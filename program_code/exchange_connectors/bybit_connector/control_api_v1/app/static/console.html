@@ -285,6 +285,13 @@ const TABS = [
   { id: 'risk',       label: '风控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
   { id: 'ai',         label: 'AI 智能',          labelEn: 'AI',        icon: '&#x1F916;', src: `/static/tab-ai.html?v=${_v}` },
   { id: 'learning',   label: '学习 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
+  // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor 抽出（位置在 Learning 之後 / Live 之前）
+  // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor extracted (position: after Learning / before Live)
+  // 既有 agent-tracker.js 行為 0 mutation；mount target 從 tab-learning.html → tab-agents.html
+  // icon=🤖 robot（對齊既有 emoji icon set）；read-only never-emit surface（V3 §11 P5）
+  // agent-tracker.js logic 0 mutation; mount target swapped from tab-learning.html → tab-agents.html
+  // icon=🤖 robot (consistent with existing emoji icon set); read-only never-emit surface (V3 §11 P5)
+  { id: 'agents',     label: 'AI 团队 Agents',   labelEn: 'Agents',    icon: '&#x1F916;', src: `/static/tab-agents.html?v=${_v}` },
   // ── 治理與運維 ───────────────────────────────────────────────────
   { id: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
   { id: 'monitoring', label: '监控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },

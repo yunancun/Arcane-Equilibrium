@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI 团队工作台 / AI Team Console</title>
+<script src="/static/common.js"></script>
+<!-- REF-20 Wave 2 P1-U9 i18n table（mode badge fallback + disabled state hooks）
+     REF-20 Wave 2 P1-U9 i18n table (mode badge fallback + disabled state hooks)
+     順序：common.js → i18n_zh.js → agent-tracker.js (boot at end)。 -->
+<script src="/static/i18n_zh.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ REF-20 Wave 7 P5 R20-P5-A1: Agents Monitor 抽出 / Agents Monitor extraction ═══
+     5-Agent 工作台（Scout / Strategist / Guardian / Analyst / Executor）從 Learning Tab
+     遷出至本獨立 Tab；既有 agent-tracker.js 行為（5 卡 + feed + budget + governance）
+     完全保留，純切換 mount target（per workplan §4 Wave 7 + V3 §11 P5）。
+
+     5-Agent dashboard moved out of Learning Tab to its own dedicated tab here per
+     V3 §11 P5 ("5-Agent panel moved out of Learning to dedicated Agents Monitor
+     surface"). agent-tracker.js behavior is preserved as-is (5 cards + feed +
+     budget + governance + recent rejects); only the mount target changed.
+
+     mode badge slot（top-right）對齊 paper tab pattern；4 維 mode（data_tier /
+     output_policy / calibration_freshness / execution_confidence）以 read-only
+     P5 抽出 phase 為基線：data_tier=demo+live_demo / output_policy=advisory /
+     calibration_freshness=unknown / execution_confidence=none（Agents Monitor
+     永不送單 read-only 視覺合約）。
+     mode badge top-right slot mirrors paper tab pattern; 4 dims fixed for the
+     P5 extraction phase since this surface is read-only never-emit. -->
+<style>
+  /* ─── Agent Tracker styles / AI 团队工作台样式（從 tab-learning.html 遷出）──
+     Executor 真仓呼吸动画 + banner 配色 + 卡片 hover 提示 / Live exec breathing,
+     banner colors, card hover lift — preserved verbatim from tab-learning.html. */
+
+  /* Executor live 卡片缓慢呼吸动画（4s loop）/ Slow breathing for live exec card */
+  @keyframes agent-breathing {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.85; }
+  }
+  /* Executor banner 通用样式 / Common banner style */
+  .exec-banner {
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+  .exec-banner-shadow {
+    background: rgba(56, 139, 253, 0.18);
+    border: 1px solid rgba(56, 139, 253, 0.4);
+    color: #79c0ff;
+  }
+  .exec-banner-live {
+    background: rgba(248, 81, 73, 0.22);
+    border: 1px solid var(--red);
+    color: #ffa198;
+    text-shadow: 0 0 8px rgba(248, 81, 73, 0.4);
+  }
+  /* Tooltip-bearing inline label / 带提示的内联标签 */
+  .agent-tip { color: var(--text); }
+  .agent-tip:hover { color: var(--accent); }
+  /* Agent card hover 微提亮 / Card hover lift */
+  .agent-card:hover { box-shadow: 0 2px 12px rgba(56, 139, 253, 0.15); }
+
+  /* Round 2 M-1: oc-chip-live 红色重写（仅本页 scope）
+     common.js 默认 oc-chip-live 为紫（LiveDemo flavor），但 Agent 工作台
+     Executor 真仓 chip 视觉上需要更强烈的「真钱」红色信号。
+     用更高 specificity 覆盖：oc-chip.oc-chip-live 比 .oc-chip-live 单一选择器优先。
+     Round 2 M-1: override oc-chip-live to red (page-scoped only). */
+  .oc-chip.oc-chip-live {
+    background: rgba(248, 81, 73, 0.22);
+    border: 1px solid var(--red);
+    color: #ffa198;
+  }
+
+  /* ─── Phase chip + mode badge slot row / 階段 chip + mode badge 槽位列 ───
+     phase chip = 「P5 抽出 active」 提醒 operator 此 surface 屬 V3 §11 P5 階段；
+     mode badge slot 對齊 paper tab pattern，read-only 永不暴露下單入口。
+     Phase chip = "P5 extraction active" advisory; mode badge slot mirrors the
+     paper tab pattern for visual consistency (read-only, no submit controls). */
+  .agents-phase-row {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    padding: 8px 10px; background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--card-radius); margin-bottom: 12px;
+  }
+  .agents-phase-chip {
+    padding: 3px 10px; border-radius: 4px;
+    background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
+    color: var(--blue); font-size: 11px; font-weight: 600;
+  }
+  .agents-mode-slot {
+    margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap;
+    align-items: center; min-height: 22px;
+  }
+
+  /* SEV-2 #1 mobile/iPad touch target retrofit pattern
+     (sourced from tab-paper.html @media block — same WCAG 2.1 AA baseline)
+     SEV-2 #1 行動裝置觸控目標調整 — 與 tab-paper.html 同基線 */
+  @media (max-width: 700px) {
+    .agents-phase-chip {
+      min-height: 32px;
+      padding: 6px 10px;
+      font-size: 12px;
+      display: inline-flex; align-items: center;
+    }
+    .oc-mode-badge {
+      min-height: 32px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+  }
+</style>
+
+<!-- ═══ Phase chip + mode badge top row / 階段 chip + mode badge 上方列 ═══
+     P5 抽出 phase 提示 + 4 維 mode badge（read-only baseline）/ P5 extraction
+     phase advisory + 4-mode badge baseline (read-only never-emit surface). -->
+<div class="agents-phase-row" role="status" aria-label="Agents Monitor P5 抽出 active / Agents Monitor P5 extraction active">
+  <span class="agents-phase-chip">P5 抽出 active / P5 extraction active</span>
+  <span style="font-size:11px;color:var(--text-dim)">
+    Read-only · 永不送單 / Read-only · never submits orders
+  </span>
+  <div id="agents-mode-badges" class="agents-mode-slot"
+       data-todo="REF-20 R20-P5-A1 mode badge slot — agents monitor read-only baseline"></div>
+</div>
+
+<!-- ═══ AI 团队工作台 / AI Team Console（從 tab-learning.html 遷出）═══
+     5 位 AI 员工今天在干什么、花了多少钱、谁进入执行链路
+     Aggregates 5-Agent state + cost + shadow vs live + activity feed + governance
+     原 section id="agent-tracker" 連同 ocExplain 提示 + 5 區塊 + boot script
+     整段從 tab-learning.html 遷出，agent-tracker.js mount target swap 完成。
+     Section id="agent-tracker" + ocExplain hint + 5 blocks + boot script all
+     migrated from tab-learning.html as-is; only mount target swapped per
+     workplan §4 R20-P5-A3「既有 agent-tracker.js 行為保留」。 -->
+<section id="agent-tracker" role="region" aria-label="AI 团队工作台 / AI Team Console">
+  <div class="oc-card">
+    <h3>&#x1F916; AI 团队工作台 / AI Team Console
+      <span class="subtitle" style="font-size:12px;color:var(--text-dim);font-weight:normal;display:block;margin-top:2px">
+        你的 5 位 AI 员工今天在干什么、花了多少钱、谁进入执行链路
+      </span>
+    </h3>
+    <div id="explain-agent-tracker"></div>
+  </div>
+
+  <!-- 区块 A: 5-Agent 卡片 grid / 5-Agent roster cards -->
+  <div class="oc-card" role="region" aria-label="5-Agent Roster">
+    <h4 style="font-size:13px;margin-bottom:10px">&#x1F465; 5 位 Agent 现况 / 5-Agent Roster</h4>
+    <div id="agent-roster-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+      &#x23F3; 正在请 5 位 Agent 报告状况…
+    </div>
+    <div id="agent-roster-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
+    </div>
+    <div id="agent-roster-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
+    </div>
+    <div id="agent-roster-data" style="display:none" tabindex="0"></div>
+  </div>
+
+  <!-- 区块 D (MVP): 思考预算进度条 / Thinking budget bar (MVP simplified) -->
+  <div class="oc-card" role="region" aria-label="今日思考预算 / Today's Thinking Budget">
+    <h4 style="font-size:13px;margin-bottom:10px">&#x1F9E0; 今日思考预算 / Today's Thinking Budget</h4>
+    <div id="agent-budget-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
+      &#x23F3; 正在请 5 位 Agent 报告状况…
+    </div>
+    <div id="agent-budget-empty" style="display:none;padding:8px;color:var(--text-dim);font-size:12px">
+      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
+    </div>
+    <div id="agent-budget-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
+      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
+    </div>
+    <div id="agent-budget-data" style="display:none" tabindex="0"></div>
+  </div>
+
+  <!--
+    区块 E: Demo 引擎成交 vs LiveDemo 引擎成交对比 / Engine Mode Fills comparison
+    Block E: Demo engine fills vs LiveDemo engine fills
+
+    语义注意 / Semantic note:
+      此卡比较的是「不同 engine_mode 标签下的真实成交」— 两边都是真送单到 Bybit demo endpoint，
+      差别在于 Demo 引擎（engine_mode='demo' / risk_config_demo.toml）vs
+      LiveDemo 引擎（engine_mode='live_demo' / risk_config_live.toml + Live 管线走 demo endpoint）。
+      与 ExecutorAgent 的 _shadow_mode（intent log 不送单）是完全不同概念。
+
+      This card compares real fills tagged by engine_mode — both sides are real submissions to
+      Bybit demo endpoint. Difference is Demo engine vs LiveDemo engine pipeline (different
+      risk_config TOML). Not related to ExecutorAgent _shadow_mode (intent log only).
+  -->
+  <div class="oc-card" role="region" aria-label="Demo 引擎 vs LiveDemo 引擎成交 / Engine Mode Fills">
+    <h4 style="font-size:13px;margin-bottom:10px">&#x1F7E6; Demo 引擎 vs &#x1F534; LiveDemo 引擎成交 / Engine Mode Fills</h4>
+    <div id="agent-shadow-live-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+      &#x23F3; 正在请 5 位 Agent 报告状况…
+    </div>
+    <div id="agent-shadow-live-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
+    </div>
+    <div id="agent-shadow-live-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
+    </div>
+    <div id="agent-shadow-live-data" style="display:none" tabindex="0"></div>
+  </div>
+
+  <!-- 区块 C: 最近活动 feed / Recent activity feed -->
+  <div class="oc-card" role="region" aria-label="最近活动 / Recent Activity">
+    <h4 style="font-size:13px;margin-bottom:10px">&#x1F4DC; 最近活动 / Recent Activity</h4>
+    <div id="agent-feed-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+      &#x23F3; 正在请 5 位 Agent 报告状况…
+    </div>
+    <div id="agent-feed-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
+    </div>
+    <div id="agent-feed-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
+    </div>
+    <div id="agent-feed-data" style="display:none" tabindex="0"></div>
+  </div>
+
+  <!-- 区块 F: Lease + reject / 决策租约 + 治理拒单 -->
+  <div class="oc-card" role="region" aria-label="治理租约 &amp; 拒单 / Governance &amp; Rejects">
+    <h4 style="font-size:13px;margin-bottom:10px">&#x1F6E1;&#xFE0F; 治理租约 &amp; 拒单 / Governance &amp; Rejects</h4>
+    <div id="agent-governance-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+      &#x23F3; 正在请 5 位 Agent 报告状况…
+    </div>
+    <div id="agent-governance-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
+    </div>
+    <div id="agent-governance-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
+    </div>
+    <div id="agent-governance-data" style="display:none" tabindex="0"></div>
+  </div>
+</section>
+
+<script>
+// ─── Explainer / 双层解释 ──────────────────────────────────────────
+// 從 tab-learning.html 遷出；ocExplain 雙層解釋系統，提供 operator 友好 + 詳細解析雙視圖。
+// Migrated from tab-learning.html. ocExplain provides operator-friendly hint
+// + detailed expansion in a dual-view widget.
+$('explain-agent-tracker').innerHTML = ocExplain(
+  '这里能一眼看到 5 位 AI 员工今天在干什么、花了多少钱、执行链路是否进入受控送单状态。',
+  '5 位 Agent 各司其职：Scout 巡逻找机会、Strategist 评估策略、Guardian 守门控风险、Analyst 复盘归因、Executor 负责执行入口。执行权限由 engine_mode、RiskConfig、Decision Lease 与 live 授权门控共同决定；LiveDemo 是 demo endpoint 上的 live-grade 管线，不等于真实主网资金。本仪表盘纯只读，不能在这里切换执行权限。'
+);
+</script>
+
+<!-- ═══ Mode badge baseline init / Mode badge 基線初始化 ═══
+     OpenClawModeBadge.render 與 paper tab pattern 對齊，4 維 mode 反映 Agents Monitor
+     P5 抽出 read-only never-emit 合約：execution_confidence=none 是 anti-cognitive-fraud
+     SENTINEL（紅外框 + warning icon），在 surface 視覺上強化「不可作為實盤決策依據」。
+     Mirror paper tab pattern; 4 dims reflect P5 extraction read-only never-emit
+     contract. execution_confidence=none = anti-cognitive-fraud SENTINEL (red
+     outline + warning icon). -->
+<script>
+document.addEventListener('DOMContentLoaded', function _ocInitAgentsModeBadges() {
+  if (window.OpenClawModeBadge && typeof window.OpenClawModeBadge.render === 'function') {
+    window.OpenClawModeBadge.render('agents-mode-badges', {
+      data_tier: 'mixed',
+      output_policy: 'advisory',
+      calibration_freshness: 'unknown',
+      execution_confidence: 'none'
+    });
+  } else {
+    console.warn('[agents] OpenClawModeBadge not loaded; mode badge slot left empty');
+  }
+});
+</script>
+
+<!-- ═══ Agent Tracker JS load + boot / 載入並啟動 agent-tracker ═══
+     必须先载入 agent-tracker.js，再调用 startAgentTracker() 启动。
+     agent-tracker.js MUST be loaded before startAgentTracker() is called.
+     cache-bust v20260503.p5-extracted-tab — Wave 7 mount target swap to tab-agents -->
+<script src="/static/js/agent-tracker.js?v=20260503.p5-extracted-tab"></script>
+<script>
+// ─── Agent Tracker boot / AI 团队工作台启动 ────────────────────────────────
+// 5 个区块（roster / feed / shadow-live / governance / budget）首次加载 + setInterval 注册；
+// iframe 切走 / hidden 时 agent-tracker.js 内部自动 clearInterval。
+// Boot 5 blocks; agent-tracker.js auto-clears intervals on pagehide / visibilitychange.
+// 既有 agent-tracker.js 0 logic mutation — 只是 mount target 從 tab-learning.html 遷至本檔。
+// agent-tracker.js logic untouched — only mount target swapped from tab-learning.html.
+if (typeof startAgentTracker === 'function') {
+  startAgentTracker();
+} else {
+  console.warn('[tab-agents] agent-tracker.js not loaded — 5-Agent dashboard inactive');
+}
+</script>
+
+</body>
+</html>

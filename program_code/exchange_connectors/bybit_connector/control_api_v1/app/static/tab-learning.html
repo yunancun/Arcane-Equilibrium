@@ -9,56 +9,71 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
-<!-- ═══ Agent Tracker styles / AI 团队工作台样式 ═══ -->
-<!-- 仅本页面用：Executor 真仓呼吸动画 + banner 配色 + 卡片 hover 提示 -->
+<!-- ═══ REF-20 Wave 7 P5 R20-P5-A2: Agents Monitor 抽出 redirect banner ═══
+     5-Agent 工作台已從 Learning Tab 遷出至獨立 12th tab「AI 团队 Agents」。
+     本 banner 通知 operator 點此前往；90d 自動 dismiss 後不再顯示。
+     localStorage `oc_banner_dismissed_lg-agents-redirect` = 1 → 永久 dismiss；
+     localStorage `oc_banner_dismissed_lg-agents-redirect_ts` = ISO ts；
+     超 90d 自動清掉 dismiss flag → 再次顯示（防 operator 完全忘記遷移事實）。
+
+     5-Agent dashboard moved from Learning Tab to its own 12th tab "AI 团队 Agents".
+     This banner notifies operator with link; 90d auto-dismiss reset (so the
+     redirect notice eventually re-shows after the migration period). -->
 <style>
-  /* Executor live 卡片缓慢呼吸动画（4s loop）/ Slow breathing for live exec card */
-  @keyframes agent-breathing {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.85; }
+  /* Banner styles / banner 配色與佈局 — info variant + dismissable */
+  .oc-banner {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px; margin-bottom: 12px;
+    border-radius: var(--card-radius); font-size: 12px; line-height: 1.5;
   }
-  /* Executor banner 通用样式 / Common banner style */
-  .exec-banner {
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 600;
-    margin-bottom: 6px;
-    text-align: center;
+  .oc-banner-info {
+    background: rgba(56, 139, 253, 0.10);
+    border: 1px solid rgba(56, 139, 253, 0.35);
+    color: var(--text);
   }
-  .exec-banner-shadow {
-    background: rgba(56, 139, 253, 0.18);
-    border: 1px solid rgba(56, 139, 253, 0.4);
-    color: #79c0ff;
+  .oc-banner-link {
+    color: var(--blue); font-weight: 600; text-decoration: underline;
+    cursor: pointer;
   }
-  .exec-banner-live {
-    background: rgba(248, 81, 73, 0.22);
-    border: 1px solid var(--red);
-    color: #ffa198;
-    text-shadow: 0 0 8px rgba(248, 81, 73, 0.4);
+  .oc-banner-link:hover { color: var(--accent); }
+  .oc-banner-close {
+    margin-left: auto; background: transparent; border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text-dim); font-size: 14px;
+    padding: 2px 8px; cursor: pointer; min-width: 28px;
   }
-  /* Tooltip-bearing inline label / 带提示的内联标签 */
-  .agent-tip { color: var(--text); }
-  .agent-tip:hover { color: var(--accent); }
-  /* Agent card hover 微提亮 / Card hover lift */
-  .agent-card:hover { box-shadow: 0 2px 12px rgba(56, 139, 253, 0.15); }
-
-  /* Round 2 M-1: oc-chip-live 红色重写（仅本页 scope）
-     common.js 默认 oc-chip-live 为紫（LiveDemo flavor），但 Agent 工作台
-     Executor 真仓 chip 视觉上需要更强烈的「真钱」红色信号（per E2 finding M-1）。
-     用更高 specificity 覆盖：oc-chip.oc-chip-live 比 .oc-chip-live 单一选择器优先。
-
-     Round 2 M-1: override oc-chip-live to red (page-scoped only).
-     common.js defaults oc-chip-live to purple (LiveDemo flavor); Agent dashboard
-     Executor real-money state needs the stronger "real money" red urgency signal
-     per E2 finding M-1. Higher-specificity override (.oc-chip.oc-chip-live) wins
-     over the single-class default in common.js.  */
-  .oc-chip.oc-chip-live {
-    background: rgba(248, 81, 73, 0.22);
-    border: 1px solid var(--red);
-    color: #ffa198;
+  .oc-banner-close:hover { border-color: var(--accent); color: var(--text); }
+  /* Mobile (≤700px) touch target retrofit — pattern from tab-paper.html SEV-2 #1
+     行動裝置觸控目標 ≥44px (WCAG 2.1 AA 2.5.5 Target Size) */
+  @media (max-width: 700px) {
+    .oc-banner-close {
+      min-height: 44px; min-width: 44px;
+      padding: 8px 12px; font-size: 16px;
+    }
+    .oc-banner-link {
+      min-height: 44px;
+      display: inline-flex; align-items: center;
+      padding: 4px 6px;
+    }
   }
 </style>
+
+<!-- Redirect banner / 遷移通知 — 顯示 operator「AI 团队工作台」已搬遷至獨立 Tab。
+     dismissable + 90d auto-reset；雙語 i18n hook (data-i18n) 維護 operator 中文 dominant。
+     Banner notifies operator that "AI Crew Dashboard" moved to its own tab;
+     dismissable + 90d auto-reset; bilingual i18n hook for ops zh-dominant preference. -->
+<div id="lg-redirect-notice" class="oc-banner oc-banner-info"
+     role="status" aria-label="Agent Tracker 已搬遷至獨立 Tab / Agent Tracker moved to its own tab"
+     data-banner-id="lg-agents-redirect"
+     data-auto-dismiss-days="90"
+     data-i18n="agents_redirect_banner">
+  &#x1F4E2; <strong>「AI 团队工作台」已搬遷至獨立 Tab</strong>：
+  <a href="#tab-agents" class="oc-banner-link" data-target-tab="agents">點此前往</a>
+  &nbsp;·&nbsp;
+  <em>Agent Tracker moved to its own tab —
+    <a href="#tab-agents" class="oc-banner-link" data-target-tab="agents">click here</a>
+  </em>
+  <button class="oc-banner-close" aria-label="關閉提醒 / Dismiss notice">&times;</button>
+</div>
 
 <!-- ═══ Learning Overview ═══ -->
 <div class="oc-card">
@@ -82,107 +97,14 @@
   </div>
 </div>
 
-<!-- ═══ AI 团队工作台 / AI Crew Dashboard ═══ -->
-<!-- 5 位 AI 员工今天在干什么、花了多少钱、谁进入执行链路 -->
-<!-- Aggregates 5-Agent state + cost + shadow vs live + activity feed + governance -->
-<section id="agent-tracker">
-  <div class="oc-card">
-    <h3>&#x1F916; AI 团队工作台 / AI Crew Dashboard
-      <span class="subtitle" style="font-size:12px;color:var(--text-dim);font-weight:normal;display:block;margin-top:2px">
-        你的 5 位 AI 员工今天在干什么、花了多少钱、谁进入执行链路
-      </span>
-    </h3>
-    <div id="explain-agent-tracker"></div>
-  </div>
-
-  <!-- 区块 A: 5-Agent 卡片 grid / 5-Agent roster cards -->
-  <div class="oc-card">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F465; 5 位 Agent 现况 / 5-Agent Roster</h4>
-    <div id="agent-roster-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
-      &#x23F3; 正在请 5 位 Agent 报告状况…
-    </div>
-    <div id="agent-roster-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
-      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
-    </div>
-    <div id="agent-roster-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
-      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
-    </div>
-    <div id="agent-roster-data" style="display:none"></div>
-  </div>
-
-  <!-- 区块 D (MVP): 思考预算进度条 / Thinking budget bar (MVP simplified) -->
-  <div class="oc-card">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F9E0; 今日思考预算 / Today's Thinking Budget</h4>
-    <div id="agent-budget-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
-      &#x23F3; 正在请 5 位 Agent 报告状况…
-    </div>
-    <div id="agent-budget-empty" style="display:none;padding:8px;color:var(--text-dim);font-size:12px">
-      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
-    </div>
-    <div id="agent-budget-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
-      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
-    </div>
-    <div id="agent-budget-data" style="display:none"></div>
-  </div>
-
-  <!--
-    区块 E: Demo 引擎成交 vs LiveDemo 引擎成交对比 / Engine Mode Fills comparison
-    Block E: Demo engine fills vs LiveDemo engine fills
-
-    语义注意 / Semantic note:
-      此卡比较的是「不同 engine_mode 标签下的真实成交」— 两边都是真送单到 Bybit demo endpoint，
-      差别在于 Demo 引擎（engine_mode='demo' / risk_config_demo.toml）vs
-      LiveDemo 引擎（engine_mode='live_demo' / risk_config_live.toml + Live 管线走 demo endpoint）。
-      与 ExecutorAgent 的 _shadow_mode（intent log 不送单）是完全不同概念。
-
-      This card compares real fills tagged by engine_mode — both sides are real submissions to
-      Bybit demo endpoint. Difference is Demo engine vs LiveDemo engine pipeline (different
-      risk_config TOML). Not related to ExecutorAgent _shadow_mode (intent log only).
-  -->
-  <div class="oc-card">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F7E6; Demo 引擎 vs &#x1F534; LiveDemo 引擎成交 / Engine Mode Fills</h4>
-    <div id="agent-shadow-live-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
-      &#x23F3; 正在请 5 位 Agent 报告状况…
-    </div>
-    <div id="agent-shadow-live-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
-      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
-    </div>
-    <div id="agent-shadow-live-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
-      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
-    </div>
-    <div id="agent-shadow-live-data" style="display:none"></div>
-  </div>
-
-  <!-- 区块 C: 最近活动 feed / Recent activity feed -->
-  <div class="oc-card">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F4DC; 最近活动 / Recent Activity</h4>
-    <div id="agent-feed-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
-      &#x23F3; 正在请 5 位 Agent 报告状况…
-    </div>
-    <div id="agent-feed-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
-      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
-    </div>
-    <div id="agent-feed-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
-      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
-    </div>
-    <div id="agent-feed-data" style="display:none"></div>
-  </div>
-
-  <!-- 区块 F: Lease + reject / 决策租约 + 治理拒单 -->
-  <div class="oc-card">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F6E1;&#xFE0F; 治理租约 &amp; 拒单 / Governance &amp; Rejects</h4>
-    <div id="agent-governance-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
-      &#x23F3; 正在请 5 位 Agent 报告状况…
-    </div>
-    <div id="agent-governance-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
-      &#x1F4A4; 今天还没有 Agent 开始工作（系统刚启动）
-    </div>
-    <div id="agent-governance-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
-      &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问题，是仪表板自己迷路了，30 秒后再试
-    </div>
-    <div id="agent-governance-data" style="display:none"></div>
-  </div>
-</section>
+<!-- REF-20 Wave 7 P5 R20-P5-A2/A3: AI 团队工作台 section 已抽出至獨立 tab-agents.html
+     原 section id="agent-tracker"（5 卡 + feed + budget + governance + recent rejects）
+     遷至 12th top-level tab「AI 团队 Agents」（per workplan §4 Wave 7 + V3 §11 P5）。
+     本檔保留 redirect banner（上方 #lg-redirect-notice）+ 移除整段 section 內容。
+     既有 agent-tracker.js 行為 0 mutation；只是 mount target swap。
+     Agents Monitor section extracted to its own tab-agents.html (12th top-level
+     tab). This file keeps the redirect banner only; agent-tracker.js logic
+     untouched, only mount target swapped. -->
 
 <!-- ═══ Review Queue ═══ -->
 <div class="oc-card">
@@ -268,10 +190,8 @@ $('explain-netpnl').innerHTML = ocExplain(
   'Net PnL = Gross PnL - Trading Fees - AI Costs - Infrastructure Costs。系统严格遵循"看 net PnL 不看 gross PnL"的原则，确保对真实盈利能力有清晰认知。'
 );
 
-$('explain-agent-tracker').innerHTML = ocExplain(
-  '这里能一眼看到 5 位 AI 员工今天在干什么、花了多少钱、执行链路是否进入受控送单状态。',
-  '5 位 Agent 各司其职：Scout 巡逻找机会、Strategist 评估策略、Guardian 守门控风险、Analyst 复盘归因、Executor 负责执行入口。执行权限由 engine_mode、RiskConfig、Decision Lease 与 live 授权门控共同决定；LiveDemo 是 demo endpoint 上的 live-grade 管线，不等于真实主网资金。本仪表盘纯只读，不能在这里切换执行权限。'
-);
+// REF-20 Wave 7 P5 R20-P5-A2: explain-agent-tracker ocExplain 已隨 section 遷至 tab-agents.html
+// REF-20 Wave 7 P5 R20-P5-A2: explain-agent-tracker ocExplain migrated to tab-agents.html
 
 $('explain-autoscan').innerHTML = ocExplain(
   '自动扫描功能让 AI 分析最近的交易数据，自动发现值得关注的观察、教训和假设。',
@@ -483,20 +403,89 @@ ocInitFx();
 window.addEventListener('occurrencychange', loadAll);
 </script>
 
-<!-- Agent Tracker JS (cache-bust v20260428.agent-roster-v2-r2) -->
-<!-- Round 2 retro fixes: real backend schema, no fallback hacks; see file MODULE_NOTE. -->
-<!-- 必须先载入 agent-tracker.js，再调用 startAgentTracker() 启动 -->
-<script src="/static/js/agent-tracker.js?v=20260428.agent-roster-v2-r2"></script>
+<!-- REF-20 Wave 7 P5 R20-P5-A2/A3: agent-tracker.js script load + boot 已遷至 tab-agents.html
+     既有 agent-tracker.js 行為 0 mutation；mount target 從本檔切到 tab-agents.html
+     agent-tracker.js script load + boot migrated to tab-agents.html;
+     no logic mutation, only mount target swap. -->
+
 <script>
-// ─── Agent Tracker boot / AI 团队工作台启动 ────────────────────────────────
-// 5 个区块（roster / feed / shadow-live / governance / budget）首次加载 + setInterval 注册；
-// iframe 切走 / hidden 时 agent-tracker.js 内部自动 clearInterval。
-// Boot 5 blocks; agent-tracker.js auto-clears intervals on pagehide / visibilitychange.
-if (typeof startAgentTracker === 'function') {
-  startAgentTracker();
-} else {
-  console.warn('[tab-learning] agent-tracker.js not loaded — 5-Agent dashboard inactive');
-}
+// ─── REF-20 Wave 7 P5 R20-P5-A2: Redirect banner dismiss + 90d auto-reset ──
+// localStorage `oc_banner_dismissed_<id>` = '1' → permanently dismissed in this browser
+// localStorage `oc_banner_dismissed_<id>_ts` = ISO ts → check >90d 後自動 clear flag
+// 雙鍵設計：dismiss flag + dismiss timestamp，超 90d 自動 reset，避免 operator 完全忘記遷移事實。
+// Dual-key design: dismiss flag + dismiss timestamp, auto-reset after 90d so the
+// redirect notice eventually re-shows after the migration period.
+//
+// 切換到 12th tab「AI 团队 Agents」/ Switch to 12th tab "AI Agents":
+//   tab-learning.html 是 console.html 的 iframe；switchTo() 由 parent window
+//   的 console.html 提供。透過 window.parent.switchTo('agents') 跨 iframe 觸發。
+//   tab-learning.html runs as iframe inside console.html; switchTo() is in parent.
+//   Cross-iframe call via window.parent.switchTo('agents').
+(function _ocInitRedirectBanner() {
+  var banner = document.getElementById('lg-redirect-notice');
+  if (!banner) return;
+
+  var bannerId = banner.getAttribute('data-banner-id') || 'lg-agents-redirect';
+  var autoDismissDays = parseInt(banner.getAttribute('data-auto-dismiss-days') || '90', 10);
+  var dismissKey = 'oc_banner_dismissed_' + bannerId;
+  var dismissTsKey = dismissKey + '_ts';
+
+  // 90d auto-reset / 90d 自動重置 — 超過 dismiss 時長 → 清掉 flag → banner 重新顯示
+  // 90d auto-reset — past auto_dismiss_days threshold → clear flag → banner re-shows
+  try {
+    var dismissedTs = localStorage.getItem(dismissTsKey);
+    if (dismissedTs) {
+      var dismissedAt = new Date(dismissedTs);
+      var nowMs = Date.now();
+      var elapsedDays = (nowMs - dismissedAt.getTime()) / (1000 * 60 * 60 * 24);
+      if (elapsedDays > autoDismissDays) {
+        localStorage.removeItem(dismissKey);
+        localStorage.removeItem(dismissTsKey);
+      }
+    }
+  } catch (e) { /* storage may be disabled; ignore */ }
+
+  // 若已 dismissed 且未超 90d → 隱藏 banner / If already dismissed and within 90d → hide banner
+  try {
+    if (localStorage.getItem(dismissKey) === '1') {
+      banner.style.display = 'none';
+      return;
+    }
+  } catch (e) { /* storage may be disabled; show banner anyway */ }
+
+  // Close button handler / 關閉按鈕事件
+  var closeBtn = banner.querySelector('.oc-banner-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function _ocBannerDismiss() {
+      try {
+        localStorage.setItem(dismissKey, '1');
+        localStorage.setItem(dismissTsKey, new Date().toISOString());
+      } catch (e) { /* storage may be disabled; just hide visually */ }
+      banner.style.display = 'none';
+    });
+  }
+
+  // Link click → switch to 12th tab via parent window
+  // Link 點擊 → 透過 parent window 切換到 12th tab
+  var links = banner.querySelectorAll('.oc-banner-link');
+  links.forEach(function(link) {
+    link.addEventListener('click', function _ocBannerLink(ev) {
+      ev.preventDefault();
+      var targetTab = link.getAttribute('data-target-tab') || 'agents';
+      try {
+        if (window.parent && typeof window.parent.switchTo === 'function') {
+          window.parent.switchTo(targetTab);
+        } else {
+          // Fallback：parent 無 switchTo（直接打開 tab-learning.html 而非 iframe 場景）
+          // Fallback: parent has no switchTo (opened directly, not as iframe)
+          console.warn('[lg-redirect-banner] parent.switchTo not available; cannot navigate');
+        }
+      } catch (e) {
+        console.warn('[lg-redirect-banner] switchTo failed: ' + e.message);
+      }
+    });
+  });
+})();
 </script>
 </body>
 </html>
