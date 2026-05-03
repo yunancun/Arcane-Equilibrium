@@ -1208,6 +1208,25 @@ def _insert_live_candidate(
     verbatim to columns; payload JSONB built via
     ``_build_live_candidate_payload`` (single SoT shared with the
     ``mlde_param_applications`` writer the consumer actually reads).
+
+    REF-20 W3-P2a-S4 切換 / migration:
+        改呼叫 learning.verify_replay_evidence_and_insert() (V036)；
+        engine_mode='live' / source='ml_shadow' / recommendation_type=
+        'experiment_plan' / created_by='mlde_demo_applier' 全部保留 (per
+        PM dispatch §2 #2 + V3 §4.2 P0-T7 classification — 27 既有
+        engine_mode='live' row 全屬 evidence_source_tier='real_outcome'
+        legacy audit trail 路徑，非 replay-derived)。LG-5 §2.1
+        ``schema_version`` payload 經 ``_build_live_candidate_payload``
+        helper 已注入；本 function 不解構或重建 payload。
+        Switched to learning.verify_replay_evidence_and_insert() (V036).
+        engine_mode='live' / source='ml_shadow' / recommendation_type=
+        'experiment_plan' / created_by='mlde_demo_applier' all preserved
+        (per PM dispatch §2 #2 + V3 §4.2 P0-T7 classification: the
+        existing 27 engine_mode='live' rows are all legacy audit trail
+        rows under evidence_source_tier='real_outcome', NOT replay-
+        derived). LG-5 §2.1 ``schema_version`` payload is injected by
+        ``_build_live_candidate_payload`` helper; this function does not
+        decompose or rebuild the payload.
     """
     strategy_name = source_row.get("strategy_name")
     payload = _build_live_candidate_payload(
@@ -1218,16 +1237,42 @@ def _insert_live_candidate(
         patch=patch,
         strategy_name=strategy_name if isinstance(strategy_name, str) else None,
     )
+    # REF-20 W3-P2a-S4: 切換到 verified insert function (V036).
+    # 保留 hardcoded 'live' engine_mode + LG-5 §2.1 schema_version payload；
+    # evidence_source_tier='real_outcome' 對應 V3 §4.2 P0-T7 classification:
+    # demo→live promotion candidate audit row 屬 legacy producer 路徑。
+    # 任何 schema 漂移會 break LG-5 reviewer pipeline (sibling CC
+    # commit 463890d Lg5_review_consumer)，下游讀 mlde_param_applications
+    # FK 回 mlde_shadow_recommendations.id 必保留 sequence allocation。
+    #
+    # REF-20 W3-P2a-S4: switch to verified insert function (V036).
+    # Hardcoded 'live' engine_mode + LG-5 §2.1 schema_version payload
+    # preserved verbatim; evidence_source_tier='real_outcome' aligns with
+    # V3 §4.2 P0-T7 classification (demo→live promotion candidate audit
+    # row is legacy producer path, NOT replay-derived). Any schema drift
+    # would break the LG-5 reviewer pipeline (sibling CC commit 463890d
+    # Lg5_review_consumer); downstream mlde_param_applications FK to
+    # mlde_shadow_recommendations.id requires sequence allocation
+    # preservation.
     cur.execute(
         """
-        INSERT INTO learning.mlde_shadow_recommendations
-            (engine_mode, symbol, strategy_name, source, recommendation_type,
-             primary_metric, expected_net_bps, confidence, sample_count,
-             payload, applied, requires_governance, created_by)
-        VALUES
-            ('live', %s, %s, 'ml_shadow', 'experiment_plan',
-             'net_bps_after_fee', %s, %s, %s, %s, false, true,
-             'mlde_demo_applier')
+        SELECT learning.verify_replay_evidence_and_insert(
+            'live',                         -- p_engine_mode (hardcoded for LG-5 §2.1 audit trail)
+            %s,                             -- p_symbol
+            %s,                             -- p_strategy_name
+            'ml_shadow',                    -- p_source (hardcoded LG-5 contract)
+            'experiment_plan',              -- p_recommendation_type (hardcoded LG-5 contract)
+            %s,                             -- p_expected_net_bps
+            %s,                             -- p_confidence
+            %s,                             -- p_sample_count
+            %s,                             -- p_payload (LG-5 §2.1 schema_version preserved)
+            false,                          -- p_applied
+            true,                           -- p_requires_governance
+            'mlde_demo_applier',            -- p_created_by
+            'real_outcome',                 -- p_evidence_source_tier (legacy LG-5 audit row)
+            NULL, NULL, NULL,               -- replay metadata (NULL for real_outcome)
+            NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
+        )
         """,
         (
             source_row.get("symbol"),
