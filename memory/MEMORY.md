@@ -1,6 +1,7 @@
 # Memory Index
 
 ## Project context
+- [REF-20 Sprint 1+2 cold audit closure (2026-05-03)](project_2026_05_03_ref20_sprint1_2_closure.md) — 8-agent cold audit 揭 24/25 GREEN false positive；Sprint 1 修 5 critical security + 3 schema drift (commit edf33c0)；Sprint 2 補 §八 evidence trail + Wave 7 amendment AMD-2026-05-03-01；Sprint 3-4 deploy pending
 - [2026-05-02 codex 4-day audit chain](project_2026_05_02_codex_4day_audit.md) — 162 codex/operator commits cold review；P1-1 retrofit chain E1×3/E2×3/E4×3 closed (e858ae2 + 6cb1c3b)；.codex/ 治理 = option (a) hint mirror only
 - [LIVE-AUTH-WATCHER fix (2026-04-27)](project_live_auth_watcher_event_consumer_spawn.md) — Live 8天 snapshot 停寫；watcher respawn 漏接 event_consumer；has_pipeline_spawner=true 驗；P1 stale-cmd-tx 待修
 - [OpenClaw 定位决策](project_openclaw_positioning.md) — OpenClaw Gateway=通信+運維層；Rust openclaw_engine=交易大腦；Python=API橋接+GUI only
