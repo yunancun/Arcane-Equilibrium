@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "source": "s3_synthetic",
+  "events": [
+    {"ts_ms": 1714521600000, "symbol": "BTCUSDT", "open": 65000.0, "high": 65100.0, "low": 64900.0, "close": 65050.0, "volume": 1.0},
+    {"ts_ms": 1714521660000, "symbol": "BTCUSDT", "open": 65050.0, "high": 65200.0, "low": 65000.0, "close": 65150.0, "volume": 1.2},
+    {"ts_ms": 1714521720000, "symbol": "BTCUSDT", "open": 65150.0, "high": 65300.0, "low": 65100.0, "close": 65250.0, "volume": 1.5},
+    {"ts_ms": 1714521780000, "symbol": "BTCUSDT", "open": 65250.0, "high": 65400.0, "low": 65200.0, "close": 65380.0, "volume": 1.8},
+    {"ts_ms": 1714521840000, "symbol": "BTCUSDT", "open": 65380.0, "high": 65450.0, "low": 65300.0, "close": 65420.0, "volume": 2.0},
+    {"ts_ms": 1714521900000, "symbol": "BTCUSDT", "open": 65420.0, "high": 65500.0, "low": 65380.0, "close": 65480.0, "volume": 2.1},
+    {"ts_ms": 1714521960000, "symbol": "BTCUSDT", "open": 65480.0, "high": 65520.0, "low": 65440.0, "close": 65500.0, "volume": 1.9},
+    {"ts_ms": 1714522020000, "symbol": "BTCUSDT", "open": 65500.0, "high": 65600.0, "low": 65480.0, "close": 65580.0, "volume": 2.2},
+    {"ts_ms": 1714522080000, "symbol": "BTCUSDT", "open": 65580.0, "high": 65650.0, "low": 65520.0, "close": 65600.0, "volume": 2.3},
+    {"ts_ms": 1714522140000, "symbol": "BTCUSDT", "open": 65600.0, "high": 65700.0, "low": 65550.0, "close": 65680.0, "volume": 2.4}
+  ]
+}

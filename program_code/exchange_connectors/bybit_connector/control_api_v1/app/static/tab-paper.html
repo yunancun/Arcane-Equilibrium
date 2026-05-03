@@ -17,10 +17,9 @@
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <style>
-  .order-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-top: 10px; }
-  .order-form .field { display: flex; flex-direction: column; gap: 3px; }
-  .order-form label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; }
-  .order-form input, .order-form select { width: 120px; }
+  /* REF-20 R20-P1-U3: .order-form CSS 移除（manual submit form 已下架）
+     REF-20 R20-P1-U3: .order-form CSS removed (manual submit form retired)
+     per UX subdoc §3 + V3 §12 #19 paper_replay_lab_no_order_submit acceptance */
   .feed-prices { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin-top: 8px; }
   .feed-price { background: var(--bg); border: 1px solid #21262d; border-radius: 6px; padding: 4px 10px; }
   .feed-price .sym { font-size: 11px; color: var(--text-dim); }
@@ -52,6 +51,25 @@
   .oc-subtab-placeholder .gate-label { display: inline-block; margin-top: 6px;
     padding: 3px 10px; background: rgba(248,81,73,0.08); color: var(--red);
     border: 1px solid rgba(248,81,73,0.25); border-radius: 4px; font-size: 11px; }
+
+  /* REF-20 SEV-2 #1: mobile/iPad touch target retrofit (A3 finding 2026-05-03)
+     REF-20 SEV-2 #1：行動裝置觸控目標調整（A3 audit 必補）
+     - .oc-subtab-btn min-height 44px (WCAG 2.1 AA 2.5.5 Target Size)
+     - .oc-mode-badge min-height 32px (AAA-tier status pill, A3 spec)
+     - 桌面 (≥701px) 維持 common.js + 上方 base 規則，不受影響
+     - Page-scoped specificity override common.js mode-badge mobile shrink rules */
+  @media (max-width: 700px) {
+    .oc-subtab-btn {
+      min-height: 44px;
+      padding: 12px 14px;
+      font-size: 13px;
+    }
+    .oc-mode-badge {
+      min-height: 32px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+  }
 </style>
 
 <!-- REF-20 R20-P1-U1: Paper Replay Lab sub-tab navigation
@@ -183,13 +201,15 @@
     </div>
   </div>
 
-  <!-- Active Orders / 活跃订单 -->
+  <!-- Active Orders / 活跃订单
+       REF-20 R20-P1-U3: 操作欄已移除（cancel button 下架），thead/colspan 同步 9→8。
+       REF-20 R20-P1-U3: 操作 column removed (cancel button retired); thead/colspan 9→8 synced. -->
   <div class="oc-card">
     <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="9">暂无订单</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th></tr></thead>
+        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="8">暂无订单</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -230,18 +250,26 @@
     </div>
   </details>
 
-  <!-- Submit Order / 手动下单（默认折叠） -->
+  <!-- REF-20 R20-P1-U3: manual submit/cancel controls 已下架（per UX subdoc §3 + V3 §12 #19）
+       REF-20 R20-P1-U3: manual submit/cancel controls retired（per UX subdoc §3 + V3 §12 #19）
+       原 inline 下單表單已移除：Paper Replay Lab 不暴露 manual order submission；
+       Rust 引擎透過策略管理訂單，operator 只透過 Session 控制條啟動/暫停/停止。
+       <details> 殼保留作為 IA 銜接點 (per PM brief)，body 改為 disabled-state 解釋
+       （UX subdoc §8 phase/gate language: 「P1 已下架」明確說明 blocking gate）。 -->
   <details class="oc-collapse">
-    <summary>&#x1F4E9; 手动下单 / Submit Order</summary>
+    <summary>&#x1F4E9; 手动下单 / Submit Order <span class="oc-chip oc-chip-neutral" style="margin-left:8px;font-size:10px">P1 已下架 / Retired</span></summary>
     <div class="oc-collapse-body">
-      <div id="explain-order"></div>
-      <div class="order-form">
-        <div class="field"><label>交易对</label><input class="oc-input" id="o-symbol" value="BTCUSDT" /></div>
-        <div class="field"><label>方向</label><select class="oc-select" id="o-side"><option value="Buy">买入</option><option value="Sell">卖出</option></select></div>
-        <div class="field"><label>类型</label><select class="oc-select" id="o-type" onchange="togglePrice()"><option value="market">市价</option><option value="limit">限价</option></select></div>
-        <div class="field"><label>数量</label><input class="oc-input" id="o-qty" type="number" step="0.001" value="0.01" /></div>
-        <div class="field" id="price-field" style="display:none"><label>价格</label><input class="oc-input" id="o-price" type="number" step="0.01" /></div>
-        <div class="field"><label>&nbsp;</label><button class="oc-btn oc-btn-success" onclick="submitOrder()">提交</button></div>
+      <div class="oc-subtab-placeholder" style="margin-top:0">
+        <div style="font-size:13px;color:var(--text);margin-bottom:6px">
+          &#x1F512; 手动下单已於 P1 下架 / Manual order submission retired in P1
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);line-height:1.6">
+          Paper Replay Lab 不暴露 manual order submission（per UX subdoc §3 + V3 §12 #19 acceptance）。<br>
+          Rust 引擎透過策略管理訂單；operator 透過上方 Session 控制條啟動 / 暫停 / 停止。<br>
+          Paper Replay Lab does not expose manual order submission. Rust engine manages orders<br>
+          through strategies; operator uses Session control bar above to start/pause/stop.
+        </div>
+        <span class="gate-label">P1 retired · UX subdoc §3 paper_replay_lab_no_order_submit</span>
       </div>
     </div>
   </details>
@@ -288,10 +316,8 @@ $('explain-paper').innerHTML = ocExplain(
   'Paper 模拟使用 Bybit 公共 WebSocket 的实时价格数据。市价单以当前 ticker 价格加上 0.01% 模拟滑点成交。限价单在市场价格穿越指定价格时成交。引擎跟踪三种盈亏：已实现（已平仓）、未实现（持仓按市值计算）、净值（已实现减去手续费和 AI 咨询成本）。'
 );
 
-$('explain-order').innerHTML = ocExplain(
-  '在这里提交 Paper 模拟订单。选择交易对、方向、类型和数量即可。',
-  '市价订单以当前市场价格立即成交。限价订单需指定价格，只有市场价格达到指定价格时才会成交。'
-);
+// REF-20 R20-P1-U3: explain-order ocExplain 已移除（manual submit form 下架）
+// REF-20 R20-P1-U3: explain-order ocExplain removed (manual submit form retired)
 
 // ─── Session Actions ──────────────────────────────────────────
 let stateRevision = 0;
@@ -344,21 +370,12 @@ async function sessionStopAll() {
   }
 }
 
-function togglePrice() {
-  $('price-field').style.display = $('o-type').value === 'limit' ? '' : 'none';
-}
-
-async function submitOrder() {
-  // Manual order submission disabled — Rust engine manages orders via strategies
-  // 手動下單已禁用 — Rust 引擎通過策略管理訂單
-  ocToast('手动下单已禁用 — Rust 引擎自主管理交易', 'error');
-}
-
-async function cancelOrder(orderId) {
-  // Manual order cancel disabled — Rust engine manages order lifecycle
-  // 手動取消訂單已禁用
-  ocToast('手动取消已禁用 — Rust 引擎自主管理订单', 'error');
-}
+// REF-20 R20-P1-U3: manual order JS handlers retired (3 fns: togglePrice + 2 order handlers)
+// REF-20 R20-P1-U3: manual order handlers 已下架（togglePrice + 2 個 order handler）
+// per UX subdoc §3 + V3 §12 #19 paper_replay_lab_no_order_submit acceptance:
+// Paper Replay Lab 不暴露 manual order entry；Rust 引擎透過策略管理訂單。
+// Paper Replay Lab does not expose manual order entry; Rust engine manages orders
+// through strategies. Active Orders table 操作欄改為唯讀（無取消按鈕）。
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadSession() {
@@ -550,12 +567,14 @@ async function closeAllPositions() {
 }
 
 async function loadOrders() {
+  // REF-20 R20-P1-U3: 操作欄 cancel button 已下架，render 改為 8 列（原 9 列）
+  // REF-20 R20-P1-U3: 操作 column cancel button retired; render 8 cols (was 9)
   const d = await ocApi('/api/v1/paper/orders');
-  if (!d || !d.data) { ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadOrders()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadOrders()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重试</button></td></tr>'); return; }
   const orders = d.data.orders || d.data || [];
   const active = orders.filter(o => o.state === 'paper_order_working' || o.state === 'paper_order_partially_filled');
   if (!active.length) {
-    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="9">暂无活跃订单</td></tr>');
+    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8">暂无活跃订单</td></tr>');
     return;
   }
   let html = '';
@@ -574,7 +593,6 @@ async function loadOrders() {
     html += '<td>' + ocNum(o.qty, 4) + '</td>';
     html += '<td>' + (o.price ? ocNum(o.price, 2) : '市价') + '</td>';
     html += '<td>' + (stateLabels[o.state] || ocEsc(o.state)) + '</td>';
-    html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="cancelOrder(\'' + o.order_id + '\')">取消</button></td>';
     html += '</tr>';
   });
   ocSetHtml('orders-tbody', html);
