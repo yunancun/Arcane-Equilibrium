@@ -260,6 +260,18 @@ app.include_router(strategist_promote_router)
 from .agents_routes import agents_router  # noqa: E402
 app.include_router(agents_router)
 
+# ── Replay Lab Router / Replay 實驗室路由（REF-20 Wave 2 P2a-S3）──
+# 8-route auth scaffold for the Paper Replay Lab (run/status/cancel/report/
+# manifests/manifest-verify/health-signature/list). Wave 2 lands AUTH +
+# CONCURRENCY caps only (global=1, per-actor=1); runtime wiring to the
+# `replay_runner` Rust binary is deferred to Wave 4 R20-P2b-T2.
+# REF-20 V3 §3 G3 (route auth contract) + §6 (Replay Runner Contract) +
+# §12 #3 (route_auth) + §12 #22 (safe_query mirror) acceptance bindings.
+# REF-20 Paper Replay Lab 的 8 路由認證 scaffold；Wave 2 只 land AUTH +
+# CONCURRENCY 上限（global=1、per-actor=1）；runtime wiring 推到 Wave 4。
+from .replay_routes import replay_router  # noqa: E402
+app.include_router(replay_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
