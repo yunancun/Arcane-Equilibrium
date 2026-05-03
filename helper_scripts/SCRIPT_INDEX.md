@@ -1,7 +1,19 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-03（新增 ci/replay_runner_symbol_audit.sh — REF-20 Wave 3 R20-P2b-S10 跨平台 binary symbol 稽核）
+最後更新：2026-05-03（REF-20 Sprint 1 closure + Sprint 2 retroactive；新增 wave9 cron 3 條 + replay_key_rotation_check / replay_artifact_prune cron + V053 audit_log enum 擴展）
+
+## REF-20 Sprint 1+2 新增 cron 與 helper
+
+| 腳本 | 用途 |
+|------|------|
+| `cron/replay_key_rotation_check.sh` | REF-20 Wave 2 P2a-S1：90d signing key 輪替檢查（fingerprint align） |
+| `cron/replay_key_archive_cleanup.py` | REF-20 Wave 2 P2a-S1：180d archive 清理 |
+| `cron/replay_artifact_prune.py` | REF-20 Wave 3 P2a-S5：6h cron 跑 manifest quota 清理 |
+| `cron/wave9_replay_no_live_mutation_watch.sh` | REF-20 Wave 9：每小時 cron 檢 trading.* WHERE source LIKE 'replay_%' = 0 |
+| `cron/wave9_business_kpi_collector.py` | REF-20 Wave 9：每天 06:00 cron 採集 V047 business_kpi_snapshots（**2026-05-03 真實狀態**：Mac mock mode 跑過，Linux 真實 PG 0 跑 → 待 Sprint 3 deploy） |
+| `cron/wave9_audit_incident_scan.py` | REF-20 Wave 9：每天 06:30 cron 掃 V048 audit_incident_summaries（同 Linux 0 跑） |
+| `db/passive_wait_healthcheck/checks_governance.py::check_44_replay_manifest_key_presence` | REF-20 Sprint 1 Track B：replay manifest key.hex 存在性監測（V042 archive land 前 fallback 監測） |
 
 ---
 

@@ -488,6 +488,34 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-02--ref20_v2_round3_audit.md` | REF-20 V2 第三輪 audit：7-agent 審查 V2，指出 schema 物理欄位、MLDE retrofit、DB role guard、V### governance、P2 isolation、UX subdoc、Mac non-actionable policy 等 P0 gates |
 | `2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線；接受 Round3 真實問題，明確 schema/DB/migration/runner/quant/UX gates，保留 P2 isolated no-write TickPipeline/IntentProcessor 方案 |
 | `2026-05-02--ref20_ux_subdoc_v1.md` | REF-20 Paper Replay Lab UX Subdoc V1：P1 前必讀 UX contract；定義 Session/Replay/Compare/Handoff、mode badges、disabled states、no submit/cancel 與 handoff gating |
+| **`2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`** | **★ SoT** REF-20 Paper Replay Lab 開發方案 V3：取代 V2.1 Round3 為當前 implementation baseline；§12 25 條 acceptance binding；§4.1 replay.experiments 22 col + replay.simulated_fills 17 col 規範表；§4.2 mlde_shadow_recommendations 三 column 雙路 CHECK |
+| `2026-05-03--ref20_implementation_workplan_v1.md` | REF-20 Implementation Workplan V1：9-Wave / 76-task atomic breakdown；§6 hard prereq table 7 條；總工時 12-14 sprint（不含 P5 LG 等期）|
+| `2026-05-03--ref20_wave2_dispatch_v1.md` | REF-20 Wave 2 dispatch v1：5 ambiguity decisions（unified terminology / 2only / reuse / Mac/Linux priority / bilingual flexibility）|
+| `2026-05-03--ref20_wave1_to_6_master_closure.md` | REF-20 Wave 1-6 master closure summary（commits 9e0c826 / 1851714+b1f6b8a / 5a618ff / 4b48b6d / 457a458 / eb5f106）|
+| `2026-05-03--ref20_wave7_defer_note.md` | REF-20 Wave 7 defer note：hard prereq LG-2/3/4 frontend stable NOT GREEN；事件觸發 dispatch 標準；後 commit `c887e4e` operator override IMPL（已正式 amendment AMD-2026-05-03-01 規範 IMPL/Deploy 2-stage gate）|
+| `2026-05-03--ref20_wave9_pm_sign_off_template.md` | REF-20 Wave 9 PM sign-off 7-item checklist template；deploy 後 14d gradient observation 起算 |
+| `2026-05-03--ref20_final_closure_and_deploy_guidance.md` | REF-20 Final IMPL closure + Operator Deploy Guidance；§4 14-step procedure (Phase A-G)；**注意**：line 99 「~3500+ PASS」是虛構數字（cold reality 3387 PASS，差 113-126；P2-FOLLOW-UP-5 訂正 ticket 待修）|
+
+#### REF-20 governance amendments
+
+| 文件 | 內容 |
+|------|------|
+| `governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` | AMD-2026-05-02-01 Decision Lease retrofit 路徑 A（Rust facade + router gate + Python IPC bridge + audit writer fix）|
+| `governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md` | AMD-2026-05-03-01 Wave 7 P5 IMPL-accept-deploy-blocked（IMPL gate vs Deploy gate 2-stage 規範 + 4 AC + 失敗回退 + PM autonomous mode 嚴格門檻 4 條）|
+
+#### REF-20 Sprint reports（cold audit + Sprint 1+2 retroactive）
+
+| 文件 | 內容 |
+|------|------|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-03--ref20_sprint1_partition_design.md` | PA Sprint 1 4 並行 Track partition design + 5 push back |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-03--ref20_sprint2_track_e_decision_lease_retrofit_design.md` | PA Sprint 2 Track E Decision Lease retrofit AMD-2026-05-02-01 partition + 5 AC SQL + 6 Phase 灰度 rollout |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_sprint1_track_{a,b,c,d}_*.md` | E1 Sprint 1 4 Track IMPL reports（spawn argv / Rust manifest verify / Python 3 安全洞 / V049-V053 schema）|
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-03--ref20_sprint1_4track_review.md` | E2 Sprint 1 round 1 4 Track review（Track C RETURN-TO-E1 1500 LOC enforce）|
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-03--ref20_sprint1_round2_retrofit_review.md` | E2 Sprint 1 round 2 retrofit verify（Track A + C retrofit PASS + cross-track 7/7）|
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-03--ref20_wave3_to_9_retroactive_master_review.md` | E2 Sprint 2 retroactive Wave 3-9 master review（10 LOW + 7 P2 ticket 提案 + Wave 7 PASS / Wave 3/4/5/6/8/9 CONDITIONAL）|
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-03--ref20_final_closure_e4_cold_audit.md` | E4 cold audit baseline（pre-Sprint 1 真實 pytest/cargo 數字）|
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-03--ref20_sprint1_e4_regression.md` | E4 Sprint 1 regression CONDITIONAL PASS（+13 PASS / +7 lib / 0 新 fail / 2 pre-existing carry-over）|
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-03--ref20_wave3_to_9_retroactive_e4_cumulative.md` | E4 Sprint 2 retroactive Wave 3-9 cumulative（4 P0 forgery flag + 5 mock retroactive flag + 3 P2-FOLLOW-UP 提案）|
 
 ### governance_dev/ — 治理开发文档
 

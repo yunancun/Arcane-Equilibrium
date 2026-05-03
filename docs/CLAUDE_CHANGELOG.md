@@ -1,7 +1,50 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-02（REF-20 Paper Replay Lab 開發方案 V2.1 Round3）
+> 最後更新：2026-05-03（REF-20 Wave 1-9 IMPL accept-with-cold-audit-caveat + Sprint 1 cold audit fix-up + Sprint 2 retroactive review）
+
+### REF-20 Sprint 2 retroactive evidence trail rebuild（2026-05-03）
+
+**範圍**：4 並行 sub-agent（PA Track E + E2 F1 + E4 F2 + R4 G push back）+ PM Track G self-execute。
+
+- **PA Track E** Decision Lease retrofit AMD-2026-05-02-01 partition design：4 task DAG（E-1 Rust facade critical → E-2/E-3/E-4 並行；3.0d work；feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` 灰度 6 Phase rollout 對齊 Wave 7 amendment IMPL/Deploy 2-stage gate）
+- **E2 F1** retroactive Wave 3-9 master review：Wave 7 PASS / Wave 3/4/5/6/8/9 CONDITIONAL；10 LOW + 7 P2 ticket 提案
+- **E4 F2** retroactive Wave 3-9 cumulative：CONDITIONAL ACCEPT with audit forgery flags；4 P0 forgery（W3 self-introduced doctest + W6 self-introduced flaky + W6 mlde_demo_applier 1542 LOC §九 violation + closure doc「3500+ PASS」虛構數字 cold reality 3387）；3 P2-FOLLOW-UP 提案
+- **R4 Track G push back**：採納 R4 read-only audit gate 不應越界寫 doc + P0-4 「false positive vs ✅ DONE」邏輯矛盾，PM 自己接管 Track G doc sync
+
+**正式 amendment**：AMD-2026-05-03-01 Wave 7 P5 IMPL-accept-deploy-blocked（commit `5184990`）。
+
+**Commit chain**：`5184990`（amendment）→ `aa9343c`（Sprint 2 deliverables 4 reports + 3 memory）→ `ab25a2a`（TODO P1-INFRA-3 status correction + 13 P2 ticket）。
+
+**邊界**：本批 docs-only；Sprint 1 commit `edf33c0` 已含業務修補（5 P0 security + 3 schema drift）。
+
+### REF-20 Sprint 1 cold audit fix-up（2026-05-03）
+
+**範圍**：8-agent cold audit verdict NO-GO 後 4 並行 E1 + E2 round 1+2 + E4 regression。
+
+**Commit chain**：`2ffe43d`（P2-AUDIT-7 V044 LOCK TABLE retrofit）→ `edf33c0`（Sprint 1 unified 34 file / 10775 ins / 380 del）→ `d602ce0`（P2-FOLLOW-UP-1/2 E4 pre-existing accept）。
+
+**8-agent cold audit verdict 速覽**：6 NO-GO / 2 CONDITIONAL / 0 GO（PA + E2 + E3 + E4 + CC + MIT + FA + R4 + QA）。19 P0 unique 整合：5 critical security + 3 schema drift + 4 governance + 4 runtime + 2 test + 1 doc。
+
+**Sprint 1 IMPL**：
+- Track A — Python `--manifest <path>` 對齊 Rust CLI（解封 IMPL 從未跑過根因 + spawn-then-poll-1.5s + ENVELOPE_KEYS_FOR_SIGNING byte-equal cross-language `ensure_ascii=False`）
+- Track B — Rust manifest verify 路徑改用 manifest 自帶 signature/manifest_hash 為 expected（不再 tautology），key.hex 缺失 hard error，加 5 fail-mode unit test + healthcheck `[44]`
+- Track C — env var production gate raise + `os.kill` cmdline 校驗 + IDOR `actor_id` filter + Path.resolve 防路徑遍歷 + V053 race-free（BEGIN+LOCK TABLE ACCESS EXCLUSIVE+COMMIT）；replay_routes.py 1603→1494 LOC
+- Track D — V049 replay_experiments + V050 replay_simulated_fills + V051 mlde_recommendations 雙路 CHECK + V052 FK redirect + V052_preflight + REF-20_RESERVATION v1.7→v1.9
+
+**驗證**：3387 PASS（+13）/ 1 fail (pre-existing) / 10 skip · 3084 cargo workspace PASS（+7）/ 2 fail (pre-existing E4-P0-2) / 3 ignored · Sprint 1 specific 63/63 PASS · Mac PG 16.13 真 smoke test 4 V### × 2 idempotent → 0 RAISE · 0 跨平台路徑 / 0 hard-boundary mutation / 100% bilingual MODULE_NOTE。
+
+**邊界**：本批 包業務 runtime + DB migration；Sprint 3 deploy 實機 pending operator action。
+
+### REF-20 Wave 1-9 PM autonomous closure（2026-05-03，cold audit 揭結構性 false positive）
+
+**範圍**：PM autonomous mode single session 跑完 Wave 1-9 30 atomic commits + 1 final closure doc，聲稱「24/25 V3 §12 acceptance GREEN」。
+
+**Wave commit chain**：Wave 1 atomic 5 commits → Wave 2 `1851714` + `b1f6b8a` → Wave 3 `5a618ff` (含 P2a-S3-S6 + P2b-S7-S10 + closure) → Wave 4 `4b48b6d` (single 26 file 7360 ins) → Wave 5 `457a458` (13 task NumPyro 2320 LOC) → Wave 6 `eb5f106` (P4 advisory 8 task) → Wave 7 `c887e4e` (operator override hard prereq bypass) + `53ab7e7` (defer note + master closure) → Wave 8 `8429af1` (typed-confirm + V044) → Wave 9 `1f5d019` (KPI + V047/V048) → final closure `5a7581e`。
+
+**cold audit 結論**：24/25 GREEN 是「結構性 false positive」— runner 從未啟動 → #2/#10/#14/#19 都是 vacuous truth；Linux runtime 0 行 active；Wave 4-9 跳過 §八 強制工作鏈 E2+E4 review；Decision Lease retrofit (P0-GOV-1) 未做但 Wave 8 P6 聲稱 closed；3 V### schema 規範表全缺。
+
+**邊界**：Wave 1-9 業務 runtime + frontend + V### migration + cron land in tree，**deploy gate retained**。
 
 ### REF-20 Paper Replay Lab dev plan V2.1 Round3（2026-05-02）
 
