@@ -66,33 +66,19 @@ blocked_symbols = [
 # trailing_distance_pct_override   = 0.4
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2026-05-02 operator decision 3C(b) — funding_arb tight-SL during 1B sample
-# accrual window. BUSDT trade lost -10.12 USDT (single fill); operator chose
-# (1B) keep funding_arb demo active=true to keep collecting EDGE-DIAG-2
-# samples, but cap per-trade loss via tight SL until (2A) R-02 redesign slot.
+# 2026-05-03 funding_arb stop-loss RCA: disable new entries across all envs.
+# Keep the 3% SL override for any legacy funding_arb position that must still be
+# evaluated by tick risk before the strategy is fully redesigned.
 #
-# Defense A: RiskConfig::validate() rejects 3.0 > limits.stop_loss_max_pct=25.0?
-#   PASS — 3.0 < 25.0, finite > 0, no other override fields set.
-# Defense B: risk_checks::effective_sl_max_pct = min(3.0, 25.0) = 3.0 runtime cap.
-# Defense C: this binding routes through TOML edit + reload_risk_config IPC
-#   (NOT g2_03_bind_ma_sltp.sh — that wrapper requires 4 fields incl. TP/trailing
-#   which are intentionally None here so funding_arb keeps global agent.* values).
-#
-# 1B 期間限制單筆損失：3% SL ≪ 全局 25% 硬頂；P1 上限不變。
-# 2A 樣本收完後評估：若 R-02 重設計 funding_arb 不採納，整 block 連同 active
-# flag 一併移除。Paper/Live TOML 不鏡像（per feedback_env_config_independence）。
-#
-# 2026-05-02 BUSDT 單筆 -10.12 USDT 後 operator 決策 3C(b)：1B 保留 demo
-# funding_arb active=true 收 EDGE-DIAG-2 樣本，3% tight SL 限單筆損失；
-# 2A R-02 重設計時段評估是否棄此策略。三 env 故意獨立，paper/live 不改。
+# 2026-05-03 funding_arb 止損 RCA：三端統一阻擋新開倉。保留 3% SL override，
+# 供既有 funding_arb 倉位在完全重設計前繼續套用更緊風控。
 # ─────────────────────────────────────────────────────────────────────────────
 [per_strategy.funding_arb]
-enabled = true
+enabled = false
 stop_loss_max_pct_override = 3.0
 # take_profit_max_pct_override   未設 → fall back limits.take_profit_max_pct=25.0
 # trailing_activation_pct_override 未設 → fall back agent.trailing_activation_pct
 # trailing_distance_pct_override   未設 → fall back agent.trailing_distance_pct
-# blocked_symbols 未設 — 1B 期間繼續觀察全 symbol（含 BUSDT），R-02 階段再評估
 
 [agent]
 trailing_enabled = true

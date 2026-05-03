@@ -100,35 +100,18 @@ fn market_block_reason(
                 None
             }
         }
-        // Funding arb uses the momentum thresholds as a soft caution in
-        // `funding_momentum_caution_reason`, not a hard market block. The
-        // observed 2026-05-01 BIOUSDT case showed that high spot momentum can
-        // still carry positive demo edge once funding / basis logic fires.
-        // funding arb 的 momentum 門檻改由 `funding_momentum_caution_reason`
-        // 做軟性降分，不作硬阻擋。2026-05-01 BIOUSDT 反例顯示高動量下
-        // funding / basis 邏輯仍可能有正 demo edge。
-        "funding_arb" => None,
+        "funding_arb" => {
+            if mc.dir_pct > cfg.funding_max_dir_pct || mc.trend_score > cfg.funding_max_trend_score
+            {
+                Some(format!(
+                    "funding_momentum_gate:trend={:.2} dir={:.2}% funding={:.2}bps",
+                    mc.trend_score, mc.dir_pct, mc.signed_fr_bps
+                ))
+            } else {
+                None
+            }
+        }
         _ => None,
-    }
-}
-
-/// Return a funding-specific soft caution reason; never hard-blocks entries.
-/// 返回 funding 專用軟性警示原因；絕不硬阻擋新開倉。
-fn funding_momentum_caution_reason(
-    strategy: &str,
-    mc: &MarketConditions,
-    cfg: &MarketJudgmentConfig,
-) -> Option<String> {
-    if strategy != "funding_arb" || !cfg.enabled {
-        return None;
-    }
-    if mc.dir_pct > cfg.funding_max_dir_pct || mc.trend_score > cfg.funding_max_trend_score {
-        Some(format!(
-            "funding_momentum_caution:trend={:.2} dir={:.2}% funding={:.2}bps",
-            mc.trend_score, mc.dir_pct, mc.signed_fr_bps
-        ))
-    } else {
-        None
     }
 }
 
@@ -180,17 +163,13 @@ pub(crate) fn build_strategy_judgments(
             edge.route_reason = reason;
         } else if immature_negative {
             edge.final_score = edge.final_score.min(market_cfg.immature_negative_score_cap);
-            edge.market_status = "edge_watch".to_string();
-            edge.route_mode = "exploration".to_string();
+            edge.market_status = "edge_quarantine".to_string();
+            edge.route_mode = "exploration_only".to_string();
             edge.route_reason = format!(
-                "immature_negative_watch:n={} bps={:.2}",
+                "immature_negative_quarantine:n={} bps={:.2}",
                 edge.n,
                 edge.edge_bps.unwrap_or(0.0)
             );
-        } else if let Some(reason) = funding_momentum_caution_reason(strategy, mc, market_cfg) {
-            edge.final_score = edge.final_score.min(market_cfg.gate_score_cap);
-            edge.market_status = "momentum_caution".to_string();
-            edge.route_reason = reason;
         } else if market_cfg.enabled {
             edge.market_status = "compatible".to_string();
             if edge.route_reason == "edge_unexplored" {
@@ -325,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn test_market_judgment_watches_immature_negative_edge_without_hard_block() {
+    fn test_market_judgment_quarantines_immature_negative_edge() {
         let estimates = EdgeEstimates::load_from_str(
             r#"{"grid_trading::BIOUSDT":{"shrunk_bps":-6.0,"n":16,"std_bps":20.0}}"#,
         )
@@ -341,10 +320,10 @@ mod tests {
             &MarketJudgmentConfig::default(),
         );
         let grid = judgments.get("grid_trading").expect("grid judgment");
-        assert_eq!(grid.market_status, "edge_watch");
-        assert_eq!(grid.route_mode, "exploration");
+        assert_eq!(grid.market_status, "edge_quarantine");
+        assert_eq!(grid.route_mode, "exploration_only");
         assert!(
-            grid.route_reason.contains("immature_negative_watch"),
+            grid.route_reason.contains("immature_negative_quarantine"),
             "{}",
             grid.route_reason
         );
@@ -377,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn test_funding_momentum_caution_does_not_hard_block_demo_learning() {
+    fn test_funding_momentum_gate_hard_blocks_demo_learning() {
         let mc = make_mc(26.0, 30.0, 0.90, -1.0);
         let fitness = compute_fitness(&mc);
         let judgments = build_strategy_judgments(
@@ -389,10 +368,10 @@ mod tests {
             &MarketJudgmentConfig::default(),
         );
         let funding = judgments.get("funding_arb").expect("funding judgment");
-        assert_eq!(funding.market_status, "momentum_caution");
-        assert_ne!(funding.route_mode, "market_gate");
+        assert_eq!(funding.market_status, "blocked");
+        assert_eq!(funding.route_mode, "market_gate");
         assert!(
-            funding.route_reason.contains("funding_momentum_caution"),
+            funding.route_reason.contains("funding_momentum_gate"),
             "{}",
             funding.route_reason
         );

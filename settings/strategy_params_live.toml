@@ -120,13 +120,14 @@ blocked_symbols = [
   "ADAUSDT",
 ]
 
-# OC-5: FundingArb — inactive for live until paper/demo validated.
-# OC-5：FundingArb — live 暫不啟用，待紙盤/模擬盤驗證通過。
+# OC-5: FundingArb — disabled across paper/demo/live until funding-capture
+# redesign lands. Keep params aligned so a future re-enable is explicit.
+# OC-5：FundingArb 三端統一關閉，待 funding-capture 重設計落地後才重啟。
 [funding_arb]
 active = false
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0
-funding_threshold = 0.001
-max_basis_pct = 0.3
+funding_threshold = 0.0005
+max_basis_pct = 0.5
 max_hold_ms = 259200000

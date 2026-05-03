@@ -146,18 +146,13 @@ blocked_symbols = [
 # 停用 2026-04-18：G-2 v2 判決 NEGATIVE EDGE（n=13，0/13 勝率，-36.76 bps）。
 # 待 R-02 Strategist 重評入場/退場/成本三參數配對後再啟。
 #
-# EDGE-DIAG-2 (2026-04-28): operator override — re-enable on demo only (live
-# stays false in strategy_params_live.toml). G-2 verdict was n=13 — far below
-# CLT threshold (n>=30). Verdict is statistically weak; treating it as
-# permanent kills the only funding-rate strategy slot. Demo accumulates fresh
-# data (with EDGE-DIAG-2 cost_gate min-n stratify, the cell will route to
-# exploration mode below n=30). Live re-enable only after a fresh demo edge
-# evaluation with n>=30 + post-EDGE-DIAG-2-cutoff fills shows positive shrunk_bps.
-# EDGE-DIAG-2（2026-04-28）：operator 覆蓋 — 僅 demo 重啟（live 仍 false）。
-# 原 G-2 判決 n=13 遠低於 CLT 門檻；當「永久」處理會殺掉唯一 funding-rate 策略槽。
-# Demo 重新累積資料（n<30 自動走探索路徑）；live 待 n>=30 + 新資料正 edge 才議。
+# 2026-05-03 stop-loss RCA: demo-only re-enable produced fresh negative edge
+# before any verified funding capture. Keep disabled across paper/demo/live until
+# the strategy is redesigned around funding settlement windows and maker entry.
+# 2026-05-03 止損 RCA：demo-only 重啟後在未驗證 funding capture 前再產生負 edge。
+# 三端統一關閉，待重做結算窗口 + maker 入場後再議。
 [funding_arb]
-active = true
+active = false
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0

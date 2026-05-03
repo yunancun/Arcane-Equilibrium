@@ -114,6 +114,7 @@ impl TickPipeline {
                     .map(|r| r.atr_percent);
                 crate::position_risk_evaluator::PositionRow {
                     symbol: p.symbol.clone(),
+                    owner_strategy: p.owner_strategy.clone(),
                     is_long: p.is_long,
                     qty: p.qty,
                     entry_price: p.entry_price,

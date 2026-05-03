@@ -66,15 +66,15 @@ reversion_max_trend_score = 0.60
 breakout_min_trend_score = 0.50
 breakout_min_dir_pct = 1.8
 
-# Funding arb momentum mismatch is a soft caution only: lower scanner route
-# score, but keep demo/live_demo sampling alive when the funding/basis strategy
-# itself emits an entry.
+# Funding arb is hard-gated in directional momentum. The current v2 behaves as a
+# directional perp trade without verified funding capture, so one-way shocks must
+# not reach demo/live_demo entry.
 funding_max_dir_pct = 4.0
 funding_max_trend_score = 0.65
 
-# Demo-learning friendly low-sample negative edge watch. This caps scanner
-# ranking but no longer hard-blocks entries; mature negatives are still handled
-# by edge_routing.robust_negative_*.
-immature_negative_min_trades = 15
-immature_negative_bps_threshold = -5.0
-immature_negative_score_cap = 35.0
+# Low-sample negative edge quarantine. Any strategy-symbol cell with enough
+# early negative evidence is exploration-only until a redesign or explicit
+# operator override reopens it.
+immature_negative_min_trades = 10
+immature_negative_bps_threshold = 0.0
+immature_negative_score_cap = 20.0

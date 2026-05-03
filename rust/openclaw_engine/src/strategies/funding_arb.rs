@@ -16,9 +16,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use super::common::{PerSymbolState, TrendCooldown};
+use super::common::{compute_post_only_price, MakerPriceInputs, PerSymbolState, TrendCooldown};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
+use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 
 // QC-H10: Constants retained as defaults only — runtime uses struct fields.
@@ -29,6 +30,9 @@ const DEFAULT_FUNDING_THRESHOLD: f64 = 0.0005; // 5 bps
 const DEFAULT_MAX_BASIS_PCT: f64 = 0.5;
 const DEFAULT_MAX_HOLD_MS: u64 = 72 * 3_600_000;
 const DEFAULT_ENTRY_BASIS_RATIO: f64 = 0.8;
+const FUNDING_ARB_MAKER_OFFSET_BPS: f64 = 1.0;
+const FUNDING_ARB_MAKER_BUFFER_TICKS: u32 = 1;
+const FUNDING_ARB_MAKER_TIMEOUT_MS: u64 = 45_000;
 
 pub struct FundingArb {
     active: bool,
@@ -453,6 +457,24 @@ impl Strategy for FundingArb {
             (edge_bps / 10.0).clamp(0.3, 0.9),
         );
 
+        let maker_inputs = MakerPriceInputs {
+            last_price: ctx.price,
+            best_bid: ctx.best_bid,
+            best_ask: ctx.best_ask,
+            tick_size: ctx.tick_size,
+        };
+        let limit_price = match compute_post_only_price(
+            is_long,
+            maker_inputs,
+            FUNDING_ARB_MAKER_OFFSET_BPS,
+            FUNDING_ARB_MAKER_BUFFER_TICKS,
+            self.name(),
+            sym,
+        ) {
+            Some(price) => price,
+            None => return vec![],
+        };
+
         // RC-04: snapshot before mutation
         self.snapshot_prev(sym);
 
@@ -473,15 +495,15 @@ impl Strategy for FundingArb {
             qty: self.default_qty, // sentinel → IntentProcessor applies Kelly/risk sizing
             confidence,
             strategy: self.name().into(),
-            order_type: "market".into(),
-            limit_price: None,
+            order_type: "limit".into(),
+            limit_price: Some(limit_price),
             // FundingArb has no confluence scoring / persistence tracker; leave
             // features unset so feature_builder fills 0.0 placeholders.
             // FundingArb 無 confluence/persistence；feature_builder 會填 0。
             confluence_score: None,
             persistence_elapsed_ms: None,
-            time_in_force: None,
-            maker_timeout_ms: None,
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(FUNDING_ARB_MAKER_TIMEOUT_MS),
         })]
     }
 
@@ -521,9 +543,9 @@ mod tests {
             funding_rate,
             index_price,
             open_interest: None,
-            best_bid: None,
-            best_ask: None,
-            tick_size: None,
+            best_bid: Some(price * 0.9999),
+            best_ask: Some(price * 1.0001),
+            tick_size: Some((price * 0.000001).max(0.0001)),
         }
     }
 
@@ -675,6 +697,10 @@ mod tests {
                 assert!(!intent.is_long, "positive funding → short");
                 assert_eq!(intent.symbol, "BTCUSDT");
                 assert_eq!(intent.strategy, "funding_arb");
+                assert_eq!(intent.order_type, "limit");
+                assert!(intent.limit_price.is_some());
+                assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+                assert_eq!(intent.maker_timeout_ms, Some(FUNDING_ARB_MAKER_TIMEOUT_MS));
                 assert!(intent.confidence >= 0.3 && intent.confidence <= 0.9);
             }
             other => panic!("expected Open, got {:?}", other),
@@ -696,6 +722,34 @@ mod tests {
             }
             other => panic!("expected Open, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_on_tick_missing_bbo_skips_maker_entry() {
+        let mut s = FundingArb::new();
+        s.set_active(true);
+        let ctx = TickContext {
+            symbol: "BTCUSDT",
+            price: 50000.0,
+            timestamp_ms: 100_000,
+            indicators: None,
+            signals: &[],
+            h0_allowed: true,
+            funding_rate: Some(0.005),
+            index_price: Some(50000.0),
+            open_interest: None,
+            best_bid: None,
+            best_ask: None,
+            tick_size: Some(0.1),
+        };
+        assert!(
+            s.on_tick(&ctx).is_empty(),
+            "funding_arb must not fall back to market entry when BBO is missing"
+        );
+        assert!(
+            !s.positions.contains_key("BTCUSDT"),
+            "maker skip must not mutate strategy position state"
+        );
     }
 
     #[test]
