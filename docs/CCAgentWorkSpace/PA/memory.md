@@ -1,5 +1,36 @@
 # PA Memory — 工作記憶
 
+## REF-20 Sprint 2 Track E — Decision Lease retrofit AMD-2026-05-02-01（2026-05-03）
+
+**Sprint scope：** Sprint 1 close 後接續開工；解 18 Live Blocker #5（Decision Lease Rust 熱路徑 0 觸發）+ #6（agent 三表 all-time 0 row）；對應 amendment `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md`。
+
+**4-task DAG（最大並行 3 E1，總 3 day E1 work）：**
+- **E-1（critical path / 串行）Rust facade** `governance_core.rs` 加 `acquire_lease/release_lease/get_lease_by_id`；`pub lease: DecisionLeaseSm` 改為 `pub lease: parking_lot::Mutex<DecisionLeaseSm>`（interior mutability，process_with_features `&self` 通過 `lock()` 修改）；新增 `lease_id_to_idx: HashMap<String, usize>` reverse lookup（解決 Rust idx vs Python lease_id impedance mismatch）；新增 `lease_transition_tx: Option<mpsc::Sender<LeaseTransitionMsg>>` audit emit channel；既有 5 處 `&mut self` cascade 需用 `lock()` 重寫；28 處 Production test fixture 同步重寫**+0.3 day 緩衝**（push back #4）；總 1.1 day。
+- **E-2（依賴 E-1）Rust router gate** `intent_processor/router.rs` `process_with_features()` + `process_gates_only_with_features()` Gate 1（is_authorized）後加 Gate 1.4（lease）；`if profile.requires_lease() { acquire_lease()? else fail-closed reject }`；fill 完成後 `release_lease(Consumed)` / 拒絕 `release_lease(Failed)`；`IntentResult/ExchangeGateResult` 加 `pub lease_id: Option<String>` 由 `step_4_5_dispatch.rs` 寫 `replay.simulated_fills.decision_lease_id`（V050 placeholder column 終於有 caller）；**feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` 默認 OFF 灰度啟動**（push back #5）；0.6 day。
+- **E-3（並行 E-2）Python IPC bridge** `governance_hub.py:693-783` 改 IPC 轉呼 Rust（保簽名 backward-compat）；shadow caller short-circuit（push back #2 — shadow=true 直接回 `"shadow_lease:no_op_<intent_id>"` 不打 IPC 不寫 lease_transitions 避免 §4 #2 假綠）；dual-write 4 週 namespace prefix `py_*` / `rs_*`；0.6 day。
+- **E-4（並行 E-2/E-3）V054 schema + audit writer** 新表 `learning.lease_transitions`（amendment §4 AC-1 觀察點，hypertable + 3 索引）；`governance.audit_log` event_type CHECK 13 → 20（加 7 lease event types）；`lease_transition_writer.rs` 新 actor 訂閱 lease_transition_tx 寫 PG；**agent 三表 writer 加 sampling**（push back #3 推薦 Option A：LOW 1% / NORMAL 10% / HIGH+CRITICAL 100%；hypertable 即使 1KB payload × 4.3-8.6M row/day 撐不住 4-8GB PG memory）；TOML config `agent_audit_writer.sampling_*`；fail-soft（DB error 不阻塞 send）；1.0 day。
+
+**5 個關鍵 push back：**
+1. **HIGH**：W8 P6 typed-confirm handoff（session 級 EarnedTrust ladder）vs Decision Lease（per-intent 30s 短期授權）絕對不可混；Validation profile 必短路 `LeaseId::Bypass` 不打 SM；E2 必查 demo 路徑 0 觸發 lease_transitions row。
+2. **HIGH**：ExecutorAgent shadow_mode_provider `lambda: True` fail-close default（CLAUDE.md §三 P1-FAKE-1）→ shadow path 仍會走 Python `acquire_lease()` IPC → Rust SM 真做 transition → 沒對應 release_lease → 卡 ACTIVE 直到 ExpiryGuardian 清。對策：Python caller-side shadow short-circuit + V054 audit writer 加 `engine_mode='shadow'` 過濾 + AC-1 query 加 `AND engine_mode != 'shadow'`。
+3. **MEDIUM**：MessageBus DB sink 對 `agent.messages` 24h 4.3-8.6M row 寫入威脅；Linux PG 4-8GB shared_buffers 撐不住。Option A sampling（LOW 1%/NORMAL 10%/HIGH+CRITICAL 100%）為 PA 推薦；E2 必查 sampling logic + fail-soft + TOML config 不 hardcode。
+4. **MEDIUM**：retrofit 後既有 28 處 `GovernanceProfile::Production` test fixture 集體 fail（沒 grant lease）；E-1 同 E1 task 重寫 fixture +0.3 day；E2 必查 fixture **不能用 LeaseId::Bypass 短路**（會掩蓋 router gate bug）。
+5. **MEDIUM**：amendment §5.4 排程 ~2026-05-15 P0-EDGE-2 後派發 vs Sprint 2 直接接續啟動衝突。PA 立場：Sprint 2 直開 + feature flag 灰度（E-1/E-3/E-4 land + E-2 land 但 OFF）；2026-05-15 P0-EDGE-2 結論後 flip flag canary 24h；amendment §6 回退條件「IPC failure > 0.5%」變成 flag flip 第二次 commit 前的觀察條件。
+
+**Rust SM impedance mismatch 解：** Python `_lease_sm` 用 `lease_id: str` 為 SM operation handle / Rust `DecisionLeaseSm` 用 `idx: usize`（Vec index）。Facade 維護 `HashMap<String, usize>` reverse lookup；對外 API 用 `lease_id: String`（與 Python 對等）；不動 lease.rs 既有 9 unit test。
+
+**5 條 AC acceptance probe SQL** + **6 phase deploy chain（feature flag gradual rollout）** 全在報告。
+
+**完成定義：**
+- 設計報告 `2026-05-03--ref20_sprint2_track_e_decision_lease_retrofit_design.md` ✅
+- AC-1~5 + 5 push back 全收 + Sprint 1 commits cross-impact map（V050 decision_lease_id 是 sprint 1 為 sprint 2 預留接口；V053 → V054 event_type 13→20）
+- E2 重點審查 3 點：fixture 重寫不能 Bypass / Python IPC shadow short-circuit / agent.messages sampling
+- 不寫業務碼 + 不 commit ✅
+
+**接續節點：** PM Sign-off 設計後 → Task E-1 派發給 E1（單 E1 串行 1.1 day）→ E-1 facade signature land → Task E-2/E-3/E-4 三 E1 並行派發。最早 2026-05-04 啟動，~2026-05-07 全部 land；feature flag 觀察期至 2026-05-15+。
+
+詳：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--ref20_sprint2_track_e_decision_lease_retrofit_design.md`
+
 ## REF-20 Sprint 1 partition design（2026-05-03）
 
 **Sprint scope：** REF-20 8-agent cold audit NO-GO 後，4 並行 Track 解 19 P0 + 補 PA W1 自身 schema drift。
