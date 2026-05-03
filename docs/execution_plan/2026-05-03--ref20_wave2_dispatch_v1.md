@@ -117,6 +117,7 @@ P2a security（S1-S3）：
 | 版次 | 日期 | 修訂者 | 摘要 |
 |---|---|---|---|
 | **v1** | 2026-05-03 | PM | Wave 2 dispatch plan + T4 closure record + 5 ambiguity decisions（Wave 3 前置）|
+| **v1.1** | 2026-05-03 | PM + Operator | E2 review §3.2 MED-2 finding closure: API uvicorn `OPENCLAW_API_WORKERS=4` 預設與 `replay_routes.py` in-memory `_ACTIVE_RUNS` cap 衝突；operator 選 **Option C** — Wave 4 R20-P2b-T2 fast-track PG advisory lock retrofit。**不**改 `OPENCLAW_API_WORKERS=4` 預設（保全 API 4x 吞吐），**不**加 startup warning（簡化 path），**直接** Wave 4 IMPL 階段以 `pg_advisory_xact_lock(hashtext('replay_run_global'))` + per-actor advisory lock 取代 `_ACTIVE_RUNS` dict。Wave 3 closure 不阻；replay routes 仍是 stub（0 production traffic）。Wave 4 task 排在 R20-P2b-T2（route → binary wire-up）同 commit 內處理，作為 deploy precondition。|
 
 ---
 
