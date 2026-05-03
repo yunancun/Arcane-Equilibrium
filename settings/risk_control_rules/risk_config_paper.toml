@@ -340,3 +340,20 @@ max_param_delta_pct = 0.30      # ±30% cap on per-cycle non-weight param delta
 [cost_edge]
 enabled = false                 # Phase A dormant — env-gate + flag dual safeguard
 trigger_threshold = -0.5        # ratio <= -0.5 trigger（PM Tier 9 T9-LOW-1 lock-in）
+
+# REF-20 Sprint 3 Track H E-4 (2026-05-03) — agent 三表 DB sink schema (Phase A
+# config-only). Paper posture: sampling 與 demo 同（paper 為 dormant 狀態
+# disabled by default per project_paper_pipeline_disabled_by_default）。
+# 實際 PG sink wiring deferred to P1-AGENT-DB-SINK follow-up ticket。
+# 三環境獨立 per memory `feedback_env_config_independence` — 禁衛生合併。
+#
+# REF-20 Sprint 3 Track H E-4：agent 三表 DB sink schema（config-only Phase A）。
+# Paper 配置：與 demo 同 sampling 比；paper 整體 dormant 不影響真實 throughput。
+[messagebus_db_sink]
+enabled = false                 # Phase A dormant — flag flip after P1 wiring lands
+sampling = "severity"            # Option A severity-based per PA design §4 #3
+sampling_low_pct = 1            # LOW priority sample rate (0-100)
+sampling_normal_pct = 10        # NORMAL priority (0-100)
+sampling_high_pct = 50          # HIGH priority (0-100)
+sampling_critical_pct = 100     # CRITICAL priority (always 100)
+fail_soft_on_db_error = true    # PG outage → log warn + drop, never block MessageBus

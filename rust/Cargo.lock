@@ -1170,6 +1170,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "openclaw_types",
+ "parking_lot",
  "rand 0.8.6",
  "serde",
  "serde_json",

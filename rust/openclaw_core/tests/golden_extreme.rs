@@ -39,15 +39,19 @@ fn test_cascade_with_multiple_leases_and_orders() {
     let mut core = GovernanceCore::new();
     core.grant_paper_authorization(None).unwrap();
 
-    // Create 10 leases
-    for _ in 0..10 {
-        let idx = core
-            .lease
-            .create_draft(serde_json::json!({"s": "BTC"}), "s", None);
-        core.lease.register(idx).unwrap();
-        core.lease.activate(idx).unwrap();
+    // Create 10 leases (AMD-2026-05-02-01 Track E E-1: lease wrapped in Mutex
+    // for facade interior mutability — direct SM access requires lock).
+    // 創建 10 個 lease（AMD-2026-05-02-01 Track E E-1：lease 包 Mutex 提供 facade
+    // 內部可變性 — 直接 SM 訪問需要 lock）。
+    {
+        let mut sm = core.lease.lock();
+        for _ in 0..10 {
+            let idx = sm.create_draft(serde_json::json!({"s": "BTC"}), "s", None);
+            sm.register(idx).unwrap();
+            sm.activate(idx).unwrap();
+        }
+        assert_eq!(sm.get_live().len(), 10);
     }
-    assert_eq!(core.lease.get_live().len(), 10);
 
     // Create 5 OMS orders
     for i in 0..5 {
@@ -69,7 +73,7 @@ fn test_cascade_with_multiple_leases_and_orders() {
     );
     assert!(result.success);
     assert_eq!(result.leases_revoked, 10);
-    assert_eq!(core.lease.get_live().len(), 0);
+    assert_eq!(core.lease.lock().get_live().len(), 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

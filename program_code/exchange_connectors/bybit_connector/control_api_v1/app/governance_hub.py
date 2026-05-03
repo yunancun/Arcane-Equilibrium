@@ -87,6 +87,20 @@ from .governance_hub_cascades import (  # FIX-08: types + mixin extracted for fi
 from .governance_hub_event_handlers import (  # E5-P1-9: callback factories + wiring extracted
     GovernanceHubEventHandlersMixin,
 )
+from .governance_lease_bridge import (  # Sprint 3 H E-3: Decision Lease IPC bridge
+    acquire_lease_via_ipc,
+    get_lease_via_ipc,
+    is_lease_ipc_enabled,
+    record_dual_write_acquire,
+    record_dual_write_release,
+    release_lease_via_ipc,
+    shadow_short_circuit_acquire,
+)
+from .lease_ipc_schema import (  # Sprint 3 H E-3: schema constants for outcome tagging
+    OUTCOME_CONSUMED,
+    OUTCOME_FAILED,
+    is_shadow_bypass_lease_id,
+)
 from .recovery_approval_gate import RecoveryApprovalGate
 from .governance_events import risk_event, recon_event, auth_event, lease_event
 from .utils.time_utils import now_ms
@@ -164,6 +178,22 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         self._governance_events: list[dict[str, Any]] = []
         self._governance_events_max_size = 1000
 
+        # ── Sprint 3 H E-3: Decision Lease IPC bridge wiring ──
+        # ── Sprint 3 H E-3：Decision Lease IPC 橋接接線 ──
+        # caller-side shadow short-circuit (PA push back #2 HIGH): when set,
+        # acquire_lease() consults this provider first; True → return
+        # SHADOW_BYPASS sentinel WITHOUT engaging IPC. Wiring lives in
+        # paper_trading_wiring or strategy_wiring; tests inject directly.
+        # caller 端 shadow 短路（PA push back #2）：被設定時，acquire_lease()
+        # 先諮詢此 provider；True → 回 SHADOW_BYPASS sentinel 但不啟動 IPC。
+        # 接線位置在 paper_trading_wiring 或 strategy_wiring；測試直接注入。
+        self._shadow_mode_provider: Optional[Any] = None
+        # Optional dispatcher override for tests; production uses default
+        # ipc_dispatch.one_shot_ipc_call. Type:
+        # Callable[[str, Mapping[str, Any], float], Awaitable[Mapping[str, Any]]]
+        # 測試用可選的派發器覆寫；production 走 ipc_dispatch.one_shot_ipc_call。
+        self._lease_ipc_dispatcher: Optional[Any] = None
+
     def set_audit_pipeline(self, pipeline: 'Any') -> None:
         """
         Set the audit pipeline for SM callbacks.
@@ -176,6 +206,52 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         with self._lock:
             self._audit_pipeline = pipeline
             logger.info("Audit pipeline set on GovernanceHub")
+
+    def set_shadow_mode_provider(self, provider: Optional[Any]) -> None:
+        """Inject shadow_mode_provider for caller-side acquire_lease short-circuit.
+        注入 shadow_mode_provider，給 acquire_lease 做 caller 端短路。
+
+        PA push back #2 HIGH: when ExecutorAgent shadow_mode is True, IPC must
+        not be engaged (would falsely populate Rust SM transitions and inflate
+        V054 lease_transitions noise → AC-1 假綠). The provider is a zero-arg
+        callable returning bool; ``None`` resets to no short-circuit.
+        當 ExecutorAgent shadow_mode=True，IPC 不可啟動（會偽造 Rust SM
+        transition 並推高 V054 lease_transitions 噪聲 → AC-1 假綠）。provider
+        為零參 callable，回傳 bool；``None`` 重置為無短路。
+
+        Wiring sites / 接線位置:
+          - tests inject directly via this setter / 測試經此 setter 直接注入
+          - production wiring (Sprint 3 H E-3 follow-up): expected to inject
+            from executor_agent.py:185 ``_shadow_mode_provider`` via
+            paper_trading_wiring or strategy_wiring during hub bootstrap.
+            Sprint 3 H E-3 後續：預期由 executor_agent.py:185 的
+            ``_shadow_mode_provider`` 經 paper_trading_wiring 或
+            strategy_wiring 在 hub bootstrap 時注入。
+        """
+        with self._lock:
+            self._shadow_mode_provider = provider
+            if provider is None:
+                logger.info(
+                    "ShadowModeProvider cleared on GovernanceHub / "
+                    "GovernanceHub 上的 ShadowModeProvider 已清除",
+                )
+            else:
+                logger.info(
+                    "ShadowModeProvider set on GovernanceHub / "
+                    "GovernanceHub 上已設定 ShadowModeProvider",
+                )
+
+    def set_lease_ipc_dispatcher(self, dispatcher: Optional[Any]) -> None:
+        """Inject IPC dispatcher (test only; production uses default).
+        注入 IPC 派發器（僅測試用；production 用預設）。
+
+        Type: Callable[[str, Mapping[str, Any], float], Awaitable[Mapping[str, Any]]].
+        Resets to default when set to None.
+        型別：Callable[[str, Mapping[str, Any], float], Awaitable[Mapping[str, Any]]].
+        設為 None 重置為預設。
+        """
+        with self._lock:
+            self._lease_ipc_dispatcher = dispatcher
 
     def set_change_audit_log(self, cal: 'ChangeAuditLog') -> None:
         """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
@@ -695,19 +771,85 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         Acquire a decision lease for a specific intent.
         为特定意图获取决策租约。
 
-        Hot path: called on trade entry/exit decisions. Minimizes I/O while holding lock.
+        Hot path: called on trade entry/exit decisions.
 
-        Args:
-            intent_id: Unique identifier for decision intent
+        Sprint 3 H E-3 retrofit / Sprint 3 H E-3 改造:
+          1. Caller-side SHADOW_BYPASS short-circuit (PA push back #2 HIGH):
+             when ``_shadow_mode_provider()`` returns True, return a
+             ``SHADOW_BYPASS:<intent_id>`` sentinel WITHOUT engaging IPC.
+             This prevents fake Rust SM transitions and AC-1 假綠 when
+             ExecutorAgent shadow_mode=True (the lambda True fail-close path
+             at executor_agent.py:185).
+          2. IPC bridge (env-gated by ``OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1``):
+             when enabled, dispatch to Rust ``governance.acquire_lease`` via
+             one_shot_ipc_call; Rust SM is the single source of truth.
+             Dual-write mirror records the acquired lease for the 4-week
+             reconcile period (PA partition §1).
+          3. Legacy local SM fallback: when env flag is off OR IPC fails OR
+             Python ``governance_hub`` is the deployment context (Phase 1
+             baseline), the original Python ``DecisionLeaseStateMachine``
+             path runs unchanged so the existing 100+ tests stay green.
+
+        改造摘要：
+          1. caller 端 SHADOW_BYPASS 短路（PA push back #2 HIGH）
+          2. IPC 橋接（env-gated by ``OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1``）
+          3. legacy local SM fallback（Phase 1 baseline 100% 不變）
+
+        Args / 參數:
+            intent_id: Unique identifier for decision intent / 決策意圖唯一 id
             scope: Lease scope (e.g., 'TRADE_ENTRY', 'TRADE_EXIT')
-            ttl_seconds: Time-to-live in seconds
+            ttl_seconds: Time-to-live in seconds / 有效時間秒數
 
-        Returns:
-            lease_id if successful; None if denied (fail-closed)
+        Returns / 回傳:
+            lease_id (incl. SHADOW_BYPASS sentinel) if acquired; None on
+            denial / fail-closed. Backward-compat with executor_agent.py:454.
+            取得時回 lease_id（含 SHADOW_BYPASS sentinel）；拒絕 / fail-closed
+            時回 None。對 executor_agent.py:454 caller 簽名向後兼容。
         """
+        # Step 1: caller-side shadow short-circuit (PA push back #2 HIGH).
+        # Read provider OUTSIDE main self._lock to avoid potential deadlock
+        # with ExecutorConfigCache internal lock; mirrors the
+        # get_executor_snapshot() pattern in executor_agent.py:268.
+        # 步驟 1：caller 端 shadow 短路（PA push back #2 HIGH）。
+        # provider 讀取於主 self._lock 外執行，避免與 ExecutorConfigCache
+        # 內部 lock 死鎖；對齊 executor_agent.py:268 get_executor_snapshot 慣例。
+        sentinel = shadow_short_circuit_acquire(
+            intent_id=intent_id,
+            shadow_mode_provider=self._shadow_mode_provider,
+        )
+        if sentinel is not None:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Lease acquire short-circuited (shadow): %s / "
+                    "Lease acquire 短路（shadow）：%s",
+                    sentinel, sentinel,
+                )
+            return sentinel
+
+        # Step 2: standard authorization gating (unchanged across both paths).
+        # 步驟 2：標準授權閘（兩條路徑共用，不變）。
         if not self._enabled or not self._initialized or not self.is_authorized():
             return None
 
+        # Step 3: IPC bridge (env-gated). On any IPC failure → return None
+        # (fail-closed); we do NOT silently fall through to local SM, which
+        # would break the dual-write canonical contract (PA partition §1
+        # "Rust = single source of truth"). Operators flip the env flag
+        # back to 0 if IPC needs to be bypassed temporarily.
+        # 步驟 3：IPC 橋接（env-gated）。IPC 失敗 → 回 None（fail-closed）；
+        # 不靜默 fall through 至 local SM（會破壞 dual-write canonical 契約 —
+        # PA partition §1 "Rust = single source of truth"）。需臨時繞過 IPC
+        # 時，operator 將 env flag flip 回 0。
+        if is_lease_ipc_enabled():
+            return acquire_lease_via_ipc(
+                intent_id=intent_id,
+                scope=scope,
+                ttl_seconds=ttl_seconds,
+                dispatcher=self._lease_ipc_dispatcher,
+            )
+
+        # Step 4: legacy local SM path (Phase 1 baseline; 100% backward-compat).
+        # 步驟 4：legacy local SM 路徑（Phase 1 baseline；100% 向後兼容）。
         try:
             with self._lock:
                 if self._lease_sm is None or self._authorization_sm is None:
@@ -743,6 +885,17 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
 
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("Lease acquired: %s for intent %s", lease_id, intent_id)
+                # Phase 1 baseline: record into the dual-write mirror as
+                # source="py" so post-IPC reconcile can detect divergence.
+                # Phase 1 baseline：記入 dual-write mirror（source="py"），
+                # 讓 IPC 上線後對賬可偵測 divergence。
+                record_dual_write_acquire(
+                    lease_id=lease_id,
+                    intent_id=intent_id,
+                    scope=scope,
+                    ttl_seconds=ttl_seconds,
+                    source="py",
+                )
                 return lease_id
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
@@ -754,16 +907,53 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         Release or consume a lease after decision/execution.
         在决策/执行后释放或消费租约。
 
-        Args:
-            lease_id: ID of lease to release
-            consumed: If True, mark as CONSUMED; else REVOKED
+        Sprint 3 H E-3: SHADOW_BYPASS sentinel short-circuits to True;
+        IPC bridge consulted when ``OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1``;
+        legacy local SM fallback otherwise.
+        Sprint 3 H E-3：SHADOW_BYPASS sentinel 短路回 True；
+        ``OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1`` 時走 IPC 橋接；
+        否則 legacy local SM fallback。
 
-        Returns:
-            True if successful; False otherwise
+        Args / 參數:
+            lease_id: ID of lease to release / 要釋放的 lease ID
+            consumed: If True, mark as CONSUMED; else REVOKED.
+                      True 標記為 CONSUMED，否則 REVOKED。
+
+        Returns / 回傳:
+            True if successful; False otherwise.
+            成功時 True；否則 False。
         """
+        # SHADOW_BYPASS sentinel: symmetric short-circuit (acquire was no-op
+        # so release is no-op success; never engages IPC or local SM).
+        # SHADOW_BYPASS sentinel：對稱短路（acquire 為 no-op，所以 release 也是
+        # no-op success；不啟動 IPC 或 local SM）。
+        if is_shadow_bypass_lease_id(lease_id):
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Lease release short-circuited (shadow): %s / "
+                    "Lease release 短路（shadow）：%s",
+                    lease_id, lease_id,
+                )
+            return True
+
         if not self._enabled or not self._initialized:
             return False
 
+        # IPC path (env-gated). Fail-soft: IPC failure → False (caller may
+        # observe and decide; existing executor_agent.py path tolerates False
+        # since release happens after order submit and the lease is short-TTL).
+        # IPC 路徑（env-gated）。fail-soft：IPC 失敗 → False（caller 觀察決定；
+        # 既有 executor_agent.py 路徑容許 False，因 release 發生在 order submit
+        # 之後且 lease 為短 TTL）。
+        if is_lease_ipc_enabled():
+            return release_lease_via_ipc(
+                lease_id=lease_id,
+                consumed=consumed,
+                dispatcher=self._lease_ipc_dispatcher,
+            )
+
+        # Legacy local SM path (Phase 1 baseline, unchanged).
+        # legacy local SM 路徑（Phase 1 baseline，不變）。
         try:
             with self._lock:
                 if self._lease_sm is None:
@@ -776,6 +966,13 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
 
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("Lease released: %s as %s", lease_id, 'CONSUMED' if consumed else 'REVOKED')
+                # Update dual-write mirror so IPC-era reconcile can detect
+                # release-side divergence.
+                # 更新 dual-write mirror 以便 IPC 期對賬偵測 release 端 divergence。
+                record_dual_write_release(
+                    lease_id=lease_id,
+                    outcome=OUTCOME_CONSUMED if consumed else OUTCOME_FAILED,
+                )
                 return True
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
@@ -786,7 +983,24 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         """查詢指定 ID 的 Decision Lease（P3-TECH-1）。
         Returns the lease object, or None if not found or hub not ready.
         Query a specific Decision Lease by ID without accessing private SM.
+
+        Sprint 3 H E-3: SHADOW_BYPASS sentinel returns None (the SM never
+        held this lease); IPC path returns the Rust LeaseObject serde dict
+        when env flag enabled; legacy local SM fallback returns the local
+        Lease dataclass instance.
+        Sprint 3 H E-3：SHADOW_BYPASS sentinel 回 None（SM 從未持有此 lease）；
+        env flag 啟用時 IPC 路徑回 Rust LeaseObject serde dict；
+        否則 legacy local SM 回本地 Lease dataclass 實例。
         """
+        if is_shadow_bypass_lease_id(lease_id):
+            return None
+
+        if is_lease_ipc_enabled():
+            return get_lease_via_ipc(
+                lease_id=lease_id,
+                dispatcher=self._lease_ipc_dispatcher,
+            )
+
         with self._lock:
             if self._lease_sm is None:
                 return None

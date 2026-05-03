@@ -16,6 +16,13 @@ pub mod cost_gate;
 pub mod dream;
 pub mod execution;
 pub mod governance_core;
+// AMD-2026-05-02-01 Track H E-4 retrofit (E2 round 1 verdict HIGH-1 fix):
+// Audit emit primitives extracted to keep governance_core.rs under 1500 LOC
+// hard cap and decouple E1/E4 retrofit collisions on the same file.
+// AMD-2026-05-02-01 Track H E-4 retrofit（E2 round 1 verdict HIGH-1 fix）：
+// 將 audit emit 基礎元件抽出，使 governance_core.rs 保持在 1500 LOC hard cap
+// 之下，並解耦 E1/E4 retrofit 對同檔的撞車。
+pub mod governance_emit;
 pub mod guardian;
 pub mod h0_gate;
 pub mod indicators;

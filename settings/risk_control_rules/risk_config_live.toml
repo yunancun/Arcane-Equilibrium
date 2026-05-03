@@ -343,3 +343,21 @@ max_param_delta_pct = 0.30      # ±30% cap on per-cycle non-weight param delta
 [cost_edge]
 enabled = false                 # Phase A dormant — env-gate + flag dual safeguard
 trigger_threshold = -0.3        # Live more conservative than demo/paper (-0.5)
+
+# REF-20 Sprint 3 Track H E-4 (2026-05-03) — agent 三表 DB sink schema (Phase A
+# config-only). Live posture: sampling 收緊（live 永遠 fail-closed strict per
+# memory `feedback_demo_loose_live_strict_policy`）；HIGH/CRITICAL 100% audit
+# 完整保留，LOW/NORMAL 略低於 demo（live throughput 真實風險）。
+# 實際 PG sink wiring deferred to P1-AGENT-DB-SINK follow-up ticket。
+# 三環境獨立 per memory `feedback_env_config_independence` — 禁衛生合併。
+#
+# REF-20 Sprint 3 Track H E-4：agent 三表 DB sink schema（config-only Phase A）。
+# Live 配置：sampling 收緊；HIGH/CRITICAL 永 100% audit；LOW/NORMAL 略低於 demo。
+[messagebus_db_sink]
+enabled = false                 # Phase A dormant — flag flip after P1 wiring + extra audit gate
+sampling = "severity"            # Option A severity-based per PA design §4 #3
+sampling_low_pct = 0            # LOW priority — Live drops all (audit completeness via HIGH+)
+sampling_normal_pct = 5         # NORMAL — Live tightened from demo 10% → 5%
+sampling_high_pct = 50          # HIGH priority (0-100)
+sampling_critical_pct = 100     # CRITICAL — always 100% (audit completeness)
+fail_soft_on_db_error = true    # PG outage → log warn + drop, never block MessageBus.send

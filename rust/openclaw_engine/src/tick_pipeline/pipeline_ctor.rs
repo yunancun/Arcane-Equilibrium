@@ -170,6 +170,20 @@ impl TickPipeline {
     pub fn set_endpoint_env(&mut self, env: crate::bybit_rest_client::BybitEnvironment) {
         self.endpoint_env = Some(env);
         self.intent_processor.set_endpoint_env(env);
+        // E2 round 1 verdict HIGH-1 retrofit: bind the engine_mode tag for
+        // V054 lease_transitions audit emit. Each pipeline (paper / demo /
+        // live_demo / live_mainnet) tags its audit rows correctly via the
+        // endpoint-aware `effective_engine_mode()` resolver below; without
+        // this wire-in the resolver in `governance_core` would always fall
+        // back to "unknown", breaking AC-1 distinct count >= 5 query.
+        // E2 round 1 verdict HIGH-1 修法：在此綁定 V054 lease_transitions
+        // audit emit 的 engine_mode tag。每個 pipeline（paper / demo /
+        // live_demo / live_mainnet）透過下方 endpoint-aware
+        // `effective_engine_mode()` resolver 正確標記 audit row；無此
+        // wire-in 則 governance_core resolver 永遠 fallback "unknown"，
+        // AC-1 distinct count >= 5 query 失效。
+        let tag = self.effective_engine_mode().to_string();
+        self.governance.set_engine_mode_tag(tag);
     }
 
     /// Wire the shared scanner SymbolRegistry so new opens are gated to
