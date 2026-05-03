@@ -12,6 +12,13 @@
 <!-- REF-20 R20-P1-U1: load Paper Replay Lab sub-tab navigation logic from app-paper.js
      REF-20 R20-P1-U1：從 app-paper.js 載入 Paper Replay Lab 子標籤導航邏輯 -->
 <script src="/static/app-paper.js"></script>
+<!-- REF-20 Wave 8 R20-P6-H1/H2/H3/H4: handoff helper (modal + cooldown + recent + idempotency)
+     REF-20 Wave 8 R20-P6-H1/H2/H3/H4：候選交接 helper（modal + 冷卻 + 近 5 筆 + 冪等鍵）
+     共拆獨立檔以避免 common.js 突破 1500 行硬上限。載入順序：common (utilities) →
+     i18n_zh (string table) → app-paper (sub-tab nav) → handoff_helper (Wave 8 P6 flow)。
+     Loaded as a separate file to avoid pushing common.js past the 1500-line hard
+     cap. Order: common → i18n_zh → app-paper → handoff_helper. -->
+<script src="/static/handoff_helper.js"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -298,15 +305,27 @@
   <div id="subtab-compare-disabled-card"></div>
 </div>
 
-<!-- REF-20 R20-P1-U6: Handoff sub-tab content wrapper（disabled state via U8 helper）
-     REF-20 R20-P1-U6：Handoff 子標籤 disabled state（透過 U8 helper 渲染）
-     mount point #subtab-handoff-disabled-card 由 inline script 結尾的 init block 透過
-     window.OpenClawDisabledStateCard.render() 填入。Phase=P6，icon=⛔ (forbidden)，
-     gate_label_i18n_key=disabled_state.handoff_disabled_until_p6（per UX subdoc §6 +
-     §8 disabled state contract）。不渲染 metrics grid（Handoff 為 typed-confirm flow，
-     不適用 metrics layout）。 -->
+<!-- REF-20 Wave 8 R20-P6-H1/H2/H3/H4: Handoff sub-tab functional content
+     REF-20 Wave 8 R20-P6-H1/H2/H3/H4：Handoff 子標籤功能內容
+     U6 disabled card 已替換為 functional handoff form + modal trigger。內容由
+     window.OpenClawHandoff.render() 從 handoff_helper.js 注入，包含：
+       - 9-field read-only summary (UX subdoc §6)
+       - Operator notes textarea (optional)
+       - "Promote to Demo" trigger button (P6 phase chip)
+       - Dual-actor banner (H2)
+       - Cooldown countdown (H2, ≥30s, localStorage 持久化)
+       - Footer recent 5 handoff list (H3)
+     Modal (typed-confirm phrase `^HANDOFF [a-z0-9-]{36}$` + idempotency key UUID v4)
+     由 handoff_helper.js 在點擊 trigger 時 lazily inject 至 document.body。
+     Wave 8 backend (S13 typed-phrase regex / S14 V044 UNIQUE / S15 governance audit)
+     由 sibling sub-agent 並行落地；此處 frontend 即使 endpoint 404 仍降級 mock + TODO。
+     —
+     U6 disabled card has been replaced by the functional handoff form + modal
+     trigger. Content is injected by window.OpenClawHandoff.render() from
+     handoff_helper.js. Backend endpoints (S13/S14/S15) land in parallel from a
+     sibling sub-agent; frontend degrades to mock + TODO marker if endpoints 404. -->
 <div id="subtab-handoff" class="oc-subtab-content" role="tabpanel" aria-labelledby="subtab-btn-handoff" hidden>
-  <div id="subtab-handoff-disabled-card"></div>
+  <div id="subtab-handoff-mount"></div>
 </div>
 
 <script>
@@ -767,19 +786,24 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperModeBadges() 
   }
 });
 
-// ─── Disabled Sub-Tab Initialization (REF-20 R20-P1-U4 / U5 / U6) ───────────
-// 3 disabled sub-tab（Replay/Compare/Handoff）共用 U8 helper
+// ─── Disabled Sub-Tab Initialization (REF-20 R20-P1-U4 / U5) ────────────────
+// 2 disabled sub-tab（Replay/Compare）共用 U8 helper
 // (window.OpenClawDisabledStateCard.render) 渲染 phase-tagged disabled card +
 // gate label + bilingual banner + optional 12-cell metrics placeholder。
+// Handoff sub-tab 已升級為 functional content (Wave 8 R20-P6-H1/H2/H3/H4)，
+// 由下方獨立 init block 透過 window.OpenClawHandoff.render() 填入。
 // Defensive: 若 helper 未載入（script 載入順序錯/race），fallback console.warn
 // 並在 mount point 留 inline notice，不阻擋 sub-tab nav。
-// 3 disabled sub-tabs (Replay/Compare/Handoff) share the U8 helper. Defensive
-// fallback if helper is missing: console.warn + inline notice in mount point.
+//
+// 2 disabled sub-tabs (Replay/Compare) share the U8 helper. Handoff has been
+// upgraded to functional content (Wave 8) and is initialized by a separate
+// block below via window.OpenClawHandoff.render(). Defensive fallback if
+// helper is missing: console.warn + inline notice in mount point.
 document.addEventListener('DOMContentLoaded', function _ocInitPaperDisabledCards() {
   if (!window.OpenClawDisabledStateCard || typeof window.OpenClawDisabledStateCard.render !== 'function') {
     console.warn('[paper] OpenClawDisabledStateCard not loaded; sub-tab disabled cards left empty');
     // Fallback inline 通知：避免空白畫面 / Avoid blank panes when helper not loaded.
-    ['subtab-replay-disabled-card', 'subtab-compare-disabled-card', 'subtab-handoff-disabled-card'].forEach(function(id) {
+    ['subtab-replay-disabled-card', 'subtab-compare-disabled-card'].forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.innerHTML = '<div class="oc-subtab-placeholder">disabled card helper not loaded — see browser console</div>';
     });
@@ -811,19 +835,57 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperDisabledCards
     banner_text_zh: 'P3a half-life / bootstrap CI / shrinkage / 費率執行校準尚未上線。下方 12 metric grid 預覽 UX subdoc §5 Compare 排版。',
     metrics_layout: 'compare_12'
   });
-  // U6 Handoff disabled card / Handoff 子標籤 disabled card
-  // Phase=P6，icon=⛔（forbidden = 嚴禁直接執行；P6 後才有 typed-confirm flow）。
-  // 不渲染 metrics grid（Handoff 為 typed-confirm flow，UX subdoc §6 9 fields 在
-  // P6-H1 modal 才登場，P1 階段不預覽 form 模糊 phase 邊界）。
-  window.OpenClawDisabledStateCard.render('subtab-handoff-disabled-card', {
-    phase: 'P6',
-    icon: '⛔',
-    gate_label: 'Handoff disabled until P6',
-    gate_label_zh: 'P6 候選交接 — Handoff 未啟用',
-    gate_label_i18n_key: 'disabled_state.handoff_disabled_until_p6',
-    banner_text: 'Handoff requires P3 calibration green + P4 advisory verified + P6 typed-confirm modal. None present at P1.',
-    banner_text_zh: '候選交接需 P3 校準通過 + P4 建議已驗證 + P6 typed-confirm modal。P1 階段三條件均未滿足。'
-  });
+});
+
+// ─── Wave 8 Handoff Functional Content (R20-P6-H1/H2/H3/H4) ─────────────────
+// Handoff sub-tab 從 disabled card 升級為 functional 9-field summary + modal
+// trigger + cooldown + dual-actor + footer recent 5 + idempotency UUID。
+// 候選資料源：當 Compare sub-tab 選定 verdict='demo_candidate' 的實驗後寫入
+// localStorage key `oc_handoff_candidate`（P3+ 階段 Compare 子任務會 wire）；
+// P1 階段尚未有 candidate flow → render 顯示 "No replay candidate selected"
+// empty notice + dual-actor banner pending + recent list mock + TODO marker。
+// trigger button keep disabled until candidate present.
+//
+// Wave 8 lifecycle / Wave 8 生命週期：
+//   - frontend (本檔 + handoff_helper.js): land here (Wave 8 frontend done)
+//   - backend (sibling sub-agent E1): S13 regex / S14 V044 UNIQUE / S15 audit
+//   - 14d gradient observation (Wave 9): replay_no_live_mutation continuous
+//
+// Handoff sub-tab is upgraded from a disabled card to functional content with
+// 9-field summary, modal trigger, cooldown, dual-actor policy, recent-5 footer
+// and idempotency. Candidate data source: localStorage key
+// `oc_handoff_candidate`, written by Compare sub-tab on verdict='demo_candidate'
+// pick (Compare flow lands later). P1 has no candidate flow yet → empty notice
+// + pending banner + mock recent list + TODO. Trigger stays disabled without
+// candidate.
+document.addEventListener('DOMContentLoaded', function _ocInitPaperHandoff() {
+  if (!window.OpenClawHandoff || typeof window.OpenClawHandoff.render !== 'function') {
+    console.warn('[paper] OpenClawHandoff helper not loaded; Handoff sub-tab left empty');
+    var mount = document.getElementById('subtab-handoff-mount');
+    if (mount) mount.innerHTML =
+      '<div class="oc-subtab-placeholder">handoff helper not loaded — see browser console</div>';
+    return;
+  }
+  // 嘗試從 localStorage 讀 candidate (Compare flow 寫入)；不存在則 null。
+  // Try to read candidate from localStorage (Compare flow writes); null if
+  // missing — render shows the empty placeholder + dual-actor pending notice.
+  var candidate = null;
+  try {
+    var raw = localStorage.getItem('oc_handoff_candidate');
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      // 過期檢查：candidate 含 expires_at 且 < now → 視為失效（不傳給 render）
+      // Expiry check: invalidate if expires_at < now (treat as missing)
+      if (parsed && parsed.experiment_id) {
+        var exp = parsed.expires_at ? Date.parse(parsed.expires_at) : 0;
+        if (!exp || exp > Date.now()) candidate = parsed;
+      }
+    }
+  } catch (e) {
+    // localStorage 讀取/parse 失敗 → 安靜忽略，render empty
+    // Read/parse failure → silent ignore, render empty
+  }
+  window.OpenClawHandoff.render('subtab-handoff-mount', candidate);
 });
 </script>
 
