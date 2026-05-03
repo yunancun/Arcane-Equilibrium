@@ -1,57 +1,32 @@
 from __future__ import annotations
 
 """REF-20 Paper Replay Lab — 8 routes wired to T1 binary + PG advisory lock.
-
 REF-20 Paper Replay Lab — 8 路由接 T1 binary + PG advisory lock。
 
 MODULE_NOTE (EN):
-    Wave 4 R20-P2b-T2 + T3 merged deliverable (per Wave 2 dispatch v1.1
-    §6 Option C decision: PG advisory lock retrofit replaces in-memory
-    `_ACTIVE_RUNS` dict to make concurrency caps survive the
-    `OPENCLAW_API_WORKERS=4` uvicorn default without state drift).
+    Wave 4 R20-P2b-T2 + T3 merged deliverable. 8 routes (POST /run + /cancel
+    + /manifest/verify mutating; GET /status + /report/{id} + /manifests +
+    /health/signature + /list read-only). PG advisory locks (V045) primary;
+    in-memory ``_ACTIVE_RUNS`` LEGACY FALLBACK when V045 absent / PG unreachable.
+    Hard contracts: session-token auth on all routes; mutating routes need
+    Operator + ``replay:write``; cap exceeded → 409; PG outage → degraded=true
+    (V3 §12 #22); ``replay_runner`` Popen wraps whitelisted env (V3 §6.2);
+    cross-platform clean (CLAUDE.md §七 ★★, no /Users / /home literals).
 
-    8 routes (V3 §6 + workplan §4 Wave 4 R20-P2b-T2):
-      POST /api/v1/replay/run                    — start replay run
-                                                    (spawns replay_runner subprocess)
-      GET  /api/v1/replay/status                 — current run status
-                                                    (per-actor active snapshot)
-      POST /api/v1/replay/cancel                 — cancel running replay
-                                                    (SIGTERM via run_state_manager)
-      GET  /api/v1/replay/report/{experiment_id} — fetch report
-                                                    (reads replay.report_artifacts JSON files)
-      GET  /api/v1/replay/manifests              — list manifests for actor
-      POST /api/v1/replay/manifest/verify        — verify a manifest signature
-                                                    (calls ManifestSigner via P2a-S2)
-      GET  /api/v1/replay/health/signature       — health probe (signing module)
-      GET  /api/v1/replay/list                   — list replay experiments
-
-    Hard contracts (E2 / E3 / MIT review focus):
-      1. ALL routes require session-token auth (401 on missing/wrong token).
-      2. Mutating routes (run/cancel/manifest/verify) require Operator +
-         ``replay:write`` scope (403 on missing).
-      3. Concurrency caps (V3 §5: global=1, per-actor=1) — PRIMARY path:
-         PG advisory locks ``pg_try_advisory_xact_lock(hashtext(...))``
-         persisted in ``replay.run_state`` (V045); FALLBACK: in-memory
-         ``_ACTIVE_RUNS`` dict (V045 absent / PG unreachable).
-      4. Cap exceeded → 409 Conflict (NOT 5xx); fail-closed throughout.
-      5. ALL PG operations go through ``_safe_pg_select`` wrapper
-         (PG outage → degraded=true, NOT 5xx). V3 §12 #22 binding.
-      6. Audit emit logged via INFO (V035 enum extension PM-deferred).
-      7. ``replay_runner`` binary path: ``OPENCLAW_REPLAY_RUNNER_BIN`` env
-         override (default ``$OPENCLAW_BASE_DIR/rust/openclaw_engine/
-         target/release/replay_runner``). Subprocess.Popen wrapped — env
-         whitelisted (V3 §6.2 no-secrets); args ``--manifest-id <UUID>
-         --output-dir <path> --run-id <UUID>``.
-      8. Cross-platform clean per CLAUDE.md §七 ★★ (no /Users / /home
-         literals; resolves via OPENCLAW_BASE_DIR / OPENCLAW_DATA_DIR).
+    Sprint 1 Track C E2 retrofit moved P0-2 / P0-4 / P0-5 security helpers to
+    sibling ``replay/security_guards.py`` for §九 1500 LOC cap compliance.
 
 MODULE_NOTE (中):
-    Wave 4 R20-P2b-T2 + T3 合併交付。8 路由 wired 到 replay_runner Rust
-    binary + V045 PG advisory lock concurrency-cap path（取代 in-memory
-    `_ACTIVE_RUNS` dict）。in-memory dict 保留為 LEGACY FALLBACK，V045 缺
-    或 PG 不可達時走（保 既有 4 auth pytest 不破 + pre-V045-deploy 平滑
-    過渡）。route 的硬約束、subprocess env 白名單、PG-degraded 信封語意
-    與 EN 部分等價，請參考上方逐條。
+    Wave 4 R20-P2b-T2 + T3 合併交付。8 路由（POST /run + /cancel + /manifest/
+    verify 變更；GET /status + /report/{id} + /manifests + /health/signature
+    + /list 只讀）。PG advisory lock（V045）主路徑；in-memory ``_ACTIVE_RUNS``
+    LEGACY FALLBACK，V045 缺/PG 不可達時走。硬約束：session-token 驗於所有
+    route；變更類需 Operator + ``replay:write``；cap 超 → 409；PG outage →
+    degraded=true（V3 §12 #22）；``replay_runner`` Popen 白名單 env（V3 §6.2）；
+    跨平台合規（CLAUDE.md §七 ★★，無 /Users / /home literal）。
+
+    Sprint 1 Track C E2 retrofit 把 P0-2 / P0-4 / P0-5 安全 helper 移至
+    sibling ``replay/security_guards.py``，符合 §九 1500 LOC cap。
 
 SPEC: REF-20 V3 §3 G3/G7 + §6 + §12 #3/#14/#22 binding
 Workplan: docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md §4 Wave 4
@@ -75,14 +50,16 @@ from . import main_legacy as base
 from .auth import require_scope_and_operator
 from .db_pool import get_pg_conn
 
-# Replay helpers — relative-package first (production), absolute fallback
-# (test layout via conftest.py PROJECT_ROOT injection).
-# Replay helper：先 relative-package（生產），fail 時 absolute（測試佈局）。
+# Replay helpers + security guards — relative-package first (production),
+# absolute fallback (test layout via conftest.py PROJECT_ROOT injection).
+# Replay helper + 安全守門：先 relative-package（生產），fail 時 absolute（測試佈局）。
 try:
     from ..replay import route_helpers as _rh  # type: ignore[no-redef]
+    from ..replay import security_guards as _sg  # type: ignore[no-redef]
     from ..replay import manifest_signer as _ms  # type: ignore[no-redef]
 except ImportError:
     from replay import route_helpers as _rh  # type: ignore[no-redef]
+    from replay import security_guards as _sg  # type: ignore[no-redef]
     try:
         from replay import manifest_signer as _ms  # type: ignore[no-redef]
     except ImportError:
@@ -95,8 +72,22 @@ _resolve_artifact_output_dir = _rh.resolve_artifact_output_dir
 _spawn_replay_runner = _rh.spawn_replay_runner
 _try_acquire_pg_advisory_locks = _rh.try_acquire_pg_advisory_locks
 _v045_table_present = _rh.v045_table_present
+_write_manifest_fixture = _rh.write_manifest_fixture
+_verify_replay_runner_pid = _rh.verify_replay_runner_pid
+_is_live_release_profile = _rh.is_live_release_profile
+_artifact_path_within_allowlist = _rh.artifact_path_within_allowlist
+_build_default_manifest_payload = _rh.build_default_manifest_payload
 
 logger = logging.getLogger(__name__)
+
+
+# Track C P0-2 boot guard: live profile + TEST_KEY env both set ⇒ FAIL-CLOSED.
+# E2 retrofit F6: log-only is a fake-fix; raise so uvicorn boot fails before
+# any /replay/manifest/verify request can enter the test_key path.
+# Track C P0-2 boot guard：live profile + TEST_KEY env 雙設 ⇒ FAIL-CLOSED。
+# E2 retrofit F6：log-only 是 fake-fix；raise 讓 uvicorn 啟動失敗，
+# /replay/manifest/verify 請求未到 test_key 路徑即斷。
+_sg.perform_p0_2_boot_guard(_is_live_release_profile)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -266,6 +257,18 @@ def _require_replay_write(actor: base.AuthenticatedActor) -> None:
     require_scope_and_operator(actor, "replay:write")
 
 
+def _actor_can_read_any_replay_report(actor: base.AuthenticatedActor) -> bool:
+    """Track C P0-5a IDOR admin bypass: True iff actor holds ``replay:read:any``.
+    Track C P0-5a IDOR admin 旁通：actor 持 ``replay:read:any`` 即 True。
+
+    Plain operator role alone is NOT enough — explicit-grant scope only.
+    Defense-in-depth on missing actor (already 401'd by FastAPI Depends).
+    """
+    if actor is None:
+        return False
+    return "replay:read:any" in (getattr(actor, "scopes", None) or set())
+
+
 # Note / 註：binary path / output dir / advisory lock / V045 helpers
 # are imported from replay.route_helpers (Wave 4 R20-P2b-T2 split per
 # CLAUDE.md §九 1500 LOC cap). They are aliased above to keep the
@@ -318,97 +321,28 @@ async def _check_run_caps_inmemory(actor_id: str) -> None:
         )
 
 
-def _emit_audit_stub(
-    *,
-    event_type: str,
-    actor_id: str,
-    experiment_id: Optional[str],
-    manifest_hash: Optional[str],
-    decision: str,
-    extra_payload: Optional[dict[str, Any]] = None,
-) -> None:
-    """STUB audit emitter — log only, no DB INSERT.
-    STUB audit 發射器 — 僅 log，不寫 DB。
-
-    Wave 4 R20-P2b-T2: kept as INFO log until V035 enum extension or
-    alert_type discriminator decision (PM-deferred). Subsequent commit
-    will replace with INSERT INTO learning.governance_audit_log.
-    Wave 4 R20-P2b-T2：保 INFO log，等 V035 enum 擴展或 alert_type
-    discriminator 決策（PM 延後）。後續 commit 改為實際 INSERT。
-    """
-    payload = {
-        "event_type": event_type,
-        "actor_id": actor_id,
-        "experiment_id": experiment_id,
-        "manifest_hash": manifest_hash,
-        "decision": decision,
-        "ts_iso": datetime.now(timezone.utc).isoformat(),
-        "extra": extra_payload or {},
-    }
-    logger.info("replay_audit_stub: %s", json.dumps(payload, sort_keys=True))
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Safe PG Helper / 安全 PG 讀取輔助 (V3 §12 #22 acceptance binding)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Thin wrappers delegating to route_helpers / 委派 route_helpers 的薄封裝 ─
+# Canonical impls in replay/route_helpers.py; wrappers preserve module-private
+# names used by tests + endpoints. / 規範實作在 replay/route_helpers.py。
+_emit_audit_stub = _rh.emit_replay_audit_stub
+_replay_response = _rh.replay_response_envelope
 
 
 def _safe_pg_select(
-    sql: str,
-    params: tuple[Any, ...] | list[Any],
+    sql: str, params: tuple[Any, ...] | list[Any],
 ) -> Tuple[list[tuple[Any, ...]], Optional[str]]:
-    """Run SELECT with statement_timeout=2s + PG-degraded fail-closed envelope.
-    執行 SELECT，套 statement_timeout=2s + PG 中斷 fail-closed 信封。
-
-    Returns (rows, err_or_none); PG unreachable → ``([], "pg_unavailable")``;
-    query exception → ``([], f"pg_error:{type(exc).__name__}")``. Caller
-    surfaces err via ``degraded`` flag (V3 §12 #22 binding).
+    """SELECT + statement_timeout + PG-degraded fail-closed envelope.
+    SELECT + statement_timeout + PG 中斷 fail-closed 信封。
     """
-    rows: list[tuple[Any, ...]] = []
-    with get_pg_conn() as conn:
-        if conn is None:
-            return rows, "pg_unavailable"
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SET LOCAL statement_timeout = %s",
-                (_STATEMENT_TIMEOUT_MS,),
-            )
-            cur.execute(sql, tuple(params))
-            rows = list(cur.fetchall())
-            return rows, None
-        except Exception as exc:
-            logger.warning("replay_routes safe_pg_select failed: %s", exc)
-            return rows, f"pg_error:{type(exc).__name__}"
+    return _rh.safe_pg_select(get_pg_conn, sql, params, _STATEMENT_TIMEOUT_MS)
 
 
 async def _async_safe_pg_select(
-    sql: str,
-    params: tuple[Any, ...] | list[Any],
+    sql: str, params: tuple[Any, ...] | list[Any],
 ) -> Tuple[list[tuple[Any, ...]], Optional[str]]:
     """Async wrapper around ``_safe_pg_select`` (H-4 pattern).
-    ``_safe_pg_select`` 的 async wrapper（H-4 pattern）。
-    """
+    ``_safe_pg_select`` async 包裝（H-4 pattern）。"""
     return await asyncio.to_thread(_safe_pg_select, sql, params)
-
-
-def _replay_response(
-    data: Any,
-    *,
-    degraded: bool = False,
-    reason: Optional[str] = None,
-) -> dict[str, Any]:
-    """Standard envelope mirroring ``agents_routes`` shape.
-    標準回應信封，鏡像 ``agents_routes`` 形狀。
-    """
-    return {
-        "ok": True,
-        "data": data,
-        "degraded": degraded,
-        "reason": reason,
-        "is_simulated": False,
-        "data_category": "replay_lab",
-    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -538,13 +472,77 @@ async def post_replay_run(
                     ),
                 )
 
-                # 4) Spawn subprocess (still holding xact lock).
-                # 4) Spawn 子程序（仍持 xact lock）。
+                # 4) Resolve output_dir + write manifest fixture (with
+                # embedded ``run_id`` so Rust runner self-verifies basename
+                # match — REF-20 Sprint 1 Track A PA push back #2 invariant).
+                # Manifest fixture has minimum 6 fields the Rust
+                # ``ReplayManifest`` struct reads (Wave 4 T1 contract):
+                # experiment_id / data_tier / fixture_uri / signature /
+                # manifest_hash / signature_key_ref. Track A uses *placeholder*
+                # values for signature/hash (Wave 4 sibling key.hex archive
+                # path will warn-skip verification per current
+                # ``load_and_verify_manifest`` fall-through; Wave 6 V042 SQL
+                # archive integration replaces with full HMAC verify).
+                #
+                # 4) 解析 output_dir + 寫 manifest fixture（embed ``run_id``
+                # 使 Rust runner 自驗 basename 一致 — REF-20 Sprint 1 Track A
+                # PA push back #2 不變量）。manifest fixture 含 6 個 Rust
+                # ``ReplayManifest`` struct 讀的最小欄位（Wave 4 T1 契約）：
+                # experiment_id / data_tier / fixture_uri / signature /
+                # manifest_hash / signature_key_ref。Track A 用 *placeholder*
+                # 值給 signature/hash（Wave 4 sibling key.hex archive 路徑
+                # warn-skip verification per 當前 ``load_and_verify_manifest``
+                # fall-through；Wave 6 V042 SQL archive integration 換實 HMAC verify）。
                 output_dir = _resolve_artifact_output_dir(run_id_local)
+                try:
+                    manifest_fixture_path = _write_manifest_fixture(
+                        run_id=run_id_local,
+                        manifest_data=_build_default_manifest_payload(
+                            experiment_id=body.experiment_id,
+                            output_dir=output_dir,
+                        ),
+                        output_dir=output_dir,
+                    )
+                except (OSError, ValueError) as exc:
+                    cur.execute(
+                        """
+                        UPDATE replay.run_state
+                           SET status = 'failed',
+                               exit_code = -1,
+                               completed_at = NOW(),
+                               cancel_reason = %s
+                         WHERE run_id = %s::uuid;
+                        """,
+                        (
+                            f"manifest_fixture_write_failed:{type(exc).__name__}",
+                            run_id_local,
+                        ),
+                    )
+                    conn.commit()
+                    return (
+                        run_id_local,
+                        None,
+                        f"manifest_fixture_write_failed:{type(exc).__name__}",
+                        output_dir,
+                    )
+
+                # 5) Spawn subprocess (still holding xact lock) + poll-then-INSERT.
+                # spawn_replay_runner waits ``poll_grace_seconds`` (default 1.5s)
+                # and polls ``proc.poll()`` to detect early death (CLI schema
+                # mismatch / manifest fail-closed cause non-zero exit; previous
+                # Python flow trusted Popen alone and never noticed — root
+                # cause #1+#2 of REF-20 Sprint 1 Track A).
+                #
+                # 5) Spawn 子程序（仍持 xact lock）+ poll-then-INSERT。
+                # spawn_replay_runner 等 ``poll_grace_seconds``（預設 1.5s）
+                # 後 ``proc.poll()`` 偵測早死亡（CLI schema mismatch /
+                # manifest fail-closed 致非 0 結束；前版 Python 只信 Popen，
+                # 完全沒發現 — REF-20 Sprint 1 Track A 第一+二根因）。
                 pid, spawn_err = _spawn_replay_runner(
                     run_id=run_id_local,
                     manifest_id=str(manifest_uuid),
                     output_dir=output_dir,
+                    manifest_fixture_path=manifest_fixture_path,
                 )
 
                 if pid is None:
@@ -564,8 +562,11 @@ async def post_replay_run(
                     conn.commit()
                     return run_id_local, None, spawn_err, output_dir
 
-                # 5) UPDATE pid + status='running'.
-                # 5) UPDATE pid + status='running'。
+                # 6) UPDATE pid + status='running' (only after poll-alive
+                # confirmed by spawn_replay_runner; pid is None already
+                # caught the dead-runner case above).
+                # 6) UPDATE pid + status='running'（僅 spawn_replay_runner
+                # poll-alive 確認後；pid is None 已於上面捕獲 dead-runner case）。
                 cur.execute(
                     """
                     UPDATE replay.run_state
@@ -646,14 +647,43 @@ async def post_replay_run(
             },
         )
 
-    if pg_err and pg_err.startswith(("spawn_error:", "mkdir_error:", "pg_error:")):
+    if pg_err and pg_err.startswith((
+        "spawn_error:",
+        "spawn_died_early:",
+        "mkdir_error:",
+        "pg_error:",
+        "manifest_fixture_write_failed:",
+    )):
         # Hard failure on PG path; surface 503 so operator can inspect logs.
-        # PG 路徑硬失敗；503 讓 operator 查 log。
+        # ``spawn_died_early`` means binary spawned but exited non-zero within
+        # the 1.5s poll grace (REF-20 Sprint 1 Track A — typically CLI schema
+        # mismatch / manifest fail-closed).
+        #
+        # PG 路徑硬失敗；503 讓 operator 查 log。``spawn_died_early`` =
+        # binary 已 spawn 但 1.5s poll grace 內非 0 結束（REF-20 Sprint 1
+        # Track A — CLI schema mismatch / manifest fail-closed 典型表現）。
         raise HTTPException(
             status_code=503,
             detail={
                 "reason_codes": ["replay_runner_spawn_failed"],
                 "message": f"replay_runner failed to spawn: {pg_err}",
+            },
+        )
+
+    if pg_err == "manifest_fixture_not_found":
+        # Caller-supplied manifest fixture path missing on disk before spawn.
+        # This is fail-closed defense-in-depth on top of route_helpers writing
+        # the fixture (race / FS-level deletion theoretical edge).
+        # caller 端 manifest fixture 路徑 spawn 前不在 disk。對 route_helpers
+        # 寫 fixture 路徑的 fail-closed 縱深防禦（race / FS 層刪除理論邊界）。
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "reason_codes": ["replay_manifest_fixture_missing"],
+                "message": (
+                    "manifest fixture not found at expected path; "
+                    "filesystem race or pre-spawn deletion suspected"
+                ),
             },
         )
 
@@ -807,98 +837,31 @@ async def post_replay_cancel(
     _require_replay_write(actor)
     actor_id = str(actor.actor_id)
 
-    # Try PG path.
-    # 試 PG 路徑。
-    def _do_pg_cancel() -> Tuple[Optional[dict[str, Any]], Optional[str]]:
-        """Sync helper for cancel transaction.
-        cancel 交易的同步 helper。
-
-        Returns / 回傳:
-            (cancelled_dict, err_or_none)
-        """
-        with get_pg_conn() as conn:
-            if conn is None:
-                return None, "pg_unavailable"
-            try:
-                cur = conn.cursor()
-                cur.execute("SET LOCAL statement_timeout = %s", (_STATEMENT_TIMEOUT_MS,))
-                if not _v045_table_present(cur):
-                    return None, "v045_absent"
-
-                cur.execute(
-                    """
-                    SELECT run_id::text, manifest_id::text,
-                           subprocess_pid, status
-                      FROM replay.run_state
-                     WHERE actor_id = %s
-                       AND status IN ('starting','running')
-                     ORDER BY started_at DESC
-                     LIMIT 1;
-                    """,
-                    (actor_id,),
-                )
-                row = cur.fetchone()
-                if row is None:
-                    return None, "no_active_run"
-                run_id, manifest_id_uuid, pid, status = row
-
-                # Send SIGTERM if pid known.
-                # 若 pid 已知則送 SIGTERM。
-                if pid is not None and pid > 0:
-                    try:
-                        import signal
-                        os.kill(pid, signal.SIGTERM)
-                        logger.info(
-                            "cancel_run: SIGTERM sent to pid=%d run_id=%s",
-                            pid, run_id,
-                        )
-                    except ProcessLookupError:
-                        logger.info(
-                            "cancel_run: pid=%d already exited; "
-                            "flipping DB only", pid,
-                        )
-                    except (PermissionError, OSError) as exc:
-                        logger.warning(
-                            "cancel_run: os.kill(pid=%d) failed: %s; "
-                            "flipping DB only", pid, exc,
-                        )
-
-                # Flip DB row.
-                # 翻 DB row。
-                cur.execute(
-                    """
-                    UPDATE replay.run_state
-                       SET status = 'cancelled',
-                           exit_code = -1,
-                           completed_at = NOW(),
-                           cancel_reason = %s
-                     WHERE run_id = %s::uuid
-                       AND status IN ('starting','running')
-                    RETURNING run_id::text;
-                    """,
-                    (body.reason, run_id),
-                )
-                flipped = cur.fetchone()
-                conn.commit()
-                if flipped is None:
-                    return None, "race_already_final"
-                return {
-                    "run_id": run_id,
-                    "manifest_id": manifest_id_uuid,
-                    "subprocess_pid": pid,
-                    "former_status": status,
-                }, None
-            except Exception as exc:
-                logger.warning("replay_routes /cancel PG path exception: %s", exc)
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                return None, f"pg_error:{type(exc).__name__}"
-
-    cancelled_dict, pg_err = await asyncio.to_thread(_do_pg_cancel)
+    # Track C E2 retrofit: PG path body in security_guards (§九 1500 LOC cap);
+    # caller sends SIGTERM after success (xact-external for hermetic test).
+    # Track C E2 retrofit：PG path body 於 security_guards（§九 1500 LOC cap）；
+    # caller 成功後送 SIGTERM（xact 外，hermetic test 友好）。
+    cancelled_dict, pg_err = await asyncio.to_thread(
+        _sg.execute_replay_cancel_pg_path,
+        actor_id=actor_id, cancel_reason=body.reason,
+        statement_timeout_ms=_STATEMENT_TIMEOUT_MS,
+        get_pg_conn_fn=get_pg_conn, v045_table_present_fn=_v045_table_present,
+        verify_pid_fn=_verify_replay_runner_pid, log_fn=logger.warning,
+    )
 
     if cancelled_dict is not None and pg_err is None:
+        _pid = cancelled_dict.get("subprocess_pid")
+        if _pid is not None and _pid > 0:
+            try:
+                import signal
+                os.kill(_pid, signal.SIGTERM)
+                logger.info("cancel_run: SIGTERM pid=%d run=%s (verified)",
+                            _pid, cancelled_dict["run_id"])
+            except ProcessLookupError:
+                logger.info("cancel_run: pid=%d already exited; DB only", _pid)
+            except (PermissionError, OSError) as exc:
+                logger.warning("cancel_run: os.kill(pid=%d) failed: %s; DB only", _pid, exc)
+
         _emit_audit_stub(
             event_type="replay_run_cancelled",
             actor_id=actor_id,
@@ -926,6 +889,19 @@ async def post_replay_cancel(
                 "reason_codes": ["replay_no_active_run"],
                 "message": f"actor '{actor_id}' has no active replay run",
             },
+        )
+
+    if pg_err and pg_err.startswith("pid_identity_mismatch:"):
+        # Track C P0-4: pid identity check rejected SIGTERM. Audit + 409.
+        _emit_audit_stub(
+            event_type="replay_pid_identity_mismatch",
+            actor_id=actor_id, experiment_id=body.experiment_id, manifest_hash=None,
+            decision="blocked_by_pid_identity_check", extra_payload={"pg_err": pg_err},
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={"reason_codes": ["replay_pid_identity_mismatch"],
+                    "message": f"PID identity check failed ({pg_err}); SIGTERM refused"},
         )
 
     # Fallback in-memory.
@@ -1016,22 +992,17 @@ async def get_replay_report(
     # 以保跨 route 一致）。
     manifest_uuid_namespace = uuid.UUID("00000000-0000-0000-0000-000020260503")
     manifest_uuid = str(uuid.uuid5(manifest_uuid_namespace, experiment_id))
+    actor_id = str(actor.actor_id)
 
-    rows, err = await _async_safe_pg_select(
-        """
-        SELECT a.artifact_id::text, a.artifact_type, a.artifact_path,
-               a.byte_size, a.is_mock,
-               EXTRACT(EPOCH FROM a.created_at)*1000 AS created_at_ms,
-               s.run_id::text, s.status, s.exit_code,
-               EXTRACT(EPOCH FROM s.started_at)*1000 AS started_at_ms,
-               EXTRACT(EPOCH FROM s.completed_at)*1000 AS completed_at_ms
-          FROM replay.report_artifacts a
-          JOIN replay.run_state s ON a.run_id = s.run_id
-         WHERE s.manifest_id = %s::uuid
-         ORDER BY a.created_at;
-        """,
-        (manifest_uuid,),
+    # Track C P0-5a IDOR fix (E2 retrofit): default = filter actor_id; admin
+    # scope replay:read:any bypass for cross-actor incident investigation.
+    # Track C P0-5a（E2 retrofit）：預設 filter actor_id；admin scope
+    # replay:read:any 旁通。
+    _idor_admin_bypass = _actor_can_read_any_replay_report(actor)
+    sql, params = _sg.build_report_idor_sql(
+        manifest_uuid, actor_id, _idor_admin_bypass,
     )
+    rows, err = await _async_safe_pg_select(sql, params)
 
     if err is not None:
         # PG outage / V046 absent → 200 + degraded (V3 §12 #22 mirror).
@@ -1048,29 +1019,47 @@ async def get_replay_report(
         )
 
     artifacts = []
+    _traversal_blocked_paths: list[str] = []
     for row in rows:
         artifact = {
-            "artifact_id": row[0],
-            "artifact_type": row[1],
-            "artifact_path": row[2],
-            "byte_size": row[3],
-            "is_mock": row[4],
+            "artifact_id": row[0], "artifact_type": row[1], "artifact_path": row[2],
+            "byte_size": row[3], "is_mock": row[4],
             "created_at_ms": int(row[5]) if row[5] is not None else None,
         }
-        # Optionally read JSON payload from filesystem if file exists.
-        # We bound the size to 256 KB to avoid OOM on large artifacts.
-        # 可選：file 存在時讀 JSON payload。bound 256 KB 避免 OOM。
+        # Track C P0-5b (E2 retrofit): allowlist guard via security_guards.
+        # Track C P0-5b（E2 retrofit）：allowlist 守門透過 security_guards。
         try:
             artifact_path = Path(row[2])
-            if artifact_path.is_file() and (row[3] or 0) <= 256 * 1024:
+            within, traversal_err = _sg.check_artifact_path_within_allowlist(
+                artifact_path, _artifact_path_within_allowlist,
+            )
+            if not within:
+                artifact["payload_read_error"] = f"path_traversal_blocked:{traversal_err}"
+                _traversal_blocked_paths.append(str(row[2])[:120])
+            elif artifact_path.is_file() and (row[3] or 0) <= 256 * 1024:
                 with open(artifact_path, "rb") as f:
                     payload_bytes = f.read(256 * 1024)
                 artifact["payload"] = json.loads(payload_bytes.decode("utf-8"))
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            artifact["payload_read_error"] = (
-                f"{type(exc).__name__}: {str(exc)[:80]}"
-            )
+            artifact["payload_read_error"] = f"{type(exc).__name__}: {str(exc)[:80]}"
         artifacts.append(artifact)
+
+    # Track C P0-5b + Track C P0-5a admin bypass audit emit.
+    if _traversal_blocked_paths:
+        _emit_audit_stub(
+            event_type="replay_artifact_path_traversal_blocked",
+            actor_id=actor_id, experiment_id=experiment_id, manifest_hash=None,
+            decision="blocked_path_traversal",
+            extra_payload={"blocked_count": len(_traversal_blocked_paths),
+                           "samples": _traversal_blocked_paths[:3]},
+        )
+    if _idor_admin_bypass:
+        _emit_audit_stub(
+            event_type="replay_idor_admin_bypass",
+            actor_id=actor_id, experiment_id=experiment_id, manifest_hash=None,
+            decision="admin_bypass_used",
+            extra_payload={"scope": "replay:read:any", "rows_returned": len(rows)},
+        )
 
     # Run-level summary from JOIN'ed columns (rows[0] has run-level fields).
     # JOIN 後的 run-level summary（rows[0] 含 run-level 欄位）。
@@ -1252,11 +1241,18 @@ async def post_manifest_verify(
     KeyStatus = _ms.KeyStatus
     ManifestSigner = _ms.ManifestSigner
 
-    # Test-only path: if OPENCLAW_REPLAY_VERIFY_TEST_KEY env set, use it
-    # to seed an InMemoryKeyArchive (for hermetic integration tests).
-    # 測試路徑：OPENCLAW_REPLAY_VERIFY_TEST_KEY env 設時用以 seed
-    # InMemoryKeyArchive（hermetic integration test 用）。
-    test_key_hex = os.environ.get("OPENCLAW_REPLAY_VERIFY_TEST_KEY", "")
+    # Track C P0-2 (E2 retrofit): per-route gate via security_guards. Boot
+    # guard already failed uvicorn startup if both envs are set in live;
+    # this gate is defense-in-depth for late-injected env (post-boot).
+    # Track C P0-2（E2 retrofit）：透過 security_guards 的 per-route 守門。
+    # boot guard 已使 uvicorn 在雙設時啟動失敗；本守門為 post-boot 注入
+    # 的縱深防禦。
+    test_key_hex = _sg.resolve_manifest_verify_test_key(
+        actor_id=actor_id,
+        declared_hash_hex=body.declared_hash_hex,
+        is_live_release_profile_fn=_is_live_release_profile,
+        audit_emit_fn=_emit_audit_stub,
+    )
     if not test_key_hex:
         # Production path: V042 SQL archive lookup not yet wired.
         # 生產路徑：V042 SQL archive 尚未接。

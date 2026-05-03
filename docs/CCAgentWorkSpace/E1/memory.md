@@ -69,6 +69,20 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-26 | Tier 9 Track 3 G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE: audit + PUSH-BACK to PM (2 H1/H3 violations confirmed; strategist_agent.py 1200/1200 hard cap blocks 11 LOC facade addition; 3 options provided) | direct message per system reminder; report inline |
 | 2026-04-26 | F7-RECOVERY: 8 healthcheck silent-regression sentinels [22-29] + 38 unit tests（從 stash@{2} 恢復、test 檔重建、isolated worktree e1-f7-healthchecks-isolated）| `.claude_reports/20260426_234933_e1_f7_recovery_healthchecks.md` |
 | 2026-04-29 | endpoint alias `engine_mode_fills_summary` for legacy `shadow_vs_live_summary`（shared handler / docstring 雙語 / 2 new pytest）| `.claude_reports/20260429_192523_e1_endpoint_alias_engine_mode_fills.md` |
+| 2026-05-03 | REF-20 Sprint 1 Track C — Python /replay/* 3 critical security fixes (P0-2 env var bypass / P0-4 SIGTERM arbitrary pid / P0-5a IDOR cross-actor / P0-5b path traversal) + V053 enum extension + 7 new pytest | `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_sprint1_track_c_python_security.md` |
+
+### 2026-05-03 REF-20 Sprint 1 Track C 教訓
+
+- **三 P0 critical 同 file 同 commit 是正解**：P0-2 (L1255-1284 manifest/verify) / P0-4 (L843-864 cancel) / P0-5 (L993-1095 report) 三個改點區段不重疊，1 個 E1 連改是最低 review 開銷。如果分 3 個 PR 反而要在 E2/E4 多輪 review；同 commit 一次拿下安全洞 + 1 個 V053 SQL + 7 pytest。
+- **`is_relative_to(strict=False)` 是 Python 3.9+ feature；Path.resolve(strict=False) 對 file 不存在 graceful**：`/etc/passwd` 真存在 → resolve 拿 absolute 路徑 → `is_relative_to('/Users/ncyu/.openclaw_runtime/replay_artifacts')` False → 拒讀。對 file 不存在的 path（如 attacker INSERT 一個假路徑），`resolve(strict=False)` 仍回 canonical absolute path，**不拋 FileNotFoundError**，這是 Python 3.9+ 行為（早版會拋）。我用 `resolve(strict=False)` 保證行為跨版本一致。
+- **psutil cmdline cert + PID reuse safety**：`psutil.Process(pid).cmdline()` 回**當前** process 的 argv，不是「原本擁有 pid 的 process」的 argv。若 V045 row 寫的 pid=12345 在 OS 已被 systemd 復用，psutil cmdline 回 `["/sbin/init", "splash"]` → `'replay_runner' not in ' '.join(cmdline)` → False → 拒送 SIGTERM。這是 PID-reuse 安全的關鍵 — 不需要顯式對比「原 process 是否還活」，cmdline 自然就是「現在這個 pid 是誰」。
+- **release-profile gate 比 single-route check 更穩**：P0-2 修補 = `is_live_release_profile()` 在 manifest/verify route 內檢查 + module-init boot guard 在 import 時檢查。前者是 fail-closed 守門；後者是「double-check」幫 operator 在 startup log grep 到「live + test_key 同設」的危險組合 ERROR。**運維 + 代碼雙重信號**比單一信號更難 silently bypass。
+- **IDOR + admin bypass via scope 對齊既有 RBAC pattern**：原 code `_require_replay_write` 用 `require_scope_and_operator(actor, "replay:write")` pattern。我加 `_actor_can_read_any_replay_report(actor)` 用 `"replay:read:any" in actor.scopes` — 同 idiom（scope-based admin check）+ 不引入新概念（無 role 檢查；純 scope 是 explicit-grant only，比 role 更精準）。**新 scope 名命名前綴 `replay:` 與既有 `replay:write` 對齊** — 一致性 ≠ 過度抽象。
+- **monkeypatch psutil 的 patch.dict("sys.modules") trick**：`verify_replay_runner_pid` 內部 `import psutil`（lazy import）→ test 端 `with patch.dict("sys.modules", {"psutil": fake_psutil})` 即可注入 fake_psutil。**fail-closed**：fake_psutil.NoSuchProcess / AccessDenied 必須是真 Exception class（用 `class _NoSuchProcess(Exception)` 創）— 不能用 MagicMock，否則 `except psutil.NoSuchProcess:` 命中失敗。
+- **dispatch 的 1500 LOC hard cap push back**：dispatch 預警「replay_routes.py 1498 LOC，新增任何行必須 extract」，我添加 5 安全洞修補 + 5 audit emit + 助手 imports = 必然超 1500。我已 extract `_safe_pg_select` / `_async_safe_pg_select` / `_replay_response` / `_emit_audit_stub` 4 個 helper 到 route_helpers.py（本來是 inline），但仍剩 1603 LOC（103 over cap）— 結構性 over，不是「添加 cosmetic comment 過多」可解。Dispatch §"Push back 通道" 第 1 點明文允許這個 case；我在 report 標 governance exception accept 請 PM 簽。**結構性 LOC 超 cap 必須 push back，不偷偷藏 logic 進大函數**。
+- **TestClient(raise_server_exceptions=False)** 是 Track C P0-2 dev profile 反向測試的關鍵：`InMemoryKeyArchive.upsert_key` API 已遷移（pre-existing breakage 不在 Track C 範圍），dev path 進入後 500 — 我用 `raise_server_exceptions=False` 讓 500 surface 為 status code 而非 test exception，再驗 reason_codes ≠ `replay_verify_archive_not_wired` 證明 P0-2 gate 在 dev 沒誤觸發。
+- **V053 enum extension 跨 V044 layered**：V044 已把 V035 的 5 值擴為 6 值（加 `replay_handoff_request`）；V053 在此基礎上再加 8 值（5 Track C + 3 pre-existing replay + 1 Track A placeholder）= 14 值 canonical list。同個 DROP+ADD pattern；idempotency 透過 8 個 NEW 值的 `position()` 探測。實際 Mac PG 跑兩次驗 = 1st run 加 NOTICE + 2nd run skip NOTICE，0 RAISE。INSERT 5 NEW event_type PASS + 未列 'attacker_random_event' 觸 CHECK constraint REJECT。
+- **V053 LOC 211（含雙語 MODULE_NOTE + Guard A + DROP+ADD + COMMENT）**：模式 + 註解都 mirror V044 既有的 V035 enum extension block；**Guard A 簡化** — 只驗 V035 base table 存在（不驗欄位，因本 migration 不動 schema 只動 CHECK constraint）；不需 Guard B（無 column type ALTER）；不需 Guard C（無 hot-path index）。比 V044 的完整 Guard A/C 更輕量但仍合 §七 Guard 強制要求（Guard A enforced，B/C N/A 明文）。
 
 ### 2026-04-29 endpoint alias engine_mode_fills_summary 教訓
 
@@ -3765,3 +3779,296 @@ PM dispatch — Wave 9 全 4 task sequential IMPL：
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave9_14d_gradient_observation.md`
 - `srv/.claude_reports/20260503_xxxxxx_ref20_wave9_14d_gradient_observation.md`
 
+
+
+---
+
+## 2026-05-03 — REF-20 Sprint 1 Track A (spawn argv schema fix; E3-P0-3 close)
+
+### Task
+PA Sprint 1 partition Track A — Python spawn argv 對齊 Rust cli.rs (`--manifest <PATH> --output-dir <PATH>`)；解 Wave 1-9 IMPL 從未跑過根因（CliError::UnknownArg silent fail，Python 沒 poll 就信 Popen）。
+
+### 實作要點
+
+**Python `route_helpers.py`** (315 → 810 LOC)：
+- `spawn_replay_runner` 簽名加 `manifest_fixture_path: Path` + `poll_grace_seconds: float`；argv 從 `--manifest-id/--run-id` 改 `--manifest <PATH> --output-dir <PATH>`；spawn 後 `time.sleep(poll) + proc.poll()` 偵測早死 → return (None, "spawn_died_early:exit=N")
+- NEW `write_manifest_fixture(run_id, manifest_data, output_dir)` — 寫 manifest JSON + embed run_id（PA push back #2 不變量）+ deep-copy caller dict (JSON round-trip; sort_keys + indent=2)
+- NEW `verify_replay_runner_pid(pid)` — psutil cmdline 識別（Track C 共用 helper per PA §6）；fail-closed enum: pid_not_found / pid_no_cmdline / pid_identity_mismatch / pid_access_denied / psutil_unavailable / psutil_error:<ExcName>
+- NEW `build_default_manifest_payload(experiment_id, output_dir)` — 6 minimum field payload（experiment_id/data_tier=S3/fixture_uri/signature/manifest_hash/signature_key_ref；無 run_id 由 write_manifest_fixture 加）+ OPENCLAW_REPLAY_FIXTURE_URI env override
+
+**Python `replay_routes.py`** (1498 → 1673 LOC，含 Track C 同檔)：
+- `_do_pg_path` 流程：INSERT V045 'starting' → write manifest fixture → spawn-with-poll → UPDATE 'running'（alive）or 'failed'（早死/失敗）
+- 新 503 reason `replay_manifest_fixture_missing` + spawn_died_early 加進 spawn fail-closed chain
+
+**Rust `bin/replay_runner.rs`** (1013 LOC，含 Track B 同檔)：
+- ReplayManifest struct 加 `#[serde(default)] pub run_id: Option<String>`
+- main() Step 2b PA push back #2 self-verify：`manifest.run_id == args.output_dir.basename()` invariant；無 run_id 時 skip（向後相容舊 fixture）
+- cli.rs **不改**（已對齊 spec POSIX --manifest/--output-dir/--baseline-id）
+
+### 設計決策
+
+1. **argv 改 vs Rust 加 alias 選 argv 改**：Rust cli.rs 已 11 unit test PASS + workplan §4 forbidden-list 凍結；改 Rust 會破 boundary
+2. **run_id 從 argv 移到 manifest JSON**：Rust 已用 serde 解析整 manifest，加 Optional 欄位 0 破壞性；Rust 端可 self-verify (PA push back #2)
+3. **spawn-then-poll 1.5s grace**：Linux release binary cold cache + CLI parse + manifest fail-closed 觀察上限；可由 caller `poll_grace_seconds=0` 在 unit test 跳過
+4. **manifest signature/hash placeholder**：Wave 4 路徑 sibling key.hex 缺 → fall-through warn-skip（自洽）；Track B 改 hard error 後本 placeholder 會 fail-closed，需 Wave 6 V042 SQL archive 整合升級
+5. **psutil import inline**：Track A scope 不擴 requirements.txt（psutil 已含）；Mac dev test 用 monkeypatch sys.modules
+
+### 不確定 / push back
+
+1. **HIGH** replay_routes.py 1673 > 1500 hard cap（Track A + Track C 並行 sub-agent 同檔合併；pre-Track A 1498 不滿足 baseline exception clause）— PM 決策 Option A (E5 抽 helpers) / B (governance exception + raise cap)
+2. signature/manifest_hash placeholder 與 Track B fail-closed 互斥 — PM 決策 3a/3b/3c
+3. V045 manifest_id 既有 row dangling vs Track D V052 FK redirect — PA push back #1 已標
+4. Mac 跑不了真 PG → uvicorn-to-spawn 真 smoke 需 Linux E4
+5. psutil 跨平台 OK；requirements.txt 已含
+
+### Pytest
+
+- NEW `replay/tests/test_track_a_spawn_argv.py` 17 case PASS：write_manifest_fixture × 5 / build_default_manifest_payload × 2 / spawn_replay_runner argv+alive+dead+missing fixture+missing bin × 5 / verify_replay_runner_pid × 4 / module export × 1
+- 既有 77 replay test PASS（regression 0 break）：t2_subprocess 9 + t2_pg_lock 5 + auth 4 + safe_query 5 + manifest_signer xlang 13 + quota 5 + calibration 11 + embargo 8
+
+### Cargo test
+
+- `cargo test --features replay_isolated --tests`: 全 PASS（含 6 replay_runner_e2e proof + replay_profile/forbidden/mac/manifest_signer/migrations/cost_edge_advisor 等）
+
+### Governance grep
+
+- 0 hardcoded path
+- 0 hard-boundary mutation (max_retries/live_execution_allowed/execution_authority/system_mode/OPENCLAW_ALLOW_MAINNET/authorization.json)
+- 0 trading.* mutation
+- 雙語 MODULE_NOTE EN/中 全配
+
+### PM commit message draft
+
+```
+fix(replay): REF-20 Sprint 1 Track A — spawn argv schema fix (E3-P0-3 close)
+
+argv: --manifest-id/--run-id → --manifest <PATH> --output-dir <PATH>;
+embedded run_id self-verify in Rust runner; spawn-then-poll 1.5s catches
+early death (CliError::UnknownArg / manifest fail-closed). Wave 1-9 e2e
+replay never actually executed pre-Track A; this commit unblocks.
+
+Pytest 17/17 PASS + 77 sibling. cargo --features replay_isolated all PASS.
+PM decision pending: replay_routes.py 1673 > 1500 hard cap (Track A + C
+parallel sub-agent same-file additions; Option A E5 refactor / Option B
+governance exception).
+```
+
+### 後續 wiring（不在本 task 範圍）
+
+- E2 review: 4 Track 合併 review；focus 雙語注釋 + manifest fixture / spawn poll-then-INSERT 時序 + run_id self-verify Rust assertion
+- E4 regression: Linux trade-core run pytest 既有 + Track A 17 case + 跨 Track 整合 smoke + 真 uvicorn → V045 → replay_runner spawn alive smoke
+- Sprint 1 Track B/C/D land 後 4 Track 同 commit + ssh trade-core git pull --ff-only
+- Wave 6 V042 SQL archive integration 把 placeholder signature/hash 升級為 ManifestSigner.sign 實簽
+
+### 報告路徑
+
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_sprint1_track_a_spawn_argv.md`
+- `srv/.claude_reports/20260503_142758_ref20_sprint1_track_a_spawn_argv.md`
+
+---
+
+## 2026-05-03 — REF-20 Sprint 1 Track B（Rust manifest signature verify path 修補）
+
+### 任務
+
+PA dispatch `2026-05-03--ref20_sprint1_partition_design.md` §2 Track B + §5 Push Back #3：修補
+`replay_runner.rs::load_and_verify_manifest` 的 self-sign tautology + key.hex 缺 fail-open（E3-P0-1
+CRITICAL 安全洞）。
+
+### 病灶
+
+```rust
+// PRE-SPRINT-1 fail-open tautology:
+let signature_hex = signer.sign(canonical_body);       // 自簽
+signer.verify(canonical_body, &body_hash, &signature_hex, ...)  // 對自簽結果驗
+
+// L404-411: key.hex 缺 → eprintln + Ok（fail-open）
+```
+
+attacker 拿到 signing key → 造任意 manifest 過 verify；攻擊面同等於拿不到 key 但能控制 manifest dir
+（無 sibling key.hex 即過）。
+
+### 修補核心邏輯
+
+1. **canonical body 路徑**：strip envelope 三欄位 (`signature` / `manifest_hash` / `signature_key_ref`)
+   + sorted-keys serde_json::to_vec → byte-equal Python `json.dumps(sort_keys=True, separators=(',', ':'),
+   ensure_ascii=False).encode('utf-8')`。
+
+   驗證：Mac dev (aarch64-apple-darwin) `serde_json::to_vec(&Value)` byte-equal Python sorted compact
+   （新 unit test `canonical_body_byte_equal_to_python_sibling` 鎖定）。
+
+2. **verify 路徑反轉**：用 `manifest.signature` + `manifest.manifest_hash` 為 expected 輸入（disk-supplied,
+   非重簽結果）。
+
+3. **完整性 sanity gate**：在 `signer.verify` 之前先驗
+   `compute_body_hash(canonical_body) == manifest.manifest_hash`，否則直接返 `manifest_hash_mismatch`
+   （hash gate 抓到 body post-sign tampering）。
+
+4. **key.hex 缺 hard error**：fail-open 改 fail-closed；warning level 不夠嚴格（PA Push Back #3 + V042
+   Wave 6+ 落地前 operator runbook 契約）。
+
+### 修改範圍
+
+- `srv/rust/openclaw_engine/src/replay/manifest_signer.rs`（+196 LOC：762→958）
+  - `pub const ENVELOPE_KEYS_FOR_SIGNING: [&str; 3]`
+  - `pub fn canonical_body_for_signing(disk_bytes: &[u8]) -> Result<Vec<u8>, serde_json::Error>`
+  - 5 new unit test（happy / idempotent on stripped / reject non-object / double apply / envelope const sanity）
+
+- `srv/rust/openclaw_engine/src/bin/replay_runner.rs`（+542 LOC：471→1013）
+  - `ReplayManifest` struct 加 `pub run_id: Option<String>`（PA Push Back #2 — Track A bridge）
+  - `signature` + `manifest_hash` + `signature_key_ref` 升為 `pub`，移除 `#[allow(dead_code)]`
+  - `load_and_verify_manifest` rewrite（key.hex 缺 hard error / canonical body 用 helper / 完整性 sanity
+    gate / verify 用 disk-supplied sig+hash）
+  - `#[cfg(test)] mod tests` 加 6 test（happy + 4 fail-mode + xlang byte-equal sanity）
+
+- `srv/helper_scripts/db/passive_wait_healthcheck/checks_governance.py`（+159 LOC：747→906）
+  - `check_44_replay_manifest_key_presence(cur)` PA Push Back #3 healthcheck
+  - V045 status='running' row 的 sibling key.hex 監測；WARN-only 過渡 gate（V042 Wave 6+ 取代）
+
+- `srv/helper_scripts/db/passive_wait_healthcheck/__init__.py` + `runner.py`：export 註冊 + `[44]` cursor
+  block 註冊 + `_RUNNER_DESCRIPTION` 更新
+
+### 治理對照
+
+- 雙語 MODULE_NOTE EN/中：✅
+- 跨平台 `/home/ncyu` `/Users/[^/]+` grep 0 hit：✅
+- 硬邊界 0 觸碰（max_retries / live_execution_allowed / execution_authority / system_mode /
+  OPENCLAW_ALLOW_MAINNET / authorization.json）：✅
+- 0 SQL mutate / 0 `live_*` mutate：✅
+- 文件 ≤1500 hard cap：replay_runner 1013（超 800 警告但 ≤1500），manifest_signer 958，
+  checks_governance 906，runner 757；皆 ≤ 1500 hard cap
+- `cargo test --release --features replay_isolated --tests`：35 lib + 6 binary tests + 8 xlang
+  fixture + 2643 全綠
+- `cargo clippy --release --bin replay_runner --features replay_isolated`：my-diff 0 warning
+  （openclaw_core too_many_arguments 是 pre-existing，非本 diff）
+- `nm target/release/replay_runner`：trading_writer / live_execution / live_authorization::write /
+  build_exchange_pipeline / acquire_lease / place_order / ipc_server / bybit_private_ws / ws_client
+  全 0 hit
+- 既有 `pytest helper_scripts/db/test_lg5_healthchecks.py`：25/25 PASS
+- 既有 xlang `replay_manifest_signer_xlang_consistency.rs`：8/8 PASS（confirms 既有 stripped-body
+  fixture 不破）
+
+### 經驗 / 注意點
+
+1. **P2a-S4 canonicalizer 還沒 land**：本 Track B 自己 craft 了 `canonical_body_for_signing` —
+   未來 Wave 2/3 P2a-S4 真正 canonicalizer 落地時，本 helper 可保留為 binary-private alias 或
+   demoted 為 thin wrapper（避免 break 現有 Track B test）。
+
+2. **`json.dumps(ensure_ascii=False)` 是 invariant 關鍵**：Python 默認 `True` 會 escape 非 ASCII，Rust
+   `serde_json::to_vec` 永遠不 escape → byte 不等。Track A E1 在 `_write_manifest_fixture` 必對齊
+   `ensure_ascii=False`，否則 verify 必失敗（在 `manifest_hash_mismatch` 階段 trip）。
+
+3. **fail mode (a) tautology defense 細節**：simulate attacker 簽完後改 body 1 字 + 不更 sig/hash →
+   sanity gate 抓到 `manifest_hash_mismatch`，不是 `signature_mismatch`。這是 design choice（hash
+   gate 比 signer.verify 更早）；如果 attacker 同改 body + manifest_hash → signer.verify 會抓到
+   `signature_mismatch`；如果 attacker 同改三欄位（拿到 active key）— 守不住，是 V042 + KMS/HSM 職責。
+
+4. **Healthcheck `[44]` status filter**：用 `status='running'` 不抓 `'starting'`（後者 race window
+   小，Python Track A spawn poll 1.5s 後若仍 starting 已 UPDATE failed）；cursor block 註冊在 [43]
+   之後。V045 缺 → PASS-skip 而非 FAIL（Sprint 1 rollout 順序差錯誤判防範）。
+
+5. **跨平台合規**：fixtures 用 `tempfile::TempDir`（dev-dependencies tempfile = "3"）— Mac /
+   Linux 都通用；既有 fixture path `tests/fixtures/replay_manifest_signer/` 是相對路徑由
+   `CARGO_MANIFEST_DIR` 解析，沒 hardcode。
+
+6. **file 1013 行接近 1500 hard cap**：542 LOC 增加都是 6 unit test fns + 雙語 doc + struct rewrite。
+   E2 review point：是否抽 unit test 到 `tests/replay_runner_verify_path.rs` integration test（需把
+   `load_and_verify_manifest` 改 `pub`，破 binary encapsulation）— 預設 (c) 維持 binary 內 cfg(test)
+   mod tests 接受。
+
+### 後續 wiring（不在本 task 範圍）
+
+- E2 review: 6 unit test 雙語對照 / 完整性 sanity gate 順序 / fingerprint 解析 fallback 邏輯 / file
+  1013 行 vs 1500 hard cap 取捨
+- E4 regression: Linux trade-core 跑 cargo test --features replay_isolated --tests 全綠 + 跑
+  passive_wait_healthcheck.py 看 `[44]` row（V045 缺 → PASS-skip；V045 在 + 0 running → PASS
+  vacuous true）
+- Track A E1（並行）按 §6.3 byte-equal invariant 對齊：`json.dumps(sort_keys=True,
+  separators=(',', ':'), ensure_ascii=False)`
+- 4 Track 並行完成後 PM 統一 commit + push + ssh trade-core git pull --ff-only
+- Wave 6+ V042 SQL archive land 時，`load_and_verify_manifest` 升級為 SQL-backed `KeyArchive` impl
+
+### 報告路徑
+
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_sprint1_track_b_manifest_verify.md`
+
+---
+
+## 2026-05-03 — REF-20 Sprint 1 Track D V049/V050/V051/V052 schema drift remediation
+
+### 任務
+PA Sprint 1 partition Track D：把 V3 §4.1 22 col + 17 col + §4.2 paired CHECK 從 W1 dispatch 偷換的「P2b runner SQL fixture」拉回真正帶編號的 migration governance。4 個 V### + 1 healthcheck file + REF-20_RESERVATION.md v1.7→v1.8 + route_helpers `_table_present` factory。
+
+### 結果
+- V049 `replay_experiments` (699 行) — V041 4 col stub → V3 §4.1 22 col promotion；ALTER experiment_id TEXT→UUID 對齊 V045/V046 既建 UUID type；intra-row 3-pair window non-overlap CHECK + EXCLUDE GIST defense-in-depth + btree_gist extension；3 hot-path index；雙語 Guard A/B/C
+- V050 `replay_simulated_fills` (385 行) — V3 §4.1 17 col；FK V049 ON DELETE CASCADE；side/liquidity_role/evidence_tier 3 enum CHECK；qty>0+price>0+ci_low<=mid<=high CHECK；UNIQUE(experiment, idempotency_key)；3 hot-path index 含 1 partial；雙語 Guard A/C
+- V051 `mlde_recommendations_replay_columns` (377 行) — V3 §4.2 第二步：加 replay_experiment_id (uuid) + manifest_hash (bytea) + paired CHECK chk_mlde_shadow_replay_lineage 真實照搬 V3 §4.2 lines 220-234 SQL；FK ON DELETE NO ACTION（非 SET NULL — paired CHECK 與 SET NULL 衝突；非 CASCADE — advisory row 是 evidence 必留）；既有 row 全 'real_outcome' 自動滿足無需 backfill
+- V052 `replay_run_state_artifacts_fk_redirect` (374 行) — forward-only ALTER ADD CONSTRAINT 不改 V045/V046 file（避觸 P0 sqlx hash drift）；V045.manifest_id ADD FK V049 ON DELETE RESTRICT；V046 ADD COLUMN experiment_id + 從 V045.manifest_id JOIN backfill + ADD FK ON DELETE CASCADE；preflight LEFT JOIN dangling row 兩路 >0 RAISE
+- V052_preflight.sql (127 行) — V040_healthcheck 風格 5 read-only probe（dangling+FK presence+PK type alignment）
+- route_helpers.py 加 `table_present(cur, schema, table)` factory + 新 v049/v050/v051 helper（v045 保留 thin wrapper 向後相容）
+- pytest fixture `tests/migrations/test_v049_v050_v051_v052_track_d.py` (507 行) **24/24 PASS**
+- 真 Mac PG smoke test：4 V### 跑兩遍全 idempotent + 5 個 paired CHECK / FK CASCADE / FK NO ACTION sanity 全擋對
+
+### 關鍵設計決策
+1. **PK type alignment**：V045/V046 既建 manifest_id/experiment_id 為 UUID；V041 stub 為 TEXT。選 path C — V049 ALTER COLUMN experiment_id TYPE UUID（preflight Guard B 驗 0 row 或全 row UUID-castable）。Linux _sqlx_migrations max=35 → 0 row 假設成立。
+2. **FK ON DELETE NO ACTION**：V051 FK 一開始用 SET NULL，smoke test 揭露 paired CHECK 直接擋 cascade SET NULL（chk_mlde_shadow_replay_lineage 禁 {非 real_outcome + replay_experiment_id NULL} 組合）。改 NO ACTION = 顯式擋 parent DELETE，符合 V3 §5 manifest immutability 語意，advisory row 作 evidence 留存。
+3. **EXCLUDE GIST**：intra-row 3-pair non-overlap 用 CHECK + tstzrange &&（Postgres 不支 intra-row EXCLUDE）；inter-row defense-in-depth 用 EXCLUDE GIST + btree_gist + WHERE candidate_window NOT NULL；feature_not_supported gracefully WARN
+4. **V052 forward-only**：不改 V045/V046 file 是直接吸取 2026-05-02 P0 sqlx hash drift incident 教訓（commit 3681f83）。preflight LEFT JOIN dangling 統計 + RAISE EXCEPTION abort 是 PA Push Back #1 落地。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_sprint1_track_d_schema_migrations.md`
+
+
+---
+
+## 2026-05-03 — REF-20 Sprint 1 Track A retrofit（E2 finding F1 byte-equal canonical contract）
+
+**任務：** E2 退回 1 條 HIGH finding（F1）— `route_helpers.py::write_manifest_fixture` 寫 manifest JSON fixture 時 `json.dumps` 缺 `ensure_ascii=False` + `separators=(',', ':')`，與 Rust `manifest_signer.rs::canonical_body_for_signing` cross-language byte-equal contract 不對齊；Wave 6 V042 真 sign 落地後會 100% fail-closed。
+
+**改動範圍（最小 scope，不擴入 Track B 的 manifest_signer.py）：**
+1. `route_helpers.py::write_manifest_fixture` 兩處 `json.dumps` 加 `sort_keys=True + separators=(',', ':') + ensure_ascii=False`，移除 disk write 的 `indent=2`（disk = compact canonical-style bytes）
+2. `route_helpers.py` 兩 helper docstring 加「Cross-language envelope contract / 跨語言 envelope 契約」段；引 Rust `ENVELOPE_KEYS_FOR_SIGNING` 常量位置（manifest_signer.rs L574-575）+ `canonical_body_for_signing` 位置（L594-625）
+3. `tests/test_track_a_spawn_argv.py` 加 2 新 case：
+   - `byte_equal_canonical_with_non_ascii` — 含 `测试_grid；非ASCII` 的 manifest，磁碟 bytes 經 envelope strip + Python canonical re-serialise 與 expected canonical bytes byte-equal；含 SHA-256 雙重驗證 + anti-`\uXXXX` 守護
+   - `sort_keys_independent_of_input_order` — 兩 caller 傳邏輯相同但 key 順序不同的 manifest，磁碟 bytes byte-equal
+4. 加 `_python_canonical_body_for_signing` test helper（鏡像 Rust 同名函式）
+
+**驗證結果：**
+- Track A pytest 17 → 19 case 全 PASS
+- 全 replay test 套件 52/52 PASS（無回歸）
+- Rust `cargo test --release --tests --features replay_isolated` 全綠（含 Track B 的 manifest_signer 6 unit test + 4 fail-mode + xlang consistency test）
+
+**LOC**：route_helpers.py 891 → 980 (+89，全 docstring + canonical kwargs)；test 494 → 687 (+193)
+
+**教訓 / 經驗：**
+1. **`ensure_ascii=False` 是跨語言 byte-equal 的常見坑** — Python 預設 `True` 把 non-ASCII 轉 `\uXXXX`；Rust `serde_json` 預設 raw UTF-8。任何 Python ↔ Rust JSON HMAC 簽名 contract 必先驗 helper 的 `json.dumps` 三 kwargs（`sort_keys=True + separators=(',', ':') + ensure_ascii=False`）齊全
+2. **byte-equal unit test 必含 non-ASCII case** — ASCII-only test 看不出 `ensure_ascii` 差異
+3. **canonical contract 必在 helper docstring 直接引 Rust 文件 + line 數**（防未來 Rust 端改 envelope keys 時 Python 端漂移）
+4. **PA push back #2 + E2 F1 是 stack-related**：PA Track A 重 spawn argv 對齊；E2 F1 重 byte-level canonical 對齊。兩個都是「Python ↔ Rust 對齊」但層次不同（CLI argv schema vs JSON canonical bytes）；retrofit 補完後 Track A scope 真正完整
+5. **不要過度擴 scope**：原本想把 `_canonical_body_for_signing` 加到 `manifest_signer.py`，但這擴 Track B；改在 test 文件做 mirror helper 是正確 minimal path
+6. **disk fixture 不需 byte-equal canonical bytes**（因 Rust read disk → parse → canonical_body re-canonicalize 會自己 byte-equal），但 helper 的 `json.dumps` kwargs 必和未來 Python sign helper kwargs 一致，避免 Python 內部 sign vs write 漂移 — 統一 kwargs 是最便宜的不變量
+
+## 2026-05-03 REF-20 Sprint 1 Track C E2 retrofit (4 finding)
+
+**任務：** Track C E2 verdict RETURN 後修 4 finding（§九 1500 LOC cap / F8 admin scope 未登記 / F6 boot guard log-only / F2 V053 race window）。
+
+**修補：**
+1. **§九 1500 LOC cap (PM 拒 baseline exception)**：新建 `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/security_guards.py` (487 LOC) + 抽 5 helper 把 P0-2 boot guard / P0-2 per-route gate / P0-4 cmdline cert wrapper / P0-5a IDOR SQL build / P0-5b allowlist guard / cancel route 全 PG path body 一起遷移。`replay_routes.py` 從 1603 LOC 降至 **1494 LOC**（≤1500 ✅）。Module top docstring 從 60 行壓至 25 行（保留雙語 MODULE_NOTE 但精簡 8-route list 與 Hard contracts 細節，已 reference archive）。
+2. **F8 `replay:read:any` scope 未登記**：`app/auth.py` `Settings.auth_scopes` default csv 加 `replay:write` + `replay:read:any`（admin actor 經 `build_authenticated_actor()` 後真持有）。加 2 case test 驗 default 集合 + 工廠 actor scope。
+3. **F6 boot guard log-only → raise**：`security_guards.perform_p0_2_boot_guard()` 在 `live profile + TEST_KEY` 雙設時 `raise RuntimeError`，使 uvicorn boot fail-closed；attacker 控 env 不能繼續啟動。Dev mode 三條件 case 全測（live+TEST_KEY raise / not_live skip / no_TEST_KEY skip）。
+4. **F2 V053 race window → BEGIN+LOCK TABLE+COMMIT**：V053 SQL 用 `BEGIN; ... LOCK TABLE learning.governance_audit_log IN ACCESS EXCLUSIVE MODE; ... COMMIT;` 包裹 DROP+ADD 對；Idempotency probe 短路在 LOCK 之前（重跑不阻塞 writer）。同 commit flag 開新 P2 ticket `P2-AUDIT-V044-LOCK-TABLE-FIX` 補回 V044 同樣 race-free retrofit。
+
+**驗證：**
+- replay_routes.py 1494 ≤ 1500 ✅
+- 13/13 Track C security pytest（原 7 + 新 6 retrofit case）+ 36/36 sibling pytest（含 safe_query_audit）+ 7/7 V053 migration test + 103/103 sibling regression（batch_b_security_auth + auth_state_machine + replay/）
+- V053 Mac dev real-PG dry-run：第 1 跑 LOCK + DROP + ADD + COMMIT，第 2 跑 idempotency-skip 0 RAISE；5 NEW event_type INSERT PASS；unknown event_type CHECK REJECT
+- 跨平台 grep 0 hit（`/home/ncyu` / `/Users/[^/]+`）；0 hard boundary touch
+- `python3 -c "from app.main import app"` 250 routes import 成功
+
+**教訓：**
+1. **§九 cap 不可接受 baseline+5 例外**：dispatch §"完成定義"#1 強制 ≤1500，PM 已拒 +99 LOC exception；只能用 sibling module extract 真正合規。pre-existing baseline exception 嚴格僅適用「pre-existing 1500+ violation」，不適用「新 wave 把 ≤1500 推到 >1500」。
+2. **boot guard 必 raise，不 log**：log-only 是 fake-fix；attacker 控 env 仍可啟動。fail-closed 必 abort process。但 dev 安全性靠「條件 AND」: 只在 live+TEST_KEY 雙設 raise，dev 三條件全測。
+3. **DROP+ADD CHECK 的 race window 不可妥協**：E3 P1-3 已 flag V044 同 pattern；任何 DROP CONSTRAINT IF EXISTS + ADD CONSTRAINT 必須 wrap 在 BEGIN+LOCK TABLE ACCESS EXCLUSIVE+COMMIT。idempotency 短路安排在 LOCK 之前避免重跑誤阻塞。
+4. **scope 系統有兩套 — actor.scopes (Settings) vs hub lease scopes**：admin bypass scope `replay:read:any` 屬 Settings actor.scopes,不是 hub lease_scopes; 必登記到 `auth_scopes` default csv 才能讓 `build_authenticated_actor()` 工廠真產出含此 scope 的 actor。governance_hub_cascades.py:806 的 `_auth_permits_scope` empty-fallback=True 是 latent rug-pull(已 flag 給 PA / TODO P2)。
+5. **抽 cancel PG path body 觸發 sibling test 假陽性**：`test_replay_routes_safe_query_audit.py::test_case1` 把 `_do_pg_cancel` inline marker 當 transactional pattern 的 grep anchor；body 抽到 `_sg.execute_replay_cancel_pg_path` 後該 audit test 必須加新 marker `_sg.execute_replay_cancel_pg_path` 到 allow-list。`test_audit_helper_returns_clean_summary` 的 `cur.execute` hit 從 8 降至 5(physical body extracted),baseline 期望需同步降。改 sibling test 而非還原 retrofit 是正確的 minimal path。
+6. **分隔 sync helper 抽出與 SIGTERM 物理位置**：`os.kill` 留在 caller route handler(xact 外),helper `execute_replay_cancel_pg_path` 不送 signal 純 PG。讓 hermetic test 不需 mock os.kill,且 PG rollback 路徑絕不誤送 stray signal。

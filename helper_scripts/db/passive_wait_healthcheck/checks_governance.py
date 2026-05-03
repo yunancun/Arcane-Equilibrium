@@ -437,6 +437,165 @@ LABEL_BACKFILL_PASS_MAX_SECONDS: int = 7200    # 2h
 LABEL_BACKFILL_WARN_MAX_SECONDS: int = 21600   # 6h
 
 
+def check_44_replay_manifest_key_presence(cur) -> tuple[str, str]:
+    """[44] replay_manifest_key_presence — REF-20 Sprint 1 Track B PA push back #3.
+
+    [44] replay_manifest_key_presence — REF-20 Sprint 1 Track B PA push back #3。
+
+    Verifies that every ``replay.run_state`` row with ``status='running'``
+    has a sibling ``key.hex`` file present at ``<output_path>/key.hex``.
+
+    為什麼存在 / Why this exists:
+        REF-20 Sprint 1 Track B (this commit) closes the E3-P0-1 fail-open
+        vulnerability: the Rust ``replay_runner`` binary previously returned
+        ``Ok(manifest)`` with stderr-only warning when sibling ``key.hex``
+        was absent — Track B switches that to hard error. After deployment,
+        any replay subprocess running without a sibling ``key.hex`` will
+        fail-closed at startup. PA push back #3 surfaces the operator
+        runbook contract: until V042 SQL-backed key archive lands (Wave 6+),
+        operator MUST place a ``key.hex`` next to every signed manifest;
+        this healthcheck monitors the contract continuously without driving
+        engine to FAIL (V042 land before is a known transitional state).
+
+        Sprint 1 Track B（本 commit）封閉 E3-P0-1 fail-open 漏洞：Rust
+        ``replay_runner`` 以前在 sibling ``key.hex`` 缺時 ``Ok(manifest)``
+        + stderr warning；Track B 改為 hard error。Track B 部署後沒 key.hex
+        的 replay subprocess 啟動即 fail-closed。PA push back #3 surface
+        運維契約 — V042 SQL-backed key archive（Wave 6+）落地前 operator
+        必在每個 signed manifest 旁放 ``key.hex``；本 healthcheck 連續監測
+        該契約但不會 FAIL（V042 前的過渡期 known issue）。
+
+    Verdict bands / 結果分級:
+        * V045 missing or no running rows → PASS (vacuous true).
+        * All running rows have sibling key.hex → PASS.
+        * 1+ running rows missing key.hex → WARN (transitional gate; Track B
+          deployment will cause subprocess fail-closed at next start, but
+          existing running runs may pre-date the change). Operator action:
+          place key.hex next to manifest, OR cancel the run, OR wait for
+          V042 SQL-backed archive (Wave 6+).
+        * V045 query exception (non-existence) → FAIL (signal V045 not yet
+          land or DB drift).
+
+    Pre-conditions (fail-closed):
+        * ``replay.run_state`` exists (V045 deployed) — else PASS-skip with
+          NOTE (V045 unreserved for some Sprint 1 deploys; not FAIL because
+          downstream is gated on V045 itself).
+
+    缺失條件處理：
+        * V045 表不存在 → PASS-skip + 標明（避免 Sprint 1 部署順序差錯時
+          被本 check 誤導為 FAIL）。
+        * V045 表存在但無 running row → PASS（vacuously true）。
+        * 1+ running row 缺 sibling key.hex → WARN（過渡 gate；Track B
+          部署後新啟動 subprocess 即 fail-closed，舊已 running 的可能
+          pre-date Track B）。
+        * V045 query 例外 → FAIL（DB drift 訊號）。
+
+    Returns:
+        ``(status, msg)`` tuple. msg lists running run count + missing key
+        count + first missing run_id for operator triage; FAIL adds explicit
+        suggested operator action.
+    """
+    # Defensive rollback before each query (mirrors [42] / [43] pattern).
+    # 每次 query 前保險 rollback（鏡 [42] / [43]）。
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001 — defensive, rollback failure ≠ fatal
+        pass
+
+    # Existence pre-check — V045 may not be deployed yet in some Sprint 1
+    # rollout orderings; treat as PASS-skip rather than FAIL so this check
+    # does not block other governance signals.
+    # V045 存在性檢查 — 某些 Sprint 1 部署順序下 V045 尚未 land；
+    # 視為 PASS-skip 而非 FAIL，避免阻塞其他治理信號。
+    try:
+        cur.execute(
+            "SELECT to_regclass('replay.run_state') IS NOT NULL"
+        )
+        exists_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[44] replay.run_state existence check failed: {exc}")
+    if not exists_row or not exists_row[0]:
+        return (
+            "PASS",
+            "[44] replay.run_state missing — V045 not applied "
+            "(SKIP; upgrade to FAIL after Wave 6 V042 lands)",
+        )
+
+    # Query running rows + their output_path. status='running' is the
+    # narrowest filter that catches active subprocess; status='starting' may
+    # not yet have spawned the subprocess (so key.hex check is premature).
+    # 查 running row 與其 output_path。status='running' 是最窄的 filter
+    # 抓主動的 subprocess；status='starting' 還沒 spawn，key.hex check 過早。
+    sql = (
+        "SELECT run_id::text, output_path "
+        "FROM replay.run_state "
+        "WHERE status = 'running' AND output_path IS NOT NULL"
+    )
+    try:
+        cur.execute(sql)
+        rows = cur.fetchall()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[44] running row query failed: {exc}")
+
+    total_running = len(rows)
+    if total_running == 0:
+        return ("PASS", "[44] no running replay subprocesses (vacuously true)")
+
+    # Filesystem walk — for each running run check sibling key.hex presence.
+    # Filesystem 步入 — 對每個 running run 檢查 sibling key.hex 是否存在。
+    #
+    # Why we use stdlib path-only ops (no os.access mode bits): we only need
+    # presence, not readability — Track B Rust binary will handle perms /
+    # invalid hex / wrong length itself at startup. False-negative on
+    # presence check (e.g. NFS staleness) is acceptable WARN, not FAIL.
+    #
+    # 為什麼純 path 操作不檢查 readable / exec：本 healthcheck 只關心
+    # presence，不關心可讀性 / 內容；NFS stale entry 偶發誤判 = 可接受 WARN。
+    import os
+    from pathlib import Path
+
+    missing: list[tuple[str, str]] = []  # (run_id, expected_key_path)
+    for run_id, output_path in rows:
+        if not output_path:
+            continue
+        # Sibling key.hex layout: <output_path>/key.hex (V045 output_path is
+        # the directory PA Track A `_write_manifest_fixture(...)` writes
+        # manifest.json + key.hex into).
+        # Sibling key.hex layout：<output_path>/key.hex（V045 output_path
+        # 是 Track A `_write_manifest_fixture(...)` 寫 manifest.json +
+        # key.hex 的目錄）。
+        try:
+            key_path = Path(output_path) / "key.hex"
+            if not key_path.is_file():
+                missing.append((run_id, str(key_path)))
+        except (OSError, ValueError) as exc:
+            # Path ops should not normally raise; defensively classify as
+            # missing so operator sees the run_id.
+            # Path ops 平時不會例外；防禦性歸為 missing 以便 operator 看到。
+            missing.append((run_id, f"<{output_path} (path err: {exc})>"))
+
+    if not missing:
+        return (
+            "PASS",
+            f"[44] {total_running} running replay run(s) all have sibling key.hex",
+        )
+
+    # WARN — Track B deployed will fail-close new starts, but in-flight runs
+    # without key.hex still need operator attention (V042 archive lands in
+    # Wave 6+; until then sibling key.hex is the production contract).
+    # WARN — Track B 部署後新啟動會 fail-closed，但 in-flight 無 key.hex
+    # 的 run 仍需 operator 注意（V042 archive 於 Wave 6+ 落地；之前 sibling
+    # key.hex 是 production 契約）。
+    first_run_id, first_path = missing[0]
+    return (
+        "WARN",
+        f"[44] {len(missing)}/{total_running} running replay run(s) missing "
+        f"sibling key.hex; first={first_run_id} expected={first_path}; "
+        "operator action: place key.hex next to manifest OR cancel run; "
+        "tracker REF-20 Track B PA push back #3 / V042 Wave 6+ supersedes",
+    )
+
+
 def check_43_label_backfill_freshness(cur) -> tuple[str, str]:
     """[43] label_backfill_freshness — LG5-W3-FUP-2 Fix 1 cron liveness.
 

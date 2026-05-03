@@ -141,17 +141,23 @@ def test_case1_all_8_endpoints_use_safe_query_wrapper_or_sanctioned_xact(
                 )
 
         elif expected_pattern == "transactional_advisory_lock":
-            # MUST contain a sync helper `_do_pg_path` / `_do_pg_cancel` and
-            # must wrap cursor work inside `with get_pg_conn() as conn:`.
-            # 必含 _do_pg_path / _do_pg_cancel 同步 helper 且 cursor 工作
-            # 在 with get_pg_conn() as conn 內。
+            # MUST contain a sync helper `_do_pg_path` / `_do_pg_cancel` OR
+            # delegate to the security_guards `execute_replay_cancel_pg_path`
+            # helper (Sprint 1 Track C E2 retrofit moved cancel PG body to
+            # sibling module for §九 1500 LOC cap compliance).
+            # 必含 _do_pg_path / _do_pg_cancel 同步 helper，或委派
+            # security_guards.execute_replay_cancel_pg_path（Sprint 1 Track C
+            # E2 retrofit 為 §九 1500 LOC cap 將 cancel PG body 移 sibling）。
             if not (
                 "_do_pg_path" in body_src
                 or "_do_pg_cancel" in body_src
+                or "_sg.execute_replay_cancel_pg_path" in body_src
+                or "execute_replay_cancel_pg_path" in body_src
             ):
                 failures.append(
                     f"{fn_name}: transactional_advisory_lock handler "
-                    "missing _do_pg_path / _do_pg_cancel sync helper"
+                    "missing _do_pg_path / _do_pg_cancel sync helper "
+                    "or _sg.execute_replay_cancel_pg_path delegation"
                 )
 
         elif expected_pattern == "no_pg":
@@ -405,11 +411,31 @@ def _audit_replay_routes_safe_query() -> dict:
 def test_audit_helper_returns_clean_summary():
     """Bonus: audit helper returns audit_ok=True + leaks=[] (smoke test).
     audit helper 回 audit_ok=True + leaks=[]（smoke test）。
+
+    Sprint 1 Track C E2 retrofit moved ``_do_pg_cancel`` body to
+    ``replay/security_guards.py::execute_replay_cancel_pg_path`` for
+    §九 1500 LOC cap compliance; ``cur.execute`` hit count in
+    ``replay_routes.py`` dropped from 8 to 5 (only ``_do_pg_path`` and
+    ``_safe_pg_select`` remain in this file). ``_do_pg_cancel`` is still
+    in the sanctioned_fns allow-list because legacy callers may grep
+    for the marker, but ``spans`` no longer contains it.
+    Sprint 1 Track C E2 retrofit 將 ``_do_pg_cancel`` body 移至
+    ``replay/security_guards.py::execute_replay_cancel_pg_path``，以符合
+    §九 1500 LOC cap；``replay_routes.py`` 內 ``cur.execute`` 命中數從
+    8 降至 5。``_do_pg_cancel`` 仍在 sanctioned_fns allow-list 內供
+    legacy grep，但 ``spans`` 不再含。
     """
     summary = _audit_replay_routes_safe_query()
     assert summary["audit_ok"] is True
     assert summary["leaks"] == []
-    assert summary["total_cur_execute_hits"] >= 8  # at least 8 sanctioned hits
+    # Post-retrofit baseline: ≥5 sanctioned hits (3 in _do_pg_path + 2 in
+    # _safe_pg_select). ``_do_pg_cancel`` body now lives in security_guards
+    # and adds 3 hits there, but those are NOT in this file's audit scope.
+    # Retrofit 後 baseline：≥5 sanctioned hits（_do_pg_path 3 + _safe_pg_select 2）。
+    assert summary["total_cur_execute_hits"] >= 5
     assert "_safe_pg_select" in summary["sanctioned_fns"]
     assert "_do_pg_path" in summary["sanctioned_fns"]
+    # ``_do_pg_cancel`` allow-listed for backward compat; physical body
+    # extracted, so ``spans`` may not contain it (do not assert presence).
+    # ``_do_pg_cancel`` allow-list 為向後相容；body 已抽出，spans 可能無此項。
     assert "_do_pg_cancel" in summary["sanctioned_fns"]
