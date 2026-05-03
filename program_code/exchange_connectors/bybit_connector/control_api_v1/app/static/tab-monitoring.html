@@ -163,14 +163,19 @@ async function loadPipeline() {
   el.className = 'oc-metric-val ' + (isActive ? 'green' : '');
 
   // Also fetch orchestrator for intent/tick stats
-  const d2 = await ocApi('/api/v1/strategy/status');
+  let d2;
+  try { d2 = await ocApi('/api/v1/strategy/status'); } catch(e) { d2 = null; }
   if (d2 && d2.data) {
     const stats = d2.data.stats || {};
     const km = d2.data.kline_manager_status || {};
     const kmStats = km.stats || {};
-    ocSetText('pipe-ticks', kmStats.total_ticks_processed || 0);
-    ocSetText('pipe-intents', stats.intents_collected || 0);
-    ocSetText('pipe-last', ocTimeShort(kmStats.last_tick_ts_ms));
+    ocSetText('pipe-ticks', kmStats.total_ticks_processed != null ? kmStats.total_ticks_processed : '--');
+    ocSetText('pipe-intents', stats.intents_collected != null ? stats.intents_collected : '--');
+    ocSetText('pipe-last', kmStats.last_tick_ts_ms ? ocTimeShort(kmStats.last_tick_ts_ms) : '--');
+  } else {
+    ocSetText('pipe-ticks', '--');
+    ocSetText('pipe-intents', '--');
+    ocSetText('pipe-last', '--');
   }
 }
 
@@ -186,9 +191,9 @@ async function loadTelegram() {
   const el = $('tg-status');
   el.textContent = enabled ? 'Enabled' : 'Disabled';
   el.className = 'oc-metric-val ' + (enabled ? 'green' : '');
-  ocSetText('tg-sent', t.messages_sent || t.sent_count || 0);
-  ocSetText('tg-failed', t.messages_failed || t.error_count || 0);
-  ocSetText('tg-last', ocTimeShort(t.last_sent_at));
+  ocSetText('tg-sent', t.messages_sent != null ? t.messages_sent : (t.sent_count != null ? t.sent_count : '--'));
+  ocSetText('tg-failed', t.messages_failed != null ? t.messages_failed : (t.error_count != null ? t.error_count : '--'));
+  ocSetText('tg-last', t.last_sent_at ? ocTimeShort(t.last_sent_at) : '--');
 }
 
 async function loadOpenClaw() {

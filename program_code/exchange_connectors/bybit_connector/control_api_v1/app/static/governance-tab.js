@@ -8,18 +8,63 @@
 
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-governance').innerHTML = ocExplain(
-  '治理系统是 OpenClaw 的安全核心，通过 4 个状态机管理授权、风控、租约、对账。',
-  '授权 SM (SM-01) 控制操作权限和有效期。风控 SM (SM-04) 动态调整风险等级。租约 SM (SM-02) 管理决策生命周期。对账引擎 (EX-04) 检查 Paper 模拟与交易所的一致性。这些组件通过级联规则联动，确保整个系统始终处于安全状态。'
+  '治理系统是 OpenClaw 的安全核心，通过 SM-01 授权、SM-02 租约、SM-03 执行和 SM-04 风控管理交易边界。',
+  '授权 SM (SM-01) 控制操作权限和有效期。租约 SM (SM-02) 管理决策生命周期。执行 SM (SM-03) 管理订单从创建到成交、取消或失败的生命周期。风控 SM (SM-04) 动态调整风险等级。对账引擎 (EX-04) 作为扩展检查系统记录与交易所实际状态是否一致。'
 );
 
 // ─── State Storage ─────────────────────────────────────────────
 let _currentStatus = null;
-let _currentRiskLevel = 0;
+let _currentAuthState = null;
+let _currentRiskLevel = null;
+let _currentLeaseActive = null;
 
 // ─── Event Log (Incident Timeline & Audit Trail) ───────────────
 let _govEventLog = [];
 let _prevStatus = null;
 const MAX_EVENTS = 50;
+
+// ─── SM-03 Derived Status / SM-03 派生狀態 ─────────────────────
+function updateOmsCard() {
+  const readinessEl = document.getElementById('oms-readiness');
+  const blockerEl = document.getElementById('oms-blocker');
+  if (!readinessEl || !blockerEl) return;
+
+  const authState = _currentAuthState || 'UNKNOWN';
+  const riskLevel = _currentRiskLevel;
+  const activeLeases = _currentLeaseActive;
+
+  let label = 'UNKNOWN';
+  let chipType = 'neutral';
+  let blocker = '等待治理状态加载 / Waiting for governance status';
+
+  if (authState !== 'ACTIVE') {
+    label = 'CLOSED';
+    chipType = 'neutral';
+    blocker = 'SM-01 未处于 ACTIVE，订单不得进入执行状态。';
+  } else if (riskLevel != null && riskLevel >= 4) {
+    label = 'RISK LOCKED';
+    chipType = 'bad';
+    blocker = 'SM-04 处于高风险等级，执行状态应停止推进。';
+  } else if (activeLeases != null && activeLeases > 0) {
+    label = 'LEASE READY';
+    chipType = 'good';
+    blocker = '存在 SM-02 活跃租约；符合范围的意图可进入 SM-03 校验。';
+  } else if (activeLeases === 0) {
+    label = 'IDLE';
+    chipType = 'neutral';
+    blocker = '暂无活跃租约；没有意图应进入订单执行状态。';
+  } else {
+    label = 'WAITING';
+    chipType = 'neutral';
+    blocker = '等待租约状态加载 / Waiting for lease state';
+  }
+
+  ocSetHtml('oms-readiness', ocChip(label, chipType));
+  ocSetText('oms-blocker', blocker);
+  if (typeof window.updateQuickStatus === 'function') {
+    window.updateQuickStatus(undefined, undefined, undefined, undefined, label);
+  }
+}
 
 // ─── Toggle Functions for Collapsible Sections ────────────────
 function toggleAuthScope() {
@@ -464,6 +509,7 @@ async function loadAuthScope() {
 
 function renderAuthCard(authData) {
   if (!authData) {
+    _currentAuthState = null;
     ocSetHtml('auth-state-badge', ocChip('UNAVAILABLE', 'neutral'));
     ocSetText('auth-expiry', '--');
     ocSetText('auth-state-desc', '');
@@ -471,10 +517,12 @@ function renderAuthCard(authData) {
     $('btn-approve').style.display = 'none';
     $('btn-request-auth').style.display = 'none';
     $('auth-pending-indicator').style.display = 'none';
+    updateOmsCard();
     return;
   }
 
   const state = authData.state || 'UNKNOWN';
+  _currentAuthState = state;
   ocSetHtml('auth-state-badge', govAuthBadge(state));
 
   const expiresMs = authData.expires_at_ms;
@@ -497,6 +545,7 @@ function renderAuthCard(authData) {
   ocSetText('auth-state-desc', AUTH_DESC[state] || '');
   // Quick status banner update / 更新快速状态栏
   if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(state, undefined, undefined, undefined);
+  updateOmsCard();
 
   // Render scope using the new visualizer
   const scope = authData.scope || {};
@@ -514,9 +563,11 @@ function renderAuthCard(authData) {
 
 function renderRiskCard(riskData) {
   if (!riskData) {
+    _currentRiskLevel = null;
     ocSetHtml('risk-level-badge', ocChip('UNAVAILABLE', 'neutral'));
     ocSetHtml('risk-mode-badge', ocChip('--', 'neutral'));
     ocSetText('risk-reason', '--');
+    updateOmsCard();
     return;
   }
 
@@ -533,6 +584,7 @@ function renderRiskCard(riskData) {
   // Quick status banner update / 更新快速状态栏风险等级
   const riskName = GOV_RISK_LEVELS[level] || ('L' + level);
   if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(undefined, riskName, undefined, undefined);
+  updateOmsCard();
 
   // Populate override dropdown with lower levels
   const selectEl = $('override-level');
@@ -595,16 +647,20 @@ function renderLeaseList(leases) {
 
 function renderLeaseCard(leaseData) {
   if (!leaseData) {
+    _currentLeaseActive = null;
     ocSetText('lease-active', '--');
     ocSetText('lease-total', '--');
+    updateOmsCard();
     return;
   }
 
   const activeCount = leaseData.active_count != null ? leaseData.active_count : 0;
   const totalCount = leaseData.total_tracked != null ? leaseData.total_tracked : 0;
+  _currentLeaseActive = activeCount;
 
   ocSetText('lease-active', String(activeCount));
   ocSetText('lease-total', String(totalCount));
+  updateOmsCard();
 }
 
 function renderReconCard(reconData) {
@@ -712,35 +768,60 @@ async function loadPaperLiveGate() {
 async function evaluatePaperLiveGate() {
   ocToast('读取指标中... / Fetching metrics...', 'info');
   try {
-    // Step 1: Fetch current paper engine metrics to fill required fields
-    // 第一步：拉取 Paper Engine 当前指标填充必填字段
-    let metrics = {
-      paper_start_time_ms: Date.now() - 86400000, // fallback: 1 day ago / 回退：1 天前
-      total_trades: 0,
-      win_rate_percent: 0,
-      net_pnl: 0,
-      sharpe_ratio: 0,
-      max_drawdown_percent: 0,
-      profit_factor: 0,
-    };
+    // Step 1: Fetch current paper engine metrics from real backend endpoints.
+    // Do not synthesize 1-day/zero-trade defaults: those can incorrectly turn
+    // "unknown" into a real gate evaluation.
+    // 第一步：只讀真後端端點。不可用 1 天 / 0 交易等預設值偽造成真評估。
+    const [sessionRes, metricsRes] = await Promise.allSettled([
+      ocApi('/api/v1/paper/session/status'),
+      ocApi('/api/v1/paper/metrics'),
+    ]);
+    const sessionData = sessionRes.status === 'fulfilled' && sessionRes.value && sessionRes.value.data
+      ? sessionRes.value.data
+      : null;
+    const metricData = metricsRes.status === 'fulfilled' && metricsRes.value && metricsRes.value.data
+      ? metricsRes.value.data
+      : null;
+    if (!sessionData || !metricData) {
+      ocToast('Paper metrics unavailable; evaluation not sent / Paper 指標不可用，未送出評估', 'error');
+      return;
+    }
 
-    try {
-      const pe = await ocApi('/api/v1/paper/status');
-      if (pe && pe.data) {
-        const m = pe.data.metrics || pe.data;
-        // Map Paper Engine metric fields to PaperLiveGate requirements
-        // 映射 Paper Engine 指标字段到 PaperLiveGate 必填参数
-        if (m.start_time_ms != null)       metrics.paper_start_time_ms = m.start_time_ms;
-        if (m.total_trades != null)         metrics.total_trades = m.total_trades;
-        if (m.win_rate != null)             metrics.win_rate_percent = m.win_rate * 100;
-        if (m.win_rate_pct != null)         metrics.win_rate_percent = m.win_rate_pct;
-        if (m.net_pnl != null)              metrics.net_pnl = m.net_pnl;
-        if (m.sharpe_ratio != null)         metrics.sharpe_ratio = m.sharpe_ratio;
-        if (m.max_drawdown_pct != null)     metrics.max_drawdown_percent = m.max_drawdown_pct;
-        if (m.profit_factor != null)        metrics.profit_factor = m.profit_factor;
+    const sess = sessionData.session || {};
+    const trade = metricData.trade_metrics || {};
+    const dd = metricData.drawdown_metrics || {};
+    const pnl = sessionData.pnl || metricData.pnl_summary || {};
+    const pickNum = (...vals) => {
+      for (const v of vals) {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
       }
-    } catch (fetchErr) {
-      console.warn('Could not fetch paper metrics, using defaults:', fetchErr);
+      return null;
+    };
+    const paperStart = pickNum(
+      sess.started_ts_ms,
+      sess.paper_start_time_ms,
+      metricData.paper_start_time_ms
+    );
+    const totalTrades = pickNum(trade.total_round_trips, metricData.total_round_trips);
+    const winRate = pickNum(trade.win_rate);
+    const winRatePercent = winRate == null ? pickNum(trade.win_rate_percent, metricData.win_rate_pct) :
+      (Math.abs(winRate) <= 1 ? winRate * 100 : winRate);
+    const metrics = {
+      paper_start_time_ms: paperStart,
+      total_trades: totalTrades,
+      win_rate_percent: winRatePercent,
+      net_pnl: pickNum(pnl.net_paper_pnl, metricData.net_pnl),
+      sharpe_ratio: pickNum(metricData.sharpe_ratio),
+      max_drawdown_percent: pickNum(dd.max_drawdown_pct, metricData.max_drawdown_pct),
+      profit_factor: pickNum(trade.profit_factor, trade.win_loss_ratio),
+    };
+    const missing = Object.entries(metrics)
+      .filter(([, v]) => v == null)
+      .map(([k]) => k);
+    if (missing.length) {
+      ocToast('Paper gate missing real fields: ' + missing.join(', '), 'error');
+      return;
     }
 
     // Step 2: POST evaluation request with populated metrics

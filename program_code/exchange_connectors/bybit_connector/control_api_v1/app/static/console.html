@@ -263,7 +263,7 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260414.margin-position-mode-v1';
+const BUILD_TS = '20260503.governance-sm03-ia-v1';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
@@ -272,28 +272,29 @@ const _v = BUILD_TS;
 const TABS = [
   // ── 儀表板 ──────────────────────────────────────────────────────
   { id: 'system',     label: '总览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
-  // ── 交易核心 ─────────────────────────────────────────────────────
-  { id: 'live',       label: '实盘 Live',        labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
+  // ── 交易环境：低风险到高风险 / Trading environments: low-risk to high-risk ──
   // FIX-43: split into direct Demo + Paper tabs (eliminate double-iframe nesting)
   // FIX-43：拆為直接 Demo + Paper 標籤（消除雙層 iframe 嵌套）
-  { id: 'demo',       label: '演示 Demo',        labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
   { id: 'paper',      label: '模拟 Paper',       labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}` },
+  { id: 'demo',       label: '演示 Demo',        labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
+  { id: 'live',       label: '实盘 Live',        labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
   // ── 市場與策略 ───────────────────────────────────────────────────
   { id: 'charts',     label: '图表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
   { id: 'strategy',   label: '策略 Strategy',    labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
-  // ── 風控與智能 ───────────────────────────────────────────────────
+  // ── 風控與治理 ───────────────────────────────────────────────────
   { id: 'risk',       label: '风控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
+  { id: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
+  // ── 智能與學習 ───────────────────────────────────────────────────
   { id: 'ai',         label: 'AI 智能',          labelEn: 'AI',        icon: '&#x1F916;', src: `/static/tab-ai.html?v=${_v}` },
   { id: 'learning',   label: '学习 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
-  // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor 抽出（位置在 Learning 之後 / Live 之前）
-  // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor extracted (position: after Learning / before Live)
+  // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor 抽出（位置在 Learning 之後）
+  // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor extracted (position: after Learning)
   // 既有 agent-tracker.js 行為 0 mutation；mount target 從 tab-learning.html → tab-agents.html
   // icon=🤖 robot（對齊既有 emoji icon set）；read-only never-emit surface（V3 §11 P5）
   // agent-tracker.js logic 0 mutation; mount target swapped from tab-learning.html → tab-agents.html
   // icon=🤖 robot (consistent with existing emoji icon set); read-only never-emit surface (V3 §11 P5)
   { id: 'agents',     label: 'AI 团队 Agents',   labelEn: 'Agents',    icon: '&#x1F916;', src: `/static/tab-agents.html?v=${_v}` },
   // ── 治理與運維 ───────────────────────────────────────────────────
-  { id: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
   { id: 'monitoring', label: '监控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
   { id: 'settings',   label: '设置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
 ];

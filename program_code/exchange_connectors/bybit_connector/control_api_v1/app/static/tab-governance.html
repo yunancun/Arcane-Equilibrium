@@ -6,6 +6,64 @@
 <title>Governance Control Center</title>
 <script src="/static/common.js"></script>
 <script src="/static/governance.js"></script>
+<style>
+  .gov-sm-grid { align-items: stretch; margin-bottom: 14px; }
+  .gov-sm-card { display: flex; flex-direction: column; }
+  .gov-sm-card h3 { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  .gov-sm-note {
+    margin: 10px 0 12px;
+    padding: 10px 12px 10px 14px;
+    background: rgba(13, 17, 23, 0.58);
+    border-left: 4px solid var(--accent);
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .gov-learn { margin: 0 0 14px; }
+  .gov-learn summary {
+    list-style: none;
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    user-select: none;
+  }
+  .gov-learn summary::-webkit-details-marker { display: none; }
+  .gov-learn summary::before {
+    content: "\25B6";
+    display: inline-block;
+    margin-right: 6px;
+    font-size: 10px;
+  }
+  .gov-learn[open] summary::before { content: "\25BC"; }
+  .gov-learn-body {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.75;
+  }
+  .gov-state-flow {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 11px;
+  }
+  .gov-flow-arrow { color: var(--text-dim); }
+  .gov-section-label {
+    margin: 10px 0 8px;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .gov-full-row { margin-bottom: 14px; }
+</style>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -15,15 +73,15 @@
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div>
       <h2>&#x2696; Governance Control Center / 治理控制中心</h2>
-      <div class="subtitle">授权、风控、租约、对账的统一控制台</div>
+      <div class="subtitle">授权、租约、执行、风控、对账的统一控制台</div>
     </div>
   </div>
   <div id="explain-governance"></div>
 </div>
 
 <!-- ═══ Quick Status Banner / 快速状态栏 ═══ -->
-<!-- One-line summary: Auth | Risk Level | Reconciler | Learning — updates with main 10s poll -->
-<!-- 单行状态摘要：授权 | 风险等级 | 对账 | 学习层级 — 随主轮询 10s 刷新 -->
+<!-- One-line summary: Auth | Risk Level | OMS | Reconciler | Learning — updates with main 10s poll -->
+<!-- 单行状态摘要：授权 | 风险等级 | 执行 | 对账 | 学习层级 — 随主轮询 10s 刷新 -->
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;
   background:var(--card-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:12px">
   <span style="color:var(--text-dim)">&#x26A1; Quick Status:</span>
@@ -31,19 +89,29 @@
   <span style="color:var(--border)">|</span>
   <span title="SM-04 风险治理等级 / SM-04 risk governance level">Risk: <strong id="qs-risk">--</strong></span>
   <span style="color:var(--border)">|</span>
+  <span title="SM-03 订单执行状态 / SM-03 order execution state">OMS: <strong id="qs-oms">--</strong></span>
+  <span style="color:var(--border)">|</span>
   <span title="EX-04 对账状态 / EX-04 reconciliation status">Recon: <strong id="qs-recon">--</strong></span>
   <span style="color:var(--border)">|</span>
   <span title="学习层级 / Learning tier">Learning: <strong id="qs-learning">--</strong></span>
   <button class="oc-btn" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="loadGovernance()">&#x1F504;</button>
 </div>
 
-<!-- ═══ 2x2 Grid: 4 Cards ═══ -->
-<div class="oc-grid-2">
+<!-- ═══ Core State Machines / 核心狀態機 ═══ -->
+<div class="gov-section-label">Core State Machines / 核心状态机</div>
+<div class="oc-grid-2 gov-sm-grid">
 
   <!-- Card 1: Authorization (SM-01) -->
-  <div class="oc-card">
+  <div class="oc-card gov-sm-card">
     <h3>&#x1F511; Authorization / 授权 <abbr title="SM-01: 授权状态机。控制谁可以获取授权租约 Lease 执行交易 / Authorization state machine. Controls who can acquire a Lease to execute trades." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
     <div class="subtitle">授权状态和范围</div>
+    <div class="gov-sm-note">SM-01 管理操作授权、有效期和可用范围。没有有效授权时，系统不得进入真实执行链路。</div>
+    <details class="gov-learn">
+      <summary>了解更多 / Learn more</summary>
+      <div class="gov-learn-body">
+        它回答三个问题：谁被授权、授权能持续多久、授权覆盖哪些操作范围。授权过期、撤销或被冻结时，后续租约和执行状态都应停止推进。
+      </div>
+    </details>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="flex:1">
@@ -84,39 +152,20 @@
     </button>
   </div>
 
-  <!-- Card 2: Risk Governor (SM-04) -->
-  <div class="oc-card">
-    <h3>&#x1F6E1; Risk Governor / 风控治理 <abbr title="SM-04: 风险治理状态机。管理 Normal/Cautious/Defensive/CircuitBreaker 四级风险等级 / Risk governance state machine. Manages Normal/Cautious/Defensive/CircuitBreaker levels." style="font-size:10px;color:var(--text-dim);cursor:help">SM-04</abbr></h3>
-    <div class="subtitle">风险等级和模式</div>
-
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Level / 等级</div>
-        <div id="risk-level-badge">--</div>
-      </div>
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Mode / 模式</div>
-        <div id="risk-mode-badge">--</div>
-      </div>
-    </div>
-
-    <div style="margin-bottom:12px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Reason / 原因</div>
-      <div id="risk-reason" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px;white-space:pre-wrap">--</div>
-    </div>
-
-    <button class="oc-btn oc-btn-primary" id="btn-override" style="width:100%" onclick="showOverrideModal()">
-      &#x1F4A7; De-escalate / 降级
-    </button>
-  </div>
-
-  <!-- Card 3: Decision Leases (SM-02) — collapsed by default / 默认折叠 -->
-  <div class="oc-card">
+  <!-- Card 2: Decision Leases (SM-02) -->
+  <div class="oc-card gov-sm-card">
     <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleDL()">
       <span>&#x1F4DD; Decision Leases / 决策租约 <abbr title="SM-02: 决策租约状态机。每个 AI 交易意图持有一个有时效的租约，过期自动作废 / Decision lease state machine. Each AI intent holds a time-bounded lease that auto-expires." style="font-size:10px;color:var(--text-dim);cursor:help">SM-02</abbr></span>
       <span id="dl-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展开</span>
     </h3>
     <div class="subtitle">活跃租约追踪</div>
+    <div class="gov-sm-note">SM-02 把 AI 或策略意图转换为短时有效的执行租约。租约过期或被释放后，该意图不能继续下单。</div>
+    <details class="gov-learn">
+      <summary>了解更多 / Learn more</summary>
+      <div class="gov-learn-body">
+        它将“交易意图”和“执行许可”分离。每个租约都有 TTL、范围和状态，确保旧判断不会在市场条件变化后继续生效。
+      </div>
+    </details>
 
     <div id="dl-body" style="display:none">
     <div class="oc-metrics">
@@ -145,40 +194,122 @@
     </div><!-- end dl-body -->
   </div>
 
-  <!-- Card 4: Reconciliation (EX-04) — collapsed by default / 默认折叠 -->
-  <div class="oc-card">
-    <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleRecon()">
-      <span>&#x1F503; Reconciliation / 对账 <abbr title="EX-04: 持仓对账。比较 Rust 内部持仓与交易所实际持仓，检测漂移 / Position reconciler. Compares engine positions vs exchange actuals, detects drift." style="font-size:10px;color:var(--text-dim);cursor:help">EX-04</abbr></span>
-      <span id="recon-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展开</span>
-    </h3>
-    <div class="subtitle">一致性检查和手动触发</div>
+  <!-- Card 3: OMS Execution (SM-03) -->
+  <div class="oc-card gov-sm-card">
+    <h3>&#x1F9FE; OMS / 执行状态 <abbr title="SM-03: OMS 执行状态机。管理订单从创建、校验、提交到成交、取消或失败的生命周期 / OMS execution state machine. Manages order lifecycle from creation and validation to submission, fill, cancel, or failure." style="font-size:10px;color:var(--text-dim);cursor:help">SM-03</abbr></h3>
+    <div class="subtitle">订单生命周期和执行边界</div>
+    <div class="gov-sm-note">SM-03 管理订单从创建、校验、提交、成交到取消或失败的生命周期。只有通过授权、租约和风控的意图才应进入此状态机。</div>
+    <details class="gov-learn">
+      <summary>了解更多 / Learn more</summary>
+      <div class="gov-learn-body">
+        它回答“这笔交易是否已经成为订单、订单是否已提交、最终是否成交或终止”。SM-03 不授予交易权限；它执行前必须依赖 SM-01、SM-02 和 SM-04 的结果。
+      </div>
+    </details>
 
-    <div id="recon-body" style="display:none">
+    <div class="oc-metrics">
+      <div class="oc-metric">
+        <div class="oc-metric-label">Readiness / 准备状态</div>
+        <div class="oc-metric-val" id="oms-readiness" style="font-size:13px">--</div>
+      </div>
+      <div class="oc-metric">
+        <div class="oc-metric-label">Blocker / 阻断原因</div>
+        <div class="oc-metric-val" id="oms-blocker" style="font-size:12px;line-height:1.45">--</div>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Lifecycle / 生命周期</div>
+      <div class="gov-state-flow" id="oms-lifecycle">
+        <span class="oc-chip oc-chip-neutral">CREATED</span>
+        <span class="gov-flow-arrow">→</span>
+        <span class="oc-chip oc-chip-info">VALIDATED</span>
+        <span class="gov-flow-arrow">→</span>
+        <span class="oc-chip oc-chip-info">SUBMITTED</span>
+        <span class="gov-flow-arrow">→</span>
+        <span class="oc-chip oc-chip-good">FILLED</span>
+        <span class="gov-flow-arrow">/</span>
+        <span class="oc-chip oc-chip-neutral">CANCELLED</span>
+        <span class="gov-flow-arrow">/</span>
+        <span class="oc-chip oc-chip-bad">FAILED</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 4: Risk Governor (SM-04) -->
+  <div class="oc-card gov-sm-card">
+    <h3>&#x1F6E1; Risk Governor / 风控治理 <abbr title="SM-04: 风险治理状态机。管理 Normal/Cautious/Defensive/CircuitBreaker 四级风险等级 / Risk governance state machine. Manages Normal/Cautious/Defensive/CircuitBreaker levels." style="font-size:10px;color:var(--text-dim);cursor:help">SM-04</abbr></h3>
+    <div class="subtitle">风险等级和模式</div>
+    <div class="gov-sm-note">SM-04 根据账户、持仓、回撤和异常信号调整风险等级。风险升高时自动收缩；风险降低通常需要明确审批。</div>
+    <details class="gov-learn">
+      <summary>了解更多 / Learn more</summary>
+      <div class="gov-learn-body">
+        它决定系统应处于正常、谨慎、收缩、防守、熔断或人工审查状态。策略不能绕过 SM-04，风险锁定时订单执行必须停止推进。
+      </div>
+    </details>
+
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Status / 状态</div>
-        <div id="recon-consistency">--</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Level / 等级</div>
+        <div id="risk-level-badge">--</div>
       </div>
       <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Last Check / 最后检查</div>
-        <div id="recon-time" style="font-size:12px">--</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Mode / 模式</div>
+        <div id="risk-mode-badge">--</div>
       </div>
     </div>
 
     <div style="margin-bottom:12px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Result / 结果</div>
-      <div id="recon-result" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px">--</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Reason / 原因</div>
+      <div id="risk-reason" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px;white-space:pre-wrap">--</div>
     </div>
 
-    <button class="oc-btn oc-btn-primary" id="btn-reconcile" style="width:100%" onclick="showReconcileModal()">
-      &#x1F504; Trigger / 触发对账
+    <button class="oc-btn oc-btn-primary" id="btn-override" style="width:100%" onclick="showOverrideModal()">
+      &#x1F4A7; De-escalate / 降级
     </button>
-    </div><!-- end recon-body -->
   </div>
 
 </div>
 
+<!-- ═══ Reconciliation (EX-04) / 對帳擴展 ═══ -->
+<div class="gov-section-label">Reconciliation Extension / 对账扩展</div>
+<div class="oc-card gov-full-row">
+  <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleRecon()">
+    <span>&#x1F503; Reconciliation / 对账 <abbr title="EX-04: 持仓对账。比较 Rust 内部持仓与交易所实际持仓，检测漂移 / Position reconciler. Compares engine positions vs exchange actuals, detects drift." style="font-size:10px;color:var(--text-dim);cursor:help">EX-04</abbr></span>
+    <span id="recon-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展开</span>
+  </h3>
+  <div class="subtitle">一致性检查和手动触发</div>
+  <div class="gov-sm-note">EX-04 比较系统内部记录与交易所实际状态，发现持仓、订单或余额漂移。它不是核心授权状态机，但会影响风控和审计判断。</div>
+  <details class="gov-learn">
+    <summary>了解更多 / Learn more</summary>
+    <div class="gov-learn-body">
+      对账用于确认“系统记录状态”和“交易所实际状态”是否一致。若出现不一致，应优先调查并可能触发 SM-04 风控收缩。
+    </div>
+  </details>
+
+  <div id="recon-body" style="display:none">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <div style="flex:1">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Status / 状态</div>
+      <div id="recon-consistency">--</div>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Last Check / 最后检查</div>
+      <div id="recon-time" style="font-size:12px">--</div>
+    </div>
+  </div>
+
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Result / 结果</div>
+    <div id="recon-result" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px">--</div>
+  </div>
+
+  <button class="oc-btn oc-btn-primary" id="btn-reconcile" style="width:100%" onclick="showReconcileModal()">
+    &#x1F504; Trigger / 触发对账
+  </button>
+  </div><!-- end recon-body -->
+</div>
+
 <!-- ═══ Live Auth / 實盤授權管理 ═══ -->
+<div class="gov-section-label">Authorization Operations / 授权操作</div>
 <!-- Moved from tab-live.html — accessible even when Live engine is not running -->
 <!-- 從 tab-live.html 移入 — 即使 Live 引擎未啟動也可操作，打破鎖死循環 -->
 <div class="oc-card" id="live-auth-card">
@@ -221,6 +352,7 @@
 </div>
 
 <!-- ═══ Paper → Live Gate / 升级门禁 ═══ -->
+<div class="gov-section-label">Eligibility & Learning / 准入与学习</div>
 <div class="oc-card" id="paper-live-gate-card">
   <h3>&#x1F4CB; Paper 模拟 &#x2192; Live 实盘 Gate / 升级门禁</h3>
   <div class="subtitle">升级 Live 实盘前的 11 项准入评估</div>
@@ -290,6 +422,39 @@
 </div>
 
 <!-- ═══ Governance Events Feed / 治理事件流 ═══ -->
+<div class="gov-section-label">Approvals & Events / 审批与事件</div>
+<!-- ═══ Pending Approvals / 待批准項目 ═══ -->
+<div class="oc-card" id="pending-approvals-card">
+  <h3 style="cursor:pointer" onclick="togglePendingApprovals()">
+    &#x2B55; Pending Approvals / 待批准項目
+    <span id="pending-toggle" style="float:right">▼</span>
+  </h3>
+  <div id="pending-approvals-body">
+    <div class="oc-tabs-wrapper" style="margin-top:12px">
+      <!-- Tab 1: Recovery Requests -->
+      <div style="margin-bottom:12px">
+        <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Recovery Requests / 恢復請求</h4>
+        <div id="pending-recovery-content" style="padding:8px 0">
+          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+        </div>
+      </div>
+      <!-- Tab 2: Audit Changes -->
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <h4 style="font-size:12px;color:var(--text-dim);margin:0">Change Approvals / 變更批准</h4>
+          <span id="btn-bulk-actions" style="margin-left:auto;display:none">
+            <button class="oc-btn oc-btn-success" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('approve')">全部同意 Approve All</button>
+            <button class="oc-btn oc-btn-danger" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('reject')">全部拒绝 Reject All</button>
+          </span>
+        </div>
+        <div id="pending-audit-content" style="padding:8px 0">
+          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="oc-card" id="events-feed-card">
   <h3 style="cursor:pointer" onclick="toggleEventsFeed()">
     &#x1F4E1; Governance Events / 治理事件流
@@ -306,6 +471,7 @@
 </div>
 
 <!-- ═══ Cross-SM Summary ═══ -->
+<div class="gov-section-label">Status & Audit / 状态与审计</div>
 <div class="oc-card">
   <h3>&#x1F4CA; Governance Summary / 治理摘要</h3>
 
@@ -342,38 +508,6 @@
   <div id="incident-log-body">
     <div id="incident-log-content" style="max-height:400px;overflow-y:auto">
       <p style="color:var(--text-dim)">Loading... / 載入中...</p>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ Pending Approvals / 待批准項目 ═══ -->
-<div class="oc-card" id="pending-approvals-card">
-  <h3 style="cursor:pointer" onclick="togglePendingApprovals()">
-    &#x2B55; Pending Approvals / 待批准項目
-    <span id="pending-toggle" style="float:right">▼</span>
-  </h3>
-  <div id="pending-approvals-body">
-    <div class="oc-tabs-wrapper" style="margin-top:12px">
-      <!-- Tab 1: Recovery Requests -->
-      <div style="margin-bottom:12px">
-        <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Recovery Requests / 恢復請求</h4>
-        <div id="pending-recovery-content" style="padding:8px 0">
-          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
-        </div>
-      </div>
-      <!-- Tab 2: Audit Changes -->
-      <div style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <h4 style="font-size:12px;color:var(--text-dim);margin:0">Change Approvals / 變更批准</h4>
-          <span id="btn-bulk-actions" style="margin-left:auto;display:none">
-            <button class="oc-btn oc-btn-success" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('approve')">全部同意 Approve All</button>
-            <button class="oc-btn oc-btn-danger" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('reject')">全部拒绝 Reject All</button>
-          </span>
-        </div>
-        <div id="pending-audit-content" style="padding:8px 0">
-          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
-        </div>
-      </div>
     </div>
   </div>
 </div>
@@ -562,12 +696,13 @@ function toggleRecon() {
 // ── Quick Status Banner updater — hooks into governance-tab.js data flows ──
 // Populated by loadGovernance() and loadSummary() callbacks in governance-tab.js
 // 通过 governance-tab.js 的 loadGovernance()/loadSummary() 回调填充
-function updateQuickStatus(auth, risk, recon, learning) {
+function updateQuickStatus(auth, risk, recon, learning, oms) {
   const el = function(id) { return document.getElementById(id); };
   if (auth !== undefined) el('qs-auth').textContent = auth || '--';
   if (risk !== undefined) el('qs-risk').textContent = risk || '--';
   if (recon !== undefined) el('qs-recon').textContent = recon || '--';
   if (learning !== undefined) el('qs-learning').textContent = learning || '--';
+  if (oms !== undefined) el('qs-oms').textContent = oms || '--';
 }
 // Expose for governance-tab.js / 暴露给 governance-tab.js 使用
 window.updateQuickStatus = updateQuickStatus;
