@@ -3055,3 +3055,116 @@ PM dispatch Wave 3 Batch 3B 並行（with E2/E4 review + S10 CI + U10 a11y）。
 
 ### 報告路徑
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave3_p2b_s8_s9_guards.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 4 R20-P2b-T1 isolated runner wrapper IMPL
+
+### 任務脈絡
+Wave 4 P2b-T1：把 Wave 3 已 land 的 3-layer guard chain（S7 profile cfg / S8 forbidden_guard / S9 mac_policy_guard）下游補齊 actual replay logic（CLI / fixture / pipeline / report）。Wave 3 land 之 binary 僅 stub `eprintln!`;Wave 4 T1 接入功能性 binary。
+
+### 5 新 lib module + 1 e2e test + fixture
+| 檔 | LOC | 用途 |
+|---|---|---|
+| `src/replay/cli.rs` | 376 | hand-rolled `--manifest --output-dir [--baseline-id]` 解析器，刻意避 clap 因 workspace 未列且 PA boundary §4 allowlist 限制 |
+| `src/replay/fixture_loader.rs` | 448 | S2 / S3 fixture JSON → `Vec<MarketEvent>`（schema_version=1）；ForbiddenTier (S0/S1/S4) 拒絕；replay:// scheme reject |
+| `src/replay/runner.rs` | 676 | `IsolatedPipeline` orchestrator + `ReplayResult` + 5 status 配對；每 event 前呼 `forbidden_guard::enforce_at_runtime` |
+| `src/replay/report_writer.rs` | 391 | `replay_report.json` + summary.txt；`schema_version=1` envelope；`execution_confidence` 原樣傳遞 |
+| `src/bin/replay_runner.rs` | 471 (270 + 200) | binary entry: 3 guard → CLI → manifest verify → fixture load → IsolatedPipeline.execute → report write |
+| `tests/replay_runner_e2e.rs` | 468 | 6 acceptance proof（5 spec + 1 helper round-trip）|
+| `tests/fixtures/replay_runner_e2e/` | 3 file | synthetic_btcusdt.json (10 ticks) + key.hex (32 bytes hex) + README.md |
+
+### 關鍵設計決策
+- **不 reuse 既有 IntentProcessor / TickPipeline**：違反 PA boundary §5（IntentProcessor 拖 paper_state / canary_writer / database / DecisionFeatureMsg / bybit_rest_client，nm symbol audit S10 會 fail）。改採 minimal in-memory pipeline（每 symbol 首見 emit 1 entry fill，後續 mark-to-market by close-to-close delta）— V3 §6.1 「may share」是 permission 不是 obligation。Wave 5 P3a 可以 strategy module 抽取重做。
+- **CLI 不用 clap**：workspace 無 clap dep；hand-roll 三 flag (manifest / output-dir / baseline-id)，POSIX `--flag=v` + `--flag v` 雙形態。9/9 unit test。
+- **manifest verify T1 self-consistency 路徑**：當 `<manifest_dir>/key.hex` 存在時走完整 HMAC 4-fail-mode；不存在時跳過（stderr warning）。Wave 4 T2 將以 SQL-backed `KeyArchive`（Wave 3 V042 archive write）收緊。
+- **execution_confidence='none' 不變量**（V3 §12 #11）：runner.rs hardcode 為 `"none"`；report_writer 原樣傳遞、不 mutate。
+- **TripFlag fail-closed 縱深防禦**：runner.rs `IsolatedPipeline.execute()` 每 event 前呼 `enforce_at_runtime(action_label)`；abort 時填 `abort_reason` + `status=AbortedForbidden`，已成 fill 保留供 audit。
+
+### V3 §12 acceptance binding
+- #8 resource_isolation：replay_runner 0 IPC/dispatch/lease/GovernanceHub（nm audit AUDIT PASS / 393 symbol scanned / 0 forbidden hit）
+- #9 no_decision_lease：runner.rs 0 acquire_lease symbol
+- #10 fail_closed：proof 4 forbidden_path_trip_via_env_aborts_run PASS，pipeline 在 `enforce_at_runtime` Err 時 abort
+- #11 confidence_label：runner hardcode + report_writer 透傳 `none`
+
+### 雙語注釋覆蓋
+- 5 新 module + 1 bin（replay_runner.rs 改寫部分）+ 1 e2e test 全帶 MODULE_NOTE EN/中 雙塊
+- 公開型別 / 函式 / 不變量 / TODO 全雙語
+- Helper 內部 fn 雙語 docstring + SAFETY 注釋
+
+### LOC budget 標記
+- 全 6 新檔 ≤ 676 LOC（< 800 警告線）
+- 6 e2e proofs（5 spec + 1 helper round-trip） + 9 cli unit test + 18 lib replay::* unit test = 33 new test;0 sibling regression
+
+### 後續 wiring
+- E2 review：對 PA boundary §5 forbidden import 0 hit（grep 確認）+ nm symbol audit AUDIT PASS / 393 symbol / 0 forbidden + V3 §12 #8/#10/#11 binding + 雙語 MODULE_NOTE 完整 + LOC < 800 + 是否接受 IntentProcessor reuse 留 ambiguity（不引入,避 boundary breach）
+- E4 regression：Linux trade-core 跑 `cargo test -p openclaw_engine --features replay_isolated --tests`（已 Mac dev 預驗 2447 lib + 58 integration + 19 sibling test 集 = 21 suite 全 PASS）+ release smoke test（`OPENCLAW_REPLAY_MAC_NO_PRIVATE=1 target/release/replay_runner --manifest <fixture> --output-dir /tmp/out` exit 0 + JSON written）
+- E3 review：CLI hand-roll 對抗 escape attack / argv 注入安全性 + manifest_signer T1 self-consistency 路徑 vs Wave 4 T2 SQL archive 路徑切換時間表 + Wave 4 T1 對 mac_policy_guard 已 land sibling 2 doctest fail（pre-existing 自 Wave 3 commit `5a618ff`）的處理建議
+
+### 已知 ambiguity（向 PM push back）
+1. **既有 IntentProcessor / TickPipeline reuse 邊界**：T1 不 reuse 採 minimal stub（理由：拖 paper_state/canary_writer/database/bybit_rest_client，nm audit S10 fail）。Wave 5 P3a 若需「真實策略 replay 邏輯」需先派 PA + E2 重評 IntentProcessor 重構為 `replay_compatible` feature gate。**不阻塞 T1**。
+2. **mac_policy_guard.rs sibling pre-existing doctest fail**（自 Wave 3 commit `5a618ff` 起）：line 32/88 ASCII table 未 fence，被 doctest parser 誤判為 Rust code → 6 個 unicode escape error。E1 已新建 5 個 module 全用 ` ```text ` fence 避此問題,**不順手修 sibling**（per CLAUDE.md §八「最小影響」+ E1 profile.md「不能在修復過程中順手優化未被要求的代碼」）。建議 E5 / 後續 PA wave 修。**不阻塞 T1 acceptance**：cargo test --tests（不含 doctest）21/21 PASS；僅 cargo test --doc 看到該 2 fail。
+3. **manifest signing canonicalisation drift**：T1 self-consistency 用「磁碟內容自身」做簽名 / 驗證（自洽即可 PASS）。production 環境需要 Python sibling signer 與 Rust 端對 sorted-keys serde_json 的 byte-equal canonicalisation；目前 Python 側未 deploy（Wave 3 P2a-S2 land Rust 但 V042 SQL archive 與 Python signer Wave 4 T2 落地）。T1 路徑可運作於 fixture 但 production deploy 必先確 Wave 4 T2 + Python signer byte-equal。
+4. **`research_notes/replay_fixtures/` baseline 目錄**：本 task 不建（V3 §6.4 baseline snapshot 屬 PM curated sha-pin 流程）;test fixture 在 `tests/fixtures/replay_runner_e2e/`,與 production baseline 路徑刻意分離。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave4_p2b_t1_isolated_runner.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 4 R20-P2b-T2 + T3 合併 IMPL（PM 派發；E1 sub-agent；Mac dev）
+
+### 任務契約
+- 上游：`docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md` §4 Wave 4 P2b-T2 + T3
+- Spec：V3 §3 G3/G7 + §6 + §12 #3/#7/#14/#22；Wave 2 dispatch v1.1 §6 Option C 決策（PG advisory lock retrofit 取代 in-memory `_ACTIVE_RUNS`）
+- Owner：E1 sub-agent；E2 + E3 + MIT review-ready
+
+### 主要交付
+1. **`replay_routes.py` 升級到 1498 LOC（< 1500 cap）**：8 endpoints actual wired，PG advisory-lock 主路徑 + in-memory dict fallback；保 既有 4 auth pytest 不退化（紅線 0 break）。
+2. **`replay/route_helpers.py`（新建 314L）**：subprocess.Popen 包裝（whitelisted env per V3 §6.2）+ advisory lock try-acquire + V045 schema-presence probe + active-run count helpers。
+3. **`replay/run_state_manager.py`（新建 682L）**：4 lifecycle ops（start_run / get_run_status / mark_run_complete / cancel_run）；schema-absent graceful；SIGTERM via os.kill + DB row flip。
+4. **`replay/canary_writer.py`（新建 437L）**：5 artifact_type 寫 filesystem + register replay.report_artifacts；Linux real / Mac is_mock=True。
+5. **V045__replay_run_state.sql**：CREATE TABLE + 5-status CHECK + runtime_environment CHECK + 2 hot-path index（actor_id+status, status only）；Guard A + Guard C；雙語注釋。
+6. **V046__replay_report_artifacts.sql**：CREATE TABLE + FK CASCADE 到 V045 + 5-artifact_type CHECK + 1 hot-path index；Guard A（含 V045 prereq 檢查）+ Guard C；雙語注釋。
+7. **REF-20_RESERVATION.md ledger v1.3**：V045 + V046 buffer 啟用（reserved → land）。
+8. **4 test files（37 test cases）**：
+   - `test_replay_routes_t2_subprocess.py` (9 case)：8 endpoint wire，mock subprocess + mock PG
+   - `test_replay_routes_t2_pg_advisory_lock.py` (5 case)：advisory lock 4 path + symbol surface
+   - `test_canary_writer.py` (6 case)：write/register/validate/Mac/enum match
+   - `tests/migrations/test_v045_v046_replay_run_state_artifacts.py` (13 case)：V045/V046 schema 靜態 parse 驗證
+
+### 設計決策
+- **PG advisory lock + in-memory dict 雙路徑共存**：紅線「既有 4 auth pytest 0 break」要求 `_ACTIVE_RUNS` symbol 必保留。設計為「PG 為 canonical；V045 缺或 PG 不可達時 fallback in-memory」。tests/test_replay_routes_auth.py 既有 4 case 仍走 in-memory 路徑（autouse `_reset_active_runs_for_test()`）。
+- **subprocess.Popen 環境白名單**：per V3 §6.2 + §12 #14 紅線，子程序只接收 8 個 env var（OPENCLAW_BASE_DIR / OPENCLAW_DATA_DIR / OPENCLAW_REPLAY_MAC_NO_PRIVATE / OPENCLAW_REPLAY_RUNTIME_ENV / HOME / PATH / USER / LANG）；無 live secrets 傳遞。
+- **manifest_id UUID5 衍生**：experiment_id 是 user-facing string；V045 manifest_id 是 UUID。用 UUID5 namespace `00000000-0000-0000-0000-000020260503` + experiment_id 衍生，跨 route 一致（POST /run + GET /report 同公式 → 同 UUID）。
+- **PG advisory lock 兩鎖串行**：global `hashtext('replay_run_global')` 先 + per-actor `hashtext('replay_run_actor:'||actor_id)` 後；同 transaction 內取得；commit/rollback 自動釋放（xact-scoped）。
+- **manifest_signer module-level import + dual-path**：原本兩個 lazy import 各佔 ~17 LOC；提到 module-init `try ..manifest_signer / except ImportError: try replay.manifest_signer / except ImportError: _ms = None`，省 ~30 LOC，使檔案合 1500 cap。
+- **route_helpers.py 抽取**：原 routes 1811 LOC（炸 1500 cap）→ 抽出 SUBPROCESS_ENV_WHITELIST / advisory lock helpers / count helpers / schema probes / spawn / path resolvers 到 route_helpers.py（314 LOC）；routes 縮回 1498 LOC（合 cap）。
+
+### 驗證
+- pytest：37 / 37 PASS（24 route + canary + 13 V045/V046 schema）
+- py_compile：4 Python 檔全 PASS
+- 跨平台 grep：0 hard-coded `/home/ncyu` 或 `/Users/ncyu` 字面值
+- V045/V046 雙語注釋 + Guard A + Guard C + bilingual：full PASS（test_v045_v046_*.py 13/13）
+- 既有 4 auth pytest 不退化：4/4 PASS
+
+### V3 §12 acceptance binding
+- **#3 route_auth**：既有 4 test 不退化 + 新 4 advisory-lock case PASS
+- **#7 registry_fk**：V046 FK run_id → V045.run_state ON DELETE CASCADE 嚴明；replay.experiments fixture FK 留 logical reference（per V3 §6 fixture 非 migration）
+- **#14 no_live_mutation**：subprocess env 白名單 0 secrets；0 trading.* / 0 live config 寫
+- **#22 safe_query**：replay_routes.py PG 操作全經 `_safe_pg_select` wrapper 或 transaction-scoped cursor with statement_timeout=2s
+
+### 後續 wiring
+- E2 review：advisory lock SQL 對抗 SQL injection / `pg_try_advisory_xact_lock` 對 hashtext collision 風險評估 + subprocess argv 跨平台 escape behavior + V045/V046 Guard A/C SQL 撞號風險（與 sibling sub-agent V###）
+- E3 review：subprocess env 白名單對抗 env-var injection / SUBPROCESS_ENV_WHITELIST 是否該收緊（HOME 是否真需要）+ manifest_signer 雙路徑 import fallback 對 production 部署順序敏感性
+- E4 regression：Linux trade-core 跑 `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_routes_*.py tests/migrations/test_v045_v046_*.py` 全綠 + sibling Wave 4 T1 binary 部署後跑 `OPENCLAW_REPLAY_RUNNER_BIN=$(pwd)/rust/openclaw_engine/target/release/replay_runner pytest test_replay_routes_t2_subprocess` 觀察 PG path active 路徑命中
+- MIT review：V045 / V046 schema 對 ML pipeline 影響（advisor 寫的 mlde_replay_veto 跨 V043 表 vs V046 是否 schema clash） + replay.experiments fixture（P2b runner SQL fixture）與 V045/V046 deploy 順序
+
+### 已知 ambiguity（向 PM push back）
+1. **`_ACTIVE_RUNS` 殘存的 deprecation 期**：紅線禁我移除（既有 4 auth pytest 依賴）。但 Option C 決策本意是「替換」而非「並存」。建議 PM 在 Wave 5+ 派 sub-agent 把 既有 4 test 改寫成 PG-mock 版（dual-path 退役），縮回單一 PG path。**不阻塞 Wave 4**。
+2. **replay.experiments fixture vs V045/V046 部署順序**：V045/V046 用 logical reference（不對 replay.experiments 加 FK）以避前向參考 fixture 表。fixture land 後可選擇追加 FK 約束（migration 範圍）；但這樣會破 V045/V046 idempotency（IF NOT EXISTS 對 ALTER TABLE ADD CONSTRAINT 不適用）。建議 PM 接 Wave 3 P2b-T1 fixture 部署後決定追加 FK 還是保 logical reference。**不阻塞 T2/T3**。
+3. **OPENCLAW_API_WORKERS=4 與 in-memory dict 行為**：Option C 決策說「PG advisory lock 取代 in-memory」是因為 `OPENCLAW_API_WORKERS=4` 下 in-memory dict 跨 worker 不共享。但 fallback 路徑仍走 in-memory；若 Linux runtime PG outage + workers=4，會出現 4 worker 各自 cap 計數（各持 1 active run = 共 4，違 spec=1）。建議 PM 在 deploy doc 強調 Linux runtime PG availability 是 Replay Lab 不可或缺前提。**不阻塞 Wave 4**。
+4. **Subprocess SIGTERM grace period**：os.kill(SIGTERM) 不等 subprocess wait；DB row 立即翻 cancelled。若 replay_runner 對 SIGTERM 處理時間 > 0（理應有清理工作），可能出現 status=cancelled 但 subprocess 仍寫 artifacts → V046 row 出現晚於 status flip。建議 Wave 5 P3a+ canary writer 加 idempotent INSERT ... ON CONFLICT DO NOTHING 保險。**不阻塞 Wave 4**。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave4_p2b_t2_t3_routes_canary.md`

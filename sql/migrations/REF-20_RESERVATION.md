@@ -37,9 +37,9 @@ Buffer：**V045-V050** 暫不綁 task，留給 unknown unknowns。
 | **V042** | R20-P2a-S2 + G9 | Wave 3 | `replay_signing_keys` — key version archive table（key_version, generated_at, retired_at, expires_at 180d） | reserved |
 | **V043** | R20-P4-Q5 | Wave 6 | `replay_mlde_replay_veto_log` — MLDE rank/veto advisory output sink | reserved |
 | **V044** | R20-P6-S14 | Wave 8 | `replay_handoff_idempotency_unique` — UNIQUE(actor, idempotency_key) on handoff requests | reserved |
-| **V045** | reserved buffer | — | unallocated（為 cross-wave 突發需求） | reserved (no task) |
-| **V046** | reserved buffer | — | unallocated | reserved (no task) |
-| **V047** | reserved buffer | — | unallocated | reserved (no task) |
+| **V045** | R20-P2b-T2 | Wave 4 | `replay_run_state` — replay_runner subprocess lifecycle table（PG advisory-lock concurrency-cap path 取代 in-memory _ACTIVE_RUNS, per Wave 2 dispatch v1.1 §6 Option C）；CHECK status enum + CHECK runtime_environment + 2 hot-path index (actor_id+status, status only) | **land 2026-05-03** (E1 sub-agent，Wave 4 P2b-T2 + T3 合併 IMPL) |
+| **V046** | R20-P2b-T3 | Wave 4 | `replay_report_artifacts` — canary / diagnostic / pnl_summary / fill_log / baseline_compare artifact registry；FK run_id REFERENCES replay.run_state ON DELETE CASCADE；is_mock=true 標 Mac dev；CHECK artifact_type enum + 1 hot-path index (run_id+created_at) | **land 2026-05-03** (E1 sub-agent，Wave 4 P2b-T2 + T3 合併 IMPL) |
+| **V047** | reserved buffer | — | unallocated（為 cross-wave 突發需求） | reserved (no task) |
 | **V048** | reserved buffer | — | unallocated | reserved (no task) |
 | **V049** | reserved buffer | — | unallocated | reserved (no task) |
 | **V050** | reserved buffer | — | unallocated | reserved (no task) |
@@ -77,6 +77,7 @@ Buffer：**V045-V050** 暫不綁 task，留給 unknown unknowns。
 | **v1** | 2026-05-03 | PM (R20-P0-T5) | 預留 V036-V050；綁定 9 個 reserved task migration + 6 個 buffer |
 | **v1.1** | 2026-05-03 | E1 (R20-P2a-S4) | V036 + V037 file artifacts landed (3-PR sequence step 1 + step 3)；4 producer 切換同 commit；V038-V040/V041-V044 仍 reserved 待後續 task 派發 |
 | **v1.2** | 2026-05-03 | E1 (R20-P2a-S6) | V038 + V039 + V040 file artifacts landed (3-step retrofit ADD nullable → backfill → ALTER NOT NULL+CHECK)；sibling helper `V040_healthcheck.sql` (3 read-only probes)；pytest fixture `tests/migrations/test_v038_v039_v040_evidence_source_tier.py` 17/17 PASS (Mac dev static-parse layer)；status reserved → land；V041-V044 仍 reserved 待後續 task 派發 |
+| **v1.3** | 2026-05-03 | E1 (R20-P2b-T2 + T3 合併 IMPL) | V045 + V046 buffer 啟用（reserved → land）；V045 `replay_run_state` (run lifecycle + PG advisory-lock concurrency-cap path)；V046 `replay_report_artifacts` (FK CASCADE 到 V045)；雙語 Guard A + Guard C（V045 2 index, V046 1 index）；pytest fixture `tests/migrations/test_v045_v046_replay_run_state_artifacts.py` (Mac dev static-parse layer)；V047-V050 仍 reserved buffer 待後續 task 派發 |
 
 ---
 
