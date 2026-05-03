@@ -6,6 +6,44 @@
 - 測試基準：2614 passed（Sprint 0 TD-1 後）；Sprint 1a+1b 全部通過後預期 2623 passed
 - 系統模式：demo_only
 
+## 2026-05-03 — REF-20 Sprint 2 Track F1 retroactive Wave 3-9 master review（補 §八 evidence trail）
+
+**結論**：7 wave 中 Wave 7 = PASS / Wave 3/4/5/6/8/9 = CONDITIONAL · 共 10 LOW finding · 7 P2 ticket 提案 · **0 P0 / 0 P1 阻塞**
+
+**對抗反問 ≥14 條**（每 wave ≥2 條 + Wave 4/6/8 各 3 條）：
+- Wave 3：mac_policy_guard.rs 中文全形括號 28 處全 self-introduced；commit msg 「sibling pre-existing doctest fail」**錯誤定性**（mac_policy_guard.rs 本就 Wave 3 引入；E5 follow-up 0 ticket）
+- Wave 4：26-file 一綑 commit 違反 §八；commit msg 自承「E2/E4 closure audit pending」但 0 跑；P2-REF20-W6-REFACTOR ticket 漂移 (TODO.md 0 hit)
+- Wave 5：4 file > 800 warn (regime_controller 1062 / shrinkage_router 767 / hierarchical_bayes 756 / mlde_shadow_advisor 812)；N_THRESHOLD 30/50 boundary sweep 缺；mini chain 200/400 v.s. production 1000/2000 CI 0 跑（cold audit 已 flag）
+- Wave 6：mlde_demo_applier.py **1542 > 1500 hard cap**；§九 Pre-existing baseline exception clause 條件 (2)+(3) 未滿足（pre-existing 1541 + Wave 6 +1，雖滿足 +5 LOC margin 但 0 P2 ticket + 0 PM exception declare）；V043 mlde_replay_veto_log healthcheck 缺
+- Wave 7：PA Sprint 1 P1-1 已 flag operator override defer (V3 §11 + Workplan §6 contract violation)；本 wave IMPL scope 純 HTML scaffold；hash routing pre-existing P3 backlog 不阻塞
+- Wave 8：cooldown query 0 row lock 0 isolation level（READ COMMITTED default）→ 兩 worker concurrent same-actor 不同 idempotency_key 1ms 內 race；E2 round 1 HIGH-3 confirmed retroactive；V044 LOCK TABLE 缺 P2-AUDIT-7 已 land
+- Wave 9：KPI cron Mac mock 跑過 Linux 真實 PG 0 跑；V047/V048 plain table 1y retention 0 設
+
+**新立 7 P2 ticket 提案**（PM Sprint 2 patch 一併進 TODO.md）：
+1. P2-WAVE-3-DOCTEST-FIX（mac_policy_guard.rs doctest fail；commit msg 偽稱 pre-existing；E5 follow-up 0 ticket）
+2. P2-WAVE-4-W6-REFACTOR（replay_routes.py 1500 LOC governance；Wave 4 commit msg ack 但 TODO.md 0 hit）
+3. P2-WAVE-5-NTHRESHOLD-SWEEP（shrinkage_router N_THRESHOLD 30/50 boundary sweep 缺 + production chain 1000/2000 CI 跑）
+4. P2-WAVE-6-MLDE-DEMO-APPLIER-SPLIT（mlde_demo_applier.py 1542 LOC；baseline exception clause (2)+(3) 未滿足）
+5. P2-WAVE-6-V043-HEALTHCHECK（V043 0 healthcheck）
+6. P2-WAVE-8-HANDOFF-HEALTHCHECK（handoff request flow 0 healthcheck）
+7. P2-WAVE-9-V047-V048-RETENTION（plain table 1y retention 0 設）
+
+**Cross-Wave ✅ contract**：
+- 0 hardcoded path on production code（reports/memory grep verify echo 除外）
+- 0 INSERT INTO trading.* / 0 live_* mutate / 0 authorization.json touch
+- 0 hard-boundary mutation（live_execution_allowed / max_retries / execution_authority / OPENCLAW_ALLOW_MAINNET）
+- V### sequence 無重號（V041 / V043 / V044 / V045/V046 / V047/V048 各綁不同 wave）
+
+**Lessons learned**：
+1. **§八 不能事後補**：E2 對抗 review 的價值在「攔截」不在「事後檢視」 — 事後檢視只能找文件結構性 finding（LOC / ticket 漂移 / hardcoded path），無法找邏輯性 race condition（這要靠 e2e test 在 deploy 前抓）；retroactive review 只是補 evidence trail
+2. **Wave 4 single-commit 26-file mega 違 §八**：未來 PM autonomous mode 派發 ≥3 wave 並行，必同 commit 立 placeholder E2 retrofit ticket（不能事後補）
+3. **§九 Pre-existing baseline exception clause 條件必須完整滿足**：3 條件 (1) ≤baseline+5 (2) P2 ticket (3) PM Sign-off declare 缺一即治理債；Wave 6 mlde_demo_applier 1542 LOC 條件 (2)+(3) 未滿足是 LOW finding 模式
+4. **commit msg 「同 commit 開 P2 ticket」 ≠ 真進 TODO.md**：Sprint 1 LOW-1 (P2-AUDIT-7) + Wave 4 (P2-REF20-W6-REFACTOR) 兩次相同模式 — E1/E2 retrofit dispatch 必明文要求 grep TODO.md 自驗
+5. **healthcheck 配對是被忽略的常態 gap**：V043/V044/V047/V048 4 V### 落地後 0 healthcheck pairing — CLAUDE.md §七「被動等待 TODO 必附 healthcheck」原則應擴展為「新 V### land 必附 healthcheck」
+6. **本 retroactive 抓出新 LOW 不是 rubber-stamp**：對 7 個 wave 各列嚴謹 grep + LOC + 雙語抽查；Wave 4 violation + Wave 6 1542 + Wave 7 contract violation + 多 ticket 漂移 — 全用 evidence chain 揭露
+
+**report**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-03--ref20_wave3_to_9_retroactive_master_review.md`
+
 ## 2026-05-03 — REF-20 Sprint 1 round 2 retrofit verify（A + C）
 
 **結論**：Track A PASS / Track C **CONDITIONAL（1 LOW finding）**
