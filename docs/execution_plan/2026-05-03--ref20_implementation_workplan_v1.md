@@ -167,7 +167,7 @@ P0 快速通道：`@PA → @E1 → @E2 → @E4 → PM`（可省 FA / E5 / E3 / C
 | **R20-P0-T5** | Migration V### PM 集中分配 | PM | `sql/migrations/` ledger（reserve V0XX-V0ZZ for replay） | 0.25 | G5 |
 | **R20-P0-T6** | 既有 `mlde_shadow_recommendations` INSERT 路徑 grep + 清單 | E1 + E3 | grep report inline | 0.25 | G3 prereq |
 | **R20-P0-T7** | 既有 `source` distinct 分類 SELECT + ambiguous review | E1 + PM 分類 | SQL probe + classification table | 0.25 | G3 prereq |
-| **R20-P0-T8** | `replay_signing_key` 部署 plan + key generation 流程 | PM + Operator | `helper_scripts/secrets/generate_replay_signing_key.sh` | 0.25 | G9 |
+| **R20-P0-T8** | `replay_signing_key` 部署 plan + key generation 流程 | PM + Operator | `helper_scripts/operator/generate_replay_signing_key.sh` | 0.25 | G9 |
 | **R20-P0-T9** | `replay_runner` crate 邊界白名單 + E2 sign-off | PA + E3 | crate dependency graph + symbol allowlist | 0.5 | G7/G8 |
 
 **Wave 1 Exit Criteria**：
@@ -198,7 +198,7 @@ P0 快速通道：`@PA → @E1 → @E2 → @E4 → PM`（可省 FA / E5 / E3 / C
 
 | Task ID | 名稱 | Owner | 修改檔案 | Sprint | V3 §12 |
 |---|---|---|---|---|---|
-| **R20-P2a-S1** | Signing key 生成 + 部署 + 90d rotation script + 180d retention | E1 + E3 + Operator | `helper_scripts/secrets/generate_replay_signing_key.sh` + runbook | 0.5 | #1/#2 |
+| **R20-P2a-S1** | Signing key 生成 + 部署 + 90d rotation script + 180d retention | E1 + E3 + Operator | `helper_scripts/operator/generate_replay_signing_key.sh` + runbook | 0.5 | #1/#2 |
 | **R20-P2a-S2** | HMAC sign+verify module（Rust + Python 雙端，4 fail-mode） | E1 + E3 | `rust/.../replay/manifest_signer.rs` + `python/.../replay/manifest_signer.py` | 1 | #2 |
 | **R20-P2a-S3** | 8 routes auth scaffolding（global=1, per-actor=1） | E1 + E3 + A3 review | `replay_routes.py` | 1 | #3/#22 |
 
