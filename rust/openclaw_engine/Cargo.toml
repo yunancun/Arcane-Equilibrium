@@ -80,6 +80,24 @@ default = []
 # 未開啟則走 stub 路徑，維持 capability 契約（reload_edge_predictor=false）。
 edge_predictor_ort = ["dep:ort"]
 
+# REF-20 Wave 1 R20-P0-T2 — replay_runner binary marker feature.
+# Wave 1: pure feature flag with no extra deps; gates `bin/replay_runner.rs`
+# behind compile-time exclusion so default `cargo build` never pulls the
+# replay binary into the live engine artifact graph (V3 §3 G7/G8 + §6.1/§6.2).
+# Wave 3 R20-P2b-S7/S8/S9/S10 will add allowed-only dependencies (fixture
+# loader / HMAC verifier / Mac policy guard / serde / chrono / clap / tracing)
+# under this same feature without ever pulling intent_processor / ipc_server /
+# build_exchange_pipeline / GovernanceHub / decision_lease.
+# REF-20 Wave 1 R20-P0-T2 — replay_runner binary marker feature。
+# Wave 1：純 feature flag 無額外依賴；於 compile-time 排除 `bin/replay_runner.rs`，
+# 使預設 `cargo build` 永遠不將 replay binary 拉進 live engine artifact graph
+# （V3 §3 G7/G8 + §6.1/§6.2）。
+# Wave 3 R20-P2b-S7/S8/S9/S10 將在同 feature 下加入 allowed-only 依賴
+# （fixture loader / HMAC verifier / Mac policy guard / serde / chrono / clap / tracing）,
+# 絕不拉 intent_processor / ipc_server / build_exchange_pipeline / GovernanceHub /
+# decision_lease。
+replay_isolated = []
+
 [[bin]]
 name = "openclaw-engine"
 path = "src/main.rs"
@@ -98,3 +116,20 @@ harness = false
 [[bin]]
 name = "repair_migration_checksum"
 path = "src/bin/repair_migration_checksum.rs"
+
+# REF-20 Wave 1 R20-P0-T2 — replay_runner binary scaffold.
+# Wave 1: scaffold only (`#![cfg(feature = "replay_isolated")]` + `panic!`).
+# Wave 3 R20-P2b-S7/S8/S9/S10 lands runtime IMPL (Isolated profile,
+# forbidden-path fail-closed, Mac policy guard, CI symbol audit).
+# Crate boundary contract: PA report
+# `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--replay_runner_crate_boundary_allowlist.md`.
+# REF-20 Wave 1 R20-P0-T2 — replay_runner binary 骨架。
+# Wave 1：純骨架（`#![cfg(feature = "replay_isolated")]` + `panic!`）。
+# Wave 3 R20-P2b-S7/S8/S9/S10 落地 runtime IMPL（Isolated profile、
+# forbidden-path fail-closed、Mac policy guard、CI symbol audit）。
+# Crate 邊界契約：PA report
+# `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--replay_runner_crate_boundary_allowlist.md`。
+[[bin]]
+name = "replay_runner"
+path = "src/bin/replay_runner.rs"
+required-features = ["replay_isolated"]

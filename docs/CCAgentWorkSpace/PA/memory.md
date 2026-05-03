@@ -1418,3 +1418,78 @@ Open questions for PM: Q1 rename vs additive constant / Q2 bulk re-synth pending
 
 Hard boundary check: 0 violation（live_execution_allowed / max_retries / OPENCLAW_ALLOW_MAINNET / live_reserved / authorization.json 全保留）。
 Root principle check: 16/16 全合規 + 加強原則 #6 #8 #12。
+
+---
+
+## 2026-05-03 — REF-20 Wave 1 R20-P0-T2 + T3 + T9 合併 deliverable（replay_runner scaffold）
+
+PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
+- T2 = `replay_runner` Rust binary scaffold（spec only）
+- T3 = `ReplayProfile::Isolated` cfg gate 設計 review
+- T9 = `replay_runner` crate 邊界白名單 + E2 sign-off
+
+**Wave 1 Exit Criteria 嚴守**：spec only / scaffold only / 0 runtime IMPL。Compiler 過 + 0 new warning。
+
+### Deliverable 5 件
+
+| # | File | LOC | 性質 |
+|---|---|---:|---|
+| A | `rust/openclaw_engine/src/bin/replay_runner.rs` | 117 | binary scaffold；`#![cfg(feature = "replay_isolated")]` + `panic!("REF-20 P2b-S7/S8 will land runtime; this is Wave 1 scaffold only")` + 4 條 TODO marker（P2b-S7/S8/S9/S10）+ 雙語 module-level doc + 完整 forbidden/allowed list 注釋 |
+| B | `rust/openclaw_engine/Cargo.toml` | +24 LOC | 新 `[features] replay_isolated = []` 純 marker（0 deps）+ 新 `[[bin]] replay_runner` with `required-features = ["replay_isolated"]` |
+| C | `rust/openclaw_engine/src/replay/profile.rs` | 116 | `pub enum ReplayProfile { Live / LiveDemo / PaperLegacy / Isolated }` 純宣告 + `#[allow(dead_code)]` + 雙語 doc（每 variant 含「為何」+ invariant）+ 0 impl 0 method body |
+| D | `rust/openclaw_engine/src/replay/mod.rs` + `lib.rs +5 LOC` | 30 + 5 | 新 `pub mod profile;` + lib.rs 加 `pub mod replay;` 並附 Wave 3 forward-looking comment |
+| E | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--replay_runner_crate_boundary_allowlist.md` | 18.6KB | Crate allowed/forbidden 雙欄列表（每項 V3 / workplan / CLAUDE.md ref）+ nm/objdump CI script + 雙層 cfg gate 設計 + 15 條 E2 sign-off ready checklist + 5 條 ambiguity for PM clarify |
+
+### `cargo check` 兩次驗收
+
+| 變體 | 結果 | 說明 |
+|---|---|---|
+| `cargo check -p openclaw_engine`（無 feature） | ✅ PASS | 21 lib + 3 bin warnings = pre-existing baseline；replay_runner **未編譯**（required-features 阻擋）— compile-time isolation 證明 |
+| `cargo check -p openclaw_engine --bin replay_runner --features replay_isolated` | ✅ PASS | 21 lib pre-existing baseline；replay 三檔（profile.rs / mod.rs / replay_runner.rs）**0 new warnings** |
+| `cargo build -p openclaw_engine --bin replay_runner --features replay_isolated` | ✅ PASS | 產 artifact；run 會以預期訊息 panic |
+| `grep -E '^use |^extern crate' replay_runner.rs profile.rs mod.rs` | 0 hit | 0 import 0 extern crate — 純 spec |
+
+### 雙層 cfg gate 設計（V3 §7.1 #2）
+
+- 第一層 = compile-time `replay_isolated` feature gate（binary 預設不編入 graph，避免 4-feature × 多 mode = matrix 爆）
+- 第二層 = runtime `ReplayProfile` enum（Wave 3 IMPL 加 `requires_lease()` / `enforce_isolated_or_panic()` method）
+- CI 只需 2 build target：(a) default no-feature / (b) `--features replay_isolated`
+
+### 派發給 Wave 3 R20-P2b-S7/S8/S9/S10 的 5 條 ambiguity（PM 派發前 clarify）
+
+1. `OPENCLAW_REPLAY_MAC_FORBID_REAL_DATA` 命名（41 字 vs 建議 14 字 `OPENCLAW_REPLAY_MAC_NO_PRIVATE`）
+2. `tokio` feature subset 限定 `rt-multi-thread + macros`，是否允許 `tokio::time`
+3. `canonical_config_parser` reuse 既有 `crate::config` 讀端 vs fork 子集（read-only assert lint 配套）
+4. `ReplayProfile::requires_lease()` 預期語意（Isolated => false / 其餘 => true）
+5. CI runner 平台（`nm -gU` macOS 兼容）
+
+### Hard boundary check
+
+0 violation：
+- ❌ 未觸 `live_execution_allowed`（Python concept，replay binary 永不 reach）
+- ❌ 未觸 `max_retries=0`（hard boundary 不變）
+- ❌ 未觸 `OPENCLAW_ALLOW_MAINNET`（feature 純 marker）
+- ❌ 未觸 `live_reserved`（無 Python 改動）
+- ❌ 未觸 `authorization.json`（無 live_authorization write 路徑）
+- ❌ 未觸 `decision_lease`（Python 唯一 caller，replay 不接 GovernanceHub）
+
+### Root principle check（16 條）
+
+✅ 16/16 — 加強原則 #1（單一寫入口：replay 物理上不可能寫；compile-time 阻擋）+ #2（讀寫分離：feature gate）+ #4（策略不繞風控：replay 不進 intent dispatch）+ #6（失敗默認收縮：scaffold panic）+ #7（學習 ≠ 改寫 Live：crate boundary 強制）。
+
+### Side-effect identification
+
+- ✅ 既有 `cargo check`/`cargo build` 行為 0 變動（replay_runner 預設不編）
+- ✅ 既有 21 lib warnings = pre-existing baseline，未添 1 條
+- ✅ `lib.rs` 加 `pub mod replay;` 不影響其他模組（replay 無 dep on engine 任何 module）
+- ✅ Cargo.toml 加 features + 1 bin entry，現有 `openclaw-engine` / `repair_migration_checksum` 0 變動
+- ⚠️ Wave 3 R20-P2b-S7 IMPL 派發後：`nm` CI script 需在 Linux/macOS 雙平台驗證；macOS `nm` 默認行為差異（不顯示 undefined symbols）需 `-gU` flag 處理
+
+### E2 sign-off readiness
+
+15/15 checklist 全 ✅（report §7）。E2 必查 3 點（per workplan §8）：
+1. `grep -rE 'acquire_lease|ipc_server|build_exchange_pipeline' replay_runner.rs replay/` Wave 3 IMPL 後 0 hit
+2. `nm target/release/replay_runner | grep -E 'acquire_lease|build_exchange_pipeline|ipc_'` 0 hit
+3. Wave 3 unit test 4 fail-mode（Wave 1 不要求）
+
+**APPROVE FOR E2 SIGN-OFF.** PM commit message 草稿：`feat(replay): scaffold replay_runner binary + ReplayProfile enum spec (REF-20 Wave 1 R20-P0-T2/T3/T9)`
