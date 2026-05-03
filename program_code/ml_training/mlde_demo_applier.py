@@ -106,6 +106,13 @@ except ImportError:  # pragma: no cover - runtime DB path only
     DictCursor = None  # type: ignore[assignment]
     Json = None  # type: ignore[assignment]
 
+# REF-20 P4-S11 evidence-source filter helpers extracted to sibling module
+# to keep this file < CLAUDE.md §九 1500 LOC. / REF-20 P4-S11 抽出 sibling。
+from ml_training.mlde_demo_applier_evidence_filter import (  # noqa: E402
+    EVIDENCE_SOURCE_TIER_ALLOWLIST,
+    fetch_pending_sql_and_params,
+)
+
 logger = logging.getLogger(__name__)
 IpcCall = Callable[[str, dict[str, Any], float], Awaitable[dict[str, Any]]]
 
@@ -499,21 +506,15 @@ async def _get_risk_config(ipc_call: IpcCall, engine: str) -> dict[str, Any]:
     return _as_dict(data.get("config", data))
 
 def _fetch_pending(cur: Any, cfg: DemoApplierConfig) -> list[dict[str, Any]]:
-    cur.execute(
-        """
-        SELECT id, ts, engine_mode, source, recommendation_type, strategy_name,
-               symbol, expected_net_bps, confidence, sample_count, payload
-          FROM learning.mlde_shadow_recommendations
-         WHERE ts >= now() - (%s::int || ' hours')::interval
-           AND engine_mode = %s
-           AND NOT applied
-           AND COALESCE(confidence, 0.0) >= %s
-           AND COALESCE(sample_count, 0) >= %s
-         ORDER BY confidence DESC NULLS LAST, sample_count DESC NULLS LAST, ts DESC
-         LIMIT %s
-        """,
-        (cfg.lookback_hours, cfg.engine_mode, cfg.min_confidence, cfg.min_samples, cfg.max_recommendations),
+    """Fetch eligible MLDE shadow recommendations / 取合資格 MLDE shadow 建議。
+    REF-20 P4-S11 forward-compat filter built in sibling helper.
+    """
+    sql, params = fetch_pending_sql_and_params(
+        cur, lookback_hours=cfg.lookback_hours, engine_mode=cfg.engine_mode,
+        min_confidence=cfg.min_confidence, min_samples=cfg.min_samples,
+        max_recommendations=cfg.max_recommendations,
     )
+    cur.execute(sql, params)
     return [dict(row) for row in cur.fetchall()]
 
 def _already_applied(cur: Any, fingerprint: str, cfg: DemoApplierConfig) -> bool:

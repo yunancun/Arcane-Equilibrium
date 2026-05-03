@@ -3472,3 +3472,196 @@ TOTAL                                                                     57 PAS
 
 ### 報告路徑
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave5_p3b_q1_rgm_q2_q3_q4.md`
+
+## 2026-05-03 REF-20 Wave 6 Batch 6C (P4-S11 + P4-S12) — IMPLEMENTATION DONE
+
+**範圍**：兩 task 平行實作，覆蓋 V3 §12 #6 + #22 acceptance binding。
+
+### 學到的核心教訓
+1. **pre-existing baseline + 5 LOC clause vs schema 探測 helper 體積**：
+   `mlde_demo_applier.py` 接手 baseline 1541 LOC 已 pre-existing 超 1500 cap。
+   P4-S11 加 ~200 LOC schema-probe + filter 邏輯會嚴重突破 +5 clause。決策：
+   抽 sibling helper module `mlde_demo_applier_evidence_filter.py`（290 LOC
+   獨立檔），mlde_demo_applier.py 只長 +1 LOC（1541→1542），符合 clause。
+   經驗：**任何 ~50+ LOC 新功能寫 sibling 模組先**，不必先寫進主 file 再撤。
+
+2. **forward-compat schema 探測 = `to_regclass` + `information_schema.columns`**：
+   V036 注釋明白指出 `replay_experiment_id` / `manifest_hash` columns 在
+   V038-V040 retrofit 後才物理化；當前生產 schema 只有 evidence_source_tier
+   land。寫 SQL filter 必先 probe 6 個 capability key（has_tier /
+   has_replay_experiment_id / has_manifest_hash / has_replay_experiments /
+   has_expires_at / has_status），缺哪個 graceful fallback skip 那個 sub-clause。
+   錯例：直接寫 `replay_experiment_id IS NULL OR ...IN (SELECT ... FROM
+   replay.experiments WHERE expires_at > now() AND status NOT IN ...)`
+   會在當前 schema 直接 SQL error。
+
+3. **AST + grep 雙保險的 cur.execute leak audit**：
+   P4-S12 audit 用 AST FunctionDef span map + regex `\b(cur|cursor)\.execute\b`
+   定位每個 call 所屬最內層 function，配 sanctioned set
+   {`_safe_pg_select`, `_do_pg_path`, `_do_pg_cancel`} 比對是否漏網。
+   只用 grep 不行（無法判斷所屬 function）；只用 AST 不行（要逐行 string match
+   pattern）。雙保險 = leak 0 hit 強保證。
+
+4. **transactional advisory lock 路徑 ≠ wrapper 違規**：
+   POST /run + POST /cancel 必直接 cur.execute（advisory lock + INSERT/UPDATE
+   同 xact），不能塞 _safe_pg_select wrapper。Mirror agents_routes 的真意是
+   「SELECT 走 wrapper / mutating xact 走 with get_pg_conn() 同步 helper」。
+   case 1 audit 必依 endpoint 性質分類 (safe_select_only / 
+   transactional_advisory_lock / no_pg)，不可一刀切要求所有 cur.execute 走 wrapper。
+
+5. **既有 unrelated test failure 必先 git stash 驗 pre-existing**：
+   既有 `test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys`
+   fail（assertion 仍找 `INSERT INTO learning.mlde_shadow_recommendations`，
+   但 W3-P2a-S4 已切到 `verify_replay_evidence_and_insert()` SQL）。git stash
+   驗證 my changes 前已 fail，與 P4-S11 無關，向 PM 報告 pre-existing。
+
+### 不確定之處 (向 PM)
+1. **mlde_demo_applier_evidence_filter.py 命名是否該帶 `_`-prefix 標 private**？
+   我選 sibling module 不帶 underscore（pattern 對齊 mlde_demo_applier.py 自身），
+   但若 PA 偏好 `_evidence_filter.py` 私模組命名我可改。
+2. **'mlde_advisor' alias 在 allowlist**：dispatch 寫「evidence_source_tier IN
+   ('real_outcome', 'shadow_live_demo', 'mlde_advisor')」但 V036 / V040 CHECK
+   enum 是 4-tier (real_outcome / calibrated_replay / synthetic_replay /
+   counterfactual_replay)。'shadow_live_demo' 不在 V040 enum 內，無法寫進
+   V040-onward 的物理 column。我用 5 tier (V040 4-tier + 'mlde_advisor' alias)；
+   'shadow_live_demo' 解讀為 dispatch 描述舊 alias 已 retire，未列入 allowlist。
+   PA / FA 若需 'shadow_live_demo' 加回，需先做 V040 ALTER + healthcheck migration。
+3. **replay.experiments 物理表 V041 stub 含 expires_at / status**？V041 stub
+   只 expose experiment_id + half_life_days + embargo_days + created_at，
+   未含 expires_at 與 status — P2b runner SQL fixture (Wave 4) 才補。當前 schema
+   probe 偵測 caps['replay_experiments_has_expires_at'] = False → graceful
+   fallback 走 partial branch (FK existence only)。production deploy 後若 P2b
+   runner fixture land 即自動切 full filter（不需 code change）。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave6_batch6c_p4_s11_s12.md`
+
+
+---
+
+## 2026-05-03 — REF-20 Wave 6 Batch 6A 4 P4 advisory gate IMPL（順序 sequential）
+
+### 派發背景
+PM dispatch：Wave 6 Batch 6A — Q1 DSR + Q2 PBO + Q3 selection bias + Q6 cost_edge_ratio。
+4 task 同 sub-agent sequential IMPL（共用 learning_engine/ + replay_routes hooks）。
+Wave 5 closed (commit 457a458 Linux synced)；Wave 6 = P4 MLDE/Dream advisory + 4 promotion gate。
+
+### 4 task 完成（依序 Q1 → Q2 → Q3 → Q6）
+
+#### TASK 1 — R20-P4-Q1 DSR(K) > 0.95 promotion gate
+NEW: `program_code/learning_engine/dsr_gate.py` (490 LOC)
+- Bailey-Lopez de Prado (2014) Deflated Sharpe Ratio
+- API: `DsrGate(threshold=0.95).compute_dsr(observed_sharpe, n_trials, ...) → DsrResult` + `gate(result) → 'promote'/'borderline'/'block'`
+- 自寫 `_normal_inv_cdf` (Beasley-Springer-Moro，避免 scipy 依賴對齊 quantile_bootstrap 政策)
+- 自寫 `_compute_expected_max_sharpe(K)` (Eq. 8 近似 K=10 ≈ 1.539σ)
+- 自寫 `_compute_psr` (PSR with skew + excess_kurtosis)
+- borderline band [0.90, 0.95) for verdict 細分
+- Test: `tests/test_dsr_gate.py` 10 case PASS（4 PA mandatory + 6 補強 boundary/invariant）
+
+#### TASK 2 — R20-P4-Q2 PBO < 0.5 gate (CSCV)
+NEW: `program_code/learning_engine/pbo_gate.py` (496 LOC)
+- Bailey-Borwein-LdP-Zhu (2014) CSCV (Combinatorially Symmetric CV)
+- 自寫 CSCV (no sklearn / scipy dep) — itertools.combinations C(S, S/2)
+- API: `PboGate(threshold=0.5, min_K=10, min_total_trades=320, s_slices=16).compute_pbo([oos_returns_per_split]) → PboResult` + `gate → 'promote'/'block'`
+- T < s_slices fallback graceful (insufficient_power=True 路徑)
+- 處理 OOS sharpe ties → 用 mean rank (避 logit ±inf)
+- Test: `tests/test_pbo_gate.py` 10 case PASS（4 PA mandatory + 6 補強）
+
+#### TASK 3 — R20-P4-Q3 Selection bias correction metadata validator
+NEW: `program_code/exchange_connectors/.../replay/selection_bias_validator.py` (407 LOC)
+- Sibling 不直改 manifest_signer.py（HMAC 簽名邏輯不碰）
+- API: `validate_selection_bias_correction(manifest, block_key='selection_bias_correction') → ValidationResult`
+- 5 mandatory field: `n_trials_K` (>=10) / `backtest_period_days` / `out_of_sample_pct` (>=0.20, <1.0) / `cv_protocol` (allowlist) / `embargo_days` (>=7 V041 floor)
+- 5 fail mode 枚舉: MISSING_BLOCK / K_TOO_LOW / OOS_PCT_TOO_LOW / UNKNOWN_CV_PROTOCOL / EMBARGO_TOO_LOW
+- bool reject for int field (bool 為 int 子類但 schema 不允)
+- int accept for float field (numeric coerce)
+- Test: `tests/test_selection_bias_validator.py` 14 case PASS（4 PA mandatory + 10 補強 boundary）
+
+#### TASK 4 — R20-P4-Q6 cost_edge_ratio >= 0.8 gate (Python advisor)
+NEW: `program_code/learning_engine/cost_edge_advisor.py` (349 LOC)
+- Python 端 advisor — Rust 端 `cost_edge_advisor_boot.rs` 已存在 (Mac 不能跑 Rust spawn)
+- API: `CostEdgeAdvisor(ratio_threshold=0.8).compute_ratio(edge_bps, cost_bps) → float` + `evaluate(...) → CostEdgeResult` + `gate(result_or_ratio, env_gate=...) → 'actionable'/'advisory_only'/'block'`
+- 環境變數 `OPENCLAW_COST_EDGE_ADVISOR=1` strict-equal "1" 比對（鏡像 Rust spec at line 142 / 145）
+- env_gate=False (default) → 不管 ratio 一律 'advisory_only'（V3 §11 P4 footnote 語義）
+- env_gate=True + ratio>=0.8 → 'actionable'
+- env_gate=True + ratio<0.8 OR NaN (cost<=0) → 'block'（fail-closed）
+- helper `is_env_gate_enabled()` 嚴格 "1" 比對 + 拒絕 "true"/"0"/" 1"/"1 "
+- Test: `tests/test_cost_edge_advisor.py` 13 case PASS（4 PA mandatory + 9 補強 + monkeypatch env var matrix）
+
+### 全部測試結果
+```
+program_code/learning_engine/tests/test_dsr_gate.py                            10 PASS
+program_code/learning_engine/tests/test_pbo_gate.py                            10 PASS
+program_code/learning_engine/tests/test_cost_edge_advisor.py                   13 PASS
+program_code/.../replay/tests/test_selection_bias_validator.py                 14 PASS
+─────────────────────────────────────────────────────────────────────────────
+TOTAL                                                                          47 PASS
+```
+PA 要求 16 case；實 47 case 含 4 PA mandatory + 31 補強（boundary / invariant / module shortcut / NaN / monkeypatch env）
+
+### Governance check 全綠
+- 0 hardcoded `/home/ncyu` / `/Users/ncyu` 路徑（grep 0 命中）
+- 0 trading.* / live mutate (4 模組純 math + dict validate + os.environ.get)
+- 4/4 模組有 MODULE_NOTE 雙語
+- 4/4 模組 LOC < 800（最大 496 PBO）
+- 4/4 test 含 雙語 docstring + 4+ PA mandatory + boundary 防禦
+
+### 不確定 / 向 PM push back
+1. **DSR Eq.8 近似 vs scipy.stats.norm.ppf**：用 Beasley-Springer-Moro IMPL（accuracy ~1e-7 對 K<=10000）。對齊 Wave 5 quantile_bootstrap 純 stdlib 政策。**K > 10000 case 應切 scipy.stats**。建議 wiring sub-task 確認生產 K 預期上限。
+2. **PBO test_pbo_high_blocks_promotion**：用 s_slices=2 + sign_flip 構造 high PBO，但實 Bailey-Borwein 規範用 S>=14。本 test 是 unit-level mathematical sanity，非生產設定模擬。**建議 wiring sub-task 補 integration test 用 S=16 + 真生產 returns**。
+3. **selection_bias_validator embargo_days 與 V041 CHECK 對齊**：本 module 只 check `>= MIN_EMBARGO_DAYS_FLOOR=7` 下限，不檢 `>= max(7, ceil(2 × half_life))` 上限（後者由 `embargo_validator.py` 已處理）。caller 應同時 invoke 2 validator。**請 PM 在 wiring sub-task 確認 chain order**。
+4. **cost_edge_advisor env_gate 預設 False vs Linux runtime 設 True**：Mac dev 環境 (Mac CC) 無 `OPENCLAW_COST_EDGE_ADVISOR=1` set → 全 'advisory_only'。Linux runtime 若 set=1 後是否會破壞 sibling P0/P1 hard boundary？**Rust 端 cost_edge_advisor_boot.rs:122 已說「dual safeguard：env=1 仍須 RiskConfig.cost_edge.enabled=true」**，Python 端是否也要鏡像 RiskConfig.cost_edge.enabled？暫未鏡像（因 RiskConfig 為 Rust ConfigStore，Python 從 IPC 取會引入耦合，超出本 task 範圍）。**請 PM 確認 wiring sub-task 是否需 IPC 雙保險**。
+5. **Wave 6 P4-Q4/Q5 (DreamEngine + MLDE) 未完成本 task 範圍**：plan §4 表列 P4 row 共 6 個（Q1/Q2/Q3/Q4/Q5/Q6 + S11/S12）。本 task 僅 4 (Q1/Q2/Q3/Q6)；Q4/Q5/S11/S12 待後續派發。
+
+### PM commit message draft（單行 conventional commit）
+```
+feat(replay): P4-Q1+Q2+Q3+Q6 — DSR + PBO + selection bias + cost_edge gate (Wave 6 Batch 6A)
+```
+
+### 後續 wiring（不在本 task 範圍）
+- E2 review：4 模組 + 4 test 雙語注釋一致性 + Beasley-Springer-Moro 數學 IMPL 驗證 + selection_bias_validator vs embargo_validator caller chain order 設計
+- E4 regression：Linux trade-core 跑 `python3 -m pytest program_code/learning_engine/tests/ program_code/exchange_connectors/.../replay/tests/` 全綠 + sibling Wave 5 (cell_calibrator/regime_controller/quantile_bootstrap) 不退化
+- MIT review：DSR PSR 數學 vs Bailey-LdP 2014 paper 公式對照；PBO CSCV vs 2014 paper Algorithm 1 對照；cost_edge_advisor env-gate 與 Rust 端 strict-equal "1" 雙端 sync
+- replay_routes wiring sub-task：將 4 gate 串入 `generate_handoff_verdict`，order = power gate → DSR → PBO → cost_edge → selection_bias_correction validate
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave6_batch6a_p4_q1_q2_q3_q6.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 6 Batch 6B (P4-Q4 + P4-Q5)
+
+### Task scope
+順序執行 P4-Q4 (DreamEngine `generate_replay_candidates()` API surface-add，NOT fork) + P4-Q5 (MLDE `rank_and_veto_replay_candidates()` advisory veto chain)。Wave 6 P4 advisory 鏈完成。
+
+### 決定
+1. **Surface-add NOT fork**：dream_engine.py 既有 ~404 行 baseline (Wave 3 P0-T6 落地) — 純加 ReplayIntent / ReplayCandidate dataclass + generate_replay_candidates() module-level helper，0 既有 build_dream_summary / persist_dream_insights mutation。同樣 mlde_shadow_advisor.py 純加 RankedCandidate / RankAndVetoGateInputs / rank_and_veto_replay_candidates()，0 既有 build_recommendations / generate_shadow_recommendations mutation。對齊 V3 §11 P4「they are not rewritten into replay-only tools」。
+2. **V043 不設 FK 至 V045.run_state**：veto row 在 candidate batch 出爐後即可寫入 (尚未 spawn replay_runner subprocess) — 若 FK 至 V045，veto row 必須等 run_state row 先 INSERT，破壞 advisory chain 時序自由度。manifest_id 為 logical UUID reference (與 V045 同 fixture-vs-migration 順序處理)。
+3. **cost_edge_ratio 方向**：V3 §12 #24 `cost_edge_ratio >= 0.8` 我採 edge ÷ cost (語意「edge 主導 cost」) — test 2 設計 edge=2 / cost=10 → ratio=0.2 → veto；路徑 1 (cost ÷ edge) 同 test 得 5.0 → 不 veto，與 spec 矛盾。請 QC 在 V3 §12 #24 確認方向。
+4. **5 veto reason allowlist** = V043 `chk_replay_mlde_veto_reason`：`cost_edge_below_threshold` / `pbo_above_threshold` / `dsr_below_threshold` / `low_confidence_replay` / `unknown_strategy_axis` (NULL = 無 veto，advisory rank-only row)。Python `VetoReasonLiteral` 與 V043 CHECK 對齊。
+
+### 不確定 / 向 PM / PA / QC / MIT push back
+1. **dream_engine.py + mlde_shadow_advisor.py LOC 過 800 警告**：surface-add 後 954 / 812 行。CLAUDE.md §九 "Pre-existing baseline exception" 不適用 (本 wave 推升 baseline)。建議 PM accept governance exception + 開 P2-REF20-W6-REFACTOR ticket 由 E5 在 Wave 6 結束後拆出 `replay_candidate_generator.py` / `replay_candidate_ranker.py`。
+2. **cost_edge_ratio 方向**：見決定 #3。請 QC sign-off V3 §12 #24 預期方向。
+3. **ConfidenceLiteral 4-value vs V3 execution_confidence 3-value**：我用 high/medium/low/none 4-value 為 P4-Q5 input；V3 §4.1 canonical {none, limited, calibrated} 3-value。建議 caller (replay_routes.py) 在 DB 持久化前做 4→3 mapping (high+medium → calibrated / low → limited / none → none)。本函式保留 4-value 給下游 ranker 用。
+4. **V043 hot-path index 暫不立**：append-only + read by GUI on-demand；建議 7d post-deploy 觀察後若需，加 sibling migration `(manifest_id, created_at DESC)` index。
+
+### Pytest output
+- 12/12 PASS (5 Q4 + 4 Q5 mandatory + 3 bonus defensive)
+- 既有 70/70 PASS (regression 0 break)
+
+### PM commit message draft（單行 conventional commit）
+```
+feat(replay): P4-Q4 DreamEngine API + P4-Q5 MLDE veto + V043 advisory_log (Wave 6 Batch 6B)
+```
+
+### 後續 wiring（不在本 task 範圍）
+- E2 review：5 個檔雙語注釋 + LOC budget governance accept + V043 SQL idempotency Linux runtime 實 run × 2
+- E4 regression：Linux trade-core run pytest 既有 + 新 12 case 全 PASS
+- MIT 副審：`_estimate_candidate_edge` baseline 是否合理 (Wave 6 簡單，P4-Q1/Q2 DSR/PBO 上線後替換) + ml_score confidence multiplier 1.0/0.7/0.4/0.0 是否需從 calibration table 學
+- replay_routes wiring (Wave 7+)：POST /run wiring 串 generate_replay_candidates → rank_and_veto_replay_candidates → V043 INSERT (走 verified function 或直 INSERT pending PA decide)
+- P4-Q1 (DSR) / Q2 (PBO) (Wave 6 已完成 batch 6A) output 接入 RankAndVetoGateInputs.dsr_k / pbo
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave6_p4_q4_q5_dream_mlde_advisory.md`
+- `srv/.claude_reports/20260503_153000_ref20_wave6_batch6b_p4_q4_q5.md`
