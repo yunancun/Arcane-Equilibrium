@@ -1,5 +1,30 @@
 # PA Memory — 工作記憶
 
+## REF-20 Sprint 1 partition design（2026-05-03）
+
+**Sprint scope：** REF-20 8-agent cold audit NO-GO 後，4 並行 Track 解 19 P0 + 補 PA W1 自身 schema drift。
+
+**Track 全景：**
+- **Track D（schema 阻塞）**：V049 replay_experiments(22 col + EXCLUDE GIST) / V050 replay_simulated_fills(17 col + FK to V049) / V051 mlde_shadow_recommendations 補 replay_experiment_id + manifest_hash + 雙路 CHECK / V052 V045/V046 FK redirect ALTER ADD CONSTRAINT（**禁改 V045/V046 file** 避免再撞 P0 sqlx hash drift）。3 並行 + 1 串行 = 4 task / ~2.75 day E1 work。
+- **Track A（spawn argv 修）**：Python `route_helpers.py:266-271 argv` 對齊 Rust `--manifest <path> --output-dir <path>`；移除 `--manifest-id <UUID> --run-id <UUID>` 直接 argv 傳遞；`run_id` 改藏在 manifest fixture JSON `serde(default) Option<String>`；spawn 後 `asyncio.sleep(1.5) + proc.poll()` 失敗 → UPDATE V045 status='failed' exit_code。1 task 跨 3 file（route_helpers.py + replay_routes.py + replay_runner.rs struct）。
+- **Track B（Rust manifest verify）**：`replay_runner.rs:386-470 load_and_verify_manifest` 改 `verify` 用 manifest 自帶 `signature` + `manifest_hash` 為 expected（非重簽 tautology）；key.hex 缺改 hard error fail-closed；移除 `#[allow(dead_code)]`。1 task 純 Rust 1 檔。V042 SQL archive 是 Wave 6（不在 Sprint 1）。
+- **Track C（Python 3 安全洞）**：（P0-2）`OPENCLAW_REPLAY_VERIFY_TEST_KEY` 加 `OPENCLAW_RELEASE_PROFILE=live` gate 強制清空 + boot guard；（P0-4）`os.kill(pid, SIGTERM)` 加 `psutil.Process(pid).cmdline()` 驗 `replay_runner` substring 防 PID reuse；（P0-5）IDOR 加 `WHERE actor_id = %s` filter（admin bypass）+ 路徑遍歷加 `is_relative_to(allowlist_root)` 驗。3 改點獨立區段同 E1 1 commit。
+
+**依賴關鍵：** Track D 必先 land schema → A+B+C 三者並行（B 純 Rust 解耦，A 與 C 同檔 replay_routes.py 但區段不重疊）。最大並行 3 E1，Sprint 1 預估 3.5-4 day。
+
+**5 個關鍵 push back：**
+1. **HIGH**：V045 既有 row 對 V052 FK redirect 的 dangling 風險 — `manifest_id` UUID5 衍生但無對應 V049 row → ALTER ADD CONSTRAINT 直接 fail。對策 = T-D4 preflight LEFT JOIN 統計 + operator 決定 reconcile 或 archive。
+2. **MEDIUM**：Track A 把 `run_id` 從 argv 移到 manifest JSON → manifest_id 與 V045 PK 一致性無 enforce。對策 = Rust replay_runner 啟動自驗 `manifest.run_id == output_dir.basename()`。
+3. **MEDIUM**：Track B fail-closed 後 V042 land 前的「key.hex 必在 manifest 旁」是運維契約 not engineering 無 healthcheck 監測。對策 = Sprint 1 順手加 `check_replay_manifest_key_presence()`（WARN-only，已知過渡期）。
+4. **MEDIUM**：Track C 假設 `_require_replay_admin` 已存在；E1 起手必 grep 驗，缺則加 task。
+5. **HIGH**：5 V### file 必 Mac dev pytest（idempotency × 2 + Guard A/B/C 全 NOTICE PASS）→ Linux operator 才 deploy（CLAUDE.md §七 跨平台合規）。
+
+**PA 自審：W1 派發 R20-P2a-T1+T3+T5 為 migration，IMPL 偷換成 fixture 沒 catch。** 根因：(1) reservation L47-48「P2b runner SQL fixture，不佔 migration 編號」用詞當時讀過去視為合法選項；(2) V045+V046 簽收時沒交叉檢查 V3 §4.1 22 column 是否在內。**未來防線：** V### reservation 從「fixture」回 migration 必 PA + PM 雙簽 + E2 加 spec-vs-SQL column count check。
+
+**跨 Track 共同 helper 統籌：** `_table_present(cur, schema, table)` factory（取代 `_v045_table_present`）/ `_emit_audit_stub` 加 5 新 event_type → 同 commit 加 V053 migration extending V035 CHECK enum / `_verify_replay_runner_pid(pid)` 放 route_helpers.py / `_write_manifest_fixture(run_id, manifest_data, output_dir)` 同 sibling 寫 key.hex（dev only）。
+
+詳：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-03--ref20_sprint1_partition_design.md`
+
 ## STRATEGY-WIRING-SPLIT P2（2026-04-28）
 
 **結論**：`strategy_wiring.py` 1060 → **784 LOC**（≤800 進入合規），抽 2 sibling：

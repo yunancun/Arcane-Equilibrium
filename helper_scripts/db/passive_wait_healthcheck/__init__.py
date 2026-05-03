@@ -121,6 +121,13 @@ from .checks_governance import (  # noqa: F401
     # [43] LG5-W3-FUP-2 Fix 1 (2026-05-02) — label backfill cron liveness.
     # [43] LG5-W3-FUP-2 Fix 1（2026-05-02）— label backfill cron 活性哨兵。
     check_43_label_backfill_freshness,
+    # [44] REF-20 Sprint 1 Track B (2026-05-03) — replay manifest sibling
+    # key.hex presence (PA push back #3 — Track B fail-closed key.hex deploy
+    # contract monitor; WARN-only until V042 SQL archive lands Wave 6+).
+    # [44] REF-20 Sprint 1 Track B（2026-05-03）— replay manifest sibling
+    # key.hex 存在性監測（PA push back #3 — Track B fail-closed key.hex 部署
+    # 契約監測；V042 SQL archive 於 Wave 6+ land 前 WARN-only）。
+    check_44_replay_manifest_key_presence,
 )
 
 __all__ = [
@@ -187,4 +194,6 @@ __all__ = [
     "check_42c_live_candidate_attribution_drift_3d",
     # [43] LG5-W3-FUP-2 Fix 1 label backfill cron liveness
     "check_43_label_backfill_freshness",
+    # [44] REF-20 Sprint 1 Track B (2026-05-03) replay manifest key.hex presence
+    "check_44_replay_manifest_key_presence",
 ]

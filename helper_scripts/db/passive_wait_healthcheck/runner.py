@@ -128,6 +128,17 @@ from .checks_governance import (
     # helper_scripts/cron/edge_label_backfill_cron.sh 配對，符合 CLAUDE.md §七
     # 「被動等待 TODO 必附 healthcheck」要求。
     check_43_label_backfill_freshness,
+    # REF-20 Sprint 1 Track B (2026-05-03) — `[44]` replay manifest sibling
+    # key.hex presence sentinel. PA push back #3 — Track B closes E3-P0-1
+    # fail-open by hard-erroring on key.hex absence at startup; this check
+    # surfaces in-flight runs that may pre-date Track B deploy. WARN-only
+    # transitional gate (V042 SQL-backed archive at Wave 6+ supersedes).
+    # REF-20 Sprint 1 Track B（2026-05-03）— `[44]` replay manifest sibling
+    # key.hex 存在性哨兵。PA push back #3 — Track B 把 key.hex 缺改 hard
+    # error 封閉 E3-P0-1 fail-open；本 check surface 可能 pre-date Track B
+    # 部署的 in-flight run。WARN-only 過渡 gate（V042 SQL-backed archive
+    # 於 Wave 6+ land 後取代）。
+    check_44_replay_manifest_key_presence,
 )
 
 
@@ -149,7 +160,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
-    [42][42b][42c][43]                                     LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness
+    [42][42b][42c][43][44]                                 LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -181,6 +192,7 @@ Execution / cost sentinels added after F7:
   [42b] live_candidate_attribution_drift (LG-5-IMPL-3 2026-05-02 per-strategy 7d ratio drift)
   [42c] live_candidate_attribution_drift_3d (LG5-W3-FUP-2 Fix 2 2026-05-02 RFC §5 Plan B — gate-aligned 3d mirror of [42b])
   [43] label_backfill_freshness         (LG5-W3-FUP-2 Fix 1 2026-05-02 max(label_filled_at) age — cron liveness)
+  [44] replay_manifest_key_presence     (REF-20 Sprint 1 Track B 2026-05-03 PA push back #3 — key.hex sibling presence; WARN-only until V042 Wave 6+)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -200,7 +212,7 @@ def main() -> int:
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43]
+              [42][42b][42c][43][44]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -208,7 +220,8 @@ def main() -> int:
                [41] is scanner market-gate confirmation;
                [42]/[42b] are LG-5-IMPL-3 governance contract + attribution drift;
                [42c] is LG5-W3-FUP-2 Fix 2 RFC §5 Plan B — gate-aligned 3d mirror of [42b];
-               [43] is LG5-W3-FUP-2 Fix 1 label-backfill cron liveness)
+               [43] is LG5-W3-FUP-2 Fix 1 label-backfill cron liveness;
+               [44] is REF-20 Sprint 1 Track B replay manifest key.hex presence)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -218,7 +231,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43]
+              [42][42b][42c][43][44]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -602,6 +615,25 @@ def main() -> int:
             # 二階觀察到。純 SELECT。
             s, m = check_43_label_backfill_freshness(cur)
             results.append(("[43] label_backfill_freshness", s, m))
+
+            # [44] REF-20 Sprint 1 Track B (2026-05-03) — replay manifest
+            # sibling key.hex presence sentinel. PA push back #3.
+            # Track B (Rust replay_runner verify path) is hard-error on
+            # missing key.hex at startup; this check reads V045 running
+            # rows + verifies sibling key.hex on disk. WARN-only transitional
+            # gate — V042 SQL-backed key archive (Wave 6+) supersedes the
+            # disk-fallback contract. Pure SELECT + filesystem stat; no
+            # mutation. PASS-skip when V045 missing (avoids false FAIL on
+            # rollout-order variance during Sprint 1).
+            # [44] REF-20 Sprint 1 Track B（2026-05-03）— replay manifest
+            # sibling key.hex 存在性哨兵。PA push back #3。Track B（Rust
+            # replay_runner verify path）對 key.hex 缺改 hard error；本
+            # check 讀 V045 running row 並驗 sibling key.hex 是否在磁碟。
+            # WARN-only 過渡 gate — V042 SQL-backed key archive（Wave 6+）
+            # 取代磁碟 fallback 契約。純 SELECT + filesystem stat。V045
+            # 缺時 PASS-skip（避免 Sprint 1 rollout 順序差錯誤判 FAIL）。
+            s, m = check_44_replay_manifest_key_presence(cur)
+            results.append(("[44] replay_manifest_key_presence", s, m))
     finally:
         conn.close()
 

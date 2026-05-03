@@ -497,6 +497,133 @@ pub fn compute_body_hash(manifest_canonical: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+// ---------------------------------------------------------------------------
+// Track B (REF-20 Sprint 1) — canonical-body-for-signing helper.
+// ---------------------------------------------------------------------------
+//
+// MODULE_NOTE (EN): When Track A's `_write_manifest_fixture(...)` writes a
+// SINGLE-FILE manifest containing both the body fields AND the signature /
+// manifest_hash / signature_key_ref envelope fields, the bytes on disk are
+// NOT the bytes that were signed. The signing payload (the byte sequence the
+// HMAC tag and SHA-256 body hash were computed over) is the body with the
+// envelope fields stripped, re-serialized in a deterministic canonical form.
+//
+// This helper provides that canonical form. Track B's verify path calls it
+// before `signer.verify(...)` so the verify input matches what Python sibling
+// signed (instead of the disk-file raw bytes which include the signature
+// itself — that would be self-referential and unverifiable).
+//
+// Algorithm (V3 §6.2 sorted-keys serde_json contract):
+//   1. Parse the disk-file bytes as `serde_json::Value` (REJECT non-object).
+//   2. Remove keys: `signature`, `manifest_hash`, `signature_key_ref`.
+//   3. Re-serialize via `serde_json::to_vec(&value)` — `serde_json` without
+//      `preserve_order` (workspace default — checked at Cargo.toml) uses
+//      `BTreeMap` internally, producing alphabetically sorted keys + compact
+//      separators (`,` and `:` no spaces).
+//
+// Cross-language byte-equal invariant (Track A Python sibling MUST match):
+//   Python: `json.dumps(stripped_dict, sort_keys=True, separators=(',', ':'),
+//                       ensure_ascii=False).encode('utf-8')`.
+//
+//   * `sort_keys=True`              ↔  Rust BTreeMap default sort.
+//   * `separators=(',', ':')`       ↔  Rust serde_json compact default.
+//   * `ensure_ascii=False`          ↔  Rust serde_json never escapes
+//                                       non-ASCII by default.
+//
+// Cross-platform note: this function is endian-agnostic and produces the same
+// byte sequence on Mac dev (aarch64-apple-darwin) and Linux runtime
+// (x86_64-unknown-linux-gnu) — verified by `tests/canonical_body_xplat.rs`
+// in this commit.
+//
+// MODULE_NOTE (中): Track A `_write_manifest_fixture(...)` 寫單檔 manifest
+// （body 欄位 + signature / manifest_hash / signature_key_ref envelope 欄位
+// 同檔）時，磁碟 bytes ≠ 簽名時的 bytes。簽名 payload（HMAC tag 與 body hash
+// 算的 byte sequence）是「剝除 envelope 欄位 + 確定性 canonical 重序列化」
+// 之後的結果。
+//
+// 此 helper 提供該 canonical form。Track B verify 路徑在 `signer.verify(...)`
+// 之前呼叫，使 verify 輸入與 Python sibling 簽時一致（而非含 signature 本身
+// 的磁碟原始 bytes — 那是自我引用、無法驗證的）。
+//
+// 演算法（V3 §6.2 sorted-keys serde_json 契約）：
+//   1. parse 磁碟 bytes 為 `serde_json::Value`（非 object 即拒絕）。
+//   2. 移除 keys：`signature`、`manifest_hash`、`signature_key_ref`。
+//   3. `serde_json::to_vec(&value)` 重序列化 — `serde_json` 無 `preserve_order`
+//      （workspace 預設，checked at Cargo.toml）內部用 `BTreeMap`，產出
+//      alphabetical sorted keys + compact separator（`,` 與 `:` 無空白）。
+//
+// 跨語言 byte-equal 不變量（Track A Python sibling 必對齊）：
+//   Python: `json.dumps(stripped_dict, sort_keys=True, separators=(',', ':'),
+//                       ensure_ascii=False).encode('utf-8')`。
+//
+// 跨平台：endian 無關；Mac dev 與 Linux runtime byte-equal。
+//
+// 不變量 / Invariant: caller MUST 傳磁碟單檔 manifest 原始 bytes；本 helper
+// 不接收已預先 strip 過的 body（會 double-strip 但 noop，仍正確）。
+
+/// Envelope keys that MUST NOT participate in the signing payload.
+/// 不得納入簽名 payload 的 envelope 欄位。
+///
+/// `signature`        — the HMAC tag itself (self-referential if signed).
+/// `manifest_hash`    — the body hash itself (self-referential if signed).
+/// `signature_key_ref` — fingerprint hint (not part of body semantics).
+///
+/// `signature`        — HMAC tag 本身（簽進去就自我引用）。
+/// `manifest_hash`    — body hash 本身（同理）。
+/// `signature_key_ref` — fingerprint 提示（非 body 語義）。
+pub const ENVELOPE_KEYS_FOR_SIGNING: [&str; 3] =
+    ["signature", "manifest_hash", "signature_key_ref"];
+
+/// Re-canonicalize a single-file manifest (Track A `_write_manifest_fixture`
+/// output) into the canonical body bytes that were signed.
+///
+/// 把單檔 manifest（Track A `_write_manifest_fixture` 輸出）重 canonicalize
+/// 成被簽的 canonical body bytes。
+///
+/// See module-level note above (`Track B (REF-20 Sprint 1) — canonical-body-
+/// for-signing helper`) for the full algorithm + cross-language invariant.
+///
+/// 演算法與跨語言不變量見上方 module-level 注釋。
+///
+/// # Errors
+/// - Returns a `serde_json::Error` if the disk bytes are not valid JSON or
+///   not a top-level object (V3 §5 requires manifest to be a JSON object).
+///
+/// 錯誤：磁碟 bytes 非 JSON 或非 top-level object 時回 `serde_json::Error`
+/// （V3 §5 要求 manifest 為 JSON object）。
+pub fn canonical_body_for_signing(
+    disk_bytes: &[u8],
+) -> Result<Vec<u8>, serde_json::Error> {
+    // Parse → Value（REJECT 非 object）。
+    // Parse → Value (REJECT non-object).
+    let mut value: serde_json::Value = serde_json::from_slice(disk_bytes)?;
+
+    // 不變量 / Invariant: V3 §5 manifest MUST be a top-level JSON object.
+    // 非 object（array / scalar）= signing payload 沒有「envelope 欄位 strip」
+    // 語義 → 拒絕。
+    let obj = match value.as_object_mut() {
+        Some(o) => o,
+        None => {
+            // 用 serde_json 自有 error 路徑保持型別一致。
+            // Use serde_json's own error path to keep the Result type.
+            return Err(serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+                "\"manifest body must be a JSON object\"",
+            )
+            .unwrap_err());
+        }
+    };
+
+    // Strip envelope keys / 剝除 envelope 欄位。
+    for k in ENVELOPE_KEYS_FOR_SIGNING.iter() {
+        obj.remove(*k);
+    }
+
+    // serde_json::to_vec → BTreeMap-default sorted keys + compact separators
+    // → byte-equal Python json.dumps(sort_keys=True, separators=(',', ':'),
+    //   ensure_ascii=False).encode('utf-8').
+    serde_json::to_vec(&value)
+}
+
 /// Constant-time byte comparison to defeat timing-oracle attacks on HMAC tag.
 /// Mirrors `live_authorization.rs::constant_time_eq` (sibling pattern).
 ///
@@ -731,6 +858,76 @@ mod tests {
             SignatureFailMode::SignatureMismatch,
             "V3 §5 verify-order invariant violated: signature must check first"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Track B (REF-20 Sprint 1) — canonical_body_for_signing tests
+    // Track B（REF-20 Sprint 1）— canonical_body_for_signing 測試
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn canonical_strips_envelope_and_sorts_keys() {
+        // 輸入故意亂序 + 含 envelope 三欄。
+        // Input deliberately unordered + contains all three envelope fields.
+        let raw = br#"{"signature":"sig_x","experiment_id":"exp_test","data_tier":"S2","manifest_hash":"hash_y","run_id":"run_abc","manifest_version":1,"fixture_uri":"fixtures/","signature_key_ref":"fp_x"}"#;
+        let canon = canonical_body_for_signing(raw).expect("must parse");
+        // sorted alphabetical + compact + envelope stripped.
+        let expected = br#"{"data_tier":"S2","experiment_id":"exp_test","fixture_uri":"fixtures/","manifest_version":1,"run_id":"run_abc"}"#;
+        assert_eq!(
+            canon, expected,
+            "canonical body drift: got {} expected {}",
+            std::str::from_utf8(&canon).unwrap(),
+            std::str::from_utf8(expected).unwrap()
+        );
+    }
+
+    #[test]
+    fn canonical_is_idempotent_on_already_stripped_body() {
+        // 既有 fixture 使用 stripped body（無 envelope 欄位）；canonical_body_for_signing
+        // 對它應 noop（除了 sorted-keys 重序列化），且因既有 fixture key 已是
+        // alphabetical → byte-equal 不變。
+        // Existing fixture uses stripped body (no envelope keys); helper must
+        // be a noop (modulo sorted-keys re-serialization). Existing fixture
+        // keys are alphabetical → output byte-equal to input.
+        let raw = br#"{"experiment_id":"exp_fixture_1","manifest_version":1}"#;
+        let canon = canonical_body_for_signing(raw).expect("must parse");
+        assert_eq!(canon, raw.to_vec());
+    }
+
+    #[test]
+    fn canonical_rejects_non_object() {
+        // V3 §5 manifest MUST be a JSON object; array / scalar 立即拒絕。
+        // V3 §5 manifest MUST be a JSON object; array / scalar reject.
+        let raw_array = br#"["not_an_object"]"#;
+        assert!(canonical_body_for_signing(raw_array).is_err());
+
+        let raw_scalar = br#"42"#;
+        assert!(canonical_body_for_signing(raw_scalar).is_err());
+
+        let raw_invalid = br#"{not valid json"#;
+        assert!(canonical_body_for_signing(raw_invalid).is_err());
+    }
+
+    #[test]
+    fn canonical_idempotent_double_apply() {
+        // 連續呼叫兩次 canonical 應 byte-equal（已是 sorted + stripped）。
+        // Calling twice should be byte-equal (already sorted + stripped).
+        let raw = br#"{"signature":"x","experiment_id":"e","manifest_hash":"h","run_id":"r"}"#;
+        let once = canonical_body_for_signing(raw).expect("first pass");
+        let twice = canonical_body_for_signing(&once).expect("second pass");
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn envelope_keys_constant_matches_doc() {
+        // 不變量 / Invariant: 三 envelope key 確切為 signature / manifest_hash /
+        //   signature_key_ref（V3 §5 與 Python sibling _canonical_body 對齊）。
+        // Three envelope keys MUST be exactly signature / manifest_hash /
+        //   signature_key_ref (V3 §5 + Python sibling alignment).
+        assert_eq!(ENVELOPE_KEYS_FOR_SIGNING.len(), 3);
+        assert!(ENVELOPE_KEYS_FOR_SIGNING.contains(&"signature"));
+        assert!(ENVELOPE_KEYS_FOR_SIGNING.contains(&"manifest_hash"));
+        assert!(ENVELOPE_KEYS_FOR_SIGNING.contains(&"signature_key_ref"));
     }
 
     #[test]

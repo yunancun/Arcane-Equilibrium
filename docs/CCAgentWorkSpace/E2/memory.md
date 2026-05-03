@@ -6,6 +6,52 @@
 - 測試基準：2614 passed（Sprint 0 TD-1 後）；Sprint 1a+1b 全部通過後預期 2623 passed
 - 系統模式：demo_only
 
+## 2026-05-03 — REF-20 Sprint 1 round 2 retrofit verify（A + C）
+
+**結論**：Track A PASS / Track C **CONDITIONAL（1 LOW finding）**
+
+**Track A retrofit verify（F1 byte-equal canonical contract）**：
+- route_helpers.py L649-657（deep-copy round-trip）+ L678-686（disk write）兩段 `json.dumps` 全帶 `sort_keys=True + separators=(',', ':') + ensure_ascii=False` 三 kwargs；deep-copy 多帶 `default=str` 是合理設計（first-pass stringify datetime/Path，後續 disk write 已純 JSON-native，不需重 default）。
+- 2 NEW pytest case `test_write_manifest_fixture_byte_equal_canonical_with_non_ascii` (L193) + `test_write_manifest_fixture_sort_keys_independent_of_input_order` (L277) 真實在 file 內；含 SHA-256 雙重驗證 + anti-`\uXXXX` 守護 grep（line 235-240）。
+- Test helper `_python_canonical_body_for_signing` (L163) 真鏡像 Rust algorithm: parse → strip envelope → json.dumps canonical kwargs → encode utf-8。docstring 引 `manifest_signer.rs` line 574 + 594（real line numbers 對齊）。
+- Track A 19/19 PASS（含 2 NEW byte-equal） + 全 replay test sub-suite 23/23 PASS + Rust 15 manifest_signer unit + 5 e2e proof + 5 cost_edge_advisor PASS。
+- F14 cross-track known-issue 在 §9.5 reflect（commit message 加 V045 status='failed' 100% expected pre-V042 advisory）。
+- **無 zombie code / 無 byte drift / 無新增私有屬性穿透。Track A retrofit PASS to E4。**
+
+**Track C retrofit verify（4 finding）**：
+1. **§九 1500 LOC cap**：`replay_routes.py` 從 1603 → **1494** ≤ 1500 ✅；`security_guards.py` 487 LOC (487 < 800 warn) ✅。
+2. **F8 `replay:read:any` scope**：`auth.py:239-240` default `auth_scopes` 真有 `replay:write` + `replay:read:any` 兩 scope；2 NEW test 驗 `Settings()` default 套含 + `build_authenticated_actor()` factory 持有兩 scope。
+3. **F6 boot guard raise**：`security_guards.py:101-149` `perform_p0_2_boot_guard()` 真 `raise RuntimeError`；`replay_routes.py:90` module-init 呼 `_sg.perform_p0_2_boot_guard(_is_live_release_profile)` 觸發 boot guard；3 NEW test 驗 dual-condition raise + dev-skip + unset-skip。
+4. **F2 V053 LOCK TABLE**：V053 SQL line 166-249 真 `BEGIN; DO $$ ... LOCK TABLE learning.governance_audit_log IN ACCESS EXCLUSIVE MODE; DROP+ADD; END $$; COMMIT;` 完整包裹；idempotency probe（line 187-200）短路在 LOCK 之前；race-free（ROW EXCLUSIVE vs ACCESS EXCLUSIVE 衝突 → concurrent INSERT 阻塞）；7/7 V053 migration test PASS（含新 LOCK TABLE 行為驗證）。
+5. **security_guards.py extract 真隔離邏輯**：6 helper 全 pure（無 FastAPI / pydantic import）；`os.kill(pid, SIGTERM)` 留在 `replay_routes.py:857` caller，**只在** `cancelled_dict is not None and pg_err is None` 時送（line 852）— 即 cmdline cert 失敗永不誤送 signal。0 zombie code / 0 reference 殘留。
+6. **Sibling test 23/23 PASS**（既有 4 file replay test）+ Track C 13/13 PASS（含 6 NEW retrofit case）。
+
+**LOW finding**：
+- `P2-AUDIT-V044-LOCK-TABLE-FIX` ticket：E1 §9.4 自報「同 commit 開新 ticket」+ V053 SQL line 163-164 注釋宣告 + E1 memory.md L4059/L4071 兩處提到，但 **TODO.md grep 0 hit**（P2-AUDIT 段現有 6 條 ID，無此新 entry）。**E1 漏寫進 TODO.md**。CONDITIONAL — PM commit Sprint 1 patch 前必補一條 `P2-AUDIT-7` row：「V044 P6-S15 enum DROP+ADD 缺 LOCK TABLE ACCESS EXCLUSIVE；補回同 V053 race-free retrofit pattern」。
+
+**對抗反問 + 結果**：
+1. 「159/159 PASS 是否包含真實業務 e2e（Linux PG outage / multi-worker race）？」— 答：**否，全 unit test + TestClient mock**。Mac dev 0 PG 是已知限制（per `feedback_dev_runtime_split.md`）；helper `execute_replay_cancel_pg_path` 的 `try/except/rollback` envelope + `race_already_final` 識別 + xact 邏輯結構正確，但真實 PG outage / pgpool failover / two-uvicorn-worker concurrent cancel 是 E4 在 Linux trade-core 跑 e2e regression 才能驗。本 round 2 接受作 known limitation 不阻塞 PASS。
+2. 「security_guards.py extract 是否真隔離邏輯（沒有 zombie code）？」— 答：**真隔離**。`os.kill` 留 caller 是 dispatch §"修法"明文設計（hermetic test 友好）；boot guard call 在 module-init line 90；6 helper 各自純函數。0 dead code / 0 double-pathway。
+3. 「`Path.resolve(strict=False)` 是否真 follows symlink？」— 答：**真 follow**。Python 3.10 docs: `Path.resolve()` resolves symlinks unconditionally; `strict=False` only relaxes the FileNotFoundError on missing files (canonical absolute path 仍計算)。attacker INSERT `/var/replay_artifacts/evil_link → /etc/passwd` → resolve → /etc/passwd → is_relative_to(/var/replay_artifacts) = False → 拒絕。
+4. 「deep-copy round-trip 加 `default=str` 但 disk write 沒加是否漂移？」— 答：**設計合理**。第一段 `default=str` 已把 datetime/Path stringify 進 dict，第二段 dump 時所有 value 都是 JSON-native（str/int/dict/list）— Python json.dumps 不會觸發 default fallback。0 漂移 risk。
+
+**Cross-track 對齊全 PASS**：
+- A `ENVELOPE_KEYS_FOR_SIGNING` (manifest_signer.rs:574) Python 端用 envelope_keys tuple `("signature", "manifest_hash", "signature_key_ref")` (test_track_a L183) 對齊 — Rust constant 三值 / Python tuple 三值 / 順序一致。
+- A `_verify_replay_runner_pid` Track C 用法 = `replay_routes.py:76 _verify_replay_runner_pid = _rh.verify_replay_runner_pid` alias + `replay_routes.py:849 verify_pid_fn=_verify_replay_runner_pid` 注入給 `_sg.execute_replay_cancel_pg_path`（dependency injection 設計）— 0 重複造輪。
+- C V053 + D V049/V050/V051/V052 V### sequence 無重號（REF-20_RESERVATION.md v1.9 確認 V049-V053 各綁不同 task）。
+- 4 並行 E1 + 2 retrofit 0 commit / 0 push（HEAD `2d6a405` 不變；git status 30 file unstaged 等 PM 一次 commit）。
+
+**Verdict**：
+- **Track A retrofit = PASS to E4**
+- **Track C retrofit = CONDITIONAL（必補 P2-AUDIT-7 row to TODO.md，~5 min 編輯）**
+- 整 Sprint 1（A+B+C+D） PM 補完 LOW after 即可派 E4 regression。
+
+**Lessons learned**：
+1. **E1 「同 commit 開 P2 ticket」≠ 真進 TODO.md**：E1 memory.md / commit message draft / SQL 注釋三處都提到，但 TODO.md 沒寫 → E2 grep 命中真實落地問題；下次 dispatch retrofit 必明文要求 E1 修 TODO.md + grep 自驗。
+2. **Mac dev 0 PG 不阻塞 unit test PASS verdict**：但 E2 報告必明標 Linux e2e 由 E4 跑，避免 PM 誤以為「159/159 PASS = 真實業務驗證完整」。
+3. **Path.resolve(strict=False) 跨平台一致**：Python 3.9+ 統一行為，不需 platform-specific guard。
+4. **DROP+ADD CHECK race window 必 LOCK TABLE ACCESS EXCLUSIVE**：V053 已驗 race-free pattern（probe-short-circuit-before-lock + 顯式 BEGIN/COMMIT 包裹）；P2 P2-AUDIT-V044-LOCK-TABLE-FIX 補回 V044 同樣修法。
+
 ## 審查強制清單（每次 Code Review 必查項）
 
 ### 雙語注釋合規（必查，不通過則打回 E1/E1a）
@@ -798,3 +844,27 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 21. **「整合到 V3 contract baseline」設計選擇下的 v2 補丁措辭** — v2 §11/§12 整節主題從 v1 storage/healthcheck 替換為 v2-only quota/role guard 補丁；v1 內容部分固化進 V3 contract baseline，部分遷至 sibling doc（REF-20 v2 §15）— 設計上 OK（v2 = governance amendment 整合 V3 工程坑），但 v2 §0 + §20 自宣稱必披露此 trace path。**boundary 是否削弱**判定：grep 16 根原則（特別是 #1/#2/#7）+ §四 fail-closed 條款 + Decision Lease 路徑承諾在 v2 是否完整保留 — 全 PASS 即 0 boundary 削弱（本 case 確認），純屬 metadata accuracy 問題降 MEDIUM。
 
 22. **5 atomic commit vs 1 wave commit 結構建議的 review trigger** — Wave 1 任務 subgroup（T1 / T2+T3+T9 / T5 / T6+T7 / T8）天然分 5 個獨立 deliverable layer，5 atomic commit 利後續 audit / rollback / partial revert。1 wave commit 的 diff 過大（governance docs + Rust + migration ledger + Python report + bash script + runbook 全包），cross-task 問題追溯困難。E2 sign-off 建議必含 commit 結構建議；PM 採納則 Wave 1 land 後 audit trail 清晰。
+
+## 2026-05-03 — REF-20 Sprint 1 4 並行 Track E2 senior+adversarial review (RETURN to E1)
+
+**Topic**: 4 並行 Track（A spawn argv / B Rust manifest verify / C Python /replay 安全洞 / D V049-V052 schema）E2 review，PM autonomous mode dispatch 強制 senior + adversarial 雙身份（W3-W9 跳過 E2 後第一份正式 E2，要求對 4 Track 各列 ≥2 條 finding 含 PASS 帶證據鏈）。
+**Verdict**: RETURN to E1（Track C 必修 4 條 finding；Track A 建議補 1 條；Track B/D PASS to E4）。
+**Workspace report**: `2026-05-03--ref20_sprint1_4track_review.md`
+
+### Sprint 1 4-Track review 教訓 / 反模式（追加 23-30）
+
+23. **CLAUDE.md §九 1500 hard cap pre-existing baseline exception clause 適用範圍** — replay_routes.py baseline 1498（pre-Sprint 1）→ Track A+C 並行同檔 → 1603 LOC（103 over）。Track C E1 申請「pre-existing baseline exception」放行，但 §九 原文明文「**僅適用 pre-existing 1500+ violation**，不適用『新 wave 把 ≤1500 推到 >1500』的場景」。E2 必嚴格 enforce — 拒絕 exception，退回 E1 抽 endpoint body 至 sibling 模組。
+
+24. **PM autonomous mode 4 並行 E1 dispatch 同檔 LOC 風險** — PA 派發階段已警示 replay_routes.py + route_helpers.py 同檔 Track A + Track C 並行（partition design § 3 cross-track 影響評估），但 PM dispatch 沒設 LOC budget enforcement（如「Track C 自行控制 ≤30 LOC delta」）。建議 PA 未來 partition design 對同檔多 Track 並行強制標 LOC budget（如「Track A ≤+50 LOC / Track C ≤+99 LOC / 合計 ≤+149 LOC ≤ §九 cap 5 LOC buffer」）。
+
+25. **Track A + Track B 同 commit 部署的 cross-track integration 斷點** — Track A 寫 placeholder hash + Track B fail-closed verify path = e2e 路徑全 fail-closed 直到 V042 Wave 6 land。E1 各自 IMPL 都正確但合併後 production 黑屏。E2 必跑 cross-track integration 推演（A 寫 + B 驗 → 預期結果），不能只信各 Track 自身 unit test green。本 case PM 必得知此 known-issue 才部署 — 否則 operator 看 Sprint 1 land 後 V045 全 'failed' 不知是 design 還是 bug。
+
+26. **`replay:read:any` scope 引入但未在 default `auth_scopes` 註冊** — Track C IDOR fix 加 admin bypass via `replay:read:any` scope，但 auth.py L184-233 預設 scope set 沒列。沒有任何 actor 能取得 → admin bypass 永遠關閉 → 功能等於失效。對抗反問「fail-closed default 不是好事？」回答：是，但 E1 deployment notes 沒提加 scope 步驟 → operator 不知道怎麼啟用。E2 必驗 grep `<new_scope>` 在 auth.py default scopes 是否註冊 — 0 hit 即標 finding。**SOP 加項**：任何新 scope 引入必同時改 auth.py default OR commit/PR 描述強制標 deploy doc 補充 step。
+
+27. **PA spec drift — boot guard 從 raise 降級為 logging-only** — PA partition design L133 明文要求 boot guard `OPENCLAW_RELEASE_PROFILE=live + OPENCLAW_REPLAY_VERIFY_TEST_KEY 設 → must raise`。E1 改為 `logging.error(...)` 沒 raise — PA spec drift。E2 必對 PA spec 每條「必 raise / fail-closed / abort」字眼 cross-check IMPL 是否真 raise（不能只 log）。本 case 退回 E1 補 5 行修。
+
+28. **同 enum DROP+ADD pattern V044 + V053 的 race window 一致性** — V044 既已 land DROP+ADD CHECK 不在 single transaction（E3 P1-3 flag 過 race window）。V053 沿用同 pattern，沒加 LOCK TABLE / BEGIN/COMMIT — Track C 未自承知道 V044 P1-3 flag。E2 必比對「同 schema 重複 pattern」是否 P1+ 已 flag — 一致性要求修。本 case 退回 E1 補 single DO block + LOCK TABLE。
+
+29. **`json.dumps(..., ensure_ascii=False)` cross-language byte-equal invariant** — Track A `_write_manifest_fixture` 用 `json.dumps(payload, sort_keys=True, indent=2)` 缺 `ensure_ascii=False` + 缺 `separators=(',', ':')`。Track B Rust `serde_json::to_vec` 預設 compact + sorted（BTreeMap） + 不 escape unicode — Python 預設 `ensure_ascii=True` 會 escape 非 ASCII char → byte 不等。**目前 attack surface 0**（A 寫 placeholder hash，B 重新 canonicalize），但 V042 land 後 A 升真 sign 必須對齊 — E1 補本檔 + 加 byte-equal unit test 防 regression。
+
+30. **對抗反問必逐項展開、不接受「測試通過」答覆** — 本 review 對 4 Track 各列 ≥2 條反問（A `time.sleep` 阻塞？/ A `output_dir.basename` 防 attacker？ / B 兩邊 verify？/ B key.hex 缺 dev workflow？/ C env attacker？/ C cmdline PID-1 邊界？/ C symlink 攻擊？/ D EXCLUDE GIST 真擋？/ D paired CHECK 既有 row？/ D preflight 0 row？）— 共 10 條反問，6 PASS（已測 / spec 合理）+ 2 acceptable（已 known + standard secondary defense）+ 2 advisory（V042 land 前 caveat / cross-track 整合）。對抗反問是 E2 senior judgement 體現 — 不能只跑 grep + checklist，必假設 E1 寫錯主動找 race / leakage / shortcut。本 SOP 化進 E2 review template。

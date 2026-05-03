@@ -226,6 +226,18 @@ class Settings:
                         "executor:write",
                         "ml:read",
                         "ml:write",
+                        # ── REF-20 Replay Lab scopes (Sprint 1 Track C E2 retrofit F8) ──
+                        # REF-20 Replay 實驗室 scope（Sprint 1 Track C E2 retrofit F8）
+                        # ``replay:write`` — POST /run, /cancel, /manifest/verify
+                        #   (mutating routes; Operator-only)
+                        # ``replay:read:any`` — admin bypass scope used by GET
+                        #   /report/{experiment_id}; allows cross-actor read for
+                        #   incident investigation. Plain operator should NOT
+                        #   hold this scope; explicit grant per-incident only.
+                        # ``replay:read:any`` 為 admin 跨 actor 讀 report 的 scope；
+                        # 一般 operator 不應持，僅 incident investigation 顯式授予。
+                        "replay:write",
+                        "replay:read:any",
                     ]
                 ),
             )
