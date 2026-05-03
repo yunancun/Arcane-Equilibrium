@@ -52,6 +52,11 @@ pub mod position_manager;
 pub mod position_reconciler;
 pub mod position_risk_evaluator;
 pub mod regime;
+// REF-20 Wave 1 R20-P0-T3 — replay subsystem scaffold (spec only, no IMPL).
+// Wave 3 R20-P2b-S7/S8/S9/S10 will add forbidden_guard + mac_policy_guard.
+// REF-20 Wave 1 R20-P0-T3 — replay 子系統骨架（純規格，無 IMPL）。
+// Wave 3 R20-P2b-S7/S8/S9/S10 將加 forbidden_guard + mac_policy_guard。
+pub mod replay;
 pub mod restart_kind;
 pub mod risk_checks;
 pub mod risk_cusum;
