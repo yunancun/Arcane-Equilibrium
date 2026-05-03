@@ -24,5 +24,16 @@
 //!   比較與 canary/diagnostic artifact 註冊。
 //!
 //! SPEC: REF-20 V3 §3 G7/G8 + §6.1/§6.2 + workplan R20-P0-T2/T3/T9
+//!
+//! Wave 2 P2a-S2 update (this commit):
+//!   - Added `manifest_signer` — server-side HMAC-SHA256 sign + verify
+//!     module with 4 fail-mode enum + KeyArchive trait + InMemoryKeyArchive
+//!     test stub. SQL-backed archive lands Wave 3 R20-P2a-S4.
+//!
+//! Wave 2 P2a-S2 更新（本 commit）：
+//!   - 加 `manifest_signer` — server-side HMAC-SHA256 簽名+驗證模組，
+//!     含 4 fail-mode enum + KeyArchive trait + InMemoryKeyArchive 測試 stub。
+//!     SQL 版 archive 於 Wave 3 R20-P2a-S4 落地。
 
+pub mod manifest_signer;
 pub mod profile;

@@ -2448,3 +2448,163 @@ PA dispatch：E4 Linux regression for LG5-W3-FUP-2 Fix 1+2 reported `psycopg2.Op
 
 ### 報告路徑
 - `srv/.claude_reports/20260502_230000_lg5_w3_fup3_cron_env.md`（待寫）
+
+---
+
+## 2026-05-03 — REF-20 R20-P2a-S1 Signing Key Rotation Cron (Wave 2 Batch 1)
+
+### 任務摘要
+PM dispatched Wave 2 Batch 1 (5 parallel)；本任務 = S1 補完 cron / scheduling 部分。
+T8 已 land key generation script + runbook（commit 6d9977e）；本任務新增：
+- 90d rotation 提前 7d 提醒 cron（runbook §4 trigger condition）
+- 180d retention cleanup cron（runbook §4.3 + §6 key_expired fail-mode 預防）
+
+### 5 new + 1 modified file
+1. `helper_scripts/cron/replay_key_rotation_check.sh` (NEW, 0755) — daily `0 9 * * *`
+2. `helper_scripts/cron/replay_key_archive_cleanup.py` (NEW, 0644) — daily `30 9 * * *`
+3. `helper_scripts/cron/test_replay_key_rotation_check.py` (NEW, 0644) — pytest 4 cases
+4. `helper_scripts/cron/test_replay_key_archive_cleanup.py` (NEW, 0644) — pytest 3 cases
+5. `docs/runbooks/replay_signing_key_rotation.md` §4.3 (MODIFIED, expanded with §4.3.1/§4.3.2/§4.3.3)
+
+### Key design decisions
+- **V042 graceful fallback**：rotation_check 用 filesystem mtime + 90d 規則；cleanup 直接 exit 0 + log。允許 cron 條目在 V042 land 前先安裝。
+- **Audit row 用 V035 既有 enum**：`event_type='audit_write_failed'` + payload `alert_type='replay_key_rotation_due'/'replay_key_archive_expired'`。後續 sibling task 可擴 enum 但本 task 不擴（scope creep prevention）。
+- **跨平台 stat / date**：rotation_check 中 BSD (`stat -f`/`date -r`) + GNU (`stat -c`/`date -d`) 雙分支兼容（CLAUDE.md §七 ★★ 跨平台）。
+- **Idempotency 強制**：rotation_check 同日 dedup `audit_write_failed` row（payload.alert_type + env match + ts >= today_start）；cleanup 用 `WHERE status='retired'` 過濾已 expired row（重跑 0 update）。
+- **PG creds sourcing 對齊 sibling**：rotation_check 跑 `linux_bootstrap_db.sh:41-45` 完整版 pattern（5 POSTGRES_* keys + HOST/PORT fallback），對齊我 2026-05-02 LG5-W3-FUP-3-CRON-ENV 任務經驗教訓。
+
+### Test results
+```
+helper_scripts/cron/test_replay_key_rotation_check.py::test_wrapper_exists_and_syntax_clean PASSED
+helper_scripts/cron/test_replay_key_rotation_check.py::test_v042_absent_mtime_within_grace_exits_0_silent PASSED
+helper_scripts/cron/test_replay_key_rotation_check.py::test_v042_absent_mtime_past_due_exits_1_alert PASSED
+helper_scripts/cron/test_replay_key_rotation_check.py::test_secrets_dir_missing_exits_2 PASSED
+helper_scripts/cron/test_replay_key_archive_cleanup.py::test_v042_absent_exits_0_graceful PASSED
+helper_scripts/cron/test_replay_key_archive_cleanup.py::test_v042_present_zero_rows_past_retention PASSED
+helper_scripts/cron/test_replay_key_archive_cleanup.py::test_v042_present_three_rows_past_retention PASSED
+=== 7 passed in 0.12s ===
+```
+- bash -n PASS / py_compile PASS / 0 hardcoded user-home path
+- 4 MODULE_NOTE blocks (EN + 中) on each new file
+
+### 報告路徑
+- `srv/.claude_reports/20260503_030500_ref20_p2a_s1_rotation_cron.md`
+
+---
+
+## 2026-05-03 REF-20 Wave 2 P2a-S2 — HMAC manifest signer (Rust + Python xlang)
+
+### 任務範圍
+PA dispatch Wave 2 R20-P2a-S2：HMAC-SHA256 sign+verify module 雙端（Rust + Python），4 fail-mode（signature_mismatch / manifest_hash_mismatch / key_missing / key_expired）unit test PASS，跨語言 byte-equal HMAC 不變量強制。對齊 V3 §3 G2 + §5 + runbook §6 + workplan §5.1 V3 §12 acceptance #2 binding。
+
+### 修改清單
+| 路徑 | 變更 | LOC |
+|---|---|---|
+| `rust/openclaw_engine/src/replay/manifest_signer.rs` | 新檔 | 697 |
+| `rust/openclaw_engine/src/replay/mod.rs` | 修 (+11) | 28 → 39 |
+| `rust/openclaw_engine/tests/replay_manifest_signer_xlang_consistency.rs` | 新檔 | 285 |
+| `rust/openclaw_engine/tests/fixtures/replay_manifest_signer/` | 新 dir，11 file（key + 3×3 manifest+sig+hash + fingerprint + README） | - |
+| `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/__init__.py` | 新 dir + file | 43 |
+| `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/manifest_signer.py` | 新檔 | 396 |
+| `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_manifest_signer_xlang_consistency.py` | 新檔 | 416 |
+
+### 驗證
+- `cargo check -p openclaw_engine --tests` PASS（0 new warning，5 pre-existing dead_code warning）
+- `cargo test --lib replay::manifest_signer::` → **10/10 PASS**（含 4 fail-mode + happy + retired/compromised + verify-order × 2）
+- `cargo test --test replay_manifest_signer_xlang_consistency` → **8/8 PASS**（fixture-based xlang byte-equal + 4 fail-mode + verify-order）
+- `pytest tests/replay/test_manifest_signer_xlang_consistency.py -v` → **13/13 PASS**（3× xlang byte-equal + happy + 4 fail-mode + RETIRED/COMPROMISED + verify-order × 2 + fingerprint helper）
+- 跨平台 grep `/home/ncyu|/Users/[a-zA-Z]` 0 source-code hit（1 hit on Chinese rule explanation comment in test，符合 §七 rule 1 例外）
+- 硬邊界 grep `max_retries|live_execution_allowed|execution_authority|system_mode` 0 hit
+- V3 §5 separation grep `auth_signing_key` 0 hit on new files
+- IPC/dispatch/GovernanceHub coupling grep 0 hit on code（2 hit on negation doc comments declaring red-line）
+- LOC max 697 < 800 warn / 1500 hard
+- `live_authorization` sibling test 18/18 PASS（0 regression）
+
+### 經驗教訓
+
+1. **`#[cfg(test)]` 對 integration test 不可見**：第一輪 Rust IMPL 用 `#[cfg(test)] pub fn new_from_bytes_for_test()`，cargo test --lib unit test 通過，但 cargo test --test integration test 立即報 E0599 "no function found"。原因：integration test 在 `tests/` link 的是 lib 的「**非測試 build**」，`#[cfg(test)]` 把符號從 integration link 視野隱藏。修法：改用 `#[doc(hidden)]` + 函數命名加 `_for_test` 後綴 + 雙語 doc 注釋明寫「production caller MUST NOT use」。**規則：scaffold 給 integration test 用的 helper constructor 必用 `#[doc(hidden)]`，不可用 `#[cfg(test)]`**。
+
+2. **pytest `__init__.py` 在 sub-test-dir 會破壞 sibling conftest path injection**：tests/conftest.py 用 `sys.path.insert(0, parents[1])` 加 control_api_v1 到 path，sibling test_*.py 直接 `from app.X import Y` 工作。但我新增 `tests/replay/__init__.py` 後，pytest 把 `tests/replay/` 視為「parent package = tests」需要 import — 但 tests 沒 __init__.py，於是 collection 階段 conftest.py 還沒跑，`from replay.manifest_signer` 找不到 module。修法：刪掉 `tests/replay/__init__.py`，讓 pytest 用 rootdir-based discovery（與 sibling test_*.py 一致 pattern）。**規則：在已有 conftest.py + 無 `__init__.py` 的 test root 下新增 sub-dir test 時，sub-dir 也禁用 `__init__.py`**（否則破壞 sibling discovery semantics）。
+
+3. **fingerprint algorithm 雙向對齊細節**：helper script `generate_replay_signing_key.sh:91/93/111` 用 `openssl dgst -sha256 -hex < <key_file>` 對「文件內容」(含 trailing `\n`) 做 sha256；本實作對 `bytes.fromhex(raw.strip())` 後的 raw 32 bytes 做 sha256。兩者結果**不同**。設計上 ManifestSigner 用 raw bytes fingerprint 為內部 invariant + V042 archive row 也存此值 — 這個 design choice 必在 docstring 雙語明寫，否則未來 reviewer 會以為是 bug 嘗試 align 到 helper script。**規則：跨 boundary（shell script ↔ Rust ↔ Python）的 fingerprint algorithm 必有單一 canonical 定義 + cross-reference 明文寫在 docstring**。
+
+4. **fixture file no trailing newline 是 HMAC byte-equal 必要條件**：`Write` tool 對 `.json` fixture 檔不加 trailing `\n`（字串內無 `\n`）→ 54/91/80 bytes 精確匹配 Python 預先算 sig 時用的 body。如果手寫 fixture 不小心加 trailing newline，body bytes 會差 1 byte → HMAC tag 完全不同 → cross-lang test 全失敗。**規則：fixture 用 `xxd | tail -3` 驗 byte exact，配合 wc -c 雙重確認；HMAC 是 byte-exact 操作，0 容差**。
+
+5. **Python `_constant_time_eq` 用 stdlib `hmac.compare_digest`**：不要自己 hand-roll constant-time comparison。stdlib 提供 + 跨平台 + 已過 security audit。Rust 側自寫是因為 stdlib 沒提供（subtle crate 需要額外依賴），但邏輯與 hmac.compare_digest 等價（length check + XOR diff）。
+
+6. **verify-order test 同時 tamper sig + hash → 必報 SignatureMismatch**：V3 §5 invariant 是 「signature first then hash」，test 不能只測單獨 tamper case，必須測「同時 tamper」case 確認 order — 這是 reviewer 最容易質疑的「為什麼順序這樣」的最有力反例。Rust + Python 兩側都加此 test。**規則：order-dependent invariant 必加「全 tamper」test，否則只測單一 case 不足以證明順序強制**。
+
+7. **`KeyArchive` trait 抽象（V042 未 land）**：dispatch 規範「V042 未 land 時用 in-memory mock 做 unit test」。設計：trait `KeyArchive` + impl `InMemoryKeyArchive` shipped；Wave 3 R20-P2a-S4 落地 SQL-backed impl 無需改 manifest_signer.rs 一行。Python 側鏡像 ABC + InMemoryKeyArchive。**規則：當 future SQL/DB 依賴 reserved 但未 land 時，trait/ABC 抽象 + 同 commit ship in-memory test impl，避免 Wave 阻塞**。
+
+8. **Module-level singleton 不需 §九 登記**：本任務新加的 `ManifestSigner` 是 stateful instance（非 singleton）；caller 可創多個 instance（per-key / per-env）。沒有 module-level mutable global → 無需 CLAUDE.md §九 表登記（與上一輪 LG5 W3 FUP-1 必登記不同；那是真的 module-level singleton with leader lock fd）。**規則：§九 只登「真 module-level mutable global」，instance class 不算**。
+
+### Cross-platform compliance
+- 所有路徑用 `Path(__file__).resolve().parents[N]` / `env!("CARGO_MANIFEST_DIR")` / `OPENCLAW_REPLAY_FIXTURE_DIR` env override，0 hardcoded `/Users/ncyu` 或 `/home/ncyu` literal
+- Python test fallback parent 計算驗證：parents[2] = control_api_v1, parents[6] = srv root（以本檔位置實測）
+- Mac + Linux 均可跑（fixture path 兩端從 OPENCLAW_BASE_DIR 推導）
+
+### Bilingual comment compliance（CLAUDE.md §七 強制）
+- 6 個新檔每一個都有 MODULE_NOTE 雙語 block
+- `pub fn` / `def` / class / impl 全部有 docstring + inline 雙語注釋
+- 4 fail-mode enum variant 各有「為什麼這個 mode 存在 + 對應 audit label + 觸發條件」雙語注釋
+- verify-order invariant inline 注釋雙語明寫「先 signature 後 hash」+ 反例範例
+
+### 報告路徑
+- `srv/.claude_reports/20260503_032000_ref20_p2a_s2_manifest_signer.md`
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_p2a_s2_manifest_signer.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 2 P2a-S2 Fingerprint Algorithm Surgical Fix-Up（dispatch by PM）
+
+### 任務
+PM Wave 2 Batch 1 整合時發現上一輪 P2a-S2（commit `2026-05-03--ref20_p2a_s2_manifest_signer.md`）有**critical algorithm divergence**：
+- helper script `generate_replay_signing_key.sh` line 91/93/111 算 fingerprint = `openssl dgst -sha256 -hex < $KEY_FILE | awk '{print $NF}' | cut -c1-16`（對 file content + trailing `\n` 做 sha256）
+- 本人上一輪 IMPL `compute_key_fingerprint(decoded_raw_32_bytes)` 對 hex decode 後 raw 32 bytes 做 sha256
+- 兩值不同 → operator 用 script 算 fingerprint 寫入 1Password vault → runtime 用 module 算 fingerprint 查 V042 archive → **100% lookup miss → 100% `key_missing` runtime fail-mode → replay subsystem 永久不能啟動**
+
+PM 決策：fix module to match script（script 是 operator-facing canonical reference 必勝；上一輪我在 §6.B 自己 push back 建議反方向「runbook align module」是錯的方向）。
+
+### 修改清單（6 file，0 new）
+| 路徑 | 變更 |
+|---|---|
+| `rust/openclaw_engine/src/replay/manifest_signer.rs` | 修 `compute_key_fingerprint` doc + param rename `key_file_content`；修 `ManifestSigner::new()` 拆「fingerprint 用 file_content_bytes / HMAC key 用 decoded raw 32 bytes」兩條獨立 derivation；修 unit test fixture `fixture_signer()`；修 `fingerprint_matches_helper_script` test 注釋 |
+| `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/manifest_signer.py` | 同 Rust：修 `compute_key_fingerprint` doc + param；修 `__init__` 用 `read_bytes()` + 拆兩條 derivation |
+| `rust/openclaw_engine/tests/replay_manifest_signer_xlang_consistency.rs` | 修 `load_fixture_signer()` 用 `fs::read` 讀 file content bytes |
+| `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_manifest_signer_xlang_consistency.py` | 修 `fixture_signer` pytest fixture 用 `read_bytes()` |
+| `rust/openclaw_engine/tests/fixtures/replay_manifest_signer/fingerprint.txt` | `4773d12e2371bb93` → `da0d3b33336d12fb` |
+| `rust/openclaw_engine/tests/fixtures/replay_manifest_signer/README.md` | 更新 fingerprint description + regenerate snippet |
+
+### 驗證（4 testcommand 全 PASS）
+- `cargo test -p openclaw_engine --lib replay::manifest_signer::` → **10/10 PASS**
+- `cargo test -p openclaw_engine --test replay_manifest_signer_xlang_consistency -- --nocapture` → **8/8 PASS**
+- `pytest .../tests/replay/test_manifest_signer_xlang_consistency.py -v` → **13/13 PASS**
+- `cargo test -p openclaw_engine --lib live_authorization` → **18/18 PASS**（sibling 0 regression）
+- Shell smoke: `openssl dgst < key.hex` == `fingerprint.txt` == `da0d3b33336d12fb` ✅
+
+### 經驗教訓
+
+1. **跨 boundary 演算法對齊：operator-facing source-of-truth 必勝**。當 shell script（operator runs by hand）+ Rust module + Python module 三端有 algorithm drift 時，operator-facing reference 是 canonical（operator 用它寫 1Password、跑 runbook、debug）。Module 必對齊 script，反方向（改 script 對齊 module）會破壞 operator 工作流。**規則：上一輪我在 sub-agent §6.B 建議「runbook + script align module」是錯的；當有「operator-facing 跑」vs「pure-code internal」的選擇時，operator-facing 永遠是 source of truth**。
+
+2. **「兩條獨立 derivation」設計模式**：HMAC key（用於 cryptographic operation）必為 raw 32 bytes；fingerprint（用於 audit/lookup label）可以是任何 deterministic projection。本 fix 的 cleanest 設計是 constructor 從 disk read 一次，分離為（a）file content bytes → fingerprint，（b）trim() + hex decode → HMAC key，兩條互不污染。**規則：當一個 source（如 disk file）需要產出多個下游 artifact 時，明確命名兩條 derivation path（`file_content_bytes` vs `key_bytes`）並在注釋說明各自的用途，避免 reviewer 以為是同一條 path 的 bug**。
+
+3. **`from_bytes_for_test` 簽名穩定 = 0 production caller breakage**：surgical fix 的最佳指標是「caller-facing API 0 改」。本 fix `new(path, fingerprint)` / `sign(canonical)` / `verify(...)` / `from_bytes_for_test(key_bytes, fingerprint)` 全部簽名不變，只改 internal derivation 語意。Wave 3 R20-P2a-S4 SQL archive impl 不需任何修改。**規則：surgical fix 必先確認 0 caller-facing API change；任何簽名變更都會擴大 blast radius 變成 mini-refactor**。
+
+4. **Sub-agent push-back 不一定對**：上一輪我在 §6.B 自己標 ambiguity 並建議反方向修法；PM cold review 後反方向決策。意義：sub-agent 在獨立 dispatch 中可能漏看 cross-system context（operator workflow / 1Password vault / runbook）。**規則：當 task scope 是 single module 但結果牽涉跨系統 contract（shell ↔ binary ↔ vault），sub-agent push-back 前先 grep 所有 caller / config consumer / operator-facing reference，不可只在 module 內部視角下決策**。
+
+5. **Test fixture regeneration 必對 production-equivalent value**：fingerprint.txt 從 `4773d12e2371bb93`（舊算法）→ `da0d3b33336d12fb`（新算法）必用 `openssl dgst < key.hex` 算（與 script 一致），不可用 Python `hashlib.sha256(file_content).hexdigest()[:16]` 算後對比 — 雖兩者結果應同，但用 production-equivalent CLI 算多一道驗證。**規則：fixture regeneration 用 production tool（openssl）算 + 用 module 算 + shell smoke 三方對比，三值同才確認**。
+
+6. **HMAC tag 與 fingerprint 算法解耦**：HMAC 用 raw 32 bytes（不變），fingerprint 用 file content bytes（改了）。兩者算法 0 共享狀態 → 改 fingerprint 不影響 cross-language byte-equal HMAC 不變量（3 個 manifest golden sig 完全不變）。**規則：當改 sub-system 算法時，先列出所有依賴此算法的 invariant，逐一驗證哪些動哪些不動 — 本 case：fingerprint algorithm 改 / HMAC byte-equal 不變 / verify order 不變**。
+
+### Cross-platform compliance
+- 0 hardcoded `/home/ncyu` 或 `/Users/<name>` literal in source（grep 1 hit on §七 規則例外的 Chinese rule explanation comment）
+- Mac + Linux 均可跑（修改後仍透過 `env!("CARGO_MANIFEST_DIR")` / `OPENCLAW_BASE_DIR` env var / fallback parents 推 fixture path）
+
+### Bilingual comment compliance（CLAUDE.md §七 強制）
+- `compute_key_fingerprint` 函數 doc 大量擴充中英對照（含 algorithm reference 到 script 行號 + invariant 解釋 + 反模式警告）
+- `ManifestSigner::new()` doc 加 invariant 雙語塊「HMAC key vs fingerprint 兩條獨立 derivation」
+- `from_bytes_for_test` / `new_from_bytes_for_test` doc 加 caller 注意事項雙語
+- 所有 inline change 都加雙語注釋說明改的原因（鏡像 helper script 對齊）
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_p2a_s2_fingerprint_align_fix.md`
