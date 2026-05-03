@@ -3665,3 +3665,103 @@ feat(replay): P4-Q4 DreamEngine API + P4-Q5 MLDE veto + V043 advisory_log (Wave 
 ### 報告路徑
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave6_p4_q4_q5_dream_mlde_advisory.md`
 - `srv/.claude_reports/20260503_153000_ref20_wave6_batch6b_p4_q4_q5.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 9 14d Gradient Observation Infrastructure (R20-W9-T1/T2/T3 + PM template)
+
+### Task
+PM dispatch — Wave 9 全 4 task sequential IMPL：
+- TASK 1: 14d gradient observation — replay_no_live_mutation continuous validator (cron + module + test)
+- TASK 2: Business KPI 7d/14d collection (cron + V047 + test)
+- TASK 3: governance_audit_log 14d 0 incident scan (cron + V048 + test)
+- TASK 4: PM Wave 9 sign-off template doc + REF-20_RESERVATION ledger v1.7
+
+### 實作要點
+
+**TASK 1 — 14d replay_no_live_mutation continuous watcher**
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/wave9_continuous_validator.py` (328 LOC)
+  - API: `validate_no_live_mutation(cursor, window_days=14) -> ContinuousValidatorResult`
+  - 純 SELECT 三表 (live_orders / fills / positions)；查 source LIKE 'replay_%' AND ts >= NOW() - INTERVAL '<N> days'
+  - Graceful absent fallback: schema 缺、table 缺、source col 缺 → ok=True (per-tier skip)
+  - window_days bound: (0, 365] ValueError 否則
+- `helper_scripts/cron/wave9_replay_no_live_mutation_watch.sh` (326 LOC)
+  - hourly cron `0 * * * *`
+  - 內嵌 Python via heredoc：DSN build + psycopg2 connect + validator + audit emit + exit 1 violation
+  - Audit emit 沿用 V035 'audit_write_failed' enum slot + payload alert_type='replay_no_live_mutation_violation'
+- 4 pytest case: schema_absent / zero_rows / 5_rows_violation / window_days_validation
+
+**TASK 2 — Business KPI 7d/14d collector**
+- `sql/migrations/V047__replay_business_kpi_snapshots.sql` (271 LOC)
+  - replay.business_kpi_snapshots: snapshot_id UUID PK / snapshot_date DATE / window_type ('7d'/'14d') / kpi_name / kpi_value / sample_size / created_at
+  - UNIQUE(snapshot_date, window_type, kpi_name) 防同日重跑
+  - 1 hot-path index idx_kpi_snapshot_date_window
+  - Guard A + Guard C
+- `helper_scripts/cron/wave9_business_kpi_collector.py` (617 LOC) — daily 06:00 cron
+  - 6 sampler 對應 V3 §11 P6 KPI list:
+    1. replay_routes_daily_request_count (V045 run_state count)
+    2. manifest_verify_fail_mode_breakdown (4 fail mode count from V035)
+    3. handoff_success_rate (V044 success / total)
+    4. quota_cap_hit_rate (V035 alert_type prune storage_cap / total prune)
+    5. cost_edge_ratio_p50 (V035 cost_regime_ratio percentile_cont)
+    6. dsr_pbo_gate_fire_rate (V035 review_live_candidate rule_failures DSR/PBO)
+  - 每 KPI 兩窗口 (7d + 14d) = 12 row/day UPSERT
+  - Mac dev mock mode: OPENCLAW_WAVE9_KPI_MOCK=1 → /tmp/wave9_kpi_test_only/snapshot.jsonl (no DB)
+- 4 pytest case: V047_absent_graceful / mock_mode_jsonl / zero_rows_skeleton / handoff_success_rate_correct
+
+**TASK 3 — Audit incident scan**
+- `sql/migrations/V048__replay_audit_incident_summaries.sql` (305 LOC)
+  - replay.audit_incident_summaries: summary_id UUID PK / scan_date / window_days / incident_count / severity (4-enum) / event_type / first_incident_ts / last_incident_ts / sample_payload JSONB
+  - UNIQUE(scan_date, severity, event_type)；severity CHECK 'low'/'medium'/'high'/'critical'
+  - 1 hot-path index idx_audit_incident_scan_date_severity
+  - Invariant: 0 incident 時 NOT 寫 row (有 row = 該日有 incident)
+- `helper_scripts/cron/wave9_audit_incident_scan.py` (532 LOC) — daily 06:30 cron (KPI collector 後 30min)
+  - 3 scanner:
+    1. handoff_rejected (severity high; replay_handoff_request payload.result='rejected')
+    2. key_rotation_due (severity high; audit_write_failed payload.alert_type='replay_key_rotation_due')
+    3. audit_failed_other (severity medium; audit_write_failed 排除其他 typed alert)
+  - Sample payload 截斷 8KB 防 unbounded blob
+  - Violation → UPSERT V048 + stderr ALERT + exit 1
+- 4 pytest case: V035_absent / V048_absent_no_upsert / zero_incidents_silent / 3_incidents_3_upsert
+
+**TASK 4 — PM Wave 9 sign-off template**
+- `docs/execution_plan/2026-05-03--ref20_wave9_pm_sign_off_template.md` (274 LOC)
+  - 7-item closure checklist: Wave 1-8 closed / V### apply / Decision Lease retrofit / 14d 0 mutation / 14d 0 incident / KPI snapshot 完整 / E2+E4+MIT+FA+QA review
+  - Operator deploy 紀錄區 + 14d window 表 + closure 確認簽章區
+  - Wave 7 defer cross-ref（不阻塞 P6 closure）
+
+**Migration ledger**: REF-20_RESERVATION.md v1.7 — V047 + V048 buffer → land
+
+### 驗證結果
+
+| 驗證項 | 結果 |
+|---|---|
+| pytest cumulative (Wave 9 specific) | 20/20 PASS (4 cron-T1 + 4 cron-T2 + 4 cron-T3 + 4 V047 + 4 V048) |
+| pytest cumulative (all cron + migrations) | 88 PASS / 2 SKIPPED (skips pre-existing V037 PG-required) |
+| bash -n syntax | OK |
+| py_compile (all 8 .py files) | OK |
+| 0 trading.* mutation grep | PASS (only SELECTs) |
+| 0 governance_hub.acquire_lease grep | PASS (2 hits 為 docstring 文字 NOT import) |
+| 0 hardcoded path grep (/home/ncyu \| /Users/ncyu/Projects) | PASS |
+| File size budget < 800 LOC each | PASS (max 617 LOC at collector) |
+
+### 設計決策
+
+1. **Audit emit enum slot fallback**: 沿用 V035 'audit_write_failed' enum slot + payload `alert_type='replay_no_live_mutation_violation'`，未來 sibling task 擴 V035 enum 加 typed slot；對齊 P2a-S5 prune cron + P2a-S1 key archive cleanup pattern
+2. **V047 / V048 不對 V035 / V044 / V045 加 FK**: 避免 hypertable retention prune 後 FK dangling；KPI snapshot + incident summary 是衍生 analytics
+3. **Wave 9 Mac dev mock mode**: OPENCLAW_WAVE9_KPI_MOCK=1 寫 /tmp/wave9_kpi_test_only/snapshot.jsonl，讓 Mac 沒 PG 可驗證 cron 邏輯；Linux trade-core deploy 後 unset
+4. **Idempotency**: 全 cron 重跑 0 effect (read-only validator + UPSERT pattern)；V047 / V048 二次 psql -f 經 Guard A IF NOT EXISTS + 條件式 ADD CONSTRAINT，第二次 no-op
+5. **Window 邊界**: validator 拒 (0, 365] 之外 (1d smoke 用 OPENCLAW_WAVE9_WINDOW_DAYS=1 env 覆寫 14d 預設；無需改碼)
+
+### 後續 wiring（不在本 task 範圍）
+- E2 review: 4 cron + 1 module + 2 SQL + 5 test 雙語注釋 + V035 enum slot fallback 是否觸發 sibling enum extension task
+- E4 regression: Linux trade-core run pytest 既有 + 新 20 case 全 PASS
+- FA review: 6 KPI sampler 是否完整對齊 V3 §11 P6 list；3 incident scanner severity 分級是否合理
+- QA review: 14d window cron 排程 (hourly + daily 06:00 + daily 06:30) 是否與既有 cron 衝突
+- Operator deploy: V047 + V048 apply on Linux trade-core 後 crontab install + 14d 自然觀察期
+- PM Wave 9 sign-off issue: 14d window END ts 後填寫 template 7 條 → REF-20 P6 closure
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave9_14d_gradient_observation.md`
+- `srv/.claude_reports/20260503_xxxxxx_ref20_wave9_14d_gradient_observation.md`
+
