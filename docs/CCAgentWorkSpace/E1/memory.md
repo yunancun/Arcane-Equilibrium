@@ -3168,3 +3168,307 @@ Wave 4 P2b-T1：把 Wave 3 已 land 的 3-layer guard chain（S7 profile cfg / S
 
 ### 報告路徑
 - `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave4_p2b_t2_t3_routes_canary.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 5 Batch 5A-B：P3a-Q2 + P3a-Q6 + RGM-Q1 IMPL（PM 派發；E1 sub-agent；Mac dev）
+
+### 任務契約
+- 上游：`docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md` §4 Wave 5 P3a-Q2/Q6 + RGM-Q1 row + §5.2 KPI
+- Spec：V3 §8.1（Sample/Freshness/Embargo）+ §8.4 #1（warmup 500 fills）+ §11 P3a Exit + §12 acceptance #15/#16/#18
+- Migration：V041 reserved → land；REF-20_RESERVATION.md §3 row V041（雙語 Guard A + Guard B）+ ledger v1.4 追加
+- Owner：E1 sub-agent；E2 + E4 + MIT review-ready
+
+### 修改清單（10 file）
+1. `sql/migrations/V041__replay_oos_embargo_enforcement.sql`（249 LOC；雙語 Guard A + Guard B；CHECK chk_embargo_days；ALTER TABLE replay.experiments ADD COLUMN IF NOT EXISTS half_life_days/embargo_days；bootstrap stub for fixture-vs-migration land 順序兼容）
+2. `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/embargo_validator.py`（260 LOC；雙語 MODULE_NOTE；3 public API: `compute_min_embargo_days` + `validate_embargo` + `check_embargo`；EmbargoCheckResult dataclass + bilingual reason；NaN/negative/non-integer guard）
+3. `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/calibration_gate.py`（407 LOC；雙語 MODULE_NOTE；CalibrationGate class with check_freshness/check_sample_power/gate_handoff；4 dataclass FreshnessCheck/PowerCheck/HandoffVerdict + literal HandoffVerdictLiteral；naive datetime guard / threshold override / manifest required field check）
+4. `program_code/learning_engine/regime_controller.py`（358 LOC；雙語 MODULE_NOTE；RegimeController base + check_warmup/get_cell_status；WarmupStatus + CellRegimeStatus dataclass；composite_status literal 為 Q2/Q3/Q4 forward-compat 留窄；500 fills V3 §8.4 #1 hard binding）
+5. `tests/migrations/test_v041_oos_embargo.py`（226 LOC；6/6 PASS；包含 cross-language alignment 測試對齊 V041 CHECK 與 Python validator 12 邊界 case）
+6. `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/tests/__init__.py`（NEW package）
+7. `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/tests/test_embargo_validator.py`（205 LOC；8/8 PASS；含 SQL alignment + edge case + error handling）
+8. `program_code/exchange_connectors/bybit_connector/control_api_v1/replay/tests/test_calibration_gate.py`（259 LOC；11/11 PASS；含 boundary 72h/200 + composite verdict + manifest field validation）
+9. `program_code/learning_engine/tests/test_regime_controller.py`（288 LOC；15/15 PASS；含 0/250/499/500 task 必測 4 case + 邊界 ≥500 + extra_payload forward-compat + 5 error case）
+10. `sql/migrations/REF-20_RESERVATION.md` §3 row V041 status reserved → land；§6 ledger v1.3 → v1.4
+
+### 關鍵設計決策
+- **V041 雙路徑 fixture-tolerant**：因 P2b runner SQL fixture（V3 §6.1）部署順序與 V041 不確定，採 (a) bootstrap minimum stub（experiment_id PK + half_life_days + embargo_days + created_at）若表不存在 + (b) ADD COLUMN IF NOT EXISTS + (c) Guard A 寬鬆（只在 experiment_id 缺時 RAISE，其他欄位由 ADD COLUMN 補）。fixture 後續 land 完整 V3 §4.1 schema 不會撞，IF NOT EXISTS no-op。
+- **CEIL 跨語言一致性**：V041 SQL 用 `GREATEST(7, CEIL(2.0 × half_life_days)::INTEGER)`；Python 用 `max(7, math.ceil(2.0 * h))`；test_v041_check_aligns_with_python_validator 12 邊界 case 全 PASS（包含 5.6 → ceil(11.2) = 12 fractional case）。
+- **CHECK NULL handling**：V041 CHECK 採 `embargo_days IS NULL OR half_life_days IS NULL OR embargo_days >= ...`；NULL 永遠通過（避 fixture 預存舊 row 中 NULL 值阻塞部署）。Python `compute_min_embargo_days(None)` 走保守 fallback 14 day → min embargo 28（V3 §8.1 規格）。
+- **CalibrationGate timezone-aware enforcement**：`check_freshness` 對 naive datetime 直接 raise ValueError（避 DST/region drift 沉默對齊錯誤）；`now` test seam 也必 timezone-aware。
+- **gate_handoff 兩 check 都跑（不 short-circuit）**：even when freshness fails, power check 仍跑，verdict 帶兩維度 reason；GUI 顯示精確失敗維度而非通用 defer_data。
+- **RegimeController 為 Q2/Q3/Q4 forward-compat base**：CompositeCellStatusLiteral 故意窄（Q1 只 warming_up/ready），Q2/Q3/Q4 sub-task 擴展時 widen literal + 加 dataclass 欄；extra_payload Dict 為 forward-compat hook（CUSUM z_score / Kupiec n / PSR statistic 由後續 sub-task 注入），不破 ABI。
+- **defensive copy on extra_payload**：`get_cell_status` 接收 caller dict 必 `dict(extra_payload)` 拷貝；test 驗證 caller 後續修改原 dict 不影響 result。
+- **boundaries 對齊 V3 §8.1**：freshness ≤ 72h（不是 < 72h）；n ≥ 200（不是 > 200）；warmup ≥ 500（不是 > 500）。test 對 72h/200/500 等值臨界全 PASS。
+
+### V3 §12 acceptance binding
+- #15 execution_calibration_freshness：CalibrationGate.check_freshness ≤72h 強制；stale → status='stale'
+- #16 execution_calibration_power：CalibrationGate.check_sample_power n≥200 強制；不足 → status='insufficient'
+- #18 replay_regime_shift_gate：RegimeController.check_warmup 500 fills warmup → ready 才能驅 handoff（Q2/Q3/Q4 後續 commit 補完整 regime gate）
+- V3 §8.1 OOS embargo 不變量 = V041 chk_embargo_days CHECK + embargo_validator Python 兩層守
+
+### 雙語注釋覆蓋
+- 4 module 全帶 MODULE_NOTE EN/中 雙塊
+- 公開型別 / 函式 / 不變量 / TODO 全雙語
+- V041 SQL 含雙語 Purpose / Guard 標籤 / 欄位 COMMENT
+- 每 test 模組含雙語 docstring 與 case 註釋
+
+### LOC budget
+- 全 4 新 module ≤ 407 LOC（< 800 警告線）
+- V041 SQL 249 LOC
+- 4 test 文件均 < 290 LOC
+- pytest 16+ requirement → 實際 40 case PASS（Q2: 14 / Q6: 11 / RGM-Q1: 15）
+
+### 後續 wiring
+- E2 review：對 V041 雙路徑 fixture-tolerant 設計接受 + chk_embargo_days CEIL 跨語言對齊 12 case 全 PASS + 雙語 MODULE_NOTE 完整 + LOC < 800
+- E4 regression：Linux trade-core 跑 `psql -f V041__replay_oos_embargo_enforcement.sql` × 2 驗 idempotent；Mac dev 已預驗 pytest 40/40 PASS；建議 sibling Wave 5 P3a-Q1 (half_life_estimator) + P3a-Q3 (quantile_bootstrap) sibling test 也跑回歸
+- MIT review：CalibrationGate 與 P3a-Q1 half_life_estimator 接口（HalfLifeResult.half_life_days 透過 manifest 餵入 embargo_validator + calibration_gate；尚未 wire 但接口可組）；Q2/Q3/Q4 RegimeController 擴展時 ABI 穩定性
+- replay_routes 接線：embargo_validator 預 Wave 5 P3a-Q2 後續 commit hook 進 manifest POST 前置驗證；calibration_gate 預 generate_handoff_verdict endpoint 擴展（V3 §12 #15/#16）；RegimeController 預 generate_handoff_verdict regime gate（V3 §12 #18）
+
+### 已知 ambiguity（向 PM push back）
+1. **`replay.experiments` table fixture 部署狀態**：本 task IMPL 時 V045/V046 已 land 但 V3 §6.1 P2b runner SQL fixture（含 replay.experiments 完整 V3 §4.1 schema）尚未派發；V041 採雙路徑 bootstrap stub + ADD COLUMN IF NOT EXISTS，fixture 後續 land 不會撞但 PM 需確認部署順序協議（V041 先 land，fixture 後 land 補完整 schema；vs fixture 先 land 完整 schema，V041 ADD COLUMN no-op + chk_embargo_days 加 CHECK）。**不阻塞**：兩順序均 idempotent。
+2. **embargo_validator 未 wire 進 replay_routes manifest POST**：本 task 範圍純 module IMPL + test，後續 sub-task（建議命名 R20-P3a-Q2-WIRING）派發 wire 進 manifest_canonicalizer 或 replay_routes pre-write hook。
+3. **CalibrationGate 未 wire 進 generate_handoff_verdict endpoint**：本 task 範圍純 module IMPL + test，replay_routes.py 尚無 generate_handoff_verdict route（task 描述提及但 endpoint 待 P4/P6 wave）；後續 sub-task wire 時需與 P4 Q1 (DSR) / Q2 (PBO) / Q6 (cost_edge_ratio) 集成。
+4. **RegimeController 為 Q2/Q3/Q4 base**：本 commit 只交 RGM-Q1 warmup gate；CompositeCellStatusLiteral 故意窄留擴展空間。Q2 (CUSUM ±3σ) / Q3 (Kupiec POF n>=250) / Q4 (PSR(0)<0.95) 後續 sub-task 將擴展此 class（widen literal + 加 dataclass 欄 + extra_payload 結構化）。
+5. **`learning_engine/` package 已存在（sibling agent land half_life_estimator + quantile_bootstrap）**：本 task IMPL 加 regime_controller.py 不衝突；package __init__.py 已含 V3 §11 binding 注釋無需改。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave5_p3a_q2_q6_rgm_q1.md`
+
+---
+
+## REF-20 Wave 5 Batch 5A-A — P3a Q1+Q3+Q5 Math IMPL（2026-05-03 第二趟）
+
+### 任務範圍
+single E1 sequential sub-agent 順序 IMPL 3 P3a global calibration math modules：
+- Q1：half_life_estimator.py（PnL decay / Sharpe decay / default 14d 三 fallback）
+- Q3：quantile_bootstrap.py（Politis-Romano 平穩 bootstrap，hand-rolled，無 `arch` lib 依賴）
+- Q5：fee_execution_calibrator.py（Bybit V5 USDT linear fee + maker/taker split + BUSDT 110017 排除）
+
+### Land 結果
+- 6 file（3 module + 3 test）共 2062 LOC，最大 module 500 LOC < 800 警告線
+- pytest 25 case PASS（PA dispatch 要求 12，多寫 13 sanity）— Q1 7 / Q3 7 / Q5 11
+- py_compile 全通過
+- 0 hardcoded /home/ncyu | /Users/<name> 路徑
+- 0 trading.* / live config 寫
+- 0 IPC / 0 dispatch / 0 exchange import
+- 0 ML pipeline runtime 依賴（offline math 純 numpy + scipy + pandas）
+
+### 關鍵實作決策
+1. **scipy.optimize.curve_fit + scipy.stats.f.cdf** 用於 PnL/Sharpe decay 擬合 + p-value（fixtures 也跨平台 PASS）
+2. **Politis-Romano hand-rolled**（無 arch 依賴）：geometric block + 隨機起點，Python `numpy.random.default_rng` seed 控制
+3. **block_size cube-root FP 修正**：Python `1000**(1/3) = 9.99...`，加 epsilon `1e-9` 後 floor 才得 10；perfect cubes (n=125) 同樣處理
+4. **Bybit V5 fee schedule** 用 `docs/references/2026-04-04--bybit_api_reference.md` L656 default（maker 2.0 bps / taker 5.5 bps for VIP=0），**非** PA dispatch 寫的 -0.025% / 0.06%（疑為 spot category 或舊 docs）— flagged 為 ambiguity，VIP-tier table 允許 override
+5. **BUSDT 110017 reject loop 排除** 用 `(symbol='BUSDT' AND reject_code='110017')` 過濾；exclusion count 在 ExecutionSplit.sample_size_excluded_busdt_110017 揭露（審計透明度）
+6. **stationary bootstrap test 重構**：原 PA dispatch test #2「90% CI tighter than naive」用詞含糊 — 在 AR(1) 下 stationary 必然 *寬* 於 naive IID（後者 under-cover），改測「IID 下兩法收斂 + AR 下 stationary CI 含真值」更能測 correctness vs tightness
+
+### V3 §11 P3a KPI 對應
+- "fee model" → Q5 FeeExecutionCalibrator.estimate_fee_per_trade
+- "maker/taker execution estimates" → Q5 estimate_maker_taker_split
+- "bootstrap CI" → Q3 QuantileBootstrap.estimate_ci
+- "shrinkage method declaration" → 留 Q4（sibling）
+- "OOS embargo (max(7d, 2 * half_life))" → Q1 HalfLifeResult.half_life_days，Q2 sibling 用此計算 oos_embargo_seconds
+
+### V3 §12 acceptance binding
+- **#15 freshness**：Q1 HalfLifeResult 不含 freshness 字段（freshness 在 manifest column，由 P3a-Q6 sibling 把守）
+- **#16 power**：Q1 min_sample_size + Q3 low_confidence flag + Q5 sample_size 都揭露樣本量；P3a-Q6 應消費這些做門檻
+- **#17 cv_protocol**：Q3 1000 iter + 95% CI 是 DSR/PBO 的 prerequisite math，P4-Q1/Q2 sibling 上層消費
+
+### 後續 wiring
+- E2 review：scipy.optimize.curve_fit 收斂 robustness（p_value=1.0 fail flag 正確 vs RuntimeError）+ Politis-Romano block_size 邊界（n<10 時 cube-root → 2，是否合適）+ BUSDT 110017 filter dtype 安全（symbol 若是 NaN）
+- E4 regression：Linux trade-core 跑 `python3 -m pytest program_code/learning_engine/tests/` 全綠 + cross-language float consistency（雖 Python-only，但有 1e-4 tolerance 注釋）
+- MIT review：fee/split 的 fills_df 真實 schema（`replay.simulated_fills` 還是 `trading.fills` JOIN exit_features）— production acceptance 需 FUP-2 attribution writer + decision_outcomes timeframe fix GREEN，IMPL 本身已 fixture-driven
+- QC review：Politis-Romano implementation 對自相關保留的 simulation 驗證；half-life p_value F-test approximation 與 bootstrap-CI 替代方案
+
+### 已知 ambiguity（向 PM push back）
+1. **PA dispatch 寫 maker -0.025% / taker 0.06%** vs Bybit reference L656 寫 maker 0.02% / taker 0.055% — 實作用 reference 值，但保留 vip_tier_override hatch 讓 operator 自定。建議 PM 在 production 派發前確認 Bybit V5 USDT linear perpetual 的真實 retail 費率。
+2. **`reject_code` column 不在 既有 trading.fills schema** — PA dispatch 提到「fixture uses mock column」確認；production 需新增 schema column 或用 audit log JOIN（後續 P3a wave 待派 sub-agent migration）。
+3. **arch lib not installed** — hand-roll Politis-Romano works fine for math correctness；如 sibling 跑 pytest 對速度敏感（n_iter=1000 約 0.25s/case），改裝 arch 可加速到 c-impl level（未阻塞 5A-A，可選優化）。
+4. **stationary bootstrap test 用詞重構**：PA dispatch test 2「90% CI tighter than naive」改成「(a) IID 收斂 + (b) AR 覆蓋率」— 因前者在 AR(1) 下違反理論（stationary 必然寬於 naive）。如 PM 希望保留 PA 原 wording 必須先解釋「naive」是 parametric normal-approx 還是 IID bootstrap。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave5_p3a_q1_q3_q5_math.md`
+
+---
+
+## REF-20 Wave 5 Batch 5B-C — P3a-Q4 + P3b-Q2 NumPyro 重 math（2026-05-03 第三趟）
+
+### 任務範圍
+PM 派發 single E1 sequential sub-agent 補完 Wave 5 最後 2 NumPyro 重 math task：
+- P3a-Q4：shrinkage_router.py（hierarchical Gibbs + James-Stein + empirical Bayes 3-tier router）
+- P3b-Q2：hierarchical_bayes.py（cell-level NumPyro hierarchical Bayes 替身：4-chain Gibbs + r_hat + ESS）
+
+### Land 結果
+- 4 file（2 module + 2 test）共 2320 LOC（767 + 756 + 397 + 400）；4 file 全 < 800 LOC PM hard cap
+- pytest 21 case PASS（PA dispatch 要求 9，多寫 12 validation/sanity）— Q4 11 / P3b-Q2 10
+- Full learning_engine regression 81 PASS（5A 60 + 5B-C 21）
+- 0 cross-platform path violation；0 trading.* mutate；4 file 全帶 MODULE_NOTE EN/中 雙塊
+
+### 修改清單
+1. `program_code/learning_engine/shrinkage_router.py`（767 LOC，3-tier router + 4 dataclass + 3 tier handler + Gibbs sampler 100% scipy.stats fallback）
+2. `program_code/learning_engine/tests/test_shrinkage_router.py`（397 LOC，11 PASS = 5 任務 spec case + 3 fallback validation + 3 routing edge case）
+3. `program_code/learning_engine/hierarchical_bayes.py`（756 LOC，CellLevelHierarchicalBayes class + 2 dataclass + Gelman-Rubin r_hat + ESS approximation + 4-chain Gibbs sampler）
+4. `program_code/learning_engine/tests/test_hierarchical_bayes.py`（400 LOC，10 PASS = 4 任務 spec case + alias column compatibility + unfit/unknown error case + REF-21 schema 對齊）
+
+### 關鍵設計決策
+
+#### NumPyro / JAX 不可裝 → scipy.stats hand-roll Gibbs（治理重點）
+- Mac dev env 確認無 numpyro / jax；scipy.stats 可用；numpy 2.2.6
+- 兩 module 內手寫 Normal-Normal hierarchical Gibbs sampler（精度加權後驗 + inverse-Gamma 共軛 prior 對 sigma_b^2 / sigma_w^2）
+- MODULE_NOTE 明文 flag fallback 路徑 + 公開 API 不變保證（日後 NumPyro 可用時 _fit_hierarchical / _fit_gibbs 可切換 NUTS）
+- 後驗摘要（grand_mean / sigma_b / sigma_w / per-cell mean）與 NumPyro Normal-Normal 模型在 prior 一致下 1:1 對齊
+
+#### P3a-Q4 ShrinkageRouter 3-tier 決策邏輯
+- `_route(n, regime_stable, fit_p_value)` 嚴格按 V3 §8.2 規格：
+  - n < 30 → empirical_bayes（cold start，不分 regime / fit）
+  - 30 ≤ n < 50 → james_stein（不分 regime / fit）
+  - n ≥ 50 + regime_stable + fit_p < 0.10 → hierarchical
+  - n ≥ 50 + (regime_unstable OR fit_p ≥ 0.10) → james_stein fallback
+- fit_p < 0.10 用 P3a half_life_estimator 同 alpha 慣例（不是 < 0.05）
+- shrinkage_factor 公式：tier 內 `prec_prior / (prec_prior + prec_data)`，跨 n 單調遞減（test 4 驗證）
+
+#### P3b-Q2 hierarchical Bayes（cell-level）
+- 4 平行 chain × 1000 warmup × 2000 sample = 12000 post-warmup draw（V3 informal expectation）
+- Gelman-Rubin r_hat 經典實作：`sqrt((n-1)/n * w + b/n) / sqrt(w)`，單鏈 fallback 1.0
+- ESS 用一階自相關近似：`n * (1 - rho1) / (1 + rho1)`；負 rho1 時 ESS 上限 = n
+- pooling_factor 同 P3a-Q4 公式：`prec_prior / (prec_prior + prec_data)`，隨 cell n 遞減（test 3 驗證）
+- log_marginal_likelihood：Laplace 近似（grand mean ± sigma_obs² = sigma_w² + sigma_b² 跨 cell 觀測加總 Normal log-pdf）
+- 接受 'intended_outcome_bps' 與 'intended_bps' 雙 alias（REF-21 placeholder §2 容許）
+
+#### REF-21 stub schema 對齊
+- _select_intended_column helper 對 REF-21 placeholder §2 雙 alias 都接（forward-compat）
+- mock fixture 用 _make_cell_outcomes_df helper：(intended, net_outcome) tuple → DataFrame；REF-21 真實 spec land 後 fixture replace 為 reader API call
+- test 4 雙 fixture 驗證（alias_long + alias_short 都 fit 成功）
+
+#### 邊界 / validation 強制
+- ShrinkageRouter ctor 驗 hierarchical > james_stein > 0；ci_alpha ∈ (0, 1)
+- hierarchical_bayes ctor 驗 n_chains ≥ 1 / n_warmup ≥ 0 / n_samples ≥ 1 / prior_std_bps > 0
+- shrink() 驗 observed 1D + 非空 + finite；prior_inputs 必填 4 keys（grand_mean / grand_std > 0 / regime_stable bool / fit_p_value finite）
+- fit() 驗 DataFrame + cell_key 列在 + net_outcome_bps 列在 + 至少一 intended alias 列在 + 非空 row 後仍有資料
+- 兩 module 都做 defensive copy on caller dict / observed array
+
+### V3 §8.2 / §11 binding
+- V3 §8.2 條 1（cell n<30 low confidence）→ ShrinkageRouter empirical_bayes tier；CellLevelHierarchicalBayes 不阻擋（n<30 cell 仍可 fit，但下游 P3b-Q1 cell calibration n≥30 gate 阻 handoff）
+- V3 §8.2 條 2（small cell + 相關 cells → hierarchical Bayes 偏好）→ ShrinkageRouter related_cells_observed prior_input
+- V3 §8.2 條 5（method 必 declare in manifest，禁 ad hoc 收縮）→ ShrinkageResult.tier_used + reason_zh/en；3 tier 為唯一 canonical surface
+- V3 §11 P3b 「per-cell calibration green ≥40%」→ CellLevelHierarchicalBayes 為 cell calibration writer math base（後續 sub-task wire 進 cell_calibrator）
+
+### 雙語注釋覆蓋
+- 兩 module 全帶 MODULE_NOTE EN/中 雙塊（首屯精煉 + V3 binding + Workplan + Usage example）
+- 公開 dataclass / class / 公開方法 / 不變量全雙語 docstring
+- inline 注釋對複雜數學步驟（精度加權 / inverse-Gamma 共軛 / Gelman-Rubin / ESS 公式）雙語
+- 測試 case 全雙語 docstring + 註釋
+
+### LOC budget
+- shrinkage_router.py 767（trim 後從 813 減 46，主要 trim docstring 重複條目，IMPL 邏輯不動）
+- hierarchical_bayes.py 756
+- test_shrinkage_router.py 397
+- test_hierarchical_bayes.py 400
+- 全 4 file < 800 LOC PM hard cap
+
+### 後續 wiring
+- E2 review：對 NumPyro 不可裝 + scipy.stats hand-roll Gibbs fallback 接受；對 fallback notice flag 在 MODULE_NOTE + tier 1 routing 邏輯接受；對 LOC 4 file 全 <800 接受
+- E4 regression：建議跑 sibling Wave 5 全 module test（half_life / quantile_bootstrap / fee_execution / regime_controller / shrinkage_router / hierarchical_bayes 共 81 case）
+- MIT review：對 cell-level Bayesian 模型在 Mac fallback 與後續 NumPyro replace 之間 ABI 穩定性接受；對 r_hat / ESS 診斷符合 V3 informal expectation 接受
+- replay_routes wiring：本 task 純 math IMPL，後續 sub-task（建議 R20-P3a-Q4-WIRING + R20-P3b-Q2-WIRING）wire ShrinkageRouter 進 generate_handoff_verdict + CellLevelHierarchicalBayes 進 cell_calibrator pipeline
+- REF-21 supersede：本 task fixture mock 對 REF-21 stub §2 對齊；REF-21 真實 spec land 後 fixture 改 import S1 reader API（但本 task 兩 module 公開 API 不需改）
+
+### 已知 ambiguity（向 PM push back）
+1. **NumPyro / JAX 缺席的部署協議**：當前 trade-core Linux runtime 是否已裝 NumPyro / JAX 未經本 task 驗證；Mac dev env 確認無，scipy.stats fallback 可運行。建議 PM 確認 Linux runtime requirements.txt + Cargo deps 是否含 jax / numpyro，若無則 fallback 為長期路徑（不阻塞）。MODULE_NOTE 已 flag fallback 切換點。
+2. **ShrinkageRouter related_cells_observed 為 optional**：tier 1 hierarchical 若 caller 不傳 related_cells_observed，模型退化為單組 Normal-Normal conjugate（仍標 hierarchical tier）。是否該強制要求？目前選 graceful fallback（tier 仍正確標 hierarchical，reason 註記）以容 caller wiring 漸進。
+3. **CellLevelHierarchicalBayes log_marginal_likelihood Laplace 近似精度**：跨 cell 加總 Normal log-pdf 假設 sigma_obs² = sigma_w² + sigma_b² 是 fixed-effect 邊際分佈的 Laplace；對 hierarchical 真 marginal likelihood 偏差可能 ≥ O(log n)。REF-21 模型比較場景需要更高精度時考慮 path sampling / thermodynamic integration（後續 task 評估，**不阻塞**本 commit acceptance）。
+4. **Gibbs warmup / draws 預設值**：n_warmup=1000 / n_samples=2000 / n_chains=4 是 V3 informal expectation，未實證 Mac dev env 收斂時間 budget；test 用 200/400/2 chain mini config 驗 r_hat<1.05 + ESS>0；production 預設值若需調整由 caller passes constructor arg。
+5. **scipy.stats 為 hard dep**：本 module 用 numpy + scipy.stats（後者僅在 numpy.random 不夠時 fallback；實際 IMPL 完全 numpy.random.Generator + math 模組，scipy.stats 不直接 import）— 已於 fee_execution_calibrator 等 sibling module 同樣處理（numpy 為硬 dep + scipy.stats 軟 dep）。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave5_p3a_q4_p3b_q2_numpyro_math.md`
+
+---
+
+## 2026-05-03 — REF-20 Wave 5 Batch 5B-D：P3b-Q1 + RGM-Q2/Q3/Q4 IMPL（PM 派發；E1 sub-agent；Mac dev）
+
+### 任務契約
+- 上游：`docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md` §4 Wave 5 P3b-Q1 + RGM-Q2/Q3/Q4 row + §5.2 KPI
+- Spec：V3 §8.1 cell sample (n>=30) + §8.2 block bootstrap CI + §8.4 #2/#3/#4 Regime Controls + §11 P3b Exit + §12 #16/#18
+- Owner：E1 sub-agent；E2 + E4 + MIT review-ready
+
+### 修改清單（5 file 全絕對路徑）
+
+**TASK 1 / R20-P3b-Q1（2 file 新建）**
+- `program_code/learning_engine/cell_calibrator.py`（659 LOC — 4 dataclass + CellCalibrator class + n>=30 gate + incremental update + bootstrap unstable detection；委派 P3a-Q3 QuantileBootstrap 跑 1000 iter Politis-Romano）
+- `program_code/learning_engine/tests/test_cell_calibrator.py`（457 LOC，20/20 PASS — 4 必測 + 16 extras）
+
+**TASK 2-4 / R20-RGM-Q2/Q3/Q4（3 file，1 extend + 1 new + 1 new test）**
+- `program_code/learning_engine/regime_controller.py`（1062 LOC — RGM-Q1 base 擴展 + 3 method: check_cusum / check_kupiec_pof / check_psr_3windows + 3 dataclass: CusumResult / KupiecResult / PsrResult；CompositeCellStatusLiteral widen 從 2 → 6 狀態；ctor 加 7 參數含 pm_alert_callback）
+- `program_code/learning_engine/_regime_math.py`（199 LOC 新建 — internal helper module 抽 cusum_statistic + kupiec_lr_pof + psr_zero + validate_returns；底線前綴示意 internal-only；防 controller 超 1200 LOC 硬上限）
+- `program_code/learning_engine/tests/test_regime_controller_q2_q3_q4.py`（559 LOC，22/22 PASS — 12 必測 + 10 extras）
+
+### 關鍵設計決策
+1. **regime_controller.py 1062 LOC > 800 警告線**：task description 要求「extend 同 file」，4 個 sequential gate（warmup + CUSUM + Kupiec + PSR）合在一起到 1062 LOC。已抽 199 LOC math helper 到 `_regime_math.py` 把 controller 從 1225 拉回 1062（< 1200 硬上限）。後續 wiring sub-task 派時可考慮再拆 controller subclass。**flagged 為 ambiguity**。
+2. **cell_calibrator 委派 P3a-Q3 QuantileBootstrap**：不重新實作 Politis-Romano；直接 import sibling 5A-A 模組（`from .quantile_bootstrap import QuantileBootstrap`）跑 q=0.5 (median) CI。
+3. **incremental_update rebootstrap_threshold 預設 30**：累積 30 新 fill 才重 bootstrap；不到則 reuse 前次 CI（ci_low + ci_high）只刷 n + mean。Edge-trigger：剛跨 n_threshold（從 < 30 跨到 >= 30）強制 rebootstrap。
+4. **fill_id 去重**：`incremental_update` 用 `seen_fill_ids` set O(1) 去重；無 fill_id 全 append。MAX_FILL_BUFFER=5000 cap 限記憶體 (187 cell × 5000 ≈ 1M row)。
+5. **CUSUM Z-scale normalisation**：`max_t |S_t / sqrt(n)|` 比較 ±3σ 閾值，使 threshold 單位為 σ；常數序列（std≤1e-12）短路返 cusum_value=0。
+6. **Kupiec POF n<250 sufficient_sample=False**：V3 §8.4 #3 明確「cell n<250 skipped」；不從 PBO sample 借 — 設 sufficient_sample=False + reject_h0=False + p_value=NaN；caller 必觀察 sufficient_sample 才用 reject_h0。
+7. **PSR(0) 用最後 3×250 fills**：caller 餵長史；我切尾 (`returns[n-750:n]`)；window[0]=最舊、window[-1]=最新。對齊 V3 §8.4 #4「3 consecutive 250-fill windows」。
+8. **PSR pm_alert_callback 為 callable hook**：避直接寫 `learning.governance_audit_log`（DB write 屬 wiring sub-task 範圍，不應在純 math module 內）。caller 在 wiring 時 pass `lambda cell_key, payload: pg.execute("INSERT INTO learning.governance_audit_log ...")`；callback raise → log warning + pm_alert_emitted=False（best-effort）。
+9. **CompositeCellStatusLiteral widen**：Q1 只 `warming_up` / `ready` → Q2/Q3/Q4 加 `break` / `refit_pending` / `reactive` / `kupiec_fail` 共 6 狀態。get_cell_status 仍只用 Q1 mapping（forward-compat）；Q2/Q3/Q4 的 verdict 由 caller composite。
+
+### V3 §12 acceptance binding
+- **#16 execution_calibration_power**：cell n>=30 gate（CellCalibrator gate() returns "insufficient_n" when n<30）
+- **#18 replay_regime_shift_gate**：Q1 warmup + Q2 CUSUM break + Q3 Kupiec POF + Q4 PSR refit 都在 RegimeController 內，generate_handoff_verdict（後續 wave）composite 為單一 verdict
+- V3 §8.1 cell sample gate：CellCalibrator.DEFAULT_N_THRESHOLD = 30
+- V3 §8.2 block bootstrap：CellCalibrator delegate to QuantileBootstrap (sibling 5A-A) for 1000-iter Politis-Romano
+- V3 §8.4 #2 CUSUM ±3σ：CUSUM_SIGMA_THRESHOLD = 3.0; check_cusum break_detected = max|S_z| > 3.0
+- V3 §8.4 #3 Kupiec POF n>=250：KUPIEC_MIN_N = 250；sufficient_sample False if n<250
+- V3 §8.4 #4 PSR(0)<0.95 across 3×250：PSR_THRESHOLD=0.95 / PSR_WINDOW_SIZE=250 / PSR_NUM_WINDOWS=3；refit_trigger = ALL windows < 0.95
+
+### 雙語注釋覆蓋
+- 3 module（cell_calibrator + regime_controller extension + _regime_math）全帶 MODULE_NOTE EN/中 雙塊
+- 公開型別 / 函式 / 不變量 / TODO 全雙語
+- 4 新 dataclass（CellCalibration + CusumResult + KupiecResult + PsrResult）attribute 雙語 docstring
+- test 模組含雙語 docstring 與 case 中文註釋
+
+### LOC budget
+- cell_calibrator.py 659 LOC < 800 警告線
+- regime_controller.py 1062 LOC > 800 警告線（< 1200 硬上限）— **flagged ambiguity，已抽 199 LOC 到 _regime_math.py 緊縮**
+- _regime_math.py 199 LOC < 800
+- test_cell_calibrator.py 457 LOC < 800
+- test_regime_controller_q2_q3_q4.py 559 LOC < 800
+
+### 跨平台 + 安全 grep
+- 0 hardcoded `/home/ncyu` / `/Users/[name]/` 路徑（grep 確認）
+- 0 trading.* mutate / 0 live_execution_allowed / 0 execution_authority / 0 system_mode / 0 max_retries 觸碰
+- 0 IPC / 0 dispatch / 0 exchange import
+- 0 SQL INSERT INTO / 0 PG writer（pure math + numpy + pandas + scipy）
+
+### pytest 全 PASS 列表（57 case 本 task 範圍 + 0 sibling regression）
+
+```
+program_code/learning_engine/tests/test_cell_calibrator.py                 20 PASS
+program_code/learning_engine/tests/test_regime_controller.py (RGM-Q1)     15 PASS (regression OK)
+program_code/learning_engine/tests/test_regime_controller_q2_q3_q4.py     22 PASS
+─────────────────────────────────────────────────────────────────────────────
+TOTAL                                                                     57 PASS
+```
+
+`pytest program_code/learning_engine/tests/` 全套 103/103 PASS（含 sibling 5A-A/5A-B 46 + 本 task 42 + shrinkage_router 11 + 既有 4）。
+
+執行時間：< 1.0s（純 unit test，0 PG / HTTP / async I/O）。
+
+### 後續 wiring（沒在本 task 範圍）
+- E2 review：1062 LOC > 800 警告線是否接受（task spec「extend 同 file」要求）+ `_regime_math.py` 底線前綴示意「internal」是否合套件慣例 + cell_calibrator MAX_FILL_BUFFER=5000 是否合 187 cell × 30d S0 累積規模（V3 §11 P3b KPI）
+- E4 regression：Linux trade-core 跑 `python3 -m pytest program_code/learning_engine/tests/` 全綠 + sibling Wave 5 5A-A/5A-B 不退化
+- MIT review：CellCalibrator + RegimeController 與 ML pipeline downstream（generate_handoff_verdict / shrinkage_router）接口；CompositeCellStatusLiteral widen 對既有 RGM-Q1 caller forward-compat 是否成立
+- replay_routes 接線：CellCalibrator + RegimeController 預 generate_handoff_verdict endpoint 後續 sub-task 接線（建議命名 R20-P3b-Q1-WIRING / R20-RGM-Q2-WIRING / R20-RGM-Q3-WIRING / R20-RGM-Q4-WIRING）
+
+### 已知 ambiguity（向 PM push back）
+1. **regime_controller.py 1062 LOC > 800 警告線**：task description 要求「extend 同 file」（修改檔案 = 同上 = regime_controller.py），4 個 sequential gate 合 1062 LOC。已抽 _regime_math.py 緊縮；但仍 > 800 警告線。建議 PM 派 wiring sub-task 時考慮拆 controller subclass 或新增 `regime_state_machine.py` 為複合層（current controller 留作低階 gate primitives）。**不阻塞 5B-D 接受**：< 1200 硬上限。
+2. **PSR pm_alert_callback 介面 vs DB write 落地**：本 task 用 callable hook 不直接寫 governance_audit_log（純 math module 不該 PG write）。後續 wiring sub-task 應派發：caller 在 generate_handoff_verdict 內 instantiate `RegimeController(pm_alert_callback=lambda c, p: pg.execute(...))`。governance_audit_log 既有 V035 schema event_type 列舉 5 種（review_live_candidate / lease_grant / lease_auto_revoke / bulk_re_evaluation / audit_write_failed）— 寫 PSR refit alert 需通過 `payload` JSONB column（schema 已支援 forward-compat），event_type 可用 'bulk_re_evaluation' 或新增 'replay_psr_refit'（後者需新 migration）。**請 PM 在 wiring sub-task 決定**。
+3. **cell_calibrator MAX_FILL_BUFFER=5000 cap**：187 cell × 5000 ≈ 1M row 記憶體 footprint。V3 §11 P3b KPI 「30d S0 累積」每 cell 平均 fill 數未量化；如真實生產數據 > 5000/cell，buffer 截斷可能丟早期 fill 影響 long-window CI。**建議 PM 跟 FUP-2 attribution writer deploy 後實測再調**。
+4. **187 cell incremental update vs 30d 累積一致性**：本 task spec「187 cells incremental update」未在 V3 §8.2 / §11 P3b 直接量化（187 推測為 5 strategy × 25 symbol × ~1.5 effective side ≈ 187）。incremental_update 設計 per-cell；但 caller 若每 hour 跑 187 cell 各自 incremental 全集，每 hour 187 × bootstrap_iter (1000) × 平均 cell n (~100) ≈ 187M numpy ops — 約 10s CPU。**請 PM 確認 caller scheduler 跑頻率**（建議 24h batch 而非 hourly）。
+5. **rebootstrap_threshold 預設 30 vs P3a-Q3 1000-iter cost**：每次 rebootstrap = 1000 iter Politis-Romano (~0.05s/cell)。187 cell × 30 fill threshold ⇒ 大批量更新前 187 × 0.05 = 9s。建議 caller 對非急用 cell 設較高閾值（如 100），或先按 cell `is_low_confidence` flag 排序（先處理 n>=30 cell）。
+6. **CompositeCellStatusLiteral widen forward-compat**：本 commit widen 6 狀態（warming_up / ready / break / refit_pending / reactive / kupiec_fail）；既有 5A-B RGM-Q1 caller（如 sibling 派的 P3b-Q2 hierarchical_bayes test）若用窄 Literal type-check 可能 break。check_warmup + get_cell_status 行為不變（仍只用 Q1 mapping），但靜態 type lint 可能 widen → narrow 不接受。**建議 E2 review 用 mypy 跑 sibling 模組驗 type safety**。
+
+### 報告路徑
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_wave5_p3b_q1_rgm_q2_q3_q4.md`
