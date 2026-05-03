@@ -183,6 +183,71 @@ RETURNING env, fingerprint, retention_until;
 進入 `expired` 後，該 key 簽的歷史 manifest 永久不可再驗證 → 任何 `verify` 請求回 `key_expired` fail-mode（§6）。
 After `expired`, manifests signed by that key are permanently unverifiable → any `verify` request returns `key_expired` fail-mode (§6).
 
+### 4.4 Manifest TTL Prune + Artifact Storage Cap Cron（REF-20 P2a-S5）
+
+Manifest TTL（30 天）與 artifact storage cap（env-specific，預設 1024 MB）由第 3 個 daily-ish cron 維護：
+
+The 30d manifest TTL window and env-specific artifact storage cap are jointly maintained by a third (≈6-hourly) cron entry that ships as REF-20 P2a-S5:
+
+| Cron 腳本 / Cron script | 路徑 / Path | 用途 / Purpose | 預設排程 / Default schedule |
+|---|---|---|---|
+| `replay_artifact_prune.py` | `helper_scripts/cron/replay_artifact_prune.py` | 每 6 小時 prune 過 TTL artifact + 各 env 超 storage cap 時 oldest-first prune；每 batch 寫一 governance_audit_log row。 / Prune past-TTL artifacts every 6h + oldest-first prune when env exceeds storage cap; one audit row per batch. | `0 */6 * * *` |
+
+執行時與 quota enforcer（`program_code/.../replay/quota_enforcer.py`）配對：enforcer 在新 manifest / run / artifact 物化前執行 4 條 quota gate（per-actor 20 manifest / per-actor 1 run / global 1 run / env storage cap），cron 在後台清理過期 artifact 釋放 cap 容量。
+
+The cron is paired with the quota enforcer (`program_code/.../replay/quota_enforcer.py`): the enforcer applies four quota gates before any manifest / run / artifact materialises (per-actor 20 manifest / per-actor 1 run / global 1 run / env storage cap); the cron prunes expired artifacts in the background to release cap capacity.
+
+**Schema-absent graceful**：`replay.experiments` / `replay.report_artifacts` 任一缺 → cron `exit 0` + log；enforcer 視為 0 active resource graceful 放行。**這允許 cron + enforcer 在 P2b runner SQL fixture land replay schema 之前先安裝 / wire**（per V3 §6 + workplan R20-P2b-T1）。
+
+**Schema-absent graceful**: if either `replay.experiments` or `replay.report_artifacts` is absent → cron exits 0 + logs; enforcer treats as 0 active resources and gracefully permits. **This permits installing the cron / wiring the enforcer before P2b runner SQL fixture lands the replay schema** (per V3 §6 + workplan R20-P2b-T1).
+
+#### 4.4.1 Storage cap env var 調整 / Storage cap env var override
+
+預設 1024 MB / env；operator 透過 env var 統一覆寫（每 env 同 cap，當前實作）：
+
+Default 1024 MB / env; operator overrides uniformly via env var (same cap per env in current implementation):
+
+```bash
+# In crontab top-level (per-process env not inherited from shell)
+# 在 crontab 開頭設（per-process env 不繼承 shell）
+OPENCLAW_REPLAY_ARTIFACT_STORAGE_CAP_MB=2048
+```
+
+Cron 每次呼叫重讀 env var；enforcer 在 process ctor 時讀一次（app 重啟後 take effect）。
+Cron re-reads env var per invocation; enforcer reads once at process ctor (app restart for change).
+
+#### 4.4.2 SQL 等值（cron 內部行為）/ SQL equivalent (cron internal behaviour)
+
+`replay_artifact_prune.py` 主流程等同每 6 小時跑：
+The prune script is equivalent to running every 6 hours:
+
+```sql
+-- TTL prune: 過 manifest TTL 的 artifact 全 DELETE / DELETE all artifacts past manifest TTL
+DELETE FROM replay.report_artifacts ra
+ USING replay.experiments ex
+ WHERE ra.experiment_id = ex.experiment_id
+   AND ex.expires_at < NOW()
+   AND COALESCE(ex.status, 'created') NOT IN ('cancelled')
+RETURNING ra.experiment_id, ra.artifact_id, COALESCE(ra.bytes, 0);
+-- 對 batch 寫一 governance_audit_log row（payload.alert_type='replay_artifact_prune_ttl'）
+-- one governance_audit_log row per batch (payload.alert_type='replay_artifact_prune_ttl')
+
+-- Storage cap prune（per env）: 超 cap 時 oldest-first DELETE 直到回到 cap 以下
+-- Storage cap prune (per env): oldest-first DELETE until env total <= cap
+SELECT COALESCE(SUM(ra.bytes), 0)
+  FROM replay.report_artifacts ra
+  JOIN replay.experiments ex ON ra.experiment_id = ex.experiment_id
+ WHERE ex.runtime_environment = $1
+   AND (ra.expires_at IS NULL OR ra.expires_at > NOW());
+-- (loop) DELETE oldest while sum > cap_bytes; emit per-env audit row
+```
+
+#### 4.4.3 Cron monitoring / Cron 監控
+
+對齊 §4.3.2 的 4 種 mechanism（cron mailer / journald / log file 直查 / healthcheck integration）。Log path：`$OPENCLAW_DATA_DIR/logs/replay_artifact_prune.log`（如需 capture，crontab 加 `>> ... 2>&1`）。
+
+Mirrors §4.3.2 four mechanisms (cron mailer / journald / log file inspect / healthcheck integration). Log path: `$OPENCLAW_DATA_DIR/logs/replay_artifact_prune.log` (operator may capture via `>> ... 2>&1` in crontab).
+
 ---
 
 ## 5. Emergency Rotation（key 洩漏 / 員工離職）
