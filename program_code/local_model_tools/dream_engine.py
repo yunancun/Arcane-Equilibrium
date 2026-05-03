@@ -342,28 +342,63 @@ def persist_dream_insights(
         return {"inserted": 0, "insights": 0}
     if psycopg2 is None or Json is None:
         raise RuntimeError("psycopg2 not installed")
+    # REF-20 W3-P2a-S4: 切換到 verified insert function (V036).
+    # PR2 of 3-PR sequence: dream_engine 不再直接 INSERT；改呼叫
+    # learning.verify_replay_evidence_and_insert()。current row 全為
+    # `evidence_source_tier='real_outcome'` (legacy producer path)，
+    # replay metadata column 全 NULL；V037 land 後 PUBLIC INSERT 被撤銷，
+    # 唯一寫路徑就是此 function。
+    #
+    # REF-20 W3-P2a-S4: switch to verified insert function (V036).
+    # PR2 of 3-PR sequence: dream_engine no longer issues raw INSERT.
+    # Calls learning.verify_replay_evidence_and_insert() instead.
+    # Current rows are all `evidence_source_tier='real_outcome'` (legacy
+    # producer path) with NULL replay metadata. After V037 lands, PUBLIC
+    # INSERT is revoked and this function becomes the only sanctioned write.
+    inserted = 0
     with psycopg2.connect(resolved_dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
             for insight in insights:
-                cur.execute(
-                    """
-                    INSERT INTO learning.mlde_shadow_recommendations
-                        (engine_mode, strategy_name, source, recommendation_type,
-                         primary_metric, expected_net_bps, confidence, sample_count,
-                         payload, applied, requires_governance, created_by)
-                    VALUES
-                        (%s, %s, 'dream_engine', 'parameter_proposal',
-                         'net_bps_after_fee', %s, %s, %s, %s,
-                         false, true, 'mlde_dream_engine')
-                    """,
-                    (
-                        cfg.engine_mode,
+                try:
+                    cur.execute(
+                        """
+                        SELECT learning.verify_replay_evidence_and_insert(
+                            %s,                             -- p_engine_mode
+                            NULL,                           -- p_symbol (insight scope is strategy-wide)
+                            %s,                             -- p_strategy_name
+                            'dream_engine',                 -- p_source
+                            'parameter_proposal',           -- p_recommendation_type
+                            %s,                             -- p_expected_net_bps
+                            %s,                             -- p_confidence
+                            %s,                             -- p_sample_count
+                            %s,                             -- p_payload
+                            false,                          -- p_applied
+                            true,                           -- p_requires_governance
+                            'mlde_dream_engine',            -- p_created_by
+                            'real_outcome',                 -- p_evidence_source_tier (legacy producer)
+                            NULL,                           -- p_replay_experiment_id
+                            NULL,                           -- p_manifest_hash
+                            NULL,                           -- p_expires_at (real_outcome 不需 TTL)
+                            NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
+                        )
+                        """,
+                        (
+                            cfg.engine_mode,
+                            insight.get("strategy_name"),
+                            insight.get("expected_improvement_bps"),
+                            insight.get("confidence"),
+                            insight.get("sample_count"),
+                            Json(insight),
+                        ),
+                    )
+                    inserted += 1
+                except psycopg2.Error as exc:  # noqa: BLE001
+                    # verified function reject: log and continue (producer 不 crash).
+                    # function reject 拒絕：記 log 後繼續下一筆 (producer 不 crash)。
+                    logger.warning(
+                        "dream_engine: verify_replay_evidence_and_insert rejected insight=%s err=%s",
                         insight.get("strategy_name"),
-                        insight.get("expected_improvement_bps"),
-                        insight.get("confidence"),
-                        insight.get("sample_count"),
-                        Json(insight),
-                    ),
-                )
+                        exc,
+                    )
         conn.commit()
-    return {"inserted": len(insights), "insights": len(insights)}
+    return {"inserted": inserted, "insights": len(insights)}

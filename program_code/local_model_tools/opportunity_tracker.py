@@ -229,25 +229,54 @@ def persist_regret_summary(
         }
     if psycopg2 is None or Json is None:
         raise RuntimeError("psycopg2 not installed")
+    # REF-20 W3-P2a-S4: 切換到 verified insert function (V036).
+    # PR2 of 3-PR sequence: opportunity_tracker 不再直接 INSERT；改呼叫
+    # learning.verify_replay_evidence_and_insert()。row 為
+    # `evidence_source_tier='real_outcome'` (legacy producer path)。
+    #
+    # REF-20 W3-P2a-S4: switch to verified insert function (V036).
+    # PR2 of 3-PR sequence: opportunity_tracker no longer issues raw INSERT.
+    # Calls learning.verify_replay_evidence_and_insert() instead.
+    # Rows remain `evidence_source_tier='real_outcome'` (legacy producer).
+    inserted = 0
     with psycopg2.connect(resolved_dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO learning.mlde_shadow_recommendations
-                    (engine_mode, source, recommendation_type, primary_metric,
-                     expected_net_bps, confidence, sample_count, payload,
-                     applied, requires_governance, created_by)
-                VALUES
-                    (%s, 'opportunity_tracker', 'regret_summary', 'net_bps_after_fee',
-                     %s, %s, %s, %s, false, true, 'mlde_opportunity_tracker')
-                """,
-                (
-                    cfg.engine_mode,
-                    summary.get("avg_regret_bps", 0.0),
-                    min(0.85, (summary.get("rejected_sample_count", 0) or 0) / 50.0),
-                    summary.get("rejected_sample_count", 0),
-                    Json(summary),
-                ),
-            )
+            try:
+                cur.execute(
+                    """
+                    SELECT learning.verify_replay_evidence_and_insert(
+                        %s,                             -- p_engine_mode
+                        NULL,                           -- p_symbol (regret scope is engine_mode-wide)
+                        NULL,                           -- p_strategy_name (regret aggregates across strategies)
+                        'opportunity_tracker',          -- p_source
+                        'regret_summary',               -- p_recommendation_type
+                        %s,                             -- p_expected_net_bps
+                        %s,                             -- p_confidence
+                        %s,                             -- p_sample_count
+                        %s,                             -- p_payload
+                        false,                          -- p_applied
+                        true,                           -- p_requires_governance
+                        'mlde_opportunity_tracker',     -- p_created_by
+                        'real_outcome',                 -- p_evidence_source_tier
+                        NULL, NULL, NULL,               -- replay metadata (NULL for real_outcome)
+                        NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
+                    )
+                    """,
+                    (
+                        cfg.engine_mode,
+                        summary.get("avg_regret_bps", 0.0),
+                        min(0.85, (summary.get("rejected_sample_count", 0) or 0) / 50.0),
+                        summary.get("rejected_sample_count", 0),
+                        Json(summary),
+                    ),
+                )
+                inserted = 1
+            except psycopg2.Error as exc:  # noqa: BLE001
+                # verified function reject: log and continue (producer 不 crash).
+                # function reject 拒絕：記 log 後返回 inserted=0。
+                logger.warning(
+                    "opportunity_tracker: verify_replay_evidence_and_insert rejected err=%s",
+                    exc,
+                )
         conn.commit()
-    return {"inserted": 1, "summary": summary}
+    return {"inserted": inserted, "summary": summary}

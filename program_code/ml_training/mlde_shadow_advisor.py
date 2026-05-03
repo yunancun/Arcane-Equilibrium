@@ -298,34 +298,71 @@ def _persist_recommendations(dsn: str, recommendations: list[ShadowRecommendatio
         return 0
     if psycopg2 is None or Json is None:
         raise RuntimeError("psycopg2 not installed")
+    # REF-20 W3-P2a-S4: 切換到 verified insert function (V036).
+    # PR2 of 3-PR sequence: mlde_shadow_advisor 不再直接 INSERT；改呼叫
+    # learning.verify_replay_evidence_and_insert()。注意此處 rec.source /
+    # rec.recommendation_type / rec.engine_mode 皆為變量 (從 ShadowRecommendation
+    # dataclass 帶入)；verified function arg 接受 source ∈ {ml_shadow,
+    # dream_engine, opportunity_tracker, linucb}，與 V031 schema CHECK 對齊。
+    # rows 全為 `evidence_source_tier='real_outcome'` (legacy producer path)。
+    #
+    # REF-20 W3-P2a-S4: switch to verified insert function (V036).
+    # PR2 of 3-PR sequence: mlde_shadow_advisor no longer issues raw INSERT.
+    # Calls learning.verify_replay_evidence_and_insert() instead. Note:
+    # rec.source / rec.recommendation_type / rec.engine_mode are variable
+    # (sourced from ShadowRecommendation dataclass). The verified function
+    # accepts source from the V031 CHECK allowlist; rows remain
+    # `evidence_source_tier='real_outcome'` (legacy producer).
     sql = """
-        INSERT INTO learning.mlde_shadow_recommendations
-            (engine_mode, symbol, strategy_name, source, recommendation_type,
-             primary_metric, expected_net_bps, confidence, sample_count, payload,
-             applied, requires_governance, created_by)
-        VALUES
-            (%s, %s, %s, %s, %s, 'net_bps_after_fee', %s, %s, %s, %s,
-             false, true, 'mlde_shadow_advisor')
+        SELECT learning.verify_replay_evidence_and_insert(
+            %s,                             -- p_engine_mode
+            %s,                             -- p_symbol
+            %s,                             -- p_strategy_name
+            %s,                             -- p_source (rec.source)
+            %s,                             -- p_recommendation_type (rec.recommendation_type)
+            %s,                             -- p_expected_net_bps
+            %s,                             -- p_confidence
+            %s,                             -- p_sample_count
+            %s,                             -- p_payload
+            false,                          -- p_applied
+            true,                           -- p_requires_governance
+            'mlde_shadow_advisor',          -- p_created_by
+            'real_outcome',                 -- p_evidence_source_tier
+            NULL, NULL, NULL,               -- replay metadata (NULL for real_outcome)
+            NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
+        )
     """
+    inserted = 0
     with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
             for rec in recommendations:
-                cur.execute(
-                    sql,
-                    (
-                        rec.engine_mode,
-                        rec.symbol,
+                try:
+                    cur.execute(
+                        sql,
+                        (
+                            rec.engine_mode,
+                            rec.symbol,
+                            rec.strategy_name,
+                            rec.source,
+                            rec.recommendation_type,
+                            rec.expected_net_bps,
+                            rec.confidence,
+                            rec.sample_count,
+                            Json(rec.payload),
+                        ),
+                    )
+                    inserted += 1
+                except psycopg2.Error as exc:  # noqa: BLE001
+                    # verified function reject: log and continue.
+                    # function reject 拒絕：記 log 後繼續下一筆。
+                    logger.warning(
+                        "mlde_shadow_advisor: verify_replay_evidence_and_insert rejected rec=%s/%s err=%s",
                         rec.strategy_name,
                         rec.source,
-                        rec.recommendation_type,
-                        rec.expected_net_bps,
-                        rec.confidence,
-                        rec.sample_count,
-                        Json(rec.payload),
-                    ),
-                )
+                        exc,
+                    )
         conn.commit()
-    return len(recommendations)
+    return inserted
 
 
 def generate_shadow_recommendations(
