@@ -76,8 +76,8 @@ pub struct StrategyRouteJudgment {
     /// Route mode for this strategy-symbol cell.
     /// 此 strategy-symbol cell 的路由模式。
     pub route_mode: String,
-    /// Market compatibility status: compatible / blocked / edge_watch / momentum_caution.
-    /// 行情相容狀態：相容 / 阻擋 / edge 觀察 / 動量警示。
+    /// Market compatibility status: compatible / blocked / edge_quarantine.
+    /// 行情相容狀態：相容 / 阻擋 / edge 隔離。
     pub market_status: String,
     /// Human-readable reason for the route decision.
     /// 路由決策原因。

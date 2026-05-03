@@ -671,7 +671,12 @@ fn score_ticker_internal(
     ]
     .into_iter()
     .filter_map(|(category, key)| strategy_judgments.get(key).cloned().map(|j| (category, j)))
-    .filter(|(_, judgment)| judgment.route_mode != "risk_policy_gate")
+    .filter(|(_, judgment)| {
+        !matches!(
+            judgment.route_mode.as_str(),
+            "market_gate" | "exploration_only" | "risk_policy_gate"
+        )
+    })
     .max_by(|a, b| a.1.final_score.total_cmp(&b.1.final_score));
     let (best_strategy, best_judgment) = match best_route {
         Some(route) => route,

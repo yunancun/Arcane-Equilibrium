@@ -19,7 +19,7 @@
 
 use crate::config::RiskConfig;
 use crate::exit_features::ExitFeatures;
-use crate::risk_checks::{check_position_on_tick, RiskAction};
+use crate::risk_checks::{check_position_on_tick_with_override, RiskAction};
 
 /// Per-position immutable input row, built upstream from `PaperState` +
 /// `IndicatorSnapshot` + `PriceHistoryTracker` + `consecutive_losses`.
@@ -28,6 +28,7 @@ use crate::risk_checks::{check_position_on_tick, RiskAction};
 #[derive(Debug, Clone)]
 pub struct PositionRow {
     pub symbol: String,
+    pub owner_strategy: String,
     pub is_long: bool,
     pub qty: f64,
     pub entry_price: f64,
@@ -114,7 +115,8 @@ pub(crate) fn evaluate_position(
     let peak_pnl = pnl_pct(row.peak_price, row.entry_price, row.is_long);
     let holding_hours = (now_ts_ms.saturating_sub(row.entry_ts_ms)) as f64 / 3_600_000.0;
     let cost_ratio = compute_cost_ratio(pnl, row.fee_rate);
-    let action = check_position_on_tick(
+    let per_strategy = config.per_strategy.get(&row.owner_strategy);
+    let action = check_position_on_tick_with_override(
         pnl,
         peak_pnl,
         holding_hours,
@@ -129,6 +131,7 @@ pub(crate) fn evaluate_position(
         cost_edge_max_ratio,
         min_profit_to_close_pct,
         exit_features,
+        per_strategy,
         config,
     );
     PositionDecision {
@@ -190,6 +193,7 @@ mod tests {
     fn mk_row(symbol: &str, current: f64, entry: f64) -> PositionRow {
         PositionRow {
             symbol: symbol.into(),
+            owner_strategy: "ma_crossover".into(),
             is_long: true,
             qty: 1.0,
             entry_price: entry,
@@ -265,6 +269,24 @@ mod tests {
         let cfg = RiskConfig::default();
         let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, None, &cfg);
         assert!(matches!(decision.action, RiskAction::ClosePosition(_)));
+    }
+
+    #[test]
+    fn test_evaluate_position_threads_per_strategy_override() {
+        let mut row = mk_row("BUSDT", 96.0, 100.0); // -4% pnl
+        row.owner_strategy = "funding_arb".into();
+        let mut cfg = RiskConfig::default();
+        let mut override_cfg = crate::config::StrategyOverride::default();
+        override_cfg.stop_loss_max_pct_override = Some(3.0);
+        cfg.per_strategy.insert("funding_arb".into(), override_cfg);
+
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, 0.3, None, &cfg);
+        assert!(
+            matches!(decision.action, RiskAction::ClosePosition(ref reason)
+                if reason.contains("-3.00%")),
+            "per-strategy 3% stop should fire, got {:?}",
+            decision.action
+        );
     }
 
     /// evaluate_positions empty input → empty output, no panic.

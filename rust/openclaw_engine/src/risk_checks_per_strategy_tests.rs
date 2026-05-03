@@ -309,20 +309,20 @@ fn test_g2_03_runtime_helper_effective_sl_returns_min() {
 }
 
 // ===========================================================================
-// 2026-05-02 — risk_config_demo.toml round-trip + runtime cap proof
-// 2026-05-02 —— risk_config_demo.toml 解析 + runtime cap 雙防線驗證
+// 2026-05-03 — risk_config_demo.toml round-trip + funding_arb kill switch
+// 2026-05-03 —— risk_config_demo.toml 解析 + funding_arb 新開倉 kill switch
 //
-// Anchors commit `a19797d` operator decision 3C (post-BUSDT funding_arb
-// -10.12 USDT loss): demo `dynamic_stop.base_ratio` 0.4→0.25 + new
-// `[per_strategy.funding_arb]` block with `stop_loss_max_pct_override = 3.0`.
+// Anchors the post-RCA shape: demo `dynamic_stop.base_ratio` 0.4→0.25 plus
+// `[per_strategy.funding_arb] enabled=false` and a retained 3% SL override for
+// any legacy funding_arb position that still reaches tick risk.
 //
 // Locks the *demo TOML wire-shape* in tandem with G2-03 schema (Defense A,
 // validate) and `effective_sl_max_pct` (Defense B, runtime cap). Acts as
 // an early sentinel for any future TOML parse / schema drift that would
-// silently lose the funding_arb override or the tightened base_ratio.
+// silently lose the funding_arb kill switch / override or the tightened base_ratio.
 //
-// 鎖定 commit a19797d demo TOML 線格式：dyn_stop base_ratio=0.25 +
-// funding_arb 3% SL override；同檔驗 Defense A (validate) + Defense B
+// 鎖定 demo TOML 線格式：dyn_stop base_ratio=0.25 + funding_arb 新開倉關閉 +
+// 3% SL override；同檔驗 Defense A (validate) + Defense B
 // (effective_sl_max_pct = 3.0)。任何未來 TOML/schema drift 會在此哨兵點 trip。
 // ===========================================================================
 
@@ -360,7 +360,10 @@ fn test_demo_toml_funding_arb_3pct_override_2026_05_02() {
         .per_strategy
         .get("funding_arb")
         .expect("[per_strategy.funding_arb] missing in demo TOML");
-    assert_eq!(fa.enabled, true, "funding_arb.enabled must be true");
+    assert_eq!(
+        fa.enabled, false,
+        "funding_arb.enabled must be false after 2026-05-03 kill switch"
+    );
     assert_eq!(
         fa.stop_loss_max_pct_override,
         Some(3.0),

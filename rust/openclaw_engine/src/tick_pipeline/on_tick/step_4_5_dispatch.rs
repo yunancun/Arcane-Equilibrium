@@ -312,7 +312,8 @@ impl TickPipeline {
                                 let blocked = matches!(
                                     sctx.route_mode.as_str(),
                                     "market_gate" | "exploration_only" | "risk_policy_gate"
-                                );
+                                ) || (intent.strategy == "funding_arb"
+                                    && sctx.route_mode == "exploration");
                                 if blocked {
                                     let reason = format!(
                                         "scanner_market_gate:{}:{}",

@@ -117,6 +117,9 @@ blocked_symbols = [
 #     re-evaluation of 3 params (cost_bps_threshold / min_apr_pct / max_position_notional_usd).
 #     env-isolation principle (feedback_env_config_independence) applies to risk
 #     thresholds, NOT to `active` binary kill switch — must be unified across envs.
+#
+# 2026-05-03: keep disabled after demo re-enable produced fresh negative edge
+# without verified funding settlement capture.
 [funding_arb]
 active = false
 cooldown_ms = 3600000
