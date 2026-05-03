@@ -272,6 +272,25 @@ app.include_router(agents_router)
 from .replay_routes import replay_router  # noqa: E402
 app.include_router(replay_router)
 
+# ── Replay Lab Handoff Router / Replay 實驗室移交路由（REF-20 Wave 8 P6-S13/S14/S15）──
+# Bounded Demo Handoff backend security trio:
+#   POST /api/v1/replay/handoff           — typed-confirmation submit
+#   GET  /api/v1/replay/handoff/recent    — last N handoff records (footer)
+#
+# Handoff lives in NEW handoff_routes.py (NOT replay_routes.py) because
+# replay_routes.py is at 1498/1500 LOC (CLAUDE.md §九 hard cap = 1500).
+# Per workplan §4 Wave 8 row, the trio lands handoff_routes.py + V044 SQL +
+# handoff_audit.py.
+#
+# REF-20 V3 §11 P6 + §12 #20 (typed_confirm + idempotency) + DOC-08 §12
+# (governance_audit_log append-only) acceptance bindings.
+#
+# REF-20 Wave 8 P6 demo handoff 後端安全三件組；handoff_routes.py 為
+# NEW 檔（replay_routes.py 已 1498/1500 §九 1500 硬上限）；
+# 兩條路由：POST /handoff（typed-confirmation）+ GET /handoff/recent（footer）。
+from .handoff_routes import handoff_router  # noqa: E402
+app.include_router(handoff_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /
