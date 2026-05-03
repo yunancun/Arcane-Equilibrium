@@ -906,3 +906,24 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 29. **`json.dumps(..., ensure_ascii=False)` cross-language byte-equal invariant** — Track A `_write_manifest_fixture` 用 `json.dumps(payload, sort_keys=True, indent=2)` 缺 `ensure_ascii=False` + 缺 `separators=(',', ':')`。Track B Rust `serde_json::to_vec` 預設 compact + sorted（BTreeMap） + 不 escape unicode — Python 預設 `ensure_ascii=True` 會 escape 非 ASCII char → byte 不等。**目前 attack surface 0**（A 寫 placeholder hash，B 重新 canonicalize），但 V042 land 後 A 升真 sign 必須對齊 — E1 補本檔 + 加 byte-equal unit test 防 regression。
 
 30. **對抗反問必逐項展開、不接受「測試通過」答覆** — 本 review 對 4 Track 各列 ≥2 條反問（A `time.sleep` 阻塞？/ A `output_dir.basename` 防 attacker？ / B 兩邊 verify？/ B key.hex 缺 dev workflow？/ C env attacker？/ C cmdline PID-1 邊界？/ C symlink 攻擊？/ D EXCLUDE GIST 真擋？/ D paired CHECK 既有 row？/ D preflight 0 row？）— 共 10 條反問，6 PASS（已測 / spec 合理）+ 2 acceptable（已 known + standard secondary defense）+ 2 advisory（V042 land 前 caveat / cross-track 整合）。對抗反問是 E2 senior judgement 體現 — 不能只跑 grep + checklist，必假設 E1 寫錯主動找 race / leakage / shortcut。本 SOP 化進 E2 review template。
+
+## 2026-05-03 — REF-20 Sprint 3 Track H 4-task E2 senior+adversarial review (RETURN to E1)
+
+**Topic**: Track H 4 task（E-1 Rust facade / E-2 router gate / E-3 Python IPC bridge / E-4 V054 schema + audit writer）E2 round 1，AMD-2026-05-02-01 路徑 A 兌現 critical path。
+**Verdict**: RETURN to E1 — 3 HIGH + 1 MEDIUM finding 必修；2 LOW informational。
+
+### Sprint 3 Track H E2 review 教訓 / 反模式（追加 31-37）
+
+31. **§九 pre-existing baseline exception clause condition (2)+(3) 嚴格 enforcement** — Pre-existing exception 不是「免責簽到」。tests.rs baseline 2375 → +535 LOC（推到 2910），E-1+E-2 雖各自正確 push back §7.2，但 condition (2)「同時開新 P2 ticket」**沒做**。E2 必查 TODO.md `grep -i "tests.rs\|P2-INTENT-PROCESSOR"` 0 hit = governance violation。RETURN E1 必 commit P2 ticket。
+
+32. **governance_core.rs 從 584 → 1498 是 NEW boundary expansion 不適用 pre-existing exception** — E-1 baseline 1251（誤），實際 git show HEAD 是 584。E-1 加 +667（Mutex/facade/8 unit test），E-4 加 +247（emit hook + 3 helper）= 合計 +914 LOC。此非 pre-existing baseline 1500+ violation，§九 exception clause 條 (1) 不適用。+247 LOC 把 governance_core.rs 推到 1498（距 hard cap 2 LOC）— 必嚴格 enforce「下次任何 +1 LOC 撞 hard cap」風險。Option A facade-inline emit 雖正確但需 helper extract 緩衝（candidate `governance_emit.rs` ~150 LOC）。E2 必標 HIGH finding + P2 ticket 強制。
+
+33. **env var-based runtime tag 必驗 setter wiring** — E-4 加 `OPENCLAW_ENGINE_MODE` env var 解析 + 5-value enum + default "demo"；對齊 V054 chk_lease_transitions_engine_mode CHECK。但 grep `OPENCLAW_ENGINE_MODE` 在 helper_scripts/restart_all.sh / engine main.rs / startup chain **0 hit setter** — env var 從來沒被設過，所有 emit 都會落入 default "demo" fallback。Live mainnet → 標 'demo'；LiveDemo → 標 'demo'；Paper → 標 'demo'。**PA push back #2 + AC-1 query `engine_mode != 'shadow'` 失效**（everything demo means no env-mode partition）。HIGH finding — env reader 必須有對應 setter（restart_all 或 main.rs runtime resolve），否則 dead tag。
+
+34. **HashMap 反查表必有清理路徑** — E-1 為解 idx vs lease_id 不對應加 `lease_id_to_idx: HashMap<String, usize>`；release_lease() **不清理 entry**（grep `lease_id_to_idx` 全文 0 remove call）。每筆 acquire+release leak 1 entry，1 年 365K entries × 50 bytes = ~18MB（不致命但 pre-live 必修）。配合 `DecisionLeaseSm::leases` Vec 也不 trim，是雙重 leak。**MEDIUM finding** — pre-existing SM-02 leak 不是 Track H 引入但 Track H 暴露面擴大；release_lease 必加 `self.lease_id_to_idx.lock().remove(lease_id_str)` 在 SM transition 之後。
+
+35. **ExpiryGuardian 引用是 lie**（router.rs L62 注釋「ExpiryGuardian sweeps」）— 字面意義 ExpiryGuardian 是 SM-02 內部 LeaseInitiator，不是真實的 background sweeper task。`governance_core.check_expiry()` exist L982 但**從未被 engine 呼**（grep `governance.*check_expiry|core\.check_expiry` 在 openclaw_engine 0 hit）。Drop 內 release_lease 失敗→「ExpiryGuardian sweep」是設計幻覺，真實是 lease 永遠卡 SM-02 直到 process restart。HIGH finding — 必須 wire periodic sweeper（main.rs spawn `tokio::spawn` 每 60s 呼 governance.check_expiry()）。
+
+36. **V050 placeholder column dangling 確認** — Sprint 1 V050 `replay.simulated_fills.decision_lease_id` 是 placeholder，PA 預期 Sprint 2 啟用。Track H 4 task 全完，但 grep `INSERT INTO replay\.|decision_lease_id` 在 Rust hot path = 0 hit。E-2 §7.1 push back 正確：V050 是 offline replay_runner output，Track H scope 只到 IntentResult.lease_id 暴露 + writer 寫 `learning.lease_transitions`，不寫 V050。**AC-2 + AC-3 query 從 `replay.simulated_fills` 取 `decision_lease_id IS NOT NULL` 將永遠返回 0** 直到 P3+ replay_runner online。E2 PASS for E-2/E-4 scope，但必 PM 知曉「AC-2/AC-3 不會 PASS in Sprint 3 deploy 後 24h 視窗」。
+
+37. **跨 crate test setter `pub fn ... _for_test` 安全紀律** — E-2 加 `set_router_gate_enabled_for_test` 為 `pub fn` + `#[doc(hidden)]`（因 cfg(test) 跨 crate 不傳遞）。grep production 代碼 0 caller — 紀律維持。E2 PASS。但建議未來加 `debug_assertions` runtime guard 防誤呼（panic on caller in release build）— 是 LOW informational suggestion。

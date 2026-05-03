@@ -3,6 +3,121 @@
 
 use super::*;
 
+// AMD-2026-05-02-01 Track E E-2: RAII guard for the Decision Lease acquired by
+// Gate 1.4. On drop without `consume()` it releases with LeaseOutcome::Cancelled
+// so any downstream gate rejection (Gate 1.5/1.6/2/2.5-2.7/3) does not leak the
+// lease. Success paths call `consume()` to take the inner Active LeaseId out;
+// fill consumer (step_4_5_dispatch.rs / future E-3 IPC release path) is the one
+// that calls release_lease(Consumed) after exchange ack.
+//
+// Bypass / None states: drop is a no-op (release_lease handles Bypass; None
+// means flag-OFF and no facade call ever happened).
+//
+// AMD-2026-05-02-01 Track E E-2：Gate 1.4 取得的 Decision Lease 之 RAII guard。
+// Drop 時若未 `consume()` 即以 LeaseOutcome::Cancelled 釋放，避免下游 gate（1.5
+// /1.6/2/2.5-2.7/3）拒絕路徑 leak lease；成功路徑呼 `consume()` 把 Active
+// LeaseId 取出後由 fill consumer (step_4_5_dispatch.rs / 未來 E-3 IPC release
+// path) 在交易所 ack 後呼 release_lease(Consumed)。Bypass / None 兩態 Drop 為
+// no-op（release_lease 對 Bypass 即 Ok；None 表 flag OFF 從未呼 facade）。
+struct RouterLeaseGuard<'a> {
+    governance: &'a GovernanceCore,
+    lease: Option<LeaseId>,
+}
+
+impl<'a> RouterLeaseGuard<'a> {
+    /// New guard; `lease=None` means flag-OFF (no facade call); `Some(Bypass)` =
+    /// non-Production short-circuit; `Some(Active(_))` = real production lease.
+    /// 新建 guard。`lease=None` 對應 flag OFF；`Some(Bypass)` = 非 Production 短路；
+    /// `Some(Active(_))` = 真實 Production lease。
+    fn new(governance: &'a GovernanceCore, lease: Option<LeaseId>) -> Self {
+        Self { governance, lease }
+    }
+
+    /// Take inner lease for use in the success-path IntentResult / ExchangeGateResult.
+    /// Disables Drop release (caller / fill consumer is now responsible for release).
+    /// 將內部 lease 取出供成功路徑使用，停用 Drop release（呼叫端 / fill consumer
+    /// 自此負責 release）。
+    fn consume(mut self) -> Option<LeaseId> {
+        self.lease.take()
+    }
+
+    /// Lease id String for IntentResult.lease_id population on success path.
+    /// 提取成功路徑的 lease_id 字串供 IntentResult 填入。
+    fn id_str(&self) -> Option<String> {
+        self.lease.as_ref().map(|l| l.as_str().to_string())
+    }
+}
+
+impl<'a> Drop for RouterLeaseGuard<'a> {
+    fn drop(&mut self) {
+        if let Some(lease) = self.lease.take() {
+            // Best-effort release on rejection-path drop. If SM transition fails
+            // (race / state already moved), log warn and rely on ExpiryGuardian
+            // to clean up — never panic in Drop.
+            // 拒絕路徑 Drop 時 best-effort 釋放；SM transition 失敗（race / state 已
+            // 異動）僅 warn，依 ExpiryGuardian 過期清理；Drop 內絕不 panic。
+            if let Err(e) = self.governance.release_lease(&lease, LeaseOutcome::Cancelled) {
+                tracing::warn!(
+                    error = %e,
+                    "Gate 1.4 lease release on drop failed (rejection path); ExpiryGuardian will sweep"
+                );
+            }
+        }
+    }
+}
+
+/// Acquire helper for Gate 1.4: wraps `governance.acquire_lease()` and maps
+/// `GovernanceError` variants to user-visible reject reasons. Returns the raw
+/// `LeaseId` (Active or Bypass) when successful so caller wraps in
+/// `RouterLeaseGuard`.
+///
+/// Gate 1.4 acquire 輔助：包 `governance.acquire_lease()` 並把 `GovernanceError`
+/// 各分支映射為對使用者可見的拒絕原因；成功時回 raw `LeaseId`，由呼叫端包成
+/// `RouterLeaseGuard`。
+fn acquire_lease_for_gate_1_4(
+    intent: &OrderIntent,
+    governance: &GovernanceCore,
+    profile: GovernanceProfile,
+    source_stage: &str,
+    now_ms: u64,
+) -> Result<LeaseId, String> {
+    // E-1 facade contract: 100..=300_000 ms TTL window. 30s per spec §3 sample.
+    // E-1 facade contract：100..=300_000 ms TTL；spec §3 範例 30s。
+    const ROUTER_LEASE_TTL_MS: u32 = 30_000;
+    // Synthetic intent_id matches make_intent_id() shape. Empty engine_mode tag
+    // is intentional — router does not own engine_mode; downstream persisters
+    // produce the canonical id with em prefix. Lease side only needs uniqueness
+    // for SM book-keeping.
+    // 合成 intent_id 與 make_intent_id() 形狀對齊；router 不掌握 engine_mode 因此
+    // 留空，下游 persister 產生 canonical id；lease 端只需 SM book-keeping 唯一。
+    let intent_id = format!("intent-{}-{}-{}", source_stage, intent.symbol, now_ms);
+    governance
+        .acquire_lease(
+            &intent_id,
+            "TRADE_ENTRY",
+            ROUTER_LEASE_TTL_MS,
+            profile,
+            source_stage,
+        )
+        .map_err(|e| match e {
+            GovernanceError::AuthNotEffective => {
+                "lease_facade: authorization not effective (Production fail-closed)".to_string()
+            }
+            GovernanceError::LeaseScopeNotPermitted(scope) => {
+                format!("lease_facade: scope not permitted: {scope}")
+            }
+            GovernanceError::InvalidTtl(ttl) => {
+                format!("lease_facade: invalid TTL {ttl} ms")
+            }
+            GovernanceError::LeaseNotFound(id) => {
+                format!("lease_facade: lease not found: {id}")
+            }
+            GovernanceError::LeaseSmFailure(sm_err) => {
+                format!("lease_facade: SM failure: {sm_err}")
+            }
+        })
+}
+
 fn apply_governor_order_constraints(
     governance: &GovernanceCore,
     is_reducing: bool,
@@ -72,7 +187,7 @@ impl IntentProcessor {
         governance: &GovernanceCore,
         paper_state: &PaperState,
         atr: f64,
-        _profile: GovernanceProfile,
+        profile: GovernanceProfile,
         features: Option<&FeatureVectorV1>,
         context_id: Option<&str>,
         now_ms: u64,
@@ -81,6 +196,31 @@ impl IntentProcessor {
         if !governance.is_authorized() {
             return IntentResult::rejected(RejectionCode::GovernanceNotAuthorized.format());
         }
+
+        // ─── Gate 1.4: Decision Lease (SM-02 R-04 retrofit) ───
+        // AMD-2026-05-02-01 Track E E-2 router gate. Feature-flag灰度 default OFF
+        // (env `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0`). When ON we consult the
+        // Rust facade `acquire_lease()`:
+        //   • Production profile + auth effective → real Active lease (live path).
+        //   • Exploration / Validation profile → LeaseId::Bypass (PA push back #1
+        //     spec §3 point 1 trailing clause — paper / demo never touches SM).
+        //   • Production but auth not effective → AuthNotEffective fail-closed.
+        // Flag OFF: Gate 1.4 short-circuits (lease_id stays None); facade is still
+        // callable from other consumers (Python IPC bridge E-3, etc.).
+        // SLA：parking_lot::Mutex acquire ≤10 ns un-contended; whole gate ≤1 µs.
+        // RouterLeaseGuard RAII：rejection 路徑下 Drop release Cancelled，避免 leak；
+        // 成功路徑 .consume() 取出 lease 後由 fill consumer 釋放（Consumed）。
+        // 灰度旗標 OFF（預設）→ 短路；ON → 真執行；spec §3 點 1 後段 short-circuit Bypass。
+        // 失敗（AuthNotEffective / InvalidTtl / SmFailure / ScopeNotPermitted）一律 fail-closed 拒絕。
+        let lease_guard = if governance.router_gate_enabled() {
+            match acquire_lease_for_gate_1_4(intent, governance, profile, "router", now_ms) {
+                Ok(lease) => RouterLeaseGuard::new(governance, Some(lease)),
+                Err(reason) => return IntentResult::rejected(reason),
+            }
+        } else {
+            RouterLeaseGuard::new(governance, None)
+        };
+        let lease_id_for_result: Option<String> = lease_guard.id_str();
 
         // Gate 1.5: Reject same-direction duplicate (prevent fee drain)
         // 拒絕同方向重複開倉（防止手續費消耗）
@@ -190,6 +330,12 @@ impl IntentProcessor {
 
         match guardian_result.verdict {
             Verdict::Rejected => {
+                // AMD-2026-05-02-01 Track E E-2: rejection — RouterLeaseGuard
+                // Drop releases Cancelled. lease_id deliberately left None on
+                // rejection (caller writes verdict only; lease lineage is for
+                // accepted intents that proceed to fill).
+                // 拒絕路徑：RouterLeaseGuard Drop 釋放 Cancelled；rejection 不帶
+                // lease_id（此欄位語意是「accepted intent → fill 之 lineage」）。
                 return IntentResult {
                     submitted: false,
                     rejected_reason: Some(
@@ -200,6 +346,7 @@ impl IntentProcessor {
                     approved_qty: 0.0,
                     resting_order: None,
                     maker_degraded_fallback: None,
+                    lease_id: None,
                 };
             }
             Verdict::Modified => {
@@ -473,6 +620,13 @@ impl IntentProcessor {
                         strategy: intent.strategy.clone(),
                         funding_rate_at_submit,
                     };
+                    // AMD-2026-05-02-01 Track E E-2: success path (resting
+                    // PostOnly draft accepted). consume() moves Active lease out
+                    // of the guard so Drop does NOT release; fill consumer
+                    // takes over (release Consumed after fill ack).
+                    // 成功路徑（PostOnly 掛單接受）：consume() 取出 lease，Drop
+                    // 不再 release；交由 fill consumer 在成交 ack 後釋放 Consumed。
+                    let _consumed_lease = lease_guard.consume();
                     return IntentResult {
                         submitted: true,
                         rejected_reason: None,
@@ -481,6 +635,7 @@ impl IntentProcessor {
                         approved_qty: final_qty,
                         resting_order: Some(draft),
                         maker_degraded_fallback: None,
+                        lease_id: lease_id_for_result.clone(),
                     };
                 }
             }
@@ -499,6 +654,12 @@ impl IntentProcessor {
             self.fee_rate_for_intent(&intent.symbol, intent),
         );
 
+        // AMD-2026-05-02-01 Track E E-2: success path (market fill emitted).
+        // consume() moves Active lease out so Drop does NOT release; fill
+        // consumer / paper_state apply_fill takes over (release Consumed).
+        // 成功路徑（市價立即成交）：consume() 取出 lease，Drop 不再 release；
+        // 由 fill consumer / paper_state apply_fill 釋放 Consumed。
+        let _consumed_lease = lease_guard.consume();
         IntentResult {
             submitted: true,
             rejected_reason: None,
@@ -507,6 +668,7 @@ impl IntentProcessor {
             approved_qty: final_qty,
             resting_order: None,
             maker_degraded_fallback: kpi_fallback_symbol,
+            lease_id: lease_id_for_result,
         }
     }
 
@@ -549,6 +711,22 @@ impl IntentProcessor {
         if !governance.is_authorized() {
             return ExchangeGateResult::rejected(RejectionCode::GovernanceNotAuthorized.format());
         }
+
+        // ─── Gate 1.4: Decision Lease (SM-02 R-04 retrofit) ───
+        // AMD-2026-05-02-01 Track E E-2 router gate. Mirror of process_with_features
+        // Gate 1.4 — see that function for rationale + flag semantics.
+        // RouterLeaseGuard RAII：rejection 路徑下 Drop release Cancelled，避免 leak；
+        // 成功路徑 .consume() 取出 lease 後由 fill consumer 釋放（Consumed）。
+        let lease_guard = if governance.router_gate_enabled() {
+            match acquire_lease_for_gate_1_4(intent, governance, profile, "router_gates_only", now_ms) {
+                Ok(lease) => RouterLeaseGuard::new(governance, Some(lease)),
+                Err(reason) => return ExchangeGateResult::rejected(reason),
+            }
+        } else {
+            RouterLeaseGuard::new(governance, None)
+        };
+        let lease_id_for_result: Option<String> = lease_guard.id_str();
+
         // Gate 1.5: Reject same-direction duplicate
         if let Some(existing) = paper_state.get_position(&intent.symbol) {
             if existing.is_long == intent.is_long {
@@ -630,6 +808,9 @@ impl IntentProcessor {
         });
 
         if let Verdict::Rejected = guardian_result.verdict {
+            // AMD-2026-05-02-01 Track E E-2: rejection — RouterLeaseGuard Drop
+            // releases Cancelled. lease_id deliberately None on rejection.
+            // 拒絕路徑：RouterLeaseGuard Drop 釋放 Cancelled；rejection 不帶 lease_id。
             return ExchangeGateResult {
                 approved: false,
                 rejected_reason: Some(
@@ -637,6 +818,7 @@ impl IntentProcessor {
                 ),
                 approved_qty: 0.0,
                 verdict_info: vi.take(),
+                lease_id: None,
             };
         }
         // Gate 2.5: Kelly position sizing
@@ -817,6 +999,11 @@ impl IntentProcessor {
                     };
                     if let Some(r) = gate_result {
                         // r already carries synthetic VerdictInfo (P0-6 permanent fix).
+                        // r is a rejection from cost_gate_*_with_slippage — its
+                        // own lease_id stays None (default). RouterLeaseGuard
+                        // Drop releases Cancelled.
+                        // r 是 cost_gate 拒絕；自身 lease_id 預設 None；
+                        // RouterLeaseGuard Drop 釋放 Cancelled。
                         let _ = vi.take();
                         return r;
                     }
@@ -824,11 +1011,18 @@ impl IntentProcessor {
             }
         }
 
+        // AMD-2026-05-02-01 Track E E-2: success path. consume() moves Active
+        // lease out of the guard so Drop does NOT release; fill consumer
+        // (downstream order-dispatch ack handler) takes over (release Consumed).
+        // 成功路徑：consume() 取出 lease，Drop 不再 release；交由 fill consumer
+        // 在交易所 ack 後釋放 Consumed。
+        let _consumed_lease = lease_guard.consume();
         ExchangeGateResult {
             approved: true,
             rejected_reason: None,
             approved_qty: final_qty,
             verdict_info: vi.take(),
+            lease_id: lease_id_for_result,
         }
     }
 }

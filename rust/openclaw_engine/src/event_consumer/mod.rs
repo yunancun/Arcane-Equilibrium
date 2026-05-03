@@ -84,6 +84,25 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let mut pending_reg_rx = pending_reg_rx_slot;
     let pending_timeout = std::time::Duration::from_secs(5);
 
+    // AMD-2026-05-02-01 Track H E-1 retrofit (HIGH-2 ExpiryGuardian sweep):
+    // Periodic Decision Lease & Authorization expiry sweeper — invokes the
+    // existing `GovernanceCore::check_expiry()` SM transition path every 60s
+    // so RouterLeaseGuard Drop release-failures and orphan TTL'd leases do
+    // not accumulate (otherwise lease objects leak in SM-02 Active forever
+    // until engine restart). Per-pipeline scope: each ModeState (paper/demo/
+    // live) sweeps its own GovernanceCore — preserving multi-mode isolation.
+    // AMD-2026-05-02-01 Track H E-1 retrofit（HIGH-2 ExpiryGuardian sweep）：
+    // 每 60s 觸發 `GovernanceCore::check_expiry()` 對 lease + auth 過期掃描。
+    // RouterLeaseGuard Drop release 失敗的 lease + 過期 TTL lease 不會永久卡在
+    // SM-02 Active；per-pipeline 範圍尊重 paper/demo/live 多模式隔離。
+    let mut lease_sweep_interval =
+        tokio::time::interval(std::time::Duration::from_secs(60));
+    lease_sweep_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Consume the immediate-fire first tick so the sweeper does not run during
+    // bootstrap before the SM has any leases.
+    // 消耗 interval 立即觸發的第一次 tick；避免 bootstrap 前 SM 0 lease 時誤掃。
+    lease_sweep_interval.tick().await;
+
     // ── Main event loop / 主事件循環 ──
     // BLOCKER-2 D6: Shadow local copies for the select! loop.
     let mut cross_engine_rx = cross_engine_rx;
@@ -187,6 +206,30 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 );
                 if flow.is_break() {
                     break;
+                }
+            }
+
+            // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──
+            // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm：lease + auth 掃描 ──
+            // HIGH-2 ExpiryGuardian sweep — every 60s invoke check_expiry() on
+            // this pipeline's GovernanceCore. Logs at INFO when any expiry
+            // transitions actually fire so operator/healthcheck can audit
+            // sweep effectiveness; otherwise silent. fail-soft: never breaks
+            // the loop or affects tick path.
+            // HIGH-2 ExpiryGuardian sweep — 每 60s 對本 pipeline 的 GovernanceCore
+            // 執行 check_expiry()。有 expiry 觸發時 INFO log 供 operator / healthcheck
+            // 審計掃描有效性；無觸發時靜默。fail-soft：不影響 tick path。
+            _ = lease_sweep_interval.tick() => {
+                let (auth_expired, lease_expired) = pipeline.governance.check_expiry();
+                if !auth_expired.is_empty() || !lease_expired.is_empty() {
+                    tracing::info!(
+                        target: "openclaw_engine::governance::expiry_sweep",
+                        pipeline_kind = ?pipeline_kind,
+                        auth_expired = auth_expired.len(),
+                        lease_expired = lease_expired.len(),
+                        "Decision Lease / Auth expiry sweep transitioned objects \
+                         / 租約 / 授權過期掃描已轉換物件"
+                    );
                 }
             }
         }

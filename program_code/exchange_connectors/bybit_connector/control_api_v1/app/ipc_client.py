@@ -215,7 +215,29 @@ class EngineIPCClient:
         if params is not None:
             request["params"] = params
 
-        payload = json.dumps(request, separators=(",", ":")) + "\n"
+        # E2 round 1 LOW-2 retrofit (2026-05-03): ensure_ascii=False keeps
+        # raw UTF-8 bytes on the wire so any cross-language byte-equal
+        # contract (mirror of REF-20 W6 V042 manifest_signer canonical body
+        # pattern + Sprint 1 Track A F1 lock) holds when params include
+        # unicode (e.g. intent_id="测试_intent_001" / non-ASCII strategy
+        # name). All current 33+ IPC methods use ASCII payloads so the kwarg
+        # is a no-op today; future unicode-bearing payloads (Decision Lease
+        # Track H E-3 lease IPC bridge, MLDE strategy_name fields, audit
+        # writers, etc.) get correct raw-UTF-8 framing automatically.
+        # Rust serde_json::to_vec emits raw UTF-8 by default; ensure_ascii=False
+        # is what makes Python serde mirror it byte-for-byte.
+        # E2 round 1 LOW-2 retrofit（2026-05-03）：ensure_ascii=False 讓 wire
+        # 上保留 raw UTF-8 bytes，使任何跨語言 byte-equal contract（鏡像
+        # REF-20 W6 V042 manifest_signer canonical body 模式 + Sprint 1
+        # Track A F1 鎖）在 params 含 unicode（如中文 intent_id / 非 ASCII
+        # 策略名）時仍成立。當前 33+ IPC method 全 ASCII payload，本 kwarg
+        # 今日為 no-op；未來含 unicode 的 payload（Track H E-3 lease IPC、
+        # MLDE strategy_name 欄位、audit writer 等）將自動獲得正確的
+        # raw-UTF-8 framing。Rust serde_json::to_vec 預設 raw UTF-8；
+        # ensure_ascii=False 讓 Python serde 鏡像相同 byte 流。
+        payload = json.dumps(
+            request, separators=(",", ":"), ensure_ascii=False
+        ) + "\n"
 
         async with self._lock:
             try:
@@ -580,7 +602,16 @@ class EngineIPCClient:
             "params": {"token": token, "ts": ts},
             "id": 0,
         }
-        payload = json.dumps(request, separators=(",", ":")) + "\n"
+        # E2 round 1 LOW-2 retrofit (2026-05-03): mirror the call() path —
+        # ensure_ascii=False so HMAC token bytes (always hex, ASCII-clean)
+        # plus future unicode-bearing auth fields stay byte-equal to Rust
+        # serde_json. See call() above for full rationale.
+        # E2 round 1 LOW-2 retrofit（2026-05-03）：與 call() 路徑同步加
+        # ensure_ascii=False，讓 HMAC token（hex 純 ASCII）與未來 unicode
+        # auth 欄位皆與 Rust serde_json byte-equal。詳見上方 call()。
+        payload = json.dumps(
+            request, separators=(",", ":"), ensure_ascii=False
+        ) + "\n"
         if self._writer is None:
             raise RuntimeError("IPC auth: writer is None (not connected)")
         self._writer.write(payload.encode("utf-8"))

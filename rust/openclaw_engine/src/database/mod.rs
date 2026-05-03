@@ -21,6 +21,7 @@ pub mod exit_feature_writer;
 pub mod experiment_ledger_pg;
 pub mod fallback;
 pub mod feature_writer;
+pub mod lease_transition_writer;
 pub mod market_writer;
 pub mod migrations;
 pub mod outcome_backfiller;

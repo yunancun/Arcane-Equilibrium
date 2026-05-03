@@ -28,7 +28,13 @@ use crate::risk_checks::check_order_allowed;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use openclaw_core::{
     execution::{self, FillResult},
-    governance_core::{GovernanceCore, GovernanceProfile},
+    // AMD-2026-05-02-01 Track E E-1: also re-export LeaseId / LeaseOutcome /
+    // GovernanceError so router (E-2) and tests reach them via super::*.
+    // AMD-2026-05-02-01 Track E E-1：同時 re-export LeaseId / LeaseOutcome /
+    // GovernanceError，讓 router（E-2）與 tests 透過 super::* 取用。
+    governance_core::{
+        GovernanceCore, GovernanceError, GovernanceProfile, LeaseId, LeaseOutcome,
+    },
     guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
 };
 use parking_lot::Mutex;
@@ -156,6 +162,18 @@ pub struct IntentResult {
     /// 降級為市價時填入 Some(symbol)。caller（on_tick）記 counter + warn，
     /// 市價成交仍走正常路徑。None = 無 gate 動作。
     pub maker_degraded_fallback: Option<String>,
+    /// AMD-2026-05-02-01 Track E E-2: Decision Lease id acquired by Gate 1.4.
+    /// `Some("lease:xxxx")` for Production profile when router-gate flag ON.
+    /// `Some("bypass")` for Exploration / Validation profile (LeaseId::Bypass
+    /// short-circuit). `None` means router-gate flag OFF (no acquire ever
+    /// happened; default observable state during Sprint 3 灰度 Phase 5 OFF).
+    /// E-3 IPC bridge / E-4 audit writer consume this for cross-row lineage.
+    /// AMD-2026-05-02-01 Track E E-2：Gate 1.4 取得的 Decision Lease id。
+    /// Production profile + flag ON → `Some("lease:xxxx")`；Exploration /
+    /// Validation profile → `Some("bypass")`（LeaseId::Bypass 短路）；
+    /// flag OFF（Sprint 3 灰度預設）→ `None`（從未 acquire）。
+    /// E-3 IPC bridge 與 E-4 audit writer 取此欄位作 cross-row lineage 鍵。
+    pub lease_id: Option<String>,
 }
 
 impl IntentResult {
@@ -171,6 +189,7 @@ impl IntentResult {
             approved_qty: 0.0,
             resting_order: None,
             maker_degraded_fallback: None,
+            lease_id: None,
         }
     }
 }
@@ -188,6 +207,11 @@ pub struct ExchangeGateResult {
     /// Guardian verdict for DB persistence; None if rejected before guardian check.
     /// Guardian 裁定供 DB 持久化；在 Guardian 前被拒時為 None。
     pub verdict_info: Option<VerdictInfo>,
+    /// AMD-2026-05-02-01 Track E E-2: Decision Lease id acquired by Gate 1.4
+    /// (mirror of IntentResult::lease_id; same semantics).
+    /// AMD-2026-05-02-01 Track E E-2：Gate 1.4 取得的 Decision Lease id
+    /// （與 IntentResult::lease_id 對齊，語意相同）。
+    pub lease_id: Option<String>,
 }
 
 impl ExchangeGateResult {
@@ -199,6 +223,7 @@ impl ExchangeGateResult {
             rejected_reason: Some(reason),
             approved_qty: 0.0,
             verdict_info: Some(vi),
+            lease_id: None,
         }
     }
 }

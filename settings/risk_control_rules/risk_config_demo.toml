@@ -379,3 +379,29 @@ max_param_delta_pct = 0.30      # ±30% cap on per-cycle non-weight param delta
 [cost_edge]
 enabled = false                 # Phase A dormant — env-gate + flag dual safeguard
 trigger_threshold = -0.5        # ratio <= -0.5 trigger（PM Tier 9 T9-LOW-1 lock-in）
+
+# REF-20 Sprint 3 Track H E-4 (2026-05-03) — agent 三表 (agent.messages /
+# agent.state_changes / agent.ai_invocations) DB sink schema. Phase A:
+# config schema only — PG sink wiring deferred to follow-up P1 ticket
+# (P1-AGENT-DB-SINK) because:
+#   1. Cross-module changes (multi_agent_framework / agent_audit_bridge /
+#      strategy_wiring / db_pool injection) exceed the 1.0-day E-4 task budget.
+#   2. PA design §4 #3 push back warns 4.3-8.6M row/day under naive logging
+#      (5 Agent × ~10 msg/sec × 86400s); MUST sample before PG sink lands.
+#   3. Sampling Option A (severity-based) selected per PA push back: LOW 1% /
+#      NORMAL 10% / HIGH 50% / CRITICAL 100%; TOML-driven so operator can tune.
+# Demo posture: 啟用前先驗 sampling math 在 demo PG（不污染 live runtime）；
+# `enabled = false` 直到 sub-agent 補完 PG sink wiring。三環境獨立 per
+# memory `feedback_env_config_independence`。
+#
+# REF-20 Sprint 3 Track H E-4：agent 三表 DB sink schema（config-only Phase A）。
+# Demo 配置：sampling 比 paper 略寬鬆（demo 是 learning data source per memory
+# `feedback_demo_loose_live_strict_policy`）；live 收緊（生產審計嚴格）。
+[messagebus_db_sink]
+enabled = false                 # Phase A dormant — flag flip after P1 wiring lands
+sampling = "severity"            # "severity" (Option A) | "uniform" | "off"
+sampling_low_pct = 1            # LOW priority sample rate (0-100)
+sampling_normal_pct = 10        # NORMAL priority (0-100)
+sampling_high_pct = 50          # HIGH priority (0-100)
+sampling_critical_pct = 100     # CRITICAL priority (always 100 for audit completeness)
+fail_soft_on_db_error = true    # PG outage → log warn + drop, never block MessageBus.send

@@ -14,3 +14,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
+# AMD-2026-05-02-01 Track E E-1: Mutex<DecisionLeaseSm> interior mutability for
+# acquire_lease facade（router 端 &GovernanceCore immutable borrow）。
+# AMD-2026-05-02-01 Track E E-1：Mutex 內部可變性供 acquire_lease facade 使用。
+parking_lot = { workspace = true }
