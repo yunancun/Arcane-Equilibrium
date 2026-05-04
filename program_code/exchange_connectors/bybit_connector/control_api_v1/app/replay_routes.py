@@ -44,7 +44,6 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, validator
 
 from . import main_legacy as base
 from .auth import require_scope_and_operator
@@ -77,6 +76,7 @@ _verify_replay_runner_pid = _rh.verify_replay_runner_pid
 _is_live_release_profile = _rh.is_live_release_profile
 _artifact_path_within_allowlist = _rh.artifact_path_within_allowlist
 _build_default_manifest_payload = _rh.build_default_manifest_payload
+_compute_replay_health_state = _rh.compute_replay_health_state
 
 logger = logging.getLogger(__name__)
 
@@ -147,98 +147,30 @@ _ACTIVE_RUNS_LOCK: asyncio.Lock = asyncio.Lock()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Pydantic Models / 請求響應模型
+#
+# Sprint A R1-T3 (2026-05-04) extraction: the 3 request models below were moved
+# to ``replay/replay_models.py`` so this file stays under the §九 1500 LOC cap
+# after the ``/api/v1/replay/health`` route lands. Behaviour is byte-identical
+# to the prior inline form; module-level aliases preserve back-compat for
+# ``__all__`` consumers and existing tests.
+#
+# Sprint A R1-T3（2026-05-04）抽出：下方 3 個請求模型已移到
+# ``replay/replay_models.py``，目的是讓本檔在 ``/api/v1/replay/health`` 路由
+# 上線後仍守住 §九 1500 LOC 硬上限。行為與內嵌完全等同；模組級別名保留
+# ``__all__`` 消費者與既有測試的向後相容性。
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-class ReplayRunRequest(BaseModel):
-    """POST /run body — start a replay run.
-    POST /run body — 啟動一次 replay run。
-
-    Wave 4 wiring: validates shape + auth, then spawns replay_runner
-    subprocess via OPENCLAW_REPLAY_RUNNER_BIN. Concurrency cap enforced
-    via PG advisory lock (primary) or in-memory dict (fallback).
-    Wave 4 接線：驗 shape + auth，然後透過 OPENCLAW_REPLAY_RUNNER_BIN
-    spawn replay_runner 子程序。並發上限由 PG advisory lock（主路徑）
-    或 in-memory dict（fallback）強制。
-    """
-
-    experiment_id: str = Field(
-        ...,
-        min_length=1,
-        max_length=128,
-        description="Pre-registered manifest experiment_id (V3 §4.1 schema)",
+try:
+    from ..replay.replay_models import (  # type: ignore[no-redef]
+        ReplayCancelRequest,
+        ReplayManifestVerifyRequest,
+        ReplayRunRequest,
     )
-    idempotency_key: Optional[str] = Field(
-        default=None,
-        max_length=128,
-        description=(
-            "Optional idempotency key per V3 §4.1 lineage; if provided "
-            "and matches an existing run for this actor, return cached."
-        ),
-    )
-
-    @validator("experiment_id")
-    def _validate_experiment_id(cls, v: str) -> str:
-        # Alphanumeric + hyphen/underscore only (path-injection guard).
-        # 只允許字母數字+連字號/底線（防 path injection）。
-        v = v.strip()
-        if not v:
-            raise ValueError("experiment_id cannot be empty")
-        for ch in v:
-            if not (ch.isalnum() or ch in "-_"):
-                raise ValueError(
-                    "experiment_id may only contain alphanumeric, hyphen, or underscore"
-                )
-        return v
-
-
-class ReplayCancelRequest(BaseModel):
-    """POST /cancel body — cancel currently running replay.
-    POST /cancel body — 取消當前運行中的 replay。
-    """
-
-    experiment_id: Optional[str] = Field(
-        default=None,
-        max_length=128,
-        description=(
-            "If set, only cancel if the active run matches this id; "
-            "guards against stale GUI state cancelling a fresher run."
-        ),
-    )
-    reason: Optional[str] = Field(
-        default=None,
-        max_length=512,
-        description="Operator-supplied cancellation reason (audit row).",
-    )
-
-
-class ReplayManifestVerifyRequest(BaseModel):
-    """POST /manifest/verify body — verify HMAC signature of a manifest.
-    POST /manifest/verify body — 驗證 manifest 的 HMAC 簽名。
-    """
-
-    canonical_bytes_b64: str = Field(
-        ...,
-        min_length=1,
-        description="Base64-encoded canonical manifest bytes.",
-    )
-    declared_hash_hex: str = Field(
-        ...,
-        min_length=1,
-        max_length=128,
-        description="Declared sha256 hex digest of the body.",
-    )
-    signature_hex: str = Field(
-        ...,
-        min_length=1,
-        max_length=128,
-        description="Declared HMAC-SHA256 signature (hex).",
-    )
-    fingerprint: str = Field(
-        ...,
-        min_length=1,
-        max_length=64,
-        description="16-char key fingerprint (per helper script algorithm).",
+except ImportError:
+    from replay.replay_models import (  # type: ignore[no-redef]
+        ReplayCancelRequest,
+        ReplayManifestVerifyRequest,
+        ReplayRunRequest,
     )
 
 
@@ -1331,6 +1263,72 @@ async def post_manifest_verify(
             degraded=True,
             reason=f"verify_failed:{fail_mode}",
         )
+
+
+@replay_router.get("/health")
+async def get_replay_health(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Backend-readiness probe for the Replay Lab as a whole.
+    Replay Lab 整體後端就緒探針。
+
+    REF-20 Sprint A R1-T3 (2026-05-04): contract health route added per
+    plan §6.R1 acceptance "binary resolution + /api/v1/replay/health
+    behind the intended auth policy". Auth = ``Depends(base.current_actor)``
+    (logged-in only) — same pattern as ``/health/signature``; monitoring
+    infra without write scope can probe.
+
+    Aggregates four pre-conditions for ``/run`` usability:
+      1. ``resolve_replay_runner_bin()`` points at an on-disk binary;
+      2. ``OPENCLAW_DATA_DIR`` exists + is writable;
+      3. PG up + V045 + V049 schemas reachable;
+      4. binary release profile env reported (``live`` / ``paper`` / blank).
+
+    Wiring-status priority (highest → lowest):
+      ``binary_missing`` > ``degraded`` > ``ready``
+    A non-``ready`` status sets ``degraded=True`` in the envelope so
+    upstream monitoring (and the GUI Replay subtab gating logic) can fail
+    fast without parsing the inner dict.
+
+    REF-20 Sprint A R1-T3（2026-05-04）：依 plan §6.R1 acceptance「binary
+    resolution + /api/v1/replay/health 走預期 auth policy」加上 contract
+    health route。Auth = ``Depends(base.current_actor)``（已登入即可），
+    與 ``/health/signature`` 對齊；不要求 write scope，monitoring infra
+    無 write scope 亦可 probe。
+
+    聚合 ``/run`` 可用性的四個前置條件：
+      1. ``resolve_replay_runner_bin()`` 指向實際落盤的 binary；
+      2. ``OPENCLAW_DATA_DIR`` 存在且可寫；
+      3. PG 可達且 V045 + V049 schema 已部署；
+      4. 上報 binary release profile env（``live`` / ``paper`` / 空）。
+
+    wiring_status 優先級（高 → 低）：
+      ``binary_missing`` > ``degraded`` > ``ready``
+    任何非 ``ready`` 狀態會在 envelope 設 ``degraded=True``，讓上游
+    monitoring（以及 GUI Replay subtab 的 gating 邏輯）能快速失敗，
+    不必解析內部 dict。
+    """
+    rows, err = await _async_safe_pg_select(
+        """
+        SELECT
+            EXISTS(
+                SELECT 1 FROM information_schema.tables
+                 WHERE table_schema='replay'
+                   AND table_name='run_state' LIMIT 1),
+            EXISTS(
+                SELECT 1 FROM information_schema.tables
+                 WHERE table_schema='replay'
+                   AND table_name='experiments' LIMIT 1);
+        """,
+        (),
+    )
+    health = _compute_replay_health_state(rows=rows or [], pg_err=err)
+    degraded = health["wiring_status"] != "ready"
+    return _replay_response(
+        data=health,
+        degraded=degraded,
+        reason=None if not degraded else f"wiring_status:{health['wiring_status']}",
+    )
 
 
 @replay_router.get("/health/signature")

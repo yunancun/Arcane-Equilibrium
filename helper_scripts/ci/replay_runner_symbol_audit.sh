@@ -86,9 +86,28 @@ IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRV_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUST_CRATE_DIR="$SRV_ROOT/rust/openclaw_engine"
+# REF-20 Sprint A R1-T4 (2026-05-04): cargo workspace (post 2026-04-15 root
+# Cargo.toml workspace consolidation) emits release artifacts to
+# $SRV_ROOT/rust/target/release/, NOT to the legacy crate-local
+# $SRV_ROOT/rust/openclaw_engine/target/release/. The legacy default caused
+# this audit to fail BIN PATH check (exit 4) on Linux runtime even when the
+# binary existed under the workspace target. RUST_CRATE_DIR remains pinned
+# for `cargo build` cwd-sensitivity (cargo still resolves crate-local
+# Cargo.toml relative to the crate dir we cd into).
+# REF-20 Sprint A R1-T4（2026-05-04）：cargo workspace（2026-04-15 root
+# Cargo.toml workspace 合併後）將 release artifact emit 到
+# $SRV_ROOT/rust/target/release/，**不**是 legacy 的 crate-local
+# $SRV_ROOT/rust/openclaw_engine/target/release/。舊預設導致 Linux runtime
+# 即使 binary 存在於 workspace target，audit 仍報 BIN PATH 找不到（exit 4）。
+# RUST_CRATE_DIR 仍保留供 `cargo build` cwd 使用（cargo 仍以 crate dir 為
+# 基準解析 crate-local Cargo.toml）。
+# 詳見 PA report：docs/CCAgentWorkSpace/PA/workspace/reports/
+#                 2026-05-04--ref20_sprint_a_task_dag.md §1 R1-T4 / §5 H1。
+RUST_TARGET_DIR="$SRV_ROOT/rust/target/release"
 BIN_NAME="replay_runner"
-# release artifact 的標準 cargo 輸出路徑 / Standard cargo release artifact path
-BIN_PATH_DEFAULT="$RUST_CRATE_DIR/target/release/$BIN_NAME"
+# release artifact 的標準 cargo workspace 輸出路徑 / Standard cargo workspace
+# release artifact path (post 2026-04-15 workspace consolidation).
+BIN_PATH_DEFAULT="$RUST_TARGET_DIR/$BIN_NAME"
 # 允許 caller 透過 $REPLAY_RUNNER_BIN env var 覆寫（測試 / CI matrix 用）
 # Allow caller to override via $REPLAY_RUNNER_BIN env var (test / CI matrix)
 BIN_PATH="${REPLAY_RUNNER_BIN:-$BIN_PATH_DEFAULT}"

@@ -1549,3 +1549,40 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 3. Wave 3 unit test 4 fail-mode（Wave 1 不要求）
 
 **APPROVE FOR E2 SIGN-OFF.** PM commit message 草稿：`feat(replay): scaffold replay_runner binary + ReplayProfile enum spec (REF-20 Wave 1 R20-P0-T2/T3/T9)`
+
+---
+
+## 2026-05-04 PA — REF-20 Sprint A 設計派工（Sprint A R1+R2+R3）
+
+**Trigger**: plan `2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md` (commit `a4ea3571`) Sprint A scope 派工設計。
+
+**4 個 gap 已被 PM pre-flight 證實**：
+1. P0-2 binary path bug — `route_helpers.py:138/143` 找 `rust/openclaw_engine/target/...` 但實際 `rust/target/...`（cargo workspace layout）。
+2. audit script 同 bug — `replay_runner_symbol_audit.sh:91` `RUST_CRATE_DIR/target/release/`。
+3. `/api/v1/replay/health` 404 — 只有 `/health/signature`（line 1336）存在。
+4. `replay.experiments / run_state / report_artifacts / simulated_fills / handoff_requests / mlde_replay_veto_log` 6 表全 0 rows（Linux PG 直查確認）。
+
+**設計要點記錄**：
+
+- R1 4 sub-tasks file 互不重疊 → 不需 worktree isolation；可派 1-2 E1 並行。
+- R2 高風險：當前 `/run` 用 `uuid5(experiment_id)` 自衍生 `manifest_id` 寫入 `replay.run_state`，但**從來沒 INSERT `replay.experiments` 任何行**；V052 FK redirect 是 vacuously true（兩表都 0 行）。R3 一旦真跑會撞 FK constraint。R2 必先於 R3 land + deploy。
+- R2 LOC 估算：`replay_routes.py` 當前 1494 LOC + R2 預估 +160 LOC = 1654 LOC，**越過 baseline+5（1499+5=1504）邊界 150 LOC**。**必拆**：R2-T1 抽到 `replay/experiment_registry.py`（沿 `route_helpers.py` 模式）；R2-T3 verify SQL archive 拆到既有 `manifest_signer.py`。
+- R3 是純串行，依 R1+R2 完成後才能跑；不可並行。
+- R2-T3 拿掉 `OPENCLAW_REPLAY_VERIFY_TEST_KEY` 改走 secrets file fallback（`$OPENCLAW_SECRETS_DIR/<env>/replay_signing_key`），不選同次 land V042 SQL archive（會把 sprint 變 1500 LOC migration，scope creep）。
+- R1-T3 `/api/v1/replay/health` auth 政策 = `Depends(base.current_actor)` 已登入即可，**不 require_scope_and_operator**（與 `/health/signature` line 1336 對齊；plan §6 R1 acceptance "behind the intended auth policy" 即此意）。
+
+**Hidden risk 結論**：
+- Decision Lease retrofit feature flag OFF + replay 子系統不走 IntentProcessor → router gate → R2 改動**不會**誤觸 lease（grep `acquire_lease|release_lease` symbol_audit.sh:226 為 0 是回歸線）。
+- 14d observation 期間 Sprint A 改動會讓 metric 從 vacuous truth 變 evidence；observation 可在 Sprint A 結束後重啟計時。
+- V049-V054 schema 已 deploy，R2 不需新 migration，但 INSERT col list 必對 V049 22-col contract 全 enumerate。
+
+**5 Open Questions 留 PM 決定**（已寫入報告 §6）：
+1. R1+R2 同 sprint 還是分 sprint（PA 推薦分波，3 cycle 各 1 day）。
+2. R2-T3 SQL archive vs secrets file fallback（PA 推薦 secrets file，V042 留 P2 ticket）。
+3. R3 後是否立即啟動 Wave R4 UI 啟用（PA 推薦 至少間隔 1 sprint）。
+4. Sprint A 是否拉 QC 介入 R2-T1 manifest schema（PA 推薦 1h soft consult，非強制）。
+5. Decision Lease flag flip 是否疊 Sprint A（PA 答 NO，不疊 deploy 視窗）。
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-04--ref20_sprint_a_task_dag.md`
+**File overlap warning**: `replay_routes.py` baseline+5 violation 風險 → R2 LOC 拆解設計已含於報告（無 PM override 不可 land）。
+

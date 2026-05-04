@@ -2,6 +2,60 @@
 
 ## 工作記憶
 
+### 2026-05-04 REF-20 Sprint A R1（Runtime Usability：binary fallback + restart_all env + /health route + audit script + 5 unit tests，HEAD `a4ea3571` + WIP 改動）— **E4 PASS**
+
+**對象**：PM 派 E4 regression 跑 R1 IMPL 落盤後的 R1-T5 5 new tests + replay-keyword sibling + module smoke + cross-platform import smoke + audit script + Sprint 1 F1 invariant 維持證明。**E2 review 不在本任務排程**（任務文件直接 IMPL → E4 → PM commit）。
+
+**Verdict**：**PASS** — R1 5 sub-task 全綠 / 0 新 fail / 0 新 regression / 0 hard-boundary mutation / 0 path leak / 0 flake (2-round identical)
+
+| 引擎 | passed | failed | baseline | delta | verdict |
+|---|---:|---:|---:|---:|---|
+| Python pytest control_api_v1 全 suite (round 1) | 3436 | 1 | 3431 / 1 (TODO.md L5) | +5 PASS / +0 fail | ✓（fail = pre-existing E4-P0-1）|
+| Python pytest control_api_v1 全 suite (round 2) | 3436 | 1 | (round 1 same) | +0 / +0 | ✓ flake=N |
+| Python pytest -k replay (round 1) | 60 | 0 | new | match | ✓ |
+| Python pytest -k replay (round 2) | 60 | 0 | (round 1 same) | match | ✓ flake=N |
+| R1-T5 new test (round 1) | 5 | 0 | new | match | ✓ |
+| R1-T5 new test (round 2) | 5 | 0 | (round 1 same) | match | ✓ flake=N |
+| Rust cargo lib（--release）| 2467 | 0 | 2447 (Sprint 1 cold audit) | +20 PASS / +0 fail | ✓ Sprint 3+4 累積 |
+
+**雙跑 confirm**：Python 3436 P / 1 F + Rust lib 2467 / 0；2 round identical 0 transient flake（E4-P0-1 是 deterministic shared-state pollution 仍是 deterministic）。
+
+**Mock 審查**：本 task 不寫業務代碼，僅讀 + 跑。E1 sign-off §1-2 已記載（5 R1-T5 test 用 `tmp_path` + `monkeypatch.delenv` + 純檔案系統 fixture，0 業務邏輯 mock；`resolve_replay_runner_bin()` 業務邏輯真跑）。✓
+
+**Hard-boundary scan**（CLAUDE.md §四 18 條紅線）：在 6 個 R1 改動 file (`replay_routes.py` / `replay_models.py` / `route_helpers.py` / `test_replay_route_helpers_binary_resolution.py` / `restart_all.sh` / `replay_runner_symbol_audit.sh`) `grep '\b(live_execution_allowed|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json|decision_lease|execution_authority)\b'` = **0 hit**。✓
+
+**Cross-platform path scan**（CLAUDE.md §七）：E1 sign-off §6.2 已驗 0 真實命中（僅 docstring 政策反例引用，CLAUDE.md §七 example exception）✓
+
+**File size cap**（CLAUDE.md §九 1500）：`replay_routes.py` 1492 ≤ 1500（E1 抽 3 model 至 `replay_models.py` 138 LOC + 加 `/health` route 70 LOC + 刪 dead pydantic import → net -3 ≤ baseline 1495）✓
+
+**Sprint 1 F1 invariant 維持證明**：`grep` 確認 `replay/manifest_signer.py` 與 `replay/route_helpers.py` 0 個 import `replay_routes` 任何 model；R1 抽出 3 model 對 canonical_bytes 路徑完全 0 耦合。HMAC byte-equal Rust↔Python 8/8 xlang fixture invariant 完整保留。✓
+
+**Module smoke 結果**：
+- 9 個 `/api/v1/replay/*` route 全註冊（`/health` + `/health/signature` 兩條同時掛載；ordering `/health` 先於 `/health/signature` 與 PA plan 一致）
+- 3 個 Pydantic class（`ReplayRunRequest` / `ReplayCancelRequest` / `ReplayManifestVerifyRequest`）`__module__` 全 = `replay.replay_models`
+- `from app.replay_routes import` 與 `from replay.replay_models import` 兩條路徑得到**同一 class object**（Python `is` 算 True）
+- → OpenAPI schema generation / 既有 5 `test_replay_routes_*.py` 0 行為改動
+
+**Cross-platform import smoke (macOS)**：
+- `resolve_replay_runner_bin()` 命中 fallback step 2 (`rust/target/release/replay_runner`，workspace 真實佈局)
+- `compute_replay_health_state(rows=[], pg_err=None)` 9-field 全產出
+- Mac local PG `pg_present=true` / `v045_present=false` / `v049_present=false` / `wiring_status="ready"`（Mac 端 PG 無 V045/V049 schema，Linux trade-core 才是真實 deploy 點；E1 sign-off §9-2 不確定點預期）
+
+**Audit script**：exit=0 + 414 symbol + 0 forbidden（R1-T1 fallback chain step 2 workspace release 真實佈局生效）。本機 cargo build emit 21 dead-code/unused-import warning 全部 pre-existing 與 R1 改動無關（在 `openclaw_engine` 而非 R1 改動的 Python 模組或 `replay_runner` binary 自身）。
+
+**E4 教訓 / 新坑**：
+1. **R1 是 IMPL → E4 直跑（無 E2）路徑** — 本任務 PA 派發直接從 E1 IMPL 跳到 E4 regression 而沒有 E2 review；屬於小範圍、低風險、純 IMPL fixup 場景的合法簡化（CLAUDE.md §八 P0 快速通道也允許省 FA/E5/E3/CC，但 E2+E4 永不跳）。後續 R2/R3 是高風險區（FK / atomic registration / E2E run），必走完整 E2→E4 鏈。
+2. **`replay_routes.py` 1495→1492 -3 LOC 透過抽 model 實現** — 加 `/health` route 70 LOC 但同時抽 3 model 138 LOC + 刪 dead pydantic import → 反而降 LOC。Future 任何擴 route 都該優先 inspect 是否能順手抽 model 至 `*_models.py` 維持 1500 governance limit。
+3. **`replay_router.routes` 路徑前綴是 `/api/v1/replay/...`** — 不是 PA design doc 寫的 `/health` 而是 `/api/v1/replay/health`（SubRouter 加 prefix）。E1 IMPL 已正確處理（route 在 `replay_router` 而非 root app）。E4 module smoke 對 endpoint 路徑時必認 prefix。
+4. **TODO.md L5 baseline 是 3431 而非 E4 prior memory 的 3387** — 兩者差 44，差距來自 Sprint 3 Track H Decision Lease retrofit + Sprint 4 closure 期間的累積增量（44 = 5 sprint 3 sibling sub-task tests + 其他）。E4 取 baseline 永遠以 **TODO.md L5 「測試基準」line** 為準，不信本 memory 寫死數字（CLAUDE.md §九「baseline 規則」）。
+5. **Mac local PG `v045_present=false` / `v049_present=false` 卻 `wiring_status="ready"`** — health state 邏輯主要 gate 是 binary+pg+data_dir，V045/V049 schema 是 secondary signal。若 PA 後續設計意圖是 V049 absent → degraded，需 E1 補一條 rule。屬 R1 sign-off 後 follow-up，不阻塞 commit。
+
+**Report**：`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-04--ref20_sprint_a_r1_regression.md`
+
+**建議 PM commit message** 見 report §8。
+
+---
+
 ### 2026-05-03 REF-20 Sprint 1（4 track A+B+C+D + V053 整 Sprint final E4 regression，HEAD `2ffe43d` + 30 file unstaged）— **E4 CONDITIONAL PASS**
 
 **對象**：PM 派 final E4 regression 整 Sprint 1（Track A spawn argv + ensure_ascii=False byte-equal canonical contract 19/19 / Track B Rust manifest verify path + key.hex hard error + 5 fail-mode + healthcheck [44] / Track C 3 P0 安全洞修 + V053 LOCK TABLE race-free + 1500 LOC enforce + admin scope 登記 / Track D V049-V052 + V052_preflight + REF-20_RESERVATION v1.9）。

@@ -1,7 +1,36 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-04（REF-20 Sprint 3 Track H + Track I deploy + Sprint 4 final closure = P6 PRODUCTION CLOSED）
+> 最後更新：2026-05-04（REF-20 closed-with-known-gap，Sprint A R1+R2+R3 in flight；Codex review 揭 4 P0/P1 gap → Gap Closure Plan V1）
+
+### REF-20 Gap Closure Plan V1 — Sprint A 啟動（2026-05-04）
+
+**Trigger**：Sprint 4 closure (commit `0ad79f67`) 標記 P6 PRODUCTION CLOSED 後，2026-05-04 Codex production-readiness review 揭 4 個 P0/P1 gap。
+
+**Gaps**：
+- **P0-1** `replay_runner` synthetic close-price walker — 不走 IntentProcessor / TickPipeline / exchange / governance，emit `qty=1.0` synthetic long fill，不能驗 strategy/risk parameter delta
+- **P0-2** API binary path bug — `route_helpers.py:138/143` 找 `rust/openclaw_engine/target/release/replay_runner`，cargo workspace 實出 `rust/target/release/replay_runner`；同 bug 存於 `helper_scripts/ci/replay_runner_symbol_audit.sh:91`
+- **P1-1** UI Replay subtab `aria-disabled="true"` 仍標 "P2 待啟用"
+- **G1-G7 additional gaps**：6 個 replay.* 表全 0 rows / `run_state.manifest_id` FK 但無 production manifest registration / `/api/v1/replay/health` 404 / `/manifest/verify` 501 without test key / cron 未裝 / closure 跳過 14d observation / UI copy 仍稱 backend pending
+
+**Plan**：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`（commit `a4ea3571`）
+
+**架構**：9 Wave (R0-R9) + 4 Sprint (A=R1+R2+R3 / B=R4+R5 / C=R6+R7 / D=R8+R9)
+
+**Sprint A scope (2026-05-04 啟動)**：
+- R1 Runtime Usability：fix binary path resolution + fix audit script + ensure API env + add `/api/v1/replay/health`
+- R2 Manifest Registry：production manifest registration path + atomic `experiments` row + SQL/archive-backed verify + idempotency
+- R3 First Real E2E：authenticated minimal replay on Linux + persist 4 表 + verify row count > 0
+
+**Sprint A acceptance**：A1 API spawn runner + A2 DB lineage exists + A3 no dangling FK
+
+**Pre-flight (PM 直查)**：4 個 plan-asserted gap 全證實 (route_helpers + audit script + curl 404 + UI disabled + 6 表 0 row + Linux engine/API alive)
+
+**Wave R0 doc reset**：CLAUDE.md §三/§十 label 改 "closed-with-known-gap (Sprint A in flight)"；TODO.md 加 P1-INFRA-3n/3o/3p/3q 對應 Sprint A/B/C/D。Plan R0 acceptance：plan 檔已 commit `a4ea3571` ✅，Sprint 4 closure entry 完整保留 ✅
+
+**Sprint A 完成前禁止 (plan §11)**：用當前 replay output 判斷策略品質 / 調 live/demo 風控 / 餵 MLDE/Dream 為真實 evidence / 對外宣稱已解決 operator fast backtest pain
+
+---
 
 ### REF-20 Sprint 3+4 closure — P6 PRODUCTION CLOSED（2026-05-03 → sync 2026-05-04）
 
