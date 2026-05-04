@@ -6,6 +6,35 @@
 - 測試基準：2614 passed（Sprint 0 TD-1 後）；Sprint 1a+1b 全部通過後預期 2623 passed
 - 系統模式：demo_only
 
+## 2026-05-04 — REF-20 Sprint A R1 adversarial review（RETURN to E1）
+
+**結論**：RETURN to E1 — 1 HIGH + 4 MEDIUM + 3 LOW · 0 CRITICAL · sibling 31/31 PASS + 新 unit test 5/5 PASS
+
+**HIGH-1（必修才放行 E4）**：`Path.exists()` 對 directory + non-executable file 都回 True，攻擊面 = workspace target dir 可寫的 attacker / 誤操作放 dir 騙 helper → `/health` 報 binary_exists=true 但 spawn 必 fail；E2 Mac 復現確認。修法：`is_file()` 收斂（最低）或加 `os.access(X_OK)`。**4 個 path candidate（workspace_release / workspace_debug / legacy_release / legacy_debug）都要套**。
+
+**MEDIUM 4 條**：(1) `OPENCLAW_BASE_DIR="   "` whitespace 不 strip → garbage path（修法 `.strip()`，與 override line 一致）。(2) `/health` data 含 `binary_path` 完整絕對路徑——leak surface 比 `/health/signature` 大；schema 不變但 docstring 必註明 future viewer 分權 review。(3) 5 case 缺 `OPENCLAW_REPLAY_RUNNER_BIN=""` empty-string fallthrough 測。(4) 缺 legacy release vs legacy debug 順序覆蓋。
+
+**LOW**：(1) docstring 寫「4-step」實際 5-step path（PA plan 同樣口徑，要 PM/PA round confirm 措辭）。(2) `compute_replay_health_state` V049 absent 但仍 ready（E1 §9 #2 自 flag）。(3) `replay_routes.py` 1492 LOC 距 1500 cap 只 8 行 margin —— R2-T1 land 必觸；PM dispatch R2 前需先決抽出策略（建議 `replay_run_route.py`）。
+
+**對抗反問 7 條 + E2 復現**：
+- HIGH-1 用 Mac tmp_path 跑出 directory 與 non-exec file 都 `.exists()=True` 的反例
+- empty-string fallthrough 行為對（`.strip()` 守）但 5 case 沒覆蓋 → MEDIUM-3
+- /health auth 走 `current_actor` 401，PG injection 0 風險（literal SQL + parameterized）
+- PG 死鎖防護 `SET LOCAL statement_timeout = 2000ms` PASS
+- model 抽出 `replay_routes.ReplayRunRequest is replay_models.ReplayRunRequest` → True，0 重複
+
+**§九 8 條 + OpenClaw 9 條 checklist**：跨平台 ✅（grep 0 真實命中，2 hit 都在 docstring 政策反例引用）/ 雙語注釋 ✅（10 元素全中英對照）/ LOC ✅（1492/1500）/ Singleton ✅（0 新登記）/ Migration N/A / healthcheck ⚠️（`/health` 端點本身是 healthcheck 但 cron `passive_wait_healthcheck.py` 還沒接，R3 / R4 補不阻塞 R1）。
+
+**驗證範圍**：6 file diff（route_helpers.py / replay_routes.py / replay_models.py / test_replay_route_helpers_binary_resolution.py / restart_all.sh / replay_runner_symbol_audit.sh）+ 31 sibling test 跑通 + 5 新 unit test 全綠 + Mac 跑 audit script exit=0 + 4 個 import path 兼容性驗證 + Mac 反例復現 4 case（symlink dangling / mode 0644 / dir at path / whitespace BASE_DIR）。
+
+**Lessons learned**：
+1. **`Path.exists()` 對 directory 不分**：未來新 binary path resolution 一律走 `.is_file()`；HIGH 等級因 spawn 後果不可逆
+2. **PA plan + helper docstring 同步漂移風險**：PA 寫「4-step」E1 跟著寫「4-step」實質 5 path —— E2 要對 PA + IMPL 雙方標的不一致，不能單方 sign-off
+3. **LOC margin <10 LOC 視為 hard alert**：R2 dispatch 前先決抽出策略，否則 land 第一 task 即破 1500
+4. **leak surface vs auth scope 對比要明寫 docstring**：未來分權 review 不漏點
+
+**report**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-04--ref20_sprint_a_r1_e2_review.md`
+
 ## 2026-05-03 — REF-20 Sprint 2 Track F1 retroactive Wave 3-9 master review（補 §八 evidence trail）
 
 **結論**：7 wave 中 Wave 7 = PASS / Wave 3/4/5/6/8/9 = CONDITIONAL · 共 10 LOW finding · 7 P2 ticket 提案 · **0 P0 / 0 P1 阻塞**
@@ -927,3 +956,12 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 36. **V050 placeholder column dangling 確認** — Sprint 1 V050 `replay.simulated_fills.decision_lease_id` 是 placeholder，PA 預期 Sprint 2 啟用。Track H 4 task 全完，但 grep `INSERT INTO replay\.|decision_lease_id` 在 Rust hot path = 0 hit。E-2 §7.1 push back 正確：V050 是 offline replay_runner output，Track H scope 只到 IntentResult.lease_id 暴露 + writer 寫 `learning.lease_transitions`，不寫 V050。**AC-2 + AC-3 query 從 `replay.simulated_fills` 取 `decision_lease_id IS NOT NULL` 將永遠返回 0** 直到 P3+ replay_runner online。E2 PASS for E-2/E-4 scope，但必 PM 知曉「AC-2/AC-3 不會 PASS in Sprint 3 deploy 後 24h 視窗」。
 
 37. **跨 crate test setter `pub fn ... _for_test` 安全紀律** — E-2 加 `set_router_gate_enabled_for_test` 為 `pub fn` + `#[doc(hidden)]`（因 cfg(test) 跨 crate 不傳遞）。grep production 代碼 0 caller — 紀律維持。E2 PASS。但建議未來加 `debug_assertions` runtime guard 防誤呼（panic on caller in release build）— 是 LOW informational suggestion。
+
+38. **`Path.exists()` 對 directory + non-executable 兩面欺騙：唯一正解 `is_file() and os.access(X_OK)` 雙保險** — REF-20 Sprint A R1 round 1 HIGH-1 攻擊面：`workspace_release.exists()` 對 mode 0644 file（True）+ directory（True）+ symlink-to-deleted（False）三面行為不一致；其中前兩者讓 `/run` 永遠 fail（subprocess.Popen 拋 PermissionError / IsADirectoryError）但 `/health` 仍報 `binary_exists=true`。對抗 probe（live Mac euid=501）發現 directory 對 `os.access(X_OK)=True`（因 traverse permission），所以**單檢 `os.access(X_OK)` 也會被 directory 騙**！E1 round 2 fix `_is_executable_file(p) = p.is_file() and os.access(p, os.X_OK)` 是**唯一**正確設計：`is_file()` 守 directory + dangling symlink，`os.access(X_OK)` 守 mode 0644 / 0444。POSIX root 行為附加：root 對 mode 0000 / 0644 仍回 X_OK=False（POSIX `access(2)` 規範要求至少一 user/group/other 有 x bit），所以「攻擊者放 0644 假 binary 騙 root helper」場景被守住。E2 PASS round 2。
+   **抽象 review pattern**：任何 binary path resolution helper 必須驗 「是檔 + 可執行」雙條件；只用 `Path.exists()` 是 attack surface。
+
+39. **`os.environ.get(..., "")` 跟 `.strip()` 必同步** — REF-20 Sprint A R1 round 1 MEDIUM-1：`OPENCLAW_BASE_DIR="   "`（whitespace-only）`if not base_dir:` 不觸發 fallback，後續 `Path("   ") / "rust/..."` 變 leading-space garbage path。E1 round 2 fix 兩處 env 都加 `.strip()`：`OPENCLAW_REPLAY_RUNNER_BIN`（line 189）+ `OPENCLAW_BASE_DIR`（line 198）。test 6/7（empty + whitespace-only）兩 corner case 釘住。**抽象 review pattern**：所有 `os.environ.get("X", "")` 後若用「if not」guard fallback，必須先 `.strip()`，避免 IFS / shell expansion / typo 留下 trailing space。
+
+40. **wiring_status='ready' 但 schema 缺：monitoring 在說謊** — REF-20 Sprint A R1 round 1 LOW-2：`compute_replay_health_state` 原邏輯只看 `binary_exists + pg_present + data_dir_writable`，PG up 但 V045 / V049 缺仍回 ready；`/run` 在第一筆 INSERT INTO replay.run_state 失敗。E1 round 2 fix 加 `elif not v045_present or not v049_present: wiring_status = "degraded"` rule + 3 unit test mock rows=[(False,True)] / [(True,False)] / [(True,True)]。**抽象 review pattern**：health endpoint 的 ready 條件 = downstream 第一筆操作能成功的 superset；health 撒謊比 health 標 degraded 更危險（前者讓 monitoring 沉默，後者只是 alert noise）。
+
+41. **focused round 2 scope 紀律：不重審已 cleared 的部分** — Round 2 verification 嚴格收斂在 round 1 finding 的 fix verdict，不重做 round 1 全 audit；對 round 1 已 PASS 的 R1-T2 / R1-T4 不再 grep / 不重跑 audit script（除非 sibling regression 觸發）。對 round 1 RETURN 的 5 finding 逐一驗 fix presence + 跑對應 regression test + 對抗反問。**抽象 review pattern**：multi-round review 後續 round = pin-point fix verification，不要把 scope 擴回全 audit；E2 對抗範圍只擴增「fix 是否引入新 issue」，不重審無關項。Round 2 結論 0 new finding → PASS to E4 直接放行。

@@ -368,7 +368,30 @@ restart_api() {
     # $DATA_DIR/api.log，與 engine 啟動模式（L200）對齊。原本 uvicorn 無
     # redirect，api.log 自 2026-04-19 PIPELINE-SLOT-1 Phase 1 重啟後不再更新，
     # 任何 API 錯誤 / traceback 隨啟動 shell 散失。
-    OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
+    #
+    # REF-20 Sprint A R1-T2 (2026-05-04): explicitly export OPENCLAW_BASE_DIR
+    # + OPENCLAW_DATA_DIR before spawning uvicorn so the API process inherits
+    # the resolved repo root + runtime directory regardless of caller env.
+    # The legacy implementation relied on `nohup` shell-inherit semantics,
+    # which silently broke when restart_all.sh was wrapped by systemd /
+    # launchd / pm2 (those re-pack env and may strip vars not in their unit
+    # spec). Without OPENCLAW_BASE_DIR, replay_routes resolve_replay_runner_bin
+    # falls back to PATH-relative "replay_runner" → 503 binary_not_found
+    # despite the binary existing under rust/target/release/. This export
+    # mirrors restart_engine() (line 347-352) which already wires both vars.
+    # REF-20 Sprint A R1-T2（2026-05-04）：在 spawn uvicorn 前顯式 export
+    # OPENCLAW_BASE_DIR + OPENCLAW_DATA_DIR，使 API process 不論 caller env
+    # 都能繼承 repo root + runtime dir。舊實作依賴 nohup shell-inherit 語意，
+    # systemd / launchd / pm2 包裹 restart_all.sh 時會重新打包 env 而漏掉這
+    # 兩個 var，導致 resolve_replay_runner_bin fall back 到 PATH 相對的
+    # "replay_runner" → 503 binary_not_found（即使 binary 真實存在於
+    # rust/target/release/）。本 export 對齊 restart_engine() (line 347-352)
+    # 既有的 env 接線。
+    local base_dir
+    base_dir="${OPENCLAW_BASE_DIR:-$REPO_ROOT}"
+    OPENCLAW_BASE_DIR="$base_dir" \
+        OPENCLAW_DATA_DIR="$DATA_DIR" \
+        OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" \

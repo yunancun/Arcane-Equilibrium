@@ -117,33 +117,120 @@ SUBPROCESS_ENV_WHITELIST = (
 # ─── Binary path resolution / Binary 路徑解析 ────────────────────────
 
 
+def _is_executable_file(p: Path) -> bool:
+    """Validate path is a regular file with executable bit set.
+    驗 path 是 regular file 且具執行 bit。
+
+    Guards against directory + non-executable + symlink-to-deleted attack
+    surfaces where Path.exists() alone returns True but subprocess.Popen
+    will raise PermissionError / IsADirectoryError. E2 R1 review HIGH-1
+    finding (2026-05-04).
+    防範 directory + 非執行檔 + symlink 指向已刪除目標等場景；
+    這些情境 ``Path.exists()`` 會回 True 但 ``subprocess.Popen`` 必拋
+    ``PermissionError`` / ``IsADirectoryError``。E2 R1 review HIGH-1
+    發現（2026-05-04）。
+
+    ``Path.is_file()`` 已 follow symlink 至目標、過濾 dangling symlink
+    與 directory；再用 ``os.access(p, os.X_OK)`` 驗 effective UID 對該
+    file 具執行權，封堵「mode 0644 file 名為 replay_runner」誤建場景。
+    """
+    return p.is_file() and os.access(p, os.X_OK)
+
+
 def resolve_replay_runner_bin() -> Path:
     """Resolve replay_runner binary path per CLAUDE.md §六 + cross-platform.
     依 CLAUDE.md §六 跨平台解析 replay_runner binary 路徑。
 
+    REF-20 Sprint A R1-T1 (2026-05-04): Codex production-readiness review
+    revealed the legacy chain only probed the crate-local layout
+    ``rust/openclaw_engine/target/...`` while cargo workspace (post
+    2026-04-15 root ``Cargo.toml`` workspace consolidation) emits to
+    ``rust/target/...``. The disk-truth divergence caused ``/run`` to
+    surface ``binary_not_found`` even when ``cargo build --release -p
+    openclaw_engine --bin replay_runner`` had succeeded. This 5-path
+    fallback adds the workspace target layout in front while keeping
+    the legacy nested layout as a compat path for partial rollouts.
+
+    REF-20 Sprint A R1-T1（2026-05-04）：Codex production-readiness 審
+    揭露舊鏈僅探 crate-local 路徑 ``rust/openclaw_engine/target/...``，
+    但 cargo workspace（2026-04-15 root ``Cargo.toml`` workspace 合併
+    後）emit 到 ``rust/target/...``。磁碟真相落差導致 ``/run`` 仍回
+    ``binary_not_found`` 即使 ``cargo build --release -p openclaw_engine
+    --bin replay_runner`` 已成功。此 5 path fallback 把 workspace target
+    放前，legacy nested 留作 partial rollout 的 compat 路徑。
+
     Priority / 優先級:
       1. ``OPENCLAW_REPLAY_RUNNER_BIN`` env override (operator / test).
-      2. ``$OPENCLAW_BASE_DIR/rust/openclaw_engine/target/release/replay_runner``.
-      3. ``$OPENCLAW_BASE_DIR/rust/openclaw_engine/target/debug/replay_runner``.
+      2. ``$OPENCLAW_BASE_DIR/rust/target/release/replay_runner``
+         (workspace; current real layout post 2026-04-15).
+      3. ``$OPENCLAW_BASE_DIR/rust/target/debug/replay_runner``
+         (workspace; dev path).
+      4. ``$OPENCLAW_BASE_DIR/rust/openclaw_engine/target/release/replay_runner``
+         (legacy nested; partial-rollout compat).
+      5. ``$OPENCLAW_BASE_DIR/rust/openclaw_engine/target/debug/replay_runner``
+         (legacy debug; final fallback — may not exist; caller surfaces 503).
+
+    Existence check uses ``_is_executable_file()`` (E2 R1 review HIGH-1):
+    ``Path.is_file()`` skips directories + dangling symlinks, and
+    ``os.access(..., os.X_OK)`` verifies executable bit so caller
+    ``subprocess.Popen`` does not raise ``IsADirectoryError`` /
+    ``PermissionError`` post-resolution.
+
+    存在性檢查走 ``_is_executable_file()``（E2 R1 review HIGH-1）：
+    ``Path.is_file()`` 過濾 directory + dangling symlink；
+    ``os.access(..., os.X_OK)`` 驗執行 bit，使後續 ``subprocess.Popen``
+    不會在解析後仍拋 ``IsADirectoryError`` / ``PermissionError``。
 
     Returns Path even if binary does not exist on disk; caller surfaces
     missing-bin via 503 degraded response.
     """
+    # Step 1: Operator/test override (highest priority).
+    # 步驟 1：operator / test 覆寫（最高優先）。
     override = os.environ.get("OPENCLAW_REPLAY_RUNNER_BIN", "").strip()
     if override:
         return Path(override)
-    base_dir = os.environ.get("OPENCLAW_BASE_DIR", "")
-    if base_dir:
-        release_path = (
-            Path(base_dir) / "rust/openclaw_engine/target/release/replay_runner"
-        )
-        if release_path.exists():
-            return release_path
-        debug_path = (
-            Path(base_dir) / "rust/openclaw_engine/target/debug/replay_runner"
-        )
-        return debug_path
-    return Path("replay_runner")
+
+    # E2 R1 review MEDIUM-1: strip whitespace-only OPENCLAW_BASE_DIR
+    # so leading/trailing spaces never propagate into Path() and become
+    # garbage filesystem paths (e.g. "   /rust/target/release/...").
+    # E2 R1 review MEDIUM-1：strip 掉 OPENCLAW_BASE_DIR 的前後空白，
+    # 避免空白被併進 Path() 變成 garbage 路徑。
+    base_dir = os.environ.get("OPENCLAW_BASE_DIR", "").strip()
+    if not base_dir:
+        # PATH-relative last resort — used in CI / sandbox runs where
+        # OPENCLAW_BASE_DIR is unset and the binary is staged into PATH.
+        # PATH 相對的最後 fallback — 用於 CI / sandbox 未設 OPENCLAW_BASE_DIR
+        # 但 binary 已 stage 進 PATH 的場景。
+        return Path("replay_runner")
+
+    # Step 2: Workspace target release (current real layout 2026-05-04).
+    # 步驟 2：workspace target release（2026-05-04 真實佈局）。
+    workspace_release = Path(base_dir) / "rust/target/release/replay_runner"
+    if _is_executable_file(workspace_release):
+        return workspace_release
+
+    # Step 3: Workspace target debug (dev path).
+    # 步驟 3：workspace target debug（dev 路徑）。
+    workspace_debug = Path(base_dir) / "rust/target/debug/replay_runner"
+    if _is_executable_file(workspace_debug):
+        return workspace_debug
+
+    # Step 4: Legacy nested crate-local release (compat fallback for
+    # partial rollouts that haven't migrated to workspace target).
+    # 步驟 4：legacy nested crate-local release（partial rollout 尚未遷移
+    # 到 workspace target 時的 compat fallback）。
+    legacy_release = (
+        Path(base_dir) / "rust/openclaw_engine/target/release/replay_runner"
+    )
+    if _is_executable_file(legacy_release):
+        return legacy_release
+
+    # Step 5: Legacy nested crate-local debug (final fallback).
+    # 步驟 5：legacy nested crate-local debug（最終 fallback）。
+    legacy_debug = (
+        Path(base_dir) / "rust/openclaw_engine/target/debug/replay_runner"
+    )
+    return legacy_debug  # may not exist; caller surfaces via 503
 
 
 def resolve_artifact_output_dir(run_id: str) -> Path:
@@ -948,6 +1035,162 @@ def artifact_path_within_allowlist(
     return True, None
 
 
+# ─── Sprint A R1-T3 /replay/health helper / R1-T3 /replay/health 輔助 ──
+
+
+def compute_replay_health_state(
+    *,
+    rows: list[tuple[Any, ...]],
+    pg_err: Optional[str],
+) -> dict[str, Any]:
+    """Compute /api/v1/replay/health response data + wiring_status.
+    計算 /api/v1/replay/health 回應資料 + wiring_status。
+
+    REF-20 Sprint A R1-T3 (2026-05-04): monitoring probe that lets
+    operator verify the four foundational pre-conditions for /run + the
+    rest of the Replay Lab actually being usable, BEFORE attempting an
+    actual run:
+
+      1. resolve_replay_runner_bin() now returns a real on-disk binary;
+      2. OPENCLAW_DATA_DIR exists + is writable;
+      3. replay schema is reachable (PG up + V045 + V049 deployed);
+      4. binary release profile env var is reported (live / paper / blank).
+
+    Auth on the route side is intentionally permissive
+    (Depends(base.current_actor) only, NOT require_scope_and_operator)
+    so monitoring infra can probe without holding write scope. Leak
+    surface is bounded to "resolved binary path + writable bool +
+    release profile" — no secrets / actor identity / PG creds exposed.
+
+    Leak surface note (E2 R1 review MEDIUM-2 — 2026-05-04): the response
+    data intentionally includes the resolved binary absolute path so
+    monitoring infra can correlate ``binary_missing`` with the exact
+    expected location. The sibling ``/health/signature`` endpoint returns
+    only module status (no path). This richer body MUST stay scoped to
+    logged-in actors (current ``Depends(base.current_actor)`` floor);
+    any future viewer-only / unauthenticated role added to the auth
+    layer needs to RE-AUDIT whether ``binary_path`` exposure is
+    acceptable. When extending RBAC, treat this route as needing the
+    minimum scope ``replay:read`` (not ``replay:read:any``) — viewers
+    that should NOT see absolute paths must hit ``/health/signature``
+    instead.
+
+    REF-20 Sprint A R1-T3（2026-05-04）：monitoring probe，讓 operator
+    在實際發起 /run 之前能先驗 Replay Lab 真正可用所需的四個基礎前置：
+
+      1. resolve_replay_runner_bin() 回傳的 binary 真實落盤；
+      2. OPENCLAW_DATA_DIR 存在且可寫；
+      3. replay schema 可達（PG up + V045 + V049 deploy）；
+      4. binary release profile env var（live / paper / 空）。
+
+    Route 端 auth 刻意寬鬆（只用 Depends(base.current_actor)，**不**用
+    require_scope_and_operator），讓 monitoring infra 不持有 write scope
+    亦可 probe。leak surface 限縮為「resolved binary path + writable bool
+    + release profile」— 不外洩 secrets / actor 身份 / PG 憑證。
+
+    Leak surface 註記（E2 R1 review MEDIUM-2 — 2026-05-04）：回應 data
+    刻意包含 resolved binary 的絕對路徑，讓 monitoring infra 能將
+    ``binary_missing`` 對應到精確期望位置；姊妹端點 ``/health/signature``
+    僅回模組狀態（無路徑）。此較豐 body **必須** 限縮給已登入 actor
+    （現以 ``Depends(base.current_actor)`` 為底）；未來若 auth 層加
+    viewer-only / 未登入角色，需重審 ``binary_path`` 是否仍可暴露。
+    擴 RBAC 時請視本 route 至少需 ``replay:read``（非 ``replay:read:any``）
+    scope；不應看絕對路徑的 viewer 改打 ``/health/signature``。
+
+    Args:
+        rows: list of tuples returned by ``_async_safe_pg_select`` after
+            running the V045 + V049 dual-presence probe SQL (caller
+            executes the SELECT; this helper only digests rows). The
+            expected SQL shape is:
+                ``SELECT
+                     EXISTS(SELECT 1 FROM information_schema.tables
+                            WHERE table_schema='replay'
+                              AND table_name='run_state' LIMIT 1),
+                     EXISTS(SELECT 1 FROM information_schema.tables
+                            WHERE table_schema='replay'
+                              AND table_name='experiments' LIMIT 1);``
+            Returns 1 row of 2 booleans.
+        pg_err: error string from ``_async_safe_pg_select`` (None on
+            success; "pg_unavailable" / "pg_error:<ExcName>" on failure).
+
+    Returns / 回傳:
+        dict shaped per PA design (9 fields: binary_path / binary_exists
+        / binary_release_profile / data_dir / data_dir_writable /
+        pg_present / v045_present / v049_present / wiring_status).
+
+    wiring_status rules / wiring_status 規則:
+      - ``binary_exists=False`` → ``"binary_missing"`` (highest priority);
+      - ``pg_present=False`` OR ``data_dir_writable=False`` → ``"degraded"``;
+      - ``v045_present=False`` OR ``v049_present=False`` → ``"degraded"``
+        (E2 R1 review LOW-2 — 2026-05-04: PG up but schema partial means
+        ``/run`` will fail at the first INSERT; we cannot truthfully claim
+        ``ready``);
+      - all PASS → ``"ready"``.
+    """
+    # Step 1: resolve binary path + executable validation (no I/O on bin
+    # contents). E2 R1 review HIGH-1: use _is_executable_file() so a
+    # directory or non-executable file at the resolved path is correctly
+    # classified as "binary missing" instead of misleadingly truthy.
+    # 步驟 1：解析 binary 路徑 + 可執行驗證（不讀 bin 內容）。E2 R1 review
+    # HIGH-1：用 ``_is_executable_file()`` 確保 directory 或非執行檔
+    # 不會被誤判為「binary 存在」。
+    binary_path = resolve_replay_runner_bin()
+    binary_exists = _is_executable_file(binary_path)
+
+    # Step 2: data_dir resolution + writability (Linux: $OPENCLAW_DATA_DIR
+    # default /tmp/openclaw; Mac: $HOME/.openclaw_runtime per CLAUDE.md §六).
+    # 步驟 2：data_dir 解析 + 可寫性。
+    data_dir_str = os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+    data_dir_path = Path(data_dir_str)
+    data_dir_writable = (
+        data_dir_path.exists() and os.access(data_dir_str, os.W_OK)
+    )
+
+    # Step 3: PG + V045 + V049 presence from rows + pg_err.
+    # 步驟 3：PG + V045 + V049 存在性（從 rows + pg_err 取）。
+    pg_present = pg_err is None
+    v045_present = False
+    v049_present = False
+    if pg_present and rows:
+        first = rows[0]
+        if len(first) >= 2:
+            v045_present = bool(first[0])
+            v049_present = bool(first[1])
+
+    # Step 4: aggregate wiring_status (binary_missing > degraded > ready).
+    # 步驟 4：聚合 wiring_status（binary_missing > degraded > ready）。
+    if not binary_exists:
+        wiring_status = "binary_missing"
+    elif not pg_present or not data_dir_writable:
+        wiring_status = "degraded"
+    elif not v045_present or not v049_present:
+        # E2 R1 review LOW-2 (2026-05-04): PG reachable but replay schema
+        # partial — /run will fail at the first INSERT INTO replay.run_state
+        # (V045 missing) or replay.experiments (V049 missing), so we
+        # cannot truthfully advertise "ready". Surface as degraded so
+        # monitoring + GUI gating fail-fast.
+        # E2 R1 review LOW-2（2026-05-04）：PG 可達但 replay schema 殘缺
+        # （V045 / V049 任一缺）→ ``/run`` 會在第一筆 INSERT 失敗，不能
+        # 誤報 ready；降級為 degraded 讓 monitoring + GUI gate 提早 fail。
+        wiring_status = "degraded"
+    else:
+        wiring_status = "ready"
+
+    return {
+        "binary_path": str(binary_path),
+        "binary_exists": binary_exists,
+        "binary_release_profile": os.environ.get(
+            "OPENCLAW_RELEASE_PROFILE", ""
+        ).strip(),
+        "data_dir": str(data_dir_path),
+        "data_dir_writable": data_dir_writable,
+        "pg_present": pg_present,
+        "v045_present": v045_present,
+        "v049_present": v049_present,
+        "wiring_status": wiring_status,
+    }
+
+
 # ─── Module export / 模組匯出 ────────────────────────────────────────
 __all__ = [
     "ADVISORY_LOCK_GLOBAL_KEY",
@@ -959,6 +1202,7 @@ __all__ = [
     "SUBPROCESS_ENV_WHITELIST",
     "artifact_path_within_allowlist",
     "build_default_manifest_payload",
+    "compute_replay_health_state",
     "count_active_runs_for_actor",
     "count_active_runs_global",
     "emit_replay_audit_stub",
