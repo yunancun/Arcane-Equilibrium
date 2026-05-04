@@ -810,33 +810,93 @@ cad8ed840e1b1fb82dc56615d04cee78f781bc75
 
 `git status --porcelain` 0 行（clean）+ HEAD = cad8ed84 ✓。
 
-### §13.4 ENGINE_BINARY_SHA 注入 API process 證明
+### §13.4 ENGINE_BINARY_SHA 注入 API process 證明（VERIFIED）
 
-**Sequence**：
-1. Mac commit + push restart_all.sh 改動 → origin/main 領先 cad8ed84
-2. Linux pull --ff-only → 收到 restart_all.sh 改動
-3. Linux `bash helper_scripts/restart_all.sh --keep-auth` → restart API
+**Sequence executed**:
+1. Mac commit + push restart_all.sh 改動 → origin/main 領先 (`2ae93992`)
+2. Linux pull --ff-only → cad8ed84..2ae93992 fast-forward
+3. Linux `bash helper_scripts/restart_all.sh --api-only` → restart API (PID 739152, 4 workers)
 4. 驗 `/proc/<api_pid>/environ` 含 `OPENCLAW_ENGINE_BINARY_SHA=<64-hex>`
 
-驗證命令：
+**驗證命令 + 結果**:
 ```bash
-ssh trade-core 'cat /proc/$(pgrep -f "uvicorn app.main" | head -1)/environ 2>/dev/null | tr "\0" "\n" | grep -E "ENGINE_BINARY_SHA"'
-# expect: OPENCLAW_ENGINE_BINARY_SHA=<64-hex>
+$ ssh trade-core 'cat /proc/$(pgrep -f "uvicorn app.main" | head -1)/environ 2>/dev/null | tr "\0" "\n" | grep -E "ENGINE_BINARY_SHA|OPENCLAW_BASE_DIR|OPENCLAW_DATA_DIR"'
+OPENCLAW_ENGINE_BINARY_SHA=38c72877e526bfede74d57e6c9a90a682d323a2f80a0a9eef0e547f4d048d2f1
+OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv
+OPENCLAW_DATA_DIR=/tmp/openclaw
 ```
 
-**注**：本 §13.4 是 commit + push + Linux pull + restart 後的驗證步驟。具體執行
-留下面 §13.6 git status sign-off-clean 後做（Mac commit 是必需前置步驟）。
+✅ ENGINE_BINARY_SHA = `38c72877e526bfede74d57e6c9a90a682d323a2f80a0a9eef0e547f4d048d2f1`（64-hex 完整）
+✅ OPENCLAW_BASE_DIR + OPENCLAW_DATA_DIR 同時注入（既有 R1 fix 仍在）
 
-### §13.5 smoke probe register 200 證明（如有）
+### §13.5 smoke probe register 200 證明（VERIFIED）
 
-**Sequence**:
-1. Login: POST /api/v1/auth/login → 200 + cookie
-2. POST /api/v1/replay/experiments/register with `manifest_jsonb.fixture_uri =
-   /home/ncyu/.../tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json`
-3. expect: HTTP 200 + experiment_id + manifest_hash
+**Sequence executed**:
+1. Login: `POST /api/v1/auth/login` → 200 + cookie
+2. `POST /api/v1/replay/experiments/register` 帶 fixture_uri + 修正後 embargo_days
+3. expect: HTTP 200 + experiment_id + manifest_hash → **ACHIEVED**
 
-執行命令見 task brief「Smoke flow probe」段。**注**：本 §13.5 同 §13.4 留 Linux
-restart 後驗證；本 round E1 範圍只負責 unblock，完整 smoke 由 PM 派 QA round 3。
+**Login probe 結果**:
+```bash
+$ ssh trade-core 'curl ... -X POST /api/v1/auth/login ...'
+{"status":"ok","username":"398903348"}
+HTTP=200
+```
+
+**Register probe 第 1 次（task brief 原參數）**：
+```bash
+# half_life_days=7.0, embargo_days=0.5
+{"detail":{"reason_codes":["replay_register_failed"],"message":"register failed: pg_error:CheckViolation"}}
+HTTP=503
+```
+
+reason_code 從 R3 round 4 前的 `replay_engine_binary_sha_not_provisioned` (M-3 fail-closed) 變成 `replay_register_failed` (CheckViolation) — **證明 ENGINE_BINARY_SHA M-3 gate 已通過**。stack trace 揭露 V041 `chk_embargo_days` CHECK 違反：
+
+```
+new row for relation "experiments" violates check constraint "chk_embargo_days"
+```
+
+V041 CHECK 邏輯（V041__replay_oos_embargo_enforcement.sql:215-219）:
+```sql
+embargo_days IS NULL
+OR half_life_days IS NULL
+OR embargo_days >= GREATEST(7, CEIL(2.0 * half_life_days)::INTEGER)
+```
+
+`half_life_days=7.0` → `GREATEST(7, CEIL(14.0)) = 14`，`embargo_days=0.5 < 14` → CHECK fail。
+**注**：V049 `embargo_days` column 是 INTEGER；0.5 也類型錯（INSERT 後 implicit cast 0）。Task brief 的 `embargo_days: 0.5` 是 typo / 不滿足 V041 數學約束，不是 fix 殘留問題。
+
+**Register probe 第 2 次（embargo_days=14 修正）**：
+```bash
+# half_life_days=7.0, embargo_days=14
+{
+  "ok": true,
+  "data": {
+    "experiment_id": "94770e9e-f440-4eed-b5d3-6190bd385e20",
+    "manifest_hash": "e6b06b8134988799c3b63a712ee63cb39d957534339fe885bebf9528e0c42371",
+    "status": "created",
+    "created_at": "2026-05-04T23:46:03.403180+02:00",
+    "idempotency_hit": false
+  },
+  "degraded": false,
+  "reason": null,
+  "is_simulated": false,
+  "data_category": "replay_lab"
+}
+HTTP=200
+```
+
+✅ **REGISTER 200 OK** — ENGINE_BINARY_SHA fix 完全成功 + V049 INSERT 全綠 + experiment_id +
+manifest_hash 真實生成。
+
+**完整 smoke E2E（POST /run + POST /finalize + 驗 4 表 row > 0）由 PM 派 QA round 3 跑**。
+本 round 4 E1 範圍只負責 unblock；smoke probe 已驗 register 200，後續 /run + /finalize 路徑健全（R3 round 1+2 hermetic test 19 PASS + Mac sibling 118 PASS 已驗）。
+
+**對 PM 的 QA round 3 brief 建議補強**：
+- QA round 3 fixture URI: `/home/ncyu/BybitOpenClaw/srv/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json`
+- QA round 3 register payload `embargo_days` 用 `14` 不是 `0.5`（V041 chk_embargo_days 約束 = `GREATEST(7, CEIL(2 × half_life_days))`，half_life_days=7.0 對應 14）
+- 或者 QA round 3 brief 可改 `half_life_days=3.5` + `embargo_days=7`（CEIL(7.0)=7 OK），減小回測 window
+- E1 不擅自改 V041 CHECK 邏輯（plan §6 R3 沒授權；保持 V041 半衰期-禁運比例不變式）
 
 ### §13.6 git status sign-off-clean (CLAUDE.md §七 P0-GOV-3)
 
@@ -854,22 +914,29 @@ E1 commit scope: `helper_scripts/restart_all.sh` + `docs/CCAgentWorkSpace/E1/mem
 
 ### §13.7 PM next action
 
-1. **Mac CC（本 round E1 結尾）commit + push**：3 件
+**已完成 step**:
+1. ✅ Mac commit + push（commit `2ae93992`）— 3 件
    - `helper_scripts/restart_all.sh`（+29 LOC infra fix）
    - `docs/CCAgentWorkSpace/E1/memory.md`（追加 round 4 log）
    - `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（本 §13）
-2. **Linux pull + restart_api**（命令見 task brief「Linux runtime 驗」）：
-   - `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"`
-   - `ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --keep-auth"`
-3. **Linux probe 驗 ENGINE_BINARY_SHA 真注入 API process**（命令見 §13.4）
-4. **smoke probe register 200**（命令見 task brief「Smoke flow probe」段）
-5. **如 register 200 → PM 派 QA round 3 跑完整 smoke E2E**（POST /run + 等 subprocess
-   結束 + POST /finalize + 驗 4 表 row > 0）
-6. **如 register 仍 fail → push back PM 看 stack trace**（不擴 scope 改業務代碼）
+2. ✅ Linux pull --ff-only（cad8ed84..2ae93992）+ restart_api（PID 739152）
+3. ✅ ENGINE_BINARY_SHA 注入 API process 證明（§13.4 verified）
+4. ✅ Smoke probe register 200 OK（§13.5 verified；experiment_id `94770e9e-f440-4eed-b5d3-6190bd385e20`）
 
-**禁區（task brief 明文）**:
-- 動 fixture 邏輯 / replay_routes.py / experiment_registry.py / run_finalize_route.py 業務代碼
-- 改 R0/R1/R2 區
-- commit Mac 之外 Linux changes（Linux 只 stash + pull，已執行）
+**PM 下一步**:
+5. **派 QA round 3 跑完整 smoke E2E**（推薦命令 + 修正參數）：
+   - 第一次 register payload `embargo_days` 用 `14` 不是 `0.5`
+   - 或 `half_life_days=3.5` + `embargo_days=7`（V041 CHECK 約束 = `GREATEST(7, CEIL(2 × half_life_days))`）
+   - POST /run（spawn replay_runner with fixture_uri）
+   - 等 subprocess 結束（poll status 或 verify_replay_runner_pid 死亡）
+   - POST /finalize 驗 4 表 row > 0（V045 status='completed' / V046 row 1 條 / V050 row N 條）
+6. **沒有 push back 給 PM 的事情** — register 200 已通過；ENGINE_BINARY_SHA 證明工作；
+   task brief 提到 `embargo_days=0.5` 是 typo（V041 chk_embargo_days 數學約束 = 7
+   下限 + 半衰期-禁運比例 ≥ 2），E1 已建議 QA brief 修正參數。
 
-E1 ROUND 4 INFRA FIX DONE：待 PM commit + push（Mac）+ Linux pull + restart + QA round 3 smoke E2E（report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`）
+**禁區（task brief 明文 + E1 已遵守）**:
+- ✅ 0 動 fixture 邏輯 / replay_routes.py / experiment_registry.py / run_finalize_route.py 業務代碼
+- ✅ 0 改 R0/R1/R2 區
+- ✅ 0 commit Mac 之外 Linux changes（Linux 只 stash + pull）
+
+E1 ROUND 4 INFRA FIX DONE：commit `2ae93992` 已 push + Linux 已驗 + register 200 OK；待 PM 派 QA round 3 跑完整 smoke E2E（report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`）
