@@ -2,6 +2,77 @@
 
 ## 工作記憶
 
+### 2026-05-04 REF-20 Sprint A R2（Manifest Registry：register/report/manifest_verify + idempotency cache + IDOR enum-oracle close + 0o600 secrets mode + rate limit；round 1+2+3 cumulative，HEAD `c1ab7ea9` + WIP 改動）— **E4 PASS**
+
+**對象**：PM 派 E4 regression 跑 R2 round 1+2+3 cumulative IMPL 落盤後的 5 R2-specific test file（29 case）+ 1 retrofit Track C IDOR cross-actor 404 + replay-keyword sibling 雙跑 + full control_api_v1 + module smoke + cross-language byte-equal + cargo workspace + audit script + cross-platform grep + LOC governance + CLAUDE.md §九 真寫入證明 + E2 round 2 NEW finding round 3 fix verification。
+
+**Verdict**：**PASS** — R2 cumulative 全綠 / 0 新 fail / 0 新 regression / 0 hard-boundary mutation / 0 path leak / 0 flake (2-round identical) / 0 LOC governance violation / E2 round 2 NEW finding（M-DEAD-LOCK + M-IDOR-ENUM + L-P3-TICKET-MISSING + L-RATE-LIMIT-WIRING）全 round 3 落實
+
+| 引擎 | passed | failed | baseline | delta | verdict |
+|---|---:|---:|---:|---:|---|
+| Python pytest control_api_v1 全 suite (round 1) | 3479 | 1 | 3431 / 1 (TODO.md L5) | +48 PASS / +0 fail | ✓（fail = pre-existing E4-P0-1）|
+| Python pytest -k replay (round 1) | 98 | 0 | 87 baseline (R1) | +11 (10 round 2 + 1 round 3) | ✓ |
+| Python pytest -k replay (round 2) | 98 | 0 | (round 1 same) | match | ✓ flake=N |
+| R2 specific 5-file new test | 29 | 0 | new | match | ✓ |
+| Track C security | 14 | 0 | 13 baseline + 1 NEW IDOR cross-actor 404 | match | ✓ |
+| Cross-language xlang_consistency | 13 | 0 | 13 | match | ✓（含 8 core fixture）|
+| Rust cargo lib (3 crate cumulative) | 2909 | 0 | ≥2447 / 0 | +462 cumulative | ✓ |
+
+**雙跑 confirm**：sibling replay 雙跑 98/98 identical 0 transient flake；E4-P0-1 是 deterministic shared-state pollution 仍是 deterministic（隔離跑 PASS / suite 跑 fail）。
+
+**H/M/L round 2 fix verdict**（E4 黑盒重跑）：
+- H-1 idempotency cache via `_REGISTER_IDEM_CACHE` ✓
+- H-2 idempotency_replay_attack 409 ✓
+- H-3 cross-route `lookup_registered_experiment_id` ✓
+- H-4 0o600 secrets mode ✓
+- M-1 4-value env_label allowlist (含 live_demo) ✓
+- M-2 rate limit `@_replay_limiter.limit("10/minute")` ✓
+- M-3 linux_trade_core engine_binary_sha 503 ✓
+- M-4 reserved prefix `_*` key 422 ✓
+- L-1 unused timezone import 刪 ✓
+
+**E2 round 2 NEW finding round 3 fix 驗 (3 finding 全 closed)**：
+- **M-DEAD-LOCK** ✓ 刪 `_REGISTER_IDEM_CACHE_LOCK = asyncio.Lock()` (0 callsite dead state) + 修 module-level docstring + 改 CLAUDE.md §九 line 404 entry（entry 改為 `_REGISTER_IDEM_CACHE / _REGISTER_IDEM_CACHE_THREAD_LOCK` 去 dead `_REGISTER_IDEM_CACHE_LOCK`）— grep 0 active asyncio.Lock callsite
+- **M-IDOR-ENUM** ✓ `report_route.py:177-203` 加 `expected_actor_id` filter + non-admin cross-actor collapse to `not_registered`（close enumeration oracle on V049 lookup）— 8 hit `M-IDOR-ENUM` round 3 changelog 雙語
+- **L-P3-TICKET-MISSING** ✓ TODO.md L167 真補 `P3-PYDANTIC-V2-MIGRATE-REPLAY` row（含 trigger / 修法 / defer rationale）
+- **L-RATE-LIMIT-WIRING** 🔵 advisory（per-actor 真正解法在 ASGI middleware；round 2 fallback IP acceptable）
+
+**Mock 審查**：本 task 不寫業務代碼，僅讀 + 跑。E1 sign-off + E2 review 已記載 R2 全部 mock 限 IO boundary（PG `_stub_get_pg_conn` / `tmp_path` filesystem fixture / `monkeypatch.delenv` env / `os.kill` spy / FastAPI `dep_overrides`）。0 業務邏輯 mock。`canonical_body_for_signing` / `_no_reserved_prefix_keys` validator / `_size_cap` validator / `_REGISTER_IDEM_CACHE_THREAD_LOCK` cache helpers / `lookup_registered_experiment_id_fn` / `build_report_idor_sql_fn` / `is_live_release_profile_fn` 業務邏輯真跑。✓
+
+**Hard-boundary scan**（CLAUDE.md §四 18 條紅線）：在 5 個 R2 改動 file (`replay_routes.py` / `experiment_registry.py` / `report_route.py` / `manifest_signer.py` / `route_helpers.py`) `grep '\b(live_execution_allowed|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json|decision_lease|execution_authority)\b'` = **0 hit**。✓
+
+**Cross-platform path scan**（CLAUDE.md §七）：5 個 R2 file `grep '/home/ncyu|/Users/ncyu'` = **0 hit**。✓
+
+**File size cap**（CLAUDE.md §九 1500）：
+- `replay_routes.py` 1443 ≤ 1500（margin 57，R3 dispatch 前 reserved）✓
+- `experiment_registry.py` 985 ≤ 1500 ✓
+- `manifest_signer.py` 757 ≤ 1500 ✓
+- `route_helpers.py` 1249 ≤ 1500 ✓
+- `report_route.py` 506 ≤ 1500（new module）✓
+
+**Module smoke**：10 個 `/api/v1/replay/*` route 全註冊（含 `/api/v1/replay/experiments/register` + `/api/v1/replay/run` + `/api/v1/replay/report/{experiment_id}` + `/api/v1/replay/health` + `/api/v1/replay/health/signature` 5 expected R2 path）。✓
+
+**Cross-language byte-equal invariant 維持證明**：13/13 xlang_consistency PASS（含 8 core fixture）。R2 round 1+2+3 不動 `manifest_signer.rs` / `manifest_signer.py:canonical_body_for_signing`；H-1 fix 改 cache 路徑（不再 inject `_idempotency_key`）但 canonical bytes 計算 algorithm 完全保留 → HMAC byte-equal Rust↔Python 8 fixture 完整保留。✓
+
+**Audit script**：Mac exit=0 + 414 symbol + 0 forbidden（R1 land 後 fallback chain step 2 workspace release 真實佈局生效）。✓
+
+**CLAUDE.md §九 governance 真寫入**：grep 結果 3 hit（line 404 singleton table entry round 3 fix M-DEAD-LOCK 後 + line 412 simulated_fills non-training surface note + line 412 同行 synthetic_replay cross-ref）。✓
+
+**E4 教訓 / 新坑**：
+1. **R2 是「round 1 + round 2 + round 3」cumulative regression** — 不像 R1 的單 round IMPL → E4 流程；R2 經過 E2 round 2 review 揭 3 NEW finding（M-DEAD-LOCK / M-IDOR-ENUM / L-P3-TICKET-MISSING）+ 1 advisory（L-RATE-LIMIT-WIRING），E1 round 3 全 closed 後 E4 final regression。E4 必驗每個 round 3 fix 真實落實（grep + isolated test confirm），不只跑 test 數字。
+2. **`replay_routes.py` 1443 LOC ≤ 1500** — round 1 1492 → round 2 round 3 cumulative -49 LOC 透過抽 `experiment_registry.py` (985 LOC) + `report_route.py` (506 LOC) 兩 new module 實現。R3 dispatch 估 +30 LOC thin handler `/run/{run_id}/finalize` → ~1473 仍 ≤ 1500。Future 任何擴 route 必先 inspect 是否能順手抽 model/handler 至 `replay/` 內 new module 維持 1500 governance limit。
+3. **E2 NEW finding 不阻 E4，但必交 E1 round 3 / R3 dispatch 前順手清** — 本 task E4 接手時 E1 round 3 已 IMPL 完（HEAD WIP）；E4 驗 round 3 fix 真落實。若 PA dispatch 是「E2 round 2 → 直接 E4」（跳 E1 round 3）E4 需 push back，因為 NEW finding 屬「不阻 E4 但必修」必須在 PM commit 前 closed。本次 PA dispatch chain 正確走 E1 round 3 → E4 final，E4 verdict PASS 同 commit。
+4. **`_REGISTER_IDEM_CACHE` per-process semantics** — multi-worker uvicorn workers=4 下 4 個獨立 cache（accepted trade-off）；race-safety 由 PG advisory xact lock 跨 process 兜底。E4 必在 sign-off §13 Advisory 寫 multi-worker 警告，幫 PM 在 commit message + Linux deploy 時 aware。
+5. **CLAUDE.md §九 line 404 entry round 3 fix 後改為 `_REGISTER_IDEM_CACHE / _REGISTER_IDEM_CACHE_THREAD_LOCK`** — 去 dead `_REGISTER_IDEM_CACHE_LOCK` 是 governance table 與實際代碼一致性的關鍵。E4 必 grep CLAUDE.md 確認 entry 真實改完，不只看 E1 sign-off 自報「改了」。
+6. **Test count 用戶 prompt 預期 vs 實測**：用戶 prompt §3 寫期望 ≥3461 PASS，實測 3479（差 +18）— 屬於 baseline 3431 之後的 sibling CC test additions（Decision Lease retrofit + V054 audit writer + 其他）累積，不是 R2 引入。E4 報告必明分清 R2-specific delta vs cumulative delta，幫 PM 理解真實貢獻數字。
+7. **E2 §12.8 列 Linux smoke 6 條 屬 deploy gate 而非 commit gate**：本 E4 task 範圍 = Mac 端 verify。Linux 端 PM commit + push 後 SSH bridge 跑（純 Python 改動 + non-runtime path 無需 --rebuild）。E4 verdict PASS 不阻 PM commit。
+
+**Report**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-04--ref20_sprint_a_r2_regression.md`
+
+**建議 PM commit message** 見 report §15。
+
+---
+
 ### 2026-05-04 REF-20 Sprint A R1（Runtime Usability：binary fallback + restart_all env + /health route + audit script + 5 unit tests，HEAD `a4ea3571` + WIP 改動）— **E4 PASS**
 
 **對象**：PM 派 E4 regression 跑 R1 IMPL 落盤後的 R1-T5 5 new tests + replay-keyword sibling + module smoke + cross-platform import smoke + audit script + Sprint 1 F1 invariant 維持證明。**E2 review 不在本任務排程**（任務文件直接 IMPL → E4 → PM commit）。

@@ -138,15 +138,27 @@ def _build_client(actor_factory) -> TestClient:
 
 
 def test_p0_2_env_var_test_key_blocked_in_live_profile(monkeypatch):
-    """Case 1 (P0-2): live profile + test_key env → 501 (test key blocked).
-    Case 1（P0-2）：live profile + test_key env → 501（test key 被擋）。
+    """Case 1 (P0-2): live profile + test_key env → 410 (test key blocked).
+    Case 1（P0-2）：live profile + test_key env → 410（test key 被擋）。
 
     The test key is honored ONLY in dev / mac_dev_smoke_test_only. With
     OPENCLAW_RELEASE_PROFILE=live, the env value is force-cleared before
-    use; verify endpoint returns 501 (archive_not_wired) instead of
-    accepting attacker-injected key bytes.
-    OPENCLAW_RELEASE_PROFILE=live 強制清空 test_key_hex；endpoint 回 501
-    archive_not_wired，不認 attacker 注入的 key bytes。
+    use; verify endpoint then tries secrets-file fallback (R2-T3) which
+    is missing in this test → 410 ``replay_verify_key_archive_not_provisioned``
+    instead of accepting attacker-injected key bytes.
+
+    R2-T3 (2026-05-04) retrofit: the prior 501 ``replay_verify_archive_not_wired``
+    code path was removed; the security invariant (live MUST NOT honor
+    attacker TEST_KEY env) is preserved through the same Track C P0-2
+    boot guard / per-route gate, only the surfaced HTTP code changed
+    from 501 to 410.
+
+    OPENCLAW_RELEASE_PROFILE=live 強制清空 test_key_hex；endpoint 接著嘗
+    secrets-file fallback（R2-T3）；secrets file 在本測試中缺 → 410
+    replay_verify_key_archive_not_provisioned；不認 attacker 注入 key bytes。
+    R2-T3 retrofit：501 死路被移除；安全不變量（live 必拒 TEST_KEY 注入）
+    依舊由 Track C P0-2 boot guard / per-route gate 守住，只是 HTTP code
+    從 501 改 410。
     """
     monkeypatch.setenv("OPENCLAW_RELEASE_PROFILE", "live")
     # Attacker-controlled env: 64-hex-char string (32 bytes).
@@ -155,6 +167,10 @@ def test_p0_2_env_var_test_key_blocked_in_live_profile(monkeypatch):
         "OPENCLAW_REPLAY_VERIFY_TEST_KEY",
         "00" * 32,
     )
+    # Ensure secrets-file fallback can't find a key (no $OPENCLAW_SECRETS_DIR
+    # set, or set to a non-existing path).
+    # 確保 secrets-file fallback 找不到 key（無 $OPENCLAW_SECRETS_DIR 或指向不存在路徑）。
+    monkeypatch.delenv("OPENCLAW_SECRETS_DIR", raising=False)
     client = _build_client(_operator_actor_alice)
     resp = client.post(
         "/api/v1/replay/manifest/verify",
@@ -165,12 +181,12 @@ def test_p0_2_env_var_test_key_blocked_in_live_profile(monkeypatch):
             "fingerprint": "fp_attacker_test01",
         },
     )
-    # Live profile must NOT honor test key → falls through to 501 archive
-    # not wired (the production path that requires V042 SQL key archive).
-    # Live profile 不認 test key → fall-through 至 501 archive 未接。
-    assert resp.status_code == 501, resp.text
+    # Live profile must NOT honor test key → R2-T3 secrets-file fallback
+    # also has no key → 410 unprovisioned (TEST_KEY env attack defeated).
+    # Live profile 不認 test key → R2-T3 secrets fallback 也無 → 410。
+    assert resp.status_code == 410, resp.text
     detail = resp.json().get("detail", {})
-    assert "replay_verify_archive_not_wired" in detail.get("reason_codes", [])
+    assert "replay_verify_key_archive_not_provisioned" in detail.get("reason_codes", [])
 
 
 def test_p0_2_dev_profile_does_not_strip_test_key(monkeypatch):
@@ -308,11 +324,24 @@ def test_p0_5a_idor_cross_actor_filter_in_sql(monkeypatch):
     Case 3（P0-5a）：plain operator → SQL 帶 actor_id filter。
 
     Mock get_pg_conn to capture the SQL passed to cur.execute. Verify
-    the second execute (after SET LOCAL statement_timeout) contains
+    the V046 IDOR-aware SELECT (the artifact-fetching execute) contains
     'AND s.actor_id = %s' AND the params tuple has 2 elements
     (manifest_uuid, actor_id).
-    捕獲 cur.execute 的 SQL；驗第二次 execute 含 'AND s.actor_id = %s'
-    + params 有 2 元素。
+    捕獲 cur.execute 的 SQL；驗 V046 IDOR-aware SELECT 含
+    'AND s.actor_id = %s' + params 有 2 元素。
+
+    Round 3 M-IDOR-ENUM: ``_lookup_manifest_uuid_sync`` now also runs an
+    actor_id check at lookup time (cross-actor enumeration close). The
+    mock V049 row therefore returns ``created_by='alice'`` so the lookup
+    passes the own-row branch and we still reach the V046 SELECT — the
+    SQL we are asserting on. A separate test
+    (``test_p0_5a_idor_cross_actor_404_no_oracle``) covers the round 3
+    enum-oracle close path.
+    Round 3 M-IDOR-ENUM：``_lookup_manifest_uuid_sync`` 加了 lookup-time
+    actor_id check（跨 actor 列舉收斂）。本 test mock V049 row 返
+    ``created_by='alice'`` 使 lookup 走 own-row 分支，仍能進 V046 SELECT
+    驗 SQL 帶 actor_id filter。Round 3 enum-oracle close 路徑由
+    ``test_p0_5a_idor_cross_actor_404_no_oracle`` 覆蓋。
     """
     captured: dict = {"sql": None, "params": None}
 
@@ -321,20 +350,40 @@ def test_p0_5a_idor_cross_actor_filter_in_sql(monkeypatch):
         conn = MagicMock()
         cur = MagicMock()
 
+        # First fetchone = lookup_registered_experiment_id (V049 hit).
+        # Second fetchone = round 3 created_by check (own-row branch).
+        # 第一次 fetchone = lookup_registered_experiment_id；第二次 =
+        # round 3 created_by check。
+        cur.fetchone.side_effect = [
+            ("11111111-1111-1111-1111-111111111111",),  # V049 lookup hit
+            ("alice",),  # round 3 created_by == expected_actor_id
+        ]
+
         def _capture_execute(sql, params=()):
-            # First execute = SET LOCAL statement_timeout. Capture the second.
-            # 第一次 = SET LOCAL；捕第二次。
-            if "SET LOCAL" not in str(sql):
+            # First execute = SET LOCAL statement_timeout. The lookup
+            # SELECTs (FOR SHARE + created_by) come next; the V046
+            # IDOR-aware SELECT is the LAST execute on the cursor.
+            # 第一次 = SET LOCAL；lookup 兩個 SELECT 後；最後一次 = V046
+            # IDOR-aware SELECT — capture that.
+            if "SET LOCAL" not in str(sql) and "FROM replay.report_artifacts" in str(sql):
                 captured["sql"] = str(sql)
                 captured["params"] = params
 
         cur.execute.side_effect = _capture_execute
-        cur.fetchall.return_value = []  # IDOR-blocked → 0 rows
+        cur.fetchall.return_value = []  # IDOR-blocked V046 → 0 rows
         conn.cursor.return_value = cur
         yield conn
 
     monkeypatch.setattr("app.replay_routes.get_pg_conn", _stub_get_pg_conn)
 
+    # _async_safe_pg_select also opens its own conn; same stub serves it
+    # but only fetchall is consumed (cur.execute called once for SELECT,
+    # we already captured it via the fetchone side-effect not consumed).
+    # NOTE: round 3 added second cur.fetchone for created_by check; once
+    # the lookup conn closes, _async_safe_pg_select opens a fresh conn
+    # that has its own fresh MagicMock — fetchall=[] still drives 0 rows.
+    # _async_safe_pg_select 也另開 conn；新 MagicMock fetchall=[] 仍跑
+    # 0 row → V046 IDOR effectively blocked。
     client = _build_client(_operator_actor_alice)
     resp = client.get("/api/v1/replay/report/exp-test-cross-actor")
     assert resp.status_code == 200, resp.text
@@ -344,12 +393,71 @@ def test_p0_5a_idor_cross_actor_filter_in_sql(monkeypatch):
     assert body["data"]["artifact_count"] == 0
     # Verify the SQL has actor_id filter + 2 params.
     # 驗 SQL 帶 actor_id filter + 2 params。
-    assert captured["sql"] is not None
+    assert captured["sql"] is not None, "V046 IDOR-aware SELECT was never reached"
     assert "s.actor_id = %s" in captured["sql"], f"SQL missing actor filter: {captured['sql']}"
     assert len(captured["params"]) == 2, f"Expected 2 params, got: {captured['params']}"
     # Second param must be the actor_id 'alice'.
     # 第二個 param 必為 actor_id 'alice'。
     assert captured["params"][1] == "alice"
+
+
+# ─── Case 3b: Round 3 M-IDOR-ENUM cross-actor 404 unification ──────────────
+
+
+def test_p0_5a_idor_cross_actor_404_no_oracle(monkeypatch):
+    """Case 3b (Round 3 M-IDOR-ENUM): cross-actor V049 row → 404 not 200.
+
+    REF-20 Sprint A R2 round 3 fix M-IDOR-ENUM: round 2 H-3 introduced an
+    enumeration oracle — V049 row exists for actor 'bob' + caller is
+    'alice' (no admin scope) → 200 + 0 artifacts (200 oracle leak). Round
+    3 collapses this to 404 + ``replay_experiment_not_found`` mirroring
+    GitHub's repo-private/repo-not-found unification.
+
+    REF-20 Sprint A R2 round 3 fix M-IDOR-ENUM：round 2 H-3 引入枚舉預言機 —
+    V049 row 屬 actor 'bob' + caller 是 'alice'（無 admin scope）→ 200 + 0
+    artifacts（200 oracle leak）。Round 3 收斂為 404 + ``replay_experiment_
+    not_found``，鏡像 GitHub repo private/not-found unify pattern。
+    """
+
+    @contextmanager
+    def _stub_get_pg_conn():
+        conn = MagicMock()
+        cur = MagicMock()
+
+        # V049 lookup hits → returns manifest_uuid; second fetchone for
+        # round 3 created_by returns 'bob' (cross-actor — not caller alice).
+        # V049 lookup 命中 → 返 manifest_uuid；第二次 fetchone (round 3
+        # created_by check) 返 'bob'（跨 actor — 非 caller alice）。
+        cur.fetchone.side_effect = [
+            ("22222222-2222-2222-2222-222222222222",),  # V049 lookup hit
+            ("bob",),  # round 3 created_by != 'alice' → not_registered
+        ]
+        cur.fetchall.return_value = []
+        conn.cursor.return_value = cur
+        yield conn
+
+    monkeypatch.setattr("app.replay_routes.get_pg_conn", _stub_get_pg_conn)
+
+    client = _build_client(_operator_actor_alice)
+    resp = client.get("/api/v1/replay/report/exp-test-id-other-owner")
+    # Must collapse cross-actor existence into the same 404 +
+    # ``replay_experiment_not_found`` reason as a missing row.
+    # 必須把跨 actor 已存在收斂為同 ``replay_experiment_not_found`` 404。
+    assert resp.status_code == 404, resp.text
+    detail = resp.json().get("detail", {})
+    assert "replay_experiment_not_found" in detail.get("reason_codes", [])
+    # Ensure no oracle leak: the message must NOT distinguish 'exists but
+    # not yours' from 'does not exist'. The standardised message wording
+    # is the same as the missing-row branch (see ``fetch_report_for_
+    # experiment`` step 2 ``not_registered`` early-return).
+    # 確保無預言機外洩：訊息不得區分「存在但非你的」vs「不存在」。
+    msg = detail.get("message", "")
+    assert "no row in" in msg, f"message wording drift: {msg!r}"
+    # Anti-oracle phrases that would betray cross-actor existence.
+    # 反 oracle 措辭（會洩漏跨 actor 存在）。
+    leak_terms = ("forbidden", "permission", "owned by", "another user", "cross-actor")
+    for term in leak_terms:
+        assert term not in msg.lower(), f"message leaks via {term!r}: {msg!r}"
 
 
 # ─── Case 4: P0-5a IDOR admin bypass allowed ───────────────────────────────
