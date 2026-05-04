@@ -48,6 +48,7 @@
 | P1-11 多角 audit | 2026-04-24 | F3 leak-free Donchian 後消失（measurement bias）；FIX-26-DEADLOCK-1 確認；engine lib 1980 |
 | EDGE-DIAG-1 報告 | 2026-04-24 | Phase 1/2/4 完成；clean window n~74 目標 200；counterfactual 顯示 phys_lock 可救但 edge 根本負 |
 | 2026-04-26 Wave 3 E2E acceptance | 2026-04-26 | PASS — 5 大功能（G2-06 disable / EDGE-P1b / EDGE-P2-flip / G2-03 schema / IPC ms→s）全 runtime verify 通過；17/18 healthcheck PASS（[11] 75% pre-existing P013，[16] rebuild 後 PASS）；HMAC fix runtime log 確認；StrategyOverride symbol 在 binary；bb_breakout 24h 0 intents；Wave 3 派發 100% PASS to next Phase |
+| 2026-05-04 REF-20 Sprint A R3 smoke E2E | 2026-05-04 | **BLOCK** — R3 deploy commit `66b650ea` 含 P0 FastAPI signature bug：`from __future__ import annotations` + lazy module import + module-level re-bind 三者組合，FastAPI signature inspection 把 `body: ReplayExperimentRegisterRequest` 視作 Query parameter（不是 BaseModel body）。`/api/v1/replay/experiments/register` + `/api/v1/replay/run` 兩 routes 100% 422 missing body；hermetic test 也 fail；4 個 Sprint A acceptance SQL count 全 = 0；無 trading.fills leak（vacuous truth — register 沒進到 mutation 點）。push back PM Option A/B/C；Sprint A R3 不可結案 |
 
 ## Wave 3 集成驗收教訓（2026-04-26）
 

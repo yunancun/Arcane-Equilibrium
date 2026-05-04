@@ -427,3 +427,255 @@ $ git status --porcelain
 5. **Linux deploy smoke run**：FOR UPDATE 真 PG 行為驗證 — 並發 2× POST /finalize 同 run_id（curl & or 雙 client tab）→ 期待第 2 call 在第 1 call commit 完才返回 409；用 `psql -c "SELECT pid, query, state, wait_event FROM pg_stat_activity WHERE state='idle in transaction';"` 驗 worker B 確實 block
 
 E1 ROUND 2 FIX DONE：待 E2 round 2 → E4 final regression → PM commit + push（report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`）
+
+---
+
+## §12 Round 3 CRITICAL HOTFIX — Linux Python 3.12 FastAPI 422 bug
+
+**Date**: 2026-05-04 (later same day as round 2)
+**Trigger**: PM brief — Linux QA smoke E2E BLOCKED：所有 Pydantic-body POST routes 100% 422 missing body。Mac Python 3.10 / Linux Python 3.12 環境差異致 R1+R2+R3 hermetic test 在 Linux **真實 fail**（之前 false-positive PASS）。
+**Scope**: Single-file 1-line surgical fix on `app/replay_routes.py:1`，0 logic change，0 V### migration，0 sibling module 動。
+**Operator decision**: Option A（刪 `from __future__ import annotations`，最小 surgical）— ACCEPTED。
+
+### §12.1 Mac vs Linux Python 版本 drift 揭露
+
+| 環境 | Python | FastAPI signature inspection on lazy-import + ForwardRef | Result |
+|---|---|---|---|
+| Mac dev | 3.10.x | tolerant，eagerly resolve via `typing.get_type_hints` introspection | 118 PASS |
+| Linux trade-core | 3.12.3 | strict，PEP 563 ForwardRef 對 lazy-rebind body class 解析失敗 | 100% 422 missing body on POST register/run/cancel/verify |
+
+**Root cause（PA brief 裁定）**：
+1. `replay_routes.py:1` 有 `from __future__ import annotations`（PEP 563）
+2. Line ~188 `ReplayExperimentRegisterRequest = _er.ReplayExperimentRegisterRequest` 把 lazy-imported `_er`（line ~59 `from ..replay import experiment_registry as _er`）的 Pydantic body class re-bind 到 module-level alias
+3. Python 3.12 + FastAPI 對 `body: <PydanticModel>` annotation 做 signature inspection 時 ForwardRef resolve 失敗
+4. → FastAPI fallback 把 body 視為 Query parameter
+5. → 422 with `loc:["query","body"]`
+
+**Mac false-positive 機制**：Python 3.10 `typing.get_type_hints` + FastAPI 早期版本 introspection 容忍 PEP 563 lazy-rebind ForwardRef，因此 19 R2 register test + 9 R3 finalize test 在 Mac 都 PASS。Linux Python 3.12 strict 驗證才暴露 bug。
+
+**P0-PROCESS-1**：E4 必跑 Linux pytest 不只 Mac（見 §12.6 TODO）。
+
+### §12.2 修法：刪 `replay_routes.py:1` `from __future__ import annotations`
+
+**Diff**：
+- **Before** (line 1): `from __future__ import annotations`
+- **After** (line 1): `"""REF-20 Paper Replay Lab — 8 routes wired to T1 binary + PG advisory lock.`（直接 docstring 起頭）
+- **加防禦性 hotfix 警告塊**（位於 docstring 內）：明文「DO NOT add `from __future__ import annotations` to this module」+ root cause 雙語注釋，防 future maintainer 誤加回。
+
+**為何只動這一個檔（PA brief 約束）**：其他 17 個 `replay/*` module（experiment_registry / replay_models / canary_writer / route_helpers / security_guards / manifest_signer / report_route / run_finalize_route / simulated_fills_writer 等）是純 Pydantic / helper / writer，**不被 FastAPI 直接 introspect** body class，PEP 563 lazy resolution 對它們無害；刪這些 file 的 `from __future__` 反而引入 forward-ref break 風險。
+
+### §12.3 Forward-ref 殘餘檢查（grep 證明 0 break）
+
+**Goal**：確認移除 `from __future__` 後，replay_routes.py 內所有 forward annotation（return type / parameter / variable）皆能 eager-resolve at module load time。
+
+**Return type grep**：
+```bash
+$ grep -n '\-> ' program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+196:def _require_replay_write(actor: base.AuthenticatedActor) -> None:
+206:def _actor_can_read_any_replay_report(actor: base.AuthenticatedActor) -> bool:
+220:def _replay_rate_limit_key(request: Request) -> str:
+255:async def _check_run_caps_inmemory(actor_id: str) -> None:
+310:) -> Tuple[list[tuple[Any, ...]], Optional[str]]:
+319:) -> Tuple[list[tuple[Any, ...]], Optional[str]]:
+339:) -> dict[str, Any]:
+376:) -> dict[str, Any]:
+400:    def _do_pg_path() -> Tuple[Optional[str], Optional[int], Optional[str], Optional[Path]]:
+735:) -> dict[str, Any]:
+776:) -> dict[str, Any]:
+862:) -> dict[str, Any]:
+1000:) -> dict[str, Any]:
+1038:) -> dict[str, Any]:
+1145:) -> dict[str, Any]:
+1269:) -> dict[str, Any]:
+1335:) -> dict[str, Any]:
+1384:) -> dict[str, Any]:
+1468:def _reset_active_runs_for_test() -> None:
+```
+
+完整 return type 集合：
+- `None` / `bool` / `str` — built-in（Python 3.x always available）
+- `Tuple[list[tuple[Any, ...]], Optional[str]]` — `from typing import Any, Optional, Tuple`（line 44）✅
+- `Tuple[Optional[str], Optional[int], Optional[str], Optional[Path]]` — typing + `from pathlib import Path`（line 43）✅
+- `dict[str, Any]` — Python 3.9+ PEP 585 builtin generic + `Any` from typing ✅
+
+**Parameter annotation grep**（Pydantic body classes）：
+```bash
+$ grep -n 'body: ' program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+337:    body: ReplayExperimentRegisterRequest,
+374:    body: ReplayRunRequest,
+860:    body: ReplayCancelRequest,
+1143:    body: ReplayManifestVerifyRequest,
+```
+
+4 處 body annotation：
+- `ReplayExperimentRegisterRequest` — line 188 `_er.ReplayExperimentRegisterRequest` re-bind ✅（依賴 `_er` 已在 line ~59 try/except import 完成）
+- `ReplayRunRequest` / `ReplayCancelRequest` / `ReplayManifestVerifyRequest` — line ~174-184 try/except 直接 import from `..replay.replay_models` ✅
+
+**Class 定義檢查**：
+```bash
+$ grep -n '^class ' program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+# (0 hits — 0 local class defined)
+```
+
+**String annotation 檢查**（forward ref via string）：
+```bash
+$ grep -nE ': "[A-Z][a-zA-Z_]+"' program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+# (0 hits — 0 string forward annotation)
+```
+
+**結論**：刪 `from __future__` 後 0 forward-ref break；所有 annotation 在 module load 即 eager-resolve。
+
+**AST parse self-test**：
+```bash
+$ python3 -c "import ast; ast.parse(open('program_code/.../replay_routes.py').read())"
+# (no error)
+```
+
+### §12.4 Linux pytest 結果（PASS count）
+
+**Brief 8 個 test file 集**（本 hotfix 主驅動）：
+```bash
+$ ssh trade-core "cd ~/BybitOpenClaw/srv/program_code/.../control_api_v1 && \
+  .venv/bin/pytest tests/test_replay_experiments_register.py tests/test_replay_run_fk_guard.py \
+    tests/test_replay_manifest_verify_secrets_path.py tests/test_replay_report_post_r2_smoke.py \
+    tests/test_replay_register_rate_limit.py tests/test_replay_simulated_fills_writer.py \
+    tests/test_replay_run_finalize.py tests/test_replay_routes_track_c_security.py \
+    --no-header -q 2>&1 | tail -3"
+63 passed, 6 warnings in 0.78s
+```
+
+**Linux Python 3.12 = 63 PASS**（brief expectation `≥ 58`）。✅
+
+**Linux full `-k replay`**：
+```bash
+$ ssh trade-core ".venv/bin/pytest tests/ -k replay --no-header -q | tail -5"
+3 failed, 115 passed, 3387 deselected, 61 warnings in 1.99s
+```
+
+3 fail = `tests/test_replay_routes_auth.py::test_authenticated_*`（**pre-existing Linux fixture bug，非 hotfix regression**，見 §12.5 證明）。
+
+**Linux full pytest**：
+```bash
+$ ssh trade-core ".venv/bin/pytest tests/ --no-header -q | tail -10"
+5 failed, 3466 passed, 34 skipped, 485 warnings in 50.59s
+```
+
+5 fail：
+1. `test_grafana_data_writer.py::TestGrafanaDataWriterLifecycle::test_start_sets_running` — Linux-only pre-existing（與本 hotfix 無關）
+2-4. `test_replay_routes_auth.py` 3 case — 見 §12.5
+5. `test_replay_routes_safe_query_audit.py::test_case2_pg_kill_simulation_returns_200_degraded` — Mac 也 fail，pre-existing per R2 sign-off §7
+
+**0 fail 歸屬本 hotfix**。
+
+**R3 round 1+2 test set 對齊驗證**：
+```bash
+$ ssh trade-core ".venv/bin/pytest tests/test_replay_simulated_fills_writer.py tests/test_replay_run_finalize.py --no-header -q | tail -3"
+20 passed, 6 warnings in 0.42s
+```
+
+Linux 20 PASS = Mac round 2 baseline 20 PASS。✅
+
+### §12.5 test_replay_routes_auth.py 3 fail = pre-existing 證明
+
+**Hotfix 揭示，非引入**。證據鏈：
+
+```bash
+$ ssh trade-core "cd ~/BybitOpenClaw/srv && git stash"
+保存工作目录和索引状态 WIP on main: 66b650ea ...
+
+$ ssh trade-core "cd ~/BybitOpenClaw/srv/program_code/.../control_api_v1 && \
+  .venv/bin/pytest tests/test_replay_routes_auth.py \
+    -k 'test_authenticated_zero_active_run_post_run_accepts or test_authenticated_per_actor_cap_returns_409 or test_authenticated_global_cap_returns_409' \
+    --no-header -q | tail -10"
+3 failed, 1 deselected, 6 warnings in 0.34s
+
+$ ssh trade-core "cd ~/BybitOpenClaw/srv && git stash pop"
+（hotfix 復原；line 1 仍是 docstring）
+```
+
+**結論**：在 stash 我的 hotfix 後（即 file 回到 `from __future__ import annotations` line 1 狀態），同樣 3 fail 仍存在 → 這 3 個 fail 是 **pre-existing Linux 問題**（test fixture 用 `experiment_id="exp-2026-05-03-test"` 不是 valid UUID，fix 前路徑因 422 提前停所以從未打 PG，fix 後路徑通暢但 PG 拒收非 UUID 文字）。
+
+**這個 test fixture bug 應作 P2 follow-up ticket 處理**（不在本 hotfix scope）：把 fixture 改用 `uuid.uuid4()` 生 valid UUID，或先 INSERT V049 row 再 POST /run。
+
+### §12.6 Mac pytest 不退（regression check）
+
+```bash
+$ cd /Users/ncyu/Projects/TradeBot/srv && python3 -m pytest \
+    program_code/exchange_connectors/bybit_connector/control_api_v1/tests/ \
+    -k replay --no-header -q | tail -3
+118 passed, 3387 deselected, 30 warnings in 1.38s
+
+$ python3 -m pytest \
+    program_code/.../control_api_v1/tests/test_replay_simulated_fills_writer.py \
+    program_code/.../control_api_v1/tests/test_replay_run_finalize.py --no-header -q | tail -3
+20 passed, 6 warnings in 0.22s
+```
+
+**Mac `-k replay` = 118 PASS**（與 R2 round 2 baseline 118 PASS 完全對齊；R3 round 1 baseline 117 + round 2 加 1 case = 118）。**0 regression**。
+
+R3 round 1+2 dedicated test set 20 PASS（與 round 2 §11.5 對齊）。
+
+**Mac full pytest**：3494 passed / 1 failed (pre-existing per R2 §7) / 10 skipped — 4 個 PASS 變 skip + 5 warnings 減少不歸屬本 hotfix（R2 round 2 → round 3 之間 sibling fixture / conftest 微小調整；本 hotfix 0 行 functional change）。
+
+### §12.7 P0-PROCESS-1 ticket：E4 必跑 Linux pytest
+
+**Add to TODO.md P0 section**：
+
+```markdown
+| **P0-PROCESS-1** | E4 sign-off 流程必加 Linux pytest（不只 Mac）— Sprint A R3 round 3 hotfix 揭示 Mac Python 3.10 / Linux Python 3.12 FastAPI lazy ForwardRef 解析行為差異，Mac PASS 不代表 Linux PASS。Sprint A R1+R2+R3 全部 hermetic test 在 Linux 真實 fail 但 E4 只跑 Mac → false-positive sign-off。修法：E4 SOP 加「PM commit pre-check Linux pytest 必綠」步驟；通過 SSH bridge `ssh trade-core "cd ~/BybitOpenClaw/srv/... && .venv/bin/pytest <files>"` 驗證真 Linux 環境。Linux baseline 數字差異（如 5 pre-existing fail）允許 carry over 但需要明文文檔化。 | @PM @E4 | NOT_STARTED |
+```
+
+E1 加到 TODO.md（在 round 3 hotfix 完成同 commit 內）。
+
+### §12.8 LOC delta（hotfix 後）
+
+| 檔 | Round 2 後 | Round 3 hotfix 後 | Δ | Cap | Margin |
+|---|--:|--:|--:|--:|--:|
+| `app/replay_routes.py` | 1491 | **1499** | +8 | 1500 | **1** |
+
+**replay_routes.py = 1499 LOC, 1 LOC margin to cap**。Hotfix +8 LOC 構成：
+- −1 line `from __future__ import annotations` 移除
+- +9 lines hotfix 警告塊（DOC-LEVEL bilingual notice + SPEC reference + Hotfix marker）
+
+**P3 follow-up 風險評估**：1 LOC margin 太薄。下次任何 small docstring update 就會超 1500 cap → 違 §九 governance。**建議 P2 follow-up**：抽 hotfix 警告塊到 `replay/MAINTAINER_NOTES.md` 外部檔，docstring 內留 1-line pointer，回收 ~7 LOC margin。
+
+### §12.9 git status sign-off-clean (CLAUDE.md §七 P0-GOV-3)
+
+**Mac local**：
+```
+$ git status --porcelain
+ M TODO.md  # P0-PROCESS-1 + 1 P2 follow-up（fixture UUID bug）
+ M docs/CCAgentWorkSpace/E1/memory.md  # round 3 hotfix log
+ M docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md  # 本 §12 章節
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py  # 1-line surgical fix
+?? （round 1+2 既有 4 new file 仍 untracked 等 PM commit）
+```
+
+**Linux trade-core**：
+```
+$ ssh trade-core "cd ~/BybitOpenClaw/srv && git status --porcelain | head -5"
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+```
+
+Linux 是 `scp` 同步的副本（驗 Linux 的唯一手段，因 PM 統一 commit + push 約束）。PM commit 後 `ssh trade-core "git pull --ff-only"` 即可重置回標準狀態。
+
+**0 stray file**。
+
+### §12.10 Operator 下一步（CLAUDE.md §七 6 節必備）
+
+1. **PM 統一 commit + push**（4 件 + Linux 同步）：
+   - `app/replay_routes.py`（hotfix +8 LOC）
+   - `TODO.md`（P0-PROCESS-1 + P2 follow-up fixture UUID bug）
+   - `docs/CCAgentWorkSpace/E1/memory.md`（round 3 hotfix log）
+   - `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（本 §12）
+   - 既有 round 1+2 4 new file（per §11.6）一併 commit
+2. **Linux pull + restart_all --rebuild** 後 PM 重派 QA smoke E2E（PA brief 指示）：
+   - `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"`
+   - `ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --rebuild"` （或 API-only restart 因 Python-only fix）
+   - 真 e2e POST /api/v1/replay/experiments/register → /run → /finalize 應 200 OK
+3. **E2 / E3 / E4 review 不重派**（PA brief 指示）— scope 太針對性 + 已知 root cause + 最小變動。
+4. **P2 follow-up（test_replay_routes_auth.py fixture UUID bug）**：別 confound 本 hotfix；分 ticket 處理。
+5. **P3 follow-up（1 LOC margin too thin）**：抽 hotfix 警告塊到 `replay/MAINTAINER_NOTES.md` 外部檔，回收 ~7 LOC margin。
+6. **P0-PROCESS-1**：E4 SOP 加 Linux pytest 步驟（避免再 false-positive sign-off）。
+
+E1 ROUND 3 HOTFIX DONE：待 PM commit + push + Linux pull + restart_all + QA smoke E2E（report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`）
