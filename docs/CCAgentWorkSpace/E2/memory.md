@@ -6,6 +6,62 @@
 - 測試基準：2614 passed（Sprint 0 TD-1 後）；Sprint 1a+1b 全部通過後預期 2623 passed
 - 系統模式：demo_only
 
+## 2026-05-04 — REF-20 Sprint A R3 e2e finalize evidence (PASS to E4 + 1 MED + 3 P2/P3 + 1 LOW)
+
+**對象**：R3 IMPL — `simulated_fills_writer.py` (NEW 602 LOC) + `run_finalize_route.py` (NEW 552 LOC after E2 micro-fix) + `app/replay_routes.py` 1443→1479 thin handler + 19 new test (11+8) · base `353db3fe`
+
+**Verdict**：PASS to E4 · 0 BLOCKER / 0 HIGH / 1 MEDIUM (deferred P2) / 2 LOW (1 E2 直修 / 1 deferred P2)
+
+**驗證手段**：
+1. V050 21-col INSERT 對 V050 CREATE TABLE 順序 byte-equivalent；V050_ALLOWED_TIER/SIDE/LIQUIDITY frozenset 對 SQL CHECK 一致
+2. V046 ARTIFACT_TYPE_REPLAY_REPORT='pnl_summary' 對 chk_replay_report_artifacts_type 5-value enum 內 + canary_writer.ALLOWED_ARTIFACT_TYPES 含 ARTIFACT_TYPE_PNL_SUMMARY → INSERT 不 23514 reject
+3. 重跑 19/19 R3 unit + 117 sibling replay PASS + 3498/3499 全 control_api_v1 PASS（1 pre-existing fail 與 R2 baseline 對齊）
+4. canonical_bytes / manifest_signer.py git diff 0 byte 修改 → xlang invariant 不破
+5. 跨平台 grep `/home/ncyu|/Users/ncyu` 0 hit（4 R3 file）
+6. MODULE_NOTE 雙語 ✅；module-level 全 frozenset / immutable constant，無新 mutable singleton 需登記 §九 (P3-FOLLOW-UP `_REGISTER_IDEM_CACHE` from R2 round 2 不在此 R3 scope)
+7. except (OSError, ValueError) 在 except Exception 之前順序對；logger.warning %s format 對；conn.rollback 包 try/except 正確
+8. IDOR enum-oracle close 雙 test 覆蓋 cross-actor 404 vs 403：test_finalize_actor_mismatch_404_not_403 hit + 不洩 row 存在
+9. atomic xact rollback test_finalize_atomic_xact_rollback_on_writer_failure 真覆蓋 conn.rollback ≥1 + commit 0 + 503 surface
+10. canary_writer.WriteResult `@dataclass(frozen=True)` 直接 synthesize 不破契約（register_artifact_in_db 內部不 reference _runtime_env）
+11. is_mock 從 row.runtime_environment="mac_dev_smoke_test_only" 推斷與 ctor 自動偵測等價
+
+**3 push-back E1 自承仲裁**：
+1. **artifact_type='pnl_summary' vs plan §6.R3 寫 'replay_report'** ✅ ACCEPT — pnl_summary 在 V046 5-value enum + canary_writer ALLOWED_ARTIFACT_TYPES 內；Rust replay_report.json 主 payload block 是 pnl_summary 對齊語意。**P2 deferred ticket**：未來 V### migration 加 'replay_report' 為新 enum value（更精準語意），同步擴 canary_writer.ALLOWED_ARTIFACT_TYPES。
+2. **multi-worker uvicorn race finalize 雙 INSERT V046** ⚠️ ACKNOWLEDGE — 真 race window；分析正確：V045 status guard + UPDATE 0 row + V050 (experiment_id, idempotency_key) UNIQUE 已防 fills 重複。V046 雙 row 是純 cosmetic 污染（兩個 artifact_id 指向同 file path），不影響後續 SELECT 行為；**P2 ticket** 加 SELECT FOR UPDATE 或 advisory lock per run_id（pattern mirror experiment_registry.py:474 advisory xact lock）。R3 不阻塞。
+3. **PID-reuse 巧合 false positive** ⚠️ ACKNOWLEDGE — 極罕見（cmdline 含 'replay_runner' 字串巧合）；**P3 ticket** 加 psutil.Process.create_time() 校驗。R3 不阻塞。
+
+**E2 直修（LOW）**：
+- run_finalize_route.py line 41 加 `import uuid` 至 top；line 428 改 `__import__("uuid").uuid4().hex` → `uuid.uuid4().hex`。19/19 PASS 後驗 552 LOC < 1500 cap。違 R1-6 「import 在頂部不在方法內」+ Python idiom。
+
+**MEDIUM finding（deferred P2）**：
+- run_finalize_route.py line 522-525 message field 含 `f"{type(exc).__name__}: {exc}"` — `OSError` exc 字串通常含絕對路徑（[Errno 2] No such file or directory: '$OPENCLAW_DATA_DIR/replay_artifacts/<run_id>/replay_report.json'）。違反 §九 SEC-04 「detail=str(e) 已改為 'Internal server error'」精神。**緩解**：(a) caller 已過 _require_replay_write Operator 守門（trusted）(b) 路徑非 secret 而是 server layout diagnostic info (c) run_id + OPENCLAW_DATA_DIR 對 operator 公開可接受。**P2 ticket**：改 message 為 generic + 細節僅 logger.warning（已 %s 格式）。**不阻塞 R3 收官**。
+
+**E2 教訓 / 反模式 提醒**：
+1. **plan 寫的字串值 vs CHECK enum**：plan §6.R3 偽碼寫 'replay_report' 但 V046 CHECK 5-value 不允；E1 的「選最近義 + 留 P2 擴 enum」是合理 pragmatic 處理；E2 不該僵化 reject 而需評估 spec drift cost（V### 擴 enum vs in-allowlist 重用）。Sprint A R3 收官 wave，pragmatic 路徑優於完美主義。
+2. **multi-worker race acceptable 邊界**：V045 status guard 是 advisory lock（idempotent UPDATE WHERE status IN）；V050 (experiment_id, idempotency_key) UNIQUE 是 hard lock；V046 無 (run_id, artifact_path) UNIQUE 是 race window 但 cosmetic-only。R3 不必修是 acceptable trade-off — 但**必須開 P2 ticket** 不靜默吞。
+3. **dataclass(frozen=True) 直接 synthesize**：canary_writer.WriteResult 是 `@dataclass(frozen=True)` public class，直接構造 instance 而不走 `write_replay_artifact()` filesystem write 階段是 OK pattern（節省一次 fsync），只要 (a) 該 file 已存在 (b) byte_size 對應 stat (c) is_mock 來源等價。但是 **risk**: 將來如果 dataclass 加 invariant（e.g., 必須 `artifact_path` 是已寫入磁碟的 file），會 silently 破。建議 docstring 加 explicit「caller 必須保證 file 已存在 + byte_size 對應 stat」。
+4. **`__import__("uuid")` 是 Python 第二類 anti-pattern**：(a) 違 R1-6 import 在頂部 (b) 違 PEP 8 idiom (c) micro overhead。E2 直修 + 不算 finding 嚴重，但見一次標一次。
+5. **"E1 push-back 列表 ≠ E2 全部 finding"**：E1 §10 列 5 個 + race + PID-reuse 共 7 push-back，E2 額外發現 message exception leak（MEDIUM）+ `__import__` typo（LOW）。E1 self-review 無 message leak 認知 — E2 對抗 audit 的價值就在這。
+6. **Sprint A 收官 wave PASS to E4 邊界判斷**：HIGH-or-above 必退 E1；MEDIUM 看 (a) 是否 trusted caller 守門 (b) 是否 secret leak vs cosmetic (c) 是否 deferred P2 可控。本次 message leak (a) caller trusted (b) 路徑非 secret (c) P2 可控 → PASS to E4 + ticket。如果 caller 是 unauthenticated public route，會升級 HIGH 退 E1。
+7. **canonical_bytes / manifest_signer 0 修改驗證**：xlang invariant cross-language 簽名一致性是 R2 round 3 H-1 fix 的核心；R3 finalize 不該動。git diff -- manifest_signer.py 0 byte → 不破 invariant 是 evidence-based 結論（不是「我看 R3 scope 沒提就信」）。每 wave 都跑這條 grep。
+
+**邏輯問題（順帶發現，但 in-scope finding 已表內含）**：無。
+
+**Files reviewed**:
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/simulated_fills_writer.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/run_finalize_route.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py (lines 60-89, 731-758 finalize wiring)
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_simulated_fills_writer.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_run_finalize.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/canary_writer.py (cross-reference WriteResult/register_artifact_in_db)
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/route_helpers.py (cross-reference artifact_path_within_allowlist)
+- /Users/ncyu/Projects/TradeBot/srv/sql/migrations/V046__replay_report_artifacts.sql
+- /Users/ncyu/Projects/TradeBot/srv/sql/migrations/V050__replay_simulated_fills.sql
+
+**E2 → E4 接手條件**：(1) E1 pre-existing P2 deferred ticket 留軌跡（artifact_type V### enum extension + multi-worker FOR UPDATE + PID-reuse create_time + message exception leak — 4 個 P2/P3）；(2) E4 跑 full smoke 117 replay sibling + 3498 control_api_v1 baseline regression；(3) Linux SSH bridge 真 PG smoke deferred 至 deploy phase。(4) E2 micro-fix（uuid import）已 working tree change，**未 commit**（同 R3 IMPL 待 PM 統一 commit）。
+
+---
+
 ## 2026-05-04 — REF-20 Sprint A R2 round 2 verification（CONDITIONAL PASS to E4）
 
 **結論**：CONDITIONAL PASS to E4 — 13 fix 全 IMPL 真改 + 數據對得上 + sibling 97 PASS / Track C 13 PASS / control_api_v1 3478 PASS / 1 PRE-EXISTING flaky；但**3 NEW finding 不阻 E4**（1 MEDIUM dead-state + 1 MEDIUM enum-oracle + 2 LOW）必交 E1 round 3 / R3 dispatch 前順手清。
