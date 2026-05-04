@@ -1,7 +1,40 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-03（REF-20 Wave 1-9 IMPL accept-with-cold-audit-caveat + Sprint 1 cold audit fix-up + Sprint 2 retroactive review）
+> 最後更新：2026-05-04（REF-20 Sprint 3 Track H + Track I deploy + Sprint 4 final closure = P6 PRODUCTION CLOSED）
+
+### REF-20 Sprint 3+4 closure — P6 PRODUCTION CLOSED（2026-05-03 → sync 2026-05-04）
+
+**範圍**：Sprint 3 Track H Decision Lease retrofit AMD-2026-05-02-01 Path A 業務代碼 + V054 audit writer schema/writer + Sprint 3 Track I Linux deploy Phase B-G executed via SSH bridge + Sprint 4 final closure operator override accept conditional skip 14d observation。
+
+**Sprint 3 Track H IMPL（commit `dbcf845b`）**：
+- E-1 Rust facade — `governance_core.rs` 951 LOC（`acquire_lease()` / `release_lease()` Path A 兌現 v3 plan）+ `governance_emit.rs` 622 LOC（emission helpers）
+- E-2 router gate — `intent_processor/router.rs` +196 LOC（feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` short-circuit 灰度）+ tests +537 LOC
+- E-3 Python IPC bridge — `governance_lease_bridge.py` 587 LOC + `lease_ipc_schema.py` 443 LOC + `ipc_client.py` +35 LOC + `governance_hub.py` +240 LOC + sibling tests `test_governance_lease_bridge.py` 758 LOC（44/44 PASS）
+- E-4 V054 audit writer — `V054__lease_transitions_audit_writer.sql` 535 LOC（TimescaleDB hypertable + 21-value enum + paired CHECK + FK redirect to V035 governance_audit_log + REF-21 placeholder）+ `lease_transition_writer.rs` 492 LOC
+- 配套：`engine_mode_tag_e2e.rs` 211 LOC + `governance_lease_retrofit.rs` 426 LOC + golden_extreme +22 LOC + 三 risk_config*.toml +61 LOC
+
+**Sprint 3 Track I Linux deploy（runbook `7a86d2eb` + Phase B-G executed 2026-05-03 21:30+ via SSH bridge）**：
+- Phase A skip（E4 final regression 已跑：3431/1/10 + 3132/2/3 + Track H specific 44/44）
+- Phase B V049-V054 6 V### apply：TimescaleDB hypertable + 21-value enum + paired CHECK + FK redirect 全綠
+- Phase C cargo --release build：openclaw-engine 28.82s + replay_runner 15.35s = 44s；nm audit 406 symbol / 0 forbidden（0 live_execution / acquire_lease / trading_writer）
+- Phase D skip（feature flag default OFF + 回測模塊不需 production maintenance cron）
+- Phase E restart_all.sh --rebuild：Engine PID 4122084 + API PID 4122156 + 三模式 paper/demo/live 全 alive + snapshot age 8.1s
+- Phase F 5 e2e smoke 核心 3 條 PASS（F.1 401 IDOR auth 修補正常 + F.2 endpoint 真實掛載 + F.5 cron script 真存在）
+- Phase G Decision Lease retrofit verify：Track H schema 全綠（lease_transitions hypertable + V051 paired CHECK + V052 FK redirect 全 verified）
+- Phase H 14d gradient observation skip（operator override）
+
+**Sprint 4 final closure（commit `0ad79f67`）**：
+- Operator override accept：「直接跑掉 A-H，後續有問題再修」（理由：REF-20 是 Paper Replay Lab 回測模塊 + feature flag default OFF + 0 trading.* mutation + 0 live trading 觸發）
+- 7 closure item 4 ✅ + 3 ⏭ override skip = **REF-20 P6 CLOSED**
+- 24/25 V3 §12 acceptance binding GREEN（#21 ⏸ DEFERRED Wave 7 P5 LG-2/3/4 stable 後解封）
+- conditional override 3 條由 operator 後續 action（無時限）：14d observation #4/5/6 + AMD-2026-05-02-01 flag flip canary 24h（~2026-05-15 P0-EDGE-2 後）+ AMD-2026-05-03-01 Wave 7 P5 deploy gate（LG-2/3/4 stable 後）
+
+**Cumulative chain（Sprint 1+2+3+4）**：`2ffe43d` → `edf33c0` → `d602ce0` → `5184990` → `aa9343c` → `ab25a2a` → `db1d04f` → `5c570df` → `c96aed4` → `984ee5d` → `35c0719` → `114f681c` → `dbcf845b` → `7a86d2eb` → `0ad79f67`。
+
+**邊界**：Sprint 3 Track H 業務 runtime + V054 schema + Track I deploy executed；2026-05-04 drift fix（本 entry 所在 commit）為 doc sync only — TODO.md / CLAUDE.md §三 / §十 / 本 changelog / memory 同步至 P6 PRODUCTION CLOSED status。
+
+**Closure doc**：`docs/execution_plan/2026-05-03--ref20_sprint4_final_closure.md`。
 
 ### REF-20 Sprint 2 retroactive evidence trail rebuild（2026-05-03）
 
