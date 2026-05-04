@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import main_legacy as base
 from .auth import require_scope_and_operator
@@ -56,6 +56,8 @@ try:
     from ..replay import route_helpers as _rh  # type: ignore[no-redef]
     from ..replay import security_guards as _sg  # type: ignore[no-redef]
     from ..replay import manifest_signer as _ms  # type: ignore[no-redef]
+    from ..replay import experiment_registry as _er  # type: ignore[no-redef]
+    from ..replay import report_route as _rr  # type: ignore[no-redef]
 except ImportError:
     from replay import route_helpers as _rh  # type: ignore[no-redef]
     from replay import security_guards as _sg  # type: ignore[no-redef]
@@ -63,6 +65,8 @@ except ImportError:
         from replay import manifest_signer as _ms  # type: ignore[no-redef]
     except ImportError:
         _ms = None  # type: ignore[assignment]
+    from replay import experiment_registry as _er  # type: ignore[no-redef]
+    from replay import report_route as _rr  # type: ignore[no-redef]
 ADVISORY_LOCK_GLOBAL_KEY = _rh.ADVISORY_LOCK_GLOBAL_KEY
 ADVISORY_LOCK_PER_ACTOR_PREFIX = _rh.ADVISORY_LOCK_PER_ACTOR_PREFIX
 _count_active_runs_for_actor = _rh.count_active_runs_for_actor
@@ -173,6 +177,10 @@ except ImportError:
         ReplayRunRequest,
     )
 
+# REF-20 Sprint A R2-T1: re-export request model owned by experiment_registry.
+# REF-20 Sprint A R2-T1：re-export ``experiment_registry`` 擁有的請求模型。
+ReplayExperimentRegisterRequest = _er.ReplayExperimentRegisterRequest
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Auth + Concurrency Helpers / 認證與並發守門
@@ -199,6 +207,37 @@ def _actor_can_read_any_replay_report(actor: base.AuthenticatedActor) -> bool:
     if actor is None:
         return False
     return "replay:read:any" in (getattr(actor, "scopes", None) or set())
+
+
+# REF-20 Sprint A R2 round 2 fix M-2: per-actor rate limit key function.
+# REF-20 Sprint A R2 round 2 fix M-2：per-actor rate limit key 函式。
+def _replay_rate_limit_key(request: Request) -> str:
+    """Rate-limit key for /replay write endpoints (R2 round 2 fix M-2).
+    /replay 寫入端點的 rate-limit key（R2 round 2 fix M-2）。
+
+    Tries ``request.state.actor.actor_id`` first; falls back to
+    ``request.client.host`` if FastAPI ``Depends(current_actor)`` has not
+    yet populated state (slowapi runs the wrapper BEFORE the Depends
+    resolution, so under current wiring this almost always falls back to
+    IP). The fallback IP-based limit is still meaningfully stricter than
+    the global 120/min default.
+    先試 ``request.state.actor.actor_id``；FastAPI ``Depends(current_actor)``
+    尚未填 state 時 fallback 到 ``request.client.host``（slowapi wrapper
+    跑在 Depends 之前所以基本都 fallback；fallback 仍比 global 120/min
+    嚴格）。
+    """
+    state_actor = getattr(getattr(request, "state", None), "actor", None)
+    if state_actor is not None:
+        actor_id = getattr(state_actor, "actor_id", None)
+        if actor_id:
+            return f"actor:{actor_id}"
+    client = getattr(request, "client", None)
+    return f"ip:{client.host}" if client is not None else "ip:unknown"
+
+
+# Resolve the limiter once at module init (avoids attribute lookup per request).
+# 模組初始化時解析 limiter（避免每請求 attribute lookup）。
+_replay_limiter = base.limiter
 
 
 # Note / 註：binary path / output dir / advisory lock / V045 helpers
@@ -285,32 +324,62 @@ async def _async_safe_pg_select(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+@replay_router.post("/experiments/register")
+@_replay_limiter.limit("10/minute", key_func=_replay_rate_limit_key)
+async def post_experiment_register(
+    request: Request,
+    body: ReplayExperimentRegisterRequest,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Register a manifest in V049 ``replay.experiments`` (R2-T1 thin handler).
+    在 V049 註冊 manifest（R2-T1 薄 handler）。Auth: Operator + ``replay:write``.
+    Rate limit: 10/min per-actor (R2 round 2 fix M-2; slowapi 0.1.9 falls
+    back to per-IP under current wiring — see ``_replay_rate_limit_key``).
+    Logic: ``replay/experiment_registry.py`` (CLAUDE.md §九 1500 LOC cap).
+    """
+    _require_replay_write(actor)
+    actor_id = str(actor.actor_id)
+    result, err = await asyncio.to_thread(
+        _er.run_register_in_pg_xact, get_pg_conn, actor, body,
+        statement_timeout_ms=_STATEMENT_TIMEOUT_MS, manifest_signer_module=_ms,
+    )
+    http_err = _er.map_register_error_to_http(err)
+    if http_err is not None:
+        status, detail = http_err
+        raise HTTPException(status_code=status, detail=detail)
+    _emit_audit_stub(
+        event_type="replay_experiment_registered", actor_id=actor_id,
+        experiment_id=result["experiment_id"] if result else None,
+        manifest_hash=result.get("manifest_hash") if result else None,
+        decision="registered",
+        extra_payload={
+            "idempotency_hit": result.get("idempotency_hit", False) if result else False,
+            "data_tier": body.data_tier, "timeframe": body.timeframe,
+            "symbol": body.symbol, "strategy": body.strategy,
+        },
+    )
+    return _replay_response(result)
+
+
 @replay_router.post("/run")
+@_replay_limiter.limit("10/minute", key_func=_replay_rate_limit_key)
 async def post_replay_run(
+    request: Request,
     body: ReplayRunRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict[str, Any]:
-    """Start a replay run for the given pre-registered manifest.
-    啟動指定 pre-registered manifest 的一次 replay run。
+    """Start a replay run for a pre-registered manifest.
+    啟動 pre-registered manifest 的 replay run。
 
-    Auth: Operator + ``replay:write`` scope. Concurrency: global=1,
-    per-actor=1 (V3 §5).
+    Auth: Operator + ``replay:write``. Concurrency cap V3 §5: global=1, per-actor=1.
+    Rate limit: 10/min per-actor (R2 round 2 fix M-2).
 
-    Wave 4 R20-P2b-T2 wiring:
-      1. Acquire PG advisory locks within transaction (primary path)
-         OR fall back to in-memory dict (V045 absent / PG unavailable).
-      2. INSERT replay.run_state row with status='starting'.
-      3. Spawn replay_runner subprocess; capture pid.
-      4. UPDATE replay.run_state with pid + status='running'.
-      5. Return run_id + experiment_id + status to caller.
-
-    Wave 4 R20-P2b-T2 接線：
-      1. 在 transaction 內取 PG advisory lock（主路徑）；V045 缺 / PG 不可達
-         時 fallback in-memory dict。
-      2. INSERT replay.run_state，status='starting'。
-      3. Spawn replay_runner 子程序；拿 pid。
-      4. UPDATE replay.run_state pid + status='running'。
-      5. 回 run_id + experiment_id + status。
+    Wiring (R2-T2 amended): PG advisory lock → SELECT V049.experiments
+    FOR SHARE → INSERT V045.run_state status='starting' → spawn
+    ``replay_runner`` → UPDATE pid + status='running'. V045 absent or PG
+    unreachable → in-memory ``_ACTIVE_RUNS`` fallback (legacy hermetic test).
+    R2-T2 修訂後流程：取 PG advisory lock → SELECT V049 FOR SHARE → INSERT
+    V045 → spawn → UPDATE。V045 缺 / PG 斷 → in-memory fallback。
     """
     _require_replay_write(actor)
     actor_id = str(actor.actor_id)
@@ -364,26 +433,10 @@ async def post_replay_run(
                 # 3) INSERT row with status='starting'; pid filled later.
                 # 3) INSERT 列 status='starting'；pid 稍後填。
                 run_id_local = uuid.uuid4().hex
-                # NOTE: experiment_id is the user-facing ID; manifest_id is
-                # logical UUID that V045 stores. We use the experiment_id
-                # as a synthetic manifest_id source by hashing — Wave 3
-                # ledger maps the V### registry FK separately.
-                #
-                # NOTE：experiment_id 是 user-facing ID；manifest_id 是
-                # V045 存的邏輯 UUID。本處用 experiment_id 透過 UUID5
-                # 衍生 — Wave 3 ledger 另行 map V### registry FK。
-                #
-                # We use a UUID5 namespace derivation so the same
-                # experiment_id always yields the same manifest_id (allows
-                # idempotency on retry).
-                # 用 UUID5 namespace 衍生：同 experiment_id 永得同 manifest_id
-                # （重試時冪等）。
-                manifest_uuid_namespace = uuid.UUID(
-                    "00000000-0000-0000-0000-000020260503"
-                )
-                manifest_uuid = uuid.uuid5(
-                    manifest_uuid_namespace, body.experiment_id
-                )
+                # REF-20 Sprint A R2-T2: real SELECT (FOR SHARE) replaces UUID5.
+                manifest_uuid = _rh.lookup_registered_experiment_id(cur, body.experiment_id)
+                if manifest_uuid is None:
+                    return None, None, "replay_experiment_not_registered", None
 
                 cur.execute(
                     """
@@ -563,6 +616,16 @@ async def post_replay_run(
                 ),
             },
         )
+
+    if pg_err == "replay_experiment_not_registered":
+        # REF-20 Sprint A R2-T2: not in V049 → 400 (no fallback). 未註冊 → 400。
+        raise HTTPException(status_code=400, detail={
+            "reason_codes": ["replay_experiment_not_registered"],
+            "message": (
+                f"experiment_id '{body.experiment_id}' has no row in "
+                "replay.experiments; call POST /api/v1/replay/experiments/register first."
+            ),
+        })
 
     if pg_err == "binary_not_found":
         # Binary missing → 503 (operator must deploy or set env).
@@ -890,130 +953,33 @@ async def get_replay_report(
     """Fetch the report for a completed (or running) replay experiment.
     取得已完成（或運行中）replay experiment 的報告。
 
-    Read-only; authentication required.
+    Read-only; authentication required. Logic in
+    ``replay/report_route.py`` (R2 round 2 fix H-3 cross-route consistency
+    extraction; CLAUDE.md §九 1500 LOC cap on this file).
 
-    Wave 4 R20-P2b-T2 wiring: queries replay.report_artifacts (V046) for
-    the experiment_id's run; reads each artifact JSON from filesystem.
-
-    Wave 4 R20-P2b-T2 接線：查 replay.report_artifacts（V046）取
-    experiment_id 對應 run；從 filesystem 讀每個 artifact JSON。
+    Read-only；需認證。Logic 在 ``replay/report_route.py``（R2 round 2
+    fix H-3 跨 route 一致性抽出）。
     """
-    # Validate experiment_id shape.
-    # 驗 experiment_id 形狀。
-    for ch in experiment_id:
-        if not (ch.isalnum() or ch in "-_"):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "reason_codes": ["replay_invalid_experiment_id"],
-                    "message": "experiment_id may only contain alphanumeric, hyphen, or underscore",
-                },
-            )
-    if len(experiment_id) > 128:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_invalid_experiment_id"],
-                "message": "experiment_id exceeds 128 chars",
-            },
-        )
-
-    # Derive manifest_uuid from experiment_id (same UUID5 derivation as
-    # POST /run for cross-route consistency).
-    # 從 experiment_id 衍生 manifest_uuid（同 POST /run 的 UUID5 衍生
-    # 以保跨 route 一致）。
-    manifest_uuid_namespace = uuid.UUID("00000000-0000-0000-0000-000020260503")
-    manifest_uuid = str(uuid.uuid5(manifest_uuid_namespace, experiment_id))
-    actor_id = str(actor.actor_id)
-
-    # Track C P0-5a IDOR fix (E2 retrofit): default = filter actor_id; admin
-    # scope replay:read:any bypass for cross-actor incident investigation.
-    # Track C P0-5a（E2 retrofit）：預設 filter actor_id；admin scope
-    # replay:read:any 旁通。
-    _idor_admin_bypass = _actor_can_read_any_replay_report(actor)
-    sql, params = _sg.build_report_idor_sql(
-        manifest_uuid, actor_id, _idor_admin_bypass,
+    response, http_err = await _rr.fetch_report_for_experiment(
+        experiment_id=experiment_id,
+        actor=actor,
+        get_pg_conn_fn=get_pg_conn,
+        lookup_registered_experiment_id_fn=_rh.lookup_registered_experiment_id,
+        actor_can_read_any_fn=_actor_can_read_any_replay_report,
+        build_report_idor_sql_fn=_sg.build_report_idor_sql,
+        async_safe_pg_select_fn=_async_safe_pg_select,
+        artifact_path_within_allowlist_fn=_artifact_path_within_allowlist,
+        check_artifact_path_within_allowlist_fn=(
+            _sg.check_artifact_path_within_allowlist
+        ),
+        audit_emit_fn=_emit_audit_stub,
+        replay_response_envelope_fn=_replay_response,
+        statement_timeout_ms=_STATEMENT_TIMEOUT_MS,
     )
-    rows, err = await _async_safe_pg_select(sql, params)
-
-    if err is not None:
-        # PG outage / V046 absent → 200 + degraded (V3 §12 #22 mirror).
-        # PG outage / V046 缺 → 200 + degraded（V3 §12 #22 鏡像）。
-        return _replay_response(
-            data={
-                "experiment_id": experiment_id,
-                "manifest_id": manifest_uuid,
-                "artifacts": [],
-                "wiring_status": "degraded",
-            },
-            degraded=True,
-            reason=err,
-        )
-
-    artifacts = []
-    _traversal_blocked_paths: list[str] = []
-    for row in rows:
-        artifact = {
-            "artifact_id": row[0], "artifact_type": row[1], "artifact_path": row[2],
-            "byte_size": row[3], "is_mock": row[4],
-            "created_at_ms": int(row[5]) if row[5] is not None else None,
-        }
-        # Track C P0-5b (E2 retrofit): allowlist guard via security_guards.
-        # Track C P0-5b（E2 retrofit）：allowlist 守門透過 security_guards。
-        try:
-            artifact_path = Path(row[2])
-            within, traversal_err = _sg.check_artifact_path_within_allowlist(
-                artifact_path, _artifact_path_within_allowlist,
-            )
-            if not within:
-                artifact["payload_read_error"] = f"path_traversal_blocked:{traversal_err}"
-                _traversal_blocked_paths.append(str(row[2])[:120])
-            elif artifact_path.is_file() and (row[3] or 0) <= 256 * 1024:
-                with open(artifact_path, "rb") as f:
-                    payload_bytes = f.read(256 * 1024)
-                artifact["payload"] = json.loads(payload_bytes.decode("utf-8"))
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            artifact["payload_read_error"] = f"{type(exc).__name__}: {str(exc)[:80]}"
-        artifacts.append(artifact)
-
-    # Track C P0-5b + Track C P0-5a admin bypass audit emit.
-    if _traversal_blocked_paths:
-        _emit_audit_stub(
-            event_type="replay_artifact_path_traversal_blocked",
-            actor_id=actor_id, experiment_id=experiment_id, manifest_hash=None,
-            decision="blocked_path_traversal",
-            extra_payload={"blocked_count": len(_traversal_blocked_paths),
-                           "samples": _traversal_blocked_paths[:3]},
-        )
-    if _idor_admin_bypass:
-        _emit_audit_stub(
-            event_type="replay_idor_admin_bypass",
-            actor_id=actor_id, experiment_id=experiment_id, manifest_hash=None,
-            decision="admin_bypass_used",
-            extra_payload={"scope": "replay:read:any", "rows_returned": len(rows)},
-        )
-
-    # Run-level summary from JOIN'ed columns (rows[0] has run-level fields).
-    # JOIN 後的 run-level summary（rows[0] 含 run-level 欄位）。
-    run_summary: Optional[dict[str, Any]] = None
-    if rows:
-        first = rows[0]
-        run_summary = {
-            "run_id": first[6],
-            "status": first[7],
-            "exit_code": first[8],
-            "started_at_ms": int(first[9]) if first[9] is not None else None,
-            "completed_at_ms": int(first[10]) if first[10] is not None else None,
-        }
-
-    return _replay_response({
-        "experiment_id": experiment_id,
-        "manifest_id": manifest_uuid,
-        "run": run_summary,
-        "artifacts": artifacts,
-        "artifact_count": len(artifacts),
-        "wiring_status": "pg_path_active",
-    })
+    if http_err is not None:
+        status, detail = http_err
+        raise HTTPException(status_code=status, detail=detail)
+    return response
 
 
 @replay_router.get("/manifests")
@@ -1135,13 +1101,12 @@ async def post_manifest_verify(
     Auth: Operator + ``replay:write`` scope (signature verification can
     leak fingerprint timing; restrict to write-capable actors).
 
-    Wave 4 R20-P2b-T2 wiring: calls ManifestSigner.verify() backed by
-    the InMemoryKeyArchive (P2a-S2 module). Production path uses
-    SQL-backed KeyArchive once V042 lands and Wave 6 archive bridge
-    deploys.
-
-    Wave 4 R20-P2b-T2 接線：呼叫 ManifestSigner.verify()，由 InMemoryKeyArchive
-    （P2a-S2 模組）支撐。生產路徑要等 V042 land + Wave 6 archive 橋接。
+    REF-20 Sprint A R2-T3 (2026-05-04): production path uses
+    secrets-file fallback via ``manifest_signer.resolve_verify_key_source``
+    (TEST_KEY env > $OPENCLAW_SECRETS_DIR/<env>/replay_signing_key >
+    410 unprovisioned). Replaces prior 501 fallthrough.
+    REF-20 Sprint A R2-T3：production 路徑用 secrets file fallback 取代
+    501 fallthrough。
     """
     _require_replay_write(actor)
     actor_id = str(actor.actor_id)
@@ -1185,83 +1150,68 @@ async def post_manifest_verify(
         is_live_release_profile_fn=_is_live_release_profile,
         audit_emit_fn=_emit_audit_stub,
     )
-    if not test_key_hex:
-        # Production path: V042 SQL archive lookup not yet wired.
-        # 生產路徑：V042 SQL archive 尚未接。
+    # REF-20 Sprint A R2-T3: secrets-file fallback replaces 501 fallthrough.
+    active_key_bytes, secrets_fingerprint, wiring_status, key_err = (
+        _ms.resolve_verify_key_source(
+            test_key_hex=test_key_hex,
+            is_live_release_profile_fn=_is_live_release_profile,
+        )
+    )
+    if active_key_bytes is None:
         _emit_audit_stub(
             event_type="replay_manifest_verify_attempted",
-            actor_id=actor_id,
-            experiment_id=None,
+            actor_id=actor_id, experiment_id=None,
             manifest_hash=body.declared_hash_hex,
-            decision="not_implemented_archive_path",
-            extra_payload={
-                "fingerprint": body.fingerprint,
-                "signature_hex_prefix": body.signature_hex[:16],
-            },
+            decision="key_archive_not_provisioned",
+            extra_payload={"fingerprint": body.fingerprint,
+                           "signature_hex_prefix": body.signature_hex[:16],
+                           "key_err": key_err},
         )
-        raise HTTPException(
-            status_code=501,
-            detail={
-                "reason_codes": ["replay_verify_archive_not_wired"],
-                "message": (
-                    "manifest signature verification SQL archive (V042) "
-                    "not yet wired; set OPENCLAW_REPLAY_VERIFY_TEST_KEY for "
-                    "hermetic test or wait for Wave 6 archive bridge deploy"
-                ),
-            },
-        )
+        raise HTTPException(status_code=410, detail={
+            "reason_codes": ["replay_verify_key_archive_not_provisioned"],
+            "message": (
+                "manifest signature verification key archive not provisioned; "
+                "place key at $OPENCLAW_SECRETS_DIR/<env>/replay_signing_key "
+                "(helper_scripts/operator/generate_replay_signing_key.sh) or "
+                "set OPENCLAW_REPLAY_VERIFY_TEST_KEY for hermetic test"
+            ),
+        })
+    active_fingerprint = secrets_fingerprint or body.fingerprint
 
-    # Hermetic test path.
-    # Hermetic test 路徑。
+    # Verify path / 驗 path.
     try:
-        key_bytes = bytes.fromhex(test_key_hex)
-        signer = ManifestSigner.from_bytes_for_test(key_bytes, body.fingerprint)
+        signer = ManifestSigner.from_bytes_for_test(active_key_bytes, active_fingerprint)
         archive = InMemoryKeyArchive()
-        archive.upsert_key(body.fingerprint, key_bytes, KeyStatus.ACTIVE)
+        # body.fingerprint mismatch active_fingerprint (secrets path) →
+        # KEY_MISSING fail-closed. fingerprint 不符 fail-closed。
+        archive.insert(body.fingerprint, KeyStatus.ACTIVE)
         signer.verify(
-            canonical_bytes,
-            body.declared_hash_hex,
-            body.signature_hex,
-            body.fingerprint,
-            archive,
+            canonical_bytes, body.declared_hash_hex,
+            body.signature_hex, body.fingerprint, archive,
         )
         _emit_audit_stub(
             event_type="replay_manifest_verify_attempted",
-            actor_id=actor_id,
-            experiment_id=None,
+            actor_id=actor_id, experiment_id=None,
             manifest_hash=body.declared_hash_hex,
-            decision="verified_test_path",
+            decision=f"verified:{wiring_status}",
             extra_payload={"fingerprint": body.fingerprint},
         )
-        return _replay_response({
-            "verified": True,
-            "fingerprint": body.fingerprint,
-            "wiring_status": "test_key_path",
-        })
+        return _replay_response({"verified": True, "fingerprint": body.fingerprint,
+                                 "wiring_status": wiring_status})
     except ValueError as exc:
         # ManifestSigner.verify raises ValueError(SignatureFailMode.X.value).
-        # ManifestSigner.verify 透過 ValueError(SignatureFailMode.X.value) 表失敗。
         fail_mode = str(exc)
         _emit_audit_stub(
             event_type="replay_manifest_verify_attempted",
-            actor_id=actor_id,
-            experiment_id=None,
+            actor_id=actor_id, experiment_id=None,
             manifest_hash=body.declared_hash_hex,
             decision=f"failed:{fail_mode}",
-            extra_payload={
-                "fingerprint": body.fingerprint,
-                "fail_mode": fail_mode,
-            },
+            extra_payload={"fingerprint": body.fingerprint, "fail_mode": fail_mode},
         )
         return _replay_response(
-            data={
-                "verified": False,
-                "fingerprint": body.fingerprint,
-                "fail_mode": fail_mode,
-                "wiring_status": "test_key_path",
-            },
-            degraded=True,
-            reason=f"verify_failed:{fail_mode}",
+            data={"verified": False, "fingerprint": body.fingerprint,
+                  "fail_mode": fail_mode, "wiring_status": wiring_status},
+            degraded=True, reason=f"verify_failed:{fail_mode}",
         )
 
 
@@ -1483,6 +1433,7 @@ __all__ = [
     "ReplayRunRequest",
     "ReplayCancelRequest",
     "ReplayManifestVerifyRequest",
+    "ReplayExperimentRegisterRequest",
     "GLOBAL_ACTIVE_RUN_CAP",
     "PER_ACTOR_ACTIVE_RUN_CAP",
     "MANIFEST_TTL_DAYS",

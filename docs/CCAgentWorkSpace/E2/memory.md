@@ -6,6 +6,48 @@
 - 測試基準：2614 passed（Sprint 0 TD-1 後）；Sprint 1a+1b 全部通過後預期 2623 passed
 - 系統模式：demo_only
 
+## 2026-05-04 — REF-20 Sprint A R2 round 2 verification（CONDITIONAL PASS to E4）
+
+**結論**：CONDITIONAL PASS to E4 — 13 fix 全 IMPL 真改 + 數據對得上 + sibling 97 PASS / Track C 13 PASS / control_api_v1 3478 PASS / 1 PRE-EXISTING flaky；但**3 NEW finding 不阻 E4**（1 MEDIUM dead-state + 1 MEDIUM enum-oracle + 2 LOW）必交 E1 round 3 / R3 dispatch 前順手清。
+
+**13 fix verdict**：
+- H-1/H-2/H-3/H-4 all PASS（cache module-level + hash mismatch 409 + report_route.py 421 LOC NEW + 0o600 mode check）
+- M-1/M-2/M-3/M-4 all PASS（live_demo allowlist + slowapi 10/min rate limit + 503 fail-closed + reserved prefix validator）
+- L-1 PASS（timezone import 移除）
+- L-2 ⚠ **NEW LOW L-P3-TICKET-MISSING**：E1 §10.6 自報 P3 ticket P3-PYDANTIC-V2-MIGRATE-REPLAY 但 grep TODO.md / E1/memory.md 0 hit，與 round 1 P2-AUDIT-V044 + LG5-W3-FUP-1 同 anti-pattern
+
+**3 NEW finding**：
+1. **M-DEAD-LOCK MEDIUM**：`_REGISTER_IDEM_CACHE_LOCK = asyncio.Lock()` (`experiment_registry.py:138`) 0 callsite。模組頂部注釋（line 116-117/134）+ CLAUDE.md §九 line 404 都宣稱有 asyncio.Lock 序列化，**但實際全用 `_REGISTER_IDEM_CACHE_THREAD_LOCK`**。注釋 + §九表 vs 實際 callsite 漂移會誤導未來 maintainer。Fix：刪 dead lock + 修注釋 + 修 §九 entry。
+2. **M-IDOR-ENUM MEDIUM**：H-3 fix 後 `/report` 用 `lookup_registered_experiment_id`（無 actor filter）→ 404 vs 200 empty 形成 enumeration oracle。E1 §10.10 給 E3 留問已提但未實作。Fix：unify 404 with `replay_experiment_not_found`（GitHub private/public 對 unauthorized 一律 404 industry pattern）。
+3. **L-P3-TICKET-MISSING / L-RATE-LIMIT-WIRING**：見上 + per-actor rate limit 真正生效需 ASGI middleware（當前 fallback IP 對企業共用 NAT 環境誤殺合法 actor，advisory only 不阻 round 2）。
+
+**對抗反問結論**：
+- **Multi-worker fallback PASS**：cache miss 跨 worker → PG advisory xact lock + DB single source of truth 兜底；race-safety 不破，cache hit% 退化 acceptable
+- **Unauthenticated rate limit safe**：`getattr` 雙 None-safe 不觸發 AttributeError
+- **IDOR retain on /report**：`build_report_idor_sql_fn` 真守 V046；Track C 13 PASS 包覆
+- **xlang invariant byte-equal PASS**：H-1 fix 不改 canonical bytes 計算路徑
+
+**LOC + R3 dispatch margin 評估**：
+- replay_routes.py **1443** ≤ 1500 (57 LOC margin) ✓
+- experiment_registry.py 972 / manifest_signer.py 757 / report_route.py 421 (NEW) / route_helpers.py 1249（E1 §10.10 自承未動，與 round 1 1480 差 -231 是 known measurement uncertainty，PM commit 前查 diff）
+- R3 dispatch 預估 +30 thin handler → ~1473 ≤ 1500 ✓
+- 建議 R3 dispatch 前 E1 round 3 順手做：(1) 修 M-DEAD-LOCK ~10 LOC (2) 修 M-IDOR-ENUM ~5 LOC (3) 補 P3 ticket ~3 line
+
+**E4 接手條件**：
+- ssh trade-core 跑 Linux 端 -k replay 對齊 97 PASS + control_api_v1 3478 PASS
+- V049-V054 schema deploy 確認（Sprint 1 Track D + Sprint 3 Track I 已 land）
+- 5 manual smoke：register idempotency / replay attack 409 / engine_sha 503 / 0o644 mode 410 / register→run→report 三連 200
+- xlang fixture 8 PASS
+
+**Lessons learned**：
+1. **`asyncio.Lock` 定義 + 注釋不等於 callsite**：對抗 grep `<lock_var>` 命中行數 = 「定義 + 注釋」 vs 「callsite」是 pattern；下次 review 必數 callsite 行數判 dead state。Round 2 同 pattern 命中 `_REGISTER_IDEM_CACHE_LOCK`（4 hit 全是 def + comment，0 use）。
+2. **CLAUDE.md §九 表 entry 與實際 race-safety 不一致**：表登記 race-safe 機制必對應真實 callsite，否則表變 documentation theatre。
+3. **`/report` 改用真實 V049 lookup 隱含 enumeration oracle**：跨 route consistency fix（H-3）正確但**需配對 unify response surface**避 oracle；不能只看「修了原 bug」就放行。
+4. **E1 「§10.6 加 P3 ticket」≠ 真進 TODO.md** 第三次 pattern（前 LG5-W3-FUP-1 + Sprint 1 P2-AUDIT-V044）：dispatch retrofit 必明文要求 E1 修 TODO.md + grep 自驗。
+5. **measurement uncertainty 標記要早**：route_helpers.py 1249 vs round 1 1480 差 -231，E1 自己也標「PM commit 時驗該檔 diff」← 這是健康的 self-flag pattern，不是 dishonesty；E2 接受並 cross-check on PM commit。
+
+**report**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-04--ref20_sprint_a_r2_e2_review.md`
+
 ## 2026-05-04 — REF-20 Sprint A R1 adversarial review（RETURN to E1）
 
 **結論**：RETURN to E1 — 1 HIGH + 4 MEDIUM + 3 LOW · 0 CRITICAL · sibling 31/31 PASS + 新 unit test 5/5 PASS

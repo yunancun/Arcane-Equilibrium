@@ -250,6 +250,31 @@ def resolve_artifact_output_dir(run_id: str) -> Path:
 # ─── PG advisory lock helpers / PG advisory lock 輔助 ────────────────
 
 
+def lookup_registered_experiment_id(cur: Any, experiment_id_text: str) -> Optional[str]:
+    """SELECT experiment_id FROM replay.experiments WHERE id = %s::uuid FOR SHARE.
+    SELECT experiment_id FROM replay.experiments WHERE id = %s::uuid FOR SHARE。
+
+    REF-20 Sprint A R2-T2 (2026-05-04). Replaces UUID5 derivation in
+    ``post_replay_run`` ``_do_pg_path`` so the V052 FK redirect resolves
+    cleanly. ``FOR SHARE`` row-locks the registered manifest within the
+    caller's xact to prevent register/delete race.
+
+    REF-20 Sprint A R2-T2：取代 ``post_replay_run`` ``_do_pg_path`` 的
+    UUID5 衍生使 V052 FK 對齊；``FOR SHARE`` 防 register/delete race。
+
+    Returns / 回傳:
+        ``str`` (uuid stringified) on registered hit; ``None`` else.
+        Caller surfaces ``replay_experiment_not_registered`` 400 on None.
+    """
+    cur.execute(
+        "SELECT experiment_id FROM replay.experiments "
+        "WHERE experiment_id = %s::uuid FOR SHARE;",
+        (experiment_id_text,),
+    )
+    row = cur.fetchone()
+    return str(row[0]) if row else None
+
+
 def try_acquire_pg_advisory_locks(
     cur: Any, actor_id: str
 ) -> Tuple[bool, Optional[str]]:
