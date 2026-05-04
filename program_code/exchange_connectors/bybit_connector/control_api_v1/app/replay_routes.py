@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """REF-20 Paper Replay Lab — 8 routes wired to T1 binary + PG advisory lock.
 REF-20 Paper Replay Lab — 8 路由接 T1 binary + PG advisory lock。
 
@@ -28,9 +26,19 @@ MODULE_NOTE (中):
     Sprint 1 Track C E2 retrofit 把 P0-2 / P0-4 / P0-5 安全 helper 移至
     sibling ``replay/security_guards.py``，符合 §九 1500 LOC cap。
 
+CRITICAL — DO NOT add ``from __future__ import annotations`` to this module.
+重要 — 本模組嚴禁加回 ``from __future__ import annotations``。
+    Sprint A R3 hotfix 2026-05-04: Linux Python 3.12 + FastAPI signature inspection
+    on lazy-imported Pydantic body classes (e.g. ``ReplayExperimentRegisterRequest =
+    _er.ReplayExperimentRegisterRequest`` re-bind) fails ForwardRef resolution under
+    PEP 563 → FastAPI fallback treats ``body:`` as Query → 100% 422 missing body.
+    Mac Python 3.10 PASS was false-positive. Fix = eager-resolve at module load.
+    Linux py3.12 + FastAPI 對 lazy-import Pydantic body 在 PEP 563 下 ForwardRef
+    解析失敗，fallback 把 body 當 Query → 422 missing body。修法 = eager 解析。
+
 SPEC: REF-20 V3 §3 G3/G7 + §6 + §12 #3/#14/#22 binding
 Workplan: docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md §4 Wave 4
-Dispatch: docs/execution_plan/2026-05-03--ref20_wave2_dispatch_v1.md §6 v1.1 Option C
+Hotfix:   Sprint A R3 round 3 hotfix 2026-05-04 (Linux py3.12 422 bug)
 """
 
 import asyncio

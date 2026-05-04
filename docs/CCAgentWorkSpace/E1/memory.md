@@ -4645,3 +4645,82 @@ Round 1 sign-off 出後 E2 + E3 並行 review。E2 verdict 0 BLOCKER / 0 HIGH / 
 ### 報告路徑
 
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（§11 round 2 fix log appended）
+
+---
+
+## 2026-05-04 — Sprint A R3 Round 3 CRITICAL HOTFIX：Linux Python 3.12 FastAPI 422 bug
+
+### 任務
+
+PA brief 派發：Mac Python 3.10 false-positive PASS 揭露後，Linux Python 3.12 上 100% Pydantic-body POST routes 422 missing body；QA Linux smoke E2E BLOCKED。Operator decision Option A：刪 `replay_routes.py:1` 一個檔的 `from __future__ import annotations`，最小 surgical fix。E2/E3/E4 review 不重派。
+
+### Root cause（PA 裁定）
+
+Python 3.12 + FastAPI 對 lazy-imported（line ~188 `_er` re-bind） + `from __future__ import annotations` 的 Pydantic body class 做 signature inspection 時 ForwardRef 無法 resolve → fallback 把 body 視為 Query parameter → 422 with `loc:["query","body"]`。Mac Python 3.10 `typing.get_type_hints` introspection 早期版本容忍 PEP 563 lazy-rebind ForwardRef 是 false-positive 機制。
+
+### Diff（單檔 1 行 surgical）
+
+| 檔 | Round 2 後 | Round 3 hotfix 後 | Δ |
+|---|--:|--:|--:|
+| `app/replay_routes.py` | 1491 | 1499 | +8 |
+
+- **Before** (line 1)：`from __future__ import annotations`
+- **After** (line 1)：`"""REF-20 Paper Replay Lab — 8 routes wired to T1 binary + PG advisory lock.`（直接 docstring）
+- **加防禦性 hotfix 警告塊**（docstring 內）：明文「DO NOT add `from __future__ import annotations` to this module」+ root cause 雙語 + SPEC reference + Hotfix marker，防 future maintainer 誤加回。
+
+### Forward-ref 殘餘檢查（grep 證明 0 break）
+
+- `def ... -> X` 19 處 return type：全為 already-imported（`None`/`bool`/`str` builtin + `Tuple/Optional/Path/Any` typing+pathlib import + `dict[...]` PEP 585 builtin）
+- `body: X` 4 處 Pydantic body annotation：3 個 from `replay_models` direct import + 1 個 `_er.ReplayExperimentRegisterRequest` re-bind（`_er` 已在 line ~59 try/except import 完成）
+- `^class ` 0 hit（0 local class defined）
+- `: "[A-Z]..."` 0 hit（0 string forward annotation）
+- AST parse OK
+
+### 驗證結果
+
+| 環境 | Test set | 結果 | Brief expectation |
+|---|---|---|---|
+| Linux py3.12 | 8 file 集 | **63 PASS** | ≥ 58 ✅ |
+| Linux py3.12 | full `-k replay` | 115 PASS / 3 fail (pre-existing) | ≥ 118 ⚠️（115/118 = 97.5%；3 fail 是 pre-existing fixture bug，git stash 雙向驗證）|
+| Linux py3.12 | R3 round 1+2 dedicated | 20 PASS | 20 ✅ |
+| Linux py3.12 | full pytest | 3466 PASS / 5 fail (pre-existing) / 34 skip | 0 hotfix regression ✅ |
+| Mac py3.10 | `-k replay` | 118 PASS | 不退（regression check）✅ |
+| Mac py3.10 | R3 round 1+2 | 20 PASS | 不退 ✅ |
+
+**0 fail 歸屬本 hotfix**。Linux 5 pre-existing fail 構成：
+- 3× `test_replay_routes_auth.py` — fixture 用非 UUID `experiment_id="exp-2026-05-03-test"`，PG schema UUID column 拒收 → P2-R3-FOLLOW-UP-6 處理
+- 1× `test_grafana_data_writer.py` — Linux-only pre-existing
+- 1× `test_replay_routes_safe_query_audit.py` — Mac 也 fail，pre-existing per R2 sign-off §7
+
+### git stash 雙向驗證（pre-existing 證明）
+
+關鍵診斷技術：當 Linux 顯示 hotfix 後新出現 3 fail 時，**先 `git stash` 我的 hotfix → re-run test → 觀察**。stash 後同樣 3 fail 仍存在 → 確認 pre-existing，不是我引入。stash pop 後 hotfix 復原。**Lesson**：CC 在 multi-env diff scenario 下要會用 stash 做「可逆 A/B 測試」隔離自己的修改 vs 環境差異，避免錯誤背鍋。
+
+### Commit-aware Linux 驗證（不違 PM 統一 commit 約束）
+
+PA brief 約束「禁 commit（PM 統一 commit）」+ 我又需要 Linux pytest evidence。解法：用 `scp <local file> trade-core:<linux path>` 把 hotfix file 推到 Linux working tree（不通過 git），驗完 test 後留 working tree dirty 等 PM commit 後 `git pull --ff-only` 重置。**Lesson**：Mac CC 為 SSOT 但 PM 統一 commit 規則下，scp 是繞過 git 直驗 Linux 的合法手段；不取代 PM commit + Linux pull。
+
+### 加 follow-up ticket
+
+- **TODO P0-OPS-PROCESS-1** ⚠️ E4 sign-off SOP 必加 Linux pytest 步驟（不只 Mac）— Mac PASS ≠ Linux PASS。修法：E4 SOP 加 PM commit pre-check 階段「Linux pytest 必綠（透過 SSH bridge）」步驟
+- **TODO P2-R3-FOLLOW-UP-6** `tests/test_replay_routes_auth.py` 3 case fixture UUID bug 修
+- **TODO P2-R3-FOLLOW-UP-7** `app/replay_routes.py` 1499/1500 LOC margin 過薄，抽 hotfix 警告塊到 `replay/MAINTAINER_NOTES.md` 外部檔回收 ~7 LOC margin
+
+### 關鍵設計決策
+
+1. **只動一個檔（PA brief 嚴格約束）** — 其他 17 個 `replay/*` module 不被 FastAPI 直接 introspect body，`from __future__ import annotations` 對它們無害，刪反而引入 forward-ref 風險。
+2. **加 docstring hotfix 警告塊（非 git tag / commit message only）** — future maintainer 看 file 開頭即知 PEP 563 ban 在這個 file 的 root cause。Git history 容易丟失上下文；in-source bilingual notice 是最強 anti-regression。
+3. **本 hotfix scope ≠ test_replay_routes_auth.py 修** — 該 file 3 case fail 是 pre-existing fixture bug，雖被 hotfix 揭示但邏輯不歸屬本 hotfix。混入會讓 hotfix scope 失控。
+
+### 關鍵教訓
+
+1. **Mac/Linux Python 版本 drift 是真實 false-positive 風險** — Python 3.10 `typing.get_type_hints` 對 PEP 563 lazy ForwardRef 容忍；Python 3.12 strict。Sprint A R1+R2+R3 三個 wave 全部 hermetic test 在 Mac PASS 但 Linux 真實 fail，sign-off 流程不抓到。**Lesson**：E4 必跑 Linux pytest，不只 Mac；TODO P0-PROCESS-1 加入。
+2. **single-line surgical fix 最高 leverage** — 1 line 刪除 + 9 line 防禦注釋 = 解開 Sprint A 3 wave 全部 hermetic test 在 Linux 的 422 bug。複雜 root cause 不一定要複雜 fix；找對 trigger point 即可。
+3. **`from __future__ import annotations` + FastAPI 是已知 anti-pattern** — Pydantic body class 必須 eager-resolved at module load（FastAPI 用 `inspect.signature` + `typing.get_type_hints` 構造 schema）。任何 lazy-rebind / ForwardRef pattern 都會 break 這個合約。**Lesson**：Pydantic body file ≠ 純 typing-aware Python file，PEP 563 在這個場景下是惡魔。
+4. **scp 是 SSOT mac CC + PM commit 約束下的隔離驗證手段** — 用 scp 推 file 到 Linux 不過 git，跑 test 不需 commit。Linux working tree 留 dirty 等 PM commit 後 `git pull --ff-only` 重置。
+5. **git stash 雙向驗證 pre-existing vs regression** — Linux 出新 fail 不一定是我引入。`git stash → re-run test → 觀察 → stash pop` 是低 cost 高信度的隔離測試。
+6. **LOC cap 1 LOC margin 是技術債** — 1499/1500 過薄，下次任何 small docstring update 就破 cap。抽到外部 `MAINTAINER_NOTES.md` 是 P2 follow-up 防線。
+
+### 報告路徑
+
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（§12 round 3 hotfix log appended）
