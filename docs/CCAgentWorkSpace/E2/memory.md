@@ -1063,3 +1063,48 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 40. **wiring_status='ready' 但 schema 缺：monitoring 在說謊** — REF-20 Sprint A R1 round 1 LOW-2：`compute_replay_health_state` 原邏輯只看 `binary_exists + pg_present + data_dir_writable`，PG up 但 V045 / V049 缺仍回 ready；`/run` 在第一筆 INSERT INTO replay.run_state 失敗。E1 round 2 fix 加 `elif not v045_present or not v049_present: wiring_status = "degraded"` rule + 3 unit test mock rows=[(False,True)] / [(True,False)] / [(True,True)]。**抽象 review pattern**：health endpoint 的 ready 條件 = downstream 第一筆操作能成功的 superset；health 撒謊比 health 標 degraded 更危險（前者讓 monitoring 沉默，後者只是 alert noise）。
 
 41. **focused round 2 scope 紀律：不重審已 cleared 的部分** — Round 2 verification 嚴格收斂在 round 1 finding 的 fix verdict，不重做 round 1 全 audit；對 round 1 已 PASS 的 R1-T2 / R1-T4 不再 grep / 不重跑 audit script（除非 sibling regression 觸發）。對 round 1 RETURN 的 5 finding 逐一驗 fix presence + 跑對應 regression test + 對抗反問。**抽象 review pattern**：multi-round review 後續 round = pin-point fix verification，不要把 scope 擴回全 audit；E2 對抗範圍只擴增「fix 是否引入新 issue」，不重審無關項。Round 2 結論 0 new finding → PASS to E4 直接放行。
+
+42. **REF-20 Sprint A R3 Round 6 review (2026-05-05) — RETURN to E1 / 1 HIGH + 1 LOW + 0 BLOCKER**：
+
+**對象**：T1+T2+T3a+T4 4 task in round 6 — `route_helpers.py` 1249 → 1485 (real HMAC sign + stderr capture + fixture env fallback) / `restart_all.sh` 470 → 492 (env injection) / 4 new test files (T4-1 to T4-4).
+
+**Verdict**：RETURN to E1 — 1 HIGH（FINDING-1：env override step 1 缺 live profile gate）+ 1 LOW（FINDING-2：spawn_died_early 503 detail leak stderr excerpt 含 path/fingerprint）
+
+**驗證手段**：
+1. `grep -rn "placeholder_signature_wave6\|placeholder_hash_wave6\|placeholder_key_ref"` production code path 0 hit（5 hits 全在 MAINTAINER docstring + test assertion）
+2. `grep "stderr=subprocess.DEVNULL"` in spawn_replay_runner — 0 hit（已換 `stderr=stderr_fh`）
+3. `grep -E '(/home/ncyu|/Users/ncyu)'` 6 文件 — 0 hit（cross-platform clean）
+4. Cross-language byte-equal invariant — Rust manifest_signer.rs:574 `ENVELOPE_KEYS_FOR_SIGNING` 3 keys 對齊 Python L707；Rust replay_runner.rs:544-547 `manifest_path.parent / "key.hex"` 對齊 Python L969 sibling key.hex 寫入路徑；Rust L480 `compute_key_fingerprint(file_content)` 對齊 Python L802 ✓
+5. Python `pytest -k xlang_consistency` 13/13 PASS（Sprint 1 F1 retrofit canonical bytes contract intact）
+6. Python `pytest -k replay` 141 PASS / 1 skip / 3387 deselected / 0 fail（baseline 118 + 23 new R3-R6 = 141）
+7. R3-R6 4 new test 23/23 unit case PASS（11 + 7 + 5 = 23 unit；T4-4 e2e smoke 1 skip opt-in）
+8. `bash -n restart_all.sh` syntax PASS
+9. Singleton 表：4 新 module-level constant 全 immutable str/tuple 不需登記
+10. LOC：route_helpers.py 1485 < 1500 hard cap ✓（但 800 警告線 Wave 4 已破；R7+ 必拆 manifest_provisioning.py）
+11. SEEK_END tail cap 演算法數學驗證：64KB → 2048 char tail，正確
+12. subprocess fd safety：parent stderr_fh 在 try/finally close（child 持自身 dup fd），exception path 也 close ✓
+
+**FINDING-1 (HIGH)** — `_resolve_manifest_signing_key()` step 1 `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env override 缺 live profile gate：
+- 位置：`route_helpers.py:765-803`
+- 問題：production live profile 下，operator/attacker 設此 env 指向任意 path（任意 mode、任意 symlink）會繞過 R2-T3 step 2 既有的 mode 0o600 + symlink-injection guard + path traversal guard。Step 1 完全沒檢查 file mode、沒做 symlink resolve、沒 fail-closed。
+- PA design §7 Q2 + §5 E3 #3 自承「dev/test only path」「Live profile 守門由 (b) R2-T3 既有 mode/symlink 邏輯涵蓋」— 但 step 1 在 step 2 之前，且 step 1 完全沒 live profile gate，PA 描述與實作不一致。
+- 對齊 Sprint 1 Track C P0-2 模式：`OPENCLAW_REPLAY_VERIFY_TEST_KEY` 在 production 由 `is_live_release_profile()` 阻斷；本 round 新增的 `OPENCLAW_REPLAY_SIGNING_KEY_FILE` 是同類測試/dev override env 但**沒對齊** P0-2 gate。
+- 修法（簡單 + minimal）：step 1 開頭加 `if is_live_release_profile() and override_path_str: log.warning + raise ValueError("signing_key_file_env_override_blocked_in_live_profile")`，與 P0-2 模式對齊。或 step 1 沿用 R2-T3 mode/symlink/path-traversal 檢查（更厚的縱深防禦）。
+- 影響：Replay Lab 不 live trade，但仍是 secret leak 設計 hole；CLAUDE.md §九 SEC-08 嚴禁類似 bypass pattern。
+
+**FINDING-2 (LOW)** — spawn_died_early 503 detail leak path/fingerprint：
+- 位置：`replay_routes.py:678` + `route_helpers.py:628-630`
+- 問題：spawn_died_early reason 含 256 byte stderr excerpt，被 raise HTTPException(detail=`replay_runner failed to spawn: {pg_err}`) leak 給 API client。stderr 內容主要是 server-side 已知資訊（output_dir absolute path、fingerprint、verify mode label），不含 OS secret / API key。但仍違反 CLAUDE.md §九 SEC-04 「detail=str(e) → 'Internal server error'」原則 + IDOR 線索（path leak）。
+- 修法：reason_code 可保留 `spawn_died_early:exit=N`（無 stderr excerpt）；stderr 完整內容**只寫 server-side log + replay_runner.stderr disk file**；503 detail 只標 `replay_runner_spawn_failed` reason_code + opaque message。stderr file 已落 disk 給 operator post-mortem，不需 leak 給 API client。
+- 嚴重性 LOW：實際可能洩漏的是 absolute path / fingerprint hex，無 secret value；但收緊符合 SEC-04 原則。
+
+**E2 教訓 / 反模式提醒**：
+
+1. **dev/test override env 在 production 的 default behaviour 是「unguarded bypass」** — Round 6 新 env `OPENCLAW_REPLAY_SIGNING_KEY_FILE` 沿用 R2-T3 secrets-dir 守門設計，但 step 1 env override **直接讀檔不檢 mode / symlink** = production live profile 下守門整片崩。PA design 自證「dev/test only path」與**實作**不一致 — 實作在 production runtime 沒任何 gate 就讀任意路徑。Sprint 1 Track C P0-2 已立過 pattern：`OPENCLAW_REPLAY_VERIFY_TEST_KEY` 必須由 `is_live_release_profile()` 阻斷。**抽象 review pattern**：任何「dev/test only」env override 都必須有 explicit live profile gate 阻斷 production 啟用，否則就是繞門。E2 對 R3-R6 同類設計 pattern 必查 production gate 是否存在，不接受 docstring 自證「dev only」。
+
+2. **HTTPException detail 含 subprocess output 是 SEC-04 灰色地帶** — Round 6 為了 operator 不 ssh manual reproduce，把 stderr 256 byte excerpt 放進 503 detail message。stderr 主要 server-side path / fingerprint 不含 OS secret，但**任何來自外部 process 的 byte string 進 detail JSON 都應視為潛在 leakage**（反 SEC-04 原則）。stderr disk file 已存 → 503 detail 只需 reason_code + opaque message + 提示 operator check disk file 即可；不需 inline stderr。**抽象 review pattern**：subprocess stderr 進 503 detail 是反模式；server-side 寫 disk + 提示 operator 路徑是正解。
+
+3. **canonical_bytes contract reuse 無 drift 是不變量釘住的範例** — Sprint 1 F1 retrofit + 8/8 cross-language fixture regression test 持續鎖定 sort_keys + separators + ensure_ascii=False 三 kwargs；Round 6 T1 透過 import `compute_manifest_canonical_bytes` from experiment_registry + `ManifestSigner` from manifest_signer 完整重用 helper、不複製 kwargs，xlang 13/13 仍綠 — 是「複用既有 helper」優於「複製設定」的範本。R7+ 任何後續 sign-related 改動延續此 pattern。
+
+4. **SEEK_END tail cap 數學驗算很容易但常被忽略** — `_read_stderr_excerpt` `seek(0, 2) → tell() = size → seek(max(0, size - cap_bytes), 0) → read(cap_bytes)`，需獨立驗 64KB → 2048 char 的數學。本 round 驗算正確。**抽象 review pattern**：任何 seek/read tail cap 都當場跑 io.BytesIO sanity，比讀代碼快、誤差零。
+

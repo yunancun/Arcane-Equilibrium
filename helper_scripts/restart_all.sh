@@ -417,11 +417,34 @@ restart_api() {
     else
         engine_sha=""
     fi
+    # REF-20 Sprint A R3 Round 6 P2-A-NEW (2026-05-05): inject default
+    # replay fixture path env so /api/v1/replay/experiments/register payload
+    # (R4 UI) and CLI smoke runs can omit explicit fixture_uri and fall
+    # through to the in-tree synthetic fixture used by Sprint A smoke
+    # E2E. Production operator OVERRIDES with absolute path or supplies
+    # the fixture via register payload's manifest_jsonb.fixture_uri (the
+    # latter preempts this env in route_helpers.build_default_manifest_payload's
+    # fallback chain). Empty string fallback is acceptable when the
+    # in-tree fixture is absent (older deploy snapshot) — the register
+    # handler's body validator will surface 400 fixture_uri_missing instead
+    # of leaking a confusing path-not-found from the runner.
+    # REF-20 Sprint A R3 Round 6 P2-A-NEW（2026-05-05）：注入 default replay
+    # fixture path env，使 /experiments/register payload（R4 UI）與 CLI smoke
+    # 可省略 fixture_uri 走 in-tree synthetic fixture。Production operator
+    # 必 override 或於 register payload 顯式提供（後者優先）。空字串 fallback
+    # 可接受（舊 deploy snapshot 沒此 fixture 時，register 會 400 回明確
+    # fixture_uri_missing，不會散失）。
+    local replay_fixture_default
+    replay_fixture_default="$base_dir/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json"
+    if [ ! -f "$replay_fixture_default" ]; then
+        replay_fixture_default=""
+    fi
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \
+        OPENCLAW_REPLAY_FIXTURE_DEFAULT="$replay_fixture_default" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &

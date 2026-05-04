@@ -1586,3 +1586,59 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 **Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-04--ref20_sprint_a_task_dag.md`
 **File overlap warning**: `replay_routes.py` baseline+5 violation 風險 → R2 LOC 拆解設計已含於報告（無 PM override 不可 land）。
 
+
+## 2026-05-05 PA — REF-20 Sprint A R3 Round 6 Task DAG（real HMAC + stderr capture + fixture provisioning）
+
+**Trigger**：QA round 3 e2e smoke 揭第 4 層 blocker — `route_helpers.build_default_manifest_payload` 寫 placeholder signature/hash → Sprint 1 Track B fail-closed verifier 拒 → subprocess exit=1 → V046/V050 永遠 0 row。
+
+**根因 stack（按 spawn 時序）**：
+1. P0-NEW Placeholder signature collision — `placeholder_signature_wave6_v042_pending` + `placeholder_hash_wave6_v042_pending`（route_helpers.py L669-670）vs Rust `manifest_signer.rs:548-557` fail-closed sibling key.hex 缺即 hard error；即使 round 5 cp key.hex 進 output_dir，placeholder sig != HMAC(canonical_body, real_key) → SIGNATURE_MISMATCH。
+2. P0-NEW-INFRA stderr DEVNULL silent-dead — `route_helpers.spawn_replay_runner:549` `stderr=subprocess.DEVNULL`；任何 spawn fail 都需 ssh manual reproduce → 違反 CLAUDE.md §九 silent-dead 反模式。
+3. P2-A-NEW fixture_uri env — API process 仍缺 `OPENCLAW_REPLAY_FIXTURE_URI` 自動 fixture provision。
+
+**4-Task 設計（R3-R6-T1/T2/T3/T4）**：
+
+| Task | scope | LOC est | parallel? |
+|---|---|---|---|
+| T1 | `route_helpers.py::write_manifest_fixture` 真 HMAC sign（重用 R2-T3 `load_signing_key_from_secrets_dir` + `compute_manifest_canonical_bytes` + `compute_body_hash` + `ManifestSigner.sign`） | +85 | ❌ T1+T2+T3 同檔 |
+| T2 | `route_helpers.py::spawn_replay_runner` stderr→file + post-mortem read | +50 | ❌ |
+| T3a | restart_all.sh::restart_api() 加 export `OPENCLAW_REPLAY_FIXTURE_DEFAULT` + route_helpers fallback | +25 | ✅ 跨檔 |
+| T4 | tests（unit×3 + integration×1）+ E3 path allowlist 重審 | +250 | ✅ 跨檔 |
+
+**派工順序（serial 4 個 E1 commit）**：
+- Commit-1：T1+T2 同 E1（同檔 LOC ≤+135 接 baseline 1249→1384，仍 < 1500 硬限）
+- Commit-2：T3a 另一 E1（跨檔，可與 Commit-1 同時派但需等 Commit-1 land 才能 e2e 驗）
+- Commit-3：T4 第三 E1（純 test 可並行 Commit-2）
+- 串聯總 LOC：route_helpers.py 1249 → 1384（warning line 800 已破，但 wave 4 P2b-T2 已知接受；本 round 不加新警告）
+
+**T3 (a) vs (b) 推薦 = (a)**：
+- (a) restart_all 加 env export：對 production deploy + dev smoke E2E 都有效；不破 build_default_manifest_payload 既有 default `<output_dir>/fixture.json` semantic；不額外做 disk I/O（避免 cp 100MB+ fixture）；對 R4 UI integration 路徑也直接生效。
+- (b) write_manifest_fixture 自動 cp：多了一個 mkdir+copy 的失敗點；fixture_uri 從 hint 變強制；違背 manifest_jsonb 不可變式（client 提供的 fixture_uri 被靜默改寫）。
+
+**簽名 key 來源優先級（T1）**：(a) `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env override（dev/test 直接指 `key.hex`）→ (b) R2-T3 `load_signing_key_from_secrets_dir(env_label)` → (c) None → 寫 fail-closed marker 並回 ValueError 讓 caller 路徑進 503。**永不 fallback 回 placeholder**。dev/test smoke 路徑用 (a) 指 fixture key.hex；production live path 用 (b) 經 secrets_dir live profile 守門。
+
+**key.hex sibling 寫入語意（T1）**：write_manifest_fixture 在 sign 完成後 sibling write `<output_dir>/key.hex`（覆寫 round 5 cp 的副本，內容相同字節）；permission 寫 0o600（Mac umask 022 default 0o644 + Linux secrets dir 期望 0o600）；test override path（OPENCLAW_REPLAY_SIGNING_KEY_FILE）下 cp 來源 file content；secrets_dir path 下 hex-encode 從 32-byte raw key 重生成 file content（含 trailing newline 對齊 generate_replay_signing_key.sh：90/93/111 fingerprint 算法）。
+
+**Hidden risk**：
+- canonical_bytes contract drift — 必重用 既有 helper，禁複製 sort_keys/separators kwargs。
+- Pre-existing baseline exception clause (CLAUDE.md §九)：route_helpers.py 1249 → 1384 增 +135，未越 baseline+5 或 1500 硬限。
+- Mac/Linux portability：`os.chmod(0o600)` 在 Mac/Linux 都正常；fixture key.hex 已 git tracked 兩平台一致。
+- multi-worker uvicorn race — M-1 V045 FOR UPDATE 已修，本 round 不重複；T1 是 process-internal sign 不涉跨 worker 共享。
+
+**E2/E3/E4 重點**：
+- E2：(1) T1 簽名 key fallthrough 順序逐條對齊（不 fallthrough placeholder）；(2) T2 stderr_path 經 artifact_path_within_allowlist 守門；(3) canonical bytes contract 重用而非複製。
+- E3：path allowlist 對 stderr_path + key.hex sibling write 兩條新 disk write 路徑審計（T3 a 不寫 disk 跳過）。
+- E4：(1) integration test mock PG + 真 spawn replay_runner 端到端 4 表 row > 0（V045/V046/V050 + V054 audit）；(2) round 3 mock-only 假綠教訓（test 必 spawn 真 binary）。
+
+**PM open question 答案**：
+1. T3 (a) — 已答。
+2. 簽名 key 優先級 (a)→(b)→fail-closed — 已答。
+3. key.hex 寫 disk 0o600 — operator pre-deploy 問是否影響 Mac dev / 答：no, restart_all run-as-user 即可寫；dev mode 下 0o600 一樣有效。
+4. LOC 拆檔 — 1384 < 1500 硬限不必拆；若 R4 啟動 UI subtab 再評估抽 manifest_provisioning.py。
+
+**預期 R3 Round 6 commit 後 4 表達成路徑**：
+- V045 replay.run_state — pid + status='running' + completed_at + exit_code=0（spawn-then-poll 後 wait runner finish）
+- V046 replay.report_artifacts — replay_report.json 落盤 + INSERT 1 row
+- V050 replay.simulated_fills — runner walks fixture 6 events + INSERT N rows（evidence_source_tier='synthetic_replay'）
+- V054 replay.audit_trail — register/run/finalize 三 audit emit 各 1 row
+

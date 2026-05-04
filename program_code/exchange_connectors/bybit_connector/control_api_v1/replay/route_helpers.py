@@ -81,6 +81,8 @@ Wave 2 dispatch v1.1: docs/execution_plan/2026-05-03--ref20_wave2_dispatch_v1.md
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -493,13 +495,23 @@ def spawn_replay_runner(
 
     Returns / 回傳:
         (pid, None) on successful Popen + alive after poll;
-        (None, "binary_not_found") if binary path does not exist;
-        (None, "manifest_fixture_not_found") if manifest_fixture_path missing;
-        (None, "mkdir_error:<ExcName>") on output_dir mkdir failure;
-        (None, "spawn_error:<ExcName>") on Popen failure;
-        (None, "spawn_died_early:exit=<rc>") on early death within poll window
-            (binary exited non-zero before poll_grace_seconds elapsed —
-            typical of CLI schema mismatch, manifest hash drift, etc.).
+        (None, "binary_not_found") binary path does not exist;
+        (None, "manifest_fixture_not_found") manifest fixture missing;
+        (None, "mkdir_error:<ExcName>") output_dir mkdir failure;
+        (None, "stderr_path_outside_allowlist") stderr path escapes
+            artifact allowlist (defense-in-depth; should never trip);
+        (None, "stderr_open_error:<ExcName>") stderr file open failed;
+        (None, "spawn_error:<ExcName>") Popen failure;
+        (None, "spawn_died_early:exit=<rc>") early death within poll
+            window; reason_code intentionally generic per Round 7 FINDING-2
+            (§九 SEC-04); stderr excerpt persists to
+            ``<output_dir>/replay_runner.stderr`` for operator post-mortem
+            (verifier reason recoverable from disk, not leaked to client).
+
+    REF-20 Sprint A R3 Round 6 P0-NEW-INFRA (2026-05-05): stderr redirected
+    to ``<output_dir>/replay_runner.stderr`` (was ``DEVNULL``); subprocess
+    fail-closed reasons persist to disk for post-mortem. Prior DEVNULL
+    pattern silenced all Rust errors → forced operator manual reproduce.
     """
     bin_path = resolve_replay_runner_bin()
     if not bin_path.exists():
@@ -527,6 +539,20 @@ def spawn_replay_runner(
         log.warning("output_dir mkdir failed: %s", exc)
         return None, f"mkdir_error:{type(exc).__name__}"
 
+    # Round 6 P0-NEW-INFRA: stderr → disk file. Allowlist guard is
+    # defense-in-depth — output_dir is server-side resolved by
+    # ``resolve_artifact_output_dir(run_id)`` so should never trip.
+    # Round 6 P0-NEW-INFRA：stderr 寫 disk；output_dir 由 server-side resolve，
+    # allowlist 守門為縱深防禦。
+    stderr_path = output_dir / "replay_runner.stderr"
+    within, allowlist_err = artifact_path_within_allowlist(stderr_path)
+    if not within:
+        log.warning(
+            "stderr path failed allowlist guard: path=%s err=%s run_id=%s",
+            stderr_path, allowlist_err, run_id,
+        )
+        return None, "stderr_path_outside_allowlist"
+
     argv = [
         str(bin_path),
         "--manifest", str(manifest_fixture_path),
@@ -541,12 +567,21 @@ def spawn_replay_runner(
         if k in os.environ
     }
 
+    # Open stderr fh — child inherits fd via Popen; parent closes own fh
+    # after Popen so fd does not outlive runner.
+    # stderr fh — child 繼承 fd；parent Popen 後 close 自身防 fd 過長。
+    try:
+        stderr_fh = open(stderr_path, "wb")
+    except OSError as exc:
+        log.warning("stderr file open failed: path=%s exc=%s", stderr_path, exc)
+        return None, f"stderr_open_error:{type(exc).__name__}"
+
     try:
         proc = subprocess.Popen(  # noqa: S603 — argv static + bin path resolved
             argv,
             env=child_env,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fh,
             close_fds=True,
         )
     except (OSError, FileNotFoundError, PermissionError) as exc:
@@ -554,7 +589,18 @@ def spawn_replay_runner(
             "replay_runner Popen failed: %s (bin=%s)",
             exc, bin_path,
         )
+        try:
+            stderr_fh.close()
+        except OSError:
+            pass
         return None, f"spawn_error:{type(exc).__name__}"
+    finally:
+        # Close parent's copy of the fd; child kept its own copy via Popen.
+        # 關 parent 端 fd；child 透過 Popen 已持自身 copy。
+        try:
+            stderr_fh.close()
+        except OSError:
+            pass
 
     # Poll-then-INSERT 'running' (root cause #2 of REF-20 Sprint 1 Track A).
     # The previous flow trusted Popen to mean "alive"; Rust binary could
@@ -570,10 +616,16 @@ def spawn_replay_runner(
         time.sleep(poll_grace_seconds)
     rc = proc.poll()
     if rc is not None and rc != 0:
+        # Round 6 wrote stderr to disk for post-mortem; Round 7 FINDING-2
+        # decouples reason_code from stderr text (envelope-only) so 503
+        # detail JSON does not leak server-side absolute paths /
+        # fingerprint hex (§九 SEC-04). stderr excerpt 仍寫 server log，
+        # disk file ``replay_runner.stderr`` 為 operator 唯一診斷入口。
+        stderr_excerpt = _read_stderr_excerpt(stderr_path)
         log.warning(
             "replay_runner died early: pid=%d exit=%d run_id=%s "
-            "(likely CLI schema mismatch / manifest fail-closed)",
-            proc.pid, rc, run_id,
+            "stderr_path=%s stderr=%r",
+            proc.pid, rc, run_id, stderr_path, stderr_excerpt,
         )
         return None, f"spawn_died_early:exit={rc}"
     if rc is not None and rc == 0:
@@ -583,17 +635,49 @@ def spawn_replay_runner(
         # wait/UPDATE 假設 PID 仍活。
         log.warning(
             "replay_runner exited 0 within poll grace: pid=%d run_id=%s "
-            "(report should still be on disk)",
-            proc.pid, run_id,
+            "(report should still be on disk; stderr_path=%s)",
+            proc.pid, run_id, stderr_path,
         )
         return None, "spawn_died_early:exit=0"
 
     log.info(
         "replay_runner spawned + alive after poll: pid=%d run_id=%s "
-        "manifest_id=%s manifest=%s output_dir=%s",
-        proc.pid, run_id, manifest_id, manifest_fixture_path, output_dir,
+        "manifest_id=%s manifest=%s output_dir=%s stderr=%s",
+        proc.pid, run_id, manifest_id,
+        manifest_fixture_path, output_dir, stderr_path,
     )
     return proc.pid, None
+
+
+def _read_stderr_excerpt(stderr_path: Path, cap_bytes: int = 2048) -> str:
+    """Read tail of stderr file with 2KB cap + utf-8 decode (replacement).
+    讀 stderr 檔尾，2KB 上限 + utf-8 decode（不可解碼字元用 replacement char）。
+
+    REF-20 Sprint A R3 Round 6 P0-NEW-INFRA helper. Used by
+    ``spawn_replay_runner`` after early-death to surface verifier reason
+    in 503 detail. Returns ``<stderr_read_failed:ExcName>`` placeholder
+    on read failure so caller's reason_code stays well-formed.
+
+    REF-20 Sprint A R3 Round 6 P0-NEW-INFRA helper。用於早死路徑暴露
+    verifier 原因；讀失敗回 ``<stderr_read_failed:ExcName>`` placeholder
+    保 caller reason_code 形狀。
+    """
+    try:
+        if not stderr_path.exists():
+            return "<stderr_file_missing>"
+        # Read last cap_bytes bytes; for small files this is whole file.
+        # 讀尾 cap_bytes byte；小檔則為整檔。
+        with open(stderr_path, "rb") as fh:
+            try:
+                fh.seek(0, 2)  # SEEK_END
+                size = fh.tell()
+                fh.seek(max(0, size - cap_bytes), 0)
+            except OSError:
+                fh.seek(0)
+            data = fh.read(cap_bytes)
+        return data.decode("utf-8", errors="replace")
+    except OSError as exc:
+        return f"<stderr_read_failed:{type(exc).__name__}>"
 
 
 # ─── Manifest fixture writer + PID identity verifier / Manifest fixture 寫入器 + PID 身份驗證 ─
@@ -604,71 +688,203 @@ def spawn_replay_runner(
 # sibling key.hex archive 時亦相容）。
 MANIFEST_FIXTURE_FILENAME = "manifest.json"
 
+# Sibling key.hex filename (Rust replay_runner reads this exact name from
+# manifest's parent directory; mirrors layout used by
+# ``rust/openclaw_engine/tests/fixtures/replay_runner_e2e/``).
+# Sibling key.hex 檔名（Rust replay_runner 從 manifest 父目錄讀此檔；
+# 對齊 ``rust/openclaw_engine/tests/fixtures/replay_runner_e2e/`` 的 layout）。
+SIBLING_KEY_HEX_FILENAME = "key.hex"
+
+# Envelope keys that MUST NOT participate in the signing payload — mirror
+# Rust ``ENVELOPE_KEYS_FOR_SIGNING`` constant in
+# ``rust/openclaw_engine/src/replay/manifest_signer.rs:574``. Caller passes
+# the body dict (envelope keys absent) to ``compute_manifest_canonical_bytes``;
+# they are added back to the on-disk manifest dict AFTER signing.
+# 不得納入簽名 payload 的 envelope keys — 鏡像 Rust ``ENVELOPE_KEYS_FOR_SIGNING``
+# 常量。caller 將 body dict（不含 envelope）傳入 ``compute_manifest_canonical_bytes``；
+# 簽名完成後再將 envelope 三鍵 inject 回 disk manifest。
+ENVELOPE_KEYS_FOR_SIGNING = ("signature", "manifest_hash", "signature_key_ref")
+
+# Env var override for sign-time signing key file path. Highest priority in
+# ``_resolve_manifest_signing_key`` lookup chain; intended for dev / test
+# (pytest fixtures + smoke runs that point at an in-tree key.hex). Production
+# operator MUST rely on the secrets-dir fallback path.
+# Sign-time signing key 檔案路徑的 env override；查詢鏈最高優先；給 dev / test
+# 使用（pytest fixture + smoke run 指向 in-tree key.hex）。Production operator
+# 必走 secrets-dir fallback 路徑。
+SIGNING_KEY_FILE_ENV_VAR = "OPENCLAW_REPLAY_SIGNING_KEY_FILE"
+
+
+def _resolve_manifest_signing_key() -> Tuple[bytes, str]:
+    """Resolve sign-time HMAC-SHA256 key + fingerprint for manifest signing.
+    解析 sign-time HMAC-SHA256 key + fingerprint 給 manifest 簽名用。
+
+    REF-20 Sprint A R3 Round 6 (2026-05-05) — Sprint 1 Track B (commit
+    ``edf33c0``) hardened ``replay_runner.rs::load_and_verify_manifest`` to
+    FAIL-CLOSED on placeholder signatures. Round 5 still wrote placeholder
+    strings, so every spawn since Sprint 1 deploy died at
+    ``manifest_signer_verify_failed`` (V046/V050 stuck at 0 rows). Round 6
+    resolves a real key here; ``write_manifest_fixture`` then signs the
+    canonical body + drops sibling ``key.hex`` for Rust verify.
+
+    REF-20 Sprint A R3 Round 6（2026-05-05）— Sprint 1 Track B 把
+    ``load_and_verify_manifest`` 改 fail-closed 拒 placeholder；Round 5 仍寫
+    placeholder → 每次 spawn 早死。Round 6 解析真 key，
+    ``write_manifest_fixture`` 簽 canonical body + 落 sibling key.hex 給 Rust。
+
+    Priority / 優先級:
+      1. ``OPENCLAW_REPLAY_SIGNING_KEY_FILE`` env override (dev/test ONLY).
+         Round 7 (2026-05-05) FINDING-1: under live profile (=``is_live_release_profile()``
+         True) this path is hard-blocked → ``ValueError(
+         "signing_key_file_env_override_blocked_in_live_profile")``,
+         mirroring Sprint 1 Track C P0-2 ``OPENCLAW_REPLAY_VERIFY_TEST_KEY``
+         block. env set 但檔不可讀 → ``ValueError``（不 silent skip）。
+      2. ``$OPENCLAW_SECRETS_DIR/<env_label>/replay_signing_key`` via R2-T3
+         ``load_signing_key_from_secrets_dir``；``env_label`` 由
+         ``OPENCLAW_REPLAY_ENV_LABEL`` 控（default ``"demo"``，allowlist
+         {paper, demo, live, live_demo}）。
+      3. NULL → ``ValueError("manifest_signing_key_unavailable")`` →
+         caller 進 ``manifest_fixture_write_failed`` 503 路徑。
+
+    Returns ``(key_bytes, fingerprint)``：32 byte HMAC key + 16 hex char
+    fingerprint = ``compute_key_fingerprint(file_content_bytes)``，與 Rust
+    replay_runner ``compute_key_fingerprint`` 對齊。
+
+    Raises ValueError: ``manifest_signing_key_unavailable`` 或 path-level
+        ``signing_key_file_{not_readable,invalid_length,invalid_hex,
+        invalid_encoding}``。
+
+    MAINTAINER WARNING：永不退化回 placeholder 路徑（Rust verifier
+    fail-closed）。E2/CR/QA 每次 edit 後必 grep
+    ``placeholder_signature_wave6`` / ``placeholder_hash_wave6`` 0 hit。
+    """
+    # Lazy import to avoid circular import at module load.
+    # 延遲 import 避免 module 載入時循環。
+    from .manifest_signer import (
+        compute_key_fingerprint,
+        load_signing_key_from_secrets_dir,
+    )
+
+    # Step 1: env override (dev/test only). Round 7 (2026-05-05)
+    # FINDING-1: live profile hard-blocks (mirrors Sprint 1 Track C P0-2
+    # ``OPENCLAW_REPLAY_VERIFY_TEST_KEY`` block; this file 1188-1205).
+    # Round 7 FINDING-1：live profile 下 env override hard-block，對齊
+    # P0-2 既有 pattern。
+    override_path_str = os.environ.get(SIGNING_KEY_FILE_ENV_VAR, "").strip()
+    if override_path_str:
+        if is_live_release_profile():
+            log.warning(
+                "signing key env override blocked under live profile: %s=%s",
+                SIGNING_KEY_FILE_ENV_VAR, override_path_str,
+            )
+            raise ValueError(
+                "signing_key_file_env_override_blocked_in_live_profile"
+            )
+        override_path = Path(override_path_str)
+        if not override_path.is_file():
+            raise ValueError(
+                f"signing_key_file_not_readable:{override_path_str}"
+            )
+        try:
+            file_content = override_path.read_bytes()
+        except OSError as exc:
+            raise ValueError(
+                f"signing_key_file_not_readable:{type(exc).__name__}"
+            ) from exc
+        try:
+            key_hex_str = file_content.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"signing_key_file_invalid_encoding:{type(exc).__name__}"
+            ) from exc
+        if len(key_hex_str) != 64:
+            raise ValueError(
+                f"signing_key_file_invalid_length:{len(key_hex_str)}"
+            )
+        try:
+            key_bytes = bytes.fromhex(key_hex_str)
+        except ValueError as exc:
+            raise ValueError(
+                f"signing_key_file_invalid_hex:{type(exc).__name__}"
+            ) from exc
+        # Fingerprint MUST hash the file content bytes AS-IS (including any
+        # trailing newline written by helper script) so it matches both the
+        # operator helper script (``generate_replay_signing_key.sh``) and
+        # the Rust runner's ``compute_key_fingerprint(key_file_content)``.
+        # fingerprint 必對 file content bytes 原樣 sha256（含 trailing newline），
+        # 才能與 helper script 與 Rust 端 ``compute_key_fingerprint`` 對齊。
+        fingerprint = compute_key_fingerprint(file_content)
+        return key_bytes, fingerprint
+
+    # Step 2: secrets-dir fallback (R2-T3 helper).
+    # 步驟 2：secrets-dir fallback（R2-T3 helper）。
+    env_label = (
+        os.environ.get("OPENCLAW_REPLAY_ENV_LABEL", "demo").strip() or "demo"
+    )
+    loaded = load_signing_key_from_secrets_dir(
+        env_label, is_live_release_profile_fn=is_live_release_profile,
+    )
+    if loaded is not None:
+        return loaded  # (key_bytes, fingerprint) tuple
+
+    # Step 3: fail-closed.
+    # 步驟 3：fail-closed。
+    raise ValueError("manifest_signing_key_unavailable")
+
 
 def build_default_manifest_payload(
     *,
     experiment_id: str,
     output_dir: Path,
 ) -> dict:
-    """Build the default manifest payload for Track A spawn flow.
-    構造 Track A spawn 流程預設 manifest payload。
+    """Build the default manifest BODY payload for Track A spawn flow.
+    構造 Track A spawn 流程預設 manifest BODY payload。
 
-    REF-20 Sprint 1 Track A — Wave 4 ``ReplayManifest`` struct reads 6
-    minimum fields (experiment_id / data_tier / fixture_uri / signature /
-    manifest_hash / signature_key_ref). Track A uses *placeholder* values
-    for signature/hash because Wave 4 ``load_and_verify_manifest`` falls
-    through with stderr warning when sibling key.hex archive is absent
-    (Wave 6 V042 SQL archive integration replaces with full HMAC verify).
-    ``run_id`` is added by ``write_manifest_fixture`` (NOT here) so this
-    payload is run_id-independent + cacheable.
+    REF-20 Sprint A R3 Round 6 (2026-05-05) — BODY-ONLY: Round 5 returned a
+    6-key dict including placeholder envelope; Sprint 1 Track B verifier
+    rejects placeholders. Round 6 returns only 3 body keys
+    (``experiment_id`` / ``data_tier`` / ``fixture_uri``); envelope
+    (``signature`` / ``manifest_hash`` / ``signature_key_ref``) is
+    computed + injected by ``write_manifest_fixture`` via real
+    HMAC-SHA256 over the canonical body bytes.
 
-    REF-20 Sprint 1 Track A — Wave 4 ``ReplayManifest`` struct 讀 6 個
-    最小欄位。Track A 用 *placeholder* 值給 signature/hash（Wave 6 V042
-    SQL archive integration 換實 HMAC verify）。``run_id`` 由
-    ``write_manifest_fixture`` 添加（**不**在此），使本 payload 與
-    run_id 解耦 + 可快取。
+    REF-20 Sprint A R3 Round 6（2026-05-05）— body-only：Round 5 回 6-key
+    dict 含 placeholder envelope；Sprint 1 Track B verifier 拒。Round 6
+    只回 3 body key；envelope 由 ``write_manifest_fixture`` 用真 HMAC-SHA256
+    簽 canonical body 後 inject。
 
-    Cross-language envelope contract / 跨語言 envelope 契約:
-        Three keys belong to the *envelope* (signature / manifest_hash /
-        signature_key_ref) and are stripped before signing. The body bytes
-        that ARE signed are the remaining keys re-serialized canonically
-        with sort_keys=True + separators=(',', ':') + ensure_ascii=False.
-        Rust mirror: ``rust/openclaw_engine/src/replay/manifest_signer.rs::
-        canonical_body_for_signing`` (constant ``ENVELOPE_KEYS_FOR_SIGNING``;
-        see line 574). Python sibling ``replay/manifest_signer.py::sign``
-        consumes the same canonical bytes shape (E2 finding F1 retrofit
-        invariant — ensure_ascii=False is critical because Python default
-        True would emit ``\\uXXXX`` for non-ASCII while Rust serde_json
-        emits raw UTF-8 → byte mismatch).
+    Cross-language contract: after ``write_manifest_fixture`` adds
+    ``run_id`` + envelope, disk fixture has 7 keys. Rust
+    ``canonical_body_for_signing`` strips envelope + serialises remaining
+    4 keys (BTreeMap sorted + compact) → byte-equal Python
+    ``compute_manifest_canonical_bytes``. 8/8 xlang regression test
+    (``test_manifest_signer_xlang_consistency.py``) locks this contract;
+    any kwargs / envelope-set change requires Python + Rust + fixture
+    sync.
 
-        三個 key 屬 envelope（簽名前剝除），其餘 key 用 sort_keys=True +
-        separators=(',', ':') + ensure_ascii=False 重序列化為簽名 body
-        bytes。Rust 鏡像見 ``rust/openclaw_engine/src/replay/manifest_signer.rs::
-        canonical_body_for_signing``（常量 ``ENVELOPE_KEYS_FOR_SIGNING``；
-        line 574）。Python ``replay/manifest_signer.py::sign`` 接同 canonical
-        bytes 形狀（E2 finding F1 retrofit 不變量 — ensure_ascii=False 為關鍵，
-        Python 預設 True 會輸出 ``\\uXXXX`` 而 Rust serde_json 輸出 raw
-        UTF-8 → byte 不等）。
+    Fixture URI fallback (R3-R6-T3):
+      1. ``OPENCLAW_REPLAY_FIXTURE_URI`` env override (operator/test).
+      2. ``OPENCLAW_REPLAY_FIXTURE_DEFAULT`` env (server-side default
+         from ``restart_all.sh``; points at in-tree synthetic fixture
+         for Sprint A smoke runs).
+      3. ``<output_dir>/fixture.json`` (legacy default; Rust errors if
+         absent — caller stages).
 
-    Args:
-        experiment_id: V045 experiment_id。
-        output_dir: per-run artifact 目錄；fixture_uri 預設指向 sibling
-            ``fixture.json``（caller 後續可由 OPENCLAW_REPLAY_FIXTURE_URI
-            env var 或 manifest dict mutation 覆寫）。
+    Returns dict with 3 body fields; no ``run_id`` (added by
+    ``write_manifest_fixture``), no envelope (signed + injected later).
 
-    Returns:
-        dict 含 6 個 minimum field（無 run_id；由 write_manifest_fixture 加）。
+    MAINTAINER WARNING：Round 5 placeholder envelope strings已永久退役；
+    E2/CR/QA edit 後必 grep ``placeholder_signature_wave6`` /
+    ``placeholder_hash_wave6`` 0 hit。
     """
     return {
         "experiment_id": experiment_id,
         "data_tier": "S3",
         "fixture_uri": (
             os.environ.get("OPENCLAW_REPLAY_FIXTURE_URI", "").strip()
+            or os.environ.get("OPENCLAW_REPLAY_FIXTURE_DEFAULT", "").strip()
             or str(output_dir / "fixture.json")
         ),
-        "signature": "placeholder_signature_wave6_v042_pending",
-        "manifest_hash": "placeholder_hash_wave6_v042_pending",
-        "signature_key_ref": "placeholder_key_ref",
     }
 
 
@@ -679,86 +895,97 @@ def write_manifest_fixture(
     output_dir: Path,
     fixture_filename: str = MANIFEST_FIXTURE_FILENAME,
 ) -> Path:
-    """Write manifest JSON fixture to ``output_dir / fixture_filename``.
-    寫 manifest JSON fixture 到 ``output_dir / fixture_filename``。
+    """Write signed manifest JSON fixture + sibling key.hex to ``output_dir``.
+    寫已簽名的 manifest JSON fixture + sibling key.hex 到 ``output_dir``。
 
-    REF-20 Sprint 1 Track A — Python writes the manifest the Rust runner
-    reads from ``--manifest <PATH>``. ``run_id`` is **embedded inside** the
-    manifest JSON (top-level ``run_id`` field) so the Rust side can
-    self-verify: ``manifest.run_id == output_dir.basename()`` invariant
-    (PA push back #2 — guards against Python/Rust UUID drift).
+    REF-20 Sprint A R3 Round 6 (2026-05-05) — REAL HMAC SIGN integration.
+    Round 5 wrote placeholder envelope; Sprint 1 Track B verifier (commit
+    ``edf33c0``) fail-closed rejects placeholders → spawn died at
+    ``manifest_signer_verify_failed`` → V045/V046/V050/V054 stuck at 0
+    rows. Round 6 5-step closure:
 
-    REF-20 Sprint 1 Track A — Python 寫 manifest 給 Rust runner 從
-    ``--manifest <PATH>`` 讀。``run_id`` **嵌入** manifest JSON 內
-    （頂層 ``run_id`` 欄位）使 Rust 端可自驗：``manifest.run_id ==
-    output_dir.basename()`` 不變量（PA push back #2 — 防 Python/Rust
-    UUID 漂移）。
+      1. Resolve real signing key via ``_resolve_manifest_signing_key()``.
+      2. Build canonical body bytes from ``{...manifest_data, run_id}``
+         (envelope ABSENT) via shared
+         ``experiment_registry.compute_manifest_canonical_bytes``.
+      3. Compute ``manifest_hash`` (SHA-256 hex) + ``signature``
+         (HMAC-SHA256 hex) via ``ManifestSigner.from_bytes_for_test``.
+      4. Write disk fixture: 7 keys = 3 body + ``run_id`` + 3 envelope,
+         sort_keys + compact + ensure_ascii=False so Rust
+         ``canonical_body_for_signing`` strips envelope → byte-equal
+         canonical body.
+      5. Drop sibling ``key.hex`` (0o600 mode); Rust runner reads from
+         ``manifest_path.parent() / "key.hex"`` (replay_runner.rs L544).
 
-    JSON serialisation contract / JSON 序列化契約 (E2 finding F1):
-        Disk-fixture bytes are written with ``sort_keys=True +
-        separators=(',', ':') + ensure_ascii=False`` so Rust serde_json
-        ``canonical_body_for_signing`` (after envelope strip) yields
-        byte-equal canonical body for HMAC verify. Three settings are all
-        load-bearing:
+    REF-20 Sprint A R3 Round 6（2026-05-05）— 真 HMAC sign 整合：Round 5
+    寫 placeholder envelope；Sprint 1 Track B verifier fail-closed 拒
+    placeholder → 每次 spawn 早死，V045/V046/V050/V054 卡 0 行。Round 6
+    5 步驟補完（解析 key → 算 canonical body → 簽 → 寫 disk + envelope →
+    落 sibling key.hex 0o600）。
 
-          * sort_keys=True       — alphabetical keys ↔ Rust BTreeMap default.
-          * separators=(',', ':') — compact ↔ Rust serde_json compact default.
-          * ensure_ascii=False    — raw UTF-8 ↔ Rust serde_json never escapes.
+    Cross-language contract:
+        Envelope 3 keys 簽前剝除；Python sign 時 dict 不含 envelope，簽完
+        才 inject 到 disk。Rust 讀 disk bytes 後重 canonicalize 必 byte-equal
+        Python 簽時的 bytes（自我引用會破壞 verify）。Disk write kwargs
+        對齊 ``compute_manifest_canonical_bytes``：sort_keys=True ↔ BTreeMap、
+        separators=(',', ':') ↔ serde_json compact、ensure_ascii=False ↔ raw
+        UTF-8 不 escape。8/8 xlang regression test 鎖此契約。
 
-        Without ``ensure_ascii=False`` Python default writes ``\\u6d4b\\u8bd5``
-        for U+6D4B U+8BD5 (测试) while Rust serde_json reads the
-        same characters but re-serialises them as raw UTF-8 bytes; the
-        canonical form would differ → HMAC verify fails permanently.
-
-        Rust contract reference:
-        ``rust/openclaw_engine/src/replay/manifest_signer.rs`` line 574-575
-        (``pub const ENVELOPE_KEYS_FOR_SIGNING: [&str; 3] = ["signature",
-        "manifest_hash", "signature_key_ref"]``) +
-        ``canonical_body_for_signing`` (line 594-625).
-
-        磁碟 fixture bytes 用 ``sort_keys=True + separators=(',', ':') +
-        ensure_ascii=False`` 寫入，使 Rust serde_json
-        ``canonical_body_for_signing`` 剝除 envelope 後 byte-equal 與
-        Python sign 路徑算 canonical body 結果。三項設定缺一不可
-        （sort_keys ↔ BTreeMap、compact ↔ serde_json default、
-        ensure_ascii=False ↔ raw UTF-8 不 escape）。
+    Sibling key.hex format: 64 hex char + trailing ``\\n``（對齊 helper
+    script ``generate_replay_signing_key.sh`` 的 ``printf '%s\\n'``）。Mode
+    0o600 對齊 production secrets dir 期望，防 Mac dev umask 022 default
+    0o644。``signature_key_ref`` = ``compute_key_fingerprint(file_content)``
+    (16 hex char)，與 Rust runner 對齊。
 
     Args:
-        run_id: V045 PK；強制 embed 到 manifest JSON。
-        manifest_data: 既有 manifest dict（會被 deep-copied 後加 run_id 鍵）。
-            Caller 提供 ``experiment_id`` / ``data_tier`` / ``fixture_uri`` /
-            ``signature`` / ``manifest_hash`` / ``signature_key_ref``；本函式
-            僅添加 ``run_id``，不改其他欄位。
+        run_id: V045 PK；embedded as top-level ``run_id`` (Rust self-verifies
+            ``manifest.run_id == output_dir.basename()``).
+        manifest_data: body dict from ``build_default_manifest_payload``;
+            MUST NOT contain envelope keys (defense-in-depth check below).
         output_dir: per-run artifact 目錄；不存在則 mkdir。
-        fixture_filename: 預設 ``manifest.json``（與 Rust e2e fixture 對齊）。
+        fixture_filename: 預設 ``manifest.json``。
 
-    Returns / 回傳:
-        Path 於落盤的 manifest JSON 檔案。
+    Returns Path of the written manifest（sibling ``key.hex`` 同目錄）。
 
     Raises:
-        ValueError: ``run_id`` 為空或 ``manifest_data`` 不是 dict。
-        OSError: mkdir 或 write 失敗（caller 由 spawn fail-closed 路徑捕獲）。
+        ValueError: ``run_id`` 空 / ``manifest_data`` 非 dict / envelope key
+            leak in input / signing key 不可解析（透傳
+            ``_resolve_manifest_signing_key`` 的 path-level 錯誤）。
+        OSError: mkdir / write 失敗（caller 由
+            ``manifest_fixture_write_failed`` 503 路徑捕獲）。
+
+    MAINTAINER WARNING：永不退化回 placeholder 路徑（Rust verifier
+    fail-closed）；E2/CR/QA edit 後必 grep ``placeholder_signature_wave6``
+    / ``placeholder_hash_wave6`` 0 hit。
     """
     if not run_id:
         raise ValueError("run_id must be a non-empty string")
     if not isinstance(manifest_data, dict):
         raise ValueError("manifest_data must be a dict")
+    # Defense-in-depth: stale Round-5 caller leaking envelope would cause
+    # canonical drift (Python signs with envelope, Rust verifies after
+    # strip) → ``signature_mismatch``. Fail-closed loudly.
+    # 縱深防禦：caller 漏遷移帶 envelope → canonical drift → 簽不過。
+    leaked = [k for k in ENVELOPE_KEYS_FOR_SIGNING if k in manifest_data]
+    if leaked:
+        raise ValueError(
+            f"manifest_data must not contain envelope keys: {leaked} "
+            f"(caller stale; rebuild via build_default_manifest_payload)"
+        )
+
+    # Lazy import to avoid circular import at module load.
+    # 延遲 import 避免 circular import。
+    from .experiment_registry import compute_manifest_canonical_bytes
+    from .manifest_signer import ManifestSigner, compute_body_hash
 
     output_dir.mkdir(parents=True, exist_ok=True)
     fixture_path = output_dir / fixture_filename
+    key_hex_path = output_dir / SIBLING_KEY_HEX_FILENAME
 
-    # Deep-copy via JSON round-trip so caller's dict is untouched + we get
-    # only JSON-serialisable payload (no datetime / Path leakage).
-    # The canonical-form kwargs (separators / ensure_ascii) are kept on the
-    # round-trip dump as well so any non-string scalar that Python's default
-    # json prints differently from the disk-bytes path (none today, but
-    # defensive against future field additions) cannot drift between the
-    # two passes — both paths use the SAME canonical settings.
-    #
-    # 透過 JSON round-trip 深拷貝：caller 的 dict 不被改 + 確保 payload 只含
-    # JSON 可序化值（無 datetime / Path 洩漏）。round-trip dump 也帶上 canonical
-    # 參數（separators / ensure_ascii），防未來新欄位讓兩段 dump 行為漂移。
-    payload = json.loads(
+    # Step 1: body dict (no envelope yet). JSON round-trip deep-copy with
+    # canonical kwargs guards against caller mutation + type drift.
+    # 步驟 1：簽前 body dict（無 envelope）；JSON round-trip 深拷貝。
+    body = json.loads(
         json.dumps(
             manifest_data,
             sort_keys=True,
@@ -767,38 +994,58 @@ def write_manifest_fixture(
             default=str,
         )
     )
-    payload["run_id"] = run_id
+    body["run_id"] = run_id
 
-    # Disk-fixture write: canonical form for cross-language byte-equal
-    # contract (E2 finding F1). NOT human-pretty; operator inspecting the
-    # fixture should pipe through ``jq .`` for indentation. The byte-equal
-    # contract dominates because Rust serde_json
-    # ``canonical_body_for_signing`` re-canonicalizes to the same shape;
-    # if Python wrote ``\\uXXXX`` for non-ASCII or used spaced separators,
-    # any subsequent Python sign call computing canonical bytes via the
-    # same json.dumps kwargs would still match Rust — but mixed kwargs
-    # between this writer and any future Python sign helper would silently
-    # diverge. Keeping kwargs identical here is the cheapest invariant.
-    #
-    # 磁碟 fixture 寫入：跨語言 byte-equal 契約所需 canonical form（E2 finding
-    # F1）。**非**人讀美化版；operator 檢查 fixture 請用 ``jq .`` 加縮排。
-    # byte-equal 契約優先，因 Rust serde_json ``canonical_body_for_signing``
-    # 會 re-canonicalize 至同 shape；若 Python 寫 ``\\uXXXX`` 或加 space
-    # separator，後續 Python sign helper 用相同 dumps kwargs 仍可對齊 Rust，
-    # 但本 writer 與未來 sign helper 之間 kwargs 不同就會悄悄漂移 — 此處
-    # kwargs 統一是最便宜的不變量。
+    # Step 2: resolve key + fingerprint.
+    # 步驟 2：解析 key + fingerprint。
+    key_bytes, fingerprint = _resolve_manifest_signing_key()
+
+    # Step 3: canonical body + hash + HMAC sig — reuse shared helper to
+    # keep all three writers (register / write_manifest_fixture / sign)
+    # aligned on identical kwargs (Sprint 1 F1 retrofit invariant).
+    # 步驟 3：canonical body + hash + sig — 重用共享 helper 使三 writer 對齊。
+    canonical_bytes = compute_manifest_canonical_bytes(body)
+    manifest_hash_hex = compute_body_hash(canonical_bytes)
+    signer = ManifestSigner.from_bytes_for_test(key_bytes, fingerprint)
+    signature_hex = signer.sign(canonical_bytes)
+
+    # Step 4: assemble disk dict (7 keys: body + run_id + envelope).
+    # 步驟 4：組 disk dict（body + envelope）。
+    disk = dict(body)
+    disk["signature"] = signature_hex
+    disk["manifest_hash"] = manifest_hash_hex
+    disk["signature_key_ref"] = fingerprint
     fixture_path.write_text(
         json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
+            disk, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         ),
         encoding="utf-8",
     )
+
+    # Step 5: sibling key.hex (Rust reads from manifest.parent/"key.hex";
+    # 0o600 vs Mac dev umask 022 default 0o644). Trailing newline mirrors
+    # ``generate_replay_signing_key.sh`` ``printf '%s\\n'`` so
+    # ``compute_key_fingerprint(file_content_bytes)`` matches Rust side.
+    # 步驟 5：sibling key.hex（trailing newline + 0o600）。
+    key_hex_path.write_text(key_bytes.hex() + "\n", encoding="utf-8")
+    try:
+        os.chmod(key_hex_path, 0o600)
+    except OSError as exc:
+        # Best-effort chmod; Mac dev sandbox FS may reject mode change
+        # but file content correct + Rust only reads (no stat check).
+        # Best-effort chmod；Mac sandbox 可能拒；內容仍正確。
+        log.warning(
+            "key.hex chmod 0o600 failed: path=%s exc=%s (file content OK)",
+            key_hex_path, exc,
+        )
+
     log.info(
-        "manifest fixture written: run_id=%s path=%s",
-        run_id, fixture_path,
+        "manifest fixture signed + written: run_id=%s path=%s "
+        "fingerprint=%s signature=%s manifest_hash=%s key_hex=%s",
+        run_id, fixture_path, fingerprint,
+        signature_hex[:12] + "...",  # truncate for log noise
+        manifest_hash_hex[:12] + "...",
+        key_hex_path,
     )
     return fixture_path
 
@@ -1221,9 +1468,12 @@ __all__ = [
     "ADVISORY_LOCK_GLOBAL_KEY",
     "ADVISORY_LOCK_PER_ACTOR_PREFIX",
     "DEFAULT_PG_STATEMENT_TIMEOUT_MS",
+    "ENVELOPE_KEYS_FOR_SIGNING",
     "MANIFEST_FIXTURE_FILENAME",
     "RELEASE_PROFILE_ENV_VAR",
     "RELEASE_PROFILE_LIVE",
+    "SIBLING_KEY_HEX_FILENAME",
+    "SIGNING_KEY_FILE_ENV_VAR",
     "SUBPROCESS_ENV_WHITELIST",
     "artifact_path_within_allowlist",
     "build_default_manifest_payload",
