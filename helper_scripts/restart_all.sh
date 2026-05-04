@@ -389,10 +389,39 @@ restart_api() {
     # 既有的 env 接線。
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$REPO_ROOT}"
+    # REF-20 Sprint A R3 round 4 infra fix (2026-05-04): inject the openclaw-engine
+    # binary SHA-256 into the API process env so /api/v1/replay/experiments/register
+    # can satisfy the M-3 fail-closed gate (linux_trade_core runtime requires
+    # OPENCLAW_ENGINE_BINARY_SHA per V049 chk_replay_experiments_engine_sha_linux).
+    # Without this env, the register handler returns 503 with reason_code
+    # ``replay_engine_binary_sha_not_provisioned``, which silently blocks every
+    # smoke E2E even though the binary itself is healthy on disk. Empty string
+    # fallback is acceptable: the register handler's M-3 branch will surface a
+    # clear 503 with the same reason_code rather than a confusing AttributeError,
+    # so operator can see the gap immediately. The sha computation is deliberately
+    # portable — sha256sum (Linux) is preferred, shasum -a 256 (Mac) is the
+    # fallback so this script remains cross-platform per CLAUDE.md §七 ★★.
+    # REF-20 Sprint A R3 round 4 infra fix（2026-05-04）：注入 openclaw-engine
+    # 二進制 SHA-256 至 API process env，使 /api/v1/replay/experiments/register
+    # 能通過 M-3 fail-closed 門控（linux_trade_core runtime 強制要求
+    # OPENCLAW_ENGINE_BINARY_SHA per V049 chk_replay_experiments_engine_sha_linux）。
+    # 沒有此 env 時 register handler 回 503 reason_code
+    # ``replay_engine_binary_sha_not_provisioned``，靜默阻塞每次 smoke E2E（即使
+    # binary 本身在磁碟上健康）。空字串 fallback 可接受：register handler M-3
+    # 分支會回明確 503 + 相同 reason_code，不會炸 AttributeError，operator 立即
+    # 看到差異。SHA 計算刻意 portable — sha256sum（Linux）優先，shasum -a 256
+    # （Mac）為 fallback，確保此 script 跨平台符合 CLAUDE.md §七 ★★。
+    local engine_sha
+    if [ -f "$ENGINE_BIN_ABS" ]; then
+        engine_sha="$( (sha256sum "$ENGINE_BIN_ABS" 2>/dev/null || shasum -a 256 "$ENGINE_BIN_ABS" 2>/dev/null) | cut -d ' ' -f 1)"
+    else
+        engine_sha=""
+    fi
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
+        OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &
