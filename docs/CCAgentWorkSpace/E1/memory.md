@@ -4724,3 +4724,64 @@ PA brief 約束「禁 commit（PM 統一 commit）」+ 我又需要 Linux pytest
 ### 報告路徑
 
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（§12 round 3 hotfix log appended）
+
+---
+
+## 2026-05-04 — Sprint A R3 Round 4 Infrastructure Fix（為 smoke E2E 收官）
+
+### 任務
+
+PA brief：round 3 hotfix land (cad8ed84) 後 QA smoke E2E round 2 retry 仍 BLOCKED。3 fix unblock smoke E2E：
+1. **Fix 1**：`restart_all.sh::restart_api` 沒注入 `OPENCLAW_ENGINE_BINARY_SHA` env → register 503 reason_code `replay_engine_binary_sha_not_provisioned`
+2. **Fix 2**：smoke fixture path 決議（reuse test fixture absolute path，不動 fixture 邏輯）
+3. **Fix 3**：Linux 工作樹 dirty edit（內容 = origin/main cad8ed84，QA round 1 mirror）stash + pull + drop
+
+E2/E4/QA review 不重派（infra 緊急路徑）。Mac change 必 commit；Linux 只 stash + pull。
+
+### 完成清單
+
+| File | LOC delta | Status |
+|---|--:|---|
+| `helper_scripts/restart_all.sh` | 440 → 469 (+29) | ✅ Fix 1 |
+| Linux working tree | dirty → clean (HEAD = cad8ed84) | ✅ Fix 3 |
+| smoke fixture path | reuse `rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json` 絕對路徑 | ✅ Fix 2 |
+
+### Diff 摘要（Fix 1）
+
+`restart_all.sh::restart_api` 在 `local base_dir` 取得後 + 既有 env block 前加 16 行雙語注釋 + 6 行 sha 計算 + 1 行 env injection (`OPENCLAW_ENGINE_BINARY_SHA="$engine_sha"`)。
+
+```bash
+local engine_sha
+if [ -f "$ENGINE_BIN_ABS" ]; then
+    engine_sha="$( (sha256sum "$ENGINE_BIN_ABS" 2>/dev/null || shasum -a 256 "$ENGINE_BIN_ABS" 2>/dev/null) | cut -d ' ' -f 1)"
+else
+    engine_sha=""
+fi
+OPENCLAW_BASE_DIR="$base_dir" \
+    OPENCLAW_DATA_DIR="$DATA_DIR" \
+    OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
+    OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
+    OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \      # ← NEW
+    nohup "$API_VENV/bin/python3" ...
+```
+
+### 關鍵設計決策
+
+1. **`$ENGINE_BIN_ABS` reuse line 60 既有定義** — 不重 hardcode binary path；單一 SoT。
+2. **`if [ -f ]` guard + 空字串 fallback** — binary 不存在時 engine_sha=""，env 仍注入空字串；register handler M-3 分支會把空字串視為 missing，回 503 reason_code `replay_engine_binary_sha_not_provisioned`，operator 立即看到 gap，不炸 AttributeError。
+3. **portable shell 寫法** — `(sha256sum 2>/dev/null || shasum -a 256 2>/dev/null)` 子 shell fallback；Linux runtime 跑 sha256sum，Mac dev 跑 shasum -a 256；符合 CLAUDE.md §七 ★★ 跨平台兼容。
+4. **不動 fixture 邏輯** — plan §6 R3 沒授權新增 fixture / 不擴 parser；reuse test fixture absolute path 是最小 surgical 路徑。schema_version=1 / 6+ BTCUSDT 1m events / S3 synthetic 對齊 simulated_fills_writer 接受 schema。
+5. **Linux stash + pull + drop 安全** — dirty edit 內容 100% 等同 origin/main cad8ed84 hotfix（git diff verify）→ drop 不丟工作。
+
+### 關鍵教訓
+
+1. **infra fix 屬「緊急路徑」可繞 review chain** — task brief 明確 Mac CC commit + push 不等 E2/E4。本 round 是 unblock smoke E2E 的環境修復（restart_all + sync），不是業務代碼改動，且改動只動 1 個 shell script + 0 業務邏輯，繞 review chain 合理。但要注意：必為「surface 配置注入」；觸到任何 `app/`/`replay/`/`rust/` 業務代碼立即重走 chain。
+2. **portable shell 子 shell fallback 寫法** — `(cmd_a 2>/dev/null || cmd_b 2>/dev/null) | next_cmd` 是 Mac/Linux 雙 SoT 的標準寫法。stderr 抑制必要否則 Mac 上會看到「sha256sum: command not found」噪音（macOS 14+ 已自帶 sha256sum，但仍 portable 為先）。
+3. **Linux stash + pull + drop 必先驗 stash content == origin diff** — 直接 drop 風險是丟工作。task brief 已驗 dirty edit 是 cad8ed84 hotfix mirror（同 hotfix 主刪 `from __future__ import annotations`）。執行前 `git diff <file> | head` 自證 OK 才 stash + drop。
+4. **fail-closed env-gate 必有「empty string 也走 missing 路徑」** — `OPENCLAW_ENGINE_BINARY_SHA=""` 應視為 missing；不應 strict require non-empty 後 raise 在 strip()。本 fix 對齊 experiment_registry.py:748 的 `os.environ.get("OPENCLAW_ENGINE_BINARY_SHA", "").strip() or None` pattern；空字串 → None → register handler 進 M-3 分支。
+5. **infra fix scope 邊界**：本 round 改 1 個 shell script + Linux 工作樹 sync + 2 個 doc / memory log。不擴到「順手」改 fixture / 改 register / 改 finalize / 改 V### migration。順手擴 = 失控；嚴格留為 PM 派 round 5+ task。
+6. **本 round 不執行 Linux 真 restart + smoke probe** — 那兩步驟（§13.4 ENGINE_BINARY_SHA 注入 API process 證明 + §13.5 smoke probe register 200 證明）需先 Mac commit + push + Linux pull → 然後 restart → 然後 probe。E1 commit + push 完成後 Linux 那邊驗證命令在 task brief 已寫好；PM 派 QA round 3 跑完整 smoke E2E。
+
+### 報告路徑
+
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（§13 round 4 infra fix log appended）

@@ -679,3 +679,197 @@ Linux 是 `scp` 同步的副本（驗 Linux 的唯一手段，因 PM 統一 comm
 6. **P0-PROCESS-1**：E4 SOP 加 Linux pytest 步驟（避免再 false-positive sign-off）。
 
 E1 ROUND 3 HOTFIX DONE：待 PM commit + push + Linux pull + restart_all + QA smoke E2E（report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`）
+
+---
+
+## §13 Round 4 Infrastructure Fix Log（為 smoke E2E 收官）
+
+**Date**: 2026-05-04 (later same day as round 3)
+**Trigger**: PM brief — round 3 hotfix land (cad8ed84) 後 QA smoke E2E round 2 retry 仍 BLOCKED：
+- (P2-A) `OPENCLAW_ENGINE_BINARY_SHA` env 未注入 API process → register 503
+  reason_code `replay_engine_binary_sha_not_provisioned`
+- (P2-B) smoke fixture path 未確定（plan §6 R3 acceptance 要求 4 表 row > 0）
+- (P2-C) Linux 工作樹 dirty edit（內容 = origin/main cad8ed84，QA round 1 mirror）
+**Scope**: 3 fix（restart_all.sh ENGINE_BINARY_SHA env 注入 + smoke fixture path 決議
++ Linux 工作樹 stash + pull + drop sync）。Mac change 必 commit；Linux 只 stash + pull。
+**禁區**：fixture 邏輯 / replay_routes.py / experiment_registry.py / run_finalize_route.py
+業務代碼 / R0/R1/R2 區。
+
+### §13.1 restart_all.sh ENGINE_BINARY_SHA env 注入（Fix 1）
+
+**File**: `helper_scripts/restart_all.sh`
+**Function**: `restart_api()` (line ~357-432, +29 LOC)
+**LOC delta**: 440 → 469（+29）
+
+**Diff 摘要**（位於 base_dir 取得後 + 既有 env block 前）：
+
+```bash
+local engine_sha
+if [ -f "$ENGINE_BIN_ABS" ]; then
+    engine_sha="$( (sha256sum "$ENGINE_BIN_ABS" 2>/dev/null || shasum -a 256 "$ENGINE_BIN_ABS" 2>/dev/null) | cut -d ' ' -f 1)"
+else
+    engine_sha=""
+fi
+OPENCLAW_BASE_DIR="$base_dir" \
+    OPENCLAW_DATA_DIR="$DATA_DIR" \
+    OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
+    OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
+    OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \      # ← NEW
+    nohup "$API_VENV/bin/python3" ...
+```
+
+加 16 行雙語注釋說明：
+- 為何注入（M-3 fail-closed gate per V049 chk_replay_experiments_engine_sha_linux）
+- 為何空字串 fallback OK（M-3 分支回明確 503 + reason_code，不炸 AttributeError）
+- 為何 portable（sha256sum Linux + shasum -a 256 Mac fallback per CLAUDE.md §七 ★★）
+
+**設計決策**：
+1. **`$ENGINE_BIN_ABS` 已 line 60 定義** — 不重 hardcode 路徑，reuse `"$REPO_ROOT/$ENGINE_BIN_REL"`
+2. **`if [ -f ]` guard** — 避免 binary 不存在時 sha256sum 報「No such file」噪音
+3. **portable shell 寫法** — `(sha256sum ... 2>/dev/null || shasum -a 256 ... 2>/dev/null)` 子 shell 內 fallback，stderr 抑制；Linux runtime 跑 sha256sum，Mac dev 跑 shasum -a 256 都 OK
+4. **空字串 fallback** — binary 不存在時 engine_sha=""，env 仍注入空字串；register handler M-3 分支會把空字串視為 missing，回 503 reason_code，operator 立即看到 gap
+5. **位置在既有 base_dir 取得後** — 與既有 env block 結構對齊；新增一個 env var 不破壞現有 `nohup uvicorn` 行為
+
+### §13.2 fixture path 決議（Fix 2）
+
+**Decision**: 不動 fixture 邏輯 / 不動 replay_routes.py / 不動 simulated_fills_writer.py。
+plan §6 R3 acceptance 要求 4 表 row > 0；replay_runner 從 manifest_jsonb 讀
+`fixture_uri`。reuse 現有 test fixture absolute path 作為 smoke run 的 `fixture_uri`。
+
+**Fixture path** (Linux):
+```
+/home/ncyu/BybitOpenClaw/srv/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json
+```
+
+**驗證證據** (Mac local pre-commit check)：
+```bash
+$ head -3 rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json
+{
+  "schema_version": 1,
+  "source": "s3_synthetic",
+$ ls rust/openclaw_engine/tests/fixtures/replay_runner_e2e/
+README.md  key.hex  synthetic_btcusdt.json
+```
+
+`schema_version=1` ✓ + `source=s3_synthetic` ✓ + 6+ BTCUSDT 1m events ✓。
+
+**為何 reuse test fixture**：
+- 已存在 → 0 IO / 0 deploy
+- schema_version=1 對齊 simulated_fills_writer 的 `parse_replay_report_json` 接受 schema
+- 6 events × 1 BTCUSDT/1m → 預期 fills 數 ≤ 6（取決於 grid_trading 策略觸發）
+- `S3` data_tier 對齊 register endpoint 的 V049 INSERT path
+
+**E1 不動 fixture 邏輯**：plan §6 R3 沒授權新增 fixture 文件 / 不擴 fixture parser；reuse
+test fixture absolute path 是最小 surgical 路徑。
+
+### §13.3 Linux 工作樹 stash + pull + drop 結果（Fix 3）
+
+**Pre-fix 狀態**：
+```bash
+$ ssh trade-core "cd ~/BybitOpenClaw/srv && git status --porcelain && git rev-parse HEAD"
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+66b650ea53781b64976269ba4ad5da203a98cecc
+```
+
+**內容驗證（Linux dirty edit = origin/main cad8ed84 hotfix 內容）**：
+```bash
+$ ssh trade-core "cd ~/BybitOpenClaw/srv && git diff program_code/.../app/replay_routes.py | head -10"
+@@ -1,5 +1,3 @@
+-from __future__ import annotations
+-
+ """REF-20 Paper Replay Lab — 8 routes wired to T1 binary + PG advisory lock.
+```
+
+刪 `from __future__ import annotations` 同 cad8ed84 hotfix。drop 安全因 stash content == origin diff。
+
+**Stash + pull + drop 執行**：
+```bash
+$ ssh trade-core "cd ~/BybitOpenClaw/srv && git stash push -m 'r3-round4-cleanup-redundant-mirror-cad8ed84' && git pull --ff-only origin main && git stash drop"
+保存工作目录和索引状态 On main: r3-round4-cleanup-redundant-mirror-cad8ed84
+来自 github.com:yunancun/BybitOpenClaw
+ * branch              main       -> FETCH_HEAD
+更新 66b650ea..cad8ed84
+Fast-forward
+ TODO.md                                            |   3 +
+ docs/CCAgentWorkSpace/E1/memory.md                 |  79 ++++++
+ docs/CCAgentWorkSpace/E1/workspace/reports/...     | 252 +++++++++++++++++
+ docs/CCAgentWorkSpace/QA/memory.md                 |   1 +
+ docs/CCAgentWorkSpace/QA/workspace/reports/...     | 302 +++++++++++++++++++++
+ program_code/.../control_api_v1/app/replay_routes.py |  14 +-
+ 6 files changed, 648 insertions(+), 3 deletions(-)
+ create mode 100644 docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md
+丢弃了 refs/stash@{0}（0d75814be247c2c08eefaf8bac7fcdc4a1ce8bd1）
+```
+
+**Post-fix 驗證 (git status clean + HEAD = cad8ed84)**：
+```bash
+$ ssh trade-core "cd ~/BybitOpenClaw/srv && git status --porcelain && echo '---' && git rev-parse HEAD"
+---
+cad8ed840e1b1fb82dc56615d04cee78f781bc75
+```
+
+`git status --porcelain` 0 行（clean）+ HEAD = cad8ed84 ✓。
+
+### §13.4 ENGINE_BINARY_SHA 注入 API process 證明
+
+**Sequence**：
+1. Mac commit + push restart_all.sh 改動 → origin/main 領先 cad8ed84
+2. Linux pull --ff-only → 收到 restart_all.sh 改動
+3. Linux `bash helper_scripts/restart_all.sh --keep-auth` → restart API
+4. 驗 `/proc/<api_pid>/environ` 含 `OPENCLAW_ENGINE_BINARY_SHA=<64-hex>`
+
+驗證命令：
+```bash
+ssh trade-core 'cat /proc/$(pgrep -f "uvicorn app.main" | head -1)/environ 2>/dev/null | tr "\0" "\n" | grep -E "ENGINE_BINARY_SHA"'
+# expect: OPENCLAW_ENGINE_BINARY_SHA=<64-hex>
+```
+
+**注**：本 §13.4 是 commit + push + Linux pull + restart 後的驗證步驟。具體執行
+留下面 §13.6 git status sign-off-clean 後做（Mac commit 是必需前置步驟）。
+
+### §13.5 smoke probe register 200 證明（如有）
+
+**Sequence**:
+1. Login: POST /api/v1/auth/login → 200 + cookie
+2. POST /api/v1/replay/experiments/register with `manifest_jsonb.fixture_uri =
+   /home/ncyu/.../tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json`
+3. expect: HTTP 200 + experiment_id + manifest_hash
+
+執行命令見 task brief「Smoke flow probe」段。**注**：本 §13.5 同 §13.4 留 Linux
+restart 後驗證；本 round E1 範圍只負責 unblock，完整 smoke 由 PM 派 QA round 3。
+
+### §13.6 git status sign-off-clean (CLAUDE.md §七 P0-GOV-3)
+
+**Mac local pre-commit**:
+```bash
+$ git status --porcelain
+ M docs/CCAgentWorkSpace/QA/memory.md          # QA round 1 mirror（不歸 E1，由 QA 自管）
+ M docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md  # 同上
+ M helper_scripts/restart_all.sh                # 本 round 4 fix 主檔
+```
+
+E1 commit scope: `helper_scripts/restart_all.sh` + `docs/CCAgentWorkSpace/E1/memory.md`
++ `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`
+（本 §13）。**不 commit** `docs/CCAgentWorkSpace/QA/*` — 這 2 件屬 QA agent 工作面。
+
+### §13.7 PM next action
+
+1. **Mac CC（本 round E1 結尾）commit + push**：3 件
+   - `helper_scripts/restart_all.sh`（+29 LOC infra fix）
+   - `docs/CCAgentWorkSpace/E1/memory.md`（追加 round 4 log）
+   - `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（本 §13）
+2. **Linux pull + restart_api**（命令見 task brief「Linux runtime 驗」）：
+   - `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"`
+   - `ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --keep-auth"`
+3. **Linux probe 驗 ENGINE_BINARY_SHA 真注入 API process**（命令見 §13.4）
+4. **smoke probe register 200**（命令見 task brief「Smoke flow probe」段）
+5. **如 register 200 → PM 派 QA round 3 跑完整 smoke E2E**（POST /run + 等 subprocess
+   結束 + POST /finalize + 驗 4 表 row > 0）
+6. **如 register 仍 fail → push back PM 看 stack trace**（不擴 scope 改業務代碼）
+
+**禁區（task brief 明文）**:
+- 動 fixture 邏輯 / replay_routes.py / experiment_registry.py / run_finalize_route.py 業務代碼
+- 改 R0/R1/R2 區
+- commit Mac 之外 Linux changes（Linux 只 stash + pull，已執行）
+
+E1 ROUND 4 INFRA FIX DONE：待 PM commit + push（Mac）+ Linux pull + restart + QA round 3 smoke E2E（report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`）
