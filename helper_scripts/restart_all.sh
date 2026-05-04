@@ -439,12 +439,30 @@ restart_api() {
     if [ ! -f "$replay_fixture_default" ]; then
         replay_fixture_default=""
     fi
+
+    # REF-20 Sprint A R3 Round 8 P0-NEW-2 (2026-05-05): inject signing key file
+    # env so /run handler write_manifest_fixture can pass _resolve_manifest_signing_key
+    # step 1 (env override). Reuses in-tree S3 dev key.hex; live profile blocks
+    # this override per Round 7 FINDING-1, so production must rely on
+    # $OPENCLAW_SECRETS_DIR/<env>/replay_signing_key (R2-T3 secrets dir path).
+    # REF-20 Sprint A R3 Round 8 P0-NEW-2（2026-05-05）：注入 signing key file
+    # env 使 /run handler write_manifest_fixture 通過 _resolve_manifest_signing_key
+    # step 1（env override）。重用 in-tree S3 dev key.hex；live profile 由
+    # Round 7 FINDING-1 阻擋此 override，production 必走 $OPENCLAW_SECRETS_DIR/
+    # <env>/replay_signing_key（R2-T3 secrets dir path）。
+    local replay_signing_key_file
+    replay_signing_key_file="$base_dir/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/key.hex"
+    if [ ! -f "$replay_signing_key_file" ]; then
+        replay_signing_key_file=""
+    fi
+
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \
         OPENCLAW_REPLAY_FIXTURE_DEFAULT="$replay_fixture_default" \
+        OPENCLAW_REPLAY_SIGNING_KEY_FILE="$replay_signing_key_file" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &
