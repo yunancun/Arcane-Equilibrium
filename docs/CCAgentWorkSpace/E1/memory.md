@@ -4785,3 +4785,157 @@ OPENCLAW_BASE_DIR="$base_dir" \
 ### 報告路徑
 
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md`（§13 round 4 infra fix log appended）
+
+
+---
+
+## 2026-05-05 — REF-20 Sprint A R3 Round 6 IMPL: real HMAC sign + stderr capture + fixture env
+
+**Operator decision**: (A) — PM 派發 PA design 4-task DAG，E1 IMPL 完成。
+**HEAD pre-impl**: e9d547c0
+**PA design**: docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-05--ref20_sprint_a_r3_round6_task_dag.md
+**Status**: IMPL 完成；待 E2 review → E4 regression → PM commit。
+
+### 4-task scope（PA approved）
+
+1. **R3-R6-T1** — `replay/route_helpers.py::write_manifest_fixture` 真 HMAC sign + sibling key.hex
+   - 移除 placeholder envelope（``placeholder_signature_wave6_v042_pending`` /
+     ``placeholder_hash_wave6_v042_pending`` / ``placeholder_key_ref``）
+   - 新增 `_resolve_manifest_signing_key()`（env override → secrets-dir → fail-closed）
+   - 新增 `SIBLING_KEY_HEX_FILENAME` / `SIGNING_KEY_FILE_ENV_VAR` /
+     `ENVELOPE_KEYS_FOR_SIGNING` 三 module-level 常量
+   - `build_default_manifest_payload` 改為 body-only（3 keys: experiment_id /
+     data_tier / fixture_uri）；envelope 由 `write_manifest_fixture` 簽完
+     後 inject
+   - `write_manifest_fixture` 5-step：(1) build body + run_id (2) resolve
+     key + fingerprint (3) compute canonical / hash / HMAC sig (4) 寫 7-key
+     disk fixture (5) 落 sibling key.hex 0o600
+2. **R3-R6-T2** — `spawn_replay_runner` stderr → disk file
+   - stderr 從 `subprocess.DEVNULL` 改寫
+     `<output_dir>/replay_runner.stderr`
+   - allowlist 守門（`artifact_path_within_allowlist`）
+   - 早死路徑讀 stderr 2KB tail + 256 char excerpt 進 reason_code
+   - 新增 `_read_stderr_excerpt()` helper（2KB cap + utf-8 with replacement）
+3. **R3-R6-T3a** — `restart_all.sh::restart_api()` 注 `OPENCLAW_REPLAY_FIXTURE_DEFAULT` env
+   - 指向 `rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json`
+   - `build_default_manifest_payload` fallback chain extended：
+     `OPENCLAW_REPLAY_FIXTURE_URI` > `OPENCLAW_REPLAY_FIXTURE_DEFAULT` >
+     `<output_dir>/fixture.json`
+4. **R3-R6-T4** — 4 個 test 檔（全在 `tests/replay/`）
+   - `test_route_helpers_real_hmac_sign.py`（11 case）：env override / fail-closed /
+     invalid path-length-hex / 真 HMAC verify / envelope leak rejection /
+     run_id required / signing fail propagation / body-only / no placeholder
+   - `test_route_helpers_stderr_capture.py`（7 case）：early-death disk write /
+     256 char cap / 2KB read cap / missing file sentinel / allowlist guard /
+     alive path / binary not found
+   - `test_route_helpers_fixture_default_env.py`（5 case）：3 fallback levels +
+     whitespace 兩種
+   - `test_replay_e2e_round6_smoke.py`（1 case + 4 skip gates）：opt-in via
+     `OPENCLAW_REPLAY_E2E_SMOKE=1`；spawn 真 Rust binary；驗 stderr 不含
+     `manifest_signer_verify_failed`
+
+### LOC governance
+
+| 檔 | baseline | post | delta | 警告 / 硬限 |
+|---|---:|---:|---:|---|
+| `route_helpers.py` | 1249 | 1485 | +236 | 1485 < 1500 ✅（已破 800 警告） |
+| `restart_all.sh` | 470 | 492 | +22 | < 800 ✅ |
+| 4 NEW test files | 0 | 1001 | +1001 | 各 < 800 ✅ |
+
+PA design 預估 +185 production LOC + 250 test LOC；實際我 +258 production + 1001 test。**production overrun ~+73**（docstring 比 PA design 寫的長）；**test overrun ~+750** 是擴大 case coverage（fail-closed paths + invariants）。route_helpers.py 1485 已碰 §九 1500 LOC 硬限上邊界，**Round 7+ 任何加碼必拆檔**。
+
+### 關鍵設計決策
+
+1. **重用 既有 helper 不複製 sort_keys/separators** — `compute_manifest_canonical_bytes`
+   from `experiment_registry.py` + `compute_body_hash` / `compute_key_fingerprint`
+   / `ManifestSigner.from_bytes_for_test` / `load_signing_key_from_secrets_dir`
+   from `manifest_signer.py`。三 writer（register / write_manifest_fixture /
+   sign）對齊同 kwargs 是 Sprint 1 F1 retrofit canonical contract 的最便宜
+   不變量。E2 必查。
+2. **Body-first / envelope-after sign 順序** — Python sign canonical body
+   時 dict 不含 envelope；簽完才 inject 三 envelope key 進 disk dict。Rust
+   `canonical_body_for_signing(disk_bytes)` 重 canonicalize 時 strip envelope，
+   byte-equal 與 Python sign 時的 bytes（自我引用會破壞 verify）。
+3. **Defense-in-depth envelope leak guard** — `write_manifest_fixture` 在
+   sign 前檢查 caller input 不得含 envelope 三 key；leak 觸 ValueError
+   提早大聲報錯；防 stale Round-5 callsite 偷漏 envelope。
+4. **stderr child-fd transfer pattern** — Python parent 在 `Popen` 後立即
+   `close()` 自身 fh；child 透過 fd inheritance 持自身 copy 寫 stderr。
+   `time.sleep(grace)` + `proc.poll()` 抓早死，未死 alive path 保留 stderr
+   file 給 runner 跑完後留 disk for post-mortem。
+5. **fingerprint computed over file_content_bytes including trailing newline**
+   — 對齊 helper script `generate_replay_signing_key.sh` `printf '%s\n'`
+   pattern + Rust `compute_key_fingerprint(key_file_content)`。caller 把
+   `key_bytes.hex() + "\n"` 寫 sibling key.hex 後立刻 chmod 0o600，Mac dev
+   sandbox 失敗時只 log 不 raise（best-effort；file 內容仍正確）。
+6. **smoke E2E opt-in via env** — `OPENCLAW_REPLAY_E2E_SMOKE=1` operator gate；
+   binary / fixture / key.hex 缺都 skip。Mac dev 不啟用，Linux trade-core
+   QA 跑 smoke 時 set env。
+
+### 關鍵教訓
+
+1. **LOC budget overrun in docstring** — Round 6 第一輪 IMPL route_helpers.py
+   到 1624 LOC（超 1500 硬限）；後收緊 `_resolve_manifest_signing_key` /
+   `build_default_manifest_payload` / `write_manifest_fixture` / `spawn_replay_runner`
+   docstring + inline comment 拉回 1485。教訓：bilingual docstring 常溢 25-50%
+   PA design 預估；E1 第一輪 IMPL 完成後立刻 wc -l 確認 LOC，超出立刻收緊；
+   不留到 E2 找。
+2. **fake replay_runner 用 `printf '%s\n' '...'` 避免 shell echo 不一致** —
+   `_make_fake_runner` 早期用 `echo {stderr_text!r}` failed on test_spawn_writes_
+   stderr_to_disk_on_early_death，因 Python `repr` 帶 single-quote 在 shell
+   parse 時可能空字串。改用 `printf '%s\n' '<safe_text>'` + 手動 escape
+   single-quotes（`'\"'\"'`）。
+3. **xlang_consistency 13/13 baseline 不可破** — Sprint 1 F1 retrofit 鎖
+   canonical bytes contract；Round 6 IMPL 重用 `compute_manifest_canonical_bytes`
+   而不複製 kwargs 是繼承 baseline 的關鍵。E2 必 grep 確認 T1 import 正確
+   來源（不從別處搬同一 helper）。
+4. **placeholder grep 必區分 production code vs MAINTAINER warning vs test
+   assertion** — final placeholder grep 5 hits 都在 docstring MAINTAINER warning
+   或 test assertion。production code path 0 hit。E2 grep 規則：排除
+   `MAINTAINER`/`grep`/`assert.*not in` 後 0 hit 才算 clear。
+5. **integration test skip-then-opt-in pattern** — `pytest.mark.skipif` 4 條
+   gate（binary + fixture + key.hex + opt-in env）使 Mac dev 預設 skip，
+   Linux trade-core QA 在 set `OPENCLAW_REPLAY_E2E_SMOKE=1` + binary 部署
+   後跑。CI infra 不需 PG（smoke 只驗 spawn-and-verify chain，row INSERT
+   留 R3-T1+T2 finalize endpoint test 涵蓋）。
+
+### 報告路徑
+
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_a_r3_round6_impl.md`
+
+---
+
+## 2026-05-05 — REF-20 Sprint A R3 Round 7 — FINDING-1 (HIGH) + FINDING-2 (LOW) fix
+
+### 任務
+
+E2 round 6 review RETURN to E1：(1) `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env override 缺 live profile gate (HIGH; SEC-08 對齊 Sprint 1 Track C P0-2 既有 pattern); (2) `spawn_died_early` reason_code 含 stderr excerpt 進 503 detail JSON → leak server-side absolute path / fingerprint hex (LOW; SEC-04 違規)。
+
+### 完成清單
+
+| 檔 | 改動 | LOC delta |
+|---|---|---:|
+| `replay/route_helpers.py` | step 1 加 `is_live_release_profile()` gate + reason_code 從 `spawn_died_early:exit=N:stderr=...` 改 envelope-only `spawn_died_early:exit=N` | 1485 → 1499 (+14) |
+| `app/replay_routes.py` | 503 detail message 從 `f"... {pg_err}"` 改靜態 operator-pointer | 1499 → 1500 (+1) |
+| `tests/replay/test_route_helpers_real_hmac_sign.py` | +2 case (block_in_live_profile + counter-test works_outside_live_profile) | 324 → 392 (+68) |
+| `tests/replay/test_route_helpers_stderr_capture.py` | 1 case 微調 (assert envelope-only) + 1 case 升級為 SEC-04 invariant test | 315 → 355 (+40) |
+
+### 關鍵設計決策
+
+1. **重用 既有 helper `is_live_release_profile()`** — Sprint 1 Track C P0-2 已立過 pattern (line 1188-1205)，Round 7 step 1 開頭直接呼叫，complete align。
+2. **Counter-test 雙保險** — 不只測「live profile 阻斷」，也測「unset/demo/paper/live_demo 4 個 non-live profile 仍可用」。確保 gate 範圍精準 — 不過 over-restrict（Mac smoke run / pytest fixture 仍依賴 env override）。
+3. **Defense-in-depth 兩層收緊 FINDING-2** — 雖然 reason_code 改 envelope-only 已足夠（route_helpers.py 端），仍同時改 replay_routes.py 端 detail message 為靜態 operator-pointer。即使將來 reason_code 不慎重新含 server-side text，HTTP 503 detail JSON 也不會 leak。
+4. **既有 test 升級而非新增** — `test_spawn_stderr_excerpt_capped_at_256_chars` 在 Round 7 後失去原始用途（reason_code 永遠 < 30 char），改為測 SEC-04 invariant（reason_code 不含 stderr / path / fingerprint）。回收 case slot 而不是新增 case，控 LOC。
+
+### 關鍵教訓
+
+1. **FINDING-1 是 PA design 自承 dev/test only 卻沒實作 production gate 的精準對應** — PA design §7 Q2 + §5 E3 #3 自承 "Live profile 守門由 (b) R2-T3 既有 mode/symlink 邏輯涵蓋"；但 step 1 在 step 2 之前，step 1 完全沒 live profile gate。E2 抓住 design intent 與 IMPL 不對齊。教訓：PA design 寫的 "dev/test only" 必對應到 production code 端的 hard gate；否則只是文件 disclaimer 不是 runtime block。
+2. **既有 P0-2 pattern 是 SEC-08 design 的 ground truth** — 找對既有 pattern 就能寫出最便宜的 fix。Sprint 1 Track C P0-2 的 `OPENCLAW_REPLAY_VERIFY_TEST_KEY` block 在 production 由 `is_live_release_profile()` 阻斷；新 env `OPENCLAW_REPLAY_SIGNING_KEY_FILE` 是同類 dev/test override，必 align 同 pattern。
+3. **SEC-04 detail leak 兩層收緊比一層好** — Defense-in-depth：route_helpers.py 端剝離 stderr text 自 reason_code 是根源 fix；replay_routes.py 端 detail message 靜態化是進一步 hard guarantee。兩層共同確保 503 不會 leak server-side info。即使 PA / E1 / E2 偶有疏忽，也有第二層擋。
+4. **LOC margin 1 LOC 是 commit gate 的火警** — Round 6 已知 `route_helpers.py` 1485/1500（PA accepted）+ `replay_routes.py` 1499/1500（P2-R3-FOLLOW-UP-7 ticket open）。Round 7 後變 1499 + 1500 = 兩檔各 1/0 LOC margin。任何下次 small docstring update 就破 cap → 必先抽部分內容到 `manifest_provisioning.py` 或 `spawn_helpers.py` 拆檔。教訓：LOC budget 規劃必含 commit message header / docstring update / future maintainer note 等隱含成本，不只 production code。
+5. **生成 docstring 比 PA 預估貴 25-50%** — PA design §7 預估 ~5 LOC production code；實際我寫了 +14 LOC（production +5 + bilingual docstring +5 + Round 7 自我引用 inline note +4）。雙語注釋 + 上下文引用 + Round 7 註明本身就會帶大概 50% LOC overhead 在小 fix 上。教訓：E1 IMPL 第一輪寫完立刻 wc -l 檢查；超出 PA 預估的部分通常是 docstring / 注釋；要嘛收緊要嘛 push back PA 重新預估。
+6. **既有 test case 升級回收 case slot 控 LOC** — Round 7 不新增 stderr_capture test case，而是把 `test_spawn_stderr_excerpt_capped_at_256_chars` 升級為 `test_spawn_stderr_excerpt_not_in_reason_code`（同樣 1 case，新測試命名 + 新 assertion focus）。原 256 char cap test 已被 envelope-only invariant 取代（cap 滿足是因為 reason_code < 30 char）。教訓：改變 invariant 時，先看既有 test case 是否可升級；新增是次選。
+
+### 報告路徑
+
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_a_r3_round6_impl.md`（§11 round 7 fix log appended）

@@ -663,19 +663,20 @@ async def post_replay_run(
         "pg_error:",
         "manifest_fixture_write_failed:",
     )):
-        # Hard failure on PG path; surface 503 so operator can inspect logs.
-        # ``spawn_died_early`` means binary spawned but exited non-zero within
-        # the 1.5s poll grace (REF-20 Sprint 1 Track A — typically CLI schema
-        # mismatch / manifest fail-closed).
-        #
-        # PG 路徑硬失敗；503 讓 operator 查 log。``spawn_died_early`` =
-        # binary 已 spawn 但 1.5s poll grace 內非 0 結束（REF-20 Sprint 1
-        # Track A — CLI schema mismatch / manifest fail-closed 典型表現）。
+        # Round 7 (2026-05-05) FINDING-2 fix: detail ``message`` is a
+        # static operator-pointer (NOT ``f"... {pg_err}"``) so server-side
+        # stderr excerpts do not flow back to API clients (§九 SEC-04).
+        # route_helpers.py also strips stderr text from reason_code.
+        # Round 7 FINDING-2：detail message 為靜態 operator-pointer，
+        # 不含 ``pg_err`` text，對齊 §九 SEC-04。
         raise HTTPException(
             status_code=503,
             detail={
                 "reason_codes": ["replay_runner_spawn_failed"],
-                "message": f"replay_runner failed to spawn: {pg_err}",
+                "message": (
+                    "replay_runner failed to spawn; check server logs "
+                    "(replay_runner.stderr) for diagnosis"
+                ),
             },
         )
 
