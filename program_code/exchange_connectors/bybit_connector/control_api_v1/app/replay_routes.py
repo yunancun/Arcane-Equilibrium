@@ -58,6 +58,9 @@ try:
     from ..replay import manifest_signer as _ms  # type: ignore[no-redef]
     from ..replay import experiment_registry as _er  # type: ignore[no-redef]
     from ..replay import report_route as _rr  # type: ignore[no-redef]
+    from ..replay import run_finalize_route as _fr  # type: ignore[no-redef]
+    from ..replay import canary_writer as _cw  # type: ignore[no-redef]
+    from ..replay import simulated_fills_writer as _sfw  # type: ignore[no-redef]
 except ImportError:
     from replay import route_helpers as _rh  # type: ignore[no-redef]
     from replay import security_guards as _sg  # type: ignore[no-redef]
@@ -67,6 +70,9 @@ except ImportError:
         _ms = None  # type: ignore[assignment]
     from replay import experiment_registry as _er  # type: ignore[no-redef]
     from replay import report_route as _rr  # type: ignore[no-redef]
+    from replay import run_finalize_route as _fr  # type: ignore[no-redef]
+    from replay import canary_writer as _cw  # type: ignore[no-redef]
+    from replay import simulated_fills_writer as _sfw  # type: ignore[no-redef]
 ADVISORY_LOCK_GLOBAL_KEY = _rh.ADVISORY_LOCK_GLOBAL_KEY
 ADVISORY_LOCK_PER_ACTOR_PREFIX = _rh.ADVISORY_LOCK_PER_ACTOR_PREFIX
 _count_active_runs_for_actor = _rh.count_active_runs_for_actor
@@ -720,6 +726,48 @@ async def post_replay_run(
         "status": "running",
         "wiring_status": "scaffold_only_no_runner_spawned",
     })
+
+
+@replay_router.post("/run/{run_id}/finalize")
+async def post_run_finalize(
+    run_id: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Finalize a completed replay run: persist V046 + V050 + UPDATE V045.
+    Finalize 已完成的 replay run：寫 V046 + V050 + UPDATE V045。
+
+    REF-20 Sprint A R3-T1 (2026-05-04). Auth: Operator + ``replay:write``.
+    Logic in ``replay/run_finalize_route.py`` (CLAUDE.md §九 1500 LOC cap).
+    """
+    _require_replay_write(actor)
+    # REF-20 Sprint A R3 round 2 fix M-2: finalize uses
+    # ``_fr._FINALIZE_STATEMENT_TIMEOUT_MS`` (5_000ms), distinct from this
+    # module's ``_STATEMENT_TIMEOUT_MS`` (2_000ms used by register).
+    # finalize bulk INSERT N×simulated_fills (worst-case ~80k rows) is
+    # slower than register's 1×INSERT into V049, so finalize needs more
+    # headroom to avoid 503 rollback under heavy fixtures.
+    #
+    # REF-20 Sprint A R3 round 2 fix M-2：finalize 用
+    # ``_fr._FINALIZE_STATEMENT_TIMEOUT_MS``（5_000ms），與本模組的
+    # ``_STATEMENT_TIMEOUT_MS``（register 用的 2_000ms）區隔。finalize 的
+    # 大量 INSERT N×simulated_fills（最壞 ~80k row）比 register 的單條
+    # INSERT V049 慢，需更多餘裕以免重 fixture 下 503 rollback。
+    response, http_err = await _fr.run_finalize_in_pg_xact(
+        actor=actor,
+        run_id=run_id,
+        get_pg_conn_fn=get_pg_conn,
+        resolve_artifact_output_dir_fn=_resolve_artifact_output_dir,
+        artifact_path_within_allowlist_fn=_artifact_path_within_allowlist,
+        verify_replay_runner_pid_fn=_verify_replay_runner_pid,
+        canary_writer=_cw,
+        simulated_fills_writer=_sfw,
+        audit_emit_fn=_emit_audit_stub,
+        statement_timeout_ms=_fr._FINALIZE_STATEMENT_TIMEOUT_MS,
+    )
+    if http_err is not None:
+        status, detail = http_err
+        raise HTTPException(status_code=status, detail=detail)
+    return _replay_response(response)
 
 
 @replay_router.get("/status")

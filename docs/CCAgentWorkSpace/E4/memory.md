@@ -2,6 +2,58 @@
 
 ## 工作記憶
 
+### 2026-05-04 REF-20 Sprint A R3（First Real E2E Evidence：simulated_fills_writer + run_finalize_route + thin handler；round 1+2 cumulative，HEAD `353db3fe` + WIP 改動）— **E4 PASS**
+
+**對象**：PM 派 E4 regression 跑 R3 round 1+2 cumulative IMPL（11 writer + 9 finalize = 20 case；含 round 2 M-1 multi-worker race + M-2 `_FINALIZE_STATEMENT_TIMEOUT_MS` const + 4 follow-up TODO ticket）+ replay-keyword sibling 雙跑 + full control_api_v1 雙跑 + module smoke + cross-language byte-equal + cargo workspace + audit script + cross-platform grep + LOC governance + Hard-boundary scan。
+
+**Verdict**：**PASS** — R3 round 1+2 cumulative 全綠 / 0 新 fail / 0 新 regression / 0 hard-boundary mutation / 0 path leak / 0 flake (2-round identical) / 0 LOC governance violation / M-1 multi-worker race test 真實落實 + FOR UPDATE clause 真實寫進 SQL line 229 / M-2 const 真實 export 5000 ms / 4 follow-up ticket 真實 land in TODO.md L168-171。
+
+| Suite | passed | failed | baseline | delta |
+|---|---:|---:|---:|---:|
+| R3-specific 2-file（writer 11 + finalize 9） | 20 | 0 | new | match ✓ |
+| Replay-tagged sibling round 1 | 118 | 0 | 98 (R2 final) | +20 ✓ |
+| Replay-tagged sibling round 2 | 118 | 0 | 98 (R2 final) | identical → 0 flake ✓ |
+| Full control_api_v1 round 1 | 3499 | 1 (E4-P0-1) | 3479 (R2 final) | +20 PASS / +0 fail ✓ |
+| Full control_api_v1 round 2 | 3499 | 1 (E4-P0-1) | 3479 (R2 final) | identical → 0 flake ✓ |
+| xlang_consistency invariant | 13 | 0 | 13 | 不退 ✓ |
+| Cargo workspace lib (Mac) | 2909 | 0 | 2909 | 不退 ✓ |
+| Audit script Mac arm64 | 0 forbidden / 414 sym / build OK / exit=0 | — | — | ✓ |
+
+**M-1 race fix 雙重驗證**：(1) `tests/test_replay_run_finalize.py:457` `def test_finalize_multi_worker_race_no_v046_dual_insert` 真存在；(2) `replay/run_finalize_route.py:229` `FOR UPDATE;` SQL clause 真寫進 source；(3) test case L625-632 含 `assert "FOR UPDATE" in src` source-grep guard 防 future refactor 誤刪 lock。
+
+**M-2 const fix 雙重驗證**：(1) Python -c import 跑出 `_FINALIZE_STATEMENT_TIMEOUT_MS = 5000`；(2) thin handler `app/replay_routes.py` 真實 import `_fr._FINALIZE_STATEMENT_TIMEOUT_MS`，runtime 取 5000ms。
+
+**Mock 審查**：本 task 不寫業務代碼，僅讀 + 跑。E1 sign-off + E3 audit 已記載 R3 全部 mock 限 IO boundary（PG `_stub_get_pg_conn` / `tmp_path` filesystem fixture / monkeypatch.setenv env / `psutil.Process` spy / FastAPI `dep_overrides`）。0 業務邏輯 mock。`parse_replay_report_json` / `map_fill_to_v050_row` validator / `persist_replay_report` xact / `run_finalize_in_pg_xact` 業務邏輯真跑。✓
+
+**Hard-boundary scan**（CLAUDE.md §四 18 條紅線）：在 3 個 R3 file (`simulated_fills_writer.py` / `run_finalize_route.py` / `app/replay_routes.py`) `grep '\b(live_execution_allowed|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json|decision_lease|execution_authority)\b'` = **0 hit**。✓
+
+**Cross-platform path scan**（CLAUDE.md §七）：2 個 R3 source file `grep '/home/ncyu|/Users/ncyu'` = **0 hit**。✓
+
+**LOC governance**（CLAUDE.md §九）：
+- `replay_routes.py` 1491 ≤ 1500（margin 9，與 E1 §11.6 claim 對齊）✓
+- `simulated_fills_writer.py` 602（margin 898）✓
+- `run_finalize_route.py` 593（margin 907；round 1 552 + round 2 +41）✓
+
+**Module smoke**：11 個 `/api/v1/replay/*` route 全註冊（含 R2 5 個 + R3 1 個 `/api/v1/replay/run/{run_id}/finalize`）。✓
+
+**Cross-language byte-equal invariant 維持**：13/13 xlang_consistency PASS。R3 完全不動 `manifest_signer.rs` / `manifest_signer.py:canonical_body_for_signing` → R2 build 起的 HMAC byte-equal Rust↔Python 8 fixture 完整保留。✓
+
+**4 follow-up ticket 真實 land**：TODO.md L168-171 完整列：P2-R3-FOLLOW-UP-1（V046 enum `'replay_report'` value 加）/ P2-R3-FOLLOW-UP-3（exception detail leak class name 改 generic）/ P3-R3-FOLLOW-UP-4（`verify_replay_runner_pid` 加 `psutil.create_time()` 防 PID-reuse）/ P2-R3-FOLLOW-UP-5（V046 byte_size CHECK 64MB defense-in-depth）。✓
+
+**8 教訓**：
+1. **R3 是「round 1 + round 2」cumulative regression** — 不像 R2 走 round 1+2+3，R3 在 E3 audit PASS-WITH-FIX (1 MEDIUM + 1 doc drift)、PM 仲裁採 E3 觀點 → E1 round 2 fix（M-1 + M-2 + 4 follow-up ticket）→ E4 final。E4 必驗每個 round 2 fix 真實落實（grep + isolated test confirm + import 取常數值），不只跑 test 數字。
+2. **M-1 SELECT FOR UPDATE 在 hermetic test 的限制** — single-process pytest 無法觸發真 PG row-level locking；只能驗 contract level「worker B 在 status 已終態下走 409 路徑、不再寫 V046/V050/V045」+ source grep `assert "FOR UPDATE" in src` 防 refactor regression。真 PG behavior 由 Linux deploy smoke run 驗（advisory §14.1）。E4 hermetic PASS ≠ production-ready。
+3. **M-2 const fix 驗證 = import + numeric value 比對** — 不只看 grep `_FINALIZE_STATEMENT_TIMEOUT_MS`，要 import 取值看 `=== 5000` 才算真 fix（避免 const 名對但 value 寫錯，比如 `5_000_000` microsecond 誤讀）。
+4. **`replay_routes.py` 1491 LOC ≤ 1500（margin 9）** — round 1 1488（基於 R2 final 1443 + 45 thin handler）+ round 2 +14 雙語注釋 = 1491。R2→R3 +48 LOC 完全在 thin handler import 與雙語注釋。Future R4/R5 任何擴 route 必先 inspect 是否能順手抽 model/handler 至 `replay/` 內 new module 維持 1500 governance limit。
+5. **R3 不動 Rust → cargo workspace 完全不退** — 純 Python 改動驗證透過 `grep` source path（`replay/*.py` + `app/replay_routes.py` + `tests/*.py`）。R3 改動 0 觸 Rust build / proto / IPC schema → cargo --release --lib --workspace 預期 identical baseline，本 round 對齊 R2 final 2909 PASS / 0 fail / Mac 0 ignored。
+6. **Test count 用戶 prompt 預期 vs 實測**：用戶 prompt §3 寫期望 ≥3499 PASS，實測 3499（exact match）— +20 = 純 R3 貢獻（11 writer + 9 finalize），baseline 3479 = R2 final，failed 1 = pre-existing E4-P0-1（不變）。E4 報告必明分清 R3-specific delta vs cumulative delta，幫 PM 理解真實貢獻數字。
+7. **Cargo Mac vs Linux ignored 數字差異是預期** — Mac arm64 端 `cargo --release --lib --workspace` 三 crate（27 + 415 + 2467 = 2909）= 0 ignored；Linux 端通常 +3 ignored 屬 PG/Postgres-feature 標記，Mac 不啟用該 feature 故 0 ignored。R2 report §7 同樣記錄 Mac=0 ignored，behavior consistent — 不要誤判為「2909 vs 3 ignored 不對齊」。
+8. **`'synthetic_replay'` tier 是 R3 寫入唯一 tier** — V050 CHECK enum 含 3-value（synthetic_replay / calibrated_replay / counterfactual_replay），但 R3 simulated_fills_writer 寫的全是 `'synthetic_replay'`（CLAUDE.md §九 line 412 entry）。下游 SELECT 必加 `WHERE evidence_source_tier IN ('calibrated_replay', 'counterfactual_replay')` 才能 ML training；E3 安全審計 grep rule 加此檢查。Sprint B-D 處理 calibration / counterfactual reweight。
+
+**Report**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-04--ref20_sprint_a_r3_regression.md`
+
+---
+
 ### 2026-05-04 REF-20 Sprint A R2（Manifest Registry：register/report/manifest_verify + idempotency cache + IDOR enum-oracle close + 0o600 secrets mode + rate limit；round 1+2+3 cumulative，HEAD `c1ab7ea9` + WIP 改動）— **E4 PASS**
 
 **對象**：PM 派 E4 regression 跑 R2 round 1+2+3 cumulative IMPL 落盤後的 5 R2-specific test file（29 case）+ 1 retrofit Track C IDOR cross-actor 404 + replay-keyword sibling 雙跑 + full control_api_v1 + module smoke + cross-language byte-equal + cargo workspace + audit script + cross-platform grep + LOC governance + CLAUDE.md §九 真寫入證明 + E2 round 2 NEW finding round 3 fix verification。
