@@ -83,6 +83,7 @@ V050 schema: sql/migrations/V050__replay_simulated_fills.sql
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -462,6 +463,42 @@ def _compute_and_persist_calibration(
         return None
 
 
+def _overlay_report_execution_confidence(
+    report_path: Path,
+    *,
+    execution_confidence: Optional[str],
+) -> bool:
+    """Patch replay_report.json with post-finalize calibration confidence.
+
+    The Rust runner writes the pre-calibration artifact with
+    execution_confidence="none". Finalize is the first point where we can read
+    recent real fills and derive the calibration label, so the registered
+    artifact is updated before V046 byte_size registration.
+    """
+    if not execution_confidence:
+        return False
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return False
+        payload["execution_confidence"] = execution_confidence
+        result = payload.get("result")
+        if isinstance(result, dict):
+            result["execution_confidence"] = execution_confidence
+        report_path.write_text(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — advisory overlay; finalize continues
+        logger.warning(
+            "run_finalize: execution_confidence artifact overlay failed "
+            "path=%s label=%s error=%s:%s",
+            report_path, execution_confidence, type(exc).__name__, exc,
+        )
+        return False
+
+
 # ─── Public coroutine: run_finalize_in_pg_xact ───────────────────────
 
 
@@ -624,6 +661,19 @@ async def run_finalize_in_pg_xact(
                         ),
                     })
 
+                # Step 4.5：derive calibration before artifact registration so
+                # replay_report.json carries the same execution_confidence as
+                # V049/report API instead of Rust's pre-calibration "none".
+                calibration_label_value = _compute_and_persist_calibration(
+                    cur, experiment_id=row["manifest_id"],
+                )
+                report_confidence_overlay_applied = (
+                    _overlay_report_execution_confidence(
+                        report_path,
+                        execution_confidence=calibration_label_value,
+                    )
+                )
+
                 # Step 5: register replay_report.json in V046.
                 # 步驟 5：將 replay_report.json 註冊到 V046。
                 # NOTE: we do NOT re-write the file (Rust already wrote
@@ -691,14 +741,6 @@ async def run_finalize_in_pg_xact(
                         ),
                     })
 
-                # Step 7.5：REF-20 Sprint C R6 W6 R6-T9 Sprint C1 closure
-                # 真實 caller chain — 計算 calibration label 並 UPDATE V049
-                # row 的 execution_confidence column。advisory 性質：任何
-                # 錯誤 log + 繼續，不 abort finalize（QC §7.4 哲學）。
-                calibration_label_value = _compute_and_persist_calibration(
-                    cur, experiment_id=row["manifest_id"],
-                )
-
                 # Step 8: commit + emit audit stub.
                 # 步驟 8：commit + 發 audit stub。
                 conn.commit()
@@ -720,6 +762,9 @@ async def run_finalize_in_pg_xact(
                     # 揭露（advisory；'none' / 'limited' / 'calibrated' / None
                     # = compute error）。
                     "execution_confidence": calibration_label_value,
+                    "report_confidence_overlay_applied": (
+                        report_confidence_overlay_applied
+                    ),
                 }
                 audit_emit_fn(
                     event_type="replay_run_finalized",

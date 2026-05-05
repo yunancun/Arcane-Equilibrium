@@ -263,12 +263,13 @@ def test_position_size_max_pct_propagates_to_disk_manifest(
         output_dir=tmp_path / "tight",
         cur=cur_tight,
     )
-    assert "_replay_risk_overrides" in payload_tight, (
-        "Round 3 Fix 3 BROKE: build_default_manifest_payload did NOT inject "
-        "_replay_risk_overrides from V049; Rust runner will see "
+    assert payload_tight["strategy"] == "grid_trading"
+    assert "risk_overrides" in payload_tight, (
+        "build_default_manifest_payload did NOT inject risk_overrides from "
+        "V049; Rust runner will see "
         "RiskConfig::default() → A5 delta dies at disk hand-off."
     )
-    assert payload_tight["_replay_risk_overrides"] == {
+    assert payload_tight["risk_overrides"] == {
         "limits": {"position_size_max_pct": 2.0}
     }
 
@@ -288,8 +289,9 @@ def test_position_size_max_pct_propagates_to_disk_manifest(
         output_dir=tmp_path / "loose",
         cur=cur_loose,
     )
-    assert "_replay_risk_overrides" in payload_loose
-    assert payload_loose["_replay_risk_overrides"] == {
+    assert payload_loose["strategy"] == "grid_trading"
+    assert "risk_overrides" in payload_loose
+    assert payload_loose["risk_overrides"] == {
         "limits": {"position_size_max_pct": 10.0}
     }
 
@@ -297,17 +299,17 @@ def test_position_size_max_pct_propagates_to_disk_manifest(
     # RiskConfig → A5 delta materialises.
     # 兩 payload 帶不同 blob → Rust runner 讀不同 RiskConfig → A5 成立。
     assert (
-        payload_tight["_replay_risk_overrides"]
-        != payload_loose["_replay_risk_overrides"]
+        payload_tight["risk_overrides"]
+        != payload_loose["risk_overrides"]
     ), (
         "A5 acceptance FAIL: two payloads carry IDENTICAL risk_overrides "
-        f"despite distinct register inputs: {payload_tight['_replay_risk_overrides']}"
+        f"despite distinct register inputs: {payload_tight['risk_overrides']}"
     )
 
     # Sanity check: strategy_params blob is NOT present (we did not register it).
     # 健全性：strategy_params blob 未注入（register 時未提供）。
-    assert "_replay_strategy_params" not in payload_tight
-    assert "_replay_strategy_params" not in payload_loose
+    assert "strategy_params" not in payload_tight
+    assert "strategy_params" not in payload_loose
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

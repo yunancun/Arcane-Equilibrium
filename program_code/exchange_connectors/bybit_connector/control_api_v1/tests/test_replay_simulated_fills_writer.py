@@ -46,6 +46,7 @@ if _control_api_dir not in sys.path:
 from replay.simulated_fills_writer import (  # noqa: E402
     MAX_PAYLOAD_BYTES,
     MAX_REPORT_BYTES,
+    REJECTED_FILL_QTY_SENTINEL,
     SimulatedFillsWriteResult,
     build_decision_evidence_index,
     consume_decision_evidence_for_fill,
@@ -186,9 +187,9 @@ def test_map_fill_to_v050_row_evidence_tier_allowlist_reject():
 # ─── Case 5: map row qty/price <=0 reject ────────────────────────────
 
 
-def test_map_fill_to_v050_row_qty_zero_rejects():
-    """Case 5: qty=0 violates V050 CHECK qty>0 → return None.
-    Case 5：qty=0 違 V050 CHECK qty>0 → 回 None。
+def test_map_fill_to_v050_row_qty_zero_persists_rejected_ghost_fill():
+    """Case 5: qty=0 ghost fill persists with DB sentinel + payload marker.
+    Case 5：qty=0 ghost fill 用 DB sentinel 寫入並保留 payload 標記。
     """
     fill = _make_synthetic_fill(0, qty=0.0)
     result = map_fill_to_v050_row(
@@ -198,7 +199,11 @@ def test_map_fill_to_v050_row_qty_zero_rejects():
         fill_index=0,
         strategy_name="grid_trading",
     )
-    assert result is None
+    assert result is not None
+    assert result["qty"] == REJECTED_FILL_QTY_SENTINEL
+    payload = json.loads(result["payload"])
+    assert payload["_replay_is_ghost_fill"] is True
+    assert payload["_replay_original_qty"] == 0.0
 
 
 def test_map_fill_to_v050_row_negative_price_rejects():

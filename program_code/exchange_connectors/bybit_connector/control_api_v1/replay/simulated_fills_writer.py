@@ -177,6 +177,7 @@ LIQUIDITY_ROLE_DEFAULT = "taker"
 EXECUTION_MODEL_VERSION_DEFAULT = "synthetic_v1"
 FEE_DEFAULT = 0.0
 FEE_RATE_DEFAULT = 0.0
+REJECTED_FILL_QTY_SENTINEL = 1e-12
 
 # Per-fill JSONB payload size cap (DoS bound); fills with bigger raw payload
 # get truncated to a {"_truncated": true, "_original_size": N} marker.
@@ -562,12 +563,14 @@ def map_fill_to_v050_row(
         )
         return None
 
-    if qty <= 0.0 or price <= 0.0:
+    if qty < 0.0 or price <= 0.0:
         logger.warning(
             "map_fill_to_v050_row: skip fill_index=%d qty=%s price=%s "
             "(V050 CHECK qty>0 AND price>0)", fill_index, qty, price,
         )
         return None
+    is_ghost_fill = qty == 0.0
+    db_qty = REJECTED_FILL_QTY_SENTINEL if is_ghost_fill else qty
 
     try:
         ts_ms = int(fill["ts_ms"])
@@ -599,6 +602,10 @@ def map_fill_to_v050_row(
     # replay_report.json。注入發生於 size check 前，超大 evidence 仍會 fallback
     # 截斷（保留 DoS bound）。
     fill_with_evidence = dict(fill)
+    if is_ghost_fill:
+        fill_with_evidence["_replay_is_ghost_fill"] = True
+        fill_with_evidence["_replay_original_qty"] = qty
+        fill_with_evidence["_replay_db_qty_sentinel"] = db_qty
     if decision_evidence is not None:
         fill_with_evidence["_replay_decision_evidence"] = decision_evidence
     payload_bytes = json.dumps(
@@ -620,6 +627,10 @@ def map_fill_to_v050_row(
         # 截斷時仍保留 decision evidence 為頂層標記（便宜；evidence 設計上 bound ~300 bytes）。
         if decision_evidence is not None:
             payload_obj["_replay_decision_evidence"] = decision_evidence
+        if is_ghost_fill:
+            payload_obj["_replay_is_ghost_fill"] = True
+            payload_obj["_replay_original_qty"] = qty
+            payload_obj["_replay_db_qty_sentinel"] = db_qty
     else:
         payload_obj = fill_with_evidence
 
@@ -673,7 +684,7 @@ def map_fill_to_v050_row(
         "symbol": str(fill["symbol"]),
         "strategy_name": strategy_name,
         "side": side,
-        "qty": qty,
+        "qty": db_qty,
         "price": price,
         "fee": fee,                        # R6-T5: 從 Rust JSON 解析 W1 R6-T1 fee model
         "fee_rate": fee_rate,              # R6-T5: 從 Rust JSON 解析 W1 R6-T1 fee_rate
@@ -911,6 +922,7 @@ __all__ = [
     "LIQUIDITY_ROLE_DEFAULT",
     "MAX_PAYLOAD_BYTES",
     "MAX_REPORT_BYTES",
+    "REJECTED_FILL_QTY_SENTINEL",
     "SUPPORTED_REPORT_SCHEMA_VERSIONS",
     "SimulatedFillsWriteResult",
     "V050_ALLOWED_LIQUIDITY_ROLES",

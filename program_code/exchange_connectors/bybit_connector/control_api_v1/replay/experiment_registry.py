@@ -672,6 +672,63 @@ def lookup_replay_config_blob(
     }
 
 
+def lookup_replay_manifest_runtime_config(
+    cur: Any, experiment_id: str
+) -> Optional[dict[str, Any]]:
+    """Read V049 manifest runtime fields needed by /run manifest fixture.
+
+    REF-20 replay /run must build the Rust manifest from the persisted V049
+    row, not from UI defaults. This helper returns the decoded
+    ``manifest_jsonb`` plus the V049 ``data_tier`` and ``execution_confidence``
+    columns so the route can fail loud when the real strategy path is missing.
+    """
+    cur.execute(
+        """
+        SELECT manifest_jsonb, data_tier, execution_confidence
+          FROM replay.experiments
+         WHERE experiment_id = %s::uuid
+         LIMIT 1;
+        """,
+        (str(experiment_id),),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    raw = row[0]
+    if isinstance(raw, (bytes, bytearray)):
+        try:
+            raw = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.warning(
+                "lookup_replay_manifest_runtime_config: experiment_id=%s "
+                "manifest_jsonb bytes not utf-8 decodable",
+                experiment_id,
+            )
+            return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "lookup_replay_manifest_runtime_config: experiment_id=%s "
+                "manifest_jsonb str payload not JSON parseable",
+                experiment_id,
+            )
+            return None
+    if not isinstance(raw, dict):
+        logger.warning(
+            "lookup_replay_manifest_runtime_config: experiment_id=%s "
+            "manifest_jsonb is not dict (got %s)",
+            experiment_id, type(raw).__name__,
+        )
+        return None
+    return {
+        "manifest_jsonb": raw,
+        "data_tier": row[1] if len(row) > 1 else None,
+        "execution_confidence": row[2] if len(row) > 2 else None,
+    }
+
+
 def update_execution_confidence(
     cur: Any,
     *,
@@ -960,11 +1017,11 @@ def register_experiment(
     #       so the DB self-consistency invariant ``sha256(persisted_jsonb)
     #       == manifest_hash`` continues to hold (E2 review H-1).
     #
-    # When neither blob is supplied (legacy path / R5-T6 round 1 callers),
-    # the existing behaviour is preserved exactly: client-supplied sha
-    # values + unmodified manifest_jsonb + xlang signature invariant intact.
-    # The 13/13 cross-language fixture set has neither blob field present so
-    # canonical_bytes is unchanged → 13/13 PASS.
+    # When neither blob is supplied, client-supplied strategy/risk sha values
+    # are still used. Runtime fields (symbol/strategy/timeframe/data_tier) are
+    # now canonical manifest fields because /run and calibration read V049
+    # manifest_jsonb; signed callers must include them rather than relying on
+    # server injection.
     #
     # SAFETY / 不變量：
     #   - 注入路徑只在 server 端執行（M-4 client-prefix rejector 已過）。
@@ -976,18 +1033,35 @@ def register_experiment(
     #     範圍不支援 signed-with-blob 同時使用；測試路徑不簽名（R5-T7
     #     fixture 路徑同步走 unsigned path）。Sprint C R6 fee calibration
     #     會處理 signed+blob 的雙路徑契約。
-    # 當 ``strategy_params`` / ``risk_overrides`` 兩者均不提供（legacy /
-    # R5-T6 round 1 caller）時，行為與 round 1 完全一致：用 client 提供的
-    # sha + 不動 manifest_jsonb + 跨語言 signature invariant 不破。
-    # 13/13 跨語言 fixture 兩 blob 欄位皆不在 → canonical_bytes 不變 → 不退。
-    manifest_to_persist: dict[str, Any] = body.manifest_jsonb
+    # 當 ``strategy_params`` / ``risk_overrides`` 兩者均不提供時，仍用 client
+    # 提供的 strategy/risk sha；但 runtime 欄位現為 canonical manifest 欄位，
+    # 因 /run 與 calibration 都讀 V049 manifest_jsonb。signed caller 必自行簽入。
+    manifest_to_persist: dict[str, Any] = dict(body.manifest_jsonb)
     effective_strategy_sha = body.strategy_config_sha256
     effective_risk_sha = body.risk_config_sha256
 
+    # Runtime fields must be part of the canonical persisted manifest. The
+    # Rust runner and calibration lookup read V049.manifest_jsonb, while V049
+    # has no top-level symbol/strategy columns. Unsigned callers get these
+    # fields injected server-side; signed callers must include them in the
+    # signed body so the server never mutates a signed manifest invisibly.
+    # runtime 欄位必進 canonical manifest；signed body 缺欄位時 fail-closed。
+    for key, expected in (
+        ("symbol", body.symbol),
+        ("strategy", body.strategy),
+        ("timeframe", body.timeframe),
+        ("data_tier", body.data_tier),
+    ):
+        existing = manifest_to_persist.get(key)
+        if existing is None:
+            if body.signature_hex is not None:
+                return None, f"manifest_runtime_field_missing:{key}"
+            manifest_to_persist[key] = expected
+            continue
+        if str(existing) != str(expected):
+            return None, f"manifest_runtime_field_mismatch:{key}"
+
     if body.strategy_params is not None or body.risk_overrides is not None:
-        # Shallow copy so caller's body.manifest_jsonb is not mutated.
-        # 淺拷貝避免動到 caller 的 body.manifest_jsonb。
-        manifest_to_persist = dict(body.manifest_jsonb)
         if body.strategy_params is not None:
             strategy_canonical = compute_manifest_canonical_bytes(
                 body.strategy_params
@@ -1096,16 +1170,16 @@ def register_experiment(
         return None, "engine_binary_sha_not_provisioned"
 
     # R2 round 2 fix H-1: do NOT inject ``_idempotency_key`` into manifest_jsonb.
-    # The persisted manifest_jsonb must be byte-equal to the (possibly
-    # blob-augmented per Sprint B2 R5-T6 round 2) input so the
+    # The persisted manifest_jsonb must be byte-equal to the augmented
+    # manifest body (runtime fields plus optional config blobs) so the
     # ``sha256(persisted_jsonb) == manifest_hash`` invariant continues to hold.
-    # The augmentation (``_replay_strategy_params`` / ``_replay_risk_overrides``)
-    # is performed BEFORE manifest_canonical/manifest_hash computation above
+    # The augmentation is performed BEFORE manifest_canonical/manifest_hash
+    # computation above
     # (see Sprint B2 R5-T6 round 2 block) so this INSERT writes a matching
     # pair: persisted manifest_jsonb bytes ↔ manifest_hash invariant intact.
     # R2 round 2 fix H-1：不注入 ``_idempotency_key`` 進 manifest_jsonb；持
-    # 久化的 manifest_jsonb 必與（可能由 Sprint B2 R5-T6 round 2 注入 blob）
-    # input byte-equal 以維持 ``sha256(persisted_jsonb) == manifest_hash``
+    # 久化的 manifest_jsonb 必與 augmentation 後的 body byte-equal，以維持
+    # ``sha256(persisted_jsonb) == manifest_hash``
     # 不變式。注入發生在前面 manifest_canonical/manifest_hash 計算之前，
     # 故 INSERT 寫入時 persisted body bytes 與 hash 仍是同對。
 
@@ -1288,6 +1362,16 @@ def map_register_error_to_http(err: Optional[str]) -> Optional[Tuple[int, dict[s
             "reason_codes": ["replay_register_bad_test_key"],
             "message": err,
         }
+    if err.startswith("manifest_runtime_field_missing"):
+        return 400, {
+            "reason_codes": ["replay_register_manifest_runtime_field_missing"],
+            "message": err,
+        }
+    if err.startswith("manifest_runtime_field_mismatch"):
+        return 400, {
+            "reason_codes": ["replay_register_manifest_runtime_field_mismatch"],
+            "message": err,
+        }
     # R2 round 2 fix H-2: idempotency replay attack → 409 Conflict.
     # R2 round 2 fix H-2：idempotency replay attack → 409 Conflict。
     if err == "idempotency_replay_attack":
@@ -1324,6 +1408,7 @@ __all__ = [
     "compute_manifest_hash",
     "lookup_replay_config_sha256",  # R5-T6 read-back helper
     "lookup_replay_config_blob",  # R5-T6 round 2 read-back blob helper
+    "lookup_replay_manifest_runtime_config",  # /run V049 manifest runtime lookup
     "update_execution_confidence",  # R6-T6 post-replay calibration writer
     "map_register_error_to_http",
     "_cache_clear_for_test",  # R2 round 2 H-1 — TEST-ONLY hermetic helper

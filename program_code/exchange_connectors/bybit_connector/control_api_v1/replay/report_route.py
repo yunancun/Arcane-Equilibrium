@@ -291,6 +291,22 @@ def _read_artifact_with_traversal_guard(
     return artifact, traversal_blocked
 
 
+def _overlay_artifact_payload_execution_confidence(
+    artifact: dict[str, Any],
+    execution_confidence: Optional[str],
+) -> None:
+    """Overlay V049 execution_confidence onto loaded report payloads."""
+    if not execution_confidence:
+        return
+    payload = artifact.get("payload")
+    if not isinstance(payload, dict):
+        return
+    payload["execution_confidence"] = execution_confidence
+    result = payload.get("result")
+    if isinstance(result, dict):
+        result["execution_confidence"] = execution_confidence
+
+
 # ─── Public coroutine: fetch_report_for_experiment ─────────────────────
 
 
@@ -410,6 +426,23 @@ async def fetch_report_for_experiment(
             reason=lookup_err,
         ), None
 
+    experiment_confidence: Optional[str] = None
+    confidence_rows, confidence_err = await async_safe_pg_select_fn(
+        """
+        SELECT execution_confidence
+          FROM replay.experiments
+         WHERE experiment_id = %s::uuid
+         LIMIT 1;
+        """,
+        (manifest_uuid,),
+    )
+    if confidence_err is None and confidence_rows:
+        first_confidence_row = confidence_rows[0]
+        if len(first_confidence_row) == 1:
+            value = first_confidence_row[0]
+            if value in ("none", "limited", "calibrated"):
+                experiment_confidence = str(value)
+
     # Step 3: IDOR-aware SELECT against V046.report_artifacts.
     # 步驟 3：對 V046.report_artifacts 做 IDOR-aware SELECT。
     # ``idor_admin_bypass`` already resolved before step 2 for IDOR enum
@@ -443,6 +476,9 @@ async def fetch_report_for_experiment(
             row,
             artifact_path_within_allowlist_fn,
             check_artifact_path_within_allowlist_fn,
+        )
+        _overlay_artifact_payload_execution_confidence(
+            artifact, experiment_confidence,
         )
         if blocked is not None:
             traversal_blocked_paths.append(blocked)
@@ -492,6 +528,7 @@ async def fetch_report_for_experiment(
         "experiment_id": experiment_id,
         "manifest_id": manifest_uuid,
         "run": run_summary,
+        "execution_confidence": experiment_confidence,
         "artifacts": artifacts,
         "artifact_count": len(artifacts),
         "wiring_status": "pg_path_active",

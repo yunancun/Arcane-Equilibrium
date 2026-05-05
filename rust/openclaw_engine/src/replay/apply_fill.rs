@@ -268,7 +268,7 @@ impl IsolatedPipeline {
                     slippage_bps,
                     liquidity_role: liquidity_role.to_string(),
                 });
-                self.apply_fill_open(&intent.symbol, intent.is_long, final_qty, fill_price);
+                self.apply_fill_open(&intent.symbol, intent.is_long, final_qty, fill_price, fee);
                 self.last_action = format!("open:{}", intent.symbol);
             }
             RiskDecision::Rejected { gate, reason } => {
@@ -357,22 +357,21 @@ impl IsolatedPipeline {
             slippage_bps,
             liquidity_role: liquidity_role.to_string(),
         });
-        self.apply_fill_close(symbol, fill_price);
+        self.apply_fill_close(symbol, fill_price, fee);
         self.last_action = format!("close:{}", symbol);
     }
 
     /// Sprint B2 R5-T3 — open-side snapshot mutation. Inserts/extends a
-    /// position; deducts no fee from `snap.balance`. Sprint C R6-T1: fee is
-    /// captured at the `SimulatedFill` row level (see `process_open_intent` /
-    /// `process_close_intent`) — folding fee into `snap.balance` mid-flight
-    /// would double-count once `into_result` reads it for
-    /// `pnl_summary.ending_balance`. Sprint D R8 may extend `pnl_summary` to
-    /// fold fee into PnL — but that is a `pnl_summary` schema decision.
-    ///
-    /// Sprint B2 R5-T3 — open-side snapshot mutation。Sprint C R6-T1：fee 在
-    /// `SimulatedFill` row 層捕獲，**不**扣 `snap.balance`（避免 `into_result`
-    /// 讀 `snap.balance` 餵 `pnl_summary.ending_balance` 時 double-count）。
-    pub(super) fn apply_fill_open(&mut self, symbol: &str, is_long: bool, qty: f64, fill_price: f64) {
+    /// position and deducts execution fee from the snapshot balance so
+    /// `pnl_summary.net_pnl` is fee-net.
+    pub(super) fn apply_fill_open(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        fill_price: f64,
+        fee: f64,
+    ) {
         let snap = match self.paper_snapshot.as_mut() {
             Some(s) => s,
             None => return,
@@ -422,21 +421,14 @@ impl IsolatedPipeline {
                 entry_price: fill_price,
             });
         }
+        snap.balance -= fee;
         self.balance = snap.balance;
     }
 
     /// Sprint B2 R5-T3 — close-side snapshot mutation. Realises PnL =
     /// (fill_price - entry_price) * qty (long; sign-flipped for short),
-    /// removes position, updates balance. Mirrors `paper_state::realize_close`.
-    /// Sprint C R6-T1: fee captured at `SimulatedFill` row level (see
-    /// `process_close_intent`), NOT subtracted from `snap.balance` here
-    /// (same rationale as `apply_fill_open` — avoid `pnl_summary` double-count).
-    ///
-    /// Sprint B2 R5-T3 — close-side snapshot mutation；對齊
-    /// `paper_state::realize_close`。Sprint C R6-T1：fee 在
-    /// `process_close_intent` row 層捕獲，**不**於此扣 snap.balance（同
-    /// `apply_fill_open` 邏輯，避免 `pnl_summary` double-count）。
-    pub(super) fn apply_fill_close(&mut self, symbol: &str, fill_price: f64) {
+    /// removes position, updates balance, and deducts the close-side fee.
+    pub(super) fn apply_fill_close(&mut self, symbol: &str, fill_price: f64, fee: f64) {
         let snap = match self.paper_snapshot.as_mut() {
             Some(s) => s,
             None => return,
@@ -444,17 +436,14 @@ impl IsolatedPipeline {
         if let Some(idx) = snap.positions.iter().position(|p| p.symbol == symbol) {
             let pos = snap.positions.remove(idx);
             // PnL = (fill - entry) * qty for long; (entry - fill) * qty for short.
-            // Sprint C R6-T1: fee is captured at row level in
-            // `process_close_intent`, NOT applied to snap.balance here.
             // PnL = (fill - entry) * qty 多倉；(entry - fill) * qty 空倉。
-            // Sprint C R6-T1：fee 在 `process_close_intent` row 層捕獲，
-            // **不**於此扣 snap.balance。
             let realised_per_unit = if pos.is_long {
                 fill_price - pos.entry_price
             } else {
                 pos.entry_price - fill_price
             };
             snap.balance += realised_per_unit * pos.qty;
+            snap.balance -= fee;
         }
         self.balance = snap.balance;
     }

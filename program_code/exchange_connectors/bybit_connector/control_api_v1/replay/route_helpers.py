@@ -85,6 +85,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import subprocess
 import time
@@ -840,30 +841,18 @@ def build_default_manifest_payload(
     """Build the default manifest BODY payload for Track A spawn flow.
     構造 Track A spawn 流程預設 manifest BODY payload。
 
-    R3 Round 6 body-only: 3 body keys; envelope (signature / manifest_hash
-    / signature_key_ref) is computed + injected by ``write_manifest_fixture``
-    via HMAC-SHA256. R3 R6：3 body key；envelope 由後簽 inject。
-
-    Sprint B2 R5-T4 Round 3 Fix 3 — BLOB PASSTHROUGH: ``cur`` supplied →
-    reads V049 ``manifest_jsonb._replay_strategy_params`` /
-    ``_replay_risk_overrides`` (R5-T6 round 2 injection) and copies them
-    into the disk manifest so the Rust runner R5-T4 round 2 schema
-    deserialises typed ``StrategyParamsConfig`` / ``RiskConfig`` overrides.
-    Without passthrough Rust falls back to ``::default()`` → A4/A5 delta
-    cannot materialise. Blob keys are in canonical body (not envelope);
-    Rust ``ReplayManifest`` ``#[serde(default)]`` keeps legacy fixtures
-    parsing cleanly (xlang 13/13 preserved); signed manifest_hash binds
-    blobs. Round 3 Fix 3：``cur`` 提供時讀 V049 兩保留 key 注入 disk；blob 在
-    canonical body 內；legacy fixture 因 serde(default) 仍可解。
+    ``cur=None`` is the legacy three-key smoke body. When ``cur`` is supplied,
+    production /run reads the V049 persisted manifest and emits the real Rust
+    adapter fields: ``strategy``, ``strategy_params``, ``risk_overrides``, and
+    optional ``starting_balance``. Missing ``strategy`` fails loud so /run can
+    no longer silently fall back to the synthetic walker.
 
     Fixture URI fallback: ``OPENCLAW_REPLAY_FIXTURE_URI`` env →
     ``OPENCLAW_REPLAY_FIXTURE_DEFAULT`` env → ``<output_dir>/fixture.json``.
     Args / 參數: ``experiment_id`` uuid text; ``output_dir`` artifact dir;
-    ``cur`` optional cursor (``None`` → byte-identical to pre-Fix-3). Returns
-    dict with 3 body fields; +up to 2 ``_replay_*`` blob keys when ``cur``
-    supplied AND V049 row has blobs.
-    SAFETY：SELECT-only; ``cur=None`` 與 pre-Fix-3 byte-equal；blob 值
-    dict-or-None（non-dict 靜默丟）。
+    ``cur`` optional cursor (``None`` → byte-identical legacy smoke fixture).
+    SAFETY：SELECT-only; ``cur=None`` 與 pre-Fix-3 byte-equal；DB path fails
+    loud when V049 lacks runtime strategy fields required by real replay.
     """
     payload: dict[str, Any] = {
         "experiment_id": experiment_id,
@@ -875,17 +864,45 @@ def build_default_manifest_payload(
         ),
     }
     if cur is not None:
-        # R5-T4 round 3 Fix 3 blob passthrough; lazy import breaks circular;
-        # only inject dict values to avoid ``null`` shifting canonical_bytes.
-        # R5-T4 round 3 Fix 3：lazy import + 僅 dict 注入避免 canonical drift。
-        from .experiment_registry import lookup_replay_config_blob
+        from .experiment_registry import (
+            lookup_replay_config_blob,
+            lookup_replay_manifest_runtime_config,
+        )
+
+        runtime = lookup_replay_manifest_runtime_config(cur, experiment_id)
+        if runtime is None:
+            raise ValueError("replay_manifest_runtime_missing")
+        manifest_jsonb = runtime.get("manifest_jsonb")
+        if not isinstance(manifest_jsonb, dict):
+            raise ValueError("replay_manifest_jsonb_missing")
+
+        strategy_name = manifest_jsonb.get("strategy")
+        if not isinstance(strategy_name, str) or not strategy_name.strip():
+            raise ValueError("replay_manifest_strategy_missing")
+        payload["strategy"] = strategy_name.strip()
+
+        data_tier = runtime.get("data_tier") or manifest_jsonb.get("data_tier")
+        if isinstance(data_tier, str) and data_tier.strip():
+            payload["data_tier"] = data_tier.strip()
+
+        if "starting_balance" in manifest_jsonb:
+            try:
+                starting_balance = float(manifest_jsonb["starting_balance"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("replay_manifest_starting_balance_invalid") from exc
+            if not math.isfinite(starting_balance) or starting_balance <= 0.0:
+                raise ValueError("replay_manifest_starting_balance_invalid")
+            payload["starting_balance"] = starting_balance
+
+        # Only inject dict blobs; runner schema expects top-level
+        # strategy_params / risk_overrides, not the V049 reserved keys.
         blob = lookup_replay_config_blob(cur, experiment_id)
         sp = blob.get("strategy_params")
         if isinstance(sp, dict):
-            payload["_replay_strategy_params"] = sp
+            payload["strategy_params"] = sp
         ro = blob.get("risk_overrides")
         if isinstance(ro, dict):
-            payload["_replay_risk_overrides"] = ro
+            payload["risk_overrides"] = ro
     return payload
 
 

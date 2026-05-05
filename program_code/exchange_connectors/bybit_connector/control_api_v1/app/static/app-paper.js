@@ -702,91 +702,152 @@ function ocPaperSubtabInit() {
     }
   }
 
+  function _metricCellHtml(id, label, value, cls, tooltip) {
+    return '<div class="oc-replay-cell ' + ocSanitizeClass(cls)
+      + '" id="' + ocEsc(id) + '" role="listitem" tabindex="0" title="'
+      + ocEsc(tooltip || "") + '">'
+      + '<div class="oc-replay-cell-label">' + ocEsc(label) + '</div>'
+      + '<div class="oc-replay-cell-val">' + ocEsc(value) + '</div>'
+      + '</div>';
+  }
+
+  function _setReplayStatus(message, cls) {
+    const statusEl = document.getElementById("oc-replay-load-status");
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.className = "oc-replay-load-status " + (cls || "");
+  }
+
+  async function _fetchReplayJson(url, options) {
+    const resp = await fetch(url, Object.assign({
+      credentials: "include",
+      headers: { "Accept": "application/json" }
+    }, options || {}));
+    const body = await resp.json().catch(function () { return {}; });
+    if (!resp.ok) {
+      throw new Error("HTTP " + resp.status + " " + JSON.stringify(body).slice(0, 160));
+    }
+    return body;
+  }
+
+  function _parseJsonControl(id, fallback) {
+    const el = document.getElementById(id);
+    const raw = el ? (el.value || "").trim() : "";
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  }
+
+  function _extractFirstReportPayload(data) {
+    const artifacts = (data && Array.isArray(data.artifacts)) ? data.artifacts : [];
+    for (let i = 0; i < artifacts.length; i += 1) {
+      if (artifacts[i] && artifacts[i].payload) return artifacts[i].payload;
+    }
+    return {};
+  }
+
+  function _renderReportMetrics(data) {
+    data = data || {};
+    const payload = _extractFirstReportPayload(data);
+    const result = payload.result || {};
+    const fills = Array.isArray(result.fills) ? result.fills : [];
+    const firstFill = fills.length ? fills[0] : {};
+    const confidence = data.execution_confidence
+      || payload.execution_confidence
+      || result.execution_confidence
+      || "not_loaded";
+    const dataTier = payload.data_tier
+      || firstFill.evidence_source_tier
+      || "waiting_report";
+    const feeModel = firstFill.fee_rate != null
+      ? ("fee_rate=" + firstFill.fee_rate + " role=" + (firstFill.liquidity_role || "unknown"))
+      : "waiting_report";
+    const calibration = confidence === "calibrated"
+      ? "CALIBRATED"
+      : (confidence === "limited" ? "LIMITED" : (confidence === "none" ? "NONE" : "WAITING"));
+    const cells = [
+      ["oc-replay-cell-execution-confidence", "執行可信度 / Execution Confidence", confidence,
+        confidence === "calibrated" ? "oc-cell-ok" : "oc-cell-warn", "V049/report execution_confidence"],
+      ["oc-replay-cell-data-tier", "資料層級 / Data Tier", dataTier,
+        dataTier === "calibrated_replay" || dataTier === "S2" ? "oc-cell-ok" : "oc-cell-neutral", "Manifest/report evidence tier"],
+      ["oc-replay-cell-fee-model", "費率模型 / Fee Model", feeModel,
+        firstFill.fee_rate != null ? "oc-cell-ok" : "oc-cell-warn", "Runner fee/slippage fields from simulated fills"],
+      ["oc-replay-cell-calibration", "校準狀態 / Calibration", calibration,
+        calibration === "CALIBRATED" ? "oc-cell-ok" : "oc-cell-warn", "Post-finalize calibration label"]
+    ];
+    cells.forEach(function (c) {
+      const el = document.getElementById(c[0]);
+      if (!el) return;
+      el.className = "oc-replay-cell " + c[3];
+      el.title = c[4];
+      el.innerHTML = '<div class="oc-replay-cell-label">' + ocEsc(c[1]) + '</div>'
+        + '<div class="oc-replay-cell-val">' + ocEsc(c[2]) + '</div>';
+    });
+  }
+
   /**
-   * 渲染 ready state：4 cell（execution_confidence / data_tier / fee_model /
-   * calibration_status）+ 1 status timestamp + 簡單實驗 ID 輸入區。
-   *
-   * Render ready state with 4 cells (execution_confidence / data_tier /
-   * fee_model / calibration_status) + status timestamp + experiment ID input.
-   *
-   * Sprint A baseline invariant（CLAUDE.md §九）：
-   *   - evidence_source_tier='synthetic_replay' 是當前唯一上線 tier
-   *   - 所以 execution_confidence baseline='none'（紅外框警示）
-   *   - data_tier baseline='S3 (Synthetic)' — 對齊 V049 schema 列舉
-   *   - fee_model baseline='placeholder' — Sprint C R6 才會校準
-   *   - calibration_status baseline='pending_R6'
-   *
-   * Sprint A baseline invariants (CLAUDE.md §九):
-   *   - evidence_source_tier='synthetic_replay' is the only currently-shipped
-   *     tier; execution_confidence baseline='none' (red outline anti-fraud)
-   *   - data_tier baseline='S3 (Synthetic)'
-   *   - fee_model baseline='placeholder' (Sprint C R6 calibrates)
-   *   - calibration_status baseline='pending_R6'
-   *
-   * @param {object} healthData - /replay/health response data field
+   * Render ready state with an operator workflow: register → run → finalize →
+   * load report. Metrics start as waiting values and are replaced by report data.
    */
   function renderReadyState(healthData) {
     const mount = document.getElementById("subtab-replay-disabled-card");
     if (!mount) return;
     healthData = healthData || {};
 
-    // Sprint A baseline invariants — 防認知欺詐：execution_confidence='none'
-    // 必紅外框；user 看到必意識到「不可作 ML training data」。
-    // Sprint A baselines per CLAUDE.md §九 — execution_confidence='none'
-    // forces red outline so user understands "not ML training data".
-    const baselineMetrics = [
-      {
-        zh: "執行可信度 / Execution Confidence",
-        valZh: "無 / NONE",
-        cls: "oc-cell-warn",
-        tooltip: "Sprint A 唯一上線 tier 是 synthetic_replay；不可作 ML training data。Sprint C R6 fee calibration 後可能升 LOW/MEDIUM。"
-      },
-      {
-        zh: "資料層級 / Data Tier",
-        valZh: "S3（合成 / Synthetic）",
-        cls: "oc-cell-neutral",
-        tooltip: "S3 = synthetic_replay；S2 = calibrated_replay；S1 = real_outcome（不在 replay 範疇）。"
-      },
-      {
-        zh: "費率模型 / Fee Model",
-        valZh: "尚未校準 / NOT CALIBRATED",
-        cls: "oc-cell-warn",
-        tooltip: "Sprint A 用 placeholder fee；Sprint C R6 會以 maker fill rate 7d 真實值校準。"
-      },
-      {
-        zh: "校準狀態 / Calibration",
-        valZh: "PENDING R6",
-        cls: "oc-cell-warn",
-        tooltip: "校準後本欄變 'CALIBRATED'；當前 R6 (Sprint C) 尚未 ship。"
-      }
-    ];
-
     const wiringStatus = ocEsc(healthData.wiring_status || "ready");
     const binaryProfile = ocEsc(healthData.binary_release_profile || "(unset)");
     const ts = new Date().toISOString();
 
     let cellsHtml = '<div class="oc-replay-cells-grid" role="list" '
-      + 'aria-label="Replay baseline metrics / 回放基線指標">';
-    baselineMetrics.forEach(function (m) {
-      cellsHtml += '<div class="oc-replay-cell '
-        + ocSanitizeClass(m.cls) + '" role="listitem" tabindex="0" '
-        + 'title="' + ocEsc(m.tooltip) + '">'
-        + '<div class="oc-replay-cell-label">' + ocEsc(m.zh) + '</div>'
-        + '<div class="oc-replay-cell-val">' + ocEsc(m.valZh) + '</div>'
-        + '</div>';
-    });
+      + 'aria-label="Replay metrics / 回放指標">';
+    cellsHtml += _metricCellHtml(
+      "oc-replay-cell-execution-confidence",
+      "執行可信度 / Execution Confidence",
+      "未載入 / NOT LOADED",
+      "oc-cell-warn",
+      "Updated after report/finalize"
+    );
+    cellsHtml += _metricCellHtml(
+      "oc-replay-cell-data-tier",
+      "資料層級 / Data Tier",
+      "等待 manifest / WAITING",
+      "oc-cell-neutral",
+      "Loaded from V049 manifest/report"
+    );
+    cellsHtml += _metricCellHtml(
+      "oc-replay-cell-fee-model",
+      "費率模型 / Fee Model",
+      "等待報告 / WAITING",
+      "oc-cell-warn",
+      "Loaded from runner fill fee fields"
+    );
+    cellsHtml += _metricCellHtml(
+      "oc-replay-cell-calibration",
+      "校準狀態 / Calibration",
+      "等待 finalize / WAITING",
+      "oc-cell-warn",
+      "Post-finalize calibration"
+    );
     cellsHtml += '</div>';
 
-    // Experiment ID 輸入 + 載入按鈕（Sprint B1 minimum；R5 才接 list endpoint）
-    // Experiment ID input + load button (Sprint B1 minimum; R5 wires list)
-    const inputHtml = '<div class="oc-replay-load-row">'
-      + '<label for="oc-replay-experiment-id" class="oc-replay-load-label">'
-      + '實驗 ID / Experiment ID:</label>'
-      + '<input type="text" id="oc-replay-experiment-id" '
-      + 'class="oc-replay-load-input" placeholder="experiment_id (UUID)" '
-      + 'autocomplete="off" maxlength="64" />'
-      + '<button type="button" class="oc-btn" id="oc-replay-load-btn">'
-      + '載入報告 / Load Report</button>'
+    const inputHtml = '<div class="oc-replay-workflow-grid">'
+      + '<label class="oc-replay-field">Symbol<input id="oc-replay-symbol" value="BTCUSDT" autocomplete="off" /></label>'
+      + '<label class="oc-replay-field">Strategy<input id="oc-replay-strategy" value="grid_trading" autocomplete="off" /></label>'
+      + '<label class="oc-replay-field">Timeframe<input id="oc-replay-timeframe" value="1m" autocomplete="off" /></label>'
+      + '<label class="oc-replay-field">Data Tier<select id="oc-replay-data-tier">'
+      + '<option value="S2">S2 calibrated_replay</option><option value="S3">S3 synthetic_replay</option></select></label>'
+      + '<label class="oc-replay-field">Window Start<input id="oc-replay-window-start" type="datetime-local" /></label>'
+      + '<label class="oc-replay-field">Window End<input id="oc-replay-window-end" type="datetime-local" /></label>'
+      + '<label class="oc-replay-field">Experiment ID<input type="text" id="oc-replay-experiment-id" placeholder="experiment_id" autocomplete="off" maxlength="64" /></label>'
+      + '<label class="oc-replay-field">Run ID<input type="text" id="oc-replay-run-id" placeholder="run_id" autocomplete="off" maxlength="64" /></label>'
+      + '<label class="oc-replay-json">Strategy Params<textarea id="oc-replay-strategy-params">{\"grid_trading\":{\"grid_levels\":20}}</textarea></label>'
+      + '<label class="oc-replay-json">Risk Overrides<textarea id="oc-replay-risk-overrides">{\"limits\":{\"position_size_max_pct\":10.0}}</textarea></label>'
+      + '<label class="oc-replay-json">Manifest JSON<textarea id="oc-replay-manifest-json">{}</textarea></label>'
+      + '</div>'
+      + '<div class="oc-replay-actions">'
+      + '<button type="button" class="oc-btn" id="oc-replay-register-btn">Register / 註冊</button>'
+      + '<button type="button" class="oc-btn" id="oc-replay-run-btn">Run / 執行</button>'
+      + '<button type="button" class="oc-btn" id="oc-replay-finalize-btn">Finalize / 完成</button>'
+      + '<button type="button" class="oc-btn" id="oc-replay-load-btn">Load Report / 載入報告</button>'
       + '<span id="oc-replay-load-status" class="oc-replay-load-status"></span>'
       + '</div>';
 
@@ -800,81 +861,146 @@ function ocPaperSubtabInit() {
       + 'probed_at: ' + ocEsc(ts)
       + '</span></div></div>';
 
-    const bannerHtml = '<div class="oc-replay-ready-banner" role="note">'
-      + '<span class="zh">Sprint A baseline：execution_confidence=NONE（合成資料）。'
-      + '所有 4 cell 為 Sprint A 預設值；Sprint C R6 校準後會更新。</span>'
-      + '<span class="en">Sprint A baseline: execution_confidence=NONE '
-      + '(synthetic data). All 4 cells are Sprint A defaults; updated after '
-      + 'Sprint C R6 calibration.</span></div>';
-
     mount.innerHTML = '<div class="oc-replay-ready-card" role="region" '
       + 'aria-label="Replay backend ready / Replay 後端就緒">'
-      + headerHtml + bannerHtml + cellsHtml + inputHtml + '</div>';
+      + headerHtml + cellsHtml + inputHtml + '</div>';
 
     // 注入 CSS（idempotent guard，避免重渲染重複加 style 節點）
     // Inject CSS once (idempotent guard against re-render dup)
     _injectReplayReadyCss();
 
-    // Wire load button click
-    const btn = document.getElementById("oc-replay-load-btn");
-    if (btn) {
-      btn.addEventListener("click", _onLoadReportClick);
+    const registerBtn = document.getElementById("oc-replay-register-btn");
+    const runBtn = document.getElementById("oc-replay-run-btn");
+    const finalizeBtn = document.getElementById("oc-replay-finalize-btn");
+    const loadBtn = document.getElementById("oc-replay-load-btn");
+    if (registerBtn) registerBtn.addEventListener("click", _onRegisterClick);
+    if (runBtn) runBtn.addEventListener("click", _onRunClick);
+    if (finalizeBtn) finalizeBtn.addEventListener("click", _onFinalizeClick);
+    if (loadBtn) loadBtn.addEventListener("click", _onLoadReportClick);
+  }
+
+  async function _onRegisterClick() {
+    try {
+      const now = new Date();
+      const startIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const symbol = (document.getElementById("oc-replay-symbol").value || "BTCUSDT").trim();
+      const strategy = (document.getElementById("oc-replay-strategy").value || "grid_trading").trim();
+      const timeframe = (document.getElementById("oc-replay-timeframe").value || "1m").trim();
+      const dataTier = document.getElementById("oc-replay-data-tier").value || "S2";
+      const manifestJson = _parseJsonControl("oc-replay-manifest-json", {});
+      manifestJson.symbol = symbol;
+      manifestJson.strategy = strategy;
+      manifestJson.timeframe = timeframe;
+      manifestJson.data_tier = dataTier;
+      const body = {
+        symbol: symbol,
+        strategy: strategy,
+        timeframe: timeframe,
+        data_tier: dataTier,
+        data_window_start: startIso,
+        data_window_end: now.toISOString(),
+        strategy_config_sha256: "0".repeat(64),
+        risk_config_sha256: "1".repeat(64),
+        half_life_days: 7.0,
+        embargo_days: 1.0,
+        manifest_jsonb: manifestJson,
+        strategy_params: _parseJsonControl("oc-replay-strategy-params", null),
+        risk_overrides: _parseJsonControl("oc-replay-risk-overrides", null),
+        idempotency_key: "paper-ui-" + Date.now()
+      };
+      const startEl = document.getElementById("oc-replay-window-start");
+      const endEl = document.getElementById("oc-replay-window-end");
+      if (startEl && startEl.value) body.data_window_start = new Date(startEl.value).toISOString();
+      if (endEl && endEl.value) body.data_window_end = new Date(endEl.value).toISOString();
+      _setReplayStatus("Registering...", "");
+      const resp = await _fetchReplayJson("/api/v1/replay/experiments/register", {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = resp.data || {};
+      document.getElementById("oc-replay-experiment-id").value = data.experiment_id || "";
+      _setReplayStatus("registered experiment_id=" + (data.experiment_id || ""), "oc-cell-ok");
+    } catch (e) {
+      _setReplayStatus("register failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
     }
   }
 
-  /**
-   * 載入 experiment 報告（fetch /replay/report/{id} → 重 render 4 cell）。
-   * Load experiment report (fetch /replay/report/{id} → re-render 4 cells).
-   *
-   * Sprint B1 R4-T3：endpoint schema 目前回 experiment_id / manifest_id /
-   * run / artifacts / wiring_status，**不**含 data_tier / evidence_source_tier
-   * / fee_model / execution_confidence 直接欄位。所以本 render 同時用：
-   *   1. envelope.data_category / wiring_status 確認 endpoint 健康
-   *   2. baseline values（CLAUDE.md §九 Sprint A invariant）
-   *   3. fallback chain（data?.run?.status / data?.artifact_count 等可顯示）
-   *
-   * Sprint B1 R4-T3: endpoint currently returns experiment_id / manifest_id /
-   * run / artifacts / wiring_status — does NOT include direct data_tier /
-   * evidence_source_tier / fee_model / execution_confidence fields. This
-   * render uses (1) envelope wiring_status for health (2) baseline values
-   * (CLAUDE.md §九 Sprint A invariant) (3) fallback chain on optional fields.
-   */
-  async function _onLoadReportClick() {
+  async function _onRunClick() {
     const inputEl = document.getElementById("oc-replay-experiment-id");
-    const statusEl = document.getElementById("oc-replay-load-status");
-    if (!inputEl || !statusEl) return;
-    const expId = (inputEl.value || "").trim();
+    const expId = inputEl ? (inputEl.value || "").trim() : "";
     if (!expId) {
-      statusEl.textContent = "⚠ 請輸入 experiment_id / Please enter experiment_id";
-      statusEl.className = "oc-replay-load-status oc-cell-warn";
+      _setReplayStatus("請先提供 experiment_id / experiment_id required", "oc-cell-warn");
       return;
     }
-    statusEl.textContent = "⏳ 載入中... / Loading...";
-    statusEl.className = "oc-replay-load-status";
     try {
-      const resp = await fetch(
-        "/api/v1/replay/report/" + encodeURIComponent(expId),
-        { credentials: "include", headers: { "Accept": "application/json" } }
+      _setReplayStatus("Running...", "");
+      const resp = await _fetchReplayJson("/api/v1/replay/run", {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          experiment_id: expId,
+          idempotency_key: "paper-run-" + Date.now()
+        })
+      });
+      const data = resp.data || {};
+      const runId = data.run_id || data.id || "";
+      const runEl = document.getElementById("oc-replay-run-id");
+      if (runEl) runEl.value = runId;
+      _setReplayStatus("run.status=" + (data.status || "started") + " run_id=" + runId, "oc-cell-ok");
+    } catch (e) {
+      _setReplayStatus("run failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+    }
+  }
+
+  async function _onFinalizeClick() {
+    const runEl = document.getElementById("oc-replay-run-id");
+    const runId = runEl ? (runEl.value || "").trim() : "";
+    if (!runId) {
+      _setReplayStatus("請先提供 run_id / run_id required", "oc-cell-warn");
+      return;
+    }
+    try {
+      _setReplayStatus("Finalizing...", "");
+      const resp = await _fetchReplayJson(
+        "/api/v1/replay/run/" + encodeURIComponent(runId) + "/finalize",
+        { method: "POST", headers: { "Accept": "application/json" } }
       );
-      if (!resp.ok) {
-        statusEl.textContent = "✗ HTTP " + resp.status + " — 報告載入失敗 / load failed";
-        statusEl.className = "oc-replay-load-status oc-cell-warn";
-        return;
+      const data = resp.data || {};
+      _setReplayStatus("finalized fills=" + (data.fills_inserted || 0)
+        + " confidence=" + (data.execution_confidence || "none"), "oc-cell-ok");
+      const expId = data.experiment_id;
+      if (expId) {
+        document.getElementById("oc-replay-experiment-id").value = expId;
+        await _onLoadReportClick();
       }
-      const body = await resp.json();
+    } catch (e) {
+      _setReplayStatus("finalize failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+    }
+  }
+
+  async function _onLoadReportClick() {
+    const inputEl = document.getElementById("oc-replay-experiment-id");
+    if (!inputEl) return;
+    const expId = (inputEl.value || "").trim();
+    if (!expId) {
+      _setReplayStatus("請輸入 experiment_id / Please enter experiment_id", "oc-cell-warn");
+      return;
+    }
+    _setReplayStatus("Loading...", "");
+    try {
+      const body = await _fetchReplayJson(
+        "/api/v1/replay/report/" + encodeURIComponent(expId)
+      );
       _lastReportData = body;
       const data = (body && body.data) || {};
       const runStatus = (data.run && data.run.status) || "unknown";
       const artifactCount = data.artifact_count != null ? data.artifact_count : 0;
-      statusEl.textContent = "✓ run.status=" + runStatus
-        + " · artifacts=" + artifactCount
-        + " · evidence_source_tier=synthetic_replay (Sprint A baseline)";
-      statusEl.className = "oc-replay-load-status oc-cell-ok";
-      // 4 cell 內容不變（Sprint A baseline）；只更新 status timestamp 與 run.status
-      // 4 cells stay (Sprint A baseline); only status text and run.status update
+      _renderReportMetrics(data);
+      _setReplayStatus("run.status=" + runStatus + " artifacts=" + artifactCount,
+        "oc-cell-ok");
     } catch (e) {
-      statusEl.textContent = "✗ 載入失敗 / load failed (" + (e.name || "Error") + ")";
-      statusEl.className = "oc-replay-load-status oc-cell-warn";
+      _setReplayStatus("load failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
     }
   }
 
@@ -919,6 +1045,19 @@ function ocPaperSubtabInit() {
       + '.oc-replay-cell.oc-cell-ok{border-color:rgba(63,185,80,0.5);'
       + 'background:rgba(63,185,80,0.06)}'
       + '.oc-replay-cell.oc-cell-ok .oc-replay-cell-val{color:var(--green)}'
+      + '.oc-replay-workflow-grid{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));'
+      + 'gap:8px;padding:10px 12px;background:rgba(13,17,23,0.4);'
+      + 'border:1px dashed var(--border);border-radius:6px}'
+      + '.oc-replay-field,.oc-replay-json{display:flex;flex-direction:column;'
+      + 'gap:5px;font-size:10px;color:var(--text-dim);text-transform:uppercase}'
+      + '.oc-replay-json{grid-column:span 4}'
+      + '.oc-replay-field input,.oc-replay-field select,.oc-replay-json textarea{'
+      + 'background:var(--bg);border:1px solid var(--border);border-radius:4px;'
+      + 'padding:6px 8px;color:var(--text);font-family:monospace;font-size:12px;'
+      + 'min-width:0}'
+      + '.oc-replay-json textarea{min-height:52px;resize:vertical;line-height:1.35}'
+      + '.oc-replay-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;'
+      + 'margin-top:8px}'
       + '.oc-replay-load-row{display:flex;gap:8px;flex-wrap:wrap;'
       + 'align-items:center;padding:10px 12px;background:rgba(13,17,23,0.4);'
       + 'border:1px dashed var(--border);border-radius:6px}'
@@ -930,9 +1069,12 @@ function ocPaperSubtabInit() {
       + 'flex-basis:100%;line-height:1.5}'
       + '.oc-replay-load-status.oc-cell-warn{color:var(--red)}'
       + '.oc-replay-load-status.oc-cell-ok{color:var(--green)}'
+      + '@media (max-width:900px){.oc-replay-workflow-grid{grid-template-columns:repeat(2,minmax(0,1fr))}'
+      + '.oc-replay-json{grid-column:span 2}}'
       + '@media (max-width:700px){.oc-replay-cells-grid{'
       + 'grid-template-columns:1fr 1fr}.oc-replay-cell{min-height:60px;'
-      + 'padding:12px 14px}.oc-replay-load-input{min-width:0;width:100%}}';
+      + 'padding:12px 14px}.oc-replay-load-input{min-width:0;width:100%}'
+      + '.oc-replay-workflow-grid{grid-template-columns:1fr}.oc-replay-json{grid-column:span 1}}';
     document.head.appendChild(s);
   }
 

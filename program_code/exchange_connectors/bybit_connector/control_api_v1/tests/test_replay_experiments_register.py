@@ -136,6 +136,10 @@ def _minimal_register_body(**overrides) -> dict:
         "manifest_jsonb": {
             "name": "test-replay-001",
             "candidate_K": 1,
+            "symbol": "BTCUSDT",
+            "strategy": "grid_trading",
+            "timeframe": "1m",
+            "data_tier": "S3",
         },
     }
     base.update(overrides)
