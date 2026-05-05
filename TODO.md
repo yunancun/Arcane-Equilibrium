@@ -1,11 +1,12 @@
-# OpenClaw TODO — 工作清單（v11 · P0/P1/P2 三層 · 2026-05-06）
+# 玄衡 TODO — 工作清單（v12 · P0/P1/P2 三層 · 2026-05-06）
 
-**版本**：v11（2026-05-06 R4 audit sweep：archive 25 done + 5 obsoleted-by-gov-change items；P1-INFRA-3 整塊 REF-20 Sprint A-D + Wave 1-9 + Sprint 1-4 closure 移歸檔）
+**版本**：v12（2026-05-06 soft rename：正式項目名改為「玄衡 · Arcane Equilibrium」；OpenClaw 保留為控制平面 / Gateway / Console / 通信服務族；Bybit 保留為唯一交易所 adapter / connector）
+**v11 摘要保留**：2026-05-06 R4 audit sweep：archive 25 done + 5 obsoleted-by-gov-change items；P1-INFRA-3 整塊 REF-20 Sprint A-D + Wave 1-9 + Sprint 1-4 closure 移歸檔
 **v10 摘要保留**：2026-05-06 active-doc sync REF-20 A-D closed + post-signoff reality-gap fix `67b95808` + AgentTodo MAG-000 confirmed
 **v9 摘要保留**：2026-05-05 §九 LOC governance change：硬上限 1500→2000（operator 決定，REF-20 Sprint C 拍板）；警告線維持 800。
 **REF-20 closure 摘要**：Sprint A+B+C+D 已 closed；R9 PM sign-off commit `6a7a885c` + reality-gap fix `67b95808`。詳 → `srv/memory/project_2026_05_03_ref20_sprint1_2_closure.md` + `docs/archive/2026-05-06--todo_completed_extract.md`。Operator-side outstanding 僅剩 live PG opt-in smoke、V056 cron schedule、5 healthcheck sentinel deploy validation，不阻塞 REF-20 closure。
-**OpenClaw 2026-05-06 定位**：外部 OpenClaw Gateway 改為通信 / mobile / supervisor / proposal relay；本地 5-Agent 保持獨立；唯一 GUI 是 `trade-core:8000/console` OpenClaw Control Console。詳 `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`。
-**HEAD**: `67b95808`（Mac/Linux/origin source 同步；2026-05-06 SSH 驗證 Linux clean）· **Engine runtime**: watchdog demo/live alive，paper inactive by design；last verified full rebuild remains Sprint 3 Track I (`dbcf845b`)。
+**玄衡 2026-05-06 命名定位**：正式項目名為「玄衡 · Arcane Equilibrium」；外部 OpenClaw Gateway 改為通信 / mobile / supervisor / proposal relay；本地 5-Agent 保持獨立；唯一 GUI 是 `trade-core:8000/console` OpenClaw Control Console。詳 `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md` + `docs/adr/0014-arcane-equilibrium-soft-rename.md`。
+**Source checkpoint before soft rename**: `61634f3a`（Mac/Linux/origin source 同步；2026-05-06 SSH 驗證 Linux clean；本次玄衡 soft rename 為 docs-only，不 rebuild / restart / DB write）· **Engine runtime**: watchdog demo/live alive，paper inactive by design；last verified full rebuild remains Sprint 3 Track I (`dbcf845b`)。
 **測試基準**：Python pytest **3431 PASS** / 1 fail (pre-existing E4-P0-1) / 10 skip · Rust cargo workspace **3132 PASS** / 2 fail (pre-existing E4-P0-2) / 3 ignored · Sprint 3 Track H Python sibling 44/44 PASS
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 

@@ -1,20 +1,22 @@
-# OpenClaw / Bybit AI Agent 交易系統
+# 玄衡 · Arcane Equilibrium
 # CLAUDE.md — 項目指令文件（核心規則 + 下一步指針）
 
 ---
 
 ## 一、項目定位
 
-長期進化型 AI Agent 自動交易系統。OpenClaw 是項目控制平面與通信入口品牌；**Bybit 為唯一交易所**（專攻）。
+長期進化型 Agentic Trading Governance System。正式項目名為 **玄衡 · Arcane Equilibrium**；OpenClaw 保留為控制平面 / Gateway / Console / 通信服務族名稱；**Bybit 為唯一交易所**（專攻）。
 
 **詞彙權威 → `srv/CONTEXT.md`** （domain glossary，所有新文檔/ADR/refactor/review 必對齊；2026-05-06 引入）。
-**架構決策記錄 → `srv/docs/adr/0001..0013-*.md`** （13 條 seed ADR，硬要可逆 / surprising / real-trade-off 三條件；2026-05-06 引入）。
+**架構決策記錄 → `srv/docs/adr/0001..0014-*.md`** （14 條 ADR，硬要可逆 / surprising / real-trade-off 三條件；2026-05-06 引入）。
 
 > Agent 自主完成交易決策與執行，對成本與收益有清晰感知，能感知自身狀態，能持續學習，在嚴格風控框架下逐步贏得更高自主權。
 
 人類 Operator 角色：不定時檢查、審閱、矯正、批准關鍵步驟、推動策略演進。
 
-**2026-05-06 OpenClaw 定位修正**：
+**2026-05-06 軟更名與 OpenClaw 定位修正**：
+- 正式項目名改為 **玄衡 · Arcane Equilibrium**；新文檔避免再用「OpenClaw Bybit」作總項目名。
+- 短期不改 `openclaw_engine`、`OPENCLAW_*`、`/tmp/openclaw`、GitHub repo、Linux runtime path、Bybit connector path；這些屬 runtime / compatibility namespace。
 - 唯一 canonical GUI 是現有 FastAPI console：`http://trade-core:8000/console`，後續命名為 **OpenClaw Control Console**。
 - 外部 OpenClaw Gateway 僅作 Telegram/WebChat/mobile/operator 通信、上級匯總、cloud escalation、proposal/approval relay；不是第二套交易 GUI。
 - 本地 5-Agent runtime 不遷入外部 OpenClaw Gateway；Scout / Strategist / Guardian / Analyst / Executor 繼續在 TradeBot FastAPI + Postgres + Rust engine 栈內運行。
@@ -52,10 +54,10 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-06 active-doc sync，HEAD `67b95808`）
+## 三、真實狀態全景（2026-05-06 active-doc sync，pre-rename source checkpoint `61634f3a`）
 
 ### Runtime 部署
-- **Mac/Linux/origin source HEAD**: `67b95808`（同步；2026-05-06 SSH 驗證 Linux clean）
+- **Mac/Linux/origin source checkpoint before soft rename**: `61634f3a`（同步；2026-05-06 SSH 驗證 Linux clean；本次玄衡 soft rename 為 docs-only，不 rebuild / restart / DB write）
 - **Engine binary deployed**: last verified full rebuild remains `dbcf845b`（2026-05-03 Sprint 3 Track I Phase E `restart_all.sh --rebuild`）；later REF-20 source changes are source-synced, but this doc-sync batch did not rebuild/restart runtime.
 - **Engine 健康**: watchdog `engine_alive=true`；demo/live fresh；paper inactive by design（2026-05-06 採集點）
 - **Live boundary**: LiveDemo 跑（Live 管線走 demo endpoint），mainnet **0 流量** by design

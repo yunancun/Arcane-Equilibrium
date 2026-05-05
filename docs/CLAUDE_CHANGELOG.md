@@ -1,7 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-05（§九 LOC governance change 1500→2000 + REF-20 Sprint C accept C1+C2 split + advisory wave dispatch pending）
+> 最後更新：2026-05-06（玄衡 · Arcane Equilibrium soft rename）
+
+### 玄衡 · Arcane Equilibrium soft rename — 2026-05-06
+
+**Governance change**：正式項目名改為 **玄衡 · Arcane Equilibrium**。
+
+**命名邊界**：
+- OpenClaw 保留為控制平面 / Gateway / Console / 通信服務族名稱。
+- Bybit 保留為唯一交易所 adapter / connector 名稱。
+- 短期不改 `openclaw_engine`、`OPENCLAW_*`、`/tmp/openclaw`、GitHub repo、Linux runtime path、Docker/service name、migration comments、Bybit connector package path。
+
+**Files updated**：README.md、CLAUDE.md、TODO.md、CONTEXT.md、docs/README.md、AGENTS.md、`.claude/agents/PM.md`、`.codex/MEMORY.md`、ADR 0014、PM report/memory。
 
 ### §九 LOC governance change 1500→2000 + REF-20 Sprint C accept C1+C2 split — 2026-05-05
 
