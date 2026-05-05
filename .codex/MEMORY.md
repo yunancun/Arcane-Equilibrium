@@ -106,6 +106,9 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 - Bybit is the only exchange target
 - Rust `openclaw_engine` is the canonical trading / risk / config authority
 - Python is the control plane, GUI, bridge, and auxiliary surface, not the trading truth layer
+- OpenClaw 2026-05-06 repositioning: external OpenClaw Gateway is only communication / mobile / supervisor / cloud-escalation / proposal relay; it is not the trading conductor, not the local 5-Agent runtime, and not a second GUI
+- canonical GUI is the existing FastAPI console at `trade-core:8000/console`, now treated as the OpenClaw Control Console
+- local 5-Agent runtime stays inside TradeBot; cloud L2 should be reached through a supervisor escalation packet, not by every runtime agent independently
 - new standalone logic should be Rust-first to avoid adding Python migration debt
 - changes must stay cross-platform and Mac-deployable; avoid hard-coded machine paths
 - tunable parameters must be real, discoverable, and persistent; no fake knobs

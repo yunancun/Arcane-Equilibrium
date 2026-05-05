@@ -23,6 +23,12 @@ YYYY-MM-DD HH:MM TZ
 - E1-blocking conditions recorded in AgentTodo: state transitions, store ownership, durable idempotency, persistence-before-side-effect, scanner decay lifecycle, protective close split, fail-closed healthchecks, feature-flag/fallback semantics
 - unrelated untracked `CONTEXT.md` and `docs/adr/` left untouched
 
+2026-05-06 CEST
+- operator clarified that external OpenClaw GUI has not been substantively used; canonical operator GUI is `trade-core:8000/console`
+- accepted new architecture: local 5-Agent runtime remains inside TradeBot; external OpenClaw Gateway becomes communication/mobile/supervisor/cloud-escalation/proposal relay only
+- created authoritative overlay and plans: `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`, `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`, `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md`
+- updated AgentTodo/TODO/CLAUDE/README/CONTEXT/Codex memory so future work does not treat OpenClaw Gateway or MessageBus as the trading conductor
+
 2026-04-28 13:00 CEST
 - created repo-synced Codex workspace under `.codex/`
 - recorded Codex role, startup docs, inventory usage policy, and Mac -> git -> ssh Linux deploy flow
