@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import contextmanager
 
 import pytest
 
@@ -93,16 +94,37 @@ def _operator_actor_bob() -> AuthenticatedActor:
 
 
 @pytest.fixture(autouse=True)
-def _reset_state_around_each_test():
+def _reset_state_around_each_test(monkeypatch):
     """Clear in-memory active-run dict before AND after every test.
     每個 test 前後清空 in-memory active-run dict。
 
     Autouse to keep the four cases hermetic regardless of run order.
     autouse 確保 4 個 case 順序無關。
     """
+    @contextmanager
+    def _pg_unavailable():
+        yield None
+
+    monkeypatch.setattr("app.replay_routes.get_pg_conn", _pg_unavailable)
     _reset_active_runs_for_test()
     yield
     _reset_active_runs_for_test()
+
+
+def test_invalid_uuid_pg_error_maps_to_400() -> None:
+    """PG UUID-cast errors are caller input errors, not runner spawn failures.
+    PG UUID cast error 屬 caller input 400，不應誤報 runner spawn failure。
+    """
+    from replay.run_route import map_run_pg_error_to_http
+
+    mapped = map_run_pg_error_to_http(
+        "pg_error:InvalidTextRepresentation",
+        experiment_id="not-a-uuid",
+    )
+    assert mapped is not None
+    status_code, detail = mapped
+    assert status_code == 400
+    assert "replay_invalid_experiment_id" in detail["reason_codes"]
 
 
 def _build_client_with_actor(actor_factory) -> TestClient:

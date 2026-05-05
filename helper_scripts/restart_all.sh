@@ -343,12 +343,22 @@ restart_engine() {
     # 設則維持舊行為（runner 關閉，零影響）。
     local auto_migrate
     auto_migrate=$(grep '^OPENCLAW_AUTO_MIGRATE=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")
+    # PAPER-ENABLE-ENV-1 (2026-05-06): make paper runtime opt-in durable across
+    # restart_all invocations by reading OPENCLAW_ENABLE_PAPER from the operator
+    # env first, then the secrets env file. A one-shot
+    # `OPENCLAW_ENABLE_PAPER=1 bash restart_all.sh` still wins, while Linux
+    # runtime can persist the choice in basic_system_services.env.
+    # PAPER-ENABLE-ENV-1：先讀 operator env，再讀 secrets env，使 paper runtime
+    # 啟用狀態可跨 restart_all 持久保存；臨時命令列 override 仍優先。
+    local enable_paper
+    enable_paper="${OPENCLAW_ENABLE_PAPER:-$(grep '^OPENCLAW_ENABLE_PAPER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_AUTO_MIGRATE="${auto_migrate}" \
+        OPENCLAW_ENABLE_PAPER="${enable_paper}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"

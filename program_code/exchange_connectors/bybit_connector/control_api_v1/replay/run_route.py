@@ -413,6 +413,19 @@ def map_run_pg_error_to_http(
             ),
         }
 
+    if pg_err == "pg_error:InvalidTextRepresentation":
+        # V049 experiment_id is a UUID column. Bad text must surface as a
+        # caller/input 400, not a replay_runner spawn 503.
+        # V049 experiment_id 為 UUID 欄位；非法文字屬 caller/input 400，
+        # 不能誤報為 replay_runner spawn 503。
+        return 400, {
+            "reason_codes": ["replay_invalid_experiment_id"],
+            "message": (
+                "experiment_id must be the UUID returned by "
+                "POST /api/v1/replay/experiments/register"
+            ),
+        }
+
     if pg_err == "binary_not_found":
         # Binary missing → 503 (operator must deploy or set env).
         # binary 缺 → 503（operator 必部署或設 env）。
