@@ -99,7 +99,7 @@
 
 **最早 Live target**：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA 看真實負 edge + 4 LG 0 IMPL，悲觀更可能**。中位需 P0-3 後 ~3 sprints 連推 LG-2/3/4 IMPL。
 
-### REF-20 IMPL 狀態（2026-05-05 **Sprint A + B closed + Sprint C C1 (R6) CLOSED**，Sprint C C2 (R7) pending + Sprint D pending）
+### REF-20 IMPL 狀態（2026-05-05 **Sprint A + B + C (C1 R6 + C2 R7) ALL CLOSED**，Sprint D pending）
 
 **Sprint A 完成（2026-05-05 02:05 UTC QA round 6 final smoke E2E PASS）**：commit chain `c1ab7ea9 → 353db3fe → 66b650ea → cad8ed84 → e9d547c0+2ae93992 → f51f4e2e → 3a425447 → 2531c011`（8 commit + 1 hotfix retrofit）。Plan §6.R3 acceptance "4 tables row > 0" 真實達成：`replay.experiments=4 / run_state=4 / report_artifacts=1 / simulated_fills=1` + Wave 9 safety 0 leak + FK lineage 4/4 valid。
 
@@ -123,7 +123,22 @@ W1 R6-T1+T2 (Rust apply_fill fee/slippage byte-equal IntentProcessor live + 4 pu
 
 **LOC governance 1500→2000** (commit `e5b5227c`): runner.rs 1466 → 1808 + apply_fill.rs new 485; cumulative R6 LOC ~5000+ across 6 commit (4 file new + 4 file mod).
 
-**Sprint C C2 (R7) pending**: AI-E pre-DAG advisory ✅ done (`docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-05--ref20_r7_advisory_chain_spec.md`); **5 producer dispatch (PA §2B 漏列 mlde_shadow_advisor.py 補位)**：R7-T1 dream_engine.persist_dream_insights + R7-T1.5 mlde_shadow_advisor._persist_recommendations + R7-T3 opportunity_tracker.persist_regret_summary 升級 calibrated_replay tier (caller side `build_replay_metadata` helper) + R7-T2 verify-only + R7-T4 LinUCB NO-OP + R7-T5/T6/T7 capability test + FK chain audit + R7-T8 lookup helper reuse + R7-T9 review.
+**Sprint C C2 (R7) CLOSED 2026-05-05** — 3 commit chain `fc3c6f19 → bbcdf067 → edac7d1b`（W1-W3）+ AI-E pre-DAG advisory ✅。
+
+W1 R7-T1+T1.5+T3 三 producer 升級 calibrated_replay tier (`dream_engine.persist_dream_insights` + `mlde_shadow_advisor._persist_recommendations` PA §2B 漏列補位 + `opportunity_tracker.persist_regret_summary`) via shared helper `replay_metadata_helper.build_replay_metadata` (~80 LOC) + R7-T2 verify-only marker + R7-T4 LinUCB NO-OP confirmation. Backward-compat preserved (4 producer 不傳 R6_calibration_provider 仍跑 hardcoded 'real_outcome' fallback). E1 push back: helper 直接 SELECT V049.manifest_hash 而非 reuse `lookup_replay_config_blob` (AI-E/PA reference signature mismatch — lesson banked).
+
+W2 R7-T5+T7+T8 audit suite — evidence_filter capability probe test (9 case, MIT §1.1 6-key 4-gate coverage) + FK chain audit (6 case, V051 paired CHECK + JOIN replay.experiments.expires_at TTL — note: mlde_shadow_recommendations 表本無 expires_at column, FK-side TTL 由 Block B JOIN 守) + lookup helper reuse audit (10 case manifest_hash consistency across producers) + observability log per MIT §1.5 (33 LOC `evidence_filter capability dump: caps=N/6 block_a=on|skip block_b=full|partial|skip` in `mlde_demo_applier_evidence_filter.fetch_pending_sql_and_params`).
+
+W3 R7-T6 E2E integration test (797 LOC, 5 mock case + 3 live PG opt-in case + 1 smoke summary) — full chain register → run → finalize → producer consume → mlde_shadow_recommendations Block B promote。grid_trading 1162 fills → calibrated_replay tier ✅. funding_arb 99 fills → none (skip insert) ✅.
+
+**A10 acceptance closure** (per plan §6.R7):
+- ✅ A10-1: 0 hardcoded 'real_outcome' in upgraded 3 producer (W1)
+- ✅ A10-2: V051 paired CHECK enforce + V036 RAISE on missing metadata (W2 + W3 live PG opt-in)
+- ✅ A10-3: TTL hard check via V036 verify input + Block B JOIN replay.experiments.expires_at (W6 R6-T9 Python port + W2 FK chain audit)
+
+Sprint C2 R7 cumulative: ~3700 LOC across 3 commits, 43 new test PASS (15+22+6), 0 production regression on 524 sibling tests. Live PG opt-in (OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN) cases skip default — 留 operator post-deploy ad-hoc verify.
+
+**Sprint D pending**: R8 (maintenance / cron / mlde_shadow_recommendations 30-60d retention policy for replay-derived row per MIT §2.4) + R9 (reality-calibrated final sign-off — ≥5 successful runs / ≥2 strategies / ≥1 parameter-change replay / ≥1 fee-aware report / 0 live mutation / UI usable / MLDE/Dream advisory non-commanding / confidence labels match calibration).
 
 **Sprint D pending**: R8 (maintenance / cron / retention policy 30-60d for replay-derived row) + R9 (reality-calibrated final sign-off).
 
