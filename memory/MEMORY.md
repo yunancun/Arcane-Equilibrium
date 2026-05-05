@@ -52,6 +52,7 @@
 - [Shell 指令必須抗貼上](feedback_shell_paste_safety.md) — 給 operator 手貼的 shell 一律單行 one-liner，禁 heredoc / 多行 for / 複雜變數注引號；複雜邏輯寫檔案（2026-04-21）
 - [Rolling-window breach look-ahead bias (2026-04-24)](feedback_indicator_lookahead_bias.md) — `rolling(N).max()` 含 current bar → breach=「current 是 N-bar max」必然 mean-revert；任何 sweep/研究必並列 leak-free shift(1) 對比
 - [V### migration PG dry-run mandatory (2026-05-05)](feedback_v_migration_pg_dry_run.md) — Mac mock pytest + static review cannot catch PG runtime semantic (PL/pgSQL constraints, empirical reflection function output, schema drift); V055 5-round loop 教訓：必先 Linux PG empirical query 再 E1 IMPL 設計
+- [注釋默認只寫中文 (2026-05-05)](feedback_chinese_only_comments.md) — 新代碼注釋默認只寫中文（廢除舊 bilingual mandate）；原有中英對照不主動清，修改時移除英文只保留中文；E2 不再要求英文版；token + LOC 成本顯著降低
 
 ## Workflow & roles
 - [強制工作鏈與審計模板](feedback_workflow_audit_chain.md) — E1→E2→E4→PM 不可跳過；策略改動加 QA Audit；L1/L2/L3 分級模板
