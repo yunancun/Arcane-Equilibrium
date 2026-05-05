@@ -286,6 +286,182 @@ def _mark_run_finalized(cur: Any, *, run_id: str) -> bool:
     return row is not None
 
 
+# ─── Calibration label compute + persist ─────────────────────────────
+
+
+# REF-20 Sprint C R6 W6 R6-T9 Sprint C1 closure：calibration window 14 天。
+# 對齊 QC spec §1 freshness max（14d）+ derive_execution_confidence
+# 14d cutoff（>14d → None 短路）。
+_CALIBRATION_FILLS_WINDOW_DAYS = 14
+
+# 鏡像 Rust 端 calibration_label.rs 對應 SELECT 語意：
+# trading.fills 是 per-fill row（V003 schema），caller 把每行視為單筆
+# fill（entry_price = exit_price = price，gross=0），fee_rate 由 V008 提供。
+# 由於 calibration label 衡量 fee/slippage 校準信心而**非** PnL 信心
+# （見 Rust calibration_label.rs MODULE_NOTE「label 衡量 fee/slippage
+# 校準信心，非 PnL 信心」），net_bps_after_fee 全為 -2×fee_bps 是
+# acceptable degenerate case；MAD/IQR 仍從 fee_bps 計算（此為主信號）。
+_CALIBRATION_ENGINE_MODES = ("demo", "live_demo")
+
+
+def _compute_and_persist_calibration(
+    cur: Any,
+    *,
+    experiment_id: str,
+    derive_fn: Callable[..., Any] = None,  # type: ignore[assignment]
+    update_fn: Callable[..., bool] = None,  # type: ignore[assignment]
+    now_fn: Callable[[], Any] = None,  # type: ignore[assignment]
+) -> Optional[str]:
+    """REF-20 Sprint C R6 W6 R6-T9 Sprint C1 closure 真實 caller chain。
+
+    Post-replay 後計算 calibration label 並 UPDATE V049 row 的
+    execution_confidence column（從 INSERT 預設 'none' 更新為實際 label）。
+
+    流程：
+      1. SELECT V049 row 的 manifest_jsonb->>'strategy' / ->>'symbol'。
+      2. SELECT trading.fills（14d window；engine_mode IN demo/live_demo；
+         strategy + symbol 對應）→ 構造 list[FillRecord]。
+      3. 跑 derive_execution_confidence(fills, now())。
+      4. label != 'none' → 呼 update_execution_confidence(cur, label=...)
+         寫 V049（label='none' 不寫，保持 INSERT 預設）。
+      5. 任何錯誤 catch + log（advisory，不阻 finalize）。
+
+    Args:
+        cur: caller transaction 內 psycopg2-style cursor（與 finalize xact 共用）。
+        experiment_id: V049 row's experiment_id (uuid text)。
+        derive_fn: 注入 `derive_execution_confidence`；測試可 stub。
+        update_fn: 注入 `update_execution_confidence`；測試可 stub。
+        now_fn: 注入 `datetime.now(timezone.utc)`；測試可 stub。
+
+    Returns:
+        ExecutionConfidence label string ('none' / 'limited' / 'calibrated')
+        on success；None on error（log warn + return None；advisory，不 raise）。
+
+    Fail-closed semantic：
+        - 任何 SELECT / SQL / 函數錯誤 → log warn + return None；caller
+          在主 finalize 流程繼續，不 abort（calibration 是 advisory）。
+        - manifest_jsonb 缺 'strategy' / 'symbol' → return None。
+        - 0 fills 對應 → derive 回 None label，不 UPDATE。
+    """
+    # 預設依賴注入（caller 不傳時用 production 版本）。
+    if derive_fn is None or update_fn is None or now_fn is None:
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
+        from program_code.exchange_connectors.bybit_connector.control_api_v1.replay import (  # noqa: E501
+            calibration_label as _cl,
+        )
+        from program_code.exchange_connectors.bybit_connector.control_api_v1.replay import (  # noqa: E501
+            experiment_registry as _er,
+        )
+
+        if derive_fn is None:
+            derive_fn = _cl.derive_execution_confidence
+        if update_fn is None:
+            update_fn = _er.update_execution_confidence
+        if now_fn is None:
+            now_fn = lambda: _dt.now(_tz.utc)  # noqa: E731
+
+    try:
+        # Step 1：取 V049 row 的 manifest_jsonb 中 strategy + symbol。
+        cur.execute(
+            """
+            SELECT manifest_jsonb->>'strategy', manifest_jsonb->>'symbol'
+              FROM replay.experiments
+             WHERE experiment_id = %s::uuid
+             LIMIT 1;
+            """,
+            (str(experiment_id),),
+        )
+        row = cur.fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            logger.info(
+                "calibration: V049 row %s 缺 strategy/symbol；skip", experiment_id,
+            )
+            return None
+        strategy_name = str(row[0])
+        symbol = str(row[1])
+
+        # Step 2：SELECT trading.fills 14d 窗口（demo/live_demo only）。
+        # V003 schema: ts/symbol/side/qty/price + V008 fee_rate + V015 engine_mode。
+        # 注：trading.fills 是 per-fill row，無 entry/exit 配對；caller 把
+        # 每行視為單筆 fill（entry=exit=price，fee_rate 仍從 V008 column 取）。
+        cur.execute(
+            """
+            SELECT ts, side, price, fee_rate
+              FROM trading.fills
+             WHERE strategy_name = %s
+               AND symbol = %s
+               AND engine_mode = ANY(%s)
+               AND ts >= NOW() - (INTERVAL '1 day' * %s)
+             ORDER BY ts ASC;
+            """,
+            (
+                strategy_name,
+                symbol,
+                list(_CALIBRATION_ENGINE_MODES),
+                _CALIBRATION_FILLS_WINDOW_DAYS,
+            ),
+        )
+        rows = cur.fetchall()
+
+        # Step 3：rows → list[FillRecord]。0 fills → derive 回 None label。
+        from program_code.exchange_connectors.bybit_connector.control_api_v1.replay.calibration_label import (  # noqa: E501
+            FillRecord,
+        )
+
+        fills: list[FillRecord] = []
+        for r_ts, r_side, r_price, r_fee_rate in rows:
+            # side 映射 long bool（Buy/long → True；Sell/short → False）。
+            side_lower = (r_side or "").lower()
+            is_long = side_lower in ("buy", "long")
+            try:
+                price_f = float(r_price) if r_price is not None else float("nan")
+                fee_f = float(r_fee_rate) if r_fee_rate is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+            fills.append(
+                FillRecord(
+                    fee_rate=fee_f,
+                    entry_price=price_f,
+                    exit_price=price_f,  # per-fill row：entry=exit；degenerate
+                    is_long=is_long,
+                    filled_at=r_ts,
+                )
+            )
+
+        # Step 4：跑 derive_execution_confidence + UPDATE V049（label != 'none' only）。
+        result = derive_fn(fills, now_fn())
+        label_value = (
+            result.label.value
+            if hasattr(result.label, "value")
+            else str(result.label)
+        )
+
+        if label_value != "none":
+            try:
+                update_fn(cur, experiment_id=str(experiment_id), label=label_value)
+            except ValueError as exc:
+                # Defense-in-depth：label 不在 V049 enum allowlist。
+                logger.warning(
+                    "calibration: invalid label %r for experiment %s: %s",
+                    label_value, experiment_id, exc,
+                )
+                return None
+
+        logger.info(
+            "calibration: experiment=%s strategy=%s symbol=%s n=%d label=%s",
+            experiment_id, strategy_name, symbol, len(fills), label_value,
+        )
+        return label_value
+    except Exception as exc:  # noqa: BLE001 — advisory; never abort finalize
+        logger.warning(
+            "calibration: failed for experiment %s: %s: %s",
+            experiment_id, type(exc).__name__, exc,
+        )
+        return None
+
+
 # ─── Public coroutine: run_finalize_in_pg_xact ───────────────────────
 
 
@@ -515,6 +691,14 @@ async def run_finalize_in_pg_xact(
                         ),
                     })
 
+                # Step 7.5：REF-20 Sprint C R6 W6 R6-T9 Sprint C1 closure
+                # 真實 caller chain — 計算 calibration label 並 UPDATE V049
+                # row 的 execution_confidence column。advisory 性質：任何
+                # 錯誤 log + 繼續，不 abort finalize（QC §7.4 哲學）。
+                calibration_label_value = _compute_and_persist_calibration(
+                    cur, experiment_id=row["manifest_id"],
+                )
+
                 # Step 8: commit + emit audit stub.
                 # 步驟 8：commit + 發 audit stub。
                 conn.commit()
@@ -531,6 +715,11 @@ async def run_finalize_in_pg_xact(
                     "fills_skipped": fills_result.fills_skipped,
                     "fills_truncated": fills_result.fills_truncated,
                     "writer_errors": fills_result.errors,
+                    # REF-20 Sprint C R6 W6 R6-T9：Sprint C1 closure 真實
+                    # caller chain；calibration label 寫入 V049 後在 response
+                    # 揭露（advisory；'none' / 'limited' / 'calibrated' / None
+                    # = compute error）。
+                    "execution_confidence": calibration_label_value,
                 }
                 audit_emit_fn(
                     event_type="replay_run_finalized",
@@ -587,7 +776,10 @@ __all__ = [
     "FINALIZABLE_STATUSES",
     "FINALIZED_STATUS",
     "REPLAY_REPORT_BASENAME",
+    "_CALIBRATION_ENGINE_MODES",
+    "_CALIBRATION_FILLS_WINDOW_DAYS",
     "_FINALIZE_STATEMENT_TIMEOUT_MS",
+    "_compute_and_persist_calibration",
     "run_finalize_in_pg_xact",
     "validate_run_id_shape",
 ]
