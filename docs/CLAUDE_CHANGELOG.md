@@ -1,7 +1,129 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-05（REF-20 Sprint A closed-with-real-evidence；6-layer blocker chain 全排除；plan §6.R3 acceptance 4 表 row > 0 達成）
+> 最後更新：2026-05-05（REF-20 Sprint A + B closed；A4/A5 strategy + risk parameter delta acceptance hermetic-proven；累計 12 commit chain）
+
+### REF-20 Sprint B closed — 2026-05-05
+
+**Sprint B 完成定義**：plan §6.R4 UI Enable + §6.R5 Real Decision/Risk Replay Path acceptance 達成。
+
+**完成範圍 (per plan §6 task list)**：
+
+R4 Paper Replay Lab UI Enablement (B1 commit `2a69addb`)：
+- tab-paper.html `subtab-btn-replay` 從 static disabled 改 backend-readiness gated
+- app-paper.js OpenClawReplaySubtab namespace (5-state machine: empty/running/failed/completed/degraded + 30s periodic poll + last-active-localStorage forced through /health probe)
+- 4-cell render: execution_confidence / data_tier / fee_model / calibration_status
+- 28/28 static asset tests + XSS guards (≥5 ocEsc/ocSanitizeClass)
+- bilingual UI labels reuse `disabled_state.p2_backend_pending` i18n key (no bloat)
+
+R0-T0 LOC budget release (B1 commit `2a69addb`)：
+- replay_routes.py 1500 → 1146 (-354 LOC margin for B2 R5)
+- 4 sub-router NEW: run_route.py / list_route.py / health_route.py / status_route.py
+  (dependency-injection pattern mirror report_route + run_finalize_route)
+- audit baseline relax `total_cur_execute_hits >= 5 → >= 0` per R0-T0 retrofit
+  (core invariant `leaks=[]` + `audit_ok=True` enforced)
+- /cancel + /manifest/verify intentional carve-out per scope
+
+R5 Real Decision/Risk Replay Path (B2 commits `c679a8b4 → a2f819c5 → 4ffb24c4`)：
+
+R5-T1 strategy_adapter.rs (NEW 398 LOC = 244 prod + 154 inline test):
+- Strategy trait reuse (0 trait change): `Box<dyn Strategy>` wrapper
+- on_tick byte-equal forward strategy.on_tick(ctx) — 0 logic divergence
+- StrategyActionTrace::Open carries deterministic SHA-256 intent_signature
+  (canonical 6-field: symbol|is_long|strategy|order_type|conf:.4f|qty:.4e)
+- ReplayProfile::Isolated constructor reject Live/LiveDemo/PaperLegacy
+
+R5-T2 risk_adapter.rs (NEW 546 LOC = 407 prod + 139 inline test):
+- Pure evaluate(&self, intent, snapshot, atr) → RiskDecision (no mutation)
+- 6/8 Gate replication from intent_processor::router.rs:
+  Gate 1.5 dup / 1.6 neg-balance / 2.0 Guardian (reuse openclaw_core::guardian
+  pure 4-check + reducing-path zero-leverage mirror) / 2.5 Kelly (reuse
+  ml::kelly_sizer::compute_kelly_qty) / 2.6 P1 cap+qty=0 / 2.7 admission
+  (reuse risk_checks::check_order_allowed)
+- Gate 1.0 (auth) + 1.4 (Decision Lease) SKIP per V3 §6.2 + AMD-2026-05-02-01
+- 2/8 Gate scope-out (per_strategy / governor / D15) — Sprint C R6 follow-up
+
+R5-T3 IsolatedPipeline wire (runner.rs +790 LOC):
+- 3 Optional fields (strategy_adapter / risk_adapter / paper_snapshot)
+- with_adapter_pipeline() setter + fail-loud snapshot validation
+  (NaN balance / empty anchor → ReplayError::InvalidSnapshot per F-3)
+- execute() splits: adapter pipeline branch vs synthetic walker fallback
+  (preserves proof_1/4/5 e2e byte-equal contract)
+- 7 new methods + apply_fill_open/close 4-path mirror paper_state/fill_engine.rs
+  (extend / full close / partial close / fresh open)
+- ReplayResult.decision_traces field NEW (serde(default) backward compat)
+- forbidden_guard runtime trip preserved per V3 §12 #10
+
+R5-T4 CLI integration (replay_runner.rs +418 LOC across 3 rounds):
+- ReplayManifest schema: +strategy / starting_balance / strategy_params /
+  risk_overrides (all serde(default) optional — xlang fixtures unaffected)
+- Always-set adapter pipeline (synthetic walker fallback for in-tree e2e only)
+- StrategyFactory::create_with_params + RiskConfig::default()+override
+
+R5-T5 simulated_fills_writer.py decision evidence (+297 LOC):
+- extract_decision_traces / build_decision_evidence_index helpers
+- map_fill_to_v050_row +decision_evidence kw injects _replay_decision_evidence
+  into V050 payload jsonb (PA §6.1: reuse jsonb, no V### migration)
+
+R5-T6 experiment_registry.py config sha256 + blob (+313 LOC):
+- Pydantic +strategy_params + risk_overrides optional fields
+- Server-side sha256 compute via reuse compute_manifest_canonical_bytes
+- INSERT V049 strategy_config_sha256 + risk_config_sha256 with computed values
+- manifest_jsonb persists raw blob via _replay_strategy_params + _replay_risk_overrides
+- lookup_replay_config_blob helper for downstream
+
+Fix 3 build_default_manifest_payload blob passthrough (route_helpers.py +76 LOC):
+- Bridge V049 _replay_* blob → /run handler disk manifest payload
+- Closes register-storage to runner-execution gap
+
+R5-T7 acceptance tests (+1210 LOC across 3 NEW files):
+- test_strategy_param_delta.py (A4 hermetic: distinct sha / fills differ /
+  decision evidence recorded)
+- test_risk_param_delta.py (A5 hermetic: distinct sha / tight rejects more /
+  rejected_gate in payload)
+- replay_runner_e2e_param_delta.rs (Rust proof_7 wiring + proof_8 risk delta)
+
+**Plan §6.R5 acceptance verdict**: A4 + A5 hermetic PASS / proof_7 wiring +
+proof_8 risk delta Rust PASS。**push-back accepted**: proof_7 fills divergence
+on real fixture (synthetic_btcusdt.json) deferred to Sprint C R6 due to
+fixture quality (10-event monotone-up insufficient for grid_levels delta);
+wiring round-trip proven, fills divergence requires richer fixture (R6 scope).
+
+**Build + test results (cumulative)**:
+- cargo build --release --bin replay_runner --features replay_isolated: PASS
+- cargo test --lib (full): 2478 PASS / 0 fail
+- cargo test --bin replay_runner: 9 PASS
+- cargo test --test replay_runner_e2e: 6 PASS (proof_1-5 + helper)
+- cargo test --test replay_runner_e2e_param_delta: 2 PASS (proof_7+8)
+- replay_runner symbol audit: 648 symbols / 0 forbidden GREEN
+- 0 forbidden import / 0 cross-platform path leak
+- Mac pytest replay (full): 196 PASS / 1 skip
+- Linux pytest replay (full): 169 PASS / 3 pre-existing fail / 1 skip
+- xlang_consistency: 13/13 PASS — CRITICAL invariant maintained throughout
+
+**LOC governance final state (CLAUDE.md §九 1500 hard cap)**:
+- replay_routes.py: 1146 (post R0-T0 split)
+- route_helpers.py: 1500 EXACT cap (P2-REPLAY-ROUTE-HELPERS-SPLIT ticket)
+- experiment_registry.py: 1278 (high-cohesion exception)
+- simulated_fills_writer.py: 893 (over 800 warning, R5-T5 scope)
+- replay_runner.rs: 1432 (high-cohesion exception)
+- 4 sub-router each <500 LOC
+
+**Sprint A still-not-proven items now resolved by Sprint B**:
+- A4 actual strategy path: ✓ 3 hermetic + proof_7 wiring
+- A5 actual risk path: ✓ 3 hermetic + proof_8 risk delta
+- A8 UI usable: ✓ R4 5-state machine + 4-cell
+
+**Sprint A items still NOT proven (Sprint C-D scope per plan §11)**:
+- A6 fee-aware PnL: Sprint C R6 (fee model calibration)
+- A7 confidence honesty: Sprint C R6 (execution_confidence label none/limited/calibrated)
+- A10 ML/Dream advisory boundary: Sprint C R7 (verify_replay_evidence_and_insert)
+
+**Sprint C-D pending dispatch**:
+- C = R6 fee calibration + R7 MLDE/Dream advisory integration
+- D = R8 maintenance + R9 reality-calibrated usability sign-off (final)
+
+---
 
 ### REF-20 Sprint A closed-with-real-evidence — 2026-05-05 02:05 UTC
 
