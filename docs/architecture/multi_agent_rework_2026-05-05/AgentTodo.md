@@ -4,6 +4,24 @@ Date: 2026-05-05
 Status: Draft task backlog
 Parent plan: `ENGINEERING_PLAN.md`
 
+## 2026-05-06 OpenClaw Repositioning Overlay
+
+This backlog is governed by the 2026-05-06 OpenClaw repositioning decision:
+
+- Local 5-Agent runtime remains inside TradeBot and must not be migrated into the external OpenClaw Gateway.
+- OpenClaw Gateway is an external communication / mobile / supervisor / proposal relay layer only.
+- The existing FastAPI console is the only canonical GUI and is now the target OpenClaw Control Console.
+- `MessageBus` is a legacy/advisory local trace; it may be observed, sampled, and audited, but it must not be promoted into the authoritative Agent Decision Spine.
+- Cloud AI is called through a supervisor escalation pattern, not by every local agent independently.
+
+Canonical overlay and implementation plans:
+
+- `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`
+- `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`
+- `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md`
+
+If older EX-06 / DOC-04 wording implies OpenClaw itself is the trading conductor or that OpenClaw's own GUI is the primary console, that wording is superseded by this overlay.
+
 ## Reference Path Index
 
 Canonical repo root:
@@ -18,6 +36,9 @@ This todo is intentionally self-contained. A follow-up agent should start from t
 |---|---|---|
 | Original multi-agent boundary | `docs/decisions/EX-06_OpenClaw_Bybit_Multi-Agent_Orchestration_多Agent编排正式边界定义_V1.md` | Defines Scout / Strategist / Guardian / Analyst / Executor / Conductor authority and structured inter-agent communication. |
 | Agent capability blueprint | `docs/decisions/DOC-04_OpenClaw_Bybit_Agent_Capability_Blueprint_Agent能力蓝图_V2.md` | Defines autonomous trading target: instrument, strategy, timing, size, params, scanner, learning, AI cost, anti-adversarial awareness. |
+| OpenClaw control-plane overlay | `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md` | Supersedes the early OpenClaw-as-trading-conductor interpretation; defines one GUI and two agent layers. |
+| OpenClaw Gateway development plan | `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md` | Defines how to use OpenClaw as communication, mobile, supervisor, proposal, and approval relay. |
+| GUI OpenClaw Control Console plan | `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md` | Defines how the existing console absorbs OpenClaw capabilities without creating a second GUI. |
 | Data/perception plane | `docs/decisions/EX-07_OpenClaw_Bybit_Data_Plane_Perception_感知平面正式边界定义_V1.md` | Use when deciding whether scanner evidence belongs to perception, Scout, H0 eligibility, or Guardian risk evidence. |
 | Root rules and runtime reality | `CLAUDE.md` | Current root principles, runtime sync rules, active blockers, Rust engine authority, Decision Lease status. |
 | Active work list | `TODO.md` | Current P0/P1 blockers, including agent schema zero rows and fake-live/shadow wiring. |
@@ -137,6 +158,7 @@ Do not start implementation before CC/FA/PA confirm the authority model:
 | MAG-001 | CC | P0 | DONE | Compliance review against root principles, EX-06, DOC-04, SM-02 Decision Lease, H0/P0/P1. | APPROVED in `docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-06--agenttodo_m0_mag001_compliance_review.md`; no blocking boundary violation or required amendment. |
 | MAG-002 | FA | P0 | CONDITIONAL | Formal architecture review of Agent Decision Spine, object lifecycle, and persistence order. | CONDITIONAL in `docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-06--agenttodo_m0_mag002_architecture_review.md`; canonical order accepted, E1 blocked until state transitions / ownership / idempotency / persistence-before-side-effect / scanner decay / protective-close split / fail-closed healthchecks are explicit. |
 | MAG-003 | PA | P0 | CONDITIONAL | Produce implementation RFC with exact module seams, structs, migrations, flags, and rollout order. | CONDITIONAL in `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-06--agenttodo_m0_mag003_implementation_rfc.md`; M1 may start only as durable event-store wave after PM reconciliation, with M2/M3 authority changes gated behind M1 Linux row proof + E2/E4 acceptance. |
+| MAG-004 | PM | P0 | DONE | Reconcile OpenClaw external Gateway vs local 5-Agent runtime after operator architecture review. | 2026-05-06 overlay accepted: local 5-Agent remains independent; OpenClaw Gateway becomes communication/supervisor/proposal relay; existing console is the only GUI. |
 
 ### M0 Conditional Gate Before E1
 
@@ -155,11 +177,12 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-010 | E1 | P0 | TODO | Wire MessageBus DB sink for `agent.messages`. | Linux runtime shows fresh rows after Scout/Strategist/Guardian messages. |
+| MAG-010 | E1 | P0 | TODO | Add legacy/advisory bus trace writer for `agent.messages` without promoting `MessageBus` to authority. | Linux runtime shows sampled/fresh advisory rows after Scout/Strategist/Guardian messages; docs and tests assert `MessageBus` is not the Agent Decision Spine and writer failure cannot affect trading behavior. |
 | MAG-011 | E1 | P0 | TODO | Persist `agent.state_changes` from agent start/stop/degrade/heartbeat transitions. | State rows exist for all five agents and Conductor. |
-| MAG-012 | E1a | P0 | TODO | Persist `agent.ai_invocations` for L1/L1.5/L2 calls with model, latency, cost, prompt hash, output hash. | Nonzero rows after Strategist and Analyst evaluations. |
+| MAG-012 | E1a | P0 | TODO | Persist `agent.ai_invocations` for local L1/L1.5/L2 and supervisor cloud escalations with model, latency, cost, prompt hash, output hash. | Nonzero rows after Strategist/Analyst evaluations and any OpenClaw supervisor cloud escalation. |
 | MAG-013 | E2 | P0 | TODO | Audit DB sink failure modes. | Message path is fail-soft for logs but fail-visible in health checks. |
 | MAG-014 | E4 | P0 | TODO | Add Linux regression for agent schema nonzero row acceptance. | Test fails on current zero-row state and passes after wiring. |
+| MAG-015 | PA | P0 | TODO | Define OpenClaw supervisor escalation packet and proposal schema. | Local agents emit structured observations; one supervisor compresses and optionally calls cloud; proposals are persisted before GUI/mobile approval. |
 
 ## Milestone 2: Scanner Advisory Conversion
 
@@ -241,7 +264,9 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 2. Should Agent Decision Spine be Rust-only authoritative with Python adapters, or DB-authoritative with Rust enforcement?
 3. What is the minimum replay window required before scanner advisory mode can become enforced?
 4. Should Strategist V2 initially control only new entries, or also existing position reviews?
-5. Which UI surface should show the decision chain first: Paper Dashboard, Learning Cockpit, or Agent roster?
+5. Which UI surface should show the decision chain first: Agent Control tab is now the default; Paper Dashboard and Learning Cockpit should deep-link to it instead of duplicating the chain.
+6. Which OpenClaw channels should be enabled first: Telegram only, or Telegram plus WebChat?
+7. What daily/monthly cloud L2 budget should gate supervisor escalations?
 
 ## Definition of Done
 

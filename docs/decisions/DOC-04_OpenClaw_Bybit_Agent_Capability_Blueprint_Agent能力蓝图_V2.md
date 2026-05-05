@@ -12,6 +12,26 @@ OpenClaw / Bybit AI Agent Trading System
 
 *Classification: Internal — Governance Document*
 
+## 2026-05-06 权威澄清 / Authoritative Clarification
+
+本文件描述的 Agent 能力目标仍有效，但 OpenClaw 的承载方式已重定位。
+
+当前权威定位见：
+
+- `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`
+- `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`
+- `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md`
+
+新的解释：
+
+- 交易认知核心是本地 5-Agent runtime，不迁入外部 OpenClaw Gateway。
+- OpenClaw Gateway 承担多通道通信、operator 对话、移动端告警、上级汇总、云模型升级和 proposal/approval relay。
+- 现有 FastAPI console 是唯一 GUI，并升级为 OpenClaw Control Console。
+- Cloud L2 采用「本地 agent 观察 -> 本地 supervisor 压缩 -> 高价值问题再升级」策略，禁止五个 agent 各自无限制调用云 API。
+- 所有交易影响动作仍必须走 GovernanceHub、Decision Lease、Rust engine 和 operator approval。
+
+后续实现和评审若与本文件旧表述冲突，以 2026-05-06 架构覆写为准。
+
 
 # 修訂歷史 / Revision History
 
@@ -322,7 +342,7 @@ New strategies follow a structured incubation pipeline. No Operator pre-approval
 
 # §5 Multi-Agent 編排架構 / Multi-Agent Orchestration
 
-OpenClaw serves as the Conductor (not an independent Agent), leveraging its existing Multi-Agent routing, Cron scheduling, web-pilot, and Memory capabilities. Five specialized Agents collaborate under OpenClaw’s orchestration.
+2026-05-06 更新：本节原先将 OpenClaw 作为运行时 Conductor 的表述已被架构覆写。当前解释是：本地 Conductor + Scout / Strategist / Guardian / Analyst / Executor 留在 TradeBot 内；外部 OpenClaw Gateway 只承担通信、移动端入口、上级汇总、cloud escalation、proposal/approval relay。五个本地交易 Agent 不迁入外部 OpenClaw Gateway。
 
 
 ## §5.1 Agent 角色矩陣 / Agent Role Matrix

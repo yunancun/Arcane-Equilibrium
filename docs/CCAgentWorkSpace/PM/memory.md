@@ -1201,3 +1201,18 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - No Rust rebuild/restart, runtime DB migration apply, live authorization change, risk config change, strategy parameter change, cron install, SIGHUP, or HTTPS deploy action was performed.
 - PRE-LIVE-3 is only partially advanced: canonical performance metrics are done; [33]/[38]/[40] trend charts and live readiness checklist remain.
+
+## 2026-05-06 OpenClaw Repositioning
+
+### Result
+- Operator clarified that the external OpenClaw GUI was effectively never used; the real operator GUI is `trade-core:8000/console`.
+- PM accepted a new authority model: local 5-Agent runtime stays inside TradeBot; external OpenClaw Gateway becomes communication/mobile/supervisor/cloud-escalation/proposal relay only.
+- Canonical GUI becomes the existing FastAPI console, now positioned as OpenClaw Control Console.
+- Added authority overlay and two plans:
+  - `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`
+  - `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`
+  - `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md`
+
+### Boundary
+- OpenClaw Gateway must not hold Bybit keys, directly order, directly mutate live TOML, or become a second trading GUI.
+- `MessageBus` remains legacy/advisory trace; Agent Decision Spine must be typed persisted objects plus Decision Lease and Rust enforcement.

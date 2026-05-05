@@ -9,11 +9,11 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 | 地址 | 功能 |
 |------|------|
-| **[http://trade-core:8000](http://trade-core:8000)** | **统一控制台**（登录后进入 11 Tab 视图） |
+| **[http://trade-core:8000](http://trade-core:8000)** | **OpenClaw Control Console**（唯一 canonical GUI；登录后进入现有 FastAPI 控制台） |
 | [http://trade-core:3000](http://trade-core:3000) | Grafana 运营监控仪表盘 |
-| [https://trade-core.tail358794.ts.net](https://trade-core.tail358794.ts.net) | OpenClaw Gateway |
+| [https://trade-core.tail358794.ts.net](https://trade-core.tail358794.ts.net) | OpenClaw Gateway / Tailscale HTTPS 入口（通信与远程入口，不是第二套交易 GUI） |
 
-### 统一控制台 Tab（11 Tab，左→右）
+### OpenClaw Control Console 核心 Tab
 
 | Tab | 内容 |
 |-----|------|
@@ -31,53 +31,16 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-05-02 · **Live_Ready ⚠️**)
+## 当前状态
 
-**HEAD**: `a7b93d5`（Mac/Linux/origin 同步）· **Engine deployed**: `eaf0c7e`（PRE-LIVE-3，Mac 领先 6 commit 待下次 deploy 一次性 promote）
+实时面板：[`CLAUDE.md` §三](CLAUDE.md) — HEAD / 5 策略 7d gross PnL / Active gates / 18 Live Blocker 表 / Live target 规划带，全在那里维护。README 不再镜像（避免 ≥3 日 drift；2026-05-06 R4 sweep 把旧 4 日快照移至 `docs/archive/2026-05-06--readme_stale_extract.md`）。
 
-**运行事实**：engine、API、watchdog、gateway 均在线；watchdog `engine_alive=true`，demo + live_demo snapshots fresh，paper inactive by design。最新 passive healthcheck 总结为 **WARN**（多项真实 WARN）。
+**关键里程碑（2026-05-03）**：REF-20 P6 PRODUCTION CLOSED — Decision Lease retrofit AMD-2026-05-02-01 Path A 落地（`dbcf845b` IMPL + `0ad79f67` deploy）；feature flag default OFF，canary 待 ~2026-05-15 P0-EDGE-2 后 operator action。
 
-### 5 策略 7d gross PnL（demo + live_demo · PA 直查 trading_ai DB · 2026-05-02）
+**Active queue**：见 `TODO.md` P0/P1/P2 三层工作流程。完整上下文和硬边界见 `CLAUDE.md`。**领域词汇** → `CONTEXT.md`；**架构决策记录** → `docs/adr/0001..0013-*.md`。
 
-| 策略 | demo fills | demo PnL | live_demo fills | live_demo PnL | 结论 |
-|---|---:|---:|---:|---:|---|
-| `grid_trading` | 642 | **+4.98** | 520 | **+0.79** | 唯一 net positive |
-| `ma_crossover` | 378 | -5.09 | 257 | -1.60 | net negative，ATR-SNR 后仍未转正 |
-| `funding_arb` | 99 | -5.96 | 0 | 0 | V2 弃策略路径（commit `a19797d`）；demo 收 EDGE-DIAG-2 样本至 2026-05-16 |
-| `bb_breakout` | 34 (14d) | -0.75 | 0 | 0 | live_demo **14d 0 fires**（FIX-26-DEADLOCK-1 修了 demo） |
-| `bb_reversion` | 7 | -0.16 | 0 | 0 | live_demo dormant |
-| **合计 7d gross** | | **-6.98** | | **-0.81** | 5 策略合计 net negative |
-
-### 当前主问题
-- **Edge 仍负**：5 策略 7d gross net **-6.98 USDT**；grid 唯一 +5.77，其它 4 个合计 -11.96。等 ~05-15 P0-3 决策（A 翻正/B 仍负/C 部分改善）。
-- **`[33]` maker fill rate live_demo 7d=36.6%** < 40% PASS 线（healthcheck 假绿，drift 待修）
-- **`[40]` 24h slippage live_demo -92 bps**（BUSDT 110017 reject loop，funding_arb V2 弃策略残仓）
-- **Decision Lease 在 Rust 热路径 0 触发** — R-04 last-mile 漏做（PA + FA archaeology 确认；非 spec design）；路径 A retrofit 待开（P0-GOV-1）
-
-### 已部署但仍需观察
-- Strategy edge models：MA/BB/grid maker buffer、grid `blocked_symbols`、reject cooldown、`min_grid_step_bps`、`cost_floor_multiplier`、scanner posterior LCB routing、MA `min_trend_snr` 已进入 runtime
-- Dust residual prevention：Bybit full-close primary path 使用 `qty=0 + reduceOnly + closeOnTrigger`；2026-04-30 已真实 Demo/LiveDemo `qty=0` close fills 验证
-- MLDE demo autonomy：`[35]` / `[36]` / `[37]` PASS。Demo 可自动受限调参；live/live_demo 自动改参仍必须走 GovernanceHub + Decision Lease + 5 live gates
-- LG-5 W3 FUP-1 reviewer 接线：sibling CC commit `463890d` 已 land；待下次 `restart_all.sh --keep-auth` 启动 reviewer scheduler，验证 24h `governance_audit_log` 累积
-
-### 18 Live Blocker（PA + FA cold panorama 整合，按重要性排序）
-
-详细见 [`CLAUDE.md` §三](CLAUDE.md#三真實狀態全景2026-05-02-pa--fa--mit-cold-panoramahead-a7b93d5)。前 5 大：
-1. 5 策略 7d gross net negative — P0-3 ~05-15 决策
-2. LG-2 H0 blocking IMPL（RFC only，0 行 IMPL）
-3. LG-3 provider pricing binding IMPL
-4. LG-4 supervised live IMPL（state machine 0 行）
-5. **Decision Lease 在 Rust 热路径 0 触发** — 路径 A retrofit（1.5-2 E1）
-
-### 下一步主路径
-
-`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 结论 → P0-3 edge decision (~05-15) → LG-2/3/4 IMPL + Decision Lease retrofit + Live infra (HTTPS / credential rotation / runbook) → true live`
-
-**Live target**：~05-23 乐观 / ~05-30 中位 / ~06-15 悲观为规划带。**panorama 评估悲观更可能**（5 LG IMPL + Decision Lease retrofit + 18 blocker）。
-
-**Active queue**：见 `TODO.md` P0/P1/P2 三层工作流程。完整上下文和硬边界见 `CLAUDE.md`。
-
-**已关闭并归档**：62-finding remediation Batch A-F、STRKUSDT P0 wave、Wave A-H、旧 Wave 1-3 叙事、4-day codex audit closure 不再是 active mainline。归档：
+**已关闭并归档**：62-finding remediation Batch A-F、STRKUSDT P0 wave、Wave A-H、旧 Wave 1-3 叙事、4-day codex audit closure、REF-20 Sprint A-D 详细叙事 不再是 active mainline。归档：
+- `docs/archive/2026-05-06--{claude_md,todo_completed,readme_stale}_extract.md` ← 本日 R4 sweep
 - `docs/archive/2026-05-02--CLAUDE-pre-trim-snapshot.md`
 - `docs/archive/2026-05-02--TODO-pre-trim-snapshot.md`
 - `docs/archive/2026-04-30--{CLAUDE,TODO,README}-pre-cleanup-snapshot.md`
@@ -88,8 +51,11 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ```
 srv/
-├── CLAUDE.md                      ← ★ 项目完整上下文
-├── docs/                          ← 工程文档（20+ 份日志/审核/设计）
+├── CLAUDE.md                      ← ★ 项目完整上下文（实时状态以此为准）
+├── CONTEXT.md                     ← ★ 领域词汇表（domain glossary，2026-05-06 引入）
+├── docs/
+│   ├── adr/                       ← ★ 12 条架构决策记录（2026-05-06 引入）
+│   └── ...                        ← 工程文档（20+ 份日志/审核/设计）
 ├── program_code/
 │   ├── exchange_connectors/
 │   │   └── bybit_connector/
@@ -107,7 +73,7 @@ srv/
 │   │           │   ├── bybit_demo_connector.py  ← 工具函数（round_price/qty，无交易逻辑）
 │   │           │   ├── grafana_data_writer.py   ← Grafana 数据写入
 │   │           │   ├── telegram_alerter.py      ← Telegram 告警
-│   │           │   └── static/                  ← GUI (login/console/11 Tab)
+│   │           │   └── static/                  ← GUI (login + OpenClaw Control Console tabs)
 │   │           └── tests/
 │   ├── local_model_tools/         ← 策略工具包（HTTP 路由层，无交易逻辑）
 │   ├── governance/                ← Phase 2 治理状态机（授权/风控/租约/对账/审计）
@@ -151,7 +117,7 @@ srv/
 | 核心状态机 | T2.01 授权状态机、T2.02 风控状态机、T2.03 决策租约、T2.04 对账引擎 | SM-01/SM-02/SM-04/EX-04 |
 | 扩展模组 | T2.05–T2.23（OMS、审计持久化、Scout Agent、组合风控、事件模型、感知数据面、学习门控等） | EX-01/EX-02/EX-05/EX-06/DOC-01/DOC-06 |
 
-**关键测试基准** (2026-05-02)：~6,200 测试通过（Py pytest 3262 passed + 1 pre-existing grafana orthogonal · Rs engine lib 2404/0 · cargo tests 2560/0 · LG-5 W3 healthcheck targeted 88/0 · ml_training scattered）· ~65,000 行代码（Py+Rs）· 100% 双语注释 · fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）
+**关键测试基准**（最新数字以 `TODO.md` header 为准）：~6,500 测试通过（Py pytest 3431 + Rs cargo workspace 3132 + sibling 44）· fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）· **注释规范**：2026-05-05 起新代码默认中文（旧双语块保留，详 `CLAUDE.md` §七）
 
 ---
 
@@ -172,9 +138,9 @@ srv/
 [SM-01 授权]      8 状态 · 16 转换 · fail-closed · 终态不可回流
 [SM-04 风控]      6 级风险（NORMAL→CIRCUIT_BREAK）· 升级自动/降级需审批
 [SM-02 决策租约]   9 状态 · TTL 自动到期 · AI→Lease→复核→执行
-                  ⚠️ Rust 热路径 0 acquire_lease 调用（P0-GOV-1 路径 A retrofit 待补）
+                  路径 A retrofit 已 land；router gate feature flag default OFF 等 canary
 [EX-04 对账引擎]   5 类结果（MATCH/MISMATCH/MISSING）· 触发风控升级（Rust event_consumer 直写 DB）
-[EX-06 多Agent]    OpenClaw Conductor + Scout/Strategist/Guardian/Analyst/Executor
+[EX-06 多Agent]    Local Conductor + Scout/Strategist/Guardian/Analyst/Executor；OpenClaw Gateway 仅外围通信/提案
 [EX-05 学习]       L1→L5 五级门控 · 逐级解锁能力 · L5 需 Operator 审批
 [EX-07 感知面]     FACT/INFERENCE/HYPOTHESIS 认知标记 · 新鲜度追踪
 [DOC-07 审计]      append-only JSONL · 不可修改不可删除 · 自动轮转
@@ -184,42 +150,25 @@ srv/
 
 ## 治理合规矩阵
 
-22 份治理 SPEC 接入率 **20/22 = 91%**（SM-01 / SM-02 / SM-03 / SM-04 / EX-01 / EX-02 / EX-04 / EX-05 / EX-06 / DOC-07 全部 ✅）。
-未接入：`scout_routes.py`（独立运行时）；`paper_live_gate.py` 在 1C-3-F 后随 Python paper engine 一同退场。
-
-> 详细完成度 / 工程目标 vs 实现矩阵已归档至 `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`（含早期 A-J 表 + Batch 9B 缺口列表，因 ARCH-RC1 后大幅过期）。当前 forward 计划见 `TODO.md`。
+正式 SPEC 注册表 → `docs/governance_dev/SPECIFICATION_REGISTER.md`（接入率以那里为准；2026-05-02 旧 91% 数字已过 REF-20 + Decision Lease retrofit 重新校验，移至 `docs/archive/2026-05-06--readme_stale_extract.md`）。
 
 ---
 
 ## OpenClaw 集成
 
-> OpenClaw 定位：通信+运维层，不碰交易决策。Python 本地 = 交易 Agent 核心。
+> 2026-05-06 定位：现有 FastAPI console 是唯一 OpenClaw Control Console；外部 OpenClaw Gateway 是通信、移动端、上级汇总、proposal/approval relay，不是交易 conductor，也不是第二套 GUI。
 
-### 当前集成架构
+当前目标架构：OpenClaw Gateway → `/api/v1/openclaw/*` 聚合/提案/审批 API → 本地 5-Agent + GovernanceHub + Postgres → Rust `openclaw_engine`。OpenClaw 不持有 Bybit key、不直接下单、不直接改 live TOML；所有交易影响动作仍通过 Operator approval、Decision Lease 和 Rust execution authority。
 
-```
-┌─────────────┐                    ┌─────────────────────┐
-│  OpenClaw   │ ── REST POST ──▶  │  scout_routes.py    │
-│  (中枢)     │   /scout/market-  │  (5 端点 · Token 认证)│
-│  Gateway    │   signal + alert  │         ▼            │
-│  :18789     │                    │  ScoutAgent+MessageBus│
-└─────────────┘                    │         ▼            │
-┌─────────────┐                    │  PipelineBridge     │
-│  Bybit API  │ ── WebSocket ──▶  │  (on_tick 本地扫描)   │
-└─────────────┘                    └─────────────────────┘
-```
+设计与计划：
 
-### 后续整合计划（非紧急，TODO P2-COND backlog）
+- `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`
+- `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`
+- `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md`
 
-| ID | 内容 | 优先级 |
-|----|------|--------|
-| OC-1 | Webhook 告警通道（异常→OpenClaw→Telegram） | 高 |
-| OC-2 | Telegram 通道配置 | 高 |
-| OC-3 | 多通道分级告警（P0→紧急群 / P1→常规群） | 中 |
-| OC-4 | MCP PostgreSQL 接入（自然语言查交易数据） | 中 |
-| OC-5 | Cron 精细化健康心跳（待 OpenClaw --exec flag） | 低 |
-| OC-6 | Sub-agent 异步回测（周频 Evolution 网格搜索） | 低 |
-| WS-1 | FastAPI WebSocket/SSE 实时推送（替代 30s 轮询） | 中 |
+旧的「OpenClaw Gateway → Scout + MessageBus → PipelineBridge」只保留为历史/legacy advisory trace，不得作为后续 Agent Decision Spine 的权威路径。
+
+外部工具策略以 `CLAUDE.md` §十一 为准（**Linear-only active** · Notion frozen · Slack/Coupler/MotherDuck declined）。OpenClaw channel / Telegram / WebChat 只作为 operator 通信入口，不等同于开放 Slack/Coupler/MotherDuck 等工作流集成。
 
 ---
 
@@ -230,7 +179,7 @@ README 只保留入口级摘要；完整硬边界以 `CLAUDE.md` §四为准。
 - 真实 live 必须同时满足 Python live_reserved、Operator 角色认证、`OPENCLAW_ALLOW_MAINNET=1`、secret slot、signed `authorization.json` 五项 gate。
 - `execution_authority` 在 Rust 侧仅是 P0/P1 denylist 字符串常量，不是真实授权逻辑。
 - LiveDemo 走 live-grade 控制流；demo endpoint 不放宽 authorization、TTL 或 risk gate。
-- Decision Lease 在 Python ExecutorAgent 是唯一 production caller；Rust 热路径 0 触发（P0-GOV-1 retrofit 待补，详 CLAUDE.md §五 註腳）。
+- Decision Lease 路径 A retrofit 已落地 2026-05-03（`dbcf845b` IMPL + `0ad79f67` deploy）；Python `ExecutorAgent` 仍是当前唯一 production caller，feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF，canary flip 待 ~2026-05-15 operator action（详 CLAUDE.md §五 註腳）。
 - 禁止手写 `authorization.json`、绕过 Operator auth、自动切 live、伪造 AI/交易活动，或在 Bybit `retCode != 0` 后重试成交路径。
 
 ---
@@ -331,12 +280,12 @@ LG-5 W3 FUP-1 启动 reviewer → restart_all.sh --keep-auth（纯 Python 改动
 |------|------|
 | 完整项目指令 | `CLAUDE.md` |
 | 当前工作计划（P0/P1/P2 三层） | `TODO.md` |
-| Decision Lease review agenda | `docs/CCAgentWorkSpace/PM/2026-05-02--decision_lease_review_agenda.md`（待写）|
+| Decision Lease review agenda | `docs/CCAgentWorkSpace/PM/2026-05-02--decision_lease_review_agenda.md` |
 | 审计报告 | `docs/governance_dev/audits/` |
 | QC 量化审查 | `docs/CCAgentWorkSpace/QC/workspace/reports/` |
 | 工作日志 | `docs/worklogs/` |
 | 变更历史 | `docs/CLAUDE_CHANGELOG.md` |
-| 治理文件（SPEC 源） | Cowork `01_source_documents/` + `docs/SPECIFICATION_REGISTER.md` |
+| 治理文件（SPEC 源） | Cowork `01_source_documents/` + `docs/governance_dev/SPECIFICATION_REGISTER.md` |
 | Phase 2/3 执行记录 | `docs/governance_dev/phase2_execution/` / `phase3_integration/` |
 
 GitHub: [yunancun/BybitOpenClaw](https://github.com/yunancun/BybitOpenClaw)

@@ -1,13 +1,16 @@
-# OpenClaw TODO — 工作清單（v10 · P0/P1/P2 三層 · 2026-05-06）
+# OpenClaw TODO — 工作清單（v11 · P0/P1/P2 三層 · 2026-05-06）
 
-**版本**：v10（2026-05-06 active-doc sync：REF-20 A-D closed + post-signoff reality-gap fix `67b95808` + AgentTodo MAG-000 confirmed）
+**版本**：v11（2026-05-06 R4 audit sweep：archive 25 done + 5 obsoleted-by-gov-change items；P1-INFRA-3 整塊 REF-20 Sprint A-D + Wave 1-9 + Sprint 1-4 closure 移歸檔）
+**v10 摘要保留**：2026-05-06 active-doc sync REF-20 A-D closed + post-signoff reality-gap fix `67b95808` + AgentTodo MAG-000 confirmed
 **v9 摘要保留**：2026-05-05 §九 LOC governance change：硬上限 1500→2000（operator 決定，REF-20 Sprint C 拍板）；警告線維持 800。
-**REF-20 closure 摘要**：Sprint A+B+C+D 已 closed；R9 PM sign-off commit `6a7a885c` 宣告 REF-20 Reality-Calibrated Fast Replay usable，後續 reality-gap fix commit `67b95808` 修 replay UI / registry / finalize / simulated fill / Rust replay runner gaps。Operator-side outstanding 僅剩 live PG opt-in smoke、V056 cron schedule、5 healthcheck sentinel deploy validation，不阻塞 REF-20 closure。
-**HEAD**: `67b95808`（Mac/Linux/origin source 同步；2026-05-06 SSH 驗證 Linux clean）· **Engine runtime**: watchdog demo/live alive，paper inactive by design；last verified full rebuild remains Sprint 3 Track I (`dbcf845b`) unless a later deploy record is produced。
-**測試基準**：Python pytest **3431 PASS** / 1 fail (pre-existing E4-P0-1) / 10 skip · Rust cargo workspace **3132 PASS** / 2 fail (pre-existing E4-P0-2) / 3 ignored · Sprint 3 Track H Python sibling 44/44 PASS · cumulative Sprint 1+2+3 chain 三端同步
+**REF-20 closure 摘要**：Sprint A+B+C+D 已 closed；R9 PM sign-off commit `6a7a885c` + reality-gap fix `67b95808`。詳 → `srv/memory/project_2026_05_03_ref20_sprint1_2_closure.md` + `docs/archive/2026-05-06--todo_completed_extract.md`。Operator-side outstanding 僅剩 live PG opt-in smoke、V056 cron schedule、5 healthcheck sentinel deploy validation，不阻塞 REF-20 closure。
+**OpenClaw 2026-05-06 定位**：外部 OpenClaw Gateway 改為通信 / mobile / supervisor / proposal relay；本地 5-Agent 保持獨立；唯一 GUI 是 `trade-core:8000/console` OpenClaw Control Console。詳 `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`。
+**HEAD**: `67b95808`（Mac/Linux/origin source 同步；2026-05-06 SSH 驗證 Linux clean）· **Engine runtime**: watchdog demo/live alive，paper inactive by design；last verified full rebuild remains Sprint 3 Track I (`dbcf845b`)。
+**測試基準**：Python pytest **3431 PASS** / 1 fail (pre-existing E4-P0-1) / 10 skip · Rust cargo workspace **3132 PASS** / 2 fail (pre-existing E4-P0-2) / 3 ignored · Sprint 3 Track H Python sibling 44/44 PASS
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
 
 **歸檔索引**：
+- **2026-05-06 R4 sweep**：`docs/archive/2026-05-06--todo_completed_extract.md`（P1-INFRA-3 整塊 + P0-DATA-INDICATOR-SWEEP + P2-CODEX-3 + 5 OBSOLETED-BY-GOV-CHANGE）
 - 4-day codex audit closure 詳細 + Wave 4 Pre-Stage 5 軸線完整表 + Top 10 派發優先序 → `docs/archive/2026-05-02--TODO-pre-trim-snapshot.md`
 - 62-finding Batch A-F：`docs/archive/2026-04-29--62finding-batch-A-to-F.md`
 - STRKUSDT P0 Wave：`docs/archive/2026-04-29--strkusdt-p0-wave.md`
@@ -49,8 +52,8 @@
 
 | ID | 任務 | 狀態 |
 |----|------|------|
-| **P0-GOV-1** ⚠️ | **Decision Lease 路徑 A retrofit**（Rust `acquire_lease()` facade + router gate + Python IPC 轉呼 + bundled audit writer fix）| 2026-05-02 三方 review 完成 ✅ AMD-2026-05-02-01；retrofit pending：~2.5-3 E1 task，派發 2026-05-15 P0-EDGE-2 後並行 LG-2/3，必在 LG-4 IMPL 前完。E4 驗收 AC-1~5（SM-02 transition coverage / 6-element auth fill rate / lease_id flow / weekly audit / agent schema row count）。詳 `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` |
-| **P0-GOV-2** | agent schema all-time 0 rows（`agent.messages` / `state_changes` / `ai_invocations`）— DOC-01 #8/#15 violation；MessageBus DB sink 接線 | **bundled with P0-GOV-1**（PA push back 採納；retrofit 同 sprint，AC-5 驗收條件）|
+| **P0-GOV-1** ✅ | **Decision Lease 路徑 A retrofit**（Rust `acquire_lease()` facade + router gate + Python IPC 轉呼 + bundled audit writer fix）| LAND 2026-05-03：`dbcf845b` IMPL + `0ad79f67` deploy；feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF → production 0 行為改動；§5.4 canary flip 待 ~2026-05-15 P0-EDGE-2 後 operator action。詳 `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` |
+| **P0-GOV-2** | agent schema all-time 0 rows（`agent.messages` / `state_changes` / `ai_invocations`）— DOC-01 #8/#15 violation；`agent.messages` 僅作 legacy/advisory bus trace，不得把 MessageBus 升為 Agent Decision Spine 權威 | AgentTodo M1 durable event-store wave；需同時覆蓋 local L1/L1.5/L2 與 OpenClaw supervisor cloud escalation 的 `agent.ai_invocations` |
 | **P0-GOV-3** | SOP「sign-off 必檢 `git status --porcelain` clean」gate（LG-5 漏洞同類防線）| CLAUDE.md §七 已加，需新 PR review template |
 | **P0-GOV-4** | Live credential rotation 7 步（PG password + Grafana admin + 6 commit history 清理）| 2 day work，Live 前必 |
 
@@ -67,7 +70,7 @@
 
 | ID | 任務 | 阻塞下游 | 狀態 |
 |----|------|---------|------|
-| **P0-DATA-INDICATOR-SWEEP** | ✅ **DONE 2026-05-03** · 5 策略 indicator leak-free sweep verdict = **5/5 PASS**（QC quant 主審 + E3 adversarial 副審 + PM 補位驗證 `compute_indicators` body @ `on_tick_helpers.rs:453` 證據鏈完整：`get_ohlcv → buffer().ohlcv_arrays(n)` 只從 closed-bar buffer，不含 currently-forming bar）。**真因排查**：5 策略 net -6.98 USDT 不是 indicator leak，最便宜解釋為 strategy logic / cost / maker fill 三者（[33] maker 36.6% / [40] slippage -92bps）。**P0-EDGE-1/2 可繼續使用現有 edge 估計，無需重算**。**REF-20 V3 §3 G6 + §7 P2 precondition 解封**。Verdict 報告：`docs/audits/2026-05-03--P0-DATA-INDICATOR-SWEEP_verdict.md`。Follow-up（升 P2）：L-01 streaming integration test（綁 REF-20 P2b fixture）+ L-02 feature_version 硬編碼 v1.0 fix。 | （已解除）| ✅ DONE |
+| **P0-DATA-INDICATOR-SWEEP** | ✅ **DONE 2026-05-03** — 5/5 PASS verdict, indicator leak-free sweep；details → `docs/archive/2026-05-06--todo_completed_extract.md` + verdict `docs/audits/2026-05-03--P0-DATA-INDICATOR-SWEEP_verdict.md` | （已解除）| ✅ DONE |
 
 ---
 
@@ -80,6 +83,16 @@
 | **P1-FAKE-1** | ExecutorAgent `shadow_mode_provider` `lambda: True` fail-close default fix（G3-03 Phase B 名為 wired 實際仍 shadow）| PA panorama |
 | **P1-FAKE-2** | H0_GATE singleton 0 production caller wire（DOC-02 spec 死於 wiring，LG-2 IMPL 前提）| FA-H2 |
 | **P1-FAKE-3** | HStateCache + CostEdgeAdvisor 兩 late-inject slot 啟用（env-gated `OPENCLAW_H_STATE_GATEWAY=1` / `OPENCLAW_COST_EDGE_ADVISOR_*` 未設）| PA panorama |
+
+#### P1-OPENCLAW — Gateway / Agent Control Console
+
+| ID | 任務 | 來源 |
+|----|------|------|
+| **P1-OPENCLAW-1** | OpenClaw Gateway authority lockdown：allowlist `/api/v1/openclaw/*`，禁止 direct order / live TOML / Bybit key / secret access | 2026-05-06 control-plane repositioning |
+| **P1-OPENCLAW-2** | 新增 `/api/v1/openclaw/status/self-state/brief/diagnostics/escalations/proposals` 聚合 API | OpenClaw Gateway development plan |
+| **P1-OPENCLAW-3** | `tab-agents.html` 升級為 OpenClaw / Agent Control Console：topology、self-state、brief、diagnostics、cloud escalation、proposal/approval queue、channels | GUI OpenClaw Control Console plan |
+| **P1-OPENCLAW-4** | Supervisor cloud escalation policy：本地 5-Agent 先產生 observation，上級 supervisor 壓縮後才按 budget 叫 cloud L2 | Operator 2026-05-06 architecture decision |
+| **P1-OPENCLAW-5** | Telegram/WebChat mobile approval lane：只 relay proposal approve/reject，所有交易影響仍走 GovernanceHub + Decision Lease + Rust | OpenClaw Gateway development plan |
 
 #### P1-EDGE — Edge 層支撐
 
@@ -118,24 +131,8 @@
 |----|------|------|
 | **P1-INFRA-1** | Slack alert channel go/no-go（pre-live ~2 週評估） | ~2026-05-15 |
 | **P1-INFRA-2** | PRE-LIVE-4 災難恢復演練（drawdown auto-revoke / liquidation buffer / auth expire 三 scenario）| LG-2 RFC 後 |
-| **P1-INFRA-3** | ✅ **REF-20 Sprint A+B+C+D CLOSED (2026-05-05)** — R9 PM sign-off `6a7a885c` + reality-gap fix `67b95808`。Acceptance closed：A1-A10 + R9 7 conditions；fee-aware report / execution_confidence / MLDE-Dream advisory boundary / maintenance retention / 5 replay healthcheck sentinels all landed。`replay.simulated_fills.evidence_source_tier='synthetic_replay'` remains non-training; only calibrated/counterfactual replay evidence can feed MLDE/Dream through verification gates. Operator-side outstanding: live PG opt-in smoke, V056 cron schedule, deploy validation of new sentinels. | DONE |
-| **P1-INFRA-3a** | ⚠️ **Wave 1 closed (atomic 5 commits) + Sprint 1 cold audit fix-up** — P0 docs amendment + scaffold 設計（V3/Workplan V1/UX subdoc 三 baseline land） | IMPL accept-with-caveat |
-| **P1-INFRA-3b** | ⚠️ **Wave 2 closed (commits `1851714` + `b1f6b8a`)** — P1 frontend IA + P2a S1/S2 signing key + manifest signer | IMPL accept-with-caveat |
-| **P1-INFRA-3c** | ⚠️ **Wave 3-4 closed (commits `5a618ff` + `4b48b6d`)** — P2a S3-S6 + P2b S7-S10 runner；**Sprint 1 修 spawn argv broken + manifest 自洽循環 + 5 critical security 洞**；W3 mac_policy_guard.rs 中文全形括號 doctest fail（self-introduced，commit msg 偽稱 sibling pre-existing → P2-FOLLOW-UP-2 修）；W4 single commit 26 file 7360 ins violated §八 工作鏈（已 Sprint 2 retroactive review 補） | IMPL accept-with-caveat |
-| **P1-INFRA-3d** | ⚠️ **Wave 5 closed (commit `457a458`)** — P3a/P3b/RGM 13 task NumPyro 2320 LOC；mini test 200/400 chain（production 1000/2000 從未 CI 跑 → P2-WAVE-5-NTHRESHOLD-SWEEP 修）；NumPyro Mac scipy 0 cross-OS sibling test → P2-FOLLOW-UP-4 | IMPL accept-with-caveat |
-| **P1-INFRA-3e** | ⚠️ **Wave 6 closed (commit `eb5f106`)** — P4 advisory chain 8 task；W6 引入 deterministic flaky test（FastAPI dependency_overrides 跨 test pollution → P2-FOLLOW-UP-1 修）；mlde_demo_applier.py 1542 LOC 違反 §九 requirement (3) → P2-WAVE-6-MLDE-DEMO-APPLIER-SPLIT；V043 0 production caller / 0 healthcheck → P2-WAVE-6-V043-HEALTHCHECK | IMPL accept-with-caveat |
-| **P1-INFRA-3f** | ⏸ **Wave 7 DEFERRED + IMPL-accept-deploy-blocked** — P5 4 task IMPL-in-tree (commit `c887e4e` operator override) 但 hard prereq LG-2/3/4 frontend merged + 7d stable 仍 NOT GREEN；**正式 amendment AMD-2026-05-03-01 (commit `5184990`)** 規範 IMPL/Deploy 2-stage gate + 4 AC + 失敗回退；defer note `2026-05-03--ref20_wave7_defer_note.md` 自證 prereq violation；deploy gate retained pending healthcheck `[46]` | LG-2/3/4 stable |
-| **P1-INFRA-3g** | ⚠️ **Wave 8 closed (commit `8429af1`)** — P6 7 task typed-confirm + V044 idempotency；handoff cooldown race（READ COMMITTED + 0 row-level lock → 由 Sprint 1 Track C cmdline 校驗 + V053 LOCK TABLE 部分緩解）；handoff flow 0 healthcheck → P2-WAVE-8-HANDOFF-HEALTHCHECK；**P6 production exposure 仍 require P0-GOV-1 Decision Lease retrofit AMD-2026-05-02-01 deploy**（Sprint 2 Track E PA design 已完，feature flag 灰度路徑） | Decision Lease retrofit deploy |
-| **P1-INFRA-3h** | ⚠️ **Wave 9 closed (commit `1f5d019`)** — 14d gradient + V047/V048 KPI 採集 cron；Mac mock mode 跑過 Linux 真實 PG 0 跑（QA 確認）；V047/V048 plain table 1y retention 0 設 → P2-WAVE-9-V047-V048-RETENTION | Sprint 3 deploy after Linux runtime |
-| **P1-INFRA-3i** | ✅ **Sprint 1 cold audit fix-up DONE (commit `edf33c0`)** — 4 並行 E1（A spawn argv / B Rust manifest verify / C Python 3 安全洞 / D V049-V053 schema 補造）；E2 round 1+2 + E4 regression 全 PASS；3387 PASS / 1 fail (pre-existing) / 10 skip；3084 cargo workspace PASS / 2 fail (pre-existing) / 3 ignored | DONE |
-| **P1-INFRA-3j** | ✅ **Sprint 2 retroactive review DONE (commit `aa9343c`)** — PA Track E Decision Lease retrofit 4-task DAG design + E2 F1 retroactive Wave 3-9 master review (10 LOW + 7 P2 提案) + E4 F2 retroactive cumulative (4 forgery flag + 5 mock retroactive flag + 3 P2 提案) | DONE |
-| **P1-INFRA-3k** | ✅ **Sprint 3 Track H DONE (commit `dbcf845b`)** — Decision Lease retrofit AMD-2026-05-02-01 Path A 業務代碼 + V054 audit writer + 4 並行 sub-task report（E-1 Rust facade / E-2 router gate / E-3 Python IPC bridge / E-4 V054 audit writer）+ E2 round 1+2 + E4 final regression；feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF 灰度路徑保留；amendment §5.4 flip flag canary 24h 待 ~2026-05-15 P0-EDGE-2 後 operator action | DONE |
-| **P1-INFRA-3l** | ✅ **Sprint 3 Track I Linux deploy DONE** (`7a86d2eb` runbook + Phase B-G executed via SSH bridge 2026-05-03 21:30+) — Phase A skip (E4 final regression 已跑) / Phase B V049-V054 6 V### apply (TimescaleDB hypertable + 21-value enum + paired CHECK + FK redirect 全綠) / Phase C cargo --release build (engine 28.82s + replay_runner 15.35s, nm audit 406 symbol 0 forbidden) / Phase D skip (feature flag OFF + 回測模塊不需 production cron) / Phase E restart_all --rebuild (Engine PID 4122084 + API PID 4122156 / paper+demo+live alive / snapshot age 8.1s) / Phase F 5 e2e smoke 核心 3 條 PASS / Phase G Track H schema verify 全綠 | DONE |
-| **P1-INFRA-3m** | ✅ **Sprint 4 final closure DONE (commit `0ad79f67`)** — operator override accept conditional skip 14d observation：「直接跑掉 A-H，後續有問題再修」（理由：REF-20 是 Paper Replay Lab 回測模塊，feature flag default OFF + 0 trading.* mutation + 0 live trading 觸發）；7 closure item 4 ✅ + 3 ⏭ override skip = REF-20 P6 CLOSED；24/25 V3 §12 acceptance binding GREEN（#21 ⏸ DEFERRED Wave 7 P5）；P2-FOLLOW-UP-5 closure doc 「3500+→3387」訂正同 commit 處理 | DONE |
-| **P1-INFRA-3n** | ✅ **Sprint A closed-with-real-evidence (2026-05-05)** — Gap Closure Plan V1 R1+R2+R3 全 IMPL + 6-layer blocker chain fix + final smoke E2E PASS。**R1 Runtime Usability** (`c1ab7ea9`)：binary path fallback chain + `/api/v1/replay/health` route + audit script + restart_all env export + 13 unit tests。**R2 Manifest Registry** (`353db3fe`)：970 LOC `experiment_registry.py` + `/experiments/register` endpoint + `/run` FK guard SELECT FOR SHARE + `/manifest/verify` secrets file fallback + 29 R2 tests + canonical_bytes contract docstring + CLAUDE.md §九 simulated_fills non-training surface note。**R3 First Real E2E** (`66b650ea` + 6 hotfix rounds)：simulated_fills_writer + run_finalize_route + 6 layer fix (Python 3.12 422 + ENGINE_BINARY_SHA + real HMAC sign + stderr capture + signing key provisioning + exit=0 sentinel)。**QA round 6 final smoke E2E PASS (2026-05-05 02:05 UTC)**：4 表 row > 0 真實達成。**A1+A2+A3 acceptance 全綠**。Plan: `docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md` | DONE |
-| **P1-INFRA-3o** | ✅ **Sprint B closed (2026-05-05)** — R4 UI Enablement + R5 real strategy/risk replay path landed. Backend-readiness-gated UI, execution confidence/data tier surface, strategy parameter delta and risk parameter delta acceptance all PASS. | DONE |
-| **P1-INFRA-3p** | ✅ **Sprint C closed (2026-05-05)** — V055 R6-T0' Linux PG fix, fee/slippage byte-equal replay fill path, execution_confidence calibration labels, calibrated_replay MLDE/Dream advisory integration, A6/A7/A10 acceptance closed. | DONE |
-| **P1-INFRA-3q** | ✅ **Sprint D closed (2026-05-05)** — R8 maintenance/retention/observation + R9 final sign-off. V056 retention policy and healthcheck sentinels [46]-[50] landed; REF-20 usable for demo research. | DONE |
+| **P1-INFRA-3** | ✅ **REF-20 Sprint A+B+C+D + Wave 1-9 + Sprint 1-4 ALL CLOSED (2026-05-05)** — R9 PM sign-off `6a7a885c` + reality-gap fix `67b95808`. Detail (Wave 1-9 closure / Sprint 1-4 evidence trail / Sprint A-D commit chain / A1-A10 + R9 7 conditions): `docs/archive/2026-05-06--todo_completed_extract.md` + `srv/memory/project_2026_05_03_ref20_sprint1_2_closure.md`. **Wave 7 仍 DEFERRED**（P1-INFRA-3f）— LG-2/3/4 frontend stable + 7d healthcheck PASS 後 operator action，per AMD-2026-05-03-01。Operator-side outstanding（不阻塞 closure）：live PG opt-in smoke / V056 cron schedule / 5 healthcheck sentinel deploy validation。 | DONE |
+| **P1-INFRA-3f** | ⏸ **Wave 7 DEFERRED + IMPL-accept-deploy-blocked** — P5 4 task IMPL-in-tree (commit `c887e4e` operator override) 但 hard prereq LG-2/3/4 frontend merged + 7d stable 仍 NOT GREEN；正式 amendment AMD-2026-05-03-01 (commit `5184990`) 規範 IMPL/Deploy 2-stage gate + 4 AC + 失敗回退；deploy gate retained pending healthcheck `[46]` | LG-2/3/4 stable |
 
 ---
 
@@ -221,7 +218,7 @@
 | **T6-FUP-PA-MEMORY-INDEX-SYNC** | PA Track 3 dust audit memory.md 條目補錄 | 下次 PA 接手 |
 | **G5-09-FUP-TYPO** | commit `a5b6f17` commit msg test count typo | 下次 commit msg edit cycle |
 | **TIER4-MIT-AUDIT-GREP-SNIPPET** | MIT EXIT-FEATURES audit H1 補 grep snippet 嚴謹度 | 下次 audit |
-| **OC-1~6** | Webhook / Telegram 多通道 / MCP PostgreSQL | Phase 5+ |
+| **OC-1~6** | Superseded by P1-OPENCLAW-1..5：OpenClaw Gateway 作通信 / mobile / supervisor / proposal relay，不作第二 GUI 或交易 conductor | 2026-05-06 architecture overlay |
 | **WS-1** | FastAPI WebSocket/SSE 實時推送（替代 30s 輪詢）| 中優先 |
 | **4-Conditional** | PairsTrading / Beta / Kalman / Jump detection | post-live |
 | **G-6/G-7/G-8/G-10** | Edge JS retrain / ClaudeTeacher / cost_gate credibility / isotonic | P1-7B / 21d+G-3 |
@@ -306,7 +303,6 @@
 |---|---|---|---|
 | **2026-05-09**（週六）| 3C deploy 7 天後對比 audit：5 metric vs prior 7d baseline | `bash helper_scripts/db/audit/2026-05-09_3c_7d_audit.sh` | exit 0（all metrics expected direction）→ PA review；exit 1 → operator 決策 base_ratio 是否續收緊或回退 |
 | **2026-05-16**（週六）| funding_arb 1B 樣本累積 14 天彙總，判斷 2A 棄策略 trigger | `bash helper_scripts/db/audit/2026-05-16_funding_arb_14d_audit.sh` | n≥30 且 net bps 顯著負 → 2A 觸發棄策略；n<30 → 續收 |
-| **REF-20 Wave 1 派發 checkpoint**（立刻）| Wave 1 P0 docs/scaffold 9 task 並行派發（PA / E1 / E1a / E3 / A3 / PM 多 owner，全 docs only 無 runtime risk）— 詳 `docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md` §4 Wave 1 表 | 9 task 全 PM sign-off | Wave 1 exit → 啟 Wave 2 P1 IA + P2a foundation |
 | **REF-20 Wave 5 prereq watch**（持續，~05-15 至 ~05-25）| 觀察 LG5-W3-FUP-2 attribution writer deploy + decision_outcomes timeframe '1' vs '1m' fix + demo 21d unlock（2026-05-07）三條件 | 三條件全 GREEN | Wave 5 P3a/P3b 才能啟（量化 calibration） |
 
 > 為什麼不用 `/schedule` remote agent：DB 在 trade-core localhost，遠端 cloud agent 沒 SSH/Tailscale。改寫腳本進 repo + TODO 提醒，operator（或 CC session）到日期 ssh 跑一行即可。
