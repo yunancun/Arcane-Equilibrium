@@ -5199,3 +5199,87 @@ Round 2：
 - `wc -l route_helpers.py`：1500（at hard cap exactly）
 - `git status --short`：2 M（route_helpers.py + run_route.py，新增 production change）+ 5 M（round 1+2 set）+ 3 ?? new test files；clean
 
+## REF-20 Sprint C R6-T0' V055 retrofit Round 2 fix（2026-05-05）
+
+### Round 1 → Round 2 transition
+
+E2 round 1 review verdict = RETURN-TO-E1 with 5 findings (2 CRITICAL + 1 HIGH + 2 MEDIUM)：
+- **C-1**: V055 INSERT body 寫 `expires_at` column 但**此 column 不存在**於 `learning.mlde_shadow_recommendations`。V031 CREATE TABLE 無 / V038-V040 + V051 任一 ADD COLUMN 也無；V049 line 305 加的 `expires_at` 是 `replay.experiments`（不同表）。
+- **C-2**: Guard A signature drift 用 `position()` substring 比對 `pg_get_function_arguments` — PG 13+ 輸出含 arg name + DEFAULT clause，substring 注定 false positive RAISE EXCEPTION。
+- **H-1**: Guard A SAVEPOINT block 內 `EXCEPTION WHEN OTHERS THEN ROLLBACK + RETURN` 是 silent skip 反模式（吞 V051 paired CHECK violation / serialization error / lock timeout 等），違 CLAUDE.md §九 SQL 等價。
+- **M-1**: sign-off §5 「16 PASS / 2 SKIPPED」是 mock-only PASS，0 真 PG validation。
+- **M-2**: stub `replay.experiments` INSERT minimal subset 未對 V049 22 col NOT NULL set 實證。
+
+PM round 2 dispatch §1 提供 design clarification — V036 docstring「4 columns physical land via V038-V040 retrofit」是錯的；TTL 雙層守門：寫端 V055 verify portion 4 input validation + 讀端 mlde_demo_applier_evidence_filter Block B JOIN replay.experiments 取 expires_at（FK 端 TTL，experiment-level）。
+
+### Round 2 fix lessons
+
+26. **V036 docstring 字面誤導**：V036 line 200-207 寫「expires_at / replay_experiment_id / manifest_hash / evidence_source_tier columns 由 V038-V040 retrofit 後實際物理存在」是 PR1 期望但 V038-V040 + V051 reality 只 land **3 column**。E1 round 1 沿用 V036 docstring 4-column 字面但**沒實際驗證 schema**（沒 grep V*.sql 確認），E2 對抗審查 catch。**教訓**：CLAUDE.md §七「先讀後改」+「最小影響」原則對 docstring 字面也適用 — 不能信 stub-era docstring，必驗 final schema reality。
+27. **PG 13+ `pg_get_function_arguments` vs `pg_get_function_identity_arguments` 差異**：`pg_get_function_arguments(oid)` 輸出含 arg name + DEFAULT clause（如 `p_evidence_source_tier text DEFAULT 'real_outcome'::text`），substring `position()` 比對在 PG 13+ 必 false positive。`pg_get_function_identity_arguments(oid)` 是 PG 9.4+ canonical API：返回 ONLY type list (no arg name, no DEFAULT clause)，可直接 strict equality 比對。**教訓**：任何 SQL Guard 對 function signature 比對必用 identity_arguments，不要用 substring；strict equality > substring 容錯。
+28. **V049 22 col NOT NULL set 實證 (E2 M-2)**：V049 line 282-307 ADD COLUMN 18 個全 NULLABLE（`ADD COLUMN IF NOT EXISTS <name> <type>` 無 NOT NULL inline）；唯一 conditional NOT NULL = `engine_binary_sha when runtime_environment='linux_trade_core'`（V049 line 425-433 chk_replay_experiments_engine_sha_linux CHECK，**不是 NOT NULL constraint**）。stub bypass 用 `runtime_environment='mac_dev_smoke_test_only'` 規避 conditional NOT NULL。**教訓**：跨 migration NOT NULL set 實證 = 抽 V049 source line 282-307 全列 + grep `inline NOT NULL` 反例 = 0 命中即證 18 col NULLABLE；不是猜也不是查文檔。
+29. **EXCEPTION WHEN OTHERS in PL/pgSQL = SQL 端 except: pass**：V055 round 1 inner BEGIN-END 內 `EXCEPTION WHEN OTHERS THEN ROLLBACK + RAISE NOTICE + RETURN` 等價 Python `except Exception: pass` 反模式 — 吞 NOT NULL violation / unique violation / serialization error / lock timeout 等。CLAUDE.md §九「沒有 except:pass 或靜默吞異常」原則延伸到 PL/pgSQL。**教訓**：fail-loud > graceful skip；SAVEPOINT 失敗應自然 propagate 上層 DO $$ block 給 psql apply 端 RAISE EXCEPTION 中止 deploy。窄 EXCEPTION（如 `WHEN unique_violation OR foreign_key_violation`）可能可接受但 OTHERS 永遠是 anti-pattern。
+30. **mock-only PASS 的 acceptance 文字訂正 (E2 M-1)**：E1 round 1 sign-off §5 寫「16/16 PASS / 2 SKIPPED on Mac dev pytest」+「8/8 dispatch §6 case PASS」隱含 acceptance PASS — 這是 fake-acceptance 反模式（mock 不撞 PG schema，0 deploy 證據）。**教訓**：sign-off 文字必明確區分「mock-only PASS = static-parse + Python mirror」vs「real PG live smoke PASS = E4 regression OPENCLAW_TEST_LIVE_PG=1 跑 18+ test PASS + V055 deploy 0 RAISE + Guard A NOTICE 4-tier verification PASS」。fail-closed final acceptance 待 E4。
+31. **3 column INSERT 對齊 V051 paired CHECK 條件**：V051 line 277-292 paired CHECK `chk_mlde_shadow_replay_lineage` 約束的 3-tuple `(evidence_source_tier, replay_experiment_id, manifest_hash)` — **不含 expires_at**。V055 INSERT 寫 3 column 與 paired CHECK 條件對齊；若強制寫 4 column 會破壞 V051 paired CHECK 範圍假設。**教訓**：function INSERT body 寫的 column 集合必對齊下游 CHECK constraint 條件；多寫 column 但 CHECK 不覆蓋 = silent constraint hole。
+32. **TTL 雙層守門設計**：寫端 V036 verify portion 4 input validation + 讀端 FK lookup 分工正確 — advisory row 不需要 local TTL column 因 reader 可透 FK 取 manifest TTL。**教訓**：DB schema 設計避免 TTL column duplication（write-side validate + read-side FK lookup 比 row-level TTL column 簡潔 + 無 sync 風險）。
+33. **CREATE OR REPLACE FUNCTION same signature byte-equal**：V055 改 function body 但保 19-arg signature byte-equal V036（`pg_get_function_identity_arguments` 輸出一致）→ caller 端 0 改動。Round 2 fix 不改 signature 仍能 deploy。**教訓**：function body refactor 不破 signature contract = caller-friendly retrofit pattern；Guard A identity_arguments check 是此 pattern 的守護者。
+
+### Round 2 自驗結果
+
+- `python3 -m pytest tests/replay/test_v055_evidence_insert_fix.py -v`：**20 PASS / 2 SKIPPED**（round 1 = 16 PASS / 2 SKIPPED，round 2 增 4 case = `test_v055_does_not_write_expires_at_column` + `test_v055_no_silent_skip_in_guard_a` + `test_v055_v049_not_null_set_documented` + `test_v055_v049_source_not_null_invariant`）
+- `grep -c "EXCEPTION WHEN OTHERS" V055__*.sql` = 4 (全 -- comment line 內，被 `_strip_sql_comments()` 剝掉；test grep 對 stripped sql 0 命中)
+- `grep -c "pg_get_function_identity_arguments" V055__*.sql` = 9 (Guard A IMPL + comment 雙語 + COMMENT ON FUNCTION 引用)
+- `wc -l V055__*.sql` = 825（round 1 = 693；round 2 增 132 line for path 1 拆出 + V049 NOT NULL set 雙語注釋 + identity_arguments 改寫）
+- `wc -l test_v055_evidence_insert_fix.py` = 1102（round 1 = 860；round 2 增 242 line for 4 new test case + V049 cross-validation + 全雙語注釋 update）
+- `git status --porcelain`：4 file 仍 unstaged (V055 SQL / Python test / RESERVATION / E1 sign-off)；隔壁 E2 memory.md auto-update 不觸碰；E2 round 1 review report ?? 仍存
+- 0 user-home path hardcode (test_v055_no_user_home_path_hardcoded PASS)
+- 0 hard-boundary column touched (test_v055_no_hard_boundary_columns_touched PASS)
+- 0 trading.* / live_* mutation (test_v055_no_trading_or_live_mutation PASS)
+
+
+## REF-20 Sprint C R6-T0' V055 retrofit Round 3 fix（2026-05-05）
+
+### Round 2 → Round 3 transition
+
+E2 round 2 review verdict = RETURN-TO-E1 round 3 with 1 NEW CRITICAL finding (C-3)：
+- **C-3** (NEW): V055 round 2 stub INSERT (line 671-687) references **phantom column `actor_id`** on `replay.experiments`。E2 round 2 cross-grep 揭露 V049 line 282-307 18 ADD COLUMN list 真實命名 `created_by` 在 line 284，無 `actor_id`。`actor_id` 實是 `replay.run_state` 表 column (V045:199 NOT NULL)，與 `replay.experiments` 完全無關。Linux deploy 必撞 `column "actor_id" of relation "experiments" does not exist`。
+- Round 1 5 findings: C-1 + C-2 + H-1 + M-1 round 2 fully verified PASS（4/5）；M-2 round 2 fix 過程引入 phantom bug = C-3。
+
+### Round 3 fix 選擇 + lessons
+
+**選 A vs 選 B 決策**：選 A (最小變動)
+- 選 A：直接刪 stub INSERT 的 `actor_id` column reference + 對應 VALUES 位置
+- 選 B：把 `actor_id` 改 `created_by` + VALUES 寫 stub 字串
+- 選 A 因 §八「最小影響」+ §八「不順手優化」，stub `actor_id='v055_smoke_test'` 的「標 actor」意圖 round 3 不必保留（SAVEPOINT ROLLBACK 後 row 不持久化，標 actor 對讀端 0 影響）
+
+### Round 3 fix lessons
+
+34. **Phantom column 反模式 + cross-validation gap**：round 2 driver test (`test_v055_v049_not_null_set_documented`) 只 grep stub 含 `runtime_environment` + `experiment_id` + `'mac_dev_smoke_test_only'`，**0 cross-validation 確認 stub 全 column 是否實存於 V049 schema**。E1 round 2 IMPL 時把 V045 `replay.run_state.actor_id` 與 V049 `replay.experiments.created_by` 混淆 — 兩表都用 'actor' / 'creator' 語意但實際 column 名不同。**教訓**：任何 INSERT 至 schema-evolved table（CREATE 後多次 ADD COLUMN）必對 stub column list 做 schema cross-validation；不能只驗 NOT NULL bypass condition 而漏掉「全 column 是否存在」。新加 test_v055_stub_columns_exist_in_v049 補此 gap。
+
+35. **Sign-off 描述事實錯誤的代價**：round 2 sign-off §13.1 M-2 row 寫「stub minimal subset 含 actor_id (V049 line 284 ADD; 為 nullable per V049 source)」是事實錯誤 — V049 line 284 ADD 真實是 `created_by`。E2 round 2 cross-grep V049 source 立刻 catch；如果 E2 信 sign-off 描述沒做 cross-grep，這個 bug 會 ship 到 Linux。**教訓**：sign-off 的「fix 機制」描述若引用具體 line / column / type 名，必逐字對 source file cross-grep verified（不是回憶寫，不是 dispatch 字面複製）；E2 cross-grep 是最後一道防線但不能依賴。CLAUDE.md §七 「先讀後改」對 sign-off 報告也適用。
+
+36. **Adversarial inline sanity check 在 critical phantom-detection test**：新 test `test_v055_stub_columns_exist_in_v049` 含 6-step 邏輯（parse stub / parse V049 ADD / parse V041 base / assert phantom = ∅ / adversarial fake_phantom inline / explicit positive 6-col expect + phantom guard）。Adversarial inline 防止未來開發者把 `assert not phantom_columns` 誤改為「永真 predicate」weakening。**教訓**：cross-validation test 在「critical schema invariant」layer 應加 adversarial inline sanity 雙重保險（不靠隔壁 file 跑檢查，inline 手 craft fake column 確認 logic 真會 catch）。
+
+37. **PA dispatch label drift 檢出但不擴大範圍**：E1 round 3 cross-grep V049 真實 ADD COLUMN count = 25，PA dispatch §「真相」+ E2 review report 都標「18 ADD COLUMN」是 stale label。**E1 立場（per §八「最小影響」）**：留 stale 標 + 在 sign-off §14.7 註明訂正；不擴大 round 3 範圍修 dispatch / E2 report。**教訓**：發現上游 doc drift 時，在 sign-off 不確定之處段落明文標註但不擅自改上游 doc — 留給 PM 端決定是否在 closure 時統一 update。
+
+38. **stub INSERT 設計：6-col vs minimal**：round 3 修正後 stub 寫 6 column = V041 base 4 (experiment_id / half_life_days / embargo_days / created_at) + V049 ADD COLUMN 2 (status / runtime_environment)。其中 created_at 顯式寫 now() 是冗餘（V041 default 也是 now()）但 round 3 不順手優化 — 保留 round 2 IMPL 不必要的優化都不動。**教訓**：retrofit fix 階段嚴守「最小變動」；發現「順手可清掉」的冗餘也不在當前 fix scope 內動，獨立 ticket 處理避免 review 範圍膨脹。
+
+### Round 3 自驗結果
+
+- `python3 -m pytest tests/replay/test_v055_evidence_insert_fix.py -v`：**21 PASS / 2 SKIPPED**（round 2 = 20 PASS / 2 SKIPPED，round 3 增 1 case = `test_v055_stub_columns_exist_in_v049`）
+- `grep -c 'INSERT INTO replay\.experiments' V055__*.sql` = 1 (single stub block)
+- `grep -c 'actor_id' V055__*.sql` = 5 (全在 round 3 fix 雙語注釋內描述 phantom 移除過程；strip_sql_comments 後 0 命中於 SQL statement)
+- `grep -c 'created_by' V055__*.sql` = 0 (round 3 選 A 不引入 created_by 替代，最小變動)
+- 真實 SQL stub INSERT 6 column = experiment_id / status / created_at / half_life_days / embargo_days / runtime_environment（全部 ∈ V041 base 4 col ∪ V049 ADD COLUMN 25 col；0 phantom）
+- `wc -l V055__*.sql` = 879（round 2 = 825；round 3 增 54 line for C-3 fix 雙語注釋 + M-2 section 訂正）
+- `wc -l test_v055_evidence_insert_fix.py` = 1271（round 2 = 1102；round 3 增 169 line for 1 new test case 含 6-step + adversarial sanity）
+- `git status --porcelain`：4 file 仍 unstaged 與 round 2 set 一致（V055 SQL / Python test / RESERVATION / E1 sign-off）
+- Adversarial sanity (E1 round 3 cross-process Python sim)：模擬把 actor_id 加回 stub → cross-validation 真會 catch phantom，sanity invariant verified
+- 0 user-home path hardcode / 0 hard-boundary column touched / 0 trading.* / live_* mutation（round 1+2 既有 test 全 PASS，無 regression）
+
+### Round 3 後 E2 必查 checklist
+
+1. C-3 phantom column 移除 (stub INSERT 0 'actor_id')
+2. test_v055_stub_columns_exist_in_v049 真會 catch 重 inject phantom
+3. Round 1+2 fix 4/5 全保留：C-1 (3-col INSERT) + C-2 (identity_arguments) + H-1 (no silent skip) + M-1 (mock-only doc) + M-2 (V049 NOT NULL doc)
+4. Sign-off §13.1 M-2 row 訂正並引用 §14
+5. 邊界守則：0 V036/V037/V049/V050/V051 modify / 0 manifest_signer / 0 跨平台路徑硬編碼 / 0 硬邊界 column 觸碰 / 0 RESERVATION.md 改動
