@@ -5592,3 +5592,42 @@ PA dispatch「REF-20 Sprint C R6 W5 — R6-T8 4-strategy reproducibility smoke t
 ### 教訓
 - 「reproducibility test」對 stateless 純函數 = 同 input 二跑字節級 equal；不必引入 RNG seed 機制（RNG seed 是針對 stochastic 函數的 reproducibility 工具，本函數無隨機性）。
 - bilingual MODULE_NOTE 默認中文（2026-05-05 governance change，commit `47922a4c`）；新增 R6-T8 註解全中文，既有 W3 中英對照塊不主動清理（per CLAUDE.md §七）。
+
+## 2026-05-05 — REF-20 Sprint C R6 W6 R6-T9 Sprint C1 closure
+
+### W6 IMPL 範圍
+
+PA dispatch「REF-20 Sprint C R6 W6 — R6-T9 Sprint C1 真實 closure (Python port + caller wiring + E2E test)」完成 Python port + finalize caller wiring + 18 hermetic test PASS。
+
+### 改動
+
+- `replay/calibration_label.py`：NEW 403 LOC — Rust `calibration_label.rs` byte-equal port（4 dataclass / 1 enum / 1 public fn / 4 helper）；ExecutionConfidence str-valued enum 對齊 V049 CHECK enum；FillRecord+CalibrationResult dataclass mirror Rust struct；derive_execution_confidence 4 維 AND 過濾 + Step 1-6 鏡像 Rust；CI 3-tier (n<30 / 30≤n<200 / n≥200) + Type 7 percentile + MAD/IQR robust stat 全 byte-equal Rust。
+- `replay/run_finalize_route.py`：593 → 785 LOC（+192）— 加 `_compute_and_persist_calibration(cur, experiment_id)` helper + wire 至主 finalize 流程 Step 7.5（_mark_run_finalized 後 / commit 前）；advisory fail-soft（exception → log warn + return None；不 abort finalize）；response 加 `execution_confidence` key。
+- `tests/replay/test_calibration_label_python.py`：NEW 329 LOC — 10 unit case（5 strategy fixture 鏡 Rust W5 + 4 boundary：stale fills / NaN fee_rate / CI n<30 / short direction）。
+- `tests/replay/test_r6_calibration_e2e.py`：NEW 407 LOC — 8 E2E mock case + 1 live PG opt-in skip：grid calibrated / funding not_calibrated / bb_reversion none / no_fills none / V049 missing strategy advisory / SQL exception advisory / SELECT filter contract / side mapping 4-way。
+
+### 驗證
+
+- Mac pytest test_calibration_label_python.py：**10/10 PASS**
+- Mac pytest test_r6_calibration_e2e.py：**8/8 PASS + 1 skipped**（live PG opt-in）
+- Mac pytest 全 replay tests：**94/94 PASS + 4 skipped**（76 既有 + 18 新加，0 regression）
+- 0 forbidden import（V3 §6.2 forbidden_surface_audit GREEN；只 MODULE_NOTE 文字提及）
+- 0 cross-platform path 硬編碼（CLAUDE.md §七 跨平台合規）
+- 0 hard boundary 觸碰（max_retries / live_execution_allowed / decision_lease）
+- 0 V### migration / 0 schema / 0 manifest_signer canonical_bytes 改動 / xlang_consistency 13/13 維持
+- LOC 全 < 800 warn / 全 < 2000 hard cap
+
+### 設計決策 / 教訓
+
+1. **trading.fills per-fill row vs entry/exit pair**：trading.fills V003 schema 為 per-fill row（無 entry/exit pair）；caller 把每行視為單筆 fill（entry=exit=price，gross=0），fee_rate 從 V008 column 取。對 calibration label OK（label 衡量 fee/slippage 校準信心，**非** PnL 信心；MAD/IQR 主信號從 fee_bps_vec 計算）；net_bps_p* 在此設計下退化為 -2×fee_bps（純 fee cost），V050 ci_low/mid/high_bps 接受此 degenerate value。R6+ 若需 PnL-based net_bps 需 caller 端 JOIN entry+exit pair（pre-existing TODO，超出 W6 scope）。
+2. **Advisory fail-soft 設計**：dispatch §1.2 明確要求「任何錯誤 catch + log 但不 abort finalize（calibration 是 advisory，不阻 finalize）」。IMPL 全程 try/except (BLE001) catch + log warn + return None；不 propagate exception 上層 caller。原則：calibration 失敗時 V045 status='completed' 仍正常寫入；V049 execution_confidence 維持 INSERT 預設 'none'（不寫 = 不 UPDATE 是有效 outcome）。
+3. **Python ↔ Rust byte-equal 邊界**：W6 只驗「Python label 對齊 Rust label」（5 case 同預期）；**未**驗「同 fixture 跑 Python derive 與 Rust binary derive 9 field 字節相同」。Rust binary 當前無 CLI 入口暴露 derive_execution_confidence；嚴格 cross-language byte-equal 需 Rust binary expose CLI（Sprint D 提案）。
+4. **Dependency injection for testability**：`_compute_and_persist_calibration` 接受 `derive_fn` / `update_fn` / `now_fn` 注入（None default → production import）；test 端可 capture / stub 觀察 call 值（如 case 8 side mapping 用 `_capture_derive` 抽出 captured_fills 驗 is_long bool）。對 `experiment_registry` + `calibration_label` 動態 import 提升 test isolation（不必 monkey-patch module global）。
+5. **2026-05-05 注釋 default 中文 governance**：CLAUDE.md §七 mid-W3 改為「新建/修改的注釋默認只寫中文」；W6 全程套用，4 NEW file 全純中文 docstring + inline comment + module note。既有 W3 + W4 + finalize 中英對照塊未碰（per「修改既有中英對照塊時移除英文只保留中文」— 本 W6 未動既有 block）。LOC 比 bilingual 少 ~30-40%（W3 calibration_label.rs bilingual 1100 LOC vs 中文 only 826 LOC = -25%；W6 Python 403 LOC 是 mid governance 後產出）。
+6. **R6 7 acceptance 全 closed**：W1-W6 chain（commits `286252d2 → 95beba74 → 3688e09a → 7a04d2f4 → c2cd317f → W6 pending`）真實 closure plan §6.R6 7 acceptance（A6-1 fee model / A6-2 calibration report / A6-3 maker/taker / A6-4 model_version / A7-1 weak auto-downgrade / A7-2 sample sufficiency / A7-3 stale auto-downgrade）— W6 caller wiring 是 A6-2/A7-1/A7-3 三條真實 chain 完成（之前是 component land 但 0 production caller）。
+
+### 後續 follow-up（建議 P2 ticket，E1 不擴大 W6 scope）
+
+- **P2-W6-FOLLOWUP-1**：Rust binary expose CLI for derive_execution_confidence + 加 Python ↔ Rust byte-equal e2e test（subprocess spawn + 9 field hash 對比）。需 Rust binary main.rs 加 `--derive-execution-confidence-from-fixture` CLI flag。
+- **P2-W6-FOLLOWUP-2**：trading.fills entry/exit pair JOIN 設計 RFC — caller 端 SQL 從 per-fill row 升級到 trade-level pair 投影（用 `position_close_event` 配對 close + open fill）。對 calibration net_bps_p* CI 信號質量提升，但對 fee_bps MAD/IQR 主信號不影響。
+- **P2-W6-FOLLOWUP-3**：V049 row 升級到 V### migration 加 top-level `strategy` / `symbol` column（取代 manifest_jsonb->>'strategy' SELECT pattern）。當前模式工作 OK 但 jsonb extraction 較 column 慢；非 hot path 暫不必修。
