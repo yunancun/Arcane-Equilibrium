@@ -5684,3 +5684,45 @@ E1 W1 IMPL 完成；交 PM：
 3. Linux pull + pytest：`ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && python3 -m pytest program_code/local_model_tools/tests/ program_code/ml_training/tests/ -v"` 驗 80 + 415 PASS（與 Mac 結果一致；1 pre-existing fail）
 4. **C2 W2 dispatch unblock**（capability test + FK chain audit + lookup helper reuse audit per PA §13.5 路線圖）
 5. PA 派發 §7 強制工作鏈 minimal-loop pattern：W1 mirror W6 hermetic test pattern；建議 PM 直接 review skip E2，E4 regression 在 W3 全 chain land 後跑
+
+## 2026-05-05 — REF-20 Sprint C2 R7 W2 (3 R7 task batch + observability log)
+
+### W2 IMPL 範圍
+
+PA dispatch「REF-20 Sprint C2 R7 W2 — capability test + FK chain audit + lookup reuse audit (3 task batch)」3-task batch 完成。
+1. R7-T5 evidence_filter capability probe test (~451 LOC)
+2. R7-T7 Part A FK chain SQL acceptance test + Part B observability log (+10 LOC logger.info)
+3. R7-T8 lookup_replay_config_blob reuse audit (~265 LOC)
+
+### 改動
+
+- `program_code/ml_training/tests/test_evidence_filter_capability.py`：NEW 451 LOC — 9 test (6 case + 3 observability log) ；MIT §1.1 6-key 4-gate spec mirror。
+- `program_code/ml_training/tests/test_advisory_lineage_fk.py`：NEW 293 LOC — 6 test (3 SQL string acceptance + 1 contract doc + 2 real PG smoke opt-in)；A10-1/A10-2/A10-3 SQL acceptance 對齊 V051 paired CHECK + V055 expires_at via JOIN replay.experiments。
+- `program_code/exchange_connectors/.../tests/replay/test_lookup_replay_config_blob_reuse.py`：NEW 265 LOC — 10 test (helper SELECT pattern + finalize_route alignment + 3 producer no-inline-SELECT + 3 producer helper-import + W1 push back doc)；接受 W1 push back accept 模式 A 獨立 SELECT。
+- `program_code/ml_training/mlde_demo_applier_evidence_filter.py`：291→324 LOC（+33）— `fetch_pending_sql_and_params` 加 R7-T7 Part B observability log（10 line logger.info dump caps=N/6 + block_a + block_b 模式）；對齊 MIT §1.5 推薦 + AI-E §11.1 W2 task。
+
+### 驗證
+
+- Mac pytest test_evidence_filter_capability.py：**8 PASS + 1 skip**（OPENCLAW_TEST_LIVE_PG=1 opt-in）
+- Mac pytest test_advisory_lineage_fk.py：**4 PASS + 2 skip**（real PG smoke opt-in）
+- Mac pytest test_lookup_replay_config_blob_reuse.py：**10 PASS**
+- Mac pytest 全 ml_training + replay + local_model_tools regression：**518 PASS + 35 skip + 1 pre-existing fail**（pre-existing fail W1 sign-off §4 已記錄；stash W2 改動仍 fail；非 W2 引入）
+- 0 forbidden import / 0 cross-platform path 硬編碼 / 0 hard boundary 觸碰 / 0 manifest_signer canonical_bytes 改動 / 0 V### migration / xlang_consistency 13/13 維持
+- LOC 全 < 800 warn / 全 < 2000 hard cap
+
+### 設計決策 / 教訓
+
+1. **R7-T7 Part B observability log 同檔放在 fetch_pending_sql_and_params 內**：dispatch §1.2 Part B 期望「在 SQL 構造 end 加 1-line INFO log dump active capabilities + Block B mode」。實 IMPL +10 LOC logger.info call 放在 build_evidence_source_filter 後 + sql.format() 前；caps_count + block_a + block_b 三個變數獨立計算（不複用 build_evidence_source_filter 的內部分支邏輯避耦合）。block_b 三段判斷對齊 helper line 196-231 三條件支路（full / partial / skip）。
+2. **A10-2 SQL JOIN 而非直查**：dispatch §1.2 注意：mlde_shadow_recommendations 表本無 expires_at column（W6 R6-T9 verified；V055 fix 確認）；A10-2 hard check 必經 JOIN replay.experiments + 取 re.expires_at（V049 source-of-truth）。本 IMPL 嚴格遵守 dispatch 注意，並加 test 文檔級驗證（test_real_pg_smoke_mlde_shadow_recommendations_no_expires_at_column）若 PG 上 expires_at 意外 land 必 fail。
+3. **R7-T8 接受 W1 push back（模式 A 獨立 SELECT）**：dispatch §1.3 明寫「R7-T8 不強要求 reuse 既有 helper — 改驗 manifest_hash 取值邏輯一致性」。本 IMPL 設兩種 PASS 路徑（has_inline_select OR has_lookup_helper_import）；W1 採模式 A inline SELECT（W1 sign-off §9.4 揭 lookup_replay_config_blob signature 不對應 manifest_hash key）；test 接受兩模式之一即 PASS。**教訓**：當 dispatch 明確接受 W1 push back accept context，test 端不應強制統一 reuse 模式而限制未來設計選擇。
+4. **R7-T5 cycle stale check 用 probe_call_count 計**：dispatch §1.1 Case 5「capability re-probed each cycle — assert evidence_filter_capabilities(cur) called per fetch_pending_sql_and_params(cur, ...)」。原本可用 monkey-patch + Mock; 改用 _ProbeCursor 加 probe_call_count counter，每次 information_schema / regclass execute 都遞增；驗 1 cycle = 3 probe call / 2 cycle = 6 probe call（0 cache）。優於 mock：counter 直觀，且 ProbeCursor 是 source filter test 既有 fixture pattern 重用；test 可同時驗 SQL 結構（Block B 完整版兩邊都 fire）。
+5. **observability log 三 case 覆蓋**：full / partial / skip 三個 capability state 各寫一個 caplog 驗證 test，確保 logger.info 一律被觸發 + dump 字串含正確 caps=N/6 + block_a + block_b 模式。`caplog.at_level(logging.INFO, logger="ml_training.mlde_demo_applier_evidence_filter")` 必指 logger name 否則 caplog 收不到 module-level logger 的 INFO record。
+6. **R7-T8 grep static analysis 不依 PG runtime**：3 producer 端「不應 inline SELECT manifest_hash」+「應 import build_replay_metadata」走純 grep regex；不需任何 import 真實 module（test 重 0 PG hit / 0 module load 設計）；對齊 W1 hermetic test pattern。reused `_repo_root()` helper 透 `Path(__file__).resolve().parents[6]` 算 repo root（穩跨 Mac / Linux 平台）。
+7. **2026-05-05 注釋 default 中文 governance**：W2 全程套用，3 NEW test file 全純中文 docstring + inline comment + module note；既有 mlde_demo_applier_evidence_filter.py 加 R7-T7 Part B 邏輯只動 inline comment 區段，全用純中文（per CLAUDE.md §七「修改既有中英對照塊時移除英文只保留中文」— 但本次新增的 inline comment 不在既有 bilingual 塊內，故維持純中文 default）。
+
+### 後續 follow-up（建議 P2 ticket，E1 不擴大 W2 scope）
+
+- **P2-R7-W2-FOLLOWUP-1**：Real PG smoke (OPENCLAW_TEST_LIVE_PG=1) 實際對 Linux PG 16 跑 + 驗 A10-1/A10-2/A10-3 真 0 violation（當前 3 test skip；待 PM 驗 deploy）。
+- **P2-R7-W2-FOLLOWUP-2**：observability log INFO level 升 cron / log slot 收集 metric（每小時 capability dump 統計）；當前單純 logger.info 走 stderr / log file，不進 PG metric 表；Sprint D 監控 chain 上線後考慮升級。
+- **P2-R7-W2-FOLLOWUP-3**：R7-T8 grep audit 補 future LinUCB warm-start caller（per memory `linucb_shadow_compare_retention.md` Sprint D/E 上線時加 LinUCB import test，當前 test 不涵蓋）。
+
