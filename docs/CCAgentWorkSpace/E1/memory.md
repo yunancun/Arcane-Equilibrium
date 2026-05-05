@@ -5334,3 +5334,56 @@ V055 Guard A line 533-539 `v_identity_args <> v_expected_identity_args` strict e
 - **P2-V055-FOLLOWUP-1**：建立 PG runtime smoke gate (Mac docker pg:16 一鍵驗 V### migration RAISE 0 觸)，加入 future V### acceptance binding
 - **P2-V055-FOLLOWUP-2**：Cross-platform PG dev fixture (Mac `pg:16` docker compose service)，避免 Mac dev / Linux runtime drift 重發
 - **P2-V055-FOLLOWUP-3**：PG docs claim vs empirical behavior gap audit，列出本項目所有 PG 內建 reflection 函數調用點（grep `pg_get_function_*` / `pg_indexes` / `pg_proc` 等）+ 為每個 hardcode expected 加「先 query 真實 output」的 SOP comment
+
+## REF-20 Sprint C R6-T0' V055 retrofit Round 5 design pivot（2026-05-05）
+
+### Round 4 → Round 5 transition
+
+- Round 4 hotfix 把 v_expected_identity_args 從「pure type list」改為「with arg names」格式對齊 PG 16 真實 `pg_get_function_identity_arguments` 輸出
+- Round 4 sign-off 後 PM SSH bridge re-apply V055，line 567 NOTICE 確認 「19-arg signature byte-equal V036 verified」 PASS
+- 但 line 883 撞新 fail：`psql:V055__:883: ERROR: syntax error at or near "TO"` (LINE 208: `ROLLBACK TO SAVEPOINT v055_smoke;`)
+- PM PG 16 直驗：`DO $$ BEGIN SAVEPOINT t; END $$;` → `ERROR: unsupported transaction command in PL/pgSQL`
+- **Round 5 是 design pivot 而非 small hotfix**：PG fundamental constraint 漏看 4 輪
+
+### Round 5 fix lessons
+
+42. **PL/pgSQL DO block 不允 explicit transaction control commands** — `SAVEPOINT name` / `ROLLBACK TO SAVEPOINT name` / `BEGIN` / `COMMIT` / `ROLLBACK` 全禁，PG raise `unsupported transaction command in PL/pgSQL`。錯誤處理只能用 `BEGIN ... EXCEPTION WHEN ... END`（implicit savepoint）但 EXCEPTION 易觸 H-1 silent skip 反模式。**教訓**：任何 in-migration smoke 模式 design 起跑前必先在目標 PG 版本（PG 16）跑 minimal repro 驗 transaction-command 是否可用：`psql -c "DO \$\$ BEGIN SAVEPOINT t; ROLLBACK TO SAVEPOINT t; END \$\$;"`。Round 1-4 累積 4 輪 fix 仍漏看這條 PG fundamental，5th-round 才 pivot drop smoke 全部從 migration。
+43. **PG migration smoke pattern 三選項** — 未來 V### retrofit 若需 in-migration smoke：(a) PG 11+ procedure（`CREATE PROCEDURE`）允許 transaction control（COMMIT/ROLLBACK）；(b) 拆 smoke 為 separate one-shot migration（V###.1 跑後 DROP）走 atomic transaction 但 schema 不污染；(c) 信 sibling Python test（V055 round 5 current decision）— 不額外 infra cost。應寫入 `sql/migrations/templates/in_migration_smoke_pattern.md`。
+44. **Static-parse vs runtime test 認知差** — Round 4 「Mac pytest 23/21/2」 全 PASS 但 Linux deploy 撞 SAVEPOINT syntax error，揭示 static-parse test 看 SQL 字面是否包含某 keyword 是 weak proof of correctness。**真正 acceptance binding 是 sibling test_v055_*_path 在 OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN env 下跑真 PG INSERT + SELECT row body verification**。Round 5 reframe：static-parse test 守備 SQL 結構不變式（0 SAVEPOINT 殘留 / 0 stub INSERT 殘留 / file header 含 design pivot section），runtime test 守備 PG 行為等價。
+45. **Dispatch §3+§8 「0 改動 Python test」前提錯誤的 push back 處理** — Round 5 dispatch 預期 0 改動 Python test，實證 4 個 SQL static-parse test fail（test_v055_idempotent_apply / test_v055_4_path_smoke_in_guard_a / test_v055_v049_not_null_set_documented / test_v055_stub_columns_exist_in_v049）。E1 push back to PM (sign-off §16.5) 但**不阻塞 round 5 IMPL**：升級 4 test 為 round 5 design pivot 對等 assert（驗 0 SAVEPOINT 殘留 / 0 INSERT INTO replay.experiments 殘留 / file header 含 design pivot section / sibling test ownership reference），保留所有原 invariant + 加 round 5 invariant。Mac pytest 23/21/2 不變。**教訓**：dispatch 預期與實證矛盾時，E1 同 commit 內 (a) 完成核心 task (b) 升級必要的 test 適應新現實 (c) 在 sign-off 明文 push back 給 PM — 不阻塞但記錄。
+46. **(REMOVED) breadcrumb 註解 vs 純刪除** — Round 5 drop smoke 後加「(REMOVED) Round 1-4 in-migration 4-tier post-INSERT smoke block」+ 簡述刪除內容 + drop 理由 雙語 breadcrumb（V055 line ~668-700）。理由：未來 reader 看 git history 會懷疑「為何 V055 比 round 4 短這麼多 + Operator deploy note 第 4 點變了？」；breadcrumb 在 source 內就回答「PL/pgSQL constraint + sibling test 取代」，避免 git archeology cost。**Trade-off**：~30 LOC overhead vs context retention。對 retrofit chain 很長的 V### migration（V055 累積 5 round）值得加 breadcrumb；對 single-round migration 不必。
+47. **Round 1-4 「H-1 (no silent skip)」invariant 在 round 5 自動延續** — Round 5 完全 drop smoke block → 不引入 EXCEPTION block → H-1 finding 從根 obsolete (沒 SAVEPOINT 就沒 EXCEPTION 路徑)。test_v055_no_silent_skip_in_guard_a 的 assert `EXCEPTION WHEN OTHERS not in sql` 仍 PASS — 不需改 test 邏輯（docstring 略 stale 但 assert valid，最小改動原則保留）。**教訓**：drop big section 時，相關 invariant 守備 test 若邏輯仍 valid 就保留 — 改 docstring 是 nice-to-have 不是 must-fix。
+48. **LOC delta 預期 vs 實際 gap** — Dispatch §1 預期 V055 913 → ~600 (-300 LOC drop smoke block)。實際 913 → 715 (-198)，比預期少 102 LOC。原因：(a) round 5 design pivot 雙語 section ~70 LOC（CLAUDE.md §七 雙語強制）；(b) Operator deploy note 第 4 點雙語擴展 ~10 LOC；(c) (REMOVED) breadcrumb ~30 LOC。Net code 真 drop ~270 LOC（SAVEPOINT + 4 path × (SELECT + INSERT + SELECT + RAISE) + ROLLBACK）。**教訓**：drop big block 後預估 LOC 必含 (a) 雙語 design pivot doc (b) breadcrumb 註解 (c) 連帶調整的 Operator note 雙語擴展。dispatch 純算 code drop 不夠 — 治理開銷要算進去。
+
+### Round 5 自驗結果
+
+- **23 collected / 21 PASS / 2 SKIPPED**（Mac pytest 與 round 4 完全一致；4 個 SQL static-parse test 升級為 design pivot 對等 assert，PASS 取代 round 4 PASS）
+- V055 LOC 715（913 → 715，-198；< §九 2000 cap）
+- 4 fail test 升級成 round 5 PASS：
+  - test_v055_idempotent_apply line 614-637 final assert 從 `ROLLBACK TO SAVEPOINT v055_smoke in sql` 改為 round 5 0 SAVEPOINT/ROLLBACK 殘留 invariant
+  - test_v055_4_path_smoke_in_guard_a line 829-925 整 test 升級驗 round 5 design pivot section + sibling test ownership + 4 tier 字串 in design pivot 註解
+  - test_v055_v049_not_null_set_documented line 945-1010 整 test 升級驗 round 5 0 stub INSERT 殘留 + design pivot section
+  - test_v055_stub_columns_exist_in_v049 line 1041-1170 整 test 升級驗 round 5 0 stub INSERT + V049/V041 schema parse 仍可解析（為 sibling test fixture validation 保留）+ adversarial sanity（phantom-detection 仍會 fail-loud）
+- 跨平台 grep `/home/ncyu|/Users/[^/]+` 0 match（GREEN）
+- 硬邊界 column 0 觸碰（GREEN）
+- 0 V036/V037/V049/V050/V051 modify / 0 V055 INSERT body / 0 Guard A 三條 enforce / 0 manifest_signer canonical_bytes / 0 RESERVATION.md 改動
+
+### Round 5 後 E2/PM 必查 checklist
+
+1. V055 SQL 0 SAVEPOINT v055_smoke 殘留（grep 驗）
+2. V055 SQL 0 INSERT INTO replay.experiments 殘留（grep 驗）
+3. V055 SQL 0 ROLLBACK TO SAVEPOINT v055_smoke 殘留（grep 驗）
+4. V055 file header 含 「Round 5 design pivot」 section 雙語
+5. V055 LOC 715 < §九 2000 cap
+6. Round 1+2+3+4 5 fix 全保留 (C-1 / C-2 / C-3 / H-1 (drop smoke 自動延續) / M-1 / M-2 (drop stub INSERT 自動 obsolete 但 sibling test 守備 V049 schema)) — 0 regression
+7. Mac pytest 23/21/2 不變
+8. Sibling test 4 path case (test_v055_*_path) 仍 PASS unchanged
+9. Operator deploy note 第 4 點更新「4-tier path verification by sibling test under OPENCLAW_TEST_LIVE_PG=1」
+10. Linux deploy NOTICE flow 無 「4-tier smoke」 段（design pivot decision）
+
+### Round 5 follow-up（建議 P2 ticket，E1 不擴大 round 5 scope）
+
+- **P2-V055-FOLLOWUP-1 (re-iterate)**：Linux deploy SOP 必納 PG runtime smoke gate（round 4 lesson re-affirmed）；對涉及 PL/pgSQL transaction control 的 V### migration，Mac sign-off 後 PM SSH bridge 必先 Linux dry-run
+- **P2-V055-FOLLOWUP-2**：in-migration smoke pattern survey doc — `sql/migrations/templates/in_migration_smoke_pattern.md`，列三選項（PG 11+ procedure / separate one-shot V###.1 / sibling Python test）+ trade-off
+- **P2-V055-FOLLOWUP-3 (round 4 carry-over)**：canonical PG metadata format snapshot test，psycopg2 + OPENCLAW_TEST_LIVE_PG=1 opt-in 跑真 PG 抽 reflection 函數輸出對齊 hardcoded expected
+- **P2-V055-FOLLOWUP-4 (round 4 carry-over)**：PG version compatibility matrix doc — `docs/references/2026-05-05--pg_version_compat_matrix.md`，列 PG 13/14/15/16 reflection 函數行為 + transaction control 限制 + 推薦 V### migration pattern

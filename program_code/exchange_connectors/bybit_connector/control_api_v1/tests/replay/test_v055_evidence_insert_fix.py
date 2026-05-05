@@ -610,9 +610,25 @@ def test_v055_idempotent_apply() -> None:
     # Guard A 不應 fail-closed 重跑（re-run 後 function exists + 19-arg 仍 PASS）
     assert "v_expected_arg_count INT := 19" in sql or "v_expected_arg_count := 19" in sql
 
-    # post-INSERT smoke 必在 ROLLBACK 內，不污染 production
-    assert "ROLLBACK TO SAVEPOINT v055_smoke" in sql, (
-        "V055 post-INSERT smoke must ROLLBACK to keep PG state pristine"
+    # Round 5 design pivot: in-migration SAVEPOINT/ROLLBACK TO SAVEPOINT 4-tier
+    # smoke 已 drop（PL/pgSQL DO block 拒 explicit transaction command）。
+    # Round 5 後 V055 內 0 SAVEPOINT v055_smoke / 0 ROLLBACK TO SAVEPOINT
+    # v055_smoke。Idempotency 由 CREATE OR REPLACE FUNCTION + Guard A 三段
+    # invariant 保證；4-tier path 驗證遷至 sibling test test_v055_*_path。
+    # Round 5 design pivot: in-migration SAVEPOINT/ROLLBACK TO SAVEPOINT 4-tier
+    # smoke is dropped (PL/pgSQL DO block rejects explicit transaction
+    # commands). After round 5, V055 contains 0 SAVEPOINT v055_smoke / 0
+    # ROLLBACK TO SAVEPOINT v055_smoke. Idempotency is preserved by CREATE
+    # OR REPLACE FUNCTION + Guard A 3 invariants; 4-tier path verification
+    # migrated to sibling test_v055_*_path cases.
+    assert "SAVEPOINT v055_smoke" not in sql, (
+        "V055 round 5 design pivot violation: in-migration SAVEPOINT/ROLLBACK "
+        "TO SAVEPOINT smoke pattern must be removed (PL/pgSQL constraint). "
+        "4-tier path verification belongs in Python sibling test_v055_*_path."
+    )
+    assert "ROLLBACK TO SAVEPOINT v055_smoke" not in sql, (
+        "V055 round 5 design pivot violation: ROLLBACK TO SAVEPOINT v055_smoke "
+        "must not appear in V055 migration (PL/pgSQL DO block constraint)."
     )
 
 
@@ -810,25 +826,88 @@ def test_v055_signature_byte_equal_v036() -> None:
 
 
 def test_v055_4_path_smoke_in_guard_a() -> None:
-    """V055 Guard A contains 4-tier path post-INSERT smoke.
+    """V055 round 5 design pivot: 4-tier path verification 已遷至 sibling test.
 
-    V055 Guard A 內含 4-path post-INSERT smoke (real_outcome /
-    calibrated_replay / synthetic_replay / counterfactual_replay)。
-    V055 Guard A contains 4-path post-INSERT smoke covering all replay tiers.
+    Round 5 (2026-05-05): in-migration 4-tier post-INSERT smoke 因 PL/pgSQL
+    DO block 拒 explicit SAVEPOINT/ROLLBACK TO SAVEPOINT (PG hard
+    constraint `unsupported transaction command in PL/pgSQL`) 而 drop。
+    4-tier path 驗證遷至 Python sibling test (此 test file) 的 4 case：
+    test_v055_real_outcome_path / test_v055_calibrated_replay_path /
+    test_v055_synthetic_replay_path / test_v055_counterfactual_replay_path
+    （+ Linux PG opt-in test_v055_live_pg_*）。
+
+    本 test (round 5 升級) 驗 V055 SQL：
+      - 0 SAVEPOINT v055_smoke / 0 ROLLBACK TO SAVEPOINT v055_smoke 殘留
+      - file header 含 "Round 5 design pivot" section 說明 PL/pgSQL constraint
+      - section 引用 4 sibling test case 名 + OPENCLAW_TEST_LIVE_PG=1 env
+      - V055 仍提及 4 tier 字串（在 design pivot 註解內 documenting coverage
+        ownership transfer）
+
+    Round 5 design pivot (2026-05-05): in-migration 4-tier post-INSERT
+    smoke is dropped because PL/pgSQL DO block rejects explicit
+    SAVEPOINT/ROLLBACK TO SAVEPOINT (PG hard constraint `unsupported
+    transaction command in PL/pgSQL`). 4-tier path verification migrated
+    to sibling test (this file) 4 case: test_v055_*_path (+ Linux PG
+    opt-in test_v055_live_pg_*).
+
+    This test (round 5 upgrade) verifies V055 SQL:
+      - 0 SAVEPOINT v055_smoke / 0 ROLLBACK TO SAVEPOINT v055_smoke residue
+      - file header contains "Round 5 design pivot" section explaining
+        the PL/pgSQL constraint
+      - section references 4 sibling test case names +
+        OPENCLAW_TEST_LIVE_PG=1 env
+      - V055 still mentions 4 tier strings (inside design pivot
+        commentary documenting ownership transfer)
     """
-    sql = _strip_sql_comments(_read_sql(V055_PATH))
+    raw_sql = _read_sql(V055_PATH)
+    stripped_sql = _strip_sql_comments(raw_sql)
 
-    # 4-path 各自必出現
-    assert "'real_outcome'" in sql, "V055 Guard A smoke missing real_outcome path"
-    assert "'calibrated_replay'" in sql, "V055 Guard A smoke missing calibrated_replay path"
-    assert "'synthetic_replay'" in sql, "V055 Guard A smoke missing synthetic_replay path"
-    assert "'counterfactual_replay'" in sql, "V055 Guard A smoke missing counterfactual_replay path"
-
-    # SAVEPOINT + ROLLBACK 機制
-    assert "SAVEPOINT v055_smoke" in sql, "V055 Guard A smoke must use SAVEPOINT"
-    assert "ROLLBACK TO SAVEPOINT v055_smoke" in sql, (
-        "V055 Guard A smoke must ROLLBACK to keep PG state pristine"
+    # ── (1) 0 SAVEPOINT/ROLLBACK TO SAVEPOINT 殘留 (round 5 drop smoke 後) ──
+    # 0 SAVEPOINT/ROLLBACK TO SAVEPOINT residue after round 5 drop
+    assert "SAVEPOINT v055_smoke" not in stripped_sql, (
+        "V055 round 5 design pivot violation: SAVEPOINT v055_smoke must not "
+        "appear in V055 migration (PL/pgSQL DO block constraint per "
+        "`unsupported transaction command in PL/pgSQL`)."
     )
+    assert "ROLLBACK TO SAVEPOINT v055_smoke" not in stripped_sql, (
+        "V055 round 5 design pivot violation: ROLLBACK TO SAVEPOINT v055_smoke "
+        "must not appear in V055 migration."
+    )
+
+    # ── (2) file header 含 round 5 design pivot section ────────────────────
+    # File header contains round 5 design pivot section
+    assert "Round 5 design pivot" in raw_sql, (
+        "V055 round 5 missing design pivot section in file header documenting "
+        "why in-migration smoke was dropped."
+    )
+    assert "PL/pgSQL" in raw_sql, (
+        "V055 round 5 design pivot section must explain PL/pgSQL constraint "
+        "as the reason for dropping in-migration smoke."
+    )
+
+    # ── (3) section 引用 sibling test ownership ────────────────────────────
+    # Section references sibling test ownership of 4-tier coverage
+    assert "test_v055_evidence_insert_fix.py" in raw_sql or (
+        "test_v055_real_outcome_path" in raw_sql
+        and "test_v055_calibrated_replay_path" in raw_sql
+        and "test_v055_synthetic_replay_path" in raw_sql
+        and "test_v055_counterfactual_replay_path" in raw_sql
+    ), (
+        "V055 round 5 design pivot section must reference Python sibling "
+        "test_v055_evidence_insert_fix.py (or its 4 path case) to document "
+        "where 4-tier coverage moved."
+    )
+    assert "OPENCLAW_TEST_LIVE_PG" in raw_sql, (
+        "V055 round 5 design pivot section must reference OPENCLAW_TEST_LIVE_PG "
+        "env to document the Linux PG opt-in path for sibling test smoke."
+    )
+
+    # ── (4) 4 tier 字串仍在 (在 design pivot 註解 documenting coverage) ─────
+    # 4 tier strings still appear (inside design pivot commentary)
+    assert "real_outcome" in raw_sql, "V055 missing real_outcome reference"
+    assert "calibrated_replay" in raw_sql, "V055 missing calibrated_replay reference"
+    assert "synthetic_replay" in raw_sql, "V055 missing synthetic_replay reference"
+    assert "counterfactual_replay" in raw_sql, "V055 missing counterfactual_replay reference"
 
 
 def test_v055_no_silent_skip_in_guard_a() -> None:
@@ -858,64 +937,72 @@ def test_v055_no_silent_skip_in_guard_a() -> None:
 
 
 def test_v055_v049_not_null_set_documented() -> None:
-    """V055 stub INSERT covers V049 NOT NULL set (round 2 fix per E2 M-2).
+    """V055 round 5 design pivot: stub INSERT 已隨 4-tier smoke 一同 drop.
 
-    Round 2 fix (E2 finding M-2): V055 SAVEPOINT block 內 stub INSERT 至
-    replay.experiments 必含 V049 已知 NOT NULL bypass column。V049 真實
-    NOT NULL set (per V049 source line 282-307 ADD COLUMN 全 NULLABLE):
-        - experiment_id (PK NOT NULL，由 caller gen_random_uuid)
-        - V049 conditional NOT NULL: engine_binary_sha when
-          runtime_environment='linux_trade_core' (V049 line 425-433
-          chk_replay_experiments_engine_sha_linux CHECK)
-        - V041 stub: experiment_id (kept), half_life_days, embargo_days,
-          created_at (default now())
-    V049 ADD COLUMN 18 個全為 NULLABLE (IF NOT EXISTS 加列無 NOT NULL
-    constraint per V049 line 282-307)。
+    Round 5 (2026-05-05): in-migration 4-tier post-INSERT smoke 因 PL/pgSQL
+    DO block 拒 explicit SAVEPOINT/ROLLBACK TO SAVEPOINT (PG hard
+    constraint) 而 drop。Round 2 fix (E2 M-2) 的 stub INSERT 至
+    replay.experiments（用於 path 2-4 FK satisfaction）也隨之移除。
 
-    Bypass strategy: stub 用 runtime_environment='mac_dev_smoke_test_only'
-    規避 conditional NOT NULL（無需 supply engine_binary_sha）。
+    本 test (round 5 升級) 改驗 V055 SQL：
+      - 0 INSERT INTO replay.experiments 殘留 (round 5 drop smoke 後)
+      - file header 含 "Round 5 design pivot" section
+      - stub-related artifacts (mac_dev_smoke_test_only 註解 OK 但 0
+        actual stub INSERT)
 
-    V055 round 2 fix per E2 M-2: V055 SAVEPOINT block stub INSERT to
-    replay.experiments must include V049 known NOT NULL bypass columns.
-    V049 actual NOT NULL set verified per source line 282-307 (all ADD
-    COLUMN are NULLABLE; only conditional NOT NULL via
-    chk_replay_experiments_engine_sha_linux CHECK with
-    runtime_environment='linux_trade_core'). Bypass via
-    runtime_environment='mac_dev_smoke_test_only'.
+    Round 5 (2026-05-05): in-migration 4-tier post-INSERT smoke is
+    dropped due to PL/pgSQL DO block constraint on explicit
+    SAVEPOINT/ROLLBACK TO SAVEPOINT. Round 2 fix (E2 M-2)'s stub INSERT
+    to replay.experiments (for path 2-4 FK satisfaction) is also removed.
+
+    This test (round 5 upgrade) verifies V055 SQL:
+      - 0 INSERT INTO replay.experiments residue (after round 5 drop)
+      - file header contains "Round 5 design pivot" section
+      - stub-related artifacts (mac_dev_smoke_test_only commentary OK
+        but 0 actual stub INSERT statement)
     """
-    sql = _strip_sql_comments(_read_sql(V055_PATH))
+    raw_sql = _read_sql(V055_PATH)
+    stripped_sql = _strip_sql_comments(raw_sql)
 
-    # Stub INSERT to replay.experiments 必含 runtime_environment 欄位
-    # (V049 conditional NOT NULL bypass)
+    # ── (1) 0 stub INSERT INTO replay.experiments 殘留 (round 5 drop) ───────
+    # 0 stub INSERT INTO replay.experiments residue (after round 5 drop)
     stub_pattern = re.compile(
-        r"INSERT INTO replay\.experiments\s*\((.+?)\)\s*VALUES",
-        re.DOTALL,
+        r"INSERT\s+INTO\s+replay\.experiments\s*\(",
+        re.IGNORECASE,
     )
-    m = stub_pattern.search(sql)
-    assert m is not None, "V055 stub INSERT to replay.experiments not found"
-    stub_columns = m.group(1)
-
-    # V049 conditional NOT NULL bypass column
-    assert "runtime_environment" in stub_columns, (
-        "V055 round 2 fix (E2 M-2): stub INSERT must include "
-        "runtime_environment column to bypass V049 conditional NOT NULL "
-        "(chk_replay_experiments_engine_sha_linux requires "
-        "engine_binary_sha when runtime='linux_trade_core'; "
-        "stub uses 'mac_dev_smoke_test_only' to bypass)"
+    m = stub_pattern.search(stripped_sql)
+    assert m is None, (
+        f"V055 round 5 design pivot violation: stub INSERT INTO "
+        f"replay.experiments must be removed (was at position {m.start() if m else None}). "
+        f"4-tier smoke + stub INSERT both dropped per PL/pgSQL constraint; "
+        f"sibling test_v055_*_path covers 4-tier path semantics."
     )
 
-    # V049 既有 unconditional NOT NULL (V041 + V049 PK)
-    assert "experiment_id" in stub_columns, (
-        "V055 stub INSERT must include experiment_id (V041 + V049 PK NOT NULL)"
+    # ── (2) file header 含 round 5 design pivot section ────────────────────
+    # File header contains round 5 design pivot section
+    assert "Round 5 design pivot" in raw_sql, (
+        "V055 round 5 missing design pivot section in file header explaining "
+        "why stub INSERT + 4-tier smoke were dropped together."
     )
 
-    # 確認 stub 用 mac_dev_smoke_test_only 而非 linux_trade_core
-    # (避免觸發 conditional NOT NULL on engine_binary_sha)
-    assert "'mac_dev_smoke_test_only'" in sql, (
-        "V055 round 2 fix (E2 M-2): stub INSERT must use "
-        "runtime_environment='mac_dev_smoke_test_only' to avoid V049 "
-        "engine_binary_sha conditional NOT NULL requirement"
-    )
+    # ── (3) stub-related artifact: mac_dev_smoke_test_only 不再 actual stub ──
+    # mac_dev_smoke_test_only is no longer an actual stub VALUES clause; it
+    # may still appear inside design pivot commentary documenting historical
+    # context. We only forbid its appearance inside an INSERT-VALUES context.
+    # (No INSERT INTO replay.experiments at all per (1) above.)
+    # mac_dev_smoke_test_only 不再是實際 stub INSERT VALUES 內容；可能仍
+    # 出現在 design pivot 註解中作為歷史脈絡描述。我們只禁止它出現在
+    # INSERT-VALUES 上下文中（依 (1) 已 0 INSERT INTO replay.experiments）。
+
+    # ── (4) round 1-4 stub-related test name 仍存在於本 test file ──────────
+    # Cross-reference: this test file historically had stub-related tests
+    # (test_v055_v049_source_not_null_invariant + test_v055_stub_columns_exist_in_v049).
+    # Round 5 升級 keeps these test names but their assertions adapt to the
+    # round 5 reality (no stub INSERT in V055).
+    # 交叉引用：本 test file 歷史上有 stub-related test
+    # (test_v055_v049_source_not_null_invariant + test_v055_stub_columns_exist_in_v049)。
+    # Round 5 升級保留 test name 但 assertion 改為適應 round 5 現實
+    # (V055 內 0 stub INSERT)。
 
 
 def test_v055_v049_source_not_null_invariant() -> None:
@@ -947,66 +1034,76 @@ def test_v055_v049_source_not_null_invariant() -> None:
 
 
 def test_v055_stub_columns_exist_in_v049() -> None:
-    """V055 stub INSERT column list 全部存在於 V049/V041 schema (round 3 fix per E2 C-3).
+    """V055 round 5 design pivot: 0 stub INSERT 殘留，phantom-column risk 消失.
 
-    Round 3 fix (E2 finding C-3): E2 round 2 review 揭露 round 2 stub INSERT
-    引用 phantom column `actor_id`（V049 line 282-307 18 ADD COLUMN list 真實
-    命名 `created_by` 在 line 284，無 `actor_id`）。Linux deploy 必撞
-    `column "actor_id" of relation "experiments" does not exist`。
+    Round 5 (2026-05-05): in-migration 4-tier post-INSERT smoke 因 PL/pgSQL
+    DO block 拒 explicit SAVEPOINT/ROLLBACK TO SAVEPOINT (PG hard
+    constraint) 而 drop。Round 3 fix (E2 C-3) 解決的 phantom column
+    `actor_id` issue 隨 stub INSERT 一起移除 — round 5 後 V055 SQL 0 stub
+    INSERT INTO replay.experiments，**phantom column risk 從根上消失**。
 
-    本 test cross-validate：(1) parse V055 stub INSERT 的 column list；
-    (2) parse V049 ADD COLUMN list（line 282-307）+ V041 base CREATE TABLE
-    column list（line 81-86）；(3) assert 每個 stub column 必 ∈ (V049
-    ADD COLUMN ∪ V041 base column) — phantom column 0 容忍。
+    Adversarial guard 仍保留：本 test 改驗 V055 內 0 stub INSERT 殘留 +
+    任何 sibling test 中 stub INSERT pattern 引用的 column 仍須存在於
+    V049/V041 schema (test_v055_live_pg_calibrated_replay_row_body 內 stub
+    INSERT 是 sibling test 內部 fixture，不歸 V055 SQL 治理)。
 
-    Adversarial guard：Round 2 漏掉此 cross-validation 是因 round 2 driver
-    test (test_v055_v049_not_null_set_documented) 只 grep stub 含
-    runtime_environment + experiment_id + 'mac_dev_smoke_test_only'，**0
-    cross-grep stub 全部 column 是否實存於 schema**。本 test 補此漏。
+    Round 5 (2026-05-05): in-migration 4-tier post-INSERT smoke is dropped
+    because PL/pgSQL DO block rejects explicit SAVEPOINT/ROLLBACK TO
+    SAVEPOINT (PG hard constraint). Round 3 fix (E2 C-3)'s `actor_id`
+    phantom-column risk goes away with stub INSERT removal — after round
+    5, V055 SQL contains 0 stub INSERT INTO replay.experiments, so
+    **phantom column risk is eliminated at the root**.
 
-    V055 stub INSERT column list must all exist in V049/V041 schema (round
-    3 fix per E2 C-3). E2 round 2 review revealed round 2 stub INSERT
-    referenced phantom column `actor_id` (V049 line 282-307's 18 ADD COLUMN
-    list contains `created_by` at line 284, NOT `actor_id`). Linux deploy
-    would fail with `column "actor_id" of relation "experiments" does not
-    exist`. This test cross-validates: (1) parse V055 stub INSERT column
-    list; (2) parse V049 ADD COLUMN list (line 282-307) + V041 base CREATE
-    TABLE column list (line 81-86); (3) assert every stub column ∈ (V049
-    ADD COLUMN ∪ V041 base column) — 0 tolerance for phantom columns.
-    Adversarial guard: round 2 missed this cross-validation because the
-    round 2 driver test only grepped stub for runtime_environment +
-    experiment_id + 'mac_dev_smoke_test_only', with 0 cross-grep verifying
-    every stub column exists in schema. This test fills that gap.
+    Adversarial guard preserved: this test now verifies V055 contains 0
+    stub INSERT residue + any sibling-test stub INSERT pattern that still
+    references replay.experiments columns must exist in V049/V041 schema
+    (test_v055_live_pg_calibrated_replay_row_body's stub INSERT is a
+    sibling-test fixture, not under V055 SQL governance).
     """
     v055_sql = _strip_sql_comments(_read_sql(V055_PATH))
     v049_sql = _strip_sql_comments(_read_sql(V049_PATH))
 
-    # ── (1) parse V055 stub INSERT column list ──────────────────────────────
-    # 抓 INSERT INTO replay.experiments (...) VALUES 的 column list。
-    # Capture V055 stub INSERT to replay.experiments column list.
+    # ── (1) round 5 invariant: 0 stub INSERT INTO replay.experiments 殘留 ──
+    # round 5 invariant: 0 stub INSERT INTO replay.experiments residue
     stub_pattern = re.compile(
-        r"INSERT INTO replay\.experiments\s*\((.+?)\)\s*VALUES",
-        re.DOTALL,
+        r"INSERT\s+INTO\s+replay\.experiments\s*\(",
+        re.IGNORECASE,
     )
     stub_match = stub_pattern.search(v055_sql)
-    assert stub_match is not None, (
-        "V055 stub INSERT to replay.experiments not found; cross-validation "
-        "skipped impossible. Round 3 acceptance binding fail-loud."
+    assert stub_match is None, (
+        f"V055 round 5 design pivot violation: stub INSERT INTO "
+        f"replay.experiments must be removed (was at position "
+        f"{stub_match.start() if stub_match else None}). Round 5 drop "
+        f"4-tier smoke + stub INSERT together because PL/pgSQL DO block "
+        f"rejects explicit SAVEPOINT/ROLLBACK TO SAVEPOINT. Sibling "
+        f"test_v055_*_path covers 4-tier path semantics; 0 stub INSERT "
+        f"in V055 means phantom column risk is eliminated at the root."
     )
-    stub_columns_raw = stub_match.group(1)
-    # split by comma + strip whitespace + strip 行內 PG comment 殘餘 + lower-case 比對
-    stub_columns = {
-        col.strip().lower()
-        for col in stub_columns_raw.split(",")
-        if col.strip()
-    }
-    assert stub_columns, "V055 stub INSERT column list parsed empty (parse failure)"
 
-    # ── (2) parse V049 ADD COLUMN list (line 282-307) ───────────────────────
-    # 抓 ALTER TABLE replay.experiments ... ADD COLUMN IF NOT EXISTS <name> <type>
-    # 的 column 名 set。Match 18 個 ADD COLUMN 全部。
-    # Capture V049 ALTER TABLE replay.experiments ADD COLUMN IF NOT EXISTS
-    # <name> <type> column name set; matches all 18 ADD COLUMN entries.
+    # ── (2) actor_id phantom column risk 消失 (round 3 fix 仍是 historic guard) ──
+    # actor_id phantom column risk gone (round 3 fix remains as historic guard)
+    # Note: `actor_id` 字串可能仍出現在 V055 註解中 (round 3 fix doc 內
+    # 解釋 V045:199 replay.run_state.actor_id 與 replay.experiments 無關)，
+    # 但 0 actual INSERT statement 引用它於 replay.experiments context。
+    # `actor_id` may still appear in V055 commentary (round 3 fix doc
+    # explaining V045:199 replay.run_state.actor_id != replay.experiments)
+    # but 0 actual INSERT statement references it in the
+    # replay.experiments context.
+    insert_actor_id_pattern = re.compile(
+        r"INSERT\s+INTO\s+replay\.experiments[^;]*?actor_id",
+        re.IGNORECASE | re.DOTALL,
+    )
+    bad_match = insert_actor_id_pattern.search(v055_sql)
+    assert bad_match is None, (
+        "V055 round 3 fix (E2 C-3) regression: INSERT INTO replay.experiments "
+        "still references phantom `actor_id` column. After round 5 there "
+        "should be 0 INSERT INTO replay.experiments at all; this match "
+        "indicates the round 5 drop did not complete."
+    )
+
+    # ── (3) V049/V041 schema 證據仍可解析 (用於 sibling test 內部 stub 校驗) ──
+    # V049/V041 schema parse evidence retained for sibling-test internal
+    # stub validation (e.g., test_v055_live_pg_calibrated_replay_row_body)
     v049_add_col_pattern = re.compile(
         r"ADD COLUMN IF NOT EXISTS\s+(\w+)",
         re.IGNORECASE,
@@ -1015,89 +1112,37 @@ def test_v055_stub_columns_exist_in_v049() -> None:
         m.group(1).lower() for m in v049_add_col_pattern.finditer(v049_sql)
     }
     assert len(v049_add_columns) >= 18, (
-        f"V049 ADD COLUMN parse expected ≥18 columns, got {len(v049_add_columns)}; "
-        f"parse failure or V049 source drift. cols={sorted(v049_add_columns)}"
+        f"V049 ADD COLUMN parse expected ≥18 columns, got "
+        f"{len(v049_add_columns)}; parse failure or V049 source drift. "
+        f"cols={sorted(v049_add_columns)}"
     )
-
-    # ── (3) parse V041 base CREATE TABLE column list (line 81-86) ───────────
-    # V041 line 81-86: CREATE TABLE IF NOT EXISTS replay.experiments (
-    #   experiment_id TEXT PRIMARY KEY, half_life_days DOUBLE PRECISION,
-    #   embargo_days INTEGER, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    # );
-    # V041 line 81-86: CREATE TABLE IF NOT EXISTS replay.experiments lists
-    # 4 base columns: experiment_id (PK), half_life_days, embargo_days,
-    # created_at (NOT NULL DEFAULT NOW()).
     v041_base_columns = {
         "experiment_id",
         "half_life_days",
         "embargo_days",
         "created_at",
     }
-
-    # Schema 真實 column = V041 base ∪ V049 ADD COLUMN
     real_schema_columns = v041_base_columns | v049_add_columns
 
-    # ── (4) assert 每個 stub column 必 ∈ schema ─────────────────────────────
-    # Phantom column = stub_columns − real_schema_columns；應為 ∅。
-    # phantom_columns = stub_columns - real_schema_columns; expect empty set.
-    phantom_columns = stub_columns - real_schema_columns
-    assert not phantom_columns, (
-        f"V055 round 3 fix (E2 C-3): stub INSERT references phantom "
-        f"column(s) not in V049/V041 schema: {sorted(phantom_columns)}. "
-        f"V041 base = {sorted(v041_base_columns)}; V049 ADD COLUMN = "
-        f"{sorted(v049_add_columns)}. Linux deploy would fail with "
-        f"`column \"{sorted(phantom_columns)[0]}\" of relation "
-        f"\"experiments\" does not exist`. This is exactly the bug E2 "
-        f"round 2 caught (round 2 stub had `actor_id` which is a "
-        f"`replay.run_state` column V045:199, NOT `replay.experiments`)."
+    # actor_id 仍不在 replay.experiments schema (V049 真實 column 為 created_by)
+    # actor_id is still not in replay.experiments schema (V049 real
+    # column is created_by)
+    assert "actor_id" not in real_schema_columns, (
+        "V049/V041 schema parse contradicts round 3 fix evidence: "
+        "actor_id should NOT be in replay.experiments schema "
+        "(V049 line 284 真實 column 名為 created_by)."
+    )
+    assert "created_by" in real_schema_columns, (
+        "V049 schema missing expected created_by column (round 3 fix "
+        "evidence). Schema source drift."
     )
 
-    # ── (5) adversarial sanity: 確保 test 真的會 fail-loud ──────────────────
-    # 手 craft 一 fake column → assert phantom 偵測會 catch。此 inline check
-    # 防止未來 (4) 那條 assert 被誤改成永真而靜默失效。
-    # Adversarial sanity: inline check that a hand-crafted phantom column
-    # would actually be caught — protects against future accidental
-    # weakening of (4) assert (e.g., changing `not phantom_columns` to a
-    # tautological always-true predicate).
+    # ── (4) adversarial sanity: 確保 phantom-detection 仍會 fail-loud ──────
+    # adversarial sanity: phantom-detection still fails loud
     fake_phantom = "definitely_not_a_real_column_xyz_42"
     assert fake_phantom not in real_schema_columns, (
         f"Adversarial sanity invariant broken: real_schema_columns "
         f"unexpectedly contains {fake_phantom!r}. Test logic compromised."
-    )
-    fake_check = ({fake_phantom} | stub_columns) - real_schema_columns
-    assert fake_phantom in fake_check, (
-        "Adversarial sanity: phantom-detection logic does NOT catch a "
-        "hand-crafted phantom column; the (4) assert above is unreliable. "
-        "Fix the test before relying on it."
-    )
-
-    # ── (6) explicit positive: round 3 expected 6 column 全部 ∈ schema ──────
-    # Document the round 3 corrected stub INSERT column set for future
-    # readers — 失敗訊息會明確指出哪個 column missing。
-    # Document the round 3 corrected stub INSERT column set for future
-    # maintenance — failure message points out exactly which column missing.
-    expected_stub_cols_round3 = {
-        "experiment_id",
-        "status",
-        "created_at",
-        "half_life_days",
-        "embargo_days",
-        "runtime_environment",
-    }
-    missing_in_stub = expected_stub_cols_round3 - stub_columns
-    assert not missing_in_stub, (
-        f"V055 round 3 stub INSERT missing expected columns: "
-        f"{sorted(missing_in_stub)}. Expected 6-column subset = "
-        f"{sorted(expected_stub_cols_round3)}; actual stub = "
-        f"{sorted(stub_columns)}."
-    )
-    # Phantom guard: round 3 stub 不該寫到 round 2 phantom `actor_id`
-    # Phantom guard: round 3 stub must not write the round 2 phantom `actor_id`
-    assert "actor_id" not in stub_columns, (
-        "V055 round 3 fix (E2 C-3) NOT applied: stub still references "
-        "phantom `actor_id`. V049 line 284 actually adds `created_by` not "
-        "`actor_id`; `actor_id` is a `replay.run_state` column (V045:199), "
-        "unrelated to `replay.experiments`."
     )
 
 
@@ -1200,14 +1245,18 @@ def test_v055_live_pg_calibrated_replay_row_body() -> None:
             cur.execute("SAVEPOINT v055_pg_smoke")
             try:
                 # Round 2 fix (E2 M-2): stub 含 V049 conditional NOT NULL bypass
-                # via runtime_environment='mac_dev_smoke_test_only'
+                # via runtime_environment='mac_dev_smoke_test_only'.
+                # PM hotfix 2026-05-05 (E2 round 5 C-4): drop phantom column
+                # `actor_id` (V049 真實 column 是 `created_by` line 284；actor_id
+                # 屬 replay.run_state V045:199，不在 replay.experiments)；
+                # 同 V055 round 3 V055 SQL stub fix 模式（option A: 直接刪除）。
                 cur.execute(
                     """
                     INSERT INTO replay.experiments (
-                        experiment_id, actor_id, status, created_at,
+                        experiment_id, status, created_at,
                         half_life_days, embargo_days, runtime_environment
                     ) VALUES (
-                        %s, 'v055_live_smoke', 'created', now(),
+                        %s, 'created', now(),
                         14.0, 14, 'mac_dev_smoke_test_only'
                     )
                     ON CONFLICT (experiment_id) DO NOTHING

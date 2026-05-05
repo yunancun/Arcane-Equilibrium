@@ -1379,3 +1379,47 @@ E1 round 3 §14.7 點 1 push back: V049 真實 ADD COLUMN line 282-307 = **25 co
 21. **「>=N」test 邏輯 + doc label drift 處理** — Test 用 `>= N` 下界 assertion 是 forward-compat 設計（V049 ADD COLUMN 未來增加也不 break test）。當 `N` 寫 stale 值（本 round 18 vs 真 25），test 邏輯仍正確；但 doc label 應 update。**抽象**：審 multi-round fix，必區分「load-bearing 計數」（必驗精準）vs「doc label」（test 邏輯不依賴 → drift accepted as PM closure scope）。本 round 「18」是 doc label，「>=18」是 test 下界，兩者解耦 = E2 不退回。
 
 22. **Inline adversarial sanity vs 拆獨立 test 的 trade-off** — Round 3 NEW test 含「6-step phantom 偵測 + step (5) inline adversarial sanity 手 craft fake_phantom + step (6) explicit positive 6-col」三層 mixed pattern。E2 verdict = accept inline pattern not split。理由：(1) inline 與「test 自身契約 = phantom-detection logic 工作」高度耦合 (2) 拆獨立 test 增 file size 不增 audit value (3) main test fail = sanity test fail (有同步保證) — 拆分反 weakening (sanity test 被 deprecated 的風險)。**抽象**：design choice 不是越細越好；多層守 in 同 test 也是合理 audit pattern，當主邏輯與 sanity 同生命週期。
+
+---
+
+## 2026-05-05 REF-20 Sprint C R6-T0' V055 retrofit (round 5 design pivot review)
+
+### 場景
+
+E1 round 5 design pivot — Linux PG 16 deploy round 4 expected_string fix passed Guard A signature 但**新 fail at line 883 ROLLBACK TO SAVEPOINT**。PM 直驗 `psql -c "DO \$\$ BEGIN SAVEPOINT test_sp; END \$\$;"` 確認 PG 硬限制：PL/pgSQL DO block **不允** explicit `SAVEPOINT name` / `ROLLBACK TO SAVEPOINT name` (`unsupported transaction command in PL/pgSQL`)。E1 採 design pivot — drop Guard A 4-tier post-INSERT smoke entirely from V055 migration；coverage 移到 Python sibling test 4 path case under OPENCLAW_TEST_LIVE_PG=1。Guard A 仍保 3 條 enforce (function existence + 19-arg pronargs + identity_arguments byte-equal V036)。
+
+### Round 5 review verdict
+
+**RETURN-TO-E1 round 6** — 1 NEW CRITICAL finding C-4: sibling test `test_v055_live_pg_calibrated_replay_row_body` line 1252 stub INSERT 仍含 round 2-3 已知 phantom column `actor_id` (V049 真實 column 名為 `created_by`)。Round 3 fix C-3 在 V055 SQL 已 land 但 sibling test 的 stub INSERT line 1244-1261 從 round 2 加入後從未 audit/cross-validate against V049 schema。Round 5 design pivot 把 4-tier coverage 遷至 sibling test，phantom column risk 從「migration deploy 端」**遷至**「E4 regression 端」未 catch + fix。Linux PG 16 跑 OPENCLAW_TEST_LIVE_PG=1 必撞 PG `column "actor_id" of relation "experiments" does not exist`。
+
+同時 dispatch §3 binding 「4 case INSERT + SELECT + 4 column verify under OPENCLAW_TEST_LIVE_PG=1」實際 = 2 live_pg case (real_outcome live_pg clean + calibrated_replay live_pg broken)，0 synthetic_replay live_pg + 0 counterfactual_replay live_pg。round 5 §16.4 「Python sibling test 4 path 已等價覆蓋」claim 名義成立但實際被 phantom column carry-over 蝕空。
+
+E1 round 6 必修：(1) sibling test line 1252 stub INSERT actor_id → created_by (對齊 V049:284 真實 column name；同 round 3 V055 SQL 內 stub fix 修法) + (2) 補 synthetic_replay live_pg case + counterfactual_replay live_pg case 完整兌現 round 5 §16.4 coverage migration claim。
+
+### Round 1+2+3+4 6 fix re-verify (post round 5)
+
+| Fix | Round 5 status | 證據 |
+|---|---|---|
+| C-1 (round 2) expires_at 不寫 mlde_shadow_recommendations | ✅ VERIFIED | INSERT body line 422-471 仍 3 column；0 expires_at column 字面 |
+| C-2 (round 2) identity_arguments + strict equality | ✅ VERIFIED | line 597-609 strict equality 仍在 |
+| C-3 (round 3) no phantom column actor_id (V055 SQL) | ✅ VERIFIED IN V055 SQL ❌ REGRESSED IN sibling test (NEW C-4) | V055 SQL 0 actor_id；sibling test 1252 actor_id alive |
+| H-1 (round 2) no silent skip | ✅ VERIFIED (auto-extended via drop smoke) | 0 EXCEPTION block |
+| M-1 (round 2) sign-off mock-only doc | ✅ VERIFIED | E1 round 5 §16.5 對齊 mock-only |
+| M-2 (round 2) V049 NOT NULL set documented | ✅ VERIFIED | 25 ADD COLUMN 全 NULLABLE；test_v055_v049_source_not_null_invariant 仍 PASS |
+| Round 4 hotfix expected_string with-arg-names | ✅ VERIFIED | line 543-551 with-arg-names 保留 |
+
+### LOC 變動 + governance check
+
+- V055 SQL 913 → **715** (-198；E1 預估 -300 但實際因 design pivot bilingual section 70 LOC + Operator note 雙語 12 LOC 等補充必要文檔)
+- Python test 1294 → **1316** (E2 wc 真實 = 1316；E1 §16.6 標 1265 是 LOC 計算誤差 +51 LOC，不影響 round 5 design pivot semantic correctness 但 sign-off LOC 數應準)
+- 全 < §九 2000 cap (§九 governance 2026-05-05 raise 1500→2000 已 OpenClaw 既載)
+
+### E2 教訓追加（lesson 23-26）
+
+23. **Design pivot 後必 audit coverage migration target 自身的 stub 是否乾淨** — Round 5 把 in-migration smoke drop + 遷至 Python sibling test 是合理 fix（解 PL/pgSQL constraint），但 design pivot 後 sibling test 從「Mac dev 取代 doc」升級為「round 5 後唯一 calibrated_replay 真 PG verification path」— sibling test 內任何 stub INSERT 必同步 cross-validate against target schema (V049)，否則 phantom column risk 從「migration deploy 端」遷至「E4 regression 端」未 catch。**抽象**：coverage migration 不是只移 file，是 audit binding 同移；任何 fix 在 file A 真實 land 後，file B 內同樣 pattern 的 sibling carry-over 必 cross-check（C-3 在 V055 SQL 修，但同 phantom 在 sibling test 仍 alive 是 round 5 N=1 真實 case study）。E2 round N 對 design pivot 必跑 grep cross-validation 對所有 sibling test 內的同類 stub INSERT。
+
+24. **PG runtime 真實行為 vs PG docs claim drift 是 multi-round 累積成本** — Round 1+2 expected `pg_get_function_arguments` substring (含 DEFAULT clause noise PG 13+) + Round 2 改用 `pg_get_function_identity_arguments` 假設 stripped-down output 純 type list (per PG docs claim) → Round 4 hotfix Linux deploy 才 catch PG 16 真 output 含 arg names → Round 5 在 round 4 fix 後**新撞** PL/pgSQL DO block 拒 explicit SAVEPOINT/ROLLBACK TO SAVEPOINT。Round 1-4 累積 4 輪 fix 都漏看「PL/pgSQL transaction control 限制」這條 PG fundamental constraint。**抽象**：審 SQL migration 涉 PG 內建 reflection / transaction-control 函數時，E2 必對抗反問「你查過 PG empirical 行為嗎？docs claim 跟 PG runtime 一致嗎？」+ 推 P2 ticket 加 docker pg:16 + Linux PG 真 dry-run gate 至 acceptance binding；不能只信 Mac static-parse。Round 5 N=1 confirmed lesson — 多 round Linux deploy 才暴露的「Mac static-parse PASS but Linux runtime fail」是系統性盲點，需 P2 ticket（per E1 §16.12 P2-V055-FOLLOW-UP-1+2+3+4）做 process gate 不依賴 individual round catch。
+
+25. **Coverage migration 「等價覆蓋」claim 必驗實際數字** — E1 round 5 §16.4 表格 4 path test「等價覆蓋」名義成立但實際是 mock-only (4 hermetic case 走 _mock_verify_and_insert + _row_capture dict)；真 PG live coverage 只 2 case (real_outcome live_pg + calibrated_replay live_pg)，0 synthetic_replay live_pg + 0 counterfactual_replay live_pg。dispatch §3 binding「4 case INSERT + SELECT + 4 column verify under OPENCLAW_TEST_LIVE_PG=1」未完整達成。**抽象**：coverage migration 後必對抗反問「dispatch binding 的 N 個是 mock 算還是真 PG 算？」「OPENCLAW_TEST_LIVE_PG=1 跑時哪些 case 真實 INSERT vs 哪些 case skipped」**真實 N**對齊 binding **聲明 N**才能 PASS。E1 round 5 §16.4 聲明 4 path「等價覆蓋」不對齊 dispatch §3 真 PG 4-case binding，需 round 6 補完。
+
+26. **LOC mismatch 處理：E1 sign-off 數字 vs E2 wc 真實** — Round 5 E1 §16.6 LOC 標 Python test 1265 但 E2 自跑 wc -l 真實 = 1316（差 +51）。E2 round 5 verdict = 不單獨 RETURN（LOC 文字 fix only，不影響 V055 SQL/test 邏輯，1316 仍 < §九 2000 cap）。但 **sign-off LOC 數字必準**，PM closure 階段建議統一訂正。**抽象**：審 sign-off report，跑 wc -l real-time 對驗 E1 標稱 LOC；發現 mismatch 必 footnote（不單獨 RETURN，但 audit trail 留下）；E2 不放過任何「Sign-off 自描述 vs 真實檔案」的小 drift。Round 3 V049 ADD COLUMN 18 vs 25 drift 是 same pattern N=1，round 5 LOC 1265 vs 1316 是 N=2。
