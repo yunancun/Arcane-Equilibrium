@@ -718,6 +718,60 @@ function ocPaperSubtabInit() {
     return {};
   }
 
+  function _datetimeLocalValue(dateObj) {
+    function pad(n) { return String(n).padStart(2, "0"); }
+    return dateObj.getFullYear()
+      + "-" + pad(dateObj.getMonth() + 1)
+      + "-" + pad(dateObj.getDate())
+      + "T" + pad(dateObj.getHours())
+      + ":" + pad(dateObj.getMinutes());
+  }
+
+  function _quickDefaultWindow() {
+    const end = new Date();
+    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    return {
+      start: _datetimeLocalValue(start),
+      end: _datetimeLocalValue(end)
+    };
+  }
+
+  function _jsonOrNull(value) {
+    return value == null ? null : value;
+  }
+
+  function _renderReplaySummary(data, payload, result, fills) {
+    const mount = document.getElementById("oc-replay-result-summary");
+    if (!mount) return;
+    data = data || {};
+    payload = payload || {};
+    result = result || {};
+    fills = Array.isArray(fills) ? fills : [];
+    const pnl = result.pnl_summary || {};
+    const statusObj = result.status || {};
+    const status = statusObj.kind || statusObj.label || (data.run && data.run.status) || "unknown";
+    const net = pnl.net_pnl;
+    const ending = pnl.ending_balance;
+    const starting = pnl.starting_balance;
+    const decisions = Array.isArray(result.decision_traces) ? result.decision_traces.length : 0;
+    const fmt = function (v, digits) {
+      return typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits || 2) : "--";
+    };
+    mount.innerHTML = ''
+      + '<div class="oc-replay-summary-grid">'
+      + _metricCellHtml("oc-replay-summary-status", "Run Status / 執行狀態", status,
+        status === "completed" ? "oc-cell-ok" : "oc-cell-neutral", "Replay report status")
+      + _metricCellHtml("oc-replay-summary-pnl", "Net PnL / 淨損益", fmt(net, 4),
+        typeof net === "number" && net >= 0 ? "oc-cell-ok" : "oc-cell-warn", "Fee-aware replay report PnL")
+      + _metricCellHtml("oc-replay-summary-fills", "Fills / 成交", String(fills.length),
+        fills.length > 0 ? "oc-cell-ok" : "oc-cell-neutral", "Persisted simulated fills")
+      + _metricCellHtml("oc-replay-summary-decisions", "Decisions / 決策", String(decisions),
+        decisions > 0 ? "oc-cell-ok" : "oc-cell-warn", "Strategy decision trace entries")
+      + _metricCellHtml("oc-replay-summary-balance", "Balance / 餘額",
+        fmt(starting, 2) + " → " + fmt(ending, 2), "oc-cell-neutral", "Starting to ending balance")
+      + '</div>';
+  }
+
   function _renderReportMetrics(data) {
     data = data || {};
     const payload = _extractFirstReportPayload(data);
@@ -755,6 +809,7 @@ function ocPaperSubtabInit() {
       el.innerHTML = '<div class="oc-replay-cell-label">' + ocEsc(c[1]) + '</div>'
         + '<div class="oc-replay-cell-val">' + ocEsc(c[2]) + '</div>';
     });
+    _renderReplaySummary(data, payload, result, fills);
   }
 
   /**
@@ -802,7 +857,45 @@ function ocPaperSubtabInit() {
     );
     cellsHtml += '</div>';
 
-    const inputHtml = '<div class="oc-replay-workflow-grid">'
+    const defaults = _quickDefaultWindow();
+    const quickHtml = '<div class="oc-replay-modebar" role="tablist" aria-label="Replay mode">'
+      + '<button type="button" class="oc-btn oc-btn-primary" id="oc-replay-mode-quick" data-replay-view="quick">Quick Replay / 一鍵回測</button>'
+      + '<button type="button" class="oc-btn" id="oc-replay-mode-advanced" data-replay-view="advanced">Advanced / 進階</button>'
+      + '</div>'
+      + '<div id="oc-replay-quick-panel" class="oc-replay-panel active">'
+      + '<div class="oc-replay-quick-grid">'
+      + '<label class="oc-replay-field">Symbol<input id="oc-replay-quick-symbol" value="BTCUSDT" autocomplete="off" /></label>'
+      + '<label class="oc-replay-field">Strategy<select id="oc-replay-quick-strategy">'
+      + '<option value="grid_trading">grid_trading</option>'
+      + '<option value="ma_crossover">ma_crossover</option>'
+      + '<option value="bb_breakout">bb_breakout</option>'
+      + '<option value="bb_reversion">bb_reversion</option>'
+      + '<option value="funding_arb">funding_arb</option>'
+      + '</select></label>'
+      + '<label class="oc-replay-field">Engine<select id="oc-replay-quick-engine">'
+      + '<option value="demo">Demo current config</option>'
+      + '<option value="live">Live current config</option>'
+      + '</select></label>'
+      + '<label class="oc-replay-field">Timeframe<select id="oc-replay-quick-timeframe">'
+      + '<option value="1m">1m</option><option value="3m">3m</option>'
+      + '<option value="5m">5m</option><option value="15m">15m</option>'
+      + '<option value="1h">1h</option><option value="4h">4h</option>'
+      + '<option value="1d">1d</option></select></label>'
+      + '<label class="oc-replay-field">Window Start<input id="oc-replay-quick-window-start" type="datetime-local" value="' + ocEsc(defaults.start) + '" /></label>'
+      + '<label class="oc-replay-field">Window End<input id="oc-replay-quick-window-end" type="datetime-local" value="' + ocEsc(defaults.end) + '" /></label>'
+      + '<label class="oc-replay-field">Starting Balance<input id="oc-replay-quick-starting-balance" type="number" min="1" step="100" value="10000" /></label>'
+      + '<label class="oc-replay-field">Category<select id="oc-replay-quick-category">'
+      + '<option value="linear">linear</option><option value="spot">spot</option>'
+      + '<option value="inverse">inverse</option></select></label>'
+      + '</div>'
+      + '<div class="oc-replay-actions">'
+      + '<button type="button" class="oc-btn oc-btn-primary oc-replay-primary-run" id="oc-replay-quick-run-btn">Run Replay / 開始回測</button>'
+      + '<button type="button" class="oc-btn" id="oc-replay-quick-refresh-btn">Refresh / 刷新</button>'
+      + '</div>'
+      + '</div>';
+
+    const advancedHtml = '<div id="oc-replay-advanced-panel" class="oc-replay-panel">'
+      + '<div class="oc-replay-workflow-grid">'
       + '<label class="oc-replay-field">Symbol<input id="oc-replay-symbol" value="BTCUSDT" autocomplete="off" /></label>'
       + '<label class="oc-replay-field">Strategy<input id="oc-replay-strategy" value="grid_trading" autocomplete="off" /></label>'
       + '<label class="oc-replay-field">Timeframe<input id="oc-replay-timeframe" value="1m" autocomplete="off" /></label>'
@@ -824,7 +917,7 @@ function ocPaperSubtabInit() {
       + '<button type="button" class="oc-btn" id="oc-replay-run-btn">Run / 執行</button>'
       + '<button type="button" class="oc-btn" id="oc-replay-finalize-btn">Finalize / 完成</button>'
       + '<button type="button" class="oc-btn" id="oc-replay-load-btn">Load Report / 載入報告</button>'
-      + '<span id="oc-replay-load-status" class="oc-replay-load-status"></span>'
+      + '</div>'
       + '</div>';
 
     const headerHtml = '<div class="oc-replay-ready-header">'
@@ -839,22 +932,209 @@ function ocPaperSubtabInit() {
 
     mount.innerHTML = '<div class="oc-replay-ready-card" role="region" '
       + 'aria-label="Replay backend ready / Replay 後端就緒">'
-      + headerHtml + cellsHtml + inputHtml + '</div>';
+      + headerHtml + cellsHtml + quickHtml + advancedHtml
+      + '<div id="oc-replay-result-summary"></div>'
+      + '<div id="oc-replay-load-status" class="oc-replay-load-status"></div>'
+      + '</div>';
 
     // 注入 CSS（idempotent guard，避免重渲染重複加 style 節點）
     // Inject CSS once (idempotent guard against re-render dup)
     _injectReplayReadyCss();
 
     const runAllBtn = document.getElementById("oc-replay-run-all-btn");
+    const quickRunBtn = document.getElementById("oc-replay-quick-run-btn");
+    const quickRefreshBtn = document.getElementById("oc-replay-quick-refresh-btn");
     const registerBtn = document.getElementById("oc-replay-register-btn");
     const runBtn = document.getElementById("oc-replay-run-btn");
     const finalizeBtn = document.getElementById("oc-replay-finalize-btn");
     const loadBtn = document.getElementById("oc-replay-load-btn");
+    const modeQuickBtn = document.getElementById("oc-replay-mode-quick");
+    const modeAdvancedBtn = document.getElementById("oc-replay-mode-advanced");
+    if (quickRunBtn) quickRunBtn.addEventListener("click", _onQuickReplayClick);
+    if (quickRefreshBtn) quickRefreshBtn.addEventListener("click", onTabActivate);
     if (runAllBtn) runAllBtn.addEventListener("click", _onRunBacktestClick);
     if (registerBtn) registerBtn.addEventListener("click", _onRegisterClick);
     if (runBtn) runBtn.addEventListener("click", _onRunClick);
     if (finalizeBtn) finalizeBtn.addEventListener("click", _onFinalizeClick);
     if (loadBtn) loadBtn.addEventListener("click", _onLoadReportClick);
+    if (modeQuickBtn) modeQuickBtn.addEventListener("click", function () { _setReplayView("quick"); });
+    if (modeAdvancedBtn) modeAdvancedBtn.addEventListener("click", function () { _setReplayView("advanced"); });
+  }
+
+  function _setReplayView(view) {
+    view = view === "advanced" ? "advanced" : "quick";
+    const quickPanel = document.getElementById("oc-replay-quick-panel");
+    const advancedPanel = document.getElementById("oc-replay-advanced-panel");
+    const quickBtn = document.getElementById("oc-replay-mode-quick");
+    const advancedBtn = document.getElementById("oc-replay-mode-advanced");
+    if (quickPanel) quickPanel.classList.toggle("active", view === "quick");
+    if (advancedPanel) advancedPanel.classList.toggle("active", view === "advanced");
+    if (quickBtn) quickBtn.className = "oc-btn" + (view === "quick" ? " oc-btn-primary" : "");
+    if (advancedBtn) advancedBtn.className = "oc-btn" + (view === "advanced" ? " oc-btn-primary" : "");
+  }
+
+  function _requiredDatetimeIso(id, label) {
+    const el = document.getElementById(id);
+    const raw = el ? (el.value || "").trim() : "";
+    if (!raw) throw new Error(label + " required");
+    const d = new Date(raw);
+    if (!Number.isFinite(d.getTime())) throw new Error(label + " invalid");
+    return d.toISOString();
+  }
+
+  function _numberFromInput(id, fallback) {
+    const el = document.getElementById(id);
+    const value = el ? Number(el.value) : NaN;
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  async function _registerReplayBody(body) {
+    _setReplayStatus("Registering...", "");
+    const resp = await _fetchReplayJson("/api/v1/replay/experiments/register", {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = resp.data || {};
+    const expId = data.experiment_id || "";
+    const expEl = document.getElementById("oc-replay-experiment-id");
+    if (expEl) expEl.value = expId;
+    _setReplayStatus("registered experiment_id=" + expId, "oc-cell-ok");
+    return expId;
+  }
+
+  async function _runReplayExperiment(expId) {
+    if (!expId) {
+      _setReplayStatus("請先提供 experiment_id / experiment_id required", "oc-cell-warn");
+      return "";
+    }
+    _setReplayStatus("Running...", "");
+    const resp = await _fetchReplayJson("/api/v1/replay/run", {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        experiment_id: expId,
+        idempotency_key: "replay-run-" + Date.now()
+      })
+    });
+    const data = resp.data || {};
+    const runId = data.run_id || data.id || "";
+    const runEl = document.getElementById("oc-replay-run-id");
+    if (runEl) runEl.value = runId;
+    _setReplayStatus("run.status=" + (data.status || "started") + " run_id=" + runId, "oc-cell-ok");
+    return runId;
+  }
+
+  async function _finalizeReplayRun(runId) {
+    if (!runId) {
+      _setReplayStatus("請先提供 run_id / run_id required", "oc-cell-warn");
+      return null;
+    }
+    _setReplayStatus("Finalizing...", "");
+    const resp = await _fetchReplayJson(
+      "/api/v1/replay/run/" + encodeURIComponent(runId) + "/finalize",
+      { method: "POST", headers: { "Accept": "application/json" } }
+    );
+    const data = resp.data || {};
+    _setReplayStatus("finalized fills=" + (data.fills_inserted || 0)
+      + " confidence=" + (data.execution_confidence || "none"), "oc-cell-ok");
+    const expId = data.experiment_id;
+    if (expId) {
+      const expEl = document.getElementById("oc-replay-experiment-id");
+      if (expEl) expEl.value = expId;
+    }
+    return data;
+  }
+
+  async function _loadReplayReport(expId) {
+    if (!expId) {
+      _setReplayStatus("請輸入 experiment_id / Please enter experiment_id", "oc-cell-warn");
+      return null;
+    }
+    _setReplayStatus("Loading...", "");
+    const body = await _fetchReplayJson(
+      "/api/v1/replay/report/" + encodeURIComponent(expId)
+    );
+    _lastReportData = body;
+    const data = (body && body.data) || {};
+    const runStatus = (data.run && data.run.status) || "unknown";
+    const artifactCount = data.artifact_count != null ? data.artifact_count : 0;
+    _renderReportMetrics(data);
+    _setReplayStatus("run.status=" + runStatus + " artifacts=" + artifactCount,
+      "oc-cell-ok");
+    return data;
+  }
+
+  function _buildQuickRegisterBody(prepared) {
+    const data = prepared || {};
+    const manifestJson = {
+      symbol: data.symbol,
+      strategy: data.strategy,
+      timeframe: data.timeframe,
+      data_tier: data.data_tier || "S2",
+      fixture_uri: data.fixture_uri,
+      starting_balance: data.starting_balance || 10000,
+      replay_source_engine: data.engine || "demo",
+      replay_source: "quick_s2_bybit_public"
+    };
+    return {
+      symbol: data.symbol,
+      strategy: data.strategy,
+      timeframe: data.timeframe,
+      data_tier: data.data_tier || "S2",
+      data_window_start: data.data_window_start,
+      data_window_end: data.data_window_end,
+      strategy_config_sha256: "0".repeat(64),
+      risk_config_sha256: "1".repeat(64),
+      half_life_days: 7.0,
+      embargo_days: 14.0,
+      manifest_jsonb: manifestJson,
+      strategy_params: _jsonOrNull(data.strategy_params),
+      risk_overrides: _jsonOrNull(data.risk_overrides),
+      idempotency_key: "replay-quick-register-" + Date.now()
+    };
+  }
+
+  async function _onQuickReplayClick() {
+    const btn = document.getElementById("oc-replay-quick-run-btn");
+    if (btn) btn.disabled = true;
+    try {
+      const startIso = _requiredDatetimeIso("oc-replay-quick-window-start", "Window Start");
+      const endIso = _requiredDatetimeIso("oc-replay-quick-window-end", "Window End");
+      if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+        throw new Error("Window End must be later than Window Start");
+      }
+      const body = {
+        symbol: (document.getElementById("oc-replay-quick-symbol").value || "BTCUSDT").trim(),
+        strategy: document.getElementById("oc-replay-quick-strategy").value || "grid_trading",
+        engine: document.getElementById("oc-replay-quick-engine").value || "demo",
+        timeframe: document.getElementById("oc-replay-quick-timeframe").value || "1m",
+        category: document.getElementById("oc-replay-quick-category").value || "linear",
+        data_window_start: startIso,
+        data_window_end: endIso,
+        starting_balance: _numberFromInput("oc-replay-quick-starting-balance", 10000),
+        use_current_config: true
+      };
+      _setReplayStatus("Preparing S2 market fixture + current config...", "");
+      const preparedResp = await _fetchReplayJson("/api/v1/replay/quick/prepare", {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const prepared = preparedResp.data || {};
+      _setReplayStatus("Prepared " + (prepared.event_count || 0)
+        + " bars; Register → Run → Finalize...", "oc-cell-ok");
+      const expId = await _registerReplayBody(_buildQuickRegisterBody(prepared));
+      if (!expId) return;
+      const runId = await _runReplayExperiment(expId);
+      if (!runId) return;
+      const finalized = await _finalizeReplayRun(runId);
+      await _loadReplayReport((finalized && finalized.experiment_id) || expId);
+    } catch (e) {
+      _setReplayStatus("quick replay failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function _onRegisterClick() {
@@ -888,7 +1168,7 @@ function ocPaperSubtabInit() {
         strategy_config_sha256: "0".repeat(64),
         risk_config_sha256: "1".repeat(64),
         half_life_days: 7.0,
-        embargo_days: 1.0,
+        embargo_days: 14.0,
         manifest_jsonb: manifestJson,
         strategy_params: _parseJsonControl("oc-replay-strategy-params", null),
         risk_overrides: _parseJsonControl("oc-replay-risk-overrides", null),
@@ -1043,7 +1323,7 @@ function ocPaperSubtabInit() {
       + 'border-radius:6px;padding:10px 12px;min-height:54px;cursor:help}'
       + '.oc-replay-cell:focus{outline:2px solid var(--accent);outline-offset:2px}'
       + '.oc-replay-cell-label{font-size:10px;color:var(--text-dim);'
-      + 'text-transform:uppercase;letter-spacing:0.4px}'
+      + 'text-transform:uppercase;letter-spacing:0}'
       + '.oc-replay-cell-val{font-size:13px;color:var(--text);font-weight:600;'
       + 'margin-top:4px}'
       + '.oc-replay-cell.oc-cell-warn{border-color:rgba(248,81,73,0.5);'
@@ -1052,6 +1332,15 @@ function ocPaperSubtabInit() {
       + '.oc-replay-cell.oc-cell-ok{border-color:rgba(63,185,80,0.5);'
       + 'background:rgba(63,185,80,0.06)}'
       + '.oc-replay-cell.oc-cell-ok .oc-replay-cell-val{color:var(--green)}'
+      + '.oc-replay-modebar{display:flex;gap:8px;margin:6px 0 10px}'
+      + '.oc-replay-panel{display:none}'
+      + '.oc-replay-panel.active{display:block}'
+      + '.oc-replay-quick-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));'
+      + 'gap:8px;padding:12px;background:rgba(13,17,23,0.46);'
+      + 'border:1px solid rgba(56,139,253,0.22);border-radius:6px}'
+      + '.oc-replay-primary-run{min-width:180px}'
+      + '.oc-replay-summary-grid{display:grid;gap:8px;margin-top:12px;'
+      + 'grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}'
       + '.oc-replay-workflow-grid{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));'
       + 'gap:8px;padding:10px 12px;background:rgba(13,17,23,0.4);'
       + 'border:1px dashed var(--border);border-radius:6px}'
@@ -1076,12 +1365,13 @@ function ocPaperSubtabInit() {
       + 'flex-basis:100%;line-height:1.5}'
       + '.oc-replay-load-status.oc-cell-warn{color:var(--red)}'
       + '.oc-replay-load-status.oc-cell-ok{color:var(--green)}'
-      + '@media (max-width:900px){.oc-replay-workflow-grid{grid-template-columns:repeat(2,minmax(0,1fr))}'
+      + '@media (max-width:900px){.oc-replay-workflow-grid,.oc-replay-quick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}'
       + '.oc-replay-json{grid-column:span 2}}'
       + '@media (max-width:700px){.oc-replay-cells-grid{'
       + 'grid-template-columns:1fr 1fr}.oc-replay-cell{min-height:60px;'
       + 'padding:12px 14px}.oc-replay-load-input{min-width:0;width:100%}'
-      + '.oc-replay-workflow-grid{grid-template-columns:1fr}.oc-replay-json{grid-column:span 1}}';
+      + '.oc-replay-workflow-grid,.oc-replay-quick-grid{grid-template-columns:1fr}'
+      + '.oc-replay-json{grid-column:span 1}.oc-replay-primary-run{min-width:0;width:100%}}';
     document.head.appendChild(s);
   }
 
