@@ -226,3 +226,46 @@ console.html: 579→586 (+7) / tab-learning.html: 502→491 (-11 净；移除 10
 
 ### tab-paper.html 829→847 (+18 LOC) — Wave 4 P1-U3 + SEV-2 #1 同 commit retrofit
 size 详细：(a) U3 删除 = `.order-form` CSS 4 行 + `<details>` 内 12 行 form + `explain-order` ocExplain 4 行 + 3 fns 14 行 + cancel button render 1 行 = -35 行；(b) U3 加入 = retirement comments 7 行 + `<details>` placeholder body 16 行 + colspan/thead 同步 0 行 (replace) = +23 行；(c) SEV-2 #1 加入 = `@media` block + bilingual comments = +18 行；(d) order-form CSS 注释保留 1 行 + 其他 retire comments = +12 行。净 +18。distance to 1500 cap = 653 行 buffer，仍充足。**规律**：retire 操作不必然净减少 LOC — 替换 disabled-state body / 加 retire 注释 / 同 commit 含 SEV-2 retrofit 都会拉回；但替换 + 注释 buyback 比保留 dead code 长期 maintenance 友好。
+
+## REF-20 Sprint B1 R4 — Paper Replay Lab UI Enablement (2026-05-05)
+
+### 任務範圍：4 task (R4-T1/T2/T3/T4)，純 frontend，0 backend 改動
+- **R4-T1**：tab-paper.html replay 按鈕移除靜態 `aria-disabled="true"` / `data-disabled="true"` (~10 LOC)
+- **R4-T2**：app-paper.js 新加 `OpenClawReplaySubtab` namespace + readiness probe + 5-state machine + 30s 週期輪詢 (~410 LOC)
+- **R4-T3**：app-paper.js renderReadyState 4 cell + 載入 experiment_id 按鈕 + CSS injection helper (~120 LOC)
+- **R4-T4**：tests/static/ 新加 1 browser HTML mock-fetch fixture + 1 pytest sibling (~860 LOC)
+
+LOC delta：tab-paper.html 909→928 (+19) / app-paper.js 447→956 (+509) / tests/static/ 0→862 新加。
+
+### 設計決定：Sprint A baseline 4 cell 視覺合約 — execution_confidence='none' 是 anti-cognitive-fraud SENTINEL
+PA brief §3 R4-T3 + CLAUDE.md §九 已登記：`evidence_source_tier='synthetic_replay'` 是 Sprint A 唯一上線 tier，**不可作 ML training data**。所以 4 baseline cell 必須：
+  - `execution_confidence`: 「無 / NONE」紅外框 + ⚠ 警示
+  - `data_tier`: 「S3（合成 / Synthetic）」中性
+  - `fee_model`: 「尚未校準 / NOT CALIBRATED」紅外框
+  - `calibration_status`: 「PENDING R6」紅外框
+即使後端未來在 `/replay/report/{id}` envelope 加欄位，前端 baseline 仍維持 — 待 Sprint C R6 fee calibration ship 才升級為 'CALIBRATED' / 'LOW' / 'MEDIUM' tier。**規律**：anti-cognitive-fraud baseline UX 必獨立於 backend 動態欄位；backend 沒回的欄位前端 must NOT silently 升級為「樂觀」標籤。
+
+### 5 態狀態機 + last-active=replay 必先 probe（禁直接 active）
+PA brief §3 R4-T2 invariant：「即使 last-active=replay localStorage，下次 load 仍須先 probe；禁直接 active without /health probe」。實作做法 = `ocPaperSubtabShow(name)` 對 `name === 'replay'` 觸發 `OpenClawReplaySubtab.onTabActivate()`，後者先 fetch `/api/v1/replay/health` → 解析 `wiring_status` → `ready` render ready / `degraded`+`binary_missing` render disabled card via U8 helper。
+**規律**：localStorage persistence + 動態 backend gating 共存時，persistence 是「讀回 last name」，gating 永遠在 render 階段做（不在 read 階段短路）；persistence 不可承擔 readiness assertion 責任。
+
+### 30s 週期輪詢 deactivate 必 clearInterval（iframe 內背景燒 timer 反模式）
+console.html iframe 內 setInterval 在 user 切走 tab 時不卸載；不 clear 會 30s 燒 fetch 一輩子。`onTabDeactivate` 必 `clearInterval(_pollIntervalId)` + `_pollIntervalId = null`。同時 `startPolling` 內 `if (_pollIntervalId !== null) return` 防重複註冊。test fixture `case_deactivate.polling_cleared_post` 直接讀 `_isPolling()` 驗證。
+**規律**：iframe-based GUI 任何 setInterval 必有對應 onDeactivate clearInterval；不 clear = 30s 燒一輩子；test fixture 必有「pre/post deactivate polling state」斷言。
+
+### Backend endpoint URL 不返 4 cell 數據 — fallback 到 baseline + 仍呼 endpoint 確認 health
+`/api/v1/replay/report/{id}` 當前 schema 只回 `experiment_id / manifest_id / run / artifacts / wiring_status`，**不**返 `data_tier / evidence_source_tier / fee_model / execution_confidence`。R4-T3 設計 = 載入按鈕 fetch endpoint → 顯示 `run.status` + `artifact_count` + 「evidence_source_tier=synthetic_replay (Sprint A baseline)」status 文字；4 cell 內容仍維持 baseline（不 silent 升級）。**規律**：當後端 endpoint schema 還沒實作 GUI 需要的欄位時，**呼 endpoint 當 health probe + 顯示 baseline** 比「假裝有真實數據」乾淨；user 看到 status 文字明確知道「現在是 Sprint A baseline」。
+
+### test fixture 沿用 `test_agent_tracker_contract.html` 純瀏覽器 mock-fetch pattern（避免 push back PM）
+PA brief §R4-T4 寫「~150 LOC pytest 或 playwright」。專案無 jsdom / vitest / playwright 框架；現有 frontend test fixture 唯一是 `test_agent_tracker_contract.html`（純瀏覽器 mock-fetch + record/assertContains 手寫斷言）。我選用同 pattern 加 1 browser HTML test（423 行，6 case 覆蓋 ready/degraded/binary_missing/fetch_failed/deactivate/probe schema）+ 1 pytest sibling（439 行，28 個 structural assertion，CI 可跑無 browser 依賴）。**規律**：當既有 codebase 已有「最低線交付」test pattern 時，沿用比 push back PM 改更高層 test 框架快；但 pytest sibling 必加（確保結構 invariants 進 CI grep 防線，browser 端只是 runtime 視覺驗證）。
+
+### Mac dev workflow：scp 同步 + ssh 跑 pytest，無 git commit（PM 後續審完才 commit）
+brief 明示「禁止 commit」。Mac CC IMPL 結束後：
+  1. `scp` 4 個檔案到 Linux trade-core 對應路徑（不過 git）
+  2. `ssh trade-core "python3 -m pytest ..."` 跑新 test
+  3. 同時 git status 確認 Mac local 還是 modified/untracked 狀態，不 git add
+這流程繞開 multi-session race（隔壁 sub-agent 可能在 main branch 推他自己的 R0-T0 work，不應被 R4 frontend 改動覆蓋）。**規律**：跨 sub-agent 並行 IMPL 期 + PM 規定 not-yet-commit 時，scp 跑驗證比 commit-then-revert 安全；commit 留給 PM 統合 sign-off。
+
+### 28/28 pytest PASS + 169/169 sibling regression unchanged（3 pre-existing fails 不歸 R4）
+新加 28 個 R4 test 全 PASS（覆蓋 R4-T1/T2/T3/T4 + Sprint A invariants + 跨平台 sanity）。sibling regression 169 PASS / 3 FAIL — 3 FAIL 是 Linux HEAD `6e39c51d` 上 `test_replay_routes_auth.py::test_authenticated_*_post_run` 系列（POST /run active_run cap 邏輯），與我 frontend 改動 0 重疊。透過 `git stash --include-untracked` + 重跑驗證 3 fail 在我改動前已存在 → 不歸 R4 責任。
+**規律**：sibling regression 報出 FAIL 必先「stash --include-untracked + 重跑」確認是否 pre-existing；只有 「stash 後 PASS / unstash 後 FAIL」才是真退化；同 stash 兩邊都 fail 屬於 pre-existing baseline，IMPL 報告必明文標出避免 reviewer 誤解為 IMPL 引入退化。

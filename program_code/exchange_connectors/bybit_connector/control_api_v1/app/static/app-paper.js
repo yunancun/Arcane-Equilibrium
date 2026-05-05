@@ -7,16 +7,26 @@
  *   persistence + disabled-state no-op). New functions are prefixed
  *   `ocPaperSubtab*` and live in 自有 namespace block at end of file to avoid
  *   colliding with existing legacy paper helpers loaded via index.html.
+ *   REF-20 Sprint B1 R4 (2026-05-05) added `OpenClawReplaySubtab` namespace
+ *   — readiness probe + 5-state machine + confidence/data tier render slot.
+ *   The subtab no longer hardcodes disabled state; it dynamically gates on
+ *   `/api/v1/replay/health` `wiring_status` (ready / degraded / binary_missing).
  * MODULE_NOTE (中): 從 app.js 提取（FIX-08 文件大小）。REF-20 R20-P1-U1 新增
  *   Paper Replay Lab 子標籤導航（show-hide + localStorage 持久化 + disabled
  *   no-op）。新函數以 `ocPaperSubtab*` 前綴命名並集中於檔案末端的命名空間區塊，
  *   避免與 legacy index.html 既有 paper helper 衝突。
+ *   REF-20 Sprint B1 R4（2026-05-05）新增 `OpenClawReplaySubtab` 命名空間 —
+ *   後端就緒探針 + 5 態狀態機 + execution_confidence/data_tier render slot。
+ *   Replay 子標籤不再硬編 disabled state，改成動態依 `/api/v1/replay/health`
+ *   `wiring_status`（ready / degraded / binary_missing）gating。
  *
  * Cross-loader notes / 跨載入點注意事項:
  *   - Loaded by legacy index.html （全部 functions accessible globally）
  *   - Loaded by tab-paper.html（iframe 內），透過 ocPaperSubtabInit() 啟動
  *   - 新增 sub-tab functions 對 legacy index.html 無副作用：legacy DOM 沒有
  *     `#paper-subtab-nav`，所以 init 內 querySelector 會 0 element，no-op。
+ *   - `OpenClawReplaySubtab` 對 legacy index.html 同樣無副作用：legacy DOM 沒有
+ *     `#subtab-replay` mount points，render fn 內 getElementById 會 null → no-op。
  */
 
 "use strict";
@@ -362,6 +372,31 @@ function ocPaperSubtabShow(name) {
     }
   });
 
+  // REF-20 Sprint B1 R4: replay subtab activate/deactivate hooks
+  // REF-20 Sprint B1 R4：replay 子標籤啟用/停用 hook
+  // - 切到 replay → 觸發 readiness probe + 啟動 30s 週期輪詢
+  // - 切離 replay → 停止輪詢避免 iframe-hidden 仍燒 timer
+  // 對 legacy index.html 無副作用：window.OpenClawReplaySubtab 可能不存在
+  // （namespace 在本檔末端定義；legacy index.html 不載 tab-paper.html）→
+  // typeof check 守衛即可。
+  // - Switch to replay → trigger readiness probe + 30s periodic poll
+  // - Switch away from replay → stop poll to avoid timer leak in hidden iframe
+  // Legacy index.html safe: typeof guard handles missing namespace.
+  if (typeof window.OpenClawReplaySubtab === "object" && window.OpenClawReplaySubtab !== null) {
+    if (name === "replay") {
+      // fire-and-forget probe；async error 內部 catch 不會冒泡破壞 navigation
+      // fire-and-forget probe; internal catch prevents async errors from
+      // breaking navigation flow.
+      try { window.OpenClawReplaySubtab.onTabActivate(); } catch (e) {
+        console.warn("[paper-subtab] replay onTabActivate threw:", e);
+      }
+    } else {
+      try { window.OpenClawReplaySubtab.onTabDeactivate(); } catch (e) {
+        console.warn("[paper-subtab] replay onTabDeactivate threw:", e);
+      }
+    }
+  }
+
   // 持久化 / Persist active sub-tab to localStorage（pure frontend, no backend hit）
   try {
     localStorage.setItem(_OC_PAPER_SUBTAB_LS_KEY, name);
@@ -381,6 +416,9 @@ function ocPaperSubtabShow(name) {
  *   - 若 localStorage 值非 valid name → fallback Session
  *   - 若 localStorage 值對應 button 是 disabled → fallback Session
  *     （避免重啟 P1 GUI 時被卡在 P2/P3/P6 disabled tab）
+ *   - REF-20 Sprint B1 R4：replay last-active 不直接 active without probe；
+ *     ocPaperSubtabShow() 對 replay 會自動 trigger onTabActivate → probe →
+ *     render degraded/ready；不可繞過 probe 直接顯示 ready UI。
  *
  * @returns {string} the sub-tab actually shown (post-fallback)
  */
@@ -398,14 +436,22 @@ function ocPaperSubtabRestoreFromStorage() {
 
   // Fallback：若 stored target 是 disabled，回 Session（避免空畫面）
   // Fallback: if stored target is disabled, fall back to Session (avoid blank view)
+  // REF-20 Sprint B1 R4：replay 子標籤已不再硬編 data-disabled="true"（R4-T1
+  // 移除靜態 disabled），所以此處對 replay 不會 fallback；session/replay 兩
+  // enabled，compare/handoff 仍 disabled，邏輯不變。
+  // After R4-T1 the replay button no longer carries hardcoded data-disabled,
+  // so this fallback only triggers for compare/handoff (still gated by phase).
   const btn = document.getElementById("subtab-btn-" + name);
   if (btn && btn.getAttribute("data-disabled") === "true") {
     name = _OC_PAPER_SUBTAB_DEFAULT;
   }
 
   // 直接 show 而非走 ocPaperSubtabShow（後者對 disabled 會 no-op；這裡 fallback
-  // 後 name 一定是 enabled 的 Session，不過為一致性仍走 show 函數）
-  // Go through show() for consistency; post-fallback name is guaranteed enabled.
+  // 後 name 一定是 enabled 的 Session 或 replay，不過為一致性仍走 show 函數）。
+  // 對 replay：show 內含 onTabActivate hook → 先 probe /health → render；
+  // 不會 unconditional render ready UI（R4-T2 invariant：禁無 probe 直 active）。
+  // Go through show() for consistency; for replay, show() triggers
+  // onTabActivate which probes /health before rendering — never bypass probe.
   ocPaperSubtabShow(name);
   return name;
 }
@@ -445,3 +491,466 @@ function ocPaperSubtabInit() {
   // Restore last-active from localStorage (fallback built-in)
   ocPaperSubtabRestoreFromStorage();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REF-20 Sprint B1 R4: OpenClawReplaySubtab — readiness probe + 5-state machine
+// REF-20 Sprint B1 R4：OpenClawReplaySubtab — 後端就緒探針 + 5 態狀態機
+//
+// 為什麼存在 / Why this exists:
+//   Sprint A R1-T3 已 ship `/api/v1/replay/health`（commit c1ab7ea9）回報
+//   `wiring_status` ('ready' / 'degraded' / 'binary_missing')；Sprint B1 R4
+//   要把 replay 子標籤從硬編 disabled 升級為 backend-readiness gated，5 態
+//   分別對應：empty (尚未跑過 experiment) / running (有 experiment 在跑) /
+//   failed (last experiment failed) / completed (有 completed experiment) /
+//   degraded (backend not ready; subtab 變 disabled)。
+//
+//   `/api/v1/replay/health` ships in Sprint A R1-T3 (commit c1ab7ea9) and
+//   reports `wiring_status` ∈ {ready, degraded, binary_missing}. Sprint B1
+//   R4 upgrades replay subtab from hardcoded disabled to backend-readiness
+//   gated. 5 states: empty / running / failed / completed / degraded.
+//
+// 設計約束 / Design invariants:
+//   - Vanilla JS only — 禁 jQuery / framework lift（per CLAUDE.md §三）
+//   - 0 backend write — 純 frontend probe + render
+//   - 禁無 probe 直 active：localStorage last-active=replay 也須先 probe
+//   - 30s 週期輪詢只在 tab active 時跑；deactivate 必 clearInterval
+//   - 對 legacy index.html 無副作用（mount points 不存在 → no-op）
+//   - `evidence_source_tier='synthetic_replay'` 是 Sprint A 唯一已上線 tier
+//     （CLAUDE.md §九），對應顯示 "execution_confidence: NONE" — 防認知欺詐
+//     baseline（A3 防誤觸詐 sentinel）
+//   - XSS 防護：任何來自 backend 的 string 必走 ocEsc()；任何 dynamic
+//     class 必走 ocSanitizeClass()
+//   - i18n：reuse `disabled_state.p2_backend_pending` 既有 key（避免膨脹）
+//
+// API:
+//   window.OpenClawReplaySubtab.onTabActivate()    — 切到 replay 時呼叫
+//   window.OpenClawReplaySubtab.onTabDeactivate()  — 切離 replay 時呼叫
+//   window.OpenClawReplaySubtab.pollBackendReadiness() — 暴露給 test fixture
+//   window.OpenClawReplaySubtab.state               — 當前狀態（test 可讀）
+// ═══════════════════════════════════════════════════════════════════════════════
+
+(function _wireReplaySubtabNamespace() {
+  // 防護：在 legacy index.html 環境也載入但無副作用 — 所有 fn 內 getElementById
+  // 對 #subtab-replay 等 mount point 找不到時 silent return。
+  // Defensive: this also loads under legacy index.html but is no-op there
+  // since the #subtab-replay mount points don't exist in legacy DOM.
+
+  // ─── Internal state / 內部狀態 ────────────────────────────────────────────
+  // state 一律 5 enum 之一；初值 empty（首次未 probe 時的中性視覺）。
+  // pollIntervalId：tab active 時的 30s 週期 timer。
+  let _state = "empty";
+  let _pollIntervalId = null;
+  let _lastProbe = null;       // 最近一次 probe 結果，供 render fn 重用
+  let _lastReportData = null;  // 最近一次 /report 結果（R4-T3 4 cell render 用）
+
+  /**
+   * 呼叫 /api/v1/replay/health 並解析 wiring_status。
+   * Probe /api/v1/replay/health and parse wiring_status.
+   *
+   * 預期 envelope（per replay/route_helpers.py:replay_response_envelope）:
+   *   { ok: true, data: { wiring_status, binary_path, binary_exists,
+   *                       binary_release_profile, data_dir, data_dir_writable,
+   *                       pg_present, v045_present, v049_present },
+   *     degraded, reason, is_simulated, data_category }
+   *
+   * @returns {Promise<{ready: boolean, wiring_status?: string, data?: object,
+   *                    reason?: string}>}
+   */
+  async function pollBackendReadiness() {
+    try {
+      // 用 fetch 而非 ocApi：probe 不需 toast / 不依賴 ocApi 的 4xx 處理
+      // Use raw fetch (not ocApi) — probe doesn't need toast / 4xx auto-toast
+      const resp = await fetch("/api/v1/replay/health", {
+        credentials: "include",
+        headers: { "Accept": "application/json" }
+      });
+      if (!resp.ok) {
+        return { ready: false, reason: "http_" + resp.status };
+      }
+      const body = await resp.json();
+      const data = (body && body.data) || {};
+      const status = data.wiring_status || "unknown";
+      return {
+        ready: status === "ready",
+        wiring_status: status,
+        data: data,
+        degraded: !!body.degraded,
+        envelope_reason: body && body.reason
+      };
+    } catch (e) {
+      // network error / JSON parse error 都當 not ready；fail-closed
+      // network error / JSON parse error → not ready (fail-closed)
+      return { ready: false, reason: "fetch_failed:" + (e && e.name ? e.name : "Error") };
+    }
+  }
+
+  /**
+   * 切到 replay 子標籤時呼叫：probe → render degraded 或 ready；ready 時啟動週期輪詢。
+   * Called on switching to replay subtab: probe → render degraded or ready;
+   * if ready, start the 30s periodic poll.
+   */
+  async function onTabActivate() {
+    const probe = await pollBackendReadiness();
+    _lastProbe = probe;
+    if (!probe.ready) {
+      _state = "degraded";
+      renderDegradedState(probe);
+      return;
+    }
+    // ready → render ready state；目前 baseline state = empty（無實驗載入）
+    // ready → render ready state; baseline state = empty (no experiment loaded)
+    _state = "empty";
+    renderReadyState(probe.data);
+    startPolling();
+  }
+
+  /**
+   * 切離 replay 子標籤時呼叫：clearInterval 停止輪詢。
+   * Called on switching away from replay subtab: stop the periodic poll.
+   *
+   * 重要 / Critical: iframe 內 setInterval 在 tab hide 時不卸載；不 clear
+   * 會 30s 燒 fetch。每次 deactivate 必 clear。
+   * iframe setInterval keeps firing when tab is hidden; must clear on
+   * deactivate to avoid background fetch leaks.
+   */
+  function onTabDeactivate() {
+    stopPolling();
+  }
+
+  function startPolling() {
+    if (_pollIntervalId !== null) return; // 防重複註冊
+    _pollIntervalId = setInterval(async function () {
+      const probe = await pollBackendReadiness();
+      _lastProbe = probe;
+      // 週期輪詢只在 degrade 切換時 re-render；不刷 ready→ready 防 flicker
+      // Periodic poll only re-renders on degrade transitions; avoids
+      // ready→ready flicker.
+      if (!probe.ready && _state !== "degraded") {
+        _state = "degraded";
+        renderDegradedState(probe);
+        stopPolling(); // degrade 後不再輪詢；待 user 切離再回來重 probe
+      }
+    }, 30000);
+  }
+
+  function stopPolling() {
+    if (_pollIntervalId !== null) {
+      clearInterval(_pollIntervalId);
+      _pollIntervalId = null;
+    }
+  }
+
+  /**
+   * 渲染 degraded state：reuse OpenClawDisabledStateCard helper。
+   * Render degraded state using the existing OpenClawDisabledStateCard helper.
+   *
+   * 三種 wiring_status 對應 reason badge 文案：
+   *   - 'binary_missing' → "Binary missing / 二進制檔案缺失"
+   *   - 'degraded' → "Backend health degraded / 後端健康降級"
+   *   - 其他（fetch_failed / http_5xx）→ "Backend probe failed / 後端探針失敗"
+   *
+   * Three reason badges per wiring_status:
+   *   - binary_missing → "Binary missing"
+   *   - degraded → "Backend health degraded"
+   *   - others (fetch_failed / http_5xx) → "Backend probe failed"
+   */
+  function renderDegradedState(probe) {
+    const mount = document.getElementById("subtab-replay-disabled-card");
+    if (!mount) return; // legacy index.html or mount missing → no-op
+
+    const wiringStatus = (probe && probe.wiring_status) || "unknown";
+    let gateZh, gateEn, bannerZh, bannerEn;
+    if (wiringStatus === "binary_missing") {
+      gateZh = "二進制檔案缺失 — replay_runner 未部署";
+      gateEn = "Binary missing — replay_runner not deployed";
+      bannerZh = "Replay 子標籤需 Linux 端部署 replay_runner binary。請執行 restart_all --rebuild 或 cargo --release。當前 wiring_status: binary_missing。";
+      bannerEn = "Replay subtab requires replay_runner binary on Linux. Run restart_all --rebuild or cargo --release. Current wiring_status: binary_missing.";
+    } else if (wiringStatus === "degraded") {
+      gateZh = "後端健康降級 — 部分前置條件未通過";
+      gateEn = "Backend health degraded — pre-conditions partially met";
+      bannerZh = "PG / data_dir / V045 / V049 至少一項不可用。請查 /api/v1/replay/health envelope 詳細欄位。當前 wiring_status: degraded。";
+      bannerEn = "PG / data_dir / V045 / V049 at least one unavailable. Check /api/v1/replay/health envelope for details. Current wiring_status: degraded.";
+    } else {
+      // fetch_failed / http_4xx / http_5xx / unknown
+      const reason = (probe && (probe.reason || probe.envelope_reason)) || "unknown";
+      gateZh = "後端探針失敗 — 30 秒後自動重試";
+      gateEn = "Backend probe failed — auto retry in 30s";
+      bannerZh = "/api/v1/replay/health probe 失敗（reason: " + reason + "）。可能是登入失效或 control_api 未啟動；切離本子標籤再回來會立即重試。";
+      bannerEn = "/api/v1/replay/health probe failed (reason: " + reason + "). May be auth expired or control_api down; switching away and back retries immediately.";
+    }
+
+    if (window.OpenClawDisabledStateCard
+        && typeof window.OpenClawDisabledStateCard.render === "function") {
+      window.OpenClawDisabledStateCard.render("subtab-replay-disabled-card", {
+        phase: "P2",
+        icon: "⏳",
+        gate_label: gateEn,
+        gate_label_zh: gateZh,
+        // Reuse 既有 i18n key（per PA brief §3 "不重複 i18n key"）
+        // Reuse existing i18n key (per PA brief §3 "no new i18n key")
+        gate_label_i18n_key: "disabled_state.p2_backend_pending",
+        banner_text: bannerEn,
+        banner_text_zh: bannerZh,
+        metrics_layout: "replay_12"
+      });
+    } else {
+      // Fallback：helper 未載入 → inline notice
+      // Fallback when helper missing → inline notice
+      mount.innerHTML = '<div class="oc-subtab-placeholder">'
+        + '<span class="gate-label">' + ocEsc(gateZh) + '</span>'
+        + '</div>';
+    }
+  }
+
+  /**
+   * 渲染 ready state：4 cell（execution_confidence / data_tier / fee_model /
+   * calibration_status）+ 1 status timestamp + 簡單實驗 ID 輸入區。
+   *
+   * Render ready state with 4 cells (execution_confidence / data_tier /
+   * fee_model / calibration_status) + status timestamp + experiment ID input.
+   *
+   * Sprint A baseline invariant（CLAUDE.md §九）：
+   *   - evidence_source_tier='synthetic_replay' 是當前唯一上線 tier
+   *   - 所以 execution_confidence baseline='none'（紅外框警示）
+   *   - data_tier baseline='S3 (Synthetic)' — 對齊 V049 schema 列舉
+   *   - fee_model baseline='placeholder' — Sprint C R6 才會校準
+   *   - calibration_status baseline='pending_R6'
+   *
+   * Sprint A baseline invariants (CLAUDE.md §九):
+   *   - evidence_source_tier='synthetic_replay' is the only currently-shipped
+   *     tier; execution_confidence baseline='none' (red outline anti-fraud)
+   *   - data_tier baseline='S3 (Synthetic)'
+   *   - fee_model baseline='placeholder' (Sprint C R6 calibrates)
+   *   - calibration_status baseline='pending_R6'
+   *
+   * @param {object} healthData - /replay/health response data field
+   */
+  function renderReadyState(healthData) {
+    const mount = document.getElementById("subtab-replay-disabled-card");
+    if (!mount) return;
+    healthData = healthData || {};
+
+    // Sprint A baseline invariants — 防認知欺詐：execution_confidence='none'
+    // 必紅外框；user 看到必意識到「不可作 ML training data」。
+    // Sprint A baselines per CLAUDE.md §九 — execution_confidence='none'
+    // forces red outline so user understands "not ML training data".
+    const baselineMetrics = [
+      {
+        zh: "執行可信度 / Execution Confidence",
+        valZh: "無 / NONE",
+        cls: "oc-cell-warn",
+        tooltip: "Sprint A 唯一上線 tier 是 synthetic_replay；不可作 ML training data。Sprint C R6 fee calibration 後可能升 LOW/MEDIUM。"
+      },
+      {
+        zh: "資料層級 / Data Tier",
+        valZh: "S3（合成 / Synthetic）",
+        cls: "oc-cell-neutral",
+        tooltip: "S3 = synthetic_replay；S2 = calibrated_replay；S1 = real_outcome（不在 replay 範疇）。"
+      },
+      {
+        zh: "費率模型 / Fee Model",
+        valZh: "尚未校準 / NOT CALIBRATED",
+        cls: "oc-cell-warn",
+        tooltip: "Sprint A 用 placeholder fee；Sprint C R6 會以 maker fill rate 7d 真實值校準。"
+      },
+      {
+        zh: "校準狀態 / Calibration",
+        valZh: "PENDING R6",
+        cls: "oc-cell-warn",
+        tooltip: "校準後本欄變 'CALIBRATED'；當前 R6 (Sprint C) 尚未 ship。"
+      }
+    ];
+
+    const wiringStatus = ocEsc(healthData.wiring_status || "ready");
+    const binaryProfile = ocEsc(healthData.binary_release_profile || "(unset)");
+    const ts = new Date().toISOString();
+
+    let cellsHtml = '<div class="oc-replay-cells-grid" role="list" '
+      + 'aria-label="Replay baseline metrics / 回放基線指標">';
+    baselineMetrics.forEach(function (m) {
+      cellsHtml += '<div class="oc-replay-cell '
+        + ocSanitizeClass(m.cls) + '" role="listitem" tabindex="0" '
+        + 'title="' + ocEsc(m.tooltip) + '">'
+        + '<div class="oc-replay-cell-label">' + ocEsc(m.zh) + '</div>'
+        + '<div class="oc-replay-cell-val">' + ocEsc(m.valZh) + '</div>'
+        + '</div>';
+    });
+    cellsHtml += '</div>';
+
+    // Experiment ID 輸入 + 載入按鈕（Sprint B1 minimum；R5 才接 list endpoint）
+    // Experiment ID input + load button (Sprint B1 minimum; R5 wires list)
+    const inputHtml = '<div class="oc-replay-load-row">'
+      + '<label for="oc-replay-experiment-id" class="oc-replay-load-label">'
+      + '實驗 ID / Experiment ID:</label>'
+      + '<input type="text" id="oc-replay-experiment-id" '
+      + 'class="oc-replay-load-input" placeholder="experiment_id (UUID)" '
+      + 'autocomplete="off" maxlength="64" />'
+      + '<button type="button" class="oc-btn" id="oc-replay-load-btn">'
+      + '載入報告 / Load Report</button>'
+      + '<span id="oc-replay-load-status" class="oc-replay-load-status"></span>'
+      + '</div>';
+
+    const headerHtml = '<div class="oc-replay-ready-header">'
+      + '<span class="oc-replay-ready-icon" aria-hidden="true">🟢</span>'
+      + '<div class="oc-replay-ready-title">'
+      + '<strong>後端就緒 / Backend Ready</strong>'
+      + '<span class="oc-replay-ready-meta">'
+      + 'wiring_status: ' + wiringStatus + ' · '
+      + 'release_profile: ' + binaryProfile + ' · '
+      + 'probed_at: ' + ocEsc(ts)
+      + '</span></div></div>';
+
+    const bannerHtml = '<div class="oc-replay-ready-banner" role="note">'
+      + '<span class="zh">Sprint A baseline：execution_confidence=NONE（合成資料）。'
+      + '所有 4 cell 為 Sprint A 預設值；Sprint C R6 校準後會更新。</span>'
+      + '<span class="en">Sprint A baseline: execution_confidence=NONE '
+      + '(synthetic data). All 4 cells are Sprint A defaults; updated after '
+      + 'Sprint C R6 calibration.</span></div>';
+
+    mount.innerHTML = '<div class="oc-replay-ready-card" role="region" '
+      + 'aria-label="Replay backend ready / Replay 後端就緒">'
+      + headerHtml + bannerHtml + cellsHtml + inputHtml + '</div>';
+
+    // 注入 CSS（idempotent guard，避免重渲染重複加 style 節點）
+    // Inject CSS once (idempotent guard against re-render dup)
+    _injectReplayReadyCss();
+
+    // Wire load button click
+    const btn = document.getElementById("oc-replay-load-btn");
+    if (btn) {
+      btn.addEventListener("click", _onLoadReportClick);
+    }
+  }
+
+  /**
+   * 載入 experiment 報告（fetch /replay/report/{id} → 重 render 4 cell）。
+   * Load experiment report (fetch /replay/report/{id} → re-render 4 cells).
+   *
+   * Sprint B1 R4-T3：endpoint schema 目前回 experiment_id / manifest_id /
+   * run / artifacts / wiring_status，**不**含 data_tier / evidence_source_tier
+   * / fee_model / execution_confidence 直接欄位。所以本 render 同時用：
+   *   1. envelope.data_category / wiring_status 確認 endpoint 健康
+   *   2. baseline values（CLAUDE.md §九 Sprint A invariant）
+   *   3. fallback chain（data?.run?.status / data?.artifact_count 等可顯示）
+   *
+   * Sprint B1 R4-T3: endpoint currently returns experiment_id / manifest_id /
+   * run / artifacts / wiring_status — does NOT include direct data_tier /
+   * evidence_source_tier / fee_model / execution_confidence fields. This
+   * render uses (1) envelope wiring_status for health (2) baseline values
+   * (CLAUDE.md §九 Sprint A invariant) (3) fallback chain on optional fields.
+   */
+  async function _onLoadReportClick() {
+    const inputEl = document.getElementById("oc-replay-experiment-id");
+    const statusEl = document.getElementById("oc-replay-load-status");
+    if (!inputEl || !statusEl) return;
+    const expId = (inputEl.value || "").trim();
+    if (!expId) {
+      statusEl.textContent = "⚠ 請輸入 experiment_id / Please enter experiment_id";
+      statusEl.className = "oc-replay-load-status oc-cell-warn";
+      return;
+    }
+    statusEl.textContent = "⏳ 載入中... / Loading...";
+    statusEl.className = "oc-replay-load-status";
+    try {
+      const resp = await fetch(
+        "/api/v1/replay/report/" + encodeURIComponent(expId),
+        { credentials: "include", headers: { "Accept": "application/json" } }
+      );
+      if (!resp.ok) {
+        statusEl.textContent = "✗ HTTP " + resp.status + " — 報告載入失敗 / load failed";
+        statusEl.className = "oc-replay-load-status oc-cell-warn";
+        return;
+      }
+      const body = await resp.json();
+      _lastReportData = body;
+      const data = (body && body.data) || {};
+      const runStatus = (data.run && data.run.status) || "unknown";
+      const artifactCount = data.artifact_count != null ? data.artifact_count : 0;
+      statusEl.textContent = "✓ run.status=" + runStatus
+        + " · artifacts=" + artifactCount
+        + " · evidence_source_tier=synthetic_replay (Sprint A baseline)";
+      statusEl.className = "oc-replay-load-status oc-cell-ok";
+      // 4 cell 內容不變（Sprint A baseline）；只更新 status timestamp 與 run.status
+      // 4 cells stay (Sprint A baseline); only status text and run.status update
+    } catch (e) {
+      statusEl.textContent = "✗ 載入失敗 / load failed (" + (e.name || "Error") + ")";
+      statusEl.className = "oc-replay-load-status oc-cell-warn";
+    }
+  }
+
+  /**
+   * 注入 ready state CSS（idempotent）。
+   * Inject ready-state CSS once (idempotent).
+   */
+  function _injectReplayReadyCss() {
+    if (document.getElementById("oc-replay-ready-css")) return;
+    const s = document.createElement("style");
+    s.id = "oc-replay-ready-css";
+    s.textContent = ''
+      + '.oc-replay-ready-card{background:rgba(22,27,34,0.7);'
+      + 'border:1px solid var(--border);border-radius:var(--card-radius);'
+      + 'padding:18px 20px 22px;margin-bottom:14px}'
+      + '.oc-replay-ready-header{display:flex;align-items:flex-start;'
+      + 'gap:10px;margin-bottom:10px}'
+      + '.oc-replay-ready-icon{font-size:22px;line-height:1;flex-shrink:0}'
+      + '.oc-replay-ready-title{flex:1;min-width:0}'
+      + '.oc-replay-ready-title strong{display:block;color:var(--green);'
+      + 'font-size:14px;margin-bottom:3px}'
+      + '.oc-replay-ready-meta{font-size:11px;color:var(--text-dim);'
+      + 'word-break:break-all;line-height:1.5}'
+      + '.oc-replay-ready-banner{font-size:12px;color:var(--text-dim);'
+      + 'line-height:1.6;padding:8px 12px;background:rgba(13,17,23,0.55);'
+      + 'border-left:3px solid var(--blue);border-radius:4px;margin:8px 0 14px}'
+      + '.oc-replay-ready-banner .zh{display:block;color:var(--text)}'
+      + '.oc-replay-ready-banner .en{display:block;color:var(--text-dim);'
+      + 'font-size:11px;margin-top:2px}'
+      + '.oc-replay-cells-grid{display:grid;gap:8px;margin-bottom:12px;'
+      + 'grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}'
+      + '.oc-replay-cell{background:rgba(13,17,23,0.4);border:1px solid #21262d;'
+      + 'border-radius:6px;padding:10px 12px;min-height:54px;cursor:help}'
+      + '.oc-replay-cell:focus{outline:2px solid var(--accent);outline-offset:2px}'
+      + '.oc-replay-cell-label{font-size:10px;color:var(--text-dim);'
+      + 'text-transform:uppercase;letter-spacing:0.4px}'
+      + '.oc-replay-cell-val{font-size:13px;color:var(--text);font-weight:600;'
+      + 'margin-top:4px}'
+      + '.oc-replay-cell.oc-cell-warn{border-color:rgba(248,81,73,0.5);'
+      + 'background:rgba(248,81,73,0.06)}'
+      + '.oc-replay-cell.oc-cell-warn .oc-replay-cell-val{color:var(--red)}'
+      + '.oc-replay-cell.oc-cell-ok{border-color:rgba(63,185,80,0.5);'
+      + 'background:rgba(63,185,80,0.06)}'
+      + '.oc-replay-cell.oc-cell-ok .oc-replay-cell-val{color:var(--green)}'
+      + '.oc-replay-load-row{display:flex;gap:8px;flex-wrap:wrap;'
+      + 'align-items:center;padding:10px 12px;background:rgba(13,17,23,0.4);'
+      + 'border:1px dashed var(--border);border-radius:6px}'
+      + '.oc-replay-load-label{font-size:11px;color:var(--text-dim)}'
+      + '.oc-replay-load-input{flex:1;min-width:200px;background:var(--bg);'
+      + 'border:1px solid var(--border);border-radius:4px;padding:6px 10px;'
+      + 'color:var(--text);font-family:monospace;font-size:12px}'
+      + '.oc-replay-load-status{font-size:11px;color:var(--text-dim);'
+      + 'flex-basis:100%;line-height:1.5}'
+      + '.oc-replay-load-status.oc-cell-warn{color:var(--red)}'
+      + '.oc-replay-load-status.oc-cell-ok{color:var(--green)}'
+      + '@media (max-width:700px){.oc-replay-cells-grid{'
+      + 'grid-template-columns:1fr 1fr}.oc-replay-cell{min-height:60px;'
+      + 'padding:12px 14px}.oc-replay-load-input{min-width:0;width:100%}}';
+    document.head.appendChild(s);
+  }
+
+  // ─── Public API export / 公開 API 匯出 ────────────────────────────────────
+  // 暴露 namespace 至 window；test fixture 可 mock window.fetch + 直接呼叫
+  // onTabActivate / pollBackendReadiness 驗證 state machine。
+  // Expose namespace on window; test fixture can mock window.fetch and call
+  // onTabActivate / pollBackendReadiness to verify state machine.
+  window.OpenClawReplaySubtab = {
+    onTabActivate: onTabActivate,
+    onTabDeactivate: onTabDeactivate,
+    pollBackendReadiness: pollBackendReadiness,
+    // Test-only accessors（不可作 production API；test fixture 才該讀）
+    // Test-only accessors (not production API; test fixture only)
+    _getState: function () { return _state; },
+    _getLastProbe: function () { return _lastProbe; },
+    _getLastReport: function () { return _lastReportData; },
+    _setStateForTest: function (s) { _state = s; },
+    _isPolling: function () { return _pollIntervalId !== null; }
+  };
+})();
