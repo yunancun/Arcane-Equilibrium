@@ -1684,33 +1684,6 @@ function toggleFills() {
   }
 }
 
-/**
- * F5/A5 — Format timestamp as "HH:mm UTC (local: HH:mm TZ)" dual stamp.
- * Avoids timezone confusion when operator is in a different TZ from the server.
- *
- * F5/A5 — 時戳雙標「HH:mm UTC (local: HH:mm CEST)」，避免 operator 與 server
- * 時區不同造成的誤判（A3 audit findings）。
- */
-function _formatFillTime(tsMs) {
-  if (tsMs == null || tsMs === '--' || tsMs === '') return '--';
-  const num = Number(tsMs);
-  if (!Number.isFinite(num) || num <= 0) return '--';
-  const d = new Date(num);
-  const pad = n => String(n).padStart(2, '0');
-  const utcStr = pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ' UTC';
-  // Resolve a short TZ abbreviation (CEST, JST, EST, etc.) — best-effort;
-  // some browsers fall back to long form, which is fine — still unambiguous.
-  // 解析短時區縮寫（CEST / JST / EST 等），瀏覽器無短形式時用長形式仍清楚。
-  let tz = '';
-  try {
-    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(d);
-    const tzPart = parts.find(p => p.type === 'timeZoneName');
-    tz = tzPart ? tzPart.value : '';
-  } catch (_) {}
-  const localStr = pad(d.getHours()) + ':' + pad(d.getMinutes()) + (tz ? ' ' + tz : '');
-  return utcStr + ' (local: ' + localStr + ')';
-}
-
 async function loadFills() {
   const body = document.getElementById('live-fills-body');
   const badge = document.getElementById('fills-count-badge');
@@ -1741,7 +1714,7 @@ async function loadFills() {
       const ts = f.execTime || f.exec_time || f.time || '--';
       // F5/A5: dual-stamp UTC + local instead of toLocaleTimeString() alone
       // F5/A5：UTC + 當地雙時戳，取代原 toLocaleTimeString() 單時區
-      const timeStr = _formatFillTime(ts);
+      const timeStr = ocFillTime(ts);
       const qty = f.execQty || f.exec_qty || f.qty || '--';
       const price = f.execPrice || f.exec_price || f.price || '--';
       const execValue = ocFillExecValue(f);

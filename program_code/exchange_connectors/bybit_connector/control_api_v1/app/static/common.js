@@ -423,16 +423,25 @@ function ocPct(v) {
   return (v * 100).toFixed(1) + '%';
 }
 
-function ocTime(ts) {
-  if (!ts) return '--';
-  const d = typeof ts === 'number' ? new Date(ts > 1e12 ? ts : ts * 1000) : new Date(ts);
-  return d.toLocaleString('zh-CN', { hour12: false });
+function ocDate(ts) {
+  if (ts == null || ts === '') return null;
+  const raw = typeof ts === 'string' ? ts.trim() : ts;
+  if (raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  const d = Number.isFinite(n) ? new Date(n > 1e12 ? n : n * 1000) : new Date(raw);
+  return Number.isFinite(d.getTime()) ? d : null;
 }
 
-function ocTimeShort(ts) {
-  if (!ts) return '--';
-  const d = typeof ts === 'number' ? new Date(ts > 1e12 ? ts : ts * 1000) : new Date(ts);
-  return d.toLocaleTimeString('zh-CN', { hour12: false });
+function ocTime(ts) { const d = ocDate(ts); return d ? d.toLocaleString('zh-CN', { hour12: false }) : '--'; }
+function ocTimeShort(ts) { const d = ocDate(ts); return d ? d.toLocaleTimeString('zh-CN', { hour12: false }) : '--'; }
+
+function ocFillTime(ts) {
+  const d = ocDate(ts);
+  if (!d) return '--';
+  const p = n => String(n).padStart(2, '0');
+  let tz = '';
+  try { const t = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(d).find(x => x.type === 'timeZoneName'); tz = t ? t.value : ''; } catch (_) {}
+  return p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ' UTC (local: ' + p(d.getHours()) + ':' + p(d.getMinutes()) + (tz ? ' ' + tz : '') + ')';
 }
 
 function ocPnlClass(v) {

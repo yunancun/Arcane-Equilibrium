@@ -678,7 +678,7 @@ async function loadFills() {
     // Rust TimestampedFill serializes the time field as `timestamp_ms` — was missing from
     // the fallback chain so the column rendered empty. / Rust 端欄位名為 timestamp_ms，
     // 之前不在 fallback 鏈中導致該欄空白。
-    html += '<td>' + ocTimeShort(f.timestamp_ms || f.ts_ms || f.filled_at || f.timestamp) + '</td>';
+    html += '<td>' + ocFillTime(f.timestamp_ms || f.ts_ms || f.filled_at || f.timestamp) + '</td>';
     html += '<td>' + ocEsc(f.symbol) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (f.side === 'Buy' || f.is_long === true ? 'green' : 'red') + '">' + sideLabel + '</td>';

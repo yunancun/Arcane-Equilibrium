@@ -625,7 +625,7 @@ async function loadDemoFills() {
     const sym = f.symbol || '';
     const cat = f.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
     html += '<tr>';
-    html += '<td>' + (ts ? ocTimeShort(parseInt(ts) || ts) : '--') + '</td>';
+    html += '<td>' + ocFillTime(ts) + '</td>';
     html += '<td>' + ocEsc(f.symbol) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
