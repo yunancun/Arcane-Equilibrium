@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** OpenClaw / Bybit
-**Last Updated:** 2026-05-02
+**Last Updated:** 2026-05-06
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -81,6 +81,7 @@
 | REF-18 | Model Canary Promotion Rules (Draft) | docs/references/2026-04-23--model_canary_promotion_rules_draft.md | 🟡 Draft | INFRA-PREBUILD-1 Part B Model Registry canary 狀態機 + Phase 晉升閾值 + Operator playbook（Phase 4 auto-promote cron 延後） |
 | REF-19 | Reality-Calibrated Fast Replay Governance | docs/references/2026-05-02--reality_calibrated_fast_replay_governance.md<br>中文：docs/references/2026-05-02--reality_calibrated_fast_replay_governance_zh.md | 🟡 Draft | Replay/MLDE/DreamEngine 邊界契約：Replay 是實驗環境與資料來源之一；ML/Dream 仍為 Agent 自我學習與策略/風控調參能力；禁止 replay 直接 live/demo mutation |
 | REF-20 | Paper Replay Lab and Learning Surface Design | docs/references/2026-05-02--paper_replay_learning_surface_design.md<br>中文：docs/references/2026-05-02--paper_replay_learning_surface_design_zh.md<br>★ SoT V3：docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md<br>Workplan V1：docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md | ⚠️ Active-with-Cold-Audit-Caveat | Paper Tab 原地升級為 Replay Lab；Learning 保持知識 cockpit 並新增 replay evidence / ML-Dream producer monitor；5-Agent 從 Learning 抽出為 read-only Agents Monitor。**2026-05-03 8-agent cold audit 揭 Wave 1-9 IMPL 是結構性 false positive**（runner 從未啟動 → vacuous truth）；Sprint 1 修 5 P0 critical security + 3 schema drift（commit edf33c0）；Sprint 2 補 §八 evidence trail + AMD-2026-05-03-01 Wave 7 IMPL/Deploy 2-stage gate（commits aa9343c + 5184990）；deploy 待 Sprint 3 Linux 實機（cargo --release replay_runner + 18 V### apply + 5 e2e smoke + Decision Lease retrofit AMD-2026-05-02-01）+ Sprint 4 14d gradient observation。詳 TODO P1-INFRA-3a-m + docs/CCAgentWorkSpace/{PA,E1,E2,E4}/workspace/reports/2026-05-03--ref20_sprint{1,2}_*.md |
+| REF-21 | Full-Chain Replay Engine | docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md | 🟡 Draft | 將 Replay 從單 symbol strategy smoke 提升為 scanner→active universe→TickPipeline→strategy→risk→execution simulator→exit 的 7D 全鏈條歷史模擬；S2 public data 先解決快速開發回饋，S1 local recorder 作後續擬真度提升；MLDE/DreamEngine 僅作 verified advisory / exploration consumer，不直接改 demo/live。 |
 
 ### Architecture Specifications
 
