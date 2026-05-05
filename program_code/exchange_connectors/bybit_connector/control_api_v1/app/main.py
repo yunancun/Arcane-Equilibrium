@@ -272,6 +272,15 @@ app.include_router(agents_router)
 from .replay_routes import replay_router  # noqa: E402
 app.include_router(replay_router)
 
+# ── Replay Quick Router / 傻瓜式快速回測路由 ──
+# Thin preparation route for the GUI Quick Replay flow. It builds S2 Bybit
+# public-data fixtures and current demo/live config snapshots, then the GUI
+# still executes through the canonical replay register/run/finalize routes.
+# 傻瓜式 Replay GUI 的準備路由：生成 S2 Bybit public fixture + 當前 demo/live
+# config snapshot；實際執行仍走 canonical replay register/run/finalize。
+from .replay_quick_routes import quick_replay_router  # noqa: E402
+app.include_router(quick_replay_router)
+
 # ── Replay Lab Handoff Router / Replay 實驗室移交路由（REF-20 Wave 8 P6-S13/S14/S15）──
 # Bounded Demo Handoff backend security trio:
 #   POST /api/v1/replay/handoff           — typed-confirmation submit
