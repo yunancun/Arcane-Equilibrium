@@ -159,6 +159,7 @@ V049_DATA_TIER_REGISTER_ALLOWED = ("S2", "S3", "S4")
 V049_TIMEFRAME_ALLOWED = ("1m", "3m", "5m", "15m", "1h", "4h", "1d", "tick")
 V049_RUNTIME_ENV_ALLOWED = ("linux_trade_core", "mac_dev_smoke_test_only")
 V049_EXECUTION_CONFIDENCE_DEFAULT = "none"  # Sprint A R3 default per plan §6.R6
+V049_EXECUTION_CONFIDENCE_ALLOWED = frozenset({"none", "limited", "calibrated"})  # R6-T6
 V049_STATUS_CREATED = "created"
 
 # manifest_jsonb size cap (bytes). Aligned with Track C P0-5b artifact 256 KB
@@ -669,6 +670,60 @@ def lookup_replay_config_blob(
         "strategy_params": strat if isinstance(strat, dict) else None,
         "risk_overrides": risk if isinstance(risk, dict) else None,
     }
+
+
+def update_execution_confidence(
+    cur: Any,
+    *,
+    experiment_id: str,
+    label: str,
+) -> bool:
+    """REF-20 Sprint C R6-T6 — post-replay 寫 V049 execution_confidence。
+
+    由 ``run_finalize_route.py`` post-replay 階段呼叫：先從 R6 CalibrationLabelProducer
+    （Rust `replay/calibration_label.rs`）取 ``CalibrationResult``，再依 ``label``
+    UPDATE V049 row 的 ``execution_confidence`` column（從 INSERT 預設 'none'
+    更新為實際 label）。
+
+    對應 QC §4 + PM D2 決策：
+      - 'calibrated' / 'limited' 寫入 row + caller 端傳 7d / 3d TTL
+      - 'none' 不寫 V049 update（保持 default）— caller 端不應呼此 helper
+
+    本 helper **只更新 execution_confidence column**；TTL（V049 expires_at
+    column）由 register_experiment INSERT 階段已 land；calibration freshness /
+    sample_count / CI bounds 由 V050.payload jsonb 內 cell-level summary
+    持久化（不在 V049 column 直接 column 化，per QC §3.1 cell-level vs per-fill）。
+
+    Args:
+        cur: caller transaction 內 psycopg2-style cursor
+        experiment_id: V049 row's experiment_id (uuid text)
+        label: 'none' | 'limited' | 'calibrated'（V049 CHECK enum；實際 caller
+            會把 ExecutionConfidence enum map 到 str）
+
+    Returns:
+        True if row UPDATE'd (1 row affected); False else (experiment not
+        found 或 label invalid)。
+
+    Raises:
+        ValueError when ``label`` not in V049 enum allowlist.
+
+    Fail-closed semantic: caller 漏傳或傳錯 → ValueError + 0 row write，
+    避免 row 寫入無效 enum 觸 V049 CHECK constraint runtime error。
+    """
+    if label not in V049_EXECUTION_CONFIDENCE_ALLOWED:
+        raise ValueError(
+            f"update_execution_confidence: label={label!r} 不在 V049 CHECK "
+            f"enum allowlist {sorted(V049_EXECUTION_CONFIDENCE_ALLOWED)}"
+        )
+    cur.execute(
+        """
+        UPDATE replay.experiments
+        SET execution_confidence = %s
+        WHERE experiment_id = %s::uuid;
+        """,
+        (label, str(experiment_id)),
+    )
+    return cur.rowcount == 1
 
 
 def _resolve_runtime_environment() -> str:
@@ -1269,10 +1324,12 @@ __all__ = [
     "compute_manifest_hash",
     "lookup_replay_config_sha256",  # R5-T6 read-back helper
     "lookup_replay_config_blob",  # R5-T6 round 2 read-back blob helper
+    "update_execution_confidence",  # R6-T6 post-replay calibration writer
     "map_register_error_to_http",
     "_cache_clear_for_test",  # R2 round 2 H-1 — TEST-ONLY hermetic helper
     "MANIFEST_JSONB_MAX_BYTES",
     "V049_DATA_TIER_REGISTER_ALLOWED",
     "V049_TIMEFRAME_ALLOWED",
+    "V049_EXECUTION_CONFIDENCE_ALLOWED",  # R6-T6
     "ADVISORY_LOCK_REGISTER_IDEMPOTENCY_PREFIX",
 ]

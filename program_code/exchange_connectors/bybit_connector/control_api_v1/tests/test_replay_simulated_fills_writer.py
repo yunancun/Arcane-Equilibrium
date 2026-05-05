@@ -638,3 +638,96 @@ def test_persist_replay_report_synthetic_walker_no_evidence():
         )
     finally:
         p.unlink(missing_ok=True)
+
+
+# ─── R6-T5: Sprint C 真實 fee/slippage/liquidity_role 解析 ──────────
+
+
+def test_map_fill_v050_row_extracts_real_fee_from_rust_json():
+    """R6-T5: Rust runner 寫真實 fee + fee_rate 進 fill JSON，writer 必解析非用 0.0。"""
+    fill = _make_synthetic_fill(
+        0,
+        fee=2.75,
+        fee_rate=0.00055,
+        liquidity_role="taker",
+        execution_model_version="calibrated_v1",
+    )
+    result = map_fill_to_v050_row(
+        fill,
+        experiment_id="11111111-1111-1111-1111-111111111111",
+        run_id="abc123",
+        fill_index=0,
+        strategy_name="grid_trading",
+    )
+    assert result is not None
+    assert result["fee"] == 2.75
+    assert result["fee_rate"] == 0.00055
+    assert result["liquidity_role"] == "taker"
+    assert result["execution_model_version"] == "calibrated_v1"
+
+
+def test_map_fill_v050_row_maker_liquidity_role_from_postonly():
+    """R6-T5: PostOnly TIF → Rust 端寫 liquidity_role='maker'，writer 直傳。"""
+    fill = _make_synthetic_fill(
+        0, fee=1.0, fee_rate=0.0002, liquidity_role="maker"
+    )
+    result = map_fill_to_v050_row(
+        fill,
+        experiment_id="11111111-1111-1111-1111-111111111111",
+        run_id="abc123",
+        fill_index=0,
+        strategy_name="grid_trading",
+    )
+    assert result is not None
+    assert result["liquidity_role"] == "maker"
+    assert result["fee_rate"] == 0.0002
+
+
+def test_map_fill_v050_row_invalid_liquidity_role_falls_back_to_taker():
+    """R6-T5: liquidity_role 不在 V050 enum allowlist → fallback 'taker' default。"""
+    fill = _make_synthetic_fill(0, fee=1.0, liquidity_role="invalid_role")
+    result = map_fill_to_v050_row(
+        fill,
+        experiment_id="11111111-1111-1111-1111-111111111111",
+        run_id="abc123",
+        fill_index=0,
+        strategy_name="grid_trading",
+    )
+    assert result is not None
+    assert result["liquidity_role"] == "taker", (
+        "unknown enum value should fallback to taker default per LIQUIDITY_ROLE_DEFAULT"
+    )
+
+
+def test_map_fill_v050_row_synthetic_walker_fallback_to_sentinel_defaults():
+    """R6-T5: synthetic walker fill 不帶 fee/fee_rate/liquidity_role keys → fallback Sprint A defaults。"""
+    fill = _make_synthetic_fill(0)
+    assert "fee" not in fill
+    assert "fee_rate" not in fill
+    assert "liquidity_role" not in fill
+    result = map_fill_to_v050_row(
+        fill,
+        experiment_id="11111111-1111-1111-1111-111111111111",
+        run_id="abc123",
+        fill_index=0,
+        strategy_name="grid_trading",
+    )
+    assert result is not None
+    assert result["fee"] == 0.0
+    assert result["fee_rate"] == 0.0
+    assert result["liquidity_role"] == "taker"
+    assert result["execution_model_version"] == "synthetic_v1"
+
+
+def test_map_fill_v050_row_unknown_liquidity_role_accepted():
+    """R6-T5: liquidity_role='unknown' 是 V050 enum 合法值（per CHECK），不 fallback。"""
+    fill = _make_synthetic_fill(0, fee=1.0, liquidity_role="unknown")
+    result = map_fill_to_v050_row(
+        fill,
+        experiment_id="11111111-1111-1111-1111-111111111111",
+        run_id="abc123",
+        fill_index=0,
+        strategy_name="grid_trading",
+    )
+    assert result is not None
+    assert result["liquidity_role"] == "unknown"

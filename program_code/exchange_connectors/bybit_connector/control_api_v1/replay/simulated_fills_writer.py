@@ -623,8 +623,43 @@ def map_fill_to_v050_row(
     else:
         payload_obj = fill_with_evidence
 
-    # Compose 17-col + 4-col-default param dict aligned to V050 CREATE TABLE
-    # column order. ``sim_fill_id`` server-derived UUID (PK).
+    # R6-T5 (Sprint C, 2026-05-05): 從 Rust fill JSON 解析 W1 R6-T1+T2 真實
+    # fee model + slippage model 寫入；fallback 到 Sprint A sentinel default
+    # 當 fill 缺對應 key（synthetic walker fallback path）。
+    # liquidity_role 必驗 V050 CHECK enum allowlist (maker/taker/unknown)。
+    # ci_low/mid/high_bps 仍 None（cell-level CalibrationResult 由
+    # run_finalize_route.py post-replay 統一 UPDATE 寫入，per QC §3.1）。
+
+    fee_value = fill.get("fee")
+    fee = float(fee_value) if isinstance(fee_value, (int, float)) else FEE_DEFAULT
+
+    fee_rate_value = fill.get("fee_rate")
+    fee_rate = (
+        float(fee_rate_value)
+        if isinstance(fee_rate_value, (int, float))
+        else FEE_RATE_DEFAULT
+    )
+
+    liquidity_role_value = fill.get("liquidity_role")
+    if liquidity_role_value in V050_ALLOWED_LIQUIDITY_ROLES:
+        liquidity_role = liquidity_role_value
+    else:
+        if liquidity_role_value is not None:
+            logger.warning(
+                "map_fill_to_v050_row: fill_index=%d liquidity_role=%r 不在 V050 "
+                "CHECK allowlist {maker,taker,unknown}；fallback 'unknown'",
+                fill_index, liquidity_role_value,
+            )
+        liquidity_role = LIQUIDITY_ROLE_DEFAULT
+
+    execution_model_version_value = fill.get("execution_model_version")
+    execution_model_version = (
+        str(execution_model_version_value)
+        if isinstance(execution_model_version_value, str)
+        and execution_model_version_value
+        else EXECUTION_MODEL_VERSION_DEFAULT
+    )
+
     # 組合 17-col + 4 default 參數 dict，對齊 V050 CREATE TABLE 順序。
     # ``sim_fill_id`` server-derived UUID (PK)。
     return {
@@ -640,12 +675,12 @@ def map_fill_to_v050_row(
         "side": side,
         "qty": qty,
         "price": price,
-        "fee": FEE_DEFAULT,                # Sprint A no fee model
-        "fee_rate": FEE_RATE_DEFAULT,      # Sprint A no fee model
-        "liquidity_role": LIQUIDITY_ROLE_DEFAULT,
+        "fee": fee,                        # R6-T5: 從 Rust JSON 解析 W1 R6-T1 fee model
+        "fee_rate": fee_rate,              # R6-T5: 從 Rust JSON 解析 W1 R6-T1 fee_rate
+        "liquidity_role": liquidity_role,  # R6-T5: 從 Rust JSON 解析 + V050 CHECK 驗
         "evidence_source_tier": tier,
-        "execution_model_version": EXECUTION_MODEL_VERSION_DEFAULT,
-        "ci_low_bps": None,                # Sprint A no per-fill CI
+        "execution_model_version": execution_model_version,  # R6-T5: 從 Rust JSON 解析
+        "ci_low_bps": None,                # cell-level CI 由 run_finalize_route 統一 UPDATE
         "ci_mid_bps": None,
         "ci_high_bps": None,
         "payload": json.dumps(payload_obj, sort_keys=True, ensure_ascii=False),
