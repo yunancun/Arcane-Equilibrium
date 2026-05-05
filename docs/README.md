@@ -1,8 +1,8 @@
 # docs/ — 项目文档目录 (Project Documentation Directory)
 
-本目录存放 OpenClaw / Bybit AI Agent 交易系统的所有工程文档、日志、交接记录和决策备忘。
+本目录存放玄衡 · Arcane Equilibrium 交易治理系统的所有工程文档、日志、交接记录和决策备忘。
 
-This directory holds all engineering documents, logs, handoff records, and decision memos for the OpenClaw / Bybit AI Agent trading system.
+This directory holds all engineering documents, logs, handoff records, and decision memos for the Arcane Equilibrium agentic trading governance system.
 
 ---
 
@@ -38,6 +38,7 @@ docs/
 │   └── YYYY-MM-DD_主题名/
 │
 ├── decisions/                         ← 重大架构/设计决策记录 + 治理源文件（DOC/SM/EX .docx）
+├── adr/                               ← 架构决策记录（ADR 0001..0014）
 │
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │

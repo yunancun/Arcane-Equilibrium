@@ -1,4 +1,4 @@
-# OpenClaw Codex Entry Rules
+# 玄衡 · Arcane Equilibrium Codex Entry Rules
 
 Scope: this file applies to the entire repository rooted at `srv/`.
 

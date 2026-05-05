@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-06 | 玄衡 · Arcane Equilibrium soft rename integration | workspace/reports/2026-05-06--arcane_equilibrium_soft_rename.md |
 | 2026-05-06 | AgentTodo M0 contract-freeze integration (MAG-001 APPROVED, MAG-002/003 CONDITIONAL) | workspace/reports/2026-05-06--agenttodo_m0_contract_freeze_integration.md |
 | 2026-05-06 | AgentTodo M0 doc sync + MAG-000 operator confirmation | workspace/reports/2026-05-06--agenttodo_m0_doc_sync.md |
 | 2026-05-06 | REF-21 Full-Chain Replay scope correction: one-click 7D scanner-to-exit replay replaces single-symbol smoke as the target default | workspace/reports/2026-05-06--ref21_full_chain_replay_scope_correction.md |

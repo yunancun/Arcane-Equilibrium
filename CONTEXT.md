@@ -1,8 +1,22 @@
-# OpenClaw / Bybit AI Trading
+# 玄衡 · Arcane Equilibrium
 
-A Rust-core, Python-bridge AI trading system that runs paper / demo / live pipelines as one process against Bybit, with a multi-agent decision loop gated by formal state machines (Decision Lease, Authorization, Risk Governor, OMS Execution).
+Arcane Equilibrium is a Rust-core, Python-bridge agentic trading governance system that runs paper / demo / live pipelines as one process against Bybit, with a multi-agent decision loop gated by formal state machines (Decision Lease, Authorization, Risk Governor, OMS Execution).
 
-This `CONTEXT.md` is the project's domain glossary. Every architectural suggestion, ADR, refactor, or review should use these terms exactly — don't substitute "service," "component," "module" (in the generic sense), or "API" when one of these names applies. Generic programming concepts (timeout, retry, lock, queue) are deliberately omitted — only OpenClaw-specific terms belong here.
+This `CONTEXT.md` is the project's domain glossary. Every architectural suggestion, ADR, refactor, or review should use these terms exactly — don't substitute "service," "component," "module" (in the generic sense), or "API" when one of these names applies. Generic programming concepts (timeout, retry, lock, queue) are deliberately omitted — only Arcane Equilibrium / OpenClaw-specific terms belong here.
+
+## Product naming
+
+**玄衡 · Arcane Equilibrium**:
+The formal project and product name after the 2026-05-06 soft rename. "玄衡" names the whole trading governance system: autonomous cognition, risk equilibrium, auditability, and bounded execution authority.
+_Avoid_: using OpenClaw Bybit as the total project name in new docs.
+
+**OpenClaw**:
+The retained service-family name for the control-plane surface: OpenClaw Control Console, OpenClaw Gateway, OpenClaw API aggregation routes, and related communication/proposal relay services.
+_Avoid_: treating OpenClaw as the total project brand, Rust engine name target, or trading brain.
+
+**Bybit**:
+The sole exchange venue and the correct label for venue adapters, connector paths, API references, secrets slots, exchange endpoint behavior, and compliance notes.
+_Avoid_: including Bybit in the formal product name unless discussing the venue adapter.
 
 ## Language
 

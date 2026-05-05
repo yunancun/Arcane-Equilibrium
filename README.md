@@ -1,7 +1,13 @@
-# OpenClaw / Bybit AI Agent Trading System
+# 玄衡 · Arcane Equilibrium
 <!-- Git 日志 — 项目入口。主日志见 CLAUDE.md -->
 
-AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略，**Live_Ready ⚠️**（5 项 live gate 全绿才上真实 live，见下文门控表）。
+Agentic trading governance system — 自主扫描 650+ 交易对，智能部署策略，**Live_Ready ⚠️**（5 项 live gate 全绿才上真实 live，见下文门控表）。
+
+**软更名口径（2026-05-06）**：
+- 正式项目名：**玄衡 · Arcane Equilibrium**。
+- **OpenClaw** 保留为控制平面 / Gateway / Console / 通信服务族名称。
+- **Bybit** 保留为唯一交易所 adapter / connector 名称。
+- 短期不改 `openclaw_engine`、`OPENCLAW_*`、`/tmp/openclaw`、GitHub 仓库名、Linux runtime 路径等运行面名称。
 
 ---
 
@@ -37,7 +43,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 **关键里程碑（2026-05-03）**：REF-20 P6 PRODUCTION CLOSED — Decision Lease retrofit AMD-2026-05-02-01 Path A 落地（`dbcf845b` IMPL + `0ad79f67` deploy）；feature flag default OFF，canary 待 ~2026-05-15 P0-EDGE-2 后 operator action。
 
-**Active queue**：见 `TODO.md` P0/P1/P2 三层工作流程。完整上下文和硬边界见 `CLAUDE.md`。**领域词汇** → `CONTEXT.md`；**架构决策记录** → `docs/adr/0001..0013-*.md`。
+**Active queue**：见 `TODO.md` P0/P1/P2 三层工作流程。完整上下文和硬边界见 `CLAUDE.md`。**领域词汇** → `CONTEXT.md`；**架构决策记录** → `docs/adr/0001..0014-*.md`。
 
 **已关闭并归档**：62-finding remediation Batch A-F、STRKUSDT P0 wave、Wave A-H、旧 Wave 1-3 叙事、4-day codex audit closure、REF-20 Sprint A-D 详细叙事 不再是 active mainline。归档：
 - `docs/archive/2026-05-06--{claude_md,todo_completed,readme_stale}_extract.md` ← 本日 R4 sweep
@@ -54,7 +60,7 @@ srv/
 ├── CLAUDE.md                      ← ★ 项目完整上下文（实时状态以此为准）
 ├── CONTEXT.md                     ← ★ 领域词汇表（domain glossary，2026-05-06 引入）
 ├── docs/
-│   ├── adr/                       ← ★ 12 条架构决策记录（2026-05-06 引入）
+│   ├── adr/                       ← ★ 14 条架构决策记录（2026-05-06 引入）
 │   └── ...                        ← 工程文档（20+ 份日志/审核/设计）
 ├── program_code/
 │   ├── exchange_connectors/
@@ -154,7 +160,9 @@ srv/
 
 ---
 
-## OpenClaw 集成
+## OpenClaw 服务族集成
+
+OpenClaw 现在是玄衡项目内的控制平面服务族名称，不再作为总项目名使用。
 
 > 2026-05-06 定位：现有 FastAPI console 是唯一 OpenClaw Control Console；外部 OpenClaw Gateway 是通信、移动端、上级汇总、proposal/approval relay，不是交易 conductor，也不是第二套 GUI。
 

@@ -6,6 +6,12 @@ Last compacted: 2026-04-29
 
 This is Codex's repo-synced operating memory for this project.
 
+Formal project name after the 2026-05-06 soft rename:
+- Chinese: `玄衡`
+- English: `Arcane Equilibrium`
+- OpenClaw remains the control-plane / Gateway / Console / communication service family.
+- Bybit remains the sole exchange adapter / connector label.
+
 Claude memory comparison outcome:
 - keep this file index-like and durable
 - keep reusable rules here
@@ -103,6 +109,7 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 
 ## Architecture and deployment invariants
 
+- Formal project/product name is `玄衡 · Arcane Equilibrium`; do not use `OpenClaw Bybit` as the total project name in new docs
 - Bybit is the only exchange target
 - Rust `openclaw_engine` is the canonical trading / risk / config authority
 - Python is the control plane, GUI, bridge, and auxiliary surface, not the trading truth layer
