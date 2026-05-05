@@ -1464,3 +1464,37 @@ E1 round 6 必修：(1) sibling test line 1252 stub INSERT actor_id → created_
 25. **Coverage migration 「等價覆蓋」claim 必驗實際數字** — E1 round 5 §16.4 表格 4 path test「等價覆蓋」名義成立但實際是 mock-only (4 hermetic case 走 _mock_verify_and_insert + _row_capture dict)；真 PG live coverage 只 2 case (real_outcome live_pg + calibrated_replay live_pg)，0 synthetic_replay live_pg + 0 counterfactual_replay live_pg。dispatch §3 binding「4 case INSERT + SELECT + 4 column verify under OPENCLAW_TEST_LIVE_PG=1」未完整達成。**抽象**：coverage migration 後必對抗反問「dispatch binding 的 N 個是 mock 算還是真 PG 算？」「OPENCLAW_TEST_LIVE_PG=1 跑時哪些 case 真實 INSERT vs 哪些 case skipped」**真實 N**對齊 binding **聲明 N**才能 PASS。E1 round 5 §16.4 聲明 4 path「等價覆蓋」不對齊 dispatch §3 真 PG 4-case binding，需 round 6 補完。
 
 26. **LOC mismatch 處理：E1 sign-off 數字 vs E2 wc 真實** — Round 5 E1 §16.6 LOC 標 Python test 1265 但 E2 自跑 wc -l 真實 = 1316（差 +51）。E2 round 5 verdict = 不單獨 RETURN（LOC 文字 fix only，不影響 V055 SQL/test 邏輯，1316 仍 < §九 2000 cap）。但 **sign-off LOC 數字必準**，PM closure 階段建議統一訂正。**抽象**：審 sign-off report，跑 wc -l real-time 對驗 E1 標稱 LOC；發現 mismatch 必 footnote（不單獨 RETURN，但 audit trail 留下）；E2 不放過任何「Sign-off 自描述 vs 真實檔案」的小 drift。Round 3 V049 ADD COLUMN 18 vs 25 drift 是 same pattern N=1，round 5 LOC 1265 vs 1316 是 N=2。
+
+---
+
+## 2026-05-05 — REF-20 Sprint C R6 W2 E2 review (R0-T0 + R6-T3)
+
+**Review target**: R0-T0 apply_fill.rs 拆檔（runner.rs 1992 → 1808；apply_fill.rs new 485 LOC）+ R6-T3 KellyConfig wire（bin/replay_runner.rs 1427 → 1461）
+
+**Verdict**: PASS to PM commit + Linux SSH cargo verify · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 2 LOW（純 doc-clarification）
+
+### byte-equal contract 三層驗證 PASS
+- 4 helper byte-equal except visibility（fn → pub(crate) fn × 3）— `diff <(W1 runner.rs:526-608) <(W2 apply_fill.rs:117-199)` 顯示 3 line diff 全是 visibility widening（必要支持 runner.rs::tests `use crate::replay::apply_fill::{...}`），body byte-equal
+- 4 method byte-equal except visibility（fn → pub(super) fn × 4）+ apply_fill_close docstring 微改（W1 寫 `SimulatedFill row 層` → W2 寫 `process_close_intent row 層` — clarification，不變邏輯）
+- 4 SimulatedFill push site 一致性 ✓（process_open Accepted/Rejected + process_close + synthetic_walker 留 runner.rs）+ manifest_signer.rs 0 byte change ✓ → xlang_consistency 13/13 維持
+
+### Mac cargo verify
+- 2490 lib + 6 e2e + 2 e2e_param_delta + 8 xlang_consistency + 4 forbidden_guard + 5 profile_acceptance + 4 mac_policy = 2519 GREEN
+- runner::tests 跑出 20 PASS（9 W1 R6-T1+T2 test_apply_fill_* + 3 W2 R6-T3 test_r6t3_* + 8 background）
+
+### 對抗反問 5 條全 PASS
+1. 1992 → 1808 真實 = -300 抽出 + ~+116 R6-T3 test = -184 ✓
+2. apply_fill.rs 485 LOC 構成 = ~110 MODULE_NOTE + ~80 helper + ~250 impl + ~25 boundary notes ✓
+3. 3 R6-T3 unit test 是 fresh design 但對齊 W1 R6-T1+T2 pattern（同 tests mod / 同 super::* import / 同 G7-01 default / 同 bilingual docstring）✓
+4. lib test 2487 → 2490 (+3) 是 R6-T3 新加 test，非 regression ✓
+5. V055 lesson form-extension：W2 是 Rust 改動不涉 V### migration 但 Linux SSH cargo verify 在 PM commit 後仍強制 ✓
+
+### 2 LOW finding（純 doc-clarification，0 code action 必要）
+1. E1 sign-off §1 module note 寫 helper 採 `pub(super)`，實作為 `pub(crate)`（pub(crate) 比 pub(super) 寬一點點但仍 crate-internal，不擴大公開 API）
+2. E1 sign-off §8.1 #3(b) 寫 `young: rc.kelly.young, mature: rc.kelly.mature`，實作 `young_threshold: risk_config.kelly.young_threshold, mature_threshold: risk_config.kelly.mature_threshold`（doc shorthand 不對應 Rust struct field 全名）
+
+### E2 教訓追加（lesson 27-28）
+
+27. **R0-T0 純 refactor 反問策略：byte-equal proof 走 `diff <(git show OLD:file) <(NEW file)`**。E2 拒「重新讀 W1 文檔 + 信任 E1 claim byte-equal」的 happy-path 答案；必跑命令式 diff 對齊 line range。本 W2 跑 3 helpers diff 出 3 處 visibility widening 是 acceptable refactor（pub(crate) ⊂ crate-internal），但若 diff 跑出 method body 改動（含 1 行邏輯 if/else 順序變化）= 立即 RETURN BLOCKER。**抽象**：refactor PR 必 diff line-by-line over claimed-equal segment，不只看 LOC delta。
+
+28. **R6-T3 實 wire 4 點對齊驗證：Sign-off vs Code 微 drift 是 LOW finding 不 RETURN** — Sign-off §8.1 #3(b) 寫 `young: rc.kelly.young, mature: rc.kelly.mature` shorthand，code 實際是 `young_threshold: risk_config.kelly.young_threshold, mature_threshold: risk_config.kelly.mature_threshold` 全名。E2 方法：(a) 對 KellyConfig struct definition grep `^    pub `（9 fields 確認 with `young_threshold` / `mature_threshold` 全名）+ (b) 對 `risk_config.kelly` struct grep `young_threshold|mature_threshold` 確認 source struct 一致 + (c) 對 cargo build verify compile success（field name 不對 Rust 不過 compile）。三層驗證後 = doc shorthand drift 是 LOW（不 RETURN）+ commit 後 PR 順帶 fix。**抽象**：sign-off shorthand vs code full-name drift 系統性出現在 Rust struct 改動；E2 必跑「struct definition + source struct + cargo compile」三層驗證才放行 LOW finding。Round 5 V055 LOC 1265 vs 1316 是 file-level drift，本 W2 是 token-level (field name shorthand) drift，是 same lesson family N=3。

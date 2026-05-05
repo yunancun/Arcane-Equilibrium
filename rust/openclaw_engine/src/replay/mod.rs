@@ -105,6 +105,7 @@
 //!       R20-P2b-S9 (mac_policy_guard, this commit) +
 //!       R20-P2b-T1 (cli + fixture_loader + runner + report_writer, Wave 4).
 
+pub mod apply_fill;
 pub mod cli;
 pub mod fixture_loader;
 pub mod forbidden_guard;
