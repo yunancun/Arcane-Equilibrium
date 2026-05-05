@@ -1,7 +1,77 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-04（REF-20 closed-with-known-gap，Sprint A R1+R2+R3 in flight；Codex review 揭 4 P0/P1 gap → Gap Closure Plan V1）
+> 最後更新：2026-05-05（REF-20 Sprint A closed-with-real-evidence；6-layer blocker chain 全排除；plan §6.R3 acceptance 4 表 row > 0 達成）
+
+### REF-20 Sprint A closed-with-real-evidence — 2026-05-05 02:05 UTC
+
+**Sprint A 完成定義**：plan §6.R3 acceptance "All four must be > 0 after the smoke run" 真實達成。
+
+**最終驗證（QA round 6 final smoke E2E）**：
+```sql
+SELECT COUNT(*) FROM replay.experiments;       -- 4
+SELECT COUNT(*) FROM replay.run_state;          -- 4
+SELECT COUNT(*) FROM replay.report_artifacts;   -- 1
+SELECT COUNT(*) FROM replay.simulated_fills;    -- 1
+```
++ Wave 9 safety (0 trading.fills leak, 0 critical replay audit) + FK lineage 4/4 valid。
+
+**8 commit chain**（按時序）：
+1. `c1ab7ea9` R0 (truth reset) + R1 (runtime usability：binary path 5-step fallback + /api/v1/replay/health + restart_all env export + audit script fix + 13 unit tests)
+2. `353db3fe` R2 (manifest registry：970 LOC `experiment_registry.py` + `/experiments/register` + `/run` FK guard SELECT FOR SHARE + `/manifest/verify` secrets fallback + 29 tests + canonical_bytes contract)
+3. `66b650ea` R3 IMPL (writer 602 LOC + finalize 593 LOC + 19 tests)
+4. `cad8ed84` Hotfix L1: Python 3.12 `from __future__ import annotations` + lazy import → FastAPI body 422
+5. `e9d547c0`+`2ae93992` Infra fix L2: `OPENCLAW_ENGINE_BINARY_SHA` env injection in restart_all
+6. `f51f4e2e` R6+R7 fixes L3+L4: real HMAC sign + sibling key.hex（撞 Sprint 1 Track B fail-closed verifier）+ stderr 寫 disk file (silent-dead 反模式) + 環境注入 + 24 tests + E2 round 1 RETURN 修 (FINDING-1 live profile gate + FINDING-2 SEC-04 detail leak)
+7. `3a425447` R8 hotfix L5: signing key provisioning（restart_all 注入 `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env 指 in-tree dev key.hex）
+8. `2531c011` R9 hotfix L6: `spawn_replay_runner` 對 `exit=0 within poll grace` 改 sentinel pid=-1 (success path)；`/run` response 加 `subprocess_completed_in_poll` flag
+
+**6-layer blocker chain（每層發現後 fix）**：
+- L1 Python 3.12 `from __future__ import annotations` 在 lazy-imported Pydantic body 下 ForwardRef 解析失敗 → FastAPI body 推 Query → 422
+- L2 `OPENCLAW_ENGINE_BINARY_SHA` env 缺 → V049 chk_replay_experiments_engine_sha_linux fail-closed → register 503
+- L3 `route_helpers.build_default_manifest_payload` 寫 `placeholder_signature_wave6_v042_pending` 撞 Sprint 1 Track B (commit `edf33c0`) `manifest_signer.rs:548-557` fail-closed verifier → subprocess exit=1
+- L4 `subprocess.DEVNULL` 隱藏 verify error → operator 必 manual reproduce (silent-dead 反模式)
+- L5 `_resolve_manifest_signing_key()` 3-tier chain (env override / secrets dir / fail-closed) 但 Linux 沒 provision → ValueError manifest_signing_key_unavailable
+- L6 `spawn_replay_runner` 對 subprocess `exit=0 within poll grace` 回 `(None, "spawn_died_early:exit=0")` failure；synthetic walker 10 events <1.5s 跑完是常態 → 永遠 503
+
+**review chain**：
+- PA design × 2 (R3 task DAG + R6 task DAG)
+- E2 review × 4 round (R1 / R2 round 1+2 / R3 round 1+2 / R6 round 1)
+- E3 audit × 3 (R2 / R3 / R6 — 3 個 PASS-WITH-FIX)
+- E4 regression × 4 (R1 / R2 / R3 / R6)
+- QA round × 6 (round 1 BLOCK Layer 1 → fix → round 2 BLOCK Layer 2 → fix → round 3 BLOCK Layer 3+4 → fix → round 4 BLOCK Layer 5 → fix → round 5 BLOCK Layer 6 → fix → round 6 PASS)
+
+**LOC final** (CLAUDE.md §九 1500 hard cap)：
+- replay_routes.py: 1494 → 1500 (exact cap)
+- experiment_registry.py: NEW 970+
+- report_route.py: NEW 506
+- run_finalize_route.py: NEW 593
+- simulated_fills_writer.py: NEW 602
+- route_helpers.py: 1224 → 1498
+- manifest_signer.py: 443 → 757
+- restart_all.sh: 470 → 510
+
+**Sprint A 仍未證明（per plan §11，Sprint B-D scope）**：A4 actual strategy path / A5 actual risk path / A6 fee-aware PnL / A7 confidence honesty / A8 UI usable / A10 ML/Dream advisory boundary。
+
+**重要 invariant 維持**：
+- `replay.simulated_fills.evidence_source_tier='synthetic_replay'` 仍**不可作 ML training data**（CLAUDE.md §九 既登記 non-training surface）
+- canonical_bytes cross-language byte-equal contract（Sprint 1 F1 retrofit invariant）13/13 PASS 全程維持
+- 0 hard-boundary mutation
+- 0 cross-platform path leak
+- Wave 9 safety SQL 全程 GREEN（0 trading.fills leak, 0 critical replay audit）
+
+**P2/P3 follow-up tickets land in TODO.md**：
+- P2-LINUX-FIXTURE-UUID, P2-GRAFANA-DATA-WRITER, P2-FASTAPI-DEPS-SHARED-STATE-POLLUTION, P2-ROUTE-HELPERS-SPLIT
+- P2-R3-FOLLOW-UP-1 (V046 enum extension), P2-R3-FOLLOW-UP-3 (exception detail genericization), P2-R3-FOLLOW-UP-5 (V046 byte_size CHECK)
+- P3-PYDANTIC-V2-MIGRATE-REPLAY, P3-R3-FOLLOW-UP-4 (PID-reuse create_time identity)
+- P0-PROCESS-1 (E4 SOP must include Linux pytest, Python 3.12 parity)
+
+**Sprint B-D pending**：
+- B = R4 (UI enable: `/static/tab-paper.html` `subtab-btn-replay` 從 disabled 改 backend-readiness gated) + R5 (real decision/risk replay path: extract pure components + ReplayStrategyAdapter + ReplayRiskAdapter)
+- C = R6 (fee/execution calibration: maker/taker fee model + spread/slippage + execution_confidence label none/limited/calibrated) + R7 (MLDE/Dream advisory integration)
+- D = R8 (maintenance: cron jobs + healthcheck probes + artifact TTL) + R9 (reality-calibrated usability sign-off final)
+
+---
 
 ### REF-20 Gap Closure Plan V1 — Sprint A 啟動（2026-05-04）
 

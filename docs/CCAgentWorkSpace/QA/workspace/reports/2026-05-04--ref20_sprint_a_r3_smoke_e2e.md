@@ -1344,4 +1344,317 @@ elif pg_err == "spawn_died_early:exit=0":
 
 ---
 
+## §19 RETRY LOG — Round 6 FINAL (post `2531c011` Layer 6 fix; 2026-05-05 02:05 UTC)
+
+### §19.1 Layer 6 fix `2531c011` deploy verified
+
+**Pre-flight 三角證據**：
+
+| 項目 | 證據 |
+|---|---|
+| Git tree HEAD | `2531c01184dc17523db12bb53d023c1733eb1c5c`（Mac=Linux=origin/main 同步） |
+| Working tree | `git status --porcelain` = empty（clean） |
+| Commit chain | `2531c011`（layer 6 hotfix）→ `3a425447`（round 8 SIGNING_KEY env）→ `f51f4e2e`（round 6+7 HMAC sign + stderr）→ `e9d547c0`（round 4 verify）→ `2ae93992`（ENGINE_BINARY_SHA env） |
+| API process started | 2026-05-05 02:03:46 UTC (pre-test, post-restart) |
+| API_PID | 831234 |
+| ENV: OPENCLAW_ENGINE_BINARY_SHA | `38c72877e526bfede74d57e6c9a90a682d323a2f80a0a9eef0e547f4d048d2f1` ✅ |
+| ENV: OPENCLAW_REPLAY_FIXTURE_DEFAULT | `/home/ncyu/BybitOpenClaw/srv/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json` ✅ |
+| ENV: OPENCLAW_REPLAY_SIGNING_KEY_FILE | `/home/ncyu/BybitOpenClaw/srv/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/key.hex` ✅ |
+
+3 env all injected · git clean · binary deployed · API process started.
+
+### §19.2 Phase 1-7 結果（每 step HTTP / SQL count / file existence）
+
+#### Phase 1 — Login
+
+```
+HTTP=200
+{"status":"ok","username":"398903348"}
+```
+
+✅ Login 成功；cookie 寫入 `/tmp/r3smoke6_cookie.txt`。
+
+#### Phase 2 — Register experiment
+
+```
+EXP_KEY=r3smoke6-1777939521
+HASH64=0000000000000000000000000000000000000000000000000000000000000000
+HTTP=200
+{"ok":true,"data":{"experiment_id":"1ba4f26c-25c1-45a2-8b5b-eafad565d1d4",
+"manifest_hash":"95e44198d52108d7fc0c27731cf08b4e64e27ed7ebcd757d5e584404bc87bf1c",
+"status":"created","created_at":"2026-05-05T02:05:22.009302+02:00",
+"idempotency_hit":false},"degraded":false,"reason":null,"is_simulated":false,"data_category":"replay_lab"}
+```
+
+✅ Register 成功，EXPERIMENT_ID = `1ba4f26c-25c1-45a2-8b5b-eafad565d1d4`，manifest_hash 計算正常。
+
+#### Phase 3 — POST /run
+
+```
+HTTP=200
+{"ok":true,"data":{"run_id":"f7df9b917b094ac3ab8da9d15e7fa928",
+"experiment_id":"1ba4f26c-25c1-45a2-8b5b-eafad565d1d4",
+"started_at_ms":1777939526566,
+"status":"running",
+"subprocess_pid":null,
+"subprocess_completed_in_poll":true,
+"wiring_status":"pg_advisory_lock_path_active",
+"output_dir":"/tmp/openclaw/replay_artifacts/f7df9b917b094ac3ab8da9d15e7fa928"},
+"degraded":false,"reason":null,"is_simulated":false,"data_category":"replay_lab"}
+```
+
+✅ **LAYER 6 FIX VERIFIED 真實 ACTIVE**：
+- HTTP 200（不再 503）
+- `subprocess_completed_in_poll: true`（新 envelope flag working）
+- `subprocess_pid: null`（Layer 6 sentinel `pid=-1` 在 response 序列為 null）
+- `status: "running"`（route 不誤映射 exit=0 → failed）
+- run_id = `f7df9b917b094ac3ab8da9d15e7fa928`
+
+#### Phase 4 — Disk artifacts (跳過 wait，因 completed_in_poll=true)
+
+```
+/tmp/openclaw/replay_artifacts/f7df9b917b094ac3ab8da9d15e7fa928/
+├── key.hex                   (65 bytes,  r------)
+├── manifest.json             (440 bytes)
+├── replay_report.json        (866 bytes)
+├── replay_report.summary.txt (316 bytes)
+└── replay_runner.stderr      (179 bytes)
+```
+
+✅ All 5 expected files written.
+
+`replay_report.json`:
+```json
+{
+  "schema_version": 1,
+  "manifest_id": "1ba4f26c-25c1-45a2-8b5b-eafad565d1d4",
+  "execution_confidence": "none",
+  "result": {
+    "status": {"kind": "completed"},
+    "fills": [
+      {"ts_ms": 1714521600000, "symbol": "BTCUSDT",
+       "side": "long", "qty": 1.0, "price": 65050.0,
+       "evidence_source_tier": "synthetic_replay"}
+    ],
+    "pnl_summary": {"events_processed": 10, "fills_emitted": 1,
+                    "starting_balance": 10000.0, "ending_balance": 10630.0,
+                    "net_pnl": 630.0},
+    "diagnostics": {"guard_enforce_runtime_calls": 10,
+                    "last_action_label": "on_event:BTCUSDT@1714522140000",
+                    "abort_reason": null}
+  }
+}
+```
+
+`replay_runner.stderr`:
+```
+replay_runner: completed manifest_id=1ba4f26c-25c1-45a2-8b5b-eafad565d1d4 status=completed json=/tmp/openclaw/replay_artifacts/f7df9b917b094ac3ab8da9d15e7fa928/replay_report.json
+```
+
+✅ subprocess truly completed: 10 events / 1 fill / +630 net_pnl / 0 abort.
+
+#### Phase 5 — POST /finalize
+
+```
+HTTP=200
+{"ok":true,"data":{"run_id":"f7df9b917b094ac3ab8da9d15e7fa928",
+"experiment_id":"1ba4f26c-25c1-45a2-8b5b-eafad565d1d4",
+"status":"completed",
+"report_artifact_id":"ce0cc720fb854f569db9015be929c944",
+"report_artifact_registered":true,
+"fills_inserted":1,
+"fills_skipped":0,
+"fills_truncated":0,
+"writer_errors":["strategy_name_missing_from_v049_manifest_jsonb"]},
+"degraded":false,"reason":null,"is_simulated":false,"data_category":"replay_lab"}
+```
+
+✅ **/finalize 接受 subprocess_pid=NULL 路徑（Layer 7 風險預警 NOT triggered）**：
+- HTTP 200
+- `fills_inserted: 1`（synthetic walker 1 fill 真實落 DB）
+- `report_artifact_id`: `ce0cc720fb854f569db9015be929c944`（FIRST EVER WRITTEN）
+- `report_artifact_registered: true`
+- `status: "completed"`
+
+⚠️ **小警告（NOT BLOCKER）**：`writer_errors: ["strategy_name_missing_from_v049_manifest_jsonb"]`
+- 原因：smoke payload 的 `manifest_jsonb={"smoke":true}` 沒含 strategy/symbol 字段
+- 影響：simulated_fills.strategy_name 預設為 `unknown_strategy`
+- 風險：低 — Plan §6.R3 acceptance 不要求 strategy_name 正確，只要求 row > 0
+- Sprint B 建議：register endpoint 把 strategy/symbol field 自動注入 manifest_jsonb
+
+#### Phase 6 — 4 表 acceptance SQL（**SPRINT A R3 MOMENT OF TRUTH**）
+
+```
+experiments | run_state | report_artifacts | simulated_fills
+4           | 4         | 1                | 1
+```
+
+🟢 **PASS — 4/4 全 > 0**：
+
+| 表 | 累積 row | round 6 新增 | 狀態 |
+|---|---:|---:|---|
+| `replay.experiments` | 4 | +1 | ✅ Round 4 起持續累積（1→3→3→4） |
+| `replay.run_state` | 4 | +1（status=completed）| ✅ Round 6 首次出現 status=completed（之前都 failed） |
+| `replay.report_artifacts` | 1 | +1 | 🆕 **FIRST EVER WRITTEN** |
+| `replay.simulated_fills` | 1 | +1 | 🆕 **FIRST EVER WRITTEN** |
+
+**Sprint A R3 acceptance 全條件達成 — 不需任何 partial credit**。
+
+#### Phase 7 — Wave 9 safety + FK lineage
+
+**(7a) Wave 9 safety**：
+
+| 條目 | 真實值 | 目標 | 狀態 |
+|---|---:|---:|---|
+| `trading.fills` last 15 min（leak detection） | 0 | = 0（必嚴格） | 🟢 PASS |
+| `learning.governance_audit_log` `event_type LIKE 'replay_%'` last 15 min | 0 | < high severity | 🟢 PASS |
+
+✅ **0 trading.fills leak**（replay 完全隔離 production trading 平面）
+✅ **0 critical replay audit row**（無 governance violation triggered）
+
+註：plan 給 SQL 用 `severity IN ('high','critical')` 但 `learning.governance_audit_log` schema **沒 severity column**（QA round 3 教訓 schema verify 後 SQL 移除 severity 條件，只用 event_type filter）。
+
+**(7b) FK lineage 4/4 valid**：
+
+| run_id | exp_id (run_state.manifest_id == experiments.experiment_id) | timeframe | status | exit_code | started_at |
+|---|---|---|---|---|---|
+| `f7df9b91-7b09-4ac3-ab8d-a9d15e7fa928` | `1ba4f26c-25c1-...-eafad565d1d4` ✅ matches | 1m | **completed** | 0 | 2026-05-05 02:05:26 |
+| `1ef3a488-...` | `be2c51ff-...` ✅ matches | 1m | failed | — | 2026-05-05 01:44:01 (round 5) |
+| `09da3571-...` | `bbcdff7e-...` ✅ matches | 1m | failed | — | 2026-05-05 01:32:17 (round 4) |
+| `8817ed9f-...` | `94770e9e-...` ✅ matches | 1m | failed | — | 2026-05-04 23:50:08 (round 3) |
+
+✅ FK 4/4 全有效 + status progression: 3 failed (round 3-5) → 1 completed (round 6) — 證明 progression 真實。
+
+**(7c) report_artifacts 行內容**：
+
+| artifact_id | run_id | artifact_type | byte_size | created_at |
+|---|---|---|---:|---|
+| `ce0cc720-fb85-4f56-9db9-015be929c944` | `f7df9b91-...` | `pnl_summary` | 866 | 2026-05-05 02:05:37 |
+
+✅ FK 鏈：report_artifacts.run_id → run_state.run_id ✅；artifact_type='pnl_summary'（V050 design）；byte_size=866（與 disk replay_report.json 一致）。
+
+**(7d) simulated_fills 行內容**：
+
+| sim_fill_id | experiment_id | idempotency_key | ts_ms | symbol | strategy_name | side | qty | price | liquidity_role | evidence_source_tier | execution_model_version |
+|---|---|---|---:|---|---|---|---:|---:|---|---|---|
+| `85bbfe20-59a4-4dd8-9788-01fcb777ebd6` | `1ba4f26c-...` | `f7df9b917b094ac3ab8da9d15e7fa928:0` | 1714521600000 | BTCUSDT | unknown_strategy | long | 1 | 65050 | taker | **synthetic_replay** | synthetic_v1 |
+
+✅ FK 鏈：simulated_fills.experiment_id → experiments.experiment_id ✅；idempotency_key=`<run_id>:<idx>` deterministic（V050 design：rerun 不雙重寫）；evidence_source_tier=`synthetic_replay` 符合 CLAUDE.md §九 non-training surface 要求。
+
+### §19.3 Sprint A acceptance verdict — 4/4 PASS
+
+🟢 **SPRINT A R3 ACCEPTANCE: ALL 4/4 GREEN**
+
+| Plan §6.R3 acceptance condition | 達成 |
+|---|---|
+| (1) `replay.experiments` row > 0 | ✅ 4 row |
+| (2) `replay.run_state` row > 0 | ✅ 4 row（含 1 completed）|
+| (3) `replay.report_artifacts` row > 0 | ✅ 1 row（first ever）|
+| (4) `replay.simulated_fills` row > 0 | ✅ 1 row（first ever，evidence_source_tier=synthetic_replay）|
+
+**Sprint A R3 acceptance moment of truth — 已達**。
+
+### §19.4 Wave 9 safety + FK lineage（GREEN）
+
+| 安全項 | 真實值 | 狀態 |
+|---|---:|---|
+| `trading.fills` leak last 15m | 0 row | 🟢 GREEN |
+| `learning.governance_audit_log` replay_* high/critical last 15m | 0 row | 🟢 GREEN |
+| FK lineage `run_state.manifest_id` → `experiments.experiment_id` | 4/4 valid | 🟢 GREEN |
+| FK lineage `report_artifacts.run_id` → `run_state.run_id` | 1/1 valid | 🟢 GREEN |
+| FK lineage `simulated_fills.experiment_id` → `experiments.experiment_id` | 1/1 valid | 🟢 GREEN |
+| `evidence_source_tier=synthetic_replay` 不污染 ML training | tier 嚴格 | 🟢 GREEN |
+| `idempotency_key` 設計（`<run_id>:<idx>`） | rerun-safe | 🟢 GREEN |
+
+### §19.5 Layer 7 揭示（**NONE — 無新 BLOCKER**）
+
+Round 6 預警的 Layer 7 風險全部 **NOT triggered**：
+
+| 預警項 | 預期風險 | 實際結果 |
+|---|---|---|
+| `/finalize` 對 `subprocess_pid IS NULL` 容忍度 | 可能 503 / 410 拒接 NULL pid | ✅ HTTP 200 + fills_inserted=1，完全接受 |
+| synthetic walker fills array 為 0 | simulated_fills row=0 不達 acceptance | ✅ fills_emitted=1 in report，DB row=1 |
+| `subprocess_completed_in_poll: true` 路徑下 status='running' 是否 confuse 後續邏輯 | 可能 race | ✅ /finalize 把 status=running → completed 平滑切換 |
+
+**唯一邊角警告**（非 BLOCKER）：
+- `writer_errors: ["strategy_name_missing_from_v049_manifest_jsonb"]` — 因 smoke payload manifest_jsonb 不含 strategy；不影響 row count，但 ML training 將看到 `strategy_name=unknown_strategy`。Sprint B 改 register endpoint 把 strategy/symbol 自動注入 manifest_jsonb。
+
+**Sprint A 無 layer 7 揭示 → 無新 P0 BLOCKER → 可進 Sprint B**。
+
+### §19.6 Sprint A close commit + Sprint B 啟動條件 recommendations
+
+#### (A) PM 後續 close commit 內容建議
+
+PM 收到本報告後可進行 Sprint A close commit（QA 不執行，QA 守 read-mostly 邊界）：
+
+1. **更新 CLAUDE.md §三 REF-20 IMPL 狀態**：
+   - 從 `closed-with-known-gap (Sprint A in flight)` → `Sprint A R3 closed (4/4 acceptance verified)`
+   - 加上 round 6 final commit `2531c011` 與本 QA report path 為 evidence
+
+2. **更新 TODO.md REF-20 entry**：
+   - 標 R3 acceptance ✅ DONE（commit `2531c011` + QA round 6 PASS）
+   - 啟動 Sprint B (R4-R5) 條目
+
+3. **記錄 Sprint A close gate v3 完成（含 D 項）**：
+   - (A) hermetic pytest gate ✅
+   - (B) Linux runtime smoke (`OPENCLAW_REPLAY_E2E_SMOKE=1`) ✅（每次 round 都跑）
+   - (C) `/proc/$API_PID/environ` 3 env grep ✅
+   - (D) Route /run E2E acceptance test ✅（round 6 真實 PASS — 走完整 register → /run → finalize → 4 表 row > 0 路徑）
+
+4. **REF-20 evidence trail**：將 round 1-6 演化壓縮成「6 layer blocker chain 漸進排除」做 future Sprint A-D 回顧樣本：
+   - L1 from __future__ annotations ✓ (round 2 cad8ed84)
+   - L2 ENGINE_BINARY_SHA missing ✓ (round 4 e9d547c0/2ae93992)
+   - L3 placeholder signature ✓ (round 6+7 f51f4e2e)
+   - L4 stderr DEVNULL ✓ (round 6+7 f51f4e2e)
+   - L5 signing key not provisioned ✓ (round 8 3a425447)
+   - L6 exit=0 误判 failure ✓ (round 9 2531c011)
+
+#### (B) Sprint B (R4-R5) 啟動條件 — 全部達成
+
+| 條件 | 狀態 |
+|---|---|
+| Sprint A R3 4/4 acceptance | 🟢 PASS |
+| Wave 9 safety 0 trading.fills leak | 🟢 PASS |
+| FK lineage 全 valid（experiments / run_state / report_artifacts / simulated_fills 4 條 FK 鏈） | 🟢 PASS |
+| `evidence_source_tier='synthetic_replay'` 不污染下游 ML pipeline | 🟢 PASS（CLAUDE.md §九 non-training surface 規則已 ship） |
+| Plan V1 Sprint B scope (R4-R5: real backtest engine + IntentProcessor wiring) | 待 PM 派 PA 啟動 |
+
+**Sprint B 啟動 0 BLOCKER**。
+
+#### (C) 後續 follow-up（非 BLOCKER but Sprint B 應處理）
+
+1. **P3 — register endpoint 自動注入 strategy/symbol 到 manifest_jsonb**
+   - 當前：smoke payload 沒填 strategy/symbol → manifest_jsonb 缺 → simulated_fills.strategy_name='unknown_strategy'
+   - 修法：register endpoint accept top-level `strategy` / `symbol` field 並注入 manifest_jsonb（同時保留向後相容性）
+   - 影響：替 Sprint B+C 真實策略 backtest 預備正確 strategy_name，避免 unknown_strategy 累積
+
+2. **P3 — V050 manifest_jsonb fail-soft strategy 字段提取**
+   - replay_writer.py 寫 simulated_fills 時 fall-back 到 `'unknown_strategy'` 是 fail-soft，但持續累積 unknown_strategy row 會污染 attribution analysis
+   - 建議：writer 看到 manifest_jsonb 缺 strategy 時 emit `governance_audit_log` warn entry（不阻斷寫盤）
+
+3. **P3 — Sprint A 手動 verify 完成後加 cron 化**
+   - 建議：把本 round 6 acceptance pipeline（Phase 1-7）寫成 `helper_scripts/canary/replay_e2e_smoke.py`，每日 1 次跑 sanity check
+   - 與 healthcheck 框架對齊（CLAUDE.md §七 被動等待 TODO 必附 healthcheck）
+
+### §19.7 結論
+
+🟢 **Sprint A R3 ACCEPTANCE: PASS**
+🟢 **Sprint A 達成 close 條件**
+🟢 **Sprint B 啟動 0 BLOCKER**
+
+push back PM 進行 close commit + Sprint B 派工。QA round 6 是 Sprint A R3 final acceptance，後續無需 round 7。
+
+**6-Layer blocker chain 100% 排除 evidence**：
+- 4 表 acceptance: 4/4 GREEN（first-ever simulated_fills + report_artifacts row）
+- subprocess truly completed (rc=0, 10 events, 1 fill, +630 PnL)
+- HMAC sign + verify cycle 工作
+- stderr disk diagnostic 工作
+- /run + /finalize chain 工作
+- Wave 9 safety GREEN
+- FK lineage 4/4 valid
+
+REF-20 進入「**closed-with-real-evidence**」label — Sprint A 完成。Sprint B (Wave 4-5 R4-R5) 由 PM 派 PA 啟動。
+
+---
+
 
