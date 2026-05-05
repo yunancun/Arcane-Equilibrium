@@ -118,3 +118,72 @@ def test_fixture_uri_override_whitespace_trimmed_then_default_used(
         experiment_id="exp", output_dir=tmp_path / "rx",
     )
     assert payload["fixture_uri"] == str(default_fixture)
+
+
+def test_manifest_fixture_uri_overrides_server_default(
+    monkeypatch, tmp_path: Path,
+):
+    """Persisted V049 manifest fixture_uri wins over server smoke default.
+    V049 manifest_jsonb.fixture_uri 覆蓋服務端 smoke default。
+    """
+    import replay.experiment_registry as registry
+
+    manifest_fixture = tmp_path / "historical_btcusdt.json"
+    manifest_fixture.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("OPENCLAW_REPLAY_FIXTURE_DEFAULT", "/server/smoke.json")
+    monkeypatch.setattr(
+        registry,
+        "lookup_replay_manifest_runtime_config",
+        lambda cur, experiment_id: {
+            "data_tier": "S2",
+            "manifest_jsonb": {
+                "symbol": "BTCUSDT",
+                "strategy": "grid_trading",
+                "timeframe": "1m",
+                "data_tier": "S2",
+                "fixture_uri": str(manifest_fixture),
+            },
+        },
+    )
+    monkeypatch.setattr(
+        registry,
+        "lookup_replay_config_blob",
+        lambda cur, experiment_id: {"strategy_params": {}, "risk_overrides": {}},
+    )
+
+    payload = build_default_manifest_payload(
+        experiment_id="exp", output_dir=tmp_path / "rx", cur=object(),
+    )
+    assert payload["fixture_uri"] == str(manifest_fixture)
+    assert payload["strategy"] == "grid_trading"
+
+
+def test_manifest_fixture_uri_rejects_control_chars(
+    monkeypatch, tmp_path: Path,
+):
+    """Control characters in persisted fixture_uri fail loud.
+    manifest fixture_uri 內含控制字符時 fail loud。
+    """
+    import replay.experiment_registry as registry
+
+    monkeypatch.setattr(
+        registry,
+        "lookup_replay_manifest_runtime_config",
+        lambda cur, experiment_id: {
+            "data_tier": "S2",
+            "manifest_jsonb": {
+                "strategy": "grid_trading",
+                "fixture_uri": "bad\npath",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        registry,
+        "lookup_replay_config_blob",
+        lambda cur, experiment_id: {"strategy_params": {}, "risk_overrides": {}},
+    )
+
+    with pytest.raises(ValueError, match="replay_manifest_fixture_uri_invalid"):
+        build_default_manifest_payload(
+            experiment_id="exp", output_dir=tmp_path / "rx", cur=object(),
+        )

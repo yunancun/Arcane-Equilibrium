@@ -123,6 +123,10 @@
     color: #34d399;
     box-shadow: inset 0 -4px 0 0 rgba(34,197,94,0.4);
   }
+  .tab[data-tab="replay"] {
+    color: #38bdf8;
+    box-shadow: inset 0 -4px 0 0 rgba(14,165,233,0.42);
+  }
 </style>
 </head>
 <body>
@@ -132,7 +136,7 @@
   <span class="logo">&#x1F99E;</span>
   <div class="dot" id="api-dot"></div>
   <h1>OpenClaw Trading Console</h1>
-  <span class="tag tag-blue">Paper 模拟</span>
+  <span class="tag tag-blue">Replay 回测</span>
   <span class="tag tag-green" id="mode-tag">shadow_only</span>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
@@ -147,19 +151,19 @@
   <!-- ─── Sidebar ─── -->
   <div class="sidebar">
 
-    <!-- Live / Paper panel switcher buttons / 实盘/模拟面板切换按钮 -->
+    <!-- Live / Demo panel switcher buttons / 实盘/Demo 面板切换按钮 -->
     <div style="display:flex;gap:4px;margin-bottom:8px">
       <button id="spbtn-live" onclick="toggleSidePanel('live')"
         style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.15);color:#ef4444;cursor:pointer">
         🔴 Live
       </button>
-      <button id="spbtn-paper" onclick="toggleSidePanel('paper')"
+      <button id="spbtn-paper" onclick="toggleSidePanel('demo')"
         style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer">
-        🧪 Paper
+        🧪 Demo
       </button>
     </div>
 
-    <!-- Switchable Live / Paper panel -->
+    <!-- Switchable Live / Demo panel -->
     <div id="side-panel-live" class="side-panel active">
       <h2 style="margin:0 0 5px">&#x1F534; Live / 实盘</h2>
       <div class="mc" id="live-section" style="opacity:0.5">
@@ -186,7 +190,7 @@
     </div>
 
     <div id="side-panel-paper" class="side-panel" style="display:none">
-      <h2 style="margin:0 0 5px">&#x1F4B0; Paper / 模拟</h2>
+      <h2 style="margin:0 0 5px">&#x1F3E6; Demo / 演示</h2>
       <div class="mc">
         <div class="mc-label">Balance</div>
         <div class="mc-val" id="s-paper-balance" style="font-size:14px">--</div>
@@ -272,10 +276,11 @@ const _v = BUILD_TS;
 const TABS = [
   // ── 儀表板 ──────────────────────────────────────────────────────
   { id: 'system',     label: '总览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
+  { id: 'replay',     label: '回测 Replay',      labelEn: 'Replay',    icon: '&#x23F1;',  src: `/static/tab-replay.html?v=${_v}` },
   // ── 交易环境：低风险到高风险 / Trading environments: low-risk to high-risk ──
   // FIX-43: split into direct Demo + Paper tabs (eliminate double-iframe nesting)
   // FIX-43：拆為直接 Demo + Paper 標籤（消除雙層 iframe 嵌套）
-  { id: 'paper',      label: '模拟 Paper',       labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}` },
+  { id: 'paper',      label: 'Legacy Paper',     labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}`, requiresPaperEngine: true },
   { id: 'demo',       label: '演示 Demo',        labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
   { id: 'live',       label: '实盘 Live',        labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
   // ── 市場與策略 ───────────────────────────────────────────────────
@@ -300,6 +305,7 @@ const TABS = [
 ];
 
 let currentTab = 'system';
+let paperEngineGuiEnabled = false;
 
 // ─── Build Tab Bar ────────────────────────────────────────────
 function buildTabs() {
@@ -311,6 +317,10 @@ function buildTabs() {
     const tab = document.createElement('div');
     tab.className = 'tab' + (i === 0 ? ' active' : '');
     tab.dataset.tab = t.id;
+    if (t.requiresPaperEngine) {
+      tab.dataset.requiresPaperEngine = 'true';
+      tab.style.display = 'none';
+    }
     tab.innerHTML = '<span class="tab-icon">' + t.icon + '</span>' + t.label;
     tab.onclick = () => switchTo(t.id);
     bar.appendChild(tab);
@@ -319,6 +329,7 @@ function buildTabs() {
     const frame = document.createElement('iframe');
     frame.id = 'f-' + t.id;
     frame.style.display = i === 0 ? 'block' : 'none';
+    if (t.requiresPaperEngine) frame.dataset.requiresPaperEngine = 'true';
     // Use & if src already has query params (e.g. ?embed=1), otherwise use ?
     // 若 src 已有查询参数则用 &，否则用 ?
     const sep = t.src.includes('?') ? '&' : '?';
@@ -329,6 +340,10 @@ function buildTabs() {
 }
 
 function switchTo(tabId) {
+  const target = TABS.find(t => t.id === tabId);
+  if (target && target.requiresPaperEngine && !paperEngineGuiEnabled) {
+    tabId = 'replay';
+  }
   currentTab = tabId;
   // Update tab bar
   document.querySelectorAll('.tab').forEach(t =>
@@ -349,6 +364,35 @@ function switchTo(tabId) {
 
 buildTabs();
 
+function applyPaperEngineGuiSetting(enabled) {
+  paperEngineGuiEnabled = !!enabled;
+  document.querySelectorAll('.tab[data-requires-paper-engine="true"]').forEach(node => {
+    node.style.display = paperEngineGuiEnabled ? '' : 'none';
+  });
+  TABS.filter(t => t.requiresPaperEngine).forEach(t => {
+    const frame = document.getElementById('f-' + t.id);
+    if (!frame) return;
+    frame.style.display = paperEngineGuiEnabled && currentTab === t.id ? 'block' : 'none';
+  });
+  if (!paperEngineGuiEnabled && currentTab === 'paper') {
+    switchTo('replay');
+  }
+}
+
+async function loadPaperEngineGuiSetting() {
+  const d = await api('/api/v1/settings/paper-engine');
+  const data = d && d.data ? d.data : d;
+  applyPaperEngineGuiSetting(!!(data && data.enabled));
+}
+
+window.addEventListener('message', function(ev) {
+  if (ev.origin !== window.location.origin) return;
+  if (!ev.data || ev.data.type !== 'openclaw-paper-engine-setting') return;
+  applyPaperEngineGuiSetting(!!ev.data.enabled);
+});
+
+loadPaperEngineGuiSetting();
+
 // ─── Clock ────────────────────────────────────────────────────
 setInterval(() => {
   const d = new Date();
@@ -363,14 +407,14 @@ if (user) document.getElementById('user-label').textContent = user;
 // 认证状态由 HttpOnly cookie 决定，非 JS 可访问的 token。
 document.getElementById('s-token-status').textContent = 'cookie-auth';
 
-// ─── Side Panel Toggle (Live ↔ Paper) ────────────────────────
+// ─── Side Panel Toggle (Live ↔ Demo) ─────────────────────────
 // Shows the clicked panel directly (not toggle to opposite)
 // 直接顯示被點擊的面板（不是切換到對面）
 let _sidePanel = 'live';
 function toggleSidePanel(clicked) {
-  _sidePanel = clicked;
+  _sidePanel = clicked === 'paper' ? 'demo' : clicked;
   document.getElementById('side-panel-live').style.display = _sidePanel === 'live' ? '' : 'none';
-  document.getElementById('side-panel-paper').style.display = _sidePanel === 'paper' ? '' : 'none';
+  document.getElementById('side-panel-paper').style.display = _sidePanel === 'demo' ? '' : 'none';
   // Update button active state / 更新按鈕激活狀態
   const liveActive = _sidePanel === 'live';
   const btnLive = document.getElementById('spbtn-live');
@@ -517,27 +561,44 @@ async function refreshSidebar() {
     document.getElementById('s-live-balance-detail').textContent = 'error';
   }
 
-  // ── Paper Trading Balance + PnL ──
+  // ── Demo Trading Balance + PnL ──
   try {
-    const d = await api('/api/v1/paper/session/status');
-    if (d && d.data) {
-      const s = d.data.session;
-      const initBal = s.initial_paper_balance_usdt || 0;
-      const pnl = d.data.pnl;
-      const net = pnl.net_paper_pnl || 0;
-      const currentBal = initBal + net;
+    const [sdR, balR, metricsR] = await Promise.allSettled([
+      api('/api/v1/strategy/demo/session/status'),
+      api('/api/v1/strategy/demo/balance'),
+      api('/api/v1/strategy/demo/metrics'),
+    ]);
+    const sd = sdR.status === 'fulfilled' && sdR.value ? sdR.value.data : null;
+    const balPayload = balR.status === 'fulfilled' && balR.value ? balR.value.data : null;
+    const metricsPayload = metricsR.status === 'fulfilled' && metricsR.value ? metricsR.value.data : null;
+    if (balPayload) {
+      let b = balPayload;
+      if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
+      const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || b.balance || 0);
+      const available = parseFloat(b.totalAvailableBalance || b.total_available_balance || b.availableBalance || b.available_balance || 0);
+      const unrealized = parseFloat(b.totalPerpUPL || b.unrealized_pnl || b.total_unrealised_pnl || b.total_unrealized_pnl || 0);
+      const realizedGross = parseFloat(b.engine_realized_pnl || 0) || 0;
+      const fees = parseFloat(b.engine_total_fees || 0) || 0;
+      let net = realizedGross - fees + unrealized;
+      const perf = (metricsPayload && metricsPayload.performance_metrics)
+        || (metricsPayload && metricsPayload.db_true_metrics && metricsPayload.db_true_metrics.performance_metrics)
+        || [];
+      const netMetric = Array.isArray(perf) ? perf.find(m => m && m.key === 'net_pnl_7d') : null;
+      if (!Number.isFinite(net) && netMetric) net = Number(netMetric.value);
 
-      document.getElementById('s-paper-balance').textContent = ocBalance(currentBal, 2);
-      const state = s.session_state;
+      document.getElementById('s-paper-balance').textContent = equity > 0 ? ocBalance(equity, 2) : '--';
+      const s = sd && sd.session ? sd.session : {};
+      const state = s.session_state || 'offline';
       const stateLabel = {active:'运行中',paused:'已暂停',stopped:'已停止',idle:'未启动'}[state] || state;
       document.getElementById('s-paper-balance-detail').textContent =
-        stateLabel + ' | Pos: ' + (d.data.position_count||0);
+        stateLabel + (available > 0 ? ' | Available: ' + ocBalance(available, 2) : '');
 
       const pnlEl = document.getElementById('s-pnl');
       pnlEl.textContent = ocMoney(net);
       pnlEl.className = 'mc-val ' + (net>=0?'green':'red');
       document.getElementById('s-pnl-detail').textContent =
-        'Realized: ' + (pnl.realized_pnl||0).toFixed(2) + ' | Fees: ' + (pnl.total_fees_paid||0).toFixed(4);
+        'UPL ' + unrealized.toFixed(2) + ' + Realized ' + realizedGross.toFixed(2) +
+        ' − Fees ' + fees.toFixed(4);
 
       document.getElementById('s-api').textContent = 'Online';
       document.getElementById('s-api').className = 'mc-val green';

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Replay 回测 / Reality-Calibrated Replay</title>
+<script src="/static/common.js"></script>
+<script src="/static/i18n_zh.js"></script>
+<script src="/static/app-paper.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<style>
+  .replay-head {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--card-bg); border: 1px solid rgba(14,165,233,0.35);
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+  }
+  .replay-head-title { font-weight: 700; font-size: 14px; }
+  .replay-note {
+    background: rgba(14,165,233,0.08); border: 1px solid rgba(14,165,233,0.28);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 14px;
+    color: var(--text-dim); font-size: 12px; line-height: 1.65;
+  }
+  .replay-note strong { color: var(--text); }
+</style>
+
+<div class="replay-head">
+  <span class="replay-head-title">&#x23F1; Reality-Calibrated Fast Replay / 真實校準快速回測</span>
+  <span class="oc-chip oc-chip-info">Replay Engine</span>
+  <span style="flex:1"></span>
+  <button class="oc-btn" onclick="window.OpenClawReplaySubtab && window.OpenClawReplaySubtab.onTabActivate()">Refresh / 刷新</button>
+</div>
+
+<div class="replay-note">
+  <strong>Replay 是策略/風控修改後的快速驗證入口。</strong>
+  Paper PnL 不作為可信回測證據；本頁調用 replay_runner、V049 manifest、策略參數與風控覆蓋，輸出可審計 report。
+  <br>
+  <strong>Replay is the fast validation path after strategy/risk edits.</strong>
+  Legacy Paper PnL is not used as trusted backtest evidence.
+</div>
+
+<div id="subtab-replay" class="oc-subtab-content active" role="tabpanel">
+  <div id="subtab-replay-disabled-card"></div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function _ocInitReplayTab() {
+  if (window.OpenClawReplaySubtab && typeof window.OpenClawReplaySubtab.onTabActivate === 'function') {
+    window.OpenClawReplaySubtab.onTabActivate();
+  }
+});
+window.addEventListener('beforeunload', function _ocStopReplayPoll() {
+  if (window.OpenClawReplaySubtab && typeof window.OpenClawReplaySubtab.onTabDeactivate === 'function') {
+    window.OpenClawReplaySubtab.onTabDeactivate();
+  }
+});
+</script>
+</body>
+</html>

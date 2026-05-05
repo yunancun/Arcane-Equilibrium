@@ -284,6 +284,24 @@
 .pf-mode-select:disabled { opacity:0.4; cursor:not-allowed; }
 </style>
 
+<!-- ═══ Legacy Paper Engine Toggle ═══ -->
+<div class="oc-card" style="border-color:rgba(52,211,153,0.28)">
+  <h3>&#x1F9EA; Legacy Paper Engine / 旧 Paper 引擎</h3>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+    Paper 引擎默认关闭；Replay 回测已独立为主入口。启用后主控制台才会显示 Paper Tab。<br>
+    Paper is disabled by default. Replay backtesting is now a standalone tab. Enable this only when you explicitly need the legacy Paper surface.
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)">
+      <input type="checkbox" id="paper-engine-enabled" class="settings-checkbox">
+      Enable Paper Engine / 显示 Paper Tab
+    </label>
+    <button class="oc-btn oc-btn-primary" onclick="savePaperEngineStatus()">保存 / Save</button>
+    <span id="paper-engine-setting-badge" class="oc-chip oc-chip-neutral">Loading...</span>
+  </div>
+  <div id="paper-engine-setting-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.6">Loading...</div>
+</div>
+
 <!-- ═══ API Key Management ═══ -->
 <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
   <h3>&#x1F511; API Key 管理 / API Key Management</h3>
@@ -723,7 +741,64 @@ async function loadDebug() {
 }
 
 async function loadAll() {
-  await Promise.allSettled([loadControlPlane(), loadProductFamilyConfig(), loadDebug(), loadApiKeyStatus()]);
+  await Promise.allSettled([
+    loadControlPlane(),
+    loadProductFamilyConfig(),
+    loadDebug(),
+    loadPaperEngineStatus(),
+    loadApiKeyStatus()
+  ]);
+}
+
+// ─── Legacy Paper Engine Toggle ───────────────────────────────
+async function loadPaperEngineStatus() {
+  const checkbox = document.getElementById('paper-engine-enabled');
+  const badge = document.getElementById('paper-engine-setting-badge');
+  const status = document.getElementById('paper-engine-setting-status');
+  if (!checkbox || !badge || !status) return;
+
+  const d = await ocApi('/api/v1/settings/paper-engine');
+  const data = (d && d.data) ? d.data : d;
+  if (!data) {
+    badge.textContent = 'Unavailable';
+    badge.className = 'oc-chip oc-chip-warn';
+    status.textContent = '无法读取 Paper Engine 设置 / Unable to load Paper Engine setting';
+    return;
+  }
+
+  checkbox.checked = !!data.enabled;
+  badge.textContent = data.enabled ? 'Enabled' : 'Disabled';
+  badge.className = 'oc-chip ' + (data.enabled ? 'oc-chip-good' : 'oc-chip-neutral');
+  status.textContent =
+    'configured=' + String(!!data.enabled) +
+    ' · runtime=' + String(!!data.runtime_enabled) +
+    ' · source=' + (data.source || 'unknown') +
+    (data.restart_required ? ' · restart required / 需要重启后后端生效' : '');
+}
+
+async function savePaperEngineStatus() {
+  const checkbox = document.getElementById('paper-engine-enabled');
+  const status = document.getElementById('paper-engine-setting-status');
+  if (!checkbox) return;
+  const enabled = !!checkbox.checked;
+  if (status) status.textContent = 'Saving...';
+
+  const d = await ocPost('/api/v1/settings/paper-engine', { enabled: enabled });
+  const data = (d && d.data) ? d.data : d;
+  if (!data) {
+    ocToast('Paper Engine 设置保存失败', 'error');
+    await loadPaperEngineStatus();
+    return;
+  }
+
+  ocToast(enabled ? 'Paper Engine 已启用' : 'Paper Engine 已禁用', 'success');
+  try {
+    window.parent.postMessage({
+      type: 'openclaw-paper-engine-setting',
+      enabled: !!data.enabled
+    }, window.location.origin);
+  } catch (_) {}
+  await loadPaperEngineStatus();
 }
 
 // ─── API Key Management ───────────────────────────────────────

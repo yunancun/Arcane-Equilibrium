@@ -847,8 +847,12 @@ def build_default_manifest_payload(
     optional ``starting_balance``. Missing ``strategy`` fails loud so /run can
     no longer silently fall back to the synthetic walker.
 
-    Fixture URI fallback: ``OPENCLAW_REPLAY_FIXTURE_URI`` env →
-    ``OPENCLAW_REPLAY_FIXTURE_DEFAULT`` env → ``<output_dir>/fixture.json``.
+    Fixture URI fallback for smoke/no-DB callers: ``OPENCLAW_REPLAY_FIXTURE_URI``
+    env → ``OPENCLAW_REPLAY_FIXTURE_DEFAULT`` env → ``<output_dir>/fixture.json``.
+    Production DB callers may persist ``manifest_jsonb.fixture_uri`` during
+    registration; that per-experiment value overrides the server default so the
+    GUI can run a selected historical fixture instead of silently using the
+    global smoke fixture.
     Args / 參數: ``experiment_id`` uuid text; ``output_dir`` artifact dir;
     ``cur`` optional cursor (``None`` → byte-identical legacy smoke fixture).
     SAFETY：SELECT-only; ``cur=None`` 與 pre-Fix-3 byte-equal；DB path fails
@@ -884,6 +888,13 @@ def build_default_manifest_payload(
         data_tier = runtime.get("data_tier") or manifest_jsonb.get("data_tier")
         if isinstance(data_tier, str) and data_tier.strip():
             payload["data_tier"] = data_tier.strip()
+
+        fixture_uri = manifest_jsonb.get("fixture_uri")
+        if isinstance(fixture_uri, str) and fixture_uri.strip():
+            cleaned_fixture_uri = fixture_uri.strip()
+            if "\n" in cleaned_fixture_uri or "\r" in cleaned_fixture_uri or "\x00" in cleaned_fixture_uri:
+                raise ValueError("replay_manifest_fixture_uri_invalid")
+            payload["fixture_uri"] = cleaned_fixture_uri
 
         if "starting_balance" in manifest_jsonb:
             try:
