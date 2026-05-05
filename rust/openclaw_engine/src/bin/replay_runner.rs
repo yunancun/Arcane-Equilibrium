@@ -350,6 +350,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let starting_balance = manifest
         .starting_balance
         .unwrap_or(runner::DEFAULT_STARTING_BALANCE);
+    if !starting_balance.is_finite() || starting_balance <= 0.0 {
+        return Err(Box::<dyn std::error::Error>::from(format!(
+            "replay_runner: manifest.starting_balance={} invalid; must be finite and > 0",
+            starting_balance
+        )));
+    }
 
     // Pull out a representative starting price from the first fixture event.
     // Used as the snapshot anchor so Gate 2.6 P1 cap has a real price; if the
@@ -369,7 +375,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         manifest.experiment_id.clone(),
         tier_label,
         events,
-    )?;
+    )?
+    .with_starting_balance(starting_balance)?;
     if let Some(strategy_name) = manifest.strategy.as_deref() {
         // R5-T4 adapter path. Resolve a matching strategy from the factory.
         // `StrategyFactory::create_with_params(default)` returns 5 strategies

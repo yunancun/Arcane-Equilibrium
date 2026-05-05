@@ -176,11 +176,13 @@ def _make_pg_conn_stub_happy_path(
         )
         cur.fetchone.side_effect = [
             run_state_row,                         # SELECT run_state
+            ("grid_trading", "BTCUSDT"),           # calibration SELECT V049
             (1,),                                  # _table_exists report_artifacts → present
             ("artifact-id-stub",),                 # register_artifact_in_db RETURNING
             ("grid_trading",),                     # SELECT strategy_name
             (run_id,),                             # _mark_run_finalized RETURNING
         ]
+        cur.fetchall.return_value = []
 
         # rowcount per execute call sequence:
         #   - SET LOCAL statement_timeout: 0
@@ -190,7 +192,7 @@ def _make_pg_conn_stub_happy_path(
         #   - SELECT strategy_name: 1
         #   - INSERT V050 fills × 2: 1, 1
         #   - UPDATE run_state: 1
-        rowcount_seq = iter([0, 1, 1, 1, 1, 1, 1, 1])
+        rowcount_seq = iter([0, 1, 1, 1, 1, 1, 1, 1, 1])
 
         def _execute(sql, params=None):
             cur.rowcount = next(rowcount_seq, 1)
@@ -511,12 +513,14 @@ def test_finalize_multi_worker_race_no_v046_dual_insert(monkeypatch):
             )
             cur.fetchone.side_effect = [
                 run_state_row,                  # SELECT FOR UPDATE
+                ("grid_trading", "BTCUSDT"),    # calibration SELECT V049
                 (1,),                           # _table_exists
                 ("artifact-id-stub",),          # register RETURNING
                 ("grid_trading",),              # SELECT strategy_name
                 (run_id,),                      # _mark_run_finalized RETURNING
             ]
-            rowcount_seq = iter([0, 1, 1, 1, 1, 1, 1, 1])
+            cur.fetchall.return_value = []
+            rowcount_seq = iter([0, 1, 1, 1, 1, 1, 1, 1, 1])
 
             def _execute(sql, params=None):
                 sql_text = str(sql)
@@ -673,12 +677,14 @@ def test_finalize_atomic_xact_rollback_on_writer_failure(monkeypatch):
         )
         cur.fetchone.side_effect = [
             run_state_row,           # SELECT run_state
+            ("grid_trading", "BTCUSDT"),  # calibration SELECT V049
             (1,),                    # _table_exists report_artifacts
             ("artifact-id-stub",),   # register_artifact_in_db RETURNING
             ("grid_trading",),       # SELECT strategy_name
             # No more fetchones expected; INSERT raises.
             # 之後 fetchone 不應被呼叫；INSERT 拋例。
         ]
+        cur.fetchall.return_value = []
 
         call_idx = [0]
 

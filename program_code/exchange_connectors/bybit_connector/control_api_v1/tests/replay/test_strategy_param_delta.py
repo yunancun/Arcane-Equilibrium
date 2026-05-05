@@ -270,12 +270,13 @@ def test_grid_count_delta_propagates_to_disk_manifest(tmp_path: Path) -> None:
     )
     # Round 3 Fix 3 invariant: blob propagates from V049 row into payload.
     # Round 3 Fix 3 不變式：blob 從 V049 row 注入 payload。
-    assert "_replay_strategy_params" in payload_a, (
-        "Round 3 Fix 3 BROKE: build_default_manifest_payload did NOT inject "
-        "_replay_strategy_params from V049; Rust runner will see "
+    assert payload_a["strategy"] == "grid_trading"
+    assert "strategy_params" in payload_a, (
+        "build_default_manifest_payload did NOT inject strategy_params from "
+        "V049; Rust runner will see "
         "StrategyParamsConfig::default() → A4 delta dies at disk hand-off."
     )
-    assert payload_a["_replay_strategy_params"] == {
+    assert payload_a["strategy_params"] == {
         "grid_trading": {"grid_levels": 10}
     }
 
@@ -294,8 +295,9 @@ def test_grid_count_delta_propagates_to_disk_manifest(tmp_path: Path) -> None:
         output_dir=tmp_path / "b",
         cur=cur_b,
     )
-    assert "_replay_strategy_params" in payload_b
-    assert payload_b["_replay_strategy_params"] == {
+    assert payload_b["strategy"] == "grid_trading"
+    assert "strategy_params" in payload_b
+    assert payload_b["strategy_params"] == {
         "grid_trading": {"grid_levels": 20}
     }
 
@@ -303,11 +305,11 @@ def test_grid_count_delta_propagates_to_disk_manifest(tmp_path: Path) -> None:
     # StrategyParamsConfig → A4 delta materialises.
     # 兩 payload 帶不同 blob → Rust runner 讀不同 StrategyParamsConfig → A4 成立。
     assert (
-        payload_a["_replay_strategy_params"]
-        != payload_b["_replay_strategy_params"]
+        payload_a["strategy_params"]
+        != payload_b["strategy_params"]
     ), (
         "A4 acceptance FAIL: two payloads carry IDENTICAL strategy_params "
-        f"despite distinct register inputs: {payload_a['_replay_strategy_params']}"
+        f"despite distinct register inputs: {payload_a['strategy_params']}"
     )
 
     # Legacy contract: cur=None still returns 3-key body (back-compat).

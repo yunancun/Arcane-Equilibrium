@@ -224,27 +224,33 @@ async function runAll() {
     "case_ready.wiring_status_displayed");
   assertContains(html, "release_profile: live",
     "case_ready.release_profile_displayed");
-  // 4 cell baseline
+  // 4 report-backed cells start in waiting state
   assertContains(html, "執行可信度",
     "case_ready.cell1_execution_confidence_label");
-  assertContains(html, "無 / NONE",
-    "case_ready.cell1_execution_confidence_baseline_NONE");
+  assertContains(html, "未載入 / NOT LOADED",
+    "case_ready.cell1_execution_confidence_not_loaded");
   assertContains(html, "資料層級",
     "case_ready.cell2_data_tier_label");
-  assertContains(html, "S3",
-    "case_ready.cell2_data_tier_S3_synthetic");
+  assertContains(html, "等待 manifest / WAITING",
+    "case_ready.cell2_data_tier_waiting");
   assertContains(html, "費率模型",
     "case_ready.cell3_fee_model_label");
-  assertContains(html, "NOT CALIBRATED",
-    "case_ready.cell3_fee_model_NOT_CALIBRATED");
+  assertContains(html, "等待報告 / WAITING",
+    "case_ready.cell3_fee_model_waiting");
   assertContains(html, "校準狀態",
     "case_ready.cell4_calibration_label");
-  assertContains(html, "PENDING R6",
-    "case_ready.cell4_calibration_PENDING_R6");
+  assertContains(html, "等待 finalize / WAITING",
+    "case_ready.cell4_calibration_waiting");
   assertContains(html, "experiment_id",
     "case_ready.experiment_id_input_present");
   assertContains(html, "載入報告",
     "case_ready.load_report_button_present");
+  assertContains(html, "Register / 註冊",
+    "case_ready.register_button_present");
+  assertContains(html, "Run / 執行",
+    "case_ready.run_button_present");
+  assertContains(html, "Finalize / 完成",
+    "case_ready.finalize_button_present");
   // State machine state should be 'empty' after ready render
   record("case_ready.state_machine_empty",
     window.OpenClawReplaySubtab._getState() === "empty",

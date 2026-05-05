@@ -10,12 +10,9 @@ without browser/jsdom — only asserts:
      on the Replay button (R4-T1 acceptance).
   2. app-paper.js defines `OpenClawReplaySubtab` namespace with required public API
      (onTabActivate / onTabDeactivate / pollBackendReadiness).
-  3. app-paper.js renders the 4 baseline cells (execution_confidence / data_tier /
-     fee_model / calibration_status) with Sprint A invariants:
-       - execution_confidence='none' (NONE / 無)
-       - data_tier='S3' (Synthetic)
-       - fee_model='NOT CALIBRATED'
-       - calibration_status='PENDING R6'
+  3. app-paper.js renders the 4 report-backed cells (execution_confidence /
+     data_tier / fee_model / calibration_status) and exposes the operator
+     workflow: register → run → finalize → load report.
   4. app-paper.js polls `/api/v1/replay/health` and reads `wiring_status` field.
   5. ocPaperSubtabShow wires the activate/deactivate hooks for replay.
   6. tab-paper.html no longer renders static disabled card on page load for replay.
@@ -245,53 +242,40 @@ def test_r4_t3_four_cells_bilingual_labels(
     )
 
 
-def test_r4_t3_sprint_a_invariant_execution_confidence_none(
+def test_replay_metrics_start_unloaded_not_hardcoded_none(
     app_paper_js: str,
 ) -> None:
-    """Sprint A invariant: execution_confidence baseline = NONE / 無 (red outline).
-
-    Sprint A 不變式：execution_confidence baseline = NONE / 無（紅外框）。
-    Per CLAUDE.md §九: evidence_source_tier='synthetic_replay' is the only
-    currently-shipped tier; UI must NEVER label as calibrated/medium/high.
-    """
-    assert "無 / NONE" in app_paper_js, (
-        "execution_confidence baseline must show '無 / NONE'"
-    )
-    # red outline class via oc-cell-warn
+    """Metrics must wait for report data instead of hardcoding Sprint A NONE."""
+    assert "未載入 / NOT LOADED" in app_paper_js
+    assert "無 / NONE" not in app_paper_js
     assert "oc-cell-warn" in app_paper_js, (
-        "oc-cell-warn class for red outline anti-fraud not found"
+        "oc-cell-warn class for pre-report warning state not found"
     )
 
 
-def test_r4_t3_sprint_a_invariant_data_tier_s3_synthetic(
+def test_replay_data_tier_is_report_backed_not_s3_static(
     app_paper_js: str,
 ) -> None:
-    """Sprint A invariant: data_tier baseline = S3 (Synthetic).
-
-    Sprint A 不變式：data_tier baseline = S3（合成）。
-    """
-    assert "S3" in app_paper_js
-    assert "合成" in app_paper_js or "Synthetic" in app_paper_js
+    """Data tier cell starts waiting; the selector still allows S2/S3."""
+    assert "等待 manifest / WAITING" in app_paper_js
+    assert "S2 calibrated_replay" in app_paper_js
+    assert "S3 synthetic_replay" in app_paper_js
 
 
-def test_r4_t3_sprint_a_invariant_fee_model_not_calibrated(
+def test_replay_fee_model_waits_for_runner_fill_fields(
     app_paper_js: str,
 ) -> None:
-    """Sprint A invariant: fee_model baseline = NOT CALIBRATED / 尚未校準.
-
-    Sprint A 不變式：fee_model baseline = NOT CALIBRATED / 尚未校準。
-    """
-    assert "NOT CALIBRATED" in app_paper_js or "尚未校準" in app_paper_js
+    """Fee model must be loaded from fill fee_rate/liquidity_role fields."""
+    assert "fee_rate=" in app_paper_js
+    assert "NOT CALIBRATED" not in app_paper_js
 
 
-def test_r4_t3_sprint_a_invariant_calibration_pending_r6(
+def test_replay_calibration_waits_for_finalize(
     app_paper_js: str,
 ) -> None:
-    """Sprint A invariant: calibration_status baseline = PENDING R6.
-
-    Sprint A 不變式：calibration_status baseline = PENDING R6。
-    """
-    assert "PENDING R6" in app_paper_js
+    """Calibration is finalize-backed, not a stale PENDING R6 label."""
+    assert "等待 finalize / WAITING" in app_paper_js
+    assert "PENDING R6" not in app_paper_js
 
 
 def test_r4_t3_fetches_replay_report_endpoint(app_paper_js: str) -> None:
@@ -302,6 +286,13 @@ def test_r4_t3_fetches_replay_report_endpoint(app_paper_js: str) -> None:
     assert "/api/v1/replay/report/" in app_paper_js, (
         "Does not fetch /api/v1/replay/report/{id}"
     )
+
+
+def test_replay_operator_workflow_endpoints_wired(app_paper_js: str) -> None:
+    """Paper tab must expose register/run/finalize workflow calls."""
+    assert "/api/v1/replay/experiments/register" in app_paper_js
+    assert '"/api/v1/replay/run"' in app_paper_js
+    assert "/finalize" in app_paper_js
 
 
 def test_r4_t3_xss_safe_via_ocesc(app_paper_js: str) -> None:
@@ -436,4 +427,3 @@ def test_no_hardcoded_user_home_paths(
     assert "/Users/ncyu/" not in content, (
         f"{src}: hardcoded /Users/ncyu/ path violates §七"
     )
-

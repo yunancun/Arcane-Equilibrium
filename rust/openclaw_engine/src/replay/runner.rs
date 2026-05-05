@@ -403,6 +403,7 @@ pub struct IsolatedPipeline {
     manifest_id: String,
     fixtures: Vec<MarketEvent>,
     fixture_tier_label: String,
+    pub(super) starting_balance: f64,
     pub(super) balance: f64,
     /// Map of symbol -> last simulated entry price (used to compute
     /// final-mark PnL). One position per symbol; T1 does not net out.
@@ -484,6 +485,7 @@ pub fn build_isolated_pipeline(
         manifest_id,
         fixtures,
         fixture_tier_label: tier_label_to_evidence_source(fixture_tier_label),
+        starting_balance: DEFAULT_STARTING_BALANCE,
         balance: DEFAULT_STARTING_BALANCE,
         positions: HashMap::new(),
         fills: Vec::new(),
@@ -555,6 +557,23 @@ impl IsolatedPipeline {
         &self.manifest_id
     }
 
+    /// Set the replay balance anchor before execution. The CLI wires this from
+    /// ``manifest.starting_balance`` so both synthetic smoke fixtures and the
+    /// real adapter path report PnL against the manifest-selected account size.
+    pub fn with_starting_balance(mut self, starting_balance: f64) -> Result<Self, ReplayError> {
+        if !starting_balance.is_finite() || starting_balance <= 0.0 {
+            return Err(ReplayError::InvalidSnapshot {
+                reason: format!(
+                    "starting_balance must be finite and > 0, got {}",
+                    starting_balance
+                ),
+            });
+        }
+        self.starting_balance = starting_balance;
+        self.balance = starting_balance;
+        Ok(self)
+    }
+
     /// Sprint B2 R5-T3 — wire in a strategy adapter + risk adapter + initial
     /// paper snapshot. After this call `execute()` runs the real strategy
     /// pipeline (Strategy::on_tick → Risk evaluate → apply_fill) instead of
@@ -622,6 +641,7 @@ impl IsolatedPipeline {
         // 把 snapshot.balance 鏡射至 pipeline.balance，使 `into_result`
         // pnl_summary 採 adapter-path 算術。未提供 snapshot 時 synthetic-walker
         // 的 `balance` 維持原值（DEFAULT_STARTING_BALANCE）。
+        self.starting_balance = snapshot.balance;
         self.balance = snapshot.balance;
         self.strategy_adapter = Some(strategy_adapter);
         self.risk_adapter = Some(risk_adapter);
@@ -908,25 +928,8 @@ impl IsolatedPipeline {
     ///
     /// 最終化為 `ReplayResult`（消費 self）。
     ///
-    /// `execution_confidence` is hardcoded to `"none"` per V3 §12 #11
-    /// invariant for the Isolated profile.
-    ///
-    /// `execution_confidence` 為 V3 §12 #11 不變量於 Isolated profile 下硬編
-    /// `"none"`。
     pub fn into_result(self) -> ReplayResult {
-        let starting_balance = if self.paper_snapshot.is_some() {
-            // Adapter path uses snapshot balance as anchor; if reached
-            // `into_result`, snapshot.balance has been mirrored into
-            // self.balance during `with_adapter_pipeline`.
-            // adapter 路徑用 snapshot balance 為錨；走到 `into_result` 時
-            // snapshot.balance 已於 `with_adapter_pipeline` 鏡射至
-            // self.balance；但 starting_balance 應對齊原始注入值，故另存。
-            // R5-T4 CLI 後續可擴 ReplayResult 暴露原始 starting_balance；
-            // R5-T3 暫沿用 DEFAULT_STARTING_BALANCE 為對外契約穩定點。
-            DEFAULT_STARTING_BALANCE
-        } else {
-            DEFAULT_STARTING_BALANCE
-        };
+        let starting_balance = self.starting_balance;
         let net_pnl = self.balance - starting_balance;
         let abort_reason = match &self.status {
             ReplayStatus::AbortedForbidden { action } => Some(format!(
