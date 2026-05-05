@@ -162,28 +162,23 @@ impl ReplayStatus {
 }
 
 /// Single simulated fill emitted by the in-memory pipeline.
-///
 /// in-memory pipeline 發出的單一模擬 fill。
 ///
-/// Field semantics (EN):
-///   - `ts_ms`: timestamp from the source event (UTC ms).
-///   - `symbol`: forwarded from event.
-///   - `side`: simplified side enum (long/short string).
-///   - `qty`: simulated quantity (deterministic; see `IsolatedPipeline::execute`).
-///   - `price`: fill price = event close (we do not model slippage in T1).
-///   - `evidence_source_tier`: hardcoded to fixture's tier label
-///     ("calibrated_replay" / "synthetic_replay") so downstream reports
-///     can audit the simulation lineage.
+/// Sprint A/B fields: `ts_ms` / `symbol` / `side` (long|short string) / `qty` /
+/// `price` (event close pre-R6-T2; slippage-adjusted post-R6-T2) /
+/// `evidence_source_tier` (fixture tier 'calibrated_replay'|'synthetic_replay').
 ///
-/// 欄位語意（中）：
-///   - `ts_ms`: 來源 event 的時戳（UTC ms）。
-///   - `symbol`: 從 event 轉發。
-///   - `side`: 簡化的方向 enum（long/short 字串）。
-///   - `qty`: 模擬數量（確定性；見 `IsolatedPipeline::execute`）。
-///   - `price`: fill price = event close（T1 不模擬滑點）。
-///   - `evidence_source_tier`: 硬編 = fixture tier label
-///     （"calibrated_replay" / "synthetic_replay"），使下游 report 可 audit
-///     模擬 lineage。
+/// Sprint C R6-T1+T2 fields:
+///   - `fee` = qty × price × fee_rate. 0 on ghost rows (qty=0 reject) and on
+///     the synthetic-walker fallback (`'synthetic_replay'` tier — fee/slippage
+///     not credible without intent context).
+///   - `fee_rate` (decimal) — PostOnly→maker / else taker. Source:
+///     `account_manager` if seeded, else `DEFAULT_*_FEE_RATE` constants.
+///   - `slippage_bps` — signed bps on reference price. PostOnly→0; else
+///     turnover-tier via `SlippageConfig::lookup_rate`. Buy→+bps / Sell→-bps.
+///   - `liquidity_role` — V050 CHECK enum ∈ {'maker','taker','unknown'}.
+///     PostOnly→'maker' / explicit non-PostOnly TIF or `Close`→'taker' /
+///     synthetic walker (no intent)→'unknown'.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SimulatedFill {
     pub ts_ms: i64,
@@ -192,6 +187,18 @@ pub struct SimulatedFill {
     pub qty: f64,
     pub price: f64,
     pub evidence_source_tier: String,
+    /// Sprint C R6-T1 — per-fill fee in quote-asset units (qty × price × fee_rate).
+    /// Sprint C R6-T1 — 每筆 fill 的手續費（quote 資產單位 = qty × price × fee_rate）。
+    pub fee: f64,
+    /// Sprint C R6-T1 — per-fill fee rate (decimal; maker if PostOnly, else taker).
+    /// Sprint C R6-T1 — 每筆 fill 的費率（小數；PostOnly→maker，否則 taker）。
+    pub fee_rate: f64,
+    /// Sprint C R6-T2 — signed slippage bps (positive=buy, negative=sell, 0=PostOnly).
+    /// Sprint C R6-T2 — 有號滑點 bps（買=正、賣=負、PostOnly=0）。
+    pub slippage_bps: f64,
+    /// Sprint C R6-T1 — liquidity role ∈ {'maker', 'taker', 'unknown'} (V050 CHECK).
+    /// Sprint C R6-T1 — 流動性角色 ∈ {'maker', 'taker', 'unknown'}（V050 CHECK）。
+    pub liquidity_role: String,
 }
 
 /// Coarse PnL summary written to `replay_report.json::pnl_summary`.
@@ -442,6 +449,17 @@ pub struct IsolatedPipeline {
     /// Sprint B2 R5-T3：由 `apply_fill_open` / `apply_fill_close` mutate 的
     /// paper snapshot。synthetic-walker 路徑下為 `None`。
     paper_snapshot: Option<ReplayPaperSnapshot>,
+    /// Sprint C R6-T1: optional `AccountManager` for per-symbol maker/taker.
+    /// `None` ⇒ `DEFAULT_*_FEE_RATE` (live cold-boot path).
+    /// Sprint C R6-T1：可選 `AccountManager` 提供 per-symbol maker/taker；
+    /// `None` ⇒ `DEFAULT_*_FEE_RATE`（live 冷啟動路徑）。
+    account_manager: Option<std::sync::Arc<crate::account_manager::AccountManager>>,
+    /// Sprint C R6-T2: slippage tier snapshot (default = pre-G7-07 SLIPPAGE_TIERS).
+    /// Sprint C R6-T2：滑點分級表（預設 = pre-G7-07 SLIPPAGE_TIERS）。
+    slippage_config: crate::config::SlippageConfig,
+    /// Sprint C R6-T2: 24h USD turnover for tier lookup; `None` → 5 bps default.
+    /// Sprint C R6-T2：tier 查找用 24h USD 成交量；`None` → 5 bps 預設。
+    volume_24h: Option<f64>,
 }
 
 /// Public constructor for `IsolatedPipeline` that funnels callers through the
@@ -477,6 +495,14 @@ pub fn build_isolated_pipeline(
         strategy_adapter: None,
         risk_adapter: None,
         paper_snapshot: None,
+        // Sprint C R6-T1+T2: fee/slippage context opt-in via
+        // `with_replay_fee_context`. Defaults preserve walker 'unknown'/0
+        // path (proof_1/4/5 byte-equal).
+        // Sprint C R6-T1+T2：fee/slippage context 經 `with_replay_fee_context`
+        // opt-in；預設保留 walker 'unknown'/0 路徑（proof_1/4/5 byte-equal）。
+        account_manager: None,
+        slippage_config: crate::config::SlippageConfig::default(),
+        volume_24h: None,
     })
 }
 
@@ -495,6 +521,90 @@ fn tier_label_to_evidence_source(tier_label: &str) -> String {
         "S3" => "synthetic_replay".to_string(),
         _ => "synthetic_replay".to_string(),
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sprint C R6-T1 fee + R6-T2 slippage helpers / R6-T1 費率 + R6-T2 滑點輔助
+// ─────────────────────────────────────────────────────────────────────────
+// Mirror the live `IntentProcessor::fee_rate_for_tif` +
+// `slippage_rate_for_tif` byte-equal contract into the replay path so
+// `simulated_fills.{fee, fee_rate, slippage_bps, liquidity_role}` reflect
+// the live maker/taker + turnover-tier model. Replay is non-actionable —
+// these helpers MUST NOT mutate live state and MUST NOT call Bybit
+// endpoints (no `refresh_fee_rates`).
+//
+// 把 live `IntentProcessor::fee_rate_for_tif` + `slippage_rate_for_tif`
+// 的 byte-equal 契約鏡射至 replay 端，讓
+// `simulated_fills.{fee, fee_rate, slippage_bps, liquidity_role}` 反映 live
+// 同一套 maker/taker + turnover-tier 模型。Replay 非 actionable — 本輔助
+// **不**動 live state、**不**打 Bybit endpoint（無 `refresh_fee_rates`）。
+
+/// Sprint C R6 default fee rates / 預設費率（鏡射 live `account_manager`
+/// `DEFAULT_TAKER_FEE = 0.00055` / `DEFAULT_MAKER_FEE = 0.0002`）。
+/// Kept local so the binary does not touch private `crate::account_manager`
+/// state when the seed path is not wired in.
+pub(crate) const DEFAULT_TAKER_FEE_RATE: f64 = 0.00055;
+pub(crate) const DEFAULT_MAKER_FEE_RATE: f64 = 0.0002;
+
+/// Sprint C R6-T1 — pick (fee_rate, liquidity_role) by TimeInForce.
+/// Mirrors `IntentProcessor::fee_rate_for_tif` (intent_processor/mod.rs:1200).
+/// PostOnly TIF → maker / Any other TIF (incl. None) → taker.
+/// Resolution: `account_manager.maker_fee/taker_fee` if Some; else
+/// `DEFAULT_MAKER_FEE_RATE` / `DEFAULT_TAKER_FEE_RATE`.
+///
+/// Sprint C R6-T1 — 依 TimeInForce 選 (fee_rate, liquidity_role)。
+/// 鏡射 `IntentProcessor::fee_rate_for_tif`。PostOnly→maker / 其他（含 None）
+/// →taker。優先序：有 Some 時用 `account_manager.maker_fee/taker_fee`；否則
+/// 退回 `DEFAULT_*_FEE_RATE`。
+///
+/// SAFETY / 不變量：本 helper 不打任何 endpoint；replay 端 AccountManager
+/// 由 caller `seed_default_fee_rates` 注入（dispatch §1）。
+/// SAFETY: helper does NOT call any endpoint; replay-side AccountManager is
+/// caller-pre-seeded via `seed_default_fee_rates` (dispatch §1).
+fn replay_fee_rate_for_tif(
+    account_manager: Option<&std::sync::Arc<crate::account_manager::AccountManager>>,
+    symbol: &str,
+    tif: Option<crate::order_manager::TimeInForce>,
+) -> (f64, &'static str) {
+    if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+        let rate = account_manager.map(|am| am.maker_fee(symbol)).unwrap_or(DEFAULT_MAKER_FEE_RATE);
+        (rate, "maker")
+    } else {
+        let rate = account_manager.map(|am| am.taker_fee(symbol)).unwrap_or(DEFAULT_TAKER_FEE_RATE);
+        (rate, "taker")
+    }
+}
+
+/// Sprint C R6-T2 — compute signed slippage bps for an intent.
+/// Mirrors `IntentProcessor::slippage_rate_for_tif` (intent_processor/mod.rs:1179).
+/// PostOnly TIF → 0.0 (rests on book) / Otherwise turnover-tier lookup via
+/// `SlippageConfig::lookup_rate`. Sign per dispatch §2: buy → +bps, sell → -bps.
+/// `volume_24h <= 0.0` graceful → `default_rate=0.0005` = 5 bps fallback.
+///
+/// Sprint C R6-T2 — 計算 intent 的有號滑點 bps。鏡射
+/// `IntentProcessor::slippage_rate_for_tif`。PostOnly→0；其他經
+/// `SlippageConfig::lookup_rate`。符號（dispatch §2）：買 +、賣 -。
+/// `volume_24h <= 0.0` graceful → 5 bps default fallback。
+fn replay_slippage_bps_for_tif(
+    slippage_config: &crate::config::SlippageConfig,
+    tif: Option<crate::order_manager::TimeInForce>,
+    volume_24h: f64,
+    is_long: bool,
+) -> f64 {
+    if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+        return 0.0;
+    }
+    let bps = slippage_config.lookup_rate(volume_24h) * 10_000.0;
+    if is_long { bps } else { -bps }
+}
+
+/// Sprint C R6-T2 — apply signed slippage_bps to a reference price.
+/// fill_price = reference_price × (1 + slippage_bps / 10_000.0).
+/// `slippage_bps == 0` (PostOnly) → fill_price == reference_price.
+/// Sprint C R6-T2 — 套用有號 slippage_bps 至參考價。
+/// `slippage_bps == 0`（PostOnly）→ fill_price == reference_price。
+fn apply_slippage_to_price(reference_price: f64, slippage_bps: f64) -> f64 {
+    reference_price * (1.0 + slippage_bps / 10_000.0)
 }
 
 impl IsolatedPipeline {
@@ -582,6 +692,35 @@ impl IsolatedPipeline {
         self.risk_adapter = Some(risk_adapter);
         self.paper_snapshot = Some(snapshot);
         Ok(self)
+    }
+
+    /// Sprint C R6-T1+T2 — wire optional fee/slippage context. All three
+    /// params opt-in:
+    ///   - `account_manager`: per-symbol maker/taker; else `DEFAULT_*_FEE_RATE`.
+    ///   - `slippage_config`: `None` keeps `SlippageConfig::default()` (= pre-G7-07
+    ///     SLIPPAGE_TIERS) seeded by `build_isolated_pipeline`.
+    ///   - `volume_24h`: 24h USD turnover for tier lookup (`None` → 0.0 → 5 bps).
+    ///
+    /// Sprint C R6-T1+T2 — 接入可選 fee/slippage context。三個參數皆 opt-in：
+    /// `account_manager` 否則退 `DEFAULT_*_FEE_RATE` / `slippage_config` `None`
+    /// 沿用 `SlippageConfig::default()` / `volume_24h` `None` → 5 bps fallback。
+    ///
+    /// SAFETY / 不變量：本 builder 不打 endpoint；`account_manager` 必為 caller
+    /// 預先 `seed_default_fee_rates` 過的 instance（dispatch §1）。
+    /// SAFETY: builder does NOT call any endpoint; `account_manager` MUST be
+    /// caller-pre-seeded via `seed_default_fee_rates` (dispatch §1).
+    pub fn with_replay_fee_context(
+        mut self,
+        account_manager: Option<std::sync::Arc<crate::account_manager::AccountManager>>,
+        slippage_config: Option<crate::config::SlippageConfig>,
+        volume_24h: Option<f64>,
+    ) -> Self {
+        self.account_manager = account_manager;
+        if let Some(cfg) = slippage_config {
+            self.slippage_config = cfg;
+        }
+        self.volume_24h = volume_24h;
+        self
     }
 
     /// Drive the in-memory pipeline.
@@ -673,13 +812,16 @@ impl IsolatedPipeline {
 
             // Minimal IMPL — emit one simulated entry fill on FIRST sighting
             // of each symbol; subsequent events update the position's
-            // mark-to-market via `balance` arithmetic. T1 deliberately does
-            // NOT model: order book, slippage, latency, partial fills, fee
-            // model — those land in Wave 5 P3a.
+            // mark-to-market via `balance` arithmetic. The walker
+            // deliberately does NOT model: order book, latency, partial
+            // fills. fee/slippage are emitted as 0 / 'unknown' on this path
+            // (Sprint C R6-T1+T2; see SimulatedFill push site below) since
+            // the walker has no `OrderIntent` context (no TIF binding).
             // Minimal IMPL — 每個 symbol 首見時發出一筆模擬入場 fill；後續
-            // event 透過 `balance` 算術更新倉位 mark-to-market。T1 刻意不模擬：
-            // order book、滑點、延遲、部分成交、費率模型 — 那些於 Wave 5 P3a
-            // 落地。
+            // event 透過 `balance` 算術更新倉位 mark-to-market。Walker 刻意
+            // 不模擬：order book、延遲、部分成交。fee/slippage 在此路徑發 0 /
+            // 'unknown'（Sprint C R6-T1+T2；見下方 SimulatedFill push site），
+            // 因 walker 無 `OrderIntent` context（無 TIF 綁定）。
             if !self.positions.contains_key(&event.symbol) {
                 let entry_price = event.close;
                 // Deterministic synthetic qty: 1.0 lot per new symbol. Real
@@ -689,6 +831,10 @@ impl IsolatedPipeline {
                 // `replay_compatible` 策略重構，非 T1 範圍。
                 let qty = 1.0_f64;
                 self.positions.insert(event.symbol.clone(), entry_price);
+                // Sprint C R6-T1+T2: synthetic-walker → 'unknown' role + 0 fee/slippage
+                // (no intent context; proof_1/4/5 e2e byte-equal since slippage=0).
+                // Sprint C R6-T1+T2：synthetic-walker → 'unknown' role + 0 fee/slippage
+                // （無 intent context；proof_1/4/5 e2e 因 slippage=0 byte-equal）。
                 self.fills.push(SimulatedFill {
                     ts_ms: event.ts_ms,
                     symbol: event.symbol.clone(),
@@ -696,6 +842,10 @@ impl IsolatedPipeline {
                     qty,
                     price: entry_price,
                     evidence_source_tier: self.fixture_tier_label.clone(),
+                    fee: 0.0,
+                    fee_rate: 0.0,
+                    slippage_bps: 0.0,
+                    liquidity_role: "unknown".to_string(),
                 });
             } else {
                 // Mark-to-market: update balance with delta vs last seen entry.
@@ -832,9 +982,35 @@ impl IsolatedPipeline {
             None => return, // unreachable — paired with strategy_adapter
         };
         let decision = risk.evaluate(intent, snapshot, atr);
+        // Sprint C R6-T1+T2: derive (fee_rate, liquidity_role, slippage_bps)
+        // from intent.time_in_force. Used for both Accepted (qty>0) and
+        // Rejected (qty=0 ghost) paths so ghost row carries counterfactual
+        // fee classification (transparency for downstream attribution).
+        // Sprint C R6-T1+T2：從 intent.time_in_force 派生 (fee_rate,
+        // liquidity_role, slippage_bps)。Accepted (qty>0) 與 Rejected (qty=0
+        // ghost) 兩路徑共用，使 ghost row 帶 counterfactual 費率分類。
+        let (fee_rate, liquidity_role) = replay_fee_rate_for_tif(
+            self.account_manager.as_ref(),
+            &intent.symbol,
+            intent.time_in_force,
+        );
+        let volume_24h = self.volume_24h.unwrap_or(0.0);
+        let slippage_bps = replay_slippage_bps_for_tif(
+            &self.slippage_config,
+            intent.time_in_force,
+            volume_24h,
+            intent.is_long,
+        );
         match decision {
             RiskDecision::Accepted { final_qty, .. } => {
-                let fill_price = intent.limit_price.unwrap_or(close_price);
+                // Reference price: limit if present (PostOnly), else event close.
+                // PostOnly slippage_bps=0 → fill_price == limit_price byte-equal
+                // to Sprint A/B baseline.
+                // 參考價：有 limit_price 取之（PostOnly），否則 event close。
+                // PostOnly slippage_bps=0 → fill_price == limit_price byte-equal。
+                let reference_price = intent.limit_price.unwrap_or(close_price);
+                let fill_price = apply_slippage_to_price(reference_price, slippage_bps);
+                let fee = final_qty * fill_price * fee_rate;
                 self.fills.push(SimulatedFill {
                     ts_ms,
                     symbol: intent.symbol.clone(),
@@ -842,23 +1018,33 @@ impl IsolatedPipeline {
                     qty: final_qty,
                     price: fill_price,
                     evidence_source_tier: tier_label.to_string(),
+                    fee,
+                    fee_rate,
+                    slippage_bps,
+                    liquidity_role: liquidity_role.to_string(),
                 });
                 self.apply_fill_open(&intent.symbol, intent.is_long, final_qty, fill_price);
                 self.last_action = format!("open:{}", intent.symbol);
             }
             RiskDecision::Rejected { gate, reason } => {
-                // Ghost fill row (qty=0) preserves the rejected decision
-                // for evidence trail (PA §6.1).
-                // Ghost fill row（qty=0）保留被拒決策供 evidence trail
-                // （PA §6.1）。
+                // Ghost fill row (qty=0) preserves the rejected decision for
+                // evidence trail (PA §6.1). qty=0 ⇒ fee=0, but fee_rate /
+                // liquidity_role / slippage_bps reflect counterfactual cost.
+                // Ghost fill row (qty=0) 保留被拒決策（PA §6.1）。qty=0 ⇒ fee=0；
+                // fee_rate / liquidity_role / slippage_bps 反映 counterfactual。
                 let _ = reason; // recorded via last_action below.
+                let reference_price = intent.limit_price.unwrap_or(close_price);
                 self.fills.push(SimulatedFill {
                     ts_ms,
                     symbol: intent.symbol.clone(),
                     side: if intent.is_long { "long" } else { "short" }.to_string(),
                     qty: 0.0,
-                    price: intent.limit_price.unwrap_or(close_price),
+                    price: reference_price,
                     evidence_source_tier: tier_label.to_string(),
+                    fee: 0.0,
+                    fee_rate,
+                    slippage_bps,
+                    liquidity_role: liquidity_role.to_string(),
                 });
                 self.last_action = format!("reject:{}:{}", intent.symbol, gate);
             }
@@ -890,6 +1076,28 @@ impl IsolatedPipeline {
                 return;
             }
         };
+        // Sprint C R6-T1+T2: Close has no OrderIntent/TIF — treat as taker
+        // (live engine routes Close as market; strategies/mod.rs:51 "Close
+        // bypasses governance gates"). Closing leg sign opposite open:
+        // long pos→sell→-bps / short pos→buy→+bps.
+        // Sprint C R6-T1+T2：Close 無 OrderIntent/TIF — 視為 taker
+        // （live 預設 Close 走市價）。平倉方向與開倉相反：多倉→賣→-bps /
+        // 空倉→買→+bps。
+        let close_is_long = !pos.is_long;
+        let (fee_rate, liquidity_role) = replay_fee_rate_for_tif(
+            self.account_manager.as_ref(),
+            symbol,
+            None, // close has no TIF → taker path
+        );
+        let volume_24h = self.volume_24h.unwrap_or(0.0);
+        let slippage_bps = replay_slippage_bps_for_tif(
+            &self.slippage_config,
+            None,
+            volume_24h,
+            close_is_long,
+        );
+        let fill_price = apply_slippage_to_price(close_price, slippage_bps);
+        let fee = pos.qty * fill_price * fee_rate;
         // Record close-side fill (qty>0 with side opposite to position).
         // 記 close-side fill（qty>0，side 與倉位反向）。
         self.fills.push(SimulatedFill {
@@ -897,20 +1105,28 @@ impl IsolatedPipeline {
             symbol: symbol.to_string(),
             side: if pos.is_long { "short" } else { "long" }.to_string(),
             qty: pos.qty,
-            price: close_price,
+            price: fill_price,
             evidence_source_tier: tier_label.to_string(),
+            fee,
+            fee_rate,
+            slippage_bps,
+            liquidity_role: liquidity_role.to_string(),
         });
-        self.apply_fill_close(symbol, close_price);
+        self.apply_fill_close(symbol, fill_price);
         self.last_action = format!("close:{}", symbol);
     }
 
     /// Sprint B2 R5-T3 — open-side snapshot mutation. Inserts/extends a
-    /// position; deducts no fee (matches Sprint A `fee=0.0` baseline; Sprint C
-    /// R6 will introduce realistic maker/taker fee).
+    /// position; deducts no fee from `snap.balance`. Sprint C R6-T1: fee is
+    /// captured at the `SimulatedFill` row level (see `process_open_intent` /
+    /// `process_close_intent`) — folding fee into `snap.balance` mid-flight
+    /// would double-count once `into_result` reads it for
+    /// `pnl_summary.ending_balance`. Sprint D R8 may extend `pnl_summary` to
+    /// fold fee into PnL — but that is a `pnl_summary` schema decision.
     ///
-    /// Sprint B2 R5-T3 — open-side snapshot mutation。插入/擴張倉位；
-    /// 不扣手續費（對齊 Sprint A `fee=0.0` baseline；Sprint C R6 將引入真實
-    /// maker/taker 費率）。
+    /// Sprint B2 R5-T3 — open-side snapshot mutation。Sprint C R6-T1：fee 在
+    /// `SimulatedFill` row 層捕獲，**不**扣 `snap.balance`（避免 `into_result`
+    /// 讀 `snap.balance` 餵 `pnl_summary.ending_balance` 時 double-count）。
     fn apply_fill_open(&mut self, symbol: &str, is_long: bool, qty: f64, fill_price: f64) {
         let snap = match self.paper_snapshot.as_mut() {
             Some(s) => s,
@@ -965,15 +1181,16 @@ impl IsolatedPipeline {
     }
 
     /// Sprint B2 R5-T3 — close-side snapshot mutation. Realises PnL =
-    /// (fill_price - entry_price) * qty (for long; sign-flipped for short),
-    /// removes position from snapshot, updates balance. PnL realisation
-    /// formula matches `paper_state::realize_close` (live engine) but
-    /// without fee deduction (Sprint A baseline).
+    /// (fill_price - entry_price) * qty (long; sign-flipped for short),
+    /// removes position, updates balance. Mirrors `paper_state::realize_close`.
+    /// Sprint C R6-T1: fee captured at `SimulatedFill` row level (see
+    /// `process_close_intent`), NOT subtracted from `snap.balance` here
+    /// (same rationale as `apply_fill_open` — avoid `pnl_summary` double-count).
     ///
-    /// Sprint B2 R5-T3 — close-side snapshot mutation。Realise PnL =
-    /// (fill_price - entry_price) * qty（多倉；空倉反號），移除倉位、更新
-    /// balance。PnL realisation 公式對齊 `paper_state::realize_close`（live
-    /// engine），不扣手續費（Sprint A baseline）。
+    /// Sprint B2 R5-T3 — close-side snapshot mutation；對齊
+    /// `paper_state::realize_close`。Sprint C R6-T1：fee 在
+    /// `SimulatedFill` row 層捕獲，**不**扣 `snap.balance`（同
+    /// `apply_fill_open` 邏輯，避免 `pnl_summary` double-count）。
     fn apply_fill_close(&mut self, symbol: &str, fill_price: f64) {
         let snap = match self.paper_snapshot.as_mut() {
             Some(s) => s,
@@ -982,9 +1199,11 @@ impl IsolatedPipeline {
         if let Some(idx) = snap.positions.iter().position(|p| p.symbol == symbol) {
             let pos = snap.positions.remove(idx);
             // PnL = (fill - entry) * qty for long; (entry - fill) * qty for short.
-            // Sprint A baseline fee=0; Sprint C R6 will introduce maker/taker.
+            // Sprint C R6-T1: fee is captured at row level in
+            // `process_close_intent`, NOT applied to snap.balance here.
             // PnL = (fill - entry) * qty 多倉；(entry - fill) * qty 空倉。
-            // Sprint A baseline fee=0；Sprint C R6 引入 maker/taker。
+            // Sprint C R6-T1：fee 在 `process_close_intent` row 層捕獲，
+            // **不**於此扣 snap.balance。
             let realised_per_unit = if pos.is_long {
                 fill_price - pos.entry_price
             } else {
@@ -1462,5 +1681,312 @@ mod tests {
             "last_action should record 1.5_dup gate, got: {}",
             result.diagnostics.last_action_label
         );
+    }
+
+    // ─── Sprint C R6-T1 + R6-T2 unit tests / R6-T1 + R6-T2 單元測試 ───
+    // Dispatch §5 6 cases + 3 cross-checks (PostOnly path / synthetic walker
+    // backward compat / ghost row counterfactual). Helpers tested directly;
+    // SimulatedFill end-to-end via TifStub.
+    // Dispatch §5 6 case + 3 交叉驗證（PostOnly path / synthetic walker
+    // 向後兼容 / ghost row counterfactual）。Helper 直測；end-to-end 用 TifStub。
+
+    use crate::order_manager::TimeInForce;
+
+    /// Stub strategy emitting one Open with caller-controlled TimeInForce.
+    /// Stub 策略：發一筆 caller 指定 TimeInForce 的 Open。
+    struct TifStub {
+        emitted: bool,
+        tif: Option<TimeInForce>,
+        is_long: bool,
+        limit_price: Option<f64>,
+    }
+
+    impl Strategy for TifStub {
+        fn name(&self) -> &str {
+            "r6t1t2_stub"
+        }
+        fn is_active(&self) -> bool {
+            true
+        }
+        fn set_active(&mut self, _: bool) {}
+        fn on_tick(&mut self, ctx: &crate::tick_pipeline::TickContext<'_>) -> Vec<StrategyAction> {
+            if self.emitted {
+                return Vec::new();
+            }
+            self.emitted = true;
+            vec![StrategyAction::Open(OrderIntent {
+                symbol: ctx.symbol.to_string(),
+                is_long: self.is_long,
+                qty: 0.01,
+                confidence: 0.5,
+                strategy: "r6t1t2_stub".to_string(),
+                order_type: if self.limit_price.is_some() {
+                    "limit".to_string()
+                } else {
+                    "market".to_string()
+                },
+                limit_price: self.limit_price,
+                confluence_score: None,
+                persistence_elapsed_ms: None,
+                time_in_force: self.tif,
+                maker_timeout_ms: None,
+            })]
+        }
+    }
+
+    fn make_tif_adapters(
+        tif: Option<TimeInForce>,
+        is_long: bool,
+        limit_price: Option<f64>,
+    ) -> (
+        crate::replay::strategy_adapter::ReplayStrategyAdapter,
+        crate::replay::risk_adapter::ReplayRiskAdapter,
+    ) {
+        let strat = Box::new(TifStub { emitted: false, tif, is_long, limit_price });
+        let strategy_adapter =
+            crate::replay::strategy_adapter::ReplayStrategyAdapter::new(strat, ReplayProfile::Isolated)
+                .expect("Isolated accepts");
+        let risk_adapter = crate::replay::risk_adapter::ReplayRiskAdapter::new(
+            ReplayProfile::Isolated,
+            GuardianConfig::default(),
+            crate::config::RiskConfig::default(),
+            0.02,
+            None,
+        )
+        .expect("risk adapter Isolated accepts");
+        (strategy_adapter, risk_adapter)
+    }
+
+    /// Sprint C R6-T1+T2 — minimal 1-event fixture builder.
+    /// Sprint C R6-T1+T2 — 最小 1-event fixture 構造器。
+    fn r6_single_event() -> Vec<MarketEvent> {
+        vec![MarketEvent {
+            ts_ms: 1,
+            symbol: "BTCUSDT".into(),
+            open: 100.0,
+            high: 101.0,
+            low: 99.0,
+            close: 100.0,
+            volume: 1.0,
+        }]
+    }
+
+    // ─── Helper unit tests / 輔助函式單元測試 ───
+
+    #[test]
+    fn test_apply_fill_postonly_uses_maker_fee() {
+        // R6-T1: PostOnly TIF + no AM seeded → DEFAULT_MAKER_FEE_RATE + 'maker'.
+        // R6-T1：PostOnly TIF + 無 AM → DEFAULT_MAKER_FEE_RATE + 'maker'。
+        let (rate, role) = replay_fee_rate_for_tif(None, "BTCUSDT", Some(TimeInForce::PostOnly));
+        assert!((rate - DEFAULT_MAKER_FEE_RATE).abs() < 1e-12, "maker rate, got {}", rate);
+        assert_eq!(role, "maker", "PostOnly → 'maker' role");
+    }
+
+    #[test]
+    fn test_apply_fill_non_postonly_uses_taker_fee() {
+        // R6-T1: non-PostOnly TIF (None / GTC / IOC / FOK) → taker + 'taker'.
+        // R6-T1：非 PostOnly（None / GTC / IOC / FOK）→ taker + 'taker'。
+        for (tif, label) in [
+            (None, "None"),
+            (Some(TimeInForce::GTC), "GTC"),
+            (Some(TimeInForce::IOC), "IOC"),
+            (Some(TimeInForce::FOK), "FOK"),
+        ] {
+            let (rate, role) = replay_fee_rate_for_tif(None, "BTCUSDT", tif);
+            assert!((rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12, "{} taker, got {}", label, rate);
+            assert_eq!(role, "taker", "{} → 'taker'", label);
+        }
+    }
+
+    #[test]
+    fn test_apply_fill_long_slippage_increases_fill_price() {
+        // R6-T2: buy (is_long=true) at $1B tier → +1.0 bps signed →
+        // 100.0 × (1 + 1/10000) = 100.01.
+        // R6-T2：買 + $1B tier → +1.0 bps → 100.0 × (1 + 1/10000) = 100.01。
+        let cfg = crate::config::SlippageConfig::default();
+        let bps = replay_slippage_bps_for_tif(&cfg, None, 2_000_000_000.0, true);
+        assert!(bps > 0.0, "buy → positive bps, got {}", bps);
+        let fill = apply_slippage_to_price(100.0, bps);
+        assert!(fill > 100.0, "buy → fill > ref, got {}", fill);
+        assert!((bps - 1.0).abs() < 1e-9, "$1B tier 1.0 bps, got {}", bps);
+        assert!((fill - 100.01).abs() < 1e-9, "fill=100.01, got {}", fill);
+    }
+
+    #[test]
+    fn test_apply_fill_short_slippage_decreases_fill_price() {
+        // R6-T2: sell at $1B tier → -1.0 bps → fill = 100 × (1 - 1/10000) = 99.99.
+        // R6-T2：賣 + $1B tier → -1.0 bps → fill = 99.99。
+        let cfg = crate::config::SlippageConfig::default();
+        let bps = replay_slippage_bps_for_tif(&cfg, None, 2_000_000_000.0, false);
+        assert!(bps < 0.0, "sell → negative bps, got {}", bps);
+        let fill = apply_slippage_to_price(100.0, bps);
+        assert!(fill < 100.0, "sell → fill < ref, got {}", fill);
+        assert!((bps + 1.0).abs() < 1e-9, "$1B tier -1.0 bps, got {}", bps);
+        assert!((fill - 99.99).abs() < 1e-9, "fill=99.99, got {}", fill);
+    }
+
+    #[test]
+    fn test_apply_fill_zero_volume_24h_graceful_fallback() {
+        // R6-T2: volume_24h <= 0.0 → 5 bps fallback (signed by direction).
+        // PostOnly always 0. No NaN.
+        // R6-T2：volume_24h <= 0.0 → 5 bps fallback（帶符號）。PostOnly 必 0。
+        let cfg = crate::config::SlippageConfig::default();
+        let bps_buy = replay_slippage_bps_for_tif(&cfg, None, 0.0, true);
+        let bps_sell = replay_slippage_bps_for_tif(&cfg, None, 0.0, false);
+        assert!(bps_buy.is_finite(), "buy bps must be finite, got {}", bps_buy);
+        assert!(bps_sell.is_finite(), "sell bps must be finite, got {}", bps_sell);
+        assert!((bps_buy - 5.0).abs() < 1e-9, "buy fallback +5.0 bps, got {}", bps_buy);
+        assert!((bps_sell + 5.0).abs() < 1e-9, "sell fallback -5.0 bps, got {}", bps_sell);
+        // Negative volume_24h same fallback (live `lookup_rate` <= 0 → default).
+        // 負 volume_24h 同 fallback。
+        let bps_neg = replay_slippage_bps_for_tif(&cfg, None, -1.0, true);
+        assert!((bps_neg - 5.0).abs() < 1e-9, "negative vol → +5.0 bps, got {}", bps_neg);
+        // PostOnly always 0 regardless of volume_24h. / PostOnly 必 0。
+        let bps_po = replay_slippage_bps_for_tif(&cfg, Some(TimeInForce::PostOnly), 0.0, true);
+        assert_eq!(bps_po, 0.0, "PostOnly slippage_bps must be 0");
+    }
+
+    #[test]
+    fn test_apply_fill_simulated_fill_fee_field_populated() {
+        // R6-T1 end-to-end via adapter path: SimulatedFill row carries fee > 0
+        // (finite), fee_rate=DEFAULT_TAKER_FEE_RATE, liquidity_role='taker',
+        // slippage_bps non-zero (no AM seeded; default 5 bps fallback).
+        // R6-T1 端到端（adapter path）：SimulatedFill row fee > 0、
+        // fee_rate=DEFAULT_TAKER_FEE_RATE、liquidity_role='taker'、
+        // slippage_bps 非 0（無 AM seed；預設 5 bps fallback）。
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_r6t1t2_taker".into(),
+            "S3",
+            r6_single_event(),
+        )
+        .expect("baseline build OK")
+        .with_replay_fee_context(None, None, None);
+        let (strategy_adapter, risk_adapter) = make_tif_adapters(None, true, None);
+        let snapshot = make_snapshot_seed(10_000.0, Some(100.0), Vec::new());
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes");
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+        assert_eq!(result.fills.len(), 1, "expected 1 accepted fill");
+        let f0 = &result.fills[0];
+        // R6-T1 assertions: fee + fee_rate + liquidity_role populated.
+        // R6-T1 斷言：fee + fee_rate + liquidity_role 已填值。
+        assert!(f0.fee.is_finite() && f0.fee > 0.0, "fee finite > 0, got {}", f0.fee);
+        assert!((f0.fee_rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12, "taker rate, got {}", f0.fee_rate);
+        assert_eq!(f0.liquidity_role, "taker", "non-PostOnly → taker role");
+        // R6-T2 assertions: market + None volume → +5 bps; price=100.05.
+        // R6-T2 斷言：market + None volume → +5 bps；price=100.05。
+        assert!((f0.slippage_bps - 5.0).abs() < 1e-9, "+5.0 bps, got {}", f0.slippage_bps);
+        assert!((f0.price - 100.05).abs() < 1e-9, "price=100.05, got {}", f0.price);
+        // Fee = 0.01 × 100.05 × 0.00055 = 0.000550275.
+        let expected_fee = 0.01 * 100.05 * DEFAULT_TAKER_FEE_RATE;
+        assert!((f0.fee - expected_fee).abs() < 1e-12, "fee={}, got {}", expected_fee, f0.fee);
+    }
+
+    #[test]
+    fn test_apply_fill_postonly_path_emits_maker_zero_slippage() {
+        // R6-T1+T2 cross-check: PostOnly → maker / 0 slippage / price == limit_price.
+        // R6-T1+T2 交叉驗證：PostOnly → maker / 0 slippage / price == limit_price。
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_r6t1t2_maker".into(),
+            "S3",
+            r6_single_event(),
+        )
+        .expect("baseline build OK")
+        .with_replay_fee_context(None, None, None);
+        // PostOnly + limit_price=99.5 (must be on book, below current 100).
+        // PostOnly + limit_price=99.5（必掛單，低於現價 100）。
+        let (strategy_adapter, risk_adapter) =
+            make_tif_adapters(Some(TimeInForce::PostOnly), true, Some(99.5));
+        let snapshot = make_snapshot_seed(10_000.0, Some(100.0), Vec::new());
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes");
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+        assert_eq!(result.fills.len(), 1, "expected 1 accepted fill");
+        let f0 = &result.fills[0];
+        assert!((f0.fee_rate - DEFAULT_MAKER_FEE_RATE).abs() < 1e-12, "maker, got {}", f0.fee_rate);
+        assert_eq!(f0.liquidity_role, "maker", "PostOnly → maker role");
+        assert_eq!(f0.slippage_bps, 0.0, "PostOnly slippage_bps must be 0");
+        assert!((f0.price - 99.5).abs() < 1e-9, "price=99.5, got {}", f0.price);
+        // Fee = 0.01 × 99.5 × 0.0002 = 0.000199.
+        let expected_fee = 0.01 * 99.5 * DEFAULT_MAKER_FEE_RATE;
+        assert!((f0.fee - expected_fee).abs() < 1e-12, "fee={}, got {}", expected_fee, f0.fee);
+    }
+
+    #[test]
+    fn test_apply_fill_synthetic_walker_emits_unknown_role_zero_fee() {
+        // R6-T1+T2 backward compat: synthetic-walker → 0 fee / 'unknown' role
+        // (proof_1/4/5 e2e byte-equal on `price` since slippage_bps=0).
+        // R6-T1+T2 向後兼容：synthetic-walker → 0 fee / 'unknown' role
+        // （proof_1/4/5 e2e 因 slippage_bps=0 在 `price` byte-equal）。
+        let mut p = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_r6t1t2_synthetic".into(),
+            "S3",
+            synthetic_events(),
+        )
+        .unwrap();
+        p.execute().unwrap();
+        let r = p.into_result();
+        assert_eq!(r.fills.len(), 2, "synthetic walker emits 1 fill per new symbol");
+        for f in &r.fills {
+            assert_eq!(f.fee, 0.0, "synthetic walker fee must be 0");
+            assert_eq!(f.fee_rate, 0.0, "synthetic walker fee_rate must be 0");
+            assert_eq!(f.slippage_bps, 0.0, "synthetic walker slippage_bps must be 0");
+            assert_eq!(
+                f.liquidity_role, "unknown",
+                "synthetic walker liquidity_role must be 'unknown'"
+            );
+        }
+    }
+
+    #[test]
+    fn test_apply_fill_ghost_row_records_zero_fee_with_intent_metadata() {
+        // R6-T1 ghost-row contract: rejected intent → qty=0 → fee=0; but
+        // fee_rate / slippage_bps / liquidity_role still reflect intent's
+        // TIF + direction (counterfactual transparency).
+        // R6-T1 ghost row 契約：被拒 intent → qty=0 → fee=0；fee_rate /
+        // slippage_bps / liquidity_role 仍反映 TIF + 方向（counterfactual）。
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_r6t1t2_ghost".into(),
+            "S3",
+            r6_single_event(),
+        )
+        .expect("baseline build OK")
+        .with_replay_fee_context(None, None, None);
+        let (strategy_adapter, risk_adapter) = make_tif_adapters(None, true, None);
+        // Same-direction position triggers Gate 1.5 reject. / 同向倉觸 Gate 1.5。
+        let snapshot = make_snapshot_seed(
+            10_000.0,
+            Some(100.0),
+            vec![crate::replay::risk_adapter::ReplayPosition {
+                symbol: "BTCUSDT".into(),
+                is_long: true,
+                qty: 0.5,
+                entry_price: 100.0,
+            }],
+        );
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes");
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+        let ghost = result
+            .fills
+            .iter()
+            .find(|f| f.qty == 0.0 && f.symbol == "BTCUSDT")
+            .expect("expected ghost fill on Gate 1.5 reject");
+        assert_eq!(ghost.fee, 0.0, "ghost fee must be 0 (qty=0)");
+        // fee_rate / liquidity_role / slippage_bps reflect counterfactual.
+        // fee_rate / liquidity_role / slippage_bps 反映 counterfactual。
+        assert!((ghost.fee_rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12, "taker, got {}", ghost.fee_rate);
+        assert_eq!(ghost.liquidity_role, "taker", "None TIF → taker");
+        assert!((ghost.slippage_bps - 5.0).abs() < 1e-9, "+5.0 bps, got {}", ghost.slippage_bps);
     }
 }

@@ -140,6 +140,21 @@ from .checks_governance import (
     # 於 Wave 6+ land 後取代）。
     check_44_replay_manifest_key_presence,
 )
+from .checks_pricing_binding import (
+    # REF-20 Sprint C R6-T7 (2026-05-05) — `[45]` LG-3 provider pricing
+    # binding sentinel. Implements RFC §IMPL T2 healthcheck output
+    # (`docs/CCAgentWorkSpace/PA/.../2026-05-01--lg3_provider_pricing_binding_rfc.md`).
+    # PG-side proxy of Rust ``AccountManager`` runtime fee health via 24h
+    # trading.fills.fee_rate distribution + last-ts staleness. Unblocks
+    # LG-3 RFC closure 0% → 70% (T1 contract test deferred to Sprint D;
+    # T3 startup assertion deferred to LG-4 IMPL pre-req).
+    # REF-20 Sprint C R6-T7（2026-05-05）— `[45]` LG-3 提供者定價綁定哨兵
+    # （RFC §IMPL T2）。PG 端 proxy 映射 Rust AccountManager 運行時 fee
+    # 健康（24h trading.fills.fee_rate 分佈 + 末條 ts staleness）。
+    # 解封 LG-3 RFC closure 0% → 70%（T1 contract test 留 Sprint D；
+    # T3 startup assertion 留 LG-4 IMPL 前提）。
+    check_45_pricing_binding,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -160,7 +175,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
-    [42][42b][42c][43][44]                                 LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence
+    [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -193,6 +208,7 @@ Execution / cost sentinels added after F7:
   [42c] live_candidate_attribution_drift_3d (LG5-W3-FUP-2 Fix 2 2026-05-02 RFC §5 Plan B — gate-aligned 3d mirror of [42b])
   [43] label_backfill_freshness         (LG5-W3-FUP-2 Fix 1 2026-05-02 max(label_filled_at) age — cron liveness)
   [44] replay_manifest_key_presence     (REF-20 Sprint 1 Track B 2026-05-03 PA push back #3 — key.hex sibling presence; WARN-only until V042 Wave 6+)
+  [45] pricing_binding                  (REF-20 Sprint C R6-T7 2026-05-05 — LG-3 RFC §IMPL T2 PG proxy of Rust AccountManager fee health; closes RFC 0%→70%, T1+T3 deferred Sprint D / LG-4)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -212,7 +228,7 @@ def main() -> int:
     Counted rows are documented by ID, not by fragile total:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44]
+              [42][42b][42c][43][44][45]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -221,7 +237,8 @@ def main() -> int:
                [42]/[42b] are LG-5-IMPL-3 governance contract + attribution drift;
                [42c] is LG5-W3-FUP-2 Fix 2 RFC §5 Plan B — gate-aligned 3d mirror of [42b];
                [43] is LG5-W3-FUP-2 Fix 1 label-backfill cron liveness;
-               [44] is REF-20 Sprint 1 Track B replay manifest key.hex presence)
+               [44] is REF-20 Sprint 1 Track B replay manifest key.hex presence;
+               [45] is REF-20 Sprint C R6-T7 LG-3 provider pricing binding)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
 
@@ -231,7 +248,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44]
+              [42][42b][42c][43][44][45]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -634,6 +651,25 @@ def main() -> int:
             # 缺時 PASS-skip（避免 Sprint 1 rollout 順序差錯誤判 FAIL）。
             s, m = check_44_replay_manifest_key_presence(cur)
             results.append(("[44] replay_manifest_key_presence", s, m))
+
+            # [45] REF-20 Sprint C R6-T7 (2026-05-05) — LG-3 provider pricing
+            # binding sentinel. Implements RFC §IMPL T2 healthcheck output
+            # per `docs/CCAgentWorkSpace/PA/.../2026-05-01--lg3_provider_pricing_binding_rfc.md`.
+            # PG-side proxy of Rust ``AccountManager`` runtime fee health
+            # via 24h trading.fills.fee_rate distribution + last-ts
+            # staleness. Catches three failure modes:
+            #   1. live mode + source=seed_default (RFC §2.3 mainnet
+            #      fail-closed: never use defaults as availability workaround)
+            #   2. last fill aged ≥24h regardless of mode
+            #   3. quiet engine (0 fills) on warm engine (≥30min uptime)
+            # Pure SELECT inside cursor; defensive rollback at top.
+            # `[45]` LG-3 提供者定價綁定哨兵（RFC §IMPL T2）。PG 端 proxy
+            # 映射 Rust AccountManager 運行時 fee 健康。捕捉 3 種失效：
+            #   1. live + source=seed_default（RFC §2.3 mainnet fail-closed）
+            #   2. 末條 fill aged ≥24h 不論 mode
+            #   3. 熱機後（≥30min）仍 0 fills 靜默
+            s, m = check_45_pricing_binding(cur)
+            results.append(("[45] pricing_binding", s, m))
     finally:
         conn.close()
 

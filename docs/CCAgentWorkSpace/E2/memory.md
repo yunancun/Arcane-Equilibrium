@@ -1,5 +1,46 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-05 — REF-20 Sprint C R6 W1 review (PASS to E4 + 1 LOW + 1 P2 + 1 LOC budget concern)
+
+**對象**：兩 sub-agent 並行 deliverable
+- E1-A R6-T1+T2: `rust/openclaw_engine/src/replay/runner.rs` 1466→**1992 LOC** (+526) + `replay/report_writer.rs` test fixture compat (+8 LOC) — fee + slippage helpers + 4 SimulatedFill push site fields + 9 unit test
+- E1-B R6-T7: `helper_scripts/db/passive_wait_healthcheck/checks_pricing_binding.py` (NEW 423 LOC) + `test_pricing_binding_healthcheck.py` (NEW 240 LOC) + `__init__.py` / `runner.py` wire-up (+51) — `[45]` LG-3 RFC §IMPL T2 sentinel
+
+**Verdict**：**PASS to E4** · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 1 LOW (slot rename) / 1 P2 (LOC budget W2 R0-T0) / 1 P2 (const drift CI)
+
+**驗證手段**：
+1. byte-equal contract empirical — `runner.rs:546-547` `DEFAULT_TAKER_FEE_RATE=0.00055 / DEFAULT_MAKER_FEE_RATE=0.0002` mirror `intent_processor::DEFAULT_*_FEE_RATE` byte-equal ✓ + mirror `account_manager::DEFAULT_*_FEE` byte-equal ✓
+2. `replay_fee_rate_for_tif` (runner.rs:564) 對 `IntentProcessor::fee_rate_for_tif` (intent_processor/mod.rs:1200) 邏輯 byte-equal — PostOnly→maker (am.maker_fee/DEFAULT_MAKER_FEE_RATE) / 其他→taker (am.taker_fee/DEFAULT_TAKER_FEE_RATE)
+3. `replay_slippage_bps_for_tif` (runner.rs:588) 對 `IntentProcessor::slippage_rate_for_tif` (intent_processor/mod.rs:1179) 邏輯 byte-equal — PostOnly→0 / 其他→`SlippageConfig::lookup_rate(volume_24h)` × 10000；signed direction (buy=+/sell=-) per dispatch §2 schema 要求（live 寫 unsigned 至 cost_gate_paper / replay 寫 signed 至 simulated_fills.slippage_bps，acknowledged divergence）
+4. apply_slippage 直接乘除：`fill_price = reference_price × (1 + slippage_bps / 10000)`，PostOnly slippage_bps=0 → fill_price == limit_price byte-equal Sprint A/B baseline ✓
+5. Close path direction sign：`close_is_long = !pos.is_long` (line 1086) → long pos→sell→-bps→fill_price 降 / short pos→buy→+bps→fill_price 升 — adverse impact 一致 ✓
+6. 9 R6-T1+T2 unit test Mac PASS (test_apply_fill_postonly_uses_maker_fee + test_apply_fill_non_postonly_uses_taker_fee × 4 TIF (None/GTC/IOC/FOK) + test_apply_fill_long/short_slippage_increases/decreases_fill_price + test_apply_fill_zero_volume_24h_graceful_fallback (含 negative volume + PostOnly always 0) + test_apply_fill_simulated_fill_fee_field_populated 端到端 + 3 cross-check (postonly_path_emits_maker_zero_slippage + synthetic_walker_emits_unknown_role_zero_fee + ghost_row_records_zero_fee_with_intent_metadata))
+7. 67/67 replay lib + 6/6 e2e + 2/2 param_delta + 8/8 xlang_consistency + 4/4 forbidden_guard + 5/5 profile + 4/4 mac_policy = 96/96 replay GREEN — proof_1/4/5 e2e byte-equal preserved (synthetic walker fee=0/slippage_bps=0 → price 欄位 byte-equal Sprint A baseline)
+8. xlang_signature 13/13 byte-equal contract preserved (manifest_signer canonical_bytes 0 改動)
+9. R6-T7 healthcheck PG-side proxy 設計接受：query `MAX(ts) FILTER (WHERE fee_rate IS NOT NULL)` over `trading.fills` 24h 是 fresher-than-hourly heartbeat 對齊 Rust `AccountManager::last_fee_refresh_ms` 語意；engine_mode (V015) + fee_rate (V008) schema 真實 ✓
+10. R6-T7 10 pytest PASS (8 verdict path: PASS-all-fresh / WARN-1h-24h / FAIL-≥24h / FAIL-live-seed-default / FAIL-table-missing / PASS-cold-engine / WARN-warm-quiet / PASS-demo-seed-default + 2 helper drift)
+11. R6-T7 sibling 122/122 helper_scripts/db pytest PASS（無 regression）
+12. CRITICAL invariant audit: 0 forbidden import (`paper_state` / `canary_writer` / `ipc_server` / `governance_hub` / `live_authorization` / `decision_lease` / `bybit_*` / `intent_processor::router`) in changed code — module-level docstring 引用名是 explanatory，不是 use 語句
+13. 跨平台 grep `/home/ncyu|/Users/[a-z]+` 0 hit (5 changed file)
+14. 0 manifest_signer canonical_bytes 改動 / 0 V### migration / 0 IPC route 新增 / 0 Rust hot-path 改動
+15. cargo check --release Mac PASS（6.92s, 3 pre-existing warnings 不歸 R6-T1+T2）
+
+**Findings**：
+- 1 LOW (E1-B labeling): 文件中 `live+source=seed_default` 訊息一處 stringified 為 `live+source=seed_default` 與 docstring `live + seed_default` 不一致；不影響功能（assertIn 對齊測試實值）；建議 P3 統一
+- 1 P2 (W2 必修): runner.rs 1992 LOC 對 §九 2000 cap 只剩 8 LOC margin；R6-T3 KellyConfig wire 估 +30 LOC 必破 cap → W2 dispatch 必含 R0-T0 拆檔（recommend abstract `apply_fill_open` / `apply_fill_close` + 4 push site fee/slippage 邏輯至新檔 `replay/apply_fill.rs` ~250 LOC，runner.rs → ~1742）
+- 1 P2 (const drift): Rust `account_manager::DEFAULT_*_FEE` (0.00055/0.0002) 修改後 Python `checks_pricing_binding::DEFAULT_*_FEE` 不會自動同步；建議 CI grep gate 抓兩處不同步
+
+**LOC delta concern (sub-finding)**：E1-A 預估 +140 LOC 實際 +526 LOC = 3.7x over。raw 業務 code 真實增量 ~315 LOC + 雙語 docstring/註解 ~211 LOC。已 trim 從 2300 → 1992 (~308 LOC trimmed)。剩餘 docstring 主要 §七 mandate 雙語，不過度。LOC 構成合理。但因業務增量高估指 R6 W2 必前置 R0-T0 拆檔（已標 P2）。
+
+**Adversarial 反問結果**：
+1. byte-equal — 已逐行對 live `IntentProcessor::fee_rate_for_tif` + `slippage_rate_for_tif` + `SlippageConfig::lookup_rate` 邏輯 + 常量值 byte-equal ✓
+2. AccountManager seed gap — 替 R5-T4 CLI caller (`bin/replay_runner.rs`) 不接 `with_replay_fee_context` 此 wave，replay 走 `account_manager=None` 路徑直 fallback DEFAULT 常量 → 與 live 走 `taker_fee_rate` legacy field 路徑可能差（live 現 caller 從不 set fee_rate，AM 路徑唯一）→ 真實 byte-equal hold；R6-T3 wire 後完全一致
+3. 9 unit test 覆蓋 4 push site — Yes：synthetic walker (`test_apply_fill_synthetic_walker_emits_unknown_role_zero_fee`) + Open Accept (`test_apply_fill_simulated_fill_fee_field_populated`) + Open Reject ghost (`test_apply_fill_ghost_row_records_zero_fee_with_intent_metadata`) + Close 路徑 incidentally not isolated test，但 process_close_intent fee/slippage logic 與 process_open_intent 用同 helper → 邏輯 covered；建議 W2 加 close path explicit unit test (P3 nice-to-have)
+4. R6-T7 PG proxy 等價 IPC query — accepted: PG `MAX(ts) FILTER` 是 derivative observability not direct query，但 fee runtime → IntentProcessor → AccountManager 必呼路徑保證 trading.fills.fee_rate 寫入 == fee runtime alive；同時用 24h `fee_rate` 分佈對 DEFAULT 常量比對抓 silent regress 到 default fallback
+5. Linux PG dry-run gate — 必跑！per V055 5-round loop lesson + CLAUDE.md §七 governance — Mac pytest mock cursor 不能等同 Linux PG empirical；E2 PASS 條件附帶「PM commit 前必 SSH bridge Linux pytest + cargo build verify」，否則 V055 incident 重演
+
+**Sprint C 鏈下游**：R6-T1+T2 closure → R6-T3 KellyConfig wire (W2 並行 R0-T0 拆檔) → R6-T4 CalibrationLabelProducer → R6-T5/T6 Python writer → R6-T8 smoke → R6-T9 review
+
 ## 項目上下文（2026-03-31 更新）
 
 - 當前 Wave：Wave 6 Sprint 1a+1b 審查完成（Sprint 1a CONDITIONAL PASS，P1 修復後 commit）

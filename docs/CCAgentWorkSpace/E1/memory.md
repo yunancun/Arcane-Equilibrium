@@ -71,6 +71,26 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-04-29 | endpoint alias `engine_mode_fills_summary` for legacy `shadow_vs_live_summary`（shared handler / docstring 雙語 / 2 new pytest）| `.claude_reports/20260429_192523_e1_endpoint_alias_engine_mode_fills.md` |
 | 2026-05-03 | REF-20 Sprint 1 Track C — Python /replay/* 3 critical security fixes (P0-2 env var bypass / P0-4 SIGTERM arbitrary pid / P0-5a IDOR cross-actor / P0-5b path traversal) + V053 enum extension + 7 new pytest | `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-03--ref20_sprint1_track_c_python_security.md` |
 | 2026-05-04 | REF-20 Sprint A R1 — E2 round 1 fix log（HIGH-1 _is_executable_file + MEDIUM-1 base_dir.strip + MEDIUM-2 leak surface docstring + MEDIUM-3 empty/whitespace fallthrough test + MEDIUM-4 legacy order test + LOW-1 5-path docstring + LOW-2 V045/V049 absent → degraded）13/13 + 68 sibling PASS | `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r1_impl.md` §11 |
+| 2026-05-05 | REF-20 Sprint C R6-T1+T2 — Rust replay runner.rs apply_fill 真 maker/taker fee + slippage model（rust/openclaw_engine/src/replay/runner.rs +526 LOC：3 helper fns + 4 SimulatedFill 新欄位 + 3 IsolatedPipeline 新欄位 + with_replay_fee_context builder + 4 SimulatedFill push site 改 + 9 unit test；replay lib 67 PASS / e2e 25 PASS / full lib 2487 PASS / 0 forbidden import / runner.rs 1992 < 2000 cap）| `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_c_r6t1t2_impl.md` |
+
+### 2026-05-05 REF-20 Sprint C R6-T1+T2 IMPL 教訓
+
+- **R0-T0 拆檔 PM authority skip**：dispatch §3 標 PM authority 跳 R0-T0 isolated_pipeline / apply_fill 拆檔（governance change `e5b5227c` 把 §九 LOC cap 從 1500→2000，1466 baseline + ~180 LOC est < 2000 不破）。實作完成後 LOC = 1992（trim 後），驗證 PA 估計成立。**LOC §九 governance change 第一次救援**：避免不必要的中介拆檔工，集中 IMPL 焦點於 fee/slippage 邏輯本身。
+- **dispatch "apply_fill" 是 SimulatedFill 4 個 push site 概念集合，不是單一函數**：dispatch §1 寫 "apply_fill 函數（line 908-985）" 是文字捷徑，實際指 (1) synthetic walker line 692 (2) process_open_intent Accept line 838 (3) process_open_intent Reject ghost line 855 (4) process_close_intent line 895。`apply_fill_open` / `apply_fill_close` 是 snapshot mutator 不發 SimulatedFill。**讀 dispatch 字面 → 反查實際代碼結構，不被概念 alias 誤導**。
+- **Synthetic walker 必保 byte-equal proof_1/4/5**：synthetic walker（line 692）發 fee=0 / fee_rate=0 / slippage_bps=0 / liquidity_role='unknown' 的關鍵原因 = walker 無 OrderIntent / TimeInForce context，無從推 maker/taker；而 `'synthetic_replay'` tier 本就非 actionable（CLAUDE.md §九 既登記 non-training surface），claim maker/taker 是 false positive。`slippage_bps=0` 確保 `price` 欄位仍 byte-equal event close（保 proof_1/4/5 e2e）。**不可圖一致性把 synthetic walker 也套 fee 模型** — 那會破 backward compat 而且邏輯上錯誤（沒有交易 intent，何來 maker/taker 分類）。
+- **Ghost row counterfactual 透明度**：被拒 intent → qty=0 → fee=0；但保 fee_rate / liquidity_role / slippage_bps 反映 intent TIF + 方向（counterfactual：如未拒 caller 應付的值）。下游 attribution writer 若做「if-not-rejected counterfactual analysis」可 reuse 這 3 欄位。**ghost row 不是「全清 0」而是「qty=0 + fee=0 + 其他保留意圖元資料」**。
+- **with_replay_fee_context builder pattern 維持 R5-T4 caller 0 break**：原 `build_isolated_pipeline(profile, manifest_id, fixture_tier_label, fixtures)` API 不能改（會破 R5-T4 bin/replay_runner.rs + Sprint B 既有 6 hermetic test）。新加 3 個 IsolatedPipeline 欄位走 ctor default `None`，`with_replay_fee_context(am, slippage_cfg, vol_24h)` opt-in builder mirror `with_adapter_pipeline`。**沿用既有 builder pattern 是最低 churn 路徑**（Sprint B R5-T3 既奠定 builder pattern，R6 自然延伸）。
+- **Close 動作無 OrderIntent，視為 taker**：StrategyAction::Close { symbol, confidence, reason } 不帶 OrderIntent，不知 TIF。實作上 close 必走 taker（live engine `strategies/mod.rs:51` 註明「Close 繞過治理門禁」 = market close 是 default）。Slippage 方向：long pos closing = sell leg → -bps；short pos closing = buy leg → +bps。**Close 不能傳 PostOnly 給 helper**（會錯誤判 maker），統一傳 `None` TIF 走 taker path。
+- **fee 不扣 snap.balance / 在 row 層捕獲，避免 pnl_summary double-count**：`apply_fill_open` / `apply_fill_close` 是 snapshot mutator，不能在此扣 fee — 否則 `into_result` 讀 `snap.balance` 餵 `pnl_summary.ending_balance` 時 double-count（既扣 row.fee 又扣 balance.fee）。**fee 永遠在 SimulatedFill row 層捕獲**，pnl_summary schema 是否要 fold fee 是 Sprint D R8 決策不在 R6 scope。docstring 明文寫此邏輯供下游 reviewer / 未來修改者參考。
+- **§九 LOC governance 第一次拉鋸**：IMPL 自然落到 2300 LOC（1466 + 834）破 2000 cap。trim 路徑 = 只動我自己加的（not pre-existing R5-T3 blocks）— 移除冗餘 bilingual 重複 + 多行 assert 改單行 + helper 抽 r6_single_event() fixture 函數。`grep` `^[[:space:]]*//` 統計 1023 comment line / 2300 total 太高（44%），收斂後 1992 LOC（達 cap 內 8 LOC margin）+ 全雙語注釋（CLAUDE.md §七）+ 9 unit test 全保留。**§七 雙語強制 vs §九 LOC 上限的衝突解法 = 抽 helper 減重複 + 集中 docstring + 多行 assert 收成單行**，不是放棄 §七 雙語要求。
+- **IsolatedPipeline 取 Option<Arc<AccountManager>> 維持 Send + Sync，不阻塞 tokio**：dispatch §1「replay 不接 refresh_fee_rates」= IsolatedPipeline 不需 mut 訪問 AccountManager，只取 read-only（taker_fee/maker_fee 內部 RwLock::read）。`Option<Arc<AccountManager>>` 設計 = caller 端可從 live engine 既有 Arc 借出 + 跨 thread share；replay binary 端可獨立 instance + seed_default_fee_rates 自接。**Arc 不是過度抽象 — 是 live/replay 共用 fee runtime 的最低開銷接口**。
+- **dispatch §5 6 unit test ↔ 實際 9 test 對應**：dispatch §5 列 6 case；實作 9 test = 6 + 3 cross-check（PostOnly path emits maker zero slippage / synthetic walker emits unknown role zero fee / ghost row records zero fee with intent metadata）。3 cross-check 補強 PostOnly + synthetic walker + ghost row 三條獨立路徑契約。**dispatch 是 minimum，不是 maximum** — 加 cross-check test 不超 scope（同 file 同檔內），補強 R6 整體 contract 完整性。
+- **`SimulatedFill` 結構擴 → R6-T5 Python writer 自動可 parse**：Rust SimulatedFill 4 新欄位（fee / fee_rate / slippage_bps / liquidity_role）經 Serde 自動序列化到 replay_report.json fills 陣列。R6-T5 Python `simulated_fills_writer.py` 由隔壁並行 sub-agent 處理（`map_fill_to_v050_row` 改讀新欄位）— 我 IMPL 完不需動 Python writer。**Rust schema 是 Python writer 的契約源頭**，Rust 端先 IMPL → Python 端順勢補 parse 是最自然順序。
+
+### 2026-05-05 dispatch fetch + sibling check 教訓
+
+- **Dispatch §7.5 強制 fetch + grep sibling branch**：`git fetch && git branch -r | grep -E "(replay|sprint_c|fee|calibration|r6)"` 0 hit，確認 R6-T1+T2 沒 sibling CC 已開 feature branch（避免 G6-01 重派教訓）。多 CC session 並行下這條紀律必須跑，2 秒成本換避免重做工。
+- **R0-T0 skip = 同檔 sub-agent isolation 不需要**：dispatch §3 PM authority skip R0-T0 拆檔 → R6-T1+T2 都在 runner.rs 內動同一 SimulatedFill struct + 4 個 push site，**單檔單 sub-agent 處理是正解**。如果 PA 原 plan 的「同檔不同函數 isolated worktree 並行」會撞 4 個 push site 的 SimulatedFill 構造（4 處都需加 4 個新欄位），merge conflict 不可避。**isolation 規則：同 struct 改動 → 必序列**（CLAUDE.md §八 18-agent 動態 isolation 派工）。
 
 ### 2026-05-04 REF-20 Sprint A R1 E2 round 1 fix 教訓
 
@@ -5387,3 +5407,35 @@ V055 Guard A line 533-539 `v_identity_args <> v_expected_identity_args` strict e
 - **P2-V055-FOLLOWUP-2**：in-migration smoke pattern survey doc — `sql/migrations/templates/in_migration_smoke_pattern.md`，列三選項（PG 11+ procedure / separate one-shot V###.1 / sibling Python test）+ trade-off
 - **P2-V055-FOLLOWUP-3 (round 4 carry-over)**：canonical PG metadata format snapshot test，psycopg2 + OPENCLAW_TEST_LIVE_PG=1 opt-in 跑真 PG 抽 reflection 函數輸出對齊 hardcoded expected
 - **P2-V055-FOLLOWUP-4 (round 4 carry-over)**：PG version compatibility matrix doc — `docs/references/2026-05-05--pg_version_compat_matrix.md`，列 PG 13/14/15/16 reflection 函數行為 + transaction control 限制 + 推薦 V### migration pattern
+
+## 2026-05-05 R6-T7 LG-3 pricing binding healthcheck
+
+### Sprint C Wave R6-T7（commit pending E2 review）
+
+REF-20 Sprint C Wave R6-T7 IMPL — LG-3 RFC §IMPL T2 healthcheck `[45]` pricing_binding。task description 給 ID `[43]` 但實際 [43] 已被 LG5-W3-FUP-2 Fix 1 占用（`check_43_label_backfill_freshness`）；下個可用 ID = `[45]`（[44] 是 REF-20 Sprint 1 Track B replay manifest key.hex）。設計選擇：
+1. 不放既有 `checks_engine.py`（1267 LOC 已破 800 warn）/ 不放 `checks_governance.py`（906 LOC 接近 warn）
+2. 建新檔 `checks_pricing_binding.py`（423 LOC 乾淨單一職責）
+3. PG 端 proxy（不加新 IPC route 直查 Rust `AccountManager::last_fee_refresh_ms`，避破 xlang_consistency）— 用 trading.fills 24h fee_rate 分佈 + max(ts) 作為 runtime fee 健康代表
+4. `DEFAULT_MAKER_FEE=0.0002 / DEFAULT_TAKER_FEE=0.00055` 鏡 Rust `account_manager.rs:136-138`，1e-6 浮點容差判 source（seed_default vs bybit_v5）
+
+### IMPL 項目
+- `helper_scripts/db/passive_wait_healthcheck/checks_pricing_binding.py` (NEW, 423 LOC)
+  - `check_45_pricing_binding(cur)` — 三 mode (demo/live_demo/live) per-mode 聚合，三條 fail-closed rule（live+seed_default / age≥24h / warm-engine 仍 0 fills）
+  - 鏡 Rust default 常量 + RFC §2.4 output shape
+- `helper_scripts/db/test_pricing_binding_healthcheck.py` (NEW, 240 LOC, 10 unittest cases — 89/89 pytest sweep PASS)
+- `__init__.py` (+16 LOC) + `runner.py` (+35 LOC) wire-up
+- 完整中英對照雙語注釋（CLAUDE.md §七 強制）
+
+### LG-3 RFC closure 0% → 70%
+- T2 healthcheck output ✅ R6-T7 完成
+- T1 contract test (Rust+Python cross-language) — 留 Sprint D
+- T3 startup assertion — 留 LG-4 supervised live IMPL 前提
+
+### Lessons
+1. **LG-3 IMPL gate vs RFC Treadmill**：fee runtime 12 元件已 100% land；RFC 0% 指 binding contract（governance T1/T2/T3），不是 fee runtime IMPL 本身 — 區分「runtime IMPL」與「治理契約 IMPL」
+2. **PG 端 proxy > 新 IPC route**：xlang_consistency 是硬約束；trading.fills 既已寫 fee_rate (V008)，proxy 比新 HMAC IPC route 乾淨且 zero engine hot-path tax
+3. **新 check ID 必查既有 [N] 占用**：task description 給 [43] 但歷史已占；新 = `[45]`（next free after [44]）— ID drift 是常見 PA→E1 spec 非同步問題；E1 IMPL 前先查 `__init__.py` __all__ 列表 + `runner.py` `_RUNNER_DESCRIPTION` 真實占用
+4. **default constants xlang mirror**：Rust `account_manager.rs:136-138` 與 Python `DEFAULT_*_FEE` 必鏡；default-fee match 用 epsilon 1e-6（CLAUDE.md memory `engineering:debug` xlang IPC 容差 1e-4 是上界，本檔 1e-6 更嚴）
+5. **既有 runner.py 的 docstring 4-segment 同步**：`_RUNNER_DESCRIPTION` (argparse desc) + `main()` docstring 列舉部分 + cursor block dispatch + `__init__.py` __all__ 四個地方都要同步加 [N]，否則 healthcheck inventory drift
+6. **runner.py 既有 4-section drift trap**：實際發現 `_RUNNER_DESCRIPTION` 有 ID inventory 列表 + main() docstring 有 cursor 列表 + post-cursor 列表 + 兩段 narrative — 4 個段落必須四個都同步，僅改一處會 silently drift
+7. **mock cursor pattern 鏡 test_lg5_healthchecks.py**：`fetchone.return_value = (existence,)` + `fetchall.return_value = rows`；不用 `side_effect` 因為本 check 只一次 fetchone（existence 檢查）+ 一次 fetchall（聚合 rows），既有 `_cursor_for_42b` helper 是同 pattern reference
