@@ -330,6 +330,9 @@ mod tests {
                 last_action_label: "on_event:BTCUSDT@3".into(),
                 abort_reason: None,
             },
+            // Sprint B2 R5-T3: synthetic-walker fixture has no decision traces.
+            // Sprint B2 R5-T3：synthetic-walker fixture 無決策追蹤。
+            decision_traces: Vec::new(),
         }
     }
 

@@ -1209,4 +1209,60 @@ R5-T1+T2 architectural foundation OK：
 
 6. **canonical bytes 範圍對齊 hash 用途** — A4 acceptance fixture 的 strategy parameter delta 若改 `grid_count` 影響 `qty` → signature flip via `qty:.4e`。若改 `cross_persistence_ms` (MA crossover) 純 internal state 不 reach OrderIntent fields 入 hash → signature 不 flip。**抽象 review pattern**：任何「hash 為證明」的設計都必須查 hash canonical bytes vs acceptance fixture 改動的 parameter 路徑是否會 reach hashed field。E2 必跑「PA fixture example 改的 X 是否 reach signature 公式」對照。
 
+---
+
+## 2026-05-05 R5-T3 Adversarial Review (REF-20 Sprint B2 — wire adapter into runner.rs)
+
+**Verdict**: PASS to E4 · 0 RETURN · 3 LOW finding (1 doc-text typo + 2 caller-side notes)
+**Report path**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_b2_r5t3_e2_review.md`
+
+### 對 PA Q10 偏離立場（Optional pattern vs wholesale replace）
+
+E1 偏離 PA Q10 改採 Optional adapter pattern，**accept**：
+- proof_1/4/5 e2e 為 V3 §12 binding 的 evidence baseline，wholesale replace 會破 byte-equal contract
+- synthetic walker 退化為 e2e regression baseline + fast deterministic test asset
+- R5-T4 CLI 後 production 永走 adapter，walker 轉 fallback 用途
+
+### apply_fill PnL 公式 byte-equal mirror paper_state
+
+讀 `paper_state/fill_engine.rs::apply_fill` (line 276-385) 對齊 4 路徑：
+- Same-direction extend (weighted avg entry): byte-equal (`(old_entry * old_qty + fill_price * qty) / new_qty`)
+- Opposite full close (qty >= pos.qty): byte-equal；over-fill 兩端皆 silent-discard 多餘 qty
+- Opposite partial close (qty < pos.qty): byte-equal；剩餘倉留
+- Fresh open: byte-equal (entry_price = fill_price)
+
+**StrategyAction::Close 無 qty 字段** → 一律全平 contract → `apply_fill_close` 全 remove 設計正確（NO BUG）
+
+**Sprint A baseline fee=0** 是 PA design 既決議 scope-out（Sprint C R6 補）
+
+### fail-loud snapshot 兩條 (F-3 fix)
+
+`with_adapter_pipeline` setter line 541-585 兩條：
+1. `!snapshot.balance.is_finite()` → `InvalidSnapshot { reason: "balance must be finite f64" }` (NaN/Inf reject)
+2. `latest_price.is_none() && positions.is_empty()` → `InvalidSnapshot { reason: "latest_price is None and positions is empty" }` (empty anchor reject)
+
+`ReplayError::InvalidSnapshot` variant 確存 (runner.rs:304) + Display impl (line 316-321)；4 R5-T3 inline test 有 2 條覆蓋。
+
+### `decision_traces` 加 field 0 break risk
+
+`ReplayResult.decision_traces: Vec<DecisionTraceEntry>` + `#[serde(default)]` 向後兼容；`grep -rln decision_traces program_code/` 0 hit (Python downstream 0 file 引用)；canonical_bytes / xlang invariant 0 影響（runner.rs 不影響 manifest envelope）。
+
+### LOC 1466 high-cohesion exception accept
+
+比照 commands.rs 1343 / scanner/scorer.rs 1437 先例 accept Option A：
+- runner.rs 全檔單一責任 (IsolatedPipeline 生命週期 + state mutation)
+- bilingual docstring + inline test 為 LOC 主要膨脹源（實業務代碼 ~470 LOC）
+- R5-T4/T5/T6 加 LOC 風險低（fixture_loader / Python writer / separate test file 走別檔）
+- 若 R5-T4 推 LOC > 1500 → 屆時拆 `runner_apply.rs`（Option B）
+
+### E2 review 教訓（追加）
+
+7. **PA Q-design 偏離的判斷標準** — E1 偏離 PA Q10「wholesale replace」改採 Optional pattern，E2 不能機械式退回。判斷三條：(1) 偏離有 e2e regression baseline 保護 (proof_1/4/5)？(2) 偏離增加 vs 減少 system fragility？(3) production path (R5-T4 CLI) 是否強制走新 path？三條都 yes → accept；任一 no → 退回 PA design 確認。**抽象**：對 PA 設計偏離的審查標準是 backward-compat asset value vs 維護複雜度的 trade-off，不是「偏離 = 違規」。
+
+8. **跨檔對齊型對抗審查** — apply_fill PnL 公式對齊 paper_state 是「跨檔 mirror invariant」典型；E2 不能只讀 runner.rs 內部，必須打開 paper_state/fill_engine.rs 對 4 路徑（extend / full close / partial close / fresh open）byte-by-byte 比對 + 確認 fee deduction scope-out 在 PA design 有跡。**抽象 pattern**：任何「mirror live behaviour」的 replay/shadow IMPL 都必須跨檔逐路徑對照，不接受「邏輯類似」答案。
+
+9. **schema 擴展 vs downstream consumer** — `ReplayResult.decision_traces` 加 field 但 Python downstream（R5-T5/T6 待寫）尚未消費。E2 確認三條：(1) `#[serde(default)]` 提供向後兼容？(2) Python `grep -rln <field_name>` 為 0？(3) 不影響 PG schema (V050)？三條都 yes → 0 break risk。**抽象**：schema 擴展型 PR 的審查必跑 producer-consumer 對照；schema 進但 consumer 未進是 acceptable forward-compat 寫法。
+
+10. **lib regression PASS count 細究** — E1 sign-off 報告 2474 PASS 但 E2 實測 2478；經查 +4 = R5-T3 inline tests，E1 §1 表格 +250 LOC = 4 inline tests 已透露但 §7 PASS count 未更新。**LOW finding**，不阻 E4 但 commit message 應訂正。**抽象**：E1 sign-off PASS count 必驗證 baseline + new = total，發現 mismatch 不一定是 regression（可能是新 test 沒計入），但必須叫 E1 解釋。
+
 7. **NaN propagation 在 risk gate 路徑的 silent bypass** — `balance <= 0.0` 對 NaN 是 false → 1.6 不 trigger。Live router.rs 同行為（即 router.rs 也 silent passes NaN balance 進 Guardian）。R5-T2 是 mirror 設計，行為一致 = OK；但 R5-T3 構造 snapshot 端必 fail-loud — 因為 router 真實由 paper_state 餵入，paper_state 自己 NaN-safe；R5-T3 從 fixture 構造 snapshot 不必然 NaN-safe。**抽象**：任何 "mirror existing function" 的 replay-pure adapter 都需確認 caller 構造 input 端維持與原 caller 一致的 fail-closed 不變量；不對齊 = silent bypass。
