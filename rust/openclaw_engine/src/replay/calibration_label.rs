@@ -823,4 +823,274 @@ mod tests {
         assert_eq!(ExecutionConfidence::Limited.as_str(), "limited");
         assert_eq!(ExecutionConfidence::Calibrated.as_str(), "calibrated");
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // R6-T8 reproducibility smoke test（per QC §1.1 + PA dispatch W5）
+    //
+    // 用途：證明 `derive_execution_confidence` 是純 stateless 函數，對
+    //       同 input 跑兩次必產字節級相同 `CalibrationResult`。下游
+    //       MLDE / Dream / writer 依賴 reproducibility 才能保 calibration
+    //       label 邏輯可重現。
+    //
+    // 策略覆蓋（QC spec §1.1 表 5 strategy fixture，每 strategy 一個
+    // reproducibility test）：
+    //   - grid_trading：n=1162 → 預期 calibrated
+    //   - ma_crossover：n=635   → 預期 limited 或 calibrated 邊界
+    //   - funding_arb：n=99    → 預期 not calibrated（n<200）
+    //   - bb_breakout：n=34    → 預期 limited / none 邊界
+    //   - bb_reversion：n=7    → 預期 None（n<30）
+    //
+    // 設計：固定 RNG seed = 構造 deterministic fixture（無 RNG，純算術
+    //       序列）→ 跑兩次 → assert 9 個 field 全相等。Deterministic 不
+    //       因下次跑改變。NaN 用專屬比較（NaN != NaN 但 bit pattern 同）。
+    // ─────────────────────────────────────────────────────────────────
+
+    /// reproducibility helper：assert 兩 `CalibrationResult` 9 欄全相等。
+    /// 對 NaN 採用 bit-level 等同（`f64::to_bits()`）以繞過 NaN != NaN。
+    fn assert_calibration_eq(a: &CalibrationResult, b: &CalibrationResult) {
+        assert_eq!(a.label, b.label, "label drift");
+        assert_eq!(a.sample_count, b.sample_count, "sample_count drift");
+        assert_eq!(a.last_fill_age_ms, b.last_fill_age_ms, "last_fill_age_ms drift");
+        // fee_bps_mad / iqr / p5 / p50 / p95 可能 NaN（n=0），用 bit-level 比。
+        assert_eq!(
+            a.fee_bps_mad.to_bits(),
+            b.fee_bps_mad.to_bits(),
+            "fee_bps_mad drift: {} vs {}",
+            a.fee_bps_mad,
+            b.fee_bps_mad
+        );
+        assert_eq!(
+            a.fee_bps_iqr.to_bits(),
+            b.fee_bps_iqr.to_bits(),
+            "fee_bps_iqr drift: {} vs {}",
+            a.fee_bps_iqr,
+            b.fee_bps_iqr
+        );
+        assert_eq!(
+            a.net_bps_p5.to_bits(),
+            b.net_bps_p5.to_bits(),
+            "net_bps_p5 drift: {} vs {}",
+            a.net_bps_p5,
+            b.net_bps_p5
+        );
+        assert_eq!(
+            a.net_bps_p50.to_bits(),
+            b.net_bps_p50.to_bits(),
+            "net_bps_p50 drift: {} vs {}",
+            a.net_bps_p50,
+            b.net_bps_p50
+        );
+        assert_eq!(
+            a.net_bps_p95.to_bits(),
+            b.net_bps_p95.to_bits(),
+            "net_bps_p95 drift: {} vs {}",
+            a.net_bps_p95,
+            b.net_bps_p95
+        );
+        assert_eq!(a.ttl, b.ttl, "ttl drift");
+    }
+
+    /// build_fixture helper：依 strategy 模板構造 deterministic
+    /// `Vec<FillRecord>`（無 RNG，純算術序列保 reproducibility）。
+    ///
+    /// 參數契約：
+    ///   - `n`：fill 數
+    ///   - `last_fill_age_days`：最後 fill 距 `now` 多久（最大 age）
+    ///   - `oldest_fill_age_days`：最舊 fill 距 `now` 多久（最小 age）
+    ///   - `fee_pattern`：fee_rate 序列模板
+    ///       - `Stable(rate)`：所有 fill 同 fee
+    ///       - `Bimodal(maker, taker)`：偶數 idx maker / 奇數 idx taker
+    ///   - `entry`：entry_price（恆同）
+    ///   - `exit_offset`：每 fill exit_price = entry + offset
+    ///
+    /// 返回的 `Vec<FillRecord>` 是 deterministic：n + 各參數同則 byte-equal。
+    enum FeePattern {
+        Stable(f64),
+        Bimodal(f64, f64),
+    }
+
+    fn build_fixture(
+        now: DateTime<Utc>,
+        n: usize,
+        last_fill_age_days: f64,
+        oldest_fill_age_days: f64,
+        fee_pattern: &FeePattern,
+        entry: f64,
+        exit_offset: f64,
+    ) -> Vec<FillRecord> {
+        let mut fills = Vec::with_capacity(n);
+        for i in 0..n {
+            // 線性插值 age：i=0 最舊，i=n-1 最新。n=1 時用 last_fill_age_days。
+            let age = if n <= 1 {
+                last_fill_age_days
+            } else {
+                oldest_fill_age_days
+                    + (last_fill_age_days - oldest_fill_age_days) * (i as f64) / (n as f64 - 1.0)
+            };
+            let fee = match fee_pattern {
+                FeePattern::Stable(rate) => *rate,
+                FeePattern::Bimodal(maker, taker) => {
+                    if i % 2 == 0 {
+                        *maker
+                    } else {
+                        *taker
+                    }
+                }
+            };
+            fills.push(make_fill(now, age, fee, entry, entry + exit_offset, true));
+        }
+        fills
+    }
+
+    /// R6-T8 §1：grid_trading n=1162 reproducibility。
+    /// 兩次同 input → 9 欄全相等 + label=Calibrated。
+    #[test]
+    fn test_r6t8_grid_trading_reproducibility() {
+        let now = reference_now();
+        // grid_trading：1162 fills、freshness 1d、穩定 maker fee 2 bps、
+        // age 線性 1d..6d；MAD=0 → calibrated 候選。
+        let fills_a = build_fixture(
+            now,
+            1162,
+            1.0,
+            6.0,
+            &FeePattern::Stable(0.0002),
+            100.0,
+            1.0,
+        );
+        let fills_b = build_fixture(
+            now,
+            1162,
+            1.0,
+            6.0,
+            &FeePattern::Stable(0.0002),
+            100.0,
+            1.0,
+        );
+        let r1 = derive_execution_confidence(&fills_a, now);
+        let r2 = derive_execution_confidence(&fills_b, now);
+        // QC §1.1 預期 calibrated。
+        assert_eq!(r1.label, ExecutionConfidence::Calibrated);
+        assert_eq!(r1.sample_count, 1162);
+        assert_eq!(r1.ttl, Duration::days(7));
+        // reproducibility：跑兩次 byte-equal。
+        assert_calibration_eq(&r1, &r2);
+        // 進階：再跑第三次驗 deterministic 不退化。
+        let r3 = derive_execution_confidence(&fills_a, now);
+        assert_calibration_eq(&r1, &r3);
+    }
+
+    /// R6-T8 §2：ma_crossover n=635 reproducibility。
+    /// bimodal maker/taker → MAD/IQR 非 0；label 應 limited 或 calibrated boundary。
+    #[test]
+    fn test_r6t8_ma_crossover_reproducibility() {
+        let now = reference_now();
+        // ma_crossover：635 fills、freshness 2d、bimodal maker(2bps)/taker(5.5bps)、
+        // age 線性 2d..6.5d。
+        let fills_a = build_fixture(
+            now,
+            635,
+            2.0,
+            6.5,
+            &FeePattern::Bimodal(0.0002, 0.00055),
+            100.0,
+            0.5,
+        );
+        let fills_b = build_fixture(
+            now,
+            635,
+            2.0,
+            6.5,
+            &FeePattern::Bimodal(0.0002, 0.00055),
+            100.0,
+            0.5,
+        );
+        let r1 = derive_execution_confidence(&fills_a, now);
+        let r2 = derive_execution_confidence(&fills_b, now);
+        // QC §1.1：n=635 ≥ 200，age ≤ 7d；視 MAD/IQR 落 limited 或 calibrated。
+        // bimodal 2/5.5 bps → median≈3.75 bps、MAD=1.75 bps → < 3 → calibrated。
+        assert_ne!(r1.label, ExecutionConfidence::None);
+        assert!(matches!(
+            r1.label,
+            ExecutionConfidence::Limited | ExecutionConfidence::Calibrated
+        ));
+        assert_eq!(r1.sample_count, 635);
+        // reproducibility 兩跑相等。
+        assert_calibration_eq(&r1, &r2);
+    }
+
+    /// R6-T8 §3：funding_arb n=99 reproducibility。
+    /// n<200 → 必非 calibrated；視 freshness/MAD 為 limited 或 None。
+    #[test]
+    fn test_r6t8_funding_arb_reproducibility() {
+        let now = reference_now();
+        // funding_arb：99 fills、freshness 1d、stable fee、age 線性 1d..5d。
+        let fills_a = build_fixture(now, 99, 1.0, 5.0, &FeePattern::Stable(0.0002), 100.0, 0.1);
+        let fills_b = build_fixture(now, 99, 1.0, 5.0, &FeePattern::Stable(0.0002), 100.0, 0.1);
+        let r1 = derive_execution_confidence(&fills_a, now);
+        let r2 = derive_execution_confidence(&fills_b, now);
+        // QC §1.1：n=99 < 200 → 不可 calibrated。
+        assert_ne!(r1.label, ExecutionConfidence::Calibrated);
+        // n=99 ≥ 30、age ≤ 14d、MAD=0 → limited（fee 全等）。
+        // 容許 Limited or None per spec wording「'none' 強制降」。
+        assert!(matches!(
+            r1.label,
+            ExecutionConfidence::Limited | ExecutionConfidence::None
+        ));
+        assert_eq!(r1.sample_count, 99);
+        // reproducibility。
+        assert_calibration_eq(&r1, &r2);
+    }
+
+    /// R6-T8 §4：bb_breakout n=34 reproducibility。
+    /// n>30 邊界、age 較舊 (10d)；視 fee shape 為 limited 或 None。
+    #[test]
+    fn test_r6t8_bb_breakout_reproducibility() {
+        let now = reference_now();
+        // bb_breakout：34 fills、freshness 10d、stable fee 2 bps、age 線性 10d..13d。
+        let fills_a = build_fixture(
+            now,
+            34,
+            10.0,
+            13.0,
+            &FeePattern::Stable(0.0002),
+            100.0,
+            0.05,
+        );
+        let fills_b = build_fixture(
+            now,
+            34,
+            10.0,
+            13.0,
+            &FeePattern::Stable(0.0002),
+            100.0,
+            0.05,
+        );
+        let r1 = derive_execution_confidence(&fills_a, now);
+        let r2 = derive_execution_confidence(&fills_b, now);
+        // QC §1.1：n=34 ≥ 30、freshness=10d ≤ 14d、MAD=0 → limited；
+        // 但 < 200 → 不 calibrated。
+        assert_ne!(r1.label, ExecutionConfidence::Calibrated);
+        assert_eq!(r1.sample_count, 34);
+        // reproducibility。
+        assert_calibration_eq(&r1, &r2);
+    }
+
+    /// R6-T8 §5：bb_reversion n=7 reproducibility。
+    /// n<30 → label 必 None。
+    #[test]
+    fn test_r6t8_bb_reversion_reproducibility() {
+        let now = reference_now();
+        // bb_reversion：7 fills、freshness 1d、stable fee、age 線性 1d..3d。
+        let fills_a = build_fixture(now, 7, 1.0, 3.0, &FeePattern::Stable(0.0002), 100.0, 0.1);
+        let fills_b = build_fixture(now, 7, 1.0, 3.0, &FeePattern::Stable(0.0002), 100.0, 0.1);
+        let r1 = derive_execution_confidence(&fills_a, now);
+        let r2 = derive_execution_confidence(&fills_b, now);
+        // QC §1.1：n=7 < 30 → None 強制。
+        assert_eq!(r1.label, ExecutionConfidence::None);
+        assert_eq!(r1.sample_count, 7);
+        assert_eq!(r1.ttl, Duration::zero());
+        // reproducibility。
+        assert_calibration_eq(&r1, &r2);
+    }
 }
