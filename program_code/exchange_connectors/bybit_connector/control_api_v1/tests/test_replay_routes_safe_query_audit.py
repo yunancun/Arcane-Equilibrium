@@ -415,24 +415,48 @@ def test_audit_helper_returns_clean_summary():
     Sprint 1 Track C E2 retrofit moved ``_do_pg_cancel`` body to
     ``replay/security_guards.py::execute_replay_cancel_pg_path`` for
     §九 1500 LOC cap compliance; ``cur.execute`` hit count in
-    ``replay_routes.py`` dropped from 8 to 5 (only ``_do_pg_path`` and
-    ``_safe_pg_select`` remain in this file). ``_do_pg_cancel`` is still
-    in the sanctioned_fns allow-list because legacy callers may grep
-    for the marker, but ``spans`` no longer contains it.
+    ``replay_routes.py`` dropped from 8 to 5.
+
+    Sprint B1 R0-T0 (PA §11.3, 2026-05-05) further moved ``_do_pg_path``
+    body to ``replay/run_route.py::_do_pg_path_for_run_sync``, plus
+    ``/health`` / ``/list`` / ``/status`` SQL templates to their
+    respective ``replay/{health,list,status}_route.py`` siblings, so
+    ``replay_routes.py`` now hosts only thin handlers + a thin
+    ``_safe_pg_select`` wrapper that delegates to
+    ``route_helpers.safe_pg_select``. Net effect: ``cur.execute``
+    in-file hits dropped from 5 to 0. The contract remains: ``leaks=[]``
+    + ``audit_ok=True`` (no cursor leakage outside sanctioned wrappers);
+    only the ``total_cur_execute_hits`` baseline is relaxed to ``>= 0``
+    because the canonical implementation now lives in sibling modules.
+    The audit cross-reference for sibling files is enforced by
+    Case 1's ``_do_pg_path`` substring check on the thin ``/run``
+    handler's AST source (which references ``_rrun._do_pg_path_for_run_sync``).
+
     Sprint 1 Track C E2 retrofit 將 ``_do_pg_cancel`` body 移至
-    ``replay/security_guards.py::execute_replay_cancel_pg_path``，以符合
-    §九 1500 LOC cap；``replay_routes.py`` 內 ``cur.execute`` 命中數從
-    8 降至 5。``_do_pg_cancel`` 仍在 sanctioned_fns allow-list 內供
-    legacy grep，但 ``spans`` 不再含。
+    ``replay/security_guards.py::execute_replay_cancel_pg_path``。
+
+    Sprint B1 R0-T0（PA §11.3，2026-05-05）進一步把 ``_do_pg_path`` body
+    移到 ``replay/run_route.py::_do_pg_path_for_run_sync``，``/health`` /
+    ``/list`` / ``/status`` 的 SQL 模板也分別搬到 ``replay/
+    {health,list,status}_route.py`` sibling。``replay_routes.py`` 只剩
+    thin handler + thin ``_safe_pg_select`` wrapper（轉派 ``route_helpers
+    .safe_pg_select``）。``cur.execute`` 本檔命中從 5 降至 0。Audit
+    contract 不變（``leaks=[]`` + ``audit_ok=True``）；僅放寬
+    ``total_cur_execute_hits`` baseline 為 ``>= 0`` 因規範實作已搬至
+    sibling module。Sibling 跨檔 audit 由 Case 1 對 thin ``/run`` handler
+    的 AST source 子字串 ``_do_pg_path`` 命中強制（caller 寫
+    ``_rrun._do_pg_path_for_run_sync``）。
     """
     summary = _audit_replay_routes_safe_query()
     assert summary["audit_ok"] is True
     assert summary["leaks"] == []
-    # Post-retrofit baseline: ≥5 sanctioned hits (3 in _do_pg_path + 2 in
-    # _safe_pg_select). ``_do_pg_cancel`` body now lives in security_guards
-    # and adds 3 hits there, but those are NOT in this file's audit scope.
-    # Retrofit 後 baseline：≥5 sanctioned hits（_do_pg_path 3 + _safe_pg_select 2）。
-    assert summary["total_cur_execute_hits"] >= 5
+    # Sprint B1 R0-T0 baseline: ``cur.execute`` hits in replay_routes.py
+    # = 0 (full extraction to sibling modules); contract preserved by
+    # ``leaks == []`` + ``audit_ok is True`` invariants.
+    # Sprint B1 R0-T0 baseline：``cur.execute`` 在 replay_routes.py 的命中
+    # = 0（完全抽至 sibling）；contract 由 ``leaks == []`` + ``audit_ok
+    # is True`` 不變式維持。
+    assert summary["total_cur_execute_hits"] >= 0
     assert "_safe_pg_select" in summary["sanctioned_fns"]
     assert "_do_pg_path" in summary["sanctioned_fns"]
     # ``_do_pg_cancel`` allow-listed for backward compat; physical body

@@ -1642,3 +1642,45 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 - V050 replay.simulated_fills — runner walks fixture 6 events + INSERT N rows（evidence_source_tier='synthetic_replay'）
 - V054 replay.audit_trail — register/run/finalize 三 audit emit 各 1 row
 
+
+
+## 2026-05-05 PA — REF-20 Sprint B Task DAG Design (R4 UI Enable + R5 Real Decision/Risk Replay Path)
+
+**Trigger**: PM 派發 Sprint B scope (R4 + R5) per `2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md` plan §6/§9.
+
+**Critical PA push back**: Sprint B should NOT be a single sprint covering R4+R5。**強烈建議切 B1（R4 + R0-T0 LOC budget release）+ B2（R5 grid_trading + ma_crossover pilot）**。理由：
+1. R5 涉 5 strategy + IntentProcessor 8-Gate pipeline architectural refactor，觸 GovernanceHub SM / Lease / paper_state 任一接縫；
+2. 既有 `replay_runner` runner.rs 刻意不接 IntentProcessor（V3 §6.2 forbidden list vs §6.1 「可共用 strategy/risk」張力未解），R5 必先 carve pure decision path；
+3. replay_routes.py 1500 LOC EXACT cap（0 margin）— 必先拆 thin handler（R0-T0 0.5-1d）；
+4. Sprint A 8-commit chain 顯示「即使簡單 IMPL 也會 6-layer blocker」，R5 複雜度 2-3 倍。
+
+**設計核心結構**：
+- §1A Strategy call graph：5 strategy 的 `Strategy trait` 本身 0 副作用（pure on `(IndicatorSnapshot, prices, signals)` → `Vec<StrategyAction>`）— 直接 `Box<dyn Strategy>` 復用即可，0 trait 改動。
+- §2 Risk call graph：`IntentProcessor::process_with_features` 8-Gate（1.0 auth / 1.4 lease / 1.5 dup / 1.6 neg balance / 2.0 Guardian / 2.5 Kelly / 2.6 P1 cap / 2.7 admission）。其中 1.0/1.4 必跳過（plan §4 hard boundary）；其餘 6 個由 `Guardian / check_order_allowed / compute_kelly_qty` 純函數重做即可。
+- §4.1 ReplayStrategyAdapter：~150 LOC 新檔 `replay/strategy_adapter.rs`，wrap `Box<dyn Strategy>` + 紀錄 trace；profile fail-closed `Isolated`-only constructor。
+- §4.2 ReplayRiskAdapter：~250 LOC 新檔 `replay/risk_adapter.rs`，重做 6-Gate mini-pipeline（不共用 IntentProcessor），加 `ReplayPaperState` 純 in-mem struct（不接 `crate::paper_state::PaperState`）。
+- §6 evidence schema：**reuse `simulated_fills.payload jsonb`**（V050 既有 column），不新加 V### migration。rejected intent 寫 simulated_fills with `qty=0.0` 保 lineage。
+- §8.1 LOC: replay_routes.py 1500 EXACT — Sprint B 第一手必拆 R0-T0 sub-router（4 endpoint /run /list /health /status 各 ~250 LOC）。
+- §8.2 indicators 處理：fixture builder 預計算 → 寫 fixture.json events[i].indicators 子鍵；replay binary 直讀，不接 KlineManager singleton。
+- §11 LOC 估算：R4 ~310 LOC + R5 ~1500 LOC = ~1810 LOC total（含 ~1300 test LOC）。
+
+**Wave 結構（R5 假設拆 B2）**：
+- W1 並行 4 task（T1 strategy_adapter / T2 risk_adapter / T5 simulated_fills_writer / T6 experiment_registry）— 4 sub-agent 並行 ~1d wall
+- W2 序列 2 task（T3 runner.rs rewrite → T4 replay_runner.rs main）~0.75d
+- W3 並行 2 test task（T7 strategy adapter integration + T8 parameter-delta proof）~1d
+- W4 序列 E2/E4 review ~0.5d
+- 總 wall ~3.25d for B2 / ~1.5-2d for B1
+
+**Hard boundary check**: 0 violation
+- replay 物理上 0 接 lease / IPC / mainnet / bybit / live_authorization / decision_lease
+- ReplayProfile::Isolated.requires_lease=false 強制
+- forbidden_guard.rs runtime symbol audit 防 import 越界
+
+**16 root principle check**: 16/16 — 加強 #1/#2/#3/#4/#6/#7/#8
+
+**10 PM open questions**：(1) sprint 切分；(2) Rust vs Python；(3) pilot vs full 5；(4) jsonb vs new table；(5) reject intent 寫不寫；(6) indicator 預計算 vs 重算；(7) R6 fee 加不加；(8) lease flag canary；(9) QC consult；(10) wholesale replace synthetic walker。
+
+**E2/E4 重點 3 點**：(1) R5-T1/T2 import audit grep 無 paper_state/canary_writer/ipc_server/bybit；(2) R5-T3 IsolatedPipeline 0 silent fallback；(3) R5-T6 canonical_bytes contract reuse 不複製 sort_keys/separators kwargs。
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-05--ref20_sprint_b_task_dag.md`
+**Status**: design ready，awaits PM Q1 拍板（切 B1+B2 vs single B），其餘 9 OQ 並行回。

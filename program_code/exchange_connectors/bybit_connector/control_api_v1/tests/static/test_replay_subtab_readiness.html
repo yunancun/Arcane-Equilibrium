@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Replay Subtab Readiness Contract Test (Sprint B1 R4-T4)</title>
+<!--
+  test_replay_subtab_readiness.html — frontend contract fixture for
+  app-paper.js OpenClawReplaySubtab namespace (REF-20 Sprint B1 R4-T4).
+
+  目的 (中):
+    用 mock fetch 替换 window.fetch，按 R4 後端契約返回
+    /api/v1/replay/health 三个 wiring_status 状态 (ready / degraded /
+    binary_missing)，跑 OpenClawReplaySubtab.onTabActivate()，断言：
+      1. ready → render 'ready' UI（含 4 cell + 載入按鈕 + 綠色 wiring_status
+         欄位）
+      2. degraded → render disabled card with reason badge "Backend health
+         degraded"
+      3. binary_missing → render disabled card with reason badge "Binary
+         missing"
+      4. fetch_failed → render disabled card with "Backend probe failed" +
+         retry text
+      5. onTabDeactivate → stop polling (clear interval)
+
+  Purpose (EN):
+    Mock window.fetch to feed three wiring_status states; run
+    OpenClawReplaySubtab.onTabActivate() and assert:
+      1. ready → render 'ready' UI (4 baseline cells + load button + green
+         wiring_status field)
+      2. degraded → render disabled card with reason badge "Backend health
+         degraded"
+      3. binary_missing → render disabled card with reason badge "Binary
+         missing"
+      4. fetch_failed → render disabled card with "Backend probe failed"
+      5. onTabDeactivate → stop polling
+
+  使用方式 (Usage):
+    1. 启动 control_api uvicorn (or any static server serving the static/ dir)
+    2. 浏览器打开 /tests/static/test_replay_subtab_readiness.html
+    3. 看 #test-results 区块，PASS 全绿即过；FAIL 行显示具体差异
+
+  限制 (Caveats):
+    - 不依赖 pytest / playwright（项目目前无前端测试框架，沿用 R20 Wave 2
+      Round 2 test_agent_tracker_contract.html 既有 pattern）
+    - 是 smoke 级断言，不是 full unit test
+    - L-3 future TODO: 升级为 vitest 或 jsdom-based pytest 进 CI
+
+  TODO (future):
+    - 将本 fixture 重构为 vitest / jsdom-based pytest，进 CI
+    - 增加 race condition test (rapid tab switch)
+    - 增加 30s polling interval observation test
+-->
+<style>
+  body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+  .case { padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .pass { color: #3fb950; }
+  .fail { color: #f85149; font-weight: bold; }
+  .info { color: #79c0ff; }
+  .skip { color: #d29922; }
+  pre { background: #161b22; padding: 8px; border-radius: 4px; max-height: 280px; overflow: auto; font-size: 11px; }
+  h1 { font-size: 18px; }
+  h2 { font-size: 14px; color: #79c0ff; margin-top: 24px; }
+  /* Minimal common.js shim — 只为让 tab-paper.html 的 mount 渲染不光秃 */
+  :root { --red:#f85149; --green:#3fb950; --yellow:#d29922; --blue:#388bfd;
+          --accent:#388bfd; --text:#c9d1d9; --text-dim:#8b949e;
+          --border:#30363d; --card-bg:#0d1117; --bg:#0d1117;
+          --card-radius:8px; }
+  .oc-subtab-placeholder { padding: 24px 18px; text-align: center;
+    background: rgba(13,17,23,0.4); border: 1px dashed var(--border);
+    border-radius: var(--card-radius); color: var(--text-dim); font-size: 13px; }
+  .oc-subtab-placeholder .gate-label { display: inline-block; margin-top: 6px;
+    padding: 3px 10px; background: rgba(248,81,73,0.08); color: var(--red);
+    border: 1px solid rgba(248,81,73,0.25); border-radius: 4px; font-size: 11px; }
+  .oc-btn { background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 6px 12px; border-radius: 4px;
+    cursor: pointer; font-size: 12px; font-family: inherit; }
+</style>
+</head>
+<body>
+<h1>OpenClawReplaySubtab Contract Test (REF-20 Sprint B1 R4-T4)</h1>
+<div class="info">
+  Purpose: assert OpenClawReplaySubtab.onTabActivate() correctly handles
+  three wiring_status states + fetch failure + polling teardown.
+</div>
+
+<!-- Mount point sandbox：模擬 tab-paper.html 的 #subtab-replay-disabled-card -->
+<!-- Mount point sandbox: simulates tab-paper.html's #subtab-replay-disabled-card -->
+<div style="display:none">
+  <div id="subtab-replay-disabled-card"></div>
+</div>
+
+<h2>Test Results</h2>
+<div id="test-results"></div>
+
+<h2>Last DOM Snapshot</h2>
+<pre id="dom-snapshot"></pre>
+
+<!--
+  載入順序 / Load order:
+    1. common.js — provides ocEsc, ocSanitizeClass, OpenClawDisabledStateCard
+    2. i18n_zh.js — provides window.t_zh + i18n_zh table (used by Disabled Card)
+    3. app-paper.js — provides OpenClawReplaySubtab namespace under test
+-->
+<script src="/static/common.js"></script>
+<script src="/static/i18n_zh.js"></script>
+<script src="/static/app-paper.js"></script>
+
+<script>
+"use strict";
+
+// ── Mock fetch infra / Mock fetch 基建 ─────────────────────────────────────
+// 保留 real fetch 以便重置；test 跑時把 window.fetch 換成 mockFetch。
+// Save real fetch for restore; replace window.fetch with mockFetch during tests.
+const _realFetch = window.fetch;
+let _mockResponses = {}; // url -> { status, body } | "fetch_error"
+let _mockCallLog = [];
+
+function mockFetch(url, opts) {
+  _mockCallLog.push({ url: url, opts: opts });
+  const rule = _mockResponses[url];
+  if (rule === "fetch_error") {
+    return Promise.reject(new TypeError("simulated network error"));
+  }
+  if (rule === undefined) {
+    // 未登記 = 404（避免 production endpoint 被誤打到）
+    return Promise.resolve({
+      ok: false, status: 404, statusText: "Not Found",
+      json: function () { return Promise.resolve({ error: "not_mocked" }); }
+    });
+  }
+  return Promise.resolve({
+    ok: rule.status >= 200 && rule.status < 300,
+    status: rule.status,
+    statusText: rule.status === 200 ? "OK" : "Mocked",
+    json: function () { return Promise.resolve(rule.body); }
+  });
+}
+
+function installMock() {
+  window.fetch = mockFetch;
+  _mockCallLog = [];
+}
+
+function uninstallMock() {
+  window.fetch = _realFetch;
+  _mockResponses = {};
+}
+
+function resetMount() {
+  document.getElementById("subtab-replay-disabled-card").innerHTML = "";
+}
+
+// ── Assertion helpers / 斷言輔助 ───────────────────────────────────────────
+const _results = [];
+function record(name, ok, detail) {
+  _results.push({ name: name, ok: ok, detail: detail || "" });
+  const div = document.createElement("div");
+  div.className = "case " + (ok ? "pass" : "fail");
+  div.textContent = (ok ? "✓ PASS  " : "✗ FAIL  ") + name
+    + (detail ? "  — " + detail : "");
+  document.getElementById("test-results").appendChild(div);
+}
+
+function assertContains(haystack, needle, caseName) {
+  const ok = haystack.indexOf(needle) !== -1;
+  record(caseName, ok, ok ? "" : "missing: '" + needle + "' in DOM");
+  return ok;
+}
+
+function assertNotContains(haystack, needle, caseName) {
+  const ok = haystack.indexOf(needle) === -1;
+  record(caseName, ok, ok ? "" : "should NOT contain: '" + needle + "'");
+  return ok;
+}
+
+function snapshotDom() {
+  const html = document.getElementById("subtab-replay-disabled-card").innerHTML;
+  document.getElementById("dom-snapshot").textContent = html;
+  return html;
+}
+
+// ── Test cases / 測試案例 ─────────────────────────────────────────────────
+async function runAll() {
+  // Sanity check: namespace must be loaded
+  if (typeof window.OpenClawReplaySubtab !== "object"
+      || window.OpenClawReplaySubtab === null) {
+    record("namespace.loaded", false,
+      "window.OpenClawReplaySubtab not defined — script load failed");
+    return;
+  }
+  record("namespace.loaded", true,
+    "OpenClawReplaySubtab namespace exposed on window");
+
+  // ─── Test Case 1: wiring_status='ready' → render ready UI ──────────────
+  installMock();
+  _mockResponses["/api/v1/replay/health"] = {
+    status: 200,
+    body: {
+      ok: true,
+      degraded: false,
+      reason: null,
+      is_simulated: false,
+      data_category: "replay_lab",
+      data: {
+        wiring_status: "ready",
+        binary_path: "/usr/local/bin/replay_runner",
+        binary_exists: true,
+        binary_release_profile: "live",
+        data_dir: "/tmp/openclaw",
+        data_dir_writable: true,
+        pg_present: true,
+        v045_present: true,
+        v049_present: true
+      }
+    }
+  };
+  resetMount();
+  await window.OpenClawReplaySubtab.onTabActivate();
+  let html = snapshotDom();
+  assertContains(html, "後端就緒",
+    "case_ready.dom_zh_label_present");
+  assertContains(html, "Backend Ready",
+    "case_ready.dom_en_label_present");
+  assertContains(html, "wiring_status: ready",
+    "case_ready.wiring_status_displayed");
+  assertContains(html, "release_profile: live",
+    "case_ready.release_profile_displayed");
+  // 4 cell baseline
+  assertContains(html, "執行可信度",
+    "case_ready.cell1_execution_confidence_label");
+  assertContains(html, "無 / NONE",
+    "case_ready.cell1_execution_confidence_baseline_NONE");
+  assertContains(html, "資料層級",
+    "case_ready.cell2_data_tier_label");
+  assertContains(html, "S3",
+    "case_ready.cell2_data_tier_S3_synthetic");
+  assertContains(html, "費率模型",
+    "case_ready.cell3_fee_model_label");
+  assertContains(html, "NOT CALIBRATED",
+    "case_ready.cell3_fee_model_NOT_CALIBRATED");
+  assertContains(html, "校準狀態",
+    "case_ready.cell4_calibration_label");
+  assertContains(html, "PENDING R6",
+    "case_ready.cell4_calibration_PENDING_R6");
+  assertContains(html, "experiment_id",
+    "case_ready.experiment_id_input_present");
+  assertContains(html, "載入報告",
+    "case_ready.load_report_button_present");
+  // State machine state should be 'empty' after ready render
+  record("case_ready.state_machine_empty",
+    window.OpenClawReplaySubtab._getState() === "empty",
+    "state=" + window.OpenClawReplaySubtab._getState());
+  // Polling started
+  record("case_ready.polling_started",
+    window.OpenClawReplaySubtab._isPolling() === true,
+    "polling=" + window.OpenClawReplaySubtab._isPolling());
+
+  // ─── Test Case 2: wiring_status='degraded' → render disabled card ──────
+  window.OpenClawReplaySubtab.onTabDeactivate(); // stop polling first
+  _mockResponses["/api/v1/replay/health"] = {
+    status: 200,
+    body: {
+      ok: true,
+      degraded: true,
+      reason: "wiring_status:degraded",
+      is_simulated: false,
+      data_category: "replay_lab",
+      data: {
+        wiring_status: "degraded",
+        binary_path: "/usr/local/bin/replay_runner",
+        binary_exists: true,
+        binary_release_profile: "live",
+        data_dir: "/tmp/openclaw",
+        data_dir_writable: true,
+        pg_present: true,
+        v045_present: false,
+        v049_present: true
+      }
+    }
+  };
+  resetMount();
+  await window.OpenClawReplaySubtab.onTabActivate();
+  html = snapshotDom();
+  assertContains(html, "後端健康降級",
+    "case_degraded.dom_zh_reason_present");
+  assertContains(html, "Backend health degraded",
+    "case_degraded.dom_en_reason_present");
+  assertNotContains(html, "後端就緒",
+    "case_degraded.no_ready_marker_zh");
+  assertNotContains(html, "Backend Ready",
+    "case_degraded.no_ready_marker_en");
+  record("case_degraded.state_machine_degraded",
+    window.OpenClawReplaySubtab._getState() === "degraded",
+    "state=" + window.OpenClawReplaySubtab._getState());
+  record("case_degraded.polling_not_started",
+    window.OpenClawReplaySubtab._isPolling() === false,
+    "polling=" + window.OpenClawReplaySubtab._isPolling());
+
+  // ─── Test Case 3: wiring_status='binary_missing' → render disabled card ─
+  _mockResponses["/api/v1/replay/health"] = {
+    status: 200,
+    body: {
+      ok: true,
+      degraded: true,
+      reason: "wiring_status:binary_missing",
+      is_simulated: false,
+      data_category: "replay_lab",
+      data: {
+        wiring_status: "binary_missing",
+        binary_path: "/usr/local/bin/replay_runner",
+        binary_exists: false,
+        binary_release_profile: "",
+        data_dir: "/tmp/openclaw",
+        data_dir_writable: true,
+        pg_present: true,
+        v045_present: true,
+        v049_present: true
+      }
+    }
+  };
+  resetMount();
+  await window.OpenClawReplaySubtab.onTabActivate();
+  html = snapshotDom();
+  assertContains(html, "二進制檔案缺失",
+    "case_binary_missing.dom_zh_reason_present");
+  assertContains(html, "Binary missing",
+    "case_binary_missing.dom_en_reason_present");
+  assertContains(html, "replay_runner",
+    "case_binary_missing.binary_name_in_banner");
+  record("case_binary_missing.state_machine_degraded",
+    window.OpenClawReplaySubtab._getState() === "degraded",
+    "state=" + window.OpenClawReplaySubtab._getState());
+
+  // ─── Test Case 4: fetch_failed (network error) → render disabled card ───
+  _mockResponses["/api/v1/replay/health"] = "fetch_error";
+  resetMount();
+  await window.OpenClawReplaySubtab.onTabActivate();
+  html = snapshotDom();
+  assertContains(html, "後端探針失敗",
+    "case_fetch_failed.dom_zh_reason_present");
+  assertContains(html, "Backend probe failed",
+    "case_fetch_failed.dom_en_reason_present");
+  assertContains(html, "fetch_failed",
+    "case_fetch_failed.reason_in_banner");
+  record("case_fetch_failed.state_machine_degraded",
+    window.OpenClawReplaySubtab._getState() === "degraded",
+    "state=" + window.OpenClawReplaySubtab._getState());
+
+  // ─── Test Case 5: onTabDeactivate stops polling ─────────────────────────
+  // Re-activate ready first to start polling
+  _mockResponses["/api/v1/replay/health"] = {
+    status: 200,
+    body: {
+      ok: true, degraded: false, reason: null,
+      is_simulated: false, data_category: "replay_lab",
+      data: {
+        wiring_status: "ready",
+        binary_path: "/usr/local/bin/replay_runner",
+        binary_exists: true, binary_release_profile: "live",
+        data_dir: "/tmp/openclaw", data_dir_writable: true,
+        pg_present: true, v045_present: true, v049_present: true
+      }
+    }
+  };
+  resetMount();
+  await window.OpenClawReplaySubtab.onTabActivate();
+  record("case_deactivate.polling_started_pre",
+    window.OpenClawReplaySubtab._isPolling() === true,
+    "polling=" + window.OpenClawReplaySubtab._isPolling());
+  window.OpenClawReplaySubtab.onTabDeactivate();
+  record("case_deactivate.polling_cleared_post",
+    window.OpenClawReplaySubtab._isPolling() === false,
+    "polling=" + window.OpenClawReplaySubtab._isPolling());
+
+  // ─── Test Case 6: pollBackendReadiness exposes correct schema ────────────
+  _mockResponses["/api/v1/replay/health"] = {
+    status: 200,
+    body: {
+      ok: true, degraded: false, reason: null,
+      is_simulated: false, data_category: "replay_lab",
+      data: { wiring_status: "ready", binary_exists: true, pg_present: true,
+              v045_present: true, v049_present: true,
+              binary_path: "/usr/local/bin/replay_runner",
+              binary_release_profile: "live",
+              data_dir: "/tmp/openclaw", data_dir_writable: true }
+    }
+  };
+  const probe = await window.OpenClawReplaySubtab.pollBackendReadiness();
+  record("case_probe.ready_flag_true",
+    probe.ready === true, "ready=" + probe.ready);
+  record("case_probe.wiring_status_field",
+    probe.wiring_status === "ready",
+    "wiring_status=" + probe.wiring_status);
+  record("case_probe.data_passthrough",
+    probe.data && probe.data.binary_exists === true,
+    "data.binary_exists=" + (probe.data && probe.data.binary_exists));
+
+  // Cleanup
+  window.OpenClawReplaySubtab.onTabDeactivate();
+  uninstallMock();
+
+  // Summary
+  const passed = _results.filter(function (r) { return r.ok; }).length;
+  const failed = _results.filter(function (r) { return !r.ok; }).length;
+  const summary = document.createElement("div");
+  summary.className = "case " + (failed === 0 ? "pass" : "fail");
+  summary.style.fontSize = "14px";
+  summary.style.marginTop = "16px";
+  summary.textContent = "─── SUMMARY: " + passed + " passed, "
+    + failed + " failed (total " + (passed + failed) + ") ───";
+  document.getElementById("test-results").appendChild(summary);
+  console.log("[replay-subtab-test] " + passed + " passed, " + failed + " failed");
+}
+
+// 啟動 test runner — 等 DOM + 外部 script 都載入後執行
+// Run after DOM + external scripts ready
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", runAll);
+} else {
+  runAll();
+}
+</script>
+</body>
+</html>

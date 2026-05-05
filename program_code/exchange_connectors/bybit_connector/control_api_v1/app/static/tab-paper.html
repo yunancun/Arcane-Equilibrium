@@ -97,10 +97,21 @@
     title="當前 Paper session 狀態 / Current paper session status">
     会话 / Session
   </button>
+  <!-- REF-20 Sprint B1 R4-T1 (2026-05-05): replay button 不再硬編 disabled
+       REF-20 Sprint B1 R4-T1：replay button no longer hardcoded disabled
+       靜態 aria-disabled / data-disabled 已移除；改由 OpenClawReplaySubtab.onTabActivate()
+       依 /api/v1/replay/health wiring_status 動態 gating（ready / degraded / binary_missing）。
+       title 改為通用「Backend health pending — see badge」；具體 reason 由 disabled card
+       的 reason badge 顯示（OpenClawDisabledStateCard helper 渲染）。
+       data-i18n-disabled 仍保留 — 實際顯示文案由 R4-T2 render fn 從 wiring_status 推導。
+       —
+       Static aria-disabled / data-disabled removed; gating now dynamic via
+       OpenClawReplaySubtab.onTabActivate() probing /api/v1/replay/health.
+       Title changed to generic "Backend health pending — see badge". -->
   <button type="button" class="oc-subtab-btn"
     role="tab" aria-selected="false" aria-controls="subtab-replay"
-    aria-disabled="true" data-disabled="true" data-subtab="replay" id="subtab-btn-replay"
-    title="P2 待啟用 — replay isolated runner 尚未上線 / P2 pending — replay isolated runner not yet shipped"
+    data-subtab="replay" id="subtab-btn-replay"
+    title="後端健康待探測 — 見徽章狀態 / Backend health pending — see badge"
     data-i18n-disabled="disabled_state.p2_backend_pending">
     <span data-i18n="terminology.replay.zh">回放 / Replay</span>
   </button>
@@ -283,12 +294,18 @@
 
 </div>
 
-<!-- REF-20 R20-P1-U4: Replay sub-tab content wrapper（disabled state via U8 helper）
-     REF-20 R20-P1-U4：Replay 子標籤 disabled state（透過 U8 helper 渲染）
-     mount point #subtab-replay-disabled-card 由 inline script 結尾的 init block 透過
-     window.OpenClawDisabledStateCard.render() 填入。Phase=P2，icon=⏳ (hourglass)，
-     gate_label_i18n_key=disabled_state.p2_backend_pending，metrics_layout=replay_12
-     渲染 12-cell run-form placeholder（UX subdoc §4 10 form fields + 2 status fields）。 -->
+<!-- REF-20 R20-P1-U4: Replay sub-tab content wrapper
+     REF-20 R20-P1-U4：Replay 子標籤內容容器
+     mount point #subtab-replay-disabled-card 在 R4 之前由 _ocInitPaperDisabledCards
+     init block 渲染靜態 P2-pending disabled card；REF-20 Sprint B1 R4 (2026-05-05)
+     起改由 OpenClawReplaySubtab.onTabActivate() 依 /api/v1/replay/health
+     wiring_status 動態渲染。Page load 時 mount 區留空以避免 flash of stale
+     disabled card；切到 replay 子標籤觸發 onTabActivate → 立即 probe → render。
+     —
+     Pre-R4: rendered static P2 disabled card on DOMContentLoaded.
+     Post-R4 (Sprint B1): rendered dynamically by OpenClawReplaySubtab.onTabActivate()
+     based on /api/v1/replay/health wiring_status. Mount stays empty on page load
+     to avoid flash-of-stale-disabled-card; first activate triggers probe + render. -->
 <div id="subtab-replay" class="oc-subtab-content" role="tabpanel" aria-labelledby="subtab-btn-replay" hidden>
   <div id="subtab-replay-disabled-card"></div>
 </div>
@@ -786,42 +803,44 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperModeBadges() 
   }
 });
 
-// ─── Disabled Sub-Tab Initialization (REF-20 R20-P1-U4 / U5) ────────────────
-// 2 disabled sub-tab（Replay/Compare）共用 U8 helper
-// (window.OpenClawDisabledStateCard.render) 渲染 phase-tagged disabled card +
-// gate label + bilingual banner + optional 12-cell metrics placeholder。
-// Handoff sub-tab 已升級為 functional content (Wave 8 R20-P6-H1/H2/H3/H4)，
-// 由下方獨立 init block 透過 window.OpenClawHandoff.render() 填入。
-// Defensive: 若 helper 未載入（script 載入順序錯/race），fallback console.warn
-// 並在 mount point 留 inline notice，不阻擋 sub-tab nav。
+// ─── Disabled Sub-Tab Initialization (REF-20 R20-P1-U5 + Sprint B1 R4) ──────
+// Compare 子標籤透過 U8 helper (window.OpenClawDisabledStateCard.render) 渲染
+// phase-tagged disabled card + gate label + bilingual banner + 12-cell metrics
+// placeholder（compare_12 layout）。
 //
-// 2 disabled sub-tabs (Replay/Compare) share the U8 helper. Handoff has been
-// upgraded to functional content (Wave 8) and is initialized by a separate
-// block below via window.OpenClawHandoff.render(). Defensive fallback if
-// helper is missing: console.warn + inline notice in mount point.
+// Replay 子標籤 (REF-20 Sprint B1 R4-T2, 2026-05-05) 已從 page-load 靜態 disabled
+// 升級為 backend-readiness gated：onTabActivate() 動態 probe /api/v1/replay/health
+// → render degraded 或 ready。Page load 時 #subtab-replay-disabled-card mount
+// 留空避免 flash-of-stale；切到 replay 子標籤即觸發第一次 probe + render。
+//
+// Handoff sub-tab 已升級為 functional content (Wave 8)，由下方獨立 init block
+// 透過 window.OpenClawHandoff.render() 填入。
+//
+// Defensive: 若 OpenClawDisabledStateCard 未載入（script 載入順序錯/race），
+// fallback console.warn + inline notice，不阻擋 sub-tab nav。
+//
+// Compare uses the U8 disabled card helper. Replay (Sprint B1 R4-T2) is now
+// dynamically gated by OpenClawReplaySubtab.onTabActivate() probing
+// /api/v1/replay/health; mount stays empty until first activation. Handoff
+// is functional via OpenClawHandoff.render().
 document.addEventListener('DOMContentLoaded', function _ocInitPaperDisabledCards() {
   if (!window.OpenClawDisabledStateCard || typeof window.OpenClawDisabledStateCard.render !== 'function') {
-    console.warn('[paper] OpenClawDisabledStateCard not loaded; sub-tab disabled cards left empty');
-    // Fallback inline 通知：避免空白畫面 / Avoid blank panes when helper not loaded.
-    ['subtab-replay-disabled-card', 'subtab-compare-disabled-card'].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.innerHTML = '<div class="oc-subtab-placeholder">disabled card helper not loaded — see browser console</div>';
-    });
+    console.warn('[paper] OpenClawDisabledStateCard not loaded; Compare disabled card left empty');
+    // Fallback inline 通知 — 只 Compare（Replay 由 OpenClawReplaySubtab 管理；
+    // 若 namespace 也缺，切到 replay 觸發 onTabActivate 時自有 fallback）
+    // Fallback inline notice — Compare only; Replay handled by OpenClawReplaySubtab.
+    var compareEl = document.getElementById('subtab-compare-disabled-card');
+    if (compareEl) compareEl.innerHTML =
+      '<div class="oc-subtab-placeholder">disabled card helper not loaded — see browser console</div>';
     return;
   }
-  // U4 Replay disabled card / Replay 子標籤 disabled card
-  // Phase=P2，icon=⏳（hourglass = 等待 P2 backend ship），banner 引 UX subdoc §4
-  // 末段 P2 Replay must visually communicate `execution_confidence=none`。
-  window.OpenClawDisabledStateCard.render('subtab-replay-disabled-card', {
-    phase: 'P2',
-    icon: '⏳',
-    gate_label: 'Replay isolated runner not yet shipped',
-    gate_label_zh: 'P2 Replay isolated runner 尚未上線',
-    gate_label_i18n_key: 'disabled_state.p2_backend_pending',
-    banner_text: 'P2 Smoke Replay backend (replay_runner binary + isolated cfg gate) is under development. Run form fields below preview the eventual UX.',
-    banner_text_zh: 'P2 煙霧回放後端（replay_runner binary + isolated cfg gate）開發中。下方欄位 placeholder 預覽即將上線的 UX。',
-    metrics_layout: 'replay_12'
-  });
+  // REF-20 Sprint B1 R4-T2 (2026-05-05): Replay disabled card 不在 page-load
+  // 渲染；改由 OpenClawReplaySubtab.onTabActivate() 動態 probe + render。
+  // 切到 replay 子標籤即觸發第一次 probe（degraded → render disabled card via
+  // helper / ready → render ready card with 4 baseline cells）。
+  // Replay disabled card no longer rendered on page-load; dynamic render via
+  // OpenClawReplaySubtab.onTabActivate() probe + render.
+  //
   // U5 Compare disabled card / Compare 子標籤 disabled card
   // Phase=P3，icon=🔒（lock = 待 P3 calibration green），12-cell metrics grid
   // 為 UX subdoc §5 Compare metrics layout 預覽。
