@@ -64,3 +64,26 @@ _Last updated: 2026-04-24_
 5. **5 must-fix + 4 backlog**；MIT-S2-1 不阻塞 dispatch；只需 V035 (~3h operator) 後即可並行派 IMPL-1/3/4 → IMPL-2。
 
 **Sign-off**: MIT ✓ APPROVE 條件成立後（PA 修 RFC + V035 land）。
+
+## 2026-05-05 REF-20 Sprint C1+C2 R6/R7 capability + risk advisory (pre-DAG)
+
+**Report**: `workspace/reports/2026-05-05--ref20_r6_r7_capability_risk.md` (509 lines)
+
+**Boundary**: read-only schema/risk assessment for PA Sprint C task DAG; QC parallel work R6 confidence label math spec.
+
+**8 結論**:
+1. **GO**: capability probe race / cache（0 cache，每 cycle 重 probe；fail-soft OK）
+2. **GO with R8 retention**: Block B cardinality（daily ~96-456 row calibrated_replay；Sprint D R8 必加 retention policy）
+3. **GO + WARN-V036-INSERT-MISSING**: V036 function body INSERT (line 208-243) **未寫 4 個 metadata column**（evidence_source_tier / replay_experiment_id / manifest_hash / expires_at）— R6/R7 dispatch 前必驗，否則 producer 升級後 row body 仍 real_outcome
+4. **GO**: sibling CC FUP-2 不在 flight（commit `34211ab4` 2026-05-02 已 PASS to E4）— PA report §0.6 過期
+5. **GO**: trading.fills retention 365d >> 30d R6 需求；fee_rate column V008 已 land
+6. **WARN**: expires_at TTL default 30d 太長 → MIT 建議 caller 傳 7d（不需改 V036）
+7. **GO**: xlang byte-equal contract maintained（V051 line 367-376 manifest_hash BYTEA byte-identical）
+8. PA §2C capability 描述需修正：實際 **6 個 capability key 不是 3 個**；4 個 全 true 才走 Block B 完整版（non-trivial fail-soft hierarchy）
+
+**Key findings (新)**:
+- `attribution_chain_ok` **不是** mlde_demo_attribution column 而是 `learning.mlde_edge_training_rows` SQL VIEW 計算 column（V031 line 332-336 + V034 line 306）— PA 描述方向對但 column 位置誤標
+- attribution_chain_ok 4 source: signal_id / context_id / signal_context_id == context_id / label_net_edge_bps NOT NULL（全在 mlde_shadow_recommendations）
+- FUP-2 真實 fix 範圍是 #4 label_net_edge_bps backfill（cron edge_label_backfill + healthcheck [43]）
+- V036 比 V051 嚴 4 條（source allowlist + tier allowlist + TTL non-null + TTL future）
+- producer cycle interval = 3600s（hourly）；dream_engine 3-15 row/cycle，opportunity_tracker 1 row/cycle，total daily ~96-456 row calibrated_replay（不洪水）

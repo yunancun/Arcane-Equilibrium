@@ -949,6 +949,107 @@ Sprint C2（6d wall）：R7 MLDE/Dream Advisory Integration
 
 ---
 
+## §13. PM-Appended Post-Advisory Updates (2026-05-05, after QC + MIT)
+
+**Trigger**: QC + MIT pre-DAG advisor 完成（QC `2026-05-05--ref20_r6_calibration_label_spec.md` + MIT `2026-05-05--ref20_r6_r7_capability_risk.md`）。Operator 拍板 D1=V055 accept / D2=7d TTL / D3=PM 自接補 task DAG（不重派 PA）。
+
+### §13.1 NEW R6-T0' V055 retrofit (P0 BLOCKER fix from MIT §3.5 / §8.2)
+
+**Source**: PM 自驗 `srv/sql/migrations/V036__replay_evidence_source_guard.sql:208-242` 確認 V036 INSERT 漏寫 4 metadata column（`evidence_source_tier` / `replay_experiment_id` / `manifest_hash` / `expires_at`）。V036 docstring line 200-207 自承「PR1 函數先 land、PR3 補 function body」— PR3 從未發生。
+
+**Silent corruption scenario**（必修不修則 R7 acceptance 假綠）：
+1. R7 producer 傳 calibrated_replay tier + replay_experiment_id + manifest_hash + expires_at
+2. V036 verify portion (line 137-191) PASS（caller args OK）
+3. V036 INSERT (line 208-242) 漏寫 4 column → row 走 V038-V040 default = `real_outcome` / NULL / NULL / NULL
+4. V051 paired CHECK PASS（real_outcome 路徑自動 valid）
+5. Row 看似 inserted 成功，但 tier 是 `real_outcome` 而非 `calibrated_replay`
+6. mlde_demo_applier Block B 永不會 promote 此 row → A10-1/2/3 假綠
+
+**新 task: R6-T0' V055 retrofit**（在 W1 前完成）：
+
+| field | 值 |
+|---|---|
+| File | `srv/sql/migrations/V055__verify_replay_evidence_function_full_insert.sql` |
+| Type | `CREATE OR REPLACE FUNCTION learning.verify_replay_evidence_and_insert` |
+| Signature | unchanged 19-arg (V036 一致) |
+| INSERT | +4 column (`evidence_source_tier`, `replay_experiment_id`, `manifest_hash`, `expires_at`) |
+| Guard A | function existence + arg signature (19-arg) unchanged + post-INSERT smoke：synthetic call → row body tier matches caller arg |
+| Idempotency | `CREATE OR REPLACE` → re-run 0 RAISE |
+| LOC est | ~80 LOC SQL（含 Guard + bilingual MODULE_NOTE per §七）|
+| Python sibling test | `srv/program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_v055_evidence_insert_fix.py` 4 case：real_outcome / calibrated_replay / synthetic_replay / counterfactual_replay 路徑各驗 row body tier match caller arg |
+| Owner chain | E1 → E2 → E4 → Linux apply via SSH bridge → C1 W1 dispatch unblock |
+| Wall | ~0.5d |
+
+**REF-20_RESERVATION ledger update**：V055 row 加入 reservation table。
+
+### §13.2 7d expires_at TTL 決策 (operator D2)
+
+**Decision**: R7 4 producer 升級時 caller 端傳 `expires_at = now() + INTERVAL '7 days'`，**不採 V036 docstring default 30d**。
+
+**理由**（QC + MIT 一致）：
+- QC §4.3：`label='calibrated' → TTL 7d`、`label='limited' → TTL 3d`（信心衰減 enforce）
+- MIT §6.2：crypto market regime 切換 7-14d 內，30d advisory 失效但 still in TTL → live trading 可能用 stale fee model
+- 工程實作：caller 端傳 TTL，0 V055 / V036 schema 改動需要
+
+**對應 R7 IMPL**：
+- `dream_engine.persist_dream_insights` 升級時 caller 計算 `expires_at = R6_label_to_ttl(execution_confidence) + now()`
+- `opportunity_tracker.persist_regret_summary` 同上
+- 全用 QC §4.3 `label_to_ttl` map：calibrated→7d / limited→3d / none→never_inserted
+
+### §13.3 PA Report 修正（doc hygiene）
+
+**§0.6 修正**：`P1-DATA-1 LG5-W3-FUP-2 attribution_chain_ok writer fix sibling CC` 已 land 於 commit `34211ab4`（2026-05-02 E2 round 1 PASS to E4）— **不在 flight**，R7 dispatch 0 wait constraint。CLAUDE.md §三 18-blocker #11 已同步 update（同 commit）。
+
+**§2C 補正**：capability probe 真實 6 個 key（不是 3 個）：
+1. `has_evidence_source_tier`（top-level fail-soft 條件）
+2. `has_replay_experiment_id`
+3. `has_manifest_hash`
+4. `has_replay_experiments`（table existence via to_regclass）
+5. `replay_experiments_has_expires_at`
+6. `replay_experiments_has_status`
+
+實際 4-level gate（不是「3 capability 全 true 走 Block B」這麼簡單）：
+- Top-level fail-soft（`has_evidence_source_tier=False`）→ legacy schema 0 filter
+- Block A only（`has_evidence_source_tier=True`）→ tier allowlist filter
+- Block B partial（`has_replay_experiment_id=True` + `has_replay_experiments=True` 但 expires_at/status 缺）→ FK existence-only gate
+- Block B 完整版（4 capability 全 true）→ FK + manifest_hash + expires_at + status NOT IN cancelled/expired/compromised
+
+**真實 runtime 狀態 HEAD `e5b5227c`**：V040 + V049 + V051 全 land → 6/6 capability 全 true → Block B 完整版啟用。0 fail-soft 路徑被觸發。
+
+### §13.4 R7-T7 NEW: capability log observability（MIT §1.5 推薦）
+
+**新 task**：`fetch_pending_sql_and_params` end 加 1-line INFO log dump active capabilities + Block B mode（full / partial / skip / fail-soft）。
+
+**理由**：
+- MLDE consumer-side 即時可見 mode flow
+- 順帶 R7-T7 加進 LG-3 healthcheck `pricing_binding` output（`mode=demo block_a=on block_b=full|partial|skip caps=N/M ...`）
+
+**LOC est**: ~10-15 LOC Python；不另增 task 編號，併入 R7-T7 既有 logging scope。
+
+### §13.5 修訂 Sprint C 路線圖
+
+| 階段 | scope | wall | dispatch order |
+|---|---|---:|---|
+| **R6-T0'**（NEW）| V055 retrofit + Python sibling test | 0.5d | E1 立即派 → E2 → E4 → Linux apply |
+| C1 W1 | R6-T1 fee model + R6-T2 slippage + R6-T7 LG-3 healthcheck（並行 3 sub-agent + R0-T0 拆檔）| 1.5d | V055 closed 後 |
+| C1 W2-W6 | R6-T3 KellyConfig → T4 CalibrationLabelProducer → T5/T6 writer → T8 smoke → T9 review | 4.5d | sequential |
+| C1 sign-off | E2 + E4 + PM | 0.5d | — |
+| **C1 total** | | **~7d** | — |
+| C2 advisory | AI-E spec 1d | 1d | C1 closed 後 |
+| C2 W1-W4 | R7 4 producer 升級 + capability test + FK audit + E2E + review | 5d | sequential |
+| **C2 total** | | **~6d** | — |
+| **Sprint C total** | | **~13d** | — |
+
+### §13.6 後續 hygiene action
+
+| Action | Owner | When |
+|---|---|---|
+| Sprint D R8 retention policy on `mlde_shadow_recommendations`（30-60d）| E1 | C2 closed 後 |
+| MIT advisory R8 加 partial index `WHERE evidence_source_tier IN replay_tier_set AND expires_at > now() - 7d`（optional）| E5 | Sprint D 維護週期 |
+
+---
+
 **END OF REPORT**
 
 PA DESIGN DONE: report path: /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-05--ref20_sprint_c_task_dag.md
+PM POST-ADVISORY UPDATES: §13 appended 2026-05-05 (V055 R6-T0' + 7d TTL + §0.6/§2C corrections + R7-T7 observability)

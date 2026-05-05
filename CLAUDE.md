@@ -88,7 +88,7 @@
 | 8 | ExecutorAgent shadow_mode hardcoded `lambda: True` fail-close — fake-live wiring | 🟠 | 0.5 sprint |
 | 9 | H0_GATE singleton 0 production caller（DOC-02 spec 死於 wiring）| 🟠 | LG-2 IMPL 前提 |
 | 10 | HStateCache + CostEdgeAdvisor 兩 late-inject slot env-gated OFF（碼好未啟） | 🟠 | 0.5 sprint |
-| 11 | MLDE training row 84.6% `attribution_chain_ok=false`（MIT-S2-1）| 🟠 | sibling CC FUP-2 in flight |
+| 11 | MLDE training row 84.6% `attribution_chain_ok=false`（MIT-S2-1）| 🟠 | sibling CC FUP-2 commit `34211ab4` PASS to E4（2026-05-02），等 E4 regression 驗 / merge / deploy |
 | 12 | `learning.exit_features.est_net_bps` 100% NULL（FA-H6） | 🟠 | edge_estimator P1-7 C labels 累積 + writer fix |
 | 13 | maker fill rate live_demo 7d 36.6% < 40% PASS 線（healthcheck 假綠） | 🟠 | 重設 baseline 或修 strategist |
 | 14 | bb_breakout live_demo 14d 0 fires；ma_crossover ATR-SNR 後仍負 | 🟠 | 等 G2-02/G2-01 結論 |
