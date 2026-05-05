@@ -470,23 +470,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     e
                 ))
             })?;
+        // Sprint C R6-T3 — derive p1_risk_pct + KellyConfig from the
+        // already-deserialised risk_config snapshot (replaces Sprint A
+        // hardcoded 0.02 + `None::<KellyConfig>` baseline). Replay uses
+        // SAME `compute_kelly_qty` formula + `KellyConfig` shape as live;
+        // tier boundaries from `risk_config.kelly`, per-trade risk pct from
+        // `risk_config.limits`. Composition at bin/ entry keeps the snapshot
+        // explicit + auditable. SAFETY: 0 endpoint / IPC / lease — V3 §6.2
+        // forbidden surface 0 觸碰。
+        //
+        // Sprint C R6-T3 — 從已反序列化的 risk_config 快照派生
+        // p1_risk_pct + KellyConfig（取代 Sprint A 硬編 0.02 +
+        // `None::<KellyConfig>` baseline）。Replay 用與 live 相同的
+        // `compute_kelly_qty` 公式與 `KellyConfig` 形狀；分級邊界讀
+        // `risk_config.kelly`，per-trade 風險百分比讀 `risk_config.limits`。
+        // 於 bin/ entry 就地組合使 snapshot 顯式且可稽核。SAFETY：0
+        // endpoint / IPC / lease — V3 §6.2 forbidden surface 0 觸碰。
+        let p1_risk_pct = risk_config.limits.per_trade_risk_pct;
+        let kelly_config = KellyConfig {
+            young_threshold: risk_config.kelly.young_threshold,
+            mature_threshold: risk_config.kelly.mature_threshold,
+            ..KellyConfig::default()
+        };
         let risk_adapter = ReplayRiskAdapter::new(
             profile,
             GuardianConfig::default(),
-            risk_config,
-            // P1 hard cap = 2% of balance (Sprint A risk_config baseline).
-            // Sprint C R6 will read p1_risk_pct from the registered
-            // risk_config snapshot instead of hardcoding.
-            // P1 硬上限 = 2% balance（Sprint A risk_config baseline）。
-            // Sprint C R6 將從註冊的 risk_config 快照讀 p1_risk_pct，
-            // 取代硬編。
-            0.02,
-            // Sprint A baseline: skip Kelly (None) so qty mirrors strategy
-            // intent directly. Sprint C R6 will inject calibrated KellyConfig
-            // when fee model lands.
-            // Sprint A baseline：跳過 Kelly（None），qty 直接鏡射策略 intent。
-            // Sprint C R6 落 fee 模型時注入 calibrated KellyConfig。
-            None::<KellyConfig>,
+            risk_config.clone(),
+            p1_risk_pct,
+            Some(kelly_config),
         )
         .map_err(|e| {
             Box::<dyn std::error::Error>::from(format!(
@@ -516,13 +527,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     e
                 ))
             })?;
+        // R6-T3 — wire fee/slippage context. account_manager=None falls back
+        // to DEFAULT_*_FEE_RATE (byte-equal with live cold-boot path before
+        // Bybit refresh). slippage_config = risk_config.slippage (G7-07
+        // hot-reloadable; default mirrors live SLIPPAGE_TIERS). volume_24h=None
+        // → 5 bps default fallback (fixture loader does not yet propagate
+        // per-symbol turnover; Sprint D R8 may extend fixture schema).
+        //
+        // R6-T3 — 接入 fee/slippage context。account_manager=None 退回
+        // DEFAULT_*_FEE_RATE（與 live 冷啟動路徑 byte-equal）。slippage_config
+        // = risk_config.slippage（G7-07 可熱重載；預設鏡射 live SLIPPAGE_TIERS）。
+        // volume_24h=None → 5 bps default fallback（fixture loader 尚未傳
+        // per-symbol turnover；Sprint D R8 可擴 fixture schema）。
+        pipeline = pipeline.with_replay_fee_context(
+            None,
+            Some(risk_config.slippage.clone()),
+            None,
+        );
         eprintln!(
             "replay_runner: adapter path engaged strategy={} \
              starting_balance={} starting_price={} \
+             p1_risk_pct={} kelly_young={} kelly_mature={} \
+             slippage_default_bps={} \
              strategy_params_supplied={} risk_overrides_supplied={}",
             strategy_name,
             starting_balance,
             starting_price,
+            p1_risk_pct,
+            risk_config.kelly.young_threshold,
+            risk_config.kelly.mature_threshold,
+            risk_config.slippage.default_rate * 10_000.0,
             manifest.strategy_params.is_some(),
             manifest.risk_overrides.is_some(),
         );

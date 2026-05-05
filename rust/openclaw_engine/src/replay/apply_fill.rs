@@ -1,0 +1,485 @@
+//! REF-20 Sprint C R6 W2 R0-T0 — replay apply_fill module (extracted from runner.rs).
+//! REF-20 Sprint C R6 W2 R0-T0 — replay apply_fill 模組（自 runner.rs 抽出）。
+//!
+//! MODULE_NOTE (EN):
+//!   This module hosts the per-intent fill mechanics that the replay
+//!   `IsolatedPipeline` invokes during `execute_adapter_pipeline`. It was
+//!   carved out of `runner.rs` (1992 LOC pre-W2) so that R6-T4+ logic can
+//!   land without breaking the §九 2000-LOC cap. R0-T0 is a **mechanical**
+//!   refactor — every byte of behaviour, every test, every public/private
+//!   API surface stays byte-equal. No fee/slippage formulas were touched.
+//!
+//!   What lives here (carved from runner.rs Sprint C R6-T1+T2 IMPL):
+//!     1. Fee/slippage helpers (`replay_fee_rate_for_tif`,
+//!        `replay_slippage_bps_for_tif`, `apply_slippage_to_price`) +
+//!        `DEFAULT_TAKER_FEE_RATE` / `DEFAULT_MAKER_FEE_RATE` constants
+//!        mirroring `crate::account_manager` defaults byte-equal.
+//!     2. `IsolatedPipeline::process_open_intent` — Strategy `Open` →
+//!        6-Gate risk → Accepted (real fill, qty>0) or Rejected
+//!        (ghost row, qty=0; PA §6.1 contract).
+//!     3. `IsolatedPipeline::process_close_intent` — Strategy `Close` →
+//!        realise PnL on existing position (taker-pricing per
+//!        `strategies/mod.rs:51` "Close bypasses governance gates").
+//!     4. `IsolatedPipeline::apply_fill_open` — open-side snapshot mutation
+//!        (extend, reduce, or fresh insert; mirrors `paper_state` semantics
+//!        WITHOUT importing `paper_state`).
+//!     5. `IsolatedPipeline::apply_fill_close` — close-side snapshot mutation
+//!        (realise PnL = (fill - entry) × qty for long; sign-flipped for
+//!        short).
+//!
+//!   What stays in `runner.rs` (this commit's deliberate boundary):
+//!     - `IsolatedPipeline` struct + public lifecycle: `build_isolated_pipeline`,
+//!       `with_adapter_pipeline`, `with_replay_fee_context`, `execute`,
+//!       `execute_synthetic_walker`, `execute_adapter_pipeline`,
+//!       `into_result`. R0-T0 deliberately keeps these together so the
+//!       lifecycle remains visually contiguous; future extraction (e.g.
+//!       `lifecycle.rs` for the synthetic walker) is a separate ticket.
+//!
+//!   Forbidden surface audit (V3 §6.2 — MUST stay green; 0 byte change vs
+//!   pre-extraction baseline):
+//!     - 0 use of `crate::paper_state` / `crate::canary_writer` /
+//!       `crate::database` / `crate::ipc_server` / `crate::governance_hub` /
+//!       `crate::live_authorization` / `crate::decision_lease`.
+//!     - 0 use of `crate::bybit_*` / `crate::intent_processor::router`.
+//!     - Allowed (replay-pure): `crate::account_manager::AccountManager`
+//!       (read-only fee getters; `pub fn maker_fee/taker_fee`),
+//!       `crate::config::SlippageConfig` (immutable snapshot;
+//!       `pub fn lookup_rate`), `crate::order_manager::TimeInForce`
+//!       (enum only — structural type).
+//!     - Allowed (replay-pure): `crate::intent_processor::OrderIntent`
+//!       (struct only — same posture runner.rs already has, no
+//!       `IntentProcessor` logic pulled).
+//!
+//!   Why an `impl IsolatedPipeline` block in a sibling module:
+//!     Rust permits multiple inherent `impl` blocks for one type to live in
+//!     different files of the same crate (here: `crate::replay::*`). This
+//!     keeps `IsolatedPipeline` field visibility unchanged (private) and
+//!     lets the methods access fields directly (`self.paper_snapshot`,
+//!     `self.balance`, etc.) without needing `pub(super)` getters/setters
+//!     and without widening the public API. Free helpers
+//!     (`replay_fee_rate_for_tif` etc.) are `pub(super)` so `runner.rs`
+//!     unit tests can keep importing them via `super::*`.
+//!
+//! MODULE_NOTE (中):
+//!   本模組存放 replay `IsolatedPipeline` 在 `execute_adapter_pipeline`
+//!   呼叫的 per-intent 成交機制。自 `runner.rs`（W2 前 1992 LOC）抽出，
+//!   讓 R6-T4+ 邏輯可在不破 §九 2000 LOC cap 的前提下落地。R0-T0 是
+//!   **機械式** refactor — 行為、測試、公私 API 表面位元級不變；
+//!   費率/滑點公式 0 改動。
+//!
+//!   本檔包含（自 runner.rs Sprint C R6-T1+T2 IMPL 抽出）：
+//!     1. 費率/滑點輔助（`replay_fee_rate_for_tif` /
+//!        `replay_slippage_bps_for_tif` / `apply_slippage_to_price`）+
+//!        `DEFAULT_TAKER_FEE_RATE` / `DEFAULT_MAKER_FEE_RATE` 常量
+//!        （位元級鏡射 `crate::account_manager` 預設）。
+//!     2. `IsolatedPipeline::process_open_intent` — 策略 `Open` →
+//!        6-Gate 風控 → Accepted（真 fill，qty>0）或 Rejected
+//!        （ghost row，qty=0；PA §6.1 契約）。
+//!     3. `IsolatedPipeline::process_close_intent` — 策略 `Close` →
+//!        對既有倉位 realise PnL（taker 計價，per `strategies/mod.rs:51`
+//!        「Close bypasses governance gates」）。
+//!     4. `IsolatedPipeline::apply_fill_open` — 開倉側 snapshot mutation
+//!        （加倉、減倉或新開；鏡射 `paper_state` 語意但**不** import）。
+//!     5. `IsolatedPipeline::apply_fill_close` — 平倉側 snapshot mutation
+//!        （realise PnL = (fill - entry) × qty 多倉；空倉符號反轉）。
+//!
+//!   仍留 `runner.rs`（本 commit 刻意邊界）：
+//!     `IsolatedPipeline` struct + 公開生命週期：`build_isolated_pipeline`、
+//!     `with_adapter_pipeline`、`with_replay_fee_context`、`execute`、
+//!     `execute_synthetic_walker`、`execute_adapter_pipeline`、
+//!     `into_result`。R0-T0 刻意保留這些函式同檔以使生命週期視覺連續；
+//!     未來抽出（如 `lifecycle.rs` 抽 synthetic walker）為獨立 ticket。
+//!
+//!   禁忌 surface 稽核（V3 §6.2，**必**保綠；位元級 0 改動 vs 抽出前
+//!   baseline）：
+//!     - 0 引 `crate::paper_state` / `crate::canary_writer` /
+//!       `crate::database` / `crate::ipc_server` / `crate::governance_hub` /
+//!       `crate::live_authorization` / `crate::decision_lease`。
+//!     - 0 引 `crate::bybit_*` / `crate::intent_processor::router`。
+//!     - 允許（replay-pure）：`crate::account_manager::AccountManager`
+//!       （唯讀費率 getter）、`crate::config::SlippageConfig`（不可變
+//!       snapshot）、`crate::order_manager::TimeInForce`（純 enum）、
+//!       `crate::intent_processor::OrderIntent`（純 struct，不引邏輯）。
+//!
+//!   為何 `impl IsolatedPipeline` 跨檔：Rust 允許同一型別的多個 inherent
+//!   `impl` block 散在同一 crate 不同檔。此處保持 `IsolatedPipeline`
+//!   欄位可見度不變（private），讓方法直接存取欄位，不必新增 `pub(super)`
+//!   getter/setter，亦不擴大公開 API。自由函式（`replay_fee_rate_for_tif`
+//!   等）採 `pub(super)`，使 runner.rs 單元測試能透過 `super::*` 繼續引用。
+//!
+//! SPEC: REF-20 V3 §6.1 + §6.2 + plan §6.R6 + Sprint C R6 W2 dispatch §1
+//!       (R0-T0 LOC budget refactor) + R6-T1+T2 byte-equal contract.
+
+use crate::intent_processor::OrderIntent;
+use crate::replay::risk_adapter::{ReplayPosition, RiskDecision};
+use crate::replay::runner::{IsolatedPipeline, SimulatedFill};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sprint C R6-T1 fee + R6-T2 slippage helpers / R6-T1 費率 + R6-T2 滑點輔助
+// ─────────────────────────────────────────────────────────────────────────
+// Mirror the live `IntentProcessor::fee_rate_for_tif` +
+// `slippage_rate_for_tif` byte-equal contract into the replay path so
+// `simulated_fills.{fee, fee_rate, slippage_bps, liquidity_role}` reflect
+// the live maker/taker + turnover-tier model. Replay is non-actionable —
+// these helpers MUST NOT mutate live state and MUST NOT call Bybit
+// endpoints (no `refresh_fee_rates`).
+//
+// 把 live `IntentProcessor::fee_rate_for_tif` + `slippage_rate_for_tif`
+// 的 byte-equal 契約鏡射至 replay 端，讓
+// `simulated_fills.{fee, fee_rate, slippage_bps, liquidity_role}` 反映 live
+// 同一套 maker/taker + turnover-tier 模型。Replay 非 actionable — 本輔助
+// **不**動 live state、**不**打 Bybit endpoint（無 `refresh_fee_rates`）。
+
+/// Sprint C R6 default fee rates / 預設費率（鏡射 live `account_manager`
+/// `DEFAULT_TAKER_FEE = 0.00055` / `DEFAULT_MAKER_FEE = 0.0002`）。
+/// Kept local so the binary does not touch private `crate::account_manager`
+/// state when the seed path is not wired in.
+pub(crate) const DEFAULT_TAKER_FEE_RATE: f64 = 0.00055;
+pub(crate) const DEFAULT_MAKER_FEE_RATE: f64 = 0.0002;
+
+/// Sprint C R6-T1 — pick (fee_rate, liquidity_role) by TimeInForce.
+/// Mirrors `IntentProcessor::fee_rate_for_tif` (intent_processor/mod.rs:1200).
+/// PostOnly TIF → maker / Any other TIF (incl. None) → taker.
+/// Resolution: `account_manager.maker_fee/taker_fee` if Some; else
+/// `DEFAULT_MAKER_FEE_RATE` / `DEFAULT_TAKER_FEE_RATE`.
+///
+/// Sprint C R6-T1 — 依 TimeInForce 選 (fee_rate, liquidity_role)。
+/// 鏡射 `IntentProcessor::fee_rate_for_tif`。PostOnly→maker / 其他（含 None）
+/// →taker。優先序：有 Some 時用 `account_manager.maker_fee/taker_fee`；否則
+/// 退回 `DEFAULT_*_FEE_RATE`。
+///
+/// SAFETY / 不變量：本 helper 不打任何 endpoint；replay 端 AccountManager
+/// 由 caller `seed_default_fee_rates` 注入（dispatch §1）。
+/// SAFETY: helper does NOT call any endpoint; replay-side AccountManager is
+/// caller-pre-seeded via `seed_default_fee_rates` (dispatch §1).
+pub(crate) fn replay_fee_rate_for_tif(
+    account_manager: Option<&std::sync::Arc<crate::account_manager::AccountManager>>,
+    symbol: &str,
+    tif: Option<crate::order_manager::TimeInForce>,
+) -> (f64, &'static str) {
+    if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+        let rate = account_manager.map(|am| am.maker_fee(symbol)).unwrap_or(DEFAULT_MAKER_FEE_RATE);
+        (rate, "maker")
+    } else {
+        let rate = account_manager.map(|am| am.taker_fee(symbol)).unwrap_or(DEFAULT_TAKER_FEE_RATE);
+        (rate, "taker")
+    }
+}
+
+/// Sprint C R6-T2 — compute signed slippage bps for an intent.
+/// Mirrors `IntentProcessor::slippage_rate_for_tif` (intent_processor/mod.rs:1179).
+/// PostOnly TIF → 0.0 (rests on book) / Otherwise turnover-tier lookup via
+/// `SlippageConfig::lookup_rate`. Sign per dispatch §2: buy → +bps, sell → -bps.
+/// `volume_24h <= 0.0` graceful → `default_rate=0.0005` = 5 bps fallback.
+///
+/// Sprint C R6-T2 — 計算 intent 的有號滑點 bps。鏡射
+/// `IntentProcessor::slippage_rate_for_tif`。PostOnly→0；其他經
+/// `SlippageConfig::lookup_rate`。符號（dispatch §2）：買 +、賣 -。
+/// `volume_24h <= 0.0` graceful → 5 bps default fallback。
+pub(crate) fn replay_slippage_bps_for_tif(
+    slippage_config: &crate::config::SlippageConfig,
+    tif: Option<crate::order_manager::TimeInForce>,
+    volume_24h: f64,
+    is_long: bool,
+) -> f64 {
+    if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+        return 0.0;
+    }
+    let bps = slippage_config.lookup_rate(volume_24h) * 10_000.0;
+    if is_long { bps } else { -bps }
+}
+
+/// Sprint C R6-T2 — apply signed slippage_bps to a reference price.
+/// fill_price = reference_price × (1 + slippage_bps / 10_000.0).
+/// `slippage_bps == 0` (PostOnly) → fill_price == reference_price.
+/// Sprint C R6-T2 — 套用有號 slippage_bps 至參考價。
+/// `slippage_bps == 0`（PostOnly）→ fill_price == reference_price。
+pub(crate) fn apply_slippage_to_price(reference_price: f64, slippage_bps: f64) -> f64 {
+    reference_price * (1.0 + slippage_bps / 10_000.0)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// IsolatedPipeline apply_fill methods (extracted from runner.rs)
+// IsolatedPipeline apply_fill 方法（自 runner.rs 抽出）
+// ─────────────────────────────────────────────────────────────────────────
+
+impl IsolatedPipeline {
+    /// Sprint B2 R5-T3 — process a strategy `Open` intent through the
+    /// 6-Gate risk adapter; emit either a real fill (qty>0) on Accepted or
+    /// a ghost row (qty=0, per PA §6.1) on Rejected.
+    ///
+    /// Sprint B2 R5-T3 — 將策略 `Open` intent 經 6-Gate 風控 adapter 處理；
+    /// Accepted 發真 fill（qty>0），Rejected 發 ghost row（qty=0，per PA §6.1）。
+    pub(super) fn process_open_intent(
+        &mut self,
+        intent: &OrderIntent,
+        ts_ms: i64,
+        close_price: f64,
+        atr: f64,
+        tier_label: &str,
+    ) {
+        let snapshot = match self.paper_snapshot.as_ref() {
+            Some(s) => s,
+            None => return, // unreachable — guarded by execute()
+        };
+        let risk = match self.risk_adapter.as_ref() {
+            Some(r) => r,
+            None => return, // unreachable — paired with strategy_adapter
+        };
+        let decision = risk.evaluate(intent, snapshot, atr);
+        // Sprint C R6-T1+T2: derive (fee_rate, liquidity_role, slippage_bps)
+        // from intent.time_in_force. Used for both Accepted (qty>0) and
+        // Rejected (qty=0 ghost) paths so ghost row carries counterfactual
+        // fee classification (transparency for downstream attribution).
+        // Sprint C R6-T1+T2：從 intent.time_in_force 派生 (fee_rate,
+        // liquidity_role, slippage_bps)。Accepted (qty>0) 與 Rejected (qty=0
+        // ghost) 兩路徑共用，使 ghost row 帶 counterfactual 費率分類。
+        let (fee_rate, liquidity_role) = replay_fee_rate_for_tif(
+            self.account_manager.as_ref(),
+            &intent.symbol,
+            intent.time_in_force,
+        );
+        let volume_24h = self.volume_24h.unwrap_or(0.0);
+        let slippage_bps = replay_slippage_bps_for_tif(
+            &self.slippage_config,
+            intent.time_in_force,
+            volume_24h,
+            intent.is_long,
+        );
+        match decision {
+            RiskDecision::Accepted { final_qty, .. } => {
+                // Reference price: limit if present (PostOnly), else event close.
+                // PostOnly slippage_bps=0 → fill_price == limit_price byte-equal
+                // to Sprint A/B baseline.
+                // 參考價：有 limit_price 取之（PostOnly），否則 event close。
+                // PostOnly slippage_bps=0 → fill_price == limit_price byte-equal。
+                let reference_price = intent.limit_price.unwrap_or(close_price);
+                let fill_price = apply_slippage_to_price(reference_price, slippage_bps);
+                let fee = final_qty * fill_price * fee_rate;
+                self.fills.push(SimulatedFill {
+                    ts_ms,
+                    symbol: intent.symbol.clone(),
+                    side: if intent.is_long { "long" } else { "short" }.to_string(),
+                    qty: final_qty,
+                    price: fill_price,
+                    evidence_source_tier: tier_label.to_string(),
+                    fee,
+                    fee_rate,
+                    slippage_bps,
+                    liquidity_role: liquidity_role.to_string(),
+                });
+                self.apply_fill_open(&intent.symbol, intent.is_long, final_qty, fill_price);
+                self.last_action = format!("open:{}", intent.symbol);
+            }
+            RiskDecision::Rejected { gate, reason } => {
+                // Ghost fill row (qty=0) preserves the rejected decision for
+                // evidence trail (PA §6.1). qty=0 ⇒ fee=0, but fee_rate /
+                // liquidity_role / slippage_bps reflect counterfactual cost.
+                // Ghost fill row (qty=0) 保留被拒決策（PA §6.1）。qty=0 ⇒ fee=0；
+                // fee_rate / liquidity_role / slippage_bps 反映 counterfactual。
+                let _ = reason; // recorded via last_action below.
+                let reference_price = intent.limit_price.unwrap_or(close_price);
+                self.fills.push(SimulatedFill {
+                    ts_ms,
+                    symbol: intent.symbol.clone(),
+                    side: if intent.is_long { "long" } else { "short" }.to_string(),
+                    qty: 0.0,
+                    price: reference_price,
+                    evidence_source_tier: tier_label.to_string(),
+                    fee: 0.0,
+                    fee_rate,
+                    slippage_bps,
+                    liquidity_role: liquidity_role.to_string(),
+                });
+                self.last_action = format!("reject:{}:{}", intent.symbol, gate);
+            }
+        }
+    }
+
+    /// Sprint B2 R5-T3 — process a strategy `Close` intent: look up the
+    /// existing position in `paper_snapshot`, realise PnL, mutate balance.
+    /// No-op when symbol has no open position (matches live router behaviour).
+    ///
+    /// Sprint B2 R5-T3 — 處理策略 `Close` intent：查 `paper_snapshot` 既有
+    /// 倉位、realise PnL、mutate balance。symbol 無倉時 no-op（對齊 live
+    /// router 行為）。
+    pub(super) fn process_close_intent(
+        &mut self,
+        symbol: &str,
+        ts_ms: i64,
+        close_price: f64,
+        tier_label: &str,
+    ) {
+        let snapshot = match self.paper_snapshot.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        let pos = match snapshot.get_position(symbol) {
+            Some(p) => p.clone(),
+            None => {
+                self.last_action = format!("close_skip:{}", symbol);
+                return;
+            }
+        };
+        // Sprint C R6-T1+T2: Close has no OrderIntent/TIF — treat as taker
+        // (live engine routes Close as market; strategies/mod.rs:51 "Close
+        // bypasses governance gates"). Closing leg sign opposite open:
+        // long pos→sell→-bps / short pos→buy→+bps.
+        // Sprint C R6-T1+T2：Close 無 OrderIntent/TIF — 視為 taker
+        // （live 預設 Close 走市價）。平倉方向與開倉相反：多倉→賣→-bps /
+        // 空倉→買→+bps。
+        let close_is_long = !pos.is_long;
+        let (fee_rate, liquidity_role) = replay_fee_rate_for_tif(
+            self.account_manager.as_ref(),
+            symbol,
+            None, // close has no TIF → taker path
+        );
+        let volume_24h = self.volume_24h.unwrap_or(0.0);
+        let slippage_bps = replay_slippage_bps_for_tif(
+            &self.slippage_config,
+            None,
+            volume_24h,
+            close_is_long,
+        );
+        let fill_price = apply_slippage_to_price(close_price, slippage_bps);
+        let fee = pos.qty * fill_price * fee_rate;
+        // Record close-side fill (qty>0 with side opposite to position).
+        // 記 close-side fill（qty>0，side 與倉位反向）。
+        self.fills.push(SimulatedFill {
+            ts_ms,
+            symbol: symbol.to_string(),
+            side: if pos.is_long { "short" } else { "long" }.to_string(),
+            qty: pos.qty,
+            price: fill_price,
+            evidence_source_tier: tier_label.to_string(),
+            fee,
+            fee_rate,
+            slippage_bps,
+            liquidity_role: liquidity_role.to_string(),
+        });
+        self.apply_fill_close(symbol, fill_price);
+        self.last_action = format!("close:{}", symbol);
+    }
+
+    /// Sprint B2 R5-T3 — open-side snapshot mutation. Inserts/extends a
+    /// position; deducts no fee from `snap.balance`. Sprint C R6-T1: fee is
+    /// captured at the `SimulatedFill` row level (see `process_open_intent` /
+    /// `process_close_intent`) — folding fee into `snap.balance` mid-flight
+    /// would double-count once `into_result` reads it for
+    /// `pnl_summary.ending_balance`. Sprint D R8 may extend `pnl_summary` to
+    /// fold fee into PnL — but that is a `pnl_summary` schema decision.
+    ///
+    /// Sprint B2 R5-T3 — open-side snapshot mutation。Sprint C R6-T1：fee 在
+    /// `SimulatedFill` row 層捕獲，**不**扣 `snap.balance`（避免 `into_result`
+    /// 讀 `snap.balance` 餵 `pnl_summary.ending_balance` 時 double-count）。
+    pub(super) fn apply_fill_open(&mut self, symbol: &str, is_long: bool, qty: f64, fill_price: f64) {
+        let snap = match self.paper_snapshot.as_mut() {
+            Some(s) => s,
+            None => return,
+        };
+        if let Some(idx) = snap.positions.iter().position(|p| p.symbol == symbol) {
+            // Same-symbol existing position → extend qty + recompute weighted
+            // entry price (rare path — Gate 1.5 should already reject same-
+            // direction adds; reducing path nets the qty).
+            // 同 symbol 既有倉 → 擴 qty + 重算加權入場價（罕見路徑 — Gate
+            // 1.5 應已拒同向加倉；減倉路徑 net qty）。
+            let pos = &mut snap.positions[idx];
+            if pos.is_long == is_long {
+                let new_qty = pos.qty + qty;
+                if new_qty > 0.0 {
+                    pos.entry_price = (pos.entry_price * pos.qty + fill_price * qty) / new_qty;
+                    pos.qty = new_qty;
+                }
+            } else {
+                // Reducing path: net qty.
+                // 減倉路徑：net qty。
+                if qty >= pos.qty {
+                    let realised_per_unit = if pos.is_long {
+                        fill_price - pos.entry_price
+                    } else {
+                        pos.entry_price - fill_price
+                    };
+                    snap.balance += realised_per_unit * pos.qty;
+                    snap.positions.remove(idx);
+                } else {
+                    let realised_per_unit = if pos.is_long {
+                        fill_price - pos.entry_price
+                    } else {
+                        pos.entry_price - fill_price
+                    };
+                    snap.balance += realised_per_unit * qty;
+                    let after = &mut snap.positions[idx];
+                    after.qty -= qty;
+                }
+            }
+        } else {
+            // Fresh open.
+            // 全新開倉。
+            snap.positions.push(ReplayPosition {
+                symbol: symbol.to_string(),
+                is_long,
+                qty,
+                entry_price: fill_price,
+            });
+        }
+        self.balance = snap.balance;
+    }
+
+    /// Sprint B2 R5-T3 — close-side snapshot mutation. Realises PnL =
+    /// (fill_price - entry_price) * qty (long; sign-flipped for short),
+    /// removes position, updates balance. Mirrors `paper_state::realize_close`.
+    /// Sprint C R6-T1: fee captured at `SimulatedFill` row level (see
+    /// `process_close_intent`), NOT subtracted from `snap.balance` here
+    /// (same rationale as `apply_fill_open` — avoid `pnl_summary` double-count).
+    ///
+    /// Sprint B2 R5-T3 — close-side snapshot mutation；對齊
+    /// `paper_state::realize_close`。Sprint C R6-T1：fee 在
+    /// `process_close_intent` row 層捕獲，**不**於此扣 snap.balance（同
+    /// `apply_fill_open` 邏輯，避免 `pnl_summary` double-count）。
+    pub(super) fn apply_fill_close(&mut self, symbol: &str, fill_price: f64) {
+        let snap = match self.paper_snapshot.as_mut() {
+            Some(s) => s,
+            None => return,
+        };
+        if let Some(idx) = snap.positions.iter().position(|p| p.symbol == symbol) {
+            let pos = snap.positions.remove(idx);
+            // PnL = (fill - entry) * qty for long; (entry - fill) * qty for short.
+            // Sprint C R6-T1: fee is captured at row level in
+            // `process_close_intent`, NOT applied to snap.balance here.
+            // PnL = (fill - entry) * qty 多倉；(entry - fill) * qty 空倉。
+            // Sprint C R6-T1：fee 在 `process_close_intent` row 層捕獲，
+            // **不**於此扣 snap.balance。
+            let realised_per_unit = if pos.is_long {
+                fill_price - pos.entry_price
+            } else {
+                pos.entry_price - fill_price
+            };
+            snap.balance += realised_per_unit * pos.qty;
+        }
+        self.balance = snap.balance;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Module-internal unit tests / 模組內部 unit test
+// ─────────────────────────────────────────────────────────────────────────
+//
+// R0-T0 boundary (R6 W2 §5): test functions remain in `runner.rs::tests`
+// because they reach IsolatedPipeline private fields via super:: and
+// the inline test helpers (TifStub / OneShotStub / make_*) live there.
+// Splitting tests across files would force re-exporting helpers as
+// pub(super), widening attack surface for future maintainers. The 4
+// helpers (`replay_fee_rate_for_tif`, `replay_slippage_bps_for_tif`,
+// `apply_slippage_to_price`, `DEFAULT_*_FEE_RATE`) are visible to
+// `runner.rs::tests` via the same-crate `pub(crate)` visibility, so
+// `test_apply_fill_*` helper unit tests continue to pass without a
+// single import change.
+//
+// R0-T0 邊界（R6 W2 §5）：test 函式仍留 `runner.rs::tests`，因 test
+// 觸碰 IsolatedPipeline 的 private field（透過 super::），且 inline
+// test helper（TifStub / OneShotStub / make_*）住在那裡。把 test
+// 拆檔將迫使把 helper 改 pub(super)，擴大未來維護者的攻擊面。4 個
+// helper（`replay_fee_rate_for_tif`/`replay_slippage_bps_for_tif`/
+// `apply_slippage_to_price`/`DEFAULT_*_FEE_RATE`）以同 crate `pub(crate)`
+// 可見，runner.rs::tests 中的 `test_apply_fill_*` helper 單元測試
+// 0 import 改動即可繼續通過。
