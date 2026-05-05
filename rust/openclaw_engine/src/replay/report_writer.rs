@@ -317,6 +317,14 @@ mod tests {
                 qty: 1.0,
                 price: 100.0,
                 evidence_source_tier: "synthetic_replay".into(),
+                // Sprint C R6-T1+T2: synthetic-walker fixture has no
+                // intent context → 'unknown' liquidity_role + 0 fee/slippage.
+                // Sprint C R6-T1+T2：synthetic-walker fixture 無 intent
+                // context → 'unknown' liquidity_role + 0 fee/slippage。
+                fee: 0.0,
+                fee_rate: 0.0,
+                slippage_bps: 0.0,
+                liquidity_role: "unknown".into(),
             }],
             pnl_summary: PnlSummary {
                 events_processed: 3,

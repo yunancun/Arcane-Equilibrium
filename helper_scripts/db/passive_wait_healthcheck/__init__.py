@@ -129,6 +129,20 @@ from .checks_governance import (  # noqa: F401
     # 契約監測；V042 SQL archive 於 Wave 6+ land 前 WARN-only）。
     check_44_replay_manifest_key_presence,
 )
+from .checks_pricing_binding import (  # noqa: F401
+    # [45] REF-20 Sprint C R6-T7 (2026-05-05) — LG-3 provider pricing
+    # binding sentinel. Implements RFC §IMPL T2 healthcheck output
+    # (`2026-05-01--lg3_provider_pricing_binding_rfc.md`); T1 contract
+    # test deferred to Sprint D, T3 startup assertion deferred to LG-4
+    # IMPL pre-req. PG-side proxy of Rust ``AccountManager`` runtime
+    # fee health via 24h trading.fills.fee_rate distribution +
+    # last-ts staleness.
+    # [45] REF-20 Sprint C R6-T7（2026-05-05）— LG-3 提供者定價綁定哨兵
+    # （RFC §IMPL T2）；T1 Sprint D / T3 LG-4 前提。PG 端 proxy（24h
+    # trading.fills.fee_rate 分佈 + 末條 ts staleness）映射 Rust
+    # AccountManager 運行時 fee 健康。
+    check_45_pricing_binding,
+)
 
 __all__ = [
     "main",
@@ -196,4 +210,6 @@ __all__ = [
     "check_43_label_backfill_freshness",
     # [44] REF-20 Sprint 1 Track B (2026-05-03) replay manifest key.hex presence
     "check_44_replay_manifest_key_presence",
+    # [45] REF-20 Sprint C R6-T7 (2026-05-05) LG-3 pricing binding sentinel
+    "check_45_pricing_binding",
 ]
