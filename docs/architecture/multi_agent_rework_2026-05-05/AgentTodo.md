@@ -133,7 +133,7 @@ Do not start implementation before CC/FA/PA confirm the authority model:
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-000 | PM | P0 | TODO | Review `ENGINEERING_PLAN.md` with operator and confirm target architecture. | Operator confirms scanner must be advisory, Strategist owns decisions, Guardian owns veto. |
+| MAG-000 | PM | P0 | DONE | Review `ENGINEERING_PLAN.md` with operator and confirm target architecture. | Operator confirmed: scanner must be advisory/evidence, Strategist owns open/hold/reduce/close/no_action decisions, Guardian owns non-bypassable veto/modify authority, Rust remains execution engine without hidden decision authority. |
 | MAG-001 | CC | P0 | TODO | Compliance review against root principles, EX-06, DOC-04, SM-02 Decision Lease, H0/P0/P1. | Written finding: no boundary violation or explicit amendments listed. |
 | MAG-002 | FA | P0 | TODO | Formal architecture review of Agent Decision Spine, object lifecycle, and persistence order. | FA signs off canonical decision ordering and fail-closed behavior. |
 | MAG-003 | PA | P0 | TODO | Produce implementation RFC with exact module seams, structs, migrations, flags, and rollout order. | RFC maps every plan object to Rust/Python files and DB tables. |
