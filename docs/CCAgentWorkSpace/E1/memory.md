@@ -5049,3 +5049,40 @@ PA design `2026-05-05--ref20_sprint_b_task_dag.md` §4.1 + §4.2 + §11.1：在 
 4. **Rust 測試 `#[cfg(test)]` LOC 是否計入 budget 需先說明** — dispatch §11.1 表把「`tests/replay/test_replay_*_smoke.rs` (new) +200 LOC」獨立列為 R5-T7 範圍；但 dispatch §9 又要求「每 adapter file 末尾加 `#[cfg(test)] mod tests`」。本次 inline test ~150 LOC 計入 file LOC。教訓：未來看到 LOC 預算 vs 「inline test + R5-T7 acceptance test」雙重要求時，先 push back 釐清計法。
 5. **`Strategy::on_tick(&mut self, ctx: &TickContext<'_>)` 簽名讓 adapter 必為 `&mut self`** — `on_tick` 內部會 mutate strategy state（cooldown timer / persistence tracker），所以 adapter `on_tick` 也必為 `&mut self`。R5-T3 wire-up 必把 adapter 包在 runner mut field 內，不能用 `&adapter`。
 6. **build feature flag `--features replay_isolated` 對 lib build 不影響但對 bin replay_runner 必要** — 兩 adapter 直接編入 lib 不需 feature gate（mirror `forbidden_guard` / `profile` / `runner` 既有 pattern）；只有 `bin/replay_runner` 需 `replay_isolated`。教訓：新增 replay 子模組時跟 sibling 既有 pattern：lib path 不加 cfg gate，bin path 加。
+
+## 2026-05-05 REF-20 Sprint B2 R5-T3 — IsolatedPipeline adapter wire-up（Rust）
+
+**Path**：`rust/openclaw_engine/src/replay/runner.rs` (676→1466, +790 LOC) + `rust/openclaw_engine/src/replay/report_writer.rs` (test fixture 補 `decision_traces` field)
+**Status**：IMPL DONE，待 E2 審查 + E4 回歸；不 commit
+**HEAD**：Mac/origin sync from `2a69addb`（dispatch baseline，未 push R5-T1+T2）
+
+### 設計關鍵決策
+
+1. **Optional adapter 雙路徑**：`strategy_adapter: Option<ReplayStrategyAdapter>` + `risk_adapter: Option<ReplayRiskAdapter>` + `paper_snapshot: Option<ReplayPaperSnapshot>` 三 Optional pair；`build_isolated_pipeline` 不變（向後兼容 e2e proof_1/4/5）；`with_adapter_pipeline(...)` 為新 setter，**僅在 setter 內**做 fail-loud snapshot 驗證（NaN/Inf balance + 空 latest_price + 空 positions）。
+2. **execute() 分流**：`if self.strategy_adapter.is_some() { execute_adapter_pipeline() } else { execute_synthetic_walker() }`；synthetic walker 邏輯**逐字** byte-equal 保留（保 proof_1 fills.len()==1 / proof_5 baseline ≡ candidate / proof_4 forbidden trip）。
+3. **forbidden_guard runtime trip 兩 path 都接**：`execute_synthetic_walker` 的 action="on_event:..." 不變；`execute_adapter_pipeline` 用 action="on_tick:..."，前者 proof_4 已驗，後者新加 inline test 證明（`adapter_pipeline_records_ghost_fill_on_risk_reject` 的 single_event）。
+4. **PA §6.1 ghost row**：`RiskDecision::Rejected` → push `SimulatedFill{qty: 0.0, side: <intent direction>, price: limit_price.or(close)}`；`last_action = format!("reject:{symbol}:{gate}")`；evidence trail preserve。
+5. **Strategy::Close 處理**：`process_close_intent` 查 snapshot.get_position；無倉 no-op + last_action="close_skip:{sym}"，有倉 push close-side fill (qty>0, side reversed) + apply_fill_close 算 PnL。
+6. **`#[derive(Debug)]` 不可保留**：`Box<dyn Strategy>` not Debug → `ReplayStrategyAdapter` not Debug → `IsolatedPipeline` not Debug；`build_rejects_non_isolated` test 改用顯式 match 替 `unwrap_err()`。
+7. **build_tick_context helper**：R5-T3 留 `indicators: None / signals: &[] / h0_allowed: true / *_price: None`；R5-T4 CLI + fixture-builder 將餵實值（PA design §13 line 691）。`atr=0.0` fallback 不破 Kelly（`risk_adapter::evaluate` line 321 same fallback）。
+
+### 教訓
+
+1. **Optional adapter pair 必三同存**：`strategy_adapter` + `risk_adapter` + `paper_snapshot` 必同寫同讀；單獨設 None 之一會破 invariant。`with_adapter_pipeline` 簽名為原子三注入。
+2. **e2e 回歸保護優先於 LOC budget**：dispatch 估 +200 LOC；實際 +790 LOC（含 4 inline R5-T3 test ~250 LOC + 7 method 雙語 docstring + execute 分流註釋）。守 §七 雙語 + 守 e2e 6 proof + LOC < 1500 hard cap > LOC ≤ 200 estimate。runner.rs 1466 < 1500 hard cap 但已超 800 警告線；需 PM decision 是否強制拆檔（建議按 commands.rs 1343 / scanner/scorer.rs 1437 先例 accept high-cohesion exception）。
+3. **inline test 末位 last_action 隨後續 event 變化**：原想用 multi-event fixture 測 ghost fill，但 last_action 被 ETHUSDT@3 的 fresh open 覆蓋；改用 single_event 才能可靠 assert `reject:BTCUSDT:1.5_dup`。
+4. **`ReplayResult.decision_traces` 不破 e2e proof_1 + proof_5**：synthetic-walker 路徑 strategy_adapter==None → into_result drain 出空 Vec；既有 e2e 對 ReplayResult 解 JSON 用 `result.fills` / `result.pnl_summary`，未引用 decision_traces，0 退化。
+5. **report_writer.rs test fixture 補 missing field**：新加 `decision_traces` field 於 ReplayResult 後，所有 `ReplayResult { ... }` literal 都要補（grep 找：1 處於 report_writer.rs:309 inline test）。E2 review 必對 ReplayResult literal 全部 grep 確認。
+6. **starting_balance 對 adapter path 暫沿 DEFAULT_STARTING_BALANCE**：`with_adapter_pipeline` 把 snapshot.balance 鏡射至 self.balance，但 `into_result` 的 `pnl_summary.starting_balance` 仍用 DEFAULT_STARTING_BALANCE（10_000 USDT）保契約穩定；R5-T4 CLI 後續可擴 ReplayResult 暴露原始 starting_balance（push back 給 PM 評估）。
+
+### 自驗結果
+
+- `cargo build --release --bin replay_runner --features replay_isolated`：PASS（11.86s）
+- `cargo test --release --features replay_isolated -p openclaw_engine --lib replay::runner::`：8/8 PASS（4 既有 + 4 新 R5-T3）
+- `cargo test --release --features replay_isolated -p openclaw_engine --lib replay::`：58/58 PASS（54 R5-T1+T2 + 4 NEW）
+- `cargo test --release --features replay_isolated -p openclaw_engine --lib`：2474/2474 PASS（與 R5-T1+T2 baseline 同數）
+- `cargo test --release --features replay_isolated -p openclaw_engine --test replay_runner_e2e`：6/6 PASS（含 proof_1 fills.len()==1 / proof_4 forbidden trip / proof_5 baseline≡candidate）
+- `bash helper_scripts/ci/replay_runner_symbol_audit.sh`：478 symbols / 0 forbidden（baseline 414 → +64 R5-T1+T2 → +0 R5-T3 因 inline 0 export new symbol；478 上升源 R5-T1+T2 已 land 後重 build）
+- `grep -nE 'use crate::(paper_state|...)' runner.rs`：0 hit
+- `grep -nE '/home/ncyu|/Users/[a-z]+/' runner.rs`：0 hit
+- `git status --short`：2 M（runner.rs + report_writer.rs）；clean
