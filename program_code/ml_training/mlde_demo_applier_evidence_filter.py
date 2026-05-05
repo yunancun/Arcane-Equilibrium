@@ -258,6 +258,40 @@ def fetch_pending_sql_and_params(
     """
     caps = evidence_filter_capabilities(cur)
     extra_filter, extra_params = build_evidence_source_filter(caps)
+    # REF-20 Sprint C2 R7-T7 Part B (per MIT §1.5 + AI-E 推薦)：
+    # observability log — 每 cycle dump active capabilities + Block A/B mode。
+    # block_a = 'on' / 'skip'（has_evidence_source_tier 是否啟用）。
+    # block_b = 'full' / 'partial' / 'skip'：
+    #   full = 4 個 FK 能力全 true（NOT NULL + manifest_hash + expires_at + status）
+    #   partial = FK column 在但 stub 缺 expires_at/status（degraded existence-only gate）
+    #   skip = replay_experiment_id column 未 land（完全 fallback）
+    has_evidence_source_tier = bool(caps.get("has_evidence_source_tier"))
+    has_fk_only = (
+        bool(caps.get("has_replay_experiment_id"))
+        and bool(caps.get("has_replay_experiments"))
+    )
+    all_block_b_caps_true = (
+        has_fk_only
+        and bool(caps.get("replay_experiments_has_expires_at"))
+        and bool(caps.get("replay_experiments_has_status"))
+    )
+    block_a_label = "on" if has_evidence_source_tier else "skip"
+    if not has_evidence_source_tier:
+        block_b_label = "skip"
+    elif all_block_b_caps_true:
+        block_b_label = "full"
+    elif has_fk_only:
+        block_b_label = "partial"
+    else:
+        block_b_label = "skip"
+    caps_count = sum(1 for v in caps.values() if v)
+    logger.info(
+        "evidence_filter capability dump: caps=%d/6 block_a=%s block_b=%s",
+        caps_count,
+        block_a_label,
+        block_b_label,
+    )
+
     sql = """
         SELECT id, ts, engine_mode, source, recommendation_type, strategy_name,
                symbol, expected_net_bps, confidence, sample_count, payload
