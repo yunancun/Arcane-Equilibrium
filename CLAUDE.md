@@ -382,11 +382,13 @@ Operator 在 Mac 並行跑 Qwen3.6-35B（LM Studio）做代碼審核。CC 每完
 ### 文件大小限制
 
 - **800 行** ⚠️ 警告線（E2 必須標記）
-- **1500 行** 🛑 硬上限（不允許 merge）
+- **2000 行** 🛑 硬上限（不允許 merge）
 
-**2026-05-02 governance change**：硬上限從 1200→1500（operator 決定）。`commands.rs` 1343 / `scanner/scorer.rs` 1437 等檔超舊 1200 限但單一檔內聚性高。**警告線維持 800**。
+**2026-05-05 governance change**：硬上限從 1500→2000（operator 決定，REF-20 Sprint C 拍板）。理由：Sprint C 預估 `runner.rs` 1466 + R6-T1+T2 ~180 LOC = 1646 會破舊 1500 cap，需先 R0-T0 拆檔；operator 評估「文件內聚性 > 機械式 LOC 限制」，提升至 2000 給 high-cohesion 模組（router.rs / runner.rs / experiment_registry.py 等）合理 headroom。**警告線維持 800**。
 
-**Pre-existing baseline exception clause**：當檔案在某個 wave 開工前的 baseline 已超過 1500 行（pre-existing violation 來自更早歷史），允許下列例外：(1) 接受 wave 後 LOC ≤ pre-existing baseline + 5 LOC；(2) 同時開新 P2 ticket 處理 pre-existing violation；(3) PM Sign-off 必明文記錄 governance exception accept 理由。**僅適用 pre-existing 1500 + violation**，不適用「新 wave 把 ≤1500 推到 >1500」的場景。
+**2026-05-02 governance change**（歷史）：硬上限從 1200→1500。`commands.rs` 1343 / `scanner/scorer.rs` 1437 等檔超舊 1200 限但單一檔內聚性高。
+
+**Pre-existing baseline exception clause**：當檔案在某個 wave 開工前的 baseline 已超過 2000 行（pre-existing violation 來自更早歷史），允許下列例外：(1) 接受 wave 後 LOC ≤ pre-existing baseline + 5 LOC；(2) 同時開新 P2 ticket 處理 pre-existing violation；(3) PM Sign-off 必明文記錄 governance exception accept 理由。**僅適用 pre-existing 2000+ violation**，不適用「新 wave 把 ≤2000 推到 >2000」的場景。
 
 ### 模塊依賴方向（禁止循環 import）
 

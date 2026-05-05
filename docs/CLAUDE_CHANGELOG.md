@@ -1,7 +1,33 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-05（REF-20 Sprint A + B closed；A4/A5 strategy + risk parameter delta acceptance hermetic-proven；累計 12 commit chain）
+> 最後更新：2026-05-05（§九 LOC governance change 1500→2000 + REF-20 Sprint C accept C1+C2 split + advisory wave dispatch pending）
+
+### §九 LOC governance change 1500→2000 + REF-20 Sprint C accept C1+C2 split — 2026-05-05
+
+**Governance change**：CLAUDE.md §九 硬上限從 1500→2000（operator 決定，REF-20 Sprint C 拍板觸發）。
+
+**Trigger**：PA Sprint C task DAG（`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-05--ref20_sprint_c_task_dag.md`）§6.4 揭：`runner.rs` 1466 + R6-T1+T2 ~180 LOC = **1646 LOC 將破舊 1500 cap**。Operator 評估「文件內聚性 > 機械式 LOC 限制」（mirror 2026-05-02 governance change 1200→1500 邏輯），提升至 2000 給 high-cohesion 模組合理 headroom。
+
+**邊界**：
+- 警告線維持 800（E2 必標記）
+- pre-existing baseline exception clause 條件 (1)+(2)+(3) 同樣適用，閾值同步改 2000
+- runner.rs R0-T0 拆檔（抽 IsolatedPipeline + apply_fill 到子模組）仍按 PA 設計做（內聚清理目的，非 LOC 強迫）
+- 既 land 但 < 2000 的高內聚模組（如 mlde_demo_applier.py 1542 / governance_hub_live_candidate_review.py 1496 / replay_runner.rs 1432）即時轉 OBSOLETED-BY-GOV-CHANGE，不再列為 §九 violation
+
+**TODO 反映**：v8 → v9 banner；P1-INFRA-3p Sprint C 拆 C1+C2；6 個 P2 ticket 標 OBSOLETED-BY-GOV-CHANGE-2026-05-05（P2-FOLLOW-UP-3 / P2-WAVE-4-W6-REFACTOR / P2-WAVE-6-MLDE-DEMO-APPLIER-SPLIT / P2-R3-FOLLOW-UP-7 / P2-STRUCT-2）；P2-INTENT-PROCESSOR-TESTS-SPLIT 仍 active（2910 > 2000，超 910）但閾值改 2000。
+
+**Sprint C accept C1+C2 split**：
+- **C1 (R6, ~6.5d)** Fee/Execution Calibration：grid + ma pilot；apply_fill 真 maker/taker fee + slippage；Rust CalibrationLabelProducer (sample count + freshness + CI bound + regime)；Python writer payload extension；experiment_registry.py execution_confidence write；R6-T7 順帶 LG-3 healthcheck unblock (RFC 0%→70%)；R0-T0 拆檔 runner.rs → isolated_pipeline.rs + apply_fill.rs。
+- **C2 (R7, ~6d, C1 closed 後啟)** MLDE/Dream Advisory Integration：dream_engine + opportunity_tracker 升級 evidence_source_tier='calibrated_replay'（依 R6 deliver 的 execution_confidence label）；linucb caller 驗；mlde_demo_applier_evidence_filter Block B integration test；4 producer FK chain audit。
+- **0 V### migration** 需求（V036 + V050 + V051 既 land）
+- **Pre-DAG advisory wave**：QC + MIT 並行 1d（C1 啟前）；AI-E 1d（C2 啟前）
+
+**設計報告**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-05--ref20_sprint_c_task_dag.md`（A 級評級，16/16 root principle 完全合規 + CLAUDE.md §四 硬邊界 0 觸碰）。
+
+**Files updated** (this commit)：CLAUDE.md §九 + .claude/agents/E2.md + .claude/agents/E5.md + TODO.md v9 + docs/CLAUDE_CHANGELOG.md（本 entry）。
+
+---
 
 ### REF-20 Sprint B closed — 2026-05-05
 
