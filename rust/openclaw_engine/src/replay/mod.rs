@@ -106,6 +106,8 @@
 //!       R20-P2b-T1 (cli + fixture_loader + runner + report_writer, Wave 4).
 
 pub mod apply_fill;
+// Sprint C R6 W3 R6-T4：校準標籤產出器（純 Rust 函數模組）。
+pub mod calibration_label;
 pub mod cli;
 pub mod fixture_loader;
 pub mod forbidden_guard;

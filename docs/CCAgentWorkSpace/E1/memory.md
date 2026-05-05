@@ -5517,3 +5517,47 @@ REF-20 Sprint C Wave R6-T7 IMPL — LG-3 RFC §IMPL T2 healthcheck `[45]` pricin
 - **P2-W2-FOLLOWUP-2 (E2 P2 ticket #2 const drift CI gate)**：dispatch §3 推 P3 ticket — `DEFAULT_*_FEE_RATE` 在 `intent_processor/mod.rs:239,245` + `replay/apply_fill.rs:108,109` 雙處硬編；CI gate 對比兩處數值（grep + extract → diff），drift 即 fail
 - **P2-W2-FOLLOWUP-3 (R6-T3 e2e proof_9)**：`tests/replay_runner_e2e_param_delta.rs` 加 proof_9：兩 manifest 同 strategy 同 fixture，risk_overrides 一個 kelly.young_threshold=50 / 另一個 kelly.young_threshold=100；驗 simulated_fills 數量或 qty 因 Kelly 分級切換而不同（end-to-end byte-trace via Rust binary spawn）
 - **P2-W2-FOLLOWUP-4 (apply_fill.rs grow plan)**：apply_fill.rs 485 LOC 已含 350 LOC bilingual MODULE_NOTE + 4 method + 4 helper；R6-T4+ 若需在 apply_fill.rs 加新邏輯（calibration label producer caller / fee writer），預留 ~315 LOC headroom (800-485) — 若超 800 warning，考慮再次拆分（例如 `apply_fill/helpers.rs` + `apply_fill/methods.rs` 兩檔）
+
+
+## 2026-05-05 — REF-20 Sprint C R6 W3 (R6-T4 CalibrationLabelProducer)
+
+### W3 R6-T4 closed
+
+- `replay/calibration_label.rs`：NEW 826 LOC（pure-function 模組，0 DB / IPC / governance coupling）
+- 7 fn（1 public API + 1 internal helper + 4 robust stat + 1 enum method）+ 3 struct + 1 enum + 19 unit test
+- byte-equal QC pre-DAG advisory `2026-05-05--ref20_r6_calibration_label_spec.md` §1 / §3 / §4 / §6
+- **2509 lib test PASS**（W2 baseline 2490 + 19 new R6-T4 = 2509，0 regression）
+- **89 replay::* PASS**（70 baseline + 19 new = 89）
+- 0 V### migration / 0 schema 改動 / 0 hard boundary 觸碰 / 0 forbidden surface use
+
+### W3 中遭遇的 governance change （CLAUDE.md mid-session 更新）
+
+2026-05-05 §七 governance change：「新建/修改的注釋默認只寫中文」（舊規則 mandatory bilingual 作廢）。Dispatch §1+§5 寫的 bilingual MODULE_NOTE 基於舊規則。
+
+**E1 處理**：mid-session 套用新規則，將 EN duplicate 從 module-level + struct/fn doc + inline comment + test doc 全部移除，僅保留中文版（共減 ~274 LOC，1100→826）。所有語意保留；19 unit test 0 改動 byte-equal PASS；0 fn body 邏輯改動。
+
+**教訓**：governance change mid-session 是 race condition 風險源；E1 應在 dispatch 已收 + IMPL 進行中如見 governance 文件被改，立即重讀 CLAUDE.md / TODO.md 對齊新規則，避免 sign-off 出現舊規則 artifacts。
+
+### W3 LOC governance call-out
+
+`calibration_label.rs` 826 LOC 微觸 §九 800 warn 線（+26 over，不阻擋 merge），不觸 2000 hard cap。原因：
+- 19 unit test ~530 LOC（dispatch §4 強制要求）
+- ~80 LOC 中文 MODULE_NOTE（new §七 governance 套用後最小化）
+- ~210 LOC fn / struct body（pure-function + serde 派生）
+
+建議 E2 / E5 governance call accept high-cohesion module 微 warn headroom；W4 R6-T5/T6 不會碰本檔。
+
+### W3 設計決策
+
+1. **`FillRecord.is_long: bool` 取代 SQL `direction` int**：QC spec §7.2 寫 `direction (or is_long)`；Rust typed 慣例選 bool，caller-side（W4 Python writer / R6-T5 SQL projection）負責 1↔long、-1↔short 映射；MODULE_NOTE 已寫明。
+2. **`compute_net_bps_after_fee` 只算 fee**：當前公式 `gross_bps - 2 × fee_bps`（未含 slippage_bps）；QC spec §3.1 公式含 `slippage_bps_estimate`。E1 留 R6-T2 row-level slippage feed（caller 端後續可在 `FillRecord` 加 `slippage_bps` field 或擴展簽名）。當前 CI 略寬於實際 — 保守方向，可接受。
+3. **No `Result` propagation**：依 QC spec §7.4 哲學，calibration label 是 advisory 信號非執行 gate；任何輸入異常自動降至 None，不 propagate Err。
+4. **`mad` / `iqr` / `percentile` / `median` 全 `pub`**：robust 統計 helper 設 `pub` 而非 `pub(crate)`，使未來 `simulated_fills_writer.py` 端 PyO3 binding 可直接 expose（若 W4 需要）；當前 W3 caller 為空，未確定 PyO3 vs 純 Rust caller，留 flexibility。
+5. **Type 7 percentile（Hyndman-Fan）**：選用線性插值，與 numpy / pandas / R 標準對齊；W4 Python writer 以 numpy 端對照驗算可 byte-equal。
+
+### W3 後續 wave 不在本 dispatch
+
+- **W4 R6-T5** `simulated_fills_writer.py` Python writer 端 consume `CalibrationResult` → 寫 V050 `simulated_fills.ci_low/mid/high_bps` + `evidence_source_tier` + `expires_at`
+- **W4 R6-T6** `experiment_registry.py` 升級 `replay.experiments.execution_confidence` 寫入路徑
+- **W5 R6-T8** smoke test 對 grid + ma + funding + bb_breakout 4 strategy 跑全 spec reproducibility 驗 `derive_execution_confidence` real fixture 行為
+- **W6 R6-T9** review 對齊 V050 / V051 schema CHECK + V049 enum text round-trip
