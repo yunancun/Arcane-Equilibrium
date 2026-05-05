@@ -5561,3 +5561,34 @@ REF-20 Sprint C Wave R6-T7 IMPL — LG-3 RFC §IMPL T2 healthcheck `[45]` pricin
 - **W4 R6-T6** `experiment_registry.py` 升級 `replay.experiments.execution_confidence` 寫入路徑
 - **W5 R6-T8** smoke test 對 grid + ma + funding + bb_breakout 4 strategy 跑全 spec reproducibility 驗 `derive_execution_confidence` real fixture 行為
 - **W6 R6-T9** review 對齊 V050 / V051 schema CHECK + V049 enum text round-trip
+
+## 2026-05-05 — REF-20 Sprint C R6 W5 R6-T8 reproducibility smoke
+
+### 任務
+PA dispatch「REF-20 Sprint C R6 W5 — R6-T8 4-strategy reproducibility smoke test (per QC §1.1)」對 `calibration_label.rs::derive_execution_confidence` 加 5 reproducibility test，證 pure stateless 函數同 input → 字節級相同 output。
+
+### 改動
+- `rust/openclaw_engine/src/replay/calibration_label.rs`：826 → 1096 LOC（+270 LOC，純 `#[cfg(test)] mod tests` 擴充，0 production 改動）
+- 加結構：5 reproducibility test + `assert_calibration_eq` helper + `FeePattern` enum + `build_fixture` helper
+
+### 設計重點
+1. **Deterministic pattern 取代 RNG seed**：PA dispatch §2.5 提「fixed RNG seed」設想；實作改用 `Stable(rate) / Bimodal(maker, taker)` deterministic enum + `i % 2` 選 pattern，效果等同（純算術 → 無 RNG → 必 reproducible）且無 `rand` 依賴。
+2. **NaN bit-equal 比對**：`assert_calibration_eq` 對 fee_bps_mad / iqr / p5 / p50 / p95 用 `f64::to_bits()` 比，繞 NaN != NaN 陷阱（n=0 case 全 NaN 仍可比）。
+3. **5 strategy fixture 對齊 QC §1.1 表**：grid 1162 → Calibrated；ma 635 bimodal → Limited or Calibrated；funding 99 → Limited or None；bb_breakout 34 + age 10d → Limited or None；bb_reversion 7 → None。
+4. **assert 容差合 spec wording**：對「QC §1.1 寫 'none' 強制降」案例（funding/bb_breakout）容許 `Limited or None`，與 PA dispatch §2.3 設想對齊（「freshness OK + MAD OK 可進 limited」）。
+
+### 驗證
+- Mac cargo test calibration_label module：19 → 24 PASS（baseline 19 仍綠 + 5 R6-T8 新加 PASS）
+- Mac cargo full openclaw_engine lib：2509 → 2514 PASS（無 regression）
+- forbidden surface grep：0 真實 use ::path（僅 MODULE_NOTE 文字提及）
+- cross-platform path grep：0 命中
+- 0 V### migration / 0 schema / 0 manifest_signer / 0 hot-path 改動
+- LOC：1096 < 2000 hard cap
+
+### 不確定處 → PM
+- PA dispatch §2.5 設想 RNG seed；本 IMPL 走 deterministic pattern。若 PM 期望顯式 RNG path 請 retrofit。
+- bb_breakout / funding_arb assert 容許 `Limited or None`（QC §1.1 容差範圍）。
+
+### 教訓
+- 「reproducibility test」對 stateless 純函數 = 同 input 二跑字節級 equal；不必引入 RNG seed 機制（RNG seed 是針對 stochastic 函數的 reproducibility 工具，本函數無隨機性）。
+- bilingual MODULE_NOTE 默認中文（2026-05-05 governance change，commit `47922a4c`）；新增 R6-T8 註解全中文，既有 W3 中英對照塊不主動清理（per CLAUDE.md §七）。
