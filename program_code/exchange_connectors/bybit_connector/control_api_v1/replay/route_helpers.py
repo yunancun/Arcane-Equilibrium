@@ -494,24 +494,24 @@ def spawn_replay_runner(
         poll_grace_seconds: spawn 後等多久 poll 一次（預設 1.5s）。
 
     Returns / 回傳:
-        (pid, None) on successful Popen + alive after poll;
-        (None, "binary_not_found") binary path does not exist;
-        (None, "manifest_fixture_not_found") manifest fixture missing;
-        (None, "mkdir_error:<ExcName>") output_dir mkdir failure;
-        (None, "stderr_path_outside_allowlist") stderr path escapes
-            artifact allowlist (defense-in-depth; should never trip);
-        (None, "stderr_open_error:<ExcName>") stderr file open failed;
-        (None, "spawn_error:<ExcName>") Popen failure;
-        (None, "spawn_died_early:exit=<rc>") early death within poll
-            window; reason_code intentionally generic per Round 7 FINDING-2
-            (§九 SEC-04); stderr excerpt persists to
-            ``<output_dir>/replay_runner.stderr`` for operator post-mortem
-            (verifier reason recoverable from disk, not leaked to client).
+        (pid, None) Popen + alive after poll;
+        (-1, None) R9 sentinel — clean-exit rc=0 inside poll grace
+            (success; ``replay_report.json`` on disk). Caller UPDATE
+            ``status='running'`` + ``subprocess_pid=NULL`` then call
+            ``/finalize`` directly (no wait-for-pid).
+        (None, "binary_not_found" | "manifest_fixture_not_found" |
+            "mkdir_error:<E>" | "stderr_path_outside_allowlist" |
+            "stderr_open_error:<E>" | "spawn_error:<E>" |
+            "spawn_died_early:exit=<rc>") — last form **non-zero rc only**;
+            envelope-only per R7 FINDING-2 §九 SEC-04; stderr persists to
+            ``<output_dir>/replay_runner.stderr`` for post-mortem.
 
-    REF-20 Sprint A R3 Round 6 P0-NEW-INFRA (2026-05-05): stderr redirected
-    to ``<output_dir>/replay_runner.stderr`` (was ``DEVNULL``); subprocess
-    fail-closed reasons persist to disk for post-mortem. Prior DEVNULL
-    pattern silenced all Rust errors → forced operator manual reproduce.
+    R6 P0-NEW-INFRA (2026-05-05): stderr → disk file (was DEVNULL).
+    R9 Layer-6 contract (2026-05-05): clean-exit (``rc==0``) within poll
+    grace = **success path** — synthetic walker 10 events typically <1.5s
+    warm cache. R6/7/8 wrongly mapped to ``spawn_died_early`` → V050 0 row
+    → R3 acceptance 1/1/0/0. R9 splits: rc==0 → (-1, None); rc!=0 → keeps
+    ``spawn_died_early:exit=<rc>``。R9 Layer-6 拆 rc==0 = 成功，rc!=0 = 早死。
     """
     bin_path = resolve_replay_runner_bin()
     if not bin_path.exists():
@@ -629,16 +629,15 @@ def spawn_replay_runner(
         )
         return None, f"spawn_died_early:exit={rc}"
     if rc is not None and rc == 0:
-        # Pathological: binary exited cleanly within grace window. Treat
-        # as alive=False since downstream wait/UPDATE assumes a live PID.
-        # 病態：binary 在 grace 視窗內乾淨退出。視為 alive=False，因下游
-        # wait/UPDATE 假設 PID 仍活。
-        log.warning(
-            "replay_runner exited 0 within poll grace: pid=%d run_id=%s "
-            "(report should still be on disk; stderr_path=%s)",
-            proc.pid, run_id, stderr_path,
+        # R9 Layer-6: rc=0 in poll grace = SUCCESS (synthetic walker
+        # <1.5s); sentinel pid=-1 → caller UPDATE status='running' +
+        # /finalize. R9 Layer-6：rc=0 grace 內 = 成功，sentinel -1。
+        log.info(
+            "replay_runner completed in poll grace (rc=0): run_id=%s "
+            "output_dir=%s — sentinel pid=-1",
+            run_id, output_dir,
         )
-        return None, "spawn_died_early:exit=0"
+        return -1, None
 
     log.info(
         "replay_runner spawned + alive after poll: pid=%d run_id=%s "

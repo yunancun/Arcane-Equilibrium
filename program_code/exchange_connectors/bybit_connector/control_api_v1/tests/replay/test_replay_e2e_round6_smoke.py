@@ -193,20 +193,25 @@ def test_round6_spawn_real_binary_with_real_hmac(tmp_path: Path, monkeypatch):
         poll_grace_seconds=2.0,
     )
 
-    # Acceptance: either alive past poll grace (pid set) OR exited 0
-    # cleanly (some fast fixtures finish under 2s on hot cache). We
-    # explicitly REJECT spawn_died_early:exit=N for N != 0 because that
-    # would indicate Round 6 sign + verify drift.
-    # acceptance：要嘛 alive 過 poll grace 要嘛 exit 0 乾淨退（小 fixture 在
-    # hot cache 下 < 2s 跑完）。明確拒絕 spawn_died_early:exit=N for N != 0
-    # 因為那代表 Round 6 sign + verify drift。
+    # Acceptance (R9 Layer-6): pid > 0 (alive past poll grace) OR pid == -1
+    # (R9 sentinel: clean-exited rc=0 in poll grace; report on disk).
+    # We REJECT spawn_died_early:exit=N for N != 0 — that = sign+verify drift.
+    # acceptance（R9 Layer-6）：pid > 0（alive 過 poll grace）或 pid == -1
+    # （R9 sentinel：rc=0 grace 內乾淨退，report 已落 disk）。
+    # 明確拒絕 spawn_died_early:exit=N for N != 0（= R6 sign+verify drift）。
     if err is not None:
-        # Allow exit=0 (fixture ran fully); reject any non-zero early death.
-        # 允許 exit=0；拒絕任何 non-zero 早死。
-        assert err == "spawn_died_early:exit=0", (
-            f"Unexpected spawn fail: {err!r}; "
+        # Any non-None err signals failure under R9 contract (clean-exit
+        # success returns err=None with pid=-1).
+        # err 非 None 在 R9 契約下都是失敗（clean-exit 成功是 err=None pid=-1）。
+        raise AssertionError(
+            f"Unexpected spawn fail under R9 contract: err={err!r}; "
             f"check stderr at {output_dir / 'replay_runner.stderr'}"
         )
+    # err is None ⇒ either pid > 0 alive OR pid == -1 R9 sentinel.
+    # err is None ⇒ pid > 0 alive 或 pid == -1 R9 sentinel。
+    assert pid is not None and (pid > 0 or pid == -1), (
+        f"Expected pid > 0 or pid == -1 sentinel; got pid={pid}"
+    )
 
     # Step 3: regardless of which path, stderr file must exist for
     # post-mortem (Round 6 P0-NEW-INFRA invariant).
@@ -214,9 +219,11 @@ def test_round6_spawn_real_binary_with_real_hmac(tmp_path: Path, monkeypatch):
     stderr_path = output_dir / "replay_runner.stderr"
     assert stderr_path.exists()
 
-    # Step 4: if pid is set, kill it for cleanup; otherwise check report.
-    # 步驟 4：pid 設了就 kill；否則檢查 report。
-    if pid is not None:
+    # Step 4: real pid > 0 → wait + kill; pid == -1 R9 sentinel → process
+    # already gone, skip. Skip pid <= 0 (sentinel or invalid).
+    # 步驟 4：真 pid > 0 → wait + kill；pid == -1 R9 sentinel → process 已
+    # 結束跳過。pid <= 0（sentinel/無效）跳過。
+    if pid is not None and pid > 0:
         # Wait briefly for runner to finish on its own.
         # 短等讓 runner 自然結束。
         for _ in range(20):  # up to 4s
