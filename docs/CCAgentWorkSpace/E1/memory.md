@@ -5283,3 +5283,54 @@ E2 round 2 review verdict = RETURN-TO-E1 round 3 with 1 NEW CRITICAL finding (C-
 3. Round 1+2 fix 4/5 全保留：C-1 (3-col INSERT) + C-2 (identity_arguments) + H-1 (no silent skip) + M-1 (mock-only doc) + M-2 (V049 NOT NULL doc)
 4. Sign-off §13.1 M-2 row 訂正並引用 §14
 5. 邊界守則：0 V036/V037/V049/V050/V051 modify / 0 manifest_signer / 0 跨平台路徑硬編碼 / 0 硬邊界 column 觸碰 / 0 RESERVATION.md 改動
+
+---
+
+## REF-20 Sprint C R6-T0' V055 retrofit IMPL — round 4 hotfix lessons (2026-05-05)
+
+### Round 4 hotfix 觸發背景
+
+PM 收 round 3 sign-off 後 SSH bridge 在 Linux trade-core 跑 `bash helper_scripts/linux_bootstrap_db.sh --apply V055`，**Linux PG 16 deploy fail at Guard A signature drift check**：
+
+```
+psql:V055__:542: ERROR: V055 Guard A: verify_replay_evidence_and_insert arg signature drift.
+Expected: text, text, ..., text (純 19-type list)
+Actual:   p_engine_mode text, p_symbol text, ..., p_intent_id text (含 arg names + types)
+```
+
+V055 Guard A line 533-539 `v_identity_args <> v_expected_identity_args` strict equality 觸 RAISE EXCEPTION → V055 transaction abort → V055 從未真 apply 成功。
+
+### Round 4 教訓 — PG docs claim vs empirical behavior gap
+
+39. **PG 函數 metadata 函數的 docs claim vs empirical drift 必先 query**：PostgreSQL 16 docs 描述 `pg_get_function_identity_arguments` 暗示 "stripped-down"（無 arg name），與 PG 16 真實 output（含 `p_<name> <type>` token）drift。**未來 SQL ops 對 PG 函數 metadata 函數 hardcode expected 字串前必先在本機 dev PG（或 docker pg:16）跑 `SELECT pg_get_function_identity_arguments('schema.func'::regprocedure);` 取真實 format**，禁直接 docs claim 字面理解推測。教訓觸發 commit/round = REF-20 Sprint C R6-T0' V055 round 4。
+
+40. **Mac static-parse 的局限**：Mac dev 走 SQL 文本 grep 驗 contract，但 PG runtime semantic（reflection 函數 output format、enum constraint check、function execution path 等）無法靠 static-parse catch。**未來 V### migration 涉及 PG 內建 reflection 函數時，acceptance binding 必加「Mac 本機 docker pg:16 一鍵驗 RAISE 0 觸」或「Linux PG dry-run smoke」**，不依賴 Mac pytest 23 case 全 PASS 來判 V### 可 Linux deploy。
+
+41. **Linux deploy SOP 必納 PG runtime smoke gate**：Round 1+2+3 sign-off 的 acceptance binding 只看 Mac pytest（static-parse），沒納入「Linux PG `psql -f V###.sql` 必跑驗 RAISE 0 觸」的 deploy gate；導致 round 1-3 全 PASS 後 round 4 在 Linux 才暴露。**Future**：對涉及 reflection / Guard A 三段檢查 / 4-tier path post-INSERT smoke 的 V### migration，Mac sign-off 後 PM SSH bridge 必先 Linux dry-run（不 commit / 不 apply 真實 schema，只驗 SQL parse + 觸 RAISE 路徑）。
+
+42. **Hotfix 範圍嚴守「最小變動」**：round 4 hotfix 純改 V055 line 507-515 expected string format + 524-526 註解 + lesson 註解，不擴大範圍處理「PG dev/runtime equivalence test fixture」（visible follow-up 但屬獨立 ticket，建議 P2-V055-FOLLOWUP）。**教訓**：deploy fail 觸發的 hotfix 必極小化（line 數 < 50 / 0 邏輯改動 / 0 既有 test 動），所有 visible 改進空間建獨立 ticket，避免 hotfix 範圍膨脹引入新 regression risk。
+
+43. **Test case 不需動的判斷依據**：round 4 hotfix 對 V055 SQL line 507-515 改動，test 是否需動的判斷流程 = (1) cross-grep test case 是否對 expected string 字面 assertion；(2) cross-grep test case 是否對「字串內含 arg name」格式 assertion；(3) confirm test 只 grep `'pg_get_function_identity_arguments' in sql` + `'v_identity_args <> v_expected_identity_args' in sql` + `'byte-equal' / 'signature drift' keyword`；(4) 0 case 對 expected_identity_args 字串內容格式作 assertion → test 不需動。**教訓**：fix scope 評估時必先 cross-grep test 對改動目標的 assertion 範圍，避免「以為 SQL 改動必動 test」的過度修改。
+
+### Round 4 自驗結果
+
+- `python3 -m pytest tests/replay/test_v055_evidence_insert_fix.py -v`：**21 PASS / 2 SKIPPED**（與 round 3 baseline 完全一致；0 case 動）
+- `wc -l V055__*.sql` = 913（round 3 = 879；round 4 增 34 line for expected string with-arg-names + 雙語 lesson 註解）
+- `git diff --stat V055__*.sql` = 41 insertion / 7 deletion = +34 LOC
+- `grep -E '/home/ncyu|/Users/[^/]+' V055__*.sql` = 0 hardcode（GREEN）
+- `grep -E '(max_retries|live_execution_allowed|execution_authority|system_mode|OPENCLAW_ALLOW_MAINNET)' V055__*.sql` = 0 touched（GREEN）
+- 0 V036/V037/V049/V050/V051 modify / 0 V055 既有 INSERT body / H-1 / C-3 fix 改動 / 0 manifest_signer canonical_bytes / 0 RESERVATION.md 改動
+
+### Round 4 後 E2/PM 必查 checklist
+
+1. V055 line 507-515 v_expected_identity_args with-arg-names 格式對齊 V036 declaration line 92-110（19 token, `p_<name> <type>`）
+2. `lower(...)` wrapper 與 line 527 `lower(pg_get_function_identity_arguments(p.oid))` case-insensitive 對齊
+3. Round 1+2+3 6 fix 全保留：C-1 / C-2 / C-3 / H-1 / M-1 / M-2 — 0 regression
+4. 23 case 0 動 + Mac pytest 23/21/2 與 round 3 baseline 完全一致
+5. 邊界守則 8 條全 GREEN（V036/V037/V049/V050/V051/INSERT body/SAVEPOINT/cross-validation/manifest_signer/跨平台/硬邊界/RESERVATION.md 0 改動）
+
+### Round 4 follow-up（建議 P2 ticket，E1 不擴大 round 4 scope）
+
+- **P2-V055-FOLLOWUP-1**：建立 PG runtime smoke gate (Mac docker pg:16 一鍵驗 V### migration RAISE 0 觸)，加入 future V### acceptance binding
+- **P2-V055-FOLLOWUP-2**：Cross-platform PG dev fixture (Mac `pg:16` docker compose service)，避免 Mac dev / Linux runtime drift 重發
+- **P2-V055-FOLLOWUP-3**：PG docs claim vs empirical behavior gap audit，列出本項目所有 PG 內建 reflection 函數調用點（grep `pg_get_function_*` / `pg_indexes` / `pg_proc` 等）+ 為每個 hardcode expected 加「先 query 真實 output」的 SOP comment
