@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-05-06 00:10 CEST
+- synced active docs before AgentTodo M0: TODO.md v10, CLAUDE.md REF-20 all-closed status, AgentTodo MAG-000 marked DONE
+- verified Mac/Linux/origin source HEAD `67b95808`; Linux watchdog demo/live fresh, paper inactive by design; no rebuild/restart/deploy
+- operator confirmed target architecture: scanner advisory/evidence, Strategist decision ownership, Guardian non-bypassable veto/modify, Rust execution engine without hidden decision authority
+- next chain: MAG-001 CC, MAG-002 FA, MAG-003 PA contract freeze
+
 2026-04-28 13:00 CEST
 - created repo-synced Codex workspace under `.codex/`
 - recorded Codex role, startup docs, inventory usage policy, and Mac -> git -> ssh Linux deploy flow

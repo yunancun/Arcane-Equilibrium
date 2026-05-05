@@ -42,12 +42,12 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-04 sync drift fix，HEAD `0ad79f67`）
+## 三、真實狀態全景（2026-05-06 active-doc sync，HEAD `67b95808`）
 
 ### Runtime 部署
-- **Mac/Linux/origin HEAD**: `0ad79f67`（同步；2026-05-03 Sprint 4 final closure commit）
-- **Engine binary deployed**: `dbcf845b`（2026-05-03 Sprint 3 Track I Phase E `restart_all.sh --rebuild` 跑完；Engine PID 4122084 + API PID 4122156；Mac 與 Linux deployed binary 同步）
-- **Engine 健康**: 三模式 paper/demo/live 全 alive，snapshot age 8.1s（healthcheck Phase E 採集點）
+- **Mac/Linux/origin source HEAD**: `67b95808`（同步；2026-05-06 SSH 驗證 Linux clean）
+- **Engine binary deployed**: last verified full rebuild remains `dbcf845b`（2026-05-03 Sprint 3 Track I Phase E `restart_all.sh --rebuild`）；later REF-20 source changes are source-synced, but this doc-sync batch did not rebuild/restart runtime.
+- **Engine 健康**: watchdog `engine_alive=true`；demo/live fresh；paper inactive by design（2026-05-06 採集點）
 - **Live boundary**: LiveDemo 跑（Live 管線走 demo endpoint），mainnet **0 流量** by design
 - **健康檢查**: SUMMARY = WARN（多項真實 WARN，見「Active gates」）
 
@@ -138,7 +138,7 @@ W3 R7-T6 E2E integration test (797 LOC, 5 mock case + 3 live PG opt-in case + 1 
 
 Sprint C2 R7 cumulative: ~3700 LOC across 3 commits, 43 new test PASS (15+22+6), 0 production regression on 524 sibling tests. Live PG opt-in (OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN) cases skip default — 留 operator post-deploy ad-hoc verify.
 
-**Sprint D CLOSED 2026-05-05** — R8 commit `61433919` + R9 PM sign-off (本 commit)。
+**Sprint D CLOSED 2026-05-05** — R8 commit `61433919` + R9 PM sign-off `6a7a885c`。
 
 R8 maintenance/retention/observation: V056 mlde_shadow_recommendations retention policy DEPLOYED Linux PG (cron-driven DELETE 30d for replay-derived / 90d for real_outcome — V### dry-run lesson APPLIED, NOT hypertable confirmed via SSH bridge per `feedback_v_migration_pg_dry_run.md`); 5 healthcheck sentinel slots [46]-[50] (runner_binary_path / manifest_registry_growth / failed_run_rate / stale_running_rows / artifact_retention); 6 cron task disposition (5 既有 Wave 9 land + 1 R8 NEW retention cron). 44 new test PASS (33 healthcheck + 11 V056 migration) + 0 production regression on 259 sibling.
 
@@ -153,14 +153,14 @@ R9 final sign-off (PM-led acceptance review per plan §6.R9):
 
 **REF-20 cumulative**: Sprint A 8 commit + Sprint B 4 commit + Sprint C 9 commit + Sprint D 1 commit + governance/sync = **~22 commit chain**, ~14000+ LOC across Rust + Python + SQL + tests + docs, **17 acceptance criteria 100% closed** (A1-A10 plan §7 + 7 R9 conditions). Live PG opt-in (R7-T6 3 case via OPENCLAW_TEST_DSN) 待 operator post-deploy ad-hoc verify。
 
+**Post-signoff reality-gap fix**: commit `67b95808` 修 replay UI readiness、registry/report/finalize edge cases、simulated fill payload、strategy/risk param delta tests、Rust replay runner/apply_fill gaps；Mac/Linux/origin source 已同步。
+
 **Outstanding (operator-side, not blocking REF-20 closure)**:
 - R7-T6 3 live PG E2E case full smoke (需 OPENCLAW_TEST_DSN 配置)
 - V056 cron schedule deployment (helper_scripts/cron/...sh 已 land，operator add to crontab)
 - Sprint D operator deploy validation (5 new healthcheck sentinel 透 cron-wrapper 跑)
 
-**Sprint D pending**: R8 (maintenance / cron / retention policy 30-60d for replay-derived row) + R9 (reality-calibrated final sign-off).
-
-**Sprint A 仍未證明的部分**（per plan §11 explicit limitations）：A4 actual strategy path / A5 actual risk path / A6 fee-aware PnL / A7 confidence honesty / A8 UI usable / A10 ML/Dream advisory boundary — 全 Sprint B-D scope。**`replay.simulated_fills.evidence_source_tier='synthetic_replay'` 仍不可作 ML training data**（CLAUDE.md §九 既登記 non-training surface）。Forward plan：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`。
+**Replay learning boundary**：`replay.simulated_fills.evidence_source_tier='synthetic_replay'` 仍不可作 ML training data；只有 `calibrated_replay` / `counterfactual_replay` 且通過 verification gates 的 row 可餵 MLDE / Dream / attribution writer。
 
 - **Wave 1-9 IMPL closed (commits 9e0c826 / 1851714+b1f6b8a / 5a618ff / 4b48b6d / 457a458 / eb5f106 / c887e4e + 53ab7e7 / 8429af1 / 1f5d019 / 5a7581e)**：cold audit 揭 24/25 GREEN 是結構性 false positive — runner 從未啟動 → #2/#10/#14/#19 都是 vacuous truth。後續 Sprint 1+2+3+4 chain 把 vacuous truth 轉為 evidence-backed truth。
 - **Sprint 1 cold audit fix-up (commit `edf33c0`)**：5 critical security（manifest 自洽循環 + spawn argv broken + IDOR + path traversal + env var bypass）+ 3 schema drift（V049 replay_experiments 22 col + V050 replay_simulated_fills 17 col + V051 mlde_recommendations 雙路 CHECK）+ V052 FK redirect + V053 race-free enum extension。3387 PASS / 1 fail (pre-existing) / 10 skip · 3084 cargo workspace PASS / 2 fail (pre-existing) / 3 ignored。
@@ -487,20 +487,20 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A + B closed (2026-05-05)，Sprint C-D pending**）。CLAUDE.md 不重複列。
+**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo M0 contract-freeze next**）。CLAUDE.md 不重複列。
 
 **關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → ~05-09 3C 7d audit → ~05-15 P0-3 edge decision + Decision Lease flag flip canary 24h → ~05-16 funding_arb V2 14d audit → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
 
-**REF-20 IMPL 狀態（2026-05-05 Sprint A + B closed，Sprint C-D pending）**：累計 12 commit chain — Sprint A 8 commit + Sprint B 4 commit (`2a69addb` B1 R4+R0-T0 / `c679a8b4` R5-T1+T2 / `a2f819c5` R5-T3 / `4ffb24c4` R5-T4+T5+T6+T7) 三端同步。Plan §6.R3 acceptance 4 表 row > 0 真實達成（Sprint A QA round 6）+ §6.R4 UI enabled + §6.R5 acceptance A4 + A5 hermetic PASS。Config blob 完整路徑 register → V049 → /run → disk manifest → Rust runner → adapter override 全 wire。Sprint C-D pending（R6 fee calibration + R7 MLDE-Dream advisory / R8 maintenance + R9 final sign-off）。**`replay.simulated_fills.evidence_source_tier='synthetic_replay'` 仍不可作 ML training data**。
+**REF-20 IMPL 狀態（2026-05-05 all closed）**：Sprint A+B+C+D closed；R9 PM sign-off `6a7a885c` + post-signoff reality-gap fix `67b95808`。A1-A10 + R9 7 conditions closed；Paper Replay Lab usable for demo research；replay evidence remains advisory / non-commanding and does not authorize live trading。
 
 **最早 Live 日期**（事件驅動，非 hard date）：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA panorama 評估悲觀更可能**（5 策略 net negative + 4 LG 0 IMPL + 18 blocker 還剩 13 個未解 + Decision Lease retrofit deploy with flag OFF）。
 
-**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + **REF-20 Paper Replay Lab Sprint A + B closed (2026-05-05)** 均已落地（A4/A5 strategy + risk parameter delta acceptance hermetic-proven）。仍未完成的是正 edge / execution-quality 驗收 / P0-3 decision / Live Gate LG-2/3/4 IMPL + Decision Lease canary / Wave 7 P5 deploy gate / true live 授權後的受監督/受限自主放權 / **REF-20 Sprint C-D Reality-Calibrated Fast Replay**（C=R6 fee calibration + R7 MLDE-Dream advisory / D=R8 maintenance + R9 final sign-off）。
+**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + **REF-20 Paper Replay Lab A-D** 均已落地。仍未完成的是正 edge / execution-quality 驗收 / P0-3 decision / Live Gate LG-2/3/4 IMPL + Decision Lease canary / Wave 7 P5 deploy gate / true live 授權後的受監督/受限自主放權 / **AgentTodo multi-agent rework contract freeze + IMPL**。
 
 **Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease retrofit deploy with flag OFF。True live 還缺 18 blocker 中的 #1/#2/#3/#4/#6-#18（13 個未解；#5 Decision Lease 已 closed）+ ~05-15 flag flip canary 24h。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
-- TODO.md 三層工作流程 + healthcheck 列表 + 排程提醒 + P1-INFRA-3 REF-20 Sprint A + B closed (Sprint C-D pending) status
+- TODO.md 三層工作流程 + healthcheck 列表 + 排程提醒 + P1-INFRA-3 REF-20 all-closed status + AgentTodo entry point
 - **REF-20 Gap Closure Plan V1 (2026-05-04, current SoT for Sprint A-D)**：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
 - REF-20 V3 SoT (legacy schema/route foundation)：`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`
 - REF-20 Sprint 4 final closure：`docs/execution_plan/2026-05-03--ref20_sprint4_final_closure.md`
