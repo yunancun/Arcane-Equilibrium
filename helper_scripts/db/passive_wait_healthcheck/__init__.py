@@ -143,6 +143,21 @@ from .checks_pricing_binding import (  # noqa: F401
     # AccountManager 運行時 fee 健康。
     check_45_pricing_binding,
 )
+from .checks_replay_maintenance import (  # noqa: F401
+    # [46]-[50] REF-20 Sprint D R8 (2026-05-05) — maintenance / observation
+    # sentinel suite。對應 Sprint D R8 plan §6.R8 task 2 五個哨兵：
+    # mlde_shadow retention cron 活性 + replay_runner binary 存在 + manifest
+    # registry 增長率 + V046 artifact retention + V045 run_state 健康。
+    # [46]-[50] REF-20 Sprint D R8 (2026-05-05) — five sentinels covering
+    # plan §6.R8 task 2: mlde_shadow retention cron freshness +
+    # replay_runner binary presence + manifest registry growth + V046
+    # artifact retention + V045 run_state health.
+    check_46_mlde_shadow_retention_status,
+    check_47_replay_runner_binary,
+    check_48_replay_manifest_registry_growth,
+    check_49_replay_artifact_retention,
+    check_50_replay_run_state_health,
+)
 
 __all__ = [
     "main",
@@ -212,4 +227,10 @@ __all__ = [
     "check_44_replay_manifest_key_presence",
     # [45] REF-20 Sprint C R6-T7 (2026-05-05) LG-3 pricing binding sentinel
     "check_45_pricing_binding",
+    # [46]-[50] REF-20 Sprint D R8 (2026-05-05) maintenance sentinel suite
+    "check_46_mlde_shadow_retention_status",
+    "check_47_replay_runner_binary",
+    "check_48_replay_manifest_registry_growth",
+    "check_49_replay_artifact_retention",
+    "check_50_replay_run_state_health",
 ]

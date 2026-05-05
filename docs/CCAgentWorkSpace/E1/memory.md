@@ -5780,3 +5780,54 @@ case 4 模擬 V055 verify_replay portion (3) line 361-367 RAISE EXCEPTION 用 `R
 - **P2-R7-W3-FOLLOWUP-2**：Live PG full pipeline fixture（INSERT trading.fills 1162 row → 完整 producer 觸發）— 當前 W3 採輕量 ROLLBACK-only pattern；W4 closure 如 PM 要求 deeper fixture 可加 1 case。
 - **P2-R7-W3-FOLLOWUP-3**：Mac transient flakiness `test_spawn_writes_stderr_to_disk_on_early_death`（與 `/tmp/replay_artifacts_test_only` 累積殘留 dir 相關，非 R7-T6 引入；單獨跑 PASS / 全 directory 跑偶 fail）。
 
+---
+
+## 2026-05-05 REF-20 Sprint D R8 IMPL（maintenance / retention / 5 sentinel）
+
+### 任務
+Sprint D R8 maintenance pass per plan §6.R8：(1) V056 retention policy migration for `learning.mlde_shadow_recommendations`（30d replay-derived + 90d real_outcome）；(2) sibling cron `mlde_shadow_recommendations_retention_cron.sh`（dry-run 默認）；(3) 5 healthcheck sentinel `[46]`-`[50]` (`checks_replay_maintenance.py`)；(4) 6 既有 cron task 確認已 land（Wave 9 land 完整：key rotation / archive cleanup / artifact prune / mutation watch / KPI / audit incident）；(5) sibling tests Mac pytest PASS。
+
+### 教訓 1：Linux PG empirical query 真實 schema 驗證（V055 5-round loop 教訓延續）
+PM 派發前先 SSH bridge 對 Linux PG 16 查 `mlde_shadow_recommendations` 是否 hypertable + 真實 schema：
+```bash
+ssh trade-core "psql -c \"SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name='mlde_shadow_recommendations';\""
+# → 0 rows (NOT hypertable，per CLAUDE.md §九 設計選擇)
+ssh trade-core "psql -c \"\\d learning.mlde_shadow_recommendations\""
+# → 21 col (id/ts/...evidence_source_tier/replay_experiment_id/manifest_hash) + chk_mlde_shadow_replay_lineage
+```
+
+決策：cron-driven DELETE（非 add_retention_policy）。V056 函數含 `RAISE EXCEPTION` 守門：若意外是 hypertable → 強迫切換 add_retention_policy 路徑。
+
+### 教訓 2：Wave 9 cron infrastructure 已 land 完整（無需重做）
+plan §6.R8 §1.1 列 6 cron-able task：key rotation check / key archive cleanup / artifact prune / mutation watch / KPI / audit incident。grep `helper_scripts/cron/` 揭示：
+- `replay_key_rotation_check.sh` (REF-20 P2a-S1)
+- `replay_key_archive_cleanup.py` (REF-20 P2a-S1)
+- `replay_artifact_prune.py` (REF-20 P2a-S5)
+- `wave9_replay_no_live_mutation_watch.sh` (REF-20 W9-T1)
+- `wave9_business_kpi_collector.py` (REF-20 W9-T2)
+- `wave9_audit_incident_scan.py` (REF-20 W9-T3)
+
+R8 工作 = 加 mlde_shadow retention（第 7 個 cron）+ 5 sentinel 守 6 cron 活性，**不重做** 既有 cron。**通用 pattern**：dispatch plan 的「Install or document」item，先 grep repo 是否已有 sibling implementation，避免重複勞動。
+
+### 教訓 3：sentinel cron 雙軸 sentinel pattern
+`[46]` mlde_shadow_retention 哨兵設計：cron 活性（sentinel mtime 檔）+ candidate count（PG 查詢）兩軸 PASS/WARN/FAIL。任一軸獨立 fail 即降級判定。Pattern 通用：cron-driven schema mutation 哨兵應同時驗 (a) cron 跑 (file mtime / log) + (b) 真實效果 (DB row count)，不可只信任其中一軸（log 丟失 ≠ silent failure；DB row growth 真實源頭）。
+
+### 教訓 4：filesystem-only sentinel 必走 conn.close() 後
+`[47]` replay_runner_binary 是 pure filesystem check（讀 `os.access(path, os.X_OK)`）；放 cursor 區塊外（mirrors `[7]` edge_estimates / `[19]` observer 既有 pattern）。runner.py post-cursor 段加 [47]，cursor 段加 [46]/[48]/[49]/[50]（DB-bound）。
+
+### 教訓 5：4-arg PL/pgSQL function Guard A pattern
+V056 retention function 4 個 arg；Guard A 三段（function existence + 4-arg pronargs + identity_arguments byte-equal）。`pg_get_function_identity_arguments` 在 PG 16 含 arg names（與 V055 round 4 教訓一致）：
+```sql
+identity_args = "p_replay_retention_days integer, p_real_retention_days integer, p_apply boolean, p_max_rows integer"
+```
+Guard A 用 4 個 `LIKE '%<arg>%'` 子句一一驗，避免 hardcode 整字串撞 PG version drift。
+
+### 治理 sign-off
+- V056: 390 LOC, 0 schema mutation（function-only DDL）
+- cron: 154 LOC, dry-run default，OPENCLAW_MLDE_RETENTION_APPLY=1 才 apply
+- 5 sentinel: 655 LOC（單 module，多 sentinel 共享 graceful-absent fallback pattern）
+- 33 healthcheck test PASS + 11 V056 migration test PASS = 44 new test
+- 0 hardcoded path / 0 schema mutation / 0 hard boundary / 0 producer code
+- 注釋全中文 per CLAUDE.md §七 2026-05-05 governance change
+- runner.py +75 LOC = 869（接近 800 warn 但未觸 cap）；觸發 §九 LOC 警告，但 R8 sentinel 接 10 LOC/sentinel 結構性增量，符合 governance exception clause；R9 final sign-off 後 PM 評估是否 split runner
+
