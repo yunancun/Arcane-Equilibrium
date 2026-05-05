@@ -495,6 +495,8 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-03--ref20_wave7_defer_note.md` | REF-20 Wave 7 defer note：hard prereq LG-2/3/4 frontend stable NOT GREEN；事件觸發 dispatch 標準；後 commit `c887e4e` operator override IMPL（已正式 amendment AMD-2026-05-03-01 規範 IMPL/Deploy 2-stage gate）|
 | `2026-05-03--ref20_wave9_pm_sign_off_template.md` | REF-20 Wave 9 PM sign-off 7-item checklist template；deploy 後 14d gradient observation 起算 |
 | `2026-05-03--ref20_final_closure_and_deploy_guidance.md` | REF-20 Final IMPL closure + Operator Deploy Guidance；§4 14-step procedure (Phase A-G)；**注意**：line 99 「~3500+ PASS」是虛構數字（cold reality 3387 PASS，差 113-126；P2-FOLLOW-UP-5 訂正 ticket 待修）|
+| `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | REF-21 Full-Chain Replay Engine V1：將 Replay 從單 symbol smoke 提升為 scanner→active universe→TickPipeline→strategy→risk→execution simulator→exit 的 7D 全鏈條歷史模擬；S1 recorder 併入後續 fidelity wave |
+| `2026-05-XX--ref21_s1_recorder_spec_placeholder.md` | REF-21 S1 recorder placeholder：已被 REF-21 Full-Chain Replay V1 接管，保留作 REF-20 Wave 5 歷史 trace |
 
 #### REF-20 governance amendments
 

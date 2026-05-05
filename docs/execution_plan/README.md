@@ -36,6 +36,8 @@ Phase 6   (W19-20,8/14-8/27):  驗收
 | [2026-05-02--ref20_v2_round3_audit.md](2026-05-02--ref20_v2_round3_audit.md) | REF-20 V2 第三輪 audit：指出 V2 仍需補 schema 物理欄位、DB role guard、migration governance、P2 isolation、UX subdoc、Mac non-actionable policy 等 P0 gates | 追溯 V2.1 採納與改寫理由時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md](2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md) | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線，接受 Round3 真實問題並保留 P2 使用 TickPipeline/IntentProcessor 的 isolated no-write 方向 | 啟動 REF-20 / Reality-Calibrated Replay 實作前 |
 | [2026-05-02--ref20_ux_subdoc_v1.md](2026-05-02--ref20_ux_subdoc_v1.md) | REF-20 Paper Replay Lab UX Subdoc V1：P1 前必讀 UX contract，定義 Session/Replay/Compare/Handoff、mode badges、disabled states、no submit/cancel 邊界 | 啟動 Paper Replay Lab P1 frontend 前 |
+| [2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md](2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md) | REF-21 Full-Chain Replay Engine V1：將 Replay 從單 symbol smoke 提升為 scanner→策略→風控→執行→退出的 7D 全鏈條歷史模擬；S1 recorder 併入後續 fidelity wave | 啟動新一代 Replay Engine / Agent replay exploration 前 |
+| [2026-05-XX--ref21_s1_recorder_spec_placeholder.md](2026-05-XX--ref21_s1_recorder_spec_placeholder.md) | REF-21 S1 recorder placeholder：已被 2026-05-06 REF-21 Full-Chain Replay plan 接管，僅保留 REF-20 Wave 5 歷史 trace | 追溯 REF-20 P3b placeholder 來源時 |
 
 ## 設計文件（按需讀��不需每次都讀）
 

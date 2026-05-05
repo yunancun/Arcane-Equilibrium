@@ -1,9 +1,9 @@
 # REF-21 S1 Recorder Spec — Placeholder Stub
 
-**狀態：** Placeholder / Wave 5 R20-P3b-Q3 dispatch；REF-21 真實 spec 待後續 wave land
+**狀態：** Superseded placeholder；REF-21 active scope 已由 `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` 接管
 **契約上游：** [`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`](2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md) §4 + §6 (replay schema 核心表 P2b binary 部署 SQL fixture，不佔 migration 編號)
 **Workplan SoT：** [`docs/execution_plan/2026-05-03--ref20_implementation_workplan_v1.md`](2026-05-03--ref20_implementation_workplan_v1.md) §4 Wave 5 R20-P3b-Q3 row
-**Owner：** PM (REF-21 spec land 後 transfer to PA)
+**Owner：** PM (superseded by REF-21 Full-Chain Replay plan)
 **Created:** 2026-05-03 (Wave 5 batch 5B PM solo)
 
 ---
@@ -14,7 +14,9 @@ REF-20 Wave 5 R20-P3b-Q3 task spec：「S1 recorder dependency stub (REF-21 spec
 
 REF-21 (S1 = Stage 1 trade recorder) 是 ML pipeline 的 ground truth source — 對每個 fill / order outcome 寫入結構化 metadata，供 P3b cell calibration + P3a half-life estimation 拉取。當前 (2026-05-03) 由 既有 `mlde_demo_applier` + `dream_engine` 部分提供 fills metadata，但 column shape 不對齊 P3b 需要的 cell-key + outcome distribution 欄位。
 
-REF-21 land 後本 placeholder 將 supersede 為 RFC-grade spec doc。
+2026-05-06 後，本 placeholder 只保留為 REF-20 Wave 5 的歷史 trace。
+Active REF-21 設計以 `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md`
+為準；S1 recorder 變成 Full-Chain Replay 的 R5 wave，而不是獨立唯一 scope。
 
 ---
 
@@ -63,6 +65,7 @@ REF-21 Stage 1 Trade Recorder spec 預期含:
 | 版次 | 日期 | 修訂者 | 摘要 |
 |---|---|---|---|
 | **placeholder-v0** | 2026-05-03 | PM (Wave 5 R20-P3b-Q3) | Stub created — minimum dependency contract surface for P3b cell calibration; REF-21 spec land 後 supersede |
+| **superseded** | 2026-05-06 | PM | Active REF-21 scope moved to Full-Chain Replay Engine V1; this file remains as historical dependency trace only. |
 
 ---
 
