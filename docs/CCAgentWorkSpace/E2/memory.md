@@ -1108,3 +1108,105 @@ worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-ag
 
 4. **SEEK_END tail cap 數學驗算很容易但常被忽略** — `_read_stderr_excerpt` `seek(0, 2) → tell() = size → seek(max(0, size - cap_bytes), 0) → read(cap_bytes)`，需獨立驗 64KB → 2048 char 的數學。本 round 驗算正確。**抽象 review pattern**：任何 seek/read tail cap 都當場跑 io.BytesIO sanity，比讀代碼快、誤差零。
 
+
+---
+
+## E2 Round — REF-20 Sprint B2 R5-T1 + R5-T2 Foundation Adversarial Review (2026-05-05)
+
+**Branch**: main HEAD `2a69addb` (E1 IMPL pre-commit, files unstaged) · **Reviewer**: E2 (this session)
+**Scope**: 2 NEW Rust modules in `rust/openclaw_engine/src/replay/`：strategy_adapter.rs (398 LOC) + risk_adapter.rs (546 LOC) + mod.rs +21 LOC re-export
+**E1 sign-off**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_b2_r5t1t2_impl.md`
+
+### Pass-confirmed checks
+1. forbidden import grep（10 pattern）0 hit on adapter source files ✓
+2. cross-platform grep（`/home/ncyu` / `/Users/[a-z]+/`）0 hit on adapter files ✓
+3. cargo test --features replay_isolated --lib 2474 PASS / 0 fail / 0 regression（54/54 replay tests + pre-existing 2420）✓
+4. cargo test --test replay_runner_e2e 6/6 proof PASS（including Proof 4 forbidden trip + Proof 5 baseline-vs-candidate）✓
+5. xlang_consistency 13/13 PASS（沒動 manifest_signer，invariant 維持）✓
+6. symbol audit 414 symbol 0 forbidden ✓
+7. bilingual MODULE_NOTE 中英對照齊備 ✓ · docstring 雙語 ✓ · SAFETY 注釋雙語 ✓ — 完美遵循 §七
+8. interior mutability 0（`evaluate(&self, &snapshot)` pure 確認） ✓
+9. 0 unsafe / 0 production unwrap / 0 production panic（test 內 expect/panic OK）✓
+10. Strategy::on_tick byte-equal forward — `actions = self.strategy.on_tick(ctx); ... return actions;` line 146 + 181，0 mutation 0 filter 0 dedup ✓
+11. file size：strategy_adapter.rs 398 / risk_adapter.rs 546 — both <1500 hard cap ✓ (E1 §8.1 push back PM accept LOC overage with bilingual policy ceiling rationale 已 file)
+12. ReplayProfile::Isolated constructor reject Live/LiveDemo/PaperLegacy — 兩 adapter 對稱 ✓
+
+### Adversarial probes (PASS with notes)
+
+**Probe 1 — `compute_intent_signature` canonical bytes**:
+- 公式：`(symbol|is_long|strategy|order_type|conf:.4f|qty:.4e)` SHA-256 → 64-char lowercase hex
+- A4 acceptance：`grid_count=10 vs 20` → strategy 內部 OU spacing 改 → emit `qty` 變 → signature flip via `qty:.4e` ✓
+- **scope-out（accepted）**：5 OrderIntent fields 不入 signature — `limit_price`/`confluence_score`/`persistence_elapsed_ms`/`time_in_force`/`maker_timeout_ms`。對齊 PA design line 339 hash 規格。但若未來 strategy 改 `cross_persistence_ms` (MA crossover) 為唯一 delta → signature 不 flip。**A4 example 是 grid_count→qty path，覆蓋；其他 strategy parameter 改動需 R5-T7/T8 fixture 端 verify。LOW finding**：canonical bytes 有限，未來 acceptance test 設計 fixture 需匹配 hash 範圍。
+
+**Probe 2 — 6/8 Gate sequence vs router.rs:184-455 byte-equal**:
+- Order：1.5 dup → 1.6 neg-balance → pre_guardian_qty calc → 2.0 Guardian (reducing-path zero-leverage) → 2.5 Kelly → 2.6 P1 cap + qty=0 ghost → 2.7 admission
+- 對齊 router.rs ✓ (line-by-line 比對)
+- **scope-out（accepted, PA spec line 432 寫「復刻 router.rs:359-455」）**：
+  - `per_strategy_symbol_rejection`（router.rs:263-266）— PA design line 173 列「純函數可重用清單」但 §4.2 line 432 沒明說復刻；實作不含
+  - `apply_governor_order_constraints`（router.rs:403-413）— PA design line 173 ⚠️「需 mock GovernanceCore」；實作不含
+  - BLOCKER-3 D15 global notional cap（router.rs:457-464）— PA design未提；實作不含
+- **影響**：A5 acceptance "risk delta changes pass/reject" — `position_size_max_pct=2 vs 10` 走 Gate 2.7 admission ✓ covered；但 governor_tier 改動 / per-strategy override 改動 / global notional cap 改動 → replay 不會反映。**LOW finding**：留 R5 後續 wave / Sprint C 補完 R5-T2 risk gate 完整性。
+
+**Probe 3 — Strategy::on_tick reuse 0 trait change**:
+- adapter `on_tick(&mut self, &TickContext)` 直接 forward 給 wrapped `Strategy` instance
+- `actions = self.strategy.on_tick(ctx); ... actions` byte-equal return ✓
+- StrategyAction enum 2 variant（Open/Close）全 trace record；Strategy trait 真實只 emit 這 2 variant ✓
+- **race-free**：adapter owns `Box<dyn Strategy>`（單一 owner），`Send` bound 滿足 thread-safety；`&mut self` borrow 強制單路徑
+
+**Probe 4 — `evaluate(&self)` pure**:
+- 0 RefCell/Mutex/UnsafeCell（grep 0 hit）✓
+- `&self` not `&mut self` ✓
+- `&snapshot` immutable borrow ✓
+- 內部 Guardian.review / compute_kelly_qty / check_order_allowed 全 pure deterministic（grep 證實）✓
+
+**Probe 5 — `into_trace` consume self reproducibility**:
+- `into_trace(self) -> Vec<DecisionTraceEntry>` consume self → caller 不能 reuse
+- adapter dropped 前已 emit complete trace
+- fixture replay 每次 build 新 adapter + 跑同 fixture 應產 byte-equal trace
+- 前提：strategy 內部 deterministic（grep `rand::|rng|Instant::now|SystemTime::now` 在 grid_trading + ma_crossover 0 hit）✓
+
+**Probe 6 — NaN / 0 / negative input fail-closed**:
+- `intent.qty = NaN` → Gate 2.6 `!(final > 0.0)` rejection（NaN > 0.0 = false）✓
+- `intent.qty < 0` → pre_guardian_qty < 0 → Gate 2.6 rejection ✓
+- `snapshot.balance = NaN` → `balance <= 0.0` for NaN is **false** → 1.6 不 trigger（NaN 穿透）— **LOW**：caller R5-T3 構造 snapshot 必 fail-loud 對 NaN balance；adapter 不 sanitize（與 router.rs 同行為）
+- `snapshot.latest_price = None` → `price = 0.0` → Gate 2.6 fallback `p1_max_qty = kelly_qty`（無 cap）；admission 內 `position_pct = 0` → P1 cap 等於被禁。**LOW**：caller 必保證 latest_price 有值（與 router.rs 同行為）
+
+**Probe 7 — empty-tick skip in trace**:
+- strategy_adapter line 149 `if !actions.is_empty()` skip empty tick → trace count = action emit count
+- A4 fixture 兩 strategy_config_sha256 都 emit 0 fills → 兩 trace 都是 N=0 → 看似「同 outcome」誤導
+- **LOW**：caller 端 acceptance test 設 fixture 必保證至少有 1 fill（PA design §5.1 example `grid_count=10 vs 20` 兩邊 ≥2 fill 假設）
+
+### Findings
+| # | Severity | Location | Issue | Recommendation |
+|---|---|---|---|---|
+| F-1 | LOW | `risk_adapter.rs` whole | 3 sub-gate scope-out（per_strategy / governor / D15 cap）vs router.rs：A5 risk delta 範圍受限 | 接受本 round；PM 在 R5-T7/T8 acceptance test fixture 設計時注意：A5 fixture 必走 `position_size_max_pct` (Gate 2.7) 路徑。Sprint C 後續補 governor + D15。**不阻 B2 dispatch** |
+| F-2 | LOW | `strategy_adapter.rs:214-234` | canonical bytes 6 field（不含 limit_price/confluence/persistence/TIF/maker_timeout）；某 strategy parameter 改動可能不 flip signature | A4 acceptance fixture 必走 `grid_count` (qty path)。MA crossover `cross_persistence_ms` 等改動不適合作 A4 fixture。**不阻 B2 dispatch** |
+| F-3 | LOW | `risk_adapter.rs:255` + `:340-344` | `snapshot.balance=NaN` / `latest_price=None` 不 sanitize，與 router.rs 同 silent 行為 | R5-T3 IsolatedPipeline::execute 構造 snapshot 必 fail-loud 對 NaN balance / None price。 |
+| F-4 | LOW | E1 sign-off §2 | `ReplayPaperState` rename 為 `ReplayPaperSnapshot`（PA design line 437-450 named ReplayPaperState）+ apply_fill 不在 R5-T2 — design refinement 沒明列 push back | 不阻 dispatch；E1 R5-T3 sign-off 報告需明列此 rename + apply_fill ownership boundary |
+| F-5 | LOW | `strategy_adapter.rs:149` | empty-tick 不 record，A4 fixture 0-fill scenario 兩 candidate 看似 same outcome | A4 fixture 端必保證 fill ≥1；R5-T7/T8 acceptance test 設計時注意 |
+
+### Verdict
+**PASS to E4** — 5 LOW finding 全 scope-out 或 caller 端 R5-T3 注意項，0 CRITICAL/HIGH/MEDIUM。0 退回 E1 修復條目。
+
+R5-T1+T2 architectural foundation OK：
+- Strategy trait 0 改動 reuse ✓
+- 6 Gate replay-pure 復刻精準 ✓
+- forbidden surface 0 hit ✓
+- 對 R5-T3 wire-up 預備已被 E1 §8.3 push back 標記（owned `mut` field 不可 Arc<Mutex>）✓
+- `tests/replay_runner_e2e.rs` 6/6 proof 不破
+
+### R5-T3 wire-up 預備風險（為 PM 派發 R5-T3 dispatch brief 留）
+1. IsolatedPipeline 必 owned `mut adapter` field（不可 Arc<Mutex>，因 Strategy::on_tick 需 &mut self）
+2. snapshot 構造端必 fail-loud 對 NaN balance + None latest_price
+3. synthetic walker (runner.rs:478-503) 將 replace；保留 Proof 4 forbidden trip 邏輯 + Proof 5 baseline-vs-candidate 行為
+4. fixture_loader IndicatorSnapshot 端必含 indicators（PA design §13 line 691）
+5. apply_fill 邏輯歸 R5-T3（snapshot.clone() → apply → 餵下 tick）
+6. R5-T2 已用 `crate::ml::kelly_sizer::compute_kelly_qty` + `crate::risk_checks::check_order_allowed` + `openclaw_core::guardian::Guardian` — 這些 import path R5-T3 不可動
+
+### E2 教訓 / 反模式提醒（追加）
+
+5. **adversarial review 對 PA scope-out 的判斷標準** — R5-T2 的 6/8 Gate 設計 ≠ "PA wrong"。PA spec line 432「復刻 router.rs:359-455」是縮緊 scope（gate 2.5/2.6/2.7 + 1.5/1.6/2.0），不取 governor/per_strategy/D15。E2 不能因「不完整 = HIGH」退回 — 應認 PA spec scope-out 是「PA 已知 trade-off」+ 列 LOW finding 留 R5-T7/T8 acceptance test 端注意 + Sprint C 補完。**抽象**：對 PA 設計 scope-out 的審查標準是「scope-out 在 PA 設計文有跡可循？」+「acceptance fixture 走的 path 是否在 IMPL 範圍內？」+「未來 wave 的補完路徑是否清晰？」三條都 yes → LOW finding；任一 no → 退回 PA 重 design。
+
+6. **canonical bytes 範圍對齊 hash 用途** — A4 acceptance fixture 的 strategy parameter delta 若改 `grid_count` 影響 `qty` → signature flip via `qty:.4e`。若改 `cross_persistence_ms` (MA crossover) 純 internal state 不 reach OrderIntent fields 入 hash → signature 不 flip。**抽象 review pattern**：任何「hash 為證明」的設計都必須查 hash canonical bytes vs acceptance fixture 改動的 parameter 路徑是否會 reach hashed field。E2 必跑「PA fixture example 改的 X 是否 reach signature 公式」對照。
+
+7. **NaN propagation 在 risk gate 路徑的 silent bypass** — `balance <= 0.0` 對 NaN 是 false → 1.6 不 trigger。Live router.rs 同行為（即 router.rs 也 silent passes NaN balance 進 Guardian）。R5-T2 是 mirror 設計，行為一致 = OK；但 R5-T3 構造 snapshot 端必 fail-loud — 因為 router 真實由 paper_state 餵入，paper_state 自己 NaN-safe；R5-T3 從 fixture 構造 snapshot 不必然 NaN-safe。**抽象**：任何 "mirror existing function" 的 replay-pure adapter 都需確認 caller 構造 input 端維持與原 caller 一致的 fail-closed 不變量；不對齊 = silent bypass。

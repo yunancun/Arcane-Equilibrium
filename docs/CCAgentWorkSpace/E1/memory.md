@@ -5016,3 +5016,36 @@ PA design report `2026-05-05--ref20_sprint_b_task_dag.md` §11.3 R0-T0：把 rep
 4. **pre-existing fail vs R0-T0 introduce 必做 A/B** — Linux baseline `test_replay_routes_auth.py` 3 個 case fail（per-actor cap / global cap / zero-active-run），原因是 Linux PG 連通讓 `_v045_table_present` 返 True 走 PG path，與 test fixture 假設 `wiring_status="scaffold_only_no_runner_spawned"`（in-memory fallback marker）+ `_ACTIVE_RUNS["alice"]` populate 互斥。我先 stash 我改動 → 跑 baseline 3 fail；unstash → 跑後仍 3 fail（同 set），確認非 R0-T0 introduce。教訓：sign-off mandatory A/B step：stash 現在改動 → 重跑 fail set → 對比 → unstash recover → confirm baseline drift 非自己造成。
 5. **multi-session WIP 的 git status 必過濾屬於自己 scope** — Linux 同時有 sibling E1a R4 work（app-paper.js / tab-paper.html），Mac 有 E1a / PA / Operator workspace report；sign-off git status check 要分類「屬我 R0-T0 scope」vs「sibling 改動 / pre-existing untracked」。教訓：`git status --short` 後 explicit 列表「屬 R0-T0 6 file」+「不屬 R0-T0 N file（sibling work / pre-existing）」，不要全部一律算進 sign-off scope。
 6. **router 註冊順序 byte-equal verification 是 refactor mandatory step** — FastAPI route matching 是 first-match，若 thin handler 抽出時意外改了 decorator 順序或 endpoint path 字串，would silently break path matching。R0-T0 verification：跑 stash + git HEAD 版 import 列 11 routes → 跟 R0-T0 版列 11 routes → 對比兩列 byte-equal。教訓：refactor 前後對 router.routes 列表做 diff 是 mandatory smoke。
+
+---
+
+## 2026-05-05 REF-20 Sprint B2 R5-T1 + R5-T2 — ReplayStrategyAdapter + ReplayRiskAdapter（Rust）
+
+### 任務範圍
+PA design `2026-05-05--ref20_sprint_b_task_dag.md` §4.1 + §4.2 + §11.1：在 `rust/openclaw_engine/src/replay/` 新增 2 個 replay-pure adapter（不接線到 runner.rs；R5-T3 後續批次接），讓 5 strategy 與 6-of-8 risk Gate 能在 Isolated profile 內執行而不跨 V3 §6.2 forbidden surface。
+
+### 完成清單
+
+| 檔 | 改動類型 | LOC（總/prod-only） | 備註 |
+|---|---|---:|---|
+| `replay/strategy_adapter.rs`（new） | NEW | 398 / 244 | wrap any `Box<dyn Strategy>` + 記錄 per-tick `DecisionTraceEntry` + SHA-256 `intent_signature` for plan §6.R5 acceptance A4 |
+| `replay/risk_adapter.rs`（new） | NEW | 546 / 407 | 復刻 6 Gate（1.5 dup / 1.6 neg-balance / 2.0 Guardian / 2.5 Kelly / 2.6 P1 cap / 2.7 admission），跳過 1.0 auth + 1.4 lease per V3 §6.2 |
+| `replay/mod.rs` | M | +21 | 加 `pub mod risk_adapter` + `pub mod strategy_adapter` + 4 re-export at `crate::replay::*` 鏡射既有 pattern |
+
+### 關鍵設計決策
+
+1. **直接 wrap `Box<dyn Strategy>` 0 trait 改動** — R5-T1 沿用既有 Strategy trait，5 strategy（grid_trading / ma_crossover 為 pilot；bb_breakout / bb_reversion / funding_arb 留 Sprint C）0 修改即被 wrap。`on_tick(&mut self, ctx)` 需要 `&mut self`（per trait 契約：策略內部持有 per-symbol cooldown / persistence state）。
+2. **R5-T2 不共用 IntentProcessor::process_with_features** — 若用會強制引入 GovernanceCore + IPC 依賴，違反 V3 §6.2。改用 mini-pipeline 復刻 8 Gate 中的 6 個（跳 1.0 + 1.4），共用 `openclaw_core::guardian::Guardian`（純 4-check 不含 IPC）+ `risk_checks::check_order_allowed` + `ml::kelly_sizer::compute_kelly_qty`。
+3. **`ReplayPaperSnapshot` 純 in-mem struct 不接 `paper_state::PaperState`** — V3 §6.2 #5 #15 forbidden（mutable global writer channel）。R5-T3 wire-up 階段會由 runner 從自己擁有的 in-memory replay 帳戶狀態建構 snapshot 餵給 adapter。
+4. **`ReplayProfile::Isolated` 構造期 fail-closed 兩 adapter 對稱** — 兩個 `new()` 都明確檢查 `!matches!(profile, ReplayProfile::Isolated)` 回 `Err(ReplayIsolationError::WrongProfile { found })`，是 binary entry `fail_closed_assert_isolated()` 之上的縱深防禦。
+5. **`intent_signature` 為 SHA-256 hash of `"{symbol}|{is_long}|{strategy}|{order_type}|conf:.4f|qty:.4e"`** — confidence 4 decimals 避後段 tick 浮點漂移，qty 4-digit scientific 使 0.001% sizing 改動仍翻轉但 1e-9 噪聲 round out。為 plan §6.R5 acceptance A4（parameter delta proof）的核心 evidence。
+6. **LOC 超 dispatch §6 的 200/300 cap 但符合 §九 1500 硬上限與 800 警告** — 主因是 CLAUDE.md §七 雙語注釋強制（每 function/class/module 中英對照），單 MODULE_NOTE 即 ~80-110 LOC bilingual。Push back PM/E2 復核：dispatch §6 cap 與 §七 雙語政策實質衝突，本 IMPL 選擇守 §七（contract）讓 LOC 自然伸展，仍遠低於 800 警告。
+
+### 關鍵教訓
+
+1. **Rust unit test 中 `unwrap_err()` 需 Ok 變體實作 Debug** — `ReplayStrategyAdapter`（含 `Box<dyn Strategy>`）與 `ReplayRiskAdapter`（含 `Guardian`，pre-existing 無 Debug derive）都不能 derive Debug。教訓：寫 test 時若 Result::Ok 變體無 Debug，必用顯式 `match { Ok(_) => panic!, Err(...) => assert }` 取代 `unwrap_err()`。
+2. **`tick_pipeline::Signal` 的 re-export 是 `use openclaw_core::signals::Signal` private re-export** — 我的 test 用 `crate::tick_pipeline::Signal` import 失敗（E0603 private import）。教訓：跨 crate 借型別必走 source crate 路徑（`openclaw_core::signals::Signal`）；engine crate 的 re-export 通常是 internal-only。
+3. **Adapter LOC budget 與 CLAUDE.md §七 雙語強制有結構性張力** — PA estimate +50 buffer 是基於「英文 only docstring」假設；中英並列每個 field/method 即翻倍。未來 PA design 若要嚴守 LOC cap，需明示「bilingual 採壓縮模式（單行 EN/中對照而非雙段落）」。本次選擇守 §七 contract 不削弱 bilingual 覆蓋。
+4. **Rust 測試 `#[cfg(test)]` LOC 是否計入 budget 需先說明** — dispatch §11.1 表把「`tests/replay/test_replay_*_smoke.rs` (new) +200 LOC」獨立列為 R5-T7 範圍；但 dispatch §9 又要求「每 adapter file 末尾加 `#[cfg(test)] mod tests`」。本次 inline test ~150 LOC 計入 file LOC。教訓：未來看到 LOC 預算 vs 「inline test + R5-T7 acceptance test」雙重要求時，先 push back 釐清計法。
+5. **`Strategy::on_tick(&mut self, ctx: &TickContext<'_>)` 簽名讓 adapter 必為 `&mut self`** — `on_tick` 內部會 mutate strategy state（cooldown timer / persistence tracker），所以 adapter `on_tick` 也必為 `&mut self`。R5-T3 wire-up 必把 adapter 包在 runner mut field 內，不能用 `&adapter`。
+6. **build feature flag `--features replay_isolated` 對 lib build 不影響但對 bin replay_runner 必要** — 兩 adapter 直接編入 lib 不需 feature gate（mirror `forbidden_guard` / `profile` / `runner` 既有 pattern）；只有 `bin/replay_runner` 需 `replay_isolated`。教訓：新增 replay 子模組時跟 sibling 既有 pattern：lib path 不加 cfg gate，bin path 加。
