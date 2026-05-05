@@ -78,7 +78,23 @@ import math
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
+
+# REF-20 Sprint C2 R7-T1.5（PA §2B 漏列補位）：calibrated_replay tier 升級。
+# Optional import 模式（避免未上線環境載入 replay 模組失敗）。
+try:  # pragma: no cover - import guard
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.replay.calibration_label import (
+        CalibrationResult,
+    )
+    from program_code.local_model_tools.replay_metadata_helper import (
+        build_replay_metadata,
+    )
+
+    _R7_HELPER_AVAILABLE = True
+except ImportError:  # pragma: no cover - fallback when replay subsystem 未上線
+    CalibrationResult = None  # type: ignore[assignment, misc]
+    build_replay_metadata = None  # type: ignore[assignment]
+    _R7_HELPER_AVAILABLE = False
 
 try:
     import psycopg2  # type: ignore
@@ -383,26 +399,54 @@ def _scanner_context_from_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _persist_recommendations(dsn: str, recommendations: list[ShadowRecommendation]) -> int:
+def _persist_recommendations(
+    dsn: str,
+    recommendations: list[ShadowRecommendation],
+    *,
+    R6_calibration_provider: Optional[
+        Callable[[Optional[str], Optional[str]], "CalibrationResult"]
+    ] = None,
+    replay_experiment_id_provider: Optional[
+        Callable[[ShadowRecommendation], Optional[str]]
+    ] = None,
+) -> int:
+    """REF-20 Sprint C2 R7-T1.5（PA §2B 漏列補位）：升級 calibrated_replay
+    tier-aware insert。
+
+    與 dream_engine / opportunity_tracker 同型路徑，但 ``rec.source`` 是
+    variable（V031 CHECK allowlist：ml_shadow / dream_engine /
+    opportunity_tracker / linucb）。R7 升級 evidence_source_tier 不影響
+    rec.source field（兩個正交軸）。
+
+    Backward-compat：
+      - 不傳 ``R6_calibration_provider`` → legacy 'real_outcome' fallback。
+      - 傳 provider + experiment_id_provider → per-rec 取
+        ``CalibrationResult`` + experiment_id；NONE 跳過、其餘走
+        calibrated_replay tier。
+
+    Args:
+        dsn: PG dsn。
+        recommendations: ShadowRecommendation list（caller 由
+            generate_shadow_recommendations build）。
+        R6_calibration_provider: optional callable
+            ``(strategy_name, symbol) → CalibrationResult``。
+        replay_experiment_id_provider: optional callable
+            ``(rec) → experiment_id``；caller 提供 per-rec experiment_id
+            mapping（典型實作：dict lookup or fixed cycle id）。
+    """
     if not recommendations:
         return 0
     if psycopg2 is None or Json is None:
         raise RuntimeError("psycopg2 not installed")
-    # REF-20 W3-P2a-S4: 切換到 verified insert function (V036).
-    # PR2 of 3-PR sequence: mlde_shadow_advisor 不再直接 INSERT；改呼叫
-    # learning.verify_replay_evidence_and_insert()。注意此處 rec.source /
-    # rec.recommendation_type / rec.engine_mode 皆為變量 (從 ShadowRecommendation
-    # dataclass 帶入)；verified function arg 接受 source ∈ {ml_shadow,
-    # dream_engine, opportunity_tracker, linucb}，與 V031 schema CHECK 對齊。
-    # rows 全為 `evidence_source_tier='real_outcome'` (legacy producer path)。
-    #
-    # REF-20 W3-P2a-S4: switch to verified insert function (V036).
-    # PR2 of 3-PR sequence: mlde_shadow_advisor no longer issues raw INSERT.
-    # Calls learning.verify_replay_evidence_and_insert() instead. Note:
-    # rec.source / rec.recommendation_type / rec.engine_mode are variable
-    # (sourced from ShadowRecommendation dataclass). The verified function
-    # accepts source from the V031 CHECK allowlist; rows remain
-    # `evidence_source_tier='real_outcome'` (legacy producer).
+
+    # R7-T1.5: 判斷是否走 calibrated_replay path
+    use_r7_path = (
+        R6_calibration_provider is not None
+        and replay_experiment_id_provider is not None
+        and _R7_HELPER_AVAILABLE
+        and build_replay_metadata is not None
+    )
+
     sql = """
         SELECT learning.verify_replay_evidence_and_insert(
             %s,                             -- p_engine_mode
@@ -417,15 +461,60 @@ def _persist_recommendations(dsn: str, recommendations: list[ShadowRecommendatio
             false,                          -- p_applied
             true,                           -- p_requires_governance
             'mlde_shadow_advisor',          -- p_created_by
-            'real_outcome',                 -- p_evidence_source_tier
-            NULL, NULL, NULL,               -- replay metadata (NULL for real_outcome)
+            %s,                             -- p_evidence_source_tier (R7)
+            %s,                             -- p_replay_experiment_id (R7)
+            %s,                             -- p_manifest_hash (R7 hex)
+            %s,                             -- p_expires_at (R7 timestamptz)
             NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
         )
     """
     inserted = 0
+    skipped_none_label = 0
+
     with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
             for rec in recommendations:
+                # R7-T1.5 metadata 構造（fail-soft）
+                tier_arg = "real_outcome"
+                replay_experiment_id_arg: Optional[str] = None
+                manifest_hash_arg: Optional[str] = None
+                expires_at_arg: Optional[Any] = None
+                should_insert = True
+
+                if use_r7_path:
+                    try:
+                        experiment_id = replay_experiment_id_provider(rec)  # type: ignore[misc]
+                        cal_result = R6_calibration_provider(  # type: ignore[misc]
+                            rec.strategy_name, rec.symbol,
+                        )
+                        if experiment_id is None or cal_result is None:
+                            tier_arg = "real_outcome"
+                        else:
+                            metadata = build_replay_metadata(
+                                experiment_id=experiment_id,
+                                calibration_result=cal_result,
+                                cur=cur,
+                            )
+                            if metadata is None:
+                                # NONE label / V049 missing → skip
+                                should_insert = False
+                                skipped_none_label += 1
+                            else:
+                                tier_arg, replay_experiment_id_arg, manifest_hash_arg, expires_at_arg = metadata
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "mlde_shadow_advisor R7: provider/helper 異常 → "
+                            "fallback real_outcome (rec=%s/%s err=%s)",
+                            rec.strategy_name, rec.source, exc,
+                        )
+                        tier_arg = "real_outcome"
+                        replay_experiment_id_arg = None
+                        manifest_hash_arg = None
+                        expires_at_arg = None
+
+                if not should_insert:
+                    continue
+
                 try:
                     cur.execute(
                         sql,
@@ -439,6 +528,10 @@ def _persist_recommendations(dsn: str, recommendations: list[ShadowRecommendatio
                             rec.confidence,
                             rec.sample_count,
                             Json(rec.payload),
+                            tier_arg,
+                            replay_experiment_id_arg,
+                            manifest_hash_arg,
+                            expires_at_arg,
                         ),
                     )
                     inserted += 1
@@ -446,12 +539,19 @@ def _persist_recommendations(dsn: str, recommendations: list[ShadowRecommendatio
                     # verified function reject: log and continue.
                     # function reject 拒絕：記 log 後繼續下一筆。
                     logger.warning(
-                        "mlde_shadow_advisor: verify_replay_evidence_and_insert rejected rec=%s/%s err=%s",
+                        "mlde_shadow_advisor: verify_replay_evidence_and_insert rejected rec=%s/%s tier=%s err=%s",
                         rec.strategy_name,
                         rec.source,
+                        tier_arg,
                         exc,
                     )
         conn.commit()
+
+    if use_r7_path and skipped_none_label > 0:
+        logger.info(
+            "mlde_shadow_advisor R7: skipped %d recommendations with NONE label",
+            skipped_none_label,
+        )
     return inserted
 
 

@@ -13,7 +13,24 @@ import math
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+
+# REF-20 Sprint C2 R7-T3：calibrated_replay tier 升級。Optional import 模式
+# （避免未上線環境載入 replay 模組失敗）；caller 不傳 R6_calibration_provider
+# 時退回 legacy 'real_outcome' fallback path（backward-compat）。
+try:  # pragma: no cover - import guard
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.replay.calibration_label import (
+        CalibrationResult,
+    )
+    from program_code.local_model_tools.replay_metadata_helper import (
+        build_replay_metadata,
+    )
+
+    _R7_HELPER_AVAILABLE = True
+except ImportError:  # pragma: no cover - fallback when replay subsystem 未上線
+    CalibrationResult = None  # type: ignore[assignment, misc]
+    build_replay_metadata = None  # type: ignore[assignment]
+    _R7_HELPER_AVAILABLE = False
 
 try:
     import psycopg2  # type: ignore
@@ -202,7 +219,31 @@ def persist_regret_summary(
     *,
     engine_mode: str = "demo",
     cfg: Optional[OpportunityConfig] = None,
+    R6_calibration_provider: Optional[
+        Callable[[Optional[str], Optional[str]], "CalibrationResult"]
+    ] = None,
+    replay_experiment_id: Optional[str] = None,
 ) -> dict[str, Any]:
+    """REF-20 Sprint C2 R7-T3：升級為 calibrated_replay tier-aware insert。
+
+    Backward-compat (per AI-E advisory §10 risk #7)：
+      - 不傳 ``R6_calibration_provider`` → 走 legacy 'real_outcome' fallback。
+      - 傳 provider + replay_experiment_id → 取 ``CalibrationResult``：
+        * NONE → skip（回 inserted=0）；
+        * LIMITED / CALIBRATED → 寫 'calibrated_replay' tier + 4-tuple
+          metadata。
+
+    Args:
+        dsn: PG dsn (None → env fallback)。
+        engine_mode: paper / demo / live_demo / live。
+        cfg: optional override config。
+        R6_calibration_provider: optional callable
+            ``(strategy=None, symbol=None) → CalibrationResult``。Caller 必
+            提供 strategy=None / symbol=None 也能 derive 的 provider（regret
+            是 engine_mode-wide aggregates，無 per-strategy/per-symbol scope）。
+        replay_experiment_id: optional V049 row UUID 對應 R7 path；caller
+            負責綁定 cycle 對應的 experiment_id。
+    """
     cfg = cfg or config_from_env(engine_mode)
     resolved_dsn = _resolve_dsn(dsn)
     if not resolved_dsn:
@@ -229,54 +270,108 @@ def persist_regret_summary(
         }
     if psycopg2 is None or Json is None:
         raise RuntimeError("psycopg2 not installed")
-    # REF-20 W3-P2a-S4: 切換到 verified insert function (V036).
-    # PR2 of 3-PR sequence: opportunity_tracker 不再直接 INSERT；改呼叫
-    # learning.verify_replay_evidence_and_insert()。row 為
-    # `evidence_source_tier='real_outcome'` (legacy producer path)。
-    #
-    # REF-20 W3-P2a-S4: switch to verified insert function (V036).
-    # PR2 of 3-PR sequence: opportunity_tracker no longer issues raw INSERT.
-    # Calls learning.verify_replay_evidence_and_insert() instead.
-    # Rows remain `evidence_source_tier='real_outcome'` (legacy producer).
+
+    # R7-T3: 判斷 calibrated_replay path 還是 legacy real_outcome path
+    use_r7_path = (
+        R6_calibration_provider is not None
+        and replay_experiment_id is not None
+        and _R7_HELPER_AVAILABLE
+        and build_replay_metadata is not None
+    )
+
     inserted = 0
+    skipped_none_label = 0
+    calibrated_inserted = 0
+
     with psycopg2.connect(resolved_dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
-            try:
-                cur.execute(
-                    """
-                    SELECT learning.verify_replay_evidence_and_insert(
-                        %s,                             -- p_engine_mode
-                        NULL,                           -- p_symbol (regret scope is engine_mode-wide)
-                        NULL,                           -- p_strategy_name (regret aggregates across strategies)
-                        'opportunity_tracker',          -- p_source
-                        'regret_summary',               -- p_recommendation_type
-                        %s,                             -- p_expected_net_bps
-                        %s,                             -- p_confidence
-                        %s,                             -- p_sample_count
-                        %s,                             -- p_payload
-                        false,                          -- p_applied
-                        true,                           -- p_requires_governance
-                        'mlde_opportunity_tracker',     -- p_created_by
-                        'real_outcome',                 -- p_evidence_source_tier
-                        NULL, NULL, NULL,               -- replay metadata (NULL for real_outcome)
-                        NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
+            # R7-T3 metadata 構造（fail-soft）
+            tier_arg = "real_outcome"
+            replay_experiment_id_arg: Optional[str] = None
+            manifest_hash_arg: Optional[str] = None
+            expires_at_arg: Optional[Any] = None
+
+            should_insert = True
+            if use_r7_path:
+                try:
+                    # regret 是 engine_mode-wide aggregate；strategy=None
+                    # symbol=None 傳給 provider。
+                    cal_result = R6_calibration_provider(None, None)  # type: ignore[misc]
+                    if cal_result is None:
+                        tier_arg = "real_outcome"
+                    else:
+                        metadata = build_replay_metadata(
+                            experiment_id=replay_experiment_id,  # type: ignore[arg-type]
+                            calibration_result=cal_result,
+                            cur=cur,
+                        )
+                        if metadata is None:
+                            # NONE label / V049 missing → skip insert
+                            should_insert = False
+                            skipped_none_label += 1
+                        else:
+                            tier_arg, replay_experiment_id_arg, manifest_hash_arg, expires_at_arg = metadata
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "opportunity_tracker R7: provider/helper 異常 → "
+                        "fallback real_outcome (err=%s)",
+                        exc,
                     )
-                    """,
-                    (
-                        cfg.engine_mode,
-                        summary.get("avg_regret_bps", 0.0),
-                        min(0.85, (summary.get("rejected_sample_count", 0) or 0) / 50.0),
-                        summary.get("rejected_sample_count", 0),
-                        Json(summary),
-                    ),
-                )
-                inserted = 1
-            except psycopg2.Error as exc:  # noqa: BLE001
-                # verified function reject: log and continue (producer 不 crash).
-                # function reject 拒絕：記 log 後返回 inserted=0。
-                logger.warning(
-                    "opportunity_tracker: verify_replay_evidence_and_insert rejected err=%s",
-                    exc,
-                )
+                    tier_arg = "real_outcome"
+                    replay_experiment_id_arg = None
+                    manifest_hash_arg = None
+                    expires_at_arg = None
+
+            if should_insert:
+                try:
+                    cur.execute(
+                        """
+                        SELECT learning.verify_replay_evidence_and_insert(
+                            %s,                             -- p_engine_mode
+                            NULL,                           -- p_symbol (regret scope is engine_mode-wide)
+                            NULL,                           -- p_strategy_name (regret aggregates across strategies)
+                            'opportunity_tracker',          -- p_source
+                            'regret_summary',               -- p_recommendation_type
+                            %s,                             -- p_expected_net_bps
+                            %s,                             -- p_confidence
+                            %s,                             -- p_sample_count
+                            %s,                             -- p_payload
+                            false,                          -- p_applied
+                            true,                           -- p_requires_governance
+                            'mlde_opportunity_tracker',     -- p_created_by
+                            %s,                             -- p_evidence_source_tier (R7)
+                            %s,                             -- p_replay_experiment_id (R7)
+                            %s,                             -- p_manifest_hash (R7 hex)
+                            %s,                             -- p_expires_at (R7 timestamptz)
+                            NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
+                        )
+                        """,
+                        (
+                            cfg.engine_mode,
+                            summary.get("avg_regret_bps", 0.0),
+                            min(0.85, (summary.get("rejected_sample_count", 0) or 0) / 50.0),
+                            summary.get("rejected_sample_count", 0),
+                            Json(summary),
+                            tier_arg,
+                            replay_experiment_id_arg,
+                            manifest_hash_arg,
+                            expires_at_arg,
+                        ),
+                    )
+                    inserted = 1
+                    if tier_arg == "calibrated_replay":
+                        calibrated_inserted = 1
+                except psycopg2.Error as exc:  # noqa: BLE001
+                    # verified function reject: log and continue (producer 不 crash).
+                    # function reject 拒絕：記 log 後返回 inserted=0。
+                    logger.warning(
+                        "opportunity_tracker: verify_replay_evidence_and_insert rejected tier=%s err=%s",
+                        tier_arg, exc,
+                    )
         conn.commit()
-    return {"inserted": inserted, "summary": summary}
+
+    result: dict[str, Any] = {"inserted": inserted, "summary": summary}
+    if use_r7_path:
+        result["calibrated_inserted"] = calibrated_inserted
+        result["skipped_none_label"] = skipped_none_label
+    return result
