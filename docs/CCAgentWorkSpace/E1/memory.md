@@ -5726,3 +5726,57 @@ PA dispatch「REF-20 Sprint C2 R7 W2 — capability test + FK chain audit + look
 - **P2-R7-W2-FOLLOWUP-2**：observability log INFO level 升 cron / log slot 收集 metric（每小時 capability dump 統計）；當前單純 logger.info 走 stderr / log file，不進 PG metric 表；Sprint D 監控 chain 上線後考慮升級。
 - **P2-R7-W2-FOLLOWUP-3**：R7-T8 grep audit 補 future LinUCB warm-start caller（per memory `linucb_shadow_compare_retention.md` Sprint D/E 上線時加 LinUCB import test，當前 test 不涵蓋）。
 
+
+## REF-20 Sprint C2 R7 W3 — R7-T6 MLDE/Dream advisory E2E integration test 教訓 (2026-05-05)
+
+### 工作範圍
+1 個 NEW test 檔（797 LOC）：
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_r7_e2e_advisory_integration.py`：5 mock case + 3 Live PG opt-in case + 1 smoke summary。
+
+### 設計準則
+- **Mock-friendly subset (5 case + 1 smoke)**：Mac dev 預設跑；hermetic mock cursor `_E2EChainCursor`（4 SQL step queue + 4 counter）；驗 R7 chain 步 4-7（步 1-3 由 W6 R6-T9 既有 cover）。
+- **Live PG opt-in subset (3 case)**：Linux operator OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN 啟用；採 BEGIN/SAVEPOINT/ROLLBACK pattern 不污染 production trading.fills；對齊 V055 sibling test 既有 ROLLBACK-only pattern。
+
+### 教訓 1：caplog logger name 取決於 import path（long vs short）
+**現象**：W2 既有 test 從 short path `from ml_training.mlde_demo_applier_evidence_filter import ...` import → `logger.name='ml_training.mlde_demo_applier_evidence_filter'`；R7-T6 從 long path `from program_code.ml_training.mlde_demo_applier_evidence_filter import ...` import → `logger.name='program_code.ml_training.mlde_demo_applier_evidence_filter'`。
+
+caplog `logger=` 參數要對應 import path 才能 capture log。我第一次寫用 W2 既有 short logger name → 0 record capture → test fail。
+
+**根因**：兩 test 不同 conftest sys.path 起點（`program_code/exchange_connectors/bybit_connector/control_api_v1/tests/conftest.py` 的 `parents[1]` 不到 `program_code/`）。W2 在 `ml_training/tests/` 可能由更上層 conftest 加 `program_code/` 到 sys.path → 短 path import works。
+
+**對策**：本檔用 long path 對應 logger.name；如未來 conftest 統一 sys.path 起點可考慮統一兩 test 為 short path。
+
+### 教訓 2：Live PG fixture 不寫 trading.fills（V055 sibling test pattern）
+**現象**：dispatch §1.4 列「INSERT trading.fills row × 1162」作為 fixture；但 V055 sibling test 既有「不 INSERT 真 row（避免污染 production trading.fills）」pattern 更保守。
+
+**對策**：採 V055 既有 ROLLBACK-only pattern，3 個 Live PG case 都聚焦於「post V049+V051 deploy 後 schema 真實能力」（capability 6/6 / FK lineage 0 dangling / V055 round-trip calibrated_replay）。Producer pipeline 端到端的 calibration 計算邏輯由 W6 R6-T9 既有 `test_calibration_e2e_grid_yields_calibrated`（mock 1162 row tuple）覆蓋。R7-T6 補位 metadata wiring + V055 INSERT body + V051 FK 真實 enforce。
+
+### 教訓 3：Mock cursor `_E2EChainCursor` 多 SQL step queue 設計
+模擬 R7 chain 多步序的 SQL response queue，依 SQL pattern match 分發回應：
+- `SELECT manifest_hash FROM replay.experiments` → V049 BYTEA tuple
+- `SELECT learning.verify_replay_evidence_and_insert(...)` → INSERT id（or RuntimeError）
+- `information_schema.columns / to_regclass` → capability probe queue
+- `FROM learning.mlde_shadow_recommendations` WHERE ts → MSR final SELECT
+
+各步序計 counter 給 assert 用。**通用 pattern**：當 mock 模擬一個觸發多 SQL 的 caller chain 時，用 `if/elif sql_lower match` 分發 + 各步 counter；queue per step 比單一 queue 靈活。
+
+### 教訓 4：hermetic test 模擬 PL/pgSQL RAISE
+case 4 模擬 V055 verify_replay portion (3) line 361-367 RAISE EXCEPTION 用 `RuntimeError(...)` 而非 `psycopg2.errors.RaiseException`（後者需要 PG）。Hermetic test 簡化策略：mock raise 任何含關鍵詞訊息的 exception class，由 `pytest.raises` + `str(exc_info.value)` 抓字。
+
+真 PG RAISE 由 V055 既有 `test_v055_live_pg_*` calibrated_replay/synthetic_replay/counterfactual_replay 4 path test 覆蓋；R7-T6 不重複此驗。
+
+### 教訓 5：smoke summary case 自守門
+加 1 個 `test_r7_e2e_mock_mode_test_count_summary` 自我守門：mock case ≥ 5 + Live PG case ≥ 3，防未來 maintenance 誤刪 case。同 V055 sibling test 既有 `test_v055_mock_mode_test_count_summary` pattern。
+
+### 治理 sign-off
+- 0 V### migration / 0 schema 改動 / 0 producer code 改動 / 0 V055/V051 function 改動
+- xlang_consistency 13/13 維持（Python-only test 改動）
+- 注釋全中文 per CLAUDE.md §七 2026-05-05 governance change
+- 0 forbidden import / 0 cross-platform path / 0 hard boundary / 0 manifest_signer canonical_bytes
+- LOC 797 < 800 warn（接近但未觸發；W4 closure 如補 1 case 可能觸 warn → 同 W4 拆檔評估）
+
+### 待跟進（PM/W4 視野）
+- **P2-R7-W3-FOLLOWUP-1**：caplog logger name long vs short path 統一問題（W3 用 long path；如未來 conftest 統一 sys.path 起點可遷 short）。
+- **P2-R7-W3-FOLLOWUP-2**：Live PG full pipeline fixture（INSERT trading.fills 1162 row → 完整 producer 觸發）— 當前 W3 採輕量 ROLLBACK-only pattern；W4 closure 如 PM 要求 deeper fixture 可加 1 case。
+- **P2-R7-W3-FOLLOWUP-3**：Mac transient flakiness `test_spawn_writes_stderr_to_disk_on_early_death`（與 `/tmp/replay_artifacts_test_only` 累積殘留 dir 相關，非 R7-T6 引入；單獨跑 PASS / 全 directory 跑偶 fail）。
+
