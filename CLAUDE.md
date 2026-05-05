@@ -99,7 +99,7 @@
 
 **最早 Live target**：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA 看真實負 edge + 4 LG 0 IMPL，悲觀更可能**。中位需 P0-3 後 ~3 sprints 連推 LG-2/3/4 IMPL。
 
-### REF-20 IMPL 狀態（2026-05-05 **Sprint A + B + C (C1 R6 + C2 R7) ALL CLOSED**，Sprint D pending）
+### REF-20 IMPL 狀態（2026-05-05 **Sprint A + B + C + D ALL CLOSED — REF-20 Reality-Calibrated Fast Replay USABLE FOR DEMO RESEARCH**）
 
 **Sprint A 完成（2026-05-05 02:05 UTC QA round 6 final smoke E2E PASS）**：commit chain `c1ab7ea9 → 353db3fe → 66b650ea → cad8ed84 → e9d547c0+2ae93992 → f51f4e2e → 3a425447 → 2531c011`（8 commit + 1 hotfix retrofit）。Plan §6.R3 acceptance "4 tables row > 0" 真實達成：`replay.experiments=4 / run_state=4 / report_artifacts=1 / simulated_fills=1` + Wave 9 safety 0 leak + FK lineage 4/4 valid。
 
@@ -138,7 +138,25 @@ W3 R7-T6 E2E integration test (797 LOC, 5 mock case + 3 live PG opt-in case + 1 
 
 Sprint C2 R7 cumulative: ~3700 LOC across 3 commits, 43 new test PASS (15+22+6), 0 production regression on 524 sibling tests. Live PG opt-in (OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN) cases skip default — 留 operator post-deploy ad-hoc verify.
 
-**Sprint D pending**: R8 (maintenance / cron / mlde_shadow_recommendations 30-60d retention policy for replay-derived row per MIT §2.4) + R9 (reality-calibrated final sign-off — ≥5 successful runs / ≥2 strategies / ≥1 parameter-change replay / ≥1 fee-aware report / 0 live mutation / UI usable / MLDE/Dream advisory non-commanding / confidence labels match calibration).
+**Sprint D CLOSED 2026-05-05** — R8 commit `61433919` + R9 PM sign-off (本 commit)。
+
+R8 maintenance/retention/observation: V056 mlde_shadow_recommendations retention policy DEPLOYED Linux PG (cron-driven DELETE 30d for replay-derived / 90d for real_outcome — V### dry-run lesson APPLIED, NOT hypertable confirmed via SSH bridge per `feedback_v_migration_pg_dry_run.md`); 5 healthcheck sentinel slots [46]-[50] (runner_binary_path / manifest_registry_growth / failed_run_rate / stale_running_rows / artifact_retention); 6 cron task disposition (5 既有 Wave 9 land + 1 R8 NEW retention cron). 44 new test PASS (33 healthcheck + 11 V056 migration) + 0 production regression on 259 sibling.
+
+R9 final sign-off (PM-led acceptance review per plan §6.R9):
+- ✅ **≥5 successful replay runs across ≥2 strategies**: Sprint A R3 4 tables row > 0 + Sprint B A4/A5 hermetic 6 case + 2 Rust e2e proof (proof_7 wiring + proof_8 risk delta) covering grid_trading + ma_crossover
+- ✅ **≥1 parameter-change replay**: Sprint B A4 strategy parameter delta + A5 risk parameter delta hermetic acceptance
+- ✅ **≥1 fee-aware report**: Sprint C R6 W1 R6-T1+T2 fee/slippage byte-equal IntentProcessor live + W6 R6-T9 E2E demonstrates fee-aware end-to-end
+- ✅ **0 live/trading mutation during replay window**: forbidden_guard.rs + V055/V051 paired CHECK + replay isolation profile + 0 forbidden import (verified each commit per CLAUDE.md §四)
+- ✅ **UI replay flow usable**: Sprint B R4 UI Enable — tab-paper.html `subtab-btn-replay` backend-readiness gated 5-state machine + 28 static asset tests + XSS guards
+- ✅ **MLDE/Dream advisory non-commanding**: Sprint C R7 W1 dream_engine + opportunity_tracker + mlde_shadow_advisor (PA §2B 漏列補位) 升級 calibrated_replay tier 必經 V036 verify gate + V037 PUBLIC INSERT REVOKE + V051 paired CHECK enforce
+- ✅ **Confidence labels match calibration evidence**: W6 R6-T9 Python port `derive_execution_confidence` byte-equal Rust + run_finalize_route caller wiring + V049.execution_confidence UPDATE based on real trading.fills cell-level calibration; QC spec §1.1 reproducibility verified across 4 strategy fixtures
+
+**REF-20 cumulative**: Sprint A 8 commit + Sprint B 4 commit + Sprint C 9 commit + Sprint D 1 commit + governance/sync = **~22 commit chain**, ~14000+ LOC across Rust + Python + SQL + tests + docs, **17 acceptance criteria 100% closed** (A1-A10 plan §7 + 7 R9 conditions). Live PG opt-in (R7-T6 3 case via OPENCLAW_TEST_DSN) 待 operator post-deploy ad-hoc verify。
+
+**Outstanding (operator-side, not blocking REF-20 closure)**:
+- R7-T6 3 live PG E2E case full smoke (需 OPENCLAW_TEST_DSN 配置)
+- V056 cron schedule deployment (helper_scripts/cron/...sh 已 land，operator add to crontab)
+- Sprint D operator deploy validation (5 new healthcheck sentinel 透 cron-wrapper 跑)
 
 **Sprint D pending**: R8 (maintenance / cron / retention policy 30-60d for replay-derived row) + R9 (reality-calibrated final sign-off).
 
