@@ -5086,3 +5086,116 @@ PA design `2026-05-05--ref20_sprint_b_task_dag.md` §4.1 + §4.2 + §11.1：在 
 - `grep -nE 'use crate::(paper_state|...)' runner.rs`：0 hit
 - `grep -nE '/home/ncyu|/Users/[a-z]+/' runner.rs`：0 hit
 - `git status --short`：2 M（runner.rs + report_writer.rs）；clean
+
+## REF-20 Sprint B2 R5-T4 + R5-T5 + R5-T6（2026-05-05）
+
+CLI integration + Python downstream after R5-T1+T2+T3 land。三 task 平行落地，等 E2 審查 + E4 回歸 + R5-T7 acceptance smoke。
+
+### 範圍
+
+- R5-T4：`rust/openclaw_engine/src/bin/replay_runner.rs` (+173 LOC) — manifest.strategy 選用欄位接 `IsolatedPipeline::with_adapter_pipeline()`；fail-loud factory miss / nan balance / empty anchor。
+- R5-T5：`replay/simulated_fills_writer.py` (+291 LOC) — 3 helpers (extract_decision_traces / build_decision_evidence_index / consume_decision_evidence_for_fill) + map_fill_to_v050_row 加 decision_evidence kw arg + persist_replay_report wire；schema 限 V050 payload jsonb 內 `_replay_decision_evidence` 子物件，0 V### migration。
+- R5-T6：`replay/experiment_registry.py` (+76 LOC) — `lookup_replay_config_sha256(cur, experiment_id) -> (strategy_sha, risk_sha)` read-back helper；register handler 確 INSERT 兩 sha 自 R2 round 2 起（V049 22-col contract 不變）。
+
+### 教訓
+
+1. **Manifest schema 演進兩條路**：R5-T4 從 manifest_jsonb 解策略名 vs 從 ReplayManifest 改 schema 兩條路。前者（採用）保 cross-language manifest_signer canonical_bytes 不變；後者要改 R3 register 端 22-col contract + Python sibling signer 結構，scope creep 至 R6。strategy_config / risk_config blob 兩 sha 留，blob 化延後 R6 calibration。
+2. **StrategyFactory.create_with_params(default) → 5 strategies pool → find by name**：不對策略單獨建構（避免 0 抽象重 5 個 if）；factory 仍跑全 5 個但僅選對應 name 那個包成 ReplayStrategyAdapter。0 策略代碼變更（CLAUDE.md §七 「最小影響」）。
+3. **R5-T5 greedy match：side=None bucket + (ts_ms, symbol, side) tuple key**：Open trace 進 (ts, sym, "long"|"short") bucket，Close trace 進 (ts, sym, None) bucket（match-any-side fallback）。consume_decision_evidence_for_fill 先試精確 side，再 fallback None bucket。Greedy pop 防 multi-fill same-tick 重複注入。
+4. **R5-T5 ghost row reason**：fill 本身 `qty=0` 不帶 rejection reason（R5-T3 由 runner 寫 last_action_label）；R5-T5 evidence rejected_reason synthesise 為 `"qty=0_ghost_fill;strategy={name}"` + 下游 audit 透過 diagnostics.last_action_label 關聯具體 gate（如 `1.5_dup`）。
+5. **R5-T5 truncation marker preserve evidence**：當 fill JSON 超 4KB 截斷時仍保留 `_replay_decision_evidence` 為頂層 marker（evidence dict 設計 ~300 bytes bound 不會自身觸發截斷）；DoS bound + audit completeness 兩贏。
+6. **R5-T6 V049 INSERT 位置 5+6（不是 6+7）**：positional args [0]=experiment_id, [1]=actor_id, [2]=runtime_environment, [3]=git_sha, [4]=engine_binary_sha, [5]=strategy_config_sha256, [6]=risk_config_sha256。round-trip test 一開始用 [6][7] 失敗教訓：mock SELECT replay 必對齊真實 cur.execute 第二參數 tuple 順序。
+7. **dispatch +200 LOC estimate vs reality +540**：bilingual MODULE_NOTE 強制 + each fail-loud Err arm full Box<dyn Error> with reason + R5-T5 schema doc 全雙語 + V049 NOT NULL future-proof defense — overhead 全為治理強制要求，無冗餘邏輯。3 file 仍 < 1500 hard cap（最大 replay_runner.rs 1187）。
+8. **`#[serde(default)]` 對 Optional 新欄位不破 baseline**：`strategy: Option<String>` + `starting_balance: Option<f64>` 兩 field 加 `#[serde(default)]` 後既有 R5-T3 e2e fixture 完全不用改（proof_1/4/5 走 None → synthetic walker path）。Python sibling signer canonicalisation 於 sort_keys + ensure_ascii=False 下對 Optional None 不發 key（serde 同行為），cross-language byte-equal invariant 保持。
+9. **R5-T4 first_event_price 可選 fallback 邏輯避免無謂 unwrap**：`events.first().map(|e| e.close).ok_or_else(...)` 回 Result，僅在 strategy=Some 路徑用 `?`，None 路徑下 `let _ = first_event_price;` 釋放。避免 first_event 缺時 synthetic walker（容忍空 fixture，AbortedFixtureExhausted）誤錯。
+10. **R5-T6 helper 暫 0 caller 但 R6 ready**：R5-T4 CLI 用 `RiskConfig::default()` 不查 sha；helper 此 Sprint 純為 R6 calibration 預備 + audit chain reconstruction tooling 準備。push back PM：Option A（採用）保留 helper for R6 future-ready vs Option B 刪除標 confirm-only no-code-change。
+
+### 自驗結果
+
+- `cargo build --release --bin replay_runner --features replay_isolated`：PASS（0.09s incremental）
+- `cargo test --release --features replay_isolated -p openclaw_engine --bin replay_runner`：6/6 PASS（含 R5-T4 backwards compat — 既有 6 manifest verify test 全 PASS）
+- `cargo test --release --features replay_isolated -p openclaw_engine --lib`：2478/2478 PASS（與 R5-T3 baseline 同數）
+- `cargo test --release --features replay_isolated -p openclaw_engine --test replay_runner_e2e`：6/6 PASS（含 proof_1/4/5 — manifest.strategy=None 不走 adapter path 即合 baseline）
+- `cargo test --release --features replay_isolated -p openclaw_engine --tests`：全 PASS（doctest 兩個 mac_policy_guard 預有 fail，與本 sprint 無關）
+- `bash helper_scripts/ci/replay_runner_symbol_audit.sh`：602 symbols / 0 forbidden（478 → 602 因 R5-T4 拉入 StrategyFactory + Strategy + GuardianConfig + KellyConfig + RiskConfig 型別；0 forbidden 仍 GREEN）
+- `python3 -m pytest tests/ -k replay --no-header -q`：185/186 PASS（172 baseline → 185；新增 13 R5-T5 + R5-T6 inline test）
+- `python3 -m pytest tests/replay/ -k xlang_consistency --no-header -q`：13/13 PASS
+- `ssh trade-core .venv/bin/pytest tests/ -k replay`：169/172 PASS — 3 fail 在 `test_replay_routes_auth.py`（runtime spawn fail，Linux 缺 OPENCLAW_REPLAY_SIGNING_KEY_FILE env；非本 sprint 改動範圍；Mac 4/4 PASS 對照證實 pre-existing infra issue）
+- `grep -nE 'use crate::(paper_state|canary_writer|database|ipc_server|governance_hub|live_authorization|decision_lease|bybit_rest_client|bybit_private_ws)' replay_runner.rs`：0 hit
+- `grep -nE '/home/ncyu|/Users/[a-z]+/' replay_runner.rs simulated_fills_writer.py experiment_registry.py`：0 hit
+- `git status --short`：5 M（3 production + 2 test files）；clean
+
+## 2026-05-05 REF-20 Sprint B2 R5-T4+T6 Round 2 — config blob from manifest（experiment_registry + replay_runner.rs）
+
+### 修了什麼（架構 gap closure）
+
+PM 發現 R5-T7 acceptance fixture (PA §5.1 + §5.2) 要求 register payload 帶 `strategy_params: {grid_levels: 10 vs 20}` + `risk_overrides: {position_size_max_pct: 2.0 vs 10.0}` 證 A4/A5 delta；但 R5-T4 round 1 用 `RiskConfig::default()` + `StrategyParamsConfig::default()` 忽略 manifest config blob → A4/A5 acceptance 跑不出 delta。
+
+Round 2：
+- R5-T6 register handler：Pydantic model 加 2 optional field `strategy_params` / `risk_overrides`；當提供 → server 計 sha256(canonical_bytes(blob)) 覆寫 client placeholder + 注入 `_replay_*` key 進 manifest_jsonb 重算 manifest_hash 維持 self-consistency invariant。
+- R5-T4 manifest schema：ReplayManifest 加 2 `serde(default) Option<serde_json::Value>` field；CLI flow 在 strategy=Some 路徑做 `serde_json::from_value(blob.clone())` typed deserialise 餵 StrategyFactory + RiskConfig；fail-loud Box<dyn Error>（NaN/越界 也 fail-loud）。
+- Round 2 不改 R5-T1/T2/T3。R5-T5 simulated_fills_writer.py round 2 verify-only（risk_decision 已於 round 1 加入 evidence schema）。
+
+### 教訓
+
+11. **dispatch 步驟 4 與 R2 round 2 H-1 invariant 共存方案**：H-1 invariant 是 `sha256(persisted_jsonb) == manifest_hash`；dispatch 「manifest 重 sign 計 manifest_hash 包含這些」與 H-1 兼容當 *recompute* manifest_hash from augmented body — 用 `_replay_strategy_params` / `_replay_risk_overrides` 注入 manifest_to_persist copy → compute_manifest_canonical_bytes(augmented_body) → recompute hash → INSERT pair (augmented_body, recomputed_hash)。`test_register_blob_path_preserves_jsonb_hash_invariant` 鎖此契約。
+12. **M-4 reserved-prefix validator 不阻 server 注入**：M-4 拒 `_*` 前綴 key 只在 Pydantic validator 階段（runs on client-supplied data）；validator 通過後 server 持有 dict reference 可任意 mutation（實作中淺拷貝 `dict(body.manifest_jsonb)` 避免 caller body mutation）。
+13. **signed-with-blob 未支援為 round 2 accepted trade-off**：當 client 提供 `signature_hex` AND `strategy_params`/`risk_overrides`，client 簽是針對 ORIGINAL body，server 注入後 hash 變 → signature 驗證會失敗。Round 2 範圍不修；R5-T7 fixture 走 unsigned path。Sprint C R6 fee calibration 應加 signed-blob dual-path（先驗 signature against original，再注入並重算 hash）。
+14. **xlang invariant 不退的核心理由**：existing xlang fixture 兩 blob 欄位皆不在 → ReplayManifest serde(default) 解為 None → CLI flow 走 round 1 default 路徑 → canonical_bytes 計算 與 round 1 一致 → cross-language byte-equal invariant 不破。`#[serde(default)] Option<T>` 是 Rust+Python 雙端對 absent field 的 zero-cost compatibility 模式。E1 round 1 push back #3 的「optional 加進 ReplayManifest break canonical_bytes」是錯的：existing fixture 不長新 field → 同 hash；新 fixture 帶新 field 計新 hash 是預期。
+15. **StrategyFactory.create_with_params(&StrategyParamsConfig) 接 typed Rust struct 而非 dict**：dispatch hint 說「既有 factory API; 如不接受 dict 需小 wrapper」原則 OK；實際走「serde_json::from_value 內聯 + typed config 餵 factory」最乾淨 ~10 LOC。`StrategyParamsConfig` derive Deserialize 是關鍵（params.rs line 74）。
+16. **RiskConfig sanity check `position_size_max_pct ∈ (0, 100]`**：dispatch §Fix 2 「risk_overrides 數值 NaN/negative → exit 非 0」具體實作；不是 deep-validate（GlobalLimits.validate() 走完整 schema），而是淺驗 + 提早 fail-loud 防 caller 誤傳。深驗交給 Guardian 下游（避免重複工作 + 保 round 2 scope 簡）。
+17. **lookup_replay_config_blob 的 jsonb defensive decode**：psycopg2 預設 jsonb→dict；舊 driver 可能給 str（json.loads fallback）或 bytes（utf-8 decode + json.loads）；非 dict 值（int/list/etc）拒回 None 不向 caller 拋 — 防污染向外傳，caller 的 `if blob['strategy_params'] is not None:` 慣用法仍工作。
+18. **Round 2 LOC overhead vs round 1 estimate**：dispatch §expectation 預估 +80 LOC，實際 +329（Python +217 + Rust +112，不含 test）。原因：bilingual 注釋強制 (CLAUDE.md §七) + lookup_replay_config_blob 三 branch defensive decode + fail-loud Box<dyn Error> 文字 + sanity check + 完整 SAFETY 區塊。仍 < 1500 hard cap，全為治理 + 防禦性代碼，無冗餘邏輯。
+19. **R5-T7 acceptance pending follow-up wiring**：Round 2 修 V049 寫入端 + Rust manifest schema；但 `replay/route_helpers.py::build_default_manifest_payload`（disk manifest fixture builder）尚未從 V049 row 讀回 `_replay_*` 並注入 disk manifest → R5-T7 跑 `/run` 時 Rust runner 看到的 disk fixture 仍**無** strategy_params/risk_overrides → 走 round 1 default 路徑 → A4/A5 delta 仍跑不出。建議 R5-T7 dispatch 加 Fix 3：`build_default_manifest_payload` 用 `lookup_replay_config_blob` 注入 disk fixture（~30 LOC）。
+
+### Round 2 自驗結果
+
+- `cargo build --release --bin replay_runner --features replay_isolated`：PASS（1.32s rebuild for new struct fields + match arms）
+- `cargo test --release --features replay_isolated -p openclaw_engine --bin replay_runner`：9/9 PASS（6 baseline + 3 round 2 cases — manifest_strategy_params_parses_into_typed_config / manifest_risk_overrides_apply_to_risk_config / manifest_legacy_fixture_without_blob_fields_still_parses）
+- `cargo test --release --features replay_isolated -p openclaw_engine --lib`：2478/2478 PASS（與 round 1 baseline 同數）
+- `cargo test --release --features replay_isolated -p openclaw_engine --test replay_runner_e2e`：6/6 PASS（含 proof_5 baseline-vs-candidate two-runs；synthetic walker 路徑仍走 round 1 baseline）
+- `cargo test --release --features replay_isolated -p openclaw_engine --tests`：全 PASS
+- `bash helper_scripts/ci/replay_runner_symbol_audit.sh`：648 symbols / 0 forbidden（602 → 648 因 round 2 拉入 `serde_json::from_value` + `RiskConfig`/`StrategyParamsConfig` Deserialize 完整 vtable；0 forbidden 仍 GREEN）
+- `python3 -m pytest tests/ -k replay --no-header -q`：190/191 PASS（185 round 1 baseline + 5 round 2 cases — test_register_with_strategy_params_computes_distinct_sha / test_register_with_risk_overrides_computes_distinct_sha / test_lookup_replay_config_blob_returns_params_and_overrides / test_lookup_replay_config_blob_returns_none_when_absent / test_register_blob_path_preserves_jsonb_hash_invariant）
+- `python3 -m pytest tests/replay/ -k xlang_consistency --no-header -q`：13/13 PASS（CRITICAL — invariant 不退）
+- `ssh trade-core .venv/bin/pytest tests/ -k replay`：(round 2 not pushed) 仍 169/172 round 1 baseline；3 fail 在 `test_replay_routes_auth.py` pre-existing infra
+- `grep -nE 'use crate::(paper_state|canary_writer|database|ipc_server|governance_hub|live_authorization|decision_lease|bybit_rest_client|bybit_private_ws)' replay_runner.rs`：0 hit
+- `grep -nE '/home/ncyu|/Users/[a-z]+/' replay_runner.rs experiment_registry.py simulated_fills_writer.py`：0 hit
+- `git status --short`：5 M（同 round 1 set；R5-T5 simulated_fills_writer.py round 2 0 改動 verify-only）；clean
+
+---
+
+## REF-20 Sprint B2 R5-T4 Round 3 Fix 3 + R5-T7 acceptance tests (2026-05-05)
+
+### 任務 / 範圍 (Round 3)
+
+- Fix 3：`replay/route_helpers.py::build_default_manifest_payload` 加 `cur: Any = None` kwarg；`cur` 提供時 lazy-import `lookup_replay_config_blob` 注入 V049 row 的 `_replay_strategy_params` / `_replay_risk_overrides` 至 disk manifest。`cur=None` 走 legacy 3-key body（pre-Fix-3 byte-equal）。Callsite `replay/run_route.py::_do_pg_path` 第 240 行傳 `cur=cur`（同 PG xact 內 cursor 既存）。
+- R5-T7-A4：`tests/replay/test_strategy_param_delta.py`（NEW 430 LOC）3 hermetic case — V049 sha override / disk payload propagation / writer evidence intent_signature delta；6/6 PASS（含 risk 配套）。
+- R5-T7-A5：`tests/replay/test_risk_param_delta.py`（NEW 410 LOC）3 hermetic case — V049 risk sha override / disk payload risk blob propagation / writer evidence rejected vs accepted gate。
+- R5-T7-Rust：`rust/openclaw_engine/tests/replay_runner_e2e_param_delta.rs`（NEW 370 LOC）2 proof：proof_7 strategy_param wiring round-trip（fixture limitation push back — 詳見教訓）；proof_8 risk_param ghost-vs-accepted delta。
+
+### 教訓（Round 3 新增）
+
+20. **route_helpers.py 1500 hard cap 邊緣管控**：dispatch §expectation `≤ 30 LOC` Fix 3；首版 +101 LOC 過度詳細 docstring → 多輪 trim docstring + 合併中英 paragraph + 縮短 inline 注釋 → 最終 +2 net 維持 §七 雙語 MODULE_NOTE / docstring / SAFETY 核心要求 + 嚴守 §九 1500 hard cap（route_helpers.py 1498 → 1500）。**教訓**：bilingual docstring 是「核心義務 + 精簡 effort」雙重；不能因為「中英對照必」就讓 docstring 膨脹到 30+ 行 — 應折疊敘事為 5-10 行重點覆蓋 BODY-ONLY contract / BLOB PASSTHROUGH 設計 / Cross-language invariant / Args / Returns / SAFETY 六項。後續對該檔再加任何 LOC 必先 push back PM。
+21. **route_helpers ↔ experiment_registry circular import 解法**：production `run_route.py` import 順序是 `from . import route_helpers` 後才 `from .experiment_registry import register_experiment`，而 `route_helpers.py` 模組級 import experiment_registry 會在 route_helpers 載入時 trigger experiment_registry 載入 → trigger replay_models 載入 → 反過來 import route_helpers → circular。**解法**：函式內 lazy import（`def build_default_manifest_payload(...): from .experiment_registry import lookup_replay_config_blob`）— 模組載入時不觸發，函式呼叫時才觸發，experiment_registry 此時已完成載入。已驗證 0 ImportError + 0 RuntimeWarning。
+22. **proof_7 fixture limitation push back**：synthetic_btcusdt.json 10 events monotone-up；grid_levels=10 vs 20 在第一 tick emit 相同 intent_signature（首次 Open 不依賴 grid 佈置）；強行驗 fills delta 失敗。**push back**：proof_7 重定為 wiring round-trip 驗證（兩 StrategyParamsConfig 通過 factory + adapter + pipeline 不 panic + Completed + ≥1 fill / ≥1 sig）；docstring + MODULE_NOTE 明示 fixture limitation；Sprint C R6 fee calibration 引入更豐富 fixture（含上下波動讓 grid placement 真起作用）後升級為 fills delta 斷言。proof_8 因 risk gate per-intent 觸發在現 fixture 上能驗 ghost row delta，PASS 證 risk_param wiring 完整。
+23. **A4 acceptance hermetic cursor pattern**：`_capturing_cursor()` 同時記 INSERT params + 服務 `SELECT manifest_jsonb`（同一 cursor 模擬 PG xact 內 INSERT 後 read-back）。這是 round 3 production flow（同一 `with get_pg_conn_fn() as conn` block 內 cursor 既 INSERT 又 SELECT）的 hermetic 對應。Mock cursor 比 monkeypatch spawn 簡單 — 因 Fix 3 不 spawn engine，純 Python 邏輯。
+24. **`__future__ annotations` + Pydantic `dict[str, Any]`**：兩 acceptance test 文件 `from __future__ import annotations` + `dict[str, Any]` type hint 在 Python 3.10+ runtime 下 OK；但既有 register_experiment Pydantic body 用 `Optional[dict[str, Any]]` 是 PEP 604 + PEP 585 風格，`from __future__ import annotations` 把所有 annotations 轉 string 形態 — 既不影響 Pydantic v2 schema 解析（runtime 用 `typing.get_type_hints()` 解析 string），也不影響 hermetic test 的 dict literal 構造。
+25. **strategy_adapter `decision_traces` Rust struct vs JSON**：`StrategyActionTrace` 是 Rust enum；lib-level test 直接用 `if let StrategyActionTrace::Open { intent_signature, .. } = action` pattern match 抽 signature。Python writer 端 `consume_decision_evidence_for_fill` 處理的是 serde_json 序列化後的 `{"Open": {...}}` 形態 — 兩端對 Open 有完整對齊但表示形態不同（typed enum vs JSON object）。proof_7 第一版誤把 Rust trace 當 JSON 操作 → 編譯失敗 → fix。
+
+### Round 3 自驗結果
+
+- `python3 -m pytest tests/replay/test_strategy_param_delta.py tests/replay/test_risk_param_delta.py --no-header -q -W ignore`：6/6 PASS（A4 3 + A5 3）
+- `python3 -m pytest tests/ -k replay --no-header -q -W ignore`：196/197 PASS / 1 skip（190 round 2 baseline + 6 R5-T7 new）
+- `python3 -m pytest tests/replay/ -k xlang_consistency --no-header -q -W ignore`：13/13 PASS（CRITICAL — invariant 不退）
+- `cargo build --release --bin replay_runner --features replay_isolated`：PASS 0.10s
+- `cargo test --release --features replay_isolated -p openclaw_engine --lib`：2478/2478 PASS（與 round 2 同數）
+- `cargo test --release --features replay_isolated -p openclaw_engine --bin replay_runner`：9/9 PASS（與 round 2 同數）
+- `cargo test --release --features replay_isolated -p openclaw_engine --test replay_runner_e2e`：6/6 PASS（與 round 2 同數，無 regression）
+- `cargo test --release --features replay_isolated -p openclaw_engine --test replay_runner_e2e_param_delta`：2/2 PASS（proof_7 + proof_8 NEW）
+- `bash helper_scripts/ci/replay_runner_symbol_audit.sh`：648 symbols / 0 forbidden（與 round 2 同 — Round 3 改 Python 端 + Rust e2e test，未動 binary）
+- `grep -nE '/home/ncyu|/Users/[a-z]+/' route_helpers.py run_route.py test_strategy_param_delta.py test_risk_param_delta.py replay_runner_e2e_param_delta.rs`：0 hit
+- `grep -nE 'use crate::(paper_state|canary_writer|database|...)' replay_runner_e2e_param_delta.rs`：0 hit
+- `wc -l route_helpers.py`：1500（at hard cap exactly）
+- `git status --short`：2 M（route_helpers.py + run_route.py，新增 production change）+ 5 M（round 1+2 set）+ 3 ?? new test files；clean
+

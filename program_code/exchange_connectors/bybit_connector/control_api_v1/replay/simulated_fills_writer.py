@@ -98,6 +98,46 @@ SPEC: docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1
 V050 schema: sql/migrations/V050__replay_simulated_fills.sql (17-col contract)
 Rust source: rust/openclaw_engine/src/replay/runner.rs::SimulatedFill
             rust/openclaw_engine/src/replay/report_writer.rs::ReportEnvelope
+
+REF-20 Sprint B2 R5-T5 extension (this commit):
+    The Rust runner now emits an additional ``result.decision_traces`` field
+    (one entry per tick that produced ≥1 strategy action). When the runner
+    walked the adapter pipeline (R5-T3 strategy + risk gate path), each
+    `Open` action carries a deterministic SHA-256 ``intent_signature`` — see
+    ``rust/openclaw_engine/src/replay/strategy_adapter.rs::compute_intent_signature``.
+    R5-T5 (this module's responsibility): match each accepted fill to the
+    strategy decision that produced it and inject a ``_replay_decision_evidence``
+    sub-object into the V050 ``payload`` jsonb so the audit chain can be
+    reconstructed without re-parsing the report from the raw JSON.
+
+    Schema (PA design §6.1, jsonb-only — NO V### migration in R5-T5 scope):
+        payload jsonb already exists in V050 (col 17). R5-T5 widens the
+        per-fill object with one optional reserved key:
+
+            payload._replay_decision_evidence = {
+                "signal_id":         "<ts_ms>:<symbol>:<side>",  # composite
+                "strategy_decision": "open" | "close",
+                "risk_decision":     "accepted" | "rejected",
+                "rejected_reason":   None | "<reason str>",
+                "intent_signature":  "<sha256 hex>" | None,
+                "intended_qty":      <float>,
+                "intended_price":    <float>,
+            }
+
+    Match algorithm: for each fill row, find the first decision_trace entry
+    whose `(ts_ms, symbol)` matches and the action's `side` aligns. Fill
+    matching is greedy (one decision_trace entry can be matched at most once);
+    unmatched fills get ``_replay_decision_evidence = None`` so callers can
+    distinguish legacy synthetic-walker fills (no trace) from adapter-path
+    fills with truncated trace.
+
+REF-20 Sprint B2 R5-T5 擴展（本 commit）：
+    Rust runner 現額外發 ``result.decision_traces``（每 tick 至少一個策略
+    action 即記一筆）。adapter 路徑（R5-T3 strategy + risk gate）下每個
+    `Open` action 攜帶確定性 SHA-256 ``intent_signature``。R5-T5（本模組）
+    將每筆 accepted fill 與其對應策略決策比對並把 ``_replay_decision_evidence``
+    子物件注入 V050 ``payload`` jsonb，使審計鏈無需重 parse raw JSON 即可
+    重建。Schema 限於 jsonb（R5-T5 範圍**不**新增 V### migration）。
 """
 
 from __future__ import annotations
@@ -108,7 +148,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +280,204 @@ def parse_replay_report_json(report_path: Path) -> dict[str, Any]:
     return envelope
 
 
+# ─── Decision-trace helpers (R5-T5) / 決策追蹤輔助 ────────────────────
+
+
+def extract_decision_traces(envelope: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return ``result.decision_traces`` list (empty if absent / wrong type).
+    回傳 ``result.decision_traces`` list（缺或型別錯則回空 list）。
+
+    REF-20 Sprint B2 R5-T5 (per dispatch §11.1).
+
+    The Rust runner adds ``decision_traces`` as a top-level key inside
+    ``result`` only when the adapter pipeline ran (R5-T3 path). For
+    synthetic-walker runs (proof_1/4/5 baseline) the field is absent or
+    serialized as ``[]`` via ``#[serde(default)]``. We tolerate both.
+
+    Rust runner 僅 adapter 路徑（R5-T3）執行時才在 ``result`` 加
+    ``decision_traces``。synthetic-walker 路徑（proof_1/4/5 baseline）
+    下欄位缺或序列化為 ``[]``（``#[serde(default)]``）。兩者皆容忍。
+
+    Args:
+        envelope: parsed replay_report.json dict (top-level).
+
+    Returns / 回傳:
+        ``list[dict]`` — possibly empty; never raises.
+    """
+    result = envelope.get("result") or {}
+    if not isinstance(result, dict):
+        return []
+    traces = result.get("decision_traces")
+    if not isinstance(traces, list):
+        return []
+    # Defense-in-depth: only keep entries whose required keys are present
+    # and well-typed; unknown shapes are dropped silently to avoid raising.
+    # 縱深防禦：僅保留必要 key 齊全且型別正確的 entry；未知 shape 靜默丟棄
+    # 避免 raise。
+    return [
+        t for t in traces
+        if isinstance(t, dict)
+        and isinstance(t.get("ts_ms"), int)
+        and isinstance(t.get("symbol"), str)
+        and isinstance(t.get("actions_emitted"), list)
+    ]
+
+
+def _normalize_action_side(action: dict[str, Any]) -> Optional[str]:
+    """Translate a `StrategyActionTrace` enum to a ``long|short`` side string.
+    將 `StrategyActionTrace` enum 翻譯為 ``long|short`` side 字串。
+
+    Rust serde tag: `Open { is_long: bool, ... }` / `Close { ... }`.
+    serde untagged: serializes as ``{"Open": {...}}`` or ``{"Close": {...}}``.
+
+    For ``Open`` we return ``"long"`` if ``is_long`` else ``"short"``; for
+    ``Close`` we return ``None`` because close-side fills emit ``side``
+    opposite to the position which is not on the trace entry directly.
+
+    Returns / 回傳:
+        ``"long"`` / ``"short"`` for Open; ``None`` for Close (caller
+        treats absence as "match-any-close-direction").
+    """
+    if "Open" in action and isinstance(action.get("Open"), dict):
+        is_long = bool(action["Open"].get("is_long"))
+        return "long" if is_long else "short"
+    if "Close" in action:
+        return None
+    return None
+
+
+def build_decision_evidence_index(
+    decision_traces: list[dict[str, Any]],
+) -> dict[Tuple[int, str, Optional[str]], list[dict[str, Any]]]:
+    """Index decision-trace actions by ``(ts_ms, symbol, side)`` for fill match.
+    依 ``(ts_ms, symbol, side)`` 索引決策 trace action 供 fill 比對。
+
+    Returns / 回傳:
+        Dict mapping ``(ts_ms, symbol, side)`` to a FIFO list of matched
+        action dicts (each dict pre-flattened with strategy_name +
+        indicators_present + intent_signature etc. for downstream injection).
+        First-match-wins consumption: caller pops from the front of the list.
+
+    REF-20 Sprint B2 R5-T5: greedy matching (one trace action consumed at
+    most once) avoids duplicate evidence injection on multi-fill same-tick
+    scenarios. Side=None bucket holds Close-side traces (match-any-side).
+    """
+    idx: dict[Tuple[int, str, Optional[str]], list[dict[str, Any]]] = {}
+    for entry in decision_traces:
+        ts_ms = int(entry["ts_ms"])
+        symbol = str(entry["symbol"])
+        strategy_name = str(entry.get("strategy_name", ""))
+        indicators_present = bool(entry.get("indicators_present", False))
+        for action in entry.get("actions_emitted", []):
+            if not isinstance(action, dict):
+                continue
+            side = _normalize_action_side(action)
+            kind: str
+            payload_obj: dict[str, Any] = {}
+            if "Open" in action and isinstance(action.get("Open"), dict):
+                kind = "open"
+                inner = action["Open"]
+                payload_obj.update(
+                    {
+                        "intent_signature": inner.get("intent_signature"),
+                        "intended_qty": float(inner.get("qty", 0.0)),
+                        "intended_price": float(inner.get("price", 0.0))
+                        if inner.get("price") is not None else None,
+                        "confidence": float(inner.get("confidence", 0.0)),
+                        "order_type": inner.get("order_type"),
+                    }
+                )
+            elif "Close" in action and isinstance(action.get("Close"), dict):
+                kind = "close"
+                inner = action["Close"]
+                payload_obj.update(
+                    {
+                        "intent_signature": None,
+                        "intended_qty": None,
+                        "intended_price": None,
+                        "confidence": float(inner.get("confidence", 0.0)),
+                        "reason": inner.get("reason"),
+                    }
+                )
+            else:
+                continue
+            payload_obj["strategy_name"] = strategy_name
+            payload_obj["indicators_present"] = indicators_present
+            payload_obj["strategy_decision"] = kind
+            key = (ts_ms, symbol, side)
+            idx.setdefault(key, []).append(payload_obj)
+    return idx
+
+
+def consume_decision_evidence_for_fill(
+    fill: dict[str, Any],
+    index: dict[Tuple[int, str, Optional[str]], list[dict[str, Any]]],
+) -> Optional[dict[str, Any]]:
+    """Pop the first matching decision evidence dict for a given fill.
+    為指定 fill 取出（pop）第一筆比對到的 decision evidence。
+
+    Match key tries (in order):
+        1. Exact ``(ts_ms, symbol, side)`` for Open traces.
+        2. Fallback ``(ts_ms, symbol, None)`` for Close traces (side=None
+           bucket).
+
+    Returns / 回傳:
+        Decision evidence dict (with synthesized ``signal_id`` + ``risk_decision``
+        + ``rejected_reason`` keys) on match; ``None`` on no match.
+
+    REF-20 Sprint B2 R5-T5：match algorithm + greedy consumption (one trace
+    action consumed at most once per fill).
+    """
+    try:
+        ts_ms = int(fill.get("ts_ms", 0))
+        symbol = str(fill.get("symbol", ""))
+        side = fill.get("side")
+        side_str = str(side) if isinstance(side, str) else None
+    except (TypeError, ValueError):
+        return None
+
+    # Try the exact-side bucket first (Open traces), then fall back to the
+    # side=None bucket (Close traces).
+    # 先試精確 side bucket（Open trace），再 fallback side=None bucket（Close trace）。
+    for key in [(ts_ms, symbol, side_str), (ts_ms, symbol, None)]:
+        bucket = index.get(key)
+        if bucket:
+            evidence = bucket.pop(0)
+            # Risk decision: qty>0 → accepted; qty==0 ghost row → rejected.
+            # 風控決策：qty>0 → 接受；qty==0 ghost row → 拒絕。
+            try:
+                qty = float(fill.get("qty", 0.0))
+            except (TypeError, ValueError):
+                qty = 0.0
+            risk_decision = "accepted" if qty > 0.0 else "rejected"
+            rejected_reason = None
+            if risk_decision == "rejected":
+                # The fill itself does not carry the rejection reason (R5-T3
+                # records it in `last_action_label` at runner level); we
+                # surface the strategy_name + a generic marker so downstream
+                # auditors can correlate via diagnostics.last_action_label.
+                # fill 本身不含拒絕原因（R5-T3 由 runner 寫 last_action_label）；
+                # 此處給 strategy_name + 通用標記，下游審計透過
+                # diagnostics.last_action_label 關聯。
+                rejected_reason = (
+                    f"qty=0_ghost_fill;strategy={evidence.get('strategy_name', '')}"
+                )
+            evidence_out: dict[str, Any] = {
+                "signal_id": f"{ts_ms}:{symbol}:{side_str or 'close'}",
+                "strategy_decision": evidence.get("strategy_decision"),
+                "risk_decision": risk_decision,
+                "rejected_reason": rejected_reason,
+                "intent_signature": evidence.get("intent_signature"),
+                "intended_qty": evidence.get("intended_qty"),
+                "intended_price": evidence.get("intended_price"),
+                "strategy_name": evidence.get("strategy_name"),
+                "indicators_present": evidence.get("indicators_present"),
+                "confidence": evidence.get("confidence"),
+            }
+            return evidence_out
+    return None
+
+
 # ─── Row mapper / 列映射器 ───────────────────────────────────────────
 
 
@@ -250,6 +488,7 @@ def map_fill_to_v050_row(
     run_id: str,
     fill_index: int,
     strategy_name: str,
+    decision_evidence: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     """Map JSON fill dict → V050 17-col INSERT params dict (or None to skip).
     將 JSON fill dict 映射到 V050 17-col INSERT 參數 dict（None 表 skip）。
@@ -262,6 +501,16 @@ def map_fill_to_v050_row(
                     idempotency_key composition; identical fills_emitted
                     sequence yields identical idempotency_key).
         strategy_name: V049 row's manifest_jsonb.strategy (looked up by caller).
+        decision_evidence: REF-20 Sprint B2 R5-T5 — optional decision evidence
+            dict (from ``consume_decision_evidence_for_fill``). When present,
+            inject as ``payload._replay_decision_evidence`` jsonb sub-object.
+            ``None`` means either (a) synthetic-walker run (no decision_traces)
+            or (b) adapter-path run with no matching trace for this fill.
+            REF-20 Sprint B2 R5-T5：選用決策證據 dict（來自
+            ``consume_decision_evidence_for_fill``）。提供時注入為
+            ``payload._replay_decision_evidence`` jsonb 子物件。``None`` 表示
+            (a) synthetic-walker run（無 decision_traces）或 (b) adapter-path
+            run 但本 fill 無對應 trace。
 
     Returns / 回傳:
         Mapped param dict on accept; ``None`` on skip (caller increments
@@ -338,8 +587,23 @@ def map_fill_to_v050_row(
     ts = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
 
     # Payload: serialize the entire fill dict; truncate if oversize.
+    # REF-20 Sprint B2 R5-T5: when decision_evidence is provided, inject as
+    # ``_replay_decision_evidence`` sub-object so the audit chain can be
+    # reconstructed without re-parsing replay_report.json. The injection
+    # happens BEFORE the size check so a giant evidence object would still
+    # fall back to truncation (DoS bound preserved).
+    #
     # payload：序列化整個 fill dict；超過則截斷。
-    payload_bytes = json.dumps(fill, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    # REF-20 Sprint B2 R5-T5：decision_evidence 存在時注入為
+    # ``_replay_decision_evidence`` 子物件，使審計鏈不需重 parse
+    # replay_report.json。注入發生於 size check 前，超大 evidence 仍會 fallback
+    # 截斷（保留 DoS bound）。
+    fill_with_evidence = dict(fill)
+    if decision_evidence is not None:
+        fill_with_evidence["_replay_decision_evidence"] = decision_evidence
+    payload_bytes = json.dumps(
+        fill_with_evidence, sort_keys=True, ensure_ascii=False
+    ).encode("utf-8")
     payload_truncated = False
     if len(payload_bytes) > MAX_PAYLOAD_BYTES:
         payload_truncated = True
@@ -351,8 +615,13 @@ def map_fill_to_v050_row(
             "symbol": fill.get("symbol"),
             "side": side,
         }
+        # When truncating, still preserve the decision evidence as a top-level
+        # marker (cheap; the evidence dict is bounded ~300 bytes by design).
+        # 截斷時仍保留 decision evidence 為頂層標記（便宜；evidence 設計上 bound ~300 bytes）。
+        if decision_evidence is not None:
+            payload_obj["_replay_decision_evidence"] = decision_evidence
     else:
-        payload_obj = fill
+        payload_obj = fill_with_evidence
 
     # Compose 17-col + 4-col-default param dict aligned to V050 CREATE TABLE
     # column order. ``sim_fill_id`` server-derived UUID (PK).
@@ -545,6 +814,20 @@ def persist_replay_report(
         strategy_name = "unknown_strategy"
         result.errors.append("strategy_name_missing_from_v049_manifest_jsonb")
 
+    # REF-20 Sprint B2 R5-T5: build decision-trace index for per-fill match.
+    # Empty index when:
+    #   * synthetic walker run (no decision_traces field; #[serde(default)] in
+    #     Rust side emits []).
+    #   * adapter-path run with empty trace (zero ticks emitted any action).
+    # Either case is non-fatal — mapping proceeds with decision_evidence=None.
+    #
+    # REF-20 Sprint B2 R5-T5：建立決策 trace index 供逐 fill 比對。空 index 於：
+    #   * synthetic walker run（缺 decision_traces；Rust 端 #[serde(default)] 發 []）
+    #   * adapter 路徑但 trace 空（無 tick 發 action）
+    # 兩種情況皆 non-fatal — 比對 fail 時 decision_evidence=None。
+    decision_traces = extract_decision_traces(envelope)
+    decision_index = build_decision_evidence_index(decision_traces)
+
     # Map each fill; collect non-None param dicts.
     # 映射每筆 fill；收集非 None 參數 dict。
     mapped: list[dict[str, Any]] = []
@@ -553,12 +836,16 @@ def persist_replay_report(
             result.fills_skipped += 1
             result.errors.append(f"fill_index_{idx}_not_object")
             continue
+        # R5-T5: greedy-match decision evidence (consumes from index).
+        # R5-T5：貪婪比對 decision evidence（從 index pop）。
+        decision_evidence = consume_decision_evidence_for_fill(fill, decision_index)
         params = map_fill_to_v050_row(
             fill,
             experiment_id=experiment_id,
             run_id=run_id,
             fill_index=idx,
             strategy_name=strategy_name,
+            decision_evidence=decision_evidence,
         )
         if params is None:
             result.fills_skipped += 1
@@ -594,6 +881,10 @@ __all__ = [
     "V050_ALLOWED_LIQUIDITY_ROLES",
     "V050_ALLOWED_SIDE_VALUES",
     "V050_ALLOWED_TIER_VALUES",
+    # R5-T5 decision-evidence helpers
+    "build_decision_evidence_index",
+    "consume_decision_evidence_for_fill",
+    "extract_decision_traces",
     "insert_simulated_fills",
     "lookup_strategy_name_from_v049",
     "map_fill_to_v050_row",
