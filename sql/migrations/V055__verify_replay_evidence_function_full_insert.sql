@@ -489,11 +489,30 @@ DECLARE
     v_arg_count INT;
     v_expected_arg_count INT := 19;
     v_identity_args TEXT;
-    -- V036 canonical 19-type identity_arguments output (PG 9.4+ uniform):
-    -- (no arg name, no DEFAULT clause; lower-cased; comma-space separated)
-    -- V036 canonical 19-type identity_arguments 輸出（PG 9.4+ 一致；無 arg
-    -- name / 無 DEFAULT clause / 小寫 / 逗號-空格分隔）。
-    v_expected_identity_args TEXT := 'text, text, text, text, text, double precision, double precision, integer, jsonb, boolean, boolean, text, text, text, text, timestamp with time zone, text, text, text';
+    -- Round 4 hotfix: PG 16 empirically returns arg names + types (no DEFAULT
+    -- clause) from pg_get_function_identity_arguments. PG docs claim "stripped
+    -- down" but empirical PG 16 includes arg names — Linux deploy 2026-05-05
+    -- confirmed signature drift exception when expected hardcoded as pure type
+    -- list. Expected string aligned to V036 declaration line 92-110 with
+    -- p_<name> <type> tokens (lower-cased, comma-space separated, no DEFAULT
+    -- clause). lower(...) wrapper kept for case-insensitive comparison with
+    -- line 527 lower(pg_get_function_identity_arguments(p.oid)).
+    -- Round 4 hotfix：PG 16 empirically pg_get_function_identity_arguments 回
+    -- arg name + 型別（無 DEFAULT clause）。PG docs 聲稱 "stripped-down" 但
+    -- 真實 PG 16 含 arg names — 2026-05-05 Linux deploy 確認 expected hardcode
+    -- 為純 type list 觸 signature drift exception。Expected 字串對齊 V036
+    -- declaration line 92-110 的 p_<name> <type> token（小寫、逗號空格分隔、
+    -- 無 DEFAULT clause）。lower(...) 包裹保留與 line 527
+    -- lower(pg_get_function_identity_arguments(p.oid)) case-insensitive 對齊。
+    v_expected_identity_args TEXT := lower(
+        'p_engine_mode text, p_symbol text, p_strategy_name text, p_source text, '
+        'p_recommendation_type text, p_expected_net_bps double precision, '
+        'p_confidence double precision, p_sample_count integer, p_payload jsonb, '
+        'p_applied boolean, p_requires_governance boolean, p_created_by text, '
+        'p_evidence_source_tier text, p_replay_experiment_id text, '
+        'p_manifest_hash text, p_expires_at timestamp with time zone, '
+        'p_decision_lease_id text, p_context_id text, p_intent_id text'
+    );
 BEGIN
     -- function existence
     SELECT EXISTS (
@@ -522,8 +541,23 @@ BEGIN
     END IF;
 
     -- arg signature byte-equal V036 via pg_get_function_identity_arguments.
-    -- pg_get_function_identity_arguments 是 PG 9.4+ canonical API：返回 ONLY
-    -- type list (no arg name, no DEFAULT clause)，可直接 strict equality 比對。
+    -- pg_get_function_identity_arguments 在 PG 16 empirically returns arg
+    -- names + types (no DEFAULT clause)，與 V036 declaration line 92-110 對齊；
+    -- strict equality 比對含 arg name 確保 V055 retrofit signature 不破 V036
+    -- caller binding（caller side 0 改動）。
+    -- pg_get_function_identity_arguments empirically returns arg names +
+    -- types on PG 16 (no DEFAULT clause), aligning with V036 declaration
+    -- line 92-110; strict equality including arg names ensures V055 retrofit
+    -- signature does not break V036 caller binding (callers need 0 changes).
+    -- (Round 4 hotfix 2026-05-05: PG docs claim "stripped-down" 但 PG 16 真實
+    --  行為含 arg names — Linux deploy 觸 signature drift exception；expected
+    --  string 必同步含 arg names。Lesson: future SQL ops 必先 query 真實 PG
+    --  output 取格式再 hardcode expected。)
+    -- (Round 4 hotfix 2026-05-05: PG docs claim "stripped-down" but PG 16
+    --  empirically includes arg names — Linux deploy raised signature drift
+    --  exception; expected string must include arg names too. Lesson: future
+    --  SQL ops must query empirical PG output for format before hardcoding
+    --  expected.)
     SELECT lower(pg_get_function_identity_arguments(p.oid)) INTO v_identity_args
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace

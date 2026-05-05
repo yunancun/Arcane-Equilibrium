@@ -818,3 +818,173 @@ E2 round 3 verdict 預期 = APPROVE-FOR-E4 if C-3 fix verified + round 2 4/5 fix
 ---
 
 E1 ROUND 3 SIGN-OFF DONE: report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_impl.md`; C-3 fix verdict = **option A (minimal change: delete phantom actor_id)**; 23 Mac pytest test (21 PASS / 2 SKIPPED); pending E2 round 3 re-verify
+
+---
+
+## §15. Round 4 hotfix — Linux PG 16 deploy fail repair (2026-05-05)
+
+### §15.1 Linux PG 16 deploy fail symptom
+
+PM via SSH bridge 在 Linux trade-core 跑 `bash helper_scripts/linux_bootstrap_db.sh --apply V055`：
+
+```
+psql:V055__verify_replay_evidence_function_full_insert.sql:542:
+  ERROR: V055 Guard A: verify_replay_evidence_and_insert arg signature drift.
+    Expected V036 byte-equal (19 types via pg_get_function_identity_arguments).
+    Expected: text, text, text, text, text, double precision, double precision,
+              integer, jsonb, boolean, boolean, text, text, text, text,
+              timestamp with time zone, text, text, text
+    Actual:   p_engine_mode text, p_symbol text, p_strategy_name text,
+              p_source text, p_recommendation_type text,
+              p_expected_net_bps double precision, p_confidence double precision,
+              p_sample_count integer, p_payload jsonb, p_applied boolean,
+              p_requires_governance boolean, p_created_by text,
+              p_evidence_source_tier text, p_replay_experiment_id text,
+              p_manifest_hash text, p_expires_at timestamp with time zone,
+              p_decision_lease_id text, p_context_id text, p_intent_id text
+```
+
+V055 Guard A（line 533-539 round 1+2+3 結構）的 strict equality `v_identity_args <> v_expected_identity_args` 觸 RAISE EXCEPTION，導致 V055 transaction abort，function 雖經 `CREATE OR REPLACE` 寫入但因 transaction rollback 整 V055 deploy fail。Linux V055 從未真 apply 成功。
+
+### §15.2 Root cause — PG 16 empirical 行為 vs PG docs claim drift
+
+**PG docs claim**（PostgreSQL 16 docs `pg_get_function_identity_arguments` 描述）：「returns the argument list necessary to identify a function, in the form it would need to appear in within `ALTER FUNCTION`, for instance. This form omits default values.」— 暗示「stripped-down」格式，可能不含 arg name。
+
+**PG 16 empirical 行為**（Linux deploy 直接驗）：實際 output 含 `p_<name> <type>` token list（含 arg names + types，無 DEFAULT clause），而非純 type list。
+
+**E1 round 2 fix C-2 的盲點**：
+- E1 round 2 為解 `pg_get_function_arguments` 在 PG 13+ 含 DEFAULT clause noise 的 substring 比對問題，改用 `pg_get_function_identity_arguments` + strict equality
+- 但 round 2 expected string hardcode 為純 type list（沿用 PG docs claim 字面理解），未實際 query PG 真實 output 取格式
+- Mac dev 走 static-parse 不真連 PG，無法 catch；只有 Linux PG 真 apply 才暴露
+
+**Round 4 fix scope**：將 V055 line 507-515 `v_expected_identity_args` 從純 type list 改為 with-arg-names 格式（19-token list, `p_<name> <type>` 對齊 V036 declaration line 92-110）。
+
+### §15.3 Fix description — `v_expected_identity_args` with-arg-names format
+
+**File**: `srv/sql/migrations/V055__verify_replay_evidence_function_full_insert.sql`
+
+**Line 507-515 變更**（pre-round-4 → round 4）：
+
+| 區段 | Round 2+3 | Round 4 hotfix |
+|---|---|---|
+| `v_expected_identity_args` 字面 | `'text, text, ..., text'`（純 19 type list） | `lower('p_engine_mode text, p_symbol text, ..., p_intent_id text')`（含 19 arg name + type token list） |
+| `lower(...)` wrapper | 無（純小寫 hardcode） | 有（與 line 527 `lower(pg_get_function_identity_arguments(p.oid))` 對齊；保留既有 case-insensitive 設計） |
+| 字串拼接方式 | 單行 inline | PG concatenated string literal multi-line（每行 string segment 自然空格分隔，PG 自動拼接） |
+
+**Line 524-526 註解變更**：原註解誤導「(no arg name, no DEFAULT clause)」，改為「empirically returns arg names + types (no DEFAULT clause)」+ 加 4 行 round 4 hotfix lesson 註解（中英對照雙語）。
+
+**LOC delta**：V055 879 → 913（+34 LOC，包含註解雙語擴充 + lesson 註解；遠 < §九 2000 cap）。
+
+**邊界守則 0 violation**：
+- 0 V036/V037/V049/V050/V051 modify ✅
+- 0 V055 既有 INSERT body 改動（C-1+C-3 fix 不破）✅
+- 0 V055 H-1 SAVEPOINT EXCEPTION removal 改動 ✅
+- 0 V055 cross-validation test 改動（C-3 test 不破）✅
+- 0 manifest_signer canonical_bytes 改動 ✅
+- 0 跨平台路徑硬編碼（`grep -E '/home/ncyu|/Users/[^/]+'` GREEN）✅
+- 0 硬邊界 column 觸碰 ✅
+- 0 REF-20_RESERVATION.md ledger 修改（per dispatch §「不動」邊界）✅
+
+### §15.4 Mac pytest round 4 結果
+
+Cmd: `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_v055_evidence_insert_fix.py -v`
+
+```
+============================= test session starts ==============================
+collected 23 items
+
+test_v055_function_existence PASSED
+test_v055_real_outcome_path PASSED
+test_v055_calibrated_replay_path PASSED
+test_v055_synthetic_replay_path PASSED
+test_v055_counterfactual_replay_path PASSED
+test_v055_v051_paired_check_still_enforced PASSED
+test_v055_v036_ttl_check_still_enforced PASSED
+test_v055_idempotent_apply PASSED
+test_v055_bilingual_module_note PASSED
+test_v055_no_user_home_path_hardcoded PASSED
+test_v055_no_hard_boundary_columns_touched PASSED
+test_v055_no_trading_or_live_mutation PASSED
+test_v055_writes_3_metadata_columns_in_insert PASSED
+test_v055_does_not_write_expires_at_column PASSED
+test_v055_signature_byte_equal_v036 PASSED
+test_v055_4_path_smoke_in_guard_a PASSED
+test_v055_no_silent_skip_in_guard_a PASSED
+test_v055_v049_not_null_set_documented PASSED
+test_v055_v049_source_not_null_invariant PASSED
+test_v055_stub_columns_exist_in_v049 PASSED
+test_v055_live_pg_real_outcome_row_body SKIPPED (live PG opt-in only)
+test_v055_live_pg_calibrated_replay_row_body SKIPPED (live PG opt-in only)
+test_v055_mock_mode_test_count_summary PASSED
+
+======================== 21 passed, 2 skipped in 0.03s =========================
+```
+
+**結果**：23 collected / 21 PASS / 2 SKIPPED — 與 round 3 baseline 完全一致（**0 case 動**）。
+
+**Why no test changed**：dispatch §「同步 Python sibling test」提示自查；E1 round 4 review case body 後確認：
+- `test_v055_function_existence`（line 272-324）只 grep V055 SQL 含 `pg_get_function_identity_arguments` substring + 含 `v_identity_args <> v_expected_identity_args` 比對結構 + 含 `byte-equal` / `signature drift` keyword
+- 0 case 對 `v_expected_identity_args` 字串內容格式（純 type vs with-arg-names）作 assertion
+- C-3 cross-validation test 走 V049 ADD COLUMN list parse，與 round 4 fix 無交集
+- Round 4 fix 純改 V055 SQL line 507-515 + 524-526 註解；test 不需動
+
+### §15.5 Lesson learned — PG docs claim vs empirical behavior gap
+
+**現象**：PG docs `pg_get_function_identity_arguments` 描述 "stripped-down"（暗示無 arg name），與 PG 16 實際 output（含 arg names + types）drift。
+
+**Root cause 反思**：
+1. **盲點 1 — Mac static-parse 局限**：Mac dev 走 SQL 文本 grep 模式，無法 catch SQL runtime semantic drift；只有 Linux PG 真 apply 才暴露
+2. **盲點 2 — 過度信任 docs claim**：E1 round 2 fix C-2 改用 `pg_get_function_identity_arguments` 時，沿用 PG docs claim 字面理解 hardcode expected 為純 type list，未先 query PG 真實 output 取格式
+3. **盲點 3 — Linux deploy SOP 漏 PG runtime smoke**：round 1+2+3 sign-off 的 acceptance binding 只看 Mac pytest（static-parse），沒納入「Linux PG `psql -f V055.sql` 必跑驗 RAISE 0 觸」的 deploy gate
+
+**Future SQL ops 的 lesson**：
+1. **PG 函數 metadata 函數調用前必先 query 真實 output**：在 expected 字串 hardcode 前，於本機 dev PG 跑 `SELECT pg_get_function_identity_arguments('learning.verify_replay_evidence_and_insert'::regprocedure);` 取真實 format，不直接根據 docs claim 推測
+2. **PG runtime smoke 必納 acceptance binding**：未來 V### migration 涉及 PG 內建 reflection 函數（`pg_get_function_identity_arguments` / `pg_get_function_arguments` / `pg_get_indexdef` / `obj_description` 等）時，acceptance binding 必含「Mac 上 docker pg:16 一鍵驗 RAISE 0 觸」或「Linux PG dry-run 驗」
+3. **Linux operator deploy 註記**：本 hotfix 後 Linux operator (PM SSH bridge apply) 跑 `bash helper_scripts/linux_bootstrap_db.sh --apply V055` 預期 NOTICE 流程：function existence → 19-arg pronargs match → 19-arg with-name signature equality match（**round 4 fix 對齊**）→ 4-tier post-INSERT smoke ROLLBACK → V055 retrofit complete
+
+**E1 round 4 立場**：本 hotfix 純修 expected string format drift，不擴大範圍處理「PG 函數 metadata 函數的 dev/runtime equivalence test fixture」（visible follow-up 但屬獨立 ticket，建議 P2 P2-V055-FOLLOWUP 開單；E1 round 4 不擴大 scope）。
+
+### §15.6 Round 4 R6-T0' acceptance binding
+
+PM dispatch round 4 explicit：
+
+| Item | Round 4 達成 |
+|---|---|
+| Linux PG 16 deploy fail symptom 記錄 | ✅ §15.1 |
+| Root cause（PG 16 empirical 含 arg names）| ✅ §15.2 |
+| Fix description（v_expected_identity_args with-arg-names 格式）| ✅ §15.3 + 真實 SQL diff |
+| Mac pytest round 4 結果 | ✅ §15.4 — 23/21/2 與 round 3 baseline 完全一致 |
+| Lesson learned | ✅ §15.5 — 3 盲點 + 3 future lesson |
+| 0 RESERVATION.md 改動 | ✅ E1 round 4 per dispatch 邊界，不動 ledger（PM closure update 時可選 v1.10 desc round 4 增補） |
+| 邊界守則全 GREEN | ✅ 8 守則 0 violation |
+
+### §15.7 E2 round 4 必 re-verify checklist（如 PM dispatch 觸發 E2 round 4 review）
+
+如果 PM 因 V055 SQL 改動觸發 E2 round 4 review：
+
+1. **V055 line 507-515 v_expected_identity_args**：with-arg-names 格式對齊 V036 declaration line 92-110；19 token；`lower(...)` wrapper 與 line 527 case-insensitive 對齊
+2. **V055 line 524-526 + 552-560 註解**：訂正「(no arg name)」誤導；加 round 4 hotfix lesson 雙語註解
+3. **Round 1+2+3 fix 全保留**：C-1 (3-col INSERT) / C-2 (identity_arguments path 仍用，僅修 expected format) / C-3 (no phantom column) / H-1 (no silent skip) / M-1 (mock-only doc) / M-2 (V049 NOT NULL doc) — 6 既有 fix 0 regression
+4. **23 case 0 動 + Mac pytest 23/21/2**：確認 round 4 fix 對 test 0 影響
+5. **§七 跨平台 + 硬邊界 grep**：0 user-home / 0 max_retries / live_* 觸碰
+
+E2 round 4 verdict 預期 = APPROVE-FOR-E4-OR-DIRECT-PM if V055 改動 verified + round 1+2+3 6 fix 全保留 + 邊界守則 0 violation。
+
+### §15.8 Pending PM Linux re-apply
+
+E1 round 4 sign-off 後 PM 端步驟：
+
+1. PM 接收 round 4 sign-off → 走 E2 round 4 review (optional, depends on PM judgment) → E4 round 4 regression (optional, 同樣 depends)
+2. PM commit + push V055 round 4 改動 + 本 sign-off report §15 update
+3. PM SSH bridge `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && bash helper_scripts/linux_bootstrap_db.sh --apply V055"`
+4. 驗 Linux PG 真實 NOTICE flow：
+   - `NOTICE: V055 retrofit applied: function CREATE OR REPLACE complete (0 phantom column)`
+   - `NOTICE: V055 Guard A: function existence + 19-arg pronargs + 19-arg with-name signature equality all PASS`
+   - `NOTICE: V055 Guard A 4-tier path post-INSERT smoke (real_outcome / calibrated_replay / synthetic_replay / counterfactual_replay) all PASS`
+   - `NOTICE: V055 retrofit complete; ROLLBACK TO SAVEPOINT v055_smoke clean`
+5. PM closure update REF-20_RESERVATION.md ledger 描述（v1.10 → v1.11 round 4 hotfix 增補一行）
+6. PM 最終 close R6-T0' acceptance binding，sprint C R6 後續 task 進入
+
+---
+
+E1 ROUND 4 SIGN-OFF DONE: report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_impl.md`; v_expected_identity_args 改為 with-arg-names format; Mac pytest 23/21/2 (與 round 3 baseline 完全一致); pending PM Linux re-apply
