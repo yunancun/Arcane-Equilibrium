@@ -1266,3 +1266,116 @@ E1 偏離 PA Q10 改採 Optional adapter pattern，**accept**：
 10. **lib regression PASS count 細究** — E1 sign-off 報告 2474 PASS 但 E2 實測 2478；經查 +4 = R5-T3 inline tests，E1 §1 表格 +250 LOC = 4 inline tests 已透露但 §7 PASS count 未更新。**LOW finding**，不阻 E4 但 commit message 應訂正。**抽象**：E1 sign-off PASS count 必驗證 baseline + new = total，發現 mismatch 不一定是 regression（可能是新 test 沒計入），但必須叫 E1 解釋。
 
 7. **NaN propagation 在 risk gate 路徑的 silent bypass** — `balance <= 0.0` 對 NaN 是 false → 1.6 不 trigger。Live router.rs 同行為（即 router.rs 也 silent passes NaN balance 進 Guardian）。R5-T2 是 mirror 設計，行為一致 = OK；但 R5-T3 構造 snapshot 端必 fail-loud — 因為 router 真實由 paper_state 餵入，paper_state 自己 NaN-safe；R5-T3 從 fixture 構造 snapshot 不必然 NaN-safe。**抽象**：任何 "mirror existing function" 的 replay-pure adapter 都需確認 caller 構造 input 端維持與原 caller 一致的 fail-closed 不變量；不對齊 = silent bypass。
+
+---
+
+## 2026-05-05 R6-T0' V055 retrofit Adversarial Review (REF-20 Sprint C — V036 PR3 retrofit)
+
+**Verdict**: RETURN-TO-E1 · 5 finding (2 CRITICAL + 1 HIGH + 2 MEDIUM)
+**Report path**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_e2_review.md`
+
+### 核心 finding 抽象
+
+**FINDING C-1 (CRITICAL) — 「docstring 字面 vs schema 真實」對抗審查盲點**：E1 沿用 V036 docstring (line 195-204)「expires_at / replay_experiment_id / manifest_hash / evidence_source_tier columns 由 V038-V040 retrofit 後實際物理存在」字面，IMPL V055 INSERT 寫 4 column。但 grep 全 V*.sql 確認 `expires_at` column **0 ADD COLUMN 到 mlde_shadow_recommendations**（V049 的 expires_at 是 replay.experiments 不同表；V051 只加 2 col）。V3 §4.2 spec line 181-187 明確只列 3 column，V036 docstring 4-column 字面是 PR1 期望但 V038-V040+V051 final reality 只 3 column。E1 mock test 16 PASS 0 catch 因 mock 不撞 PG schema。**抽象**：任何 SQL function retrofit 必驗 INSERT 寫的 column 在目標表真實 ADD（grep `ALTER TABLE <table> ADD COLUMN <col>` 全 migration history），不可信 docstring 字面 + 不可信 mock test PASS。E2 必跑「schema reality grep」+「spec source-of-truth 對齊」。
+
+**FINDING C-2 (CRITICAL) — pg_get_function_arguments DEFAULT clause 干擾 substring 比對**：E1 用 `position('text, text, ..., timestamp with time zone, text, text, text' in lower(v_arg_types))` 子串檢測 19-arg signature drift。但 PG 13+ `pg_get_function_arguments(oid)` 真實輸出含 arg name + DEFAULT clause（`p_evidence_source_tier text DEFAULT 'real_outcome'::text, p_replay_experiment_id text DEFAULT NULL::text, ...`），第 13-19 arg 因 DEFAULT 插入打斷連續 type list → substring 必 false negative → V055 deploy 在真 PG 必 RAISE EXCEPTION 即使 signature 100% byte-equal V036。Mac mock 不暴露此 bug。**抽象**：PG 函數 signature 比對必用 `pg_get_function_identity_arguments(oid)` (PG 9.4+ 通用，不含 arg name + DEFAULT clause) 或 `pg_proc.proargtypes::regtype[]`，禁用 `pg_get_function_arguments(oid)` substring 子串比對（DEFAULT clause 必干擾）。E1 sign-off 自承「PG 12/11 未驗」但連 PG 13+ 都沒在真實 PG 跑 = mock-only PASS 不可採。
+
+**FINDING H-1 (HIGH) — `EXCEPTION WHEN OTHERS THEN ROLLBACK + RETURN` silent skip 反模式 in SQL**：E1 用「stub `replay.experiments` INSERT 失敗 → RAISE NOTICE skipped + RETURN（退出整個 outer DO block）」處理 V049 NOT NULL set 不確定。問題：(1) `WHEN OTHERS` 太寬（吞 V051 paired CHECK / serialization / lock timeout 等真 bug），(2) RETURN 連 path 1 real_outcome（不依賴 FK）也 skip，(3) operator 永遠不知道 smoke 真跑了沒（fragility 來源）。是 CLAUDE.md §九「sql:pass」等價反模式。**抽象**：SQL `EXCEPTION WHEN OTHERS` 是 silent skip 反模式（與 Python except:pass 同等）；必窄條件 (`WHEN unique_violation OR foreign_key_violation`) + RAISE NOTICE 含 SQLSTATE+SQLERRM 全文；preferred fail-loud 直接 RAISE EXCEPTION 不 graceful skip。任何 schema NOT NULL 不確定必先 `\d <table>` / information_schema 抽 NOT NULL set 對齊 stub minimal subset，不靠 try-except 規避。
+
+**FINDING M-1 (MEDIUM) — Python mock test PASS 不能宣稱 acceptance PASS**：E1 sign-off §5「16/16 PASS / 2 SKIP」是 `_mock_verify_and_insert` Python in-memory dict capture（test:129-212），完全不模擬 PG schema。test_v055_writes_4_metadata_columns_in_insert 只驗 SQL 靜態文字含 4 column 名 — 「靜態文字含 ≠ schema 真存在」。**抽象**：sign-off 報告引用「N PASS」當 acceptance 證據必驗證測試實質：(a) static-parse PASS 對應 SQL syntax / contract structural；(b) mock function 鏡射 PASS 對應 caller-side logic invariant；(c) 真 PG live smoke PASS 才對應 deploy 行為 acceptance。三層獨立，不可互相覆蓋。E2 必查 sign-off 引用的 PASS 屬哪層 + 是否對應宣稱的 acceptance 條件。
+
+### E2 教訓追加
+
+11. **「docstring 字面 + spec 真實」對齊審查** — E1 IMPL V055 沿用 V036 docstring 4-column 但 V3 §4.2 spec 與 V051 ADD COLUMN reality 只 3 column。E2 必 cross-check 三層：(1) IMPL 引用的 docstring 字面，(2) PA / V3 spec 真實要求，(3) 實際 ADD COLUMN migration grep。三層任一不對齊 = retrofit 設計錯誤（不只是字面 typo）。**抽象 pattern**：retrofit 類 PR（含 silent corruption fix / pre-existing PRn retrofit / docstring TODO follow-up）必驗 docstring 字面與 spec/schema reality 對齊；docstring 字面是 PR 早期期望，可能與後續 spec 演進偏離。
+
+12. **PG function signature 比對的正確 PG primitive** — E1 用 `pg_get_function_arguments(oid)` substring 子串比對 → DEFAULT clause 干擾 → false positive RAISE。**抽象規範**：PG function signature drift 檢測必用 `pg_get_function_identity_arguments(oid)`（不含 arg name + DEFAULT；PG 9.4+ 通用）或 `pg_proc.proargtypes::regtype[]`（陣列式型別 ID）。禁用 `pg_get_function_arguments`（含 arg name + DEFAULT，substring 比對必 false positive）。E2 看到 SQL Guard 用 `pg_get_function_arguments` 必標 issue。
+
+13. **mock test 不能宣稱 acceptance — 三層證據獨立** — Python mock test PASS 是 caller-logic invariant 證據，不是 deploy 行為證據。E2 必 cross-check sign-off 引用 PASS 是 (a) static-parse / (b) mock-mirror / (c) PG-live 哪一層；任一層 PASS 不能跨層代替。E1 sign-off 慣性「16 PASS = acceptance」必由 E2 訂正。**抽象**：acceptance 必涵蓋對應行為層 — schema 改動 acceptance 必含 PG-live；business logic 改動 acceptance 必含 mock-mirror；contract 文字 acceptance 含 static-parse 即可。
+
+14. **SQL `EXCEPTION WHEN OTHERS` 是 silent skip 反模式** — 與 Python except:pass / `except Exception` 同等。E2 看 SQL DO $$ block 內任何 `WHEN OTHERS` 必標 issue：(a) 改窄條件，(b) 必 RAISE NOTICE 含 SQLSTATE+SQLERRM 全文，(c) preferred 直接 RAISE EXCEPTION fail-loud。CLAUDE.md §九 fail-loud 原則 SQL 等價形式。
+
+15. **schema reality grep 是 SQL retrofit PR 的對抗審查必跑** — `grep ALTER TABLE <target_table> ADD COLUMN <col>` 全 V*.sql 是「column 真實存在」唯一 source-of-truth；docstring / spec / sign-off 表格 / mock test 都不可採。E2 對任何 INSERT/SELECT 觸碰 column 的 SQL retrofit PR 必跑此 grep。
+
+## 2026-05-05 R6-T0' V055 Round 2 Re-verify (REF-20 Sprint C — V036 PR3 retrofit)
+
+**Verdict**: RETURN-TO-E1 round 3 · 1 NEW CRITICAL finding (C-3 phantom column)
+**Report path**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_e2_review.md`
+
+### Round 1 5 finding 全 fixed verified
+
+| # | Round 1 | Round 2 status |
+|---|---|---|
+| C-1 expires_at column 不存在 | RETURN | **FIXED** (V055:386-431 INSERT body 0 expires_at；preflight 0 check；test_v055_does_not_write_expires_at_column PASS) |
+| C-2 Guard A position() substring 在 PG 13+ false positive | RETURN | **FIXED** (V055:527 pg_get_function_identity_arguments + V055:533 strict equality) |
+| H-1 EXCEPTION WHEN OTHERS silent skip | RETURN | **FIXED** (V055:600-795 SAVEPOINT block 0 EXCEPTION block in active code；4 hits 全 comment) |
+| M-1 sign-off §5 文字訂正 | RETURN | **FIXED** (sign-off §13.4 + §13.5 訂正 + 7-step E4 regression command) |
+| M-2 V049 NOT NULL set 對齊 | RETURN | **PARTIAL FIXED, NEW BUG (C-3)** |
+
+### NEW FINDING C-3 (CRITICAL) — phantom column `actor_id` on replay.experiments
+
+**位置**: V055:671-687 stub INSERT block + E1 sign-off §13.1 M-2 fix description
+
+**描述**: Round 2 fix M-2 改 stub INSERT 加 `runtime_environment` 規避 conditional NOT NULL，但**保留** round 1 的 `actor_id` column（line 673）— **此 column 不存在於 `replay.experiments` 表**：
+- V045:199 `actor_id TEXT NOT NULL` 是 `replay.run_state` 的 column（不同表）
+- V049 22 col schema 用 `created_by TEXT` (V049:284) 標 actor，不是 `actor_id`
+- V041/V049 任一 ADD COLUMN 都未加 actor_id 給 replay.experiments
+- Linux deploy V055 必撞 PG error `column "actor_id" of relation "experiments" does not exist`
+
+E1 round 2 sign-off §13.1 M-2 fix description 寫「stub minimal subset = experiment_id + actor_id (V041 4-col 之外，但 V049 line 284 ADD; 為 nullable per V049 source)」是 **factually 錯**：V049:284 ADD 是 `parent_experiment_id` 不是 `actor_id`。
+
+E1 round 1 §12 點 1 已自承「我寫了 INSERT INTO replay.experiments (experiment_id, actor_id, status, ...)」是混淆 `replay.run_state.actor_id` 與不存在的 `replay.experiments.actor_id`。Round 2 fix 直接複用 round 1 stub structure 加 runtime_environment 但**未 audit `actor_id` 實存性**。
+
+**為何 round 2 mock test 0 catch**: M-2 driver test (test_v055_v049_not_null_set_documented line 873-905) 只 grep stub INSERT column list 是否含 `runtime_environment` + `experiment_id` + 字串 `'mac_dev_smoke_test_only'`，**0 cross-validation 確認 stub column 全部實存於 V049 schema**。Mock layer 本質限制（per round 1 finding M-1 仍適用）。
+
+**為何 round 1 E2 沒 catch**: round 1 E2 finding M-2 標的是「NOT NULL 完整性」+ 建議「跑 \d replay.experiments 抽 NOT NULL set 全列」，假設 stub column 名都正確。Round 2 E2 對抗反問 §4「真實 line 282-307 跑 grep 看到的是什麼」深挖到 V049 source 才發現 stub column `actor_id` 與 V049 真實 column 名不一致。Multi-round audit 不同對抗角度（accepted limitation）。
+
+### E2 教訓追加（lesson 16-19）
+
+16. **Round 2 fix 必 cross-validate 不只審 round 1 finding 是否 fix** — Round 1 5 finding 全 fixed 不等於 round 2 deliverable 完整。Fix 過程 introducer 新 bug 是常見模式（C-3 = M-2 fix 過程引入 phantom column）。E2 round 2 必對 round 2 改動範圍做完整 8 條 §九 + 9 條 §3 checklist re-run，不只 verify 5 finding 之 fix。
+
+17. **stub INSERT column list 必對 source schema cross-validate** — 任何 SQL retrofit 寫 stub INSERT (含 SAVEPOINT smoke 測試 row)，column list 必對 source migration 的 ADD COLUMN list cross-validate；docstring 寫的、spec 寫的、E1 心智模型寫的都不可採。E2 必查 grep `ADD COLUMN <col>` 在原始 CREATE TABLE migration + 後續所有 ALTER TABLE migration 的全 history。M-2 driver test 應加 cross-validation step（test_v055_stub_columns_exist_in_v049 by V049 source ADD COLUMN list grep）防 round 4+ 重犯。
+
+18. **`actor_id` vs `created_by` 跨表名稱混淆是常見 SQL retrofit 反模式** — `replay.run_state.actor_id` (V045) vs `replay.experiments.created_by` (V049) 兩 column 都標 actor 但名稱不同。E1 round 1 + round 2 都把 `actor_id` 直接複製到 `replay.experiments` stub 引用而未 grep audit。**抽象**：跨表 actor identity 命名不一致（即使語意相同）必逐表查 source；不可信 cross-table mental model。E2 必 grep `<col_name>` 全 V*.sql 確認哪表有此 column。
+
+19. **multi-round audit 對抗角度演進** — Round 1 E2 finding M-2 dedicated NOT NULL 完整性；round 2 E2 dedicated column 名實存性。同 finding 不同 round 不同角度。**抽象**：每 round audit 的對抗角度可能漂移（隨 fix 演進），E2 必每 round 重新 audit reasoning，不靠「上 round 已 PASS」當免審；fix 過程引入新 bug 必新 round catch。
+
+## REF-20 Sprint C R6-T0' V055 retrofit ROUND 3 (2026-05-05)
+
+E2 round 3 verdict = **PASS to E4** — 0 finding。E1 round 3 fix 完美修 C-3 phantom column bug + round 1+2 5 fix 全保留 + 邊界守則 0 violation + Mac pytest 23/21/2 verified。
+
+### Round 3 fix 真實性驗證（C-3 phantom column 移除）
+
+E2 round 3 自跑 Python parser + grep 驗證 stub INSERT 真實狀態:
+- Active SQL `actor_id` 0 hit (21 raw hit 全為 round 3 fix doc comments)
+- Stub INSERT column set = `{experiment_id, status, created_at, half_life_days, embargo_days, runtime_environment}` 6-col byte-equal round 3 expected
+- 移除路徑 = E1 選 A (最小變動)：刪 phantom column row + VALUES 對應 row，0 column 替代
+
+### NEW test `test_v055_stub_columns_exist_in_v049` 真實性驗證
+
+- 真 file read (非 hardcoded fixture): `_read_sql(V049_PATH)` real I/O
+- V049 ADD COLUMN regex parse: `re.compile(r"ADD COLUMN IF NOT EXISTS\s+(\w+)").finditer(v049_sql)` 真實計數
+- V041 base 4-col hardcoded: accepted (V041 stub bootstrap 結構穩定，改動成本 vs 風險 trade-off)
+- 6-step + adversarial sanity inline + dual phantom guard：
+  - (1) parse stub
+  - (2) parse V049 ADD COLUMN
+  - (3) V041 base
+  - (4) phantom = stub − schema 必 ∅
+  - (5) adversarial inline sanity (手 craft fake_phantom 驗 phantom-detection logic 真會 catch)
+  - (6) explicit positive expect 6-col + phantom guard `assert "actor_id" not in stub_columns`
+
+### V049 ADD COLUMN count drift footnote (push back 接受)
+
+E1 round 3 §14.7 點 1 push back: V049 真實 ADD COLUMN line 282-307 = **25 columns** (PA dispatch + E2 round 1+2 標稱「18」是 stale label)。E2 round 3 awk-grep V049:283-307 確認 = 25 (parent_experiment_id / created_by / runtime_environment / git_sha / engine_binary_sha / strategy_config_sha256 / risk_config_sha256 / timeframe / data_tier / execution_confidence / 6 個 window TIMESTAMPTZ / oos_embargo_seconds / total_candidates_K / manifest_jsonb / manifest_hash / manifest_signature / signature_key_ref / expires_at / status / output_policy_jsonb)。
+
+**E2 verdict**: ACCEPT push back; 不 RETURN E1 round 4。理由：
+- Test logic 用 `len(v049_add_columns) >= 18` 是下界，>= 25 也 PASS（forward-compat）
+- E1 doc-label drift 在 V055 SQL line 591/623/718 + test line 945/953/969/1009 「18 ADD COLUMN list」是 doc label only，不影響 test 真實邏輯
+- Per dispatch §5 explicit instruction: footnote but not RETURN
+
+### E2 教訓追加（lesson 20-22）
+
+20. **Multi-round audit C-3 fix 真實性驗證 + push back 邊界處理** — 收到 round 3 deliverable 必 (1) 跑 round 1+2 N-1 finding regression check (本 round 是 5 fix preserve check) + (2) 對抗 N round 新 fix 真實性 (本 round C-3 phantom 移除) + (3) accept E1 push back 範圍判斷（doc label drift 不擴大 scope vs schema-real bug）。E2 round N 不必每 round 都 RETURN——當 fix 完整 + 邊界守則尊 + push back 合理，PASS to E4 是正確 verdict。
+
+21. **「>=N」test 邏輯 + doc label drift 處理** — Test 用 `>= N` 下界 assertion 是 forward-compat 設計（V049 ADD COLUMN 未來增加也不 break test）。當 `N` 寫 stale 值（本 round 18 vs 真 25），test 邏輯仍正確；但 doc label 應 update。**抽象**：審 multi-round fix，必區分「load-bearing 計數」（必驗精準）vs「doc label」（test 邏輯不依賴 → drift accepted as PM closure scope）。本 round 「18」是 doc label，「>=18」是 test 下界，兩者解耦 = E2 不退回。
+
+22. **Inline adversarial sanity vs 拆獨立 test 的 trade-off** — Round 3 NEW test 含「6-step phantom 偵測 + step (5) inline adversarial sanity 手 craft fake_phantom + step (6) explicit positive 6-col」三層 mixed pattern。E2 verdict = accept inline pattern not split。理由：(1) inline 與「test 自身契約 = phantom-detection logic 工作」高度耦合 (2) 拆獨立 test 增 file size 不增 audit value (3) main test fail = sanity test fail (有同步保證) — 拆分反 weakening (sanity test 被 deprecated 的風險)。**抽象**：design choice 不是越細越好；多層守 in 同 test 也是合理 audit pattern，當主邏輯與 sanity 同生命週期。
