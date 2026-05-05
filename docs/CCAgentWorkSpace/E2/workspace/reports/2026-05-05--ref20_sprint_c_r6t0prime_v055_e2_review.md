@@ -585,3 +585,400 @@ PM action (closure phase, post E4 PASS):
 ---
 
 E2 ROUND 3 REVIEW DONE: report path: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_e2_review.md`; verdict: **PASS to E4**; findings: 0; pending E4 regression (Linux SSH bridge OPENCLAW_TEST_LIVE_PG=1 跑 23 PASS); PM action (closure phase): REF-20_RESERVATION ledger v1.10 entry 訂正 (4 col → 3 col / graceful skip 移除 / 16 PASS → **21 PASS**) + V049 ADD COLUMN count 18 → 25 update (PA dispatch + E2 round 1+2 docs) at commit phase
+
+---
+
+# ─────────────────────────────────────────────────────────────────────────
+# Round 5 Review (E2 re-verify after E1 round 5 design pivot — drop in-migration smoke)
+# ─────────────────────────────────────────────────────────────────────────
+
+**Date**: 2026-05-05
+**HEAD**: `622fd3e0` (Mac/Linux/origin synced; 4 unstaged file pending PM commit)
+**Source**: E1 round 5 sign-off `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_impl.md` §16 (round 5 design pivot append)
+**E1 round 5 deliverables**:
+- V055 SQL 715 LOC (round 4 913 → -198 LOC: drop in-migration 4-tier post-INSERT smoke per PL/pgSQL constraint)
+- Python test 1316 LOC ≠ E1 reported 1265 (sign-off §16.6 標 1265，**實際 1316**；E2 wc -l 驗；§round-5.6 §round-5.LOC 訂正)
+- Round 5 sign-off §16 appended (1192 LOC total — E2 round 3 baseline 820 → +372)
+- E1 memory.md round 5 lessons append (5237 → 5389 — actual; sign-off declared 5336 → 5389 +53)
+
+**Round 4 → 5 hotfix history**：
+- Round 4 hotfix `622fd3e0` 修 PG 16 empirical `pg_get_function_identity_arguments` 含 arg name (signature drift 假陽性)，**通過** Linux PG 16 deploy 的 line 539 expected_string assert
+- Round 5 在 round 4 fix 後**新撞** PG 硬限制：PL/pgSQL DO block 拒 explicit `SAVEPOINT name` / `ROLLBACK TO SAVEPOINT name`（line 883 fail）→ E1 採設計修正路線（drop in-migration smoke entirely）
+
+---
+
+## Round 5 Verdict: **RETURN-TO-E1 round 6** — 1 NEW CRITICAL finding (C-4)
+
+E1 round 5 design pivot **正確**（PL/pgSQL constraint 確實阻擋 in-migration savepoint，drop smoke + 遷至 sibling test 是合理 fix）。但設計遷移過程中**漏審 sibling test 自身的 stub INSERT** — `test_v055_live_pg_calibrated_replay_row_body` line 1252 仍含 round 2-3 已知的 phantom column `actor_id`。round 3 fix C-3 在 V055 SQL 內已修，但同等 phantom 在 sibling test 內 **alive**。
+
+**Round 5 design pivot 的核心矛盾**：E1 §16.4 明說「4-tier path verification migrated to Python sibling test under OPENCLAW_TEST_LIVE_PG=1」是 round 5 的 coverage migration substitute — 即 sibling test 取代 in-migration smoke 成為**主要** live PG verification path。但 sibling test 的 calibrated_replay live_pg case 在 Linux PG 16 OPENCLAW_TEST_LIVE_PG=1 跑時必撞 `column "actor_id" of relation "experiments" does not exist` → coverage migration 名義成立但**實**等於 0 真實 calibrated_replay live PG verification，等同 round 5 把 in-migration smoke 換成 broken sibling test。
+
+E2 round 5 verdict: **RETURN-TO-E1 round 6**。1 NEW CRITICAL finding（C-4 sibling stub phantom column carry-over）。
+
+---
+
+## Round 5 改動範圍
+
+| 檔 | Round 4 LOC | Round 5 LOC (E2 wc) | E1 reported | Δ vs round 4 | E1 vs E2 |
+|---|---:|---:|---:|---:|---|
+| `sql/migrations/V055__verify_replay_evidence_function_full_insert.sql` | 913 | **715** | 715 | -198 | match |
+| `program_code/.../tests/replay/test_v055_evidence_insert_fix.py` | 1294 | **1316** | 1265 | +22 | **mismatch (+51)** — 見 §round-5.LOC |
+| `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_impl.md` | 990 | **1192** | 1192 | +202 | match |
+| `sql/migrations/REF-20_RESERVATION.md` | unchanged | unchanged | 0 | 0 | (PM closure phase) |
+
+git status:
+```
+ M docs/CCAgentWorkSpace/E1/memory.md
+ M docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_impl.md
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_v055_evidence_insert_fix.py
+ M sql/migrations/V055__verify_replay_evidence_function_full_insert.sql
+```
+
+4 unstaged file，與 dispatch §「E1 round 5 deliverables 全 unstaged（4 file）」聲明對齊。
+
+---
+
+## §round-5.LOC: Python test LOC mismatch (E1 §16.6 1265 vs E2 wc 1316)
+
+E1 §16.6 LOC table 列 Python test 「1294 → 1265 (-29)」但 E2 自跑 `wc -l` 真實 = **1316**（差 +51）。
+
+對抗驗：
+```bash
+wc -l program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_v055_evidence_insert_fix.py
+```
+真實: **1316** (E2 verified at HEAD `622fd3e0`)
+
+E1 §16.6 LOC delta 計算誤差 +51 LOC — 不影響 round 5 design pivot semantic correctness，但 sign-off LOC 數字應準。建議 PM closure 時統一訂正 §16.6 column。**E2 round 5 不單獨 RETURN 此項**（sign-off 文字 fix only，不影響 V055 SQL 或 Python test 邏輯）。LOC 1316 仍 < §九 2000 cap，0 governance violation。
+
+---
+
+## Round 5 — 8 條 §九 checklist re-check
+
+| Item | Round 3 | Round 5 | 變化 |
+|---|---|---|---|
+| 改動範圍與 PA 方案一致 | PASS | **PASS** | dispatch §1+§2 邊界 0 violation；V036/V037/V049/V050/V051 0 modify；H-1 SAVEPOINT/ROLLBACK 移除路徑乾淨 |
+| 沒有 except:pass 或靜默吞異常 | PASS | **PASS** | grep `EXCEPTION WHEN OTHERS` V055 = 0 hit (raw + post-strip-comment 全 0)；H-1 finding 經 drop smoke 自然延續，0 regression |
+| 日誌使用 %s 格式 | N/A | N/A | — |
+| 新 API 端點 _require_operator_role | N/A | N/A | — |
+| except HTTPException 在 except Exception 之前 | N/A | N/A | — |
+| detail=str(e) 已改 | N/A | N/A | — |
+| asyncio blocking threading.Lock | N/A | N/A | — |
+| 沒有私有屬性穿透 | PASS | PASS | — |
+
+---
+
+## Round 5 — OpenClaw 9 條 §3 checklist re-check
+
+| Item | Round 3 | Round 5 | 變化 |
+|---|---|---|---|
+| 跨平台 grep `/home/ncyu`/`/Users/[a-z]+` | PASS | **PASS** | V055 SQL 0 hit；test:659 唯一命中是 detection regex 自身 (test_v055_no_user_home_path_hardcoded 內，false positive accepted) |
+| 雙語注釋 (CLAUDE.md §七) | PASS | **PASS** | round 5 design pivot section 雙語對照 (line 114-151 + 614-674)；Operator note 第 4 點雙語擴展；(REMOVED) breadcrumb 雙語 |
+| Rust unsafe | N/A | N/A | — |
+| 跨語言 IPC | N/A | N/A | — |
+| Migration Guard A/B/C | PASS | **PASS** | Guard A 3 invariant (function existence + pronargs + identity_arguments) 全保留 line 522-612；C-2 fix 不破；Guard A 4-tier post-INSERT smoke drop = design pivot non-violation (sibling test 替代覆蓋) |
+| healthcheck 配對 | N/A | N/A | — |
+| Singleton 登記 §九 表 | N/A | N/A | — |
+| 文件大小 800/1200 | PASS | **PASS** | V055=715 / test=1316 全 < §九 2000 cap (test 1316 ≥ 800 warn line, accepted; V055 715 也 ≥ 800 但 round 5 是 LOC 減)。**注**：round 4 1500→2000 cap 為 OpenClaw governance 2026-05-05 raise，§九 既載 |
+| Bybit API | N/A | N/A | — |
+
+---
+
+## Round 5 對抗反問結果（dispatch §6 5 條）
+
+### Q1: 你說 V055 round 5 drop smoke — grep `SAVEPOINT` / `ROLLBACK TO` / `INSERT INTO replay.experiments` 真實 0 hit?
+
+**A**: **PASS（V055 SQL 內 active code 0 hit；doc comments 仍提及 8 hit）**.
+
+```bash
+$ grep -nE "INSERT INTO replay\.experiments" V055.sql
+(0 hit)
+
+$ grep -nE "EXCEPTION WHEN OTHERS" V055.sql
+(0 hit)
+
+$ grep -nE "actor_id" V055.sql
+(0 hit)
+
+$ grep -n "SAVEPOINT v055_smoke" V055.sql
+(0 hit)
+
+$ grep -n "ROLLBACK TO SAVEPOINT v055_smoke" V055.sql
+(0 hit)
+
+$ grep -n "SAVEPOINT" V055.sql
+115/131:  -- (註解，雙語對照 PL/pgSQL constraint)
+619/640/644-645/664: (round 5 design pivot section 雙語注釋)
+```
+
+V055 SQL 8 個 SAVEPOINT 字串全在 design pivot doc comments 內，0 active SQL；V055 SQL 0 active stub INSERT；0 actor_id 殘留。
+
+### Q2: Round 1-4 6 finding 全保留 — round 5 drop block 過程沒誤刪 Guard A 三段?
+
+**A**: **PASS** (6/6 preserved; +0 new degradation in V055 SQL).
+
+| Fix | Round 5 verify 方法 | 結果 |
+|---|---|---|
+| **C-1** (round 2): expires_at column 不寫 mlde_shadow_recommendations | E2 round 5 grep V055 INSERT body line 422-471：3 column (`evidence_source_tier` / `replay_experiment_id` / `manifest_hash`) 在；0 `expires_at` column 字面在 INSERT body | ✅ PASS |
+| **C-2** (round 2): identity_arguments + strict equality | grep V055 line 597 `pg_get_function_identity_arguments` + line 603 `<>` strict equality + round 4 hotfix expected_string with-arg-names 格式 line 543-551 | ✅ PASS |
+| **C-3** (round 3): no phantom column actor_id | V055 SQL 0 actor_id hit (round 5 drop stub block，phantom 隨之自然消失於 V055 SQL 內) | ✅ PASS in V055 SQL（但 sibling test 仍含，見 C-4 NEW finding） |
+| **H-1** (round 2): no silent skip | V055 SQL 0 EXCEPTION WHEN OTHERS hit；drop smoke entirely → 不引入 EXCEPTION block → H-1 自動延續 | ✅ PASS |
+| **M-1** (round 2): sign-off mock-only doc | E1 round 5 §16.5 explicit「sibling test 4 path 是 mock-only 鏡射；live PG 真實 INSERT only test_v055_live_pg_*」 | ✅ PASS |
+| **M-2** (round 2): V049 NOT NULL set documented | V049 source still has 25 ADD COLUMN all NULLABLE; sibling test_v055_v049_source_not_null_invariant 仍 PASS | ✅ PASS (相關 stub 隨 round 5 design pivot 移除，但 V049 schema doc 仍 documented) |
+| **R4 hotfix** (round 4): expected_string with-arg-names | V055 line 543-551 v_expected_identity_args 含 `p_engine_mode text, p_symbol text, ..., p_intent_id text` 19 token | ✅ PASS |
+
+Guard A 三段（line 552-612）全保留：
+- Line 553-563 function existence check
+- Line 565-577 pronargs = 19 check
+- Line 579-609 identity_arguments byte-equal V036（含 round 4 fix expected_string format）
+
+V055 INSERT body line 422-471 全保留 (3 column 寫入 + 17 column total 對齊 V036)。
+
+### Q3: 4 SQL static-parse test 升級是否真實對齊 round 5 現實 — case 命名是否仍語意一致?
+
+**A**: **PASS for assertion logic** + **PARTIAL FAIL for naming consistency**.
+
+E1 round 5 升級的 4 test：
+1. `test_v055_idempotent_apply` (line 585) — round 5 加 0 SAVEPOINT v055_smoke + 0 ROLLBACK TO SAVEPOINT v055_smoke 殘留檢查 ✅ assertion 對齊 round 5 現實
+2. `test_v055_4_path_smoke_in_guard_a` (line 828) — 整 test 升級為 verify round 5 design pivot section 雙語 + 0 SAVEPOINT 殘留 + 4 sibling test name reference + OPENCLAW_TEST_LIVE_PG env reference + 4 tier 字串仍在 doc comments ✅ assertion 對齊
+3. `test_v055_v049_not_null_set_documented` (line 939) — 升級為 0 stub INSERT INTO replay.experiments 殘留 + Round 5 design pivot section 在 file header ✅ assertion 對齊
+4. `test_v055_stub_columns_exist_in_v049` (line 1036) — 升級為 0 stub INSERT 殘留 + actor_id phantom column 從根 eliminated（V055 SQL 內）+ V049/V041 schema parse 仍可解析 ✅ assertion 對齊
+
+**PARTIAL FAIL — 命名不一致**：
+- `test_v055_4_path_smoke_in_guard_a` (line 828) 名 contains `smoke_in_guard_a` 但 round 5 已 drop in-migration smoke；E1 自承 (line 829-861 docstring)「本 test (round 5 升級) 改驗 V055 SQL ... 0 SAVEPOINT v055_smoke 殘留」— 名稱與實際 assertion 矛盾 (Guard A round 5 不再有 smoke)；E1 round 5 §16.5 修法表格亦標明「整 test 升級驗 round 5 design pivot section ...」未重命名
+- `test_v055_v049_not_null_set_documented` (line 939) — 名為「v049_not_null_set_documented」但 round 5 升級後 assertion 的核心是「0 stub INSERT 殘留 + design pivot section 存在」，與「V049 NOT NULL set」語意已脫節
+- `test_v055_stub_columns_exist_in_v049` (line 1036) — 名為「stub_columns_exist_in_v049」但 round 5 後 V055 SQL 0 stub INSERT，本 test assertion 主要驗「0 stub INSERT 殘留 + V049/V041 schema parse 仍可解析（為 sibling test 保留）」，與「stub columns exist in v049」語意半矛盾（test 自身也 explicit 不再有 stub）
+
+E2 round 5 verdict on naming: dispatch §2 explicit「如 E2 應 push back 重命名 (如 `test_v055_no_in_migration_smoke_round5_pivot` 或 `test_v055_smoke_dropped_per_pl_pgsql_constraint`)」— E1 round 5 未重命名是 minor governance debt，但 E1 sign-off §16.5 explicit 自承 trade-off「最小改動原則」。**E2 round 5 評估**：命名 drift 是 LOW severity finding（assertion logic 仍 valid，未來閱讀者透過 docstring 可理解 round 5 升級語意），E2 round 5 **不單獨 RETURN 命名 issue**（per E2 LOW severity rule = 退回 OR E2 直修；考慮命名 drift 涉 4 test rename + impact summary count test，由 E1 round 6 一併處理較乾淨）。
+
+→ Round 5 4 test 升級 logic 對齊 PASS；命名 LOW debt 建議 E1 round 6 順手 rename 或派 P3 ticket 後續處理。
+
+### Q4: Python sibling test 4 path case 在 OPENCLAW_TEST_LIVE_PG=1 是否真有 INSERT + SELECT + 4 column verify (而非 mock-only)?
+
+**A**: **CRITICAL FAIL** — round 5 design pivot's coverage migration premise 真實**有缺**.
+
+**對抗驗 1：4 hermetic path test 真實是 mock-only**
+- `test_v055_real_outcome_path` (line 332-370): `_mock_verify_and_insert(...)` Python mirror，`_row_capture` dict capture，**0 真 PG INSERT**
+- `test_v055_calibrated_replay_path` (line 378-418): 同上 mock pattern
+- `test_v055_synthetic_replay_path` (line 426-463): 同上 mock pattern
+- `test_v055_counterfactual_replay_path` (line 471-508): 同上 mock pattern
+- 4 case 預設 Mac 跑 + Linux 跑 全用 mock — **不需** OPENCLAW_TEST_LIVE_PG=1 就跑（Mac pytest round 5 baseline 4 case PASS 是 mock layer），與 dispatch §3 描述「OPENCLAW_TEST_LIVE_PG=1 真 PG INSERT」不符
+
+**對抗驗 2：live_pg case 真實只 cover 2 tier (real_outcome + calibrated_replay)；不是 dispatch §3 binding 的 4-tier**
+- `test_v055_live_pg_real_outcome_row_body` (line 1163): 真 PG INSERT real_outcome path；**clean** (不需 stub experiment 因 real_outcome 不寫 exp_id+hash)
+- `test_v055_live_pg_calibrated_replay_row_body` (line 1217): 真 PG INSERT calibrated_replay path + 內部 stub experiment INSERT；**有 C-3 phantom column actor_id bug 在 line 1252**（**詳 FINDING C-4 NEW**）
+- **0 synthetic_replay 真 PG case + 0 counterfactual_replay 真 PG case**
+
+dispatch §3 binding 「每 case 確實 INSERT + SELECT + 4 column verify（不只 mock，含真 PG 真 INSERT under OPENCLAW_TEST_LIVE_PG=1）」**未真實達成**：
+- 4 hermetic case 全 mock（不需 OPENCLAW_TEST_LIVE_PG=1）
+- 2 live_pg case 之一 broken (calibrated_replay 撞 actor_id)，另一 (real_outcome) clean
+- 0 synthetic_replay live PG case + 0 counterfactual_replay live PG case
+
+**E1 round 5 §16.4 表格 misleading**：
+> | Test name | 覆蓋 path | INSERT + SELECT row body 對齊 args |
+> | `test_v055_real_outcome_path` | real_outcome | tier='real_outcome' + ... |
+
+§16.4 表格說 4 hermetic case「INSERT + SELECT row body 對齊 args」— 但實際 4 case 是 **mock-only INSERT + mock _row_capture 對齊**，**不是真 PG INSERT + SELECT**。E1 §16.4 表格 wording 與 mock layer 實況有 gap，建議訂正為「mock-only INSERT + _row_capture 對齊」+ 補列「真 PG INSERT 只 2 case (real_outcome live_pg + calibrated_replay live_pg)」+ 加「synthetic_replay live_pg + counterfactual_replay live_pg 為 round 5 design pivot 後仍缺的 binding gap」P2 ticket 提案。
+
+→ **C-4 NEW (CRITICAL)** + Q4 揭露 round 5 coverage migration shortfall（實際真 PG live coverage = 2 tier；dispatch §3 binding 4-tier）
+
+### Q5: LOC 715 對 round 4 913 = -198 — 是否合理 (drop smoke 預估 ~200 LOC)?
+
+**A**: **PASS** (within reason; -198 vs predicted -300; gap +102 LOC reasonable for design-pivot bilingual doc additions).
+
+E1 §16.6 自承「dispatch §1 預期 V055 913 → ~600 (-300)。實際 -198 因加 round 5 design pivot 雙語 section（70 LOC）+ Operator note 雙語擴展（10 LOC）+ (REMOVED) breadcrumb 註解（30 LOC）」。
+
+E2 round 5 對抗驗：
+- Round 4 913 → round 5 715 = -198 LOC
+- Drop smoke 真實救 ~270 LOC actual code（line 615-672 round 4 4-tier smoke + stub INSERT + 4 path SELECT + EXCEPTION block + ROLLBACK TO SAVEPOINT — 全 drop）
+- Add round 5 design pivot bilingual section ~70 LOC (line 114-151 file header + 614-674 inline section)
+- Add round 5 design pivot Operator note 第 4 點雙語 ~12 LOC (line 689-714)
+- Net: -270 + 70 + 12 = **-188 LOC** (誤差 +10 LOC 為 Format/blank 細節差，可接受)
+
+E1 §16.6 預估 -270 + 110 = -160；實際 -198；gap +38 LOC = E1 預估略 conservative；E2 round 5 接受作 reasonable engineering estimate。**0 隱性新 logic** 引入。
+
+V055 LOC 715 < §九 2000 cap (large headroom)；test LOC 1316 < §九 2000 cap (large headroom)。
+
+→ Round 5 LOC delta within reason，0 governance violation。
+
+---
+
+## Round 5 NEW Findings 總表
+
+### FINDING C-4（NEW CRITICAL）— sibling test live_pg stub INSERT phantom column carry-over
+
+| 嚴重性 | 位置 | 描述 |
+|---|---|---|
+| **CRITICAL** | `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_v055_evidence_insert_fix.py:1252` (within `test_v055_live_pg_calibrated_replay_row_body` 1217-1296) | Round 5 design pivot 將 4-tier post-INSERT path verification 由 in-migration smoke 遷至 sibling Python test (E1 §16.4 explicit binding)；live_pg 路徑是 round 5 後 calibrated_replay tier 的**唯一**真 PG verification surface (4 hermetic case 是 mock-only)。但 line 1252 stub INSERT 仍含 round 2-3 已知 phantom column `actor_id`：`INSERT INTO replay.experiments (experiment_id, actor_id, status, created_at, half_life_days, embargo_days, runtime_environment) VALUES (...)`。Round 3 fix C-3 修了 V055 SQL 內 stub block actor_id phantom，但同 phantom 在 sibling test live_pg 路徑**仍 alive**。E1 round 5 §16.4 自描述「4-tier path verification migrated to Python sibling test under OPENCLAW_TEST_LIVE_PG=1」— Linux PG 16 跑 OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN env，line 1252 INSERT 必撞 PG `column "actor_id" of relation "experiments" does not exist`（V049 line 282-307 ADD COLUMN list 真實命名 `created_by` line 284，V045:199 actor_id 是 `replay.run_state` 表 column、與 `replay.experiments` 無關）。E2 round 3 finding C-3 揭發此 phantom 後，round 3 sign-off § 14.6.2 + V055 SQL line 707 stub INSERT block 已修，但**未同步審 sibling test 自身的 stub INSERT**。Round 5 design pivot 將 coverage 遷至 sibling test，提升 sibling test 從「Mac dev 取代 doc」到「round 5 後唯一 calibrated_replay 真 PG verification path」— phantom column risk 從 V055 SQL「migration deploy 端」遷至 sibling test「Linux E4 regression 端」未隨之 catch + fix。Round 5 design pivot 有效性實證**0 calibrated_replay live_pg verification 真實成立**（round 5 §16.5 自表「sibling test 4 path 已等價覆蓋」名義成立但實際被 phantom column carry-over 蝕空）。同時 E1 round 5 §16.5 自相矛盾於 line 1042 docstring「round 5 (2026-05-05): in-migration ... drop ... actor_id phantom column risk goes away with stub INSERT removal」— **但 stub INSERT removal 只發生於 V055 SQL，sibling test 內 stub INSERT 仍 alive**。 |
+
+**對抗驗證真實性 (E2 round 5 自跑)**：
+
+```bash
+$ grep -n "actor_id" .../test_v055_evidence_insert_fix.py | tail -1
+1252:                        experiment_id, actor_id, status, created_at,
+
+$ sed -n '1248,1265p' .../test_v055_evidence_insert_fix.py
+                # via runtime_environment='mac_dev_smoke_test_only'
+                cur.execute(
+                    """
+                    INSERT INTO replay.experiments (
+                        experiment_id, actor_id, status, created_at,
+                        half_life_days, embargo_days, runtime_environment
+                    ) VALUES (
+                        %s, 'v055_live_smoke', 'created', now(),
+                        14.0, 14, 'mac_dev_smoke_test_only'
+                    )
+                    ON CONFLICT (experiment_id) DO NOTHING
+                    """,
+                    (test_exp_id,),
+                )
+```
+
+對 V049 ADD COLUMN list cross-validate：
+```sql
+-- V049 line 282-307 ADD COLUMN 25 columns: parent_experiment_id, created_by, runtime_environment, ..., status, output_policy_jsonb
+-- 0 actor_id in V049 schema
+```
+
+→ Linux PG 16 OPENCLAW_TEST_LIVE_PG=1 跑 `test_v055_live_pg_calibrated_replay_row_body` 必失敗於 stub INSERT step (line 1244-1261)，無法進到 verify_replay_evidence_and_insert call (line 1263-1273) → calibrated_replay tier 真 PG verification 等於 0。
+
+**修法建議 (E1 round 6 必修)**：
+
+修 line 1251-1261 stub INSERT 移除 `actor_id` 改用 `created_by` 對齊 V049:284 真實 column name：
+```python
+cur.execute(
+    """
+    INSERT INTO replay.experiments (
+        experiment_id, created_by, status, created_at,
+        half_life_days, embargo_days, runtime_environment
+    ) VALUES (
+        %s, 'v055_live_smoke', 'created', now(),
+        14.0, 14, 'mac_dev_smoke_test_only'
+    )
+    ON CONFLICT (experiment_id) DO NOTHING
+    """,
+    (test_exp_id,),
+)
+```
+（同 round 3 V055 SQL 內 stub fix 的修法）
+
+順手檢查 + 同步修：
+1. Line 1247-1248 Round 2 fix 注釋訂正：「stub 含 V049 conditional NOT NULL bypass via runtime_environment='mac_dev_smoke_test_only'」訂正為「(round 6 fix per round 5 E2 finding C-4): stub 用 V049:284 真實 column `created_by` (V045:199 `replay.run_state.actor_id` 與此表無關)」雙語雙保險
+2. **新加** synthetic_replay live_pg case 與 counterfactual_replay live_pg case（dispatch §3 binding「4 case」+ round 5 §16.4 「Python sibling test 4 path 已等價覆蓋」claim 完整兌現）。預估 ~80-100 LOC 新增，仍 < §九 2000 cap。
+   - Option A（推薦）：派 round 6 一併補上
+   - Option B：作 round 5 P2 ticket 補做（dispatch §6.4 binding 仍未完整滿足；建議不採此 option）
+
+**為何 round 1-4 沒 catch**：
+- Round 1-4 E2 finding 全聚焦 V055 SQL 內 stub INSERT 的 phantom（C-3）
+- Sibling test stub INSERT line 1244-1261 是 **round 2 加的** (per round 2 sign-off §13.3 「4-tier sibling test cases」block)，與 V055 SQL stub INSERT 同期 land
+- Round 3 fix C-3 在 V055 SQL 內 land 但**未 cross-check sibling test 內同等 stub INSERT 是否帶 phantom**
+- Round 4 hotfix 純解 expected_string format drift，不觸 stub
+- Round 5 design pivot 把 V055 SQL stub INSERT 整段 drop（stub 隨 smoke 一起移除），但**從未 audit sibling test 自身的 stub INSERT 是否同等乾淨**
+- E1 round 5 §16.5 line 1042 自承「actor_id phantom column risk goes away with stub INSERT removal」— 此聲明只 apply V055 SQL，未 verify sibling test (E1 自身盲點)
+
+**E2 round 5 認為**：round 5 design pivot 邏輯 sound (drop in-migration smoke + 遷至 sibling test 解 PL/pgSQL constraint 是合理 fix)，但 **coverage migration 的「驗收條件」設計不完整** — round 5 sign-off binding 應加「sibling test 內所有 stub INSERT cross-validate against V049 schema」步驟才能保 round 5 design pivot 的 coverage promise 真實成立。E1 round 6 必同時 fix line 1252 + 補 missing 2 tier (synthetic / counterfactual) live_pg case 才完整兌現 round 5 design pivot 的 coverage migration claim。
+
+---
+
+## Round 1-4 + Round 4 hotfix Findings 6 個 re-verify 結果
+
+| # | Finding | Round 5 Status | 證據 |
+|---|---|---|---|
+| C-1 | expires_at column 不寫 mlde_shadow_recommendations | **VERIFIED PASS** | V055 INSERT body line 422-471 仍 3 column；0 expires_at 字面 |
+| C-2 | identity_arguments + strict equality | **VERIFIED PASS** | line 597-609 strict equality 仍在 |
+| C-3 | no phantom column actor_id (V055 SQL) | **VERIFIED PASS in V055 SQL** ✅ + **REGRESSED in sibling test** (NEW C-4 finding) | V055 SQL 0 actor_id；sibling test line 1252 actor_id alive |
+| H-1 | no silent skip | **VERIFIED PASS** | drop smoke 後 0 EXCEPTION block (auto-extended fix) |
+| M-1 | sign-off §13 訂正 | **VERIFIED PASS** | E1 round 5 §16.5 mock-only doc 對齊 |
+| M-2 | V049 NOT NULL set documented | **VERIFIED PASS** | 25 ADD COLUMN 全 NULLABLE；test_v055_v049_source_not_null_invariant 仍 PASS |
+| Round 4 hotfix | expected_string with-arg-names | **VERIFIED PASS** | line 543-551 with-arg-names format 保留 |
+
+---
+
+## Round 5 Findings 1 個
+
+### CRITICAL (1)
+- **C-4 (NEW)**: sibling test `test_v055_live_pg_calibrated_replay_row_body` line 1252 stub INSERT 仍含 phantom column `actor_id` (round 3 fix C-3 在 V055 SQL 已修但未同步 sibling test)；round 5 design pivot 把 calibrated_replay tier 真 PG verification 路徑遷至此 sibling test，phantom carry-over 等於 round 5 「sibling test 等價覆蓋」claim 在 calibrated_replay tier 失效 + Linux PG OPENCLAW_TEST_LIVE_PG=1 跑必撞 PG error；同時 round 5 design pivot 後缺 synthetic_replay + counterfactual_replay live_pg case，dispatch §3 binding「4 case INSERT + SELECT + 4 column verify under OPENCLAW_TEST_LIVE_PG=1」實際只 2 case (real_outcome live_pg + calibrated_replay live_pg) 且 後者 broken。
+
+### LOW (governance debt, optional fix)
+- 4 升級 SQL static-parse test 命名與 round 5 assertion 語意不完全一致（如 `test_v055_4_path_smoke_in_guard_a` 仍用「smoke_in_guard_a」字眼但 round 5 已 drop in-migration smoke）— E2 round 5 不 RETURN 此項，建議 E1 round 6 順手 rename 或派 P3 ticket。
+
+---
+
+## Round 5 結論
+
+**RETURN-TO-E1 round 6** — 1 NEW CRITICAL finding (C-4)。
+
+E1 round 5 design pivot 邏輯正確（PL/pgSQL constraint 確實 + drop smoke 是合理 fix），V055 SQL 內所有 round 1-4 + round 4 hotfix 6 fix 完整保留 0 regression。但 sibling test 自身的 stub INSERT 未隨 round 3 V055 SQL fix 同步修，round 5 design pivot 把 coverage 遷至 sibling test 後 phantom column risk 從 V055 SQL「deploy 端」**遷移**至 sibling test「E4 regression 端」未 catch。
+
+直接結果：
+- Linux PG 16 跑 OPENCLAW_TEST_LIVE_PG=1 `test_v055_live_pg_calibrated_replay_row_body` **必失敗於** stub INSERT step
+- Round 5 §16.4 表格描述 4 path 「等價覆蓋」實質為 mock-only (4 hermetic case) + 2 live_pg case + 1 broken (calibrated)
+- dispatch §3 binding「4 case INSERT + SELECT + 4 column verify under OPENCLAW_TEST_LIVE_PG=1」未完整達成：實際 = 2 live_pg case (1 clean + 1 broken)，0 synthetic_replay + 0 counterfactual_replay live_pg case
+
+E2 round 5 對抗反問 §4 真實揭發此 coverage migration shortfall。E1 round 6 必同時 fix line 1252 + 補 2 missing live_pg tier case 才完整兌現 round 5 design pivot 的 coverage migration claim。
+
+---
+
+## Round 5 退回 E1 round 6 修復清單
+
+### CRITICAL (必修，修完才能重 E2 round 6)
+
+1. **FINDING C-4 — sibling test stub INSERT phantom column修復**
+   - File: `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_v055_evidence_insert_fix.py`
+   - Line 1252 INSERT INTO replay.experiments stub:
+     ```python
+     # 改前：
+     INSERT INTO replay.experiments (
+         experiment_id, actor_id, status, created_at,
+         half_life_days, embargo_days, runtime_environment
+     )
+     # 改後：
+     INSERT INTO replay.experiments (
+         experiment_id, created_by, status, created_at,
+         half_life_days, embargo_days, runtime_environment
+     )
+     ```
+   - Line 1247-1248 round 2 fix 注釋同步訂正（標明 round 6 fix per round 5 E2 C-4）
+
+2. **FINDING C-4 補完 — 補 synthetic_replay + counterfactual_replay live_pg case**
+   - 新加 `test_v055_live_pg_synthetic_replay_row_body` (預估 ~50 LOC，patterns 對齊 calibrated_replay live_pg)
+   - 新加 `test_v055_live_pg_counterfactual_replay_row_body` (預估 ~50 LOC，patterns 同上)
+   - 兩 case 走相同 stub experiment INSERT (with `created_by` not `actor_id`) + verify_replay_evidence_and_insert call + SELECT 3 column verify pattern
+   - test_v055_mock_mode_test_count_summary docstring 內 23 collected 訂正為 25 collected (4 → 6 live_pg case 升)
+
+### LOW (optional governance debt, can defer to round 6 順手 fix or P3 ticket)
+
+- 4 round 5 升級 test 命名訂正為 round 5-friendly 名（如 `test_v055_no_in_migration_smoke_round5_pivot`），E1 round 6 可順手 rename 或派 P3 ticket 後續處理
+
+### Round 4 hotfix + Round 1+2+3 5 fix 全 verified, no further action
+
+- C-1 (3-col INSERT): VERIFIED
+- C-2 (identity_arguments strict equality): VERIFIED
+- C-3 (no phantom column in V055 SQL): VERIFIED in V055 SQL（但 sibling test 同等 phantom 仍在，見 C-4）
+- H-1 (no silent skip): VERIFIED
+- M-1 (sign-off §13/§14/§16 mock-only doc): VERIFIED
+- M-2 (V049 NOT NULL set documented): VERIFIED
+- Round 4 hotfix (expected_string with-arg-names format): VERIFIED
+
+### REF-20_RESERVATION.md ledger 訂正（PM action at commit time）
+
+E1 round 5 不修 ledger（dispatch §「不動」邊界）。PM closure phase 統一更新：
+- v1.10 entry 「INSERT body 加 4 column」→「INSERT body 加 3 column」
+- v1.10 entry 「graceful skip 4-tier smoke」→「round 5 design pivot drop 4-tier smoke entirely (PL/pgSQL constraint)；4-tier path verification 遷至 Python sibling test under OPENCLAW_TEST_LIVE_PG=1」
+- v1.10 entry 「16 PASS / 2 SKIPPED」→「23 PASS / 2 SKIPPED」（round 6 fix 後升 25 PASS / 2 SKIPPED）
+- v1.10 entry V049 ADD COLUMN「18」→「25」(round 3 push back 已揭，round 5 確認)
+- 加 v1.11/v1.12 entry 標 round 4 hotfix + round 5 design pivot 兩條 line item
+
+---
+
+## Round 5 重 E2 round 6 條件
+
+E1 修完 C-4 finding + 補 2 missing live_pg case 後：
+- 重新 sign-off 報告（appended §17 round 6 fix description）
+- E2 round 6 review 重跑（重點 = sibling test stub INSERT cross-validation against V049 schema + 25 collected pytest baseline）
+- 若 round 6 fix 結束 0 NEW finding → APPROVE-FOR-E4 → E4 regression Linux SSH bridge apply OPENCLAW_TEST_LIVE_PG=1 跑 25/23/2 PASS（含新 2 live_pg case）
+
+**注**：E2 round 6 不需重審 round 5 已 verified 的 6 fix（C-1/C-2/C-3-V055/H-1/M-1/M-2/round 4 hotfix），除非 round 6 改動觸發 cross-cutting regression。
+
+---
+
+E2 ROUND 5 REVIEW DONE: report path: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_e2_review.md`; verdict: **RETURN-TO-E1 round 6**; findings: **1 NEW CRITICAL (C-4 sibling test stub phantom column carry-over + missing 2 live_pg tier case)**; pending E1 round 6 fix; PM action (closure phase): REF-20_RESERVATION ledger v1.10 entry 訂正 (4 col → 3 col / graceful skip → round 5 design pivot / 16 PASS → **25 PASS** post round 6 / V049 ADD COLUMN count 18 → 25) at commit phase

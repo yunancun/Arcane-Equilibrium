@@ -100,19 +100,55 @@
 -- Idempotency / 幂等性:
 --   `CREATE OR REPLACE FUNCTION` overrides the previous body when re-run.
 --   Guard A function existence + 19-arg signature check is no-op on re-run.
---   Post-INSERT 4-tier smoke runs inside a savepoint; ROLLBACK keeps PG
---   state pristine.
 --
 --   `CREATE OR REPLACE FUNCTION` 重跑時覆寫舊 body。Guard A function 存在
---   + 19-arg signature 檢查重跑無 RAISE。Post-INSERT 4-tier smoke 跑在
---   savepoint 內 ROLLBACK，PG 狀態保持乾淨。
+--   + 19-arg signature 檢查重跑無 RAISE。
 --
 -- Guard A: enforced (function existence + arg count + arg signature
---          byte-equal V036 via pg_get_function_identity_arguments;
---          4-tier post-INSERT smoke verifies row body 3 column matches
---          caller args).
+--          byte-equal V036 via pg_get_function_identity_arguments).
+--          Post-INSERT 4-tier path verification covered by Python sibling
+--          test (see Round 5 design pivot section below).
 -- Guard B: N/A (no ALTER COLUMN; function-only DDL).
 -- Guard C: N/A (no index DDL).
+--
+-- Round 5 design pivot (2026-05-05) / Round 5 設計修正:
+--   PL/pgSQL DO block 不允許 explicit SAVEPOINT / ROLLBACK TO SAVEPOINT
+--   (PostgreSQL hard constraint: "unsupported transaction command in
+--    PL/pgSQL"). Round 1-4 嘗試在 migration 內做 4-tier post-INSERT smoke
+--   被 PG 16 deploy reject。
+--
+--   Decision: drop Guard A post-INSERT smoke entirely from migration.
+--   4-tier path verification covered by Python sibling test
+--   `test_v055_evidence_insert_fix.py` (4 case test_v055_*_path) under
+--   OPENCLAW_TEST_LIVE_PG=1 environment — equivalent semantic, avoids
+--   PL/pgSQL constraint.
+--
+--   Guard A retains 3 migration-time enforces:
+--     1. function existence post-CREATE OR REPLACE
+--     2. 19-arg pronargs byte-equal V036
+--     3. pg_get_function_identity_arguments byte-equal V036
+--
+--   PL/pgSQL DO block 不允許 explicit SAVEPOINT/ROLLBACK TO SAVEPOINT
+--   (PG 硬限制：unsupported transaction command in PL/pgSQL)。Round 1-4
+--   嘗試 migration 內 4-tier smoke 被 PG 16 deploy reject。
+--
+--   Decision：drop Guard A post-INSERT smoke。4-tier path 由 Python
+--   sibling test 在 OPENCLAW_TEST_LIVE_PG=1 真 PG 環境覆蓋，等價語意。
+--
+--   Guard A 仍保 3 條 migration-time enforce：function existence /
+--   19-arg pronargs / identity_arguments byte-equal V036。
+--
+--   H-1 finding revisit: drop smoke entirely → 不引入 EXCEPTION block →
+--   H-1 (silent skip 反模式) 仍 fixed，不退步。Future in-migration smoke
+--   pattern options: PG 11+ procedure (allows COMMIT/ROLLBACK) or split
+--   smoke as separate migration (V055.1 one-shot DROP). Current decision
+--   trusts sibling test.
+--
+--   H-1 finding revisit：完全 drop smoke → 不引入 EXCEPTION block →
+--   H-1（silent skip 反模式）仍 fixed，不退步。未來 migration 內 smoke
+--   pattern 選項：PG 11+ procedure（允許 COMMIT/ROLLBACK）或拆 smoke 為
+--   separate migration（V055.1 一次性 DROP）。當前 decision 信 sibling
+--   test。
 --
 -- Spec source / 規格來源:
 --   docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-05--ref20_r6_r7_capability_risk.md §3.5 + §8.2
@@ -576,311 +612,67 @@ BEGIN
 END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Guard A post-INSERT smoke: 4-tier path verification.
--- Guard A post-INSERT smoke：4 path row body 驗證。
+-- Round 5 design pivot (2026-05-05): 4-tier post-INSERT smoke removed.
+-- Round 5 設計修正（2026-05-05）：4-tier post-INSERT smoke 已移除。
 --
--- 在 SAVEPOINT 內 INSERT 4 row 各 path，SELECT 驗 row body 3 column 對齊
--- caller args，最後 ROLLBACK 不污染 production data。Mismatch RAISE EXCEPTION。
+-- PostgreSQL hard constraint: PL/pgSQL DO block forbids explicit
+-- `SAVEPOINT name` and `ROLLBACK TO SAVEPOINT name`; PG raises
+-- `unsupported transaction command in PL/pgSQL`. Round 1-4 attempts
+-- to embed a 4-tier post-INSERT smoke inside this migration were
+-- rejected by PG 16 deploy.
 --
--- Inside a SAVEPOINT, INSERT 4 rows (one per path), SELECT row body to verify
--- the 3 columns match caller args, then ROLLBACK so no production data is
--- polluted. Any mismatch RAISE EXCEPTION.
+-- Decision: 4-tier path verification migrated to Python sibling test
+-- `program_code/exchange_connectors/bybit_connector/control_api_v1/
+--  tests/replay/test_v055_evidence_insert_fix.py` —
+--   - test_v055_real_outcome_path
+--   - test_v055_calibrated_replay_path
+--   - test_v055_synthetic_replay_path
+--   - test_v055_counterfactual_replay_path
+-- and `test_v055_live_pg_*` cases under OPENCLAW_TEST_LIVE_PG=1 +
+-- OPENCLAW_TEST_DSN env (Linux PG). Equivalent semantic; avoids the
+-- PL/pgSQL transaction-command constraint.
 --
--- 必驗 4 path / Must verify 4 paths:
---   1. real_outcome → tier='real_outcome', exp_id NULL, hash NULL
---   2. calibrated_replay → tier match, exp_id NOT NULL, hash NOT NULL
---   3. synthetic_replay → 同上 with synthetic_replay tier
---   4. counterfactual_replay → 同上 with counterfactual_replay tier
+-- Migration-time Guard A still enforces 3 invariants above:
+--   1. function existence post-CREATE OR REPLACE
+--   2. 19-arg pronargs byte-equal V036
+--   3. pg_get_function_identity_arguments byte-equal V036
 --
--- Round 2 fix (E2 finding H-1) / Round 2 修補（E2 finding H-1）：
---   1. path 1 real_outcome 拆出 stub experiment INSERT 之外（不依賴 FK，
---      永跑）。
---   2. inner BEGIN-END 已**移除** EXCEPTION WHEN OTHERS silent skip 模式。
---      任何 stub INSERT 或 path 2-4 INSERT 異常自然 propagate 到上層 DO $$
---      block，最終 RAISE EXCEPTION 給 psql apply 端 fail-loud（CLAUDE.md §九
---      無 silent fallthrough 原則的 SQL 等價）。
---   3. ROLLBACK TO SAVEPOINT 在 normal path（4 row INSERT 完成後）保留 —
---      是設計意圖（不污染 production data）。
+-- H-1 invariant preserved: by removing the SAVEPOINT block entirely,
+-- no EXCEPTION block is introduced; Round 1 H-1 (silent skip 反模式)
+-- finding remains fixed.
 --
---   1. path 1 real_outcome 拆出 stub experiment INSERT 之外（不需 FK，永跑）。
---   2. inner BEGIN-END 已**移除** EXCEPTION WHEN OTHERS silent skip。任何
---      stub INSERT / path 2-4 異常自然 propagate 上層 DO $$ block 最終
---      RAISE EXCEPTION 給 psql apply 端 fail-loud（CLAUDE.md §九 無 silent
---      fallthrough 原則的 SQL 等價）。
---   3. ROLLBACK TO SAVEPOINT 保留於 normal path（4 row INSERT 完成後）—
---      設計意圖：不污染 production data。
+-- PostgreSQL 硬限制：PL/pgSQL DO block 不允許 explicit `SAVEPOINT name`
+-- / `ROLLBACK TO SAVEPOINT name`；PG raise `unsupported transaction
+-- command in PL/pgSQL`。Round 1-4 嘗試 migration 內 4-tier post-INSERT
+-- smoke 被 PG 16 deploy reject。
 --
--- Round 2 fix (E2 finding M-2) / Round 2 修補（E2 finding M-2）：
---   replay.experiments stub INSERT 提供 V049 全 unconditional NOT NULL
---   column。V049 line 282-307 ADD COLUMN 全為 NULLABLE（IF NOT EXISTS 加列
---   無 NOT NULL constraint）。V041 stub bootstrap 既有 4 column 皆有 default
---   或 NULLABLE：experiment_id (PK NOT NULL) / half_life_days (V041 default
---   或要求 supply) / embargo_days (V041 default 或要求 supply) / created_at
---   (default now())。V049 conditional NOT NULL = engine_binary_sha when
---   runtime_environment='linux_trade_core' (CHECK 不是 NOT NULL；用
---   runtime_environment='mac_dev_smoke_test_only' 規避)。
+-- Decision：4-tier path verification 遷至 Python sibling test
+-- `test_v055_evidence_insert_fix.py` —
+--   - test_v055_real_outcome_path
+--   - test_v055_calibrated_replay_path
+--   - test_v055_synthetic_replay_path
+--   - test_v055_counterfactual_replay_path
+-- 加 `test_v055_live_pg_*` 走 OPENCLAW_TEST_LIVE_PG=1 +
+-- OPENCLAW_TEST_DSN env（Linux PG）。等價語意；避 PL/pgSQL transaction
+-- command 限制。
 --
--- Round 3 fix (E2 finding C-3) / Round 3 修補（E2 finding C-3）：
---   Round 2 stub INSERT 引用 phantom column `actor_id` 是錯的。E2 round 2
---   cross-grep 揭露：V049 line 282-307 18 ADD COLUMN list 內 line 284 真實
---   命名 `created_by`，而非 `actor_id`。V049 對 `replay.experiments` 完全
---   未加 `actor_id` column。`actor_id` 實是 `replay.run_state` 表的 column
---   (V045:199 NOT NULL)，與 `replay.experiments` schema 完全無關。
+-- Migration-time Guard A 仍保 3 invariants：
+--   1. function existence post-CREATE OR REPLACE
+--   2. 19-arg pronargs byte-equal V036
+--   3. pg_get_function_identity_arguments byte-equal V036
 --
---   選 A 修正（最小變動）：直接刪除 stub INSERT 中的 `actor_id` column
---   reference + 對應 VALUES 位置。理由：(1) actor_id 不存在於 replay.experiments
---   schema，Linux deploy 必撞 `column "actor_id" of relation "experiments"
---   does not exist`；(2) 不引入 created_by 替代以保持最小變動；(3) status
---   是 V049 真實 column 但 NULLABLE + V049 line 384-395 chk_replay_experiments_status
---   CHECK 接受 NULL，所以保留 status='created' 寫入 OK 不必動；(4) 修正後
---   stub INSERT 寫 6 column：experiment_id / status / created_at /
---   half_life_days / embargo_days / runtime_environment，全是 V041 base 4 col
---   + V049 conditional NOT NULL bypass column，0 phantom。
---
---   stub minimal subset (round 3 corrected) = experiment_id (PK 由 caller
---   gen_random_uuid) + status (V049 5-value enum NULL OK 但寫 'created' 標記
---   smoke 來源) + created_at (V041 default now() 但顯式 supply 對齊) +
---   half_life_days (V041 既有 NULLABLE) + embargo_days (V041 既有 NULLABLE)
---   + runtime_environment='mac_dev_smoke_test_only' (V049 conditional NOT
---   NULL bypass via CHECK chk_replay_experiments_engine_sha_linux)。
---
---   V049 22 col NOT NULL set per source line N-M / V049 line 282-307 ADD COLUMN
---   全 NULLABLE（IF NOT EXISTS 加列）。Conditional NOT NULL 在 V049 line 425-433
---   chk_replay_experiments_engine_sha_linux CHECK，runtime='mac_dev_smoke_test_only'
---   時不觸發。V041 既有 4 col：experiment_id PK NOT NULL / half_life_days /
---   embargo_days / created_at。Stub minimal subset 已含全部 unconditional
---   NOT NULL（experiment_id 由 caller 傳）+ V041 既有 + V049 nullable column
---   default NULL OK。
---
---   Round 3 fix (E2 finding C-3): the round 2 stub INSERT referenced phantom
---   column `actor_id`. E2 round 2 cross-grep revealed: V049 line 282-307's
---   18 ADD COLUMN list contains `created_by` at line 284, NOT `actor_id`.
---   V049 never adds `actor_id` to `replay.experiments`. `actor_id` actually
---   belongs to `replay.run_state` (V045:199 NOT NULL), unrelated to the
---   `replay.experiments` schema.
---
---   Option A fix (minimal change): simply delete the `actor_id` column
---   reference + matching VALUES position from the stub INSERT. Rationale:
---   (1) actor_id does not exist in replay.experiments schema; Linux deploy
---   would fail with `column "actor_id" of relation "experiments" does not
---   exist`. (2) Do NOT introduce created_by as replacement — preserve
---   minimal change. (3) status is a real V049 column but NULLABLE +
---   chk_replay_experiments_status CHECK accepts NULL, so retaining
---   status='created' write is OK with no change. (4) After fix the stub
---   INSERT writes 6 columns: experiment_id / status / created_at /
---   half_life_days / embargo_days / runtime_environment — all are V041 base
---   4 col + V049 conditional NOT NULL bypass column. 0 phantom.
+-- H-1 invariant 保留：完全移除 SAVEPOINT block → 不引入 EXCEPTION block →
+-- Round 1 H-1（silent skip 反模式）finding 仍 fixed。
 -- ─────────────────────────────────────────────────────────────────────────────
-DO $$
-DECLARE
-    v_test_experiment_id UUID;
-    v_test_manifest_hash_hex TEXT := '0000000000000000000000000000000000000000000000000000000000000001';
-    v_test_expires_at TIMESTAMPTZ := now() + INTERVAL '7 days';
-    v_inserted_id BIGINT;
-    v_row_tier TEXT;
-    v_row_exp_id UUID;
-    v_row_hash BYTEA;
-BEGIN
-    -- pin a savepoint so all smoke INSERTs roll back cleanly.
-    -- 設 savepoint 讓 4 個 smoke INSERT 乾淨 ROLLBACK。
-    SAVEPOINT v055_smoke;
-
-    -- ─── path 1: real_outcome (no FK dependency; always runs) ───────────────
-    -- path 1 不依賴 replay.experiments FK（real_outcome ⇒ replay_experiment_id
-    -- IS NULL），先跑。Round 2 fix (E2 H-1)：path 1 拆出 stub experiment INSERT
-    -- 之外，永跑。
-    SELECT learning.verify_replay_evidence_and_insert(
-        'demo',                          -- p_engine_mode
-        'BTCUSDT',                       -- p_symbol
-        'ma_crossover',                  -- p_strategy_name
-        'ml_shadow',                     -- p_source
-        'rank',                          -- p_recommendation_type
-        12.5,                            -- p_expected_net_bps
-        0.65,                            -- p_confidence
-        100,                             -- p_sample_count
-        '{"v055":"smoke"}'::jsonb,       -- p_payload
-        false,                           -- p_applied
-        true,                            -- p_requires_governance
-        'v055_smoke',                    -- p_created_by
-        'real_outcome',                  -- p_evidence_source_tier
-        NULL,                            -- p_replay_experiment_id
-        NULL,                            -- p_manifest_hash
-        NULL,                            -- p_expires_at
-        NULL,                            -- p_decision_lease_id
-        NULL,                            -- p_context_id
-        NULL                             -- p_intent_id
-    ) INTO v_inserted_id;
-
-    SELECT evidence_source_tier, replay_experiment_id, manifest_hash
-    INTO v_row_tier, v_row_exp_id, v_row_hash
-    FROM learning.mlde_shadow_recommendations
-    WHERE id = v_inserted_id;
-
-    IF v_row_tier <> 'real_outcome' OR v_row_exp_id IS NOT NULL OR v_row_hash IS NOT NULL THEN
-        RAISE EXCEPTION
-            'V055 Guard A smoke real_outcome path mismatch: tier=%, exp_id=%, hash=% (expected real_outcome / NULL / NULL)',
-            v_row_tier, v_row_exp_id, v_row_hash;
-    END IF;
-
-    -- ─── replay.experiments stub for path 2-4 FK / path 2-4 FK 用 stub ───────
-    -- V055 retrofit smoke 需要 replay.experiments 內有一行測試 row 才能滿足
-    -- V051 fk_mlde_shadow_replay_experiment FK 至 V049。我們插一個 stub
-    -- experiment row (smoke savepoint 內) 然後 ROLLBACK。
-    -- V055 retrofit smoke needs a stub replay.experiments row to satisfy V051 FK.
-    -- We INSERT a stub inside the savepoint then ROLLBACK at the end.
-    --
-    -- Round 2 fix (E2 H-1)：移除 EXCEPTION WHEN OTHERS silent skip。任何 V049
-    -- NOT NULL drift 必須 fail-loud 才能 catch；不再 graceful skip。
-    -- Round 2 fix (E2 M-2)：minimal subset 含 V049 conditional NOT NULL 規避路徑
-    -- (runtime_environment='mac_dev_smoke_test_only' 不觸發 engine_binary_sha
-    -- requirement)。
-    -- Round 3 fix (E2 C-3)：移除 phantom column `actor_id`。E2 round 2 cross-grep
-    -- 揭露 round 2 stub INSERT 引用 `actor_id` 是 phantom（V049 line 282-307 18
-    -- ADD COLUMN 真實命名 `created_by` 在 line 284，無 `actor_id`）。Linux deploy
-    -- 端必撞 `column "actor_id" of relation "experiments" does not exist`。
-    -- 選 A 修正：刪除 phantom column reference + VALUES 對應，保持其他 column
-    -- (V041 base 4 col + V049 conditional NOT NULL bypass) 不動。`actor_id` 本就是
-    -- `replay.run_state` 的 column（V045:199），與 `replay.experiments` 無關。
-    --
-    -- Round 2 fix (E2 H-1): EXCEPTION WHEN OTHERS silent skip removed. Any
-    -- V049 NOT NULL drift must fail-loud; no more graceful skip.
-    -- Round 2 fix (E2 M-2): minimal subset includes V049 conditional NOT NULL
-    -- bypass path (runtime_environment='mac_dev_smoke_test_only' avoids
-    -- engine_binary_sha requirement).
-    -- Round 3 fix (E2 C-3): phantom column `actor_id` removed from stub INSERT.
-    -- E2 round 2 cross-grep revealed the round 2 stub INSERT referenced
-    -- a phantom column (V049 line 282-307's 18 ADD COLUMN list contains
-    -- `created_by` at line 284, NOT `actor_id`). Linux deploy would fail with
-    -- `column "actor_id" of relation "experiments" does not exist`. Option A
-    -- fix: remove the phantom column reference + matching VALUES position;
-    -- preserve V041 base 4 col + V049 conditional NOT NULL bypass.
-    -- `actor_id` is actually a column on `replay.run_state` (V045:199), not
-    -- `replay.experiments`.
-    v_test_experiment_id := gen_random_uuid();
-
-    INSERT INTO replay.experiments (
-        experiment_id,
-        status,
-        created_at,
-        half_life_days,
-        embargo_days,
-        runtime_environment           -- V049 conditional NOT NULL bypass via mac_dev_smoke_test_only
-    ) VALUES (
-        v_test_experiment_id,
-        'created',                    -- V049 5-value enum (V049 line 393)
-        now(),
-        14.0,                         -- V041 stub field (kept by V049)
-        14,                           -- V041 stub field (kept by V049)
-        'mac_dev_smoke_test_only'     -- V049 line 341 enum + line 425-433 conditional NOT NULL bypass
-    );
-
-    -- ─── path 2: calibrated_replay ──────────────────────────────────────
-    SELECT learning.verify_replay_evidence_and_insert(
-        'demo',
-        'BTCUSDT',
-        'ma_crossover',
-        'ml_shadow',
-        'rank',
-        12.5,
-        0.65,
-        100,
-        '{"v055":"smoke"}'::jsonb,
-        false,
-        true,
-        'v055_smoke',
-        'calibrated_replay',
-        v_test_experiment_id::TEXT,
-        v_test_manifest_hash_hex,
-        v_test_expires_at,
-        NULL,
-        NULL,
-        NULL
-    ) INTO v_inserted_id;
-
-    SELECT evidence_source_tier, replay_experiment_id, manifest_hash
-    INTO v_row_tier, v_row_exp_id, v_row_hash
-    FROM learning.mlde_shadow_recommendations
-    WHERE id = v_inserted_id;
-
-    IF v_row_tier <> 'calibrated_replay' OR v_row_exp_id <> v_test_experiment_id OR v_row_hash IS NULL THEN
-        RAISE EXCEPTION
-            'V055 Guard A smoke calibrated_replay path mismatch: tier=%, exp_id=%, hash_is_null=% (expected calibrated_replay / non-NULL / non-NULL)',
-            v_row_tier, v_row_exp_id, (v_row_hash IS NULL);
-    END IF;
-
-    -- ─── path 3: synthetic_replay ───────────────────────────────────────
-    SELECT learning.verify_replay_evidence_and_insert(
-        'demo',
-        'BTCUSDT',
-        'ma_crossover',
-        'ml_shadow',
-        'rank',
-        12.5,
-        0.65,
-        100,
-        '{"v055":"smoke"}'::jsonb,
-        false,
-        true,
-        'v055_smoke',
-        'synthetic_replay',
-        v_test_experiment_id::TEXT,
-        v_test_manifest_hash_hex,
-        v_test_expires_at,
-        NULL,
-        NULL,
-        NULL
-    ) INTO v_inserted_id;
-
-    SELECT evidence_source_tier, replay_experiment_id, manifest_hash
-    INTO v_row_tier, v_row_exp_id, v_row_hash
-    FROM learning.mlde_shadow_recommendations
-    WHERE id = v_inserted_id;
-
-    IF v_row_tier <> 'synthetic_replay' OR v_row_exp_id <> v_test_experiment_id OR v_row_hash IS NULL THEN
-        RAISE EXCEPTION
-            'V055 Guard A smoke synthetic_replay path mismatch: tier=%, exp_id=%, hash_is_null=% (expected synthetic_replay / non-NULL / non-NULL)',
-            v_row_tier, v_row_exp_id, (v_row_hash IS NULL);
-    END IF;
-
-    -- ─── path 4: counterfactual_replay ──────────────────────────────────
-    SELECT learning.verify_replay_evidence_and_insert(
-        'demo',
-        'BTCUSDT',
-        'ma_crossover',
-        'ml_shadow',
-        'rank',
-        12.5,
-        0.65,
-        100,
-        '{"v055":"smoke"}'::jsonb,
-        false,
-        true,
-        'v055_smoke',
-        'counterfactual_replay',
-        v_test_experiment_id::TEXT,
-        v_test_manifest_hash_hex,
-        v_test_expires_at,
-        NULL,
-        NULL,
-        NULL
-    ) INTO v_inserted_id;
-
-    SELECT evidence_source_tier, replay_experiment_id, manifest_hash
-    INTO v_row_tier, v_row_exp_id, v_row_hash
-    FROM learning.mlde_shadow_recommendations
-    WHERE id = v_inserted_id;
-
-    IF v_row_tier <> 'counterfactual_replay' OR v_row_exp_id <> v_test_experiment_id OR v_row_hash IS NULL THEN
-        RAISE EXCEPTION
-            'V055 Guard A smoke counterfactual_replay path mismatch: tier=%, exp_id=%, hash_is_null=% (expected counterfactual_replay / non-NULL / non-NULL)',
-            v_row_tier, v_row_exp_id, (v_row_hash IS NULL);
-    END IF;
-
-    -- 全 4 path 通過後 ROLLBACK，不污染 production data。
-    -- All 4 paths pass; ROLLBACK so no production data is polluted.
-    ROLLBACK TO SAVEPOINT v055_smoke;
-    RAISE NOTICE 'V055 Guard A post-INSERT smoke: 4-tier path verification PASS (real_outcome / calibrated_replay / synthetic_replay / counterfactual_replay). All row body 3 metadata columns match caller args.';
-END $$;
+--
+-- (Round 1-4 in-migration 4-tier post-INSERT smoke block removed in round 5
+-- per the design pivot section above. All path semantics preserved by
+-- Python sibling test under OPENCLAW_TEST_LIVE_PG=1; see file header.)
+--
+-- (Round 1-4 migration 內 4-tier post-INSERT smoke block 已於 round 5
+-- 移除，原因見上方 design pivot section。所有 path 語意由 Python sibling
+-- test 在 OPENCLAW_TEST_LIVE_PG=1 真 PG 環境覆蓋；見檔頭。)
+-- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Operator deploy note / Operator 部署備忘:
@@ -894,9 +686,14 @@ END $$;
 --      by verify portion (4) but NOT persisted to a row column; TTL canonical
 --      source-of-truth = replay.experiments.expires_at (V049) accessed via
 --      V051 FK.
---   4. V055 Guard A smoke verifies the 3-column write path is intact at
---      deploy time + 19-arg signature byte-equal V036 (via
---      pg_get_function_identity_arguments).
+--   4. V055 Guard A enforces 3 invariants at deploy time: function
+--      existence post-CREATE OR REPLACE + 19-arg pronargs + 19-arg
+--      identity_arguments byte-equal V036 (via
+--      pg_get_function_identity_arguments). 4-tier path verification is
+--      covered by Python sibling test_v055_evidence_insert_fix.py
+--      (test_v055_*_path 4 case + Linux PG opt-in test_v055_live_pg_*
+--      under OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN env). Round 5
+--      design pivot — see file header.
 --
 -- Operator 部署順序:
 --   1. V055 上線 (本檔；CREATE OR REPLACE FUNCTION)。
@@ -908,6 +705,11 @@ END $$;
 --      as TEXT) + p_expires_at；p_expires_at 走 verify portion (4) input
 --      驗證但**不**持久化到 row column；TTL 真實 source-of-truth =
 --      replay.experiments.expires_at (V049) 透 V051 FK 取。
---   4. V055 Guard A smoke 在 deploy 時驗 3-column 寫入路徑完整 + 19-arg
---      signature byte-equal V036（透 pg_get_function_identity_arguments）。
+--   4. V055 Guard A 在 deploy 時 enforce 3 invariants：function existence
+--      post-CREATE OR REPLACE + 19-arg pronargs + 19-arg identity_arguments
+--      byte-equal V036（透 pg_get_function_identity_arguments）。4-tier
+--      path 驗證由 Python sibling test_v055_evidence_insert_fix.py
+--      (test_v055_*_path 4 case + Linux PG opt-in test_v055_live_pg_*
+--      在 OPENCLAW_TEST_LIVE_PG=1 + OPENCLAW_TEST_DSN env) 覆蓋。Round 5
+--      design pivot — 見檔頭。
 -- ─────────────────────────────────────────────────────────────────────────────
