@@ -155,6 +155,22 @@ from .checks_pricing_binding import (
     # T3 startup assertion 留 LG-4 IMPL 前提）。
     check_45_pricing_binding,
 )
+from .checks_replay_maintenance import (
+    # REF-20 Sprint D R8 (2026-05-05) — `[46]`-`[50]` maintenance / observation
+    # sentinel suite per plan §6.R8 task 2.
+    # [46] V056 retention cron 活性 + replay-derived candidate cap
+    # [47] Linux replay_runner binary presence + executable bit
+    # [48] replay.experiments row growth rate stall detection
+    # [49] V046 replay.report_artifacts oldest age + storage cap dual check
+    # [50] V045 replay.run_state failed rate + zombie 'running' detection
+    # REF-20 Sprint D R8（2026-05-05）— `[46]`-`[50]` maintenance / observation
+    # 哨兵套組（plan §6.R8 task 2）。
+    check_46_mlde_shadow_retention_status,
+    check_47_replay_runner_binary,
+    check_48_replay_manifest_registry_growth,
+    check_49_replay_artifact_retention,
+    check_50_replay_run_state_health,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -176,9 +192,11 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
+    [46][48][49][50]                                       REF-20 Sprint D R8 maintenance suite (mlde_shadow retention + manifest registry growth + V046 artifact retention + V045 run_state health)
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
+    [47]                                                  REF-20 Sprint D R8 — replay_runner binary presence (filesystem)
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -209,6 +227,11 @@ Execution / cost sentinels added after F7:
   [43] label_backfill_freshness         (LG5-W3-FUP-2 Fix 1 2026-05-02 max(label_filled_at) age — cron liveness)
   [44] replay_manifest_key_presence     (REF-20 Sprint 1 Track B 2026-05-03 PA push back #3 — key.hex sibling presence; WARN-only until V042 Wave 6+)
   [45] pricing_binding                  (REF-20 Sprint C R6-T7 2026-05-05 — LG-3 RFC §IMPL T2 PG proxy of Rust AccountManager fee health; closes RFC 0%→70%, T1+T3 deferred Sprint D / LG-4)
+  [46] mlde_shadow_retention_status     (REF-20 Sprint D R8 2026-05-05 — V056 retention cron 活性 + replay-derived candidate row cap dual probe)
+  [47] replay_runner_binary             (REF-20 Sprint D R8 2026-05-05 — Linux replay_runner binary presence + executable bit; filesystem)
+  [48] replay_manifest_registry_growth  (REF-20 Sprint D R8 2026-05-05 — replay.experiments row growth rate stall detection)
+  [49] replay_artifact_retention        (REF-20 Sprint D R8 2026-05-05 — V046 oldest age + storage cap dual check vs replay_artifact_prune.py cron)
+  [50] replay_run_state_health          (REF-20 Sprint D R8 2026-05-05 — V045 failed_rate 7d + zombie 'running' >1h detection)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -229,6 +252,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
+              [46][48][49][50]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -238,9 +262,16 @@ def main() -> int:
                [42c] is LG5-W3-FUP-2 Fix 2 RFC §5 Plan B — gate-aligned 3d mirror of [42b];
                [43] is LG5-W3-FUP-2 Fix 1 label-backfill cron liveness;
                [44] is REF-20 Sprint 1 Track B replay manifest key.hex presence;
-               [45] is REF-20 Sprint C R6-T7 LG-3 provider pricing binding)
+               [45] is REF-20 Sprint C R6-T7 LG-3 provider pricing binding;
+               [46]-[50] are REF-20 Sprint D R8 maintenance suite —
+               [46] mlde_shadow retention cron + candidate cap;
+               [47] post-cursor — replay_runner binary filesystem;
+               [48] manifest registry growth stall;
+               [49] V046 artifact retention dual-check;
+               [50] V045 run_state health failed_rate + zombie)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
+                   [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
 
     入口 — 跑全部註冊 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
@@ -248,8 +279,8 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45]
-      post-cursor: [7][13][11][Xa][16][18][19][20] [29]
+              [42][42b][42c][43][44][45] [46][48][49][50]
+      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -670,6 +701,41 @@ def main() -> int:
             #   3. 熱機後（≥30min）仍 0 fills 靜默
             s, m = check_45_pricing_binding(cur)
             results.append(("[45] pricing_binding", s, m))
+
+            # [46] REF-20 Sprint D R8 (2026-05-05) — V056 mlde_shadow
+            # retention cron 活性 + replay-derived candidate row cap 雙軸驗證。
+            # Sentinel 檔 mtime + V056 dry-run candidate count 雙軸 PASS/WARN/FAIL；
+            # V056 缺即 graceful PASS-skip（pre-deploy 不阻塞）。
+            # [46] V056 retention cron freshness + candidate row cap dual probe；
+            # graceful PASS-skip when V056 absent。
+            s, m = check_46_mlde_shadow_retention_status(cur)
+            results.append(("[46] mlde_shadow_retention_status", s, m))
+
+            # [48] REF-20 Sprint D R8 — replay.experiments row 增長率 stall
+            # 偵測。Sprint A-C 後 runner 停滯 / E2E pipeline broken 即 7d 0
+            # row 增長 → FAIL；24h 0 row → WARN（quiet day）；表缺即 PASS-skip。
+            # [48] replay.experiments registry growth rate stall；7d 0 row +
+            # total>=2 → FAIL（runner stalled）；24h 0 row → WARN（quiet）。
+            s, m = check_48_replay_manifest_registry_growth(cur)
+            results.append(("[48] replay_manifest_registry_growth", s, m))
+
+            # [49] REF-20 Sprint D R8 — V046 replay.report_artifacts oldest
+            # row age + storage cap 雙重驗證 cron `replay_artifact_prune.py`
+            # 真有效跑。oldest >30d FAIL（TTL prune cron 死）；total >cap
+            # FAIL（cap prune cron 死）；表缺即 PASS-skip。
+            # [49] V046 oldest age + storage cap dual-check vs
+            # replay_artifact_prune.py cron。
+            s, m = check_49_replay_artifact_retention(cur)
+            results.append(("[49] replay_artifact_retention", s, m))
+
+            # [50] REF-20 Sprint D R8 — V045 replay.run_state 7d failed rate
+            # + zombie 'running' >1h 偵測。failed_rate >20% → FAIL（系統性
+            # 問題）；zombie >4h → FAIL（subprocess 死亡未收回）；表缺即
+            # PASS-skip。
+            # [50] V045 run_state failed rate (7d) + zombie 'running' age
+            # >4h FAIL detection。
+            s, m = check_50_replay_run_state_health(cur)
+            results.append(("[50] replay_run_state_health", s, m))
     finally:
         conn.close()
 
@@ -757,6 +823,16 @@ def main() -> int:
     # 讓 healthcheck 自足，cron/CI 不需 HMAC secret 即可跑。
     s, m = check_h_state_gateway_freshness()
     results.append(("[20] h_state_gateway_freshness", s, m))
+
+    # [47] REF-20 Sprint D R8 (2026-05-05) — Linux replay_runner binary
+    # presence + executable bit。Pure filesystem 檢查 (mirror
+    # route_helpers.resolve_replay_runner_bin 5-path priority chain)：
+    # workspace release → workspace debug → legacy nested release/debug；
+    # release path 缺但 debug 在 → WARN（未 --rebuild）；4 path 全缺 → FAIL
+    # （cargo --release 未跑）。Pure filesystem，post-conn.close()。
+    # [47] Linux replay_runner binary 存在 + executable；filesystem only。
+    s, m = check_47_replay_runner_binary()
+    results.append(("[47] replay_runner_binary", s, m))
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
