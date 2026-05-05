@@ -1,0 +1,244 @@
+# AgentTodo: Multi-Agent Rework
+
+Date: 2026-05-05
+Status: Draft task backlog
+Parent plan: `ENGINEERING_PLAN.md`
+
+## Reference Path Index
+
+Canonical repo root:
+
+- `/Users/ncyu/Projects/TradeBot/srv`
+
+This todo is intentionally self-contained. A follow-up agent should start from the paths below and should not need to scan the full repo to find the original design, current audit evidence, or likely implementation files.
+
+### Original Design and Governance Sources
+
+| Area | Path | Why it matters |
+|---|---|---|
+| Original multi-agent boundary | `docs/decisions/EX-06_OpenClaw_Bybit_Multi-Agent_Orchestration_多Agent编排正式边界定义_V1.md` | Defines Scout / Strategist / Guardian / Analyst / Executor / Conductor authority and structured inter-agent communication. |
+| Agent capability blueprint | `docs/decisions/DOC-04_OpenClaw_Bybit_Agent_Capability_Blueprint_Agent能力蓝图_V2.md` | Defines autonomous trading target: instrument, strategy, timing, size, params, scanner, learning, AI cost, anti-adversarial awareness. |
+| Data/perception plane | `docs/decisions/EX-07_OpenClaw_Bybit_Data_Plane_Perception_感知平面正式边界定义_V1.md` | Use when deciding whether scanner evidence belongs to perception, Scout, H0 eligibility, or Guardian risk evidence. |
+| Root rules and runtime reality | `CLAUDE.md` | Current root principles, runtime sync rules, active blockers, Rust engine authority, Decision Lease status. |
+| Active work list | `TODO.md` | Current P0/P1 blockers, including agent schema zero rows and fake-live/shadow wiring. |
+| Codex durable memory | `.codex/MEMORY.md` | Session-level operating memory and current project assumptions. |
+| 5-Agent runtime audit | `memory/project_5agent_runtime_state.md` | Key evidence that Python 5-Agent is advisory/shadow and Rust engine is trading authority. |
+| R-06 value audit | `docs/references/2026-04-13--r06_deep_analysis_agent_value.md` | Key evidence of Path A / Path B split, Conductor idle methods, Analyst consumer gap. |
+| Scout/Conductor initial changelog | `docs/governance_dev/changelogs/2026-03-29_T2.07_scout_agent_conductor.md` | Historical implementation claim for EX-06 Scout + Conductor. |
+| Batch 7 multi-agent chain changelog | `docs/governance_dev/changelogs/2026-03-30_Batch7_S2_multi_agent_chain.md` | Historical implementation details for Strategist, Guardian, Analyst, Executor prewrites. |
+
+### Current Python Agent Implementation Paths
+
+| Area | Path | Start here for |
+|---|---|---|
+| Shared agent contracts and MessageBus | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/multi_agent_framework.py` | AgentRole, MessageType, AgentMessage, IntelObject, TradeIntent, RiskVerdict, MessageBus. |
+| Conductor implementation | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/multi_agent_conductor.py` | Registry, lifecycle, arbitration, resource allocation, process_trade_intent. |
+| Base lifecycle/audit behavior | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/base_agent.py` | Common agent state, start/stop, audit callback behavior. |
+| Agent wiring singleton | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_wiring.py` | How Scout/Strategist/Guardian/Analyst/Executor are instantiated and subscribed. |
+| Scanner to Scout wiring | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_wiring_scanner.py` | ScoutWorker scan loop, Rust scanner opportunity ingestion, intel injection. |
+| Scout Agent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/scout_agent.py` | produce_intel, produce_event_alert, Scout authority boundary. |
+| Scout worker | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/scout_worker.py` | Periodic Scout scan worker and liveness behavior. |
+| Rust scanner reader | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/rust_scanner_reader.py` | Python-side access to Rust scanner opportunities. |
+| Strategist main agent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_agent.py` | Intel handling, H1/H3/H4 routing, pattern/risk/directive handlers. |
+| Strategist edge evaluation | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_edge_eval.py` | AI/heuristic edge eval and TradeIntent production. |
+| Strategist weights/insight consumption | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_weights.py` | PatternInsight -> strategy preference weights. |
+| Strategist cognitive modulation | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_cognitive.py` | Consecutive loss handling, emergency channel, cognitive modulation. |
+| H1 thought gate | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/h1_thought_gate.py` | Pre-AI budget/complexity/cooldown gate. |
+| Model router | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/model_router.py` | L1/L1.5/L2 routing. |
+| H4 validator | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/h4_validator.py` | AI output structure validation. |
+| Guardian Agent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/guardian_agent.py` | Current five-check risk review and event alert handling. |
+| Analyst Agent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/analyst_agent.py` | L1 trade analysis, L2 pattern insight, PatternInsight bus emission. |
+| Analyst record contracts | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/analyst_records.py` | TradeRecord, PatternInsight, AnalystConfig. |
+| Analyst pattern claims | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/analyst_pattern_claims.py` | TruthRegistry pattern claim registration. |
+| Executor Agent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_agent.py` | Decision Lease acquisition, shadow/IPC execution bridge, ExecutionReport. |
+| Executor runtime config | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_config_cache.py` | Shadow mode runtime cache and fail-closed default. |
+| Agent audit bridge | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agent_audit_bridge.py` | Current bridge from agent audit callback to GovernanceHub audit log. |
+| AI service IPC handlers | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/ai_service.py` | Python IPC entry points used by Rust scheduler/agent-related calls. |
+| AI service dispatch | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/ai_service_dispatch.py` | Dispatch path for conductor/agent style requests. |
+| GovernanceHub | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_hub.py` | Decision Lease, governance authority, risk upgrade hooks. |
+| Lease IPC bridge | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_lease_bridge.py` | Python/Rust Decision Lease bridge. |
+| H0 gate | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/h0_gate.py` | Existing Python H0 singleton; check current production caller status before using. |
+
+### Current Rust Trading Engine Paths
+
+| Area | Path | Start here for |
+|---|---|---|
+| Engine bootstrap | `rust/openclaw_engine/src/main.rs` | Scanner runner spawn, pipeline channels, shared symbol registry wiring. |
+| Pipeline spawn and disabled paper behavior | `rust/openclaw_engine/src/main_pipelines.rs` | Paper/demo/live pipeline setup and disabled paper command behavior. |
+| Tick pipeline dispatch | `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs` | Current scanner gate, strategy action dispatch, scanner context on intents. |
+| Tick H0 gate step | `rust/openclaw_engine/src/tick_pipeline/on_tick/step_0_5_h0_gate.rs` | Hot-path deterministic gate candidate for hard eligibility. |
+| Tick risk checks | `rust/openclaw_engine/src/tick_pipeline/on_tick/step_6_risk_checks.rs` | Existing Rust-side risk close/check behavior. |
+| Tick strategy signals | `rust/openclaw_engine/src/tick_pipeline/on_tick/step_3_signals.rs` | Current strategy signal collection point. |
+| Pipeline commands | `rust/openclaw_engine/src/tick_pipeline/commands.rs` | PipelineCommand variants, SubmitOrder, scanner/query commands. |
+| Pipeline helpers | `rust/openclaw_engine/src/tick_pipeline/pipeline_helpers.rs` | Order dispatch helpers, close handling, position helpers. |
+| Scanner runner | `rust/openclaw_engine/src/scanner/runner.rs` | Scan loop, open position query, scan result persistence, WS subscription changes. |
+| Scanner registry | `rust/openclaw_engine/src/scanner/registry.rs` | Active symbols, pinned symbols, anti-churn, add/remove logic. |
+| Scanner types | `rust/openclaw_engine/src/scanner/types.rs` | ScanResult, candidate types, score fields. |
+| Scanner scoring | `rust/openclaw_engine/src/scanner/scorer.rs` | Candidate scoring and context generation. |
+| Scanner market judgment | `rust/openclaw_engine/src/scanner/market_judgment.rs` | Route mode / market gate style judgments. |
+| Scanner config | `rust/openclaw_engine/src/scanner/config.rs` | Scanner thresholds, anti-churn, hard filters. |
+| Scanner strategy policy | `rust/openclaw_engine/src/scanner/strategy_policy.rs` | Strategy route eligibility by market/policy. |
+| Strategist scheduler | `rust/openclaw_engine/src/strategist_scheduler/mod.rs` | Current Rust-side param tuning loop and IPC to Python strategist_evaluate. |
+| Strategist scheduler eval | `rust/openclaw_engine/src/strategist_scheduler/evaluate.rs` | Pair ranking and evaluation input construction. |
+| Strategist scheduler persistence | `rust/openclaw_engine/src/strategist_scheduler/persist.rs` | Applied parameter persistence. |
+| Orphan handler | `rust/openclaw_engine/src/position_reconciler/orphan_handler.rs` | Important scanner-rotation-not-close behavior and orphan adoption/close logic. |
+| Position reconciler | `rust/openclaw_engine/src/position_reconciler/mod.rs` | Drift/orphan/ghost reconciliation path. |
+
+### Database and Migration Paths
+
+| Area | Path | Start here for |
+|---|---|---|
+| Agent schema DDL | `sql/migrations/V003__trading_agent_tables.sql` | Existing `agent.messages`, `agent.ai_invocations`, `agent.state_changes` definitions. |
+| Engine mode DDL changes | `sql/migrations/V015__engine_mode_separation.sql` | Engine mode additions to agent/trading tables. |
+| DB helper scripts | `helper_scripts/db/` | Runtime healthchecks and DB operational scripts. |
+| Passive wait healthcheck | `helper_scripts/db/passive_wait_healthcheck.sh` | Required style for silent-dead healthchecks. |
+
+### UI and Observability Paths
+
+| Area | Path | Start here for |
+|---|---|---|
+| Agent routes | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agents_routes.py` | API surface for agent status. |
+| Agent route helpers | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agents_routes_helpers.py` | Agent response helper logic. |
+| Agent tab HTML | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/tab-agents.html` | Current agent roster UI. |
+| Agent tracker JS | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/js/agent-tracker.js` | Frontend agent tracker behavior. |
+
+## Milestone Start Paths
+
+| Milestone | Primary paths |
+|---|---|
+| M0 Review and Contract Freeze | `ENGINEERING_PLAN.md`, `docs/decisions/EX-06_OpenClaw_Bybit_Multi-Agent_Orchestration_多Agent编排正式边界定义_V1.md`, `docs/decisions/DOC-04_OpenClaw_Bybit_Agent_Capability_Blueprint_Agent能力蓝图_V2.md`, `CLAUDE.md`, `TODO.md` |
+| M1 Durable Agent Event Store | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/multi_agent_framework.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/base_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agent_audit_bridge.py`, `sql/migrations/V003__trading_agent_tables.sql`, `sql/migrations/V015__engine_mode_separation.sql` |
+| M2 Scanner Advisory Conversion | `rust/openclaw_engine/src/scanner/runner.rs`, `rust/openclaw_engine/src/scanner/registry.rs`, `rust/openclaw_engine/src/scanner/types.rs`, `rust/openclaw_engine/src/scanner/market_judgment.rs`, `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_wiring_scanner.py` |
+| M3 Agent Decision Spine Shadow | `rust/openclaw_engine/src/tick_pipeline/on_tick/step_3_signals.rs`, `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`, `rust/openclaw_engine/src/tick_pipeline/commands.rs`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/guardian_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_agent.py` |
+| M4 Strategist V2 | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_edge_eval.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_weights.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_cognitive.py`, `rust/openclaw_engine/src/strategist_scheduler/mod.rs`, `rust/openclaw_engine/src/strategist_scheduler/evaluate.rs` |
+| M5 Guardian V2 | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/guardian_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_hub.py`, `rust/openclaw_engine/src/tick_pipeline/on_tick/step_6_risk_checks.rs`, `rust/openclaw_engine/src/scanner/market_judgment.rs` |
+| M6 Executor Planner | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_config_cache.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_lease_bridge.py`, `rust/openclaw_engine/src/tick_pipeline/commands.rs`, `rust/openclaw_engine/src/tick_pipeline/pipeline_helpers.rs` |
+| M7 Analyst Learning Loop | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/analyst_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/analyst_records.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/analyst_pattern_claims.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_weights.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/guardian_agent.py` |
+| M8 Canary and Cutover | `CLAUDE.md`, `TODO.md`, `helper_scripts/db/passive_wait_healthcheck.sh`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agents_routes.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/js/agent-tracker.js` |
+
+## Execution Rule
+
+Recommended dispatch chain for this architecture work:
+
+PM -> CC -> FA -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM
+
+Do not start implementation before CC/FA/PA confirm the authority model:
+
+- Scanner advisory vs gate.
+- Rust engine as execution engine vs hidden decision authority.
+- Agent Decision Spine persistence requirements.
+- Guardian/Decision Lease enforcement order.
+
+## Milestone 0: Review and Contract Freeze
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-000 | PM | P0 | TODO | Review `ENGINEERING_PLAN.md` with operator and confirm target architecture. | Operator confirms scanner must be advisory, Strategist owns decisions, Guardian owns veto. |
+| MAG-001 | CC | P0 | TODO | Compliance review against root principles, EX-06, DOC-04, SM-02 Decision Lease, H0/P0/P1. | Written finding: no boundary violation or explicit amendments listed. |
+| MAG-002 | FA | P0 | TODO | Formal architecture review of Agent Decision Spine, object lifecycle, and persistence order. | FA signs off canonical decision ordering and fail-closed behavior. |
+| MAG-003 | PA | P0 | TODO | Produce implementation RFC with exact module seams, structs, migrations, flags, and rollout order. | RFC maps every plan object to Rust/Python files and DB tables. |
+
+## Milestone 1: Durable Agent Event Store
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-010 | E1 | P0 | TODO | Wire MessageBus DB sink for `agent.messages`. | Linux runtime shows fresh rows after Scout/Strategist/Guardian messages. |
+| MAG-011 | E1 | P0 | TODO | Persist `agent.state_changes` from agent start/stop/degrade/heartbeat transitions. | State rows exist for all five agents and Conductor. |
+| MAG-012 | E1a | P0 | TODO | Persist `agent.ai_invocations` for L1/L1.5/L2 calls with model, latency, cost, prompt hash, output hash. | Nonzero rows after Strategist and Analyst evaluations. |
+| MAG-013 | E2 | P0 | TODO | Audit DB sink failure modes. | Message path is fail-soft for logs but fail-visible in health checks. |
+| MAG-014 | E4 | P0 | TODO | Add Linux regression for agent schema nonzero row acceptance. | Test fails on current zero-row state and passes after wiring. |
+
+## Milestone 2: Scanner Advisory Conversion
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-020 | PA | P0 | TODO | Define scanner authority modes: `legacy_gate`, `advisory_shadow`, `advisory_enforced`. | Config semantics documented and reviewed. |
+| MAG-021 | E1 | P0 | TODO | Add `OpportunityCandidate` and `OpportunityDecay` contracts. | Rust/Python serialization tests pass. |
+| MAG-022 | E1 | P0 | TODO | Emit scanner decay when symbol weakens, is displaced, or exits top set. | Open position decay creates review event, not close command. |
+| MAG-023 | E1 | P0 | TODO | Preserve active-position market data subscription independent of scanner ranking. | Replay proves open positions remain monitored after scanner drop. |
+| MAG-024 | E1 | P0 | TODO | Convert scanner hot-path new-open gate into advisory shadow comparison behind flag. | In shadow mode, legacy gate result is recorded but does not alter spine decision. |
+| MAG-025 | QC | P0 | TODO | Build replay set for scanner churn windows and wave profit/loss behavior. | Replay fixture identifies regular scanner-driven waves if present. |
+| MAG-026 | E4 | P0 | TODO | Regression: scanner decay -> PositionReview, no auto close. | Test proves no close dispatch is caused solely by scanner removal. |
+
+## Milestone 3: Agent Decision Spine Shadow
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-030 | PA | P0 | TODO | Finalize `agent_spine` Rust module design. | RFC lists module files, interfaces, stores, and feature flags. |
+| MAG-031 | E1 | P0 | TODO | Implement `StrategySignal` adapter for Rust strategies. | Existing strategy outputs can be persisted as signals without executing. |
+| MAG-032 | E1 | P0 | TODO | Implement spine store for StrategistDecision, GuardianVerdict, ExecutionPlan, ExecutionReport. | DB chain query can join signal -> decision -> verdict -> plan. |
+| MAG-033 | E1a | P0 | TODO | Add Python `agent_spine_client.py` for Strategist/Guardian/Analyst interaction. | Python agents can publish/consume typed objects without free-text routing. |
+| MAG-034 | E2 | P0 | TODO | Audit idempotency and double-execution prevention. | Every execution candidate has decision_id and order_plan_id dedupe. |
+| MAG-035 | E4 | P0 | TODO | Shadow integration test: legacy Rust path vs spine decisions. | Shadow produces complete chain while legacy behavior remains unchanged. |
+
+## Milestone 4: Strategist V2
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-040 | PA/QC | P0 | TODO | Define strategy matching model for MA/Grid/Funding/BB/Breakout. | Strategy choice is not `strategist_ai`/`strategist_heuristic` only. |
+| MAG-041 | E1a | P0 | TODO | Implement StrategistDecision open/hold/reduce/close/no_action. | Decisions include thesis, invalidation, expected net edge, portfolio impact. |
+| MAG-042 | E1a | P0 | TODO | Implement PositionReview for scanner decay and regime shifts. | Scanner decay on open position leads to hold/reduce/tighten/close recommendation. |
+| MAG-043 | E1a | P1 | TODO | Consume Guardian rejection stats in next-cycle decision. | High reject rate reduces aggressiveness or raises confidence floor. |
+| MAG-044 | E1a | P1 | TODO | Consume AnalystInsight and TruthRegistry in strategy weights. | Losing pattern changes future strategy preference with persisted reason. |
+| MAG-045 | E4 | P0 | TODO | Replay test: Strategist decisions are not equivalent to scanner score sorting. | Test compares candidate rank vs chosen action and requires explicit reasoning. |
+
+## Milestone 5: Guardian V2
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-050 | QC | P0 | TODO | Design dynamic correlation and per-strategy drawdown metrics. | Model inputs and fallback behavior documented. |
+| MAG-051 | E1 | P0 | TODO | Replace hardcoded BTC/ETH-only correlation with dynamic matrix or safe fallback. | Correlation verdict works across active symbols. |
+| MAG-052 | E1 | P0 | TODO | Add P2 risk modification output to GuardianVerdict. | Guardian can modify size/leverage/stop/cooldown with reason. |
+| MAG-053 | E1 | P1 | TODO | Consume Scout event alerts and scanner risk evidence in Guardian. | Event/risk alert can tighten risk without directly ordering. |
+| MAG-054 | E4 | P0 | TODO | Regression: Guardian verdict is mandatory before ExecutionPlan. | ExecutionPlan cannot be created without approved/modified verdict. |
+
+## Milestone 6: Executor Planner
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-060 | PA | P1 | TODO | Define ExecutionPlan interface and allowed order styles. | Executor cannot encode symbol/direction authority. |
+| MAG-061 | E1 | P1 | TODO | Implement ExecutionPlan generation. | Approved StrategistDecision becomes plan with max slippage, urgency, maker preference. |
+| MAG-062 | E1 | P1 | TODO | Add Decision Lease binding to ExecutionPlan. | Every real submit carries lease id or fails closed. |
+| MAG-063 | E1 | P1 | TODO | Persist ExecutionReport with quality metrics. | Analyst receives slippage/fees/fill latency. |
+| MAG-064 | E4 | P1 | TODO | Regression: Executor never chooses symbol/direction. | Tests assert symbol/direction come only from approved decision. |
+
+## Milestone 7: Analyst Learning Loop
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-070 | MIT/QC | P1 | TODO | Define L1/L2/L3 AnalystInsight schemas. | Insights carry fact/inference/hypothesis labels. |
+| MAG-071 | E1a | P1 | TODO | Persist AnalystInsight and link to evidence refs. | Insight can be traced to round trips and strategy metrics. |
+| MAG-072 | E1a | P1 | TODO | Strategist consumes losing/winning patterns through typed rules. | Next-cycle decision changes are explainable. |
+| MAG-073 | E1 | P1 | TODO | Guardian consumes risk patterns. | Risk pattern can tighten P2 without changing P0/P1. |
+| MAG-074 | E4 | P1 | TODO | End-to-end test: losing pattern -> Strategist weight change -> persisted reason. | Full chain passes in Linux regression. |
+
+## Milestone 8: Canary and Cutover
+
+| ID | Owner | Priority | Status | Task | Acceptance |
+|---|---|---:|---|---|---|
+| MAG-080 | PM/PA | P0 | TODO | Define cutover policy: shadow -> canary -> primary. | Operator has exact flags, rollback steps, and thresholds. |
+| MAG-081 | E3 | P0 | TODO | Runtime risk review for canary flags and rollback. | No flag can accidentally enable live autonomy without approval. |
+| MAG-082 | E4 | P0 | TODO | 24h canary validation checklist. | Complete evidence chain for every canary decision. |
+| MAG-083 | QA | P0 | TODO | Final release audit. | No trade reaches execution without StrategistDecision + GuardianVerdict + ExecutionPlan + Decision Lease. |
+| MAG-084 | PM | P0 | TODO | Operator sign-off. | Written sign-off updates TODO/CLAUDE/MEMORY as needed. |
+
+## Open Questions
+
+1. Should scanner hard market invalidity be represented under H0 eligibility or Guardian risk evidence?
+2. Should Agent Decision Spine be Rust-only authoritative with Python adapters, or DB-authoritative with Rust enforcement?
+3. What is the minimum replay window required before scanner advisory mode can become enforced?
+4. Should Strategist V2 initially control only new entries, or also existing position reviews?
+5. Which UI surface should show the decision chain first: Paper Dashboard, Learning Cockpit, or Agent roster?
+
+## Definition of Done
+
+The rework is done only when:
+
+1. Agent event DB tables are populated in production runtime.
+2. Scanner no longer directly decides open/close through hidden gates.
+3. Every trade or rejection has a full decision chain.
+4. Strategist produces real tactical decisions, not generic edge intents.
+5. Guardian has mandatory, persisted veto/modification authority.
+6. Executor creates execution plans and reports quality.
+7. Analyst insights are consumed by Strategist/Guardian.
+8. Cutover has shadow/canary evidence and rollback plan.
