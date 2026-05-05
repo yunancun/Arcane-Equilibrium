@@ -134,9 +134,22 @@ Do not start implementation before CC/FA/PA confirm the authority model:
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
 | MAG-000 | PM | P0 | DONE | Review `ENGINEERING_PLAN.md` with operator and confirm target architecture. | Operator confirmed: scanner must be advisory/evidence, Strategist owns open/hold/reduce/close/no_action decisions, Guardian owns non-bypassable veto/modify authority, Rust remains execution engine without hidden decision authority. |
-| MAG-001 | CC | P0 | TODO | Compliance review against root principles, EX-06, DOC-04, SM-02 Decision Lease, H0/P0/P1. | Written finding: no boundary violation or explicit amendments listed. |
-| MAG-002 | FA | P0 | TODO | Formal architecture review of Agent Decision Spine, object lifecycle, and persistence order. | FA signs off canonical decision ordering and fail-closed behavior. |
-| MAG-003 | PA | P0 | TODO | Produce implementation RFC with exact module seams, structs, migrations, flags, and rollout order. | RFC maps every plan object to Rust/Python files and DB tables. |
+| MAG-001 | CC | P0 | DONE | Compliance review against root principles, EX-06, DOC-04, SM-02 Decision Lease, H0/P0/P1. | APPROVED in `docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-06--agenttodo_m0_mag001_compliance_review.md`; no blocking boundary violation or required amendment. |
+| MAG-002 | FA | P0 | CONDITIONAL | Formal architecture review of Agent Decision Spine, object lifecycle, and persistence order. | CONDITIONAL in `docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-06--agenttodo_m0_mag002_architecture_review.md`; canonical order accepted, E1 blocked until state transitions / ownership / idempotency / persistence-before-side-effect / scanner decay / protective-close split / fail-closed healthchecks are explicit. |
+| MAG-003 | PA | P0 | CONDITIONAL | Produce implementation RFC with exact module seams, structs, migrations, flags, and rollout order. | CONDITIONAL in `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-06--agenttodo_m0_mag003_implementation_rfc.md`; M1 may start only as durable event-store wave after PM reconciliation, with M2/M3 authority changes gated behind M1 Linux row proof + E2/E4 acceptance. |
+
+### M0 Conditional Gate Before E1
+
+PM reconciliation result: M0 contract-freeze direction is approved, but implementation is limited to M1 durable event store only until the following conditions are explicit in the implementation packet and reviewed by E2/E4:
+
+1. Object state transitions, terminal states, parent IDs, and versioning for evidence, StrategistDecision, GuardianVerdict, ExecutionPlan, Decision Lease, ExecutionReport, and AnalystInsight.
+2. Store ownership table: DB as durable lineage ledger, Python as reasoning-object producer through adapters, Rust as final execution enforcement, with exactly one writer/updater class per transition.
+3. Durable idempotency keys and unique constraints for `decision_id`, verdict version, `order_plan_id`, lease binding, and execution submit.
+4. Persistence-before-side-effect rule for every authoritative object; write failure must fail closed or degrade to non-trading shadow behavior.
+5. Scanner lifecycle: `OpportunityCandidate` / `OpportunityDecay` / `PositionReview`; scanner decay cannot auto-close or directly block opens except hard H0/Guardian facts.
+6. Protective close vs tactical close/reduce split: protective H0/P0/P1 reduce-only paths may bypass Strategist tactical approval only with explicit protective lineage; tactical close/reduce must pass StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease.
+7. Fail-closed healthchecks for complete-chain ratio, orphan decisions/verdicts/plans, zero-row agent tables, missing AI invocation links, missing lease IDs, scanner decay without review, and duplicate submit attempts.
+8. Feature-flag semantics: `advisory_enforced` means enforced advisory-only semantics, and any legacy fallback after cutover must be wrapped by the full spine or constrained to protective/reduce-only behavior.
 
 ## Milestone 1: Durable Agent Event Store
 

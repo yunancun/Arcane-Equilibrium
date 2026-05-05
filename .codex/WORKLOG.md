@@ -17,6 +17,12 @@ YYYY-MM-DD HH:MM TZ
 - operator confirmed target architecture: scanner advisory/evidence, Strategist decision ownership, Guardian non-bypassable veto/modify, Rust execution engine without hidden decision authority
 - next chain: MAG-001 CC, MAG-002 FA, MAG-003 PA contract freeze
 
+2026-05-06 00:35 CEST
+- completed AgentTodo M0 contract-freeze dispatch: MAG-001 CC APPROVED, MAG-002 FA CONDITIONAL, MAG-003 PA CONDITIONAL
+- PM reconciled: M0 direction accepted, but E1 cannot start broadly; first implementation wave is limited to M1 durable agent event store
+- E1-blocking conditions recorded in AgentTodo: state transitions, store ownership, durable idempotency, persistence-before-side-effect, scanner decay lifecycle, protective close split, fail-closed healthchecks, feature-flag/fallback semantics
+- unrelated untracked `CONTEXT.md` and `docs/adr/` left untouched
+
 2026-04-28 13:00 CEST
 - created repo-synced Codex workspace under `.codex/`
 - recorded Codex role, startup docs, inventory usage policy, and Mac -> git -> ssh Linux deploy flow
