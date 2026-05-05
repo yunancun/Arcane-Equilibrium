@@ -73,7 +73,7 @@ import random
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 try:
     import psycopg2  # type: ignore
@@ -81,6 +81,24 @@ try:
 except ImportError:  # pragma: no cover - runtime DB path only
     psycopg2 = None  # type: ignore[assignment]
     Json = None  # type: ignore[assignment]
+
+# REF-20 Sprint C2 R7-T1：calibrated_replay tier 升級需要 CalibrationResult
+# 型別 + build_replay_metadata helper。Optional import 模式（避免未上線環境
+# 載入 replay 模組失敗）。caller 不傳 R6_calibration_provider 時退回 legacy
+# 'real_outcome' fallback path（backward-compat per AI-E §10 risk #7）。
+try:  # pragma: no cover - import guard
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.replay.calibration_label import (
+        CalibrationResult,
+    )
+    from program_code.local_model_tools.replay_metadata_helper import (
+        build_replay_metadata,
+    )
+
+    _R7_HELPER_AVAILABLE = True
+except ImportError:  # pragma: no cover - fallback when replay subsystem 未上線
+    CalibrationResult = None  # type: ignore[assignment, misc]
+    build_replay_metadata = None  # type: ignore[assignment]
+    _R7_HELPER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -415,7 +433,36 @@ def persist_dream_insights(
     *,
     engine_mode: str = "demo",
     cfg: Optional[DreamConfig] = None,
+    R6_calibration_provider: Optional[
+        Callable[[str, Optional[str]], "CalibrationResult"]
+    ] = None,
 ) -> dict[str, Any]:
+    """REF-20 Sprint C2 R7-T1：升級為 calibrated_replay tier-aware insert。
+
+    Backward-compat (per AI-E advisory §10 risk #7)：
+      - 不傳 ``R6_calibration_provider`` → 走 legacy 'real_outcome' fallback
+        path（既有 18 月生產行為不動）。
+      - 傳 provider → per-insight 取 ``CalibrationResult``，依 label：
+        * NONE → skip（不 INSERT）；強制下游 fail-fast，避免污染
+          calibrated_replay tier。
+        * LIMITED / CALIBRATED → 寫 'calibrated_replay' tier + 4-tuple
+          metadata (replay_experiment_id / manifest_hash / expires_at)。
+
+    Args:
+        dsn: PG dsn (None → env fallback)。
+        engine_mode: paper / demo / live_demo / live。
+        cfg: optional override config（test 注入用）。
+        R6_calibration_provider: optional callable
+            ``(strategy_name, symbol) → CalibrationResult``。Caller 必須提
+            供能取 R6 ``derive_execution_confidence`` 結果的方法（典型實
+            作：caller 上游 pre-computed dict 包成 lambda）。傳 None →
+            backward-compat fallback path（'real_outcome' tier）。
+
+    Returns:
+        dict with ``inserted`` / ``insights`` 計數 + R7 路徑時加
+        ``skipped_none_label`` (NONE label 跳過數量) + ``calibrated_inserted``
+        (calibrated_replay tier 寫入數)。
+    """
     cfg = cfg or config_from_env(engine_mode)
     resolved_dsn = _resolve_dsn(dsn)
     if not resolved_dsn:
@@ -426,23 +473,66 @@ def persist_dream_insights(
         return {"inserted": 0, "insights": 0}
     if psycopg2 is None or Json is None:
         raise RuntimeError("psycopg2 not installed")
-    # REF-20 W3-P2a-S4: 切換到 verified insert function (V036).
-    # PR2 of 3-PR sequence: dream_engine 不再直接 INSERT；改呼叫
-    # learning.verify_replay_evidence_and_insert()。current row 全為
-    # `evidence_source_tier='real_outcome'` (legacy producer path)，
-    # replay metadata column 全 NULL；V037 land 後 PUBLIC INSERT 被撤銷，
-    # 唯一寫路徑就是此 function。
-    #
-    # REF-20 W3-P2a-S4: switch to verified insert function (V036).
-    # PR2 of 3-PR sequence: dream_engine no longer issues raw INSERT.
-    # Calls learning.verify_replay_evidence_and_insert() instead.
-    # Current rows are all `evidence_source_tier='real_outcome'` (legacy
-    # producer path) with NULL replay metadata. After V037 lands, PUBLIC
-    # INSERT is revoked and this function becomes the only sanctioned write.
+
+    # R7-T1: 判斷是否走 calibrated_replay path 或 legacy real_outcome path。
+    # provider 提供 + helper 可用 → 走 R7 升級路徑；否則 backward-compat
+    # 'real_outcome' fallback。
+    use_r7_path = (
+        R6_calibration_provider is not None
+        and _R7_HELPER_AVAILABLE
+        and build_replay_metadata is not None
+    )
+
     inserted = 0
+    skipped_none_label = 0  # R7 path: label=NONE 跳過數
+    calibrated_inserted = 0  # R7 path: 走 calibrated_replay tier 數
+
     with psycopg2.connect(resolved_dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
             for insight in insights:
+                strategy_name = insight.get("strategy_name")
+
+                # R7-T1 metadata 構造（fail-soft）
+                replay_experiment_id_arg: Optional[str] = None
+                manifest_hash_arg: Optional[str] = None
+                expires_at_arg: Optional[Any] = None
+                tier_arg = "real_outcome"  # 預設 legacy
+
+                if use_r7_path:
+                    try:
+                        # provider 收 (strategy, symbol) — dream insight scope
+                        # 是 strategy-wide，symbol 傳 None。
+                        cal_result = R6_calibration_provider(strategy_name, None)  # type: ignore[misc]
+                        # Caller 必含 experiment_id（R6 W6 從 V049 derive 後
+                        # caller 自記 mapping）。預期 caller 包 lambda 帶 closure。
+                        experiment_id = insight.get("replay_experiment_id")
+                        if experiment_id is None or cal_result is None:
+                            # 缺 experiment_id 或 cal_result → fallback real_outcome
+                            tier_arg = "real_outcome"
+                        else:
+                            metadata = build_replay_metadata(
+                                experiment_id=experiment_id,
+                                calibration_result=cal_result,
+                                cur=cur,
+                            )
+                            if metadata is None:
+                                # NONE label 或 V049 row 缺失 → skip 此筆
+                                skipped_none_label += 1
+                                continue
+                            tier_arg, replay_experiment_id_arg, manifest_hash_arg, expires_at_arg = metadata
+                    except Exception as exc:  # noqa: BLE001
+                        # R6 provider 異常 → fallback real_outcome（不 crash
+                        # producer cycle）
+                        logger.warning(
+                            "dream_engine R7: provider/helper 異常 → "
+                            "fallback real_outcome (strategy=%s err=%s)",
+                            strategy_name, exc,
+                        )
+                        tier_arg = "real_outcome"
+                        replay_experiment_id_arg = None
+                        manifest_hash_arg = None
+                        expires_at_arg = None
+
                 try:
                     cur.execute(
                         """
@@ -459,33 +549,46 @@ def persist_dream_insights(
                             false,                          -- p_applied
                             true,                           -- p_requires_governance
                             'mlde_dream_engine',            -- p_created_by
-                            'real_outcome',                 -- p_evidence_source_tier (legacy producer)
-                            NULL,                           -- p_replay_experiment_id
-                            NULL,                           -- p_manifest_hash
-                            NULL,                           -- p_expires_at (real_outcome 不需 TTL)
+                            %s,                             -- p_evidence_source_tier (R7: real_outcome | calibrated_replay)
+                            %s,                             -- p_replay_experiment_id (R7)
+                            %s,                             -- p_manifest_hash (R7 hex)
+                            %s,                             -- p_expires_at (R7 timestamptz)
                             NULL, NULL, NULL                -- decision_lease_id / context_id / intent_id
                         )
                         """,
                         (
                             cfg.engine_mode,
-                            insight.get("strategy_name"),
+                            strategy_name,
                             insight.get("expected_improvement_bps"),
                             insight.get("confidence"),
                             insight.get("sample_count"),
                             Json(insight),
+                            tier_arg,
+                            replay_experiment_id_arg,
+                            manifest_hash_arg,
+                            expires_at_arg,
                         ),
                     )
                     inserted += 1
+                    if tier_arg == "calibrated_replay":
+                        calibrated_inserted += 1
                 except psycopg2.Error as exc:  # noqa: BLE001
                     # verified function reject: log and continue (producer 不 crash).
                     # function reject 拒絕：記 log 後繼續下一筆 (producer 不 crash)。
                     logger.warning(
-                        "dream_engine: verify_replay_evidence_and_insert rejected insight=%s err=%s",
-                        insight.get("strategy_name"),
-                        exc,
+                        "dream_engine: verify_replay_evidence_and_insert rejected insight=%s tier=%s err=%s",
+                        strategy_name, tier_arg, exc,
                     )
         conn.commit()
-    return {"inserted": inserted, "insights": len(insights)}
+
+    result: dict[str, Any] = {
+        "inserted": inserted,
+        "insights": len(insights),
+    }
+    if use_r7_path:
+        result["calibrated_inserted"] = calibrated_inserted
+        result["skipped_none_label"] = skipped_none_label
+    return result
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -781,6 +884,12 @@ def generate_replay_candidates(
     """Generate sampled replay candidate parameter sets given a ``ReplayIntent``.
 
     依 ``ReplayIntent`` 生成取樣 replay 候選 parameter set。
+
+    R7-T2 (Sprint C2 W1, 2026-05-05): verify-only — 本 function 是 pure
+    compute API；caller `replay_routes.py POST /api/v1/replay/run` 走 V036
+    verify_replay_evidence_and_insert 路徑（AI-E §1 grep verified: 0 直接
+    INSERT in this function body）。本函數不動 evidence_source_tier；
+    R7 升級不影響（caller 已負責決定 tier）。
 
     This is the Wave 6 R20-P4-Q4 deliverable: a pure-compute API surface
     that the upcoming ``replay_routes.py POST /api/v1/replay/run`` caller

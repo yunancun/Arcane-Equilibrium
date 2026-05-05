@@ -5631,3 +5631,56 @@ PA dispatch「REF-20 Sprint C R6 W6 — R6-T9 Sprint C1 真實 closure (Python p
 - **P2-W6-FOLLOWUP-1**：Rust binary expose CLI for derive_execution_confidence + 加 Python ↔ Rust byte-equal e2e test（subprocess spawn + 9 field hash 對比）。需 Rust binary main.rs 加 `--derive-execution-confidence-from-fixture` CLI flag。
 - **P2-W6-FOLLOWUP-2**：trading.fills entry/exit pair JOIN 設計 RFC — caller 端 SQL 從 per-fill row 升級到 trade-level pair 投影（用 `position_close_event` 配對 close + open fill）。對 calibration net_bps_p* CI 信號質量提升，但對 fee_bps MAD/IQR 主信號不影響。
 - **P2-W6-FOLLOWUP-3**：V049 row 升級到 V### migration 加 top-level `strategy` / `symbol` column（取代 manifest_jsonb->>'strategy' SELECT pattern）。當前模式工作 OK 但 jsonb extraction 較 column 慢；非 hot path 暫不必修。
+
+## 2026-05-05 — REF-20 Sprint C2 R7 W1 (5 R7 task batch + shared helper)
+
+### W1 IMPL 範圍
+
+PA dispatch「REF-20 Sprint C2 R7 W1 — 5-producer 升級 calibrated_replay tier + 共用 helper」5-task batch 完成。3 R7-T producer 升級 + 1 R7-T2 verify-only marker + 1 R7-T4 LinUCB NO-OP confirmation + 1 共用 helper。
+
+### 改動
+
+- `local_model_tools/replay_metadata_helper.py`：NEW 190 LOC — `build_replay_metadata` 統一接口 + R7-T4 LinUCB NO-OP marker；fail-soft（NONE label / V049 row missing / manifest_hash NULL → 回 None）；BYTEA → hex 編碼（接受 bytes / memoryview / bytearray driver variant）；caller side 構造 4-tuple metadata。
+- `local_model_tools/dream_engine.py`：954 → 1063 LOC（+109）— `persist_dream_insights` 加 `R6_calibration_provider` optional kwarg；per-insight loop 構造 metadata；NONE skip / Calibrated/Limited 寫 calibrated_replay tier；result dict 加 `calibrated_inserted` + `skipped_none_label` (R7 path only)；backward-compat：不傳 provider → legacy 'real_outcome' fallback。`generate_replay_candidates` 加 R7-T2 verify-only marker comment（不動 logic）。
+- `local_model_tools/opportunity_tracker.py`：282 → 377 LOC（+95）— `persist_regret_summary` 加 `R6_calibration_provider` + `replay_experiment_id` 兩 optional kwarg；single regret row 構造 metadata；regret 是 engine_mode-wide aggregate，provider sig=(strategy=None, symbol=None)；should_insert flag 控制 NONE skip。
+- `ml_training/mlde_shadow_advisor.py`：812 → 912 LOC（+100）— `_persist_recommendations` 加 `R6_calibration_provider` + `replay_experiment_id_provider` 兩 optional kwarg（PA §2B 漏列補位）；per-rec loop 構造 metadata；rec.source 是 V031 allowlist variable 不動，正交於 evidence_source_tier。
+- `local_model_tools/tests/test_replay_metadata_helper.py`：NEW 212 LOC — 7 unit case：CALIBRATED label / LIMITED label 3d TTL / NONE label 短路 / V049 row missing advisory / manifest_hash NULL advisory / hex format 64-char / memoryview BYTEA。
+- `local_model_tools/tests/test_r7_producer_upgrade.py`：NEW 512 LOC — 8 producer mock case：dream_engine 3 case (calibrated_replay path / NONE skip / no_provider fallback) + opportunity_tracker 2 case (calibrated path / no_provider fallback) + mlde_shadow_advisor 3 case (calibrated path / no_provider fallback / NONE skip)。
+
+### 驗證
+
+- Mac pytest test_replay_metadata_helper.py：**7/7 PASS**（< 0.1s）
+- Mac pytest test_r7_producer_upgrade.py：**8/8 PASS**（< 0.1s）
+- Mac pytest 全 local_model_tools tests：**80/80 PASS**（含新加 15 + 既有 65 regression，0 regression）
+- Mac pytest 全 ml_training + replay regression：**416 passed / 1 fail / 32 skipped**（1 fail = pre-existing `test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys` 與本 R7 改動無關，stash 我的改動仍 fail）
+- 0 forbidden import（V3 §6.2 forbidden_surface_audit GREEN；helper 文字提及僅 MODULE_NOTE）
+- 0 cross-platform path 硬編碼（CLAUDE.md §七 跨平台合規）
+- 0 hard boundary 觸碰（max_retries / live_execution_allowed / decision_lease）
+- 0 V### migration / 0 schema 改動 / 0 manifest_signer canonical_bytes 改動 / xlang_consistency 13/13 維持
+- LOC 全 < 2000 hard cap；dream_engine.py 1063 + mlde_shadow_advisor.py 912 都已 > 800 warn（baseline pre-existing > warn，post-W1 +109/+100；不適用 baseline+5 exception 因仍 < 2000 hard cap）
+
+### 設計決策 / 教訓
+
+1. **Helper API：直接 SELECT V049.manifest_hash 而非 reuse `lookup_replay_config_blob`**：AI-E spec §3.2 + PA dispatch §1.1 提示用 `lookup_replay_config_blob` 取 manifest_hash，但實際 `experiment_registry.lookup_replay_config_blob` 只取 manifest_jsonb 內 `_replay_strategy_params` / `_replay_risk_overrides` 兩 blob（Sprint B2 R5-T6 設計），無 manifest_hash key。本 helper 改用獨立 SELECT manifest_hash + experiment_id 確認 row 存在 + advisory NULL handling 模式。教訓：dispatch reference 與真實 fn signature 對不上時，E1 應 grep 真實 caller 路徑驗證再決定 helper API（不盲信 dispatch reference）。
+2. **backward-compat default = real_outcome fallback**：AI-E §10 risk #7 風險點：「caller 不 supply `R6_calibration_provider` 仍跑 hardcoded 'real_outcome' path」。IMPL 4 producer 全程默認 `R6_calibration_provider=None` → use_r7_path=False → tier='real_outcome' / metadata 全 NULL（既有 18 月生產行為不變）。當 caller 上游 R6 calibration 整合 chain 時 opt-in 傳 provider 啟用 calibrated_replay tier。
+3. **NONE label skip semantic**：V036 `evidence_source_tier='real_outcome'` + `replay_experiment_id IS NOT NULL` 違反 V051 paired CHECK；NONE label 計算結果不能 INSERT 為 'real_outcome' (碰巧不違反 paired CHECK 但語意誤導)。設計選擇：NONE → caller skip insert，不 fallback 為 real_outcome。理由：V036 拒絕 NONE tier；強制 fail-fast 比 silently downgrade 更安全（producer 0 INSERT 比污染 real_outcome tier 更好）。
+4. **mlde_shadow_advisor PA §2B 漏列補位**：PA dispatch §2B 列「4 producer」實 3 主路徑（dream / opportunity / mlde_shadow_advisor），AI-E §2 揭 PA 漏列 mlde_shadow_advisor。E1 IMPL 補位（R7-T1.5）；rec.source 是 variable（V031 CHECK allowlist {ml_shadow / dream_engine / opportunity_tracker / linucb}）但與 evidence_source_tier 正交，不影響升級。
+5. **opportunity_tracker single-row aggregate**：與 dream_engine / mlde_shadow_advisor 不同（後二者 per-row loop），opportunity_tracker 一個 cycle 只寫 1 row regret_summary aggregate；R7 metadata 構造邏輯放 with cur block 第一段（before INSERT），用 `should_insert` flag 控制 NONE skip 跳過 single INSERT。
+6. **2026-05-05 注釋 default 中文 governance**：本 W1 全程套用，6 NEW/MODIFIED file 全純中文 docstring + inline comment + module note；既有英文塊未碰（per CLAUDE.md §七「修改既有中英對照塊時移除英文只保留中文」— 本 W1 修改之 SQL execute 區塊只動 args 不動 comment）。
+7. **AI-E spec lookup_replay_config_blob 過時 reference**：Sprint B2 R5-T6 land 後此 fn 已是 round 2 版本回 strategy_params / risk_overrides 兩 blob；AI-E pre-DAG advisory 用此 fn 名作 placeholder spec，PA dispatch 直接複製。E1 必獨立驗 fn signature 真實返回類型，不盲信 advisory reference name。
+
+### 後續 follow-up（建議 P2 ticket，E1 不擴大 W1 scope）
+
+- **P2-R7-W1-FOLLOWUP-1**：caller 上游整合 chain — `edge_estimator_scheduler` 同 cycle 取 R6 CalibrationResult + experiment_id mapping 傳給 dream_engine / opportunity_tracker / mlde_shadow_advisor 啟用 R7 path（W1 只升級 4 producer signature；caller 整合留 W2-W3）。
+- **P2-R7-W1-FOLLOWUP-2**：opportunity_tracker `replay_experiment_id` 設計：當前 caller 必 caller 端帶 cycle scope experiment_id；若多 experiment 同 cycle 並行需更精細 mapping。當前 single-experiment cycle 充分。
+- **P2-R7-W1-FOLLOWUP-3**：mlde_shadow_advisor 期望 `replay_experiment_id_provider(rec) → exp_id`；caller 應 cache cycle-wide experiment_id 避免 per-rec O(n) lookup。當前 < 64 rec/cycle 可接受。
+- **P2-R7-W1-FOLLOWUP-4**：dream_engine `insight.get('replay_experiment_id')` 預期 caller 在 build_dream_summary 階段把 experiment_id 注入 insight dict；當前 build_dream_summary 不知道 experiment_id（caller 上游需修）。W1 設計使 caller 對 insight 加 key 即啟用 R7。
+
+### Output (PM 下一步)
+
+E1 W1 IMPL 完成；交 PM：
+1. Review 本 sign-off report
+2. Commit + push（建議 message：`feat(ref20): Sprint C2 R7 W1 — 3 producer calibrated_replay tier upgrade + shared helper`）
+3. Linux pull + pytest：`ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && python3 -m pytest program_code/local_model_tools/tests/ program_code/ml_training/tests/ -v"` 驗 80 + 415 PASS（與 Mac 結果一致；1 pre-existing fail）
+4. **C2 W2 dispatch unblock**（capability test + FK chain audit + lookup helper reuse audit per PA §13.5 路線圖）
+5. PA 派發 §7 強制工作鏈 minimal-loop pattern：W1 mirror W6 hermetic test pattern；建議 PM 直接 review skip E2，E4 regression 在 W3 全 chain land 後跑
