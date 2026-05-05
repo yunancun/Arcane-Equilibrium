@@ -39,6 +39,8 @@ _THIS_DIR = Path(__file__).resolve().parent
 # tests/static/ → tests/ → control_api_v1/ → app/ → static/
 _STATIC_DIR = _THIS_DIR.parent.parent / "app" / "static"
 _TAB_PAPER_HTML = _STATIC_DIR / "tab-paper.html"
+_TAB_REPLAY_HTML = _STATIC_DIR / "tab-replay.html"
+_CONSOLE_HTML = _STATIC_DIR / "console.html"
 _APP_PAPER_JS = _STATIC_DIR / "app-paper.js"
 _BROWSER_TEST_HTML = _THIS_DIR / "test_replay_subtab_readiness.html"
 
@@ -50,6 +52,22 @@ def tab_paper_html() -> str:
         f"tab-paper.html not found at {_TAB_PAPER_HTML}"
     )
     return _TAB_PAPER_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def tab_replay_html() -> str:
+    """Read tab-replay.html once per test module / 每模組讀一次。"""
+    assert _TAB_REPLAY_HTML.exists(), (
+        f"tab-replay.html not found at {_TAB_REPLAY_HTML}"
+    )
+    return _TAB_REPLAY_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def console_html() -> str:
+    """Read console.html once per test module / 每模組讀一次。"""
+    assert _CONSOLE_HTML.exists(), f"console.html not found at {_CONSOLE_HTML}"
+    return _CONSOLE_HTML.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -67,42 +85,24 @@ def app_paper_js() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def test_r4_t1_replay_button_not_hardcoded_disabled(tab_paper_html: str) -> None:
-    """Replay button must NOT carry static aria-disabled/data-disabled.
-
-    回放按鈕不可靜態帶 aria-disabled/data-disabled。
-    """
-    # The replay button block must contain id="subtab-btn-replay" and
-    # data-subtab="replay" but NOT aria-disabled="true"/data-disabled="true"
-    # within its tag bounds. Find the button line and assert.
-    lines = tab_paper_html.split("\n")
-    in_replay_btn = False
-    btn_lines: list[str] = []
-    for line in lines:
-        if 'id="subtab-btn-replay"' in line:
-            in_replay_btn = True
-        if in_replay_btn:
-            btn_lines.append(line)
-            if line.rstrip().endswith("</button>"):
-                break
-
-    assert btn_lines, "subtab-btn-replay <button> block not found"
-    btn_text = "\n".join(btn_lines)
-    assert 'aria-disabled="true"' not in btn_text, (
-        f"R4-T1 violation: replay button still has aria-disabled='true':\n{btn_text}"
-    )
-    assert 'data-disabled="true"' not in btn_text, (
-        f"R4-T1 violation: replay button still has data-disabled='true':\n{btn_text}"
-    )
+def test_replay_is_no_longer_owned_by_paper_tab(tab_paper_html: str) -> None:
+    """Legacy Paper tab must not expose the Replay subtab anymore."""
+    assert 'id="subtab-btn-replay"' not in tab_paper_html
+    assert 'id="subtab-replay"' not in tab_paper_html
 
 
-def test_r4_t1_replay_button_keeps_subtab_id(tab_paper_html: str) -> None:
-    """data-subtab + id attributes preserved per PA brief §3 R4-T1.
+def test_top_level_replay_tab_mount_present(tab_replay_html: str) -> None:
+    """Standalone Replay tab owns the readiness mount and boot hook."""
+    assert 'id="subtab-replay-disabled-card"' in tab_replay_html
+    assert "OpenClawReplaySubtab.onTabActivate" in tab_replay_html
 
-    PA brief §3 R4-T1：保留 data-subtab + id 屬性。
-    """
-    assert 'id="subtab-btn-replay"' in tab_paper_html
-    assert 'data-subtab="replay"' in tab_paper_html
+
+def test_console_has_replay_and_optional_paper_tabs(console_html: str) -> None:
+    """Console exposes Replay as first-class tab; Paper is settings-gated."""
+    assert "id: 'replay'" in console_html
+    assert "tab-replay.html" in console_html
+    assert "requiresPaperEngine: true" in console_html
+    assert "/api/v1/settings/paper-engine" in console_html
 
 
 def test_r4_t1_other_subtabs_still_disabled(tab_paper_html: str) -> None:
@@ -195,21 +195,15 @@ def test_r4_t2_30s_polling_interval(app_paper_js: str) -> None:
 
 
 def test_r4_t2_subtab_show_hooks_replay_activate(app_paper_js: str) -> None:
-    """ocPaperSubtabShow must call onTabActivate when name === 'replay'.
-
-    ocPaperSubtabShow 對 name === 'replay' 必呼 onTabActivate。
-    """
-    # Find the show fn block and confirm 'replay' branch wires hooks
-    assert "onTabActivate" in app_paper_js
-    assert "onTabDeactivate" in app_paper_js
-    # Ensure replay branch in show fn
+    """Replay namespace still exports activation hooks for the standalone tab."""
+    assert "onTabActivate: onTabActivate" in app_paper_js
+    assert "onTabDeactivate: onTabDeactivate" in app_paper_js
     show_idx = app_paper_js.find("function ocPaperSubtabShow(")
     assert show_idx >= 0, "ocPaperSubtabShow not found"
-    # Look for 'replay' string within ~3500 chars after show start
-    show_block = app_paper_js[show_idx:show_idx + 3500]
-    assert '"replay"' in show_block or "'replay'" in show_block, (
-        "ocPaperSubtabShow does not branch on 'replay' name"
-    )
+    next_fn = app_paper_js.find("function ocPaperSubtabRestoreFromStorage", show_idx)
+    assert next_fn > show_idx
+    show_block = app_paper_js[show_idx:next_fn]
+    assert '"replay"' not in show_block and "'replay'" not in show_block
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -293,6 +287,8 @@ def test_replay_operator_workflow_endpoints_wired(app_paper_js: str) -> None:
     assert "/api/v1/replay/experiments/register" in app_paper_js
     assert '"/api/v1/replay/run"' in app_paper_js
     assert "/finalize" in app_paper_js
+    assert "Run Backtest / 一鍵回測" in app_paper_js
+    assert "oc-replay-fixture-uri" in app_paper_js
 
 
 def test_r4_t3_xss_safe_via_ocesc(app_paper_js: str) -> None:
@@ -411,7 +407,7 @@ def test_r4_t4_browser_test_covers_three_states() -> None:
 
 @pytest.mark.parametrize(
     "src",
-    ["tab_paper_html", "app_paper_js"],
+    ["tab_paper_html", "tab_replay_html", "console_html", "app_paper_js"],
 )
 def test_no_hardcoded_user_home_paths(
     request: pytest.FixtureRequest, src: str,

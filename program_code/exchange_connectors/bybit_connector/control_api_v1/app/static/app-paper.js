@@ -308,7 +308,7 @@ function renderMarketFeedStatus(d) {
 
 const _OC_PAPER_SUBTAB_LS_KEY = "paper_active_subtab";
 const _OC_PAPER_SUBTAB_DEFAULT = "session";
-const _OC_PAPER_SUBTAB_VALID = ["session", "replay", "compare", "handoff"];
+const _OC_PAPER_SUBTAB_VALID = ["session", "compare", "handoff"];
 
 /**
  * 顯示指定 sub-tab，隱藏其他三個。/ Show the named sub-tab, hide the other three.
@@ -321,7 +321,7 @@ const _OC_PAPER_SUBTAB_VALID = ["session", "replay", "compare", "handoff"];
  *   4. 切換 hidden attribute 在 content divs（screen reader + a11y baseline）
  *   5. 持久化 active sub-tab 到 localStorage["paper_active_subtab"]
  *
- * @param {string} name - one of "session" / "replay" / "compare" / "handoff"
+ * @param {string} name - one of "session" / "compare" / "handoff"
  * @returns {boolean} true if switched, false if no-op (disabled or invalid)
  */
 function ocPaperSubtabShow(name) {
@@ -372,31 +372,6 @@ function ocPaperSubtabShow(name) {
     }
   });
 
-  // REF-20 Sprint B1 R4: replay subtab activate/deactivate hooks
-  // REF-20 Sprint B1 R4：replay 子標籤啟用/停用 hook
-  // - 切到 replay → 觸發 readiness probe + 啟動 30s 週期輪詢
-  // - 切離 replay → 停止輪詢避免 iframe-hidden 仍燒 timer
-  // 對 legacy index.html 無副作用：window.OpenClawReplaySubtab 可能不存在
-  // （namespace 在本檔末端定義；legacy index.html 不載 tab-paper.html）→
-  // typeof check 守衛即可。
-  // - Switch to replay → trigger readiness probe + 30s periodic poll
-  // - Switch away from replay → stop poll to avoid timer leak in hidden iframe
-  // Legacy index.html safe: typeof guard handles missing namespace.
-  if (typeof window.OpenClawReplaySubtab === "object" && window.OpenClawReplaySubtab !== null) {
-    if (name === "replay") {
-      // fire-and-forget probe；async error 內部 catch 不會冒泡破壞 navigation
-      // fire-and-forget probe; internal catch prevents async errors from
-      // breaking navigation flow.
-      try { window.OpenClawReplaySubtab.onTabActivate(); } catch (e) {
-        console.warn("[paper-subtab] replay onTabActivate threw:", e);
-      }
-    } else {
-      try { window.OpenClawReplaySubtab.onTabDeactivate(); } catch (e) {
-        console.warn("[paper-subtab] replay onTabDeactivate threw:", e);
-      }
-    }
-  }
-
   // 持久化 / Persist active sub-tab to localStorage（pure frontend, no backend hit）
   try {
     localStorage.setItem(_OC_PAPER_SUBTAB_LS_KEY, name);
@@ -436,11 +411,9 @@ function ocPaperSubtabRestoreFromStorage() {
 
   // Fallback：若 stored target 是 disabled，回 Session（避免空畫面）
   // Fallback: if stored target is disabled, fall back to Session (avoid blank view)
-  // REF-20 Sprint B1 R4：replay 子標籤已不再硬編 data-disabled="true"（R4-T1
-  // 移除靜態 disabled），所以此處對 replay 不會 fallback；session/replay 兩
-  // enabled，compare/handoff 仍 disabled，邏輯不變。
-  // After R4-T1 the replay button no longer carries hardcoded data-disabled,
-  // so this fallback only triggers for compare/handoff (still gated by phase).
+  // Replay is now a top-level console tab, so any stale localStorage value
+  // from the older Paper Replay Lab falls back to Session.
+  // Replay 已獨立為主控制台一級 Tab；舊 localStorage replay 值回退 Session。
   const btn = document.getElementById("subtab-btn-" + name);
   if (btn && btn.getAttribute("data-disabled") === "true") {
     name = _OC_PAPER_SUBTAB_DEFAULT;
@@ -835,6 +808,8 @@ function ocPaperSubtabInit() {
       + '<label class="oc-replay-field">Timeframe<input id="oc-replay-timeframe" value="1m" autocomplete="off" /></label>'
       + '<label class="oc-replay-field">Data Tier<select id="oc-replay-data-tier">'
       + '<option value="S2">S2 calibrated_replay</option><option value="S3">S3 synthetic_replay</option></select></label>'
+      + '<label class="oc-replay-field">Fixture URI<input id="oc-replay-fixture-uri" placeholder="optional path / server default" autocomplete="off" /></label>'
+      + '<label class="oc-replay-field">Starting Balance<input id="oc-replay-starting-balance" type="number" min="1" step="100" value="10000" /></label>'
       + '<label class="oc-replay-field">Window Start<input id="oc-replay-window-start" type="datetime-local" /></label>'
       + '<label class="oc-replay-field">Window End<input id="oc-replay-window-end" type="datetime-local" /></label>'
       + '<label class="oc-replay-field">Experiment ID<input type="text" id="oc-replay-experiment-id" placeholder="experiment_id" autocomplete="off" maxlength="64" /></label>'
@@ -844,6 +819,7 @@ function ocPaperSubtabInit() {
       + '<label class="oc-replay-json">Manifest JSON<textarea id="oc-replay-manifest-json">{}</textarea></label>'
       + '</div>'
       + '<div class="oc-replay-actions">'
+      + '<button type="button" class="oc-btn oc-btn-primary" id="oc-replay-run-all-btn">Run Backtest / 一鍵回測</button>'
       + '<button type="button" class="oc-btn" id="oc-replay-register-btn">Register / 註冊</button>'
       + '<button type="button" class="oc-btn" id="oc-replay-run-btn">Run / 執行</button>'
       + '<button type="button" class="oc-btn" id="oc-replay-finalize-btn">Finalize / 完成</button>'
@@ -869,10 +845,12 @@ function ocPaperSubtabInit() {
     // Inject CSS once (idempotent guard against re-render dup)
     _injectReplayReadyCss();
 
+    const runAllBtn = document.getElementById("oc-replay-run-all-btn");
     const registerBtn = document.getElementById("oc-replay-register-btn");
     const runBtn = document.getElementById("oc-replay-run-btn");
     const finalizeBtn = document.getElementById("oc-replay-finalize-btn");
     const loadBtn = document.getElementById("oc-replay-load-btn");
+    if (runAllBtn) runAllBtn.addEventListener("click", _onRunBacktestClick);
     if (registerBtn) registerBtn.addEventListener("click", _onRegisterClick);
     if (runBtn) runBtn.addEventListener("click", _onRunClick);
     if (finalizeBtn) finalizeBtn.addEventListener("click", _onFinalizeClick);
@@ -892,6 +870,14 @@ function ocPaperSubtabInit() {
       manifestJson.strategy = strategy;
       manifestJson.timeframe = timeframe;
       manifestJson.data_tier = dataTier;
+      const fixtureEl = document.getElementById("oc-replay-fixture-uri");
+      const fixtureUri = fixtureEl ? (fixtureEl.value || "").trim() : "";
+      if (fixtureUri) manifestJson.fixture_uri = fixtureUri;
+      const startingEl = document.getElementById("oc-replay-starting-balance");
+      const startingBalance = startingEl ? Number(startingEl.value) : NaN;
+      if (Number.isFinite(startingBalance) && startingBalance > 0) {
+        manifestJson.starting_balance = startingBalance;
+      }
       const body = {
         symbol: symbol,
         strategy: strategy,
@@ -906,7 +892,7 @@ function ocPaperSubtabInit() {
         manifest_jsonb: manifestJson,
         strategy_params: _parseJsonControl("oc-replay-strategy-params", null),
         risk_overrides: _parseJsonControl("oc-replay-risk-overrides", null),
-        idempotency_key: "paper-ui-" + Date.now()
+        idempotency_key: "replay-ui-" + Date.now()
       };
       const startEl = document.getElementById("oc-replay-window-start");
       const endEl = document.getElementById("oc-replay-window-end");
@@ -921,8 +907,10 @@ function ocPaperSubtabInit() {
       const data = resp.data || {};
       document.getElementById("oc-replay-experiment-id").value = data.experiment_id || "";
       _setReplayStatus("registered experiment_id=" + (data.experiment_id || ""), "oc-cell-ok");
+      return data.experiment_id || "";
     } catch (e) {
       _setReplayStatus("register failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+      return "";
     }
   }
 
@@ -940,7 +928,7 @@ function ocPaperSubtabInit() {
         headers: { "Accept": "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({
           experiment_id: expId,
-          idempotency_key: "paper-run-" + Date.now()
+          idempotency_key: "replay-run-" + Date.now()
         })
       });
       const data = resp.data || {};
@@ -948,8 +936,10 @@ function ocPaperSubtabInit() {
       const runEl = document.getElementById("oc-replay-run-id");
       if (runEl) runEl.value = runId;
       _setReplayStatus("run.status=" + (data.status || "started") + " run_id=" + runId, "oc-cell-ok");
+      return runId;
     } catch (e) {
       _setReplayStatus("run failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+      return "";
     }
   }
 
@@ -974,8 +964,25 @@ function ocPaperSubtabInit() {
         document.getElementById("oc-replay-experiment-id").value = expId;
         await _onLoadReportClick();
       }
+      return data;
     } catch (e) {
       _setReplayStatus("finalize failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+      return null;
+    }
+  }
+
+  async function _onRunBacktestClick() {
+    const btn = document.getElementById("oc-replay-run-all-btn");
+    if (btn) btn.disabled = true;
+    try {
+      _setReplayStatus("Register → Run → Finalize...", "");
+      const expId = await _onRegisterClick();
+      if (!expId) return;
+      const runId = await _onRunClick();
+      if (!runId) return;
+      await _onFinalizeClick();
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 

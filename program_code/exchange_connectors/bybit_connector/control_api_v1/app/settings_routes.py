@@ -102,6 +102,16 @@ _VALIDATE_PATH = "/v5/user/query-api"
 # HTTP timeout for validation call (seconds) / 驗證請求超時（秒）
 _VALIDATE_TIMEOUT = 10
 
+# Legacy Paper engine process toggle. The Rust engine reads this at process
+# startup; the GUI reads the persisted setting immediately to decide whether
+# to expose the legacy Paper tab.
+# Legacy Paper engine 進程開關。Rust engine 啟動時讀取；GUI 立即讀取持久化
+# 設定，以決定是否顯示 legacy Paper tab。
+_PAPER_ENGINE_ENV_KEY = "OPENCLAW_ENABLE_PAPER"
+_BASIC_SYSTEM_ENV_FILE = "basic_system_services.env"
+_ENV_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
+_ENV_FALSEY = frozenset({"0", "false", "no", "off", "disabled"})
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers / 輔助函數
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -176,6 +186,130 @@ def _write_key_file(slot: str, filename: str, content: str) -> None:
     # Enforce 600 — owner read/write only, no group/other access
     # 強制 600 — 僅 owner 可讀寫，group/other 無權限
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _coerce_env_bool(raw: str | None, *, default: bool = False) -> bool:
+    """Parse shell-style boolean env values. / 解析 shell 風格布林值。"""
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in _ENV_TRUTHY:
+        return True
+    if value in _ENV_FALSEY:
+        return False
+    return default
+
+
+def _paper_engine_env_file() -> Path:
+    """Resolve the operator environment file used by restart_all.sh.
+    解析 restart_all.sh 會讀取的 operator environment file。
+
+    Test override order:
+      1. OPENCLAW_BASIC_SYSTEM_ENV_FILE
+      2. OPENCLAW_SECRETS_ROOT/environment_files/basic_system_services.env
+      3. ~/BybitOpenClaw/secrets/environment_files/basic_system_services.env
+    """
+    explicit = os.environ.get("OPENCLAW_BASIC_SYSTEM_ENV_FILE")
+    if explicit:
+        return Path(explicit).expanduser()
+    secrets_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if secrets_root:
+        return Path(secrets_root).expanduser() / "environment_files" / _BASIC_SYSTEM_ENV_FILE
+    return Path.home() / "BybitOpenClaw" / "secrets" / "environment_files" / _BASIC_SYSTEM_ENV_FILE
+
+
+def _read_env_file_value(path: Path, key: str) -> str | None:
+    """Read a KEY=value assignment without sourcing the file. / 不 source 文件讀 KEY=value。"""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    prefix = key + "="
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export " + prefix):
+            value = stripped[len("export " + prefix):].strip()
+        elif stripped.startswith(prefix):
+            value = stripped[len(prefix):].strip()
+        else:
+            continue
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            value = value[1:-1]
+        return value
+    return None
+
+
+def _write_env_file_value(path: Path, key: str, value: str) -> None:
+    """Upsert KEY=value in an env file with restrictive permissions.
+    以嚴格權限在 env file 中 upsert KEY=value。
+    """
+    if "\n" in key + value or "\r" in key + value or "\x00" in key + value:
+        raise ValueError("invalid_env_assignment")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, stat.S_IRWXU)
+    except OSError:
+        pass
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+
+    prefix = key + "="
+    updated = False
+    next_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(prefix) or stripped.startswith("export " + prefix):
+            next_lines.append(f"{key}={value}")
+            updated = True
+        else:
+            next_lines.append(line)
+    if not updated:
+        if next_lines and next_lines[-1].strip():
+            next_lines.append("")
+        next_lines.append(f"{key}={value}")
+
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text("\n".join(next_lines).rstrip() + "\n", encoding="utf-8")
+    os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+    tmp.replace(path)
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _paper_engine_setting_payload() -> dict[str, Any]:
+    """Return configured/runtime Paper engine setting payload for GUI.
+    回傳 GUI 所需的 configured/runtime Paper engine 設定。
+    """
+    env_file = _paper_engine_env_file()
+    file_raw = _read_env_file_value(env_file, _PAPER_ENGINE_ENV_KEY)
+    runtime_raw = os.environ.get(_PAPER_ENGINE_ENV_KEY)
+
+    if file_raw is not None:
+        configured_enabled = _coerce_env_bool(file_raw)
+        source = "env_file"
+    elif runtime_raw is not None:
+        configured_enabled = _coerce_env_bool(runtime_raw)
+        source = "process_env"
+    else:
+        configured_enabled = False
+        source = "default_disabled"
+
+    runtime_enabled = _coerce_env_bool(runtime_raw, default=configured_enabled)
+    return {
+        "enabled": configured_enabled,
+        "configured_enabled": configured_enabled,
+        "runtime_enabled": runtime_enabled,
+        "restart_required": runtime_enabled != configured_enabled,
+        "source": source,
+        "env_key": _PAPER_ENGINE_ENV_KEY,
+        "env_file_present": env_file.exists(),
+    }
 
 
 def _build_bybit_signature(
@@ -318,6 +452,14 @@ class ApiKeySaveRequest(BaseModel):
     """Request body for POST /api/v1/settings/api-key/{slot}"""
     api_key: str = Field(..., min_length=1, max_length=128, description="Bybit API key")
     api_secret: str = Field(..., min_length=1, max_length=128, description="Bybit API secret")
+
+
+class PaperEngineSettingRequest(BaseModel):
+    """Request body for POST /api/v1/settings/paper-engine."""
+    enabled: bool = Field(
+        ...,
+        description="Whether the legacy Paper engine GUI/backend path is enabled",
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -472,3 +614,49 @@ async def save_api_key(
             "key_hint": key_hint,
             "slot": slot,
         }
+
+
+@settings_router.get("/paper-engine")
+async def get_paper_engine_setting(
+    actor: Any = Depends(_get_auth_actor),
+) -> dict:
+    """
+    GET /api/v1/settings/paper-engine
+    Return the configured legacy Paper engine visibility/runtime setting.
+
+    The default is disabled when no persisted value exists. ``enabled`` is the
+    configured GUI truth; ``runtime_enabled`` is the current process value, so
+    a settings write can correctly report that restart is needed.
+    """
+    return _paper_engine_setting_payload()
+
+
+@settings_router.post("/paper-engine")
+async def save_paper_engine_setting(
+    body: PaperEngineSettingRequest,
+    actor: Any = Depends(_require_operator_auth),
+) -> dict:
+    """
+    POST /api/v1/settings/paper-engine
+    Persist the legacy Paper engine toggle into the restart_all.sh env file.
+
+    This intentionally does not restart services. The response includes
+    ``restart_required`` when the running process still differs from the
+    persisted setting.
+    """
+    value = "1" if body.enabled else "0"
+    try:
+        _write_env_file_value(_paper_engine_env_file(), _PAPER_ENGINE_ENV_KEY, value)
+    except (OSError, PermissionError, ValueError) as exc:
+        logger.error("Failed to persist paper engine setting: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist Paper engine setting")
+
+    payload = _paper_engine_setting_payload()
+    logger.info(
+        "Paper engine setting updated enabled=%s runtime_enabled=%s restart_required=%s actor=%s",
+        payload["enabled"],
+        payload["runtime_enabled"],
+        payload["restart_required"],
+        getattr(actor, "actor_id", "?"),
+    )
+    return payload

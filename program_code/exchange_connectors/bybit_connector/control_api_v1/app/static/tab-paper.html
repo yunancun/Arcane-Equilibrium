@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>模擬重放實驗室 / Paper Replay Lab</title>
+<title>Legacy Paper Engine / 旧 Paper 引擎</title>
 <script src="/static/common.js"></script>
-<!-- REF-20 R20-P1-U9: Paper Replay Lab i18n (Chinese-dominant, 9 對照表)
+<!-- REF-20 R20-P1-U9: Legacy Paper i18n (Chinese-dominant, 9 對照表)
      REF-20 R20-P1-U9: load before app-paper.js so sub-tab logic can resolve t_zh()
      順序：common.js (utilities) → i18n_zh.js (string table) → app-paper.js (sub-tab nav) -->
 <script src="/static/i18n_zh.js"></script>
-<!-- REF-20 R20-P1-U1: load Paper Replay Lab sub-tab navigation logic from app-paper.js
-     REF-20 R20-P1-U1：從 app-paper.js 載入 Paper Replay Lab 子標籤導航邏輯 -->
+<!-- REF-20 R20-P1-U1: load Legacy Paper sub-tab navigation logic from app-paper.js
+     REF-20 R20-P1-U1：從 app-paper.js 載入 Legacy Paper 子標籤導航邏輯 -->
 <script src="/static/app-paper.js"></script>
 <!-- REF-20 Wave 8 R20-P6-H1/H2/H3/H4: handoff helper (modal + cooldown + recent + idempotency)
      REF-20 Wave 8 R20-P6-H1/H2/H3/H4：候選交接 helper（modal + 冷卻 + 近 5 筆 + 冪等鍵）
@@ -32,8 +32,8 @@
   .feed-price .sym { font-size: 11px; color: var(--text-dim); }
   .feed-price .price { font-weight: 600; }
 
-  /* REF-20 R20-P1-U1: Paper Replay Lab sub-tab navigation styles
-     REF-20 R20-P1-U1：Paper Replay Lab 子標籤導航樣式 */
+  /* REF-20 R20-P1-U1: Legacy Paper sub-tab navigation styles
+     REF-20 R20-P1-U1：Legacy Paper 子標籤導航樣式 */
   .oc-subtab-nav { display: flex; gap: 4px; flex-wrap: wrap; align-items: center;
     padding: 8px 10px; background: var(--card-bg); border: 1px solid var(--border);
     border-radius: var(--card-radius); margin-bottom: 12px; }
@@ -79,12 +79,9 @@
   }
 </style>
 
-<!-- REF-20 R20-P1-U1: Paper Replay Lab sub-tab navigation
-     REF-20 R20-P1-U1：Paper Replay Lab 4 子標籤導航
-     - Session：active by default（per UX subdoc §3）
-     - Replay/Compare/Handoff：P1 disabled，tooltip 標明 blocking gate（UX §8）
-     - data-disabled="true" 給 axe-core a11y 識別 + aria-disabled 給 screen reader -->
-<nav class="oc-subtab-nav" id="paper-subtab-nav" role="tablist" aria-label="Paper Replay Lab sub-tabs">
+<!-- Legacy Paper sub-tab navigation. Replay is now a standalone top-level tab.
+     旧 Paper 子標籤導航。Replay 已獨立為主控制台一級 Tab。 -->
+<nav class="oc-subtab-nav" id="paper-subtab-nav" role="tablist" aria-label="Legacy Paper sub-tabs">
   <!-- REF-20 R20-P1-U9: 4 sub-tab button + tooltip + disabled gate 使用 i18n_zh 對照表
        REF-20 R20-P1-U9: 4 sub-tab buttons + tooltip + disabled gate hook into i18n_zh
        - data-i18n: 顯示文案 key (terminology row); inline span 為 fallback
@@ -96,24 +93,6 @@
     data-subtab="session" id="subtab-btn-session"
     title="當前 Paper session 狀態 / Current paper session status">
     会话 / Session
-  </button>
-  <!-- REF-20 Sprint B1 R4-T1 (2026-05-05): replay button 不再硬編 disabled
-       REF-20 Sprint B1 R4-T1：replay button no longer hardcoded disabled
-       靜態 aria-disabled / data-disabled 已移除；改由 OpenClawReplaySubtab.onTabActivate()
-       依 /api/v1/replay/health wiring_status 動態 gating（ready / degraded / binary_missing）。
-       title 改為通用「Backend health pending — see badge」；具體 reason 由 disabled card
-       的 reason badge 顯示（OpenClawDisabledStateCard helper 渲染）。
-       data-i18n-disabled 仍保留 — 實際顯示文案由 R4-T2 render fn 從 wiring_status 推導。
-       —
-       Static aria-disabled / data-disabled removed; gating now dynamic via
-       OpenClawReplaySubtab.onTabActivate() probing /api/v1/replay/health.
-       Title changed to generic "Backend health pending — see badge". -->
-  <button type="button" class="oc-subtab-btn"
-    role="tab" aria-selected="false" aria-controls="subtab-replay"
-    data-subtab="replay" id="subtab-btn-replay"
-    title="後端健康待探測 — 見徽章狀態 / Backend health pending — see badge"
-    data-i18n-disabled="disabled_state.p2_backend_pending">
-    <span data-i18n="terminology.replay.zh">回放 / Replay</span>
   </button>
   <button type="button" class="oc-subtab-btn"
     role="tab" aria-selected="false" aria-controls="subtab-compare"
@@ -270,7 +249,7 @@
 
   <!-- REF-20 R20-P1-U3: manual submit/cancel controls 已下架（per UX subdoc §3 + V3 §12 #19）
        REF-20 R20-P1-U3: manual submit/cancel controls retired（per UX subdoc §3 + V3 §12 #19）
-       原 inline 下單表單已移除：Paper Replay Lab 不暴露 manual order submission；
+       原 inline 下單表單已移除：Legacy Paper 不暴露 manual order submission；
        Rust 引擎透過策略管理訂單，operator 只透過 Session 控制條啟動/暫停/停止。
        <details> 殼保留作為 IA 銜接點 (per PM brief)，body 改為 disabled-state 解釋
        （UX subdoc §8 phase/gate language: 「P1 已下架」明確說明 blocking gate）。 -->
@@ -282,9 +261,9 @@
           &#x1F512; 手动下单已於 P1 下架 / Manual order submission retired in P1
         </div>
         <div style="font-size:11px;color:var(--text-dim);line-height:1.6">
-          Paper Replay Lab 不暴露 manual order submission（per UX subdoc §3 + V3 §12 #19 acceptance）。<br>
+          Legacy Paper 不暴露 manual order submission（per UX subdoc §3 + V3 §12 #19 acceptance）。<br>
           Rust 引擎透過策略管理訂單；operator 透過上方 Session 控制條啟動 / 暫停 / 停止。<br>
-          Paper Replay Lab does not expose manual order submission. Rust engine manages orders<br>
+          Legacy Paper does not expose manual order submission. Rust engine manages orders<br>
           through strategies; operator uses Session control bar above to start/pause/stop.
         </div>
         <span class="gate-label">P1 retired · UX subdoc §3 paper_replay_lab_no_order_submit</span>
@@ -292,22 +271,6 @@
     </div>
   </details>
 
-</div>
-
-<!-- REF-20 R20-P1-U4: Replay sub-tab content wrapper
-     REF-20 R20-P1-U4：Replay 子標籤內容容器
-     mount point #subtab-replay-disabled-card 在 R4 之前由 _ocInitPaperDisabledCards
-     init block 渲染靜態 P2-pending disabled card；REF-20 Sprint B1 R4 (2026-05-05)
-     起改由 OpenClawReplaySubtab.onTabActivate() 依 /api/v1/replay/health
-     wiring_status 動態渲染。Page load 時 mount 區留空以避免 flash of stale
-     disabled card；切到 replay 子標籤觸發 onTabActivate → 立即 probe → render。
-     —
-     Pre-R4: rendered static P2 disabled card on DOMContentLoaded.
-     Post-R4 (Sprint B1): rendered dynamically by OpenClawReplaySubtab.onTabActivate()
-     based on /api/v1/replay/health wiring_status. Mount stays empty on page load
-     to avoid flash-of-stale-disabled-card; first activate triggers probe + render. -->
-<div id="subtab-replay" class="oc-subtab-content" role="tabpanel" aria-labelledby="subtab-btn-replay" hidden>
-  <div id="subtab-replay-disabled-card"></div>
 </div>
 
 <!-- REF-20 R20-P1-U5: Compare sub-tab content wrapper（disabled state via U8 helper）
@@ -409,8 +372,8 @@ async function sessionStopAll() {
 // REF-20 R20-P1-U3: manual order JS handlers retired (3 fns: togglePrice + 2 order handlers)
 // REF-20 R20-P1-U3: manual order handlers 已下架（togglePrice + 2 個 order handler）
 // per UX subdoc §3 + V3 §12 #19 paper_replay_lab_no_order_submit acceptance:
-// Paper Replay Lab 不暴露 manual order entry；Rust 引擎透過策略管理訂單。
-// Paper Replay Lab does not expose manual order entry; Rust engine manages orders
+// Legacy Paper 不暴露 manual order entry；Rust 引擎透過策略管理訂單。
+// Legacy Paper does not expose manual order entry; Rust engine manages orders
 // through strategies. Active Orders table 操作欄改為唯讀（無取消按鈕）。
 
 // ─── Data Loading ─────────────────────────────────────────────
@@ -761,8 +724,8 @@ ocStartRefresh(loadAll, 15000);
 ocInitFx();
 window.addEventListener('occurrencychange', loadAll);
 
-// REF-20 R20-P1-U1: 初始化 Paper Replay Lab 4 子標籤導航（show-hide + localStorage 持久化）
-// REF-20 R20-P1-U1: bootstrap Paper Replay Lab 4-sub-tab nav (show-hide + localStorage persistence)
+// REF-20 R20-P1-U1: 初始化 Legacy Paper 子標籤導航（show-hide + localStorage 持久化）
+// REF-20 R20-P1-U1: bootstrap Legacy Paper sub-tab nav (show-hide + localStorage persistence)
 if (typeof ocPaperSubtabInit === 'function') ocPaperSubtabInit();
 
 // Auto-start feed when global mode is observe_only / shadow_only / demo_reserved
@@ -803,15 +766,13 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperModeBadges() 
   }
 });
 
-// ─── Disabled Sub-Tab Initialization (REF-20 R20-P1-U5 + Sprint B1 R4) ──────
+// ─── Disabled Sub-Tab Initialization (REF-20 R20-P1-U5) ─────────────────────
 // Compare 子標籤透過 U8 helper (window.OpenClawDisabledStateCard.render) 渲染
 // phase-tagged disabled card + gate label + bilingual banner + 12-cell metrics
 // placeholder（compare_12 layout）。
 //
-// Replay 子標籤 (REF-20 Sprint B1 R4-T2, 2026-05-05) 已從 page-load 靜態 disabled
-// 升級為 backend-readiness gated：onTabActivate() 動態 probe /api/v1/replay/health
-// → render degraded 或 ready。Page load 時 #subtab-replay-disabled-card mount
-// 留空避免 flash-of-stale；切到 replay 子標籤即觸發第一次 probe + render。
+// Replay 已從 Paper 抽出到主控制台一級 tab-replay.html；Legacy Paper 只保留
+// Session / Compare / Handoff 舊入口。
 //
 // Handoff sub-tab 已升級為 functional content (Wave 8)，由下方獨立 init block
 // 透過 window.OpenClawHandoff.render() 填入。
@@ -819,10 +780,8 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperModeBadges() 
 // Defensive: 若 OpenClawDisabledStateCard 未載入（script 載入順序錯/race），
 // fallback console.warn + inline notice，不阻擋 sub-tab nav。
 //
-// Compare uses the U8 disabled card helper. Replay (Sprint B1 R4-T2) is now
-// dynamically gated by OpenClawReplaySubtab.onTabActivate() probing
-// /api/v1/replay/health; mount stays empty until first activation. Handoff
-// is functional via OpenClawHandoff.render().
+// Compare uses the U8 disabled card helper. Replay now lives in standalone
+// tab-replay.html. Handoff is functional via OpenClawHandoff.render().
 document.addEventListener('DOMContentLoaded', function _ocInitPaperDisabledCards() {
   if (!window.OpenClawDisabledStateCard || typeof window.OpenClawDisabledStateCard.render !== 'function') {
     console.warn('[paper] OpenClawDisabledStateCard not loaded; Compare disabled card left empty');
@@ -834,13 +793,6 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperDisabledCards
       '<div class="oc-subtab-placeholder">disabled card helper not loaded — see browser console</div>';
     return;
   }
-  // REF-20 Sprint B1 R4-T2 (2026-05-05): Replay disabled card 不在 page-load
-  // 渲染；改由 OpenClawReplaySubtab.onTabActivate() 動態 probe + render。
-  // 切到 replay 子標籤即觸發第一次 probe（degraded → render disabled card via
-  // helper / ready → render ready card with 4 baseline cells）。
-  // Replay disabled card no longer rendered on page-load; dynamic render via
-  // OpenClawReplaySubtab.onTabActivate() probe + render.
-  //
   // U5 Compare disabled card / Compare 子標籤 disabled card
   // Phase=P3，icon=🔒（lock = 待 P3 calibration green），12-cell metrics grid
   // 為 UX subdoc §5 Compare metrics layout 預覽。
