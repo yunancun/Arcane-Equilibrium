@@ -112,7 +112,16 @@ pub mod mac_policy_guard;
 pub mod manifest_signer;
 pub mod profile;
 pub mod report_writer;
+// Sprint B2 R5-T1 / R5-T2: replay-pure adapters reusing live `Strategy` trait
+// + 6-of-8 Gate risk pipeline reproduction. Both modules sit under the
+// existing `replay::*` re-export pattern; R5-T3 `runner::IsolatedPipeline`
+// wire-up will compose them.
+// Sprint B2 R5-T1 / R5-T2：replay-pure adapter，復用 live `Strategy` trait
+// 與 8-Gate 中復刻的 6 個風控 gate。兩 module 沿用既有 `replay::*` re-export
+// 模式；R5-T3 `runner::IsolatedPipeline` 接線會將兩者組合。
+pub mod risk_adapter;
 pub mod runner;
+pub mod strategy_adapter;
 
 // Subsystem-level re-export: `ReplayIsolationError` is the public failure
 // type carried by `ReplayProfile::fail_closed_assert_isolated()`. Re-exporting
@@ -161,4 +170,16 @@ pub use report_writer::{write_replay_report, ReportError};
 pub use runner::{
     build_isolated_pipeline, IsolatedPipeline, PnlSummary, ReplayDiagnostics, ReplayError,
     ReplayResult, ReplayStatus, SimulatedFill,
+};
+
+// Sprint B2 R5-T1 / R5-T2 re-exports — adapter types accessible at
+// `crate::replay::*` so R5-T3 `runner::IsolatedPipeline` wire-up and
+// integration tests can pattern-match without descending into per-module
+// paths.
+// Sprint B2 R5-T1 / R5-T2 re-export — adapter 型別於 `crate::replay::*`
+// 可取得，使 R5-T3 `runner::IsolatedPipeline` 接線與 integration test 不必
+// 下到 per-module 路徑即可 pattern-match。
+pub use risk_adapter::{ReplayPaperSnapshot, ReplayPosition, ReplayRiskAdapter, RiskDecision};
+pub use strategy_adapter::{
+    DecisionTraceEntry, ReplayStrategyAdapter, StrategyActionTrace,
 };
