@@ -194,6 +194,8 @@
 
 use std::path::Path;
 
+use openclaw_engine::config::RiskConfig;
+use openclaw_engine::ml::kelly_sizer::KellyConfig;
 use openclaw_engine::replay::cli;
 use openclaw_engine::replay::fixture_loader::{self, FixtureSource};
 use openclaw_engine::replay::forbidden_guard;
@@ -204,7 +206,13 @@ use openclaw_engine::replay::manifest_signer::{
 };
 use openclaw_engine::replay::profile::ReplayProfile;
 use openclaw_engine::replay::report_writer;
+use openclaw_engine::replay::risk_adapter::{
+    ReplayPaperSnapshot, ReplayRiskAdapter,
+};
 use openclaw_engine::replay::runner::{self, ReplayResult};
+use openclaw_engine::replay::strategy_adapter::ReplayStrategyAdapter;
+use openclaw_engine::strategies::{Strategy, StrategyFactory, StrategyParamsConfig};
+use openclaw_core::guardian::GuardianConfig;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wave 3 P2b-S7/S8/S9 三層 fail-closed guard 串聯。
@@ -317,14 +325,218 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tier_label = fixture_source.tier_label();
     let events = fixture_loader::load_fixtures(&fixture_source)?;
 
-    // Step 4: bootstrap the IsolatedPipeline + execute.
-    // Step 4：建構 IsolatedPipeline + 執行。
+    // Step 4: bootstrap the IsolatedPipeline + (optionally) wire adapters.
+    // Step 4：建構 IsolatedPipeline + （選擇性）接 adapter。
+    //
+    // REF-20 Sprint B2 R5-T4 dispatch §11.1:
+    //   When manifest declares `strategy` field, wire the real adapter path
+    //   (StrategyFactory + ReplayStrategyAdapter + ReplayRiskAdapter +
+    //   ReplayPaperSnapshot via IsolatedPipeline::with_adapter_pipeline).
+    //   Otherwise fall back to synthetic walker (R5-T3 proof_1/4/5 baseline).
+    //
+    // Fail-loud: if `manifest.strategy = Some(name)` but factory cannot find
+    // a matching strategy → exit non-zero with typed Box<dyn Error> so the
+    // operator's CI shell branches via `$?` (CLAUDE.md §四 fail-closed).
+    //
+    // REF-20 Sprint B2 R5-T4 dispatch §11.1：
+    //   manifest 宣告 `strategy` 時走真實 adapter 路徑（StrategyFactory +
+    //   ReplayStrategyAdapter + ReplayRiskAdapter + ReplayPaperSnapshot 經
+    //   IsolatedPipeline::with_adapter_pipeline 接入）。否則 fallback
+    //   synthetic walker（R5-T3 proof_1/4/5 baseline）。
+    //
+    // Fail-loud：`manifest.strategy = Some(name)` 但 factory 找不到 → 非 0
+    // 結束帶 typed Box<dyn Error>，operator CI shell 由 `$?` 分支
+    // （CLAUDE.md §四 fail-closed）。
+    let starting_balance = manifest
+        .starting_balance
+        .unwrap_or(runner::DEFAULT_STARTING_BALANCE);
+
+    // Pull out a representative starting price from the first fixture event.
+    // Used as the snapshot anchor so Gate 2.6 P1 cap has a real price; if the
+    // first event is missing we cannot proceed (would silent-bypass Gate 2.6).
+    //
+    // 從首個 fixture event 取代表性起始價作為 snapshot 錨點，使 Gate 2.6
+    // P1 cap 有真錨；首 event 缺即無法續（否則會 silent-bypass Gate 2.6）。
+    let first_event_price = events.first().map(|e| e.close).ok_or_else(|| {
+        Box::<dyn std::error::Error>::from(
+            "replay_runner: manifest declared strategy but fixture has no \
+             events to derive starting anchor price (R5-T4 invariant)",
+        )
+    });
+
     let mut pipeline = runner::build_isolated_pipeline(
         profile,
         manifest.experiment_id.clone(),
         tier_label,
         events,
     )?;
+    if let Some(strategy_name) = manifest.strategy.as_deref() {
+        // R5-T4 adapter path. Resolve a matching strategy from the factory.
+        // `StrategyFactory::create_with_params(default)` returns 5 strategies
+        // (one per registered impl); we pick by `Strategy::name()` match
+        // against `manifest.strategy`. Sprint B2 pilot focuses grid_trading +
+        // ma_crossover; the rest are still constructed but only the named
+        // one is wrapped (zero strategy code change per E2 §6.2 isolation).
+        //
+        // R5-T4 adapter 路徑。從 factory 找對應策略。
+        // `StrategyFactory::create_with_params(default)` 回 5 個策略
+        // （各註冊 impl 各一）；以 `Strategy::name()` 對 `manifest.strategy`
+        // 匹配。Sprint B2 pilot 聚焦 grid_trading + ma_crossover；其餘仍
+        // 建構但僅對應名稱的那個被包裝（0 策略代碼變更，E2 §6.2 隔離）。
+        let starting_price = first_event_price?;
+
+        // ── REF-20 Sprint B2 R5-T4 round 2 — config blob deserialise ──
+        // ── REF-20 Sprint B2 R5-T4 round 2 — 配置 blob 反序列化 ──
+        //
+        // When the manifest carries `strategy_params` / `risk_overrides`
+        // (v0 register handler's `_replay_*` injection bridged to disk
+        // fixture by Python `build_default_manifest_payload` later this
+        // sprint), runner threads them through factory + adapter.
+        // Otherwise R5-T4 round 1 default behaviour (StrategyParamsConfig
+        // ::default + RiskConfig::default) is preserved.
+        // Manifest 帶 blob 時接入 factory + adapter；無則退 R5-T4 round 1
+        // 預設行為。
+        //
+        // Fail-loud: serde_json::from_value Err → typed Box<dyn Error>
+        // with shape-mismatch reason; CI parses ``$?`` non-zero exit
+        // (CLAUDE.md §四 fail-closed).
+        let strategy_params_config: StrategyParamsConfig = match &manifest.strategy_params {
+            Some(blob) => {
+                serde_json::from_value(blob.clone()).map_err(|e| {
+                    Box::<dyn std::error::Error>::from(format!(
+                        "replay_runner: manifest.strategy_params shape \
+                         mismatch (cannot deserialise into \
+                         StrategyParamsConfig): {} (R5-T4 round 2 \
+                         fail-closed; check fixture builder + register \
+                         handler V049 _replay_strategy_params injection)",
+                        e
+                    ))
+                })?
+            }
+            None => StrategyParamsConfig::default(),
+        };
+        let risk_config: RiskConfig = match &manifest.risk_overrides {
+            Some(blob) => {
+                let cfg: RiskConfig =
+                    serde_json::from_value(blob.clone()).map_err(|e| {
+                        Box::<dyn std::error::Error>::from(format!(
+                            "replay_runner: manifest.risk_overrides shape \
+                             mismatch (cannot deserialise into RiskConfig): \
+                             {} (R5-T4 round 2 fail-closed; check fixture \
+                             builder + register handler V049 \
+                             _replay_risk_overrides injection)",
+                            e
+                        ))
+                    })?;
+                // Cheap sanity: position_size_max_pct must be in (0, 100].
+                // Catches obvious caller mistakes (e.g. negative / NaN) so
+                // adapter doesn't proceed with poisoned config (Guardian
+                // would reject downstream but loud-and-early surface beats
+                // silent run that 100%-rejects intents).
+                // 簡易完整性檢查：position_size_max_pct ∈ (0, 100]，
+                // 防 caller 誤傳負/NaN，提早 fail-loud（否則 Guardian
+                // 會在下游 100% reject）。
+                let p = cfg.limits.position_size_max_pct;
+                if !p.is_finite() || p <= 0.0 || p > 100.0 {
+                    return Err(Box::<dyn std::error::Error>::from(format!(
+                        "replay_runner: manifest.risk_overrides invariant \
+                         violation: limits.position_size_max_pct = {p} not \
+                         in (0, 100] (R5-T4 round 2 fail-closed)"
+                    )));
+                }
+                cfg
+            }
+            None => RiskConfig::default(),
+        };
+
+        let pool: Vec<Box<dyn Strategy>> =
+            StrategyFactory::create_with_params(&strategy_params_config);
+        let chosen = pool
+            .into_iter()
+            .find(|s| s.name() == strategy_name)
+            .ok_or_else(|| {
+                Box::<dyn std::error::Error>::from(format!(
+                    "replay_runner: manifest.strategy='{}' not in StrategyFactory \
+                     registry (registered: grid_trading / ma_crossover / \
+                     bb_breakout / bb_reversion / funding_arb)",
+                    strategy_name,
+                ))
+            })?;
+
+        let strategy_adapter = ReplayStrategyAdapter::new(chosen, profile)
+            .map_err(|e| {
+                Box::<dyn std::error::Error>::from(format!(
+                    "replay_runner: ReplayStrategyAdapter::new failed: {:?}",
+                    e
+                ))
+            })?;
+        let risk_adapter = ReplayRiskAdapter::new(
+            profile,
+            GuardianConfig::default(),
+            risk_config,
+            // P1 hard cap = 2% of balance (Sprint A risk_config baseline).
+            // Sprint C R6 will read p1_risk_pct from the registered
+            // risk_config snapshot instead of hardcoding.
+            // P1 硬上限 = 2% balance（Sprint A risk_config baseline）。
+            // Sprint C R6 將從註冊的 risk_config 快照讀 p1_risk_pct，
+            // 取代硬編。
+            0.02,
+            // Sprint A baseline: skip Kelly (None) so qty mirrors strategy
+            // intent directly. Sprint C R6 will inject calibrated KellyConfig
+            // when fee model lands.
+            // Sprint A baseline：跳過 Kelly（None），qty 直接鏡射策略 intent。
+            // Sprint C R6 落 fee 模型時注入 calibrated KellyConfig。
+            None::<KellyConfig>,
+        )
+        .map_err(|e| {
+            Box::<dyn std::error::Error>::from(format!(
+                "replay_runner: ReplayRiskAdapter::new failed: {:?}",
+                e
+            ))
+        })?;
+
+        let snapshot = ReplayPaperSnapshot {
+            balance: starting_balance,
+            drawdown_pct: 0.0,
+            positions: Vec::new(),
+            latest_price: Some(starting_price),
+            exposure_pct: 0.0,
+            correlated_exposure_pct: 0.0,
+            leverage: 0.0,
+            daily_loss_pct: 0.0,
+            trade_stats: None,
+        };
+        pipeline = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .map_err(|e| {
+                Box::<dyn std::error::Error>::from(format!(
+                    "replay_runner: with_adapter_pipeline failed: {} \
+                     (R5-T3 fail-loud snapshot rejected; check manifest \
+                     starting_balance + first fixture event)",
+                    e
+                ))
+            })?;
+        eprintln!(
+            "replay_runner: adapter path engaged strategy={} \
+             starting_balance={} starting_price={} \
+             strategy_params_supplied={} risk_overrides_supplied={}",
+            strategy_name,
+            starting_balance,
+            starting_price,
+            manifest.strategy_params.is_some(),
+            manifest.risk_overrides.is_some(),
+        );
+    } else {
+        // Drop the unused first_event_price (no error surface — synthetic
+        // walker path tolerates empty fixtures via AbortedFixtureExhausted).
+        // 釋放 first_event_price（無錯誤表面 — synthetic walker 容忍空
+        // fixture，由 AbortedFixtureExhausted 處理）。
+        let _ = first_event_price;
+        eprintln!(
+            "replay_runner: synthetic walker path (manifest.strategy absent; \
+             R5-T3 e2e proof_1/4/5 baseline)"
+        );
+    }
     let exec_outcome = pipeline.execute();
     let result: ReplayResult = pipeline.into_result();
 
@@ -443,6 +655,80 @@ struct ReplayManifest {
     /// `tests/fixtures/replay_manifest_signer/` stripped-body fixture）。
     #[serde(default)]
     pub run_id: Option<String>,
+    /// REF-20 Sprint B2 R5-T4: optional strategy name (matches V049
+    /// `manifest_jsonb.strategy`; e.g. "grid_trading" / "ma_crossover").
+    /// When `None` the replay runner falls back to the synthetic walker
+    /// path (R5-T3 e2e proof_1/4/5 baseline). When `Some(name)` R5-T4 wires
+    /// a real `StrategyFactory::create_with_params(default)` instance plus
+    /// `ReplayRiskAdapter` (6-Gate path) under the existing
+    /// `IsolatedPipeline::with_adapter_pipeline()` setter.
+    ///
+    /// REF-20 Sprint B2 R5-T4：選用策略名（對齊 V049 `manifest_jsonb.strategy`；
+    /// 例 "grid_trading" / "ma_crossover"）。`None` 時 runner fallback 至
+    /// synthetic walker（R5-T3 e2e proof_1/4/5 baseline）。`Some(name)` 時
+    /// R5-T4 透過既有 `IsolatedPipeline::with_adapter_pipeline()` setter
+    /// 接入真實 `StrategyFactory::create_with_params(default)` instance + 6-Gate
+    /// `ReplayRiskAdapter`。
+    ///
+    /// `#[serde(default)]` 為向後相容 R5-T3 前的 manifest fixture（無 strategy
+    /// 欄位即視為 synthetic walker 路徑，proof_1/4/5 不退）。
+    #[serde(default)]
+    pub strategy: Option<String>,
+    /// REF-20 Sprint B2 R5-T4: optional starting balance (defaults to
+    /// `runner::DEFAULT_STARTING_BALANCE = 10_000.0`). Sourced from
+    /// `manifest_jsonb.starting_balance` if present. Sprint A baseline picks
+    /// 10_000 USDT for non-actionable replay; manifest may override only when
+    /// `evidence_source_tier='calibrated_replay'` requires non-default anchor.
+    ///
+    /// REF-20 Sprint B2 R5-T4：選用起始餘額（預設
+    /// `runner::DEFAULT_STARTING_BALANCE = 10_000.0`）。來自
+    /// `manifest_jsonb.starting_balance`（若存在）。Sprint A baseline 取
+    /// 10_000 USDT for non-actionable replay；僅當
+    /// `evidence_source_tier='calibrated_replay'` 需非預設錨時 manifest 覆寫。
+    #[serde(default)]
+    pub starting_balance: Option<f64>,
+    /// REF-20 Sprint B2 R5-T4 round 2: optional strategy-parameter blob
+    /// matching V049 register handler's `_replay_strategy_params` injection.
+    /// When present, the runner deserialises this `serde_json::Value` into
+    /// a `StrategyParamsConfig` (sub-key for the manifest's `strategy` field
+    /// e.g. `grid_trading`) and threads the customised params through
+    /// `StrategyFactory::create_with_params(...)`. When absent, falls back
+    /// to `StrategyParamsConfig::default()` (R5-T4 round 1 behaviour, A4
+    /// parameter delta cannot be observed). When deserialisation fails
+    /// (shape mismatch), runner exits non-zero with typed `Box<dyn Error>`
+    /// so CI parses fail-mode (CLAUDE.md §四 fail-closed).
+    ///
+    /// REF-20 Sprint B2 R5-T4 round 2：選用策略參數 blob，對齊 V049 register
+    /// handler 的 `_replay_strategy_params` 注入。存在時 runner 把此
+    /// `serde_json::Value` 反序列化為 `StrategyParamsConfig`（包含 manifest
+    /// `strategy` 對應子段，例如 `grid_trading`）並透過
+    /// `StrategyFactory::create_with_params(...)` 接入；不存在時退回
+    /// `StrategyParamsConfig::default()`（R5-T4 round 1 行為，無法觀察 A4
+    /// 參數 delta）。Shape 不符 → 非 0 結束帶 typed `Box<dyn Error>`，CI
+    /// 解析 fail-mode（CLAUDE.md §四 fail-closed）。
+    ///
+    /// `#[serde(default)]` 為向後相容 R5-T4 round 1 前的 manifest fixture
+    /// （無此欄位即視為 default config，xlang 13/13 不退）。
+    #[serde(default)]
+    pub strategy_params: Option<serde_json::Value>,
+    /// REF-20 Sprint B2 R5-T4 round 2: optional risk-override blob matching
+    /// V049 register handler's `_replay_risk_overrides` injection. When
+    /// present, runner deserialises this `serde_json::Value` into a
+    /// `RiskConfig` (full schema; downstream gates read e.g.
+    /// `limits.position_size_max_pct`). When absent, falls back to
+    /// `RiskConfig::default()` (R5-T4 round 1 behaviour, A5 risk-delta
+    /// cannot be observed). Fail-loud on shape mismatch / NaN /
+    /// out-of-bounds via the same `Box<dyn Error>` non-zero-exit path.
+    ///
+    /// REF-20 Sprint B2 R5-T4 round 2：選用風險覆寫 blob，對齊 V049 register
+    /// handler 的 `_replay_risk_overrides` 注入。存在時反序列化為完整
+    /// `RiskConfig` schema（下游 gate 例如讀 `limits.position_size_max_pct`）；
+    /// 不存在退回 `RiskConfig::default()`（R5-T4 round 1，無法觀察 A5）。
+    /// Shape 不符 / NaN / 越界 → 同 `Box<dyn Error>` 非 0 結束。
+    ///
+    /// `#[serde(default)]` 同 `strategy_params`：向後相容、xlang 13/13 不退。
+    #[serde(default)]
+    pub risk_overrides: Option<serde_json::Value>,
 }
 
 /// Load the manifest JSON and run the manifest_signer verify path.
@@ -1009,5 +1295,133 @@ mod tests {
             std::str::from_utf8(&canon).unwrap(),
             std::str::from_utf8(expected).unwrap()
         );
+    }
+
+    // ─── REF-20 Sprint B2 R5-T4 round 2 — manifest config blob tests ──
+
+    /// R5-T4 round 2 test 1: ReplayManifest happily parses manifests that
+    /// declare `strategy_params` as a JSON object. The blob is preserved
+    /// verbatim (no premature deserialise into StrategyParamsConfig); the
+    /// CLI flow does the typed deserialise + factory wire downstream.
+    /// 此 test 確保 manifest schema 接收 blob，CLI flow 在下游做型別反序列化。
+    ///
+    /// R5-T4 round 2 test 1：ReplayManifest 接受帶 `strategy_params` JSON
+    /// object 的 manifest；blob 保留原樣（不提前反序列化），CLI flow 在
+    /// 下游做型別反序列化 + factory 接線。
+    #[test]
+    fn manifest_strategy_params_parses_into_typed_config() {
+        // Arrange: minimal-valid manifest JSON with strategy_params blob
+        // mimicking V049 register handler's `_replay_strategy_params`
+        // injection (strategy_params has the same shape as
+        // StrategyParamsConfig serde wire format).
+        // 安排：含 strategy_params blob 的最小可解析 manifest JSON，模擬
+        // V049 register handler `_replay_strategy_params` 注入。
+        let raw = serde_json::json!({
+            "experiment_id": "xp_round2_strat",
+            "data_tier": "S2",
+            "fixture_uri": "fixtures/x/",
+            "signature": "deadbeef",
+            "manifest_hash": "cafebabe",
+            "signature_key_ref": "fp_x",
+            "strategy": "grid_trading",
+            "strategy_params": {
+                "grid_trading": {
+                    "grid_levels": 17
+                }
+            }
+        });
+
+        // Act: parse via serde (mimics load_and_verify_manifest's
+        // serde_json::from_str on disk bytes).
+        // 動作：以 serde 解析（mimics load_and_verify_manifest）。
+        let parsed: ReplayManifest =
+            serde_json::from_str(&raw.to_string()).expect("manifest parses");
+        let blob = parsed
+            .strategy_params
+            .as_ref()
+            .expect("strategy_params present");
+
+        // Now do the typed deserialise that CLI flow does. This proves
+        // the wire format aligns with StrategyParamsConfig.
+        // 驗 wire format 對齊 StrategyParamsConfig。
+        let typed: StrategyParamsConfig =
+            serde_json::from_value(blob.clone()).expect("blob → typed");
+        assert_eq!(
+            typed.grid_trading.grid_levels, 17,
+            "grid_levels round-trip failed: got {} expected 17",
+            typed.grid_trading.grid_levels,
+        );
+    }
+
+    /// R5-T4 round 2 test 2: ReplayManifest accepts `risk_overrides` blob;
+    /// the typed deserialise into RiskConfig succeeds and downstream gates
+    /// see the override (e.g. `limits.position_size_max_pct`).
+    /// 同 test 1 但驗 risk_overrides → RiskConfig 的 wire format 對齊。
+    ///
+    /// R5-T4 round 2 test 2：ReplayManifest 接受 `risk_overrides` blob；
+    /// 反序列化為 RiskConfig 後下游 gate（如 `limits.position_size_max_pct`）
+    /// 看到 override 值。
+    #[test]
+    fn manifest_risk_overrides_apply_to_risk_config() {
+        let raw = serde_json::json!({
+            "experiment_id": "xp_round2_risk",
+            "data_tier": "S2",
+            "fixture_uri": "fixtures/x/",
+            "signature": "deadbeef",
+            "manifest_hash": "cafebabe",
+            "signature_key_ref": "fp_x",
+            "strategy": "grid_trading",
+            "risk_overrides": {
+                "limits": {
+                    "position_size_max_pct": 7.5
+                }
+            }
+        });
+        let parsed: ReplayManifest =
+            serde_json::from_str(&raw.to_string()).expect("manifest parses");
+        let blob = parsed
+            .risk_overrides
+            .as_ref()
+            .expect("risk_overrides present");
+        let typed: RiskConfig =
+            serde_json::from_value(blob.clone()).expect("blob → typed");
+        let pct = typed.limits.position_size_max_pct;
+        assert!(
+            (pct - 7.5).abs() < 1e-9,
+            "position_size_max_pct round-trip failed: got {} expected 7.5",
+            pct,
+        );
+    }
+
+    /// R5-T4 round 2 test 3: backward-compat — manifests WITHOUT the new
+    /// fields parse correctly (`#[serde(default)]` works) and yield None
+    /// for both blob options. This is the xlang 13/13 invariant: existing
+    /// fixtures don't grow the field, canonical_bytes unchanged.
+    /// R5-T4 round 2 test 3：向後相容 — 舊 manifest 無此欄位 parse 仍成功，
+    /// 兩 blob 為 None。確保 xlang 13/13 invariant：既有 fixture 不長出新
+    /// 欄位 → canonical_bytes 不變。
+    #[test]
+    fn manifest_legacy_fixture_without_blob_fields_still_parses() {
+        let raw = serde_json::json!({
+            "experiment_id": "xp_legacy",
+            "data_tier": "S2",
+            "fixture_uri": "fixtures/x/",
+            "signature": "deadbeef",
+            "manifest_hash": "cafebabe",
+            "signature_key_ref": "fp_x"
+        });
+        let parsed: ReplayManifest =
+            serde_json::from_str(&raw.to_string()).expect("legacy parses");
+        assert!(
+            parsed.strategy_params.is_none(),
+            "expected None for absent strategy_params"
+        );
+        assert!(
+            parsed.risk_overrides.is_none(),
+            "expected None for absent risk_overrides"
+        );
+        // strategy is also absent → synthetic walker path engages.
+        // strategy 亦缺 → synthetic walker 路徑啟用。
+        assert!(parsed.strategy.is_none());
     }
 }

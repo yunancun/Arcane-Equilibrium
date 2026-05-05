@@ -47,6 +47,9 @@ from replay.simulated_fills_writer import (  # noqa: E402
     MAX_PAYLOAD_BYTES,
     MAX_REPORT_BYTES,
     SimulatedFillsWriteResult,
+    build_decision_evidence_index,
+    consume_decision_evidence_for_fill,
+    extract_decision_traces,
     insert_simulated_fills,
     map_fill_to_v050_row,
     parse_replay_report_json,
@@ -396,5 +399,242 @@ def test_persist_replay_report_mixed_valid_and_skipped_fills():
         )
         assert result.fills_inserted == 2, f"expected 2, got {result.fills_inserted}"
         assert result.fills_skipped == 1
+    finally:
+        p.unlink(missing_ok=True)
+
+
+# ─── REF-20 Sprint B2 R5-T5 — decision-evidence injection tests ──────
+
+
+def _make_decision_trace_open(
+    *, ts_ms: int, symbol: str, qty: float, intent_signature: str = "abc123def456" * 4
+) -> dict:
+    """Build a single Open-side decision_traces entry mirroring Rust schema.
+    建構一筆 Open 側 decision_traces entry 鏡射 Rust schema。
+    """
+    return {
+        "ts_ms": ts_ms,
+        "symbol": symbol,
+        "strategy_name": "grid_trading",
+        "indicators_present": False,
+        "actions_emitted": [
+            {
+                "Open": {
+                    "intent_signature": intent_signature,
+                    "symbol": symbol,
+                    "is_long": True,
+                    "confidence": 0.5,
+                    "qty": qty,
+                    "strategy": "grid_trading",
+                    "order_type": "market",
+                }
+            }
+        ],
+    }
+
+
+def test_extract_decision_traces_absent_returns_empty():
+    """R5-T5 Case A: synthetic walker run with no decision_traces field → []."""
+    envelope = _make_envelope([_make_synthetic_fill(0)])
+    # synthetic walker — Rust serde_json #[serde(default)] omits field.
+    # synthetic walker — Rust serde_json #[serde(default)] 略 field。
+    envelope["result"].pop("decision_traces", None)
+    traces = extract_decision_traces(envelope)
+    assert traces == []
+
+
+def test_extract_decision_traces_well_formed_kept():
+    """R5-T5 Case B: well-formed decision_traces entry survives extraction."""
+    envelope = _make_envelope([_make_synthetic_fill(0)])
+    envelope["result"]["decision_traces"] = [
+        _make_decision_trace_open(ts_ms=1717000000000, symbol="BTCUSDT", qty=0.01),
+    ]
+    traces = extract_decision_traces(envelope)
+    assert len(traces) == 1
+    assert traces[0]["symbol"] == "BTCUSDT"
+
+
+def test_extract_decision_traces_malformed_dropped():
+    """R5-T5 Case B2: malformed entry (missing ts_ms / wrong type) dropped."""
+    envelope = _make_envelope([_make_synthetic_fill(0)])
+    envelope["result"]["decision_traces"] = [
+        {"symbol": "BTCUSDT", "actions_emitted": []},  # missing ts_ms
+        {"ts_ms": "not_int", "symbol": "BTC", "actions_emitted": []},
+        _make_decision_trace_open(ts_ms=1717000000000, symbol="BTCUSDT", qty=0.01),
+    ]
+    traces = extract_decision_traces(envelope)
+    assert len(traces) == 1, f"expected 1 well-formed, got {len(traces)}"
+
+
+def test_consume_decision_evidence_matches_open_fill():
+    """R5-T5 Case C: ts_ms+symbol+side match → evidence returned + popped."""
+    traces = [
+        _make_decision_trace_open(ts_ms=1717000000000, symbol="BTCUSDT", qty=0.01),
+    ]
+    idx = build_decision_evidence_index(traces)
+    fill = _make_synthetic_fill(0)
+    fill["ts_ms"] = 1717000000000
+    fill["qty"] = 0.01
+    evidence = consume_decision_evidence_for_fill(fill, idx)
+    assert evidence is not None
+    assert evidence["strategy_decision"] == "open"
+    assert evidence["risk_decision"] == "accepted"
+    assert evidence["intent_signature"]
+    assert evidence["intended_qty"] == 0.01
+    # Greedy consumption: second consume returns None.
+    # 貪婪消費：第二次取為 None。
+    second = consume_decision_evidence_for_fill(fill, idx)
+    assert second is None
+
+
+def test_consume_decision_evidence_qty_zero_marks_rejected():
+    """R5-T5 Case D: qty=0 ghost fill maps to risk_decision=rejected."""
+    traces = [
+        _make_decision_trace_open(ts_ms=1717000000000, symbol="BTCUSDT", qty=0.01),
+    ]
+    idx = build_decision_evidence_index(traces)
+    fill = _make_synthetic_fill(0)
+    fill["ts_ms"] = 1717000000000
+    fill["qty"] = 0.0  # ghost row from Gate 1.5 reject
+    fill["side"] = "long"
+    evidence = consume_decision_evidence_for_fill(fill, idx)
+    assert evidence is not None
+    assert evidence["risk_decision"] == "rejected"
+    assert evidence["rejected_reason"] is not None
+    assert "ghost_fill" in evidence["rejected_reason"]
+
+
+def test_map_fill_to_v050_row_injects_decision_evidence():
+    """R5-T5 Case E: decision_evidence kw arg injects payload sub-object."""
+    fill = _make_synthetic_fill(0)
+    fill["ts_ms"] = 1717000000000
+    decision_evidence = {
+        "signal_id": "1717000000000:BTCUSDT:long",
+        "strategy_decision": "open",
+        "risk_decision": "accepted",
+        "rejected_reason": None,
+        "intent_signature": "deadbeef" * 8,
+        "intended_qty": 0.01,
+        "intended_price": 50000.0,
+    }
+    params = map_fill_to_v050_row(
+        fill,
+        experiment_id="11111111-1111-1111-1111-111111111111",
+        run_id="abc123",
+        fill_index=0,
+        strategy_name="grid_trading",
+        decision_evidence=decision_evidence,
+    )
+    assert params is not None
+    payload = json.loads(params["payload"])
+    assert "_replay_decision_evidence" in payload
+    inner = payload["_replay_decision_evidence"]
+    assert inner["intent_signature"].startswith("deadbeef")
+    assert inner["risk_decision"] == "accepted"
+    assert inner["intended_qty"] == 0.01
+
+
+def test_map_fill_to_v050_row_no_evidence_no_injection():
+    """R5-T5 Case F: decision_evidence=None leaves payload free of marker."""
+    fill = _make_synthetic_fill(0)
+    params = map_fill_to_v050_row(
+        fill,
+        experiment_id="11111111-1111-1111-1111-111111111111",
+        run_id="abc123",
+        fill_index=0,
+        strategy_name="grid_trading",
+        decision_evidence=None,
+    )
+    assert params is not None
+    payload = json.loads(params["payload"])
+    assert "_replay_decision_evidence" not in payload, (
+        "no evidence supplied but marker injected"
+    )
+
+
+def test_persist_replay_report_with_decision_traces_inline_evidence():
+    """R5-T5 Case G: end-to-end — adapter-path envelope with decision_traces.
+
+    Verifies that persist_replay_report wires extract → index → consume →
+    map flow so the rendered V050 INSERT param's `payload` jsonb contains
+    `_replay_decision_evidence` sub-object.
+    驗收：persist_replay_report 串通 extract → index → consume → map 流程，
+    使最終 V050 INSERT param 的 `payload` jsonb 含 `_replay_decision_evidence`
+    子物件。
+    """
+    fill0 = _make_synthetic_fill(0)
+    fill0["ts_ms"] = 1717000000000
+    fill0["qty"] = 0.01
+    envelope = _make_envelope([fill0])
+    envelope["result"]["decision_traces"] = [
+        _make_decision_trace_open(ts_ms=1717000000000, symbol="BTCUSDT", qty=0.01),
+    ]
+    p = _write_envelope(envelope)
+    try:
+        cur = MagicMock()
+        cur.fetchone.return_value = ("grid_trading",)
+        # SELECT (rowcount=0) + 1 INSERT (rowcount=1).
+        rowcount_seq = iter([0, 1])
+
+        captured_params: list[dict] = []
+
+        def _execute(sql, params=None):
+            cur.rowcount = next(rowcount_seq, 0)
+            if params is not None and "INSERT" in sql:
+                captured_params.append(dict(params))
+
+        cur.execute.side_effect = _execute
+
+        result = persist_replay_report(
+            cur, p,
+            experiment_id="11111111-1111-1111-1111-111111111111",
+            run_id="abc123",
+        )
+        assert result.fills_inserted == 1
+        assert len(captured_params) == 1
+        payload = json.loads(captured_params[0]["payload"])
+        assert "_replay_decision_evidence" in payload
+        assert payload["_replay_decision_evidence"]["risk_decision"] == "accepted"
+    finally:
+        p.unlink(missing_ok=True)
+
+
+def test_persist_replay_report_synthetic_walker_no_evidence():
+    """R5-T5 Case H: legacy synthetic walker (no traces) → no evidence marker.
+
+    Confirms backward compatibility — fills from the R5-T3 synthetic walker
+    path (proof_1/4/5 e2e baseline) do not get evidence markers and the
+    payload remains the bare fill object.
+    確認向後兼容 — R5-T3 synthetic walker（proof_1/4/5 e2e baseline）的 fill
+    無 evidence marker，payload 保持為純 fill 物件。
+    """
+    envelope = _make_envelope([_make_synthetic_fill(0)])
+    # Explicitly drop decision_traces to mimic synthetic walker run.
+    # 顯式刪 decision_traces 模擬 synthetic walker run。
+    envelope["result"].pop("decision_traces", None)
+    p = _write_envelope(envelope)
+    try:
+        cur = MagicMock()
+        cur.fetchone.return_value = ("grid_trading",)
+        rowcount_seq = iter([0, 1])
+        captured_params: list[dict] = []
+
+        def _execute(sql, params=None):
+            cur.rowcount = next(rowcount_seq, 0)
+            if params is not None and "INSERT" in sql:
+                captured_params.append(dict(params))
+
+        cur.execute.side_effect = _execute
+
+        result = persist_replay_report(
+            cur, p,
+            experiment_id="11111111-1111-1111-1111-111111111111",
+            run_id="abc123",
+        )
+        assert result.fills_inserted == 1
+        payload = json.loads(captured_params[0]["payload"])
+        assert "_replay_decision_evidence" not in payload, (
+            "synthetic walker fill leaked evidence marker"
+        )
     finally:
         p.unlink(missing_ok=True)

@@ -835,48 +835,37 @@ def build_default_manifest_payload(
     *,
     experiment_id: str,
     output_dir: Path,
+    cur: Any = None,
 ) -> dict:
     """Build the default manifest BODY payload for Track A spawn flow.
     構造 Track A spawn 流程預設 manifest BODY payload。
 
-    REF-20 Sprint A R3 Round 6 (2026-05-05) — BODY-ONLY: Round 5 returned a
-    6-key dict including placeholder envelope; Sprint 1 Track B verifier
-    rejects placeholders. Round 6 returns only 3 body keys
-    (``experiment_id`` / ``data_tier`` / ``fixture_uri``); envelope
-    (``signature`` / ``manifest_hash`` / ``signature_key_ref``) is
-    computed + injected by ``write_manifest_fixture`` via real
-    HMAC-SHA256 over the canonical body bytes.
+    R3 Round 6 body-only: 3 body keys; envelope (signature / manifest_hash
+    / signature_key_ref) is computed + injected by ``write_manifest_fixture``
+    via HMAC-SHA256. R3 R6：3 body key；envelope 由後簽 inject。
 
-    REF-20 Sprint A R3 Round 6（2026-05-05）— body-only：Round 5 回 6-key
-    dict 含 placeholder envelope；Sprint 1 Track B verifier 拒。Round 6
-    只回 3 body key；envelope 由 ``write_manifest_fixture`` 用真 HMAC-SHA256
-    簽 canonical body 後 inject。
+    Sprint B2 R5-T4 Round 3 Fix 3 — BLOB PASSTHROUGH: ``cur`` supplied →
+    reads V049 ``manifest_jsonb._replay_strategy_params`` /
+    ``_replay_risk_overrides`` (R5-T6 round 2 injection) and copies them
+    into the disk manifest so the Rust runner R5-T4 round 2 schema
+    deserialises typed ``StrategyParamsConfig`` / ``RiskConfig`` overrides.
+    Without passthrough Rust falls back to ``::default()`` → A4/A5 delta
+    cannot materialise. Blob keys are in canonical body (not envelope);
+    Rust ``ReplayManifest`` ``#[serde(default)]`` keeps legacy fixtures
+    parsing cleanly (xlang 13/13 preserved); signed manifest_hash binds
+    blobs. Round 3 Fix 3：``cur`` 提供時讀 V049 兩保留 key 注入 disk；blob 在
+    canonical body 內；legacy fixture 因 serde(default) 仍可解。
 
-    Cross-language contract: after ``write_manifest_fixture`` adds
-    ``run_id`` + envelope, disk fixture has 7 keys. Rust
-    ``canonical_body_for_signing`` strips envelope + serialises remaining
-    4 keys (BTreeMap sorted + compact) → byte-equal Python
-    ``compute_manifest_canonical_bytes``. 8/8 xlang regression test
-    (``test_manifest_signer_xlang_consistency.py``) locks this contract;
-    any kwargs / envelope-set change requires Python + Rust + fixture
-    sync.
-
-    Fixture URI fallback (R3-R6-T3):
-      1. ``OPENCLAW_REPLAY_FIXTURE_URI`` env override (operator/test).
-      2. ``OPENCLAW_REPLAY_FIXTURE_DEFAULT`` env (server-side default
-         from ``restart_all.sh``; points at in-tree synthetic fixture
-         for Sprint A smoke runs).
-      3. ``<output_dir>/fixture.json`` (legacy default; Rust errors if
-         absent — caller stages).
-
-    Returns dict with 3 body fields; no ``run_id`` (added by
-    ``write_manifest_fixture``), no envelope (signed + injected later).
-
-    MAINTAINER WARNING：Round 5 placeholder envelope strings已永久退役；
-    E2/CR/QA edit 後必 grep ``placeholder_signature_wave6`` /
-    ``placeholder_hash_wave6`` 0 hit。
+    Fixture URI fallback: ``OPENCLAW_REPLAY_FIXTURE_URI`` env →
+    ``OPENCLAW_REPLAY_FIXTURE_DEFAULT`` env → ``<output_dir>/fixture.json``.
+    Args / 參數: ``experiment_id`` uuid text; ``output_dir`` artifact dir;
+    ``cur`` optional cursor (``None`` → byte-identical to pre-Fix-3). Returns
+    dict with 3 body fields; +up to 2 ``_replay_*`` blob keys when ``cur``
+    supplied AND V049 row has blobs.
+    SAFETY：SELECT-only; ``cur=None`` 與 pre-Fix-3 byte-equal；blob 值
+    dict-or-None（non-dict 靜默丟）。
     """
-    return {
+    payload: dict[str, Any] = {
         "experiment_id": experiment_id,
         "data_tier": "S3",
         "fixture_uri": (
@@ -885,6 +874,19 @@ def build_default_manifest_payload(
             or str(output_dir / "fixture.json")
         ),
     }
+    if cur is not None:
+        # R5-T4 round 3 Fix 3 blob passthrough; lazy import breaks circular;
+        # only inject dict values to avoid ``null`` shifting canonical_bytes.
+        # R5-T4 round 3 Fix 3：lazy import + 僅 dict 注入避免 canonical drift。
+        from .experiment_registry import lookup_replay_config_blob
+        blob = lookup_replay_config_blob(cur, experiment_id)
+        sp = blob.get("strategy_params")
+        if isinstance(sp, dict):
+            payload["_replay_strategy_params"] = sp
+        ro = blob.get("risk_overrides")
+        if isinstance(ro, dict):
+            payload["_replay_risk_overrides"] = ro
+    return payload
 
 
 def write_manifest_fixture(

@@ -297,6 +297,39 @@ class ReplayExperimentRegisterRequest(BaseModel):
             "secret value. Mirrors V049 ``signature_key_ref`` column."
         ),
     )
+    # ── REF-20 Sprint B2 R5-T6 round 2 — config blob top-level fields ────
+    # ── REF-20 Sprint B2 R5-T6 round 2 — 配置 blob 頂層欄位 ─────────────
+    strategy_params: Optional[dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "REF-20 Sprint B2 R5-T6 round 2: optional strategy parameter "
+            "blob (e.g. {grid_levels: 20}). When supplied, server computes "
+            "``strategy_config_sha256 = sha256(canonical_bytes(blob))`` and "
+            "OVERRIDES the client-supplied ``strategy_config_sha256`` field "
+            "so A4 acceptance fixture (PA design §5.1) can register two "
+            "experiments with same strategy name + DIFFERENT params and "
+            "observe distinct sha values in V049. Persisted into a copy of "
+            "manifest_jsonb under reserved key ``_replay_strategy_params`` "
+            "(post-validation injection bypasses the M-4 ``_*`` prefix "
+            "rejector which only fires on client-supplied keys). The "
+            "augmented manifest_jsonb's manifest_hash is recomputed so the "
+            "DB self-consistency invariant ``sha256(persisted_jsonb) == "
+            "manifest_hash`` continues to hold."
+        ),
+    )
+    risk_overrides: Optional[dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "REF-20 Sprint B2 R5-T6 round 2: optional risk override blob "
+            "(e.g. {limits: {position_size_max_pct: 10.0}}). When supplied, "
+            "server computes ``risk_config_sha256 = sha256(canonical_bytes("
+            "blob))`` and OVERRIDES the client-supplied ``risk_config_sha256``. "
+            "A5 acceptance fixture (PA design §5.2) registers same strategy "
+            "with tight (2%) vs loose (10%) limits and observes distinct sha. "
+            "Persisted into manifest_jsonb under reserved key "
+            "``_replay_risk_overrides``."
+        ),
+    )
 
     @validator("symbol", "strategy")
     def _alphanumeric_underscore(cls, v: str) -> str:
@@ -450,6 +483,192 @@ def compute_manifest_hash(manifest_jsonb: dict[str, Any]) -> str:
     回傳 64 小寫 hex 字（``hashlib.sha256().hexdigest()``）。
     """
     return hashlib.sha256(compute_manifest_canonical_bytes(manifest_jsonb)).hexdigest()
+
+
+# ─── Sprint B2 R5-T6 — config-sha lookup / 配置 sha 查詢 ───────────────
+
+
+def lookup_replay_config_sha256(
+    cur: Any, experiment_id: str
+) -> Tuple[Optional[str], Optional[str]]:
+    """Read back ``(strategy_config_sha256, risk_config_sha256)`` from V049.
+    從 V049 取回 ``(strategy_config_sha256, risk_config_sha256)``。
+
+    REF-20 Sprint B2 R5-T6 (per dispatch §11.1).
+
+    Sprint A R2 register handler INSERTs both columns (V049 22-col contract
+    lines 775+802 in this file). R5-T6 adds the read-back helper so that:
+      1. R5-T4 CLI can SELECT the canonical sha hashes when constructing
+         the in-memory `StrategyParamsConfig` / `RiskConfig` (Sprint C R6
+         will widen to actual config blob retrieval — R5-T6 lands the read
+         path so R6 only needs to add a JSONB blob column reader).
+      2. Audit chain reconstruction tools can verify that a registered
+         experiment's manifest still has matching strategy/risk config sha
+         pre-replay (defense against post-register config swap).
+
+    Sprint A R2 register handler 已 INSERT 兩 column（V049 22-col 契約本檔
+    line 775+802）。R5-T6 加 read-back helper 使：
+      1. R5-T4 CLI 在構造 in-memory `StrategyParamsConfig` / `RiskConfig` 時
+         可 SELECT canonical sha；Sprint C R6 將擴為實際 config blob 取回 —
+         R5-T6 僅落 read path，R6 只需加 JSONB blob column reader。
+      2. 審計鏈重建工具可驗已註冊 experiment 的 manifest 仍有匹配 strategy/
+         risk config sha（防 post-register config swap）。
+
+    Args:
+        cur: psycopg2-style cursor inside caller's transaction.
+        experiment_id: V049 row's experiment_id (uuid text or uuid object).
+
+    Returns / 回傳:
+        Tuple ``(strategy_sha, risk_sha)``; ``(None, None)`` if experiment
+        not found. Both fields are NOT NULL in V049 — once a row exists,
+        both sha values are guaranteed populated by the R2 register handler.
+        Tuple ``(strategy_sha, risk_sha)``；experiment 找不到時回 ``(None, None)``。
+        V049 兩 column 皆 NOT NULL — row 一旦存在，R2 register handler 保
+        兩 sha 必填。
+
+    SAFETY / 不變量：
+        - parameterised SQL（無字串拼接）。
+        - 僅 SELECT，無 mutation；caller 不需 commit。
+        - V049 column 名永久（PA design §6.1 + §5 cross-language contract）。
+    """
+    cur.execute(
+        """
+        SELECT strategy_config_sha256, risk_config_sha256
+          FROM replay.experiments
+         WHERE experiment_id = %s::uuid
+         LIMIT 1;
+        """,
+        (str(experiment_id),),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None, None
+    strategy_sha = row[0]
+    risk_sha = row[1]
+    # Defense-in-depth: V049 NOT NULL constraint guarantees both fields, but
+    # if a future schema migration relaxes this, treat empty/NULL as missing
+    # so callers can fail loud on partial state.
+    # 縱深防禦：V049 NOT NULL 保證雙欄；若未來 migration 放寬，視 NULL/空
+    # 為 missing 使 caller fail loud。
+    if not strategy_sha or not risk_sha:
+        logger.warning(
+            "lookup_replay_config_sha256: experiment_id=%s has partial sha "
+            "(strategy=%r risk=%r) — V049 NOT NULL invariant violated?",
+            experiment_id, strategy_sha, risk_sha,
+        )
+        return strategy_sha or None, risk_sha or None
+    return str(strategy_sha), str(risk_sha)
+
+
+# ─── Sprint B2 R5-T6 round 2 — config blob lookup / 配置 blob 讀取 ─────
+
+
+def lookup_replay_config_blob(
+    cur: Any, experiment_id: str
+) -> dict[str, Optional[dict[str, Any]]]:
+    """Read back ``(strategy_params, risk_overrides)`` blobs from V049.
+    從 V049 取回 ``(strategy_params, risk_overrides)`` blobs。
+
+    REF-20 Sprint B2 R5-T6 round 2 (per dispatch §Fix 1.5).
+
+    Sprint B2 R5-T6 round 2 register handler injects optional blobs into
+    ``replay.experiments.manifest_jsonb`` under reserved keys
+    ``_replay_strategy_params`` / ``_replay_risk_overrides``. This helper
+    extracts them so:
+      1. R5-T7 acceptance fixture builders can SELECT round-tripped blobs
+         to assert that A4/A5 parameter delta produced distinct sha values
+         AND that the persisted blobs match what was registered.
+      2. ``replay/route_helpers.py::build_default_manifest_payload`` (later
+         Sprint B work) can copy blobs from V049 into the disk manifest
+         fixture so the Rust replay_runner's R5-T4 round 2 manifest schema
+         (``ReplayManifest.strategy_params`` / ``risk_overrides``) sees them.
+
+    Sprint B2 R5-T6 round 2 register handler 將選用 blob 注入
+    ``replay.experiments.manifest_jsonb`` 的保留 key
+    （``_replay_strategy_params`` / ``_replay_risk_overrides``）。Helper 取回：
+      1. R5-T7 acceptance fixture 可 SELECT round-trip 的 blob 驗 A4/A5 參數
+         delta 確實產生不同 sha + 持久化 blob 與 register 時一致。
+      2. ``build_default_manifest_payload`` 後續 Sprint 可從 V049 copy blob 進
+         disk manifest fixture，使 Rust runner R5-T4 round 2 manifest schema
+         （``ReplayManifest.strategy_params`` / ``risk_overrides``）看得到。
+
+    Args:
+        cur: psycopg2-style cursor inside caller's transaction.
+        experiment_id: V049 row's experiment_id (uuid text or uuid object).
+
+    Returns / 回傳:
+        Dict ``{"strategy_params": Optional[dict], "risk_overrides":
+        Optional[dict]}``. Both keys present in returned dict; per-key value
+        is ``None`` when (a) experiment not found, (b) manifest_jsonb has no
+        such reserved key, or (c) reserved key value is not a dict (defense:
+        won't surface non-dict polluted values to caller).
+        回傳兩 key 永遠出現；值為 ``None`` 時代表（a）找不到 experiment、
+        （b）manifest_jsonb 無此保留 key、（c）保留 key 值非 dict（防禦性
+        不把污染值往外送）。
+
+    SAFETY / 不變量：
+        - parameterised SQL（無字串拼接）。
+        - 僅 SELECT，無 mutation；caller 不需 commit。
+        - psycopg2 ``jsonb`` 自動解碼為 Python dict（不需 ``json.loads``）；
+          若回傳是 str（極舊 driver fallback），手動 ``json.loads`` 防禦。
+    """
+    cur.execute(
+        """
+        SELECT manifest_jsonb
+          FROM replay.experiments
+         WHERE experiment_id = %s::uuid
+         LIMIT 1;
+        """,
+        (str(experiment_id),),
+    )
+    row = cur.fetchone()
+    none_pair: dict[str, Optional[dict[str, Any]]] = {
+        "strategy_params": None,
+        "risk_overrides": None,
+    }
+    if row is None:
+        return none_pair
+    raw = row[0]
+    if raw is None:
+        return none_pair
+    # psycopg2 returns jsonb as Python dict by default; older drivers may
+    # surface a JSON-encoded str. Decode-or-passthrough defensively.
+    # psycopg2 預設 jsonb→dict；舊版 driver 可能給字串，必要時 decode。
+    if isinstance(raw, (bytes, bytearray)):
+        try:
+            raw = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.warning(
+                "lookup_replay_config_blob: experiment_id=%s manifest_jsonb "
+                "bytes not utf-8 decodable",
+                experiment_id,
+            )
+            return none_pair
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "lookup_replay_config_blob: experiment_id=%s manifest_jsonb "
+                "str payload not JSON parseable",
+                experiment_id,
+            )
+            return none_pair
+    if not isinstance(raw, dict):
+        logger.warning(
+            "lookup_replay_config_blob: experiment_id=%s manifest_jsonb "
+            "is not dict (got %s)",
+            experiment_id, type(raw).__name__,
+        )
+        return none_pair
+    # Defensive: only return when value is dict; tolerate missing keys.
+    # 防禦：只回 dict 值；無 key 視為未注入。
+    strat = raw.get("_replay_strategy_params")
+    risk = raw.get("_replay_risk_overrides")
+    return {
+        "strategy_params": strat if isinstance(strat, dict) else None,
+        "risk_overrides": risk if isinstance(risk, dict) else None,
+    }
 
 
 def _resolve_runtime_environment() -> str:
@@ -667,9 +886,72 @@ def register_experiment(
     # 步驟 1：衍生 experiment_id。
     experiment_id = uuid.uuid4()
 
-    # Step 2: canonical bytes + manifest hash.
-    # 步驟 2：canonical bytes + manifest hash。
-    manifest_canonical = compute_manifest_canonical_bytes(body.manifest_jsonb)
+    # ── REF-20 Sprint B2 R5-T6 round 2 — config blob server-side wiring ──
+    # ── REF-20 Sprint B2 R5-T6 round 2 — 配置 blob 伺服端接線 ─────────
+    #
+    # When ``strategy_params`` / ``risk_overrides`` are supplied at register
+    # time (PA design §5.1 + §5.2 acceptance fixture pattern), server:
+    #   (a) computes the canonical sha256 of each blob using the SAME
+    #       canonical-bytes contract as ``manifest_hash`` (Sprint 1 F1
+    #       retrofit invariant: sort_keys+separators+ensure_ascii=False)
+    #       and OVERRIDES the client-supplied
+    #       ``strategy_config_sha256`` / ``risk_config_sha256``
+    #       (the client-supplied value becomes a placeholder in this path).
+    #   (b) injects the raw JSON blobs into a COPY of ``manifest_jsonb``
+    #       under reserved keys ``_replay_strategy_params`` /
+    #       ``_replay_risk_overrides`` so the Rust replay_runner can read
+    #       them out of the disk fixture (R5-T4 Round 2 manifest schema).
+    #   (c) recomputes ``manifest_hash`` from the AUGMENTED manifest_jsonb
+    #       so the DB self-consistency invariant ``sha256(persisted_jsonb)
+    #       == manifest_hash`` continues to hold (E2 review H-1).
+    #
+    # When neither blob is supplied (legacy path / R5-T6 round 1 callers),
+    # the existing behaviour is preserved exactly: client-supplied sha
+    # values + unmodified manifest_jsonb + xlang signature invariant intact.
+    # The 13/13 cross-language fixture set has neither blob field present so
+    # canonical_bytes is unchanged → 13/13 PASS.
+    #
+    # SAFETY / 不變量：
+    #   - 注入路徑只在 server 端執行（M-4 client-prefix rejector 已過）。
+    #   - manifest_canonical 與 manifest_hash 的 byte-equality 由
+    #     compute_manifest_canonical_bytes 保證（與 Rust serde_json compact
+    #     對齊）；augmented body 的 hash 重新計算，invariant 保持。
+    #   - 若 client 同時提供 ``signature_hex``：簽名是針對 ORIGINAL body
+    #     計算的，server 注入後 hash 會變 → signature 將驗證失敗。Round 2
+    #     範圍不支援 signed-with-blob 同時使用；測試路徑不簽名（R5-T7
+    #     fixture 路徑同步走 unsigned path）。Sprint C R6 fee calibration
+    #     會處理 signed+blob 的雙路徑契約。
+    # 當 ``strategy_params`` / ``risk_overrides`` 兩者均不提供（legacy /
+    # R5-T6 round 1 caller）時，行為與 round 1 完全一致：用 client 提供的
+    # sha + 不動 manifest_jsonb + 跨語言 signature invariant 不破。
+    # 13/13 跨語言 fixture 兩 blob 欄位皆不在 → canonical_bytes 不變 → 不退。
+    manifest_to_persist: dict[str, Any] = body.manifest_jsonb
+    effective_strategy_sha = body.strategy_config_sha256
+    effective_risk_sha = body.risk_config_sha256
+
+    if body.strategy_params is not None or body.risk_overrides is not None:
+        # Shallow copy so caller's body.manifest_jsonb is not mutated.
+        # 淺拷貝避免動到 caller 的 body.manifest_jsonb。
+        manifest_to_persist = dict(body.manifest_jsonb)
+        if body.strategy_params is not None:
+            strategy_canonical = compute_manifest_canonical_bytes(
+                body.strategy_params
+            )
+            effective_strategy_sha = hashlib.sha256(
+                strategy_canonical
+            ).hexdigest()
+            manifest_to_persist["_replay_strategy_params"] = body.strategy_params
+        if body.risk_overrides is not None:
+            risk_canonical = compute_manifest_canonical_bytes(
+                body.risk_overrides
+            )
+            effective_risk_sha = hashlib.sha256(risk_canonical).hexdigest()
+            manifest_to_persist["_replay_risk_overrides"] = body.risk_overrides
+
+    # Step 2: canonical bytes + manifest hash (over the AUGMENTED body if
+    # blobs were injected; legacy path: unmodified body).
+    # 步驟 2：canonical bytes + manifest hash（注入後的 augmented body 或原 body）。
+    manifest_canonical = compute_manifest_canonical_bytes(manifest_to_persist)
     manifest_hash_hex = hashlib.sha256(manifest_canonical).hexdigest()
 
     # Step 3: signature verify (only if client supplied).
@@ -759,13 +1041,18 @@ def register_experiment(
         return None, "engine_binary_sha_not_provisioned"
 
     # R2 round 2 fix H-1: do NOT inject ``_idempotency_key`` into manifest_jsonb.
-    # The persisted manifest_jsonb must be byte-equal to the client-supplied
-    # input so ``sha256(persisted_jsonb) == manifest_hash`` holds (DB-row
-    # self-consistency invariant).
+    # The persisted manifest_jsonb must be byte-equal to the (possibly
+    # blob-augmented per Sprint B2 R5-T6 round 2) input so the
+    # ``sha256(persisted_jsonb) == manifest_hash`` invariant continues to hold.
+    # The augmentation (``_replay_strategy_params`` / ``_replay_risk_overrides``)
+    # is performed BEFORE manifest_canonical/manifest_hash computation above
+    # (see Sprint B2 R5-T6 round 2 block) so this INSERT writes a matching
+    # pair: persisted manifest_jsonb bytes ↔ manifest_hash invariant intact.
     # R2 round 2 fix H-1：不注入 ``_idempotency_key`` 進 manifest_jsonb；持
-    # 久化的 manifest_jsonb 必與 client 提交的 byte-equal 維持
-    # ``sha256(persisted_jsonb) == manifest_hash`` 的 DB row 自洽不變式。
-    manifest_to_persist = body.manifest_jsonb
+    # 久化的 manifest_jsonb 必與（可能由 Sprint B2 R5-T6 round 2 注入 blob）
+    # input byte-equal 以維持 ``sha256(persisted_jsonb) == manifest_hash``
+    # 不變式。注入發生在前面 manifest_canonical/manifest_hash 計算之前，
+    # 故 INSERT 寫入時 persisted body bytes 與 hash 仍是同對。
 
     cur.execute(
         """
@@ -799,7 +1086,11 @@ def register_experiment(
         (
             str(experiment_id), actor_id,
             runtime_environment, git_sha, engine_binary_sha,
-            body.strategy_config_sha256, body.risk_config_sha256,
+            # REF-20 Sprint B2 R5-T6 round 2: prefer server-computed sha
+            # when ``strategy_params`` / ``risk_overrides`` were supplied;
+            # else fall back to client-supplied (legacy path).
+            # 優先使用 server 算的 sha；無 blob 時退回 client 提供值。
+            effective_strategy_sha, effective_risk_sha,
             body.timeframe, body.data_tier, V049_EXECUTION_CONFIDENCE_DEFAULT,
             body.data_window_start, body.data_window_end,
             json.dumps(manifest_to_persist, sort_keys=True, ensure_ascii=False),
@@ -976,6 +1267,8 @@ __all__ = [
     "run_register_in_pg_xact",
     "compute_manifest_canonical_bytes",
     "compute_manifest_hash",
+    "lookup_replay_config_sha256",  # R5-T6 read-back helper
+    "lookup_replay_config_blob",  # R5-T6 round 2 read-back blob helper
     "map_register_error_to_http",
     "_cache_clear_for_test",  # R2 round 2 H-1 — TEST-ONLY hermetic helper
     "MANIFEST_JSONB_MAX_BYTES",

@@ -39,6 +39,7 @@ SPEC: docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from contextlib import contextmanager
@@ -616,4 +617,435 @@ def test_register_reserved_prefix_key_422():
     msg = str(raw)
     assert "_my_key" in msg or "_'" in msg or "reserved" in msg.lower(), (
         f"422 detail did not surface the reserved-prefix reason: {raw}"
+    )
+
+
+# ─── REF-20 Sprint B2 R5-T6 — config sha lookup helper ────────────────
+
+
+def test_lookup_replay_config_sha256_returns_pair_when_row_exists():
+    """R5-T6 Case A: row exists → returns (strategy_sha, risk_sha) tuple.
+
+    Mock cursor simulates V049 SELECT returning the canonical 64-hex shas
+    that R2 register handler INSERTed. Helper must return them as plain
+    strings (not bytes / not memoryview).
+
+    R5-T6 Case A：row 存在 → 回 (strategy_sha, risk_sha) tuple。
+    Mock cursor 模擬 V049 SELECT 回 R2 register handler 寫入的 64-hex sha。
+    Helper 必回純字串（非 bytes / memoryview）。
+    """
+    cur = MagicMock()
+    cur.fetchone.return_value = ("a" * 64, "b" * 64)
+    strategy_sha, risk_sha = _er.lookup_replay_config_sha256(
+        cur, "11111111-1111-1111-1111-111111111111"
+    )
+    assert strategy_sha == "a" * 64
+    assert risk_sha == "b" * 64
+    # Confirm SELECT used parameterised SQL and uuid cast.
+    # 確認 SELECT 用參數化 SQL + uuid 轉型。
+    sql_arg = cur.execute.call_args.args[0]
+    assert "SELECT strategy_config_sha256, risk_config_sha256" in sql_arg
+    assert "%s::uuid" in sql_arg
+    params_arg = cur.execute.call_args.args[1]
+    assert params_arg == ("11111111-1111-1111-1111-111111111111",)
+
+
+def test_lookup_replay_config_sha256_returns_none_when_row_missing():
+    """R5-T6 Case B: experiment not found → (None, None) tuple."""
+    cur = MagicMock()
+    cur.fetchone.return_value = None
+    strategy_sha, risk_sha = _er.lookup_replay_config_sha256(
+        cur, "22222222-2222-2222-2222-222222222222"
+    )
+    assert strategy_sha is None
+    assert risk_sha is None
+
+
+def test_lookup_replay_config_sha256_handles_partial_null_defensively():
+    """R5-T6 Case C: V049 NOT NULL violated (defensive) → log warning + return.
+
+    V049 currently NOT NULL on both columns; this test exercises the
+    defense-in-depth branch in case a future migration relaxes the
+    constraint. Helper must return whichever side is non-empty so callers
+    can fail-loud on partial state without exception.
+
+    R5-T6 Case C：V049 NOT NULL 違反（縱深防禦）→ 印 warning + 回。
+    當前 V049 兩 column NOT NULL；本 test 測未來 migration 放寬時的縱深
+    分支。Helper 必回非空那側使 caller 可 fail-loud 而不 raise。
+    """
+    cur = MagicMock()
+    cur.fetchone.return_value = ("a" * 64, "")  # risk_sha empty
+    strategy_sha, risk_sha = _er.lookup_replay_config_sha256(
+        cur, "33333333-3333-3333-3333-333333333333"
+    )
+    assert strategy_sha == "a" * 64
+    assert risk_sha is None
+
+
+def test_register_then_lookup_round_trip(monkeypatch):
+    """R5-T6 Case D: round-trip — register → SELECT shas back.
+
+    Verifies the V049 INSERT path written by R2 round 2 stores both
+    strategy_config_sha256 and risk_config_sha256 as canonical 64-hex
+    columns that R5-T6 helper can read back. Uses real register code +
+    mocked PG connection so we exercise the SELECT shape end-to-end.
+
+    R5-T6 Case D：round-trip — register → SELECT 取回 sha。
+    驗 R2 round 2 寫入路徑將兩 sha 存為 canonical 64-hex column，R5-T6
+    helper 可讀回。用真實 register 代碼 + mock PG 連線端對端驗 SELECT shape。
+    """
+    monkeypatch.setenv("OPENCLAW_ENGINE_BINARY_SHA", _DUMMY_ENGINE_SHA)
+
+    # Stub PG connection with cursor that records INSERT params + replays
+    # them on subsequent SELECT.
+    # Stub PG 連線；cursor 記下 INSERT params 並在後續 SELECT 重播。
+    captured_insert_params: list = []
+    captured_select_results: list = []
+
+    class StubCursor:
+        def __init__(self):
+            self.rowcount = 0
+            self._next_result = None
+            self.last_sql = ""
+            self.last_params = None
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+            self.last_params = params
+            if "INSERT INTO replay.experiments" in sql:
+                captured_insert_params.append(params)
+                # Simulate RETURNING experiment_id::text, created_at.
+                from datetime import datetime, timezone
+                self._next_result = (
+                    "44444444-4444-4444-4444-444444444444",
+                    datetime.now(timezone.utc),
+                )
+            elif "SELECT strategy_config_sha256" in sql:
+                captured_select_results.append(params)
+                # Replay the strategy_config_sha256 + risk_config_sha256 from
+                # the INSERT params tuple. Positional layout in
+                # ``register_experiment``'s cur.execute call:
+                #   [0] str(experiment_id)
+                #   [1] actor_id
+                #   [2] runtime_environment
+                #   [3] git_sha
+                #   [4] engine_binary_sha
+                #   [5] body.strategy_config_sha256   ← R5-T6 read target
+                #   [6] body.risk_config_sha256       ← R5-T6 read target
+                # （R5-T6：對齊 register_experiment 內 INSERT 參數順序）
+                if captured_insert_params:
+                    insert_args = captured_insert_params[-1]
+                    self._next_result = (
+                        insert_args[5],  # strategy_config_sha256
+                        insert_args[6],  # risk_config_sha256
+                    )
+                else:
+                    self._next_result = None
+            else:
+                self._next_result = None
+
+        def fetchone(self):
+            return self._next_result
+
+    cur = StubCursor()
+
+    body = _er.ReplayExperimentRegisterRequest(
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        timeframe="1m",
+        data_tier="S2",
+        data_window_start="2026-01-01T00:00:00Z",
+        data_window_end="2026-01-02T00:00:00Z",
+        strategy_config_sha256="a" * 64,
+        risk_config_sha256="b" * 64,
+        half_life_days=1.0,
+        manifest_jsonb={"strategy": "grid_trading", "version": 1},
+    )
+    actor = _operator_actor_alice()
+    result, err = _er.register_experiment(cur, actor, body)
+    assert err is None
+    assert result is not None
+    experiment_id = result["experiment_id"]
+
+    # R5-T6 SELECT: read back the shas via helper.
+    # R5-T6 SELECT：透過 helper 讀回 sha。
+    strategy_sha, risk_sha = _er.lookup_replay_config_sha256(cur, experiment_id)
+    assert strategy_sha == "a" * 64
+    assert risk_sha == "b" * 64
+
+
+# ─── REF-20 Sprint B2 R5-T6 round 2 — config blob server-side wiring ──
+
+
+def _capturing_cursor():
+    """Build a cursor that records all INSERT params for inspection.
+    建一個記下所有 INSERT params 的 cursor 供斷言檢查。
+    """
+    captured: list = []
+
+    class _Cur:
+        def __init__(self):
+            self.rowcount = 0
+            self._next = None
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+            if "INSERT INTO replay.experiments" in sql:
+                captured.append(params)
+                from datetime import datetime, timezone
+                self._next = (
+                    "55555555-5555-5555-5555-555555555555",
+                    datetime.now(timezone.utc),
+                )
+            else:
+                self._next = None
+
+        def fetchone(self):
+            return self._next
+
+    return _Cur(), captured
+
+
+def test_register_with_strategy_params_computes_distinct_sha(monkeypatch):
+    """R5-T6 round 2 Case A: same strategy name + DIFFERENT strategy_params
+    → server-computed strategy_config_sha256 distinct (A4 acceptance proof).
+
+    R5-T6 round 2 Case A：同 strategy name + 不同 strategy_params → server
+    計出的 strategy_config_sha256 不同（A4 acceptance proof）。
+    """
+    monkeypatch.setenv("OPENCLAW_ENGINE_BINARY_SHA", _DUMMY_ENGINE_SHA)
+
+    # Baseline: grid_levels=10
+    cur_a, captured_a = _capturing_cursor()
+    body_a = _er.ReplayExperimentRegisterRequest(
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        timeframe="1m",
+        data_tier="S2",
+        data_window_start="2026-01-01T00:00:00Z",
+        data_window_end="2026-01-02T00:00:00Z",
+        # Client-supplied placeholder; server will OVERRIDE this when
+        # strategy_params is provided.
+        # Client 提的 placeholder；server 會用 strategy_params 算出的真值覆寫。
+        strategy_config_sha256="0" * 64,
+        risk_config_sha256="b" * 64,
+        half_life_days=1.0,
+        manifest_jsonb={"name": "test-A4-baseline"},
+        strategy_params={"grid_trading": {"grid_levels": 10}},
+    )
+    res_a, err_a = _er.register_experiment(cur_a, _operator_actor_alice(), body_a)
+    assert err_a is None and res_a is not None
+
+    # Candidate: grid_levels=20
+    cur_b, captured_b = _capturing_cursor()
+    body_b = _er.ReplayExperimentRegisterRequest(
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        timeframe="1m",
+        data_tier="S2",
+        data_window_start="2026-01-01T00:00:00Z",
+        data_window_end="2026-01-02T00:00:00Z",
+        strategy_config_sha256="0" * 64,
+        risk_config_sha256="b" * 64,
+        half_life_days=1.0,
+        manifest_jsonb={"name": "test-A4-candidate"},
+        strategy_params={"grid_trading": {"grid_levels": 20}},
+    )
+    res_b, err_b = _er.register_experiment(cur_b, _operator_actor_alice(), body_b)
+    assert err_b is None and res_b is not None
+
+    # INSERT param positional layout (see register_experiment cur.execute):
+    #   [5] strategy_config_sha256
+    #   [6] risk_config_sha256
+    # INSERT 參數位置（見 register_experiment cur.execute）。
+    sha_a = captured_a[0][5]
+    sha_b = captured_b[0][5]
+    # Server must override the "0"*64 placeholder with computed sha.
+    # Server 必用算出的 sha 覆寫 client placeholder。
+    assert sha_a != "0" * 64, (
+        f"server did NOT override placeholder strategy sha: {sha_a}"
+    )
+    assert sha_b != "0" * 64
+    # Distinct params → distinct sha (A4 acceptance core invariant).
+    # 不同 params → 不同 sha（A4 核心不變式）。
+    assert sha_a != sha_b, (
+        "same strategy name + different strategy_params produced IDENTICAL "
+        f"strategy_config_sha256: {sha_a} (A4 acceptance fail; "
+        "compute_manifest_canonical_bytes contract drift?)"
+    )
+    # Risk sha untouched (no risk_overrides supplied).
+    # 未提供 risk_overrides → risk sha 不變。
+    assert captured_a[0][6] == "b" * 64
+    assert captured_b[0][6] == "b" * 64
+
+
+def test_register_with_risk_overrides_computes_distinct_sha(monkeypatch):
+    """R5-T6 round 2 Case B: same strategy + DIFFERENT risk_overrides →
+    server-computed risk_config_sha256 distinct (A5 acceptance proof).
+
+    R5-T6 round 2 Case B：同 strategy + 不同 risk_overrides → server 計
+    risk_config_sha256 不同（A5 acceptance proof）。
+    """
+    monkeypatch.setenv("OPENCLAW_ENGINE_BINARY_SHA", _DUMMY_ENGINE_SHA)
+
+    # Tight: position_size_max_pct = 2.0
+    cur_a, captured_a = _capturing_cursor()
+    body_a = _er.ReplayExperimentRegisterRequest(
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        timeframe="1m",
+        data_tier="S2",
+        data_window_start="2026-01-01T00:00:00Z",
+        data_window_end="2026-01-02T00:00:00Z",
+        strategy_config_sha256="a" * 64,
+        risk_config_sha256="0" * 64,
+        half_life_days=1.0,
+        manifest_jsonb={"name": "test-A5-tight"},
+        risk_overrides={"limits": {"position_size_max_pct": 2.0}},
+    )
+    res_a, err_a = _er.register_experiment(cur_a, _operator_actor_alice(), body_a)
+    assert err_a is None and res_a is not None
+
+    # Loose: position_size_max_pct = 10.0
+    cur_b, captured_b = _capturing_cursor()
+    body_b = _er.ReplayExperimentRegisterRequest(
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        timeframe="1m",
+        data_tier="S2",
+        data_window_start="2026-01-01T00:00:00Z",
+        data_window_end="2026-01-02T00:00:00Z",
+        strategy_config_sha256="a" * 64,
+        risk_config_sha256="0" * 64,
+        half_life_days=1.0,
+        manifest_jsonb={"name": "test-A5-loose"},
+        risk_overrides={"limits": {"position_size_max_pct": 10.0}},
+    )
+    res_b, err_b = _er.register_experiment(cur_b, _operator_actor_alice(), body_b)
+    assert err_b is None and res_b is not None
+
+    risk_sha_a = captured_a[0][6]
+    risk_sha_b = captured_b[0][6]
+    assert risk_sha_a != "0" * 64
+    assert risk_sha_b != "0" * 64
+    assert risk_sha_a != risk_sha_b, (
+        "same strategy + different risk_overrides produced IDENTICAL "
+        f"risk_config_sha256: {risk_sha_a} (A5 acceptance fail)"
+    )
+    # Strategy sha untouched (no strategy_params supplied).
+    assert captured_a[0][5] == "a" * 64
+    assert captured_b[0][5] == "a" * 64
+
+
+def test_lookup_replay_config_blob_returns_params_and_overrides():
+    """R5-T6 round 2 Case C: lookup_replay_config_blob round-trips both
+    blobs from manifest_jsonb's reserved keys.
+
+    R5-T6 round 2 Case C：lookup_replay_config_blob 從 manifest_jsonb 保留 key
+    讀回兩 blob。
+    """
+    cur = MagicMock()
+    # Simulate persisted manifest_jsonb with both reserved keys.
+    # 模擬 manifest_jsonb 兩保留 key 已注入。
+    cur.fetchone.return_value = (
+        {
+            "name": "test",
+            "_replay_strategy_params": {"grid_trading": {"grid_levels": 7}},
+            "_replay_risk_overrides": {
+                "limits": {"position_size_max_pct": 3.5}
+            },
+        },
+    )
+    blob = _er.lookup_replay_config_blob(
+        cur, "11111111-1111-1111-1111-111111111111"
+    )
+    assert blob["strategy_params"] == {
+        "grid_trading": {"grid_levels": 7}
+    }
+    assert blob["risk_overrides"] == {
+        "limits": {"position_size_max_pct": 3.5}
+    }
+    # SELECT shape contract.
+    sql_arg = cur.execute.call_args.args[0]
+    assert "SELECT manifest_jsonb" in sql_arg
+    assert "%s::uuid" in sql_arg
+
+
+def test_lookup_replay_config_blob_returns_none_when_absent():
+    """R5-T6 round 2 Case D: experiment row exists but manifest_jsonb has
+    no reserved keys → both fields None.
+
+    R5-T6 round 2 Case D：experiment 存在但 manifest_jsonb 無保留 key
+    → 兩 field 皆 None。
+    """
+    cur = MagicMock()
+    cur.fetchone.return_value = (
+        {"name": "legacy-without-blob"},  # no _replay_* keys
+    )
+    blob = _er.lookup_replay_config_blob(
+        cur, "22222222-2222-2222-2222-222222222222"
+    )
+    assert blob == {"strategy_params": None, "risk_overrides": None}
+
+    # Row missing entirely.
+    cur2 = MagicMock()
+    cur2.fetchone.return_value = None
+    blob2 = _er.lookup_replay_config_blob(
+        cur2, "33333333-3333-3333-3333-333333333333"
+    )
+    assert blob2 == {"strategy_params": None, "risk_overrides": None}
+
+
+def test_register_blob_path_preserves_jsonb_hash_invariant(monkeypatch):
+    """R5-T6 round 2 Case E: when blobs are injected, recomputed
+    manifest_hash matches sha256(canonical_bytes(persisted_jsonb)) so the
+    DB self-consistency invariant holds (E2 review H-1 guarantee).
+
+    R5-T6 round 2 Case E：注入 blob 後重算 manifest_hash 必等於
+    sha256(canonical_bytes(persisted_jsonb))，DB 自洽不變式維持。
+    """
+    monkeypatch.setenv("OPENCLAW_ENGINE_BINARY_SHA", _DUMMY_ENGINE_SHA)
+
+    cur, captured = _capturing_cursor()
+    body = _er.ReplayExperimentRegisterRequest(
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        timeframe="1m",
+        data_tier="S2",
+        data_window_start="2026-01-01T00:00:00Z",
+        data_window_end="2026-01-02T00:00:00Z",
+        strategy_config_sha256="0" * 64,
+        risk_config_sha256="0" * 64,
+        half_life_days=1.0,
+        manifest_jsonb={"name": "invariant-check"},
+        strategy_params={"grid_trading": {"grid_levels": 13}},
+        risk_overrides={"limits": {"position_size_max_pct": 4.2}},
+    )
+    res, err = _er.register_experiment(cur, _operator_actor_alice(), body)
+    assert err is None and res is not None
+
+    # INSERT param positional layout (matches register_experiment
+    # cur.execute call):
+    #   [12] manifest_jsonb (json.dumps str)
+    #   [13] manifest_hash (bytes)
+    # INSERT 參數位置。
+    persisted_jsonb_str = captured[0][12]
+    persisted_hash_bytes = captured[0][13]
+    persisted_jsonb_dict = json.loads(persisted_jsonb_str)
+    # Augmented body must contain reserved keys.
+    # 注入後 body 必含保留 key。
+    assert "_replay_strategy_params" in persisted_jsonb_dict
+    assert "_replay_risk_overrides" in persisted_jsonb_dict
+    # Recompute hash from persisted body bytes — must match INSERTed hash.
+    # 重算 hash 必等於 INSERTed hash。
+    import hashlib as _hl
+    expected = _hl.sha256(
+        _er.compute_manifest_canonical_bytes(persisted_jsonb_dict)
+    ).digest()
+    assert persisted_hash_bytes == expected, (
+        "DB self-consistency invariant BROKEN: "
+        f"sha256(persisted_jsonb) != manifest_hash "
+        f"(persisted_hash={persisted_hash_bytes.hex()} "
+        f"recomputed={expected.hex()})"
     )

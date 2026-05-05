@@ -235,11 +235,17 @@ def _do_pg_path_for_run_sync(
             # 簽 + sibling key.hex；embed ``run_id`` 給 Rust 自驗 basename）。
             output_dir = route_helpers.resolve_artifact_output_dir(run_id_local)
             try:
+                # REF-20 Sprint B2 R5-T4 round 3 Fix 3: pass ``cur`` so V049
+                # blob fields (``_replay_strategy_params`` /
+                # ``_replay_risk_overrides``) propagate to disk for Rust runner.
+                # REF-20 Sprint B2 R5-T4 round 3 Fix 3：傳 ``cur`` 使 V049 兩
+                # blob 欄位流向 disk manifest 供 Rust runner 讀取。
                 manifest_fixture_path = route_helpers.write_manifest_fixture(
                     run_id=run_id_local,
                     manifest_data=route_helpers.build_default_manifest_payload(
                         experiment_id=body.experiment_id,
                         output_dir=output_dir,
+                        cur=cur,
                     ),
                     output_dir=output_dir,
                 )
