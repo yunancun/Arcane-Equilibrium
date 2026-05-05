@@ -696,3 +696,652 @@ Round 5 verify 範圍只到「真實 ssh 觸發 R3 smoke + 觀察 4 表 acceptan
 | 7d 灰度 | N/A — Sprint A 仍開頭，未到 7d 觀察 |
 | §三 drift check | passed — `e9d547c0` HEAD + `dbcf845b` engine binary deployed 對齊 §三 描述 |
 
+---
+
+## §17 RETRY LOG — Round 4 final smoke (post `f51f4e2e` R6+R7 deploy，2026-05-05 01:32+ UTC)
+
+**Verdict: BLOCK 仍維持；R6+R7 deploy 揭露 L6 layer 5 blocker — manifest_signing_key 未 provisioning。Sprint A R3 4-table acceptance 仍 FAIL（experiments=2 / run_state=2 status='failed' / report_artifacts=0 / simulated_fills=0）；無 trading.fills leak**
+
+### §17.1 Round 6+7 deploy verified（部分）
+
+| 驗證項 | 結果 | 證據 |
+|---|---|---|
+| origin/main HEAD | `f51f4e2e73768a70cef8547b445cd864d3dafcc1` | Mac fetch verified |
+| Linux 工作樹 git HEAD | **`e9d547c0`（落後 1 commit）** | `git rev-parse HEAD` |
+| Linux working tree clean | **dirty — 3 M files + 2 untracked** | `git status --porcelain` 顯示 helper_scripts/restart_all.sh + replay_routes.py + replay/route_helpers.py modified；test_replay_e2e_round6_smoke.py + test_route_helpers_fixture_default_env.py untracked |
+| Working tree 內容 functionally equivalent to `f51f4e2e` | YES（per uncommitted diff 比對） | 但 git tracking 未一致 → P0-INFRA round 4 也 active |
+| API process restart time | 2026-05-05 01:29:30 | `ps -o lstart` |
+| API PID | 805444 | `ps -ef \| grep uvicorn` |
+| `OPENCLAW_ENGINE_BINARY_SHA` env | **YES** | `/proc/805444/environ` = `38c72877...` |
+| Engine binary actual sha256 match env | **YES** | `sha256sum rust/target/release/openclaw-engine` = `38c72877...` (identical) |
+| `OPENCLAW_REPLAY_FIXTURE_DEFAULT` env | **YES** | `/proc/805444/environ` = `/home/ncyu/BybitOpenClaw/srv/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json` |
+| **`OPENCLAW_SECRETS_DIR` env** | **MISSING** | `/proc/805444/environ` 0 命中 |
+| **`OPENCLAW_REPLAY_SIGNING_KEY_FILE` env** | **MISSING** | `/proc/805444/environ` 0 命中 |
+| **`replay_signing_key` file exists anywhere** | **NO** | `find /home/ncyu/BybitOpenClaw -name replay_signing_key` empty result |
+
+**Round 6+7 的 3 個聲稱 fix 真實狀態**：
+
+| 聲稱 fix | runtime 驗證 | 狀態 |
+|---|---|---|
+| ✅ R6-T1 真 HMAC sign + key.hex sibling | **未驗到** — `_resolve_manifest_signing_key()` 在 step 2 `load_signing_key_from_secrets_dir` 因 `OPENCLAW_SECRETS_DIR` 未設直接 fallthrough → step 3 raise `ValueError("manifest_signing_key_unavailable")` → caller 進 `manifest_fixture_write_failed:ValueError` 路徑；output_dir 0 file written | **DEPLOY 半完成** |
+| ✅ R6-T2 stderr DEVNULL → `<output_dir>/replay_runner.stderr` disk file | **代碼存在但未觸發** — subprocess.Popen 從未 invoke（在 manifest_fixture_write_failed 之前已 return） | **deploy OK 但未行動** |
+| ✅ R6-T3a `OPENCLAW_REPLAY_FIXTURE_DEFAULT` env 注入 | **YES** | **deploy OK** |
+
+### §17.2 Phase 1-7 結果
+
+| Phase | 動作 | HTTP / SQL | 結果 |
+|---|---|---|---|
+| 1 — login | `POST /auth/login` | HTTP 200 + cookie 有效 | **PASS** |
+| 2 — register | `POST /experiments/register` with `idempotency_key=r3smoke4-1777937530`（不傳 fixture_uri）| HTTP 200 + `experiment_id=bbcdff7e-0014-4bcd-80df-9292413e734e` + `manifest_hash=95e44198...` + `idempotency_hit=false` | **PASS** |
+| 3 — POST /run | `POST /run` with experiment_id+idempotency | **HTTP 503**（`reason_codes=["replay_runner_spawn_failed"]; message=replay_runner failed to spawn; check server logs (replay_runner.stderr) for diagnosis`）| **BLOCKED on signing key** |
+| 4 — wait subprocess + check artifacts | `ls /tmp/openclaw/replay_artifacts/<RUN_ID>` | **空 directory**，0 file written | subprocess 從未 spawn（R6-T1 fail-closed before subprocess.Popen） |
+| 4b — root cause 從 api.log | `grep load_signing_key_from_secrets_dir /tmp/openclaw/api.log` | `load_signing_key_from_secrets_dir: OPENCLAW_SECRETS_DIR not set / OPENCLAW_SECRETS_DIR 未設` | **smoking gun 鎖定 P0-NEW-2** |
+| 5 — POST /finalize | (未跑：依賴 Phase 3) | N/A | N/A |
+| 6 — 4-table acceptance SQL | `experiments=2 / run_state=2 (status='failed' both rows) / report_artifacts=0 / simulated_fills=0` | 2+2+0+0 | **FAIL（4/4 必 > 0，僅 2 表 > 0）** |
+| 7 — Wave 9 safety + FK lineage | `trading_fills_15m=2`（TONUSDT demo ma_crossover，無 replay context_id）；`all_replay_audit_15m=0`；`all_audit_15m=48`（review_live_candidate）；run 09da3571.manifest_id == experiment bbcdff7e（FK valid） | no replay-induced live mutation | trivially PASS |
+
+### §17.3 Sprint A acceptance verdict — 4 表 row > 0 是否達成
+
+| Plan §6.R3 標準 | 結果 |
+|---|---|
+| `replay.experiments > 0` | **PASS** (= 2，含 round 5 leftover 1 + round 4 新 1) |
+| `replay.run_state > 0` | **PASS** (= 2，兩 row 都 status='failed') |
+| `replay.report_artifacts > 0` | **FAIL** (= 0) |
+| `replay.simulated_fills > 0` | **FAIL** (= 0) |
+
+**整體 R3 smoke E2E：仍 FAIL — Sprint A R3 acceptance 2/4 PASS, 2/4 FAIL**
+
+進度 trajectory（4 round 累積）：
+- Round 1：0/0/0/0（FastAPI 422 body bug）
+- Round 2：0/0/0/0（OPENCLAW_ENGINE_BINARY_SHA env missing）
+- Round 3：1/1/0/0（manifest_signer key.hex missing — placeholder vs Sprint 1 Track B fail-closed）
+- **Round 4：2/2/0/0（manifest_signing_key 未 provisioning — secrets_dir + signing_key_file 雙 env 都 missing）**
+
+**Sprint A R3 仍不可結案**，但寫入鏈半通：register 200 + run pid 寫 row（status='failed' fail-closed 設計正確）。subprocess 從未 invoke → report_artifacts + simulated_fills 寫入鏈仍 untested。
+
+### §17.4 故障排除 — Round 4 真實 root cause
+
+PM plan 開頭斷言「核心 fix 已 land」3 條，runtime 驗證後實況：
+
+#### P0-NEW-2 — `OPENCLAW_SECRETS_DIR` + `replay_signing_key` 未 provisioning（**新發現，不在 plan 預期內**）
+
+R6+R7 commit `f51f4e2e` 改 `route_helpers.py::_resolve_manifest_signing_key()`：
+
+```python
+# Step 1: env override OPENCLAW_REPLAY_SIGNING_KEY_FILE
+# Step 2: load_signing_key_from_secrets_dir(env_label) —
+#   look up $OPENCLAW_SECRETS_DIR/<env_label>/replay_signing_key
+# Step 3: NULL → raise ValueError("manifest_signing_key_unavailable")
+```
+
+**runtime 真實狀態**：
+- `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env 未設 → step 1 skip
+- `OPENCLAW_SECRETS_DIR` env 未設 → `load_signing_key_from_secrets_dir` 印 `OPENCLAW_SECRETS_DIR not set` 後 return None → step 2 skip
+- step 3 raise ValueError → caller `replay_routes.py:516` 把 `ValueError` 包成 `manifest_fixture_write_failed:ValueError` pg_err → `replay_routes.py:660-680` 路由到 503 `replay_runner_spawn_failed`（R7 FINDING-2 改動讓 message 不再帶 stderr text）
+
+**為何 R6+R7 commit 沒同步 ship 配套 provisioning？**：
+
+- 已存在 `helper_scripts/operator/generate_replay_signing_key.sh`（since R2-T3，2026-05-04 commit `353db3fe`），其 docstring 明確說 *「This script generates a 256-bit random key, writes to the spec'd path with mode 0600. It does NOT auto-deploy, auto-restart engines.」*
+- R6 commit message 列 "Pending: Linux deploy via restart_all.sh --rebuild" 但**未列**「先跑 generate_replay_signing_key.sh demo」
+- `restart_all.sh` R6-T3a 改動只 inject `OPENCLAW_REPLAY_FIXTURE_DEFAULT`，**沒**加 `OPENCLAW_SECRETS_DIR` export
+- 結果：deploy chain 完成 binary path / fixture default / FastAPI 422 fix，但 sigining key 路徑仍是 「文檔提示但未 ship」
+
+**修法（推薦 PM Option A）**：兩步走 deploy：
+
+```bash
+# 1. 跑 operator key gen helper for demo profile：
+ssh trade-core "OPENCLAW_SECRETS_DIR=/home/ncyu/BybitOpenClaw/secrets/secret_files/bybit \
+  bash helper_scripts/operator/generate_replay_signing_key.sh demo"
+# 預期：寫 /home/ncyu/BybitOpenClaw/secrets/secret_files/bybit/demo/replay_signing_key (mode 0600)
+
+# 2. 改 restart_all.sh::restart_api() 加 export：
+export OPENCLAW_SECRETS_DIR="$OPENCLAW_BASE_DIR/../secrets/secret_files/bybit"
+# 或 已有變數 mapping CLAUDE.md §六 顯示
+#   OPENCLAW_SECRETS_DIR=secrets/secret_files/bybit (slot base)
+# restart_all.sh 應該 honor 既有 env layout
+
+# 3. restart_all --keep-auth (無 Rust 改動，不需 --rebuild)
+ssh trade-core "bash helper_scripts/restart_all.sh --keep-auth"
+```
+
+**修法 Option B**：繞過 secrets_dir，用 env override 直指 dev key file（dev/test profile only）：
+
+```bash
+# restart_all.sh::restart_api() 加：
+export OPENCLAW_REPLAY_SIGNING_KEY_FILE="$OPENCLAW_BASE_DIR/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/key.hex"
+# 該 dev key 已 commit 到 git: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899
+```
+
+**不選 Option B 的理由**：R7 FINDING-1 加了 `is_live_release_profile()` block — 若日後 profile 切 live，env override 會 hard-block，但若 dev fixture key 被誤用一陣後切 live 容易留 audit-trail 殘渣。Option A 是 production-grade。
+
+#### P0-INFRA-2 — Linux working tree 仍 dirty + 落後 origin 1 commit（round 2 P0-INFRA repeat）
+
+| 驗證項 | 結果 |
+|---|---|
+| Linux HEAD | `e9d547c0`（origin/main = `f51f4e2e`）|
+| 落後 commits | 1（即 `f51f4e2e`） |
+| Working tree dirty 內容 | 3 M files + 2 untracked，內容 functionally equivalent to `f51f4e2e` |
+
+PM plan 開頭聲稱「Mac=Linux=origin sync」，runtime 驗證為 **Mac=origin (`f51f4e2e`) ≠ Linux (`e9d547c0` working tree dirty)**。代碼層行為等同，但 git tracking 違反 §七 commit 即 push + Mac→Linux pull 同步規則。
+
+修法：operator 端 `cd ~/BybitOpenClaw/srv && git stash && git pull --ff-only && git stash drop`（per CLAUDE.md §七 CC 不執行 stash/pull/reset）。
+
+#### P0-NEW-INFRA-2 — `replay_runner.stderr` disk file 在 manifest_fixture_write_failed 路徑下不會被寫
+
+**現象**：R6-T2 改動 `subprocess.Popen` 加 stderr redirect 到 `<output_dir>/replay_runner.stderr`，**但**該 fix 只生效於 subprocess.Popen 真實 invoke 後。R6-T1 失敗（`manifest_signing_key_unavailable`）發生在 subprocess.Popen **之前**，stderr disk file 不會被開檔，operator 唯一 root cause 證據是 `tail /tmp/openclaw/api.log` 找 `OPENCLAW_SECRETS_DIR not set` 那一行。
+
+這算 R6-T2 fix scope 的 known limitation — fix 解決「subprocess died after Popen with silent stderr」，不解決「subprocess never spawned due to pre-spawn ValueError」。
+
+**改善建議（非 P0，但對 round 5+ debugging 有幫助）**：`route_helpers.py::write_manifest_fixture` 在 catch ValueError 後 `log.error()` 應該 print full traceback（含 step 1/2/3 哪一步 fail），而不只是 step 2 的 print 一行。當前 caller 寫 503 但 swallow exception traceback。
+
+#### P2-A-RESOLVED ✅ — `OPENCLAW_REPLAY_FIXTURE_DEFAULT` env injected
+
+R6-T3a 已 deploy。`/proc/805444/environ` 確認。register call 不傳 `manifest_jsonb.fixture_uri` 且未報「fixture_uri_missing」（雖然 spawn 沒到 fixture loader 那一步）。
+
+### §17.5 PM 接手建議 — Sprint A close commit doc + worklog
+
+#### 建議 1：Round 5 deploy chain（連 commit + 跑 helper script）
+
+```bash
+# 1. clean Linux working tree
+ssh trade-core 'cd ~/BybitOpenClaw/srv && git stash && git pull --ff-only && git stash drop'
+# 預期：working tree clean + HEAD == f51f4e2e
+
+# 2. provision dev signing key for demo profile
+ssh trade-core 'OPENCLAW_SECRETS_DIR=/home/ncyu/BybitOpenClaw/secrets/secret_files/bybit \
+  bash helper_scripts/operator/generate_replay_signing_key.sh demo'
+
+# 3. PM 派 E1 in-flight：改 helper_scripts/restart_all.sh::restart_api() 加：
+export OPENCLAW_SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$REPO_ROOT/../secrets/secret_files/bybit}"
+# CLAUDE.md §六 已宣 OPENCLAW_SECRETS_DIR=secrets/secret_files/bybit (slot base)，restart_all 應該尊重既有 layout
+
+# 4. restart_all --keep-auth + smoke retest
+ssh trade-core 'bash helper_scripts/restart_all.sh --keep-auth'
+```
+
+#### 建議 2：governance 修補（Sprint A close gate 補強）
+
+R6+R7 round chain 揭示一個系統 governance hole：3500+ pytest PASS（含 R6-T4 的 25 PASS）但**真實 Linux runtime smoke E2E 0 cycle**才能 catch P0-NEW-2。
+
+新 Sprint A close gate 應包含：
+
+```bash
+# (A) 既有 hermetic pytest gate（無變動）
+cd program_code/exchange_connectors/bybit_connector/control_api_v1
+.venv/bin/python -m pytest tests/test_replay_*
+
+# (B) 新增 Linux runtime smoke gate（新增）：
+ssh trade-core 'cd ~/BybitOpenClaw/srv && \
+  OPENCLAW_REPLAY_E2E_SMOKE=1 .venv/bin/python -m pytest \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_replay_e2e_round6_smoke.py'
+# R6-T4 commit 提到 test_replay_e2e_round6_smoke.py 是 opt-in via OPENCLAW_REPLAY_E2E_SMOKE=1；本應每次 deploy 後跑一次
+
+# (C) PM commit 驗 ENV 三件套（新增）：
+ssh trade-core 'API_PID=$(pgrep -f "uvicorn app.main:app" | head -1); \
+  for v in OPENCLAW_ENGINE_BINARY_SHA OPENCLAW_REPLAY_FIXTURE_DEFAULT OPENCLAW_SECRETS_DIR; do \
+    echo -n "$v="; grep -aE "^$v=" /proc/$API_PID/environ | head -1 || echo "MISSING"; \
+  done'
+```
+
+(B) + (C) 都應在 deploy 後 ssh 驗，**任一 missing 即 BLOCK Sprint A close**。
+
+#### 建議 3：Round 5 派發路徑
+
+| Step | Owner | Action |
+|---|---|---|
+| 1 | operator | `git stash drop + pull --ff-only` Linux working tree |
+| 2 | operator (一次性) | 跑 `generate_replay_signing_key.sh demo` |
+| 3 | E1 | 改 `restart_all.sh::restart_api()` 加 `export OPENCLAW_SECRETS_DIR` |
+| 4 | E2 round | 5 review 該 1 LOC 改動 |
+| 5 | E4 | hermetic pytest 全 PASS + restart_all 重啟 + ssh 驗 ENV 三件套 |
+| 6 | QA | 重跑 Phase 1-7 + §17 sign-off round 5 |
+| 7 | PM | Sprint A close commit + 標 P6 真正 RUN-CALIBRATED 收尾 |
+
+預計 round 5 工作量：~0.5-1 day（小範圍 deploy infra fix + smoke 1 cycle 即可結 Sprint A）。
+
+#### 建議 4：Sprint A 真實狀態 vs PM plan 偏差
+
+PM plan 開頭斷言「核心 fix 已 land — 4-layer blocker fix」3 條：
+- ✅ R6-T1 真 HMAC sign + key.hex sibling — **未驗** (deploy 半完成；secrets_dir 未注入)
+- ✅ R6-T2 stderr → disk file — deploy OK 但未行動
+- ✅ R6-T3a fixture env — DEPLOY OK
+
+斷言「API 4 routes all 401」誤導：本 round 驗證 register 真實 200；plan 寫 401 應該是 plan 寫作時未 login。
+
+PM 應更新 plan §17.1 狀態以匹配 runtime 證據：「3 fix 中 1 deploy halfway（manifest_signer 配套未 ship），1 deploy OK but untriggered，1 deploy fully OK」。
+
+### §17.6 R3 smoke 完成後 follow-up — B Sprint 啟動
+
+**保持與 round 1-3 一致**：只有 Sprint A 真正 close（4 表全 > 0 + Wave 9 0 leak + FK valid + subprocess 真實 EXIT=0 + replay_report.json 寫入 + simulated_fills 真實 row）後，Sprint B（R4=intent_processor stub + R5=full pipeline integration）才有 evidence 觸發。
+
+當前 Sprint A 4-round trajectory：
+- Round 1: P0 FastAPI 422 ✅ resolved
+- Round 2: P2-A ENGINE_BINARY_SHA env ✅ resolved
+- Round 3: P0-NEW manifest_signer key.hex ✅ resolved (per R6-T1 design intent)
+- **Round 4: P0-NEW-2 OPENCLAW_SECRETS_DIR + replay_signing_key provisioning — not resolved**
+
+**Round 5 的工作不應是「再多寫一個 fix commit」**，而是 **「補完 deploy infra」**：跑 `generate_replay_signing_key.sh` + 改 `restart_all.sh` 加 `OPENCLAW_SECRETS_DIR` export。R6 的 Python 代碼 fix 是正確的（fail-closed 設計合宜），缺的是 deploy chain 配套。
+
+### §17.7 QA push back — Round 4
+
+我**沒有自行跑 `generate_replay_signing_key.sh`**（per CLAUDE.md §六 secrets layout + §七 CC 不寫 secret），**沒有自行修 `restart_all.sh`**（per round 2 plan-instruction），**沒有自行 stash/pull Linux working tree**（per CLAUDE.md §七 CC 不執行 pull/merge/checkout/reset）。
+
+需要 PM action：
+
+(a) 確認 §17.4 P0-NEW-2 Option A（推薦）vs Option B（dev 專用 env override）的選擇
+(b) 確認 §17.5 建議 1 的 4-step deploy chain order（先 git clean 再 key gen 再 E1 改 restart_all 再 deploy）
+(c) 確認 §17.5 建議 2 新 Sprint A close gate 加 Linux runtime smoke + ENV 三件套驗（governance update）
+(d) 確認 §17.5 建議 3 派發路徑 — round 5 應走 §八 強制鏈（@PA → @E1 → @E2 → @E4 → QA round 5）
+(e) PM 更新 plan plan-status 標 R6+R7 為「半 deploy / signing key 未 provisioning」
+
+### §17.8 Sprint A R3 status — Round 4 trajectory
+
+**仍 BLOCKED**，但 progress trajectory：
+
+| Round | trajectory | 寫入鏈 |
+|---|---|---|
+| 1 | 0/0/0/0 — `from __future__ annotations` FastAPI 422 | register endpoint 0% |
+| 2 | 0/0/0/0 — ENGINE_BINARY_SHA env not provisioned | register 503 |
+| 3 | 1/1/0/0 — placeholder signature mismatch | register 200 + run spawn fails on key.hex |
+| **4** | **2/2/0/0 — secrets_dir + signing_key_file 雙 env missing** | **register 200 + run pre-spawn ValueError** |
+
+**Round 5 必修 P0-NEW-2 + P0-INFRA-2，重跑 §17 retry log**。預計 trajectory 進到 3/3/1/1 或 3/3/0/0（取決於 subprocess 真實是否 EXIT=0）。
+
+---
+
+# QA E2E ACCEPTANCE DONE (Round 4): BLOCK · report path: /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md
+
+## BLOCKER 清單（Round 4 update）
+
+1. ~~**P0**~~ — FastAPI 422 (round 1) — RESOLVED by `cad8ed84`
+2. ~~**P2-A**~~ — ENGINE_BINARY_SHA env (round 2) — RESOLVED by `e9d547c0` + `2ae93992`
+3. ~~**P0-NEW** (round 3)~~ — placeholder signature collision — RESOLVED by `f51f4e2e` R6-T1（Python 代碼層）
+4. ~~**P0-NEW-INFRA** (round 3)~~ — stderr DEVNULL — RESOLVED by `f51f4e2e` R6-T2（Python 代碼層；本 round 未觸發路徑驗證）
+5. ~~**P2-A-NEW** (round 3)~~ — REPLAY_FIXTURE_URI env — RESOLVED by `f51f4e2e` R6-T3a（rename 為 REPLAY_FIXTURE_DEFAULT）
+6. **P0-NEW-2 — `OPENCLAW_SECRETS_DIR` + `replay_signing_key` 未 provisioning**（**Round 4 新發現**）
+   - 修法：見 §17.4 Option A（推薦）— 跑 `generate_replay_signing_key.sh demo` + restart_all.sh export OPENCLAW_SECRETS_DIR
+   - 驗證：`/proc/$API_PID/environ` 含 `OPENCLAW_SECRETS_DIR` + `ls $OPENCLAW_SECRETS_DIR/demo/replay_signing_key` 存在
+   - Owner：operator (跑 helper) + @E1 (改 restart_all.sh) + @QA (round 5 重驗)
+   - Block 範圍：所有 R3 smoke E2E /run → spawn → finalize 鏈
+7. **P0-INFRA-2 — Linux working tree dirty + 落後 origin 1 commit**（**Round 4 repeat round 2 issue**）
+   - 修法：operator `git stash drop + pull --ff-only`
+   - 驗證：`git status --porcelain` 空 + `git rev-parse HEAD` == `f51f4e2e`
+   - Owner：operator
+8. **P0-NEW-INFRA-2 — manifest_fixture_write_failed pre-spawn ValueError 路徑下無 stderr disk file**（**改善建議，非阻塞**）
+   - 修法：`route_helpers.py::write_manifest_fixture` catch ValueError 後 `log.error()` print full traceback
+   - 驗證：next ValueError event 有完整 traceback in api.log
+   - Owner：@E1（小範圍 logging fix，可進 round 5 同 commit chain）
+9. **P1 — Sprint A close gate 不夠強**（**round 4 governance update**）
+   - 修法：見 §17.5 建議 2 — 新增 (B) Linux runtime smoke gate + (C) ENV 三件套 grep
+   - Owner：@PM (policy) + @E4 (CI integration)
+
+**Sprint A R3 仍不可結案**；R3 round 5 必修 P0-NEW-2 + P0-INFRA-2，重跑 §17 retry log。
+
+| Phase 8 hard gate | 結果 |
+|---|---|
+| 5 階段業務鏈 | N/A — Sprint A scope = replay lab，不影響 live 鏈 |
+| 雙進程 E2E（API + replay subprocess） | **PARTIAL**：API alive，但 subprocess 從未 spawn（pre-spawn ValueError）|
+| 5 hard gate（Phase 6 Live） | N/A — Sprint A 非 Live 升級 gate |
+| 7d 灰度 | N/A — Sprint A 仍開頭，未到 7d 觀察 |
+| §三 drift check | passed — engine binary SHA `38c72877...` 對齊 §三「Engine binary deployed `dbcf845b`」描述（前者為 binary 內容 hash，後者為原始碼 commit hash；engine_watchdog 看的是 mtime/SHA 用於 H0 freshness） |
+
+---
+
+## §18 Round 5 final smoke (post-`3a425447` Round 8 hotfix; 2026-05-05 01:43-01:44)
+
+**Verdict: STILL BLOCK — P0-NEW-2 ROOT CAUSE 已識別 — Round 8 deploy 配套 100% 正確（subprocess 真實 status=completed + report 寫盤），但 route handler 把 fast-exit-0 當 503 失敗 — 「pathological clean-exit branch」設計缺陷；4 表 acceptance 部分 PASS：experiments=3 + run_state=3 (status=failed 因路由錯誤標記) + report_artifacts=0 + simulated_fills=0**
+
+**HEAD**: Mac=Linux=origin all `3a425447` · Engine PID 4122084 alive · API PID 816284 alive · operator 0 manual fix needed for env
+
+---
+
+### §18.1 Round 8 hotfix deploy verified — 3 env injected ✅
+
+| ENV | Value | 狀態 |
+|---|---|---|
+| `OPENCLAW_ENGINE_BINARY_SHA` | `38c72877e526bfede74d57e6c9a90a682d323a2f80a0a9eef0e547f4d048d2f1` | ✅ injected |
+| `OPENCLAW_REPLAY_FIXTURE_DEFAULT` | `/home/ncyu/BybitOpenClaw/srv/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json` | ✅ injected |
+| `OPENCLAW_REPLAY_SIGNING_KEY_FILE` | `/home/ncyu/BybitOpenClaw/srv/rust/openclaw_engine/tests/fixtures/replay_runner_e2e/key.hex` | ✅ injected |
+
+git working tree clean，Mac=Linux=origin 全 sync 在 `3a425447`。Round 1-4 5-layer infra blocker chain **真實清光**。
+
+---
+
+### §18.2 Phase 1-7 結果
+
+#### Phase 1 — Login（200 OK）
+
+```bash
+POST /api/v1/auth/login
+→ {"status":"ok","username":"398903348"} HTTP=200
+```
+
+Cookie 寫入 `/tmp/r3smoke5_cookie.txt`。
+
+#### Phase 2 — Register experiment（200 OK）
+
+```bash
+POST /api/v1/replay/experiments/register
+{
+  "idempotency_key":"r3smoke5-1777938237",
+  "symbol":"BTCUSDT","strategy":"grid_trading","timeframe":"1m",
+  "data_tier":"S3",
+  "data_window_start":"2026-05-01T00:00:00Z",
+  "data_window_end":"2026-05-02T00:00:00Z",
+  "strategy_config_sha256":"<64x0>","risk_config_sha256":"<64x0>",
+  "half_life_days":7.0,"embargo_days":14,
+  "manifest_jsonb":{"smoke":true}
+}
+→ {
+  "ok":true,
+  "data":{
+    "experiment_id":"be2c51ff-d104-4e45-bf0c-417a5cac0228",
+    "manifest_hash":"95e44198d52108d7fc0c27731cf08b4e64e27ed7ebcd757d5e584404bc87bf1c",
+    "status":"created",
+    "idempotency_hit":false
+  },
+  "is_simulated":false
+} HTTP=200
+```
+
+Register 路徑全綠。Manifest hash 來自 sha256(manifest_jsonb)，非 placeholder。
+
+#### Phase 3 — POST /run（503 — UNEXPECTED）
+
+```bash
+POST /api/v1/replay/run
+{"experiment_id":"be2c51ff-d104-4e45-bf0c-417a5cac0228",
+ "idempotency_key":"r3smoke5-1777938237-run"}
+→ {"detail":{"reason_codes":["replay_runner_spawn_failed"],
+   "message":"replay_runner failed to spawn; check server logs (replay_runner.stderr) for diagnosis"}}
+HTTP=503
+```
+
+503 reason `replay_runner_spawn_failed`。但下方 §18.5 揭示這是**虛假 503** — subprocess 實際成功，route handler 誤判。
+
+#### Phase 4 — Subprocess 實際狀態（真相揭示）
+
+`api.log` 直接 truth：
+
+```
+replay_runner exited 0 within poll grace: pid=817807 run_id=1ef3a488e72946aa80090aa745fdd59e
+(report should still be on disk; stderr_path=/tmp/openclaw/replay_artifacts/.../replay_runner.stderr)
+```
+
+artifact dir 全套都在：
+
+```bash
+ls /tmp/openclaw/replay_artifacts/1ef3a488e72946aa80090aa745fdd59e/
+# key.hex (65 byte)
+# manifest.json (440 byte) — 含真實 HMAC signature key_ref e7f5af202753a289
+# replay_report.json (866 byte)
+# replay_report.summary.txt (316 byte)
+# replay_runner.stderr (179 byte) ← R6-T2 stderr disk file 真實寫入
+```
+
+`replay_runner.stderr` 內容：
+```
+replay_runner: completed manifest_id=be2c51ff-d104-4e45-bf0c-417a5cac0228 status=completed
+json=/tmp/openclaw/replay_artifacts/1ef3a488e72946aa80090aa745fdd59e/replay_report.json
+```
+
+**stderr 訊息明確說「completed」** — subprocess 完整跑完。
+
+`replay_report.json` 內容（節錄）：
+
+```json
+{
+  "schema_version": 1,
+  "manifest_id": "be2c51ff-d104-4e45-bf0c-417a5cac0228",
+  "execution_confidence": "none",
+  "result": {
+    "status": {"kind": "completed"},
+    "fills": [
+      {
+        "ts_ms": 1714521600000,
+        "symbol": "BTCUSDT", "side": "long",
+        "qty": 1.0, "price": 65050.0,
+        "evidence_source_tier": "synthetic_replay"
+      }
+    ],
+    "pnl_summary": {
+      "events_processed": 10,
+      "fills_emitted": 1,
+      "starting_balance": 10000.0,
+      "ending_balance": 10630.0,
+      "net_pnl": 630.0
+    },
+    "diagnostics": {
+      "guard_enforce_runtime_calls": 10,
+      "abort_reason": null
+    }
+  }
+}
+```
+
+10 events 全部處理 + 1 fill emitted + net_pnl=+630 + 0 abort_reason + 10 guard enforce calls。**這是 Sprint A scope 100% 完成的證據** — replay_runner 真實 walk fixture，真實 HMAC verify 通過，真實寫盤。
+
+#### Phase 5 — 嘗試 /finalize（409 — 不可結案因為 route 已標 failed）
+
+```bash
+POST /api/v1/replay/run/1ef3a488-e729-46aa-8009-0aa745fdd59e/finalize
+→ {"detail":{"reason_codes":["replay_run_not_finalizable"],
+   "message":"run 1ef3a488... status not in ('starting','running'); may be already finalized or never started"}}
+HTTP=409
+```
+
+run_state row 已被 route 503 路徑標記 `status=failed`，finalize 拒接（finalize 要求 `IN ('starting','running')`）。
+
+#### Phase 6 — 4 表 acceptance SQL（部分 PASS）
+
+| 表 | count | 預期 | 結果 |
+|---|---:|---|---|
+| `replay.experiments` | **3** | > 0 | ✅ PASS（register 成功）|
+| `replay.run_state` | **3** | > 0 | ⚠️ 寫了但 status=failed（route 誤判）|
+| `replay.report_artifacts` | **0** | > 0 | ❌ FAIL（finalize 從未執行）|
+| `replay.simulated_fills` | **0** | > 0 | ❌ FAIL（finalize 從未執行）|
+
+**2/4 寫鏈通了，2/4 finalize 鏈未通 — 因為 503 path 不寫 finalize**。
+
+#### Phase 7 — Wave 9 safety + FK lineage
+
+| 檢查 | 結果 | 結論 |
+|---|---|---|
+| `trading.fills` last 15 min | **0 row** | ✅ no leak |
+| `learning.governance_audit_log` replay_* event last 15 min | **0 row** | ✅ no critical |
+| FK lineage（`run_state.manifest_id == experiments.experiment_id`）| **3/3 valid** | ✅ |
+| run_state 最新 row | run=1ef3a488 / manifest=be2c51ff / status=failed / pid=NULL / completed=2026-05-05T01:44:01Z | failed=route 誤判，非真實死亡 |
+
+---
+
+### §18.3 Sprint A acceptance verdict
+
+**4/4 PASS**: ❌ **NOT MET**
+- experiments=3 ✅ PASS
+- run_state=3 ⚠️ 寫了但 status=failed（程序邏輯錯誤產生 false negative）
+- report_artifacts=0 ❌ FAIL
+- simulated_fills=0 ❌ FAIL
+
+**Plan §6.R3 acceptance "All four > 0 after smoke run"**：**NOT MET**
+
+---
+
+### §18.4 Wave 9 safety + FK lineage 結果
+
+| 安全 invariant | 結果 |
+|---|---|
+| `trading.fills` 無 replay 注入 | ✅ PASS（0 row last 15 min）|
+| `governance_audit_log` 無 replay critical event | ✅ PASS（0 row）|
+| FK lineage `run_state.manifest_id → experiments.experiment_id` 三筆 row 全 valid | ✅ PASS |
+| `evidence_source_tier='synthetic_replay'` 在 replay_report.json | ✅ PASS（不會混入 ML training，§九 `replay.simulated_fills` 規則保留）|
+
+Wave 9 safety GREEN — replay subprocess **沒有**洩漏到 production 數據面，failure 是純 control-plane bug 不是數據面 bug。
+
+---
+
+### §18.5 P0-NEW-2 ROOT CAUSE — `pathological clean-exit branch` 設計缺陷
+
+**Code path**：
+
+```python
+# program_code/.../control_api_v1/replay/route_helpers.py:639-650
+if rc is not None and rc == 0:
+    # Pathological: binary exited cleanly within grace window. Treat
+    # as alive=False since downstream wait/UPDATE assumes a live PID.
+    log.warning(
+        "replay_runner exited 0 within poll grace: pid=%d run_id=%s "
+        "(report should still be on disk; stderr_path=%s)",
+        proc.pid, run_id, stderr_path,
+    )
+    return None, "spawn_died_early:exit=0"  # ← 返回失敗 reason
+```
+
+下游 route handler：
+
+```python
+# program_code/.../control_api_v1/app/replay_routes.py:657-680
+if pg_err and pg_err.startswith((
+    "spawn_error:",
+    "spawn_died_early:",  # ← 包括 :exit=0
+    "mkdir_error:",
+    "pg_error:",
+    "manifest_fixture_write_failed:",
+)):
+    raise HTTPException(
+        status_code=503,
+        detail={"reason_codes": ["replay_runner_spawn_failed"], ...}
+    )
+```
+
+**邏輯漏洞**：
+1. `replay_runner` 對 synthetic 10-event fixture 在 hot cache 下 ~0.5-1s 跑完
+2. `poll_grace_seconds=1.5` (route_helpers.py default)
+3. `time.sleep(1.5)` + `proc.poll()` → rc=0（已 clean exit）
+4. 函數認為「downstream wait/UPDATE assumes a live PID」所以 pid=None + return failure reason
+5. Route 不 distinguish `exit=0`（成功）vs `exit=N for N != 0`（真死），全部 503
+
+**對比 R6-T4 hermetic test**（`test_replay_e2e_round6_smoke.py:206`）：
+```python
+# Allow exit=0 (fixture ran fully); reject any non-zero early death.
+assert err == "spawn_died_early:exit=0", (...)
+```
+
+該 test 明確接受 `exit=0` 是 OK path（"fixture ran fully"），但 **route handler 沒有 mirror 該 acceptance** — 把 exit=0 與真死同等對待。
+
+**Sprint A R3 hermetic test 不能保護 production E2E**：因為 R6-T4 只測 `spawn_replay_runner` 直接呼叫，沒測 route handler downstream 路徑。
+
+---
+
+### §18.6 故障排除 — Round 8 deploy 配套全綠
+
+| Layer | Round 8 狀態 | 證據 |
+|---|---|---|
+| Python `from __future__ annotations` | ✅ removed (round 1 fix `cad8ed84`) | hotfix 已 land |
+| `OPENCLAW_ENGINE_BINARY_SHA` env | ✅ injected | `/proc/816284/environ` 確認 |
+| `OPENCLAW_REPLAY_FIXTURE_DEFAULT` env | ✅ injected | 同上 |
+| `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env | ✅ injected | round 8 hotfix `3a425447` |
+| `key.hex` provisioning | ✅ R6 sibling key.hex written | `aabbccddeeff00112233...` |
+| stderr to disk file | ✅ R6-T2 working | replay_runner.stderr 179 byte 真實寫入 |
+| Manifest HMAC signing | ✅ working | manifest.json signature_key_ref `e7f5af202753a289` |
+| Subprocess 真實執行 | ✅ status=completed | replay_report.json events_processed=10 fills_emitted=1 |
+
+5-layer infra blocker chain（round 1-4）**100% 真實清光**。新 P0 是 round 5 才暴露的 **route handler design bug**，與 round 1-4 infra 無關。
+
+---
+
+### §18.7 Sprint A close commit + Sprint B 啟動條件 recommendations
+
+**Sprint A R3 推進度**（5 round 累積）：
+- ✅ Layer 1: Python signature handling (cad8ed84)
+- ✅ Layer 2: ENGINE_BINARY_SHA env (e9d547c0/2ae93992)
+- ✅ Layer 3: Manifest HMAC signing (f51f4e2e R6-T1)
+- ✅ Layer 4: stderr to disk (f51f4e2e R6-T2)
+- ✅ Layer 5: Signing key provisioning (3a425447)
+- ❌ Layer 6（**新揭 round 5**）: Route handler exit=0 acceptance
+
+**P0-NEW-2 修法（Round 9 必補）**：
+
+選項 A — 區分 `spawn_died_early:exit=0`（推薦，最小改動）:
+
+```python
+# replay_routes.py:657-680 改成：
+if pg_err and pg_err.startswith((
+    "spawn_error:",
+    "spawn_died_early:exit=0",  # ← 移除這條從 503 list
+    "mkdir_error:",
+    ...
+)):
+    raise HTTPException(503, ...)
+
+# 加新 elif 處理 spawn_died_early:exit=0：
+elif pg_err == "spawn_died_early:exit=0":
+    # Subprocess completed fast (synthetic fixture < poll_grace).
+    # Report on disk. Drive finalize directly from report file.
+    # Read replay_report.json from output_dir, drive INSERT into
+    # report_artifacts + simulated_fills + UPDATE run_state to completed.
+    ... (call finalize_run_from_report() helper)
+```
+
+選項 B — 增加 poll_grace 到 5s（不推薦，繞過根因）:
+- 5s 對 synthetic 10-event fixture 仍可能 < 跑完時間
+- production 大 fixture 也許會跑超過 5s
+- 改 grace 是 timing band-aid，不解決設計問題
+
+選項 C — 不 sleep poll_grace 直接呼叫 proc.wait + 讀 report file（推薦但較大改動）:
+- 改 spawn_replay_runner 為 synchronous wait pattern（合理因為 subprocess 是 short-lived）
+- 直接讀 replay_report.json 後 driv INSERT
+- finalize 變成 dispatch /run 的內聯動作
+
+**推薦 Option A** — 最小範圍 fix，保留 spawn pattern，明確區分 exit=0 success path。
+
+**Sprint A close gate（governance update v3）**：
+- (A) hermetic pytest gate ✅ 已有
+- (B) Linux runtime smoke (`OPENCLAW_REPLAY_E2E_SMOKE=1`) ✅ 部分（spawn 路徑驗了，route handler exit=0 路徑沒驗）
+- (C) `/proc/$API_PID/environ` ENV 全套 grep ✅ 已有
+- **(D) NEW: Route /run E2E acceptance test** — 必須測 register → /run → finalize → 4 表 row 全 > 0 整鏈，**不允許在 hermetic 直接呼叫 spawn_replay_runner 跳過 route handler**
+
+**Sprint A 不可結案**：
+- 4/4 acceptance 未達（2/4 partial PASS）
+- /run → finalize → 寫盤鏈未通
+- Sprint B（Wave 4-5 R4-R5）啟動條件未達
+
+**派工建議**（push back PM）：
+- @PA 派 round 9 派工 PR：選項 A 改 replay_routes.py + route_helpers.py + 新增 `finalize_run_from_report_on_disk()` helper
+- @E1 改碼（小改 ~30 lines）
+- @E2 review（重點：exit=0 path 不誤判 + finalize 鏈正確 trigger）
+- @E4 加 hermetic test for route /run with synthetic fixture（明確驗 exit=0 → 200 OK）
+- @QA round 6（將是 Sprint A R3 最終 acceptance）
+
+---
+
+### §18.8 教訓（追加 memory 用）
+
+1. **5 round infra blocker chain 全清 ≠ Sprint A 達成**：round 5 揭示「route handler 邏輯」是隱藏的 6th layer。每一層 fix 都暴露下一層，這次是不同類型（不是 deploy infra，是 route control flow design）。
+2. **Hermetic test 覆蓋率盲點**：R6-T4 直接測 `spawn_replay_runner`，但 production code path 是 `replay_routes.py → spawn_replay_runner → return`. 如果 hermetic 不測 route handler 完整路徑，將永遠看不到 `spawn_died_early:exit=0` 被誤映射到 503。Sprint A close gate 必加 (D) Route E2E test。
+3. **API 503 不一定代表 subprocess 死**：route handler 可能在 subprocess 成功完成後仍 503。QA 必查 disk artifacts + api.log，不能只信 HTTP code。本 round 同樣的 `spawn_died_early:exit=0` 誤訊在 round 4 就已存在但因為 round 4 是 pre-spawn ValueError（沒走到 poll_grace），沒暴露。
+4. **「Pathological clean-exit branch」是設計缺陷**：route_helpers.py:639-650 把「runner 跑得太快」歸類為失敗，違反「subprocess 成功完成 = 成功」的常識。需重新定義「成功路徑包含 exit=0 + report on disk」。
+5. **subprocess 寫盤 + route 認為失敗 = 不一致 state**：run_state 標 failed 但 report 真實存在，造成「3 失敗 row + 3 真實成功 report on disk」分裂狀態。Operator 必跨 DB 與 disk 才能識別。
+6. **/run + /finalize 應該是原子 transaction 或 idempotent retry**：當前設計下 503 → run_state.status=failed → finalize 拒絕，沒有 recovery path 從 disk report 補完 INSERT。建議 finalize 加 force-from-disk-report 模式 OR /run 把 finalize 整合為 inline call。
+
+---
+
+### §18.9 Round 5 verdict
+
+**STATUS: STILL BLOCK，但 progression 真實 + root cause 已徹底定位**
+
+5 round 累積成果：
+- 5 layer infra blocker chain：100% 清光 ✅
+- replay_runner subprocess：100% 真實執行 ✅
+- HMAC sign + verify：100% 工作 ✅
+- stderr disk diagnostic：100% 工作 ✅
+- 4 表 acceptance：2/4 partial PASS（experiments + run_state 寫鏈通；report_artifacts + simulated_fills 寫鏈待 route fix）❌
+- Wave 9 safety: GREEN ✅
+- FK lineage: VALID ✅
+
+**Round 6 必補單一 P0**: route_helpers.py:639-650 + replay_routes.py:657-680 區分 exit=0 成功路徑 + 加 finalize from disk report helper。預估 ~30-50 LOC + 1 hermetic route test。修完 Sprint A 才能結案進 Sprint B。
+
+**push back PM**：不要 commit；不要走 P0 快速通道；走 §八 強制工作鏈派 round 6 PR。
+
+---
+
+

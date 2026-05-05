@@ -471,27 +471,12 @@ async def post_replay_run(
                     ),
                 )
 
-                # 4) Resolve output_dir + write manifest fixture (with
-                # embedded ``run_id`` so Rust runner self-verifies basename
-                # match — REF-20 Sprint 1 Track A PA push back #2 invariant).
-                # Manifest fixture has minimum 6 fields the Rust
-                # ``ReplayManifest`` struct reads (Wave 4 T1 contract):
-                # experiment_id / data_tier / fixture_uri / signature /
-                # manifest_hash / signature_key_ref. Track A uses *placeholder*
-                # values for signature/hash (Wave 4 sibling key.hex archive
-                # path will warn-skip verification per current
-                # ``load_and_verify_manifest`` fall-through; Wave 6 V042 SQL
-                # archive integration replaces with full HMAC verify).
-                #
-                # 4) 解析 output_dir + 寫 manifest fixture（embed ``run_id``
-                # 使 Rust runner 自驗 basename 一致 — REF-20 Sprint 1 Track A
-                # PA push back #2 不變量）。manifest fixture 含 6 個 Rust
-                # ``ReplayManifest`` struct 讀的最小欄位（Wave 4 T1 契約）：
-                # experiment_id / data_tier / fixture_uri / signature /
-                # manifest_hash / signature_key_ref。Track A 用 *placeholder*
-                # 值給 signature/hash（Wave 4 sibling key.hex archive 路徑
-                # warn-skip verification per 當前 ``load_and_verify_manifest``
-                # fall-through；Wave 6 V042 SQL archive integration 換實 HMAC verify）。
+                # 4) Resolve output_dir + write manifest fixture (real HMAC
+                # sign + sibling key.hex per R6 P0-NEW-INFRA; ``run_id``
+                # embedded so Rust runner self-verifies basename — Sprint 1
+                # Track A PA push back #2 invariant).
+                # 4) 解析 output_dir + 寫 manifest fixture（R6 起 real HMAC
+                # 簽 + sibling key.hex；embed ``run_id`` 給 Rust 自驗 basename）。
                 output_dir = _resolve_artifact_output_dir(run_id_local)
                 try:
                     manifest_fixture_path = _write_manifest_fixture(
@@ -545,8 +530,9 @@ async def post_replay_run(
                 )
 
                 if pid is None:
-                    # Mark row as failed; commit so audit row persists.
-                    # 標 row failed；commit 讓 audit row 持久化。
+                    # Real spawn failure (binary missing / argv reject /
+                    # rc!=0 within poll grace etc).
+                    # 真 spawn 失敗（binary 缺 / argv reject / rc!=0 等）。
                     cur.execute(
                         """
                         UPDATE replay.run_state
@@ -561,11 +547,22 @@ async def post_replay_run(
                     conn.commit()
                     return run_id_local, None, spawn_err, output_dir
 
-                # 6) UPDATE pid + status='running' (only after poll-alive
-                # confirmed by spawn_replay_runner; pid is None already
-                # caught the dead-runner case above).
-                # 6) UPDATE pid + status='running'（僅 spawn_replay_runner
-                # poll-alive 確認後；pid is None 已於上面捕獲 dead-runner case）。
+                # 6) UPDATE pid + status='running'. R9 Layer-6: sentinel
+                # pid=-1 means subprocess clean-exit in poll grace
+                # (synthetic walker <1.5s); ``replay_report.json`` already
+                # on disk; subprocess_pid stays NULL (process gone) and
+                # caller invokes ``/finalize`` directly.
+                # 6) UPDATE pid + status='running'。R9 Layer-6：sentinel
+                # pid=-1 表 subprocess 在 poll grace 內乾淨退出；report
+                # 已落 disk；subprocess_pid 保 NULL，caller 直接呼 /finalize。
+                if pid == -1:
+                    cur.execute(
+                        "UPDATE replay.run_state SET status='running' "
+                        "WHERE run_id=%s::uuid;",
+                        (run_id_local,),
+                    )
+                    conn.commit()
+                    return run_id_local, None, None, output_dir
                 cur.execute(
                     """
                     UPDATE replay.run_state
@@ -613,6 +610,9 @@ async def post_replay_run(
             "started_at_ms": started_at_ms,
             "status": "running",
             "subprocess_pid": subprocess_pid,
+            # R9 Layer-6: True ⇒ clean-exited in poll grace; caller
+            # /finalize directly. R9：True ⇒ poll grace 完成可直 /finalize。
+            "subprocess_completed_in_poll": subprocess_pid is None,
             "wiring_status": "pg_advisory_lock_path_active",
             "output_dir": str(output_dir) if output_dir else None,
         })

@@ -523,4 +523,131 @@ Round 7 改動透過 scp 推到 Linux working tree（git status dirty，不過 g
 
 ---
 
-**End of report (round 6 + round 7 cumulative sign-off)**.
+## §12. Round 9 Layer-6 fix（subprocess clean-exit sentinel pid=-1）
+
+**Date**: 2026-05-05
+**HEAD pre-impl**: `3a425447` (R8 deploy + Mac/Linux/origin sync)
+**Status**: IMPL COMPLETE — pending E2 review → E4 regression → PM commit + Linux deploy → QA round 6 final acceptance
+**PM brief**: round 9 task spec — Layer 6 blocker; route_helpers.py 1499 + replay_routes.py 1500 cap-tight；Mac LOC verified ≤1500；trim source = stale R6 placeholder doc-comment block (15 LOC saved)
+
+### §12.1 Root cause + sentinel pid=-1 contract
+
+**Layer-6 blocker（QA round 5 揭）**：subprocess 真實成功完成（exit=0）+ replay_report.json 真實寫 disk + key.hex + manifest_fixture.json 全在；BUT `route_helpers.py::spawn_replay_runner` 對 `rc == 0` 也 return `(None, "spawn_died_early:exit=0")`；`replay_routes.py::post_replay_run` 把這視為 failure → 503 → V045 status='failed' → 4 表 acceptance 1/1/0/0；Sprint A acceptance 不達。
+
+**正確語意修正**：
+- subprocess `rc == 0` within poll grace = **subprocess completed successfully**（synthetic walker 10 events typically <1.5s warm cache 跑完是常態）。Round 6/7/8 mistakenly treated as `spawn_died_early` failure。
+- subprocess `rc != 0` within poll grace = real spawn_died_early failure（保 Round 6 行為不變）。
+- subprocess still alive after poll grace = success path（保現有 OK 行為）。
+
+**Round 9 sentinel pid=-1 contract**（route_helpers.py:631-640）：
+```python
+if rc is not None and rc == 0:
+    # R9 Layer-6: rc=0 in poll grace = SUCCESS (synthetic walker
+    # <1.5s); sentinel pid=-1 → caller UPDATE status='running' +
+    # /finalize. R9 Layer-6：rc=0 grace 內 = 成功，sentinel -1。
+    log.info(...)
+    return -1, None
+```
+
+**Caller side** (`replay_routes.py::post_replay_run`)：
+```python
+if pid == -1:
+    cur.execute(
+        "UPDATE replay.run_state SET status='running' "
+        "WHERE run_id=%s::uuid;",
+        (run_id_local,),
+    )
+    conn.commit()
+    return run_id_local, None, None, output_dir
+```
+
+**`/run` response envelope**（replay_routes.py 加 flag）：
+```python
+"subprocess_completed_in_poll": subprocess_pid is None,
+```
+True ⇒ subprocess 已在 poll grace 完成；caller 可直接呼 `/finalize` 不用 wait subprocess。
+
+### §12.2 LOC delta（兩檔結尾值）
+
+| File | Pre-R9 | Post-R9 | Delta | Cap | Margin |
+|---|---:|---:|---:|---:|---:|
+| `replay/route_helpers.py` | 1499 | **1498** | -1 | 1500 | 2 |
+| `app/replay_routes.py` | 1500 | **1500** | 0 | 1500 | 0 (exact cap) |
+| **Total** | 2999 | **2998** | -1 | 3000 | — |
+
+**Trim source（replay_routes.py）**：`# 4) Resolve output_dir + write manifest fixture` 區段 21 LOC stale R6 placeholder doc-comment（描述 R6 前 placeholder behavior，已被 real HMAC sign 取代）→ 緊縮至 6 LOC，淨 -15 LOC，恰好用作 R9 sentinel branch (10 LOC) + envelope flag (4 LOC) 補充 budget；總 net 0 LOC。
+**Trim source（route_helpers.py）**：原 `# Pathological: binary exited cleanly within grace window` 11 LOC 區塊改寫為 R9 sentinel return 10 LOC（淨 -1 LOC）；docstring 加 R9 contract 描述 +20 LOC，再緊縮回 +0 LOC。
+
+**E2/E4 LOC verification command**：
+```bash
+wc -l program_code/exchange_connectors/bybit_connector/control_api_v1/replay/route_helpers.py \
+       program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+# expect ≤1500 both, total = 2998
+```
+
+### §12.3 Mac + Linux test PASS
+
+**Mac side（venvs/mac_dev/bin/pytest）**：
+```
+test_route_helpers_stderr_capture.py: 8 passed (含新加的 test_spawn_clean_exit_in_poll_returns_sentinel_pid_minus_one)
+test_route_helpers_real_hmac_sign.py: 13 passed
+test_route_helpers_fixture_default_env.py: 5 passed
+[replay 全集合]: 144 passed, 1 skipped (e2e smoke opt-in), 3387 deselected
+```
+
+**Linux side（trade-core .venv/bin/pytest）**：
+```
+[3 focal test files]: 26 passed (含 R9 sentinel test)
+[replay 全集合]: 141 passed, 3 failed (pre-existing - 與 R9 無關), 1 skipped
+```
+
+**Pre-existing fail 確認**（與 R9 修改無關）：
+- `tests/test_replay_routes_auth.py::test_authenticated_zero_active_run_post_run_accepts`
+- `tests/test_replay_routes_auth.py::test_authenticated_per_actor_cap_returns_409`
+- `tests/test_replay_routes_auth.py::test_authenticated_global_cap_returns_409`
+
+**A/B verification done**：暫時 restore Linux 原始 4 檔（Mac 改 deploy 前的 Linux git HEAD `3a425447` 狀態）跑 `tests/test_replay_routes_auth.py` → 同樣 3 fail / 1 pass（即 fail set 與 R9 無關）；確認後再 redeploy R9 payload。Pre-existing fail root cause = `tests/test_replay_routes_auth.py:_build_client_with_actor` 用 `experiment_id="exp-2026-05-03-test"` 直送 V049 lookup → SQL `WHERE experiment_id = 'exp-2026-05-03-test'` 報 `invalid input syntax for type uuid`（V049 schema column type 是 UUID 不是 TEXT；預期 register endpoint 先返 UUID）— 是 R2 schema vs auth test fixture 對齊問題，不在 R9 scope。
+
+### §12.4 Git status sign-off-clean
+
+```
+$ git status --porcelain | grep -E 'replay_routes|route_helpers|test_(replay_e2e|route_helpers_stderr)' | head
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/replay/route_helpers.py
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_replay_e2e_round6_smoke.py
+ M program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_route_helpers_stderr_capture.py
+```
+
+R9 modified set = **4 檔**（route_helpers.py / replay_routes.py + 2 test files），全在 git status modified；待 PM commit + push + Linux deploy。
+
+**No untracked R9 file leftover**：未 create new file（PA spec 指示「不抽 helper 新檔」遵守）。
+
+### §12.5 預留問題（給 PM）— Layer 7 是否潛在？
+
+**已 cleared 路徑** (R9 修完之後):
+1. R6+R7+R8 cleared 部分維持不變（_resolve_manifest_signing_key / write_manifest_fixture / stderr capture / OPENCLAW_REPLAY_SIGNING_KEY_FILE env injection）。
+2. R9 sentinel pid=-1 contract 加封 `spawn_replay_runner` clean-exit ↔ caller `post_replay_run` UPDATE V045 ↔ response envelope `subprocess_completed_in_poll` flag 三點對齊。
+3. `/finalize` endpoint 在 sentinel 路徑下被 caller (operator GUI / QA round 6 e2e script) 呼叫；R3-T1 既有 `_fr.run_finalize_in_pg_xact` 不變（它讀 `replay_report.json` from disk + INSERT V046/V050），R9 sentinel 路徑下 V045 row status='running' + subprocess_pid NULL，符合 `_fr` finalize input 預期。
+
+**Layer 7 潛在風險清單**（給 PM 判斷是否值得 round 10 預留）：
+
+(a) **`/finalize` 對 subprocess_pid IS NULL 的容忍度**：R3-T1 finalize logic 是否假設 `WHERE run_id=X AND subprocess_pid IS NOT NULL`？若是 → R9 sentinel 路徑下會 0 row finalize → V050 仍 0。**建議**：QA round 6 first run 先驗證 V050 真寫入 ≥1 row；若 fail 則回 PA 派發 R10。預期不會 fail（finalize 通常 by run_id query 不 by pid，但需驗證）。
+
+(b) **synthetic walker 是否真產出 V050 simulated_fills 形狀**：synthetic walker is `replay_runner` Rust binary 在 `synthetic_btcusdt.json` fixture 走 10 events；產出 `replay_report.json` 是 trades + simulated fills array；`run_finalize_route::run_finalize_in_pg_xact` 把 fills array 轉成 V050 INSERT。R9 修了 spawn return value 不影響此鏈條，但 R6 sign + verify drift 若有殘留可能讓 fills array 為 0。**建議**：QA round 6 額外 grep `replay_report.json` 內 fills array 長度 > 0 + 比對 V050 INSERT row count。
+
+(c) **`subprocess_completed_in_poll` flag downstream consumer**：UI / GUI 對此 flag 的處理邏輯尚未 implement（GUI 仍 disabled per P1-1）；CLI / E2E test 不影響。**建議**：P2-R3-FOLLOW-UP-9（新建）追加 GUI subtab enable 後對此 flag 的 progress bar handling。
+
+(d) **e2e smoke test (round6_smoke) acceptance change**：原 `assert err == "spawn_died_early:exit=0"` 改為 R9 contract `assert err is None and (pid > 0 or pid == -1)`；現 `OPENCLAW_REPLAY_E2E_SMOKE=1` env-gated opt-in。**建議**：QA round 6 跑 with `OPENCLAW_REPLAY_E2E_SMOKE=1` 設定，驗證 e2e smoke acceptance 與 4-table acceptance 同時 GREEN。
+
+(e) **`replay_routes.py` LOC 1500 = exact cap**：R9 完成後 `app/replay_routes.py` 仍 1500 LOC，**0 margin**。任何後續微調必觸 cap → R10 起所有對 `replay_routes.py` 的改動必先抽部分到 `replay/` 子模組。**建議**：開 P2-R3-FOLLOW-UP-10「`app/replay_routes.py` LOC 1500 exact cap，下次改動前先 split」（與 R5 hotfix 後新開的 P2-R3-FOLLOW-UP-7 合併或 supersede）。
+
+### §12.6 Operator 下一步
+
+1. **E2 round 9** focused review (~10 min)：確認 sentinel pid=-1 contract 簡潔 + caller side 處理三分支正確（real fail / sentinel / alive）+ envelope flag 語意對齊 + 2 test (新加 R9 + e2e smoke 對齊)。
+2. **E4 round 9** brief regression (~5 min)：Mac 144 PASS / 1 skip + Linux 141 PASS / 3 fail (pre-existing) / 1 skip 兩端 parity（fail set 經 A/B 驗證為 R2 schema vs auth test fixture 對齊問題，與 R9 無關）。
+3. **PM commit + push**：`hotfix(replay): R9 Layer-6 — subprocess clean-exit sentinel pid=-1 (REF-20 Sprint A R3 round 9)`；commit 後 Linux trade-core `restart_all.sh --rebuild`。
+4. **QA round 6 final acceptance**：opt-in `OPENCLAW_REPLAY_E2E_SMOKE=1` + 4-table acceptance 應達 1/1/N/N（V045 status='succeeded' + V046 1 row + V050 ≥1 row + V054 audit ≥3 rows）；若 V050 仍 0 row → 觸發 §12.5(a) Layer 7 prediction → reopen R10 finalize-side fix。
+
+---
+
+**End of report (round 6 + round 7 + round 9 cumulative sign-off)**.

@@ -149,6 +149,59 @@ def test_spawn_writes_stderr_to_disk_on_early_death(
     assert "signature_mismatch" in content
 
 
+def test_spawn_clean_exit_in_poll_returns_sentinel_pid_minus_one(
+    tmp_path: Path, monkeypatch, isolated_data_dir,
+):
+    """R9 Layer-6: rc=0 within poll grace returns (-1, None) sentinel.
+    R9 Layer-6：rc=0 在 poll grace 內回 (-1, None) sentinel。
+
+    Round 6/7/8 mistakenly treated rc=0 in poll grace as
+    ``spawn_died_early:exit=0`` failure → V045 status='failed' → V050
+    simulated_fills 0 row → Sprint A R3 acceptance 1/1/0/0. Round 9
+    splits success path (clean-exit + report on disk) from real failure
+    (non-zero rc); this test locks rc=0 → ``(-1, None)`` invariant.
+
+    Round 6/7/8 將 rc=0 in poll grace 誤判為 ``spawn_died_early:exit=0``
+    失敗 → V045 status='failed' → V050 0 row → R3 acceptance 1/1/0/0。
+    Round 9 拆 success（rc=0 + report 落 disk）與真失敗（rc!=0）；本
+    test 鎖 rc=0 → ``(-1, None)`` 不變量。
+    """
+    if sys.platform == "darwin":
+        artifact_root = Path("/tmp/replay_artifacts_test_only")
+    else:
+        artifact_root = isolated_data_dir / "replay_artifacts"
+    output_dir = artifact_root / "test-run-clean-exit"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = _make_fake_manifest(output_dir)
+
+    # Fake runner exits 0 quickly (synthetic walker analog: <1.5s grace).
+    # 假 runner 快速 exit 0（synthetic walker 類比：<1.5s grace）。
+    fake_runner = _make_fake_runner(
+        tmp_path, exit_code=0,
+        stderr_text="replay_runner: report written to replay_report.json",
+    )
+    monkeypatch.setenv("OPENCLAW_REPLAY_RUNNER_BIN", str(fake_runner))
+
+    pid, err = spawn_replay_runner(
+        run_id="test-run-clean-exit", manifest_id="mid-clean",
+        output_dir=output_dir, manifest_fixture_path=manifest,
+        poll_grace_seconds=0.5,
+    )
+    # R9 sentinel: pid=-1 + err=None (success path).
+    # R9 sentinel：pid=-1 + err=None（成功路徑）。
+    assert pid == -1, (
+        f"Expected sentinel pid=-1 for clean-exit; got pid={pid} err={err!r}"
+    )
+    assert err is None, (
+        f"Expected err=None for clean-exit success; got {err!r}"
+    )
+
+    # stderr file persists (Round 6 P0-NEW-INFRA invariant).
+    # stderr file 持久落 disk（Round 6 不變量）。
+    stderr_path = output_dir / "replay_runner.stderr"
+    assert stderr_path.exists()
+
+
 def test_spawn_stderr_excerpt_not_in_reason_code(
     tmp_path: Path, monkeypatch, isolated_data_dir,
 ):

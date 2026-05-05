@@ -4939,3 +4939,45 @@ E2 round 6 review RETURN to E1：(1) `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env over
 ### 報告路徑
 
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_a_r3_round6_impl.md`（§11 round 7 fix log appended）
+
+---
+
+## 2026-05-05 — REF-20 Sprint A R3 Round 9 Layer-6 fix（subprocess clean-exit sentinel pid=-1）
+
+**HEAD pre-impl**: `3a425447`（Mac=Linux=origin sync 後）；R8 hotfix 已 deploy 但 QA round 5 揭第 6 層 blocker。
+
+### 背景
+
+QA round 5 揭 Layer 6：subprocess 真實成功完成（exit=0）+ replay_report.json 真實寫 disk + key.hex + manifest_fixture.json 全在；BUT `route_helpers.py::spawn_replay_runner` line 641 對 `rc == 0` 也 return `None, "spawn_died_early:exit=0"`；caller 把這視為 failure → 503 → V045 status='failed' → 4 表 acceptance 1/1/0/0。
+
+**正確語意**：subprocess `rc == 0` within poll grace = **subprocess completed successfully**（synthetic walker 10 events typically <1.5s warm cache）；Round 6/7/8 mistakenly treated as `spawn_died_early` failure。
+
+### 完成清單
+
+| 檔 | 改動 | LOC delta |
+|---|---|---:|
+| `replay/route_helpers.py` | (1) docstring 加 R9 contract 描述（含中英 sentinel pid=-1 文件化）；(2) `if rc == 0` 區塊改寫：原回 `(None, "spawn_died_early:exit=0")` 改回 `(-1, None)` sentinel + log info | 1499 → 1498 (-1) |
+| `app/replay_routes.py` | (1) 加 `if pid == -1:` sentinel branch（caller UPDATE V045 status='running' + subprocess_pid stays NULL；directly return success）；(2) response envelope 加 `subprocess_completed_in_poll: subprocess_pid is None` flag；(3) 緊縮 stale R6 placeholder doc-comment block 21 → 6 LOC（-15 LOC trim source） | 1500 → 1500 (0; net 0) |
+| `tests/replay/test_route_helpers_stderr_capture.py` | 新加 `test_spawn_clean_exit_in_poll_returns_sentinel_pid_minus_one`：mock subprocess `rc=0` → assert `(pid=-1, err=None)` + stderr file 存在 | 8 case (+1) |
+| `tests/replay/test_replay_e2e_round6_smoke.py` | acceptance 升級：原 `assert err == "spawn_died_early:exit=0"` 改 R9 contract `err is None and (pid > 0 or pid == -1)`；step 4 `os.kill` 條件加 `pid > 0` 防 sentinel pid=-1 誤殺 | 0 case delta；2 block 改 |
+
+### 關鍵設計決策
+
+1. **Sentinel pid=-1 vs pid=None 無 err 的選擇** — 原方案候選有 `(pid=None, err="completed_in_poll")` 但會與 caller 既有 `if pid is None:` failure branch 撞；改用 `(-1, None)` 是「明確的特殊值 + err None 維持 success 路徑語意」最簡單。
+2. **stale comment trim 同時更新過時注釋** — `app/replay_routes.py` 内 #4 區段 21 LOC stale R6 placeholder doc-comment 描述 R6 前 placeholder behaviour（已被 real HMAC sign 取代）→ 緊縮至 6 LOC，淨 -15 LOC，恰好用作 R9 sentinel branch (10 LOC) + envelope flag (4 LOC) 補充 budget；總 net 0 LOC。一舉兩得。
+3. **不抽 helper（spec push back）** — PA spec 建議 `_handle_subprocess_poll_result()` helper（淨 LOC delta ≤ 0），但實踐後發現 helper 30+ LOC（含 docstring）+ caller 縮減 30 LOC = 淨 0 但複雜度高；改採 inline trim 路徑（rc==0 區塊原 11 LOC → 10 LOC）+ docstring 加 R9 contract 緊縮版（淨 0 LOC）。最終 -1 LOC + 簡單。Push back 理由給 PM：抽 helper 在「fix 範圍 ~50 LOC」目標下不必要，inline 改寫更直接。
+4. **envelope `subprocess_completed_in_poll` flag 語意精準** — 不用 `f"completed_in_poll: true"` 字串，改用 boolean (`subprocess_pid is None`)；caller (UI / E2E test / operator GUI) 檢測時 type-safe + JSON-serializable + 不需 string parsing。
+5. **Pre-existing test failure A/B verification 是 E1 sign-off 必做動作** — Linux replay 集合跑 141 PASS / 3 fail。我先 restore 原始 4 檔到 Linux 跑 `tests/test_replay_routes_auth.py` → 同樣 3 fail / 1 pass（即 fail set 與 R9 完全無關）；確認後再 redeploy R9 payload。Pre-existing fail root cause = R2 schema vs auth test fixture 對齊問題（V049 column UUID 但 fixture 傳 string 'exp-2026-05-03-test'），不在 R9 scope。
+
+### 關鍵教訓
+
+1. **「rc == 0 within poll grace」語意必對齊「subprocess job 結構」** — 這個 bug 是 Round 6 P0-NEW-INFRA 寫死「subprocess 持續存活」假設的副作用：當 subprocess 是 short-lived job（synthetic walker 10 events <1.5s）時，「poll grace 內已退」是常態而非 pathological；Round 6 把它當成 anomaly 並回 spawn_died_early 是 silent semantic mismatch。教訓：寫 Popen poll-grace 邏輯時必先問「subprocess 是 long-running daemon 還是 short-lived job？」；前者 rc!=None=anomaly，後者 rc==0=success / rc!=0=anomaly。
+2. **Sentinel value 通訊機制比新增字段乾淨** — 想過 `Tuple[Optional[int], Optional[str], bool]`（加 `completed_in_poll: bool`）但這樣 caller 端 unpacking 必到處改；改用 `pid=-1` sentinel + 既有 `Tuple[Optional[int], Optional[str]]` shape 不變，caller 只需加 `if pid == -1:` 一個 branch，無需破壞 既有 `if pid is None:` failure 分支。教訓：擴張 contract 時先問「能不能用 sentinel value 在現有 type 上表達？」；type 不變比 type 改更安全。
+3. **stale comment 是 LOC budget 的隱形 reservoir** — `app/replay_routes.py` 早 R6 placeholder doc-comment 21 LOC 在 R6 之後已不適用（real HMAC sign 已取代 placeholder）；R9 順手把它緊縮 -15 LOC = 直接補出 sentinel branch 的 budget。教訓：每次小 fix 時先 grep 過時注釋 `(\bplaceholder\b|\bWave\d|R\d 之前的描述)`；找到的 LOC 直接 trim 同時 LOC budget 補出。一舉兩得策略。
+4. **commit-blocking LOC margin 必發給 PM 看到** — `app/replay_routes.py` 1500 = exact cap，0 margin。R9 完成後 PM commit + push 後再有任何 hotfix 會立即破 cap。我在 §12.5(e) 留 P2-R3-FOLLOW-UP-10 預警讓 PM 看見並開 ticket。教訓：LOC cap 邊緣的檔，每次 sign-off 報告必含「下次任何改動會破 cap，P2 ticket 已開」 — 不只記在腦中。
+5. **A/B verification（pre-existing fail vs R9 introduce）是 sign-off mandatory step** — Linux 集合 141 PASS / 3 fail；如果只跑 R9 修改後沒做 A/B，就會把 3 fail 誤算成 R9 引入的 regression 退回給 PM；做了 A/B 才能說「3 fail 是 R2/auth-test alignment issue, not R9 regression, please proceed」。教訓：sign-off 前必做 A/B（restore 原檔重跑 fail set → 確認 fail 數一致 → redeploy R9）。
+6. **Push back PA 抽 helper 建議是合理的** — PA spec 建議 `_handle_subprocess_poll_result()` helper 但實作後發現淨 LOC ≈ 0 + 增加複雜度。我選 inline 路徑 + push back 給 PM 解釋（spec §五「不自行 expand cap 或 split file」明確不允許 split file，但允許 inline 改寫達到 LOC budget）。教訓：PA spec 是 design hint，不是 implementation prescription；E1 在 cap-tight 場景發現抽 helper 並未節省 LOC 時，inline 改寫 + 寫報告 push back 是正確選擇。
+
+### 報告路徑
+
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_a_r3_round6_impl.md`（§12 round 9 Layer-6 fix log appended，含 §12.1-12.6 完整 sign-off）
