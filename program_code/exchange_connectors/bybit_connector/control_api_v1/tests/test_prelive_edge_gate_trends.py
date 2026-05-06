@@ -7,6 +7,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -42,6 +43,27 @@ def _ready_gates() -> dict:
             },
         },
     }
+
+
+def _grid_cursor(
+    cohort_row: tuple[int, int, int, float | None, float | None],
+) -> MagicMock:
+    cur = MagicMock()
+    cur.connection = MagicMock()
+    cur.connection.rollback = MagicMock()
+    cur.fetchall.side_effect = [
+        [("2026-05-07", 12, 14.5, 7, 4.2)],
+        [
+            ("demo", 12, 14.5, 15.0, 1.0, 10.0),
+            ("live_demo", 7, 4.2, 5.0, 0.7, 7.0),
+        ],
+        [
+            ("demo", 12, 2, 0.1667),
+            ("live_demo", 7, 3, 0.4286),
+        ],
+    ]
+    cur.fetchone.return_value = cohort_row
+    return cur
 
 
 def test_build_live_readiness_passes_when_all_gate_targets_are_met() -> None:
@@ -86,6 +108,44 @@ def test_fetch_prelive_edge_gate_trends_degrades_when_pg_unavailable(monkeypatch
         "bb_reversion",
     }
     assert payload["error"] == "postgres connection unavailable"
+
+
+def test_grid_lifecycle_gate_uses_common_cohort_for_current_verdict() -> None:
+    gate = trends._fetch_grid_lifecycle_gate(_grid_cursor((3, 5, 7, 1.53, 2.98)), 7)
+
+    assert gate["status"] == "pass"
+    assert gate["current"]["global_lifetime_ratio"] == 0.29
+    assert gate["current"]["lifetime_ratio"] == 1.53
+    assert gate["current"]["cohort_common"] == 3
+
+
+def test_grid_lifecycle_gate_warns_when_global_fails_without_common_cohort() -> None:
+    gate = trends._fetch_grid_lifecycle_gate(_grid_cursor((0, 0, 0, None, None)), 7)
+
+    assert gate["status"] == "warn"
+    assert "cohort sample insufficient" in gate["summary"]
+    assert gate["current"]["global_lifetime_ratio"] == 0.29
+    assert gate["current"]["lifetime_ratio"] is None
+
+
+def test_edge_gate_sql_uses_entry_only_fill_predicate() -> None:
+    maker_cur = MagicMock()
+    maker_cur.connection = MagicMock()
+    maker_cur.connection.rollback = MagicMock()
+    maker_cur.fetchall.return_value = []
+    maker_cur.fetchone.return_value = (0, 0, None, 0, 0)
+
+    grid_cur = _grid_cursor((3, 5, 7, 1.53, 2.98))
+    trends._fetch_maker_fill_gate(maker_cur, 7)
+    trends._fetch_grid_lifecycle_gate(grid_cur, 7)
+
+    maker_sql = "\n".join(call.args[0] for call in maker_cur.execute.call_args_list)
+    grid_sql = "\n".join(call.args[0] for call in grid_cur.execute.call_args_list)
+
+    assert "f.entry_context_id IS NULL" in maker_sql
+    assert "f.exit_reason IS NULL" in maker_sql
+    assert "f.order_id NOT LIKE 'oc_risk_" in maker_sql
+    assert "f.entry_context_id IS NULL" in grid_sql
 
 
 @pytest.mark.asyncio

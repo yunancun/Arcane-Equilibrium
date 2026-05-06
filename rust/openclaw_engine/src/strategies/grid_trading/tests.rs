@@ -7,15 +7,14 @@
 //!   on cross, Close-on-inventory-reduction lifecycle, close_skipped rollback,
 //!   adaptive + geometric grid behaviours, OU spacing update, health check +
 //!   auto-rebalance, param range / validation, G-SR-1 A3 trend cooldown, and
-//!   EDGE-P2-3 Phase 1a PostOnly maker entry. All tests preserved byte-identical
-//!   to pre-split; no tests added, removed, or reordered.
+//!   EDGE-P2-3 Phase 1a PostOnly maker entry, and grid churn breaker behavior.
 //! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
 //!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
 //!   （拆前 1729 行）。本檔包含 36 個測試案例，涵蓋網格建構、延遲初始化、
 //!   穿越時買入/賣出、庫存縮減時 Close 生命週期、close_skipped 回滾、自適應
 //!   + 幾何網格行為、OU 間距更新、健康檢查 + 自動再平衡、參數範圍 / 驗證、
-//!   G-SR-1 A3 趨勢冷卻，以及 EDGE-P2-3 Phase 1a PostOnly maker 入場。所有
-//!   測試與拆前逐字節相同；未新增、刪除或重排任何測試。
+//!   G-SR-1 A3 趨勢冷卻、EDGE-P2-3 Phase 1a PostOnly maker 入場，以及
+//!   grid churn breaker 行為。
 
 use super::*;
 use crate::order_manager::TimeInForce;
@@ -419,11 +418,11 @@ fn test_grid_update() {
 #[test]
 fn test_grid_param_ranges_count() {
     let ranges = GridTradingParams::param_ranges();
-    // 4 original + 3 trend cooldown + 2 edge-cost spacing knobs = 9
+    // 4 original + 3 trend cooldown + 2 edge-cost spacing + 3 churn breaker knobs = 12
     assert_eq!(
         ranges.len(),
-        9,
-        "expected 9 param ranges, got {}",
+        12,
+        "expected 12 param ranges, got {}",
         ranges.len()
     );
 }
@@ -438,6 +437,9 @@ fn test_grid_param_ranges_cooldown_names() {
         "max_cooldown_boost",
         "min_grid_step_bps",
         "cost_floor_multiplier",
+        "churn_breaker_window_ms",
+        "churn_breaker_close_count",
+        "churn_breaker_cooldown_ms",
     ] {
         assert!(names.contains(expected), "missing param range: {expected}");
     }
@@ -836,5 +838,54 @@ fn test_grid_blocked_symbol_skips_open_but_allows_close() {
     match &close[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
         other => panic!("blocked symbol must still allow close, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_grid_churn_breaker_arms_after_repeated_confirmed_closes() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.churn_breaker_close_count = 2;
+    g.churn_breaker_window_ms = 3_600_000;
+    g.churn_breaker_cooldown_ms = 3_600_000;
+
+    g.prev_inventory.insert("BTC".to_string(), 1.0);
+    g.net_inventory.insert("BTC".to_string(), 1.0);
+    g.last_trade_ms.insert("BTC".to_string(), 1_000);
+    g.on_close_confirmed("BTC");
+    assert!(
+        !g.churn_breaker_until_ms.contains_key("BTC"),
+        "first close alone should not arm churn breaker"
+    );
+
+    g.prev_inventory.insert("BTC".to_string(), 1.0);
+    g.net_inventory.insert("BTC".to_string(), 1.0);
+    g.last_trade_ms.insert("BTC".to_string(), 2_000);
+    g.on_close_confirmed("BTC");
+    assert_eq!(
+        g.churn_breaker_until_ms.get("BTC").copied(),
+        Some(3_602_000)
+    );
+}
+
+#[test]
+fn test_grid_churn_breaker_skips_open_but_allows_close() {
+    let mut blocked = GridTrading::new(49_000.0, 51_000.0);
+    blocked
+        .churn_breaker_until_ms
+        .insert("BTC".to_string(), 300_000);
+    blocked.on_tick(&ctx(50_500.0, 0));
+    let skipped = blocked.on_tick(&ctx(49_700.0, 60_001));
+    assert!(skipped.is_empty(), "churn breaker must skip new grid open");
+
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.on_tick(&ctx(50_500.0, 0));
+    let opened = g.on_tick(&ctx(49_700.0, 60_001));
+    assert_eq!(opened.len(), 1, "setup should create a long grid position");
+
+    g.churn_breaker_until_ms.insert("BTC".to_string(), 500_000);
+    let close = g.on_tick(&ctx(50_300.0, 240_003));
+    match &close[0] {
+        StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
+        other => panic!("churn breaker must still allow close, got {other:?}"),
     }
 }

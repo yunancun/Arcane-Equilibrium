@@ -60,6 +60,44 @@ impl GridTrading {
         (self.cooldown_ms as f64 * multiplier) as u64
     }
 
+    /// Record a confirmed grid close and arm a no-new-entry cooldown if the
+    /// symbol is churning. Close/risk reduction paths remain enabled.
+    /// 記錄已確認 grid 平倉；若短窗內反覆平倉，對該 symbol 暫停新入場。
+    /// 平倉 / 降風險路徑不受影響。
+    pub(super) fn record_churn_close_impl(&mut self, symbol: &str) {
+        if !self.churn_breaker_enabled {
+            return;
+        }
+        let close_ts = self.last_trade_ms.get(symbol).copied().unwrap_or(0);
+        if close_ts == 0 {
+            return;
+        }
+        let window_start = close_ts.saturating_sub(self.churn_breaker_window_ms);
+        let close_times = self
+            .churn_breaker_close_times
+            .entry(symbol.to_string())
+            .or_default();
+        close_times.retain(|&ts| ts >= window_start);
+        close_times.push(close_ts);
+
+        if close_times.len() >= self.churn_breaker_close_count {
+            let until = close_ts.saturating_add(self.churn_breaker_cooldown_ms);
+            self.churn_breaker_until_ms
+                .insert(symbol.to_string(), until);
+            close_times.clear();
+            warn!(
+                strategy = "grid_trading",
+                %symbol,
+                close_ts,
+                cooldown_until_ms = until,
+                window_ms = self.churn_breaker_window_ms,
+                close_count = self.churn_breaker_close_count,
+                "grid churn breaker armed: suppressing new entries \
+                 / grid churn breaker 已觸發：暫停新入場"
+            );
+        }
+    }
+
     /// Reset per-symbol net_inventory on external close (risk-stop) to prevent desync.
     /// 外部平倉（風控止損）時重設該幣種 net_inventory，防止與 paper_state 脫鉤。
     pub(super) fn on_external_close_impl(&mut self, symbol: &str) {
@@ -75,13 +113,17 @@ impl GridTrading {
     /// 管線確認策略平倉已執行 — 調整該幣種庫存。
     pub(super) fn on_close_confirmed_impl(&mut self, symbol: &str) {
         let prev_inv = self.prev_inventory.get(symbol).copied().unwrap_or(0.0);
-        let cur_inv = self.net_inventory.entry(symbol.to_string()).or_insert(0.0);
-        if prev_inv < 0.0 {
-            *cur_inv += self.qty_per_grid;
-        } else if prev_inv > 0.0 {
-            *cur_inv -= self.qty_per_grid;
-        }
-        info!(strategy = "grid_trading", %symbol, new_inventory = %cur_inv,
+        let new_inventory = {
+            let cur_inv = self.net_inventory.entry(symbol.to_string()).or_insert(0.0);
+            if prev_inv < 0.0 {
+                *cur_inv += self.qty_per_grid;
+            } else if prev_inv > 0.0 {
+                *cur_inv -= self.qty_per_grid;
+            }
+            *cur_inv
+        };
+        self.record_churn_close_impl(symbol);
+        info!(strategy = "grid_trading", %symbol, new_inventory = %new_inventory,
               "close confirmed: inventory adjusted / 平倉確認：庫存已調整");
     }
 

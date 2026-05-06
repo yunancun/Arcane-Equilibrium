@@ -64,6 +64,19 @@ if str(_CONTROL_API_ROOT) not in sys.path:
 
 logger = logging.getLogger("lg5_bulk_re_eval")
 
+_TAKER_FEE_RATE: float = 0.00055
+_MAKER_FEE_CUTOFF: float = 0.00040
+_STRATEGY_ENTRY_FILL_PREDICATE: str = """
+                  AND (f.entry_context_id IS NULL OR f.entry_context_id = '')
+                  AND f.exit_reason IS NULL
+                  AND f.order_id NOT LIKE 'oc_risk_%%'
+"""
+
+
+def _strategy_entry_fill_predicate() -> str:
+    """SQL predicate for strategy-owned entry fills only. 僅篩 strategy entry fill。"""
+    return _STRATEGY_ENTRY_FILL_PREDICATE
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Imports deferred to runtime (post sys.path injection)
@@ -116,8 +129,12 @@ def _synthesize_demo_cost_baseline(cur: Any, candidate_ts: Any) -> dict[str, Any
             """
             WITH entry_fills AS (
                 SELECT
-                    CASE WHEN lower(coalesce(f.liquidity_role, '')) = 'maker' THEN 1 ELSE 0 END AS maker_like,
-                    coalesce(f.fee_rate, 0.0)::float8 * 10000.0 AS fee_bps
+                    coalesce(nullif(f.fee_rate, 0), %s)::float8 AS effective_fee_rate,
+                    CASE
+                        WHEN lower(coalesce(f.liquidity_role, '')) = 'maker'
+                          OR coalesce(nullif(f.fee_rate, 0), %s) <= %s
+                        THEN 1 ELSE 0
+                    END AS maker_like
                 FROM trading.fills f
                 WHERE f.ts > %s::timestamptz - INTERVAL '7 days'
                   AND f.ts <= %s::timestamptz
@@ -125,13 +142,23 @@ def _synthesize_demo_cost_baseline(cur: Any, candidate_ts: Any) -> dict[str, Any
                   AND coalesce(f.strategy_name, '') <> ''
                   AND f.strategy_name NOT LIKE 'risk_close:%%'
                   AND f.strategy_name NOT LIKE 'strategy_close:%%'
+                  AND f.strategy_name NOT LIKE 'ipc_close%%'
+                  AND f.strategy_name NOT LIKE 'unattributed:%%'
                   AND coalesce(f.exit_source, '') = ''
+            """ + _strategy_entry_fill_predicate() + """
             )
             SELECT count(*)::int, coalesce(sum(maker_like), 0)::int,
-                   coalesce(avg(fee_bps), 0.0)::float8
+                   (coalesce(avg(effective_fee_rate), %s)::float8 * 10000.0)::float8
             FROM entry_fills
             """,
-            (candidate_ts, candidate_ts),
+            (
+                _TAKER_FEE_RATE,
+                _TAKER_FEE_RATE,
+                _MAKER_FEE_CUTOFF,
+                candidate_ts,
+                candidate_ts,
+                _TAKER_FEE_RATE,
+            ),
         )
         row = cur.fetchone()
         if row is not None:
@@ -142,6 +169,15 @@ def _synthesize_demo_cost_baseline(cur: Any, candidate_ts: Any) -> dict[str, Any
             if total > 0:
                 baseline["maker_fill_rate_7d"] = maker_like / total
             baseline["avg_realized_fee_bps_7d"] = avg_fee_bps
+            fee_drop = max(
+                0.0,
+                min(
+                    1.0,
+                    (_TAKER_FEE_RATE * 10_000.0 - avg_fee_bps)
+                    / max(_TAKER_FEE_RATE * 10_000.0, 1e-12),
+                ),
+            )
+            baseline["fee_drop_only_7d"] = fee_drop
     except Exception as exc:  # noqa: BLE001
         logger.warning("synthesize maker query failed cand_ts=%s err=%s",
                        candidate_ts, exc)

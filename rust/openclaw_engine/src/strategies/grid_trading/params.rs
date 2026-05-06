@@ -95,6 +95,19 @@ pub struct GridTradingParams {
     /// G2-04：可選逐 symbol 禁止 grid 新開倉清單；既有倉位仍可正常平倉。
     #[serde(default)]
     pub blocked_symbols: Vec<String>,
+    /// Churn breaker: pause new grid entries after repeated closes in a short window.
+    /// 平倉 churn breaker：短窗內反覆平倉後暫停新 grid 入場。
+    #[serde(default = "default_churn_breaker_enabled")]
+    pub churn_breaker_enabled: bool,
+    /// Churn breaker lookback window in ms. / churn breaker 回看窗口（毫秒）。
+    #[serde(default = "default_churn_breaker_window_ms")]
+    pub churn_breaker_window_ms: u64,
+    /// Close count threshold inside the lookback window. / 回看窗口內 close 次數門檻。
+    #[serde(default = "default_churn_breaker_close_count")]
+    pub churn_breaker_close_count: usize,
+    /// Cooldown applied to new entries after the threshold trips. / 觸發後新入場冷卻。
+    #[serde(default = "default_churn_breaker_cooldown_ms")]
+    pub churn_breaker_cooldown_ms: u64,
 }
 
 /// G7-09c Phase 1: default buffer = 1 tick (one tick inside the inside quote).
@@ -116,6 +129,22 @@ fn default_reject_cooldown_ms() -> u64 {
 
 fn default_cost_floor_multiplier() -> f64 {
     1.0
+}
+
+fn default_churn_breaker_enabled() -> bool {
+    true
+}
+
+fn default_churn_breaker_window_ms() -> u64 {
+    3_600_000
+}
+
+fn default_churn_breaker_close_count() -> usize {
+    3
+}
+
+fn default_churn_breaker_cooldown_ms() -> u64 {
+    21_600_000
 }
 
 impl Default for GridTradingParams {
@@ -143,6 +172,10 @@ impl Default for GridTradingParams {
             min_grid_step_bps: 0.0,
             cost_floor_multiplier: 1.0,
             blocked_symbols: Vec::new(),
+            churn_breaker_enabled: true,
+            churn_breaker_window_ms: 3_600_000,
+            churn_breaker_close_count: 3,
+            churn_breaker_cooldown_ms: 21_600_000,
         }
     }
 }
@@ -224,6 +257,30 @@ impl StrategyParams for GridTradingParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            ParamRange {
+                name: "churn_breaker_window_ms".into(),
+                min: 60_000.0,
+                max: 86_400_000.0,
+                step: Some(60_000.0),
+                agent_adjustable: false,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "churn_breaker_close_count".into(),
+                min: 2.0,
+                max: 20.0,
+                step: Some(1.0),
+                agent_adjustable: false,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "churn_breaker_cooldown_ms".into(),
+                min: 300_000.0,
+                max: 86_400_000.0,
+                step: Some(300_000.0),
+                agent_adjustable: false,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -268,6 +325,15 @@ impl StrategyParams for GridTradingParams {
             || !(1.0..=5.0).contains(&self.cost_floor_multiplier)
         {
             return Err("cost_floor_multiplier must be in [1, 5]".into());
+        }
+        if self.churn_breaker_window_ms < 60_000 || self.churn_breaker_window_ms > 86_400_000 {
+            return Err("churn_breaker_window_ms must be in [60_000, 86_400_000] ms".into());
+        }
+        if self.churn_breaker_close_count < 2 || self.churn_breaker_close_count > 20 {
+            return Err("churn_breaker_close_count must be in [2, 20]".into());
+        }
+        if self.churn_breaker_cooldown_ms < 300_000 || self.churn_breaker_cooldown_ms > 86_400_000 {
+            return Err("churn_breaker_cooldown_ms must be in [300_000, 86_400_000] ms".into());
         }
         Ok(())
     }

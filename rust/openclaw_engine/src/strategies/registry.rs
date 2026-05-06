@@ -209,6 +209,16 @@ impl StrategyFactory {
         } else {
             1.0
         };
+        gt.churn_breaker_enabled = p.grid_trading.churn_breaker_enabled;
+        gt.churn_breaker_window_ms = p
+            .grid_trading
+            .churn_breaker_window_ms
+            .clamp(60_000, 86_400_000);
+        gt.churn_breaker_close_count = p.grid_trading.churn_breaker_close_count.clamp(2, 20);
+        gt.churn_breaker_cooldown_ms = p
+            .grid_trading
+            .churn_breaker_cooldown_ms
+            .clamp(300_000, 86_400_000);
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));

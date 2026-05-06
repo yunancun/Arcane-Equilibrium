@@ -284,6 +284,20 @@ pub struct GridTrading {
     /// paths stay enabled so existing exposure can still be reduced.
     /// G2-04：operator 維護的逐 symbol 暫停新 grid 入場清單；平倉路徑仍啟用。
     pub(crate) blocked_symbols: HashSet<String>,
+    /// Per-symbol close timestamps used by the churn breaker.
+    /// churn breaker 使用的逐 symbol 平倉時間戳。
+    pub(super) churn_breaker_close_times: HashMap<String, Vec<u64>>,
+    /// Per-symbol deadline before which new grid entries are suppressed.
+    /// 逐 symbol 新 grid 入場暫停截止時間。
+    pub(super) churn_breaker_until_ms: HashMap<String, u64>,
+    /// Churn breaker master toggle. / churn breaker 主開關。
+    pub(crate) churn_breaker_enabled: bool,
+    /// Churn breaker close lookback window. / churn breaker 平倉回看窗口。
+    pub(crate) churn_breaker_window_ms: u64,
+    /// Number of closes inside the window required to trip. / 觸發所需 close 次數。
+    pub(crate) churn_breaker_close_count: usize,
+    /// Cooldown applied to new entries after trip. / 觸發後新入場冷卻。
+    pub(crate) churn_breaker_cooldown_ms: u64,
 }
 
 // build_linear_levels, build_geometric_levels, build_levels moved to grid_helpers.rs (A0-a)

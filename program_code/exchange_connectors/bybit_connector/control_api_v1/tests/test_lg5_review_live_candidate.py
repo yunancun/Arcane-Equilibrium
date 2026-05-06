@@ -16,10 +16,12 @@ mocked DB) are deferred to LG-5-IMPL-4 (E4) per RFC §6 ownership split.
 
 from __future__ import annotations
 
+import inspect
 import math
 
 import pytest
 
+import app.governance_hub_live_candidate_review as mod
 from app.governance_hub_live_candidate_review import (
     R1_MAKER_FILL_FLOOR,
     R1_MAKER_FILL_RATIO,
@@ -43,6 +45,18 @@ from app.governance_hub_live_candidate_review import (
     evaluate_r6,
     evaluate_r_meta,
 )
+
+
+def test_live_cost_regime_sql_uses_entry_only_fill_predicate() -> None:
+    """Live cost regime mirror must use the same entry-only filters as [33]."""
+    source = inspect.getsource(mod._fetch_live_cost_regime)
+    predicate = mod._strategy_entry_fill_predicate()
+
+    assert "_strategy_entry_fill_predicate()" in source
+    assert "f.entry_context_id IS NULL" in predicate
+    assert "f.exit_reason IS NULL" in predicate
+    assert "f.order_id NOT LIKE 'oc_risk_" in predicate
+    assert "coalesce(nullif(f.fee_rate, 0)" in source
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

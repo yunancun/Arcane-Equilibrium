@@ -97,6 +97,16 @@ _R_META_MIN_SAMPLE_PER_STRATEGY: int = 10
 # Maker-like fee cutoff 與 taker fee rate 鏡 healthcheck `[33]`；手動同步。
 _TAKER_FEE_RATE: float = 0.00055   # 5.5 bps Bybit Linear taker default
 _MAKER_FEE_CUTOFF: float = 0.00040  # any fee_rate <= 4.0 bps treated as maker-like
+_STRATEGY_ENTRY_FILL_PREDICATE: str = """
+                  AND (f.entry_context_id IS NULL OR f.entry_context_id = '')
+                  AND f.exit_reason IS NULL
+                  AND f.order_id NOT LIKE 'oc_risk_%%'
+"""
+
+
+def _strategy_entry_fill_predicate() -> str:
+    """SQL predicate for strategy-owned entry fills only. 僅篩 strategy entry fill。"""
+    return _STRATEGY_ENTRY_FILL_PREDICATE
 
 try:
     import psycopg2  # type: ignore
@@ -764,6 +774,7 @@ def _compute_demo_cost_baseline(cur: Any) -> dict[str, Any]:
                   AND f.strategy_name NOT LIKE 'ipc_close%%'
                   AND f.strategy_name NOT LIKE 'unattributed:%%'
                   AND coalesce(f.exit_source, '') = ''
+            """ + _strategy_entry_fill_predicate() + """
             )
             SELECT
                 count(*)::int AS total_fills,

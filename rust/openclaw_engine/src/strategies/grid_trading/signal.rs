@@ -167,6 +167,21 @@ impl GridTrading {
             );
             return vec![];
         }
+        if would_open && self.churn_breaker_enabled {
+            if let Some(until) = self.churn_breaker_until_ms.get(sym).copied() {
+                if ctx.timestamp_ms < until {
+                    debug!(
+                        strategy = "grid_trading",
+                        symbol = sym,
+                        cooldown_until_ms = until,
+                        "grid new entry skipped: churn breaker active \
+                         / grid 新開倉跳過：churn breaker 生效"
+                    );
+                    return vec![];
+                }
+                self.churn_breaker_until_ms.remove(sym);
+            }
+        }
         let entry_order = if would_open {
             let is_long = is_down_cross;
             self.resolve_entry_order(ctx, is_long)

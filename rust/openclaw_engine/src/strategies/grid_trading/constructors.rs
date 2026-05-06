@@ -75,6 +75,12 @@ impl GridTrading {
             min_grid_step_bps: 0.0,
             cost_floor_multiplier: 1.0,
             blocked_symbols: HashSet::new(),
+            churn_breaker_close_times: HashMap::new(),
+            churn_breaker_until_ms: HashMap::new(),
+            churn_breaker_enabled: true,
+            churn_breaker_window_ms: 3_600_000,
+            churn_breaker_close_count: 3,
+            churn_breaker_cooldown_ms: 21_600_000,
         }
     }
 
@@ -126,6 +132,12 @@ impl GridTrading {
             min_grid_step_bps: 0.0,
             cost_floor_multiplier: 1.0,
             blocked_symbols: HashSet::new(),
+            churn_breaker_close_times: HashMap::new(),
+            churn_breaker_until_ms: HashMap::new(),
+            churn_breaker_enabled: true,
+            churn_breaker_window_ms: 3_600_000,
+            churn_breaker_close_count: 3,
+            churn_breaker_cooldown_ms: 21_600_000,
         }
     }
 
@@ -191,6 +203,12 @@ impl GridTrading {
             min_grid_step_bps: 0.0,
             cost_floor_multiplier: 1.0,
             blocked_symbols: HashSet::new(),
+            churn_breaker_close_times: HashMap::new(),
+            churn_breaker_until_ms: HashMap::new(),
+            churn_breaker_enabled: true,
+            churn_breaker_window_ms: 3_600_000,
+            churn_breaker_close_count: 3,
+            churn_breaker_cooldown_ms: 21_600_000,
         }
     }
 
@@ -244,6 +262,10 @@ impl GridTrading {
             .map(|s| s.trim().to_ascii_uppercase())
             .filter(|s| !s.is_empty())
             .collect();
+        self.churn_breaker_enabled = params.churn_breaker_enabled;
+        self.churn_breaker_window_ms = params.churn_breaker_window_ms;
+        self.churn_breaker_close_count = params.churn_breaker_close_count;
+        self.churn_breaker_cooldown_ms = params.churn_breaker_cooldown_ms;
         info!(
             strategy = "grid_trading",
             grid_count = self.grid_count,
@@ -280,6 +302,10 @@ impl GridTrading {
                 symbols.sort();
                 symbols
             },
+            churn_breaker_enabled: self.churn_breaker_enabled,
+            churn_breaker_window_ms: self.churn_breaker_window_ms,
+            churn_breaker_close_count: self.churn_breaker_close_count,
+            churn_breaker_cooldown_ms: self.churn_breaker_cooldown_ms,
         }
     }
 }
