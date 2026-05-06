@@ -29,6 +29,9 @@ and Bybit public-data parsing.
     `bybit-public://v5/market/instruments-info?category=...`.
   - Default instrument statuses are `Trading,PreLaunch,Delivering,Closed`,
     fetched explicitly and de-duped by category/symbol.
+  - Symbols outside the V058 schema contract, such as dated futures symbols
+    with hyphens, are skipped instead of being written into the perp replay
+    universe.
   - `--asof` controls the V058 snapshot timestamp; `--freeze-asof` separately
     controls the strategy freeze-log timestamp.
   - V059 source is the existing `settings/edge_estimates*.json` files.
@@ -41,14 +44,15 @@ and Bybit public-data parsing.
 ## Verification
 
 - `python3 -m pytest tests/helper_scripts/test_ref21_backfill_v058_v059.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_bybit_public_client.py -q`
-  - 9 passed.
+  - 10 passed.
 - `python3 -m py_compile helper_scripts/db/ref21_backfill_v058_v059.py program_code/exchange_connectors/bybit_connector/control_api_v1/replay/bybit_public_client.py`
   - passed.
 - `python3 helper_scripts/db/ref21_backfill_v058_v059.py --skip-instruments`
   - dry-run only; produced 1 freeze row and 1 edge snapshot row.
 - `venvs/mac_dev/bin/python helper_scripts/db/ref21_backfill_v058_v059.py --skip-edge --skip-freeze-log --rps 2 --categories linear`
   - dry-run only; fetched 655 Trading, 1 PreLaunch, 0 Delivering, and 803
-    Closed instruments; 1459 V058 universe rows total.
+    Closed instruments; after V058 symbol-contract filtering, 905 universe
+    rows remained.
 - `cargo test scanner_timeline --features replay_isolated`
   - 4 passed.
 - `cargo test load_fixture_accepts_optional_turnover --features replay_isolated`

@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -31,6 +32,7 @@ DEFAULT_CATEGORIES = ("linear",)
 DEFAULT_INSTRUMENT_STATUSES = ("Trading", "PreLaunch", "Delivering", "Closed")
 BYBIT_PUBLIC_BASE = "https://api.bybit.com"
 INSTRUMENTS_ENDPOINT = "/v5/market/instruments-info"
+V058_SYMBOL_RE = re.compile(r"^[A-Z0-9_.]{1,32}$")
 
 
 @dataclass(frozen=True)
@@ -175,7 +177,7 @@ def instrument_snapshot_rows(
     rows: list[dict[str, Any]] = []
     for item in instruments:
         symbol = str(item.get("symbol") or "").strip().upper()
-        if not symbol:
+        if not symbol or not V058_SYMBOL_RE.match(symbol):
             continue
         status = str(item.get("status") or "unknown")
         lot = item.get("lotSizeFilter") or {}
