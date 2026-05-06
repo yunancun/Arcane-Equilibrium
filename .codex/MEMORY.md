@@ -116,6 +116,7 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 - OpenClaw 2026-05-06 repositioning: external OpenClaw Gateway is only communication / mobile / supervisor / cloud-escalation / proposal relay; it is not the trading conductor, not the local 5-Agent runtime, and not a second GUI
 - canonical GUI is the existing FastAPI console at `trade-core:8000/console`, now treated as the OpenClaw Control Console
 - local 5-Agent runtime stays inside TradeBot; cloud L2 should be reached through a supervisor escalation packet, not by every runtime agent independently
+- AgentTodo is the handoff source for the next multi-agent phase. Start order is MAG-015 contract addendum, then MAG-010..014 durable event store, then MAG-016..019 read-only OpenClaw status/self-state and Agent Control foundation; proposal/approval/channel relay waits until Linux agent schema row proof exists
 - new standalone logic should be Rust-first to avoid adding Python migration debt
 - changes must stay cross-platform and Mac-deployable; avoid hard-coded machine paths
 - tunable parameters must be real, discoverable, and persistent; no fake knobs

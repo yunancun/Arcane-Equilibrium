@@ -29,6 +29,11 @@ YYYY-MM-DD HH:MM TZ
 - created authoritative overlay and plans: `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`, `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`, `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md`
 - updated AgentTodo/TODO/CLAUDE/README/CONTEXT/Codex memory so future work does not treat OpenClaw Gateway or MessageBus as the trading conductor
 
+2026-05-06 CEST
+- reviewed AgentTodo against the accepted OpenClaw Gateway / Control Console architecture and found the boundary correct but the handoff order too flat
+- updated AgentTodo with a dispatch-ready Sprint A order: MAG-015 contract addendum -> MAG-010..014 durable event store -> MAG-016..019 read-only OpenClaw status/self-state and Agent Control foundation
+- updated TODO P1-OPENCLAW, CLAUDE, Codex memory, and PM memory so the next session starts with durable agent tables and read-only gateway/GUI, not Telegram/WebChat or proposal approval
+
 2026-04-28 13:00 CEST
 - created repo-synced Codex workspace under `.codex/`
 - recorded Codex role, startup docs, inventory usage policy, and Mac -> git -> ssh Linux deploy flow

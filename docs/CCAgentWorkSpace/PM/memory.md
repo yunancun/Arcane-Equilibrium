@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-06 | AgentTodo OpenClaw handoff alignment: Sprint A order is MAG-015 -> MAG-010..014 -> MAG-016..019; proposal/channel work waits for durable row proof | workspace/reports/2026-05-06--agenttodo_openclaw_handoff_alignment.md |
 | 2026-05-06 | 玄衡 GUI brand cleanup | workspace/reports/2026-05-06--arcane_equilibrium_gui_brand_cleanup.md |
 | 2026-05-06 | 玄衡 · Arcane Equilibrium soft rename integration | workspace/reports/2026-05-06--arcane_equilibrium_soft_rename.md |
 | 2026-05-06 | AgentTodo M0 contract-freeze integration (MAG-001 APPROVED, MAG-002/003 CONDITIONAL) | workspace/reports/2026-05-06--agenttodo_m0_contract_freeze_integration.md |
@@ -1224,3 +1225,22 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - OpenClaw Gateway must not hold Bybit keys, directly order, directly mutate live TOML, or become a second trading GUI.
 - `MessageBus` remains legacy/advisory trace; Agent Decision Spine must be typed persisted objects plus Decision Lease and Rust enforcement.
+
+## 2026-05-06 AgentTodo OpenClaw Handoff Alignment
+
+### Result
+- PM reviewed the new OpenClaw plan, GUI plan, and AgentTodo for handoff readiness.
+- Verdict: the new thinking was present at the architecture-boundary level, but the work order was too flat. OpenClaw tasks were split between MAG-015 and TODO P1-OPENCLAW, which could lead the next agent to start with Telegram/WebChat or GUI before the durable event store exists.
+- AgentTodo is now the primary handoff source for the next multi-agent phase.
+
+### New Start Order
+1. MAG-015: contract addendum for observations, OpenClaw view models, escalation/proposal/channel schemas, endpoint allowlist, cloud budget, store ownership, and state transitions.
+2. MAG-010..014: durable `agent.messages`, `agent.state_changes`, and `agent.ai_invocations` wiring with Linux nonzero-row proof.
+3. MAG-016..017: OpenClaw Gateway authority lockdown and read-only `/api/v1/openclaw/status` + `/self-state`.
+4. MAG-018..019: read-only Agent Control GUI foundation and supervisor cloud escalation ledger policy.
+5. Only after that: proposal/approval queue and Telegram/WebChat relay.
+
+### Boundary
+- No second OpenClaw trading GUI.
+- No OpenClaw direct order, live TOML/risk mutation, Bybit key access, or Rust hot-path dependency.
+- No per-agent independent cloud L2 calls; cloud escalation is supervisor-compressed and budgeted.

@@ -22,6 +22,21 @@ Canonical overlay and implementation plans:
 
 If older EX-06 / DOC-04 wording implies OpenClaw itself is the trading conductor or that OpenClaw's own GUI is the primary console, that wording is superseded by this overlay.
 
+## 2026-05-06 PM Handoff Verdict and Start Order
+
+PM review result: this backlog now reflects the new authority model at the boundary level, but implementation must start from the data and contract foundation. Do not begin with Telegram/WebChat, a second GUI, or a broad cloud-agent buildout.
+
+Dispatch-ready order for the next handoff:
+
+1. **Contract addendum first**: complete MAG-015 before implementation. It must define typed local observations, `SelfStateSnapshot`, `Diagnosis`, `EscalationPacket`, `Proposal`, `ApprovalDecision`, `ChannelEvent`, endpoint allowlist, cloud budget, and store ownership.
+2. **Durable event store second**: complete MAG-010..MAG-014 until Linux runtime proves nonzero fresh rows in `agent.messages`, `agent.state_changes`, and `agent.ai_invocations`. This is a P0 governance blocker and a prerequisite for trustworthy OpenClaw views.
+3. **Read-only OpenClaw bridge third**: complete MAG-016..MAG-017 for authority lockdown and `/api/v1/openclaw/status` + `/api/v1/openclaw/self-state`. No proposals, approvals, or mobile relay before this layer renders degraded/healthy state correctly.
+4. **Read-only Agent Control GUI fourth**: complete MAG-018 on top of backend view models. The GUI must not stitch raw tables in JavaScript and must not add trading controls.
+5. **Supervisor escalation fifth**: complete MAG-019 only after `agent.ai_invocations` is populated. Cloud L2 calls go through one supervisor packet, not five independent agent calls.
+6. **Proposal / approval / channel relay last**: use the standalone OpenClaw Gateway and GUI plans for OC-GW-5..7 and GUI-OC-4..7 after the read-only foundation is proven.
+
+This means the first implementation sprint should be **AgentTodo Sprint A: MAG-015 -> MAG-010/011/012 -> MAG-013/014 -> MAG-016/017 -> MAG-018/019**. M2 Scanner Advisory Conversion and M3 Agent Decision Spine Shadow remain blocked until M1 has Linux row proof and E2/E4 acceptance.
+
 ## Reference Path Index
 
 Canonical repo root:
@@ -120,6 +135,8 @@ This todo is intentionally self-contained. A follow-up agent should start from t
 |---|---|---|
 | Agent routes | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agents_routes.py` | API surface for agent status. |
 | Agent route helpers | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agents_routes_helpers.py` | Agent response helper logic. |
+| Planned OpenClaw routes | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/openclaw_routes.py` | Suggested new home for `/api/v1/openclaw/*` aggregation endpoints; keep backend-authored view models here rather than ad hoc frontend stitching. |
+| Planned OpenClaw models | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/openclaw_models.py` | Suggested new home for `SelfStateSnapshot`, `Diagnosis`, `EscalationPacket`, `Proposal`, `ApprovalDecision`, and `ChannelEvent` API contracts. |
 | Agent tab HTML | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/tab-agents.html` | Current agent roster UI. |
 | Agent tracker JS | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/js/agent-tracker.js` | Frontend agent tracker behavior. |
 
@@ -129,6 +146,7 @@ This todo is intentionally self-contained. A follow-up agent should start from t
 |---|---|
 | M0 Review and Contract Freeze | `ENGINEERING_PLAN.md`, `docs/decisions/EX-06_OpenClaw_Bybit_Multi-Agent_Orchestration_多Agent编排正式边界定义_V1.md`, `docs/decisions/DOC-04_OpenClaw_Bybit_Agent_Capability_Blueprint_Agent能力蓝图_V2.md`, `CLAUDE.md`, `TODO.md` |
 | M1 Durable Agent Event Store | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/multi_agent_framework.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/base_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agent_audit_bridge.py`, `sql/migrations/V003__trading_agent_tables.sql`, `sql/migrations/V015__engine_mode_separation.sql` |
+| M1A OpenClaw Read-Only Foundation | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/agents_routes.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/openclaw_routes.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/openclaw_models.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/tab-agents.html`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/js/agent-tracker.js` |
 | M2 Scanner Advisory Conversion | `rust/openclaw_engine/src/scanner/runner.rs`, `rust/openclaw_engine/src/scanner/registry.rs`, `rust/openclaw_engine/src/scanner/types.rs`, `rust/openclaw_engine/src/scanner/market_judgment.rs`, `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_wiring_scanner.py` |
 | M3 Agent Decision Spine Shadow | `rust/openclaw_engine/src/tick_pipeline/on_tick/step_3_signals.rs`, `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`, `rust/openclaw_engine/src/tick_pipeline/commands.rs`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/guardian_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_agent.py` |
 | M4 Strategist V2 | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_agent.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_edge_eval.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_weights.py`, `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_cognitive.py`, `rust/openclaw_engine/src/strategist_scheduler/mod.rs`, `rust/openclaw_engine/src/strategist_scheduler/evaluate.rs` |
@@ -149,6 +167,8 @@ Do not start implementation before CC/FA/PA confirm the authority model:
 - Rust engine as execution engine vs hidden decision authority.
 - Agent Decision Spine persistence requirements.
 - Guardian/Decision Lease enforcement order.
+- OpenClaw Gateway read/proposal/approval boundary and endpoint allowlist.
+- Supervisor cloud escalation budget, ledger, and no-per-agent-cloud-call rule.
 
 ## Milestone 0: Review and Contract Freeze
 
@@ -172,6 +192,8 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 6. Protective close vs tactical close/reduce split: protective H0/P0/P1 reduce-only paths may bypass Strategist tactical approval only with explicit protective lineage; tactical close/reduce must pass StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease.
 7. Fail-closed healthchecks for complete-chain ratio, orphan decisions/verdicts/plans, zero-row agent tables, missing AI invocation links, missing lease IDs, scanner decay without review, and duplicate submit attempts.
 8. Feature-flag semantics: `advisory_enforced` means enforced advisory-only semantics, and any legacy fallback after cutover must be wrapped by the full spine or constrained to protective/reduce-only behavior.
+9. OpenClaw boundary semantics: Gateway allowlist, auth profile, request ID, channel identity, and forbidden direct paths to order/live config/secrets are explicit before any endpoint is exposed.
+10. GUI view-model semantics: Agent Control reads backend-authored degraded envelopes and never reconstructs the decision chain from raw tables in JavaScript.
 
 ## Milestone 1: Durable Agent Event Store
 
@@ -179,10 +201,14 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 |---|---|---:|---|---|---|
 | MAG-010 | E1 | P0 | TODO | Add legacy/advisory bus trace writer for `agent.messages` without promoting `MessageBus` to authority. | Linux runtime shows sampled/fresh advisory rows after Scout/Strategist/Guardian messages; docs and tests assert `MessageBus` is not the Agent Decision Spine and writer failure cannot affect trading behavior. |
 | MAG-011 | E1 | P0 | TODO | Persist `agent.state_changes` from agent start/stop/degrade/heartbeat transitions. | State rows exist for all five agents and Conductor. |
-| MAG-012 | E1a | P0 | TODO | Persist `agent.ai_invocations` for local L1/L1.5/L2 and supervisor cloud escalations with model, latency, cost, prompt hash, output hash. | Nonzero rows after Strategist/Analyst evaluations and any OpenClaw supervisor cloud escalation. |
+| MAG-012 | E1a | P0 | TODO | Persist `agent.ai_invocations` for local L1/L1.5/L2 and supervisor cloud escalations with model, latency, cost, prompt hash, output hash. | Nonzero rows after Strategist/Analyst evaluations and any OpenClaw supervisor cloud escalation; cloud rows link to escalation/proposal IDs when present. |
 | MAG-013 | E2 | P0 | TODO | Audit DB sink failure modes. | Message path is fail-soft for logs but fail-visible in health checks. |
 | MAG-014 | E4 | P0 | TODO | Add Linux regression for agent schema nonzero row acceptance. | Test fails on current zero-row state and passes after wiring. |
-| MAG-015 | PA | P0 | TODO | Define OpenClaw supervisor escalation packet and proposal schema. | Local agents emit structured observations; one supervisor compresses and optionally calls cloud; proposals are persisted before GUI/mobile approval. |
+| MAG-015 | PA | P0 | TODO | Define AgentTodo Sprint A contract addendum: local observations, OpenClaw view models, supervisor escalation packet, proposal/approval/channel schemas, endpoint allowlist, cloud budget, store ownership, and state transitions. | E1/E1a can implement without guessing contracts; local agents emit structured observations; one supervisor compresses and optionally calls cloud; proposals are persisted before GUI/mobile approval. |
+| MAG-016 | E2/E3 | P0 | TODO | Define and test OpenClaw Gateway authority lockdown. | Static and route tests prove no Gateway path can directly order, mutate live TOML/risk config, read secrets, or bypass GovernanceHub/Decision Lease. |
+| MAG-017 | E1 | P0 | TODO | Implement read-only `/api/v1/openclaw/status` and `/api/v1/openclaw/self-state` aggregation endpoints. | Endpoints return backend-authored degraded envelopes; gateway outage is visible but non-fatal; no write/proposal endpoints are enabled in this step. |
+| MAG-018 | E1a | P1 | TODO | Upgrade `tab-agents.html` into read-only Agent Control foundation: topology, self-state, gateway/channel posture, and degraded/error states. | GUI renders local 5-Agent + Gateway topology from backend view models; no manual order controls and no raw prompt text. |
+| MAG-019 | AI-E/PM | P1 | TODO | Define and wire supervisor cloud escalation ledger policy after `agent.ai_invocations` exists. | No local agent calls cloud independently; every cloud L2 call has budget decision, prompt hash, cost, latency, response summary, and linked diagnosis/proposal IDs. |
 
 ## Milestone 2: Scanner Advisory Conversion
 
