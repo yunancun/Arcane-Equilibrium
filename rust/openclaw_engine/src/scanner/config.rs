@@ -752,8 +752,14 @@ fn default_opportunity_score_bps_multiplier() -> f64 {
     2.0
 }
 
-/// Shadow-only scanner opportunity evaluation knobs.
-/// Scanner opportunity v1 只輸出審計欄位，不新增 hot-path 拒單行為。
+fn default_canary_block_new_entries() -> bool {
+    false
+}
+
+/// Scanner opportunity evaluation knobs.
+/// Scanner opportunity 評估參數。預設只輸出審計欄位；若
+/// `canary_block_new_entries` 明確開啟，僅 demo/live_demo new-open 會消費
+/// canary 欄位，close/reduce/protective path 不受影響。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpportunityConfig {
     /// Master switch for emitting opportunity fields.
@@ -808,6 +814,12 @@ pub struct OpportunityConfig {
     /// opportunity LCB bps 轉標準化分數的乘數。
     #[serde(default = "default_opportunity_score_bps_multiplier")]
     pub opportunity_score_bps_multiplier: f64,
+    /// Enable demo/live_demo new-open canary blocking when opportunity LCB is
+    /// non-positive. This is explicit because it changes admission behavior.
+    /// 當 opportunity LCB 非正時，啟用 demo/live_demo 新開倉 canary 拒絕。
+    /// 此項會改變准入行為，因此必須顯式配置。
+    #[serde(default = "default_canary_block_new_entries")]
+    pub canary_block_new_entries: bool,
 }
 
 impl Default for OpportunityConfig {
@@ -827,6 +839,7 @@ impl Default for OpportunityConfig {
             positive_history_uncertainty_discount_bps:
                 default_positive_history_uncertainty_discount_bps(),
             opportunity_score_bps_multiplier: default_opportunity_score_bps_multiplier(),
+            canary_block_new_entries: default_canary_block_new_entries(),
         }
     }
 }

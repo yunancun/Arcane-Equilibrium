@@ -80,8 +80,9 @@ immature_negative_bps_threshold = 0.0
 immature_negative_score_cap = 20.0
 
 [opportunity]
-# Shadow-only scanner opportunity evaluation. These fields are persisted for
-# audit/replay and are not used as an additional rejection gate in v1.
+# Scanner opportunity evaluation. The typed fields are persisted for
+# audit/replay; canary_block_new_entries only applies to demo/live_demo new
+# opens and never to close/reduce/protective paths.
 enabled = true
 one_way_fee_bps = 4.5
 slippage_buffer_bps = 1.0
@@ -95,3 +96,4 @@ historical_min_std_bps = 20.0
 historical_negative_penalty_weight = 0.25
 positive_history_uncertainty_discount_bps = 2.0
 opportunity_score_bps_multiplier = 2.0
+canary_block_new_entries = true

@@ -501,7 +501,7 @@ async fn async_main(
     // ------------------------------------------------------------------
     let main_instruments::SharedClientsBundle {
         shared_client,
-        shared_account_manager: _shared_account_manager,
+        shared_account_manager,
         shared_instruments,
         paper_balance,
     } = main_instruments::init_shared_clients_and_instruments(
@@ -667,6 +667,7 @@ async fn async_main(
             market_client,
             Arc::clone(&scanner_edge_estimates),
             Arc::clone(&scanner_store),
+            shared_account_manager.clone(),
             ScannerStrategyPolicyStores::new(
                 Arc::clone(&risk_stores.paper),
                 Arc::clone(&risk_stores.demo),
