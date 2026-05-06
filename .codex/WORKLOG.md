@@ -156,4 +156,5 @@ YYYY-MM-DD HH:MM TZ
 - no runtime, DB write/schema, strategy/risk config, live authorization, rebuild, restart, or deploy action
 - continued AgentTodo Sprint A MAG-010..014 source wave: added default-off `AgentEventStore`, MessageBus sink, BaseAgent/Conductor state hooks, Strategist/Guardian/Analyst AI invocation hooks, and `[52] agent_event_store_rows`
 - verification on Mac: new + affected targeted pytest 215 PASS, `py_compile` PASS, `git diff --check` PASS
-- status after source wave: MAG-010/011/012 source done but final DONE blocked on Linux runtime fresh rows; MAG-013/014 next gate is Linux targeted tests + `[52]` row proof
+- Linux `trade-core` fast-forwarded to `91379cd2`; targeted pytest 215 PASS and py_compile PASS
+- status after source wave: MAG-010/011/012 source done but final DONE blocked on Linux runtime fresh rows; next gate is `[52]` row proof
