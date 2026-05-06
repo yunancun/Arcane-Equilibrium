@@ -531,6 +531,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 |------|------|
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_integration_audit.md` | PM scanner opportunity integration audit：整合零散 scanner / edge / market judgment 模塊，定義 shadow-only 中性 opportunity 判斷邊界 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_v1_shadow_implementation.md` | Scanner Opportunity v1 shadow implementation：Rust scanner opportunity math、intent details、Python reader、測試與對抗性審查結果 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_healthcheck_51.md` | Scanner Opportunity `[51]` passive healthcheck：snapshot / intent / MLDE row proof coverage + opportunity_lcb_bps calibration，shadow-only |
 
 ### governance_dev/ — 治理开发文档
 

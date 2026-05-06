@@ -256,8 +256,9 @@
 | `[16]` strategist cycle fresh | last cycle 11.3min ago；within 30-min backoff window | <30min backoff tolerated | transient observe |
 | `[33]` maker fill rate | 7d rolling **27.2%**（CLAUDE.md drift） / **36.6%** (PA SQL ground truth)；fee_drop 22.0% | ≥60% fee_drop | ~05-07/08 |
 | `[38]` grid lifecycle drift | demo p50 7.9min vs live_demo 3.2min；lifetime_ratio 0.41 WARN；live re_entry_rate 0.48 | lifetime ≥0.5x | ~05-06 再看 |
-| `[40]` realized edge acceptance | 24h MLDE rows=37-39，avg_net **-17~-18 bps**；slippage live_demo 24h **-92.47 bps** (BUSDT loop) | net_bps_after_fee>0 | 等累積 + edge 翻正 |
+| `[40]` realized edge acceptance | 24h MLDE rows=19，avg_net **-27.93 bps**；slippage live_demo 24h **-92.47 bps** (BUSDT loop) | net_bps_after_fee>0 | 等累積 + edge 翻正 |
 | `[41]` scanner market-gate confirmation | events=1260 / cells=69 / scoreable=0，gate 已 fire 但 label 未足 | gate blocked cells later negative | 等 label 累積 |
+| `[51]` scanner opportunity shadow acceptance | 3h snapshot routes=340/340、scanner intents=4/4；24h labels=7，positive_avg=27.93bps / nonpositive_avg=-55.70bps / corr=0.22 | labels≥10 後評估 calibration；保持 shadow-only | row proof 完整但 label 未足 |
 | `[27]` intents counter freeze | demo stale 88.3m / intents_30m=0 / verdicts_30m=1 / approved_verdicts_30m=0；risk/cost gates rejected all | approved verdicts with 0 intents 才 FAIL | 持續觀察 |
 | `[11]` counterfactual clean window | n=413/200, cf_fired=46，rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
 | `[42]/[42b]` LG-5 reviewer | 0 audit row 累積（sibling CC FUP-1 commit `463890d` 已 land）| >0 row/24h | 下次 deploy 後 |
@@ -313,6 +314,16 @@
 | [41] | scanner_market_gate_confirmation | scanner market judgement 後驗 |
 | [42] | lg5_review_audit_lag | LG-5 W3 IMPL-3（sibling CC FUP-1 deploy 後啟動）|
 | [42b] | lg5_attribution_drift | 同上 |
+| [42c] | lg5_attribution_drift_3d | R-meta gate 對齊 3d 鏡像 |
+| [43] | label_backfill_freshness | edge label backfill cron 活性 |
+| [44] | replay_manifest_key_presence | replay manifest key.hex deploy contract |
+| [45] | pricing_binding | LG-3 provider pricing binding |
+| [46] | mlde_shadow_retention_status | V056 retention cron + candidate cap |
+| [47] | replay_runner_binary | Linux replay_runner binary presence |
+| [48] | replay_manifest_registry_growth | replay.experiments row growth |
+| [49] | replay_artifact_retention | V046 artifact TTL/cap |
+| [50] | replay_run_state_health | V045 failed rate + zombie running |
+| [51] | scanner_opportunity_shadow_acceptance | scanner opportunity row proof + calibration |
 | [Xa] | leader_election_health | G1-01 |
 | [Xb] | pipeline_triangulation | G6-01 |
 
