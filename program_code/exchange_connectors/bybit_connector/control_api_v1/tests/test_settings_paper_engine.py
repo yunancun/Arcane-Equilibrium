@@ -154,6 +154,11 @@ def test_development_status_scans_repo_migrations_dynamically(
     assert data["migrations"]["next_version"] == "V004"
     items = {row["id"]: row for row in data["migrations"]["items"]}
     assert items["V001"]["purpose"] == "create alpha schema for development status tests."
+    assert items["V001"]["action_counts"]["create_schema"] == 1
+    assert items["V001"]["header_excerpt"][0] == "V001__create_alpha.sql"
+    assert items["V001"]["size_bytes"] > 0
     assert "beta.items" in items["V003"]["objects"]
+    assert items["V003"]["action_counts"]["create_table"] == 1
     assert items["V003"]["companions"] == ["V003_healthcheck.sql"]
+    assert items["V003"]["companion_count"] == 1
     assert data["development_context"]["todo_excerpt"][0] == "# TODO"
