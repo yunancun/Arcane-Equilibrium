@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-06 | 玄衡 GUI brand cleanup | workspace/reports/2026-05-06--arcane_equilibrium_gui_brand_cleanup.md |
 | 2026-05-06 | 玄衡 · Arcane Equilibrium soft rename integration | workspace/reports/2026-05-06--arcane_equilibrium_soft_rename.md |
 | 2026-05-06 | AgentTodo M0 contract-freeze integration (MAG-001 APPROVED, MAG-002/003 CONDITIONAL) | workspace/reports/2026-05-06--agenttodo_m0_contract_freeze_integration.md |
 | 2026-05-06 | AgentTodo M0 doc sync + MAG-000 operator confirmation | workspace/reports/2026-05-06--agenttodo_m0_doc_sync.md |

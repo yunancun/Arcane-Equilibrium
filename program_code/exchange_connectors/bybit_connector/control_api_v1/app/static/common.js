@@ -1,5 +1,5 @@
 /**
- * OpenClaw Trading System — Shared Utilities
+ * 玄衡 · Arcane Equilibrium — Shared Utilities
  * 共享工具库：认证、API 调用、格式化、解释模式
  */
 

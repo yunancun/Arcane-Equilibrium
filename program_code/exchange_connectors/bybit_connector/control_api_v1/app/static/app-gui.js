@@ -1,6 +1,6 @@
 /**
- * OpenClaw GUI DOM Injection
- * OpenClaw GUI DOM 注入
+ * 玄衡 GUI DOM Injection
+ * 玄衡 GUI DOM 注入
  *
  * MODULE_NOTE (EN): Extracted from app.js (FIX-08 file size).
  * MODULE_NOTE (中): 從 app.js 提取（FIX-08 文件大小）。
@@ -15,7 +15,7 @@ function ensureGuiEnhancements() {
   if (!pageShell) return;
 
   const topbarSubtle = document.querySelector(".topbar p");
-  if (topbarSubtle) topbarSubtle.textContent = "RC2 控制台 · OpenClaw/Bybit 受保护控制面 / RC2 control console for guarded operations";
+  if (topbarSubtle) topbarSubtle.textContent = "RC2 控制台 · 玄衡受保护控制面 / OpenClaw services + Bybit venue adapter";
 
   // 更新表格头 / Update table headers
   const tableHeaders = [
@@ -634,4 +634,3 @@ function ensureGuiEnhancements() {
     document.body.appendChild(modal);
   }
 }
-
