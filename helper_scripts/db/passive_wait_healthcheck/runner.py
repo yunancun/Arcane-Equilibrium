@@ -100,6 +100,7 @@ from .checks_execution import (
 )
 from .checks_scanner_market import (
     check_scanner_market_gate_confirmation,
+    check_scanner_opportunity_shadow_acceptance,
 )
 from .checks_governance import (
     # LG-5-IMPL-3 (2026-05-02) — RFC v2 §6 governance contract sentinels.
@@ -192,7 +193,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50]                                       REF-20 Sprint D R8 maintenance suite (mlde_shadow retention + manifest registry growth + V046 artifact retention + V045 run_state health)
+    [46][48][49][50][51]                                   REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -232,6 +233,7 @@ Execution / cost sentinels added after F7:
   [48] replay_manifest_registry_growth  (REF-20 Sprint D R8 2026-05-05 — replay.experiments row growth rate stall detection)
   [49] replay_artifact_retention        (REF-20 Sprint D R8 2026-05-05 — V046 oldest age + storage cap dual check vs replay_artifact_prune.py cron)
   [50] replay_run_state_health          (REF-20 Sprint D R8 2026-05-05 — V045 failed_rate 7d + zombie 'running' >1h detection)
+  [51] scanner_opportunity_shadow_acceptance (2026-05-06 — snapshot/intent/MLDE row-proof coverage + opportunity_lcb_bps calibration, shadow-only)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -736,6 +738,19 @@ def main() -> int:
             # >4h FAIL detection。
             s, m = check_50_replay_run_state_health(cur)
             results.append(("[50] replay_run_state_health", s, m))
+
+            # [51] Scanner opportunity shadow acceptance: verify recent
+            # scanner snapshots, scanner-origin intents, and MLDE row proof
+            # all carry the neutral opportunity object; then compare
+            # opportunity_lcb_bps with realized post-fee net bps once enough
+            # labels exist. Shadow-only: no enforcement gate or trading
+            # parameter mutation.
+            # [51] scanner opportunity shadow 驗收：驗 snapshot / intent /
+            # MLDE row proof 三段是否都帶 opportunity object，並在 label 足夠
+            # 後比較 opportunity_lcb_bps 對 realized post-fee net bps 的關係。
+            # 純 shadow，不接 enforcement gate，不改交易參數。
+            s, m = check_scanner_opportunity_shadow_acceptance(cur)
+            results.append(("[51] scanner_opportunity_shadow_acceptance", s, m))
     finally:
         conn.close()
 
