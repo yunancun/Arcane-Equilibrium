@@ -63,6 +63,30 @@ def test_parse_iso_datetime_accepts_iso_and_epoch_ms() -> None:
     )
 
 
+def test_instrument_snapshot_rows_skip_symbols_outside_v058_contract() -> None:
+    rows = mod.instrument_snapshot_rows(
+        category="linear",
+        asof=datetime(2026, 5, 7, tzinfo=timezone.utc),
+        status_filter="Closed",
+        instruments=[
+            {
+                "symbol": "BTCUSDT-08MAY26",
+                "status": "Closed",
+                "priceFilter": {"tickSize": "0.10"},
+                "lotSizeFilter": {"qtyStep": "0.001"},
+            },
+            {
+                "symbol": "BTCUSDT",
+                "status": "Trading",
+                "priceFilter": {"tickSize": "0.10"},
+                "lotSizeFilter": {"qtyStep": "0.001"},
+            },
+        ],
+    )
+
+    assert [row["symbol"] for row in rows] == ["BTCUSDT"]
+
+
 def test_parse_edge_snapshot_file_builds_v059_rows(tmp_path: Path) -> None:
     path = tmp_path / "edge_estimates.json"
     path.write_text(
