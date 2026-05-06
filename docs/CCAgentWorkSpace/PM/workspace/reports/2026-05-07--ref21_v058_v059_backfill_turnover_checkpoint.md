@@ -40,11 +40,15 @@ and Bybit public-data parsing.
 - Extended Rust `MarketEvent` with optional `turnover`.
 - Updated Rust scanner timeline ticker reconstruction to use fixture turnover
   when present and fall back to `close * volume` for legacy fixtures.
+- Fixed the real PG full-chain register path to use `embargo_days=14` with
+  `half_life_days=7`, satisfying V041 `chk_embargo_days`.
 
 ## Verification
 
 - `python3 -m pytest tests/helper_scripts/test_ref21_backfill_v058_v059.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_bybit_public_client.py -q`
   - 10 passed.
+- `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_full_chain_run_routes.py tests/helper_scripts/test_ref21_backfill_v058_v059.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_bybit_public_client.py -q`
+  - 15 passed.
 - `python3 -m py_compile helper_scripts/db/ref21_backfill_v058_v059.py program_code/exchange_connectors/bybit_connector/control_api_v1/replay/bybit_public_client.py`
   - passed.
 - `python3 helper_scripts/db/ref21_backfill_v058_v059.py --skip-instruments`

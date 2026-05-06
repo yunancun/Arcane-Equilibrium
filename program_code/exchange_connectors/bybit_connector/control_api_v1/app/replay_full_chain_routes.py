@@ -72,6 +72,8 @@ full_chain_replay_router = APIRouter(
 _STATEMENT_TIMEOUT_MS = _rh.DEFAULT_PG_STATEMENT_TIMEOUT_MS
 _FULL_CHAIN_SYMBOL_SENTINEL = "FULL_CHAIN"
 _REPLAY_LIMITER = base.limiter
+_FULL_CHAIN_HALF_LIFE_DAYS = 7.0
+_FULL_CHAIN_EMBARGO_DAYS = 14.0
 
 
 class ReplayFullChainRunRequest(ReplayFullChainPrepareRequest):
@@ -686,8 +688,8 @@ async def _register_full_chain_experiment(
         data_window_end=body.data_window_end,
         strategy_config_sha256="0" * 64,
         risk_config_sha256="0" * 64,
-        half_life_days=7.0,
-        embargo_days=7.0,
+        half_life_days=_FULL_CHAIN_HALF_LIFE_DAYS,
+        embargo_days=_FULL_CHAIN_EMBARGO_DAYS,
         manifest_jsonb=manifest_jsonb,
         strategy_params=strategy_params,
         risk_overrides=risk_overrides,
