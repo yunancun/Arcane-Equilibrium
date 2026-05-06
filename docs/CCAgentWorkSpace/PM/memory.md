@@ -1285,3 +1285,30 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 ### Boundary
 - This session closes scanner opportunity evaluation and edge-staunching on the current legacy Rust path.
 - It does not mark AgentTodo M2 MAG-020..026 done; formal M2 remains blocked until M1 durable agent row proof and E2/E4 acceptance.
+
+## 2026-05-06 AgentTodo Sprint A MAG-015 Contract Addendum
+
+### Result
+- MAG-015 is done as a docs/meta contract artifact:
+  `docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`.
+- The contract freezes `LocalObservation`, `EvidenceRef`, `SelfStateSnapshot`,
+  `Diagnosis`, `EscalationPacket`, `Proposal`, `ApprovalDecision`, and
+  `ChannelEvent`.
+- It also freezes the Sprint A endpoint allowlist, forbidden endpoint classes,
+  cloud budget defaults, store ownership table, state transitions, and
+  MAG-010..MAG-019 implementation packet.
+
+### Next Order
+1. MAG-010/011/012: durable `agent.messages`, `agent.state_changes`, and
+   `agent.ai_invocations` event-store wiring.
+2. MAG-013/014: E2 DB failure/security audit and E4 Linux nonzero-row proof.
+3. MAG-016/017: read-only `/api/v1/openclaw/status` and `/self-state`.
+4. MAG-018/019: read-only Agent Control foundation and supervisor cloud ledger
+   policy after `agent.ai_invocations` row proof.
+
+### Boundary
+- No runtime, DB schema, DB write, strategy/risk config, live authorization,
+  Decision Lease flag flip, Gateway channel enablement, proposal write endpoint,
+  rebuild, restart, or deploy was performed.
+- Passive healthcheck remained FAIL for known runtime/data gaps; this contract
+  does not change live readiness.

@@ -147,3 +147,10 @@ YYYY-MM-DD HH:MM TZ
 - corrected the TODO cleanup after operator feedback: restored `TODO.md` to the v3 single-timeline record shape instead of the over-compressed 100-line active queue
 - moved only the confirmed stale active-mainline block (`62-finding` as current mainline + Post-Wave-H hotfixes) to `docs/archive/2026-04-30--TODO-stale-active-mainline.md`
 - kept GUI static dirty files untouched
+
+2026-05-06 CEST
+- started AgentTodo Sprint A from MAG-015 as requested
+- completed docs-only MAG-015 contract addendum at `docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`
+- froze local observation, OpenClaw view-model, supervisor escalation, proposal/approval/channel, endpoint allowlist, cloud budget, store ownership, state-transition, and MAG-010..019 implementation-packet contracts
+- next order: MAG-010/011/012 durable event store, then MAG-013/014 Linux row proof, then MAG-016/017 read-only OpenClaw status/self-state
+- no runtime, DB write/schema, strategy/risk config, live authorization, rebuild, restart, or deploy action
