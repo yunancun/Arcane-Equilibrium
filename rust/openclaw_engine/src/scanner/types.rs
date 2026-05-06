@@ -64,6 +64,10 @@ pub struct OpportunityComponents {
     /// Expected round-trip execution cost in bps.
     /// 預期來回執行成本（bps）。
     pub expected_execution_cost_bps: Option<f64>,
+    /// Source used for the fee/slippage component of execution cost.
+    /// 執行成本中 fee/slippage component 的來源。
+    #[serde(default)]
+    pub cost_source: String,
     /// Q90-style cost uncertainty buffer in bps.
     /// q90 風格成本不確定性 buffer（bps）。
     pub cost_uncertainty_bps: Option<f64>,
@@ -97,9 +101,16 @@ pub struct OpportunityDecision {
     /// Net lower-confidence opportunity in bps after cost and uncertainty.
     /// 扣除成本與不確定性後的 net LCB opportunity（bps）。
     pub opportunity_lcb_bps: Option<f64>,
-    /// Shadow admission hint: opportunity_positive / weak / calibration_block / etc.
-    /// shadow admission 提示。
+    /// Admission hint: opportunity_positive / weak / calibration_block / etc.
+    /// admission 提示。
     pub admission_hint: String,
+    /// Demo/live_demo canary admission decision. True means new opens may be
+    /// rejected by the scanner opportunity canary, while close/reduce paths are
+    /// untouched.
+    /// demo/live_demo canary 准入判斷。true 表示新開倉可被 scanner opportunity
+    /// canary 拒絕；close/reduce 不受影響。
+    #[serde(default)]
+    pub canary_block_new_entry: bool,
     /// Compact audit reason.
     /// 精簡審計原因。
     pub reason: String,
@@ -142,8 +153,8 @@ pub struct StrategyRouteJudgment {
     /// Human-readable reason for the route decision.
     /// 路由決策原因。
     pub route_reason: String,
-    /// Shadow-only current opportunity evaluation for this strategy-symbol route.
-    /// 此 strategy-symbol route 的 shadow-only 當前機會判斷。
+    /// Current opportunity evaluation for this strategy-symbol route.
+    /// 此 strategy-symbol route 的當前機會判斷。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opportunity: Option<OpportunityDecision>,
 }

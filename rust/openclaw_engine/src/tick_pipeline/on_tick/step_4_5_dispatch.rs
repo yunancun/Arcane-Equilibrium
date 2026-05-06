@@ -50,6 +50,57 @@ fn execution_reference(
     }
 }
 
+fn scanner_opportunity_canary_reason(scanner_ctx: &IntentScannerContext) -> Option<String> {
+    let opportunity = scanner_ctx.opportunity.as_ref()?;
+    if !opportunity.canary_block_new_entry {
+        return None;
+    }
+    let lcb = opportunity
+        .opportunity_lcb_bps
+        .map(|v| format!("{v:.2}"))
+        .unwrap_or_else(|| "none".to_string());
+    Some(format!(
+        "scanner_opportunity_canary:hint={} lcb={} {}",
+        opportunity.admission_hint, lcb, opportunity.reason
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_pre_risk_rejection(
+    trading_tx: &Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+    recent_intents: &mut std::collections::VecDeque<crate::pipeline_types::TimestampedIntent>,
+    em: &str,
+    ts_ms: u64,
+    signal_id: &str,
+    context_id: &str,
+    intent: &crate::intent_processor::OrderIntent,
+    price: f64,
+    scanner_ctx: Option<&IntentScannerContext>,
+    reason: &str,
+) {
+    push_display_intent(
+        recent_intents,
+        ts_ms,
+        intent,
+        Some(0.0),
+        format!("rejected:{reason}"),
+    );
+    persist_intent(
+        trading_tx,
+        em,
+        ts_ms,
+        signal_id,
+        context_id,
+        intent,
+        0.0,
+        price,
+        em,
+        scanner_ctx,
+    );
+    let verdict_info = crate::intent_processor::VerdictInfo::rejected(reason.to_string());
+    persist_verdict(trading_tx, em, &intent.symbol, ts_ms, &verdict_info, em);
+}
+
 impl TickPipeline {
     /// Execute Step 4 (strategy dispatch) + Step 5 (intent processing with
     /// rejection / fill callbacks) + maker-sweep + deferred-close execution
@@ -296,12 +347,38 @@ impl TickPipeline {
                                         .unwrap_or(candidate.raw_score),
                                 })
                             });
+                        let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
+                        let signal_id = make_strategy_signal_id(
+                            em,
+                            &intent.strategy,
+                            &intent.symbol,
+                            event.ts_ms,
+                        );
+                        persist_strategy_signal(
+                            &self.trading_tx,
+                            &signal_id,
+                            &context_id,
+                            event.ts_ms,
+                            intent,
+                        );
                         if matches!(em, "demo" | "live_demo") {
                             if let Some(reason) = self
                                 .intent_processor
                                 .per_strategy_new_entry_rejection(intent)
                             {
                                 strategy.on_rejection(intent, &reason);
+                                record_pre_risk_rejection(
+                                    &self.trading_tx,
+                                    &mut self.recent_intents,
+                                    em,
+                                    event.ts_ms,
+                                    &signal_id,
+                                    &context_id,
+                                    intent,
+                                    event.last_price,
+                                    scanner_ctx.as_ref(),
+                                    &reason,
+                                );
                                 tracing::debug!(
                                     strategy = %intent.strategy,
                                     symbol = %intent.symbol,
@@ -322,6 +399,18 @@ impl TickPipeline {
                                         sctx.market_status, sctx.route_reason
                                     );
                                     strategy.on_rejection(intent, &reason);
+                                    record_pre_risk_rejection(
+                                        &self.trading_tx,
+                                        &mut self.recent_intents,
+                                        em,
+                                        event.ts_ms,
+                                        &signal_id,
+                                        &context_id,
+                                        intent,
+                                        event.last_price,
+                                        scanner_ctx.as_ref(),
+                                        &reason,
+                                    );
                                     tracing::debug!(
                                         strategy = %intent.strategy,
                                         symbol = %intent.symbol,
@@ -332,22 +421,32 @@ impl TickPipeline {
                                     );
                                     continue;
                                 }
+                                if let Some(reason) = scanner_opportunity_canary_reason(sctx) {
+                                    strategy.on_rejection(intent, &reason);
+                                    record_pre_risk_rejection(
+                                        &self.trading_tx,
+                                        &mut self.recent_intents,
+                                        em,
+                                        event.ts_ms,
+                                        &signal_id,
+                                        &context_id,
+                                        intent,
+                                        event.last_price,
+                                        scanner_ctx.as_ref(),
+                                        &reason,
+                                    );
+                                    tracing::debug!(
+                                        strategy = %intent.strategy,
+                                        symbol = %intent.symbol,
+                                        route_mode = %sctx.route_mode,
+                                        market_status = %sctx.market_status,
+                                        route_reason = %sctx.route_reason,
+                                        "SCANNER-OPPORTUNITY-CANARY: demo/live_demo new entry blocked"
+                                    );
+                                    continue;
+                                }
                             }
                         }
-                        let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
-                        let signal_id = make_strategy_signal_id(
-                            em,
-                            &intent.strategy,
-                            &intent.symbol,
-                            event.ts_ms,
-                        );
-                        persist_strategy_signal(
-                            &self.trading_tx,
-                            &signal_id,
-                            &context_id,
-                            event.ts_ms,
-                            intent,
-                        );
                         if is_exchange_mode {
                             // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
                             // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══

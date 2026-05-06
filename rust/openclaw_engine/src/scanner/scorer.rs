@@ -17,7 +17,7 @@ use crate::scanner::config::{
     CorrelationLimits, EdgeRoutingConfig, HardFilters, MarketJudgmentConfig, OpportunityConfig,
 };
 use crate::scanner::market_judgment::{build_strategy_judgments, classify_market_regime};
-use crate::scanner::opportunity::evaluate_opportunity;
+use crate::scanner::opportunity::{evaluate_opportunity, OpportunityCostPrior};
 use crate::scanner::sectors::{base_from_usdt_symbol, symbol_sector, STABLECOIN_BASES};
 use crate::scanner::strategy_policy::{apply_strategy_policy, ScannerStrategyPolicy};
 use crate::scanner::types::{ScoredSymbol, StrategyCategory, StrategyRouteJudgment};
@@ -622,6 +622,33 @@ pub fn score_ticker_with_policy_and_opportunity(
     opportunity_config: &OpportunityConfig,
     strategy_policy: &ScannerStrategyPolicy,
 ) -> Option<ScoredSymbol> {
+    score_ticker_with_policy_opportunity_and_cost(
+        ticker,
+        btc_change_pct,
+        estimates,
+        hard_filter_config,
+        edge_routing_config,
+        market_judgment_config,
+        opportunity_config,
+        strategy_policy,
+        None,
+    )
+}
+
+/// Build a scored symbol with explicit runtime opportunity cost prior.
+/// 使用明確 runtime opportunity cost prior 生成候選評分。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn score_ticker_with_policy_opportunity_and_cost(
+    ticker: &TickerInfo,
+    btc_change_pct: f64,
+    estimates: &EdgeEstimates,
+    hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
+    opportunity_config: &OpportunityConfig,
+    strategy_policy: &ScannerStrategyPolicy,
+    cost_prior: Option<OpportunityCostPrior>,
+) -> Option<ScoredSymbol> {
     score_ticker_internal(
         ticker,
         btc_change_pct,
@@ -631,6 +658,7 @@ pub fn score_ticker_with_policy_and_opportunity(
         market_judgment_config,
         opportunity_config,
         strategy_policy,
+        cost_prior,
         true,
     )
 }
@@ -676,6 +704,33 @@ pub fn score_ticker_for_context_with_opportunity(
     opportunity_config: &OpportunityConfig,
     strategy_policy: &ScannerStrategyPolicy,
 ) -> Option<ScoredSymbol> {
+    score_ticker_for_context_opportunity_and_cost(
+        ticker,
+        btc_change_pct,
+        estimates,
+        hard_filter_config,
+        edge_routing_config,
+        market_judgment_config,
+        opportunity_config,
+        strategy_policy,
+        None,
+    )
+}
+
+/// Build scanner context with explicit runtime opportunity cost prior.
+/// 使用明確 runtime opportunity cost prior 建立 scanner context。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn score_ticker_for_context_opportunity_and_cost(
+    ticker: &TickerInfo,
+    btc_change_pct: f64,
+    estimates: &EdgeEstimates,
+    hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
+    opportunity_config: &OpportunityConfig,
+    strategy_policy: &ScannerStrategyPolicy,
+    cost_prior: Option<OpportunityCostPrior>,
+) -> Option<ScoredSymbol> {
     score_ticker_internal(
         ticker,
         btc_change_pct,
@@ -685,6 +740,7 @@ pub fn score_ticker_for_context_with_opportunity(
         market_judgment_config,
         opportunity_config,
         strategy_policy,
+        cost_prior,
         false,
     )
 }
@@ -699,6 +755,7 @@ fn score_ticker_internal(
     market_judgment_config: &MarketJudgmentConfig,
     opportunity_config: &OpportunityConfig,
     strategy_policy: &ScannerStrategyPolicy,
+    cost_prior: Option<OpportunityCostPrior>,
     enforce_hard_filters: bool,
 ) -> Option<ScoredSymbol> {
     if enforce_hard_filters {
@@ -728,6 +785,7 @@ fn score_ticker_internal(
             ticker,
             cell,
             opportunity_config,
+            cost_prior,
         ));
     }
     let best_route = [
@@ -777,6 +835,7 @@ fn score_ticker_internal(
                 ticker,
                 estimates.get_cell(best_key, &ticker.symbol),
                 opportunity_config,
+                cost_prior,
             ));
             (fitness.best, fallback_judgment)
         }

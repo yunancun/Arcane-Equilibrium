@@ -24,10 +24,11 @@ use crate::database::{try_send_trading_msg, TradingMsg};
 use crate::edge_estimates::EdgeEstimates;
 use crate::market_data_client::MarketDataClient;
 use crate::scanner::config::ScannerConfig;
+use crate::scanner::opportunity::OpportunityCostPrior;
 use crate::scanner::registry::SymbolRegistry;
 use crate::scanner::scorer::{
-    apply_correlation_filter, score_ticker_for_context_with_opportunity,
-    score_ticker_with_policy_and_opportunity,
+    apply_correlation_filter, score_ticker_for_context_opportunity_and_cost,
+    score_ticker_with_policy_opportunity_and_cost,
 };
 use crate::scanner::strategy_policy::ScannerStrategyPolicyStores;
 use crate::scanner::types::ScanResult;
@@ -65,6 +66,7 @@ pub struct ScannerRunner {
     market_client: Arc<MarketDataClient>,
     edge_estimates: Arc<parking_lot::RwLock<EdgeEstimates>>,
     scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
+    account_manager: Option<Arc<crate::account_manager::AccountManager>>,
     strategy_policy_stores: ScannerStrategyPolicyStores,
     ws_tx: mpsc::UnboundedSender<WsTopicChange>,
     pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
@@ -81,6 +83,7 @@ impl ScannerRunner {
         market_client: Arc<MarketDataClient>,
         edge_estimates: Arc<parking_lot::RwLock<EdgeEstimates>>,
         scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
+        account_manager: Option<Arc<crate::account_manager::AccountManager>>,
         strategy_policy_stores: ScannerStrategyPolicyStores,
         ws_tx: mpsc::UnboundedSender<WsTopicChange>,
         pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
@@ -92,6 +95,7 @@ impl ScannerRunner {
             market_client,
             edge_estimates,
             scanner_config,
+            account_manager,
             strategy_policy_stores,
             ws_tx,
             pipeline_cmd_tx,
@@ -158,7 +162,8 @@ impl ScannerRunner {
                 tickers
                     .iter()
                     .filter_map(|t| {
-                        score_ticker_with_policy_and_opportunity(
+                        let cost_prior = self.opportunity_cost_prior(&t.symbol, &config);
+                        score_ticker_with_policy_opportunity_and_cost(
                             t,
                             btc_change_pct,
                             &estimates_guard,
@@ -167,6 +172,7 @@ impl ScannerRunner {
                             &config.market_judgment,
                             &config.opportunity,
                             &strategy_policy,
+                            cost_prior,
                         )
                     })
                     .collect()
@@ -240,7 +246,8 @@ impl ScannerRunner {
                         continue;
                     }
                     if let Some(ticker) = by_ticker.get(symbol.as_str()) {
-                        if let Some(candidate) = score_ticker_for_context_with_opportunity(
+                        let cost_prior = self.opportunity_cost_prior(&ticker.symbol, &config);
+                        if let Some(candidate) = score_ticker_for_context_opportunity_and_cost(
                             ticker,
                             btc_change_pct,
                             &estimates_guard,
@@ -249,6 +256,7 @@ impl ScannerRunner {
                             &config.market_judgment,
                             &config.opportunity,
                             &strategy_policy,
+                            cost_prior,
                         ) {
                             if seen.insert(symbol.clone()) {
                                 out.push(candidate);
@@ -342,11 +350,67 @@ impl ScannerRunner {
             }
         }
     }
+
+    fn opportunity_cost_prior(
+        &self,
+        symbol: &str,
+        config: &ScannerConfig,
+    ) -> Option<OpportunityCostPrior> {
+        let account_manager = self.account_manager.as_ref()?;
+        let source = if account_manager.fee_rate_count() == 0 {
+            "account_manager_default_taker_fee"
+        } else {
+            "account_manager_taker_fee"
+        };
+        // Scanner admission does not know the final strategy TIF; taker is the
+        // conservative fee prior and prevents cost underestimation.
+        Some(OpportunityCostPrior {
+            one_way_fee_bps: account_manager.taker_fee(symbol) * 10_000.0,
+            slippage_buffer_bps: config.opportunity.slippage_buffer_bps,
+            source,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_test_runner(
+        account_manager: Option<Arc<crate::account_manager::AccountManager>>,
+    ) -> ScannerRunner {
+        let (ws_tx, _ws_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        ScannerRunner {
+            registry: Arc::new(SymbolRegistry::new(vec![], vec![])),
+            market_client: Arc::new(MarketDataClient::new(Arc::new(
+                crate::bybit_rest_client::BybitRestClient::new(
+                    crate::bybit_rest_client::BybitEnvironment::Demo,
+                    None,
+                    None,
+                )
+                .expect("demo client"),
+            ))),
+            edge_estimates: Arc::new(parking_lot::RwLock::new(EdgeEstimates::empty())),
+            scanner_config: Arc::new(crate::config::ConfigStore::new(ScannerConfig::default())),
+            account_manager,
+            strategy_policy_stores: ScannerStrategyPolicyStores::new(
+                Arc::new(crate::config::ConfigStore::new(
+                    crate::config::RiskConfig::default(),
+                )),
+                Arc::new(crate::config::ConfigStore::new(
+                    crate::config::RiskConfig::default(),
+                )),
+                Arc::new(crate::config::ConfigStore::new(
+                    crate::config::RiskConfig::default(),
+                )),
+            ),
+            ws_tx,
+            pipeline_cmd_tx: cmd_tx,
+            trading_tx: None,
+            cancel: CancellationToken::new(),
+        }
+    }
 
     /// EN: topics_for_symbol generates market, ticker, and BBO topics for each symbol.
     /// 中文: topics_for_symbol 為每個交易對生成行情、ticker 與 BBO 主題。
@@ -376,38 +440,23 @@ mod tests {
     /// 中文: 通道關閉時 query_open_positions 返回空集合。
     #[tokio::test]
     async fn test_query_open_positions_channel_closed() {
-        let (ws_tx, _ws_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         drop(cmd_rx); // receiver dropped → send will fail
-        let runner = ScannerRunner {
-            registry: Arc::new(SymbolRegistry::new(vec![], vec![])),
-            market_client: Arc::new(MarketDataClient::new(Arc::new(
-                crate::bybit_rest_client::BybitRestClient::new(
-                    crate::bybit_rest_client::BybitEnvironment::Demo,
-                    None,
-                    None,
-                )
-                .expect("demo client"),
-            ))),
-            edge_estimates: Arc::new(parking_lot::RwLock::new(EdgeEstimates::empty())),
-            scanner_config: Arc::new(crate::config::ConfigStore::new(ScannerConfig::default())),
-            strategy_policy_stores: ScannerStrategyPolicyStores::new(
-                Arc::new(crate::config::ConfigStore::new(
-                    crate::config::RiskConfig::default(),
-                )),
-                Arc::new(crate::config::ConfigStore::new(
-                    crate::config::RiskConfig::default(),
-                )),
-                Arc::new(crate::config::ConfigStore::new(
-                    crate::config::RiskConfig::default(),
-                )),
-            ),
-            ws_tx,
-            pipeline_cmd_tx: cmd_tx,
-            trading_tx: None,
-            cancel: CancellationToken::new(),
-        };
+        let mut runner = make_test_runner(None);
+        runner.pipeline_cmd_tx = cmd_tx;
         let result = runner.query_open_positions().await;
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_opportunity_cost_prior_uses_account_manager_default_at_cold_boot() {
+        let runner = make_test_runner(Some(
+            Arc::new(crate::account_manager::AccountManager::new()),
+        ));
+        let prior = runner
+            .opportunity_cost_prior("BTCUSDT", &ScannerConfig::default())
+            .expect("account manager prior");
+        assert_eq!(prior.source, "account_manager_default_taker_fee");
+        assert!((prior.one_way_fee_bps - 5.5).abs() < 1e-9);
     }
 }
