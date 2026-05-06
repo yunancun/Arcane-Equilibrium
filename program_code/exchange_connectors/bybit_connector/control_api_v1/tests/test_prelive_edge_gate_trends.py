@@ -77,6 +77,14 @@ def test_fetch_prelive_edge_gate_trends_degrades_when_pg_unavailable(monkeypatch
     assert payload["available"] is False
     assert set(payload["gates"]) == {"33", "38", "40"}
     assert payload["readiness"]["ready"] is False
+    assert len(payload["strategy_status"]) >= 5
+    assert {row["strategy_name"] for row in payload["strategy_status"]} >= {
+        "grid_trading",
+        "ma_crossover",
+        "funding_arb",
+        "bb_breakout",
+        "bb_reversion",
+    }
     assert payload["error"] == "postgres connection unavailable"
 
 
@@ -91,6 +99,7 @@ async def test_prelive_edge_gate_route_returns_enveloped_payload(monkeypatch: py
             "window_days": window_days,
             "gates": {"33": {}, "38": {}, "40": {}},
             "readiness": {"ready": False, "status": "not_ready", "items": []},
+            "strategy_status": [],
         }
 
     monkeypatch.setattr(routes, "fetch_prelive_edge_gate_trends", fake_fetch)
@@ -104,9 +113,13 @@ async def test_prelive_edge_gate_route_returns_enveloped_payload(monkeypatch: py
 def test_live_static_tab_renders_prelive_edge_gate_contract() -> None:
     root = Path(__file__).resolve().parents[1]
     tab = (root / "app" / "static" / "tab-live.html").read_text(encoding="utf-8")
+    edge_tab = (root / "app" / "static" / "tab-edge-gates.html").read_text(encoding="utf-8")
     common = (root / "app" / "static" / "common.js").read_text(encoding="utf-8")
 
     assert "/api/v1/strategy/prelive/edge-gates" in tab
+    assert "/api/v1/strategy/prelive/edge-gates" in edge_tab
+    assert "Strategy Gate Matrix" in edge_tab
+    assert "Global Healthcheck" in edge_tab
     assert "loadPreLiveEdgeGates" in tab
     assert "live-readiness-checklist" in tab
     assert "ocMiniTrendSvg" in common

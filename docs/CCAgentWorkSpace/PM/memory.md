@@ -1256,3 +1256,13 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Boundary
 - No trading mode, risk config, live auth, engine runtime, DB migration apply, deploy, rebuild, restart, or strategy parameter change.
+
+## 2026-05-06 Console Navigation + Edge Gate Tab
+
+### Result
+- `/console` navigation is grouped into `核心`, `交易`, `策略/Edge`, `治理`, `智能`, and `运维` instead of one flat tab strip.
+- Added standalone `Pre-Live Gates` tab (`tab-edge-gates.html`) for [33]/[38]/[40] Edge Gate Trends, Live readiness, strategy pass/warn/fail/crisis status, active negative cells, and global healthcheck PASS/WARN/FAIL.
+- `/api/v1/strategy/prelive/edge-gates` now includes read-only `strategy_status` for per-strategy visibility; frontend has a fallback from existing bad-cell payload if the backend has not restarted yet.
+
+### Boundary
+- Read-only source/static/API change; no trading mode, risk config, live auth, engine runtime, DB migration apply, rebuild, restart, or strategy parameter change.

@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pre-Live Gate 趋势 / Edge Gate Trends</title>
+<script src="/static/common.js?v=20260506.nav-edge-gates-v1"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<style>
+  html, body { min-height:100%; margin:0; overflow-y:auto; background:var(--bg); color:var(--text); }
+  .edge-wrap { padding:16px; max-width:1280px; margin:0 auto; }
+  .edge-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .edge-title { margin:0; font-size:18px; line-height:1.25; }
+  .edge-sub { margin-top:4px; color:var(--text-dim); font-size:12px; line-height:1.5; }
+  .edge-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .edge-select {
+    background:var(--bg); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:5px 8px; font-size:12px;
+  }
+  .edge-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:14px; }
+  .edge-section { margin:14px 0 8px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .edge-section-title { font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; }
+  .edge-health-grid { display:grid; grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr); gap:10px; }
+  .edge-status-card {
+    background:var(--card-bg); border:1px solid var(--border); border-radius:8px;
+    padding:12px; min-height:120px;
+  }
+  .edge-health-score-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); gap:8px; margin-top:10px; }
+  .edge-score .label { font-size:9px; color:var(--text-dim); text-transform:uppercase; line-height:1.25; }
+  .edge-score .value { font-size:18px; font-weight:700; line-height:1.25; }
+  .edge-chip-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .strategy-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .strategy-table th {
+    text-align:left; padding:8px 10px; border-bottom:1px solid var(--border);
+    color:var(--text-dim); font-weight:600; font-size:11px;
+  }
+  .strategy-table td { padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:top; }
+  .strategy-table tr:last-child td { border-bottom:none; }
+  .strategy-name { font-weight:700; color:var(--text); }
+  .bad-cell-list { margin-top:4px; color:var(--text-dim); font-size:11px; line-height:1.45; }
+  .edge-muted { color:var(--text-dim); font-size:12px; }
+  .edge-card-bad { border-color:rgba(248,81,73,0.35); }
+  .edge-card-warn { border-color:rgba(210,153,34,0.35); }
+  .edge-card-good { border-color:rgba(63,185,80,0.28); }
+  @media (max-width: 820px) {
+    .edge-health-grid { grid-template-columns:1fr; }
+    .strategy-table th:nth-child(5), .strategy-table td:nth-child(5) { display:none; }
+  }
+</style>
+
+<div class="edge-wrap">
+  <div class="edge-head">
+    <div>
+      <h2 class="edge-title">&#x1F4C8; Pre-Live Gate 趋势 / Edge Gate Trends</h2>
+      <div class="edge-sub">策略达标、crisis、Edge gates 与全局 healthcheck fail/warn 汇总。</div>
+    </div>
+    <div class="edge-toolbar">
+      <select id="edge-window-days" class="edge-select" onchange="loadAll()">
+        <option value="7">7d</option>
+        <option value="14">14d</option>
+        <option value="30">30d</option>
+      </select>
+      <button class="oc-btn oc-btn-primary" onclick="loadAll()">刷新 / Refresh</button>
+      <span id="edge-updated-chip" class="oc-chip oc-chip-neutral">loading...</span>
+    </div>
+  </div>
+
+  <div class="edge-summary">
+    <div class="oc-metric"><div class="oc-metric-label">Live Readiness</div><div class="oc-metric-val" id="edge-readiness-val">--</div><div class="oc-metric-sub" id="edge-readiness-sub"></div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Strategy Crisis</div><div class="oc-metric-val" id="edge-crisis-val">--</div><div class="oc-metric-sub" id="edge-crisis-sub"></div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Strategies Passing</div><div class="oc-metric-val" id="edge-strategy-pass-val">--</div><div class="oc-metric-sub" id="edge-strategy-pass-sub"></div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Global Healthcheck</div><div class="oc-metric-val" id="edge-health-val">--</div><div class="oc-metric-sub" id="edge-health-sub"></div></div>
+  </div>
+
+  <div class="edge-health-grid">
+    <div class="edge-status-card" id="edge-health-card">
+      <div class="edge-section-title">&#x1F6E1; 全局 Healthcheck / Global Healthcheck</div>
+      <div id="edge-health-body" class="edge-muted" style="margin-top:10px">Loading...</div>
+    </div>
+    <div class="edge-status-card" id="edge-readiness-card">
+      <div class="edge-section-title">&#x2705; Live Readiness Checklist</div>
+      <div id="edge-readiness-list" class="oc-readiness-list" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <div class="edge-section">
+    <div class="edge-section-title">&#x1F9ED; Gate Cards / 关键 Gate</div>
+    <span class="edge-muted">[33] maker fill · [38] grid lifecycle · [40] realized edge</span>
+  </div>
+  <div id="edge-gate-grid" class="oc-edge-gate-grid">
+    <div class="oc-loading">Loading...</div>
+  </div>
+
+  <div class="edge-section">
+    <div class="edge-section-title">&#x1F3AF; 策略达标矩阵 / Strategy Gate Matrix</div>
+    <span id="edge-strategy-source" class="edge-muted"></span>
+  </div>
+  <div class="edge-status-card">
+    <div style="overflow-x:auto">
+      <table class="strategy-table">
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th>Status</th>
+            <th>24h Avg Net</th>
+            <th>24h Rows</th>
+            <th>Win Rate</th>
+            <th>Window Avg</th>
+            <th>Reason / Crisis Cells</th>
+          </tr>
+        </thead>
+        <tbody id="edge-strategy-body">
+          <tr><td colspan="7" class="edge-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const KNOWN_STRATEGIES = ['grid_trading', 'ma_crossover', 'funding_arb', 'bb_breakout', 'bb_reversion'];
+
+function toneFor(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'pass' || s === 'ready') return 'good';
+  if (s === 'warn' || s === 'not_ready' || s === 'unknown') return 'warn';
+  if (s === 'fail' || s === 'crisis') return 'bad';
+  return 'neutral';
+}
+
+function chipFor(status, label) {
+  const s = String(status || 'unknown').toLowerCase();
+  const text = label || (
+    s === 'pass' ? 'PASS' :
+    s === 'ready' ? 'READY' :
+    s === 'warn' ? 'WARN' :
+    s === 'fail' ? 'FAIL' :
+    s === 'crisis' ? 'CRISIS' :
+    s === 'not_ready' ? 'NOT READY' : 'UNKNOWN'
+  );
+  return ocChip(text, toneFor(s));
+}
+
+function metricValue(value, suffix, decimals) {
+  if (value == null || value === '') return '--';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return ocEsc(value);
+  const d = decimals == null ? 1 : decimals;
+  return ocNum(n, d) + (suffix || '');
+}
+
+function trendValues(gate) {
+  const rows = Array.isArray(gate && gate.series) ? gate.series : [];
+  if (!gate) return [];
+  if (gate.gate_id === '33') return rows.map(r => r.fee_drop_pct);
+  if (gate.gate_id === '38') return rows.map(r => r.lifetime_ratio);
+  if (gate.gate_id === '40') return rows.map(r => r.avg_net_bps);
+  return [];
+}
+
+function gateValueCells(gate) {
+  const c = (gate && gate.current) || {};
+  if (!gate) return [];
+  if (gate.gate_id === '33') {
+    return [
+      ['Fee drop', metricValue(c.fee_drop_pct, '%', 1)],
+      ['Maker-like', metricValue(c.maker_like_pct, '%', 1)],
+      ['Entry fills', metricValue(c.entry_fills, '', 0)],
+    ];
+  }
+  if (gate.gate_id === '38') {
+    return [
+      ['Lifetime', metricValue(c.lifetime_ratio, 'x', 2)],
+      ['Live p50', metricValue(c.live_demo_p50_min, 'm', 1)],
+      ['Re-entry', metricValue(c.live_demo_reentry_rate, '', 2)],
+    ];
+  }
+  if (gate.gate_id === '40') {
+    return [
+      ['Avg net', metricValue(c.avg_net_bps, ' bps', 2)],
+      ['Rows', metricValue(c.rows, '', 0)],
+      ['Bad cells', metricValue((c.bad_cells || []).length, '', 0)],
+    ];
+  }
+  return [];
+}
+
+function renderGateCard(gate) {
+  const tone = toneFor(gate.status);
+  const cells = gateValueCells(gate).map(pair =>
+    '<div class="oc-edge-gate-value">' +
+      '<div class="label">' + ocEsc(pair[0]) + '</div>' +
+      '<div class="value">' + pair[1] + '</div>' +
+    '</div>'
+  ).join('');
+  return '<div class="oc-edge-gate-card edge-card-' + tone + '">' +
+    '<div class="oc-edge-gate-head">' +
+      '<div><div class="oc-edge-gate-title">[' + ocEsc(gate.gate_id) + '] ' + ocEsc(gate.label || gate.key) + '</div>' +
+      '<div class="oc-edge-gate-sub">' + ocEsc(gate.key || '') + '</div></div>' +
+      chipFor(gate.status) +
+    '</div>' +
+    '<div class="oc-edge-gate-values">' + cells + '</div>' +
+    ocMiniTrendSvg(trendValues(gate), { tone: tone, includeZero: gate.gate_id === '40' }) +
+    '<div class="oc-edge-gate-summary">' + ocEsc(gate.summary || '') + '</div>' +
+  '</div>';
+}
+
+function readinessValue(item) {
+  const key = item && item.key ? String(item.key) : '';
+  if (key.indexOf('fee_drop') >= 0 || key.indexOf('maker_like') >= 0) return metricValue(item.value, '%', 1);
+  if (key.indexOf('avg_net') >= 0) return metricValue(item.value, ' bps', 2);
+  if (key.indexOf('ratio') >= 0 || key.indexOf('rate') >= 0) return metricValue(item.value, '', 2);
+  return metricValue(item.value, '', 0);
+}
+
+function renderReadiness(payload) {
+  const box = document.getElementById('edge-readiness-list');
+  const readiness = payload && payload.readiness;
+  const items = readiness && Array.isArray(readiness.items) ? readiness.items : [];
+  if (!items.length) {
+    box.innerHTML = '<div class="edge-muted">No readiness checklist</div>';
+    return;
+  }
+  const rows = [
+    '<div class="oc-readiness-row">' +
+      '<div><div class="oc-readiness-label">Live readiness</div>' +
+      '<div class="oc-readiness-detail">' + ocEsc(String(readiness.passed || 0)) + '/' +
+        ocEsc(String(readiness.total || items.length)) + ' passed · unknown ' + ocEsc(String(readiness.unknown || 0)) +
+      '</div></div><div>' + chipFor(readiness.status || (readiness.ready ? 'ready' : 'not_ready')) + '</div>' +
+      '<div class="oc-readiness-target">[33] [38] [40]</div></div>'
+  ];
+  items.forEach(item => {
+    rows.push(
+      '<div class="oc-readiness-row">' +
+        '<div><div class="oc-readiness-label">[' + ocEsc(item.gate || '') + '] ' + ocEsc(item.label || item.key || '') + '</div>' +
+        '<div class="oc-readiness-detail">' + ocEsc(item.detail || '') + '</div></div>' +
+        '<div>' + chipFor(item.status || (item.passed ? 'pass' : 'fail')) + '</div>' +
+        '<div class="oc-readiness-target">' + readinessValue(item) + ' / ' + ocEsc(item.target || '') + '</div>' +
+      '</div>'
+    );
+  });
+  box.innerHTML = rows.join('');
+}
+
+function fallbackStrategyStatus(payload) {
+  const gate38 = payload && payload.gates && payload.gates['38'];
+  const gate40 = payload && payload.gates && payload.gates['40'];
+  const badCells = ((gate40 && gate40.current && gate40.current.bad_cells) || []);
+  const byStrategy = {};
+  badCells.forEach(cell => {
+    const name = cell.strategy_name || '';
+    if (!name) return;
+    if (!byStrategy[name]) byStrategy[name] = [];
+    byStrategy[name].push(cell);
+  });
+  return KNOWN_STRATEGIES.map(name => {
+    const bad = byStrategy[name] || [];
+    let status = 'unknown';
+    let summary = 'strategy_status field not available from backend';
+    if (bad.length) {
+      status = 'crisis';
+      summary = bad.length + ' active negative cell(s)';
+    } else if (name === 'grid_trading' && gate38 && ['warn', 'fail'].includes(String(gate38.status))) {
+      status = gate38.status === 'fail' ? 'fail' : 'warn';
+      summary = 'grid lifecycle gate ' + gate38.status;
+    } else if (gate40 && gate40.status === 'pass') {
+      status = 'pass';
+      summary = 'no active 24h negative cell in current payload';
+    }
+    return { strategy_name:name, status, summary, rows_24h:null, avg_net_24h_bps:null, win_rate_24h_pct:null, rows_window:null, avg_net_window_bps:null, bad_cells:bad };
+  });
+}
+
+function renderStrategies(payload) {
+  const rows = Array.isArray(payload && payload.strategy_status) && payload.strategy_status.length
+    ? payload.strategy_status
+    : fallbackStrategyStatus(payload);
+  const source = Array.isArray(payload && payload.strategy_status) && payload.strategy_status.length
+    ? 'source=strategy_status'
+    : 'source=fallback_from_bad_cells';
+  ocSetText('edge-strategy-source', source);
+  const crisis = rows.filter(r => String(r.status).toLowerCase() === 'crisis');
+  const passing = rows.filter(r => String(r.status).toLowerCase() === 'pass');
+  ocSetText('edge-crisis-val', String(crisis.length));
+  document.getElementById('edge-crisis-val').className = 'oc-metric-val ' + (crisis.length ? 'red' : 'green');
+  ocSetText('edge-crisis-sub', crisis.length ? crisis.map(r => r.strategy_name).join(', ') : 'no crisis strategy');
+  ocSetText('edge-strategy-pass-val', String(passing.length) + '/' + String(rows.length || KNOWN_STRATEGIES.length));
+  document.getElementById('edge-strategy-pass-val').className = 'oc-metric-val ' + (passing.length === rows.length ? 'green' : 'yellow');
+  ocSetText('edge-strategy-pass-sub', rows.filter(r => String(r.status).toLowerCase() !== 'pass').map(r => r.strategy_name + ':' + r.status).join(', ') || 'all pass');
+
+  const html = rows.map(row => {
+    const bad = Array.isArray(row.bad_cells) ? row.bad_cells : [];
+    const badHtml = bad.length
+      ? '<div class="bad-cell-list">' + bad.map(c => ocEsc((c.engine_mode || '') + ' ' + (c.symbol || '') + ' n=' + (c.rows || 0) + ' avg=' + metricValue(c.avg_net_bps, ' bps', 2))).join('<br>') + '</div>'
+      : '';
+    return '<tr>' +
+      '<td><span class="strategy-name">' + ocEsc(row.strategy_name || '--') + '</span></td>' +
+      '<td>' + chipFor(row.status) + '</td>' +
+      '<td>' + metricValue(row.avg_net_24h_bps, ' bps', 2) + '</td>' +
+      '<td>' + metricValue(row.rows_24h, '', 0) + '</td>' +
+      '<td>' + metricValue(row.win_rate_24h_pct, '%', 1) + '</td>' +
+      '<td>' + metricValue(row.avg_net_window_bps, ' bps', 2) + '<div class="edge-muted">n=' + metricValue(row.rows_window, '', 0) + '</div></td>' +
+      '<td><div>' + ocEsc(row.summary || '') + '</div>' + badHtml + '</td>' +
+    '</tr>';
+  }).join('');
+  ocSetHtml('edge-strategy-body', html || '<tr><td colspan="7" class="edge-muted">No strategy status</td></tr>');
+}
+
+async function loadEdgeGates() {
+  const days = document.getElementById('edge-window-days').value || '7';
+  const d = await ocApi('/api/v1/strategy/prelive/edge-gates?window_days=' + encodeURIComponent(days));
+  const payload = d && d.data;
+  const gateBox = document.getElementById('edge-gate-grid');
+  if (!payload || !payload.gates) {
+    gateBox.innerHTML = '<div class="edge-muted">No edge gate trend data</div>';
+    ocSetText('edge-readiness-val', 'UNKNOWN');
+    document.getElementById('edge-readiness-val').className = 'oc-metric-val yellow';
+    ocSetText('edge-readiness-sub', 'edge gate API unavailable');
+    return;
+  }
+  const readiness = payload.readiness || {};
+  const ready = !!readiness.ready;
+  ocSetText('edge-readiness-val', ready ? 'READY' : 'NOT READY');
+  document.getElementById('edge-readiness-val').className = 'oc-metric-val ' + (ready ? 'green' : 'yellow');
+  ocSetText('edge-readiness-sub', String(readiness.passed || 0) + '/' + String(readiness.total || 0) + ' passed · unknown ' + String(readiness.unknown || 0));
+  const gates = ['33', '38', '40'].map(id => payload.gates[id]).filter(Boolean);
+  gateBox.innerHTML = gates.length ? gates.map(renderGateCard).join('') : '<div class="edge-muted">No gate payload</div>';
+  renderReadiness(payload);
+  renderStrategies(payload);
+  ocSetText('edge-updated-chip', payload.generated_at ? ('updated ' + ocTimeShort(payload.generated_at)) : 'updated');
+}
+
+function healthToneFrom(h) {
+  if (!h) return { status:'unknown', tone:'warn', reason:'health API unavailable' };
+  const scores = h.scores || {};
+  const gates = h.gates || {};
+  const scoreVals = Object.values(scores).map(Number).filter(Number.isFinite);
+  const failedGates = Object.values(gates).filter(v => String(v).toLowerCase() !== 'passed' && String(v).toLowerCase() !== 'true');
+  if (failedGates.length || scoreVals.some(v => v < 50)) return { status:'FAIL', tone:'bad', reason: failedGates.length + ' failed gate(s)' };
+  if (scoreVals.some(v => v < 80)) return { status:'WARN', tone:'warn', reason:'score below 80' };
+  return { status:'PASS', tone:'good', reason:'scores and gates pass' };
+}
+
+async function loadSystemHealth() {
+  const d = await ocApi('/api/v1/system/health');
+  const h = d && d.data;
+  const state = healthToneFrom(h);
+  ocSetText('edge-health-val', state.status);
+  document.getElementById('edge-health-val').className = 'oc-metric-val ' + (state.tone === 'good' ? 'green' : state.tone === 'bad' ? 'red' : 'yellow');
+  ocSetText('edge-health-sub', state.reason);
+  const body = document.getElementById('edge-health-body');
+  if (!h) {
+    body.innerHTML = '<div class="edge-muted">Healthcheck unavailable</div>';
+    return;
+  }
+  const scores = h.scores || {};
+  const gates = h.gates || {};
+  let html = '<div>' + chipFor(state.tone === 'bad' ? 'fail' : state.tone === 'good' ? 'pass' : 'warn', 'HEALTH ' + state.status) + '</div>';
+  html += '<div class="edge-health-score-grid">';
+  Object.entries(scores).forEach(([key, val]) => {
+    const n = Number(val);
+    const cls = n >= 80 ? 'green' : n >= 50 ? 'yellow' : 'red';
+    html += '<div class="edge-score"><div class="label">' + ocEsc(key.replace(/_/g, ' ')) + '</div><div class="value ' + cls + '">' + ocEsc(String(val)) + '</div></div>';
+  });
+  html += '</div><div class="edge-chip-row">';
+  Object.entries(gates).forEach(([key, val]) => {
+    const ok = String(val).toLowerCase() === 'passed' || String(val).toLowerCase() === 'true';
+    html += ocChip((ok ? 'PASS ' : 'FAIL ') + key.replace(/_gate_state|_state/g, '').replace(/_/g, ' '), ok ? 'good' : 'bad');
+  });
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadEdgeGates(), loadSystemHealth()]);
+}
+
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
