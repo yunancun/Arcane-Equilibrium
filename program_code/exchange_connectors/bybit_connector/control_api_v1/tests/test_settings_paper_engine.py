@@ -76,3 +76,29 @@ def test_paper_engine_reports_restart_required_when_runtime_differs(
     assert data["enabled"] is True
     assert data["runtime_enabled"] is False
     assert data["restart_required"] is True
+
+
+def test_development_mode_defaults_disabled(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _client(tmp_path, monkeypatch)
+
+    resp = client.get("/api/v1/settings/development-mode")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enabled"] is False
+    assert data["restart_required"] is False
+    assert data["source"] == "default_disabled"
+    assert data["scope"] == "gui_visibility_only"
+
+
+def test_development_mode_post_persists_env_file(tmp_path: Path, monkeypatch) -> None:
+    client, env_file = _client(tmp_path, monkeypatch)
+
+    resp = client.post("/api/v1/settings/development-mode", json={"enabled": True})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enabled"] is True
+    assert data["restart_required"] is False
+    assert "OPENCLAW_GUI_DEVELOPMENT_MODE=1" in env_file.read_text(encoding="utf-8")
+    assert oct(os.stat(env_file).st_mode & 0o777) == "0o600"

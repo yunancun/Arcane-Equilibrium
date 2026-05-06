@@ -40,6 +40,8 @@ _THIS_DIR = Path(__file__).resolve().parent
 _STATIC_DIR = _THIS_DIR.parent.parent / "app" / "static"
 _TAB_PAPER_HTML = _STATIC_DIR / "tab-paper.html"
 _TAB_REPLAY_HTML = _STATIC_DIR / "tab-replay.html"
+_TAB_DEVELOPMENT_HTML = _STATIC_DIR / "tab-development.html"
+_TAB_LIVE_HTML = _STATIC_DIR / "tab-live.html"
 _CONSOLE_HTML = _STATIC_DIR / "console.html"
 _LOGIN_HTML = _STATIC_DIR / "login.html"
 _INDEX_HTML = _STATIC_DIR / "index.html"
@@ -67,10 +69,26 @@ def tab_replay_html() -> str:
 
 
 @pytest.fixture(scope="module")
+def tab_development_html() -> str:
+    """Read tab-development.html once per test module / 每模組讀一次。"""
+    assert _TAB_DEVELOPMENT_HTML.exists(), (
+        f"tab-development.html not found at {_TAB_DEVELOPMENT_HTML}"
+    )
+    return _TAB_DEVELOPMENT_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
 def console_html() -> str:
     """Read console.html once per test module / 每模組讀一次。"""
     assert _CONSOLE_HTML.exists(), f"console.html not found at {_CONSOLE_HTML}"
     return _CONSOLE_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def tab_live_html() -> str:
+    """Read tab-live.html once per test module / 每模組讀一次。"""
+    assert _TAB_LIVE_HTML.exists(), f"tab-live.html not found at {_TAB_LIVE_HTML}"
+    return _TAB_LIVE_HTML.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -106,6 +124,32 @@ def test_console_has_replay_and_optional_paper_tabs(console_html: str) -> None:
     assert "tab-replay.html" in console_html
     assert "requiresPaperEngine: true" in console_html
     assert "/api/v1/settings/paper-engine" in console_html
+
+
+def test_console_has_settings_gated_development_tab(console_html: str) -> None:
+    """Development tab is present but hidden until the setting is enabled."""
+    assert "id: 'development'" in console_html
+    assert "tab-development.html" in console_html
+    assert "requiresDevelopmentMode: true" in console_html
+    assert "/api/v1/settings/development-mode" in console_html
+    assert "openclaw-development-mode-setting" in console_html
+
+
+def test_development_tab_covers_v001_to_v063(tab_development_html: str) -> None:
+    """Development tab renders the full V001-V063 migration dashboard range."""
+    assert "V001__create_schemas.sql" in tab_development_html
+    assert "V061__replay_promotion_metrics_calculator.sql" in tab_development_html
+    assert "V063" in tab_development_html
+    assert "for (let i = 1; i <= 63; i += 1)" in tab_development_html
+
+
+def test_global_mode_control_surfaces_are_development_gated(
+    tab_live_html: str,
+) -> None:
+    """Live's global-mode explanatory surface is gated by Development Mode."""
+    assert 'id="live-global-mode-control-note"' in tab_live_html
+    assert 'data-dev-mode-only="global-mode-control"' in tab_live_html
+    assert "ocFetchGuiDevelopmentMode" in tab_live_html
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(

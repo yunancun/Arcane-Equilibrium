@@ -108,6 +108,7 @@ _VALIDATE_TIMEOUT = 10
 # Legacy Paper engine 進程開關。Rust engine 啟動時讀取；GUI 立即讀取持久化
 # 設定，以決定是否顯示 legacy Paper tab。
 _PAPER_ENGINE_ENV_KEY = "OPENCLAW_ENABLE_PAPER"
+_GUI_DEVELOPMENT_MODE_ENV_KEY = "OPENCLAW_GUI_DEVELOPMENT_MODE"
 _BASIC_SYSTEM_ENV_FILE = "basic_system_services.env"
 _ENV_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
 _ENV_FALSEY = frozenset({"0", "false", "no", "off", "disabled"})
@@ -312,6 +313,37 @@ def _paper_engine_setting_payload() -> dict[str, Any]:
     }
 
 
+def _gui_development_mode_payload() -> dict[str, Any]:
+    """Return the GUI-only development mode setting payload.
+
+    This setting controls only frontend visibility. It does not affect engine
+    runtime, trading authority, risk config, live auth, or restart behavior.
+    """
+    env_file = _paper_engine_env_file()
+    file_raw = _read_env_file_value(env_file, _GUI_DEVELOPMENT_MODE_ENV_KEY)
+    runtime_raw = os.environ.get(_GUI_DEVELOPMENT_MODE_ENV_KEY)
+
+    if file_raw is not None:
+        enabled = _coerce_env_bool(file_raw)
+        source = "env_file"
+    elif runtime_raw is not None:
+        enabled = _coerce_env_bool(runtime_raw)
+        source = "process_env"
+    else:
+        enabled = False
+        source = "default_disabled"
+
+    return {
+        "enabled": enabled,
+        "configured_enabled": enabled,
+        "restart_required": False,
+        "source": source,
+        "env_key": _GUI_DEVELOPMENT_MODE_ENV_KEY,
+        "env_file_present": env_file.exists(),
+        "scope": "gui_visibility_only",
+    }
+
+
 def _build_bybit_signature(
     api_key: str,
     api_secret: str,
@@ -459,6 +491,14 @@ class PaperEngineSettingRequest(BaseModel):
     enabled: bool = Field(
         ...,
         description="Whether the legacy Paper engine GUI/backend path is enabled",
+    )
+
+
+class DevelopmentModeSettingRequest(BaseModel):
+    """Request body for POST /api/v1/settings/development-mode."""
+    enabled: bool = Field(
+        ...,
+        description="Whether GUI development surfaces are visible",
     )
 
 
@@ -657,6 +697,48 @@ async def save_paper_engine_setting(
         payload["enabled"],
         payload["runtime_enabled"],
         payload["restart_required"],
+        getattr(actor, "actor_id", "?"),
+    )
+    return payload
+
+
+@settings_router.get("/development-mode")
+async def get_development_mode_setting(
+    actor: Any = Depends(_get_auth_actor),
+) -> dict:
+    """
+    GET /api/v1/settings/development-mode
+    Return the GUI-only development mode visibility setting.
+
+    Default is disabled. This is intentionally a frontend visibility toggle,
+    not an execution/risk/runtime control.
+    """
+    return _gui_development_mode_payload()
+
+
+@settings_router.post("/development-mode")
+async def save_development_mode_setting(
+    body: DevelopmentModeSettingRequest,
+    actor: Any = Depends(_require_operator_auth),
+) -> dict:
+    """
+    POST /api/v1/settings/development-mode
+    Persist the GUI-only development mode toggle.
+
+    Enabling exposes the Development tab and dashboard mode-control surfaces.
+    Disabling hides them. No service restart is required.
+    """
+    value = "1" if body.enabled else "0"
+    try:
+        _write_env_file_value(_paper_engine_env_file(), _GUI_DEVELOPMENT_MODE_ENV_KEY, value)
+    except (OSError, PermissionError, ValueError) as exc:
+        logger.error("Failed to persist GUI development mode setting: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist development mode setting")
+
+    payload = _gui_development_mode_payload()
+    logger.info(
+        "GUI development mode updated enabled=%s actor=%s",
+        payload["enabled"],
         getattr(actor, "actor_id", "?"),
     )
     return payload
