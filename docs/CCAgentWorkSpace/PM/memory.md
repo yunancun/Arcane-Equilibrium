@@ -1395,3 +1395,29 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   strategy/risk config mutation, production continuous event-store flag, or
   trading authority change was made.
 - Next Sprint A work is MAG-019 supervisor cloud escalation ledger policy.
+
+## 2026-05-06 AgentTodo Sprint A MAG-019 Supervisor Cloud Ledger Policy
+
+### Result
+- MAG-019 source is complete at `65a4279f`.
+- Added `openclaw_supervisor_policy.py`.
+- Wired `/api/v1/openclaw/*` `model_budget` to the supervisor policy snapshot.
+- Cloud remains default-disabled.
+- Any future cloud call must use one supervisor packet, explicit budget/model
+  config, and pre-cloud-call `AgentEventStore.record_ai_invocation` reservation.
+
+### Verification
+- Mac: `test_openclaw_supervisor_policy.py`, `test_openclaw_agent_control_static.py`,
+  `test_openclaw_routes.py`, and `test_agents_routes.py` passed 45/0.
+- Linux `trade-core` after fast-forward to `65a4279f`: same targeted pytest
+  passed 45/0.
+- Mac/Linux `py_compile` passed for touched OpenClaw policy/route/test files.
+- Mac/Linux `node --check` passed for `openclaw-agent-control.js`.
+- Static tests prove the policy module has no cloud/network call markers.
+
+### Boundary
+- No cloud provider call, service restart, deploy/rebuild, write/proposal
+  endpoint, live auth, strategy/risk config mutation, production continuous
+  event-store flag, or trading authority change was made.
+- AgentTodo Sprint A is closed. Next AgentTodo gate is M2 MAG-020..026 Scanner
+  Advisory Conversion.
