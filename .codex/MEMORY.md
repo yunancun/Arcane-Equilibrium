@@ -133,7 +133,7 @@ REF-21 2026-05-06 empirical gap closure:
 - §10 replay SLA corrected away from pytest `2555/17`
 - full-chain prepare now has live-profile `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP`
   guard
-- V057-V060 migration files exist for MIT Linux PG dry-run
+- V057-V060 migration files include Guard A/B/C and passed Linux PG transaction dry-run on `trade-core`; pre-existing objects were absent, all four migrations created expected objects inside the transaction, and rollback left all five target tables absent
 - GUI/CLAUDE console contract is 13 tabs
 
 Current strategy-edge packet:

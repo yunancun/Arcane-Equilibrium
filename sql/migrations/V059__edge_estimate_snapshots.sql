@@ -62,6 +62,46 @@ BEGIN
     RAISE NOTICE 'V059 Guard A: edge estimate snapshot table verified';
 END $$;
 
+DO $$
+DECLARE
+    v_constraint_defs TEXT;
+    v_pk_exists BOOLEAN;
+BEGIN
+    SELECT string_agg(pg_get_constraintdef(c.oid), E'\n')
+    INTO v_constraint_defs
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'learning'
+      AND t.relname = 'edge_estimate_snapshots';
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'learning'
+          AND t.relname = 'edge_estimate_snapshots'
+          AND c.contype = 'p'
+          AND pg_get_constraintdef(c.oid) LIKE '%asof_ts%'
+          AND pg_get_constraintdef(c.oid) LIKE '%strategy_hash%'
+          AND pg_get_constraintdef(c.oid) LIKE '%scanner_config_hash%'
+          AND pg_get_constraintdef(c.oid) LIKE '%cell_key%'
+    ) INTO v_pk_exists;
+
+    IF v_constraint_defs IS NULL
+       OR position('75 days' IN v_constraint_defs) = 0
+       OR position('octet_length(config_hash) = 32' IN v_constraint_defs) = 0
+       OR position('octet_length(estimate_payload_hash) = 32' IN v_constraint_defs) = 0
+       OR NOT v_pk_exists THEN
+        RAISE EXCEPTION
+            'V059 Guard B: edge snapshot constraints incomplete pk=%',
+            v_pk_exists;
+    END IF;
+
+    RAISE NOTICE 'V059 Guard B: retention, hash, and primary-key constraints verified';
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_edge_estimate_snapshots_symbol_strategy_asof
     ON learning.edge_estimate_snapshots (symbol, strategy, asof_ts DESC);
 
@@ -70,6 +110,45 @@ CREATE INDEX IF NOT EXISTS idx_edge_estimate_snapshots_deprecated
     WHERE is_deprecated_at_asof = true;
 
 REVOKE UPDATE, DELETE ON learning.edge_estimate_snapshots FROM PUBLIC;
+
+DO $$
+DECLARE
+    v_public_write_grants INTEGER;
+    v_symbol_index_exists BOOLEAN;
+    v_deprecated_index_exists BOOLEAN;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_public_write_grants
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'learning'
+      AND table_name = 'edge_estimate_snapshots'
+      AND grantee = 'PUBLIC'
+      AND privilege_type IN ('UPDATE', 'DELETE');
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'learning'
+          AND tablename = 'edge_estimate_snapshots'
+          AND indexname = 'idx_edge_estimate_snapshots_symbol_strategy_asof'
+    ) INTO v_symbol_index_exists;
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'learning'
+          AND tablename = 'edge_estimate_snapshots'
+          AND indexname = 'idx_edge_estimate_snapshots_deprecated'
+    ) INTO v_deprecated_index_exists;
+
+    IF v_public_write_grants <> 0 OR NOT v_symbol_index_exists OR NOT v_deprecated_index_exists THEN
+        RAISE EXCEPTION
+            'V059 Guard C: public_write_grants=% symbol_index=% deprecated_index=%',
+            v_public_write_grants, v_symbol_index_exists, v_deprecated_index_exists;
+    END IF;
+
+    RAISE NOTICE 'V059 Guard C: PUBLIC write revoke and indexes verified';
+END $$;
 
 COMMENT ON TABLE learning.edge_estimate_snapshots IS
 'REF-21 immutable historical edge estimate snapshots. Retention must be at least 75 days.';

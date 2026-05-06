@@ -86,10 +86,90 @@ BEGIN
     RAISE NOTICE 'V057 Guard A: replay.tier_promotion_approval column contract verified';
 END $$;
 
+DO $$
+DECLARE
+    v_required_tiers TEXT[] := ARRAY[
+        'synthetic_replay',
+        's2_public_replay',
+        's2_oos_replay',
+        's1_calibrated_replay',
+        'verified_replay_advisory',
+        'legacy_calibrated_replay_pending_review',
+        'legacy_counterfactual_replay_pending_review'
+    ];
+    v_actual_tiers TEXT[];
+    v_constraint_defs TEXT;
+BEGIN
+    SELECT COALESCE(array_agg(e.enumlabel::TEXT ORDER BY e.enumsortorder), ARRAY[]::TEXT[])
+    INTO v_actual_tiers
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    JOIN pg_enum e ON e.enumtypid = t.oid
+    WHERE n.nspname = 'replay'
+      AND t.typname = 'replay_evidence_tier_v057';
+
+    IF NOT v_required_tiers <@ v_actual_tiers THEN
+        RAISE EXCEPTION
+            'V057 Guard B: replay.replay_evidence_tier_v057 missing required values. actual=%',
+            array_to_string(v_actual_tiers, ', ');
+    END IF;
+
+    SELECT string_agg(pg_get_constraintdef(c.oid), E'\n')
+    INTO v_constraint_defs
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'replay'
+      AND t.relname = 'tier_promotion_approval';
+
+    IF v_constraint_defs IS NULL
+       OR position('requested' IN v_constraint_defs) = 0
+       OR position('approved' IN v_constraint_defs) = 0
+       OR position('rejected' IN v_constraint_defs) = 0
+       OR position('hmac_sha256_v1' IN v_constraint_defs) = 0
+       OR position('octet_length(metrics_hash) = 32' IN v_constraint_defs) = 0
+       OR position('octet_length(approval_signature) = 32' IN v_constraint_defs) = 0 THEN
+        RAISE EXCEPTION
+            'V057 Guard B: tier promotion approval constraints incomplete';
+    END IF;
+
+    RAISE NOTICE 'V057 Guard B: tier enum and signature/hash constraints verified';
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_tier_promotion_approval_report
     ON replay.tier_promotion_approval (report_id, signed_at DESC);
 
 REVOKE INSERT, UPDATE, DELETE ON replay.tier_promotion_approval FROM PUBLIC;
+
+DO $$
+DECLARE
+    v_public_write_grants INTEGER;
+    v_index_exists BOOLEAN;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_public_write_grants
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'replay'
+      AND table_name = 'tier_promotion_approval'
+      AND grantee = 'PUBLIC'
+      AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE');
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'replay'
+          AND tablename = 'tier_promotion_approval'
+          AND indexname = 'idx_tier_promotion_approval_report'
+    ) INTO v_index_exists;
+
+    IF v_public_write_grants <> 0 OR NOT v_index_exists THEN
+        RAISE EXCEPTION
+            'V057 Guard C: public_write_grants=% index_exists=%',
+            v_public_write_grants, v_index_exists;
+    END IF;
+
+    RAISE NOTICE 'V057 Guard C: PUBLIC write revoke and hot-path index verified';
+END $$;
 
 COMMENT ON TABLE replay.tier_promotion_approval IS
 'REF-21 signed tier-promotion approval ledger. Signature scheme is fixed to hmac_sha256_v1; metrics calculator is intentionally not stubbed in V057.';

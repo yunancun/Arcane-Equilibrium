@@ -74,6 +74,59 @@ BEGIN
     RAISE NOTICE 'V058 Guard A: freeze log and symbol universe snapshot tables verified';
 END $$;
 
+DO $$
+DECLARE
+    v_freeze_constraint_defs TEXT;
+    v_universe_pk_exists BOOLEAN;
+    v_universe_payload_hash_type TEXT;
+BEGIN
+    SELECT string_agg(pg_get_constraintdef(c.oid), E'\n')
+    INTO v_freeze_constraint_defs
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'governance'
+      AND t.relname = 'strategy_freeze_log';
+
+    IF v_freeze_constraint_defs IS NULL
+       OR position('freeze/' IN v_freeze_constraint_defs) = 0
+       OR position('octet_length(strategy_config_hash) = 32' IN v_freeze_constraint_defs) = 0
+       OR position('octet_length(scanner_config_hash) = 32' IN v_freeze_constraint_defs) = 0
+       OR position('octet_length(risk_config_hash) = 32' IN v_freeze_constraint_defs) = 0 THEN
+        RAISE EXCEPTION
+            'V058 Guard B: strategy_freeze_log constraints incomplete';
+    END IF;
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'market'
+          AND t.relname = 'symbol_universe_snapshots'
+          AND c.contype = 'p'
+          AND pg_get_constraintdef(c.oid) LIKE '%ts%'
+          AND pg_get_constraintdef(c.oid) LIKE '%exchange%'
+          AND pg_get_constraintdef(c.oid) LIKE '%category%'
+          AND pg_get_constraintdef(c.oid) LIKE '%symbol%'
+    ) INTO v_universe_pk_exists;
+
+    SELECT udt_name
+    INTO v_universe_payload_hash_type
+    FROM information_schema.columns
+    WHERE table_schema = 'market'
+      AND table_name = 'symbol_universe_snapshots'
+      AND column_name = 'payload_hash';
+
+    IF NOT v_universe_pk_exists OR v_universe_payload_hash_type <> 'bytea' THEN
+        RAISE EXCEPTION
+            'V058 Guard B: symbol universe PK/type contract failed pk=% payload_hash_type=%',
+            v_universe_pk_exists, v_universe_payload_hash_type;
+    END IF;
+
+    RAISE NOTICE 'V058 Guard B: freeze constraints and symbol universe PK/type verified';
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_symbol_universe_snapshots_symbol_ts
     ON market.symbol_universe_snapshots (exchange, category, symbol, ts DESC);
 
@@ -82,6 +135,45 @@ CREATE INDEX IF NOT EXISTS idx_strategy_freeze_log_date
 
 REVOKE UPDATE, DELETE ON governance.strategy_freeze_log FROM PUBLIC;
 REVOKE UPDATE, DELETE ON market.symbol_universe_snapshots FROM PUBLIC;
+
+DO $$
+DECLARE
+    v_public_write_grants INTEGER;
+    v_universe_index_exists BOOLEAN;
+    v_freeze_index_exists BOOLEAN;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_public_write_grants
+    FROM information_schema.role_table_grants
+    WHERE table_schema IN ('governance', 'market')
+      AND table_name IN ('strategy_freeze_log', 'symbol_universe_snapshots')
+      AND grantee = 'PUBLIC'
+      AND privilege_type IN ('UPDATE', 'DELETE');
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'market'
+          AND tablename = 'symbol_universe_snapshots'
+          AND indexname = 'idx_symbol_universe_snapshots_symbol_ts'
+    ) INTO v_universe_index_exists;
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'governance'
+          AND tablename = 'strategy_freeze_log'
+          AND indexname = 'idx_strategy_freeze_log_date'
+    ) INTO v_freeze_index_exists;
+
+    IF v_public_write_grants <> 0 OR NOT v_universe_index_exists OR NOT v_freeze_index_exists THEN
+        RAISE EXCEPTION
+            'V058 Guard C: public_write_grants=% universe_index=% freeze_index=%',
+            v_public_write_grants, v_universe_index_exists, v_freeze_index_exists;
+    END IF;
+
+    RAISE NOTICE 'V058 Guard C: PUBLIC write revoke and indexes verified';
+END $$;
 
 COMMENT ON TABLE governance.strategy_freeze_log IS
 'Immutable REF-21 strategy freeze log. strategy_freeze_date must be derived from this table or CI freeze tag, not operator-entered request JSON.';

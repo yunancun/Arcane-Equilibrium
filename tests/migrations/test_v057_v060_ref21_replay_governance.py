@@ -50,6 +50,11 @@ def test_v057_tier_promotion_approval_has_hmac_signature_contract() -> None:
     assert "octet_length(approval_signature) = 32" in sql
     assert "UNIQUE (report_id, from_tier, to_tier, approver_role)" in sql
     assert "replay.calculate_promotion_metrics" not in sql
+    assert "V057 Guard A" in sql
+    assert "V057 Guard B" in sql
+    assert "V057 Guard C" in sql
+    assert "REVOKE INSERT, UPDATE, DELETE ON replay.tier_promotion_approval FROM PUBLIC" in sql
+    assert "idx_tier_promotion_approval_report" in sql
 
 
 def test_v058_creates_governance_freeze_log_and_symbol_universe() -> None:
@@ -61,6 +66,11 @@ def test_v058_creates_governance_freeze_log_and_symbol_universe() -> None:
     assert "CREATE TABLE IF NOT EXISTS market.symbol_universe_snapshots" in sql
     assert "PRIMARY KEY (ts, exchange, category, symbol)" in sql
     assert "is_delisted_at_asof BOOLEAN NOT NULL DEFAULT false" in sql
+    assert "V058 Guard A" in sql
+    assert "V058 Guard B" in sql
+    assert "V058 Guard C" in sql
+    assert "REVOKE UPDATE, DELETE ON governance.strategy_freeze_log FROM PUBLIC" in sql
+    assert "REVOKE UPDATE, DELETE ON market.symbol_universe_snapshots FROM PUBLIC" in sql
 
 
 def test_v059_edge_snapshot_has_deprecated_flag_and_retention_floor() -> None:
@@ -71,6 +81,10 @@ def test_v059_edge_snapshot_has_deprecated_flag_and_retention_floor() -> None:
     assert "retention_until TIMESTAMPTZ NOT NULL" in sql
     assert "retention_until >= asof_ts + INTERVAL '75 days'" in sql
     assert "idx_edge_estimate_snapshots_deprecated" in sql
+    assert "V059 Guard A" in sql
+    assert "V059 Guard B" in sql
+    assert "V059 Guard C" in sql
+    assert "REVOKE UPDATE, DELETE ON learning.edge_estimate_snapshots FROM PUBLIC" in sql
 
 
 def test_v060_replay_emergency_log_creates_audit_and_governance_schema() -> None:
@@ -82,3 +96,21 @@ def test_v060_replay_emergency_log_creates_audit_and_governance_schema() -> None
     assert "bulk_prod_ip_allowed BOOLEAN NOT NULL DEFAULT false" in sql
     assert "request_count INTEGER NOT NULL CHECK (request_count >= 0)" in sql
     assert "REVOKE UPDATE, DELETE ON audit.replay_emergency_log FROM PUBLIC" in sql
+    assert "V060 Guard A" in sql
+    assert "V060 Guard B" in sql
+    assert "V060 Guard C" in sql
+    assert "idx_replay_emergency_log_ts" in sql
+    assert "idx_replay_emergency_log_actor_ts" in sql
+
+
+def test_v057_v060_guard_c_checks_public_write_grants_and_indexes() -> None:
+    """Guard C must verify runtime privileges and hot-path indexes.
+
+    Guard C 必須驗 runtime 權限與 hot-path index，不能只靠註釋承諾。
+    """
+    for path in (V057_PATH, V058_PATH, V059_PATH, V060_PATH):
+        sql = _strip_sql_comments(_read_sql(path))
+        assert "information_schema.role_table_grants" in sql, path.name
+        assert "grantee = 'PUBLIC'" in sql, path.name
+        assert "privilege_type IN" in sql, path.name
+        assert "FROM pg_indexes" in sql, path.name
