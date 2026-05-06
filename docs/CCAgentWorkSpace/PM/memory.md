@@ -148,6 +148,7 @@
 | 2026-05-06 | AgentTodo M0 doc sync + MAG-000 operator confirmation | workspace/reports/2026-05-06--agenttodo_m0_doc_sync.md |
 | 2026-05-06 | REF-21 Full-Chain Replay scope correction: one-click 7D scanner-to-exit replay replaces single-symbol smoke as the target default | workspace/reports/2026-05-06--ref21_full_chain_replay_scope_correction.md |
 | 2026-05-06 | REF-21 V1.1 audit revision: 8-agent blockers accepted; V1 superseded; R2/R3 blocked behind dedicated subprocess, forbidden guard, edge snapshot, OOS, tier promotion, auth/rate, Bybit reality, and GUI safety gates | workspace/reports/2026-05-06--ref21_v1_1_audit_revision.md |
+| 2026-05-06 | REF-21 V1.2 closure revision: V1.1 endpoint bypass accepted; `/full-chain/prepare` default-OFF behind `OPENCLAW_REPLAY_PREPARE_ENABLED`; V1.2 adds subprocess env/auth bans, V057/V058/V059 migrations, promotion thresholds, maker defaults, timeout criteria, applier prerequisite, ScannerCore, LOC gate, and GUI companion spec | workspace/reports/2026-05-06--ref21_v1_2_closure_revision.md |
 | 2026-03-31 | Wave 5 B 方案計劃 | workspace/reports/2026-03-31--wave5_plan_b_multiagent.md |
 | 2026-03-31 | Wave 5 最終派發計劃（Sprint 0+5a+5b 結構） | workspace/reports/2026-03-31--wave5_final_dispatch.md |
 | 2026-03-31 | Sprint 5a 詳細派發計劃 | workspace/reports/2026-03-31--sprint5a_dispatch.md |

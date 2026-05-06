@@ -35,11 +35,45 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+def test_full_chain_prepare_disabled_by_default(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import app.replay_quick_routes as mod
+
+    monkeypatch.delenv("OPENCLAW_REPLAY_PREPARE_ENABLED", raising=False)
+
+    def forbidden_fetch(**kwargs):
+        raise AssertionError("disabled full-chain prepare must not fetch market data")
+
+    monkeypatch.setattr(mod, "_fetch_bybit_klines_sync", forbidden_fetch)
+
+    client = _client(monkeypatch, tmp_path)
+    resp = client.post(
+        "/api/v1/replay/full-chain/prepare",
+        json={
+            "universe_preset": "custom",
+            "symbols": ["BTCUSDT"],
+            "engine": "demo",
+            "timeframe": "1m",
+            "category": "linear",
+            "data_window_start": "2026-05-01T00:00:00Z",
+            "data_window_end": "2026-05-01T00:02:00Z",
+            "use_current_config": False,
+        },
+    )
+
+    assert resp.status_code == 403
+    assert "replay_full_chain_prepare_disabled" in resp.json()["detail"]["reason_codes"]
+
+
 def test_full_chain_prepare_writes_time_ordered_multi_symbol_fixture(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     import app.replay_quick_routes as mod
+
+    monkeypatch.setenv("OPENCLAW_REPLAY_PREPARE_ENABLED", "1")
 
     def fake_fetch(**kwargs):
         symbol = kwargs["symbol"]
@@ -122,6 +156,8 @@ def test_full_chain_prepare_uses_scanner_universe(
 ) -> None:
     import app.replay_quick_routes as mod
 
+    monkeypatch.setenv("OPENCLAW_REPLAY_PREPARE_ENABLED", "1")
+
     def fake_fetch(**kwargs):
         symbol = kwargs["symbol"]
         return [
@@ -175,6 +211,7 @@ def test_full_chain_prepare_rejects_custom_empty_universe(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    monkeypatch.setenv("OPENCLAW_REPLAY_PREPARE_ENABLED", "1")
     client = _client(monkeypatch, tmp_path)
     resp = client.post(
         "/api/v1/replay/full-chain/prepare",
@@ -200,6 +237,7 @@ def test_full_chain_prepare_rejects_oversized_window(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    monkeypatch.setenv("OPENCLAW_REPLAY_PREPARE_ENABLED", "1")
     monkeypatch.setenv("OPENCLAW_REPLAY_FULL_CHAIN_MAX_EVENTS", "10")
     client = _client(monkeypatch, tmp_path)
 
