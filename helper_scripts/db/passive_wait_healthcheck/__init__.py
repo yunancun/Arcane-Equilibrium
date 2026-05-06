@@ -105,6 +105,8 @@ from .checks_execution import (  # noqa: F401
 from .checks_scanner_market import (  # noqa: F401
     # [41] scanner market-gate confirmation monitor.
     check_scanner_market_gate_confirmation,
+    # [51] scanner opportunity shadow acceptance monitor.
+    check_scanner_opportunity_shadow_acceptance,
 )
 from .checks_governance import (  # noqa: F401
     # [42]/[42b] LG-5-IMPL-3 (2026-05-02) governance contract + attribution drift.
@@ -216,6 +218,8 @@ __all__ = [
     "check_realized_edge_acceptance",
     # [41] scanner market-gate confirmation
     "check_scanner_market_gate_confirmation",
+    # [51] scanner opportunity shadow acceptance
+    "check_scanner_opportunity_shadow_acceptance",
     # [42]/[42b] LG-5-IMPL-3 governance contract + attribution drift
     "check_42_live_candidate_eval_contract",
     "check_42b_live_candidate_attribution_drift",
