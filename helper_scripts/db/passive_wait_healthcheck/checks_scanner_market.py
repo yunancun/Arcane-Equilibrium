@@ -366,7 +366,7 @@ SELECT
 FROM trading.intents
 WHERE ts > now() - (%s * interval '1 hour')
   AND engine_mode IN ('demo', 'live_demo')
-  AND details ? 'scanner'
+  AND jsonb_typeof(details->'scanner') = 'object'
 """
     label_sql = """
 WITH labeled AS (

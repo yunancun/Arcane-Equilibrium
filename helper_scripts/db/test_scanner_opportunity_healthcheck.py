@@ -190,6 +190,7 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
         check_scanner_opportunity_shadow_acceptance(cur)
         sql_text = "\n".join(str(call.args[0]) for call in cur.execute.call_args_list)
         self.assertIn("strategy_judgments", sql_text)
+        self.assertIn("jsonb_typeof(details->'scanner') = 'object'", sql_text)
         self.assertIn("details #> '{scanner,opportunity}'", sql_text)
         self.assertIn("metadata #>> '{scanner,opportunity,opportunity_lcb_bps}'", sql_text)
         self.assertIn("trading.risk_verdicts", sql_text)
