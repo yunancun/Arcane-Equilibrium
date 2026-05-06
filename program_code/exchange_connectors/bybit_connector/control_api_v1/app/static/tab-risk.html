@@ -10,14 +10,14 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
-<!-- ═══ Quick-nav bar: Monitor / Config sub-tabs + Danger Zone shortcut ═══ -->
-<!-- 子分页导航 — Monitor(只读监控) / Config(可编辑配置) + Danger Zone 快捷入口 -->
+<!-- ═══ Quick-nav bar: Risk Overview / Risk Settings + Danger Zone shortcut ═══ -->
+<!-- 子分页导航 — 风险总览(只读状态) / 参数设置(可编辑配置) + Danger Zone 快捷入口 -->
 <div style="display:flex;align-items:center;gap:8px;padding:4px 0 2px;flex-wrap:wrap">
-  <button id="rtab-monitor" class="oc-btn" style="background:rgba(56,139,253,0.15);border-color:var(--blue);color:var(--blue)" onclick="switchRiskTab('monitor')" title="只读监控：风险状态、治理等级、P0/P1/P2 配置查看 / Read-only: risk status, governor, P0/P1/P2 view">
-    &#x1F4CA; Monitor / 监控
+  <button id="rtab-monitor" class="oc-btn" style="background:rgba(56,139,253,0.15);border-color:var(--blue);color:var(--blue)" onclick="switchRiskTab('monitor')" title="只读风险总览：风险状态、治理等级、P0/P1/P2 配置查看 / Read-only: risk status, governor, P0/P1/P2 view">
+    &#x1F4CA; 风险总览 / Risk Overview
   </button>
-  <button id="rtab-config" class="oc-btn" style="opacity:0.55" onclick="switchRiskTab('config')" title="可编辑配置：止损、仓位、冷却、H0、AI 建议 / Editable: stop, sizing, cooldown, H0, AI">
-    &#x2699;&#xFE0F; Config / 配置
+  <button id="rtab-config" class="oc-btn" style="opacity:0.55" onclick="switchRiskTab('config')" title="参数设置：止损、仓位、冷却、H0、AI 建议 / Editable: stop, sizing, cooldown, H0, AI">
+    &#x2699;&#xFE0F; 参数设置 / Risk Settings
   </button>
   <span style="flex:1"></span>
   <a href="#danger-zone" onclick="switchRiskTab('config');setTimeout(function(){var z=document.getElementById('danger-zone');if(z)z.scrollIntoView({behavior:'smooth',block:'start'});},0);return false" style="font-size:12px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid rgba(248,81,73,0.4);border-radius:6px;background:rgba(248,81,73,0.08)" title="跳转到危险操作区 / Jump to Danger Zone">
@@ -121,7 +121,7 @@
   </div>
   <!-- Engine selector tabs / 引擎選擇 tab -->
   <div style="display:flex;gap:4px;margin:10px 0 4px;flex-wrap:wrap" id="engine-tab-row">
-    <button class="oc-btn" id="etab-paper" onclick="selectRiskEngine('paper')"
+    <button class="oc-btn" id="etab-paper" data-paper-risk-engine="true" onclick="selectRiskEngine('paper')"
       style="background:rgba(56,139,253,0.15);border-color:rgba(56,139,253,0.4);color:var(--blue)">
       &#x1F4C4; Paper
     </button>

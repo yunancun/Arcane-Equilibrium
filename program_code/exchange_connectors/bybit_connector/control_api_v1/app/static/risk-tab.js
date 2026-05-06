@@ -158,8 +158,30 @@ function toggleTPInputs() {
 // demo 才是主要學習/edge 累積通道。
 let _selectedRiskEngine = 'demo';
 let _liveRiskSavePendingCallback = null;
+let _paperRiskEngineEnabled = true;
+
+function applyPaperRiskAvailability(enabled) {
+  _paperRiskEngineEnabled = !!enabled;
+  const paperBtn = $('etab-paper');
+  if (paperBtn) {
+    paperBtn.style.display = _paperRiskEngineEnabled ? '' : 'none';
+  }
+  if (!_paperRiskEngineEnabled && _selectedRiskEngine === 'paper') {
+    selectRiskEngine('demo');
+  }
+}
+
+async function loadPaperRiskAvailability() {
+  const d = await ocApi('/api/v1/settings/paper-engine');
+  const data = (d && d.data) ? d.data : d;
+  if (!data) return;
+  applyPaperRiskAvailability(!!data.enabled);
+}
 
 function selectRiskEngine(engine) {
+  if (engine === 'paper' && !_paperRiskEngineEnabled) {
+    engine = 'demo';
+  }
   _selectedRiskEngine = engine;
   ['paper', 'demo', 'live'].forEach(e => {
     const b = $('etab-' + e);
@@ -220,6 +242,24 @@ function confirmLiveEngineRiskSave() {
   document.getElementById('dlg-engine-live-confirm').style.display = 'none';
   if (_liveRiskSavePendingCallback) { _liveRiskSavePendingCallback(); _liveRiskSavePendingCallback = null; }
 }
+
+window.addEventListener('message', function(ev) {
+  if (ev.origin !== window.location.origin) return;
+  if (!ev.data) return;
+  if (ev.data.type === 'openclaw-paper-engine-setting') {
+    applyPaperRiskAvailability(!!ev.data.enabled);
+    return;
+  }
+  if (ev.data.type !== 'openclaw-risk-select') return;
+  if (ev.data.riskTab) switchRiskTab(ev.data.riskTab);
+  if (ev.data.engine) selectRiskEngine(ev.data.engine);
+  if (ev.data.scrollTo === 'top') {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else if (ev.data.scrollTo) {
+    const target = document.getElementById(ev.data.scrollTo);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
 
 // ─── Dirty-tracking: skip input population during 15s refresh while user has unsaved edits ──
 // 髒標記：用戶有未保存的編輯時，15s 刷新跳過輸入框填充
@@ -956,7 +996,8 @@ async function loadAll() {
   await Promise.allSettled([loadRiskGovernor(), loadRiskStatus(), loadRiskConfig(), loadAIContext(), loadDynamicRisk()]);
 }
 
-_updateEngineBadges(_selectedRiskEngine);
+selectRiskEngine(_selectedRiskEngine);
+loadPaperRiskAvailability();
 loadAll();
 ocStartRefresh(loadAll, 15000);
 ocInitFx();

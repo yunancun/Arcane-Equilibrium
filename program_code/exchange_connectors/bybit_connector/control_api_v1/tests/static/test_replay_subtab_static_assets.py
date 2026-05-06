@@ -42,7 +42,9 @@ _TAB_PAPER_HTML = _STATIC_DIR / "tab-paper.html"
 _TAB_REPLAY_HTML = _STATIC_DIR / "tab-replay.html"
 _TAB_DEVELOPMENT_HTML = _STATIC_DIR / "tab-development.html"
 _TAB_EDGE_GATES_HTML = _STATIC_DIR / "tab-edge-gates.html"
+_TAB_DEMO_HTML = _STATIC_DIR / "tab-demo.html"
 _TAB_LIVE_HTML = _STATIC_DIR / "tab-live.html"
+_TAB_RISK_HTML = _STATIC_DIR / "tab-risk.html"
 _TAB_SETTINGS_HTML = _STATIC_DIR / "tab-settings.html"
 _CONSOLE_HTML = _STATIC_DIR / "console.html"
 _LOGIN_HTML = _STATIC_DIR / "login.html"
@@ -50,6 +52,7 @@ _INDEX_HTML = _STATIC_DIR / "index.html"
 _TRADING_HTML = _STATIC_DIR / "trading.html"
 _COMMON_JS = _STATIC_DIR / "common.js"
 _APP_PAPER_JS = _STATIC_DIR / "app-paper.js"
+_RISK_TAB_JS = _STATIC_DIR / "risk-tab.js"
 _BROWSER_TEST_HTML = _THIS_DIR / "test_replay_subtab_readiness.html"
 
 
@@ -90,6 +93,13 @@ def tab_edge_gates_html() -> str:
 
 
 @pytest.fixture(scope="module")
+def tab_demo_html() -> str:
+    """Read tab-demo.html once per test module / 每模組讀一次。"""
+    assert _TAB_DEMO_HTML.exists(), f"tab-demo.html not found at {_TAB_DEMO_HTML}"
+    return _TAB_DEMO_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
 def console_html() -> str:
     """Read console.html once per test module / 每模組讀一次。"""
     assert _CONSOLE_HTML.exists(), f"console.html not found at {_CONSOLE_HTML}"
@@ -113,6 +123,13 @@ def tab_live_html() -> str:
 
 
 @pytest.fixture(scope="module")
+def tab_risk_html() -> str:
+    """Read tab-risk.html once per test module / 每模組讀一次。"""
+    assert _TAB_RISK_HTML.exists(), f"tab-risk.html not found at {_TAB_RISK_HTML}"
+    return _TAB_RISK_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
 def common_js() -> str:
     """Read common.js once per test module / 每模組讀一次。"""
     assert _COMMON_JS.exists(), f"common.js not found at {_COMMON_JS}"
@@ -126,6 +143,13 @@ def app_paper_js() -> str:
         f"app-paper.js not found at {_APP_PAPER_JS}"
     )
     return _APP_PAPER_JS.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def risk_tab_js() -> str:
+    """Read risk-tab.js once per test module / 每模組讀一次。"""
+    assert _RISK_TAB_JS.exists(), f"risk-tab.js not found at {_RISK_TAB_JS}"
+    return _RISK_TAB_JS.read_text(encoding="utf-8")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,6 +176,9 @@ def test_console_has_replay_and_optional_paper_tabs(console_html: str) -> None:
     assert "tab-replay.html" in console_html
     assert "TAB_GROUP_LABELS" in console_html
     assert "tab-group-label" in console_html
+    assert "toggleTabGroup" in console_html
+    assert "tab-group-caret" in console_html
+    assert "tab-label" in console_html
     assert "requiresPaperEngine: true" in console_html
     assert "/api/v1/settings/paper-engine" in console_html
 
@@ -162,6 +189,19 @@ def test_console_has_top_level_edge_gates_tab(console_html: str) -> None:
     assert "tab-edge-gates.html" in console_html
     assert "Pre-Live Gates" in console_html
     assert "group: 'core'" in console_html
+
+
+def test_console_strategy_group_order_and_labels_are_operator_clear(
+    console_html: str,
+) -> None:
+    """Strategy/Edge order is Replay → Strategy → Charts; AI labels are distinct."""
+    replay_idx = console_html.index("id: 'replay'")
+    strategy_idx = console_html.index("id: 'strategy'")
+    charts_idx = console_html.index("id: 'charts'")
+    assert replay_idx < strategy_idx < charts_idx
+    assert "label: 'AI 状态'" in console_html
+    assert "label: 'Agent 团队'" in console_html
+    assert "AI 智能" not in console_html
 
 
 def test_console_has_settings_gated_development_support_tab(console_html: str) -> None:
@@ -216,6 +256,27 @@ def test_global_mode_control_surfaces_are_development_gated(
     assert 'id="live-global-mode-control-note"' in tab_live_html
     assert 'data-dev-mode-only="global-mode-control"' in tab_live_html
     assert "ocFetchDevelopmentSupportMode" in tab_live_html
+
+
+def test_demo_and_live_tabs_have_risk_shortcuts(
+    console_html: str,
+    tab_demo_html: str,
+    tab_live_html: str,
+    tab_risk_html: str,
+    risk_tab_js: str,
+) -> None:
+    """Demo/Live can jump to the selected Risk surface inside the console."""
+    assert "openclaw-console-switch-tab" in console_html
+    assert "openclaw-risk-select" in console_html
+    assert "openDemoRisk" in tab_demo_html
+    assert "riskEngine: 'demo'" in tab_demo_html
+    assert "openLiveRisk" in tab_live_html
+    assert "riskEngine: 'live'" in tab_live_html
+    assert "风险总览 / Risk Overview" in tab_risk_html
+    assert "参数设置 / Risk Settings" in tab_risk_html
+    assert "applyPaperRiskAvailability" in risk_tab_js
+    assert "/api/v1/settings/paper-engine" in risk_tab_js
+    assert "openclaw-risk-select" in risk_tab_js
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(

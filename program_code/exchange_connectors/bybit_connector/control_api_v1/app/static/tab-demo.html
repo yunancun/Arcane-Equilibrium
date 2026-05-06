@@ -15,6 +15,7 @@
   <span id="demo-badge" class="oc-chip oc-chip-neutral">检测中...</span>
   <span id="demo-session-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px">--</span>
   <span style="flex:1"></span>
+  <button class="oc-btn" onclick="openDemoRisk()" title="跳转到 Demo 风控页 / Open Demo risk controls" style="font-size:12px;padding:4px 10px;border-color:rgba(56,139,253,0.45);color:var(--blue)">&#x1F6E1; 风控</button>
   <button class="oc-btn oc-btn-success" id="btn-demo-start" onclick="demoSessionAction('start')" style="font-size:12px;padding:4px 10px">&#x25B6; 启动</button>
   <button class="oc-btn" id="btn-demo-pause" onclick="demoSessionAction('pause')" disabled style="font-size:12px;padding:4px 10px">&#x23F8; 暂停</button>
   <button class="oc-btn" id="btn-demo-resume" onclick="demoSessionAction('resume')" disabled style="font-size:12px;padding:4px 10px">&#x25B6; 继续</button>
@@ -213,6 +214,18 @@ try {
 } catch (e) {}
 
 let _demoFillsCache = []; // Cache fills for metrics calculation
+
+function openDemoRisk() {
+  try {
+    window.parent.postMessage({
+      type: 'openclaw-console-switch-tab',
+      tab: 'risk',
+      riskEngine: 'demo',
+      riskTab: 'monitor',
+      scrollTo: 'top'
+    }, window.location.origin);
+  } catch (_) {}
+}
 
 // ─── Synthetic owner_strategy rendering helper ────────────────
 // Rust paper_state may tag positions with synthetic owner labels that are
