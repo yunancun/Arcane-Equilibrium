@@ -6,6 +6,11 @@ Repo root：`/Users/ncyu/Projects/TradeBot/srv`
 Commit：`74b986a0`
 狀態：v1 shadow 已實作、已三端同步、已 Linux rebuild deploy
 
+2026-05-06 continuation：`98ce3d00` 已在同一 typed evaluation 上啟用
+demo/live_demo new-open canary、runtime AccountManager cost prior、以及 rejected
+intent/verdict row proof。本文保留 v1 shadow 實作歷史；最新狀態見
+`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_integration_audit.md`。
+
 ## 範圍
 
 本輪實作 `Scanner Opportunity Evaluation v1 shadow`。

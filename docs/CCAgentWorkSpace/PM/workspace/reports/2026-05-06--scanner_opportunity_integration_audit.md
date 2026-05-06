@@ -7,7 +7,8 @@ Read-time HEAD：`df5b1638`
 Implementation / deploy HEAD：`74b986a0`
 Continuation / deploy HEAD：`113f345f`
 Regret healthcheck HEAD：`d1754aa6`
-狀態：v1 shadow 已實作、`[51]` healthcheck 已實作、shared cost definition 已落地並 Linux rebuild deploy；`[51]` rejected-intent regret proof 已接入
+Admission canary / deploy HEAD：`98ce3d00`
+狀態：Scanner Opportunity 已完成本 session 收口：v1 typed evaluation、`[51]` healthcheck、shared cost definition、runtime AccountManager cost prior、demo/live_demo new-open canary、pre-risk rejected intent/verdict row proof 均已落地並 Linux rebuild deploy。
 
 更新：v1 shadow implementation 已落地，詳
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_v1_shadow_implementation.md`。
@@ -32,10 +33,30 @@ Regret healthcheck HEAD：`d1754aa6`
   `{"scanner": null}` 非 scanner intent 造成 false FAIL。
 - Linux focused `[51]` after `d1754aa6`：WARN；3h snapshot routes 370/370，
   scanner intents 6/6，24h labels=7<10，rejected_labels=0。
+- `98ce3d00` 接入 shared `AccountManager` 作 scanner opportunity cost prior：
+  per-symbol taker fee 優先，fee cache 冷啟動時使用 AccountManager conservative
+  default taker fee，並持久化 `components.cost_source`。
+- `98ce3d00` 開啟 `canary_block_new_entries = true`。此 canary 只阻擋
+  demo/live_demo new-open；close / reduce / protective exit 不受 scanner
+  opportunity 影響。
+- `98ce3d00` 將 scanner pre-risk rejects（per-strategy risk policy、
+  scanner market gate、opportunity canary）持久化為 `trading.intents` +
+  synthetic rejected `trading.risk_verdicts`，且 intent details 保留
+  `scanner.opportunity`，讓 `[51]` 能後續累積 rejected counterfactual proof。
+- Linux `trade-core` 已 `restart_all.sh --rebuild --keep-auth` 部署
+  `98ce3d00`。部署後最新 scanner snapshot（2026-05-06 20:46:59+02:00）
+  85/85 route judgments 帶 `opportunity`、85/85 帶
+  `cost_source=account_manager_taker_fee`、85/85 帶 canary 欄位。
+  最近 30 分鐘 demo/live_demo rejected scanner intents 78/78 帶 scanner
+  opportunity，其中 2 筆為 `scanner_opportunity_canary`。
+  focused `[51]`：WARN，3h snapshot routes 485/485，scanner intents 50/50，
+  24h labels=9<10，rejected_labels=0（需等 decision_outcomes backfill）。
 
 ## 結論
 
-不要再加一個孤立 gate。
+不要再加一個孤立 gate。已落地的是 typed Scanner Opportunity Evaluation
+內部產出的 canary admission flag，並由既有 demo/live_demo new-open
+pre-risk path 消費；它不是獨立於 scanner evaluation 的臨時補丁。
 
 耐久方向是把目前散在 scanner、edge、cost、learning 裡的判斷收斂成一個 typed **Scanner Opportunity Evaluation** 層。它應該是 Rust 純計算，輸出可審計的 opportunity 欄位，然後由既有 open-admission path 或未來 Agent Decision Spine 消費；它不應成為新的隱性交易權威。
 

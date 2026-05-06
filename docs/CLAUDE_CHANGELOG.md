@@ -1,7 +1,39 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（Scanner Opportunity regret healthcheck）
+> 最後更新：2026-05-06（Scanner Opportunity admission canary）
+
+### Scanner Opportunity admission canary — 2026-05-06
+
+**Scope**：把 scanner opportunity 從 read-only shadow 收口到 demo/live_demo
+new-open admission canary。這不是孤立新 gate，而是消費既有 typed
+`OpportunityDecision.canary_block_new_entry`；close / reduce / protective
+paths 不受影響。
+
+**Runtime cost prior**：ScannerRunner 接入 shared `AccountManager`，scanner
+opportunity cost 使用 per-symbol taker fee；冷啟動 fee cache 尚空時使用
+AccountManager conservative default taker fee，並在
+`components.cost_source` 標記來源。
+
+**Row proof**：pre-risk scanner rejects（per-strategy policy、scanner
+market gate、opportunity canary）現在寫入 `trading.intents` +
+synthetic rejected `trading.risk_verdicts`，且 intent details 保留
+`scanner.opportunity`。`[51]` 可對 rejected scanner intents 做後續
+counterfactual regret proof；rejected labels 仍需等 `decision_outcomes`
+backfill。
+
+**Verification / deploy**：Mac targeted tests PASS：
+`scanner::opportunity` 6、`scanner::runner` 4、`scanner::scorer` 32、
+`tick_pipeline::tests::fast_track_reduce` 17、`cargo check -p openclaw_engine`、
+`test_scanner_opportunity_healthcheck.py` 8。Linux focused tests PASS：
+opportunity 6、runner 4、scorer 32、`[51]` Python 8。
+Linux `restart_all.sh --rebuild --keep-auth` deployed `98ce3d00`。
+Latest scanner snapshot after deploy：85/85 route judgments carry
+opportunity, 85/85 carry `cost_source=account_manager_taker_fee`, 85/85
+carry canary field；last 30m demo/live_demo rejected scanner intents 78/78
+carry scanner opportunity, including 2 `scanner_opportunity_canary` rejects。
+Focused `[51]` returned WARN: routes 485/485, scanner intents 50/50,
+labels=9<10, rejected_labels=0.
 
 ### Scanner Opportunity regret healthcheck — 2026-05-06
 
