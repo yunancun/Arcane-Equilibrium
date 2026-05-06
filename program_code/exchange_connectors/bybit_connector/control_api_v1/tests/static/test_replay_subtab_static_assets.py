@@ -42,10 +42,12 @@ _TAB_PAPER_HTML = _STATIC_DIR / "tab-paper.html"
 _TAB_REPLAY_HTML = _STATIC_DIR / "tab-replay.html"
 _TAB_DEVELOPMENT_HTML = _STATIC_DIR / "tab-development.html"
 _TAB_LIVE_HTML = _STATIC_DIR / "tab-live.html"
+_TAB_SETTINGS_HTML = _STATIC_DIR / "tab-settings.html"
 _CONSOLE_HTML = _STATIC_DIR / "console.html"
 _LOGIN_HTML = _STATIC_DIR / "login.html"
 _INDEX_HTML = _STATIC_DIR / "index.html"
 _TRADING_HTML = _STATIC_DIR / "trading.html"
+_COMMON_JS = _STATIC_DIR / "common.js"
 _APP_PAPER_JS = _STATIC_DIR / "app-paper.js"
 _BROWSER_TEST_HTML = _THIS_DIR / "test_replay_subtab_readiness.html"
 
@@ -85,10 +87,26 @@ def console_html() -> str:
 
 
 @pytest.fixture(scope="module")
+def tab_settings_html() -> str:
+    """Read tab-settings.html once per test module / 每模組讀一次。"""
+    assert _TAB_SETTINGS_HTML.exists(), (
+        f"tab-settings.html not found at {_TAB_SETTINGS_HTML}"
+    )
+    return _TAB_SETTINGS_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
 def tab_live_html() -> str:
     """Read tab-live.html once per test module / 每模組讀一次。"""
     assert _TAB_LIVE_HTML.exists(), f"tab-live.html not found at {_TAB_LIVE_HTML}"
     return _TAB_LIVE_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def common_js() -> str:
+    """Read common.js once per test module / 每模組讀一次。"""
+    assert _COMMON_JS.exists(), f"common.js not found at {_COMMON_JS}"
+    return _COMMON_JS.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -126,30 +144,46 @@ def test_console_has_replay_and_optional_paper_tabs(console_html: str) -> None:
     assert "/api/v1/settings/paper-engine" in console_html
 
 
-def test_console_has_settings_gated_development_tab(console_html: str) -> None:
-    """Development tab is present but hidden until the setting is enabled."""
+def test_console_has_settings_gated_development_support_tab(console_html: str) -> None:
+    """Development support tab is present but hidden until the setting is enabled."""
     assert "id: 'development'" in console_html
     assert "tab-development.html" in console_html
-    assert "requiresDevelopmentMode: true" in console_html
-    assert "/api/v1/settings/development-mode" in console_html
-    assert "openclaw-development-mode-setting" in console_html
+    assert "requiresDevelopmentSupport: true" in console_html
+    assert "/api/v1/settings/development-mode" not in console_html
+    assert "openclaw-development-support-setting" in console_html
 
 
 def test_development_tab_covers_v001_to_v063(tab_development_html: str) -> None:
-    """Development tab renders the full V001-V063 migration dashboard range."""
+    """Development support tab renders the full V001-V063 migration dashboard range."""
     assert "V001__create_schemas.sql" in tab_development_html
     assert "V061__replay_promotion_metrics_calculator.sql" in tab_development_html
+    assert "MIGRATION_ICONS" in tab_development_html
+    assert "V022" in tab_development_html
+    assert "V042" in tab_development_html
     assert "V063" in tab_development_html
     assert "for (let i = 1; i <= 63; i += 1)" in tab_development_html
+
+
+def test_development_support_toggle_is_browser_local(
+    tab_settings_html: str,
+    common_js: str,
+) -> None:
+    """Settings support toggle must not depend on a newly loaded backend route."""
+    assert "Development Support" in tab_settings_html
+    assert "development-support-enabled" in tab_settings_html
+    assert "/api/v1/settings/development-mode" not in tab_settings_html
+    assert "OC_DEVELOPMENT_SUPPORT_MODE_KEY" in common_js
+    assert "async function ocFetchDevelopmentSupportMode" in common_js
+    assert "/api/v1/settings/development-mode" not in common_js
 
 
 def test_global_mode_control_surfaces_are_development_gated(
     tab_live_html: str,
 ) -> None:
-    """Live's global-mode explanatory surface is gated by Development Mode."""
+    """Live's global-mode explanatory surface is gated by Development Support."""
     assert 'id="live-global-mode-control-note"' in tab_live_html
     assert 'data-dev-mode-only="global-mode-control"' in tab_live_html
-    assert "ocFetchGuiDevelopmentMode" in tab_live_html
+    assert "ocFetchDevelopmentSupportMode" in tab_live_html
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(

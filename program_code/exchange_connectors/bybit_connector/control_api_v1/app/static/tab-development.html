@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>开发 / Development</title>
+<title>开发状态支持 / Development Support</title>
 <script src="/static/common.js"></script>
 </head>
 <body>
@@ -12,15 +12,18 @@
 <style>
   .dev-header-row { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
   .dev-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
-  .dev-mode-btn-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:10px; }
+  .dev-mode-btn-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(184px,1fr)); gap:10px; }
   .dev-version-card {
-    background:var(--bg); border:1px solid var(--border); border-radius:10px;
-    padding:14px 12px; text-align:left; color:var(--text); min-height:126px;
-    display:flex; flex-direction:column; gap:6px;
+    background:var(--bg); border:1px solid var(--border); border-radius:8px;
+    padding:12px; text-align:left; color:var(--text); min-height:142px;
+    display:flex; flex-direction:column; gap:7px;
   }
   .dev-version-card.landed { border-color:rgba(56,139,253,0.34); background:rgba(56,139,253,0.055); }
-  .dev-version-card.missing { border-color:rgba(139,148,158,0.24); opacity:0.72; }
-  .dev-version-id { font-size:20px; font-weight:700; letter-spacing:0; color:var(--accent); }
+  .dev-version-card.reserved { border-color:rgba(210,153,34,0.28); background:rgba(210,153,34,0.045); }
+  .dev-version-card.future { border-color:rgba(139,148,158,0.24); opacity:0.76; }
+  .dev-version-top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .dev-version-id { font-size:19px; font-weight:700; letter-spacing:0; color:var(--accent); }
+  .dev-version-icon { font-size:23px; line-height:1; }
   .dev-version-name { font-size:12px; font-weight:600; line-height:1.35; min-height:32px; }
   .dev-version-file { font-size:10px; color:var(--text-dim); font-family:monospace; word-break:break-all; }
   .dev-version-meta { margin-top:auto; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
@@ -31,25 +34,25 @@
 
 <div id="development-root" class="dev-locked">
   <div class="oc-card dev-locked-note" style="border-color:rgba(210,153,34,0.35)">
-    <h2>&#x1F6E0; 开发模式未启用 / Development Mode Disabled</h2>
-    <div class="subtitle">请在 Settings 中启用 GUI Development Mode。此页面不影响交易、风控、live 授权或 engine runtime。</div>
+    <h2>&#x1F6E0; 开发状态支持未启用 / Development Support Disabled</h2>
+    <div class="subtitle">请在 Settings 中启用 Development Support。此页面只显示全局开发过程状态，不影响交易、风控、live 授权或 engine runtime。</div>
   </div>
 
   <div class="dev-dashboard-body">
     <div class="oc-card">
       <div class="dev-header-row">
         <div>
-          <h2>&#x1F6E0; 开发仪表盘 / Development Dashboard</h2>
-          <div class="subtitle">V001-V063 migration surface，按 Global Mode Control 的按钮卡片密度展示。</div>
+          <h2>&#x1F6E0; 全局开发状态 / Global Development Status</h2>
+          <div class="subtitle">V001-V063 support dashboard，按 Global Mode Control 的按钮密度展示，每个 V0xx 使用独立状态图标。</div>
         </div>
-        <span id="dev-mode-chip" class="oc-chip oc-chip-neutral">loading...</span>
+        <span id="dev-support-chip" class="oc-chip oc-chip-neutral">loading...</span>
       </div>
 
       <div class="dev-summary">
         <div class="oc-metric"><div class="oc-metric-label">Range</div><div class="oc-metric-val" style="font-size:16px">V001-V063</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Landed</div><div class="oc-metric-val green" id="dev-landed-count">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Empty Slots</div><div class="oc-metric-val" id="dev-empty-count">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Companions</div><div class="oc-metric-val" id="dev-companion-count">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Reserved / Future</div><div class="oc-metric-val" id="dev-empty-count">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Companion Checks</div><div class="oc-metric-val" id="dev-companion-count">--</div></div>
       </div>
 
       <div class="dev-mode-btn-grid" id="migration-dashboard-grid"></div>
@@ -126,12 +129,39 @@ const MIGRATION_COMPANIONS = {
   V052: ['V052_preflight.sql'],
 };
 
-function titleFromFile(fileName) {
-  if (!fileName) return 'Not landed / 未落地';
+const MIGRATION_RESERVED = {
+  V022: 'reserved gap / history slot',
+  V042: 'reserved replay signing keys slot',
+  V062: 'future development slot',
+  V063: 'future development slot',
+};
+
+const MIGRATION_ICONS = {
+  V001:'🧱', V002:'📈', V003:'🤖', V004:'🧠', V005:'🗂️', V006:'⏳', V007:'📒', V008:'💸', V009:'📰',
+  V010:'🧮', V011:'🧬', V012:'📜', V013:'🗓️', V014:'⚙️', V015:'🧭', V016:'🔁', V017:'📐', V018:'💾',
+  V019:'🎚️', V020:'⚖️', V021:'🚪', V022:'📌', V023:'🏷️', V024:'🛡️', V025:'🧹', V026:'💡', V027:'🏦',
+  V028:'🛣️', V029:'📤', V030:'🔎', V031:'🌱', V032:'🧪', V033:'🏁', V034:'🧩', V035:'📋', V036:'🔐',
+  V037:'🚫', V038:'🏷️', V039:'🧰', V040:'✅', V041:'⛔', V042:'🔑', V043:'🪞', V044:'🤝', V045:'🏃',
+  V046:'📦', V047:'📊', V048:'🚨', V049:'🔬', V050:'🧾', V051:'🧠', V052:'🔗', V053:'📣', V054:'📝',
+  V055:'🧷', V056:'🕰️', V057:'🎖️', V058:'🧊', V059:'📉', V060:'🆘', V061:'🧮', V062:'🧭', V063:'🏗️',
+};
+
+function titleFromFile(fileName, id) {
+  if (!fileName) return MIGRATION_RESERVED[id] || 'future support slot';
   return fileName
     .replace(/^V\d{3}__?/, '')
     .replace(/\.sql$/, '')
     .replace(/_/g, ' ');
+}
+
+function phaseFor(id) {
+  const n = Number(id.slice(1));
+  if (n <= 8) return 'foundation';
+  if (n <= 21) return 'agent/runtime';
+  if (n <= 35) return 'learning/edge';
+  if (n <= 48) return 'replay governance';
+  if (n <= 61) return 'REF-20/21 hardening';
+  return 'future';
 }
 
 function renderMigrationDashboard() {
@@ -148,17 +178,22 @@ function renderMigrationDashboard() {
     if (file) landed += 1;
     else empty += 1;
     companions += companionList.length;
-    const cls = file ? 'landed' : 'missing';
-    const status = file ? '<span class="oc-chip oc-chip-good">landed</span>' : '<span class="oc-chip oc-chip-neutral">empty</span>';
+    const state = file ? 'landed' : (MIGRATION_RESERVED[id] ? 'reserved' : 'future');
+    const status = file
+      ? '<span class="oc-chip oc-chip-good">landed</span>'
+      : '<span class="oc-chip oc-chip-neutral">' + state + '</span>';
     const companionHtml = companionList.length
       ? '<span class="oc-chip oc-chip-warn">' + companionList.length + ' companion</span>'
       : '';
     rows.push(
-      '<div class="dev-version-card ' + cls + '">' +
-        '<div class="dev-version-id">' + id + '</div>' +
-        '<div class="dev-version-name">' + ocEsc(titleFromFile(file)) + '</div>' +
+      '<div class="dev-version-card ' + state + '">' +
+        '<div class="dev-version-top">' +
+          '<div class="dev-version-id">' + id + '</div>' +
+          '<div class="dev-version-icon" title="' + ocEsc(id + ' icon') + '">' + (MIGRATION_ICONS[id] || '•') + '</div>' +
+        '</div>' +
+        '<div class="dev-version-name">' + ocEsc(titleFromFile(file, id)) + '</div>' +
         '<div class="dev-version-file">' + ocEsc(file || 'no migration file in repo') + '</div>' +
-        '<div class="dev-version-meta">' + status + companionHtml + '</div>' +
+        '<div class="dev-version-meta">' + status + '<span class="oc-chip oc-chip-neutral">' + phaseFor(id) + '</span>' + companionHtml + '</div>' +
       '</div>'
     );
   }
@@ -168,27 +203,27 @@ function renderMigrationDashboard() {
   ocSetText('dev-companion-count', String(companions));
 }
 
-function applyDevelopmentModeVisibility(enabled) {
+function applyDevelopmentSupportVisibility(enabled) {
   const root = document.getElementById('development-root');
   if (root) root.classList.toggle('dev-locked', !enabled);
-  const chip = document.getElementById('dev-mode-chip');
+  const chip = document.getElementById('dev-support-chip');
   if (chip) {
-    chip.textContent = enabled ? 'Development Mode Enabled' : 'Development Mode Disabled';
+    chip.textContent = enabled ? 'Development Support Enabled' : 'Development Support Disabled';
     chip.className = 'oc-chip ' + (enabled ? 'oc-chip-good' : 'oc-chip-neutral');
   }
 }
 
 renderMigrationDashboard();
-applyDevelopmentModeVisibility(
-  typeof ocReadCachedGuiDevelopmentMode === 'function'
-    ? ocReadCachedGuiDevelopmentMode()
+applyDevelopmentSupportVisibility(
+  typeof ocReadCachedDevelopmentSupportMode === 'function'
+    ? ocReadCachedDevelopmentSupportMode()
     : false
 );
-if (typeof ocListenGuiDevelopmentMode === 'function') {
-  ocListenGuiDevelopmentMode(applyDevelopmentModeVisibility);
+if (typeof ocListenDevelopmentSupportMode === 'function') {
+  ocListenDevelopmentSupportMode(applyDevelopmentSupportVisibility);
 }
-if (typeof ocFetchGuiDevelopmentMode === 'function') {
-  ocFetchGuiDevelopmentMode().then(applyDevelopmentModeVisibility);
+if (typeof ocFetchDevelopmentSupportMode === 'function') {
+  ocFetchDevelopmentSupportMode().then(applyDevelopmentSupportVisibility);
 }
 </script>
 </body>

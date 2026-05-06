@@ -1,25 +1,35 @@
-# GUI Development Mode Tab
+# Development Support Tab
 
 Date: 2026-05-06
 Role: PM local implementation
 Repo root: `/Users/ncyu/Projects/TradeBot/srv`
 
+Correction: this report supersedes the earlier "GUI Development Mode" naming.
+The intended feature is a Development Support/status surface, not a GUI mode
+that changes runtime behavior.
+
 ## Result
 
-Implemented a GUI-only Development Mode setting.
+Implemented a Development Support setting and status page.
 
-- Added authenticated `GET/POST /api/v1/settings/development-mode`.
-- Added Settings toggle: `GUI Development Mode / GUI 开发模式`.
+- Settings toggle is browser-local and no longer depends on
+  `/api/v1/settings/development-mode`, preventing 404s when the running API
+  process has not been restarted.
+- Backend `GET/POST /api/v1/settings/development-mode` remains compatibility-only
+  and maps to `OPENCLAW_DEVELOPMENT_SUPPORT_MODE` with legacy fallback.
+- Added Settings toggle: `开发状态支持页 / Development Support`.
 - Disabled state hides:
   - Overview `Global Mode Control` card.
   - Live page development-only global-mode note.
-  - Development tab.
-- Enabled state shows a new `开发 Dev` tab.
-- New Development tab renders a V001-V063 migration dashboard using compact cards aligned with the existing Global Mode Control card density.
+  - Support tab.
+- Enabled state shows a `开发状态 Support` tab.
+- New Support tab renders a V001-V063 global development status dashboard using
+  compact cards aligned with the existing Global Mode Control card density.
+  Each V0xx card has a distinct icon and shows landed/reserved/future status.
 
 ## Boundary
 
-This is GUI visibility only:
+This is support visibility only:
 
 - No trading mode change.
 - No risk config change.
@@ -36,7 +46,7 @@ No sub-agents were spawned because the active Codex tool rule only permits sub-a
 ## Verification
 
 - `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_settings_paper_engine.py -q` -> 5 passed.
-- `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/static/test_replay_subtab_static_assets.py -q` -> 38 passed.
+- `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/static/test_replay_subtab_static_assets.py -q` -> 39 passed.
 - `python3 -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/app/settings_routes.py` -> passed.
 - `git diff --check` on touched GUI/settings/test files -> clean.
 
