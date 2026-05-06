@@ -1,14 +1,14 @@
 # REF-21 Full-Chain Replay Engine Dev Plan V1.3
 
 **Date:** 2026-05-06  
-**Status:** Active revised design / R2-R3 blocked behind V1.3 P0 gates  
+**Status:** Active revised design / R2-R3 blocked behind empirical P0 gates
 **Owner:** PM  
 **Supersedes:** `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md`  
-**Audit input:** V1.2 8-agent adversarial closure review, overall rating
-`REVISE -> V1.3 consensus`  
+**Audit input:** V1.2 8-agent adversarial closure review + final
+8-agent empirical spec-to-deploy audit, overall verdict `R2/R3 BLOCKED`
 **Runtime state:** `/api/v1/replay/full-chain/prepare` remains default-OFF behind
 `OPENCLAW_REPLAY_PREPARE_ENABLED=0`. R1 hardening may continue; GUI remains
-unbound. R2/R3 dispatch is forbidden until V1.3 P0 gates pass.
+unbound. R2/R3 dispatch is forbidden until empirical P0 gates pass.
 
 ---
 
@@ -24,7 +24,19 @@ closure review found five remaining P0 design blockers:
 5. tier-promotion approval and metric calculation not tamper-resistant.
 
 V1.3 keeps REF-21 blocked from R2/R3 until those are closed. The only allowed
-near-term implementation is **R1 hardening of the disabled dataset endpoint**.
+near-term implementation is **R1 hardening of the disabled dataset endpoint**
+plus migration files that give MIT real PG dry-run targets.
+
+Empirical correction from the final review:
+
+- V057/V058/V059/V060 must exist as migration files before MIT dry-run.
+- `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP` is a production-host guard, not just a
+  plan note.
+- Baseline fixture/decision counts are replay business metrics; pytest pass/fail
+  totals live in a separate regression namespace.
+- The current `replay_runner` binary is not an empty stub: it has manifest
+  verification, fixture loading, isolated pipeline, strategy/risk adapter, and
+  report writing. It still is not a REF-21 full-chain scanner-to-exit runner.
 
 ---
 
@@ -62,6 +74,9 @@ inside the uvicorn worker process.
 
 - default env: `OPENCLAW_REPLAY_PREPARE_ENABLED=0`,
 - disabled response: HTTP 403 with `replay_full_chain_prepare_disabled`,
+- live release profile requires a second flag:
+  `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP=1`; otherwise HTTP 403 with
+  `replay_full_chain_prod_ip_blocked`,
 - disabled path must not fetch market data, scanner state, strategy params, or
   risk config,
 - no default GUI binding,
@@ -69,9 +84,12 @@ inside the uvicorn worker process.
 
 ### 2.1 Emergency Audit Log DDL Sketch
 
-Reserved migration component: `V060_replay_emergency_audit_log`.
+Migration component: `sql/migrations/V060__replay_emergency_audit_log.sql`.
 
 ```sql
+CREATE SCHEMA IF NOT EXISTS audit;
+CREATE SCHEMA IF NOT EXISTS governance;
+
 CREATE TABLE audit.replay_emergency_log (
     event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ts TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -79,6 +97,7 @@ CREATE TABLE audit.replay_emergency_log (
     actor_type TEXT NOT NULL CHECK (actor_type IN ('human', 'agent', 'system')),
     route TEXT NOT NULL CHECK (route = '/api/v1/replay/full-chain/prepare'),
     enabled_flag BOOLEAN NOT NULL,
+    bulk_prod_ip_allowed BOOLEAN NOT NULL DEFAULT false,
     window_start TIMESTAMPTZ,
     window_end TIMESTAMPTZ,
     symbols TEXT[] NOT NULL DEFAULT '{}',
@@ -98,7 +117,7 @@ Application logs may mirror this row, but the database row is the authority.
 
 ## 3. Dedicated Subprocess Deploy Path
 
-Full-chain run route shape:
+Planned full-chain run route shape:
 
 ```text
 POST /api/v1/replay/full-chain/run
@@ -110,6 +129,12 @@ POST /api/v1/replay/full-chain/run
   -> collect artifacts
   -> finalize report
 ```
+
+Deploy reality as of this revision:
+
+- implemented dataset endpoint: `POST /api/v1/replay/full-chain/prepare`,
+- implemented REF-20 run endpoint: `POST /api/v1/replay/run`,
+- not implemented: `POST /api/v1/replay/full-chain/run`.
 
 Subprocess environment policy:
 
@@ -169,9 +194,20 @@ Concurrency gate:
 
 ---
 
-## 5. Migration Step 0 And DDL Sketches
+## 5. Migration Step -1 / Step 0 And DDL
 
-Before any V057/V058/V059 code is written, MIT must run a Linux PG dry-run per
+Step -1 before dry-run:
+
+- PM dispatches MIT/E1 to turn V057/V058/V059/V060 into migration files.
+- Minimum target files:
+  - `V057__replay_tier_promotion_approval.sql`,
+  - `V058__symbol_universe_and_strategy_freeze_log.sql`,
+  - `V059__edge_estimate_snapshots.sql`,
+  - `V060__replay_emergency_audit_log.sql`.
+
+Step 0:
+
+MIT runs a Linux PG dry-run per
 `memory/feedback_v_migration_pg_dry_run.md` and record:
 
 - preflight on current `trade-core` schema,
@@ -184,6 +220,7 @@ Before any V057/V058/V059 code is written, MIT must run a Linux PG dry-run per
 ### 5.1 V057 Replay Evidence Tiers
 
 ```sql
+-- Landed as sql/migrations/V057__replay_tier_promotion_approval.sql.
 CREATE TYPE replay.replay_evidence_tier_v057 AS ENUM (
     'synthetic_replay',
     's2_public_replay',
@@ -204,6 +241,7 @@ CREATE TABLE replay.tier_promotion_approval (
     manifest_hash BYTEA NOT NULL,
     approver_actor_id TEXT NOT NULL CHECK (approver_actor_id !~ '[\r\n]'),
     approver_role TEXT NOT NULL CHECK (approver_role IN ('PM', 'QC', 'MIT')),
+    signature_scheme TEXT NOT NULL DEFAULT 'hmac_sha256_v1',
     signature_payload_sha256 BYTEA NOT NULL,
     approval_signature BYTEA NOT NULL,
     mfa_challenge_id TEXT,
@@ -215,15 +253,12 @@ REVOKE INSERT, UPDATE, DELETE ON replay.tier_promotion_approval FROM PUBLIC;
 ```
 
 Metrics must be produced by a SECURITY DEFINER calculator, not by replay
-producer payloads:
+producer payloads. **Do not deploy a stub calculator.** The calculator body
+must dispatch to or byte-align with:
 
-```sql
-CREATE FUNCTION replay.calculate_promotion_metrics(report_id UUID)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$ /* reads immutable report artifacts and computes DSR/PBO/PSR/OOS gap */ $$;
-```
+- `program_code/learning_engine/dsr_gate.py`,
+- `program_code/learning_engine/pbo_gate.py`,
+- `program_code/learning_engine/quantile_bootstrap.py`.
 
 Allowed FSM transitions:
 
@@ -239,6 +274,11 @@ Direct tier jumps fail closed.
 ### 5.2 V058 Symbol Universe Snapshots
 
 ```sql
+-- Landed as sql/migrations/V058__symbol_universe_and_strategy_freeze_log.sql.
+CREATE SCHEMA IF NOT EXISTS governance;
+
+CREATE TABLE governance.strategy_freeze_log (...);
+
 CREATE TABLE market.symbol_universe_snapshots (
     ts TIMESTAMPTZ NOT NULL,
     exchange TEXT NOT NULL CHECK (exchange = 'bybit'),
@@ -264,6 +304,7 @@ Scanner replay must select symbols from V058, not from current survivors.
 ### 5.3 V059 Edge Estimate Snapshots
 
 ```sql
+-- Landed as sql/migrations/V059__edge_estimate_snapshots.sql.
 CREATE TABLE learning.edge_estimate_snapshots (
     asof_ts TIMESTAMPTZ NOT NULL,
     source_tier TEXT NOT NULL,
@@ -276,6 +317,9 @@ CREATE TABLE learning.edge_estimate_snapshots (
     cell_key TEXT NOT NULL,
     estimate_payload_hash BYTEA NOT NULL,
     estimate_payload_jsonb JSONB NOT NULL,
+    is_deprecated_at_asof BOOLEAN NOT NULL DEFAULT false,
+    deprecated_reason TEXT,
+    retention_until TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (asof_ts, strategy_hash, scanner_config_hash, symbol, strategy, regime_key, cell_key)
 );
 ```
@@ -407,15 +451,25 @@ Funding settlement and broker rebate:
 
 Baseline SLA before any candidate comparison:
 
-- fixture row count target: `2555 ± 5` for the canonical 7-day baseline fixture
-  selected by FA,
-- decision count target: `17 ± 3`,
+- canonical 7-day fixture row count target: approximately `254062 ± 1%`
+  (`25 symbols * 7d * 1m kline ~= 252000`, plus funding/open-interest/
+  instrument snapshots),
+- scan-cycle count target: `10080 ± 5%` for a 7-day 60-second scan interval,
+- intent/decision artifact target: `500-1500` strategy intents for the
+  canonical 7-day fixture, with FA/QC allowed to narrow after first real run,
 - five pytest categories must be green:
   1. dataset fixture validation,
   2. scanner timeline,
   3. strategy/risk decisions,
   4. execution/fee lifecycle,
   5. report/failure states.
+
+Regression namespace, separate from replay fixture SLA:
+
+- Python pytest total pass should not regress materially from the current
+  active baseline (`3431 PASS` in TODO.md v12),
+- legacy historical `2555 passed / 17 failed` references are pytest regression
+  snapshots and must not be reused as fixture row count or decision count.
 
 Baseline-vs-candidate / regret report:
 
@@ -438,15 +492,19 @@ Baseline-vs-candidate / regret report:
 | R5 S1 recorder | `s1_calibrated_replay` | recorder retention, S1 reader, calibration |
 | R6 MLDE/Dream advisory | `verified_replay_advisory` | V057 FSM, SECURITY DEFINER calculator, applier gate |
 
-R2/R3 cannot begin until V1.3 P0 review returns at least Conditional/B.
+R2/R3 cannot begin until empirical P0 review returns at least Conditional/B.
 
 ---
 
 ## 12. Required Review Chain
 
+Step -1 before implementation:
+
+- PM dispatches concrete migration implementation for V057/V058/V059/V060.
+
 Step 0 before implementation:
 
-- MIT Linux PG dry-run for V057/V058/V059/V060 DDL sketches.
+- MIT Linux PG dry-run for V057/V058/V059/V060 migration files.
 
 Then:
 
@@ -458,6 +516,15 @@ Then:
 5. FA: baseline SLA, wave-to-tier mapping, candidate/regret acceptance.
 6. A3 + TW: GUI V1.1.
 
+LOC governance:
+
+- warning line: 800 LOC per source/test file,
+- hard line: 2000 LOC per source/test file,
+- PM sign-off is required before any patch increases a file above 2000 LOC or
+  adds more than 500 LOC to an already over-warning file,
+- current known exceptions remain tracked in TODO.md (`intent_processor/tests.rs`
+  2910 LOC split backlog).
+
 ---
 
 ## 13. Revision History
@@ -467,4 +534,5 @@ Then:
 | V1 | 2026-05-06 | PM | Initial direction baseline; superseded. |
 | V1.1 | 2026-05-06 | PM | Added B-gates after first audit; superseded. |
 | V1.2 | 2026-05-06 | PM | Added default-OFF endpoint gate and 16 B-gates; superseded by V1.3 audit closure. |
-| V1.3 | 2026-05-06 | PM | Closes negative-edge fail-open, adds subprocess deploy path, expanded write confinement, V057/V058/V059/V060 DDL sketches and dry-run step, tamper-resistant promotion FSM, Bybit SSOT mapping, block bootstrap, survival/correlation/cost thresholds, baseline SLA, and wave-to-tier mapping. |
+| V1.3 | 2026-05-06 | PM | Closes negative-edge fail-open, adds subprocess deploy path, expanded write confinement, V057/V058/V059/V060 DDL plan and dry-run step, tamper-resistant promotion FSM, Bybit SSOT mapping, block bootstrap, survival/correlation/cost thresholds, baseline SLA, and wave-to-tier mapping. |
+| V1.3 empirical correction | 2026-05-06 | PM | Final 8-agent real-code audit accepted: fixed replay SLA namespace collision, added bulk production-IP guard requirement, reversed migration review order to Step -1/Step 0, landed V057-V060 migration targets, restored LOC governance, and clarified current binary/full-chain route deploy reality. |

@@ -12,7 +12,7 @@
 ## 0. PM Decision
 
 GUI V1 moved Replay out of Paper and added simulation-only language. V1.1 adds
-the missing R4 gates: feature-flag behavior, second confirmation, 12-tab
+the missing R4 gates: feature-flag behavior, second confirmation, 13-tab
 navigation consistency, accessibility, i18n, agent quotas, and sign-off SOP.
 
 R4 cannot begin until this spec is reviewed by A3 + TW and PM sign-off is
@@ -28,7 +28,7 @@ Replay is a top-level tab:
 - not hidden behind Paper enablement,
 - Advanced Replay is nested inside Replay,
 - sidebar cards remain `Live` and `Demo`,
-- global 12-tab navigation naming must stay consistent with `CLAUDE.md §五`
+- global 13-tab navigation naming must stay consistent with `CLAUDE.md §五`
   and the current console tab dictionary.
 
 Paper, if retained, is optional behind settings and is not a PnL authority.
