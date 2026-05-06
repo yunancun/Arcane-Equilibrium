@@ -34,6 +34,7 @@ GRID_REENTRY_RATE_WARN = 0.5
 GRID_REENTRY_RATE_FAIL = 0.7
 GRID_REENTRY_DELTA_WARN = 0.3
 GRID_LIFECYCLE_MIN_SAMPLE = 5
+GRID_COHORT_MIN_COMMON_SYMBOLS = 2
 
 EDGE_ACCEPTANCE_MIN_SAMPLE = 30
 EDGE_ACCEPTANCE_MIN_AVG_NET_BPS = 5.0
@@ -53,6 +54,17 @@ ACTIVE_STRATEGIES: tuple[str, ...] = (
     "bb_breakout",
     "bb_reversion",
 )
+
+STRATEGY_ENTRY_FILL_PREDICATE = """
+      AND (f.entry_context_id IS NULL OR f.entry_context_id = '')
+      AND f.exit_reason IS NULL
+      AND f.order_id NOT LIKE 'oc_risk_%%'
+"""
+
+
+def _strategy_entry_fill_predicate() -> str:
+    """SQL predicate for strategy-owned entry fills only. 僅篩 strategy entry fill。"""
+    return STRATEGY_ENTRY_FILL_PREDICATE
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -173,6 +185,7 @@ entry_fills AS (
     AND f.strategy_name NOT LIKE 'ipc_close%%'
     AND f.strategy_name NOT LIKE 'unattributed:%%'
     AND coalesce(f.exit_source, '') = ''
+""" + _strategy_entry_fill_predicate() + """
 )
 SELECT
   to_char(d.bucket_day, 'YYYY-MM-DD') AS bucket_day,
@@ -210,6 +223,7 @@ WITH entry_fills AS (
     AND f.strategy_name NOT LIKE 'ipc_close%%'
     AND f.strategy_name NOT LIKE 'unattributed:%%'
     AND coalesce(f.exit_source, '') = ''
+""" + _strategy_entry_fill_predicate() + """
 )
 SELECT
   count(*)::int AS total_fills,
@@ -345,6 +359,7 @@ entries AS (
   WHERE f.ts >= date_trunc('day', now()) - (%s::int * interval '1 day')
     AND f.engine_mode IN ('demo', 'live_demo')
     AND f.strategy_name = 'grid_trading'
+""" + _strategy_entry_fill_predicate() + """
 ),
 closes AS (
   SELECT f.entry_context_id AS entry_cid,
@@ -363,7 +378,7 @@ closes AS (
 ),
 first_close AS (SELECT * FROM closes WHERE rn = 1),
 lifecycles AS (
-  SELECT e.bucket_day, e.engine_mode,
+  SELECT e.bucket_day, e.engine_mode, e.symbol, e.side,
          EXTRACT(EPOCH FROM (c.exit_ts - e.entry_ts))/60.0 AS lifetime_min,
          (e.entry_fee + c.exit_fee) AS total_fee_usd,
          c.realized_pnl
@@ -383,7 +398,7 @@ LEFT JOIN lifecycles l ON l.bucket_day = d.bucket_day
 GROUP BY d.bucket_day
 ORDER BY d.bucket_day
 """
-    current_sql = """
+    current_lifecycle_cte = """
 WITH entries AS (
   SELECT f.engine_mode, f.symbol, f.side,
          f.context_id AS entry_cid,
@@ -393,6 +408,7 @@ WITH entries AS (
   WHERE f.ts > now() - interval '24 hours'
     AND f.engine_mode IN ('demo', 'live_demo')
     AND f.strategy_name = 'grid_trading'
+""" + _strategy_entry_fill_predicate() + """
 ),
 closes AS (
   SELECT f.entry_context_id AS entry_cid,
@@ -411,13 +427,15 @@ closes AS (
 ),
 first_close AS (SELECT * FROM closes WHERE rn = 1),
 lifecycles AS (
-  SELECT e.engine_mode,
+  SELECT e.engine_mode, e.symbol, e.side,
          EXTRACT(EPOCH FROM (c.exit_ts - e.entry_ts))/60.0 AS lifetime_min,
          (e.entry_fee + c.exit_fee) AS total_fee_usd,
          c.realized_pnl
   FROM entries e
   JOIN first_close c ON c.entry_cid = e.entry_cid
 )
+"""
+    current_sql = current_lifecycle_cte + """
 SELECT engine_mode,
        count(*)::int AS n,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY lifetime_min)::float8 AS p50_min,
@@ -428,15 +446,47 @@ FROM lifecycles
 GROUP BY engine_mode
 ORDER BY engine_mode
 """
+    cohort_sql = current_lifecycle_cte + """
+, by_cohort AS (
+  SELECT engine_mode, symbol, side,
+         count(*)::int AS n,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY lifetime_min)::float8 AS p50_min
+  FROM lifecycles
+  GROUP BY engine_mode, symbol, side
+),
+common_cohorts AS (
+  SELECT d.symbol, d.side,
+         d.n AS demo_n,
+         l.n AS live_demo_n,
+         d.p50_min AS demo_p50_min,
+         l.p50_min AS live_demo_p50_min,
+         l.p50_min / NULLIF(d.p50_min, 0)::float8 AS lifetime_ratio
+  FROM by_cohort d
+  JOIN by_cohort l
+    ON l.symbol = d.symbol
+   AND l.side = d.side
+   AND l.engine_mode = 'live_demo'
+  WHERE d.engine_mode = 'demo'
+    AND d.p50_min > 0
+)
+SELECT count(*)::int AS common_cohorts,
+       coalesce(sum(demo_n), 0)::int AS demo_common_n,
+       coalesce(sum(live_demo_n), 0)::int AS live_common_n,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY lifetime_ratio)::float8 AS median_ratio,
+       sum(live_demo_n * lifetime_ratio)::float8
+         / NULLIF(sum(live_demo_n), 0)::float8 AS live_weighted_ratio
+FROM common_cohorts
+"""
     reentry_sql = """
 WITH entries_with_lag AS (
-  SELECT engine_mode, symbol, side, ts AS entry_ts,
-         LAG(ts) OVER (PARTITION BY engine_mode, symbol, side ORDER BY ts) AS prev_ts
-  FROM trading.fills
-  WHERE ts > now() - interval '24 hours'
-    AND engine_mode IN ('demo', 'live_demo')
-    AND strategy_name = 'grid_trading'
-    AND coalesce(exit_source, '') = ''
+  SELECT f.engine_mode, f.symbol, f.side, f.ts AS entry_ts,
+         LAG(f.ts) OVER (PARTITION BY f.engine_mode, f.symbol, f.side ORDER BY f.ts) AS prev_ts
+  FROM trading.fills f
+  WHERE f.ts > now() - interval '24 hours'
+    AND f.engine_mode IN ('demo', 'live_demo')
+    AND f.strategy_name = 'grid_trading'
+    AND coalesce(f.exit_source, '') = ''
+""" + _strategy_entry_fill_predicate() + """
 )
 SELECT engine_mode,
        count(*)::int AS total_entries,
@@ -456,6 +506,8 @@ ORDER BY engine_mode
         day_rows = cur.fetchall() or []
         cur.execute(current_sql)
         current_rows = cur.fetchall() or []
+        cur.execute(cohort_sql)
+        cohort_row = cur.fetchone()
         cur.execute(reentry_sql)
         re_rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
@@ -513,12 +565,27 @@ ORDER BY engine_mode
     live_demo = stats.get("live_demo")
     re_demo = re_stats.get("demo", {"rate": 0.0, "total": 0.0, "re": 0.0})
     re_live = re_stats.get("live_demo", {"rate": 0.0, "total": 0.0, "re": 0.0})
-    lifetime_ratio = None
+    global_lifetime_ratio = None
+    cohort_common = _as_int(cohort_row[0] if cohort_row else 0)
+    demo_common_n = _as_int(cohort_row[1] if cohort_row else 0)
+    live_common_n = _as_int(cohort_row[2] if cohort_row else 0)
+    cohort_lifetime_ratio = (
+        _as_float(cohort_row[3], 0.0) if cohort_row and cohort_row[3] is not None else None
+    )
+    cohort_weighted_ratio = (
+        _as_float(cohort_row[4], 0.0) if cohort_row and cohort_row[4] is not None else None
+    )
+    cohort_comparable = (
+        cohort_common >= GRID_COHORT_MIN_COMMON_SYMBOLS
+        and demo_common_n >= GRID_LIFECYCLE_MIN_SAMPLE
+        and live_common_n >= GRID_LIFECYCLE_MIN_SAMPLE
+    )
+    lifetime_ratio = cohort_lifetime_ratio if cohort_comparable else None
     fee_burn_demo = None
     fee_burn_live = None
     fee_burn_ratio = None
     if demo and live_demo and demo["p50_min"] > 0:
-        lifetime_ratio = live_demo["p50_min"] / demo["p50_min"]
+        global_lifetime_ratio = live_demo["p50_min"] / demo["p50_min"]
     if demo and demo["sum_abs_pnl"] > 0:
         fee_burn_demo = demo["sum_fee"] / demo["sum_abs_pnl"]
     if live_demo and live_demo["sum_abs_pnl"] > 0:
@@ -529,9 +596,18 @@ ORDER BY engine_mode
     severities: list[tuple[str, str]] = []
     if lifetime_ratio is not None:
         if lifetime_ratio < GRID_LIFETIME_RATIO_FAIL:
-            severities.append(("fail", f"lifetime_ratio={lifetime_ratio:.2f}"))
+            severities.append(("fail", f"cohort_lifetime_ratio={lifetime_ratio:.2f}"))
         elif lifetime_ratio < GRID_LIFETIME_RATIO_WARN:
-            severities.append(("warn", f"lifetime_ratio={lifetime_ratio:.2f}"))
+            severities.append(("warn", f"cohort_lifetime_ratio={lifetime_ratio:.2f}"))
+    elif global_lifetime_ratio is not None and global_lifetime_ratio < GRID_LIFETIME_RATIO_WARN:
+        severities.append(
+            (
+                "warn",
+                "cohort sample insufficient "
+                f"(common={cohort_common}, demo_common_n={demo_common_n}, "
+                f"live_common_n={live_common_n}, global_ratio={global_lifetime_ratio:.2f})",
+            )
+        )
     if fee_burn_live is not None:
         if fee_burn_live > GRID_FEE_BURN_ABS_FAIL:
             severities.append(("fail", f"live fee_burn={fee_burn_live:.2f}"))
@@ -548,10 +624,10 @@ ORDER BY engine_mode
         severities.append(("warn", f"re_entry_delta={re_delta:.2f}"))
 
     if not demo or demo["n"] < GRID_LIFECYCLE_MIN_SAMPLE:
-        status = "pass"
+        status = "warn"
         summary = f"24h demo lifecycles n={int(demo['n']) if demo else 0}; insufficient baseline"
     elif not live_demo or live_demo["n"] < GRID_LIFECYCLE_MIN_SAMPLE:
-        status = "pass"
+        status = "warn"
         summary = f"24h live_demo lifecycles n={int(live_demo['n']) if live_demo else 0}; insufficient live sample"
     elif any(level == "fail" for level, _ in severities):
         status = "fail"
@@ -571,6 +647,7 @@ ORDER BY engine_mode
                 "min_lifecycle_sample_per_mode": GRID_LIFECYCLE_MIN_SAMPLE,
                 "lifetime_ratio_warn_min": GRID_LIFETIME_RATIO_WARN,
                 "lifetime_ratio_fail_min": GRID_LIFETIME_RATIO_FAIL,
+                "min_common_cohorts": GRID_COHORT_MIN_COMMON_SYMBOLS,
                 "live_reentry_rate_warn_max": GRID_REENTRY_RATE_WARN,
                 "live_reentry_rate_fail_max": GRID_REENTRY_RATE_FAIL,
             },
@@ -581,6 +658,12 @@ ORDER BY engine_mode
                 "live_demo_n": int(live_demo["n"]) if live_demo else 0,
                 "live_demo_p50_min": _round_or_none(live_demo["p50_min"] if live_demo else None, 2),
                 "lifetime_ratio": _round_or_none(lifetime_ratio, 2),
+                "global_lifetime_ratio": _round_or_none(global_lifetime_ratio, 2),
+                "cohort_common": cohort_common,
+                "demo_common_n": demo_common_n,
+                "live_common_n": live_common_n,
+                "cohort_lifetime_ratio": _round_or_none(cohort_lifetime_ratio, 2),
+                "cohort_weighted_lifetime_ratio": _round_or_none(cohort_weighted_ratio, 2),
                 "demo_reentry_rate": _round_or_none(re_demo["rate"], 2),
                 "live_demo_reentry_rate": _round_or_none(re_live["rate"], 2),
                 "reentry_delta": _round_or_none(re_delta, 2),

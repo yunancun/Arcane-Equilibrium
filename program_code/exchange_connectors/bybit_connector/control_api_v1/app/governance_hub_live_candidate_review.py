@@ -129,6 +129,19 @@ DEFAULT_LEASE_REVOKE_TRIGGERS = (
     "[42b]_attribution_chain_drift",
 )
 
+_TAKER_FEE_RATE: float = 0.00055
+_MAKER_FEE_CUTOFF: float = 0.00040
+_STRATEGY_ENTRY_FILL_PREDICATE: str = """
+                      AND (f.entry_context_id IS NULL OR f.entry_context_id = '')
+                      AND f.exit_reason IS NULL
+                      AND f.order_id NOT LIKE 'oc_risk_%%'
+"""
+
+
+def _strategy_entry_fill_predicate() -> str:
+    """SQL predicate for strategy-owned entry fills only. 僅篩 strategy entry fill。"""
+    return _STRATEGY_ENTRY_FILL_PREDICATE
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ReviewVerdict dataclass / 評估結果資料類 (per RFC §2.2)
@@ -395,23 +408,28 @@ def _fetch_live_cost_regime() -> dict[str, float]:
                     SELECT
                         CASE
                             WHEN lower(coalesce(f.liquidity_role, '')) = 'maker'
+                              OR coalesce(nullif(f.fee_rate, 0), %s) <= %s
                             THEN 1 ELSE 0
                         END AS maker_like,
-                        coalesce(f.fee_rate, 0.0)::float8 * 10000.0 AS fee_bps
+                        coalesce(nullif(f.fee_rate, 0), %s)::float8 * 10000.0 AS fee_bps
                     FROM trading.fills f
                     WHERE f.ts > now() - INTERVAL '24 hours'
                       AND f.engine_mode IN ('live', 'live_demo')
                       AND coalesce(f.strategy_name, '') <> ''
                       AND f.strategy_name NOT LIKE 'risk_close:%%'
                       AND f.strategy_name NOT LIKE 'strategy_close:%%'
+                      AND f.strategy_name NOT LIKE 'ipc_close%%'
+                      AND f.strategy_name NOT LIKE 'unattributed:%%'
                       AND coalesce(f.exit_source, '') = ''
+                """ + _strategy_entry_fill_predicate() + """
                 )
                 SELECT
                     count(*)::int,
                     coalesce(sum(maker_like), 0)::int,
                     coalesce(avg(fee_bps), 0.0)::float8
                 FROM entry_fills
-                """
+                """,
+                (_TAKER_FEE_RATE, _MAKER_FEE_CUTOFF, _TAKER_FEE_RATE),
             )
             row = cur.fetchone()
         if row is not None:

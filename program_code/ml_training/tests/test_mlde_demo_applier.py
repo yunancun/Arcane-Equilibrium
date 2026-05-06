@@ -293,6 +293,10 @@ def test_lg5_helpers_return_well_formed_dicts_with_deterministic_data():
     assert baseline["avg_realized_net_bps_7d"] == pytest.approx(3.5)
     assert baseline["avg_realized_slippage_bps_7d"] == pytest.approx(1.2)
     assert baseline["source_healthchecks"] == ["[33]", "[40]"]
+    maker_sql = cursor.executed[0][0]
+    assert "f.entry_context_id IS NULL" in maker_sql
+    assert "f.exit_reason IS NULL" in maker_sql
+    assert "f.order_id NOT LIKE 'oc_risk_" in maker_sql
 
     # No strategy_name → n_strategy_fills 0（helper short-circuits, no DB hit）
     # 不傳 strategy_name → n_strategy_fills 0（helper 不查 DB），cursor 序列不被消耗。

@@ -555,9 +555,38 @@ GRID_REENTRY_RATE_WARN = 0.5
 GRID_REENTRY_RATE_FAIL = 0.7
 GRID_REENTRY_DELTA_WARN = 0.3    # live - demo > 0.3 absolute
 
-# Sample-size floor — below this skip evaluation (PASS-with-note).
-# 樣本下限：低於此值跳評估（PASS-with-note）。
+# Sample-size floor — below this returns WARN. Insufficient data should not
+# fail trading, but it also must not count as a clean lifecycle PASS.
+# 樣本下限：低於此值回 WARN。樣本不足不應 FAIL trading，但也不能算乾淨 PASS。
 GRID_LIFECYCLE_MIN_SAMPLE = 5
+
+# Minimum paired cohort sample for demo/live lifecycle parity. This does not
+# relax the lifetime thresholds; it prevents unrelated symbol mixes from
+# creating a false lifecycle FAIL when the comparable cohort is healthy.
+# demo/live lifecycle parity 的最小可比 cohort 樣本。不放寬 lifetime 門檻；
+# 只防止不可比 symbol mix 造成假 FAIL。
+GRID_COHORT_MIN_COMMON_SYMBOLS = 2
+
+
+STRATEGY_ENTRY_FILL_PREDICATE = """
+      AND (f.entry_context_id IS NULL OR f.entry_context_id = '')
+      AND f.exit_reason IS NULL
+      AND f.order_id NOT LIKE 'oc_risk_%%'
+"""
+
+
+def _strategy_entry_fill_predicate() -> str:
+    """SQL predicate for strategy-owned entry fills only.
+
+    Close/risk-close fills now keep the original strategy label and carry
+    ``entry_context_id`` / ``exit_reason`` / ``oc_risk_*`` order ids. A
+    strategy-name-only filter therefore contaminates maker/cost baselines.
+
+    僅篩 strategy entry fill。新 close/risk-close row 會保留原 strategy_name，
+    並用 ``entry_context_id`` / ``exit_reason`` / ``oc_risk_*`` 表示 close；
+    只靠 strategy_name 會污染 maker/cost baseline。
+    """
+    return STRATEGY_ENTRY_FILL_PREDICATE
 
 
 def check_grid_trading_lifecycle_drift(cur) -> tuple[str, str]:
@@ -624,6 +653,7 @@ WITH entries AS (
   WHERE f.ts > now() - interval '24 hours'
     AND f.engine_mode IN ('demo', 'live_demo')
     AND f.strategy_name = 'grid_trading'
+""" + _strategy_entry_fill_predicate() + """
 ),
 closes AS (
   SELECT f.entry_context_id AS entry_cid, f.ts AS exit_ts,
@@ -690,26 +720,83 @@ ORDER BY engine_mode
     demo = stats.get("demo")
     live_demo = stats.get("live_demo")
 
-    # 0 row in either side: PASS-with-note (no enforcement during ramp).
-    # 任一邊 0 row：PASS-with-note（爬升期不警報）。
+    # 0/low row in either side: WARN-with-note. This is not a lifecycle PASS.
+    # 任一邊 0/低樣本：WARN-with-note。這不是 lifecycle PASS。
     if not demo or demo["n"] < GRID_LIFECYCLE_MIN_SAMPLE:
         return (
-            "PASS",
+            "WARN",
             f"24h grid_trading demo lifecycles n={int(demo['n']) if demo else 0} "
             f"< {GRID_LIFECYCLE_MIN_SAMPLE} — insufficient demo baseline, skip drift",
         )
     if not live_demo or live_demo["n"] < GRID_LIFECYCLE_MIN_SAMPLE:
         return (
-            "PASS",
+            "WARN",
             f"24h grid_trading live_demo lifecycles n={int(live_demo['n']) if live_demo else 0} "
             f"< {GRID_LIFECYCLE_MIN_SAMPLE} — insufficient live sample, skip drift",
         )
 
-    # Indicator A: lifetime ratio.
-    # 指標 A：lifetime 比例。
-    lifetime_ratio = (
+    # Indicator A: lifetime ratio. The global ratio remains diagnostic, but the
+    # verdict uses common symbol+side cohorts when enough comparable data exists.
+    # This keeps the original 0.5/0.3 thresholds while avoiding a false FAIL
+    # from demo-only BTC rows compared with live_demo-only alt rows.
+    # 指標 A：lifetime 比例。global ratio 仍保留診斷；判定改用 common
+    # symbol+side cohort（樣本足夠時），門檻不放寬。
+    global_lifetime_ratio = (
         live_demo["p50"] / demo["p50"] if demo["p50"] > 0 else None
     )
+    try:
+        cur.execute(
+            lifecycle_cte
+            + """
+, by_cohort AS (
+  SELECT engine_mode, symbol, side,
+         count(*)::int AS n,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY lifetime_min)::float8 AS p50_min
+  FROM lifecycles
+  GROUP BY engine_mode, symbol, side
+),
+common_cohorts AS (
+  SELECT d.symbol, d.side,
+         d.n AS demo_n, l.n AS live_demo_n,
+         d.p50_min AS demo_p50_min,
+         l.p50_min AS live_demo_p50_min,
+         l.p50_min / NULLIF(d.p50_min, 0)::float8 AS lifetime_ratio
+  FROM by_cohort d
+  JOIN by_cohort l
+    ON l.symbol = d.symbol
+   AND l.side = d.side
+   AND l.engine_mode = 'live_demo'
+  WHERE d.engine_mode = 'demo'
+    AND d.p50_min > 0
+)
+SELECT count(*)::int AS common_cohorts,
+       coalesce(sum(demo_n), 0)::int AS demo_common_n,
+       coalesce(sum(live_demo_n), 0)::int AS live_common_n,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY lifetime_ratio)::float8 AS median_ratio,
+       sum(live_demo_n * lifetime_ratio)::float8
+         / NULLIF(sum(live_demo_n), 0)::float8 AS live_weighted_ratio
+FROM common_cohorts
+"""
+        )
+        cohort_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"cohort lifecycle query failed: {type(exc).__name__}: {exc}")
+
+    cohort_common = _as_int(cohort_row[0] if cohort_row else 0)
+    demo_common_n = _as_int(cohort_row[1] if cohort_row else 0)
+    live_common_n = _as_int(cohort_row[2] if cohort_row else 0)
+    cohort_lifetime_ratio = (
+        _as_float(cohort_row[3], 0.0) if cohort_row and cohort_row[3] is not None else None
+    )
+    cohort_weighted_ratio = (
+        _as_float(cohort_row[4], 0.0) if cohort_row and cohort_row[4] is not None else None
+    )
+    cohort_comparable = (
+        cohort_common >= GRID_COHORT_MIN_COMMON_SYMBOLS
+        and demo_common_n >= GRID_LIFECYCLE_MIN_SAMPLE
+        and live_common_n >= GRID_LIFECYCLE_MIN_SAMPLE
+    )
+    verdict_lifetime_ratio = cohort_lifetime_ratio if cohort_comparable else None
 
     # Indicator B: fee-burn ratio absolute + relative.
     # 指標 B：fee-burn 比例（絕對 + 相對）。
@@ -731,13 +818,14 @@ ORDER BY engine_mode
         cur.execute(
             """
 WITH entries_with_lag AS (
-  SELECT engine_mode, symbol, side, ts AS entry_ts,
-         LAG(ts) OVER (PARTITION BY engine_mode, symbol, side ORDER BY ts) AS prev_ts
-  FROM trading.fills
-  WHERE ts > now() - interval '24 hours'
-    AND engine_mode IN ('demo', 'live_demo')
-    AND strategy_name = 'grid_trading'
-    AND coalesce(exit_source, '') = ''
+  SELECT f.engine_mode, f.symbol, f.side, f.ts AS entry_ts,
+         LAG(f.ts) OVER (PARTITION BY f.engine_mode, f.symbol, f.side ORDER BY f.ts) AS prev_ts
+  FROM trading.fills f
+  WHERE f.ts > now() - interval '24 hours'
+    AND f.engine_mode IN ('demo', 'live_demo')
+    AND f.strategy_name = 'grid_trading'
+    AND coalesce(f.exit_source, '') = ''
+""" + _strategy_entry_fill_predicate() + """
 )
 SELECT engine_mode,
        count(*)::int AS total_entries,
@@ -775,15 +863,24 @@ ORDER BY engine_mode
     severities: list[tuple[str, str]] = []  # (level, reason)
 
     # A: lifetime
-    if lifetime_ratio is not None:
-        if lifetime_ratio < GRID_LIFETIME_RATIO_FAIL:
+    if verdict_lifetime_ratio is not None:
+        if verdict_lifetime_ratio < GRID_LIFETIME_RATIO_FAIL:
             severities.append(
-                ("FAIL", f"lifetime_ratio={lifetime_ratio:.2f} < {GRID_LIFETIME_RATIO_FAIL} (live too fast)")
+                ("FAIL", f"cohort_lifetime_ratio={verdict_lifetime_ratio:.2f} < {GRID_LIFETIME_RATIO_FAIL} (live too fast)")
             )
-        elif lifetime_ratio < GRID_LIFETIME_RATIO_WARN:
+        elif verdict_lifetime_ratio < GRID_LIFETIME_RATIO_WARN:
             severities.append(
-                ("WARN", f"lifetime_ratio={lifetime_ratio:.2f} < {GRID_LIFETIME_RATIO_WARN}")
+                ("WARN", f"cohort_lifetime_ratio={verdict_lifetime_ratio:.2f} < {GRID_LIFETIME_RATIO_WARN}")
             )
+    elif global_lifetime_ratio is not None and global_lifetime_ratio < GRID_LIFETIME_RATIO_WARN:
+        severities.append(
+            (
+                "WARN",
+                "cohort sample insufficient for lifecycle parity "
+                f"(common={cohort_common}, demo_common_n={demo_common_n}, "
+                f"live_common_n={live_common_n}, global_ratio={global_lifetime_ratio:.2f})",
+            )
+        )
 
     # B: fee burn
     if fee_burn_live is not None:
@@ -821,14 +918,22 @@ ORDER BY engine_mode
 
     fee_burn_demo_str = f"{fee_burn_demo:.2f}" if fee_burn_demo is not None else "N/A"
     fee_burn_live_str = f"{fee_burn_live:.2f}" if fee_burn_live is not None else "N/A"
-    lifetime_ratio_str = f"{lifetime_ratio:.2f}" if lifetime_ratio is not None else "N/A"
+    global_ratio_str = f"{global_lifetime_ratio:.2f}" if global_lifetime_ratio is not None else "N/A"
+    cohort_ratio_str = (
+        f"{cohort_lifetime_ratio:.2f}" if cohort_lifetime_ratio is not None else "N/A"
+    )
+    cohort_weighted_str = (
+        f"{cohort_weighted_ratio:.2f}" if cohort_weighted_ratio is not None else "N/A"
+    )
 
     base_msg = (
         f"24h lifecycle: demo n={int(demo['n'])} p50={demo['p50']:.1f}min "
         f"fee_burn={fee_burn_demo_str} re_rate={re_demo['rate']:.2f}; "
         f"live_demo n={int(live_demo['n'])} p50={live_demo['p50']:.1f}min "
         f"fee_burn={fee_burn_live_str} re_rate={re_live['rate']:.2f}; "
-        f"lifetime_ratio={lifetime_ratio_str}"
+        f"global_ratio={global_ratio_str}; common_cohorts={cohort_common} "
+        f"demo_common_n={demo_common_n} live_common_n={live_common_n} "
+        f"cohort_ratio={cohort_ratio_str} cohort_weighted={cohort_weighted_str}"
     )
 
     if has_fail:
@@ -868,6 +973,7 @@ WITH entry_fills AS (
       AND f.strategy_name NOT LIKE 'ipc_close%%'
       AND f.strategy_name NOT LIKE 'unattributed:%%'
       AND coalesce(f.exit_source, '') = ''
+""" + _strategy_entry_fill_predicate() + """
 )
 """
 

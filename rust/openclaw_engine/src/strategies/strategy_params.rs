@@ -624,6 +624,14 @@ pub struct GridTradingParams {
     pub min_grid_step_bps: f64,
     #[serde(default = "default_grid_cost_floor_multiplier")]
     pub cost_floor_multiplier: f64,
+    #[serde(default = "default_grid_churn_breaker_enabled")]
+    pub churn_breaker_enabled: bool,
+    #[serde(default = "default_grid_churn_breaker_window_ms")]
+    pub churn_breaker_window_ms: u64,
+    #[serde(default = "default_grid_churn_breaker_close_count")]
+    pub churn_breaker_close_count: usize,
+    #[serde(default = "default_grid_churn_breaker_cooldown_ms")]
+    pub churn_breaker_cooldown_ms: u64,
 }
 
 fn default_adaptive_range_pct() -> f64 {
@@ -662,6 +670,18 @@ fn default_grid_reject_cooldown_ms() -> u64 {
 fn default_grid_cost_floor_multiplier() -> f64 {
     1.0
 }
+fn default_grid_churn_breaker_enabled() -> bool {
+    true
+}
+fn default_grid_churn_breaker_window_ms() -> u64 {
+    3_600_000
+}
+fn default_grid_churn_breaker_close_count() -> usize {
+    3
+}
+fn default_grid_churn_breaker_cooldown_ms() -> u64 {
+    21_600_000
+}
 
 impl Default for GridTradingParams {
     fn default() -> Self {
@@ -689,6 +709,10 @@ impl Default for GridTradingParams {
             blocked_symbols: Vec::new(),
             min_grid_step_bps: 0.0,
             cost_floor_multiplier: 1.0,
+            churn_breaker_enabled: true,
+            churn_breaker_window_ms: 3_600_000,
+            churn_breaker_close_count: 3,
+            churn_breaker_cooldown_ms: 21_600_000,
         }
     }
 }
