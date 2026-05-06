@@ -1,7 +1,7 @@
 # REF-21 Full-Chain Replay Engine Dev Plan V1
 
 **Date:** 2026-05-06  
-**Status:** P0 design baseline / not implemented  
+**Status:** Superseded by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md`
 **Owner:** PM  
 **Supersedes:** `docs/execution_plan/2026-05-XX--ref21_s1_recorder_spec_placeholder.md` for the active REF-21 scope  
 **Upstream contracts:**
@@ -11,6 +11,12 @@
 - `docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
 
 ---
+
+> **Supersession note (2026-05-06):** 8-agent A1-A8 review rated this V1 plan
+> `REVISE`. Active REF-21 governance now lives in
+> `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md`, which converts
+> the review blockers into mandatory B-gates. This V1 file remains for history
+> only and must not be used to authorize R2/R3 implementation.
 
 ## 0. PM Decision
 
