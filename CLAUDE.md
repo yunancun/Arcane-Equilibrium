@@ -97,7 +97,7 @@
 | 3 | LG-3 provider pricing binding IMPL（RFC `5ce777b`，0% binding contract）| 🔴 | 0.5-1 sprint |
 | 4 | LG-4 supervised live IMPL（RFC `ec8f0f4`，state machine 0 行）| 🔴 | 1.5-2 sprint |
 | 5 | ✅ **Decision Lease retrofit AMD-2026-05-02-01 Path A LAND** (Sprint 3 Track H commit `dbcf845b` + Track I deploy `0ad79f67`)；feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF → production 0 行為改動；amendment §5.4 flip flag canary 24h 待 ~05-15 P0-EDGE-2 後 operator action | ✅ DONE | (closed) |
-| 6 | `agent.messages` / `state_changes` / `ai_invocations` **all-time 0 rows** — DOC-01 #8/#15 violation | 🔴 | 1 sprint |
+| 6 | `agent.messages` / `state_changes` / `ai_invocations` **all-time 0 rows** — DOC-01 #8/#15 violation；MAG-010..012 source wiring + `[52]` 已 land，解除仍等 Linux runtime row proof | 🔴 | 1 sprint |
 | 7 | LG-5 W3 FUP-1 reviewer 0 emit fix | 🟡 | sibling CC `463890d` 已 land，待 deploy 啟動 |
 | 8 | ExecutorAgent shadow_mode hardcoded `lambda: True` fail-close — fake-live wiring | 🟠 | 0.5 sprint |
 | 9 | H0_GATE singleton 0 production caller（DOC-02 spec 死於 wiring）| 🟠 | LG-2 IMPL 前提 |
@@ -449,7 +449,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A active**）。AgentTodo 已完成 **MAG-015 合約附錄**（`docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`）；下一步不是做第二 GUI 或 Telegram，而是 **MAG-010..014 durable event store → MAG-016..019 read-only OpenClaw/Agent Control foundation**。
+**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A active**）。AgentTodo 已完成 **MAG-015 合約附錄**（`docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`）；MAG-010..012 source wiring + `[52]` 已補，下一步不是做第二 GUI 或 Telegram，而是 **MAG-013/014 Linux row proof → MAG-016..019 read-only OpenClaw/Agent Control foundation**。
 
 **關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → ~05-09 3C 7d audit → ~05-15 P0-3 edge decision + Decision Lease flag flip canary 24h → ~05-16 funding_arb V2 14d audit → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
 

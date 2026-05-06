@@ -109,12 +109,14 @@ class GuardianAgent(BaseAgent):
         ollama_client: Optional[Any] = None,
         governance_hub: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
+        event_store: Optional[Any] = None,
     ):
         super().__init__(
             role=AgentRole.GUARDIAN,
             message_bus=message_bus,
             audit_callback=audit_callback,
             cost_tracker=None,  # Guardian does not track LLM costs directly.
+            event_store=event_store,
         )
         self.config = config or GuardianConfig()
         self._risk_manager = risk_manager
@@ -533,16 +535,47 @@ class GuardianAgent(BaseAgent):
         if ollama_is_available(self._ollama):
             try:
                 desc = payload.get("description", event_type)
+                prompt_text = (
+                    f"Event: {event_type}. Severity: {severity}. Description: {desc}"
+                )
                 resp = call_ollama_classify(
                     self._ollama,
-                    f"Event: {event_type}. Severity: {severity}. Description: {desc}",
+                    prompt_text,
                     ["low", "medium", "high", "critical"],
+                )
+                self._record_ai_invocation(
+                    provider="ollama",
+                    model="l1_9b",
+                    tier="L1",
+                    purpose="guardian_event_risk_classification",
+                    prompt_material=prompt_text,
+                    response_material=getattr(resp, "text", None),
+                    success=bool(resp.success),
+                    response_summary=(
+                        f"classify success={bool(resp.success)} "
+                        f"text_len={len(getattr(resp, 'text', '') or '')}"
+                    ),
+                    context_id=str(getattr(message, "message_id", "")),
+                    details={"event_type": event_type, "severity": severity},
                 )
                 if resp.success:
                     risk_level = resp.text.strip().lower()
                     if risk_level not in ("low", "medium", "high", "critical"):
                         risk_level = severity  # fallback to scout's assessment
             except Exception as e:
+                self._record_ai_invocation(
+                    provider="ollama",
+                    model="l1_9b",
+                    tier="L1",
+                    purpose="guardian_event_risk_classification",
+                    prompt_material=(
+                        f"Event: {event_type}. Severity: {severity}."
+                    ),
+                    success=False,
+                    response_summary="classify exception",
+                    context_id=str(getattr(message, "message_id", "")),
+                    details={"event_type": event_type, "severity": severity},
+                )
                 logger.warning("Event risk classification failed: %s / 事件风险分类失败", e)
 
         event_record = {

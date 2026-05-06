@@ -98,6 +98,7 @@ class BaseAgent:
         message_bus: Optional["MessageBus"] = None,  # type: ignore[name-defined]
         audit_callback: Optional[Callable] = None,
         cost_tracker: Optional[Any] = None,
+        event_store: Optional[Any] = None,
     ) -> None:
         """
         Initialize common Agent fields.
@@ -124,6 +125,7 @@ class BaseAgent:
         self.bus = message_bus
         self._audit_callback = audit_callback
         self.cost_tracker = cost_tracker
+        self.event_store = event_store
 
         self.state = _AgentState.INITIALIZING
         self._lock: threading.Lock = threading.Lock()
@@ -147,12 +149,16 @@ class BaseAgent:
         start() 中呼叫 super().start() 後再 log。
         """
         from .multi_agent_framework import AgentState as _AgentState
+        old_state = self.state
         self.state = _AgentState.RUNNING
+        self._record_state_change(old_state, _AgentState.RUNNING, "start")
 
     def pause(self) -> None:
         """Transition to PAUSED. / 切換到 PAUSED 狀態。"""
         from .multi_agent_framework import AgentState as _AgentState
+        old_state = self.state
         self.state = _AgentState.PAUSED
+        self._record_state_change(old_state, _AgentState.PAUSED, "pause")
 
     def stop(self) -> None:
         """
@@ -162,7 +168,9 @@ class BaseAgent:
         刻意不打日誌，理由同 start()。
         """
         from .multi_agent_framework import AgentState as _AgentState
+        old_state = self.state
         self.state = _AgentState.STOPPED
+        self._record_state_change(old_state, _AgentState.STOPPED, "stop")
 
     # ── Audit / 審計 ──
 
@@ -184,6 +192,88 @@ class BaseAgent:
             self._audit_callback(f"{self.role.value}_{event_type}", data)
         except Exception as e:  # noqa: BLE001 — fail-open by design / 設計上失敗開放
             logger.debug("Audit callback error: %s", e)
+
+    def _record_state_change(
+        self,
+        from_state: Any,
+        to_state: Any,
+        trigger_event: str,
+        *,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Fail-soft state-change writer; DB I/O never runs under agent locks."""
+        if self.event_store is None:
+            return False
+        try:
+            record_fn = getattr(self.event_store, "record_state_change", None)
+            if record_fn is None:
+                return False
+            return bool(
+                record_fn(
+                    agent_name=self.role.value,
+                    from_state=getattr(from_state, "value", from_state),
+                    to_state=getattr(to_state, "value", to_state),
+                    trigger_event=trigger_event,
+                    details=details or {"source": "BaseAgent.lifecycle"},
+                )
+            )
+        except Exception as e:  # noqa: BLE001 - observability only
+            logger.warning("Agent state event-store write failed: %s", e)
+            return False
+
+    def _record_ai_invocation(
+        self,
+        *,
+        provider: str,
+        model: str,
+        tier: Optional[str] = None,
+        purpose: str,
+        prompt_hash: Optional[str] = None,
+        prompt_material: Optional[str] = None,
+        response_hash: Optional[str] = None,
+        response_material: Optional[str] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+        cost_usd: float = 0.0,
+        latency_ms: Optional[int | float] = None,
+        success: bool,
+        response_summary: Optional[str] = None,
+        context_id: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        engine_mode: Optional[str] = None,
+    ) -> bool:
+        """Fail-soft AI invocation writer; stores prompt hashes, not raw prompts."""
+        if self.event_store is None:
+            return False
+        try:
+            record_fn = getattr(self.event_store, "record_ai_invocation", None)
+            if record_fn is None:
+                return False
+            safe_details = {"agent": self.role.value, **dict(details or {})}
+            return bool(
+                record_fn(
+                    provider=provider,
+                    model=model,
+                    tier=tier,
+                    purpose=purpose,
+                    prompt_hash=prompt_hash,
+                    prompt_material=prompt_material,
+                    response_hash=response_hash,
+                    response_material=response_material,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_usd=cost_usd,
+                    latency_ms=latency_ms,
+                    success=success,
+                    response_summary=response_summary,
+                    context_id=context_id,
+                    details=safe_details,
+                    engine_mode=engine_mode,
+                )
+            )
+        except Exception as e:  # noqa: BLE001 - observability only
+            logger.warning("AI invocation event-store write failed: %s", e)
+            return False
 
     # ── Cost-tracker helper / 成本追蹤輔助 ──
 

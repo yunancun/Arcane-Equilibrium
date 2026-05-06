@@ -109,8 +109,10 @@ logger.info("TradeAttributionEngine initialized / 交易归因引擎已初始化
 
 # ── Scout Agent + Message Bus (T2.07: Plan A2 — ScoutAgent as OpenClaw local proxy) ──
 # Scout 代理 + 消息总线（T2.07：方案 A2 — ScoutAgent 作为 OpenClaw 本地代理）
+from .agent_event_store import get_agent_event_store
 from .multi_agent_framework import ScoutAgent, MessageBus, ScoutConfig
-MESSAGE_BUS = MessageBus()
+_AGENT_EVENT_STORE = get_agent_event_store()
+MESSAGE_BUS = MessageBus(message_sink=_AGENT_EVENT_STORE.message_sink)
 
 # ── E5-FN-3-FUP-d: Scout audit_callback wiring ──
 # Wires ScoutAgent._audit(...) calls into GOV_HUB._change_audit_log via
@@ -144,6 +146,7 @@ SCOUT_AGENT = ScoutAgent(
     config=ScoutConfig(),
     message_bus=MESSAGE_BUS,
     audit_callback=_SCOUT_AUDIT_CB,
+    event_store=_AGENT_EVENT_STORE,
 )
 SCOUT_AGENT.start()
 logger.info("ScoutAgent + MessageBus initialized (Plan A2) / Scout 代理 + 消息总线已初始化（方案 A2）")
@@ -172,7 +175,14 @@ except Exception as _ct_e:
     )
 
 # Create Conductor with shared MessageBus / 创建 Conductor 并使用共享消息总线
-CONDUCTOR = Conductor(message_bus=MESSAGE_BUS)
+CONDUCTOR = Conductor(message_bus=MESSAGE_BUS, event_store=_AGENT_EVENT_STORE)
+_AGENT_EVENT_STORE.record_state_change(
+    agent_name=AgentRole.CONDUCTOR.value,
+    from_state=None,
+    to_state=_AgentState.RUNNING.value,
+    trigger_event="strategy_wiring_import",
+    details={"source": "strategy_wiring"},
+)
 
 # Register Scout with Conductor / 向 Conductor 注册 Scout
 CONDUCTOR.register_agent(AgentRole.SCOUT, resource_mode="local")
@@ -245,6 +255,7 @@ STRATEGIST_AGENT = StrategistAgent(
     ollama_client=OLLAMA_CLIENT,
     cost_tracker=_COST_TRACKER_FOR_STRATEGIST,
     audit_callback=_STRATEGIST_AUDIT_CB,
+    event_store=_AGENT_EVENT_STORE,
 )
 STRATEGIST_AGENT.start()
 
@@ -306,6 +317,7 @@ GUARDIAN_AGENT = GuardianAgent(
     ollama_client=OLLAMA_CLIENT,
     governance_hub=_GOV_HUB_FOR_GUARDIAN,
     audit_callback=_GUARDIAN_AUDIT_CB,
+    event_store=_AGENT_EVENT_STORE,
 )
 GUARDIAN_AGENT.start()
 
@@ -359,6 +371,7 @@ ANALYST_AGENT = AnalystAgent(
     ollama_client=OLLAMA_CLIENT,
     learning_tier_gate=_LTG_FOR_ANALYST,
     audit_callback=_ANALYST_AUDIT_CB,
+    event_store=_AGENT_EVENT_STORE,
 )
 ANALYST_AGENT.start()
 
@@ -434,6 +447,7 @@ try:
         message_bus=MESSAGE_BUS if 'MESSAGE_BUS' in dir() else None,
         ollama_client=get_local_llm_client(heavy=True),  # heavy: complex weekly pattern analysis
         audit_callback=_ANALYST_AUDIT_CB,
+        event_store=_AGENT_EVENT_STORE,
     )
     ANALYST_AGENT.start()
     if MESSAGE_BUS is not None:
@@ -539,6 +553,7 @@ try:
         governance_hub=_GOV_HUB_FOR_EXECUTOR,
         audit_callback=_EXECUTOR_AUDIT_CB,
         shadow_mode_provider=_EXECUTOR_CONFIG_CACHE.shadow_mode_provider(),
+        event_store=_AGENT_EVENT_STORE,
     )
     EXECUTOR_AGENT.start()
     CONDUCTOR.register_agent(_AR11.EXECUTOR, resource_mode="local")

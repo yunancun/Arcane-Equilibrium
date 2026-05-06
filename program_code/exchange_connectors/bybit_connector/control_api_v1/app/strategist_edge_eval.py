@@ -307,8 +307,47 @@ def _ai_evaluate(agent: "StrategistAgent", intel: IntelObject) -> EdgeEvaluation
     # E5-P1-4: routed via llm_call_wrapper.call_ollama_judge_edge
     # (thin pass-through — identical call semantics, preserves fail-closed).
     # E5-P1-4：通過 llm_call_wrapper.call_ollama_judge_edge（語義完全等同）。
-    response = call_ollama_judge_edge(agent._ollama, context)
+    try:
+        response = call_ollama_judge_edge(agent._ollama, context)
+    except Exception:
+        latency_ms = (time.time() - start) * 1000
+        agent._record_ai_invocation(
+            provider="ollama",
+            model="l1_9b",
+            tier="L1",
+            purpose="strategist_edge_eval",
+            prompt_material=context,
+            latency_ms=latency_ms,
+            success=False,
+            response_summary="judge_edge exception",
+            context_id=getattr(intel, "intel_id", None),
+            details={
+                "intel_id": getattr(intel, "intel_id", None),
+                "symbols": list(getattr(intel, "symbols", [])),
+            },
+        )
+        raise
     latency_ms = (time.time() - start) * 1000
+    agent._record_ai_invocation(
+        provider="ollama",
+        model="l1_9b",
+        tier="L1",
+        purpose="strategist_edge_eval",
+        prompt_material=context,
+        response_material=getattr(response, "text", None),
+        latency_ms=latency_ms,
+        success=bool(response.success),
+        response_summary=(
+            f"judge_edge success={bool(response.success)} "
+            f"text_len={len(getattr(response, 'text', '') or '')} "
+            f"error_len={len(getattr(response, 'error', '') or '')}"
+        ),
+        context_id=getattr(intel, "intel_id", None),
+        details={
+            "intel_id": getattr(intel, "intel_id", None),
+            "symbols": list(getattr(intel, "symbols", [])),
+        },
+    )
 
     with agent._lock:
         agent._stats["ai_evaluations"] += 1

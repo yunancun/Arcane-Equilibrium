@@ -108,6 +108,7 @@ class ScoutAgent(BaseAgent):
         message_bus: Optional[MessageBus] = None,
         *,
         audit_callback: Optional[Callable] = None,
+        event_store: Optional[Any] = None,
     ):
         # Preserve legacy positional signature (config, message_bus); BaseAgent takes kwargs.
         # audit_callback is keyword-only to avoid positional collision with legacy callers
@@ -129,6 +130,7 @@ class ScoutAgent(BaseAgent):
             message_bus=message_bus,
             audit_callback=audit_callback,
             cost_tracker=None,
+            event_store=event_store,
         )
         self.config = config or ScoutConfig()
         self._intel_log: List[IntelObject] = []

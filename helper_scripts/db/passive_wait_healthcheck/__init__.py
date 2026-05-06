@@ -108,6 +108,10 @@ from .checks_scanner_market import (  # noqa: F401
     # [51] scanner opportunity shadow acceptance monitor.
     check_scanner_opportunity_shadow_acceptance,
 )
+from .checks_agent_events import (  # noqa: F401
+    # [52] AgentTodo MAG-010..012 durable event-store row proof.
+    check_52_agent_event_store_rows,
+)
 from .checks_governance import (  # noqa: F401
     # [42]/[42b] LG-5-IMPL-3 (2026-05-02) governance contract + attribution drift.
     # [42]/[42b] LG-5-IMPL-3（2026-05-02）治理契約 + 歸因漂移哨兵。
@@ -220,6 +224,8 @@ __all__ = [
     "check_scanner_market_gate_confirmation",
     # [51] scanner opportunity shadow acceptance
     "check_scanner_opportunity_shadow_acceptance",
+    # [52] AgentTodo MAG-010..012 durable event-store row proof
+    "check_52_agent_event_store_rows",
     # [42]/[42b] LG-5-IMPL-3 governance contract + attribution drift
     "check_42_live_candidate_eval_contract",
     "check_42b_live_candidate_attribution_drift",

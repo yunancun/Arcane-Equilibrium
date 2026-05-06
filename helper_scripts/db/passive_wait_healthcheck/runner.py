@@ -102,6 +102,9 @@ from .checks_scanner_market import (
     check_scanner_market_gate_confirmation,
     check_scanner_opportunity_shadow_acceptance,
 )
+from .checks_agent_events import (
+    check_52_agent_event_store_rows,
+)
 from .checks_governance import (
     # LG-5-IMPL-3 (2026-05-02) — RFC v2 §6 governance contract sentinels.
     # `[42]` review_live_candidate 1h SLA + audit row contract;
@@ -193,7 +196,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51]                                   REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance
+    [46][48][49][50][51][52]                               REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -234,6 +237,7 @@ Execution / cost sentinels added after F7:
   [49] replay_artifact_retention        (REF-20 Sprint D R8 2026-05-05 — V046 oldest age + storage cap dual check vs replay_artifact_prune.py cron)
   [50] replay_run_state_health          (REF-20 Sprint D R8 2026-05-05 — V045 failed_rate 7d + zombie 'running' >1h detection)
   [51] scanner_opportunity_shadow_acceptance (2026-05-06 — snapshot/intent/MLDE row-proof coverage + opportunity_lcb_bps calibration, shadow-only)
+  [52] agent_event_store_rows            (AgentTodo MAG-010..012 — agent.messages/state_changes/ai_invocations recent row proof)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -254,7 +258,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50]
+              [46][48][49][50][51][52]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -270,7 +274,9 @@ def main() -> int:
                [47] post-cursor — replay_runner binary filesystem;
                [48] manifest registry growth stall;
                [49] V046 artifact retention dual-check;
-               [50] V045 run_state health failed_rate + zombie)
+               [50] V045 run_state health failed_rate + zombie;
+               [51] scanner opportunity shadow acceptance;
+               [52] agent event-store row proof)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
@@ -281,7 +287,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -751,6 +757,15 @@ def main() -> int:
             # 純 shadow，不接 enforcement gate，不改交易參數。
             s, m = check_scanner_opportunity_shadow_acceptance(cur)
             results.append(("[51] scanner_opportunity_shadow_acceptance", s, m))
+
+            # [52] AgentTodo MAG-010..012 durable event-store row proof.
+            # Feature-flagged default-off: env=0 PASS-skip; env=1 checks
+            # recent rows in agent.messages / agent.state_changes /
+            # agent.ai_invocations. REQUIRED env escalates WARN to FAIL.
+            # [52] AgentTodo MAG-010..012 durable event-store row proof。
+            # 預設關閉；啟用後檢查三張 agent.* 表近期是否都有 row。
+            s, m = check_52_agent_event_store_rows(cur)
+            results.append(("[52] agent_event_store_rows", s, m))
     finally:
         conn.close()
 
