@@ -31,6 +31,9 @@ OPPORTUNITY_SHADOW_MIN_INTENT_SAMPLE = 3
 OPPORTUNITY_SHADOW_MIN_LABEL_SAMPLE = 10
 OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE = 10
 OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_AVG_NET_BPS = 0.0
+OPPORTUNITY_SHADOW_MIN_REJECTED_SAMPLE = 5
+OPPORTUNITY_SHADOW_REJECTED_AVG_NET_WARN_BPS = 0.0
+OPPORTUNITY_SHADOW_REJECTED_COST_FALLBACK_BPS = 11.0
 
 
 def check_scanner_market_gate_confirmation(cur) -> tuple[str, str]:
@@ -286,12 +289,14 @@ def check_scanner_opportunity_shadow_acceptance(cur) -> tuple[str, str]:
       2. recent scanner-origin intents preserve ``details.scanner.opportunity``;
       3. MLDE row proof preserves the same shadow object and lets us compare
          ``opportunity_lcb_bps`` against realized post-fee ``net_bps_after_fee``.
+      4. rejected scanner intents can be counterfactually compared against
+         later ``decision_outcomes`` without creating a new admission gate.
 
     Low labeled sample is WARN rather than FAIL because a new shadow signal
     needs time to accumulate outcomes. Coverage regression is FAIL because it
     means the row-proof contract is broken before learning can start.
 
-    [51] scanner opportunity shadow 驗收。這不是交易 gate，只驗三個中性
+    [51] scanner opportunity shadow 驗收。這不是交易 gate，只驗四個中性
     contract：scanner snapshot 有 opportunity、intent details 保留
     opportunity、MLDE row proof 可把 opportunity_lcb_bps 對上實現後 fee net
     bps。label 樣本不足是 WARN；覆蓋率斷裂才 FAIL。
@@ -308,6 +313,10 @@ def check_scanner_opportunity_shadow_acceptance(cur) -> tuple[str, str]:
         intents_exists = cur.fetchone()
         cur.execute("SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL")
         mlde_exists = cur.fetchone()
+        cur.execute("SELECT to_regclass('trading.risk_verdicts') IS NOT NULL")
+        risk_verdicts_exists = cur.fetchone()
+        cur.execute("SELECT to_regclass('trading.decision_outcomes') IS NOT NULL")
+        outcomes_exists = cur.fetchone()
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"scanner opportunity table check failed: {exc}")
     if not scanner_exists or not scanner_exists[0]:
@@ -316,6 +325,12 @@ def check_scanner_opportunity_shadow_acceptance(cur) -> tuple[str, str]:
         return ("WARN", "trading.intents missing — cannot verify opportunity shadow")
     if not mlde_exists or not mlde_exists[0]:
         return ("WARN", "learning.mlde_edge_training_rows missing — cannot verify opportunity shadow")
+    rejected_regret_available = bool(
+        risk_verdicts_exists
+        and risk_verdicts_exists[0]
+        and outcomes_exists
+        and outcomes_exists[0]
+    )
 
     snapshot_sql = """
 WITH routes AS (
@@ -396,6 +411,69 @@ HAVING count(*) >= %s
 ORDER BY avg(net_bps_after_fee), label_n DESC
 LIMIT 6
 """
+    rejected_regret_base_sql = """
+WITH rejected AS (
+    SELECT
+        i.strategy_name,
+        COALESCE(rv.symbol, i.symbol) AS symbol,
+        lower(COALESCE(i.side, '')) AS side,
+        lower(COALESCE(i.details #>> '{scanner,opportunity,admission_hint}', 'unknown')) AS admission_hint,
+        (i.details #>> '{scanner,opportunity,opportunity_lcb_bps}')::float8 AS opportunity_lcb_bps,
+        CASE
+            WHEN jsonb_typeof(i.details #> '{scanner,opportunity,components,expected_execution_cost_bps}') = 'number'
+                THEN (i.details #>> '{scanner,opportunity,components,expected_execution_cost_bps}')::float8
+            ELSE %s
+        END AS expected_execution_cost_bps,
+        COALESCE(o.outcome_1h, o.outcome_5m, o.outcome_1m)::float8 AS raw_outcome
+    FROM trading.risk_verdicts rv
+    JOIN trading.intents i
+      ON i.intent_id = rv.intent_id
+     AND i.engine_mode = rv.engine_mode
+    LEFT JOIN trading.decision_outcomes o
+      ON o.context_id = rv.context_id
+    WHERE rv.engine_mode IN ('demo', 'live_demo')
+      AND rv.ts > now() - (%s * interval '1 hour')
+      AND lower(rv.verdict) LIKE 'reject%%'
+      AND COALESCE(i.details->>'source', '') <> 'command'
+      AND i.details #> '{scanner,opportunity}' IS NOT NULL
+      AND jsonb_typeof(i.details #> '{scanner,opportunity,opportunity_lcb_bps}') = 'number'
+),
+scored AS (
+    SELECT
+        *,
+        raw_outcome * 10000.0
+            * CASE WHEN side IN ('sell', 'short') THEN -1.0 ELSE 1.0 END
+            - expected_execution_cost_bps AS counterfactual_net_bps
+    FROM rejected
+    WHERE raw_outcome IS NOT NULL
+)
+"""
+    rejected_regret_sql = rejected_regret_base_sql + """
+SELECT
+    count(*)::int AS rejected_label_n,
+    count(*) FILTER (WHERE opportunity_lcb_bps > 0)::int AS positive_lcb_reject_n,
+    avg(counterfactual_net_bps)::float8 AS rejected_avg_net_bps,
+    avg(counterfactual_net_bps) FILTER (WHERE opportunity_lcb_bps > 0)::float8
+        AS positive_lcb_reject_avg_net_bps,
+    corr(opportunity_lcb_bps, counterfactual_net_bps)::float8 AS rejected_lcb_counterfactual_corr
+FROM scored
+"""
+    regretted_rejects_sql = rejected_regret_base_sql + """
+SELECT
+    strategy_name,
+    symbol,
+    admission_hint,
+    count(*)::int AS label_n,
+    avg(counterfactual_net_bps)::float8 AS avg_net_bps,
+    avg(opportunity_lcb_bps)::float8 AS avg_lcb_bps
+FROM scored
+WHERE opportunity_lcb_bps > 0
+GROUP BY strategy_name, symbol, admission_hint
+HAVING count(*) >= %s
+   AND avg(counterfactual_net_bps) > %s
+ORDER BY avg(counterfactual_net_bps) DESC, label_n DESC
+LIMIT 6
+"""
     try:
         cur.execute(snapshot_sql, (OPPORTUNITY_SHADOW_RECENT_WINDOW_HOURS,))
         snapshot_row = cur.fetchone()
@@ -412,6 +490,27 @@ LIMIT 6
             ),
         )
         bad_positive_rows = cur.fetchall() or []
+        rejected_regret_row = (0, 0, None, None, None)
+        regretted_reject_rows = []
+        if rejected_regret_available:
+            cur.execute(
+                rejected_regret_sql,
+                (
+                    OPPORTUNITY_SHADOW_REJECTED_COST_FALLBACK_BPS,
+                    OPPORTUNITY_SHADOW_LABEL_WINDOW_HOURS,
+                ),
+            )
+            rejected_regret_row = cur.fetchone() or (0, 0, None, None, None)
+            cur.execute(
+                regretted_rejects_sql,
+                (
+                    OPPORTUNITY_SHADOW_REJECTED_COST_FALLBACK_BPS,
+                    OPPORTUNITY_SHADOW_LABEL_WINDOW_HOURS,
+                    OPPORTUNITY_SHADOW_MIN_REJECTED_SAMPLE,
+                    OPPORTUNITY_SHADOW_REJECTED_AVG_NET_WARN_BPS,
+                ),
+            )
+            regretted_reject_rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"scanner opportunity shadow query failed: {type(exc).__name__}: {exc}")
 
@@ -426,9 +525,23 @@ LIMIT 6
     positive_avg_net = label_row[3] if label_row else None
     nonpositive_avg_net = label_row[4] if label_row else None
     corr = label_row[5] if label_row else None
+    rejected_label_n = _as_int(rejected_regret_row[0]) if rejected_regret_available else 0
+    positive_lcb_reject_n = _as_int(rejected_regret_row[1]) if rejected_regret_available else 0
+    rejected_avg_net = rejected_regret_row[2] if rejected_regret_available else None
+    positive_lcb_reject_avg_net = rejected_regret_row[3] if rejected_regret_available else None
+    rejected_corr = rejected_regret_row[4] if rejected_regret_available else None
 
     route_coverage = (route_opp_n / route_n) if route_n else 1.0
     intent_coverage = (intent_opp_n / intent_n) if intent_n else 1.0
+    rejected_regret_summary = (
+        f"rejected_labels={rejected_label_n}, "
+        f"positive_lcb_reject_n={positive_lcb_reject_n}, "
+        f"reject_avg={_fmt_float(rejected_avg_net, 'bps')}, "
+        f"positive_reject_avg={_fmt_float(positive_lcb_reject_avg_net, 'bps')}, "
+        f"reject_corr={_fmt_float(rejected_corr)}"
+        if rejected_regret_available
+        else "rejected_regret=unavailable"
+    )
     base = (
         f"{OPPORTUNITY_SHADOW_RECENT_WINDOW_HOURS}h snapshot routes={route_opp_n}/{route_n} "
         f"({_pct(route_opp_n, route_n)}), scans={scan_n}; "
@@ -438,7 +551,8 @@ LIMIT 6
         f"positive_lcb_n={positive_lcb_n}, avg_net={_fmt_float(avg_net, 'bps')}, "
         f"positive_avg={_fmt_float(positive_avg_net, 'bps')}, "
         f"nonpositive_avg={_fmt_float(nonpositive_avg_net, 'bps')}, "
-        f"corr={_fmt_float(corr)}"
+        f"corr={_fmt_float(corr)}; "
+        f"{rejected_regret_summary}"
     )
 
     if route_n == 0:
@@ -469,6 +583,18 @@ LIMIT 6
             base
             + f" — insufficient labeled outcomes for calibration "
             + f"(min={OPPORTUNITY_SHADOW_MIN_LABEL_SAMPLE})",
+        )
+    if regretted_reject_rows:
+        parts = [
+            f"{r[0]}/{r[1]} hint={r[2]} n={_as_int(r[3])} "
+            f"avg={_as_float(r[4]):.2f}bps lcb={_as_float(r[5]):.2f}bps"
+            for r in regretted_reject_rows
+        ]
+        return (
+            "WARN",
+            base
+            + " — positive scanner LCB was rejected but counterfactual was profitable: "
+            + "; ".join(parts),
         )
     if (
         positive_lcb_n >= OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE
