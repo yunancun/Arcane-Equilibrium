@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>玄衡 · Arcane Equilibrium Console</title>
-<script src="/static/common.js?v=20260506.nav-folding-risk-v1"></script>
+<script src="/static/common.js?v=20260506.dev-status-nav-v1"></script>
 <!-- REF-20 Wave 2 P1-U9: Paper Replay Lab i18n (Chinese dominant, 9 對照表) -->
 <!-- REF-20 Wave 2 P1-U9: Paper Replay Lab i18n (Chinese-dominant, 9 lookup tables) -->
 <script src="/static/i18n_zh.js"></script>
@@ -66,22 +66,30 @@
   .panel-dot-active { background: var(--accent); }
 
   /* ── Tab Bar ────────────────────────────────────────────────── */
-  .tab-bar { display: flex; align-items: stretch; gap: 6px; background: var(--card-bg);
-    border-bottom: 1px solid var(--border); padding: 4px 8px;
+  .tab-bar { display: flex; align-items: stretch; gap: 8px; background: var(--card-bg);
+    border-bottom: 1px solid var(--border); padding: 6px 8px;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
   .tab-bar::-webkit-scrollbar { display: none; }
-  .tab-group { display:flex; align-items:center; gap:4px; flex-shrink:0; border-right:1px solid rgba(139,148,158,0.18); padding-right:6px; }
-  .tab-group:last-child { border-right:none; }
-  .tab-group-label { display:inline-flex; align-items:center; gap:4px; min-height:28px;
-    font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.2px;
-    padding:0 8px; border:1px solid transparent; border-radius:6px; background:transparent;
+  .tab-group { display:flex; align-items:center; gap:5px; flex-shrink:0;
+    border:1px solid rgba(139,148,158,0.24); border-radius:9px; padding:3px;
+    background:rgba(13,17,23,0.62); }
+  .tab-group.collapsed { border-style:dashed; background:rgba(13,17,23,0.34); }
+  .tab-group-label { display:inline-flex; align-items:center; gap:5px; min-height:30px;
+    font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1px;
+    padding:0 9px; border:1px solid rgba(139,148,158,0.16); border-radius:7px; background:rgba(139,148,158,0.06);
     font-family:inherit; cursor:pointer; white-space:nowrap; user-select:none; }
-  .tab-group-label:hover { color:var(--text); background:rgba(56,139,253,0.05); border-color:rgba(139,148,158,0.18); }
+  .tab-group-label:hover { color:var(--text); background:rgba(56,139,253,0.08); border-color:rgba(56,139,253,0.28); }
   .tab-group.has-active .tab-group-label { color:var(--accent); border-color:rgba(56,139,253,0.25); background:rgba(56,139,253,0.06); }
-  .tab-group-caret { font-size:9px; line-height:1; transition:transform 0.12s ease; }
-  .tab-group-items { display:flex; align-items:center; gap:3px; }
+  .tab-group-caret { display:inline-flex; align-items:center; justify-content:center;
+    width:15px; height:15px; border-radius:4px; background:rgba(139,148,158,0.12);
+    font-size:9px; line-height:1; transition:transform 0.12s ease; }
+  .tab-group-state { font-size:9px; color:var(--text-dim); font-weight:600; text-transform:none; }
+  .tab-group-count { font-size:9px; color:var(--text-dim); background:rgba(139,148,158,0.10);
+    border:1px solid rgba(139,148,158,0.14); border-radius:999px; padding:0 5px; }
+  .tab-group-items { display:flex; align-items:center; gap:3px; padding-left:2px; border-left:1px solid rgba(139,148,158,0.16); }
   .tab-group.collapsed .tab-group-items { display:none; }
   .tab-group.collapsed .tab-group-caret { transform:rotate(-90deg); }
+  .tab-group.collapsed .tab-group-label { background:rgba(139,148,158,0.035); }
   .tab { padding: 5px 9px; font-size: 11px; cursor: pointer; color: var(--text-dim);
     border:1px solid transparent; border-bottom: 2px solid transparent; border-radius:6px;
     display:inline-flex; align-items:center; gap:4px; transition: all 0.15s; user-select: none;
@@ -294,7 +302,7 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260506.nav-folding-risk-v1';
+const BUILD_TS = '20260506.dev-status-nav-v1';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
@@ -381,6 +389,8 @@ function setTabGroupExpanded(groupId, expanded, persist) {
     group.classList.toggle('collapsed', !expanded);
     const toggle = group.querySelector('.tab-group-label');
     if (toggle) toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    const state = group.querySelector('.tab-group-state');
+    if (state) state.textContent = expanded ? '收起' : '展开';
   }
   if (persist !== false) persistTabGroupExpandedState();
 }
@@ -417,9 +427,12 @@ function buildTabs() {
     label.className = 'tab-group-label';
     label.title = '展开/折叠 ' + (TAB_GROUP_LABELS[id] || id);
     label.setAttribute('aria-expanded', tabGroupExpanded[id] ? 'true' : 'false');
+    const tabCount = TABS.filter(tab => (tab.group || 'core') === id).length;
     label.innerHTML =
       '<span class="tab-group-caret">&#x25BE;</span>' +
-      '<span class="tab-group-text">' + (TAB_GROUP_LABELS[id] || id) + '</span>';
+      '<span class="tab-group-text">' + (TAB_GROUP_LABELS[id] || id) + '</span>' +
+      '<span class="tab-group-state"></span>' +
+      '<span class="tab-group-count">' + tabCount + '</span>';
     label.onclick = () => toggleTabGroup(id);
     const items = document.createElement('div');
     items.className = 'tab-group-items';

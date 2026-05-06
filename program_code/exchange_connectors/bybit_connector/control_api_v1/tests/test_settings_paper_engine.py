@@ -107,3 +107,53 @@ def test_development_mode_post_persists_support_env_file(
     assert data["restart_required"] is False
     assert "OPENCLAW_DEVELOPMENT_SUPPORT_MODE=1" in env_file.read_text(encoding="utf-8")
     assert oct(os.stat(env_file).st_mode & 0o777) == "0o600"
+
+
+def test_development_status_scans_repo_migrations_dynamically(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    migrations = repo / "sql" / "migrations"
+    migrations.mkdir(parents=True)
+    (migrations / "V001__create_alpha.sql").write_text(
+        "-- V001__create_alpha.sql\n"
+        "-- Purpose: create alpha schema for development status tests.\n"
+        "CREATE SCHEMA IF NOT EXISTS alpha;\n",
+        encoding="utf-8",
+    )
+    (migrations / "V003__create_beta.sql").write_text(
+        "-- V003__create_beta.sql\n"
+        "-- Purpose: create beta table.\n"
+        "CREATE TABLE IF NOT EXISTS beta.items (id INT PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+    (migrations / "V003_healthcheck.sql").write_text(
+        "-- companion\n",
+        encoding="utf-8",
+    )
+    (repo / "TODO.md").write_text("# TODO\n\n- next thing\n", encoding="utf-8")
+    agenttodo = repo / "docs" / "architecture" / "multi_agent_rework_2026-05-05"
+    agenttodo.mkdir(parents=True)
+    (agenttodo / "AgentTodo.md").write_text("# AgentTodo\n\nMAG-001\n", encoding="utf-8")
+    reports = repo / "docs" / "CCAgentWorkSpace" / "PM" / "workspace" / "reports"
+    reports.mkdir(parents=True)
+    (reports / "2026-05-06--sample_report.md").write_text("# sample\n", encoding="utf-8")
+
+    monkeypatch.setenv("OPENCLAW_BASE_DIR", str(repo))
+    client, _ = _client(tmp_path, monkeypatch)
+
+    resp = client.get("/api/v1/settings/development-status")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["repo_root"] == str(repo.resolve())
+    assert data["migrations"]["landed_count"] == 2
+    assert data["migrations"]["companion_count"] == 1
+    assert "V002" in data["migrations"]["gap_versions"]
+    assert data["migrations"]["next_version"] == "V004"
+    items = {row["id"]: row for row in data["migrations"]["items"]}
+    assert items["V001"]["purpose"] == "create alpha schema for development status tests."
+    assert "beta.items" in items["V003"]["objects"]
+    assert items["V003"]["companions"] == ["V003_healthcheck.sql"]
+    assert data["development_context"]["todo_excerpt"][0] == "# TODO"
