@@ -62,7 +62,7 @@
 - **Engine 健康**: watchdog `engine_alive=true`；demo/live fresh；paper inactive by design（2026-05-06 採集點）
 - **Live boundary**: LiveDemo 跑（Live 管線走 demo endpoint），mainnet **0 流量** by design
 - **健康檢查**: SUMMARY = WARN（多項真實 WARN，見「Active gates」）
-- **REF-21 execution checkpoint**: V057-V060 replay governance migrations now include Guard A/B/C and passed Linux `trade-core` PG transaction dry-run with rollback proof（pre-existing target tables absent → inside_tx present → after_rollback absent）; R2/R3 remain blocked by SECURITY DEFINER calculator, `/full-chain/run`, and replay dedicated Bybit rate/IP isolation.
+- **REF-21 execution checkpoint**: V057-V060 replay governance migrations now include Guard A/B/C and passed Linux `trade-core` PG transaction dry-run with rollback proof（pre-existing target tables absent → inside_tx present → after_rollback absent）; V061 `replay.calculate_promotion_metrics` non-stub SECURITY DEFINER body is landed and Linux transaction-tested with replay data (`eligible=true`, rollback). R2/R3 remain blocked by `/full-chain/run` and replay dedicated Bybit rate/IP isolation.
 
 ### 5 策略 7d gross PnL（demo + live_demo 真實 fills，PA 直查 trading_ai DB）
 

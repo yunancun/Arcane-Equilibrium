@@ -9,8 +9,10 @@
 **Runtime state:** `/api/v1/replay/full-chain/prepare` remains default-OFF behind
 `OPENCLAW_REPLAY_PREPARE_ENABLED=0`. R1 hardening may continue; GUI remains
 unbound. V057-V060 Guard A/B/C Linux PG dry-run is green with rollback proof.
-R2/R3 dispatch remains forbidden until the SECURITY DEFINER calculator,
-`/full-chain/run`, and replay dedicated Bybit rate/IP isolation pass.
+V061 `replay.calculate_promotion_metrics` is now a non-stub SECURITY DEFINER
+calculator and passed a Linux replay-data transaction dry-run with rollback.
+R2/R3 dispatch remains forbidden until `/full-chain/run` and replay dedicated
+Bybit rate/IP isolation pass.
 
 ---
 
@@ -212,8 +214,15 @@ Step 0:
 
 Completed 2026-05-06: V057-V060 Guard A/B/C Linux PG dry-run passed on
 `trade-core`. Pre-existing target tables were absent, all target objects existed
-inside the transaction, and rollback left them absent. MIT still owns follow-up
-review of the future SECURITY DEFINER calculator body.
+inside the transaction, and rollback left them absent.
+
+P0-REF21-5 completed 2026-05-06: `sql/migrations/V061__replay_promotion_metrics_calculator.sql`
+creates `replay.calculate_promotion_metrics(...)` as a non-stub SECURITY
+DEFINER function. It derives promotion metrics from replay-owned rows,
+historical edge snapshots, PSR/DSR, CSCV PBO, and deterministic stationary
+bootstrap bands. Linux transaction dry-run with fixture replay data returned
+`eligible=true`, `fail_reasons=[]`, `PBO=0`, `pbo_combinations=12870`, and
+`q50.n_iter=1000`, then rolled back.
 
 Required pattern for future REF-21 migrations remains: run Linux PG dry-run per
 `memory/feedback_v_migration_pg_dry_run.md` and record:
@@ -261,8 +270,9 @@ REVOKE INSERT, UPDATE, DELETE ON replay.tier_promotion_approval FROM PUBLIC;
 ```
 
 Metrics must be produced by a SECURITY DEFINER calculator, not by replay
-producer payloads. **Do not deploy a stub calculator.** The calculator body
-must dispatch to or byte-align with:
+producer payloads. **Do not deploy a stub calculator.** The calculator is
+landed as `sql/migrations/V061__replay_promotion_metrics_calculator.sql`; its
+body must remain aligned with:
 
 - `program_code/learning_engine/dsr_gate.py`,
 - `program_code/learning_engine/pbo_gate.py`,
@@ -514,6 +524,8 @@ Step 0 before implementation:
 
 - CLOSED for V057/V058/V059/V060 migration files: Linux PG transaction dry-run
   passed with rollback proof.
+- CLOSED for V061 calculator: Linux PG transaction dry-run with replay data
+  passed with rollback proof.
 
 Then:
 
@@ -545,3 +557,4 @@ LOC governance:
 | V1.2 | 2026-05-06 | PM | Added default-OFF endpoint gate and 16 B-gates; superseded by V1.3 audit closure. |
 | V1.3 | 2026-05-06 | PM | Closes negative-edge fail-open, adds subprocess deploy path, expanded write confinement, V057/V058/V059/V060 DDL plan and dry-run step, tamper-resistant promotion FSM, Bybit SSOT mapping, block bootstrap, survival/correlation/cost thresholds, baseline SLA, and wave-to-tier mapping. |
 | V1.3 empirical correction | 2026-05-06 | PM | Final 8-agent real-code audit accepted: fixed replay SLA namespace collision, added bulk production-IP guard requirement, reversed migration review order to Step -1/Step 0, landed V057-V060 migration targets, restored LOC governance, and clarified current binary/full-chain route deploy reality. |
+| V1.3 P0-REF21-5 closure | 2026-05-06 | PM | Landed V061 non-stub SECURITY DEFINER promotion calculator with PSR/DSR, CSCV PBO, stationary bootstrap q10/q50/q90, historical edge snapshot reader, public execute revokes, static tests, and Linux replay-data transaction dry-run proof. |
