@@ -1266,3 +1266,22 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Boundary
 - Read-only source/static/API change; no trading mode, risk config, live auth, engine runtime, DB migration apply, rebuild, restart, or strategy parameter change.
+
+## 2026-05-06 Scanner Opportunity Edge-Staunching Closure
+
+### Result
+- `98ce3d00` deployed Scanner Opportunity admission canary to Linux `trade-core`.
+- Scanner opportunity cost now uses shared `AccountManager` taker-fee prior, including conservative AccountManager defaults at cold boot, and persists `components.cost_source`.
+- `settings/risk_control_rules/scanner_config.toml [opportunity]` has `canary_block_new_entries = true`.
+- The canary is consumed only by demo/live_demo new-open pre-risk dispatch. Close, reduce, protective exits, H0, Guardian, Decision Lease, and IntentProcessor cost gate authority are not bypassed or replaced.
+- Pre-risk scanner rejects now persist `trading.intents` plus synthetic rejected `trading.risk_verdicts` with `details.scanner.opportunity`, enabling `[51]` rejected counterfactual row proof once `decision_outcomes` backfills.
+
+### Verification
+- Mac: `scanner::opportunity` 6, `scanner::runner` 4, `scanner::scorer` 32, `tick_pipeline::tests::fast_track_reduce` 17, `cargo check -p openclaw_engine`, `[51]` Python 8 all passed.
+- Linux: focused opportunity 6, runner 4, scorer 32, `[51]` Python 8 passed; `restart_all.sh --rebuild --keep-auth` deployed `98ce3d00`.
+- Runtime DB proof after deploy: latest scanner snapshot 85/85 routes carried opportunity, 85/85 carried `cost_source=account_manager_taker_fee`, 85/85 carried canary field; last 30m demo/live_demo rejected scanner intents 78/78 carried scanner opportunity, including 2 `scanner_opportunity_canary` rejects.
+- Focused `[51]` returned WARN: snapshot routes 485/485, scanner intents 50/50, labels=9<10, rejected_labels=0.
+
+### Boundary
+- This session closes scanner opportunity evaluation and edge-staunching on the current legacy Rust path.
+- It does not mark AgentTodo M2 MAG-020..026 done; formal M2 remains blocked until M1 durable agent row proof and E2/E4 acceptance.

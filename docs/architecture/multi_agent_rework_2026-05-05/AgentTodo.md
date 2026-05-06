@@ -37,6 +37,35 @@ Dispatch-ready order for the next handoff:
 
 This means the first implementation sprint should be **AgentTodo Sprint A: MAG-015 -> MAG-010/011/012 -> MAG-013/014 -> MAG-016/017 -> MAG-018/019**. M2 Scanner Advisory Conversion and M3 Agent Decision Spine Shadow remain blocked until M1 has Linux row proof and E2/E4 acceptance.
 
+## 2026-05-06 Scanner Opportunity Edge-Staunching Overlay
+
+Scanner-specific edge staunching is now closed for this session outside the
+formal M2 Agent Decision Spine conversion:
+
+- `98ce3d00` deployed a typed Scanner Opportunity admission canary on Linux
+  `trade-core`.
+- Scanner opportunity cost now uses the shared `AccountManager` taker-fee
+  prior, including conservative AccountManager defaults at cold boot, with
+  `components.cost_source` persisted for audit.
+- `settings/risk_control_rules/scanner_config.toml [opportunity]` has
+  `canary_block_new_entries = true`; this affects demo/live_demo new-open
+  intents only.
+- Scanner market-gate / per-strategy pre-risk rejects and the new opportunity
+  canary reject now persist `trading.intents` + synthetic rejected
+  `trading.risk_verdicts` rows with `details.scanner.opportunity`, so `[51]`
+  can accumulate counterfactual row proof.
+- Linux runtime proof after deploy: latest scanner snapshot route judgments
+  `85/85` carry opportunity, `85/85` carry `cost_source=account_manager_taker_fee`,
+  `85/85` carry canary fields; last 30m demo/live_demo rejected scanner intents
+  `78/78` carried scanner opportunity, including `2` `scanner_opportunity_canary`
+  rejects.
+
+This does **not** mark M2 MAG-020..026 done. Formal M2 still means converting
+scanner lifecycle into Agent Decision Spine advisory objects (`OpportunityCandidate`,
+`OpportunityDecay`, `PositionReview`) after M1 durable agent row proof. The current
+overlay is a general Rust-side mathematical new-entry admission guard and row-proof
+closure for the existing legacy path.
+
 ## Reference Path Index
 
 Canonical repo root:

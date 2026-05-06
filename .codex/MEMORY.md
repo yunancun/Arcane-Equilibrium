@@ -117,6 +117,7 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 - canonical GUI is the existing FastAPI console at `trade-core:8000/console`, now treated as the OpenClaw Control Console
 - local 5-Agent runtime stays inside TradeBot; cloud L2 should be reached through a supervisor escalation packet, not by every runtime agent independently
 - AgentTodo is the handoff source for the next multi-agent phase. Start order is MAG-015 contract addendum, then MAG-010..014 durable event store, then MAG-016..019 read-only OpenClaw status/self-state and Agent Control foundation; proposal/approval/channel relay waits until Linux agent schema row proof exists
+- Scanner Opportunity edge-staunching overlay is closed at commit `98ce3d00`: runtime AccountManager taker-fee cost prior, demo/live_demo new-open canary, and pre-risk rejected intent/verdict row proof are deployed on Linux. This does not complete formal AgentTodo M2; M2 remains the later Agent Decision Spine advisory-object conversion.
 - new standalone logic should be Rust-first to avoid adding Python migration debt
 - changes must stay cross-platform and Mac-deployable; avoid hard-coded machine paths
 - tunable parameters must be real, discoverable, and persistent; no fake knobs

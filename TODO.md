@@ -258,7 +258,7 @@
 | `[38]` grid lifecycle drift | demo p50 7.9min vs live_demo 3.2min；lifetime_ratio 0.41 WARN；live re_entry_rate 0.48 | lifetime ≥0.5x | ~05-06 再看 |
 | `[40]` realized edge acceptance | 24h MLDE rows=19，avg_net **-27.93 bps**；slippage live_demo 24h **-92.47 bps** (BUSDT loop) | net_bps_after_fee>0 | 等累積 + edge 翻正 |
 | `[41]` scanner market-gate confirmation | events=1260 / cells=69 / scoreable=0，gate 已 fire 但 label 未足 | gate blocked cells later negative | 等 label 累積 |
-| `[51]` scanner opportunity shadow acceptance | 3h snapshot routes=340/340、scanner intents=4/4；24h labels=7，positive_avg=27.93bps / nonpositive_avg=-55.70bps / corr=0.22 | labels≥10 後評估 calibration；保持 shadow-only | row proof 完整但 label 未足 |
+| `[51]` scanner opportunity shadow/canary acceptance | 3h snapshot routes=485/485、scanner intents=50/50；24h labels=9，positive_avg=27.93bps / nonpositive_avg=-47.85bps / corr=0.21；post-`98ce3d00` latest scanner snapshot 85/85 cost_source=`account_manager_taker_fee`，30m rejected scanner intents 78/78 carry opportunity（2 canary） | labels≥10 後評估 calibration；rejected counterfactual labels需等 decision_outcomes backfill | row proof 完整但 label 未足；canary live for demo/live_demo new-open only |
 | `[27]` intents counter freeze | demo stale 88.3m / intents_30m=0 / verdicts_30m=1 / approved_verdicts_30m=0；risk/cost gates rejected all | approved verdicts with 0 intents 才 FAIL | 持續觀察 |
 | `[11]` counterfactual clean window | n=413/200, cf_fired=46，rolling 2d window shrink expected，WARN not FAIL after `2674e14` | fresh replay + 3d WARN/PASS streak；criteria grid/ma/orphan 達標 | 本週 |
 | `[42]/[42b]` LG-5 reviewer | 0 audit row 累積（sibling CC FUP-1 commit `463890d` 已 land）| >0 row/24h | 下次 deploy 後 |
