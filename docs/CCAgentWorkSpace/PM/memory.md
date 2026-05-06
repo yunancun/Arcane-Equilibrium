@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | REF-21 V058/V059 backfill + turnover checkpoint: added dry-run/apply helper for V058 symbol universe/freeze log and V059 edge snapshots with `--asof` / `--freeze-asof` split and Trading/PreLaunch/Delivering/Closed status coverage; preserved Bybit kline turnover through fixture and Rust scanner timeline reconstruction | workspace/reports/2026-05-07--ref21_v058_v059_backfill_turnover_checkpoint.md |
 | 2026-05-06 | AgentTodo OpenClaw handoff alignment: Sprint A order is MAG-015 -> MAG-010..014 -> MAG-016..019; proposal/channel work waits for durable row proof | workspace/reports/2026-05-06--agenttodo_openclaw_handoff_alignment.md |
 | 2026-05-06 | 玄衡 GUI brand cleanup | workspace/reports/2026-05-06--arcane_equilibrium_gui_brand_cleanup.md |
 | 2026-05-06 | 玄衡 · Arcane Equilibrium soft rename integration | workspace/reports/2026-05-06--arcane_equilibrium_soft_rename.md |

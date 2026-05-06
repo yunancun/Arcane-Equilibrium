@@ -170,3 +170,10 @@ YYYY-MM-DD HH:MM TZ
 - completed AgentTodo Sprint A MAG-019 supervisor cloud ledger policy: added `openclaw_supervisor_policy.py`, wired OpenClaw `model_budget` to the policy snapshot, and added tests for default-disabled cloud, explicit budget/model requirements, bounded/hashing supervisor packets, budget-denied diagnosis payloads, pre-cloud-call `AgentEventStore.record_ai_invocation` reservation, event-store write failure visibility, and no network call markers
 - verification: Mac targeted pytest `test_openclaw_supervisor_policy.py` + OpenClaw frontend/routes + agents routes 45/0, py_compile PASS, `node --check` PASS, `git diff --check` PASS; Linux `trade-core` fast-forward to `65a4279f`, same pytest 45/0 plus py_compile and node check PASS
 - boundary: no cloud provider call, no write/proposal endpoint, no service restart, no deploy/rebuild, no live auth, no production continuous event-store flag, and no trading authority change; AgentTodo Sprint A is closed and next AgentTodo gate is M2 MAG-020..026
+
+2026-05-07 CEST
+- continued REF-21 P0-REF21-6b with parallel investigation across DB/backfill, scanner data realism, and E2E deploy readiness
+- added `helper_scripts/db/ref21_backfill_v058_v059.py` dry-run/apply helper for V058 symbol universe/freeze log and V059 edge snapshots; helper supports `--asof` / `--freeze-asof` split and fetches Trading/PreLaunch/Delivering/Closed statuses
+- preserved Bybit public kline `turnover` through Python fixture rows, Rust `MarketEvent`, and scanner timeline ticker reconstruction; legacy fixtures still fall back to `close * volume`
+- verification: Python targeted pytest 9/0, project-venv Bybit instruments dry-run 1459 rows, py_compile PASS, Rust scanner timeline 4/0, fixture turnover 1/0, `cargo check -p openclaw_engine --bin replay_runner --features replay_isolated` PASS with pre-existing warnings
+- remaining before runtime sign-off: Linux migration apply/backfill, release `replay_runner` rebuild, API reload, and Linux one-click full-chain replay smoke

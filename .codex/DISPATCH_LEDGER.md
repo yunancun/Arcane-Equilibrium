@@ -100,3 +100,24 @@ Result:
 - `README.md`, `TODO.md`, and `CLAUDE.md` now describe current 2026-04-30 active state
 - Linear project and issues updated as a high-level mirror without publishing secrets or detailed runtime internals
 - Correction: after operator feedback, `TODO.md` was restored to its v3 single-timeline record shape; only the stale active-mainline block was removed to `docs/archive/2026-04-30--TODO-stale-active-mainline.md`
+
+2026-05-07 CEST
+Task:
+- Continue REF-21 replay after operator asked to assess parallel dispatch and proceed.
+
+Chain:
+- PM -> MIT(explorer) + BB/E2(explorer) + QA(explorer) -> PM/E1-local integration -> E2(explorer) + E4(worker) -> PM
+
+Ownership:
+- MIT(explorer): V058/V059/V061 production DB state and backfill path.
+- BB/E2(explorer): Bybit public-data realism and scanner turnover reconstruction.
+- QA(explorer): Linux one-click replay execution prerequisites.
+- PM/E1-local integration: backfill helper, turnover fixture propagation, docs/TODO update.
+- E2(explorer): adversarial review of current diff.
+- E4(worker): targeted regression verification.
+
+Result:
+- Source/test checkpoint added for V058/V059 backfill helper and Bybit kline turnover preservation.
+- E2 returned two P1 findings on status coverage and historical-window timestamp visibility; fixes added `--asof` / `--freeze-asof` split and explicit Trading/PreLaunch/Delivering/Closed status fetch. E2 follow-up verdict closed both.
+- E4 follow-up verified Python targeted tests 9/0, project-venv Bybit dry-run 1459 rows, and `git diff --check`.
+- Runtime sign-off remains blocked until Linux migration/backfill/rebuild/API reload/full-chain smoke complete.

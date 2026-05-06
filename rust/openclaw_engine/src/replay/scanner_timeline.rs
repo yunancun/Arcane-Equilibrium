@@ -295,6 +295,14 @@ fn validate_event(event: &MarketEvent) -> Result<(), ReplayScannerTimelineError>
             )));
         }
     }
+    if let Some(turnover) = event.turnover {
+        if !turnover.is_finite() || turnover < 0.0 {
+            return Err(ReplayScannerTimelineError::InvalidEvent(format!(
+                "{} turnover is invalid: {:?}",
+                event.symbol, event.turnover
+            )));
+        }
+    }
     if event.close <= 0.0 || event.high < event.low {
         return Err(ReplayScannerTimelineError::InvalidEvent(format!(
             "{} has invalid OHLC close={} high={} low={}",
@@ -330,7 +338,10 @@ fn build_ticker_snapshot(
             high = high.max(event.high);
             low = low.min(event.low);
             volume += event.volume.max(0.0);
-            turnover += event.close.max(0.0) * event.volume.max(0.0);
+            turnover += event
+                .turnover
+                .unwrap_or_else(|| event.close.max(0.0) * event.volume.max(0.0))
+                .max(0.0);
         }
         let prev_price = window
             .first()
@@ -403,6 +414,7 @@ mod tests {
             low: close * 0.98,
             close,
             volume,
+            turnover: None,
         }
     }
 
@@ -428,6 +440,24 @@ mod tests {
         assert_eq!(timeline.len(), 3);
         assert_eq!(timeline.scan_interval_ms(), 60_000);
         assert!(timeline.is_active_at("BTCUSDT", 121_000));
+    }
+
+    #[test]
+    fn uses_fixture_turnover_when_present() {
+        let mut high_turnover = event("SOLUSDT", 1_000, 10.0, 1.0);
+        high_turnover.turnover = Some(12_000.0);
+        let mut low_turnover = event("XRPUSDT", 1_000, 10.0, 1.0);
+        low_turnover.turnover = Some(10.0);
+        let mut by_symbol = std::collections::HashMap::new();
+        by_symbol.insert("SOLUSDT".to_string(), vec![high_turnover]);
+        by_symbol.insert("XRPUSDT".to_string(), vec![low_turnover]);
+
+        let tickers = build_ticker_snapshot(&by_symbol, 1_000, DEFAULT_LOOKBACK_MS);
+        let sol = tickers.iter().find(|ticker| ticker.symbol == "SOLUSDT").unwrap();
+        let xrp = tickers.iter().find(|ticker| ticker.symbol == "XRPUSDT").unwrap();
+
+        assert_eq!(sol.turnover_24h, 12_000.0);
+        assert_eq!(xrp.turnover_24h, 10.0);
     }
 
     #[test]

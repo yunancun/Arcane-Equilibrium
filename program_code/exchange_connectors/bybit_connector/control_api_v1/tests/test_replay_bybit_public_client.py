@@ -114,6 +114,7 @@ def test_replay_public_client_fetches_and_parses_kline_rows(
             "low": 90.0,
             "close": 105.0,
             "volume": 12.5,
+            "turnover": None,
         }
     ]
     assert len(fake.requests) == 1
@@ -153,6 +154,47 @@ def test_replay_public_client_retries_429_then_succeeds(
     assert len(rows) == 1
     assert len(fake.requests) == 2
     assert sleeps
+
+
+def test_replay_public_client_preserves_kline_turnover(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENCLAW_REPLAY_PUBLIC_GLOBAL_RPS", "50")
+    fake = _FakeUrlOpen([
+        {
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "list": [
+                    [
+                        "1700000000000",
+                        "100",
+                        "110",
+                        "90",
+                        "105",
+                        "12.5",
+                        "1312.5",
+                    ],
+                ]
+            },
+        }
+    ])
+    client = ReplayBybitPublicClient(
+        urlopen=fake,
+        sleeper=lambda _: None,
+        monotonic=lambda: 0.0,
+    )
+
+    rows = client.fetch_klines_sync(
+        symbol="BTCUSDT",
+        category="linear",
+        timeframe="1m",
+        start_ms=1_699_999_999_000,
+        end_ms=1_700_000_001_000,
+        max_bars=10,
+    )
+
+    assert rows[0]["turnover"] == 1312.5
 
 
 def test_replay_public_client_rejects_non_allowlisted_endpoint(
