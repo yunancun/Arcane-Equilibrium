@@ -5,10 +5,23 @@
 Repo root：`/Users/ncyu/Projects/TradeBot/srv`
 Read-time HEAD：`df5b1638`
 Implementation / deploy HEAD：`74b986a0`
-狀態：v1 shadow 已實作、已三端同步、已 Linux rebuild deploy
+Continuation / deploy HEAD：`113f345f`
+狀態：v1 shadow 已實作、`[51]` healthcheck 已實作、shared cost definition 已落地並 Linux rebuild deploy
 
 更新：v1 shadow implementation 已落地，詳
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_v1_shadow_implementation.md`。
+
+續做更新：
+
+- `[51] scanner_opportunity_shadow_acceptance` 已落地，詳
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_healthcheck_51.md`。
+- `113f345f` 將 scanner opportunity 的 fee+slippage round-trip cost 定義改為復用
+  `edge_predictor::gate::estimate_round_trip_cost_bps`，scanner 只額外加當前 spread。
+- Linux `trade-core` 已 `restart_all.sh --rebuild --keep-auth` 部署 `113f345f`；watchdog
+  `engine_alive=true`，demo/live snapshots fresh。
+- 最新 scanner snapshot（2026-05-06 19:53:12+02:00）75/75 route judgments 帶
+  `opportunity`，且 75/75 `opportunity.reason` 含
+  `cost_model=edge_predictor_round_trip+spread`。
 
 ## 結論
 
@@ -192,10 +205,23 @@ hard eligibility 後，是否仍有正 expected net opportunity？
    - 對齊 scanner hard filters 與 `RiskConfig.market_gate` / slippage config。
    - 消費 fee / maker calibration snapshots 作為 cost priors。
 
+   **2026-05-06 續做狀態**：第一條已完成於 `113f345f`。Scanner opportunity 不再手寫
+   fee+slippage round-trip cost，而是使用 `estimate_round_trip_cost_bps`，再疊加
+   scanner-time spread 作為當前市場成本。這仍是 shadow-only，沒有任何
+   `opportunity_lcb_bps` / `admission_hint` enforcement。尚未完成的是動態 cost-source：
+   runtime fee/maker calibration snapshots 仍未成為 scanner cost prior；這是下一個
+   durable 切口，而不是新增 gate。
+
 3. Shadow acceptance healthcheck
    - 比較 `opportunity_lcb_bps <= 0` 與後續 realized negative round trips。
    - 比較 `opportunity_lcb_bps > 0` 與 missed / regret opportunities。
    - 按 strategy 追 false block / false pass rate。
+
+   **2026-05-06 續做狀態**：`[51]` 已覆蓋 snapshot / intent / MLDE row proof 與
+   positive-LCB realized outcome warmup。Runtime 結果是 row proof 100%，但 labels=7<10，
+   所以正確回 `WARN`。Missed/regret opportunity 尚未接入 `[51]`，需要下一步把
+   `opportunity_tracker.py` 的 rejected-opportunity regret summary 與 scanner
+   `opportunity_lcb_bps` 對齊。
 
 4. Admission consolidation
    - 不新增 gate number。

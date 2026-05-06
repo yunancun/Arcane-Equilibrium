@@ -1,7 +1,27 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（Scanner Opportunity v1 shadow）
+> 最後更新：2026-05-06（Scanner Opportunity shared cost definition）
+
+### Scanner Opportunity shared cost definition — 2026-05-06
+
+**Scope**：續做 scanner opportunity integration audit 的 Step 2，把 scanner
+shadow opportunity 的 fee+slippage round-trip cost 收斂到
+`edge_predictor::gate::estimate_round_trip_cost_bps`。Scanner 只額外加當前 spread
+作為 scanner-time market cost。
+
+**邊界**：
+- 仍是 shadow-only；不新增 gate，不接 `opportunity_lcb_bps` / `admission_hint`
+  到拒單 path。
+- 不改 H0、Guardian、Decision Lease、Risk Governor、IntentProcessor cost gate。
+- 不改 risk config、strategy params、DB schema 或 live authorization。
+
+**Verification / deploy**：Mac + Linux targeted Rust tests PASS：
+`scanner::opportunity` 4/4、`scanner::scorer::tests::test_score_ticker_emits_opportunity_shadow_for_each_strategy_judgment` 1/1。
+Linux `restart_all.sh --rebuild --keep-auth` deployed `113f345f`，watchdog
+`engine_alive=true`，latest scanner snapshot 75/75 route judgments carry
+`opportunity` and 75/75 reasons include `cost_model=edge_predictor_round_trip+spread`。
+`[51]` remains WARN by design due labels=7<10, with snapshot/intent row proof 100%。
 
 ### Scanner Opportunity v1 shadow — 2026-05-06
 
