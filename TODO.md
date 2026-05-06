@@ -77,8 +77,9 @@
 | **P0-REF21-3** ✅ | V057-V060 至少有真 migration targets：tier approval / symbol+freeze / edge snapshots / emergency audit log | DONE source/test |
 | **P0-REF21-4** ✅ | MIT Linux PG dry-run V057-V060（apply transaction + rollback/disposable DB proof + Guard A/B/C + GRANT/REVOKE diff） | DONE 2026-05-06：pre-existing f/f/f/f/f → inside_tx t/t/t/t/t → after_rollback f/f/f/f/f；all Guard A/B/C notices emitted |
 | **P0-REF21-5** ✅ | SECURITY DEFINER `replay.calculate_promotion_metrics` 真 body，對齊 `learning_engine/dsr_gate.py` + `pbo_gate.py` + `quantile_bootstrap.py`；禁止 stub deploy | DONE 2026-05-06：`V061__replay_promotion_metrics_calculator.sql` + static tests；Linux transaction dry-run with replay.experiments/simulated_fills/edge snapshots returned `eligible=true`, `fail_reasons=[]`, `PBO=0`, `q50.n_iter=1000`, then rollback |
-| **P0-REF21-6** | `POST /api/v1/replay/full-chain/run` 真 full-chain scanner-to-exit runner 實作；當前只有 `/full-chain/prepare` dataset endpoint + REF-20 `/run` | BLOCKS R3 |
-| **P0-REF21-7** | Rate/IP 50 req/s 真 enforce + replay dedicated public Bybit client；避免共用 production rate window | BLOCKS production enablement |
+| **P0-REF21-6a** ✅ | `POST /api/v1/replay/full-chain/run` API orchestration：同一份多幣種 S2 fixture，按策略逐一註冊 V049 manifest，並走既有 REF-20 `_do_pg_path_for_run_sync` spawn dedicated Rust `replay_runner` subprocess；不在 uvicorn 內跑策略/風控。Mac/Linux targeted tests 16/16 PASS。 | DONE source/test |
+| **P0-REF21-6b** | 真歷史 scanner timeline：抽出 replay-safe `ScannerCore` / historical symbol universe / edge snapshot driver，讓 replay_runner 在歷史時間軸內重建 scanner scan cycles，而不只是 current scanner universe snapshot。這是「scanner-to-exit」完整語義剩餘缺口。 | BLOCKS R3 completeness |
+| **P0-REF21-7** ✅ | Rate/IP 50 req/s 真 enforce + replay dedicated public Bybit client；避免共用 production rate window。`ReplayBybitPublicClient` endpoint allowlist + per-endpoint lower budget + 429/5xx bounded retry 已落，Mac/Linux targeted tests 12/12 PASS。 | DONE source/test |
 
 #### P0-DATA — 資料正確性紅線（跨 wave prerequisite）
 

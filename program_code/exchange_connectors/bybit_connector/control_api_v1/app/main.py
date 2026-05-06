@@ -287,6 +287,13 @@ app.include_router(replay_router)
 from .replay_quick_routes import quick_replay_router  # noqa: E402
 app.include_router(quick_replay_router)
 
+# REF-21 full-chain run orchestration. This stays separate from
+# replay_quick_routes.py so the default run path can spawn dedicated
+# replay_runner subprocesses without turning the dataset helper into a
+# strategy/risk executor.
+from .replay_full_chain_routes import full_chain_replay_router  # noqa: E402
+app.include_router(full_chain_replay_router)
+
 # ── Replay Lab Handoff Router / Replay 實驗室移交路由（REF-20 Wave 8 P6-S13/S14/S15）──
 # Bounded Demo Handoff backend security trio:
 #   POST /api/v1/replay/handoff           — typed-confirmation submit
