@@ -22,4 +22,7 @@ pub mod types;
 
 pub use config::ScannerConfig;
 pub use strategy_policy::ScannerStrategyPolicyStores;
-pub use types::{ChurnState, ScanResult, ScoredSymbol, StrategyCategory};
+pub use types::{
+    ChurnState, OpportunityCandidate, OpportunityDecay, OpportunityDecayReason, ScanResult,
+    ScannerAuthorityMode, ScoredSymbol, StrategyCategory,
+};
