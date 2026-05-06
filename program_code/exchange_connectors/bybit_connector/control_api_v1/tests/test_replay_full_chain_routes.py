@@ -35,6 +35,17 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+def test_full_chain_route_uses_dedicated_replay_public_client() -> None:
+    route_source = (
+        _CONTROL_API_DIR / "app" / "replay_quick_routes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "ReplayBybitPublicClient" in route_source
+    assert "urllib.request.urlopen" not in route_source
+    assert "_BYBIT_CLIENT" not in route_source
+    assert "KLINE_MANAGER" not in route_source
+
+
 def test_full_chain_prepare_disabled_by_default(
     monkeypatch,
     tmp_path: Path,
