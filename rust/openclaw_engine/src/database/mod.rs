@@ -480,6 +480,11 @@ pub enum TradingMsg {
         candidates: serde_json::Value,
         config: serde_json::Value,
     },
+    /// Advisory scanner decay evidence. This is never a close/reduce command.
+    /// scanner decay advisory evidence；絕不是平倉/減倉命令。
+    ScannerOpportunityDecay {
+        decay: crate::scanner::types::OpportunityDecay,
+    },
 }
 
 static TRADING_WRITER_DROP_TOTAL: AtomicU64 = AtomicU64::new(0);

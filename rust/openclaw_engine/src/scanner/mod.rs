@@ -10,6 +10,7 @@
 //!   /v5/market/tickers 並更新活躍交易對集合。
 //!   BTC 和 ETH 始終固定；其餘槽位由適配評分填充。
 
+pub(crate) mod advisory;
 pub mod config;
 pub mod market_judgment;
 pub mod opportunity;

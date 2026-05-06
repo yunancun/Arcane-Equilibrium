@@ -37,6 +37,7 @@ pub async fn run_trading_writer(
     let mut order_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut state_change_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut scanner_snapshot_buf: Vec<TradingMsg> = Vec::with_capacity(8);
+    let mut scanner_decay_buf: Vec<TradingMsg> = Vec::with_capacity(16);
 
     let flush_interval = {
         let cfg = config.get();
@@ -52,9 +53,19 @@ pub async fn run_trading_writer(
             _ = cancel.cancelled() => break,
             _ = flush_timer.tick() => {
                 if pool.is_available() {
-                    flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf,
-                    &mut funding_buf, &mut pos_buf, &mut verdict_buf,
-                              &mut order_buf, &mut state_change_buf, &mut scanner_snapshot_buf).await;
+                    flush_all(
+                        &pool,
+                        &mut signal_buf,
+                        &mut intent_buf,
+                        &mut fill_buf,
+                        &mut funding_buf,
+                        &mut pos_buf,
+                        &mut verdict_buf,
+                        &mut order_buf,
+                        &mut state_change_buf,
+                        &mut scanner_snapshot_buf,
+                        &mut scanner_decay_buf,
+                    ).await;
                 }
             }
             msg = rx.recv() => {
@@ -69,6 +80,7 @@ pub async fn run_trading_writer(
                         TradingMsg::Order { .. } => order_buf.push(m),
                         TradingMsg::OrderStateChange { .. } => state_change_buf.push(m),
                         TradingMsg::ScannerSnapshot { .. } => scanner_snapshot_buf.push(m),
+                        TradingMsg::ScannerOpportunityDecay { .. } => scanner_decay_buf.push(m),
                     },
                     None => break,
                 }
@@ -88,6 +100,7 @@ pub async fn run_trading_writer(
             &mut order_buf,
             &mut state_change_buf,
             &mut scanner_snapshot_buf,
+            &mut scanner_decay_buf,
         )
         .await;
     }
@@ -107,6 +120,7 @@ async fn flush_all(
     orders: &mut Vec<TradingMsg>,
     state_changes: &mut Vec<TradingMsg>,
     scanner_snapshots: &mut Vec<TradingMsg>,
+    scanner_decays: &mut Vec<TradingMsg>,
 ) {
     tokio::join!(
         async {
@@ -154,6 +168,11 @@ async fn flush_all(
                 flush_scanner_snapshots(pool, scanner_snapshots).await;
             }
         },
+        async {
+            if !scanner_decays.is_empty() {
+                flush_scanner_opportunity_decays(pool, scanner_decays).await;
+            }
+        },
     );
 }
 
@@ -170,6 +189,7 @@ const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
 const ORDER_COLS: usize = 12;
 const STATE_CHANGE_COLS: usize = 8;
 const SCANNER_SNAPSHOT_COLS: usize = 9;
+const SCANNER_OPPORTUNITY_DECAY_COLS: usize = 16;
 
 fn should_clear_buffer(table: &str, outcome: BatchInsertOutcome, pending_rows: usize) -> bool {
     if outcome.all_ok() {
@@ -799,6 +819,67 @@ async fn flush_scanner_snapshots(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     }
 }
 
+/// Flush scanner opportunity decay evidence to trading.scanner_opportunity_decays.
+/// 將 scanner opportunity decay evidence 批量寫入 trading.scanner_opportunity_decays。
+async fn flush_scanner_opportunity_decays(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            warn!(
+                pending_rows = buf.len(),
+                "trading.scanner_opportunity_decays flush skipped: DB pool unavailable — retaining buffer"
+            );
+            return;
+        }
+    };
+    let outcome = batch_insert_chunked(
+        pg,
+        pool,
+        "trading.scanner_opportunity_decays",
+        buf.as_slice(),
+        SCANNER_OPPORTUNITY_DECAY_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO trading.scanner_opportunity_decays \
+                 (ts, decay_id, scan_id, symbol, strategy, authority_mode, reason, \
+                  previous_score, current_score, previous_rank, current_rank, \
+                  has_open_position, position_review_required, auto_close_allowed, evidence, payload) ",
+            );
+            qb.push_values(chunk.iter(), |mut b, msg| {
+                if let TradingMsg::ScannerOpportunityDecay { decay } = msg {
+                    let payload = serde_json::to_value(decay)
+                        .unwrap_or_else(|_| serde_json::json!({"serialization_error": "decay"}));
+                    b.push_bind(
+                        chrono::DateTime::from_timestamp_millis(decay.decay_ts_ms as i64)
+                            .unwrap_or_default(),
+                    );
+                    b.push_bind(decay.decay_id.as_str());
+                    b.push_bind(decay.scan_id.as_str());
+                    b.push_bind(decay.symbol.as_str());
+                    b.push_bind(decay.strategy.as_deref());
+                    b.push_bind(decay.authority_mode.as_str());
+                    b.push_bind(decay.reason.as_str());
+                    b.push_bind(decay.previous_score.and_then(sanitize_f64));
+                    b.push_bind(decay.current_score.and_then(sanitize_f64));
+                    b.push_bind(decay.previous_rank.map(|v| v as i32));
+                    b.push_bind(decay.current_rank.map(|v| v as i32));
+                    b.push_bind(decay.has_open_position);
+                    b.push_bind(decay.position_review_required);
+                    b.push_bind(decay.auto_close_allowed);
+                    b.push_bind(decay.evidence.clone());
+                    b.push_bind(payload);
+                }
+            });
+            qb.push(" ON CONFLICT (decay_id, ts) DO NOTHING");
+            qb
+        },
+    )
+    .await;
+    if should_clear_buffer("trading.scanner_opportunity_decays", outcome, buf.len()) {
+        buf.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,6 +990,11 @@ mod tests {
             chunk_rows_for_columns(SCANNER_SNAPSHOT_COLS) * SCANNER_SNAPSHOT_COLS <= 65535,
             "scanner_snapshots batch would exceed PG limit"
         );
+        assert!(
+            chunk_rows_for_columns(SCANNER_OPPORTUNITY_DECAY_COLS) * SCANNER_OPPORTUNITY_DECAY_COLS
+                <= 65535,
+            "scanner_opportunity_decays batch would exceed PG limit"
+        );
     }
 
     #[test]
@@ -919,6 +1005,7 @@ mod tests {
         let mut funding = Vec::new();
         let mut positions = Vec::new();
         let mut scanner_snapshots = Vec::new();
+        let mut scanner_decays = Vec::new();
 
         let msgs: Vec<TradingMsg> = vec![
             TradingMsg::Signal {
@@ -1007,6 +1094,27 @@ mod tests {
                 candidates: serde_json::json!([]),
                 config: serde_json::json!({}),
             },
+            TradingMsg::ScannerOpportunityDecay {
+                decay: crate::scanner::types::OpportunityDecay {
+                    schema_version: "1.0".into(),
+                    decay_id: "oppdecay:scan-0:SOLUSDT:exited_top_set".into(),
+                    candidate_id: Some("oppcand:scan-prev:SOLUSDT:grid_trading".into()),
+                    scan_id: "scan-0".into(),
+                    decay_ts_ms: 0,
+                    symbol: "SOLUSDT".into(),
+                    strategy: Some("grid_trading".into()),
+                    authority_mode: crate::scanner::types::ScannerAuthorityMode::LegacyGate,
+                    reason: crate::scanner::types::OpportunityDecayReason::ExitedTopSet,
+                    previous_score: Some(80.0),
+                    current_score: None,
+                    previous_rank: Some(1),
+                    current_rank: None,
+                    has_open_position: true,
+                    position_review_required: true,
+                    auto_close_allowed: false,
+                    evidence: serde_json::json!({"source": "test"}),
+                },
+            },
         ];
 
         let mut verdicts = Vec::new();
@@ -1023,6 +1131,7 @@ mod tests {
                 TradingMsg::Order { .. } => orders.push(m),
                 TradingMsg::OrderStateChange { .. } => state_changes.push(m),
                 TradingMsg::ScannerSnapshot { .. } => scanner_snapshots.push(m),
+                TradingMsg::ScannerOpportunityDecay { .. } => scanner_decays.push(m),
             }
         }
 
@@ -1035,5 +1144,6 @@ mod tests {
         assert_eq!(orders.len(), 0);
         assert_eq!(state_changes.len(), 0);
         assert_eq!(scanner_snapshots.len(), 1);
+        assert_eq!(scanner_decays.len(), 1);
     }
 }
