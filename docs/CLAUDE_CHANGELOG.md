@@ -15,7 +15,7 @@
 
 **Files updated**：Rust scanner config/types/scorer/runner/opportunity module、tick pipeline intent details、Python `rust_scanner_reader.py`、scanner TOML、Rust/Python tests、PM implementation/audit reports。
 
-**Verification / deploy**：local Rust scanner tests 79/79、engine lib tests 2519/2519、release build PASS、Python scanner IPC tests PASS；Linux `restart_all.sh --rebuild --keep-auth` deployed commit `74b986a0`，watchdog fresh，Linux scanner tests 79/79，Linux Python scanner tests 13/13；latest DB scanner snapshot 10/10 candidates carry `strategy_judgments[*].opportunity`，API sample `has_opportunity=true`。Adversarial grep confirmed no opportunity field is consumed by rejection paths.
+**Verification / deploy**：local Rust scanner tests 79/79、engine lib tests 2519/2519、release build PASS、Python scanner IPC tests PASS；Linux `restart_all.sh --rebuild --keep-auth` deployed commit `74b986a0`，watchdog `engine_alive=true` with demo/live fresh and paper inactive by design，Linux scanner tests 79/79，Linux Python scanner tests 13/13；latest DB scanner snapshot 10/10 candidates carry `strategy_judgments[*].opportunity`，API sample `has_opportunity=true`。Adversarial grep confirmed no opportunity field is consumed by rejection paths.
 
 ### 玄衡 GUI brand cleanup — 2026-05-06
 
