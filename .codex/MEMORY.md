@@ -135,6 +135,7 @@ REF-21 2026-05-06 empirical gap closure:
 - full-chain prepare now has live-profile `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP`
   guard
 - V057-V060 migration files include Guard A/B/C and passed Linux PG transaction dry-run on `trade-core`; pre-existing objects were absent, all four migrations created expected objects inside the transaction, and rollback left all five target tables absent
+- V061 `replay.calculate_promotion_metrics` is now a non-stub SECURITY DEFINER calculator. It derives metrics from `replay.experiments`, `replay.simulated_fills`, and `learning.edge_estimate_snapshots`; includes PSR/DSR, CSCV PBO, stationary bootstrap q10/q50/q90, and fail-closed promotion reasons; Linux transaction dry-run returned `eligible=true` with rollback proof.
 - GUI/CLAUDE console contract is 13 tabs
 
 Current strategy-edge packet:
