@@ -28,8 +28,6 @@ import math
 import os
 import re
 import tempfile
-import urllib.parse
-import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,8 +42,10 @@ from .ipc_dispatch import one_shot_ipc_call
 
 try:
     from ..replay import route_helpers as _rh  # type: ignore[no-redef]
+    from ..replay.bybit_public_client import ReplayBybitPublicClient
 except ImportError:
     from replay import route_helpers as _rh  # type: ignore[no-redef]
+    from replay.bybit_public_client import ReplayBybitPublicClient
 
 
 logger = logging.getLogger(__name__)
@@ -68,8 +68,6 @@ _DEFAULT_FULL_CHAIN_STRATEGIES = (
     "bb_reversion",
     "funding_arb",
 )
-_BYBIT_BASE_URL = "https://api.bybit.com"
-_BYBIT_LIMIT = 200
 _TIMEFRAMES: dict[str, tuple[str, int]] = {
     "1m": ("1", 60_000),
     "3m": ("3", 180_000),
@@ -79,6 +77,7 @@ _TIMEFRAMES: dict[str, tuple[str, int]] = {
     "4h": ("240", 14_400_000),
     "1d": ("D", 86_400_000),
 }
+_REPLAY_BYBIT_PUBLIC_CLIENT = ReplayBybitPublicClient()
 
 
 class ReplayQuickPrepareRequest(BaseModel):
@@ -323,61 +322,15 @@ def _fetch_bybit_klines_sync(
     max_bars: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """Fetch Bybit public klines and return replay MarketEvent dictionaries."""
-    interval = _TIMEFRAMES[timeframe][0]
-    events_by_ts: dict[int, dict[str, Any]] = {}
-    end_cursor = end_ms
     request_bar_budget = max_bars if max_bars is not None else _max_quick_bars()
-    max_requests = int(math.ceil(request_bar_budget / _BYBIT_LIMIT)) + 2
-
-    for _ in range(max_requests):
-        query = urllib.parse.urlencode({
-            "category": category,
-            "symbol": symbol,
-            "interval": interval,
-            "start": str(start_ms),
-            "end": str(end_cursor),
-            "limit": str(_BYBIT_LIMIT),
-        })
-        req = urllib.request.Request(
-            f"{_BYBIT_BASE_URL}/v5/market/kline?{query}",
-            headers={"User-Agent": "OpenClawReplayQuick/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        if data.get("retCode") != 0:
-            raise RuntimeError(
-                "bybit_kline_error:"
-                + str(data.get("retMsg") or data.get("retCode") or "unknown")
-            )
-        rows = data.get("result", {}).get("list", [])
-        if not rows:
-            break
-
-        parsed_ts: list[int] = []
-        for row in rows:
-            ts = int(row[0])
-            parsed_ts.append(ts)
-            if ts < start_ms or ts > end_ms:
-                continue
-            events_by_ts[ts] = {
-                "ts_ms": ts,
-                "symbol": symbol,
-                "open": float(row[1]),
-                "high": float(row[2]),
-                "low": float(row[3]),
-                "close": float(row[4]),
-                "volume": float(row[5]),
-            }
-
-        oldest = min(parsed_ts)
-        if oldest <= start_ms or len(rows) < _BYBIT_LIMIT:
-            break
-        next_cursor = oldest - 1
-        if next_cursor >= end_cursor:
-            break
-        end_cursor = next_cursor
-
-    return [events_by_ts[k] for k in sorted(events_by_ts)]
+    return _REPLAY_BYBIT_PUBLIC_CLIENT.fetch_klines_sync(
+        symbol=symbol,
+        category=category,
+        timeframe=timeframe,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        max_bars=request_bar_budget,
+    )
 
 
 def _write_s2_fixture(
