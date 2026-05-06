@@ -3,7 +3,8 @@
 日期：2026-05-06
 角色：PM
 Repo root：`/Users/ncyu/Projects/TradeBot/srv`
-狀態：本地實作完成；等待 commit / 三端同步 / Linux rebuild deploy
+Commit：`74b986a0`
+狀態：v1 shadow 已實作、已三端同步、已 Linux rebuild deploy
 
 ## 範圍
 
@@ -127,6 +128,33 @@ Warnings：
 - Rust warnings 為既有 unused/dead_code warnings。
 - Python warnings 為既有 Pydantic v2 deprecation warnings。
 
+Linux / runtime 通過：
+
+- `ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only origin main"`
+  - Linux HEAD `74b986a0`
+- `ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --rebuild --keep-auth"`
+  - engine PID 2025331 / API parent PID 2025412
+  - `--keep-auth` 保留現有授權狀態
+- `python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status`
+  - `engine_alive=true`
+  - paper/demo/live snapshots fresh（採集點 2026-05-06 13:31 UTC）
+- `cargo test -p openclaw_engine scanner --lib --manifest-path rust/Cargo.toml` on Linux
+  - 79 passed
+- `PYTHONPATH=. python3 -m pytest tests/test_scanner_opportunities_ipc.py tests/test_strategy_wiring_scanner.py -q` on Linux
+  - 13 passed
+- Latest DB scanner snapshot（2026-05-06 15:32:35.543+02:00）
+  - 10 candidates
+  - 10/10 candidates have `strategy_judgments[*].opportunity`
+- API `/api/v1/strategy/scanner/opportunities`
+  - `source=rust_scanner`
+  - sample row `has_opportunity=true`
+  - sample `admission_hint=exploration_candidate`
+
+Runtime caveat：
+
+- `trading.intents.details.scanner.opportunity` 的 hot-path DB output 需要新 approved intent 才會出現；部署後最近 5 分鐘 0 intent，未主動製造交易來驗欄位。
+- 被動 healthcheck 仍為 SUMMARY FAIL：`[42]` live_candidate_eval_contract、`[42c]` 3d attribution drift、`[50]` replay_run_state_health；`[40]` realized edge 仍負。這些是本輪 shadow-only 改動沒有也不應該掩蓋的真實 gap。
+
 ## 下游使用
 
 新欄位位置：
@@ -143,6 +171,6 @@ Warnings：
 
 下一步可以派：
 
-1. E4 / QA：Linux runtime query 驗證新 scanner snapshot 與 intent details 出現 opportunity object。
+1. E4 / QA：等下一筆 approved intent 後查 `trading.intents.details.scanner.opportunity` runtime row。
 2. QC / MIT：設計 shadow acceptance healthcheck，對比 `opportunity_lcb_bps` 與後續 realized outcome。
 3. PA：定義 admission consolidation 條件，但 enforcement 必須等 shadow metrics 和 canary criteria。
