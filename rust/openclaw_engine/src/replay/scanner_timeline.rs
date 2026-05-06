@@ -303,6 +303,19 @@ fn validate_event(event: &MarketEvent) -> Result<(), ReplayScannerTimelineError>
             )));
         }
     }
+    if let (Some(best_bid), Some(best_ask)) = (event.best_bid, event.best_ask) {
+        if !best_bid.is_finite()
+            || !best_ask.is_finite()
+            || best_bid <= 0.0
+            || best_ask <= 0.0
+            || best_bid > best_ask
+        {
+            return Err(ReplayScannerTimelineError::InvalidEvent(format!(
+                "{} BBO is invalid: bid={:?} ask={:?}",
+                event.symbol, event.best_bid, event.best_ask
+            )));
+        }
+    }
     if event.close <= 0.0 || event.high < event.low {
         return Err(ReplayScannerTimelineError::InvalidEvent(format!(
             "{} has invalid OHLC close={} high={} low={}",
@@ -352,12 +365,20 @@ fn build_ticker_snapshot(
         } else {
             0.0
         };
-        let spread_half = 0.0001_f64;
+        let synthetic_spread_half = 0.0001_f64;
+        let bid1_price = latest
+            .best_bid
+            .filter(|bid| bid.is_finite() && *bid > MIN_PRICE)
+            .unwrap_or_else(|| (latest.close * (1.0 - synthetic_spread_half)).max(MIN_PRICE));
+        let ask1_price = latest
+            .best_ask
+            .filter(|ask| ask.is_finite() && *ask > MIN_PRICE && *ask >= bid1_price)
+            .unwrap_or_else(|| (latest.close * (1.0 + synthetic_spread_half)).max(MIN_PRICE));
         tickers.push(TickerInfo {
             symbol: symbol.clone(),
             last_price: latest.close,
-            bid1_price: (latest.close * (1.0 - spread_half)).max(MIN_PRICE),
-            ask1_price: (latest.close * (1.0 + spread_half)).max(MIN_PRICE),
+            bid1_price,
+            ask1_price,
             volume_24h: volume,
             turnover_24h: turnover,
             high_price_24h: high,
@@ -415,6 +436,12 @@ mod tests {
             close,
             volume,
             turnover: None,
+            best_bid: None,
+            best_ask: None,
+            bid_size: None,
+            ask_size: None,
+            spread_bps: None,
+            microstructure_source: None,
         }
     }
 
@@ -458,6 +485,21 @@ mod tests {
 
         assert_eq!(sol.turnover_24h, 12_000.0);
         assert_eq!(xrp.turnover_24h, 10.0);
+    }
+
+    #[test]
+    fn uses_fixture_bbo_when_present() {
+        let mut event = event("BTCUSDT", 1_000, 100.0, 1.0);
+        event.best_bid = Some(99.5);
+        event.best_ask = Some(100.5);
+        let mut by_symbol = std::collections::HashMap::new();
+        by_symbol.insert("BTCUSDT".to_string(), vec![event]);
+
+        let tickers = build_ticker_snapshot(&by_symbol, 1_000, DEFAULT_LOOKBACK_MS);
+        let btc = tickers.iter().find(|ticker| ticker.symbol == "BTCUSDT").unwrap();
+
+        assert_eq!(btc.bid1_price, 99.5);
+        assert_eq!(btc.ask1_price, 100.5);
     }
 
     #[test]

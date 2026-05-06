@@ -1039,8 +1039,8 @@ fn build_tick_context<'a>(event: &'a MarketEvent) -> crate::tick_pipeline::TickC
         funding_rate: None,
         index_price: None,
         open_interest: None,
-        best_bid: None,
-        best_ask: None,
+        best_bid: event.best_bid,
+        best_ask: event.best_ask,
         tick_size: None,
     }
 }
@@ -1073,6 +1073,12 @@ mod tests {
                 close: 100.0,
                 volume: 1.0,
                 turnover: None,
+                best_bid: None,
+                best_ask: None,
+                bid_size: None,
+                ask_size: None,
+                spread_bps: None,
+                microstructure_source: None,
             },
             MarketEvent {
                 ts_ms: 2,
@@ -1083,6 +1089,12 @@ mod tests {
                 close: 105.0,
                 volume: 1.0,
                 turnover: None,
+                best_bid: None,
+                best_ask: None,
+                bid_size: None,
+                ask_size: None,
+                spread_bps: None,
+                microstructure_source: None,
             },
             MarketEvent {
                 ts_ms: 3,
@@ -1093,6 +1105,12 @@ mod tests {
                 close: 50.5,
                 volume: 5.0,
                 turnover: None,
+                best_bid: None,
+                best_ask: None,
+                bid_size: None,
+                ask_size: None,
+                spread_bps: None,
+                microstructure_source: None,
             },
         ]
     }
@@ -1435,6 +1453,12 @@ mod tests {
             close: 100.0,
             volume: 1.0,
             turnover: None,
+            best_bid: None,
+            best_ask: None,
+            bid_size: None,
+            ask_size: None,
+            spread_bps: None,
+            microstructure_source: None,
         }];
         let pipeline = build_isolated_pipeline(
             ReplayProfile::Isolated,
@@ -1560,6 +1584,12 @@ mod tests {
             close: 100.0,
             volume: 1.0,
             turnover: None,
+            best_bid: None,
+            best_ask: None,
+            bid_size: None,
+            ask_size: None,
+            spread_bps: None,
+            microstructure_source: None,
         }]
     }
 

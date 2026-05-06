@@ -22,8 +22,10 @@ from typing import Any, Callable, Optional
 
 _BYBIT_PUBLIC_BASE_URL = "https://api.bybit.com"
 _KLINE_ENDPOINT = "/v5/market/kline"
+_TICKERS_ENDPOINT = "/v5/market/tickers"
+_ORDERBOOK_ENDPOINT = "/v5/market/orderbook"
 _KLINE_LIMIT = 200
-_ALLOWED_ENDPOINTS = {_KLINE_ENDPOINT}
+_ALLOWED_ENDPOINTS = {_KLINE_ENDPOINT, _TICKERS_ENDPOINT, _ORDERBOOK_ENDPOINT}
 _RETRIABLE_HTTP_CODES = {429, 500, 502, 503, 504}
 _RETRIABLE_BYBIT_RETCODES = {10006, 10016, 10018}
 _TIMEFRAMES: dict[str, tuple[str, int]] = {
@@ -53,6 +55,8 @@ class ReplayPublicRatePolicy:
 
     global_rps: float = 50.0
     kline_rps: float = 20.0
+    ticker_rps: float = 5.0
+    orderbook_rps: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -97,7 +101,24 @@ def current_replay_public_rate_policy() -> ReplayPublicRatePolicy:
     )
     if global_rps > 1.0 and kline_rps >= global_rps:
         kline_rps = max(0.1, global_rps - 1.0)
-    return ReplayPublicRatePolicy(global_rps=global_rps, kline_rps=kline_rps)
+    ticker_rps = _env_float(
+        "OPENCLAW_REPLAY_PUBLIC_TICKER_RPS",
+        min(5.0, global_rps),
+        lower=0.1,
+        upper=global_rps,
+    )
+    orderbook_rps = _env_float(
+        "OPENCLAW_REPLAY_PUBLIC_ORDERBOOK_RPS",
+        min(10.0, global_rps),
+        lower=0.1,
+        upper=global_rps,
+    )
+    return ReplayPublicRatePolicy(
+        global_rps=global_rps,
+        kline_rps=kline_rps,
+        ticker_rps=ticker_rps,
+        orderbook_rps=orderbook_rps,
+    )
 
 
 def current_replay_public_retry_policy() -> ReplayPublicRetryPolicy:
@@ -143,7 +164,14 @@ class ReplayPublicRateLimiter:
             raise ReplayBybitPublicClientError(
                 f"replay_bybit_endpoint_not_allowed:{endpoint}"
             )
-        endpoint_rps = policy.kline_rps if endpoint == _KLINE_ENDPOINT else policy.global_rps
+        if endpoint == _KLINE_ENDPOINT:
+            endpoint_rps = policy.kline_rps
+        elif endpoint == _TICKERS_ENDPOINT:
+            endpoint_rps = policy.ticker_rps
+        elif endpoint == _ORDERBOOK_ENDPOINT:
+            endpoint_rps = policy.orderbook_rps
+        else:
+            endpoint_rps = policy.global_rps
         global_interval = 1.0 / max(policy.global_rps, 0.1)
         endpoint_interval = 1.0 / max(endpoint_rps, 0.1)
         with self._lock:
@@ -246,6 +274,59 @@ class ReplayBybitPublicClient:
             end_cursor = next_cursor
 
         return [events_by_ts[k] for k in sorted(events_by_ts)]
+
+    def fetch_tickers_sync(
+        self,
+        *,
+        category: str,
+        symbol: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch current Bybit public ticker snapshot rows.
+
+        This endpoint is current-snapshot only. Callers that persist rows for
+        replay must label them as locally recorded snapshots, not historical
+        Bybit ticker history.
+        """
+        params = {"category": category}
+        if symbol:
+            params["symbol"] = symbol
+        data = self._request_json(_TICKERS_ENDPOINT, params)
+        ret_code = data.get("retCode")
+        if ret_code != 0:
+            raise ReplayBybitPublicClientError(
+                "bybit_public_ticker_error:"
+                + str(data.get("retMsg") or ret_code or "unknown")
+            )
+        rows = data.get("result", {}).get("list", [])
+        return [row for row in rows if isinstance(row, dict)]
+
+    def fetch_orderbook_sync(
+        self,
+        *,
+        category: str,
+        symbol: str,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """Fetch current Bybit public orderbook snapshot for one symbol."""
+        bounded_limit = max(1, min(int(limit), 500))
+        data = self._request_json(
+            _ORDERBOOK_ENDPOINT,
+            {
+                "category": category,
+                "symbol": symbol,
+                "limit": str(bounded_limit),
+            },
+        )
+        ret_code = data.get("retCode")
+        if ret_code != 0:
+            raise ReplayBybitPublicClientError(
+                "bybit_public_orderbook_error:"
+                + str(data.get("retMsg") or ret_code or "unknown")
+            )
+        result = data.get("result")
+        if not isinstance(result, dict):
+            raise ReplayBybitPublicClientError("bybit_public_orderbook_missing_result")
+        return result
 
     def _request_json(self, endpoint: str, params: dict[str, str]) -> dict[str, Any]:
         if endpoint not in _ALLOWED_ENDPOINTS:

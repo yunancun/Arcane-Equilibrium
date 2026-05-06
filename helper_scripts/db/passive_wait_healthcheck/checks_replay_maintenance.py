@@ -126,6 +126,11 @@ RUN_STATE_FAILED_RATE_WARN_MAX: float = 0.20  # 20%
 RUN_STATE_ZOMBIE_PASS_MAX_HOURS: float = 1.0
 RUN_STATE_ZOMBIE_WARN_MAX_HOURS: float = 4.0
 
+# `[53]` REF-21 V058 symbol universe recorder thresholds.
+V058_RECORDER_PASS_MAX_HOURS: float = 2.0
+V058_RECORDER_WARN_MAX_HOURS: float = 26.0
+V058_RECORDER_MIN_ROWS_24H: int = 1
+
 
 # ---------------------------------------------------------------------------
 # `[46]` mlde_shadow_retention_status — V056 cron freshness + candidate cap.
@@ -653,3 +658,66 @@ def check_50_replay_run_state_health(cur) -> tuple[str, str]:
     if warn_reasons:
         return ("WARN", f"[50] {base} — " + "; ".join(warn_reasons))
     return ("PASS", f"[50] {base} — run_state health PASS")
+
+
+# ---------------------------------------------------------------------------
+# `[53]` ref21_v058_symbol_universe_recorder — recurring universe snapshots.
+# `[53]` REF-21 V058 symbol universe recorder 活性。
+# ---------------------------------------------------------------------------
+
+def check_53_ref21_v058_symbol_universe_recorder(cur) -> tuple[str, str]:
+    """[53] REF-21 V058 recurring symbol-universe snapshot liveness."""
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        cur.execute("SELECT to_regclass('market.symbol_universe_snapshots') IS NOT NULL")
+        exists_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"[53] V058 existence query failed: {exc}")
+
+    if not exists_row or not exists_row[0]:
+        return (
+            "PASS",
+            "[53] market.symbol_universe_snapshots missing (V058 not applied; pre-deploy graceful skip)",
+        )
+
+    try:
+        cur.execute(
+            """
+            SELECT
+              count(*)::bigint AS total_rows,
+              count(*) FILTER (WHERE ts > now() - interval '24 hours')::bigint AS rows_24h,
+              extract(epoch FROM (now() - max(ts)))::bigint AS last_age_seconds
+            FROM market.symbol_universe_snapshots
+            WHERE exchange = 'bybit'
+            """
+        )
+        row = cur.fetchone()
+        total_rows = int(row[0] or 0)
+        rows_24h = int(row[1] or 0)
+        last_age_seconds = int(row[2]) if row[2] is not None else None
+    except Exception as exc:  # noqa: BLE001
+        return ("WARN", f"[53] V058 recorder query failed: {exc}")
+
+    if total_rows == 0 or last_age_seconds is None:
+        return (
+            "FAIL",
+            "[53] market.symbol_universe_snapshots exists but has no Bybit rows; recurring recorder/backfill not active",
+        )
+
+    age_hours = last_age_seconds / 3600.0
+    base = f"total={total_rows} rows_24h={rows_24h} last_age={age_hours:.1f}h"
+    if age_hours > V058_RECORDER_WARN_MAX_HOURS:
+        return (
+            "FAIL",
+            f"[53] {base} — V058 recorder stale > {V058_RECORDER_WARN_MAX_HOURS}h",
+        )
+    if age_hours > V058_RECORDER_PASS_MAX_HOURS or rows_24h < V058_RECORDER_MIN_ROWS_24H:
+        return (
+            "WARN",
+            f"[53] {base} — V058 recorder missed hourly cadence",
+        )
+    return ("PASS", f"[53] {base} — V058 recorder healthy")

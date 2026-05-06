@@ -56,6 +56,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_replay_maintenance import
     RUN_STATE_ZOMBIE_PASS_MAX_HOURS,
     RUN_STATE_ZOMBIE_WARN_MAX_HOURS,
     RUNNER_BINARY_CANDIDATE_PATHS,
+    check_53_ref21_v058_symbol_universe_recorder,
     check_46_mlde_shadow_retention_status,
     check_47_replay_runner_binary,
     check_48_replay_manifest_registry_growth,
@@ -250,6 +251,54 @@ class TestCheck47ReplayRunnerBinary(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(tmp_base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# `[53]` ref21_v058_symbol_universe_recorder tests.
+# `[53]` REF21 V058 symbol universe recorder 測試。
+# ---------------------------------------------------------------------------
+class TestCheck53Ref21V058Recorder(unittest.TestCase):
+    """`[53]` V058 recurring universe snapshot healthcheck tests."""
+
+    def test_pass_skip_when_v058_table_absent(self) -> None:
+        cur = _build_cur(fetchone_returns=[(False,)])
+
+        status, msg = check_53_ref21_v058_symbol_universe_recorder(cur)
+
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("pre-deploy graceful skip", msg)
+
+    def test_fail_when_v058_table_exists_but_empty(self) -> None:
+        cur = _build_cur(fetchone_returns=[(True,), (0, 0, None)])
+
+        status, msg = check_53_ref21_v058_symbol_universe_recorder(cur)
+
+        self.assertEqual(status, "FAIL", msg)
+        self.assertIn("no Bybit rows", msg)
+
+    def test_pass_when_recent_rows_exist(self) -> None:
+        cur = _build_cur(fetchone_returns=[(True,), (905, 905, 120)])
+
+        status, msg = check_53_ref21_v058_symbol_universe_recorder(cur)
+
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("recorder healthy", msg)
+
+    def test_warn_when_latest_row_misses_hourly_cadence(self) -> None:
+        cur = _build_cur(fetchone_returns=[(True,), (905, 905, 3 * 3600)])
+
+        status, msg = check_53_ref21_v058_symbol_universe_recorder(cur)
+
+        self.assertEqual(status, "WARN", msg)
+        self.assertIn("missed hourly cadence", msg)
+
+    def test_fail_when_latest_row_is_stale(self) -> None:
+        cur = _build_cur(fetchone_returns=[(True,), (905, 0, 27 * 3600)])
+
+        status, msg = check_53_ref21_v058_symbol_universe_recorder(cur)
+
+        self.assertEqual(status, "FAIL", msg)
+        self.assertIn("recorder stale", msg)
 
 
 # ---------------------------------------------------------------------------

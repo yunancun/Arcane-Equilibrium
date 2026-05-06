@@ -31,6 +31,7 @@ def _operator_actor() -> AuthenticatedActor:
 
 def _client(monkeypatch, tmp_path: Path) -> TestClient:
     monkeypatch.setenv("OPENCLAW_REPLAY_FULL_CHAIN_FIXTURE_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENCLAW_REPLAY_MICROSTRUCTURE_OVERLAY_ENABLED", "0")
     app = FastAPI()
     app.include_router(full_chain_replay_router)
     app.dependency_overrides[current_actor] = _operator_actor
@@ -370,3 +371,48 @@ def test_full_chain_run_rejects_strategy_cap(
 
     assert resp.status_code == 400
     assert "replay_full_chain_strategy_cap_exceeded" in resp.json()["detail"]["reason_codes"]
+
+
+def test_apply_microstructure_overlay_enriches_prior_bbo_only() -> None:
+    import app.replay_full_chain_routes as mod
+
+    events = [
+        _sample_event("BTCUSDT", 1_700_000_060_000),
+        _sample_event("ETHUSDT", 1_700_000_060_000),
+    ]
+    overlay = {
+        "status": "ok",
+        "source": "market.market_tickers",
+        "records": {
+            "BTCUSDT": [
+                {
+                    "ts_ms": 1_700_000_000_000,
+                    "best_bid": 99.9,
+                    "best_ask": 100.1,
+                    "bid_size": 2.0,
+                    "ask_size": 3.0,
+                    "spread_bps": 20.0,
+                }
+            ],
+            "ETHUSDT": [
+                {
+                    "ts_ms": 1_700_000_070_000,
+                    "best_bid": 49.9,
+                    "best_ask": 50.1,
+                }
+            ],
+        },
+    }
+
+    stats = mod._apply_microstructure_overlays(  # noqa: SLF001
+        events,
+        overlay,
+        max_staleness_ms=120_000,
+    )
+
+    assert stats["status"] == "ok"
+    assert stats["enriched_event_count"] == 1
+    assert events[0]["best_bid"] == 99.9
+    assert events[0]["best_ask"] == 100.1
+    assert events[0]["microstructure_source"] == "market.market_tickers"
+    assert "best_bid" not in events[1]
