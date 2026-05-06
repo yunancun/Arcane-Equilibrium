@@ -156,6 +156,7 @@
 | 2026-05-06 | REF-21 V1.3 P0-REF21-4 PG dry-run closure: added Guard B/C to V057-V060, verified PUBLIC write revokes/indexes, and passed Linux transaction dry-run with rollback proof | workspace/reports/2026-05-06--ref21_v1_3_p0_ref21_4_pg_dry_run.md |
 | 2026-05-06 | REF-21 V1.3 P0-REF21-5 promotion calculator closure: landed V061 non-stub SECURITY DEFINER `replay.calculate_promotion_metrics` with PSR/DSR, CSCV PBO, stationary bootstrap, static tests, and Linux replay-data transaction dry-run proof | workspace/reports/2026-05-06--ref21_v1_3_p0_ref21_5_promotion_calculator.md |
 | 2026-05-06 | REF-21 full-chain run orchestration checkpoint: dedicated replay Bybit public client closed P0-REF21-7; `/full-chain/run` now prepares multi-symbol fixture and spawns one Rust replay_runner subprocess per strategy via REF-20 register/run path; true historical ScannerCore timeline remains P0-REF21-6b | workspace/reports/2026-05-06--ref21_full_chain_run_orchestration_checkpoint.md |
+| 2026-05-06 | REF-21 One-Click Replay GUI checkpoint: default Replay tab now starts `/full-chain/run` multi-symbol, multi-strategy subprocess runs; Advanced manifest workflow remains preserved | workspace/reports/2026-05-06--ref21_one_click_replay_gui_checkpoint.md |
 | 2026-03-31 | Wave 5 B 方案計劃 | workspace/reports/2026-03-31--wave5_plan_b_multiagent.md |
 | 2026-03-31 | Wave 5 最終派發計劃（Sprint 0+5a+5b 結構） | workspace/reports/2026-03-31--wave5_final_dispatch.md |
 | 2026-03-31 | Sprint 5a 詳細派發計劃 | workspace/reports/2026-03-31--sprint5a_dispatch.md |

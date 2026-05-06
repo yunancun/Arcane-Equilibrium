@@ -504,17 +504,22 @@ def test_replay_quick_mode_is_default_and_advanced_is_preserved(
     """Replay tab defaults to simple one-click flow and keeps Advanced."""
     assert "oc-replay-quick-panel" in app_paper_js
     assert "oc-replay-advanced-panel" in app_paper_js
-    assert "Quick Replay / 一鍵回測" in app_paper_js
+    assert "One-Click Replay / 一鍵 Replay" in app_paper_js
     assert "Advanced / 進階" in app_paper_js
-    assert "/api/v1/replay/quick/prepare" in app_paper_js
+    assert "/api/v1/replay/full-chain/run" in app_paper_js
+    assert "oc-replay-quick-universe" in app_paper_js
+    assert "oc-replay-quick-symbols" in app_paper_js
+    assert "oc-replay-quick-strategy-check" in app_paper_js
     assert "oc-replay-quick-window-start" in app_paper_js
     assert "oc-replay-quick-engine" in app_paper_js
     assert "use_current_config: true" in app_paper_js
+    assert "SIMULATION ONLY" in app_paper_js
 
 
 def test_replay_tab_copy_mentions_quick_and_advanced(tab_replay_html: str) -> None:
     """Top-level Replay page frames Quick as default and Advanced as full flow."""
-    assert "Quick Replay" in tab_replay_html
+    assert "One-Click Replay" in tab_replay_html
+    assert "multi-symbol, multi-strategy" in tab_replay_html
     assert "Advanced" in tab_replay_html
 
 
