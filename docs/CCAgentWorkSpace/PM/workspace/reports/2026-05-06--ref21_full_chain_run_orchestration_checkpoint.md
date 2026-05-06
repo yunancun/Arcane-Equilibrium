@@ -50,8 +50,22 @@ git diff --check
 => passed
 ```
 
-Linux `trade-core` verification is required after push/sync for the second
-checkpoint commit.
+Linux `trade-core`:
+
+```text
+python3 -m pytest \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_bybit_public_client.py \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_full_chain_routes.py \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_full_chain_run_routes.py -q
+=> 16 passed
+
+python3 -m py_compile \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/replay/bybit_public_client.py \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_quick_routes.py \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_full_chain_routes.py \
+  program_code/exchange_connectors/bybit_connector/control_api_v1/app/main.py
+=> passed
+```
 
 ## Remaining Gap
 
@@ -73,4 +87,3 @@ Therefore TODO now splits:
 
 - `P0-REF21-6a` closed: API orchestration and subprocess handoff.
 - `P0-REF21-6b` open: true scanner timeline completeness.
-

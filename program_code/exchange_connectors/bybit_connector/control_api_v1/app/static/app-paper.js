@@ -729,15 +729,86 @@ function ocPaperSubtabInit() {
 
   function _quickDefaultWindow() {
     const end = new Date();
-    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
     return {
       start: _datetimeLocalValue(start),
       end: _datetimeLocalValue(end)
     };
   }
 
-  function _jsonOrNull(value) {
-    return value == null ? null : value;
+  function _parseQuickSymbols() {
+    const el = document.getElementById("oc-replay-quick-symbols");
+    const raw = el ? (el.value || "") : "";
+    const out = [];
+    const seen = {};
+    raw.split(/[,\s]+/).forEach(function (part) {
+      const symbol = part.trim().toUpperCase();
+      if (!symbol || seen[symbol]) return;
+      if (!/^[A-Z0-9_.]{1,32}$/.test(symbol)) return;
+      seen[symbol] = true;
+      out.push(symbol);
+    });
+    return out;
+  }
+
+  function _selectedQuickStrategies() {
+    const boxes = document.querySelectorAll(".oc-replay-quick-strategy-check");
+    const strategies = [];
+    boxes.forEach(function (box) {
+      if (box.checked && box.value) strategies.push(box.value);
+    });
+    return strategies;
+  }
+
+  function _syncQuickUniverseFields() {
+    const universeEl = document.getElementById("oc-replay-quick-universe");
+    const symbolEl = document.getElementById("oc-replay-quick-symbols");
+    const value = universeEl ? universeEl.value : "current_scanner";
+    if (symbolEl) {
+      symbolEl.disabled = value !== "custom" && value !== "pinned_only";
+      symbolEl.placeholder = value === "custom"
+        ? "BTCUSDT,ETHUSDT"
+        : "optional pinned override";
+    }
+  }
+
+  function _renderFullChainRunSummary(data) {
+    const mount = document.getElementById("oc-replay-result-summary");
+    if (!mount) return;
+    data = data || {};
+    const symbols = Array.isArray(data.symbols) ? data.symbols : [];
+    const strategies = Array.isArray(data.strategies) ? data.strategies : [];
+    const runs = Array.isArray(data.runs) ? data.runs : [];
+    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    const runRows = runs.map(function (run) {
+      return '<div class="oc-replay-run-row">'
+        + '<span>' + ocEsc(run.strategy || "strategy") + '</span>'
+        + '<code>' + ocEsc(run.run_id || "pending") + '</code>'
+        + '<strong>' + ocEsc(run.status || "unknown") + '</strong>'
+        + '</div>';
+    }).join("");
+    const warningHtml = warnings.length
+      ? '<div class="oc-replay-warning-line">' + ocEsc(warnings.join(" | ")) + '</div>'
+      : "";
+    mount.innerHTML = ''
+      + '<div class="oc-replay-summary-grid">'
+      + _metricCellHtml("oc-replay-summary-scope", "Scope / 範圍",
+        "Full-chain S2", "oc-cell-ok", "Multi-symbol fixture + per-strategy subprocess runs")
+      + _metricCellHtml("oc-replay-summary-symbols", "Symbols / 幣種",
+        String(symbols.length), symbols.length > 0 ? "oc-cell-ok" : "oc-cell-warn",
+        symbols.join(","))
+      + _metricCellHtml("oc-replay-summary-strategies", "Strategies / 策略",
+        String(strategies.length), strategies.length > 0 ? "oc-cell-ok" : "oc-cell-warn",
+        strategies.join(","))
+      + _metricCellHtml("oc-replay-summary-events", "Events / 行情事件",
+        String(data.event_count || 0), data.event_count > 0 ? "oc-cell-ok" : "oc-cell-warn",
+        "S2 public market bars in the generated fixture")
+      + _metricCellHtml("oc-replay-summary-runs", "Runs / 子進程",
+        String(runs.length), runs.length > 0 ? "oc-cell-ok" : "oc-cell-warn",
+        "Dedicated replay_runner subprocess runs")
+      + '</div>'
+      + '<div class="oc-replay-run-list">' + runRows + '</div>'
+      + warningHtml;
   }
 
   function _renderReplaySummary(data, payload, result, fills) {
@@ -858,23 +929,37 @@ function ocPaperSubtabInit() {
     cellsHtml += '</div>';
 
     const defaults = _quickDefaultWindow();
+    const strategyChecks = [
+      "grid_trading",
+      "ma_crossover",
+      "bb_breakout",
+      "bb_reversion",
+      "funding_arb"
+    ].map(function (strategy) {
+      return '<label class="oc-replay-check"><input type="checkbox" '
+        + 'class="oc-replay-quick-strategy-check" value="' + ocEsc(strategy)
+        + '" checked />' + ocEsc(strategy) + '</label>';
+    }).join("");
     const quickHtml = '<div class="oc-replay-modebar" role="tablist" aria-label="Replay mode">'
-      + '<button type="button" class="oc-btn oc-btn-primary" id="oc-replay-mode-quick" data-replay-view="quick">Quick Replay / 一鍵回測</button>'
+      + '<button type="button" class="oc-btn oc-btn-primary" id="oc-replay-mode-quick" data-replay-view="quick">One-Click Replay / 一鍵 Replay</button>'
       + '<button type="button" class="oc-btn" id="oc-replay-mode-advanced" data-replay-view="advanced">Advanced / 進階</button>'
       + '</div>'
       + '<div id="oc-replay-quick-panel" class="oc-replay-panel active">'
+      + '<div class="oc-replay-badge-row">'
+      + '<span class="oc-replay-badge oc-replay-badge-warn">SIMULATION ONLY</span>'
+      + '<span class="oc-replay-badge">S2 public market data</span>'
+      + '<span class="oc-replay-badge">scanner universe snapshot</span>'
+      + '</div>'
       + '<div class="oc-replay-quick-grid">'
-      + '<label class="oc-replay-field">Symbol<input id="oc-replay-quick-symbol" value="BTCUSDT" autocomplete="off" /></label>'
-      + '<label class="oc-replay-field">Strategy<select id="oc-replay-quick-strategy">'
-      + '<option value="grid_trading">grid_trading</option>'
-      + '<option value="ma_crossover">ma_crossover</option>'
-      + '<option value="bb_breakout">bb_breakout</option>'
-      + '<option value="bb_reversion">bb_reversion</option>'
-      + '<option value="funding_arb">funding_arb</option>'
+      + '<label class="oc-replay-field">Universe<select id="oc-replay-quick-universe">'
+      + '<option value="current_scanner">Current scanner snapshot</option>'
+      + '<option value="pinned_only">Pinned symbols</option>'
+      + '<option value="custom">Custom symbols</option>'
       + '</select></label>'
-      + '<label class="oc-replay-field">Engine<select id="oc-replay-quick-engine">'
-      + '<option value="demo">Demo current config</option>'
-      + '<option value="live">Live current config</option>'
+      + '<label class="oc-replay-field">Symbols<input id="oc-replay-quick-symbols" value="BTCUSDT,ETHUSDT" autocomplete="off" /></label>'
+      + '<label class="oc-replay-field">Engine Snapshot<select id="oc-replay-quick-engine">'
+      + '<option value="demo">Demo config snapshot</option>'
+      + '<option value="live">Live config snapshot (simulation only)</option>'
       + '</select></label>'
       + '<label class="oc-replay-field">Timeframe<select id="oc-replay-quick-timeframe">'
       + '<option value="1m">1m</option><option value="3m">3m</option>'
@@ -884,12 +969,15 @@ function ocPaperSubtabInit() {
       + '<label class="oc-replay-field">Window Start<input id="oc-replay-quick-window-start" type="datetime-local" value="' + ocEsc(defaults.start) + '" /></label>'
       + '<label class="oc-replay-field">Window End<input id="oc-replay-quick-window-end" type="datetime-local" value="' + ocEsc(defaults.end) + '" /></label>'
       + '<label class="oc-replay-field">Starting Balance<input id="oc-replay-quick-starting-balance" type="number" min="1" step="100" value="10000" /></label>'
+      + '<label class="oc-replay-field">Max Symbols<input id="oc-replay-quick-max-symbols" type="number" min="1" max="25" step="1" value="8" /></label>'
       + '<label class="oc-replay-field">Category<select id="oc-replay-quick-category">'
       + '<option value="linear">linear</option><option value="spot">spot</option>'
       + '<option value="inverse">inverse</option></select></label>'
+      + '<fieldset class="oc-replay-strategy-field"><legend>Strategies</legend>'
+      + strategyChecks + '</fieldset>'
       + '</div>'
       + '<div class="oc-replay-actions">'
-      + '<button type="button" class="oc-btn oc-btn-primary oc-replay-primary-run" id="oc-replay-quick-run-btn">Run Replay / 開始回測</button>'
+      + '<button type="button" class="oc-btn oc-btn-primary oc-replay-primary-run" id="oc-replay-quick-run-btn">Run Full-Chain Replay / 全鏈條回測</button>'
       + '<button type="button" class="oc-btn" id="oc-replay-quick-refresh-btn">Refresh / 刷新</button>'
       + '</div>'
       + '</div>';
@@ -950,6 +1038,7 @@ function ocPaperSubtabInit() {
     const loadBtn = document.getElementById("oc-replay-load-btn");
     const modeQuickBtn = document.getElementById("oc-replay-mode-quick");
     const modeAdvancedBtn = document.getElementById("oc-replay-mode-advanced");
+    const quickUniverseEl = document.getElementById("oc-replay-quick-universe");
     if (quickRunBtn) quickRunBtn.addEventListener("click", _onQuickReplayClick);
     if (quickRefreshBtn) quickRefreshBtn.addEventListener("click", onTabActivate);
     if (runAllBtn) runAllBtn.addEventListener("click", _onRunBacktestClick);
@@ -959,6 +1048,8 @@ function ocPaperSubtabInit() {
     if (loadBtn) loadBtn.addEventListener("click", _onLoadReportClick);
     if (modeQuickBtn) modeQuickBtn.addEventListener("click", function () { _setReplayView("quick"); });
     if (modeAdvancedBtn) modeAdvancedBtn.addEventListener("click", function () { _setReplayView("advanced"); });
+    if (quickUniverseEl) quickUniverseEl.addEventListener("change", _syncQuickUniverseFields);
+    _syncQuickUniverseFields();
   }
 
   function _setReplayView(view) {
@@ -988,113 +1079,6 @@ function ocPaperSubtabInit() {
     return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 
-  async function _registerReplayBody(body) {
-    _setReplayStatus("Registering...", "");
-    const resp = await _fetchReplayJson("/api/v1/replay/experiments/register", {
-      method: "POST",
-      headers: { "Accept": "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    const data = resp.data || {};
-    const expId = data.experiment_id || "";
-    const expEl = document.getElementById("oc-replay-experiment-id");
-    if (expEl) expEl.value = expId;
-    _setReplayStatus("registered experiment_id=" + expId, "oc-cell-ok");
-    return expId;
-  }
-
-  async function _runReplayExperiment(expId) {
-    if (!expId) {
-      _setReplayStatus("請先提供 experiment_id / experiment_id required", "oc-cell-warn");
-      return "";
-    }
-    _setReplayStatus("Running...", "");
-    const resp = await _fetchReplayJson("/api/v1/replay/run", {
-      method: "POST",
-      headers: { "Accept": "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({
-        experiment_id: expId,
-        idempotency_key: "replay-run-" + Date.now()
-      })
-    });
-    const data = resp.data || {};
-    const runId = data.run_id || data.id || "";
-    const runEl = document.getElementById("oc-replay-run-id");
-    if (runEl) runEl.value = runId;
-    _setReplayStatus("run.status=" + (data.status || "started") + " run_id=" + runId, "oc-cell-ok");
-    return runId;
-  }
-
-  async function _finalizeReplayRun(runId) {
-    if (!runId) {
-      _setReplayStatus("請先提供 run_id / run_id required", "oc-cell-warn");
-      return null;
-    }
-    _setReplayStatus("Finalizing...", "");
-    const resp = await _fetchReplayJson(
-      "/api/v1/replay/run/" + encodeURIComponent(runId) + "/finalize",
-      { method: "POST", headers: { "Accept": "application/json" } }
-    );
-    const data = resp.data || {};
-    _setReplayStatus("finalized fills=" + (data.fills_inserted || 0)
-      + " confidence=" + (data.execution_confidence || "none"), "oc-cell-ok");
-    const expId = data.experiment_id;
-    if (expId) {
-      const expEl = document.getElementById("oc-replay-experiment-id");
-      if (expEl) expEl.value = expId;
-    }
-    return data;
-  }
-
-  async function _loadReplayReport(expId) {
-    if (!expId) {
-      _setReplayStatus("請輸入 experiment_id / Please enter experiment_id", "oc-cell-warn");
-      return null;
-    }
-    _setReplayStatus("Loading...", "");
-    const body = await _fetchReplayJson(
-      "/api/v1/replay/report/" + encodeURIComponent(expId)
-    );
-    _lastReportData = body;
-    const data = (body && body.data) || {};
-    const runStatus = (data.run && data.run.status) || "unknown";
-    const artifactCount = data.artifact_count != null ? data.artifact_count : 0;
-    _renderReportMetrics(data);
-    _setReplayStatus("run.status=" + runStatus + " artifacts=" + artifactCount,
-      "oc-cell-ok");
-    return data;
-  }
-
-  function _buildQuickRegisterBody(prepared) {
-    const data = prepared || {};
-    const manifestJson = {
-      symbol: data.symbol,
-      strategy: data.strategy,
-      timeframe: data.timeframe,
-      data_tier: data.data_tier || "S2",
-      fixture_uri: data.fixture_uri,
-      starting_balance: data.starting_balance || 10000,
-      replay_source_engine: data.engine || "demo",
-      replay_source: "quick_s2_bybit_public"
-    };
-    return {
-      symbol: data.symbol,
-      strategy: data.strategy,
-      timeframe: data.timeframe,
-      data_tier: data.data_tier || "S2",
-      data_window_start: data.data_window_start,
-      data_window_end: data.data_window_end,
-      strategy_config_sha256: "0".repeat(64),
-      risk_config_sha256: "1".repeat(64),
-      half_life_days: 7.0,
-      embargo_days: 14.0,
-      manifest_jsonb: manifestJson,
-      strategy_params: _jsonOrNull(data.strategy_params),
-      risk_overrides: _jsonOrNull(data.risk_overrides),
-      idempotency_key: "replay-quick-register-" + Date.now()
-    };
-  }
-
   async function _onQuickReplayClick() {
     const btn = document.getElementById("oc-replay-quick-run-btn");
     if (btn) btn.disabled = true;
@@ -1104,34 +1088,51 @@ function ocPaperSubtabInit() {
       if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
         throw new Error("Window End must be later than Window Start");
       }
+      const universeEl = document.getElementById("oc-replay-quick-universe");
+      const universePreset = universeEl ? (universeEl.value || "current_scanner") : "current_scanner";
+      const strategies = _selectedQuickStrategies();
+      if (!strategies.length) {
+        throw new Error("Select at least one strategy");
+      }
+      const symbols = _parseQuickSymbols();
+      if (universePreset === "custom" && !symbols.length) {
+        throw new Error("Custom universe requires at least one valid symbol");
+      }
       const body = {
-        symbol: (document.getElementById("oc-replay-quick-symbol").value || "BTCUSDT").trim(),
-        strategy: document.getElementById("oc-replay-quick-strategy").value || "grid_trading",
+        universe_preset: universePreset,
+        strategies: strategies,
         engine: document.getElementById("oc-replay-quick-engine").value || "demo",
         timeframe: document.getElementById("oc-replay-quick-timeframe").value || "1m",
         category: document.getElementById("oc-replay-quick-category").value || "linear",
         data_window_start: startIso,
         data_window_end: endIso,
         starting_balance: _numberFromInput("oc-replay-quick-starting-balance", 10000),
-        use_current_config: true
+        max_symbols: Math.max(1, Math.min(25, Math.round(_numberFromInput("oc-replay-quick-max-symbols", 8)))),
+        use_current_config: true,
+        auto_finalize_completed: true
       };
-      _setReplayStatus("Preparing S2 market fixture + current config...", "");
-      const preparedResp = await _fetchReplayJson("/api/v1/replay/quick/prepare", {
+      if ((universePreset === "custom" || universePreset === "pinned_only") && symbols.length) {
+        body.symbols = symbols;
+      }
+      _setReplayStatus("Preparing full-chain fixture and starting replay_runner subprocesses...", "");
+      const runResp = await _fetchReplayJson("/api/v1/replay/full-chain/run", {
         method: "POST",
         headers: { "Accept": "application/json", "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
-      const prepared = preparedResp.data || {};
-      _setReplayStatus("Prepared " + (prepared.event_count || 0)
-        + " bars; Register → Run → Finalize...", "oc-cell-ok");
-      const expId = await _registerReplayBody(_buildQuickRegisterBody(prepared));
-      if (!expId) return;
-      const runId = await _runReplayExperiment(expId);
-      if (!runId) return;
-      const finalized = await _finalizeReplayRun(runId);
-      await _loadReplayReport((finalized && finalized.experiment_id) || expId);
+      const data = runResp.data || {};
+      const runs = Array.isArray(data.runs) ? data.runs : [];
+      const firstRun = runs.length ? runs[0] : {};
+      const expEl = document.getElementById("oc-replay-experiment-id");
+      const runEl = document.getElementById("oc-replay-run-id");
+      if (expEl && firstRun.experiment_id) expEl.value = firstRun.experiment_id;
+      if (runEl && firstRun.run_id) runEl.value = firstRun.run_id;
+      _renderFullChainRunSummary(data);
+      _setReplayStatus("full-chain replay started: strategies=" + (data.strategy_count || runs.length)
+        + " symbols=" + (Array.isArray(data.symbols) ? data.symbols.length : 0)
+        + " events=" + (data.event_count || 0), "oc-cell-ok");
     } catch (e) {
-      _setReplayStatus("quick replay failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+      _setReplayStatus("full-chain replay failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -1335,12 +1336,35 @@ function ocPaperSubtabInit() {
       + '.oc-replay-modebar{display:flex;gap:8px;margin:6px 0 10px}'
       + '.oc-replay-panel{display:none}'
       + '.oc-replay-panel.active{display:block}'
+      + '.oc-replay-badge-row{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px}'
+      + '.oc-replay-badge{font-size:10px;color:var(--text-dim);border:1px solid var(--border);'
+      + 'border-radius:999px;padding:3px 8px;background:rgba(13,17,23,0.45)}'
+      + '.oc-replay-badge-warn{color:var(--red);border-color:rgba(248,81,73,0.45);'
+      + 'background:rgba(248,81,73,0.07)}'
       + '.oc-replay-quick-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));'
       + 'gap:8px;padding:12px;background:rgba(13,17,23,0.46);'
       + 'border:1px solid rgba(56,139,253,0.22);border-radius:6px}'
+      + '.oc-replay-strategy-field{grid-column:span 4;display:flex;gap:8px;'
+      + 'flex-wrap:wrap;border:1px dashed var(--border);border-radius:6px;'
+      + 'padding:8px 10px;color:var(--text-dim);font-size:10px}'
+      + '.oc-replay-strategy-field legend{padding:0 4px;color:var(--text-dim);'
+      + 'text-transform:uppercase}'
+      + '.oc-replay-check{display:flex;align-items:center;gap:5px;color:var(--text);'
+      + 'font-size:11px;text-transform:none}'
+      + '.oc-replay-field input:disabled{opacity:.55;cursor:not-allowed}'
       + '.oc-replay-primary-run{min-width:180px}'
       + '.oc-replay-summary-grid{display:grid;gap:8px;margin-top:12px;'
       + 'grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}'
+      + '.oc-replay-run-list{display:grid;gap:6px;margin-top:8px}'
+      + '.oc-replay-run-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,2fr) auto;'
+      + 'gap:8px;align-items:center;background:rgba(13,17,23,0.42);'
+      + 'border:1px solid var(--border);border-radius:6px;padding:7px 9px;'
+      + 'font-size:11px;color:var(--text)}'
+      + '.oc-replay-run-row code{font-size:11px;color:var(--text-dim);'
+      + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      + '.oc-replay-run-row strong{color:var(--green);font-size:11px}'
+      + '.oc-replay-warning-line{margin-top:8px;font-size:11px;color:var(--red);'
+      + 'line-height:1.5}'
       + '.oc-replay-workflow-grid{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));'
       + 'gap:8px;padding:10px 12px;background:rgba(13,17,23,0.4);'
       + 'border:1px dashed var(--border);border-radius:6px}'
@@ -1366,12 +1390,13 @@ function ocPaperSubtabInit() {
       + '.oc-replay-load-status.oc-cell-warn{color:var(--red)}'
       + '.oc-replay-load-status.oc-cell-ok{color:var(--green)}'
       + '@media (max-width:900px){.oc-replay-workflow-grid,.oc-replay-quick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}'
-      + '.oc-replay-json{grid-column:span 2}}'
+      + '.oc-replay-json,.oc-replay-strategy-field{grid-column:span 2}}'
       + '@media (max-width:700px){.oc-replay-cells-grid{'
       + 'grid-template-columns:1fr 1fr}.oc-replay-cell{min-height:60px;'
       + 'padding:12px 14px}.oc-replay-load-input{min-width:0;width:100%}'
       + '.oc-replay-workflow-grid,.oc-replay-quick-grid{grid-template-columns:1fr}'
-      + '.oc-replay-json{grid-column:span 1}.oc-replay-primary-run{min-width:0;width:100%}}';
+      + '.oc-replay-json,.oc-replay-strategy-field{grid-column:span 1}'
+      + '.oc-replay-run-row{grid-template-columns:1fr}.oc-replay-primary-run{min-width:0;width:100%}}';
     document.head.appendChild(s);
   }
 
