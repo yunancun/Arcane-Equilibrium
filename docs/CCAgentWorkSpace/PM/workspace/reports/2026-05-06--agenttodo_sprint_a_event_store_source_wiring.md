@@ -2,7 +2,7 @@
 
 Date: 2026-05-06
 Owner: PM
-Status: Source wiring complete; Linux runtime row proof pending
+Status: Source wiring complete; Linux controlled row proof passed
 
 ## Scope
 
@@ -23,7 +23,14 @@ Status: Source wiring complete; Linux runtime row proof pending
 - `git diff --check`: PASS.
 - Linux `trade-core` fast-forward to `91379cd2`: targeted pytest 215 passed and
   touched-module `py_compile` passed.
+- MAG-013/014 row proof: strict `[52]` first failed with
+  `messages=0 state_changes=0 ai_invocations=0`; controlled smoke then wrote
+  `messages=2 state_changes=11 ai_invocations=2`; strict `[52]` passed.
+- State proof includes `scout`, `strategist`, `guardian`, `analyst`, `executor`,
+  `conductor`, and `conductor:*` rows.
 
 ## Remaining Gate
 
-MAG-010..012 are not marked DONE because the acceptance requires Linux runtime fresh rows. MAG-013/014 next step is to enable/validate `[52]` row proof without changing trading authority.
+MAG-010..014 are closed for source + controlled Linux row proof. No service restart
+or production continuous flag was applied. Supervisor cloud escalation ledger remains
+MAG-019, and read-only OpenClaw foundation starts at MAG-016/017.
