@@ -195,6 +195,7 @@
 use std::path::Path;
 
 use openclaw_engine::config::RiskConfig;
+use openclaw_engine::edge_estimates::EdgeEstimates;
 use openclaw_engine::ml::kelly_sizer::KellyConfig;
 use openclaw_engine::replay::cli;
 use openclaw_engine::replay::fixture_loader::{self, FixtureSource};
@@ -210,7 +211,11 @@ use openclaw_engine::replay::risk_adapter::{
     ReplayPaperSnapshot, ReplayRiskAdapter,
 };
 use openclaw_engine::replay::runner::{self, ReplayResult};
+use openclaw_engine::replay::scanner_timeline::{
+    replay_default_scanner_config, ReplayScannerTimeline,
+};
 use openclaw_engine::replay::strategy_adapter::ReplayStrategyAdapter;
+use openclaw_engine::scanner::ScannerConfig;
 use openclaw_engine::strategies::{Strategy, StrategyFactory, StrategyParamsConfig};
 use openclaw_core::guardian::GuardianConfig;
 
@@ -324,6 +329,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         FixtureSource::from_manifest_strings(&manifest.data_tier, &manifest.fixture_uri)?;
     let tier_label = fixture_source.tier_label();
     let events = fixture_loader::load_fixtures(&fixture_source)?;
+    let scanner_timeline = if manifest.mode.as_deref() == Some("full_chain") {
+        let scanner_config = scanner_config_from_manifest(manifest.scanner_config.as_ref())?;
+        let edge_estimates = edge_estimates_from_manifest(manifest.edge_estimates.as_ref())?;
+        Some(ReplayScannerTimeline::new(
+            &events,
+            &scanner_config,
+            &edge_estimates,
+        )?)
+    } else {
+        None
+    };
 
     // Step 4: bootstrap the IsolatedPipeline + (optionally) wire adapters.
     // Step 4：建構 IsolatedPipeline + （選擇性）接 adapter。
@@ -377,6 +393,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         events,
     )?
     .with_starting_balance(starting_balance)?;
+    if let Some(timeline) = scanner_timeline {
+        pipeline = pipeline.with_scanner_timeline(timeline);
+    }
     if let Some(strategy_name) = manifest.strategy.as_deref() {
         // R5-T4 adapter path. Resolve a matching strategy from the factory.
         // `StrategyFactory::create_with_params(default)` returns 5 strategies
@@ -770,6 +789,66 @@ struct ReplayManifest {
     /// `#[serde(default)]` 同 `strategy_params`：向後相容、xlang 13/13 不退。
     #[serde(default)]
     pub risk_overrides: Option<serde_json::Value>,
+    /// REF-21 full-chain replay mode marker. When `mode == "full_chain"`,
+    /// the dedicated subprocess reconstructs a scanner timeline from the
+    /// fixture before running the strategy/risk adapter path.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// Optional scanner config snapshot captured by the control plane. Absent
+    /// manifests use replay defaults (60-second scan interval, zero warmup).
+    #[serde(default)]
+    pub scanner_config: Option<serde_json::Value>,
+    /// Optional historical edge estimate snapshot. Shape matches
+    /// `EdgeEstimates::load_from_str`; absent manifests use an empty snapshot
+    /// rather than reading current mutable settings.
+    #[serde(default)]
+    pub edge_estimates: Option<serde_json::Value>,
+}
+
+fn scanner_config_from_manifest(
+    blob: Option<&serde_json::Value>,
+) -> Result<ScannerConfig, Box<dyn std::error::Error>> {
+    let mut config = match blob {
+        Some(value) => serde_json::from_value::<ScannerConfig>(value.clone()).map_err(|e| {
+            Box::<dyn std::error::Error>::from(format!(
+                "replay_runner: manifest.scanner_config shape mismatch \
+                 (cannot deserialise into ScannerConfig): {}",
+                e
+            ))
+        })?,
+        None => replay_default_scanner_config(),
+    };
+    if blob.is_none() {
+        config.scheduling.scan_interval_secs = 60;
+        config.scheduling.warmup_delay_secs = 0;
+    }
+    config.validate().map_err(|e| {
+        Box::<dyn std::error::Error>::from(format!(
+            "replay_runner: manifest.scanner_config invalid: {}",
+            e
+        ))
+    })?;
+    Ok(config)
+}
+
+fn edge_estimates_from_manifest(
+    blob: Option<&serde_json::Value>,
+) -> Result<EdgeEstimates, Box<dyn std::error::Error>> {
+    let Some(value) = blob else {
+        return Ok(EdgeEstimates::empty());
+    };
+    let raw = serde_json::to_string(value).map_err(|e| {
+        Box::<dyn std::error::Error>::from(format!(
+            "replay_runner: manifest.edge_estimates cannot be serialized: {}",
+            e
+        ))
+    })?;
+    EdgeEstimates::load_from_str(&raw).ok_or_else(|| {
+        Box::<dyn std::error::Error>::from(
+            "replay_runner: manifest.edge_estimates shape mismatch \
+             (expected edge_estimates.json-compatible object)",
+        )
+    })
 }
 
 /// Load the manifest JSON and run the manifest_signer verify path.

@@ -885,6 +885,18 @@ def build_default_manifest_payload(
             raise ValueError("replay_manifest_strategy_missing")
         payload["strategy"] = strategy_name.strip()
 
+        mode = manifest_jsonb.get("mode")
+        if isinstance(mode, str) and mode.strip():
+            payload["mode"] = mode.strip()
+
+        scanner_config = manifest_jsonb.get("scanner_config")
+        if isinstance(scanner_config, dict):
+            payload["scanner_config"] = scanner_config
+
+        edge_estimates = manifest_jsonb.get("edge_estimates")
+        if isinstance(edge_estimates, dict):
+            payload["edge_estimates"] = edge_estimates
+
         data_tier = runtime.get("data_tier") or manifest_jsonb.get("data_tier")
         if isinstance(data_tier, str) and data_tier.strip():
             payload["data_tier"] = data_tier.strip()

@@ -53,7 +53,8 @@ git diff --check
 
 ## Boundary
 
-This closes the practical One-Click UI wiring over P0-REF21-6a. It does not
-close P0-REF21-6b: true historical scanner timeline replay still requires
-ScannerCore extraction, historical symbol universe snapshots, and edge snapshot
-time gating.
+This closes the practical One-Click UI wiring over P0-REF21-6a. As of the
+follow-up scanner timeline checkpoint, Rust `replay_runner` can reconstruct
+fixture-derived 60s scanner cycles for `mode=full_chain`; P0-REF21-6b still
+needs the Control API to default to V058 historical universe snapshots and V059
+edge snapshots instead of request/current scanner symbol sources.

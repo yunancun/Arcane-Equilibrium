@@ -294,7 +294,7 @@ def _build_manifest_jsonb(
     return {
         "manifest_version": 1,
         "mode": "full_chain",
-        "execution_scope": "scanner_universe_snapshot_to_strategy_risk_exit",
+        "execution_scope": "historical_scanner_timeline_to_strategy_risk_exit",
         "source": "s2_bybit_public_full_chain",
         "fixture_uri": str(fixture_path),
         "symbol": _FULL_CHAIN_SYMBOL_SENTINEL,
@@ -525,7 +525,7 @@ async def post_replay_full_chain_run(
     return _rh.replay_response_envelope({
         "mode": "full_chain_run",
         "execution_mode": "subprocess_strategy_risk_per_strategy",
-        "scanner_scope": "scanner_universe_snapshot",
+        "scanner_scope": "historical_scanner_timeline_from_fixture",
         "started_at_ms": started_at_ms,
         "fixture_uri": str(prepared["fixture_path"]),
         "data_tier": "S2",
