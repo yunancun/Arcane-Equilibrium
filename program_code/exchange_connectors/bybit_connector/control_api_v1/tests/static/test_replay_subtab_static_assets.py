@@ -214,14 +214,13 @@ def test_console_has_settings_gated_development_support_tab(console_html: str) -
 
 
 def test_development_tab_covers_v001_to_v063(tab_development_html: str) -> None:
-    """Development support tab renders the full V001-V063 migration dashboard range."""
-    assert "V001__create_schemas.sql" in tab_development_html
-    assert "V061__replay_promotion_metrics_calculator.sql" in tab_development_html
-    assert "MIGRATION_ICONS" in tab_development_html
-    assert "V022" in tab_development_html
-    assert "V042" in tab_development_html
-    assert "V063" in tab_development_html
-    assert "for (let i = 1; i <= 63; i += 1)" in tab_development_html
+    """Development support tab is backed by dynamic repo diagnostics."""
+    assert "/api/v1/settings/development-status" in tab_development_html
+    assert "Migration Intelligence" in tab_development_html
+    assert "Development Focus" in tab_development_html
+    assert "Recent PM Reports" in tab_development_html
+    assert "新增 V064+ migration 后会自动出现在本页" in tab_development_html
+    assert "for (let i = 1; i <= 63; i += 1)" not in tab_development_html
 
 
 def test_development_support_toggle_is_browser_local(
@@ -270,8 +269,10 @@ def test_demo_and_live_tabs_have_risk_shortcuts(
     assert "openclaw-risk-select" in console_html
     assert "openDemoRisk" in tab_demo_html
     assert "riskEngine: 'demo'" in tab_demo_html
+    assert "riskTab: 'config'" in tab_demo_html
     assert "openLiveRisk" in tab_live_html
     assert "riskEngine: 'live'" in tab_live_html
+    assert "riskTab: 'config'" in tab_live_html
     assert "风险总览 / Risk Overview" in tab_risk_html
     assert "参数设置 / Risk Settings" in tab_risk_html
     assert "applyPaperRiskAvailability" in risk_tab_js

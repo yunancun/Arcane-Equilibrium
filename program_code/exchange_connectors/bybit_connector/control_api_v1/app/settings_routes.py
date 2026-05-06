@@ -37,7 +37,9 @@ import hmac as hmac_lib
 import json
 import logging
 import os
+import re
 import stat
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -113,6 +115,8 @@ _LEGACY_GUI_DEVELOPMENT_MODE_ENV_KEY = "OPENCLAW_GUI_DEVELOPMENT_MODE"
 _BASIC_SYSTEM_ENV_FILE = "basic_system_services.env"
 _ENV_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
 _ENV_FALSEY = frozenset({"0", "false", "no", "off", "disabled"})
+_MIGRATION_FILE_RE = re.compile(r"^V(?P<version>\d{3})__(?P<name>.+)\.sql$")
+_MIGRATION_COMPANION_RE = re.compile(r"^V(?P<version>\d{3})_(?!_)(?P<name>.+)\.sql$")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers / 輔助函數
@@ -282,6 +286,282 @@ def _write_env_file_value(path: Path, key: str, value: str) -> None:
     os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
     tmp.replace(path)
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _resolve_repo_root() -> Path:
+    """Resolve the canonical repo root for read-only development diagnostics."""
+    base_dir = os.environ.get("OPENCLAW_BASE_DIR")
+    if base_dir:
+        root = Path(base_dir).expanduser().resolve()
+        if (root / "sql" / "migrations").is_dir():
+            return root
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "sql" / "migrations").is_dir():
+            return parent
+    return Path.cwd().resolve()
+
+
+def _dev_git(root: Path, *args: str) -> str:
+    """Run a bounded git read command. Returns empty string on failure."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def _migration_phase(version: int) -> str:
+    if version <= 8:
+        return "foundation"
+    if version <= 21:
+        return "agent/runtime"
+    if version <= 35:
+        return "learning/edge"
+    if version <= 48:
+        return "replay governance"
+    if version <= 61:
+        return "REF-20/21 hardening"
+    return "future"
+
+
+def _title_from_migration_name(name: str) -> str:
+    return name.replace("_", " ").strip()
+
+
+def _read_text_limited(path: Path, *, max_chars: int = 20000) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except (FileNotFoundError, PermissionError, OSError):
+        return ""
+    return text[:max_chars]
+
+
+def _extract_migration_purpose(path: Path, fallback: str) -> str:
+    """Extract a concise purpose from migration header comments."""
+    text = _read_text_limited(path, max_chars=12000)
+    if not text:
+        return fallback
+    purpose: list[str] = []
+    fallback_comments: list[str] = []
+    capturing = False
+    for raw in text.splitlines()[:120]:
+        stripped = raw.strip()
+        if not stripped:
+            if capturing and purpose:
+                break
+            continue
+        if not stripped.startswith("--"):
+            if capturing and purpose:
+                break
+            continue
+        comment = stripped[2:].strip()
+        if not comment:
+            continue
+        if "Purpose" in comment or "目的" in comment:
+            capturing = True
+            after = comment.split(":", 1)[-1].strip() if ":" in comment else comment
+            if after and after.lower() not in {"purpose", "purpose / 目的"}:
+                purpose.append(after)
+            continue
+        if capturing:
+            purpose.append(comment)
+            if len(" ".join(purpose)) > 260:
+                break
+        elif len(fallback_comments) < 3 and not comment.startswith("V"):
+            fallback_comments.append(comment)
+    summary = " ".join(purpose or fallback_comments).strip()
+    if not summary:
+        summary = fallback
+    return summary[:320]
+
+
+def _extract_migration_objects(path: Path) -> list[str]:
+    text = _read_text_limited(path, max_chars=30000)
+    if not text:
+        return []
+    patterns = [
+        r"\bCREATE\s+(?:TABLE|VIEW|INDEX|SCHEMA|FUNCTION|TYPE)\s+"
+        r"(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z_][\w.]+)",
+        r"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-zA-Z_][\w.]+)",
+    ]
+    objects: list[str] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            name = match.group(1).strip().strip('"')
+            if name and name not in seen:
+                seen.add(name)
+                objects.append(name)
+            if len(objects) >= 8:
+                return objects
+    return objects
+
+
+def _doc_excerpt(path: Path, *, max_lines: int = 12) -> list[str]:
+    text = _read_text_limited(path, max_chars=20000)
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        out.append(line[:260])
+        if len(out) >= max_lines:
+            break
+    return out
+
+
+def _recent_pm_reports(root: Path, *, limit: int = 8) -> list[dict[str, Any]]:
+    reports_dir = root / "docs" / "CCAgentWorkSpace" / "PM" / "workspace" / "reports"
+    try:
+        reports = [p for p in reports_dir.glob("*.md") if p.is_file()]
+    except OSError:
+        return []
+    reports.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return [
+        {
+            "file": str(path.relative_to(root)),
+            "title": path.stem.replace("--", " · ").replace("_", " "),
+            "mtime_epoch": int(path.stat().st_mtime),
+        }
+        for path in reports[:limit]
+    ]
+
+
+def _build_development_status_payload() -> dict[str, Any]:
+    """Build read-only repository development diagnostics for Support tab."""
+    root = _resolve_repo_root()
+    migrations_dir = root / "sql" / "migrations"
+    migration_by_version: dict[int, Path] = {}
+    companions_by_version: dict[int, list[Path]] = {}
+    if migrations_dir.is_dir():
+        for path in migrations_dir.iterdir():
+            if not path.is_file():
+                continue
+            match = _MIGRATION_FILE_RE.match(path.name)
+            if match:
+                migration_by_version[int(match.group("version"))] = path
+                continue
+            companion = _MIGRATION_COMPANION_RE.match(path.name)
+            if companion:
+                companions_by_version.setdefault(
+                    int(companion.group("version")),
+                    [],
+                ).append(path)
+
+    max_landed = max(migration_by_version.keys(), default=0)
+    display_max = max(max_landed, 63)
+    items: list[dict[str, Any]] = []
+    gaps: list[str] = []
+    for version in range(1, display_max + 1):
+        path = migration_by_version.get(version)
+        version_id = f"V{version:03d}"
+        companions = sorted(p.name for p in companions_by_version.get(version, []))
+        if path is None:
+            status = "future" if version > max_landed else "gap"
+            if status == "gap":
+                gaps.append(version_id)
+            title = "future development slot" if status == "future" else "reserved gap / missing file"
+            items.append(
+                {
+                    "id": version_id,
+                    "version": version,
+                    "status": status,
+                    "file": "",
+                    "title": title,
+                    "purpose": title,
+                    "phase": _migration_phase(version),
+                    "objects": [],
+                    "companions": companions,
+                    "line_count": 0,
+                }
+            )
+            continue
+        name = _MIGRATION_FILE_RE.match(path.name).group("name")  # type: ignore[union-attr]
+        title = _title_from_migration_name(name)
+        text = _read_text_limited(path, max_chars=500000)
+        items.append(
+            {
+                "id": version_id,
+                "version": version,
+                "status": "landed",
+                "file": str(path.relative_to(root)),
+                "title": title,
+                "purpose": _extract_migration_purpose(path, title),
+                "phase": _migration_phase(version),
+                "objects": _extract_migration_objects(path),
+                "companions": companions,
+                "line_count": len(text.splitlines()) if text else 0,
+            }
+        )
+
+    branch = _dev_git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    sha = _dev_git(root, "rev-parse", "--short", "HEAD")
+    subject = _dev_git(root, "log", "-1", "--pretty=%s")
+    dirty_raw = _dev_git(root, "status", "--porcelain")
+    dirty_paths = [line[3:] for line in dirty_raw.splitlines() if len(line) > 3]
+    recent_commits = [
+        {"sha": row.split("\t", 1)[0], "subject": row.split("\t", 1)[1]}
+        for row in _dev_git(root, "log", "-5", "--pretty=%h%x09%s").splitlines()
+        if "\t" in row
+    ]
+    latest = items[max_landed - 1] if max_landed and max_landed <= len(items) else None
+    return {
+        "generated_at_epoch": int(time.time()),
+        "repo_root": str(root),
+        "migrations_dir": str(migrations_dir.relative_to(root)) if migrations_dir.is_dir() else "",
+        "migrations": {
+            "display_max_version": display_max,
+            "landed_count": len(migration_by_version),
+            "companion_count": sum(len(v) for v in companions_by_version.values()),
+            "gap_count": len(gaps),
+            "gap_versions": gaps,
+            "latest": latest,
+            "next_version": f"V{max_landed + 1:03d}" if max_landed else "V001",
+            "items": items,
+        },
+        "git": {
+            "branch": branch or "unknown",
+            "sha": sha or "unknown",
+            "subject": subject or "unknown",
+            "dirty_count": len(dirty_paths),
+            "dirty_paths": dirty_paths[:12],
+            "recent_commits": recent_commits,
+        },
+        "development_context": {
+            "todo_excerpt": _doc_excerpt(root / "TODO.md", max_lines=10),
+            "agenttodo_excerpt": _doc_excerpt(
+                root / "docs" / "architecture" / "multi_agent_rework_2026-05-05" / "AgentTodo.md",
+                max_lines=10,
+            ),
+            "recent_pm_reports": _recent_pm_reports(root),
+        },
+        "runbook": [
+            {
+                "label": "Focused console static tests",
+                "command": (
+                    "python3 -m pytest "
+                    "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+                    "tests/static/test_replay_subtab_static_assets.py -q"
+                ),
+            },
+            {
+                "label": "API-only restart",
+                "command": "bash helper_scripts/restart_all.sh --api-only",
+            },
+            {
+                "label": "Migration dry-run pattern",
+                "command": "psql \"$OPENCLAW_DATABASE_URL\" -v ON_ERROR_STOP=1 -f sql/migrations/V0xx__name.sql",
+            },
+        ],
+    }
 
 
 def _paper_engine_setting_payload() -> dict[str, Any]:
@@ -727,6 +1007,20 @@ async def get_development_mode_setting(
     support toggle into a 404.
     """
     return _development_support_mode_payload()
+
+
+@settings_router.get("/development-status")
+async def get_development_status(
+    actor: Any = Depends(_get_auth_actor),
+) -> dict:
+    """
+    GET /api/v1/settings/development-status
+    Return read-only repository development diagnostics for the Support tab.
+
+    This endpoint scans source-controlled migrations and handoff documents at
+    request time, so V064+ files appear without front-end changes.
+    """
+    return _build_development_status_payload()
 
 
 @settings_router.post("/development-mode")

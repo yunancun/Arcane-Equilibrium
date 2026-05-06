@@ -4,32 +4,33 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>开发状态支持 / Development Support</title>
-<script src="/static/common.js?v=20260506.dev-support-v2"></script>
+<script src="/static/common.js?v=20260506.dev-status-nav-v1"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <style>
   .dev-header-row { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
-  .dev-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
-  .dev-mode-btn-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(184px,1fr)); gap:10px; }
-  .dev-version-card {
-    background:var(--bg); border:1px solid var(--border); border-radius:8px;
-    padding:12px; text-align:left; color:var(--text); min-height:142px;
-    display:flex; flex-direction:column; gap:7px;
-  }
-  .dev-version-card.landed { border-color:rgba(56,139,253,0.34); background:rgba(56,139,253,0.055); }
-  .dev-version-card.reserved { border-color:rgba(210,153,34,0.28); background:rgba(210,153,34,0.045); }
-  .dev-version-card.future { border-color:rgba(139,148,158,0.24); opacity:0.76; }
-  .dev-version-top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  .dev-version-id { font-size:19px; font-weight:700; letter-spacing:0; color:var(--accent); }
-  .dev-version-icon { font-size:23px; line-height:1; }
-  .dev-version-name { font-size:12px; font-weight:600; line-height:1.35; min-height:32px; }
-  .dev-version-file { font-size:10px; color:var(--text-dim); font-family:monospace; word-break:break-all; }
-  .dev-version-meta { margin-top:auto; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .dev-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
+  .dev-panels { display:grid; grid-template-columns:minmax(280px,0.9fr) minmax(360px,1.4fr); gap:12px; align-items:start; }
+  .dev-panel { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px; }
+  .dev-panel h3 { margin:0 0 8px; font-size:14px; }
+  .dev-list { display:grid; gap:7px; }
+  .dev-list-item { padding:8px 10px; border:1px solid rgba(139,148,158,0.16); border-radius:7px; background:rgba(139,148,158,0.04); font-size:12px; line-height:1.45; }
+  .dev-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; }
+  .dev-table { width:100%; border-collapse:collapse; min-width:900px; font-size:12px; }
+  .dev-table th, .dev-table td { padding:8px 10px; border-bottom:1px solid rgba(139,148,158,0.12); vertical-align:top; }
+  .dev-table th { position:sticky; top:0; z-index:1; background:var(--card-bg); color:var(--text-dim); text-align:left; font-size:11px; }
+  .dev-version { font-weight:800; color:var(--accent); white-space:nowrap; }
+  .dev-purpose { color:var(--text); line-height:1.45; max-width:520px; }
+  .dev-objects { color:var(--text-dim); font-family:monospace; font-size:11px; max-width:260px; }
+  .dev-filter-row { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px; }
+  .dev-filter-row .oc-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(56,139,253,0.12); }
+  .dev-code { font-family:monospace; font-size:11px; color:var(--text-dim); word-break:break-all; }
   .dev-locked-note { display:none; }
   .dev-locked .dev-dashboard-body { display:none; }
   .dev-locked .dev-locked-note { display:block; }
+  @media (max-width: 980px) { .dev-panels { grid-template-columns:1fr; } }
 </style>
 
 <div id="development-root" class="dev-locked">
@@ -43,165 +44,70 @@
       <div class="dev-header-row">
         <div>
           <h2>&#x1F6E0; 全局开发状态 / Global Development Status</h2>
-          <div class="subtitle">V001-V063 support dashboard，按 Global Mode Control 的按钮密度展示，每个 V0xx 使用独立状态图标。</div>
+          <div class="subtitle">动态扫描 repo 的 migrations、git 状态、TODO、AgentTodo 与 PM handoff。新增 V064+ migration 后会自动出现在本页。</div>
         </div>
-        <span id="dev-support-chip" class="oc-chip oc-chip-neutral">loading...</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="dev-support-chip" class="oc-chip oc-chip-neutral">loading...</span>
+          <button class="oc-btn" onclick="loadDevelopmentStatus()">&#x27F3; Refresh</button>
+        </div>
       </div>
 
       <div class="dev-summary">
-        <div class="oc-metric"><div class="oc-metric-label">Range</div><div class="oc-metric-val" style="font-size:16px">V001-V063</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Landed</div><div class="oc-metric-val green" id="dev-landed-count">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Reserved / Future</div><div class="oc-metric-val" id="dev-empty-count">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Companion Checks</div><div class="oc-metric-val" id="dev-companion-count">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Latest Migration</div><div class="oc-metric-val" style="font-size:16px" id="dev-latest">--</div><div class="oc-metric-sub" id="dev-latest-sub"></div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Next Slot</div><div class="oc-metric-val blue" style="font-size:16px" id="dev-next">--</div><div class="oc-metric-sub">auto-discovered from sql/migrations</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Repo Head</div><div class="oc-metric-val" style="font-size:16px" id="dev-head">--</div><div class="oc-metric-sub" id="dev-head-sub"></div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Dirty Files</div><div class="oc-metric-val" style="font-size:16px" id="dev-dirty">--</div><div class="oc-metric-sub" id="dev-dirty-sub"></div></div>
       </div>
 
-      <div class="dev-mode-btn-grid" id="migration-dashboard-grid"></div>
+      <div class="dev-panels">
+        <div class="dev-panel">
+          <h3>&#x1F9ED; 开发焦点 / Development Focus</h3>
+          <div class="dev-list" id="dev-focus-list"><div class="oc-loading">Loading...</div></div>
+        </div>
+        <div class="dev-panel">
+          <h3>&#x1F4DD; 最近 PM Handoff / Recent PM Reports</h3>
+          <div class="dev-list" id="dev-report-list"><div class="oc-loading">Loading...</div></div>
+        </div>
+      </div>
+
+      <div class="dev-panel" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <h3>&#x1F5FA; Migration Intelligence</h3>
+          <div class="dev-code" id="dev-migrations-dir">sql/migrations</div>
+        </div>
+        <div class="dev-filter-row">
+          <button class="oc-btn active" data-dev-filter="all" onclick="setMigrationFilter('all')">All</button>
+          <button class="oc-btn" data-dev-filter="landed" onclick="setMigrationFilter('landed')">Landed</button>
+          <button class="oc-btn" data-dev-filter="gap" onclick="setMigrationFilter('gap')">Gaps</button>
+          <button class="oc-btn" data-dev-filter="future" onclick="setMigrationFilter('future')">Future</button>
+        </div>
+        <div class="dev-table-wrap">
+          <table class="dev-table">
+            <thead>
+              <tr><th>V</th><th>Status</th><th>做了什么 / Purpose</th><th>Phase</th><th>Key Objects</th><th>File</th></tr>
+            </thead>
+            <tbody id="dev-migration-body"><tr><td colspan="6" class="oc-loading">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="dev-panels" style="margin-top:12px">
+        <div class="dev-panel">
+          <h3>&#x2699; Useful Development Commands</h3>
+          <div class="dev-list" id="dev-runbook-list"></div>
+        </div>
+        <div class="dev-panel">
+          <h3>&#x1F5C3; Git Context</h3>
+          <div class="dev-list" id="dev-git-list"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
-const MIGRATION_FILES = {
-  V001: 'V001__create_schemas.sql',
-  V002: 'V002__market_tables.sql',
-  V003: 'V003__trading_agent_tables.sql',
-  V004: 'V004__learning_features_obs_risk_tables.sql',
-  V005: 'V005__indexes_views.sql',
-  V006: 'V006__timescaledb_policies.sql',
-  V007: 'V007__experiment_ledger.sql',
-  V008: 'V008__fills_fee_rate.sql',
-  V009: 'V009__phase4_ml_news_tables.sql',
-  V010: 'V010__ai_budget_and_linucb_versioning.sql',
-  V011: 'V011__foundation_model_features.sql',
-  V012: 'V012__directive_executions_outcomes.sql',
-  V013: 'V013__weekly_review_log.sql',
-  V014: 'V014__engine_events.sql',
-  V015: 'V015__engine_mode_separation.sql',
-  V016: 'V016__learning_feedback_loop.sql',
-  V017: 'V017__edge_predictor_tables.sql',
-  V018: 'V018__paper_state_checkpoint.sql',
-  V019: 'V019__strategist_applied_params.sql',
-  V020: 'V020__strategist_applied_params_tie_break.sql',
-  V021: 'V021__fills_exit_source.sql',
-  V023: 'V023__model_registry.sql',
-  V024: 'V024__guard_v019_v020_strategist_applied_params.sql',
-  V025: 'V025__outcome_backfill_pending_index.sql',
-  V026: 'V026__cost_edge_advisor_log.sql',
-  V027: 'V027__funding_settlements.sql',
-  V028: 'V028__fills_execution_slippage.sql',
-  V029: 'V029__exit_features.sql',
-  V030: 'V030__scanner_snapshots.sql',
-  V031: 'V031__ml_dream_edge_unblock.sql',
-  V032: 'V032__mlde_demo_param_applications.sql',
-  V033: 'V033__fills_exit_reason.sql',
-  V034: 'V034__mlde_scanner_context_columns.sql',
-  V035: 'V035__governance_audit_log.sql',
-  V036: 'V036__replay_evidence_source_guard.sql',
-  V037: 'V037__replay_evidence_revoke_public_insert.sql',
-  V038: 'V038__add_evidence_source_tier.sql',
-  V039: 'V039__backfill_evidence_source_tier.sql',
-  V040: 'V040__finalize_evidence_source_tier.sql',
-  V041: 'V041__replay_oos_embargo_enforcement.sql',
-  V043: 'V043__replay_mlde_replay_veto_log.sql',
-  V044: 'V044__replay_handoff_idempotency_unique.sql',
-  V045: 'V045__replay_run_state.sql',
-  V046: 'V046__replay_report_artifacts.sql',
-  V047: 'V047__replay_business_kpi_snapshots.sql',
-  V048: 'V048__replay_audit_incident_summaries.sql',
-  V049: 'V049__replay_experiments.sql',
-  V050: 'V050__replay_simulated_fills.sql',
-  V051: 'V051__mlde_recommendations_replay_columns.sql',
-  V052: 'V052__replay_run_state_artifacts_fk_redirect.sql',
-  V053: 'V053__governance_audit_log_replay_event_types.sql',
-  V054: 'V054__lease_transitions_audit_writer.sql',
-  V055: 'V055__verify_replay_evidence_function_full_insert.sql',
-  V056: 'V056__mlde_shadow_recommendations_retention_policy.sql',
-  V057: 'V057__replay_tier_promotion_approval.sql',
-  V058: 'V058__symbol_universe_and_strategy_freeze_log.sql',
-  V059: 'V059__edge_estimate_snapshots.sql',
-  V060: 'V060__replay_emergency_audit_log.sql',
-  V061: 'V061__replay_promotion_metrics_calculator.sql',
-};
-
-const MIGRATION_COMPANIONS = {
-  V017: ['V017_rollback.sql'],
-  V040: ['V040_healthcheck.sql'],
-  V052: ['V052_preflight.sql'],
-};
-
-const MIGRATION_RESERVED = {
-  V022: 'reserved gap / history slot',
-  V042: 'reserved replay signing keys slot',
-  V062: 'future development slot',
-  V063: 'future development slot',
-};
-
-const MIGRATION_ICONS = {
-  V001:'🧱', V002:'📈', V003:'🤖', V004:'🧠', V005:'🗂️', V006:'⏳', V007:'📒', V008:'💸', V009:'📰',
-  V010:'🧮', V011:'🧬', V012:'📜', V013:'🗓️', V014:'⚙️', V015:'🧭', V016:'🔁', V017:'📐', V018:'💾',
-  V019:'🎚️', V020:'⚖️', V021:'🚪', V022:'📌', V023:'🏷️', V024:'🛡️', V025:'🧹', V026:'💡', V027:'🏦',
-  V028:'🛣️', V029:'📤', V030:'🔎', V031:'🌱', V032:'🧪', V033:'🏁', V034:'🧩', V035:'📋', V036:'🔐',
-  V037:'🚫', V038:'🏷️', V039:'🧰', V040:'✅', V041:'⛔', V042:'🔑', V043:'🪞', V044:'🤝', V045:'🏃',
-  V046:'📦', V047:'📊', V048:'🚨', V049:'🔬', V050:'🧾', V051:'🧠', V052:'🔗', V053:'📣', V054:'📝',
-  V055:'🧷', V056:'🕰️', V057:'🎖️', V058:'🧊', V059:'📉', V060:'🆘', V061:'🧮', V062:'🧭', V063:'🏗️',
-};
-
-function titleFromFile(fileName, id) {
-  if (!fileName) return MIGRATION_RESERVED[id] || 'future support slot';
-  return fileName
-    .replace(/^V\d{3}__?/, '')
-    .replace(/\.sql$/, '')
-    .replace(/_/g, ' ');
-}
-
-function phaseFor(id) {
-  const n = Number(id.slice(1));
-  if (n <= 8) return 'foundation';
-  if (n <= 21) return 'agent/runtime';
-  if (n <= 35) return 'learning/edge';
-  if (n <= 48) return 'replay governance';
-  if (n <= 61) return 'REF-20/21 hardening';
-  return 'future';
-}
-
-function renderMigrationDashboard() {
-  const grid = document.getElementById('migration-dashboard-grid');
-  if (!grid) return;
-  const rows = [];
-  let landed = 0;
-  let empty = 0;
-  let companions = 0;
-  for (let i = 1; i <= 63; i += 1) {
-    const id = 'V' + String(i).padStart(3, '0');
-    const file = MIGRATION_FILES[id] || '';
-    const companionList = MIGRATION_COMPANIONS[id] || [];
-    if (file) landed += 1;
-    else empty += 1;
-    companions += companionList.length;
-    const state = file ? 'landed' : (MIGRATION_RESERVED[id] ? 'reserved' : 'future');
-    const status = file
-      ? '<span class="oc-chip oc-chip-good">landed</span>'
-      : '<span class="oc-chip oc-chip-neutral">' + state + '</span>';
-    const companionHtml = companionList.length
-      ? '<span class="oc-chip oc-chip-warn">' + companionList.length + ' companion</span>'
-      : '';
-    rows.push(
-      '<div class="dev-version-card ' + state + '">' +
-        '<div class="dev-version-top">' +
-          '<div class="dev-version-id">' + id + '</div>' +
-          '<div class="dev-version-icon" title="' + ocEsc(id + ' icon') + '">' + (MIGRATION_ICONS[id] || '•') + '</div>' +
-        '</div>' +
-        '<div class="dev-version-name">' + ocEsc(titleFromFile(file, id)) + '</div>' +
-        '<div class="dev-version-file">' + ocEsc(file || 'no migration file in repo') + '</div>' +
-        '<div class="dev-version-meta">' + status + '<span class="oc-chip oc-chip-neutral">' + phaseFor(id) + '</span>' + companionHtml + '</div>' +
-      '</div>'
-    );
-  }
-  grid.innerHTML = rows.join('');
-  ocSetText('dev-landed-count', String(landed));
-  ocSetText('dev-empty-count', String(empty));
-  ocSetText('dev-companion-count', String(companions));
-}
+let _developmentPayload = null;
+let _migrationFilter = 'all';
 
 function applyDevelopmentSupportVisibility(enabled) {
   const root = document.getElementById('development-root');
@@ -213,7 +119,110 @@ function applyDevelopmentSupportVisibility(enabled) {
   }
 }
 
-renderMigrationDashboard();
+function chipForMigrationStatus(status) {
+  if (status === 'landed') return '<span class="oc-chip oc-chip-good">landed</span>';
+  if (status === 'gap') return '<span class="oc-chip oc-chip-warn">gap</span>';
+  return '<span class="oc-chip oc-chip-neutral">future</span>';
+}
+
+function renderSummary(payload) {
+  const migrations = payload.migrations || {};
+  const latest = migrations.latest || {};
+  const git = payload.git || {};
+  ocSetText('dev-latest', latest.id || '--');
+  ocSetText('dev-latest-sub', latest.title || '');
+  ocSetText('dev-next', migrations.next_version || '--');
+  ocSetText('dev-head', git.sha || '--');
+  ocSetText('dev-head-sub', (git.branch || 'unknown') + ' · ' + (git.subject || ''));
+  ocSetText('dev-dirty', String(git.dirty_count == null ? '--' : git.dirty_count));
+  const dirty = git.dirty_paths || [];
+  ocSetText('dev-dirty-sub', dirty.length ? dirty.slice(0, 3).join(', ') : 'clean');
+  ocSetText('dev-migrations-dir', payload.migrations_dir || 'sql/migrations');
+}
+
+function renderFocus(payload) {
+  const ctx = payload.development_context || {};
+  const rows = [];
+  (ctx.todo_excerpt || []).slice(0, 7).forEach(line => {
+    rows.push('<div class="dev-list-item">' + ocEsc(line) + '</div>');
+  });
+  (ctx.agenttodo_excerpt || []).slice(0, 5).forEach(line => {
+    rows.push('<div class="dev-list-item"><strong>AgentTodo</strong><br>' + ocEsc(line) + '</div>');
+  });
+  ocSetHtml('dev-focus-list', rows.length ? rows.join('') : '<div class="oc-loading">No development focus docs found</div>');
+}
+
+function renderReports(payload) {
+  const reports = ((payload.development_context || {}).recent_pm_reports || []);
+  ocSetHtml('dev-report-list', reports.length ? reports.map(r =>
+    '<div class="dev-list-item"><div>' + ocEsc(r.title || r.file) + '</div><div class="dev-code">' + ocEsc(r.file || '') + '</div></div>'
+  ).join('') : '<div class="oc-loading">No PM reports found</div>');
+}
+
+function renderRunbook(payload) {
+  const rows = (payload.runbook || []).map(item =>
+    '<div class="dev-list-item"><strong>' + ocEsc(item.label || '') + '</strong><div class="dev-code">' + ocEsc(item.command || '') + '</div></div>'
+  );
+  ocSetHtml('dev-runbook-list', rows.join(''));
+}
+
+function renderGit(payload) {
+  const git = payload.git || {};
+  const rows = [];
+  (git.recent_commits || []).forEach(c => {
+    rows.push('<div class="dev-list-item"><span class="dev-code">' + ocEsc(c.sha || '') + '</span> ' + ocEsc(c.subject || '') + '</div>');
+  });
+  if (git.dirty_paths && git.dirty_paths.length) {
+    rows.push('<div class="dev-list-item"><strong>Dirty paths</strong><div class="dev-code">' + ocEsc(git.dirty_paths.join('\\n')) + '</div></div>');
+  }
+  ocSetHtml('dev-git-list', rows.length ? rows.join('') : '<div class="oc-loading">No git context available</div>');
+}
+
+function renderMigrations(payload) {
+  const items = (((payload.migrations || {}).items) || []).filter(item =>
+    _migrationFilter === 'all' || item.status === _migrationFilter
+  );
+  const rows = items.map(item => {
+    const objects = (item.objects || []).slice(0, 6).join(', ');
+    const companions = (item.companions || []).length
+      ? '<div>' + (item.companions || []).map(c => '<span class="oc-chip oc-chip-warn">' + ocEsc(c) + '</span>').join(' ') + '</div>'
+      : '';
+    return '<tr>' +
+      '<td><span class="dev-version">' + ocEsc(item.id || '') + '</span></td>' +
+      '<td>' + chipForMigrationStatus(item.status) + '</td>' +
+      '<td><div class="dev-purpose"><strong>' + ocEsc(item.title || '') + '</strong><br>' + ocEsc(item.purpose || '') + '</div></td>' +
+      '<td><span class="oc-chip oc-chip-neutral">' + ocEsc(item.phase || '') + '</span></td>' +
+      '<td><div class="dev-objects">' + ocEsc(objects || '--') + companions + '</div></td>' +
+      '<td><div class="dev-code">' + ocEsc(item.file || 'no source file') + '</div></td>' +
+    '</tr>';
+  });
+  ocSetHtml('dev-migration-body', rows.length ? rows.join('') : '<tr><td colspan="6" class="oc-loading">No rows</td></tr>');
+}
+
+function setMigrationFilter(filter) {
+  _migrationFilter = filter;
+  document.querySelectorAll('[data-dev-filter]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.devFilter === filter);
+  });
+  if (_developmentPayload) renderMigrations(_developmentPayload);
+}
+
+async function loadDevelopmentStatus() {
+  const d = await ocApi('/api/v1/settings/development-status');
+  const payload = d && d.data ? d.data : d;
+  if (!payload) {
+    ocSetHtml('dev-migration-body', '<tr><td colspan="6" class="oc-loading">Unable to load development status</td></tr>');
+    return;
+  }
+  _developmentPayload = payload;
+  renderSummary(payload);
+  renderFocus(payload);
+  renderReports(payload);
+  renderRunbook(payload);
+  renderGit(payload);
+  renderMigrations(payload);
+}
+
 applyDevelopmentSupportVisibility(
   typeof ocReadCachedDevelopmentSupportMode === 'function'
     ? ocReadCachedDevelopmentSupportMode()
@@ -225,6 +234,8 @@ if (typeof ocListenDevelopmentSupportMode === 'function') {
 if (typeof ocFetchDevelopmentSupportMode === 'function') {
   ocFetchDevelopmentSupportMode().then(applyDevelopmentSupportVisibility);
 }
+loadDevelopmentStatus();
+ocStartRefresh(loadDevelopmentStatus, 60000);
 </script>
 </body>
 </html>
