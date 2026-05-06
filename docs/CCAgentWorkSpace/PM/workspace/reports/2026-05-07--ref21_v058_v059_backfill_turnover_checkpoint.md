@@ -74,14 +74,37 @@ and Bybit public-data parsing.
 - A one-shot current public instruments-info backfill cannot recover symbols
   already absent from Bybit public instruments-info; durable historical coverage
   still requires recurring V058 snapshots.
-- V058/V059 production backfill and V060/V061 persistent migration apply still
-  need to be run on Linux after source sync.
 
-## Next Steps
+## Linux Runtime
 
-1. Commit and push this checkpoint.
-2. Pull on Linux `trade-core`.
-3. Apply missing V060/V061 migrations if still absent.
-4. Run V058/V059 backfill dry-run, then `--apply` if counts are sane.
-5. Build release `replay_runner` with `--features replay_isolated`.
-6. Restart/reload API so the Bybit public client turnover parser is active.
+- Linux `trade-core` fast-forwarded through the REF-21 replay checkpoint
+  `01b9cf59` for the smoke below. After this replay validation, a parallel
+  workflow advanced `origin/main` and Linux source to `11c73e15`; that later
+  commit is unrelated to the replay helper/runtime proof and must not be
+  reverted.
+- V060/V061 applied persistently with Guard A/B/C passing.
+- V058/V059 backfill applied:
+  - V058 symbol universe rows: 905.
+  - V058 strategy freeze rows: 1.
+  - V059 edge snapshot rows: 457.
+- Release `rust/target/release/replay_runner` rebuilt with
+  `--features replay_isolated`.
+- API reloaded with `restart_all.sh --api-only --keep-auth`.
+- Runtime DB proof:
+  - `audit.replay_emergency_log` exists.
+  - `replay.calculate_promotion_metrics(uuid,replay.replay_evidence_tier_v057,replay.replay_evidence_tier_v057)` exists.
+- Linux current-config smoke:
+  - `universe_source=v058_symbol_universe_snapshots`.
+  - symbols: `BTCUSDT`, `ETHUSDT`.
+  - event_count: 60.
+  - `strategy_params` and `risk_overrides` loaded from current demo config.
+  - dedicated `replay_runner` completed and finalized.
+  - run_id: `22558afa-3597-4571-b2c2-71b218201085`.
+  - The 30-minute smoke produced 0 simulated fills, which is a strategy-signal
+    result for that small window, not a runner failure.
+
+## Remaining
+
+1. Add recurring V058 recorder snapshots so future historical universes are not
+   limited by current public instruments-info availability.
+2. Historical order-book/ticker replay remains out of this checkpoint.
