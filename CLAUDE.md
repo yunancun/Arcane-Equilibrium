@@ -449,7 +449,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A active**）。AgentTodo 已完成 **MAG-015 合約附錄**（`docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`）與 **MAG-010..014 durable event-store source + Linux controlled row proof**；下一步不是做第二 GUI 或 Telegram，而是 **MAG-016/017 read-only OpenClaw authority lockdown + status/self-state endpoints → MAG-018/019**。
+**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A active**）。AgentTodo 已完成 **MAG-015 合約附錄**（`docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`）、**MAG-010..014 durable event-store source + Linux controlled row proof**、以及 **MAG-016/017 read-only OpenClaw authority lockdown + status/self-state endpoints**（`cbb225b7`；Mac/Linux targeted tests 33/0）。下一步不是 Telegram/WebChat、proposal approval relay、或第二 GUI，而是 **MAG-018 Agent Control GUI foundation → MAG-019 supervisor cloud escalation ledger policy**。
 
 **關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → ~05-09 3C 7d audit → ~05-15 P0-3 edge decision + Decision Lease flag flip canary 24h → ~05-16 funding_arb V2 14d audit → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
 

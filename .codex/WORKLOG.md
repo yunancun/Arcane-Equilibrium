@@ -160,3 +160,7 @@ YYYY-MM-DD HH:MM TZ
 - status after source wave: MAG-010/011/012 source done but final DONE blocked on Linux runtime fresh rows; next gate is `[52]` row proof
 - continued MAG-013/014 row proof: strict `[52]` failed before smoke with `messages=0 state_changes=0 ai_invocations=0`; controlled Linux smoke wrote `messages=2 state_changes=11 ai_invocations=2` through real event-store hooks; strict `[52]` then PASS
 - no service restart, production continuous flag, live auth, strategy/risk config, or trading authority change
+- continued AgentTodo Sprint A MAG-016/017 read-only OpenClaw foundation: added `openclaw_models.py`, `openclaw_routes.py`, and main router registration for exactly `GET /api/v1/openclaw/status` + `GET /api/v1/openclaw/self-state`
+- route envelopes now surface authority posture, gateway/channel posture, runtime summary, event-store recent row proof, governance posture, model-budget posture, open blockers, and self-state sections; PG outage and missing OpenClaw request context return 200 degraded, and required zero rows are fail-visible
+- verification: Mac targeted pytest `test_openclaw_routes.py` + `test_agents_routes.py` 33/0, py_compile PASS, `git diff --check` PASS; Linux `trade-core` fast-forward to `cbb225b7`, same targeted pytest 33/0 and py_compile PASS
+- boundary: no write/proposal endpoint, no service restart, no deploy/rebuild, no live auth, no strategy/risk config mutation, and no trading authority change

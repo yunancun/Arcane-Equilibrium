@@ -1340,3 +1340,30 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - No deploy/restart yet and no live trading authority change.
 - Production continuous event-store flag and supervisor cloud escalation ledger
   remain MAG-019/runtime rollout scope.
+
+## 2026-05-06 AgentTodo Sprint A MAG-016/017 Read-Only OpenClaw Foundation
+
+### Result
+- MAG-016/017 source is complete at `cbb225b7`.
+- Added `openclaw_models.py` and `openclaw_routes.py`.
+- Registered only the Sprint A allowlist routes:
+  `GET /api/v1/openclaw/status` and
+  `GET /api/v1/openclaw/self-state`.
+- Envelopes are backend-authored and include authority, gateway/channel posture,
+  runtime summary, event-store recent row proof, governance posture, model-budget
+  posture, open blockers, and self-state sections.
+
+### Verification
+- Mac: `test_openclaw_routes.py` + `test_agents_routes.py` passed 33/0.
+- Linux `trade-core` after fast-forward to `cbb225b7`: same targeted pytest
+  passed 33/0.
+- `py_compile` passed on touched OpenClaw route/model/main/test files.
+- Static tests prove exactly two GET routes, no write SQL, no forbidden proxy
+  markers, degraded PG/request-context behavior, and zero-row fail visibility.
+
+### Boundary
+- No write/proposal endpoint was enabled.
+- No service restart, deploy/rebuild, live auth, strategy/risk config mutation,
+  production continuous event-store flag, or trading authority change was made.
+- Next Sprint A work is MAG-018 Agent Control GUI foundation, then MAG-019
+  supervisor cloud escalation ledger policy.
