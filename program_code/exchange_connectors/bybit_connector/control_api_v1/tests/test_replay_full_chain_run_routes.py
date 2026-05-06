@@ -171,6 +171,8 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     assert [body.strategy for body in registered] == ["grid_trading", "ma_crossover"]
     assert all(body.symbol == "FULL_CHAIN" for body in registered)
     assert all(body.data_tier == "S2" for body in registered)
+    assert all(body.half_life_days == 7.0 for body in registered)
+    assert all(body.embargo_days == 14.0 for body in registered)
     assert all(body.strategy_params["grid_trading"]["grid_levels"] == 12 for body in registered)
     assert all(body.risk_overrides["limits"]["position_size_max_pct"] == 10.0 for body in registered)
     assert all(body.manifest_jsonb["fixture_uri"] == data["fixture_uri"] for body in registered)

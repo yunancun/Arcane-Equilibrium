@@ -175,5 +175,6 @@ YYYY-MM-DD HH:MM TZ
 - continued REF-21 P0-REF21-6b with parallel investigation across DB/backfill, scanner data realism, and E2E deploy readiness
 - added `helper_scripts/db/ref21_backfill_v058_v059.py` dry-run/apply helper for V058 symbol universe/freeze log and V059 edge snapshots; helper supports `--asof` / `--freeze-asof` split and fetches Trading/PreLaunch/Delivering/Closed statuses
 - preserved Bybit public kline `turnover` through Python fixture rows, Rust `MarketEvent`, and scanner timeline ticker reconstruction; legacy fixtures still fall back to `close * volume`
+- fixed `/full-chain/run` register to use `embargo_days=14` with `half_life_days=7`, matching V041 `chk_embargo_days` on the real PG path
 - verification: Python targeted pytest 10/0, project-venv Bybit instruments dry-run 905 V058-compatible rows after dated-futures symbol filtering, py_compile PASS, Rust scanner timeline 4/0, fixture turnover 1/0, `cargo check -p openclaw_engine --bin replay_runner --features replay_isolated` PASS with pre-existing warnings
 - remaining before runtime sign-off: Linux migration apply/backfill, release `replay_runner` rebuild, API reload, and Linux one-click full-chain replay smoke
