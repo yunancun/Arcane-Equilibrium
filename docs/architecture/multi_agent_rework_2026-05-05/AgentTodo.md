@@ -26,6 +26,8 @@ If older EX-06 / DOC-04 wording implies OpenClaw itself is the trading conductor
 
 PM review result: this backlog now reflects the new authority model at the boundary level, but implementation must start from the data and contract foundation. Do not begin with Telegram/WebChat, a second GUI, or a broad cloud-agent buildout.
 
+MAG-015 Sprint A contract addendum is now frozen in `2026-05-06--mag015_sprint_a_contract_addendum.md`. MAG-010..014 may start as the durable event-store wave only; MAG-016..019 must consume the frozen allowlist, view-model, budget, ownership, and state-transition contracts from that addendum.
+
 Dispatch-ready order for the next handoff:
 
 1. **Contract addendum first**: complete MAG-015 before implementation. It must define typed local observations, `SelfStateSnapshot`, `Diagnosis`, `EscalationPacket`, `Proposal`, `ApprovalDecision`, `ChannelEvent`, endpoint allowlist, cloud budget, and store ownership.
@@ -83,6 +85,7 @@ This todo is intentionally self-contained. A follow-up agent should start from t
 | OpenClaw control-plane overlay | `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md` | Supersedes the early OpenClaw-as-trading-conductor interpretation; defines one GUI and two agent layers. |
 | OpenClaw Gateway development plan | `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md` | Defines how to use OpenClaw as communication, mobile, supervisor, proposal, and approval relay. |
 | GUI OpenClaw Control Console plan | `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md` | Defines how the existing console absorbs OpenClaw capabilities without creating a second GUI. |
+| Sprint A contract addendum | `docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md` | MAG-015 frozen contract for local observations, OpenClaw view models, escalation/proposal/channel schemas, endpoint allowlist, cloud budget, store ownership, and state transitions. |
 | Data/perception plane | `docs/decisions/EX-07_OpenClaw_Bybit_Data_Plane_Perception_感知平面正式边界定义_V1.md` | Use when deciding whether scanner evidence belongs to perception, Scout, H0 eligibility, or Guardian risk evidence. |
 | Root rules and runtime reality | `CLAUDE.md` | Current root principles, runtime sync rules, active blockers, Rust engine authority, Decision Lease status. |
 | Active work list | `TODO.md` | Current P0/P1 blockers, including agent schema zero rows and fake-live/shadow wiring. |
@@ -233,7 +236,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 | MAG-012 | E1a | P0 | TODO | Persist `agent.ai_invocations` for local L1/L1.5/L2 and supervisor cloud escalations with model, latency, cost, prompt hash, output hash. | Nonzero rows after Strategist/Analyst evaluations and any OpenClaw supervisor cloud escalation; cloud rows link to escalation/proposal IDs when present. |
 | MAG-013 | E2 | P0 | TODO | Audit DB sink failure modes. | Message path is fail-soft for logs but fail-visible in health checks. |
 | MAG-014 | E4 | P0 | TODO | Add Linux regression for agent schema nonzero row acceptance. | Test fails on current zero-row state and passes after wiring. |
-| MAG-015 | PA | P0 | TODO | Define AgentTodo Sprint A contract addendum: local observations, OpenClaw view models, supervisor escalation packet, proposal/approval/channel schemas, endpoint allowlist, cloud budget, store ownership, and state transitions. | E1/E1a can implement without guessing contracts; local agents emit structured observations; one supervisor compresses and optionally calls cloud; proposals are persisted before GUI/mobile approval. |
+| MAG-015 | PA | P0 | DONE | Define AgentTodo Sprint A contract addendum: local observations, OpenClaw view models, supervisor escalation packet, proposal/approval/channel schemas, endpoint allowlist, cloud budget, store ownership, and state transitions. | DONE 2026-05-06 in `2026-05-06--mag015_sprint_a_contract_addendum.md`: E1/E1a can implement without guessing contracts; local agents emit structured observations; one supervisor compresses and optionally calls cloud; proposals are persisted before GUI/mobile approval. |
 | MAG-016 | E2/E3 | P0 | TODO | Define and test OpenClaw Gateway authority lockdown. | Static and route tests prove no Gateway path can directly order, mutate live TOML/risk config, read secrets, or bypass GovernanceHub/Decision Lease. |
 | MAG-017 | E1 | P0 | TODO | Implement read-only `/api/v1/openclaw/status` and `/api/v1/openclaw/self-state` aggregation endpoints. | Endpoints return backend-authored degraded envelopes; gateway outage is visible but non-fatal; no write/proposal endpoints are enabled in this step. |
 | MAG-018 | E1a | P1 | TODO | Upgrade `tab-agents.html` into read-only Agent Control foundation: topology, self-state, gateway/channel posture, and degraded/error states. | GUI renders local 5-Agent + Gateway topology from backend view models; no manual order controls and no raw prompt text. |

@@ -418,6 +418,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | 文件 | 内容 |
 |------|------|
 | `DATA_STORAGE_ARCHITECTURE_V1.md` | ★ 數據存儲架構 V1：PG + TimescaleDB 方案 · 8 Schema · 存儲精簡 97%（5.6→0.17 GB/day）· 冷存儲 NAS 策略 |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md` | AgentTodo Sprint A MAG-015 合約附錄：local observations、OpenClaw view models、supervisor escalation、proposal/approval/channel schemas、endpoint allowlist、cloud budget、store ownership、state transitions |
 
 ### references/ — 长期参考文档
 

@@ -1,7 +1,22 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（Scanner Opportunity admission canary）
+> 最後更新：2026-05-06（AgentTodo MAG-015 Sprint A contract addendum）
+
+### AgentTodo MAG-015 Sprint A contract addendum — 2026-05-06
+
+**Scope**：凍結 AgentTodo Sprint A 的第一份實作前合同：
+`docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`。
+合同定義 `LocalObservation`、`SelfStateSnapshot`、`Diagnosis`、
+`EscalationPacket`、`Proposal`、`ApprovalDecision`、`ChannelEvent`、
+OpenClaw endpoint allowlist、cloud budget、store ownership、state transitions
+與 MAG-010..019 implementation packet。
+
+**Boundary**：docs/meta only。未改 runtime、DB schema、策略/風控參數、live auth、
+Decision Lease flag、Gateway channel、proposal write endpoint、rebuild 或 deploy。
+OpenClaw Gateway 仍只能作 read/brief/diagnose/proposal/approval relay；MAG-010..014
+下一步仍必須先證明 `agent.messages` / `agent.state_changes` /
+`agent.ai_invocations` Linux nonzero row proof。
 
 ### Scanner Opportunity admission canary — 2026-05-06
 
