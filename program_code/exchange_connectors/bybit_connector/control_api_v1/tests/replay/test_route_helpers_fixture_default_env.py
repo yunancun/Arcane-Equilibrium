@@ -158,6 +158,48 @@ def test_manifest_fixture_uri_overrides_server_default(
     assert payload["strategy"] == "grid_trading"
 
 
+def test_full_chain_manifest_fields_propagate_to_runner_payload(
+    monkeypatch, tmp_path: Path,
+):
+    """Full-chain V049 manifest fields must reach the Rust replay runner."""
+    import replay.experiment_registry as registry
+
+    scanner_config = {
+        "scheduling": {"scan_interval_secs": 60, "warmup_delay_secs": 0},
+        "universe": {"max_symbols": 5, "pinned_symbols": ["BTCUSDT"]},
+    }
+    edge_estimates = {
+        "grid_trading::BTCUSDT": {"runtime_bps": 1.2, "n": 40, "std_bps": 12.0}
+    }
+    monkeypatch.setattr(
+        registry,
+        "lookup_replay_manifest_runtime_config",
+        lambda cur, experiment_id: {
+            "data_tier": "S2",
+            "manifest_jsonb": {
+                "mode": "full_chain",
+                "strategy": "grid_trading",
+                "fixture_uri": str(tmp_path / "full_chain.json"),
+                "scanner_config": scanner_config,
+                "edge_estimates": edge_estimates,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        registry,
+        "lookup_replay_config_blob",
+        lambda cur, experiment_id: {"strategy_params": {}, "risk_overrides": {}},
+    )
+
+    payload = build_default_manifest_payload(
+        experiment_id="exp", output_dir=tmp_path / "rx", cur=object(),
+    )
+
+    assert payload["mode"] == "full_chain"
+    assert payload["scanner_config"] == scanner_config
+    assert payload["edge_estimates"] == edge_estimates
+
+
 def test_manifest_fixture_uri_rejects_control_chars(
     monkeypatch, tmp_path: Path,
 ):

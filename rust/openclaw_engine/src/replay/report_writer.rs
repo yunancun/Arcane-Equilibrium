@@ -67,13 +67,22 @@ use crate::replay::runner::ReplayResult;
 pub enum ReportError {
     /// Output directory does not exist AND could not be created.
     /// 輸出目錄不存在且無法建立。
-    OutputDirCreate { path: PathBuf, source: std::io::Error },
+    OutputDirCreate {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// Failed to write `replay_report.json`.
     /// 寫 `replay_report.json` 失敗。
-    JsonWrite { path: PathBuf, source: std::io::Error },
+    JsonWrite {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// Failed to write `replay_report.summary.txt`.
     /// 寫 `replay_report.summary.txt` 失敗。
-    SummaryWrite { path: PathBuf, source: std::io::Error },
+    SummaryWrite {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// `serde_json::to_string_pretty` failed (extremely rare; only happens on
     /// non-string-serialisable map keys, which `ReplayResult` does not use).
     /// `serde_json::to_string_pretty` 失敗（極罕見；僅發生於 non-string-
@@ -102,11 +111,9 @@ impl std::fmt::Display for ReportError {
                 path.display(),
                 source
             ),
-            Self::JsonSerialize { source } => write!(
-                f,
-                "ReportError::JsonSerialize{{serde_err={}}}",
-                source
-            ),
+            Self::JsonSerialize { source } => {
+                write!(f, "ReportError::JsonSerialize{{serde_err={}}}", source)
+            }
         }
     }
 }
@@ -244,6 +251,9 @@ pub fn write_replay_report(
 /// net_pnl: 5
 /// guard_enforce_runtime_calls: K
 /// abort_reason: -|<text>
+/// scanner_timeline_enabled: true|false
+/// scanner_timeline_cycles: N
+/// scanner_timeline_skipped_events: N
 /// ```
 ///
 /// 格式（中）：見 EN。
@@ -264,7 +274,10 @@ fn format_summary(result: &ReplayResult) -> String {
          net_pnl: {}\n\
          guard_enforce_runtime_calls: {}\n\
          last_action_label: {}\n\
-         abort_reason: {}\n",
+         abort_reason: {}\n\
+         scanner_timeline_enabled: {}\n\
+         scanner_timeline_cycles: {}\n\
+         scanner_timeline_skipped_events: {}\n",
         result.manifest_id,
         result.status.label(),
         result.execution_confidence,
@@ -276,6 +289,9 @@ fn format_summary(result: &ReplayResult) -> String {
         result.diagnostics.guard_enforce_runtime_calls,
         result.diagnostics.last_action_label,
         abort,
+        result.diagnostics.scanner_timeline_enabled,
+        result.diagnostics.scanner_timeline_cycles,
+        result.diagnostics.scanner_timeline_skipped_events,
     )
 }
 
@@ -337,6 +353,9 @@ mod tests {
                 guard_enforce_runtime_calls: 3,
                 last_action_label: "on_event:BTCUSDT@3".into(),
                 abort_reason: None,
+                scanner_timeline_enabled: false,
+                scanner_timeline_cycles: 0,
+                scanner_timeline_skipped_events: 0,
             },
             // Sprint B2 R5-T3: synthetic-walker fixture has no decision traces.
             // Sprint B2 R5-T3：synthetic-walker fixture 無決策追蹤。

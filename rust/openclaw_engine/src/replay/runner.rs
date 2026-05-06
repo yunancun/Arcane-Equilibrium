@@ -108,6 +108,7 @@ use crate::replay::profile::ReplayProfile;
 use crate::replay::risk_adapter::{
     ReplayPaperSnapshot, ReplayPosition, ReplayRiskAdapter, RiskDecision,
 };
+use crate::replay::scanner_timeline::ReplayScannerTimeline;
 use crate::replay::strategy_adapter::{DecisionTraceEntry, ReplayStrategyAdapter};
 use crate::strategies::StrategyAction;
 
@@ -228,6 +229,9 @@ pub struct ReplayDiagnostics {
     pub guard_enforce_runtime_calls: u64,
     pub last_action_label: String,
     pub abort_reason: Option<String>,
+    pub scanner_timeline_enabled: bool,
+    pub scanner_timeline_cycles: usize,
+    pub scanner_timeline_skipped_events: u64,
 }
 
 /// Full replay execution result.
@@ -461,6 +465,12 @@ pub struct IsolatedPipeline {
     /// Sprint C R6-T2: 24h USD turnover for tier lookup; `None` → 5 bps default.
     /// Sprint C R6-T2：tier 查找用 24h USD 成交量；`None` → 5 bps 預設。
     pub(super) volume_24h: Option<f64>,
+    /// REF-21: optional replay-safe scanner timeline. When present, adapter
+    /// path only feeds a strategy tick for symbols active at the historical
+    /// scanner cycle, while still feeding ticks for already-open positions so
+    /// exits remain observable.
+    pub(super) scanner_timeline: Option<ReplayScannerTimeline>,
+    pub(super) scanner_timeline_skipped_events: u64,
 }
 
 /// Public constructor for `IsolatedPipeline` that funnels callers through the
@@ -505,6 +515,8 @@ pub fn build_isolated_pipeline(
         account_manager: None,
         slippage_config: crate::config::SlippageConfig::default(),
         volume_24h: None,
+        scanner_timeline: None,
+        scanner_timeline_skipped_events: 0,
     })
 }
 
@@ -678,6 +690,14 @@ impl IsolatedPipeline {
         self
     }
 
+    /// REF-21 full-chain replay: attach a precomputed, replay-safe scanner
+    /// timeline. The timeline is built inside the dedicated replay subprocess
+    /// from fixture data only; it does not share live scanner state.
+    pub fn with_scanner_timeline(mut self, timeline: ReplayScannerTimeline) -> Self {
+        self.scanner_timeline = Some(timeline);
+        self
+    }
+
     /// Drive the in-memory pipeline.
     ///
     /// 驅動 in-memory pipeline。
@@ -820,6 +840,19 @@ impl IsolatedPipeline {
         Ok(())
     }
 
+    fn should_skip_for_scanner_timeline(&self, event: &MarketEvent) -> bool {
+        let Some(timeline) = self.scanner_timeline.as_ref() else {
+            return false;
+        };
+        if timeline.is_active_at(&event.symbol, event.ts_ms) {
+            return false;
+        }
+        self.paper_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.get_position(&event.symbol))
+            .is_none()
+    }
+
     /// Sprint B2 R5-T3 — real adapter pipeline (Strategy::on_tick + 6-Gate
     /// Risk evaluate + apply_fill snapshot mutation).
     ///
@@ -880,6 +913,11 @@ impl IsolatedPipeline {
             }
             let atr: f64 = 0.0; // R5-T4 fixture-loader upgrade will populate.
             let tier_label = self.fixture_tier_label.clone();
+
+            if self.should_skip_for_scanner_timeline(event) {
+                self.scanner_timeline_skipped_events += 1;
+                continue;
+            }
 
             // Build TickContext (R5-T3 minimal fields; R5-T4 CLI will populate
             // indicators, signals, h0_allowed from fixture metadata).
@@ -963,6 +1001,13 @@ impl IsolatedPipeline {
                 guard_enforce_runtime_calls: self.guard_calls,
                 last_action_label: self.last_action,
                 abort_reason,
+                scanner_timeline_enabled: self.scanner_timeline.is_some(),
+                scanner_timeline_cycles: self
+                    .scanner_timeline
+                    .as_ref()
+                    .map(ReplayScannerTimeline::len)
+                    .unwrap_or(0),
+                scanner_timeline_skipped_events: self.scanner_timeline_skipped_events,
             },
             fills: self.fills,
             status: self.status,
@@ -1328,6 +1373,45 @@ mod tests {
         assert_eq!(result.decision_traces.len(), 1);
         assert_eq!(result.decision_traces[0].symbol, "BTCUSDT");
         assert_eq!(result.decision_traces[0].strategy_name, "r5t3_stub");
+    }
+
+    #[test]
+    fn adapter_pipeline_scanner_timeline_gates_inactive_entries() {
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_ref21_scanner_gate".into(),
+            "S3",
+            synthetic_events(),
+        )
+        .expect("baseline build OK");
+        let (strategy_adapter, risk_adapter) = make_adapters(None);
+        let snapshot = make_snapshot_seed(10_000.0, Some(100.0), Vec::new());
+        let scan = crate::scanner::types::ScanResult {
+            scan_ts_ms: 1,
+            scan_id: "ref21_test_scan".to_string(),
+            active_symbols: vec!["ETHUSDT".to_string()],
+            added: vec!["ETHUSDT".to_string()],
+            removed: Vec::new(),
+            candidates: Vec::new(),
+            opportunity_decays: Vec::new(),
+            rejected_count: 0,
+            scan_duration_ms: 0,
+        };
+        let timeline =
+            ReplayScannerTimeline::from_scan_results(60_000, vec![scan]).expect("valid timeline");
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes")
+            .with_scanner_timeline(timeline);
+
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+
+        assert_eq!(result.status, ReplayStatus::Completed);
+        assert_eq!(result.fills.len(), 1);
+        assert_eq!(result.fills[0].symbol, "ETHUSDT");
+        assert_eq!(result.diagnostics.scanner_timeline_cycles, 1);
+        assert_eq!(result.diagnostics.scanner_timeline_skipped_events, 2);
     }
 
     #[test]

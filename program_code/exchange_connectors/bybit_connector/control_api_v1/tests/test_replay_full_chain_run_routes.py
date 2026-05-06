@@ -150,7 +150,7 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     data = resp.json()["data"]
     assert data["mode"] == "full_chain_run"
     assert data["execution_mode"] == "subprocess_strategy_risk_per_strategy"
-    assert data["scanner_scope"] == "scanner_universe_snapshot"
+    assert data["scanner_scope"] == "historical_scanner_timeline_from_fixture"
     assert data["symbols"] == ["ETHUSDT", "BTCUSDT"]
     assert data["strategies"] == ["grid_trading", "ma_crossover"]
     assert data["strategy_count"] == 2
@@ -164,6 +164,11 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     assert all(body.strategy_params["grid_trading"]["grid_levels"] == 12 for body in registered)
     assert all(body.risk_overrides["limits"]["position_size_max_pct"] == 10.0 for body in registered)
     assert all(body.manifest_jsonb["fixture_uri"] == data["fixture_uri"] for body in registered)
+    assert all(
+        body.manifest_jsonb["execution_scope"]
+        == "historical_scanner_timeline_to_strategy_risk_exit"
+        for body in registered
+    )
     assert all(body.manifest_jsonb["promotion_allowed"] is False for body in registered)
     assert [cap for _body, cap, _global_cap in run_requests] == [2, 2]
     assert [cap for _body, _cap, cap in run_requests] == [2, 2]

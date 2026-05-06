@@ -507,6 +507,7 @@ def test_replay_quick_mode_is_default_and_advanced_is_preserved(
     assert "One-Click Replay / 一鍵 Replay" in app_paper_js
     assert "Advanced / 進階" in app_paper_js
     assert "/api/v1/replay/full-chain/run" in app_paper_js
+    assert "historical scanner timeline" in app_paper_js
     assert "oc-replay-quick-universe" in app_paper_js
     assert "oc-replay-quick-symbols" in app_paper_js
     assert "oc-replay-quick-strategy-check" in app_paper_js
@@ -520,6 +521,7 @@ def test_replay_tab_copy_mentions_quick_and_advanced(tab_replay_html: str) -> No
     """Top-level Replay page frames Quick as default and Advanced as full flow."""
     assert "One-Click Replay" in tab_replay_html
     assert "multi-symbol, multi-strategy" in tab_replay_html
+    assert "historical scanner timeline" in tab_replay_html
     assert "Advanced" in tab_replay_html
 
 

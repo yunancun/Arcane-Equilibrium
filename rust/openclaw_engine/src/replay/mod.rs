@@ -115,6 +115,7 @@ pub mod mac_policy_guard;
 pub mod manifest_signer;
 pub mod profile;
 pub mod report_writer;
+pub mod scanner_timeline;
 // Sprint B2 R5-T1 / R5-T2: replay-pure adapters reusing live `Strategy` trait
 // + 6-of-8 Gate risk pipeline reproduction. Both modules sit under the
 // existing `replay::*` re-export pattern; R5-T3 `runner::IsolatedPipeline`
@@ -174,6 +175,9 @@ pub use runner::{
     build_isolated_pipeline, IsolatedPipeline, PnlSummary, ReplayDiagnostics, ReplayError,
     ReplayResult, ReplayStatus, SimulatedFill,
 };
+pub use scanner_timeline::{
+    replay_default_scanner_config, ReplayScannerTimeline, ReplayScannerTimelineError,
+};
 
 // Sprint B2 R5-T1 / R5-T2 re-exports — adapter types accessible at
 // `crate::replay::*` so R5-T3 `runner::IsolatedPipeline` wire-up and
@@ -183,6 +187,4 @@ pub use runner::{
 // 可取得，使 R5-T3 `runner::IsolatedPipeline` 接線與 integration test 不必
 // 下到 per-module 路徑即可 pattern-match。
 pub use risk_adapter::{ReplayPaperSnapshot, ReplayPosition, ReplayRiskAdapter, RiskDecision};
-pub use strategy_adapter::{
-    DecisionTraceEntry, ReplayStrategyAdapter, StrategyActionTrace,
-};
+pub use strategy_adapter::{DecisionTraceEntry, ReplayStrategyAdapter, StrategyActionTrace};
