@@ -4,7 +4,8 @@
 角色：PM
 Repo root：`/Users/ncyu/Projects/TradeBot/srv`
 Read-time HEAD：`df5b1638`
-狀態：PM synthesis / handoff boundary，未改 production code
+Implementation / deploy HEAD：`74b986a0`
+狀態：v1 shadow 已實作、已三端同步、已 Linux rebuild deploy
 
 更新：v1 shadow implementation 已落地，詳
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_v1_shadow_implementation.md`。
