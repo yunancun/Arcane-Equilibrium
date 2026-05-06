@@ -46,6 +46,13 @@ GATE_LABELS: dict[str, tuple[str, str]] = {
     "38": ("grid_trading_lifecycle_drift", "Grid lifecycle drift"),
     "40": ("realized_edge_acceptance", "Realized edge acceptance"),
 }
+ACTIVE_STRATEGIES: tuple[str, ...] = (
+    "grid_trading",
+    "ma_crossover",
+    "funding_arb",
+    "bb_breakout",
+    "bb_reversion",
+)
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -775,6 +782,183 @@ LIMIT 6
     return gate
 
 
+def _fetch_strategy_status(
+    cur: Any,
+    window_days: int,
+    realized_edge_gate: dict[str, Any],
+    lifecycle_gate: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Fetch per-strategy pre-live edge status from MLDE labels.
+    從 MLDE label 讀取每策略 pre-live edge 狀態。
+    """
+    _rollback_cursor(cur)
+    try:
+        cur.execute("SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL")
+        exists = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("strategy edge status existence check failed: %s", exc)
+        return [
+            {
+                "strategy_name": name,
+                "status": "unknown",
+                "summary": "learning.mlde_edge_training_rows existence check failed",
+                "rows_24h": 0,
+                "rows_window": 0,
+            }
+            for name in ACTIVE_STRATEGIES
+        ]
+    if not exists or not exists[0]:
+        return [
+            {
+                "strategy_name": name,
+                "status": "unknown",
+                "summary": "learning.mlde_edge_training_rows missing",
+                "rows_24h": 0,
+                "rows_window": 0,
+            }
+            for name in ACTIVE_STRATEGIES
+        ]
+
+    sql = """
+WITH strategy_rows AS (
+  SELECT
+    strategy_name,
+    ts,
+    net_bps_after_fee
+  FROM learning.mlde_edge_training_rows
+  WHERE ts > now() - (%s::int * interval '1 day')
+    AND engine_mode IN ('demo', 'live_demo')
+    AND attribution_chain_ok
+    AND net_bps_after_fee IS NOT NULL
+    AND coalesce(strategy_name, '') <> ''
+)
+SELECT
+  strategy_name,
+  COUNT(*) FILTER (WHERE ts > now() - interval '24 hours')::int AS rows_24h,
+  AVG(net_bps_after_fee) FILTER (WHERE ts > now() - interval '24 hours')::float8 AS avg_net_24h_bps,
+  (COUNT(*) FILTER (
+     WHERE ts > now() - interval '24 hours' AND net_bps_after_fee > 0
+   )::float8 / NULLIF(COUNT(*) FILTER (WHERE ts > now() - interval '24 hours'), 0)::float8 * 100.0)::float8
+    AS win_rate_24h_pct,
+  COUNT(*)::int AS rows_window,
+  AVG(net_bps_after_fee)::float8 AS avg_net_window_bps
+FROM strategy_rows
+GROUP BY strategy_name
+ORDER BY strategy_name
+"""
+    try:
+        cur.execute(sql, (window_days,))
+        rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001
+        _rollback_cursor(cur)
+        logger.warning("strategy edge status query failed: %s", exc)
+        return [
+            {
+                "strategy_name": name,
+                "status": "unknown",
+                "summary": f"strategy edge query failed: {type(exc).__name__}",
+                "rows_24h": 0,
+                "rows_window": 0,
+            }
+            for name in ACTIVE_STRATEGIES
+        ]
+
+    by_name: dict[str, dict[str, Any]] = {}
+    bad_cells = (realized_edge_gate.get("current") or {}).get("bad_cells") or []
+    bad_by_strategy: dict[str, list[dict[str, Any]]] = {}
+    for cell in bad_cells:
+        name = str(cell.get("strategy_name") or "")
+        if name:
+            bad_by_strategy.setdefault(name, []).append(cell)
+
+    lifecycle_status = str(lifecycle_gate.get("status") or "unknown").lower()
+    for row in rows:
+        name = str(row[0] or "")
+        rows_24h = _as_int(row[1])
+        avg_24h = _round_or_none(row[2], 2)
+        win_24h = _round_or_none(row[3], 1)
+        rows_window = _as_int(row[4])
+        avg_window = _round_or_none(row[5], 2)
+        bad = bad_by_strategy.get(name, [])
+        reasons: list[str] = []
+        status = "unknown"
+
+        if bad:
+            status = "crisis"
+            reasons.append(f"{len(bad)} active negative cell(s)")
+        elif rows_24h == 0:
+            status = "unknown"
+            reasons.append("no fresh 24h MLDE labels")
+        elif rows_24h < EDGE_ACCEPTANCE_BAD_CELL_MIN_N:
+            status = "warn"
+            reasons.append(f"24h rows {rows_24h} below sample target {EDGE_ACCEPTANCE_BAD_CELL_MIN_N}")
+        elif avg_24h is not None and avg_24h > EDGE_ACCEPTANCE_MIN_AVG_NET_BPS:
+            status = "pass"
+            reasons.append(f"24h avg_net {avg_24h:.2f} bps above target")
+        elif avg_24h is not None and avg_24h > 0:
+            status = "warn"
+            reasons.append(f"24h avg_net {avg_24h:.2f} bps positive but below target")
+        elif avg_24h is not None:
+            status = "fail"
+            reasons.append(f"24h avg_net {avg_24h:.2f} bps is non-positive")
+
+        if name == "grid_trading" and lifecycle_status in {"warn", "fail"}:
+            if status not in {"crisis", "fail"}:
+                status = "warn"
+            reasons.append(f"grid lifecycle gate {lifecycle_status}")
+
+        by_name[name] = {
+            "strategy_name": name,
+            "status": status,
+            "rows_24h": rows_24h,
+            "avg_net_24h_bps": avg_24h,
+            "win_rate_24h_pct": win_24h,
+            "rows_window": rows_window,
+            "avg_net_window_bps": avg_window,
+            "bad_cells": bad,
+            "summary": "; ".join(reasons) if reasons else "no status reason",
+            "target": {
+                "min_rows_24h": EDGE_ACCEPTANCE_BAD_CELL_MIN_N,
+                "min_avg_net_bps": EDGE_ACCEPTANCE_MIN_AVG_NET_BPS,
+                "crisis_avg_net_bps_max": EDGE_ACCEPTANCE_BAD_CELL_MAX_AVG_BPS,
+            },
+        }
+
+    all_names = list(ACTIVE_STRATEGIES)
+    for name in sorted(set(by_name) | set(bad_by_strategy)):
+        if name not in all_names:
+            all_names.append(name)
+
+    result: list[dict[str, Any]] = []
+    for name in all_names:
+        if name in by_name:
+            result.append(by_name[name])
+            continue
+        bad = bad_by_strategy.get(name, [])
+        result.append(
+            {
+                "strategy_name": name,
+                "status": "crisis" if bad else "unknown",
+                "rows_24h": 0,
+                "avg_net_24h_bps": None,
+                "win_rate_24h_pct": None,
+                "rows_window": 0,
+                "avg_net_window_bps": None,
+                "bad_cells": bad,
+                "summary": (
+                    f"{len(bad)} active negative cell(s)"
+                    if bad else "no fresh MLDE labels in window"
+                ),
+                "target": {
+                    "min_rows_24h": EDGE_ACCEPTANCE_BAD_CELL_MIN_N,
+                    "min_avg_net_bps": EDGE_ACCEPTANCE_MIN_AVG_NET_BPS,
+                    "crisis_avg_net_bps_max": EDGE_ACCEPTANCE_BAD_CELL_MAX_AVG_BPS,
+                },
+            }
+        )
+    return result
+
+
 def _readiness_item(
     *,
     gate: str,
@@ -921,6 +1105,16 @@ def _degraded_payload(window_days: int, reason: str) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "gates": gates,
         "readiness": build_live_readiness(gates),
+        "strategy_status": [
+            {
+                "strategy_name": name,
+                "status": "unknown",
+                "summary": reason,
+                "rows_24h": 0,
+                "rows_window": 0,
+            }
+            for name in ACTIVE_STRATEGIES
+        ],
         "error": reason,
     }
 
@@ -936,10 +1130,12 @@ def fetch_prelive_edge_gate_trends(window_days: int = 7) -> dict[str, Any]:
                 return _degraded_payload(bounded_days, "postgres connection unavailable")
             cur = conn.cursor()
             maker_gate = _fetch_maker_fill_gate(cur, bounded_days)
+            lifecycle_gate = _fetch_grid_lifecycle_gate(cur, bounded_days)
+            realized_edge_gate = _fetch_realized_edge_gate(cur, bounded_days, maker_gate)
             gates = {
                 "33": maker_gate,
-                "38": _fetch_grid_lifecycle_gate(cur, bounded_days),
-                "40": _fetch_realized_edge_gate(cur, bounded_days, maker_gate),
+                "38": lifecycle_gate,
+                "40": realized_edge_gate,
             }
             return {
                 "available": any(gate.get("available") for gate in gates.values()),
@@ -948,6 +1144,12 @@ def fetch_prelive_edge_gate_trends(window_days: int = 7) -> dict[str, Any]:
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "gates": gates,
                 "readiness": build_live_readiness(gates),
+                "strategy_status": _fetch_strategy_status(
+                    cur,
+                    bounded_days,
+                    realized_edge_gate,
+                    lifecycle_gate,
+                ),
             }
     except Exception as exc:  # noqa: BLE001
         logger.warning("pre-live edge gate trend fetch failed: %s", exc, exc_info=True)

@@ -41,6 +41,7 @@ _STATIC_DIR = _THIS_DIR.parent.parent / "app" / "static"
 _TAB_PAPER_HTML = _STATIC_DIR / "tab-paper.html"
 _TAB_REPLAY_HTML = _STATIC_DIR / "tab-replay.html"
 _TAB_DEVELOPMENT_HTML = _STATIC_DIR / "tab-development.html"
+_TAB_EDGE_GATES_HTML = _STATIC_DIR / "tab-edge-gates.html"
 _TAB_LIVE_HTML = _STATIC_DIR / "tab-live.html"
 _TAB_SETTINGS_HTML = _STATIC_DIR / "tab-settings.html"
 _CONSOLE_HTML = _STATIC_DIR / "console.html"
@@ -77,6 +78,15 @@ def tab_development_html() -> str:
         f"tab-development.html not found at {_TAB_DEVELOPMENT_HTML}"
     )
     return _TAB_DEVELOPMENT_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def tab_edge_gates_html() -> str:
+    """Read tab-edge-gates.html once per test module / 每模組讀一次。"""
+    assert _TAB_EDGE_GATES_HTML.exists(), (
+        f"tab-edge-gates.html not found at {_TAB_EDGE_GATES_HTML}"
+    )
+    return _TAB_EDGE_GATES_HTML.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -140,8 +150,18 @@ def test_console_has_replay_and_optional_paper_tabs(console_html: str) -> None:
     """Console exposes Replay as first-class tab; Paper is settings-gated."""
     assert "id: 'replay'" in console_html
     assert "tab-replay.html" in console_html
+    assert "TAB_GROUP_LABELS" in console_html
+    assert "tab-group-label" in console_html
     assert "requiresPaperEngine: true" in console_html
     assert "/api/v1/settings/paper-engine" in console_html
+
+
+def test_console_has_top_level_edge_gates_tab(console_html: str) -> None:
+    """Console exposes Pre-Live Edge Gates as a standalone grouped tab."""
+    assert "id: 'edge-gates'" in console_html
+    assert "tab-edge-gates.html" in console_html
+    assert "Pre-Live Gates" in console_html
+    assert "group: 'core'" in console_html
 
 
 def test_console_has_settings_gated_development_support_tab(console_html: str) -> None:
@@ -175,6 +195,18 @@ def test_development_support_toggle_is_browser_local(
     assert "OC_DEVELOPMENT_SUPPORT_MODE_KEY" in common_js
     assert "async function ocFetchDevelopmentSupportMode" in common_js
     assert "/api/v1/settings/development-mode" not in common_js
+
+
+def test_edge_gates_tab_renders_strategy_and_healthcheck_surfaces(
+    tab_edge_gates_html: str,
+) -> None:
+    """Edge Gates tab must show readiness, strategies, crisis, and healthcheck."""
+    assert "/api/v1/strategy/prelive/edge-gates" in tab_edge_gates_html
+    assert "/api/v1/system/health" in tab_edge_gates_html
+    assert "Strategy Gate Matrix" in tab_edge_gates_html
+    assert "Strategy Crisis" in tab_edge_gates_html
+    assert "Global Healthcheck" in tab_edge_gates_html
+    assert "fallbackStrategyStatus" in tab_edge_gates_html
 
 
 def test_global_mode_control_surfaces_are_development_gated(

@@ -66,6 +66,7 @@ async def get_prelive_edge_gates(
                 "window_days": window_days,
                 "gates": {},
                 "readiness": {"ready": False, "status": "not_ready", "items": []},
+                "strategy_status": [],
                 "error": "internal_error",
             }
         )

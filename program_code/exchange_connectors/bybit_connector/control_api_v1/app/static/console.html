@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>玄衡 · Arcane Equilibrium Console</title>
-<script src="/static/common.js?v=20260506.dev-support-v2"></script>
+<script src="/static/common.js?v=20260506.nav-edge-gates-v1"></script>
 <!-- REF-20 Wave 2 P1-U9: Paper Replay Lab i18n (Chinese dominant, 9 對照表) -->
 <!-- REF-20 Wave 2 P1-U9: Paper Replay Lab i18n (Chinese-dominant, 9 lookup tables) -->
 <script src="/static/i18n_zh.js"></script>
@@ -66,15 +66,25 @@
   .panel-dot-active { background: var(--accent); }
 
   /* ── Tab Bar ────────────────────────────────────────────────── */
-  .tab-bar { display: flex; background: var(--card-bg); border-bottom: 1px solid var(--border);
+  .tab-bar { display: flex; align-items: stretch; gap: 6px; background: var(--card-bg);
+    border-bottom: 1px solid var(--border); padding: 4px 8px;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
   .tab-bar::-webkit-scrollbar { display: none; }
-  .tab { padding: 7px 14px; font-size: 12px; cursor: pointer; color: var(--text-dim);
-    border-bottom: 2px solid transparent; transition: all 0.15s; user-select: none;
+  .tab-group { display:flex; align-items:center; gap:4px; flex-shrink:0; border-right:1px solid rgba(139,148,158,0.18); padding-right:6px; }
+  .tab-group:last-child { border-right:none; }
+  .tab-group-label { font-size:9px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.4px; padding:0 4px; }
+  .tab-group-items { display:flex; align-items:center; gap:3px; }
+  .tab { padding: 5px 9px; font-size: 11px; cursor: pointer; color: var(--text-dim);
+    border:1px solid transparent; border-bottom: 2px solid transparent; border-radius:6px;
+    transition: all 0.15s; user-select: none;
     white-space: nowrap; flex-shrink: 0; }
   .tab:hover { color: var(--text); background: rgba(56,139,253,0.04); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab.active { color: var(--accent); border-color:rgba(56,139,253,0.25); border-bottom-color: var(--accent); background:rgba(56,139,253,0.06); }
   .tab .tab-icon { margin-right: 4px; font-size: 12px; }
+  @media (max-width: 900px) {
+    .tab-group-label { display:none; }
+    .tab { padding:5px 8px; }
+  }
 
   /* ── Frame Container ────────────────────────────────────────── */
   .frame-wrap { flex: 1; position: relative; overflow: hidden; }
@@ -274,42 +284,46 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260506.dev-support-v2';
+const BUILD_TS = '20260506.nav-edge-gates-v1';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
 // src 使用 BUILD_TS 破壞緩存 — 每次部署更新 BUILD_TS
 const _v = BUILD_TS;
+const TAB_GROUP_LABELS = {
+  core: '核心',
+  trading: '交易',
+  edge: '策略/Edge',
+  governance: '治理',
+  intelligence: '智能',
+  ops: '运维',
+};
 const TABS = [
-  // ── 儀表板 ──────────────────────────────────────────────────────
-  { id: 'system',     label: '总览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
-  { id: 'replay',     label: '回测 Replay',      labelEn: 'Replay',    icon: '&#x23F1;',  src: `/static/tab-replay.html?v=${_v}` },
+  { id: 'system',     group: 'core', label: '总览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
+  { id: 'edge-gates', group: 'core', label: 'Pre-Live Gates',   labelEn: 'Edge Gates',icon: '&#x1F4C8;', src: `/static/tab-edge-gates.html?v=${_v}` },
   // ── 交易环境：低风险到高风险 / Trading environments: low-risk to high-risk ──
   // FIX-43: split into direct Demo + Paper tabs (eliminate double-iframe nesting)
   // FIX-43：拆為直接 Demo + Paper 標籤（消除雙層 iframe 嵌套）
-  { id: 'paper',      label: 'Legacy Paper',     labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}`, requiresPaperEngine: true },
-  { id: 'demo',       label: '演示 Demo',        labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
-  { id: 'live',       label: '实盘 Live',        labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
-  // ── 市場與策略 ───────────────────────────────────────────────────
-  { id: 'charts',     label: '图表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
-  { id: 'strategy',   label: '策略 Strategy',    labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
-  // ── 風控與治理 ───────────────────────────────────────────────────
-  { id: 'risk',       label: '风控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
-  { id: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
-  // ── 智能與學習 ───────────────────────────────────────────────────
-  { id: 'ai',         label: 'AI 智能',          labelEn: 'AI',        icon: '&#x1F916;', src: `/static/tab-ai.html?v=${_v}` },
-  { id: 'learning',   label: '学习 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
+  { id: 'paper',      group: 'trading', label: 'Legacy Paper',  labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}`, requiresPaperEngine: true },
+  { id: 'demo',       group: 'trading', label: '演示 Demo',     labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
+  { id: 'live',       group: 'trading', label: '实盘 Live',     labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
+  { id: 'strategy',   group: 'edge', label: '策略 Strategy',    labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
+  { id: 'charts',     group: 'edge', label: '图表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
+  { id: 'replay',     group: 'edge', label: '回测 Replay',      labelEn: 'Replay',    icon: '&#x23F1;',  src: `/static/tab-replay.html?v=${_v}` },
+  { id: 'risk',       group: 'governance', label: '风控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
+  { id: 'governance', group: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
+  { id: 'ai',         group: 'intelligence', label: 'AI 智能',          labelEn: 'AI',        icon: '&#x1F916;', src: `/static/tab-ai.html?v=${_v}` },
+  { id: 'learning',   group: 'intelligence', label: '学习 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
   // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor 抽出（位置在 Learning 之後）
   // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor extracted (position: after Learning)
   // 既有 agent-tracker.js 行為 0 mutation；mount target 從 tab-learning.html → tab-agents.html
   // icon=🤖 robot（對齊既有 emoji icon set）；read-only never-emit surface（V3 §11 P5）
   // agent-tracker.js logic 0 mutation; mount target swapped from tab-learning.html → tab-agents.html
   // icon=🤖 robot (consistent with existing emoji icon set); read-only never-emit surface (V3 §11 P5)
-  { id: 'agents',     label: 'AI 团队 Agents',   labelEn: 'Agents',    icon: '&#x1F916;', src: `/static/tab-agents.html?v=${_v}` },
-  // ── 治理與運維 ───────────────────────────────────────────────────
-  { id: 'monitoring', label: '监控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
-  { id: 'development',label: '开发状态 Support', labelEn: 'Support',   icon: '&#x1F6E0;', src: `/static/tab-development.html?v=${_v}`, requiresDevelopmentSupport: true },
-  { id: 'settings',   label: '设置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
+  { id: 'agents',     group: 'intelligence', label: 'AI 团队 Agents',   labelEn: 'Agents',    icon: '&#x1F916;', src: `/static/tab-agents.html?v=${_v}` },
+  { id: 'monitoring', group: 'ops', label: '监控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
+  { id: 'development',group: 'ops', label: '开发状态 Support', labelEn: 'Support',   icon: '&#x1F6E0;', src: `/static/tab-development.html?v=${_v}`, requiresDevelopmentSupport: true },
+  { id: 'settings',   group: 'ops', label: '设置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
 ];
 
 let currentTab = 'system';
@@ -322,8 +336,28 @@ let developmentSupportEnabled = typeof ocReadCachedDevelopmentSupportMode === 'f
 function buildTabs() {
   const bar = document.getElementById('tab-bar');
   const wrap = document.getElementById('frame-wrap');
+  const groups = {};
+
+  function ensureGroup(groupId) {
+    const id = groupId || 'core';
+    if (groups[id]) return groups[id];
+    const group = document.createElement('div');
+    group.className = 'tab-group';
+    group.dataset.tabGroup = id;
+    const label = document.createElement('div');
+    label.className = 'tab-group-label';
+    label.textContent = TAB_GROUP_LABELS[id] || id;
+    const items = document.createElement('div');
+    items.className = 'tab-group-items';
+    group.appendChild(label);
+    group.appendChild(items);
+    bar.appendChild(group);
+    groups[id] = { group, items };
+    return groups[id];
+  }
 
   TABS.forEach((t, i) => {
+    const group = ensureGroup(t.group);
     // Tab button
     const tab = document.createElement('div');
     tab.className = 'tab' + (i === 0 ? ' active' : '');
@@ -338,7 +372,7 @@ function buildTabs() {
     }
     tab.innerHTML = '<span class="tab-icon">' + t.icon + '</span>' + t.label;
     tab.onclick = () => switchTo(t.id);
-    bar.appendChild(tab);
+    group.items.appendChild(tab);
 
     // iframe (lazy loaded) — append build timestamp to bust browser cache on reload
     const frame = document.createElement('iframe');
@@ -353,6 +387,7 @@ function buildTabs() {
     if (i === 0) frame.src = t.src + sep + 'v=' + BUILD_TS; // Load first tab immediately
     wrap.appendChild(frame);
   });
+  updateTabGroupVisibility();
 }
 
 function switchTo(tabId) {
@@ -383,11 +418,19 @@ function switchTo(tabId) {
 
 buildTabs();
 
+function updateTabGroupVisibility() {
+  document.querySelectorAll('.tab-group').forEach(group => {
+    const tabs = Array.from(group.querySelectorAll('.tab'));
+    group.style.display = tabs.some(tab => tab.style.display !== 'none') ? '' : 'none';
+  });
+}
+
 function applyPaperEngineGuiSetting(enabled) {
   paperEngineGuiEnabled = !!enabled;
   document.querySelectorAll('.tab[data-requires-paper-engine="true"]').forEach(node => {
     node.style.display = paperEngineGuiEnabled ? '' : 'none';
   });
+  updateTabGroupVisibility();
   TABS.filter(t => t.requiresPaperEngine).forEach(t => {
     const frame = document.getElementById('f-' + t.id);
     if (!frame) return;
@@ -427,6 +470,7 @@ function applyDevelopmentSupportSetting(enabled, options) {
   document.querySelectorAll('.tab[data-requires-development-support="true"]').forEach(node => {
     node.style.display = developmentSupportEnabled ? '' : 'none';
   });
+  updateTabGroupVisibility();
   TABS.filter(t => t.requiresDevelopmentSupport).forEach(t => {
     const frame = document.getElementById('f-' + t.id);
     if (!frame) return;
