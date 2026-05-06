@@ -1,7 +1,7 @@
 # REF-21 Full-Chain Replay Engine Dev Plan V1.1
 
 **Date:** 2026-05-06  
-**Status:** Revised design baseline / implementation blocked until B-gates pass  
+**Status:** Superseded by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md`
 **Owner:** PM  
 **Supersedes:** `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md`  
 **Audit input:** 8-agent A1-A8 consensus review, overall rating `REVISE`  
@@ -10,6 +10,12 @@
 acceptance and must not be exposed as a completed full-chain replay.
 
 ---
+
+> **Supersession note (2026-05-06):** V1.1 was rated `REVISE -> V1.2`
+> after adversarial closure review found the deployed provisional endpoint
+> bypass, tier enum drift, applier-gate gap, missing GUI structure, and
+> additional acceptance gaps. Active REF-21 governance now lives in
+> `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md`.
 
 ## 0. PM Decision Change From V1
 

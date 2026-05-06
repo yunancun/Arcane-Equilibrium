@@ -249,6 +249,11 @@ def _max_full_chain_events() -> int:
     return max(1_000, min(parsed, 300_000))
 
 
+def _full_chain_prepare_enabled() -> bool:
+    raw = os.environ.get("OPENCLAW_REPLAY_PREPARE_ENABLED", "0")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _max_full_chain_bars_per_symbol() -> int:
     raw = os.environ.get("OPENCLAW_REPLAY_FULL_CHAIN_MAX_BARS_PER_SYMBOL", "12000")
     try:
@@ -732,6 +737,17 @@ async def post_replay_full_chain_prepare(
 ) -> dict[str, Any]:
     """Prepare a REF-21 full-chain multi-symbol S2 fixture + config snapshots."""
     _require_replay_write(actor)
+    if not _full_chain_prepare_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "reason_codes": ["replay_full_chain_prepare_disabled"],
+                "message": (
+                    "full-chain replay prepare is disabled; set "
+                    "OPENCLAW_REPLAY_PREPARE_ENABLED=1 only for governed R1 hardening"
+                ),
+            },
+        )
     start_ms = _to_utc_ms(body.data_window_start)
     end_ms = _to_utc_ms(body.data_window_end)
     estimated_bars_per_symbol = _estimate_bar_count(start_ms, end_ms, body.timeframe)
