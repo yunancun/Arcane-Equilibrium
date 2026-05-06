@@ -374,6 +374,7 @@ def _write_full_chain_s2_fixture(
     events: list[dict[str, Any]],
     scanner_snapshot: dict[str, Any],
     universe_preset: str,
+    microstructure_overlay: Optional[dict[str, Any]] = None,
 ) -> Path:
     root = _full_chain_fixture_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -393,6 +394,10 @@ def _write_full_chain_s2_fixture(
         "symbols": symbols,
         "window": {"start_ms": start_ms, "end_ms": end_ms},
         "scanner_snapshot": scanner_snapshot,
+        "microstructure_overlay": microstructure_overlay or {
+            "status": "not_requested",
+            "source": "market.market_tickers",
+        },
         "events": events,
     }
     path.write_text(

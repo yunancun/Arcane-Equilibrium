@@ -8,6 +8,7 @@ inside the Control API worker process.
 """
 
 import asyncio
+import bisect
 import hashlib
 import json
 import logging
@@ -159,6 +160,196 @@ def _iso_from_ms(ms: int) -> str:
 def _cursor_fetchall(cur: Any) -> list[Any]:
     rows = cur.fetchall()
     return list(rows or [])
+
+
+def _microstructure_overlay_enabled() -> bool:
+    raw = os.environ.get("OPENCLAW_REPLAY_MICROSTRUCTURE_OVERLAY_ENABLED", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _microstructure_max_staleness_ms() -> int:
+    raw = os.environ.get("OPENCLAW_REPLAY_MICROSTRUCTURE_MAX_STALENESS_MS", "120000")
+    try:
+        parsed = int(raw)
+    except ValueError:
+        parsed = 120_000
+    return max(0, min(parsed, 3_600_000))
+
+
+def _fetch_microstructure_overlays_sync(
+    *,
+    symbols: list[str],
+    start_ms: int,
+    end_ms: int,
+) -> dict[str, Any]:
+    """Fetch locally recorded ticker BBO rows for fixture enrichment.
+
+    Bybit's public ticker/orderbook REST endpoints are current snapshots, not
+    historical endpoints. REF-21 only enriches historical fixtures from locally
+    recorded `market.market_tickers` rows and labels the coverage explicitly.
+    """
+    if not _microstructure_overlay_enabled():
+        return {
+            "status": "disabled",
+            "source": "market.market_tickers",
+            "records": {},
+            "reason": "env_disabled",
+        }
+    if not symbols:
+        return {
+            "status": "empty",
+            "source": "market.market_tickers",
+            "records": {},
+            "reason": "empty_symbols",
+        }
+    try:
+        with get_pg_conn() as conn:
+            if conn is None:
+                return {
+                    "status": "unavailable",
+                    "source": "market.market_tickers",
+                    "records": {},
+                    "reason": "pg_unavailable",
+                }
+            cur = conn.cursor()
+            cur.execute("SET LOCAL statement_timeout = %s;", (_STATEMENT_TIMEOUT_MS,))
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'market'
+                      AND table_name = 'market_tickers'
+                );
+                """
+            )
+            if not bool(cur.fetchone()[0]):
+                return {
+                    "status": "unavailable",
+                    "source": "market.market_tickers",
+                    "records": {},
+                    "reason": "table_absent",
+                }
+            cur.execute(
+                """
+                SELECT
+                    symbol,
+                    floor(extract(epoch from ts) * 1000)::bigint AS ts_ms,
+                    best_bid,
+                    best_ask,
+                    bid_size,
+                    ask_size,
+                    spread_bps
+                FROM market.market_tickers
+                WHERE symbol = ANY(%s)
+                  AND ts >= to_timestamp(%s / 1000.0)
+                  AND ts <= to_timestamp(%s / 1000.0)
+                  AND best_bid IS NOT NULL
+                  AND best_ask IS NOT NULL
+                ORDER BY symbol, ts ASC;
+                """,
+                (symbols, start_ms - _microstructure_max_staleness_ms(), end_ms),
+            )
+            rows = _cursor_fetchall(cur)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "unavailable",
+            "source": "market.market_tickers",
+            "records": {},
+            "reason": type(exc).__name__,
+            "message": str(exc),
+        }
+
+    records: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        symbol = str(row[0]).strip().upper()
+        best_bid = float(row[2]) if row[2] is not None else None
+        best_ask = float(row[3]) if row[3] is not None else None
+        if (
+            not symbol
+            or best_bid is None
+            or best_ask is None
+            or best_bid <= 0
+            or best_ask <= 0
+            or best_bid > best_ask
+        ):
+            continue
+        records.setdefault(symbol, []).append({
+            "ts_ms": int(row[1]),
+            "best_bid": best_bid,
+            "best_ask": best_ask,
+            "bid_size": float(row[4]) if row[4] is not None else None,
+            "ask_size": float(row[5]) if row[5] is not None else None,
+            "spread_bps": float(row[6]) if row[6] is not None else None,
+        })
+    record_count = sum(len(items) for items in records.values())
+    return {
+        "status": "ok" if record_count else "empty",
+        "source": "market.market_tickers",
+        "records": records,
+        "record_count": record_count,
+        "symbol_count": len(records),
+        "reason": None if record_count else "no_bbo_rows_for_window",
+    }
+
+
+def _apply_microstructure_overlays(
+    events: list[dict[str, Any]],
+    overlay: dict[str, Any],
+    *,
+    max_staleness_ms: int,
+) -> dict[str, Any]:
+    records_by_symbol = overlay.get("records") if isinstance(overlay, dict) else None
+    if not isinstance(records_by_symbol, dict):
+        return {
+            "status": "unavailable",
+            "source": "market.market_tickers",
+            "event_count": len(events),
+            "enriched_event_count": 0,
+            "reason": "records_missing",
+        }
+
+    timestamps: dict[str, list[int]] = {}
+    for symbol, rows in records_by_symbol.items():
+        if not isinstance(rows, list):
+            continue
+        rows.sort(key=lambda item: int(item.get("ts_ms", 0)))
+        timestamps[str(symbol)] = [int(item.get("ts_ms", 0)) for item in rows]
+
+    enriched = 0
+    for event in events:
+        symbol = str(event.get("symbol") or "").upper()
+        event_ts = int(event.get("ts_ms") or 0)
+        rows = records_by_symbol.get(symbol)
+        ts_values = timestamps.get(symbol)
+        if not rows or not ts_values:
+            continue
+        idx = bisect.bisect_right(ts_values, event_ts) - 1
+        if idx < 0:
+            continue
+        record = rows[idx]
+        age_ms = event_ts - int(record["ts_ms"])
+        if age_ms < 0 or age_ms > max_staleness_ms:
+            continue
+        event["best_bid"] = record["best_bid"]
+        event["best_ask"] = record["best_ask"]
+        if record.get("bid_size") is not None:
+            event["bid_size"] = record["bid_size"]
+        if record.get("ask_size") is not None:
+            event["ask_size"] = record["ask_size"]
+        if record.get("spread_bps") is not None:
+            event["spread_bps"] = record["spread_bps"]
+        event["microstructure_source"] = "market.market_tickers"
+        enriched += 1
+
+    return {
+        "status": "ok" if enriched else "empty",
+        "source": "market.market_tickers",
+        "event_count": len(events),
+        "enriched_event_count": enriched,
+        "coverage_ratio": (enriched / len(events)) if events else 0.0,
+        "max_staleness_ms": max_staleness_ms,
+        "reason": None if enriched else "no_matching_bbo_rows",
+    }
 
 
 def _fetch_historical_universe_snapshot_sync(
@@ -576,6 +767,27 @@ async def _prepare_full_chain_run_fixture(
     events.sort(
         key=lambda item: (int(item.get("ts_ms", 0)), str(item.get("symbol", "")))
     )
+    microstructure_overlay = await asyncio.to_thread(
+        _fetch_microstructure_overlays_sync,
+        symbols=symbols,
+        start_ms=start_ms,
+        end_ms=end_ms,
+    )
+    microstructure_stats = _apply_microstructure_overlays(
+        events,
+        microstructure_overlay,
+        max_staleness_ms=_microstructure_max_staleness_ms(),
+    )
+    if microstructure_stats.get("status") != "ok":
+        warnings.append(
+            "microstructure_overlay_unavailable:"
+            + str(
+                microstructure_stats.get("reason")
+                or microstructure_overlay.get("reason")
+                or microstructure_stats.get("status")
+                or "unknown"
+            )
+        )
     missing_symbols = [symbol for symbol, count in per_symbol_counts.items() if count <= 0]
     if missing_symbols:
         warnings.append("market_data_missing_for:" + ",".join(missing_symbols))
@@ -596,6 +808,7 @@ async def _prepare_full_chain_run_fixture(
         events=events,
         scanner_snapshot=scanner_snapshot,
         universe_preset=body.universe_preset,
+        microstructure_overlay=microstructure_stats,
     )
 
     return {
@@ -611,6 +824,7 @@ async def _prepare_full_chain_run_fixture(
         "historical_universe": historical_universe,
         "universe_source": universe_source,
         "edge_snapshot": edge_snapshot,
+        "microstructure_overlay": microstructure_stats,
         "start_ms": start_ms,
         "end_ms": end_ms,
         "strategy_params": strategy_params,
@@ -630,6 +844,7 @@ def _build_manifest_jsonb(
     universe_source: str,
     historical_universe: dict[str, Any],
     edge_snapshot: dict[str, Any],
+    microstructure_overlay: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "manifest_version": 1,
@@ -656,6 +871,7 @@ def _build_manifest_jsonb(
             if key != "edge_estimates"
         },
         "edge_estimates": edge_snapshot.get("edge_estimates") or {},
+        "microstructure_overlay": microstructure_overlay,
         "replay_tier": "s2_public_replay",
         "promotion_allowed": False,
         "promotion_block_reason": "current_config_in_sample_sandbox",
@@ -847,6 +1063,7 @@ async def post_replay_full_chain_run(
             universe_source=prepared["universe_source"],
             historical_universe=prepared["historical_universe"],
             edge_snapshot=prepared["edge_snapshot"],
+            microstructure_overlay=prepared["microstructure_overlay"],
         )
         registered.append(
             await _register_full_chain_experiment(
@@ -893,6 +1110,7 @@ async def post_replay_full_chain_run(
             for key, value in prepared["edge_snapshot"].items()
             if key != "edge_estimates"
         },
+        "microstructure_overlay": prepared["microstructure_overlay"],
         "strategies": strategies,
         "strategy_count": len(strategies),
         "runs": runs,

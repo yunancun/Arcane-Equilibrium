@@ -105,6 +105,8 @@ use std::path::{Path, PathBuf};
 ///     markets.
 ///   - `turnover`: optional quote turnover from Bybit kline row[6]. Legacy
 ///     fixtures may omit it; scanner replay then falls back to close * volume.
+///   - `best_bid` / `best_ask`: optional locally recorded BBO. These are
+///     consumed only when present and valid; replay does not fabricate them.
 ///
 /// 欄位語意（中）：
 ///   - `ts_ms`: Unix 毫秒時戳（UTC）。
@@ -114,6 +116,8 @@ use std::path::{Path, PathBuf};
 ///   - `volume`: 交易量；預期有限 f64，瘦市場可能 0.0。
 ///   - `turnover`: 可選 quote turnover，來自 Bybit kline row[6]。舊 fixture
 ///     可省略；scanner replay 會 fallback 至 close * volume。
+///   - `best_bid` / `best_ask`: 可選本地錄製 BBO。只有存在且有效時消費；
+///     replay 不偽造這些欄位。
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct MarketEvent {
     pub ts_ms: i64,
@@ -125,6 +129,18 @@ pub struct MarketEvent {
     pub volume: f64,
     #[serde(default)]
     pub turnover: Option<f64>,
+    #[serde(default)]
+    pub best_bid: Option<f64>,
+    #[serde(default)]
+    pub best_ask: Option<f64>,
+    #[serde(default)]
+    pub bid_size: Option<f64>,
+    #[serde(default)]
+    pub ask_size: Option<f64>,
+    #[serde(default)]
+    pub spread_bps: Option<f64>,
+    #[serde(default)]
+    pub microstructure_source: Option<String>,
 }
 
 /// Fixture source enum mapping to manifest `data_tier`.
@@ -413,7 +429,11 @@ mod tests {
               "events": [
                 {"ts_ms": 1, "symbol": "BTCUSDT",
                  "open": 100.0, "high": 101.0, "low": 99.0,
-                 "close": 100.5, "volume": 1.0, "turnover": 100.5}
+                 "close": 100.5, "volume": 1.0, "turnover": 100.5,
+                 "best_bid": 100.4, "best_ask": 100.6,
+                 "bid_size": 2.0, "ask_size": 3.0,
+                 "spread_bps": 19.9005,
+                 "microstructure_source": "market.market_tickers"}
               ]
             }"#,
         );
@@ -422,6 +442,12 @@ mod tests {
         };
         let events = load_fixtures(&src).unwrap();
         assert_eq!(events[0].turnover, Some(100.5));
+        assert_eq!(events[0].best_bid, Some(100.4));
+        assert_eq!(events[0].best_ask, Some(100.6));
+        assert_eq!(
+            events[0].microstructure_source.as_deref(),
+            Some("market.market_tickers")
+        );
     }
 
     #[test]

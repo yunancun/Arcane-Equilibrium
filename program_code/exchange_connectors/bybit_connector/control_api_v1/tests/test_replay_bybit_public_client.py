@@ -65,12 +65,16 @@ def test_replay_public_rate_policy_defaults_stay_under_ref21_ceiling(
 ) -> None:
     monkeypatch.delenv("OPENCLAW_REPLAY_PUBLIC_GLOBAL_RPS", raising=False)
     monkeypatch.delenv("OPENCLAW_REPLAY_PUBLIC_KLINE_RPS", raising=False)
+    monkeypatch.delenv("OPENCLAW_REPLAY_PUBLIC_TICKER_RPS", raising=False)
+    monkeypatch.delenv("OPENCLAW_REPLAY_PUBLIC_ORDERBOOK_RPS", raising=False)
 
     policy = current_replay_public_rate_policy()
 
     assert policy.global_rps <= 50.0
     assert policy.kline_rps < policy.global_rps
     assert policy.kline_rps == 20.0
+    assert policy.ticker_rps == 5.0
+    assert policy.orderbook_rps == 10.0
 
 
 def test_replay_public_rate_policy_clamps_operator_overrides(
@@ -78,11 +82,15 @@ def test_replay_public_rate_policy_clamps_operator_overrides(
 ) -> None:
     monkeypatch.setenv("OPENCLAW_REPLAY_PUBLIC_GLOBAL_RPS", "500")
     monkeypatch.setenv("OPENCLAW_REPLAY_PUBLIC_KLINE_RPS", "500")
+    monkeypatch.setenv("OPENCLAW_REPLAY_PUBLIC_TICKER_RPS", "500")
+    monkeypatch.setenv("OPENCLAW_REPLAY_PUBLIC_ORDERBOOK_RPS", "500")
 
     policy = current_replay_public_rate_policy()
 
     assert policy.global_rps == 50.0
     assert policy.kline_rps == 49.0
+    assert policy.ticker_rps == 50.0
+    assert policy.orderbook_rps == 50.0
 
 
 def test_replay_public_client_fetches_and_parses_kline_rows(
@@ -213,3 +221,62 @@ def test_replay_public_client_rejects_non_allowlisted_endpoint(
         assert "replay_bybit_endpoint_not_allowed" in str(exc)
     else:
         raise AssertionError("non-allowlisted replay endpoint should fail closed")
+
+
+def test_replay_public_client_fetches_current_ticker_snapshot(monkeypatch) -> None:
+    monkeypatch.setenv("OPENCLAW_REPLAY_PUBLIC_GLOBAL_RPS", "50")
+    fake = _FakeUrlOpen([
+        {
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "list": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "lastPrice": "100",
+                        "bid1Price": "99.9",
+                        "ask1Price": "100.1",
+                    }
+                ]
+            },
+        }
+    ])
+    client = ReplayBybitPublicClient(
+        urlopen=fake,
+        sleeper=lambda _: None,
+        monotonic=lambda: 0.0,
+    )
+
+    rows = client.fetch_tickers_sync(category="linear", symbol="BTCUSDT")
+
+    assert rows[0]["symbol"] == "BTCUSDT"
+    assert "/v5/market/tickers?" in fake.requests[0]
+    assert "symbol=BTCUSDT" in fake.requests[0]
+
+
+def test_replay_public_client_fetches_current_orderbook_snapshot(monkeypatch) -> None:
+    monkeypatch.setenv("OPENCLAW_REPLAY_PUBLIC_GLOBAL_RPS", "50")
+    fake = _FakeUrlOpen([
+        {
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "s": "BTCUSDT",
+                "b": [["99.9", "2.0"]],
+                "a": [["100.1", "1.5"]],
+                "ts": 1_700_000_000_123,
+            },
+        }
+    ])
+    client = ReplayBybitPublicClient(
+        urlopen=fake,
+        sleeper=lambda _: None,
+        monotonic=lambda: 0.0,
+    )
+
+    row = client.fetch_orderbook_sync(category="linear", symbol="BTCUSDT", limit=5)
+
+    assert row["s"] == "BTCUSDT"
+    assert row["b"][0] == ["99.9", "2.0"]
+    assert "/v5/market/orderbook?" in fake.requests[0]
+    assert "limit=5" in fake.requests[0]

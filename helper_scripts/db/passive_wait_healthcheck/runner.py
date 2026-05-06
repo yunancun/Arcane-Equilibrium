@@ -161,19 +161,20 @@ from .checks_pricing_binding import (
 )
 from .checks_replay_maintenance import (
     # REF-20 Sprint D R8 (2026-05-05) — `[46]`-`[50]` maintenance / observation
-    # sentinel suite per plan §6.R8 task 2.
+    # sentinel suite per plan §6.R8 task 2, plus REF-21 `[53]` universe recorder.
     # [46] V056 retention cron 活性 + replay-derived candidate cap
     # [47] Linux replay_runner binary presence + executable bit
     # [48] replay.experiments row growth rate stall detection
     # [49] V046 replay.report_artifacts oldest age + storage cap dual check
     # [50] V045 replay.run_state failed rate + zombie 'running' detection
     # REF-20 Sprint D R8（2026-05-05）— `[46]`-`[50]` maintenance / observation
-    # 哨兵套組（plan §6.R8 task 2）。
+    # 哨兵套組（plan §6.R8 task 2），並追加 REF-21 `[53]` universe recorder。
     check_46_mlde_shadow_retention_status,
     check_47_replay_runner_binary,
     check_48_replay_manifest_registry_growth,
     check_49_replay_artifact_retention,
     check_50_replay_run_state_health,
+    check_53_ref21_v058_symbol_universe_recorder,
 )
 
 
@@ -196,7 +197,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52]                               REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof
+    [46][48][49][50][51][52][53]                           REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -238,6 +239,7 @@ Execution / cost sentinels added after F7:
   [50] replay_run_state_health          (REF-20 Sprint D R8 2026-05-05 — V045 failed_rate 7d + zombie 'running' >1h detection)
   [51] scanner_opportunity_shadow_acceptance (2026-05-06 — snapshot/intent/MLDE row-proof coverage + opportunity_lcb_bps calibration, shadow-only)
   [52] agent_event_store_rows            (AgentTodo MAG-010..012 — agent.messages/state_changes/ai_invocations recent row proof)
+  [53] ref21_v058_symbol_universe_recorder (REF-21 — recurring V058 universe snapshot liveness)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -258,7 +260,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52]
+              [46][48][49][50][51][52][53]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -287,7 +289,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50][51][52]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -766,6 +768,12 @@ def main() -> int:
             # 預設關閉；啟用後檢查三張 agent.* 表近期是否都有 row。
             s, m = check_52_agent_event_store_rows(cur)
             results.append(("[52] agent_event_store_rows", s, m))
+
+            # [53] REF-21 recurring V058 symbol-universe snapshot liveness.
+            # Prevents survivorship-bias regression where full-chain replay
+            # falls back to current survivors because universe snapshots stop.
+            s, m = check_53_ref21_v058_symbol_universe_recorder(cur)
+            results.append(("[53] ref21_v058_symbol_universe_recorder", s, m))
     finally:
         conn.close()
 
