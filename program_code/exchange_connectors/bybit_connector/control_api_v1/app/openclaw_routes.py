@@ -26,6 +26,7 @@ from . import agents_routes_helpers as _agent_h
 from . import main_legacy as base
 from .db_pool import get_pg_conn
 from .openclaw_models import OpenClawEnvelope, OpenClawEvidenceRef, OpenClawStatus
+from .openclaw_supervisor_policy import build_supervisor_cloud_policy_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -360,25 +361,10 @@ def _build_edge_summary() -> dict[str, Any]:
 
 
 def _build_model_budget(event_store: dict[str, Any]) -> dict[str, Any]:
-    cloud_enabled = _env_enabled("OPENCLAW_SUPERVISOR_CLOUD_ENABLED")
-    require_budget = _env_enabled("OPENCLAW_SUPERVISOR_CLOUD_REQUIRE_BUDGET", "1")
-    daily_cap = os.getenv("OPENCLAW_SUPERVISOR_CLOUD_DAILY_USD_CAP")
-    monthly_cap = os.getenv("OPENCLAW_SUPERVISOR_CLOUD_MONTHLY_USD_CAP")
-    budget_configured = bool(daily_cap and monthly_cap)
-    disabled_reason = None
-    if not cloud_enabled:
-        disabled_reason = "cloud_disabled_by_env"
-    elif require_budget and not budget_configured:
-        disabled_reason = "cloud_budget_missing"
+    policy = build_supervisor_cloud_policy_snapshot()
     return {
         "local_event_store_ai_rows_30m": event_store["recent_rows"]["ai_invocations"],
-        "cloud_enabled": cloud_enabled,
-        "require_budget": require_budget,
-        "budget_configured": budget_configured,
-        "daily_cap_configured": bool(daily_cap),
-        "monthly_cap_configured": bool(monthly_cap),
-        "disabled_reason": disabled_reason,
-        "per_agent_cloud_calls_allowed": False,
+        **policy,
     }
 
 
