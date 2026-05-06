@@ -14,6 +14,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -149,8 +150,294 @@ def _canonical_sha256(payload: Any) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _iso_from_ms(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+
+
+def _cursor_fetchall(cur: Any) -> list[Any]:
+    rows = cur.fetchall()
+    return list(rows or [])
+
+
+def _fetch_historical_universe_snapshot_sync(
+    *,
+    category: str,
+    start_ms: int,
+    end_ms: int,
+    max_symbols: int,
+) -> dict[str, Any]:
+    """Read V058 as the default universe source for current-scanner replay."""
+    try:
+        with get_pg_conn() as conn:
+            if conn is None:
+                return {
+                    "status": "unavailable",
+                    "source": "v058_symbol_universe_snapshots",
+                    "reason": "pg_unavailable",
+                    "symbols": [],
+                }
+            cur = conn.cursor()
+            cur.execute("SET LOCAL statement_timeout = %s;", (_STATEMENT_TIMEOUT_MS,))
+            cur.execute(
+                """
+                WITH candidate_symbols AS (
+                    SELECT DISTINCT symbol
+                    FROM market.symbol_universe_snapshots
+                    WHERE exchange = 'bybit'
+                      AND category = %s
+                      AND ts <= to_timestamp(%s / 1000.0)
+                      AND (listed_at IS NULL OR listed_at <= to_timestamp(%s / 1000.0))
+                      AND (delisted_at IS NULL OR delisted_at >= to_timestamp(%s / 1000.0))
+                ),
+                latest AS (
+                    SELECT DISTINCT ON (s.symbol)
+                        s.symbol,
+                        s.ts,
+                        s.status,
+                        s.base_coin,
+                        s.quote_coin,
+                        s.contract_type,
+                        s.listed_at,
+                        s.delisted_at,
+                        s.is_delisted_at_asof,
+                        s.source_uri
+                    FROM market.symbol_universe_snapshots s
+                    JOIN candidate_symbols c ON c.symbol = s.symbol
+                    WHERE s.exchange = 'bybit'
+                      AND s.category = %s
+                      AND s.ts <= to_timestamp(%s / 1000.0)
+                    ORDER BY s.symbol, s.ts DESC
+                )
+                SELECT
+                    symbol,
+                    ts,
+                    status,
+                    base_coin,
+                    quote_coin,
+                    contract_type,
+                    listed_at,
+                    delisted_at,
+                    is_delisted_at_asof,
+                    source_uri
+                FROM latest
+                WHERE NOT (
+                    is_delisted_at_asof
+                    AND COALESCE(delisted_at, ts) < to_timestamp(%s / 1000.0)
+                )
+                ORDER BY
+                    CASE symbol WHEN 'BTCUSDT' THEN 0 WHEN 'ETHUSDT' THEN 1 ELSE 2 END,
+                    is_delisted_at_asof ASC,
+                    symbol ASC
+                LIMIT %s;
+                """,
+                (
+                    category,
+                    end_ms,
+                    end_ms,
+                    start_ms,
+                    category,
+                    end_ms,
+                    start_ms,
+                    max_symbols,
+                ),
+            )
+            rows = _cursor_fetchall(cur)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "unavailable",
+            "source": "v058_symbol_universe_snapshots",
+            "reason": type(exc).__name__,
+            "message": str(exc),
+            "symbols": [],
+        }
+
+    symbols: list[str] = []
+    entries: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row[0]).strip().upper()
+        if not symbol:
+            continue
+        symbols.append(symbol)
+        entries.append({
+            "symbol": symbol,
+            "asof_ts": row[1].isoformat() if hasattr(row[1], "isoformat") else str(row[1]),
+            "status": row[2],
+            "base_coin": row[3],
+            "quote_coin": row[4],
+            "contract_type": row[5],
+            "listed_at": row[6].isoformat() if hasattr(row[6], "isoformat") else row[6],
+            "delisted_at": row[7].isoformat() if hasattr(row[7], "isoformat") else row[7],
+            "is_delisted_at_asof": bool(row[8]),
+            "source_uri": row[9],
+        })
+    if not symbols:
+        return {
+            "status": "empty",
+            "source": "v058_symbol_universe_snapshots",
+            "reason": "no_rows_for_window",
+            "symbols": [],
+            "window": {"start_ms": start_ms, "end_ms": end_ms},
+        }
+    warnings: list[str] = []
+    if len(rows) >= max_symbols:
+        warnings.append(f"historical_universe_truncated_to_{max_symbols}")
+    return {
+        "status": "ok",
+        "source": "v058_symbol_universe_snapshots",
+        "symbols": symbols,
+        "symbol_count": len(symbols),
+        "entries": entries,
+        "window": {"start_ms": start_ms, "end_ms": end_ms},
+        "data_window_start": _iso_from_ms(start_ms),
+        "data_window_end": _iso_from_ms(end_ms),
+        "warnings": warnings,
+    }
+
+
+def _normalise_edge_payload(payload: Any) -> Optional[dict[str, Any]]:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    cell = dict(payload)
+    if "runtime_bps" not in cell and "shrunk_bps" not in cell:
+        for key in (
+            "runtime_edge_bps",
+            "shrunk_edge_bps",
+            "mean_net_bps",
+            "edge_bps",
+            "net_bps",
+        ):
+            if key in cell:
+                cell["shrunk_bps"] = cell[key]
+                break
+    if "runtime_bps" not in cell and "shrunk_bps" not in cell:
+        return None
+    for key in ("runtime_bps", "shrunk_bps", "win_rate", "win_rate_shrunk", "std_bps"):
+        if key in cell and cell[key] is not None:
+            try:
+                cell[key] = float(cell[key])
+            except (TypeError, ValueError):
+                return None
+    if "n" not in cell:
+        for key in ("n_trades", "sample_size", "count"):
+            if key in cell:
+                cell["n"] = cell[key]
+                break
+    if "n" in cell and cell["n"] is not None:
+        try:
+            cell["n"] = int(cell["n"])
+        except (TypeError, ValueError):
+            cell["n"] = 0
+    return _json_safe_payload(cell)
+
+
+def _json_safe_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _json_safe_payload(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_payload(v) for v in value]
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _fetch_edge_estimate_snapshot_sync(
+    *,
+    symbols: list[str],
+    strategies: list[str],
+    cutoff_ms: int,
+) -> dict[str, Any]:
+    """Read V059 historical edge snapshots as replay runner JSON cells."""
+    if not symbols or not strategies:
+        return {
+            "status": "empty",
+            "source": "v059_edge_estimate_snapshots",
+            "reason": "empty_symbols_or_strategies",
+            "edge_estimates": {},
+        }
+    try:
+        with get_pg_conn() as conn:
+            if conn is None:
+                return {
+                    "status": "unavailable",
+                    "source": "v059_edge_estimate_snapshots",
+                    "reason": "pg_unavailable",
+                    "edge_estimates": {},
+                }
+            cur = conn.cursor()
+            cur.execute("SET LOCAL statement_timeout = %s;", (_STATEMENT_TIMEOUT_MS,))
+            cur.execute(
+                """
+                SELECT DISTINCT ON (strategy, symbol)
+                    strategy,
+                    symbol,
+                    asof_ts,
+                    source_tier,
+                    estimate_payload_jsonb,
+                    regime_key,
+                    cell_key
+                FROM learning.edge_estimate_snapshots
+                WHERE symbol = ANY(%s)
+                  AND strategy = ANY(%s)
+                  AND asof_ts <= to_timestamp(%s / 1000.0)
+                  AND is_deprecated_at_asof = false
+                ORDER BY
+                    strategy,
+                    symbol,
+                    asof_ts DESC,
+                    (regime_key = 'global') DESC,
+                    (cell_key = 'default') DESC;
+                """,
+                (symbols, strategies, cutoff_ms),
+            )
+            rows = _cursor_fetchall(cur)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "unavailable",
+            "source": "v059_edge_estimate_snapshots",
+            "reason": type(exc).__name__,
+            "message": str(exc),
+            "edge_estimates": {},
+        }
+
+    edge_estimates: dict[str, Any] = {}
+    cells: list[dict[str, Any]] = []
+    for row in rows:
+        strategy = str(row[0])
+        symbol = str(row[1]).upper()
+        cell = _normalise_edge_payload(row[4])
+        if cell is None:
+            continue
+        key = f"{strategy}::{symbol}"
+        edge_estimates[key] = cell
+        cells.append({
+            "key": key,
+            "asof_ts": row[2].isoformat() if hasattr(row[2], "isoformat") else str(row[2]),
+            "source_tier": row[3],
+            "regime_key": row[5],
+            "cell_key": row[6],
+        })
+    return {
+        "status": "ok" if edge_estimates else "empty",
+        "source": "v059_edge_estimate_snapshots",
+        "cutoff_ms": cutoff_ms,
+        "cutoff_iso": _iso_from_ms(cutoff_ms),
+        "cell_count": len(edge_estimates),
+        "cells": cells,
+        "edge_estimates": edge_estimates,
+        "reason": None if edge_estimates else "no_cells_for_symbols_strategies_cutoff",
+    }
+
+
 async def _prepare_full_chain_run_fixture(
     body: ReplayFullChainRunRequest,
+    strategies: list[str],
 ) -> dict[str, Any]:
     _require_full_chain_bulk_prod_ip_allowed()
     start_ms = _to_utc_ms(body.data_window_start)
@@ -176,17 +463,42 @@ async def _prepare_full_chain_run_fixture(
 
     scanner_snapshot: dict[str, Any] = {}
     scanner_warning: Optional[str] = None
+    historical_universe: dict[str, Any] = {}
+    universe_source = body.universe_preset
     if body.universe_preset == "current_scanner":
-        try:
-            scanner_snapshot = await _fetch_current_scanner_snapshot()
-        except Exception as exc:  # noqa: BLE001
-            scanner_warning = f"scanner_snapshot_unavailable:{exc}"
-            scanner_snapshot = {"status": "unavailable", "reason": str(exc)}
-
-    symbols, warnings = _resolve_full_chain_symbols(
-        body=body,
-        scanner_snapshot=scanner_snapshot,
-    )
+        historical_universe = await asyncio.to_thread(
+            _fetch_historical_universe_snapshot_sync,
+            category=body.category,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            max_symbols=body.max_symbols,
+        )
+        if historical_universe.get("status") == "ok" and historical_universe.get("symbols"):
+            symbols = list(historical_universe["symbols"])
+            warnings = list(historical_universe.get("warnings") or [])
+            universe_source = "v058_symbol_universe_snapshots"
+            scanner_snapshot = {"historical_universe": historical_universe}
+        else:
+            reason = str(historical_universe.get("reason") or "empty")
+            try:
+                scanner_snapshot = await _fetch_current_scanner_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                scanner_warning = f"scanner_snapshot_unavailable:{exc}"
+                scanner_snapshot = {"status": "unavailable", "reason": str(exc)}
+            symbols, warnings = _resolve_full_chain_symbols(
+                body=body,
+                scanner_snapshot=scanner_snapshot,
+            )
+            warnings.append(
+                "historical_universe_unavailable_fell_back_to_current_scanner:"
+                + reason
+            )
+            universe_source = "current_scanner_fallback"
+    else:
+        symbols, warnings = _resolve_full_chain_symbols(
+            body=body,
+            scanner_snapshot=scanner_snapshot,
+        )
     if scanner_warning:
         warnings.append(scanner_warning)
 
@@ -213,6 +525,12 @@ async def _prepare_full_chain_run_fixture(
             end_ms=end_ms,
             max_bars_per_symbol=max_bars_per_symbol,
         )
+        edge_task = asyncio.to_thread(
+            _fetch_edge_estimate_snapshot_sync,
+            symbols=symbols,
+            strategies=strategies,
+            cutoff_ms=start_ms,
+        )
         if body.use_current_config:
             strategy_task = _fetch_full_chain_strategy_params(engine=body.engine)
             risk_task = _fetch_current_risk_config(engine=body.engine)
@@ -220,9 +538,18 @@ async def _prepare_full_chain_run_fixture(
                 (events, per_symbol_counts),
                 strategy_params,
                 risk_overrides,
-            ) = await asyncio.gather(market_task, strategy_task, risk_task)
+                edge_snapshot,
+            ) = await asyncio.gather(
+                market_task,
+                strategy_task,
+                risk_task,
+                edge_task,
+            )
         else:
-            events, per_symbol_counts = await market_task
+            (events, per_symbol_counts), edge_snapshot = await asyncio.gather(
+                market_task,
+                edge_task,
+            )
             strategy_params = None
             risk_overrides = None
     except Exception as exc:  # noqa: BLE001
@@ -250,6 +577,11 @@ async def _prepare_full_chain_run_fixture(
     missing_symbols = [symbol for symbol, count in per_symbol_counts.items() if count <= 0]
     if missing_symbols:
         warnings.append("market_data_missing_for:" + ",".join(missing_symbols))
+    if edge_snapshot.get("status") != "ok":
+        warnings.append(
+            "edge_snapshot_unavailable:"
+            + str(edge_snapshot.get("reason") or edge_snapshot.get("status") or "unknown")
+        )
 
     fixture_path = await asyncio.to_thread(
         _write_full_chain_s2_fixture,
@@ -274,6 +606,9 @@ async def _prepare_full_chain_run_fixture(
         "symbols": symbols,
         "warnings": warnings,
         "scanner_snapshot": scanner_snapshot,
+        "historical_universe": historical_universe,
+        "universe_source": universe_source,
+        "edge_snapshot": edge_snapshot,
         "start_ms": start_ms,
         "end_ms": end_ms,
         "strategy_params": strategy_params,
@@ -290,6 +625,9 @@ def _build_manifest_jsonb(
     start_ms: int,
     end_ms: int,
     scanner_snapshot: dict[str, Any],
+    universe_source: str,
+    historical_universe: dict[str, Any],
+    edge_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "manifest_version": 1,
@@ -307,7 +645,15 @@ def _build_manifest_jsonb(
         "starting_balance": body.starting_balance,
         "window": {"start_ms": start_ms, "end_ms": end_ms},
         "universe_preset": body.universe_preset,
+        "universe_source": universe_source,
+        "historical_universe": historical_universe,
         "scanner_snapshot_hash": _canonical_sha256(scanner_snapshot),
+        "edge_snapshot_meta": {
+            key: value
+            for key, value in edge_snapshot.items()
+            if key != "edge_estimates"
+        },
+        "edge_estimates": edge_snapshot.get("edge_estimates") or {},
         "replay_tier": "s2_public_replay",
         "promotion_allowed": False,
         "promotion_block_reason": "current_config_in_sample_sandbox",
@@ -485,7 +831,7 @@ async def post_replay_full_chain_run(
             },
         )
 
-    prepared = await _prepare_full_chain_run_fixture(body)
+    prepared = await _prepare_full_chain_run_fixture(body, strategies)
     registered: list[dict[str, Any]] = []
     for strategy in strategies:
         manifest_jsonb = _build_manifest_jsonb(
@@ -496,6 +842,9 @@ async def post_replay_full_chain_run(
             start_ms=prepared["start_ms"],
             end_ms=prepared["end_ms"],
             scanner_snapshot=prepared["scanner_snapshot"],
+            universe_source=prepared["universe_source"],
+            historical_universe=prepared["historical_universe"],
+            edge_snapshot=prepared["edge_snapshot"],
         )
         registered.append(
             await _register_full_chain_experiment(
@@ -535,6 +884,13 @@ async def post_replay_full_chain_run(
         "estimated_bars_per_symbol": prepared["estimated_bars_per_symbol"],
         "per_symbol_event_counts": prepared["per_symbol_event_counts"],
         "symbols": prepared["symbols"],
+        "universe_source": prepared["universe_source"],
+        "historical_universe": prepared["historical_universe"],
+        "edge_snapshot": {
+            key: value
+            for key, value in prepared["edge_snapshot"].items()
+            if key != "edge_estimates"
+        },
         "strategies": strategies,
         "strategy_count": len(strategies),
         "runs": runs,
