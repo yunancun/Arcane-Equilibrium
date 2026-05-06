@@ -137,7 +137,7 @@ Linux / runtime 通過：
   - `--keep-auth` 保留現有授權狀態
 - `python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status`
   - `engine_alive=true`
-  - paper/demo/live snapshots fresh（採集點 2026-05-06 13:31 UTC）
+  - final check：demo/live snapshots fresh；paper inactive by design（採集點 2026-05-06 13:39 UTC）
 - `cargo test -p openclaw_engine scanner --lib --manifest-path rust/Cargo.toml` on Linux
   - 79 passed
 - `PYTHONPATH=. python3 -m pytest tests/test_scanner_opportunities_ipc.py tests/test_strategy_wiring_scanner.py -q` on Linux
