@@ -26,21 +26,24 @@
   .dev-migration-card {
     background:rgba(56,139,253,0.055); border:1px solid rgba(56,139,253,0.32); border-radius:8px;
     min-height:148px; padding:12px; display:flex; flex-direction:column; gap:8px;
-    color:var(--text); cursor:pointer; text-align:left; outline:none;
+    color:var(--text); cursor:pointer; text-align:left; outline:none; min-width:0; overflow:hidden;
   }
   .dev-migration-card:hover, .dev-migration-card:focus { border-color:rgba(56,139,253,0.68); background:rgba(56,139,253,0.085); }
   .dev-migration-card.expanded { grid-column:span 2; background:rgba(56,139,253,0.10); }
   .dev-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-  .dev-card-title { font-size:12px; font-weight:700; line-height:1.35; }
+  .dev-card-title { font-size:12px; font-weight:700; line-height:1.35; overflow-wrap:anywhere; word-break:break-word; }
   .dev-card-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:auto; }
   .dev-card-detail { display:none; border-top:1px solid rgba(139,148,158,0.18); padding-top:9px; margin-top:2px; }
   .dev-migration-card.expanded .dev-card-detail { display:grid; gap:8px; }
   .dev-detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
   .dev-detail-box { border:1px solid rgba(139,148,158,0.14); border-radius:7px; padding:8px; background:rgba(13,17,23,0.34); }
   .dev-detail-label { color:var(--text-dim); font-size:10px; text-transform:uppercase; margin-bottom:4px; }
-  .dev-detail-value { color:var(--text); font-size:12px; line-height:1.45; }
+  .dev-detail-value { color:var(--text); font-size:12px; line-height:1.45; overflow-wrap:anywhere; word-break:break-word; }
   .dev-version { font-weight:800; color:var(--accent); white-space:nowrap; }
-  .dev-purpose { color:var(--text); line-height:1.45; max-width:520px; }
+  .dev-purpose { color:var(--text); line-height:1.45; max-width:520px; overflow-wrap:anywhere; word-break:break-word; }
+  .dev-migration-card:not(.expanded) .dev-purpose {
+    display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;
+  }
   .dev-objects { color:var(--text-dim); font-family:monospace; font-size:11px; max-width:260px; }
   .dev-filter-row { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px; }
   .dev-filter-row .oc-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(56,139,253,0.12); }
@@ -112,6 +115,17 @@
             </thead>
             <tbody id="dev-migration-body"><tr><td colspan="6" class="oc-loading">Loading...</td></tr></tbody>
           </table>
+        </div>
+      </div>
+
+      <div class="dev-panels" style="margin-top:12px">
+        <div class="dev-panel">
+          <h3>&#x1F5C2; 文档智能 / Documentation Intelligence</h3>
+          <div class="dev-list" id="dev-doc-summary-list"><div class="oc-loading">Loading...</div></div>
+        </div>
+        <div class="dev-panel">
+          <h3>&#x1F517; GUI 热交互候选 / Hot GUI Candidates</h3>
+          <div class="dev-list" id="dev-doc-hot-list"><div class="oc-loading">Loading...</div></div>
         </div>
       </div>
 
@@ -203,6 +217,53 @@ function renderGit(payload) {
     rows.push('<div class="dev-list-item"><strong>Dirty paths</strong><div class="dev-code">' + ocEsc(git.dirty_paths.join('\\n')) + '</div></div>');
   }
   ocSetHtml('dev-git-list', rows.length ? rows.join('') : '<div class="oc-loading">No git context available</div>');
+}
+
+function renderDocumentation(payload) {
+  const docs = payload.documentation || {};
+  const inventory = docs.inventory || {};
+  const indexFiles = docs.index_files || {};
+  const counts = docs.live_counts || {};
+  const clusters = docs.live_clusters || [];
+  const phases = inventory.phased_execution || [];
+  const summaryRows = [];
+  summaryRows.push(
+    '<div class="dev-list-item"><strong>Index Layer</strong><br>' +
+    '<span class="oc-chip ' + (indexFiles.document_inventory_present ? 'oc-chip-good' : 'oc-chip-warn') + '">inventory</span> ' +
+    '<span class="oc-chip ' + (indexFiles.path_redirects_present ? 'oc-chip-good' : 'oc-chip-warn') + '">redirects</span>' +
+    '<div class="dev-code">' + ocEsc(indexFiles.document_inventory || 'docs/_indexes/document_inventory.json pending') + '</div>' +
+    '<div class="dev-code">' + ocEsc(indexFiles.path_redirects || 'docs/_indexes/path_redirects.md pending') + '</div></div>'
+  );
+  summaryRows.push(
+    '<div class="dev-list-item"><strong>Live Markdown Counts</strong><br>' +
+    '<span class="oc-chip oc-chip-neutral">docs ' + ocEsc(String(counts.docs_markdown || 0)) + '</span> ' +
+    '<span class="oc-chip oc-chip-neutral">memory ' + ocEsc(String(counts.memory_markdown || 0)) + '</span> ' +
+    '<span class="oc-chip oc-chip-neutral">.codex ' + ocEsc(String(counts.codex_markdown || 0)) + '</span> ' +
+    '<span class="oc-chip oc-chip-neutral">.claude_reports ' + ocEsc(String(counts.claude_reports_markdown || 0)) + '</span></div>'
+  );
+  if (clusters.length) {
+    summaryRows.push(
+      '<div class="dev-list-item"><strong>Largest Clusters</strong><br>' +
+      clusters.slice().sort((a, b) => (b.markdown_count || 0) - (a.markdown_count || 0)).slice(0, 6).map(c =>
+        '<div class="dev-code">' + ocEsc(c.path || '') + ' · ' + ocEsc(String(c.markdown_count || 0)) + '</div>'
+      ).join('') + '</div>'
+    );
+  }
+  if (phases.length) {
+    summaryRows.push(
+      '<div class="dev-list-item"><strong>Reorg Phases</strong><br>' +
+      phases.slice(0, 4).map(p => '<div>' + ocEsc(p) + '</div>').join('') + '</div>'
+    );
+  }
+  ocSetHtml('dev-doc-summary-list', summaryRows.join(''));
+
+  const hot = ((inventory.gui_hot_candidates || {}).high || []);
+  const hotRows = hot.map(item =>
+    '<div class="dev-list-item"><strong>' + ocEsc(item.path || '') + '</strong>' +
+    '<div>' + ocEsc(item.surface || '') + '</div>' +
+    '<div class="dev-code">' + ocEsc(item.integration || '') + '</div></div>'
+  );
+  ocSetHtml('dev-doc-hot-list', hotRows.length ? hotRows.join('') : '<div class="oc-loading">No hot candidates indexed</div>');
 }
 
 function formatBytes(n) {
@@ -338,6 +399,7 @@ async function loadDevelopmentStatus() {
   renderSummary(payload);
   renderFocus(payload);
   renderReports(payload);
+  renderDocumentation(payload);
   renderRunbook(payload);
   renderGit(payload);
   renderMigrations(payload);

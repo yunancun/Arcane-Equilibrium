@@ -42,6 +42,8 @@ docs/
 │
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │
+├── _indexes/                          ← 文檔 inventory / redirect map / GUI metadata（先建索引再重命名）
+│
 ├── audits/                            ← ★ 全系统审计报告（专项 + 综合审计子目录）
 │   ├── 2026-04-05--l3_comprehensive/   ← L3 全系统综合审计（12 角色专项报告，2026-04-05）
 │   └── （专项审计报告）                ← 按日期命名的专项审计（如 Bybit API 审计）
@@ -155,6 +157,13 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 ---
 
 ## 文档索引 (Document Index)
+
+### _indexes/ — 文档 inventory / redirect map / GUI metadata（2026-05-06+）
+
+| 文件 | 内容 |
+|------|------|
+| `document_inventory.json` | R4 文档信息架构盘点结果：当前 cluster counts、目标 taxonomy、GUI 热交互候选、分阶段执行计划 |
+| `path_redirects.md` | 文档重命名/搬迁 redirect plan；当前仅规划，不代表文件已移动 |
 
 ### worklogs/chapters_a-g/ — A-G 章节工作日志（2026-03-11 ~ 2026-03-19）
 

@@ -117,6 +117,27 @@ _ENV_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
 _ENV_FALSEY = frozenset({"0", "false", "no", "off", "disabled"})
 _MIGRATION_FILE_RE = re.compile(r"^V(?P<version>\d{3})__(?P<name>.+)\.sql$")
 _MIGRATION_COMPANION_RE = re.compile(r"^V(?P<version>\d{3})_(?!_)(?P<name>.+)\.sql$")
+_DOC_CLUSTER_PATHS = (
+    "docs/CCAgentWorkSpace",
+    "docs/governance_dev",
+    "docs/worklogs",
+    "docs/references",
+    "docs/archive",
+    "docs/execution_plan",
+    "docs/audits",
+    "docs/audit",
+    "docs/decisions",
+    "docs/adr",
+    "docs/architecture",
+    "docs/runbooks",
+    "docs/healthchecks",
+    "docs/handoffs",
+    "docs/known_issues",
+    "docs/rust_migration",
+    "memory",
+    ".codex",
+    ".claude_reports",
+)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers / 輔助函數
@@ -344,6 +365,11 @@ def _read_text_limited(path: Path, *, max_chars: int = 20000) -> str:
     return text[:max_chars]
 
 
+def _is_sql_comment_separator(comment: str) -> bool:
+    compact = comment.strip()
+    return bool(compact) and set(compact) <= {"=", "-", "_", " ", "\t"}
+
+
 def _extract_migration_purpose(path: Path, fallback: str) -> str:
     """Extract a concise purpose from migration header comments."""
     text = _read_text_limited(path, max_chars=12000)
@@ -364,6 +390,8 @@ def _extract_migration_purpose(path: Path, fallback: str) -> str:
             continue
         comment = stripped[2:].strip()
         if not comment:
+            continue
+        if _is_sql_comment_separator(comment):
             continue
         if "Purpose" in comment or "目的" in comment:
             capturing = True
@@ -421,7 +449,7 @@ def _extract_migration_header(path: Path) -> list[str]:
         comment = stripped[2:].strip()
         if not comment:
             continue
-        if set(comment) <= {"=", "-", " ", "\t"}:
+        if _is_sql_comment_separator(comment):
             continue
         rows.append(comment[:260])
         if len(rows) >= 10:
@@ -477,6 +505,96 @@ def _recent_pm_reports(root: Path, *, limit: int = 8) -> list[dict[str, Any]]:
         }
         for path in reports[:limit]
     ]
+
+
+def _count_markdown_files(path: Path) -> int:
+    try:
+        return sum(1 for p in path.rglob("*.md") if p.is_file())
+    except OSError:
+        return 0
+
+
+def _fallback_document_inventory() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "source": "runtime fallback",
+        "policy": {
+            "strategy": "index-first; no mass rename until redirects and hot references are stable",
+        },
+        "target_taxonomy": [
+            {"path": "docs/00-active", "purpose": "active status and plan pointers"},
+            {"path": "docs/01-architecture", "purpose": "architecture overlays and ADRs"},
+            {"path": "docs/02-execution-plans", "purpose": "REF, MAG, sprint, wave, and phase plans"},
+            {"path": "docs/03-governance", "purpose": "governance specs, amendments, registers"},
+            {"path": "docs/04-audits", "purpose": "audit and verdict reports"},
+            {"path": "docs/05-agent-workspace", "purpose": "role workspaces and reports"},
+            {"path": "docs/_indexes", "purpose": "machine-readable inventories and redirect maps"},
+        ],
+        "gui_hot_candidates": {
+            "high": [
+                {"path": "TODO.md", "surface": "Global Development Status", "integration": "parsed structured data"},
+                {"path": "CLAUDE.md", "surface": "Live readiness", "integration": "parsed structured data"},
+                {
+                    "path": "docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md",
+                    "surface": "Agent Control",
+                    "integration": "parsed structured data and OpenClaw status APIs",
+                },
+            ],
+            "medium": [],
+            "low": [],
+        },
+        "phased_execution": [
+            "Generate docs/_indexes/document_inventory.json and docs/_indexes/path_redirects.md before moving files.",
+            "Build GUI from indexes and parsed active docs before moving hot paths.",
+            "Move cold docs first, with redirect stubs for at least one release cycle.",
+        ],
+        "risk_notes": [
+            "Agent boot rules and dispatch files reference fixed paths.",
+            "SQL migrations and code comments cite execution plans and reports.",
+            "CCAgentWorkSpace report paths are active role conventions.",
+        ],
+    }
+
+
+def _build_documentation_inventory_payload(root: Path) -> dict[str, Any]:
+    index_dir = root / "docs" / "_indexes"
+    inventory_path = index_dir / "document_inventory.json"
+    redirects_path = index_dir / "path_redirects.md"
+    inventory = _fallback_document_inventory()
+    try:
+        if inventory_path.is_file():
+            loaded = json.loads(inventory_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                inventory = loaded
+    except (json.JSONDecodeError, OSError):
+        inventory = _fallback_document_inventory()
+
+    live_clusters = []
+    for rel in _DOC_CLUSTER_PATHS:
+        path = root / rel
+        if path.exists():
+            live_clusters.append(
+                {
+                    "path": rel,
+                    "markdown_count": _count_markdown_files(path),
+                }
+            )
+    return {
+        "index_files": {
+            "document_inventory_present": inventory_path.is_file(),
+            "path_redirects_present": redirects_path.is_file(),
+            "document_inventory": str(inventory_path.relative_to(root)) if inventory_path.is_file() else "",
+            "path_redirects": str(redirects_path.relative_to(root)) if redirects_path.is_file() else "",
+        },
+        "live_counts": {
+            "docs_markdown": _count_markdown_files(root / "docs"),
+            "memory_markdown": _count_markdown_files(root / "memory"),
+            "codex_markdown": _count_markdown_files(root / ".codex"),
+            "claude_reports_markdown": _count_markdown_files(root / ".claude_reports"),
+        },
+        "live_clusters": live_clusters,
+        "inventory": inventory,
+    }
 
 
 def _build_development_status_payload() -> dict[str, Any]:
@@ -595,6 +713,7 @@ def _build_development_status_payload() -> dict[str, Any]:
             ),
             "recent_pm_reports": _recent_pm_reports(root),
         },
+        "documentation": _build_documentation_inventory_payload(root),
         "runbook": [
             {
                 "label": "Focused console static tests",
