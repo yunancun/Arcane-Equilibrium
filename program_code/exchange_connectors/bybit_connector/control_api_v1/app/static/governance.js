@@ -1,5 +1,5 @@
 /**
- * OpenClaw Trading System — Governance API Module
+ * 玄衡 · Arcane Equilibrium — Governance API Module
  * 治理系统 API 模块：授权、风控、租约、对账
  */
 

@@ -1,6 +1,6 @@
 /**
- * OpenClaw / Bybit Control Center — GUI JavaScript
- * OpenClaw / Bybit 控制台前端脚本
+ * 玄衡 · Arcane Equilibrium Control Center — GUI JavaScript
+ * 玄衡控制台前端脚本
  *
  * 功能概述 / Feature overview:
  * - 通过 HttpOnly Cookie 认证调用 Control API（已从 Bearer Token 迁移）
@@ -696,4 +696,3 @@ function updateSettingsConsoleFromControlPlane(controlPlane) {
     riskStateEl.innerHTML = `<span class="status-chip ${variantForState(effectiveState)}">${ocEsc(effectiveState)}</span>`;
   }
 }
-

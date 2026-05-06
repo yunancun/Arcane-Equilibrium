@@ -41,6 +41,9 @@ _STATIC_DIR = _THIS_DIR.parent.parent / "app" / "static"
 _TAB_PAPER_HTML = _STATIC_DIR / "tab-paper.html"
 _TAB_REPLAY_HTML = _STATIC_DIR / "tab-replay.html"
 _CONSOLE_HTML = _STATIC_DIR / "console.html"
+_LOGIN_HTML = _STATIC_DIR / "login.html"
+_INDEX_HTML = _STATIC_DIR / "index.html"
+_TRADING_HTML = _STATIC_DIR / "trading.html"
 _APP_PAPER_JS = _STATIC_DIR / "app-paper.js"
 _BROWSER_TEST_HTML = _THIS_DIR / "test_replay_subtab_readiness.html"
 
@@ -103,6 +106,26 @@ def test_console_has_replay_and_optional_paper_tabs(console_html: str) -> None:
     assert "tab-replay.html" in console_html
     assert "requiresPaperEngine: true" in console_html
     assert "/api/v1/settings/paper-engine" in console_html
+
+
+def test_soft_rename_removes_claw_logo_from_entry_surfaces(
+    console_html: str,
+) -> None:
+    """Entry surfaces should show 玄衡 branding, not the old claw mark."""
+    entry_text = "\n".join(
+        [
+            console_html,
+            _LOGIN_HTML.read_text(encoding="utf-8"),
+            _INDEX_HTML.read_text(encoding="utf-8"),
+            _TRADING_HTML.read_text(encoding="utf-8"),
+        ]
+    )
+    assert "玄衡" in entry_text
+    assert "Arcane Equilibrium" in entry_text
+    assert "&#x1F99E;" not in entry_text
+    assert "OpenClaw Trading Console" not in entry_text
+    assert "OpenClaw Trading System" not in entry_text
+    assert "OpenClaw / Bybit Control Center" not in entry_text
 
 
 def test_r4_t1_other_subtabs_still_disabled(tab_paper_html: str) -> None:

@@ -91,7 +91,7 @@
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-grafana').innerHTML = ocExplain(
   'Grafana 是一个专业的监控仪表盘工具，用来展示系统运行的实时图表和历史趋势。如果 Grafana 显示"未连接"，说明监控服务尚未启动或配置。',
-  'Grafana 连接到 Prometheus 时间序列数据库，收集交易系统的各项指标：API 响应时间、订单处理延迟、WebSocket 连接状态、内存/CPU 使用率等。Dashboard 预配置了 OpenClaw Trading PnL 看板，显示盈亏趋势和交易活动。'
+  'Grafana 连接到 Prometheus 时间序列数据库，收集交易系统的各项指标：API 响应时间、订单处理延迟、WebSocket 连接状态、内存/CPU 使用率等。Dashboard 预配置了玄衡 Trading PnL 看板，显示盈亏趋势和交易活动。'
 );
 
 $('explain-pipeline').innerHTML = ocExplain(
@@ -143,7 +143,7 @@ function showGrafanaOffline() {
         <p>2. 安装 Prometheus: <code>sudo apt install prometheus</code></p>
         <p>3. 配置 Prometheus 抓取 Trading API 的 /metrics 端点</p>
         <p>4. 在 Grafana 添加 Prometheus 数据源</p>
-        <p>5. 导入 OpenClaw Trading PnL 看板</p>
+        <p>5. 导入玄衡 Trading PnL 看板</p>
         <p>6. 确保 Grafana 运行在 trade-core:3000</p>
       </div>
     </details>

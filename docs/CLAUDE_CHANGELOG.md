@@ -1,7 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（玄衡 · Arcane Equilibrium soft rename）
+> 最後更新：2026-05-06（玄衡 GUI brand cleanup）
+
+### 玄衡 GUI brand cleanup — 2026-05-06
+
+**Scope**：完成 soft rename 的 GUI 收尾，移除入口頁 / console header 的 claw logo，將對外顯示標題改為 **玄衡 · Arcane Equilibrium**。
+
+**邊界**：
+- 保留 `OpenClaw Gateway` 作服務名稱。
+- 保留 `window.OpenClaw*` JS namespace、`/openclaw` route、`OPENCLAW_*` env、Rust crate / binary names、Bybit connector path。
+- 未做 runtime deploy / restart / DB write / live auth mutation。
+
+**Files updated**：static console/login/index/trading/app-gui/governance/monitoring copy + static asset regression test + PM report。
 
 ### 玄衡 · Arcane Equilibrium soft rename — 2026-05-06
 
