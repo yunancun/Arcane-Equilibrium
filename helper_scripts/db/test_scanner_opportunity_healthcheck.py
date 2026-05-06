@@ -22,17 +22,29 @@ sys.path.insert(0, _SRV_ROOT)
 from helper_scripts.db.passive_wait_healthcheck.checks_scanner_market import (  # noqa: E402
     OPPORTUNITY_SHADOW_MIN_LABEL_SAMPLE,
     OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE,
+    OPPORTUNITY_SHADOW_MIN_REJECTED_SAMPLE,
     check_scanner_opportunity_shadow_acceptance,
 )
 
 
-def _build_cur(fetchone_rows: list[tuple], fetchall_rows: list[tuple] | None = None) -> MagicMock:
+_TABLES_OK = [(True,), (True,), (True,), (True,), (True,)]
+
+
+def _build_cur(
+    fetchone_rows: list[tuple],
+    fetchall_rows: list[tuple] | list[list[tuple]] | None = None,
+) -> MagicMock:
     """Build a psycopg2-like cursor for `[51]` tests."""
     cur = MagicMock()
     cur.connection = MagicMock()
     cur.connection.rollback = MagicMock()
     cur.fetchone.side_effect = fetchone_rows
-    cur.fetchall.return_value = fetchall_rows if fetchall_rows is not None else []
+    if fetchall_rows is None:
+        cur.fetchall.return_value = []
+    elif fetchall_rows and isinstance(fetchall_rows[0], list):
+        cur.fetchall.side_effect = fetchall_rows
+    else:
+        cur.fetchall.return_value = fetchall_rows
     return cur
 
 
@@ -40,7 +52,7 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
     """Verdict paths for coverage, low-label warmup, and calibration failure."""
 
     def test_warn_when_required_table_missing(self) -> None:
-        cur = _build_cur([(False,), (True,), (True,)])
+        cur = _build_cur([(False,), (True,), (True,), (True,), (True,)])
         status, msg = check_scanner_opportunity_shadow_acceptance(cur)
         self.assertEqual(status, "WARN")
         self.assertIn("trading.scanner_snapshots missing", msg)
@@ -48,12 +60,11 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
     def test_fail_when_snapshot_opportunity_coverage_regresses(self) -> None:
         cur = _build_cur(
             [
-                (True,),
-                (True,),
-                (True,),
+                *_TABLES_OK,
                 (100, 80, 3),  # route_n, opportunity_n, scan_n
                 (4, 4),  # scanner intents, opportunity intents
                 (OPPORTUNITY_SHADOW_MIN_LABEL_SAMPLE, 2, -10.0, None, -10.0, None),
+                (0, 0, None, None, None),
             ]
         )
         status, msg = check_scanner_opportunity_shadow_acceptance(cur)
@@ -64,12 +75,11 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
     def test_fail_when_intent_opportunity_coverage_regresses(self) -> None:
         cur = _build_cur(
             [
-                (True,),
-                (True,),
-                (True,),
+                *_TABLES_OK,
                 (100, 100, 3),
                 (10, 8),  # scanner intents, opportunity intents
                 (OPPORTUNITY_SHADOW_MIN_LABEL_SAMPLE, 2, -5.0, None, -5.0, None),
+                (0, 0, None, None, None),
             ]
         )
         status, msg = check_scanner_opportunity_shadow_acceptance(cur)
@@ -80,12 +90,11 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
     def test_warn_low_label_sample_is_not_false_fail(self) -> None:
         cur = _build_cur(
             [
-                (True,),
-                (True,),
-                (True,),
+                *_TABLES_OK,
                 (340, 340, 6),
                 (4, 4),
                 (OPPORTUNITY_SHADOW_MIN_LABEL_SAMPLE - 1, 2, -31.8, 27.9, -55.7, 0.22),
+                (0, 0, None, None, None),
             ]
         )
         status, msg = check_scanner_opportunity_shadow_acceptance(cur)
@@ -96,12 +105,11 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
     def test_pass_when_shadow_coverage_and_calibration_are_healthy(self) -> None:
         cur = _build_cur(
             [
-                (True,),
-                (True,),
-                (True,),
+                *_TABLES_OK,
                 (200, 200, 4),
                 (12, 12),
                 (30, 14, 6.5, 18.0, -2.0, 0.42),
+                (0, 0, None, None, None),
             ]
         )
         status, msg = check_scanner_opportunity_shadow_acceptance(cur)
@@ -112,9 +120,7 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
     def test_fail_when_positive_lcb_bucket_is_realized_negative(self) -> None:
         cur = _build_cur(
             [
-                (True,),
-                (True,),
-                (True,),
+                *_TABLES_OK,
                 (200, 200, 4),
                 (12, 12),
                 (
@@ -125,6 +131,7 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
                     -15.0,
                     -0.30,
                 ),
+                (0, 0, None, None, None),
             ],
             [
                 (
@@ -141,15 +148,43 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
         self.assertIn("positive opportunity LCB realized negative", msg)
         self.assertIn("grid_trading/ETHUSDT", msg)
 
+    def test_warn_when_positive_lcb_rejects_were_profitable_counterfactuals(self) -> None:
+        cur = _build_cur(
+            [
+                *_TABLES_OK,
+                (200, 200, 4),
+                (12, 12),
+                (30, 14, 6.5, 18.0, -2.0, 0.42),
+                (8, 8, 11.5, 11.5, 0.51),
+            ],
+            [
+                [],
+                [
+                    (
+                        "grid_trading",
+                        "ETHUSDT",
+                        "opportunity_positive",
+                        OPPORTUNITY_SHADOW_MIN_REJECTED_SAMPLE,
+                        12.5,
+                        8.0,
+                    )
+                ],
+            ],
+        )
+        status, msg = check_scanner_opportunity_shadow_acceptance(cur)
+        self.assertEqual(status, "WARN", msg)
+        self.assertIn("positive scanner LCB was rejected", msg)
+        self.assertIn("grid_trading/ETHUSDT", msg)
+        self.assertIn("hint=opportunity_positive", msg)
+
     def test_sql_contract_reads_shadow_paths_without_mutation(self) -> None:
         cur = _build_cur(
             [
-                (True,),
-                (True,),
-                (True,),
+                *_TABLES_OK,
                 (10, 10, 1),
                 (0, 0),
                 (0, 0, None, None, None, None),
+                (0, 0, None, None, None),
             ]
         )
         check_scanner_opportunity_shadow_acceptance(cur)
@@ -157,6 +192,12 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
         self.assertIn("strategy_judgments", sql_text)
         self.assertIn("details #> '{scanner,opportunity}'", sql_text)
         self.assertIn("metadata #>> '{scanner,opportunity,opportunity_lcb_bps}'", sql_text)
+        self.assertIn("trading.risk_verdicts", sql_text)
+        self.assertIn("trading.decision_outcomes", sql_text)
+        self.assertIn(
+            "details #> '{scanner,opportunity,components,expected_execution_cost_bps}'",
+            sql_text,
+        )
         self.assertNotIn("INSERT ", sql_text.upper())
         self.assertNotIn("UPDATE ", sql_text.upper())
         self.assertNotIn("DELETE ", sql_text.upper())
