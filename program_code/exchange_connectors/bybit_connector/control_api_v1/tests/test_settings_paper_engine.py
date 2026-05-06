@@ -118,7 +118,9 @@ def test_development_status_scans_repo_migrations_dynamically(
     migrations.mkdir(parents=True)
     (migrations / "V001__create_alpha.sql").write_text(
         "-- V001__create_alpha.sql\n"
+        "-- ================================================================\n"
         "-- Purpose: create alpha schema for development status tests.\n"
+        "-- ---------------------------------------------------------------\n"
         "CREATE SCHEMA IF NOT EXISTS alpha;\n",
         encoding="utf-8",
     )
@@ -156,9 +158,13 @@ def test_development_status_scans_repo_migrations_dynamically(
     assert items["V001"]["purpose"] == "create alpha schema for development status tests."
     assert items["V001"]["action_counts"]["create_schema"] == 1
     assert items["V001"]["header_excerpt"][0] == "V001__create_alpha.sql"
+    assert not any(set(line) <= {"=", "-", "_", " "} for line in items["V001"]["header_excerpt"])
     assert items["V001"]["size_bytes"] > 0
     assert "beta.items" in items["V003"]["objects"]
     assert items["V003"]["action_counts"]["create_table"] == 1
     assert items["V003"]["companions"] == ["V003_healthcheck.sql"]
     assert items["V003"]["companion_count"] == 1
     assert data["development_context"]["todo_excerpt"][0] == "# TODO"
+    assert data["documentation"]["index_files"]["document_inventory_present"] is False
+    assert data["documentation"]["live_counts"]["docs_markdown"] >= 2
+    assert data["documentation"]["inventory"]["gui_hot_candidates"]["high"][0]["path"] == "TODO.md"

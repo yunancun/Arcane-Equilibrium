@@ -224,10 +224,13 @@ def test_development_tab_covers_v001_to_v063(tab_development_html: str) -> None:
     assert "Migration Intelligence" in tab_development_html
     assert "Development Focus" in tab_development_html
     assert "Recent PM Reports" in tab_development_html
+    assert "Documentation Intelligence" in tab_development_html
+    assert "Hot GUI Candidates" in tab_development_html
     assert "dev-migration-grid" in tab_development_html
     assert "toggleMigrationCard" in tab_development_html
     assert "auto refresh 60s" in tab_development_html
     assert "server-side scan per refresh" in tab_development_html
+    assert "renderDocumentation" in tab_development_html
     assert "新增 V064+ migration 后会自动出现在本页" in tab_development_html
     assert "for (let i = 1; i <= 63; i += 1)" not in tab_development_html
 
