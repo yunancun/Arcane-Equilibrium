@@ -952,7 +952,7 @@ function ocPaperSubtabInit() {
       + '</div>'
       + '<div class="oc-replay-quick-grid">'
       + '<label class="oc-replay-field">Universe<select id="oc-replay-quick-universe">'
-      + '<option value="current_scanner">Current scanner universe</option>'
+      + '<option value="current_scanner">Historical universe (V058)</option>'
       + '<option value="pinned_only">Pinned symbols</option>'
       + '<option value="custom">Custom symbols</option>'
       + '</select></label>'

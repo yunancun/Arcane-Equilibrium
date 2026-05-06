@@ -49,6 +49,15 @@ def _sample_event(symbol: str, ts_ms: int) -> dict[str, Any]:
     }
 
 
+def _empty_edge_snapshot(**kwargs: Any) -> dict[str, Any]:
+    return {
+        "status": "empty",
+        "source": "v059_edge_estimate_snapshots",
+        "reason": "test_empty",
+        "edge_estimates": {},
+    }
+
+
 def test_full_chain_run_live_profile_requires_bulk_prod_ip_override(
     monkeypatch,
     tmp_path: Path,
@@ -127,6 +136,7 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     monkeypatch.setattr(mod, "_fetch_full_chain_events", fake_events)
     monkeypatch.setattr(mod, "_fetch_full_chain_strategy_params", fake_strategy_params)
     monkeypatch.setattr(mod, "_fetch_current_risk_config", fake_risk_config)
+    monkeypatch.setattr(mod, "_fetch_edge_estimate_snapshot_sync", _empty_edge_snapshot)
     monkeypatch.setattr(mod._er, "run_register_in_pg_xact", fake_register)
     monkeypatch.setattr(mod._rrun, "_do_pg_path_for_run_sync", fake_run)
 
@@ -170,6 +180,11 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
         for body in registered
     )
     assert all(body.manifest_jsonb["promotion_allowed"] is False for body in registered)
+    assert all(
+        body.manifest_jsonb["edge_snapshot_meta"]["source"]
+        == "v059_edge_estimate_snapshots"
+        for body in registered
+    )
     assert [cap for _body, cap, _global_cap in run_requests] == [2, 2]
     assert [cap for _body, _cap, cap in run_requests] == [2, 2]
 
@@ -202,6 +217,7 @@ def test_full_chain_run_finalizes_completed_in_poll(
         return {"fills_inserted": 1, "status": "completed"}, None
 
     monkeypatch.setattr(mod, "_fetch_full_chain_events", fake_events)
+    monkeypatch.setattr(mod, "_fetch_edge_estimate_snapshot_sync", _empty_edge_snapshot)
     monkeypatch.setattr(mod._er, "run_register_in_pg_xact", fake_register)
     monkeypatch.setattr(mod._rrun, "_do_pg_path_for_run_sync", fake_run)
     monkeypatch.setattr(mod._fr, "run_finalize_in_pg_xact", fake_finalize)
@@ -227,6 +243,105 @@ def test_full_chain_run_finalizes_completed_in_poll(
     assert run["status"] == "completed"
     assert run["finalize_status"] == "completed"
     assert run["finalize"]["fills_inserted"] == 1
+
+
+def test_full_chain_run_prefers_v058_universe_and_embeds_v059_edges(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import app.replay_full_chain_routes as mod
+
+    registered: list[Any] = []
+
+    def fake_universe(**kwargs):
+        assert kwargs["category"] == "linear"
+        assert kwargs["max_symbols"] == 8
+        return {
+            "status": "ok",
+            "source": "v058_symbol_universe_snapshots",
+            "symbols": ["SOLUSDT", "XRPUSDT"],
+            "symbol_count": 2,
+            "entries": [],
+            "warnings": [],
+        }
+
+    async def forbidden_current_scanner():
+        raise AssertionError("V058 hit must avoid current scanner fallback")
+
+    async def fake_events(**kwargs):
+        assert kwargs["symbols"] == ["SOLUSDT", "XRPUSDT"]
+        return (
+            [
+                _sample_event("SOLUSDT", 1_700_000_000_000),
+                _sample_event("XRPUSDT", 1_700_000_000_000),
+            ],
+            {"SOLUSDT": 1, "XRPUSDT": 1},
+        )
+
+    def fake_edge(**kwargs):
+        assert kwargs["symbols"] == ["SOLUSDT", "XRPUSDT"]
+        assert kwargs["strategies"] == ["grid_trading"]
+        return {
+            "status": "ok",
+            "source": "v059_edge_estimate_snapshots",
+            "cutoff_ms": kwargs["cutoff_ms"],
+            "cell_count": 1,
+            "cells": [{"key": "grid_trading::SOLUSDT"}],
+            "edge_estimates": {
+                "grid_trading::SOLUSDT": {
+                    "runtime_bps": 4.2,
+                    "n": 31,
+                    "std_bps": 12.0,
+                }
+            },
+        }
+
+    def fake_register(get_pg_conn, actor, body, **kwargs):
+        registered.append(body)
+        return {
+            "experiment_id": str(uuid.uuid4()),
+            "manifest_hash": "c" * 64,
+            "status": "created",
+            "idempotency_hit": False,
+        }, None
+
+    def fake_run(**kwargs):
+        return uuid.uuid4().hex, 1234, None, tmp_path / "artifact"
+
+    monkeypatch.setattr(mod, "_fetch_historical_universe_snapshot_sync", fake_universe)
+    monkeypatch.setattr(mod, "_fetch_current_scanner_snapshot", forbidden_current_scanner)
+    monkeypatch.setattr(mod, "_fetch_full_chain_events", fake_events)
+    monkeypatch.setattr(mod, "_fetch_edge_estimate_snapshot_sync", fake_edge)
+    monkeypatch.setattr(mod._er, "run_register_in_pg_xact", fake_register)
+    monkeypatch.setattr(mod._rrun, "_do_pg_path_for_run_sync", fake_run)
+
+    client = _client(monkeypatch, tmp_path)
+    resp = client.post(
+        "/api/v1/replay/full-chain/run",
+        json={
+            "universe_preset": "current_scanner",
+            "strategies": ["grid_trading"],
+            "engine": "demo",
+            "timeframe": "1m",
+            "category": "linear",
+            "data_window_start": "2026-05-01T00:00:00Z",
+            "data_window_end": "2026-05-01T00:05:00Z",
+            "use_current_config": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["symbols"] == ["SOLUSDT", "XRPUSDT"]
+    assert data["universe_source"] == "v058_symbol_universe_snapshots"
+    assert data["historical_universe"]["source"] == "v058_symbol_universe_snapshots"
+    assert data["edge_snapshot"]["cell_count"] == 1
+
+    manifest = registered[0].manifest_jsonb
+    assert manifest["universe_source"] == "v058_symbol_universe_snapshots"
+    assert manifest["historical_universe"]["symbol_count"] == 2
+    assert manifest["edge_snapshot_meta"]["cell_count"] == 1
+    assert manifest["edge_estimates"]["grid_trading::SOLUSDT"]["runtime_bps"] == 4.2
 
 
 def test_full_chain_run_rejects_strategy_cap(

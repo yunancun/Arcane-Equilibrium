@@ -1424,3 +1424,29 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   event-store flag, or trading authority change was made.
 - AgentTodo Sprint A is closed. Next AgentTodo gate is M2 MAG-020..026 Scanner
   Advisory Conversion.
+
+## 2026-05-06 REF-21 Replay Scanner Timeline + V058/V059 API Driver
+
+### Result
+- Commit `62ec04ea` added replay-safe Rust scanner timeline gating in
+  `replay_runner`, pushed to origin/main and deployed to Linux with release
+  rebuild.
+- Follow-up local work wires `/api/v1/replay/full-chain/run` to query V058
+  `market.symbol_universe_snapshots` before falling back to current scanner,
+  and to embed V059 `learning.edge_estimate_snapshots` as Rust-compatible
+  `EdgeEstimates` cells.
+- Replay UI default universe label now says `Historical universe (V058)`.
+
+### Verification
+- Mac and Linux for `62ec04ea`: targeted replay Python tests 67/0, JS syntax,
+  `cargo check --bin replay_runner --features replay_isolated`, and
+  `cargo test scanner_timeline --features replay_isolated` passed.
+- Local follow-up V058/V059 driver: `py_compile replay_full_chain_routes.py`
+  and `test_replay_full_chain_run_routes.py` passed 5/0.
+
+### Boundary
+- V058/V059 production tables still need persistent migration apply/backfill;
+  the driver emits explicit warnings and degrades when historical rows are
+  unavailable.
+- Runner scanner ticker inputs are still OHLCV-derived, not historical
+  order-book/ticker reconstruction.

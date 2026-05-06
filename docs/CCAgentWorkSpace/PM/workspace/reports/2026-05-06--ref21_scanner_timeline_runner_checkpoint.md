@@ -24,16 +24,18 @@ snapshot toward a replayed scanner timeline inside the dedicated Rust
 - V049 runtime manifest payload propagation now preserves `mode`,
   `scanner_config`, and `edge_estimates` so the signed manifest reaching Rust
   does not lose REF-21 fields.
+- Follow-up Control API driver now defaults `/api/v1/replay/full-chain/run`
+  `current_scanner` requests to V058 `market.symbol_universe_snapshots` and
+  embeds V059 `learning.edge_estimate_snapshots` as Rust-compatible
+  `EdgeEstimates` JSON cells when available.
 - Replay tab copy now says `historical scanner timeline`; Advanced workflow is
   unchanged.
 
 ## Remaining
 
-- The current one-click API still builds the initial fixture symbol list from
-  request/current scanner/custom universe. V058 `market.symbol_universe_snapshots`
-  is not yet queried as the default historical universe source.
-- V059 edge snapshots are supported by the Rust manifest path when supplied,
-  but the Control API does not yet query and embed them by default.
+- Linux production still needs persistent V058/V059 migration application and
+  backfill. Until those tables contain rows, the Control API emits an explicit
+  warning and falls back instead of silently claiming historical provenance.
 - The runner still uses fixture OHLCV-derived 24h ticker approximations; this is
   replay-safe and deterministic, but it is not a historical Bybit ticker/order
   book reconstruction.
@@ -45,4 +47,3 @@ snapshot toward a replayed scanner timeline inside the dedicated Rust
 - `cargo check --bin replay_runner --features replay_isolated`
 - `cargo test scanner_timeline --features replay_isolated`
 - `cargo test adapter_pipeline_scanner_timeline_gates_inactive_entries --features replay_isolated`
-
