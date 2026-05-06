@@ -8,6 +8,7 @@
 //!   可審計欄位，供下游 admission/replay 與實現結果對照。
 
 use crate::edge_estimates::CellEstimate;
+use crate::edge_predictor::gate::estimate_round_trip_cost_bps;
 use crate::market_data_client::types::TickerInfo;
 use crate::scanner::config::OpportunityConfig;
 use crate::scanner::scorer::MarketConditions;
@@ -27,6 +28,17 @@ fn spread_bps(ticker: &TickerInfo) -> f64 {
         return 0.0;
     }
     ((ticker.ask1_price - ticker.bid1_price).max(0.0) / mid * 10_000.0).max(0.0)
+}
+
+fn bps_to_rate(bps: f64) -> f64 {
+    bps / 10_000.0
+}
+
+fn round_trip_fee_slippage_cost_bps(cfg: &OpportunityConfig) -> f64 {
+    estimate_round_trip_cost_bps(
+        bps_to_rate(cfg.one_way_fee_bps),
+        bps_to_rate(cfg.slippage_buffer_bps),
+    )
 }
 
 fn data_quality_score(mc: &MarketConditions, spread_bps: f64, cfg: &OpportunityConfig) -> f64 {
@@ -113,8 +125,7 @@ pub(crate) fn evaluate_opportunity(
     cfg: &OpportunityConfig,
 ) -> OpportunityDecision {
     let spread = spread_bps(ticker);
-    let expected_execution_cost_bps =
-        2.0 * (cfg.one_way_fee_bps + cfg.slippage_buffer_bps) + spread;
+    let expected_execution_cost_bps = round_trip_fee_slippage_cost_bps(cfg) + spread;
     let cost_uncertainty_bps = cfg.cost_uncertainty_bps + 0.5 * spread;
     let quality = data_quality_score(mc, spread, cfg);
 
@@ -156,7 +167,7 @@ pub(crate) fn evaluate_opportunity(
         .unwrap_or(0.0);
     let hint = admission_hint(judgment, opportunity_lcb_bps, hist_weight, cfg).to_string();
     let reason = format!(
-        "{hint}:strategy={strategy} fitness={:.2} gross={:.2} cost_q90={:.2} lcb={} route_mode={} edge_status={}",
+        "{hint}:strategy={strategy} fitness={:.2} gross={:.2} cost_q90={:.2} lcb={} cost_model=edge_predictor_round_trip+spread route_mode={} edge_status={}",
         judgment.fitness_score,
         gross_current_opportunity_bps,
         cost_q90_bps,
@@ -244,6 +255,29 @@ mod tests {
         assert!(decision.opportunity_lcb_bps.unwrap() > 0.0);
         assert_eq!(decision.admission_hint, "exploration_candidate");
         assert!(decision.components.expected_execution_cost_bps.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_reuses_edge_predictor_round_trip_definition() {
+        let cfg = OpportunityConfig::default();
+        let decision = evaluate_opportunity(
+            "ma_crossover",
+            &make_judgment(95.0),
+            &make_mc(),
+            &make_ticker(),
+            None,
+            &cfg,
+        );
+        let shared_round_trip = estimate_round_trip_cost_bps(
+            bps_to_rate(cfg.one_way_fee_bps),
+            bps_to_rate(cfg.slippage_buffer_bps),
+        );
+        let expected = shared_round_trip + spread_bps(&make_ticker());
+        let actual = decision.components.expected_execution_cost_bps.unwrap();
+        assert!((actual - expected).abs() < 1e-9);
+        assert!(decision
+            .reason
+            .contains("cost_model=edge_predictor_round_trip+spread"));
     }
 
     #[test]
