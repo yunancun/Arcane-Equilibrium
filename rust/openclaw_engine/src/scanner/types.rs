@@ -35,6 +35,18 @@ impl Default for ScannerAuthorityMode {
     }
 }
 
+impl ScannerAuthorityMode {
+    /// Stable wire value used by JSON, DB rows, and audit logs.
+    /// JSON、DB row 與 audit log 使用的穩定 wire value。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::LegacyGate => "legacy_gate",
+            Self::AdvisoryShadow => "advisory_shadow",
+            Self::AdvisoryEnforced => "advisory_enforced",
+        }
+    }
+}
+
 /// Strategy category for per-strategy fitness scoring.
 /// 策略類別，用於分立的策略適配評分。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -231,6 +243,20 @@ pub enum OpportunityDecayReason {
     /// A hard eligibility fact invalidated this route.
     /// 硬 eligibility fact 使此 route 失效。
     HardFactInvalid,
+}
+
+impl OpportunityDecayReason {
+    /// Stable wire value used by JSON, DB rows, and audit logs.
+    /// JSON、DB row 與 audit log 使用的穩定 wire value。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ScoreWeakened => "score_weakened",
+            Self::Displaced => "displaced",
+            Self::ExitedTopSet => "exited_top_set",
+            Self::DataStale => "data_stale",
+            Self::HardFactInvalid => "hard_fact_invalid",
+        }
+    }
 }
 
 /// Scanner advisory decay event.
@@ -460,6 +486,10 @@ pub struct ScanResult {
     /// 活躍交易對的評分 context，包含固定交易對與 anti-churn 保留交易對。選擇
     /// 已在組裝本欄位前完成；本列表供 dispatch 歸因與 gate 使用。
     pub candidates: Vec<ScoredSymbol>,
+    /// Advisory scanner decay evidence emitted this cycle.
+    /// 本輪 emit 的 scanner decay advisory evidence。
+    #[serde(default)]
+    pub opportunity_decays: Vec<OpportunityDecay>,
     /// Number of symbols rejected by hard filters / 被硬過濾器拒絕的交易對數量
     pub rejected_count: usize,
     /// Duration of the scan in milliseconds / 掃描耗時（毫秒）

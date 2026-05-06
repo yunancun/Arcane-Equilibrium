@@ -184,6 +184,8 @@ pub(in crate::ipc_server) fn handle_get_scanner_status(
                     })
                 })
                 .collect();
+            let opportunity_decays = serde_json::to_value(&scan.opportunity_decays)
+                .unwrap_or_else(|_| serde_json::json!([]));
             serde_json::json!({
                 "scan_ts_ms": scan.scan_ts_ms,
                 "duration_ms": scan.scan_duration_ms,
@@ -191,6 +193,8 @@ pub(in crate::ipc_server) fn handle_get_scanner_status(
                 "removed": scan.removed,
                 "rejected_count": scan.rejected_count,
                 "top_candidates": top_candidates,
+                "opportunity_decay_count": scan.opportunity_decays.len(),
+                "opportunity_decays": opportunity_decays,
             })
         }
     };

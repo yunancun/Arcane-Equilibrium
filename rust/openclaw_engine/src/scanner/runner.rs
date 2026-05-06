@@ -23,6 +23,7 @@
 use crate::database::{try_send_trading_msg, TradingMsg};
 use crate::edge_estimates::EdgeEstimates;
 use crate::market_data_client::MarketDataClient;
+use crate::scanner::advisory::build_opportunity_decays;
 use crate::scanner::config::ScannerConfig;
 use crate::scanner::opportunity::OpportunityCostPrior;
 use crate::scanner::registry::SymbolRegistry;
@@ -130,6 +131,7 @@ impl ScannerRunner {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
+            let scan_id = format!("scan-{now_ms}");
 
             let config = self.scanner_config.load();
             let strategy_policy = self.strategy_policy_stores.load_policy();
@@ -200,6 +202,7 @@ impl ScannerRunner {
 
             // ── Step 5: Query open positions / 查詢開放持倉 ──
             let open_positions = self.query_open_positions().await;
+            let previous_scan = self.registry.last_scan();
 
             // ── Step 6: Apply to registry / 應用到注冊表 ──
             let (added, removed) = self.registry.apply_scan_result(
@@ -229,6 +232,16 @@ impl ScannerRunner {
             // ── Step 8: Store scan result / 存儲掃描結果 ──
             let scan_duration_ms = scan_start.elapsed().as_millis() as u64;
             let active_symbols = self.registry.snapshot();
+            let opportunity_decays = build_opportunity_decays(
+                previous_scan.as_ref(),
+                &filtered,
+                &scan_id,
+                now_ms,
+                &open_positions,
+                &added,
+                &removed,
+                &pinned,
+            );
             let snapshot_candidates = {
                 let by_selected: HashMap<&str, _> =
                     filtered.iter().map(|c| (c.symbol.as_str(), c)).collect();
@@ -270,11 +283,12 @@ impl ScannerRunner {
 
             let scan_result = ScanResult {
                 scan_ts_ms: now_ms,
-                scan_id: format!("scan-{now_ms}"),
+                scan_id,
                 active_symbols: active_symbols.clone(),
                 added: added.clone(),
                 removed: removed.clone(),
                 candidates: snapshot_candidates,
+                opportunity_decays: opportunity_decays.clone(),
                 rejected_count,
                 scan_duration_ms,
             };
@@ -299,6 +313,15 @@ impl ScannerRunner {
                     },
                     "scanner_snapshot",
                 );
+                for decay in &opportunity_decays {
+                    let _ = try_send_trading_msg(
+                        tx,
+                        TradingMsg::ScannerOpportunityDecay {
+                            decay: decay.clone(),
+                        },
+                        "scanner_opportunity_decay",
+                    );
+                }
             }
             self.registry.store_last_scan(scan_result);
 
