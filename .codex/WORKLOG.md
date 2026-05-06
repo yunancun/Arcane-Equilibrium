@@ -158,3 +158,5 @@ YYYY-MM-DD HH:MM TZ
 - verification on Mac: new + affected targeted pytest 215 PASS, `py_compile` PASS, `git diff --check` PASS
 - Linux `trade-core` fast-forwarded to `91379cd2`; targeted pytest 215 PASS and py_compile PASS
 - status after source wave: MAG-010/011/012 source done but final DONE blocked on Linux runtime fresh rows; next gate is `[52]` row proof
+- continued MAG-013/014 row proof: strict `[52]` failed before smoke with `messages=0 state_changes=0 ai_invocations=0`; controlled Linux smoke wrote `messages=2 state_changes=11 ai_invocations=2` through real event-store hooks; strict `[52]` then PASS
+- no service restart, production continuous flag, live auth, strategy/risk config, or trading authority change

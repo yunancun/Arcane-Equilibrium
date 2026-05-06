@@ -1329,7 +1329,14 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - `py_compile`: PASS.
 - `git diff --check`: PASS.
 
+### Row Proof
+- Strict `[52]` first failed with `messages=0 state_changes=0 ai_invocations=0`.
+- Controlled Linux smoke wrote real rows through `AgentEventStore`,
+  `MessageBus`, `BaseAgent`, and `Conductor`.
+- Strict `[52]` then passed with `messages=2 state_changes=11 ai_invocations=2`.
+- State proof includes five local agents, `conductor`, and `conductor:*` rows.
+
 ### Boundary
 - No deploy/restart yet and no live trading authority change.
-- MAG-010..012 remain row-proof pending until Linux runtime writes fresh agent
-  rows; `[52]` runtime row proof is the next gate.
+- Production continuous event-store flag and supervisor cloud escalation ledger
+  remain MAG-019/runtime rollout scope.

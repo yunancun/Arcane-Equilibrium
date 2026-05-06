@@ -55,7 +55,7 @@
 | ID | 任務 | 狀態 |
 |----|------|------|
 | **P0-GOV-1** ✅ | **Decision Lease 路徑 A retrofit**（Rust `acquire_lease()` facade + router gate + Python IPC 轉呼 + bundled audit writer fix）| LAND 2026-05-03：`dbcf845b` IMPL + `0ad79f67` deploy；feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF → production 0 行為改動；§5.4 canary flip 待 ~2026-05-15 P0-EDGE-2 後 operator action。詳 `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` |
-| **P0-GOV-2** | agent schema all-time 0 rows（`agent.messages` / `state_changes` / `ai_invocations`）— DOC-01 #8/#15 violation；`agent.messages` 僅作 legacy/advisory bus trace，不得把 MessageBus 升為 Agent Decision Spine 權威。2026-05-06 已補 source wiring + `[52]`，但 blocker 解除仍等 Linux runtime row proof | AgentTodo M1 durable event-store wave；需同時覆蓋 local L1/L1.5/L2 與 OpenClaw supervisor cloud escalation 的 `agent.ai_invocations` |
+| **P0-GOV-2** | ✅ **source + Linux smoke row proof closed**：`agent.messages` / `state_changes` / `ai_invocations` 不再是 all-time 0；`MessageBus` 僅作 legacy/advisory trace，不得升為 Agent Decision Spine 權威。2026-05-06 `[52]` strict 先 FAIL `0/0/0`，受控 smoke 後 PASS `messages=2 state_changes=11 ai_invocations=2`。Production continuous event-store flag / supervisor cloud rows 仍屬 MAG-019 / runtime rollout | AgentTodo M1 durable event-store wave；local row proof closed，OpenClaw supervisor cloud escalation 的 `agent.ai_invocations` 留 MAG-019 |
 | **P0-GOV-3** | SOP「sign-off 必檢 `git status --porcelain` clean」gate（LG-5 漏洞同類防線）| CLAUDE.md §七 已加，需新 PR review template |
 | **P0-GOV-4** | Live credential rotation 7 步（PG password + Grafana admin + 6 commit history 清理）| 2 day work，Live 前必 |
 
@@ -100,11 +100,11 @@
 
 #### P1-OPENCLAW — Gateway / Agent Control Console
 
-**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。MAG-015 合約附錄已完成；MAG-010..012 source wiring + `[52]` healthcheck/test 已補，下一步是 MAG-013/014 Linux runtime row proof，再進 MAG-016..019 read-only foundation；未取得 Linux agent schema nonzero row proof 前，不做 Telegram/WebChat、proposal approval relay、或第二 GUI。
+**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。MAG-015 合約附錄已完成；MAG-010..014 source + Linux controlled row proof 已完成；下一步是 MAG-016/017 read-only foundation，再到 MAG-018/019。未完成 MAG-016/017 前，不做 Telegram/WebChat、proposal approval relay、或第二 GUI。
 
 | ID | 任務 | 來源 |
 |----|------|------|
-| **P1-OPENCLAW-0** | AgentTodo Sprint A handoff：✅ MAG-015 contract addendum frozen；MAG-010/011/012 durable event-store source wiring + `[52]` row-proof healthcheck landed locally，狀態為 row-proof pending → next MAG-013/014 Linux runtime proof → MAG-016/017 → MAG-018/019；OpenClaw 工作不得繞過 P0-GOV-2 agent schema 0-row blocker | AgentTodo 2026-05-06 PM handoff |
+| **P1-OPENCLAW-0** | AgentTodo Sprint A handoff：✅ MAG-015 contract addendum frozen；✅ MAG-010..014 durable event-store source + Linux controlled `[52]` row proof closed → next MAG-016/017 read-only OpenClaw authority lockdown + status/self-state endpoints → MAG-018/019；OpenClaw 工作不得繞過 read-only foundation | AgentTodo 2026-05-06 PM handoff |
 | **P1-OPENCLAW-1** | OpenClaw Gateway authority lockdown：allowlist `/api/v1/openclaw/*`，禁止 direct order / live TOML / Bybit key / secret access；OpenClaw request 必帶 source/channel/sender/auth_profile/request_id | 2026-05-06 control-plane repositioning |
 | **P1-OPENCLAW-2** | 先新增 read-only `/api/v1/openclaw/status` + `/api/v1/openclaw/self-state` 聚合 API；返回 degraded envelopes，不啟用 write/proposal endpoint | OpenClaw Gateway development plan + AgentTodo MAG-017 |
 | **P1-OPENCLAW-3** | 再新增 `/brief/latest` / `/diagnostics` / `/escalations` 聚合 API；必須由 durable event store + `agent.ai_invocations` 支撐，不讓前端拼 raw table | OpenClaw Gateway development plan |
