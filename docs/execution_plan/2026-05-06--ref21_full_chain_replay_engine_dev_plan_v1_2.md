@@ -1,7 +1,7 @@
 # REF-21 Full-Chain Replay Engine Dev Plan V1.2
 
 **Date:** 2026-05-06  
-**Status:** Active revised design / R2-R3 blocked behind B-gates  
+**Status:** Superseded by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md`
 **Owner:** PM  
 **Supersedes:** `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md`  
 **Audit input:** V1.1 8-agent adversarial closure review, overall rating
@@ -11,6 +11,12 @@
 hardening and must not be wired to default GUI.
 
 ---
+
+> **Supersession note (2026-05-06):** V1.2 was rated `REVISE -> V1.3`
+> after closure review found negative-edge promotion fail-open, missing DDL
+> dry-run, subprocess deploy-path ambiguity, write-confinement gaps, and missing
+> promotion sign-off mechanics. Active REF-21 governance now lives in
+> `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md`.
 
 ## 0. PM Decision
 

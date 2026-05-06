@@ -1,12 +1,17 @@
 # REF-21 Replay GUI / UX Spec V1
 
 **Date:** 2026-05-06  
-**Status:** Draft companion spec for REF-21 V1.2  
+**Status:** Superseded by `2026-05-06--ref21_gui_ux_spec_v1_1.md`
 **Owner:** PM  
 **Co-review:** A3 + TW  
 **Parent:** `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md`
 
 ---
+
+> **Supersession note (2026-05-06):** Active REF-21 GUI governance now lives in
+> `2026-05-06--ref21_gui_ux_spec_v1_1.md`, which adds second confirmation,
+> cooldown, 12-tab navigation consistency, accessibility/i18n, agent quota UI,
+> and sign-off SOP gates.
 
 ## 0. Purpose
 
