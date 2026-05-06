@@ -26,7 +26,8 @@ use crate::market_data_client::MarketDataClient;
 use crate::scanner::config::ScannerConfig;
 use crate::scanner::registry::SymbolRegistry;
 use crate::scanner::scorer::{
-    apply_correlation_filter, score_ticker_for_context, score_ticker_with_policy,
+    apply_correlation_filter, score_ticker_for_context_with_opportunity,
+    score_ticker_with_policy_and_opportunity,
 };
 use crate::scanner::strategy_policy::ScannerStrategyPolicyStores;
 use crate::scanner::types::ScanResult;
@@ -157,13 +158,14 @@ impl ScannerRunner {
                 tickers
                     .iter()
                     .filter_map(|t| {
-                        score_ticker_with_policy(
+                        score_ticker_with_policy_and_opportunity(
                             t,
                             btc_change_pct,
                             &estimates_guard,
                             &config.hard_filters,
                             &config.edge_routing,
                             &config.market_judgment,
+                            &config.opportunity,
                             &strategy_policy,
                         )
                     })
@@ -238,13 +240,14 @@ impl ScannerRunner {
                         continue;
                     }
                     if let Some(ticker) = by_ticker.get(symbol.as_str()) {
-                        if let Some(candidate) = score_ticker_for_context(
+                        if let Some(candidate) = score_ticker_for_context_with_opportunity(
                             ticker,
                             btc_change_pct,
                             &estimates_guard,
                             &config.hard_filters,
                             &config.edge_routing,
                             &config.market_judgment,
+                            &config.opportunity,
                             &strategy_policy,
                         ) {
                             if seen.insert(symbol.clone()) {

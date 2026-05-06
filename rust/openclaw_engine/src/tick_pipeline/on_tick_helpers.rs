@@ -240,6 +240,7 @@ pub(crate) struct IntentScannerContext {
     pub route_mode: String,
     pub market_status: String,
     pub route_reason: String,
+    pub opportunity: Option<crate::scanner::types::OpportunityDecision>,
     pub final_score: f64,
     pub raw_score: f64,
 }
@@ -341,6 +342,7 @@ pub(crate) fn persist_intent(
                 "route_mode": s.route_mode,
                 "market_status": s.market_status,
                 "route_reason": s.route_reason,
+                "opportunity": s.opportunity.as_ref(),
                 "final_score": s.final_score,
                 "raw_score": s.raw_score,
             })

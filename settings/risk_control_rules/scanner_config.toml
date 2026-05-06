@@ -78,3 +78,20 @@ funding_max_trend_score = 0.65
 immature_negative_min_trades = 10
 immature_negative_bps_threshold = 0.0
 immature_negative_score_cap = 20.0
+
+[opportunity]
+# Shadow-only scanner opportunity evaluation. These fields are persisted for
+# audit/replay and are not used as an additional rejection gate in v1.
+enabled = true
+one_way_fee_bps = 4.5
+slippage_buffer_bps = 1.0
+cost_uncertainty_bps = 2.0
+base_uncertainty_bps = 3.0
+fitness_gross_bps_per_score = 0.30
+spread_quality_reference_bps = 8.0
+min_calibration_trades = 30
+historical_lcb_z = 1.0
+historical_min_std_bps = 20.0
+historical_negative_penalty_weight = 0.25
+positive_history_uncertainty_discount_bps = 2.0
+opportunity_score_bps_multiplier = 2.0

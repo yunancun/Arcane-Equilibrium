@@ -14,9 +14,10 @@
 use crate::edge_estimates::{CellEstimate, EdgeEstimates};
 use crate::market_data_client::types::TickerInfo;
 use crate::scanner::config::{
-    CorrelationLimits, EdgeRoutingConfig, HardFilters, MarketJudgmentConfig,
+    CorrelationLimits, EdgeRoutingConfig, HardFilters, MarketJudgmentConfig, OpportunityConfig,
 };
 use crate::scanner::market_judgment::{build_strategy_judgments, classify_market_regime};
+use crate::scanner::opportunity::evaluate_opportunity;
 use crate::scanner::sectors::{base_from_usdt_symbol, symbol_sector, STABLECOIN_BASES};
 use crate::scanner::strategy_policy::{apply_strategy_policy, ScannerStrategyPolicy};
 use crate::scanner::types::{ScoredSymbol, StrategyCategory, StrategyRouteJudgment};
@@ -595,6 +596,32 @@ pub fn score_ticker_with_policy(
     market_judgment_config: &MarketJudgmentConfig,
     strategy_policy: &ScannerStrategyPolicy,
 ) -> Option<ScoredSymbol> {
+    score_ticker_with_policy_and_opportunity(
+        ticker,
+        btc_change_pct,
+        estimates,
+        hard_filter_config,
+        edge_routing_config,
+        market_judgment_config,
+        &OpportunityConfig::default(),
+        strategy_policy,
+    )
+}
+
+/// Build a scored symbol while applying scanner-side strategy policy and
+/// emitting scanner opportunity shadow fields.
+/// 套用 scanner 側策略政策並輸出 opportunity shadow 欄位後生成候選評分。
+#[allow(clippy::too_many_arguments)]
+pub fn score_ticker_with_policy_and_opportunity(
+    ticker: &TickerInfo,
+    btc_change_pct: f64,
+    estimates: &EdgeEstimates,
+    hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
+    opportunity_config: &OpportunityConfig,
+    strategy_policy: &ScannerStrategyPolicy,
+) -> Option<ScoredSymbol> {
     score_ticker_internal(
         ticker,
         btc_change_pct,
@@ -602,6 +629,7 @@ pub fn score_ticker_with_policy(
         hard_filter_config,
         edge_routing_config,
         market_judgment_config,
+        opportunity_config,
         strategy_policy,
         true,
     )
@@ -621,6 +649,33 @@ pub fn score_ticker_for_context(
     market_judgment_config: &MarketJudgmentConfig,
     strategy_policy: &ScannerStrategyPolicy,
 ) -> Option<ScoredSymbol> {
+    score_ticker_for_context_with_opportunity(
+        ticker,
+        btc_change_pct,
+        estimates,
+        hard_filter_config,
+        edge_routing_config,
+        market_judgment_config,
+        &OpportunityConfig::default(),
+        strategy_policy,
+    )
+}
+
+/// Build scanner context for an active symbol and emit opportunity shadow
+/// fields using the runtime scanner opportunity config.
+/// 為已活躍交易對建立 scanner context，並使用 runtime opportunity config
+/// 輸出 shadow 欄位。
+#[allow(clippy::too_many_arguments)]
+pub fn score_ticker_for_context_with_opportunity(
+    ticker: &TickerInfo,
+    btc_change_pct: f64,
+    estimates: &EdgeEstimates,
+    hard_filter_config: &HardFilters,
+    edge_routing_config: &EdgeRoutingConfig,
+    market_judgment_config: &MarketJudgmentConfig,
+    opportunity_config: &OpportunityConfig,
+    strategy_policy: &ScannerStrategyPolicy,
+) -> Option<ScoredSymbol> {
     score_ticker_internal(
         ticker,
         btc_change_pct,
@@ -628,6 +683,7 @@ pub fn score_ticker_for_context(
         hard_filter_config,
         edge_routing_config,
         market_judgment_config,
+        opportunity_config,
         strategy_policy,
         false,
     )
@@ -641,6 +697,7 @@ fn score_ticker_internal(
     hard_filter_config: &HardFilters,
     edge_routing_config: &EdgeRoutingConfig,
     market_judgment_config: &MarketJudgmentConfig,
+    opportunity_config: &OpportunityConfig,
     strategy_policy: &ScannerStrategyPolicy,
     enforce_hard_filters: bool,
 ) -> Option<ScoredSymbol> {
@@ -662,6 +719,17 @@ fn score_ticker_internal(
         market_judgment_config,
     );
     apply_strategy_policy(&ticker.symbol, &mut strategy_judgments, strategy_policy);
+    for (strategy, judgment) in strategy_judgments.iter_mut() {
+        let cell = estimates.get_cell(strategy, &ticker.symbol);
+        judgment.opportunity = Some(evaluate_opportunity(
+            strategy,
+            judgment,
+            &mc,
+            ticker,
+            cell,
+            opportunity_config,
+        ));
+    }
     let best_route = [
         (StrategyCategory::MaCrossover, "ma_crossover"),
         (StrategyCategory::GridTrading, "grid_trading"),
@@ -689,21 +757,28 @@ fn score_ticker_internal(
                 estimates,
                 edge_routing_config,
             );
-            (
-                fitness.best,
-                StrategyRouteJudgment {
-                    strategy: best_key.to_string(),
-                    fitness_score: fitness.raw,
-                    final_score: edge.final_score,
-                    edge_bps: edge.edge_bps,
-                    edge_bonus: edge.bonus,
-                    edge_n: edge.n,
-                    edge_status: edge.edge_status,
-                    route_mode: edge.route_mode,
-                    market_status: edge.market_status,
-                    route_reason: edge.route_reason,
-                },
-            )
+            let mut fallback_judgment = StrategyRouteJudgment {
+                strategy: best_key.to_string(),
+                fitness_score: fitness.raw,
+                final_score: edge.final_score,
+                edge_bps: edge.edge_bps,
+                edge_bonus: edge.bonus,
+                edge_n: edge.n,
+                edge_status: edge.edge_status,
+                route_mode: edge.route_mode,
+                market_status: edge.market_status,
+                route_reason: edge.route_reason,
+                opportunity: None,
+            };
+            fallback_judgment.opportunity = Some(evaluate_opportunity(
+                best_key,
+                &fallback_judgment,
+                &mc,
+                ticker,
+                estimates.get_cell(best_key, &ticker.symbol),
+                opportunity_config,
+            ));
+            (fitness.best, fallback_judgment)
         }
         None => return None,
     };
@@ -1243,6 +1318,42 @@ mod tests {
         assert!(scored.strategy_judgments.contains_key("funding_arb"));
     }
 
+    #[test]
+    fn test_score_ticker_emits_opportunity_shadow_for_each_strategy_judgment() {
+        let ticker = make_ticker(
+            "OPPUSDT",
+            100.0,
+            99.99,
+            100.01,
+            120_000_000.0,
+            106.0,
+            96.0,
+            0.0001,
+            0.03,
+        );
+        let scored = score_ticker(
+            &ticker,
+            2.0,
+            &EdgeEstimates::empty(),
+            &default_hard_filters(),
+            &EdgeRoutingConfig::default(),
+            &MarketJudgmentConfig::default(),
+        )
+        .expect("scored symbol");
+
+        assert_eq!(scored.strategy_judgments.len(), 5);
+        for judgment in scored.strategy_judgments.values() {
+            let opportunity = judgment
+                .opportunity
+                .as_ref()
+                .expect("scanner opportunity shadow must be emitted");
+            assert!(opportunity.opportunity_score.is_finite());
+            assert!(opportunity.components.data_quality_score >= 0.0);
+            assert!(opportunity.components.data_quality_score <= 1.0);
+            assert!(opportunity.components.expected_execution_cost_bps.unwrap() > 0.0);
+        }
+    }
+
     // ── beta_proxy tests ───────────────────────────────────────────────────────
 
     #[test]
@@ -1299,6 +1410,7 @@ mod tests {
                 route_mode: "exploration".to_string(),
                 market_status: "compatible".to_string(),
                 route_reason: "test".to_string(),
+                opportunity: None,
             },
         );
         ScoredSymbol {

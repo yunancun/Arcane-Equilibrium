@@ -48,6 +48,66 @@ impl StrategyCategory {
     }
 }
 
+/// Scanner-side opportunity component breakdown.
+/// scanner 側機會判斷的組件拆解。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpportunityComponents {
+    /// Current market-structure score before historical calibration.
+    /// 當前市場結構分數，不含歷史校準。
+    pub market_structure_score: f64,
+    /// Strategy-specific scanner fitness score.
+    /// 策略別 scanner 適配分。
+    pub strategy_fitness_score: f64,
+    /// Current-state gross opportunity estimate in bps.
+    /// 當前狀態 gross opportunity 估計（bps）。
+    pub gross_current_opportunity_bps: Option<f64>,
+    /// Expected round-trip execution cost in bps.
+    /// 預期來回執行成本（bps）。
+    pub expected_execution_cost_bps: Option<f64>,
+    /// Q90-style cost uncertainty buffer in bps.
+    /// q90 風格成本不確定性 buffer（bps）。
+    pub cost_uncertainty_bps: Option<f64>,
+    /// Market/data uncertainty buffer in bps.
+    /// 市場/數據不確定性 buffer（bps）。
+    pub uncertainty_buffer_bps: Option<f64>,
+    /// Historical realized-edge estimate in bps, if any.
+    /// 歷史 realized-edge 估計（bps），未知時為 None。
+    pub historical_edge_bps: Option<f64>,
+    /// Historical sample count for the strategy-symbol cell.
+    /// strategy-symbol cell 的歷史樣本數。
+    pub historical_edge_n: u32,
+    /// Historical lower confidence bound in bps, if computable.
+    /// 歷史 edge 下置信界（bps），可計算時提供。
+    pub historical_edge_lcb_bps: Option<f64>,
+    /// Data quality score [0, 1].
+    /// 數據品質分數 [0, 1]。
+    pub data_quality_score: f64,
+    /// Historical calibration weight [0, 1].
+    /// 歷史校準權重 [0, 1]。
+    pub calibration_weight: f64,
+}
+
+/// Scanner-side opportunity decision emitted in shadow mode.
+/// scanner 側機會判斷；v1 僅 shadow emit，不新增拒單行為。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpportunityDecision {
+    /// Normalized opportunity score [0, 100].
+    /// 標準化機會分數 [0, 100]。
+    pub opportunity_score: f64,
+    /// Net lower-confidence opportunity in bps after cost and uncertainty.
+    /// 扣除成本與不確定性後的 net LCB opportunity（bps）。
+    pub opportunity_lcb_bps: Option<f64>,
+    /// Shadow admission hint: opportunity_positive / weak / calibration_block / etc.
+    /// shadow admission 提示。
+    pub admission_hint: String,
+    /// Compact audit reason.
+    /// 精簡審計原因。
+    pub reason: String,
+    /// Component breakdown.
+    /// 組件拆解。
+    pub components: OpportunityComponents,
+}
+
 /// Strategy-specific route judgement emitted by scanner scoring.
 /// scanner scoring 輸出的策略別路由判斷。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -82,6 +142,10 @@ pub struct StrategyRouteJudgment {
     /// Human-readable reason for the route decision.
     /// 路由決策原因。
     pub route_reason: String,
+    /// Shadow-only current opportunity evaluation for this strategy-symbol route.
+    /// 此 strategy-symbol route 的 shadow-only 當前機會判斷。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opportunity: Option<OpportunityDecision>,
 }
 
 /// Full scoring breakdown for a single symbol candidate.

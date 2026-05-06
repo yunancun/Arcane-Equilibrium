@@ -1,7 +1,21 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（玄衡 GUI brand cleanup）
+> 最後更新：2026-05-06（Scanner Opportunity v1 shadow）
+
+### Scanner Opportunity v1 shadow — 2026-05-06
+
+**Scope**：把 scanner 從「掃市場」補強為 shadow-only「判斷機會」：每個 strategy-symbol judgment 產生中性的 opportunity object，並一路帶到 scanner snapshot、intent details 與 Python control-plane normalized row。
+
+**邊界**：
+- 不新增 gate number，不把 `opportunity_lcb_bps` / `admission_hint` 接進拒單 path。
+- 不改 H0、Guardian、Decision Lease、Risk Governor、IntentProcessor cost gate。
+- 不改 close / reduce / protective exit。
+- 歷史 edge 只作 calibration / uncertainty，不覆寫 current-state opportunity。
+
+**Files updated**：Rust scanner config/types/scorer/runner/opportunity module、tick pipeline intent details、Python `rust_scanner_reader.py`、scanner TOML、Rust/Python tests、PM implementation/audit reports。
+
+**Verification**：local Rust scanner tests 79/79、engine lib tests 2519/2519、release build PASS、Python scanner IPC tests PASS；adversarial grep confirmed no opportunity field is consumed by rejection paths.
 
 ### 玄衡 GUI brand cleanup — 2026-05-06
 
