@@ -254,6 +254,28 @@ def _full_chain_prepare_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _bulk_prod_ip_allowed() -> bool:
+    raw = os.environ.get("OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP", "0")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_full_chain_bulk_prod_ip_allowed() -> None:
+    """Block bulk Bybit fetches from the live release host unless explicitly enabled."""
+    if not _rh.is_live_release_profile() or _bulk_prod_ip_allowed():
+        return
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "reason_codes": ["replay_full_chain_prod_ip_blocked"],
+            "message": (
+                "full-chain replay prepare is enabled, but bulk Bybit fetches "
+                "from the live release host are blocked unless "
+                "OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP=1 is set for a governed run"
+            ),
+        },
+    )
+
+
 def _max_full_chain_bars_per_symbol() -> int:
     raw = os.environ.get("OPENCLAW_REPLAY_FULL_CHAIN_MAX_BARS_PER_SYMBOL", "12000")
     try:
@@ -748,6 +770,7 @@ async def post_replay_full_chain_prepare(
                 ),
             },
         )
+    _require_full_chain_bulk_prod_ip_allowed()
     start_ms = _to_utc_ms(body.data_window_start)
     end_ms = _to_utc_ms(body.data_window_end)
     estimated_bars_per_symbol = _estimate_bar_count(start_ms, end_ms, body.timeframe)

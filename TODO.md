@@ -6,6 +6,7 @@
 **v9 摘要保留**：2026-05-05 §九 LOC governance change：硬上限 1500→2000（operator 決定，REF-20 Sprint C 拍板）；警告線維持 800。
 **REF-20 closure 摘要**：Sprint A+B+C+D 已 closed；R9 PM sign-off commit `6a7a885c` + reality-gap fix `67b95808`。詳 → `srv/memory/project_2026_05_03_ref20_sprint1_2_closure.md` + `docs/archive/2026-05-06--todo_completed_extract.md`。Operator-side outstanding 僅剩 live PG opt-in smoke、V056 cron schedule、5 healthcheck sentinel deploy validation，不阻塞 REF-20 closure。
 **玄衡 2026-05-06 命名定位**：正式項目名為「玄衡 · Arcane Equilibrium」；外部 OpenClaw Gateway 改為通信 / mobile / supervisor / proposal relay；本地 5-Agent 保持獨立；唯一 GUI 是 `trade-core:8000/console` OpenClaw Control Console。詳 `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md` + `docs/adr/0014-arcane-equilibrium-soft-rename.md`。
+**REF-21 實證審查（2026-05-06）**：V1.3 final 8-agent real-code audit 接受；R2/R3 仍 BLOCKED。已修正 §10 replay baseline namespace collision、補 `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP` guard、落 V057-V060 migration targets、回填 GUI 13-tab 與 LOC governance。剩餘主阻塞：MIT Linux PG dry-run、SECURITY DEFINER calculator 真 body、full-chain `/run` 實作、rate ceiling 50 req/s dedicated client、Bybit ToS/fair-use review。
 **Source checkpoint before soft rename**: `61634f3a`（Mac/Linux/origin source 同步；2026-05-06 SSH 驗證 Linux clean；本次玄衡 soft rename 為 docs-only，不 rebuild / restart / DB write）· **Engine runtime**: watchdog demo/live alive，paper inactive by design；last verified full rebuild remains Sprint 3 Track I (`dbcf845b`)。
 **測試基準**：Python pytest **3431 PASS** / 1 fail (pre-existing E4-P0-1) / 10 skip · Rust cargo workspace **3132 PASS** / 2 fail (pre-existing E4-P0-2) / 3 ignored · Sprint 3 Track H Python sibling 44/44 PASS
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
@@ -66,6 +67,18 @@
 | **P0-OPS-2** | KYC / 地理禁區 / Bybit ToS 合規確認（0 governance entry）| Operator 法律確認 |
 | **P0-OPS-3** | Disaster runbook + Live first-day SOP（dust clear SOP only，缺完整 first-day playbook）| 1d work |
 | **P0-PROCESS-1** ⚠️ | E4 sign-off SOP 必加 Linux pytest 步驟（不只 Mac）— Sprint A R3 round 3 hotfix 揭 Mac Python 3.10 / Linux Python 3.12 FastAPI lazy ForwardRef 解析行為差異，Mac PASS ≠ Linux PASS。Sprint A R1+R2+R3 全部 hermetic test 在 Linux 真實 fail（100% 422 missing body）但 E4 只跑 Mac → false-positive sign-off。修法：E4 SOP 加 PM commit pre-check 階段「Linux pytest 必綠（透過 SSH bridge `ssh trade-core "cd ~/BybitOpenClaw/srv/... && .venv/bin/pytest <files>"`）」步驟；允許 Linux 已知 pre-existing fail 集 carry over，但需明文文檔化。詳：`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-04--ref20_sprint_a_r3_impl.md` §12 | @PM @E4 |
+
+#### P0-REF21 — Full-Chain Replay R2/R3 解阻
+
+| ID | 任務 | 狀態 |
+|----|------|------|
+| **P0-REF21-1** ✅ | §10 baseline SLA namespace collision 修正：replay fixture row/decision count 改為 `254062 ±1%` / `10080 ±5%` scan cycles / `500-1500` intents；pytest baseline 獨立 | DONE in V1.3 empirical correction |
+| **P0-REF21-2** ✅ | `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP` guard：live release profile 下 full-chain prepare 無 override 即 403，不 fetch Bybit | DONE source/test |
+| **P0-REF21-3** ✅ | V057-V060 至少有真 migration targets：tier approval / symbol+freeze / edge snapshots / emergency audit log | DONE source/test；待 MIT Linux PG dry-run |
+| **P0-REF21-4** | MIT Linux PG dry-run V057-V060（apply transaction + rollback/disposable DB proof + Guard A/B/C + GRANT/REVOKE diff） | BLOCKS R2/R3 |
+| **P0-REF21-5** | SECURITY DEFINER `replay.calculate_promotion_metrics` 真 body，對齊 `learning_engine/dsr_gate.py` + `pbo_gate.py` + `quantile_bootstrap.py`；禁止 stub deploy | BLOCKS R6 advisory |
+| **P0-REF21-6** | `POST /api/v1/replay/full-chain/run` 真 full-chain scanner-to-exit runner 實作；當前只有 `/full-chain/prepare` dataset endpoint + REF-20 `/run` | BLOCKS R3 |
+| **P0-REF21-7** | Rate/IP 50 req/s 真 enforce + replay dedicated public Bybit client；避免共用 production rate window | BLOCKS production enablement |
 
 #### P0-DATA — 資料正確性紅線（跨 wave prerequisite）
 

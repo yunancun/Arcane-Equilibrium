@@ -128,6 +128,14 @@ Primary active-state sources:
 - `CLAUDE.md`
 - `TODO.md`
 
+REF-21 2026-05-06 empirical gap closure:
+- final 8-agent real-code audit accepted; R2/R3 remain BLOCKED
+- §10 replay SLA corrected away from pytest `2555/17`
+- full-chain prepare now has live-profile `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP`
+  guard
+- V057-V060 migration files exist for MIT Linux PG dry-run
+- GUI/CLAUDE console contract is 13 tabs
+
 Current strategy-edge packet:
 - source/runtime sync checkpoint `2026-05-02`: `origin/main`, Mac `main`, and Linux `trade-core` were fast-forwarded through the Codex docs-only memory-sync commits. This is docs/memory only; no rebuild, restart, DB write, risk/strategy config change, or live auth mutation was performed. Check `git log --oneline -3` for the exact latest SHA before committing, because later docs fixes may supersede the first memory-sync commit. A local Codex session may still be on an audit branch after fast-forward; inspect `git status --short --branch` before committing.
 - active healthcheck risk `2026-05-02`: Linux watchdog reports demo/live fresh, but passive healthcheck is FAIL because `[40] realized_edge_acceptance`, `[42] live_candidate_eval_contract`, and `[42b] live_candidate_attribution_drift` are red. This matches TODO follow-ups `LG5-W3-FUP-1` and `LG5-W3-FUP-2`.

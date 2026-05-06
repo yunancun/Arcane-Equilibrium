@@ -183,7 +183,7 @@ max_retries             = 0
 [H1-H5 AI 治理層]       thought_gate / budget / model_router / governor / cost_logging
 [I Decision Lease]       (*) GovernanceHub.acquire_lease() / release_lease()
 [Control API v1]         FastAPI 209 /api/v1 + non-api GUI 路由 + `/api/v1/openclaw/*` planned aggregation
-[GUI + Learning]         OpenClaw Control Console（唯一 GUI）+ Learning Cockpit + Paper Trading Dashboard
+[GUI + Learning]         OpenClaw Control Console（唯一 GUI；13 tabs）+ Learning Cockpit + Paper Trading Dashboard
 [OpenClaw Gateway]       外圍通信 / mobile / supervisor / proposal relay；非交易 hot path，非第二 GUI
 [Rust openclaw_engine]   paper / demo / live 三模式唯一引擎（1C-3-F 後）
                          tick pipeline + IntentProcessor + paper_state + governance + stop_manager
@@ -193,6 +193,11 @@ max_retries             = 0
 [管線橋接]               PipelineBridge: Tick Fan-Out + Intent→Order + 治理 gate
 [止損管理器]             StopManager: Hard/Trailing/Time Stop + ATR 動態倉位
 ```
+
+**OpenClaw Control Console 13-tab dictionary（2026-05-06 current）**：
+`system`, `replay`, `paper`, `demo`, `live`, `strategy`, `risk`,
+`governance`, `ai`, `learning`, `agents`, `monitoring`, `settings`。GUI spec
+must reference the current 13-tab console dictionary.
 
 **(*) Decision Lease 路徑 A LANDED 2026-05-03**：Sprint 3 Track H IMPL `dbcf845b`（Rust facade 951 LOC + router gate + Python IPC bridge 587 LOC + V054 audit writer 535 LOC schema + 492 LOC writer）+ Track I deploy `0ad79f67` 全綠。Feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF → production runtime 0 行為改動；amendment §5.4 flip flag canary 24h 待 ~2026-05-15 P0-EDGE-2 後 operator action。詳 `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md`。Python `governance_hub.acquire_lease()` 仍是當前唯一 production caller（`executor_agent.py:454`），canary 後 Rust router gate 才會啟用。
 
