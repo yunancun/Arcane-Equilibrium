@@ -405,6 +405,50 @@ def _extract_migration_objects(path: Path) -> list[str]:
     return objects
 
 
+def _extract_migration_header(path: Path) -> list[str]:
+    text = _read_text_limited(path, max_chars=16000)
+    if not text:
+        return []
+    rows: list[str] = []
+    for raw in text.splitlines()[:140]:
+        stripped = raw.strip()
+        if not stripped:
+            if rows:
+                break
+            continue
+        if not stripped.startswith("--"):
+            break
+        comment = stripped[2:].strip()
+        if not comment:
+            continue
+        if set(comment) <= {"=", "-", " ", "\t"}:
+            continue
+        rows.append(comment[:260])
+        if len(rows) >= 10:
+            break
+    return rows
+
+
+def _extract_migration_action_counts(text: str) -> dict[str, int]:
+    if not text:
+        return {}
+    patterns = {
+        "create_schema": r"\bCREATE\s+SCHEMA\b",
+        "create_table": r"\bCREATE\s+TABLE\b",
+        "create_view": r"\bCREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b",
+        "create_index": r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\b",
+        "create_function": r"\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b",
+        "alter_table": r"\bALTER\s+TABLE\b",
+        "grant": r"\bGRANT\b",
+        "revoke": r"\bREVOKE\b",
+    }
+    counts = {
+        key: len(re.findall(pattern, text, flags=re.IGNORECASE))
+        for key, pattern in patterns.items()
+    }
+    return {key: count for key, count in counts.items() if count}
+
+
 def _doc_excerpt(path: Path, *, max_lines: int = 12) -> list[str]:
     text = _read_text_limited(path, max_chars=20000)
     out: list[str] = []
@@ -480,7 +524,11 @@ def _build_development_status_payload() -> dict[str, Any]:
                     "phase": _migration_phase(version),
                     "objects": [],
                     "companions": companions,
+                    "companion_count": len(companions),
+                    "header_excerpt": [],
+                    "action_counts": {},
                     "line_count": 0,
+                    "size_bytes": 0,
                 }
             )
             continue
@@ -498,7 +546,11 @@ def _build_development_status_payload() -> dict[str, Any]:
                 "phase": _migration_phase(version),
                 "objects": _extract_migration_objects(path),
                 "companions": companions,
+                "companion_count": len(companions),
+                "header_excerpt": _extract_migration_header(path),
+                "action_counts": _extract_migration_action_counts(text),
                 "line_count": len(text.splitlines()) if text else 0,
+                "size_bytes": path.stat().st_size,
             }
         )
 

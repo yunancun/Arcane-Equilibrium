@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>开发状态支持 / Development Support</title>
-<script src="/static/common.js?v=20260506.dev-status-nav-v1"></script>
+<script src="/static/common.js?v=20260506.dev-status-cards-v1"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -21,6 +21,24 @@
   .dev-table { width:100%; border-collapse:collapse; min-width:900px; font-size:12px; }
   .dev-table th, .dev-table td { padding:8px 10px; border-bottom:1px solid rgba(139,148,158,0.12); vertical-align:top; }
   .dev-table th { position:sticky; top:0; z-index:1; background:var(--card-bg); color:var(--text-dim); text-align:left; font-size:11px; }
+  .dev-table-wrap[hidden], .dev-migration-grid[hidden] { display:none; }
+  .dev-migration-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
+  .dev-migration-card {
+    background:rgba(56,139,253,0.055); border:1px solid rgba(56,139,253,0.32); border-radius:8px;
+    min-height:148px; padding:12px; display:flex; flex-direction:column; gap:8px;
+    color:var(--text); cursor:pointer; text-align:left; outline:none;
+  }
+  .dev-migration-card:hover, .dev-migration-card:focus { border-color:rgba(56,139,253,0.68); background:rgba(56,139,253,0.085); }
+  .dev-migration-card.expanded { grid-column:span 2; background:rgba(56,139,253,0.10); }
+  .dev-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .dev-card-title { font-size:12px; font-weight:700; line-height:1.35; }
+  .dev-card-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:auto; }
+  .dev-card-detail { display:none; border-top:1px solid rgba(139,148,158,0.18); padding-top:9px; margin-top:2px; }
+  .dev-migration-card.expanded .dev-card-detail { display:grid; gap:8px; }
+  .dev-detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+  .dev-detail-box { border:1px solid rgba(139,148,158,0.14); border-radius:7px; padding:8px; background:rgba(13,17,23,0.34); }
+  .dev-detail-label { color:var(--text-dim); font-size:10px; text-transform:uppercase; margin-bottom:4px; }
+  .dev-detail-value { color:var(--text); font-size:12px; line-height:1.45; }
   .dev-version { font-weight:800; color:var(--accent); white-space:nowrap; }
   .dev-purpose { color:var(--text); line-height:1.45; max-width:520px; }
   .dev-objects { color:var(--text-dim); font-family:monospace; font-size:11px; max-width:260px; }
@@ -30,7 +48,10 @@
   .dev-locked-note { display:none; }
   .dev-locked .dev-dashboard-body { display:none; }
   .dev-locked .dev-locked-note { display:block; }
-  @media (max-width: 980px) { .dev-panels { grid-template-columns:1fr; } }
+  @media (max-width: 980px) {
+    .dev-panels { grid-template-columns:1fr; }
+    .dev-migration-card.expanded { grid-column:span 1; }
+  }
 </style>
 
 <div id="development-root" class="dev-locked">
@@ -44,10 +65,11 @@
       <div class="dev-header-row">
         <div>
           <h2>&#x1F6E0; 全局开发状态 / Global Development Status</h2>
-          <div class="subtitle">动态扫描 repo 的 migrations、git 状态、TODO、AgentTodo 与 PM handoff。新增 V064+ migration 后会自动出现在本页。</div>
+          <div class="subtitle">动态扫描 repo 的 migrations、git 状态、TODO、AgentTodo 与 PM handoff。每次刷新都会重新扫描，新增 V064+ migration 后会自动出现在本页。</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span id="dev-support-chip" class="oc-chip oc-chip-neutral">loading...</span>
+          <span id="dev-refresh-chip" class="oc-chip oc-chip-neutral">auto refresh 60s</span>
           <button class="oc-btn" onclick="loadDevelopmentStatus()">&#x27F3; Refresh</button>
         </div>
       </div>
@@ -57,6 +79,7 @@
         <div class="oc-metric"><div class="oc-metric-label">Next Slot</div><div class="oc-metric-val blue" style="font-size:16px" id="dev-next">--</div><div class="oc-metric-sub">auto-discovered from sql/migrations</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Repo Head</div><div class="oc-metric-val" style="font-size:16px" id="dev-head">--</div><div class="oc-metric-sub" id="dev-head-sub"></div></div>
         <div class="oc-metric"><div class="oc-metric-label">Dirty Files</div><div class="oc-metric-val" style="font-size:16px" id="dev-dirty">--</div><div class="oc-metric-sub" id="dev-dirty-sub"></div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Last Scan</div><div class="oc-metric-val" style="font-size:16px" id="dev-last-scan">--</div><div class="oc-metric-sub">server-side scan per refresh</div></div>
       </div>
 
       <div class="dev-panels">
@@ -81,7 +104,8 @@
           <button class="oc-btn" data-dev-filter="gap" onclick="setMigrationFilter('gap')">Gaps</button>
           <button class="oc-btn" data-dev-filter="future" onclick="setMigrationFilter('future')">Future</button>
         </div>
-        <div class="dev-table-wrap">
+        <div id="dev-migration-grid" class="dev-migration-grid" hidden></div>
+        <div id="dev-migration-table-wrap" class="dev-table-wrap">
           <table class="dev-table">
             <thead>
               <tr><th>V</th><th>Status</th><th>做了什么 / Purpose</th><th>Phase</th><th>Key Objects</th><th>File</th></tr>
@@ -108,6 +132,7 @@
 <script>
 let _developmentPayload = null;
 let _migrationFilter = 'all';
+let _expandedMigrations = new Set();
 
 function applyDevelopmentSupportVisibility(enabled) {
   const root = document.getElementById('development-root');
@@ -138,6 +163,8 @@ function renderSummary(payload) {
   const dirty = git.dirty_paths || [];
   ocSetText('dev-dirty-sub', dirty.length ? dirty.slice(0, 3).join(', ') : 'clean');
   ocSetText('dev-migrations-dir', payload.migrations_dir || 'sql/migrations');
+  const generated = payload.generated_at_epoch ? new Date(payload.generated_at_epoch * 1000) : null;
+  ocSetText('dev-last-scan', generated ? generated.toLocaleTimeString() : '--');
 }
 
 function renderFocus(payload) {
@@ -178,10 +205,103 @@ function renderGit(payload) {
   ocSetHtml('dev-git-list', rows.length ? rows.join('') : '<div class="oc-loading">No git context available</div>');
 }
 
+function formatBytes(n) {
+  const value = Number(n || 0);
+  if (!value) return '0 B';
+  if (value < 1024) return value + ' B';
+  return (value / 1024).toFixed(1) + ' KB';
+}
+
+function renderActionCounts(item) {
+  const counts = item.action_counts || {};
+  const keys = Object.keys(counts);
+  if (!keys.length) return '<span class="dev-code">--</span>';
+  return keys.map(k =>
+    '<span class="oc-chip oc-chip-neutral">' + ocEsc(k.replace(/_/g, ' ')) + ': ' + ocEsc(String(counts[k])) + '</span>'
+  ).join(' ');
+}
+
+function renderHeaderExcerpt(item) {
+  const rows = item.header_excerpt || [];
+  if (!rows.length) return '<div class="dev-code">No header comments found</div>';
+  return rows.slice(0, 6).map(line => '<div class="dev-code">' + ocEsc(line) + '</div>').join('');
+}
+
+function renderLandedMigrationCards(items) {
+  if (!items.length) return '<div class="oc-loading">No landed migrations</div>';
+  return items.map(item => {
+    const expanded = _expandedMigrations.has(item.id);
+    const objects = (item.objects || []).slice(0, 8);
+    const companions = item.companions || [];
+    const objectText = objects.length ? objects.join(', ') : '--';
+    const companionHtml = companions.length
+      ? companions.map(c => '<span class="oc-chip oc-chip-warn">' + ocEsc(c) + '</span>').join(' ')
+      : '<span class="dev-code">--</span>';
+    return '<div class="dev-migration-card' + (expanded ? ' expanded' : '') + '" role="button" tabindex="0" data-migration-id="' + ocEsc(item.id || '') + '" aria-expanded="' + (expanded ? 'true' : 'false') + '">' +
+      '<div class="dev-card-top">' +
+        '<div><div class="dev-version">' + ocEsc(item.id || '') + '</div><div class="dev-card-title">' + ocEsc(item.title || '') + '</div></div>' +
+        '<div>' + chipForMigrationStatus(item.status) + '</div>' +
+      '</div>' +
+      '<div class="dev-purpose">' + ocEsc(item.purpose || '') + '</div>' +
+      '<div class="dev-card-meta">' +
+        '<span class="oc-chip oc-chip-neutral">' + ocEsc(item.phase || '') + '</span>' +
+        '<span class="oc-chip oc-chip-neutral">' + ocEsc(String(item.line_count || 0)) + ' lines</span>' +
+        '<span class="oc-chip oc-chip-neutral">' + ocEsc(String((item.objects || []).length)) + ' objects</span>' +
+      '</div>' +
+      '<div class="dev-card-detail">' +
+        '<div class="dev-detail-grid">' +
+          '<div class="dev-detail-box"><div class="dev-detail-label">Source File</div><div class="dev-detail-value dev-code">' + ocEsc(item.file || 'no source file') + '</div></div>' +
+          '<div class="dev-detail-box"><div class="dev-detail-label">Size</div><div class="dev-detail-value">' + ocEsc(formatBytes(item.size_bytes)) + '</div></div>' +
+          '<div class="dev-detail-box"><div class="dev-detail-label">Companions</div><div class="dev-detail-value">' + companionHtml + '</div></div>' +
+          '<div class="dev-detail-box"><div class="dev-detail-label">SQL Actions</div><div class="dev-detail-value">' + renderActionCounts(item) + '</div></div>' +
+        '</div>' +
+        '<div class="dev-detail-box"><div class="dev-detail-label">Key Objects</div><div class="dev-detail-value dev-code">' + ocEsc(objectText) + '</div></div>' +
+        '<div class="dev-detail-box"><div class="dev-detail-label">Header / Work Notes</div><div class="dev-detail-value">' + renderHeaderExcerpt(item) + '</div></div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function toggleMigrationCard(id) {
+  if (_expandedMigrations.has(id)) _expandedMigrations.delete(id);
+  else _expandedMigrations.add(id);
+  if (_developmentPayload) renderMigrations(_developmentPayload);
+}
+
+function handleMigrationCardKey(ev, id) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  ev.preventDefault();
+  toggleMigrationCard(id);
+}
+
+function wireMigrationCards() {
+  document.querySelectorAll('.dev-migration-card[data-migration-id]').forEach(card => {
+    const id = card.dataset.migrationId;
+    card.onclick = () => toggleMigrationCard(id);
+    card.onkeydown = ev => handleMigrationCardKey(ev, id);
+  });
+}
+
 function renderMigrations(payload) {
   const items = (((payload.migrations || {}).items) || []).filter(item =>
     _migrationFilter === 'all' || item.status === _migrationFilter
   );
+  const grid = document.getElementById('dev-migration-grid');
+  const tableWrap = document.getElementById('dev-migration-table-wrap');
+  if (_migrationFilter === 'landed') {
+    if (tableWrap) tableWrap.hidden = true;
+    if (grid) {
+      grid.hidden = false;
+      grid.innerHTML = renderLandedMigrationCards(items);
+      wireMigrationCards();
+    }
+    return;
+  }
+  if (grid) {
+    grid.hidden = true;
+    grid.innerHTML = '';
+  }
+  if (tableWrap) tableWrap.hidden = false;
   const rows = items.map(item => {
     const objects = (item.objects || []).slice(0, 6).join(', ');
     const companions = (item.companions || []).length

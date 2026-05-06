@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>玄衡 · Arcane Equilibrium Console</title>
-<script src="/static/common.js?v=20260506.dev-status-nav-v1"></script>
+<script src="/static/common.js?v=20260506.dev-status-cards-v1"></script>
 <!-- REF-20 Wave 2 P1-U9: Paper Replay Lab i18n (Chinese dominant, 9 對照表) -->
 <!-- REF-20 Wave 2 P1-U9: Paper Replay Lab i18n (Chinese-dominant, 9 lookup tables) -->
 <script src="/static/i18n_zh.js"></script>
@@ -86,6 +86,9 @@
   .tab-group-state { font-size:9px; color:var(--text-dim); font-weight:600; text-transform:none; }
   .tab-group-count { font-size:9px; color:var(--text-dim); background:rgba(139,148,158,0.10);
     border:1px solid rgba(139,148,158,0.14); border-radius:999px; padding:0 5px; }
+  .tab-group-key { display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px;
+    border-radius:4px; border:1px solid rgba(139,148,158,0.18); background:rgba(139,148,158,0.10);
+    color:var(--text); font-size:9px; font-weight:800; }
   .tab-group-items { display:flex; align-items:center; gap:3px; padding-left:2px; border-left:1px solid rgba(139,148,158,0.16); }
   .tab-group.collapsed .tab-group-items { display:none; }
   .tab-group.collapsed .tab-group-caret { transform:rotate(-90deg); }
@@ -302,7 +305,7 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260506.dev-status-nav-v1';
+const BUILD_TS = '20260506.dev-status-cards-v1';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
@@ -315,6 +318,22 @@ const TAB_GROUP_LABELS = {
   governance: '治理',
   intelligence: '智能',
   ops: '运维',
+};
+const TAB_GROUP_SHORTCUTS = {
+  '1': 'core',
+  '2': 'trading',
+  '3': 'edge',
+  '4': 'governance',
+  '5': 'intelligence',
+  '6': 'ops',
+};
+const TAB_GROUP_SHORTCUT_LABELS = {
+  core: '1',
+  trading: '2',
+  edge: '3',
+  governance: '4',
+  intelligence: '5',
+  ops: '6',
 };
 const TAB_GROUP_STATE_KEY = 'oc_console_tab_group_state_v1';
 const TAB_GROUP_DEFAULT_OPEN = {
@@ -399,6 +418,21 @@ function toggleTabGroup(groupId) {
   setTabGroupExpanded(groupId, !tabGroupExpanded[groupId]);
 }
 
+function isConsoleTypingTarget(target) {
+  if (!target) return false;
+  const tag = (target.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+
+function handleTabGroupShortcut(ev) {
+  if (ev.defaultPrevented || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (isConsoleTypingTarget(ev.target)) return;
+  const groupId = TAB_GROUP_SHORTCUTS[ev.key];
+  if (!groupId) return;
+  ev.preventDefault();
+  toggleTabGroup(groupId);
+}
+
 function expandTabGroupForTab(tabId) {
   setTabGroupExpanded(getTabGroup(tabId), true);
 }
@@ -425,12 +459,13 @@ function buildTabs() {
     const label = document.createElement('button');
     label.type = 'button';
     label.className = 'tab-group-label';
-    label.title = '展开/折叠 ' + (TAB_GROUP_LABELS[id] || id);
+    label.title = '展开/折叠 ' + (TAB_GROUP_LABELS[id] || id) + ' · 快捷键 ' + (TAB_GROUP_SHORTCUT_LABELS[id] || '');
     label.setAttribute('aria-expanded', tabGroupExpanded[id] ? 'true' : 'false');
     const tabCount = TABS.filter(tab => (tab.group || 'core') === id).length;
     label.innerHTML =
       '<span class="tab-group-caret">&#x25BE;</span>' +
       '<span class="tab-group-text">' + (TAB_GROUP_LABELS[id] || id) + '</span>' +
+      '<span class="tab-group-key">' + (TAB_GROUP_SHORTCUT_LABELS[id] || '') + '</span>' +
       '<span class="tab-group-state"></span>' +
       '<span class="tab-group-count">' + tabCount + '</span>';
     label.onclick = () => toggleTabGroup(id);
@@ -512,6 +547,7 @@ function switchTo(tabId) {
 }
 
 buildTabs();
+window.addEventListener('keydown', handleTabGroupShortcut);
 
 function flushPendingFrameMessages(tabId) {
   const frame = document.getElementById('f-' + tabId);

@@ -177,7 +177,12 @@ def test_console_has_replay_and_optional_paper_tabs(console_html: str) -> None:
     assert "TAB_GROUP_LABELS" in console_html
     assert "tab-group-label" in console_html
     assert "toggleTabGroup" in console_html
+    assert "TAB_GROUP_SHORTCUTS" in console_html
+    assert "'1': 'core'" in console_html
+    assert "'6': 'ops'" in console_html
+    assert "handleTabGroupShortcut" in console_html
     assert "tab-group-caret" in console_html
+    assert "tab-group-key" in console_html
     assert "tab-label" in console_html
     assert "requiresPaperEngine: true" in console_html
     assert "/api/v1/settings/paper-engine" in console_html
@@ -219,6 +224,10 @@ def test_development_tab_covers_v001_to_v063(tab_development_html: str) -> None:
     assert "Migration Intelligence" in tab_development_html
     assert "Development Focus" in tab_development_html
     assert "Recent PM Reports" in tab_development_html
+    assert "dev-migration-grid" in tab_development_html
+    assert "toggleMigrationCard" in tab_development_html
+    assert "auto refresh 60s" in tab_development_html
+    assert "server-side scan per refresh" in tab_development_html
     assert "新增 V064+ migration 后会自动出现在本页" in tab_development_html
     assert "for (let i = 1; i <= 63; i += 1)" not in tab_development_html
 
