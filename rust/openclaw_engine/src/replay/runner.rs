@@ -1072,6 +1072,7 @@ mod tests {
                 low: 99.0,
                 close: 100.0,
                 volume: 1.0,
+                turnover: None,
             },
             MarketEvent {
                 ts_ms: 2,
@@ -1081,6 +1082,7 @@ mod tests {
                 low: 100.0,
                 close: 105.0,
                 volume: 1.0,
+                turnover: None,
             },
             MarketEvent {
                 ts_ms: 3,
@@ -1090,6 +1092,7 @@ mod tests {
                 low: 49.0,
                 close: 50.5,
                 volume: 5.0,
+                turnover: None,
             },
         ]
     }
@@ -1431,6 +1434,7 @@ mod tests {
             low: 99.0,
             close: 100.0,
             volume: 1.0,
+            turnover: None,
         }];
         let pipeline = build_isolated_pipeline(
             ReplayProfile::Isolated,
@@ -1555,6 +1559,7 @@ mod tests {
             low: 99.0,
             close: 100.0,
             volume: 1.0,
+            turnover: None,
         }]
     }
 

@@ -234,6 +234,7 @@ class ReplayBybitPublicClient:
                     "low": float(row[3]),
                     "close": float(row[4]),
                     "volume": float(row[5]),
+                    "turnover": float(row[6]) if len(row) > 6 else None,
                 }
 
             oldest = min(parsed_ts)

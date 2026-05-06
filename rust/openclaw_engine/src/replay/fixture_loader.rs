@@ -33,7 +33,7 @@
 //!       "events": [
 //!         { "ts_ms": 1714521600000, "symbol": "BTCUSDT",
 //!           "open": 65000.0, "high": 65100.0, "low": 64900.0,
-//!           "close": 65050.0, "volume": 1.234 },
+//!           "close": 65050.0, "volume": 1.234, "turnover": 80123.45 },
 //!         ...
 //!       ]
 //!     }
@@ -103,6 +103,8 @@ use std::path::{Path, PathBuf};
 ///   - `open` / `high` / `low` / `close`: OHLC prices; finite f64 expected.
 ///   - `volume`: trading volume; finite f64 expected, may be 0.0 for thin
 ///     markets.
+///   - `turnover`: optional quote turnover from Bybit kline row[6]. Legacy
+///     fixtures may omit it; scanner replay then falls back to close * volume.
 ///
 /// 欄位語意（中）：
 ///   - `ts_ms`: Unix 毫秒時戳（UTC）。
@@ -110,6 +112,8 @@ use std::path::{Path, PathBuf};
 ///     binary 0 交易所存取，不驗 symbol 對應 exchange-side allowlist。
 ///   - `open` / `high` / `low` / `close`: OHLC 價格；預期有限 f64。
 ///   - `volume`: 交易量；預期有限 f64，瘦市場可能 0.0。
+///   - `turnover`: 可選 quote turnover，來自 Bybit kline row[6]。舊 fixture
+///     可省略；scanner replay 會 fallback 至 close * volume。
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct MarketEvent {
     pub ts_ms: i64,
@@ -119,6 +123,8 @@ pub struct MarketEvent {
     pub low: f64,
     pub close: f64,
     pub volume: f64,
+    #[serde(default)]
+    pub turnover: Option<f64>,
 }
 
 /// Fixture source enum mapping to manifest `data_tier`.
@@ -396,6 +402,26 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].ts_ms, 1);
         assert_eq!(events[1].close, 101.5);
+    }
+
+    #[test]
+    fn load_fixture_accepts_optional_turnover() {
+        let fixture = write_fixture(
+            r#"{
+              "schema_version": 1,
+              "source": "s2_bybit_public",
+              "events": [
+                {"ts_ms": 1, "symbol": "BTCUSDT",
+                 "open": 100.0, "high": 101.0, "low": 99.0,
+                 "close": 100.5, "volume": 1.0, "turnover": 100.5}
+              ]
+            }"#,
+        );
+        let src = FixtureSource::S2BybitPublic {
+            path: fixture.path().to_path_buf(),
+        };
+        let events = load_fixtures(&src).unwrap();
+        assert_eq!(events[0].turnover, Some(100.5));
     }
 
     #[test]
