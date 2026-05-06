@@ -247,7 +247,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
 | MAG-020 | PA | P0 | DONE (CONTRACT) | Define scanner authority modes: `legacy_gate`, `advisory_shadow`, `advisory_enforced`. | DONE 2026-05-06 in `2026-05-06--mag020_scanner_authority_modes.md`: current runtime remains `legacy_gate`; target `[authority].mode` semantics, hard-fact boundary, object ownership, rollout gates, and "no unused runtime knob before MAG-024" rule are documented and reviewed. |
-| MAG-021 | E1 | P0 | TODO | Add `OpportunityCandidate` and `OpportunityDecay` contracts. | Rust/Python serialization tests pass. |
+| MAG-021 | E1 | P0 | DONE (MAC/LINUX CONTRACT) | Add `OpportunityCandidate` and `OpportunityDecay` contracts. | `scanner/types.rs` now defines serde contracts for `ScannerAuthorityMode`, `OpportunityCandidate`, `OpportunityDecayReason`, and `OpportunityDecay`; `scanner_advisory_contracts.py` mirrors them as Pydantic models. Rust/Python targeted serialization tests pass on Mac and Linux. No runtime authority behavior is wired in this task. |
 | MAG-022 | E1 | P0 | TODO | Emit scanner decay when symbol weakens, is displaced, or exits top set. | Open position decay creates review event, not close command. |
 | MAG-023 | E1 | P0 | TODO | Preserve active-position market data subscription independent of scanner ranking. | Replay proves open positions remain monitored after scanner drop. |
 | MAG-024 | E1 | P0 | TODO | Convert scanner hot-path new-open gate into advisory shadow comparison behind flag. | In shadow mode, legacy gate result is recorded but does not alter spine decision. |

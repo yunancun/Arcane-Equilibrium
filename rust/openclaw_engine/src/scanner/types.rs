@@ -13,6 +13,28 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Scanner authority mode contract for M2 advisory conversion.
+/// M2 scanner advisory conversion 的權限模式合約。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScannerAuthorityMode {
+    /// Current compatibility behavior: scanner may gate demo/live_demo new opens.
+    /// 當前兼容行為：scanner 可門控 demo/live_demo 新開倉。
+    LegacyGate,
+    /// Compute and record legacy would-block decisions without suppressing opens.
+    /// 計算並記錄 legacy would-block，但不阻擋新開倉。
+    AdvisoryShadow,
+    /// Scanner is enforced as evidence only; decisions must pass the spine.
+    /// scanner 強制只作 evidence；交易決策必須經 decision spine。
+    AdvisoryEnforced,
+}
+
+impl Default for ScannerAuthorityMode {
+    fn default() -> Self {
+        Self::LegacyGate
+    }
+}
+
 /// Strategy category for per-strategy fitness scoring.
 /// 策略類別，用於分立的策略適配評分。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -117,6 +139,161 @@ pub struct OpportunityDecision {
     /// Component breakdown.
     /// 組件拆解。
     pub components: OpportunityComponents,
+}
+
+/// Scanner advisory candidate emitted toward the Agent Decision Spine.
+/// 發往 Agent Decision Spine 的 scanner advisory candidate。
+///
+/// This is not an order, a risk verdict, or a permission to trade. It is
+/// Scout/Strategist evidence derived from a scanner snapshot.
+/// 這不是訂單、風控裁決或交易許可；它只是源自 scanner snapshot 的
+/// Scout/Strategist evidence。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpportunityCandidate {
+    /// Contract schema version.
+    /// 合約 schema 版本。
+    pub schema_version: String,
+    /// Stable candidate id for idempotent persistence.
+    /// 用於冪等持久化的穩定 candidate id。
+    pub candidate_id: String,
+    /// Scanner snapshot id that produced this candidate.
+    /// 產生此 candidate 的 scanner snapshot id。
+    pub scan_id: String,
+    /// Snapshot timestamp in Unix milliseconds.
+    /// snapshot Unix 毫秒時間戳。
+    pub scan_ts_ms: u64,
+    /// Candidate symbol.
+    /// 候選交易對。
+    pub symbol: String,
+    /// Strategy route represented by this candidate.
+    /// 此 candidate 對應的策略路由。
+    pub strategy: String,
+    /// Authority mode under which this evidence was emitted.
+    /// 發出此 evidence 時的 scanner authority mode。
+    #[serde(default)]
+    pub authority_mode: ScannerAuthorityMode,
+    /// Scanner route final score after edge/market/opportunity transforms.
+    /// edge/market/opportunity 轉換後的 scanner route final score。
+    pub final_score: f64,
+    /// Raw scanner fitness score before route transforms.
+    /// route 轉換前的 scanner raw fitness score。
+    pub raw_score: f64,
+    /// Optional normalized opportunity score [0, 100].
+    /// 可選標準化 opportunity score [0, 100]。
+    pub opportunity_score: Option<f64>,
+    /// Optional lower-confidence net opportunity in bps.
+    /// 可選 net opportunity 下置信界（bps）。
+    pub opportunity_lcb_bps: Option<f64>,
+    /// Optional admission hint from OpportunityDecision.
+    /// OpportunityDecision 的可選 admission hint。
+    pub admission_hint: Option<String>,
+    /// Scanner route mode, e.g. main/exploration/market_gate.
+    /// scanner route mode，例如 main/exploration/market_gate。
+    pub route_mode: String,
+    /// Market compatibility status.
+    /// 行情相容狀態。
+    pub market_status: String,
+    /// Compact route reason for audit.
+    /// 供審計使用的精簡 route reason。
+    pub route_reason: String,
+    /// Optional data-quality score [0, 1].
+    /// 可選 data-quality score [0, 1]。
+    pub data_quality_score: Option<f64>,
+    /// Optional realized-edge estimate for this strategy-symbol cell.
+    /// 此 strategy-symbol cell 的可選 realized-edge 估計。
+    pub edge_bps: Option<f64>,
+    /// Realized-edge sample count for this strategy-symbol cell.
+    /// 此 strategy-symbol cell 的 realized-edge 樣本數。
+    pub edge_n: u32,
+    /// Extra evidence payload for forward-compatible scanner context.
+    /// 前向兼容的 scanner context evidence payload。
+    #[serde(default)]
+    pub evidence: serde_json::Value,
+}
+
+/// Why a previously emitted opportunity candidate decayed.
+/// 既有 opportunity candidate 為何 decay。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpportunityDecayReason {
+    /// The score or LCB weakened but the symbol may remain observable.
+    /// score 或 LCB 變弱，但交易對仍可觀察。
+    ScoreWeakened,
+    /// A stronger candidate displaced this candidate.
+    /// 被更強 candidate 替換。
+    Displaced,
+    /// The symbol exited the selected top set.
+    /// 交易對離開 selected top set。
+    ExitedTopSet,
+    /// Market data became stale or insufficient.
+    /// 市場數據變舊或不足。
+    DataStale,
+    /// A hard eligibility fact invalidated this route.
+    /// 硬 eligibility fact 使此 route 失效。
+    HardFactInvalid,
+}
+
+/// Scanner advisory decay event.
+/// scanner advisory decay 事件。
+///
+/// On an open position this is review input only. It must not be converted
+/// directly into a close/reduce order.
+/// 對開倉中持倉而言，這只是 review input；不得直接轉成平倉/減倉訂單。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpportunityDecay {
+    /// Contract schema version.
+    /// 合約 schema 版本。
+    pub schema_version: String,
+    /// Stable decay event id for idempotent persistence.
+    /// 用於冪等持久化的穩定 decay event id。
+    pub decay_id: String,
+    /// Previous candidate id, if one was emitted.
+    /// 先前 candidate id；若有 emit 則填。
+    pub candidate_id: Option<String>,
+    /// Scanner snapshot id that observed the decay.
+    /// 觀察到 decay 的 scanner snapshot id。
+    pub scan_id: String,
+    /// Decay timestamp in Unix milliseconds.
+    /// decay Unix 毫秒時間戳。
+    pub decay_ts_ms: u64,
+    /// Decayed symbol.
+    /// decay 的交易對。
+    pub symbol: String,
+    /// Strategy route, if the decay is strategy-specific.
+    /// 若 decay 屬特定策略路由則填。
+    pub strategy: Option<String>,
+    /// Authority mode under which this decay was emitted.
+    /// 發出此 decay 時的 scanner authority mode。
+    #[serde(default)]
+    pub authority_mode: ScannerAuthorityMode,
+    /// Decay classification.
+    /// decay 分類。
+    pub reason: OpportunityDecayReason,
+    /// Previous score, if known.
+    /// 已知時填先前 score。
+    pub previous_score: Option<f64>,
+    /// Current score, if known.
+    /// 已知時填當前 score。
+    pub current_score: Option<f64>,
+    /// Previous 1-based scanner rank, if known.
+    /// 已知時填先前 1-based scanner rank。
+    pub previous_rank: Option<u32>,
+    /// Current 1-based scanner rank, if still ranked.
+    /// 若仍有排名則填當前 1-based scanner rank。
+    pub current_rank: Option<u32>,
+    /// Whether there is an open position on this symbol.
+    /// 此交易對是否存在開倉中持倉。
+    pub has_open_position: bool,
+    /// True when Strategist must create or refresh PositionReview input.
+    /// 若 Strategist 必須建立或刷新 PositionReview input，則為 true。
+    pub position_review_required: bool,
+    /// Must remain false for scanner-only decay.
+    /// scanner-only decay 必須維持 false。
+    pub auto_close_allowed: bool,
+    /// Extra evidence payload for forward-compatible decay context.
+    /// 前向兼容的 decay context evidence payload。
+    #[serde(default)]
+    pub evidence: serde_json::Value,
 }
 
 /// Strategy-specific route judgement emitted by scanner scoring.
@@ -348,5 +525,68 @@ mod tests {
         let s = ChurnState::default();
         assert_eq!(s.cycles_held, 0);
         assert_eq!(s.removal_cooldown_until_ms, 0);
+    }
+
+    #[test]
+    fn test_opportunity_candidate_json_round_trip() {
+        let candidate = OpportunityCandidate {
+            schema_version: "1.0".to_string(),
+            candidate_id: "oppcand:scan-1:BTCUSDT:grid_trading".to_string(),
+            scan_id: "scan-1".to_string(),
+            scan_ts_ms: 1_778_100_000_000,
+            symbol: "BTCUSDT".to_string(),
+            strategy: "grid_trading".to_string(),
+            authority_mode: ScannerAuthorityMode::AdvisoryShadow,
+            final_score: 72.5,
+            raw_score: 68.0,
+            opportunity_score: Some(61.0),
+            opportunity_lcb_bps: Some(5.25),
+            admission_hint: Some("opportunity_positive".to_string()),
+            route_mode: "main".to_string(),
+            market_status: "compatible".to_string(),
+            route_reason: "range_compatible".to_string(),
+            data_quality_score: Some(0.91),
+            edge_bps: Some(3.2),
+            edge_n: 42,
+            evidence: serde_json::json!({"source": "scanner_snapshot"}),
+        };
+
+        let raw = serde_json::to_string(&candidate).expect("serialize candidate");
+        assert!(raw.contains("\"authority_mode\":\"advisory_shadow\""));
+        let restored: OpportunityCandidate =
+            serde_json::from_str(&raw).expect("deserialize candidate");
+
+        assert_eq!(restored, candidate);
+    }
+
+    #[test]
+    fn test_opportunity_decay_json_round_trip_preserves_no_auto_close() {
+        let decay = OpportunityDecay {
+            schema_version: "1.0".to_string(),
+            decay_id: "oppdecay:scan-2:BTCUSDT".to_string(),
+            candidate_id: Some("oppcand:scan-1:BTCUSDT:grid_trading".to_string()),
+            scan_id: "scan-2".to_string(),
+            decay_ts_ms: 1_778_100_300_000,
+            symbol: "BTCUSDT".to_string(),
+            strategy: Some("grid_trading".to_string()),
+            authority_mode: ScannerAuthorityMode::AdvisoryEnforced,
+            reason: OpportunityDecayReason::ExitedTopSet,
+            previous_score: Some(72.5),
+            current_score: Some(31.0),
+            previous_rank: Some(3),
+            current_rank: None,
+            has_open_position: true,
+            position_review_required: true,
+            auto_close_allowed: false,
+            evidence: serde_json::json!({"displaced_by": ["ETHUSDT", "SOLUSDT"]}),
+        };
+
+        let raw = serde_json::to_string(&decay).expect("serialize decay");
+        assert!(raw.contains("\"reason\":\"exited_top_set\""));
+        let restored: OpportunityDecay = serde_json::from_str(&raw).expect("deserialize decay");
+
+        assert_eq!(restored, decay);
+        assert!(restored.position_review_required);
+        assert!(!restored.auto_close_allowed);
     }
 }
