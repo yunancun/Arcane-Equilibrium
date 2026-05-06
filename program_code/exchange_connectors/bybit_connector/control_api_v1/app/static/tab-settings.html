@@ -302,6 +302,24 @@
   <div id="paper-engine-setting-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.6">Loading...</div>
 </div>
 
+<!-- ═══ GUI Development Mode Toggle ═══ -->
+<div class="oc-card" style="border-color:rgba(56,139,253,0.28)">
+  <h3>&#x1F6E0; GUI 开发模式 / GUI Development Mode</h3>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+    关闭时隐藏主仪表盘的 Global Mode Control，并隐藏 Development Tab。开启后显示开发 Tab，集中查看 V001-V063 的迁移仪表盘。<br>
+    This is GUI visibility only. It does not change trading mode, risk config, live authorization, or engine runtime.
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)">
+      <input type="checkbox" id="gui-development-mode-enabled" class="settings-checkbox">
+      Enable Development Mode / 显示开发 Tab
+    </label>
+    <button class="oc-btn oc-btn-primary" onclick="saveDevelopmentModeStatus()">保存 / Save</button>
+    <span id="gui-development-mode-badge" class="oc-chip oc-chip-neutral">Loading...</span>
+  </div>
+  <div id="gui-development-mode-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.6">Loading...</div>
+</div>
+
 <!-- ═══ API Key Management ═══ -->
 <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
   <h3>&#x1F511; API Key 管理 / API Key Management</h3>
@@ -746,6 +764,7 @@ async function loadAll() {
     loadProductFamilyConfig(),
     loadDebug(),
     loadPaperEngineStatus(),
+    loadDevelopmentModeStatus(),
     loadApiKeyStatus()
   ]);
 }
@@ -799,6 +818,63 @@ async function savePaperEngineStatus() {
     }, window.location.origin);
   } catch (_) {}
   await loadPaperEngineStatus();
+}
+
+// ─── GUI Development Mode Toggle ─────────────────────────────
+async function loadDevelopmentModeStatus() {
+  const checkbox = document.getElementById('gui-development-mode-enabled');
+  const badge = document.getElementById('gui-development-mode-badge');
+  const status = document.getElementById('gui-development-mode-status');
+  if (!checkbox || !badge || !status) return;
+
+  const d = await ocApi('/api/v1/settings/development-mode');
+  const data = (d && d.data) ? d.data : d;
+  if (!data) {
+    badge.textContent = 'Unavailable';
+    badge.className = 'oc-chip oc-chip-warn';
+    status.textContent = '无法读取 Development Mode 设置 / Unable to load development mode setting';
+    return;
+  }
+
+  checkbox.checked = !!data.enabled;
+  if (typeof ocCacheGuiDevelopmentMode === 'function') {
+    ocCacheGuiDevelopmentMode(!!data.enabled);
+  }
+  badge.textContent = data.enabled ? 'Enabled' : 'Disabled';
+  badge.className = 'oc-chip ' + (data.enabled ? 'oc-chip-good' : 'oc-chip-neutral');
+  status.textContent =
+    'configured=' + String(!!data.enabled) +
+    ' · scope=' + (data.scope || 'gui_visibility_only') +
+    ' · source=' + (data.source || 'unknown') +
+    ' · restart required=false';
+}
+
+async function saveDevelopmentModeStatus() {
+  const checkbox = document.getElementById('gui-development-mode-enabled');
+  const status = document.getElementById('gui-development-mode-status');
+  if (!checkbox) return;
+  const enabled = !!checkbox.checked;
+  if (status) status.textContent = 'Saving...';
+
+  const d = await ocPost('/api/v1/settings/development-mode', { enabled: enabled });
+  const data = (d && d.data) ? d.data : d;
+  if (!data) {
+    ocToast('Development Mode 设置保存失败', 'error');
+    await loadDevelopmentModeStatus();
+    return;
+  }
+
+  if (typeof ocCacheGuiDevelopmentMode === 'function') {
+    ocCacheGuiDevelopmentMode(!!data.enabled);
+  }
+  ocToast(enabled ? 'Development Mode 已启用' : 'Development Mode 已禁用', 'success');
+  try {
+    window.parent.postMessage({
+      type: 'openclaw-development-mode-setting',
+      enabled: !!data.enabled
+    }, window.location.origin);
+  } catch (_) {}
+  await loadDevelopmentModeStatus();
 }
 
 // ─── API Key Management ───────────────────────────────────────

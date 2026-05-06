@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>开发 / Development</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<style>
+  .dev-header-row { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .dev-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+  .dev-mode-btn-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:10px; }
+  .dev-version-card {
+    background:var(--bg); border:1px solid var(--border); border-radius:10px;
+    padding:14px 12px; text-align:left; color:var(--text); min-height:126px;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .dev-version-card.landed { border-color:rgba(56,139,253,0.34); background:rgba(56,139,253,0.055); }
+  .dev-version-card.missing { border-color:rgba(139,148,158,0.24); opacity:0.72; }
+  .dev-version-id { font-size:20px; font-weight:700; letter-spacing:0; color:var(--accent); }
+  .dev-version-name { font-size:12px; font-weight:600; line-height:1.35; min-height:32px; }
+  .dev-version-file { font-size:10px; color:var(--text-dim); font-family:monospace; word-break:break-all; }
+  .dev-version-meta { margin-top:auto; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .dev-locked-note { display:none; }
+  .dev-locked .dev-dashboard-body { display:none; }
+  .dev-locked .dev-locked-note { display:block; }
+</style>
+
+<div id="development-root" class="dev-locked">
+  <div class="oc-card dev-locked-note" style="border-color:rgba(210,153,34,0.35)">
+    <h2>&#x1F6E0; 开发模式未启用 / Development Mode Disabled</h2>
+    <div class="subtitle">请在 Settings 中启用 GUI Development Mode。此页面不影响交易、风控、live 授权或 engine runtime。</div>
+  </div>
+
+  <div class="dev-dashboard-body">
+    <div class="oc-card">
+      <div class="dev-header-row">
+        <div>
+          <h2>&#x1F6E0; 开发仪表盘 / Development Dashboard</h2>
+          <div class="subtitle">V001-V063 migration surface，按 Global Mode Control 的按钮卡片密度展示。</div>
+        </div>
+        <span id="dev-mode-chip" class="oc-chip oc-chip-neutral">loading...</span>
+      </div>
+
+      <div class="dev-summary">
+        <div class="oc-metric"><div class="oc-metric-label">Range</div><div class="oc-metric-val" style="font-size:16px">V001-V063</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Landed</div><div class="oc-metric-val green" id="dev-landed-count">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Empty Slots</div><div class="oc-metric-val" id="dev-empty-count">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Companions</div><div class="oc-metric-val" id="dev-companion-count">--</div></div>
+      </div>
+
+      <div class="dev-mode-btn-grid" id="migration-dashboard-grid"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const MIGRATION_FILES = {
+  V001: 'V001__create_schemas.sql',
+  V002: 'V002__market_tables.sql',
+  V003: 'V003__trading_agent_tables.sql',
+  V004: 'V004__learning_features_obs_risk_tables.sql',
+  V005: 'V005__indexes_views.sql',
+  V006: 'V006__timescaledb_policies.sql',
+  V007: 'V007__experiment_ledger.sql',
+  V008: 'V008__fills_fee_rate.sql',
+  V009: 'V009__phase4_ml_news_tables.sql',
+  V010: 'V010__ai_budget_and_linucb_versioning.sql',
+  V011: 'V011__foundation_model_features.sql',
+  V012: 'V012__directive_executions_outcomes.sql',
+  V013: 'V013__weekly_review_log.sql',
+  V014: 'V014__engine_events.sql',
+  V015: 'V015__engine_mode_separation.sql',
+  V016: 'V016__learning_feedback_loop.sql',
+  V017: 'V017__edge_predictor_tables.sql',
+  V018: 'V018__paper_state_checkpoint.sql',
+  V019: 'V019__strategist_applied_params.sql',
+  V020: 'V020__strategist_applied_params_tie_break.sql',
+  V021: 'V021__fills_exit_source.sql',
+  V023: 'V023__model_registry.sql',
+  V024: 'V024__guard_v019_v020_strategist_applied_params.sql',
+  V025: 'V025__outcome_backfill_pending_index.sql',
+  V026: 'V026__cost_edge_advisor_log.sql',
+  V027: 'V027__funding_settlements.sql',
+  V028: 'V028__fills_execution_slippage.sql',
+  V029: 'V029__exit_features.sql',
+  V030: 'V030__scanner_snapshots.sql',
+  V031: 'V031__ml_dream_edge_unblock.sql',
+  V032: 'V032__mlde_demo_param_applications.sql',
+  V033: 'V033__fills_exit_reason.sql',
+  V034: 'V034__mlde_scanner_context_columns.sql',
+  V035: 'V035__governance_audit_log.sql',
+  V036: 'V036__replay_evidence_source_guard.sql',
+  V037: 'V037__replay_evidence_revoke_public_insert.sql',
+  V038: 'V038__add_evidence_source_tier.sql',
+  V039: 'V039__backfill_evidence_source_tier.sql',
+  V040: 'V040__finalize_evidence_source_tier.sql',
+  V041: 'V041__replay_oos_embargo_enforcement.sql',
+  V043: 'V043__replay_mlde_replay_veto_log.sql',
+  V044: 'V044__replay_handoff_idempotency_unique.sql',
+  V045: 'V045__replay_run_state.sql',
+  V046: 'V046__replay_report_artifacts.sql',
+  V047: 'V047__replay_business_kpi_snapshots.sql',
+  V048: 'V048__replay_audit_incident_summaries.sql',
+  V049: 'V049__replay_experiments.sql',
+  V050: 'V050__replay_simulated_fills.sql',
+  V051: 'V051__mlde_recommendations_replay_columns.sql',
+  V052: 'V052__replay_run_state_artifacts_fk_redirect.sql',
+  V053: 'V053__governance_audit_log_replay_event_types.sql',
+  V054: 'V054__lease_transitions_audit_writer.sql',
+  V055: 'V055__verify_replay_evidence_function_full_insert.sql',
+  V056: 'V056__mlde_shadow_recommendations_retention_policy.sql',
+  V057: 'V057__replay_tier_promotion_approval.sql',
+  V058: 'V058__symbol_universe_and_strategy_freeze_log.sql',
+  V059: 'V059__edge_estimate_snapshots.sql',
+  V060: 'V060__replay_emergency_audit_log.sql',
+  V061: 'V061__replay_promotion_metrics_calculator.sql',
+};
+
+const MIGRATION_COMPANIONS = {
+  V017: ['V017_rollback.sql'],
+  V040: ['V040_healthcheck.sql'],
+  V052: ['V052_preflight.sql'],
+};
+
+function titleFromFile(fileName) {
+  if (!fileName) return 'Not landed / 未落地';
+  return fileName
+    .replace(/^V\d{3}__?/, '')
+    .replace(/\.sql$/, '')
+    .replace(/_/g, ' ');
+}
+
+function renderMigrationDashboard() {
+  const grid = document.getElementById('migration-dashboard-grid');
+  if (!grid) return;
+  const rows = [];
+  let landed = 0;
+  let empty = 0;
+  let companions = 0;
+  for (let i = 1; i <= 63; i += 1) {
+    const id = 'V' + String(i).padStart(3, '0');
+    const file = MIGRATION_FILES[id] || '';
+    const companionList = MIGRATION_COMPANIONS[id] || [];
+    if (file) landed += 1;
+    else empty += 1;
+    companions += companionList.length;
+    const cls = file ? 'landed' : 'missing';
+    const status = file ? '<span class="oc-chip oc-chip-good">landed</span>' : '<span class="oc-chip oc-chip-neutral">empty</span>';
+    const companionHtml = companionList.length
+      ? '<span class="oc-chip oc-chip-warn">' + companionList.length + ' companion</span>'
+      : '';
+    rows.push(
+      '<div class="dev-version-card ' + cls + '">' +
+        '<div class="dev-version-id">' + id + '</div>' +
+        '<div class="dev-version-name">' + ocEsc(titleFromFile(file)) + '</div>' +
+        '<div class="dev-version-file">' + ocEsc(file || 'no migration file in repo') + '</div>' +
+        '<div class="dev-version-meta">' + status + companionHtml + '</div>' +
+      '</div>'
+    );
+  }
+  grid.innerHTML = rows.join('');
+  ocSetText('dev-landed-count', String(landed));
+  ocSetText('dev-empty-count', String(empty));
+  ocSetText('dev-companion-count', String(companions));
+}
+
+function applyDevelopmentModeVisibility(enabled) {
+  const root = document.getElementById('development-root');
+  if (root) root.classList.toggle('dev-locked', !enabled);
+  const chip = document.getElementById('dev-mode-chip');
+  if (chip) {
+    chip.textContent = enabled ? 'Development Mode Enabled' : 'Development Mode Disabled';
+    chip.className = 'oc-chip ' + (enabled ? 'oc-chip-good' : 'oc-chip-neutral');
+  }
+}
+
+renderMigrationDashboard();
+applyDevelopmentModeVisibility(
+  typeof ocReadCachedGuiDevelopmentMode === 'function'
+    ? ocReadCachedGuiDevelopmentMode()
+    : false
+);
+if (typeof ocListenGuiDevelopmentMode === 'function') {
+  ocListenGuiDevelopmentMode(applyDevelopmentModeVisibility);
+}
+if (typeof ocFetchGuiDevelopmentMode === 'function') {
+  ocFetchGuiDevelopmentMode().then(applyDevelopmentModeVisibility);
+}
+</script>
+</body>
+</html>

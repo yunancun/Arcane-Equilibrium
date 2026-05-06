@@ -1245,3 +1245,13 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - No second OpenClaw trading GUI.
 - No OpenClaw direct order, live TOML/risk mutation, Bybit key access, or Rust hot-path dependency.
 - No per-agent independent cloud L2 calls; cloud escalation is supervisor-compressed and budgeted.
+
+## 2026-05-06 GUI Development Mode
+
+### Result
+- Added GUI-only `OPENCLAW_GUI_DEVELOPMENT_MODE` setting exposed through `/api/v1/settings/development-mode`.
+- Settings can now enable a Development tab; disabled mode hides Overview Global Mode Control and the Live dev-only global-mode note.
+- Development tab renders a read-only V001-V063 migration dashboard. This is static GUI inventory, not a DB migration runner.
+
+### Boundary
+- No trading mode, risk config, live auth, engine runtime, DB migration apply, deploy, rebuild, restart, or strategy parameter change.

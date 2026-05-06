@@ -633,4 +633,21 @@ function ensureGuiEnhancements() {
       </div>`;
     document.body.appendChild(modal);
   }
+
+  function applyDevelopmentModeVisibility(enabled) {
+    const runtimeMode = document.getElementById("runtimeModeSection");
+    if (runtimeMode) runtimeMode.style.display = enabled ? "" : "none";
+  }
+  applyDevelopmentModeVisibility(
+    typeof ocReadCachedGuiDevelopmentMode === "function"
+      ? ocReadCachedGuiDevelopmentMode()
+      : false
+  );
+  if (!window.__ocDevModeLegacyDashboardBound && typeof ocListenGuiDevelopmentMode === "function") {
+    window.__ocDevModeLegacyDashboardBound = true;
+    ocListenGuiDevelopmentMode(applyDevelopmentModeVisibility);
+  }
+  if (typeof ocFetchGuiDevelopmentMode === "function") {
+    ocFetchGuiDevelopmentMode().then(applyDevelopmentModeVisibility);
+  }
 }

@@ -274,7 +274,7 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260503.governance-sm03-ia-v1';
+const BUILD_TS = '20260506.gui-dev-mode-v1';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
@@ -308,11 +308,15 @@ const TABS = [
   { id: 'agents',     label: 'AI 团队 Agents',   labelEn: 'Agents',    icon: '&#x1F916;', src: `/static/tab-agents.html?v=${_v}` },
   // ── 治理與運維 ───────────────────────────────────────────────────
   { id: 'monitoring', label: '监控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
+  { id: 'development',label: '开发 Dev',         labelEn: 'Dev',       icon: '&#x1F6E0;', src: `/static/tab-development.html?v=${_v}`, requiresDevelopmentMode: true },
   { id: 'settings',   label: '设置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
 ];
 
 let currentTab = 'system';
 let paperEngineGuiEnabled = false;
+let developmentModeGuiEnabled = typeof ocReadCachedGuiDevelopmentMode === 'function'
+  ? ocReadCachedGuiDevelopmentMode()
+  : false;
 
 // ─── Build Tab Bar ────────────────────────────────────────────
 function buildTabs() {
@@ -328,6 +332,10 @@ function buildTabs() {
       tab.dataset.requiresPaperEngine = 'true';
       tab.style.display = 'none';
     }
+    if (t.requiresDevelopmentMode) {
+      tab.dataset.requiresDevelopmentMode = 'true';
+      tab.style.display = developmentModeGuiEnabled ? '' : 'none';
+    }
     tab.innerHTML = '<span class="tab-icon">' + t.icon + '</span>' + t.label;
     tab.onclick = () => switchTo(t.id);
     bar.appendChild(tab);
@@ -337,6 +345,7 @@ function buildTabs() {
     frame.id = 'f-' + t.id;
     frame.style.display = i === 0 ? 'block' : 'none';
     if (t.requiresPaperEngine) frame.dataset.requiresPaperEngine = 'true';
+    if (t.requiresDevelopmentMode) frame.dataset.requiresDevelopmentMode = 'true';
     // Use & if src already has query params (e.g. ?embed=1), otherwise use ?
     // 若 src 已有查询参数则用 &，否则用 ?
     const sep = t.src.includes('?') ? '&' : '?';
@@ -350,6 +359,9 @@ function switchTo(tabId) {
   const target = TABS.find(t => t.id === tabId);
   if (target && target.requiresPaperEngine && !paperEngineGuiEnabled) {
     tabId = 'replay';
+  }
+  if (target && target.requiresDevelopmentMode && !developmentModeGuiEnabled) {
+    tabId = 'system';
   }
   currentTab = tabId;
   // Update tab bar
@@ -392,13 +404,61 @@ async function loadPaperEngineGuiSetting() {
   applyPaperEngineGuiSetting(!!(data && data.enabled));
 }
 
+function broadcastDevelopmentModeSetting(enabled) {
+  document.querySelectorAll('#frame-wrap iframe').forEach(frame => {
+    try {
+      frame.contentWindow.postMessage({
+        type: 'openclaw-development-mode-setting',
+        enabled: !!enabled
+      }, window.location.origin);
+    } catch (_) {}
+  });
+}
+
+function applyDevelopmentModeSetting(enabled, options) {
+  developmentModeGuiEnabled = !!enabled;
+  if (typeof ocCacheGuiDevelopmentMode === 'function') {
+    ocCacheGuiDevelopmentMode(developmentModeGuiEnabled);
+  }
+  document.querySelectorAll('.tab[data-requires-development-mode="true"]').forEach(node => {
+    node.style.display = developmentModeGuiEnabled ? '' : 'none';
+  });
+  TABS.filter(t => t.requiresDevelopmentMode).forEach(t => {
+    const frame = document.getElementById('f-' + t.id);
+    if (!frame) return;
+    frame.style.display = developmentModeGuiEnabled && currentTab === t.id ? 'block' : 'none';
+  });
+  if (!developmentModeGuiEnabled && currentTab === 'development') {
+    switchTo('system');
+  }
+  if (!options || options.broadcast !== false) {
+    broadcastDevelopmentModeSetting(developmentModeGuiEnabled);
+  }
+}
+
+async function loadDevelopmentModeSetting() {
+  const d = await api('/api/v1/settings/development-mode');
+  const data = d && d.data ? d.data : d;
+  const fallback = typeof ocReadCachedGuiDevelopmentMode === 'function'
+    ? ocReadCachedGuiDevelopmentMode()
+    : false;
+  applyDevelopmentModeSetting(data ? !!data.enabled : fallback, { broadcast: true });
+}
+
 window.addEventListener('message', function(ev) {
   if (ev.origin !== window.location.origin) return;
   if (!ev.data || ev.data.type !== 'openclaw-paper-engine-setting') return;
   applyPaperEngineGuiSetting(!!ev.data.enabled);
 });
 
+window.addEventListener('message', function(ev) {
+  if (ev.origin !== window.location.origin) return;
+  if (!ev.data || ev.data.type !== 'openclaw-development-mode-setting') return;
+  applyDevelopmentModeSetting(!!ev.data.enabled, { broadcast: true });
+});
+
 loadPaperEngineGuiSetting();
+loadDevelopmentModeSetting();
 
 // ─── Clock ────────────────────────────────────────────────────
 setInterval(() => {

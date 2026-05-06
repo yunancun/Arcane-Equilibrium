@@ -11,6 +11,7 @@
 // Cookie 由登录端点设置，由登出端点清除。JS 永远不碰 token，浏览器自动发送 cookie。
 const OC_TOKEN_KEY = 'oc_trading_token';   // Legacy key — used only for migration cleanup
 const OC_USER_KEY = 'oc_username';
+const OC_GUI_DEVELOPMENT_MODE_KEY = 'oc_gui_development_mode_enabled';
 
 // On load, clean up any legacy localStorage tokens (one-time migration).
 // 页面加载时清理旧的 localStorage token（一次性迁移）。
@@ -214,6 +215,49 @@ async function ocApi(path, opts) {
 
 async function ocPost(path, body) {
   return ocApi(path, { method: 'POST', body: body || {} });
+}
+
+// ─── GUI Development Mode Visibility ────────────────────────────────────────
+// GUI-only setting: controls whether development surfaces are visible. It never
+// changes trading mode, risk config, live auth, or engine runtime.
+function ocReadCachedGuiDevelopmentMode() {
+  try {
+    return localStorage.getItem(OC_GUI_DEVELOPMENT_MODE_KEY) === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+function ocCacheGuiDevelopmentMode(enabled) {
+  const value = !!enabled;
+  try {
+    localStorage.setItem(OC_GUI_DEVELOPMENT_MODE_KEY, value ? '1' : '0');
+  } catch (_) {}
+  try {
+    window.dispatchEvent(new CustomEvent('ocguidevelopmentmodechange', {
+      detail: { enabled: value }
+    }));
+  } catch (_) {}
+  return value;
+}
+
+async function ocFetchGuiDevelopmentMode() {
+  const d = await ocApi('/api/v1/settings/development-mode');
+  const data = d && d.data ? d.data : d;
+  if (!data) return ocReadCachedGuiDevelopmentMode();
+  return ocCacheGuiDevelopmentMode(!!data.enabled);
+}
+
+function ocListenGuiDevelopmentMode(handler) {
+  if (typeof handler !== 'function') return;
+  window.addEventListener('message', function(ev) {
+    if (ev.origin !== window.location.origin) return;
+    if (!ev.data || ev.data.type !== 'openclaw-development-mode-setting') return;
+    handler(ocCacheGuiDevelopmentMode(!!ev.data.enabled));
+  });
+  window.addEventListener('ocguidevelopmentmodechange', function(ev) {
+    handler(!!(ev.detail && ev.detail.enabled));
+  });
 }
 
 // ─── Request Envelope ────────────────────────────────────────────────────────

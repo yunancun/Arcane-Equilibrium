@@ -304,6 +304,23 @@ let _stateRevision = 0;
 let _currentGlobalMode = '';
 let _pendingMode = null;
 
+function applyDevelopmentModeVisibility(enabled) {
+  const card = $('mode-control-card');
+  if (card) card.style.display = enabled ? '' : 'none';
+}
+
+applyDevelopmentModeVisibility(
+  typeof ocReadCachedGuiDevelopmentMode === 'function'
+    ? ocReadCachedGuiDevelopmentMode()
+    : false
+);
+if (typeof ocListenGuiDevelopmentMode === 'function') {
+  ocListenGuiDevelopmentMode(applyDevelopmentModeVisibility);
+}
+if (typeof ocFetchGuiDevelopmentMode === 'function') {
+  ocFetchGuiDevelopmentMode().then(applyDevelopmentModeVisibility);
+}
+
 // ─── Mode Confirm Descriptions ───────────────────────────────
 const MODE_CONFIRM = {
   design_only: {
