@@ -120,4 +120,4 @@ Result:
 - Source/test checkpoint added for V058/V059 backfill helper and Bybit kline turnover preservation.
 - E2 returned two P1 findings on status coverage and historical-window timestamp visibility; fixes added `--asof` / `--freeze-asof` split and explicit Trading/PreLaunch/Delivering/Closed status fetch. E2 follow-up verdict closed both.
 - E4 follow-up verified Python targeted tests 9/0, project-venv Bybit dry-run 1459 raw rows, and `git diff --check`; Linux apply then exposed dated-futures symbols outside V058 schema, so a follow-up fix filters symbols to the V058 contract and local targeted tests now pass 10/0 with 905 compatible dry-run rows.
-- Runtime sign-off remains blocked until Linux migration/backfill/rebuild/API reload/full-chain smoke complete.
+- Runtime follow-through completed after source sync: Linux V060/V061 apply, V058/V059 backfill, release `replay_runner` rebuild, API reload, and current-config V058 full-chain smoke all passed. Remaining work is recurring V058 snapshots plus order-book/ticker fidelity, not this checkpoint's deploy path.

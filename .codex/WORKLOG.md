@@ -177,4 +177,5 @@ YYYY-MM-DD HH:MM TZ
 - preserved Bybit public kline `turnover` through Python fixture rows, Rust `MarketEvent`, and scanner timeline ticker reconstruction; legacy fixtures still fall back to `close * volume`
 - fixed `/full-chain/run` register to use `embargo_days=14` with `half_life_days=7`, matching V041 `chk_embargo_days` on the real PG path
 - verification: Python targeted pytest 10/0, project-venv Bybit instruments dry-run 905 V058-compatible rows after dated-futures symbol filtering, py_compile PASS, Rust scanner timeline 4/0, fixture turnover 1/0, `cargo check -p openclaw_engine --bin replay_runner --features replay_isolated` PASS with pre-existing warnings
-- remaining before runtime sign-off: Linux migration apply/backfill, release `replay_runner` rebuild, API reload, and Linux one-click full-chain replay smoke
+- Linux runtime: pulled to `01b9cf59`, applied V060/V061, backfilled V058=905 / freeze=1 / V059=457, rebuilt release `replay_runner`, reloaded API, and completed a current-config full-chain smoke (`run_id=22558afa-3597-4571-b2c2-71b218201085`) with V058 universe + dedicated runner finalize
+- remaining: recurring V058 recorder snapshots and historical order-book/ticker fidelity
