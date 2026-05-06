@@ -1246,12 +1246,13 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - No OpenClaw direct order, live TOML/risk mutation, Bybit key access, or Rust hot-path dependency.
 - No per-agent independent cloud L2 calls; cloud escalation is supervisor-compressed and budgeted.
 
-## 2026-05-06 GUI Development Mode
+## 2026-05-06 Development Support Page
 
 ### Result
-- Added GUI-only `OPENCLAW_GUI_DEVELOPMENT_MODE` setting exposed through `/api/v1/settings/development-mode`.
-- Settings can now enable a Development tab; disabled mode hides Overview Global Mode Control and the Live dev-only global-mode note.
-- Development tab renders a read-only V001-V063 migration dashboard. This is static GUI inventory, not a DB migration runner.
+- Settings exposes a browser-local Development Support toggle; the frontend no longer depends on `/api/v1/settings/development-mode`, so an old running API process cannot produce a 404 for this support switch.
+- Enabled mode shows the Support tab and development-only Global Mode Control surfaces; disabled mode hides the Overview Global Mode Control and the Live dev-only global-mode note.
+- Support tab renders a read-only V001-V063 global development status dashboard with distinct V0xx icons. This is static support inventory, not a DB migration runner.
+- Backend `/api/v1/settings/development-mode` remains compatibility-only and now maps to `OPENCLAW_DEVELOPMENT_SUPPORT_MODE` with legacy `OPENCLAW_GUI_DEVELOPMENT_MODE` fallback.
 
 ### Boundary
 - No trading mode, risk config, live auth, engine runtime, DB migration apply, deploy, rebuild, restart, or strategy parameter change.

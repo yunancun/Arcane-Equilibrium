@@ -634,20 +634,21 @@ function ensureGuiEnhancements() {
     document.body.appendChild(modal);
   }
 
-  function applyDevelopmentModeVisibility(enabled) {
+  function applyDevelopmentSupportVisibility(enabled) {
     const runtimeMode = document.getElementById("runtimeModeSection");
     if (runtimeMode) runtimeMode.style.display = enabled ? "" : "none";
   }
-  applyDevelopmentModeVisibility(
-    typeof ocReadCachedGuiDevelopmentMode === "function"
-      ? ocReadCachedGuiDevelopmentMode()
+  applyDevelopmentSupportVisibility(
+    typeof ocReadCachedDevelopmentSupportMode === "function"
+      ? ocReadCachedDevelopmentSupportMode()
       : false
   );
-  if (!window.__ocDevModeLegacyDashboardBound && typeof ocListenGuiDevelopmentMode === "function") {
+  if (!window.__ocDevSupportLegacyDashboardBound && typeof ocListenDevelopmentSupportMode === "function") {
     window.__ocDevModeLegacyDashboardBound = true;
-    ocListenGuiDevelopmentMode(applyDevelopmentModeVisibility);
+    window.__ocDevSupportLegacyDashboardBound = true;
+    ocListenDevelopmentSupportMode(applyDevelopmentSupportVisibility);
   }
-  if (typeof ocFetchGuiDevelopmentMode === "function") {
-    ocFetchGuiDevelopmentMode().then(applyDevelopmentModeVisibility);
+  if (typeof ocFetchDevelopmentSupportMode === "function") {
+    ocFetchDevelopmentSupportMode().then(applyDevelopmentSupportVisibility);
   }
 }

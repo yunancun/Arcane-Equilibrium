@@ -11,7 +11,8 @@
 // Cookie 由登录端点设置，由登出端点清除。JS 永远不碰 token，浏览器自动发送 cookie。
 const OC_TOKEN_KEY = 'oc_trading_token';   // Legacy key — used only for migration cleanup
 const OC_USER_KEY = 'oc_username';
-const OC_GUI_DEVELOPMENT_MODE_KEY = 'oc_gui_development_mode_enabled';
+const OC_DEVELOPMENT_SUPPORT_MODE_KEY = 'oc_development_support_enabled';
+const OC_GUI_DEVELOPMENT_MODE_KEY = 'oc_gui_development_mode_enabled';  // Legacy key
 
 // On load, clean up any legacy localStorage tokens (one-time migration).
 // 页面加载时清理旧的 localStorage token（一次性迁移）。
@@ -217,47 +218,69 @@ async function ocPost(path, body) {
   return ocApi(path, { method: 'POST', body: body || {} });
 }
 
-// ─── GUI Development Mode Visibility ────────────────────────────────────────
-// GUI-only setting: controls whether development surfaces are visible. It never
-// changes trading mode, risk config, live auth, or engine runtime.
-function ocReadCachedGuiDevelopmentMode() {
+// ─── Development Support Visibility ─────────────────────────────────────────
+// Browser-local setting: controls whether the global development support page
+// and development-only controls are visible. It never changes trading mode,
+// risk config, live auth, or engine runtime.
+function ocReadCachedDevelopmentSupportMode() {
   try {
+    const raw = localStorage.getItem(OC_DEVELOPMENT_SUPPORT_MODE_KEY);
+    if (raw !== null) return raw === '1';
     return localStorage.getItem(OC_GUI_DEVELOPMENT_MODE_KEY) === '1';
   } catch (_) {
     return false;
   }
 }
 
-function ocCacheGuiDevelopmentMode(enabled) {
+function ocCacheDevelopmentSupportMode(enabled) {
   const value = !!enabled;
   try {
+    localStorage.setItem(OC_DEVELOPMENT_SUPPORT_MODE_KEY, value ? '1' : '0');
     localStorage.setItem(OC_GUI_DEVELOPMENT_MODE_KEY, value ? '1' : '0');
   } catch (_) {}
   try {
-    window.dispatchEvent(new CustomEvent('ocguidevelopmentmodechange', {
+    window.dispatchEvent(new CustomEvent('ocdevelopmentsupportchange', {
       detail: { enabled: value }
     }));
   } catch (_) {}
   return value;
 }
 
-async function ocFetchGuiDevelopmentMode() {
-  const d = await ocApi('/api/v1/settings/development-mode');
-  const data = d && d.data ? d.data : d;
-  if (!data) return ocReadCachedGuiDevelopmentMode();
-  return ocCacheGuiDevelopmentMode(!!data.enabled);
+async function ocFetchDevelopmentSupportMode() {
+  return ocReadCachedDevelopmentSupportMode();
 }
 
-function ocListenGuiDevelopmentMode(handler) {
+function ocListenDevelopmentSupportMode(handler) {
   if (typeof handler !== 'function') return;
   window.addEventListener('message', function(ev) {
     if (ev.origin !== window.location.origin) return;
-    if (!ev.data || ev.data.type !== 'openclaw-development-mode-setting') return;
-    handler(ocCacheGuiDevelopmentMode(!!ev.data.enabled));
+    if (!ev.data) return;
+    if (
+      ev.data.type !== 'openclaw-development-support-setting' &&
+      ev.data.type !== 'openclaw-development-mode-setting'
+    ) return;
+    handler(ocCacheDevelopmentSupportMode(!!ev.data.enabled));
   });
-  window.addEventListener('ocguidevelopmentmodechange', function(ev) {
+  window.addEventListener('ocdevelopmentsupportchange', function(ev) {
     handler(!!(ev.detail && ev.detail.enabled));
   });
+}
+
+// Backward-compatible aliases for cached console/tab HTML from the prior build.
+function ocReadCachedGuiDevelopmentMode() {
+  return ocReadCachedDevelopmentSupportMode();
+}
+
+function ocCacheGuiDevelopmentMode(enabled) {
+  return ocCacheDevelopmentSupportMode(enabled);
+}
+
+async function ocFetchGuiDevelopmentMode() {
+  return ocFetchDevelopmentSupportMode();
+}
+
+function ocListenGuiDevelopmentMode(handler) {
+  return ocListenDevelopmentSupportMode(handler);
 }
 
 // ─── Request Envelope ────────────────────────────────────────────────────────

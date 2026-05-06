@@ -29,6 +29,8 @@ def _client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     env_file = tmp_path / "environment_files" / "basic_system_services.env"
     monkeypatch.setenv("OPENCLAW_BASIC_SYSTEM_ENV_FILE", str(env_file))
     monkeypatch.delenv("OPENCLAW_ENABLE_PAPER", raising=False)
+    monkeypatch.delenv("OPENCLAW_DEVELOPMENT_SUPPORT_MODE", raising=False)
+    monkeypatch.delenv("OPENCLAW_GUI_DEVELOPMENT_MODE", raising=False)
 
     app = FastAPI()
     app.include_router(settings_router)
@@ -88,10 +90,13 @@ def test_development_mode_defaults_disabled(tmp_path: Path, monkeypatch) -> None
     assert data["enabled"] is False
     assert data["restart_required"] is False
     assert data["source"] == "default_disabled"
-    assert data["scope"] == "gui_visibility_only"
+    assert data["scope"] == "development_support_visibility_only"
+    assert data["surface"] == "global_development_status_support"
 
 
-def test_development_mode_post_persists_env_file(tmp_path: Path, monkeypatch) -> None:
+def test_development_mode_post_persists_support_env_file(
+    tmp_path: Path, monkeypatch,
+) -> None:
     client, env_file = _client(tmp_path, monkeypatch)
 
     resp = client.post("/api/v1/settings/development-mode", json={"enabled": True})
@@ -100,5 +105,5 @@ def test_development_mode_post_persists_env_file(tmp_path: Path, monkeypatch) ->
     data = resp.json()
     assert data["enabled"] is True
     assert data["restart_required"] is False
-    assert "OPENCLAW_GUI_DEVELOPMENT_MODE=1" in env_file.read_text(encoding="utf-8")
+    assert "OPENCLAW_DEVELOPMENT_SUPPORT_MODE=1" in env_file.read_text(encoding="utf-8")
     assert oct(os.stat(env_file).st_mode & 0o777) == "0o600"

@@ -708,22 +708,22 @@ const _liveModeState = {
   session_state: 'offline',
 };
 
-function applyDevelopmentModeVisibility(enabled) {
+function applyDevelopmentSupportVisibility(enabled) {
   document.querySelectorAll('[data-dev-mode-only="global-mode-control"]').forEach(node => {
     node.style.display = enabled ? '' : 'none';
   });
 }
 
-applyDevelopmentModeVisibility(
-  typeof ocReadCachedGuiDevelopmentMode === 'function'
-    ? ocReadCachedGuiDevelopmentMode()
+applyDevelopmentSupportVisibility(
+  typeof ocReadCachedDevelopmentSupportMode === 'function'
+    ? ocReadCachedDevelopmentSupportMode()
     : false
 );
-if (typeof ocListenGuiDevelopmentMode === 'function') {
-  ocListenGuiDevelopmentMode(applyDevelopmentModeVisibility);
+if (typeof ocListenDevelopmentSupportMode === 'function') {
+  ocListenDevelopmentSupportMode(applyDevelopmentSupportVisibility);
 }
-if (typeof ocFetchGuiDevelopmentMode === 'function') {
-  ocFetchGuiDevelopmentMode().then(applyDevelopmentModeVisibility);
+if (typeof ocFetchDevelopmentSupportMode === 'function') {
+  ocFetchDevelopmentSupportMode().then(applyDevelopmentSupportVisibility);
 }
 
 /**
