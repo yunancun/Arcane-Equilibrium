@@ -201,7 +201,8 @@ impl ScannerRunner {
             );
 
             // ── Step 5: Query open positions / 查詢開放持倉 ──
-            let open_positions = self.query_open_positions().await;
+            let open_positions = self
+                .open_positions_or_active_universe_on_unknown(self.query_open_positions().await);
             let previous_scan = self.registry.last_scan();
 
             // ── Step 6: Apply to registry / 應用到注冊表 ──
@@ -348,10 +349,10 @@ impl ScannerRunner {
     }
 
     /// Query the event_consumer for the set of symbols with open positions.
-    /// Returns an empty set on timeout or channel error (safe — will just defer removal).
+    /// Returns None on timeout or channel error so removals can fail closed.
     /// 向 event_consumer 查詢有開放持倉的交易對集合。
-    /// 超時或通道錯誤時返回空集合（安全 — 只會延遲移除）。
-    async fn query_open_positions(&self) -> HashSet<String> {
+    /// 超時或通道錯誤時返回 None，讓移除行為 fail-closed。
+    async fn query_open_positions(&self) -> Option<HashSet<String>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         if self
             .pipeline_cmd_tx
@@ -359,19 +360,39 @@ impl ScannerRunner {
             .is_err()
         {
             warn!("[scanner] pipeline_cmd_tx send failed (channel closed?)");
-            return HashSet::new();
+            return None;
         }
         match tokio::time::timeout(Duration::from_secs(2), rx).await {
-            Ok(Ok(symbols)) => symbols,
+            Ok(Ok(symbols)) => Some(symbols),
             Ok(Err(_)) => {
                 warn!("[scanner] open positions query: response channel dropped");
-                HashSet::new()
+                None
             }
             Err(_) => {
                 warn!("[scanner] open positions query timed out (2s)");
-                HashSet::new()
+                None
             }
         }
+    }
+
+    /// Use reliable open-position symbols when available. If discovery fails,
+    /// conservatively defer removal for the current active universe so scanner
+    /// ranking churn cannot unsubscribe an unknown open position.
+    /// 若查詢可靠則使用 open-position symbols；查詢失敗時保守延遲當前 active
+    /// universe 的移除，避免 scanner ranking churn 退訂未知持倉。
+    fn open_positions_or_active_universe_on_unknown(
+        &self,
+        query_result: Option<HashSet<String>>,
+    ) -> HashSet<String> {
+        if let Some(symbols) = query_result {
+            return symbols;
+        }
+        let symbols: HashSet<String> = self.registry.snapshot().into_iter().collect();
+        warn!(
+            deferred_symbols = symbols.len(),
+            "[scanner] open position discovery unavailable; deferring active-universe removals"
+        );
+        symbols
     }
 
     fn opportunity_cost_prior(
@@ -459,8 +480,8 @@ mod tests {
         }
     }
 
-    /// EN: query_open_positions returns empty set when channel is closed.
-    /// 中文: 通道關閉時 query_open_positions 返回空集合。
+    /// EN: query_open_positions returns None when channel is closed.
+    /// 中文: 通道關閉時 query_open_positions 返回 None。
     #[tokio::test]
     async fn test_query_open_positions_channel_closed() {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -468,7 +489,29 @@ mod tests {
         let mut runner = make_test_runner(None);
         runner.pipeline_cmd_tx = cmd_tx;
         let result = runner.query_open_positions().await;
-        assert!(result.is_empty());
+        assert!(result.is_none());
+    }
+
+    /// EN: unknown open-position state defers removals for all active symbols.
+    /// 中文: open-position 狀態未知時，所有 active symbol 都延遲移除。
+    #[test]
+    fn test_unknown_open_positions_defer_active_universe_removal() {
+        let mut runner = make_test_runner(None);
+        runner.registry = Arc::new(SymbolRegistry::new(
+            vec!["BTCUSDT".to_string(), "SOLUSDT".to_string()],
+            vec!["BTCUSDT".to_string()],
+        ));
+        let open_positions = runner.open_positions_or_active_universe_on_unknown(None);
+
+        let mut config = crate::scanner::config::AntiChurnConfig::default();
+        config.min_hold_cycles = 0;
+        let (_added, removed) =
+            runner
+                .registry
+                .apply_scan_result(&[], 1_700_000_000_000, &config, &open_positions, 1);
+
+        assert!(removed.is_empty());
+        assert!(runner.registry.is_active("SOLUSDT"));
     }
 
     #[test]
