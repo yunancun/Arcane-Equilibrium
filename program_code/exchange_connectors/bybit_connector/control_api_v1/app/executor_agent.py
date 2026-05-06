@@ -143,6 +143,7 @@ class ExecutorAgent(BaseAgent):
         audit_callback: Optional[Callable] = None,
         governance_hub: Optional[Any] = None,
         shadow_mode_provider: Optional[Callable[[], bool]] = None,
+        event_store: Optional[Any] = None,
     ):
         """
         Initialize ExecutorAgent with optional GovernanceHub for Decision Lease acquisition.
@@ -170,6 +171,7 @@ class ExecutorAgent(BaseAgent):
             message_bus=message_bus,
             audit_callback=audit_callback,
             cost_tracker=None,  # Executor does not invoke LLMs.
+            event_store=event_store,
         )
         self.config = config or ExecutorConfig()
         self._paper_engine = paper_engine

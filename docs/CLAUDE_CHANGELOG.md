@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（AgentTodo MAG-015 Sprint A contract addendum）
+> 最後更新：2026-05-06（AgentTodo MAG-010..012 durable event-store source wiring）
+
+### AgentTodo MAG-010..012 durable event-store source wiring — 2026-05-06
+
+**Scope**：新增 default-off `AgentEventStore`，把 legacy/advisory
+`MessageBus` delivery 寫入 `agent.messages`，把 `BaseAgent` lifecycle 與
+`Conductor.set_agent_state` 寫入 `agent.state_changes`，並把 Strategist /
+Guardian / Analyst local Ollama calls 寫入 `agent.ai_invocations`。
+
+**Boundary**：`MessageBus` 仍不是 Agent Decision Spine；DB/serialization 失敗
+全部 fail-soft，不阻塞 subscriber、agent lifecycle 或交易 runtime。raw prompt /
+raw response 不入庫，只保存 prompt hash、response hash、latency、model、tier、
+purpose 與 redacted metadata。Supervisor cloud escalation rows 仍屬 MAG-019。
+
+**Healthcheck / tests**：新增 `[52] agent_event_store_rows`；env=0 PASS-skip，
+env=1 檢查 `agent.messages` / `agent.state_changes` / `agent.ai_invocations`
+30m 內 row proof，`OPENCLAW_AGENT_EVENT_STORE_HEALTH_REQUIRED=1` 時 WARN 升 FAIL。
+Mac targeted verification：new tests + affected multi-agent tests 215 PASS，
+`py_compile` PASS，`git diff --check` PASS。Linux runtime row proof 仍待 MAG-013/014。
 
 ### AgentTodo MAG-015 Sprint A contract addendum — 2026-05-06
 

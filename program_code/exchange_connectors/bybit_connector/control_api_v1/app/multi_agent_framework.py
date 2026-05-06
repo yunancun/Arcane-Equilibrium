@@ -283,11 +283,17 @@ class MessageBus:
     persisted for audit.
     """
 
-    def __init__(self, *, audit_callback: Optional[Callable] = None):
+    def __init__(
+        self,
+        *,
+        audit_callback: Optional[Callable] = None,
+        message_sink: Optional[Callable[[AgentMessage], None]] = None,
+    ):
         self._lock = threading.Lock()
         self._messages: List[AgentMessage] = []
         self._subscribers: Dict[AgentRole, List[Callable]] = {}
         self._audit_callback = audit_callback
+        self._message_sink = message_sink
 
     def validate_route(
         self, sender: AgentRole, receiver: AgentRole, msg_type: MessageType
@@ -318,6 +324,16 @@ class MessageBus:
             # holding the lock during potentially slow callbacks (A8 fix).
             # 在锁内复制订阅者列表；在锁外调用，避免慢回调阻塞整个 bus。
             subscribers = list(self._subscribers.get(message.receiver, []))
+            message_sink = self._message_sink
+
+        # Durable sink is advisory observability only: DB failures must not
+        # block delivery to subscribers.
+        # 持久化 sink 僅作觀測；DB 失敗不得阻塞 subscriber delivery。
+        if message_sink:
+            try:
+                message_sink(message)
+            except Exception as e:
+                logger.warning("MessageBus message_sink error: %s", e)
 
         # Notify subscribers outside the lock — each callback wrapped in
         # try/except so one failing subscriber cannot block others.
@@ -334,6 +350,11 @@ class MessageBus:
         """Register a handler for messages delivered to *role*."""
         with self._lock:
             self._subscribers.setdefault(role, []).append(callback)
+
+    def set_message_sink(self, callback: Optional[Callable[[AgentMessage], None]]) -> None:
+        """Install or clear an advisory durable sink for delivered messages."""
+        with self._lock:
+            self._message_sink = callback
 
     def get_messages(
         self,

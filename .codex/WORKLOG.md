@@ -154,3 +154,6 @@ YYYY-MM-DD HH:MM TZ
 - froze local observation, OpenClaw view-model, supervisor escalation, proposal/approval/channel, endpoint allowlist, cloud budget, store ownership, state-transition, and MAG-010..019 implementation-packet contracts
 - next order: MAG-010/011/012 durable event store, then MAG-013/014 Linux row proof, then MAG-016/017 read-only OpenClaw status/self-state
 - no runtime, DB write/schema, strategy/risk config, live authorization, rebuild, restart, or deploy action
+- continued AgentTodo Sprint A MAG-010..014 source wave: added default-off `AgentEventStore`, MessageBus sink, BaseAgent/Conductor state hooks, Strategist/Guardian/Analyst AI invocation hooks, and `[52] agent_event_store_rows`
+- verification on Mac: new + affected targeted pytest 215 PASS, `py_compile` PASS, `git diff --check` PASS
+- status after source wave: MAG-010/011/012 source done but final DONE blocked on Linux runtime fresh rows; MAG-013/014 next gate is Linux targeted tests + `[52]` row proof

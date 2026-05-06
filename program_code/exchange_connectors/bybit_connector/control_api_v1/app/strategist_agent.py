@@ -141,12 +141,14 @@ class StrategistAgent(BaseAgent):
         ollama_client: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
         cost_tracker: Optional[Any] = None,
+        event_store: Optional[Any] = None,
     ):
         super().__init__(
             role=AgentRole.STRATEGIST,
             message_bus=message_bus,
             audit_callback=audit_callback,
             cost_tracker=cost_tracker,
+            event_store=event_store,
         )
         self.config = config or StrategistConfig()
         self._ollama = ollama_client

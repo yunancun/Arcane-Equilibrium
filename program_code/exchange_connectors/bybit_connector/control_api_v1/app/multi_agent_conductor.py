@@ -55,11 +55,13 @@ class Conductor:
         *,
         message_bus: Optional[MessageBus] = None,
         audit_callback: Optional[Callable] = None,
+        event_store: Optional[Any] = None,
     ):
         self.bus = message_bus or MessageBus(audit_callback=audit_callback)
         self._lock = threading.Lock()
         self._agents: Dict[AgentRole, AgentInfo] = {}
         self._audit_callback = audit_callback
+        self.event_store = event_store
         self._directives_issued: int = 0
         self._arbitrations: int = 0
         self._resource_budget_usd: float = 2.0
@@ -88,9 +90,35 @@ class Conductor:
             info = self._agents.get(role)
             if not info:
                 return False
+            old_state = info.state
             info.state = state
             info.last_heartbeat_ms = int(time.time() * 1000)
+        self._record_state_change(role, old_state, state, "set_agent_state")
         return True
+
+    def _record_state_change(
+        self,
+        role: AgentRole,
+        from_state: AgentState,
+        to_state: AgentState,
+        trigger_event: str,
+    ) -> None:
+        """Fail-soft state persistence for conductor-observed lifecycle."""
+        if self.event_store is None:
+            return
+        try:
+            record_fn = getattr(self.event_store, "record_state_change", None)
+            if record_fn is None:
+                return
+            record_fn(
+                agent_name=f"conductor:{role.value}",
+                from_state=from_state.value,
+                to_state=to_state.value,
+                trigger_event=trigger_event,
+                details={"source": "Conductor.set_agent_state", "role": role.value},
+            )
+        except Exception:
+            pass
 
     def heartbeat(self, role: AgentRole) -> bool:
         """Record a heartbeat from an agent."""

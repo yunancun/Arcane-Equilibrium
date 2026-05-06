@@ -93,12 +93,14 @@ class AnalystAgent(BaseAgent):
         learning_tier_gate: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
         min_observations_for_ai: Optional[int] = None,
+        event_store: Optional[Any] = None,
     ):
         super().__init__(
             role=AgentRole.ANALYST,
             message_bus=message_bus,
             audit_callback=audit_callback,
             cost_tracker=None,  # Analyst's Ollama usage is untracked (legacy behavior).
+            event_store=event_store,
         )
         self.config = config or AnalystConfig()
         # Configurable observation threshold for L2 AI analysis trigger.
@@ -596,8 +598,44 @@ class AnalystAgent(BaseAgent):
 
         # E5-P1-4: routed via llm_call_wrapper.call_ollama_generate (identical defaults).
         # E5-P1-4：通過 llm_call_wrapper.call_ollama_generate（默認參數完全一致）。
-        response = call_ollama_generate(
-            self._ollama, summary, system=system, temperature=0.3, max_tokens=1024, think=True,
+        start_ms = time.time()
+        try:
+            response = call_ollama_generate(
+                self._ollama,
+                summary,
+                system=system,
+                temperature=0.3,
+                max_tokens=1024,
+                think=True,
+            )
+        except Exception:
+            self._record_ai_invocation(
+                provider="ollama",
+                model="l2_heavy",
+                tier="L2",
+                purpose="analyst_pattern_analysis",
+                prompt_material=f"{system}\n\n{summary}",
+                latency_ms=(time.time() - start_ms) * 1000,
+                success=False,
+                response_summary="generate exception",
+                details={"observations_count": len(self._records)},
+            )
+            raise
+
+        self._record_ai_invocation(
+            provider="ollama",
+            model="l2_heavy",
+            tier="L2",
+            purpose="analyst_pattern_analysis",
+            prompt_material=f"{system}\n\n{summary}",
+            response_material=getattr(response, "text", None),
+            latency_ms=(time.time() - start_ms) * 1000,
+            success=bool(response.success),
+            response_summary=(
+                f"generate success={bool(response.success)} "
+                f"text_len={len(getattr(response, 'text', '') or '')}"
+            ),
+            details={"observations_count": len(self._records)},
         )
 
         if not response.success:

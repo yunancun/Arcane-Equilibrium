@@ -1312,3 +1312,23 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   rebuild, restart, or deploy was performed.
 - Passive healthcheck remained FAIL for known runtime/data gaps; this contract
   does not change live readiness.
+
+## 2026-05-06 AgentTodo Sprint A MAG-010..014 Source Wave
+
+### Result
+- MAG-010..012 source wiring is implemented locally: default-off `AgentEventStore`,
+  MessageBus advisory sink, BaseAgent/Conductor state-change hooks, and
+  Strategist / Guardian / Analyst AI invocation hooks.
+- Added `[52] agent_event_store_rows` to passive healthcheck. Env default is
+  PASS-skip; enabled mode verifies recent rows in `agent.messages`,
+  `agent.state_changes`, and `agent.ai_invocations`.
+
+### Verification
+- Mac targeted new + affected pytest: 215 PASS.
+- `py_compile`: PASS.
+- `git diff --check`: PASS.
+
+### Boundary
+- No deploy/restart yet and no live trading authority change.
+- MAG-010..012 remain row-proof pending until Linux runtime writes fresh agent
+  rows; MAG-013/014 are the next gate.
