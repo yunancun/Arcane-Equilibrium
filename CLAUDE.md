@@ -97,7 +97,7 @@
 | 3 | LG-3 provider pricing binding IMPL（RFC `5ce777b`，0% binding contract）| 🔴 | 0.5-1 sprint |
 | 4 | LG-4 supervised live IMPL（RFC `ec8f0f4`，state machine 0 行）| 🔴 | 1.5-2 sprint |
 | 5 | ✅ **Decision Lease retrofit AMD-2026-05-02-01 Path A LAND** (Sprint 3 Track H commit `dbcf845b` + Track I deploy `0ad79f67`)；feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF → production 0 行為改動；amendment §5.4 flip flag canary 24h 待 ~05-15 P0-EDGE-2 後 operator action | ✅ DONE | (closed) |
-| 6 | ✅ `agent.messages` / `state_changes` / `ai_invocations` all-time 0 blocker closed by MAG-010..014 source + Linux controlled row proof；`[52]` strict PASS `messages=2 state_changes=11 ai_invocations=2`，continuous production flag / supervisor cloud rows remain MAG-019 rollout | ✅ DONE-SMOKE | (closed) |
+| 6 | ✅ `agent.messages` / `state_changes` / `ai_invocations` all-time 0 blocker closed by MAG-010..014 source + Linux controlled row proof；`[52]` strict PASS `messages=2 state_changes=11 ai_invocations=2`；MAG-019 default-disabled supervisor ledger policy done，real cloud rows remain disabled until future runtime enablement | ✅ DONE-SMOKE | (closed) |
 | 7 | LG-5 W3 FUP-1 reviewer 0 emit fix | 🟡 | sibling CC `463890d` 已 land，待 deploy 啟動 |
 | 8 | ExecutorAgent shadow_mode hardcoded `lambda: True` fail-close — fake-live wiring | 🟠 | 0.5 sprint |
 | 9 | H0_GATE singleton 0 production caller（DOC-02 spec 死於 wiring）| 🟠 | LG-2 IMPL 前提 |
@@ -449,7 +449,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A active**）。AgentTodo 已完成 **MAG-015 合約附錄**（`docs/architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md`）、**MAG-010..014 durable event-store source + Linux controlled row proof**、**MAG-016/017 read-only OpenClaw authority lockdown + status/self-state endpoints**（`cbb225b7`；Mac/Linux targeted tests 33/0）、以及 **MAG-018 Agent Control GUI foundation**（`12d3f3ff`；Mac/Linux targeted tests 38/0 + node check）。下一步不是 Telegram/WebChat、proposal approval relay、或第二 GUI，而是 **MAG-019 supervisor cloud escalation ledger policy**。
+**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A closed**）。AgentTodo Sprint A 已完成：**MAG-015 合約附錄**、**MAG-010..014 durable event-store source + Linux controlled row proof**、**MAG-016/017 read-only OpenClaw authority lockdown + status/self-state endpoints**（`cbb225b7`；Mac/Linux targeted tests 33/0）、**MAG-018 Agent Control GUI foundation**（`12d3f3ff`；Mac/Linux targeted tests 38/0 + node check）、以及 **MAG-019 supervisor cloud escalation ledger policy**（`65a4279f`；Mac/Linux targeted tests 45/0；cloud default disabled）。下一步若繼續 AgentTodo，進 **M2 MAG-020..026 Scanner Advisory Conversion**；仍不是 Telegram/WebChat、proposal approval relay、或第二 GUI。
 
 **關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → ~05-09 3C 7d audit → ~05-15 P0-3 edge decision + Decision Lease flag flip canary 24h → ~05-16 funding_arb V2 14d audit → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
 
