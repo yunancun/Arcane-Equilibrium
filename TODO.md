@@ -6,7 +6,7 @@
 **v9 摘要保留**：2026-05-05 §九 LOC governance change：硬上限 1500→2000（operator 決定，REF-20 Sprint C 拍板）；警告線維持 800。
 **REF-20 closure 摘要**：Sprint A+B+C+D 已 closed；R9 PM sign-off commit `6a7a885c` + reality-gap fix `67b95808`。詳 → `srv/memory/project_2026_05_03_ref20_sprint1_2_closure.md` + `docs/archive/2026-05-06--todo_completed_extract.md`。Operator-side outstanding 僅剩 live PG opt-in smoke、V056 cron schedule、5 healthcheck sentinel deploy validation，不阻塞 REF-20 closure。
 **玄衡 2026-05-06 命名定位**：正式項目名為「玄衡 · Arcane Equilibrium」；外部 OpenClaw Gateway 改為通信 / mobile / supervisor / proposal relay；本地 5-Agent 保持獨立；唯一 GUI 是 `trade-core:8000/console` OpenClaw Control Console。詳 `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md` + `docs/adr/0014-arcane-equilibrium-soft-rename.md`。
-**REF-21 實證審查（2026-05-06）**：V1.3 final 8-agent real-code audit 接受；R2/R3 仍 BLOCKED。已修正 §10 replay baseline namespace collision、補 `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP` guard、落 V057-V060 migration targets、回填 GUI 13-tab 與 LOC governance。剩餘主阻塞：MIT Linux PG dry-run、SECURITY DEFINER calculator 真 body、full-chain `/run` 實作、rate ceiling 50 req/s dedicated client、Bybit ToS/fair-use review。
+**REF-21 實證審查（2026-05-06）**：V1.3 final 8-agent real-code audit 接受；R2/R3 仍 BLOCKED。已修正 §10 replay baseline namespace collision、補 `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP` guard、落 V057-V060 migration targets、回填 GUI 13-tab 與 LOC governance；V057-V060 Guard A/B/C + Linux PG transaction dry-run 已綠且 rollback 後 0 persisted table。剩餘主阻塞：SECURITY DEFINER calculator 真 body、full-chain `/run` 實作、rate ceiling 50 req/s dedicated client、Bybit ToS/fair-use review。
 **Source checkpoint before soft rename**: `61634f3a`（Mac/Linux/origin source 同步；2026-05-06 SSH 驗證 Linux clean；本次玄衡 soft rename 為 docs-only，不 rebuild / restart / DB write）· **Engine runtime**: watchdog demo/live alive，paper inactive by design；last verified full rebuild remains Sprint 3 Track I (`dbcf845b`)。
 **測試基準**：Python pytest **3431 PASS** / 1 fail (pre-existing E4-P0-1) / 10 skip · Rust cargo workspace **3132 PASS** / 2 fail (pre-existing E4-P0-2) / 3 ignored · Sprint 3 Track H Python sibling 44/44 PASS
 **21d demo 時鐘**：2026-04-16 22:16 → 解鎖 **2026-05-07**
@@ -74,8 +74,8 @@
 |----|------|------|
 | **P0-REF21-1** ✅ | §10 baseline SLA namespace collision 修正：replay fixture row/decision count 改為 `254062 ±1%` / `10080 ±5%` scan cycles / `500-1500` intents；pytest baseline 獨立 | DONE in V1.3 empirical correction |
 | **P0-REF21-2** ✅ | `OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP` guard：live release profile 下 full-chain prepare 無 override 即 403，不 fetch Bybit | DONE source/test |
-| **P0-REF21-3** ✅ | V057-V060 至少有真 migration targets：tier approval / symbol+freeze / edge snapshots / emergency audit log | DONE source/test；待 MIT Linux PG dry-run |
-| **P0-REF21-4** | MIT Linux PG dry-run V057-V060（apply transaction + rollback/disposable DB proof + Guard A/B/C + GRANT/REVOKE diff） | BLOCKS R2/R3 |
+| **P0-REF21-3** ✅ | V057-V060 至少有真 migration targets：tier approval / symbol+freeze / edge snapshots / emergency audit log | DONE source/test |
+| **P0-REF21-4** ✅ | MIT Linux PG dry-run V057-V060（apply transaction + rollback/disposable DB proof + Guard A/B/C + GRANT/REVOKE diff） | DONE 2026-05-06：pre-existing f/f/f/f/f → inside_tx t/t/t/t/t → after_rollback f/f/f/f/f；all Guard A/B/C notices emitted |
 | **P0-REF21-5** | SECURITY DEFINER `replay.calculate_promotion_metrics` 真 body，對齊 `learning_engine/dsr_gate.py` + `pbo_gate.py` + `quantile_bootstrap.py`；禁止 stub deploy | BLOCKS R6 advisory |
 | **P0-REF21-6** | `POST /api/v1/replay/full-chain/run` 真 full-chain scanner-to-exit runner 實作；當前只有 `/full-chain/prepare` dataset endpoint + REF-20 `/run` | BLOCKS R3 |
 | **P0-REF21-7** | Rate/IP 50 req/s 真 enforce + replay dedicated public Bybit client；避免共用 production rate window | BLOCKS production enablement |
@@ -100,13 +100,18 @@
 
 #### P1-OPENCLAW — Gateway / Agent Control Console
 
+**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。先做 MAG-015 合約附錄 + MAG-010..014 durable event store + MAG-016..019 read-only foundation；未取得 Linux agent schema nonzero row proof 前，不做 Telegram/WebChat、proposal approval relay、或第二 GUI。
+
 | ID | 任務 | 來源 |
 |----|------|------|
-| **P1-OPENCLAW-1** | OpenClaw Gateway authority lockdown：allowlist `/api/v1/openclaw/*`，禁止 direct order / live TOML / Bybit key / secret access | 2026-05-06 control-plane repositioning |
-| **P1-OPENCLAW-2** | 新增 `/api/v1/openclaw/status/self-state/brief/diagnostics/escalations/proposals` 聚合 API | OpenClaw Gateway development plan |
-| **P1-OPENCLAW-3** | `tab-agents.html` 升級為 OpenClaw / Agent Control Console：topology、self-state、brief、diagnostics、cloud escalation、proposal/approval queue、channels | GUI OpenClaw Control Console plan |
-| **P1-OPENCLAW-4** | Supervisor cloud escalation policy：本地 5-Agent 先產生 observation，上級 supervisor 壓縮後才按 budget 叫 cloud L2 | Operator 2026-05-06 architecture decision |
-| **P1-OPENCLAW-5** | Telegram/WebChat mobile approval lane：只 relay proposal approve/reject，所有交易影響仍走 GovernanceHub + Decision Lease + Rust | OpenClaw Gateway development plan |
+| **P1-OPENCLAW-0** | AgentTodo Sprint A handoff：MAG-015 → MAG-010/011/012 → MAG-013/014 → MAG-016/017 → MAG-018/019；OpenClaw 工作不得繞過 P0-GOV-2 agent schema 0-row blocker | AgentTodo 2026-05-06 PM handoff |
+| **P1-OPENCLAW-1** | OpenClaw Gateway authority lockdown：allowlist `/api/v1/openclaw/*`，禁止 direct order / live TOML / Bybit key / secret access；OpenClaw request 必帶 source/channel/sender/auth_profile/request_id | 2026-05-06 control-plane repositioning |
+| **P1-OPENCLAW-2** | 先新增 read-only `/api/v1/openclaw/status` + `/api/v1/openclaw/self-state` 聚合 API；返回 degraded envelopes，不啟用 write/proposal endpoint | OpenClaw Gateway development plan + AgentTodo MAG-017 |
+| **P1-OPENCLAW-3** | 再新增 `/brief/latest` / `/diagnostics` / `/escalations` 聚合 API；必須由 durable event store + `agent.ai_invocations` 支撐，不讓前端拼 raw table | OpenClaw Gateway development plan |
+| **P1-OPENCLAW-4** | `tab-agents.html` 先升級為 read-only OpenClaw / Agent Control foundation：topology、self-state、gateway/channel posture、degraded/error states | GUI OpenClaw Control Console plan + AgentTodo MAG-018 |
+| **P1-OPENCLAW-5** | Supervisor cloud escalation policy：本地 5-Agent 先產生 observation，上級 supervisor 壓縮後才按 budget 叫 cloud L2；所有 cloud call 記入 `agent.ai_invocations` | Operator 2026-05-06 architecture decision + AgentTodo MAG-019 |
+| **P1-OPENCLAW-6** | Proposal / approval queue：OpenClaw 只能 create proposal 和 relay approve/reject；交易影響仍走 canonical GUI approval queue + GovernanceHub + Decision Lease + Rust | OpenClaw Gateway + GUI plans |
+| **P1-OPENCLAW-7** | Telegram/WebChat mobile lane：最後接入 alert / read-only query / approval relay；Gateway outage 不影響 Rust trading runtime | OpenClaw Gateway development plan |
 
 #### P1-EDGE — Edge 層支撐
 

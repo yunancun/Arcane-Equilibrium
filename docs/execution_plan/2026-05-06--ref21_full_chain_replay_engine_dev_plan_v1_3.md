@@ -1,14 +1,16 @@
 # REF-21 Full-Chain Replay Engine Dev Plan V1.3
 
 **Date:** 2026-05-06  
-**Status:** Active revised design / R2-R3 blocked behind empirical P0 gates
+**Status:** Active revised design / R2-R3 blocked behind remaining P0 gates
 **Owner:** PM  
 **Supersedes:** `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md`  
 **Audit input:** V1.2 8-agent adversarial closure review + final
 8-agent empirical spec-to-deploy audit, overall verdict `R2/R3 BLOCKED`
 **Runtime state:** `/api/v1/replay/full-chain/prepare` remains default-OFF behind
 `OPENCLAW_REPLAY_PREPARE_ENABLED=0`. R1 hardening may continue; GUI remains
-unbound. R2/R3 dispatch is forbidden until empirical P0 gates pass.
+unbound. V057-V060 Guard A/B/C Linux PG dry-run is green with rollback proof.
+R2/R3 dispatch remains forbidden until the SECURITY DEFINER calculator,
+`/full-chain/run`, and replay dedicated Bybit rate/IP isolation pass.
 
 ---
 
@@ -23,9 +25,10 @@ closure review found five remaining P0 design blockers:
 4. write confinement still missing high-impact state/audit paths,
 5. tier-promotion approval and metric calculation not tamper-resistant.
 
-V1.3 keeps REF-21 blocked from R2/R3 until those are closed. The only allowed
-near-term implementation is **R1 hardening of the disabled dataset endpoint**
-plus migration files that give MIT real PG dry-run targets.
+V1.3 keeps REF-21 blocked from R2/R3 until those are closed. The already-closed
+early execution checkpoint is V057-V060 Guard A/B/C plus Linux PG transaction
+dry-run. Remaining allowed near-term implementation is **R1 hardening of the
+disabled dataset endpoint** and the remaining P0 gates listed in TODO.
 
 Empirical correction from the final review:
 
@@ -207,7 +210,12 @@ Step -1 before dry-run:
 
 Step 0:
 
-MIT runs a Linux PG dry-run per
+Completed 2026-05-06: V057-V060 Guard A/B/C Linux PG dry-run passed on
+`trade-core`. Pre-existing target tables were absent, all target objects existed
+inside the transaction, and rollback left them absent. MIT still owns follow-up
+review of the future SECURITY DEFINER calculator body.
+
+Required pattern for future REF-21 migrations remains: run Linux PG dry-run per
 `memory/feedback_v_migration_pg_dry_run.md` and record:
 
 - preflight on current `trade-core` schema,
@@ -504,7 +512,8 @@ Step -1 before implementation:
 
 Step 0 before implementation:
 
-- MIT Linux PG dry-run for V057/V058/V059/V060 migration files.
+- CLOSED for V057/V058/V059/V060 migration files: Linux PG transaction dry-run
+  passed with rollback proof.
 
 Then:
 

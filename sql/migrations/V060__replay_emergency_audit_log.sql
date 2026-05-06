@@ -60,6 +60,32 @@ BEGIN
     RAISE NOTICE 'V060 Guard A: audit.replay_emergency_log verified';
 END $$;
 
+DO $$
+DECLARE
+    v_constraint_defs TEXT;
+BEGIN
+    SELECT string_agg(pg_get_constraintdef(c.oid), E'\n')
+    INTO v_constraint_defs
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'audit'
+      AND t.relname = 'replay_emergency_log';
+
+    IF v_constraint_defs IS NULL
+       OR position('/api/v1/replay/full-chain/prepare' IN v_constraint_defs) = 0
+       OR position('request_count >= 0' IN v_constraint_defs) = 0
+       OR position('human' IN v_constraint_defs) = 0
+       OR position('agent' IN v_constraint_defs) = 0
+       OR position('system' IN v_constraint_defs) = 0
+       OR position('octet_length(manifest_hash) = 32' IN v_constraint_defs) = 0 THEN
+        RAISE EXCEPTION
+            'V060 Guard B: emergency audit log constraints incomplete';
+    END IF;
+
+    RAISE NOTICE 'V060 Guard B: route, actor, request-count, and hash constraints verified';
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_replay_emergency_log_ts
     ON audit.replay_emergency_log (ts DESC);
 
@@ -67,6 +93,45 @@ CREATE INDEX IF NOT EXISTS idx_replay_emergency_log_actor_ts
     ON audit.replay_emergency_log (actor_id, ts DESC);
 
 REVOKE UPDATE, DELETE ON audit.replay_emergency_log FROM PUBLIC;
+
+DO $$
+DECLARE
+    v_public_write_grants INTEGER;
+    v_ts_index_exists BOOLEAN;
+    v_actor_index_exists BOOLEAN;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_public_write_grants
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'audit'
+      AND table_name = 'replay_emergency_log'
+      AND grantee = 'PUBLIC'
+      AND privilege_type IN ('UPDATE', 'DELETE');
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'audit'
+          AND tablename = 'replay_emergency_log'
+          AND indexname = 'idx_replay_emergency_log_ts'
+    ) INTO v_ts_index_exists;
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'audit'
+          AND tablename = 'replay_emergency_log'
+          AND indexname = 'idx_replay_emergency_log_actor_ts'
+    ) INTO v_actor_index_exists;
+
+    IF v_public_write_grants <> 0 OR NOT v_ts_index_exists OR NOT v_actor_index_exists THEN
+        RAISE EXCEPTION
+            'V060 Guard C: public_write_grants=% ts_index=% actor_index=%',
+            v_public_write_grants, v_ts_index_exists, v_actor_index_exists;
+    END IF;
+
+    RAISE NOTICE 'V060 Guard C: PUBLIC write revoke and indexes verified';
+END $$;
 
 COMMENT ON TABLE audit.replay_emergency_log IS
 'REF-21 append-only audit authority for /api/v1/replay/full-chain/prepare governed enablement.';
