@@ -245,6 +245,11 @@ html, body {
       &#x1F511; 如需授權請至 <strong>Governance Hub → Live Auth</strong> 執行 Renew。<br>
       To authorize, go to <strong>Governance Hub → Live Auth</strong>.
     </div>
+    <div style="margin-top:12px">
+      <button class="oc-btn" onclick="openLiveRisk()" style="border-color:rgba(168,85,247,0.55);color:#a855f7">
+        &#x1F6E1; 跳转 Live 风控 / Open Live Risk
+      </button>
+    </div>
   </div>
   <!-- Trust status bar visible even when engine is locked — shows TTL so operator knows when to renew -->
   <!-- 即使 tab 鎖定時 trust status bar 仍顯示 TTL — 讓 operator 知道何時需要去 Governance 續期 -->
@@ -299,6 +304,7 @@ html, body {
     <span id="live-contraction-badge" style="display:none"></span>
     <span id="live-engine-detail" style="font-size:12px;color:var(--text-dim)"></span>
     <span style="flex:1"></span>
+    <button class="oc-btn" onclick="openLiveRisk()" title="跳转到 Live 风控页 / Open Live risk controls" style="font-weight:700;border-color:rgba(168,85,247,0.55);color:#a855f7">&#x1F6E1; 风控</button>
     <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live 实盘</button>
     <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live 实盘</button>
     <!-- Separator before emergency stop to prevent accidental clicks / 分隔符防止误触紧急停止 -->
@@ -707,6 +713,18 @@ const _liveModeState = {
   execution_authority: 'not_granted',
   session_state: 'offline',
 };
+
+function openLiveRisk() {
+  try {
+    window.parent.postMessage({
+      type: 'openclaw-console-switch-tab',
+      tab: 'risk',
+      riskEngine: 'live',
+      riskTab: 'monitor',
+      scrollTo: 'top'
+    }, window.location.origin);
+  } catch (_) {}
+}
 
 function applyDevelopmentSupportVisibility(enabled) {
   document.querySelectorAll('[data-dev-mode-only="global-mode-control"]').forEach(node => {
