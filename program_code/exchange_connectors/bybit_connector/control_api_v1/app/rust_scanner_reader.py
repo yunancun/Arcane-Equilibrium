@@ -253,6 +253,7 @@ def normalize_scanner_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     strategy_judgments = candidate.get("strategy_judgments")
     if not isinstance(strategy_judgments, dict):
         strategy_judgments = {}
+    opportunity = _candidate_opportunity(candidate, strategy_judgments)
 
     return {
         "symbol": candidate.get("symbol"),
@@ -260,6 +261,7 @@ def normalize_scanner_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "score": candidate.get("final_score"),
         "reason": _candidate_reason(candidate),
         "scanner_context": scanner_context,
+        "opportunity": opportunity,
         "strategy_judgments": strategy_judgments,
         "fitness": fitness,
         "breakout_proxy": {
@@ -273,6 +275,39 @@ def normalize_scanner_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
             ),
         },
     }
+
+
+def _candidate_opportunity(
+    candidate: dict[str, Any],
+    strategy_judgments: dict[str, Any],
+) -> dict[str, Any]:
+    """Return best-route scanner opportunity if present.
+
+    回傳 best-route scanner opportunity；缺失時返回空 dict。Rust v1 把
+    opportunity 掛在每個 strategy_judgment 上，這裡只做讀面正規化，不重算。
+    """
+    direct = candidate.get("opportunity")
+    if isinstance(direct, dict):
+        return direct
+    for best_strategy in _strategy_key_aliases(str(candidate.get("best_strategy") or "")):
+        judgment = strategy_judgments.get(best_strategy)
+        if isinstance(judgment, dict):
+            opportunity = judgment.get("opportunity")
+            if isinstance(opportunity, dict):
+                return opportunity
+    return {}
+
+
+def _strategy_key_aliases(raw: str) -> tuple[str, ...]:
+    aliases = {
+        "MaCrossover": "ma_crossover",
+        "GridTrading": "grid_trading",
+        "BbReversion": "bb_reversion",
+        "BbBreakout": "bb_breakout",
+        "FundingArb": "funding_arb",
+    }
+    mapped = aliases.get(raw)
+    return (raw, mapped) if mapped and mapped != raw else (raw,)
 
 
 def _candidate_reason(candidate: dict[str, Any]) -> str:

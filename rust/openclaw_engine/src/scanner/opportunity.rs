@@ -1,0 +1,288 @@
+//! Scanner opportunity evaluation — shadow-only current opportunity math.
+//! scanner 機會評估 — shadow-only 當前機會數學。
+//!
+//! MODULE_NOTE (EN): Pure functions only. This module does not reject orders
+//!   and does not mutate scanner route scores; it emits auditable fields that
+//!   downstream admission/replay layers can compare against realized outcomes.
+//! MODULE_NOTE (中): 僅純函數。本模組不拒單、不改 scanner route score；只輸出
+//!   可審計欄位，供下游 admission/replay 與實現結果對照。
+
+use crate::edge_estimates::CellEstimate;
+use crate::market_data_client::types::TickerInfo;
+use crate::scanner::config::OpportunityConfig;
+use crate::scanner::scorer::MarketConditions;
+use crate::scanner::types::{OpportunityComponents, OpportunityDecision, StrategyRouteJudgment};
+
+fn finite_some(value: f64) -> Option<f64> {
+    if value.is_finite() {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn spread_bps(ticker: &TickerInfo) -> f64 {
+    let mid = (ticker.bid1_price + ticker.ask1_price) / 2.0;
+    if mid <= 0.0 {
+        return 0.0;
+    }
+    ((ticker.ask1_price - ticker.bid1_price).max(0.0) / mid * 10_000.0).max(0.0)
+}
+
+fn data_quality_score(mc: &MarketConditions, spread_bps: f64, cfg: &OpportunityConfig) -> f64 {
+    let spread_score = (1.0 - spread_bps / cfg.spread_quality_reference_bps).clamp(0.0, 1.0);
+    let turnover_score = if mc.turnover_24h >= 100_000_000.0 {
+        1.0
+    } else if mc.turnover_24h >= 50_000_000.0 {
+        0.8
+    } else {
+        0.5
+    };
+    let regime_score =
+        (1.0 - 0.35 * mc.shock_score - 0.20 * mc.crowding_score - 0.20 * mc.reversal_risk_score)
+            .clamp(0.0, 1.0);
+    (0.45 * spread_score + 0.35 * turnover_score + 0.20 * regime_score).clamp(0.0, 1.0)
+}
+
+fn historical_lcb_bps(cell: &CellEstimate, cfg: &OpportunityConfig) -> Option<f64> {
+    if cfg.historical_lcb_z <= 0.0 || cell.n_trades == 0 {
+        return None;
+    }
+    let sample_std = if cell.std_bps.is_finite() && cell.std_bps > 0.0 {
+        cell.std_bps
+    } else {
+        cfg.historical_min_std_bps
+    };
+    let std = sample_std.max(cfg.historical_min_std_bps);
+    finite_some(cell.shrunk_bps - cfg.historical_lcb_z * std / (cell.n_trades as f64).sqrt())
+}
+
+fn calibration_weight(cell: Option<&CellEstimate>, cfg: &OpportunityConfig) -> f64 {
+    let Some(cell) = cell else {
+        return 0.0;
+    };
+    let sample_weight =
+        (cell.n_trades as f64 / f64::from(cfg.min_calibration_trades)).clamp(0.0, 1.0);
+    let validation_weight = if cell.validation_passed || cell.shrunk_bps <= 0.0 {
+        1.0
+    } else {
+        0.5
+    };
+    (sample_weight * validation_weight).clamp(0.0, 1.0)
+}
+
+fn admission_hint(
+    judgment: &StrategyRouteJudgment,
+    lcb_bps: Option<f64>,
+    calibration_weight: f64,
+    cfg: &OpportunityConfig,
+) -> &'static str {
+    if !cfg.enabled {
+        return "shadow_disabled";
+    }
+    match judgment.route_mode.as_str() {
+        "risk_policy_gate" => return "tradability_block",
+        "market_gate" => return "opportunity_weak",
+        "exploration_only" => {
+            if matches!(
+                judgment.edge_status.as_str(),
+                "robust_negative" | "posterior_negative"
+            ) {
+                return "calibration_block";
+            }
+            return "exploration_candidate";
+        }
+        _ => {}
+    }
+    match lcb_bps {
+        Some(v) if v > 0.0 && calibration_weight >= 1.0 => "opportunity_positive",
+        Some(v) if v > 0.0 => "exploration_candidate",
+        Some(_) => "opportunity_weak",
+        None => "shadow_only",
+    }
+}
+
+/// Evaluate the current scanner opportunity for one strategy-symbol route.
+/// 評估單個 strategy-symbol route 的當前 scanner opportunity。
+pub(crate) fn evaluate_opportunity(
+    strategy: &str,
+    judgment: &StrategyRouteJudgment,
+    mc: &MarketConditions,
+    ticker: &TickerInfo,
+    cell: Option<&CellEstimate>,
+    cfg: &OpportunityConfig,
+) -> OpportunityDecision {
+    let spread = spread_bps(ticker);
+    let expected_execution_cost_bps =
+        2.0 * (cfg.one_way_fee_bps + cfg.slippage_buffer_bps) + spread;
+    let cost_uncertainty_bps = cfg.cost_uncertainty_bps + 0.5 * spread;
+    let quality = data_quality_score(mc, spread, cfg);
+
+    let gross_current_opportunity_bps =
+        (judgment.fitness_score.max(0.0) * cfg.fitness_gross_bps_per_score).max(0.0);
+
+    let historical_edge_bps = cell.map(|c| c.shrunk_bps);
+    let historical_edge_n = cell
+        .map(|c| c.n_trades.min(u64::from(u32::MAX)) as u32)
+        .unwrap_or(0);
+    let historical_edge_lcb = cell.and_then(|c| historical_lcb_bps(c, cfg));
+    let hist_weight = calibration_weight(cell, cfg);
+
+    let mut uncertainty_buffer_bps = cfg.base_uncertainty_bps
+        + 5.0 * mc.shock_score
+        + 3.0 * mc.crowding_score
+        + 3.0 * mc.reversal_risk_score
+        + (1.0 - quality) * 5.0;
+
+    if let Some(lcb) = historical_edge_lcb {
+        if lcb < 0.0 {
+            uncertainty_buffer_bps += (-lcb) * hist_weight * cfg.historical_negative_penalty_weight;
+        } else if lcb > expected_execution_cost_bps {
+            uncertainty_buffer_bps = (uncertainty_buffer_bps
+                - cfg.positive_history_uncertainty_discount_bps * hist_weight)
+                .max(0.0);
+        }
+    }
+
+    let current_q10_bps = gross_current_opportunity_bps - uncertainty_buffer_bps;
+    let cost_q90_bps = expected_execution_cost_bps + cost_uncertainty_bps;
+    let opportunity_lcb_bps = if cfg.enabled {
+        finite_some(current_q10_bps - cost_q90_bps)
+    } else {
+        None
+    };
+    let score = opportunity_lcb_bps
+        .map(|lcb| (50.0 + lcb * cfg.opportunity_score_bps_multiplier).clamp(0.0, 100.0))
+        .unwrap_or(0.0);
+    let hint = admission_hint(judgment, opportunity_lcb_bps, hist_weight, cfg).to_string();
+    let reason = format!(
+        "{hint}:strategy={strategy} fitness={:.2} gross={:.2} cost_q90={:.2} lcb={} route_mode={} edge_status={}",
+        judgment.fitness_score,
+        gross_current_opportunity_bps,
+        cost_q90_bps,
+        opportunity_lcb_bps
+            .map(|v| format!("{v:.2}"))
+            .unwrap_or_else(|| "none".to_string()),
+        judgment.route_mode,
+        judgment.edge_status,
+    );
+
+    OpportunityDecision {
+        opportunity_score: score,
+        opportunity_lcb_bps,
+        admission_hint: hint,
+        reason,
+        components: OpportunityComponents {
+            market_structure_score: judgment.fitness_score,
+            strategy_fitness_score: judgment.fitness_score,
+            gross_current_opportunity_bps: finite_some(gross_current_opportunity_bps),
+            expected_execution_cost_bps: finite_some(expected_execution_cost_bps),
+            cost_uncertainty_bps: finite_some(cost_uncertainty_bps),
+            uncertainty_buffer_bps: finite_some(uncertainty_buffer_bps),
+            historical_edge_bps,
+            historical_edge_n,
+            historical_edge_lcb_bps: historical_edge_lcb,
+            data_quality_score: quality,
+            calibration_weight: hist_weight,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::config::OpportunityConfig;
+
+    fn make_ticker() -> TickerInfo {
+        TickerInfo {
+            symbol: "BTCUSDT".to_string(),
+            last_price: 100.0,
+            bid1_price: 99.99,
+            ask1_price: 100.01,
+            volume_24h: 0.0,
+            turnover_24h: 120_000_000.0,
+            high_price_24h: 106.0,
+            low_price_24h: 96.0,
+            prev_price_24h: 98.0,
+            open_interest: 0.0,
+            funding_rate: 0.0,
+            next_funding_time: String::new(),
+            price_change_24h_pct: 0.03,
+        }
+    }
+
+    fn make_mc() -> MarketConditions {
+        crate::scanner::scorer::compute_market_conditions(&make_ticker())
+    }
+
+    fn make_judgment(fitness_score: f64) -> StrategyRouteJudgment {
+        StrategyRouteJudgment {
+            strategy: "ma_crossover".to_string(),
+            fitness_score,
+            final_score: fitness_score,
+            edge_bps: None,
+            edge_bonus: 0.0,
+            edge_n: 0,
+            edge_status: "unexplored".to_string(),
+            route_mode: "exploration".to_string(),
+            market_status: "compatible".to_string(),
+            route_reason: "test".to_string(),
+            opportunity: None,
+        }
+    }
+
+    #[test]
+    fn test_high_fitness_can_emit_positive_or_exploration_opportunity() {
+        let decision = evaluate_opportunity(
+            "ma_crossover",
+            &make_judgment(95.0),
+            &make_mc(),
+            &make_ticker(),
+            None,
+            &OpportunityConfig::default(),
+        );
+        assert!(decision.opportunity_lcb_bps.unwrap() > 0.0);
+        assert_eq!(decision.admission_hint, "exploration_candidate");
+        assert!(decision.components.expected_execution_cost_bps.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn test_risk_policy_gate_maps_to_tradability_block_without_changing_route() {
+        let mut judgment = make_judgment(95.0);
+        judgment.route_mode = "risk_policy_gate".to_string();
+        let decision = evaluate_opportunity(
+            "ma_crossover",
+            &judgment,
+            &make_mc(),
+            &make_ticker(),
+            None,
+            &OpportunityConfig::default(),
+        );
+        assert_eq!(decision.admission_hint, "tradability_block");
+        assert_eq!(judgment.route_mode, "risk_policy_gate");
+    }
+
+    #[test]
+    fn test_mature_negative_history_penalizes_uncertainty() {
+        let cfg = OpportunityConfig::default();
+        let cell = CellEstimate {
+            shrunk_bps: -20.0,
+            win_rate: 0.3,
+            n_trades: 60,
+            std_bps: 20.0,
+            validation_passed: true,
+            validation_reason: "test".to_string(),
+        };
+        let decision = evaluate_opportunity(
+            "ma_crossover",
+            &make_judgment(95.0),
+            &make_mc(),
+            &make_ticker(),
+            Some(&cell),
+            &cfg,
+        );
+        assert!(decision.components.historical_edge_lcb_bps.unwrap() < 0.0);
+        assert!(decision.components.calibration_weight > 0.9);
+        assert!(decision.components.uncertainty_buffer_bps.unwrap() > cfg.base_uncertainty_bps);
+    }
+}

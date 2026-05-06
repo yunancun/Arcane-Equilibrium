@@ -12,6 +12,7 @@
 
 pub mod config;
 pub mod market_judgment;
+pub mod opportunity;
 pub mod registry;
 pub mod runner;
 pub mod scorer;

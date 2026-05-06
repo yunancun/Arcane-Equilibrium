@@ -525,6 +525,13 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/E4/workspace/reports/2026-05-03--ref20_sprint1_e4_regression.md` | E4 Sprint 1 regression CONDITIONAL PASS（+13 PASS / +7 lib / 0 新 fail / 2 pre-existing carry-over）|
 | `CCAgentWorkSpace/E4/workspace/reports/2026-05-03--ref20_wave3_to_9_retroactive_e4_cumulative.md` | E4 Sprint 2 retroactive Wave 3-9 cumulative（4 P0 forgery flag + 5 mock retroactive flag + 3 P2-FOLLOW-UP 提案）|
 
+#### PM scanner / edge reports（2026-05-06）
+
+| 文件 | 內容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_integration_audit.md` | PM scanner opportunity integration audit：整合零散 scanner / edge / market judgment 模塊，定義 shadow-only 中性 opportunity 判斷邊界 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_v1_shadow_implementation.md` | Scanner Opportunity v1 shadow implementation：Rust scanner opportunity math、intent details、Python reader、測試與對抗性審查結果 |
+
 ### governance_dev/ — 治理开发文档
 
 > 注意：governance_dev/ 下早期文件使用大寫命名（如 `T2_EXECUTION_SUMMARY.md`），

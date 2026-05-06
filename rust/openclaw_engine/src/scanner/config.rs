@@ -698,6 +698,198 @@ impl MarketJudgmentConfig {
     }
 }
 
+// ─── OpportunityConfig ────────────────────────────────────────────────────────
+
+fn default_opportunity_enabled() -> bool {
+    true
+}
+
+fn default_one_way_fee_bps() -> f64 {
+    4.5
+}
+
+fn default_slippage_buffer_bps() -> f64 {
+    1.0
+}
+
+fn default_cost_uncertainty_bps() -> f64 {
+    2.0
+}
+
+fn default_base_uncertainty_bps() -> f64 {
+    3.0
+}
+
+fn default_fitness_gross_bps_per_score() -> f64 {
+    0.30
+}
+
+fn default_spread_quality_reference_bps() -> f64 {
+    8.0
+}
+
+fn default_min_calibration_trades() -> u32 {
+    30
+}
+
+fn default_historical_lcb_z() -> f64 {
+    1.0
+}
+
+fn default_historical_min_std_bps() -> f64 {
+    20.0
+}
+
+fn default_historical_negative_penalty_weight() -> f64 {
+    0.25
+}
+
+fn default_positive_history_uncertainty_discount_bps() -> f64 {
+    2.0
+}
+
+fn default_opportunity_score_bps_multiplier() -> f64 {
+    2.0
+}
+
+/// Shadow-only scanner opportunity evaluation knobs.
+/// Scanner opportunity v1 只輸出審計欄位，不新增 hot-path 拒單行為。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpportunityConfig {
+    /// Master switch for emitting opportunity fields.
+    /// 是否輸出 opportunity 欄位。
+    #[serde(default = "default_opportunity_enabled")]
+    pub enabled: bool,
+    /// Conservative one-way fee estimate in bps.
+    /// 保守單邊 fee 估計（bps）。
+    #[serde(default = "default_one_way_fee_bps")]
+    pub one_way_fee_bps: f64,
+    /// Conservative one-way slippage buffer in bps.
+    /// 保守單邊 slippage buffer（bps）。
+    #[serde(default = "default_slippage_buffer_bps")]
+    pub slippage_buffer_bps: f64,
+    /// Cost uncertainty added to expected execution cost.
+    /// 加到預期執行成本上的成本不確定性。
+    #[serde(default = "default_cost_uncertainty_bps")]
+    pub cost_uncertainty_bps: f64,
+    /// Base market/data uncertainty in bps.
+    /// 基礎市場/數據不確定性（bps）。
+    #[serde(default = "default_base_uncertainty_bps")]
+    pub base_uncertainty_bps: f64,
+    /// Convert scanner fitness points to gross current-opportunity bps.
+    /// 將 scanner 適配分轉成 gross current-opportunity bps。
+    #[serde(default = "default_fitness_gross_bps_per_score")]
+    pub fitness_gross_bps_per_score: f64,
+    /// Spread reference for data-quality scoring.
+    /// 數據品質評分使用的 spread 參考值。
+    #[serde(default = "default_spread_quality_reference_bps")]
+    pub spread_quality_reference_bps: f64,
+    /// Samples needed for full historical calibration weight.
+    /// 歷史校準權重達到 1.0 所需樣本數。
+    #[serde(default = "default_min_calibration_trades")]
+    pub min_calibration_trades: u32,
+    /// Z-score for historical edge lower confidence bound.
+    /// 歷史 edge 下置信界 z 值。
+    #[serde(default = "default_historical_lcb_z")]
+    pub historical_lcb_z: f64,
+    /// Minimum std_bps when historical cell has no usable std.
+    /// 歷史 cell 無有效 std 時使用的最小標準差。
+    #[serde(default = "default_historical_min_std_bps")]
+    pub historical_min_std_bps: f64,
+    /// Weight applied to negative historical LCB as uncertainty penalty.
+    /// 歷史負 LCB 轉為不確定性懲罰的權重。
+    #[serde(default = "default_historical_negative_penalty_weight")]
+    pub historical_negative_penalty_weight: f64,
+    /// Maximum uncertainty discount from positive validated history.
+    /// 正向歷史可降低的不確定性上限。
+    #[serde(default = "default_positive_history_uncertainty_discount_bps")]
+    pub positive_history_uncertainty_discount_bps: f64,
+    /// Multiplier from opportunity LCB bps to normalized score.
+    /// opportunity LCB bps 轉標準化分數的乘數。
+    #[serde(default = "default_opportunity_score_bps_multiplier")]
+    pub opportunity_score_bps_multiplier: f64,
+}
+
+impl Default for OpportunityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_opportunity_enabled(),
+            one_way_fee_bps: default_one_way_fee_bps(),
+            slippage_buffer_bps: default_slippage_buffer_bps(),
+            cost_uncertainty_bps: default_cost_uncertainty_bps(),
+            base_uncertainty_bps: default_base_uncertainty_bps(),
+            fitness_gross_bps_per_score: default_fitness_gross_bps_per_score(),
+            spread_quality_reference_bps: default_spread_quality_reference_bps(),
+            min_calibration_trades: default_min_calibration_trades(),
+            historical_lcb_z: default_historical_lcb_z(),
+            historical_min_std_bps: default_historical_min_std_bps(),
+            historical_negative_penalty_weight: default_historical_negative_penalty_weight(),
+            positive_history_uncertainty_discount_bps:
+                default_positive_history_uncertainty_discount_bps(),
+            opportunity_score_bps_multiplier: default_opportunity_score_bps_multiplier(),
+        }
+    }
+}
+
+impl OpportunityConfig {
+    fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("opportunity.one_way_fee_bps", self.one_way_fee_bps),
+            ("opportunity.slippage_buffer_bps", self.slippage_buffer_bps),
+            (
+                "opportunity.cost_uncertainty_bps",
+                self.cost_uncertainty_bps,
+            ),
+            (
+                "opportunity.base_uncertainty_bps",
+                self.base_uncertainty_bps,
+            ),
+            (
+                "opportunity.fitness_gross_bps_per_score",
+                self.fitness_gross_bps_per_score,
+            ),
+            (
+                "opportunity.spread_quality_reference_bps",
+                self.spread_quality_reference_bps,
+            ),
+            ("opportunity.historical_lcb_z", self.historical_lcb_z),
+            (
+                "opportunity.historical_min_std_bps",
+                self.historical_min_std_bps,
+            ),
+            (
+                "opportunity.historical_negative_penalty_weight",
+                self.historical_negative_penalty_weight,
+            ),
+            (
+                "opportunity.positive_history_uncertainty_discount_bps",
+                self.positive_history_uncertainty_discount_bps,
+            ),
+            (
+                "opportunity.opportunity_score_bps_multiplier",
+                self.opportunity_score_bps_multiplier,
+            ),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!("{name} must be finite and >= 0"));
+            }
+        }
+        if self.spread_quality_reference_bps <= 0.0 {
+            return Err("opportunity.spread_quality_reference_bps must be > 0".into());
+        }
+        if self.min_calibration_trades == 0 {
+            return Err("opportunity.min_calibration_trades must be > 0".into());
+        }
+        if !(0.0..=5.0).contains(&self.historical_lcb_z) {
+            return Err("opportunity.historical_lcb_z must be in [0, 5]".into());
+        }
+        if self.historical_negative_penalty_weight > 1.0 {
+            return Err("opportunity.historical_negative_penalty_weight must be <= 1".into());
+        }
+        Ok(())
+    }
+}
+
 // ─── ScannerConfig ────────────────────────────────────────────────────────────
 
 /// Top-level scanner configuration.
@@ -724,6 +916,8 @@ pub struct ScannerConfig {
     pub edge_routing: EdgeRoutingConfig,
     #[serde(default)]
     pub market_judgment: MarketJudgmentConfig,
+    #[serde(default)]
+    pub opportunity: OpportunityConfig,
 }
 
 impl ScannerConfig {
@@ -737,6 +931,7 @@ impl ScannerConfig {
         self.correlation.validate()?;
         self.edge_routing.validate()?;
         self.market_judgment.validate()?;
+        self.opportunity.validate()?;
         Ok(())
     }
 }

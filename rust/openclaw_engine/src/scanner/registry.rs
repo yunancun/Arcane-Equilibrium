@@ -291,6 +291,7 @@ mod tests {
                 route_mode: "exploration".to_string(),
                 market_status: "compatible".to_string(),
                 route_reason: "test".to_string(),
+                opportunity: None,
             },
         );
         ScoredSymbol {

@@ -286,6 +286,8 @@ impl TickPipeline {
                                     route_reason: strategy_judgment
                                         .map(|j| j.route_reason.clone())
                                         .unwrap_or_else(|| candidate.route_reason.clone()),
+                                    opportunity: strategy_judgment
+                                        .and_then(|j| j.opportunity.clone()),
                                     final_score: strategy_judgment
                                         .map(|j| j.final_score)
                                         .unwrap_or(candidate.final_score),

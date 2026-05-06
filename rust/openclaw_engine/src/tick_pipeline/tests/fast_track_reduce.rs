@@ -489,3 +489,106 @@ fn test_persist_intent_helper_records_maker_entry_details() {
         other => panic!("expected TradingMsg::Intent, got {:?}", other),
     }
 }
+
+#[test]
+fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
+    use crate::intent_processor::OrderIntent;
+    use crate::scanner::types::{OpportunityComponents, OpportunityDecision};
+
+    let intent = OrderIntent {
+        symbol: "BTCUSDT".into(),
+        is_long: true,
+        qty: 0.25,
+        confidence: 0.91,
+        strategy: "ma_crossover".into(),
+        order_type: "limit".into(),
+        limit_price: Some(50_000.0),
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+    };
+    let scanner = super::super::on_tick_helpers::IntentScannerContext {
+        scan_id: "scan-1".to_string(),
+        best_strategy: "ma_crossover".to_string(),
+        intent_strategy: "ma_crossover".to_string(),
+        market_regime: "trending".to_string(),
+        trend_phase: "clean_trend".to_string(),
+        trend_score: 0.8,
+        range_score: 0.2,
+        shock_score: 0.1,
+        close_alignment: 0.9,
+        range_position: 0.8,
+        crowding_score: 0.1,
+        reversal_risk_score: 0.0,
+        directional_efficiency: 0.7,
+        dir_pct: 3.0,
+        signed_dir_pct: 3.0,
+        range_pct: 5.0,
+        fr_bps: 1.0,
+        f_ma: 90.0,
+        f_grid: 10.0,
+        f_bbrv: 5.0,
+        f_bkout: 70.0,
+        f_funding_arb: 0.0,
+        edge_bps: None,
+        edge_n: 0,
+        edge_status: "unexplored".to_string(),
+        route_mode: "exploration".to_string(),
+        market_status: "compatible".to_string(),
+        route_reason: "test".to_string(),
+        opportunity: Some(OpportunityDecision {
+            opportunity_score: 64.0,
+            opportunity_lcb_bps: Some(7.0),
+            admission_hint: "exploration_candidate".to_string(),
+            reason: "shadow".to_string(),
+            components: OpportunityComponents {
+                market_structure_score: 90.0,
+                strategy_fitness_score: 90.0,
+                gross_current_opportunity_bps: Some(27.0),
+                expected_execution_cost_bps: Some(12.0),
+                cost_uncertainty_bps: Some(2.0),
+                uncertainty_buffer_bps: Some(6.0),
+                historical_edge_bps: None,
+                historical_edge_n: 0,
+                historical_edge_lcb_bps: None,
+                data_quality_score: 0.9,
+                calibration_weight: 0.0,
+            },
+        }),
+        final_score: 92.0,
+        raw_score: 90.0,
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+
+    super::super::on_tick_helpers::persist_intent(
+        &Some(tx),
+        "demo",
+        1_700_000_000_789,
+        "sig-demo-ma_crossover-BTCUSDT-1700000000789",
+        "ctx-demo-BTCUSDT-1700000000789",
+        &intent,
+        0.25,
+        50_000.0,
+        "demo",
+        Some(&scanner),
+    );
+
+    let msg = rx.try_recv().expect("Intent must be enqueued");
+    match msg {
+        crate::database::TradingMsg::Intent { details, .. } => {
+            let details = details.expect("details must be persisted");
+            let opportunity = &details["scanner"]["opportunity"];
+            assert_eq!(
+                opportunity["admission_hint"].as_str(),
+                Some("exploration_candidate")
+            );
+            assert_eq!(opportunity["opportunity_lcb_bps"].as_f64(), Some(7.0));
+            assert_eq!(
+                opportunity["components"]["expected_execution_cost_bps"].as_f64(),
+                Some(12.0)
+            );
+        }
+        other => panic!("expected TradingMsg::Intent, got {:?}", other),
+    }
+}

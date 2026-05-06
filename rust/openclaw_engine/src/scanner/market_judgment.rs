@@ -201,6 +201,7 @@ pub(crate) fn build_strategy_judgments(
                 route_mode: edge.route_mode,
                 market_status: edge.market_status,
                 route_reason: edge.route_reason,
+                opportunity: None,
             },
         );
     }

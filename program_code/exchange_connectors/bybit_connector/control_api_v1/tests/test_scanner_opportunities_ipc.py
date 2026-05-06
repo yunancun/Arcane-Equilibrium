@@ -111,7 +111,16 @@ def test_opportunities_maps_rust_candidates_to_gui_fields() -> None:
                     "edge_bonus": 3.21,
                     "edge_n": 87,
                     "strategy_judgments": {
-                        "ma_crossover": {"route_mode": "normal", "final_score": 90.0},
+                        "ma_crossover": {
+                            "route_mode": "normal",
+                            "final_score": 90.0,
+                            "opportunity": {
+                                "opportunity_score": 64.0,
+                                "opportunity_lcb_bps": 7.0,
+                                "admission_hint": "exploration_candidate",
+                                "reason": "shadow",
+                            },
+                        },
                         "grid_trading": {"route_mode": "market_gate", "final_score": 10.0},
                     },
                 },
@@ -139,6 +148,8 @@ def test_opportunities_maps_rust_candidates_to_gui_fields() -> None:
     assert opps[0]["scanner_context"]["trend_phase"] == "clean_trend"
     assert opps[0]["scanner_context"]["market_regime"] == "trending"
     assert opps[0]["fitness"]["f_bkout"] == 0.74
+    assert opps[0]["opportunity"]["admission_hint"] == "exploration_candidate"
+    assert opps[0]["opportunity"]["opportunity_lcb_bps"] == 7.0
     assert opps[0]["strategy_judgments"]["ma_crossover"]["route_mode"] == "normal"
     assert opps[0]["breakout_proxy"]["inputs"]["trend_score"] == 0.82
     assert opps[1]["reason"] == "majors · edge=-1.50 (n=42)"
@@ -311,7 +322,15 @@ def test_enrich_scanner_status_merges_latest_snapshot_candidate_details() -> Non
         "close_alignment": 0.92,
         "range_position": 0.85,
         "strategy_judgments": {
-            "ma_crossover": {"route_mode": "normal"},
+            "ma_crossover": {
+                "route_mode": "normal",
+                "opportunity": {
+                    "opportunity_score": 55.0,
+                    "opportunity_lcb_bps": 2.5,
+                    "admission_hint": "opportunity_positive",
+                    "reason": "snapshot",
+                },
+            },
             "funding_arb": {"route_mode": "momentum_caution"},
         },
     }
