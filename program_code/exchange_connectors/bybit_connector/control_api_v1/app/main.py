@@ -260,6 +260,12 @@ app.include_router(strategist_promote_router)
 from .agents_routes import agents_router  # noqa: E402
 app.include_router(agents_router)
 
+# ── OpenClaw Read-Only Router / OpenClaw 只讀控制面路由（MAG-016/017）──
+# Sprint A 只掛 allowlist 內兩條 GET 路由：status / self-state。此 router
+# 只回 backend-authored degraded envelopes，不新增 proposal / approval / 交易寫入面。
+from .openclaw_routes import openclaw_router  # noqa: E402
+app.include_router(openclaw_router)
+
 # ── Replay Lab Router / Replay 實驗室路由（REF-20 Wave 2 P2a-S3）──
 # 8-route auth scaffold for the Paper Replay Lab (run/status/cancel/report/
 # manifests/manifest-verify/health-signature/list). Wave 2 lands AUTH +
