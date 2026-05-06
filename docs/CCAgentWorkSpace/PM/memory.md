@@ -1325,10 +1325,11 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 ### Verification
 - Mac targeted new + affected pytest: 215 PASS.
+- Linux `trade-core` after fast-forward to `91379cd2`: targeted pytest 215 PASS.
 - `py_compile`: PASS.
 - `git diff --check`: PASS.
 
 ### Boundary
 - No deploy/restart yet and no live trading authority change.
 - MAG-010..012 remain row-proof pending until Linux runtime writes fresh agent
-  rows; MAG-013/014 are the next gate.
+  rows; `[52]` runtime row proof is the next gate.

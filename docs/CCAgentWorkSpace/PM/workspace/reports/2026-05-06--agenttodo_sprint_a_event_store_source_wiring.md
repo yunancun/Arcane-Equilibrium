@@ -21,7 +21,9 @@ Status: Source wiring complete; Linux runtime row proof pending
 - `python3 -m pytest ...` targeted new + affected tests: 215 passed.
 - `python3 -m py_compile` for touched runtime and healthcheck modules: PASS.
 - `git diff --check`: PASS.
+- Linux `trade-core` fast-forward to `91379cd2`: targeted pytest 215 passed and
+  touched-module `py_compile` passed.
 
 ## Remaining Gate
 
-MAG-010..012 are not marked DONE because the acceptance requires Linux runtime fresh rows. MAG-013/014 next step is to push/pull to Linux, run targeted Linux tests, and then enable/validate `[52]` row proof without changing trading authority.
+MAG-010..012 are not marked DONE because the acceptance requires Linux runtime fresh rows. MAG-013/014 next step is to enable/validate `[52]` row proof without changing trading authority.
