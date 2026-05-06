@@ -1367,3 +1367,31 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   production continuous event-store flag, or trading authority change was made.
 - Next Sprint A work is MAG-018 Agent Control GUI foundation, then MAG-019
   supervisor cloud escalation ledger policy.
+
+## 2026-05-06 AgentTodo Sprint A MAG-018 Agent Control GUI Foundation
+
+### Result
+- MAG-018 source is complete at `12d3f3ff`.
+- `tab-agents.html` now mounts `openclaw-agent-control.js`.
+- The new read-only panel consumes only:
+  `GET /api/v1/openclaw/status` and
+  `GET /api/v1/openclaw/self-state`.
+- The panel renders authority lockdown, gateway/channel posture, local topology,
+  event-store row proof, and degraded/error state from backend view models.
+
+### Verification
+- Mac: `test_openclaw_agent_control_static.py`, `test_openclaw_routes.py`, and
+  `test_agents_routes.py` passed 38/0.
+- Linux `trade-core` after fast-forward to `12d3f3ff`: same targeted pytest
+  passed 38/0.
+- Mac/Linux `node --check` passed for `openclaw-agent-control.js`.
+- Mac/Linux `py_compile` passed for touched OpenClaw route/model/main/test files.
+- Static tests prove no manual controls, no write methods, no raw `agent.*`
+  table join, required OpenClaw request-context headers, and exact two-route
+  backend allowlist consumption.
+
+### Boundary
+- No browser/server restart, deploy/rebuild, write/proposal endpoint, live auth,
+  strategy/risk config mutation, production continuous event-store flag, or
+  trading authority change was made.
+- Next Sprint A work is MAG-019 supervisor cloud escalation ledger policy.
