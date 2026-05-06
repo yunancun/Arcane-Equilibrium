@@ -54,14 +54,14 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-06 scanner opportunity shared-cost checkpoint `113f345f`）
+## 三、真實狀態全景（2026-05-06 scanner opportunity regret-healthcheck checkpoint `d1754aa6`）
 
 ### Runtime 部署
-- **Mac/Linux/origin source checkpoint**: `113f345f`（scanner opportunity shared cost definition；2026-05-06 Mac → origin/main → Linux `trade-core` 三端同步）
+- **Scanner opportunity code checkpoint**: `d1754aa6`（`[51]` rejected-intent regret alignment + `scanner:null` intent denominator fix；Python healthcheck only，無需 Rust rebuild；2026-05-06 Mac → origin/main → Linux `trade-core` 同步）
 - **Engine binary deployed**: `113f345f`（2026-05-06 Linux `restart_all.sh --rebuild --keep-auth`；engine PID 2159736 / API parent PID 2159816）
-- **Engine 健康**: watchdog `engine_alive=true`；demo/live snapshots fresh，paper active snapshot fresh after rebuild（final check 2026-05-06 ~17:55 UTC；demo/live snapshot age 28.0s）；scanner runtime snapshot `2026-05-06 19:53:12.827+02:00` 75/75 route judgments 帶 `strategy_judgments[*].opportunity` 且 reason 含 `cost_model=edge_predictor_round_trip+spread`
+- **Engine 健康**: watchdog `engine_alive=true`；demo/live snapshots fresh，paper inactive by design（post-`d1754aa6` check：snapshot age 10.5s）；scanner runtime after shared-cost deploy produced `strategy_judgments[*].opportunity` with `cost_model=edge_predictor_round_trip+spread`
 - **Live boundary**: LiveDemo 跑（Live 管線走 demo endpoint），mainnet **0 流量** by design
-- **健康檢查**: SUMMARY = FAIL（2026-05-06 post-`113f345f` deploy；pre-existing/live reality gaps：FAIL `[42]` live_candidate_eval_contract、`[42c]` 3d attribution drift、`[50]` replay_run_state_health；WARN `[40]` realized edge 仍負；`[51]` scanner opportunity shadow coverage 100% 但 labels=7<10，WARN）
+- **健康檢查**: SUMMARY = FAIL（pre-existing/live reality gaps：FAIL `[42]` live_candidate_eval_contract、`[42c]` 3d attribution drift、`[50]` replay_run_state_health；WARN `[40]` realized edge 仍負）。`[51]` focused runtime result after `d1754aa6`：WARN，3h scanner snapshot routes 370/370、scanner intents 6/6、24h labels=7<10、rejected_labels=0；false FAIL from `details.scanner = null` denominator is fixed.
 - **REF-21 execution checkpoint**: V057-V060 replay governance migrations now include Guard A/B/C and passed Linux `trade-core` PG transaction dry-run with rollback proof（pre-existing target tables absent → inside_tx present → after_rollback absent）; V061 `replay.calculate_promotion_metrics` non-stub SECURITY DEFINER body is landed and Linux transaction-tested with replay data (`eligible=true`, rollback). R2/R3 remain blocked by `/full-chain/run` and replay dedicated Bybit rate/IP isolation.
 
 ### 5 策略 7d gross PnL（demo + live_demo 真實 fills，PA 直查 trading_ai DB）

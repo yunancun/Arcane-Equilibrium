@@ -1,7 +1,30 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（Scanner Opportunity shared cost definition）
+> 最後更新：2026-05-06（Scanner Opportunity regret healthcheck）
+
+### Scanner Opportunity regret healthcheck — 2026-05-06
+
+**Scope**：續做 scanner opportunity integration audit 的 Step 3，把 `[51]`
+從 snapshot / intent / MLDE row-proof 擴展到 rejected scanner intents：
+`trading.risk_verdicts` + `trading.intents.details.scanner.opportunity` +
+`trading.decision_outcomes` 形成 counterfactual regret proof。Positive LCB
+被 reject 但後續 counterfactual net 為正時只回 WARN，不新增交易 gate。
+
+**Durability fix**：`d1754aa6` 將 intent coverage denominator 從
+`details ? 'scanner'` 改成 `jsonb_typeof(details->'scanner') = 'object'`，
+避免 `{"scanner": null}` 的非 scanner-context intent 造成 false FAIL。
+
+**邊界**：
+- 仍是 read-only / shadow-only healthcheck；不改 H0、Guardian、Decision Lease、
+  Risk Governor、IntentProcessor。
+- 不消費 regret summary 直接開倉；只把 missed / false-block evidence surface 給 operator。
+- Rust engine binary 不需 rebuild；`113f345f` 仍是 deployed engine binary。
+
+**Verification / deploy**：Mac `helper_scripts/db/test_*.py` 163 PASS；
+Linux `test_scanner_opportunity_healthcheck.py` 8 PASS。Linux focused `[51]`
+after `d1754aa6`：WARN，snapshot routes 370/370，scanner intents 6/6，
+labels=7<10，rejected_labels=0。Watchdog `engine_alive=true`，demo/live fresh。
 
 ### Scanner Opportunity shared cost definition — 2026-05-06
 

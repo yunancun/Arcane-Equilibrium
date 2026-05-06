@@ -6,7 +6,8 @@ Repo root：`/Users/ncyu/Projects/TradeBot/srv`
 Read-time HEAD：`df5b1638`
 Implementation / deploy HEAD：`74b986a0`
 Continuation / deploy HEAD：`113f345f`
-狀態：v1 shadow 已實作、`[51]` healthcheck 已實作、shared cost definition 已落地並 Linux rebuild deploy
+Regret healthcheck HEAD：`d1754aa6`
+狀態：v1 shadow 已實作、`[51]` healthcheck 已實作、shared cost definition 已落地並 Linux rebuild deploy；`[51]` rejected-intent regret proof 已接入
 
 更新：v1 shadow implementation 已落地，詳
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-06--scanner_opportunity_v1_shadow_implementation.md`。
@@ -22,6 +23,15 @@ Continuation / deploy HEAD：`113f345f`
 - 最新 scanner snapshot（2026-05-06 19:53:12+02:00）75/75 route judgments 帶
   `opportunity`，且 75/75 `opportunity.reason` 含
   `cost_model=edge_predictor_round_trip+spread`。
+- `5434543c` 將 `[51]` 擴展到 rejected scanner intents：用
+  `risk_verdicts` + `intents.details.scanner.opportunity` + `decision_outcomes`
+  形成 missed / regret counterfactual proof；positive LCB 被 reject 但後續為正時
+  WARN-only，不新增 gate。
+- `d1754aa6` 修正 `[51]` intent coverage denominator：只統計
+  `jsonb_typeof(details->'scanner') = 'object'` 的真 scanner context，避免
+  `{"scanner": null}` 非 scanner intent 造成 false FAIL。
+- Linux focused `[51]` after `d1754aa6`：WARN；3h snapshot routes 370/370，
+  scanner intents 6/6，24h labels=7<10，rejected_labels=0。
 
 ## 結論
 
@@ -217,11 +227,14 @@ hard eligibility 後，是否仍有正 expected net opportunity？
    - 比較 `opportunity_lcb_bps > 0` 與 missed / regret opportunities。
    - 按 strategy 追 false block / false pass rate。
 
-   **2026-05-06 續做狀態**：`[51]` 已覆蓋 snapshot / intent / MLDE row proof 與
-   positive-LCB realized outcome warmup。Runtime 結果是 row proof 100%，但 labels=7<10，
-   所以正確回 `WARN`。Missed/regret opportunity 尚未接入 `[51]`，需要下一步把
-   `opportunity_tracker.py` 的 rejected-opportunity regret summary 與 scanner
-   `opportunity_lcb_bps` 對齊。
+   **2026-05-06 續做狀態**：`[51]` 已覆蓋 snapshot / intent / MLDE row proof、
+   positive-LCB realized outcome warmup，以及 rejected scanner-intent
+   counterfactual regret proof。新 rejected path 直接對齊 scanner
+   `opportunity_lcb_bps` 與 `components.expected_execution_cost_bps`，來源是
+   `risk_verdicts` / `intents` / `decision_outcomes`，語義與
+   `opportunity_tracker.py` 的 rejected-outcome regret summary 一致但保持 healthcheck
+   read-only。Runtime 結果是 row proof 100%，但 labels=7<10 且
+   rejected_labels=0，所以正確回 `WARN`。
 
 4. Admission consolidation
    - 不新增 gate number。
