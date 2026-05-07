@@ -424,6 +424,12 @@ function isConsoleTypingTarget(target) {
   return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
 }
 
+function withBuildVersion(src) {
+  if (src.includes('v=')) return src;
+  const sep = src.includes('?') ? '&' : '?';
+  return src + sep + 'v=' + BUILD_TS;
+}
+
 function handleTabGroupShortcut(ev) {
   if (ev.defaultPrevented || ev.ctrlKey || ev.metaKey || ev.altKey) return;
   if (isConsoleTypingTarget(ev.target)) return;
@@ -507,11 +513,9 @@ function buildTabs() {
     });
     if (t.requiresPaperEngine) frame.dataset.requiresPaperEngine = 'true';
     if (t.requiresDevelopmentSupport) frame.dataset.requiresDevelopmentSupport = 'true';
-    // Use & if src already has query params (e.g. ?embed=1), otherwise use ?
-    // 若 src 已有查询参数则用 &，否则用 ?
-    const sep = t.src.includes('?') ? '&' : '?';
-    frame.dataset.src = t.src + sep + 'v=' + BUILD_TS;
-    if (i === 0) frame.src = t.src + sep + 'v=' + BUILD_TS; // Load first tab immediately
+    const frameSrc = withBuildVersion(t.src);
+    frame.dataset.src = frameSrc;
+    if (i === 0) frame.src = frameSrc; // Load first tab immediately
     wrap.appendChild(frame);
   });
   updateTabGroupVisibility();
