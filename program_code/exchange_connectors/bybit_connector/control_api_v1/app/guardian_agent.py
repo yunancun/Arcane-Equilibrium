@@ -73,6 +73,19 @@ class GuardianConfig:
     min_sharpe_ratio: float = 0.0
     # Max correlation between positions (reject if too correlated) / 最大持仓相关性
     max_correlation: float = 0.85
+    # Soft correlation threshold that triggers a P2-style modification.
+    # 觸發 P2 修改建議的軟相關性閾值。
+    soft_correlation: float = 0.55
+    # Minimum aligned return samples required for a dynamic correlation verdict.
+    # dynamic correlation verdict 所需最少對齊回報樣本數。
+    correlation_min_samples: int = 5
+    # Snapshot staleness limit for Guardian correlation review.
+    # Guardian correlation review 的 snapshot 過期界線。
+    correlation_stale_ms: int = 10 * 60 * 1000
+    # Safe-fallback size factor when matrix is missing but same-direction
+    # exposure already exists.
+    # matrix 缺失但已有同向倉位時的保守縮倉比例。
+    correlation_fallback_size_factor: float = 0.5
     # Max concurrent positions per direction / 每方向最大并发仓位
     max_same_direction_positions: int = 3
     # Size reduction factor for MODIFIED verdicts / MODIFIED 裁决的仓位缩减因子
@@ -110,6 +123,7 @@ class GuardianAgent(BaseAgent):
         governance_hub: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
         event_store: Optional[Any] = None,
+        correlation_snapshot_provider: Optional[Callable[[], Optional[Dict[str, Any]]]] = None,
     ):
         super().__init__(
             role=AgentRole.GUARDIAN,
@@ -122,6 +136,8 @@ class GuardianAgent(BaseAgent):
         self._risk_manager = risk_manager
         self._ollama = ollama_client
         self._governance_hub = governance_hub
+        self._correlation_snapshot_provider = correlation_snapshot_provider
+        self._correlation_snapshot: Optional[Dict[str, Any]] = None
 
         # Active positions tracking (injected from PipelineBridge state)
         # 活跃仓位追踪（从 PipelineBridge 状态注入）
@@ -228,8 +244,10 @@ class GuardianAgent(BaseAgent):
             self._stats["intents_reviewed"] += 1
 
         rejection_reasons: List[str] = []
+        modification_reasons: List[str] = []
         modification_needed = False
         modified_params: Dict[str, Any] = {}
+        verdict_metadata: Dict[str, Any] = {}
         risk_score = 0.0
 
         # Check 1: Direction conflict / 方向冲突检查
@@ -248,13 +266,29 @@ class GuardianAgent(BaseAgent):
                 risk_score += 0.4
             else:
                 modification_needed = True
+                modification_reasons.append(
+                    f"leverage capped at {self.config.modification_leverage_cap}x"
+                )
                 modified_params["leverage"] = self.config.modification_leverage_cap
                 risk_score += 0.15
 
         # Check 3: Correlation conflict / 关联冲突检查
-        corr_result = self._check_correlation_conflict(intent)
-        if corr_result:
-            rejection_reasons.append(corr_result)
+        (
+            corr_action,
+            corr_reason,
+            corr_params,
+            corr_risk,
+            corr_metadata,
+        ) = self._review_correlation_conflict(intent)
+        if corr_metadata:
+            verdict_metadata["correlation_review"] = corr_metadata
+        if corr_action == "reject":
+            rejection_reasons.append(corr_reason or "Correlation conflict")
+            risk_score += corr_risk
+        elif corr_action == "modify":
+            modification_needed = True
+            modification_reasons.append(corr_reason or "correlation_safe_fallback")
+            modified_params.update(corr_params)
             risk_score += 0.2
 
         # Check 4: Sharpe ratio threshold / Sharpe 比率阈值检查
@@ -278,18 +312,20 @@ class GuardianAgent(BaseAgent):
                 result=RiskVerdictResult.REJECTED,
                 reason="; ".join(rejection_reasons),
                 risk_score=risk_score,
+                metadata=verdict_metadata,
             )
             with self._lock:
                 self._stats["verdicts_rejected"] += 1
         elif modification_needed:
             # Also reduce size by modification factor / 同时按因子缩减仓位
-            modified_params["size"] = intent.size * self.config.modification_size_factor
+            modified_params.setdefault("size", intent.size * self.config.modification_size_factor)
             verdict = RiskVerdict(
                 intent_id=intent.intent_id,
                 result=RiskVerdictResult.MODIFIED,
-                reason=f"Modified: leverage capped, size reduced by {self.config.modification_size_factor}",
+                reason="Modified: " + "; ".join(modification_reasons or ["risk parameters adjusted"]),
                 modified_params=modified_params,
                 risk_score=risk_score,
+                metadata=verdict_metadata,
             )
             with self._lock:
                 self._stats["verdicts_modified"] += 1
@@ -299,6 +335,7 @@ class GuardianAgent(BaseAgent):
                 result=RiskVerdictResult.APPROVED,
                 reason="All 5 checks passed",
                 risk_score=risk_score,
+                metadata=verdict_metadata,
             )
             with self._lock:
                 self._stats["verdicts_approved"] += 1
@@ -356,22 +393,254 @@ class GuardianAgent(BaseAgent):
         return None
 
     def _check_correlation_conflict(self, intent: TradeIntent) -> Optional[str]:
-        """Check if new position is too correlated with existing ones / 检查新仓位与现有仓位的关联性"""
-        # Simplified: BTC and ETH are highly correlated
-        correlated_pairs = {
-            ("BTCUSDT", "ETHUSDT"): 0.85,
-            ("ETHUSDT", "BTCUSDT"): 0.85,
+        """Backward-compatible hard-reject correlation check wrapper."""
+        action, reason, _, _, _ = self._review_correlation_conflict(intent)
+        return reason if action == "reject" else None
+
+    def _review_correlation_conflict(
+        self,
+        intent: TradeIntent,
+    ) -> tuple[str, Optional[str], Dict[str, Any], float, Dict[str, Any]]:
+        """Review dynamic correlation matrix or explicit safe fallback.
+
+        Returns: (action, reason, modified_params, risk_score, metadata)
+        action is one of pass / modify / reject.
+        """
+        intent_side = "Buy" if intent.direction == "long" else "Sell"
+        same_direction_positions: list[tuple[str, Dict[str, Any]]] = []
+        hedge_pairs: list[str] = []
+        metadata: Dict[str, Any] = {
+            "action": "pass",
+            "symbol": intent.symbol,
+            "direction": intent.direction,
+            "reason_codes": [],
+            "same_direction_symbols": [],
+            "hedge_symbols": [],
         }
-        for key, pos in self._active_positions.items():
-            pos_symbol = pos.get("symbol", "")
-            pair = (intent.symbol, pos_symbol)
-            correlation = correlated_pairs.get(pair, 0.0)
+
+        for _, pos in self._active_positions.items():
+            pos_symbol = str(pos.get("symbol", ""))
+            if not pos_symbol or pos_symbol == intent.symbol:
+                continue
+            if not self._position_is_active(pos):
+                continue
+
+            pos_side = str(pos.get("side", ""))
+            if pos_side == intent_side:
+                same_direction_positions.append((pos_symbol, pos))
+            else:
+                hedge_pairs.append(pos_symbol)
+
+        metadata["same_direction_symbols"] = [symbol for symbol, _ in same_direction_positions]
+        metadata["hedge_symbols"] = hedge_pairs
+        if hedge_pairs:
+            metadata["reason_codes"].append("correlation_hedge_evidence")
+
+        snapshot = self._current_correlation_snapshot()
+        if self._snapshot_is_usable(snapshot):
+            metadata.update({
+                "snapshot_id": snapshot.get("snapshot_id"),
+                "source": snapshot.get("source", "unknown"),
+                "quality": snapshot.get("quality", "unknown"),
+                "max_pairwise_r": self.config.max_correlation,
+                "soft_pairwise_r": self.config.soft_correlation,
+                "min_samples": self.config.correlation_min_samples,
+            })
+        else:
+            metadata.update({
+                "source": snapshot.get("source", "safe_fallback") if snapshot else "safe_fallback",
+                "quality": "insufficient",
+            })
+            metadata["reason_codes"].append("correlation_data_insufficient")
+
+        if not same_direction_positions:
+            return "pass", None, {}, 0.0, metadata
+
+        if not self._snapshot_is_usable(snapshot):
+            metadata["action"] = "modify"
+            metadata["reason_codes"].append("correlation_safe_fallback_size_cap")
+            return (
+                "modify",
+                (
+                    "Correlation safe fallback: correlation_data_insufficient "
+                    f"for {intent.symbol} with {len(same_direction_positions)} "
+                    "same-direction positions"
+                ),
+                {
+                    "size": intent.size * self.config.correlation_fallback_size_factor,
+                    "correlation_action": "safe_fallback_size_cap",
+                    "correlation_quality": "insufficient",
+                },
+                0.2,
+                metadata,
+            )
+
+        strongest_soft: tuple[str, float, int] | None = None
+        reviewed_pairs: list[Dict[str, Any]] = []
+        insufficient_pairs: list[Dict[str, Any]] = []
+        for pos_symbol, _ in same_direction_positions:
+            correlation, samples = self._snapshot_pair(snapshot, intent.symbol, pos_symbol)
+            if correlation is None:
+                insufficient_pairs.append({
+                    "pair": f"{intent.symbol}/{pos_symbol}",
+                    "sample_count": samples,
+                    "reason": "missing_correlation",
+                })
+                continue
+            if samples < self.config.correlation_min_samples:
+                insufficient_pairs.append({
+                    "pair": f"{intent.symbol}/{pos_symbol}",
+                    "r": round(correlation, 6),
+                    "sample_count": samples,
+                    "reason": "sample_count_below_minimum",
+                })
+                continue
+            reviewed_pairs.append({
+                "pair": f"{intent.symbol}/{pos_symbol}",
+                "r": round(correlation, 6),
+                "sample_count": samples,
+            })
             if correlation >= self.config.max_correlation:
-                pos_side = pos.get("side", "")
-                intent_side = "Buy" if intent.direction == "long" else "Sell"
-                if pos_side == intent_side:
-                    return f"Correlation conflict: {intent.symbol} ↔ {pos_symbol} (r={correlation:.2f})"
-        return None
+                metadata.update({
+                    "action": "reject",
+                    "selected_pair": f"{intent.symbol}/{pos_symbol}",
+                    "r": round(correlation, 6),
+                    "sample_count": samples,
+                    "threshold": self.config.max_correlation,
+                    "reviewed_pairs": reviewed_pairs,
+                    "insufficient_pairs": insufficient_pairs,
+                })
+                metadata["reason_codes"].append("correlation_hard_limit")
+                return (
+                    "reject",
+                    (
+                        f"Correlation conflict: {intent.symbol} ↔ {pos_symbol} "
+                        f"(r={correlation:.2f}, n={samples}, "
+                        f"source={snapshot.get('source', 'unknown')})"
+                    ),
+                    {},
+                    0.2,
+                    metadata,
+                )
+            if correlation >= self.config.soft_correlation:
+                if strongest_soft is None or correlation > strongest_soft[1]:
+                    strongest_soft = (pos_symbol, correlation, samples)
+
+        if strongest_soft is not None:
+            pos_symbol, correlation, samples = strongest_soft
+            metadata.update({
+                "action": "modify",
+                "selected_pair": f"{intent.symbol}/{pos_symbol}",
+                "r": round(correlation, 6),
+                "sample_count": samples,
+                "threshold": self.config.soft_correlation,
+                "reviewed_pairs": reviewed_pairs,
+                "insufficient_pairs": insufficient_pairs,
+            })
+            metadata["reason_codes"].append("correlation_soft_limit")
+            return (
+                "modify",
+                (
+                    f"Correlation soft limit: {intent.symbol} ↔ {pos_symbol} "
+                    f"(r={correlation:.2f}, n={samples})"
+                ),
+                {
+                    "size": intent.size * self.config.correlation_fallback_size_factor,
+                    "correlation_action": "soft_limit_size_cap",
+                    "correlation_pair": f"{intent.symbol}/{pos_symbol}",
+                    "correlation_r": round(correlation, 6),
+                },
+                0.15,
+                metadata,
+            )
+
+        if insufficient_pairs:
+            metadata.update({
+                "action": "modify",
+                "reviewed_pairs": reviewed_pairs,
+                "insufficient_pairs": insufficient_pairs,
+            })
+            metadata["reason_codes"].append("correlation_data_insufficient")
+            metadata["reason_codes"].append("correlation_safe_fallback_size_cap")
+            return (
+                "modify",
+                (
+                    "Correlation safe fallback: correlation_data_insufficient "
+                    f"for {intent.symbol} with incomplete same-direction matrix"
+                ),
+                {
+                    "size": intent.size * self.config.correlation_fallback_size_factor,
+                    "correlation_action": "safe_fallback_size_cap",
+                    "correlation_quality": "insufficient",
+                },
+                0.2,
+                metadata,
+            )
+
+        metadata["reviewed_pairs"] = reviewed_pairs
+        return "pass", None, {}, 0.0, metadata
+
+    def _current_correlation_snapshot(self) -> Optional[Dict[str, Any]]:
+        if self._correlation_snapshot_provider is not None:
+            try:
+                snapshot = self._correlation_snapshot_provider()
+                if snapshot is not None:
+                    return dict(snapshot)
+            except Exception as e:
+                logger.warning("Guardian correlation snapshot provider failed: %s", e)
+        with self._lock:
+            return dict(self._correlation_snapshot) if self._correlation_snapshot else None
+
+    def _snapshot_is_usable(self, snapshot: Optional[Dict[str, Any]]) -> bool:
+        if not snapshot:
+            return False
+        if snapshot.get("quality") == "insufficient":
+            return False
+        staleness_ms = snapshot.get("staleness_ms")
+        if staleness_ms is None:
+            ts_ms = snapshot.get("ts_ms")
+            if ts_ms is not None:
+                staleness_ms = int(time.time() * 1000) - int(ts_ms)
+        if staleness_ms is not None and int(staleness_ms) > self.config.correlation_stale_ms:
+            return False
+        return isinstance(snapshot.get("pairwise_r"), dict)
+
+    def _snapshot_pair(
+        self,
+        snapshot: Dict[str, Any],
+        symbol_a: str,
+        symbol_b: str,
+    ) -> tuple[Optional[float], int]:
+        matrix = snapshot.get("pairwise_r") or {}
+        value = None
+        if isinstance(matrix.get(symbol_a), dict):
+            value = matrix[symbol_a].get(symbol_b)
+        if value is None and isinstance(matrix.get(symbol_b), dict):
+            value = matrix[symbol_b].get(symbol_a)
+        if value is None:
+            return None, 0
+
+        sample_counts = snapshot.get("sample_counts") or {}
+        sample_value = None
+        pair_key = f"{symbol_a}/{symbol_b}"
+        reverse_pair_key = f"{symbol_b}/{symbol_a}"
+        if isinstance(sample_counts, dict):
+            sample_value = sample_counts.get(pair_key, sample_counts.get(reverse_pair_key))
+            if sample_value is None and isinstance(sample_counts.get(symbol_a), dict):
+                sample_value = sample_counts[symbol_a].get(symbol_b)
+            if sample_value is None and isinstance(sample_counts.get(symbol_b), dict):
+                sample_value = sample_counts[symbol_b].get(symbol_a)
+        samples = int(sample_value or 0)
+        return float(value), samples
+
+    def _position_is_active(self, pos: Dict[str, Any]) -> bool:
+        raw_size = pos.get("size", pos.get("qty"))
+        if raw_size is None:
+            return True
+        try:
+            return float(raw_size) > 0.0
+        except (TypeError, ValueError):
+            return True
 
     def _check_sharpe_threshold(self, intent: TradeIntent) -> Optional[str]:
         """Check if strategy Sharpe ratio meets minimum / 检查策略 Sharpe 比率是否达标"""
@@ -636,6 +905,11 @@ class GuardianAgent(BaseAgent):
         """Update strategy performance metrics / 更新策略性能指标"""
         with self._lock:
             self._strategy_metrics.update(metrics)
+
+    def update_correlation_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        """Update dynamic correlation snapshot used by Guardian V2."""
+        with self._lock:
+            self._correlation_snapshot = dict(snapshot)
 
     # ── Audit / 审计 ──
     # _audit() inherited from BaseAgent (prefixes event with role.value = "guardian").

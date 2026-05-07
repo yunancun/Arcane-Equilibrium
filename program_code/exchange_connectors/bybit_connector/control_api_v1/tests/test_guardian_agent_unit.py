@@ -122,17 +122,104 @@ class TestGuardianReview(unittest.TestCase):
         self.assertAlmostEqual(verdict.modified_params["size"], 0.1 * config.modification_size_factor)
 
     def test_correlation_conflict_rejected(self):
-        """BTC+ETH same direction → correlation conflict REJECTED."""
+        """Dynamic matrix high same-direction correlation → REJECTED."""
         config = GuardianConfig(max_correlation=0.8)
         agent = GuardianAgent(config=config)
         agent.start()
         agent.update_active_positions({
             "s1:BTCUSDT": {"symbol": "BTCUSDT", "side": "Buy"},
         })
+        agent.update_correlation_snapshot({
+            "snapshot_id": "corr-unit-1",
+            "ts_ms": int(time.time() * 1000),
+            "source": "runtime_returns",
+            "quality": "full",
+            "pairwise_r": {"ETHUSDT": {"BTCUSDT": 0.86}},
+            "sample_counts": {"ETHUSDT/BTCUSDT": 12},
+        })
         intent = self._make_intent(symbol="ETHUSDT", direction="long")
         verdict = agent.review_intent(intent)
         self.assertEqual(verdict.result, RiskVerdictResult.REJECTED)
         self.assertIn("Correlation", verdict.reason)
+
+    def test_dynamic_correlation_rejects_non_btc_eth_pair(self):
+        """SOL+XRP high dynamic correlation rejects without static BTC/ETH map."""
+        config = GuardianConfig(max_correlation=0.8)
+        agent = GuardianAgent(config=config)
+        agent.start()
+        agent.update_active_positions({
+            "s1:SOLUSDT": {"symbol": "SOLUSDT", "side": "Buy"},
+        })
+        agent.update_correlation_snapshot({
+            "snapshot_id": "corr-unit-sol-xrp",
+            "ts_ms": int(time.time() * 1000),
+            "source": "runtime_returns",
+            "quality": "full",
+            "pairwise_r": {"XRPUSDT": {"SOLUSDT": 0.91}},
+            "sample_counts": {"XRPUSDT/SOLUSDT": 16},
+        })
+        intent = self._make_intent(symbol="XRPUSDT", direction="long")
+        verdict = agent.review_intent(intent)
+        self.assertEqual(verdict.result, RiskVerdictResult.REJECTED)
+        self.assertIn("XRPUSDT", verdict.reason)
+        self.assertIn("SOLUSDT", verdict.reason)
+        correlation_review = verdict.metadata["correlation_review"]
+        self.assertEqual(correlation_review["selected_pair"], "XRPUSDT/SOLUSDT")
+        self.assertIn("correlation_hard_limit", correlation_review["reason_codes"])
+
+    def test_btc_eth_without_dynamic_matrix_uses_safe_fallback_not_static_reject(self):
+        """BTC/ETH static pair alone cannot create hard correlation rejection."""
+        config = GuardianConfig(max_correlation=0.8)
+        agent = GuardianAgent(config=config)
+        agent.start()
+        agent.update_active_positions({
+            "s1:BTCUSDT": {"symbol": "BTCUSDT", "side": "Buy"},
+        })
+        intent = self._make_intent(symbol="ETHUSDT", direction="long", size=0.2)
+        verdict = agent.review_intent(intent)
+        self.assertEqual(verdict.result, RiskVerdictResult.MODIFIED)
+        self.assertIn("correlation_data_insufficient", verdict.reason)
+        self.assertAlmostEqual(verdict.modified_params["size"], 0.1)
+        correlation_review = verdict.metadata["correlation_review"]
+        self.assertEqual(correlation_review["quality"], "insufficient")
+        self.assertIn("correlation_safe_fallback_size_cap", correlation_review["reason_codes"])
+
+    def test_soft_dynamic_correlation_modifies_size(self):
+        """Soft dynamic correlation produces MODIFIED rather than hard rejection."""
+        config = GuardianConfig(max_correlation=0.8, soft_correlation=0.55)
+        agent = GuardianAgent(config=config)
+        agent.start()
+        agent.update_active_positions({
+            "s1:SOLUSDT": {"symbol": "SOLUSDT", "side": "Buy"},
+        })
+        agent.update_correlation_snapshot({
+            "snapshot_id": "corr-unit-soft",
+            "ts_ms": int(time.time() * 1000),
+            "source": "runtime_returns",
+            "quality": "full",
+            "pairwise_r": {"XRPUSDT": {"SOLUSDT": 0.62}},
+            "sample_counts": {"XRPUSDT/SOLUSDT": 20},
+        })
+        intent = self._make_intent(symbol="XRPUSDT", direction="long", size=0.2)
+        verdict = agent.review_intent(intent)
+        self.assertEqual(verdict.result, RiskVerdictResult.MODIFIED)
+        self.assertIn("Correlation soft limit", verdict.reason)
+        self.assertEqual(verdict.modified_params["correlation_action"], "soft_limit_size_cap")
+        correlation_review = verdict.metadata["correlation_review"]
+        self.assertEqual(correlation_review["selected_pair"], "XRPUSDT/SOLUSDT")
+        self.assertIn("correlation_soft_limit", correlation_review["reason_codes"])
+
+    def test_missing_matrix_without_same_direction_records_insufficient_metadata(self):
+        """Missing matrix without same-direction exposure remains pass but records evidence."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        intent = self._make_intent(symbol="ADAUSDT", direction="long")
+        verdict = agent.review_intent(intent)
+        self.assertEqual(verdict.result, RiskVerdictResult.APPROVED)
+        correlation_review = verdict.metadata["correlation_review"]
+        self.assertEqual(correlation_review["quality"], "insufficient")
+        self.assertIn("correlation_data_insufficient", correlation_review["reason_codes"])
+        self.assertEqual(correlation_review["same_direction_symbols"], [])
 
     def test_correlation_ok_opposite_direction(self):
         """BTC long + ETH short → no correlation conflict (different directions)."""
@@ -145,6 +232,9 @@ class TestGuardianReview(unittest.TestCase):
         intent = self._make_intent(symbol="ETHUSDT", direction="long")
         verdict = agent.review_intent(intent)
         self.assertEqual(verdict.result, RiskVerdictResult.APPROVED)
+        correlation_review = verdict.metadata["correlation_review"]
+        self.assertEqual(correlation_review["hedge_symbols"], ["BTCUSDT"])
+        self.assertIn("correlation_hedge_evidence", correlation_review["reason_codes"])
 
     def test_sharpe_below_threshold_rejected(self):
         """Strategy with poor Sharpe → REJECTED."""

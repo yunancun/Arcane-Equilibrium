@@ -772,14 +772,22 @@ class TestGuardianCorrelationConflict(unittest.TestCase):
     """Test 25: Correlation conflict detection."""
 
     def test_025_high_correlation_with_same_direction_rejected(self):
-        """Test 25: Highly correlated pair (BTC+ETH) in same direction → REJECTED."""
+        """Test 25: Dynamic high correlation in same direction → REJECTED."""
         config = GuardianConfig(max_correlation=0.85)
         agent = GuardianAgent(config=config)
         agent.start()
         agent.update_active_positions({
             "pos1": {"symbol": "BTCUSDT", "side": "Buy"},
         })
-        # ETH is highly correlated with BTC, same direction
+        agent.update_correlation_snapshot({
+            "snapshot_id": "corr-test025",
+            "ts_ms": int(time.time() * 1000),
+            "source": "runtime_returns",
+            "quality": "full",
+            "pairwise_r": {"ETHUSDT": {"BTCUSDT": 0.90}},
+            "sample_counts": {"ETHUSDT/BTCUSDT": 12},
+        })
+        # ETH is dynamically correlated with BTC, same direction
         intent = TradeIntent(
             intent_id="intent_test025",
             symbol="ETHUSDT",
