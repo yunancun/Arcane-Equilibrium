@@ -77,11 +77,37 @@ pub struct StrategistDecision {
     pub strategy: String,
     pub direction: StrategySignalDirection,
     pub confidence: f64,
+    #[serde(default = "default_decision_action")]
+    pub decision_action: String,
+    #[serde(default)]
+    pub selected_strategy: Option<String>,
+    #[serde(default)]
+    pub selected_candidate_id: Option<String>,
+    #[serde(default)]
+    pub candidate_scores: serde_json::Value,
+    #[serde(default)]
+    pub expected_net_edge_bps: Option<f64>,
+    #[serde(default)]
+    pub portfolio_impact: serde_json::Value,
+    #[serde(default)]
+    pub thesis: Option<String>,
+    #[serde(default)]
+    pub invalidation: Option<String>,
+    #[serde(default)]
+    pub fact_refs: Vec<String>,
+    #[serde(default)]
+    pub inference_refs: Vec<String>,
+    #[serde(default)]
+    pub hypothesis_refs: Vec<String>,
     pub proposed_qty: Option<f64>,
     pub proposed_price: Option<f64>,
     pub rationale: Option<String>,
     pub evidence_refs: Vec<String>,
     pub metadata: serde_json::Value,
+}
+
+fn default_decision_action() -> String {
+    "open".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
