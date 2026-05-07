@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo M8 Stage 2 authorization: rebuilt Linux with keep-auth, confirmed Mac/origin/Linux sync at `e8a58852`, and started MAG-082 Stage 2 demo/live_demo canary evidence window `stage2_demo_livedemo_20260507t1602z` as RUNNING, not PASS | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_stage2_demo_livedemo_20260507t1602z.md |
 | 2026-05-07 | AgentTodo MAG-084 operator sign-off blocker: M8 cannot be signed off while MAG-083 remains BLOCKED; sign-off requires operator-approved MAG-082 canary evidence followed by a MAG-083 PASS | workspace/reports/2026-05-07--agenttodo_mag084_operator_signoff_blocked.md |
 | 2026-05-07 | AgentTodo MAG-083 final release pre-audit: source/policy prerequisites are present, but final release audit is BLOCKED until an operator-approved MAG-082 canary evidence window proves no execution without StrategistDecision + GuardianVerdict + ExecutionPlan + Decision Lease | workspace/reports/2026-05-07--agenttodo_mag083_final_release_audit_blocked.md |
 | 2026-05-07 | AgentTodo MAG-082 24h canary validation checklist: defined window metadata, entry checks, SQL evidence, runtime health evidence, and PASS/WARN/FAIL criteria; every executable canary decision must reconstruct StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_checklist.md |
@@ -1839,3 +1840,32 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Sign-off blocker/docs only. No runtime flag, rebuild, restart, deploy,
   DB write, live auth, cloud call, runtime submit path, canary run, or trading
   authority change was made.
+
+## 2026-05-07 AgentTodo M8 Stage 2 Authorization
+
+### Result
+- Operator explicitly requested rebuild, three-side sync, then Stage 2 allow.
+- First rebuild attempt did not stop services because remote non-login shell
+  lacked `cargo` on PATH.
+- Successful Linux rebuild used `$HOME/.cargo/env` and
+  `bash helper_scripts/restart_all.sh --rebuild --keep-auth`.
+- Mac/origin/Linux were synchronized at
+  `e8a588529a65c2b5a62a2a5a6c79f0a58be9faac` at authorization time.
+- Started MAG-082 Stage 2 demo/live_demo canary evidence report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_stage2_demo_livedemo_20260507t1602z.md`.
+
+### Verification
+- Rebuild completed; engine/API restarted.
+- Watchdog showed engine alive, demo/live fresh; paper out of scope because
+  `OPENCLAW_ENABLE_PAPER=0`.
+- Linux OpenClaw route contract test passed 8/8.
+- Passive healthcheck start state was SUMMARY FAIL with pre-existing failures
+  listed in the window report.
+
+### Boundary
+- Stage 2 authorization only; report status is RUNNING, not PASS.
+- No Stage 3/4 promotion, true-live primary autonomy, live auth mutation,
+  OpenClaw write/proposal route, scanner authority config change, executor
+  shadow unlock, or lease-router flag enablement.
+- MAG-083 and MAG-084 remain blocked until the 24h report completes with PASS
+  and MAG-083 reruns successfully.
