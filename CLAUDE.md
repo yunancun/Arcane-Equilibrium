@@ -449,7 +449,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A/M2/M3/M4/M5/M6/M7 closed**）。AgentTodo M8 Canary/Cutover 已完成 **MAG-080 cutover policy**、**MAG-081 canary flag runtime risk review**、**MAG-082 24h canary validation checklist**；**MAG-083 final release audit** 已做 pre-audit 並 BLOCKED，缺 operator-approved MAG-082 24h canary evidence；**MAG-084 operator sign-off** 已正式記錄 BLOCKED，需 MAG-083 PASS 後才可簽核。下一步若繼續 M8，唯一 release-safe 動作是先取得 operator-approved Stage 2 demo/live_demo canary evidence；仍不是 Telegram/WebChat、proposal approval relay、或第二 GUI。
+**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A/M2/M3/M4/M5/M6/M7 closed**）。AgentTodo M8 Canary/Cutover 已完成 **MAG-080 cutover policy**、**MAG-081 canary flag runtime risk review**、**MAG-082 24h canary validation checklist**；2026-05-07 operator 已要求並完成 rebuild + Mac/origin/Linux 三端同步，Stage 2 demo/live_demo canary evidence window `stage2_demo_livedemo_20260507t1602z` 已授權/啟動（RUNNING，不是 PASS；runtime build commit `e8a58852`）。**MAG-083 final release audit** 仍 BLOCKED，需 MAG-082 24h report PASS；**MAG-084 operator sign-off** 仍 BLOCKED，需 MAG-083 PASS 後才可簽核。仍不是 Telegram/WebChat、proposal approval relay、或第二 GUI。
 
 **關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → ~05-09 3C 7d audit → ~05-15 P0-3 edge decision + Decision Lease flag flip canary 24h → ~05-16 funding_arb V2 14d audit → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
 
