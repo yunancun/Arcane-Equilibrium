@@ -434,6 +434,103 @@ class TestGuardianEventAlert(unittest.TestCase):
         agent.on_message(msg)
         mock_gov.trigger_risk_upgrade.assert_called_once()
 
+    def test_high_event_tightens_next_matching_intent_without_ordering(self):
+        """High Scout event modifies risk for matching symbols without direct order authority."""
+        config = GuardianConfig()
+        agent = GuardianAgent(config=config)
+        agent.start()
+        msg = AgentMessage(
+            sender=AgentRole.SCOUT,
+            receiver=AgentRole.GUARDIAN,
+            message_type=MessageType.EVENT_ALERT,
+            payload={"event_type": "fomc", "severity": "high", "affected_symbols": ["BTCUSDT"]},
+        )
+        agent.on_message(msg)
+
+        intent = TradeIntent(
+            symbol="BTCUSDT",
+            strategy="test",
+            direction="long",
+            size=0.4,
+            params={"leverage": 1.0},
+            confidence=0.7,
+        )
+        verdict = agent.review_intent(intent)
+
+        self.assertEqual(verdict.result, RiskVerdictResult.MODIFIED)
+        self.assertIn("Event/scanner risk modified", verdict.reason)
+        self.assertAlmostEqual(verdict.modified_params["size"], 0.2)
+        fields = {item["field"] for item in verdict.p2_modifications}
+        self.assertEqual(fields, {"size", "cooldown"})
+        review = verdict.metadata["risk_evidence_review"]
+        self.assertIn("event_high_risk", review["reason_codes"])
+        self.assertNotIn("close", verdict.modified_params)
+
+    def test_scanner_risk_evidence_tightens_without_symbol_direction_change(self):
+        """Scanner risk evidence can tighten risk without changing trade authority."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        intent = TradeIntent(
+            symbol="SOLUSDT",
+            strategy="grid_trading",
+            direction="long",
+            size=0.3,
+            params={"leverage": 1.0},
+            confidence=0.7,
+            metadata={
+                "scanner_risk_evidence": {
+                    "source": "scanner_crowding",
+                    "symbol": "SOLUSDT",
+                    "risk_score": 0.72,
+                    "reason_codes": ["scanner_crowding_high"],
+                }
+            },
+        )
+
+        verdict = agent.review_intent(intent)
+
+        self.assertEqual(verdict.result, RiskVerdictResult.MODIFIED)
+        self.assertEqual(verdict.modified_params["risk_evidence_action"], "event_scanner_risk_p2_modify")
+        review = verdict.metadata["risk_evidence_review"]
+        self.assertIn("scanner_soft_risk", review["reason_codes"])
+        self.assertIn("scanner_crowding_high", review["reason_codes"])
+        for modification in verdict.p2_modifications:
+            self.assertNotIn("symbol", modification)
+            self.assertNotIn("direction", modification)
+
+    def test_scanner_risk_pattern_can_pause_new_open_without_direct_close(self):
+        """Critical scanner risk pattern rejects new opens but does not direct close."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        agent.on_message(AgentMessage(
+            sender=AgentRole.ANALYST,
+            receiver=AgentRole.GUARDIAN,
+            message_type=MessageType.RISK_PATTERN,
+            payload={
+                "source": "scanner_decay",
+                "risk_level": "critical",
+                "symbols": ["XRPUSDT"],
+                "reason_codes": ["scanner_decay_requires_review"],
+            },
+        ))
+        verdict = agent.review_intent(TradeIntent(
+            symbol="XRPUSDT",
+            strategy="grid_trading",
+            direction="long",
+            size=0.2,
+            params={"leverage": 1.0},
+            confidence=0.7,
+        ))
+
+        self.assertEqual(verdict.result, RiskVerdictResult.REJECTED)
+        self.assertIn("Event/scanner risk pause", verdict.reason)
+        self.assertEqual(verdict.p2_modifications, [])
+        self.assertNotIn("close", verdict.modified_params)
+        self.assertIn(
+            "scanner_hard_risk",
+            verdict.metadata["risk_evidence_review"]["reason_codes"],
+        )
+
     def test_directive_updates_risk_params(self):
         """Conductor directive can update risk parameters."""
         agent = GuardianAgent(config=GuardianConfig(max_leverage=5.0))
