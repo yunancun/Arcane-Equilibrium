@@ -2,6 +2,7 @@
 //! FIX-29：on_tick 抽出的輔助方法 — 讓 on_tick.rs 保持在 §九 1200 行硬上限以下。
 
 use super::*;
+use crate::scanner::types::ScannerAuthorityMode;
 use std::collections::{HashMap, VecDeque};
 
 // ── P0-5: ReduceToHalf one-shot cooldown — decouples the guard from governance state ──
@@ -212,6 +213,9 @@ pub(crate) fn risk_score_level(score: f64) -> Option<&'static str> {
 /// Scanner 側審計 metadata，隨策略 intent 寫入 details。
 #[derive(Debug, Clone)]
 pub(crate) struct IntentScannerContext {
+    pub authority_mode: ScannerAuthorityMode,
+    pub legacy_would_block: bool,
+    pub legacy_block_reason: Option<String>,
     pub scan_id: String,
     pub best_strategy: String,
     pub intent_strategy: String,
@@ -243,6 +247,77 @@ pub(crate) struct IntentScannerContext {
     pub opportunity: Option<crate::scanner::types::OpportunityDecision>,
     pub final_score: f64,
     pub raw_score: f64,
+}
+
+/// Scanner gate audit for the legacy hot-path comparison.
+/// scanner legacy hot-path gate 的比較審計。
+#[derive(Debug, Clone)]
+pub(crate) struct ScannerGateAudit {
+    pub authority_mode: ScannerAuthorityMode,
+    pub legacy_would_block: bool,
+    pub legacy_block_reason: Option<String>,
+}
+
+impl ScannerGateAudit {
+    pub(crate) fn new(
+        authority_mode: ScannerAuthorityMode,
+        legacy_block_reason: Option<String>,
+    ) -> Self {
+        Self {
+            authority_mode,
+            legacy_would_block: legacy_block_reason.is_some(),
+            legacy_block_reason,
+        }
+    }
+}
+
+#[inline]
+pub(crate) fn scanner_authority_enforces_legacy_new_open_gate(mode: ScannerAuthorityMode) -> bool {
+    matches!(mode, ScannerAuthorityMode::LegacyGate)
+}
+
+pub(crate) fn scanner_opportunity_canary_reason(
+    scanner_ctx: &IntentScannerContext,
+) -> Option<String> {
+    let opportunity = scanner_ctx.opportunity.as_ref()?;
+    if !opportunity.canary_block_new_entry {
+        return None;
+    }
+    let lcb = opportunity
+        .opportunity_lcb_bps
+        .map(|v| format!("{v:.2}"))
+        .unwrap_or_else(|| "none".to_string());
+    Some(format!(
+        "scanner_opportunity_canary:hint={} lcb={} {}",
+        opportunity.admission_hint, lcb, opportunity.reason
+    ))
+}
+
+pub(crate) fn scanner_legacy_new_open_block_reason(
+    intent_strategy: &str,
+    scanner_ctx: Option<&IntentScannerContext>,
+    active_universe_block_reason: Option<&str>,
+    demo_live_gate: bool,
+) -> Option<String> {
+    if let Some(reason) = active_universe_block_reason {
+        return Some(reason.to_string());
+    }
+    if !demo_live_gate {
+        return None;
+    }
+    let sctx = scanner_ctx?;
+    let market_blocked = matches!(
+        sctx.route_mode.as_str(),
+        "market_gate" | "exploration_only" | "risk_policy_gate"
+    ) || (intent_strategy == "funding_arb"
+        && sctx.route_mode == "exploration");
+    if market_blocked {
+        return Some(format!(
+            "scanner_market_gate:{}:{}",
+            sctx.market_status, sctx.route_reason
+        ));
+    }
+    scanner_opportunity_canary_reason(sctx)
 }
 
 /// Persist a strategy-generated signal used as the attribution anchor for a
@@ -294,6 +369,7 @@ pub(crate) fn persist_intent(
     price: f64,
     engine_mode: &str,
     scanner: Option<&IntentScannerContext>,
+    scanner_gate: Option<&ScannerGateAudit>,
 ) {
     if let Some(ref tx) = trading_tx {
         // FUP-8: populate details so trading.intents.details stops being 100% NULL.
@@ -345,6 +421,16 @@ pub(crate) fn persist_intent(
                 "opportunity": s.opportunity.as_ref(),
                 "final_score": s.final_score,
                 "raw_score": s.raw_score,
+                "authority_mode": s.authority_mode.as_str(),
+                "legacy_would_block": s.legacy_would_block,
+                "legacy_block_reason": s.legacy_block_reason.as_deref(),
+            })
+        });
+        let scanner_gate_details = scanner_gate.map(|g| {
+            serde_json::json!({
+                "authority_mode": g.authority_mode.as_str(),
+                "legacy_would_block": g.legacy_would_block,
+                "legacy_block_reason": g.legacy_block_reason.as_deref(),
             })
         });
         let details = serde_json::json!({
@@ -360,6 +446,7 @@ pub(crate) fn persist_intent(
             "signal_id": signal_id,
             "context_id": context_id,
             "scanner": scanner_details,
+            "scanner_gate": scanner_gate_details,
         });
         let _ = crate::database::try_send_trading_msg(
             tx,

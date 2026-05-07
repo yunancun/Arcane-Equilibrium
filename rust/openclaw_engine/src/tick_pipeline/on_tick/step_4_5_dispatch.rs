@@ -27,7 +27,8 @@ use tracing::{info, warn};
 use super::super::on_tick_helpers::{
     build_intent, make_context_id, make_fill_id, make_order_id, make_strategy_signal_id,
     persist_intent, persist_strategy_signal, persist_verdict, push_capped, push_display_intent,
-    IntentScannerContext,
+    scanner_authority_enforces_legacy_new_open_gate, scanner_legacy_new_open_block_reason,
+    IntentScannerContext, ScannerGateAudit,
 };
 use super::super::*;
 
@@ -50,21 +51,6 @@ fn execution_reference(
     }
 }
 
-fn scanner_opportunity_canary_reason(scanner_ctx: &IntentScannerContext) -> Option<String> {
-    let opportunity = scanner_ctx.opportunity.as_ref()?;
-    if !opportunity.canary_block_new_entry {
-        return None;
-    }
-    let lcb = opportunity
-        .opportunity_lcb_bps
-        .map(|v| format!("{v:.2}"))
-        .unwrap_or_else(|| "none".to_string());
-    Some(format!(
-        "scanner_opportunity_canary:hint={} lcb={} {}",
-        opportunity.admission_hint, lcb, opportunity.reason
-    ))
-}
-
 #[allow(clippy::too_many_arguments)]
 fn record_pre_risk_rejection(
     trading_tx: &Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
@@ -76,6 +62,7 @@ fn record_pre_risk_rejection(
     intent: &crate::intent_processor::OrderIntent,
     price: f64,
     scanner_ctx: Option<&IntentScannerContext>,
+    scanner_gate: Option<&ScannerGateAudit>,
     reason: &str,
 ) {
     push_display_intent(
@@ -96,6 +83,7 @@ fn record_pre_risk_rejection(
         price,
         em,
         scanner_ctx,
+        scanner_gate,
     );
     let verdict_info = crate::intent_processor::VerdictInfo::rejected(reason.to_string());
     persist_verdict(trading_tx, em, &intent.symbol, ts_ms, &verdict_info, em);
@@ -273,20 +261,36 @@ impl TickPipeline {
                             );
                             continue;
                         }
-                        // SCANNER-GATE: block new opens on symbols not in scanner active universe.
-                        // Prevents death-loop where strategy opens → reconciler closes → repeat.
-                        // 掃描器門控：非活躍交易對不開新倉，防止開→平→開死循環。
+                        let scanner_authority_mode = self.scanner_authority_mode;
+                        // SCANNER-GATE: in legacy mode, block new opens on symbols not in
+                        // scanner active universe. Advisory modes record this legacy
+                        // would-block result but keep the intent on the normal spine path.
+                        // 掃描器門控：legacy 模式維持非活躍交易對不開新倉；advisory
+                        // 模式只記錄 legacy would-block，讓 intent 繼續走正常治理路徑。
+                        let mut active_universe_block_reason: Option<String> = None;
                         if let Some(ref reg) = self.symbol_registry {
                             if !reg.is_active(&intent.symbol) {
+                                let reason = "scanner_active_universe:inactive".to_string();
+                                if scanner_authority_enforces_legacy_new_open_gate(
+                                    scanner_authority_mode,
+                                ) {
+                                    tracing::debug!(
+                                            strategy = %strategy.name(),
+                                            symbol = %intent.symbol,
+                                        "SCANNER-GATE: new entry blocked — symbol not in scanner universe"
+                                    );
+                                    continue;
+                                }
                                 tracing::debug!(
                                         strategy = %strategy.name(),
                                         symbol = %intent.symbol,
-                                    "SCANNER-GATE: new entry blocked — symbol not in scanner universe"
+                                        authority_mode = %scanner_authority_mode.as_str(),
+                                    "SCANNER-GATE: legacy inactive-universe block recorded without suppressing new entry"
                                 );
-                                continue;
+                                active_universe_block_reason = Some(reason);
                             }
                         }
-                        let scanner_ctx: Option<IntentScannerContext> =
+                        let mut scanner_ctx: Option<IntentScannerContext> =
                             self.symbol_registry.as_ref().and_then(|reg| {
                                 let scan = reg.last_scan()?;
                                 let candidate =
@@ -294,6 +298,9 @@ impl TickPipeline {
                                 let strategy_judgment =
                                     candidate.strategy_judgments.get(intent.strategy.as_str());
                                 Some(IntentScannerContext {
+                                    authority_mode: scanner_authority_mode,
+                                    legacy_would_block: false,
+                                    legacy_block_reason: None,
                                     scan_id: scan.scan_id.clone(),
                                     best_strategy: candidate
                                         .best_strategy
@@ -347,6 +354,20 @@ impl TickPipeline {
                                         .unwrap_or(candidate.raw_score),
                                 })
                             });
+                        let scanner_legacy_block_reason = scanner_legacy_new_open_block_reason(
+                            &intent.strategy,
+                            scanner_ctx.as_ref(),
+                            active_universe_block_reason.as_deref(),
+                            matches!(em, "demo" | "live_demo"),
+                        );
+                        if let Some(ref mut sctx) = scanner_ctx {
+                            sctx.legacy_would_block = scanner_legacy_block_reason.is_some();
+                            sctx.legacy_block_reason = scanner_legacy_block_reason.clone();
+                        }
+                        let scanner_gate_audit = ScannerGateAudit::new(
+                            scanner_authority_mode,
+                            scanner_legacy_block_reason.clone(),
+                        );
                         let context_id = make_context_id(em, &intent.symbol, event.ts_ms);
                         let signal_id = make_strategy_signal_id(
                             em,
@@ -377,6 +398,7 @@ impl TickPipeline {
                                     intent,
                                     event.last_price,
                                     scanner_ctx.as_ref(),
+                                    Some(&scanner_gate_audit),
                                     &reason,
                                 );
                                 tracing::debug!(
@@ -387,17 +409,10 @@ impl TickPipeline {
                                 );
                                 continue;
                             }
-                            if let Some(ref sctx) = scanner_ctx {
-                                let blocked = matches!(
-                                    sctx.route_mode.as_str(),
-                                    "market_gate" | "exploration_only" | "risk_policy_gate"
-                                ) || (intent.strategy == "funding_arb"
-                                    && sctx.route_mode == "exploration");
-                                if blocked {
-                                    let reason = format!(
-                                        "scanner_market_gate:{}:{}",
-                                        sctx.market_status, sctx.route_reason
-                                    );
+                            if let Some(reason) = scanner_legacy_block_reason.clone() {
+                                if scanner_authority_enforces_legacy_new_open_gate(
+                                    scanner_authority_mode,
+                                ) {
                                     strategy.on_rejection(intent, &reason);
                                     record_pre_risk_rejection(
                                         &self.trading_tx,
@@ -409,42 +424,24 @@ impl TickPipeline {
                                         intent,
                                         event.last_price,
                                         scanner_ctx.as_ref(),
+                                        Some(&scanner_gate_audit),
                                         &reason,
                                     );
                                     tracing::debug!(
                                         strategy = %intent.strategy,
                                         symbol = %intent.symbol,
-                                        route_mode = %sctx.route_mode,
-                                        market_status = %sctx.market_status,
-                                        route_reason = %sctx.route_reason,
-                                        "SCANNER-MARKET-GATE: demo/live_demo new entry blocked"
+                                        reason = %reason,
+                                        "SCANNER-LEGACY-GATE: demo/live_demo new entry blocked"
                                     );
                                     continue;
                                 }
-                                if let Some(reason) = scanner_opportunity_canary_reason(sctx) {
-                                    strategy.on_rejection(intent, &reason);
-                                    record_pre_risk_rejection(
-                                        &self.trading_tx,
-                                        &mut self.recent_intents,
-                                        em,
-                                        event.ts_ms,
-                                        &signal_id,
-                                        &context_id,
-                                        intent,
-                                        event.last_price,
-                                        scanner_ctx.as_ref(),
-                                        &reason,
-                                    );
-                                    tracing::debug!(
-                                        strategy = %intent.strategy,
-                                        symbol = %intent.symbol,
-                                        route_mode = %sctx.route_mode,
-                                        market_status = %sctx.market_status,
-                                        route_reason = %sctx.route_reason,
-                                        "SCANNER-OPPORTUNITY-CANARY: demo/live_demo new entry blocked"
-                                    );
-                                    continue;
-                                }
+                                tracing::debug!(
+                                    strategy = %intent.strategy,
+                                    symbol = %intent.symbol,
+                                    reason = %reason,
+                                    authority_mode = %scanner_authority_mode.as_str(),
+                                    "SCANNER-AUTHORITY-SHADOW: legacy would-block recorded without suppressing new entry"
+                                );
                             }
                         }
                         if is_exchange_mode {
@@ -553,6 +550,7 @@ impl TickPipeline {
                                     event.last_price,
                                     em,
                                     scanner_ctx.as_ref(),
+                                    Some(&scanner_gate_audit),
                                 );
 
                                 // Dispatch to exchange / 派發到交易所
@@ -733,6 +731,7 @@ impl TickPipeline {
                                     event.last_price,
                                     em,
                                     scanner_ctx.as_ref(),
+                                    Some(&scanner_gate_audit),
                                 );
 
                                 // EDGE-P2-3 Phase 1B-4.2: router classified

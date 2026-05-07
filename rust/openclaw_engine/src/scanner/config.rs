@@ -16,6 +16,7 @@
 //!   - TOML 路徑：settings/risk_control_rules/scanner_config.toml
 //!     或環境變量 OPENCLAW_SCANNER_CONFIG
 
+use crate::scanner::types::ScannerAuthorityMode;
 use serde::{Deserialize, Serialize};
 
 // ─── Meta ────────────────────────────────────────────────────────────────────
@@ -905,6 +906,31 @@ impl OpportunityConfig {
 
 // ─── ScannerConfig ────────────────────────────────────────────────────────────
 
+/// Scanner authority mode config.
+/// TOML:
+/// [authority]
+/// mode = "legacy_gate" | "advisory_shadow" | "advisory_enforced"
+/// 掃描器權限模式配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthorityConfig {
+    #[serde(default)]
+    pub mode: ScannerAuthorityMode,
+}
+
+impl Default for AuthorityConfig {
+    fn default() -> Self {
+        Self {
+            mode: ScannerAuthorityMode::LegacyGate,
+        }
+    }
+}
+
+impl AuthorityConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// Top-level scanner configuration.
 /// TOML path: settings/risk_control_rules/scanner_config.toml
 /// Env override: OPENCLAW_SCANNER_CONFIG
@@ -915,6 +941,8 @@ impl OpportunityConfig {
 pub struct ScannerConfig {
     #[serde(default)]
     pub meta: Meta,
+    #[serde(default)]
+    pub authority: AuthorityConfig,
     #[serde(default)]
     pub scheduling: SchedulingConfig,
     #[serde(default)]
@@ -937,6 +965,7 @@ impl ScannerConfig {
     /// Validate all sub-config invariants.
     /// 校驗所有子配置不變量。
     pub fn validate(&self) -> Result<(), String> {
+        self.authority.validate()?;
         self.scheduling.validate()?;
         self.universe.validate()?;
         self.hard_filters.validate()?;
@@ -957,6 +986,7 @@ mod tests {
     fn test_default_scanner_config_valid() {
         let cfg = ScannerConfig::default();
         assert!(cfg.validate().is_ok());
+        assert_eq!(cfg.authority.mode, ScannerAuthorityMode::LegacyGate);
     }
 
     #[test]
@@ -1006,8 +1036,33 @@ mod tests {
         let partial = "[scheduling]\nscan_interval_secs = 900\n";
         let cfg: ScannerConfig = toml::from_str(partial).unwrap();
         assert_eq!(cfg.scheduling.scan_interval_secs, 900);
+        assert_eq!(cfg.authority.mode, ScannerAuthorityMode::LegacyGate);
         // Other fields should still use defaults
         assert_eq!(cfg.hard_filters.min_turnover_24h_usdt, 50_000_000.0);
         assert_eq!(cfg.anti_churn.min_hold_cycles, 2);
+    }
+
+    #[test]
+    fn test_authority_toml_parses_shadow_mode() {
+        let cfg: ScannerConfig = toml::from_str(
+            r#"
+            [authority]
+            mode = "advisory_shadow"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(cfg.authority.mode, ScannerAuthorityMode::AdvisoryShadow);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_invalid_authority_mode_is_rejected() {
+        let bad = r#"
+            [authority]
+            mode = "unused_mode"
+        "#;
+
+        assert!(toml::from_str::<ScannerConfig>(bad).is_err());
     }
 }

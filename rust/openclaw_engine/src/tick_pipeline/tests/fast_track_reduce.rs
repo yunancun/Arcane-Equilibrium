@@ -414,6 +414,7 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
         2_500.0,
         "live_demo",
         None,
+        None,
     );
 
     let msg = rx.try_recv().expect("Intent must be enqueued");
@@ -470,6 +471,7 @@ fn test_persist_intent_helper_records_maker_entry_details() {
         49_995.0,
         "demo",
         None,
+        None,
     );
 
     let msg = rx.try_recv().expect("Intent must be enqueued");
@@ -493,7 +495,7 @@ fn test_persist_intent_helper_records_maker_entry_details() {
 #[test]
 fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
     use crate::intent_processor::OrderIntent;
-    use crate::scanner::types::{OpportunityComponents, OpportunityDecision};
+    use crate::scanner::types::{OpportunityComponents, OpportunityDecision, ScannerAuthorityMode};
 
     let intent = OrderIntent {
         symbol: "BTCUSDT".into(),
@@ -509,6 +511,9 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
         maker_timeout_ms: None,
     };
     let scanner = super::super::on_tick_helpers::IntentScannerContext {
+        authority_mode: ScannerAuthorityMode::AdvisoryShadow,
+        legacy_would_block: true,
+        legacy_block_reason: Some("scanner_market_gate:incompatible:test".to_string()),
         scan_id: "scan-1".to_string(),
         best_strategy: "ma_crossover".to_string(),
         intent_strategy: "ma_crossover".to_string(),
@@ -561,6 +566,10 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
         final_score: 92.0,
         raw_score: 90.0,
     };
+    let scanner_gate = super::super::on_tick_helpers::ScannerGateAudit::new(
+        ScannerAuthorityMode::AdvisoryShadow,
+        Some("scanner_market_gate:incompatible:test".to_string()),
+    );
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
 
     super::super::on_tick_helpers::persist_intent(
@@ -574,6 +583,7 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
         50_000.0,
         "demo",
         Some(&scanner),
+        Some(&scanner_gate),
     );
 
     let msg = rx.try_recv().expect("Intent must be enqueued");
@@ -590,7 +600,52 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
                 opportunity["components"]["expected_execution_cost_bps"].as_f64(),
                 Some(12.0)
             );
+            assert_eq!(
+                details["scanner"]["authority_mode"].as_str(),
+                Some("advisory_shadow")
+            );
+            assert_eq!(
+                details["scanner"]["legacy_would_block"].as_bool(),
+                Some(true)
+            );
+            assert_eq!(
+                details["scanner_gate"]["legacy_block_reason"].as_str(),
+                Some("scanner_market_gate:incompatible:test")
+            );
         }
         other => panic!("expected TradingMsg::Intent, got {:?}", other),
     }
+}
+
+#[test]
+fn scanner_authority_shadow_records_legacy_gate_without_enforcing() {
+    use crate::scanner::types::ScannerAuthorityMode;
+
+    let reason = super::super::on_tick_helpers::scanner_legacy_new_open_block_reason(
+        "ma_crossover",
+        None,
+        Some("scanner_active_universe:inactive"),
+        true,
+    )
+    .expect("legacy gate should compute inactive-universe reason");
+    let audit = super::super::on_tick_helpers::ScannerGateAudit::new(
+        ScannerAuthorityMode::AdvisoryShadow,
+        Some(reason),
+    );
+
+    assert!(audit.legacy_would_block);
+    assert_eq!(
+        audit.legacy_block_reason.as_deref(),
+        Some("scanner_active_universe:inactive")
+    );
+    assert!(
+        !super::super::on_tick_helpers::scanner_authority_enforces_legacy_new_open_gate(
+            audit.authority_mode
+        )
+    );
+    assert!(
+        super::super::on_tick_helpers::scanner_authority_enforces_legacy_new_open_gate(
+            ScannerAuthorityMode::LegacyGate
+        )
+    );
 }
