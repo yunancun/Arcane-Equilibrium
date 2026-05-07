@@ -315,6 +315,15 @@ def test_execution_plan_contract_limits_allowed_order_styles() -> None:
     assert ExecutionPlan(**close_payload).reduce_only is True
 
 
+@pytest.mark.parametrize("field", ("symbol_source", "direction_source"))
+def test_execution_plan_contract_forbids_non_strategist_scope_sources(field: str) -> None:
+    plan_payload = _plan().model_dump(mode="json")
+    plan_payload[field] = "executor"
+
+    with pytest.raises(ValidationError):
+        ExecutionPlan(**plan_payload)
+
+
 def test_guardian_verdict_contract_carries_p2_modifications_without_authority_shift() -> None:
     verdict = _modified_verdict()
     payload = verdict.model_dump(mode="json")
@@ -415,10 +424,21 @@ def test_publish_execution_plan_rejects_rejected_guardian_verdict(fake_conn) -> 
     )
 
 
-def test_publish_execution_plan_rejects_executor_symbol_direction_authority(fake_conn) -> None:
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("symbol", "ETHUSDT"),
+        ("direction", "short"),
+    ),
+)
+def test_publish_execution_plan_rejects_scope_not_from_approved_decision(
+    fake_conn,
+    field: str,
+    value: str,
+) -> None:
     client = AgentSpineClient(enabled=True, authority_mode="shadow")
     plan_payload = _plan().model_dump(mode="json")
-    plan_payload["direction"] = "short"
+    plan_payload[field] = value
 
     assert client.publish_strategist_decision(_decision()) is True
     assert client.publish_guardian_verdict(_verdict()) is True

@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-064 Executor scope regression: focused Python tests now prove ExecutionPlan generation and AgentSpine persistence keep symbol/direction sourced only from the approved StrategistDecision; M6 Executor Planner closed | workspace/reports/2026-05-07--agenttodo_mag064_executor_scope_regression.md |
 | 2026-05-07 | AgentTodo MAG-060 ExecutionPlan interface: Python/Rust ExecutionPlan contracts now carry allowed order styles, verdict version, symbol/direction source, reduce-only, urgency, slippage, maker preference, stop-policy handoff, and lease request fields; Python spine client refuses plans that do not match a prior StrategistDecision plus approved/modified GuardianVerdict | workspace/reports/2026-05-07--agenttodo_mag060_execution_plan_interface.md |
 | 2026-05-07 | AgentTodo MAG-054 Guardian verdict required regression: ExecutionPlan now requires non-empty Guardian verdict lineage, Python client refuses plans without a prior allowing verdict or after a rejected verdict, and Python/Rust spine state classifies P2-modified GuardianVerdict as `modified`; M5 Guardian V2 closed | workspace/reports/2026-05-07--agenttodo_mag054_guardian_verdict_required.md |
 | 2026-05-07 | AgentTodo MAG-053 Event/Scanner risk Guardian consumption: Guardian review now consumes active Scout EventAlert risk, scanner risk evidence from TradeIntent metadata/params, and RISK_PATTERN evidence; soft evidence P2-tightens size/cooldown, hard evidence pauses new opens without direct order/close authority | workspace/reports/2026-05-07--agenttodo_mag053_event_scanner_risk_guardian.md |
@@ -1550,3 +1551,26 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   authority change was made.
 - Next AgentTodo item is MAG-064 Executor never chooses symbol/direction
   regression.
+
+## 2026-05-07 AgentTodo MAG-064 Executor Scope Regression
+
+### Result
+- MAG-064 is complete and M6 Executor Planner is closed.
+- `test_executor_plan_v2.py` now proves Executor plan generation copies
+  symbol/direction only from the approved StrategistDecision even when decision,
+  Guardian verdict, and Guardian P2 metadata carry decoy scope fields.
+- `test_agent_spine_client.py` now rejects non-Strategist scope sources at
+  contract validation and refuses persisted plans whose symbol or direction
+  diverges from the prior approved decision.
+
+### Verification
+- Mac targeted: executor plan + spine client pytest 32/0, py_compile, and diff
+  check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 32/0, py_compile, and diff check.
+
+### Boundary
+- No runtime submit wiring, IPC protocol change, Rust contract change, rebuild,
+  restart, deploy, DB write, live auth, runtime flag, or trading authority
+  change was made.
+- Next AgentTodo item is M7 MAG-070 AnalystInsight L1/L2/L3 schema.
