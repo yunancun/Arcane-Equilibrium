@@ -531,6 +531,57 @@ class TestGuardianEventAlert(unittest.TestCase):
             verdict.metadata["risk_evidence_review"]["reason_codes"],
         )
 
+    def test_analyst_risk_pattern_tightens_p2_without_scope_authority(self):
+        """Analyst L2 risk patterns can P2-tighten without symbol/direction authority."""
+        agent = GuardianAgent(config=GuardianConfig())
+        agent.start()
+        agent.on_message(AgentMessage(
+            sender=AgentRole.ANALYST,
+            receiver=AgentRole.GUARDIAN,
+            message_type=MessageType.RISK_PATTERN,
+            payload={
+                "insight_id": "insight-l2-grid-risk-1",
+                "analyst_tier": "l2",
+                "insight_type": "risk_pattern",
+                "insight_level": "inference",
+                "symbol": "ADAUSDT",
+                "strategy": "grid_trading",
+                "confidence": 0.78,
+                "reason_codes": ["analyst_grid_drawdown_cluster"],
+                "evidence_refs": ["roundtrip-ada-grid-loss-window"],
+            },
+        ))
+
+        verdict = agent.review_intent(TradeIntent(
+            symbol="ADAUSDT",
+            strategy="grid_trading",
+            direction="long",
+            size=0.4,
+            params={"leverage": 1.0},
+            confidence=0.7,
+        ))
+
+        self.assertEqual(verdict.result, RiskVerdictResult.MODIFIED)
+        self.assertIn("Event/scanner risk modified", verdict.reason)
+        self.assertAlmostEqual(verdict.modified_params["size"], 0.2)
+        self.assertEqual(
+            verdict.modified_params["risk_evidence_action"],
+            "event_scanner_risk_p2_modify",
+        )
+        fields = {item["field"] for item in verdict.p2_modifications}
+        self.assertEqual(fields, {"size", "cooldown"})
+        for modification in verdict.p2_modifications:
+            self.assertNotIn("symbol", modification)
+            self.assertNotIn("direction", modification)
+        review = verdict.metadata["risk_evidence_review"]
+        self.assertIn("risk_pattern_soft_risk", review["reason_codes"])
+        self.assertIn("analyst_grid_drawdown_cluster", review["reason_codes"])
+        evidence = review["scanner_risk_evidence"][0]
+        self.assertEqual(evidence["insight_id"], "insight-l2-grid-risk-1")
+        self.assertEqual(evidence["analyst_tier"], "l2")
+        self.assertEqual(evidence["insight_type"], "risk_pattern")
+        self.assertEqual(evidence["evidence_refs"], ["roundtrip-ada-grid-loss-window"])
+
     def test_directive_updates_risk_params(self):
         """Conductor directive can update risk parameters."""
         agent = GuardianAgent(config=GuardianConfig(max_leverage=5.0))

@@ -996,13 +996,14 @@ class GuardianAgent(BaseAgent):
             risk_level = str(evidence.get("risk_level", "")).lower()
             risk_score = float(evidence.get("risk_score") or 0.0)
             source = str(evidence.get("source", "scanner_risk_evidence"))
+            pattern_code_prefix = "risk_pattern" if "risk_pattern" in source else "scanner"
             risk_label = risk_level or f"{risk_score:.2f}"
             if risk_level in ("critical", "hard") or risk_score >= self.config.scanner_risk_hard_score:
                 hard_reasons.append(f"{source} risk {risk_label}")
-                metadata["reason_codes"].append("scanner_hard_risk")
+                metadata["reason_codes"].append(f"{pattern_code_prefix}_hard_risk")
             elif risk_level == "high" or risk_score >= self.config.scanner_risk_soft_score:
                 soft_reasons.append(f"{source} risk {risk_label}")
-                metadata["reason_codes"].append("scanner_soft_risk")
+                metadata["reason_codes"].append(f"{pattern_code_prefix}_soft_risk")
             metadata["reason_codes"].extend(
                 str(code) for code in self._as_list(evidence.get("reason_codes"))
             )
@@ -1340,13 +1341,24 @@ class GuardianAgent(BaseAgent):
     def _handle_risk_pattern(self, message: AgentMessage) -> None:
         """Handle risk pattern from Analyst / 处理 Analyst 风险模式"""
         payload = dict(message.payload or {})
+        symbols = payload.get("symbols", payload.get("affected_symbols"))
+        if symbols is None and payload.get("symbol") is not None:
+            symbols = [payload.get("symbol")]
         record = {
-            "source": payload.get("source", "risk_pattern"),
+            "source": payload.get("source", "analyst_risk_pattern"),
             "risk_level": payload.get("risk_level", payload.get("severity", "medium")),
-            "risk_score": payload.get("risk_score", payload.get("score", 0.0)),
-            "symbols": payload.get("symbols", payload.get("affected_symbols", [])),
+            "risk_score": payload.get(
+                "risk_score",
+                payload.get("score", payload.get("confidence", 0.0)),
+            ),
+            "symbols": symbols or [],
             "strategy": payload.get("strategy"),
             "reason_codes": payload.get("reason_codes", []),
+            "insight_id": payload.get("insight_id"),
+            "analyst_tier": payload.get("analyst_tier"),
+            "insight_type": payload.get("insight_type"),
+            "insight_level": payload.get("insight_level"),
+            "evidence_refs": payload.get("evidence_refs", []),
             "timestamp_ms": int(payload.get("timestamp_ms") or time.time() * 1000),
             "metadata": payload.get("metadata", {}),
         }
