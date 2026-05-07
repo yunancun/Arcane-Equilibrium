@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-07  
 **Owner:** PM  
-**Status:** Active execution reset after `5403fce3`  
+**Status:** Active execution reset after `a03cdbb7`
 **Supersedes for sequencing only:** V1.3 §11 wave table  
 **Does not supersede:** REF-21 V1.3 governance gates, write confinement,
 subprocess isolation, promotion FSM, or 16 root-principle acceptance.
@@ -23,7 +23,9 @@ REF-21 replay is now runtime-usable for one-click full-chain S2 replay:
   exists,
 - taker slippage and maker fill probability are now replay-calibrated from
   demo/live_demo history,
-- Linux `trade-core` is synced and rebuilt through `5403fce3`.
+- taker fill reference prices are BBO-anchored when local best bid/ask exists,
+- BBO anchor coverage is exposed in API/manifest warnings and the one-click GUI,
+- Linux `trade-core` is synced and rebuilt/reloaded through `a03cdbb7`.
 
 The remaining work is no longer "make replay exist". It is "raise replay from
 S2/S2+ development sandbox to S1-calibrated advisory quality without inventing
@@ -68,13 +70,13 @@ replay with missing microstructure coverage.
 
 ## 2. Remaining Work Count
 
-PM count as of this reset:
+PM count as of the C1 BBO-anchor checkpoint:
 
 | Severity | Count | Meaning |
 |---|---:|---|
 | P0 | 0 | No known blocker prevents replay from being usable as a development sandbox. |
-| P1 | 6 | Needed before calling output S1-calibrated advisory quality. |
-| P2 | 5 | Usability, diagnostics, and acceptance hardening. |
+| P1 | 5 | Needed before calling output S1-calibrated advisory quality. |
+| P2 | 4 | Usability, diagnostics, and acceptance hardening. |
 | Data-maturity gates | 3 | Cannot be solved by code alone; require recorder history / demo outcomes. |
 
 In practical terms: **5 waves remain**. The first two are the core quality
@@ -92,7 +94,8 @@ historical order outcomes, not only by global slippage floors.
 
 Tasks:
 
-1. Add BBO/spread-aware taker pricing in Rust replay fills.
+1. **Done in `0bb61aeb` / `a03cdbb7`:** add BBO/spread-aware taker pricing
+   in Rust replay fills and surface BBO anchor coverage.
    - Buy taker reference should not be better than best ask when BBO exists.
    - Sell taker reference should not be better than best bid when BBO exists.
    - Preserve slippage floor on top of the BBO anchor.
@@ -276,3 +279,4 @@ stays narrow and is followed by Linux verification; otherwise dispatch E1/E2/E4.
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | V1 | 2026-05-07 | PM | Resets remaining REF-21 work after runtime usable one-click replay and maker execution calibration checkpoint `5403fce3`. |
+| V1.1 | 2026-05-07 | PM | Updates status after C1 BBO-anchor fill pricing and GUI/API coverage checkpoints `0bb61aeb` / `a03cdbb7`. |
