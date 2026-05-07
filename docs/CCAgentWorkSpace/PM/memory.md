@@ -258,6 +258,7 @@
    - 監控：加入 healthcheck [13] daily cron（mtime + cell count 驗證）
 
 2. **PostOnly 配置反向 — G1-05 立即修**
+
    - 現象：`strategy_params_{demo,live}.toml` 中 demo=false / live=true（反向！）
    - 違反原則 #6（失敗默認收縮）
    - 風險：若下線後遺忘改回，demo 環境實際跑 live 參數
@@ -1476,3 +1477,28 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   unavailable.
 - Runner scanner ticker inputs are still OHLCV-derived, not historical
   order-book/ticker reconstruction.
+
+## 2026-05-07 AgentTodo MAG-061 ExecutionPlan Generation
+
+### Result
+- MAG-061 source is complete: `executor_plan_v2.py` builds deterministic
+  `ExecutionPlan` objects from approved/modified `StrategistDecision +
+  GuardianVerdict` lineage.
+- The builder rejects Guardian rejects/mismatches, `hold`, and `no_action`.
+- Symbol/direction/strategy/engine mode are copied from StrategistDecision only.
+- Guardian P2 size/stop/cooldown/leverage modifications are applied as bounded
+  quantity/policy metadata without changing trade scope.
+- Open-with-price becomes post-only maker plan; market open is slippage bounded;
+  reduce/close becomes reduce-only market exit plan with high urgency.
+
+### Verification
+- Mac targeted: executor plan pytest 9/0, executor plan + spine client pytest
+  22/0, py_compile, and diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 22/0, py_compile, and diff check.
+
+### Boundary
+- No runtime submit wiring, Decision Lease binding/acquisition, rebuild,
+  restart, deploy, DB write, live auth, runtime flag, or trading authority
+  change was made.
+- Next AgentTodo item is MAG-062 Decision Lease binding to ExecutionPlan.
