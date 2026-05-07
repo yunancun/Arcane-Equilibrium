@@ -105,6 +105,9 @@ from .checks_scanner_market import (
 from .checks_agent_events import (
     check_52_agent_event_store_rows,
 )
+from .checks_openclaw_gateway import (
+    check_54_openclaw_proposal_relay,
+)
 from .checks_governance import (
     # LG-5-IMPL-3 (2026-05-02) — RFC v2 §6 governance contract sentinels.
     # `[42]` review_live_candidate 1h SLA + audit row contract;
@@ -239,6 +242,7 @@ Execution / cost sentinels added after F7:
   [50] replay_run_state_health          (REF-20 Sprint D R8 2026-05-05 — V045 failed_rate 7d + zombie 'running' >1h detection)
   [51] scanner_opportunity_shadow_acceptance (2026-05-06 — snapshot/intent/MLDE row-proof coverage + opportunity_lcb_bps calibration, shadow-only)
   [52] agent_event_store_rows            (AgentTodo MAG-010..012 — agent.messages/state_changes/ai_invocations recent row proof)
+  [54] openclaw_proposal_relay           (OC-GW-5/6/7 proposal/approval/channel ledger audit)
   [53] ref21_v058_symbol_universe_recorder (REF-21 — recurring V058 universe snapshot liveness)
 
 Exit codes:
@@ -774,6 +778,12 @@ def main() -> int:
             # falls back to current survivors because universe snapshots stop.
             s, m = check_53_ref21_v058_symbol_universe_recorder(cur)
             results.append(("[53] ref21_v058_symbol_universe_recorder", s, m))
+
+            # [54] OC-GW-5/6/7 proposal intake, approval relay, and channel
+            # audit ledger sentinel. Missing tables WARN during migration
+            # rollout; expired pending approvals or orphan decisions FAIL.
+            s, m = check_54_openclaw_proposal_relay(cur)
+            results.append(("[54] openclaw_proposal_relay", s, m))
     finally:
         conn.close()
 

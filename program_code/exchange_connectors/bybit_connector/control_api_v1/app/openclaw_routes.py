@@ -21,12 +21,23 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from . import agents_routes_helpers as _agent_h
 from . import main_legacy as base
 from .db_pool import get_pg_conn
-from .openclaw_models import OpenClawEnvelope, OpenClawEvidenceRef, OpenClawStatus
+from .openclaw_models import (
+    OpenClawEnvelope,
+    OpenClawEvidenceRef,
+    OpenClawProposalCreateRequest,
+    OpenClawProposalDecisionRequest,
+    OpenClawStatus,
+)
+from .openclaw_proposal_store import (
+    OpenClawProposalStore,
+    OpenClawProposalStoreUnavailable,
+    OpenClawProposalValidationError,
+)
 from .openclaw_supervisor_policy import build_supervisor_cloud_policy_snapshot
 
 logger = logging.getLogger(__name__)
@@ -79,6 +90,29 @@ _OPENCLAW_READ_ONLY_ROUTES = (
         "OpenClaw supervisor escalation ledger view",
     ),
 )
+_OPENCLAW_PROPOSAL_ROUTES = (
+    (
+        "GET",
+        "/api/v1/openclaw/proposals",
+        "OpenClaw proposal ledger view",
+    ),
+    (
+        "POST",
+        "/api/v1/openclaw/proposals",
+        "OpenClaw proposal intake ledger route",
+    ),
+    (
+        "POST",
+        "/api/v1/openclaw/proposals/{proposal_id}/approve",
+        "OpenClaw approval decision ledger route",
+    ),
+    (
+        "POST",
+        "/api/v1/openclaw/proposals/{proposal_id}/reject",
+        "OpenClaw rejection decision ledger route",
+    ),
+)
+_OPENCLAW_ACTIVE_ROUTES = _OPENCLAW_READ_ONLY_ROUTES + _OPENCLAW_PROPOSAL_ROUTES
 _SUPERVISOR_ESCALATION_PURPOSE = "openclaw_supervisor_escalation"
 
 
@@ -117,6 +151,12 @@ def _details_dict(value: Any) -> dict[str, Any]:
 
 def _safe_list(value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else []
+
+
+def _model_to_dict(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        return dict(value.model_dump())
+    return dict(value.dict())
 
 
 def _hash_snapshot(payload: dict[str, Any]) -> str:
@@ -326,11 +366,16 @@ def _build_authority_posture() -> dict[str, Any]:
         "gateway_role": "read_only_supervisor_relay",
         "active_allowlist": [
             {"method": method, "path": path}
-            for method, path, _label in _OPENCLAW_READ_ONLY_ROUTES
+            for method, path, _label in _OPENCLAW_ACTIVE_ROUTES
         ],
-        "deferred_workflows_enabled": False,
-        "proposal_creation_enabled": False,
-        "external_approval_relay_enabled": False,
+        "deferred_workflows_enabled": True,
+        "proposal_creation_enabled": True,
+        "external_approval_relay_enabled": True,
+        "enabled_write_classes": [
+            "proposal_ledger",
+            "approval_decision_ledger",
+            "channel_event_audit",
+        ],
         "can_submit_orders": False,
         "can_cancel_orders": False,
         "can_close_positions": False,
@@ -495,6 +540,7 @@ def _evidence_refs(generated_at_ms: int) -> list[OpenClawEvidenceRef]:
             safe_url=path,
         )
         for method, path, label in _OPENCLAW_READ_ONLY_ROUTES
+        + _OPENCLAW_PROPOSAL_ROUTES
     ]
     return [
         *route_refs,
@@ -882,6 +928,88 @@ def _build_escalations_view(
     }
 
 
+def _get_proposal_store() -> OpenClawProposalStore:
+    return OpenClawProposalStore()
+
+
+def _actor_dict(actor: base.AuthenticatedActor) -> dict[str, Any]:
+    return {
+        "actor_id": actor.actor_id,
+        "actor_type": actor.actor_type,
+        "roles": sorted(actor.roles),
+        "scopes": sorted(actor.scopes),
+    }
+
+
+def _require_complete_write_context(
+    request: Request,
+    actor: base.AuthenticatedActor,
+) -> dict[str, Any]:
+    context, context_error = _build_request_context(request, actor)
+    if context_error or not context.get("request_id"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_codes": ["openclaw_request_context_required"],
+                "missing": context.get("missing", []),
+            },
+        )
+    return context
+
+
+def _require_proposal_creator(actor: base.AuthenticatedActor) -> None:
+    if not ({"operator", "operator_guarded", "service"} & set(actor.roles)):
+        raise HTTPException(
+            status_code=403,
+            detail={"reason_codes": ["openclaw_proposal_creator_required"]},
+        )
+
+
+def _require_approval_actor(actor: base.AuthenticatedActor) -> None:
+    if not ({"operator", "operator_guarded"} & set(actor.roles)):
+        raise HTTPException(
+            status_code=403,
+            detail={"reason_codes": ["openclaw_operator_approval_required"]},
+        )
+
+
+def _resolve_body_request_id(
+    *,
+    body_request_id: str | None,
+    context: dict[str, Any],
+) -> str:
+    context_request_id = str(context.get("request_id") or "")
+    if body_request_id and body_request_id != context_request_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": ["openclaw_request_id_mismatch"]},
+        )
+    return context_request_id
+
+
+def _write_envelope(
+    *,
+    data_category: str,
+    data: dict[str, Any],
+    generated_at_ms: int,
+    status: OpenClawStatus = "pass",
+    ok: bool = True,
+    degraded_reasons: list[str] | None = None,
+) -> OpenClawEnvelope:
+    degraded = bool(degraded_reasons) or status == "degraded"
+    return OpenClawEnvelope(
+        ok=ok and status not in {"fail", "degraded"},
+        status=status,
+        generated_at_ms=generated_at_ms,
+        freshness_ms=None,
+        degraded=degraded,
+        degraded_reasons=degraded_reasons or [],
+        evidence_refs=_evidence_refs(generated_at_ms),
+        data=data,
+        data_category=data_category,
+    )
+
+
 async def _read_backing_sources() -> tuple[dict[str, Any], str | None, dict[str, Any], str | None]:
     (event_store, event_store_error), (runtime, runtime_error) = await asyncio.gather(
         asyncio.to_thread(_read_agent_event_store_summary),
@@ -1097,4 +1225,169 @@ async def get_openclaw_escalations(
         evidence_refs=_evidence_refs(generated_at_ms),
         data=data,
         data_category="openclaw_escalations",
+    )
+
+
+@openclaw_router.get("/proposals", response_model=OpenClawEnvelope)
+async def get_openclaw_proposals(
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> OpenClawEnvelope:
+    generated_at_ms = _now_ms()
+    request_context, request_context_error = _build_request_context(request, actor)
+    ledger, ledger_error = _get_proposal_store().list_proposals()
+    degraded_reasons = [
+        reason
+        for reason in (request_context_error, ledger_error)
+        if reason
+    ]
+    status: OpenClawStatus = "degraded" if degraded_reasons else "pass"
+    data = {
+        "proposals": ledger,
+        "authority": _build_authority_posture(),
+        "request_context": request_context,
+        "side_effect_delegation_enabled": False,
+    }
+    return _write_envelope(
+        data_category="openclaw_proposals",
+        data=data,
+        generated_at_ms=generated_at_ms,
+        status=status,
+        ok=not degraded_reasons,
+        degraded_reasons=degraded_reasons,
+    )
+
+
+@openclaw_router.post("/proposals", response_model=OpenClawEnvelope)
+async def create_openclaw_proposal(
+    body: OpenClawProposalCreateRequest,
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> OpenClawEnvelope:
+    _require_proposal_creator(actor)
+    context = _require_complete_write_context(request, actor)
+    _resolve_body_request_id(body_request_id=body.request_id, context=context)
+    generated_at_ms = _now_ms()
+    payload = _model_to_dict(body)
+    evidence_refs = [
+        _model_to_dict(item)
+        for item in body.evidence_refs
+    ]
+    try:
+        proposal = _get_proposal_store().create_proposal(
+            request_context=context,
+            actor=_actor_dict(actor),
+            proposal_type=body.proposal_type,
+            risk_class=body.risk_class,
+            summary=body.summary,
+            evidence_refs=evidence_refs,
+            required_approval_class=body.required_approval_class,
+            expires_at_ms=body.expires_at_ms,
+            linked_diagnosis_id=body.linked_diagnosis_id,
+            linked_escalation_id=body.linked_escalation_id,
+            side_effect_route=body.side_effect_route,
+            payload=payload.get("payload") or {},
+        )
+    except OpenClawProposalValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": [str(exc)]},
+        ) from exc
+    except OpenClawProposalStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"reason_codes": ["openclaw_proposal_store_unavailable"], "detail": str(exc)},
+        ) from exc
+
+    return _write_envelope(
+        data_category="openclaw_proposal_created",
+        data={
+            "proposal": proposal,
+            "request_context": context,
+            "side_effect_executed": False,
+        },
+        generated_at_ms=generated_at_ms,
+    )
+
+
+@openclaw_router.post("/proposals/{proposal_id}/approve", response_model=OpenClawEnvelope)
+async def approve_openclaw_proposal(
+    proposal_id: str,
+    body: OpenClawProposalDecisionRequest,
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> OpenClawEnvelope:
+    return await _decide_openclaw_proposal(
+        proposal_id=proposal_id,
+        action="approve",
+        body=body,
+        request=request,
+        actor=actor,
+    )
+
+
+@openclaw_router.post("/proposals/{proposal_id}/reject", response_model=OpenClawEnvelope)
+async def reject_openclaw_proposal(
+    proposal_id: str,
+    body: OpenClawProposalDecisionRequest,
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> OpenClawEnvelope:
+    return await _decide_openclaw_proposal(
+        proposal_id=proposal_id,
+        action="reject",
+        body=body,
+        request=request,
+        actor=actor,
+    )
+
+
+async def _decide_openclaw_proposal(
+    *,
+    proposal_id: str,
+    action: str,
+    body: OpenClawProposalDecisionRequest,
+    request: Request,
+    actor: base.AuthenticatedActor,
+) -> OpenClawEnvelope:
+    _require_approval_actor(actor)
+    context = _require_complete_write_context(request, actor)
+    _resolve_body_request_id(body_request_id=body.request_id, context=context)
+    generated_at_ms = _now_ms()
+    try:
+        approval = _get_proposal_store().decide_proposal(
+            proposal_id=proposal_id,
+            request_context=context,
+            actor=_actor_dict(actor),
+            action=action,
+            reason=body.reason,
+        )
+    except OpenClawProposalValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": [str(exc)]},
+        ) from exc
+    except OpenClawProposalStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"reason_codes": ["openclaw_proposal_store_unavailable"], "detail": str(exc)},
+        ) from exc
+    if approval is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"reason_codes": ["openclaw_proposal_not_found"]},
+        )
+    decision = approval.get("decision")
+    status: OpenClawStatus = "warn" if decision in {"denied", "expired"} else "pass"
+    return _write_envelope(
+        data_category="openclaw_proposal_decision",
+        data={
+            "approval": approval,
+            "request_context": context,
+            "side_effect_executed": False,
+            "side_effect_delegation_enabled": False,
+        },
+        generated_at_ms=generated_at_ms,
+        status=status,
+        ok=decision not in {"denied", "expired"},
     )
