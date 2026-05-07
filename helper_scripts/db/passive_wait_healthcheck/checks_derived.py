@@ -328,9 +328,14 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
             "(defer to [1] verdict; ratios unreliable at this sample size)",
         )
 
-    # Query labels_24h (same filter as [2]) and intents_24h (same filter as [10]
-    # but demo-only, since close_fills baseline is demo-scoped).
-    # 查 labels_24h（同 [2]）與 intents_24h（同 [10]，demo-only 匹配 baseline）。
+    # Query labels_24h (same filter as [2]) and a close-fill-linked intent
+    # anchor. Raw scanner/opportunity intents are shadow observations and can
+    # legitimately outnumber filled trade contexts by several orders of
+    # magnitude; they are kept in the message as a diagnostic, but they are not
+    # the denominator for fills/labels triangulation.
+    # 查 labels_24h（同 [2]）與 close-fill-linked intent 錨。Raw scanner /
+    # opportunity intent 是影子觀察，數量可合理遠大於成交 context；輸出保留作
+    # 診斷，但不當 fills/labels 三角驗證分母。
     try:
         cur.execute(
             "SELECT COUNT(*) FROM learning.decision_features "
@@ -344,12 +349,46 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
 
     try:
         cur.execute(
-            "SELECT COUNT(*) FROM trading.intents "
-            "WHERE ts > now() - interval '24 hours' AND engine_mode = 'demo'"
+            """
+            WITH closed_contexts AS (
+                SELECT DISTINCT NULLIF(entry_context_id, '') AS context_id
+                FROM trading.fills
+                WHERE ts > now() - interval '24 hours'
+                  AND engine_mode = 'demo'
+                  AND realized_pnl != 0
+                  AND NULLIF(entry_context_id, '') IS NOT NULL
+            ),
+            intent_matches AS (
+                SELECT i.context_id
+                FROM trading.intents i
+                JOIN closed_contexts c ON c.context_id = i.context_id
+                WHERE i.engine_mode = 'demo'
+            )
+            SELECT
+                (SELECT COUNT(*)
+                 FROM trading.intents
+                 WHERE ts > now() - interval '24 hours'
+                   AND engine_mode = 'demo') AS raw_intents_24h,
+                (SELECT COUNT(*)
+                 FROM trading.intents
+                 WHERE ts > now() - interval '24 hours'
+                   AND engine_mode = 'demo'
+                   AND details #> '{scanner,opportunity}' IS NOT NULL)
+                    AS scanner_opportunity_raw_24h,
+                COUNT(*) AS close_fill_linked_intent_rows,
+                COUNT(DISTINCT context_id) AS close_fill_linked_intent_contexts,
+                (SELECT COUNT(*) FROM closed_contexts) AS close_fill_contexts
+            FROM intent_matches
+            """
         )
-        intents_24h = int(cur.fetchone()[0] or 0)
+        intent_row = cur.fetchone()
+        raw_intents_24h = int((intent_row[0] if intent_row else 0) or 0)
+        scanner_opportunity_raw_24h = int((intent_row[1] if intent_row else 0) or 0)
+        linked_intent_rows_24h = int((intent_row[2] if intent_row else 0) or 0)
+        intents_24h = int((intent_row[3] if intent_row else 0) or 0)
+        close_fill_contexts_24h = int((intent_row[4] if intent_row else 0) or 0)
     except Exception as e:
-        return ("WARN", f"triangulation intents query failed: {e}")
+        return ("WARN", f"triangulation close-fill-linked intents query failed: {e}")
 
     # Pairwise ratio analysis. Reference anchor = close_fills_24h.
     # fills:labels and fills:intents are most informative; labels:intents is
@@ -391,6 +430,21 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
         "labels/intents": (r_li, _classify(r_li)),
     }
 
+    r_dup = _ratio(linked_intent_rows_24h, intents_24h)
+    dup_cls = ""
+    if intents_24h > 0:
+        # Duplicate-writer guard: scanner shadow volume is intentionally out
+        # of-band, but multiple ledger rows for the same filled trade context
+        # still indicate retry-loop or idempotency drift.
+        # 重複 writer 防線：scanner shadow 總量不參與，但同一 filled context
+        # 多筆 intent ledger row 仍代表 retry/idempotency 漂移。
+        if r_dup > FAIL_HI:
+            dup_cls = "FAIL"
+        elif r_dup > WARN_HI:
+            dup_cls = "WARN"
+        if dup_cls:
+            classes["intent_rows/contexts"] = (r_dup, dup_cls)
+
     # Summarise pairwise ratios for operator readability. Use "inf" / "0.00"
     # sentinels for one-sided divergence; float('inf') formats as 'inf' so
     # explicit branch for clarity.
@@ -405,7 +459,11 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
         for name, (r, cls) in classes.items()
     )
     base = (
-        f"close_fills={close_fills_24h}, labels={labels_24h}, intents={intents_24h} | "
+        f"close_fills={close_fills_24h}, labels={labels_24h}, "
+        f"filled_intent_contexts={intents_24h}, "
+        f"close_fill_contexts={close_fill_contexts_24h}, "
+        f"raw_intents={raw_intents_24h}, "
+        f"scanner_opportunity_raw={scanner_opportunity_raw_24h} | "
         f"{pairs_str}"
     )
 
@@ -421,7 +479,8 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
     if "WARN" in statuses:
         return (
             "WARN",
-            base + " — drift; inspect intent writer + label backfill lag",
+            base + " — drift; inspect close-fill intent linkage, duplicate "
+            "intent rows, and label backfill lag",
         )
     return ("PASS", base)
 
