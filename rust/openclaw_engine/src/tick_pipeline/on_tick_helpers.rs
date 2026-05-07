@@ -331,27 +331,18 @@ pub(crate) fn persist_strategy_signal(
     signal_id: &str,
     context_id: &str,
     ts_ms: u64,
+    engine_mode: &str,
     intent: &crate::intent_processor::OrderIntent,
 ) {
     if let Some(ref tx) = trading_tx {
-        let _ = crate::database::try_send_trading_msg(
-            tx,
-            crate::database::TradingMsg::Signal {
-                signal_id: signal_id.to_string(),
-                ts_ms,
-                symbol: intent.symbol.clone(),
-                strategy_name: intent.strategy.clone(),
-                timeframe: "1m".to_string(),
-                signal_type: if intent.is_long {
-                    "OpenLong".to_string()
-                } else {
-                    "OpenShort".to_string()
-                },
-                strength: intent.confidence,
-                context_id: context_id.to_string(),
-            },
-            "strategy_signal",
+        let msg = crate::agent_spine::signal_adapter::trading_msg_from_open_intent(
+            signal_id,
+            context_id,
+            ts_ms,
+            engine_mode,
+            intent,
         );
+        let _ = crate::database::try_send_trading_msg(tx, msg, "strategy_signal");
     }
 }
 

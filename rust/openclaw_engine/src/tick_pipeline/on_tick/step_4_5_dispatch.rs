@@ -380,6 +380,7 @@ impl TickPipeline {
                             &signal_id,
                             &context_id,
                             event.ts_ms,
+                            em,
                             intent,
                         );
                         if matches!(em, "demo" | "live_demo") {

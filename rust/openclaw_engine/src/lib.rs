@@ -9,6 +9,7 @@
 //!   二進制入口在 main.rs。
 
 pub mod account_manager;
+pub mod agent_spine;
 pub mod ai_budget;
 pub mod ai_service_client;
 pub mod bybit_private_ws;

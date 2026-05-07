@@ -259,7 +259,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
 | MAG-030 | PA | P0 | DONE (RFC) | Finalize `agent_spine` Rust module design. | `2026-05-07--mag030_agent_spine_rust_module_design.md` defines Rust module files, mode/contracts/store/router interfaces, DB object/edge/state/idempotency stores, feature flags, and MAG-031..035 implementation seams. No runtime behavior change. |
-| MAG-031 | E1 | P0 | TODO | Implement `StrategySignal` adapter for Rust strategies. | Existing strategy outputs can be persisted as signals without executing. |
+| MAG-031 | E1 | P0 | DONE (MAC/LINUX SHADOW ADAPTER) | Implement `StrategySignal` adapter for Rust strategies. | `rust/openclaw_engine/src/agent_spine/{config,contracts,signal_adapter}.rs` now defines the default-disabled/shadow-first mode contract and typed `StrategySignal`; existing Rust strategy open intents build typed `StrategySignal` first, then downgrade to the current `TradingMsg::Signal` / `trading.signals` persistence shape without changing dispatch, Guardian, lease, scanner, or order behavior. Mac/Linux targeted Rust tests pass. |
 | MAG-032 | E1 | P0 | TODO | Implement spine store for StrategistDecision, GuardianVerdict, ExecutionPlan, ExecutionReport. | DB chain query can join signal -> decision -> verdict -> plan. |
 | MAG-033 | E1a | P0 | TODO | Add Python `agent_spine_client.py` for Strategist/Guardian/Analyst interaction. | Python agents can publish/consume typed objects without free-text routing. |
 | MAG-034 | E2 | P0 | TODO | Audit idempotency and double-execution prevention. | Every execution candidate has decision_id and order_plan_id dedupe. |
