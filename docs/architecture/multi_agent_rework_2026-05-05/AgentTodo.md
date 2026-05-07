@@ -280,7 +280,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-050 | QC | P0 | TODO | Design dynamic correlation and per-strategy drawdown metrics. | Model inputs and fallback behavior documented. |
+| MAG-050 | QC | P0 | DONE (MAC/LINUX CONTRACT) | Design dynamic correlation and per-strategy drawdown metrics. | `2026-05-07--mag050_guardian_v2_risk_metrics_model.md` defines `CorrelationSnapshot`, `CorrelationReviewInput`, safe fallback semantics, `StrategyRiskSnapshot`, drawdown/loss-streak states, GuardianVerdict mapping, and MAG-051/MAG-052 regression targets. Docs-only contract; Mac/Linux diff checks passed. |
 | MAG-051 | E1 | P0 | TODO | Replace hardcoded BTC/ETH-only correlation with dynamic matrix or safe fallback. | Correlation verdict works across active symbols. |
 | MAG-052 | E1 | P0 | TODO | Add P2 risk modification output to GuardianVerdict. | Guardian can modify size/leverage/stop/cooldown with reason. |
 | MAG-053 | E1 | P1 | TODO | Consume Scout event alerts and scanner risk evidence in Guardian. | Event/risk alert can tighten risk without directly ordering. |
