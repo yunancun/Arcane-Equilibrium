@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-070 AnalystInsight schema: Python contracts now define L1/L2/L3 analyst tiers, tier-scoped insight types, fact/inference/hypothesis labels, bounded confidence, recommendation, and severity; analyzed_by edges carry tier/type/level | workspace/reports/2026-05-07--agenttodo_mag070_analyst_insight_schema.md |
 | 2026-05-07 | AgentTodo MAG-064 Executor scope regression: focused Python tests now prove ExecutionPlan generation and AgentSpine persistence keep symbol/direction sourced only from the approved StrategistDecision; M6 Executor Planner closed | workspace/reports/2026-05-07--agenttodo_mag064_executor_scope_regression.md |
 | 2026-05-07 | AgentTodo MAG-060 ExecutionPlan interface: Python/Rust ExecutionPlan contracts now carry allowed order styles, verdict version, symbol/direction source, reduce-only, urgency, slippage, maker preference, stop-policy handoff, and lease request fields; Python spine client refuses plans that do not match a prior StrategistDecision plus approved/modified GuardianVerdict | workspace/reports/2026-05-07--agenttodo_mag060_execution_plan_interface.md |
 | 2026-05-07 | AgentTodo MAG-054 Guardian verdict required regression: ExecutionPlan now requires non-empty Guardian verdict lineage, Python client refuses plans without a prior allowing verdict or after a rejected verdict, and Python/Rust spine state classifies P2-modified GuardianVerdict as `modified`; M5 Guardian V2 closed | workspace/reports/2026-05-07--agenttodo_mag054_guardian_verdict_required.md |
@@ -1574,3 +1575,31 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   restart, deploy, DB write, live auth, runtime flag, or trading authority
   change was made.
 - Next AgentTodo item is M7 MAG-070 AnalystInsight L1/L2/L3 schema.
+
+## 2026-05-07 AgentTodo MAG-070 AnalystInsight Schema
+
+### Result
+- MAG-070 is complete.
+- Added
+  `docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag070_analyst_insight_l1_l2_l3_schema.md`
+  as the schema definition note.
+- Python `AnalystInsight` now carries `analyst_tier`, tier-scoped
+  `insight_type`, `insight_level` fact/inference/hypothesis labels, bounded
+  `confidence`, optional `recommendation`, and optional `severity`.
+- Added `AnalystInsightL1`, `AnalystInsightL2`, and `AnalystInsightL3`
+  subclasses for contract-level schema validation.
+- `AgentSpineClient.publish_analyst_insight()` writes analyst tier/type/level
+  into the `analyzed_by` edge details.
+
+### Verification
+- Mac targeted: agent contracts + spine client + Strategist analyst-consumption
+  pytest 33/0, py_compile, and diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 33/0, py_compile, and diff check.
+
+### Boundary
+- No runtime Analyst emission wiring, Strategist/Guardian behavior change,
+  cloud call, runtime submit path, Rust contract change, rebuild, restart,
+  deploy, DB write, live auth, runtime flag, or trading authority change was
+  made.
+- Next AgentTodo item is MAG-071 Persist AnalystInsight evidence links.

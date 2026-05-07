@@ -300,7 +300,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-070 | MIT/QC | P1 | TODO | Define L1/L2/L3 AnalystInsight schemas. | Insights carry fact/inference/hypothesis labels. |
+| MAG-070 | MIT/QC | P1 | DONE (MAC/LINUX PY CONTRACT) | Define L1/L2/L3 AnalystInsight schemas. | `2026-05-07--mag070_analyst_insight_l1_l2_l3_schema.md` defines L1 post-trade/execution-quality, L2 pattern, and L3 hypothesis/experiment AnalystInsight boundaries. Python contracts now carry `analyst_tier`, tier-scoped `insight_type`, `insight_level` fact/inference/hypothesis labels, bounded confidence, recommendation, and severity; `AgentSpineClient.publish_analyst_insight()` writes tier/type/level into `analyzed_by` edge details. Mac/Linux targeted pytest 33/0, py_compile, and diff checks passed. |
 | MAG-071 | E1a | P1 | TODO | Persist AnalystInsight and link to evidence refs. | Insight can be traced to round trips and strategy metrics. |
 | MAG-072 | E1a | P1 | TODO | Strategist consumes losing/winning patterns through typed rules. | Next-cycle decision changes are explainable. |
 | MAG-073 | E1 | P1 | TODO | Guardian consumes risk patterns. | Risk pattern can tighten P2 without changing P0/P1. |

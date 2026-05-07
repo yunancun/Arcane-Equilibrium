@@ -52,6 +52,21 @@ ExecutionOrderStyle = Literal["market", "limit", "post_only", "twap", "split"]
 ExecutionUrgency = Literal["low", "normal", "high", "urgent"]
 ExecutionMakerPreference = Literal["none", "prefer_maker", "maker_only", "allow_taker"]
 ExecutionAuthoritySource = Literal["strategist_decision"]
+AnalystInsightTier = Literal["l1", "l2", "l3"]
+AnalystInsightLevel = Literal["fact", "inference", "hypothesis"]
+AnalystInsightType = Literal[
+    "post_trade_review",
+    "execution_quality",
+    "strategy_metric",
+    "strategy_pattern",
+    "risk_pattern",
+    "regime_pattern",
+    "cost_pattern",
+    "hypothesis",
+    "experiment_design",
+    "experiment_result",
+]
+AnalystInsightSeverity = Literal["info", "low", "medium", "high", "critical"]
 
 PositionReviewRecommendation = Literal[
     "hold",
@@ -74,6 +89,12 @@ PositionReviewTrigger = Literal[
 ]
 
 PositionReviewUrgency = Literal["low", "medium", "high", "critical"]
+
+_ANALYST_INSIGHT_TYPES_BY_TIER = {
+    "l1": {"post_trade_review", "execution_quality", "strategy_metric"},
+    "l2": {"strategy_pattern", "risk_pattern", "regime_pattern", "cost_pattern"},
+    "l3": {"hypothesis", "experiment_design", "experiment_result"},
+}
 
 CanonicalStrategy = Literal[
     "ma_crossover",
@@ -312,11 +333,42 @@ class AnalystInsight(_SpineModel):
     decision_id: str | None = None
     order_plan_id: str | None = None
     execution_report_id: str | None = None
-    insight_level: Literal["fact", "inference", "hypothesis"] = "inference"
+    analyst_tier: AnalystInsightTier = "l1"
+    insight_type: AnalystInsightType = "post_trade_review"
+    insight_level: AnalystInsightLevel = "inference"
     summary: str
     evidence_refs: list[str] = Field(default_factory=list)
     claims: list[dict[str, Any]] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    recommendation: str | None = None
+    severity: AnalystInsightSeverity | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_analyst_insight_schema(self) -> "AnalystInsight":
+        allowed_types = _ANALYST_INSIGHT_TYPES_BY_TIER[self.analyst_tier]
+        if self.insight_type not in allowed_types:
+            raise ValueError("analyst_insight_type_not_allowed_for_tier")
+        return self
+
+
+class AnalystInsightL1(AnalystInsight):
+    analyst_tier: Literal["l1"] = "l1"
+    insight_type: Literal["post_trade_review", "execution_quality", "strategy_metric"] = (
+        "post_trade_review"
+    )
+
+
+class AnalystInsightL2(AnalystInsight):
+    analyst_tier: Literal["l2"] = "l2"
+    insight_type: Literal["strategy_pattern", "risk_pattern", "regime_pattern", "cost_pattern"] = (
+        "strategy_pattern"
+    )
+
+
+class AnalystInsightL3(AnalystInsight):
+    analyst_tier: Literal["l3"] = "l3"
+    insight_type: Literal["hypothesis", "experiment_design", "experiment_result"] = "hypothesis"
 
 
 SpinePayload = (

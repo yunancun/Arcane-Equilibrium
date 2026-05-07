@@ -8,6 +8,9 @@ from pydantic import ValidationError
 from app import agent_spine_client as asc
 from app.agent_contracts import (
     AnalystInsight,
+    AnalystInsightL1,
+    AnalystInsightL2,
+    AnalystInsightL3,
     ExecutionPlan,
     ExecutionReport,
     GuardianP2Modification,
@@ -228,9 +231,13 @@ def _insight() -> AnalystInsight:
         strategy="grid_trading",
         decision_id="decision-paper-BTCUSDT-1",
         execution_report_id="report-paper-BTCUSDT-1",
+        analyst_tier="l1",
+        insight_type="execution_quality",
         insight_level="fact",
         summary="round trip analyzed",
         evidence_refs=["fill-paper-BTCUSDT-1"],
+        confidence=0.95,
+        severity="info",
     )
 
 
@@ -322,6 +329,88 @@ def test_execution_plan_contract_forbids_non_strategist_scope_sources(field: str
 
     with pytest.raises(ValidationError):
         ExecutionPlan(**plan_payload)
+
+
+def test_analyst_insight_contract_defines_l1_l2_l3_schema_labels() -> None:
+    l1 = AnalystInsightL1(
+        insight_id="insight-l1-execution-quality",
+        ts_ms=1,
+        engine_mode="paper",
+        symbol="BTCUSDT",
+        execution_report_id="report-paper-BTCUSDT-1",
+        insight_type="execution_quality",
+        insight_level="fact",
+        summary="fill quality measured",
+        evidence_refs=["report-paper-BTCUSDT-1"],
+        confidence=1.0,
+    )
+    l2 = AnalystInsightL2(
+        insight_id="insight-l2-strategy-pattern",
+        ts_ms=2,
+        engine_mode="paper",
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        insight_type="strategy_pattern",
+        insight_level="inference",
+        summary="grid_trading underperforms in one-way shock",
+        evidence_refs=["report-paper-BTCUSDT-window"],
+        claims=[
+            {
+                "claim_id": "claim-grid-loss",
+                "strategy": "grid_trading",
+                "polarity": "negative",
+                "confidence": 0.8,
+            }
+        ],
+        confidence=0.8,
+    )
+    l3 = AnalystInsightL3(
+        insight_id="insight-l3-hypothesis",
+        ts_ms=3,
+        engine_mode="paper",
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        insight_type="hypothesis",
+        insight_level="hypothesis",
+        summary="reducing grid size during shock regime should improve drawdown",
+        evidence_refs=[l2.insight_id],
+        claims=[
+            {
+                "claim_id": "hyp-grid-size-shock",
+                "strategy": "grid_trading",
+                "polarity": "positive",
+                "confidence": 0.55,
+            }
+        ],
+        confidence=0.55,
+    )
+
+    assert l1.model_dump(mode="json")["analyst_tier"] == "l1"
+    assert l2.model_dump(mode="json")["insight_level"] == "inference"
+    assert l3.model_dump(mode="json")["insight_type"] == "hypothesis"
+
+    with pytest.raises(ValidationError):
+        AnalystInsightL2(
+            insight_id="insight-l2-invalid",
+            ts_ms=4,
+            engine_mode="paper",
+            symbol="BTCUSDT",
+            insight_type="hypothesis",
+            insight_level="inference",
+            summary="wrong tier/type pairing",
+        )
+
+    with pytest.raises(ValidationError):
+        AnalystInsightL1(
+            insight_id="insight-l1-confidence-invalid",
+            ts_ms=5,
+            engine_mode="paper",
+            symbol="BTCUSDT",
+            insight_type="execution_quality",
+            insight_level="fact",
+            summary="confidence must be bounded",
+            confidence=1.5,
+        )
 
 
 def test_guardian_verdict_contract_carries_p2_modifications_without_authority_shift() -> None:
@@ -502,3 +591,10 @@ def test_publish_execution_report_and_analyst_insight_write_typed_edges(fake_con
     assert fake_conn.executes[1][1][8]["liquidity_role"] == "maker"
     assert fake_conn.executes[2][1][2] == "analyst_insight"
     assert fake_conn.executes[3][1][4] == "analyzed_by"
+    assert fake_conn.executes[3][1][8] == {
+        "analyst_tier": "l1",
+        "insight_type": "execution_quality",
+        "insight_level": "fact",
+        "confidence": 0.95,
+        "severity": "info",
+    }
