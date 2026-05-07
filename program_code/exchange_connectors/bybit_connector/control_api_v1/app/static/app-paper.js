@@ -797,6 +797,15 @@ function ocPaperSubtabInit() {
     const execStatus = String(execCal.status || "unknown");
     const execConfidence = String(execCal.execution_confidence || execCal.confidence || execStatus);
     const execOk = execStatus === "calibrated" || execStatus === "limited";
+    const makerStatus = String(execCal.maker_fill_probability_status || "unknown");
+    const makerConfidence = String(execCal.maker_fill_confidence || makerStatus);
+    const makerCap = typeof execCal.recommended_maker_fill_probability_cap === "number"
+      ? execCal.recommended_maker_fill_probability_cap
+      : null;
+    const makerSampleCount = typeof execCal.maker_order_sample_count === "number"
+      ? execCal.maker_order_sample_count
+      : 0;
+    const makerOk = makerStatus === "calibrated" || makerStatus === "limited";
     const inputTooltip = "Indicators/signals are runner-derived from fixture OHLCV; funding/OI/BBO/tick-size depend on local recorder/V058 coverage";
     const runRows = runs.map(function (run) {
       return '<div class="oc-replay-run-row">'
@@ -841,7 +850,11 @@ function ocPaperSubtabInit() {
       + _metricCellHtml("oc-replay-summary-exec-cal", "Exec Cal / 執行校準",
         execConfidence + " · " + fmtBps(execCal.recommended_taker_slippage_bps),
         execOk ? "oc-cell-ok" : "oc-cell-warn",
-        "Replay-only slippage floor from demo/live_demo fills; maker fill probability remains unavailable without order-outcome samples")
+        "Replay-only taker slippage floor from demo/live_demo fills")
+      + _metricCellHtml("oc-replay-summary-maker-cal", "Maker Fill / Maker成交",
+        makerConfidence + " · cap " + (makerCap === null ? "--" : pct(makerCap)),
+        makerOk ? "oc-cell-ok" : "oc-cell-warn",
+        "PostOnly order outcome calibration from demo/live_demo orders; samples=" + String(makerSampleCount))
       + _metricCellHtml("oc-replay-summary-inputs", "Inputs / 策略輸入",
         fidelity.indicators && fidelity.indicators.status ? fidelity.indicators.status : "runner_derived",
         "oc-cell-ok", inputTooltip)

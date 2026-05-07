@@ -31,6 +31,12 @@ def _default_execution_calibration(**kwargs: Any) -> dict[str, Any]:
         "recommended_taker_slippage_clamped": False,
         "execution_confidence": "S2_CONSERVATIVE_BOUND",
         "maker_fill_probability_status": "unavailable_without_order_outcomes",
+        "maker_fill_confidence": "S2_CONSERVATIVE_BOUND",
+        "maker_fill_probability_reason": "test_no_order_outcomes",
+        "maker_order_sample_count": 0,
+        "maker_any_fill_probability": 0.0,
+        "recommended_maker_fill_probability_cap": 0.40,
+        "maker_fill_cap_source": "default_conservative_cap",
         "risk_overlay": {"applied": False},
     }
 
@@ -426,7 +432,13 @@ def test_full_chain_run_embeds_limited_execution_calibration_overlay(
             "recommended_taker_slippage_bps": 12.0,
             "recommended_taker_slippage_clamped": False,
             "execution_confidence": "S1_LIMITED",
-            "maker_fill_probability_status": "unavailable_without_order_outcomes",
+            "maker_fill_probability_status": "limited",
+            "maker_fill_confidence": "S1_LIMITED",
+            "maker_fill_probability_reason": None,
+            "maker_order_sample_count": 40,
+            "maker_any_fill_probability": 0.35,
+            "recommended_maker_fill_probability_cap": 0.35,
+            "maker_fill_cap_source": "observed_order_outcomes",
             "risk_overlay": {"applied": False},
         }
 
@@ -473,10 +485,18 @@ def test_full_chain_run_embeds_limited_execution_calibration_overlay(
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["execution_calibration"]["execution_confidence"] == "S1_LIMITED"
+    assert data["execution_calibration"]["maker_fill_confidence"] == "S1_LIMITED"
     assert data["execution_calibration"]["risk_overlay"]["applied"] is True
     assert data["input_fidelity"]["execution_calibration"]["status"] == "limited"
+    assert data["input_fidelity"]["execution_calibration"][
+        "recommended_maker_fill_probability_cap"
+    ] == 0.35
     assert not any(
         item.startswith("execution_calibration_conservative_bound")
+        for item in data["warnings"]
+    )
+    assert not any(
+        item.startswith("maker_fill_probability_conservative_bound")
         for item in data["warnings"]
     )
     assert registered[0].risk_overrides["slippage"]["default_rate"] == 0.0012
@@ -609,3 +629,35 @@ def test_execution_calibration_floors_all_replay_slippage_tiers() -> None:
     assert risk["limits"]["position_size_max_pct"] == 10.0
     assert risk["slippage"]["default_rate"] >= floor_rate
     assert all(tier["rate"] >= floor_rate for tier in risk["slippage"]["tiers"])
+
+
+def test_maker_order_outcome_summary_clamps_to_conservative_cap() -> None:
+    import app.replay_execution_calibration as ec
+
+    now_ms = 1_777_593_600_000
+    records = [
+        {
+            "order_ts": now_ms - 60_000,
+            "latest_state_ts": now_ms - 30_000,
+            "any_fill": idx < 35,
+            "full_fill": idx < 20,
+            "rejected": idx >= 35,
+            "cancelled": False,
+            "post_only_cross": idx >= 35,
+        }
+        for idx in range(50)
+    ]
+
+    summary = ec.build_maker_order_outcome_summary(
+        records,
+        asof_ms=now_ms,
+        source="unit",
+    )
+
+    assert summary["maker_fill_probability_status"] == "limited"
+    assert summary["maker_fill_confidence"] == "S1_LIMITED"
+    assert summary["maker_order_sample_count"] == 50
+    assert summary["maker_order_any_fill_count"] == 35
+    assert summary["maker_any_fill_probability"] == 0.7
+    assert summary["recommended_maker_fill_probability_cap"] == 0.40
+    assert summary["maker_fill_cap_source"] == "observed_order_outcomes"

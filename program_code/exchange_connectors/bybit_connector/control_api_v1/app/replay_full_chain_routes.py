@@ -523,6 +523,23 @@ def _build_input_fidelity_summary(
             "risk_overlay_applied": (
                 execution_calibration.get("risk_overlay") or {}
             ).get("applied", False),
+            "maker_fill_probability_status": execution_calibration.get(
+                "maker_fill_probability_status"
+            ),
+            "maker_fill_confidence": execution_calibration.get(
+                "maker_fill_confidence"
+            ),
+            "maker_order_sample_count": execution_calibration.get(
+                "maker_order_sample_count",
+                0,
+            ),
+            "maker_any_fill_probability": execution_calibration.get(
+                "maker_any_fill_probability",
+                0.0,
+            ),
+            "recommended_maker_fill_probability_cap": execution_calibration.get(
+                "recommended_maker_fill_probability_cap",
+            ),
         },
     }
 
@@ -1035,6 +1052,18 @@ async def _prepare_full_chain_run_fixture(
             + str(
                 execution_calibration.get("reason")
                 or execution_calibration.get("status")
+                or "unknown"
+            )
+        )
+    if execution_calibration.get("maker_fill_probability_status") not in {
+        "calibrated",
+        "limited",
+    }:
+        warnings.append(
+            "maker_fill_probability_conservative_bound:"
+            + str(
+                execution_calibration.get("maker_fill_probability_reason")
+                or execution_calibration.get("maker_fill_probability_status")
                 or "unknown"
             )
         )

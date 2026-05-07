@@ -392,7 +392,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tier_label,
         events,
     )?
-    .with_starting_balance(starting_balance)?;
+    .with_starting_balance(starting_balance)?
+    .with_execution_calibration(maker_fill_cap_from_manifest(
+        manifest.execution_calibration.as_ref(),
+    )?);
     if let Some(timeline) = scanner_timeline {
         pipeline = pipeline.with_scanner_timeline(timeline);
     }
@@ -804,6 +807,12 @@ struct ReplayManifest {
     /// rather than reading current mutable settings.
     #[serde(default)]
     pub edge_estimates: Option<serde_json::Value>,
+    /// REF-21 execution calibration overlay written by the control plane.
+    /// The isolated runner currently consumes only
+    /// `recommended_maker_fill_probability_cap`; slippage calibration flows
+    /// through `risk_overrides.slippage`.
+    #[serde(default)]
+    pub execution_calibration: Option<serde_json::Value>,
 }
 
 fn scanner_config_from_manifest(
@@ -850,6 +859,30 @@ fn edge_estimates_from_manifest(
              (expected edge_estimates.json-compatible object)",
         )
     })
+}
+
+fn maker_fill_cap_from_manifest(
+    blob: Option<&serde_json::Value>,
+) -> Result<Option<f64>, Box<dyn std::error::Error>> {
+    let Some(value) = blob else {
+        return Ok(None);
+    };
+    let Some(raw) = value
+        .get("recommended_maker_fill_probability_cap")
+        .and_then(|item| item.as_f64())
+    else {
+        return Ok(None);
+    };
+    if !raw.is_finite() || !(0.0..=1.0).contains(&raw) {
+        return Err(format!(
+            "replay_runner: manifest.execution_calibration.\
+             recommended_maker_fill_probability_cap={} invalid; must be \
+             finite and within [0, 1]",
+            raw
+        )
+        .into());
+    }
+    Ok(Some(raw))
 }
 
 /// Load the manifest JSON and run the manifest_signer verify path.

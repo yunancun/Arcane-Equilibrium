@@ -158,10 +158,14 @@ pub(crate) fn replay_fee_rate_for_tif(
     tif: Option<crate::order_manager::TimeInForce>,
 ) -> (f64, &'static str) {
     if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
-        let rate = account_manager.map(|am| am.maker_fee(symbol)).unwrap_or(DEFAULT_MAKER_FEE_RATE);
+        let rate = account_manager
+            .map(|am| am.maker_fee(symbol))
+            .unwrap_or(DEFAULT_MAKER_FEE_RATE);
         (rate, "maker")
     } else {
-        let rate = account_manager.map(|am| am.taker_fee(symbol)).unwrap_or(DEFAULT_TAKER_FEE_RATE);
+        let rate = account_manager
+            .map(|am| am.taker_fee(symbol))
+            .unwrap_or(DEFAULT_TAKER_FEE_RATE);
         (rate, "taker")
     }
 }
@@ -186,7 +190,11 @@ pub(crate) fn replay_slippage_bps_for_tif(
         return 0.0;
     }
     let bps = slippage_config.lookup_rate(volume_24h) * 10_000.0;
-    if is_long { bps } else { -bps }
+    if is_long {
+        bps
+    } else {
+        -bps
+    }
 }
 
 /// Sprint C R6-T2 — apply signed slippage_bps to a reference price.
@@ -254,6 +262,26 @@ impl IsolatedPipeline {
                 // 參考價：有 limit_price 取之（PostOnly），否則 event close。
                 // PostOnly slippage_bps=0 → fill_price == limit_price byte-equal。
                 let reference_price = intent.limit_price.unwrap_or(close_price);
+                if matches!(
+                    intent.time_in_force,
+                    Some(crate::order_manager::TimeInForce::PostOnly)
+                ) && !self.should_accept_maker_execution(&intent.symbol, ts_ms)
+                {
+                    self.fills.push(SimulatedFill {
+                        ts_ms,
+                        symbol: intent.symbol.clone(),
+                        side: if intent.is_long { "long" } else { "short" }.to_string(),
+                        qty: 0.0,
+                        price: reference_price,
+                        evidence_source_tier: tier_label.to_string(),
+                        fee: 0.0,
+                        fee_rate,
+                        slippage_bps,
+                        liquidity_role: liquidity_role.to_string(),
+                    });
+                    self.last_action = format!("maker_miss:{}", intent.symbol);
+                    return;
+                }
                 let fill_price = apply_slippage_to_price(reference_price, slippage_bps);
                 let fee = final_qty * fill_price * fee_rate;
                 self.fills.push(SimulatedFill {
@@ -335,12 +363,8 @@ impl IsolatedPipeline {
             None, // close has no TIF → taker path
         );
         let volume_24h = self.volume_24h.unwrap_or(0.0);
-        let slippage_bps = replay_slippage_bps_for_tif(
-            &self.slippage_config,
-            None,
-            volume_24h,
-            close_is_long,
-        );
+        let slippage_bps =
+            replay_slippage_bps_for_tif(&self.slippage_config, None, volume_24h, close_is_long);
         let fill_price = apply_slippage_to_price(close_price, slippage_bps);
         let fee = pos.qty * fill_price * fee_rate;
         // Record close-side fill (qty>0 with side opposite to position).

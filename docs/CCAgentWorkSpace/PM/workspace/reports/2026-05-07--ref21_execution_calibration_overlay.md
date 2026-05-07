@@ -60,3 +60,31 @@ fills. It is not a historical order-book simulator and it does not infer maker
 fill probability from fills alone. Until order-outcome samples are recorded and
 modeled, maker fill probability remains explicitly unavailable and replay
 retains S2/S1-limited confidence depending on available fill attribution.
+
+## Follow-Up Checkpoint: Maker Outcome Calibration
+
+- Added PostOnly order-outcome calibration from
+  `trading.orders` + `trading.order_state_changes` using the same 30-day
+  as-of window and `demo` / `live_demo` mode scope.
+- Added maker outcome fields:
+  `maker_order_sample_count`, observed any/full fill probability, rejection /
+  cancellation / post-only-cross counts, confidence tier, and
+  `recommended_maker_fill_probability_cap`.
+- Kept the default maker cap conservative at `0.40` when order outcomes are
+  missing or insufficient; observed caps are also clamped to `<= 0.40`.
+- Wired the signed replay manifest so the dedicated Rust `replay_runner`
+  consumes `execution_calibration.recommended_maker_fill_probability_cap`.
+  Risk-accepted PostOnly attempts that do not pass the deterministic cap are
+  recorded as qty=0 maker-miss ghost rows instead of being over-claimed as
+  immediate maker fills.
+- Replay GUI now shows a separate `Maker Fill / Maker成交` trust cell, with
+  sample count in the tooltip.
+
+Verification:
+
+- `python3 -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_execution_calibration.py program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_full_chain_routes.py`
+- `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_full_chain_run_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/static/test_replay_subtab_static_assets.py -q`
+  - 53 passed.
+- `cargo test -p openclaw_engine replay::runner::tests::test_apply_fill_postonly_calibration_cap_records_maker_miss --features replay_isolated`
+- `cargo build --release -p openclaw_engine --bin replay_runner --features replay_isolated`
+- `git diff --check`
