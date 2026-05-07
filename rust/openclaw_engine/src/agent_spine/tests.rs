@@ -1,8 +1,9 @@
 use super::config::AgentSpineMode;
 use super::contracts::{
-    ExecutionPlan, GuardianVerdict, StrategistDecision, StrategySignalDirection,
-    EXECUTION_PLAN_SCHEMA_VERSION, GUARDIAN_VERDICT_SCHEMA_VERSION,
-    STRATEGIST_DECISION_SCHEMA_VERSION, STRATEGY_SIGNAL_SCHEMA_VERSION,
+    ExecutionPlan, ExecutionReport, GuardianVerdict, StrategistDecision, StrategySignalDirection,
+    EXECUTION_PLAN_SCHEMA_VERSION, EXECUTION_REPORT_SCHEMA_VERSION,
+    GUARDIAN_VERDICT_SCHEMA_VERSION, STRATEGIST_DECISION_SCHEMA_VERSION,
+    STRATEGY_SIGNAL_SCHEMA_VERSION,
 };
 use super::events::{
     DecisionEdgeType, DecisionObjectType, ExecutionIdempotencyKey, SpineEdge, SpineObjectEnvelope,
@@ -312,4 +313,172 @@ async fn channel_spine_store_queues_object_edge_transition_and_idempotency_key()
     assert!(
         matches!(rx.recv().await.unwrap(), AgentSpineMsg::ExecutionIdempotencyKey(row) if row == key)
     );
+}
+
+#[test]
+fn shadow_spine_chain_is_complete_while_legacy_signal_msg_stays_unchanged() {
+    let signal = strategy_signal_from_open_intent(
+        "sig-live_demo-grid_trading-BTCUSDT-shadow",
+        "ctx-live_demo-BTCUSDT-shadow",
+        1_700_000_000_000,
+        "live_demo",
+        &sample_intent(true),
+    );
+    let legacy_before = serde_json::to_value(strategy_signal_to_trading_msg(&signal)).unwrap();
+
+    let signal_obj = SpineObjectEnvelope::from_strategy_signal(&signal, AgentSpineMode::Shadow)
+        .expect("strategy signal envelope");
+    let decision = StrategistDecision {
+        schema_version: STRATEGIST_DECISION_SCHEMA_VERSION.to_string(),
+        decision_id: "decision-live_demo-BTCUSDT-shadow".to_string(),
+        signal_id: signal.signal_id.clone(),
+        ts_ms: signal.ts_ms + 1,
+        engine_mode: signal.engine_mode.clone(),
+        symbol: signal.symbol.clone(),
+        strategy: signal.strategy.clone(),
+        direction: signal.direction,
+        confidence: signal.confidence,
+        proposed_qty: Some(1.25),
+        proposed_price: Some(101.25),
+        rationale: Some("shadow integration regression".to_string()),
+        evidence_refs: vec![signal.signal_id.clone()],
+        metadata: json!({"mag": "035"}),
+    };
+    let decision_obj =
+        SpineObjectEnvelope::from_strategist_decision(&decision, AgentSpineMode::Shadow)
+            .expect("strategist decision envelope");
+    let verdict = GuardianVerdict {
+        schema_version: GUARDIAN_VERDICT_SCHEMA_VERSION.to_string(),
+        verdict_id: "verdict-live_demo-BTCUSDT-shadow-v1".to_string(),
+        decision_id: decision.decision_id.clone(),
+        verdict_version: 1,
+        ts_ms: signal.ts_ms + 2,
+        engine_mode: signal.engine_mode.clone(),
+        symbol: signal.symbol.clone(),
+        strategy: signal.strategy.clone(),
+        allow: true,
+        risk_level: "low".to_string(),
+        reasons: vec!["shadow_integration_only".to_string()],
+        metadata: json!({}),
+    };
+    let verdict_obj = SpineObjectEnvelope::from_guardian_verdict(&verdict, AgentSpineMode::Shadow)
+        .expect("guardian verdict envelope");
+    let plan = ExecutionPlan {
+        schema_version: EXECUTION_PLAN_SCHEMA_VERSION.to_string(),
+        order_plan_id: "plan-live_demo-BTCUSDT-shadow".to_string(),
+        decision_id: decision.decision_id.clone(),
+        verdict_id: verdict.verdict_id.clone(),
+        ts_ms: signal.ts_ms + 3,
+        engine_mode: signal.engine_mode.clone(),
+        symbol: signal.symbol.clone(),
+        strategy: signal.strategy.clone(),
+        direction: signal.direction,
+        qty: 1.25,
+        order_type: "limit".to_string(),
+        limit_price: Some(101.25),
+        time_in_force: Some("PostOnly".to_string()),
+        lease_id: Some("lease-live_demo-BTCUSDT-shadow".to_string()),
+        idempotency_key: "idem-live_demo-BTCUSDT-shadow".to_string(),
+        metadata: json!({"shadow_only": true}),
+    };
+    let plan_obj = SpineObjectEnvelope::from_execution_plan(&plan, AgentSpineMode::Shadow)
+        .expect("execution plan envelope");
+    let report = ExecutionReport {
+        schema_version: EXECUTION_REPORT_SCHEMA_VERSION.to_string(),
+        execution_report_id: "report-live_demo-BTCUSDT-shadow".to_string(),
+        order_plan_id: plan.order_plan_id.clone(),
+        decision_id: decision.decision_id.clone(),
+        ts_ms: signal.ts_ms + 4,
+        engine_mode: signal.engine_mode.clone(),
+        symbol: signal.symbol.clone(),
+        status: "shadow_planned".to_string(),
+        exchange_order_id: None,
+        fill_id: None,
+        metadata: json!({"no_order_submitted": true}),
+    };
+    let report_obj = SpineObjectEnvelope::from_execution_report(&report, AgentSpineMode::Shadow)
+        .expect("execution report envelope");
+
+    let edges = [
+        SpineEdge::new(
+            signal.ts_ms + 5,
+            signal_obj.object_id.clone(),
+            decision_obj.object_id.clone(),
+            DecisionEdgeType::SignalFor,
+            signal.engine_mode.clone(),
+            Some(decision.decision_id.clone()),
+            json!({"contract": "signal_to_decision"}),
+        ),
+        SpineEdge::new(
+            signal.ts_ms + 6,
+            decision_obj.object_id.clone(),
+            verdict_obj.object_id.clone(),
+            DecisionEdgeType::ReviewedBy,
+            signal.engine_mode.clone(),
+            Some(decision.decision_id.clone()),
+            json!({"contract": "decision_to_verdict"}),
+        ),
+        SpineEdge::new(
+            signal.ts_ms + 7,
+            verdict_obj.object_id.clone(),
+            plan_obj.object_id.clone(),
+            DecisionEdgeType::PlannedBy,
+            signal.engine_mode.clone(),
+            Some(decision.decision_id.clone()),
+            json!({"contract": "verdict_to_plan"}),
+        ),
+        SpineEdge::new(
+            signal.ts_ms + 8,
+            plan_obj.object_id.clone(),
+            report_obj.object_id.clone(),
+            DecisionEdgeType::ExecutedBy,
+            signal.engine_mode.clone(),
+            Some(decision.decision_id.clone()),
+            json!({"contract": "plan_to_report"}),
+        ),
+    ];
+    let idempotency = ExecutionIdempotencyKey::reserved(&plan, signal.ts_ms + 9);
+    let object_types = [
+        signal_obj.object_type,
+        decision_obj.object_type,
+        verdict_obj.object_type,
+        plan_obj.object_type,
+        report_obj.object_type,
+    ];
+
+    assert_eq!(
+        object_types,
+        [
+            DecisionObjectType::StrategySignal,
+            DecisionObjectType::StrategistDecision,
+            DecisionObjectType::GuardianVerdict,
+            DecisionObjectType::ExecutionPlan,
+            DecisionObjectType::ExecutionReport,
+        ]
+    );
+    assert_eq!(
+        edges.map(|edge| edge.edge_type.as_str()),
+        ["signal_for", "reviewed_by", "planned_by", "executed_by"]
+    );
+    assert_eq!(signal_obj.state, "observed");
+    assert_eq!(decision_obj.state, "proposed");
+    assert_eq!(verdict_obj.state, "approved");
+    assert_eq!(plan_obj.state, "planned");
+    assert_eq!(report_obj.state, "shadow_planned");
+    assert_eq!(
+        plan_obj.lease_id.as_deref(),
+        Some("lease-live_demo-BTCUSDT-shadow")
+    );
+    assert_eq!(idempotency.idempotency_key, plan.idempotency_key);
+    assert_eq!(idempotency.order_plan_id, plan.order_plan_id);
+    assert_eq!(idempotency.decision_id, decision.decision_id);
+
+    let legacy_after = serde_json::to_value(strategy_signal_to_trading_msg(&signal)).unwrap();
+    assert_eq!(legacy_after, legacy_before);
+    assert_eq!(
+        legacy_after["Signal"]["signal_id"],
+        "sig-live_demo-grid_trading-BTCUSDT-shadow"
+    );
+    assert_eq!(legacy_after["Signal"]["signal_type"], "OpenLong");
+    assert_eq!(legacy_after["Signal"]["strategy_name"], "grid_trading");
 }
