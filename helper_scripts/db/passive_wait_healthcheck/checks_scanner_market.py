@@ -372,6 +372,7 @@ WHERE ts > now() - (%s * interval '1 hour')
 WITH labeled AS (
     SELECT
         (metadata #>> '{scanner,opportunity,opportunity_lcb_bps}')::float8 AS opportunity_lcb_bps,
+        lower(COALESCE(metadata #>> '{scanner,opportunity,admission_hint}', 'unknown')) AS admission_hint,
         net_bps_after_fee
     FROM learning.mlde_edge_training_rows
     WHERE ts > now() - (%s * interval '1 hour')
@@ -384,8 +385,16 @@ WITH labeled AS (
 SELECT
     count(*)::int AS label_n,
     count(*) FILTER (WHERE opportunity_lcb_bps > 0)::int AS positive_lcb_n,
+    count(*) FILTER (
+        WHERE opportunity_lcb_bps > 0
+          AND admission_hint = 'opportunity_positive'
+    )::int AS opportunity_positive_n,
     avg(net_bps_after_fee)::float8 AS avg_net_bps,
     avg(net_bps_after_fee) FILTER (WHERE opportunity_lcb_bps > 0)::float8 AS positive_lcb_avg_net_bps,
+    avg(net_bps_after_fee) FILTER (
+        WHERE opportunity_lcb_bps > 0
+          AND admission_hint = 'opportunity_positive'
+    )::float8 AS opportunity_positive_avg_net_bps,
     avg(net_bps_after_fee) FILTER (WHERE opportunity_lcb_bps <= 0)::float8 AS nonpositive_lcb_avg_net_bps,
     corr(opportunity_lcb_bps, net_bps_after_fee)::float8 AS lcb_realized_corr
 FROM labeled
@@ -405,6 +414,7 @@ WHERE ts > now() - (%s * interval '1 hour')
   AND metadata #> '{scanner,opportunity}' IS NOT NULL
   AND jsonb_typeof(metadata #> '{scanner,opportunity,opportunity_lcb_bps}') = 'number'
   AND (metadata #>> '{scanner,opportunity,opportunity_lcb_bps}')::float8 > 0
+  AND lower(COALESCE(metadata #>> '{scanner,opportunity,admission_hint}', 'unknown')) = 'opportunity_positive'
 GROUP BY strategy_name, symbol
 HAVING count(*) >= %s
    AND avg(net_bps_after_fee) < %s
@@ -521,10 +531,12 @@ LIMIT 6
     intent_opp_n = _as_int(intent_row[1]) if intent_row else 0
     label_n = _as_int(label_row[0]) if label_row else 0
     positive_lcb_n = _as_int(label_row[1]) if label_row else 0
-    avg_net = label_row[2] if label_row else None
-    positive_avg_net = label_row[3] if label_row else None
-    nonpositive_avg_net = label_row[4] if label_row else None
-    corr = label_row[5] if label_row else None
+    opportunity_positive_n = _as_int(label_row[2]) if label_row else 0
+    avg_net = label_row[3] if label_row else None
+    positive_avg_net = label_row[4] if label_row else None
+    opportunity_positive_avg_net = label_row[5] if label_row else None
+    nonpositive_avg_net = label_row[6] if label_row else None
+    corr = label_row[7] if label_row else None
     rejected_label_n = _as_int(rejected_regret_row[0]) if rejected_regret_available else 0
     positive_lcb_reject_n = _as_int(rejected_regret_row[1]) if rejected_regret_available else 0
     rejected_avg_net = rejected_regret_row[2] if rejected_regret_available else None
@@ -550,6 +562,8 @@ LIMIT 6
         f"{OPPORTUNITY_SHADOW_LABEL_WINDOW_HOURS}h labels={label_n}, "
         f"positive_lcb_n={positive_lcb_n}, avg_net={_fmt_float(avg_net, 'bps')}, "
         f"positive_avg={_fmt_float(positive_avg_net, 'bps')}, "
+        f"opportunity_positive_n={opportunity_positive_n}, "
+        f"opportunity_positive_avg={_fmt_float(opportunity_positive_avg_net, 'bps')}, "
         f"nonpositive_avg={_fmt_float(nonpositive_avg_net, 'bps')}, "
         f"corr={_fmt_float(corr)}; "
         f"{rejected_regret_summary}"
@@ -597,13 +611,23 @@ LIMIT 6
             + "; ".join(parts),
         )
     if (
+        opportunity_positive_n >= OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE
+        and opportunity_positive_avg_net is not None
+        and float(opportunity_positive_avg_net) < OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_AVG_NET_BPS
+    ):
+        return (
+            "FAIL",
+            base
+            + " — calibrated opportunity_positive LCB bucket is negative post-fee",
+        )
+    if (
         positive_lcb_n >= OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE
         and positive_avg_net is not None
         and float(positive_avg_net) < OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_AVG_NET_BPS
     ):
         return (
-            "FAIL",
+            "WARN",
             base
-            + " — positive opportunity LCB bucket is negative post-fee",
+            + " — exploration positive LCB bucket is negative post-fee; keep scanner opportunity shadow-only",
         )
     return ("PASS", base + " — opportunity shadow contract healthy")
