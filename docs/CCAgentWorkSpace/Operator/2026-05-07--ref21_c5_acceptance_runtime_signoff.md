@@ -45,9 +45,10 @@ C2-C4 checkpoint commits:
 Verification:
 
 - Mac targeted replay suite: 59 passed.
-- Linux `trade-core` targeted replay suite at `0eda6005`: 59 passed.
-- Linux API reloaded with `--api-only --keep-auth`, API parent PID `2467045`.
-- Route probes:
+- Linux `trade-core` targeted replay suite: 59 passed.
+- Final Linux source sync: `59f5634a`.
+- Linux API reloaded with `--api-only --keep-auth`, API parent PID `2467902`.
+- Final route probes:
   - `/api/v1/replay/full-chain/coverage` GET -> 405,
   - `/api/v1/replay/advisory/rank` GET -> 405,
   - `/api/v1/replay/report/example` GET -> 401.
