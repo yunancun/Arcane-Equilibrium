@@ -7,7 +7,28 @@ from app.agent_contracts import (
     GuardianVerdict,
     StrategistDecision,
 )
-from app.executor_plan_v2 import build_execution_plan
+from app.executor_plan_v2 import (
+    acquire_execution_plan_lease,
+    build_execution_plan,
+    prepare_execution_plan_for_submit,
+    require_execution_plan_lease_for_submit,
+)
+
+
+class _FakeGovernanceHub:
+    def __init__(self, lease_id: str | None = "lease-plan-1"):
+        self.lease_id = lease_id
+        self.calls: list[dict[str, object]] = []
+
+    def acquire_lease(self, *, intent_id: str, scope: str, ttl_seconds: float):
+        self.calls.append(
+            {
+                "intent_id": intent_id,
+                "scope": scope,
+                "ttl_seconds": ttl_seconds,
+            }
+        )
+        return self.lease_id
 
 
 def _decision(**overrides) -> StrategistDecision:
@@ -209,3 +230,83 @@ def test_market_entry_without_price_keeps_slippage_and_taker_preference_bounded(
     assert plan.time_in_force is None
     assert plan.maker_preference == "allow_taker"
     assert plan.max_slippage_bps == 10.0
+
+
+def test_acquire_execution_plan_lease_binds_lease_id_from_plan_request() -> None:
+    plan = build_execution_plan(_decision(), _verdict())
+    hub = _FakeGovernanceHub(lease_id="lease-bound-1")
+
+    bound = acquire_execution_plan_lease(plan, hub)
+
+    assert plan.lease_id is None
+    assert bound.lease_id == "lease-bound-1"
+    assert hub.calls == [
+        {
+            "intent_id": plan.order_plan_id,
+            "scope": "TRADE_ENTRY",
+            "ttl_seconds": 30.0,
+        }
+    ]
+    assert bound.metadata["lease_binding"] == {
+        "source": "governance_hub",
+        "intent_id": plan.order_plan_id,
+        "lease_scope": "TRADE_ENTRY",
+        "lease_ttl_ms": 30_000,
+        "ttl_seconds": 30.0,
+    }
+
+
+def test_real_submit_without_governance_or_lease_fails_closed() -> None:
+    plan = build_execution_plan(_decision(), _verdict())
+
+    with pytest.raises(ValueError, match="execution_plan_real_submit_requires_governance_hub"):
+        prepare_execution_plan_for_submit(plan, real_submit=True, governance_hub=None)
+
+    with pytest.raises(ValueError, match="execution_plan_real_submit_requires_lease_id"):
+        require_execution_plan_lease_for_submit(plan, real_submit=True)
+
+
+def test_shadow_submit_can_remain_unleased_until_real_submit_boundary() -> None:
+    plan = build_execution_plan(_decision(), _verdict())
+
+    prepared = prepare_execution_plan_for_submit(plan, real_submit=False)
+    require_execution_plan_lease_for_submit(prepared, real_submit=False)
+
+    assert prepared is plan
+    assert prepared.lease_id is None
+
+
+def test_real_submit_with_existing_lease_does_not_reacquire() -> None:
+    plan = build_execution_plan(_decision(), _verdict())
+    bound = acquire_execution_plan_lease(plan, _FakeGovernanceHub("lease-existing-1"))
+    hub = _FakeGovernanceHub("lease-should-not-be-used")
+
+    prepared = prepare_execution_plan_for_submit(
+        bound,
+        real_submit=True,
+        governance_hub=hub,
+    )
+
+    assert prepared.lease_id == "lease-existing-1"
+    assert hub.calls == []
+
+
+def test_lease_acquisition_failure_fails_closed() -> None:
+    plan = build_execution_plan(_decision(), _verdict())
+
+    with pytest.raises(ValueError, match="execution_plan_lease_acquisition_failed"):
+        acquire_execution_plan_lease(plan, _FakeGovernanceHub(lease_id=None))
+
+
+def test_missing_lease_request_fields_fail_closed_for_real_submit() -> None:
+    plan = build_execution_plan(_decision(), _verdict())
+    payload = plan.model_dump(mode="json")
+    payload["lease_scope"] = None
+    plan_without_scope = type(plan)(**payload)
+
+    with pytest.raises(ValueError, match="execution_plan_lease_request_required"):
+        prepare_execution_plan_for_submit(
+            plan_without_scope,
+            real_submit=True,
+            governance_hub=_FakeGovernanceHub(),
+        )

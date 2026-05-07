@@ -145,6 +145,67 @@ def build_execution_plan(
     )
 
 
+def acquire_execution_plan_lease(
+    plan: ExecutionPlan,
+    governance_hub: Any,
+) -> ExecutionPlan:
+    """Acquire and bind a Decision Lease for an ExecutionPlan."""
+
+    if plan.lease_id:
+        return plan
+    if governance_hub is None or not hasattr(governance_hub, "acquire_lease"):
+        raise ValueError("execution_plan_real_submit_requires_governance_hub")
+    if not plan.lease_scope or plan.lease_ttl_ms is None:
+        raise ValueError("execution_plan_lease_request_required")
+
+    ttl_seconds = plan.lease_ttl_ms / 1000.0
+    lease_id = governance_hub.acquire_lease(
+        intent_id=plan.order_plan_id,
+        scope=plan.lease_scope,
+        ttl_seconds=ttl_seconds,
+    )
+    if not lease_id:
+        raise ValueError("execution_plan_lease_acquisition_failed")
+
+    return _copy_plan_with_lease(
+        plan,
+        lease_id=str(lease_id),
+        lease_binding={
+            "source": "governance_hub",
+            "intent_id": plan.order_plan_id,
+            "lease_scope": plan.lease_scope,
+            "lease_ttl_ms": plan.lease_ttl_ms,
+            "ttl_seconds": ttl_seconds,
+        },
+    )
+
+
+def prepare_execution_plan_for_submit(
+    plan: ExecutionPlan,
+    *,
+    real_submit: bool,
+    governance_hub: Any | None = None,
+) -> ExecutionPlan:
+    """Return a submit-ready plan, fail-closed for real submit without lease."""
+
+    if not real_submit:
+        return plan
+    bound_plan = plan if plan.lease_id else acquire_execution_plan_lease(plan, governance_hub)
+    require_execution_plan_lease_for_submit(bound_plan, real_submit=real_submit)
+    return bound_plan
+
+
+def require_execution_plan_lease_for_submit(
+    plan: ExecutionPlan,
+    *,
+    real_submit: bool,
+) -> None:
+    """Assert the MAG-062 lease invariant before any real submit."""
+
+    if real_submit and not plan.lease_id:
+        raise ValueError("execution_plan_real_submit_requires_lease_id")
+
+
 def _validate_lineage(decision: StrategistDecision, verdict: GuardianVerdict) -> None:
     if not verdict.allow:
         raise ValueError("guardian_verdict_rejects_execution_plan")
@@ -325,6 +386,20 @@ def _digest(parts: list[str]) -> str:
         h.update(part.encode("utf-8", errors="replace"))
         h.update(b"\0")
     return h.hexdigest()[:16]
+
+
+def _copy_plan_with_lease(
+    plan: ExecutionPlan,
+    *,
+    lease_id: str,
+    lease_binding: dict[str, Any],
+) -> ExecutionPlan:
+    payload = plan.model_dump(mode="json")
+    metadata = dict(payload.get("metadata") or {})
+    metadata["lease_binding"] = lease_binding
+    payload["metadata"] = metadata
+    payload["lease_id"] = lease_id
+    return ExecutionPlan(**payload)
 
 
 def _positive_float(value: Any, error_code: str) -> float:
