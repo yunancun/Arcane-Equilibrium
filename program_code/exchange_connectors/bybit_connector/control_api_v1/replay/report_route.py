@@ -76,6 +76,8 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Tuple
 
+from . import report_analytics as _report_analytics
+
 logger = logging.getLogger(__name__)
 
 
@@ -480,6 +482,7 @@ async def fetch_report_for_experiment(
         _overlay_artifact_payload_execution_confidence(
             artifact, experiment_confidence,
         )
+        _report_analytics.overlay_artifact_payload_analytics(artifact)
         if blocked is not None:
             traversal_blocked_paths.append(blocked)
         artifacts.append(artifact)

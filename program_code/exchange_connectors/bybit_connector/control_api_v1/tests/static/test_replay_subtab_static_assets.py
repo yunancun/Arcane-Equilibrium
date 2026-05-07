@@ -470,6 +470,10 @@ def test_full_chain_summary_surfaces_execution_calibration(
     assert "PostOnly order outcome calibration from demo/live_demo orders" in app_paper_js
     assert "Taker fills are bounded by local best bid/ask only for covered events" in app_paper_js
     assert "Read-only recorder coverage estimate before launching replay" in app_paper_js
+    assert "Net Bps / 淨bps" in app_paper_js
+    assert "Verdict / 判定" in app_paper_js
+    assert "Miss/Reject / 未成交拒絕" in app_paper_js
+    assert "C3 development-sandbox verdict; not a live/demo promotion" in app_paper_js
 
 
 def test_replay_data_tier_is_report_backed_not_s3_static(
