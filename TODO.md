@@ -91,23 +91,23 @@
 
 ### 🟠 P1 — Important（Live 質量 / 在 LG IMPL 前後完成）
 
-#### P1-FAIL — Healthcheck FAIL 插隊隊列（2026-05-07T17:09Z runtime）
+#### P1-FAIL — Healthcheck FAIL 插隊隊列（2026-05-07T17:09Z → 17:51Z runtime）
 
 | ID | Healthcheck | 目前狀態 | 插隊處理 |
 |----|-------------|----------|----------|
-| **P1-FAIL-0** | `[Xb] pipeline_triangulation` | FAIL：close_fills=24 / labels=23 / intents=98960，fills/intents 與 labels/intents 嚴重背離 | 先做 RCA；未清前 MAG-083/MAG-084 不得解封 |
-| **P1-FAIL-1** | `[42]` + `[42b]` + `[42c]` LG-5 reviewer / attribution | FAIL：recent_24h_total=0、unaudited_over_1h=11；grid/ma attribution_chain_ok 仍接近 0 | 提升到 P1-DATA-4 / P0-LG-5 之前；驗證 reviewer scheduler 是否真已隨 rebuild 啟動 |
-| **P1-FAIL-2** | `[50] replay_run_state_health` | FAIL：7d failed_rate=66.7%，running=3 | 插到 P1-INFRA-3f 前；清 zombie / failed-run RCA，不作 replay promotion 依據 |
-| **P1-FAIL-3** | `[51] scanner_opportunity_shadow_acceptance` | FAIL：24h labels=37，但 positive LCB bucket avg_net=-48.36bps、corr=-0.22 | 插到 P1-EDGE-1/2/4 前；scanner opportunity canary 只可做負 edge 警報，不可 promotion |
-| **P1-FAIL-4** | `[14]` `[37]` `[40]` `[45]` WARN | WARN：exit_features 累積降速、MLDE applier failed=14、realized edge -44.04bps、pricing live 無 fresh fills | 作為 P1-DATA / P1-EDGE 支撐訊號；若連續 3 次升級為 FAIL lane |
+| **P1-FAIL-0** | `[Xb] pipeline_triangulation` | ✅ PASS / not emitted at 17:51Z. RCA：raw demo intents 103k 中 103k 為 scanner opportunity shadow，原分母把影子掃描量與成交閉環量比較造成 false FAIL；`4f437ea1` 改為 close-fill-linked intent contexts，並保留 duplicate context guard | FAIL blocker cleared；raw scanner volume 只作診斷，不作 fills/labels 三角分母 |
+| **P1-FAIL-1** | `[42]` + `[42b]` + `[42c]` LG-5 reviewer / attribution | ✅ `[42]` cleared；`[42b]` / `[42c]` WARN only：settled attribution ratio 1.000，低 settled sample strategies 仍需累積 | FAIL blocker cleared；保留 sample-maturity watch，不阻塞普通 P1，但不授權 live promotion |
+| **P1-FAIL-2** | `[50] replay_run_state_health` | ✅ FAIL→WARN：completed_7d=6 / failed_7d=6，但 5 個 newer completed runs supersede newest historical failure | FAIL blocker cleared；歷史失敗不得作 promotion 依據，若新增 failure 再升級 |
+| **P1-FAIL-3** | `[51] scanner_opportunity_shadow_acceptance` | ✅ FAIL→WARN：`opportunity_positive_n=0`；負 edge 來自 exploration positive LCB bucket，不是 calibrated `opportunity_positive` bucket | FAIL blocker cleared；scanner opportunity 仍 shadow-only，等 calibrated positive sample 後再評估 |
+| **P1-FAIL-4** | `[14]` `[37]` `[40]` `[45]` WARN | WARN：exit_features 週累積 ratio=0.18、MLDE applier failed=17、realized edge avg_net=-44.04bps / fee_drop=57.5%、pricing freshness stale | 作為 P1-DATA / P1-EDGE 支撐訊號；若連續 3 次升級為 FAIL lane |
 
-排序規則：P1 implementation 先清 P1-FAIL-0..3，再推 P1-OPENCLAW-6/7 或任何 live-facing P1。MAG-082 Stage 2 window 可收證，但 `[Xb]` / `[42*]` / `[50]` / `[51]` 未清時，MAG-083 final release audit 保持 BLOCKED。
+排序規則（2026-05-07 17:51Z）：P1-FAIL-0..3 的 FAIL blocker 已清；普通 P1 可恢復，但 MAG-083/MAG-084 仍因 MAG-082 runtime lineage NO-GO 保持 BLOCKED。下一步排序：1) 收 `P1-FAKE-1` runtime smoke / close；2) 處理 P1-DATA / P1-EDGE 的 WARN cluster（`[14]` / `[37]` / `[40]` / `[45]`、`[42b/c]` low sample、`[51]` shadow-only）；3) 再做 `P1-OPENCLAW-3` brief/diagnostics/escalations；4) 最後才推 `P1-OPENCLAW-6/7` proposal relay / mobile lane。
 
 #### P1-FAKE — Fake-live wiring 修
 
 | ID | 任務 | 來源 |
 |----|------|------|
-| **P1-FAKE-1** | ✅ SOURCE FIX 2026-05-07 — ExecutorAgent IPC path now calls Rust's real `submit_paper_order` method with explicit `engine`; `ExecutorConfigCache.shadow_mode_provider()` can resolve explicit `demo` / `live` / `live_demo` instead of silently reading paper/default. Mac targeted tests 25 PASS / 7 skipped；Linux targeted tests 30 PASS / 2 skipped。待 deploy/reload 驗證後關閉 runtime | PA panorama |
+| **P1-FAKE-1** | ✅ SOURCE FIX + API reload loaded 2026-05-07 — ExecutorAgent IPC path now calls Rust's real `submit_paper_order` method with explicit `engine`; `ExecutorConfigCache.shadow_mode_provider()` can resolve explicit `demo` / `live` / `live_demo` instead of silently reading paper/default. Mac targeted tests 25 PASS / 7 skipped；Linux targeted tests 30 PASS / 2 skipped。仍缺一次 explicit fake-live runtime smoke 才算 fully closed | PA panorama |
 | **P1-FAKE-2** | H0_GATE singleton 0 production caller wire（DOC-02 spec 死於 wiring，LG-2 IMPL 前提）| FA-H2 |
 | **P1-FAKE-3** | HStateCache + CostEdgeAdvisor 兩 late-inject slot 啟用（env-gated `OPENCLAW_H_STATE_GATEWAY=1` / `OPENCLAW_COST_EDGE_ADVISOR_*` 未設）| PA panorama |
 
