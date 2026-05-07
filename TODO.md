@@ -47,8 +47,15 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
 - P1 healthcheck FAIL queue from 2026-05-07 is source-closed/downgraded:
   `[Xb]`, `[42]`, `[50]`, and `[51]` are not current hard blockers. Their
   residual WARN signals remain under P1 data/edge monitoring.
-- `P1-FAKE-1` source fix is loaded on Linux, but still needs one explicit
-  fake-live runtime smoke before closure.
+- `P1-FAKE-1` is closed: explicit Linux runtime smoke proved fake-live
+  `live_demo` metadata routes through real Rust IPC with no exchange order and
+  no DB write in the smoke harness.
+- `P1-OPENCLAW-3` is closed at `c49125f1`: `/brief/latest`,
+  `/diagnostics`, and `/escalations` are backend-authored read-only envelopes.
+- `P1-OPENCLAW-6/7` backend foundation is closed at `276a9b17`: proposal
+  intake, approval/reject relay, channel-event audit ledger, V065 schema, and
+  healthcheck `[54]` are live on Linux. Approval relay records operator
+  decisions only; side-effect delegation remains disabled/fail-closed.
 
 ## Dispatch Order
 
@@ -57,13 +64,13 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 
 | Rank | Wave | Owner Chain | Target Window | Exit Criteria |
 |---:|---|---|---|---|
-| 1 | `W-A` Executor fake-live runtime smoke | PM -> E4 -> PM | 2026-05-07/08 | Prove the loaded `P1-FAKE-1` path routes explicit `demo` / `live_demo` engine calls through real Rust IPC without Python-only fake success. |
+| 1 | `W-A` Executor fake-live runtime smoke | PM -> E4 -> PM | DONE 2026-05-07 | Proved the loaded `P1-FAKE-1` path routes explicit `live_demo` metadata through real Rust IPC without exchange order, DB write, or Python-only fake success. |
 | 2 | `W-B` Runtime decision-spine lineage wiring | PM -> PA -> E1 -> E2 -> E4 -> PM | 2026-05-08 to 2026-05-10 | Runtime shadow path writes nonzero typed decision objects, edges, and idempotency keys for demo/live_demo without changing trading authority. |
 | 3 | `W-C` New MAG-082 Stage 2 evidence window | PM -> E3 -> E4 -> QA -> PM | after W-B + explicit operator rebuild/restart approval | Fresh 24h demo/live_demo canary proves StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease/idempotency -> ExecutionReport. |
 | 4 | `W-D` MAG-083 / MAG-084 | QA -> PM | after W-C PASS only | Final release audit PASS, then operator sign-off. |
-| 5 | `W-E` OpenClaw read-only observability expansion | PM -> PA -> E1 -> E2 -> E4 -> PM | after W-A, parallel with W-B only if ownership is clean | Add `/brief/latest`, `/diagnostics`, and `/escalations` as backend-authored view models. No write/proposal/mobile lane yet. |
+| 5 | `W-E` OpenClaw read-only observability expansion | PM -> PA -> E1 -> E2 -> E4 -> PM | DONE 2026-05-07 | Added `/brief/latest`, `/diagnostics`, and `/escalations` as backend-authored view models. |
 | 6 | `W-F` Edge/data quality and Live Gate foundation | PM -> QC/MIT/PA -> E1/E4 -> PM | after W-A; before true-live | Work through residual WARN cluster, H0 production caller, pricing binding, and supervised-live state machine. |
-| 7 | `W-G` Proposal/approval/mobile relay | PM -> CC/FA/PA -> E1/E2/E4 -> PM | only after W-E and explicit operator approval | Gateway may create proposals and relay approvals through canonical TradeBot APIs. No direct order/config/live-auth authority. |
+| 7 | `W-G` Proposal/approval/mobile relay | PM -> CC/FA/PA -> E1/E2/E4 -> PM | BACKEND FOUNDATION DONE 2026-05-07 | Gateway/console may create proposals and relay approval/reject intent into the `openclaw.*` ledger. No direct order/config/live-auth authority; external Telegram/WebChat/mobile adapters remain disabled until separately configured. |
 
 ## P0 — True-Live Blockers
 
@@ -86,8 +93,9 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 
 | ID | Priority | Task | Notes |
 |---|---:|---|---|
-| `P1-FAKE-1` | 1 | Finish executor fake-live smoke | Source fix and Linux verification are present; one runtime smoke remains before closing. |
-| `P1-OPENCLAW-3` | 2 | Add read-only brief/diagnostics/escalations APIs | Backend-authored view models from durable stores only; no raw frontend table stitching. |
+| `P1-FAKE-1` | 1 | DONE — executor fake-live smoke | Linux runtime smoke passed: Rust IPC path exercised, no exchange order, no DB write. |
+| `P1-OPENCLAW-3` | 2 | DONE — read-only brief/diagnostics/escalations APIs | Backend-authored view models from durable stores only; no raw frontend table stitching. |
+| `P1-OPENCLAW-6/7` | 2 | DONE — proposal/approval relay backend foundation | V065 `openclaw.*` ledger applied on Linux; proposal create + approve runtime smoke passed with `side_effect_executed=false`; `[54]` PASS. |
 | `P1-AGENT-OBS-1` | 2 | Add explicit lineage healthcheck | A healthcheck must distinguish "decision spine disabled" from "enabled but empty" and surface MAG-082 readiness. |
 | `P1-DATA-1` | 3 | WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | Exit-feature accumulation, MLDE applier failures, realized edge, and pricing freshness remain quality signals. |
 | `P1-DATA-2` | 3 | `[42b]` / `[42c]` low-sample attribution watch | Settled attribution improved; low-sample strategies still require maturity before promotion. |
