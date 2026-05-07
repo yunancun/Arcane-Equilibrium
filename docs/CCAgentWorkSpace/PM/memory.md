@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-074 Analyst learning loop E2E regression: losing-pattern AnalystInsight persists with evidence edges, Strategist next-cycle preference changes, and persisted StrategistDecision payload carries typed reason/evidence; M7 closed | workspace/reports/2026-05-07--agenttodo_mag074_analyst_learning_e2e.md |
 | 2026-05-07 | AgentTodo MAG-073 Guardian risk-pattern consumption: Guardian preserves Analyst risk-pattern metadata and soft risk_pattern evidence P2-tightens size/cooldown without symbol/direction or direct close/order authority | workspace/reports/2026-05-07--agenttodo_mag073_guardian_risk_patterns.md |
 | 2026-05-07 | AgentTodo MAG-072 Strategist typed Analyst pattern rules: StrategistDecision V2 now records Analyst/TruthRegistry learning effects as typed rules so L2 losing/winning patterns change next-cycle strategy preference with explainable reason/evidence | workspace/reports/2026-05-07--agenttodo_mag072_strategist_typed_pattern_rules.md |
 | 2026-05-07 | AgentTodo MAG-071 AnalystInsight evidence links: AgentSpineClient now persists unique evidence_for edges from each evidence_ref to AnalystInsight, with tier/type/level metadata for traceability to round trips and strategy metrics | workspace/reports/2026-05-07--agenttodo_mag071_analyst_insight_evidence_links.md |
@@ -1687,3 +1688,27 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   change, rebuild, restart, deploy, DB write, live auth, runtime flag, or
   trading authority change was made.
 - Next AgentTodo item is MAG-074 end-to-end losing-pattern regression.
+
+## 2026-05-07 AgentTodo MAG-074 Analyst Learning E2E
+
+### Result
+- MAG-074 is complete and M7 Analyst Learning Loop is closed.
+- `test_agent_spine_client.py` now covers the full typed learning chain:
+  1. persist an L2 losing-pattern AnalystInsight,
+  2. write evidence edges for round-trip and strategy-metric refs,
+  3. feed that insight into StrategistDecision V2,
+  4. prove next-cycle preference moves away from the losing grid route,
+  5. publish StrategistDecision and assert the persisted payload carries the
+     typed learning reason and evidence refs.
+
+### Verification
+- Mac targeted: spine + Strategist analyst-learning pytest 35/0, py_compile,
+  and diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 35/0, py_compile, and diff check.
+
+### Boundary
+- No runtime Strategist/Analyst/Guardian wiring, cloud call, runtime submit
+  path, Rust contract change, rebuild, restart, deploy, DB write, live auth,
+  runtime flag, or trading authority change was made.
+- Next AgentTodo item is M8 MAG-080 cutover policy.
