@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.strategist_decision_v2 import (
+    GuardianFeedbackStats,
     StrategyCandidate,
     StrategyMatchInput,
     build_strategist_decision,
@@ -211,4 +212,146 @@ def test_unknown_strategy_is_rejected_fail_closed() -> None:
     assert decision.decision_action == "no_action"
     assert decision.candidate_scores[0]["reject_reasons"] == [
         "unknown_strategy:strategist_ai"
+    ]
+
+
+def test_guardian_high_reject_rate_raises_confidence_floor_for_new_opens() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-grid-after-rejects",
+                strategy="grid_trading",
+                action="open",
+                direction="long",
+                market_fit_score=0.75,
+                edge_lcb_bps=20.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                confidence=0.62,
+            ),
+            guardian_feedback=[
+                GuardianFeedbackStats(
+                    strategy="grid_trading",
+                    symbol="BTCUSDT",
+                    engine_mode="paper",
+                    approved=2,
+                    rejected=8,
+                    top_reasons=["drawdown_limit", "correlation_cap"],
+                    evidence_refs=["guardian-window-grid-btc-1"],
+                )
+            ],
+        )
+    )
+
+    assert decision.decision_action == "no_action"
+    feedback = decision.candidate_scores[0]["guardian_feedback"]
+    assert feedback["reject_rate"] == 0.8
+    assert feedback["confidence_floor"] == 0.85
+    assert feedback["risk_acceptance_prior"] < 0.3
+    assert "guardian_reject_rate_confidence_floor" in decision.candidate_scores[0][
+        "reject_reasons"
+    ]
+
+
+def test_guardian_reject_stats_reduce_aggressiveness_for_high_confidence_open() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-ma-high-confidence",
+                strategy="ma_crossover",
+                action="open",
+                direction="long",
+                market_fit_score=0.95,
+                edge_lcb_bps=45.0,
+                cost_bps=5.0,
+                data_quality_score=0.95,
+                confidence=0.92,
+            ),
+            guardian_feedback=[
+                GuardianFeedbackStats(
+                    strategy="ma_crossover",
+                    symbol="BTCUSDT",
+                    approved=4,
+                    modified=1,
+                    rejected=5,
+                    evidence_refs=["guardian-window-ma-btc-1"],
+                )
+            ],
+            default_size=1.0,
+        )
+    )
+
+    assert decision.decision_action == "open"
+    assert decision.proposed_qty == 0.725
+    assert decision.evidence_refs[-1] == "guardian-window-ma-btc-1"
+    assert decision.portfolio_impact["guardian_feedback"] == {
+        "reject_rate": 0.5,
+        "modify_rate": 0.1,
+        "aggressiveness_multiplier": 0.725,
+        "confidence_floor": 0.75,
+    }
+    assert decision.metadata["guardian_feedback_model"] == "v1"
+
+
+def test_guardian_feedback_is_strategy_scoped() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-ma-not-grid",
+                strategy="ma_crossover",
+                action="open",
+                direction="long",
+                market_fit_score=0.85,
+                edge_lcb_bps=28.0,
+                cost_bps=6.0,
+                data_quality_score=0.9,
+                confidence=0.7,
+            ),
+            guardian_feedback=[
+                GuardianFeedbackStats(
+                    strategy="grid_trading",
+                    symbol="BTCUSDT",
+                    approved=1,
+                    rejected=9,
+                    evidence_refs=["guardian-window-grid-only"],
+                )
+            ],
+        )
+    )
+
+    assert decision.decision_action == "open"
+    assert decision.candidate_scores[0]["guardian_feedback"]["reject_rate"] == 0.0
+    assert decision.proposed_qty == 0.001
+
+
+def test_guardian_open_rejection_stats_do_not_block_position_review_reduce() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-grid-reduce-after-review",
+                strategy="grid_trading",
+                action="reduce",
+                direction="close_long",
+                market_fit_score=0.75,
+                edge_lcb_bps=-5.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                confidence=0.45,
+            ),
+            guardian_feedback=[
+                GuardianFeedbackStats(
+                    strategy="grid_trading",
+                    symbol="BTCUSDT",
+                    approved=1,
+                    rejected=9,
+                )
+            ],
+            position_review_id="position-review-guardian-feedback-1",
+        )
+    )
+
+    assert decision.decision_action == "reduce"
+    assert decision.candidate_scores[0]["guardian_feedback"]["confidence_floor"] == 0.0
+    assert "guardian_reject_rate_confidence_floor" not in decision.candidate_scores[0][
+        "reject_reasons"
     ]

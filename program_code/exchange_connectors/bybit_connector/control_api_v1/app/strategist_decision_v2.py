@@ -51,6 +51,21 @@ class StrategyCandidate(_StrategistV2Model):
     portfolio_impact: dict[str, Any] = Field(default_factory=dict)
 
 
+class GuardianFeedbackStats(_StrategistV2Model):
+    strategy: str | None = None
+    symbol: str | None = None
+    engine_mode: str | None = None
+    window: str = "recent"
+    approved: int = Field(default=0, ge=0)
+    modified: int = Field(default=0, ge=0)
+    rejected: int = Field(default=0, ge=0)
+    total: int | None = Field(default=None, ge=0)
+    reject_rate: float | None = None
+    modify_rate: float | None = None
+    top_reasons: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class StrategyMatchInput(_StrategistV2Model):
     match_id: str
     signal_id: str
@@ -65,6 +80,8 @@ class StrategyMatchInput(_StrategistV2Model):
     fact_refs: list[str] = Field(default_factory=list)
     inference_refs: list[str] = Field(default_factory=list)
     hypothesis_refs: list[str] = Field(default_factory=list)
+    guardian_feedback: list[GuardianFeedbackStats] = Field(default_factory=list)
+    guardian_feedback_min_total: int = 3
     cognitive_confidence_floor: float = 0.0
     min_data_quality_score: float = 0.2
     default_size: float | None = None
@@ -89,7 +106,7 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
     if not match.candidate_routes:
         return _no_action(match, "no_strategy_candidates", candidate_scores)
 
-    best: tuple[StrategyCandidate, str, float, list[str]] | None = None
+    best: tuple[StrategyCandidate, str, float, list[str], dict[str, Any]] | None = None
     for candidate in match.candidate_routes:
         normalized_strategy: str | None = None
         reject_reasons = list(candidate.reject_reasons)
@@ -99,6 +116,11 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
             reject_reasons.append(str(exc))
 
         net_edge_lcb_bps = _net_edge(candidate)
+        guardian_feedback = _guardian_feedback(
+            match=match,
+            candidate=candidate,
+            normalized_strategy=normalized_strategy,
+        )
         if candidate.data_quality_score < match.min_data_quality_score:
             reject_reasons.append("data_quality_below_floor")
         if (
@@ -110,10 +132,17 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
         if candidate.action in {"reduce", "close"} and match.position_review_id is None:
             reject_reasons.append("position_review_required_for_tactical_exit")
 
-        match_score = _match_score(candidate, net_edge_lcb_bps)
+        match_score = _match_score(
+            candidate,
+            net_edge_lcb_bps,
+            guardian_feedback["risk_acceptance_prior"],
+        )
         effective_confidence = max(_clamp01(candidate.confidence), match_score)
-        if effective_confidence < _clamp01(match.cognitive_confidence_floor):
+        confidence_floor = guardian_feedback["confidence_floor"]
+        if effective_confidence < confidence_floor:
             reject_reasons.append("confidence_below_cognitive_floor")
+        if guardian_feedback["high_reject_rate"] and effective_confidence < confidence_floor:
+            reject_reasons.append("guardian_reject_rate_confidence_floor")
 
         score_row = {
             "candidate_id": candidate.candidate_id,
@@ -126,6 +155,15 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
             "edge_lcb_bps": candidate.edge_lcb_bps,
             "cost_bps": candidate.cost_bps,
             "net_edge_lcb_bps": net_edge_lcb_bps,
+            "guardian_feedback": {
+                "reject_rate": guardian_feedback["reject_rate"],
+                "modify_rate": guardian_feedback["modify_rate"],
+                "total": guardian_feedback["total"],
+                "confidence_floor": guardian_feedback["confidence_floor"],
+                "aggressiveness_multiplier": guardian_feedback["aggressiveness_multiplier"],
+                "risk_acceptance_prior": guardian_feedback["risk_acceptance_prior"],
+                "top_reasons": guardian_feedback["top_reasons"],
+            },
             "reject_reasons": reject_reasons,
         }
         candidate_scores.append(score_row)
@@ -133,17 +171,43 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
         if normalized_strategy is None or reject_reasons:
             continue
         if best is None or match_score > best[2]:
-            best = (candidate, normalized_strategy, match_score, reject_reasons)
+            best = (
+                candidate,
+                normalized_strategy,
+                match_score,
+                reject_reasons,
+                guardian_feedback,
+            )
 
     if best is None:
         return _no_action(match, "all_candidates_rejected", candidate_scores)
 
-    candidate, strategy, match_score, _ = best
+    candidate, strategy, match_score, _, guardian_feedback = best
     net_edge_lcb_bps = _net_edge(candidate)
     confidence = max(_clamp01(candidate.confidence), match_score)
     thesis = _thesis(strategy, candidate, net_edge_lcb_bps)
     invalidation = _invalidation(candidate)
-    evidence_refs = list(dict.fromkeys([*lineage_refs, *match.evidence_refs]))
+    evidence_refs = list(
+        dict.fromkeys(
+            [
+                *lineage_refs,
+                *match.evidence_refs,
+                *guardian_feedback["evidence_refs"],
+            ]
+        )
+    )
+    proposed_qty = None
+    if candidate.action == "open" and match.default_size is not None:
+        proposed_qty = match.default_size * guardian_feedback["aggressiveness_multiplier"]
+    portfolio_impact = {
+        **candidate.portfolio_impact,
+        "guardian_feedback": {
+            "reject_rate": guardian_feedback["reject_rate"],
+            "modify_rate": guardian_feedback["modify_rate"],
+            "aggressiveness_multiplier": guardian_feedback["aggressiveness_multiplier"],
+            "confidence_floor": guardian_feedback["confidence_floor"],
+        },
+    }
 
     return StrategistDecision(
         decision_id=_decision_id(match.match_id, match.engine_mode, match.symbol),
@@ -159,10 +223,10 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
         selected_candidate_id=candidate.candidate_id,
         candidate_scores=candidate_scores,
         expected_net_edge_bps=net_edge_lcb_bps,
-        portfolio_impact=candidate.portfolio_impact,
+        portfolio_impact=portfolio_impact,
         thesis=thesis,
         invalidation=invalidation,
-        proposed_qty=match.default_size if candidate.action == "open" else None,
+        proposed_qty=proposed_qty,
         rationale=thesis,
         evidence_refs=evidence_refs,
         fact_refs=match.fact_refs,
@@ -170,8 +234,9 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
         hypothesis_refs=match.hypothesis_refs,
         metadata={
             **match.metadata,
-            "mag": "041",
-            "strategy_matching_model": "v1",
+            "mag": "043",
+            "strategy_matching_model": "v2",
+            "guardian_feedback_model": "v1",
             "scanner_candidate_id": match.scanner_candidate_id,
             "position_review_id": match.position_review_id,
         },
@@ -208,8 +273,9 @@ def _no_action(
         hypothesis_refs=match.hypothesis_refs,
         metadata={
             **match.metadata,
-            "mag": "041",
-            "strategy_matching_model": "v1",
+            "mag": "043",
+            "strategy_matching_model": "v2",
+            "guardian_feedback_model": "v1",
             "reject_reasons": [reason],
         },
     )
@@ -236,14 +302,22 @@ def _net_edge(candidate: StrategyCandidate) -> float | None:
     return candidate.edge_lcb_bps - candidate.cost_bps
 
 
-def _match_score(candidate: StrategyCandidate, net_edge_lcb_bps: float | None) -> float:
+def _match_score(
+    candidate: StrategyCandidate,
+    net_edge_lcb_bps: float | None,
+    risk_acceptance_prior: float | None = None,
+) -> float:
     market_fit = _clamp01(candidate.market_fit_score)
     edge_quality = _edge_quality(candidate.edge_lcb_bps)
     net_margin = _net_margin(net_edge_lcb_bps)
     portfolio_fit = _clamp01(candidate.portfolio_fit_score)
     data_quality = _clamp01(candidate.data_quality_score)
     learning = _clamp01(candidate.learning_weight)
-    risk_prior = _clamp01(candidate.risk_acceptance_prior)
+    risk_prior = _clamp01(
+        candidate.risk_acceptance_prior
+        if risk_acceptance_prior is None
+        else risk_acceptance_prior
+    )
     return _clamp01(
         0.25 * market_fit
         + 0.25 * edge_quality
@@ -253,6 +327,115 @@ def _match_score(candidate: StrategyCandidate, net_edge_lcb_bps: float | None) -
         + 0.05 * learning
         + 0.05 * risk_prior
     )
+
+
+def _guardian_feedback(
+    *,
+    match: StrategyMatchInput,
+    candidate: StrategyCandidate,
+    normalized_strategy: str | None,
+) -> dict[str, Any]:
+    base_floor = _clamp01(match.cognitive_confidence_floor)
+    default = {
+        "reject_rate": 0.0,
+        "modify_rate": 0.0,
+        "total": 0,
+        "confidence_floor": base_floor,
+        "aggressiveness_multiplier": 1.0,
+        "risk_acceptance_prior": _clamp01(candidate.risk_acceptance_prior),
+        "top_reasons": [],
+        "evidence_refs": [],
+        "high_reject_rate": False,
+    }
+    if candidate.action != "open" or normalized_strategy is None:
+        return default
+
+    selected: tuple[GuardianFeedbackStats, float, float, int] | None = None
+    for stats in match.guardian_feedback:
+        if stats.engine_mode and stats.engine_mode != match.engine_mode:
+            continue
+        if stats.symbol and stats.symbol != match.symbol:
+            continue
+        stats_strategy = _normalize_guardian_feedback_strategy(stats.strategy)
+        if stats_strategy is not None and stats_strategy != normalized_strategy:
+            continue
+        total = _guardian_total(stats)
+        if total < max(0, match.guardian_feedback_min_total):
+            continue
+        reject_rate = _guardian_reject_rate(stats, total)
+        modify_rate = _guardian_modify_rate(stats, total)
+        if selected is None or reject_rate > selected[1]:
+            selected = (stats, reject_rate, modify_rate, total)
+
+    if selected is None:
+        return default
+
+    stats, reject_rate, modify_rate, total = selected
+    confidence_floor = max(base_floor, _guardian_confidence_floor(reject_rate))
+    aggressiveness_multiplier = _guardian_aggressiveness_multiplier(
+        reject_rate,
+        modify_rate,
+    )
+    risk_acceptance_prior = min(
+        _clamp01(candidate.risk_acceptance_prior),
+        _clamp01(1.0 - reject_rate - (0.5 * modify_rate)),
+    )
+    return {
+        "reject_rate": round(reject_rate, 6),
+        "modify_rate": round(modify_rate, 6),
+        "total": total,
+        "confidence_floor": round(confidence_floor, 6),
+        "aggressiveness_multiplier": round(aggressiveness_multiplier, 6),
+        "risk_acceptance_prior": round(risk_acceptance_prior, 6),
+        "top_reasons": stats.top_reasons,
+        "evidence_refs": stats.evidence_refs,
+        "high_reject_rate": reject_rate >= 0.50,
+    }
+
+
+def _normalize_guardian_feedback_strategy(strategy: str | None) -> str | None:
+    if strategy is None:
+        return None
+    try:
+        return normalize_strategy_key(strategy)
+    except ValueError:
+        return strategy.strip().lower()
+
+
+def _guardian_total(stats: GuardianFeedbackStats) -> int:
+    if stats.total is not None:
+        return stats.total
+    return stats.approved + stats.modified + stats.rejected
+
+
+def _guardian_reject_rate(stats: GuardianFeedbackStats, total: int) -> float:
+    if stats.reject_rate is not None:
+        return _clamp01(stats.reject_rate)
+    if total <= 0:
+        return 0.0
+    return _clamp01(stats.rejected / total)
+
+
+def _guardian_modify_rate(stats: GuardianFeedbackStats, total: int) -> float:
+    if stats.modify_rate is not None:
+        return _clamp01(stats.modify_rate)
+    if total <= 0:
+        return 0.0
+    return _clamp01(stats.modified / total)
+
+
+def _guardian_confidence_floor(reject_rate: float) -> float:
+    if reject_rate >= 0.70:
+        return 0.85
+    if reject_rate >= 0.50:
+        return 0.75
+    if reject_rate >= 0.30:
+        return 0.65
+    return 0.0
+
+
+def _guardian_aggressiveness_multiplier(reject_rate: float, modify_rate: float) -> float:
+    return max(0.25, _clamp01(1.0 - (0.50 * reject_rate) - (0.25 * modify_rate)))
 
 
 def _edge_quality(edge_lcb_bps: float | None) -> float:
