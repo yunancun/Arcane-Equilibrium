@@ -1,6 +1,7 @@
 use super::config::AgentSpineMode;
 use super::contracts::{
-    ExecutionPlan, ExecutionReport, GuardianP2Modification, GuardianVerdict, StrategistDecision,
+    ExecutionAuthoritySource, ExecutionMakerPreference, ExecutionOrderStyle, ExecutionPlan,
+    ExecutionReport, ExecutionUrgency, GuardianP2Modification, GuardianVerdict, StrategistDecision,
     StrategySignalDirection, EXECUTION_PLAN_SCHEMA_VERSION, EXECUTION_REPORT_SCHEMA_VERSION,
     GUARDIAN_VERDICT_SCHEMA_VERSION, STRATEGIST_DECISION_SCHEMA_VERSION,
     STRATEGY_SIGNAL_SCHEMA_VERSION,
@@ -196,19 +197,34 @@ fn durable_spine_objects_model_signal_decision_verdict_plan_chain() {
         order_plan_id: "plan-paper-BTCUSDT-789".to_string(),
         decision_id: decision.decision_id.clone(),
         verdict_id: verdict.verdict_id.clone(),
+        verdict_version: verdict.verdict_version,
         ts_ms: 792,
         engine_mode: "paper".to_string(),
         symbol: "BTCUSDT".to_string(),
         strategy: "grid_trading".to_string(),
         direction: StrategySignalDirection::Long,
+        symbol_source: ExecutionAuthoritySource::StrategistDecision,
+        direction_source: ExecutionAuthoritySource::StrategistDecision,
         qty: 1.25,
+        reduce_only: false,
+        order_style: ExecutionOrderStyle::PostOnly,
+        urgency: ExecutionUrgency::Normal,
+        max_slippage_bps: Some(10.0),
+        maker_preference: ExecutionMakerPreference::MakerOnly,
         order_type: "limit".to_string(),
         limit_price: Some(101.25),
         time_in_force: Some("PostOnly".to_string()),
+        order_style_params: json!({}),
+        local_stop_policy: json!({"mode": "guardian_required"}),
+        anti_hunt_stop_policy: json!({"enabled": true}),
+        lease_scope: Some("TRADE_ENTRY".to_string()),
+        lease_ttl_ms: Some(30_000),
         lease_id: Some("lease-paper-BTCUSDT-789".to_string()),
         idempotency_key: "idem-paper-BTCUSDT-789".to_string(),
         metadata: json!({"writer": "mag032"}),
     };
+    assert!(plan.symbol_direction_authority_is_delegated());
+    assert!(plan.reduce_only_direction_is_consistent());
     let plan_obj = SpineObjectEnvelope::from_execution_plan(&plan, AgentSpineMode::Shadow)
         .expect("execution plan envelope");
 
@@ -298,15 +314,28 @@ async fn channel_spine_store_queues_object_edge_transition_and_idempotency_key()
         order_plan_id: "plan-paper-ETHUSDT-900".to_string(),
         decision_id: "decision-paper-ETHUSDT-900".to_string(),
         verdict_id: "verdict-paper-ETHUSDT-900-v1".to_string(),
+        verdict_version: 1,
         ts_ms: 903,
         engine_mode: "paper".to_string(),
         symbol: "ETHUSDT".to_string(),
         strategy: "grid_trading".to_string(),
         direction: StrategySignalDirection::Long,
+        symbol_source: ExecutionAuthoritySource::StrategistDecision,
+        direction_source: ExecutionAuthoritySource::StrategistDecision,
         qty: 0.5,
+        reduce_only: false,
+        order_style: ExecutionOrderStyle::PostOnly,
+        urgency: ExecutionUrgency::Normal,
+        max_slippage_bps: Some(12.5),
+        maker_preference: ExecutionMakerPreference::MakerOnly,
         order_type: "limit".to_string(),
         limit_price: Some(2400.0),
         time_in_force: Some("PostOnly".to_string()),
+        order_style_params: json!({}),
+        local_stop_policy: json!({}),
+        anti_hunt_stop_policy: json!({}),
+        lease_scope: None,
+        lease_ttl_ms: None,
         lease_id: None,
         idempotency_key: "idem-paper-ETHUSDT-900".to_string(),
         metadata: json!({}),
@@ -319,8 +348,10 @@ async fn channel_spine_store_queues_object_edge_transition_and_idempotency_key()
     assert_eq!(key.first_seen_at_ms, 904);
     assert_eq!(key.status, "reserved");
     assert_eq!(key.details["verdict_id"], plan.verdict_id);
+    assert_eq!(key.details["verdict_version"], plan.verdict_version);
     assert_eq!(key.details["symbol"], plan.symbol);
     assert_eq!(key.details["order_type"], plan.order_type);
+    assert_eq!(key.details["order_style"], "post_only");
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(4);
     let store = ChannelAgentSpineStore::new(tx);
@@ -405,15 +436,28 @@ fn shadow_spine_chain_is_complete_while_legacy_signal_msg_stays_unchanged() {
         order_plan_id: "plan-live_demo-BTCUSDT-shadow".to_string(),
         decision_id: decision.decision_id.clone(),
         verdict_id: verdict.verdict_id.clone(),
+        verdict_version: verdict.verdict_version,
         ts_ms: signal.ts_ms + 3,
         engine_mode: signal.engine_mode.clone(),
         symbol: signal.symbol.clone(),
         strategy: signal.strategy.clone(),
         direction: signal.direction,
+        symbol_source: ExecutionAuthoritySource::StrategistDecision,
+        direction_source: ExecutionAuthoritySource::StrategistDecision,
         qty: 1.25,
+        reduce_only: false,
+        order_style: ExecutionOrderStyle::PostOnly,
+        urgency: ExecutionUrgency::Normal,
+        max_slippage_bps: Some(10.0),
+        maker_preference: ExecutionMakerPreference::MakerOnly,
         order_type: "limit".to_string(),
         limit_price: Some(101.25),
         time_in_force: Some("PostOnly".to_string()),
+        order_style_params: json!({}),
+        local_stop_policy: json!({}),
+        anti_hunt_stop_policy: json!({}),
+        lease_scope: Some("TRADE_ENTRY".to_string()),
+        lease_ttl_ms: Some(30_000),
         lease_id: Some("lease-live_demo-BTCUSDT-shadow".to_string()),
         idempotency_key: "idem-live_demo-BTCUSDT-shadow".to_string(),
         metadata: json!({"shadow_only": true}),

@@ -19,6 +19,40 @@ pub enum StrategySignalDirection {
     Neutral,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionAuthoritySource {
+    StrategistDecision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionOrderStyle {
+    Market,
+    Limit,
+    PostOnly,
+    Twap,
+    Split,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionUrgency {
+    Low,
+    Normal,
+    High,
+    Urgent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMakerPreference {
+    None,
+    PreferMaker,
+    MakerOnly,
+    AllowTaker,
+}
+
 impl StrategySignalDirection {
     pub fn as_trading_signal_type(self) -> &'static str {
         match self {
@@ -151,18 +185,49 @@ pub struct ExecutionPlan {
     pub order_plan_id: String,
     pub decision_id: String,
     pub verdict_id: String,
+    pub verdict_version: i32,
     pub ts_ms: u64,
     pub engine_mode: String,
     pub symbol: String,
     pub strategy: String,
     pub direction: StrategySignalDirection,
+    pub symbol_source: ExecutionAuthoritySource,
+    pub direction_source: ExecutionAuthoritySource,
     pub qty: f64,
+    pub reduce_only: bool,
+    pub order_style: ExecutionOrderStyle,
+    pub urgency: ExecutionUrgency,
+    pub max_slippage_bps: Option<f64>,
+    pub maker_preference: ExecutionMakerPreference,
     pub order_type: String,
     pub limit_price: Option<f64>,
     pub time_in_force: Option<String>,
+    #[serde(default)]
+    pub order_style_params: serde_json::Value,
+    #[serde(default)]
+    pub local_stop_policy: serde_json::Value,
+    #[serde(default)]
+    pub anti_hunt_stop_policy: serde_json::Value,
+    pub lease_scope: Option<String>,
+    pub lease_ttl_ms: Option<u64>,
     pub lease_id: Option<String>,
     pub idempotency_key: String,
     pub metadata: serde_json::Value,
+}
+
+impl ExecutionPlan {
+    pub fn symbol_direction_authority_is_delegated(&self) -> bool {
+        self.symbol_source == ExecutionAuthoritySource::StrategistDecision
+            && self.direction_source == ExecutionAuthoritySource::StrategistDecision
+    }
+
+    pub fn reduce_only_direction_is_consistent(&self) -> bool {
+        let close_direction = matches!(
+            self.direction,
+            StrategySignalDirection::CloseLong | StrategySignalDirection::CloseShort
+        );
+        self.reduce_only == close_direction
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

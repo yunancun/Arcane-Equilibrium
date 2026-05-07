@@ -290,7 +290,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-060 | PA | P1 | TODO | Define ExecutionPlan interface and allowed order styles. | Executor cannot encode symbol/direction authority. |
+| MAG-060 | PA | P1 | DONE (MAC/LINUX PY+RUST CONTRACT) | Define ExecutionPlan interface and allowed order styles. | `2026-05-07--mag060_execution_plan_interface.md` defines the Executor Planner interface and order-style contract. Python/Rust ExecutionPlan now carries verdict version, symbol/direction source, reduce-only, order_style, urgency, max slippage, maker preference, stop-policy handoff, and lease request fields; Python validation rejects invalid order-style combinations, and `AgentSpineClient.publish_execution_plan()` refuses plans that do not match a prior StrategistDecision plus approved/modified GuardianVerdict. Mac/Linux Python spine-client tests 13/0, Rust agent_spine 6/0, py_compile, and diff checks passed. |
 | MAG-061 | E1 | P1 | TODO | Implement ExecutionPlan generation. | Approved StrategistDecision becomes plan with max slippage, urgency, maker preference. |
 | MAG-062 | E1 | P1 | TODO | Add Decision Lease binding to ExecutionPlan. | Every real submit carries lease id or fails closed. |
 | MAG-063 | E1 | P1 | TODO | Persist ExecutionReport with quality metrics. | Analyst receives slippage/fees/fill latency. |
