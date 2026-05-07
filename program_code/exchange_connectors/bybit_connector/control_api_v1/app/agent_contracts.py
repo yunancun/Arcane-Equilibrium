@@ -288,6 +288,17 @@ class ExecutionReport(_SpineModel):
     status: str
     exchange_order_id: str | None = None
     fill_id: str | None = None
+    requested_qty: float | None = Field(default=None, ge=0)
+    filled_qty: float | None = Field(default=None, ge=0)
+    expected_price: float | None = Field(default=None, gt=0)
+    avg_fill_price: float | None = Field(default=None, gt=0)
+    slippage_bps: float | None = None
+    fees_paid: float | None = Field(default=None, ge=0)
+    fee_bps: float | None = Field(default=None, ge=0)
+    submit_latency_ms: float | None = Field(default=None, ge=0)
+    fill_latency_ms: float | None = Field(default=None, ge=0)
+    liquidity_role: Literal["maker", "taker", "mixed", "unknown"] = "unknown"
+    quality_metrics: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

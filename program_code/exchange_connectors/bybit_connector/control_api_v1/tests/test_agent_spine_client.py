@@ -205,6 +205,17 @@ def _report() -> ExecutionReport:
         symbol="BTCUSDT",
         status="filled",
         fill_id="fill-paper-BTCUSDT-1",
+        requested_qty=1.0,
+        filled_qty=1.0,
+        expected_price=101.0,
+        avg_fill_price=101.08,
+        slippage_bps=7.920792,
+        fees_paid=0.03,
+        fee_bps=3.0,
+        submit_latency_ms=120.0,
+        fill_latency_ms=480.0,
+        liquidity_role="maker",
+        quality_metrics={"metric_source": "executor_report_v2"},
     )
 
 
@@ -465,5 +476,9 @@ def test_publish_execution_report_and_analyst_insight_write_typed_edges(fake_con
     assert len(fake_conn.executes) == 4
     assert fake_conn.executes[0][1][2] == "execution_report"
     assert fake_conn.executes[1][1][4] == "executed_by"
+    assert fake_conn.executes[1][1][8]["slippage_bps"] == 7.920792
+    assert fake_conn.executes[1][1][8]["fees_paid"] == 0.03
+    assert fake_conn.executes[1][1][8]["fill_latency_ms"] == 480.0
+    assert fake_conn.executes[1][1][8]["liquidity_role"] == "maker"
     assert fake_conn.executes[2][1][2] == "analyst_insight"
     assert fake_conn.executes[3][1][4] == "analyzed_by"

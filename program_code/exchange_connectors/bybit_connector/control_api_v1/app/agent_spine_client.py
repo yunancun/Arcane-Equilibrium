@@ -409,7 +409,22 @@ class AgentSpineClient:
             edge_type="executed_by",
             engine_mode=report.engine_mode,
             decision_id=report.decision_id,
-            details={"status": report.status, "fill_id": report.fill_id},
+            details={
+                "status": report.status,
+                "exchange_order_id": report.exchange_order_id,
+                "fill_id": report.fill_id,
+                "requested_qty": report.requested_qty,
+                "filled_qty": report.filled_qty,
+                "expected_price": report.expected_price,
+                "avg_fill_price": report.avg_fill_price,
+                "slippage_bps": report.slippage_bps,
+                "fees_paid": report.fees_paid,
+                "fee_bps": report.fee_bps,
+                "submit_latency_ms": report.submit_latency_ms,
+                "fill_latency_ms": report.fill_latency_ms,
+                "liquidity_role": report.liquidity_role,
+                "quality_metrics": report.quality_metrics,
+            },
             created_at_ms=report.ts_ms,
         )
         return ok and edge_ok

@@ -1525,3 +1525,28 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   change, rebuild, restart, deploy, DB write, live auth, runtime flag, or
   trading authority change was made.
 - Next AgentTodo item is MAG-063 ExecutionReport quality metrics.
+
+## 2026-05-07 AgentTodo MAG-063 ExecutionReport Quality Metrics
+
+### Result
+- MAG-063 source is complete: Python/Rust `ExecutionReport` now carries
+  Analyst-consumable execution quality metrics.
+- `executor_report_v2.py` builds reports from `ExecutionPlan` plus fill
+  observations, including slippage bps, fees paid, fee bps, submit latency,
+  fill latency, requested/filled qty, expected/average fill price, and
+  liquidity role.
+- `AgentSpineClient.publish_execution_report()` writes those metrics into the
+  `executed_by` edge details instead of leaving them hidden in metadata.
+
+### Verification
+- Mac targeted: executor report + spine client pytest 16/0, py_compile,
+  cargo fmt, Rust agent_spine 6/0, and diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  Python pytest set 16/0, py_compile, Rust agent_spine 6/0, and diff check.
+
+### Boundary
+- No runtime submit wiring, runtime Analyst wiring, IPC protocol change,
+  rebuild, restart, deploy, DB write, live auth, runtime flag, or trading
+  authority change was made.
+- Next AgentTodo item is MAG-064 Executor never chooses symbol/direction
+  regression.
