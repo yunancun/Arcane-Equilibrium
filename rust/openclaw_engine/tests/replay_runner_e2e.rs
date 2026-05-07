@@ -276,8 +276,8 @@ fn proof_1_happy_path_synthetic_fixture() {
 #[test]
 fn proof_2_invalid_manifest_signature() {
     let (signer, fingerprint, archive) = load_fixture_signer();
-    let body = br#"{"experiment_id":"exp_e2e_sig","data_tier":"S3","fixture_uri":"unused"}"#
-        .to_vec();
+    let body =
+        br#"{"experiment_id":"exp_e2e_sig","data_tier":"S3","fixture_uri":"unused"}"#.to_vec();
     let body_hash = compute_body_hash(&body);
     let sig = signer.sign(&body);
 
@@ -341,10 +341,16 @@ fn proof_4_forbidden_path_trip_via_env_aborts_run() {
     )
     .unwrap();
     let exec_result = pipeline.execute();
-    assert!(exec_result.is_err(), "pipeline must abort on forbidden trip");
+    assert!(
+        exec_result.is_err(),
+        "pipeline must abort on forbidden trip"
+    );
 
     let result = pipeline.into_result();
-    assert!(matches!(result.status, ReplayStatus::AbortedForbidden { .. }));
+    assert!(matches!(
+        result.status,
+        ReplayStatus::AbortedForbidden { .. }
+    ));
     let reason = result
         .diagnostics
         .abort_reason
@@ -412,8 +418,14 @@ fn proof_5_baseline_vs_candidate_two_runs() {
     // independent results emitted to disk" pipeline).
     // 同 fixture 上兩者皆確定性完成，故 pnl_summary 欄位相等（T2 將引入
     // strategy-config perturbation 使其分歧；T1 僅證「兩獨立結果落盤」管線）。
-    assert_eq!(baseline.pnl_summary.events_processed, candidate.pnl_summary.events_processed);
-    assert_eq!(baseline.pnl_summary.fills_emitted, candidate.pnl_summary.fills_emitted);
+    assert_eq!(
+        baseline.pnl_summary.events_processed,
+        candidate.pnl_summary.events_processed
+    );
+    assert_eq!(
+        baseline.pnl_summary.fills_emitted,
+        candidate.pnl_summary.fills_emitted
+    );
     assert_eq!(baseline.manifest_id, "exp_baseline_001");
     assert_eq!(candidate.manifest_id, "exp_candidate_001");
     assert_ne!(baseline.manifest_id, candidate.manifest_id);
@@ -447,15 +459,14 @@ fn proof_5_baseline_vs_candidate_two_runs() {
 fn proof_helper_signed_manifest_round_trip() {
     let tmp = tempdir().unwrap();
     let fixture_uri_str = fixture_synthetic_path().to_string_lossy().into_owned();
-    let (body, _fp, _hash, _sig) = build_signed_manifest_body(
-        "exp_helper_round_trip",
-        "S3",
-        &fixture_uri_str,
-    );
+    let (body, _fp, _hash, _sig) =
+        build_signed_manifest_body("exp_helper_round_trip", "S3", &fixture_uri_str);
     let manifest_path = write_test_manifest(tmp.path(), &body);
     assert!(manifest_path.exists());
-    assert!(tmp.path().join("key.hex").exists(),
-        "sibling key.hex must be present so runner finds it");
+    assert!(
+        tmp.path().join("key.hex").exists(),
+        "sibling key.hex must be present so runner finds it"
+    );
 
     // Sanity: the manifest can be parsed as JSON with the required fields.
     // sanity：manifest 可解析為 JSON 且必填欄位俱在。

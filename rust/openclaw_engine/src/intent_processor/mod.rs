@@ -32,9 +32,7 @@ use openclaw_core::{
     // GovernanceError so router (E-2) and tests reach them via super::*.
     // AMD-2026-05-02-01 Track E E-1：同時 re-export LeaseId / LeaseOutcome /
     // GovernanceError，讓 router（E-2）與 tests 透過 super::* 取用。
-    governance_core::{
-        GovernanceCore, GovernanceError, GovernanceProfile, LeaseId, LeaseOutcome,
-    },
+    governance_core::{GovernanceCore, GovernanceError, GovernanceProfile, LeaseId, LeaseOutcome},
     guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
 };
 use parking_lot::Mutex;

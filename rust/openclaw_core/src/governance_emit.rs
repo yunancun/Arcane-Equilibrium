@@ -375,10 +375,7 @@ pub fn build_msg_from_last_transition(
 ///   amendment §6 條件 #1「lease IPC 中位延遲 > 100µs」回退 SLA。
 /// - lease IPC median latency budget = ~10µs；channel send 為 lock-free queue
 ///   ~50ns，writer 端 spawn_blocking thread 解 lock 也 ~微秒級。
-pub fn emit_transition_fail_soft(
-    sender: Option<&LeaseTransitionSender>,
-    msg: LeaseTransitionMsg,
-) {
+pub fn emit_transition_fail_soft(sender: Option<&LeaseTransitionSender>, msg: LeaseTransitionMsg) {
     if let Some(tx) = sender {
         // std::sync::mpsc::Sender::send is fire-and-forget; on dropped
         // Receiver returns SendError which we silently swallow (fail-soft).

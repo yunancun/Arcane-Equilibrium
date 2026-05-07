@@ -280,12 +280,20 @@ impl ReplayRiskAdapter {
                 .iter()
                 .map(|p| ExistingPosition {
                     symbol: p.symbol.clone(),
-                    side: if p.is_long { "Buy".into() } else { "Sell".into() },
+                    side: if p.is_long {
+                        "Buy".into()
+                    } else {
+                        "Sell".into()
+                    },
                 })
                 .collect()
         };
         let guardian_leverage = if is_reducing { 0.0 } else { snapshot.leverage };
-        let drawdown = if is_reducing { 0.0 } else { snapshot.drawdown_pct };
+        let drawdown = if is_reducing {
+            0.0
+        } else {
+            snapshot.drawdown_pct
+        };
 
         let ctx = PortfolioContext {
             drawdown_pct: drawdown,
@@ -293,7 +301,11 @@ impl ReplayRiskAdapter {
         };
         let check = TradeIntentCheck {
             symbol: intent.symbol.clone(),
-            side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+            side: if intent.is_long {
+                "Buy".into()
+            } else {
+                "Sell".into()
+            },
             leverage: guardian_leverage,
             qty: pre_guardian_qty,
         };
@@ -460,7 +472,11 @@ mod tests {
         let snap = mk_snapshot(10_000.0, Vec::new());
         let intent = mk_intent("BTCUSDT", true, 0.5);
         let decision = adapter.evaluate(&intent, &snap, 0.0);
-        assert!(decision.is_accepted(), "expected Accepted, got {:?}", decision);
+        assert!(
+            decision.is_accepted(),
+            "expected Accepted, got {:?}",
+            decision
+        );
         match decision {
             RiskDecision::Accepted {
                 final_qty,

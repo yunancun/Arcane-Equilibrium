@@ -257,7 +257,14 @@ async fn run() -> i32 {
             }
         }
         let sha = hex::encode(m.checksum.as_ref());
-        file_meta.push((m.version, file_name, line_end, format!("{size}"), mtime, sha));
+        file_meta.push((
+            m.version,
+            file_name,
+            line_end,
+            format!("{size}"),
+            mtime,
+            sha,
+        ));
     }
 
     // ───── 2. Connect to DB and read _sqlx_migrations ─────
@@ -319,15 +326,7 @@ async fn run() -> i32 {
         };
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            m.version,
-            m.description,
-            meta.1,
-            meta.2,
-            meta.3,
-            meta.4,
-            file_sha,
-            db_hex,
-            drift_label
+            m.version, m.description, meta.1, meta.2, meta.3, meta.4, file_sha, db_hex, drift_label
         );
     }
 
@@ -368,7 +367,10 @@ async fn run() -> i32 {
     println!("# pa_caught_by_binary = {:?}", pa_caught);
     println!("# pa_missed_by_binary = {:?}", pa_missed);
     let v033_drifts = drift_versions.contains(&33);
-    println!("# v033_verdict       = {}", if v033_drifts { "DRIFT" } else { "clean" });
+    println!(
+        "# v033_verdict       = {}",
+        if v033_drifts { "DRIFT" } else { "clean" }
+    );
 
     // ───── 4. --verify exit ─────
     if args.mode == Mode::Verify {
@@ -417,11 +419,13 @@ async fn run() -> i32 {
             continue;
         }
         let new_hex = hex::encode(m.checksum.as_ref());
-        let r = sqlx::query("UPDATE _sqlx_migrations SET checksum = decode($1, 'hex') WHERE version = $2")
-            .bind(&new_hex)
-            .bind(m.version)
-            .execute(&mut *tx)
-            .await;
+        let r = sqlx::query(
+            "UPDATE _sqlx_migrations SET checksum = decode($1, 'hex') WHERE version = $2",
+        )
+        .bind(&new_hex)
+        .bind(m.version)
+        .execute(&mut *tx)
+        .await;
         match r {
             Ok(res) => {
                 println!(
@@ -518,14 +522,11 @@ async fn run() -> i32 {
 
 /// Read all rows of `_sqlx_migrations` ordered by version.
 /// 讀 `_sqlx_migrations` 全行（依 version 排序）。
-async fn read_sqlx_migrations(
-    pool: &PgPool,
-) -> Result<Vec<(i64, String, Vec<u8>)>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT version, description, checksum FROM _sqlx_migrations ORDER BY version",
-    )
-    .fetch_all(pool)
-    .await?;
+async fn read_sqlx_migrations(pool: &PgPool) -> Result<Vec<(i64, String, Vec<u8>)>, sqlx::Error> {
+    let rows =
+        sqlx::query("SELECT version, description, checksum FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await?;
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
         let v: i64 = r.try_get("version")?;
@@ -545,10 +546,7 @@ fn pg_dump_backup(db_url: &str) -> Result<PathBuf, String> {
     let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let out_path = backup_dir.join(format!("_sqlx_migrations_pre_repair_{ts}.sql"));
 
-    println!(
-        "# pg_dump backup target: {} / 備份目標",
-        out_path.display()
-    );
+    println!("# pg_dump backup target: {} / 備份目標", out_path.display());
 
     let status = Command::new("pg_dump")
         .arg("--data-only")

@@ -75,8 +75,7 @@ fn load_fixture_signer() -> (ManifestSigner, String) {
     // 內容做 sha256（鏡像 `openssl dgst -sha256 -hex < key.hex`）。
     // Read file content as bytes — fingerprint must sha256 the entire file
     // content including trailing newline (mirrors `openssl dgst -sha256 -hex < key.hex`).
-    let file_content = fs::read(fixture_dir().join("key.hex"))
-        .expect("fixture key.hex missing");
+    let file_content = fs::read(fixture_dir().join("key.hex")).expect("fixture key.hex missing");
     let key_hex = std::str::from_utf8(&file_content)
         .expect("fixture key.hex must be UTF-8")
         .trim()

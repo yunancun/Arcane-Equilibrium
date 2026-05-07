@@ -56,7 +56,10 @@ impl<'a> Drop for RouterLeaseGuard<'a> {
             // to clean up — never panic in Drop.
             // 拒絕路徑 Drop 時 best-effort 釋放；SM transition 失敗（race / state 已
             // 異動）僅 warn，依 ExpiryGuardian 過期清理；Drop 內絕不 panic。
-            if let Err(e) = self.governance.release_lease(&lease, LeaseOutcome::Cancelled) {
+            if let Err(e) = self
+                .governance
+                .release_lease(&lease, LeaseOutcome::Cancelled)
+            {
                 tracing::warn!(
                     error = %e,
                     "Gate 1.4 lease release on drop failed (rejection path); ExpiryGuardian will sweep"
@@ -718,7 +721,13 @@ impl IntentProcessor {
         // RouterLeaseGuard RAII：rejection 路徑下 Drop release Cancelled，避免 leak；
         // 成功路徑 .consume() 取出 lease 後由 fill consumer 釋放（Consumed）。
         let lease_guard = if governance.router_gate_enabled() {
-            match acquire_lease_for_gate_1_4(intent, governance, profile, "router_gates_only", now_ms) {
+            match acquire_lease_for_gate_1_4(
+                intent,
+                governance,
+                profile,
+                "router_gates_only",
+                now_ms,
+            ) {
                 Ok(lease) => RouterLeaseGuard::new(governance, Some(lease)),
                 Err(reason) => return ExchangeGateResult::rejected(reason),
             }

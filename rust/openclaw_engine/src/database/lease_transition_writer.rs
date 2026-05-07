@@ -378,7 +378,11 @@ mod tests {
         // Send 3 msgs through std → drop tokio_rx (writer dropped scenario).
         // 透過 std 發送 3 筆 → drop tokio_rx（writer dropped 情境）。
         for i in 0..3u8 {
-            let msg = make_msg(&format!("clean_{i}"), "ACTIVE", 1_700_000_000_000 + i as u64);
+            let msg = make_msg(
+                &format!("clean_{i}"),
+                "ACTIVE",
+                1_700_000_000_000 + i as u64,
+            );
             std_tx.send(msg).expect("std mpsc send must succeed");
         }
         drop(tokio_rx); // simulate writer dropped
@@ -418,7 +422,7 @@ mod tests {
         // 驗證 facade 模式：忽略 Err，無 panic。
         let msg2 = make_msg("disconnect_2", "ACTIVE", 1_700_000_000_000);
         let _ = std_tx.send(msg2); // facade pattern: ignore result
-        // No panic = test pass.
+                                   // No panic = test pass.
     }
 
     /// Test: epoch-0 ts_ms reject path (V054 chk_lease_transitions_ts_ms_positive).
@@ -443,7 +447,8 @@ mod tests {
     /// 4 of 5 unit tests per task spec.
     #[tokio::test]
     async fn test_bridge_channel_capacity_does_not_block_facade() {
-        let (tokio_tx, _tokio_rx) = tokio_mpsc::channel::<LeaseTransitionMsg>(BRIDGE_CHANNEL_CAPACITY);
+        let (tokio_tx, _tokio_rx) =
+            tokio_mpsc::channel::<LeaseTransitionMsg>(BRIDGE_CHANNEL_CAPACITY);
 
         // Fill exactly to capacity — try_send must succeed BRIDGE_CHANNEL_CAPACITY times.
         // 灌滿 — try_send 必須成功 BRIDGE_CHANNEL_CAPACITY 次。
@@ -458,7 +463,10 @@ mod tests {
         // 第 capacity+1 條 send 必失敗（channel 滿），證明 fail-soft 路徑。
         let overflow = make_msg("overflow", "ACTIVE", 1_700_000_000_000);
         let result = tokio_tx.try_send(overflow);
-        assert!(result.is_err(), "try_send beyond capacity must Err (TrySendError::Full)");
+        assert!(
+            result.is_err(),
+            "try_send beyond capacity must Err (TrySendError::Full)"
+        );
     }
 
     /// Test: insert SQL column lock — prevent silent schema drift vs V054.

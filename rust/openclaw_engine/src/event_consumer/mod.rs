@@ -95,8 +95,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 每 60s 觸發 `GovernanceCore::check_expiry()` 對 lease + auth 過期掃描。
     // RouterLeaseGuard Drop release 失敗的 lease + 過期 TTL lease 不會永久卡在
     // SM-02 Active；per-pipeline 範圍尊重 paper/demo/live 多模式隔離。
-    let mut lease_sweep_interval =
-        tokio::time::interval(std::time::Duration::from_secs(60));
+    let mut lease_sweep_interval = tokio::time::interval(std::time::Duration::from_secs(60));
     lease_sweep_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Consume the immediate-fire first tick so the sweeper does not run during
     // bootstrap before the SM has any leases.
