@@ -107,6 +107,12 @@ class GuardianConfig:
     strategy_soft_loss_streak: int = 3
     strategy_hard_loss_streak: int = 5
     strategy_loss_rate_warn: float = 0.60
+    # Event/scanner risk evidence tightening thresholds.
+    # Event/scanner 風險 evidence 的收緊閾值。
+    event_risk_ttl_ms: int = 6 * 60 * 60 * 1000
+    event_risk_size_factor: float = 0.5
+    scanner_risk_soft_score: float = 0.65
+    scanner_risk_hard_score: float = 0.90
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -167,6 +173,8 @@ class GuardianAgent(BaseAgent):
         # Event risk state (from Scout alerts) / 事件风险状态
         self._active_event_risks: List[Dict[str, Any]] = []
         self._max_event_risks = 50
+        self._active_risk_evidence: List[Dict[str, Any]] = []
+        self._max_risk_evidence = 50
 
         # Stats / 统计
         self._stats = {
@@ -352,7 +360,28 @@ class GuardianAgent(BaseAgent):
             ))
             risk_score += strategy_risk
 
-        # Check 6: Portfolio drawdown limit / 組合回撤限制檢查
+        # Check 6: Scout event + scanner risk evidence / Scout 事件 + scanner 風險 evidence
+        evidence_action, evidence_reason, evidence_params, evidence_risk, evidence_metadata = (
+            self._review_event_scanner_risk(intent)
+        )
+        if evidence_metadata:
+            verdict_metadata["risk_evidence_review"] = evidence_metadata
+        if evidence_action == "reject":
+            rejection_reasons.append(evidence_reason or "Event/scanner risk pause")
+            risk_score += evidence_risk
+        elif evidence_action == "modify":
+            modification_needed = True
+            modification_reasons.append(evidence_reason or "event_scanner_risk_p2_modify")
+            modified_params.update(evidence_params)
+            p2_modifications.extend(self._params_to_p2_modifications(
+                intent,
+                evidence_params,
+                evidence_reason or "event_scanner_risk_p2_modify",
+                reason_code=str(evidence_params.get("risk_evidence_action", "event_scanner_risk")),
+            ))
+            risk_score += evidence_risk
+
+        # Check 7: Portfolio drawdown limit / 組合回撤限制檢查
         dd_result = self._check_drawdown_limit(intent)
         if dd_result:
             rejection_reasons.append(dd_result)
@@ -933,6 +962,145 @@ class GuardianAgent(BaseAgent):
                 return True
         return False
 
+    def _review_event_scanner_risk(
+        self,
+        intent: TradeIntent,
+    ) -> tuple[str, Optional[str], Dict[str, Any], float, Dict[str, Any]]:
+        event_evidence = self._matching_event_risks(intent)
+        scanner_evidence = self._matching_scanner_risk_evidence(intent)
+        if not event_evidence and not scanner_evidence:
+            return "pass", None, {}, 0.0, {}
+
+        metadata: Dict[str, Any] = {
+            "action": "pass",
+            "symbol": intent.symbol,
+            "strategy": intent.strategy,
+            "reason_codes": [],
+            "event_evidence": event_evidence,
+            "scanner_risk_evidence": scanner_evidence,
+        }
+
+        hard_reasons: List[str] = []
+        soft_reasons: List[str] = []
+        for event in event_evidence:
+            risk_level = str(event.get("risk_level", event.get("severity", "medium"))).lower()
+            event_type = str(event.get("event_type", "event"))
+            if risk_level == "critical":
+                hard_reasons.append(f"critical event {event_type}")
+                metadata["reason_codes"].append("event_critical_risk")
+            elif risk_level == "high":
+                soft_reasons.append(f"high-risk event {event_type}")
+                metadata["reason_codes"].append("event_high_risk")
+
+        for evidence in scanner_evidence:
+            risk_level = str(evidence.get("risk_level", "")).lower()
+            risk_score = float(evidence.get("risk_score") or 0.0)
+            source = str(evidence.get("source", "scanner_risk_evidence"))
+            risk_label = risk_level or f"{risk_score:.2f}"
+            if risk_level in ("critical", "hard") or risk_score >= self.config.scanner_risk_hard_score:
+                hard_reasons.append(f"{source} risk {risk_label}")
+                metadata["reason_codes"].append("scanner_hard_risk")
+            elif risk_level == "high" or risk_score >= self.config.scanner_risk_soft_score:
+                soft_reasons.append(f"{source} risk {risk_label}")
+                metadata["reason_codes"].append("scanner_soft_risk")
+            metadata["reason_codes"].extend(
+                str(code) for code in self._as_list(evidence.get("reason_codes"))
+            )
+
+        if hard_reasons:
+            metadata.update({
+                "action": "reject",
+                "state": "pause_new_entries",
+                "position_review_requested": self._has_active_strategy_position(intent),
+            })
+            metadata["reason_codes"].append("pause_new_entries")
+            if metadata["position_review_requested"]:
+                metadata["reason_codes"].append("position_review_requested")
+            return (
+                "reject",
+                "Event/scanner risk pause: " + "; ".join(hard_reasons),
+                {},
+                0.3,
+                metadata,
+            )
+
+        if soft_reasons:
+            now_ms = int(time.time() * 1000)
+            params = {
+                "size": intent.size * self.config.event_risk_size_factor,
+                "cooldown_ms": self.config.p2_cooldown_ms,
+                "cooldown_until_ms": now_ms + self.config.p2_cooldown_ms,
+                "risk_evidence_action": "event_scanner_risk_p2_modify",
+            }
+            metadata.update({
+                "action": "modify",
+                "state": "modify",
+            })
+            return (
+                "modify",
+                "Event/scanner risk modified: " + "; ".join(soft_reasons),
+                params,
+                0.2,
+                metadata,
+            )
+
+        metadata["state"] = "watch"
+        return "pass", None, {}, 0.0, metadata
+
+    def _matching_event_risks(self, intent: TradeIntent) -> List[Dict[str, Any]]:
+        now_ms = int(time.time() * 1000)
+        with self._lock:
+            records = [dict(item) for item in self._active_event_risks]
+        matches: List[Dict[str, Any]] = []
+        for record in records:
+            ts_ms = int(record.get("timestamp_ms") or 0)
+            if ts_ms and now_ms - ts_ms > self.config.event_risk_ttl_ms:
+                continue
+            symbols = [str(symbol) for symbol in self._as_list(record.get("affected_symbols"))]
+            if not symbols or intent.symbol in symbols or "*" in symbols or "ALL" in symbols:
+                matches.append(record)
+        return matches
+
+    def _matching_scanner_risk_evidence(self, intent: TradeIntent) -> List[Dict[str, Any]]:
+        evidence: List[Dict[str, Any]] = []
+        for raw in (
+            intent.metadata.get("scanner_risk_evidence"),
+            intent.params.get("scanner_risk_evidence"),
+        ):
+            evidence.extend(self._normalize_risk_evidence_items(raw))
+        with self._lock:
+            evidence.extend(dict(item) for item in self._active_risk_evidence)
+        return [item for item in evidence if self._risk_evidence_matches_intent(item, intent)]
+
+    def _normalize_risk_evidence_items(self, raw: Any) -> List[Dict[str, Any]]:
+        if raw is None:
+            return []
+        if isinstance(raw, dict):
+            return [dict(raw)]
+        if isinstance(raw, list):
+            return [dict(item) for item in raw if isinstance(item, dict)]
+        return []
+
+    def _risk_evidence_matches_intent(self, evidence: Dict[str, Any], intent: TradeIntent) -> bool:
+        symbols = evidence.get("symbols", evidence.get("affected_symbols"))
+        if symbols is None and evidence.get("symbol") is not None:
+            symbols = [evidence.get("symbol")]
+        if symbols:
+            normalized = [str(symbol) for symbol in self._as_list(symbols)]
+            if intent.symbol not in normalized and "*" not in normalized and "ALL" not in normalized:
+                return False
+        strategy = evidence.get("strategy")
+        if strategy is not None and str(strategy) not in ("*", intent.strategy):
+            return False
+        return True
+
+    def _as_list(self, raw: Any) -> List[Any]:
+        if raw is None:
+            return []
+        if isinstance(raw, (list, tuple, set)):
+            return list(raw)
+        return [raw]
+
     def _check_sharpe_threshold(self, intent: TradeIntent) -> Optional[str]:
         """Check if strategy Sharpe ratio meets minimum / 检查策略 Sharpe 比率是否达标"""
         strategy = intent.strategy
@@ -1087,7 +1255,7 @@ class GuardianAgent(BaseAgent):
         severity = payload.get("severity", "medium")
         event_type = payload.get("event_type", "unknown")
 
-        risk_level = "medium"  # default
+        risk_level = severity if severity in ("low", "medium", "high", "critical") else "medium"
 
         # Try AI classification if available / 尝试 AI 分类
         # E5-P1-4: routed via llm_call_wrapper (unified L1 Ollama invocation).
@@ -1171,7 +1339,23 @@ class GuardianAgent(BaseAgent):
 
     def _handle_risk_pattern(self, message: AgentMessage) -> None:
         """Handle risk pattern from Analyst / 处理 Analyst 风险模式"""
-        self._audit("risk_pattern_received", message.payload)
+        payload = dict(message.payload or {})
+        record = {
+            "source": payload.get("source", "risk_pattern"),
+            "risk_level": payload.get("risk_level", payload.get("severity", "medium")),
+            "risk_score": payload.get("risk_score", payload.get("score", 0.0)),
+            "symbols": payload.get("symbols", payload.get("affected_symbols", [])),
+            "strategy": payload.get("strategy"),
+            "reason_codes": payload.get("reason_codes", []),
+            "timestamp_ms": int(payload.get("timestamp_ms") or time.time() * 1000),
+            "metadata": payload.get("metadata", {}),
+        }
+        with self._lock:
+            self._active_risk_evidence.append(record)
+            if len(self._active_risk_evidence) > self._max_risk_evidence:
+                self._active_risk_evidence = self._active_risk_evidence[-self._max_risk_evidence:]
+        self._audit("risk_pattern_received", payload)
+        _invalidate_h_state_async("agent.guardian.risk_pattern_received")
 
     def _handle_directive(self, message: AgentMessage) -> None:
         """Handle Conductor directives / 处理 Conductor 指令"""
