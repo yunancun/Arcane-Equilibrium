@@ -98,3 +98,34 @@ def test_replay_advisory_rank_route_caps_and_never_invokes_applier() -> None:
     assert data["applier_path"] == "not_invoked"
     assert data["ranked_candidates"][0]["eligible_for_demo_handoff"] is False
     assert data["output_policy"] == "read_only_ml_dream_advisory_no_live_or_demo_mutation"
+
+
+def test_replay_advisory_compare_route_is_read_only() -> None:
+    client = _client()
+    resp = client.post(
+        "/api/v1/replay/advisory/compare",
+        json={
+            "requester": "dream_engine",
+            "baseline": {
+                "net_bps_after_fee": 3.0,
+                "max_drawdown_bps": 35.0,
+                "fill_count": 8,
+                "reject_or_miss_rate": 0.2,
+            },
+            "candidate": {
+                "net_bps_after_fee": 11.0,
+                "max_drawdown_bps": 40.0,
+                "fill_count": 10,
+                "reject_or_miss_rate": 0.1,
+            },
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["mode"] == "replay_advisory_compare"
+    assert data["advisory_only"] is True
+    assert data["mutation_allowed"] is False
+    assert data["applier_path"] == "not_invoked"
+    assert data["comparison"]["status"] == "computed"
+    assert data["comparison"]["verdict"] == "candidate_better"

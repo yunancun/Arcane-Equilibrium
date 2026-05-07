@@ -208,6 +208,8 @@ mod tests {
             best_ask: None,
             bid_size: None,
             ask_size: None,
+            bid_depth_5: None,
+            ask_depth_5: None,
             spread_bps: None,
             microstructure_source: None,
             funding_rate: None,

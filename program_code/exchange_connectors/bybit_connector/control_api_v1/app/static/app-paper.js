@@ -785,6 +785,7 @@ function ocPaperSubtabInit() {
     const funding = coverage.funding_rate || {};
     const oi = coverage.open_interest || {};
     const specs = coverage.instrument_specs || {};
+    const retention = coverage.retention_policy || {};
     const warnings = Array.isArray(data.warnings) ? data.warnings : [];
     const pct = function (v) {
       return typeof v === "number" && Number.isFinite(v) ? (v * 100).toFixed(0) + "%" : "--";
@@ -824,6 +825,14 @@ function ocPaperSubtabInit() {
       + _metricCellHtml("oc-replay-preflight-samples", "Exec Samples / 執行樣本",
         String(sampleCount), sampleCount >= 200 ? "oc-cell-ok" : "oc-cell-warn",
         "Minimum of taker slippage samples and maker order-outcome samples")
+      + _metricCellHtml("oc-replay-preflight-latency", "Latency / 延遲",
+        execCal.latency_ms && execCal.latency_ms.q50 != null ? String(execCal.latency_ms.q50) + " ms q50" : String(execCal.latency_status || "missing"),
+        execCal.latency_status === "calibrated" || execCal.latency_status === "limited" ? "oc-cell-ok" : "oc-cell-warn",
+        "Order state-change latency calibration from demo/live_demo orders")
+      + _metricCellHtml("oc-replay-preflight-retention", "Retention / 留存",
+        retention.configured_retention_days != null ? String(retention.configured_retention_days) + "d" : "--",
+        retention.status === "ok" ? "oc-cell-ok" : "oc-cell-warn",
+        "Local recorder retention maturity policy for this replay window")
       + '</div>'
       + warningHtml;
   }
@@ -859,6 +868,13 @@ function ocPaperSubtabInit() {
     const bboAnchorStatus = String(
       micro.bbo_anchor_status || fidelityMicro.bbo_anchor_status || "unavailable"
     );
+    const orderbookCoverage = typeof micro.orderbook_depth_coverage_ratio === "number"
+      ? micro.orderbook_depth_coverage_ratio
+      : (
+        typeof fidelityMicro.orderbook_depth_coverage_ratio === "number"
+          ? fidelityMicro.orderbook_depth_coverage_ratio
+          : 0
+      );
     const tickCoverage = typeof specs.coverage_ratio === "number" ? specs.coverage_ratio : 0;
     const edgeCells = typeof edge.cell_count === "number" ? edge.cell_count : 0;
     const execStatus = String(execCal.status || "unknown");
@@ -873,6 +889,9 @@ function ocPaperSubtabInit() {
       ? execCal.maker_order_sample_count
       : 0;
     const makerOk = makerStatus === "calibrated" || makerStatus === "limited";
+    const latencyStatus = String(execCal.latency_status || "unknown");
+    const latency = execCal.latency_ms || {};
+    const latencyOk = latencyStatus === "calibrated" || latencyStatus === "limited";
     const inputTooltip = "Indicators/signals are runner-derived from fixture OHLCV; funding/OI/BBO/tick-size depend on local recorder/V058 coverage";
     const runRows = runs.map(function (run) {
       return '<div class="oc-replay-run-row">'
@@ -910,6 +929,9 @@ function ocPaperSubtabInit() {
       + _metricCellHtml("oc-replay-summary-bbo-anchor", "BBO Anchor / BBO約束",
         pct(bboAnchorCoverage), bboAnchorCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
         "Taker fills are bounded by local best bid/ask only for covered events; status=" + bboAnchorStatus)
+      + _metricCellHtml("oc-replay-summary-depth", "Orderbook Depth / 深度約束",
+        pct(orderbookCoverage), orderbookCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "Partial-fill sizing consumes local market.ob_snapshots top-5 depth when covered")
       + _metricCellHtml("oc-replay-summary-specs", "Tick Size / 價格精度",
         pct(tickCoverage), tickCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
         "V058 instrument tick_size coverage")
@@ -925,6 +947,10 @@ function ocPaperSubtabInit() {
         makerConfidence + " · cap " + (makerCap === null ? "--" : pct(makerCap)),
         makerOk ? "oc-cell-ok" : "oc-cell-warn",
         "PostOnly order outcome calibration from demo/live_demo orders; samples=" + String(makerSampleCount))
+      + _metricCellHtml("oc-replay-summary-latency", "Latency / 延遲",
+        latency.q50 != null ? String(latency.q50) + " ms q50" : latencyStatus,
+        latencyOk ? "oc-cell-ok" : "oc-cell-warn",
+        "Latency metadata is attached to fills as effective_ts_ms; no runtime sleeping")
       + _metricCellHtml("oc-replay-summary-inputs", "Inputs / 策略輸入",
         fidelity.indicators && fidelity.indicators.status ? fidelity.indicators.status : "runner_derived",
         "oc-cell-ok", inputTooltip)
@@ -948,6 +974,11 @@ function ocPaperSubtabInit() {
     const ending = pnl.ending_balance;
     const starting = pnl.starting_balance;
     const decisions = Array.isArray(result.decision_traces) ? result.decision_traces.length : 0;
+    const bands = analytics.run_bands_bps || {};
+    const baseline = analytics.baseline_comparison || {};
+    const partialCount = fills.filter(function (fill) {
+      return String(fill.fill_status || "") === "partial";
+    }).length;
     const fmt = function (v, digits) {
       return typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits || 2) : "--";
     };
@@ -971,8 +1002,24 @@ function ocPaperSubtabInit() {
         String(analytics.ghost_fill_count || 0),
         Number(analytics.ghost_fill_count || 0) === 0 ? "oc-cell-ok" : "oc-cell-warn",
         "Qty=0 maker-miss or risk-reject ghost rows")
+      + _metricCellHtml("oc-replay-summary-partials", "Partial Fills / 部分成交",
+        String(partialCount),
+        partialCount === 0 ? "oc-cell-neutral" : "oc-cell-warn",
+        "Depth-limited partial fills from recorded top-5 orderbook coverage")
       + _metricCellHtml("oc-replay-summary-decisions", "Decisions / 決策", String(decisions),
         decisions > 0 ? "oc-cell-ok" : "oc-cell-warn", "Strategy decision trace entries")
+      + _metricCellHtml("oc-replay-summary-drawdown", "Drawdown / 回撤",
+        fmt(analytics.max_drawdown_bps, 2) + " bps",
+        typeof analytics.max_drawdown_bps === "number" ? "oc-cell-ok" : "oc-cell-warn",
+        String(analytics.drawdown_status || "balance curve unavailable"))
+      + _metricCellHtml("oc-replay-summary-bands", "Run Bands / 區間",
+        bands.q10 != null ? (fmt(bands.q10, 1) + " / " + fmt(bands.q50, 1) + " / " + fmt(bands.q90, 1)) : String(analytics.run_band_status || "--"),
+        analytics.run_band_status === "stationary_block_bootstrap" ? "oc-cell-ok" : "oc-cell-warn",
+        "Stationary block bootstrap q10/q50/q90 in bps")
+      + _metricCellHtml("oc-replay-summary-baseline", "Baseline Delta / 基準差",
+        baseline.delta_net_bps_after_fee != null ? fmt(baseline.delta_net_bps_after_fee, 2) + " bps" : String(analytics.baseline_comparison_status || "not_configured"),
+        baseline.verdict === "candidate_better" ? "oc-cell-ok" : "oc-cell-neutral",
+        "Read-only baseline-vs-candidate comparison when a baseline payload is attached")
       + _metricCellHtml("oc-replay-summary-balance", "Balance / 餘額",
         fmt(starting, 2) + " → " + fmt(ending, 2), "oc-cell-neutral", "Starting to ending balance")
       + '</div>';

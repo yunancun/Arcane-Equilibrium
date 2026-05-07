@@ -683,6 +683,16 @@ def test_apply_microstructure_overlay_enriches_prior_bbo_only() -> None:
                 }
             ],
         },
+        "orderbook_records": {
+            "BTCUSDT": [
+                {
+                    "ts_ms": 1_700_000_010_000,
+                    "bid_depth_5": 20.0,
+                    "ask_depth_5": 30.0,
+                    "spread_bps": 18.0,
+                }
+            ]
+        },
     }
 
     stats = mod._apply_microstructure_overlays(  # noqa: SLF001
@@ -696,14 +706,18 @@ def test_apply_microstructure_overlay_enriches_prior_bbo_only() -> None:
     assert stats["bbo_anchor_status"] == "available"
     assert stats["bbo_anchor_event_count"] == 1
     assert stats["bbo_anchor_coverage_ratio"] == 0.5
+    assert stats["orderbook_depth_event_count"] == 1
+    assert stats["orderbook_depth_coverage_ratio"] == 0.5
     assert events[0]["best_bid"] == 99.9
     assert events[0]["best_ask"] == 100.1
+    assert events[0]["bid_depth_5"] == 20.0
+    assert events[0]["ask_depth_5"] == 30.0
     assert events[0]["turnover_24h"] == 5_000_000.0
     assert events[0]["index_price"] == 100.0
     assert events[0]["open_interest"] == 12345.0
     assert events[0]["funding_rate"] == 0.0001
     assert stats["field_counts"]["turnover_24h"] == 1
-    assert events[0]["microstructure_source"] == "market.market_tickers"
+    assert events[0]["microstructure_source"] == "market.market_tickers+market.ob_snapshots"
     assert "best_bid" not in events[1]
 
 
@@ -807,3 +821,8 @@ def test_maker_order_outcome_summary_clamps_to_conservative_cap() -> None:
     assert summary["maker_any_fill_probability"] == 0.7
     assert summary["recommended_maker_fill_probability_cap"] == 0.40
     assert summary["maker_fill_cap_source"] == "observed_order_outcomes"
+    assert summary["latency_status"] == "limited"
+    assert summary["latency_sample_count"] == 50
+    assert summary["latency_ms"]["q50"] == 30_000
+    assert summary["latency_ms"]["q90"] == 30_000
+    assert summary["recommended_latency_ms"] == 30_000

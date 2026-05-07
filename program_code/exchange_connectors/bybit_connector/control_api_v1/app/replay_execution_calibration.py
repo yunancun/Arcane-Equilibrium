@@ -278,6 +278,16 @@ def build_maker_order_outcome_summary(
     rejected_count = sum(1 for item in records if bool(item.get("rejected")))
     cancelled_count = sum(1 for item in records if bool(item.get("cancelled")))
     post_only_cross_count = sum(1 for item in records if bool(item.get("post_only_cross")))
+    latency_values = [
+        latency
+        for latency in (
+            _latency_ms(item.get("order_ts"), item.get("latest_state_ts"))
+            for item in records
+        )
+        if latency is not None
+    ]
+    latency_q50 = _percentile(latency_values, 0.50)
+    latency_q90 = _percentile(latency_values, 0.90)
     latest_ts_ms = max(
         (
             _to_epoch_ms(item.get("latest_state_ts"))
@@ -329,6 +339,21 @@ def build_maker_order_outcome_summary(
         cap_source = "default_conservative_cap"
         cap = DEFAULT_MAKER_FILL_PROBABILITY_CAP
 
+    if (
+        len(latency_values) >= MIN_CALIBRATED_MAKER_ORDER_SAMPLES
+        and (latest_age_days or 999.0) <= 7.0
+    ):
+        latency_status = "calibrated"
+    elif (
+        len(latency_values) >= MIN_LIMITED_MAKER_ORDER_SAMPLES
+        and (latest_age_days or 999.0) <= 30.0
+    ):
+        latency_status = "limited"
+    elif unavailable_reason:
+        latency_status = "unavailable_without_order_state_changes"
+    else:
+        latency_status = "insufficient_latency_samples"
+
     return {
         "maker_order_source": source,
         "maker_fill_probability_status": status,
@@ -345,6 +370,10 @@ def build_maker_order_outcome_summary(
         "latest_maker_order_age_days": latest_age_days,
         "recommended_maker_fill_probability_cap": cap,
         "maker_fill_cap_source": cap_source,
+        "latency_status": latency_status,
+        "latency_sample_count": len(latency_values),
+        "latency_ms": {"q50": latency_q50, "q90": latency_q90},
+        "recommended_latency_ms": int(latency_q50) if latency_q50 is not None else None,
     }
 
 
@@ -570,6 +599,10 @@ def _base_summary(*, asof_ms: int) -> dict[str, Any]:
         "maker_any_fill_probability": 0.0,
         "recommended_maker_fill_probability_cap": DEFAULT_MAKER_FILL_PROBABILITY_CAP,
         "maker_fill_cap_source": "default_conservative_cap",
+        "latency_status": "unavailable_without_order_state_changes",
+        "latency_sample_count": 0,
+        "latency_ms": {"q50": None, "q90": None},
+        "recommended_latency_ms": None,
         "risk_overlay": {"applied": False},
     }
 
@@ -625,3 +658,11 @@ def _to_epoch_ms(value: Any) -> int | None:
     if parsed is None:
         return None
     return int(parsed)
+
+
+def _latency_ms(start: Any, end: Any) -> int | None:
+    start_ms = _to_epoch_ms(start)
+    end_ms = _to_epoch_ms(end)
+    if start_ms is None or end_ms is None or end_ms < start_ms:
+        return None
+    return end_ms - start_ms

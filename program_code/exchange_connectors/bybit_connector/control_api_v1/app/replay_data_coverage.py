@@ -8,6 +8,7 @@ risk, demo, or live settings.
 from __future__ import annotations
 
 import math
+import os
 from typing import Any, Callable
 
 
@@ -17,6 +18,8 @@ S1_BBO_COVERAGE_RATIO = 0.80
 S1_ORDERBOOK_COVERAGE_RATIO = 0.80
 S1_LIMITED_SAMPLE_COUNT = 30
 S1_CALIBRATED_SAMPLE_COUNT = 200
+DEFAULT_RECORDER_RETENTION_DAYS = 45
+MIN_RECORDER_RETENTION_DAYS = 14
 
 TIMEFRAME_INTERVAL_MS = {
     "1m": 60_000,
@@ -41,6 +44,7 @@ def estimate_replay_window_coverage_sync(
     interval_ms = TIMEFRAME_INTERVAL_MS.get(timeframe, 60_000)
     bars_per_symbol = max(0, math.ceil((end_ms - start_ms) / interval_ms))
     expected_slots = bars_per_symbol * len(clean_symbols)
+    retention_policy = _recorder_retention_policy(start_ms=start_ms, end_ms=end_ms)
     base = {
         "status": "empty" if not clean_symbols else "ok",
         "source": "local_market_recorder",
@@ -57,6 +61,7 @@ def estimate_replay_window_coverage_sync(
         "index_price": _coverage_block(0, expected_slots, "market.market_tickers"),
         "orderbook_depth": _coverage_block(0, expected_slots, "market.ob_snapshots"),
         "instrument_specs": _coverage_block(0, len(clean_symbols), "market.symbol_universe_snapshots"),
+        "retention_policy": retention_policy,
         "reason": None,
     }
     if not clean_symbols:
@@ -119,6 +124,9 @@ def build_replay_coverage_verdict(
     maker_samples = int(execution_calibration.get("maker_order_sample_count") or 0)
     slippage_samples = int(execution_calibration.get("slippage_sample_count") or 0)
     min_samples = min(maker_samples, slippage_samples)
+    retention_policy = recorder_coverage.get("retention_policy")
+    if not isinstance(retention_policy, dict):
+        retention_policy = {}
     reason_codes: list[str] = []
     if bbo_ratio < S2_PLUS_BBO_COVERAGE_RATIO:
         reason_codes.append("bbo_coverage_below_s2_plus")
@@ -132,6 +140,8 @@ def build_replay_coverage_verdict(
         reason_codes.append("execution_samples_below_s1_limited")
     elif min_samples < S1_CALIBRATED_SAMPLE_COUNT:
         reason_codes.append("execution_samples_below_s1_calibrated")
+    if retention_policy.get("status") not in (None, "ok"):
+        reason_codes.append(str(retention_policy.get("reason") or "recorder_retention_policy_warning"))
 
     if (
         bbo_ratio >= S1_BBO_COVERAGE_RATIO
@@ -160,6 +170,7 @@ def build_replay_coverage_verdict(
             "s1_orderbook_coverage_ratio": S1_ORDERBOOK_COVERAGE_RATIO,
             "s1_limited_sample_count": S1_LIMITED_SAMPLE_COUNT,
             "s1_calibrated_sample_count": S1_CALIBRATED_SAMPLE_COUNT,
+            "min_recorder_retention_days": MIN_RECORDER_RETENTION_DAYS,
         },
         "inputs": {
             "bbo_coverage_ratio": bbo_ratio,
@@ -167,6 +178,7 @@ def build_replay_coverage_verdict(
             "tick_size_coverage_ratio": tick_ratio,
             "maker_order_sample_count": maker_samples,
             "slippage_sample_count": slippage_samples,
+            "retention_policy": retention_policy,
         },
     }
 
@@ -190,6 +202,36 @@ def _coverage_block(covered: int, expected: int, source: str) -> dict[str, Any]:
         "covered_event_slots": covered,
         "expected_event_slots": expected,
         "coverage_ratio": ratio,
+    }
+
+
+def _configured_recorder_retention_days() -> int:
+    raw = os.environ.get(
+        "OPENCLAW_REF21_RECORDER_RETENTION_DAYS",
+        str(DEFAULT_RECORDER_RETENTION_DAYS),
+    )
+    try:
+        parsed = int(raw)
+    except ValueError:
+        parsed = DEFAULT_RECORDER_RETENTION_DAYS
+    return max(MIN_RECORDER_RETENTION_DAYS, parsed)
+
+
+def _recorder_retention_policy(*, start_ms: int, end_ms: int) -> dict[str, Any]:
+    retention_days = _configured_recorder_retention_days()
+    window_days = max(0.0, (end_ms - start_ms) / 86_400_000.0)
+    status = "ok" if window_days <= retention_days else "warning"
+    reason = None if status == "ok" else "window_exceeds_configured_recorder_retention"
+    return {
+        "status": status,
+        "reason": reason,
+        "configured_retention_days": retention_days,
+        "minimum_retention_days": MIN_RECORDER_RETENTION_DAYS,
+        "requested_window_days": window_days,
+        "maturity_rule": (
+            "S1 claims require locally recorded BBO/orderbook rows for the "
+            "requested window; windows older than retention remain S2/S2+."
+        ),
     }
 
 
@@ -226,11 +268,12 @@ def _table_presence(cur: Any) -> dict[str, dict[str, Any]]:
     for name in tables:
         if not result[name]["exists"]:
             continue
-        cur.execute(
-            f"SELECT COUNT(*)::bigint, MAX(ts) FROM {name};"
-        )
-        count, latest_ts = cur.fetchone() or (0, None)
+        cur.execute(f"SELECT COUNT(*)::bigint, MIN(ts), MAX(ts) FROM {name};")
+        count, oldest_ts, latest_ts = cur.fetchone() or (0, None, None)
         result[name]["row_count"] = int(count or 0)
+        result[name]["oldest_ts"] = (
+            oldest_ts.isoformat() if hasattr(oldest_ts, "isoformat") else oldest_ts
+        )
         result[name]["latest_ts"] = (
             latest_ts.isoformat() if hasattr(latest_ts, "isoformat") else latest_ts
         )

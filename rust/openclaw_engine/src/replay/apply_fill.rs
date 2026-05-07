@@ -114,6 +114,8 @@ use crate::intent_processor::OrderIntent;
 use crate::replay::risk_adapter::{ReplayPosition, RiskDecision};
 use crate::replay::runner::{IsolatedPipeline, SimulatedFill};
 
+const ORDERBOOK_DEPTH_PARTICIPATION_CAP: f64 = 0.20;
+
 // ─────────────────────────────────────────────────────────────────────────
 // Sprint C R6-T1 fee + R6-T2 slippage helpers / R6-T1 費率 + R6-T2 滑點輔助
 // ─────────────────────────────────────────────────────────────────────────
@@ -230,6 +232,105 @@ pub(crate) fn bbo_anchor_taker_reference_price(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PartialFillDecision {
+    filled_qty: f64,
+    requested_qty: f64,
+    fill_ratio: f64,
+    fill_status: &'static str,
+    model_status: &'static str,
+    depth_available_qty: Option<f64>,
+}
+
+fn partial_fill_decision(
+    requested_qty: f64,
+    is_buy: bool,
+    tif: Option<crate::order_manager::TimeInForce>,
+    bid_size: Option<f64>,
+    ask_size: Option<f64>,
+    bid_depth_5: Option<f64>,
+    ask_depth_5: Option<f64>,
+) -> PartialFillDecision {
+    let requested_qty = if requested_qty.is_finite() && requested_qty > 0.0 {
+        requested_qty
+    } else {
+        0.0
+    };
+    if requested_qty <= 0.0 {
+        return PartialFillDecision {
+            filled_qty: 0.0,
+            requested_qty,
+            fill_ratio: 0.0,
+            fill_status: "rejected",
+            model_status: "invalid_requested_qty",
+            depth_available_qty: None,
+        };
+    }
+    if matches!(tif, Some(crate::order_manager::TimeInForce::PostOnly)) {
+        return PartialFillDecision {
+            filled_qty: requested_qty,
+            requested_qty,
+            fill_ratio: 1.0,
+            fill_status: "filled",
+            model_status: "not_applicable_maker",
+            depth_available_qty: None,
+        };
+    }
+    let depth = if is_buy {
+        positive_finite_opt(ask_depth_5).or_else(|| positive_finite_opt(ask_size))
+    } else {
+        positive_finite_opt(bid_depth_5).or_else(|| positive_finite_opt(bid_size))
+    };
+    let Some(depth_qty) = depth else {
+        return PartialFillDecision {
+            filled_qty: requested_qty,
+            requested_qty,
+            fill_ratio: 1.0,
+            fill_status: "filled",
+            model_status: "unavailable_without_orderbook_depth",
+            depth_available_qty: None,
+        };
+    };
+    let executable_qty = (depth_qty * ORDERBOOK_DEPTH_PARTICIPATION_CAP).max(0.0);
+    let filled_qty = requested_qty.min(executable_qty);
+    let fill_ratio = if requested_qty > 0.0 {
+        (filled_qty / requested_qty).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let fill_status = if filled_qty <= 0.0 {
+        "partial_unfilled"
+    } else if filled_qty + f64::EPSILON < requested_qty {
+        "partial"
+    } else {
+        "filled"
+    };
+    let model_status = if fill_status == "filled" {
+        "applied_full"
+    } else {
+        "applied_partial"
+    };
+    PartialFillDecision {
+        filled_qty,
+        requested_qty,
+        fill_ratio,
+        fill_status,
+        model_status,
+        depth_available_qty: Some(depth_qty),
+    }
+}
+
+fn positive_finite_opt(value: Option<f64>) -> Option<f64> {
+    value.filter(|item| item.is_finite() && *item > 0.0)
+}
+
+fn effective_ts_ms(ts_ms: i64, latency_ms: Option<u64>) -> Option<i64> {
+    latency_ms
+        .and_then(|latency| i64::try_from(latency).ok())
+        .and_then(|latency| ts_ms.checked_add(latency))
+        .or(Some(ts_ms))
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // IsolatedPipeline apply_fill methods (extracted from runner.rs)
 // IsolatedPipeline apply_fill 方法（自 runner.rs 抽出）
@@ -249,6 +350,10 @@ impl IsolatedPipeline {
         close_price: f64,
         best_bid: Option<f64>,
         best_ask: Option<f64>,
+        bid_size: Option<f64>,
+        ask_size: Option<f64>,
+        bid_depth_5: Option<f64>,
+        ask_depth_5: Option<f64>,
         atr: f64,
         tier_label: &str,
     ) {
@@ -282,6 +387,15 @@ impl IsolatedPipeline {
         );
         match decision {
             RiskDecision::Accepted { final_qty, .. } => {
+                let partial = partial_fill_decision(
+                    final_qty,
+                    intent.is_long,
+                    intent.time_in_force,
+                    bid_size,
+                    ask_size,
+                    bid_depth_5,
+                    ask_depth_5,
+                );
                 // Reference price: limit if present (PostOnly), else event close.
                 // PostOnly slippage_bps=0 → fill_price == limit_price byte-equal
                 // to Sprint A/B baseline.
@@ -311,32 +425,60 @@ impl IsolatedPipeline {
                         symbol: intent.symbol.clone(),
                         side: if intent.is_long { "long" } else { "short" }.to_string(),
                         qty: 0.0,
+                        requested_qty: partial.requested_qty,
+                        fill_ratio: 0.0,
+                        fill_status: "maker_miss".to_string(),
                         price: reference_price,
                         evidence_source_tier: tier_label.to_string(),
                         fee: 0.0,
                         fee_rate,
                         slippage_bps,
                         liquidity_role: liquidity_role.to_string(),
+                        partial_fill_model_status: partial.model_status.to_string(),
+                        depth_available_qty: partial.depth_available_qty,
+                        latency_ms: self.execution_latency_ms,
+                        effective_ts_ms: effective_ts_ms(ts_ms, self.execution_latency_ms),
                     });
                     self.last_action = format!("maker_miss:{}", intent.symbol);
                     return;
                 }
                 let fill_price = apply_slippage_to_price(reference_price, slippage_bps);
-                let fee = final_qty * fill_price * fee_rate;
+                let fee = partial.filled_qty * fill_price * fee_rate;
                 self.fills.push(SimulatedFill {
                     ts_ms,
                     symbol: intent.symbol.clone(),
                     side: if intent.is_long { "long" } else { "short" }.to_string(),
-                    qty: final_qty,
+                    qty: partial.filled_qty,
+                    requested_qty: partial.requested_qty,
+                    fill_ratio: partial.fill_ratio,
+                    fill_status: partial.fill_status.to_string(),
                     price: fill_price,
                     evidence_source_tier: tier_label.to_string(),
                     fee,
                     fee_rate,
                     slippage_bps,
                     liquidity_role: liquidity_role.to_string(),
+                    partial_fill_model_status: partial.model_status.to_string(),
+                    depth_available_qty: partial.depth_available_qty,
+                    latency_ms: self.execution_latency_ms,
+                    effective_ts_ms: effective_ts_ms(ts_ms, self.execution_latency_ms),
                 });
-                self.apply_fill_open(&intent.symbol, intent.is_long, final_qty, fill_price, fee);
-                self.last_action = format!("open:{}", intent.symbol);
+                if partial.filled_qty > 0.0 {
+                    self.apply_fill_open(
+                        &intent.symbol,
+                        intent.is_long,
+                        partial.filled_qty,
+                        fill_price,
+                        fee,
+                    );
+                }
+                self.last_action = if partial.fill_status == "partial" {
+                    format!("open_partial:{}", intent.symbol)
+                } else if partial.fill_status == "partial_unfilled" {
+                    format!("open_unfilled:{}", intent.symbol)
+                } else {
+                    format!("open:{}", intent.symbol)
+                };
             }
             RiskDecision::Rejected { gate, reason } => {
                 // Ghost fill row (qty=0) preserves the rejected decision for
@@ -364,12 +506,19 @@ impl IsolatedPipeline {
                     symbol: intent.symbol.clone(),
                     side: if intent.is_long { "long" } else { "short" }.to_string(),
                     qty: 0.0,
+                    requested_qty: 0.0,
+                    fill_ratio: 0.0,
+                    fill_status: "rejected".to_string(),
                     price: reference_price,
                     evidence_source_tier: tier_label.to_string(),
                     fee: 0.0,
                     fee_rate,
                     slippage_bps,
                     liquidity_role: liquidity_role.to_string(),
+                    partial_fill_model_status: "not_evaluated_risk_reject".to_string(),
+                    depth_available_qty: None,
+                    latency_ms: self.execution_latency_ms,
+                    effective_ts_ms: effective_ts_ms(ts_ms, self.execution_latency_ms),
                 });
                 self.last_action = format!("reject:{}:{}", intent.symbol, gate);
             }
@@ -390,6 +539,10 @@ impl IsolatedPipeline {
         close_price: f64,
         best_bid: Option<f64>,
         best_ask: Option<f64>,
+        bid_size: Option<f64>,
+        ask_size: Option<f64>,
+        bid_depth_5: Option<f64>,
+        ask_depth_5: Option<f64>,
         tier_label: &str,
     ) {
         let snapshot = match self.paper_snapshot.as_ref() {
@@ -422,23 +575,47 @@ impl IsolatedPipeline {
         let reference_price =
             bbo_anchor_taker_reference_price(close_price, best_bid, best_ask, close_is_long);
         let fill_price = apply_slippage_to_price(reference_price, slippage_bps);
-        let fee = pos.qty * fill_price * fee_rate;
+        let partial = partial_fill_decision(
+            pos.qty,
+            close_is_long,
+            None,
+            bid_size,
+            ask_size,
+            bid_depth_5,
+            ask_depth_5,
+        );
+        let fee = partial.filled_qty * fill_price * fee_rate;
         // Record close-side fill (qty>0 with side opposite to position).
         // 記 close-side fill（qty>0，side 與倉位反向）。
         self.fills.push(SimulatedFill {
             ts_ms,
             symbol: symbol.to_string(),
             side: if pos.is_long { "short" } else { "long" }.to_string(),
-            qty: pos.qty,
+            qty: partial.filled_qty,
+            requested_qty: partial.requested_qty,
+            fill_ratio: partial.fill_ratio,
+            fill_status: partial.fill_status.to_string(),
             price: fill_price,
             evidence_source_tier: tier_label.to_string(),
             fee,
             fee_rate,
             slippage_bps,
             liquidity_role: liquidity_role.to_string(),
+            partial_fill_model_status: partial.model_status.to_string(),
+            depth_available_qty: partial.depth_available_qty,
+            latency_ms: self.execution_latency_ms,
+            effective_ts_ms: effective_ts_ms(ts_ms, self.execution_latency_ms),
         });
-        self.apply_fill_close(symbol, fill_price, fee);
-        self.last_action = format!("close:{}", symbol);
+        if partial.filled_qty > 0.0 {
+            self.apply_fill_close(symbol, fill_price, fee, partial.filled_qty);
+        }
+        self.last_action = if partial.fill_status == "partial" {
+            format!("close_partial:{}", symbol)
+        } else if partial.fill_status == "partial_unfilled" {
+            format!("close_unfilled:{}", symbol)
+        } else {
+            format!("close:{}", symbol)
+        };
     }
 
     /// Sprint B2 R5-T3 — open-side snapshot mutation. Inserts/extends a
@@ -508,13 +685,23 @@ impl IsolatedPipeline {
     /// Sprint B2 R5-T3 — close-side snapshot mutation. Realises PnL =
     /// (fill_price - entry_price) * qty (long; sign-flipped for short),
     /// removes position, updates balance, and deducts the close-side fee.
-    pub(super) fn apply_fill_close(&mut self, symbol: &str, fill_price: f64, fee: f64) {
+    pub(super) fn apply_fill_close(
+        &mut self,
+        symbol: &str,
+        fill_price: f64,
+        fee: f64,
+        filled_qty: f64,
+    ) {
         let snap = match self.paper_snapshot.as_mut() {
             Some(s) => s,
             None => return,
         };
         if let Some(idx) = snap.positions.iter().position(|p| p.symbol == symbol) {
-            let pos = snap.positions.remove(idx);
+            let pos = snap.positions[idx].clone();
+            let close_qty = filled_qty.min(pos.qty).max(0.0);
+            if close_qty <= 0.0 {
+                return;
+            }
             // PnL = (fill - entry) * qty for long; (entry - fill) * qty for short.
             // PnL = (fill - entry) * qty 多倉；(entry - fill) * qty 空倉。
             let realised_per_unit = if pos.is_long {
@@ -522,8 +709,13 @@ impl IsolatedPipeline {
             } else {
                 pos.entry_price - fill_price
             };
-            snap.balance += realised_per_unit * pos.qty;
+            snap.balance += realised_per_unit * close_qty;
             snap.balance -= fee;
+            if close_qty + f64::EPSILON >= pos.qty {
+                snap.positions.remove(idx);
+            } else if let Some(existing) = snap.positions.get_mut(idx) {
+                existing.qty -= close_qty;
+            }
         }
         self.balance = snap.balance;
     }

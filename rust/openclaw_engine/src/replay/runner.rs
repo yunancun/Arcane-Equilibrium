@@ -184,6 +184,15 @@ pub struct SimulatedFill {
     pub symbol: String,
     pub side: String,
     pub qty: f64,
+    /// Requested quantity before replay execution realism clamps.
+    /// replay 執行真實度 clamp 前的原始請求數量。
+    pub requested_qty: f64,
+    /// Filled / requested ratio. 1.0 = full fill; 0.0 = miss/reject.
+    /// 成交 / 請求比例。1.0 = 全成；0.0 = 未成/拒絕。
+    pub fill_ratio: f64,
+    /// Fill status: filled / partial / rejected / maker_miss / synthetic.
+    /// 成交狀態：filled / partial / rejected / maker_miss / synthetic。
+    pub fill_status: String,
     pub price: f64,
     pub evidence_source_tier: String,
     /// Sprint C R6-T1 — per-fill fee in quote-asset units (qty × price × fee_rate).
@@ -198,6 +207,18 @@ pub struct SimulatedFill {
     /// Sprint C R6-T1 — liquidity role ∈ {'maker', 'taker', 'unknown'} (V050 CHECK).
     /// Sprint C R6-T1 — 流動性角色 ∈ {'maker', 'taker', 'unknown'}（V050 CHECK）。
     pub liquidity_role: String,
+    /// REF-21 S1 calibration: partial-fill model status for this fill.
+    /// REF-21 S1 校準：本 fill 的 partial-fill 模型狀態。
+    pub partial_fill_model_status: String,
+    /// REF-21 S1 calibration: usable depth quantity at the replay timestamp.
+    /// REF-21 S1 校準：replay 時刻可用的深度數量。
+    pub depth_available_qty: Option<f64>,
+    /// REF-21 S1 calibration: modeled execution latency in milliseconds.
+    /// REF-21 S1 校準：建模執行延遲（毫秒）。
+    pub latency_ms: Option<u64>,
+    /// REF-21 S1 calibration: ts_ms + latency_ms when latency exists.
+    /// REF-21 S1 校準：存在 latency 時為 ts_ms + latency_ms。
+    pub effective_ts_ms: Option<i64>,
 }
 
 /// Coarse PnL summary written to `replay_report.json::pnl_summary`.
@@ -469,6 +490,10 @@ pub struct IsolatedPipeline {
     /// attempts into qty=0 maker-miss ghost rows.
     pub(super) maker_fill_probability_cap: Option<f64>,
     pub(super) maker_attempt_counter: u64,
+    /// REF-21 S1 calibration: replay-only modeled latency attached to emitted
+    /// fill evidence. This does not import live order state; it is parsed from
+    /// the signed manifest execution_calibration block.
+    pub(super) execution_latency_ms: Option<u64>,
     /// REF-21: optional replay-safe scanner timeline. When present, adapter
     /// path only feeds a strategy tick for symbols active at the historical
     /// scanner cycle, while still feeding ticks for already-open positions so
@@ -521,6 +546,7 @@ pub fn build_isolated_pipeline(
         volume_24h: None,
         maker_fill_probability_cap: None,
         maker_attempt_counter: 0,
+        execution_latency_ms: None,
         scanner_timeline: None,
         scanner_timeline_skipped_events: 0,
     })
@@ -699,10 +725,15 @@ impl IsolatedPipeline {
     /// REF-21 calibration — attach replay-only execution calibration knobs.
     /// The dedicated subprocess receives this only through the signed
     /// manifest; it never reads or mutates live execution state.
-    pub fn with_execution_calibration(mut self, maker_fill_probability_cap: Option<f64>) -> Self {
+    pub fn with_execution_calibration(
+        mut self,
+        maker_fill_probability_cap: Option<f64>,
+        execution_latency_ms: Option<u64>,
+    ) -> Self {
         self.maker_fill_probability_cap = maker_fill_probability_cap
             .filter(|value| value.is_finite())
             .map(|value| value.clamp(0.0, 1.0));
+        self.execution_latency_ms = execution_latency_ms.filter(|value| *value <= 60_000);
         self
     }
 
@@ -863,6 +894,13 @@ impl IsolatedPipeline {
                     fee_rate: 0.0,
                     slippage_bps: 0.0,
                     liquidity_role: "unknown".to_string(),
+                    requested_qty: qty,
+                    fill_ratio: 1.0,
+                    fill_status: "synthetic".to_string(),
+                    partial_fill_model_status: "synthetic_walker_unavailable".to_string(),
+                    depth_available_qty: None,
+                    latency_ms: None,
+                    effective_ts_ms: Some(event.ts_ms),
                 });
             } else {
                 // Mark-to-market: update balance with delta vs last seen entry.
@@ -984,6 +1022,10 @@ impl IsolatedPipeline {
                             event.close,
                             event.best_bid,
                             event.best_ask,
+                            event.bid_size,
+                            event.ask_size,
+                            event.bid_depth_5,
+                            event.ask_depth_5,
                             atr,
                             &tier_label,
                         );
@@ -995,6 +1037,10 @@ impl IsolatedPipeline {
                             event.close,
                             event.best_bid,
                             event.best_ask,
+                            event.bid_size,
+                            event.ask_size,
+                            event.bid_depth_5,
+                            event.ask_depth_5,
                             &tier_label,
                         );
                     }
@@ -1144,6 +1190,8 @@ mod tests {
                 best_ask: None,
                 bid_size: None,
                 ask_size: None,
+                bid_depth_5: None,
+                ask_depth_5: None,
                 spread_bps: None,
                 microstructure_source: None,
                 funding_rate: None,
@@ -1168,6 +1216,8 @@ mod tests {
                 best_ask: None,
                 bid_size: None,
                 ask_size: None,
+                bid_depth_5: None,
+                ask_depth_5: None,
                 spread_bps: None,
                 microstructure_source: None,
                 funding_rate: None,
@@ -1192,6 +1242,8 @@ mod tests {
                 best_ask: None,
                 bid_size: None,
                 ask_size: None,
+                bid_depth_5: None,
+                ask_depth_5: None,
                 spread_bps: None,
                 microstructure_source: None,
                 funding_rate: None,
@@ -1433,6 +1485,8 @@ mod tests {
             best_ask: None,
             bid_size: None,
             ask_size: None,
+            bid_depth_5: None,
+            ask_depth_5: None,
             spread_bps: None,
             microstructure_source: None,
             funding_rate: None,
@@ -1681,6 +1735,8 @@ mod tests {
             best_ask: None,
             bid_size: None,
             ask_size: None,
+            bid_depth_5: None,
+            ask_depth_5: None,
             spread_bps: None,
             microstructure_source: None,
             funding_rate: None,
@@ -1830,6 +1886,8 @@ mod tests {
             best_ask: None,
             bid_size: None,
             ask_size: None,
+            bid_depth_5: None,
+            ask_depth_5: None,
             spread_bps: None,
             microstructure_source: None,
             funding_rate: None,
@@ -2065,6 +2123,44 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_fill_taker_open_uses_depth_partial_and_latency_metadata() {
+        // REF-21 S1: taker replay consumes recorded top-5 depth when present.
+        // Only 20% of usable top-5 depth is considered executable, and the
+        // calibrated latency is surfaced without sleeping or mutating runtime.
+        let mut events = r6_single_event_with_bbo(99.0, 101.0);
+        events[0].ask_depth_5 = Some(0.02);
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_ref21_depth_latency".into(),
+            "S3",
+            events,
+        )
+        .expect("baseline build OK")
+        .with_replay_fee_context(None, None, None)
+        .with_execution_calibration(None, Some(250));
+        let (strategy_adapter, risk_adapter) = make_tif_adapters(None, true, None);
+        let snapshot = make_snapshot_seed(10_000.0, Some(100.0), Vec::new());
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes");
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+        assert_eq!(result.fills.len(), 1, "expected one accepted partial fill");
+        let f0 = &result.fills[0];
+        assert_eq!(f0.requested_qty, 0.01);
+        assert!(
+            (f0.qty - 0.004).abs() < 1e-12,
+            "20% of ask_depth_5=0.02 should fill 0.004, got {}",
+            f0.qty
+        );
+        assert_eq!(f0.fill_status, "partial");
+        assert_eq!(f0.partial_fill_model_status, "applied_partial");
+        assert_eq!(f0.depth_available_qty, Some(0.02));
+        assert_eq!(f0.latency_ms, Some(250));
+        assert_eq!(f0.effective_ts_ms, Some(251));
+    }
+
+    #[test]
     fn test_apply_fill_postonly_path_emits_maker_zero_slippage() {
         // R6-T1+T2 cross-check: PostOnly → maker / 0 slippage / price == limit_price.
         // R6-T1+T2 交叉驗證：PostOnly → maker / 0 slippage / price == limit_price。
@@ -2123,7 +2219,7 @@ mod tests {
         )
         .expect("baseline build OK")
         .with_replay_fee_context(None, None, None)
-        .with_execution_calibration(Some(0.0));
+        .with_execution_calibration(Some(0.0), None);
         let (strategy_adapter, risk_adapter) =
             make_tif_adapters(Some(TimeInForce::PostOnly), true, Some(99.5));
         let snapshot = make_snapshot_seed(10_000.0, Some(100.0), Vec::new());

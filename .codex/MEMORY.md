@@ -137,6 +137,7 @@ REF-21 2026-05-06 empirical gap closure:
   guard
 - V057-V060 migration files include Guard A/B/C and passed Linux PG transaction dry-run on `trade-core`; pre-existing objects were absent, all four migrations created expected objects inside the transaction, and rollback left all five target tables absent
 - V061 `replay.calculate_promotion_metrics` is now a non-stub SECURITY DEFINER calculator. It derives metrics from `replay.experiments`, `replay.simulated_fills`, and `learning.edge_estimate_snapshots`; includes PSR/DSR, CSCV PBO, stationary bootstrap q10/q50/q90, and fail-closed promotion reasons; Linux transaction dry-run returned `eligible=true` with rollback proof.
+- 2026-05-07 S1 replay calibration lift is implemented in source/tests: Rust fills now carry depth partial-fill + latency metadata, Python execution calibration exposes latency q50/q90, reports include balance curve / drawdown / stationary block bootstrap bands / baseline comparison, `/replay/advisory/compare` is read-only, and recorder retention/maturity policy is surfaced. Confidence still depends on local recorder history; do not claim historical L2 for windows before recorder startup.
 - GUI/CLAUDE console contract is 13 tabs
 
 Current strategy-edge packet:
