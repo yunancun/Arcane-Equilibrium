@@ -171,7 +171,9 @@ impl SpineObjectEnvelope {
             order_plan_id: None,
             execution_report_id: None,
             lease_id: None,
-            state: if verdict.allow {
+            state: if verdict.allow && !verdict.p2_modifications.is_empty() {
+                "modified"
+            } else if verdict.allow {
                 "approved"
             } else {
                 "rejected"

@@ -199,7 +199,7 @@ class ExecutionPlan(_SpineModel):
     schema_version: str = "agent_spine.execution_plan.v1"
     order_plan_id: str
     decision_id: str
-    verdict_id: str
+    verdict_id: str = Field(min_length=1)
     ts_ms: int
     engine_mode: str
     symbol: str
