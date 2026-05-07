@@ -101,13 +101,11 @@
 use serde::Serialize;
 use std::collections::HashMap;
 
-use crate::intent_processor::OrderIntent;
+use crate::replay::context_builder::{ReplayContextBuilder, ReplayTickInputs};
 use crate::replay::fixture_loader::MarketEvent;
 use crate::replay::forbidden_guard::{self, ForbiddenPathError};
 use crate::replay::profile::ReplayProfile;
-use crate::replay::risk_adapter::{
-    ReplayPaperSnapshot, ReplayPosition, ReplayRiskAdapter, RiskDecision,
-};
+use crate::replay::risk_adapter::{ReplayPaperSnapshot, ReplayRiskAdapter};
 use crate::replay::scanner_timeline::ReplayScannerTimeline;
 use crate::replay::strategy_adapter::{DecisionTraceEntry, ReplayStrategyAdapter};
 use crate::strategies::StrategyAction;
@@ -690,6 +688,10 @@ impl IsolatedPipeline {
         self
     }
 
+    fn set_replay_event_turnover_24h(&mut self, turnover_24h: Option<f64>) {
+        self.volume_24h = turnover_24h.filter(|v| v.is_finite() && *v > 0.0);
+    }
+
     /// REF-21 full-chain replay: attach a precomputed, replay-safe scanner
     /// timeline. The timeline is built inside the dedicated replay subprocess
     /// from fixture data only; it does not share live scanner state.
@@ -874,6 +876,7 @@ impl IsolatedPipeline {
     /// 為 R5-T2 既綠路徑。
     fn execute_adapter_pipeline(&mut self) -> Result<(), ForbiddenPathError> {
         let fixtures = std::mem::take(&mut self.fixtures);
+        let mut context_builder = ReplayContextBuilder::new();
         for event in fixtures.iter() {
             // Pre-step runtime guard. V3 §12 #10 + Proof 4 acceptance.
             // 步驟前 runtime guard。V3 §12 #10 + Proof 4 acceptance。
@@ -887,20 +890,14 @@ impl IsolatedPipeline {
                 err
             })?;
 
+            let tick_inputs = context_builder.update(event);
+
             // Update snapshot's last-seen price for this symbol so Gate 2.6
             // P1 cap (balance * p1_risk_pct / price) has a real anchor.
-            // ATR is derived later — fixture builder pre-computes
-            // `IndicatorSnapshot.atr_14` (PA design §13 line 691); R5-T3
-            // assumes `event.indicators` is None until R5-T4 fixture loader
-            // upgrade lands, falling back to atr=0.0 (Kelly skips
-            // volatility scaling — matches `risk_adapter::evaluate` line 321).
-            //
-            // 更新 snapshot 該 symbol 的 latest_price，使 Gate 2.6 P1 cap
-            // （balance * p1_risk_pct / price）有真錨。ATR 後算 — fixture
-            // builder 預先算 `IndicatorSnapshot.atr_14`（PA design §13
-            // line 691）；R5-T3 在 R5-T4 fixture loader 升級前假設
-            // `event.indicators` 為 None，fallback 至 atr=0.0（Kelly 跳過
-            // 波動率縮放 — 對齊 `risk_adapter::evaluate` line 321）。
+            // REF-21 derives indicators/signals inside the isolated subprocess
+            // from fixture OHLCV, or consumes fixture-provided snapshots when
+            // present. ATR therefore reaches risk evaluation on warm bars
+            // without importing live IndicatorEngine / SignalEngine singletons.
             //
             // SAFETY / 不變量：本 block 至 self.paper_snapshot.is_some() —
             // execute_adapter_pipeline 由 execute() 守衛保證 strategy_adapter
@@ -911,7 +908,14 @@ impl IsolatedPipeline {
             if let Some(snap) = self.paper_snapshot.as_mut() {
                 snap.latest_price = Some(event.close);
             }
-            let atr: f64 = 0.0; // R5-T4 fixture-loader upgrade will populate.
+            let atr: f64 = tick_inputs
+                .indicators
+                .as_ref()
+                .and_then(|snapshot| snapshot.get_conservative_atr())
+                .map(|atr| atr.atr)
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .unwrap_or(0.0);
+            self.set_replay_event_turnover_24h(tick_inputs.turnover_24h);
             let tier_label = self.fixture_tier_label.clone();
 
             if self.should_skip_for_scanner_timeline(event) {
@@ -919,11 +923,7 @@ impl IsolatedPipeline {
                 continue;
             }
 
-            // Build TickContext (R5-T3 minimal fields; R5-T4 CLI will populate
-            // indicators, signals, h0_allowed from fixture metadata).
-            // 構造 TickContext（R5-T3 最小欄位；R5-T4 CLI 將以 fixture metadata
-            // 填 indicators / signals / h0_allowed）。
-            let ctx = build_tick_context(event);
+            let ctx = build_tick_context(event, &tick_inputs);
 
             // Strategy emits actions (mut borrow on adapter).
             // 策略發出 action（adapter 取 mut borrow）。
@@ -1016,32 +1016,28 @@ impl IsolatedPipeline {
     }
 }
 
-/// Sprint B2 R5-T3 — build a minimal `TickContext` for adapter-path
-/// `Strategy::on_tick`. R5-T3 leaves indicators/signals empty; R5-T4
-/// CLI + fixture-builder will populate them per PA design §13 line 691.
+/// Build a replay TickContext from fixture event + replay-safe derived inputs.
 ///
-/// Sprint B2 R5-T3 — 為 adapter 路徑 `Strategy::on_tick` 建最小
-/// `TickContext`。R5-T3 留 indicators/signals 為空；R5-T4 CLI + fixture-builder
-/// 會依 PA design §13 line 691 填入。
-///
-/// SAFETY / 不變量：本 helper 不導入任何 V3 §6.2 forbidden surface；
-/// `signals` 用 `&[]` 空切片（'static），`indicators` 用 None。
-/// SAFETY: helper does not import any V3 §6.2 forbidden surface; `signals`
-/// uses `&[]` empty slice ('static), `indicators` uses None.
-fn build_tick_context<'a>(event: &'a MarketEvent) -> crate::tick_pipeline::TickContext<'a> {
+/// SAFETY: this helper borrows owned inputs from the current replay loop only;
+/// it imports no production singleton, DB writer, exchange, IPC, or live-auth
+/// surface.
+fn build_tick_context<'a>(
+    event: &'a MarketEvent,
+    inputs: &'a ReplayTickInputs,
+) -> crate::tick_pipeline::TickContext<'a> {
     crate::tick_pipeline::TickContext {
         symbol: &event.symbol,
         price: event.close,
         timestamp_ms: event.ts_ms.max(0) as u64,
-        indicators: None,
-        signals: &[],
-        h0_allowed: true,
-        funding_rate: None,
-        index_price: None,
-        open_interest: None,
+        indicators: inputs.indicators.as_ref(),
+        signals: &inputs.signals,
+        h0_allowed: inputs.h0_allowed,
+        funding_rate: inputs.funding_rate,
+        index_price: inputs.index_price,
+        open_interest: inputs.open_interest,
         best_bid: event.best_bid,
         best_ask: event.best_ask,
-        tick_size: None,
+        tick_size: inputs.tick_size,
     }
 }
 
@@ -1073,12 +1069,20 @@ mod tests {
                 close: 100.0,
                 volume: 1.0,
                 turnover: None,
+                turnover_24h: None,
                 best_bid: None,
                 best_ask: None,
                 bid_size: None,
                 ask_size: None,
                 spread_bps: None,
                 microstructure_source: None,
+                funding_rate: None,
+                index_price: None,
+                open_interest: None,
+                tick_size: None,
+                h0_allowed: None,
+                indicators: None,
+                signals: Vec::new(),
             },
             MarketEvent {
                 ts_ms: 2,
@@ -1089,12 +1093,20 @@ mod tests {
                 close: 105.0,
                 volume: 1.0,
                 turnover: None,
+                turnover_24h: None,
                 best_bid: None,
                 best_ask: None,
                 bid_size: None,
                 ask_size: None,
                 spread_bps: None,
                 microstructure_source: None,
+                funding_rate: None,
+                index_price: None,
+                open_interest: None,
+                tick_size: None,
+                h0_allowed: None,
+                indicators: None,
+                signals: Vec::new(),
             },
             MarketEvent {
                 ts_ms: 3,
@@ -1105,12 +1117,20 @@ mod tests {
                 close: 50.5,
                 volume: 5.0,
                 turnover: None,
+                turnover_24h: None,
                 best_bid: None,
                 best_ask: None,
                 bid_size: None,
                 ask_size: None,
                 spread_bps: None,
                 microstructure_source: None,
+                funding_rate: None,
+                index_price: None,
+                open_interest: None,
+                tick_size: None,
+                h0_allowed: None,
+                indicators: None,
+                signals: Vec::new(),
             },
         ]
     }
@@ -1453,12 +1473,20 @@ mod tests {
             close: 100.0,
             volume: 1.0,
             turnover: None,
+            turnover_24h: None,
             best_bid: None,
             best_ask: None,
             bid_size: None,
             ask_size: None,
             spread_bps: None,
             microstructure_source: None,
+            funding_rate: None,
+            index_price: None,
+            open_interest: None,
+            tick_size: None,
+            h0_allowed: None,
+            indicators: None,
+            signals: Vec::new(),
         }];
         let pipeline = build_isolated_pipeline(
             ReplayProfile::Isolated,
@@ -1584,12 +1612,20 @@ mod tests {
             close: 100.0,
             volume: 1.0,
             turnover: None,
+            turnover_24h: None,
             best_bid: None,
             best_ask: None,
             bid_size: None,
             ask_size: None,
             spread_bps: None,
             microstructure_source: None,
+            funding_rate: None,
+            index_price: None,
+            open_interest: None,
+            tick_size: None,
+            h0_allowed: None,
+            indicators: None,
+            signals: Vec::new(),
         }]
     }
 

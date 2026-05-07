@@ -780,6 +780,17 @@ function ocPaperSubtabInit() {
     const strategies = Array.isArray(data.strategies) ? data.strategies : [];
     const runs = Array.isArray(data.runs) ? data.runs : [];
     const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    const micro = data.microstructure_overlay || {};
+    const edge = data.edge_snapshot || {};
+    const fidelity = data.input_fidelity || {};
+    const specs = data.instrument_specs || {};
+    const pct = function (v) {
+      return typeof v === "number" && Number.isFinite(v) ? (v * 100).toFixed(0) + "%" : "--";
+    };
+    const microCoverage = typeof micro.coverage_ratio === "number" ? micro.coverage_ratio : 0;
+    const tickCoverage = typeof specs.coverage_ratio === "number" ? specs.coverage_ratio : 0;
+    const edgeCells = typeof edge.cell_count === "number" ? edge.cell_count : 0;
+    const inputTooltip = "Indicators/signals are runner-derived from fixture OHLCV; funding/OI/BBO/tick-size depend on local recorder/V058 coverage";
     const runRows = runs.map(function (run) {
       return '<div class="oc-replay-run-row">'
         + '<span>' + ocEsc(run.strategy || "strategy") + '</span>'
@@ -806,6 +817,23 @@ function ocPaperSubtabInit() {
       + _metricCellHtml("oc-replay-summary-runs", "Runs / 子進程",
         String(runs.length), runs.length > 0 ? "oc-cell-ok" : "oc-cell-warn",
         "Dedicated replay_runner subprocess runs")
+      + _metricCellHtml("oc-replay-summary-universe", "Universe / 樣本池",
+        String(data.universe_source || "unknown"),
+        data.universe_source === "v058_symbol_universe_snapshots" ? "oc-cell-ok" : "oc-cell-warn",
+        "Universe source used before scanner replay")
+      + _metricCellHtml("oc-replay-summary-micro", "Microstructure / 微結構",
+        pct(microCoverage), microCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "Local market.market_tickers BBO/funding/OI overlay coverage")
+      + _metricCellHtml("oc-replay-summary-specs", "Tick Size / 價格精度",
+        pct(tickCoverage), tickCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "V058 instrument tick_size coverage")
+      + _metricCellHtml("oc-replay-summary-edge", "Edge Snapshot / Edge快照",
+        edge.status === "ok" ? String(edgeCells) + " cells" : String(edge.status || "missing"),
+        edge.status === "ok" ? "oc-cell-ok" : "oc-cell-warn",
+        "V059 edge snapshot cells with cutoff at replay window start")
+      + _metricCellHtml("oc-replay-summary-inputs", "Inputs / 策略輸入",
+        fidelity.indicators && fidelity.indicators.status ? fidelity.indicators.status : "runner_derived",
+        "oc-cell-ok", inputTooltip)
       + '</div>'
       + '<div class="oc-replay-run-list">' + runRows + '</div>'
       + warningHtml;
@@ -969,7 +997,7 @@ function ocPaperSubtabInit() {
       + '<label class="oc-replay-field">Window Start<input id="oc-replay-quick-window-start" type="datetime-local" value="' + ocEsc(defaults.start) + '" /></label>'
       + '<label class="oc-replay-field">Window End<input id="oc-replay-quick-window-end" type="datetime-local" value="' + ocEsc(defaults.end) + '" /></label>'
       + '<label class="oc-replay-field">Starting Balance<input id="oc-replay-quick-starting-balance" type="number" min="1" step="100" value="10000" /></label>'
-      + '<label class="oc-replay-field">Max Symbols<input id="oc-replay-quick-max-symbols" type="number" min="1" max="25" step="1" value="8" /></label>'
+      + '<label class="oc-replay-field">Max Symbols<input id="oc-replay-quick-max-symbols" type="number" min="1" max="25" step="1" value="25" /></label>'
       + '<label class="oc-replay-field">Category<select id="oc-replay-quick-category">'
       + '<option value="linear">linear</option><option value="spot">spot</option>'
       + '<option value="inverse">inverse</option></select></label>'
@@ -1107,7 +1135,7 @@ function ocPaperSubtabInit() {
         data_window_start: startIso,
         data_window_end: endIso,
         starting_balance: _numberFromInput("oc-replay-quick-starting-balance", 10000),
-        max_symbols: Math.max(1, Math.min(25, Math.round(_numberFromInput("oc-replay-quick-max-symbols", 8)))),
+        max_symbols: Math.max(1, Math.min(25, Math.round(_numberFromInput("oc-replay-quick-max-symbols", 25)))),
         use_current_config: true,
         auto_finalize_completed: true
       };

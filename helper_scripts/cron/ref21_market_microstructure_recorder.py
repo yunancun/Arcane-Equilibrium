@@ -192,6 +192,7 @@ def ticker_rows(
             "turnover_24h": to_float(item.get("turnover24h")),
             "spread_bps": spread_bps(bid, ask),
             "open_interest": to_float(item.get("openInterest")),
+            "funding_rate": to_float(item.get("fundingRate")),
         })
     rows.sort(key=lambda row: (SYMBOL_PRIORITY.get(str(row["symbol"]), 2), str(row["symbol"])))
     return rows
@@ -254,18 +255,35 @@ def insert_ticker_rows(conn: Any, rows: list[dict[str, Any]]) -> int:
 
     if not rows:
         return 0
-    sql = """
-    INSERT INTO market.market_tickers (
-        ts, symbol, last_price, mark_price, index_price, best_bid, best_ask,
-        bid_size, ask_size, volume_24h, turnover_24h, spread_bps, open_interest
-    ) VALUES (
-        %(ts)s, %(symbol)s, %(last_price)s, %(mark_price)s, %(index_price)s,
-        %(best_bid)s, %(best_ask)s, %(bid_size)s, %(ask_size)s,
-        %(volume_24h)s, %(turnover_24h)s, %(spread_bps)s, %(open_interest)s
-    )
-    ON CONFLICT DO NOTHING;
-    """
     with conn.cursor() as cur:
+        has_funding_rate = table_exists(cur, "market", "market_tickers")
+        if has_funding_rate:
+            cur.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'market'
+                  AND table_name = 'market_tickers'
+                  AND column_name = 'funding_rate'
+                LIMIT 1;
+                """
+            )
+            has_funding_rate = cur.fetchone() is not None
+        funding_col = ", funding_rate" if has_funding_rate else ""
+        funding_value = ", %(funding_rate)s" if has_funding_rate else ""
+        sql = f"""
+        INSERT INTO market.market_tickers (
+            ts, symbol, last_price, mark_price, index_price, best_bid, best_ask,
+            bid_size, ask_size, volume_24h, turnover_24h, spread_bps, open_interest
+            {funding_col}
+        ) VALUES (
+            %(ts)s, %(symbol)s, %(last_price)s, %(mark_price)s, %(index_price)s,
+            %(best_bid)s, %(best_ask)s, %(bid_size)s, %(ask_size)s,
+            %(volume_24h)s, %(turnover_24h)s, %(spread_bps)s, %(open_interest)s
+            {funding_value}
+        )
+        ON CONFLICT DO NOTHING;
+        """
         execute_batch(cur, sql, rows, page_size=500)
     return len(rows)
 

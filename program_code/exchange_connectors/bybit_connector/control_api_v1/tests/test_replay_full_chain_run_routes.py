@@ -258,13 +258,16 @@ def test_full_chain_run_prefers_v058_universe_and_embeds_v059_edges(
 
     def fake_universe(**kwargs):
         assert kwargs["category"] == "linear"
-        assert kwargs["max_symbols"] == 8
+        assert kwargs["max_symbols"] == 25
         return {
             "status": "ok",
             "source": "v058_symbol_universe_snapshots",
             "symbols": ["SOLUSDT", "XRPUSDT"],
             "symbol_count": 2,
-            "entries": [],
+            "entries": [
+                {"symbol": "SOLUSDT", "tick_size": 0.01, "qty_step": 0.1, "min_notional": 5.0},
+                {"symbol": "XRPUSDT", "tick_size": 0.0001, "qty_step": 1.0, "min_notional": 5.0},
+            ],
             "warnings": [],
         }
 
@@ -339,12 +342,15 @@ def test_full_chain_run_prefers_v058_universe_and_embeds_v059_edges(
     assert data["universe_source"] == "v058_symbol_universe_snapshots"
     assert data["historical_universe"]["source"] == "v058_symbol_universe_snapshots"
     assert data["edge_snapshot"]["cell_count"] == 1
+    assert data["instrument_specs"]["coverage_ratio"] == 1.0
+    assert data["input_fidelity"]["instrument_specs"]["status"] == "ok"
 
     manifest = registered[0].manifest_jsonb
     assert manifest["universe_source"] == "v058_symbol_universe_snapshots"
     assert manifest["historical_universe"]["symbol_count"] == 2
     assert manifest["edge_snapshot_meta"]["cell_count"] == 1
     assert manifest["edge_estimates"]["grid_trading::SOLUSDT"]["runtime_bps"] == 4.2
+    assert manifest["input_fidelity"]["edge_snapshot"]["cell_count"] == 1
 
 
 def test_full_chain_run_rejects_strategy_cap(
@@ -392,6 +398,10 @@ def test_apply_microstructure_overlay_enriches_prior_bbo_only() -> None:
                     "bid_size": 2.0,
                     "ask_size": 3.0,
                     "spread_bps": 20.0,
+                    "turnover_24h": 5_000_000.0,
+                    "index_price": 100.0,
+                    "open_interest": 12345.0,
+                    "funding_rate": 0.0001,
                 }
             ],
             "ETHUSDT": [
@@ -414,5 +424,10 @@ def test_apply_microstructure_overlay_enriches_prior_bbo_only() -> None:
     assert stats["enriched_event_count"] == 1
     assert events[0]["best_bid"] == 99.9
     assert events[0]["best_ask"] == 100.1
+    assert events[0]["turnover_24h"] == 5_000_000.0
+    assert events[0]["index_price"] == 100.0
+    assert events[0]["open_interest"] == 12345.0
+    assert events[0]["funding_rate"] == 0.0001
+    assert stats["field_counts"]["turnover_24h"] == 1
     assert events[0]["microstructure_source"] == "market.market_tickers"
     assert "best_bid" not in events[1]
