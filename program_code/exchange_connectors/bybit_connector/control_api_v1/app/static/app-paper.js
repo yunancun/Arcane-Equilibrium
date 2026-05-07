@@ -943,6 +943,7 @@ function ocPaperSubtabInit() {
     const pnl = result.pnl_summary || {};
     const statusObj = result.status || {};
     const status = statusObj.kind || statusObj.label || (data.run && data.run.status) || "unknown";
+    const analytics = result.replay_result_analytics || payload.replay_result_analytics || {};
     const net = pnl.net_pnl;
     const ending = pnl.ending_balance;
     const starting = pnl.starting_balance;
@@ -956,8 +957,20 @@ function ocPaperSubtabInit() {
         status === "completed" ? "oc-cell-ok" : "oc-cell-neutral", "Replay report status")
       + _metricCellHtml("oc-replay-summary-pnl", "Net PnL / 淨損益", fmt(net, 4),
         typeof net === "number" && net >= 0 ? "oc-cell-ok" : "oc-cell-warn", "Fee-aware replay report PnL")
+      + _metricCellHtml("oc-replay-summary-net-bps", "Net Bps / 淨bps",
+        fmt(analytics.net_bps_after_fee, 2),
+        typeof analytics.net_bps_after_fee === "number" && analytics.net_bps_after_fee >= 0 ? "oc-cell-ok" : "oc-cell-warn",
+        "Fee-net replay return in bps of starting balance")
+      + _metricCellHtml("oc-replay-summary-verdict", "Verdict / 判定",
+        String(analytics.verdict || "waiting_report"),
+        analytics.verdict === "development_sandbox_pass" ? "oc-cell-ok" : "oc-cell-warn",
+        "C3 development-sandbox verdict; not a live/demo promotion")
       + _metricCellHtml("oc-replay-summary-fills", "Fills / 成交", String(fills.length),
         fills.length > 0 ? "oc-cell-ok" : "oc-cell-neutral", "Persisted simulated fills")
+      + _metricCellHtml("oc-replay-summary-misses", "Miss/Reject / 未成交拒絕",
+        String(analytics.ghost_fill_count || 0),
+        Number(analytics.ghost_fill_count || 0) === 0 ? "oc-cell-ok" : "oc-cell-warn",
+        "Qty=0 maker-miss or risk-reject ghost rows")
       + _metricCellHtml("oc-replay-summary-decisions", "Decisions / 決策", String(decisions),
         decisions > 0 ? "oc-cell-ok" : "oc-cell-warn", "Strategy decision trace entries")
       + _metricCellHtml("oc-replay-summary-balance", "Balance / 餘額",
