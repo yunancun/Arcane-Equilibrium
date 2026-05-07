@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-050 Guardian V2 risk metrics contract: defined dynamic correlation snapshots, safe fallback behavior, per-strategy drawdown/loss-streak snapshots, GuardianVerdict mapping, and required MAG-051/MAG-052 regressions | workspace/reports/2026-05-07--agenttodo_mag050_guardian_v2_risk_metrics_model.md |
 | 2026-05-07 | AgentTodo MAG-045 replay regression: added replay-style test proving Strategist V2 selection is not raw scanner rank sorting; candidate scores persist scanner_rank plus Guardian/Analyst reason codes and M4 Strategist V2 is closed | workspace/reports/2026-05-07--agenttodo_mag045_replay_not_scanner_sorting.md |
 | 2026-05-07 | AgentTodo MAG-044 Analyst/Truth strategy weights: Strategist V2 now consumes AnalystInsight and TruthRegistry-style claims as bounded learning-weight adjustments; losing patterns can move preference away from the affected strategy with persisted reason/evidence refs | workspace/reports/2026-05-07--agenttodo_mag044_analyst_truth_weights.md |
 | 2026-05-07 | AgentTodo MAG-043 Guardian feedback stats: Strategist V2 now consumes Guardian reject/modify history, raises new-open confidence floors, scales proposed quantity through an aggressiveness multiplier, records adjusted risk prior in candidate scores, and leaves position-review reduce/close paths unblocked | workspace/reports/2026-05-07--agenttodo_mag043_guardian_feedback_stats.md |
