@@ -223,6 +223,8 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     )
     assert data["execution_calibration"]["execution_confidence"] == "S2_CONSERVATIVE_BOUND"
     assert data["input_fidelity"]["execution_calibration"]["risk_overlay_applied"] is True
+    assert data["input_fidelity"]["microstructure"]["bbo_anchor_status"] == "unavailable"
+    assert data["input_fidelity"]["microstructure"]["bbo_anchor_coverage_ratio"] == 0.0
     assert all(
         body.manifest_jsonb["execution_calibration"]["risk_overlay"]["applied"] is True
         for body in registered
@@ -580,6 +582,9 @@ def test_apply_microstructure_overlay_enriches_prior_bbo_only() -> None:
 
     assert stats["status"] == "ok"
     assert stats["enriched_event_count"] == 1
+    assert stats["bbo_anchor_status"] == "available"
+    assert stats["bbo_anchor_event_count"] == 1
+    assert stats["bbo_anchor_coverage_ratio"] == 0.5
     assert events[0]["best_bid"] == 99.9
     assert events[0]["best_ask"] == 100.1
     assert events[0]["turnover_24h"] == 5_000_000.0

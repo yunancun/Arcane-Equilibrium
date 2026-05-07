@@ -102,9 +102,17 @@ Verification:
 - Kept PostOnly maker pricing on the existing limit-price / maker-cap path.
 - Applied the same BBO anchor to rejected taker counterfactual ghost fills so
   risk-decision audit rows use the same execution-quality boundary.
+- Exposed BBO anchor coverage in the full-chain replay API, signed manifest
+  input-fidelity block, warning list, and one-click GUI summary.
+  - `bbo_anchor_coverage_ratio` is first-class rather than inferred from a
+    generic microstructure cell.
+  - Coverage below 80% remains a warning and cannot be read as S1 execution
+    quality.
 
 Verification:
 
+- `python3 -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_full_chain_routes.py`
+- `python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_full_chain_run_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/static/test_replay_subtab_static_assets.py -q`
 - `cargo test -p openclaw_engine test_apply_fill_bbo_anchor_bounds_taker_reference_price --features replay_isolated`
 - `cargo test -p openclaw_engine test_apply_fill_taker_open_uses_bbo_anchor_when_present --features replay_isolated`
 - `cargo build --release -p openclaw_engine --bin replay_runner --features replay_isolated`
