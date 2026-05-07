@@ -64,6 +64,25 @@ def test_v064_idempotency_and_chain_indexes_present() -> None:
     assert "ON CONFLICT" not in sql
 
 
+def test_v064_execution_idempotency_keys_are_nonnullable_and_deduped() -> None:
+    sql = _strip_sql_comments(_read_sql())
+    normalized = re.sub(r"\s+", " ", sql)
+    assert re.search(r"idempotency_key\s+TEXT\s+NOT NULL", sql)
+    assert re.search(r"order_plan_id\s+TEXT\s+NOT NULL", sql)
+    assert re.search(r"decision_id\s+TEXT\s+NOT NULL", sql)
+    assert re.search(r"engine_mode\s+TEXT\s+NOT NULL", sql)
+    assert "PRIMARY KEY (idempotency_key)" in normalized
+    assert (
+        "CONSTRAINT uq_agent_execution_keys_plan_mode UNIQUE (order_plan_id, engine_mode)"
+        in normalized
+    )
+    assert (
+        "CONSTRAINT uq_agent_execution_keys_decision_plan_mode UNIQUE "
+        "(decision_id, order_plan_id, engine_mode)"
+        in normalized
+    )
+
+
 def test_v064_state_changes_are_timescale_optional_and_guarded() -> None:
     sql_with_comments = _read_sql()
     sql = _strip_sql_comments(sql_with_comments)

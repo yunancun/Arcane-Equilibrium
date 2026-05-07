@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-034 idempotency audit: verified execution candidates require `decision_id`, `order_plan_id`, `idempotency_key`, and `engine_mode`; V064 duplicate-prevention constraints plus Rust/Python contract tests cover double-execution prevention for shadow integration | workspace/reports/2026-05-07--agenttodo_mag034_idempotency_audit.md |
 | 2026-05-07 | AgentTodo MAG-033 Python spine client: added mirrored Pydantic contracts and default-disabled fail-soft `agent_spine_client.py` publish/consume helpers for typed objects, edges, and execution idempotency keys; Mac/Linux targeted pytest + py_compile passed | workspace/reports/2026-05-07--agenttodo_mag033_python_spine_client.md |
 | 2026-05-07 | AgentTodo MAG-032 durable spine store: added V064 `agent.*` lineage/idempotency tables, Rust `agent_spine` event envelopes/store, DB writer surface, and static/Rust tests for signal -> decision -> verdict -> plan lineage; runtime wiring remains disabled | workspace/reports/2026-05-07--agenttodo_mag032_durable_spine_store.md |
 | 2026-05-07 | AgentTodo MAG-031 StrategySignal adapter: added Rust `agent_spine` mode/contracts/signal_adapter, typed StrategySignal tests, and wired existing strategy-open signal persistence through the typed adapter while preserving legacy `trading.signals` row shape and behavior; Mac/Linux targeted Rust tests passed | workspace/reports/2026-05-07--agenttodo_mag031_strategy_signal_adapter.md |

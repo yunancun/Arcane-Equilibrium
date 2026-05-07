@@ -286,6 +286,15 @@ async fn channel_spine_store_queues_object_edge_transition_and_idempotency_key()
         metadata: json!({}),
     };
     let key = ExecutionIdempotencyKey::reserved(&plan, 904);
+    assert_eq!(key.idempotency_key, plan.idempotency_key);
+    assert_eq!(key.order_plan_id, plan.order_plan_id);
+    assert_eq!(key.decision_id, plan.decision_id);
+    assert_eq!(key.engine_mode, plan.engine_mode);
+    assert_eq!(key.first_seen_at_ms, 904);
+    assert_eq!(key.status, "reserved");
+    assert_eq!(key.details["verdict_id"], plan.verdict_id);
+    assert_eq!(key.details["symbol"], plan.symbol);
+    assert_eq!(key.details["order_type"], plan.order_type);
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(4);
     let store = ChannelAgentSpineStore::new(tx);

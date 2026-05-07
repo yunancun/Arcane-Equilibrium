@@ -174,6 +174,22 @@ def test_contracts_forbid_unbounded_extra_free_text_fields() -> None:
         )
 
 
+def test_execution_contracts_require_deduplication_lineage_ids() -> None:
+    plan_payload = _plan().model_dump(mode="json")
+    for field in ("order_plan_id", "decision_id", "idempotency_key"):
+        invalid_payload = dict(plan_payload)
+        invalid_payload.pop(field)
+        with pytest.raises(ValidationError):
+            ExecutionPlan(**invalid_payload)
+
+    report_payload = _report().model_dump(mode="json")
+    for field in ("execution_report_id", "order_plan_id", "decision_id"):
+        invalid_payload = dict(report_payload)
+        invalid_payload.pop(field)
+        with pytest.raises(ValidationError):
+            ExecutionReport(**invalid_payload)
+
+
 def test_disabled_client_never_writes(fake_conn) -> None:
     client = AgentSpineClient(enabled=False)
 
@@ -220,6 +236,7 @@ def test_publish_guardian_verdict_and_plan_write_chain_and_idempotency(fake_conn
     assert fake_conn.executes[3][1][4] == "planned_by"
     idem_sql, idem_params = fake_conn.executes[4]
     assert "INSERT INTO agent.execution_idempotency_keys" in idem_sql
+    assert "ON CONFLICT (idempotency_key) DO NOTHING" in idem_sql
     assert idem_params[:4] == (
         "idem-paper-BTCUSDT-1",
         "plan-paper-BTCUSDT-1",
