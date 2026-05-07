@@ -451,24 +451,51 @@ class AgentSpineClient:
             idempotency_key=f"analyst_insight:{insight.engine_mode}:{insight.insight_id}",
         )
         parent_id = insight.execution_report_id or insight.order_plan_id or insight.decision_id
-        if parent_id is None:
-            return ok
-        edge_ok = self.publish_edge(
-            from_object_id=parent_id,
-            to_object_id=insight.insight_id,
-            edge_type="analyzed_by",
-            engine_mode=insight.engine_mode,
-            decision_id=insight.decision_id,
-            details={
-                "analyst_tier": insight.analyst_tier,
-                "insight_type": insight.insight_type,
-                "insight_level": insight.insight_level,
-                "confidence": insight.confidence,
-                "severity": insight.severity,
-            },
-            created_at_ms=insight.ts_ms,
-        )
-        return ok and edge_ok
+        parent_edge_ok = True
+        if parent_id is not None:
+            parent_edge_ok = self.publish_edge(
+                from_object_id=parent_id,
+                to_object_id=insight.insight_id,
+                edge_type="analyzed_by",
+                engine_mode=insight.engine_mode,
+                decision_id=insight.decision_id,
+                details={
+                    "analyst_tier": insight.analyst_tier,
+                    "insight_type": insight.insight_type,
+                    "insight_level": insight.insight_level,
+                    "confidence": insight.confidence,
+                    "severity": insight.severity,
+                },
+                created_at_ms=insight.ts_ms,
+            )
+        evidence_edges_ok = self._publish_analyst_evidence_edges(insight)
+        return ok and parent_edge_ok and evidence_edges_ok
+
+    def _publish_analyst_evidence_edges(self, insight: AnalystInsight) -> bool:
+        all_ok = True
+        seen: set[str] = set()
+        for index, evidence_ref in enumerate(insight.evidence_refs):
+            evidence_id = str(evidence_ref).strip()
+            if not evidence_id or evidence_id in seen:
+                continue
+            seen.add(evidence_id)
+            ok = self.publish_edge(
+                from_object_id=evidence_id,
+                to_object_id=insight.insight_id,
+                edge_type="evidence_for",
+                engine_mode=insight.engine_mode,
+                decision_id=insight.decision_id,
+                details={
+                    "evidence_ref": evidence_id,
+                    "evidence_ref_index": index,
+                    "analyst_tier": insight.analyst_tier,
+                    "insight_type": insight.insight_type,
+                    "insight_level": insight.insight_level,
+                },
+                created_at_ms=insight.ts_ms,
+            )
+            all_ok = all_ok and ok
+        return all_ok
 
     def publish_edge(
         self,

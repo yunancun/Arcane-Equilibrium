@@ -582,7 +582,7 @@ def test_publish_execution_report_and_analyst_insight_write_typed_edges(fake_con
     assert client.publish_execution_report(_report()) is True
     assert client.publish_analyst_insight(_insight()) is True
 
-    assert len(fake_conn.executes) == 4
+    assert len(fake_conn.executes) == 5
     assert fake_conn.executes[0][1][2] == "execution_report"
     assert fake_conn.executes[1][1][4] == "executed_by"
     assert fake_conn.executes[1][1][8]["slippage_bps"] == 7.920792
@@ -597,4 +597,68 @@ def test_publish_execution_report_and_analyst_insight_write_typed_edges(fake_con
         "insight_level": "fact",
         "confidence": 0.95,
         "severity": "info",
+    }
+    assert fake_conn.executes[4][1][2:5] == (
+        "fill-paper-BTCUSDT-1",
+        "insight-paper-BTCUSDT-1",
+        "evidence_for",
+    )
+    assert fake_conn.executes[4][1][8]["evidence_ref_index"] == 0
+
+
+def test_publish_analyst_insight_links_unique_round_trip_and_metric_evidence(fake_conn) -> None:
+    client = AgentSpineClient(enabled=True, authority_mode="shadow")
+    insight = AnalystInsightL2(
+        insight_id="insight-paper-grid-pattern-1",
+        ts_ms=1_700_000_000_060,
+        engine_mode="paper",
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        decision_id="decision-paper-BTCUSDT-1",
+        order_plan_id="plan-paper-BTCUSDT-1",
+        insight_type="strategy_pattern",
+        insight_level="inference",
+        summary="grid round trips underperform after one-way shock",
+        evidence_refs=[
+            "roundtrip-paper-BTCUSDT-grid-1",
+            "strategy-metric-paper-grid-drawdown",
+            "roundtrip-paper-BTCUSDT-grid-1",
+        ],
+        claims=[
+            {
+                "claim_id": "claim-grid-drawdown",
+                "strategy": "grid_trading",
+                "polarity": "negative",
+                "confidence": 0.82,
+            }
+        ],
+        confidence=0.82,
+        severity="medium",
+    )
+
+    assert client.publish_analyst_insight(insight) is True
+
+    assert len(fake_conn.executes) == 4
+    assert fake_conn.executes[0][1][2] == "analyst_insight"
+    assert fake_conn.executes[1][1][2:5] == (
+        "plan-paper-BTCUSDT-1",
+        "insight-paper-grid-pattern-1",
+        "analyzed_by",
+    )
+    assert fake_conn.executes[2][1][2:5] == (
+        "roundtrip-paper-BTCUSDT-grid-1",
+        "insight-paper-grid-pattern-1",
+        "evidence_for",
+    )
+    assert fake_conn.executes[3][1][2:5] == (
+        "strategy-metric-paper-grid-drawdown",
+        "insight-paper-grid-pattern-1",
+        "evidence_for",
+    )
+    assert fake_conn.executes[2][1][8] == {
+        "evidence_ref": "roundtrip-paper-BTCUSDT-grid-1",
+        "evidence_ref_index": 0,
+        "analyst_tier": "l2",
+        "insight_type": "strategy_pattern",
+        "insight_level": "inference",
     }
