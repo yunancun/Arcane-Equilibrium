@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Pre-Live Gate 趋势 / Edge Gate Trends</title>
-<script src="/static/common.js?v=20260506.nav-edge-gates-v1"></script>
+<script src="/static/common.js?v=20260507.strategy-colors-v1"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -297,7 +297,7 @@ function renderStrategies(payload) {
       ? '<div class="bad-cell-list">' + bad.map(c => ocEsc((c.engine_mode || '') + ' ' + (c.symbol || '') + ' n=' + (c.rows || 0) + ' avg=' + metricValue(c.avg_net_bps, ' bps', 2))).join('<br>') + '</div>'
       : '';
     return '<tr>' +
-      '<td><span class="strategy-name">' + ocEsc(row.strategy_name || '--') + '</span></td>' +
+      '<td><span class="strategy-name">' + ((typeof ocStrategyChip === 'function') ? ocStrategyChip(row.strategy_name || '--') : ocEsc(row.strategy_name || '--')) + '</span></td>' +
       '<td>' + chipFor(row.status) + '</td>' +
       '<td>' + metricValue(row.avg_net_24h_bps, ' bps', 2) + '</td>' +
       '<td>' + metricValue(row.rows_24h, '', 0) + '</td>' +

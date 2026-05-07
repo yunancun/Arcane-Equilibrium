@@ -44,6 +44,7 @@ _TAB_DEVELOPMENT_HTML = _STATIC_DIR / "tab-development.html"
 _TAB_EDGE_GATES_HTML = _STATIC_DIR / "tab-edge-gates.html"
 _TAB_DEMO_HTML = _STATIC_DIR / "tab-demo.html"
 _TAB_LIVE_HTML = _STATIC_DIR / "tab-live.html"
+_TAB_STRATEGY_HTML = _STATIC_DIR / "tab-strategy.html"
 _TAB_RISK_HTML = _STATIC_DIR / "tab-risk.html"
 _TAB_SETTINGS_HTML = _STATIC_DIR / "tab-settings.html"
 _CONSOLE_HTML = _STATIC_DIR / "console.html"
@@ -120,6 +121,15 @@ def tab_live_html() -> str:
     """Read tab-live.html once per test module / 每模組讀一次。"""
     assert _TAB_LIVE_HTML.exists(), f"tab-live.html not found at {_TAB_LIVE_HTML}"
     return _TAB_LIVE_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def tab_strategy_html() -> str:
+    """Read tab-strategy.html once per test module / 每模組讀一次。"""
+    assert _TAB_STRATEGY_HTML.exists(), (
+        f"tab-strategy.html not found at {_TAB_STRATEGY_HTML}"
+    )
+    return _TAB_STRATEGY_HTML.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -298,13 +308,45 @@ def test_demo_and_live_fill_history_show_strategy(
     tab_live_html: str,
 ) -> None:
     """Demo/Live fill history tables show per-fill strategy attribution."""
-    assert "20260507.fill-strategy-v1" in console_html
+    assert "20260507.strategy-colors-v1" in console_html
     assert "<th>策略</th>" in tab_demo_html
     assert "f.strategy || f.strategy_name || f.owner_strategy" in tab_demo_html
+    assert "ocStrategyChip(s)" in tab_demo_html
     assert '<td colspan="10">暂无成交</td>' in tab_demo_html
     assert "<th>策略 / Strategy</th>" in tab_live_html
     assert "f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap" in tab_live_html
+    assert "ocStrategyChip(s)" in tab_live_html
     assert 'td colspan="10"' in tab_live_html
+
+
+def test_strategy_identity_colors_are_shared_across_console_surfaces(
+    console_html: str,
+    common_js: str,
+    tab_strategy_html: str,
+    tab_demo_html: str,
+    tab_live_html: str,
+    tab_edge_gates_html: str,
+) -> None:
+    """Five strategy identities should keep one color system across pages."""
+    assert "20260507.strategy-colors-v1" in console_html
+    assert "OC_STRATEGY_COLOR_META" in common_js
+    for key in [
+        "grid_trading",
+        "ma_crossover",
+        "bb_reversion",
+        "bb_breakout",
+        "funding_arb",
+    ]:
+        assert key in common_js
+        assert f"oc-strategy-{key}" in common_js
+        assert f"oc-strategy-card-{key}" in common_js
+
+    assert "ocStrategyKey(stratName)" in tab_strategy_html
+    assert "ocStrategyChip(stratName" in tab_strategy_html
+    assert "oc-strategy-card-" in tab_strategy_html
+    assert "ocStrategyChip(s)" in tab_demo_html
+    assert "ocStrategyChip(s)" in tab_live_html
+    assert "ocStrategyChip(row.strategy_name" in tab_edge_gates_html
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(
