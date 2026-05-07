@@ -652,6 +652,68 @@ function ocSanitizeClass(s) {
   return String(s).replace(/[^a-zA-Z0-9\-_]/g, '');
 }
 
+// ─── Strategy Identity Color / 策略身份顏色 ─────────────────────────────────
+// Shared by Strategy, Demo, and Live so one strategy keeps the same color everywhere.
+const OC_STRATEGY_COLOR_META = {
+  grid_trading: { label: 'grid_trading', zh: '网格', color: '#58a6ff' },
+  ma_crossover: { label: 'ma_crossover', zh: '均线', color: '#3fb950' },
+  bb_reversion: { label: 'bb_reversion', zh: '回归', color: '#a855f7' },
+  bb_breakout: { label: 'bb_breakout', zh: '突破', color: '#f78166' },
+  funding_arb: { label: 'funding_arb', zh: '费率', color: '#d29922' },
+};
+
+function ocStrategyKey(strategy) {
+  if (strategy == null) return '';
+  const raw = String(strategy).trim();
+  if (!raw || raw === '--') return '';
+  const normalized = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .toLowerCase();
+  const aliases = {
+    grid: 'grid_trading',
+    grid_trading: 'grid_trading',
+    ma_crossover: 'ma_crossover',
+    bb_reversion: 'bb_reversion',
+    bb_breakout: 'bb_breakout',
+    funding_arb: 'funding_arb',
+    funding_rate_arb: 'funding_arb',
+    fundingrate_arb: 'funding_arb',
+  };
+  if (aliases[normalized]) return aliases[normalized];
+  for (const key of Object.keys(OC_STRATEGY_COLOR_META)) {
+    if (normalized === key || normalized.startsWith(key + '_')) return key;
+  }
+  if (normalized.startsWith('funding_rate_arb_') || normalized.startsWith('fundingrate_arb_')) return 'funding_arb';
+  return '';
+}
+
+function ocStrategyMeta(strategy) {
+  const key = ocStrategyKey(strategy);
+  if (!key || !OC_STRATEGY_COLOR_META[key]) return null;
+  return Object.assign({ key: key }, OC_STRATEGY_COLOR_META[key]);
+}
+
+function ocStrategyLabel(strategy) {
+  const meta = ocStrategyMeta(strategy);
+  if (!meta) return strategy == null ? '' : String(strategy);
+  return meta.label + ' / ' + meta.zh;
+}
+
+function ocStrategyChip(strategy, options) {
+  const raw = strategy == null ? '' : String(strategy);
+  if (!raw || raw === '--') return '--';
+  const meta = ocStrategyMeta(raw);
+  if (!meta) return ocEsc(raw);
+  const opts = options || {};
+  const text = opts.label || meta.label;
+  const title = meta.label + ' / ' + meta.zh;
+  return '<span class="oc-strategy-chip oc-strategy-' + meta.key + '" title="' + ocEsc(title) + '">'
+    + '<span class="oc-strategy-dot"></span>' + ocEsc(text) + '</span>';
+}
+
 // ─── Product Category Tag / 產品品類標籤 ─────────────────────────────────────
 // Renders a colored chip showing the Bybit product category for positions/orders/fills.
 // 在持倉/訂單/成交旁顯示帶顏色的品類標籤，便於區分不同產品類型。
@@ -884,6 +946,18 @@ function ocInjectBaseCSS() {
     .oc-chip-info { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--blue); }
     .oc-chip-live { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.3); color: #a855f7; }
 
+    /* Strategy Identity Chips */
+    .oc-strategy-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px;
+      padding: 2px 8px; font-size: 11px; font-weight: 700; border: 1px solid var(--strategy-border, rgba(139,148,158,0.22));
+      background: var(--strategy-bg, rgba(139,148,158,0.1)); color: var(--strategy-color, var(--text)); white-space: nowrap; }
+    .oc-strategy-dot { width: 7px; height: 7px; border-radius: 999px;
+      background: var(--strategy-color, var(--text-dim)); box-shadow: 0 0 0 2px var(--strategy-bg, rgba(139,148,158,0.1)); flex: 0 0 auto; }
+    .oc-strategy-grid_trading, .oc-strategy-card-grid_trading { --strategy-color: #58a6ff; --strategy-bg: rgba(88,166,255,0.13); --strategy-border: rgba(88,166,255,0.34); }
+    .oc-strategy-ma_crossover, .oc-strategy-card-ma_crossover { --strategy-color: #3fb950; --strategy-bg: rgba(63,185,80,0.13); --strategy-border: rgba(63,185,80,0.34); }
+    .oc-strategy-bb_reversion, .oc-strategy-card-bb_reversion { --strategy-color: #a855f7; --strategy-bg: rgba(168,85,247,0.13); --strategy-border: rgba(168,85,247,0.34); }
+    .oc-strategy-bb_breakout, .oc-strategy-card-bb_breakout { --strategy-color: #f78166; --strategy-bg: rgba(247,129,102,0.13); --strategy-border: rgba(247,129,102,0.36); }
+    .oc-strategy-funding_arb, .oc-strategy-card-funding_arb { --strategy-color: #d29922; --strategy-bg: rgba(210,153,34,0.13); --strategy-border: rgba(210,153,34,0.34); }
+
     /* Colors */
     .green { color: var(--green); } .red { color: var(--red); }
     .yellow { color: var(--yellow); } .blue { color: var(--blue); }
@@ -985,9 +1059,11 @@ function ocInjectBaseCSS() {
 
     /* Strategy Cards */
     .oc-strat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-    .oc-strat-card { background: var(--bg); border: 1px solid #21262d; border-radius: 8px; padding: 14px; }
-    .oc-strat-card .strat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .oc-strat-card { background: var(--bg); border: 1px solid #21262d; border-radius: 8px; padding: 14px; position: relative; overflow: hidden; }
+    .oc-strat-card[class*="oc-strategy-card-"] { border-color: var(--strategy-border, #21262d); box-shadow: inset 3px 0 0 var(--strategy-color, transparent); }
+    .oc-strat-card .strat-header { display: flex; justify-content: flex-start; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
     .oc-strat-card .strat-name { font-weight: 600; font-size: 14px; }
+    .oc-strat-card .strat-name .oc-strategy-chip { font-size: 13px; padding: 3px 10px; }
     .oc-strat-card .strat-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
     .oc-strat-card .strat-actions { display: flex; gap: 6px; }
 

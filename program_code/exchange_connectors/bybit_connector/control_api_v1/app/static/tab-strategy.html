@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Strategy Center</title>
-<script src="/static/common.js"></script>
+<script src="/static/common.js?v=20260507.strategy-colors-v1"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -212,6 +212,10 @@ const STRAT_CN = {
   'Volume_Spike':     '量价突破',
 };
 function stratLabel(name) {
+  if (typeof ocStrategyLabel === 'function') {
+    const shared = ocStrategyLabel(name);
+    if (shared) return shared;
+  }
   // Strip symbol suffix (e.g. MA_Crossover_BTCUSDT → MA_Crossover)
   // 去掉 symbol 后缀，只保留策略类型名
   const base = Object.keys(STRAT_CN).find(k => name === k || name.startsWith(k + '_'));
@@ -224,20 +228,21 @@ function stratLabel(name) {
 // Render V2 parameters per strategy type, returns HTML fragment.
 function stratV2Params(s) {
   const strat = s.strategy || s.name || '';
-  const base = Object.keys(STRAT_CN).find(k => strat === k || strat.startsWith(k + '_')) || strat;
+  const sharedKey = (typeof ocStrategyKey === 'function') ? ocStrategyKey(strat) : '';
+  const base = sharedKey || Object.keys(STRAT_CN).find(k => strat === k || strat.startsWith(k + '_')) || strat;
   const rows = [];
 
-  if (base === 'MA_Crossover') {
+  if (base === 'ma_crossover' || base === 'MA_Crossover') {
     if (s.adx_threshold != null)   rows.push('ADX&gt;' + s.adx_threshold);
     if (s.use_kama)                rows.push('KAMA ✓');
     if (s.multi_tf_confirm)        rows.push('Multi-TF ✓');
     if (s.min_confidence != null)  rows.push('MinConf=' + s.min_confidence);
-  } else if (base === 'BB_Reversion') {
+  } else if (base === 'bb_reversion' || base === 'BB_Reversion') {
     if (s.rsi_threshold != null)       rows.push('RSI&lt;' + s.rsi_threshold);
     if (s.rsi_short_threshold != null) rows.push('RSI&gt;' + s.rsi_short_threshold);
     if (s.regime_aware)                rows.push('Regime ✓');
     if (s.use_limit_orders != null)    rows.push(s.use_limit_orders ? 'Limit ✓' : 'Market');
-  } else if (base === 'FundingRate_Arb') {
+  } else if (base === 'funding_arb' || base === 'FundingRate_Arb') {
     if (s.funding_threshold != null) rows.push('FundThr=' + (s.funding_threshold * 10000).toFixed(1) + 'bps');
     if (s.total_fee_bps != null)     rows.push('TotalFee=' + s.total_fee_bps + 'bps');
     if (s.delta_neutral)             rows.push('ΔNeutral ✓');
@@ -245,12 +250,12 @@ function stratV2Params(s) {
       const cs = s.cost_summary;
       if (cs.net_funding_pnl != null) rows.push('NetPnL=' + cs.net_funding_pnl.toFixed(4));
     }
-  } else if (base === 'Grid_Trading') {
+  } else if (base === 'grid_trading' || base === 'Grid_Trading' || base === 'grid') {
     if (s.upper_price != null) rows.push('U=' + s.upper_price);
     if (s.lower_price != null) rows.push('L=' + s.lower_price);
     if (s.grid_count != null)  rows.push('N=' + s.grid_count);
     if (s.grid_step != null)   rows.push('Step=' + s.grid_step);
-  } else if (base === 'BB_Breakout') {
+  } else if (base === 'bb_breakout' || base === 'BB_Breakout') {
     if (s.min_confidence != null)  rows.push('MinConf=' + s.min_confidence);
     if (s.use_volume_filter != null && s.use_volume_filter) rows.push('VolFlt ✓');
     if (s.use_donchian != null && s.use_donchian) rows.push('Donchian ✓');
@@ -375,13 +380,19 @@ async function loadStrategies() {
     else if (state === 'stopped') { dotClass = 'red'; chipType = 'bad'; }
     else if (state === 'paused') { dotClass = 'yellow'; chipType = 'warn'; }
 
-    html += '<div class="oc-strat-card">';
-    html += '<div class="strat-header">';
     const stratName = s.strategy || s.name || s.strategy_name || '?';
+    const stratKey = (typeof ocStrategyKey === 'function') ? ocStrategyKey(stratName) : '';
+    const stratCardClass = stratKey ? ' oc-strategy-card-' + ocSanitizeClass(stratKey) : '';
+    html += '<div class="oc-strat-card' + stratCardClass + '">';
+    html += '<div class="strat-header">';
     const sid = s.strategy_id || 0;
     html += '<span style="font-size:11px;color:var(--text-dim);margin-right:6px">#' + sid + '</span>';
-    html += '<span class="strat-name">' + ocEsc(stratLabel(stratName)) + '</span>';
-    html += '<span class="oc-chip oc-chip-' + chipType + '">' + ocEsc(state) + '</span>';
+    const displayName = stratLabel(stratName);
+    const strategyNameHtml = (typeof ocStrategyChip === 'function' && stratKey)
+      ? ocStrategyChip(stratName, { label: displayName })
+      : ocEsc(displayName);
+    html += '<span class="strat-name">' + strategyNameHtml + '</span>';
+    html += '<span class="oc-chip oc-chip-' + chipType + '" style="margin-left:auto">' + ocEsc(state) + '</span>';
     html += '</div>';
     html += '<div class="strat-meta">';
     if (s.symbol) html += 'Symbol: <strong>' + ocEsc(s.symbol) + '</strong>';

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Live 实盘 / Live Trading</title>
-<script src="/static/common.js?v=20260506.dev-support-v2"></script>
+<script src="/static/common.js?v=20260507.strategy-colors-v1"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -959,9 +959,9 @@ function _ocRenderOwnerStrategy(strat, posData) {
     }
     return '<span title="' + ocEsc(detail) + '">🔴 塵埃凍結 / DUST</span>';
   }
-  // Real strategy names pass through escaped.
-  // 真實策略名原樣輸出（已轉義）。
-  return ocEsc(s);
+  // Real strategy names use the shared color identity chip so Live matches Strategy and Demo.
+  // 真實策略名使用共用策略顏色 chip，和策略頁、Demo 保持一致。
+  return (typeof ocStrategyChip === 'function') ? ocStrategyChip(s) : ocEsc(s);
 }
 
 // Render the dust-positions summary panel from a positions array. Filters rows
