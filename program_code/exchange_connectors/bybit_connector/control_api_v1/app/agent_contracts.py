@@ -45,6 +45,28 @@ StrategySignalDirection = Literal[
 
 DecisionAction = Literal["open", "hold", "reduce", "close", "no_action"]
 
+PositionReviewRecommendation = Literal[
+    "hold",
+    "reduce",
+    "tighten_exit",
+    "stop_adding",
+    "close_when_net_positive",
+    "close_now_if_risk_requires",
+    "no_action",
+]
+
+PositionReviewTrigger = Literal[
+    "scanner_decay",
+    "analyst_risk_pattern",
+    "guardian_risk_pattern",
+    "adverse_pnl_drift",
+    "cost_edge_ratio_deterioration",
+    "regime_shift",
+    "time_stop_nearing",
+]
+
+PositionReviewUrgency = Literal["low", "medium", "high", "critical"]
+
 CanonicalStrategy = Literal[
     "ma_crossover",
     "grid_trading",
@@ -107,6 +129,38 @@ class StrategistDecision(_SpineModel):
     proposed_price: float | None = None
     rationale: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PositionReview(_SpineModel):
+    schema_version: str = "agent_spine.position_review.v1"
+    position_review_id: str
+    ts_ms: int
+    engine_mode: str
+    symbol: str
+    strategy: str | None = None
+    position_id: str | None = None
+    scanner_decay_id: str | None = None
+    trigger: PositionReviewTrigger
+    recommendation: PositionReviewRecommendation
+    decision_action: DecisionAction = "hold"
+    direction: StrategySignalDirection = "neutral"
+    urgency: PositionReviewUrgency = "low"
+    confidence: float = 0.0
+    remaining_edge_lcb_bps: float | None = None
+    exit_cost_bps: float | None = None
+    current_pnl_bps: float | None = None
+    net_exit_bps: float | None = None
+    market_regime_before: str | None = None
+    market_regime_after: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
+    position_directives: dict[str, Any] = Field(default_factory=dict)
+    thesis: str | None = None
+    invalidation: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    fact_refs: list[str] = Field(default_factory=list)
+    inference_refs: list[str] = Field(default_factory=list)
+    hypothesis_refs: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
