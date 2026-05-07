@@ -121,6 +121,117 @@ def test_full_chain_run_live_profile_requires_bulk_prod_ip_override(
     assert "replay_full_chain_prod_ip_blocked" in resp.json()["detail"]["reason_codes"]
 
 
+def test_full_chain_coverage_preflight_is_read_only_and_surfaces_verdict(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import app.replay_full_chain_routes as mod
+
+    def fake_coverage(**kwargs):
+        assert kwargs["symbols"] == ["BTCUSDT", "ETHUSDT"]
+        assert kwargs["timeframe"] == "1m"
+        expected = 4
+        return {
+            "status": "ok",
+            "source": "local_market_recorder",
+            "symbols": kwargs["symbols"],
+            "symbol_count": 2,
+            "expected_bars_per_symbol": 2,
+            "expected_event_slots": expected,
+            "tables": {},
+            "bbo": {
+                "status": "ok",
+                "source": "market.market_tickers",
+                "covered_event_slots": 3,
+                "expected_event_slots": expected,
+                "coverage_ratio": 0.75,
+            },
+            "orderbook_depth": {
+                "status": "empty",
+                "source": "market.ob_snapshots",
+                "covered_event_slots": 0,
+                "expected_event_slots": expected,
+                "coverage_ratio": 0.0,
+            },
+            "funding_rate": {
+                "status": "ok",
+                "source": "market.market_tickers",
+                "covered_event_slots": 2,
+                "expected_event_slots": expected,
+                "coverage_ratio": 0.5,
+            },
+            "open_interest": {
+                "status": "ok",
+                "source": "market.market_tickers",
+                "covered_event_slots": 2,
+                "expected_event_slots": expected,
+                "coverage_ratio": 0.5,
+            },
+            "index_price": {
+                "status": "ok",
+                "source": "market.market_tickers",
+                "covered_event_slots": 2,
+                "expected_event_slots": expected,
+                "coverage_ratio": 0.5,
+            },
+            "instrument_specs": {
+                "status": "ok",
+                "source": "market.symbol_universe_snapshots",
+                "covered_event_slots": 2,
+                "expected_event_slots": 2,
+                "coverage_ratio": 1.0,
+            },
+        }
+
+    monkeypatch.setattr(mod._dc, "estimate_replay_window_coverage_sync", fake_coverage)
+    monkeypatch.setattr(
+        mod,
+        "_fetch_edge_estimate_snapshot_sync",
+        lambda **kwargs: {
+            "status": "ok",
+            "source": "v059_edge_estimate_snapshots",
+            "cell_count": 1,
+            "edge_estimates": {},
+        },
+    )
+    monkeypatch.setattr(
+        mod._er,
+        "run_register_in_pg_xact",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("coverage preflight must not register manifests")
+        ),
+    )
+
+    client = _client(monkeypatch, tmp_path)
+    resp = client.post(
+        "/api/v1/replay/full-chain/coverage",
+        json={
+            "universe_preset": "custom",
+            "symbols": ["BTCUSDT", "ETHUSDT"],
+            "strategies": ["grid_trading"],
+            "engine": "demo",
+            "timeframe": "1m",
+            "category": "linear",
+            "data_window_start": "2026-05-01T00:00:00Z",
+            "data_window_end": "2026-05-01T00:02:00Z",
+            "use_current_config": True,
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["mode"] == "full_chain_coverage_preflight"
+    assert data["execution_mode"] == "read_only_preflight_no_subprocess"
+    assert data["promotion_allowed"] is False
+    assert data["symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert data["recorder_coverage"]["bbo"]["coverage_ratio"] == 0.75
+    assert data["coverage_verdict"]["tier"] == "S2_PLUS_LOCAL_BBO"
+    assert "bbo_coverage_below_s1" in data["coverage_verdict"]["reason_codes"]
+    assert "orderbook_coverage_below_s1" in data["warnings"]
+    assert "runs" not in data
+    assert "fixture_uri" not in data
+
+
 def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     monkeypatch,
     tmp_path: Path,
@@ -634,6 +745,36 @@ def test_execution_calibration_floors_all_replay_slippage_tiers() -> None:
     assert risk["limits"]["position_size_max_pct"] == 10.0
     assert risk["slippage"]["default_rate"] >= floor_rate
     assert all(tier["rate"] >= floor_rate for tier in risk["slippage"]["tiers"])
+
+
+def test_replay_coverage_verdict_promotes_only_when_samples_and_depth_pass() -> None:
+    import app.replay_data_coverage as dc
+
+    recorder = {
+        "bbo": {"coverage_ratio": 0.85},
+        "orderbook_depth": {"coverage_ratio": 0.81},
+        "instrument_specs": {"coverage_ratio": 1.0},
+    }
+    calibrated = dc.build_replay_coverage_verdict(
+        recorder_coverage=recorder,
+        execution_calibration={
+            "maker_order_sample_count": 220,
+            "slippage_sample_count": 240,
+        },
+    )
+    assert calibrated["tier"] == "S1_CALIBRATED_READY"
+    assert calibrated["verdict"] == "calibrated_advisory_ready"
+
+    limited = dc.build_replay_coverage_verdict(
+        recorder_coverage={**recorder, "orderbook_depth": {"coverage_ratio": 0.0}},
+        execution_calibration={
+            "maker_order_sample_count": 40,
+            "slippage_sample_count": 45,
+        },
+    )
+    assert limited["tier"] == "S1_LIMITED_READY"
+    assert limited["verdict"] == "limited_advisory_ready"
+    assert "orderbook_coverage_below_s1" in limited["reason_codes"]
 
 
 def test_maker_order_outcome_summary_clamps_to_conservative_cap() -> None:

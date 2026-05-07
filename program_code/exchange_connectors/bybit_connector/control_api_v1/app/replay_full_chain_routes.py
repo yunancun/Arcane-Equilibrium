@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field, validator
 
 from . import main_legacy as base
+from . import replay_data_coverage as _dc
 from . import replay_execution_calibration as _ec
 from .auth import require_scope_and_operator
 from .db_pool import get_pg_conn
@@ -1140,6 +1141,181 @@ async def _prepare_full_chain_run_fixture(
         "strategy_params": strategy_params,
         "risk_overrides": risk_overrides,
     }
+
+
+async def _resolve_full_chain_coverage_scope(
+    body: ReplayFullChainRunRequest,
+) -> dict[str, Any]:
+    start_ms = _to_utc_ms(body.data_window_start)
+    end_ms = _to_utc_ms(body.data_window_end)
+    estimated_bars_per_symbol = _estimate_bar_count(
+        start_ms,
+        end_ms,
+        body.timeframe,
+    )
+    max_bars_per_symbol = _max_full_chain_bars_per_symbol()
+    if estimated_bars_per_symbol > max_bars_per_symbol:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_codes": ["replay_full_chain_window_too_large_per_symbol"],
+                "message": (
+                    f"requested window estimates {estimated_bars_per_symbol} "
+                    f"bars per symbol; full-chain per-symbol limit is "
+                    f"{max_bars_per_symbol}"
+                ),
+            },
+        )
+
+    scanner_snapshot: dict[str, Any] = {}
+    historical_universe: dict[str, Any] = {}
+    universe_source = body.universe_preset
+    warnings: list[str] = []
+    if body.universe_preset == "current_scanner":
+        historical_universe = await asyncio.to_thread(
+            _fetch_historical_universe_snapshot_sync,
+            category=body.category,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            max_symbols=body.max_symbols,
+        )
+        if historical_universe.get("status") == "ok" and historical_universe.get("symbols"):
+            symbols = list(historical_universe["symbols"])
+            warnings.extend(list(historical_universe.get("warnings") or []))
+            scanner_snapshot = {"historical_universe": historical_universe}
+            universe_source = "v058_symbol_universe_snapshots"
+        else:
+            reason = str(historical_universe.get("reason") or "empty")
+            try:
+                scanner_snapshot = await _fetch_current_scanner_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                scanner_snapshot = {"status": "unavailable", "reason": str(exc)}
+                warnings.append(f"scanner_snapshot_unavailable:{exc}")
+            symbols, resolved_warnings = _resolve_full_chain_symbols(
+                body=body,
+                scanner_snapshot=scanner_snapshot,
+            )
+            warnings.extend(resolved_warnings)
+            warnings.append(
+                "historical_universe_unavailable_fell_back_to_current_scanner:"
+                + reason
+            )
+            universe_source = "current_scanner_fallback"
+    else:
+        symbols, resolved_warnings = _resolve_full_chain_symbols(
+            body=body,
+            scanner_snapshot=scanner_snapshot,
+        )
+        warnings.extend(resolved_warnings)
+
+    estimated_events = estimated_bars_per_symbol * len(symbols)
+    max_events = _max_full_chain_events()
+    if estimated_events > max_events:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_codes": ["replay_full_chain_window_too_large"],
+                "message": (
+                    f"requested window estimates {estimated_events} events across "
+                    f"{len(symbols)} symbols; full-chain limit is {max_events}"
+                ),
+            },
+        )
+    return {
+        "start_ms": start_ms,
+        "end_ms": end_ms,
+        "symbols": symbols,
+        "warnings": warnings,
+        "scanner_snapshot": scanner_snapshot,
+        "historical_universe": historical_universe,
+        "universe_source": universe_source,
+        "estimated_bars_per_symbol": estimated_bars_per_symbol,
+        "estimated_event_count": estimated_events,
+    }
+
+
+@full_chain_replay_router.post("/full-chain/coverage")
+@_REPLAY_LIMITER.limit("10/minute", key_func=_replay_rate_limit_key)
+async def post_replay_full_chain_coverage(
+    request: Request,
+    body: ReplayFullChainRunRequest,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only recorder coverage preflight for one-click full-chain replay."""
+    _require_replay_write(actor)
+    strategies = body.strategies or list(_DEFAULT_FULL_CHAIN_STRATEGIES)
+    max_strategies = _max_full_chain_run_strategies()
+    if len(strategies) > max_strategies:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_codes": ["replay_full_chain_strategy_cap_exceeded"],
+                "message": (
+                    f"requested {len(strategies)} strategies; full-chain "
+                    f"run limit is {max_strategies}"
+                ),
+            },
+        )
+
+    scope = await _resolve_full_chain_coverage_scope(body)
+    recorder_coverage, edge_snapshot, execution_calibration = await asyncio.gather(
+        asyncio.to_thread(
+            _dc.estimate_replay_window_coverage_sync,
+            get_pg_conn_fn=get_pg_conn,
+            symbols=scope["symbols"],
+            start_ms=scope["start_ms"],
+            end_ms=scope["end_ms"],
+            timeframe=body.timeframe,
+        ),
+        asyncio.to_thread(
+            _fetch_edge_estimate_snapshot_sync,
+            symbols=scope["symbols"],
+            strategies=strategies,
+            cutoff_ms=scope["start_ms"],
+        ),
+        asyncio.to_thread(
+            _ec.fetch_execution_calibration_sync,
+            get_pg_conn_fn=get_pg_conn,
+            symbols=scope["symbols"],
+            strategies=strategies,
+            asof_ms=scope["start_ms"],
+        ),
+    )
+    coverage_verdict = _dc.build_replay_coverage_verdict(
+        recorder_coverage=recorder_coverage,
+        execution_calibration=execution_calibration,
+    )
+    warnings = list(scope["warnings"])
+    warnings.extend(coverage_verdict.get("reason_codes") or [])
+    if edge_snapshot.get("status") != "ok":
+        warnings.append(
+            "edge_snapshot_unavailable:"
+            + str(edge_snapshot.get("reason") or edge_snapshot.get("status") or "unknown")
+        )
+    return _rh.replay_response_envelope({
+        "mode": "full_chain_coverage_preflight",
+        "execution_mode": "read_only_preflight_no_subprocess",
+        "promotion_allowed": False,
+        "universe_preset": body.universe_preset,
+        "universe_source": scope["universe_source"],
+        "symbols": scope["symbols"],
+        "symbol_count": len(scope["symbols"]),
+        "strategies": strategies,
+        "strategy_count": len(strategies),
+        "timeframe": body.timeframe,
+        "category": body.category,
+        "engine": body.engine,
+        "data_window_start": _iso_from_ms(scope["start_ms"]),
+        "data_window_end": _iso_from_ms(scope["end_ms"]),
+        "estimated_bars_per_symbol": scope["estimated_bars_per_symbol"],
+        "estimated_event_count": scope["estimated_event_count"],
+        "historical_universe": scope["historical_universe"],
+        "recorder_coverage": recorder_coverage,
+        "coverage_verdict": coverage_verdict,
+        "edge_snapshot": edge_snapshot,
+        "execution_calibration": execution_calibration,
+        "warnings": warnings,
+    })
 
 
 def _build_manifest_jsonb(
