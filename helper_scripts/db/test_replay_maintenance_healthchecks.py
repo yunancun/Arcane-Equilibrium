@@ -53,6 +53,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_replay_maintenance import
     RETENTION_LAST_RUN_WARN_MAX_HOURS,
     RUN_STATE_FAILED_RATE_PASS_MAX,
     RUN_STATE_FAILED_RATE_WARN_MAX,
+    RUN_STATE_SUPERSEDING_COMPLETED_MIN,
     RUN_STATE_ZOMBIE_PASS_MAX_HOURS,
     RUN_STATE_ZOMBIE_WARN_MAX_HOURS,
     RUNNER_BINARY_CANDIDATE_PATHS,
@@ -439,7 +440,7 @@ class TestCheck50ReplayRunStateHealth(unittest.TestCase):
         """V045 在但 7d 全空 → PASS（quiet week）。"""
         cur = _build_cur(fetchone_returns=[
             (True,),
-            (0, 0, 0, 0, None),
+            (0, 0, 0, 0, None, None, None, 0),
         ])
         status, msg = check_50_replay_run_state_health(cur)
         self.assertEqual(status, "PASS", msg)
@@ -449,7 +450,7 @@ class TestCheck50ReplayRunStateHealth(unittest.TestCase):
         """failed_rate 5% + 0 zombie → PASS。"""
         cur = _build_cur(fetchone_returns=[
             (True,),
-            (95, 5, 0, 0, None),  # 95 completed + 5 failed = 5% failed rate
+            (95, 5, 0, 0, None, 1, 2, 1),  # 95 completed + 5 failed = 5% failed rate
         ])
         status, msg = check_50_replay_run_state_health(cur)
         self.assertEqual(status, "PASS", msg)
@@ -459,7 +460,7 @@ class TestCheck50ReplayRunStateHealth(unittest.TestCase):
         """failed_rate 15% (>10% PASS but <20% WARN) → WARN。"""
         cur = _build_cur(fetchone_returns=[
             (True,),
-            (85, 15, 0, 0, None),
+            (85, 15, 0, 0, None, 1, 2, 1),
         ])
         status, msg = check_50_replay_run_state_health(cur)
         self.assertEqual(status, "WARN", msg)
@@ -469,17 +470,27 @@ class TestCheck50ReplayRunStateHealth(unittest.TestCase):
         """failed_rate 30% → FAIL（系統性問題）。"""
         cur = _build_cur(fetchone_returns=[
             (True,),
-            (70, 30, 0, 0, None),
+            (70, 30, 0, 0, None, 2, 1, 0),
         ])
         status, msg = check_50_replay_run_state_health(cur)
         self.assertEqual(status, "FAIL", msg)
         self.assertIn("FAIL threshold", msg)
 
+    def test_warn_when_failed_rate_superseded_by_newer_successes(self) -> None:
+        """High historical failed_rate + newer completed streak → WARN."""
+        cur = _build_cur(fetchone_returns=[
+            (True,),
+            (6, 6, 0, 0, None, 1, 2, RUN_STATE_SUPERSEDING_COMPLETED_MIN),
+        ])
+        status, msg = check_50_replay_run_state_health(cur)
+        self.assertEqual(status, "WARN", msg)
+        self.assertIn("supersede newest failure", msg)
+
     def test_warn_when_zombie_running_above_1h(self) -> None:
         """zombie 'running' age 2h → WARN。"""
         cur = _build_cur(fetchone_returns=[
             (True,),
-            (90, 5, 0, 1, 7200),  # 1 'running' aged 2h
+            (90, 5, 0, 1, 7200, 1, 2, 1),  # 1 'running' aged 2h
         ])
         status, msg = check_50_replay_run_state_health(cur)
         self.assertEqual(status, "WARN", msg)
@@ -489,7 +500,7 @@ class TestCheck50ReplayRunStateHealth(unittest.TestCase):
         """zombie 'running' age 5h → FAIL（subprocess 死亡未收回）。"""
         cur = _build_cur(fetchone_returns=[
             (True,),
-            (90, 5, 0, 1, 18000),  # 1 'running' aged 5h
+            (90, 5, 0, 1, 18000, 1, 2, 1),  # 1 'running' aged 5h
         ])
         status, msg = check_50_replay_run_state_health(cur)
         self.assertEqual(status, "FAIL", msg)
