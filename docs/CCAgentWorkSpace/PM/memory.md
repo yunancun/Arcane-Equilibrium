@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-073 Guardian risk-pattern consumption: Guardian preserves Analyst risk-pattern metadata and soft risk_pattern evidence P2-tightens size/cooldown without symbol/direction or direct close/order authority | workspace/reports/2026-05-07--agenttodo_mag073_guardian_risk_patterns.md |
 | 2026-05-07 | AgentTodo MAG-072 Strategist typed Analyst pattern rules: StrategistDecision V2 now records Analyst/TruthRegistry learning effects as typed rules so L2 losing/winning patterns change next-cycle strategy preference with explainable reason/evidence | workspace/reports/2026-05-07--agenttodo_mag072_strategist_typed_pattern_rules.md |
 | 2026-05-07 | AgentTodo MAG-071 AnalystInsight evidence links: AgentSpineClient now persists unique evidence_for edges from each evidence_ref to AnalystInsight, with tier/type/level metadata for traceability to round trips and strategy metrics | workspace/reports/2026-05-07--agenttodo_mag071_analyst_insight_evidence_links.md |
 | 2026-05-07 | AgentTodo MAG-070 AnalystInsight schema: Python contracts now define L1/L2/L3 analyst tiers, tier-scoped insight types, fact/inference/hypothesis labels, bounded confidence, recommendation, and severity; analyzed_by edges carry tier/type/level | workspace/reports/2026-05-07--agenttodo_mag070_analyst_insight_schema.md |
@@ -1661,3 +1662,28 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   change, rebuild, restart, deploy, DB write, live auth, runtime flag, or
   trading authority change was made.
 - Next AgentTodo item is MAG-073 Guardian consumes risk patterns.
+
+## 2026-05-07 AgentTodo MAG-073 Guardian Risk Patterns
+
+### Result
+- MAG-073 is complete.
+- `guardian_agent.py` preserves Analyst risk-pattern metadata from
+  `RISK_PATTERN` messages: insight ID, analyst tier/type/level, evidence refs,
+  symbol, strategy, confidence/risk score, and reason codes.
+- Soft Analyst `risk_pattern` evidence now appears as explicit
+  `risk_pattern_soft_risk` metadata and P2-tightens size/cooldown without
+  symbol/direction changes or direct close/order authority.
+- Critical scanner/risk-pattern evidence still rejects new opens without direct
+  close authority.
+
+### Verification
+- Mac targeted: Guardian pytest 45/0, py_compile, and diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 45/0, py_compile, and diff check.
+
+### Boundary
+- No runtime Guardian wiring, runtime Analyst emission wiring,
+  Strategist behavior change, cloud call, runtime submit path, Rust contract
+  change, rebuild, restart, deploy, DB write, live auth, runtime flag, or
+  trading authority change was made.
+- Next AgentTodo item is MAG-074 end-to-end losing-pattern regression.
