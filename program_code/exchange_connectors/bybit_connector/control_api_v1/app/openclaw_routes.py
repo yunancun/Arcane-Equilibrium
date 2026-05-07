@@ -4,8 +4,9 @@ from __future__ import annotations
 OpenClaw read-only control-plane routes.
 
 MODULE_NOTE (中文):
-  MAG-016/MAG-017 只讀基礎層。此模組只暴露 Sprint A allowlist：
-  GET /api/v1/openclaw/status 與 GET /api/v1/openclaw/self-state。
+  MAG-016/MAG-017 只讀基礎層。P1-OPENCLAW-3 擴展 backend-authored
+  observability allowlist：status、self-state、brief/latest、diagnostics、
+  escalations 五個 GET route。
   它聚合 backend-authored view models，所有 backing source 缺失都回
   degraded envelope，不新增 proposal / approval / trading side effect。
 """
@@ -51,6 +52,34 @@ _OPENCLAW_CONTEXT_HEADERS = {
     "auth_profile": "x-openclaw-auth-profile",
     "request_id": "x-openclaw-request-id",
 }
+_OPENCLAW_READ_ONLY_ROUTES = (
+    (
+        "GET",
+        "/api/v1/openclaw/status",
+        "OpenClaw status view",
+    ),
+    (
+        "GET",
+        "/api/v1/openclaw/self-state",
+        "OpenClaw self-state view",
+    ),
+    (
+        "GET",
+        "/api/v1/openclaw/brief/latest",
+        "OpenClaw latest brief view",
+    ),
+    (
+        "GET",
+        "/api/v1/openclaw/diagnostics",
+        "OpenClaw diagnostics view",
+    ),
+    (
+        "GET",
+        "/api/v1/openclaw/escalations",
+        "OpenClaw supervisor escalation ledger view",
+    ),
+)
+_SUPERVISOR_ESCALATION_PURPOSE = "openclaw_supervisor_escalation"
 
 
 def _now_ms() -> int:
@@ -72,6 +101,22 @@ def _env_enabled(name: str, default: str = "0") -> bool:
 
 def _safe_status_reason(prefix: str, exc: Exception) -> str:
     return f"{prefix}:{type(exc).__name__}"
+
+
+def _details_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _safe_list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
 
 
 def _hash_snapshot(payload: dict[str, Any]) -> str:
@@ -280,10 +325,12 @@ def _build_authority_posture() -> dict[str, Any]:
         "trading_authority": "rust_openclaw_engine",
         "gateway_role": "read_only_supervisor_relay",
         "active_allowlist": [
-            {"method": "GET", "path": "/api/v1/openclaw/status"},
-            {"method": "GET", "path": "/api/v1/openclaw/self-state"},
+            {"method": method, "path": path}
+            for method, path, _label in _OPENCLAW_READ_ONLY_ROUTES
         ],
         "deferred_workflows_enabled": False,
+        "proposal_creation_enabled": False,
+        "external_approval_relay_enabled": False,
         "can_submit_orders": False,
         "can_cancel_orders": False,
         "can_close_positions": False,
@@ -374,6 +421,7 @@ def _build_blockers(
     event_store_error: str | None,
     runtime_error: str | None,
     request_context_error: str | None,
+    extra_source_errors: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
     if event_store_error:
@@ -408,6 +456,14 @@ def _build_blockers(
                 "summary": "OpenClaw request context headers were missing and inferred.",
             }
         )
+    for reason in extra_source_errors or []:
+        blockers.append(
+            {
+                "code": reason.split(":", 1)[0],
+                "severity": "warn",
+                "summary": "Optional OpenClaw read backing source is unavailable.",
+            }
+        )
     return blockers
 
 
@@ -430,21 +486,18 @@ def _derive_envelope_status(
 
 
 def _evidence_refs(generated_at_ms: int) -> list[OpenClawEvidenceRef]:
+    route_refs = [
+        OpenClawEvidenceRef(
+            ref_type="api_route",
+            ref_id=f"{method} {path}",
+            label=label,
+            freshness_ts_ms=generated_at_ms,
+            safe_url=path,
+        )
+        for method, path, label in _OPENCLAW_READ_ONLY_ROUTES
+    ]
     return [
-        OpenClawEvidenceRef(
-            ref_type="api_route",
-            ref_id="GET /api/v1/openclaw/status",
-            label="Sprint A active OpenClaw status allowlist route",
-            freshness_ts_ms=generated_at_ms,
-            safe_url="/api/v1/openclaw/status",
-        ),
-        OpenClawEvidenceRef(
-            ref_type="api_route",
-            ref_id="GET /api/v1/openclaw/self-state",
-            label="Sprint A active OpenClaw self-state allowlist route",
-            freshness_ts_ms=generated_at_ms,
-            safe_url="/api/v1/openclaw/self-state",
-        ),
+        *route_refs,
         OpenClawEvidenceRef(
             ref_type="healthcheck",
             ref_id="[52] agent_event_store_rows",
@@ -463,6 +516,7 @@ def _compose_common_payload(
     runtime: dict[str, Any],
     runtime_error: str | None,
     generated_at_ms: int,
+    extra_source_errors: list[str] | None = None,
 ) -> tuple[dict[str, Any], OpenClawStatus, bool, list[str]]:
     request_context, request_context_error = _build_request_context(request, actor)
     source_errors = [
@@ -470,11 +524,13 @@ def _compose_common_payload(
         for reason in (event_store_error, runtime_error, request_context_error)
         if reason
     ]
+    source_errors.extend(extra_source_errors or [])
     blockers = _build_blockers(
         event_store=event_store,
         event_store_error=event_store_error,
         runtime_error=runtime_error,
         request_context_error=request_context_error,
+        extra_source_errors=extra_source_errors,
     )
     status, degraded, degraded_reasons = _derive_envelope_status(
         event_store=event_store,
@@ -493,6 +549,337 @@ def _compose_common_payload(
         "open_blockers": blockers,
     }
     return common, status, degraded, degraded_reasons
+
+
+def _evidence_ref_dict(
+    *,
+    ref_type: str,
+    ref_id: str,
+    label: str,
+    generated_at_ms: int,
+    safe_url: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "ref_type": ref_type,
+        "ref_id": ref_id,
+        "label": label,
+        "freshness_ts_ms": generated_at_ms,
+        "safe_url": safe_url,
+    }
+
+
+def _build_latest_brief(
+    *,
+    common: dict[str, Any],
+    status: OpenClawStatus,
+    generated_at_ms: int,
+) -> dict[str, Any]:
+    event_rows = common["agent_event_store"].get("recent_rows", {})
+    blockers = common["open_blockers"]
+    warnings = [
+        {
+            "code": blocker["code"],
+            "severity": blocker["severity"],
+            "summary": blocker["summary"],
+        }
+        for blocker in blockers
+    ]
+    if common["agent_event_store"].get("status") == "disabled":
+        warnings.append(
+            {
+                "code": "agent_event_store_disabled",
+                "severity": "warn",
+                "summary": "Agent event-store health surface is disabled by env.",
+            }
+        )
+
+    next_actions = [
+        {
+            "action": "keep_openclaw_read_only",
+            "reason": "Proposal, approval, order, config, secret, and deploy lanes are disabled.",
+        }
+    ]
+    if warnings:
+        next_actions.append(
+            {
+                "action": "inspect_degraded_sources",
+                "reason": "One or more backing sources are missing, stale, or inferred.",
+            }
+        )
+    if common["model_budget"].get("default_cloud_call_allowed") is False:
+        next_actions.append(
+            {
+                "action": "keep_supervisor_cloud_disabled",
+                "reason": common["model_budget"].get("disabled_reason"),
+            }
+        )
+
+    payload = {
+        "status": status,
+        "runtime_snapshot_id": common["runtime"].get("snapshot_id"),
+        "event_rows": event_rows,
+        "warnings": warnings,
+    }
+    return {
+        "brief_id": f"brief_{_hash_snapshot(payload)}",
+        "title": "OpenClaw control-plane latest brief",
+        "ts_ms": generated_at_ms,
+        "status": status,
+        "facts": [
+            {
+                "claim": "OpenClaw has no direct trading, risk-config, live-auth, secret, restart, or deploy authority.",
+                "source": "authority_posture",
+            },
+            {
+                "claim": "OpenClaw brief data is backend-authored by the FastAPI control plane.",
+                "source": "openclaw_routes",
+            },
+            {
+                "claim": "Recent agent event-store rows are counted from durable agent tables.",
+                "source": "agent_event_store",
+                "window_minutes": common["agent_event_store"].get("window_minutes"),
+                "rows": event_rows,
+            },
+        ],
+        "warnings": warnings,
+        "next_actions": next_actions,
+        "source_tables": [
+            "agent.messages",
+            "agent.state_changes",
+            "agent.ai_invocations",
+        ],
+        "route_allowlist": common["authority"]["active_allowlist"],
+        "proposal_lane": {
+            "creation_endpoint_enabled": False,
+            "approval_relay_enabled": False,
+            "reason": "deferred_until_explicit_operator_approval",
+        },
+    }
+
+
+def _build_diagnostics(
+    *,
+    common: dict[str, Any],
+    status: OpenClawStatus,
+    generated_at_ms: int,
+) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    route_evidence = _evidence_ref_dict(
+        ref_type="api_route",
+        ref_id="GET /api/v1/openclaw/diagnostics",
+        label="OpenClaw diagnostics view",
+        generated_at_ms=generated_at_ms,
+        safe_url="/api/v1/openclaw/diagnostics",
+    )
+    event_evidence = _evidence_ref_dict(
+        ref_type="healthcheck",
+        ref_id="[52] agent_event_store_rows",
+        label="Agent event-store recent row proof",
+        generated_at_ms=generated_at_ms,
+    )
+
+    domain_by_code = {
+        "agent_event_store_unavailable": "data",
+        "agent_event_store_zero_rows": "data",
+        "agent_event_store_disabled": "data",
+        "runtime_snapshot_unavailable": "runtime",
+        "request_context_inferred": "gateway",
+        "supervisor_escalation_ledger_unavailable": "ai_cost",
+    }
+    for blocker in common["open_blockers"]:
+        code = blocker["code"]
+        diagnostics.append(
+            {
+                "diagnosis_id": f"diag_{_hash_snapshot({'code': code, 'status': status})}",
+                "ts_ms": generated_at_ms,
+                "severity": blocker["severity"],
+                "domain": domain_by_code.get(code, "operator"),
+                "status": "open",
+                "facts": [blocker["summary"]],
+                "inferences": [
+                    "OpenClaw read models should be treated as incomplete until this source recovers."
+                ],
+                "hypotheses": [
+                    "The backing source may be unavailable, disabled, idle, or missing required request context."
+                ],
+                "recommended_action": "verify_backing_source_and_keep_read_only",
+                "evidence_refs": [route_evidence, event_evidence],
+                "linked_escalation_id": None,
+                "linked_proposal_id": None,
+            }
+        )
+
+    if common["agent_event_store"].get("status") == "disabled":
+        diagnostics.append(
+            {
+                "diagnosis_id": "diag_agent_event_store_disabled",
+                "ts_ms": generated_at_ms,
+                "severity": "warn",
+                "domain": "data",
+                "status": "open",
+                "facts": ["Agent event-store health check is disabled by env."],
+                "inferences": [
+                    "OpenClaw cannot use the recent row proof as a hard readiness gate."
+                ],
+                "hypotheses": ["The deployment may be intentionally running in advisory-only mode."],
+                "recommended_action": "enable_event_store_health_when_runtime_row_proof_is_required",
+                "evidence_refs": [event_evidence],
+                "linked_escalation_id": None,
+                "linked_proposal_id": None,
+            }
+        )
+
+    if not diagnostics:
+        diagnostics.append(
+            {
+                "diagnosis_id": f"diag_openclaw_read_only_{_hash_snapshot({'status': status})}",
+                "ts_ms": generated_at_ms,
+                "severity": "info",
+                "domain": "governance",
+                "status": "open",
+                "facts": [
+                    "The active OpenClaw route allowlist is read-only.",
+                    "Proposal creation and approval relay are disabled.",
+                ],
+                "inferences": [
+                    "This surface can observe runtime posture without changing trading authority."
+                ],
+                "hypotheses": [],
+                "recommended_action": "continue_read_only_observation",
+                "evidence_refs": [route_evidence],
+                "linked_escalation_id": None,
+                "linked_proposal_id": None,
+            }
+        )
+    return diagnostics
+
+
+def _row_to_escalation(row: tuple[Any, ...]) -> dict[str, Any]:
+    (
+        invocation_id,
+        created_at_ms,
+        provider,
+        model,
+        tier,
+        prompt_hash,
+        success,
+        response_summary,
+        context_id,
+        details,
+    ) = row
+    detail_payload = _details_dict(details)
+    escalation_id = str(
+        detail_payload.get("escalation_id")
+        or context_id
+        or f"esc_ai_{_hash_snapshot({'invocation_id': invocation_id})}"
+    )
+    source_ids = _safe_list(detail_payload.get("source_observation_ids"))
+    budget_decision = detail_payload.get("budget_decision")
+    ledger_phase = str(detail_payload.get("ledger_phase") or "")
+    status = "invocation_recorded" if ledger_phase == "before_cloud_call" else "responded"
+    if success is False and ledger_phase != "before_cloud_call":
+        status = "failed"
+    return {
+        "escalation_id": escalation_id,
+        "created_at_ms": int(created_at_ms or 0),
+        "trigger_type": str(detail_payload.get("trigger_type") or "operator_requested"),
+        "source_observation_ids": source_ids,
+        "budget_decision": budget_decision if isinstance(budget_decision, dict) else {},
+        "prompt_hash": prompt_hash,
+        "input_summary": "Supervisor escalation ledger row from agent.ai_invocations.",
+        "model_request": {
+            "provider": provider,
+            "model": model,
+            "tier": tier,
+        },
+        "ai_invocation_id": invocation_id,
+        "response_summary": response_summary,
+        "result_diagnosis_ids": _safe_list(detail_payload.get("result_diagnosis_ids")),
+        "result_proposal_ids": _safe_list(detail_payload.get("result_proposal_ids")),
+        "status": status,
+    }
+
+
+def _read_supervisor_escalation_ledger(
+    *,
+    limit: int = 20,
+) -> tuple[dict[str, Any], str | None]:
+    ledger: dict[str, Any] = {
+        "source_table": "agent.ai_invocations",
+        "purpose": _SUPERVISOR_ESCALATION_PURPOSE,
+        "available": False,
+        "items": [],
+        "recent_count": 0,
+    }
+    with get_pg_conn() as conn:
+        if conn is None:
+            return ledger, "supervisor_escalation_ledger_unavailable:pg_unavailable"
+        try:
+            cur = conn.cursor()
+            _set_statement_timeout(cur)
+            cur.execute("SELECT to_regclass(%s) IS NOT NULL", ("agent.ai_invocations",))
+            row = cur.fetchone()
+            if not row or not row[0]:
+                ledger["missing_table"] = "agent.ai_invocations"
+                return ledger, "supervisor_escalation_ledger_unavailable:missing_table"
+            cur.execute(
+                """
+                SELECT
+                    invocation_id,
+                    (EXTRACT(EPOCH FROM ts) * 1000)::bigint AS ts_ms,
+                    provider,
+                    model,
+                    tier,
+                    prompt_hash,
+                    success,
+                    response_summary,
+                    context_id,
+                    details
+                  FROM agent.ai_invocations
+                 WHERE purpose = %s
+                 ORDER BY ts DESC
+                 LIMIT %s
+                """,
+                (_SUPERVISOR_ESCALATION_PURPOSE, int(limit)),
+            )
+            rows = list(cur.fetchall() or [])
+            items = [_row_to_escalation(tuple(item)) for item in rows]
+            ledger.update(
+                {
+                    "available": True,
+                    "items": items,
+                    "recent_count": len(items),
+                }
+            )
+            return ledger, None
+        except Exception as exc:  # noqa: BLE001 - read route degrades, never 5xx
+            logger.warning("openclaw supervisor escalation ledger read failed: %s", exc)
+            return ledger, _safe_status_reason(
+                "supervisor_escalation_ledger_unavailable",
+                exc,
+            )
+
+
+def _build_escalations_view(
+    *,
+    common: dict[str, Any],
+    ledger: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "creation_endpoint_enabled": False,
+        "external_creation_deferred": True,
+        "approval_relay_enabled": False,
+        "cloud_policy": common["model_budget"],
+        "ledger": {
+            "source_table": ledger["source_table"],
+            "purpose": ledger["purpose"],
+            "available": ledger["available"],
+            "recent_count": ledger["recent_count"],
+        },
+        "items": ledger["items"],
+        "proposal_side_effect_allowed": False,
+        "direct_cloud_call_allowed_from_route": False,
+    }
 
 
 async def _read_backing_sources() -> tuple[dict[str, Any], str | None, dict[str, Any], str | None]:
@@ -588,4 +975,126 @@ async def get_openclaw_self_state(
         evidence_refs=_evidence_refs(generated_at_ms),
         data=data,
         data_category="openclaw_self_state",
+    )
+
+
+@openclaw_router.get("/brief/latest", response_model=OpenClawEnvelope)
+async def get_openclaw_brief_latest(
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> OpenClawEnvelope:
+    generated_at_ms = _now_ms()
+    event_store, event_store_error, runtime, runtime_error = await _read_backing_sources()
+    common, status, degraded, degraded_reasons = _compose_common_payload(
+        request=request,
+        actor=actor,
+        event_store=event_store,
+        event_store_error=event_store_error,
+        runtime=runtime,
+        runtime_error=runtime_error,
+        generated_at_ms=generated_at_ms,
+    )
+    data = {
+        "brief": _build_latest_brief(
+            common=common,
+            status=status,
+            generated_at_ms=generated_at_ms,
+        ),
+        "authority": common["authority"],
+        "gateway": common["gateway"],
+        "request_context": common["request_context"],
+    }
+    return OpenClawEnvelope(
+        ok=(not degraded and status not in {"fail", "degraded"}),
+        status=status,
+        generated_at_ms=generated_at_ms,
+        freshness_ms=runtime.get("snapshot_age_ms"),
+        degraded=degraded or status == "degraded",
+        degraded_reasons=degraded_reasons,
+        evidence_refs=_evidence_refs(generated_at_ms),
+        data=data,
+        data_category="openclaw_brief_latest",
+    )
+
+
+@openclaw_router.get("/diagnostics", response_model=OpenClawEnvelope)
+async def get_openclaw_diagnostics(
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> OpenClawEnvelope:
+    generated_at_ms = _now_ms()
+    event_store, event_store_error, runtime, runtime_error = await _read_backing_sources()
+    common, status, degraded, degraded_reasons = _compose_common_payload(
+        request=request,
+        actor=actor,
+        event_store=event_store,
+        event_store_error=event_store_error,
+        runtime=runtime,
+        runtime_error=runtime_error,
+        generated_at_ms=generated_at_ms,
+    )
+    diagnostics = _build_diagnostics(
+        common=common,
+        status=status,
+        generated_at_ms=generated_at_ms,
+    )
+    data = {
+        "diagnostics": diagnostics,
+        "diagnostic_count": len(diagnostics),
+        "authority": common["authority"],
+        "request_context": common["request_context"],
+    }
+    return OpenClawEnvelope(
+        ok=(not degraded and status not in {"fail", "degraded"}),
+        status=status,
+        generated_at_ms=generated_at_ms,
+        freshness_ms=runtime.get("snapshot_age_ms"),
+        degraded=degraded or status == "degraded",
+        degraded_reasons=degraded_reasons,
+        evidence_refs=_evidence_refs(generated_at_ms),
+        data=data,
+        data_category="openclaw_diagnostics",
+    )
+
+
+@openclaw_router.get("/escalations", response_model=OpenClawEnvelope)
+async def get_openclaw_escalations(
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> OpenClawEnvelope:
+    generated_at_ms = _now_ms()
+    (
+        event_store,
+        event_store_error,
+        runtime,
+        runtime_error,
+    ), (ledger, ledger_error) = await asyncio.gather(
+        _read_backing_sources(),
+        asyncio.to_thread(_read_supervisor_escalation_ledger),
+    )
+    common, status, degraded, degraded_reasons = _compose_common_payload(
+        request=request,
+        actor=actor,
+        event_store=event_store,
+        event_store_error=event_store_error,
+        runtime=runtime,
+        runtime_error=runtime_error,
+        generated_at_ms=generated_at_ms,
+        extra_source_errors=[ledger_error] if ledger_error else None,
+    )
+    data = {
+        "escalations": _build_escalations_view(common=common, ledger=ledger),
+        "authority": common["authority"],
+        "request_context": common["request_context"],
+    }
+    return OpenClawEnvelope(
+        ok=(not degraded and status not in {"fail", "degraded"}),
+        status=status,
+        generated_at_ms=generated_at_ms,
+        freshness_ms=runtime.get("snapshot_age_ms"),
+        degraded=degraded or status == "degraded",
+        degraded_reasons=degraded_reasons,
+        evidence_refs=_evidence_refs(generated_at_ms),
+        data=data,
+        data_category="openclaw_escalations",
     )
