@@ -269,7 +269,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-040 | PA/QC | P0 | TODO | Define strategy matching model for MA/Grid/Funding/BB/Breakout. | Strategy choice is not `strategist_ai`/`strategist_heuristic` only. |
+| MAG-040 | PA/QC | P0 | DONE (MATCHING MODEL RFC) | Define strategy matching model for MA/Grid/Funding/BB/Breakout. | `2026-05-07--mag040_strategist_v2_matching_model.md` defines canonical strategy keys, evidence inputs, candidate scoring, strategy fit rules, fail-closed behavior, and required regressions so strategy choice is not `strategist_ai`/`strategist_heuristic` only. |
 | MAG-041 | E1a | P0 | TODO | Implement StrategistDecision open/hold/reduce/close/no_action. | Decisions include thesis, invalidation, expected net edge, portfolio impact. |
 | MAG-042 | E1a | P0 | TODO | Implement PositionReview for scanner decay and regime shifts. | Scanner decay on open position leads to hold/reduce/tighten/close recommendation. |
 | MAG-043 | E1a | P1 | TODO | Consume Guardian rejection stats in next-cycle decision. | High reject rate reduces aggressiveness or raises confidence floor. |
