@@ -1909,5 +1909,7 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   `live_demo` instead of silently reading paper/default.
 - Mac verification: Executor targeted pytest 25 passed / 7 skipped, and
   `py_compile` passed for `executor_agent.py` / `executor_config_cache.py`.
+- Linux `trade-core` verification after fast-forward to `f5bfd854`: targeted
+  Executor pytest 30 passed / 2 skipped, and `py_compile` passed.
 - Runtime deploy remains pending; no restart, rebuild, live auth mutation,
   Decision Lease flag flip, or strategy/risk config change occurred.
