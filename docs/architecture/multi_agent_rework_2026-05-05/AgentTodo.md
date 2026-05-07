@@ -1,8 +1,23 @@
 # AgentTodo: Multi-Agent Rework
 
 Date: 2026-05-05
-Status: Draft task backlog
+Status: Historical implementation backlog; active dispatch now in `TODO.md` v13
 Parent plan: `ENGINEERING_PLAN.md`
+
+## 2026-05-07 Active-Queue Overlay
+
+AgentTodo remains the detailed historical implementation ledger for the
+multi-agent rework. The active dispatch order is now `TODO.md` v13.
+
+Current boundary:
+
+- M0/Sprint A/M2/M3/M4/M5/M6/M7 are closed.
+- M8 policy/checklist work is closed through MAG-082, but runtime evidence is
+  NO-GO after the Stage 2 fast-track review.
+- MAG-083 and MAG-084 remain blocked until a later MAG-082 runtime lineage
+  report PASSes.
+- Do not start Telegram/WebChat, proposal approval relay, a second GUI, Stage
+  3/4, or true-live autonomy from this file. Start from `TODO.md` v13 instead.
 
 ## 2026-05-06 OpenClaw Repositioning Overlay
 
