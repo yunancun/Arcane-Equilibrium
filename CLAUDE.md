@@ -449,20 +449,20 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A/M2/M3/M4/M5/M6/M7 closed**）。AgentTodo M8 Canary/Cutover 已完成 **MAG-080 cutover policy**、**MAG-081 canary flag runtime risk review**、**MAG-082 24h canary validation checklist**；2026-05-07 operator 已要求並完成 rebuild + Mac/origin/Linux 三端同步，Stage 2 demo/live_demo canary evidence window `stage2_demo_livedemo_20260507t1602z` 已授權/啟動。Fast-track replay review 結論是 **NO-GO**：runtime decision-spine / idempotency rows 仍為 0，replay 三策略 completed 但 0 fills、`execution_confidence=none`，不可替代 MAG-082 runtime lineage；runtime build commit 仍是 `e8a58852`，source 已快進到 replay finalize import fix `ffd9802f`。**MAG-083 final release audit** 仍 BLOCKED；**MAG-084 operator sign-off** 仍 BLOCKED，需 MAG-083 PASS 後才可簽核。仍不是 Telegram/WebChat、proposal approval relay、或第二 GUI。
+**當前焦點**：活躍任務以 `TODO.md` v13 為準。2026-05-07 已按最新 Agent 設計與 OpenClaw 定位重排：主 TODO 現在只保留 active dispatch queue，舊 REF-20/REF-21/AgentTodo closure、過期觀察表與 obsoleted work 已歸檔到 `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md`。當前順序是 `W-A` executor fake-live runtime smoke -> `W-B` runtime Agent Decision Spine lineage -> `W-C` 新 MAG-082 Stage 2 evidence window -> `W-D` MAG-083/MAG-084 -> `W-E` OpenClaw read-only brief/diagnostics/escalations。仍不是 Telegram/WebChat、proposal approval relay、第二 GUI、Stage 3/4，或 true-live autonomy。
 
-**關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → ~05-09 3C 7d audit → ~05-15 P0-3 edge decision + Decision Lease flag flip canary 24h → ~05-16 funding_arb V2 14d audit → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
+**關鍵路徑**：`P1-FAKE-1 runtime smoke → runtime decision-spine/idempotency lineage → new MAG-082 Stage 2 24h PASS → MAG-083 QA audit → MAG-084 operator sign-off → OpenClaw read-only expansion → edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
 **REF-20 IMPL 狀態（2026-05-05 all closed）**：Sprint A+B+C+D closed；R9 PM sign-off `6a7a885c` + post-signoff reality-gap fix `67b95808`。A1-A10 + R9 7 conditions closed；Paper Replay Lab usable for demo research；replay evidence remains advisory / non-commanding and does not authorize live trading。
 
 **最早 Live 日期**（事件驅動，非 hard date）：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA panorama 評估悲觀更可能**（5 策略 net negative + 4 LG 0 IMPL + 18 blocker 還剩 13 個未解 + Decision Lease retrofit deploy with flag OFF）。
 
-**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + **REF-20 Paper Replay Lab A-D** 均已落地。仍未完成的是正 edge / execution-quality 驗收 / P0-3 decision / Live Gate LG-2/3/4 IMPL + Decision Lease canary / Wave 7 P5 deploy gate / true live 授權後的受監督/受限自主放權 / **AgentTodo M8 canary evidence + final audit + sign-off**。
+**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + REF-20/REF-21 replay foundation 均已落地。仍未完成的是 runtime Agent Decision Spine lineage、MAG-082 重新取證、MAG-083/MAG-084、edge / execution-quality 驗收、Live Gate LG-2/3/4、Live infra、以及 true live 前的受監督/受限自主放權。
 
-**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease retrofit deploy with flag OFF。True live 還缺 18 blocker 中的 #1/#2/#3/#4/#6-#18（13 個未解；#5 Decision Lease 已 closed）+ ~05-15 flag flip canary 24h。
+**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease retrofit deploy with flag OFF。True live 仍缺 Agent runtime lineage PASS、edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
-- TODO.md 三層工作流程 + healthcheck 列表 + 排程提醒 + P1-INFRA-3 REF-20 all-closed status + AgentTodo Sprint A entry point
+- TODO.md v13 active dispatch queue + `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` for removed historical context
 - **REF-20 Gap Closure Plan V1 (2026-05-04, current SoT for Sprint A-D)**：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
 - REF-20 V3 SoT (legacy schema/route foundation)：`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`
 - REF-20 Sprint 4 final closure：`docs/execution_plan/2026-05-03--ref20_sprint4_final_closure.md`

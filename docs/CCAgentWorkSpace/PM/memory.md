@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | TODO v13 Agent/OpenClaw replan: converted TODO from historical ledger to active dispatch queue, archived stale v12 context, and reordered work around executor smoke -> runtime lineage -> MAG-082 rerun -> MAG-083/MAG-084 -> OpenClaw read-only expansion | workspace/reports/2026-05-07--todo_v13_agent_openclaw_replan.md |
 | 2026-05-07 | P1 healthcheck FAIL queue + Executor fake-live source fix: inserted `[Xb]` / `[42*]` / `[50]` / `[51]` ahead of P1 work and fixed Executor IPC to use `submit_paper_order` with explicit engine plus engine-aware shadow provider | workspace/reports/2026-05-07--p1_healthcheck_fail_queue_and_executor_fake_live_fix.md |
 | 2026-05-07 | AgentTodo M8 Stage 2 fast-track NO-GO: replay runner/report path completed after import fix `ffd9802f`, but runtime decision-spine/idempotency rows remain 0 and replay produced 0 fills / `execution_confidence=none`; MAG-083/MAG-084 remain blocked | workspace/reports/2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md |
 | 2026-05-07 | AgentTodo M8 Stage 2 authorization report: rebuilt Linux with keep-auth, confirmed Mac/origin/Linux sync at `e8a58852`, started MAG-082 Stage 2 demo/live_demo canary evidence window, then fast-track evidence review updated the report to NO-GO | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_stage2_demo_livedemo_20260507t1602z.md |
@@ -1913,3 +1914,25 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   Executor pytest 30 passed / 2 skipped, and `py_compile` passed.
 - Runtime deploy remains pending; no restart, rebuild, live auth mutation,
   Decision Lease flag flip, or strategy/risk config change occurred.
+
+## 2026-05-07 TODO v13 Agent/OpenClaw Replan
+
+- Re-read TODO against the accepted OpenClaw repositioning and latest
+  AgentTodo M8 evidence.
+- Converted `TODO.md` from history-ledger format to active dispatch queue.
+- Archived removed v12 context at
+  `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md`.
+- Active order is now:
+  1. `W-A` executor fake-live runtime smoke.
+  2. `W-B` runtime decision-spine lineage wiring.
+  3. `W-C` new MAG-082 Stage 2 evidence window after explicit runtime approval.
+  4. `W-D` MAG-083/MAG-084 only after MAG-082 PASS.
+  5. `W-E` OpenClaw read-only brief/diagnostics/escalations.
+  6. `W-F` edge/data and Live Gate foundation.
+  7. `W-G` proposal/approval/mobile relay only after read-only foundation and
+     explicit operator approval.
+- Removed stale active entries for closed REF-20/REF-21 work, old observation
+  snapshots, old date reminders, and obsoleted LOC-governance tickets.
+- Documentation-only change; no rebuild, restart, DB write, live auth mutation,
+  scanner authority change, executor shadow unlock, lease-router flag
+  enablement, or OpenClaw write/proposal route was performed.
