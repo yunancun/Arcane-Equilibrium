@@ -144,7 +144,7 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         budget_store,
         audit_pool,
         symbol_registry,
-        scanner_store: _, // D-03: unused — ScannerConfig read via scanner_runner, not event_consumer
+        scanner_store,
         shared_risk_level,
         is_primary,
         ready_tx,
@@ -340,6 +340,9 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         symbol_registry.as_ref().map(Arc::clone);
     if let Some(ref reg) = symbol_registry {
         pipeline.set_symbol_registry(Arc::clone(reg));
+    }
+    if let Some(ref store) = scanner_store {
+        pipeline.set_scanner_authority_mode(store.load().authority.mode);
     }
 
     // ── P0-6 FIX: Triage bybit_sync positions ─────────────────────────────

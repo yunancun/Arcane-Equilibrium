@@ -25,6 +25,7 @@ pub(crate) fn build_opportunity_decays(
     added: &[String],
     removed: &[String],
     pinned_symbols: &[String],
+    authority_mode: ScannerAuthorityMode,
 ) -> Vec<OpportunityDecay> {
     let Some(previous_scan) = previous_scan else {
         return Vec::new();
@@ -81,7 +82,7 @@ pub(crate) fn build_opportunity_decays(
             decay_ts_ms: now_ms,
             symbol: previous_candidate.symbol.clone(),
             strategy: Some(strategy),
-            authority_mode: ScannerAuthorityMode::LegacyGate,
+            authority_mode,
             reason,
             previous_score: Some(previous_candidate.final_score),
             current_score,
@@ -97,6 +98,8 @@ pub(crate) fn build_opportunity_decays(
                 "replacement_symbols": added,
                 "removed_this_cycle": removed_set.contains(symbol),
                 "review_only": has_open_position,
+                "position_review_input": has_open_position,
+                "close_dispatch_allowed": false,
             }),
         });
     }
@@ -204,6 +207,7 @@ mod tests {
             &[],
             &[],
             &[],
+            ScannerAuthorityMode::LegacyGate,
         );
 
         assert_eq!(decays.len(), 1);
@@ -233,6 +237,7 @@ mod tests {
             &[],
             &[],
             &[],
+            ScannerAuthorityMode::LegacyGate,
         );
 
         assert_eq!(decays.len(), 1);
@@ -242,6 +247,36 @@ mod tests {
         assert!(decay.position_review_required);
         assert!(!decay.auto_close_allowed);
         assert_eq!(decay.current_rank, None);
+    }
+
+    #[test]
+    fn scanner_removal_of_open_position_is_review_input_not_close_signal() {
+        let previous = make_scan("scan-prev", vec![make_scored("SOLUSDT", 80.0)]);
+        let selected = Vec::new();
+        let mut open_positions = HashSet::new();
+        open_positions.insert("SOLUSDT".to_string());
+
+        let decays = build_opportunity_decays(
+            Some(&previous),
+            &selected,
+            "scan-now",
+            2_000,
+            &open_positions,
+            &[],
+            &[],
+            &[],
+            ScannerAuthorityMode::AdvisoryShadow,
+        );
+
+        assert_eq!(decays.len(), 1);
+        let decay = &decays[0];
+        assert_eq!(decay.authority_mode, ScannerAuthorityMode::AdvisoryShadow);
+        assert_eq!(decay.reason, OpportunityDecayReason::ExitedTopSet);
+        assert!(decay.has_open_position);
+        assert!(decay.position_review_required);
+        assert!(!decay.auto_close_allowed);
+        assert_eq!(decay.evidence["position_review_input"], true);
+        assert_eq!(decay.evidence["close_dispatch_allowed"], false);
     }
 
     #[test]
@@ -260,6 +295,7 @@ mod tests {
             &added,
             &removed,
             &[],
+            ScannerAuthorityMode::LegacyGate,
         );
 
         assert_eq!(decays.len(), 1);
@@ -283,6 +319,7 @@ mod tests {
             &[],
             &[],
             &["BTCUSDT".to_string()],
+            ScannerAuthorityMode::LegacyGate,
         );
 
         assert!(decays.is_empty());

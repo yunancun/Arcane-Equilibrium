@@ -242,6 +242,7 @@ impl ScannerRunner {
                 &added,
                 &removed,
                 &pinned,
+                config.authority.mode,
             );
             let snapshot_candidates = {
                 let by_selected: HashMap<&str, _> =

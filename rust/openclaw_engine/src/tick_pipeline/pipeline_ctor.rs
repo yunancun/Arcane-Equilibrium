@@ -118,6 +118,7 @@ impl TickPipeline {
             exit_feature_tx: None,
             shadow_exit_tx: None,
             symbol_registry: None,
+            scanner_authority_mode: crate::scanner::types::ScannerAuthorityMode::LegacyGate,
             retriage_last_evict_ms: HashMap::new(),
             // G7-03 Phase B: empty per-symbol HysteresisDetector cache.
             // When `risk.hurst.enabled = false` (default), the helper bypasses
@@ -191,6 +192,15 @@ impl TickPipeline {
     /// 接入掃描器 SymbolRegistry，新開倉僅限掃描器活躍交易對。
     pub fn set_symbol_registry(&mut self, reg: Arc<crate::scanner::registry::SymbolRegistry>) {
         self.symbol_registry = Some(reg);
+    }
+
+    /// Set scanner authority mode for the hot-path legacy gate comparison.
+    /// 設定 hot-path legacy scanner gate 比較所用的 scanner 權限模式。
+    pub fn set_scanner_authority_mode(
+        &mut self,
+        mode: crate::scanner::types::ScannerAuthorityMode,
+    ) {
+        self.scanner_authority_mode = mode;
     }
 
     /// DB engine_mode tag for this pipeline (endpoint-aware). All DB-writing

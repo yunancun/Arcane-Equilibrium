@@ -971,6 +971,10 @@ pub struct TickPipeline {
     /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。
     /// None = 門控停用（允許所有交易對，如測試/獨立運行）。
     symbol_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    /// Scanner authority mode controlling whether legacy scanner would-block
+    /// decisions enforce or only record advisory evidence.
+    /// scanner 權限模式，控制 legacy scanner would-block 是執行還是只記錄。
+    scanner_authority_mode: crate::scanner::types::ScannerAuthorityMode,
     /// DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): per-symbol last `NeedsEviction`
     /// dispatch timestamp (ms since epoch). Used to rate-limit `ipc_close_symbol`
     /// retries on symbols whose retriage keeps asking for a close but the exchange
