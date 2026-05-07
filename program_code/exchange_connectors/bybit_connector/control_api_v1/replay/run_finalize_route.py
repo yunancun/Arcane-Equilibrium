@@ -380,12 +380,8 @@ def _compute_and_persist_calibration(
         from datetime import datetime as _dt
         from datetime import timezone as _tz
 
-        from program_code.exchange_connectors.bybit_connector.control_api_v1.replay import (  # noqa: E501
-            calibration_label as _cl,
-        )
-        from program_code.exchange_connectors.bybit_connector.control_api_v1.replay import (  # noqa: E501
-            experiment_registry as _er,
-        )
+        from replay import calibration_label as _cl
+        from replay import experiment_registry as _er
 
         if derive_fn is None:
             derive_fn = _cl.derive_execution_confidence
@@ -448,9 +444,7 @@ def _compute_and_persist_calibration(
         rows = cur.fetchall()
 
         # Step 3：rows → list[FillRecord]。0 fills → derive 回 None label。
-        from program_code.exchange_connectors.bybit_connector.control_api_v1.replay.calibration_label import (  # noqa: E501
-            FillRecord,
-        )
+        from replay.calibration_label import FillRecord
 
         fills: list[FillRecord] = []
         for r_ts, r_side, r_price, r_fee_rate in rows:
