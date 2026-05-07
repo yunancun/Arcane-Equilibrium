@@ -19,6 +19,11 @@ from app.agent_contracts import (
     StrategySignal,
 )
 from app.agent_spine_client import AgentSpineClient
+from app.strategist_decision_v2 import (
+    StrategyCandidate,
+    StrategyMatchInput,
+    build_strategist_decision,
+)
 
 
 @dataclass
@@ -662,3 +667,98 @@ def test_publish_analyst_insight_links_unique_round_trip_and_metric_evidence(fak
         "insight_type": "strategy_pattern",
         "insight_level": "inference",
     }
+
+
+def test_losing_pattern_to_strategist_weight_change_persists_reason(fake_conn) -> None:
+    client = AgentSpineClient(enabled=True, authority_mode="shadow")
+    insight = AnalystInsightL2(
+        insight_id="insight-paper-grid-loss-e2e",
+        ts_ms=1_700_000_000_070,
+        engine_mode="paper",
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        decision_id="decision-paper-BTCUSDT-prior",
+        order_plan_id="plan-paper-BTCUSDT-prior",
+        insight_type="strategy_pattern",
+        insight_level="inference",
+        summary="grid_trading loses during one-way shock",
+        evidence_refs=[
+            "roundtrip-paper-grid-loss-window",
+            "strategy-metric-paper-grid-drawdown",
+        ],
+        claims=[
+            {
+                "claim_id": "claim-grid-loss-e2e",
+                "strategy": "grid_trading",
+                "polarity": "negative",
+                "confidence": 0.9,
+                "observation_count": 20,
+                "reason": "losing pattern: one-way shock",
+            }
+        ],
+        confidence=0.9,
+        severity="medium",
+    )
+
+    assert client.publish_analyst_insight(insight) is True
+
+    decision = build_strategist_decision(
+        StrategyMatchInput(
+            match_id="match-paper-BTCUSDT-e2e",
+            signal_id="sig-paper-BTCUSDT-e2e",
+            ts_ms=1_700_000_000_100,
+            engine_mode="paper",
+            symbol="BTCUSDT",
+            direction="long",
+            scanner_candidate_id="scanner-paper-BTCUSDT-e2e",
+            candidate_routes=[
+                StrategyCandidate(
+                    candidate_id="route-grid-losing-e2e",
+                    strategy="grid_trading",
+                    action="open",
+                    direction="long",
+                    market_fit_score=0.80,
+                    edge_lcb_bps=20.0,
+                    cost_bps=5.0,
+                    data_quality_score=0.9,
+                    learning_weight=0.8,
+                ),
+                StrategyCandidate(
+                    candidate_id="route-ma-neutral-e2e",
+                    strategy="ma_crossover",
+                    action="open",
+                    direction="long",
+                    market_fit_score=0.80,
+                    edge_lcb_bps=20.0,
+                    cost_bps=5.0,
+                    data_quality_score=0.9,
+                    learning_weight=0.5,
+                ),
+            ],
+            analyst_insights=[insight],
+            default_size=0.001,
+        )
+    )
+
+    assert decision.selected_strategy == "ma_crossover"
+    grid_feedback = decision.candidate_scores[0]["learning_feedback"]
+    assert grid_feedback["reason_codes"] == ["analyst_negative_pattern:claim-grid-loss-e2e"]
+    assert grid_feedback["typed_rules"][0]["reason_code"] == (
+        "analyst_negative_pattern:claim-grid-loss-e2e"
+    )
+    assert "insight-paper-grid-loss-e2e" in grid_feedback["evidence_refs"]
+
+    assert client.publish_strategist_decision(decision) is True
+
+    persisted_decision = next(
+        params[19]
+        for _, params in fake_conn.executes
+        if len(params) > 19 and params[2] == "strategist_decision"
+    )
+    persisted_feedback = persisted_decision["candidate_scores"][0]["learning_feedback"]
+    assert persisted_feedback["typed_rules"][0]["claim_id"] == "claim-grid-loss-e2e"
+    assert persisted_feedback["typed_rules"][0]["evidence_refs"] == [
+        "insight-paper-grid-loss-e2e",
+        "roundtrip-paper-grid-loss-window",
+        "strategy-metric-paper-grid-drawdown",
+    ]
