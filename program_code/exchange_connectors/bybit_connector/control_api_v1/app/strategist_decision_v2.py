@@ -11,7 +11,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .agent_contracts import DecisionAction, StrategistDecision, StrategySignalDirection
+from .agent_contracts import (
+    AnalystInsight,
+    DecisionAction,
+    StrategistDecision,
+    StrategySignalDirection,
+)
 
 
 CANONICAL_STRATEGY_KEYS = (
@@ -23,6 +28,7 @@ CANONICAL_STRATEGY_KEYS = (
 )
 
 _STRATEGY_ALIASES = {
+    "grid": "grid_trading",
     "funding_rate_arb": "funding_arb",
     "bollinger_reversion": "bb_reversion",
     "bollinger_breakout": "bb_breakout",
@@ -66,6 +72,19 @@ class GuardianFeedbackStats(_StrategistV2Model):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class TruthRegistryClaim(_StrategistV2Model):
+    claim_id: str
+    strategy: str | None = None
+    symbol: str | None = None
+    regime: str | None = None
+    pattern_text: str
+    polarity: str | None = None
+    confidence: float = 0.5
+    observation_count: int = Field(default=0, ge=0)
+    reason: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class StrategyMatchInput(_StrategistV2Model):
     match_id: str
     signal_id: str
@@ -82,6 +101,8 @@ class StrategyMatchInput(_StrategistV2Model):
     hypothesis_refs: list[str] = Field(default_factory=list)
     guardian_feedback: list[GuardianFeedbackStats] = Field(default_factory=list)
     guardian_feedback_min_total: int = 3
+    analyst_insights: list[AnalystInsight] = Field(default_factory=list)
+    truth_registry_claims: list[TruthRegistryClaim] = Field(default_factory=list)
     cognitive_confidence_floor: float = 0.0
     min_data_quality_score: float = 0.2
     default_size: float | None = None
@@ -106,7 +127,7 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
     if not match.candidate_routes:
         return _no_action(match, "no_strategy_candidates", candidate_scores)
 
-    best: tuple[StrategyCandidate, str, float, list[str], dict[str, Any]] | None = None
+    best: tuple[StrategyCandidate, str, float, list[str], dict[str, Any], dict[str, Any]] | None = None
     for candidate in match.candidate_routes:
         normalized_strategy: str | None = None
         reject_reasons = list(candidate.reject_reasons)
@@ -117,6 +138,11 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
 
         net_edge_lcb_bps = _net_edge(candidate)
         guardian_feedback = _guardian_feedback(
+            match=match,
+            candidate=candidate,
+            normalized_strategy=normalized_strategy,
+        )
+        learning_feedback = _learning_feedback(
             match=match,
             candidate=candidate,
             normalized_strategy=normalized_strategy,
@@ -136,6 +162,7 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
             candidate,
             net_edge_lcb_bps,
             guardian_feedback["risk_acceptance_prior"],
+            learning_feedback["learning_weight"],
         )
         effective_confidence = max(_clamp01(candidate.confidence), match_score)
         confidence_floor = guardian_feedback["confidence_floor"]
@@ -164,6 +191,12 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
                 "risk_acceptance_prior": guardian_feedback["risk_acceptance_prior"],
                 "top_reasons": guardian_feedback["top_reasons"],
             },
+            "learning_feedback": {
+                "learning_weight": learning_feedback["learning_weight"],
+                "learning_delta": learning_feedback["learning_delta"],
+                "reason_codes": learning_feedback["reason_codes"],
+                "evidence_refs": learning_feedback["evidence_refs"],
+            },
             "reject_reasons": reject_reasons,
         }
         candidate_scores.append(score_row)
@@ -177,12 +210,13 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
                 match_score,
                 reject_reasons,
                 guardian_feedback,
+                learning_feedback,
             )
 
     if best is None:
         return _no_action(match, "all_candidates_rejected", candidate_scores)
 
-    candidate, strategy, match_score, _, guardian_feedback = best
+    candidate, strategy, match_score, _, guardian_feedback, learning_feedback = best
     net_edge_lcb_bps = _net_edge(candidate)
     confidence = max(_clamp01(candidate.confidence), match_score)
     thesis = _thesis(strategy, candidate, net_edge_lcb_bps)
@@ -193,8 +227,16 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
                 *lineage_refs,
                 *match.evidence_refs,
                 *guardian_feedback["evidence_refs"],
+                *learning_feedback["evidence_refs"],
             ]
         )
+    )
+    fact_refs = list(dict.fromkeys([*match.fact_refs, *learning_feedback["fact_refs"]]))
+    inference_refs = list(
+        dict.fromkeys([*match.inference_refs, *learning_feedback["inference_refs"]])
+    )
+    hypothesis_refs = list(
+        dict.fromkeys([*match.hypothesis_refs, *learning_feedback["hypothesis_refs"]])
     )
     proposed_qty = None
     if candidate.action == "open" and match.default_size is not None:
@@ -206,6 +248,11 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
             "modify_rate": guardian_feedback["modify_rate"],
             "aggressiveness_multiplier": guardian_feedback["aggressiveness_multiplier"],
             "confidence_floor": guardian_feedback["confidence_floor"],
+        },
+        "learning_feedback": {
+            "learning_weight": learning_feedback["learning_weight"],
+            "learning_delta": learning_feedback["learning_delta"],
+            "reason_codes": learning_feedback["reason_codes"],
         },
     }
 
@@ -229,14 +276,15 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
         proposed_qty=proposed_qty,
         rationale=thesis,
         evidence_refs=evidence_refs,
-        fact_refs=match.fact_refs,
-        inference_refs=match.inference_refs,
-        hypothesis_refs=match.hypothesis_refs,
+        fact_refs=fact_refs,
+        inference_refs=inference_refs,
+        hypothesis_refs=hypothesis_refs,
         metadata={
             **match.metadata,
-            "mag": "043",
-            "strategy_matching_model": "v2",
+            "mag": "044",
+            "strategy_matching_model": "v3",
             "guardian_feedback_model": "v1",
+            "learning_feedback_model": "v1",
             "scanner_candidate_id": match.scanner_candidate_id,
             "position_review_id": match.position_review_id,
         },
@@ -273,9 +321,10 @@ def _no_action(
         hypothesis_refs=match.hypothesis_refs,
         metadata={
             **match.metadata,
-            "mag": "043",
-            "strategy_matching_model": "v2",
+            "mag": "044",
+            "strategy_matching_model": "v3",
             "guardian_feedback_model": "v1",
+            "learning_feedback_model": "v1",
             "reject_reasons": [reason],
         },
     )
@@ -306,13 +355,14 @@ def _match_score(
     candidate: StrategyCandidate,
     net_edge_lcb_bps: float | None,
     risk_acceptance_prior: float | None = None,
+    learning_weight: float | None = None,
 ) -> float:
     market_fit = _clamp01(candidate.market_fit_score)
     edge_quality = _edge_quality(candidate.edge_lcb_bps)
     net_margin = _net_margin(net_edge_lcb_bps)
     portfolio_fit = _clamp01(candidate.portfolio_fit_score)
     data_quality = _clamp01(candidate.data_quality_score)
-    learning = _clamp01(candidate.learning_weight)
+    learning = _clamp01(candidate.learning_weight if learning_weight is None else learning_weight)
     risk_prior = _clamp01(
         candidate.risk_acceptance_prior
         if risk_acceptance_prior is None
@@ -436,6 +486,162 @@ def _guardian_confidence_floor(reject_rate: float) -> float:
 
 def _guardian_aggressiveness_multiplier(reject_rate: float, modify_rate: float) -> float:
     return max(0.25, _clamp01(1.0 - (0.50 * reject_rate) - (0.25 * modify_rate)))
+
+
+def _learning_feedback(
+    *,
+    match: StrategyMatchInput,
+    candidate: StrategyCandidate,
+    normalized_strategy: str | None,
+) -> dict[str, Any]:
+    default = {
+        "learning_weight": _clamp01(candidate.learning_weight),
+        "learning_delta": 0.0,
+        "reason_codes": [],
+        "evidence_refs": [],
+        "fact_refs": [],
+        "inference_refs": [],
+        "hypothesis_refs": [],
+    }
+    if normalized_strategy is None:
+        return default
+
+    delta = 0.0
+    reason_codes: list[str] = []
+    evidence_refs: list[str] = []
+    fact_refs: list[str] = []
+    inference_refs: list[str] = []
+    hypothesis_refs: list[str] = []
+
+    for insight in match.analyst_insights:
+        if insight.engine_mode != match.engine_mode:
+            continue
+        if insight.symbol != match.symbol:
+            continue
+        claim_rows = insight.claims or [
+            {
+                "claim_id": insight.insight_id,
+                "strategy": insight.strategy,
+                "polarity": insight.metadata.get("polarity")
+                if isinstance(insight.metadata, dict)
+                else None,
+                "confidence": insight.metadata.get("confidence", 0.5)
+                if isinstance(insight.metadata, dict)
+                else 0.5,
+                "reason": insight.summary,
+            }
+        ]
+        for claim in claim_rows:
+            if not _claim_matches(claim, normalized_strategy, match.symbol):
+                continue
+            claim_delta, reason = _claim_learning_delta(
+                claim,
+                source="analyst",
+                level=insight.insight_level,
+            )
+            if reason is None:
+                continue
+            delta += claim_delta
+            reason_codes.append(reason)
+            evidence_refs.extend([insight.insight_id, *insight.evidence_refs])
+            if insight.insight_level == "fact":
+                fact_refs.append(insight.insight_id)
+            elif insight.insight_level == "hypothesis":
+                hypothesis_refs.append(insight.insight_id)
+            else:
+                inference_refs.append(insight.insight_id)
+
+    for claim in match.truth_registry_claims:
+        if claim.symbol and claim.symbol != match.symbol:
+            continue
+        claim_row = {
+            "claim_id": claim.claim_id,
+            "strategy": claim.strategy,
+            "pattern_text": claim.pattern_text,
+            "polarity": claim.polarity,
+            "confidence": claim.confidence,
+            "observation_count": claim.observation_count,
+            "reason": claim.reason,
+        }
+        if not _claim_matches(claim_row, normalized_strategy, match.symbol):
+            continue
+        claim_delta, reason = _claim_learning_delta(
+            claim_row,
+            source="truth_registry",
+            level="inference",
+        )
+        if reason is None:
+            continue
+        delta += claim_delta
+        reason_codes.append(reason)
+        evidence_refs.extend([claim.claim_id, *claim.evidence_refs])
+        inference_refs.append(claim.claim_id)
+
+    learning_weight = _clamp01(candidate.learning_weight + delta)
+    return {
+        "learning_weight": round(learning_weight, 6),
+        "learning_delta": round(learning_weight - _clamp01(candidate.learning_weight), 6),
+        "reason_codes": list(dict.fromkeys(reason_codes)),
+        "evidence_refs": list(dict.fromkeys(evidence_refs)),
+        "fact_refs": list(dict.fromkeys(fact_refs)),
+        "inference_refs": list(dict.fromkeys(inference_refs)),
+        "hypothesis_refs": list(dict.fromkeys(hypothesis_refs)),
+    }
+
+
+def _claim_matches(claim: dict[str, Any], normalized_strategy: str, symbol: str) -> bool:
+    claim_symbol = claim.get("symbol")
+    if claim_symbol and str(claim_symbol) != symbol:
+        return False
+    strategy = claim.get("strategy") or claim.get("applies_to_strategy")
+    if strategy is None:
+        return False
+    try:
+        return normalize_strategy_key(str(strategy)) == normalized_strategy
+    except ValueError:
+        return str(strategy).strip().lower() == normalized_strategy
+
+
+def _claim_learning_delta(
+    claim: dict[str, Any],
+    *,
+    source: str,
+    level: str,
+) -> tuple[float, str | None]:
+    polarity = _claim_polarity(claim)
+    if polarity is None:
+        return 0.0, None
+    confidence = _clamp01(float(claim.get("confidence", 0.5) or 0.5))
+    obs_factor = _observation_factor(claim.get("observation_count"))
+    level_factor = {"fact": 1.0, "inference": 0.75, "hypothesis": 0.50}.get(level, 0.75)
+    claim_id = str(claim.get("claim_id") or claim.get("id") or "unidentified")
+    if polarity == "negative":
+        delta = -0.50 * confidence * obs_factor * level_factor
+        return delta, f"{source}_negative_pattern:{claim_id}"
+    delta = 0.25 * confidence * obs_factor * level_factor
+    return delta, f"{source}_positive_pattern:{claim_id}"
+
+
+def _claim_polarity(claim: dict[str, Any]) -> str | None:
+    raw = str(claim.get("polarity") or claim.get("direction") or "").strip().lower()
+    pattern_text = str(claim.get("pattern_text") or claim.get("pattern") or "").strip().lower()
+    reason = str(claim.get("reason") or "").strip().lower()
+    haystack = f"{raw} {pattern_text} {reason}"
+    if any(token in haystack for token in ("losing", "loss", "negative", "refuting", "bad")):
+        return "negative"
+    if any(token in haystack for token in ("winning", "win", "positive", "supporting", "good")):
+        return "positive"
+    return None
+
+
+def _observation_factor(value: Any) -> float:
+    try:
+        obs = float(value)
+    except (TypeError, ValueError):
+        obs = 0.0
+    if obs <= 0.0:
+        return 0.50
+    return _clamp01(max(0.25, min(obs / 20.0, 1.0)))
 
 
 def _edge_quality(edge_lcb_bps: float | None) -> float:
