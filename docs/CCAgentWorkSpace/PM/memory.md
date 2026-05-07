@@ -143,7 +143,8 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
-| 2026-05-07 | AgentTodo M8 Stage 2 authorization: rebuilt Linux with keep-auth, confirmed Mac/origin/Linux sync at `e8a58852`, and started MAG-082 Stage 2 demo/live_demo canary evidence window `stage2_demo_livedemo_20260507t1602z` as RUNNING, not PASS | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_stage2_demo_livedemo_20260507t1602z.md |
+| 2026-05-07 | AgentTodo M8 Stage 2 fast-track NO-GO: replay runner/report path completed after import fix `ffd9802f`, but runtime decision-spine/idempotency rows remain 0 and replay produced 0 fills / `execution_confidence=none`; MAG-083/MAG-084 remain blocked | workspace/reports/2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md |
+| 2026-05-07 | AgentTodo M8 Stage 2 authorization report: rebuilt Linux with keep-auth, confirmed Mac/origin/Linux sync at `e8a58852`, started MAG-082 Stage 2 demo/live_demo canary evidence window, then fast-track evidence review updated the report to NO-GO | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_stage2_demo_livedemo_20260507t1602z.md |
 | 2026-05-07 | AgentTodo MAG-084 operator sign-off blocker: M8 cannot be signed off while MAG-083 remains BLOCKED; sign-off requires operator-approved MAG-082 canary evidence followed by a MAG-083 PASS | workspace/reports/2026-05-07--agenttodo_mag084_operator_signoff_blocked.md |
 | 2026-05-07 | AgentTodo MAG-083 final release pre-audit: source/policy prerequisites are present, but final release audit is BLOCKED until an operator-approved MAG-082 canary evidence window proves no execution without StrategistDecision + GuardianVerdict + ExecutionPlan + Decision Lease | workspace/reports/2026-05-07--agenttodo_mag083_final_release_audit_blocked.md |
 | 2026-05-07 | AgentTodo MAG-082 24h canary validation checklist: defined window metadata, entry checks, SQL evidence, runtime health evidence, and PASS/WARN/FAIL criteria; every executable canary decision must reconstruct StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_checklist.md |
@@ -1863,9 +1864,35 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   listed in the window report.
 
 ### Boundary
-- Stage 2 authorization only; report status is RUNNING, not PASS.
+- Stage 2 authorization only; report status was RUNNING at authorization and
+  was later superseded by the fast-track NO-GO review below.
 - No Stage 3/4 promotion, true-live primary autonomy, live auth mutation,
   OpenClaw write/proposal route, scanner authority config change, executor
   shadow unlock, or lease-router flag enablement.
-- MAG-083 and MAG-084 remain blocked until the 24h report completes with PASS
-  and MAG-083 reruns successfully.
+- MAG-083 and MAG-084 remain blocked until a later MAG-082 report completes
+  with PASS and MAG-083 reruns successfully.
+
+## 2026-05-07 AgentTodo M8 Stage 2 Fast-Track NO-GO
+
+- Operator approved replay as a fast-track diagnostic for
+  `stage2_demo_livedemo_20260507t1602z`.
+- Runtime decision-spine evidence is absent: `agent.decision_objects`,
+  `agent.decision_edges`, and `agent.execution_idempotency_keys` are all 0
+  both within the Stage 2 window and all-time.
+- Replay preflight returned `promotion_allowed=false`,
+  `S2_PLUS_LOCAL_BBO`, `development_sandbox_with_local_bbo`, and
+  `execution_samples_below_s1_limited`.
+- Full-chain replay completed for `grid_trading`, `ma_crossover`, and
+  `bb_reversion`; each report processed 180 events, emitted 0 fills, net PnL
+  stayed 0.0, and `execution_confidence=none`.
+- `replay.report_artifacts` registered the three `pnl_summary` reports, but
+  `replay.simulated_fills` inserted 0 rows.
+- Replay health was wired (`wiring_status=ready`), but passive healthcheck
+  still failed; `[50] replay_run_state_health` had `completed_7d=6`,
+  `failed_7d=6`, `running=0`, `failed_rate=50.0%`.
+- Commit `ffd9802f` fixed a production replay finalize import path bug. Mac
+  targeted tests passed; Linux source was fast-forwarded. No API/engine restart,
+  rebuild, live auth mutation, OpenClaw write route, scanner authority change,
+  executor shadow unlock, or lease-router flag enablement occurred.
+- Fast-track verdict: Stage 2 NO-GO. MAG-083 and MAG-084 remain blocked until a
+  later MAG-082 runtime lineage report can PASS.
