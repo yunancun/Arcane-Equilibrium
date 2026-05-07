@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-041 StrategistDecision V2: added typed deterministic builder for open/hold/reduce/close/no_action, extended Rust/Python contracts with MAG-040 fields, and tested canonical strategy selection, alias normalization, no_action fail-closed, negative-net-LCB open blocking, and evidence label separation | workspace/reports/2026-05-07--agenttodo_mag041_strategist_decision_v2.md |
 | 2026-05-07 | AgentTodo MAG-040 Strategist V2 matching model: defined canonical five-strategy matching, candidate scoring, fail-closed rules, output fields, and regression requirements so selected strategy is not just `strategist_ai` / `strategist_heuristic` | workspace/reports/2026-05-07--agenttodo_mag040_strategist_matching_model.md |
 | 2026-05-07 | AgentTodo MAG-035 shadow integration regression: added Rust regression proving StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> ExecutionReport chain plus idempotency reservation while preserving legacy `TradingMsg::Signal` serialization; M3 closed | workspace/reports/2026-05-07--agenttodo_mag035_shadow_integration_regression.md |
 | 2026-05-07 | AgentTodo MAG-034 idempotency audit: verified execution candidates require `decision_id`, `order_plan_id`, `idempotency_key`, and `engine_mode`; V064 duplicate-prevention constraints plus Rust/Python contract tests cover double-execution prevention for shadow integration | workspace/reports/2026-05-07--agenttodo_mag034_idempotency_audit.md |

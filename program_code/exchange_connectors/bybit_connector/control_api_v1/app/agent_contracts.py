@@ -43,6 +43,16 @@ StrategySignalDirection = Literal[
     "neutral",
 ]
 
+DecisionAction = Literal["open", "hold", "reduce", "close", "no_action"]
+
+CanonicalStrategy = Literal[
+    "ma_crossover",
+    "grid_trading",
+    "bb_reversion",
+    "bb_breakout",
+    "funding_arb",
+]
+
 
 class _SpineModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -82,6 +92,17 @@ class StrategistDecision(_SpineModel):
     strategy: str
     direction: StrategySignalDirection
     confidence: float
+    decision_action: DecisionAction = "open"
+    selected_strategy: CanonicalStrategy | None = None
+    selected_candidate_id: str | None = None
+    candidate_scores: list[dict[str, Any]] = Field(default_factory=list)
+    expected_net_edge_bps: float | None = None
+    portfolio_impact: dict[str, Any] = Field(default_factory=dict)
+    thesis: str | None = None
+    invalidation: str | None = None
+    fact_refs: list[str] = Field(default_factory=list)
+    inference_refs: list[str] = Field(default_factory=list)
+    hypothesis_refs: list[str] = Field(default_factory=list)
     proposed_qty: float | None = None
     proposed_price: float | None = None
     rationale: str | None = None
