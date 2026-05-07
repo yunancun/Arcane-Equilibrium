@@ -460,10 +460,13 @@ def test_full_chain_summary_surfaces_execution_calibration(
     """One-click full-chain summary must show execution calibration fidelity."""
     assert "Exec Cal / 執行校準" in app_paper_js
     assert "Maker Fill / Maker成交" in app_paper_js
+    assert "BBO Anchor / BBO約束" in app_paper_js
+    assert "bbo_anchor_coverage_ratio" in app_paper_js
     assert "recommended_taker_slippage_bps" in app_paper_js
     assert "recommended_maker_fill_probability_cap" in app_paper_js
     assert "Replay-only taker slippage floor from demo/live_demo fills" in app_paper_js
     assert "PostOnly order outcome calibration from demo/live_demo orders" in app_paper_js
+    assert "Taker fills are bounded by local best bid/ask only for covered events" in app_paper_js
 
 
 def test_replay_data_tier_is_report_backed_not_s3_static(

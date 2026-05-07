@@ -76,6 +76,7 @@ _FULL_CHAIN_SYMBOL_SENTINEL = "FULL_CHAIN"
 _REPLAY_LIMITER = base.limiter
 _FULL_CHAIN_HALF_LIFE_DAYS = 7.0
 _FULL_CHAIN_EMBARGO_DAYS = 14.0
+_BBO_ANCHOR_S1_COVERAGE_RATIO = 0.80
 
 
 class ReplayFullChainRunRequest(ReplayFullChainPrepareRequest):
@@ -398,12 +399,26 @@ def _apply_microstructure_overlays(
         field: (count / len(events)) if events else 0.0
         for field, count in field_counts.items()
     }
+    bbo_anchor_event_count = min(
+        field_counts.get("best_bid", 0),
+        field_counts.get("best_ask", 0),
+    )
+    bbo_anchor_coverage_ratio = (
+        bbo_anchor_event_count / len(events)
+        if events
+        else 0.0
+    )
     return {
         "status": "ok" if enriched else "empty",
         "source": "market.market_tickers",
         "event_count": len(events),
         "enriched_event_count": enriched,
         "coverage_ratio": (enriched / len(events)) if events else 0.0,
+        "bbo_anchor_status": (
+            "available" if bbo_anchor_event_count else "unavailable"
+        ),
+        "bbo_anchor_event_count": bbo_anchor_event_count,
+        "bbo_anchor_coverage_ratio": bbo_anchor_coverage_ratio,
         "field_counts": field_counts,
         "field_coverage": field_coverage,
         "max_staleness_ms": max_staleness_ms,
@@ -496,6 +511,15 @@ def _build_input_fidelity_summary(
             "status": microstructure_stats.get("status"),
             "source": microstructure_stats.get("source"),
             "coverage_ratio": microstructure_stats.get("coverage_ratio", 0.0),
+            "bbo_anchor_status": microstructure_stats.get("bbo_anchor_status"),
+            "bbo_anchor_event_count": microstructure_stats.get(
+                "bbo_anchor_event_count",
+                0,
+            ),
+            "bbo_anchor_coverage_ratio": microstructure_stats.get(
+                "bbo_anchor_coverage_ratio",
+                0.0,
+            ),
             "field_coverage": field_coverage,
         },
         "instrument_specs": {
@@ -1022,6 +1046,12 @@ async def _prepare_full_chain_run_fixture(
                 or "unknown"
             )
         )
+    else:
+        bbo_anchor_coverage = float(
+            microstructure_stats.get("bbo_anchor_coverage_ratio") or 0.0
+        )
+        if bbo_anchor_coverage < _BBO_ANCHOR_S1_COVERAGE_RATIO:
+            warnings.append(f"bbo_anchor_coverage_low:{bbo_anchor_coverage:.2f}")
     if instrument_stats.get("status") != "ok":
         warnings.append(
             "instrument_specs_unavailable:"

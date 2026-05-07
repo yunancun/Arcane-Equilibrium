@@ -792,6 +792,17 @@ function ocPaperSubtabInit() {
       return typeof v === "number" && Number.isFinite(v) ? v.toFixed(0) + " bps" : "--";
     };
     const microCoverage = typeof micro.coverage_ratio === "number" ? micro.coverage_ratio : 0;
+    const fidelityMicro = fidelity.microstructure || {};
+    const bboAnchorCoverage = typeof micro.bbo_anchor_coverage_ratio === "number"
+      ? micro.bbo_anchor_coverage_ratio
+      : (
+        typeof fidelityMicro.bbo_anchor_coverage_ratio === "number"
+          ? fidelityMicro.bbo_anchor_coverage_ratio
+          : 0
+      );
+    const bboAnchorStatus = String(
+      micro.bbo_anchor_status || fidelityMicro.bbo_anchor_status || "unavailable"
+    );
     const tickCoverage = typeof specs.coverage_ratio === "number" ? specs.coverage_ratio : 0;
     const edgeCells = typeof edge.cell_count === "number" ? edge.cell_count : 0;
     const execStatus = String(execCal.status || "unknown");
@@ -840,6 +851,9 @@ function ocPaperSubtabInit() {
       + _metricCellHtml("oc-replay-summary-micro", "Microstructure / 微結構",
         pct(microCoverage), microCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
         "Local market.market_tickers BBO/funding/OI overlay coverage")
+      + _metricCellHtml("oc-replay-summary-bbo-anchor", "BBO Anchor / BBO約束",
+        pct(bboAnchorCoverage), bboAnchorCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "Taker fills are bounded by local best bid/ask only for covered events; status=" + bboAnchorStatus)
       + _metricCellHtml("oc-replay-summary-specs", "Tick Size / 價格精度",
         pct(tickCoverage), tickCoverage >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
         "V058 instrument tick_size coverage")
