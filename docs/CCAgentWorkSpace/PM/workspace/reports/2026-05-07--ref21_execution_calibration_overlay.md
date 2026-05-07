@@ -36,6 +36,23 @@ path.
   - 52 passed.
 - `git diff --check`
 
+## Linux Runtime
+
+- Mac/origin checkpoint: `7878aa4a`.
+- Linux `trade-core` fast-forwarded from `c0544787` to `7878aa4a`.
+- Linux verification:
+  - `python3 -m py_compile ...` passed.
+  - Targeted replay pytest suite passed: 61 passed / 1 skipped.
+  - `cargo build --release -p openclaw_engine --bin replay_runner --features replay_isolated --manifest-path rust/Cargo.toml` passed with pre-existing warnings.
+- Applied `V063__market_tickers_funding_rate_for_replay.sql`; verified
+  `market.market_tickers.funding_rate` exists.
+- API reloaded with `bash helper_scripts/restart_all.sh --api-only --keep-auth`;
+  new API parent PID: `2437376`.
+- Route/static proof:
+  - local source contains `Exec Cal / 執行校準` in `app-paper.js`.
+  - `GET /api/v1/replay/full-chain/run` returns 405 Method Not Allowed,
+    proving the route is loaded in the reloaded API process.
+
 ## Reality Boundary
 
 This is slippage/fee/role-share calibration from historical demo/live_demo
