@@ -454,6 +454,16 @@ def test_replay_metrics_start_unloaded_not_hardcoded_none(
     )
 
 
+def test_full_chain_summary_surfaces_execution_calibration(
+    app_paper_js: str,
+) -> None:
+    """One-click full-chain summary must show execution calibration fidelity."""
+    assert "Exec Cal / 執行校準" in app_paper_js
+    assert "recommended_taker_slippage_bps" in app_paper_js
+    assert "Replay-only slippage floor from demo/live_demo fills" in app_paper_js
+    assert "maker fill probability remains unavailable" in app_paper_js
+
+
 def test_replay_data_tier_is_report_backed_not_s3_static(
     app_paper_js: str,
 ) -> None:

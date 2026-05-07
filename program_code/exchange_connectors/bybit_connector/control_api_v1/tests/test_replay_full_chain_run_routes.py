@@ -20,6 +20,21 @@ from app.main_legacy import current_actor  # noqa: E402
 from app.replay_full_chain_routes import full_chain_replay_router  # noqa: E402
 
 
+def _default_execution_calibration(**kwargs: Any) -> dict[str, Any]:
+    return {
+        "status": "insufficient_samples",
+        "reason": "test_default_s2_bound",
+        "source": "trading.fills",
+        "sample_count": 0,
+        "slippage_sample_count": 0,
+        "recommended_taker_slippage_bps": 50.0,
+        "recommended_taker_slippage_clamped": False,
+        "execution_confidence": "S2_CONSERVATIVE_BOUND",
+        "maker_fill_probability_status": "unavailable_without_order_outcomes",
+        "risk_overlay": {"applied": False},
+    }
+
+
 def _operator_actor() -> AuthenticatedActor:
     return AuthenticatedActor(
         actor_id="full-chain-run-test",
@@ -30,8 +45,15 @@ def _operator_actor() -> AuthenticatedActor:
 
 
 def _client(monkeypatch, tmp_path: Path) -> TestClient:
+    import app.replay_full_chain_routes as mod
+
     monkeypatch.setenv("OPENCLAW_REPLAY_FULL_CHAIN_FIXTURE_DIR", str(tmp_path))
     monkeypatch.setenv("OPENCLAW_REPLAY_MICROSTRUCTURE_OVERLAY_ENABLED", "0")
+    monkeypatch.setattr(
+        mod._ec,
+        "fetch_execution_calibration_sync",
+        _default_execution_calibration,
+    )
     app = FastAPI()
     app.include_router(full_chain_replay_router)
     app.dependency_overrides[current_actor] = _operator_actor
@@ -176,6 +198,11 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     assert all(body.embargo_days == 14.0 for body in registered)
     assert all(body.strategy_params["grid_trading"]["grid_levels"] == 12 for body in registered)
     assert all(body.risk_overrides["limits"]["position_size_max_pct"] == 10.0 for body in registered)
+    assert all(body.risk_overrides["slippage"]["default_rate"] >= 0.005 for body in registered)
+    assert all(
+        all(tier["rate"] >= 0.005 for tier in body.risk_overrides["slippage"]["tiers"])
+        for body in registered
+    )
     assert all(body.manifest_jsonb["fixture_uri"] == data["fixture_uri"] for body in registered)
     assert all(
         body.manifest_jsonb["execution_scope"]
@@ -186,6 +213,12 @@ def test_full_chain_run_registers_and_starts_one_subprocess_per_strategy(
     assert all(
         body.manifest_jsonb["edge_snapshot_meta"]["source"]
         == "v059_edge_estimate_snapshots"
+        for body in registered
+    )
+    assert data["execution_calibration"]["execution_confidence"] == "S2_CONSERVATIVE_BOUND"
+    assert data["input_fidelity"]["execution_calibration"]["risk_overlay_applied"] is True
+    assert all(
+        body.manifest_jsonb["execution_calibration"]["risk_overlay"]["applied"] is True
         for body in registered
     )
     assert [cap for _body, cap, _global_cap in run_requests] == [2, 2]
@@ -351,6 +384,111 @@ def test_full_chain_run_prefers_v058_universe_and_embeds_v059_edges(
     assert manifest["edge_snapshot_meta"]["cell_count"] == 1
     assert manifest["edge_estimates"]["grid_trading::SOLUSDT"]["runtime_bps"] == 4.2
     assert manifest["input_fidelity"]["edge_snapshot"]["cell_count"] == 1
+    assert manifest["execution_calibration"]["recommended_taker_slippage_bps"] == 50.0
+
+
+def test_full_chain_run_embeds_limited_execution_calibration_overlay(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import app.replay_full_chain_routes as mod
+
+    registered: list[Any] = []
+
+    async def fake_events(**kwargs):
+        return ([_sample_event("BTCUSDT", 1_700_000_000_000)], {"BTCUSDT": 1})
+
+    async def fake_strategy_params(**kwargs):
+        return {"grid_trading": {"grid_levels": 12}}
+
+    async def fake_risk_config(**kwargs):
+        return {
+            "limits": {"position_size_max_pct": 10.0},
+            "slippage": {
+                "default_rate": 0.0001,
+                "tiers": [
+                    {"min_turnover_usd": 1_000_000_000.0, "rate": 0.0001},
+                    {"min_turnover_usd": 0.0, "rate": 0.0002},
+                ],
+            },
+        }
+
+    def fake_execution_calibration(**kwargs):
+        assert kwargs["symbols"] == ["BTCUSDT"]
+        assert kwargs["strategies"] == ["grid_trading"]
+        assert kwargs["asof_ms"] == 1_777_593_600_000
+        return {
+            "status": "limited",
+            "reason": None,
+            "source": "trading.fills",
+            "sample_count": 31,
+            "slippage_sample_count": 31,
+            "recommended_taker_slippage_bps": 12.0,
+            "recommended_taker_slippage_clamped": False,
+            "execution_confidence": "S1_LIMITED",
+            "maker_fill_probability_status": "unavailable_without_order_outcomes",
+            "risk_overlay": {"applied": False},
+        }
+
+    def fake_register(get_pg_conn, actor, body, **kwargs):
+        registered.append(body)
+        return {
+            "experiment_id": str(uuid.uuid4()),
+            "manifest_hash": "d" * 64,
+            "status": "created",
+            "idempotency_hit": False,
+        }, None
+
+    def fake_run(**kwargs):
+        return uuid.uuid4().hex, 1234, None, tmp_path / "artifact"
+
+    monkeypatch.setattr(mod, "_fetch_full_chain_events", fake_events)
+    monkeypatch.setattr(mod, "_fetch_full_chain_strategy_params", fake_strategy_params)
+    monkeypatch.setattr(mod, "_fetch_current_risk_config", fake_risk_config)
+    monkeypatch.setattr(mod, "_fetch_edge_estimate_snapshot_sync", _empty_edge_snapshot)
+    monkeypatch.setattr(mod._er, "run_register_in_pg_xact", fake_register)
+    monkeypatch.setattr(mod._rrun, "_do_pg_path_for_run_sync", fake_run)
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        mod._ec,
+        "fetch_execution_calibration_sync",
+        fake_execution_calibration,
+    )
+    resp = client.post(
+        "/api/v1/replay/full-chain/run",
+        json={
+            "universe_preset": "custom",
+            "symbols": ["BTCUSDT"],
+            "strategies": ["grid_trading"],
+            "engine": "demo",
+            "timeframe": "1m",
+            "category": "linear",
+            "data_window_start": "2026-05-01T00:00:00Z",
+            "data_window_end": "2026-05-01T00:02:00Z",
+            "use_current_config": True,
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["execution_calibration"]["execution_confidence"] == "S1_LIMITED"
+    assert data["execution_calibration"]["risk_overlay"]["applied"] is True
+    assert data["input_fidelity"]["execution_calibration"]["status"] == "limited"
+    assert not any(
+        item.startswith("execution_calibration_conservative_bound")
+        for item in data["warnings"]
+    )
+    assert registered[0].risk_overrides["slippage"]["default_rate"] == 0.0012
+    assert all(
+        tier["rate"] >= 0.0012
+        for tier in registered[0].risk_overrides["slippage"]["tiers"]
+    )
+    assert (
+        registered[0]
+        .manifest_jsonb["execution_calibration"]["recommended_taker_slippage_bps"]
+        == 12.0
+    )
 
 
 def test_full_chain_run_rejects_strategy_cap(
@@ -431,3 +569,43 @@ def test_apply_microstructure_overlay_enriches_prior_bbo_only() -> None:
     assert stats["field_counts"]["turnover_24h"] == 1
     assert events[0]["microstructure_source"] == "market.market_tickers"
     assert "best_bid" not in events[1]
+
+
+def test_execution_calibration_floors_all_replay_slippage_tiers() -> None:
+    import app.replay_execution_calibration as ec
+
+    asof_ms = 1_700_000_000_000
+    records = [
+        {
+            "ts": asof_ms - 1_000,
+            "liquidity_role": "taker" if idx % 2 else "maker",
+            "slippage_bps": float(idx),
+            "fee_rate": 0.00055,
+        }
+        for idx in range(31)
+    ]
+    calibration = ec.build_execution_calibration_summary(
+        records,
+        asof_ms=asof_ms,
+        source="test",
+    )
+    risk = ec.apply_execution_calibration_to_risk_overrides(
+        {
+            "limits": {"position_size_max_pct": 10.0},
+            "slippage": {
+                "default_rate": 0.0001,
+                "tiers": [
+                    {"min_turnover_usd": 1_000_000_000.0, "rate": 0.0001},
+                    {"min_turnover_usd": 0.0, "rate": 0.0002},
+                ],
+            },
+        },
+        calibration,
+    )
+
+    floor_rate = calibration["recommended_taker_slippage_bps"] / 10_000.0
+    assert calibration["status"] == "limited"
+    assert calibration["risk_overlay"]["applied"] is True
+    assert risk["limits"]["position_size_max_pct"] == 10.0
+    assert risk["slippage"]["default_rate"] >= floor_rate
+    assert all(tier["rate"] >= floor_rate for tier in risk["slippage"]["tiers"])
