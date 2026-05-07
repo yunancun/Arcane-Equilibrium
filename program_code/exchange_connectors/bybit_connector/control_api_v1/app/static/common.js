@@ -71,7 +71,9 @@ function ocIsUnauthenticatedDetail(detail) {
 }
 
 function ocRedirectToLogin(redirectPath) {
-  const current = redirectPath || (window.location.pathname + window.location.search) || '/console';
+  const rawCurrent = redirectPath || (window.location.pathname + window.location.search) || '/';
+  const currentPath = window.location.pathname || '/';
+  const current = currentPath.startsWith('/static/') ? '/' : rawCurrent;
   if (window.location.pathname !== '/login') {
     sessionStorage.setItem('oc_login_redirect', current);
     window.location.href = '/login';
