@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-072 Strategist typed Analyst pattern rules: StrategistDecision V2 now records Analyst/TruthRegistry learning effects as typed rules so L2 losing/winning patterns change next-cycle strategy preference with explainable reason/evidence | workspace/reports/2026-05-07--agenttodo_mag072_strategist_typed_pattern_rules.md |
 | 2026-05-07 | AgentTodo MAG-071 AnalystInsight evidence links: AgentSpineClient now persists unique evidence_for edges from each evidence_ref to AnalystInsight, with tier/type/level metadata for traceability to round trips and strategy metrics | workspace/reports/2026-05-07--agenttodo_mag071_analyst_insight_evidence_links.md |
 | 2026-05-07 | AgentTodo MAG-070 AnalystInsight schema: Python contracts now define L1/L2/L3 analyst tiers, tier-scoped insight types, fact/inference/hypothesis labels, bounded confidence, recommendation, and severity; analyzed_by edges carry tier/type/level | workspace/reports/2026-05-07--agenttodo_mag070_analyst_insight_schema.md |
 | 2026-05-07 | AgentTodo MAG-064 Executor scope regression: focused Python tests now prove ExecutionPlan generation and AgentSpine persistence keep symbol/direction sourced only from the approved StrategistDecision; M6 Executor Planner closed | workspace/reports/2026-05-07--agenttodo_mag064_executor_scope_regression.md |
@@ -1633,3 +1634,30 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   made.
 - Next AgentTodo item is MAG-072 Strategist consumes losing/winning patterns
   through typed rules.
+
+## 2026-05-07 AgentTodo MAG-072 Strategist Typed Pattern Rules
+
+### Result
+- MAG-072 is complete.
+- `strategist_decision_v2.py` now records Analyst and TruthRegistry learning
+  effects as `typed_rules` in candidate-level and selected-candidate
+  `learning_feedback`.
+- Typed rules include source, Analyst tier/type/level when applicable,
+  insight ID, claim ID, polarity, reason code, and evidence refs.
+- L2 Analyst losing-pattern tests prove Strategist moves preference away from
+  a grid route; winning-pattern tests prove a lower-ranked bb_breakout route
+  can be boosted, with reason/evidence persisted in the next-cycle
+  StrategistDecision.
+
+### Verification
+- Mac targeted: Strategist typed-rule pytest 16/0, py_compile, and diff check
+  passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 16/0, py_compile, and diff check.
+
+### Boundary
+- No runtime Strategist wiring, runtime Analyst emission wiring,
+  Guardian behavior change, cloud call, runtime submit path, Rust contract
+  change, rebuild, restart, deploy, DB write, live auth, runtime flag, or
+  trading authority change was made.
+- Next AgentTodo item is MAG-073 Guardian consumes risk patterns.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.agent_contracts import AnalystInsight
+from app.agent_contracts import AnalystInsight, AnalystInsightL2
 from app.strategist_decision_v2 import (
     GuardianFeedbackStats,
     StrategyCandidate,
@@ -386,12 +386,13 @@ def test_analyst_losing_pattern_changes_strategy_preference_with_reason() -> Non
                 learning_weight=0.5,
             ),
             analyst_insights=[
-                AnalystInsight(
+                AnalystInsightL2(
                     insight_id="analyst-insight-grid-loss-1",
                     ts_ms=1_700_000_000_020,
                     engine_mode="paper",
                     symbol="BTCUSDT",
                     strategy="grid_trading",
+                    insight_type="strategy_pattern",
                     insight_level="inference",
                     summary="grid_trading losing pattern in one-way shock",
                     evidence_refs=["roundtrip-grid-loss-1"],
@@ -405,6 +406,7 @@ def test_analyst_losing_pattern_changes_strategy_preference_with_reason() -> Non
                             "reason": "losing pattern: one-way shock",
                         }
                     ],
+                    confidence=0.9,
                 )
             ],
         )
@@ -417,6 +419,19 @@ def test_analyst_losing_pattern_changes_strategy_preference_with_reason() -> Non
         "analyst_negative_pattern:claim-grid-loss-1"
     ]
     assert "analyst-insight-grid-loss-1" in grid_score["learning_feedback"]["evidence_refs"]
+    assert grid_score["learning_feedback"]["typed_rules"] == [
+        {
+            "source": "analyst",
+            "insight_id": "analyst-insight-grid-loss-1",
+            "analyst_tier": "l2",
+            "insight_type": "strategy_pattern",
+            "insight_level": "inference",
+            "claim_id": "claim-grid-loss-1",
+            "polarity": "negative",
+            "reason_code": "analyst_negative_pattern:claim-grid-loss-1",
+            "evidence_refs": ["analyst-insight-grid-loss-1", "roundtrip-grid-loss-1"],
+        }
+    ]
 
 
 def test_truth_registry_losing_claim_persists_reason_in_selected_candidate_score() -> None:
@@ -485,12 +500,13 @@ def test_analyst_positive_pattern_can_boost_lower_rank_strategy() -> None:
                 learning_weight=0.5,
             ),
             analyst_insights=[
-                AnalystInsight(
+                AnalystInsightL2(
                     insight_id="analyst-insight-bb-win-1",
                     ts_ms=1_700_000_000_030,
                     engine_mode="paper",
                     symbol="BTCUSDT",
                     strategy="bb_breakout",
+                    insight_type="strategy_pattern",
                     insight_level="fact",
                     summary="bb_breakout winning pattern after squeeze expansion",
                     evidence_refs=["roundtrip-bb-win-1"],
@@ -503,6 +519,7 @@ def test_analyst_positive_pattern_can_boost_lower_rank_strategy() -> None:
                             "observation_count": 20,
                         }
                     ],
+                    confidence=0.9,
                 )
             ],
         )
@@ -513,6 +530,17 @@ def test_analyst_positive_pattern_can_boost_lower_rank_strategy() -> None:
     assert decision.candidate_scores[1]["learning_feedback"]["reason_codes"] == [
         "analyst_positive_pattern:claim-bb-win-1"
     ]
+    assert decision.portfolio_impact["learning_feedback"]["typed_rules"][0] == {
+        "source": "analyst",
+        "insight_id": "analyst-insight-bb-win-1",
+        "analyst_tier": "l2",
+        "insight_type": "strategy_pattern",
+        "insight_level": "fact",
+        "claim_id": "claim-bb-win-1",
+        "polarity": "positive",
+        "reason_code": "analyst_positive_pattern:claim-bb-win-1",
+        "evidence_refs": ["analyst-insight-bb-win-1", "roundtrip-bb-win-1"],
+    }
 
 
 def test_learning_feedback_is_strategy_scoped() -> None:

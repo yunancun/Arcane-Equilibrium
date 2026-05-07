@@ -198,6 +198,7 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
                 "learning_delta": learning_feedback["learning_delta"],
                 "reason_codes": learning_feedback["reason_codes"],
                 "evidence_refs": learning_feedback["evidence_refs"],
+                "typed_rules": learning_feedback["typed_rules"],
             },
             "reject_reasons": reject_reasons,
         }
@@ -255,6 +256,7 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
             "learning_weight": learning_feedback["learning_weight"],
             "learning_delta": learning_feedback["learning_delta"],
             "reason_codes": learning_feedback["reason_codes"],
+            "typed_rules": learning_feedback["typed_rules"],
         },
     }
 
@@ -504,6 +506,7 @@ def _learning_feedback(
         "fact_refs": [],
         "inference_refs": [],
         "hypothesis_refs": [],
+        "typed_rules": [],
     }
     if normalized_strategy is None:
         return default
@@ -514,6 +517,7 @@ def _learning_feedback(
     fact_refs: list[str] = []
     inference_refs: list[str] = []
     hypothesis_refs: list[str] = []
+    typed_rules: list[dict[str, Any]] = []
 
     for insight in match.analyst_insights:
         if insight.engine_mode != match.engine_mode:
@@ -527,9 +531,13 @@ def _learning_feedback(
                 "polarity": insight.metadata.get("polarity")
                 if isinstance(insight.metadata, dict)
                 else None,
-                "confidence": insight.metadata.get("confidence", 0.5)
-                if isinstance(insight.metadata, dict)
-                else 0.5,
+                "confidence": (
+                    insight.confidence
+                    if insight.confidence is not None
+                    else insight.metadata.get("confidence", 0.5)
+                    if isinstance(insight.metadata, dict)
+                    else 0.5
+                ),
                 "reason": insight.summary,
             }
         ]
@@ -545,7 +553,21 @@ def _learning_feedback(
                 continue
             delta += claim_delta
             reason_codes.append(reason)
-            evidence_refs.extend([insight.insight_id, *insight.evidence_refs])
+            insight_evidence_refs = list(dict.fromkeys([insight.insight_id, *insight.evidence_refs]))
+            evidence_refs.extend(insight_evidence_refs)
+            typed_rules.append(
+                {
+                    "source": "analyst",
+                    "insight_id": insight.insight_id,
+                    "analyst_tier": insight.analyst_tier,
+                    "insight_type": insight.insight_type,
+                    "insight_level": insight.insight_level,
+                    "claim_id": _claim_id(claim),
+                    "polarity": _claim_polarity(claim),
+                    "reason_code": reason,
+                    "evidence_refs": insight_evidence_refs,
+                }
+            )
             if insight.insight_level == "fact":
                 fact_refs.append(insight.insight_id)
             elif insight.insight_level == "hypothesis":
@@ -577,6 +599,16 @@ def _learning_feedback(
         delta += claim_delta
         reason_codes.append(reason)
         evidence_refs.extend([claim.claim_id, *claim.evidence_refs])
+        typed_rules.append(
+            {
+                "source": "truth_registry",
+                "insight_level": "inference",
+                "claim_id": claim.claim_id,
+                "polarity": _claim_polarity(claim_row),
+                "reason_code": reason,
+                "evidence_refs": list(dict.fromkeys([claim.claim_id, *claim.evidence_refs])),
+            }
+        )
         inference_refs.append(claim.claim_id)
 
     learning_weight = _clamp01(candidate.learning_weight + delta)
@@ -588,6 +620,7 @@ def _learning_feedback(
         "fact_refs": list(dict.fromkeys(fact_refs)),
         "inference_refs": list(dict.fromkeys(inference_refs)),
         "hypothesis_refs": list(dict.fromkeys(hypothesis_refs)),
+        "typed_rules": typed_rules,
     }
 
 
@@ -616,12 +649,16 @@ def _claim_learning_delta(
     confidence = _clamp01(float(claim.get("confidence", 0.5) or 0.5))
     obs_factor = _observation_factor(claim.get("observation_count"))
     level_factor = {"fact": 1.0, "inference": 0.75, "hypothesis": 0.50}.get(level, 0.75)
-    claim_id = str(claim.get("claim_id") or claim.get("id") or "unidentified")
+    claim_id = _claim_id(claim)
     if polarity == "negative":
         delta = -0.50 * confidence * obs_factor * level_factor
         return delta, f"{source}_negative_pattern:{claim_id}"
     delta = 0.25 * confidence * obs_factor * level_factor
     return delta, f"{source}_positive_pattern:{claim_id}"
+
+
+def _claim_id(claim: dict[str, Any]) -> str:
+    return str(claim.get("claim_id") or claim.get("id") or "unidentified")
 
 
 def _claim_polarity(claim: dict[str, Any]) -> str | None:
