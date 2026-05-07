@@ -648,6 +648,18 @@ def test_finalize_multi_worker_race_no_v046_dual_insert(monkeypatch):
             pass
 
 
+def test_finalize_calibration_imports_are_runtime_cwd_safe():
+    """Regression: API workers run from control_api_v1, where program_code is absent."""
+    from replay import run_finalize_route as _fr_mod
+    import inspect
+
+    src = inspect.getsource(_fr_mod._compute_and_persist_calibration)
+    assert "from replay import calibration_label" in src
+    assert "from replay import experiment_registry" in src
+    assert "from replay.calibration_label import FillRecord" in src
+    assert "program_code.exchange_connectors" not in src
+
+
 # ─── Case 8: atomic xact rollback on writer failure ──────────────────
 
 
