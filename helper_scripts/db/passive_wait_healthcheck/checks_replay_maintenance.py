@@ -121,6 +121,7 @@ ARTIFACT_STORAGE_CAP_MB_DEFAULT: int = 1024  # match replay_artifact_prune.py de
 # DB schema drift）。
 RUN_STATE_FAILED_RATE_PASS_MAX: float = 0.10  # 10%
 RUN_STATE_FAILED_RATE_WARN_MAX: float = 0.20  # 20%
+RUN_STATE_SUPERSEDING_COMPLETED_MIN: int = 3
 # Zombie 'running' rows: >1h still in 'running' status = subprocess 死亡未
 # 收回；>4h = 嚴重，可能需 operator 手動 cleanup。
 RUN_STATE_ZOMBIE_PASS_MAX_HOURS: float = 1.0
@@ -595,7 +596,18 @@ def check_50_replay_run_state_health(cur) -> tuple[str, str]:
               count(*) FILTER (WHERE status = 'failed' AND started_at > now() - interval '7 days')::bigint AS failed_7d,
               count(*) FILTER (WHERE status = 'cancelled' AND started_at > now() - interval '7 days')::bigint AS cancelled_7d,
               count(*) FILTER (WHERE status = 'running')::bigint AS running_count,
-              extract(epoch FROM (now() - min(started_at) FILTER (WHERE status = 'running')))::bigint AS oldest_running_seconds
+              extract(epoch FROM (now() - min(started_at) FILTER (WHERE status = 'running')))::bigint AS oldest_running_seconds,
+              max(started_at) FILTER (WHERE status = 'failed' AND started_at > now() - interval '7 days') AS newest_failed_at,
+              max(started_at) FILTER (WHERE status = 'completed' AND started_at > now() - interval '7 days') AS newest_completed_at,
+              count(*) FILTER (
+                WHERE status = 'completed'
+                  AND started_at > (
+                    SELECT max(started_at)
+                    FROM replay.run_state
+                    WHERE status = 'failed'
+                      AND started_at > now() - interval '7 days'
+                  )
+              )::bigint AS completed_after_newest_failed
             FROM replay.run_state
             """
         )
@@ -605,6 +617,9 @@ def check_50_replay_run_state_health(cur) -> tuple[str, str]:
         cancelled_7d = int(row[2] or 0)
         running_count = int(row[3] or 0)
         oldest_running_seconds = int(row[4]) if row[4] is not None else None
+        newest_failed_at = row[5]
+        newest_completed_at = row[6]
+        completed_after_newest_failed = int(row[7] or 0)
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"[50] run_state query failed: {exc}")
 
@@ -623,9 +638,21 @@ def check_50_replay_run_state_health(cur) -> tuple[str, str]:
     if total_settled_7d > 0:
         failed_rate = failed_7d / total_settled_7d
         if failed_rate > RUN_STATE_FAILED_RATE_WARN_MAX:
-            fail_reasons.append(
-                f"failed_rate_7d={failed_rate:.1%} > {RUN_STATE_FAILED_RATE_WARN_MAX:.0%} FAIL threshold"
-            )
+            if (
+                newest_failed_at is not None
+                and newest_completed_at is not None
+                and newest_completed_at > newest_failed_at
+                and completed_after_newest_failed >= RUN_STATE_SUPERSEDING_COMPLETED_MIN
+            ):
+                warn_reasons.append(
+                    f"historical failed_rate_7d={failed_rate:.1%} > "
+                    f"{RUN_STATE_FAILED_RATE_WARN_MAX:.0%} FAIL threshold, but "
+                    f"{completed_after_newest_failed} completed runs supersede newest failure"
+                )
+            else:
+                fail_reasons.append(
+                    f"failed_rate_7d={failed_rate:.1%} > {RUN_STATE_FAILED_RATE_WARN_MAX:.0%} FAIL threshold"
+                )
         elif failed_rate > RUN_STATE_FAILED_RATE_PASS_MAX:
             warn_reasons.append(
                 f"failed_rate_7d={failed_rate:.1%} > {RUN_STATE_FAILED_RATE_PASS_MAX:.0%} PASS threshold"
