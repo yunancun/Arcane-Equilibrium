@@ -15,6 +15,7 @@ from ml_training.mlde_demo_applier import (
     _compute_demo_cost_baseline,
     _compute_demo_realized_window,
     _compute_demo_sample_count_strategy_cell,
+    _execute_read_fail_soft,
     _insert_live_candidate,
     _noop_audit_payload,
     _record_application,
@@ -66,6 +67,34 @@ class _ScriptedCursor:
         if isinstance(self._current, list):
             return self._current
         return [self._current] if self._current is not None else []
+
+
+class _RealishPsycopgCursor:
+    """Cursor shaped like psycopg2 enough to exercise SAVEPOINT behavior."""
+
+    def __init__(self):
+        self.executed = []
+
+    def execute(self, sql, params=()):
+        self.executed.append((sql, params))
+        if "SELECT broken_read" in sql:
+            raise RuntimeError("simulated pg read failure")
+
+
+_RealishPsycopgCursor.__module__ = "psycopg2.extras"
+
+
+def test_execute_read_fail_soft_rolls_back_to_savepoint_for_real_pg_cursor():
+    cur = _RealishPsycopgCursor()
+
+    with pytest.raises(RuntimeError, match="simulated pg read failure"):
+        _execute_read_fail_soft(cur, "SELECT broken_read", ())
+
+    executed_sql = [sql for sql, _params in cur.executed]
+    assert executed_sql[0].startswith("SAVEPOINT mlde_demo_read_")
+    assert executed_sql[1] == "SELECT broken_read"
+    assert executed_sql[2].startswith("ROLLBACK TO SAVEPOINT mlde_demo_read_")
+    assert executed_sql[3].startswith("RELEASE SAVEPOINT mlde_demo_read_")
 
 
 def test_grid_dream_spacing_maps_to_bounded_runtime_params():

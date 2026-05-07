@@ -197,6 +197,23 @@ class TestCheck45PricingBinding(unittest.TestCase):
         self.assertEqual(status, "WARN", msg)
         self.assertIn("0 fills with fee_rate in 24h", msg)
 
+    def test_pass_when_mainnet_live_slot_inactive_but_demo_modes_fresh(self) -> None:
+        """No Mainnet fills are expected when OPENCLAW_ALLOW_MAINNET is disabled."""
+        rows = [
+            ("demo", 100, 5, 95, 12, 600),
+            ("live_demo", 50, 0, 50, 8, 900),
+            # live missing means 0 fills; with mainnet disabled this is designed.
+        ]
+        cur = _build_cur(True, rows)
+        with patch.dict(os.environ, {"OPENCLAW_ALLOW_MAINNET": ""}, clear=False), patch(
+            "helper_scripts.db.passive_wait_healthcheck.shared._engine_process_age_minutes",
+            return_value=(120.0, "ok"),
+        ):
+            status, msg = check_45_pricing_binding(cur)
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("live: source=inactive_mainnet", msg)
+        self.assertIn("pricing binding healthy", msg)
+
     def test_pass_demo_seed_default_acceptable(self) -> None:
         """Demo + 100% default fee_rate → PASS per RFC §2.3 demo fallback.
         Demo + 100% default → PASS（RFC §2.3 demo 容許 conservative default）。

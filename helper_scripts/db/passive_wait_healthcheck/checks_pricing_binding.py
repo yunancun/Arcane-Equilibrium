@@ -162,6 +162,19 @@ def _matches_default(fee_rate: float) -> bool:
     )
 
 
+def _mainnet_live_enabled() -> bool:
+    """Return whether true Mainnet live flow is explicitly enabled.
+
+    LiveDemo is represented by ``engine_mode='live_demo'`` in the DB. The
+    ``live`` slot is Mainnet-only for this healthcheck; when Mainnet is not
+    explicitly enabled and the slot has no fills, treating it as a warm-engine
+    quiet warning creates permanent noise for the designed 0-mainnet state.
+    """
+    import os
+
+    return os.environ.get("OPENCLAW_ALLOW_MAINNET", "").strip() == "1"
+
+
 def _infer_source(default_count: int, non_default_count: int) -> str:
     """Infer pricing source label from 24h fee_rate distribution.
 
@@ -372,6 +385,9 @@ SELECT engine_mode,
         # Rule 2: 0 fills in window — distinguish cold engine vs production silent.
         # Rule 2：24h 0 fills — 區分冷啟動 vs production silent。
         if fill_count == 0:
+            if mode == "live" and not _mainnet_live_enabled():
+                slot["source"] = "inactive_mainnet"
+                continue
             if engine_age_min is not None and engine_age_min < ENGINE_WARMUP_GRACE_MINUTES:
                 # cold engine — accept as PASS.
                 # 冷啟動 — 接受為 PASS。

@@ -720,6 +720,43 @@ def _utc_iso8601(when: Optional[_dt.datetime] = None) -> str:
     return ts.isoformat(timespec="seconds")
 
 
+def _is_psycopg_cursor(cur: Any) -> bool:
+    """Best-effort detection for real psycopg2 cursors.
+
+    Unit-test cursors in this module are lightweight fakes and should not see
+    extra SAVEPOINT statements because their scripted response order is tied to
+    business SQL calls only.
+    """
+    return type(cur).__module__.startswith("psycopg2")
+
+
+def _execute_read_fail_soft(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> None:
+    """Execute a read-side SQL statement inside a SAVEPOINT on real PG cursors.
+
+    The LG-5 payload helpers intentionally catch SQL exceptions and emit
+    conservative defaults. In psycopg2, a caught SQL error still leaves the
+    current transaction aborted unless we roll back to a savepoint. Without
+    this wrapper, a benign fail-soft read can poison the later application
+    insert and surface as the misleading `current transaction is aborted`.
+    """
+    if not _is_psycopg_cursor(cur):
+        cur.execute(sql, params)
+        return
+
+    sp_name = f"mlde_demo_read_{time.time_ns()}"
+    cur.execute(f"SAVEPOINT {sp_name}")
+    try:
+        cur.execute(sql, params)
+    except Exception:
+        try:
+            cur.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+        finally:
+            cur.execute(f"RELEASE SAVEPOINT {sp_name}")
+        raise
+    else:
+        cur.execute(f"RELEASE SAVEPOINT {sp_name}")
+
+
 def _compute_demo_cost_baseline(cur: Any) -> dict[str, Any]:
     """Compute 7d demo cost baseline / 計算 7d demo cost baseline。
 
@@ -754,7 +791,8 @@ def _compute_demo_cost_baseline(cur: Any) -> dict[str, Any]:
     # 鏡 [33]：7d demo + live_demo 入場 fill 的 effective fee_rate +
     # maker_like ratio。
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             """
             WITH entry_fills AS (
                 SELECT
@@ -816,7 +854,8 @@ def _compute_demo_cost_baseline(cur: Any) -> dict[str, Any]:
     # Block 2：realized net_bps + slippage from MLDE training rows view.
     # 鏡 [40]：7d MLDE training row 的 net_bps_after_fee 與 slippage_bps。
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
         )
         view_exists = cur.fetchone()
@@ -825,7 +864,8 @@ def _compute_demo_cost_baseline(cur: Any) -> dict[str, Any]:
 
     if view_exists and view_exists[0]:
         try:
-            cur.execute(
+            _execute_read_fail_soft(
+                cur,
                 """
                 SELECT
                     coalesce(avg(net_bps_after_fee), 0.0)::float8 AS avg_net_bps,
@@ -893,7 +933,8 @@ def _compute_demo_realized_window(
     }
 
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             """
             SELECT count(*)::int
               FROM trading.fills
@@ -940,7 +981,8 @@ def _compute_attribution_chain_ratio_by_strategy(cur: Any) -> dict[str, float]:
     ratios: dict[str, float] = {key: 0.0 for key in _ATTRIBUTION_STRATEGY_KEYS}
 
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
         )
         view_exists = cur.fetchone()
@@ -950,7 +992,8 @@ def _compute_attribution_chain_ratio_by_strategy(cur: Any) -> dict[str, float]:
         return ratios
 
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             """
             SELECT
                 strategy_name,
@@ -1014,7 +1057,8 @@ def _compute_attribution_sample_count_by_strategy(cur: Any) -> dict[str, int]:
     counts: dict[str, int] = {key: 0 for key in _ATTRIBUTION_STRATEGY_KEYS}
 
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
         )
         view_exists = cur.fetchone()
@@ -1024,7 +1068,8 @@ def _compute_attribution_sample_count_by_strategy(cur: Any) -> dict[str, int]:
         return counts
 
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             """
             SELECT
                 strategy_name,
@@ -1079,7 +1124,8 @@ def _compute_demo_sample_count_strategy_cell(
         return 0
 
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             "SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL"
         )
         view_exists = cur.fetchone()
@@ -1089,7 +1135,8 @@ def _compute_demo_sample_count_strategy_cell(
         return 0
 
     try:
-        cur.execute(
+        _execute_read_fail_soft(
+            cur,
             """
             SELECT count(*)::int
               FROM learning.mlde_edge_training_rows
