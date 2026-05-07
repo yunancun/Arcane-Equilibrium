@@ -772,6 +772,62 @@ function ocPaperSubtabInit() {
     }
   }
 
+  function _renderFullChainCoveragePreflight(data) {
+    const mount = document.getElementById("oc-replay-result-summary");
+    if (!mount) return;
+    data = data || {};
+    const coverage = data.recorder_coverage || {};
+    const verdict = data.coverage_verdict || {};
+    const edge = data.edge_snapshot || {};
+    const execCal = data.execution_calibration || {};
+    const bbo = coverage.bbo || {};
+    const ob = coverage.orderbook_depth || {};
+    const funding = coverage.funding_rate || {};
+    const oi = coverage.open_interest || {};
+    const specs = coverage.instrument_specs || {};
+    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    const pct = function (v) {
+      return typeof v === "number" && Number.isFinite(v) ? (v * 100).toFixed(0) + "%" : "--";
+    };
+    const sampleCount = Math.min(
+      Number(execCal.slippage_sample_count || 0),
+      Number(execCal.maker_order_sample_count || 0)
+    );
+    const warningHtml = warnings.length
+      ? '<div class="oc-replay-warning-line">' + ocEsc(warnings.join(" | ")) + '</div>'
+      : "";
+    mount.innerHTML = ''
+      + '<div class="oc-replay-summary-grid">'
+      + _metricCellHtml("oc-replay-preflight-verdict", "Preflight / 預檢",
+        String(verdict.tier || "S2_PUBLIC_KLINE_ONLY"),
+        String(verdict.tier || "").indexOf("S1") === 0 ? "oc-cell-ok" : "oc-cell-warn",
+        "Read-only recorder coverage estimate before launching replay")
+      + _metricCellHtml("oc-replay-preflight-bbo", "BBO / 最優買賣",
+        pct(bbo.coverage_ratio), Number(bbo.coverage_ratio || 0) >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "Local market.market_tickers best bid/ask coverage")
+      + _metricCellHtml("oc-replay-preflight-ob", "Orderbook / 深度",
+        pct(ob.coverage_ratio), Number(ob.coverage_ratio || 0) >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "Local market.ob_snapshots depth coverage")
+      + _metricCellHtml("oc-replay-preflight-funding", "Funding / 資金費",
+        pct(funding.coverage_ratio), Number(funding.coverage_ratio || 0) >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "Local funding_rate coverage from recorder")
+      + _metricCellHtml("oc-replay-preflight-oi", "Open Interest / 持倉",
+        pct(oi.coverage_ratio), Number(oi.coverage_ratio || 0) >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
+        "Local open_interest coverage from recorder")
+      + _metricCellHtml("oc-replay-preflight-specs", "Tick Size / 價格精度",
+        pct(specs.coverage_ratio), Number(specs.coverage_ratio || 0) >= 1.0 ? "oc-cell-ok" : "oc-cell-warn",
+        "V058 symbol universe instrument spec coverage")
+      + _metricCellHtml("oc-replay-preflight-edge", "Edge Snapshot / Edge快照",
+        edge.status === "ok" ? String(edge.cell_count || 0) + " cells" : String(edge.status || "missing"),
+        edge.status === "ok" ? "oc-cell-ok" : "oc-cell-warn",
+        "V059 edge snapshot availability before launch")
+      + _metricCellHtml("oc-replay-preflight-samples", "Exec Samples / 執行樣本",
+        String(sampleCount), sampleCount >= 200 ? "oc-cell-ok" : "oc-cell-warn",
+        "Minimum of taker slippage samples and maker order-outcome samples")
+      + '</div>'
+      + warningHtml;
+  }
+
   function _renderFullChainRunSummary(data) {
     const mount = document.getElementById("oc-replay-result-summary");
     if (!mount) return;
@@ -1180,6 +1236,13 @@ function ocPaperSubtabInit() {
       if ((universePreset === "custom" || universePreset === "pinned_only") && symbols.length) {
         body.symbols = symbols;
       }
+      _setReplayStatus("Checking local recorder coverage before launch...", "");
+      const coverageResp = await _fetchReplayJson("/api/v1/replay/full-chain/coverage", {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      _renderFullChainCoveragePreflight(coverageResp.data || {});
       _setReplayStatus("Preparing full-chain fixture and starting replay_runner subprocesses...", "");
       const runResp = await _fetchReplayJson("/api/v1/replay/full-chain/run", {
         method: "POST",
