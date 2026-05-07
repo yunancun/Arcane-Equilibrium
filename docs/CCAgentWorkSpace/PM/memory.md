@@ -143,6 +143,10 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | REF-21 C5 acceptance/runtime sign-off: C2-C4 deployed sequentially; replay is signed off conditionally as a one-click S2/S2+ development sandbox with read-only ML/Dream advisory ranking, while S1 calibration remains gated by partial fills, latency, baseline comparison, bootstrap/balance curve, and recorder maturity | workspace/reports/2026-05-07--ref21_c5_acceptance_runtime_signoff.md |
+| 2026-05-07 | REF-21 C4 advisory ranking checkpoint: added read-only `/api/v1/replay/advisory/rank` with operator auth, K cap, replay limiter, and no mutation/applier path | workspace/reports/2026-05-07--ref21_c4_advisory_rank_checkpoint.md |
+| 2026-05-07 | REF-21 C3 report analytics checkpoint: overlays fee-net bps, miss/reject counts, fee/slippage summary, and sandbox verdict into replay reports | workspace/reports/2026-05-07--ref21_c3_report_analytics_checkpoint.md |
+| 2026-05-07 | REF-21 C2 recorder coverage preflight checkpoint: added `/full-chain/coverage` and GUI preflight fidelity cells for BBO/orderbook/funding/OI/tick-size/edge/execution samples | workspace/reports/2026-05-07--ref21_c2_recorder_preflight_checkpoint.md |
 | 2026-05-07 | REF-21 execution calibration overlay: added as-of demo/live_demo fill calibration, replay-only slippage risk overlay, manifest/API/UI fidelity surfacing, and tests for full-tier slippage flooring | workspace/reports/2026-05-07--ref21_execution_calibration_overlay.md |
 | 2026-05-07 | REF-21 V058/V059 backfill + turnover checkpoint: added dry-run/apply helper for V058 symbol universe/freeze log and V059 edge snapshots with `--asof` / `--freeze-asof` split and Trading/PreLaunch/Delivering/Closed status coverage; preserved Bybit kline turnover through fixture and Rust scanner timeline reconstruction | workspace/reports/2026-05-07--ref21_v058_v059_backfill_turnover_checkpoint.md |
 | 2026-05-06 | AgentTodo OpenClaw handoff alignment: Sprint A order is MAG-015 -> MAG-010..014 -> MAG-016..019; proposal/channel work waits for durable row proof | workspace/reports/2026-05-06--agenttodo_openclaw_handoff_alignment.md |

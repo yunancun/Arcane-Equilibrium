@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-07  
 **Owner:** PM  
-**Status:** Active execution reset after `a03cdbb7`
+**Status:** C2-C5 completed and Mac/Linux verified after `0eda6005`
 **Supersedes for sequencing only:** V1.3 §11 wave table  
 **Does not supersede:** REF-21 V1.3 governance gates, write confinement,
 subprocess isolation, promotion FSM, or 16 root-principle acceptance.
@@ -25,13 +25,18 @@ REF-21 replay is now runtime-usable for one-click full-chain S2 replay:
   demo/live_demo history,
 - taker fill reference prices are BBO-anchored when local best bid/ask exists,
 - BBO anchor coverage is exposed in API/manifest warnings and the one-click GUI,
-- Linux `trade-core` is synced and rebuilt/reloaded through `a03cdbb7`.
+- recorder preflight, report analytics, and read-only ML/Dream advisory ranking
+  are deployed through `0eda6005`,
+- Linux `trade-core` is synced and API-reloaded through `0eda6005`.
 
 The remaining work is no longer "make replay exist". It is "raise replay from
 S2/S2+ development sandbox to S1-calibrated advisory quality without inventing
 market data that Bybit does not provide".
 
-Therefore the previous R1-R6 table is reset into five practical waves:
+Therefore the previous R1-R6 table is reset into five practical waves. C2-C4
+were intentionally executed sequentially because C3 consumes C2 trust fields
+and C4 consumes C3 analytics. C5 is now the documentation, acceptance, and
+runtime sign-off wave.
 
 1. **Wave C1 - Execution Realism**
 2. **Wave C2 - Data Coverage And Recorder Maturity**
@@ -57,7 +62,10 @@ Therefore the previous R1-R6 table is reset into five practical waves:
 | Universe | V058 symbol universe is the default source; ordering uses ticker turnover when present. |
 | Edge snapshots | V059 edge snapshots are embedded when available; missing snapshots are explicit warnings. |
 | GUI | One-click replay is available; Advanced replay remains available separately. |
-| Linux | Mac/origin/Linux synced through `5403fce3`; Linux API reloaded and release runner rebuilt. |
+| Preflight | `/api/v1/replay/full-chain/coverage` estimates local recorder, edge snapshot, and execution sample coverage before a run. |
+| Report analytics | `/api/v1/replay/report/{experiment_id}` overlays fee-net bps, miss/reject counts, and a development-sandbox verdict. |
+| ML/Dream advisory | `/api/v1/replay/advisory/rank` ranks replay summaries as read-only advisory output; no applier or mutation path is exposed. |
+| Linux | Mac/origin/Linux synced through `0eda6005`; Linux API reloaded; release runner was rebuilt in the C1 checkpoint. |
 
 ### Hard Reality Boundary
 
@@ -70,18 +78,18 @@ replay with missing microstructure coverage.
 
 ## 2. Remaining Work Count
 
-PM count as of the C1 BBO-anchor checkpoint:
+PM count after the C2-C4 checkpoints:
 
 | Severity | Count | Meaning |
 |---|---:|---|
 | P0 | 0 | No known blocker prevents replay from being usable as a development sandbox. |
-| P1 | 5 | Needed before calling output S1-calibrated advisory quality. |
-| P2 | 4 | Usability, diagnostics, and acceptance hardening. |
+| P1 | 3 | Still needed before calling output S1-calibrated advisory quality: partial fills, latency, and full baseline/candidate comparison. |
+| P2 | 2 | Usability and diagnostic hardening after the C5 operator runbook/sign-off sync. |
 | Data-maturity gates | 3 | Cannot be solved by code alone; require recorder history / demo outcomes. |
 
-In practical terms: **5 waves remain**. The first two are the core quality
-lift; the last three make the outputs actionable for ML/Dream advisory and
-operator workflow.
+In practical terms: C1-C4 are partially or fully implemented as a usable
+development sandbox. Remaining work is no longer an availability blocker; it is
+the S1-calibrated advisory lift and richer comparison analytics.
 
 ---
 
@@ -99,15 +107,16 @@ Tasks:
    - Buy taker reference should not be better than best ask when BBO exists.
    - Sell taker reference should not be better than best bid when BBO exists.
    - Preserve slippage floor on top of the BBO anchor.
-2. Add deterministic partial-fill modeling for large orders.
+2. **Open:** add deterministic partial-fill modeling for large orders.
    - Use local `market.ob_snapshots` depth when event-aligned data exists.
    - If no orderbook depth exists, stay fail-conservative and mark
      `partial_fill_model=unavailable`.
-3. Add latency model fields to execution calibration.
+3. **Open:** add latency model fields to execution calibration.
    - Use `trading.orders` → `trading.fills` / `order_state_changes` deltas when
      available.
    - Expose q50/q90 latency and freshness.
-4. Add per-strategy/per-symbol maker cap when samples are sufficient.
+4. **Partial:** add per-strategy/per-symbol maker cap when samples are
+   sufficient.
    - Fallback remains pooled cap `<= 0.40`.
    - Do not promote per-cell cap below `n >= 30`.
 
@@ -127,14 +136,14 @@ recorder data, while old windows remain honestly labeled.
 
 Tasks:
 
-1. Add recorder health summary for `market.market_tickers` and
+1. **Done in `9ba6ebc6`:** add recorder health summary for `market.market_tickers` and
    `market.ob_snapshots`.
-2. Add replay-window coverage estimator before run starts.
+2. **Done in `9ba6ebc6`:** add replay-window coverage estimator before run starts.
    - Estimate BBO/orderbook/funding/OI/tick-size coverage for selected window.
    - GUI shows expected fidelity before launching the run.
-3. Add retention policy / storage budget for microstructure recorder tables.
-4. Add recorder backfill status panel or healthcheck row.
-5. Decide minimum history thresholds:
+3. **Open:** add retention policy / storage budget for microstructure recorder tables.
+4. **Partial:** add recorder backfill status panel or healthcheck row.
+5. **Done in `9ba6ebc6`:** decide minimum history thresholds:
    - S2+: local BBO coverage >= 50%.
    - S1-limited: local BBO coverage >= 80% and maker/order samples >= 30.
    - S1-calibrated: local BBO/orderbook coverage >= 80% and samples >= 200.
@@ -143,7 +152,7 @@ Acceptance:
 
 - GUI cannot imply S1 quality when the recorder has insufficient history.
 - Healthcheck detects stale recorder or insufficient recent rows.
-- Linux cron proof is recorded.
+- Linux cron proof is recorded where recorder jobs are deployed.
 
 ### Wave C3 - Replay Result Analytics
 
@@ -152,17 +161,17 @@ without overclaiming predictive power.
 
 Tasks:
 
-1. Add baseline-vs-candidate comparison workflow.
+1. **Open:** add baseline-vs-candidate comparison workflow.
    - Same window, same symbol universe, same recorder coverage.
    - Compare current working tree config vs selected baseline manifest.
-2. Add fee-net edge metrics:
+2. **Partial in `925d3017`:** add fee-net edge metrics:
    - net bps after fee,
    - trade count,
    - reject/maker-miss rate,
    - max drawdown,
    - q10/q50/q90 run bands.
-3. Add regret / missed-opportunity summary from scanner candidates.
-4. Add report verdict:
+3. **Open:** add regret / missed-opportunity summary from scanner candidates.
+4. **Partial in `925d3017`:** add report verdict:
    - `development_sandbox_pass`,
    - `needs_more_data`,
    - `execution_model_too_weak`,
@@ -170,8 +179,9 @@ Tasks:
 
 Acceptance:
 
-- One-click replay report answers: "after this strategy edit, would demo/live
-  have behaved better or worse over this historical window?"
+- One-click replay report partially answers whether a run was fee-net positive
+  in the selected historical sandbox; it does not yet compare against a
+  baseline manifest.
 - Result copy explicitly says in-sample development sandbox unless a freeze/OOS
   manifest is used.
 
@@ -182,18 +192,19 @@ without turning replay outputs into live commands.
 
 Tasks:
 
-1. Add read-only ML/Dream replay request path.
+1. **Done in `0eda6005`:** add read-only ML/Dream replay request path.
    - Auth scope and K cap.
    - No direct live/demo parameter write.
-2. Write replay advisory outputs only through verified replay/learning reader
-   gates.
-3. Add candidate ranking input for ML/Dream:
+2. **Done by policy in `0eda6005`:** keep replay advisory outputs read-only;
+   no replay advisory writer or applier is exposed in this checkpoint.
+3. **Partial in `0eda6005`:** add candidate ranking input for ML/Dream:
    - baseline delta,
    - confidence tier,
    - execution coverage,
    - promotion eligibility.
-4. Add DreamEngine exploration loop budget and stop conditions.
-5. Ensure existing demo applier gate remains a separate governance path.
+4. **Open:** add DreamEngine exploration loop budget and stop conditions.
+5. **Done by boundary in `0eda6005`:** ensure existing demo applier gate remains
+   a separate governance path; this route cannot hand off to it.
 
 Acceptance:
 
@@ -242,18 +253,19 @@ Acceptance:
 
 ## 5. Immediate Next Step
 
-Start **Wave C1**.
+Close **Wave C5** for the C2-C4 checkpoint.
 
-Recommended first implementation slice:
+Required first slice:
 
-1. Rust replay BBO anchor for taker fills.
-2. Report/API coverage fields for BBO-anchored fills.
-3. Python/GUI trust qualifier update.
-4. Mac targeted tests.
-5. Linux release build and API reload.
+1. Operator runbook for one-click replay.
+2. PM sign-off report copied to Operator workspace.
+3. TODO / CLAUDE state synchronization.
+4. Mac targeted replay suite.
+5. Linux sync, API reload, and route probes.
 
-This is the highest-value next step because it directly reduces the current
-fill-quality overclaim risk and uses recorder data already being collected.
+After C5, the next implementation wave should be scoped separately as S1
+calibration: partial fills, latency, balance-curve/bootstrap analytics, and
+baseline/candidate comparison.
 
 ---
 
@@ -280,3 +292,5 @@ stays narrow and is followed by Linux verification; otherwise dispatch E1/E2/E4.
 |---|---|---|---|
 | V1 | 2026-05-07 | PM | Resets remaining REF-21 work after runtime usable one-click replay and maker execution calibration checkpoint `5403fce3`. |
 | V1.1 | 2026-05-07 | PM | Updates status after C1 BBO-anchor fill pricing and GUI/API coverage checkpoints `0bb61aeb` / `a03cdbb7`. |
+| V1.2 | 2026-05-07 | PM | Updates status after C2 recorder preflight `9ba6ebc6`, C3 report analytics `925d3017`, and C4 read-only advisory ranking `0eda6005`; C5 becomes runbook/sign-off/runtime sync. |
+| V1.3 | 2026-05-07 | PM | Records C5 operator runbook/sign-off and Mac/Linux targeted verification: replay remains usable as S2/S2+ development sandbox; S1 calibration remains a separate quality wave. |
