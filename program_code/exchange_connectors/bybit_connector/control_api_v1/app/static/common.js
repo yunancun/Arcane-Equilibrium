@@ -966,6 +966,13 @@ function ocInjectBaseCSS() {
     .oc-control-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       padding: 12px 16px; background: var(--card-bg); border: 1px solid var(--border);
       border-radius: var(--card-radius); margin-bottom: 14px; }
+    .oc-fill-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .oc-fill-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+    .oc-fill-tab { border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
+      border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+    .oc-fill-tab.active { border-color: var(--blue); color: var(--blue); background: rgba(56,139,253,0.12); }
+    .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 11px; }
+    .oc-fill-summary { color: var(--text-dim); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
 
     /* Buttons */
     .oc-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);

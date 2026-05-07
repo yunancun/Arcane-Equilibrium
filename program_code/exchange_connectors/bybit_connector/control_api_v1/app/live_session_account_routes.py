@@ -38,7 +38,7 @@ MODULE_NOTE (English):
 import logging
 from typing import Any
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 
 from . import live_session_routes as core
 from . import main_legacy as base
@@ -361,6 +361,9 @@ async def get_live_orders(
 
 @core.live_router.get("/fills")
 async def get_live_fills(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    side: str | None = Query(None),
     actor: Any = Depends(base.current_actor),
 ) -> dict:
     """
@@ -391,31 +394,47 @@ async def get_live_fills(
             # ``strategy_name`` shape; GUI renders both side by side.
             # W1-T3 同步 demo bucket：fills SELECT 多回 exit_reason，UI 渲染
             # ``strategy + (exit_reason ? ' (' + exit_reason + ')' : '')``。
+            safe_side = side if side in {"Buy", "Sell"} else None
+            where = "engine_mode IN (%s, %s)"
+            params: list[Any] = ["live", "live_demo"]
+            if safe_side:
+                where += " AND side = %s"
+                params.append(safe_side)
+            params.extend([limit + 1, offset])
             cur.execute(
                 "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name, exit_reason "
-                "FROM trading.fills WHERE engine_mode IN (%s, %s) ORDER BY ts DESC LIMIT %s",
-                ("live", "live_demo", 50),
+                f"FROM trading.fills WHERE {where} ORDER BY ts DESC LIMIT %s OFFSET %s",
+                tuple(params),
             )
             rows = cur.fetchall()
-            if rows:
-                fills = []
-                for ts, symbol, side, qty, price, fee, rpnl, strategy, exit_reason in rows:
-                    ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
-                    sym = symbol or ""
-                    cat = "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
-                    fills.append({
-                        "execTime": str(ts_ms),
-                        "symbol": sym,
-                        "side": side or "",
-                        "execQty": float(qty) if qty is not None else 0.0,
-                        "execPrice": float(price) if price is not None else 0.0,
-                        "execFee": float(fee) if fee is not None else 0.0,
-                        "closedPnl": float(rpnl) if rpnl is not None else 0.0,
-                        "strategy": strategy or "",
-                        "exit_reason": exit_reason if exit_reason else None,
-                        "category": cat,
-                    })
-                return core._live_response({"list": fills, "count": len(fills), "source": "pg_trading_fills"})
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            fills = []
+            for ts, symbol, side, qty, price, fee, rpnl, strategy, exit_reason in rows:
+                ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
+                sym = symbol or ""
+                cat = "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
+                fills.append({
+                    "execTime": str(ts_ms),
+                    "symbol": sym,
+                    "side": side or "",
+                    "execQty": float(qty) if qty is not None else 0.0,
+                    "execPrice": float(price) if price is not None else 0.0,
+                    "execFee": float(fee) if fee is not None else 0.0,
+                    "closedPnl": float(rpnl) if rpnl is not None else 0.0,
+                    "strategy": strategy or "",
+                    "exit_reason": exit_reason if exit_reason else None,
+                    "category": cat,
+                })
+            return core._live_response({
+                "list": fills,
+                "count": len(fills),
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+                "next_offset": offset + len(fills) if has_more else None,
+                "source": "pg_trading_fills",
+            })
         except Exception as e:
             logger.warning("PG live fills query failed, falling back to Bybit API: %s", e)
         finally:
@@ -429,8 +448,21 @@ async def get_live_fills(
     if rc is not None:
         try:
             from .strategy_ai_routes import _normalize_execution
-            fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
-            return core._live_response({"source": "rust_engine", "list": fills, "count": len(fills)})
+            safe_side = side if side in {"Buy", "Sell"} else None
+            fetch_limit = min(max(limit + offset + 1, limit), 100)
+            raw = [_normalize_execution(f) for f in rc.get_executions("linear", limit=fetch_limit)]
+            if safe_side:
+                raw = [f for f in raw if f.get("side") == safe_side]
+            fills = raw[offset:offset + limit]
+            return core._live_response({
+                "source": "rust_engine",
+                "list": fills,
+                "count": len(fills),
+                "limit": limit,
+                "offset": offset,
+                "has_more": len(raw) > offset + limit,
+                "next_offset": offset + len(fills) if len(raw) > offset + limit else None,
+            })
         except Exception as e:
             logger.warning("Rust fills fetch failed for live endpoint: %s", e)
     # Fallback: engine recent fills (3E-ARCH snapshot, now carries realized_pnl).
@@ -438,8 +470,20 @@ async def get_live_fills(
     rust = get_rust_reader()
     if rust.is_engine_available("live"):
         try:
-            recent = rust.get_recent_fills(mode="live")
-            return core._live_response({"source": "engine_state", "list": recent or [], "count": len(recent or [])})
+            recent = rust.get_recent_fills(mode="live") or []
+            safe_side = side if side in {"Buy", "Sell"} else None
+            if safe_side:
+                recent = [f for f in recent if f.get("side") == safe_side]
+            fills = recent[offset:offset + limit]
+            return core._live_response({
+                "source": "engine_state",
+                "list": fills,
+                "count": len(fills),
+                "limit": limit,
+                "offset": offset,
+                "has_more": len(recent) > offset + limit,
+                "next_offset": offset + len(fills) if len(recent) > offset + limit else None,
+            })
         except Exception:
             pass
     return core._live_response({"list": [], "count": 0, "available": False})

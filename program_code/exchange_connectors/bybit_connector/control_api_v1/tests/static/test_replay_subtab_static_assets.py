@@ -308,11 +308,11 @@ def test_demo_and_live_fill_history_show_strategy(
     tab_live_html: str,
 ) -> None:
     """Demo/Live fill history tables show per-fill strategy attribution."""
-    assert "20260507.strategy-colors-v1" in console_html
+    assert "20260507.fill-tabs-v1" in console_html
     assert "<th>策略</th>" in tab_demo_html
     assert "f.strategy || f.strategy_name || f.owner_strategy" in tab_demo_html
     assert "ocStrategyChip(s)" in tab_demo_html
-    assert '<td colspan="10">暂无成交</td>' in tab_demo_html
+    assert "暂无成交" in tab_demo_html
     assert "<th>策略 / Strategy</th>" in tab_live_html
     assert "f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap" in tab_live_html
     assert "ocStrategyChip(s)" in tab_live_html
@@ -328,7 +328,7 @@ def test_strategy_identity_colors_are_shared_across_console_surfaces(
     tab_edge_gates_html: str,
 ) -> None:
     """Five strategy identities should keep one color system across pages."""
-    assert "20260507.strategy-colors-v1" in console_html
+    assert "20260507.fill-tabs-v1" in console_html
     assert "OC_STRATEGY_COLOR_META" in common_js
     for key in [
         "grid_trading",
@@ -347,6 +347,26 @@ def test_strategy_identity_colors_are_shared_across_console_surfaces(
     assert "ocStrategyChip(s)" in tab_demo_html
     assert "ocStrategyChip(s)" in tab_live_html
     assert "ocStrategyChip(row.strategy_name" in tab_edge_gates_html
+
+
+def test_demo_and_live_fill_history_has_paged_subtabs(
+    console_html: str,
+    tab_demo_html: str,
+    tab_live_html: str,
+) -> None:
+    """Demo/Live fill history should page server-side and split key views."""
+    assert "20260507.fill-tabs-v1" in console_html
+    for html in [tab_demo_html, tab_live_html]:
+        assert "data-fill-tab=\"aggregate\"" in html
+        assert "data-fill-tab=\"buy\"" in html
+        assert "data-fill-tab=\"sell\"" in html
+        assert "data-fill-tab=\"profit\"" in html
+        assert "limit=' + _" in html
+        assert "offset=' + _" in html
+        assert "side=' + encodeURIComponent(side)" in html
+        assert "has_more" in html
+        assert "Page ' + page" in html
+        assert "BuildProfitRows" in html
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(

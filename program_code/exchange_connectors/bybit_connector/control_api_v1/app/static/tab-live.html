@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Live 实盘 / Live Trading</title>
-<script src="/static/common.js?v=20260507.strategy-colors-v1"></script>
+<script src="/static/common.js?v=20260507.fill-tabs-v1"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -470,9 +470,24 @@ html, body {
     &#x1F4DD; 成交記錄 / Fill History
     <span id="fills-count-badge" style="margin-left:auto;font-size:11px;color:var(--text-dim)"></span>
   </button>
-  <div id="fills-section" style="display:none;overflow-x:auto">
+  <div id="fills-section" style="display:none">
+    <div class="oc-fill-toolbar">
+      <div class="oc-fill-tabs" id="live-fill-tabs">
+        <button class="oc-fill-tab active" data-fill-tab="aggregate" onclick="setLiveFillView('aggregate')">聚合 / Aggregate</button>
+        <button class="oc-fill-tab" data-fill-tab="buy" onclick="setLiveFillView('buy')">买入 / Buy</button>
+        <button class="oc-fill-tab" data-fill-tab="sell" onclick="setLiveFillView('sell')">卖出 / Sell</button>
+        <button class="oc-fill-tab" data-fill-tab="profit" onclick="setLiveFillView('profit')">收益 / PnL</button>
+      </div>
+      <div class="oc-fill-pager">
+        <button class="oc-btn" id="live-fills-prev" onclick="liveFillPrev()" disabled>上一页</button>
+        <span id="live-fills-page-info">Page 1 · 50/页</span>
+        <button class="oc-btn" id="live-fills-next" onclick="liveFillNext()" disabled>下一页</button>
+      </div>
+    </div>
+    <div class="oc-fill-summary" id="live-fills-summary">当前只加载本页数据，切页时再拉取下一页。</div>
+    <div style="overflow-x:auto">
     <table class="live-table" id="live-fills-table">
-      <thead><tr>
+      <thead id="live-fills-head"><tr>
         <th>時間 / Time</th><th>Symbol</th><th>策略 / Strategy</th><th>Side</th>
         <th>Qty</th><th>Price</th><th>Exec Value</th><th>Fee</th><th>盈亏 / PnL</th><th>Order ID</th>
       </tr></thead>
@@ -480,6 +495,7 @@ html, body {
         <tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:16px">展開以加載 / Expand to load</td></tr>
       </tbody>
     </table>
+    </div>
   </div>
 
 </div><!-- /live-wrap -->
@@ -1708,6 +1724,14 @@ async function loadPreLiveEdgeGates() {
 // 成交記錄 — 展開時懶加載
 // ═══════════════════════════════════════════════════════════════
 let _fillsLoaded = false;
+const LIVE_FILL_PAGE_SIZE = 50;
+const LIVE_FILL_TABS = {
+  aggregate: { label: '聚合 / Aggregate', side: '' },
+  buy: { label: '买入 / Buy', side: 'Buy' },
+  sell: { label: '卖出 / Sell', side: 'Sell' },
+  profit: { label: '收益 / PnL', side: '' },
+};
+let _liveFillState = { tab: 'aggregate', offset: 0, limit: LIVE_FILL_PAGE_SIZE, hasMore: false, loading: false };
 
 function toggleFills() {
   const section = document.getElementById('fills-section');
@@ -1720,63 +1744,183 @@ function toggleFills() {
   }
 }
 
+function _liveFillTs(f) { return f.execTime || f.exec_time || f.time || f.updatedTime || f.createdTime || ''; }
+function _liveFillQty(f) { return parseFloat(f.execQty || f.exec_qty || f.qty || 0) || 0; }
+function _liveFillPrice(f) { return parseFloat(f.execPrice || f.exec_price || f.price || 0) || 0; }
+function _liveFillFee(f) { return Math.abs(parseFloat(f.execFee || f.exec_fee || f.fee || 0) || 0); }
+function _liveFillPnl(f) {
+  const raw = f.closedPnl != null ? f.closedPnl : f.realized_pnl;
+  const pnl = parseFloat(raw);
+  return isFinite(pnl) ? pnl : 0;
+}
+
+function _liveFillHead(tab) {
+  if (tab === 'profit') {
+    return '<tr><th>平倉時間</th><th>Symbol</th><th>策略 / Strategy</th><th>開倉</th><th>平倉</th><th>Qty</th><th>持倉</th><th>收益 / PnL</th></tr>';
+  }
+  return '<tr><th>時間 / Time</th><th>Symbol</th><th>策略 / Strategy</th><th>Side</th><th>Qty</th><th>Price</th><th>Exec Value</th><th>Fee</th><th>盈亏 / PnL</th><th>Order ID</th></tr>';
+}
+
+function _liveFillRow(f) {
+  const ts = _liveFillTs(f);
+  const qty = f.execQty || f.exec_qty || f.qty || '--';
+  const price = f.execPrice || f.exec_price || f.price || '--';
+  const execValue = ocFillExecValue(f);
+  const fee = f.execFee || f.exec_fee || '--';
+  const feeStr = fee !== '--' ? parseFloat(fee).toFixed(6) : '--';
+  const oid = f.orderId || f.order_id || '--';
+  const side = f.side || '--';
+  const sideCls = side === 'Buy' ? 'color:var(--green)' : side === 'Sell' ? 'color:#f87171' : '';
+  const strategy = f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[f.symbol || ''] || '';
+  return `<tr>
+    <td style="white-space:nowrap">${ocEsc(ocFillTime(ts))}</td>
+    <td><strong>${ocEsc(f.symbol || '--')}</strong></td>
+    <td style="font-size:11px">${strategy ? _ocRenderOwnerStrategy(strategy, f) : '--'}</td>
+    <td style="${sideCls}">${ocEsc(side)}</td>
+    <td>${ocEsc(String(qty))}</td>
+    <td>${ocEsc(String(price))}</td>
+    <td>${ocEsc(ocAmount(execValue))}</td>
+    <td style="color:var(--text-dim)">${ocEsc(feeStr)}</td>
+    ${ocPnlCell(_liveFillPnl(f))}
+    <td style="font-size:10px;color:var(--text-dim)">${ocEsc(String(oid)).slice(0, 12)}…</td>
+  </tr>`;
+}
+
+function _liveBuildProfitRows(fills) {
+  const sorted = fills.slice().sort((a, b) => (Number(_liveFillTs(a)) || 0) - (Number(_liveFillTs(b)) || 0));
+  const lotsBySymbol = {};
+  const rows = [];
+  sorted.forEach(f => {
+    const sym = f.symbol || '';
+    const side = f.side || '';
+    const qty = _liveFillQty(f);
+    const price = _liveFillPrice(f);
+    const fee = _liveFillFee(f);
+    const time = Number(_liveFillTs(f)) || 0;
+    const strategy = f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[sym] || '';
+    if (!sym || !side || qty <= 0 || price <= 0) return;
+    const lots = lotsBySymbol[sym] || (lotsBySymbol[sym] = []);
+    let remaining = qty;
+    while (remaining > 0.00000001 && lots.length && lots[0].side !== side) {
+      const open = lots[0];
+      const matchQty = Math.min(remaining, open.remaining);
+      const rawPnl = _liveFillPnl(f);
+      const computed = open.side === 'Buy'
+        ? (price - open.price) * matchQty
+        : (open.price - price) * matchQty;
+      const pnl = Math.abs(rawPnl) > 0.0001 ? rawPnl * (matchQty / qty) : computed - fee * (matchQty / qty) - open.fee * (matchQty / open.qty);
+      rows.push({ sym, strategy: strategy || open.strategy, open, close: { side, price, time }, qty: matchQty, pnl, holdMs: time - open.time, paired: true });
+      open.remaining -= matchQty;
+      remaining -= matchQty;
+      if (open.remaining <= 0.00000001) lots.shift();
+    }
+    if (remaining > 0.00000001) {
+      lots.push({ side, price, time, qty: remaining, remaining, fee: fee * (remaining / qty), strategy });
+    }
+  });
+  if (!rows.length) {
+    fills.forEach(f => {
+      const pnl = _liveFillPnl(f);
+      if (Math.abs(pnl) > 0.0001) {
+        rows.push({ sym: f.symbol || '', strategy: f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[f.symbol || ''] || '', open: null, close: { side: f.side || '', price: _liveFillPrice(f), time: Number(_liveFillTs(f)) || 0 }, qty: _liveFillQty(f), pnl, holdMs: null, paired: false });
+      }
+    });
+  }
+  return rows.sort((a, b) => (b.close.time || 0) - (a.close.time || 0));
+}
+
+function _liveProfitRow(r) {
+  const openText = r.open ? (r.open.side + ' @ ' + ocNum(r.open.price, 2)) : '--';
+  const closeText = (r.close.side || '--') + (r.close.price ? ' @ ' + ocNum(r.close.price, 2) : '');
+  const hold = r.holdMs != null && r.holdMs >= 0 ? (r.holdMs / 60000).toFixed(1) + 'm' : (r.paired ? '--' : 'page edge');
+  const pnlCls = r.pnl >= 0 ? 'green' : 'red';
+  const sign = r.pnl >= 0 ? '+' : '';
+  return '<tr>' +
+    '<td>' + ocFillTime(r.close.time) + '</td>' +
+    '<td><strong>' + ocEsc(r.sym) + '</strong></td>' +
+    '<td style="font-size:11px">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
+    '<td>' + ocEsc(openText) + '</td>' +
+    '<td>' + ocEsc(closeText) + '</td>' +
+    '<td>' + ocNum(r.qty, 4) + '</td>' +
+    '<td style="color:var(--text-dim)">' + ocEsc(hold) + '</td>' +
+    '<td class="' + pnlCls + '">' + sign + r.pnl.toFixed(4) + '</td>' +
+    '</tr>';
+}
+
+function _liveUpdateFillControls(payload, fills) {
+  document.querySelectorAll('#live-fill-tabs .oc-fill-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-fill-tab') === _liveFillState.tab);
+  });
+  _liveFillState.hasMore = !!(payload && payload.has_more);
+  const page = Math.floor(_liveFillState.offset / _liveFillState.limit) + 1;
+  const tabLabel = (LIVE_FILL_TABS[_liveFillState.tab] || {}).label || _liveFillState.tab;
+  ocSetText('live-fills-page-info', tabLabel + ' · Page ' + page + ' · ' + _liveFillState.limit + '/页');
+  const prev = document.getElementById('live-fills-prev');
+  const next = document.getElementById('live-fills-next');
+  if (prev) prev.disabled = _liveFillState.offset <= 0 || _liveFillState.loading;
+  if (next) next.disabled = !_liveFillState.hasMore || _liveFillState.loading;
+  ocSetText('live-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + ' · offset=' + _liveFillState.offset);
+}
+
+function setLiveFillView(tab) {
+  if (!LIVE_FILL_TABS[tab] || _liveFillState.loading) return;
+  _liveFillState.tab = tab;
+  _liveFillState.offset = 0;
+  loadFills();
+}
+
+function liveFillPrev() {
+  if (_liveFillState.loading || _liveFillState.offset <= 0) return;
+  _liveFillState.offset = Math.max(0, _liveFillState.offset - _liveFillState.limit);
+  loadFills();
+}
+
+function liveFillNext() {
+  if (_liveFillState.loading || !_liveFillState.hasMore) return;
+  _liveFillState.offset += _liveFillState.limit;
+  loadFills();
+}
+
 async function loadFills() {
   const body = document.getElementById('live-fills-body');
   const badge = document.getElementById('fills-count-badge');
-  body.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  const side = (LIVE_FILL_TABS[_liveFillState.tab] || {}).side || '';
+  const qs = '?limit=' + _liveFillState.limit + '&offset=' + _liveFillState.offset + (side ? '&side=' + encodeURIComponent(side) : '');
+  _liveFillState.loading = true;
+  _liveUpdateFillControls(null, []);
+  document.getElementById('live-fills-head').innerHTML = _liveFillHead(_liveFillState.tab);
+  body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
   try {
-    const d = await ocApi('/api/v1/live/fills');
+    const d = await ocApi('/api/v1/live/fills' + qs);
     const payload = d && d.data;
     if (_isPhantomViewError(payload)) {
-      // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
-      body.innerHTML = '<tr><td colspan="10" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
       if (badge) badge.textContent = '';
       ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
       _fillsLoaded = false;
+      _liveFillState.loading = false;
+      _liveUpdateFillControls(payload, []);
       return;
     }
     const arr = (payload && Array.isArray(payload.list)) ? payload.list : [];
     _fillsLoaded = true;
+    _liveFillState.loading = false;
+    _liveUpdateFillControls(payload, arr);
     if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
     if (arr.length === 0) {
-      body.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
       ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
       return;
     }
-    body.innerHTML = arr.map(f => {
-      // Bybit execution fields: execTime, symbol, side, execQty, execPrice, execFee, orderId, closedPnl
-      // Bybit 成交字段：execTime, symbol, side, execQty, execPrice, execFee, orderId, closedPnl（平倉盈虧）
-      const ts = f.execTime || f.exec_time || f.time || '--';
-      // F5/A5: dual-stamp UTC + local instead of toLocaleTimeString() alone
-      // F5/A5：UTC + 當地雙時戳，取代原 toLocaleTimeString() 單時區
-      const timeStr = ocFillTime(ts);
-      const qty = f.execQty || f.exec_qty || f.qty || '--';
-      const price = f.execPrice || f.exec_price || f.price || '--';
-      const execValue = ocFillExecValue(f);
-      const fee = f.execFee || f.exec_fee || '--';
-      const feeStr = fee !== '--' ? parseFloat(fee).toFixed(6) : '--';
-      const oid = f.orderId || f.order_id || '--';
-      const side = f.side || '--';
-      const sideCls = side === 'Buy' ? 'color:var(--green)' : side === 'Sell' ? 'color:#f87171' : '';
-      const pnlRaw = f.closedPnl != null ? f.closedPnl : f.realized_pnl;
-      const strategy = f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[f.symbol || ''] || '';
-      return `<tr>
-        <td style="white-space:nowrap">${ocEsc(timeStr)}</td>
-        <td><strong>${ocEsc(f.symbol || '--')}</strong></td>
-        <td style="font-size:11px">${strategy ? _ocRenderOwnerStrategy(strategy, f) : '--'}</td>
-        <td style="${sideCls}">${ocEsc(side)}</td>
-        <td>${ocEsc(String(qty))}</td>
-        <td>${ocEsc(String(price))}</td>
-        <td>${ocEsc(ocAmount(execValue))}</td>
-        <td style="color:var(--text-dim)">${ocEsc(feeStr)}</td>
-        ${ocPnlCell(pnlRaw)}
-        <td style="font-size:10px;color:var(--text-dim)">${ocEsc(String(oid)).slice(0, 12)}…</td>
-      </tr>`;
-    }).join('');
+    body.innerHTML = _liveFillState.tab === 'profit'
+      ? (_liveBuildProfitRows(arr).map(_liveProfitRow).join('') || '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">本页没有可关联收益</td></tr>')
+      : arr.map(_liveFillRow).join('');
     ocPnlTrend('live-pnl-line', 'live-pnl-label', arr, 'live-pnl-zero');
   } catch(e) {
-    body.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
+    _liveFillState.loading = false;
+    _liveUpdateFillControls(null, []);
+    body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
   }
 }
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Demo 演示</title>
-<script src="/static/common.js?v=20260507.strategy-colors-v1"></script>
+<script src="/static/common.js?v=20260507.fill-tabs-v1"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -132,11 +132,25 @@
 
   <!-- Fill History / 成交历史 -->
   <details class="oc-collapse">
-    <summary>&#x1F4C4; 成交历史 / Fill History（最近 50 笔）</summary>
+    <summary>&#x1F4C4; 成交历史 / Fill History（分页，每页 50 笔）</summary>
     <div class="oc-collapse-body">
+      <div class="oc-fill-toolbar">
+        <div class="oc-fill-tabs" id="demo-fill-tabs">
+          <button class="oc-fill-tab active" data-fill-tab="aggregate" onclick="setDemoFillView('aggregate')">聚合 / Aggregate</button>
+          <button class="oc-fill-tab" data-fill-tab="buy" onclick="setDemoFillView('buy')">买入 / Buy</button>
+          <button class="oc-fill-tab" data-fill-tab="sell" onclick="setDemoFillView('sell')">卖出 / Sell</button>
+          <button class="oc-fill-tab" data-fill-tab="profit" onclick="setDemoFillView('profit')">收益 / PnL</button>
+        </div>
+        <div class="oc-fill-pager">
+          <button class="oc-btn" id="demo-fills-prev" onclick="demoFillPrev()" disabled>上一页</button>
+          <span id="demo-fills-page-info">Page 1 · 50/页</span>
+          <button class="oc-btn" id="demo-fills-next" onclick="demoFillNext()" disabled>下一页</button>
+        </div>
+      </div>
+      <div class="oc-fill-summary" id="demo-fills-summary">当前只加载本页数据，切页时再拉取下一页。</div>
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>时间</th><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
+          <thead id="demo-fills-head"><tr><th>时间</th><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
           <tbody id="demo-fills"><tr class="empty-row"><td colspan="10">加载中...</td></tr></tbody>
         </table>
       </div>
@@ -213,7 +227,15 @@ try {
   localStorage.removeItem('oc_demo_realized_baseline');
 } catch (e) {}
 
-let _demoFillsCache = []; // Cache fills for metrics calculation
+let _demoFillsCache = []; // Cache recent aggregate fills for metrics/strategy mapping.
+const DEMO_FILL_PAGE_SIZE = 50;
+const DEMO_FILL_TABS = {
+  aggregate: { label: '聚合 / Aggregate', side: '' },
+  buy: { label: '买入 / Buy', side: 'Buy' },
+  sell: { label: '卖出 / Sell', side: 'Sell' },
+  profit: { label: '收益 / PnL', side: '' },
+};
+let _demoFillState = { tab: 'aggregate', offset: 0, limit: DEMO_FILL_PAGE_SIZE, hasMore: false, loading: false };
 
 function openDemoRisk() {
   try {
@@ -605,54 +627,182 @@ async function loadDemoOrders() {
   ocSetHtml('demo-orders', html);
 }
 
-async function loadDemoFills() {
-  const d = await ocApi('/api/v1/strategy/demo/fills');
-  if (!d || !d.data) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="10">暂无成交</td></tr>');
-    return;
+function _demoFillTs(f) {
+  return f.exec_time || f.execTime || f.updatedTime || f.createdTime || f.ts_ms || f.time || '';
+}
+
+function _demoFillQty(f) { return parseFloat(f.execQty || f.exec_qty || f.qty || 0) || 0; }
+function _demoFillPrice(f) { return parseFloat(f.execPrice || f.exec_price || f.price || 0) || 0; }
+function _demoFillFee(f) { return Math.abs(parseFloat(f.execFee || f.exec_fee || f.fee || 0) || 0); }
+function _demoFillPnl(f) {
+  const raw = f.closedPnl != null ? f.closedPnl : f.realized_pnl;
+  const pnl = parseFloat(raw);
+  return isFinite(pnl) ? pnl : 0;
+}
+
+function _demoExtractFills(data) {
+  if (!data) return [];
+  if (data.result && data.result.list) return data.result.list;
+  if (data.list) return data.list;
+  const raw = data.fills || data || [];
+  return Array.isArray(raw) ? raw : Object.values(raw);
+}
+
+function _demoFillHead(tab) {
+  if (tab === 'profit') {
+    return '<tr><th>平仓时间</th><th>交易对</th><th>策略</th><th>开仓</th><th>平仓</th><th>数量</th><th>持仓</th><th>收益 / PnL</th></tr>';
   }
-  let fills = [];
-  if (d.data.result && d.data.result.list) {
-    fills = d.data.result.list;
-  } else if (d.data.list) {
-    fills = d.data.list;
-  } else {
-    const raw = d.data.fills || d.data || [];
-    fills = Array.isArray(raw) ? raw : Object.values(raw);
-  }
-  _demoFillsCache = fills;
-  if (!fills.length) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="10">暂无成交</td></tr>');
-    return;
-  }
-  let html = '';
-  fills.slice(0, 50).forEach(f => {
-    const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
-    // Rust ExecutionInfo serializes time field as `exec_time` (snake_case) — was missing
-    // from the fallback chain so the column rendered as '--'.
-    // / Rust ExecutionInfo 序列化欄位名為 exec_time，之前不在 fallback 鏈中導致該欄顯示 '--'。
-    const ts = f.exec_time || f.execTime || f.updatedTime || f.createdTime || f.ts_ms || '';
-    const price = parseFloat(f.execPrice || f.price || 0);
-    const qty = parseFloat(f.execQty || f.qty || 0);
-    const fee = parseFloat(f.execFee || f.fee || 0);
+  return '<tr><th>时间</th><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr>';
+}
+
+function _demoFillRow(f) {
+  const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
+  const ts = _demoFillTs(f);
+  const price = _demoFillPrice(f);
+  const qty = _demoFillQty(f);
+  const fee = _demoFillFee(f);
+  const sym = f.symbol || '';
+  const cat = f.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
+  const strategy = f.strategy || f.strategy_name || f.owner_strategy || '';
+  let html = '<tr>';
+  html += '<td>' + ocFillTime(ts) + '</td>';
+  html += '<td>' + ocEsc(sym) + '</td>';
+  html += '<td style="font-size:11px">' + (strategy ? _ocRenderOwnerStrategy(strategy, f) : '--') + '</td>';
+  html += '<td>' + ocCategoryTag(cat) + '</td>';
+  html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
+  html += '<td>' + ocNum(qty, 4) + '</td>';
+  html += '<td>' + ocNum(price, 2) + '</td>';
+  html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
+  html += '<td>' + ocNum(fee, 6) + '</td>';
+  html += ocPnlCell(_demoFillPnl(f));
+  html += '</tr>';
+  return html;
+}
+
+function _demoBuildProfitRows(fills) {
+  const sorted = fills.slice().sort((a, b) => (Number(_demoFillTs(a)) || 0) - (Number(_demoFillTs(b)) || 0));
+  const lotsBySymbol = {};
+  const rows = [];
+  sorted.forEach(f => {
     const sym = f.symbol || '';
-    const cat = f.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
+    const side = f.side || '';
+    const qty = _demoFillQty(f);
+    const price = _demoFillPrice(f);
+    const fee = _demoFillFee(f);
+    const time = Number(_demoFillTs(f)) || 0;
     const strategy = f.strategy || f.strategy_name || f.owner_strategy || '';
-    html += '<tr>';
-    html += '<td>' + ocFillTime(ts) + '</td>';
-    html += '<td>' + ocEsc(f.symbol) + '</td>';
-    html += '<td style="font-size:11px">' + (strategy ? _ocRenderOwnerStrategy(strategy, f) : '--') + '</td>';
-    html += '<td>' + ocCategoryTag(cat) + '</td>';
-    html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
-    html += '<td>' + ocNum(qty, 4) + '</td>';
-    html += '<td>' + ocNum(price, 2) + '</td>';
-    html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
-    html += '<td>' + ocNum(Math.abs(fee), 6) + '</td>';
-    html += ocPnlCell(f.closedPnl != null ? f.closedPnl : f.realized_pnl);
-    html += '</tr>';
+    if (!sym || !side || qty <= 0 || price <= 0) return;
+    const lots = lotsBySymbol[sym] || (lotsBySymbol[sym] = []);
+    let remaining = qty;
+    while (remaining > 0.00000001 && lots.length && lots[0].side !== side) {
+      const open = lots[0];
+      const matchQty = Math.min(remaining, open.remaining);
+      const rawPnl = _demoFillPnl(f);
+      const computed = open.side === 'Buy'
+        ? (price - open.price) * matchQty
+        : (open.price - price) * matchQty;
+      const pnl = Math.abs(rawPnl) > 0.0001 ? rawPnl * (matchQty / qty) : computed - fee * (matchQty / qty) - open.fee * (matchQty / open.qty);
+      rows.push({ sym, strategy: strategy || open.strategy, open, close: { side, price, time }, qty: matchQty, pnl, holdMs: time - open.time, paired: true });
+      open.remaining -= matchQty;
+      remaining -= matchQty;
+      if (open.remaining <= 0.00000001) lots.shift();
+    }
+    if (remaining > 0.00000001) {
+      lots.push({ side, price, time, qty: remaining, remaining, fee: fee * (remaining / qty), strategy });
+    }
   });
-  ocSetHtml('demo-fills', html);
-  ocPnlTrend('demo-pnl-line', 'demo-pnl-label', fills, 'demo-pnl-zero');
+  if (!rows.length) {
+    fills.forEach(f => {
+      const pnl = _demoFillPnl(f);
+      if (Math.abs(pnl) > 0.0001) {
+        rows.push({ sym: f.symbol || '', strategy: f.strategy || f.strategy_name || f.owner_strategy || '', open: null, close: { side: f.side || '', price: _demoFillPrice(f), time: Number(_demoFillTs(f)) || 0 }, qty: _demoFillQty(f), pnl, holdMs: null, paired: false });
+      }
+    });
+  }
+  return rows.sort((a, b) => (b.close.time || 0) - (a.close.time || 0));
+}
+
+function _demoProfitRow(r) {
+  const openText = r.open ? (r.open.side + ' @ ' + ocNum(r.open.price, 2)) : '--';
+  const closeText = (r.close.side || '--') + (r.close.price ? ' @ ' + ocNum(r.close.price, 2) : '');
+  const hold = r.holdMs != null && r.holdMs >= 0 ? (r.holdMs / 60000).toFixed(1) + 'm' : (r.paired ? '--' : 'page edge');
+  const pnlCls = r.pnl >= 0 ? 'green' : 'red';
+  const sign = r.pnl >= 0 ? '+' : '';
+  return '<tr>' +
+    '<td>' + ocFillTime(r.close.time) + '</td>' +
+    '<td>' + ocEsc(r.sym) + '</td>' +
+    '<td style="font-size:11px">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
+    '<td>' + ocEsc(openText) + '</td>' +
+    '<td>' + ocEsc(closeText) + '</td>' +
+    '<td>' + ocNum(r.qty, 4) + '</td>' +
+    '<td style="color:var(--text-dim)">' + ocEsc(hold) + '</td>' +
+    '<td class="' + pnlCls + '">' + sign + r.pnl.toFixed(4) + '</td>' +
+    '</tr>';
+}
+
+function _demoUpdateFillControls(payload, fills) {
+  document.querySelectorAll('#demo-fill-tabs .oc-fill-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-fill-tab') === _demoFillState.tab);
+  });
+  _demoFillState.hasMore = !!(payload && payload.has_more);
+  const page = Math.floor(_demoFillState.offset / _demoFillState.limit) + 1;
+  const tabLabel = (DEMO_FILL_TABS[_demoFillState.tab] || {}).label || _demoFillState.tab;
+  ocSetText('demo-fills-page-info', tabLabel + ' · Page ' + page + ' · ' + _demoFillState.limit + '/页');
+  const prev = $('demo-fills-prev');
+  const next = $('demo-fills-next');
+  if (prev) prev.disabled = _demoFillState.offset <= 0 || _demoFillState.loading;
+  if (next) next.disabled = !_demoFillState.hasMore || _demoFillState.loading;
+  ocSetText('demo-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + ' · offset=' + _demoFillState.offset);
+}
+
+function setDemoFillView(tab) {
+  if (!DEMO_FILL_TABS[tab] || _demoFillState.loading) return;
+  _demoFillState.tab = tab;
+  _demoFillState.offset = 0;
+  loadDemoFills();
+}
+
+function demoFillPrev() {
+  if (_demoFillState.loading || _demoFillState.offset <= 0) return;
+  _demoFillState.offset = Math.max(0, _demoFillState.offset - _demoFillState.limit);
+  loadDemoFills();
+}
+
+function demoFillNext() {
+  if (_demoFillState.loading || !_demoFillState.hasMore) return;
+  _demoFillState.offset += _demoFillState.limit;
+  loadDemoFills();
+}
+
+async function loadDemoFills() {
+  const side = (DEMO_FILL_TABS[_demoFillState.tab] || {}).side || '';
+  const qs = '?limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset + (side ? '&side=' + encodeURIComponent(side) : '');
+  _demoFillState.loading = true;
+  _demoUpdateFillControls(null, []);
+  ocSetHtml('demo-fills-head', _demoFillHead(_demoFillState.tab));
+  ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">加载中...</td></tr>');
+  try {
+    const d = await ocApi('/api/v1/strategy/demo/fills' + qs);
+    const payload = d && d.data;
+    const fills = _demoExtractFills(payload);
+    if (_demoFillState.tab === 'aggregate' && _demoFillState.offset === 0) _demoFillsCache = fills;
+    _demoFillState.loading = false;
+    _demoUpdateFillControls(payload, fills);
+    if (!fills.length) {
+      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">暂无成交</td></tr>');
+      ocPnlTrend('demo-pnl-line', 'demo-pnl-label', [], 'demo-pnl-zero');
+      return;
+    }
+    const html = _demoFillState.tab === 'profit'
+      ? (_demoBuildProfitRows(fills).map(_demoProfitRow).join('') || '<tr class="empty-row"><td colspan="8">本页没有可关联收益</td></tr>')
+      : fills.map(_demoFillRow).join('');
+    ocSetHtml('demo-fills', html);
+    ocPnlTrend('demo-pnl-line', 'demo-pnl-label', fills, 'demo-pnl-zero');
+  } catch (e) {
+    _demoFillState.loading = false;
+    _demoUpdateFillControls(null, []);
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">无法加载成交</td></tr>');
+  }
 }
 
 async function loadComparison() {
