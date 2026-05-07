@@ -66,3 +66,31 @@ replay fidelity by recording ticker/orderbook snapshots now, and it uses
 existing local `market.market_tickers` history when available. Older windows
 without local microstructure rows remain S2/S2+ public kline replay and are
 explicitly labeled with missing microstructure coverage.
+
+## Linux Runtime
+
+- Linux `trade-core` fast-forwarded to `053ed2ad`.
+- Linux Python verification:
+  - `python3 -m py_compile ...` passed.
+  - targeted pytest suite passed: 59 passed.
+- Linux release runner rebuilt with:
+  - `/home/ncyu/.cargo/bin/cargo build --release -p openclaw_engine --bin replay_runner --features replay_isolated --manifest-path rust/Cargo.toml`
+  - passed with pre-existing warnings.
+- API reloaded with:
+  - `bash helper_scripts/restart_all.sh --api-only --keep-auth`
+- Manual recorder apply:
+  - V058 recorder wrote 905 universe rows for the new snapshot.
+  - Microstructure recorder wrote 2 ticker rows and 2 orderbook rows for
+    `BTCUSDT,ETHUSDT`.
+- DB proof after recorder apply:
+  - `market.symbol_universe_snapshots`: total Bybit rows 1810; rows in last 24h
+    1810.
+  - Recent `market.market_tickers` rows for BTC/ETH in the last 10 minutes:
+    702.
+  - Recent `market.ob_snapshots` rows for BTC/ETH in the last 10 minutes: 20.
+- Passive healthcheck:
+  - `[53] ref21_v058_symbol_universe_recorder` PASS, `last_age=0.0h`.
+- Linux crontab installed with an idempotent marker block:
+  - V058 universe snapshot: hourly at minute 20.
+  - Microstructure recorder: every minute, max 10 symbols.
+  - First automatic cron tick wrote 10 ticker rows and 10 orderbook rows.
