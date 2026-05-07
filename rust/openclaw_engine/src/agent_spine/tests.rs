@@ -189,6 +189,7 @@ fn durable_spine_objects_model_signal_decision_verdict_plan_chain() {
     assert_eq!(verdict_json["p2_modifications"][0]["field"], "size");
     let verdict_obj = SpineObjectEnvelope::from_guardian_verdict(&verdict, AgentSpineMode::Shadow)
         .expect("guardian verdict envelope");
+    assert_eq!(verdict_obj.state, "modified");
 
     let plan = ExecutionPlan {
         schema_version: EXECUTION_PLAN_SCHEMA_VERSION.to_string(),

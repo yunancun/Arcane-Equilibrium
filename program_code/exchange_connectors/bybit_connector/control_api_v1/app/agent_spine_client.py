@@ -110,6 +110,7 @@ class AgentSpineClient:
         )
         self.stats = AgentSpineClientStats()
         self._lock = threading.Lock()
+        self._known_guardian_verdicts: dict[str, bool] = {}
 
     def publish_strategy_signal(self, signal: StrategySignal) -> bool:
         return self._publish_object(
@@ -166,7 +167,9 @@ class AgentSpineClient:
         return ok and edge_ok
 
     def publish_guardian_verdict(self, verdict: GuardianVerdict) -> bool:
-        state = "approved" if verdict.allow else "rejected"
+        state = "modified" if verdict.allow and verdict.p2_modifications else (
+            "approved" if verdict.allow else "rejected"
+        )
         ok = self._publish_object(
             verdict,
             object_id=verdict.verdict_id,
@@ -199,9 +202,19 @@ class AgentSpineClient:
             details={"allow": verdict.allow, "risk_level": verdict.risk_level},
             created_at_ms=verdict.ts_ms,
         )
-        return ok and edge_ok
+        published = ok and edge_ok
+        if published:
+            with self._lock:
+                self._known_guardian_verdicts[verdict.verdict_id] = bool(verdict.allow)
+        return published
 
     def publish_execution_plan(self, plan: ExecutionPlan, *, reserve_idempotency: bool = True) -> bool:
+        if not self._guardian_verdict_allows_plan(plan):
+            self._record_failure(
+                "publish_execution_plan",
+                ValueError("approved_or_modified_guardian_verdict_required"),
+            )
+            return False
         ok = self._publish_object(
             plan,
             object_id=plan.order_plan_id,
@@ -242,6 +255,26 @@ class AgentSpineClient:
                 details={"verdict_id": plan.verdict_id, "symbol": plan.symbol},
             )
         return ok and edge_ok and idem_ok
+
+    def _guardian_verdict_allows_plan(self, plan: ExecutionPlan) -> bool:
+        if not plan.verdict_id:
+            return False
+        with self._lock:
+            known = self._known_guardian_verdicts.get(plan.verdict_id)
+        if known is not None:
+            return known
+        row = self.fetch_object(plan.verdict_id)
+        if not row or row.get("object_type") != "guardian_verdict":
+            return False
+        state = str(row.get("state", ""))
+        payload = row.get("payload") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        allow = bool(payload.get("allow", state in ("approved", "modified")))
+        return allow and state in ("approved", "modified")
 
     def publish_execution_report(self, report: ExecutionReport) -> bool:
         ok = self._publish_object(

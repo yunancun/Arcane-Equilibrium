@@ -149,6 +149,21 @@ def _modified_verdict() -> GuardianVerdict:
     )
 
 
+def _rejected_verdict() -> GuardianVerdict:
+    return GuardianVerdict(
+        verdict_id="verdict-paper-BTCUSDT-1-rejected",
+        decision_id="decision-paper-BTCUSDT-1",
+        verdict_version=3,
+        ts_ms=1_700_000_000_026,
+        engine_mode="paper",
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        allow=False,
+        risk_level="high",
+        reasons=["hard_risk_limit"],
+    )
+
+
 def _plan() -> ExecutionPlan:
     return ExecutionPlan(
         order_plan_id="plan-paper-BTCUSDT-1",
@@ -217,6 +232,10 @@ def test_execution_contracts_require_deduplication_lineage_ids() -> None:
         invalid_payload.pop(field)
         with pytest.raises(ValidationError):
             ExecutionPlan(**invalid_payload)
+    invalid_payload = dict(plan_payload)
+    invalid_payload["verdict_id"] = ""
+    with pytest.raises(ValidationError):
+        ExecutionPlan(**invalid_payload)
 
     report_payload = _report().model_dump(mode="json")
     for field in ("execution_report_id", "order_plan_id", "decision_id"):
@@ -290,6 +309,41 @@ def test_publish_guardian_verdict_and_plan_write_chain_and_idempotency(fake_conn
         "paper",
     )
     assert client.stats.idempotency_rows == 1
+
+
+def test_publish_execution_plan_requires_prior_allowing_guardian_verdict(fake_conn) -> None:
+    client = AgentSpineClient(enabled=True, authority_mode="shadow")
+
+    assert client.publish_execution_plan(_plan()) is False
+
+    assert client.stats.last_error == "publish_execution_plan:ValueError"
+    assert client.stats.write_failures == 1
+    assert not any(
+        len(params) > 2 and params[2] == "execution_plan"
+        for _, params in fake_conn.executes
+    )
+
+
+def test_publish_execution_plan_rejects_rejected_guardian_verdict(fake_conn) -> None:
+    client = AgentSpineClient(enabled=True, authority_mode="shadow")
+
+    assert client.publish_guardian_verdict(_rejected_verdict()) is True
+    assert client.publish_execution_plan(_plan()) is False
+
+    assert fake_conn.executes[0][1][14] == "rejected"
+    assert not any(
+        len(params) > 2 and params[2] == "execution_plan"
+        for _, params in fake_conn.executes
+    )
+
+
+def test_publish_modified_guardian_verdict_records_modified_state(fake_conn) -> None:
+    client = AgentSpineClient(enabled=True, authority_mode="shadow")
+
+    assert client.publish_guardian_verdict(_modified_verdict()) is True
+
+    assert fake_conn.executes[0][1][2] == "guardian_verdict"
+    assert fake_conn.executes[0][1][14] == "modified"
 
 
 def test_fetch_chain_by_signal_returns_typed_payload_rows(fake_conn) -> None:
