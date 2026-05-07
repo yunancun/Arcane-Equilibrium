@@ -110,7 +110,8 @@ class AgentSpineClient:
         )
         self.stats = AgentSpineClientStats()
         self._lock = threading.Lock()
-        self._known_guardian_verdicts: dict[str, bool] = {}
+        self._known_strategist_decisions: dict[str, dict[str, Any]] = {}
+        self._known_guardian_verdicts: dict[str, dict[str, Any]] = {}
 
     def publish_strategy_signal(self, signal: StrategySignal) -> bool:
         return self._publish_object(
@@ -164,7 +165,11 @@ class AgentSpineClient:
             details={"source": "python_agent_spine_client"},
             created_at_ms=decision.ts_ms,
         )
-        return ok and edge_ok
+        published = ok and edge_ok
+        if published:
+            with self._lock:
+                self._known_strategist_decisions[decision.decision_id] = payload_dict(decision)
+        return published
 
     def publish_guardian_verdict(self, verdict: GuardianVerdict) -> bool:
         state = "modified" if verdict.allow and verdict.p2_modifications else (
@@ -205,14 +210,15 @@ class AgentSpineClient:
         published = ok and edge_ok
         if published:
             with self._lock:
-                self._known_guardian_verdicts[verdict.verdict_id] = bool(verdict.allow)
+                self._known_guardian_verdicts[verdict.verdict_id] = payload_dict(verdict)
         return published
 
     def publish_execution_plan(self, plan: ExecutionPlan, *, reserve_idempotency: bool = True) -> bool:
-        if not self._guardian_verdict_allows_plan(plan):
+        lineage_ok, lineage_error = self._execution_plan_lineage_allows_publish(plan)
+        if not lineage_ok:
             self._record_failure(
                 "publish_execution_plan",
-                ValueError("approved_or_modified_guardian_verdict_required"),
+                ValueError(lineage_error),
             )
             return False
         ok = self._publish_object(
@@ -227,7 +233,7 @@ class AgentSpineClient:
             signal_id=None,
             decision_id=plan.decision_id,
             verdict_id=plan.verdict_id,
-            verdict_version=None,
+            verdict_version=plan.verdict_version,
             order_plan_id=plan.order_plan_id,
             execution_report_id=None,
             lease_id=plan.lease_id,
@@ -241,7 +247,15 @@ class AgentSpineClient:
             edge_type="planned_by",
             engine_mode=plan.engine_mode,
             decision_id=plan.decision_id,
-            details={"order_type": plan.order_type, "time_in_force": plan.time_in_force},
+            details={
+                "order_style": plan.order_style,
+                "order_type": plan.order_type,
+                "time_in_force": plan.time_in_force,
+                "urgency": plan.urgency,
+                "max_slippage_bps": plan.max_slippage_bps,
+                "maker_preference": plan.maker_preference,
+                "reduce_only": plan.reduce_only,
+            },
             created_at_ms=plan.ts_ms,
         )
         idem_ok = True
@@ -252,20 +266,72 @@ class AgentSpineClient:
                 decision_id=plan.decision_id,
                 engine_mode=plan.engine_mode,
                 first_seen_at_ms=plan.ts_ms,
-                details={"verdict_id": plan.verdict_id, "symbol": plan.symbol},
+                details={
+                    "verdict_id": plan.verdict_id,
+                    "verdict_version": plan.verdict_version,
+                    "symbol": plan.symbol,
+                    "direction": plan.direction,
+                    "order_style": plan.order_style,
+                },
             )
         return ok and edge_ok and idem_ok
 
-    def _guardian_verdict_allows_plan(self, plan: ExecutionPlan) -> bool:
-        if not plan.verdict_id:
-            return False
+    def _execution_plan_lineage_allows_publish(self, plan: ExecutionPlan) -> tuple[bool, str]:
+        decision_payload = self._find_strategist_decision_payload(plan.decision_id)
+        if not decision_payload:
+            return False, "strategist_decision_required_for_execution_plan"
+        if not self._plan_matches_strategist_decision(plan, decision_payload):
+            return False, "execution_plan_symbol_direction_authority_mismatch"
+
+        verdict_payload = self._find_guardian_verdict_payload(plan.verdict_id)
+        if not verdict_payload:
+            return False, "approved_or_modified_guardian_verdict_required"
+        if not self._guardian_verdict_allows_plan(plan, verdict_payload):
+            return False, "approved_or_modified_guardian_verdict_required"
+        if not self._plan_matches_guardian_verdict(plan, verdict_payload):
+            return False, "guardian_verdict_plan_scope_mismatch"
+
+        decision_action = str(decision_payload.get("decision_action", "open"))
+        if decision_action in {"hold", "no_action"}:
+            return False, "execution_plan_for_non_trading_decision"
+        return True, ""
+
+    def _find_strategist_decision_payload(self, decision_id: str) -> dict[str, Any] | None:
+        if not decision_id:
+            return None
         with self._lock:
-            known = self._known_guardian_verdicts.get(plan.verdict_id)
+            known = self._known_strategist_decisions.get(decision_id)
         if known is not None:
             return known
-        row = self.fetch_object(plan.verdict_id)
+        row = self.fetch_object(decision_id)
+        if not row or row.get("object_type") != "strategist_decision":
+            return None
+        payload = self._payload_from_row(row)
+        if not payload:
+            return None
+        with self._lock:
+            self._known_strategist_decisions[decision_id] = payload
+        return payload
+
+    def _find_guardian_verdict_payload(self, verdict_id: str) -> dict[str, Any] | None:
+        if not verdict_id:
+            return None
+        with self._lock:
+            known = self._known_guardian_verdicts.get(verdict_id)
+        if known is not None:
+            return known
+        row = self.fetch_object(verdict_id)
         if not row or row.get("object_type") != "guardian_verdict":
-            return False
+            return None
+        payload = self._payload_from_row(row)
+        if not payload:
+            return None
+        payload["_spine_state"] = str(row.get("state", ""))
+        with self._lock:
+            self._known_guardian_verdicts[verdict_id] = payload
+        return payload
+
+    def _payload_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
         state = str(row.get("state", ""))
         payload = row.get("payload") or {}
         if isinstance(payload, str):
@@ -273,8 +339,48 @@ class AgentSpineClient:
                 payload = json.loads(payload)
             except Exception:
                 payload = {}
-        allow = bool(payload.get("allow", state in ("approved", "modified")))
-        return allow and state in ("approved", "modified")
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            payload.setdefault("_spine_state", state)
+            return payload
+        return {}
+
+    def _guardian_verdict_allows_plan(
+        self,
+        plan: ExecutionPlan,
+        verdict_payload: dict[str, Any],
+    ) -> bool:
+        state = str(verdict_payload.get("_spine_state", ""))
+        allow = bool(verdict_payload.get("allow", state in ("approved", "modified")))
+        return bool(plan.verdict_id) and allow and state in {"approved", "modified", ""}
+
+    def _plan_matches_guardian_verdict(
+        self,
+        plan: ExecutionPlan,
+        verdict_payload: dict[str, Any],
+    ) -> bool:
+        return (
+            verdict_payload.get("decision_id") == plan.decision_id
+            and verdict_payload.get("verdict_version") == plan.verdict_version
+            and verdict_payload.get("symbol") == plan.symbol
+            and verdict_payload.get("strategy") == plan.strategy
+            and verdict_payload.get("engine_mode") == plan.engine_mode
+        )
+
+    def _plan_matches_strategist_decision(
+        self,
+        plan: ExecutionPlan,
+        decision_payload: dict[str, Any],
+    ) -> bool:
+        return (
+            decision_payload.get("decision_id") == plan.decision_id
+            and decision_payload.get("symbol") == plan.symbol
+            and decision_payload.get("direction") == plan.direction
+            and decision_payload.get("strategy") == plan.strategy
+            and decision_payload.get("engine_mode") == plan.engine_mode
+            and plan.symbol_source == "strategist_decision"
+            and plan.direction_source == "strategist_decision"
+        )
 
     def publish_execution_report(self, report: ExecutionReport) -> bool:
         ok = self._publish_object(

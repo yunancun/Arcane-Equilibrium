@@ -169,15 +169,28 @@ def _plan() -> ExecutionPlan:
         order_plan_id="plan-paper-BTCUSDT-1",
         decision_id="decision-paper-BTCUSDT-1",
         verdict_id="verdict-paper-BTCUSDT-1-v1",
+        verdict_version=1,
         ts_ms=1_700_000_000_030,
         engine_mode="paper",
         symbol="BTCUSDT",
         strategy="grid_trading",
         direction="long",
+        symbol_source="strategist_decision",
+        direction_source="strategist_decision",
         qty=1.0,
+        reduce_only=False,
+        order_style="post_only",
+        urgency="normal",
+        max_slippage_bps=10.0,
+        maker_preference="maker_only",
         order_type="limit",
         limit_price=101.0,
         time_in_force="PostOnly",
+        order_style_params={},
+        local_stop_policy={"mode": "guardian_required"},
+        anti_hunt_stop_policy={"enabled": True},
+        lease_scope="TRADE_ENTRY",
+        lease_ttl_ms=30_000,
         idempotency_key="idem-paper-BTCUSDT-1",
     )
 
@@ -227,7 +240,15 @@ def test_contracts_forbid_unbounded_extra_free_text_fields() -> None:
 
 def test_execution_contracts_require_deduplication_lineage_ids() -> None:
     plan_payload = _plan().model_dump(mode="json")
-    for field in ("order_plan_id", "decision_id", "idempotency_key"):
+    for field in (
+        "order_plan_id",
+        "decision_id",
+        "verdict_version",
+        "idempotency_key",
+        "symbol_source",
+        "direction_source",
+        "order_style",
+    ):
         invalid_payload = dict(plan_payload)
         invalid_payload.pop(field)
         with pytest.raises(ValidationError):
@@ -243,6 +264,44 @@ def test_execution_contracts_require_deduplication_lineage_ids() -> None:
         invalid_payload.pop(field)
         with pytest.raises(ValidationError):
             ExecutionReport(**invalid_payload)
+
+
+def test_execution_plan_contract_limits_allowed_order_styles() -> None:
+    plan_payload = _plan().model_dump(mode="json")
+
+    invalid_payload = dict(plan_payload)
+    invalid_payload.update({"order_style": "market", "order_type": "market"})
+    with pytest.raises(ValidationError):
+        ExecutionPlan(**invalid_payload)
+
+    invalid_payload = dict(plan_payload)
+    invalid_payload.update({"order_style": "limit", "time_in_force": "PostOnly"})
+    with pytest.raises(ValidationError):
+        ExecutionPlan(**invalid_payload)
+
+    invalid_payload = dict(plan_payload)
+    invalid_payload.update({"order_style": "limit", "maker_preference": "maker_only"})
+    with pytest.raises(ValidationError):
+        ExecutionPlan(**invalid_payload)
+
+    invalid_payload = dict(plan_payload)
+    invalid_payload.update({"reduce_only": True, "direction": "long"})
+    with pytest.raises(ValidationError):
+        ExecutionPlan(**invalid_payload)
+
+    close_payload = dict(plan_payload)
+    close_payload.update(
+        {
+            "direction": "close_long",
+            "reduce_only": True,
+            "order_style": "market",
+            "maker_preference": "none",
+            "order_type": "market",
+            "limit_price": None,
+            "time_in_force": None,
+        }
+    )
+    assert ExecutionPlan(**close_payload).reduce_only is True
 
 
 def test_guardian_verdict_contract_carries_p2_modifications_without_authority_shift() -> None:
@@ -291,15 +350,19 @@ def test_publish_strategist_decision_writes_object_and_signal_edge(fake_conn) ->
 def test_publish_guardian_verdict_and_plan_write_chain_and_idempotency(fake_conn) -> None:
     client = AgentSpineClient(enabled=True, authority_mode="shadow")
 
+    assert client.publish_strategist_decision(_decision()) is True
     assert client.publish_guardian_verdict(_verdict()) is True
     assert client.publish_execution_plan(_plan()) is True
 
-    assert len(fake_conn.executes) == 5
-    assert fake_conn.executes[0][1][2] == "guardian_verdict"
-    assert fake_conn.executes[1][1][4] == "reviewed_by"
-    assert fake_conn.executes[2][1][2] == "execution_plan"
-    assert fake_conn.executes[3][1][4] == "planned_by"
-    idem_sql, idem_params = fake_conn.executes[4]
+    assert len(fake_conn.executes) == 7
+    assert fake_conn.executes[0][1][2] == "strategist_decision"
+    assert fake_conn.executes[1][1][4] == "signal_for"
+    assert fake_conn.executes[2][1][2] == "guardian_verdict"
+    assert fake_conn.executes[3][1][4] == "reviewed_by"
+    assert fake_conn.executes[4][1][2] == "execution_plan"
+    assert fake_conn.executes[5][1][4] == "planned_by"
+    assert fake_conn.executes[5][1][8]["order_style"] == "post_only"
+    idem_sql, idem_params = fake_conn.executes[6]
     assert "INSERT INTO agent.execution_idempotency_keys" in idem_sql
     assert "ON CONFLICT (idempotency_key) DO NOTHING" in idem_sql
     assert idem_params[:4] == (
@@ -314,6 +377,7 @@ def test_publish_guardian_verdict_and_plan_write_chain_and_idempotency(fake_conn
 def test_publish_execution_plan_requires_prior_allowing_guardian_verdict(fake_conn) -> None:
     client = AgentSpineClient(enabled=True, authority_mode="shadow")
 
+    assert client.publish_strategist_decision(_decision()) is True
     assert client.publish_execution_plan(_plan()) is False
 
     assert client.stats.last_error == "publish_execution_plan:ValueError"
@@ -326,11 +390,30 @@ def test_publish_execution_plan_requires_prior_allowing_guardian_verdict(fake_co
 
 def test_publish_execution_plan_rejects_rejected_guardian_verdict(fake_conn) -> None:
     client = AgentSpineClient(enabled=True, authority_mode="shadow")
+    plan_payload = _plan().model_dump(mode="json")
+    plan_payload["verdict_id"] = _rejected_verdict().verdict_id
 
+    assert client.publish_strategist_decision(_decision()) is True
     assert client.publish_guardian_verdict(_rejected_verdict()) is True
-    assert client.publish_execution_plan(_plan()) is False
+    assert client.publish_execution_plan(ExecutionPlan(**plan_payload)) is False
 
-    assert fake_conn.executes[0][1][14] == "rejected"
+    assert fake_conn.executes[2][1][14] == "rejected"
+    assert not any(
+        len(params) > 2 and params[2] == "execution_plan"
+        for _, params in fake_conn.executes
+    )
+
+
+def test_publish_execution_plan_rejects_executor_symbol_direction_authority(fake_conn) -> None:
+    client = AgentSpineClient(enabled=True, authority_mode="shadow")
+    plan_payload = _plan().model_dump(mode="json")
+    plan_payload["direction"] = "short"
+
+    assert client.publish_strategist_decision(_decision()) is True
+    assert client.publish_guardian_verdict(_verdict()) is True
+    assert client.publish_execution_plan(ExecutionPlan(**plan_payload)) is False
+
+    assert client.stats.last_error == "publish_execution_plan:ValueError"
     assert not any(
         len(params) > 2 and params[2] == "execution_plan"
         for _, params in fake_conn.executes

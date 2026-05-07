@@ -206,7 +206,7 @@ impl SpineObjectEnvelope {
             signal_id: None,
             decision_id: Some(plan.decision_id.clone()),
             verdict_id: Some(plan.verdict_id.clone()),
-            verdict_version: None,
+            verdict_version: Some(plan.verdict_version),
             order_plan_id: Some(plan.order_plan_id.clone()),
             execution_report_id: None,
             lease_id: plan.lease_id.clone(),
@@ -376,8 +376,10 @@ impl ExecutionIdempotencyKey {
             status: "reserved".to_string(),
             details: serde_json::json!({
                 "verdict_id": plan.verdict_id,
+                "verdict_version": plan.verdict_version,
                 "symbol": plan.symbol,
                 "order_type": plan.order_type,
+                "order_style": plan.order_style,
             }),
         }
     }
