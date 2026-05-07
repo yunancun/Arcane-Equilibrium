@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-052 Guardian P2 modifications: Python/Rust GuardianVerdict contracts now carry bounded size/leverage/stop/cooldown `p2_modifications`; Guardian consumes strategy risk snapshots, soft risk modifies with reason codes, hard strategy risk pauses new opens and requests PositionReview evidence without direct close authority | workspace/reports/2026-05-07--agenttodo_mag052_guardian_p2_modifications.md |
 | 2026-05-07 | AgentTodo MAG-051 dynamic Guardian correlation: replaced static BTC/ETH correlation authority with dynamic snapshot/provider review, safe fallback P2 modification, and persisted correlation metadata/reason codes; Mac/Linux targeted Guardian pytest + py_compile passed | workspace/reports/2026-05-07--agenttodo_mag051_dynamic_correlation_guardian.md |
 | 2026-05-07 | AgentTodo MAG-050 Guardian V2 risk metrics contract: defined dynamic correlation snapshots, safe fallback behavior, per-strategy drawdown/loss-streak snapshots, GuardianVerdict mapping, and required MAG-051/MAG-052 regressions | workspace/reports/2026-05-07--agenttodo_mag050_guardian_v2_risk_metrics_model.md |
 | 2026-05-07 | AgentTodo MAG-045 replay regression: added replay-style test proving Strategist V2 selection is not raw scanner rank sorting; candidate scores persist scanner_rank plus Guardian/Analyst reason codes and M4 Strategist V2 is closed | workspace/reports/2026-05-07--agenttodo_mag045_replay_not_scanner_sorting.md |

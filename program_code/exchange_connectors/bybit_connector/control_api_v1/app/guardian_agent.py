@@ -50,6 +50,7 @@ from .multi_agent_framework import (
     AgentState,
     MessageBus,
     MessageType,
+    RiskModification,
     RiskVerdict,
     RiskVerdictResult,
     TradeIntent,
@@ -92,6 +93,20 @@ class GuardianConfig:
     modification_size_factor: float = 0.5
     # Leverage reduction for MODIFIED verdicts / MODIFIED 裁决的杠杆缩减
     modification_leverage_cap: float = 2.0
+    # P2 stop-loss cap in bps when soft risk warrants tighter exits.
+    # 軟風險需要收緊退出時的 P2 止損 bps 上限。
+    p2_stop_loss_bps_cap: float = 75.0
+    # P2 cooldown duration emitted with soft risk modification.
+    # 軟風險修改輸出的 P2 冷卻時間。
+    p2_cooldown_ms: int = 30 * 60 * 1000
+    # Strategy risk snapshot thresholds for Guardian V2.
+    # Guardian V2 策略風險 snapshot 閾值。
+    strategy_risk_min_samples: int = 10
+    strategy_soft_drawdown_bps: float = 150.0
+    strategy_hard_drawdown_bps: float = 300.0
+    strategy_soft_loss_streak: int = 3
+    strategy_hard_loss_streak: int = 5
+    strategy_loss_rate_warn: float = 0.60
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -124,6 +139,7 @@ class GuardianAgent(BaseAgent):
         audit_callback: Optional[Callable] = None,
         event_store: Optional[Any] = None,
         correlation_snapshot_provider: Optional[Callable[[], Optional[Dict[str, Any]]]] = None,
+        strategy_risk_snapshot_provider: Optional[Callable[[TradeIntent], Optional[Dict[str, Any]]]] = None,
     ):
         super().__init__(
             role=AgentRole.GUARDIAN,
@@ -138,6 +154,8 @@ class GuardianAgent(BaseAgent):
         self._governance_hub = governance_hub
         self._correlation_snapshot_provider = correlation_snapshot_provider
         self._correlation_snapshot: Optional[Dict[str, Any]] = None
+        self._strategy_risk_snapshot_provider = strategy_risk_snapshot_provider
+        self._strategy_risk_snapshots: Dict[str, Dict[str, Any]] = {}
 
         # Active positions tracking (injected from PipelineBridge state)
         # 活跃仓位追踪（从 PipelineBridge 状态注入）
@@ -247,6 +265,7 @@ class GuardianAgent(BaseAgent):
         modification_reasons: List[str] = []
         modification_needed = False
         modified_params: Dict[str, Any] = {}
+        p2_modifications: List[Dict[str, Any]] = []
         verdict_metadata: Dict[str, Any] = {}
         risk_score = 0.0
 
@@ -270,6 +289,15 @@ class GuardianAgent(BaseAgent):
                     f"leverage capped at {self.config.modification_leverage_cap}x"
                 )
                 modified_params["leverage"] = self.config.modification_leverage_cap
+                p2_modifications.append(self._p2_modification(
+                    field="leverage",
+                    action="cap",
+                    original_value=leverage,
+                    modified_value=self.config.modification_leverage_cap,
+                    unit="x",
+                    reason_code="leverage_cap",
+                    reason=modification_reasons[-1],
+                ))
                 risk_score += 0.15
 
         # Check 3: Correlation conflict / 关联冲突检查
@@ -289,6 +317,12 @@ class GuardianAgent(BaseAgent):
             modification_needed = True
             modification_reasons.append(corr_reason or "correlation_safe_fallback")
             modified_params.update(corr_params)
+            p2_modifications.extend(self._params_to_p2_modifications(
+                intent,
+                corr_params,
+                corr_reason or "correlation_safe_fallback",
+                reason_code=str(corr_params.get("correlation_action", "correlation_p2_modify")),
+            ))
             risk_score += 0.2
 
         # Check 4: Sharpe ratio threshold / Sharpe 比率阈值检查
@@ -297,7 +331,28 @@ class GuardianAgent(BaseAgent):
             rejection_reasons.append(sharpe_result)
             risk_score += 0.2
 
-        # Check 5: Drawdown limit / 回撤限制检查
+        # Check 5: Strategy risk snapshot / 策略風險 snapshot 檢查
+        strategy_action, strategy_reason, strategy_params, strategy_risk, strategy_metadata = (
+            self._review_strategy_risk(intent)
+        )
+        if strategy_metadata:
+            verdict_metadata["strategy_risk_review"] = strategy_metadata
+        if strategy_action == "reject":
+            rejection_reasons.append(strategy_reason or "Strategy risk pause")
+            risk_score += strategy_risk
+        elif strategy_action == "modify":
+            modification_needed = True
+            modification_reasons.append(strategy_reason or "strategy_risk_p2_modify")
+            modified_params.update(strategy_params)
+            p2_modifications.extend(self._params_to_p2_modifications(
+                intent,
+                strategy_params,
+                strategy_reason or "strategy_risk_p2_modify",
+                reason_code="strategy_soft_risk",
+            ))
+            risk_score += strategy_risk
+
+        # Check 6: Portfolio drawdown limit / 組合回撤限制檢查
         dd_result = self._check_drawdown_limit(intent)
         if dd_result:
             rejection_reasons.append(dd_result)
@@ -312,6 +367,7 @@ class GuardianAgent(BaseAgent):
                 result=RiskVerdictResult.REJECTED,
                 reason="; ".join(rejection_reasons),
                 risk_score=risk_score,
+                p2_modifications=[],
                 metadata=verdict_metadata,
             )
             with self._lock:
@@ -324,6 +380,7 @@ class GuardianAgent(BaseAgent):
                 result=RiskVerdictResult.MODIFIED,
                 reason="Modified: " + "; ".join(modification_reasons or ["risk parameters adjusted"]),
                 modified_params=modified_params,
+                p2_modifications=p2_modifications,
                 risk_score=risk_score,
                 metadata=verdict_metadata,
             )
@@ -335,6 +392,7 @@ class GuardianAgent(BaseAgent):
                 result=RiskVerdictResult.APPROVED,
                 reason="All 5 checks passed",
                 risk_score=risk_score,
+                p2_modifications=p2_modifications,
                 metadata=verdict_metadata,
             )
             with self._lock:
@@ -642,6 +700,239 @@ class GuardianAgent(BaseAgent):
         except (TypeError, ValueError):
             return True
 
+    def _p2_modification(
+        self,
+        *,
+        field: str,
+        action: str,
+        original_value: Any,
+        modified_value: Any,
+        unit: str,
+        reason_code: str,
+        reason: str,
+        evidence_refs: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return RiskModification(
+            field=field,
+            action=action,
+            original_value=original_value,
+            modified_value=modified_value,
+            unit=unit,
+            reason_code=reason_code,
+            reason=reason,
+            evidence_refs=evidence_refs or [],
+            metadata=metadata or {},
+        ).to_dict()
+
+    def _params_to_p2_modifications(
+        self,
+        intent: TradeIntent,
+        params: Dict[str, Any],
+        reason: str,
+        *,
+        reason_code: str,
+    ) -> List[Dict[str, Any]]:
+        modifications: List[Dict[str, Any]] = []
+        if "size" in params:
+            modifications.append(self._p2_modification(
+                field="size",
+                action="reduce",
+                original_value=intent.size,
+                modified_value=params["size"],
+                unit="base_qty",
+                reason_code=reason_code,
+                reason=reason,
+            ))
+        if "leverage" in params:
+            modifications.append(self._p2_modification(
+                field="leverage",
+                action="cap",
+                original_value=intent.params.get("leverage", 1.0),
+                modified_value=params["leverage"],
+                unit="x",
+                reason_code=reason_code,
+                reason=reason,
+            ))
+        if "stop_loss_bps" in params:
+            modifications.append(self._p2_modification(
+                field="stop",
+                action="tighten",
+                original_value=intent.params.get("stop_loss_bps"),
+                modified_value=params["stop_loss_bps"],
+                unit="bps",
+                reason_code=reason_code,
+                reason=reason,
+            ))
+        if "cooldown_ms" in params:
+            modifications.append(self._p2_modification(
+                field="cooldown",
+                action="extend",
+                original_value=intent.params.get("cooldown_ms"),
+                modified_value=params["cooldown_ms"],
+                unit="ms",
+                reason_code=reason_code,
+                reason=reason,
+                metadata={
+                    "cooldown_until_ms": params.get("cooldown_until_ms"),
+                },
+            ))
+        return modifications
+
+    def _current_strategy_risk_snapshot(self, intent: TradeIntent) -> Optional[Dict[str, Any]]:
+        if self._strategy_risk_snapshot_provider is not None:
+            try:
+                snapshot = self._strategy_risk_snapshot_provider(intent)
+                if snapshot is not None:
+                    return dict(snapshot)
+            except Exception as e:
+                logger.warning("Guardian strategy risk snapshot provider failed: %s", e)
+        with self._lock:
+            exact_key = self._strategy_risk_key(intent.strategy, intent.symbol)
+            strategy_key = self._strategy_risk_key(intent.strategy, None)
+            snapshot = self._strategy_risk_snapshots.get(
+                exact_key,
+                self._strategy_risk_snapshots.get(strategy_key),
+            )
+            return dict(snapshot) if snapshot else None
+
+    def _strategy_risk_key(self, strategy: str, symbol: Optional[str]) -> str:
+        return f"{strategy or '*'}:{symbol or '*'}"
+
+    def _review_strategy_risk(
+        self,
+        intent: TradeIntent,
+    ) -> tuple[str, Optional[str], Dict[str, Any], float, Dict[str, Any]]:
+        snapshot = self._current_strategy_risk_snapshot(intent)
+        metadata: Dict[str, Any] = {
+            "action": "pass",
+            "strategy": intent.strategy,
+            "symbol": intent.symbol,
+            "reason_codes": [],
+        }
+        if not snapshot or snapshot.get("quality") == "insufficient":
+            metadata.update({
+                "quality": "insufficient",
+                "state": "watch",
+            })
+            metadata["reason_codes"].append("strategy_risk_data_insufficient")
+            return "pass", None, {}, 0.0, metadata
+
+        sample_count = int(snapshot.get("sample_count") or 0)
+        quality = str(snapshot.get("quality", "unknown"))
+        current_drawdown = abs(float(snapshot.get("current_drawdown_bps") or 0.0))
+        max_drawdown = abs(float(snapshot.get("max_drawdown_bps") or 0.0))
+        drawdown = max(current_drawdown, max_drawdown)
+        loss_streak = int(snapshot.get("consecutive_losses") or 0)
+        loss_rate = float(snapshot.get("loss_rate") or 0.0)
+        evidence_refs = [str(ref) for ref in (snapshot.get("evidence_refs") or [])]
+
+        metadata.update({
+            "snapshot_id": snapshot.get("snapshot_id"),
+            "quality": quality,
+            "sample_count": sample_count,
+            "current_drawdown_bps": current_drawdown,
+            "max_drawdown_bps": max_drawdown,
+            "consecutive_losses": loss_streak,
+            "loss_rate": loss_rate,
+            "evidence_refs": evidence_refs,
+            "soft_drawdown_bps": self.config.strategy_soft_drawdown_bps,
+            "hard_drawdown_bps": self.config.strategy_hard_drawdown_bps,
+            "soft_loss_streak": self.config.strategy_soft_loss_streak,
+            "hard_loss_streak": self.config.strategy_hard_loss_streak,
+        })
+        if sample_count < self.config.strategy_risk_min_samples:
+            metadata["state"] = "watch"
+            metadata["reason_codes"].append("strategy_risk_samples_insufficient")
+            return "pass", None, {}, 0.0, metadata
+
+        hard_reasons: List[str] = []
+        if drawdown >= self.config.strategy_hard_drawdown_bps:
+            hard_reasons.append(
+                f"drawdown {drawdown:.1f}bps >= hard {self.config.strategy_hard_drawdown_bps:.1f}bps"
+            )
+            metadata["reason_codes"].append("strategy_hard_drawdown")
+        if loss_streak >= self.config.strategy_hard_loss_streak:
+            hard_reasons.append(
+                f"loss streak {loss_streak} >= hard {self.config.strategy_hard_loss_streak}"
+            )
+            metadata["reason_codes"].append("strategy_hard_loss_streak")
+        if hard_reasons:
+            metadata.update({
+                "action": "reject",
+                "state": "pause_new_entries",
+                "position_review_requested": self._has_active_strategy_position(intent),
+            })
+            metadata["reason_codes"].append("pause_new_entries")
+            if metadata["position_review_requested"]:
+                metadata["reason_codes"].append("position_review_requested")
+            return (
+                "reject",
+                "Strategy risk pause: " + "; ".join(hard_reasons),
+                {},
+                0.3,
+                metadata,
+            )
+
+        soft_reasons: List[str] = []
+        if drawdown >= self.config.strategy_soft_drawdown_bps:
+            soft_reasons.append(
+                f"drawdown {drawdown:.1f}bps >= soft {self.config.strategy_soft_drawdown_bps:.1f}bps"
+            )
+            metadata["reason_codes"].append("strategy_soft_drawdown")
+        if loss_streak >= self.config.strategy_soft_loss_streak:
+            soft_reasons.append(
+                f"loss streak {loss_streak} >= soft {self.config.strategy_soft_loss_streak}"
+            )
+            metadata["reason_codes"].append("strategy_soft_loss_streak")
+        if loss_rate >= self.config.strategy_loss_rate_warn:
+            soft_reasons.append(
+                f"loss rate {loss_rate:.2f} >= warn {self.config.strategy_loss_rate_warn:.2f}"
+            )
+            metadata["reason_codes"].append("strategy_loss_rate_warn")
+        if soft_reasons:
+            now_ms = int(time.time() * 1000)
+            params: Dict[str, Any] = {
+                "size": intent.size * self.config.modification_size_factor,
+                "stop_loss_bps": min(
+                    float(intent.params.get("stop_loss_bps", self.config.p2_stop_loss_bps_cap)),
+                    self.config.p2_stop_loss_bps_cap,
+                ),
+                "cooldown_ms": self.config.p2_cooldown_ms,
+                "cooldown_until_ms": now_ms + self.config.p2_cooldown_ms,
+                "strategy_risk_action": "soft_risk_p2_modify",
+            }
+            leverage = float(intent.params.get("leverage", 1.0))
+            if leverage > self.config.modification_leverage_cap:
+                params["leverage"] = self.config.modification_leverage_cap
+            metadata.update({
+                "action": "modify",
+                "state": "modify",
+                "position_review_requested": self._has_active_strategy_position(intent),
+            })
+            if metadata["position_review_requested"]:
+                metadata["reason_codes"].append("position_review_requested")
+            return (
+                "modify",
+                "Strategy risk modified: " + "; ".join(soft_reasons),
+                params,
+                0.2,
+                metadata,
+            )
+
+        metadata["state"] = "ok"
+        return "pass", None, {}, 0.0, metadata
+
+    def _has_active_strategy_position(self, intent: TradeIntent) -> bool:
+        for pos in self._active_positions.values():
+            if not self._position_is_active(pos):
+                continue
+            pos_strategy = str(pos.get("strategy", ""))
+            pos_symbol = str(pos.get("symbol", ""))
+            if pos_strategy == intent.strategy or pos_symbol == intent.symbol:
+                return True
+        return False
+
     def _check_sharpe_threshold(self, intent: TradeIntent) -> Optional[str]:
         """Check if strategy Sharpe ratio meets minimum / 检查策略 Sharpe 比率是否达标"""
         strategy = intent.strategy
@@ -910,6 +1201,14 @@ class GuardianAgent(BaseAgent):
         """Update dynamic correlation snapshot used by Guardian V2."""
         with self._lock:
             self._correlation_snapshot = dict(snapshot)
+
+    def update_strategy_risk_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        """Update per-strategy risk snapshot used by Guardian V2."""
+        strategy = str(snapshot.get("strategy", ""))
+        symbol = snapshot.get("symbol")
+        key = self._strategy_risk_key(strategy, str(symbol) if symbol else None)
+        with self._lock:
+            self._strategy_risk_snapshots[key] = dict(snapshot)
 
     # ── Audit / 审计 ──
     # _audit() inherited from BaseAgent (prefixes event with role.value = "guardian").
