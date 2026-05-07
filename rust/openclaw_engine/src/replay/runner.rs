@@ -1345,6 +1345,35 @@ mod tests {
         }
     }
 
+    /// Stub strategy that closes a seeded replay position when its symbol tick
+    /// is still delivered after scanner timeline removal.
+    /// Stub 策略：scanner timeline 移除後若既有倉位 tick 仍送達，即發平倉。
+    struct CloseOnTickStub {
+        target_symbol: String,
+        emitted: bool,
+    }
+
+    impl Strategy for CloseOnTickStub {
+        fn name(&self) -> &str {
+            "mag023_close_stub"
+        }
+        fn is_active(&self) -> bool {
+            true
+        }
+        fn set_active(&mut self, _: bool) {}
+        fn on_tick(&mut self, ctx: &crate::tick_pipeline::TickContext<'_>) -> Vec<StrategyAction> {
+            if self.emitted || ctx.symbol != self.target_symbol {
+                return Vec::new();
+            }
+            self.emitted = true;
+            vec![StrategyAction::Close {
+                symbol: ctx.symbol.to_string(),
+                confidence: 0.95,
+                reason: "mag023_replay_exit_after_scanner_drop".to_string(),
+            }]
+        }
+    }
+
     fn make_snapshot_seed(
         balance: f64,
         latest_price: Option<f64>,
@@ -1387,6 +1416,33 @@ mod tests {
         )
         .expect("risk adapter Isolated accepts");
         (strategy_adapter, risk_adapter)
+    }
+
+    fn scanner_guard_event(symbol: &str, ts_ms: i64, close: f64) -> MarketEvent {
+        MarketEvent {
+            ts_ms,
+            symbol: symbol.to_string(),
+            open: close,
+            high: close * 1.01,
+            low: close * 0.99,
+            close,
+            volume: 1.0,
+            turnover: None,
+            turnover_24h: None,
+            best_bid: None,
+            best_ask: None,
+            bid_size: None,
+            ask_size: None,
+            spread_bps: None,
+            microstructure_source: None,
+            funding_rate: None,
+            index_price: None,
+            open_interest: None,
+            tick_size: None,
+            h0_allowed: None,
+            indicators: None,
+            signals: Vec::new(),
+        }
     }
 
     #[test]
@@ -1520,6 +1576,86 @@ mod tests {
         assert_eq!(result.fills[0].symbol, "ETHUSDT");
         assert_eq!(result.diagnostics.scanner_timeline_cycles, 1);
         assert_eq!(result.diagnostics.scanner_timeline_skipped_events, 2);
+    }
+
+    #[test]
+    fn adapter_pipeline_preserves_open_position_tick_after_scanner_drop() {
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_mag023_scanner_drop_exit".into(),
+            "S3",
+            vec![
+                scanner_guard_event("SOLUSDT", 1, 20.0),
+                scanner_guard_event("BTCUSDT", 2, 110.0),
+            ],
+        )
+        .expect("baseline build OK");
+        let strategy_adapter = crate::replay::strategy_adapter::ReplayStrategyAdapter::new(
+            Box::new(CloseOnTickStub {
+                target_symbol: "BTCUSDT".to_string(),
+                emitted: false,
+            }),
+            ReplayProfile::Isolated,
+        )
+        .expect("Isolated accepts");
+        let risk_adapter = crate::replay::risk_adapter::ReplayRiskAdapter::new(
+            ReplayProfile::Isolated,
+            GuardianConfig::default(),
+            crate::config::RiskConfig::default(),
+            0.02,
+            None,
+        )
+        .expect("risk adapter Isolated accepts");
+        let snapshot = make_snapshot_seed(
+            10_000.0,
+            None,
+            vec![crate::replay::risk_adapter::ReplayPosition {
+                symbol: "BTCUSDT".to_string(),
+                is_long: true,
+                qty: 1.0,
+                entry_price: 100.0,
+            }],
+        );
+        let scan = crate::scanner::types::ScanResult {
+            scan_ts_ms: 1,
+            scan_id: "mag023_drop_scan".to_string(),
+            active_symbols: vec!["ETHUSDT".to_string()],
+            added: vec!["ETHUSDT".to_string()],
+            removed: vec!["BTCUSDT".to_string()],
+            candidates: Vec::new(),
+            opportunity_decays: Vec::new(),
+            rejected_count: 0,
+            scan_duration_ms: 0,
+        };
+        let timeline =
+            ReplayScannerTimeline::from_scan_results(60_000, vec![scan]).expect("valid timeline");
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes")
+            .with_scanner_timeline(timeline);
+
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+
+        assert_eq!(result.status, ReplayStatus::Completed);
+        assert_eq!(result.fills.len(), 1);
+        assert_eq!(result.fills[0].symbol, "BTCUSDT");
+        assert_eq!(result.fills[0].side, "short");
+        assert!(
+            result.pnl_summary.net_pnl > 9.0,
+            "close after scanner drop should realise the seeded position PnL, got {}",
+            result.pnl_summary.net_pnl
+        );
+        assert_eq!(result.diagnostics.scanner_timeline_cycles, 1);
+        assert_eq!(result.diagnostics.scanner_timeline_skipped_events, 1);
+        assert!(
+            result
+                .diagnostics
+                .last_action_label
+                .contains("close:BTCUSDT"),
+            "last_action should record close, got {}",
+            result.diagnostics.last_action_label
+        );
     }
 
     #[test]

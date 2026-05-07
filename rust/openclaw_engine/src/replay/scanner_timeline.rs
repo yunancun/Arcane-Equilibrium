@@ -488,8 +488,14 @@ mod tests {
         by_symbol.insert("XRPUSDT".to_string(), vec![low_turnover]);
 
         let tickers = build_ticker_snapshot(&by_symbol, 1_000, DEFAULT_LOOKBACK_MS);
-        let sol = tickers.iter().find(|ticker| ticker.symbol == "SOLUSDT").unwrap();
-        let xrp = tickers.iter().find(|ticker| ticker.symbol == "XRPUSDT").unwrap();
+        let sol = tickers
+            .iter()
+            .find(|ticker| ticker.symbol == "SOLUSDT")
+            .unwrap();
+        let xrp = tickers
+            .iter()
+            .find(|ticker| ticker.symbol == "XRPUSDT")
+            .unwrap();
 
         assert_eq!(sol.turnover_24h, 12_000.0);
         assert_eq!(xrp.turnover_24h, 10.0);
@@ -504,10 +510,51 @@ mod tests {
         by_symbol.insert("BTCUSDT".to_string(), vec![event]);
 
         let tickers = build_ticker_snapshot(&by_symbol, 1_000, DEFAULT_LOOKBACK_MS);
-        let btc = tickers.iter().find(|ticker| ticker.symbol == "BTCUSDT").unwrap();
+        let btc = tickers
+            .iter()
+            .find(|ticker| ticker.symbol == "BTCUSDT")
+            .unwrap();
 
         assert_eq!(btc.bid1_price, 99.5);
         assert_eq!(btc.ask1_price, 100.5);
+    }
+
+    #[test]
+    fn replay_churn_fixture_identifies_scanner_driven_wave() {
+        let mut config = replay_default_scanner_config();
+        config.hard_filters.min_turnover_24h_usdt = 0.0;
+        config.universe.max_symbols = 1;
+        config.universe.pinned_symbols = Vec::new();
+        config.anti_churn.min_hold_cycles = 0;
+        config.anti_churn.challenger_threshold = 0.0;
+        config.anti_churn.removal_cooldown_minutes = 0;
+        config.market_judgment.enabled = false;
+        let events = vec![
+            event("SOLUSDT", 1_000, 100.0, 1_000_000.0),
+            event("XRPUSDT", 1_000, 100.0, 1_000_000.0),
+            event("SOLUSDT", 61_000, 100.0, 1_000_000.0),
+            event("XRPUSDT", 61_000, 112.0, 1_000_000.0),
+        ];
+
+        let timeline = ReplayScannerTimeline::new(&events, &config, &EdgeEstimates::empty())
+            .expect("timeline builds");
+
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline.cycles[0].added, vec!["SOLUSDT".to_string()]);
+        assert!(timeline.cycles[0].removed.is_empty());
+        assert_eq!(
+            timeline.cycles[0].active_symbols,
+            vec!["SOLUSDT".to_string()]
+        );
+        assert_eq!(timeline.cycles[1].removed, vec!["SOLUSDT".to_string()]);
+        assert_eq!(timeline.cycles[1].added, vec!["XRPUSDT".to_string()]);
+        assert_eq!(
+            timeline.cycles[1].active_symbols,
+            vec!["XRPUSDT".to_string()]
+        );
+        assert!(timeline.is_active_at("SOLUSDT", 1_000));
+        assert!(!timeline.is_active_at("SOLUSDT", 61_000));
+        assert!(timeline.is_active_at("XRPUSDT", 61_000));
     }
 
     #[test]
