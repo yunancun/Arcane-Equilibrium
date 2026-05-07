@@ -185,3 +185,10 @@ YYYY-MM-DD HH:MM TZ
 - source-fixed `P1-FAKE-1`: ExecutorAgent now calls Rust IPC `submit_paper_order` with explicit `engine`, and ExecutorConfigCache's provider can read explicit demo/live/live_demo shadow config
 - verification: Mac targeted Executor pytest 25 passed / 7 skipped, Linux targeted Executor pytest 30 passed / 2 skipped, py_compile passed on both sides
 - no deploy/restart/live auth/strategy/risk config mutation; Linux pull/deploy verification remains pending
+
+2026-05-07 CEST
+- cleared the inserted P1 healthcheck FAIL queue to PASS/WARN: `[Xb]` no longer emitted, `[42]` cleared, `[42b/c]`, `[50]`, and `[51]` are WARN with explicit RCA
+- source commits involved: `c8240b6a` LG5 candidate drain, `4654964d` settled attribution denominator, `898f4a90` replay superseded failures, `84f63706` scanner exploration separation, `4f437ea1` pipeline triangulation filled-context denominator
+- verification: Mac/Linux targeted P1 healthcheck regression suite 96 passed; Linux passive healthcheck at 2026-05-07T17:51:38Z returned `SUMMARY: WARN`
+- updated TODO P1 ordering: finish `P1-FAKE-1` runtime smoke if needed, then work WARN cluster `[14]/[37]/[40]/[45]` plus sample-maturity warnings, then resume P1-OPENCLAW-3 before P1-OPENCLAW-6/7
+- boundary: API-only reloads loaded Python source; no engine rebuild, no live auth mutation, no Decision Lease flag flip, no strategy/risk config change

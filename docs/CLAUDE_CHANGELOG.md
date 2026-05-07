@@ -1,13 +1,14 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-06（AgentTodo MAG-010..014 durable event-store row proof）
+> 最後更新：2026-05-07（P1 healthcheck FAIL queue cleared to PASS/WARN）
 
-### P1 healthcheck FAIL queue + Executor fake-live source fix — 2026-05-07
+### P1 healthcheck FAIL queue cleared + Executor fake-live source fix — 2026-05-07
 
 **Scope**：新增 `TODO.md` `P1-FAIL` 插隊隊列，將當前 Linux
 healthcheck FAIL `[Xb]` / `[42*]` / `[50]` / `[51]` 放到 P1 normal work
-之前；`P1-FAKE-1` source 修復 Executor fake-live wiring。
+之前；`P1-FAKE-1` source 修復 Executor fake-live wiring。後續同日已清
+P1-FAIL-0..3 的 FAIL blocker：17:51Z Linux healthcheck 回到 `SUMMARY: WARN`。
 
 **Executor fix**：`ExecutorAgent` real IPC path 改為 Rust 實際存在的
 `submit_paper_order`，payload 顯式帶 `engine`；`ExecutorConfigCache`
@@ -16,8 +17,18 @@ healthcheck FAIL `[Xb]` / `[42*]` / `[50]` / `[51]` 放到 P1 normal work
 
 **Verification**：Mac targeted Executor tests 25 PASS / 7 skipped；
 Linux `trade-core` targeted Executor tests 30 PASS / 2 skipped；`py_compile`
-PASS。Runtime deploy pending；未 rebuild/restart、未改 live auth、
-未 flip Decision Lease、未改 strategy/risk config。
+PASS。P1-FAIL queue regression：Mac/Linux targeted tests 96 PASS；Linux
+runtime healthcheck 17:51Z `SUMMARY: WARN`，`[Xb]` / `[42]` 不再 emitted，
+`[42b]` / `[42c]` / `[50]` / `[51]` 降為可解釋 WARN。API-only reload 已載入
+Python-side source；未 engine rebuild、未改 live auth、未 flip Decision Lease、
+未改 strategy/risk config。
+
+**Queue RCA**：`[Xb]` 是分母 bug，raw demo intents 被 scanner opportunity
+shadow observations 放大，已改為 close-fill-linked intent contexts；
+`[42]` 是 LG5 scheduler starvation；`[42b/c]` 是未 settlement 樣本被錯當
+attribution failure；`[50]` 是 historical replay failures 已被 newer completed
+runs supersede；`[51]` 是 exploration positive LCB 與 calibrated
+`opportunity_positive` bucket 混在一起。
 
 ### AgentTodo MAG-010..012 durable event-store source wiring — 2026-05-06
 

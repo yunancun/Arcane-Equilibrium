@@ -140,6 +140,13 @@ REF-21 2026-05-06 empirical gap closure:
 - 2026-05-07 S1 replay calibration lift is implemented in source/tests: Rust fills now carry depth partial-fill + latency metadata, Python execution calibration exposes latency q50/q90, reports include balance curve / drawdown / stationary block bootstrap bands / baseline comparison, `/replay/advisory/compare` is read-only, and recorder retention/maturity policy is surfaced. Confidence still depends on local recorder history; do not claim historical L2 for windows before recorder startup.
 - GUI/CLAUDE console contract is 13 tabs
 
+P1 healthcheck FAIL queue 2026-05-07:
+- Operator inserted current Linux healthcheck FAILs ahead of P1 Important work: `[Xb]`, `[42]`/`[42b]`/`[42c]`, `[50]`, `[51]`.
+- Queue is now cleared to PASS/WARN as of Linux passive healthcheck `2026-05-07T17:51:38Z` (`SUMMARY: WARN`): `[Xb]` and `[42]` no longer emitted; `[42b/c]`, `[50]`, `[51]` are explained WARNs.
+- RCA/fixes: `c8240b6a` drains unaudited LG5 candidates; `4654964d` aligns attribution drift to settled samples; `898f4a90` downgrades replay failures superseded by newer completed runs; `84f63706` separates scanner exploration from calibrated `opportunity_positive`; `4f437ea1` scopes pipeline triangulation to close-fill-linked intent contexts while keeping raw scanner intent volume diagnostic.
+- Next P1 order: finish `P1-FAKE-1` explicit runtime smoke if needed, then work WARN cluster `[14]`/`[37]`/`[40]`/`[45]` plus sample maturity, then resume `P1-OPENCLAW-3`, then `P1-OPENCLAW-6/7`.
+- Boundary: only API-side reloads for Python source; no engine rebuild, live auth mutation, strategy/risk config change, or Decision Lease flag flip.
+
 Current strategy-edge packet:
 - source/runtime sync checkpoint `2026-05-02`: `origin/main`, Mac `main`, and Linux `trade-core` were fast-forwarded through the Codex docs-only memory-sync commits. This is docs/memory only; no rebuild, restart, DB write, risk/strategy config change, or live auth mutation was performed. Check `git log --oneline -3` for the exact latest SHA before committing, because later docs fixes may supersede the first memory-sync commit. A local Codex session may still be on an audit branch after fast-forward; inspect `git status --short --branch` before committing.
 - active healthcheck risk `2026-05-02`: Linux watchdog reports demo/live fresh, but passive healthcheck is FAIL because `[40] realized_edge_acceptance`, `[42] live_candidate_eval_contract`, and `[42b] live_candidate_attribution_drift` are red. This matches TODO follow-ups `LG5-W3-FUP-1` and `LG5-W3-FUP-2`.
