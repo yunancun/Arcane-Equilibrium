@@ -463,6 +463,12 @@ pub struct IsolatedPipeline {
     /// Sprint C R6-T2: 24h USD turnover for tier lookup; `None` → 5 bps default.
     /// Sprint C R6-T2：tier 查找用 24h USD 成交量；`None` → 5 bps 預設。
     pub(super) volume_24h: Option<f64>,
+    /// REF-21 calibration: replay-only conservative cap for PostOnly maker
+    /// execution probability. `None` preserves legacy "fills if risk accepts"
+    /// semantics; `Some(p)` deterministically converts a fraction of maker
+    /// attempts into qty=0 maker-miss ghost rows.
+    pub(super) maker_fill_probability_cap: Option<f64>,
+    pub(super) maker_attempt_counter: u64,
     /// REF-21: optional replay-safe scanner timeline. When present, adapter
     /// path only feeds a strategy tick for symbols active at the historical
     /// scanner cycle, while still feeding ticks for already-open positions so
@@ -513,6 +519,8 @@ pub fn build_isolated_pipeline(
         account_manager: None,
         slippage_config: crate::config::SlippageConfig::default(),
         volume_24h: None,
+        maker_fill_probability_cap: None,
+        maker_attempt_counter: 0,
         scanner_timeline: None,
         scanner_timeline_skipped_events: 0,
     })
@@ -686,6 +694,38 @@ impl IsolatedPipeline {
         }
         self.volume_24h = volume_24h;
         self
+    }
+
+    /// REF-21 calibration — attach replay-only execution calibration knobs.
+    /// The dedicated subprocess receives this only through the signed
+    /// manifest; it never reads or mutates live execution state.
+    pub fn with_execution_calibration(mut self, maker_fill_probability_cap: Option<f64>) -> Self {
+        self.maker_fill_probability_cap = maker_fill_probability_cap
+            .filter(|value| value.is_finite())
+            .map(|value| value.clamp(0.0, 1.0));
+        self
+    }
+
+    pub(super) fn should_accept_maker_execution(&mut self, symbol: &str, ts_ms: i64) -> bool {
+        let Some(cap) = self.maker_fill_probability_cap else {
+            return true;
+        };
+        if cap >= 1.0 {
+            self.maker_attempt_counter = self.maker_attempt_counter.saturating_add(1);
+            return true;
+        }
+        if cap <= 0.0 {
+            self.maker_attempt_counter = self.maker_attempt_counter.saturating_add(1);
+            return false;
+        }
+        self.maker_attempt_counter = self.maker_attempt_counter.saturating_add(1);
+        let bucket = deterministic_maker_bucket(
+            &self.manifest_id,
+            symbol,
+            ts_ms,
+            self.maker_attempt_counter,
+        );
+        bucket < (cap * 10_000.0).round() as u64
     }
 
     fn set_replay_event_turnover_24h(&mut self, turnover_24h: Option<f64>) {
@@ -938,7 +978,13 @@ impl IsolatedPipeline {
             for act in actions {
                 match act {
                     StrategyAction::Open(intent) => {
-                        self.process_open_intent(&intent, event.ts_ms, event.close, atr, &tier_label);
+                        self.process_open_intent(
+                            &intent,
+                            event.ts_ms,
+                            event.close,
+                            atr,
+                            &tier_label,
+                        );
                     }
                     StrategyAction::Close { symbol, .. } => {
                         self.process_close_intent(&symbol, event.ts_ms, event.close, &tier_label);
@@ -1039,6 +1085,21 @@ fn build_tick_context<'a>(
         best_ask: event.best_ask,
         tick_size: inputs.tick_size,
     }
+}
+
+fn deterministic_maker_bucket(manifest_id: &str, symbol: &str, ts_ms: i64, attempt: u64) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in manifest_id
+        .as_bytes()
+        .iter()
+        .chain(symbol.as_bytes().iter())
+        .chain(ts_ms.to_le_bytes().iter())
+        .chain(attempt.to_le_bytes().iter())
+    {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash % 10_000
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1213,10 +1274,7 @@ mod tests {
     fn status_label_matches_variant() {
         assert_eq!(ReplayStatus::Completed.label(), "completed");
         assert_eq!(
-            ReplayStatus::AbortedForbidden {
-                action: "x".into()
-            }
-            .label(),
+            ReplayStatus::AbortedForbidden { action: "x".into() }.label(),
             "aborted_forbidden"
         );
         assert_eq!(
@@ -1520,7 +1578,10 @@ mod tests {
             .expect("expected ghost fill on Gate 1.5 reject");
         assert_eq!(ghost.side, "long");
         assert!(
-            result.diagnostics.last_action_label.contains("reject:BTCUSDT:1.5_dup"),
+            result
+                .diagnostics
+                .last_action_label
+                .contains("reject:BTCUSDT:1.5_dup"),
             "last_action should record 1.5_dup gate, got: {}",
             result.diagnostics.last_action_label
         );
@@ -1585,10 +1646,17 @@ mod tests {
         crate::replay::strategy_adapter::ReplayStrategyAdapter,
         crate::replay::risk_adapter::ReplayRiskAdapter,
     ) {
-        let strat = Box::new(TifStub { emitted: false, tif, is_long, limit_price });
-        let strategy_adapter =
-            crate::replay::strategy_adapter::ReplayStrategyAdapter::new(strat, ReplayProfile::Isolated)
-                .expect("Isolated accepts");
+        let strat = Box::new(TifStub {
+            emitted: false,
+            tif,
+            is_long,
+            limit_price,
+        });
+        let strategy_adapter = crate::replay::strategy_adapter::ReplayStrategyAdapter::new(
+            strat,
+            ReplayProfile::Isolated,
+        )
+        .expect("Isolated accepts");
         let risk_adapter = crate::replay::risk_adapter::ReplayRiskAdapter::new(
             ReplayProfile::Isolated,
             GuardianConfig::default(),
@@ -1636,7 +1704,11 @@ mod tests {
         // R6-T1: PostOnly TIF + no AM seeded → DEFAULT_MAKER_FEE_RATE + 'maker'.
         // R6-T1：PostOnly TIF + 無 AM → DEFAULT_MAKER_FEE_RATE + 'maker'。
         let (rate, role) = replay_fee_rate_for_tif(None, "BTCUSDT", Some(TimeInForce::PostOnly));
-        assert!((rate - DEFAULT_MAKER_FEE_RATE).abs() < 1e-12, "maker rate, got {}", rate);
+        assert!(
+            (rate - DEFAULT_MAKER_FEE_RATE).abs() < 1e-12,
+            "maker rate, got {}",
+            rate
+        );
         assert_eq!(role, "maker", "PostOnly → 'maker' role");
     }
 
@@ -1651,7 +1723,12 @@ mod tests {
             (Some(TimeInForce::FOK), "FOK"),
         ] {
             let (rate, role) = replay_fee_rate_for_tif(None, "BTCUSDT", tif);
-            assert!((rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12, "{} taker, got {}", label, rate);
+            assert!(
+                (rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12,
+                "{} taker, got {}",
+                label,
+                rate
+            );
             assert_eq!(role, "taker", "{} → 'taker'", label);
         }
     }
@@ -1691,14 +1768,34 @@ mod tests {
         let cfg = crate::config::SlippageConfig::default();
         let bps_buy = replay_slippage_bps_for_tif(&cfg, None, 0.0, true);
         let bps_sell = replay_slippage_bps_for_tif(&cfg, None, 0.0, false);
-        assert!(bps_buy.is_finite(), "buy bps must be finite, got {}", bps_buy);
-        assert!(bps_sell.is_finite(), "sell bps must be finite, got {}", bps_sell);
-        assert!((bps_buy - 5.0).abs() < 1e-9, "buy fallback +5.0 bps, got {}", bps_buy);
-        assert!((bps_sell + 5.0).abs() < 1e-9, "sell fallback -5.0 bps, got {}", bps_sell);
+        assert!(
+            bps_buy.is_finite(),
+            "buy bps must be finite, got {}",
+            bps_buy
+        );
+        assert!(
+            bps_sell.is_finite(),
+            "sell bps must be finite, got {}",
+            bps_sell
+        );
+        assert!(
+            (bps_buy - 5.0).abs() < 1e-9,
+            "buy fallback +5.0 bps, got {}",
+            bps_buy
+        );
+        assert!(
+            (bps_sell + 5.0).abs() < 1e-9,
+            "sell fallback -5.0 bps, got {}",
+            bps_sell
+        );
         // Negative volume_24h same fallback (live `lookup_rate` <= 0 → default).
         // 負 volume_24h 同 fallback。
         let bps_neg = replay_slippage_bps_for_tif(&cfg, None, -1.0, true);
-        assert!((bps_neg - 5.0).abs() < 1e-9, "negative vol → +5.0 bps, got {}", bps_neg);
+        assert!(
+            (bps_neg - 5.0).abs() < 1e-9,
+            "negative vol → +5.0 bps, got {}",
+            bps_neg
+        );
         // PostOnly always 0 regardless of volume_24h. / PostOnly 必 0。
         let bps_po = replay_slippage_bps_for_tif(&cfg, Some(TimeInForce::PostOnly), 0.0, true);
         assert_eq!(bps_po, 0.0, "PostOnly slippage_bps must be 0");
@@ -1731,16 +1828,37 @@ mod tests {
         let f0 = &result.fills[0];
         // R6-T1 assertions: fee + fee_rate + liquidity_role populated.
         // R6-T1 斷言：fee + fee_rate + liquidity_role 已填值。
-        assert!(f0.fee.is_finite() && f0.fee > 0.0, "fee finite > 0, got {}", f0.fee);
-        assert!((f0.fee_rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12, "taker rate, got {}", f0.fee_rate);
+        assert!(
+            f0.fee.is_finite() && f0.fee > 0.0,
+            "fee finite > 0, got {}",
+            f0.fee
+        );
+        assert!(
+            (f0.fee_rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12,
+            "taker rate, got {}",
+            f0.fee_rate
+        );
         assert_eq!(f0.liquidity_role, "taker", "non-PostOnly → taker role");
         // R6-T2 assertions: market + None volume → +5 bps; price=100.05.
         // R6-T2 斷言：market + None volume → +5 bps；price=100.05。
-        assert!((f0.slippage_bps - 5.0).abs() < 1e-9, "+5.0 bps, got {}", f0.slippage_bps);
-        assert!((f0.price - 100.05).abs() < 1e-9, "price=100.05, got {}", f0.price);
+        assert!(
+            (f0.slippage_bps - 5.0).abs() < 1e-9,
+            "+5.0 bps, got {}",
+            f0.slippage_bps
+        );
+        assert!(
+            (f0.price - 100.05).abs() < 1e-9,
+            "price=100.05, got {}",
+            f0.price
+        );
         // Fee = 0.01 × 100.05 × 0.00055 = 0.000550275.
         let expected_fee = 0.01 * 100.05 * DEFAULT_TAKER_FEE_RATE;
-        assert!((f0.fee - expected_fee).abs() < 1e-12, "fee={}, got {}", expected_fee, f0.fee);
+        assert!(
+            (f0.fee - expected_fee).abs() < 1e-12,
+            "fee={}, got {}",
+            expected_fee,
+            f0.fee
+        );
     }
 
     #[test]
@@ -1767,13 +1885,67 @@ mod tests {
         let result = wired.into_result();
         assert_eq!(result.fills.len(), 1, "expected 1 accepted fill");
         let f0 = &result.fills[0];
-        assert!((f0.fee_rate - DEFAULT_MAKER_FEE_RATE).abs() < 1e-12, "maker, got {}", f0.fee_rate);
+        assert!(
+            (f0.fee_rate - DEFAULT_MAKER_FEE_RATE).abs() < 1e-12,
+            "maker, got {}",
+            f0.fee_rate
+        );
         assert_eq!(f0.liquidity_role, "maker", "PostOnly → maker role");
         assert_eq!(f0.slippage_bps, 0.0, "PostOnly slippage_bps must be 0");
-        assert!((f0.price - 99.5).abs() < 1e-9, "price=99.5, got {}", f0.price);
+        assert!(
+            (f0.price - 99.5).abs() < 1e-9,
+            "price=99.5, got {}",
+            f0.price
+        );
         // Fee = 0.01 × 99.5 × 0.0002 = 0.000199.
         let expected_fee = 0.01 * 99.5 * DEFAULT_MAKER_FEE_RATE;
-        assert!((f0.fee - expected_fee).abs() < 1e-12, "fee={}, got {}", expected_fee, f0.fee);
+        assert!(
+            (f0.fee - expected_fee).abs() < 1e-12,
+            "fee={}, got {}",
+            expected_fee,
+            f0.fee
+        );
+    }
+
+    #[test]
+    fn test_apply_fill_postonly_calibration_cap_records_maker_miss() {
+        // REF-21 calibration: maker cap=0 converts a risk-accepted PostOnly
+        // attempt into a qty=0 maker-miss ghost row instead of over-claiming
+        // immediate maker execution.
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_ref21_maker_cap_zero".into(),
+            "S3",
+            r6_single_event(),
+        )
+        .expect("baseline build OK")
+        .with_replay_fee_context(None, None, None)
+        .with_execution_calibration(Some(0.0));
+        let (strategy_adapter, risk_adapter) =
+            make_tif_adapters(Some(TimeInForce::PostOnly), true, Some(99.5));
+        let snapshot = make_snapshot_seed(10_000.0, Some(100.0), Vec::new());
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes");
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+        assert_eq!(result.fills.len(), 1, "expected 1 maker miss ghost row");
+        let f0 = &result.fills[0];
+        assert_eq!(f0.qty, 0.0, "maker miss ghost row must carry qty=0");
+        assert_eq!(
+            f0.liquidity_role, "maker",
+            "PostOnly miss remains maker role"
+        );
+        assert_eq!(f0.fee, 0.0, "maker miss has no fee");
+        assert_eq!(f0.slippage_bps, 0.0, "PostOnly miss keeps zero slippage");
+        assert!(
+            result
+                .diagnostics
+                .last_action_label
+                .contains("maker_miss:BTCUSDT"),
+            "last_action should record maker miss, got {}",
+            result.diagnostics.last_action_label
+        );
     }
 
     #[test]
@@ -1791,11 +1963,18 @@ mod tests {
         .unwrap();
         p.execute().unwrap();
         let r = p.into_result();
-        assert_eq!(r.fills.len(), 2, "synthetic walker emits 1 fill per new symbol");
+        assert_eq!(
+            r.fills.len(),
+            2,
+            "synthetic walker emits 1 fill per new symbol"
+        );
         for f in &r.fills {
             assert_eq!(f.fee, 0.0, "synthetic walker fee must be 0");
             assert_eq!(f.fee_rate, 0.0, "synthetic walker fee_rate must be 0");
-            assert_eq!(f.slippage_bps, 0.0, "synthetic walker slippage_bps must be 0");
+            assert_eq!(
+                f.slippage_bps, 0.0,
+                "synthetic walker slippage_bps must be 0"
+            );
             assert_eq!(
                 f.liquidity_role, "unknown",
                 "synthetic walker liquidity_role must be 'unknown'"
@@ -1843,9 +2022,17 @@ mod tests {
         assert_eq!(ghost.fee, 0.0, "ghost fee must be 0 (qty=0)");
         // fee_rate / liquidity_role / slippage_bps reflect counterfactual.
         // fee_rate / liquidity_role / slippage_bps 反映 counterfactual。
-        assert!((ghost.fee_rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12, "taker, got {}", ghost.fee_rate);
+        assert!(
+            (ghost.fee_rate - DEFAULT_TAKER_FEE_RATE).abs() < 1e-12,
+            "taker, got {}",
+            ghost.fee_rate
+        );
         assert_eq!(ghost.liquidity_role, "taker", "None TIF → taker");
-        assert!((ghost.slippage_bps - 5.0).abs() < 1e-9, "+5.0 bps, got {}", ghost.slippage_bps);
+        assert!(
+            (ghost.slippage_bps - 5.0).abs() < 1e-9,
+            "+5.0 bps, got {}",
+            ghost.slippage_bps
+        );
     }
 
     // ─── Sprint C R6 W2 R6-T3 KellyConfig wire tests / R6-T3 Kelly 接線測試 ───
@@ -1893,7 +2080,9 @@ mod tests {
         assert!((kelly_config.vol_mult_floor - live_default.vol_mult_floor).abs() < 1e-12);
         assert!((kelly_config.vol_mult_ceil - live_default.vol_mult_ceil).abs() < 1e-12);
         // Validate KellyConfig itself (G7-01 invariant: young < mature, both > 0).
-        kelly_config.validate().expect("derived KellyConfig must validate");
+        kelly_config
+            .validate()
+            .expect("derived KellyConfig must validate");
     }
 
     /// R6-T3 — verify p1_risk_pct extraction from risk_config.limits.
@@ -1909,14 +2098,22 @@ mod tests {
         // "3% risk/trade" — feedback_position_sizing.md).
         // 預設 RiskConfig 有 per_trade_risk_pct=0.03（Position Sizing memo
         // 「3% risk/trade」— feedback_position_sizing.md）。
-        assert!(p1_risk_pct > 0.0 && p1_risk_pct <= 1.0,
-            "p1_risk_pct must be in (0,1], got {}", p1_risk_pct);
-        assert!((p1_risk_pct - 0.03).abs() < 1e-9,
-            "default per_trade_risk_pct should be 0.03, got {}", p1_risk_pct);
+        assert!(
+            p1_risk_pct > 0.0 && p1_risk_pct <= 1.0,
+            "p1_risk_pct must be in (0,1], got {}",
+            p1_risk_pct
+        );
+        assert!(
+            (p1_risk_pct - 0.03).abs() < 1e-9,
+            "default per_trade_risk_pct should be 0.03, got {}",
+            p1_risk_pct
+        );
         // Differs from Sprint A baseline hardcode of 0.02.
         // 與 Sprint A baseline 0.02 硬編不同。
-        assert!((p1_risk_pct - 0.02).abs() > 1e-9,
-            "R6-T3 must replace Sprint A 0.02 hardcode");
+        assert!(
+            (p1_risk_pct - 0.02).abs() > 1e-9,
+            "R6-T3 must replace Sprint A 0.02 hardcode"
+        );
     }
 
     /// R6-T3 — verify `IsolatedPipeline::with_adapter_pipeline` accepts the
@@ -1946,8 +2143,11 @@ mod tests {
         assert!(qty >= 0.0, "qty must be non-negative, got {}", qty);
         // Cold-boot expected: min(10000 * 0.03 / 100, 5.0) = min(3.0, 5.0) = 3.0
         // 冷啟動期望：min(10000 * 0.03 / 100, 5.0) = min(3.0, 5.0) = 3.0
-        assert!((qty - 3.0).abs() < 1e-9,
-            "cold-boot expected balance*risk_pct/price = 3.0, got {}", qty);
+        assert!(
+            (qty - 3.0).abs() < 1e-9,
+            "cold-boot expected balance*risk_pct/price = 3.0, got {}",
+            qty
+        );
 
         // Verify pipeline acceptance: building a risk_adapter with Some(kelly_config)
         // does NOT trip ReplayIsolationError.
@@ -1959,8 +2159,10 @@ mod tests {
             risk_config.limits.per_trade_risk_pct,
             Some(kelly_config),
         );
-        assert!(risk_adapter.is_ok(),
+        assert!(
+            risk_adapter.is_ok(),
             "Isolated profile + Some(KellyConfig) must construct, got {:?}",
-            risk_adapter.err());
+            risk_adapter.err()
+        );
     }
 }

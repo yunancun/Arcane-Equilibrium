@@ -21,9 +21,12 @@ CALIBRATION_LOOKBACK_DAYS = 30
 CALIBRATION_STATEMENT_TIMEOUT_MS = 3_000
 MIN_LIMITED_SLIPPAGE_SAMPLES = 30
 MIN_CALIBRATED_SLIPPAGE_SAMPLES = 200
+MIN_LIMITED_MAKER_ORDER_SAMPLES = 30
+MIN_CALIBRATED_MAKER_ORDER_SAMPLES = 200
 FALLBACK_TAKER_SLIPPAGE_BPS = 50.0
 MIN_TAKER_SLIPPAGE_BPS = 5.0
 MAX_TAKER_SLIPPAGE_BPS = 100.0
+DEFAULT_MAKER_FILL_PROBABILITY_CAP = 0.40
 
 DEFAULT_SLIPPAGE_TIERS = (
     {"min_turnover_usd": 1_000_000_000.0, "rate": 0.0001},
@@ -133,6 +136,18 @@ def fetch_execution_calibration_sync(
                     ),
                 )
                 rows = cur.fetchall()
+                order_rows: list[dict[str, Any]] = []
+                order_unavailable_reason = None
+                try:
+                    order_rows, order_unavailable_reason = _fetch_maker_order_outcomes(
+                        cur,
+                        symbols=clean_symbols,
+                        strategies=clean_strategies,
+                        asof_ms=asof_ms,
+                    )
+                except Exception as exc:  # noqa: BLE001 - advisory calibration only
+                    logger.warning("replay maker outcome calibration unavailable: %s", exc)
+                    order_unavailable_reason = type(exc).__name__
     except Exception as exc:  # noqa: BLE001 - advisory calibration only
         logger.warning("replay execution calibration unavailable: %s", exc)
         return {
@@ -152,11 +167,18 @@ def fetch_execution_calibration_sync(
         }
         for row in rows
     ]
-    return build_execution_calibration_summary(
+    summary = build_execution_calibration_summary(
         records,
         asof_ms=asof_ms,
         source="trading.fills",
     )
+    maker_summary = build_maker_order_outcome_summary(
+        order_rows,
+        asof_ms=asof_ms,
+        source="trading.orders+trading.order_state_changes",
+        unavailable_reason=order_unavailable_reason,
+    )
+    return _merge_maker_order_summary(summary, maker_summary)
 
 
 def build_execution_calibration_summary(
@@ -236,7 +258,247 @@ def build_execution_calibration_summary(
         "recommended_taker_slippage_clamped": recommended_clamped,
         "execution_confidence": confidence,
         "maker_fill_probability_status": "unavailable_without_order_outcomes",
+        "maker_fill_confidence": "S2_CONSERVATIVE_BOUND",
+        "recommended_maker_fill_probability_cap": DEFAULT_MAKER_FILL_PROBABILITY_CAP,
+        "maker_fill_cap_source": "default_conservative_cap",
     }
+
+
+def build_maker_order_outcome_summary(
+    records: list[dict[str, Any]],
+    *,
+    asof_ms: int,
+    source: str,
+    unavailable_reason: str | None = None,
+) -> dict[str, Any]:
+    """Build maker fill-probability calibration from PostOnly order outcomes."""
+    sample_count = len(records)
+    any_fill_count = sum(1 for item in records if bool(item.get("any_fill")))
+    full_fill_count = sum(1 for item in records if bool(item.get("full_fill")))
+    rejected_count = sum(1 for item in records if bool(item.get("rejected")))
+    cancelled_count = sum(1 for item in records if bool(item.get("cancelled")))
+    post_only_cross_count = sum(1 for item in records if bool(item.get("post_only_cross")))
+    latest_ts_ms = max(
+        (
+            _to_epoch_ms(item.get("latest_state_ts"))
+            or _to_epoch_ms(item.get("order_ts"))
+            or 0
+            for item in records
+        ),
+        default=0,
+    )
+    latest_age_days = (
+        max(0.0, (asof_ms - latest_ts_ms) / 86_400_000.0)
+        if latest_ts_ms > 0
+        else None
+    )
+    any_fill_probability = (any_fill_count / sample_count) if sample_count else 0.0
+    full_fill_probability = (full_fill_count / sample_count) if sample_count else 0.0
+
+    if (
+        sample_count >= MIN_CALIBRATED_MAKER_ORDER_SAMPLES
+        and (latest_age_days or 999.0) <= 7.0
+    ):
+        status = "calibrated"
+        confidence = "S1_CALIBRATED"
+        reason = None
+        cap_source = "observed_order_outcomes"
+        cap = min(any_fill_probability, DEFAULT_MAKER_FILL_PROBABILITY_CAP)
+    elif (
+        sample_count >= MIN_LIMITED_MAKER_ORDER_SAMPLES
+        and (latest_age_days or 999.0) <= 30.0
+    ):
+        status = "limited"
+        confidence = "S1_LIMITED"
+        reason = None
+        cap_source = "observed_order_outcomes"
+        cap = min(any_fill_probability, DEFAULT_MAKER_FILL_PROBABILITY_CAP)
+    elif unavailable_reason:
+        status = "unavailable_without_order_outcomes"
+        confidence = "S2_CONSERVATIVE_BOUND"
+        reason = unavailable_reason
+        cap_source = "default_conservative_cap"
+        cap = DEFAULT_MAKER_FILL_PROBABILITY_CAP
+    else:
+        status = "insufficient_order_outcome_samples"
+        confidence = "S2_CONSERVATIVE_BOUND"
+        reason = (
+            f"maker_order_samples:{sample_count}"
+            f"<required:{MIN_LIMITED_MAKER_ORDER_SAMPLES}"
+        )
+        cap_source = "default_conservative_cap"
+        cap = DEFAULT_MAKER_FILL_PROBABILITY_CAP
+
+    return {
+        "maker_order_source": source,
+        "maker_fill_probability_status": status,
+        "maker_fill_confidence": confidence,
+        "maker_fill_probability_reason": reason,
+        "maker_order_sample_count": sample_count,
+        "maker_order_any_fill_count": any_fill_count,
+        "maker_order_full_fill_count": full_fill_count,
+        "maker_order_rejected_count": rejected_count,
+        "maker_order_cancelled_count": cancelled_count,
+        "maker_order_post_only_cross_count": post_only_cross_count,
+        "maker_any_fill_probability": any_fill_probability,
+        "maker_full_fill_probability": full_fill_probability,
+        "latest_maker_order_age_days": latest_age_days,
+        "recommended_maker_fill_probability_cap": cap,
+        "maker_fill_cap_source": cap_source,
+    }
+
+
+def _merge_maker_order_summary(
+    summary: dict[str, Any],
+    maker_summary: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(summary)
+    merged.update(maker_summary)
+    return merged
+
+
+def _fetch_maker_order_outcomes(
+    cur: Any,
+    *,
+    symbols: list[str],
+    strategies: list[str],
+    asof_ms: int,
+) -> tuple[list[dict[str, Any]], str | None]:
+    cur.execute("SELECT to_regclass('trading.orders') IS NOT NULL;")
+    has_orders_row = cur.fetchone()
+    cur.execute("SELECT to_regclass('trading.order_state_changes') IS NOT NULL;")
+    has_changes_row = cur.fetchone()
+    if not has_orders_row or not bool(has_orders_row[0]):
+        return [], "trading_orders_missing"
+    if not has_changes_row or not bool(has_changes_row[0]):
+        return [], "trading_order_state_changes_missing"
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'trading'
+          AND table_name = 'orders';
+        """
+    )
+    order_columns = {str(row[0]) for row in cur.fetchall()}
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'trading'
+          AND table_name = 'order_state_changes';
+        """
+    )
+    change_columns = {str(row[0]) for row in cur.fetchall()}
+    order_required = {
+        "ts",
+        "order_id",
+        "symbol",
+        "strategy_name",
+        "engine_mode",
+        "order_type",
+        "time_in_force",
+    }
+    change_required = {"ts", "order_id", "to_status", "filled_qty", "reason"}
+    missing_orders = sorted(order_required - order_columns)
+    missing_changes = sorted(change_required - change_columns)
+    if missing_orders:
+        return [], "trading_orders_missing_columns:" + ",".join(missing_orders)
+    if missing_changes:
+        return [], (
+            "trading_order_state_changes_missing_columns:"
+            + ",".join(missing_changes)
+        )
+
+    change_engine_filter = (
+        "AND (osc.engine_mode = ANY(%s) OR osc.engine_mode IS NULL)"
+        if "engine_mode" in change_columns
+        else ""
+    )
+    params: list[Any] = [
+        strategies,
+        symbols,
+        list(CALIBRATION_ENGINE_MODES),
+        asof_ms - CALIBRATION_LOOKBACK_DAYS * 86_400_000,
+        asof_ms,
+    ]
+    if change_engine_filter:
+        params.append(list(CALIBRATION_ENGINE_MODES))
+    params.append(asof_ms)
+    cur.execute(
+        f"""
+        WITH post_only_orders AS (
+            SELECT
+                o.order_id,
+                o.symbol,
+                o.strategy_name,
+                o.ts AS order_ts
+            FROM trading.orders o
+            WHERE o.strategy_name = ANY(%s)
+              AND o.symbol = ANY(%s)
+              AND o.engine_mode = ANY(%s)
+              AND o.ts >= to_timestamp(%s / 1000.0)
+              AND o.ts < to_timestamp(%s / 1000.0)
+              AND lower(coalesce(o.order_type, '')) = 'limit'
+              AND lower(replace(coalesce(o.time_in_force, ''), '_', '')) = 'postonly'
+        )
+        SELECT
+            po.strategy_name,
+            po.symbol,
+            po.order_id,
+            po.order_ts,
+            max(osc.ts) AS latest_state_ts,
+            coalesce(bool_or(lower(coalesce(osc.to_status, '')) IN (
+                'filled',
+                'partiallyfilled',
+                'partially_filled'
+            )), false) AS any_fill,
+            coalesce(bool_or(lower(coalesce(osc.to_status, '')) = 'filled'), false)
+                AS full_fill,
+            coalesce(bool_or(lower(coalesce(osc.to_status, '')) = 'rejected'), false)
+                AS rejected,
+            coalesce(bool_or(lower(coalesce(osc.to_status, '')) IN (
+                'cancelled',
+                'canceled',
+                'deactivated'
+            )), false) AS cancelled,
+            coalesce(bool_or(
+                coalesce(osc.reason, '') ILIKE '%post_only_cross%'
+                OR coalesce(osc.reason, '') ILIKE '%postonlywilltakeliquidity%'
+                OR coalesce(osc.reason, '') ILIKE '%post only will take liquidity%'
+                OR coalesce(osc.reason, '') ILIKE '%ec_postonlywilltakeliquidity%'
+            ), false) AS post_only_cross,
+            coalesce(sum(greatest(coalesce(osc.filled_qty, 0), 0)), 0)
+                AS state_filled_qty
+        FROM post_only_orders po
+        LEFT JOIN trading.order_state_changes osc
+          ON osc.order_id = po.order_id
+         AND osc.ts >= po.order_ts
+         {change_engine_filter}
+         AND osc.ts < to_timestamp(%s / 1000.0)
+        GROUP BY po.strategy_name, po.symbol, po.order_id, po.order_ts
+        ORDER BY po.order_ts ASC;
+        """,
+        tuple(params),
+    )
+    rows = cur.fetchall()
+    return [
+        {
+            "strategy": row[0],
+            "symbol": row[1],
+            "order_id": row[2],
+            "order_ts": row[3],
+            "latest_state_ts": row[4],
+            "any_fill": bool(row[5]),
+            "full_fill": bool(row[6]),
+            "rejected": bool(row[7]),
+            "cancelled": bool(row[8]),
+            "post_only_cross": bool(row[9]),
+            "state_filled_qty": float(row[10] or 0.0),
+        }
+        for row in rows
+    ], None
 
 
 def apply_execution_calibration_to_risk_overrides(
@@ -302,6 +564,12 @@ def _base_summary(*, asof_ms: int) -> dict[str, Any]:
         "recommended_taker_slippage_bps": FALLBACK_TAKER_SLIPPAGE_BPS,
         "recommended_taker_slippage_clamped": False,
         "execution_confidence": "S2_CONSERVATIVE_BOUND",
+        "maker_fill_probability_status": "unavailable_without_order_outcomes",
+        "maker_fill_confidence": "S2_CONSERVATIVE_BOUND",
+        "maker_order_sample_count": 0,
+        "maker_any_fill_probability": 0.0,
+        "recommended_maker_fill_probability_cap": DEFAULT_MAKER_FILL_PROBABILITY_CAP,
+        "maker_fill_cap_source": "default_conservative_cap",
         "risk_overlay": {"applied": False},
     }
 
