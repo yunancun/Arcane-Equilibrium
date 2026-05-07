@@ -179,3 +179,9 @@ YYYY-MM-DD HH:MM TZ
 - verification: Python targeted pytest 10/0, project-venv Bybit instruments dry-run 905 V058-compatible rows after dated-futures symbol filtering, py_compile PASS, Rust scanner timeline 4/0, fixture turnover 1/0, `cargo check -p openclaw_engine --bin replay_runner --features replay_isolated` PASS with pre-existing warnings
 - Linux runtime: pulled to `01b9cf59`, applied V060/V061, backfilled V058=905 / freeze=1 / V059=457, rebuilt release `replay_runner`, reloaded API, and completed a current-config full-chain smoke (`run_id=22558afa-3597-4571-b2c2-71b218201085`) with V058 universe + dedicated runner finalize
 - remaining: recurring V058 recorder snapshots and historical order-book/ticker fidelity
+
+2026-05-07 CEST
+- inserted current Linux healthcheck FAILs into TODO as `P1-FAIL`: `[Xb]`, `[42]`/`[42b]`/`[42c]`, `[50]`, and `[51]` now preempt normal P1 Important work and keep MAG-083/MAG-084 blocked
+- source-fixed `P1-FAKE-1`: ExecutorAgent now calls Rust IPC `submit_paper_order` with explicit `engine`, and ExecutorConfigCache's provider can read explicit demo/live/live_demo shadow config
+- verification: Mac targeted Executor pytest 25 passed / 7 skipped, py_compile passed
+- no deploy/restart/live auth/strategy/risk config mutation; Linux pull/deploy verification remains pending

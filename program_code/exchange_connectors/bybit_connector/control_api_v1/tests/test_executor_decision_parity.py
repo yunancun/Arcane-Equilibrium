@@ -227,7 +227,7 @@ def _drive_python_decision(case: ParityCase) -> Tuple[str, str]:
         → execute_order()
         → _execute_via_ipc()
             → if provider() True  : ExecutionReport.error == "shadow_mode"
-            → if provider() False : real submit_order IPC (recorded)
+            → if provider() False : real submit_paper_order IPC (recorded)
     """
     cache = ExecutorConfigCache()
     snapshot = _build_runtime_config(case.config)
@@ -273,11 +273,11 @@ def _drive_python_decision(case: ParityCase) -> Tuple[str, str]:
         return ("block_shadow", "shadow_mode")
 
     if exec_path == "ipc_real":
-        # Live path — emitted exactly one submit_order IPC.
-        # Live 路徑：恰好送出一次 submit_order IPC。
+        # Live path — emitted exactly one submit_paper_order IPC.
+        # Live 路徑：恰好送出一次 submit_paper_order IPC。
         if len(ipc_recorder.calls) != 1:
             return ("error", f"unexpected_ipc_call_count={len(ipc_recorder.calls)}")
-        if ipc_recorder.calls[0]["method"] != "submit_order":
+        if ipc_recorder.calls[0]["method"] != "submit_paper_order":
             return ("error", f"unexpected_method={ipc_recorder.calls[0]['method']}")
         return ("submit", "live_intent_passthrough")
 

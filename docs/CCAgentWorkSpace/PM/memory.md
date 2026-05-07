@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | P1 healthcheck FAIL queue + Executor fake-live source fix: inserted `[Xb]` / `[42*]` / `[50]` / `[51]` ahead of P1 work and fixed Executor IPC to use `submit_paper_order` with explicit engine plus engine-aware shadow provider | workspace/reports/2026-05-07--p1_healthcheck_fail_queue_and_executor_fake_live_fix.md |
 | 2026-05-07 | AgentTodo M8 Stage 2 fast-track NO-GO: replay runner/report path completed after import fix `ffd9802f`, but runtime decision-spine/idempotency rows remain 0 and replay produced 0 fills / `execution_confidence=none`; MAG-083/MAG-084 remain blocked | workspace/reports/2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md |
 | 2026-05-07 | AgentTodo M8 Stage 2 authorization report: rebuilt Linux with keep-auth, confirmed Mac/origin/Linux sync at `e8a58852`, started MAG-082 Stage 2 demo/live_demo canary evidence window, then fast-track evidence review updated the report to NO-GO | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_stage2_demo_livedemo_20260507t1602z.md |
 | 2026-05-07 | AgentTodo MAG-084 operator sign-off blocker: M8 cannot be signed off while MAG-083 remains BLOCKED; sign-off requires operator-approved MAG-082 canary evidence followed by a MAG-083 PASS | workspace/reports/2026-05-07--agenttodo_mag084_operator_signoff_blocked.md |
@@ -1896,3 +1897,17 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   executor shadow unlock, or lease-router flag enablement occurred.
 - Fast-track verdict: Stage 2 NO-GO. MAG-083 and MAG-084 remain blocked until a
   later MAG-082 runtime lineage report can PASS.
+
+## 2026-05-07 P1 Healthcheck FAIL Queue And Executor Fake-Live Fix
+
+- Operator requested inserting healthcheck FAILs ahead of P1 Important.
+- TODO now has `P1-FAIL` for `[Xb]`, `[42]`/`[42b]`/`[42c]`, `[50]`, and
+  `[51]`; MAG-083/MAG-084 stay blocked while those FAILs are unresolved.
+- Source-fixed `P1-FAKE-1`: `ExecutorAgent` now calls Rust's actual
+  `submit_paper_order` IPC method and includes explicit `engine`; the
+  executor shadow provider can resolve explicit `demo`, `live`, and
+  `live_demo` instead of silently reading paper/default.
+- Mac verification: Executor targeted pytest 25 passed / 7 skipped, and
+  `py_compile` passed for `executor_agent.py` / `executor_config_cache.py`.
+- Runtime deploy remains pending; no restart, rebuild, live auth mutation,
+  Decision Lease flag flip, or strategy/risk config change occurred.

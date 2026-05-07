@@ -12,7 +12,7 @@ MODULE_NOTE (EN):
       → ExecutorAgent.__init__(shadow_mode_provider=...)
       → execute_order() → _execute_via_ipc()
         → if provider() returns True: log shadow report, no SubmitOrder
-        → if provider() returns False: paper_trading_routes._ipc_command("submit_order", ...) (mocked)
+        → if provider() returns False: paper_trading_routes._ipc_command("submit_paper_order", ...) (mocked)
 
   The "IPC flip" is simulated by varying the mocked
   `_fetch_via_ipc_blocking` return value across `_poll_once()` calls. We do
@@ -26,7 +26,7 @@ MODULE_NOTE (EN):
       ``ExecutorRuntimeConfig`` (post-parse). Equivalent to a successful
       Rust JSON-RPC ``get_risk_config`` reply with the executor sub-slice.
     - SubmitOrder boundary: `paper_trading_routes._ipc_command` returns the
-      Rust JSON-RPC ``submit_order`` shape ({"order_id": ..., "price": ..., "qty": ...}).
+      Rust JSON-RPC ``submit_paper_order`` shape ({"order_id": ..., "price": ..., "qty": ...}).
       This is exactly where Path A (Agent pipeline) hands the intent to the
       Rust intent_processor — see ``executor_agent.py:570-595``.
 
@@ -50,7 +50,7 @@ MODULE_NOTE (中):
       → ExecutorAgent ctor 注入
       → execute_order() → _execute_via_ipc()
         → provider() True：log shadow report，**不**送 SubmitOrder
-        → provider() False：呼叫 paper_trading_routes._ipc_command("submit_order", ...)
+        → provider() False：呼叫 paper_trading_routes._ipc_command("submit_paper_order", ...)
           （mocked）
 
   「IPC flip」由變動 mocked `_fetch_via_ipc_blocking` 回傳值模擬；我們**不**啟
@@ -287,8 +287,9 @@ class TestIpcFlipShadowToLive(unittest.TestCase):
 
         self.assertEqual(len(ipc_recorder.calls), 1)
         call = ipc_recorder.calls[0]
-        self.assertEqual(call["method"], "submit_order")
+        self.assertEqual(call["method"], "submit_paper_order")
         params = call["params"]
+        self.assertEqual(params["engine"], "paper")
         self.assertEqual(params["symbol"], "BTCUSDT")
         self.assertEqual(params["side"], "Sell")
         self.assertAlmostEqual(params["qty"], 0.05)
@@ -508,6 +509,7 @@ class TestPerEngineIsolation(unittest.TestCase):
             r_demo = agent_demo.execute_order(
                 intent_id="i_iso_demo_001",
                 symbol="BTCUSDT", side="Buy", qty=0.01,
+                metadata={"engine": "demo"},
             )
 
         # Paper: shadow report, no IPC.
@@ -517,7 +519,8 @@ class TestPerEngineIsolation(unittest.TestCase):
         # Demo: live IPC.
         self.assertEqual(r_demo.metadata.get("execution_path"), "ipc_real")
         self.assertEqual(len(ipc_recorder_demo.calls), 1)
-        self.assertEqual(ipc_recorder_demo.calls[0]["method"], "submit_order")
+        self.assertEqual(ipc_recorder_demo.calls[0]["method"], "submit_paper_order")
+        self.assertEqual(ipc_recorder_demo.calls[0]["params"]["engine"], "demo")
 
     def test_paper_engine_default_unaffected_by_demo_cache(self) -> None:
         """Even if demo cache hasn't initialized, paper agent stays consistent
