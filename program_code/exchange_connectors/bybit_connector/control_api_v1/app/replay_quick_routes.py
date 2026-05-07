@@ -152,7 +152,7 @@ class ReplayFullChainPrepareRequest(BaseModel):
     data_window_start: datetime
     data_window_end: datetime
     starting_balance: Optional[float] = Field(default=10_000.0, gt=0)
-    max_symbols: int = Field(default=8, ge=1, le=25)
+    max_symbols: int = Field(default=25, ge=1, le=25)
     use_current_config: bool = True
 
     @validator("universe_preset")

@@ -436,12 +436,20 @@ mod tests {
             close,
             volume,
             turnover: None,
+            turnover_24h: None,
             best_bid: None,
             best_ask: None,
             bid_size: None,
             ask_size: None,
             spread_bps: None,
             microstructure_source: None,
+            funding_rate: None,
+            index_price: None,
+            open_interest: None,
+            tick_size: None,
+            h0_allowed: None,
+            indicators: None,
+            signals: Vec::new(),
         }
     }
 

@@ -553,18 +553,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     e
                 ))
             })?;
-        // R6-T3 — wire fee/slippage context. account_manager=None falls back
-        // to DEFAULT_*_FEE_RATE (byte-equal with live cold-boot path before
-        // Bybit refresh). slippage_config = risk_config.slippage (G7-07
-        // hot-reloadable; default mirrors live SLIPPAGE_TIERS). volume_24h=None
-        // → 5 bps default fallback (fixture loader does not yet propagate
-        // per-symbol turnover; Sprint D R8 may extend fixture schema).
+        // R6-T3 / REF-21 — wire fee/slippage context. account_manager=None
+        // falls back to DEFAULT_*_FEE_RATE (byte-equal with live cold-boot path
+        // before Bybit refresh). slippage_config = risk_config.slippage
+        // (G7-07 hot-reloadable; default mirrors live SLIPPAGE_TIERS). The
+        // third argument is only the cold-start fallback; adapter execution now
+        // overwrites it per event from fixture turnover_24h or derived rolling
+        // 24h turnover before each intent is filled.
         //
         // R6-T3 — 接入 fee/slippage context。account_manager=None 退回
         // DEFAULT_*_FEE_RATE（與 live 冷啟動路徑 byte-equal）。slippage_config
         // = risk_config.slippage（G7-07 可熱重載；預設鏡射 live SLIPPAGE_TIERS）。
-        // volume_24h=None → 5 bps default fallback（fixture loader 尚未傳
-        // per-symbol turnover；Sprint D R8 可擴 fixture schema）。
+        // 第三參數僅為冷啟動 fallback；adapter execute 會在每個 event 前用
+        // fixture turnover_24h 或 rolling 24h turnover 覆寫。
         pipeline = pipeline.with_replay_fee_context(
             None,
             Some(risk_config.slippage.clone()),

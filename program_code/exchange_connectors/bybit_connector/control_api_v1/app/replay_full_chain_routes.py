@@ -231,6 +231,20 @@ def _fetch_microstructure_overlays_sync(
                 }
             cur.execute(
                 """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'market'
+                  AND table_name = 'market_tickers';
+                """
+            )
+            ticker_columns = {str(row[0]) for row in _cursor_fetchall(cur)}
+            funding_expr = (
+                "funding_rate"
+                if "funding_rate" in ticker_columns
+                else "NULL::real AS funding_rate"
+            )
+            cur.execute(
+                f"""
                 SELECT
                     symbol,
                     floor(extract(epoch from ts) * 1000)::bigint AS ts_ms,
@@ -238,7 +252,12 @@ def _fetch_microstructure_overlays_sync(
                     best_ask,
                     bid_size,
                     ask_size,
-                    spread_bps
+                    spread_bps,
+                    volume_24h,
+                    turnover_24h,
+                    index_price,
+                    open_interest,
+                    {funding_expr}
                 FROM market.market_tickers
                 WHERE symbol = ANY(%s)
                   AND ts >= to_timestamp(%s / 1000.0)
@@ -280,6 +299,11 @@ def _fetch_microstructure_overlays_sync(
             "bid_size": float(row[4]) if row[4] is not None else None,
             "ask_size": float(row[5]) if row[5] is not None else None,
             "spread_bps": float(row[6]) if row[6] is not None else None,
+            "volume_24h": float(row[7]) if row[7] is not None else None,
+            "turnover_24h": float(row[8]) if row[8] is not None else None,
+            "index_price": float(row[9]) if row[9] is not None else None,
+            "open_interest": float(row[10]) if row[10] is not None else None,
+            "funding_rate": float(row[11]) if row[11] is not None else None,
         })
     record_count = sum(len(items) for items in records.values())
     return {
@@ -316,6 +340,15 @@ def _apply_microstructure_overlays(
         timestamps[str(symbol)] = [int(item.get("ts_ms", 0)) for item in rows]
 
     enriched = 0
+    field_counts: dict[str, int] = {
+        "best_bid": 0,
+        "best_ask": 0,
+        "turnover_24h": 0,
+        "volume_24h": 0,
+        "index_price": 0,
+        "open_interest": 0,
+        "funding_rate": 0,
+    }
     for event in events:
         symbol = str(event.get("symbol") or "").upper()
         event_ts = int(event.get("ts_ms") or 0)
@@ -332,23 +365,148 @@ def _apply_microstructure_overlays(
             continue
         event["best_bid"] = record["best_bid"]
         event["best_ask"] = record["best_ask"]
+        field_counts["best_bid"] += 1
+        field_counts["best_ask"] += 1
         if record.get("bid_size") is not None:
             event["bid_size"] = record["bid_size"]
         if record.get("ask_size") is not None:
             event["ask_size"] = record["ask_size"]
         if record.get("spread_bps") is not None:
             event["spread_bps"] = record["spread_bps"]
+        for field in (
+            "turnover_24h",
+            "volume_24h",
+            "index_price",
+            "open_interest",
+            "funding_rate",
+        ):
+            value = record.get(field)
+            if value is None:
+                continue
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                continue
+            if parsed == parsed:
+                event[field] = parsed
+                field_counts[field] += 1
         event["microstructure_source"] = "market.market_tickers"
         enriched += 1
 
+    field_coverage = {
+        field: (count / len(events)) if events else 0.0
+        for field, count in field_counts.items()
+    }
     return {
         "status": "ok" if enriched else "empty",
         "source": "market.market_tickers",
         "event_count": len(events),
         "enriched_event_count": enriched,
         "coverage_ratio": (enriched / len(events)) if events else 0.0,
+        "field_counts": field_counts,
+        "field_coverage": field_coverage,
         "max_staleness_ms": max_staleness_ms,
         "reason": None if enriched else "no_matching_bbo_rows",
+    }
+
+
+def _instrument_specs_from_universe(
+    historical_universe: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    specs: dict[str, dict[str, Any]] = {}
+    entries = historical_universe.get("entries")
+    if not isinstance(entries, list):
+        return specs
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        specs[symbol] = {
+            "tick_size": item.get("tick_size"),
+            "qty_step": item.get("qty_step"),
+            "min_notional": item.get("min_notional"),
+            "source": "market.symbol_universe_snapshots",
+        }
+    return specs
+
+
+def _apply_instrument_specs(
+    events: list[dict[str, Any]],
+    specs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    if not specs:
+        return {
+            "status": "empty",
+            "source": "market.symbol_universe_snapshots",
+            "event_count": len(events),
+            "tick_size_event_count": 0,
+            "coverage_ratio": 0.0,
+            "reason": "no_specs",
+        }
+    tick_size_count = 0
+    for event in events:
+        symbol = str(event.get("symbol") or "").strip().upper()
+        spec = specs.get(symbol)
+        if not spec:
+            continue
+        value = spec.get("tick_size")
+        if value is None:
+            continue
+        try:
+            tick_size = float(value)
+        except (TypeError, ValueError):
+            continue
+        if tick_size > 0 and tick_size == tick_size:
+            event["tick_size"] = tick_size
+            tick_size_count += 1
+    return {
+        "status": "ok" if tick_size_count else "empty",
+        "source": "market.symbol_universe_snapshots",
+        "event_count": len(events),
+        "tick_size_event_count": tick_size_count,
+        "coverage_ratio": (tick_size_count / len(events)) if events else 0.0,
+        "reason": None if tick_size_count else "no_tick_size_for_events",
+    }
+
+
+def _build_input_fidelity_summary(
+    *,
+    microstructure_stats: dict[str, Any],
+    instrument_stats: dict[str, Any],
+    edge_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    field_coverage = microstructure_stats.get("field_coverage")
+    if not isinstance(field_coverage, dict):
+        field_coverage = {}
+    return {
+        "indicators": {
+            "status": "runner_derived",
+            "source": "fixture_ohlcv",
+            "warmup_bars": 30,
+        },
+        "signals": {
+            "status": "runner_derived",
+            "source": "fixture_ohlcv_indicator_snapshot",
+        },
+        "microstructure": {
+            "status": microstructure_stats.get("status"),
+            "source": microstructure_stats.get("source"),
+            "coverage_ratio": microstructure_stats.get("coverage_ratio", 0.0),
+            "field_coverage": field_coverage,
+        },
+        "instrument_specs": {
+            "status": instrument_stats.get("status"),
+            "source": instrument_stats.get("source"),
+            "tick_size_coverage_ratio": instrument_stats.get("coverage_ratio", 0.0),
+        },
+        "edge_snapshot": {
+            "status": edge_snapshot.get("status"),
+            "source": edge_snapshot.get("source"),
+            "cell_count": edge_snapshot.get("cell_count", 0),
+            "cutoff_iso": edge_snapshot.get("cutoff_iso"),
+        },
     }
 
 
@@ -371,8 +529,30 @@ def _fetch_historical_universe_snapshot_sync(
                 }
             cur = conn.cursor()
             cur.execute("SET LOCAL statement_timeout = %s;", (_STATEMENT_TIMEOUT_MS,))
-            cur.execute(
+            cur.execute("SELECT to_regclass('market.market_tickers') IS NOT NULL;")
+            has_market_tickers = bool(cur.fetchone()[0])
+            latest_ticker_cte = (
                 """
+                latest_ticker AS (
+                    SELECT DISTINCT ON (mt.symbol)
+                        mt.symbol,
+                        mt.turnover_24h
+                    FROM market.market_tickers mt
+                    JOIN candidate_symbols c ON c.symbol = mt.symbol
+                    WHERE mt.ts <= to_timestamp(%s / 1000.0)
+                    ORDER BY mt.symbol, mt.ts DESC
+                )
+                """
+                if has_market_tickers
+                else """
+                latest_ticker AS (
+                    SELECT NULL::text AS symbol, NULL::real AS turnover_24h
+                    WHERE false
+                )
+                """
+            )
+            cur.execute(
+                f"""
                 WITH candidate_symbols AS (
                     SELECT DISTINCT symbol
                     FROM market.symbol_universe_snapshots
@@ -390,6 +570,9 @@ def _fetch_historical_universe_snapshot_sync(
                         s.base_coin,
                         s.quote_coin,
                         s.contract_type,
+                        s.tick_size,
+                        s.qty_step,
+                        s.min_notional,
                         s.listed_at,
                         s.delisted_at,
                         s.is_delisted_at_asof,
@@ -400,27 +583,35 @@ def _fetch_historical_universe_snapshot_sync(
                       AND s.category = %s
                       AND s.ts <= to_timestamp(%s / 1000.0)
                     ORDER BY s.symbol, s.ts DESC
-                )
+                ),
+                {latest_ticker_cte}
                 SELECT
-                    symbol,
-                    ts,
-                    status,
-                    base_coin,
-                    quote_coin,
-                    contract_type,
-                    listed_at,
-                    delisted_at,
-                    is_delisted_at_asof,
-                    source_uri
+                    latest.symbol,
+                    latest.ts,
+                    latest.status,
+                    latest.base_coin,
+                    latest.quote_coin,
+                    latest.contract_type,
+                    latest.tick_size,
+                    latest.qty_step,
+                    latest.min_notional,
+                    latest.listed_at,
+                    latest.delisted_at,
+                    latest.is_delisted_at_asof,
+                    latest.source_uri,
+                    latest_ticker.turnover_24h
                 FROM latest
+                LEFT JOIN latest_ticker ON latest_ticker.symbol = latest.symbol
                 WHERE NOT (
-                    is_delisted_at_asof
-                    AND COALESCE(delisted_at, ts) < to_timestamp(%s / 1000.0)
+                    latest.is_delisted_at_asof
+                    AND COALESCE(latest.delisted_at, latest.ts) < to_timestamp(%s / 1000.0)
                 )
                 ORDER BY
-                    CASE symbol WHEN 'BTCUSDT' THEN 0 WHEN 'ETHUSDT' THEN 1 ELSE 2 END,
-                    is_delisted_at_asof ASC,
-                    symbol ASC
+                    CASE WHEN latest_ticker.turnover_24h IS NULL THEN 1 ELSE 0 END,
+                    latest_ticker.turnover_24h DESC NULLS LAST,
+                    CASE latest.symbol WHEN 'BTCUSDT' THEN 0 WHEN 'ETHUSDT' THEN 1 ELSE 2 END,
+                    latest.is_delisted_at_asof ASC,
+                    latest.symbol ASC
                 LIMIT %s;
                 """,
                 (
@@ -430,6 +621,7 @@ def _fetch_historical_universe_snapshot_sync(
                     start_ms,
                     category,
                     end_ms,
+                    *([end_ms] if has_market_tickers else []),
                     start_ms,
                     max_symbols,
                 ),
@@ -458,10 +650,14 @@ def _fetch_historical_universe_snapshot_sync(
             "base_coin": row[3],
             "quote_coin": row[4],
             "contract_type": row[5],
-            "listed_at": row[6].isoformat() if hasattr(row[6], "isoformat") else row[6],
-            "delisted_at": row[7].isoformat() if hasattr(row[7], "isoformat") else row[7],
-            "is_delisted_at_asof": bool(row[8]),
-            "source_uri": row[9],
+            "tick_size": float(row[6]) if row[6] is not None else None,
+            "qty_step": float(row[7]) if row[7] is not None else None,
+            "min_notional": float(row[8]) if row[8] is not None else None,
+            "listed_at": row[9].isoformat() if hasattr(row[9], "isoformat") else row[9],
+            "delisted_at": row[10].isoformat() if hasattr(row[10], "isoformat") else row[10],
+            "is_delisted_at_asof": bool(row[11]),
+            "source_uri": row[12],
+            "turnover_24h": float(row[13]) if row[13] is not None else None,
         })
     if not symbols:
         return {
@@ -778,6 +974,10 @@ async def _prepare_full_chain_run_fixture(
         microstructure_overlay,
         max_staleness_ms=_microstructure_max_staleness_ms(),
     )
+    instrument_stats = _apply_instrument_specs(
+        events,
+        _instrument_specs_from_universe(historical_universe),
+    )
     if microstructure_stats.get("status") != "ok":
         warnings.append(
             "microstructure_overlay_unavailable:"
@@ -787,6 +987,11 @@ async def _prepare_full_chain_run_fixture(
                 or microstructure_stats.get("status")
                 or "unknown"
             )
+        )
+    if instrument_stats.get("status") != "ok":
+        warnings.append(
+            "instrument_specs_unavailable:"
+            + str(instrument_stats.get("reason") or instrument_stats.get("status") or "unknown")
         )
     missing_symbols = [symbol for symbol, count in per_symbol_counts.items() if count <= 0]
     if missing_symbols:
@@ -810,6 +1015,11 @@ async def _prepare_full_chain_run_fixture(
         universe_preset=body.universe_preset,
         microstructure_overlay=microstructure_stats,
     )
+    input_fidelity = _build_input_fidelity_summary(
+        microstructure_stats=microstructure_stats,
+        instrument_stats=instrument_stats,
+        edge_snapshot=edge_snapshot,
+    )
 
     return {
         "fixture_path": fixture_path,
@@ -825,6 +1035,8 @@ async def _prepare_full_chain_run_fixture(
         "universe_source": universe_source,
         "edge_snapshot": edge_snapshot,
         "microstructure_overlay": microstructure_stats,
+        "instrument_specs": instrument_stats,
+        "input_fidelity": input_fidelity,
         "start_ms": start_ms,
         "end_ms": end_ms,
         "strategy_params": strategy_params,
@@ -845,6 +1057,7 @@ def _build_manifest_jsonb(
     historical_universe: dict[str, Any],
     edge_snapshot: dict[str, Any],
     microstructure_overlay: dict[str, Any],
+    input_fidelity: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "manifest_version": 1,
@@ -872,6 +1085,7 @@ def _build_manifest_jsonb(
         },
         "edge_estimates": edge_snapshot.get("edge_estimates") or {},
         "microstructure_overlay": microstructure_overlay,
+        "input_fidelity": input_fidelity,
         "replay_tier": "s2_public_replay",
         "promotion_allowed": False,
         "promotion_block_reason": "current_config_in_sample_sandbox",
@@ -1064,6 +1278,7 @@ async def post_replay_full_chain_run(
             historical_universe=prepared["historical_universe"],
             edge_snapshot=prepared["edge_snapshot"],
             microstructure_overlay=prepared["microstructure_overlay"],
+            input_fidelity=prepared["input_fidelity"],
         )
         registered.append(
             await _register_full_chain_experiment(
@@ -1111,6 +1326,8 @@ async def post_replay_full_chain_run(
             if key != "edge_estimates"
         },
         "microstructure_overlay": prepared["microstructure_overlay"],
+        "instrument_specs": prepared["instrument_specs"],
+        "input_fidelity": prepared["input_fidelity"],
         "strategies": strategies,
         "strategy_count": len(strategies),
         "runs": runs,

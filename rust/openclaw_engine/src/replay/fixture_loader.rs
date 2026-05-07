@@ -83,6 +83,10 @@
 //!
 //! SPEC: REF-20 V3 §4.1 data_tier + §6.1 + §6.2 + workplan §4 Wave 4 R20-P2b-T1.
 
+use openclaw_core::{
+    indicators::IndicatorSnapshot,
+    signals::Signal,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -105,6 +109,9 @@ use std::path::{Path, PathBuf};
 ///     markets.
 ///   - `turnover`: optional quote turnover from Bybit kline row[6]. Legacy
 ///     fixtures may omit it; scanner replay then falls back to close * volume.
+///   - `turnover_24h`: optional local ticker 24h quote turnover. Replay fill
+///     slippage consumes this when present; otherwise the replay context
+///     builder derives a rolling 24h turnover from fixture bars.
 ///   - `best_bid` / `best_ask`: optional locally recorded BBO. These are
 ///     consumed only when present and valid; replay does not fabricate them.
 ///
@@ -116,9 +123,11 @@ use std::path::{Path, PathBuf};
 ///   - `volume`: 交易量；預期有限 f64，瘦市場可能 0.0。
 ///   - `turnover`: 可選 quote turnover，來自 Bybit kline row[6]。舊 fixture
 ///     可省略；scanner replay 會 fallback 至 close * volume。
+///   - `turnover_24h`: 可選本地 ticker 24h quote turnover。存在時供 replay
+///     fill slippage 消費；否則 replay context builder 由 fixture bar 推導。
 ///   - `best_bid` / `best_ask`: 可選本地錄製 BBO。只有存在且有效時消費；
 ///     replay 不偽造這些欄位。
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MarketEvent {
     pub ts_ms: i64,
     pub symbol: String,
@@ -129,6 +138,8 @@ pub struct MarketEvent {
     pub volume: f64,
     #[serde(default)]
     pub turnover: Option<f64>,
+    #[serde(default)]
+    pub turnover_24h: Option<f64>,
     #[serde(default)]
     pub best_bid: Option<f64>,
     #[serde(default)]
@@ -141,6 +152,20 @@ pub struct MarketEvent {
     pub spread_bps: Option<f64>,
     #[serde(default)]
     pub microstructure_source: Option<String>,
+    #[serde(default)]
+    pub funding_rate: Option<f64>,
+    #[serde(default)]
+    pub index_price: Option<f64>,
+    #[serde(default)]
+    pub open_interest: Option<f64>,
+    #[serde(default)]
+    pub tick_size: Option<f64>,
+    #[serde(default)]
+    pub h0_allowed: Option<bool>,
+    #[serde(default)]
+    pub indicators: Option<IndicatorSnapshot>,
+    #[serde(default)]
+    pub signals: Vec<Signal>,
 }
 
 /// Fixture source enum mapping to manifest `data_tier`.
@@ -430,10 +455,15 @@ mod tests {
                 {"ts_ms": 1, "symbol": "BTCUSDT",
                  "open": 100.0, "high": 101.0, "low": 99.0,
                  "close": 100.5, "volume": 1.0, "turnover": 100.5,
+                 "turnover_24h": 1234567.8,
                  "best_bid": 100.4, "best_ask": 100.6,
                  "bid_size": 2.0, "ask_size": 3.0,
                  "spread_bps": 19.9005,
-                 "microstructure_source": "market.market_tickers"}
+                 "microstructure_source": "market.market_tickers",
+                 "funding_rate": 0.0001,
+                 "index_price": 100.55,
+                 "open_interest": 12345.0,
+                 "tick_size": 0.1}
               ]
             }"#,
         );
@@ -442,8 +472,13 @@ mod tests {
         };
         let events = load_fixtures(&src).unwrap();
         assert_eq!(events[0].turnover, Some(100.5));
+        assert_eq!(events[0].turnover_24h, Some(1234567.8));
         assert_eq!(events[0].best_bid, Some(100.4));
         assert_eq!(events[0].best_ask, Some(100.6));
+        assert_eq!(events[0].funding_rate, Some(0.0001));
+        assert_eq!(events[0].index_price, Some(100.55));
+        assert_eq!(events[0].open_interest, Some(12345.0));
+        assert_eq!(events[0].tick_size, Some(0.1));
         assert_eq!(
             events[0].microstructure_source.as_deref(),
             Some("market.market_tickers")

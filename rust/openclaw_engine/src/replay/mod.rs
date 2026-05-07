@@ -109,6 +109,7 @@ pub mod apply_fill;
 // Sprint C R6 W3 R6-T4：校準標籤產出器（純 Rust 函數模組）。
 pub mod calibration_label;
 pub mod cli;
+pub mod context_builder;
 pub mod fixture_loader;
 pub mod forbidden_guard;
 pub mod mac_policy_guard;
