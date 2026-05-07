@@ -459,7 +459,13 @@ class AgentSpineClient:
             edge_type="analyzed_by",
             engine_mode=insight.engine_mode,
             decision_id=insight.decision_id,
-            details={"insight_level": insight.insight_level},
+            details={
+                "analyst_tier": insight.analyst_tier,
+                "insight_type": insight.insight_type,
+                "insight_level": insight.insight_level,
+                "confidence": insight.confidence,
+                "severity": insight.severity,
+            },
             created_at_ms=insight.ts_ms,
         )
         return ok and edge_ok
