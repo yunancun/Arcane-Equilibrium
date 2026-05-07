@@ -3,6 +3,21 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-05-06（AgentTodo MAG-010..014 durable event-store row proof）
 
+### P1 healthcheck FAIL queue + Executor fake-live source fix — 2026-05-07
+
+**Scope**：新增 `TODO.md` `P1-FAIL` 插隊隊列，將當前 Linux
+healthcheck FAIL `[Xb]` / `[42*]` / `[50]` / `[51]` 放到 P1 normal work
+之前；`P1-FAKE-1` source 修復 Executor fake-live wiring。
+
+**Executor fix**：`ExecutorAgent` real IPC path 改為 Rust 實際存在的
+`submit_paper_order`，payload 顯式帶 `engine`；`ExecutorConfigCache`
+`shadow_mode_provider()` 支持 explicit `demo` / `live` / `live_demo` 查詢，
+避免 demo/live_demo flip 被 paper/default cache 吞掉。
+
+**Verification**：Mac targeted Executor tests 25 PASS / 7 skipped；
+`py_compile` PASS。Runtime deploy pending；未 rebuild/restart、未改 live auth、
+未 flip Decision Lease、未改 strategy/risk config。
+
 ### AgentTodo MAG-010..012 durable event-store source wiring — 2026-05-06
 
 **Scope**：新增 default-off `AgentEventStore`，把 legacy/advisory

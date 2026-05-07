@@ -168,11 +168,17 @@ class ExecutorConfigCache:
         with self._snapshot_lock:
             return self._initialized
 
-    def shadow_mode_provider(self) -> Callable[[], bool]:
+    def shadow_mode_provider(self) -> Callable[..., bool]:
         """Return a zero-arg callable that reads current shadow_mode.
         Used by ``ExecutorAgent`` constructor's ``shadow_mode_provider`` arg.
         回傳零參 callable，供 ExecutorAgent ctor 的 shadow_mode_provider 注入。"""
-        return lambda: self.get().shadow_mode
+        def _provider(engine: Optional[str] = None) -> bool:
+            normalized = _normalize_engine_name(engine)
+            if normalized is None or normalized == self._engine:
+                return self.get().shadow_mode
+            return self._fetch_via_ipc_blocking(engine=normalized).shadow_mode
+
+        return _provider
 
     # ── Lifecycle / 生命週期 ──
 
@@ -260,7 +266,7 @@ class ExecutorConfigCache:
             new_snapshot.config_version,
         )
 
-    def _fetch_via_ipc_blocking(self) -> ExecutorRuntimeConfig:
+    def _fetch_via_ipc_blocking(self, engine: Optional[str] = None) -> ExecutorRuntimeConfig:
         """Synchronously execute the async IPC call from this thread.
 
         ``one_shot_ipc_call`` is async; we own this daemon thread, so we
@@ -273,10 +279,12 @@ class ExecutorConfigCache:
         # 延遲匯入：避免測試環境缺 IPC client 時連 import 都失敗。
         from .ipc_dispatch import one_shot_ipc_call  # noqa: PLC0415
 
+        selected_engine = _normalize_engine_name(engine) or self._engine
+
         async def _call() -> dict:
             return await one_shot_ipc_call(
                 "get_risk_config",
-                params={"engine": self._engine},
+                params={"engine": selected_engine},
                 timeout=2.0,
                 wrap_errors_as_http=False,
                 error_context="executor_config_cache",
@@ -413,6 +421,17 @@ def get_executor_config_cache() -> ExecutorConfigCache:
             if _CACHE_INSTANCE is None:
                 _CACHE_INSTANCE = ExecutorConfigCache()
     return _CACHE_INSTANCE
+
+
+def _normalize_engine_name(engine: Optional[str]) -> Optional[str]:
+    if engine is None:
+        return None
+    value = str(engine).strip().lower()
+    if value == "live_demo":
+        return "live"
+    if value in {"paper", "demo", "live"}:
+        return value
+    return None
 
 
 def _reset_for_tests() -> None:

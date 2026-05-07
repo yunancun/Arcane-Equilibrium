@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
 import threading
 import time
 import uuid
@@ -57,6 +58,41 @@ from .multi_agent_framework import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_execution_engine(metadata: Optional[Dict[str, Any]]) -> str:
+    candidates: list[Any] = []
+    if isinstance(metadata, dict):
+        candidates.extend(
+            [
+                metadata.get("engine"),
+                metadata.get("engine_mode"),
+                metadata.get("runtime_engine"),
+                metadata.get("pipeline_engine"),
+            ]
+        )
+    candidates.extend(
+        [
+            os.environ.get("OPENCLAW_EXECUTOR_DEFAULT_ENGINE"),
+            os.environ.get("OPENCLAW_EXECUTOR_CACHE_ENGINE"),
+        ]
+    )
+    for candidate in candidates:
+        engine = _normalize_execution_engine(candidate)
+        if engine is not None:
+            return engine
+    return "paper"
+
+
+def _normalize_execution_engine(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    engine = str(value).strip().lower()
+    if engine == "live_demo":
+        return "live"
+    if engine in {"paper", "demo", "live"}:
+        return engine
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -142,7 +178,7 @@ class ExecutorAgent(BaseAgent):
         paper_engine: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
         governance_hub: Optional[Any] = None,
-        shadow_mode_provider: Optional[Callable[[], bool]] = None,
+        shadow_mode_provider: Optional[Callable[..., bool]] = None,
         event_store: Optional[Any] = None,
     ):
         """
@@ -184,7 +220,7 @@ class ExecutorAgent(BaseAgent):
         # (test fixtures / standalone use).
         # G3-03 Phase B：shadow_mode 改為 runtime provider 提供（Rust IPC 快取）。
         # 取代 ``_shadow_mode = True`` 類屬性硬編碼；無 provider 時 fail-closed。
-        self._shadow_mode_provider: Callable[[], bool] = (
+        self._shadow_mode_provider: Callable[..., bool] = (
             shadow_mode_provider if shadow_mode_provider is not None else (lambda: True)
         )
 
@@ -628,31 +664,26 @@ class ExecutorAgent(BaseAgent):
         Fail-closed: IPC error → return failure report, never raises.
         失敗關閉：IPC 錯誤 → 返回失敗報告，不向上拋出。
         """
-        # G3-03 Phase B: read shadow_mode via runtime provider (Rust IPC cache).
-        # If the provider raises, fail-closed to shadow=True (safest).
-        # G3-03 Phase B：透過 runtime provider 讀 shadow_mode；異常時 fail-closed。
-        try:
-            shadow_now = bool(self._shadow_mode_provider())
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "ExecutorAgent shadow_mode_provider raised %s — fail-closed to shadow=True "
-                "/ shadow_mode_provider 異常，fail-closed 為 True",
-                exc,
-            )
-            shadow_now = True
+        execution_engine = _resolve_execution_engine(metadata)
+        shadow_now = self._read_shadow_mode(execution_engine)
         if shadow_now:
             # Shadow mode: log only, don't submit / 影子模式：僅記錄不提交
             logger.info(
-                "Executor IPC shadow: intent=%s %s %s qty=%.6f / "
-                "執行器 IPC 影子：intent=%s %s %s qty=%.6f",
-                intent_id, side, symbol, qty, intent_id, side, symbol, qty,
+                "Executor IPC shadow: intent=%s engine=%s %s %s qty=%.6f / "
+                "執行器 IPC 影子：intent=%s engine=%s %s %s qty=%.6f",
+                intent_id, execution_engine, side, symbol, qty,
+                intent_id, execution_engine, side, symbol, qty,
             )
             report = ExecutionReport(
                 intent_id=intent_id, symbol=symbol, side=side,
                 requested_qty=qty, expected_price=expected_price,
                 success=True,  # shadow "success" — intent was captured
                 error="shadow_mode",
-                metadata={**(metadata or {}), "execution_path": "ipc_shadow"},
+                metadata={
+                    **(metadata or {}),
+                    "execution_path": "ipc_shadow",
+                    "execution_engine": execution_engine,
+                },
             )
             self._store_report(report)
             return report
@@ -663,6 +694,7 @@ class ExecutorAgent(BaseAgent):
             from .paper_trading_routes import _ipc_command
 
             ipc_params = {
+                "engine": execution_engine,
                 "symbol": symbol,
                 "side": side,
                 "qty": qty,
@@ -678,12 +710,12 @@ class ExecutorAgent(BaseAgent):
                 loop = asyncio.get_running_loop()
                 # Already in async context — schedule coroutine
                 future = asyncio.run_coroutine_threadsafe(
-                    _ipc_command("submit_order", ipc_params), loop,
+                    _ipc_command("submit_paper_order", ipc_params), loop,
                 )
                 result = future.result(timeout=5.0)
             except RuntimeError:
                 # No running loop — create one
-                result = asyncio.run(_ipc_command("submit_order", ipc_params))
+                result = asyncio.run(_ipc_command("submit_paper_order", ipc_params))
 
             fill_time_ms = (time.time() - start_time) * 1000
             if isinstance(result, dict) and result.get("error"):
@@ -692,7 +724,11 @@ class ExecutorAgent(BaseAgent):
                     requested_qty=qty, expected_price=expected_price,
                     fill_time_ms=round(fill_time_ms, 2), success=False,
                     error=f"IPC rejected: {str(result.get('error', ''))[:100]}",
-                    metadata={**(metadata or {}), "execution_path": "ipc_real"},
+                    metadata={
+                        **(metadata or {}),
+                        "execution_path": "ipc_real",
+                        "execution_engine": execution_engine,
+                    },
                 )
             else:
                 actual_price = float(result.get("price", expected_price)) if isinstance(result, dict) else expected_price
@@ -704,7 +740,11 @@ class ExecutorAgent(BaseAgent):
                     expected_price=expected_price, actual_price=actual_price,
                     slippage_bps=round(slippage_bps, 2),
                     fill_time_ms=round(fill_time_ms, 2), success=True,
-                    metadata={**(metadata or {}), "execution_path": "ipc_real"},
+                    metadata={
+                        **(metadata or {}),
+                        "execution_path": "ipc_real",
+                        "execution_engine": execution_engine,
+                    },
                 )
                 with self._lock:
                     self._stats["executions_success"] += 1
@@ -719,13 +759,38 @@ class ExecutorAgent(BaseAgent):
                 requested_qty=qty, expected_price=expected_price,
                 fill_time_ms=round(fill_time_ms, 2), success=False,
                 error="IPC bridge failed — see server logs",
-                metadata={**(metadata or {}), "execution_path": "ipc_error"},
+                metadata={
+                    **(metadata or {}),
+                    "execution_path": "ipc_error",
+                    "execution_engine": execution_engine,
+                },
             )
             with self._lock:
                 self._stats["executions_failed"] += 1
                 self._stats["errors"] += 1
             self._store_report(report)
             return report
+
+    def _read_shadow_mode(self, engine: str) -> bool:
+        try:
+            return bool(self._shadow_mode_provider(engine))
+        except TypeError:
+            try:
+                return bool(self._shadow_mode_provider())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ExecutorAgent shadow_mode_provider raised %s — fail-closed to shadow=True "
+                    "/ shadow_mode_provider 異常，fail-closed 為 True",
+                    exc,
+                )
+                return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ExecutorAgent shadow_mode_provider raised %s for engine=%s — "
+                "fail-closed to shadow=True / shadow_mode_provider 異常，engine=%s，fail-closed",
+                exc, engine, engine,
+            )
+            return True
 
     # ── Report Storage / 报告存储 ──
 

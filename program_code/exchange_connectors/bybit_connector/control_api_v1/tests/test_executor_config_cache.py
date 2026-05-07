@@ -207,6 +207,36 @@ class TestProviderLambda(unittest.TestCase):
         )
         self.assertTrue(provider())  # reads back to True
 
+    def test_provider_fetches_explicit_engine(self):
+        cache = ExecutorConfigCache(engine="paper")
+        provider = cache.shadow_mode_provider()
+        with patch.object(
+            cache,
+            "_fetch_via_ipc_blocking",
+            return_value=ExecutorRuntimeConfig(
+                shadow_mode=False,
+                config_version=9,
+                fetched_at_ms=1,
+            ),
+        ) as mocked_fetch:
+            self.assertFalse(provider("demo"))
+        mocked_fetch.assert_called_once_with(engine="demo")
+
+    def test_provider_maps_live_demo_to_live(self):
+        cache = ExecutorConfigCache(engine="paper")
+        provider = cache.shadow_mode_provider()
+        with patch.object(
+            cache,
+            "_fetch_via_ipc_blocking",
+            return_value=ExecutorRuntimeConfig(
+                shadow_mode=False,
+                config_version=10,
+                fetched_at_ms=1,
+            ),
+        ) as mocked_fetch:
+            self.assertFalse(provider("live_demo"))
+        mocked_fetch.assert_called_once_with(engine="live")
+
 
 class TestConcurrentReads(unittest.TestCase):
     """8. Concurrent reads under interleaving polls remain safe."""
