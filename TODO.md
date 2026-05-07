@@ -101,7 +101,7 @@
 
 #### P1-OPENCLAW — Gateway / Agent Control Console
 
-**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。AgentTodo Sprint A（MAG-015 -> MAG-010..014 -> MAG-016/017 -> MAG-018/019）已完成；M2 MAG-020..026 Scanner Advisory Conversion 已完成；M3 Agent Decision Spine Shadow（MAG-030..035）已完成；M4 Strategist V2（MAG-040..045）已完成；M5 Guardian V2（MAG-050..054）已完成；M6 Executor Planner（MAG-060..064）已完成；M7 Analyst Learning Loop（MAG-070..074）已完成；M8 Canary/Cutover 已完成 MAG-080 cutover policy + MAG-081 canary flag runtime risk review。下一步若繼續 AgentTodo，進 M8 MAG-082 24h canary validation checklist。Telegram/WebChat、proposal approval relay、第二 GUI 仍不在下一步。
+**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。AgentTodo Sprint A（MAG-015 -> MAG-010..014 -> MAG-016/017 -> MAG-018/019）已完成；M2 MAG-020..026 Scanner Advisory Conversion 已完成；M3 Agent Decision Spine Shadow（MAG-030..035）已完成；M4 Strategist V2（MAG-040..045）已完成；M5 Guardian V2（MAG-050..054）已完成；M6 Executor Planner（MAG-060..064）已完成；M7 Analyst Learning Loop（MAG-070..074）已完成；M8 Canary/Cutover 已完成 MAG-080 cutover policy + MAG-081 canary flag runtime risk review + MAG-082 24h canary validation checklist。下一步若繼續 AgentTodo，進 M8 MAG-083 final release audit（需 operator-approved canary window evidence 才能真 sign off）。Telegram/WebChat、proposal approval relay、第二 GUI 仍不在下一步。
 
 | ID | 任務 | 來源 |
 |----|------|------|

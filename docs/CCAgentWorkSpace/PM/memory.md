@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-082 24h canary validation checklist: defined window metadata, entry checks, SQL evidence, runtime health evidence, and PASS/WARN/FAIL criteria; every executable canary decision must reconstruct StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_checklist.md |
 | 2026-05-07 | AgentTodo MAG-081 canary flag runtime risk review: reviewed event-store, Agent Spine, scanner authority, lease router, executor shadow, Mainnet opt-in, signed live auth, OpenClaw read-only routes, H-state, cost-edge, and cloud policy; verdict no reviewed single flag can enable true live autonomy without approval | workspace/reports/2026-05-07--agenttodo_mag081_canary_flag_runtime_risk_review.md |
 | 2026-05-07 | AgentTodo MAG-080 cutover policy: defined shadow/soak/canary/primary-candidate/primary stages, exact control surfaces/flags, thresholds, rollback triggers, executor shadow rollback payload, and operator checklist | workspace/reports/2026-05-07--agenttodo_mag080_cutover_policy.md |
 | 2026-05-07 | AgentTodo MAG-074 Analyst learning loop E2E regression: losing-pattern AnalystInsight persists with evidence edges, Strategist next-cycle preference changes, and persisted StrategistDecision payload carries typed reason/evidence; M7 closed | workspace/reports/2026-05-07--agenttodo_mag074_analyst_learning_e2e.md |
@@ -1765,3 +1766,30 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   live auth, cloud call, runtime submit path, or trading authority change was
   made.
 - Next AgentTodo item is MAG-082 24h canary validation checklist.
+
+## 2026-05-07 AgentTodo MAG-082 24h Canary Validation Checklist
+
+### Result
+- MAG-082 is complete as a checklist/validation contract.
+- Added
+  `docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag082_24h_canary_validation_checklist.md`.
+- The checklist defines the required 24h window header, entry checks, evidence
+  report path, SQL templates, runtime health evidence, and PASS/WARN/FAIL
+  criteria.
+- Every executable canary decision must reconstruct:
+  StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan ->
+  Decision Lease / idempotency -> ExecutionReport.
+- No 24h canary was run by this checkpoint.
+
+### Verification
+- Mac targeted: markdown diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  diff check.
+
+### Boundary
+- Checklist only. No runtime flag, rebuild, restart, deploy, DB write,
+  live auth, cloud call, runtime submit path, canary run, or trading authority
+  change was made.
+- Next AgentTodo item is MAG-083 final release audit, but MAG-083 should wait
+  for an operator-approved canary window to produce evidence against the
+  MAG-082 checklist.
