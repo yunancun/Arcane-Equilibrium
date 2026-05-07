@@ -88,21 +88,22 @@ def _make_mock_cursor(
     *,
     strategy: str | None = "grid_trading",
     symbol: str | None = "BTCUSDT",
+    symbols: list[str] | None = None,
     fills_rows: list[tuple] | None = None,
     update_rowcount: int = 1,
 ) -> MagicMock:
     """構造 mock cursor 模擬 V049 SELECT + trading.fills SELECT + V049 UPDATE。
 
-    - 第一個 fetchone()：(strategy, symbol) tuple。
+    - 第一個 fetchone()：(strategy, symbol, symbols) tuple。
     - fetchall()：trading.fills 行。
     - rowcount：UPDATE V049 影響行數。
     """
     cur = MagicMock()
     fetchone_results: list[Any] = []
-    if strategy is None and symbol is None:
+    if strategy is None and symbol is None and symbols is None:
         fetchone_results.append(None)
     else:
-        fetchone_results.append((strategy, symbol))
+        fetchone_results.append((strategy, symbol, symbols))
     cur.fetchone.side_effect = fetchone_results
     cur.fetchall.return_value = fills_rows or []
     cur.rowcount = update_rowcount
@@ -302,11 +303,41 @@ def test_calibration_e2e_select_filters_engine_mode_and_14d_window() -> None:
     assert "FROM trading.fills" in fills_sql
     assert "engine_mode = ANY" in fills_sql
     assert "INTERVAL '1 day'" in fills_sql
-    # params: (strategy_name, symbol, [demo, live_demo], 14)
+    # params: (strategy_name, symbols[], [demo, live_demo], 14)
     assert fills_params[0] == "grid_trading"
-    assert fills_params[1] == "BTCUSDT"
+    assert fills_params[1] == ["BTCUSDT"]
     assert fills_params[2] == list(_CALIBRATION_ENGINE_MODES)
     assert fills_params[3] == _CALIBRATION_FILLS_WINDOW_DAYS
+
+
+def test_calibration_e2e_full_chain_uses_manifest_symbols_array() -> None:
+    """Full-chain manifest lacks scalar symbol; calibration must use symbols[]."""
+    fills_rows = _build_fills_rows(
+        n=31,
+        last_age_days=0.5,
+        oldest_age_days=2.0,
+        fee_rate=0.0002,
+        price=50000.0,
+    )
+    cur = _make_mock_cursor(
+        strategy="grid_trading",
+        symbol=None,
+        symbols=["SOLUSDT", "XRPUSDT"],
+        fills_rows=fills_rows,
+    )
+
+    label = _compute_and_persist_calibration(
+        cur,
+        experiment_id=_TEST_EXPERIMENT_ID,
+        now_fn=lambda: _REFERENCE_NOW,
+    )
+
+    assert label == "limited"
+    fills_call = cur.execute.call_args_list[1]
+    fills_sql = fills_call.args[0]
+    fills_params = fills_call.args[1]
+    assert "symbol = ANY" in fills_sql
+    assert fills_params[1] == ["SOLUSDT", "XRPUSDT"]
 
 
 # ───────────────────────────────────────────────────────────────────
