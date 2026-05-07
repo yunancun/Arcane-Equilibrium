@@ -238,6 +238,7 @@ def _synthesize_attribution_dict(cur: Any) -> dict[str, float]:
             WHERE ts > now() - INTERVAL '7 days'
               AND engine_mode IN ('demo', 'live_demo')
               AND strategy_name IS NOT NULL
+              AND net_bps_after_fee IS NOT NULL
             GROUP BY strategy_name
             """
         )

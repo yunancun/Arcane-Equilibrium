@@ -427,7 +427,7 @@ def test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys(
         patch={"cooldown_ms": 144_000},
     )
 
-    assert "INSERT INTO learning.mlde_shadow_recommendations" in captured["sql"]
+    assert "learning.verify_replay_evidence_and_insert" in captured["sql"]
     # params: (symbol, strategy_name, expected_net_bps, confidence,
     #          sample_count, Json(payload))
     payload_param = captured["params"][-1]
@@ -819,6 +819,7 @@ def test_attribution_ratio_uses_3d_window():
     assert len(cur.executed) == 2
     group_by_sql, group_by_params = cur.executed[1]
     assert "GROUP BY strategy_name" in group_by_sql
+    assert "net_bps_after_fee IS NOT NULL" in group_by_sql
     assert group_by_params[0] == _R_META_WINDOW_DAYS == 3
     # 確保不是 7（即未誤用 _DEMO_BASELINE_WINDOW_DAYS）
     # Confirm not 7 (i.e., did not regress to _DEMO_BASELINE_WINDOW_DAYS).
@@ -855,6 +856,7 @@ def test_compute_sample_count_by_strategy_5_keys_default_zero():
     # SQL must bind 3d window + 5 strategy keyset list
     group_by_sql, group_by_params = cur.executed[1]
     assert "GROUP BY strategy_name" in group_by_sql
+    assert "net_bps_after_fee IS NOT NULL" in group_by_sql
     assert group_by_params[0] == _R_META_WINDOW_DAYS == 3
     assert sorted(group_by_params[1]) == sorted(_ATTRIBUTION_STRATEGY_KEYS)
 
