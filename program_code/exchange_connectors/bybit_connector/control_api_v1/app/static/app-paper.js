@@ -784,12 +784,19 @@ function ocPaperSubtabInit() {
     const edge = data.edge_snapshot || {};
     const fidelity = data.input_fidelity || {};
     const specs = data.instrument_specs || {};
+    const execCal = data.execution_calibration || {};
     const pct = function (v) {
       return typeof v === "number" && Number.isFinite(v) ? (v * 100).toFixed(0) + "%" : "--";
+    };
+    const fmtBps = function (v) {
+      return typeof v === "number" && Number.isFinite(v) ? v.toFixed(0) + " bps" : "--";
     };
     const microCoverage = typeof micro.coverage_ratio === "number" ? micro.coverage_ratio : 0;
     const tickCoverage = typeof specs.coverage_ratio === "number" ? specs.coverage_ratio : 0;
     const edgeCells = typeof edge.cell_count === "number" ? edge.cell_count : 0;
+    const execStatus = String(execCal.status || "unknown");
+    const execConfidence = String(execCal.execution_confidence || execCal.confidence || execStatus);
+    const execOk = execStatus === "calibrated" || execStatus === "limited";
     const inputTooltip = "Indicators/signals are runner-derived from fixture OHLCV; funding/OI/BBO/tick-size depend on local recorder/V058 coverage";
     const runRows = runs.map(function (run) {
       return '<div class="oc-replay-run-row">'
@@ -831,6 +838,10 @@ function ocPaperSubtabInit() {
         edge.status === "ok" ? String(edgeCells) + " cells" : String(edge.status || "missing"),
         edge.status === "ok" ? "oc-cell-ok" : "oc-cell-warn",
         "V059 edge snapshot cells with cutoff at replay window start")
+      + _metricCellHtml("oc-replay-summary-exec-cal", "Exec Cal / 執行校準",
+        execConfidence + " · " + fmtBps(execCal.recommended_taker_slippage_bps),
+        execOk ? "oc-cell-ok" : "oc-cell-warn",
+        "Replay-only slippage floor from demo/live_demo fills; maker fill probability remains unavailable without order-outcome samples")
       + _metricCellHtml("oc-replay-summary-inputs", "Inputs / 策略輸入",
         fidelity.indicators && fidelity.indicators.status ? fidelity.indicators.status : "runner_derived",
         "oc-cell-ok", inputTooltip)

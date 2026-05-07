@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field, validator
 
 from . import main_legacy as base
+from . import replay_execution_calibration as _ec
 from .auth import require_scope_and_operator
 from .db_pool import get_pg_conn
 from .replay_quick_routes import (
@@ -476,6 +477,7 @@ def _build_input_fidelity_summary(
     microstructure_stats: dict[str, Any],
     instrument_stats: dict[str, Any],
     edge_snapshot: dict[str, Any],
+    execution_calibration: dict[str, Any],
 ) -> dict[str, Any]:
     field_coverage = microstructure_stats.get("field_coverage")
     if not isinstance(field_coverage, dict):
@@ -506,6 +508,21 @@ def _build_input_fidelity_summary(
             "source": edge_snapshot.get("source"),
             "cell_count": edge_snapshot.get("cell_count", 0),
             "cutoff_iso": edge_snapshot.get("cutoff_iso"),
+        },
+        "execution_calibration": {
+            "status": execution_calibration.get("status"),
+            "source": execution_calibration.get("source"),
+            "confidence": execution_calibration.get("execution_confidence"),
+            "slippage_sample_count": execution_calibration.get(
+                "slippage_sample_count",
+                0,
+            ),
+            "recommended_taker_slippage_bps": execution_calibration.get(
+                "recommended_taker_slippage_bps"
+            ),
+            "risk_overlay_applied": (
+                execution_calibration.get("risk_overlay") or {}
+            ).get("applied", False),
         },
     }
 
@@ -1001,6 +1018,26 @@ async def _prepare_full_chain_run_fixture(
             "edge_snapshot_unavailable:"
             + str(edge_snapshot.get("reason") or edge_snapshot.get("status") or "unknown")
         )
+    execution_calibration = await asyncio.to_thread(
+        _ec.fetch_execution_calibration_sync,
+        get_pg_conn_fn=get_pg_conn,
+        symbols=symbols,
+        strategies=strategies,
+        asof_ms=start_ms,
+    )
+    risk_overrides = _ec.apply_execution_calibration_to_risk_overrides(
+        risk_overrides,
+        execution_calibration,
+    )
+    if execution_calibration.get("status") not in {"calibrated", "limited"}:
+        warnings.append(
+            "execution_calibration_conservative_bound:"
+            + str(
+                execution_calibration.get("reason")
+                or execution_calibration.get("status")
+                or "unknown"
+            )
+        )
 
     fixture_path = await asyncio.to_thread(
         _write_full_chain_s2_fixture,
@@ -1019,6 +1056,7 @@ async def _prepare_full_chain_run_fixture(
         microstructure_stats=microstructure_stats,
         instrument_stats=instrument_stats,
         edge_snapshot=edge_snapshot,
+        execution_calibration=execution_calibration,
     )
 
     return {
@@ -1037,6 +1075,7 @@ async def _prepare_full_chain_run_fixture(
         "microstructure_overlay": microstructure_stats,
         "instrument_specs": instrument_stats,
         "input_fidelity": input_fidelity,
+        "execution_calibration": execution_calibration,
         "start_ms": start_ms,
         "end_ms": end_ms,
         "strategy_params": strategy_params,
@@ -1058,6 +1097,7 @@ def _build_manifest_jsonb(
     edge_snapshot: dict[str, Any],
     microstructure_overlay: dict[str, Any],
     input_fidelity: dict[str, Any],
+    execution_calibration: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "manifest_version": 1,
@@ -1086,6 +1126,7 @@ def _build_manifest_jsonb(
         "edge_estimates": edge_snapshot.get("edge_estimates") or {},
         "microstructure_overlay": microstructure_overlay,
         "input_fidelity": input_fidelity,
+        "execution_calibration": execution_calibration,
         "replay_tier": "s2_public_replay",
         "promotion_allowed": False,
         "promotion_block_reason": "current_config_in_sample_sandbox",
@@ -1279,6 +1320,7 @@ async def post_replay_full_chain_run(
             edge_snapshot=prepared["edge_snapshot"],
             microstructure_overlay=prepared["microstructure_overlay"],
             input_fidelity=prepared["input_fidelity"],
+            execution_calibration=prepared["execution_calibration"],
         )
         registered.append(
             await _register_full_chain_experiment(
@@ -1328,6 +1370,7 @@ async def post_replay_full_chain_run(
         "microstructure_overlay": prepared["microstructure_overlay"],
         "instrument_specs": prepared["instrument_specs"],
         "input_fidelity": prepared["input_fidelity"],
+        "execution_calibration": prepared["execution_calibration"],
         "strategies": strategies,
         "strategy_count": len(strategies),
         "runs": runs,
