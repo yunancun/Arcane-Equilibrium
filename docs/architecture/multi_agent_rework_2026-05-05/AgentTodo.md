@@ -258,7 +258,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-030 | PA | P0 | TODO | Finalize `agent_spine` Rust module design. | RFC lists module files, interfaces, stores, and feature flags. |
+| MAG-030 | PA | P0 | DONE (RFC) | Finalize `agent_spine` Rust module design. | `2026-05-07--mag030_agent_spine_rust_module_design.md` defines Rust module files, mode/contracts/store/router interfaces, DB object/edge/state/idempotency stores, feature flags, and MAG-031..035 implementation seams. No runtime behavior change. |
 | MAG-031 | E1 | P0 | TODO | Implement `StrategySignal` adapter for Rust strategies. | Existing strategy outputs can be persisted as signals without executing. |
 | MAG-032 | E1 | P0 | TODO | Implement spine store for StrategistDecision, GuardianVerdict, ExecutionPlan, ExecutionReport. | DB chain query can join signal -> decision -> verdict -> plan. |
 | MAG-033 | E1a | P0 | TODO | Add Python `agent_spine_client.py` for Strategist/Guardian/Analyst interaction. | Python agents can publish/consume typed objects without free-text routing. |
