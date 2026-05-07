@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-071 AnalystInsight evidence links: AgentSpineClient now persists unique evidence_for edges from each evidence_ref to AnalystInsight, with tier/type/level metadata for traceability to round trips and strategy metrics | workspace/reports/2026-05-07--agenttodo_mag071_analyst_insight_evidence_links.md |
 | 2026-05-07 | AgentTodo MAG-070 AnalystInsight schema: Python contracts now define L1/L2/L3 analyst tiers, tier-scoped insight types, fact/inference/hypothesis labels, bounded confidence, recommendation, and severity; analyzed_by edges carry tier/type/level | workspace/reports/2026-05-07--agenttodo_mag070_analyst_insight_schema.md |
 | 2026-05-07 | AgentTodo MAG-064 Executor scope regression: focused Python tests now prove ExecutionPlan generation and AgentSpine persistence keep symbol/direction sourced only from the approved StrategistDecision; M6 Executor Planner closed | workspace/reports/2026-05-07--agenttodo_mag064_executor_scope_regression.md |
 | 2026-05-07 | AgentTodo MAG-060 ExecutionPlan interface: Python/Rust ExecutionPlan contracts now carry allowed order styles, verdict version, symbol/direction source, reduce-only, urgency, slippage, maker preference, stop-policy handoff, and lease request fields; Python spine client refuses plans that do not match a prior StrategistDecision plus approved/modified GuardianVerdict | workspace/reports/2026-05-07--agenttodo_mag060_execution_plan_interface.md |
@@ -1603,3 +1604,32 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   deploy, DB write, live auth, runtime flag, or trading authority change was
   made.
 - Next AgentTodo item is MAG-071 Persist AnalystInsight evidence links.
+
+## 2026-05-07 AgentTodo MAG-071 AnalystInsight Evidence Links
+
+### Result
+- MAG-071 is complete.
+- `AgentSpineClient.publish_analyst_insight()` now writes:
+  - the AnalystInsight object,
+  - the parent `analyzed_by` edge when an execution report, order plan, or
+    decision parent exists,
+  - one unique `evidence_for` edge from each non-empty `evidence_ref` to the
+    AnalystInsight.
+- `evidence_for` edge details carry the evidence ref, original index, analyst
+  tier, insight type, and fact/inference/hypothesis level.
+- Tests cover traceability from round-trip and strategy-metric evidence IDs
+  while de-duplicating repeated evidence refs.
+
+### Verification
+- Mac targeted: spine client + Strategist analyst-consumption pytest 34/0,
+  py_compile, and diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 34/0, py_compile, and diff check.
+
+### Boundary
+- No runtime Analyst emission wiring, Strategist/Guardian behavior change,
+  cloud call, runtime submit path, Rust contract change, rebuild, restart,
+  deploy, DB write, live auth, runtime flag, or trading authority change was
+  made.
+- Next AgentTodo item is MAG-072 Strategist consumes losing/winning patterns
+  through typed rules.
