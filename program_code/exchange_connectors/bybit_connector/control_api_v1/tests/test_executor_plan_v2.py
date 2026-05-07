@@ -158,6 +158,54 @@ def test_guardian_p2_modifications_tighten_qty_stop_cooldown_without_scope_chang
     assert plan.metadata["applied_p2_modifications"][0]["applied_qty"] == 0.4
 
 
+def test_executor_plan_scope_is_copied_only_from_approved_decision() -> None:
+    decision = _decision(
+        decision_id="decision-paper-ETHUSDT-1",
+        signal_id="sig-paper-ETHUSDT-1",
+        symbol="ETHUSDT",
+        direction="short",
+        metadata={
+            "executor_symbol": "BTCUSDT",
+            "executor_direction": "long",
+        },
+    )
+    verdict = _verdict(
+        decision_id=decision.decision_id,
+        symbol=decision.symbol,
+        p2_modifications=[
+            GuardianP2Modification(
+                field="size",
+                action="reduce",
+                original_value=1.0,
+                modified_value=0.8,
+                unit="base_qty",
+                reason_code="soft_scope_decoy",
+                reason="scope metadata must remain advisory only",
+                metadata={
+                    "suggested_symbol": "SOLUSDT",
+                    "suggested_direction": "long",
+                },
+            )
+        ],
+        metadata={
+            "symbol": "BTCUSDT",
+            "direction": "long",
+        },
+    )
+
+    plan = build_execution_plan(decision, verdict)
+
+    assert plan.symbol == decision.symbol
+    assert plan.direction == decision.direction
+    assert plan.symbol_source == "strategist_decision"
+    assert plan.direction_source == "strategist_decision"
+    assert plan.qty == 0.8
+    assert plan.metadata["guardian_p2_modifications"][0]["metadata"] == {
+        "suggested_symbol": "SOLUSDT",
+        "suggested_direction": "long",
+    }
+
+
 def test_rejected_guardian_verdict_fails_closed() -> None:
     with pytest.raises(ValueError, match="guardian_verdict_rejects_execution_plan"):
         build_execution_plan(_decision(), _verdict(allow=False, risk_level="high"))
