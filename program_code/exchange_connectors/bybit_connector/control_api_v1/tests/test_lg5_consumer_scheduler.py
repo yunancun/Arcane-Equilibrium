@@ -68,6 +68,40 @@ class _FakeHub:
         return self._authorized
 
 
+class _FakeCursor:
+    """Tiny cursor spy for _fetch_pending_candidate_ids SQL shape tests.
+    _fetch_pending_candidate_ids SQL 形狀測試用極簡 cursor spy。"""
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+        self.sql = ""
+        self.params: tuple[Any, ...] | None = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple[Any, ...]) -> None:
+        self.sql = sql
+        self.params = params
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self._rows
+
+
+class _FakeConn:
+    """Connection wrapper exposing a single fake cursor.
+    暴露單一 fake cursor 的 connection wrapper。"""
+
+    def __init__(self, cursor: _FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> _FakeCursor:
+        return self._cursor
+
+
 @pytest.fixture(autouse=True)
 def _reset_singleton():
     """Reset module singleton + leader lock fd before/after each test.
@@ -76,6 +110,38 @@ def _reset_singleton():
     _reset_for_tests()
     yield
     _reset_for_tests()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 0. Pending candidate fetch SQL / Pending candidate 選取 SQL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPendingCandidateFetch:
+    """Lock the [42] drain contract at the SQL selection layer.
+    在 SQL 選取層鎖住 [42] drain 契約。"""
+
+    def test_fetch_excludes_candidates_already_review_audited(self, monkeypatch):
+        """Already-audited candidates must not starve later unaudited rows.
+        已 audit candidate 不可持續佔住 cap，導致後續 unaudited rows 飢餓。"""
+        from app import lg5_review_consumer_scheduler as mod
+
+        cursor = _FakeCursor([(241,), (249,), (None,)])
+        conn = _FakeConn(cursor)
+        returned: list[Any] = []
+
+        monkeypatch.setattr(mod, "get_conn", lambda: conn)
+        monkeypatch.setattr(mod, "put_conn", lambda c: returned.append(c))
+
+        ids = mod._fetch_pending_candidate_ids(16)
+
+        assert ids == [241, 249]
+        normalized_sql = " ".join(cursor.sql.split())
+        assert "NOT EXISTS" in normalized_sql
+        assert "learning.governance_audit_log AS a" in normalized_sql
+        assert "a.candidate_id = c.id" in normalized_sql
+        assert "a.event_type = 'review_live_candidate'" in normalized_sql
+        assert cursor.params == (16,)
+        assert returned == [conn]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

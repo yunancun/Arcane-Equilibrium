@@ -116,8 +116,8 @@ DEFAULT_MAX_PER_CYCLE = 16
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _fetch_pending_candidate_ids(limit: int) -> list[int]:
-    """Fetch IDs of pending live promotion candidates (decision_lease_id IS NULL).
-    取所有 pending live promotion candidate ID（decision_lease_id IS NULL）。
+    """Fetch unaudited pending live promotion candidate IDs.
+    取尚未 audit 的 pending live promotion candidate ID。
 
     Returns oldest-first so the longest-waiting candidates are reviewed first
     (mitigates [42] unaudited_over_1h backlog).
@@ -134,12 +134,18 @@ def _fetch_pending_candidate_ids(limit: int) -> list[int]:
             cur.execute(
                 """
                 SELECT id
-                FROM learning.mlde_param_applications
-                WHERE engine_mode = 'live'
-                  AND status = 'candidate'
-                  AND application_type = 'live_promotion_candidate'
-                  AND decision_lease_id IS NULL
-                ORDER BY ts ASC
+                FROM learning.mlde_param_applications AS c
+                WHERE c.engine_mode = 'live'
+                  AND c.status = 'candidate'
+                  AND c.application_type = 'live_promotion_candidate'
+                  AND c.decision_lease_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM learning.governance_audit_log AS a
+                      WHERE a.candidate_id = c.id
+                        AND a.event_type = 'review_live_candidate'
+                  )
+                ORDER BY c.ts ASC
                 LIMIT %s
                 """,
                 (limit,),
