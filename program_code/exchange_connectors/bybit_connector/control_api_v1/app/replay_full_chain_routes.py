@@ -234,6 +234,16 @@ def _fetch_microstructure_overlays_sync(
                 }
             cur.execute(
                 """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'market'
+                      AND table_name = 'ob_snapshots'
+                );
+                """
+            )
+            has_orderbook = bool(cur.fetchone()[0])
+            cur.execute(
+                """
                 SELECT column_name
                 FROM information_schema.columns
                 WHERE table_schema = 'market'
@@ -272,6 +282,29 @@ def _fetch_microstructure_overlays_sync(
                 (symbols, start_ms - _microstructure_max_staleness_ms(), end_ms),
             )
             rows = _cursor_fetchall(cur)
+            ob_rows: list[Any] = []
+            if has_orderbook:
+                cur.execute(
+                    """
+                    SELECT
+                        symbol,
+                        floor(extract(epoch from ts) * 1000)::bigint AS ts_ms,
+                        bid_depth_5,
+                        ask_depth_5,
+                        spread_bps
+                    FROM market.ob_snapshots
+                    WHERE symbol = ANY(%s)
+                      AND ts >= to_timestamp(%s / 1000.0)
+                      AND ts <= to_timestamp(%s / 1000.0)
+                    ORDER BY symbol, ts ASC;
+                    """,
+                    (
+                        symbols,
+                        start_ms - _microstructure_max_staleness_ms(),
+                        end_ms,
+                    ),
+                )
+                ob_rows = _cursor_fetchall(cur)
     except Exception as exc:  # noqa: BLE001
         return {
             "status": "unavailable",
@@ -308,14 +341,32 @@ def _fetch_microstructure_overlays_sync(
             "open_interest": float(row[10]) if row[10] is not None else None,
             "funding_rate": float(row[11]) if row[11] is not None else None,
         })
+    orderbook_records: dict[str, list[dict[str, Any]]] = {}
+    for row in ob_rows:
+        symbol = str(row[0]).strip().upper()
+        if not symbol:
+            continue
+        bid_depth = _finite_float(row[2])
+        ask_depth = _finite_float(row[3])
+        if bid_depth is None and ask_depth is None:
+            continue
+        orderbook_records.setdefault(symbol, []).append({
+            "ts_ms": int(row[1]),
+            "bid_depth_5": bid_depth,
+            "ask_depth_5": ask_depth,
+            "spread_bps": _finite_float(row[4]),
+        })
     record_count = sum(len(items) for items in records.values())
+    orderbook_count = sum(len(items) for items in orderbook_records.values())
     return {
-        "status": "ok" if record_count else "empty",
-        "source": "market.market_tickers",
+        "status": "ok" if (record_count or orderbook_count) else "empty",
+        "source": "market.market_tickers+market.ob_snapshots",
         "records": records,
+        "orderbook_records": orderbook_records,
         "record_count": record_count,
+        "orderbook_record_count": orderbook_count,
         "symbol_count": len(records),
-        "reason": None if record_count else "no_bbo_rows_for_window",
+        "reason": None if (record_count or orderbook_count) else "no_microstructure_rows_for_window",
     }
 
 
@@ -341,6 +392,15 @@ def _apply_microstructure_overlays(
             continue
         rows.sort(key=lambda item: int(item.get("ts_ms", 0)))
         timestamps[str(symbol)] = [int(item.get("ts_ms", 0)) for item in rows]
+    orderbook_by_symbol = overlay.get("orderbook_records")
+    if not isinstance(orderbook_by_symbol, dict):
+        orderbook_by_symbol = {}
+    orderbook_timestamps: dict[str, list[int]] = {}
+    for symbol, rows in orderbook_by_symbol.items():
+        if not isinstance(rows, list):
+            continue
+        rows.sort(key=lambda item: int(item.get("ts_ms", 0)))
+        orderbook_timestamps[str(symbol)] = [int(item.get("ts_ms", 0)) for item in rows]
 
     enriched = 0
     field_counts: dict[str, int] = {
@@ -351,50 +411,74 @@ def _apply_microstructure_overlays(
         "index_price": 0,
         "open_interest": 0,
         "funding_rate": 0,
+        "bid_depth_5": 0,
+        "ask_depth_5": 0,
     }
+    orderbook_enriched = 0
     for event in events:
         symbol = str(event.get("symbol") or "").upper()
         event_ts = int(event.get("ts_ms") or 0)
         rows = records_by_symbol.get(symbol)
         ts_values = timestamps.get(symbol)
-        if not rows or not ts_values:
-            continue
-        idx = bisect.bisect_right(ts_values, event_ts) - 1
-        if idx < 0:
-            continue
-        record = rows[idx]
-        age_ms = event_ts - int(record["ts_ms"])
-        if age_ms < 0 or age_ms > max_staleness_ms:
-            continue
-        event["best_bid"] = record["best_bid"]
-        event["best_ask"] = record["best_ask"]
-        field_counts["best_bid"] += 1
-        field_counts["best_ask"] += 1
-        if record.get("bid_size") is not None:
-            event["bid_size"] = record["bid_size"]
-        if record.get("ask_size") is not None:
-            event["ask_size"] = record["ask_size"]
-        if record.get("spread_bps") is not None:
-            event["spread_bps"] = record["spread_bps"]
-        for field in (
-            "turnover_24h",
-            "volume_24h",
-            "index_price",
-            "open_interest",
-            "funding_rate",
-        ):
-            value = record.get(field)
-            if value is None:
-                continue
-            try:
-                parsed = float(value)
-            except (TypeError, ValueError):
-                continue
-            if parsed == parsed:
-                event[field] = parsed
-                field_counts[field] += 1
-        event["microstructure_source"] = "market.market_tickers"
-        enriched += 1
+        ticker_enriched = False
+        if rows and ts_values:
+            idx = bisect.bisect_right(ts_values, event_ts) - 1
+            if idx >= 0:
+                record = rows[idx]
+                age_ms = event_ts - int(record["ts_ms"])
+                if 0 <= age_ms <= max_staleness_ms:
+                    event["best_bid"] = record["best_bid"]
+                    event["best_ask"] = record["best_ask"]
+                    field_counts["best_bid"] += 1
+                    field_counts["best_ask"] += 1
+                    if record.get("bid_size") is not None:
+                        event["bid_size"] = record["bid_size"]
+                    if record.get("ask_size") is not None:
+                        event["ask_size"] = record["ask_size"]
+                    if record.get("spread_bps") is not None:
+                        event["spread_bps"] = record["spread_bps"]
+                    for field in (
+                        "turnover_24h",
+                        "volume_24h",
+                        "index_price",
+                        "open_interest",
+                        "funding_rate",
+                    ):
+                        value = record.get(field)
+                        if value is None:
+                            continue
+                        parsed = _finite_float(value)
+                        if parsed is not None:
+                            event[field] = parsed
+                            field_counts[field] += 1
+                    ticker_enriched = True
+        ob_rows = orderbook_by_symbol.get(symbol)
+        ob_ts_values = orderbook_timestamps.get(symbol)
+        ob_enriched = False
+        if ob_rows and ob_ts_values:
+            ob_idx = bisect.bisect_right(ob_ts_values, event_ts) - 1
+            if ob_idx >= 0:
+                ob_record = ob_rows[ob_idx]
+                ob_age_ms = event_ts - int(ob_record["ts_ms"])
+                if 0 <= ob_age_ms <= max_staleness_ms:
+                    for field in ("bid_depth_5", "ask_depth_5", "spread_bps"):
+                        value = ob_record.get(field)
+                        if value is None:
+                            continue
+                        parsed = _finite_float(value)
+                        if parsed is not None:
+                            event[field] = parsed
+                            if field in field_counts:
+                                field_counts[field] += 1
+                    ob_enriched = True
+                    orderbook_enriched += 1
+        if ticker_enriched or ob_enriched:
+            event["microstructure_source"] = (
+                "market.market_tickers+market.ob_snapshots"
+                if ticker_enriched and ob_enriched
+                else ("market.ob_snapshots" if ob_enriched else "market.market_tickers")
+            )
+            enriched += 1
 
     field_coverage = {
         field: (count / len(events)) if events else 0.0
@@ -411,9 +495,15 @@ def _apply_microstructure_overlays(
     )
     return {
         "status": "ok" if enriched else "empty",
-        "source": "market.market_tickers",
+        "source": "market.market_tickers+market.ob_snapshots",
         "event_count": len(events),
         "enriched_event_count": enriched,
+        "orderbook_depth_event_count": orderbook_enriched,
+        "orderbook_depth_coverage_ratio": (
+            orderbook_enriched / len(events)
+            if events
+            else 0.0
+        ),
         "coverage_ratio": (enriched / len(events)) if events else 0.0,
         "bbo_anchor_status": (
             "available" if bbo_anchor_event_count else "unavailable"
@@ -512,6 +602,14 @@ def _build_input_fidelity_summary(
             "status": microstructure_stats.get("status"),
             "source": microstructure_stats.get("source"),
             "coverage_ratio": microstructure_stats.get("coverage_ratio", 0.0),
+            "orderbook_depth_event_count": microstructure_stats.get(
+                "orderbook_depth_event_count",
+                0,
+            ),
+            "orderbook_depth_coverage_ratio": microstructure_stats.get(
+                "orderbook_depth_coverage_ratio",
+                0.0,
+            ),
             "bbo_anchor_status": microstructure_stats.get("bbo_anchor_status"),
             "bbo_anchor_event_count": microstructure_stats.get(
                 "bbo_anchor_event_count",
@@ -564,6 +662,15 @@ def _build_input_fidelity_summary(
             ),
             "recommended_maker_fill_probability_cap": execution_calibration.get(
                 "recommended_maker_fill_probability_cap",
+            ),
+            "latency_status": execution_calibration.get("latency_status"),
+            "latency_sample_count": execution_calibration.get(
+                "latency_sample_count",
+                0,
+            ),
+            "latency_ms": execution_calibration.get("latency_ms"),
+            "recommended_latency_ms": execution_calibration.get(
+                "recommended_latency_ms"
             ),
         },
     }
@@ -793,6 +900,16 @@ def _json_safe_payload(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     return value
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return None
+    return parsed
 
 
 def _fetch_edge_estimate_snapshot_sync(
@@ -1053,6 +1170,11 @@ async def _prepare_full_chain_run_fixture(
         )
         if bbo_anchor_coverage < _BBO_ANCHOR_S1_COVERAGE_RATIO:
             warnings.append(f"bbo_anchor_coverage_low:{bbo_anchor_coverage:.2f}")
+        orderbook_coverage = float(
+            microstructure_stats.get("orderbook_depth_coverage_ratio") or 0.0
+        )
+        if orderbook_coverage < _BBO_ANCHOR_S1_COVERAGE_RATIO:
+            warnings.append(f"orderbook_depth_coverage_low:{orderbook_coverage:.2f}")
     if instrument_stats.get("status") != "ok":
         warnings.append(
             "instrument_specs_unavailable:"
@@ -1095,6 +1217,15 @@ async def _prepare_full_chain_run_fixture(
             + str(
                 execution_calibration.get("maker_fill_probability_reason")
                 or execution_calibration.get("maker_fill_probability_status")
+                or "unknown"
+            )
+        )
+    if execution_calibration.get("latency_status") not in {"calibrated", "limited"}:
+        warnings.append(
+            "latency_calibration_conservative_bound:"
+            + str(
+                execution_calibration.get("latency_reason")
+                or execution_calibration.get("latency_status")
                 or "unknown"
             )
         )

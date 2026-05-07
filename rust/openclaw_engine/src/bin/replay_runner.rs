@@ -194,6 +194,7 @@
 
 use std::path::Path;
 
+use openclaw_core::guardian::GuardianConfig;
 use openclaw_engine::config::RiskConfig;
 use openclaw_engine::edge_estimates::EdgeEstimates;
 use openclaw_engine::ml::kelly_sizer::KellyConfig;
@@ -207,9 +208,7 @@ use openclaw_engine::replay::manifest_signer::{
 };
 use openclaw_engine::replay::profile::ReplayProfile;
 use openclaw_engine::replay::report_writer;
-use openclaw_engine::replay::risk_adapter::{
-    ReplayPaperSnapshot, ReplayRiskAdapter,
-};
+use openclaw_engine::replay::risk_adapter::{ReplayPaperSnapshot, ReplayRiskAdapter};
 use openclaw_engine::replay::runner::{self, ReplayResult};
 use openclaw_engine::replay::scanner_timeline::{
     replay_default_scanner_config, ReplayScannerTimeline,
@@ -217,7 +216,6 @@ use openclaw_engine::replay::scanner_timeline::{
 use openclaw_engine::replay::strategy_adapter::ReplayStrategyAdapter;
 use openclaw_engine::scanner::ScannerConfig;
 use openclaw_engine::strategies::{Strategy, StrategyFactory, StrategyParamsConfig};
-use openclaw_core::guardian::GuardianConfig;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wave 3 P2b-S7/S8/S9 三層 fail-closed guard 串聯。
@@ -393,9 +391,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         events,
     )?
     .with_starting_balance(starting_balance)?
-    .with_execution_calibration(maker_fill_cap_from_manifest(
-        manifest.execution_calibration.as_ref(),
-    )?);
+    .with_execution_calibration(
+        maker_fill_cap_from_manifest(manifest.execution_calibration.as_ref())?,
+        latency_ms_from_manifest(manifest.execution_calibration.as_ref())?,
+    );
     if let Some(timeline) = scanner_timeline {
         pipeline = pipeline.with_scanner_timeline(timeline);
     }
@@ -430,33 +429,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // with shape-mismatch reason; CI parses ``$?`` non-zero exit
         // (CLAUDE.md §四 fail-closed).
         let strategy_params_config: StrategyParamsConfig = match &manifest.strategy_params {
-            Some(blob) => {
-                serde_json::from_value(blob.clone()).map_err(|e| {
-                    Box::<dyn std::error::Error>::from(format!(
-                        "replay_runner: manifest.strategy_params shape \
+            Some(blob) => serde_json::from_value(blob.clone()).map_err(|e| {
+                Box::<dyn std::error::Error>::from(format!(
+                    "replay_runner: manifest.strategy_params shape \
                          mismatch (cannot deserialise into \
                          StrategyParamsConfig): {} (R5-T4 round 2 \
                          fail-closed; check fixture builder + register \
                          handler V049 _replay_strategy_params injection)",
-                        e
-                    ))
-                })?
-            }
+                    e
+                ))
+            })?,
             None => StrategyParamsConfig::default(),
         };
         let risk_config: RiskConfig = match &manifest.risk_overrides {
             Some(blob) => {
-                let cfg: RiskConfig =
-                    serde_json::from_value(blob.clone()).map_err(|e| {
-                        Box::<dyn std::error::Error>::from(format!(
-                            "replay_runner: manifest.risk_overrides shape \
+                let cfg: RiskConfig = serde_json::from_value(blob.clone()).map_err(|e| {
+                    Box::<dyn std::error::Error>::from(format!(
+                        "replay_runner: manifest.risk_overrides shape \
                              mismatch (cannot deserialise into RiskConfig): \
                              {} (R5-T4 round 2 fail-closed; check fixture \
                              builder + register handler V049 \
                              _replay_risk_overrides injection)",
-                            e
-                        ))
-                    })?;
+                        e
+                    ))
+                })?;
                 // Cheap sanity: position_size_max_pct must be in (0, 100].
                 // Catches obvious caller mistakes (e.g. negative / NaN) so
                 // adapter doesn't proceed with poisoned config (Guardian
@@ -492,13 +488,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ))
             })?;
 
-        let strategy_adapter = ReplayStrategyAdapter::new(chosen, profile)
-            .map_err(|e| {
-                Box::<dyn std::error::Error>::from(format!(
-                    "replay_runner: ReplayStrategyAdapter::new failed: {:?}",
-                    e
-                ))
-            })?;
+        let strategy_adapter = ReplayStrategyAdapter::new(chosen, profile).map_err(|e| {
+            Box::<dyn std::error::Error>::from(format!(
+                "replay_runner: ReplayStrategyAdapter::new failed: {:?}",
+                e
+            ))
+        })?;
         // Sprint C R6-T3 — derive p1_risk_pct + KellyConfig from the
         // already-deserialised risk_config snapshot (replaces Sprint A
         // hardcoded 0.02 + `None::<KellyConfig>` baseline). Replay uses
@@ -569,11 +564,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // = risk_config.slippage（G7-07 可熱重載；預設鏡射 live SLIPPAGE_TIERS）。
         // 第三參數僅為冷啟動 fallback；adapter execute 會在每個 event 前用
         // fixture turnover_24h 或 rolling 24h turnover 覆寫。
-        pipeline = pipeline.with_replay_fee_context(
-            None,
-            Some(risk_config.slippage.clone()),
-            None,
-        );
+        pipeline = pipeline.with_replay_fee_context(None, Some(risk_config.slippage.clone()), None);
         eprintln!(
             "replay_runner: adapter path engaged strategy={} \
              starting_balance={} starting_price={} \
@@ -885,6 +876,35 @@ fn maker_fill_cap_from_manifest(
     Ok(Some(raw))
 }
 
+fn latency_ms_from_manifest(
+    blob: Option<&serde_json::Value>,
+) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+    let Some(value) = blob else {
+        return Ok(None);
+    };
+    let raw = value
+        .get("recommended_latency_ms")
+        .and_then(|item| item.as_u64())
+        .or_else(|| {
+            value
+                .get("latency_ms")
+                .and_then(|latency| latency.get("q50"))
+                .and_then(|item| item.as_u64())
+        });
+    let Some(latency_ms) = raw else {
+        return Ok(None);
+    };
+    if latency_ms > 60_000 {
+        return Err(format!(
+            "replay_runner: manifest.execution_calibration latency={}ms invalid; \
+             must be <= 60000ms",
+            latency_ms
+        )
+        .into());
+    }
+    Ok(Some(latency_ms))
+}
+
 /// Load the manifest JSON and run the manifest_signer verify path.
 ///
 /// 載入 manifest JSON 並跑 manifest_signer 驗證路徑。
@@ -1052,14 +1072,13 @@ fn load_and_verify_manifest(
     // canonicalize 路徑（REF-20 Sprint 1 Track B）：
     //   strip envelope 欄位 + sorted-keys serde_json::to_vec → 與 Python
     //   sibling signer byte-equal。
-    let canonical_body =
-        canonical_body_for_signing(raw.as_bytes()).map_err(|e| {
-            format!(
-                "manifest_signer_canonicalize_failed: {} (manifest body must \
+    let canonical_body = canonical_body_for_signing(raw.as_bytes()).map_err(|e| {
+        format!(
+            "manifest_signer_canonicalize_failed: {} (manifest body must \
                  be top-level JSON object per V3 §5)",
-                e
-            )
-        })?;
+            e
+        )
+    })?;
 
     // Sanity gate / 完整性 gate: declared manifest_hash must match the
     // actual hash of the canonical body. This catches body-tampering after
@@ -1154,8 +1173,7 @@ mod tests {
     /// Sign the given body with fixture key, return (sig_hex, hash_hex).
     fn sign_body(body: &[u8], fingerprint: &str) -> (String, String) {
         let key_bytes = hex::decode(FIXTURE_KEY_HEX).unwrap();
-        let signer =
-            ManifestSigner::new_from_bytes_for_test(key_bytes, fingerprint.to_string());
+        let signer = ManifestSigner::new_from_bytes_for_test(key_bytes, fingerprint.to_string());
         let sig = signer.sign(body);
         let hash = compute_body_hash(body);
         (sig, hash)
@@ -1178,11 +1196,13 @@ mod tests {
             body.insert((*k).to_string(), v.clone());
         }
         if let Some(rid) = run_id {
-            body.insert("run_id".to_string(), serde_json::Value::String(rid.to_string()));
+            body.insert(
+                "run_id".to_string(),
+                serde_json::Value::String(rid.to_string()),
+            );
         }
         // 2. canonical body bytes for signing (sorted-keys + compact)。
-        let canon =
-            serde_json::to_vec(&serde_json::Value::Object(body.clone())).unwrap();
+        let canon = serde_json::to_vec(&serde_json::Value::Object(body.clone())).unwrap();
         // 3. 算 sig + hash。
         let (sig, hash) = sign_body(&canon, fingerprint);
         // 4. 把 sig + hash + signature_key_ref envelope 加進 body 寫成完整 manifest。
@@ -1257,8 +1277,7 @@ mod tests {
         // Mutate fixture_uri without updating sig/hash, simulating post-sign
         // body tampering.
         let raw = std::fs::read_to_string(&manifest_path).unwrap();
-        let tampered =
-            raw.replace("\"fixtures/x/\"", "\"fixtures/ATTACKER_PATH/\"");
+        let tampered = raw.replace("\"fixtures/x/\"", "\"fixtures/ATTACKER_PATH/\"");
         std::fs::write(&manifest_path, tampered).unwrap();
 
         let err = load_and_verify_manifest(&manifest_path)
@@ -1444,7 +1463,8 @@ mod tests {
         let canon = canonical_body_for_signing(disk_full).unwrap();
         let expected = br#"{"data_tier":"S2","experiment_id":"x","manifest_version":1}"#;
         assert_eq!(
-            canon, expected,
+            canon,
+            expected,
             "canonical body drift: got {} expected {}",
             std::str::from_utf8(&canon).unwrap(),
             std::str::from_utf8(expected).unwrap()
@@ -1537,8 +1557,7 @@ mod tests {
             .risk_overrides
             .as_ref()
             .expect("risk_overrides present");
-        let typed: RiskConfig =
-            serde_json::from_value(blob.clone()).expect("blob → typed");
+        let typed: RiskConfig = serde_json::from_value(blob.clone()).expect("blob → typed");
         let pct = typed.limits.position_size_max_pct;
         assert!(
             (pct - 7.5).abs() < 1e-9,
@@ -1564,8 +1583,7 @@ mod tests {
             "manifest_hash": "cafebabe",
             "signature_key_ref": "fp_x"
         });
-        let parsed: ReplayManifest =
-            serde_json::from_str(&raw.to_string()).expect("legacy parses");
+        let parsed: ReplayManifest = serde_json::from_str(&raw.to_string()).expect("legacy parses");
         assert!(
             parsed.strategy_params.is_none(),
             "expected None for absent strategy_params"

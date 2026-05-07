@@ -140,15 +140,22 @@ replay gap rather than bypassing the trust-tier labels.
 
 ---
 
-## 7. Current Known Gaps
+## 7. Calibration And Retention
 
-These are not runtime availability blockers, but they block stronger S1 claims:
+The one-click workflow now surfaces the S1 calibration inputs directly in the
+Replay tab:
 
-- deterministic partial-fill modeling from local orderbook depth is not fully
-  wired into Rust fills,
-- latency q50/q90 modeling is not wired,
-- baseline-vs-candidate comparison is not complete,
-- drawdown and q10/q50/q90 run bands need balance-curve/bootstrap support,
+- top-5 orderbook depth coverage controls partial-fill sizing,
+- demo/live_demo order state changes provide latency q50/q90,
+- report analytics include balance-curve drawdown and stationary block
+  bootstrap q10/q50/q90 run bands,
+- baseline-vs-candidate comparison is read-only advisory data and never calls
+  the demo/live applier path,
+- recorder retention is maintained by
+  `helper_scripts/cron/ref21_market_recorder_retention.py --apply`.
+
+Current remaining caveat:
+
 - old windows before recorder startup cannot gain historical microstructure
   coverage retroactively.
 

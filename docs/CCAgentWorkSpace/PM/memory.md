@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | REF-21 S1 calibration lift: completed orderbook-depth partial-fill sizing, latency q50/q90 calibration, baseline-vs-candidate comparison, balance curve + stationary block bootstrap run bands, recorder retention/maturity policy, and GUI trust surfacing; empirical confidence still depends on recorder history | workspace/reports/2026-05-07--ref21_s1_calibration_lift.md |
 | 2026-05-07 | REF-21 C5 acceptance/runtime sign-off: C2-C4 deployed sequentially; replay is signed off conditionally as a one-click S2/S2+ development sandbox with read-only ML/Dream advisory ranking, while S1 calibration remains gated by partial fills, latency, baseline comparison, bootstrap/balance curve, and recorder maturity | workspace/reports/2026-05-07--ref21_c5_acceptance_runtime_signoff.md |
 | 2026-05-07 | AgentTodo MAG-023/MAG-025 replay proofs: added active-position-after-scanner-drop runner proof and deterministic SOLUSDT -> XRPUSDT scanner churn fixture; used clean detached worktree staging because Mac main had unrelated uncommitted replay/calibration changes while Linux was clean | workspace/reports/2026-05-07--agenttodo_mag023_mag025_replay_proofs.md |
 | 2026-05-07 | REF-21 C4 advisory ranking checkpoint: added read-only `/api/v1/replay/advisory/rank` with operator auth, K cap, replay limiter, and no mutation/applier path | workspace/reports/2026-05-07--ref21_c4_advisory_rank_checkpoint.md |

@@ -331,6 +331,9 @@ mod tests {
                 symbol: "BTCUSDT".into(),
                 side: "long".into(),
                 qty: 1.0,
+                requested_qty: 1.0,
+                fill_ratio: 1.0,
+                fill_status: "synthetic".into(),
                 price: 100.0,
                 evidence_source_tier: "synthetic_replay".into(),
                 // Sprint C R6-T1+T2: synthetic-walker fixture has no
@@ -341,6 +344,10 @@ mod tests {
                 fee_rate: 0.0,
                 slippage_bps: 0.0,
                 liquidity_role: "unknown".into(),
+                partial_fill_model_status: "synthetic_walker_unavailable".into(),
+                depth_available_qty: None,
+                latency_ms: None,
+                effective_ts_ms: Some(1),
             }],
             pnl_summary: PnlSummary {
                 events_processed: 3,

@@ -83,10 +83,7 @@
 //!
 //! SPEC: REF-20 V3 §4.1 data_tier + §6.1 + §6.2 + workplan §4 Wave 4 R20-P2b-T1.
 
-use openclaw_core::{
-    indicators::IndicatorSnapshot,
-    signals::Signal,
-};
+use openclaw_core::{indicators::IndicatorSnapshot, signals::Signal};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -114,6 +111,8 @@ use std::path::{Path, PathBuf};
 ///     builder derives a rolling 24h turnover from fixture bars.
 ///   - `best_bid` / `best_ask`: optional locally recorded BBO. These are
 ///     consumed only when present and valid; replay does not fabricate them.
+///   - `bid_depth_5` / `ask_depth_5`: optional locally recorded top-5 depth.
+///     These bound deterministic partial-fill sizing when present.
 ///
 /// 欄位語意（中）：
 ///   - `ts_ms`: Unix 毫秒時戳（UTC）。
@@ -127,6 +126,8 @@ use std::path::{Path, PathBuf};
 ///     fill slippage 消費；否則 replay context builder 由 fixture bar 推導。
 ///   - `best_bid` / `best_ask`: 可選本地錄製 BBO。只有存在且有效時消費；
 ///     replay 不偽造這些欄位。
+///   - `bid_depth_5` / `ask_depth_5`: 可選本地錄製 top-5 depth；存在時供
+///     deterministic partial-fill sizing 使用。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MarketEvent {
     pub ts_ms: i64,
@@ -148,6 +149,10 @@ pub struct MarketEvent {
     pub bid_size: Option<f64>,
     #[serde(default)]
     pub ask_size: Option<f64>,
+    #[serde(default)]
+    pub bid_depth_5: Option<f64>,
+    #[serde(default)]
+    pub ask_depth_5: Option<f64>,
     #[serde(default)]
     pub spread_bps: Option<f64>,
     #[serde(default)]
@@ -194,10 +199,7 @@ impl FixtureSource {
     /// 或 `<runtime-local>` 路徑）。Wave 4 拒絕 bare path 以外的 scheme
     /// （`replay://` scheme 保留給未來 in-DB artifact lookup 路徑，
     /// Wave 8 P6 handoff 才用得到）。
-    pub fn from_manifest_strings(
-        data_tier: &str,
-        fixture_uri: &str,
-    ) -> Result<Self, FixtureError> {
+    pub fn from_manifest_strings(data_tier: &str, fixture_uri: &str) -> Result<Self, FixtureError> {
         // Wave 4 only accepts plain-path fixture_uri; `replay://` reserved
         // for Wave 8 in-DB artifact lookup.
         // Wave 4 僅接受純路徑 fixture_uri；`replay://` 保留給 Wave 8 in-DB
@@ -251,7 +253,10 @@ impl FixtureSource {
 pub enum FixtureError {
     /// Fixture file path does not exist OR is not readable.
     /// Fixture file 路徑不存在或無法讀取。
-    FixtureNotFound { path: PathBuf, source: std::io::Error },
+    FixtureNotFound {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// Fixture file exists but JSON cannot be parsed / schema mismatch.
     /// Fixture file 存在但 JSON 無法解析 / schema 不符。
     FixtureFormat { path: PathBuf, reason: String },
@@ -458,6 +463,7 @@ mod tests {
                  "turnover_24h": 1234567.8,
                  "best_bid": 100.4, "best_ask": 100.6,
                  "bid_size": 2.0, "ask_size": 3.0,
+                 "bid_depth_5": 20.0, "ask_depth_5": 30.0,
                  "spread_bps": 19.9005,
                  "microstructure_source": "market.market_tickers",
                  "funding_rate": 0.0001,
@@ -475,6 +481,8 @@ mod tests {
         assert_eq!(events[0].turnover_24h, Some(1234567.8));
         assert_eq!(events[0].best_bid, Some(100.4));
         assert_eq!(events[0].best_ask, Some(100.6));
+        assert_eq!(events[0].bid_depth_5, Some(20.0));
+        assert_eq!(events[0].ask_depth_5, Some(30.0));
         assert_eq!(events[0].funding_rate, Some(0.0001));
         assert_eq!(events[0].index_price, Some(100.55));
         assert_eq!(events[0].open_interest, Some(12345.0));
@@ -496,9 +504,8 @@ mod tests {
 
     #[test]
     fn load_fixture_empty_events() {
-        let fixture = write_fixture(
-            r#"{"schema_version": 1, "source": "s3_synthetic", "events": []}"#,
-        );
+        let fixture =
+            write_fixture(r#"{"schema_version": 1, "source": "s3_synthetic", "events": []}"#);
         let src = FixtureSource::S3Synthetic {
             path: fixture.path().to_path_buf(),
         };

@@ -17,8 +17,10 @@ from .auth import require_scope_and_operator
 
 try:
     from ..replay import route_helpers as _rh  # type: ignore[no-redef]
+    from ..replay import report_analytics as _ra  # type: ignore[no-redef]
 except ImportError:
     from replay import route_helpers as _rh  # type: ignore[no-redef]
+    from replay import report_analytics as _ra  # type: ignore[no-redef]
 
 
 replay_advisory_router = APIRouter(
@@ -41,6 +43,12 @@ class ReplayAdvisoryRankRequest(BaseModel):
     requester: str = Field(default="operator", min_length=1, max_length=64)
     candidates: list[ReplayAdvisoryCandidate] = Field(default_factory=list)
     objective: str = Field(default="fee_net_bps", min_length=1, max_length=64)
+
+
+class ReplayAdvisoryCompareRequest(BaseModel):
+    requester: str = Field(default="operator", min_length=1, max_length=64)
+    baseline: dict[str, Any] = Field(default_factory=dict)
+    candidate: dict[str, Any] = Field(default_factory=dict)
 
 
 def _replay_advisory_rate_limit_key(request: Request) -> str:
@@ -148,7 +156,31 @@ async def post_replay_advisory_rank(
     })
 
 
+@replay_advisory_router.post("/compare")
+@_REPLAY_LIMITER.limit("10/minute", key_func=_replay_advisory_rate_limit_key)
+async def post_replay_advisory_compare(
+    request: Request,
+    body: ReplayAdvisoryCompareRequest,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    _require_replay_write(actor)
+    comparison = _ra.compare_replay_analytics(
+        baseline=body.baseline,
+        candidate=body.candidate,
+    )
+    return _rh.replay_response_envelope({
+        "mode": "replay_advisory_compare",
+        "requester": body.requester,
+        "advisory_only": True,
+        "mutation_allowed": False,
+        "applier_path": "not_invoked",
+        "output_policy": "read_only_baseline_candidate_comparison",
+        "comparison": comparison,
+    })
+
+
 __all__ = [
     "replay_advisory_router",
+    "ReplayAdvisoryCompareRequest",
     "rank_replay_advisory_candidates",
 ]
