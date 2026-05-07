@@ -305,6 +305,37 @@ _CALIBRATION_FILLS_WINDOW_DAYS = 14
 _CALIBRATION_ENGINE_MODES = ("demo", "live_demo")
 
 
+def _manifest_calibration_symbols(
+    single_symbol: Any,
+    symbols_payload: Any,
+) -> list[str]:
+    """Return canonical symbol list for single-symbol or full-chain manifests."""
+    seen: set[str] = set()
+    symbols: list[str] = []
+
+    def _add(value: Any) -> None:
+        symbol = str(value or "").strip().upper()
+        if not symbol or symbol in seen:
+            return
+        seen.add(symbol)
+        symbols.append(symbol)
+
+    _add(single_symbol)
+    if symbols:
+        return symbols
+
+    payload = symbols_payload
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = [payload]
+    if isinstance(payload, (list, tuple)):
+        for item in payload:
+            _add(item)
+    return symbols
+
+
 def _compute_and_persist_calibration(
     cur: Any,
     *,
@@ -319,9 +350,9 @@ def _compute_and_persist_calibration(
     execution_confidence column（從 INSERT 預設 'none' 更新為實際 label）。
 
     流程：
-      1. SELECT V049 row 的 manifest_jsonb->>'strategy' / ->>'symbol'。
+      1. SELECT V049 row 的 manifest_jsonb->>'strategy' / symbol(s)。
       2. SELECT trading.fills（14d window；engine_mode IN demo/live_demo；
-         strategy + symbol 對應）→ 構造 list[FillRecord]。
+         strategy + symbol set 對應）→ 構造 list[FillRecord]。
       3. 跑 derive_execution_confidence(fills, now())。
       4. label != 'none' → 呼 update_execution_confidence(cur, label=...)
          寫 V049（label='none' 不寫，保持 INSERT 預設）。
@@ -341,7 +372,7 @@ def _compute_and_persist_calibration(
     Fail-closed semantic：
         - 任何 SELECT / SQL / 函數錯誤 → log warn + return None；caller
           在主 finalize 流程繼續，不 abort（calibration 是 advisory）。
-        - manifest_jsonb 缺 'strategy' / 'symbol' → return None。
+        - manifest_jsonb 缺 'strategy' / 'symbol(s)' → return None。
         - 0 fills 對應 → derive 回 None label，不 UPDATE。
     """
     # 預設依賴注入（caller 不傳時用 production 版本）。
@@ -364,10 +395,12 @@ def _compute_and_persist_calibration(
             now_fn = lambda: _dt.now(_tz.utc)  # noqa: E731
 
     try:
-        # Step 1：取 V049 row 的 manifest_jsonb 中 strategy + symbol。
+        # Step 1：取 V049 row 的 manifest_jsonb 中 strategy + symbol(s)。
         cur.execute(
             """
-            SELECT manifest_jsonb->>'strategy', manifest_jsonb->>'symbol'
+            SELECT manifest_jsonb->>'strategy',
+                   manifest_jsonb->>'symbol',
+                   manifest_jsonb->'symbols'
               FROM replay.experiments
              WHERE experiment_id = %s::uuid
              LIMIT 1;
@@ -375,13 +408,21 @@ def _compute_and_persist_calibration(
             (str(experiment_id),),
         )
         row = cur.fetchone()
-        if row is None or row[0] is None or row[1] is None:
+        if row is None or row[0] is None:
             logger.info(
-                "calibration: V049 row %s 缺 strategy/symbol；skip", experiment_id,
+                "calibration: V049 row %s 缺 strategy；skip", experiment_id,
             )
             return None
         strategy_name = str(row[0])
-        symbol = str(row[1])
+        symbols = _manifest_calibration_symbols(
+            row[1],
+            row[2] if len(row) > 2 else None,
+        )
+        if not symbols:
+            logger.info(
+                "calibration: V049 row %s 缺 symbol(s)；skip", experiment_id,
+            )
+            return None
 
         # Step 2：SELECT trading.fills 14d 窗口（demo/live_demo only）。
         # V003 schema: ts/symbol/side/qty/price + V008 fee_rate + V015 engine_mode。
@@ -392,14 +433,14 @@ def _compute_and_persist_calibration(
             SELECT ts, side, price, fee_rate
               FROM trading.fills
              WHERE strategy_name = %s
-               AND symbol = %s
+               AND symbol = ANY(%s)
                AND engine_mode = ANY(%s)
                AND ts >= NOW() - (INTERVAL '1 day' * %s)
              ORDER BY ts ASC;
             """,
             (
                 strategy_name,
-                symbol,
+                symbols,
                 list(_CALIBRATION_ENGINE_MODES),
                 _CALIBRATION_FILLS_WINDOW_DAYS,
             ),
@@ -451,8 +492,8 @@ def _compute_and_persist_calibration(
                 return None
 
         logger.info(
-            "calibration: experiment=%s strategy=%s symbol=%s n=%d label=%s",
-            experiment_id, strategy_name, symbol, len(fills), label_value,
+            "calibration: experiment=%s strategy=%s symbols=%d n=%d label=%s",
+            experiment_id, strategy_name, len(symbols), len(fills), label_value,
         )
         return label_value
     except Exception as exc:  # noqa: BLE001 — advisory; never abort finalize
