@@ -242,5 +242,31 @@ pub struct ExecutionReport {
     pub status: String,
     pub exchange_order_id: Option<String>,
     pub fill_id: Option<String>,
+    #[serde(default)]
+    pub requested_qty: Option<f64>,
+    #[serde(default)]
+    pub filled_qty: Option<f64>,
+    #[serde(default)]
+    pub expected_price: Option<f64>,
+    #[serde(default)]
+    pub avg_fill_price: Option<f64>,
+    #[serde(default)]
+    pub slippage_bps: Option<f64>,
+    #[serde(default)]
+    pub fees_paid: Option<f64>,
+    #[serde(default)]
+    pub fee_bps: Option<f64>,
+    #[serde(default)]
+    pub submit_latency_ms: Option<f64>,
+    #[serde(default)]
+    pub fill_latency_ms: Option<f64>,
+    #[serde(default = "default_liquidity_role")]
+    pub liquidity_role: String,
+    #[serde(default)]
+    pub quality_metrics: serde_json::Value,
     pub metadata: serde_json::Value,
+}
+
+fn default_liquidity_role() -> String {
+    "unknown".to_string()
 }

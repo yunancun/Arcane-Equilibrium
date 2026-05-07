@@ -475,8 +475,28 @@ fn shadow_spine_chain_is_complete_while_legacy_signal_msg_stays_unchanged() {
         status: "shadow_planned".to_string(),
         exchange_order_id: None,
         fill_id: None,
+        requested_qty: Some(1.25),
+        filled_qty: Some(1.25),
+        expected_price: Some(101.25),
+        avg_fill_price: Some(101.35),
+        slippage_bps: Some(9.876543),
+        fees_paid: Some(0.031),
+        fee_bps: Some(3.1),
+        submit_latency_ms: Some(120.0),
+        fill_latency_ms: Some(480.0),
+        liquidity_role: "maker".to_string(),
+        quality_metrics: json!({
+            "metric_source": "executor_report_v2",
+            "slippage_bps": 9.876543,
+            "fees_paid": 0.031,
+            "fill_latency_ms": 480.0
+        }),
         metadata: json!({"no_order_submitted": true}),
     };
+    let report_json = serde_json::to_value(&report).expect("execution report json");
+    assert_eq!(report_json["slippage_bps"], 9.876543);
+    assert_eq!(report_json["fees_paid"], 0.031);
+    assert_eq!(report_json["fill_latency_ms"], 480.0);
     let report_obj = SpineObjectEnvelope::from_execution_report(&report, AgentSpineMode::Shadow)
         .expect("execution report envelope");
 

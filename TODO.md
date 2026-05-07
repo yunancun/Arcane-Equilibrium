@@ -101,7 +101,7 @@
 
 #### P1-OPENCLAW — Gateway / Agent Control Console
 
-**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。AgentTodo Sprint A（MAG-015 -> MAG-010..014 -> MAG-016/017 -> MAG-018/019）已完成；M2 MAG-020..026 Scanner Advisory Conversion 已完成；M3 Agent Decision Spine Shadow（MAG-030..035）已完成；M4 Strategist V2（MAG-040..045）已完成；M5 Guardian V2（MAG-050..054）已完成；M6 Executor Planner 已完成 MAG-060 ExecutionPlan interface/order-style contract、MAG-061 ExecutionPlan deterministic generation、MAG-062 Decision Lease binding guard。下一步若繼續 AgentTodo，進 MAG-063 ExecutionReport quality metrics。Telegram/WebChat、proposal approval relay、第二 GUI 仍不在下一步。
+**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。AgentTodo Sprint A（MAG-015 -> MAG-010..014 -> MAG-016/017 -> MAG-018/019）已完成；M2 MAG-020..026 Scanner Advisory Conversion 已完成；M3 Agent Decision Spine Shadow（MAG-030..035）已完成；M4 Strategist V2（MAG-040..045）已完成；M5 Guardian V2（MAG-050..054）已完成；M6 Executor Planner 已完成 MAG-060 ExecutionPlan interface/order-style contract、MAG-061 ExecutionPlan deterministic generation、MAG-062 Decision Lease binding guard、MAG-063 ExecutionReport quality metrics。下一步若繼續 AgentTodo，進 MAG-064 Executor never chooses symbol/direction regression。Telegram/WebChat、proposal approval relay、第二 GUI 仍不在下一步。
 
 | ID | 任務 | 來源 |
 |----|------|------|
