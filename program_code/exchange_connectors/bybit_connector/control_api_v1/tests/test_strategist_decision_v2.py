@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from app.agent_contracts import AnalystInsight
 from app.strategist_decision_v2 import (
     GuardianFeedbackStats,
     StrategyCandidate,
     StrategyMatchInput,
+    TruthRegistryClaim,
     build_strategist_decision,
     normalize_strategy_key,
 )
@@ -133,6 +135,7 @@ def test_negative_net_lcb_blocks_new_open_but_allows_position_review_reduce() ->
 
 def test_strategy_alias_is_normalized_before_persistence() -> None:
     assert normalize_strategy_key("funding_rate_arb") == "funding_arb"
+    assert normalize_strategy_key("grid") == "grid_trading"
 
     decision = build_strategist_decision(
         _match(
@@ -355,3 +358,190 @@ def test_guardian_open_rejection_stats_do_not_block_position_review_reduce() -> 
     assert "guardian_reject_rate_confidence_floor" not in decision.candidate_scores[0][
         "reject_reasons"
     ]
+
+
+def test_analyst_losing_pattern_changes_strategy_preference_with_reason() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-grid-losing-pattern",
+                strategy="grid_trading",
+                action="open",
+                direction="long",
+                market_fit_score=0.80,
+                edge_lcb_bps=20.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                learning_weight=0.8,
+            ),
+            StrategyCandidate(
+                candidate_id="route-ma-neutral-pattern",
+                strategy="ma_crossover",
+                action="open",
+                direction="long",
+                market_fit_score=0.80,
+                edge_lcb_bps=20.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                learning_weight=0.5,
+            ),
+            analyst_insights=[
+                AnalystInsight(
+                    insight_id="analyst-insight-grid-loss-1",
+                    ts_ms=1_700_000_000_020,
+                    engine_mode="paper",
+                    symbol="BTCUSDT",
+                    strategy="grid_trading",
+                    insight_level="inference",
+                    summary="grid_trading losing pattern in one-way shock",
+                    evidence_refs=["roundtrip-grid-loss-1"],
+                    claims=[
+                        {
+                            "claim_id": "claim-grid-loss-1",
+                            "strategy": "grid_trading",
+                            "polarity": "negative",
+                            "confidence": 0.9,
+                            "observation_count": 20,
+                            "reason": "losing pattern: one-way shock",
+                        }
+                    ],
+                )
+            ],
+        )
+    )
+
+    assert decision.selected_strategy == "ma_crossover"
+    grid_score = decision.candidate_scores[0]
+    assert grid_score["learning_feedback"]["learning_weight"] < 0.8
+    assert grid_score["learning_feedback"]["reason_codes"] == [
+        "analyst_negative_pattern:claim-grid-loss-1"
+    ]
+    assert "analyst-insight-grid-loss-1" in grid_score["learning_feedback"]["evidence_refs"]
+
+
+def test_truth_registry_losing_claim_persists_reason_in_selected_candidate_score() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-grid-truth-loss",
+                strategy="grid_trading",
+                action="open",
+                direction="long",
+                market_fit_score=0.9,
+                edge_lcb_bps=35.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                learning_weight=0.8,
+            ),
+            truth_registry_claims=[
+                TruthRegistryClaim(
+                    claim_id="truth-grid-loss-1",
+                    strategy="grid",
+                    symbol="BTCUSDT",
+                    pattern_text="losing: grid_trading fails after one-way shock",
+                    confidence=0.8,
+                    observation_count=20,
+                    evidence_refs=["truth-registry-row-1"],
+                )
+            ],
+        )
+    )
+
+    assert decision.decision_action == "open"
+    feedback = decision.candidate_scores[0]["learning_feedback"]
+    assert feedback["learning_weight"] == 0.5
+    assert feedback["learning_delta"] == -0.3
+    assert feedback["reason_codes"] == ["truth_registry_negative_pattern:truth-grid-loss-1"]
+    assert "truth-grid-loss-1" in decision.inference_refs
+    assert "truth-registry-row-1" in decision.evidence_refs
+    assert decision.portfolio_impact["learning_feedback"]["reason_codes"] == [
+        "truth_registry_negative_pattern:truth-grid-loss-1"
+    ]
+
+
+def test_analyst_positive_pattern_can_boost_lower_rank_strategy() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-grid-neutral",
+                strategy="grid_trading",
+                action="open",
+                direction="long",
+                market_fit_score=0.79,
+                edge_lcb_bps=18.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                learning_weight=0.5,
+            ),
+            StrategyCandidate(
+                candidate_id="route-bb-positive",
+                strategy="bb_breakout",
+                action="open",
+                direction="long",
+                market_fit_score=0.78,
+                edge_lcb_bps=18.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                learning_weight=0.5,
+            ),
+            analyst_insights=[
+                AnalystInsight(
+                    insight_id="analyst-insight-bb-win-1",
+                    ts_ms=1_700_000_000_030,
+                    engine_mode="paper",
+                    symbol="BTCUSDT",
+                    strategy="bb_breakout",
+                    insight_level="fact",
+                    summary="bb_breakout winning pattern after squeeze expansion",
+                    evidence_refs=["roundtrip-bb-win-1"],
+                    claims=[
+                        {
+                            "claim_id": "claim-bb-win-1",
+                            "strategy": "bb_breakout",
+                            "polarity": "positive",
+                            "confidence": 0.9,
+                            "observation_count": 20,
+                        }
+                    ],
+                )
+            ],
+        )
+    )
+
+    assert decision.selected_strategy == "bb_breakout"
+    assert "analyst-insight-bb-win-1" in decision.fact_refs
+    assert decision.candidate_scores[1]["learning_feedback"]["reason_codes"] == [
+        "analyst_positive_pattern:claim-bb-win-1"
+    ]
+
+
+def test_learning_feedback_is_strategy_scoped() -> None:
+    decision = build_strategist_decision(
+        _match(
+            StrategyCandidate(
+                candidate_id="route-ma-ignores-grid-loss",
+                strategy="ma_crossover",
+                action="open",
+                direction="long",
+                market_fit_score=0.85,
+                edge_lcb_bps=25.0,
+                cost_bps=5.0,
+                data_quality_score=0.9,
+                learning_weight=0.6,
+            ),
+            truth_registry_claims=[
+                TruthRegistryClaim(
+                    claim_id="truth-grid-loss-scoped",
+                    strategy="grid_trading",
+                    symbol="BTCUSDT",
+                    pattern_text="losing: grid_trading shock failure",
+                    confidence=0.9,
+                    observation_count=20,
+                )
+            ],
+        )
+    )
+
+    assert decision.decision_action == "open"
+    assert decision.candidate_scores[0]["learning_feedback"]["learning_weight"] == 0.6
+    assert decision.candidate_scores[0]["learning_feedback"]["reason_codes"] == []
