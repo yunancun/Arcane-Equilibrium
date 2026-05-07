@@ -88,3 +88,32 @@ Verification:
 - `cargo test -p openclaw_engine replay::runner::tests::test_apply_fill_postonly_calibration_cap_records_maker_miss --features replay_isolated`
 - `cargo build --release -p openclaw_engine --bin replay_runner --features replay_isolated`
 - `git diff --check`
+
+## Follow-Up Checkpoint: BBO-Anchored Taker Pricing
+
+- Added Wave C1 taker reference-price anchoring in Rust replay fills.
+  - Market/taker buy reference price cannot be better than fixture best ask
+    when valid BBO exists.
+  - Market/taker sell reference price cannot be better than fixture best bid
+    when valid BBO exists.
+  - Existing replay slippage floors still apply on top of the BBO anchor.
+  - Missing, crossed, or invalid BBO keeps the previous reference-price path,
+    preserving legacy fixture behavior without fabricating microstructure.
+- Kept PostOnly maker pricing on the existing limit-price / maker-cap path.
+- Applied the same BBO anchor to rejected taker counterfactual ghost fills so
+  risk-decision audit rows use the same execution-quality boundary.
+
+Verification:
+
+- `cargo test -p openclaw_engine test_apply_fill_bbo_anchor_bounds_taker_reference_price --features replay_isolated`
+- `cargo test -p openclaw_engine test_apply_fill_taker_open_uses_bbo_anchor_when_present --features replay_isolated`
+- `cargo build --release -p openclaw_engine --bin replay_runner --features replay_isolated`
+- `git diff --check`
+
+Reality boundary:
+
+- This closes the obvious "taker fill better than observed BBO" overclaim when
+  local BBO exists.
+- It does not create historical BBO/orderbook data for old windows.
+- Partial fills, depth-aware sizing, and latency modeling remain Wave C1
+  follow-up items before any S1-calibrated execution claim.

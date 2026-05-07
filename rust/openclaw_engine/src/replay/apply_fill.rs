@@ -206,6 +206,30 @@ pub(crate) fn apply_slippage_to_price(reference_price: f64, slippage_bps: f64) -
     reference_price * (1.0 + slippage_bps / 10_000.0)
 }
 
+/// REF-21 Wave C1: anchor taker reference prices to fixture BBO when present.
+/// Buy/taker fills must not be priced below best ask; sell/taker fills must
+/// not be priced above best bid. Invalid/missing BBO keeps the existing
+/// reference price so legacy fixtures remain usable and explicitly rely on
+/// slippage floors rather than fabricated microstructure.
+pub(crate) fn bbo_anchor_taker_reference_price(
+    reference_price: f64,
+    best_bid: Option<f64>,
+    best_ask: Option<f64>,
+    is_buy: bool,
+) -> f64 {
+    let (Some(bid), Some(ask)) = (best_bid, best_ask) else {
+        return reference_price;
+    };
+    if !bid.is_finite() || !ask.is_finite() || bid <= 0.0 || ask <= 0.0 || bid > ask {
+        return reference_price;
+    }
+    if is_buy {
+        reference_price.max(ask)
+    } else {
+        reference_price.min(bid)
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // IsolatedPipeline apply_fill methods (extracted from runner.rs)
 // IsolatedPipeline apply_fill 方法（自 runner.rs 抽出）
@@ -223,6 +247,8 @@ impl IsolatedPipeline {
         intent: &OrderIntent,
         ts_ms: i64,
         close_price: f64,
+        best_bid: Option<f64>,
+        best_ask: Option<f64>,
         atr: f64,
         tier_label: &str,
     ) {
@@ -261,7 +287,20 @@ impl IsolatedPipeline {
                 // to Sprint A/B baseline.
                 // 參考價：有 limit_price 取之（PostOnly），否則 event close。
                 // PostOnly slippage_bps=0 → fill_price == limit_price byte-equal。
-                let reference_price = intent.limit_price.unwrap_or(close_price);
+                let raw_reference_price = intent.limit_price.unwrap_or(close_price);
+                let reference_price = if matches!(
+                    intent.time_in_force,
+                    Some(crate::order_manager::TimeInForce::PostOnly)
+                ) {
+                    raw_reference_price
+                } else {
+                    bbo_anchor_taker_reference_price(
+                        raw_reference_price,
+                        best_bid,
+                        best_ask,
+                        intent.is_long,
+                    )
+                };
                 if matches!(
                     intent.time_in_force,
                     Some(crate::order_manager::TimeInForce::PostOnly)
@@ -306,7 +345,20 @@ impl IsolatedPipeline {
                 // Ghost fill row (qty=0) 保留被拒決策（PA §6.1）。qty=0 ⇒ fee=0；
                 // fee_rate / liquidity_role / slippage_bps 反映 counterfactual。
                 let _ = reason; // recorded via last_action below.
-                let reference_price = intent.limit_price.unwrap_or(close_price);
+                let raw_reference_price = intent.limit_price.unwrap_or(close_price);
+                let reference_price = if matches!(
+                    intent.time_in_force,
+                    Some(crate::order_manager::TimeInForce::PostOnly)
+                ) {
+                    raw_reference_price
+                } else {
+                    bbo_anchor_taker_reference_price(
+                        raw_reference_price,
+                        best_bid,
+                        best_ask,
+                        intent.is_long,
+                    )
+                };
                 self.fills.push(SimulatedFill {
                     ts_ms,
                     symbol: intent.symbol.clone(),
@@ -336,6 +388,8 @@ impl IsolatedPipeline {
         symbol: &str,
         ts_ms: i64,
         close_price: f64,
+        best_bid: Option<f64>,
+        best_ask: Option<f64>,
         tier_label: &str,
     ) {
         let snapshot = match self.paper_snapshot.as_ref() {
@@ -365,7 +419,9 @@ impl IsolatedPipeline {
         let volume_24h = self.volume_24h.unwrap_or(0.0);
         let slippage_bps =
             replay_slippage_bps_for_tif(&self.slippage_config, None, volume_24h, close_is_long);
-        let fill_price = apply_slippage_to_price(close_price, slippage_bps);
+        let reference_price =
+            bbo_anchor_taker_reference_price(close_price, best_bid, best_ask, close_is_long);
+        let fill_price = apply_slippage_to_price(reference_price, slippage_bps);
         let fee = pos.qty * fill_price * fee_rate;
         // Record close-side fill (qty>0 with side opposite to position).
         // 記 close-side fill（qty>0，side 與倉位反向）。

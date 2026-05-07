@@ -982,12 +982,21 @@ impl IsolatedPipeline {
                             &intent,
                             event.ts_ms,
                             event.close,
+                            event.best_bid,
+                            event.best_ask,
                             atr,
                             &tier_label,
                         );
                     }
                     StrategyAction::Close { symbol, .. } => {
-                        self.process_close_intent(&symbol, event.ts_ms, event.close, &tier_label);
+                        self.process_close_intent(
+                            &symbol,
+                            event.ts_ms,
+                            event.close,
+                            event.best_bid,
+                            event.best_ask,
+                            &tier_label,
+                        );
                     }
                 }
             }
@@ -1115,8 +1124,8 @@ mod tests {
     // R0-T0 Sprint C R6 W2：4 helper 抽至 `crate::replay::apply_fill`，
     // 在 tests 模組 import，使既有 test 呼叫 byte-equal 不變。
     use crate::replay::apply_fill::{
-        apply_slippage_to_price, replay_fee_rate_for_tif, replay_slippage_bps_for_tif,
-        DEFAULT_MAKER_FEE_RATE, DEFAULT_TAKER_FEE_RATE,
+        apply_slippage_to_price, bbo_anchor_taker_reference_price, replay_fee_rate_for_tif,
+        replay_slippage_bps_for_tif, DEFAULT_MAKER_FEE_RATE, DEFAULT_TAKER_FEE_RATE,
     };
 
     fn synthetic_events() -> Vec<MarketEvent> {
@@ -1697,6 +1706,16 @@ mod tests {
         }]
     }
 
+    fn r6_single_event_with_bbo(best_bid: f64, best_ask: f64) -> Vec<MarketEvent> {
+        let mut events = r6_single_event();
+        events[0].best_bid = Some(best_bid);
+        events[0].best_ask = Some(best_ask);
+        events[0]
+            .microstructure_source
+            .replace("market.market_tickers".to_string());
+        events
+    }
+
     // ─── Helper unit tests / 輔助函式單元測試 ───
 
     #[test]
@@ -1758,6 +1777,25 @@ mod tests {
         assert!(fill < 100.0, "sell → fill < ref, got {}", fill);
         assert!((bps + 1.0).abs() < 1e-9, "$1B tier -1.0 bps, got {}", bps);
         assert!((fill - 99.99).abs() < 1e-9, "fill=99.99, got {}", fill);
+    }
+
+    #[test]
+    fn test_apply_fill_bbo_anchor_bounds_taker_reference_price() {
+        assert_eq!(
+            bbo_anchor_taker_reference_price(100.0, Some(99.0), Some(101.0), true),
+            101.0,
+            "buy taker must not price better than best ask"
+        );
+        assert_eq!(
+            bbo_anchor_taker_reference_price(100.0, Some(99.0), Some(101.0), false),
+            99.0,
+            "sell taker must not price better than best bid"
+        );
+        assert_eq!(
+            bbo_anchor_taker_reference_price(100.0, Some(102.0), Some(101.0), true),
+            100.0,
+            "crossed/invalid BBO must keep legacy reference price"
+        );
     }
 
     #[test]
@@ -1858,6 +1896,35 @@ mod tests {
             "fee={}, got {}",
             expected_fee,
             f0.fee
+        );
+    }
+
+    #[test]
+    fn test_apply_fill_taker_open_uses_bbo_anchor_when_present() {
+        // REF-21 Wave C1: market buy at close=100 with best_ask=101 uses ask
+        // as the reference, then applies the existing +5 bps taker slippage.
+        let pipeline = build_isolated_pipeline(
+            ReplayProfile::Isolated,
+            "exp_ref21_bbo_anchor".into(),
+            "S3",
+            r6_single_event_with_bbo(99.0, 101.0),
+        )
+        .expect("baseline build OK")
+        .with_replay_fee_context(None, None, None);
+        let (strategy_adapter, risk_adapter) = make_tif_adapters(None, true, None);
+        let snapshot = make_snapshot_seed(10_000.0, Some(100.0), Vec::new());
+        let mut wired = pipeline
+            .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
+            .expect("snapshot validation passes");
+        wired.execute().expect("execute completes");
+        let result = wired.into_result();
+        let f0 = &result.fills[0];
+        assert_eq!(f0.liquidity_role, "taker");
+        assert!((f0.slippage_bps - 5.0).abs() < 1e-9);
+        assert!(
+            (f0.price - 101.0505).abs() < 1e-9,
+            "expected best_ask 101 plus 5 bps slippage, got {}",
+            f0.price
         );
     }
 
