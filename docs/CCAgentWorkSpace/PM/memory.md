@@ -1502,3 +1502,26 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   restart, deploy, DB write, live auth, runtime flag, or trading authority
   change was made.
 - Next AgentTodo item is MAG-062 Decision Lease binding to ExecutionPlan.
+
+## 2026-05-07 AgentTodo MAG-062 ExecutionPlan Lease Binding
+
+### Result
+- MAG-062 source is complete: `executor_plan_v2.py` can acquire and bind a
+  Decision Lease ID to an `ExecutionPlan`.
+- Real-submit preparation now fails closed when a plan has no lease and no
+  GovernanceHub, when acquisition returns no lease, or when lease request fields
+  are missing.
+- Shadow/pre-submit planning remains allowed without `lease_id`, preserving the
+  distinction between durable plan publication and real order submission.
+
+### Verification
+- Mac targeted: executor plan + spine client pytest 28/0, py_compile, and diff
+  check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  pytest set 28/0, py_compile, and diff check.
+
+### Boundary
+- No runtime submit wiring, IPC protocol change, Rust `SubmitOrder` shape
+  change, rebuild, restart, deploy, DB write, live auth, runtime flag, or
+  trading authority change was made.
+- Next AgentTodo item is MAG-063 ExecutionReport quality metrics.
