@@ -137,6 +137,9 @@ def test_dashboard_html_requires_server_side_auth() -> None:
     gui_legacy_routes.register_gui_legacy_routes(app)
     client = TestClient(app)
     assert client.get("/login").status_code == 200
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code == 303
+    assert root.headers["location"] == "/login?redirect=/"
     console = client.get("/console", follow_redirects=False)
     assert console.status_code == 303
     assert console.headers["location"] == "/login?redirect=/console"
@@ -144,6 +147,7 @@ def test_dashboard_html_requires_server_side_auth() -> None:
     assert trading.status_code == 303
     assert trading.headers["location"] == "/login?redirect=/trading%3Fembed%3D1"
     headers = {"Authorization": f"Bearer {base.settings.api_token}"}
+    assert client.get("/", headers=headers).status_code == 200
     assert client.get("/console", headers=headers).status_code == 200
 
 

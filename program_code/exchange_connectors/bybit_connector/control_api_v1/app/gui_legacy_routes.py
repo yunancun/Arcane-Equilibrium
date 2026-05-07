@@ -5,7 +5,7 @@ MODULE_NOTE (中文):
   GUI / HTML legacy 路由（E5-P0-5 拆分自 legacy_routes.py）。
   包含 5 條路由：
     GET /login     — 登入頁面
-    GET /          — 重定向到 /console
+    GET /          — 統一控制台根入口
     GET /gui       — 舊版 GUI index.html
     GET /console   — 統一控制台（交易儀表盤 + OpenClaw + AI Cost 側欄）
     GET /trading   — 交易圖表儀表盤（TradingView Lightweight Charts）
@@ -17,7 +17,7 @@ MODULE_NOTE (English):
   GUI / HTML legacy routes (split out of legacy_routes.py in E5-P0-5).
   Contains 5 routes:
     GET /login     — login page
-    GET /          — redirect to /console
+    GET /          — unified console root entry
     GET /gui       — legacy GUI index.html
     GET /console   — unified console (trading dashboard + OpenClaw + AI cost sidebar)
     GET /trading   — trading chart dashboard (TradingView Lightweight Charts)
@@ -95,9 +95,12 @@ def register_gui_legacy_routes(app) -> None:
         return FileResponse(_static_dir / "login.html")
 
     @app.get("/", include_in_schema=False)
-    def root_redirect():
-        """Redirect site root to /console / 站點根目錄重定向到 /console."""
-        return RedirectResponse(url="/console")
+    def root_console(request: Request):
+        """Unified console root entry / 統一控制台根入口。"""
+        redirect = _redirect_if_unauthenticated(request)
+        if redirect is not None:
+            return redirect
+        return FileResponse(_static_dir / "console.html", headers=_NO_CACHE_HEADERS)
 
     @app.get("/gui", include_in_schema=False)
     def gui_index(request: Request):
