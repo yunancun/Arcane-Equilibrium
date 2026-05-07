@@ -52,13 +52,9 @@ use openclaw_core::guardian::GuardianConfig;
 use openclaw_engine::config::RiskConfig;
 use openclaw_engine::replay::fixture_loader::{self, FixtureSource};
 use openclaw_engine::replay::profile::ReplayProfile;
-use openclaw_engine::replay::risk_adapter::{
-    ReplayPaperSnapshot, ReplayRiskAdapter,
-};
+use openclaw_engine::replay::risk_adapter::{ReplayPaperSnapshot, ReplayRiskAdapter};
 use openclaw_engine::replay::runner::{self, ReplayStatus};
-use openclaw_engine::replay::strategy_adapter::{
-    ReplayStrategyAdapter, StrategyActionTrace,
-};
+use openclaw_engine::replay::strategy_adapter::{ReplayStrategyAdapter, StrategyActionTrace};
 use openclaw_engine::strategies::{Strategy, StrategyFactory, StrategyParamsConfig};
 use std::path::PathBuf;
 
@@ -123,8 +119,7 @@ fn run_adapter_pipeline(
 
     // Wrap the chosen strategy via factory.
     // 用 factory 包裹選定的策略。
-    let pool: Vec<Box<dyn Strategy>> =
-        StrategyFactory::create_with_params(strategy_cfg);
+    let pool: Vec<Box<dyn Strategy>> = StrategyFactory::create_with_params(strategy_cfg);
     let chosen = pool
         .into_iter()
         .find(|s| s.name() == strategy_name)
@@ -153,7 +148,9 @@ fn run_adapter_pipeline(
     let mut wired = pipeline
         .with_adapter_pipeline(strategy_adapter, risk_adapter, snapshot)
         .expect("adapter wire-up succeeds");
-    wired.execute().expect("execute() never returns runtime err here");
+    wired
+        .execute()
+        .expect("execute() never returns runtime err here");
 
     let result = wired.into_result();
     assert_eq!(
@@ -170,7 +167,10 @@ fn run_adapter_pipeline(
     let mut sigs: Vec<String> = Vec::new();
     for entry in result.decision_traces.iter() {
         for action in entry.actions_emitted.iter() {
-            if let StrategyActionTrace::Open { intent_signature, .. } = action {
+            if let StrategyActionTrace::Open {
+                intent_signature, ..
+            } = action
+            {
                 sigs.push(intent_signature.clone());
             }
         }
@@ -349,13 +349,15 @@ fn proof_8_risk_param_delta_changes_decision_outcomes() {
         "proof_8 acceptance FAIL: tight risk produced FEWER ghosts than \
          loose: tight={} loose={} (position_size_max_pct gate seems \
          non-decision-relevant or wiring inverted)",
-        ghost_tight, ghost_loose
+        ghost_tight,
+        ghost_loose
     );
     assert!(
         accepted_tight <= accepted_loose,
         "proof_8 acceptance FAIL: tight risk accepted MORE fills than \
          loose: tight={} loose={} (position_size_max_pct gate inverted?)",
-        accepted_tight, accepted_loose
+        accepted_tight,
+        accepted_loose
     );
     assert!(
         ghost_tight > ghost_loose || accepted_tight < accepted_loose,
@@ -364,7 +366,10 @@ fn proof_8_risk_param_delta_changes_decision_outcomes() {
          decision-relevant in the adapter pipeline. \
          loose: {} accepted / {} ghosts; tight: {} accepted / {} ghosts; \
          total intents: {}",
-        accepted_loose, ghost_loose, accepted_tight, ghost_tight,
+        accepted_loose,
+        ghost_loose,
+        accepted_tight,
+        ghost_tight,
         total_intents
     );
 }

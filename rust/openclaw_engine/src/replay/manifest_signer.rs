@@ -376,8 +376,8 @@ impl ManifestSigner {
         // the constructor invariant.
         // 不變量：HMAC-SHA256 接受任意長度 key。32-byte 限制在 `new()` 強制；
         // 此處信任 constructor invariant。
-        let mut mac = HmacSha256::new_from_slice(&self.key_bytes)
-            .expect("HMAC-SHA256 accepts any key size");
+        let mut mac =
+            HmacSha256::new_from_slice(&self.key_bytes).expect("HMAC-SHA256 accepts any key size");
         mac.update(manifest_canonical);
         let tag = mac.finalize().into_bytes();
         hex::encode(tag)
@@ -591,9 +591,7 @@ pub const ENVELOPE_KEYS_FOR_SIGNING: [&str; 3] =
 ///
 /// 錯誤：磁碟 bytes 非 JSON 或非 top-level object 時回 `serde_json::Error`
 /// （V3 §5 要求 manifest 為 JSON object）。
-pub fn canonical_body_for_signing(
-    disk_bytes: &[u8],
-) -> Result<Vec<u8>, serde_json::Error> {
+pub fn canonical_body_for_signing(disk_bytes: &[u8]) -> Result<Vec<u8>, serde_json::Error> {
     // Parse → Value（REJECT 非 object）。
     // Parse → Value (REJECT non-object).
     let mut value: serde_json::Value = serde_json::from_slice(disk_bytes)?;
@@ -606,10 +604,12 @@ pub fn canonical_body_for_signing(
         None => {
             // 用 serde_json 自有 error 路徑保持型別一致。
             // Use serde_json's own error path to keep the Result type.
-            return Err(serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
-                "\"manifest body must be a JSON object\"",
-            )
-            .unwrap_err());
+            return Err(
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+                    "\"manifest body must be a JSON object\"",
+                )
+                .unwrap_err(),
+            );
         }
     };
 
@@ -707,7 +707,13 @@ mod tests {
 
         let archive = archive_with(signer.fingerprint(), KeyStatus::Active);
         let err = signer
-            .verify(body, &body_hash, &tampered_sig, signer.fingerprint(), &archive)
+            .verify(
+                body,
+                &body_hash,
+                &tampered_sig,
+                signer.fingerprint(),
+                &archive,
+            )
             .unwrap_err();
         assert_eq!(err, SignatureFailMode::SignatureMismatch);
         assert_eq!(err.audit_label(), "signature_mismatch");
@@ -874,7 +880,8 @@ mod tests {
         // sorted alphabetical + compact + envelope stripped.
         let expected = br#"{"data_tier":"S2","experiment_id":"exp_test","fixture_uri":"fixtures/","manifest_version":1,"run_id":"run_abc"}"#;
         assert_eq!(
-            canon, expected,
+            canon,
+            expected,
             "canonical body drift: got {} expected {}",
             std::str::from_utf8(&canon).unwrap(),
             std::str::from_utf8(expected).unwrap()

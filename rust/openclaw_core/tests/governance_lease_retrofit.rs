@@ -23,9 +23,7 @@
 //!   1491 為 Track H E-3+E-4 round 1 引入的 pre-existing violation，已於報告
 //!   §9.X push back PM）。
 
-use openclaw_core::governance_core::{
-    GovernanceCore, GovernanceProfile, LeaseId, LeaseOutcome,
-};
+use openclaw_core::governance_core::{GovernanceCore, GovernanceProfile, LeaseId, LeaseOutcome};
 use openclaw_core::sm::lease::LeaseState;
 
 // ═════════════════════════════════════════════════════════════════════════════

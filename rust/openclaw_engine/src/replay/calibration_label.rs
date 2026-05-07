@@ -195,17 +195,12 @@ impl CalibrationResult {
 ///
 /// 回傳：
 ///   - `CalibrationResult` — 不 panic、不回 Err。異常依 QC spec §6 降至 `None`。
-pub fn derive_execution_confidence(
-    fills: &[FillRecord],
-    now: DateTime<Utc>,
-) -> CalibrationResult {
+pub fn derive_execution_confidence(fills: &[FillRecord], now: DateTime<Utc>) -> CalibrationResult {
     // Step 1：過濾 NaN/Inf row。caller 端契約允許 NaN balance / NaN fee_rate
     // 存在；防禦性過濾保護下游統計。
     let valid: Vec<&FillRecord> = fills
         .iter()
-        .filter(|f| {
-            f.fee_rate.is_finite() && f.entry_price.is_finite() && f.exit_price.is_finite()
-        })
+        .filter(|f| f.fee_rate.is_finite() && f.entry_price.is_finite() && f.exit_price.is_finite())
         .collect();
 
     let n = valid.len();
@@ -253,10 +248,8 @@ pub fn derive_execution_confidence(
                 f64::INFINITY
             };
 
-            let calibrated_ok = n >= 200
-                && last_fill_age_days <= 7.0
-                && fee_bps_mad < 3.0
-                && iqr_for_compare < 8.0;
+            let calibrated_ok =
+                n >= 200 && last_fill_age_days <= 7.0 && fee_bps_mad < 3.0 && iqr_for_compare < 8.0;
 
             let limited_ok = n >= 30
                 && last_fill_age_days <= 14.0
@@ -346,7 +339,11 @@ fn compute_ci(net_bps_vec: &[f64]) -> (f64, f64, f64) {
     if n < 200 {
         // 寬幅 empirical percentile：兩尾各加 0.5×IQR。
         let iqr_value = iqr(net_bps_vec);
-        let pad = if iqr_value.is_finite() { 0.5 * iqr_value } else { 0.0 };
+        let pad = if iqr_value.is_finite() {
+            0.5 * iqr_value
+        } else {
+            0.0
+        };
         let p5_raw = percentile(net_bps_vec, 5.0);
         let p50 = percentile(net_bps_vec, 50.0);
         let p95_raw = percentile(net_bps_vec, 95.0);
@@ -482,7 +479,10 @@ mod tests {
         let result = derive_execution_confidence(&fills, now);
         assert_eq!(result.label, ExecutionConfidence::Calibrated);
         assert_eq!(result.sample_count, 1162);
-        assert!(result.fee_bps_mad < 3.0, "MAD must be < 3 bps for calibrated");
+        assert!(
+            result.fee_bps_mad < 3.0,
+            "MAD must be < 3 bps for calibrated"
+        );
         assert_eq!(result.ttl, Duration::days(7));
         // p5 ≤ p50 ≤ p95 不變式。
         assert!(result.net_bps_p5 <= result.net_bps_p50);
@@ -589,7 +589,7 @@ mod tests {
         }
         let result = derive_execution_confidence(&fills, now);
         assert_eq!(result.sample_count, 35); // 10 NaN 過濾
-        // 35 ≥ 30 + age ≤ 14d + MAD=0 → limited。
+                                             // 35 ≥ 30 + age ≤ 14d + MAD=0 → limited。
         assert_eq!(result.label, ExecutionConfidence::Limited);
     }
 
@@ -619,7 +619,14 @@ mod tests {
             let age = (i as f64) * 6.0 / 250.0;
             // 正弦狀 exit 使 net_bps 分布展開。
             let exit_offset = ((i as f64) * 0.1).sin() * 0.5;
-            fills.push(make_fill(now, age, 0.0002, 100.0, 100.0 + exit_offset, true));
+            fills.push(make_fill(
+                now,
+                age,
+                0.0002,
+                100.0,
+                100.0 + exit_offset,
+                true,
+            ));
         }
         let result = derive_execution_confidence(&fills, now);
         assert_eq!(result.label, ExecutionConfidence::Calibrated);
@@ -850,7 +857,10 @@ mod tests {
     fn assert_calibration_eq(a: &CalibrationResult, b: &CalibrationResult) {
         assert_eq!(a.label, b.label, "label drift");
         assert_eq!(a.sample_count, b.sample_count, "sample_count drift");
-        assert_eq!(a.last_fill_age_ms, b.last_fill_age_ms, "last_fill_age_ms drift");
+        assert_eq!(
+            a.last_fill_age_ms, b.last_fill_age_ms,
+            "last_fill_age_ms drift"
+        );
         // fee_bps_mad / iqr / p5 / p50 / p95 可能 NaN（n=0），用 bit-level 比。
         assert_eq!(
             a.fee_bps_mad.to_bits(),
@@ -949,24 +959,8 @@ mod tests {
         let now = reference_now();
         // grid_trading：1162 fills、freshness 1d、穩定 maker fee 2 bps、
         // age 線性 1d..6d；MAD=0 → calibrated 候選。
-        let fills_a = build_fixture(
-            now,
-            1162,
-            1.0,
-            6.0,
-            &FeePattern::Stable(0.0002),
-            100.0,
-            1.0,
-        );
-        let fills_b = build_fixture(
-            now,
-            1162,
-            1.0,
-            6.0,
-            &FeePattern::Stable(0.0002),
-            100.0,
-            1.0,
-        );
+        let fills_a = build_fixture(now, 1162, 1.0, 6.0, &FeePattern::Stable(0.0002), 100.0, 1.0);
+        let fills_b = build_fixture(now, 1162, 1.0, 6.0, &FeePattern::Stable(0.0002), 100.0, 1.0);
         let r1 = derive_execution_confidence(&fills_a, now);
         let r2 = derive_execution_confidence(&fills_b, now);
         // QC §1.1 預期 calibrated。

@@ -202,8 +202,7 @@ impl TickPipeline {
 
         // PA-DRY-1: helper centralised in tick_pipeline::mod (was 4-line dup here + below).
         // PA-DRY-1：legacy close-prefix 判斷集中到 tick_pipeline::mod helper（原處兩份重複）。
-        let is_close_fill_for_db =
-            realized_pnl != 0.0 || super::is_legacy_close_tag(strategy);
+        let is_close_fill_for_db = realized_pnl != 0.0 || super::is_legacy_close_tag(strategy);
 
         // EDGE-P3-1 R2: entry_context_id for the Fill row emission below.
         // Close fills carry the pre-close entry's id; open/accumulate fills
@@ -574,8 +573,7 @@ impl TickPipeline {
                 .unwrap_or_else(|| self.intent_processor.fee_rate(symbol));
             // PA-DRY-1: see helper in tick_pipeline::mod (single source of truth).
             // PA-DRY-1：see tick_pipeline::mod helper（單一真相來源）。
-            let is_close_fill_for_db =
-                realized_pnl != 0.0 || super::is_legacy_close_tag(strategy);
+            let is_close_fill_for_db = realized_pnl != 0.0 || super::is_legacy_close_tag(strategy);
             // EDGE-P3-1 R2: close fills carry the pre-close entry's id; opens stay empty.
             // Zero-PnL IPC/manual closes still count as close rows for DB attribution.
             // EDGE-P3-1 R2：平倉 fill 帶 entry_context_id；開倉/加倉留空。0 PnL

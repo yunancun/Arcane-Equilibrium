@@ -224,7 +224,9 @@ where
     }
 
     let manifest_path = manifest_path.ok_or(CliError::MissingRequired { flag: "--manifest" })?;
-    let output_dir = output_dir.ok_or(CliError::MissingRequired { flag: "--output-dir" })?;
+    let output_dir = output_dir.ok_or(CliError::MissingRequired {
+        flag: "--output-dir",
+    })?;
 
     Ok(ReplayCliArgs {
         manifest_path,

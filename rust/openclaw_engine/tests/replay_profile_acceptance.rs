@@ -187,7 +187,10 @@ fn proof_5_cross_method_consistency() {
     // Isolated: 四 gating method 全 false。
     // Isolated: all four gating methods MUST be false.
     let isolated = ReplayProfile::Isolated;
-    assert!(!isolated.requires_lease(), "Isolated.requires_lease must be false");
+    assert!(
+        !isolated.requires_lease(),
+        "Isolated.requires_lease must be false"
+    );
     assert!(
         !isolated.allow_ipc_server(),
         "Isolated.allow_ipc_server must be false"

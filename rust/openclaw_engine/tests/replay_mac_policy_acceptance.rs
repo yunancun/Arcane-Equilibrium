@@ -78,7 +78,7 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 
 use openclaw_engine::replay::mac_policy_guard::{
-    self, ENV_VAR_NAME, ENV_VAR_REQUIRED_VALUE, MacPolicyError,
+    self, MacPolicyError, ENV_VAR_NAME, ENV_VAR_REQUIRED_VALUE,
 };
 use openclaw_engine::replay::profile::ReplayProfile;
 

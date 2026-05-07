@@ -2722,7 +2722,10 @@ mod router_gate_lease_tests {
             NOW_MS,
         );
         assert!(!r.submitted, "ATR=0 must SEC-11 fail-closed downstream");
-        assert!(r.lease_id.is_none(), "rejection path must NOT carry lease_id");
+        assert!(
+            r.lease_id.is_none(),
+            "rejection path must NOT carry lease_id"
+        );
         let reason = r.rejected_reason.expect("must have reason");
         assert!(
             reason.contains("ATR") || reason.contains("atr"),
@@ -2769,7 +2772,10 @@ mod router_gate_lease_tests {
         // data — exchange path rejects. lease_id stays None either way.
         // Production cost_gate_live_with_slippage 在無 edge 時嚴格拒絕；
         // lease_id 兩種情況都 None。
-        assert!(g_off.lease_id.is_none(), "flag OFF → exchange path lease_id None");
+        assert!(
+            g_off.lease_id.is_none(),
+            "flag OFF → exchange path lease_id None"
+        );
         assert_eq!(gov_off.lease.lock().len(), 0, "flag OFF → SM untouched");
 
         // Sub-case 2: Flag ON + Validation → Bypass.
@@ -2806,7 +2812,9 @@ mod router_gate_lease_tests {
         // Either approved (lease_id Some) OR rejected (lease_id None).
         // 接受（lease_id Some）或拒絕（lease_id None）兩種狀態都合法。
         if g_prod.approved {
-            let lid = g_prod.lease_id.expect("Production approved → lease_id Some");
+            let lid = g_prod
+                .lease_id
+                .expect("Production approved → lease_id Some");
             assert!(lid.starts_with("lease:"));
             assert_eq!(
                 gov_prod.lease.lock().get_live().len(),
