@@ -216,9 +216,9 @@ class TestCheck42bAttributionDrift(unittest.TestCase):
         self.assertIn("pipeline-alert floor", msg)
         self.assertIn("lease_revoke_trigger", msg)
 
-    def test_missing_strategy_treated_as_zero_ratio(self) -> None:
-        """Missing strategy in DB → ratio=0.0 forces FAIL.
-        某 strategy 在 DB 中缺 → 視為 ratio=0.0 強制 FAIL。"""
+    def test_missing_strategy_treated_as_low_sample_warn(self) -> None:
+        """Missing settled strategy sample → WARN, not ratio failure.
+        缺 settled strategy sample → WARN，不當作 ratio failure。"""
         # Only 4 of 5 strategies emit rows; funding_arb missing.
         # 只有 4 個 strategy 有 row；funding_arb 缺。
         rows = [
@@ -229,9 +229,9 @@ class TestCheck42bAttributionDrift(unittest.TestCase):
         ]
         cur = _cursor_for_42b(exists=True, rows=rows)
         status, msg = check_42b_live_candidate_attribution_drift(cur)
-        self.assertEqual(status, "FAIL")
+        self.assertEqual(status, "WARN")
         self.assertIn("funding_arb=0.000", msg)
-        self.assertIn("funding_arb", msg)
+        self.assertIn("low settled sample", msg)
 
     def test_warn_when_all_strategies_silent(self) -> None:
         """All 5 strategies have 0 rows in 7d → WARN (greenfield deploy).
@@ -239,7 +239,7 @@ class TestCheck42bAttributionDrift(unittest.TestCase):
         cur = _cursor_for_42b(exists=True, rows=[])  # no rows at all
         status, msg = check_42b_live_candidate_attribution_drift(cur)
         self.assertEqual(status, "WARN")
-        self.assertIn("no MLDE training rows", msg)
+        self.assertIn("no settled MLDE training rows", msg)
         self.assertIn("first-deploy", msg)
 
     def test_fail_when_view_missing(self) -> None:
@@ -464,15 +464,9 @@ class TestCheck42cLiveCandidateAttributionDrift3d(unittest.TestCase):
         # `[42c]` msg 必須明示 3d window，即使在 FAIL-pipeline 段。
         self.assertIn("3d", msg)
 
-    def test_missing_strategy_treated_as_zero_ratio(self) -> None:
-        """Missing strategy in DB → ratio=0.0 forces FAIL.
-        某 strategy 在 DB 中缺 → 視為 ratio=0.0 強制 FAIL。
-
-        Mirrors [42b] missing-strategy fail-soft behavior; only 4 of 5
-        strategies emit rows; funding_arb missing → ratio 0.0 → FAIL.
-        鏡 [42b] missing-strategy fail-soft 行為；只有 4 個 strategy 有 row；
-        funding_arb 缺 → ratio 0.0 → FAIL。
-        """
+    def test_missing_strategy_treated_as_low_sample_warn(self) -> None:
+        """Missing settled strategy sample → WARN, not ratio failure.
+        缺 settled strategy sample → WARN，不當作 ratio failure。"""
         rows = [
             ("grid_trading", 100, 80, 0.80),
             ("ma_crossover", 100, 60, 0.60),
@@ -481,9 +475,9 @@ class TestCheck42cLiveCandidateAttributionDrift3d(unittest.TestCase):
         ]
         cur = _cursor_for_42b(exists=True, rows=rows)
         status, msg = check_42c_live_candidate_attribution_drift_3d(cur)
-        self.assertEqual(status, "FAIL")
+        self.assertEqual(status, "WARN")
         self.assertIn("funding_arb=0.000", msg)
-        self.assertIn("funding_arb", msg)
+        self.assertIn("low settled sample", msg)
 
     def test_fail_when_view_missing(self) -> None:
         """V031 not applied → FAIL fast / V031 未部署即直接 FAIL。

@@ -106,6 +106,7 @@ LG5_STRATEGIES: tuple[str, ...] = (
 ATTRIBUTION_RATIO_PASS_FLOOR: float = 0.50
 ATTRIBUTION_RATIO_WARN_FLOOR: float = 0.30
 ATTRIBUTION_RATIO_FAIL_FLOOR: float = 0.10
+ATTRIBUTION_MIN_SETTLED_SAMPLES: int = 10
 
 # `[42]` 1h SLA per RFC v2 §6 IMPL-3 line 451-454.
 # `[42]` 1h SLA（RFC v2 §6 IMPL-3 line 451-454）。
@@ -313,24 +314,30 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
             "[42b] learning.mlde_edge_training_rows missing — V031 not applied",
         )
 
-    # Per-strategy 7d ratio. engine_mode filter MUST match IMPL-1 producer
+    # Per-strategy 7d settled ratio. engine_mode filter MUST match IMPL-1 producer
     # `_compute_attribution_chain_ratio_by_strategy`
     # (program_code/ml_training/mlde_demo_applier.py:907-920) exactly:
     # ``engine_mode IN ('demo', 'live_demo')`` — the drift sentinel must
     # measure the SAME source the producer feeds the consumer (LG-5-IMPL-2
-    # `GovernanceHub.review_live_candidate`). Including 'live' here would
+    # `GovernanceHub.review_live_candidate`). Denominator is settled post-fee
+    # samples only; raw open/unfilled intents are low-sample, not attribution
+    # chain failure. Including 'live' here would
     # diverge from the producer's input set and yield false alarms / false
     # reassurance vs the actual ratio R-meta sees.
-    # Per-strategy 7d 比率；engine_mode filter 必對齊 IMPL-1 producer
+    # Per-strategy 7d settled 比率；engine_mode filter 必對齊 IMPL-1 producer
     # `_compute_attribution_chain_ratio_by_strategy` 的 `IN ('demo','live_demo')`
-    # —— sentinel 必須測 producer 餵給 consumer 的同一資料源，否則 drift
-    # 訊號失真（會 false alarm / false reassurance）。
+    # —— sentinel 必須測 producer 餵給 consumer 的同一資料源。分母只計 settled
+    # post-fee samples；未成交/未關閉 raw intent 是 low-sample，不是 chain failure。
     sql = (
         "SELECT strategy_name, "
-        "       count(*)::int AS total, "
-        "       count(*) FILTER (WHERE attribution_chain_ok)::int AS chain_ok, "
-        "       (count(*) FILTER (WHERE attribution_chain_ok))::float "
-        "         / nullif(count(*), 0)::float AS ratio "
+        "       count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL)::int AS total, "
+        "       count(*) FILTER ( "
+        "         WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
+        "       )::int AS chain_ok, "
+        "       (count(*) FILTER ( "
+        "          WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
+        "        ))::float "
+        "         / nullif(count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL), 0)::float AS ratio "
         "FROM learning.mlde_edge_training_rows "
         f"WHERE ts > now() - {ATTRIBUTION_DRIFT_WINDOW} "
         "  AND engine_mode IN ('demo', 'live_demo') "
@@ -363,28 +370,41 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
             ratios[s] = 0.0
             totals[s] = 0
 
-    # First-deploy / quiet-window grace: if EVERY LG-5 strategy has total=0
-    # within 7d, no production traffic exists yet — emit WARN (not FAIL),
-    # because forcing FAIL would alarm on greenfield deploy. Single missing
-    # strategy still falls through to standard band logic (= 0.0 ratio).
-    # 全 5 strategy 7d 內 0 row → WARN（未部署 / 全靜默；FAIL 過嚴）。
+    # First-deploy / quiet-window grace: if EVERY LG-5 strategy has 0 settled
+    # samples within 7d, no closed post-fee evidence exists yet — emit WARN
+    # (not FAIL). Single low-sample strategies are WARN too; R-meta consumer
+    # will defer them via defer_attribution_chain_low_sample.
+    # 全 5 strategy 7d 內 0 settled sample → WARN（未部署 / 全靜默；FAIL 過嚴）。
     if all(totals[s] == 0 for s in LG5_STRATEGIES):
         return (
             "WARN",
-            "[42b] no MLDE training rows for any LG-5 strategy in 7d — "
+            "[42b] no settled MLDE training rows for any LG-5 strategy in 7d — "
             "first-deploy or production silent; cannot evaluate attribution drift",
         )
 
-    # Determine worst strategy (lowest ratio) for the verdict + msg.
-    # 找最差 strategy（最低 ratio）作為 verdict + msg。
-    worst_strategy = min(LG5_STRATEGIES, key=lambda s: ratios[s])
+    eligible = [s for s in LG5_STRATEGIES if totals[s] >= ATTRIBUTION_MIN_SETTLED_SAMPLES]
+    low_samples = [s for s in LG5_STRATEGIES if totals[s] < ATTRIBUTION_MIN_SETTLED_SAMPLES]
+    if not eligible:
+        summary = ", ".join(
+            f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
+        )
+        return (
+            "WARN",
+            "7d per-strategy settled attribution_chain_ok ratio: "
+            f"{summary} — all strategies below settled sample floor "
+            f"n<{ATTRIBUTION_MIN_SETTLED_SAMPLES}; R-meta will defer low-sample strategies",
+        )
+
+    # Determine worst eligible strategy (lowest ratio) for the verdict + msg.
+    # 找樣本足夠的最差 strategy（最低 ratio）作為 verdict + msg。
+    worst_strategy = min(eligible, key=lambda s: ratios[s])
     worst_ratio = ratios[worst_strategy]
 
     summary = ", ".join(
         f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
     )
     base = (
-        f"7d per-strategy attribution_chain_ok ratio: {summary}; "
+        f"7d per-strategy settled attribution_chain_ok ratio: {summary}; "
         f"worst={worst_strategy}@{worst_ratio:.3f}"
     )
 
@@ -392,6 +412,13 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
     # (PASS/WARN/FAIL = 0.50/0.30/0.10) + §3 line 377 pipeline-alert escalation.
     # 三段判定（RFC v2 §6 IMPL-3 line 451）+ §3 line 377 pipeline-alert 升級。
     if worst_ratio >= ATTRIBUTION_RATIO_PASS_FLOOR:
+        if low_samples:
+            return (
+                "WARN",
+                base
+                + " — eligible strategies pass R-meta floor; low settled sample strategies: "
+                + ", ".join(f"{s}(n={totals[s]})" for s in low_samples),
+            )
         return ("PASS", base + " — all strategies ≥ 0.50 R-meta floor")
     if worst_ratio >= ATTRIBUTION_RATIO_WARN_FLOOR:
         return (
@@ -796,21 +823,27 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
             "[42c] learning.mlde_edge_training_rows missing — V031 not applied",
         )
 
-    # Per-strategy 3d ratio. SQL shape identical to [42b] except window:
+    # Per-strategy 3d settled ratio. SQL shape identical to [42b] except window:
     # `ATTRIBUTION_DRIFT_WINDOW_3D = "interval '3 days'"` instead of 7d.
     # engine_mode filter MUST match IMPL-1 producer
     # `_compute_attribution_chain_ratio_by_strategy` (post-Fix 2:
     # `IN ('demo', 'live_demo')` + `_R_META_WINDOW_DAYS = 3`) so this
-    # sentinel reads the SAME data the R-meta gate consumer reads.
-    # Per-strategy 3d 比率；SQL 結構與 [42b] 一致，唯獨 window 改 3d
+    # sentinel reads the SAME data the R-meta gate consumer reads. Denominator
+    # is settled post-fee samples only; raw open/unfilled intents are low-sample.
+    # Per-strategy 3d settled 比率；SQL 結構與 [42b] 一致，唯獨 window 改 3d
     # (`ATTRIBUTION_DRIFT_WINDOW_3D`)。engine_mode filter 對齊 Fix 2 後的
     # producer (`IN ('demo','live_demo')` + `_R_META_WINDOW_DAYS = 3`)。
+    # 分母只計 settled post-fee samples；未成交/未關閉 raw intent 是 low-sample。
     sql = (
         "SELECT strategy_name, "
-        "       count(*)::int AS total, "
-        "       count(*) FILTER (WHERE attribution_chain_ok)::int AS chain_ok, "
-        "       (count(*) FILTER (WHERE attribution_chain_ok))::float "
-        "         / nullif(count(*), 0)::float AS ratio "
+        "       count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL)::int AS total, "
+        "       count(*) FILTER ( "
+        "         WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
+        "       )::int AS chain_ok, "
+        "       (count(*) FILTER ( "
+        "          WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
+        "        ))::float "
+        "         / nullif(count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL), 0)::float AS ratio "
         "FROM learning.mlde_edge_training_rows "
         f"WHERE ts > now() - {ATTRIBUTION_DRIFT_WINDOW_3D} "
         "  AND engine_mode IN ('demo', 'live_demo') "
@@ -843,28 +876,39 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
             ratios[s] = 0.0
             totals[s] = 0
 
-    # First-deploy / quiet-window grace: all 5 strategies 0 row in 3d → WARN.
-    # 3d window 比 7d 更易觸發 first-deploy grace，符合「3d 是更近期切片」設計
-    # (RFC §5 方案 B：3d 對齊「post-bug-fix」純後時段，量小是預期行為，
-    # 不應 FAIL 製造雜訊)。
-    # 全 5 strategy 3d 內 0 row → WARN（首部署 / 全靜默；FAIL 過嚴）。
+    # First-deploy / quiet-window grace: all 5 strategies 0 settled samples
+    # in 3d → WARN. 3d window is intentionally more sensitive to low sample.
+    # 全 5 strategy 3d 內 0 settled sample → WARN（首部署 / 全靜默；FAIL 過嚴）。
     if all(totals[s] == 0 for s in LG5_STRATEGIES):
         return (
             "WARN",
-            "[42c] no MLDE training rows for any LG-5 strategy in 3d — "
+            "[42c] no settled MLDE training rows for any LG-5 strategy in 3d — "
             "first-deploy or production silent; cannot evaluate R-meta drift",
         )
 
-    # Determine worst strategy (lowest ratio) for the verdict + msg.
-    # 找最差 strategy（最低 ratio）作為 verdict + msg。
-    worst_strategy = min(LG5_STRATEGIES, key=lambda s: ratios[s])
+    eligible = [s for s in LG5_STRATEGIES if totals[s] >= ATTRIBUTION_MIN_SETTLED_SAMPLES]
+    low_samples = [s for s in LG5_STRATEGIES if totals[s] < ATTRIBUTION_MIN_SETTLED_SAMPLES]
+    if not eligible:
+        summary = ", ".join(
+            f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
+        )
+        return (
+            "WARN",
+            "3d per-strategy settled attribution_chain_ok ratio "
+            f"(R-meta gate aligned): {summary} — all strategies below settled sample floor "
+            f"n<{ATTRIBUTION_MIN_SETTLED_SAMPLES}; R-meta will defer low-sample strategies",
+        )
+
+    # Determine worst eligible strategy (lowest ratio) for the verdict + msg.
+    # 找樣本足夠的最差 strategy（最低 ratio）作為 verdict + msg。
+    worst_strategy = min(eligible, key=lambda s: ratios[s])
     worst_ratio = ratios[worst_strategy]
 
     summary = ", ".join(
         f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
     )
     base = (
-        f"3d per-strategy attribution_chain_ok ratio "
+        f"3d per-strategy settled attribution_chain_ok ratio "
         f"(R-meta gate aligned): {summary}; "
         f"worst={worst_strategy}@{worst_ratio:.3f}"
     )
@@ -876,6 +920,13 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
     # 三段判定（RFC v2 §6 IMPL-3 line 451）+ §3 line 377 pipeline-alert 升級。
     # 閾值常數複用 [42b]（RFC §5 方案 B「同閾值、僅 window 異」）。
     if worst_ratio >= ATTRIBUTION_RATIO_PASS_FLOOR:
+        if low_samples:
+            return (
+                "WARN",
+                base
+                + " — eligible strategies pass R-meta floor; low settled sample strategies: "
+                + ", ".join(f"{s}(n={totals[s]})" for s in low_samples),
+            )
         return (
             "PASS",
             base + " — all strategies ≥ 0.50 R-meta floor (3d window)",

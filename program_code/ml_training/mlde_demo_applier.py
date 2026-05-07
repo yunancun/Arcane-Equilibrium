@@ -914,22 +914,27 @@ def _compute_demo_realized_window(
 
 
 def _compute_attribution_chain_ratio_by_strategy(cur: Any) -> dict[str, float]:
-    """Compute per-strategy 3d attribution_chain_ok ratio (R-meta gate input).
-    計算 per-strategy 3d attribution_chain_ok 比率（R-meta gate 輸入源）。
+    """Compute per-strategy 3d settled attribution_chain_ok ratio.
+    計算 per-strategy 3d 已 settle attribution_chain_ok 比率。
 
     LG-5 RFC v2 §2.1 + MIT MF-M2 + Fix 2 amendment (PA RFC 2026-05-02):
     R-meta window aligned to post-bug-fix 3d (vs cost baseline 7d in
     ``_compute_demo_cost_baseline`` / ``_compute_demo_realized_window``).
-    Returns dict keyed by 5 hardcoded strategy names; missing data → 0.0
-    (consumer R-meta defers per strategy; pair with
+    Returns dict keyed by 5 hardcoded strategy names; missing settled samples
+    → 0.0 (consumer R-meta defers per strategy; pair with
     ``_compute_attribution_sample_count_by_strategy`` +
     ``_R_META_MIN_SAMPLE_PER_STRATEGY=10`` to split "broken" vs "3d
-    insufficient"). NOT a global average — per-strategy is structural.
+    insufficient"). The denominator is post-fee settled samples
+    (``net_bps_after_fee IS NOT NULL``), not all raw intents; otherwise
+    open/unfilled intents masquerade as attribution failures.
+    NOT a global average — per-strategy is structural.
 
     LG-5 RFC v2 §2.1 + MIT MF-M2 + Fix 2 amendment（PA RFC 2026-05-02）：
-    R-meta 對齊已修 bug 後 3d (vs cost baseline 7d)。回傳 5 key dict；缺者
-    → 0.0（consumer R-meta per strategy defer；配 sample_count helper +
-    _R_META_MIN_SAMPLE_PER_STRATEGY=10 區分「真壞」vs「3d 樣本不足」）。
+    R-meta 對齊已修 bug 後 3d (vs cost baseline 7d)。回傳 5 key dict；缺
+    settled sample → 0.0（consumer R-meta per strategy defer；配 sample_count
+    helper + _R_META_MIN_SAMPLE_PER_STRATEGY=10 區分「真壞」vs「3d 樣本不足」）。
+    分母是 post-fee settled samples（net_bps_after_fee IS NOT NULL），不是所有
+    raw intents，否則未成交/未關閉 intent 會被誤算成 attribution failure。
     這 **不是** global 平均 — per-strategy 結構性必須。
     """
     ratios: dict[str, float] = {key: 0.0 for key in _ATTRIBUTION_STRATEGY_KEYS}
@@ -949,8 +954,11 @@ def _compute_attribution_chain_ratio_by_strategy(cur: Any) -> dict[str, float]:
             """
             SELECT
                 strategy_name,
-                count(*)::int AS total,
-                count(*) FILTER (WHERE attribution_chain_ok)::int AS ok_count
+                count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL)::int AS total,
+                count(*) FILTER (
+                    WHERE net_bps_after_fee IS NOT NULL
+                      AND attribution_chain_ok
+                )::int AS ok_count
               FROM learning.mlde_edge_training_rows
              WHERE ts > now() - (%s::int || ' days')::interval
                AND engine_mode IN ('demo', 'live_demo')
@@ -982,24 +990,25 @@ def _compute_attribution_chain_ratio_by_strategy(cur: Any) -> dict[str, float]:
 
 
 def _compute_attribution_sample_count_by_strategy(cur: Any) -> dict[str, int]:
-    """Per-strategy sample count over R-meta 3d window.
-    計算 R-meta 3d 窗口內 per-strategy sample 數。
+    """Per-strategy settled sample count over R-meta 3d window.
+    計算 R-meta 3d 窗口內 per-strategy settled sample 數。
 
     LG-5 W3 FUP-2 Fix 2 (PA RFC 2026-05-02 §9.3): producer-side companion
     to ``_compute_attribution_chain_ratio_by_strategy``. Consumer R-meta
     gate uses this dict + ``_R_META_MIN_SAMPLE_PER_STRATEGY=10`` to emit
     ``defer_attribution_chain_low_sample`` (vs ``reject_attribution_chain_
     too_broken``) so low-cardinality strategies (bb_breakout / bb_reversion
-    ~13 / ~2-3 in 3d per RFC §9.2) are not permanently deferred. Filter
-    mirrors ratio helper exactly (same window / engine_mode / strategy
-    keyset). Returns dict keyed by all 5 ``_ATTRIBUTION_STRATEGY_KEYS``;
-    missing → 0 (fail-soft).
+    ~13 / ~2-3 in 3d per RFC §9.2) are not permanently deferred. Count only
+    post-fee settled samples (``net_bps_after_fee IS NOT NULL``), mirroring
+    the ratio helper denominator. Returns dict keyed by all 5
+    ``_ATTRIBUTION_STRATEGY_KEYS``; missing → 0 (fail-soft).
 
     LG-5 W3 FUP-2 Fix 2（PA RFC 2026-05-02 §9.3）：producer 端 ratio helper
     的 sample-count 配對。Consumer R-meta gate 配 _R_META_MIN_SAMPLE_PER_
     STRATEGY=10 區分「真壞」vs「3d 樣本不足」(後者發
     defer_attribution_chain_low_sample)；避免 bb_breakout / bb_reversion 永久
-    defer。Filter 與 ratio helper 完全一致 (window / engine_mode / keyset)。
+    defer。只計 post-fee settled samples（net_bps_after_fee IS NOT NULL），
+    與 ratio helper 分母一致。
     回傳 5 key dict；缺者 → 0 fail-soft。
     """
     counts: dict[str, int] = {key: 0 for key in _ATTRIBUTION_STRATEGY_KEYS}
@@ -1024,6 +1033,7 @@ def _compute_attribution_sample_count_by_strategy(cur: Any) -> dict[str, int]:
              WHERE ts > now() - (%s::int || ' days')::interval
                AND engine_mode IN ('demo', 'live_demo')
                AND coalesce(strategy_name, '') = ANY(%s)
+               AND net_bps_after_fee IS NOT NULL
              GROUP BY strategy_name
             """,
             # 與 ratio helper 共用 _R_META_WINDOW_DAYS / strategy keyset
