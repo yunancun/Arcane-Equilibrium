@@ -44,6 +44,7 @@ class StrategyCandidate(_StrategistV2Model):
     strategy: str
     action: DecisionAction = "open"
     direction: StrategySignalDirection = "neutral"
+    scanner_rank: int | None = Field(default=None, ge=1)
     market_fit_score: float = 0.0
     edge_lcb_bps: float | None = None
     cost_bps: float | None = None
@@ -177,6 +178,7 @@ def build_strategist_decision(match: StrategyMatchInput) -> StrategistDecision:
             "normalized_strategy": normalized_strategy,
             "action": candidate.action,
             "direction": candidate.direction,
+            "scanner_rank": candidate.scanner_rank,
             "match_score": round(match_score, 6),
             "confidence": round(effective_confidence, 6),
             "edge_lcb_bps": candidate.edge_lcb_bps,
