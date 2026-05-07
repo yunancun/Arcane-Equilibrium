@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-032 durable spine store: added V064 `agent.*` lineage/idempotency tables, Rust `agent_spine` event envelopes/store, DB writer surface, and static/Rust tests for signal -> decision -> verdict -> plan lineage; runtime wiring remains disabled | workspace/reports/2026-05-07--agenttodo_mag032_durable_spine_store.md |
 | 2026-05-07 | AgentTodo MAG-031 StrategySignal adapter: added Rust `agent_spine` mode/contracts/signal_adapter, typed StrategySignal tests, and wired existing strategy-open signal persistence through the typed adapter while preserving legacy `trading.signals` row shape and behavior; Mac/Linux targeted Rust tests passed | workspace/reports/2026-05-07--agenttodo_mag031_strategy_signal_adapter.md |
 | 2026-05-07 | AgentTodo MAG-030 Agent Spine Rust module design: defined default-disabled/shadow-first `agent_spine` module files, Rust mode/contracts/store/router interfaces, DB object/edge/state/idempotency stores, and MAG-031..035 seams; no runtime behavior change | workspace/reports/2026-05-07--agenttodo_mag030_agent_spine_design.md |
 | 2026-05-07 | REF-21 S1 calibration lift: completed orderbook-depth partial-fill sizing, latency q50/q90 calibration, baseline-vs-candidate comparison, balance curve + stationary block bootstrap run bands, recorder retention/maturity policy, and GUI trust surfacing; empirical confidence still depends on recorder history | workspace/reports/2026-05-07--ref21_s1_calibration_lift.md |

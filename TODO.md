@@ -101,7 +101,7 @@
 
 #### P1-OPENCLAW — Gateway / Agent Control Console
 
-**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。AgentTodo Sprint A（MAG-015 -> MAG-010..014 -> MAG-016/017 -> MAG-018/019）已完成；M2 MAG-020..026 Scanner Advisory Conversion 已完成；M3 MAG-030 `agent_spine` Rust module RFC 與 MAG-031 Rust `StrategySignal` shadow adapter 已完成。下一步若繼續 AgentTodo，做 MAG-032 durable `agent_spine` store。Telegram/WebChat、proposal approval relay、第二 GUI 仍不在下一步。
+**執行順序**：以 `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md` 為接手入口。AgentTodo Sprint A（MAG-015 -> MAG-010..014 -> MAG-016/017 -> MAG-018/019）已完成；M2 MAG-020..026 Scanner Advisory Conversion 已完成；M3 MAG-030 `agent_spine` Rust module RFC、MAG-031 Rust `StrategySignal` shadow adapter、MAG-032 durable `agent_spine` store 已完成。下一步若繼續 AgentTodo，做 MAG-033 Python `agent_spine_client.py`。Telegram/WebChat、proposal approval relay、第二 GUI 仍不在下一步。
 
 | ID | 任務 | 來源 |
 |----|------|------|
