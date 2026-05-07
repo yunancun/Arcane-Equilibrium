@@ -292,6 +292,21 @@ def test_demo_and_live_tabs_have_risk_shortcuts(
     assert "openclaw-risk-select" in risk_tab_js
 
 
+def test_demo_and_live_fill_history_show_strategy(
+    console_html: str,
+    tab_demo_html: str,
+    tab_live_html: str,
+) -> None:
+    """Demo/Live fill history tables show per-fill strategy attribution."""
+    assert "20260507.fill-strategy-v1" in console_html
+    assert "<th>策略</th>" in tab_demo_html
+    assert "f.strategy || f.strategy_name || f.owner_strategy" in tab_demo_html
+    assert '<td colspan="10">暂无成交</td>' in tab_demo_html
+    assert "<th>策略 / Strategy</th>" in tab_live_html
+    assert "f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap" in tab_live_html
+    assert 'td colspan="10"' in tab_live_html
+
+
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(
     console_html: str,
 ) -> None:
