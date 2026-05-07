@@ -44,6 +44,14 @@ python3 -m pytest test_executor_config_cache.py test_executor_shadow_to_live_e2e
 25 passed, 7 skipped
 ```
 
+Linux `trade-core` after fast-forward to `f5bfd854`:
+
+```text
+python3 -m py_compile app/executor_agent.py app/executor_config_cache.py
+python3 -m pytest test_executor_config_cache.py test_executor_shadow_to_live_e2e.py test_executor_decision_parity.py -q
+30 passed, 2 skipped
+```
+
 ## Boundary
 
 No runtime deploy/restart, no live auth mutation, no risk/strategy config

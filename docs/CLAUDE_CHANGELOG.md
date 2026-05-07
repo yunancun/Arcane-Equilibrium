@@ -15,7 +15,8 @@ healthcheck FAIL `[Xb]` / `[42*]` / `[50]` / `[51]` 放到 P1 normal work
 避免 demo/live_demo flip 被 paper/default cache 吞掉。
 
 **Verification**：Mac targeted Executor tests 25 PASS / 7 skipped；
-`py_compile` PASS。Runtime deploy pending；未 rebuild/restart、未改 live auth、
+Linux `trade-core` targeted Executor tests 30 PASS / 2 skipped；`py_compile`
+PASS。Runtime deploy pending；未 rebuild/restart、未改 live auth、
 未 flip Decision Lease、未改 strategy/risk config。
 
 ### AgentTodo MAG-010..012 durable event-store source wiring — 2026-05-06

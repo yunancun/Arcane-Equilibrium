@@ -107,7 +107,7 @@
 
 | ID | 任務 | 來源 |
 |----|------|------|
-| **P1-FAKE-1** | ✅ SOURCE FIX 2026-05-07 — ExecutorAgent IPC path now calls Rust's real `submit_paper_order` method with explicit `engine`; `ExecutorConfigCache.shadow_mode_provider()` can resolve explicit `demo` / `live` / `live_demo` instead of silently reading paper/default. Mac targeted tests 25 PASS / 7 skipped；待 Linux pull + deploy 驗證後關閉 runtime | PA panorama |
+| **P1-FAKE-1** | ✅ SOURCE FIX 2026-05-07 — ExecutorAgent IPC path now calls Rust's real `submit_paper_order` method with explicit `engine`; `ExecutorConfigCache.shadow_mode_provider()` can resolve explicit `demo` / `live` / `live_demo` instead of silently reading paper/default. Mac targeted tests 25 PASS / 7 skipped；Linux targeted tests 30 PASS / 2 skipped。待 deploy/reload 驗證後關閉 runtime | PA panorama |
 | **P1-FAKE-2** | H0_GATE singleton 0 production caller wire（DOC-02 spec 死於 wiring，LG-2 IMPL 前提）| FA-H2 |
 | **P1-FAKE-3** | HStateCache + CostEdgeAdvisor 兩 late-inject slot 啟用（env-gated `OPENCLAW_H_STATE_GATEWAY=1` / `OPENCLAW_COST_EDGE_ADVISOR_*` 未設）| PA panorama |
 

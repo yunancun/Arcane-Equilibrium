@@ -183,5 +183,5 @@ YYYY-MM-DD HH:MM TZ
 2026-05-07 CEST
 - inserted current Linux healthcheck FAILs into TODO as `P1-FAIL`: `[Xb]`, `[42]`/`[42b]`/`[42c]`, `[50]`, and `[51]` now preempt normal P1 Important work and keep MAG-083/MAG-084 blocked
 - source-fixed `P1-FAKE-1`: ExecutorAgent now calls Rust IPC `submit_paper_order` with explicit `engine`, and ExecutorConfigCache's provider can read explicit demo/live/live_demo shadow config
-- verification: Mac targeted Executor pytest 25 passed / 7 skipped, py_compile passed
+- verification: Mac targeted Executor pytest 25 passed / 7 skipped, Linux targeted Executor pytest 30 passed / 2 skipped, py_compile passed on both sides
 - no deploy/restart/live auth/strategy/risk config mutation; Linux pull/deploy verification remains pending
