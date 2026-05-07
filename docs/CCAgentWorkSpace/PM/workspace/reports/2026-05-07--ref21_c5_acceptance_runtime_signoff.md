@@ -100,13 +100,14 @@ Mac verification:
 - Targeted replay route/report/static pytest suite: 59 passed.
 - `git diff --check`: passed.
 
-Linux `trade-core` verification at `0eda6005`:
+Linux `trade-core` verification:
 
 - `python3 -m py_compile` for the same modules: passed.
 - Targeted replay route/report/static pytest suite: 59 passed.
-- API reload: `bash helper_scripts/restart_all.sh --api-only --keep-auth`
-  restarted API parent PID `2467045`.
-- Route probes:
+- Final source sync: `59f5634a`.
+- Final API reload: `bash helper_scripts/restart_all.sh --api-only --keep-auth`
+  restarted API parent PID `2467902`.
+- Final route probes at `59f5634a`:
   - `GET /api/v1/replay/full-chain/coverage` -> 405,
   - `GET /api/v1/replay/advisory/rank` -> 405,
   - `GET /api/v1/replay/report/example` -> 401.
