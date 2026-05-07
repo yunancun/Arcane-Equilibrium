@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-083 final release pre-audit: source/policy prerequisites are present, but final release audit is BLOCKED until an operator-approved MAG-082 canary evidence window proves no execution without StrategistDecision + GuardianVerdict + ExecutionPlan + Decision Lease | workspace/reports/2026-05-07--agenttodo_mag083_final_release_audit_blocked.md |
 | 2026-05-07 | AgentTodo MAG-082 24h canary validation checklist: defined window metadata, entry checks, SQL evidence, runtime health evidence, and PASS/WARN/FAIL criteria; every executable canary decision must reconstruct StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport | workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_checklist.md |
 | 2026-05-07 | AgentTodo MAG-081 canary flag runtime risk review: reviewed event-store, Agent Spine, scanner authority, lease router, executor shadow, Mainnet opt-in, signed live auth, OpenClaw read-only routes, H-state, cost-edge, and cloud policy; verdict no reviewed single flag can enable true live autonomy without approval | workspace/reports/2026-05-07--agenttodo_mag081_canary_flag_runtime_risk_review.md |
 | 2026-05-07 | AgentTodo MAG-080 cutover policy: defined shadow/soak/canary/primary-candidate/primary stages, exact control surfaces/flags, thresholds, rollback triggers, executor shadow rollback payload, and operator checklist | workspace/reports/2026-05-07--agenttodo_mag080_cutover_policy.md |
@@ -1793,3 +1794,27 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Next AgentTodo item is MAG-083 final release audit, but MAG-083 should wait
   for an operator-approved canary window to produce evidence against the
   MAG-082 checklist.
+
+## 2026-05-07 AgentTodo MAG-083 Final Release Audit Pre-Audit
+
+### Result
+- MAG-083 is advanced to a documented BLOCKED state, not closed.
+- Added
+  `docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag083_final_release_audit_blocked.md`.
+- Source/policy prerequisites are present: MAG-080 cutover policy, MAG-081
+  flag risk review, MAG-082 canary checklist, and M6 ExecutionPlan / lease /
+  ExecutionReport / scope regressions.
+- Final release audit cannot pass because there is no operator-approved 24h
+  canary evidence report proving no execution without StrategistDecision,
+  GuardianVerdict, ExecutionPlan, and Decision Lease.
+
+### Verification
+- Mac targeted: markdown diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  diff check.
+
+### Boundary
+- Pre-audit/docs only. No runtime flag, rebuild, restart, deploy, DB write,
+  live auth, cloud call, runtime submit path, canary run, or trading authority
+  change was made.
+- MAG-084 operator sign-off is blocked while MAG-083 remains blocked.
