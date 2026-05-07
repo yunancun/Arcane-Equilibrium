@@ -54,12 +54,85 @@ def _viewer_actor() -> AuthenticatedActor:
     )
 
 
+def _operator_actor() -> AuthenticatedActor:
+    return AuthenticatedActor(
+        actor_id="test-operator",
+        actor_type="human",
+        roles={"viewer", "operator"},
+        scopes={"private_readonly"},
+    )
+
+
 @pytest.fixture
 def client() -> TestClient:
     app = FastAPI()
     app.include_router(openclaw_router)
     app.dependency_overrides[current_actor] = _viewer_actor
     return TestClient(app)
+
+
+@pytest.fixture
+def operator_client() -> TestClient:
+    app = FastAPI()
+    app.include_router(openclaw_router)
+    app.dependency_overrides[current_actor] = _operator_actor
+    return TestClient(app)
+
+
+class _FakeProposalStore:
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+        self.decisions: list[dict[str, Any]] = []
+
+    def list_proposals(self) -> tuple[dict[str, Any], None]:
+        return (
+            {
+                "source_table": "openclaw.proposals",
+                "available": True,
+                "items": [],
+                "recent_count": 0,
+            },
+            None,
+        )
+
+    def create_proposal(self, **kwargs: Any) -> dict[str, Any]:
+        self.created.append(kwargs)
+        return {
+            "proposal_id": "prop-test-1",
+            "request_id": kwargs["request_context"]["request_id"],
+            "created_at_ms": 1_778_000_000_000,
+            "created_by": {"actor": kwargs["actor"]},
+            "proposal_type": kwargs["proposal_type"],
+            "risk_class": kwargs["risk_class"],
+            "status": "pending_approval",
+            "summary": kwargs["summary"],
+            "evidence_refs": kwargs["evidence_refs"],
+            "required_approval_class": kwargs["required_approval_class"],
+            "operator_action_required": True,
+            "expires_at_ms": kwargs["expires_at_ms"],
+            "linked_diagnosis_id": kwargs["linked_diagnosis_id"],
+            "linked_escalation_id": kwargs["linked_escalation_id"],
+            "side_effect_route": kwargs["side_effect_route"],
+            "payload": kwargs["payload"],
+        }
+
+    def decide_proposal(self, **kwargs: Any) -> dict[str, Any] | None:
+        self.decisions.append(kwargs)
+        return {
+            "approval_id": "appr-test-1",
+            "proposal_id": kwargs["proposal_id"],
+            "request_id": kwargs["request_context"]["request_id"],
+            "decision": "approved" if kwargs["action"] == "approve" else "rejected",
+            "decided_at_ms": 1_778_000_000_100,
+            "actor": kwargs["actor"],
+            "auth_result": "authenticated",
+            "reason": kwargs["reason"],
+            "delegated_route": None,
+            "governance_result_ref": {
+                "status": "not_delegated",
+                "reason": "openclaw_p1_approval_relay_records_decision_only",
+            },
+        }
 
 
 class _FakeCursor:
@@ -389,6 +462,112 @@ def test_escalations_lists_supervisor_ai_invocation_ledger_rows_read_only(
     assert item["status"] == "invocation_recorded"
 
 
+def test_proposals_get_returns_readable_empty_ledger(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_store = _FakeProposalStore()
+    monkeypatch.setattr(oc_routes, "_get_proposal_store", lambda: fake_store)
+    resp = client.get("/api/v1/openclaw/proposals", headers=_CONTEXT_HEADERS)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data_category"] == "openclaw_proposals"
+    assert body["data"]["proposals"]["source_table"] == "openclaw.proposals"
+    assert body["data"]["side_effect_delegation_enabled"] is False
+
+
+def test_proposal_create_requires_complete_openclaw_context(
+    operator_client: TestClient,
+) -> None:
+    resp = operator_client.post(
+        "/api/v1/openclaw/proposals",
+        json={
+            "proposal_type": "read_only_report",
+            "risk_class": "read_only",
+            "summary": "test proposal",
+            "evidence_refs": [
+                {
+                    "ref_type": "api_route",
+                    "ref_id": "GET /api/v1/openclaw/status",
+                    "label": "status",
+                }
+            ],
+            "required_approval_class": "operator",
+            "expires_at_ms": 1_778_000_300_000,
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["reason_codes"] == [
+        "openclaw_request_context_required"
+    ]
+
+
+def test_proposal_create_persists_without_side_effect(
+    operator_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_store = _FakeProposalStore()
+    monkeypatch.setattr(oc_routes, "_get_proposal_store", lambda: fake_store)
+    resp = operator_client.post(
+        "/api/v1/openclaw/proposals",
+        headers=_CONTEXT_HEADERS,
+        json={
+            "proposal_type": "read_only_report",
+            "risk_class": "read_only",
+            "summary": "test proposal",
+            "evidence_refs": [
+                {
+                    "ref_type": "api_route",
+                    "ref_id": "GET /api/v1/openclaw/status",
+                    "label": "status",
+                }
+            ],
+            "required_approval_class": "operator",
+            "expires_at_ms": 1_778_000_300_000,
+            "payload": {"safe": True},
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data_category"] == "openclaw_proposal_created"
+    assert body["data"]["proposal"]["proposal_id"] == "prop-test-1"
+    assert body["data"]["side_effect_executed"] is False
+    assert fake_store.created[0]["request_context"]["request_id"] == "req-openclaw-test-1"
+
+
+def test_proposal_approval_requires_operator_role(client: TestClient) -> None:
+    resp = client.post(
+        "/api/v1/openclaw/proposals/prop-test-1/approve",
+        headers=_CONTEXT_HEADERS,
+        json={"reason": "ok"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["reason_codes"] == [
+        "openclaw_operator_approval_required"
+    ]
+
+
+def test_proposal_approval_records_decision_without_delegation(
+    operator_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_store = _FakeProposalStore()
+    monkeypatch.setattr(oc_routes, "_get_proposal_store", lambda: fake_store)
+    resp = operator_client.post(
+        "/api/v1/openclaw/proposals/prop-test-1/approve",
+        headers=_CONTEXT_HEADERS,
+        json={"reason": "approved for read-only followup"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data_category"] == "openclaw_proposal_decision"
+    approval = body["data"]["approval"]
+    assert approval["decision"] == "approved"
+    assert approval["delegated_route"] is None
+    assert body["data"]["side_effect_executed"] is False
+    assert body["data"]["side_effect_delegation_enabled"] is False
+
+
 def test_pg_unavailable_returns_degraded_envelope(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -449,7 +628,7 @@ def test_zero_rows_are_fail_visible_when_required(
     }
 
 
-def test_openclaw_router_exposes_only_sprint_a_allowlist() -> None:
+def test_openclaw_router_exposes_only_openclaw_allowlist() -> None:
     routes = {
         (tuple(sorted(route.methods or [])), route.path)
         for route in openclaw_router.routes
@@ -461,6 +640,10 @@ def test_openclaw_router_exposes_only_sprint_a_allowlist() -> None:
         (("GET",), "/api/v1/openclaw/brief/latest"),
         (("GET",), "/api/v1/openclaw/diagnostics"),
         (("GET",), "/api/v1/openclaw/escalations"),
+        (("GET",), "/api/v1/openclaw/proposals"),
+        (("POST",), "/api/v1/openclaw/proposals"),
+        (("POST",), "/api/v1/openclaw/proposals/{proposal_id}/approve"),
+        (("POST",), "/api/v1/openclaw/proposals/{proposal_id}/reject"),
     }
     forbidden_path_fragments = (
         "order",
