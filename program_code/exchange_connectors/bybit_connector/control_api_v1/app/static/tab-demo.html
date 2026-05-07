@@ -136,8 +136,8 @@
     <div class="oc-collapse-body">
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
-          <tbody id="demo-fills"><tr class="empty-row"><td colspan="9">加载中...</td></tr></tbody>
+          <thead><tr><th>时间</th><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
+          <tbody id="demo-fills"><tr class="empty-row"><td colspan="10">加载中...</td></tr></tbody>
         </table>
       </div>
     <div class="oc-metrics" style="margin-top:8px">
@@ -608,7 +608,7 @@ async function loadDemoOrders() {
 async function loadDemoFills() {
   const d = await ocApi('/api/v1/strategy/demo/fills');
   if (!d || !d.data) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="9">暂无成交</td></tr>');
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="10">暂无成交</td></tr>');
     return;
   }
   let fills = [];
@@ -622,7 +622,7 @@ async function loadDemoFills() {
   }
   _demoFillsCache = fills;
   if (!fills.length) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="9">暂无成交</td></tr>');
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="10">暂无成交</td></tr>');
     return;
   }
   let html = '';
@@ -637,9 +637,11 @@ async function loadDemoFills() {
     const fee = parseFloat(f.execFee || f.fee || 0);
     const sym = f.symbol || '';
     const cat = f.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
+    const strategy = f.strategy || f.strategy_name || f.owner_strategy || '';
     html += '<tr>';
     html += '<td>' + ocFillTime(ts) + '</td>';
     html += '<td>' + ocEsc(f.symbol) + '</td>';
+    html += '<td style="font-size:11px">' + (strategy ? _ocRenderOwnerStrategy(strategy, f) : '--') + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(qty, 4) + '</td>';
