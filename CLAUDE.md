@@ -449,7 +449,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A closed**）。AgentTodo Sprint A 已完成：**MAG-015 合約附錄**、**MAG-010..014 durable event-store source + Linux controlled row proof**、**MAG-016/017 read-only OpenClaw authority lockdown + status/self-state endpoints**（`cbb225b7`；Mac/Linux targeted tests 33/0）、**MAG-018 Agent Control GUI foundation**（`12d3f3ff`；Mac/Linux targeted tests 38/0 + node check）、以及 **MAG-019 supervisor cloud escalation ledger policy**（`65a4279f`；Mac/Linux targeted tests 45/0；cloud default disabled）。下一步若繼續 AgentTodo，進 **M2 MAG-020..026 Scanner Advisory Conversion**；仍不是 Telegram/WebChat、proposal approval relay、或第二 GUI。
+**當前焦點**：活躍任務以 `TODO.md` 為準（P0/P1/P2 三層 · 5 大組 × 36 條目 · **REF-20 Sprint A+B+C+D closed，AgentTodo Sprint A/M2/M3/M4/M5/M6/M7 closed**）。AgentTodo M8 Canary/Cutover 已完成 **MAG-080 cutover policy**、**MAG-081 canary flag runtime risk review**、**MAG-082 24h canary validation checklist**；**MAG-083 final release audit** 已做 pre-audit 並 BLOCKED，缺 operator-approved MAG-082 24h canary evidence；**MAG-084 operator sign-off** 已正式記錄 BLOCKED，需 MAG-083 PASS 後才可簽核。下一步若繼續 M8，唯一 release-safe 動作是先取得 operator-approved Stage 2 demo/live_demo canary evidence；仍不是 Telegram/WebChat、proposal approval relay、或第二 GUI。
 
 **關鍵路徑**：`post-deploy edge observation + LG-5 reviewer activation → G2-02/G2-01 結論 → ~05-09 3C 7d audit → ~05-15 P0-3 edge decision + Decision Lease flag flip canary 24h → ~05-16 funding_arb V2 14d audit → LG-2/3/4 IMPL + Live infra (HTTPS / credential rotation / runbook) → true live`
 
@@ -457,7 +457,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **最早 Live 日期**（事件驅動，非 hard date）：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA panorama 評估悲觀更可能**（5 策略 net negative + 4 LG 0 IMPL + 18 blocker 還剩 13 個未解 + Decision Lease retrofit deploy with flag OFF）。
 
-**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + **REF-20 Paper Replay Lab A-D** 均已落地。仍未完成的是正 edge / execution-quality 驗收 / P0-3 decision / Live Gate LG-2/3/4 IMPL + Decision Lease canary / Wave 7 P5 deploy gate / true live 授權後的受監督/受限自主放權 / **AgentTodo Sprint A +後續 multi-agent rework IMPL**。
+**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + **REF-20 Paper Replay Lab A-D** 均已落地。仍未完成的是正 edge / execution-quality 驗收 / P0-3 decision / Live Gate LG-2/3/4 IMPL + Decision Lease canary / Wave 7 P5 deploy gate / true live 授權後的受監督/受限自主放權 / **AgentTodo M8 canary evidence + final audit + sign-off**。
 
 **Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease retrofit deploy with flag OFF。True live 還缺 18 blocker 中的 #1/#2/#3/#4/#6-#18（13 個未解；#5 Decision Lease 已 closed）+ ~05-15 flag flip canary 24h。
 
