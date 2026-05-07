@@ -281,6 +281,77 @@ class TestGuardianReview(unittest.TestCase):
         verdict = agent.review_intent(intent)
         self.assertEqual(verdict.result, RiskVerdictResult.APPROVED)
 
+    def test_soft_strategy_drawdown_modifies_size_leverage_stop_cooldown(self):
+        """Soft strategy drawdown emits bounded P2 modification output."""
+        config = GuardianConfig()
+        agent = GuardianAgent(config=config)
+        agent.start()
+        agent.update_strategy_risk_snapshot({
+            "snapshot_id": "strategy-risk-soft-1",
+            "ts_ms": int(time.time() * 1000),
+            "engine_mode": "paper",
+            "strategy": "test",
+            "sample_count": 12,
+            "current_drawdown_bps": 180.0,
+            "max_drawdown_bps": 190.0,
+            "consecutive_losses": 3,
+            "loss_rate": 0.5,
+            "quality": "full",
+            "evidence_refs": ["execution_report:soft-1"],
+        })
+        intent = self._make_intent(size=0.4, leverage=3.0)
+        intent.params["stop_loss_bps"] = 120.0
+
+        verdict = agent.review_intent(intent)
+
+        self.assertEqual(verdict.result, RiskVerdictResult.MODIFIED)
+        self.assertIn("Strategy risk modified", verdict.reason)
+        self.assertAlmostEqual(verdict.modified_params["size"], 0.2)
+        self.assertEqual(verdict.modified_params["leverage"], config.modification_leverage_cap)
+        self.assertEqual(verdict.modified_params["stop_loss_bps"], config.p2_stop_loss_bps_cap)
+        self.assertEqual(verdict.modified_params["cooldown_ms"], config.p2_cooldown_ms)
+        fields = {item["field"]: item for item in verdict.p2_modifications}
+        self.assertEqual(set(fields), {"size", "leverage", "stop", "cooldown"})
+        self.assertNotIn("symbol", fields["size"])
+        self.assertNotIn("direction", fields["size"])
+        self.assertIn(
+            "strategy_soft_drawdown",
+            verdict.metadata["strategy_risk_review"]["reason_codes"],
+        )
+
+    def test_hard_strategy_drawdown_rejects_and_requests_position_review_not_close(self):
+        """Hard strategy risk pauses new opens and requests review, not direct close."""
+        config = GuardianConfig()
+        agent = GuardianAgent(config=config)
+        agent.start()
+        agent.update_active_positions({
+            "pos1": {"symbol": "BTCUSDT", "side": "Buy", "strategy": "test", "size": 0.1},
+        })
+        agent.update_strategy_risk_snapshot({
+            "snapshot_id": "strategy-risk-hard-1",
+            "ts_ms": int(time.time() * 1000),
+            "engine_mode": "paper",
+            "strategy": "test",
+            "sample_count": 15,
+            "current_drawdown_bps": 325.0,
+            "max_drawdown_bps": 330.0,
+            "consecutive_losses": 5,
+            "loss_rate": 0.7,
+            "quality": "full",
+            "evidence_refs": ["execution_report:hard-1"],
+        })
+
+        verdict = agent.review_intent(self._make_intent(symbol="BTCUSDT", direction="long"))
+
+        self.assertEqual(verdict.result, RiskVerdictResult.REJECTED)
+        self.assertIn("Strategy risk pause", verdict.reason)
+        review = verdict.metadata["strategy_risk_review"]
+        self.assertEqual(review["state"], "pause_new_entries")
+        self.assertTrue(review["position_review_requested"])
+        self.assertIn("position_review_requested", review["reason_codes"])
+        self.assertNotIn("close", verdict.modified_params)
+        self.assertEqual(verdict.p2_modifications, [])
+
 
 class TestGuardianFailClosed(unittest.TestCase):
     """Test fail-closed behavior."""

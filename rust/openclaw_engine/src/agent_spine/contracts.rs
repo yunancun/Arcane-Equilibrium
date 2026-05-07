@@ -111,6 +111,23 @@ fn default_decision_action() -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GuardianP2Modification {
+    pub field: String,
+    pub action: String,
+    #[serde(default)]
+    pub original_value: Option<serde_json::Value>,
+    pub modified_value: serde_json::Value,
+    #[serde(default)]
+    pub unit: Option<String>,
+    pub reason_code: String,
+    pub reason: String,
+    #[serde(default)]
+    pub evidence_refs: Vec<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GuardianVerdict {
     pub schema_version: String,
     pub verdict_id: String,
@@ -123,6 +140,8 @@ pub struct GuardianVerdict {
     pub allow: bool,
     pub risk_level: String,
     pub reasons: Vec<String>,
+    #[serde(default)]
+    pub p2_modifications: Vec<GuardianP2Modification>,
     pub metadata: serde_json::Value,
 }
 

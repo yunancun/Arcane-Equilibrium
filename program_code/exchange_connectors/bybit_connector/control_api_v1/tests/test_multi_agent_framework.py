@@ -20,6 +20,7 @@ from app.multi_agent_framework import (
     MessageBus,
     MessageType,
     ResourcePriority,
+    RiskModification,
     RiskVerdict,
     RiskVerdictResult,
     ScoutAgent,
@@ -172,8 +173,20 @@ class TestRiskVerdict:
             result=RiskVerdictResult.MODIFIED,
             reason="Size reduced",
             modified_params={"size": 0.05},
+            p2_modifications=[
+                RiskModification(
+                    field="size",
+                    action="reduce",
+                    original_value=0.1,
+                    modified_value=0.05,
+                    unit="base_qty",
+                    reason_code="strategy_soft_risk",
+                    reason="Size reduced",
+                ).to_dict()
+            ],
         )
         assert v.modified_params["size"] == 0.05
+        assert v.to_dict()["p2_modifications"][0]["field"] == "size"
 
 
 # ─────────────────────────────────────────────

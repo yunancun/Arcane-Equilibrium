@@ -227,6 +227,37 @@ class TradeIntent:
 
 
 @dataclass
+class RiskModification:
+    """P2 Guardian modification output.
+
+    The field names intentionally describe bounded risk adjustments only.
+    They do not carry symbol or direction authority.
+    """
+    field: str
+    action: str
+    modified_value: Any
+    original_value: Any = None
+    unit: str = ""
+    reason_code: str = ""
+    reason: str = ""
+    evidence_refs: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "field": self.field,
+            "action": self.action,
+            "original_value": self.original_value,
+            "modified_value": self.modified_value,
+            "unit": self.unit,
+            "reason_code": self.reason_code,
+            "reason": self.reason,
+            "evidence_refs": list(self.evidence_refs),
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass
 class RiskVerdict:
     """EX-06 §5/§8.2 — Guardian's review conclusion."""
     verdict_id: str = field(default_factory=lambda: f"verdict_{uuid.uuid4().hex[:12]}")
@@ -234,6 +265,7 @@ class RiskVerdict:
     result: RiskVerdictResult = RiskVerdictResult.REJECTED
     reason: str = ""
     modified_params: Dict[str, Any] = field(default_factory=dict)
+    p2_modifications: List[Dict[str, Any]] = field(default_factory=list)
     risk_score: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -244,6 +276,7 @@ class RiskVerdict:
             "result": self.result.value,
             "reason": self.reason,
             "modified_params": dict(self.modified_params),
+            "p2_modifications": [dict(item) for item in self.p2_modifications],
             "risk_score": self.risk_score,
             "metadata": dict(self.metadata),
         }

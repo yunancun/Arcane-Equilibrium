@@ -1,7 +1,7 @@
 use super::config::AgentSpineMode;
 use super::contracts::{
-    ExecutionPlan, ExecutionReport, GuardianVerdict, StrategistDecision, StrategySignalDirection,
-    EXECUTION_PLAN_SCHEMA_VERSION, EXECUTION_REPORT_SCHEMA_VERSION,
+    ExecutionPlan, ExecutionReport, GuardianP2Modification, GuardianVerdict, StrategistDecision,
+    StrategySignalDirection, EXECUTION_PLAN_SCHEMA_VERSION, EXECUTION_REPORT_SCHEMA_VERSION,
     GUARDIAN_VERDICT_SCHEMA_VERSION, STRATEGIST_DECISION_SCHEMA_VERSION,
     STRATEGY_SIGNAL_SCHEMA_VERSION,
 };
@@ -172,8 +172,21 @@ fn durable_spine_objects_model_signal_decision_verdict_plan_chain() {
         allow: true,
         risk_level: "low".to_string(),
         reasons: vec!["shadow_only".to_string()],
+        p2_modifications: vec![GuardianP2Modification {
+            field: "size".to_string(),
+            action: "reduce".to_string(),
+            original_value: Some(json!(1.25)),
+            modified_value: json!(0.75),
+            unit: Some("base_qty".to_string()),
+            reason_code: "strategy_soft_risk".to_string(),
+            reason: "soft risk size cap".to_string(),
+            evidence_refs: vec![signal.signal_id.clone()],
+            metadata: json!({}),
+        }],
         metadata: json!({}),
     };
+    let verdict_json = serde_json::to_value(&verdict).expect("guardian verdict json");
+    assert_eq!(verdict_json["p2_modifications"][0]["field"], "size");
     let verdict_obj = SpineObjectEnvelope::from_guardian_verdict(&verdict, AgentSpineMode::Shadow)
         .expect("guardian verdict envelope");
 
@@ -381,6 +394,7 @@ fn shadow_spine_chain_is_complete_while_legacy_signal_msg_stays_unchanged() {
         allow: true,
         risk_level: "low".to_string(),
         reasons: vec!["shadow_integration_only".to_string()],
+        p2_modifications: vec![],
         metadata: json!({}),
     };
     let verdict_obj = SpineObjectEnvelope::from_guardian_verdict(&verdict, AgentSpineMode::Shadow)

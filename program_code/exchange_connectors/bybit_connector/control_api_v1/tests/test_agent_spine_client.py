@@ -10,6 +10,7 @@ from app.agent_contracts import (
     AnalystInsight,
     ExecutionPlan,
     ExecutionReport,
+    GuardianP2Modification,
     GuardianVerdict,
     StrategistDecision,
     StrategySignal,
@@ -113,6 +114,41 @@ def _verdict() -> GuardianVerdict:
     )
 
 
+def _modified_verdict() -> GuardianVerdict:
+    return GuardianVerdict(
+        verdict_id="verdict-paper-BTCUSDT-1-v2",
+        decision_id="decision-paper-BTCUSDT-1",
+        verdict_version=2,
+        ts_ms=1_700_000_000_025,
+        engine_mode="paper",
+        symbol="BTCUSDT",
+        strategy="grid_trading",
+        allow=True,
+        risk_level="medium",
+        reasons=["strategy_soft_risk"],
+        p2_modifications=[
+            GuardianP2Modification(
+                field="size",
+                action="reduce",
+                original_value=1.0,
+                modified_value=0.5,
+                unit="base_qty",
+                reason_code="strategy_soft_risk",
+                reason="soft drawdown size cap",
+            ),
+            GuardianP2Modification(
+                field="cooldown",
+                action="extend",
+                original_value=None,
+                modified_value=1_800_000,
+                unit="ms",
+                reason_code="strategy_soft_risk",
+                reason="soft drawdown cooldown",
+            ),
+        ],
+    )
+
+
 def _plan() -> ExecutionPlan:
     return ExecutionPlan(
         order_plan_id="plan-paper-BTCUSDT-1",
@@ -188,6 +224,16 @@ def test_execution_contracts_require_deduplication_lineage_ids() -> None:
         invalid_payload.pop(field)
         with pytest.raises(ValidationError):
             ExecutionReport(**invalid_payload)
+
+
+def test_guardian_verdict_contract_carries_p2_modifications_without_authority_shift() -> None:
+    verdict = _modified_verdict()
+    payload = verdict.model_dump(mode="json")
+
+    assert payload["allow"] is True
+    assert payload["symbol"] == "BTCUSDT"
+    assert "direction" not in payload["p2_modifications"][0]
+    assert [item["field"] for item in payload["p2_modifications"]] == ["size", "cooldown"]
 
 
 def test_disabled_client_never_writes(fake_conn) -> None:

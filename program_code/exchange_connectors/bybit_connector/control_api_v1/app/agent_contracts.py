@@ -45,6 +45,9 @@ StrategySignalDirection = Literal[
 
 DecisionAction = Literal["open", "hold", "reduce", "close", "no_action"]
 
+GuardianP2Field = Literal["size", "leverage", "stop", "cooldown"]
+GuardianP2Action = Literal["cap", "reduce", "tighten", "extend", "set"]
+
 PositionReviewRecommendation = Literal[
     "hold",
     "reduce",
@@ -164,6 +167,18 @@ class PositionReview(_SpineModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class GuardianP2Modification(_SpineModel):
+    field: GuardianP2Field
+    action: GuardianP2Action
+    original_value: float | int | str | None = None
+    modified_value: float | int | str
+    unit: str | None = None
+    reason_code: str
+    reason: str
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class GuardianVerdict(_SpineModel):
     schema_version: str = "agent_spine.guardian_verdict.v1"
     verdict_id: str
@@ -176,6 +191,7 @@ class GuardianVerdict(_SpineModel):
     allow: bool
     risk_level: str
     reasons: list[str] = Field(default_factory=list)
+    p2_modifications: list[GuardianP2Modification] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
