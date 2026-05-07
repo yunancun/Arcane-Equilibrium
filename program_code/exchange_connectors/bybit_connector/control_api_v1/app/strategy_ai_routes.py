@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Any
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 
 from . import main_legacy as base
 from .strategy_wiring import (
@@ -1064,7 +1064,12 @@ def get_demo_session_status(
 
 
 @phase2_router.get("/demo/fills")
-async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+async def get_demo_fills(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    side: str | None = Query(None),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """Get Demo fill history. DB primary (has realized_pnl) / Bybit API fallback.
     獲取 Demo 成交歷史。DB 為主（帶 realized_pnl）/ Bybit API 備援。"""
     # DB path — same pattern as paper fills; carries engine-calculated realized_pnl.
@@ -1077,12 +1082,21 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
     if conn is not None:
         try:
             cur = conn.cursor()
+            safe_side = side if side in {"Buy", "Sell"} else None
+            where = "engine_mode = %s"
+            params: list[Any] = ["demo"]
+            if safe_side:
+                where += " AND side = %s"
+                params.append(safe_side)
+            params.extend([limit + 1, offset])
             cur.execute(
                 "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name "
-                "FROM trading.fills WHERE engine_mode = %s ORDER BY ts DESC LIMIT %s",
-                ("demo", 50),
+                f"FROM trading.fills WHERE {where} ORDER BY ts DESC LIMIT %s OFFSET %s",
+                tuple(params),
             )
             rows = cur.fetchall()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
             fills = []
             for ts, symbol, side, qty, price, fee, rpnl, strategy in rows:
                 ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
@@ -1099,7 +1113,15 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
                     "strategy": strategy or "",
                     "category": cat,
                 })
-            return _envelope({"list": fills, "count": len(fills), "source": "pg_trading_fills"})
+            return _envelope({
+                "list": fills,
+                "count": len(fills),
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+                "next_offset": offset + len(fills) if has_more else None,
+                "source": "pg_trading_fills",
+            })
         except Exception as e:
             logger.warning("PG demo fills query failed, falling back to Bybit API: %s", e)
         finally:
@@ -1113,8 +1135,21 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
-        return _envelope({"source": "rust_engine", "list": fills, "count": len(fills)})
+        safe_side = side if side in {"Buy", "Sell"} else None
+        fetch_limit = min(max(limit + offset + 1, limit), 100)
+        raw = [_normalize_execution(f) for f in rc.get_executions("linear", limit=fetch_limit)]
+        if safe_side:
+            raw = [f for f in raw if f.get("side") == safe_side]
+        fills = raw[offset:offset + limit]
+        return _envelope({
+            "source": "rust_engine",
+            "list": fills,
+            "count": len(fills),
+            "limit": limit,
+            "offset": offset,
+            "has_more": len(raw) > offset + limit,
+            "next_offset": offset + len(fills) if len(raw) > offset + limit else None,
+        })
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Bybit fills fetch failed: {exc}")
 
