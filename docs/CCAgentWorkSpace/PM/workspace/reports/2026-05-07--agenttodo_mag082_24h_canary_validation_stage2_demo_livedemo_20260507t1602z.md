@@ -1,7 +1,7 @@
 # AgentTodo MAG-082 24h Canary Validation: Stage 2 Window Start
 
 Date: 2026-05-07
-Status: RUNNING, operator-authorized Stage 2 window
+Status: NO-GO, fast-track early evidence review
 Window: stage2_demo_livedemo_20260507t1602z
 
 ## Window Header
@@ -18,7 +18,7 @@ Window: stage2_demo_livedemo_20260507t1602z
 | Symbol scope | Current runtime/snapshot symbols: `ADAUSDT`, `B3USDT`, `BILLUSDT`, `BTCUSDT`, `DOGEUSDT`, `ENAUSDT`, `ETHUSDT`, `ICPUSDT`, `JTOUSDT`, `LABUSDT`, `TAOUSDT`, `VIRTUALUSDT`, `XRPUSDT`, `ZECUSDT`. |
 | Start time UTC | `2026-05-07T16:02:23Z` |
 | Planned stop time UTC | `2026-05-08T16:02:23Z` |
-| Actual stop time UTC | `running` |
+| Actual stop time UTC | `2026-05-07T17:15:33Z` fast-track evidence stop; runtime services unchanged |
 | Rollback owner | Operator/user in Codex thread; PM-local execution |
 | Live auth state | No live authorization mutation performed by this checkpoint. `OPENCLAW_ALLOW_MAINNET` absent from captured engine env. |
 | OpenClaw route posture | Linux route contract test passed: `tests/test_openclaw_routes.py` 8/8. Active OpenClaw M8 posture remains read-only foundation. |
@@ -158,20 +158,65 @@ python3 -m pytest tests/test_openclaw_routes.py -q
 
 Result: `8 passed in 0.34s`.
 
+## Fast-Track Replay Review
+
+The operator approved using replay as a fast-track diagnostic. Replay can
+accelerate diagnosis and preflight, but it cannot replace the MAG-082 runtime
+lineage requirement.
+
+Runtime decision-spine evidence was queried after the Stage 2 start time
+`2026-05-07T16:02:23Z`:
+
+| Metric | Count |
+|---|---:|
+| `agent.decision_objects` in demo/live_demo window | 0 |
+| `agent.decision_edges` in window | 0 |
+| `agent.execution_idempotency_keys` in demo/live_demo window | 0 |
+| `agent.decision_objects` all-time | 0 |
+| `agent.decision_edges` all-time | 0 |
+| `agent.execution_idempotency_keys` all-time | 0 |
+
+Replay preflight returned `promotion_allowed=false`, tier
+`S2_PLUS_LOCAL_BBO`, verdict `development_sandbox_with_local_bbo`, and reason
+`execution_samples_below_s1_limited`. The full-chain replay fixture covered
+`BTCUSDT`, `ETHUSDT`, and `LABUSDT` for `grid_trading`, `ma_crossover`, and
+`bb_reversion`.
+
+Full-chain replay runs were completed and finalized after a small replay
+finalize import fix at source commit `ffd9802f`. No engine restart, API restart,
+live auth mutation, or trading flag change was performed for this fix; Linux
+source was fast-forwarded and the existing reports were finalized through the
+same finalize business function from a one-off CLI.
+
+| Strategy | Run ID | Final status | Events | Fills | Execution confidence |
+|---|---|---|---:|---:|---|
+| `grid_trading` | `3d2a7842-0271-4154-941c-5ee478732dd9` | completed | 180 | 0 | `none` |
+| `ma_crossover` | `2b3ca6b3-0d1c-4bfd-99f7-ddb57709a7b0` | completed | 180 | 0 | `none` |
+| `bb_reversion` | `652a6476-28b7-45a4-9f93-9c46d004ea10` | completed | 180 | 0 | `none` |
+
+Artifacts were registered in `replay.report_artifacts` as `pnl_summary`, but
+`replay.simulated_fills` inserted 0 rows for the three experiments. Replay
+health reported `wiring_status=ready`, but passive healthcheck still failed:
+`[50] replay_run_state_health` had `completed_7d=6`, `failed_7d=6`,
+`running=0`, `failed_rate=50.0%`, above the 20% FAIL threshold.
+
 ## Current Verdict
 
 ```text
-MAG-082 24h canary validation verdict: RUNNING
+MAG-082 24h canary validation verdict: NO-GO
 Window: stage2_demo_livedemo_20260507t1602z
 Engine scope: demo/live_demo only
-Decision count: pending 24h collection
-Executable chain count: pending 24h collection
-Non-shadow submit report count: pending 24h collection
+Decision count: 0
+Executable chain count: 0
+Non-shadow submit report count: 0
 Rollback used: no
 Operator: user/operator in Codex thread
-Timestamp UTC: 2026-05-07T16:02:23Z
+Timestamp UTC: 2026-05-07T17:15:33Z
 ```
 
-Only a later PASS/WARN/FAIL update after the 24h window can feed MAG-083.
-MAG-083 and MAG-084 remain blocked until this report is completed and MAG-083
-passes.
+Replay proved the diagnostic runner/report path is usable, but it did not prove
+the required runtime chain: StrategySignal -> StrategistDecision ->
+GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency ->
+ExecutionReport. MAG-083 and MAG-084 remain blocked. The previous 24h heartbeat
+for this window was paused because the fast-track review already produced a
+NO-GO verdict.
