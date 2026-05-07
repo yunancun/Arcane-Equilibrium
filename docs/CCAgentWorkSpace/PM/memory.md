@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-080 cutover policy: defined shadow/soak/canary/primary-candidate/primary stages, exact control surfaces/flags, thresholds, rollback triggers, executor shadow rollback payload, and operator checklist | workspace/reports/2026-05-07--agenttodo_mag080_cutover_policy.md |
 | 2026-05-07 | AgentTodo MAG-074 Analyst learning loop E2E regression: losing-pattern AnalystInsight persists with evidence edges, Strategist next-cycle preference changes, and persisted StrategistDecision payload carries typed reason/evidence; M7 closed | workspace/reports/2026-05-07--agenttodo_mag074_analyst_learning_e2e.md |
 | 2026-05-07 | AgentTodo MAG-073 Guardian risk-pattern consumption: Guardian preserves Analyst risk-pattern metadata and soft risk_pattern evidence P2-tightens size/cooldown without symbol/direction or direct close/order authority | workspace/reports/2026-05-07--agenttodo_mag073_guardian_risk_patterns.md |
 | 2026-05-07 | AgentTodo MAG-072 Strategist typed Analyst pattern rules: StrategistDecision V2 now records Analyst/TruthRegistry learning effects as typed rules so L2 losing/winning patterns change next-cycle strategy preference with explainable reason/evidence | workspace/reports/2026-05-07--agenttodo_mag072_strategist_typed_pattern_rules.md |
@@ -1712,3 +1713,26 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   path, Rust contract change, rebuild, restart, deploy, DB write, live auth,
   runtime flag, or trading authority change was made.
 - Next AgentTodo item is M8 MAG-080 cutover policy.
+
+## 2026-05-07 AgentTodo MAG-080 Cutover Policy
+
+### Result
+- MAG-080 is complete.
+- Added
+  `docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag080_cutover_policy.md`.
+- The policy defines Stage 0 shadow, Stage 1 shadow soak, Stage 2
+  demo/live_demo canary, Stage 3 primary candidate, and Stage 4 primary
+  sign-off.
+- It lists exact control surfaces/flags, lineage and lease thresholds,
+  rollback triggers, executor shadow rollback payload, and operator checklist.
+
+### Verification
+- Mac targeted: markdown diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  diff check.
+
+### Boundary
+- Policy only. No runtime flag, rebuild, restart, deploy, DB write, live auth,
+  cloud call, runtime submit path, or trading authority change was made.
+- Next AgentTodo item is MAG-081 runtime risk review for canary flags and
+  rollback.
