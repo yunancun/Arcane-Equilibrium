@@ -281,7 +281,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
 | MAG-050 | QC | P0 | DONE (MAC/LINUX CONTRACT) | Design dynamic correlation and per-strategy drawdown metrics. | `2026-05-07--mag050_guardian_v2_risk_metrics_model.md` defines `CorrelationSnapshot`, `CorrelationReviewInput`, safe fallback semantics, `StrategyRiskSnapshot`, drawdown/loss-streak states, GuardianVerdict mapping, and MAG-051/MAG-052 regression targets. Docs-only contract; Mac/Linux diff checks passed. |
-| MAG-051 | E1 | P0 | TODO | Replace hardcoded BTC/ETH-only correlation with dynamic matrix or safe fallback. | Correlation verdict works across active symbols. |
+| MAG-051 | E1 | P0 | DONE (MAC/LINUX PY) | Replace hardcoded BTC/ETH-only correlation with dynamic matrix or safe fallback. | `guardian_agent.py` now reviews dynamic correlation snapshots via provider/update API, removes static BTC/ETH authority, hard-rejects any same-direction pair over the configured max, P2-modifies soft/missing-matrix risk with size cap, and persists correlation metadata/reason codes. Mac/Linux targeted Guardian pytest 69/0 + py_compile passed. |
 | MAG-052 | E1 | P0 | TODO | Add P2 risk modification output to GuardianVerdict. | Guardian can modify size/leverage/stop/cooldown with reason. |
 | MAG-053 | E1 | P1 | TODO | Consume Scout event alerts and scanner risk evidence in Guardian. | Event/risk alert can tighten risk without directly ordering. |
 | MAG-054 | E4 | P0 | TODO | Regression: Guardian verdict is mandatory before ExecutionPlan. | ExecutionPlan cannot be created without approved/modified verdict. |
