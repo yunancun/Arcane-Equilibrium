@@ -310,7 +310,7 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 
 | ID | Owner | Priority | Status | Task | Acceptance |
 |---|---|---:|---|---|---|
-| MAG-080 | PM/PA | P0 | TODO | Define cutover policy: shadow -> canary -> primary. | Operator has exact flags, rollback steps, and thresholds. |
+| MAG-080 | PM/PA | P0 | DONE (POLICY DOC) | Define cutover policy: shadow -> canary -> primary. | `2026-05-07--mag080_cutover_policy.md` defines Stage 0 shadow, Stage 1 shadow soak, Stage 2 demo/live_demo canary, Stage 3 primary candidate, and Stage 4 primary sign-off. It lists exact control surfaces/flags, lineage and lease thresholds, rollback triggers, executor shadow rollback payload, and operator checklist. Policy only; no runtime flag, rebuild, restart, deploy, DB write, live auth, or trading authority change. |
 | MAG-081 | E3 | P0 | TODO | Runtime risk review for canary flags and rollback. | No flag can accidentally enable live autonomy without approval. |
 | MAG-082 | E4 | P0 | TODO | 24h canary validation checklist. | Complete evidence chain for every canary decision. |
 | MAG-083 | QA | P0 | TODO | Final release audit. | No trade reaches execution without StrategistDecision + GuardianVerdict + ExecutionPlan + Decision Lease. |
