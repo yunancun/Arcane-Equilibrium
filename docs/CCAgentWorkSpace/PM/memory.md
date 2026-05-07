@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-07 | AgentTodo MAG-081 canary flag runtime risk review: reviewed event-store, Agent Spine, scanner authority, lease router, executor shadow, Mainnet opt-in, signed live auth, OpenClaw read-only routes, H-state, cost-edge, and cloud policy; verdict no reviewed single flag can enable true live autonomy without approval | workspace/reports/2026-05-07--agenttodo_mag081_canary_flag_runtime_risk_review.md |
 | 2026-05-07 | AgentTodo MAG-080 cutover policy: defined shadow/soak/canary/primary-candidate/primary stages, exact control surfaces/flags, thresholds, rollback triggers, executor shadow rollback payload, and operator checklist | workspace/reports/2026-05-07--agenttodo_mag080_cutover_policy.md |
 | 2026-05-07 | AgentTodo MAG-074 Analyst learning loop E2E regression: losing-pattern AnalystInsight persists with evidence edges, Strategist next-cycle preference changes, and persisted StrategistDecision payload carries typed reason/evidence; M7 closed | workspace/reports/2026-05-07--agenttodo_mag074_analyst_learning_e2e.md |
 | 2026-05-07 | AgentTodo MAG-073 Guardian risk-pattern consumption: Guardian preserves Analyst risk-pattern metadata and soft risk_pattern evidence P2-tightens size/cooldown without symbol/direction or direct close/order authority | workspace/reports/2026-05-07--agenttodo_mag073_guardian_risk_patterns.md |
@@ -1736,3 +1737,31 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   cloud call, runtime submit path, or trading authority change was made.
 - Next AgentTodo item is MAG-081 runtime risk review for canary flags and
   rollback.
+
+## 2026-05-07 AgentTodo MAG-081 Canary Flag Runtime Risk Review
+
+### Result
+- MAG-081 is complete.
+- Added
+  `docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag081_canary_flag_runtime_risk_review.md`.
+- Review covered Agent event-store flags, Agent Spine client enablement/mode
+  metadata, scanner authority mode, Decision Lease router gate,
+  ExecutorAgent shadow mode, Mainnet opt-in, signed live authorization,
+  OpenClaw active read-only routes, H-state gateway, cost-edge advisor, and
+  supervisor cloud policy.
+- Verdict: no reviewed single flag can enable true live autonomy without
+  operator approval.
+- Highest-risk surface remains `executor.shadow_mode=false`; live use still
+  requires Operator role, `live_reserved`, Mainnet env when applicable, live
+  secret slot, valid signed authorization, and Rust/live governance gates.
+
+### Verification
+- Mac targeted: markdown diff check passed.
+- Linux `trade-core` temp-worktree targeted verification passed with the same
+  diff check.
+
+### Boundary
+- Risk review only. No runtime flag, rebuild, restart, deploy, DB write,
+  live auth, cloud call, runtime submit path, or trading authority change was
+  made.
+- Next AgentTodo item is MAG-082 24h canary validation checklist.
