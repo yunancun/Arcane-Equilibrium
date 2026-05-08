@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
-**Project:** OpenClaw / Bybit
-**Last Updated:** 2026-05-06
+**Project:** 玄衡 · Arcane Equilibrium
+**Last Updated:** 2026-05-09
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -13,6 +13,7 @@
 | Code | 對應 spec | 路徑 | 日期 | 摘要 |
 |------|----------|------|------|------|
 | AMD-2026-05-02-01 | SM-02 §scope · DOC-01 §5.3 | `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` | 2026-05-02 | Path A — Rust `acquire_lease()` facade R-04 retrofit；spec 條文 0 改動，回填 v3 plan §1.3 last-mile；bundled with 18 blocker #6 audit writer fix；E4 5 條 acceptance criteria（AC-1~5）|
+| W-C-AUTH-2026-05-08 | AMD-2026-05-02-01 §5.4.1 · MAG-082 | `docs/governance_dev/2026-05-08--w_c_lease_router_authorized.md` | 2026-05-08 | Operator-authorized W-C evidence-mode lease-router flag ON；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` + Agent Spine shadow lineage only；not true-live auth / not MAG-083 / not MAG-084 |
 
 ---
 
@@ -24,7 +25,7 @@
 |------|------|--------|--------|-------------|
 | SM-01 | Authorization State Machine | authorization_state_machine.py | ✅ Active | 8 states, 16 transitions, fail-closed auth |
 | SM-02 | Decision Lease State Machine | decision_lease_state_machine.py | ✅ Active | 9 states, TTL-based lease lifecycle |
-| SM-03 | (Reserved) | — | ⏳ Reserved | Reserved for future state machine |
+| SM-03 | OMS / Execution State Machine | oms_state_machine.py / Rust execution lifecycle | ✅ Active | Formal execution object lifecycle: pending/approved/submitted/filled/completed plus cancel/reconcile/fail states |
 | SM-04 | Risk Governor State Machine | risk_governor_state_machine.py | ✅ Active | 6-level risk escalation/de-escalation |
 
 ### Exchange Specifications (EX)
@@ -33,7 +34,7 @@
 |------|------|-----------|--------|-------------|
 | EX-01 | Protection & Anti-Hunt | protective_order_manager.py, portfolio_risk_control.py | ✅ Active | Hard stops, ATR dynamic distance, correlation gates |
 | EX-02 | OMS & Order Lifecycle | oms_state_machine.py | ✅ Active | 11-state order management with reconciliation gate |
-| EX-03 | (Reserved) | — | ⏳ Reserved | Reserved for future exchange spec |
+| EX-03 | Control Plane / Operator Console Boundary | FastAPI Control Console / OpenClaw Control Console | ✅ Active | Operator control plane is a governed override/approval surface, not market/account/order/fill source of truth and not a trading write path |
 | EX-04 | Reconciliation Engine | reconciliation_engine.py | ✅ Active | Paper vs. live/demo position consistency checks |
 | EX-05 | Learning Tiers & Autonomy | learning_tier_gate.py | ✅ Active | L1-L5 analyst evolution with tier gates |
 | EX-06 | Agent Conflict Arbitration | multi_agent_framework.py, market_regime.py | ✅ Active | Scout/Conductor pattern, fact/inference/hypothesis |
@@ -50,6 +51,15 @@
 | DOC-06 | Change Audit Log | change_audit_log.py | ✅ Active | Append-only JSONL, rotation, thread-safe |
 | DOC-07 | Audit Persistence | audit_persistence.py | ✅ Active | JSONL audit trail, file rotation |
 | DOC-08 | Incident Response | incident_event_model.py | ✅ Active | Incident classification, SM trigger integration |
+
+### Live Gate Foundation Specifications (LG-X)
+
+| Code | Name | Module(s) / SoT | Status | Description |
+|------|------|------------------|--------|-------------|
+| LG-X-01 | H0 Production Caller | TODO.md `P0-LG-1` / Rust H0 hot path + Python H0 singleton cleanup | 🔴 Active Gap | H0 blocking must be wired into production decision path with metrics and fail-closed behavior; Python `H0_GATE` singleton is not the Rust hot path authority |
+| LG-X-02 | Provider Pricing Binding | TODO.md `P0-LG-2` / AccountManager + pricing healthcheck `[45]` | 🔴 Active Gap | Fee/pricing source must be bound, freshness-checked, and asserted before true live |
+| LG-X-03 | Supervised-Live State Machine | TODO.md `P0-LG-3` / future supervised-live spec | 🔴 Active Gap | Live authorization, lease, drawdown, revoke, and operator approval states must be explicit and tested |
+| LG-X-04 | Live Ops Foundation | TODO.md `P0-OPS-1..4` | 🔴 Active Gap | HTTPS/secure cookies, credential rotation, legal/ToS/geography, and first-day runbook |
 
 ---
 
@@ -88,6 +98,8 @@
 | Code | Name | Path | Status | Description |
 |------|------|------|--------|-------------|
 | ARCH-01 | Data Storage Architecture V1 | docs/architecture/DATA_STORAGE_ARCHITECTURE_V1.md | ✅ Active | PG + TimescaleDB · 8 Schema · 存儲精簡 97%（5.6→0.17 GB/day）· 冷存儲 NAS 策略 |
+| ARCH-02 | OpenClaw Control Plane Repositioning | docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md | ✅ Active | OpenClaw is communication/control-plane/Gateway/proposal relay only, not trading conductor and not second GUI |
+| ARCH-03 | Agent Decision Spine Architecture | docs/architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md<br>docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag030_agent_spine_rust_module_design.md | ✅ Active | Typed StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease/idempotency -> ExecutionReport lineage |
 
 ---
 
@@ -111,6 +123,7 @@
 | AUDIT-10 | Full Program Chain Audit | docs/audits/2026-04-12--full_program_chain_audit.md | 2026-04-12 | 12 角色合併 · 58 findings（8 P0 · 17 P1 · 28 P2 · 5 P3） |
 | AUDIT-11 | Full Audit Fix Plan (PM Confirmed) | docs/audits/2026-04-12--full_audit_fix_plan_pm_confirmed.md | 2026-04-12 | AUDIT-10 配套 · P0~P3 分級修復排期 + PM 簽核 |
 | AUDIT-12 | TODO Refactor Audit (10-Agent) | docs/audits/2026-04-24--todo_refactor_audit.md | 2026-04-24 | 10 Agent 獨立 audit · PA FIX-PLAN（45 findings / 6 工作組 / 4 Wave）· PM Sign-off |
+| AUDIT-13 | 2026-05-08 12-Agent Full Audit + PA Fix Plan | 2026-05-08--full_audit_fix_plan.md<br>docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md | 2026-05-08 | 12 audit reports -> 88 unique findings -> W-AUDIT-1..7；5 pending operator decisions；K-6 LG-5 reviewer stale finding disputed |
 
 > **註**：早期審計（2026-04-05 L3 12 角色報告）位於 `docs/audits/2026-04-05--l3_comprehensive/` 子目錄；
 > Phase 治理審計位於 `docs/governance_dev/audits/`（如 `2026-03-31--gap_analysis_287_specs.md`）。
@@ -123,6 +136,7 @@
 - **SM-XX**: State Machine specifications (core governance automata)
 - **EX-XX**: Exchange specifications (trading operations and integration)
 - **DOC-XX**: Organization document specifications (policies and procedures)
+- **LG-X-XX**: Live Gate foundation specifications (true-live blockers and supervised-live prerequisites)
 - **REF-XX**: Reference specifications (architecture contracts, design specs, cross-language boundaries; 2026-04 新增類別)
 - **ARCH-XX**: Architecture specifications (system-level design documents; 2026-04 新增類別)
 - **AUDIT-XX**: Audit catalog (major audit reports cross-referenced to SM/EX/DOC/REF; 2026-04 新增類別)
@@ -134,11 +148,11 @@
 
 | Metric | Count |
 |--------|-------|
-| Active SM/EX/DOC specifications | 16 |
-| Reserved specifications | 2 (SM-03, EX-03) |
+| Active SM/EX/DOC/LG-X specifications | 22 |
+| Reserved specifications | 0 |
 | Active REF specifications | 19 |
-| Active ARCH specifications | 1 |
-| Active AUDIT entries (2026-04) | 12 |
+| Active ARCH specifications | 3 |
+| Active AUDIT entries | 13 |
 | Total code references | 335+ |
 | Implementing modules | 22 |
 | Test coverage | 2,308+ Rust lib tests + Python pytest（持續增加） |

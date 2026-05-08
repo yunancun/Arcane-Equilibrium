@@ -38,7 +38,7 @@ docs/
 │   └── YYYY-MM-DD_主题名/
 │
 ├── decisions/                         ← 重大架构/设计决策记录 + 治理源文件（DOC/SM/EX .docx）
-├── adr/                               ← 架构决策记录（ADR 0001..0014）
+├── adr/                               ← 架构决策记录（ADR 0001..0019）
 │
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │
@@ -157,6 +157,63 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 ---
 
 ## 文档索引 (Document Index)
+
+### 2026-05 W-AUDIT-1 index addendum（AgentTodo / audit / governance）
+
+| 文件 | 内容 |
+|------|------|
+| `../2026-05-08--full_audit_fix_plan.md` | 12-agent full audit PA 整合修復計劃：88 unique findings / W-AUDIT-1..7 / 5 pending operator decisions |
+| `governance_dev/2026-05-08--w_c_lease_router_authorized.md` | W-C Decision Lease router evidence-mode operator authorization record |
+| `governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` | AMD-2026-05-02-01 + §5.4.1 W-C early evidence flag addendum |
+| `governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md` | AMD-2026-05-03-01 Wave 7 P5 IMPL accepted / deploy blocked split |
+| `governance_dev/SPECIFICATION_REGISTER.md` | SM/EX/DOC/REF/ARCH/AUDIT/LG-X specification register, updated through W-AUDIT-1 |
+| `adr/0015-openclaw-control-plane-repositioning.md` | ADR-0015: OpenClaw is Control Plane/Gateway, not trading conductor |
+| `adr/0016-decision-lease-router-evidence-mode.md` | ADR-0016: Decision Lease router flag may run as shadow evidence |
+| `adr/0017-scanner-is-evidence-not-authority.md` | ADR-0017: scanner is always-on evidence infrastructure, not authority |
+| `adr/0018-funding-arb-v2-deprecation-watch.md` | ADR-0018: funding_arb V2 remains disabled pending audit / operator verdict |
+| `adr/0019-github-issues-active-tracker.md` | ADR-0019: GitHub Issues active external tracker; git remains SoT |
+| `architecture/2026-05-06--openclaw_control_plane_repositioning.md` | ARCH-02: OpenClaw control-plane repositioning |
+| `architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md` | ARCH-03 parent: Agent Decision Spine engineering plan |
+| `architecture/multi_agent_rework_2026-05-05/AgentTodo.md` | Historical AgentTodo milestone board for MAG-010..084 |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-06--mag015_sprint_a_contract_addendum.md` | MAG-015 Sprint A contract addendum |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-06--mag020_scanner_authority_modes.md` | MAG-020 historical scanner authority-mode contract, superseded by ADR-0017 boundary |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag030_agent_spine_rust_module_design.md` | MAG-030 Agent Spine Rust module design |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag034_idempotency_double_execution_audit.md` | MAG-034 idempotency / double execution audit |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag040_strategist_v2_matching_model.md` | MAG-040 Strategist V2 matching model |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag050_guardian_v2_risk_metrics_model.md` | MAG-050 Guardian V2 risk metrics model |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag060_execution_plan_interface.md` | MAG-060 ExecutionPlan interface and order styles |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag070_analyst_insight_l1_l2_l3_schema.md` | MAG-070 AnalystInsight L1/L2/L3 schema |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag080_cutover_policy.md` | MAG-080 shadow -> canary -> primary cutover policy |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag081_canary_flag_runtime_risk_review.md` | MAG-081 canary flag runtime risk review |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag082_24h_canary_validation_checklist.md` | MAG-082 24h canary validation checklist |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag083_final_release_audit_blocked.md` | MAG-083 final release audit blocked report |
+| `architecture/multi_agent_rework_2026-05-05/2026-05-07--mag084_operator_signoff_blocked.md` | MAG-084 operator sign-off blocked report |
+| `CCAgentWorkSpace/FA/workspace/reports/2026-05-08--full_chain_functional_audit.md` | 12-agent audit input: FA functional audit |
+| `CCAgentWorkSpace/AI-E/workspace/reports/2026-05-08--ai_effectiveness_full_audit.md` | 12-agent audit input: AI effectiveness audit |
+| `CCAgentWorkSpace/E5/workspace/reports/2026-05-08--full_chain_optimization_audit.md` | 12-agent audit input: optimization / structure audit |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-08--full_chain_test_audit.md` | 12-agent audit input: test audit |
+| `CCAgentWorkSpace/E3/workspace/reports/2026-05-08--full_chain_security_audit.md` | 12-agent audit input: security audit |
+| `CCAgentWorkSpace/CC/workspace/reports/2026-05-08--project_compliance_audit.md` | 12-agent audit input: compliance audit |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-08--strategy_risk_math_audit.md` | 12-agent audit input: quant / strategy audit |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-08--db_ml_foundation_audit.md` | 12-agent audit input: DB / ML foundation audit |
+| `CCAgentWorkSpace/MIT/README.md` | MIT workspace orientation and current report pointer |
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-08--bybit_api_compatibility_audit.md` | 12-agent audit input: Bybit compatibility audit |
+| `CCAgentWorkSpace/BB/README.md` | BB workspace orientation and current report pointer |
+| `CCAgentWorkSpace/TW/workspace/reports/2026-05-08--apr_may_doc_audit.md` | 12-agent audit input: TW documentation audit |
+| `CCAgentWorkSpace/R4/workspace/reports/2026-05-08--index_completeness_audit.md` | 12-agent audit input: R4 index completeness audit |
+| `CCAgentWorkSpace/A3/workspace/reports/2026-05-08--gui_ux_full_audit.md` | 12-agent audit input: GUI/UX audit |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md` | PA de-duped full audit fix plan |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-08--mattpocock_skills_setup.md` | PM report: mattpocock skills setup and GitHub Issues posture |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_1_docs_governance_sync.md` | PM report: W-AUDIT-1 docs/governance sync closure |
+| `CCAgentWorkSpace/Operator/2026-05-09--w_audit_1_docs_governance_sync.md` | Operator-facing W-AUDIT-1 completion note |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_mag080_cutover_policy.md` | PM report: MAG-080 cutover policy |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_mag081_canary_flag_runtime_risk_review.md` | PM report: MAG-081 flag risk review |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_mag082_24h_canary_validation_checklist.md` | PM report: MAG-082 validation checklist |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_mag083_final_release_audit_blocked.md` | PM report: MAG-083 blocked pre-audit |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_mag084_operator_signoff_blocked.md` | PM report: MAG-084 blocked sign-off |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md` | PM report: M8 fast-track NO-GO |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--todo_v13_agent_openclaw_replan.md` | PM report: TODO v13 Agent/OpenClaw replan, superseded by TODO v14 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--p1_healthcheck_fail_queue_and_executor_fake_live_fix.md` | PM report: P1 healthcheck FAIL queue and executor fake-live source fix |
 
 ### _indexes/ — 文档 inventory / redirect map / GUI metadata（2026-05-06+）
 

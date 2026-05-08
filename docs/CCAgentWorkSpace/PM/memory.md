@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | W-AUDIT-1 docs/governance sync: closed CLAUDE runtime drift, W-C authorization record, AMD §5.4.1, register/glossary/ADR/README/SCRIPT_INDEX catch-up, and MIT/BB workspace READMEs; no runtime mutation | workspace/reports/2026-05-09--w_audit_1_docs_governance_sync.md |
 | 2026-05-07 | TODO v13 Agent/OpenClaw replan: converted TODO from historical ledger to active dispatch queue, archived stale v12 context, and reordered work around executor smoke -> runtime lineage -> MAG-082 rerun -> MAG-083/MAG-084 -> OpenClaw read-only expansion | workspace/reports/2026-05-07--todo_v13_agent_openclaw_replan.md |
 | 2026-05-07 | P1 healthcheck FAIL queue + Executor fake-live source fix: inserted `[Xb]` / `[42*]` / `[50]` / `[51]` ahead of P1 work and fixed Executor IPC to use `submit_paper_order` with explicit engine plus engine-aware shadow provider | workspace/reports/2026-05-07--p1_healthcheck_fail_queue_and_executor_fake_live_fix.md |
 | 2026-05-07 | AgentTodo M8 Stage 2 fast-track NO-GO: replay runner/report path completed after import fix `ffd9802f`, but runtime decision-spine/idempotency rows remain 0 and replay produced 0 fills / `execution_confidence=none`; MAG-083/MAG-084 remain blocked | workspace/reports/2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md |

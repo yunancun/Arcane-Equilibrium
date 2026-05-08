@@ -192,3 +192,11 @@ YYYY-MM-DD HH:MM TZ
 - verification: Mac/Linux targeted P1 healthcheck regression suite 96 passed; Linux passive healthcheck at 2026-05-07T17:51:38Z returned `SUMMARY: WARN`
 - updated TODO P1 ordering: finish `P1-FAKE-1` runtime smoke if needed, then work WARN cluster `[14]/[37]/[40]/[45]` plus sample-maturity warnings, then resume P1-OPENCLAW-3 before P1-OPENCLAW-6/7
 - boundary: API-only reloads loaded Python source; no engine rebuild, no live auth mutation, no Decision Lease flag flip, no strategy/risk config change
+
+2026-05-09 CEST
+- fixed passive healthcheck `[41]` scanner market evidence so legacy scanner would-block contradictions are WARN instead of FAIL; scanner is always-on evidence infrastructure, not a hard authority gate
+- verification: Mac targeted scanner opportunity healthcheck pytest 12/0, py_compile PASS, `git diff --check` PASS; Linux fast-forwarded to `b91487f2`
+- Linux passive healthcheck after sync returned `SUMMARY: WARN`; direct `[55]` Agent Decision Spine lineage proof PASS with `chains=101`, `chains_with_lease=76`, `chains_with_report=101`, `bad_report_quality=0`, readiness still `LINEAGE_READY_NOT_WINDOW_PASS`
+- ran the 3C 7d audit script on Linux: overall WARN, `[40]` current edge delta `-1.12bps`, `[38]` grid lifecycle `-47.6%`, funding_arb hard stops PASS
+- completed W-AUDIT-1 docs/governance sync across CLAUDE/TODO/MEMORY/register/glossary/README/script index, recorded W-C lease-router authorization, and added ADR-0015..0019 plus MIT/BB workspace READMEs
+- boundary: docs/governance/source-only sync after `[41]`; no rebuild/restart, true-live API/auth, Executor authority, scanner authority, strategy/risk config mutation, or MAG-083/084 unlock

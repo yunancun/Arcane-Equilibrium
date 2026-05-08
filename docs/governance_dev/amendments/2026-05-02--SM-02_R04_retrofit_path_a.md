@@ -130,6 +130,36 @@ retrofit 任務派發時間軸：
 - bundled with 18 blocker #6 audit writer fix（同 sprint）
 - 預估 2.5-3 個 E1 task（PA 原估 1.7-2.2 + #6 bundled 加 0.8 task）
 
+### 5.4.1 W-C evidence-mode authorization addendum（2026-05-08）
+
+2026-05-08 operator explicitly authorized enabling
+`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` on Linux `trade-core` for W-C / MAG-082
+Stage 2 evidence collection before the original 2026-05-15 planning date.
+
+This addendum narrows the meaning of that early flag flip:
+
+- The flag is ON only as an evidence-mode runtime surface paired with
+  `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`.
+- The purpose is to write Decision Lease router-gate bypass / lease lineage into
+  shadow Agent Spine ExecutionPlan rows.
+- It does not grant true-live authorization, Mainnet traffic, Executor order
+  authority, live config mutation, strategy/risk parameter mutation, scanner
+  authority, MAG-083 approval, or MAG-084 operator sign-off.
+- The W-C window still requires MAG-082 readiness PASS over the 24h evidence
+  window before MAG-083 / MAG-084 may proceed.
+- The durable authorization record is
+  `docs/governance_dev/2026-05-08--w_c_lease_router_authorized.md`.
+
+Evidence at 2026-05-08 22:09 UTC:
+
+- runtime env: `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` and
+  `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`;
+- scanner config has no `[authority]`;
+- `[55] agent_decision_spine_lineage` PASSed with `chains=101`,
+  `chains_with_lease=76`, `chains_with_report=101`, and
+  `bad_report_quality=0`;
+- readiness remained `LINEAGE_READY_NOT_WINDOW_PASS`.
+
 ---
 
 ## 6. 失敗回退條件
