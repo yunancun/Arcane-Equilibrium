@@ -61,12 +61,12 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   enabled-but-empty, incomplete lineage, pending reports, and
   `MAG-082 readiness=*`. It is read-only and does not authorize runtime flag
   changes, rebuild, restart, or Stage 2.
-- `W-B` runtime decision-spine lineage is source-ready: Rust startup now wires
-  the durable Agent Spine writer behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE`,
-  and approved demo/live_demo open intents emit shadow-only typed
-  StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan ->
-  ExecutionReport objects plus edges and idempotency keys. Runtime row proof
-  still requires explicit operator approval for rebuild/restart/env flip.
+- `W-B` runtime decision-spine lineage is closed: Linux `trade-core`
+  deployed `3d6f62dd` with `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`;
+  `[55]` PASSed with typed StrategySignal -> StrategistDecision ->
+  GuardianVerdict -> ExecutionPlan -> ExecutionReport runtime rows, edges,
+  and idempotency keys. This is still shadow-only and does not grant trading
+  authority or complete the later Decision Lease Stage 2 gate.
 
 ## Dispatch Order
 
@@ -76,7 +76,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | Rank | Wave | Owner Chain | Target Window | Exit Criteria |
 |---:|---|---|---|---|
 | 1 | `W-A` Executor fake-live runtime smoke | PM -> E4 -> PM | DONE 2026-05-07 | Proved the loaded `P1-FAKE-1` path routes explicit `live_demo` metadata through real Rust IPC without exchange order, DB write, or Python-only fake success. |
-| 2 | `W-B` Runtime decision-spine lineage wiring | PM -> PA -> E1 -> E2 -> E4 -> PM | 2026-05-08 to 2026-05-10 | Runtime shadow path writes nonzero typed decision objects, edges, and idempotency keys for demo/live_demo without changing trading authority. |
+| 2 | `W-B` Runtime decision-spine lineage wiring | PM -> PA -> E1 -> E2 -> E4 -> PM | DONE 2026-05-08 | Runtime shadow path writes nonzero typed decision objects, edges, and idempotency keys for demo/live_demo without changing trading authority. |
 | 3 | `W-C` New MAG-082 Stage 2 evidence window | PM -> E3 -> E4 -> QA -> PM | after W-B + explicit operator rebuild/restart approval | Fresh 24h demo/live_demo canary proves StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease/idempotency -> ExecutionReport. |
 | 4 | `W-D` MAG-083 / MAG-084 | QA -> PM | after W-C PASS only | Final release audit PASS, then operator sign-off. |
 | 5 | `W-E` OpenClaw read-only observability expansion | PM -> PA -> E1 -> E2 -> E4 -> PM | DONE 2026-05-07 | Added `/brief/latest`, `/diagnostics`, and `/escalations` as backend-authored view models. |
@@ -108,7 +108,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-OPENCLAW-3` | 2 | DONE — read-only brief/diagnostics/escalations APIs | Backend-authored view models from durable stores only; no raw frontend table stitching. |
 | `P1-OPENCLAW-6/7` | 2 | DONE — proposal/approval relay backend foundation | V065 `openclaw.*` ledger applied on Linux; proposal create + approve runtime smoke passed with `side_effect_executed=false`; `[54]` PASS. |
 | `P1-AGENT-OBS-1` | 2 | DONE — explicit lineage healthcheck | `[55] agent_decision_spine_lineage` distinguishes disabled / enabled-empty / incomplete / report-pending states and surfaces `MAG-082 readiness=*`; `OPENCLAW_AGENT_SPINE_HEALTH_REQUIRED=1` escalates WARN to FAIL. |
-| `P1-AGENT-RUNTIME-1` | 2 | SOURCE-READY — runtime decision-spine lineage | Source/test wiring complete behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE`; 2026-05-08 restart loaded current source, but env remains disabled, so no runtime row proof until explicit env flip. |
+| `P1-AGENT-RUNTIME-1` | 2 | DONE — runtime decision-spine lineage | Linux `trade-core` is running `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`; `[55]` PASSed with objects=15/15, edges=12/12, idempotency=3/3, chains=3, reports=3. `chains_with_lease=0`, so W-C/MAG-082 Stage 2 remains the next proof gate. |
 | `P1-DATA-1` | 3 | Runtime-reloaded WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | `[14]` distinguishes risk/cost gate suppression from writer-health evidence; `[37]` ignores recovered historical failures; `[40]` catches combined demo/live_demo negative cells and `LABUSDT` grid block source is now runtime-reloaded as of 2026-05-08; `[45]` accepts recent AccountManager fee-use proof during rejected-only demo/live_demo no-fill windows. Monitor row rolloff after reload. |
 | `P1-DATA-2` | 3 | Source-fixed `[42b]` / `[42c]` low-sample attribution watch | Settled attribution ratio failures stay fail-closed, but low-sample strategies now render as `LOW_SAMPLE(n, need)` sample-maturity watch instead of misleading `0.000` ratio drift; low-sample strategies still defer promotion until mature. |
 | `P1-DATA-3` | 3 | Source-fixed `[51]` scanner opportunity calibration watch | `[51]` now requires mature `opportunity_positive` samples before PASS, reports `MATURE/LOW_SAMPLE(n, need)`, and keeps scanner opportunity shadow-only when only exploration positive LCB samples exist or calibrated samples are immature. |
@@ -143,7 +143,7 @@ Dates are planning windows, not automatic authorization.
 | Date | Work | Gate |
 |---|---|---|
 | 2026-05-07/08 | `W-A` executor fake-live runtime smoke | No rebuild unless operator asks. |
-| 2026-05-08 to 2026-05-10 | `W-B` runtime decision-spine lineage wiring | Source/test only until operator authorizes runtime reload. |
+| 2026-05-08 | `W-B` runtime decision-spine lineage wiring | DONE: operator-authorized env flip + rebuild/restart completed in shadow mode. |
 | 2026-05-09 | 3C 7d audit | Run `bash helper_scripts/db/audit/2026-05-09_3c_7d_audit.sh` if still relevant to current runtime history. |
 | 2026-05-10/11 | New Stage 2 evidence window candidate | Requires W-B, rebuild/restart approval, and clean entry checks. |
 | 2026-05-11/12 | MAG-083/MAG-084 candidate | Only if new MAG-082 report PASSes. |
