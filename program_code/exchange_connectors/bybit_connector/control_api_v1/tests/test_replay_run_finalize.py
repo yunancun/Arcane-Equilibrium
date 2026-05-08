@@ -660,6 +660,13 @@ def test_finalize_calibration_imports_are_runtime_cwd_safe():
     assert "program_code.exchange_connectors" not in src
 
 
+def test_finalize_registers_explicit_replay_report_artifact_type():
+    """V066: finalize must register replay_report, not legacy pnl_summary."""
+    from replay import run_finalize_route as _fr_mod
+
+    assert _fr_mod.ARTIFACT_TYPE_REPLAY_REPORT == "replay_report"
+
+
 # ─── Case 8: atomic xact rollback on writer failure ──────────────────
 
 

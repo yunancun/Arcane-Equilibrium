@@ -81,11 +81,13 @@ log = logging.getLogger("replay.canary_writer")
 
 
 # ─── Constants / 常量 ────────────────────────────────────────────────
-# V046 artifact_type enum allowlist. Mirrors CHECK chk_replay_report_artifacts_type.
-# V046 artifact_type enum 白名單。對齊 CHECK chk_replay_report_artifacts_type。
+# V046/V066 artifact_type enum allowlist. Mirrors CHECK
+# chk_replay_report_artifacts_type.
+# V046/V066 artifact_type enum 白名單。對齊 CHECK chk_replay_report_artifacts_type。
 ARTIFACT_TYPE_CANARY = "canary"
 ARTIFACT_TYPE_DIAGNOSTIC = "diagnostic"
 ARTIFACT_TYPE_PNL_SUMMARY = "pnl_summary"
+ARTIFACT_TYPE_REPLAY_REPORT = "replay_report"
 ARTIFACT_TYPE_FILL_LOG = "fill_log"
 ARTIFACT_TYPE_BASELINE_COMPARE = "baseline_compare"
 
@@ -93,6 +95,7 @@ ALLOWED_ARTIFACT_TYPES = frozenset({
     ARTIFACT_TYPE_CANARY,
     ARTIFACT_TYPE_DIAGNOSTIC,
     ARTIFACT_TYPE_PNL_SUMMARY,
+    ARTIFACT_TYPE_REPLAY_REPORT,
     ARTIFACT_TYPE_FILL_LOG,
     ARTIFACT_TYPE_BASELINE_COMPARE,
 })
@@ -127,10 +130,10 @@ class WriteResult:
 # ─── Writer class / 寫手主類 ─────────────────────────────────────────
 class CanaryArtifactWriter:
     """Filesystem + DB writer for canary / diagnostic / pnl_summary /
-    fill_log / baseline_compare replay artifacts.
+    replay_report / fill_log / baseline_compare replay artifacts.
 
-    canary / diagnostic / pnl_summary / fill_log / baseline_compare replay
-    artifact 的 filesystem + DB 寫手。
+    canary / diagnostic / pnl_summary / replay_report / fill_log /
+    baseline_compare replay artifact 的 filesystem + DB 寫手。
 
     Caller responsibility / Caller 責任:
       - Hand a live cursor to `register_artifact_in_db`; writer does NOT
@@ -430,6 +433,7 @@ __all__ = [
     "ARTIFACT_TYPE_DIAGNOSTIC",
     "ARTIFACT_TYPE_FILL_LOG",
     "ARTIFACT_TYPE_PNL_SUMMARY",
+    "ARTIFACT_TYPE_REPLAY_REPORT",
     "CanaryArtifactWriter",
     "DEFAULT_ARTIFACTS_SUBDIR",
     "MAC_DEV_ARTIFACTS_DIR",

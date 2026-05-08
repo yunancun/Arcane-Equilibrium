@@ -391,6 +391,13 @@ _REPORT_BASE_SELECT = (
     "FROM replay.report_artifacts a JOIN replay.run_state s ON a.run_id = s.run_id "
 )
 
+_REPORT_ARTIFACT_ORDER_BY = (
+    "ORDER BY CASE a.artifact_type "
+    "WHEN 'replay_report' THEN 0 "
+    "WHEN 'pnl_summary' THEN 1 "
+    "ELSE 2 END, a.created_at;"
+)
+
 
 def build_report_idor_sql(
     manifest_uuid: str,
@@ -426,11 +433,12 @@ def build_report_idor_sql(
     """
     if can_read_any:
         sql = _REPORT_BASE_SELECT + (
-            "WHERE s.manifest_id = %s::uuid ORDER BY a.created_at;"
+            "WHERE s.manifest_id = %s::uuid " + _REPORT_ARTIFACT_ORDER_BY
         )
         return sql, (manifest_uuid,)
     sql = _REPORT_BASE_SELECT + (
-        "WHERE s.manifest_id = %s::uuid AND s.actor_id = %s ORDER BY a.created_at;"
+        "WHERE s.manifest_id = %s::uuid AND s.actor_id = %s "
+        + _REPORT_ARTIFACT_ORDER_BY
     )
     return sql, (manifest_uuid, actor_id)
 
