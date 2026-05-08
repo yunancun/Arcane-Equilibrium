@@ -835,7 +835,10 @@ async def run_finalize_in_pg_xact(
                     pass
                 return None, (503, {
                     "reason_codes": ["replay_finalize_failed"],
-                    "message": f"finalize failed: {type(exc).__name__}",
+                    "message": (
+                        "finalize failed due to an internal persistence error; "
+                        "see server logs with reason replay_finalize_failed"
+                    ),
                 })
 
     return await asyncio.to_thread(_do_pg_xact)

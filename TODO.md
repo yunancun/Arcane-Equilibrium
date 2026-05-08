@@ -128,7 +128,7 @@ historical wave narratives, and old date-driven reminders are archived.
 |---|---|---|
 | `P2-MIG-1` | V054 lease transitions Python migration sibling test | Next DB-migration maintenance batch. |
 | `P2-MIG-2` | DONE — V066 byte-size CHECK and `replay_report` artifact enum migration | Covered by `P1-REPLAY-2`; migration added, not applied to runtime DB without operator authorization. |
-| `P2-SEC-1` | Genericize replay finalize 503 exception messages | Next replay hardening pass. |
+| `P2-SEC-1` | DONE — generic replay finalize 503 exception messages | Client 503 no longer exposes backend exception class/message; detailed failure remains in server logs under `replay_finalize_failed`. |
 | `P2-REPLAY-1` | PID reuse guard for replay runner finalize | Low-probability hardening; add `subprocess_started_at_ms`. |
 | `P2-PYDANTIC-1` | DONE — replay Pydantic V1 `@validator` -> V2 `@field_validator` migration | Removed replay validator deprecation warnings under pinned `pydantic>=2.11.0`. |
 | `P2-RUST-1` | Split `intent_processor/tests.rs` under 2000 LOC | Next Rust test maintenance batch. |
