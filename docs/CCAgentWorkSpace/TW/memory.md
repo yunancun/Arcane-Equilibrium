@@ -25,6 +25,18 @@
 | 2026-04-27 | LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN 工程日誌（P0 Silent Regression · 8d event_consumer missing） | `docs/worklogs/2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` |
 | 2026-04-29 | 62-finding Batch A-F + STRKUSDT P0 wave 歸檔（TODO.md 頭部敘述瘦身）| `docs/archive/2026-04-29--62finding-batch-A-to-F.md` + `docs/archive/2026-04-29--strkusdt-p0-wave.md` |
 | 2026-04-29 | TODO.md Stage 2A refactor — 頭部敘述 + Wave 索引化 | inline final message（不寫 report file）|
+| 2026-05-08 | 04-01~05-08 範圍重複 / 合併 / 應歸檔審計（38 天 ~1850 docs/.md + ~430 .claude_reports）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-08--apr_may_doc_audit.md` |
+
+## 2026-05-08 04-01~05-08 doc audit 重點
+
+- **任務**：operator 派 TW 對玄衡 4 月初~5 月初新增/修改文件做盤查（重複 / 應合併 / 應歸檔），不直接合併由後續 PA fix plan 派工。
+- **產出**：522 行報告，覆蓋 12 段（Executive Summary / 時間範圍 / 重複 / 合併 / 歸檔 / 雙語注釋 / 索引漂移 / CCAgentWorkSpace / .claude_reports / §三衛生 / Top 30 housekeeping action / TW Verdict）。
+- **本次 P0 0 / P1 9 組合併 / P2 11 個應歸檔 / P3 5 組索引漂移 / P4 2 個雙語注釋違反**。
+- **3 大發現**：(1) 5/5-5/7 multi_agent_rework 14 份 + ADR 14 份 + openclaw_repositioning 完全未進 docs/README 索引（~32+ 條 missing） (2) SCRIPT_INDEX.md 5/3 後 5 天無更新，~20+ 個 cron/healthcheck script 漏登 (3) `helper_scripts/cron/ref21_market_microstructure_recorder.py` + `ref21_market_recorder_retention.py` 純英文 docstring，違反 5/5 governance change 默認中文注釋規則。
+- **carry-over from 4/24**：g2_funding_arb v1+v2 合併 / phase_0a~6 + rust_migration HISTORICAL header / E5 4/12 雙報告合併 / KNOWN_ISSUES + CLAUDE_REFERENCE + CLAUDE_CHANGELOG 三大 stale — 14 天後仍未處理。
+- **嚴重發現**：worklogs/ 4/27 後 12 天 0 daily_summary（5/1-5/8 全空）；所有 5 月 active 工作分散於 .claude_reports + CCAgentWorkSpace agent reports，跨日聚合視角缺失。
+- **TW Verdict 整體文檔健康度**：70%（中等偏弱）；§三衛生 85% / 命名規範 95% / .claude_reports 隔絕 100% / pre-trim snapshot 機制 90% — 強項；README 索引 50% / SCRIPT_INDEX 45% / Worklog daily_summary 30% / Agent workspace 利用 50% / RFC 多版本管理 40% — 弱項。
+- **規範遵守**：本報告中文為主 + 英文技術名詞；不直接動文件；所有 housekeeping action 留待 PA fix plan 派工；report 路徑 + 行數 + severity 嚴格遵守 prompt format。
 
 ## 2026-04-29 TODO.md Stage 2A refactor 重點
 

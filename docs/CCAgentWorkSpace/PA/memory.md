@@ -1684,3 +1684,54 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 
 **Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-05--ref20_sprint_b_task_dag.md`
 **Status**: design ready，awaits PM Q1 拍板（切 B1+B2 vs single B），其餘 9 OQ 並行回。
+
+
+## 2026-05-08 PA — 12 Audit 整合修復計劃（W-AUDIT-1~7）
+
+**Trigger**: PM 派 12 audit cold review 整合（FA/AI-E/E5/E4/E3/CC/QC/MIT/BB/TW/R4/A3）→ 88 finding 去重 → 7 wave 派工 DAG。
+
+**88 finding 分佈**：Critical 8 / High 28 / Medium 22 / Low 18 / Advisory 12（去重前 142 → 去重後 88）
+
+**Top 30 verified rate**：80% ✅ VERIFIED (24/30) + 13% ⚠️ PROBABLE (4/30) + 7% ❌ DISPUTED/OUTDATED (2/30)
+
+**6 個跨 agent 共識 Critical**：
+1. K-1 ExecutorAgent shadow_mode `lambda: True` + TOML × 3 全 true（FA/CC/E5/E4/AI-E 5 共識）— ✅ verified
+2. K-2 CLAUDE.md §三 lease flag default OFF stale 5 day（FA/CC/R4/E4/TW 5 共識）— ✅ verified runtime `=1`
+3. K-3 lease_transitions audit channel 寫端 wiring 死綁（E3/FA/E5/MIT 4 共識）— ✅ verified spawn_lease_transition_pipeline 0 caller
+4. K-4 H0_GATE Python 0 production caller（FA/E4/E5/E3 4 共識，E3 解釋更精確：Rust h0_gate active hot path）— ✅ verified
+5. K-5 5 策略 7d gross net negative；CLAUDE.md §三 -6.98 stale（FA/QC/AI-E/CC 4 共識）— ✅ PG 直查 demo 7d -26.44 USDT
+6. K-6 ❌ DISPUTED LG-5 reviewer 0 audit row — PG 22,790 row（reviewer 已 deploy active）；FA/CC/E5 引用 stale
+
+**7 個 Wave 設計（總 ~140h / 8-14 session / 6-8 sprint）**：
+- W-AUDIT-1 文檔同步（4.5h，TW+R4+PM+PA 4 sub-agent 並行）— 解 F-02/F-19/F-14/spec-reg/script-idx
+- W-AUDIT-2 安全 + 認證硬補（7-8h，E1×4 並行）— 解 F-23/F-24/F-25 + F-03 partial
+- W-AUDIT-3 ExecutorAgent fake-live + decision spine（10h，2 session）— 解 F-01/F-15/F-17 + 部分 M-9
+- W-AUDIT-4 ML 基座 + dead schema（30h，3 session）— 解 F-08/F-09/F-11/F-16/F-22/F-29 + 部分 M-2/M-3/M-10
+- W-AUDIT-5 性能 + 結構（17+17h，2 session）— 解 F-12/F-20/F-21/F-26/F-27 + 部分 M-5
+- W-AUDIT-6 策略 + 量化（30h，3 session）— PM 5 策略決策 + DSR/PBO promotion gate + 5 策略 IMPL
+- W-AUDIT-7 AI 棧 + GUI（25h，2 session）— 解 F-07/F-28/F-30 + 部分 A3 30 issues
+
+**5 個 PM 必拍板決策（PA push back）**：
+1. AMD-2026-05-02-01 §5.4 流程搶跑 — 立即補 W-C 操作授權檔 + amendment §5.4.1（不可放過合規）
+2. shadow_mode TOML × 3 設計意圖鎖定 — PA 推薦 (a) 「demo TOML 是 W-A demo fail-close」+ 補 SM-05 spec
+3. CLAUDE.md §三 數值 vs runtime drift 防線 — PA 推薦 (i) 把 runtime 數值搬出 §三 + (ii) 7-day cron
+4. 5 策略決策（QC verdict 4/5 REJECT）— PA 推薦 (ii) grid CONDITIONAL / ma REVISE / bb 1m→5m / funding RETIRE / bb_reversion pair
+5. openclaw_core 9 模組 + Layer 2 14 天 0 動作 sunset — PA 推薦 ADR-0015 永久 sunset + W-AUDIT-5 P2 drop
+
+**4 條 PM 簽收的 hard truth**：
+1. 88 finding 至少需 6-8 sprint 才達 supervised live；不可 1-2 sprint 速通
+2. 5 策略 net negative 是結構性問題（QC 4/5 REJECT or REVISE）
+3. AI 棧 cost = $0 / cost_edge_advisor 0 row / Layer 2 0 流量 — advisory-dormant 真實狀態
+4. CLAUDE.md 治理規則執行不徹底（§七 7-day rule + §九 hard cap 違反）
+
+**核實過程**：
+- ssh trade-core PG 直查 4 critical 表（lease_transitions=0 / governance_audit_log=22790 / cost_edge_advisor_log=0 / ai_usage_log=0 / feature_baselines=0 / directive_executions=0 / agent.messages=2 / state_changes=11 / ai_invocations=2）
+- engine env 取 OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1 + OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow（驗 K-2）
+- grep `H0_GATE.{check,evaluate,decide}(` Python 0 hit / Rust step_0_5_h0_gate.rs:41 active（驗 K-4）
+- grep `lambda: True` executor_agent.py:223-224（驗 K-1）
+- TOML × 3 shadow_mode = true（驗 K-1）
+- restart_all.sh:489 + clean_restart.sh:390 `--host 0.0.0.0`（驗 F-23）
+- phase4_routes.py:822/832 0 actor / scout_routes.py:325/431 0 require_operator（驗 F-24/F-25）
+- PG 7d demo gross = funding_arb -15.43 / grid -11.15 / ma +0.20 / bb -0.06 ≈ -26.44 USDT（驗 K-5）
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md`（同次複製到 Operator/）

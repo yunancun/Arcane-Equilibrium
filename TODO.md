@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v13
+Version: v14
 Date: 2026-05-08
-Status: PM replan after AgentTodo M8 fast-track NO-GO and OpenClaw repositioning
+Status: PM replan after AgentTodo M8 fast-track NO-GO and OpenClaw repositioning; v14 mounts 12-agent full audit fix plan (PA integrated, 88 finding / 7 wave / ~140h)
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -79,6 +79,18 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   `chains_with_lease=33`, proving router-gate bypass lineage is written into
   Agent Spine shadow ExecutionPlan rows. MAG-082 readiness remains
   `LINEAGE_READY_NOT_WINDOW_PASS`; the 24h window is not complete.
+- **2026-05-08 12-Agent Full Audit + PA Fix Plan land**：12 audit (FA / AI-E /
+  E5 / E4 / E3 / CC / QC / MIT / BB / TW / R4 / A3) reports written to
+  `srv/docs/CCAgentWorkSpace/<AGENT>/workspace/reports/2026-05-08--*.md`. PA
+  integrated 88 unique findings (de-duped from 142 raw) into 7 waves
+  W-AUDIT-1..7 with ~140h estimated. Top 30 critical/high 80% VERIFIED via
+  grep + ssh trade-core PG. Full plan archived at
+  `srv/2026-05-08--full_audit_fix_plan.md` and PA workspace
+  `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md`.
+  6 cross-agent consensus criticals (K-1..K-6); K-6 (LG-5 reviewer 0 row)
+  is DISPUTED — PG actual 22,790 row, reviewer is active. 5 PM/operator
+  decision points (`P0-DECISION-AUDIT-1..5`) below need operator sign-off
+  before downstream IMPL fully unblocks.
 
 ## Dispatch Order
 
@@ -94,6 +106,13 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | 5 | `W-E` OpenClaw read-only observability expansion | PM -> PA -> E1 -> E2 -> E4 -> PM | DONE 2026-05-07 | Added `/brief/latest`, `/diagnostics`, and `/escalations` as backend-authored view models. |
 | 6 | `W-F` Edge/data quality and Live Gate foundation | PM -> QC/MIT/PA -> E1/E4 -> PM | after W-A; before true-live | Work through residual WARN cluster, H0 production caller, pricing binding, and supervised-live state machine. |
 | 7 | `W-G` Proposal/approval/mobile relay | PM -> CC/FA/PA -> E1/E2/E4 -> PM | BACKEND FOUNDATION DONE 2026-05-07 | Gateway/console may create proposals and relay approval/reject intent into the `openclaw.*` ledger. No direct order/config/live-auth authority; external Telegram/WebChat/mobile adapters remain disabled until separately configured. |
+| 8 | `W-AUDIT-1` Docs sync + governance compliance | TW + R4 + PM + PA | NEW 2026-05-08 (~4.5h, 1 session, no deps) | CLAUDE.md §三/§五/§四 lease drift sync, AMD §5.4.1 amendment, docs/README +50 entries, SPECIFICATION_REGISTER LG-X + SM-03/EX-03/ARCH-02/03 補登, ADR-0015..0019 補錄, CONTEXT.md +6 詞條 (PA fix plan §6 W-AUDIT-1). |
+| 9 | `W-AUDIT-2` Security IMPL (4 HIGH) | E1×4 並行 + E2 + E4 + E3 | NEW 2026-05-08 (~7-8h, 1 session, after W-AUDIT-1) | F-24 phase4 0 actor / F-25 scout 0 require_operator / F-23 0.0.0.0 binding / F-03 lease audit channel writer wire (4h) / layer2 +chmod 0o600. |
+| 10 | `W-AUDIT-3` ExecutorAgent fake-live + 5-Agent decision spine (mount W-A/W-B) | E1 + E1a + E2 + E4 + PA + PM | NEW 2026-05-08 (~10h, 2 sessions, after W-AUDIT-2 #4) | F-01 lambda:True 移除 + TOML × 3 PM 決策 / F-17 GUI dynamic / F-15 lease flip→writer e2e test / SM-05 spec 補；mounts W-A close-out condition + W-B regression test. |
+| 11 | `W-AUDIT-4` ML 基座 + dead schema (mount W-F-1) | E1×6 並行 + MIT + E2 + E4 | NEW 2026-05-08 (~30h, 3 sessions, after W-AUDIT-1) | V068-V076 9 條 migration: retention 9 表 / compression / drop 4 dead / feature_baselines writer / edge cycle / outcome backfill / Guard retrofit / engine_mode CHECK / 5 ML cron + FUP-2 deploy. |
+| 12 | `W-AUDIT-5` 性能/結構/CI/跨平台 (split 5a + 5b) | E1×6 並行 + E5 + E2 + E4 | NEW 2026-05-08 (~17h+17h, 2 sessions) | 5a: F-12 runner.rs split 5 sibling / F-20 drop 952MB damaged / F-21 strip / F-26 .github CI aarch64-apple-darwin / F-27 字典 4 drift / test_h_state split. 5b: orjson / deepcopy / ai_budget RwLock / event_consumer split. |
+| 13 | `W-AUDIT-6` 策略 + 量化 promotion gate (mount P0-EDGE-1) | E1×5 + QC + E2 + E4 + PM | NEW 2026-05-08 (~30h+VaR, 3 sessions, PM 決策後) | PM 5 策略 verdict (1d) → F-13 DSR/PBO/CPCV promotion gate / Kelly tier config / fast_track config / funding clean / bb_breakout cooldown 統一 / bb 1m→5m RFC / ma_crossover R:R 重寫 / VaR/CVaR/EVT (3d after). |
+| 14 | `W-AUDIT-7` AI 棧 + GUI/UX 收口 | E1×4 + AI-E + A3 + E2 + E4 + ops | NEW 2026-05-08 (~25h, 2 sessions, parallel-able) | F-07 operator API key + Layer2 manual / F-cea-env CostEdgeAdvisor / F-strategist-cap / F-30 prompt() × 6 → custom modal / F-system-mode-confirm 5s 倒計時 / F-strategy-confirm 視覺隔離 / F-28 ContextDistiller IMPL / Layer2 autonomous loop. |
 
 ## P0 — True-Live Blockers
 
@@ -111,6 +130,11 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P0-OPS-2` | ACTIVE | Credential rotation | PG/Grafana/live-secret rotation and history-clean plan complete before true-live. |
 | `P0-OPS-3` | ACTIVE | Legal/ToS/geography check | Operator confirms Bybit ToS, KYC, and geography constraints before true-live. |
 | `P0-OPS-4` | ACTIVE | First-day live runbook | Disaster and supervised-live first-day SOP exists and is rehearsed. |
+| `P0-DECISION-AUDIT-1` | PENDING-OPERATOR | AMD-2026-05-02-01 §5.4 流程搶跑（Linux flag flip 5/3 vs amendment 規定 5/15 後） | PA 推薦：補 `docs/governance_dev/2026-05-08--w_c_lease_router_authorized.md` operator 授權檔 + amendment §5.4.1 修訂條款（0.5h），flag 維持 ON；理由 = chains_with_lease=33 已 stable。或 flag 回 OFF 至 5/15。Operator 必擇一。 |
+| `P0-DECISION-AUDIT-2` | PENDING-OPERATOR | shadow_mode TOML × 3 設計意圖鎖定（FA push back #2） | PA 推薦 (a)：「demo TOML 是 W-A demo fail-close，等 P0-EDGE-1 後 demo 翻 false 啟 shadow→live promotion」+ 補 SM-05 spec。或 (b)「5-Agent 鏈是 shadow-only 觀察工具，真實下單永遠走 Rust tick_pipeline 直接路徑」。Operator 必擇一寫進 amendment。 |
+| `P0-DECISION-AUDIT-3` | PENDING-OPERATOR | CLAUDE.md §三 數值 vs runtime drift 防線改造 | PA 推薦 (i)+(ii)：把 runtime numerical state 搬出 §三 進入 healthcheck 自動產 status table；§三 7-day 自動重驗 cron（hard cap 5d）。或 (iii) 接受現狀但加 cross-ref。 |
+| `P0-DECISION-AUDIT-4` | PENDING-OPERATOR | 5 策略 verdict 採納 | PA 推薦 (ii)：保留 grid CONDITIONAL（限 ORDIUSDT）+ ma_crossover REVISE + bb_breakout REJECT 1m→REVISE 5m + funding_arb RETIRE（完全清 RiskConfig）+ bb_reversion 配 ma pair。或 (i) 全 RETIRE 重做 / (iii) 觀望 P0-EDGE-1 後決。 |
+| `P0-DECISION-AUDIT-5` | PENDING-OPERATOR | openclaw_core 9 模組 + Layer 2 自主循環 14 天 0 動作 sunset（FA push back #3） | PA 推薦 (i)+(ii)：ADR-0015 「openclaw_core 9 模組永久 sunset」決議 + W-AUDIT-5 接續 drop；ADR-0017「Layer 2 GUI-only by design」+ CLAUDE.md §五 圖示更正。或 (ii) 排 W-AUDIT-5 P2 修 / (iii) 接受長期共存。 |
 
 ## P1 — Next Engineering Queue
 
@@ -129,6 +153,13 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-REPLAY-1` | 4 | Recorder-history maturity | Build longer local BBO/orderbook/latency history for S1/S1+ calibration; never fabricate old microstructure. |
 | `P1-REPLAY-2` | 4 | DONE — runtime-applied replay artifact type cleanup | V066 applied twice on Linux for idempotency, constraints verified, rollback smoke passed, and runtime reloaded with `restart_all.sh --keep-auth` on 2026-05-08. New finalize rows can use `replay_report`; legacy `pnl_summary` remains readable. |
 | `P1-LG-5` | 4 | LG-5 reviewer maturity watch | Source is active; continue audit-row and attribution health monitoring. |
+| `P1-AUDIT-DOCS-1` | 2 | W-AUDIT-1 docs sync chain | Per PA fix plan §6 W-AUDIT-1: CLAUDE.md §三/§五/§四 stale sync (PM 1h) + AMD §5.4.1 + W-C operator auth file (PM 1h) + docs/README +50 entries (TW 1h) + SPECIFICATION_REGISTER LG-X / SM-03 / EX-03 / ARCH-02/03 + AUDIT-13 (R4 0.5h) + CONTEXT.md +6 詞條 (R4 0.3h) + ADR-0015..0019 (PA+R4 1h) + SCRIPT_INDEX (TW 0.3h) + MIT/BB workspace/README (R4 0.2h). All parallel; 1 session ~4.5h. |
+| `P1-AUDIT-SEC-2` | 2 | W-AUDIT-2 security IMPL chain (4 HIGH from E3) | F-24 phase4_routes.py:822/832 +actor +require_scope_and_operator (E1-a 1h) + F-25 scout_routes.py:325/431 (E1-a 0.5h same PR) + F-23 restart_all.sh:489 + clean_restart.sh:390 + fresh_start.sh + deploy/README `--host 0.0.0.0` → `${OPENCLAW_BIND_HOST:-127.0.0.1}` + Tailscale doc (E1-b 1.5h) + F-03 `spawn_lease_transition_pipeline` 接線到 main.rs/pipeline_ctor.rs (E1-c 4h, blocks W-AUDIT-3 F-15 e2e test) + ai_service_listener.py:149 chmod 0o600 (E1-d 0.2h). Parallel sub-agents; depends on W-AUDIT-1. |
+| `P1-AUDIT-RUNTIME-3` | 2 | W-AUDIT-3 ExecutorAgent fake-live (mounts W-A close-out + W-B regression) | F-01 executor_agent.py:223-224 lambda:True 移除（after P0-DECISION-AUDIT-2 operator 拍板）+ F-17 tab-settings.html:393 dynamic 改 `/api/v1/governance/lease-router/status` (E1-b 1h) + F-15 lease flip→writer→DB row e2e regression test (E4 4h, depends on W-AUDIT-2 #4 F-03) + SM-05 spec / ExecutorConfigCache polling design (PA+PM 1h). 2 sessions; depends on W-AUDIT-2 F-03. |
+| `P1-AUDIT-ML-4` | 3 | W-AUDIT-4 ML 基座 + dead schema (mounts W-F-1) | V068-V071 drop dead schema (4 條, MIT+E1-b 4h) + V072 feature_baselines writer + helper script (MIT+E1-c 4h) + V073 edge_estimate_snapshots cycle hourly cron (E1-c 3h) + V074 decision_outcomes daily backfill (E1-d 3h) + V075/V075b retention + compression policies 9 表 (E1-a+MIT 5h) + V076 retrofit Guard A for V062/V063/V065 (E1-e 1h) + F-29 trading.fills.engine_mode='demo_archive_20260418' 6,616 row CHECK (E1-f 2h) + F-08 5 ML 腳本 cron (thompson/optuna/cpcv/dl3/weekly_report, E1+ops 3h) + F-09 sibling FUP-2 commit `34211ab4` E4 regression + merge + deploy (E4+ops 4h, passive wait). Heavy parallel; 3 sessions; depends on W-AUDIT-1. |
+| `P1-AUDIT-PERF-5` | 3 | W-AUDIT-5a 性能/結構/CI urgent | F-12 runner.rs 2467 LOC hard violation split 5 sibling (config/scheduler/reporter/calibrator/metrics, E1-a 6h) + F-20 DROP `trading.*_damaged_20260414_130607` 4 表 909MB (E1-b+ops 2h, NAS dump 先) + F-21 Cargo.toml `[profile.release] strip="symbols"` (E1-c 0.5h) + F-26 `.github/workflows/ci.yml` cargo check aarch64-apple-darwin + linux-gnu matrix (E1-d 4h) + F-27 字典 4 drift L5-1..L5-4 + G9-02 章節補 (TW or BB 1.5h) + test_h_state_query_handler.py 2641 split (E4 3h). Heavy parallel; 1 session ~17h. |
+| `P1-AUDIT-STRATEGY-6` | 3 | W-AUDIT-6 策略 verdict + DSR/PBO promotion gate (mounts P0-EDGE-1) | After P0-DECISION-AUDIT-4 operator 拍板：F-13 `learning_engine/promotion_gate.py` DSR/PBO/CPCV 強制 promotion gate (QC+E1-a 8h, mounts LG-2 IMPL) + Kelly tier 8/6/4 → RiskConfig.kelly.{young/mature/established}_fraction (E1-b+QC 3h) + per_trade_risk_pct 雙 SSOT 統一 0.1% (kelly_sizer.rs:109) + fast_track 15%/5%+3σ → RiskConfig (E1-c 1h) + funding_arb 完全清除 RiskConfig schema 段 (E1-d+QC 1h) + bb_breakout cooldown 600k vs 300k 統一 (E1-e 0.3h). Plus QC heavy: bb_breakout 1m→5m RFC (4h spec + 1d IMPL) + ma_crossover R:R trailing/TP 重寫 (1d). VaR/CVaR/EVT 排 W-AUDIT-6c (3d 後期). 3 sessions; depends on W-AUDIT-1 + W-AUDIT-3. |
+| `P1-AUDIT-AI-UX-7` | 3 | W-AUDIT-7 AI + GUI/UX 收口 | F-07 operator GUI ANTHROPIC_API_KEY + Layer2 manual trigger 觀察 7d (operator 5min) + F-cea-env `OPENCLAW_COST_EDGE_ADVISOR=1` env + restart (ops 0.5h) + F-strategist-cap RiskConfig strategist max_param_delta_pct 30%→50% (E1 1h) + F-30 governance prompt() × 4 + learning prompt() × 2 → custom modal (A3+E1 4h) + tab-system.html:243-252 live_reserved 5s 倒計時 + hold-to-confirm (A3+E1 2h) + tab-strategy/live/paper Stop/Pause/Delete 視覺隔離 (A3+E1 3h). W-AUDIT-7b: F-28 ContextDistiller IMPL (PA+E1 8h, 推遲到 LG-2 IMPL 之後). W-AUDIT-7c: Layer2 autonomous loop hourly L1 triage cron (E1+AI-E 8h, 推遲下個 cycle). 2 sessions urgent; can parallel with W-AUDIT-3..6. |
 
 ## P2 — Maintenance Backlog
 
@@ -147,6 +178,10 @@ historical wave narratives, and old date-driven reminders are archived.
 | `P2-LEASE-1` | Clean terminal `DecisionLeaseSm.objects` Vec entries | If long soak shows memory growth or before high-volume live. |
 | `P2-STRUCT-1` | HStateCache + CostEdgeAdvisor late-inject slot enablement | After H0/pricing ownership is clear. |
 | `P2-STRUCT-2` | Zombie/deprecated code inventory | Next architecture hygiene sweep. |
+| `P2-AUDIT-PERF-5b` | W-AUDIT-5b 性能優化次層（after 5a）| json.loads/dumps 501 處 → orjson (E1-f 3h) + Python copy.deepcopy 10 處 → frozen dataclass (E1-g 6h) + ai_budget tracker 16+ 鎖 → RwLock + per-strategy ArcSwap (E1-h 4h) + event_consumer/loop_handlers + dispatch 1144+1195 再拆 (E1-e 4h)。 |
+| `P2-AUDIT-VAR-6c` | W-AUDIT-6c portfolio VaR/CVaR/EVT IMPL | After 5 策略 verdict 落地：portfolio_var.py + cvar.py + EVT/GPD tail fit + LUNA/FTX stress test + block bootstrap CI (QC+MIT+E1, ~3d)。 |
+| `P2-AUDIT-LAYER2-7c` | W-AUDIT-7c Layer 2 autonomous loop | Hourly L1 triage cron + ContextDistiller wire (E1+AI-E ~8h)。Depends on W-AUDIT-7a operator API key 7d 累積觀察。 |
+| `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset (after P0-DECISION-AUDIT-5) | 待 ADR-0015 通過後 drop attention.rs / attribution.rs / backtest.rs / cognitive.rs / dream.rs / message_bus.rs / opportunity.rs / order_match.rs / portfolio.rs ~4468 行 Rust dead code。 |
 
 ## Schedule
 
@@ -161,6 +196,14 @@ Dates are planning windows, not automatic authorization.
 | 2026-05-11/12 | MAG-083/MAG-084 candidate | Only if new MAG-082 report PASSes. |
 | 2026-05-15 | Edge / Decision Lease canary decision review | Use current edge data; do not promote if MAG-082 lineage is still NO-GO. |
 | 2026-05-16 | funding_arb 14d audit | Run `bash helper_scripts/db/audit/2026-05-16_funding_arb_14d_audit.sh`. |
+| 2026-05-08+ | W-AUDIT-1 docs sync | After PM/operator approval; ~4.5h, 1 session. PA fix plan §6 W-AUDIT-1. |
+| 2026-05-09/10 | W-AUDIT-2 security IMPL | After W-AUDIT-1; ~7-8h, 1 session. 4 HIGH security fixes (phase4 / scout / 0.0.0.0 / lease audit). |
+| 2026-05-10/12 | W-AUDIT-3 ExecutorAgent fake-live | After W-AUDIT-2 #4 (F-03 lease audit channel); blocks on `P0-DECISION-AUDIT-2`; ~10h, 2 sessions. |
+| 2026-05-10..18 | W-AUDIT-4 ML 基座 + dead schema | After W-AUDIT-1; parallel with W-AUDIT-3/5/6/7; ~30h, 3 sessions. |
+| 2026-05-10..14 | W-AUDIT-5a 性能/結構/CI | After W-AUDIT-1; parallel; ~17h, 1 session. |
+| 2026-05-15..22 | W-AUDIT-6 策略 + DSR/PBO promotion gate | After `P0-DECISION-AUDIT-4` operator 5 策略 verdict + W-AUDIT-1/3; ~30h, 3 sessions. |
+| 2026-05-12..16 | W-AUDIT-7 AI + GUI/UX 收口 | Parallel; operator API key 7d 觀察 + GUI fix; ~25h, 2 sessions urgent (7a) + 7b/7c 後期。 |
+| 2026-06-15 | Supervised live target (悲觀帶) | Conditional on W-AUDIT-1..7 完成 + 5 PENDING-OPERATOR 拍板 + 5 P0-LG/OPS 條目 + W-A/W-B/W-C/W-D PASS. PA panorama 偏向悲觀。 |
 
 ## Dispatch Rules
 
@@ -184,3 +227,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && git status --short --branch"
 ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --status"
 ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_healthcheck.sh --quiet"
 ```
+
+## Reference — 2026-05-08 Full Audit Fix Plan
+
+- **Sign-off archive**: `srv/2026-05-08--full_audit_fix_plan.md`（PM banner + PA 原文 543 行）
+- **PA workspace original**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md`
+- **12 audit reports**: `srv/docs/CCAgentWorkSpace/{FA,AI-E,E5,E4,E3,CC,QC,MIT,BB,TW,R4,A3}/workspace/reports/2026-05-08--*.md`
+- **Cross-agent consensus**: K-1..K-6 critical (見 fix plan §3.1)；K-6 (LG-5 reviewer 0 row) DISPUTED — 真實 PG 22,790 row。
+- **Out-of-date in §三**: 5 策略 7d gross PA 直查 demo -26.44 USDT / live_demo +0.43；§三 寫 -6.98 是 2026-05-03 stale。`[40]` 24h slippage / `[33]` maker fill rate / `[42b]` attribution_chain_ok 等 §三 數字均待 W-AUDIT-1 sync。

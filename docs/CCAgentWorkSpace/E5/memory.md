@@ -44,6 +44,28 @@
 | 2026-04-01 | 全程序優化審計 v2 | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-01--optimization_audit.md` |
 | 2026-04-12 | E5 Performance Optimization Wave 最終報告 | `docs/CCAgentWorkSpace/E5/2026-04-12--e5_optimization_final_report.md` |
 | 2026-04-24 | 全程序鏈優化審計（P0 Rust 硬違反焦點） | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-24--full_chain_optimization_audit.md` |
+| 2026-05-08 | 全程序鏈優化審計（HEAD 4e2d2883；30 opportunity）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-08--full_chain_optimization_audit.md` |
+
+## 2026-05-08 全程序鏈審計 key findings
+
+- 規模演進：Rust 184k LOC（+49k vs 4-24）/ Python 260k LOC
+- Rust >800 warn = 70 / >2000 hard = **1**（runner.rs 2467；唯一 hard violation；REF-20 Sprint A R3 直接生長）
+- Python >800 warn = 72 / >2000 hard = **1**（test_h_state_query_handler.py 2641）
+- Engine binary 25 MB **未 strip**（debug info 殘留）— `Cargo.toml [profile.release] strip = "symbols"` 可一鍵 -8 MB
+- **Hot path clone count -37%** vs 2026-04-24（115 → 73 in tick_pipeline 4 檔）— 性能優化軌道正確
+- **DB 32 GB 中 909 MB 純 24 天前 damaged dump 死數據**（risk_verdicts_damaged 903 MB single-handed）— 必 DROP
+- Dead schema 大批揭發：learning 30 表 67% 0-row / replay 9 表 55% 0-row / observability 6 表 83% 0-row
+- 18 blocker 確認：H0_GATE 業務 caller = 0 (block #9) / CostEdgeAdvisor caller = 0 (block #10) / executor_agent.py:224 lambda:True hardcoded (block #8)
+- LG-5 reviewer 死於 wiring 揭發：`learning.governance_audit_log` n_live_tup = 0
+- **無 CI workflow 包含 aarch64-apple-darwin** — M5 部署前必補
+- API log 揭發 lg5 schema drift 2 列 (slippage_bps / net_bps_after_fee 不存在) → healthcheck 永久 FAIL
+- 30 opportunity 拆：4 Critical / 11 High / 9 Medium / 6 Low
+- Python `copy.deepcopy` 10+ 處在 lease/auth state read 路徑 — 非熱點 critical 但 measurable -30% latency 機會
+
+教訓：
+1. PA panorama 列 V059 edge_estimate_snapshots 為 dead 不準確（實際 457 row + replay_full_chain_routes 在用）— 標 dead 前先 grep replay_full_chain_routes/V059 references
+2. PG `n_live_tup` 在 timescale parent 顯示 0 但 hypertable chunk 有真數據（trading.fills 13018 rows but parent stat shows 0）— audit 必走 `count(*) FROM <hypertable>` 而非只看 pg_stat_user_tables.n_live_tup
+3. Linux ssh PG 需用 `trading_admin` 走 `~/.pgpass`，非 `trading_user`
 
 ## 2026-04-24 TODO.md Audit 發現
 

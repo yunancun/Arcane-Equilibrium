@@ -56,3 +56,63 @@
 |------|------|---------|
 | 2026-04-01 | AI 使用效果與開發情況評估（舊基準）| docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-04-01--ai_effectiveness_audit.md |
 | 2026-04-24 | AI 使用效果、接入度、開發完成度評估（本次）| docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-04-24--ai_effectiveness_audit.md |
+
+## 2026-05-08 完整 AI 棧 audit（本次）
+
+### 三大新發現（更正過期 memory）
+
+1. **MLDE shadow → param applications 已真活**（vs 4/24 audit 過期記錄「ai_usage_log=0」）：
+   - 7d shadow 5209 row（mlde_shadow_advisor 437/24h + dream_engine 391/24h + mlde_demo_applier 21）
+   - 7d param applications 2398（applied 277=11.5% / skipped 2041=85% / failed 47 / candidate 33 live）
+   - dedupe filter 過於激進（1941/2041 = 95% skipped 因 dedupe）
+   - decision_features 9.47M / scorer 1.4M / mlde_edge_training 559k / JS 864 全在跑
+
+2. **`98b76cce` (2026-05-08 21:58) cloud L2 整合**：
+   - provider_client.py 622 LOC + provider_keys_store.py 397 LOC + layer2_engine.py 3 callsite refactor
+   - Anthropic + OpenAI(GPT-4o/o1) + DeepSeek(Chat/Reasoner) 三 provider client_implemented=true
+   - Tier 2/3 budget fallback 真接（50% threshold→DeepSeek / 85%→Haiku）
+   - Perplexity scout-only（**0 真實 PerplexityClient class**，只是 enum 標記 + UI）
+   - 致命 gap：~/BybitOpenClaw/secrets/providers/ 目錄存在 0 file；ANTHROPIC/OPENAI/DEEPSEEK API_KEY env 全 unset
+   - layer2_engine 完全靠 manual `POST /paper/layer2/trigger`（0 autonomous scheduler）
+   - 結論：**code-ready / operationally-dormant**
+
+3. **engine env 檢查發現 CLAUDE.md §三 過期**：
+   - `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 已啟用！（vs CLAUDE.md 說 default OFF / canary ~05-15）
+   - `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow` 確認
+   - `OPENCLAW_COST_EDGE_ADVISOR` 未設 → daemon disabled → cost_edge_advisor_log 0 row all-time
+
+### 真實 AI 流量（2026-05-08 17:00 取樣）
+
+| Layer | 24h | 7d | cost |
+|---|---|---|---|
+| L0 | 不可計 | 不可計 | $0 |
+| L1 Ollama 9B | ~8 cycle Strategist 全 reject | ~336 cycle | $0 |
+| L1 Ollama 27B | 0 | 0 | $0 |
+| L1.5/L2 Anthropic/OpenAI/DeepSeek | 0 | 0 | $0 |
+| MLDE shadow → params | 469 attempts | 2398 attempts | $0 |
+| DreamEngine | 391 row | ~hourly cycles | $0 |
+
+### Strategist 8/8 cycle delta>30% rejected
+engine.log 證據：5-min cycle alive，Ollama IPC 真接，但 `RiskConfig.strategist.max_param_delta_pct=30%` 永遠擋下 q4 量化高方差輸出 → AI tuning **0 effective commit**。
+
+### ContextDistiller / Perplexity / 5 ML 訓練腳本 真實狀態
+- ContextDistiller: 0 callsite 全 codebase（profile/memory 提到的 spec 未 IMPL）
+- Perplexity client class: 不存在（enum + UI + provider_keys 白名單，但無 PerplexityClient impl）
+- thompson_sampling 4/6 / cpcv 4/10 / dl3 4/6-4/27 / optuna 4/20 / weekly_report 4/7 — 全 9-32 天無 invoke
+- crontab 只 2 個 entry（edge_label_backfill + microstructure_recorder），無 ML training entry
+
+### 報告
+| 日期 | 任務 | 文件位置 | 行數 |
+|------|------|---------|------|
+| 2026-05-08 | 完整 AI 棧 effect/dev/接入度/可用度 audit | docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-08--ai_effectiveness_full_audit.md | 278 |
+
+### advisory-active prerequisite（最低可行 = 1+2+4+6 共 ~1d 工作量）
+1. GUI 寫 ANTHROPIC_API_KEY（trivial / operator）
+2. Manual Layer2 trigger 1 次驗端到端（5min / operator）
+3. Strategist max_param_delta_pct 30→50%（1d / E1+E2+E4）
+4. OPENCLAW_COST_EDGE_ADVISOR=1 + restart（30min / operator）
+5. attribution writer 修 84.6% chain failed（1-2 sprint / E1+MIT）
+6. 5 ML 訓練腳本 cron 化（0.5d / operator）
+7. AI advisory ROI 月報自動產出（1 sprint / E1+AI-E）
+8. Layer2 autonomous loop（1 sprint / E1）
+9. ContextDistiller IMPL（1 sprint / PA+E1）

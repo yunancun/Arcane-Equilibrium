@@ -58,3 +58,26 @@
   1. test fixtures 用 `Box::leak(IndicatorSnapshot)` 跳過 KlineManager streaming → 策略邏輯有 coverage、streaming 整合無 coverage
   2. `feature_version` hardcoded "v1.0"（pipeline_ctor.rs:67）→ indicator code 改不會自動 bump → MLDE training 數據版本污染風險
 - Mac vs Linux byte-equality：default rustc (no rustflags) → IEEE-754 reproducible likely OK
+
+### 2026-05-08 全鏈安全審計（Mac HEAD 4e2d2883）
+
+**評級：A（vs 2026-04-24 A-）**
+- 0 CRITICAL / 3 HIGH / 5 MEDIUM / 6 LOW / 4 INFO
+- 5 項 Live 門控 5/5 設計綠 ✅
+- 0 Rust unsafe / 0 PyO3 FFI ✅
+
+**新發現 3 HIGH (true-live 前 must-fix)**：
+1. HIGH-1: `learning.lease_transitions=0 row`，spawn_lease_transition_pipeline 0 production caller — Decision Lease retrofit Sprint 3 IMPL 完成但 audit channel writer wiring 死
+2. HIGH-2: `phase4_routes.py:822/832` weekly_review/approve+reject **0 auth**（anonymous client 可改 governance 批准）
+3. HIGH-3: `scout_routes.py:324/430` post_market_signal+post_event_alert 缺 require_operator（viewer 可注入 ScoutAgent）
+4. HIGH-4 (升級自 MEDIUM): FastAPI `--host 0.0.0.0:8000` 對 LAN 全開（PRE-LIVE-2 配套）
+
+**保留 MEDIUM/LOW**：MEDIUM-E IPC fail-OPEN dev/test (paper/demo), MEDIUM-F ai_service.sock 0o775 + 0 HMAC handshake，4 個其他 + 6 LOW
+
+**對 PA 「audit oblivion / 5-Agent 解耦 governance bypass」立場**：
+- 5-Agent 解耦對 governance **是好設計**：Strategist Python 出 bug 不能直送 IntentProcessor（因為 0 Python→IntentProcessor 介面）
+- Rust IntentProcessor.process_with_features Gate 1（is_authorized）→1.4（lease）→1.5（dup）→1.6（balance）→2（Rust Guardian.review）→3 全部強制執行
+- lease_transitions audit 0 row 不阻 trading safety，但 audit channel 死綁 = 真實 finding
+- Python H0_GATE 0 caller 對 Rust hot path 0 影響（Rust h0_gate.check 每 tick 強制 fire，shadow_mode IPC writable）
+
+報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-08--full_chain_security_audit.md`（408 行）

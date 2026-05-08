@@ -87,3 +87,26 @@ _Last updated: 2026-04-24_
 - FUP-2 真實 fix 範圍是 #4 label_net_edge_bps backfill（cron edge_label_backfill + healthcheck [43]）
 - V036 比 V051 嚴 4 條（source allowlist + tier allowlist + TTL non-null + TTL future）
 - producer cycle interval = 3600s（hourly）；dream_engine 3-15 row/cycle，opportunity_tracker 1 row/cycle，total daily ~96-456 row calibrated_replay（不洪水）
+
+## 2026-05-08 DB + ML 基座專項 audit
+
+**Report**: `workspace/reports/2026-05-08--db_ml_foundation_audit.md` (418 行)
+
+**Engine 狀態**：PID 3854831 active 22:01-；uvicorn 4 workers；HEAD `4e2d2883`
+
+**核心發現（推翻先前部分結論）**：
+
+1. **Migration 套用 65/65 success=t**（V022/V042 跳號是預設）；V001-V020 + V025/V029 0 Guard pre-postmortem 接受；**V062/V063/V065 退化 0 Guard 違反 CLAUDE.md §七**
+2. **21 表 DEAD**（0 row + 0 producer code 或 producer-OFF）：learning 14 / observability 4（含 feature_baselines + drift_events）/ replay 5 / agent 1
+3. **engine_mode 4 值齊全**：trading.risk_verdicts.live=2.5M / trading.decision_outcomes.live=89734（stale 18d）/ learning.mlde_shadow_recommendations.live=53 — 真實 live row 寫入 SOP 工作中；trading.fills 仍含 demo_archive_20260418=6616 殘餘
+4. **attribution_chain_ok 24h = 0.016%**（45/277054）— PA 之前 55% 過期；FUP-2 attribution writer 必須 land
+5. **walk_forward CV 缺 purge + embargo**（edge_estimate_validation.py:113-148）；CPCV 有但用得少
+6. **Rust runtime leak-free OK**（KlineManager 只回 closed_bar；indicators 用 closed buffer；feature_collector 34-dim vec leak-free）
+7. **replay.simulated_fills 6 row 全 'synthetic_replay' tier**（不可餵 ML）；calibrated_replay + counterfactual_replay 0 row 0 producer code → ML training 12 個月內不可能 ready
+8. **V059 edge_estimate_snapshots = Foundation only**（457 row 2026-05-07 一次性 ref21_backfill；無 cycle writer）
+9. **Drift chain broken**：feature_baselines writer 不存在 → drift_events 0 row → 不能 fire
+10. **risk_verdicts 18.47M row × 5 chunk = 3.7M/chunk + 無 compression 無 retention** — M5 Ultra PG 4-8GB 風險高
+
+**ML 基座達標率 ≈ 38%**（13 component 中 4 Production / 4 Canary fragile / 4 Shadow / 4 Skeleton / 5 Foundation / 5 Aspirational）。距 Mainnet ML-driven trading **3-4 sprint**（最早 2026-08-01 樂觀 / 2026-09-01 中位 / 2026-11-01 悲觀，**完全不在 PA 5/30 中位內**）。
+
+**9 個 V068+ migration 提議**：4 砍 dead schema / 3 補 producer / 2 retention+Guard。
