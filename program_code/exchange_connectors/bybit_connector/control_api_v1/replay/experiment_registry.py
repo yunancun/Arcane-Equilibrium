@@ -88,7 +88,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional, Tuple
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -332,7 +332,7 @@ class ReplayExperimentRegisterRequest(BaseModel):
         ),
     )
 
-    @validator("symbol", "strategy")
+    @field_validator("symbol", "strategy")
     def _alphanumeric_underscore(cls, v: str) -> str:
         """Path-injection guard: alphanumeric + underscore only.
         防 path injection：只允許字母數字 + 底線。
@@ -353,7 +353,7 @@ class ReplayExperimentRegisterRequest(BaseModel):
                 )
         return v
 
-    @validator("timeframe")
+    @field_validator("timeframe")
     def _timeframe_v049_allowlist(cls, v: str) -> str:
         """V049 CHECK chk_replay_experiments_timeframe 8-value allowlist.
         V049 CHECK 8 值白名單。
@@ -366,7 +366,7 @@ class ReplayExperimentRegisterRequest(BaseModel):
             )
         return v
 
-    @validator("manifest_jsonb")
+    @field_validator("manifest_jsonb")
     def _no_reserved_prefix_keys(cls, v: dict[str, Any]) -> dict[str, Any]:
         """REF-20 Sprint A R2 round 2 fix M-4: reject keys with '_' prefix.
         REF-20 Sprint A R2 round 2 fix M-4：拒 '_' 前綴 key。
@@ -398,7 +398,7 @@ class ReplayExperimentRegisterRequest(BaseModel):
             )
         return v
 
-    @validator("manifest_jsonb")
+    @field_validator("manifest_jsonb")
     def _size_cap(cls, v: dict[str, Any]) -> dict[str, Any]:
         """Canonical-form size cap (256 KB) on manifest_jsonb body.
         manifest_jsonb body 的 canonical-form 大小上限（256 KB）。
@@ -430,12 +430,12 @@ class ReplayExperimentRegisterRequest(BaseModel):
             )
         return v
 
-    @validator("data_window_end")
-    def _window_order(cls, v: datetime, values: dict[str, Any]) -> datetime:
+    @field_validator("data_window_end")
+    def _window_order(cls, v: datetime, info: ValidationInfo) -> datetime:
         """V049 CHECK chk_replay_experiments_window_order: end > start.
         V049 CHECK：window 結束 > 開始。
         """
-        start = values.get("data_window_start")
+        start = info.data.get("data_window_start")
         if start is not None and v <= start:
             raise ValueError(
                 "data_window_end must be strictly greater than "
