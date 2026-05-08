@@ -201,7 +201,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
   Cursor block:
     [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]      14 baseline
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
-    [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
+    [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
     [46][48][49][50][51][52][53][54][55]                    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage
   Post-cursor (filesystem / pure-Python):
@@ -231,7 +231,7 @@ Execution / cost sentinels added after F7:
   [38] grid_trading_lifecycle_drift    (MIT 2026-04-29 demo vs live_demo passive 7d)
   [39] strategy_name_cardinality_drift (PA W1-T4 2026-04-29 post-normalization sentinel)
   [40] realized_edge_acceptance        (DB-truth post-fee profitability acceptance)
-  [41] scanner_market_gate_confirmation (scanner gates later-realized edge check)
+  [41] scanner_market_gate_confirmation (legacy scanner would-block evidence calibration; WARN-only after scanner authority retirement)
   [42] live_candidate_eval_contract    (LG-5-IMPL-3 2026-05-02 review_live_candidate 1h SLA + audit row)
   [42b] live_candidate_attribution_drift (LG-5-IMPL-3 2026-05-02 per-strategy 7d ratio drift)
   [42c] live_candidate_attribution_drift_3d (LG5-W3-FUP-2 Fix 2 2026-05-02 RFC §5 Plan B — gate-aligned 3d mirror of [42b])
@@ -273,7 +273,7 @@ def main() -> int:
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
                [40] is DB-truth realized edge acceptance;
-               [41] is scanner market-gate confirmation;
+               [41] is scanner legacy would-block evidence calibration;
                [42]/[42b] are LG-5-IMPL-3 governance contract + attribution drift;
                [42c] is LG5-W3-FUP-2 Fix 2 RFC §5 Plan B — gate-aligned 3d mirror of [42b];
                [43] is LG5-W3-FUP-2 Fix 1 label-backfill cron liveness;

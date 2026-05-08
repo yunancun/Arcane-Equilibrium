@@ -1,24 +1,26 @@
-"""Scanner market-gate / opportunity-shadow healthchecks.
-Scanner 行情 gate 後驗 / opportunity shadow 健康檢查。
+"""Scanner market evidence / opportunity-shadow healthchecks.
+Scanner 行情證據 / opportunity shadow 健康檢查。
 
-MODULE_NOTE (EN): Owns [41], which verifies that scanner market/edge gates
-are not silently blocking cells that later show positive demo/live_demo edge,
-and [51], which verifies scanner opportunity shadow coverage/calibration
-without enforcing any live trading gate. It is split from checks_execution.py
-to keep each healthcheck module under the repository line cap.
+MODULE_NOTE (EN): Owns [41], which records legacy scanner market would-block
+evidence against later demo/live_demo edge, and [51], which verifies scanner
+opportunity shadow coverage/calibration without enforcing any live trading
+gate. Scanner evidence is observational after the 2026-05-08 authority
+retirement: it must not hard-gate opens/closes/live auth/order dispatch, and a
+would-block contradiction is WARN evidence, not a healthcheck FAIL.
 
-MODULE_NOTE (中): 本檔負責 [41]，驗證 scanner 行情/edge gate 不會靜默擋下
-後續證明為正 edge 的 demo/live_demo cell；並負責 [51]，驗證 scanner
-opportunity shadow 的覆蓋率 / 校準性，但不接任何 live trading gate。從
-checks_execution.py 拆出，維持 repo 行數硬上限。
+MODULE_NOTE (中): 本檔負責 [41]，把 legacy scanner market would-block
+證據與後續 demo/live_demo edge 做校準比對；並負責 [51]，驗證 scanner
+opportunity shadow 的覆蓋率 / 校準性，但不接任何 live trading gate。
+2026-05-08 scanner authority 退役後，scanner 只是觀察證據：不能 hard-gate
+開倉/平倉/live auth/order dispatch；would-block 反證是 WARN，不是 FAIL。
 """
 
 from __future__ import annotations
 
 from .checks_execution import _as_float, _as_int
 
-# [41] scanner market-gate confirmation.
-# [41] scanner 行情 gate 後驗。
+# [41] scanner legacy would-block evidence confirmation.
+# [41] scanner legacy would-block 證據後驗。
 MARKET_GATE_CONFIRM_MIN_LABELS = 3
 
 # [51] scanner opportunity shadow acceptance.
@@ -37,22 +39,26 @@ OPPORTUNITY_SHADOW_REJECTED_COST_FALLBACK_BPS = 11.0
 
 
 def check_scanner_market_gate_confirmation(cur) -> tuple[str, str]:
-    """[41] Confirm scanner market gates against subsequent realized edge.
+    """[41] Confirm scanner legacy would-block evidence against realized edge.
 
     The scanner emits per-strategy market route judgements in
     ``trading.scanner_snapshots.candidates[*].strategy_judgments``. This check
-    asks whether cells gated out by market judgement / negative-edge gates later
-    show negative demo/live_demo post-fee edge while that gate is still active.
-    If a later scanner snapshot marks the route compatible again, labels after
-    that transition are excluded because they no longer contradict the old gate.
-    Lack of labels is WARN, not FAIL, because a successful gate can intentionally
-    suppress all future opens.
+    asks whether cells that legacy scanner logic would have blocked later show
+    negative demo/live_demo post-fee edge while that would-block evidence is
+    still active. If a later scanner snapshot marks the route compatible again,
+    labels after that transition are excluded because they no longer contradict
+    the old would-block evidence.
 
-    [41] scanner 行情 gate 後驗。scanner 在 snapshot candidate 中輸出分策略
-    market route judgement；本 check 觀察被 gate / 負 edge gate 擋下的 cell，
-    且只統計 gate 仍生效期間內的後續 demo/live_demo post-fee label。若後續
-    scanner snapshot 已將 route 標回 compatible，之後的 label 不再算作舊 gate
-    的反證。無 label 是 WARN 而非 FAIL，因為成功 gate 可能本來就會抑制後續開倉。
+    After the 2026-05-08 scanner authority retirement, scanner cannot hard-gate
+    opens/closes/live auth/order dispatch. Contradictions are therefore WARN
+    calibration evidence, not FAIL. Lack of labels is also WARN.
+
+    [41] scanner legacy would-block 後驗。scanner 在 snapshot candidate 中
+    輸出分策略 market route judgement；本 check 觀察 legacy scanner 邏輯
+    would-block 的 cell，且只統計該 evidence 仍生效期間內的後續 demo/live_demo
+    post-fee label。若後續 scanner snapshot 已將 route 標回 compatible，之後的
+    label 不再算作舊 evidence 的反證。2026-05-08 scanner authority 退役後，
+    scanner 不能 hard-gate；反證與無 label 都是 WARN，不是 FAIL。
     """
     try:
         cur.connection.rollback()
@@ -67,9 +73,9 @@ def check_scanner_market_gate_confirmation(cur) -> tuple[str, str]:
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"scanner market-gate table check failed: {exc}")
     if not scanner_exists or not scanner_exists[0]:
-        return ("WARN", "trading.scanner_snapshots missing — cannot confirm scanner gates")
+        return ("WARN", "trading.scanner_snapshots missing — cannot confirm scanner would-block evidence")
     if not mlde_exists or not mlde_exists[0]:
-        return ("WARN", "learning.mlde_edge_training_rows missing — cannot confirm scanner gates")
+        return ("WARN", "learning.mlde_edge_training_rows missing — cannot confirm scanner would-block evidence")
 
     sql = """
 WITH raw_routes AS (
@@ -246,21 +252,26 @@ LIMIT 6
     low_sample = _as_int(row[5]) if row else 0
 
     base = (
-        f"24h scanner gates: events={gate_events}, cells={gate_cells}, "
+        f"24h scanner legacy would-block evidence: events={gate_events}, cells={gate_cells}, "
         f"scoreable_cells={scoreable} (min_labels={MARKET_GATE_CONFIRM_MIN_LABELS}), "
         f"confirmed_negative={confirmed}, contradicted={contradicted}, low_sample={low_sample}"
     )
     if gate_cells == 0:
-        return ("PASS", base + " — no market/edge gates fired yet")
+        return ("PASS", base + " — no legacy market/edge would-block evidence emitted yet")
     if contradicted_rows:
         parts = [
             f"{r[0]}/{r[1]} n={_as_int(r[2])} avg={_as_float(r[3]):.2f}bps reason={str(r[4])[:80]}"
             for r in contradicted_rows
         ]
-        return ("FAIL", base + " — gated cells later non-negative: " + "; ".join(parts))
+        return (
+            "WARN",
+            base
+            + " — legacy would-block evidence later non-negative; scanner remains evidence-only: "
+            + "; ".join(parts),
+        )
     if scoreable == 0:
-        return ("WARN", base + " — gates fired but no subsequent labels yet")
-    return ("PASS", base + " — gated cells with labels were negative post-fee")
+        return ("WARN", base + " — would-block evidence emitted but no subsequent labels yet")
+    return ("PASS", base + " — legacy would-block evidence with labels was negative post-fee")
 
 
 def _pct(numer: int, denom: int) -> str:

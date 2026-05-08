@@ -79,6 +79,11 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   `chains_with_lease=33`, proving router-gate bypass lineage is written into
   Agent Spine shadow ExecutionPlan rows. MAG-082 readiness remains
   `LINEAGE_READY_NOT_WINDOW_PASS`; the 24h window is not complete.
+- `P1-DATA-4` is source-closed: passive healthcheck `[41]` now treats scanner
+  market would-block contradictions as WARN-only calibration evidence, not hard
+  FAIL. This matches the 2026-05-08 scanner boundary: scanner is always-on
+  infrastructure and cannot hard-gate opens, closes, live auth, or order
+  dispatch.
 - **2026-05-08 12-Agent Full Audit + PA Fix Plan land**：12 audit (FA / AI-E /
   E5 / E4 / E3 / CC / QC / MIT / BB / TW / R4 / A3) reports written to
   `srv/docs/CCAgentWorkSpace/<AGENT>/workspace/reports/2026-05-08--*.md`. PA
@@ -148,6 +153,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-DATA-1` | 3 | Runtime-reloaded WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | `[14]` distinguishes risk/cost gate suppression from writer-health evidence; `[37]` ignores recovered historical failures; `[40]` catches combined demo/live_demo negative cells and `LABUSDT` grid block source is now runtime-reloaded as of 2026-05-08; `[45]` accepts recent AccountManager fee-use proof during rejected-only demo/live_demo no-fill windows. Monitor row rolloff after reload. |
 | `P1-DATA-2` | 3 | Source-fixed `[42b]` / `[42c]` low-sample attribution watch | Settled attribution ratio failures stay fail-closed, but low-sample strategies now render as `LOW_SAMPLE(n, need)` sample-maturity watch instead of misleading `0.000` ratio drift; low-sample strategies still defer promotion until mature. |
 | `P1-DATA-3` | 3 | Source-fixed `[51]` scanner opportunity calibration watch | `[51]` now requires mature `opportunity_positive` samples before PASS, reports `MATURE/LOW_SAMPLE(n, need)`, and keeps scanner opportunity shadow-only when only exploration positive LCB samples exist or calibrated samples are immature. |
+| `P1-DATA-4` | 3 | DONE — source-fixed `[41]` scanner would-block evidence semantics | `[41] scanner_market_gate_confirmation` no longer hard-fails when legacy scanner would-block evidence later realizes non-negative; it returns WARN calibration evidence because scanner is always-on infrastructure, not trading authority. |
 | `P1-EDGE-1` | 3 | Source-fixed ma_crossover LABUSDT block + bb_breakout diagnosis | Runtime diagnosis: 7d ma_crossover combined demo/live_demo is negative mainly from `LABUSDT` (`n=6 avg=-244.54bps`), so `LABUSDT` is source-blocked for ma_crossover new entries in risk configs while close/reduce remains allowed; bb_breakout stays demo-only/live-disabled with low negative sample (`7d n=10 avg=-5.06bps`) pending more evidence. |
 | `P1-EDGE-2` | 3 | funding_arb 14d audit | Run the 2026-05-16 audit before retention or deprecation decisions. |
 | `P1-REPLAY-1` | 4 | Recorder-history maturity | Build longer local BBO/orderbook/latency history for S1/S1+ calibration; never fabricate old microstructure. |
