@@ -100,6 +100,8 @@ cost_floor_multiplier = 2.0
 # GRID-LIFECYCLE-DRIFT RFC (2026-04-29): mirror demo's robust-negative cells
 # (n>=30, shrunk_bps<0) into live_demo. This blocks NEW grid entries only;
 # existing positions can still close/reduce normally.
+# P1-DATA-1 2026-05-08: LABUSDT added from [40] combined demo/live_demo negative
+# cell (grid_trading/LABUSDT n=17 avg=-78.76bps).
 # GRID-LIFECYCLE-DRIFT RFC：同步 demo robust-negative cells 到 live_demo；
 # 僅阻擋新 grid 入場，既有倉位仍可平倉 / 減倉。
 blocked_symbols = [
@@ -118,6 +120,7 @@ blocked_symbols = [
   "TAOUSDT",
   "1000PEPEUSDT",
   "ADAUSDT",
+  "LABUSDT",
 ]
 
 # OC-5: FundingArb — disabled across paper/demo/live until funding-capture

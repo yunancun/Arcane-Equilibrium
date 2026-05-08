@@ -80,6 +80,8 @@ maker_limit_timeout_ms = 45000
 reject_cooldown_ms = 120000
 min_grid_step_bps = 22.0
 cost_floor_multiplier = 2.0
+# P1-DATA-1 2026-05-08: LABUSDT added from [40] combined demo/live_demo negative
+# cell (grid_trading/LABUSDT n=17 avg=-78.76bps). Keep paper/demo/live aligned.
 blocked_symbols = [
   "BSBUSDT",
   "PRLUSDT",
@@ -96,6 +98,7 @@ blocked_symbols = [
   "TAOUSDT",
   "1000PEPEUSDT",
   "ADAUSDT",
+  "LABUSDT",
 ]
 
 # OC-5: FundingArb — funding rate capture strategy.
