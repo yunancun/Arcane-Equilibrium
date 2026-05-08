@@ -11,6 +11,7 @@ use crate::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use crate::config::ConfigManager;
 use crate::instrument_info::InstrumentInfoCache;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
+use openclaw_core::governance_core::LeaseTransitionSender;
 use openclaw_types::PriceEvent;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -235,6 +236,12 @@ pub struct EventConsumerDeps {
     /// W-B：Agent Decision Spine runtime shadow writer；僅 runtime mode 啟用。
     pub agent_spine_tx: Option<tokio::sync::mpsc::Sender<crate::agent_spine::store::AgentSpineMsg>>,
     pub agent_spine_mode: crate::agent_spine::config::AgentSpineMode,
+    /// W-AUDIT-2: GovernanceCore lease-transition audit writer. All active
+    /// pipelines clone the same sender so acquire/release rows reach
+    /// `learning.lease_transitions` without becoming a trading gate.
+    /// W-AUDIT-2：GovernanceCore 租約轉換審計 writer；所有 active pipeline
+    /// clone 同一 sender，僅落審計 row，不成為交易 gate。
+    pub lease_transition_tx: Option<LeaseTransitionSender>,
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,

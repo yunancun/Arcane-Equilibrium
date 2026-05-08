@@ -113,7 +113,8 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=%h/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1
-ExecStart=%h/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Environment=OPENCLAW_BIND_HOST=127.0.0.1
+ExecStart=%h/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/uvicorn app.main:app --host ${OPENCLAW_BIND_HOST} --port 8000
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
@@ -361,8 +362,10 @@ brew install redis
 | Redis | 6379 | TCP | 缓存（可选） |
 | Grafana | 3000 | HTTP | 监控面板（可选） |
 
-> **安全提醒 / Security Note**: Trading API 绑定 `0.0.0.0:8000`，生产环境应配合
-> Tailscale 或防火墙限制访问。Gateway 绑定 loopback，不对外暴露。
+> **安全提醒 / Security Note**: Trading API 默认绑定 `127.0.0.1:8000`。
+> 远程访问请优先通过 Tailscale Serve / 反向代理转发；如需直接监听 Tailscale
+> 接口，显式设置 `OPENCLAW_BIND_HOST=<tailscale-100.x-ip>`，不要默认暴露
+> `0.0.0.0`。Gateway 绑定 loopback，不对外暴露。
 
 ---
 
@@ -406,7 +409,7 @@ macOS 上可用 launchd plist 替代 cron（参见 `com.openclaw.daily-report.pl
 
 # 手动启动排查 / Manual start for debugging
 cd program_code/exchange_connectors/bybit_connector/control_api_v1
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level debug
+.venv/bin/uvicorn app.main:app --host "${OPENCLAW_BIND_HOST:-127.0.0.1}" --port 8000 --log-level debug
 ```
 
 ### API Token 问题 / Token Issues

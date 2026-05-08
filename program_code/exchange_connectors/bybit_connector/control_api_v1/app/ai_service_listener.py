@@ -161,6 +161,14 @@ class AIServiceListener:
                 )
                 return
             raise
+        try:
+            os.chmod(self._socket_path, 0o600)
+        except OSError:
+            if self._server is not None:
+                self._server.close()
+                await self._server.wait_closed()
+                self._server = None
+            raise
         self._running = True
         logger.info("AIServiceListener started: %s", self._socket_path)
 

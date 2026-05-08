@@ -31,11 +31,22 @@ if _control_api_dir not in sys.path:
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app.auth import AuthenticatedActor  # noqa: E402
+from app.main_legacy import current_actor  # noqa: E402
 from app.phase4_routes import phase4_router  # noqa: E402
 
 
 _VALID_LIGHTS = {"grey", "green", "yellow", "red"}
 _MODULES = ("teacher", "linucb", "news", "dl3")
+
+
+def _learning_manager_actor() -> AuthenticatedActor:
+    return AuthenticatedActor(
+        actor_id="test_op",
+        actor_type="human",
+        roles={"operator", "viewer"},
+        scopes={"learning:manage", "private_readonly"},
+    )
 
 
 @pytest.fixture
@@ -46,6 +57,7 @@ def client() -> TestClient:
     """
     app = FastAPI()
     app.include_router(phase4_router)
+    app.dependency_overrides[current_actor] = _learning_manager_actor
     return TestClient(app)
 
 

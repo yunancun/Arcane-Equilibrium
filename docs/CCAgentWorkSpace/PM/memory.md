@@ -1954,3 +1954,27 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Documentation/config-only change; no rebuild, restart, DB write, runtime
   auth mutation, strategy/risk config change, or external issue mutation was
   performed.
+
+## 2026-05-09 W-AUDIT-2 Security IMPL Source Close
+
+- W-AUDIT-2 / `P1-AUDIT-SEC-2` is source-closed.
+- Closed F-24/F-25/F-mid-A route auth gaps: Phase4 weekly review approve/reject
+  requires `learning:manage` operator scope and writes `audit_actor_id(actor)`;
+  Scout market-signal/event-alert requires `learning:write`; Layer2 trigger
+  requires `ai_budget:write`.
+- Closed F-23 deploy exposure: `restart_all.sh`, `clean_restart.sh`, and
+  `fresh_start.sh` now default API bind host to
+  `${OPENCLAW_BIND_HOST:-127.0.0.1}`; deploy README documents loopback default,
+  Tailscale Serve / reverse proxy, and explicit Tailscale-IP binding.
+- Closed AI service socket gap: Unix socket is chmod `0600` after bind and
+  startup fails closed if chmod fails.
+- Closed F-03 source dependency for W-AUDIT-3 F-15: Rust boot starts
+  `spawn_lease_transition_pipeline` and injects the shared sender into
+  Paper/Demo/Live `GovernanceCore::set_lease_transition_tx`.
+- Verification: py_compile PASS, Batch E static pytest 14/0, Phase4 pytest
+  29/0, Scout pytest 46/0, Layer2 route class pytest 12/0, targeted Layer2
+  trigger PASS, `cargo check -p openclaw_engine --bin openclaw-engine` PASS
+  with pre-existing unused warnings, lease transition writer tests 6/0, and
+  `git diff --check` PASS.
+- Boundary: no rebuild/restart/runtime env flip/live auth/scanner authority/
+  Executor authority/strategy-risk config/MAG-083/084 unlock/true-live action.

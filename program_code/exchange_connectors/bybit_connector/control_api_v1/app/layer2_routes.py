@@ -184,6 +184,7 @@ async def trigger_l2_session(
     The session runs in the background. Use GET /sessions/{id} to check progress.
     Session 在后台运行。使用 GET /sessions/{id} 查看进度。
     """
+    base.require_scope_and_operator(actor, "ai_budget:write")
     engine = _get_engine()
     tracker = _get_cost_tracker()
 

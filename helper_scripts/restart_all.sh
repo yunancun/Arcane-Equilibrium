@@ -53,6 +53,7 @@ PG_PORT="${OPENCLAW_PG_PORT:-5432}"
 # API venv 路徑。相對路徑以 control_api_v1 為基準（script 會 cd 進去再跑 uvicorn）。
 # 絕對路徑讓 Mac dev 指向共用 venv（例：srv/venvs/mac_dev）。
 API_VENV="${OPENCLAW_API_VENV:-.venv}"
+API_BIND_HOST="${OPENCLAW_BIND_HOST:-127.0.0.1}"
 RUNTIME_SECRET_DIR="$DATA_DIR/runtime_secrets"
 OPENCLAW_DATABASE_URL_FILE="$RUNTIME_SECRET_DIR/openclaw_database_url"
 OPENCLAW_IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
@@ -379,7 +380,7 @@ restart_engine() {
 restart_api() {
     echo ">>> Stopping API server..."
     stop_api_safe
-    echo ">>> Starting API server ($WORKERS workers)..."
+    echo ">>> Starting API server ($WORKERS workers, bind $API_BIND_HOST:8000)..."
     cd "$API_WORKDIR"
     # RESTART-ALL-UVICORN-LOG-1 (2026-04-23): redirect uvicorn stdout/stderr to
     # $DATA_DIR/api.log with nohup, mirroring engine startup pattern (L200).
@@ -486,7 +487,7 @@ restart_api() {
         OPENCLAW_REPLAY_FIXTURE_DEFAULT="$replay_fixture_default" \
         OPENCLAW_REPLAY_SIGNING_KEY_FILE="$replay_signing_key_file" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
-        --host 0.0.0.0 --port 8000 --workers "$WORKERS" \
+        --host "$API_BIND_HOST" --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &
     echo "    PID: $!"
     cd - > /dev/null

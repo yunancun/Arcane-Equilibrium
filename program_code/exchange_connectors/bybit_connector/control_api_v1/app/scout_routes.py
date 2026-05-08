@@ -341,6 +341,7 @@ def post_market_signal(
     Returns the created IntelObject on success.
     成功时返回创建的 IntelObject。
     """
+    base.require_scope_and_operator(actor, "learning:write")
     _check_agent_ready()
 
     try:
@@ -447,6 +448,7 @@ def post_event_alert(
     Returns the created EventAlert on success.
     成功时返回创建的 EventAlert。
     """
+    base.require_scope_and_operator(actor, "learning:write")
     _check_agent_ready()
 
     try:

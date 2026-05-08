@@ -137,6 +137,7 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         shadow_exit_tx,
         agent_spine_tx,
         agent_spine_mode,
+        lease_transition_tx,
         exchange_event_rx,
         seed_positions,
         account_manager,
@@ -183,6 +184,9 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     // Live+demo endpoint 的資料列標 `live_demo` 而非誤導性的 `live`。Paper 傳 None。
     if let Some(env) = endpoint_env {
         pipeline.set_endpoint_env(env);
+    }
+    if let Some(tx) = lease_transition_tx {
+        pipeline.governance.set_lease_transition_tx(tx);
     }
 
     // EDGE-P3-1 Phase B #1: Inject per-engine EdgePredictorStore. None preserves

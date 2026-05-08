@@ -53,6 +53,7 @@ done
 
 TS="$(date +%Y%m%d_%H%M%S)"
 DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+API_BIND_HOST="${OPENCLAW_BIND_HOST:-127.0.0.1}"
 # Secrets root + archive dir (env vars for Mac / non-HOME deployment).
 # Mac dev recommendation: export OPENCLAW_SECRETS_ROOT / OPENCLAW_ARCHIVE_DIR.
 # Secrets 根 + 歸檔目錄（支援 Mac / 非 $HOME 路徑部署）。
@@ -382,12 +383,12 @@ OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
 ENGINE_PID=$!
 echo "    engine PID: $ENGINE_PID"
 
-echo "  starting API (4 workers)..."
+echo "  starting API (4 workers, bind $API_BIND_HOST:8000)..."
 cd program_code/exchange_connectors/bybit_connector/control_api_v1
 OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
 OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
     nohup .venv/bin/python3 .venv/bin/uvicorn app.main:app \
-    --host 0.0.0.0 --port 8000 --workers 4 \
+    --host "$API_BIND_HOST" --port 8000 --workers 4 \
     > "$DATA_DIR/api.log" 2>&1 &
 API_PID=$!
 echo "    API PID: $API_PID"
