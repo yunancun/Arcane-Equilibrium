@@ -65,6 +65,7 @@ from .layer2_types import (
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_tools import TOOL_SCHEMAS, ToolExecutor
 from .local_llm_factory import get_local_llm_client
+from . import provider_client as _pc
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,107 @@ class Layer2Engine:
     def get_current_session(self) -> Layer2Session | None:
         return self._current_session
 
+    # ── Provider 路由（含 tier 2/3 預算降級）───────────────────────
+
+    def _daily_spend_pct(self) -> float:
+        """回今日累計花費佔 daily_hard_cap 的比例（0.0–∞）。"""
+        try:
+            summary = self._cost_tracker.get_cost_summary()
+            spent = float(summary.get("today", {}).get("total_usd", 0.0))
+            cap = float(summary.get("budget", {}).get("daily_hard_cap_usd", 0.0))
+            return (spent / cap) if cap > 0 else 0.0
+        except Exception as exc:
+            logger.warning("daily spend pct read failed: %s", exc)
+            return 0.0
+
+    def _resolve_effective_provider(
+        self,
+        *,
+        base_provider: str,
+        base_tier: str,
+        role: str,
+    ) -> tuple[str, str]:
+        """
+        根據 daily_spend % 與 fallback_tier2/3 config 決定 effective (provider, tier_key)。
+
+        role:
+          - "agent"  → 直接用 base_tier；fallback 觸發時用 fallback tier
+          - "triage" → 不論 base_tier 是什麼，都用 effective_provider 的 cheapest tier
+                       （L1 triage 與 model-upgrade triage 都應走最便宜路徑）
+        """
+        config = self._cost_tracker.get_config()
+        pct = self._daily_spend_pct()
+
+        # 從高到低檢查 threshold
+        if pct >= float(config.fallback_tier3_threshold_pct):
+            eff_provider = config.fallback_tier3_provider or base_provider
+            eff_tier = config.fallback_tier3_model or base_tier
+        elif pct >= float(config.fallback_tier2_threshold_pct):
+            eff_provider = config.fallback_tier2_provider or base_provider
+            eff_tier = config.fallback_tier2_model or base_tier
+        else:
+            eff_provider = base_provider
+            eff_tier = base_tier
+
+        # provider 不在 L2 白名單（如 perplexity/google/local_llm）→ 退到 anthropic
+        if eff_provider not in _pc.L2_PROVIDERS:
+            logger.info(
+                "fallback provider %s not in L2 whitelist; routing to anthropic",
+                eff_provider,
+            )
+            eff_provider = _pc.PROVIDER_ANTHROPIC
+            if eff_tier not in _pc.PROVIDER_TIERS[_pc.PROVIDER_ANTHROPIC]:
+                eff_tier = _pc.TIER_HAIKU if role == "triage" else _pc.TIER_SONNET
+
+        # tier 與 provider 不匹配 → 跨 provider 映射
+        if eff_tier not in _pc.PROVIDER_TIERS.get(eff_provider, []):
+            eff_tier = _pc.map_tier_to_provider(eff_tier, eff_provider)
+
+        # triage 角色：強制降到該 provider 的 cheapest tier
+        if role == "triage":
+            tiers = _pc.PROVIDER_TIERS.get(eff_provider, [])
+            if tiers:
+                eff_tier = min(tiers, key=lambda t: _pc.TIER_RANK.get(t, 99))
+
+        return eff_provider, eff_tier
+
+    async def _provider_complete(
+        self,
+        *,
+        provider_name: str,
+        tier: str,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+        timeout: float,
+    ) -> _pc.L2Response | None:
+        """asyncio-friendly 包裝 + 全鏈路 fail-soft。回 None 由呼叫端決定 fallback。"""
+        try:
+            provider = _pc.get_provider(provider_name)
+        except ValueError:
+            logger.warning("unknown L2 provider: %s", provider_name)
+            return None
+        if not provider.is_available():
+            logger.warning("L2 provider %s 不可用（SDK 缺 / key 缺）", provider_name)
+            return None
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    provider.complete,
+                    tier=tier,
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    tools=tools,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error("L2 provider %s 呼叫超時 %ss (tier=%s)", provider_name, timeout, tier)
+            return None
+
     # ── L1 Triage / L1 快速分诊 ──
 
     async def l1_triage(self, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -209,49 +311,50 @@ class Layer2Engine:
             triage_context += "No specific context provided. Check if general conditions warrant investigation."
 
         try:
-            client = _get_anthropic_client()
-            if client is None:
-                # Fallback to local Ollama/Qwen for L1 triage
-                # 回退到本地 Ollama/Qwen 进行 L1 分诊
+            # 走 provider abstraction：default_provider + tier 2/3 fallback；triage 強制 cheapest tier
+            base_provider = config.default_provider or _pc.PROVIDER_ANTHROPIC
+            eff_provider, eff_tier = self._resolve_effective_provider(
+                base_provider=base_provider,
+                base_tier=MODEL_HAIKU,
+                role="triage",
+            )
+            response = await self._provider_complete(
+                provider_name=eff_provider,
+                tier=eff_tier,
+                system_prompt=L1_TRIAGE_PROMPT,
+                messages=[{"role": "user", "content": triage_context}],
+                tools=None,
+                max_tokens=256,
+                timeout=60.0,
+            )
+            if response is None:
+                # Provider 不可用 → 本地 LLM 兜底（Ollama / LM Studio）
                 return await self._l1_triage_local(triage_context)
 
-            # Add timeout to prevent hanging / 添加超时防止挂起
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.messages.create,
-                    model=MODEL_IDS[MODEL_HAIKU],
-                    max_tokens=256,
-                    system=L1_TRIAGE_PROMPT,
-                    messages=[{"role": "user", "content": triage_context}],
-                ),
-                timeout=60.0,  # 1 minute for triage
-            )
-
-            # Track cost
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-            cost = self._cost_tracker.get_pricing().models[MODEL_HAIKU].cost_for_tokens(input_tokens, output_tokens)
-
-            # Parse response
-            text = response.content[0].text if response.content else "{}"
+            input_tokens = response.input_tokens
+            output_tokens = response.output_tokens
             try:
-                result = json.loads(text)
+                cost = self._cost_tracker.get_pricing().models[eff_tier].cost_for_tokens(input_tokens, output_tokens)
+            except KeyError:
+                logger.warning("triage tier %s 不在 pricing table，cost=0", eff_tier)
+                cost = 0.0
+
+            try:
+                result = json.loads(response.text or "{}")
             except json.JSONDecodeError:
                 result = {"worth_investigating": False, "reason": "Failed to parse triage response"}
 
-            # Track triage cost in daily budget / 将分诊成本计入每日预算
             if cost > 0:
                 triage_session = Layer2Session(trigger="triage")
-                self._cost_tracker.record_claude_cost(triage_session, input_tokens, output_tokens, MODEL_HAIKU)
+                self._cost_tracker.record_claude_cost(triage_session, input_tokens, output_tokens, eff_tier)
 
             result["triage_cost_usd"] = cost
             result["input_tokens"] = input_tokens
             result["output_tokens"] = output_tokens
+            result["provider"] = eff_provider
+            result["tier"] = eff_tier
             return result
 
-        except asyncio.TimeoutError:
-            logger.error("L1 triage timed out after 60s / L1 分诊超时")
-            return {"worth_investigating": False, "reason": "Triage timed out after 60s", "error": True}
         except Exception as e:
             logger.error("L1 triage error: %s", e)
             return {"worth_investigating": False, "reason": f"Triage error: {str(e)[:100]}", "error": True}
@@ -400,20 +503,13 @@ class Layer2Engine:
         )
 
         try:
-            client = _get_anthropic_client()
-            if client is None:
-                session.state = SESSION_STATE_FAILED
-                session.final_summary = "Anthropic client not available (ANTHROPIC_API_KEY not set)"
-                return session
-
-            # Build initial user message
+            base_provider = config.default_provider or _pc.PROVIDER_ANTHROPIC
             user_message = self._build_user_message(symbol=symbol, context=context)
-
             messages: list[dict[str, Any]] = [
                 {"role": "user", "content": user_message},
             ]
 
-            # Agent loop
+            # Agent loop（每輪重新解析 effective provider/tier，允許 budget 觸發降級）
             for iteration in range(config.max_iterations):
                 session.iterations = iteration + 1
 
@@ -428,77 +524,71 @@ class Layer2Engine:
                     session.final_summary = "Daily hard cap reached during session"
                     break
 
-                # Call Claude (with timeout to prevent hanging)
-                # 调用 Claude（带超时防止挂起）
-                model_id = MODEL_IDS.get(session.current_model, MODEL_IDS[MODEL_SONNET])
-                try:
-                    response = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            client.messages.create,
-                            model=model_id,
-                            max_tokens=4096,
-                            system=SYSTEM_PROMPT,
-                            tools=TOOL_SCHEMAS,
-                            messages=messages,
-                        ),
-                        timeout=120.0,  # 2 minute timeout per iteration
-                    )
-                except asyncio.TimeoutError:
-                    logger.error("L2 Claude call timed out after 120s (iteration %d) / L2 Claude 调用超时", iteration)
+                # 解析本輪 effective (provider, tier_key)；budget% 越線會自動降級
+                eff_provider, eff_tier = self._resolve_effective_provider(
+                    base_provider=base_provider,
+                    base_tier=session.current_model,
+                    role="agent",
+                )
+
+                # tools 在不支援的 tier 上會被 adapter 自動 None-out（DeepSeek-reasoner）
+                response = await self._provider_complete(
+                    provider_name=eff_provider,
+                    tier=eff_tier,
+                    system_prompt=SYSTEM_PROMPT,
+                    messages=messages,
+                    tools=TOOL_SCHEMAS,
+                    max_tokens=4096,
+                    timeout=120.0,
+                )
+                if response is None:
                     session.state = SESSION_STATE_FAILED
-                    session.final_summary = f"Claude API call timed out after 120s at iteration {iteration}"
+                    session.final_summary = (
+                        f"L2 provider {eff_provider} 不可用或超時（iter {iteration}）"
+                    )
                     break
 
-                # Track tokens & cost
-                input_tokens = response.usage.input_tokens
-                output_tokens = response.usage.output_tokens
-                self._cost_tracker.record_claude_cost(session, input_tokens, output_tokens, session.current_model)
+                # 記帳：用實際 effective tier_key（DeepSeek 走 deepseek-chat 條目）
+                self._cost_tracker.record_claude_cost(
+                    session, response.input_tokens, response.output_tokens, eff_tier,
+                )
+                # 記下這輪用了誰（debug / GUI 顯示）
+                if not hasattr(session, "provider_chain"):
+                    setattr(session, "provider_chain", [])
+                session.provider_chain.append({  # type: ignore[attr-defined]
+                    "iter": iteration, "provider": eff_provider, "tier": eff_tier,
+                    "in_tok": response.input_tokens, "out_tok": response.output_tokens,
+                })
 
-                # Process response
-                assistant_content = response.content
-                stop_reason = response.stop_reason
+                # 把 assistant 回應接回 messages（provider 自己決定 raw vs 合成 blocks）
+                provider = _pc.get_provider(eff_provider)
+                provider.append_assistant_message(messages, response)
 
-                # Build assistant message
-                messages.append({"role": "assistant", "content": assistant_content})
-
-                if stop_reason == "end_turn":
-                    # Agent finished — extract final text
-                    for block in assistant_content:
-                        if hasattr(block, "text"):
-                            session.final_summary = block.text[:2000]
+                if response.stop_reason == "end_turn":
+                    if response.text:
+                        session.final_summary = response.text[:2000]
                     session.state = SESSION_STATE_COMPLETED
                     break
-
-                if stop_reason != "tool_use":
+                if response.stop_reason != "tool_use":
                     session.state = SESSION_STATE_COMPLETED
-                    session.final_summary = "Agent stopped without tool use"
+                    session.final_summary = f"Agent stopped: {response.stop_reason}"
                     break
 
-                # Process tool calls
+                # 處理 tool calls
                 tool_results: list[dict[str, Any]] = []
-                for block in assistant_content:
-                    if block.type != "tool_use":
-                        continue
-
-                    tool_name = block.name
-                    tool_input = block.input
-                    tool_id = block.id
-
+                for tu in response.tool_uses:
                     call_start = time.time()
-                    result_str = await executor.execute(tool_name, tool_input)
+                    result_str = await executor.execute(tu.name, tu.input)
                     call_latency = (time.time() - call_start) * 1000
 
-                    # Record tool call
-                    tc = ToolCallRecord(
-                        tool_name=tool_name,
-                        input_args=tool_input,
+                    session.tool_calls.append(ToolCallRecord(
+                        tool_name=tu.name,
+                        input_args=tu.input,
                         output=result_str[:500] if len(result_str) > 500 else result_str,
                         latency_ms=round(call_latency, 1),
-                    )
-                    session.tool_calls.append(tc)
+                    ))
 
-                    # Track search costs
-                    if tool_name == TOOL_WEB_SEARCH:
+                    if tu.name == TOOL_WEB_SEARCH:
                         try:
                             search_result = json.loads(result_str)
                             search_cost = search_result.get("cost_usd", 0.0)
@@ -509,16 +599,15 @@ class Layer2Engine:
                         except json.JSONDecodeError:
                             pass
 
-                        # Model upgrade triage after search
+                        # Model upgrade triage after search（沿用 Anthropic 升級語意；
+                        # 跨 provider 時 _resolve_effective_provider 會 map 到對應 tier）
                         if config.allow_opus_upgrade and not session.model_upgraded:
                             should_upgrade = await self._model_upgrade_triage(
-                                session, result_str, client,
+                                session, result_str,
                             )
                             if should_upgrade:
                                 session.current_model = MODEL_OPUS
                                 session.model_upgraded = True
-                                # Re-check daily budget at upgrade time (stale `remaining` from session start)
-                                # 升级时重新检查每日预算（session 开始时的 remaining 可能已过时）
                                 _, fresh_remaining = self._cost_tracker.check_daily_budget()
                                 session.session_budget_usd = min(
                                     self._cost_tracker.get_effective_session_budget(MODEL_OPUS),
@@ -526,12 +615,13 @@ class Layer2Engine:
                                 )
 
                     tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "content": result_str,
+                        "tool_use_id": tu.id,
+                        "output_str": result_str,
+                        "is_error": False,
                     })
 
-                messages.append({"role": "user", "content": tool_results})
+                # 由 adapter 把 tool_results 變成 provider 對應格式（Anthropic blocks / OpenAI tool msgs）
+                provider.append_tool_results(messages, tool_results)
 
             else:
                 # Max iterations reached
@@ -563,39 +653,45 @@ class Layer2Engine:
         self,
         session: Layer2Session,
         search_results_str: str,
-        client: Any,
     ) -> bool:
         """
-        Use Haiku to decide if Sonnet should be upgraded to Opus.
-        使用 Haiku 快速判断是否从 Sonnet 升级到 Opus。
+        用 cheapest tier 判斷是否值得從 sonnet → opus 升級。
+        走 provider abstraction（與 default_provider 同；triage role 強制最便宜 tier）。
         """
         try:
-            triage_input = f"Search results:\n{search_results_str[:3000]}"
-
-            # Add timeout to prevent hanging / 添加超时防止挂起
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.messages.create,
-                    model=MODEL_IDS[MODEL_HAIKU],
-                    max_tokens=256,
-                    system=MODEL_UPGRADE_TRIAGE_PROMPT,
-                    messages=[{"role": "user", "content": triage_input}],
-                ),
-                timeout=60.0,  # 1 minute for upgrade triage
+            config = self._cost_tracker.get_config()
+            base_provider = config.default_provider or _pc.PROVIDER_ANTHROPIC
+            eff_provider, eff_tier = self._resolve_effective_provider(
+                base_provider=base_provider,
+                base_tier=MODEL_HAIKU,
+                role="triage",
             )
+            triage_input = f"Search results:\n{search_results_str[:3000]}"
+            response = await self._provider_complete(
+                provider_name=eff_provider,
+                tier=eff_tier,
+                system_prompt=MODEL_UPGRADE_TRIAGE_PROMPT,
+                messages=[{"role": "user", "content": triage_input}],
+                tools=None,
+                max_tokens=256,
+                timeout=60.0,
+            )
+            if response is None:
+                return False
 
-            # Track cost
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-            self._cost_tracker.record_claude_cost(session, input_tokens, output_tokens, MODEL_HAIKU)
-
-            text = response.content[0].text if response.content else "{}"
             try:
-                result = json.loads(text)
+                self._cost_tracker.record_claude_cost(
+                    session, response.input_tokens, response.output_tokens, eff_tier,
+                )
+            except KeyError:
+                logger.warning("upgrade triage tier %s 不在 pricing table", eff_tier)
+
+            try:
+                result = json.loads(response.text or "{}")
                 upgrade = result.get("upgrade_to_opus", False)
                 if upgrade:
                     session.upgrade_reason = result.get("reason", "haiku_triage_recommended")
-                    logger.info("Model upgrade: Sonnet → Opus. Reason: %s", session.upgrade_reason)
+                    logger.info("Model upgrade: → Opus. Reason: %s", session.upgrade_reason)
                 return upgrade
             except json.JSONDecodeError:
                 return False

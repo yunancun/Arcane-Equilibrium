@@ -104,50 +104,47 @@
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
   <h3>&#x1F310; AI 供应商管理 / AI Provider Management</h3>
   <div id="explain-providers"></div>
+  <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
+    标记 <span class="oc-chip oc-chip-good" style="font-size:9px">已配置 · Active</span> 表示密钥已存且 L2 客户端就绪；
+    <span class="oc-chip oc-chip-warn" style="font-size:9px">已存储 · 客户端未接</span> 表示密钥已写入但 L2 路径暂无对应 client；
+    Perplexity 已移到下方 Scout 搜索专用区域。
+  </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px" id="provider-grid">
     <!-- Anthropic / Claude -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-neutral" id="prov-anthropic-badge">未检测 / Unknown</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-neutral" id="prov-anthropic-badge">检测中...</span></div>
       <div class="prov-models">模型：Claude Opus / Sonnet / Haiku</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-anthropic" type="password" placeholder="sk-ant-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('anthropic',this)">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('anthropic',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
     </div>
 
     <!-- OpenAI -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F4A1; OpenAI (GPT)</span><span class="oc-chip oc-chip-neutral" id="prov-openai-badge">未检测 / Unknown</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F4A1; OpenAI (GPT)</span><span class="oc-chip oc-chip-neutral" id="prov-openai-badge">检测中...</span></div>
       <div class="prov-models">模型：GPT-4o / GPT-4o-mini / o1 / o3</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-openai" type="password" placeholder="sk-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('openai',this)">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('openai',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
     </div>
 
     <!-- DeepSeek -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">未检测 / Unknown</span></div>
-      <div class="prov-models">模型：DeepSeek-V3 / DeepSeek-R1</div>
+      <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">检测中...</span></div>
+      <div class="prov-models">模型：DeepSeek-V4 / DeepSeek-R1</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-deepseek" type="password" placeholder="sk-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('deepseek',this)">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('deepseek',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：V3 $0.27/R1 $0.55 per 1M tokens（极低成本）</div>
-    </div>
-
-    <!-- Perplexity -->
-    <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">未检测 / Unknown</span></div>
-      <div class="prov-models">搜索增强型 AI，用于获取实时市场信息</div>
-      <div class="api-key-row">
-        <input class="oc-input" id="key-perplexity" type="password" placeholder="pplx-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('perplexity',this)">保存</button>
-      </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：$5/1000 requests（含实时搜索）</div>
     </div>
 
     <!-- Local LLM (Ollama) -->
@@ -164,13 +161,37 @@
 
     <!-- Google -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F3AF; Google (Gemini)</span><span class="oc-chip oc-chip-neutral" id="prov-google-badge">未检测 / Unknown</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F3AF; Google (Gemini)</span><span class="oc-chip oc-chip-neutral" id="prov-google-badge">检测中...</span></div>
       <div class="prov-models">模型：Gemini 2.5 Pro / Flash</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-google" type="password" placeholder="AI..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('google',this)">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('google',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Flash $0.075/Pro $1.25 per 1M tokens</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Scout 搜索专用 (Search-only providers) ═══ -->
+<div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
+  <h3>&#x1F50D; Scout 搜索专用 / Scout Search-Only Providers</h3>
+  <div style="font-size:11px;color:var(--text-dim);margin:6px 0">
+    此区域 provider 仅供 Scout 工具搜索实时市场信息使用，<strong>不参与 L2 推理</strong>，
+    不可设为「默认供应商」或 Tier 2/3 fallback。<br>
+    Used by Scout web-search tooling only — these never run L2 reasoning agent loop.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px">
+    <!-- Perplexity (search-only) -->
+    <div class="provider-card">
+      <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">检测中...</span></div>
+      <div class="prov-models">搜索增强型 AI — 实时市场信息（不接 L2 推理）</div>
+      <div class="api-key-row">
+        <input class="oc-input" id="key-perplexity" type="password" placeholder="pplx-..." />
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('perplexity',this)">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('perplexity',this)">清除</button>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：$5/1000 requests（含实时搜索）</div>
     </div>
   </div>
 </div>
@@ -187,30 +208,30 @@
         <select class="oc-select" id="ai-enabled" style="width:100px"><option value="true">启用</option><option value="false">禁用</option></select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">默认供应商 / Default Provider</div><div style="font-size:10px;color:var(--text-dim)">首选使用哪个 AI 供应商</div></div>
+        <div><div style="font-size:12px;font-weight:600">默认供应商 / Default Provider</div><div style="font-size:10px;color:var(--text-dim)">L2 推理首选；仅显示已实装客户端的 provider</div></div>
         <select class="oc-select" id="ai-provider" style="width:140px">
           <option value="anthropic">Anthropic (Claude)</option>
-          <option value="openai">OpenAI (GPT)</option>
           <option value="deepseek">DeepSeek</option>
-          <option value="google">Google (Gemini)</option>
-          <option value="perplexity">Perplexity</option>
-          <option value="local_llm">本地 LLM</option>
+          <option value="openai">OpenAI (GPT)</option>
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">默认模型 / Default Model</div><div style="font-size:10px;color:var(--text-dim)">首选使用哪个模型</div></div>
-        <select class="oc-select" id="ai-model" style="width:140px">
-          <option value="sonnet">Claude Sonnet</option>
-          <option value="haiku">Claude Haiku</option>
-          <option value="opus">Claude Opus</option>
-          <option value="gpt-4o-mini">GPT-4o-mini</option>
-          <option value="gpt-4o">GPT-4o</option>
-          <option value="deepseek-v3">DeepSeek-V3</option>
-          <option value="deepseek-r1">DeepSeek-R1</option>
-          <option value="gemini-flash">Gemini Flash</option>
-          <option value="gemini-pro">Gemini Pro</option>
-          <option value="qwen3.5:27b">Qwen 3.5 27B (本地)</option>
-          <option value="qwen3.5:9b">Qwen 3.5 9B (本地)</option>
+        <div><div style="font-size:12px;font-weight:600">默认模型 / Default Model</div><div style="font-size:10px;color:var(--text-dim)">tier_key — provider adapter 自动映射到具体 model_id</div></div>
+        <select class="oc-select" id="ai-model" style="width:160px">
+          <optgroup label="Anthropic">
+            <option value="haiku">haiku — Claude Haiku</option>
+            <option value="sonnet">sonnet — Claude Sonnet</option>
+            <option value="opus">opus — Claude Opus</option>
+          </optgroup>
+          <optgroup label="DeepSeek">
+            <option value="deepseek-chat">deepseek-chat — V4</option>
+            <option value="deepseek-reasoner">deepseek-reasoner — R1（无 tools）</option>
+          </optgroup>
+          <optgroup label="OpenAI">
+            <option value="gpt-4o-mini">gpt-4o-mini</option>
+            <option value="gpt-4o">gpt-4o</option>
+            <option value="o1">o1（reasoner）</option>
+          </optgroup>
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -241,6 +262,59 @@
         <div><div style="font-size:12px;font-weight:600">最大迭代次数 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">单次 AI 推理的最大思考轮数</div></div>
         <input class="oc-input" id="ai-max-iter" type="number" step="1" min="1" max="50" style="width:80px" />
       </div>
+
+      <!-- ── 预算降级 Tier 2 / Budget Fallback Tier 2 ── -->
+      <div style="border-top:1px dashed #21262d;margin-top:6px;padding-top:8px">
+        <div style="font-size:11px;font-weight:600;color:var(--yellow);margin-bottom:4px">&#x1F539; Tier 2 降级 — 中度成本压缩</div>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花费 ≥ 阈值 × 日硬上限时，切到此 provider+model 继续推理</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:11px">触发阈值 / Trigger %</div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-tier2-threshold" type="number" step="0.05" min="0" max="1" style="width:80px" /><span>×cap</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:11px">Tier 2 供应商 / Provider</div>
+        <select class="oc-select" id="ai-tier2-provider" style="width:140px">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="openai">OpenAI (GPT)</option>
+        </select>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:11px">Tier 2 模型 / Model</div>
+        <select class="oc-select" id="ai-tier2-model" style="width:160px">
+          <optgroup label="Anthropic"><option value="haiku">haiku</option><option value="sonnet">sonnet</option></optgroup>
+          <optgroup label="DeepSeek"><option value="deepseek-chat">deepseek-chat</option><option value="deepseek-reasoner">deepseek-reasoner</option></optgroup>
+          <optgroup label="OpenAI"><option value="gpt-4o-mini">gpt-4o-mini</option><option value="gpt-4o">gpt-4o</option></optgroup>
+        </select>
+      </div>
+
+      <!-- ── 预算降级 Tier 3 / Budget Fallback Tier 3 ── -->
+      <div style="border-top:1px dashed #21262d;margin-top:6px;padding-top:8px">
+        <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:4px">&#x1F538; Tier 3 降级 — 极限省钱</div>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花费 ≥ 阈值 × 日硬上限时，切到此 provider+model（仍受 hard_cap 拦截）</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:11px">触发阈值 / Trigger %</div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-tier3-threshold" type="number" step="0.05" min="0" max="1" style="width:80px" /><span>×cap</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:11px">Tier 3 供应商 / Provider</div>
+        <select class="oc-select" id="ai-tier3-provider" style="width:140px">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="openai">OpenAI (GPT)</option>
+        </select>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:11px">Tier 3 模型 / Model</div>
+        <select class="oc-select" id="ai-tier3-model" style="width:160px">
+          <optgroup label="Anthropic"><option value="haiku">haiku</option></optgroup>
+          <optgroup label="DeepSeek"><option value="deepseek-chat">deepseek-chat</option></optgroup>
+          <optgroup label="OpenAI"><option value="gpt-4o-mini">gpt-4o-mini</option></optgroup>
+        </select>
+      </div>
+
       <button class="oc-btn oc-btn-primary" onclick="saveAIConfig(this)" style="margin-top:4px">&#x1F4BE; 保存设置 / Save Settings</button>
     </div>
 
@@ -457,42 +531,140 @@ const KEY_FORMATS = {
   local_llm:  { prefix: 'http',     minLen: 8,  hint: '必须是 http:// 或 https:// URL' },
 };
 
+// 統一 provider → DOM id 映射；local_llm 的 input id 為 'key-local' 是歷史遺留。
+const PROVIDER_INPUT_ID = {
+  anthropic: 'key-anthropic', openai: 'key-openai', deepseek: 'key-deepseek',
+  perplexity: 'key-perplexity', google: 'key-google', local_llm: 'key-local',
+};
+const PROVIDER_BADGE_ID = {
+  anthropic: 'prov-anthropic-badge', openai: 'prov-openai-badge', deepseek: 'prov-deepseek-badge',
+  perplexity: 'prov-perplexity-badge', google: 'prov-google-badge', local_llm: 'prov-local-badge',
+};
+
+// 根據 (configured, client_implemented) 計算 badge 顯示。
+// 客戶端未實裝時即使存了 key 也只顯示「已存储」並黃色提示，避免假成功。
+function _renderProviderBadge(provider, info) {
+  if (provider === 'local_llm') return; // 由 checkOllamaStatus 管理，避免互蓋
+  const badge = $(PROVIDER_BADGE_ID[provider]);
+  if (!badge) return;
+  if (info.configured) {
+    if (info.client_implemented) {
+      badge.textContent = '已配置 / Active';
+      badge.className = 'oc-chip oc-chip-good';
+    } else {
+      badge.textContent = '已存储 · 客户端未接';
+      badge.className = 'oc-chip oc-chip-warn';
+    }
+  } else {
+    if (info.client_implemented) {
+      badge.textContent = '待密钥 / Awaiting key';
+      badge.className = 'oc-chip oc-chip-neutral';
+    } else {
+      badge.textContent = '客户端未接 / Not wired';
+      badge.className = 'oc-chip oc-chip-neutral';
+    }
+  }
+  // 已存儲時把 placeholder 改成 masked 提示，input 留空表示「不替換」。
+  const input = $(PROVIDER_INPUT_ID[provider]);
+  if (input) {
+    if (info.configured && info.masked) {
+      input.placeholder = '已存储：' + info.masked + '（输入新值替换）';
+    } else if (provider === 'anthropic') {
+      input.placeholder = 'sk-ant-...';
+    } else if (provider === 'perplexity') {
+      input.placeholder = 'pplx-...';
+    } else if (provider === 'google') {
+      input.placeholder = 'AI...';
+    } else {
+      input.placeholder = 'sk-...';
+    }
+  }
+}
+
+async function loadProviderStatus() {
+  const d = await ocApi('/api/v1/paper/layer2/providers/status');
+  if (!d || !d.data || !d.data.providers) return;
+  Object.entries(d.data.providers).forEach(([name, info]) => _renderProviderBadge(name, info));
+}
+
 async function saveProviderKey(provider, btn) {
-  const inputId = 'key-' + (provider === 'local_llm' ? 'local' : provider);
+  const inputId = PROVIDER_INPUT_ID[provider];
+  if (!inputId) { ocToast('未知供应商 / Unknown provider', 'error'); return; }
   const key = $(inputId).value.trim();
   if (!key) { ocToast('请输入 API Key / Please enter an API key', 'error'); return; }
 
-  // Validate format / 格式验证
+  // 前端格式校验（與後端 validate_key 規則一致；提早攔截）
   const fmt = KEY_FORMATS[provider];
   if (fmt) {
     if (fmt.prefix && !key.startsWith(fmt.prefix)) {
       ocToast('格式错误：' + fmt.hint, 'error'); return;
     }
     if (key.length < fmt.minLen) {
-      ocToast('Key 太短（至少 ' + fmt.minLen + ' 个字符）/ Key too short (min ' + fmt.minLen + ')', 'error'); return;
+      ocToast('Key 太短（至少 ' + fmt.minLen + ' 个字符）', 'error'); return;
     }
   }
 
-  // UX-06: loading state / 保存中状态
   let origText;
   if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '保存中...'; }
 
-  // Save via API (backend will write to secrets folder)
   try {
     const d = await ocPost('/api/v1/paper/layer2/config', {
       provider_keys: { [provider]: key },
     });
-    if (d) {
-      ocToast(provider + ' API Key 已保存', 'success');
+    if (!d) { ocToast('保存失败（后端无响应）/ Backend not responding', 'error'); return; }
+
+    // 後端回 envelope：data.provider_results / provider_errors / provider_status。
+    const errs = (d.data && d.data.provider_errors) || [];
+    const results = (d.data && d.data.provider_results) || [];
+    const myErr = errs.find(e => e.provider === provider);
+    const myResult = results.find(r => r.provider === provider);
+
+    if (myErr) {
+      ocToast(provider + ' 保存失败：' + (myErr.detail || myErr.reason_code), 'error');
+    } else if (myResult) {
       $(inputId).value = '';
-      const badgeId = provider === 'local_llm' ? 'prov-local-badge' : ('prov-' + provider + '-badge');
-      const badge = $(badgeId);
-      if (badge) {
-        badge.textContent = '已配置';
-        badge.className = 'oc-chip oc-chip-good';
+      if (myResult.client_implemented) {
+        const hot = myResult.hot_reloaded ? '（已热重载客户端）' : '';
+        ocToast(provider + ' API Key 已保存并就绪 ' + hot, 'success');
+      } else {
+        // 誠實提示：key 落地了但推理路徑還沒接，避免使用者以為立即生效。
+        ocToast(provider + ' Key 已存储；客户端尚未实装（仅存盘待用）', 'warn');
+      }
+      // 用後端最新 status 重繪所有 badge（單一信源，不再前端臆測）
+      if (d.data && d.data.provider_status && d.data.provider_status.providers) {
+        Object.entries(d.data.provider_status.providers).forEach(
+          ([name, info]) => _renderProviderBadge(name, info));
+      } else {
+        loadProviderStatus();
       }
     } else {
-      ocToast('保存到后端失败，请手动添加到 ~/BybitOpenClaw/secrets/providers/' + provider + '.env', 'error');
+      // envelope 沒帶結果（理論上不會），保守降級
+      ocToast(provider + ' 已提交，但后端未返回结果 — 请检查 / 重试', 'warn');
+      loadProviderStatus();
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
+}
+
+async function clearProviderKey(provider, btn) {
+  if (!PROVIDER_INPUT_ID[provider]) { ocToast('未知供应商', 'error'); return; }
+  if (!confirm('确认清除 ' + provider + ' API Key？\n（删除 secrets 文件 + 移除当前进程 env）')) return;
+  let origText;
+  if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '清除中...'; }
+  try {
+    const d = await ocApi('/api/v1/paper/layer2/providers/' + encodeURIComponent(provider), { method: 'DELETE' });
+    if (!d) { ocToast('清除失败（后端无响应）', 'error'); return; }
+    if (d.data && d.data.deleted) {
+      ocToast(provider + ' API Key 已清除', 'success');
+    } else {
+      ocToast(provider + ' 无密钥可清除（已是空状态）', 'neutral');
+    }
+    if (d.data && d.data.provider_status && d.data.provider_status.providers) {
+      Object.entries(d.data.provider_status.providers).forEach(
+        ([name, info]) => _renderProviderBadge(name, info));
+    } else {
+      loadProviderStatus();
     }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = origText; }
@@ -512,6 +684,13 @@ async function saveAIConfig(btn) {
     default_provider: $('ai-provider').value,
     auto_submit_to_paper: $('ai-auto-submit').value === 'true',
     max_iterations: parseInt($('ai-max-iter').value) || 15,
+    // Tier 2/3 budget fallback（後端 Layer2Config + layer2_engine._resolve_effective_provider）
+    fallback_tier2_threshold_pct: parseFloat($('ai-tier2-threshold').value) || 0.5,
+    fallback_tier2_provider: $('ai-tier2-provider').value,
+    fallback_tier2_model: $('ai-tier2-model').value,
+    fallback_tier3_threshold_pct: parseFloat($('ai-tier3-threshold').value) || 0.85,
+    fallback_tier3_provider: $('ai-tier3-provider').value,
+    fallback_tier3_model: $('ai-tier3-model').value,
   };
   // UX-06: loading state / 保存中状态
   let origText;
@@ -698,8 +877,13 @@ async function loadConfig() {
   if (!d || !d.data) { ocSetHtml('ai-config', '<div class="oc-loading">No config</div>'); return; }
   const cfg = d.data;
   let html = '<div class="oc-metrics" style="grid-template-columns:1fr">';
+  const t2 = (cfg.fallback_tier2_provider || '?') + ' / ' + (cfg.fallback_tier2_model || '?')
+    + ' @ ' + ((cfg.fallback_tier2_threshold_pct ?? 0.5) * 100).toFixed(0) + '%';
+  const t3 = (cfg.fallback_tier3_provider || '?') + ' / ' + (cfg.fallback_tier3_model || '?')
+    + ' @ ' + ((cfg.fallback_tier3_threshold_pct ?? 0.85) * 100).toFixed(0) + '%';
   const fields = [
-    ['默认模型', cfg.default_model || 'sonnet'],
+    ['默认供应商', cfg.default_provider || 'anthropic'],
+    ['默认模型(tier)', cfg.default_model || 'sonnet'],
     ['日硬上限', '$' + (cfg.daily_hard_cap_usd || 2)],
     ['弹性基准', '$' + (cfg.adaptive_base_daily_usd || 8)],
     ['弹性范围', (cfg.adaptive_min_multiplier || 0.3) + 'x - ' + (cfg.adaptive_max_multiplier || 2) + 'x'],
@@ -707,6 +891,8 @@ async function loadConfig() {
     ['最大迭代', cfg.max_iterations || 15],
     ['自动提交', cfg.auto_submit_to_paper ? '是' : '否'],
     ['搜索引擎', (cfg.search_providers_enabled || []).join(', ') || '--'],
+    ['Tier 2 降级', t2],
+    ['Tier 3 降级', t3],
   ];
   fields.forEach(([label, val]) => {
     html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(String(val)) + '</div></div>';
@@ -724,6 +910,14 @@ async function loadConfig() {
   $('ai-enabled').value = cfg.adaptive_enabled !== false ? 'true' : 'false';
   $('ai-auto-submit').value = cfg.auto_submit_to_paper ? 'true' : 'false';
   if (cfg.default_model) $('ai-model').value = cfg.default_model;
+  if (cfg.default_provider) $('ai-provider').value = cfg.default_provider;
+  // Tier 2/3 fallback 欄位回填
+  if (cfg.fallback_tier2_threshold_pct != null) $('ai-tier2-threshold').value = cfg.fallback_tier2_threshold_pct;
+  if (cfg.fallback_tier2_provider) $('ai-tier2-provider').value = cfg.fallback_tier2_provider;
+  if (cfg.fallback_tier2_model) $('ai-tier2-model').value = cfg.fallback_tier2_model;
+  if (cfg.fallback_tier3_threshold_pct != null) $('ai-tier3-threshold').value = cfg.fallback_tier3_threshold_pct;
+  if (cfg.fallback_tier3_provider) $('ai-tier3-provider').value = cfg.fallback_tier3_provider;
+  if (cfg.fallback_tier3_model) $('ai-tier3-model').value = cfg.fallback_tier3_model;
 }
 
 async function loadPricing() {
@@ -796,6 +990,7 @@ async function loadAll() {
     loadSessions(),
     loadConfig(),
     loadPricing(),
+    loadProviderStatus(),  // GUI Tab-AI 供应商 badge 真實狀態（取代靜態「未检测」）
   ]);
   checkOllamaStatus();
 }
