@@ -28,6 +28,7 @@ _CORE_OBJECT_TYPES = (
     "execution_plan",
 )
 _DISPLAY_OBJECT_TYPES = _CORE_OBJECT_TYPES + ("execution_report",)
+_RUNTIME_ENABLED_MODES = {"shadow", "canary", "primary"}
 
 
 def _enabled(name: str, default: str = "0") -> bool:
@@ -53,6 +54,16 @@ def _engine_modes() -> list[str]:
     raw = os.getenv("OPENCLAW_AGENT_SPINE_HEALTH_ENGINE_MODES", "demo,live_demo")
     modes = [part.strip() for part in raw.split(",") if part.strip()]
     return modes or ["demo", "live_demo"]
+
+
+def _runtime_mode() -> str:
+    return os.getenv("OPENCLAW_AGENT_SPINE_RUNTIME_MODE", "disabled").strip().lower()
+
+
+def _agent_spine_enabled() -> bool:
+    return _enabled("OPENCLAW_AGENT_SPINE_CLIENT_ENABLED") or (
+        _runtime_mode() in _RUNTIME_ENABLED_MODES
+    )
 
 
 def _mode_detail(modes: list[str]) -> str:
@@ -204,11 +215,13 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
     modes = _engine_modes()
     mode_detail = _mode_detail(modes)
 
-    if not _enabled("OPENCLAW_AGENT_SPINE_CLIENT_ENABLED"):
+    runtime_mode = _runtime_mode()
+    if not _agent_spine_enabled():
         return (
             _status(required),
             "agent decision spine disabled by env; "
-            f"MAG-082 readiness=DISABLED window={window_minutes}m modes={mode_detail}",
+            f"MAG-082 readiness=DISABLED window={window_minutes}m "
+            f"modes={mode_detail} runtime_mode={runtime_mode}",
         )
 
     try:

@@ -117,6 +117,8 @@ impl TickPipeline {
             shadow_fill_db_tx: None,
             exit_feature_tx: None,
             shadow_exit_tx: None,
+            agent_spine_tx: None,
+            agent_spine_mode: crate::agent_spine::config::AgentSpineMode::Disabled,
             symbol_registry: None,
             scanner_authority_mode: crate::scanner::types::ScannerAuthorityMode::LegacyGate,
             retriage_last_evict_ms: HashMap::new(),
@@ -413,6 +415,22 @@ impl TickPipeline {
         &self,
     ) -> Option<&tokio::sync::mpsc::Sender<crate::database::ShadowExitMsg>> {
         self.shadow_exit_tx.as_ref()
+    }
+
+    /// W-B: Wire Agent Decision Spine runtime shadow lineage. Fail-soft:
+    /// missing tx or Disabled mode leaves trading untouched and emits nothing.
+    /// W-B：接 Agent Decision Spine runtime shadow lineage；缺 tx 或 Disabled 時 no-op。
+    pub fn set_agent_spine_runtime(
+        &mut self,
+        tx: Option<tokio::sync::mpsc::Sender<crate::agent_spine::store::AgentSpineMsg>>,
+        mode: crate::agent_spine::config::AgentSpineMode,
+    ) {
+        debug_assert!(
+            self.agent_spine_tx.is_none(),
+            "agent_spine_tx injected twice — bootstrap should call this exactly once per pipeline"
+        );
+        self.agent_spine_tx = tx;
+        self.agent_spine_mode = mode;
     }
 
     /// EXIT-FEATURES-TABLE-1: Read-only accessor to the pre-existing

@@ -61,6 +61,12 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   enabled-but-empty, incomplete lineage, pending reports, and
   `MAG-082 readiness=*`. It is read-only and does not authorize runtime flag
   changes, rebuild, restart, or Stage 2.
+- `W-B` runtime decision-spine lineage is source-ready: Rust startup now wires
+  the durable Agent Spine writer behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE`,
+  and approved demo/live_demo open intents emit shadow-only typed
+  StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan ->
+  ExecutionReport objects plus edges and idempotency keys. Runtime row proof
+  still requires explicit operator approval for rebuild/restart/env flip.
 
 ## Dispatch Order
 
@@ -102,6 +108,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-OPENCLAW-3` | 2 | DONE — read-only brief/diagnostics/escalations APIs | Backend-authored view models from durable stores only; no raw frontend table stitching. |
 | `P1-OPENCLAW-6/7` | 2 | DONE — proposal/approval relay backend foundation | V065 `openclaw.*` ledger applied on Linux; proposal create + approve runtime smoke passed with `side_effect_executed=false`; `[54]` PASS. |
 | `P1-AGENT-OBS-1` | 2 | DONE — explicit lineage healthcheck | `[55] agent_decision_spine_lineage` distinguishes disabled / enabled-empty / incomplete / report-pending states and surfaces `MAG-082 readiness=*`; `OPENCLAW_AGENT_SPINE_HEALTH_REQUIRED=1` escalates WARN to FAIL. |
+| `P1-AGENT-RUNTIME-1` | 2 | SOURCE-READY — runtime decision-spine lineage | Source/test wiring complete behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE`; no runtime row proof until operator authorizes rebuild/restart/env flip. |
 | `P1-DATA-1` | 3 | WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | Exit-feature accumulation, MLDE applier failures, realized edge, and pricing freshness remain quality signals. |
 | `P1-DATA-2` | 3 | `[42b]` / `[42c]` low-sample attribution watch | Settled attribution improved; low-sample strategies still require maturity before promotion. |
 | `P1-DATA-3` | 3 | `[51]` scanner opportunity calibration | Scanner opportunity remains shadow/advisory until calibrated positive samples exist. |

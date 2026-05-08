@@ -1,8 +1,8 @@
 //! Agent Spine DB writer.
 //!
-//! MAG-032 provides the durable writer surface but does not wire it into
-//! runtime startup. That keeps the current legacy trading behavior unchanged
-//! until the later shadow integration task explicitly enables it.
+//! MAG-032 provided the durable writer surface. W-B wires it into runtime
+//! startup behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE` while keeping trading
+//! authority on the legacy path.
 
 use super::batch_insert::{batch_insert_chunked, BatchInsertOutcome};
 use super::pool::DbPool;

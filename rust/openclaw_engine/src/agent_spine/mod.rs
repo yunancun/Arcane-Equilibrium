@@ -6,6 +6,7 @@
 pub mod config;
 pub mod contracts;
 pub mod events;
+pub mod runtime_shadow;
 pub mod signal_adapter;
 pub mod store;
 

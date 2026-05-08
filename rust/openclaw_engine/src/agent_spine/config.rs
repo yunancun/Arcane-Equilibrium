@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+pub const RUNTIME_MODE_ENV: &str = "OPENCLAW_AGENT_SPINE_RUNTIME_MODE";
+
 /// Agent Decision Spine rollout mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -38,6 +40,13 @@ impl AgentSpineMode {
 
     pub fn store_error_blocks_new_exposure(self) -> bool {
         matches!(self, Self::Primary)
+    }
+
+    pub fn from_runtime_env() -> Self {
+        std::env::var(RUNTIME_MODE_ENV)
+            .ok()
+            .and_then(|raw| Self::from_str(raw.trim()).ok())
+            .unwrap_or(Self::Disabled)
     }
 }
 
