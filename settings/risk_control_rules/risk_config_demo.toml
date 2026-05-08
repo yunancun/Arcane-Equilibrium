@@ -55,10 +55,13 @@ per_trade_risk_pct = 0.1
 # ─────────────────────────────────────────────────────────────────────────────
 [per_strategy.ma_crossover]
 enabled = true
+# P1-EDGE-1 2026-05-08: LABUSDT added from ma_crossover combined demo/live_demo
+# negative cell (7d n=6 avg=-244.54bps); blocks new entries only.
 blocked_symbols = [
   "NAORISUSDT",
   "PENGUUSDT",
   "FARTCOINUSDT",
+  "LABUSDT",
 ]
 # stop_loss_max_pct_override   = 2.5   # < limits.stop_loss_max_pct (must be ≤ P1)
 # take_profit_max_pct_override = 8.0   # < limits.take_profit_max_pct
