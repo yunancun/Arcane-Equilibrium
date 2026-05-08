@@ -234,3 +234,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-4 V073 source checkpoint: added read-only edge snapshot contract guard and executable cron wrapper for recurring V059 snapshot writes via the existing REF-21 helper with instruments/freeze-log disabled
 - verification: V073 migration + cron static pytest 6/0, combined V073+V075+V076+V077 pytest 20/0, `bash -n` PASS, py_compile PASS, `git diff --check` PASS
 - boundary: source/test only; cron was not installed or run, no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
+
+2026-05-09 CEST
+- continued W-AUDIT-4 F-08 source checkpoint: added `ml_training_maintenance_cron.sh` plus a Python runner for the five audit-listed unscheduled ML paths (`linucb_trainer`, `mlde_shadow_advisor`, `mlde_demo_applier`, `scorer_trainer`, `quantile_trainer`)
+- wrapper sources PG creds from `basic_system_services.env`, sets repo/program_code `PYTHONPATH`, uses an overlap lock, writes a status JSON, and keeps default training scope to demo while shadow advisory runs demo+live_demo
+- verification: F-08 cron static pytest 4/0, `bash -n` PASS, py_compile PASS; source/test only, cron was not installed or run, no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
