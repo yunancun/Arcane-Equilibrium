@@ -54,88 +54,59 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-06 scanner opportunity canary checkpoint `98ce3d00`）
+## 三、真實狀態全景（2026-05-09 W-AUDIT-1 sync）
 
-### Runtime 部署
-- **Scanner opportunity code checkpoint**: `98ce3d00`（runtime AccountManager taker-fee cost prior + demo/live_demo new-open opportunity canary + pre-risk rejected intent/verdict row proof；2026-05-06 Mac → origin/main → Linux `trade-core` 同步）
-- **Engine binary deployed**: `98ce3d00`（2026-05-06 Linux `restart_all.sh --rebuild --keep-auth`；engine PID 2195503 / API parent PID 2195582）
-- **Engine 健康**: restart probe `engine_alive=true`；demo/live snapshots fresh。watchdog direct invocation may exit with lock if the resident watchdog already holds `/tmp/openclaw/watchdog.lock`（非 engine fault）。
-- **Live boundary**: LiveDemo 跑（Live 管線走 demo endpoint），mainnet **0 流量** by design
-- **健康檢查**: SUMMARY = FAIL（pre-existing/live reality gaps：FAIL `[42]` live_candidate_eval_contract、`[42c]` 3d attribution drift、`[50]` replay_run_state_health；WARN `[40]` realized edge 仍負）。`[51]` focused runtime result after `98ce3d00`：WARN，3h scanner snapshot routes 485/485、scanner intents 50/50、24h labels=9<10、rejected_labels=0（decision_outcomes backfill 延遲）；latest runtime scanner snapshot 85/85 routes carry `cost_source=account_manager_taker_fee` and canary fields；30m rejected scanner intents 78/78 carry scanner opportunity, including 2 `scanner_opportunity_canary` rejects.
-- **REF-21 execution checkpoint**: V057-V060 replay governance migrations now include Guard A/B/C and passed Linux `trade-core` PG transaction dry-run with rollback proof（pre-existing target tables absent → inside_tx present → after_rollback absent）; V061 `replay.calculate_promotion_metrics` non-stub SECURITY DEFINER body is landed and Linux transaction-tested with replay data (`eligible=true`, rollback). One-click full-chain replay is runtime-usable as an S2/S2+ development sandbox: `/full-chain/run` uses the dedicated Rust `replay_runner` subprocess, scanner timeline is active, local recorder BBO/orderbook overlays are consumed when present, `/full-chain/coverage` provides preflight fidelity, reports expose fee-net analytics, and `/replay/advisory/rank` is read-only for ML/Dream. 2026-05-07 S1 calibration lift added deterministic depth partial-fill, latency q50/q90, baseline-vs-candidate comparison, balance curve + stationary block bootstrap run bands, and recorder retention/maturity policy. Remaining trust boundary is empirical maturity: longer local recorder history, per-cell calibration, operator baseline libraries, and no fabricated microstructure for windows before recorder startup.
+本節只保留當前活躍狀態。歷史長敘述移到 `docs/CLAUDE_CHANGELOG.md`、
+`docs/archive/`、`docs/CCAgentWorkSpace/*/workspace/reports/` 和 `TODO.md`。
+帶 runtime 數值的行必附採集時間或 healthcheck id；滿 7 日未重驗即更新或移出。
 
-### 5 策略 7d gross PnL（demo + live_demo 真實 fills，PA 直查 trading_ai DB）
+### Runtime / Source
 
-| 策略 | demo fills | demo PnL | live_demo fills | live_demo PnL | 結論 |
-|---|---:|---:|---:|---:|---|
-| `grid_trading` | 642 | **+4.98** | 520 | **+0.79** | 唯一 net positive |
-| `ma_crossover` | 378 | -5.09 | 257 | -1.60 | net negative，ATR-SNR 後仍未轉正 |
-| `funding_arb` | 99 | -5.96 | 0 | 0 | V2 棄策略路徑（commit `a19797d`），demo 收 EDGE-DIAG-2 樣本至 2026-05-16 |
-| `bb_breakout` | 34 (14d) | -0.75 | 0 | 0 | live_demo **14d 0 fires**（FIX-26-DEADLOCK-1 修了 demo） |
-| `bb_reversion` | 7 | -0.16 | 0 | 0 | live_demo dormant |
-| **合計 7d gross** | | **-6.98** | | **-0.81** | 5 策略合計 net negative |
+| 項 | 目前事實 |
+|---|---|
+| W-AUDIT-1 evidence source | `b91487f2`（`healthcheck: make scanner would-block evidence advisory`）；後續 docs/governance commit 只改文檔索引，當前 repo head 以 `git log -1` 為準。 |
+| Runtime host | Linux `trade-core`；watchdog 2026-05-08 22:04 UTC：`engine_alive=true`，demo/live snapshots fresh。 |
+| Runtime env | `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
+| Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
+| Live boundary | LiveDemo 可跑（Live pipeline -> Bybit demo endpoint），Mainnet 真 live 流量仍為 0 by design；本輪未 rebuild、未 restart、未改 live auth、未開真 live API。 |
 
-### Active Observation Gates（真實 ground truth）
+### W-C / MAG-082
 
-| Gate | 真實值 | 目標 | 結論 |
-|---|---|---|---|
-| `[33]` maker fill rate | live_demo 7d **36.6%**（PA 直查） | ≥40% PASS / ≥60% fee_drop | 接近但仍下，post-2026-04-29 reload slice 73% but 7d rolling diluted |
-| `[38]` grid lifecycle drift | demo p50 7.9min vs live_demo 3.2min；ratio 0.41 | ≥0.5x | WARN，rolling 14d 觀察 |
-| `[40]` realized edge | 24h n=19, avg net **-27.93 bps**（2026-05-06 17:43 UTC healthcheck） | net_bps_after_fee>0 | 等累積 + edge 翻正 |
-| `[40]` 24h slippage live_demo | **-92.47 bps**（14 fills） | <-30 bps | BUSDT 110017 reject loop（funding_arb V2 棄策略殘倉） |
-| `[42]/[42b]` LG-5 reviewer | 0 audit row 累積 (sibling CC FUP-1 commit `463890d` 已 land，待下次 deploy 後啟動)| >0 row/24h | 待 deploy 確認；FUP-2 attribution writer 仍在開工 |
-| `[51]` scanner opportunity shadow/canary | 3h snapshot routes 485/485、scanner intents 50/50；24h labels=9，positive_avg=27.93bps、nonpositive_avg=-47.85bps、corr=0.21；post-`98ce3d00` latest scanner snapshot 85/85 cost_source=`account_manager_taker_fee`，30m rejected scanner intents 78/78 carry opportunity（2 canary） | labels≥10 後評估 calibration；rejected labels wait for decision_outcomes backfill | row proof 完整；demo/live_demo new-open canary live |
+| Gate | 最新實測 | 結論 |
+|---|---|---|
+| `[55] agent_decision_spine_lineage` | 2026-05-08 22:09 UTC direct check PASS：`objects=505/505`、`edges=404/404`、`idempotency=101/101`、`chains=101`、`chains_with_lease=76`、`chains_with_report=101`、`bad_report_quality=0`。 | Shadow lineage and lease-bypass evidence are flowing. |
+| MAG-082 readiness | `[55]` still reports `LINEAGE_READY_NOT_WINDOW_PASS window=1440m`。 | Stage 2 still needs the 24h window PASS before MAG-083 / MAG-084。 |
+| Passive healthcheck | 2026-05-08 22:08 UTC：`SUMMARY: WARN`，無 hard FAIL。 | 可繼續觀察；WARN cluster 見下表。 |
 
-### 18 Live Blocker 真實 gap（PA + FA cold panorama 整合）
+### Strategy / Edge
 
-按重要性序：
+- 2026-05-08 12-agent audit PA PG 直查：5 策略 7d demo gross 約 `-26.44 USDT`，live_demo gross 約 `+0.43 USDT`；舊 §三 的 `-6.98 USDT` 已過期。
+- 2026-05-09 3C 7d audit：Overall `WARN`；`[40]` avg_net 比 baseline 下滑 `-1.12bps`（within tolerance），grid p50 lifetime shortened `47.6%`，demo gross PnL delta improved `+20.87 USD` vs baseline。
+- `funding_arb` 新開倉仍按現有 risk configs 禁用 / 收斂；最終 retention 或 deprecation 等 2026-05-16 14d audit 與 `P0-DECISION-AUDIT-4`。
 
-| # | Blocker | 嚴重 | 距 Live |
-|---|---|---|---|
-| 1 | 5 策略 7d gross net **-6.98 USDT** — edge 仍負 | 🔴 | P0-3 ~05-15 決策 |
-| 2 | LG-2 H0 blocking IMPL（RFC `5ce777b`，0 行 IMPL，過去 24h log 0 H0 blocks）| 🔴 | 1 sprint，等 P0-3 |
-| 3 | LG-3 provider pricing binding IMPL（RFC `5ce777b`，0% binding contract）| 🔴 | 0.5-1 sprint |
-| 4 | LG-4 supervised live IMPL（RFC `ec8f0f4`，state machine 0 行）| 🔴 | 1.5-2 sprint |
-| 5 | ✅ **Decision Lease retrofit AMD-2026-05-02-01 Path A LAND** (Sprint 3 Track H commit `dbcf845b` + Track I deploy `0ad79f67`)；feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF → production 0 行為改動；amendment §5.4 flip flag canary 24h 待 ~05-15 P0-EDGE-2 後 operator action | ✅ DONE | (closed) |
-| 6 | ✅ `agent.messages` / `state_changes` / `ai_invocations` all-time 0 blocker closed by MAG-010..014 source + Linux controlled row proof；`[52]` strict PASS `messages=2 state_changes=11 ai_invocations=2`；MAG-019 default-disabled supervisor ledger policy done，real cloud rows remain disabled until future runtime enablement | ✅ DONE-SMOKE | (closed) |
-| 7 | LG-5 W3 FUP-1 reviewer 0 emit fix | 🟡 | sibling CC `463890d` 已 land，待 deploy 啟動 |
-| 8 | ExecutorAgent shadow_mode hardcoded `lambda: True` fail-close — fake-live wiring | 🟠 | 0.5 sprint |
-| 9 | H0_GATE singleton 0 production caller（DOC-02 spec 死於 wiring）| 🟠 | LG-2 IMPL 前提 |
-| 10 | HStateCache + CostEdgeAdvisor 兩 late-inject slot env-gated OFF（碼好未啟） | 🟠 | 0.5 sprint |
-| 11 | MLDE training row 84.6% `attribution_chain_ok=false`（MIT-S2-1）| 🟠 | sibling CC FUP-2 commit `34211ab4` PASS to E4（2026-05-02），等 E4 regression 驗 / merge / deploy |
-| 12 | `learning.exit_features.est_net_bps` 100% NULL（FA-H6） | 🟠 | edge_estimator P1-7 C labels 累積 + writer fix |
-| 13 | maker fill rate live_demo 7d 36.6% < 40% PASS 線（healthcheck 假綠） | 🟠 | 重設 baseline 或修 strategist |
-| 14 | bb_breakout live_demo 14d 0 fires；ma_crossover ATR-SNR 後仍負 | 🟠 | 等 G2-02/G2-01 結論 |
-| 15 | HTTPS deploy + Cookie secure G-4（PRE-LIVE-2 0 行）| 🟡 | 3d，Live 前必 |
-| 16 | Live credential rotation（PG password + Grafana admin 在 git history 6 commit 公開，private repo 風險低）| 🟡 | Live 前必，2 day |
-| 17 | KYC / 地理禁區 / Bybit ToS 合規（0 governance entry） | 🟡 | Operator 法律確認 |
-| 18 | Disaster runbook + Live first-day SOP（dust clear SOP only） | 🟡 | 1d |
+### Current Observation Gates
 
-**最早 Live target**：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA 看真實負 edge + 4 LG 0 IMPL，悲觀更可能**。中位需 P0-3 後 ~3 sprints 連推 LG-2/3/4 IMPL。
+| Gate | 2026-05-08/09 latest | 結論 |
+|---|---|---|
+| `[33]` maker fill rate | 7d demo/live_demo entry_fills=298，maker_like=89.6%，fee_drop=59.5%（target >=60%）。 | WARN：接近 fee-drop target，但未過。 |
+| `[38]` grid lifecycle drift | passive 24h live_demo re_entry_rate=0.52；3C 7d audit post window p50 3.79min vs baseline 7.23min（-47.6%）。 | WARN：grid lifecycle 需 review，但不阻 passive observation。 |
+| `[40]` realized edge | passive 24h MLDE rows=42，avg_net=-6.02bps；3C 7d audit demo current avg_net=-17.82bps vs baseline -16.70bps。 | WARN：edge 未轉正；P0-EDGE-1 仍 active。 |
+| `[41]` scanner would-block evidence | `b91487f2` 後 WARN-only：legacy scanner would-block evidence later non-negative，scanner remains evidence-only。 | 源碼已修正：scanner contradiction 不再 hard FAIL。 |
+| `[42b]/[42c]` attribution drift | settled eligible strategies ratio=1.000；低樣本策略標 `LOW_SAMPLE(n, need)`。 | WARN sample-maturity watch，不是 attribution drift。 |
+| `[45]` pricing binding | demo/live_demo source=`bybit_v5`，age >1h but <24h。 | WARN：仍需 P0-LG-2 provider pricing binding foundation。 |
+| `[51]` scanner opportunity shadow | routes/intents 100%；24h labels=39，positive_lcb_n=16，avg_net=-4.29bps，`opportunity_positive_n=0 LOW_SAMPLE`。 | WARN：shadow-only，calibrated positive sample 未成熟。 |
 
-### REF-20 IMPL 狀態（2026-05-05 **Sprint A + B + C + D ALL CLOSED — Paper Replay Lab USABLE FOR DEMO RESEARCH**）
+### Active Blockers
 
-REF-20 P6 PRODUCTION CLOSED 2026-05-03（commit `dbcf845b` IMPL + `0ad79f67` deploy + `6a7a885c` R9 sign-off + `67b95808` post-signoff reality-gap fix）。**24/25 V3 §12 acceptance binding GREEN**（#21 ⏸ DEFERRED Wave 7 P5 LG-2/3/4 stable 後解封）。`replay.simulated_fills.evidence_source_tier='synthetic_replay'` 仍非 ML training data；只有 `calibrated_replay` / `counterfactual_replay` 通過 verification gate 的 row 可餵 MLDE / Dream / attribution writer。
-
-**完整 commit chain + 6-layer blocker chain + Sprint A/B/C/D + Wave 1-9 + Sprint 1-4 詳細歸檔** → `docs/archive/2026-05-06--claude_md_stale_extract.md` + `srv/memory/project_2026_05_03_ref20_sprint1_2_closure.md`
-
-**Outstanding (operator-side, not blocking REF-20 closure)**:
-- R7-T6 3 live PG E2E case full smoke (需 OPENCLAW_TEST_DSN 配置)
-- V056 cron schedule deployment (helper_scripts/cron/...sh 已 land，operator add to crontab)
-- Sprint D operator deploy validation (5 new healthcheck sentinel 透 cron-wrapper 跑)
-- AMD-2026-05-02-01 §5.4 flag flip canary 24h（~2026-05-15 P0-EDGE-2 後 operator action）
-- AMD-2026-05-03-01 Wave 7 P5 deploy gate（LG-2/3/4 frontend stable + 7d healthcheck PASS 後 operator action）
-
-**後續 follow-up**：13 P2 ticket + 1 P3 ticket land in TODO §P2-AUDIT/P2-WAVE-*/P2-FOLLOW-UP/P2-LEASE/P2-INTENT/P3-V054。
-
-### History pointers
-- 2026-05-04 REF-20 Gap Closure Plan V1：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
-- 2026-05-03 REF-20 Sprint 4 final closure：`docs/execution_plan/2026-05-03--ref20_sprint4_final_closure.md`
-- 2026-05-03 REF-20 Sprint 3 Track I Linux deploy runbook：`docs/execution_plan/2026-05-03--ref20_sprint3_track_i_linux_deploy_runbook.md`
-- 2026-05-03 REF-20 Sprint 1+2+3 reports：`docs/CCAgentWorkSpace/{PA,E1,E2,E4}/workspace/reports/2026-05-03--ref20_sprint{1,2,3}_*.md` + `docs/governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md`
-- 2026-05-02 trim 前完整 §三 / §七 詳述 / §九 5 條長注釋 / §十一 一句話狀態：`docs/archive/2026-05-02--CLAUDE-pre-trim-snapshot.md`
-- 2026-05-02 4-day codex audit closure（P1+P2+Step 2+LG-5 Wave）：`docs/archive/2026-05-02--TODO-pre-trim-snapshot.md`
-- 早於 2026-05-01 的 active-doc snapshots：`docs/archive/2026-04-30--{CLAUDE,TODO,README}-pre-cleanup-snapshot.md`、`docs/archive/2026-04-29--62finding-batch-A-to-F.md`、`docs/archive/2026-04-29--strkusdt-p0-wave.md`、`docs/archive/2026-04-29--wave-A-to-H-narrative.md`
+| Blocker | 狀態 |
+|---|---|
+| W-C / MAG-082 | Active evidence window；未達 24h PASS。 |
+| MAG-083 / MAG-084 | Blocked until MAG-082 PASS。 |
+| P0-EDGE-1 | Active；realized edge 未轉正。 |
+| P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
+| P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
+| P0-DECISION-AUDIT-2/4/5 | 仍需 operator 拍板。`P0-DECISION-AUDIT-1` 由 W-C authorization file + AMD §5.4.1 補件收口；`P0-DECISION-AUDIT-3` 由本次 §三 drift 防線收口。 |
+| W-AUDIT-1..7 | W-AUDIT-1 已 source-closed；W-AUDIT-2 security IMPL 是下一個可做項。 |
 
 ---
 
@@ -161,7 +132,11 @@ REF-20 P6 PRODUCTION CLOSED 2026-05-03（commit `dbcf845b` IMPL + `0ad79f67` dep
 
 # execution_authority：Rust 僅為 P0/P1 denylist 字串常量
 # （claude_teacher/applier.rs:226），非真實授權邏輯；「auto_granted_on_start」屬 Python 概念。
-decision_lease_emitted  = False   # 注：Python ExecutorAgent only；Rust 路徑 A retrofit LANDED 2026-05-03 (`dbcf845b` IMPL + `0ad79f67` deploy)，feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF，canary flip 待 ~2026-05-15 P0-EDGE-2 後 operator action
+decision_lease_emitted  = "shadow_bypass_lineage_only"  # 2026-05-08 operator-authorized W-C evidence mode:
+                                                        # Linux `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`
+                                                        # writes lease/bypass lineage into Agent Spine shadow
+                                                        # ExecutionPlan rows. This is not true-live auth,
+                                                        # not Executor order authority, and not MAG-083/084.
 max_retries             = 0
 
 # 永不允許的硬錯誤：
@@ -201,7 +176,17 @@ max_retries             = 0
 `governance`, `ai`, `learning`, `agents`, `monitoring`, `settings`。GUI spec
 must reference the current 13-tab console dictionary.
 
-**(*) Decision Lease 路徑 A LANDED 2026-05-03**：Sprint 3 Track H IMPL `dbcf845b`（Rust facade 951 LOC + router gate + Python IPC bridge 587 LOC + V054 audit writer 535 LOC schema + 492 LOC writer）+ Track I deploy `0ad79f67` 全綠。Feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` default OFF → production runtime 0 行為改動；amendment §5.4 flip flag canary 24h 待 ~2026-05-15 P0-EDGE-2 後 operator action。詳 `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md`。Python `governance_hub.acquire_lease()` 仍是當前唯一 production caller（`executor_agent.py:454`），canary 後 Rust router gate 才會啟用。
+**(*) Decision Lease 路徑 A + W-C evidence mode（2026-05-09 current）**：
+Sprint 3 Track H IMPL `dbcf845b` + Track I deploy `0ad79f67` 已落地；
+W-C 於 2026-05-08 經 operator 授權在 Linux 啟用
+`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，並在
+`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow` 下把 lease/bypass lineage 寫入
+Agent Spine shadow ExecutionPlan rows。這是 MAG-082 Stage 2 evidence
+collection，不是 true-live 授權、不是 Executor order authority、不是
+MAG-083/MAG-084 sign-off。§5.4 原定 2026-05-15 後翻 flag 的排程由
+AMD §5.4.1 補件修訂；詳
+`docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` 和
+`docs/governance_dev/2026-05-08--w_c_lease_router_authorized.md`。
 
 **EarnedTrust T0/T1/T2/T3 vs Decision Lease 兩者互補**：
 - T0-T3：session 級 authorization TTL（24h-360h），管「整個 live session 多久重 auth」
@@ -449,20 +434,21 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` v13 為準。2026-05-07 已按最新 Agent 設計與 OpenClaw 定位重排：主 TODO 現在只保留 active dispatch queue，舊 REF-20/REF-21/AgentTodo closure、過期觀察表與 obsoleted work 已歸檔到 `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md`。當前順序是 `W-A` executor fake-live runtime smoke -> `W-B` runtime Agent Decision Spine lineage -> `W-C` 新 MAG-082 Stage 2 evidence window -> `W-D` MAG-083/MAG-084 -> `W-E` OpenClaw read-only brief/diagnostics/escalations。仍不是 Telegram/WebChat、proposal approval relay、第二 GUI、Stage 3/4，或 true-live autonomy。
+**當前焦點**：活躍任務以 `TODO.md` v14 為準。2026-05-08 已把 12-agent full audit PA fix plan 掛入 W-AUDIT-1..7。當前順序是：保持 `W-C` MAG-082 Stage 2 evidence window 觀察；先做 `W-AUDIT-1` docs sync + governance compliance；再做 `W-AUDIT-2` security IMPL；之後接 W-AUDIT-3..7。仍不是 Telegram/WebChat、第二 GUI、Stage 3/4，或 true-live autonomy。
 
-**關鍵路徑**：`P1-FAKE-1 runtime smoke → runtime decision-spine/idempotency lineage → new MAG-082 Stage 2 24h PASS → MAG-083 QA audit → MAG-084 operator sign-off → OpenClaw read-only expansion → edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
+**關鍵路徑**：`W-C 24h PASS → MAG-083 QA audit → MAG-084 operator sign-off → W-AUDIT-1 docs/governance → W-AUDIT-2 security IMPL → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
-**REF-20 IMPL 狀態（2026-05-05 all closed）**：Sprint A+B+C+D closed；R9 PM sign-off `6a7a885c` + post-signoff reality-gap fix `67b95808`。A1-A10 + R9 7 conditions closed；Paper Replay Lab usable for demo research；replay evidence remains advisory / non-commanding and does not authorize live trading。
+**REF-20 / REF-21 狀態**：REF-20 Sprint A-D 與 REF-21 replay usability foundation 已收口；剩餘 replay 工作是 empirical calibration maturity、recorder history、baseline library，不替代 runtime lineage 或 live promotion。
 
-**最早 Live 日期**（事件驅動，非 hard date）：以 2026-05-23 樂觀 / 2026-05-30 中位 / 2026-06-15 悲觀為規劃帶。**PA panorama 評估悲觀更可能**（5 策略 net negative + 4 LG 0 IMPL + 18 blocker 還剩 13 個未解 + Decision Lease retrofit deploy with flag OFF）。
+**最早 Live 日期**（事件驅動，非 hard date）：以 2026-06-15 悲觀規劃帶為主。PA full audit 偏悲觀：edge 未轉正、LG-2/3/4 尚未 IMPL、W-AUDIT-1..7 未完、MAG-082 未 PASS、MAG-083/084 blocked。
 
-**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor shadow toggle + MLDE demo autonomy + Strategy Edge Repair + Strategy Edge Models + Dust residual prevention + REF-20/REF-21 replay foundation 均已落地。仍未完成的是 runtime Agent Decision Spine lineage、MAG-082 重新取證、MAG-083/MAG-084、edge / execution-quality 驗收、Live Gate LG-2/3/4、Live infra、以及 true live 前的受監督/受限自主放權。
+**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor fake-live smoke + runtime Agent Spine shadow lineage + Decision Lease bypass lineage + REF-20/REF-21 replay foundation 均已落地。仍未完成的是 MAG-082 24h PASS、MAG-083/MAG-084、W-AUDIT-2..7、edge / execution-quality 驗收、Live Gate LG-2/3/4、Live infra、以及 true live 前的受監督/受限自主放權。
 
-**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease retrofit deploy with flag OFF。True live 仍缺 Agent runtime lineage PASS、edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
+**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease router evidence flag is ON for shadow W-C only。True live 仍缺 MAG-082/083/084、edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
-- TODO.md v13 active dispatch queue + `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` for removed historical context
+- TODO.md v14 active dispatch queue + `2026-05-08--full_audit_fix_plan.md`
+- `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` for removed historical context
 - **REF-20 Gap Closure Plan V1 (2026-05-04, current SoT for Sprint A-D)**：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
 - REF-20 V3 SoT (legacy schema/route foundation)：`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`
 - REF-20 Sprint 4 final closure：`docs/execution_plan/2026-05-03--ref20_sprint4_final_closure.md`

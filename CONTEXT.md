@@ -42,11 +42,24 @@ _Avoid_: "live demo" (two words), treating it as a relaxed Live. Historical 43k 
 The three-engine architecture — paper / demo / live as one Rust binary spawning three pipelines with three independent risk-config TOML files.
 _Avoid_: "multi-mode engine" (loses the "three independent configs" connotation).
 
+**3-Config**:
+The independent TOML/config ownership model for paper / demo / live. A setting
+being safe in one engine mode does not imply the same value or authority in the
+other two modes.
+_Avoid_: "shared config" when the code path must respect per-mode authority.
+
 ### Decision Lease state machine (SM-02)
 
 **Decision Lease**:
 A timed, revocable, scope-limited authorization wrapping a single trading intent. AI output never becomes an order — it becomes a Lease that must be activated, risk-approved, bridged, and consumed. Per-intent TTL 0.1–300s.
 _Avoid_: lease (alone), intent token, trade ticket, signal.
+
+**Feature flag**:
+A named runtime or config switch that changes evidence collection, routing, or
+behavior only inside its documented authority boundary. A feature flag is never
+an operator sign-off, never a live authorization, and never a substitute for
+MAG-082/083/084 evidence.
+_Avoid_: treating a flag flip as a release decision.
 
 **DRAFT**:
 Lease draft formed by H5 / Strategist but not yet accepted by the Lease Control Plane; cannot bridge downstream.
@@ -145,6 +158,13 @@ _Avoid_: treating the external OpenClaw dashboard as the canonical trading conso
 External self-hosted agent gateway used for Telegram/WebChat/mobile/operator communication, multi-channel alerting, supervisor briefs, cloud escalation, and proposal/approval relay into TradeBot APIs. It is not the trading conductor, not the hot path, and not a second GUI.
 _Avoid_: OpenClaw engine, OpenClaw trading brain, OpenClaw GUI.
 
+**LG-X**:
+The Live Gate foundation backlog family tracked after the original LG-1..LG-5
+items expanded into H0 production caller, provider pricing binding,
+supervised-live state machine, ops/security, legal, credential, and first-day
+runbook work.
+_Avoid_: treating LG-X as a single runtime gate.
+
 **Gateway Agent**:
 An LLM/session hosted through OpenClaw Gateway for operator interaction, brief generation, diagnosis, or proposal creation. Gateway Agents may read bounded state packets and create proposals; they may not hold Bybit credentials or call trading write APIs.
 _Avoid_: confusing Gateway Agents with the local 5-Agent runtime.
@@ -193,6 +213,13 @@ _Avoid_: OpenClaw Gateway, master agent.
 **Local 5-Agent runtime**:
 Scout / Strategist / Guardian / Analyst / Executor running inside TradeBot's FastAPI + Postgres + Rust-engine-adjacent stack. This is the trading cognition layer; it remains independent from external OpenClaw Gateway availability.
 _Avoid_: moving these Agents into OpenClaw Gateway unless a future ADR explicitly reverses the 2026-05-06 decision.
+
+**Agent Decision Spine**:
+The typed, durable lineage chain for trade-relevant decisions:
+StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan ->
+Decision Lease / idempotency -> ExecutionReport -> AnalystInsight. It
+supersedes free-text MessageBus traces for promotion evidence.
+_Avoid_: using MessageBus rows alone as execution lineage proof.
 
 **Scout Agent** (情報):
 "Eyes and ears" — news search, event calendar, sentiment, exchange anomaly monitoring. Emits `intel_object` and `event_alert`; never produces trade signals or modifies risk parameters.
@@ -320,6 +347,17 @@ The v0.4 ML/DL self-learning architecture — Teacher labels, Student trains; co
 **REF-20 Paper Replay Lab**:
 The reality-calibrated fast-replay subsystem (Sprint A–D) for backtest evidence. Data tagged `evidence_source_tier='synthetic_replay'` is **non-training** by design.
 
+**REF-19 Reality-Calibrated Fast Replay Governance**:
+The governance boundary for replay as an experiment and evidence surface.
+Replay may accelerate diagnostics and preflight evidence; it cannot directly
+authorize demo/live mutation or true-live promotion.
+
+**REF-21 Full-Chain Replay Engine**:
+The full-chain replay foundation with dedicated `replay_runner`, preflight
+coverage, scanner timeline, calibration overlays, and read-only advisory
+surfaces. Remaining trust depends on empirical recorder history and calibration
+maturity.
+
 **evidence_source_tier**:
 Column on `replay.simulated_fills` ∈ {`synthetic_replay`, `calibrated_replay`, `counterfactual_replay`} — only the latter two may feed MLDE / Dream / attribution writers.
 
@@ -401,7 +439,7 @@ The Operator-tracked panorama of remaining gaps before true Live trading (curren
 - **`engine_mode='live'` historical 43k rows are actually LiveDemo** — resolved: ML filters now use `engine_mode IN ('live','live_demo')`; new INSERTs write `'live_demo'` for the LiveDemo pipeline.
 - **"Engine" can mean the Rust process OR the whole Python+Rust stack** — resolved: in this codebase, "engine" without qualification = the Rust `openclaw_engine` binary; the Python side is "Bridge" or "Control API." Note "Dream Engine" is a separate subsystem.
 - **"Demo" means the engine_mode OR the Bybit endpoint** — resolved: `demo` (lowercase) = engine_mode; "Bybit demo endpoint" = the API target. **LiveDemo** always means "Live pipeline → Bybit demo endpoint."
-- **Decision Lease deployment status** — Path A retrofit IMPL landed (commit `dbcf845b`) but feature flag `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=0` defaults OFF; production behavior is currently unchanged.
+- **Decision Lease deployment status** — Path A retrofit IMPL landed (commit `dbcf845b`). As of W-C, Linux `trade-core` runs `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` only for shadow Agent Spine evidence collection; this does not grant true-live auth, Executor order authority, MAG-083, or MAG-084.
 - **`replay.simulated_fills.evidence_source_tier='synthetic_replay'`** looks usable but is explicitly non-training data. Always filter `IN ('calibrated_replay','counterfactual_replay')` before feeding MLDE / Dream / attribution.
 - **5-Agent runtime set (Scout / Strategist / Guardian / Analyst / Executor) vs 18-Agent dev role tiers (PM / FA / PA / CC / E1 / E2 …)** — different vocabularies. The 5-Agent set is a runtime trading construct (DOC-01); the 18 are dev workflow personas living under `.claude/agents/`.
 - **`OPENCLAW_BASE_DIR` vs `OPENCLAW_SRV_ROOT`** — `SRV_ROOT` is a legacy alias; new code must use `OPENCLAW_BASE_DIR`. They do not fall back to each other; Mac dev must export both to the same value.

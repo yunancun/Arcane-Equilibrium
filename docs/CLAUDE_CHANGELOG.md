@@ -1,7 +1,27 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-07（P1 healthcheck FAIL queue cleared to PASS/WARN）
+> 最後更新：2026-05-09（W-AUDIT-1 docs/governance sync）
+
+### W-AUDIT-1 docs/governance sync — 2026-05-09
+
+**Scope**：完成 W-AUDIT-1 文檔/治理同步。CLAUDE §三/§四/§五/§十
+改為 2026-05-09 實測狀態；新增 W-C lease-router evidence authorization file；
+AMD-2026-05-02-01 補 §5.4.1；補 ADR-0015..0019、CONTEXT 詞條、SCRIPT_INDEX、
+SPECIFICATION_REGISTER LG-X / SM-03 / EX-03 / ARCH-02/03 / AUDIT-13、
+docs/README 2026-05 index addendum、MIT/BB workspace README。
+
+**Runtime evidence used**：Linux `trade-core` source `b91487f2`；watchdog
+`engine_alive=true`；runtime env `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow` +
+`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`；scanner config 無 `[authority]`；
+`[55]` PASS with `chains=101` / `chains_with_lease=76` /
+`chains_with_report=101`，但 MAG-082 readiness remains
+`LINEAGE_READY_NOT_WINDOW_PASS`；passive healthcheck after `[41]` source fix
+returned `SUMMARY: WARN`。
+
+**Boundary**：docs/governance only。未 rebuild、未 restart、未改 live auth、
+未開真 live API、未改策略/風控參數、未解鎖 Executor order authority、未批准
+MAG-083/MAG-084。
 
 ### P1 healthcheck FAIL queue cleared + Executor fake-live source fix — 2026-05-07
 

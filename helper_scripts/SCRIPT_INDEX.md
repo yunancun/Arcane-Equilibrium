@@ -1,7 +1,31 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-03（REF-20 Sprint 1 closure + Sprint 2 retroactive；新增 wave9 cron 3 條 + replay_key_rotation_check / replay_artifact_prune cron + V053 audit_log enum 擴展）
+最後更新：2026-05-09（W-AUDIT-1 catch-up；新增 REF-21 recorder / passive healthcheck split / 3C and funding_arb audits / operator helpers）
+
+## 2026-05-09 W-AUDIT-1 補登
+
+| 腳本 | 用途 |
+|------|------|
+| `db/audit/2026-05-09_3c_7d_audit.sh` | 3C deploy 7d follow-up read-only audit wrapper |
+| `db/audit/2026-05-09_3c_7d_audit.py` | 3C deploy 7d follow-up SQL audit implementation |
+| `db/audit/2026-05-16_funding_arb_14d_audit.sh` | funding_arb 14d audit wrapper |
+| `db/audit/2026-05-16_funding_arb_14d_audit.py` | funding_arb 14d audit SQL implementation |
+| `db/passive_wait_healthcheck/__main__.py` | `python -m helper_scripts.db.passive_wait_healthcheck` entrypoint |
+| `db/passive_wait_healthcheck/runner.py` | Passive healthcheck orchestrator and output formatter |
+| `db/passive_wait_healthcheck/checks_agent_spine.py` | `[55]` Agent Decision Spine lineage / MAG-082 readiness check |
+| `db/passive_wait_healthcheck/checks_openclaw_gateway.py` | `[54]` OpenClaw proposal relay healthcheck |
+| `db/passive_wait_healthcheck/checks_scanner_market.py` | `[41]` scanner would-block evidence and `[51]` opportunity shadow checks |
+| `cron/ref21_market_microstructure_recorder.py` | REF-21 local BBO/orderbook/latency recorder |
+| `cron/ref21_market_recorder_retention.py` | REF-21 recorder retention maintenance |
+| `cron/ref21_symbol_universe_snapshot_cron.sh` | REF-21 V058 symbol universe snapshot cron |
+| `operator/edge_p2_flip.sh` | Operator helper for Edge P2 guarded flip |
+| `operator/edge_p2_revert.sh` | Operator helper for Edge P2 revert |
+| `operator/generate_replay_signing_key.sh` | Replay signing key generation helper |
+| `research/bb_breakout_threshold_sweep.py` | bb_breakout threshold research sweep |
+| `research/ma_crossover_counterfactual_replay.py` | ma_crossover counterfactual replay research helper |
+| `research/shadow_disagreement_breakdown.py` | Shadow disagreement breakdown analysis |
+| `deploy/launchd_preflight.sh` | macOS launchd deployment preflight |
 
 ## REF-20 Sprint 1+2 新增 cron 與 helper
 
