@@ -352,6 +352,12 @@ restart_engine() {
     # 啟用狀態可跨 restart_all 持久保存；臨時命令列 override 仍優先。
     local enable_paper
     enable_paper="${OPENCLAW_ENABLE_PAPER:-$(grep '^OPENCLAW_ENABLE_PAPER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # W-B Agent Decision Spine runtime rollout mode. Operator env wins for
+    # one-shot tests; otherwise persist the runtime choice in the secrets env
+    # file so a later plain restart_all keeps the same shadow/canary/primary
+    # setting instead of silently falling back to disabled.
+    local agent_spine_runtime_mode
+    agent_spine_runtime_mode="${OPENCLAW_AGENT_SPINE_RUNTIME_MODE:-$(grep '^OPENCLAW_AGENT_SPINE_RUNTIME_MODE=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
@@ -359,6 +365,7 @@ restart_engine() {
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_AUTO_MIGRATE="${auto_migrate}" \
         OPENCLAW_ENABLE_PAPER="${enable_paper}" \
+        OPENCLAW_AGENT_SPINE_RUNTIME_MODE="${agent_spine_runtime_mode}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
