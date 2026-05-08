@@ -498,6 +498,21 @@ def test_p0_5a_idor_admin_bypass_skips_actor_filter(monkeypatch):
     assert len(captured["params"]) == 1, f"Expected 1 param (admin), got: {captured['params']}"
 
 
+def test_report_idor_sql_prefers_replay_report_with_legacy_fallback():
+    """V066: report SELECT orders explicit replay_report before legacy pnl_summary."""
+    from replay.security_guards import build_report_idor_sql
+
+    sql, params = build_report_idor_sql(
+        "11111111-1111-1111-1111-111111111111",
+        "alice",
+        False,
+    )
+    assert params == ("11111111-1111-1111-1111-111111111111", "alice")
+    assert "WHEN 'replay_report' THEN 0" in sql
+    assert "WHEN 'pnl_summary' THEN 1" in sql
+    assert "s.actor_id = %s" in sql
+
+
 # ─── Case 5: P0-5b path traversal blocked ─────────────────────────────────
 
 

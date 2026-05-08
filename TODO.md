@@ -115,7 +115,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-EDGE-1` | 3 | Source-fixed ma_crossover LABUSDT block + bb_breakout diagnosis | Runtime diagnosis: 7d ma_crossover combined demo/live_demo is negative mainly from `LABUSDT` (`n=6 avg=-244.54bps`), so `LABUSDT` is source-blocked for ma_crossover new entries in risk configs while close/reduce remains allowed; bb_breakout stays demo-only/live-disabled with low negative sample (`7d n=10 avg=-5.06bps`) pending more evidence. |
 | `P1-EDGE-2` | 3 | funding_arb 14d audit | Run the 2026-05-16 audit before retention or deprecation decisions. |
 | `P1-REPLAY-1` | 4 | Recorder-history maturity | Build longer local BBO/orderbook/latency history for S1/S1+ calibration; never fabricate old microstructure. |
-| `P1-REPLAY-2` | 4 | Replay artifact type cleanup | Add `replay_report` artifact enum and align finalize/report queries. |
+| `P1-REPLAY-2` | 4 | Source-fixed replay artifact type cleanup | V066 adds `replay_report` artifact enum + byte-size CHECK; finalize registers `replay_report`; report query prefers it while retaining legacy `pnl_summary` fallback. |
 | `P1-LG-5` | 4 | LG-5 reviewer maturity watch | Source is active; continue audit-row and attribution health monitoring. |
 
 ## P2 — Maintenance Backlog
@@ -127,7 +127,7 @@ historical wave narratives, and old date-driven reminders are archived.
 | ID | Task | Trigger |
 |---|---|---|
 | `P2-MIG-1` | V054 lease transitions Python migration sibling test | Next DB-migration maintenance batch. |
-| `P2-MIG-2` | V046 byte-size CHECK and `replay_report` artifact enum migration | Replay report cleanup batch. |
+| `P2-MIG-2` | DONE — V066 byte-size CHECK and `replay_report` artifact enum migration | Covered by `P1-REPLAY-2`; migration added, not applied to runtime DB without operator authorization. |
 | `P2-SEC-1` | Genericize replay finalize 503 exception messages | Next replay hardening pass. |
 | `P2-REPLAY-1` | PID reuse guard for replay runner finalize | Low-probability hardening; add `subprocess_started_at_ms`. |
 | `P2-PYDANTIC-1` | Replay Pydantic V1 `@validator` -> V2 `@field_validator` migration | Before Pydantic V3. |

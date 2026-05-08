@@ -104,23 +104,13 @@ FINALIZABLE_STATUSES = frozenset({"starting", "running"})
 # 成功 finalize 後的 V045 status。
 FINALIZED_STATUS = "completed"
 
-# V046 artifact_type used for the per-finalize replay_report.json registration.
-# V046 CHECK chk_replay_report_artifacts_type allowlist
-#   = {canary, diagnostic, pnl_summary, fill_log, baseline_compare}.
-# We choose ``pnl_summary`` because Rust ``replay_report.json`` carries a
-# top-level ``pnl_summary`` block as its dominant payload. The plan §6.R3
-# pseudocode wrote ``replay_report`` but that string is NOT in V046 CHECK
-# enum (would 23514 reject INSERT). E1 selects the closest in-allowlist
-# value and notes the discrepancy in the sign-off report (§10).
+# V066 artifact_type used for per-finalize replay_report.json registration.
+# V066 keeps legacy pnl_summary readable, but new finalize rows use the explicit
+# replay_report enum value.
 #
-# V046 artifact_type 用於 per-finalize replay_report.json 註冊。
-# V046 CHECK chk_replay_report_artifacts_type 白名單
-#   = {canary, diagnostic, pnl_summary, fill_log, baseline_compare}。
-# 選 ``pnl_summary`` 因為 Rust ``replay_report.json`` top-level 有
-# ``pnl_summary`` block 為主 payload。plan §6.R3 偽碼寫 ``replay_report``
-# 但該字串不在 V046 CHECK enum（會 INSERT 23514 reject）。E1 選白名單
-# 內最近義值並在 sign-off §10 標記差異。
-ARTIFACT_TYPE_REPLAY_REPORT = "pnl_summary"
+# V066 artifact_type 用於 per-finalize replay_report.json 註冊。V066 保留
+# legacy pnl_summary 可讀，但新 finalize row 使用明確 replay_report enum。
+ARTIFACT_TYPE_REPLAY_REPORT = "replay_report"
 
 # Replay report file basename written by Rust report_writer.
 # Rust report_writer 寫的 replay report file basename。

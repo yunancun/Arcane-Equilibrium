@@ -47,6 +47,7 @@ from replay.canary_writer import (  # noqa: E402
     ALLOWED_ARTIFACT_TYPES,
     ARTIFACT_TYPE_CANARY,
     ARTIFACT_TYPE_DIAGNOSTIC,
+    ARTIFACT_TYPE_REPLAY_REPORT,
     CanaryArtifactWriter,
     WriteResult,
 )
@@ -217,15 +218,17 @@ def test_mac_runtime_writes_to_test_only_dir(monkeypatch, tmp_path) -> None:
     assert "/tmp/replay_artifacts_test_only" in str(writer.root_dir)
 
 
-def test_allowed_artifact_types_match_v046_check_constraint() -> None:
-    """Sanity: ALLOWED_ARTIFACT_TYPES matches V046 CHECK chk_replay_report_artifacts_type.
-    健全性：ALLOWED_ARTIFACT_TYPES 對齊 V046 CHECK chk_replay_report_artifacts_type。
+def test_allowed_artifact_types_match_v066_check_constraint() -> None:
+    """Sanity: ALLOWED_ARTIFACT_TYPES matches V066 artifact_type CHECK.
+    健全性：ALLOWED_ARTIFACT_TYPES 對齊 V066 artifact_type CHECK。
     """
     expected = {
         "canary",
         "diagnostic",
         "pnl_summary",
+        "replay_report",
         "fill_log",
         "baseline_compare",
     }
     assert ALLOWED_ARTIFACT_TYPES == frozenset(expected)
+    assert ARTIFACT_TYPE_REPLAY_REPORT == "replay_report"
