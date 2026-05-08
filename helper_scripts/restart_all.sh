@@ -358,6 +358,10 @@ restart_engine() {
     # setting instead of silently falling back to disabled.
     local agent_spine_runtime_mode
     agent_spine_runtime_mode="${OPENCLAW_AGENT_SPINE_RUNTIME_MODE:-$(grep '^OPENCLAW_AGENT_SPINE_RUNTIME_MODE=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # Decision Lease router gate rollout. Keep it operator-controlled and
+    # durable across restarts; blank/absent preserves the code default OFF.
+    local lease_router_gate_enabled
+    lease_router_gate_enabled="${OPENCLAW_LEASE_ROUTER_GATE_ENABLED:-$(grep '^OPENCLAW_LEASE_ROUTER_GATE_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
@@ -366,6 +370,7 @@ restart_engine() {
         OPENCLAW_AUTO_MIGRATE="${auto_migrate}" \
         OPENCLAW_ENABLE_PAPER="${enable_paper}" \
         OPENCLAW_AGENT_SPINE_RUNTIME_MODE="${agent_spine_runtime_mode}" \
+        OPENCLAW_LEASE_ROUTER_GATE_ENABLED="${lease_router_gate_enabled}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
