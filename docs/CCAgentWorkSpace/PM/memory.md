@@ -1936,3 +1936,20 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Documentation-only change; no rebuild, restart, DB write, live auth mutation,
   scanner authority change, executor shadow unlock, lease-router flag
   enablement, or OpenClaw write/proposal route was performed.
+
+## 2026-05-08 Matt Pocock Skills Setup
+
+- Ran `setup-matt-pocock-skills` for repo root `srv/`.
+- Operator selected GitHub as the active issue tracker, default triage labels,
+  and single-context domain docs.
+- Added `docs/agents/issue-tracker.md`, `docs/agents/triage-labels.md`, and
+  `docs/agents/domain.md`.
+- Updated `CLAUDE.md` and `.codex/MEMORY.md` away from stale Linear-active
+  wording: GitHub Issues is now active for mattpocock engineering skills and
+  new issue/PRD workflow; Linear is historical/passive unless reopened.
+- `gh` CLI was not installed in the local PATH during setup, so labels were not
+  fetched from GitHub. The docs instruct agents to report that blocker rather
+  than silently creating local `.scratch/` issues.
+- Documentation/config-only change; no rebuild, restart, DB write, runtime
+  auth mutation, strategy/risk config change, or external issue mutation was
+  performed.
