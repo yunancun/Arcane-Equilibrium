@@ -20,9 +20,11 @@ _SRV_ROOT = os.path.dirname(_HELPER_SCRIPTS_DIR)
 sys.path.insert(0, _SRV_ROOT)
 
 from helper_scripts.db.passive_wait_healthcheck.checks_scanner_market import (  # noqa: E402
+    MARKET_GATE_CONFIRM_MIN_LABELS,
     OPPORTUNITY_SHADOW_MIN_LABEL_SAMPLE,
     OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE,
     OPPORTUNITY_SHADOW_MIN_REJECTED_SAMPLE,
+    check_scanner_market_gate_confirmation,
     check_scanner_opportunity_shadow_acceptance,
 )
 
@@ -255,6 +257,64 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
         self.assertNotIn("INSERT ", sql_text.upper())
         self.assertNotIn("UPDATE ", sql_text.upper())
         self.assertNotIn("DELETE ", sql_text.upper())
+
+
+class TestScannerMarketWouldBlockEvidence(unittest.TestCase):
+    """`[41]` is evidence calibration, not scanner authority enforcement."""
+
+    def test_warn_not_fail_when_legacy_would_block_is_contradicted(self) -> None:
+        cur = _build_cur(
+            [
+                (True,),
+                (True,),
+                (
+                    98,  # gate_cells
+                    1454,  # gate_events
+                    45,  # scoreable_cells
+                    23,  # confirmed_negative
+                    22,  # contradicted
+                    71,  # low_sample_cells
+                ),
+            ],
+            [
+                (
+                    "grid_trading",
+                    "DYDXUSDT",
+                    MARKET_GATE_CONFIRM_MIN_LABELS,
+                    24.53,
+                    "grid_trend_mismatch",
+                )
+            ],
+        )
+
+        status, msg = check_scanner_market_gate_confirmation(cur)
+
+        self.assertEqual(status, "WARN", msg)
+        self.assertIn("legacy would-block evidence later non-negative", msg)
+        self.assertIn("scanner remains evidence-only", msg)
+        self.assertIn("grid_trading/DYDXUSDT", msg)
+
+    def test_pass_when_legacy_would_block_evidence_is_negative(self) -> None:
+        cur = _build_cur(
+            [
+                (True,),
+                (True,),
+                (
+                    8,
+                    21,
+                    4,
+                    4,
+                    0,
+                    1,
+                ),
+            ],
+            [],
+        )
+
+        status, msg = check_scanner_market_gate_confirmation(cur)
+
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("legacy would-block evidence with labels was negative", msg)
 
 
 if __name__ == "__main__":
