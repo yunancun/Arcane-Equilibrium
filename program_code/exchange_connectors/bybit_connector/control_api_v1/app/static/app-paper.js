@@ -698,9 +698,29 @@ function ocPaperSubtabInit() {
     }, options || {}));
     const body = await resp.json().catch(function () { return {}; });
     if (!resp.ok) {
-      throw new Error("HTTP " + resp.status + " " + JSON.stringify(body).slice(0, 160));
+      const detail = body && body.detail ? body.detail : {};
+      const message = detail && detail.message
+        ? detail.message
+        : JSON.stringify(body).slice(0, 160);
+      const error = new Error("HTTP " + resp.status + " " + message);
+      error.httpStatus = resp.status;
+      error.detail = detail;
+      error.responseBody = body;
+      throw error;
     }
     return body;
+  }
+
+  function _formatQuickReplayError(error) {
+    const detail = error && error.detail ? error.detail : {};
+    const codes = Array.isArray(detail.reason_codes) ? detail.reason_codes : [];
+    const message = detail.message || (error && (error.message || error.name)) || "Error";
+    if (codes.indexOf("replay_full_chain_window_too_large") >= 0
+        || codes.indexOf("replay_full_chain_window_too_large_per_symbol") >= 0) {
+      return "full-chain replay failed: window too large; reduce Max Symbols, choose 1h/4h, or shorten the window. "
+        + message;
+    }
+    return "full-chain replay failed: " + message;
   }
 
   function _parseJsonControl(id, fallback) {
@@ -803,6 +823,10 @@ function ocPaperSubtabInit() {
         String(verdict.tier || "S2_PUBLIC_KLINE_ONLY"),
         String(verdict.tier || "").indexOf("S1") === 0 ? "oc-cell-ok" : "oc-cell-warn",
         "Read-only recorder coverage estimate before launching replay")
+      + _metricCellHtml("oc-replay-preflight-events", "Events / 行情事件",
+        String(data.estimated_event_count || 0),
+        Number(data.estimated_event_count || 0) > 0 ? "oc-cell-ok" : "oc-cell-warn",
+        "Estimated market bars across the selected full-chain symbol scope")
       + _metricCellHtml("oc-replay-preflight-bbo", "BBO / 最優買賣",
         pct(bbo.coverage_ratio), Number(bbo.coverage_ratio || 0) >= 0.8 ? "oc-cell-ok" : "oc-cell-warn",
         "Local market.market_tickers best bid/ask coverage")
@@ -1146,12 +1170,12 @@ function ocPaperSubtabInit() {
       + '<label class="oc-replay-field">Timeframe<select id="oc-replay-quick-timeframe">'
       + '<option value="1m">1m</option><option value="3m">3m</option>'
       + '<option value="5m">5m</option><option value="15m">15m</option>'
-      + '<option value="1h">1h</option><option value="4h">4h</option>'
+      + '<option value="1h" selected>1h</option><option value="4h">4h</option>'
       + '<option value="1d">1d</option></select></label>'
       + '<label class="oc-replay-field">Window Start<input id="oc-replay-quick-window-start" type="datetime-local" value="' + ocEsc(defaults.start) + '" /></label>'
       + '<label class="oc-replay-field">Window End<input id="oc-replay-quick-window-end" type="datetime-local" value="' + ocEsc(defaults.end) + '" /></label>'
       + '<label class="oc-replay-field">Starting Balance<input id="oc-replay-quick-starting-balance" type="number" min="1" step="100" value="10000" /></label>'
-      + '<label class="oc-replay-field">Max Symbols<input id="oc-replay-quick-max-symbols" type="number" min="1" max="25" step="1" value="25" /></label>'
+      + '<label class="oc-replay-field">Max Symbols<input id="oc-replay-quick-max-symbols" type="number" min="1" max="25" step="1" value="2" /></label>'
       + '<label class="oc-replay-field">Category<select id="oc-replay-quick-category">'
       + '<option value="linear">linear</option><option value="spot">spot</option>'
       + '<option value="inverse">inverse</option></select></label>'
@@ -1321,7 +1345,7 @@ function ocPaperSubtabInit() {
         + " symbols=" + (Array.isArray(data.symbols) ? data.symbols.length : 0)
         + " events=" + (data.event_count || 0), "oc-cell-ok");
     } catch (e) {
-      _setReplayStatus("full-chain replay failed: " + (e.message || e.name || "Error"), "oc-cell-warn");
+      _setReplayStatus(_formatQuickReplayError(e), "oc-cell-warn");
     } finally {
       if (btn) btn.disabled = false;
     }

@@ -614,6 +614,14 @@ def test_replay_quick_mode_is_default_and_advanced_is_preserved(
     assert "oc-replay-quick-engine" in app_paper_js
     assert "use_current_config: true" in app_paper_js
     assert "SIMULATION ONLY" in app_paper_js
+    assert '<option value="1h" selected>1h</option>' in app_paper_js
+    assert (
+        'id="oc-replay-quick-max-symbols" type="number" min="1" max="25" '
+        'step="1" value="2"'
+    ) in app_paper_js
+    assert "oc-replay-preflight-events" in app_paper_js
+    assert "replay_full_chain_window_too_large" in app_paper_js
+    assert "reduce Max Symbols, choose 1h/4h, or shorten the window" in app_paper_js
 
 
 def test_replay_tab_copy_mentions_quick_and_advanced(tab_replay_html: str) -> None:
