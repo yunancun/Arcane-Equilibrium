@@ -120,7 +120,7 @@ impl TickPipeline {
             agent_spine_tx: None,
             agent_spine_mode: crate::agent_spine::config::AgentSpineMode::Disabled,
             symbol_registry: None,
-            scanner_authority_mode: crate::scanner::types::ScannerAuthorityMode::LegacyGate,
+            scanner_authority_mode: crate::scanner::types::ScannerAuthorityMode::AdvisoryShadow,
             retriage_last_evict_ms: HashMap::new(),
             // G7-03 Phase B: empty per-symbol HysteresisDetector cache.
             // When `risk.hurst.enabled = false` (default), the helper bypasses
@@ -189,15 +189,15 @@ impl TickPipeline {
         self.governance.set_engine_mode_tag(tag);
     }
 
-    /// Wire the shared scanner SymbolRegistry so new opens are gated to
-    /// scanner-active symbols only. Must be called after construction.
-    /// 接入掃描器 SymbolRegistry，新開倉僅限掃描器活躍交易對。
+    /// Wire the shared scanner SymbolRegistry as market context and
+    /// active-universe evidence. Must be called after construction.
+    /// 接入掃描器 SymbolRegistry 作市場 context 與 active-universe evidence。
     pub fn set_symbol_registry(&mut self, reg: Arc<crate::scanner::registry::SymbolRegistry>) {
         self.symbol_registry = Some(reg);
     }
 
-    /// Set scanner authority mode for the hot-path legacy gate comparison.
-    /// 設定 hot-path legacy scanner gate 比較所用的 scanner 權限模式。
+    /// Set scanner authority audit label for persisted scanner evidence.
+    /// 設定持久化 scanner evidence 使用的權限審計標籤。
     pub fn set_scanner_authority_mode(
         &mut self,
         mode: crate::scanner::types::ScannerAuthorityMode,

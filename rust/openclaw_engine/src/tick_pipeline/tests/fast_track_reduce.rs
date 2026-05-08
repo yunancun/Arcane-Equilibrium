@@ -618,7 +618,7 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
 }
 
 #[test]
-fn scanner_authority_shadow_records_legacy_gate_without_enforcing() {
+fn scanner_authority_records_legacy_would_block_without_enforcing() {
     use crate::scanner::types::ScannerAuthorityMode;
 
     let reason = super::super::on_tick_helpers::scanner_legacy_new_open_block_reason(
@@ -629,7 +629,7 @@ fn scanner_authority_shadow_records_legacy_gate_without_enforcing() {
     )
     .expect("legacy gate should compute inactive-universe reason");
     let audit = super::super::on_tick_helpers::ScannerGateAudit::new(
-        ScannerAuthorityMode::AdvisoryShadow,
+        ScannerAuthorityMode::LegacyGate,
         Some(reason),
     );
 
@@ -638,14 +638,5 @@ fn scanner_authority_shadow_records_legacy_gate_without_enforcing() {
         audit.legacy_block_reason.as_deref(),
         Some("scanner_active_universe:inactive")
     );
-    assert!(
-        !super::super::on_tick_helpers::scanner_authority_enforces_legacy_new_open_gate(
-            audit.authority_mode
-        )
-    );
-    assert!(
-        super::super::on_tick_helpers::scanner_authority_enforces_legacy_new_open_gate(
-            ScannerAuthorityMode::LegacyGate
-        )
-    );
+    assert_eq!(audit.authority_mode, ScannerAuthorityMode::LegacyGate);
 }

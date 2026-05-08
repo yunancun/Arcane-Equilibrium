@@ -249,8 +249,8 @@ pub(crate) struct IntentScannerContext {
     pub raw_score: f64,
 }
 
-/// Scanner gate audit for the legacy hot-path comparison.
-/// scanner legacy hot-path gate 的比較審計。
+/// Scanner evidence audit for legacy would-block calculations.
+/// scanner legacy would-block 計算的 evidence 審計。
 #[derive(Debug, Clone)]
 pub(crate) struct ScannerGateAudit {
     pub authority_mode: ScannerAuthorityMode,
@@ -269,11 +269,6 @@ impl ScannerGateAudit {
             legacy_block_reason,
         }
     }
-}
-
-#[inline]
-pub(crate) fn scanner_authority_enforces_legacy_new_open_gate(mode: ScannerAuthorityMode) -> bool {
-    matches!(mode, ScannerAuthorityMode::LegacyGate)
 }
 
 pub(crate) fn scanner_opportunity_canary_reason(

@@ -10,7 +10,7 @@
 //!     A1. Liquidation distance too close: |mark - liq| / mark < 10%
 //!     A2. Global CircuitBreaker active (risk level ≥ CB)
 //!     A3. Notional > max_order_notional_usdt (when cap configured)
-//!     A4. REMOVED — scanner universe gating moved to tick_pipeline (SCANNER-GATE)
+//!     A4. REMOVED — scanner universe findings are evidence, not orphan hard safety
 //!
 //!   Stage B — soft eval (conservative close only, Phase 1):
 //!     B1. All known strategies have non-positive edge on symbol AND
@@ -244,14 +244,13 @@ pub fn handle_orphan(ctx: &OrphanContext) -> OrphanDecision {
         }
     }
 
-    // ── Stage A4: REMOVED (SCANNER-GATE fix) ───────────────────────────────
-    // Scanner rotation ≠ orphan. Orphan = restart-leftover only. New opens are
-    // now gated at the tick_pipeline level (SymbolRegistry check before intent
-    // dispatch), so a position that the engine chose to open should never be
-    // force-closed just because the scanner rotated the symbol out. The enum
-    // variant `HardSafetyNotInUniverse` is kept for DB backward compat.
-    // 掃描器輪替 ≠ 孤兒。孤兒僅指重啟後遺留的舊倉位。新開倉已在 tick_pipeline
-    // 層由 SymbolRegistry 門控，引擎主動開的倉不應因掃描器輪替而被強平。
+    // ── Stage A4: REMOVED (scanner evidence only) ─────────────────────────
+    // Scanner rotation ≠ orphan. Orphan = restart-leftover only. Scanner
+    // active-universe findings are persisted as evidence in tick_pipeline and
+    // must not force-close a position just because the symbol rotated out. The
+    // enum variant `HardSafetyNotInUniverse` is kept for DB backward compat.
+    // 掃描器輪替 ≠ 孤兒。孤兒僅指重啟後遺留的舊倉位。scanner active-universe
+    // findings 在 tick_pipeline 持久化為 evidence，不應因掃描器輪替而強平倉位。
     // enum 變體保留以相容歷史 DB 資料。
 
     // ── Stage B: edge-based branch (Phase 2A)─────────────────────────────

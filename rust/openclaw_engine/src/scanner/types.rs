@@ -13,13 +13,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Scanner authority mode contract for M2 advisory conversion.
-/// M2 scanner advisory conversion 的權限模式合約。
+/// Scanner authority audit label for M2 advisory conversion.
+/// Scanner is always a market-context/evidence infrastructure surface at runtime;
+/// these values are retained for JSON/DB compatibility and historical reports.
+/// M2 scanner advisory conversion 的審計標籤。
+/// runtime 中 scanner 永遠是市場 context / evidence 基礎設施；這些值只保留
+/// JSON/DB 相容與歷史報告用途。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScannerAuthorityMode {
-    /// Current compatibility behavior: scanner may gate demo/live_demo new opens.
-    /// 當前兼容行為：scanner 可門控 demo/live_demo 新開倉。
+    /// Deprecated wire value: legacy would-block evidence only; no runtime hard gate.
+    /// 已棄用 wire value：只表示 legacy would-block evidence；runtime 不作 hard gate。
     LegacyGate,
     /// Compute and record legacy would-block decisions without suppressing opens.
     /// 計算並記錄 legacy would-block，但不阻擋新開倉。
@@ -31,7 +35,7 @@ pub enum ScannerAuthorityMode {
 
 impl Default for ScannerAuthorityMode {
     fn default() -> Self {
-        Self::LegacyGate
+        Self::AdvisoryShadow
     }
 }
 

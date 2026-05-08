@@ -971,14 +971,14 @@ pub struct TickPipeline {
     /// W-B：Agent Decision Spine runtime shadow writer，可選；None 時停用且不影響交易權限。
     agent_spine_tx: Option<tokio::sync::mpsc::Sender<crate::agent_spine::store::AgentSpineMsg>>,
     agent_spine_mode: crate::agent_spine::config::AgentSpineMode,
-    /// Scanner symbol registry — gates new opens to scanner-active symbols only.
-    /// None = gate disabled (all symbols allowed, e.g. tests / standalone).
-    /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。
-    /// None = 門控停用（允許所有交易對，如測試/獨立運行）。
+    /// Scanner symbol registry — always-on market context and active-universe
+    /// evidence. It does not grant or remove order authority.
+    /// 掃描器交易對注冊表 — 常開的市場 context 與 active-universe evidence；
+    /// 不授予或移除下單權限。
     symbol_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
-    /// Scanner authority mode controlling whether legacy scanner would-block
-    /// decisions enforce or only record advisory evidence.
-    /// scanner 權限模式，控制 legacy scanner would-block 是執行還是只記錄。
+    /// Scanner authority audit label retained for compatibility. Runtime scanner
+    /// would-block decisions are evidence only.
+    /// scanner 權限審計標籤，僅為相容保留；runtime scanner would-block 只作 evidence。
     scanner_authority_mode: crate::scanner::types::ScannerAuthorityMode,
     /// DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): per-symbol last `NeedsEviction`
     /// dispatch timestamp (ms since epoch). Used to rate-limit `ipc_close_symbol`

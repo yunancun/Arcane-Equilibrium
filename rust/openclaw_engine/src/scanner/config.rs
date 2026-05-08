@@ -564,9 +564,9 @@ pub struct MarketJudgmentConfig {
     /// BB 突破所需最低 24h 淨移動。
     #[serde(default = "default_breakout_min_dir_pct")]
     pub breakout_min_dir_pct: f64,
-    /// Funding arb is hard-gated when price trend is too directional.
+    /// Funding arb route fitness is penalized when price trend is too directional.
     /// Funding arb depends on funding capture, not chasing one-way shocks.
-    /// 價格趨勢過強時硬阻擋 funding arb；funding arb 依賴 funding capture，
+    /// 價格趨勢過強時降低 funding arb route fitness；funding arb 依賴 funding capture，
     /// 不是追逐單邊衝擊。
     #[serde(default = "default_funding_max_dir_pct")]
     pub funding_max_dir_pct: f64,
@@ -906,11 +906,16 @@ impl OpportunityConfig {
 
 // ─── ScannerConfig ────────────────────────────────────────────────────────────
 
-/// Scanner authority mode config.
+/// Scanner authority audit label config.
 /// TOML:
 /// [authority]
 /// mode = "legacy_gate" | "advisory_shadow" | "advisory_enforced"
-/// 掃描器權限模式配置。
+///
+/// This does not enable/disable scanner infrastructure and does not grant
+/// order authority. Runtime scanner output is always advisory evidence; the
+/// field is kept only for historical TOML/DB compatibility.
+/// Scanner 權限審計標籤配置。它不開關 scanner 基礎設施，也不授予下單權限；
+/// runtime scanner 輸出永遠是 advisory evidence，此欄位僅保留歷史 TOML/DB 相容。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorityConfig {
     #[serde(default)]
@@ -920,7 +925,7 @@ pub struct AuthorityConfig {
 impl Default for AuthorityConfig {
     fn default() -> Self {
         Self {
-            mode: ScannerAuthorityMode::LegacyGate,
+            mode: ScannerAuthorityMode::AdvisoryShadow,
         }
     }
 }
@@ -986,7 +991,7 @@ mod tests {
     fn test_default_scanner_config_valid() {
         let cfg = ScannerConfig::default();
         assert!(cfg.validate().is_ok());
-        assert_eq!(cfg.authority.mode, ScannerAuthorityMode::LegacyGate);
+        assert_eq!(cfg.authority.mode, ScannerAuthorityMode::AdvisoryShadow);
     }
 
     #[test]
@@ -1036,7 +1041,7 @@ mod tests {
         let partial = "[scheduling]\nscan_interval_secs = 900\n";
         let cfg: ScannerConfig = toml::from_str(partial).unwrap();
         assert_eq!(cfg.scheduling.scan_interval_secs, 900);
-        assert_eq!(cfg.authority.mode, ScannerAuthorityMode::LegacyGate);
+        assert_eq!(cfg.authority.mode, ScannerAuthorityMode::AdvisoryShadow);
         // Other fields should still use defaults
         assert_eq!(cfg.hard_filters.min_turnover_24h_usdt, 50_000_000.0);
         assert_eq!(cfg.anti_churn.min_hold_cycles, 2);
