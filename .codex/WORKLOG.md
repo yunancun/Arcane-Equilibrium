@@ -214,3 +214,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-3 source checkpoint: added F-17 lease-router dynamic status source/API/GUI wiring, F-15 lease flag flip writer/e2e regression coverage, and AMD-2026-05-09-01 draft SM-05 polling design for `ExecutorConfigCache`
 - F-01 remains blocked by `P0-DECISION-AUDIT-2`; this checkpoint does not decide whether the 5-Agent Executor is temporary demo-promotion capable or permanently shadow-only
 - verification: Python governance route pytest 113/0, Settings static pytest 48/0, Rust F-15 writer regression 1/0, risk runtime status regression 1/0, `cargo check -p openclaw_engine --bin openclaw-engine` PASS with pre-existing warnings, `git diff --check` PASS
+
+2026-05-09 CEST
+- started W-AUDIT-4 with source-only V076 Guard A retrofit for legacy V062/V063/V065 contracts
+- added read-only `V076__guard_v062_v063_v065.sql` checks for scanner decay advisory table, market ticker funding_rate replay column, and OpenClaw proposal/approval/channel ledger safety constraints/indexes
+- verification: V076 migration static pytest 5/0, py_compile PASS; no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
