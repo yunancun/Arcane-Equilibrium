@@ -6,11 +6,6 @@
 version = 1
 saved_ts_ms = 0
 
-[authority]
-# Scanner is a market-context and attribution surface here. Keep legacy
-# would-block evidence in intent details without suppressing new opens.
-mode = "advisory_shadow"
-
 [scheduling]
 scan_interval_secs = 1800   # 30 minutes / 30 分鐘
 warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等待 60 秒
@@ -71,9 +66,9 @@ reversion_max_trend_score = 0.60
 breakout_min_trend_score = 0.50
 breakout_min_dir_pct = 1.8
 
-# Funding arb is hard-gated in directional momentum. The current v2 behaves as a
-# directional perp trade without verified funding capture, so one-way shocks must
-# not reach demo/live_demo entry.
+# Funding arb route fitness is penalized in directional momentum. The current v2
+# behaves as a directional perp trade without verified funding capture, so one-way
+# shocks are recorded as scanner evidence rather than scanner-side hard gates.
 funding_max_dir_pct = 4.0
 funding_max_trend_score = 0.65
 

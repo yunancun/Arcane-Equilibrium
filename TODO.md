@@ -167,7 +167,7 @@ Dates are planning windows, not automatic authorization.
   PM`.
 - Commit each green checkpoint with subject and body, push to origin, then
   sync Linux by fast-forward.
-- Do not rebuild, restart, mutate live auth, change scanner authority, unlock
+- Do not rebuild, restart, mutate live auth, change scanner evidence contract, unlock
   executor shadow, enable lease-router, or add OpenClaw write/proposal routes
   unless the operator explicitly authorizes that action.
 

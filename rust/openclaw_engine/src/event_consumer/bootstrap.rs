@@ -333,13 +333,14 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         pipeline.paper_state.set_positions_mirror(mirror);
     }
 
-    // SCANNER-GATE: wire SymbolRegistry into pipeline so new opens are gated
-    // to scanner-active symbols only (prevents open→orphan-close death loop).
+    // SCANNER-EVIDENCE: wire SymbolRegistry into the pipeline as always-on
+    // market context / active-universe evidence. It does not hard-gate opens.
     // The loop's event arm (D2 diff) also reads this Arc, so we'll carry it
     // through in `BootstrappedRuntime.symbol_registry` — clone before the
     // triage `ref` borrow below.
-    // SCANNER-GATE：接入 SymbolRegistry，新開倉僅限掃描器活躍交易對。
-    // 主迴圈事件 arm（D2 差分）亦讀此 Arc，故在 triage 的 ref 借用前先 clone 轉出。
+    // SCANNER-EVIDENCE：接入 SymbolRegistry 作常開市場 context / active-universe
+    // evidence；它不 hard-gate 新開倉。主迴圈事件 arm（D2 差分）亦讀此 Arc，
+    // 故在 triage 的 ref 借用前先 clone 轉出。
     let symbol_registry_for_loop: Option<Arc<crate::scanner::registry::SymbolRegistry>> =
         symbol_registry.as_ref().map(Arc::clone);
     if let Some(ref reg) = symbol_registry {
