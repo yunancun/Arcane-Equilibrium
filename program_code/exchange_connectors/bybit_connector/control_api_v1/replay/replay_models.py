@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -66,7 +66,7 @@ class ReplayRunRequest(BaseModel):
         ),
     )
 
-    @validator("experiment_id")
+    @field_validator("experiment_id")
     def _validate_experiment_id(cls, v: str) -> str:
         # Alphanumeric + hyphen/underscore only (path-injection guard).
         # 只允許字母數字+連字號/底線（防 path injection）。
