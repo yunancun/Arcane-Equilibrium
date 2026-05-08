@@ -572,6 +572,7 @@ impl TickPipeline {
                                         approved_qty: final_qty,
                                         reference_price: event.last_price,
                                         verdict_info: gate.verdict_info.as_ref(),
+                                        lease_id: gate.lease_id.as_deref(),
                                         order_link_id: Some(order_link_id.as_str()),
                                     },
                                 );
@@ -774,6 +775,7 @@ impl TickPipeline {
                                         approved_qty: result.approved_qty,
                                         reference_price: event.last_price,
                                         verdict_info: result.verdict_info.as_ref(),
+                                        lease_id: result.lease_id.as_deref(),
                                         order_link_id: None,
                                     },
                                 );

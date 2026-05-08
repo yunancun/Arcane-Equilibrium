@@ -144,6 +144,7 @@ fn runtime_shadow_lineage_emits_complete_demo_chain() {
             approved_qty: 0.75,
             reference_price: 101.20,
             verdict_info: Some(&verdict),
+            lease_id: Some("bypass"),
             order_link_id: Some("oc_900_1"),
         },
     );
@@ -181,6 +182,11 @@ fn runtime_shadow_lineage_emits_complete_demo_chain() {
     assert!(objects
         .iter()
         .any(|object| object.object_type == DecisionObjectType::ExecutionPlan));
+    let plan_object = objects
+        .iter()
+        .find(|object| object.object_type == DecisionObjectType::ExecutionPlan)
+        .expect("execution plan object");
+    assert_eq!(plan_object.lease_id.as_deref(), Some("bypass"));
     assert!(objects
         .iter()
         .any(|object| object.object_type == DecisionObjectType::ExecutionReport));
@@ -218,6 +224,7 @@ fn runtime_shadow_lineage_is_disabled_for_unscoped_modes() {
             approved_qty: 0.75,
             reference_price: 101.20,
             verdict_info: None,
+            lease_id: None,
             order_link_id: None,
         },
     );
@@ -235,6 +242,7 @@ fn runtime_shadow_lineage_is_disabled_for_unscoped_modes() {
             approved_qty: 0.75,
             reference_price: 101.20,
             verdict_info: None,
+            lease_id: None,
             order_link_id: None,
         },
     );

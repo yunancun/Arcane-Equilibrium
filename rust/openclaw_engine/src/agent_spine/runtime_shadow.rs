@@ -29,6 +29,7 @@ pub struct RuntimeShadowLineageInput<'a> {
     pub approved_qty: f64,
     pub reference_price: f64,
     pub verdict_info: Option<&'a VerdictInfo>,
+    pub lease_id: Option<&'a str>,
     pub order_link_id: Option<&'a str>,
 }
 
@@ -166,7 +167,7 @@ pub fn emit_entry_lineage(
         anti_hunt_stop_policy: json!({}),
         lease_scope: Some("TRADE_ENTRY".to_string()),
         lease_ttl_ms: Some(30_000),
-        lease_id: None,
+        lease_id: input.lease_id.map(str::to_string),
         idempotency_key: format!(
             "shadow_execution_plan:{}:{}",
             input.engine_mode, order_plan_id
