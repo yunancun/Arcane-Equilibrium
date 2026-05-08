@@ -79,12 +79,12 @@ from __future__ import annotations
 # RFC v2 §3 R-meta + §4 lease_revoke_triggers 閾值。
 # ---------------------------------------------------------------------------
 # Five LG-5 strategies per RFC v2 §3 R-meta — attribution dict keyed by
-# these strategy names. Missing strategy → defer (producer bug, treated as
-# 0.0 ratio for this healthcheck so it surfaces). Keep in sync with
-# strategy_params_demo.toml [<strategy>] sections + scout/strategist allow-list.
+# these strategy names. Missing / low-sample strategies are a sample-maturity
+# watch, not a ratio failure. Keep in sync with strategy_params_demo.toml
+# [<strategy>] sections + scout/strategist allow-list.
 # 五個 LG-5 strategy（RFC v2 §3）— attribution dict 以這些 key 切片。
-# Missing strategy 視為 0.0（暴露 producer bug）。與 strategy_params_demo.toml
-# 同步。
+# Missing / low-sample strategy 是樣本成熟度 watch，不是 ratio failure。
+# 與 strategy_params_demo.toml 同步。
 LG5_STRATEGIES: tuple[str, ...] = (
     "grid_trading",
     "ma_crossover",
@@ -133,6 +133,34 @@ ATTRIBUTION_DRIFT_WINDOW_3D: str = "interval '3 days'"
 # `[42]` 未審計候選數的嚴重度分級。
 UNAUDITED_PASS_MAX: int = 0
 UNAUDITED_WARN_MAX: int = 2  # > 2 → FAIL
+
+
+def _format_attribution_summary(
+    ratios: dict[str, float], totals: dict[str, int]
+) -> str:
+    parts: list[str] = []
+    for strategy in LG5_STRATEGIES:
+        total = totals[strategy]
+        if total < ATTRIBUTION_MIN_SETTLED_SAMPLES:
+            need = ATTRIBUTION_MIN_SETTLED_SAMPLES - total
+            parts.append(f"{strategy}=LOW_SAMPLE(n={total}, need={need})")
+        else:
+            parts.append(f"{strategy}={ratios[strategy]:.3f}(n={total})")
+    return ", ".join(parts)
+
+
+def _format_low_sample_watch(totals: dict[str, int], low_samples: list[str]) -> str:
+    if not low_samples:
+        return ""
+    details = ", ".join(
+        f"{strategy}(n={totals[strategy]}, need={ATTRIBUTION_MIN_SETTLED_SAMPLES - totals[strategy]})"
+        for strategy in low_samples
+    )
+    return (
+        "sample-maturity watch only; low settled sample strategies "
+        f"(floor n>={ATTRIBUTION_MIN_SETTLED_SAMPLES}): {details}; "
+        "R-meta will defer those strategies, but this is not attribution drift"
+    )
 
 
 def check_42_live_candidate_eval_contract(cur) -> tuple[str, str]:
@@ -385,14 +413,13 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
     eligible = [s for s in LG5_STRATEGIES if totals[s] >= ATTRIBUTION_MIN_SETTLED_SAMPLES]
     low_samples = [s for s in LG5_STRATEGIES if totals[s] < ATTRIBUTION_MIN_SETTLED_SAMPLES]
     if not eligible:
-        summary = ", ".join(
-            f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
-        )
+        summary = _format_attribution_summary(ratios, totals)
         return (
             "WARN",
             "7d per-strategy settled attribution_chain_ok ratio: "
             f"{summary} — all strategies below settled sample floor "
-            f"n<{ATTRIBUTION_MIN_SETTLED_SAMPLES}; R-meta will defer low-sample strategies",
+            f"n<{ATTRIBUTION_MIN_SETTLED_SAMPLES}; "
+            "sample-maturity watch only; R-meta will defer low-sample strategies",
         )
 
     # Determine worst eligible strategy (lowest ratio) for the verdict + msg.
@@ -400,9 +427,7 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
     worst_strategy = min(eligible, key=lambda s: ratios[s])
     worst_ratio = ratios[worst_strategy]
 
-    summary = ", ".join(
-        f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
-    )
+    summary = _format_attribution_summary(ratios, totals)
     base = (
         f"7d per-strategy settled attribution_chain_ok ratio: {summary}; "
         f"worst={worst_strategy}@{worst_ratio:.3f}"
@@ -416,8 +441,8 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
             return (
                 "WARN",
                 base
-                + " — eligible strategies pass R-meta floor; low settled sample strategies: "
-                + ", ".join(f"{s}(n={totals[s]})" for s in low_samples),
+                + " — eligible strategies pass R-meta floor; "
+                + _format_low_sample_watch(totals, low_samples),
             )
         return ("PASS", base + " — all strategies ≥ 0.50 R-meta floor")
     if worst_ratio >= ATTRIBUTION_RATIO_WARN_FLOOR:
@@ -889,14 +914,13 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
     eligible = [s for s in LG5_STRATEGIES if totals[s] >= ATTRIBUTION_MIN_SETTLED_SAMPLES]
     low_samples = [s for s in LG5_STRATEGIES if totals[s] < ATTRIBUTION_MIN_SETTLED_SAMPLES]
     if not eligible:
-        summary = ", ".join(
-            f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
-        )
+        summary = _format_attribution_summary(ratios, totals)
         return (
             "WARN",
             "3d per-strategy settled attribution_chain_ok ratio "
             f"(R-meta gate aligned): {summary} — all strategies below settled sample floor "
-            f"n<{ATTRIBUTION_MIN_SETTLED_SAMPLES}; R-meta will defer low-sample strategies",
+            f"n<{ATTRIBUTION_MIN_SETTLED_SAMPLES}; "
+            "sample-maturity watch only; R-meta will defer low-sample strategies",
         )
 
     # Determine worst eligible strategy (lowest ratio) for the verdict + msg.
@@ -904,9 +928,7 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
     worst_strategy = min(eligible, key=lambda s: ratios[s])
     worst_ratio = ratios[worst_strategy]
 
-    summary = ", ".join(
-        f"{s}={ratios[s]:.3f}(n={totals[s]})" for s in LG5_STRATEGIES
-    )
+    summary = _format_attribution_summary(ratios, totals)
     base = (
         f"3d per-strategy settled attribution_chain_ok ratio "
         f"(R-meta gate aligned): {summary}; "
@@ -924,8 +946,8 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
             return (
                 "WARN",
                 base
-                + " — eligible strategies pass R-meta floor; low settled sample strategies: "
-                + ", ".join(f"{s}(n={totals[s]})" for s in low_samples),
+                + " — eligible strategies pass R-meta floor; "
+                + _format_low_sample_watch(totals, low_samples),
             )
         return (
             "PASS",
