@@ -1182,6 +1182,27 @@ def check_realized_edge_acceptance(cur) -> tuple[str, str]:
             (EDGE_ACCEPTANCE_BAD_CELL_MIN_N, EDGE_ACCEPTANCE_BAD_CELL_MAX_AVG_BPS),
         )
         bad_rows = cur.fetchall() or []
+        cur.execute(
+            """
+            SELECT
+              string_agg(DISTINCT engine_mode, '+' ORDER BY engine_mode) AS engine_modes,
+              strategy_name,
+              symbol,
+              COUNT(*)::int,
+              AVG(net_bps_after_fee)::float8
+            FROM learning.mlde_edge_training_rows
+            WHERE ts > now() - interval '24 hours'
+              AND engine_mode IN ('demo', 'live_demo')
+              AND attribution_chain_ok
+              AND net_bps_after_fee IS NOT NULL
+            GROUP BY strategy_name, symbol
+            HAVING COUNT(*) >= %s AND AVG(net_bps_after_fee) < %s
+            ORDER BY AVG(net_bps_after_fee), COUNT(*) DESC
+            LIMIT 6
+            """,
+            (EDGE_ACCEPTANCE_BAD_CELL_MIN_N, EDGE_ACCEPTANCE_BAD_CELL_MAX_AVG_BPS),
+        )
+        combined_bad_rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"edge acceptance query failed: {type(exc).__name__}: {exc}")
 
@@ -1225,8 +1246,19 @@ def check_realized_edge_acceptance(cur) -> tuple[str, str]:
         f"{r[0]}/{r[1]}/{r[2]} n={_as_int(r[3])} avg={_as_float(r[4]):.2f}bps"
         for r in bad_rows
     ]
+    combined_bad_parts = [
+        f"{r[0]}/{r[1]}/{r[2]} n={_as_int(r[3])} avg={_as_float(r[4]):.2f}bps"
+        for r in combined_bad_rows
+    ]
     if bad_parts:
         return ("FAIL", base + " — negative cells still active: " + "; ".join(bad_parts))
+    if combined_bad_parts:
+        return (
+            "FAIL",
+            base
+            + " — negative cells still active across demo/live_demo: "
+            + "; ".join(combined_bad_parts),
+        )
 
     warnings: list[str] = []
     if total >= EDGE_ACCEPTANCE_MIN_SAMPLE and avg_net <= EDGE_ACCEPTANCE_MIN_AVG_NET_BPS:
