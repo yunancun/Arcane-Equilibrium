@@ -104,7 +104,7 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 - GUI is Vanilla JS; do not introduce React/Vue/Angular. GUI write surfaces must write through Rust authority, not Python-only fake-success paths.
 - Path handling must remain portable for a future Apple Silicon runtime. New code must not hard-code `/home/ncyu`, `/Users/ncyu`, or machine-specific TradeBot paths.
 - Meta-doc commits in a dirty multi-session tree should use `git commit --only <file>` so unrelated WIP is not staged.
-- Linear is the only active external workflow integration. Notion is frozen; Drive is passive; Coupler, MotherDuck, and Slack are declined unless the operator explicitly reopens them.
+- GitHub Issues is the active issue tracker for mattpocock engineering skills and new issue/PRD workflow as of the 2026-05-08 operator decision. Linear is historical/passive unless the operator explicitly reopens it. Notion is frozen; Drive is passive; Coupler, MotherDuck, and Slack are declined unless the operator explicitly reopens them.
 - Governance register path in this repo is `docs/governance_dev/SPECIFICATION_REGISTER.md`. The older shorthand `docs/SPECIFICATION_REGISTER.md` is not present.
 
 ## Architecture and deployment invariants

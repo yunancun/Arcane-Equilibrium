@@ -476,11 +476,11 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ---
 
-## 十一、外部整合工具映射（**Linear-only active** posture）
+## 十一、外部整合工具映射（**GitHub Issues active** posture）
 
 **核心原則**：**git `srv/` 是唯一 source of truth**。外部工具僅為 *view layer*、*artifact store*，永不擁有交易參數 / 代碼 / 政策的權威。任何衝突一律以 git 為準。
 
-**Posture（2026-04-29 operator 決定）**：**Linear 是唯一 active workflow tool**。其他工具不融入工作流。
+**Posture（2026-05-08 operator 決定）**：**GitHub Issues 是 active issue tracker**。Linear 僅保留為歷史 / passive 參考，除非 operator 明確重新開啟。
 
 ### `.codex/` 平行目錄角色（2026-05-02 operator 決定）
 
@@ -496,7 +496,8 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | 工具 | 狀態 | 用途 |
 |---|---|---|
 | `srv/` git | **Source of truth** | 代碼 / CLAUDE.md / TODO.md / memory / docs |
-| **Linear** | **🟢 ACTIVE** | 62-finding remediation tracker |
+| **GitHub Issues** | **🟢 ACTIVE** | issue / PRD / mattpocock engineering skills tracker |
+| **Linear** | **🟡 HISTORICAL / PASSIVE** | 既有 62-finding remediation tracker 參考；不再作為新 issue 默認入口 |
 | **Notion** | **❄️ FROZEN** | 2026-04-29 bootstrap 快照（5 pages），不再同步 |
 | **Google Drive** | **🟡 PASSIVE** | 按需 binary artifact，0 SOP |
 | **Coupler.io** | **❌ DECLINED** | 不啟用 dataflow |
@@ -505,23 +506,40 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ### Bootstrap 入口
 
-- **Linear**：team `NCYu` · project [`OpenClaw 62-Finding Remediation`](https://linear.app/ncyu/project/openclaw-62-finding-remediation-de1bc8f68e42)
+- **GitHub Issues**：repo `yunancun/BybitOpenClaw`；詳 `docs/agents/issue-tracker.md`
+- **Linear (historical/passive)**：team `NCYu` · project [`OpenClaw 62-Finding Remediation`](https://linear.app/ncyu/project/openclaw-62-finding-remediation-de1bc8f68e42)
 - **Notion (frozen)**：[OpenClaw — Operator Hub](https://www.notion.so/350dcd3b1eff81038de2d10874ae0fe4)
 
 ### SOP（簡化版）
 
-**PM**：Wave/Batch Sign-off 後更新對應 Linear 父 issue（description checklist + status flip）；**Notion 不更新**；新 finding 判斷是否 mainline，是則建 Linear issue。**不要**把 TODO.md 全鏡像 Linear。
+**PM**：Wave/Batch Sign-off 後按需更新對應 GitHub issue（description checklist + status flip）；**Notion 不更新**；新 finding 判斷是否 mainline，是則建 GitHub issue。**不要**把 TODO.md 全鏡像 GitHub Issues。
 
-**PA / 審計 agents**：RFC / audit 寫入 `docs/CCAgentWorkSpace/.../reports/` 或 `docs/audits/` / `.claude_reports/`。**不要**寫 Notion；**不要**直接寫 Linear（PM 提案）。
+**PA / 審計 agents**：RFC / audit 寫入 `docs/CCAgentWorkSpace/.../reports/` 或 `docs/audits/` / `.claude_reports/`。**不要**寫 Notion；issue 發布走 `docs/agents/issue-tracker.md` 的 GitHub workflow。
 
 ### 嚴禁事項
 
-- 把 Linear / Notion 當有否決權；它們鏡像，git 決策
-- 自動同步 TODO.md → Linear；策展鏡像 only
+- 把 GitHub Issues / Linear / Notion 當有否決權；它們鏡像，git 決策
+- 自動同步 TODO.md → GitHub Issues；策展鏡像 only
 - 在任何外部工具發布 secrets / API keys / authorization tokens
 - 啟用 Coupler.io dataflow / authenticate Slack（已 declined）
 - 未經 operator 授權發布 runtime engine state 到任何外部工具
 
 ### 重新評估觸發點
 
-只有以下情況才考慮重啟 declined 工具：**Coupler.io**（本機 DuckDB / psql 真不可行）/ **Slack**（approaching live ~2026-05-15 需 mobile alert）/ **MotherDuck**（見 `memory/reference_external_tools.md`）/ **Notion**（operator 主動要求重新融入）。
+只有以下情況才考慮重啟 declined / passive 工具：**Linear**（operator 主動要求重新融入）/ **Coupler.io**（本機 DuckDB / psql 真不可行）/ **Slack**（approaching live ~2026-05-15 需 mobile alert）/ **MotherDuck**（見 `memory/reference_external_tools.md`）/ **Notion**（operator 主動要求重新融入）。
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs for mattpocock engineering skills are tracked in GitHub Issues for `yunancun/BybitOpenClaw`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five-label triage vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
