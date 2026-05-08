@@ -6,6 +6,11 @@
 version = 1
 saved_ts_ms = 0
 
+[authority]
+# Scanner is a market-context and attribution surface here. Keep legacy
+# would-block evidence in intent details without suppressing new opens.
+mode = "advisory_shadow"
+
 [scheduling]
 scan_interval_secs = 1800   # 30 minutes / 30 分鐘
 warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等待 60 秒
