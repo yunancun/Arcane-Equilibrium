@@ -116,6 +116,7 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
         self.assertEqual(status, "PASS", msg)
         self.assertIn("opportunity shadow contract healthy", msg)
         self.assertIn("positive_avg=18.00bps", msg)
+        self.assertIn("MATURE(n=14)", msg)
 
     def test_fail_when_positive_lcb_bucket_is_realized_negative(self) -> None:
         cur = _build_cur(
@@ -173,6 +174,32 @@ class TestScannerOpportunityShadowAcceptance(unittest.TestCase):
         status, msg = check_scanner_opportunity_shadow_acceptance(cur)
         self.assertEqual(status, "WARN", msg)
         self.assertIn("exploration positive LCB bucket is negative", msg)
+        self.assertIn("LOW_SAMPLE(n=0, need=10)", msg)
+
+    def test_warn_when_calibrated_opportunity_positive_sample_is_immature(self) -> None:
+        cur = _build_cur(
+            [
+                *_TABLES_OK,
+                (200, 200, 4),
+                (12, 12),
+                (
+                    40,
+                    OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE,
+                    0,
+                    12.0,
+                    8.0,
+                    None,
+                    4.0,
+                    0.30,
+                ),
+                (0, 0, None, None, None),
+            ],
+            [],
+        )
+        status, msg = check_scanner_opportunity_shadow_acceptance(cur)
+        self.assertEqual(status, "WARN", msg)
+        self.assertIn("calibrated opportunity_positive sample is LOW_SAMPLE", msg)
+        self.assertIn("keep scanner opportunity shadow-only", msg)
 
     def test_warn_when_positive_lcb_rejects_were_profitable_counterfactuals(self) -> None:
         cur = _build_cur(

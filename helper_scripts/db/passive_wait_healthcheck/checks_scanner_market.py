@@ -280,6 +280,12 @@ def _fmt_float(value: object, suffix: str = "") -> str:
         return "n/a"
 
 
+def _sample_floor_state(sample_n: int, floor: int) -> str:
+    if sample_n >= floor:
+        return f"MATURE(n={sample_n})"
+    return f"LOW_SAMPLE(n={sample_n}, need={floor - sample_n})"
+
+
 def check_scanner_opportunity_shadow_acceptance(cur) -> tuple[str, str]:
     """[51] Verify scanner opportunity shadow coverage and calibration.
 
@@ -545,6 +551,10 @@ LIMIT 6
 
     route_coverage = (route_opp_n / route_n) if route_n else 1.0
     intent_coverage = (intent_opp_n / intent_n) if intent_n else 1.0
+    opportunity_positive_state = _sample_floor_state(
+        opportunity_positive_n,
+        OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE,
+    )
     rejected_regret_summary = (
         f"rejected_labels={rejected_label_n}, "
         f"positive_lcb_reject_n={positive_lcb_reject_n}, "
@@ -562,7 +572,7 @@ LIMIT 6
         f"{OPPORTUNITY_SHADOW_LABEL_WINDOW_HOURS}h labels={label_n}, "
         f"positive_lcb_n={positive_lcb_n}, avg_net={_fmt_float(avg_net, 'bps')}, "
         f"positive_avg={_fmt_float(positive_avg_net, 'bps')}, "
-        f"opportunity_positive_n={opportunity_positive_n}, "
+        f"opportunity_positive_n={opportunity_positive_n} ({opportunity_positive_state}), "
         f"opportunity_positive_avg={_fmt_float(opportunity_positive_avg_net, 'bps')}, "
         f"nonpositive_avg={_fmt_float(nonpositive_avg_net, 'bps')}, "
         f"corr={_fmt_float(corr)}; "
@@ -628,6 +638,20 @@ LIMIT 6
         return (
             "WARN",
             base
-            + " — exploration positive LCB bucket is negative post-fee; keep scanner opportunity shadow-only",
+            + " — exploration positive LCB bucket is negative post-fee; "
+            "calibrated opportunity_positive sample is "
+            + opportunity_positive_state
+            + "; keep scanner opportunity shadow-only",
         )
-    return ("PASS", base + " — opportunity shadow contract healthy")
+    if opportunity_positive_n < OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_SAMPLE:
+        return (
+            "WARN",
+            base
+            + " — calibrated opportunity_positive sample is "
+            + opportunity_positive_state
+            + "; keep scanner opportunity shadow-only until calibrated samples mature",
+        )
+    return (
+        "PASS",
+        base + " — opportunity shadow contract healthy; calibrated positive bucket mature",
+    )
