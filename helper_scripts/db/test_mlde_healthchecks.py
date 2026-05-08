@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -95,17 +96,45 @@ class TestMldeDemoApplier(unittest.TestCase):
 
     def test_passes_with_audited_demo_application(self) -> None:
         status, msg = check_mlde_demo_applier(
-            _cursor([(True,), (2, 1, 1, 0, 0)])
+            _cursor([(True,), (2, 1, 1, 0, 0, None, None, 0)])
         )
         self.assertEqual(status, "PASS")
         self.assertIn("demo autonomy audited", msg)
 
     def test_live_application_without_lease_fails(self) -> None:
         status, msg = check_mlde_demo_applier(
-            _cursor([(True,), (1, 0, 0, 0, 1)])
+            _cursor([(True,), (1, 0, 0, 0, 1, None, None, 0)])
         )
         self.assertEqual(status, "FAIL")
         self.assertIn("lacks Decision Lease", msg)
+
+    def test_recovered_historical_failures_do_not_warn(self) -> None:
+        last_failed = datetime(2026, 5, 7, 19, 40, tzinfo=timezone.utc)
+        last_non_failed = datetime(2026, 5, 7, 20, 6, tzinfo=timezone.utc)
+        status, msg = check_mlde_demo_applier(
+            _cursor([(True,), (54, 28, 9, 17, 0, last_failed, last_non_failed, 0)])
+        )
+        self.assertEqual(status, "PASS")
+        self.assertIn("historical applier failures recovered", msg)
+        self.assertIn("failed_recent_60m=0", msg)
+
+    def test_recent_failures_still_warn_after_recovery(self) -> None:
+        last_failed = datetime(2026, 5, 7, 19, 40, tzinfo=timezone.utc)
+        last_non_failed = datetime(2026, 5, 7, 20, 6, tzinfo=timezone.utc)
+        status, msg = check_mlde_demo_applier(
+            _cursor([(True,), (54, 28, 9, 17, 0, last_failed, last_non_failed, 1)])
+        )
+        self.assertEqual(status, "WARN")
+        self.assertIn("applier failures need inspection", msg)
+
+    def test_unrecovered_failures_warn(self) -> None:
+        last_failed = datetime(2026, 5, 7, 20, 6, tzinfo=timezone.utc)
+        last_non_failed = datetime(2026, 5, 7, 19, 40, tzinfo=timezone.utc)
+        status, msg = check_mlde_demo_applier(
+            _cursor([(True,), (54, 28, 9, 17, 0, last_failed, last_non_failed, 0)])
+        )
+        self.assertEqual(status, "WARN")
+        self.assertIn("applier failures need inspection", msg)
 
 
 if __name__ == "__main__":
