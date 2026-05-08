@@ -325,14 +325,18 @@ def _do_pg_path_for_run_sync(
                 )
                 conn.commit()
                 return run_id_local, None, None, output_dir
+            subprocess_started_at_ms = route_helpers.resolve_process_started_at_ms(
+                pid
+            )
             cur.execute(
                 """
                 UPDATE replay.run_state
                    SET subprocess_pid = %s,
+                       subprocess_started_at_ms = %s,
                        status = 'running'
                  WHERE run_id = %s::uuid;
                 """,
-                (pid, run_id_local),
+                (pid, subprocess_started_at_ms, run_id_local),
             )
             conn.commit()
             return run_id_local, pid, None, output_dir

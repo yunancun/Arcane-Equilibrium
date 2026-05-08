@@ -104,7 +104,7 @@ def _make_pg_conn_stub_cross_actor(run_id: str, expected_actor_id: str):
         # row 屬 'mallory' 但 caller 是 'alice'。
         cur.fetchone.return_value = (
             run_id, "mallory", "11111111-1111-1111-1111-111111111111",
-            "running", None, "linux_trade_core", None,
+            "running", None, None, "linux_trade_core", None,
         )
         conn.cursor.return_value = cur
         yield conn
@@ -119,7 +119,7 @@ def _make_pg_conn_stub_terminal_status(run_id: str, actor_id: str = "alice"):
         cur = MagicMock()
         cur.fetchone.return_value = (
             run_id, actor_id, "11111111-1111-1111-1111-111111111111",
-            "completed", None, "linux_trade_core", None,
+            "completed", None, None, "linux_trade_core", None,
         )
         conn.cursor.return_value = cur
         yield conn
@@ -130,6 +130,7 @@ def _make_pg_conn_stub_running_with_pid(
     run_id: str,
     pid: int,
     actor_id: str = "alice",
+    subprocess_started_at_ms: int | None = None,
 ):
     """Stub: SELECT row with status='running' + pid set."""
     @contextmanager
@@ -138,7 +139,7 @@ def _make_pg_conn_stub_running_with_pid(
         cur = MagicMock()
         cur.fetchone.return_value = (
             run_id, actor_id, "11111111-1111-1111-1111-111111111111",
-            "running", pid, "linux_trade_core", None,
+            "running", pid, subprocess_started_at_ms, "linux_trade_core", None,
         )
         conn.cursor.return_value = cur
         yield conn
@@ -172,7 +173,7 @@ def _make_pg_conn_stub_happy_path(
         #   - 5th fetchone: _mark_run_finalized RETURNING → run_id row
         run_state_row = (
             run_id, actor_id, "11111111-1111-1111-1111-111111111111",
-            "running", None, runtime_environment, None,
+            "running", None, None, runtime_environment, None,
         )
         cur.fetchone.side_effect = [
             run_state_row,                         # SELECT run_state
@@ -335,15 +336,25 @@ def test_finalize_subprocess_still_running_409(monkeypatch):
     Case 4：pid 還活著 + status='running' → 409 replay_run_not_yet_completed。
     """
     run_id = "33334444333344443333444433334444"
+    seen_verify_args: list[tuple[int, int | None]] = []
     monkeypatch.setattr(
         "app.replay_routes.get_pg_conn",
-        _make_pg_conn_stub_running_with_pid(run_id, pid=99999, actor_id="alice"),
+        _make_pg_conn_stub_running_with_pid(
+            run_id,
+            pid=99999,
+            actor_id="alice",
+            subprocess_started_at_ms=1717000000123,
+        ),
     )
     # Mock verify_replay_runner_pid → alive=True.
     # mock verify_replay_runner_pid → alive=True。
+    def _fake_verify(pid, expected_started_at_ms=None):
+        seen_verify_args.append((pid, expected_started_at_ms))
+        return True, None
+
     monkeypatch.setattr(
         "app.replay_routes._verify_replay_runner_pid",
-        lambda pid: (True, None),
+        _fake_verify,
     )
 
     client = _build_client(_operator_actor_alice)
@@ -351,6 +362,7 @@ def test_finalize_subprocess_still_running_409(monkeypatch):
     assert resp.status_code == 409, resp.text
     detail = resp.json().get("detail", {})
     assert "replay_run_not_yet_completed" in detail.get("reason_codes", [])
+    assert seen_verify_args == [(99999, 1717000000123)]
 
 
 # ─── Case 5: missing report file → 410 ──────────────────────────────
@@ -509,7 +521,7 @@ def test_finalize_multi_worker_race_no_v046_dual_insert(monkeypatch):
             run_state_row = (
                 run_id, "alice",
                 "11111111-1111-1111-1111-111111111111",
-                "running", None, "linux_trade_core", None,
+                "running", None, None, "linux_trade_core", None,
             )
             cur.fetchone.side_effect = [
                 run_state_row,                  # SELECT FOR UPDATE
@@ -555,7 +567,7 @@ def test_finalize_multi_worker_race_no_v046_dual_insert(monkeypatch):
                 run_id, "alice",
                 "11111111-1111-1111-1111-111111111111",
                 "completed",  # already finalized by worker A
-                None, "linux_trade_core", None,
+                None, None, "linux_trade_core", None,
             )
 
             def _execute(sql, params=None):
@@ -636,6 +648,10 @@ def test_finalize_multi_worker_race_no_v046_dual_insert(monkeypatch):
             "M-1 fix regression: SELECT FOR UPDATE clause missing from "
             "_select_run_state_for_finalize_sync"
         )
+        assert "subprocess_started_at_ms" in src, (
+            "P2-REPLAY-1 regression: finalize must select V067 "
+            "subprocess_started_at_ms for PID reuse guard"
+        )
     finally:
         for f in output_dir.iterdir():
             try:
@@ -692,7 +708,7 @@ def test_finalize_atomic_xact_rollback_on_writer_failure(monkeypatch):
 
         run_state_row = (
             run_id, "alice", "11111111-1111-1111-1111-111111111111",
-            "running", None, "linux_trade_core", None,
+            "running", None, None, "linux_trade_core", None,
         )
         cur.fetchone.side_effect = [
             run_state_row,           # SELECT run_state

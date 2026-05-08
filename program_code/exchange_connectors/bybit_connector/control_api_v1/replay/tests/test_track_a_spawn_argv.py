@@ -607,6 +607,47 @@ def test_verify_replay_runner_pid_accepts_replay_runner_cmdline(
     assert err is None
 
 
+def test_verify_replay_runner_pid_accepts_matching_start_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cmdline + V067 subprocess_started_at_ms match → True."""
+    fake_proc = MagicMock()
+    fake_proc.cmdline.return_value = ["/path/to/replay_runner"]
+    fake_proc.create_time.return_value = 1717000000.123
+    fake_psutil = MagicMock()
+    fake_psutil.Process.return_value = fake_proc
+    fake_psutil.NoSuchProcess = type("NoSuchProcess", (Exception,), {})
+    fake_psutil.AccessDenied = type("AccessDenied", (Exception,), {})
+
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    ok, err = _rh.verify_replay_runner_pid(
+        12345, expected_started_at_ms=1717000000123
+    )
+    assert ok is True
+    assert err is None
+
+
+def test_verify_replay_runner_pid_rejects_reused_replay_runner_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """same cmdline but different create_time → PID reuse fail-closed."""
+    fake_proc = MagicMock()
+    fake_proc.cmdline.return_value = ["/path/to/replay_runner"]
+    fake_proc.create_time.return_value = 1717000999.000
+    fake_psutil = MagicMock()
+    fake_psutil.Process.return_value = fake_proc
+    fake_psutil.NoSuchProcess = type("NoSuchProcess", (Exception,), {})
+    fake_psutil.AccessDenied = type("AccessDenied", (Exception,), {})
+
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    ok, err = _rh.verify_replay_runner_pid(
+        12345, expected_started_at_ms=1717000000123
+    )
+    assert ok is False
+    assert err is not None
+    assert err.startswith("pid_start_time_mismatch:")
+
+
 def test_verify_replay_runner_pid_rejects_unrelated_cmdline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
