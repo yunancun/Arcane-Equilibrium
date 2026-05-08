@@ -200,3 +200,12 @@ YYYY-MM-DD HH:MM TZ
 - ran the 3C 7d audit script on Linux: overall WARN, `[40]` current edge delta `-1.12bps`, `[38]` grid lifecycle `-47.6%`, funding_arb hard stops PASS
 - completed W-AUDIT-1 docs/governance sync across CLAUDE/TODO/MEMORY/register/glossary/README/script index, recorded W-C lease-router authorization, and added ADR-0015..0019 plus MIT/BB workspace READMEs
 - boundary: docs/governance/source-only sync after `[41]`; no rebuild/restart, true-live API/auth, Executor authority, scanner authority, strategy/risk config mutation, or MAG-083/084 unlock
+
+2026-05-09 CEST
+- completed W-AUDIT-2 security IMPL source checkpoint: Phase4 weekly review approve/reject now require `learning:manage` operator scope and use server-authenticated actor id; Scout market-signal/event-alert require `learning:write`; Layer2 trigger requires `ai_budget:write`
+- changed restart/fresh/clean deploy surfaces to default Trading API bind to `127.0.0.1` through `OPENCLAW_BIND_HOST`, and documented Tailscale Serve / reverse proxy / explicit Tailscale-IP binding instead of default `0.0.0.0`
+- hardened `AIServiceListener` Unix socket startup with chmod `0600` after bind, failing closed if chmod fails
+- wired Rust `spawn_lease_transition_pipeline` into boot and injected the shared sender into Paper/Demo/Live `GovernanceCore::set_lease_transition_tx`, unblocking W-AUDIT-3 F-15 lease flip→writer e2e work
+- verification: Python py_compile PASS, Batch E static pytest 14/0, Phase4 route pytest 29/0, Scout route/audit pytest 46/0, Layer2 route class pytest 12/0, targeted Layer2 trigger test PASS, `cargo check -p openclaw_engine --bin openclaw-engine` PASS with pre-existing unused warnings, `cargo test -p openclaw_engine --lib database::lease_transition_writer -q` 6/0, `git diff --check` PASS
+- residual: full `test_layer2.py` still has 5 pre-existing Layer2Engine failures from local Anthropic/local-LLM availability and an older `_model_upgrade_triage` signature expectation; the W-AUDIT-2 route-auth failure in that file is fixed by the route-class/targeted trigger pass above
+- boundary: source/test/docs only; no rebuild, restart, runtime env flip, live auth mutation, scanner authority, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

@@ -34,9 +34,11 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+
+from . import main_legacy as base
 
 logger = logging.getLogger(__name__)
 
@@ -820,22 +822,30 @@ def _update_weekly_review(week_iso: str, approved: bool, approved_by: str, decis
 
 
 @phase4_router.post("/weekly_review/approve")
-async def approve_weekly_review(payload: WeeklyReviewApproveRequest) -> dict[str, Any]:
+async def approve_weekly_review(
+    payload: WeeklyReviewApproveRequest,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
     """Operator approves a pending weekly review row.
     Operator 批准 pending 的週度審查 row。
     """
+    base.require_scope_and_operator(actor, "learning:manage")
     return _update_weekly_review(
-        payload.week_iso, True, payload.approved_by, payload.decision_notes
+        payload.week_iso, True, base.audit_actor_id(actor), payload.decision_notes
     )
 
 
 @phase4_router.post("/weekly_review/reject")
-async def reject_weekly_review(payload: WeeklyReviewApproveRequest) -> dict[str, Any]:
+async def reject_weekly_review(
+    payload: WeeklyReviewApproveRequest,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
     """Operator rejects a pending weekly review row.
     Operator 拒絕 pending 的週度審查 row。
     """
+    base.require_scope_and_operator(actor, "learning:manage")
     return _update_weekly_review(
-        payload.week_iso, False, payload.approved_by, payload.decision_notes
+        payload.week_iso, False, base.audit_actor_id(actor), payload.decision_notes
     )
 
 

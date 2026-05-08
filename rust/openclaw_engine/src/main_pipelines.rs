@@ -26,6 +26,7 @@
 use crate::main_fanout::LiveEventSenderSlot;
 use crate::run_pipeline_crash_only;
 use crate::startup::ExchangePipelineBindings;
+use openclaw_core::governance_core::LeaseTransitionSender;
 use openclaw_engine::agent_spine::{config::AgentSpineMode, store::AgentSpineMsg};
 use openclaw_engine::bybit_rest_client::{
     live_bybit_environment, BybitEnvironment, BybitRestClient,
@@ -93,6 +94,7 @@ pub(crate) struct WriterSenders {
     pub shadow_exit_tx: Option<mpsc::Sender<ShadowExitMsg>>,
     pub agent_spine_tx: Option<mpsc::Sender<AgentSpineMsg>>,
     pub agent_spine_mode: AgentSpineMode,
+    pub lease_transition_tx: Option<LeaseTransitionSender>,
 }
 
 /// Paper pipeline spawn inputs.
@@ -355,6 +357,7 @@ pub(crate) fn spawn_paper_pipeline(
         shadow_exit_tx: writers.shadow_exit_tx.clone(),
         agent_spine_tx: writers.agent_spine_tx.clone(),
         agent_spine_mode: writers.agent_spine_mode,
+        lease_transition_tx: writers.lease_transition_tx.clone(),
         exchange_event_rx: None,
         seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
         account_manager: None,
@@ -462,6 +465,7 @@ pub(crate) fn spawn_demo_pipeline(
         shadow_exit_tx: writers.shadow_exit_tx.clone(),
         agent_spine_tx: writers.agent_spine_tx.clone(),
         agent_spine_mode: writers.agent_spine_mode,
+        lease_transition_tx: writers.lease_transition_tx.clone(),
         exchange_event_rx: Some(demo_b.ws_bindings.exchange_event_rx),
         seed_positions: demo_seed_positions,
         account_manager: Some(demo_b.account_manager),
@@ -591,6 +595,7 @@ pub(crate) fn spawn_live_pipeline(
         shadow_exit_tx: writers.shadow_exit_tx.clone(),
         agent_spine_tx: writers.agent_spine_tx.clone(),
         agent_spine_mode: writers.agent_spine_mode,
+        lease_transition_tx: writers.lease_transition_tx.clone(),
         exchange_event_rx: Some(live_b.ws_bindings.exchange_event_rx),
         seed_positions: live_seed_positions,
         account_manager: Some(live_b.account_manager),
@@ -779,6 +784,7 @@ pub(crate) struct LiveSpawnBundle {
     pub shadow_exit_tx: Option<mpsc::Sender<ShadowExitMsg>>,
     pub agent_spine_tx: Option<mpsc::Sender<AgentSpineMsg>>,
     pub agent_spine_mode: AgentSpineMode,
+    pub lease_transition_tx: Option<LeaseTransitionSender>,
 }
 
 /// Build the `LivePipelineSpawner` closure from a `LiveSpawnBundle`.
@@ -848,6 +854,7 @@ pub(crate) fn build_live_pipeline_spawner(
     let writers_c_shadow_exit = b.shadow_exit_tx;
     let writers_c_agent_spine = b.agent_spine_tx;
     let writers_c_agent_spine_mode = b.agent_spine_mode;
+    let writers_c_lease_transition = b.lease_transition_tx;
 
     Arc::new(move |spawn_output: crate::pipeline_slot::SpawnOutput| -> crate::live_auth_watcher::LivePipelineSpawnResult {
         // Build fresh channels for this spawn cycle.
@@ -874,6 +881,7 @@ pub(crate) fn build_live_pipeline_spawner(
             shadow_exit_tx: writers_c_shadow_exit.clone(),
             agent_spine_tx: writers_c_agent_spine.clone(),
             agent_spine_mode: writers_c_agent_spine_mode,
+            lease_transition_tx: writers_c_lease_transition.clone(),
         };
         let ctx = PipelineSpawnContext {
             config: &config_c,

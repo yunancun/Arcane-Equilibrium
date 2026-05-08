@@ -181,3 +181,63 @@ def test_os_007_telegram_report_uses_json_encoder_and_no_tokenized_argv() -> Non
     assert "TELEGRAM_API=" not in body
     assert "bot${BOT_TOKEN}" not in body
     assert "-d \"{\\\"chat_id\\\"" not in body
+
+
+def test_w_audit_2_mutating_learning_routes_require_operator_scopes() -> None:
+    """Weekly review and scout writes must require operator role plus explicit scopes."""
+    phase4 = _read(
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/phase4_routes.py"
+    )
+    scout = _read(
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/scout_routes.py"
+    )
+    layer2 = _read(
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_routes.py"
+    )
+
+    assert phase4.count('base.require_scope_and_operator(actor, "learning:manage")') >= 2
+    assert "base.audit_actor_id(actor)" in phase4
+    assert scout.count('base.require_scope_and_operator(actor, "learning:write")') >= 2
+    assert 'base.require_scope_and_operator(actor, "ai_budget:write")' in layer2
+
+
+def test_w_audit_2_api_launches_default_to_loopback_bind() -> None:
+    """Lifecycle scripts and deploy docs must not default uvicorn to all interfaces."""
+    scripts = [
+        "helper_scripts/restart_all.sh",
+        "helper_scripts/clean_restart.sh",
+        "helper_scripts/fresh_start.sh",
+    ]
+    for script in scripts:
+        body = _read(script)
+        assert "OPENCLAW_BIND_HOST:-127.0.0.1" in body, script
+        assert "--host 0.0.0.0" not in body, script
+
+    deploy_readme = _read("helper_scripts/deploy/README.md")
+    assert "OPENCLAW_BIND_HOST=127.0.0.1" in deploy_readme
+    assert "--host 0.0.0.0" not in deploy_readme
+    assert "Tailscale Serve" in deploy_readme
+
+
+def test_w_audit_2_ai_service_listener_chmods_unix_socket() -> None:
+    """AI service Unix socket should be owner-only after bind."""
+    body = _read(
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/ai_service_listener.py"
+    )
+    assert "os.chmod(self._socket_path, 0o600)" in body
+    assert "await self._server.wait_closed()" in body
+
+
+def test_w_audit_2_lease_transition_writer_is_wired_into_pipelines() -> None:
+    """Governance lease transitions must reach the DB writer from all active pipelines."""
+    main = _read("rust/openclaw_engine/src/main.rs")
+    pipelines = _read("rust/openclaw_engine/src/main_pipelines.rs")
+    deps = _read("rust/openclaw_engine/src/event_consumer/types.rs")
+    bootstrap = _read("rust/openclaw_engine/src/event_consumer/bootstrap.rs")
+
+    assert "spawn_lease_transition_pipeline" in main
+    assert "lease_transition_tx: lease_transition_tx.clone()" in main
+    assert "pub lease_transition_tx: Option<LeaseTransitionSender>" in pipelines
+    assert "lease_transition_tx: writers.lease_transition_tx.clone()" in pipelines
+    assert "pub lease_transition_tx: Option<LeaseTransitionSender>" in deps
+    assert "pipeline.governance.set_lease_transition_tx(tx)" in bootstrap

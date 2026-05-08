@@ -1159,6 +1159,9 @@ class TestLayer2Routes:
         tracker.record_claude_cost(s, 1000000, 500000, MODEL_OPUS)
 
         mock_actor = MagicMock()
+        mock_actor.roles = {"operator"}
+        mock_actor.scopes = {"ai_budget:write"}
+        mock_actor.actor_id = "test_op"
         background = MagicMock()
         req = TriggerRequest(symbol="BTCUSDT")
         result = _run(

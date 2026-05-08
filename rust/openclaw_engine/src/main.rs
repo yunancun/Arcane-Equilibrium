@@ -653,6 +653,13 @@ async fn async_main(
         &shared_last_tick_ms,
     )
     .await;
+    let lease_transition_tx = Some(
+        openclaw_engine::database::lease_transition_writer::spawn_lease_transition_pipeline(
+            Arc::clone(&db_pool),
+            Arc::clone(&config),
+            cancel.clone(),
+        ),
+    );
 
     // ------------------------------------------------------------------
     // Scanner D4: Spawn ScannerRunner (requires market REST client + DB writer)
@@ -914,6 +921,7 @@ async fn async_main(
         shadow_exit_tx: shadow_exit_tx.clone(),
         agent_spine_tx: agent_spine_tx.clone(),
         agent_spine_mode,
+        lease_transition_tx: lease_transition_tx.clone(),
     };
 
     let paper_handle = main_pipelines::spawn_paper_pipeline(
@@ -1015,6 +1023,7 @@ async fn async_main(
             shadow_exit_tx: shadow_exit_tx.clone(),
             agent_spine_tx: agent_spine_tx.clone(),
             agent_spine_mode,
+            lease_transition_tx: lease_transition_tx.clone(),
         });
 
     // Boot Some: direct spawn using pre-built channels. Reuses the `spawn_ctx`

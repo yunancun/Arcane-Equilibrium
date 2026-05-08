@@ -106,7 +106,7 @@
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
 | P0-DECISION-AUDIT-2/4/5 | 仍需 operator 拍板。`P0-DECISION-AUDIT-1` 由 W-C authorization file + AMD §5.4.1 補件收口；`P0-DECISION-AUDIT-3` 由本次 §三 drift 防線收口。 |
-| W-AUDIT-1..7 | W-AUDIT-1 已 source-closed；W-AUDIT-2 security IMPL 是下一個可做項。 |
+| W-AUDIT-1..7 | W-AUDIT-1/W-AUDIT-2 已 source-closed；下一個可做項是 W-AUDIT-3。 |
 
 ---
 
@@ -434,15 +434,15 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` v14 為準。2026-05-08 已把 12-agent full audit PA fix plan 掛入 W-AUDIT-1..7。當前順序是：保持 `W-C` MAG-082 Stage 2 evidence window 觀察；先做 `W-AUDIT-1` docs sync + governance compliance；再做 `W-AUDIT-2` security IMPL；之後接 W-AUDIT-3..7。仍不是 Telegram/WebChat、第二 GUI、Stage 3/4，或 true-live autonomy。
+**當前焦點**：活躍任務以 `TODO.md` v14 為準。2026-05-08 已把 12-agent full audit PA fix plan 掛入 W-AUDIT-1..7。當前順序是：保持 `W-C` MAG-082 Stage 2 evidence window 觀察；`W-AUDIT-1` docs sync/governance compliance 與 `W-AUDIT-2` security IMPL 已 source-closed；下一步接 W-AUDIT-3 runtime/fake-live alignment，再接 W-AUDIT-4..7。仍不是 Telegram/WebChat、第二 GUI、Stage 3/4，或 true-live autonomy。
 
-**關鍵路徑**：`W-C 24h PASS → MAG-083 QA audit → MAG-084 operator sign-off → W-AUDIT-1 docs/governance → W-AUDIT-2 security IMPL → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
+**關鍵路徑**：`W-C 24h PASS → MAG-083 QA audit → MAG-084 operator sign-off → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
 **REF-20 / REF-21 狀態**：REF-20 Sprint A-D 與 REF-21 replay usability foundation 已收口；剩餘 replay 工作是 empirical calibration maturity、recorder history、baseline library，不替代 runtime lineage 或 live promotion。
 
 **最早 Live 日期**（事件驅動，非 hard date）：以 2026-06-15 悲觀規劃帶為主。PA full audit 偏悲觀：edge 未轉正、LG-2/3/4 尚未 IMPL、W-AUDIT-1..7 未完、MAG-082 未 PASS、MAG-083/084 blocked。
 
-**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor fake-live smoke + runtime Agent Spine shadow lineage + Decision Lease bypass lineage + REF-20/REF-21 replay foundation 均已落地。仍未完成的是 MAG-082 24h PASS、MAG-083/MAG-084、W-AUDIT-2..7、edge / execution-quality 驗收、Live Gate LG-2/3/4、Live infra、以及 true live 前的受監督/受限自主放權。
+**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor fake-live smoke + runtime Agent Spine shadow lineage + Decision Lease bypass lineage + REF-20/REF-21 replay foundation 均已落地。仍未完成的是 MAG-082 24h PASS、MAG-083/MAG-084、W-AUDIT-3..7、edge / execution-quality 驗收、Live Gate LG-2/3/4、Live infra、以及 true live 前的受監督/受限自主放權。
 
 **Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease router evidence flag is ON for shadow W-C only。True live 仍缺 MAG-082/083/084、edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
 
