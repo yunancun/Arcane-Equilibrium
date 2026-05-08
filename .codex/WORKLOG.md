@@ -229,3 +229,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-4 F-22 source checkpoint: Linux read-only schema audit showed the 9 planned retention targets are actually 5 hypertables, 2 plain tables, and 2 views
 - added corrected `V075__w_audit4_retention_compression.sql`: Timescale retention/compression only for the 5 real hypertables; dry-run-default prune function for `learning.decision_features` and non-live `trading.decision_outcomes`; views are guarded as non-policy targets
 - verification: V075 migration static pytest 5/0, combined V075+V076+V077 migration static pytest 14/0, py_compile PASS, `git diff --check` PASS; no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
+
+2026-05-09 CEST
+- continued W-AUDIT-4 V073 source checkpoint: added read-only edge snapshot contract guard and executable cron wrapper for recurring V059 snapshot writes via the existing REF-21 helper with instruments/freeze-log disabled
+- verification: V073 migration + cron static pytest 6/0, combined V073+V075+V076+V077 pytest 20/0, `bash -n` PASS, py_compile PASS, `git diff --check` PASS
+- boundary: source/test only; cron was not installed or run, no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
