@@ -32,10 +32,13 @@ per_trade_risk_pct = 0.1
 
 [per_strategy.ma_crossover]
 enabled = true
+# P1-EDGE-1 2026-05-08: LABUSDT added from ma_crossover combined demo/live_demo
+# negative cell (7d n=6 avg=-244.54bps); blocks new entries only.
 blocked_symbols = [
   "NAORISUSDT",
   "PENGUUSDT",
   "FARTCOINUSDT",
+  "LABUSDT",
 ]
 
 [per_strategy.funding_arb]

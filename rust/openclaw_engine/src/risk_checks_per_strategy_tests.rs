@@ -386,6 +386,13 @@ fn test_demo_toml_funding_arb_3pct_override_2026_05_02() {
         ma.stop_loss_max_pct_override, None,
         "ma_crossover SL override must remain commented-out (None)"
     );
+    assert!(
+        ma.blocked_symbols
+            .as_ref()
+            .map(|symbols| symbols.iter().any(|s| s == "LABUSDT"))
+            .unwrap_or(false),
+        "ma_crossover.blocked_symbols must include LABUSDT after P1-EDGE-1"
+    );
 
     // ── Defense A: full RiskConfig::validate() must PASS ──
     // 3.0 < limits.stop_loss_max_pct=25.0 + finite + > 0 ⇒ accepted.

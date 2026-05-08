@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for grid_trading blocked-symbol config alignment."""
+"""Tests for negative-edge blocked-symbol config alignment."""
 
 from __future__ import annotations
 
@@ -27,6 +27,20 @@ class TestGridBlockedSymbolsConfig(unittest.TestCase):
                 data = tomllib.load(f)
             blocked = data["grid_trading"]["blocked_symbols"]
             self.assertIn("LABUSDT", blocked, f"{kind} grid blocklist missing LABUSDT")
+
+    def test_labusdt_blocked_for_ma_crossover_across_risk_config_files(self) -> None:
+        risk_dir = _SRV_ROOT / "settings" / "risk_control_rules"
+        for name in (
+            "risk_config.toml",
+            "risk_config_paper.toml",
+            "risk_config_demo.toml",
+            "risk_config_live.toml",
+        ):
+            path = risk_dir / name
+            with path.open("rb") as f:
+                data = tomllib.load(f)
+            blocked = data["per_strategy"]["ma_crossover"]["blocked_symbols"]
+            self.assertIn("LABUSDT", blocked, f"{name} ma_crossover blocklist missing LABUSDT")
 
 
 if __name__ == "__main__":
