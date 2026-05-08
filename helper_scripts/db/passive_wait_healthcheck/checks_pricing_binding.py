@@ -211,6 +211,119 @@ def _format_per_mode_summary(per_mode: dict[str, dict[str, Any]]) -> str:
     return "; ".join(parts) if parts else "no monitored engine_mode rows"
 
 
+def _recent_fee_proxy_context(cur) -> tuple[dict[str, dict[str, int]], str]:
+    """Return recent AccountManager fee-use proof from persisted intent details.
+
+    ``trading.fills.fee_rate`` is the strongest materialized proof, but during
+    rejected-only periods there may be no fills by design. Scanner opportunity
+    details persist ``cost_source=account_manager_taker_fee`` only when the
+    Rust AccountManager has a non-empty fee table; this is a weaker but useful
+    DB-side proof that demo/live_demo pricing remains bound while fills are
+    intentionally suppressed by gates.
+    """
+    empty = {
+        mode: {
+            "cost_intents_30m": 0,
+            "account_manager_taker_fee_30m": 0,
+            "account_manager_default_taker_fee_30m": 0,
+            "risk_verdicts_30m": 0,
+            "approved_risk_verdicts_30m": 0,
+            "rejected_risk_verdicts_30m": 0,
+        }
+        for mode in MONITORED_ENGINE_MODES
+    }
+    try:
+        cur.execute(
+            """
+            WITH modes AS (
+                SELECT unnest(%s::text[]) AS engine_mode
+            ), recent_intents AS (
+                SELECT
+                    engine_mode,
+                    details #>> '{scanner,opportunity,components,cost_source}' AS cost_source
+                  FROM trading.intents
+                 WHERE ts > now() - interval '30 minutes'
+                   AND engine_mode = ANY(%s)
+            ), recent_risk AS (
+                SELECT engine_mode, verdict
+                  FROM trading.risk_verdicts
+                 WHERE ts > now() - interval '30 minutes'
+                   AND engine_mode = ANY(%s)
+            )
+            SELECT
+                modes.engine_mode,
+                count(recent_intents.cost_source)::int AS cost_intents_30m,
+                count(*) FILTER (
+                    WHERE recent_intents.cost_source = 'account_manager_taker_fee'
+                )::int AS account_manager_taker_fee_30m,
+                count(*) FILTER (
+                    WHERE recent_intents.cost_source = 'account_manager_default_taker_fee'
+                )::int AS account_manager_default_taker_fee_30m,
+                (SELECT count(*)::int
+                   FROM recent_risk rr
+                  WHERE rr.engine_mode = modes.engine_mode
+                ) AS risk_verdicts_30m,
+                (SELECT count(*)::int
+                   FROM recent_risk rr
+                  WHERE rr.engine_mode = modes.engine_mode
+                    AND lower(coalesce(rr.verdict, '')) = 'approved'
+                ) AS approved_risk_verdicts_30m,
+                (SELECT count(*)::int
+                   FROM recent_risk rr
+                  WHERE rr.engine_mode = modes.engine_mode
+                    AND lower(coalesce(rr.verdict, '')) = 'rejected'
+                ) AS rejected_risk_verdicts_30m
+              FROM modes
+              LEFT JOIN recent_intents
+                ON recent_intents.engine_mode = modes.engine_mode
+             GROUP BY modes.engine_mode
+             ORDER BY modes.engine_mode
+            """,
+            (
+                list(MONITORED_ENGINE_MODES),
+                list(MONITORED_ENGINE_MODES),
+                list(MONITORED_ENGINE_MODES),
+            ),
+        )
+        rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001 - explanatory proof only
+        return empty, f"fee_proxy_context=unavailable ({type(exc).__name__})"
+
+    context = {mode: dict(values) for mode, values in empty.items()}
+    keys = (
+        "cost_intents_30m",
+        "account_manager_taker_fee_30m",
+        "account_manager_default_taker_fee_30m",
+        "risk_verdicts_30m",
+        "approved_risk_verdicts_30m",
+        "rejected_risk_verdicts_30m",
+    )
+    for row in rows:
+        mode = str(row[0])
+        if mode not in context:
+            continue
+        context[mode] = {key: int(row[idx + 1] or 0) for idx, key in enumerate(keys)}
+    summary = "; ".join(
+        f"{mode}: am_taker={context[mode]['account_manager_taker_fee_30m']}, "
+        f"am_default={context[mode]['account_manager_default_taker_fee_30m']}, "
+        f"approved_30m={context[mode]['approved_risk_verdicts_30m']}, "
+        f"rejected_30m={context[mode]['rejected_risk_verdicts_30m']}"
+        for mode in MONITORED_ENGINE_MODES
+    )
+    return context, f"fee_proxy_context: {summary}"
+
+
+def _demo_livedemo_stale_fill_age_explained(mode: str, ctx: dict[str, int]) -> bool:
+    """Whether stale fill proof is explained by fresh AccountManager cost use."""
+    if mode not in {"demo", "live_demo"}:
+        return False
+    return (
+        ctx.get("account_manager_taker_fee_30m", 0) > 0
+        and ctx.get("risk_verdicts_30m", 0) > 0
+        and ctx.get("approved_risk_verdicts_30m", 0) == 0
+    )
+
+
 # ---------------------------------------------------------------------------
 # `[45]` pricing_binding — LG-3 RFC §IMPL T2 healthcheck.
 # `[45]` pricing_binding — LG-3 RFC §IMPL T2 healthcheck。
@@ -359,12 +472,14 @@ SELECT engine_mode,
         engine_age_min, _diag = _engine_process_age_minutes()
     except Exception:  # noqa: BLE001
         engine_age_min = None
+    fee_proxy_context, fee_proxy_summary = _recent_fee_proxy_context(cur)
 
     # Verdict aggregation per RFC §2.2 + §2.3.
     # 整體 verdict 聚合（RFC §2.2 + §2.3）。
     worst: str = "PASS"
     fail_reasons: list[str] = []
     warn_reasons: list[str] = []
+    proof_reasons: list[str] = []
 
     for mode in MONITORED_ENGINE_MODES:
         slot = per_mode[mode]
@@ -414,6 +529,14 @@ SELECT engine_mode,
             )
             worst = "FAIL"
         elif age_s >= REFRESH_AGE_PASS_MAX_SECONDS:
+            ctx = fee_proxy_context.get(mode, {})
+            if _demo_livedemo_stale_fill_age_explained(mode, ctx):
+                proof_reasons.append(
+                    f"{mode}: fill fee proof stale but recent "
+                    f"account_manager_taker_fee intents={ctx.get('account_manager_taker_fee_30m', 0)} "
+                    "and approved_30m=0; no fill proof expected"
+                )
+                continue
             warn_reasons.append(
                 f"{mode}: age={age_s}s exceeds 1h refresh cadence "
                 f"(but within 24h)"
@@ -424,7 +547,7 @@ SELECT engine_mode,
     # RFC §2.4 ``Healthcheck Shape`` formatted summary.
     # RFC §2.4 標準格式輸出。
     summary = _format_per_mode_summary(per_mode)
-    base = f"category=linear; {summary}"
+    base = f"category=linear; {summary}; {fee_proxy_summary}"
 
     if worst == "FAIL":
         return (
@@ -436,4 +559,5 @@ SELECT engine_mode,
             "WARN",
             base + " — " + "; ".join(warn_reasons),
         )
-    return ("PASS", base + " — pricing binding healthy across monitored modes")
+    proof_tail = "; " + "; ".join(proof_reasons) if proof_reasons else ""
+    return ("PASS", base + " — pricing binding healthy across monitored modes" + proof_tail)

@@ -53,6 +53,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_pricing_binding import ( 
 def _build_cur(
     table_exists: bool,
     rows: list[tuple] | None,
+    fee_proxy_rows: list[tuple] | None = None,
 ) -> MagicMock:
     """Build a MagicMock cursor with ``fetchone`` returning the existence row
     and ``fetchall`` returning per-mode aggregate rows.
@@ -69,7 +70,10 @@ def _build_cur(
     cur.connection = MagicMock()
     cur.connection.rollback = MagicMock()
     cur.fetchone.return_value = (table_exists,)
-    cur.fetchall.return_value = rows if rows is not None else []
+    cur.fetchall.side_effect = [
+        rows if rows is not None else [],
+        fee_proxy_rows if fee_proxy_rows is not None else [],
+    ]
     return cur
 
 
@@ -121,6 +125,33 @@ class TestCheck45PricingBinding(unittest.TestCase):
         self.assertEqual(status, "WARN", msg)
         self.assertIn("exceeds 1h refresh cadence", msg)
         self.assertIn("live_demo", msg)
+
+    def test_pass_when_demo_livedemo_stale_fill_age_has_recent_fee_proxy(self) -> None:
+        """Demo/LiveDemo stale fill proof is explained by rejected-only flow.
+
+        `account_manager_taker_fee` in recent intent details proves the Rust
+        AccountManager fee table is in use, while approved_30m=0 explains why
+        no fresh fill materialized fee proof is expected.
+        """
+        rows = [
+            ("demo", 100, 5, 95, 12, 7200),
+            ("live_demo", 50, 0, 50, 8, 7200),
+        ]
+        fee_proxy_rows = [
+            ("demo", 20, 20, 0, 12, 0, 12),
+            ("live_demo", 18, 18, 0, 10, 0, 10),
+            ("live", 0, 0, 0, 0, 0, 0),
+        ]
+        cur = _build_cur(True, rows, fee_proxy_rows)
+        with patch.dict(os.environ, {"OPENCLAW_ALLOW_MAINNET": ""}, clear=False), patch(
+            "helper_scripts.db.passive_wait_healthcheck.shared._engine_process_age_minutes",
+            return_value=(120.0, "ok"),
+        ):
+            status, msg = check_45_pricing_binding(cur)
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("fee_proxy_context", msg)
+        self.assertIn("fill fee proof stale", msg)
+        self.assertIn("approved_30m=0", msg)
 
     def test_fail_when_mode_aged_24h_or_more(self) -> None:
         """One mode aged ≥86400s → FAIL per RFC §2.2 24h limit.
