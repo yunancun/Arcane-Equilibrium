@@ -108,14 +108,14 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-OPENCLAW-3` | 2 | DONE — read-only brief/diagnostics/escalations APIs | Backend-authored view models from durable stores only; no raw frontend table stitching. |
 | `P1-OPENCLAW-6/7` | 2 | DONE — proposal/approval relay backend foundation | V065 `openclaw.*` ledger applied on Linux; proposal create + approve runtime smoke passed with `side_effect_executed=false`; `[54]` PASS. |
 | `P1-AGENT-OBS-1` | 2 | DONE — explicit lineage healthcheck | `[55] agent_decision_spine_lineage` distinguishes disabled / enabled-empty / incomplete / report-pending states and surfaces `MAG-082 readiness=*`; `OPENCLAW_AGENT_SPINE_HEALTH_REQUIRED=1` escalates WARN to FAIL. |
-| `P1-AGENT-RUNTIME-1` | 2 | SOURCE-READY — runtime decision-spine lineage | Source/test wiring complete behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE`; no runtime row proof until operator authorizes rebuild/restart/env flip. |
-| `P1-DATA-1` | 3 | Source-fixed WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | `[14]` distinguishes risk/cost gate suppression from writer-health evidence; `[37]` ignores recovered historical failures; `[40]` catches combined demo/live_demo negative cells and source-blocks `LABUSDT` grid new entries across paper/demo/live pending explicit runtime reload; `[45]` accepts recent AccountManager fee-use proof during rejected-only demo/live_demo no-fill windows. |
+| `P1-AGENT-RUNTIME-1` | 2 | SOURCE-READY — runtime decision-spine lineage | Source/test wiring complete behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE`; 2026-05-08 restart loaded current source, but env remains disabled, so no runtime row proof until explicit env flip. |
+| `P1-DATA-1` | 3 | Runtime-reloaded WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | `[14]` distinguishes risk/cost gate suppression from writer-health evidence; `[37]` ignores recovered historical failures; `[40]` catches combined demo/live_demo negative cells and `LABUSDT` grid block source is now runtime-reloaded as of 2026-05-08; `[45]` accepts recent AccountManager fee-use proof during rejected-only demo/live_demo no-fill windows. Monitor row rolloff after reload. |
 | `P1-DATA-2` | 3 | Source-fixed `[42b]` / `[42c]` low-sample attribution watch | Settled attribution ratio failures stay fail-closed, but low-sample strategies now render as `LOW_SAMPLE(n, need)` sample-maturity watch instead of misleading `0.000` ratio drift; low-sample strategies still defer promotion until mature. |
 | `P1-DATA-3` | 3 | Source-fixed `[51]` scanner opportunity calibration watch | `[51]` now requires mature `opportunity_positive` samples before PASS, reports `MATURE/LOW_SAMPLE(n, need)`, and keeps scanner opportunity shadow-only when only exploration positive LCB samples exist or calibrated samples are immature. |
 | `P1-EDGE-1` | 3 | Source-fixed ma_crossover LABUSDT block + bb_breakout diagnosis | Runtime diagnosis: 7d ma_crossover combined demo/live_demo is negative mainly from `LABUSDT` (`n=6 avg=-244.54bps`), so `LABUSDT` is source-blocked for ma_crossover new entries in risk configs while close/reduce remains allowed; bb_breakout stays demo-only/live-disabled with low negative sample (`7d n=10 avg=-5.06bps`) pending more evidence. |
 | `P1-EDGE-2` | 3 | funding_arb 14d audit | Run the 2026-05-16 audit before retention or deprecation decisions. |
 | `P1-REPLAY-1` | 4 | Recorder-history maturity | Build longer local BBO/orderbook/latency history for S1/S1+ calibration; never fabricate old microstructure. |
-| `P1-REPLAY-2` | 4 | Source-fixed replay artifact type cleanup | V066 adds `replay_report` artifact enum + byte-size CHECK; finalize registers `replay_report`; report query prefers it while retaining legacy `pnl_summary` fallback. |
+| `P1-REPLAY-2` | 4 | DONE — runtime-applied replay artifact type cleanup | V066 applied twice on Linux for idempotency, constraints verified, rollback smoke passed, and runtime reloaded with `restart_all.sh --keep-auth` on 2026-05-08. New finalize rows can use `replay_report`; legacy `pnl_summary` remains readable. |
 | `P1-LG-5` | 4 | LG-5 reviewer maturity watch | Source is active; continue audit-row and attribution health monitoring. |
 
 ## P2 — Maintenance Backlog
@@ -127,7 +127,7 @@ historical wave narratives, and old date-driven reminders are archived.
 | ID | Task | Trigger |
 |---|---|---|
 | `P2-MIG-1` | V054 lease transitions Python migration sibling test | Next DB-migration maintenance batch. |
-| `P2-MIG-2` | DONE — V066 byte-size CHECK and `replay_report` artifact enum migration | Covered by `P1-REPLAY-2`; migration added, not applied to runtime DB without operator authorization. |
+| `P2-MIG-2` | DONE — V066 byte-size CHECK and `replay_report` artifact enum migration | Covered by `P1-REPLAY-2`; Linux runtime DB applied and idempotency-verified on 2026-05-08. |
 | `P2-SEC-1` | DONE — generic replay finalize 503 exception messages | Client 503 no longer exposes backend exception class/message; detailed failure remains in server logs under `replay_finalize_failed`. |
 | `P2-REPLAY-1` | PID reuse guard for replay runner finalize | Low-probability hardening; add `subprocess_started_at_ms`. |
 | `P2-PYDANTIC-1` | DONE — replay Pydantic V1 `@validator` -> V2 `@field_validator` migration | Removed replay validator deprecation warnings under pinned `pydantic>=2.11.0`. |
