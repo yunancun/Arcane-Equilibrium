@@ -254,3 +254,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-4 V072 source checkpoint after Linux read-only contract proof: `features.online_latest` has 43 rows at 34 dims, active `observability.feature_baselines` rows are 0, and 7d `learning.decision_features` rows are 51,130 at 17 JSON keys
 - added `V072__feature_baselines_contract_guard.sql` to lock active baselines to Rust drift_detector / feature_collector 34-dim names and prevent accidental 17-dim edge_predictor `decision_features` seeding
 - remaining V072 work is a real 34-dim historical baseline writer design; this checkpoint intentionally does not seed/write baselines and does not apply DB
+
+2026-05-09 CEST
+- continued W-AUDIT-4 V068/V070/V071 source checkpoint: converted the original dead-schema cleanup plan into metadata-only reclassification guards after source audit found active route/cron/Rust writer/Agent Spine references across most targets
+- V068 retains or marks review-only learning/agent targets; V070 retains replay handoff/advisory/KPI/incident/tier-approval contracts; V071 retains CostEdgeAdvisor, AI budget/usage, and Claude Teacher tables
+- no destructive DB cleanup is included; no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
