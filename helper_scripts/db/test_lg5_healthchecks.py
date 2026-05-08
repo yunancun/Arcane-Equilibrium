@@ -230,8 +230,9 @@ class TestCheck42bAttributionDrift(unittest.TestCase):
         cur = _cursor_for_42b(exists=True, rows=rows)
         status, msg = check_42b_live_candidate_attribution_drift(cur)
         self.assertEqual(status, "WARN")
-        self.assertIn("funding_arb=0.000", msg)
-        self.assertIn("low settled sample", msg)
+        self.assertIn("funding_arb=LOW_SAMPLE(n=0, need=10)", msg)
+        self.assertIn("sample-maturity watch only", msg)
+        self.assertIn("not attribution drift", msg)
 
     def test_warn_when_all_strategies_silent(self) -> None:
         """All 5 strategies have 0 rows in 7d → WARN (greenfield deploy).
@@ -476,8 +477,9 @@ class TestCheck42cLiveCandidateAttributionDrift3d(unittest.TestCase):
         cur = _cursor_for_42b(exists=True, rows=rows)
         status, msg = check_42c_live_candidate_attribution_drift_3d(cur)
         self.assertEqual(status, "WARN")
-        self.assertIn("funding_arb=0.000", msg)
-        self.assertIn("low settled sample", msg)
+        self.assertIn("funding_arb=LOW_SAMPLE(n=0, need=10)", msg)
+        self.assertIn("sample-maturity watch only", msg)
+        self.assertIn("not attribution drift", msg)
 
     def test_fail_when_view_missing(self) -> None:
         """V031 not applied → FAIL fast / V031 未部署即直接 FAIL。
