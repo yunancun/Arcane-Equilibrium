@@ -105,6 +105,9 @@ from .checks_scanner_market import (
 from .checks_agent_events import (
     check_52_agent_event_store_rows,
 )
+from .checks_agent_spine import (
+    check_55_agent_decision_spine_lineage,
+)
 from .checks_openclaw_gateway import (
     check_54_openclaw_proposal_relay,
 )
@@ -200,7 +203,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner-gate
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53]                           REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder
+    [46][48][49][50][51][52][53][54][55]                    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -244,6 +247,7 @@ Execution / cost sentinels added after F7:
   [52] agent_event_store_rows            (AgentTodo MAG-010..012 — agent.messages/state_changes/ai_invocations recent row proof)
   [54] openclaw_proposal_relay           (OC-GW-5/6/7 proposal/approval/channel ledger audit)
   [53] ref21_v058_symbol_universe_recorder (REF-21 — recurring V058 universe snapshot liveness)
+  [55] agent_decision_spine_lineage       (P1-AGENT-OBS-1 — MAG-082 lineage readiness)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -264,7 +268,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53]
+              [46][48][49][50][51][52][53][54][55]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -282,7 +286,10 @@ def main() -> int:
                [49] V046 artifact retention dual-check;
                [50] V045 run_state health failed_rate + zombie;
                [51] scanner opportunity shadow acceptance;
-               [52] agent event-store row proof)
+               [52] agent event-store row proof;
+               [53] REF-21 V058 universe recorder;
+               [54] OpenClaw proposal relay;
+               [55] Agent Decision Spine MAG-082 lineage readiness)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
@@ -293,7 +300,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -784,6 +791,13 @@ def main() -> int:
             # rollout; expired pending approvals or orphan decisions FAIL.
             s, m = check_54_openclaw_proposal_relay(cur)
             results.append(("[54] openclaw_proposal_relay", s, m))
+
+            # [55] P1-AGENT-OBS-1 Agent Decision Spine lineage readiness.
+            # Distinguishes writer disabled vs enabled-but-empty vs incomplete
+            # MAG-082 runtime lineage. Read-only PG check; default WARN,
+            # REQUIRED env escalates to FAIL.
+            s, m = check_55_agent_decision_spine_lineage(cur)
+            results.append(("[55] agent_decision_spine_lineage", s, m))
     finally:
         conn.close()
 
