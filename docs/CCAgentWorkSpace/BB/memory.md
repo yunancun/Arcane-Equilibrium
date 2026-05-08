@@ -155,3 +155,67 @@
 
 ---
 
+
+---
+
+## 2026-05-08 審計（HEAD `4e2d2883`）
+
+### 04-24 → 05-08 closure 進度（5/8）
+
+✅ **closed**：
+- H-1（字典 confirm-mmr → confirm-pending-mmr）：字典 v1.1 line 21/570/576/1161 已修（2026-04-26 G9-01 audit）
+- M-1（ws_client handler not found 無強制重連）：G9-02 + UnknownHandlerGuard 488 LOC 新模組接線到 public + private WS；ProcessOutcome::ForceReconnect 路徑 + env-gate `OPENCLAW_WS_UNKNOWN_GUARD_ARMED`
+- M-2（bybit_public_connectivity_check 硬編碼 mainnet URL）：env override `OPENCLAW_BYBIT_PUBLIC_BASE_URL` 已加，default fallback mainnet 公開（無簽名）= 可接受
+- M-3（bybit_private_ws_smoke_test legacy read_only slot）：兩個 smoke test 檔已從 io_and_persistence/ 刪除（移到 readonly_observer_pipeline/ 改 `bybit_full_readonly_observer_cycle.py`，舊腳本 dead）
+- L-1 / L-4：closed via M-1 修復
+
+⚠ **持續 open（非 hot-path）**：
+- L-2 / L5-1：字典 §1.1 get_open_interest interval 字面值（代碼用 intervalTime）
+- L-2 / L5-2：字典 §1.1 get_long_short_ratio period 含 "1d"（Bybit 不支援，應為 "4d"）
+- L-3 / L5-3：字典缺 /v5/user/query-api 章節
+
+### 本次新發現
+
+- **Critical / High**：0 / 0 ✅
+- **Medium**：2（純政策層，非代碼）
+  - **M5-1 ToS / KYC / 地理禁區 0 governance entry**（CLAUDE.md §三 18 Live Blocker #17）operator 必確認 6 項自證入 git
+  - **M5-2 API key IP whitelist 無代碼可驗** — operator 在 Bybit UI 確認
+- **Low**：4（L5-1/2/3 字典 drift 持續未解 + L5-4 G9-02 新章未補）
+- **Advisory**：9（A5-1 至 A5-9）
+
+### 關鍵結構性變動 vs 04-24
+
+1. ★ **`bybit_rest_client.rs` 1725 → 933 行**（簽名邏輯抽到 `common/bybit_signer.rs:164`）— E1-P0-3 dedup
+2. ★ **`ws_client.rs` 1136 行單檔 → 6 檔模組 1335 LOC**（mod/connection/dispatch/parsers/run_loop/tests）— 符合 CLAUDE.md §九 800 行警告線
+3. ★ **`ws_unknown_handler_guard.rs:488`** 新模組 — G9-02 sliding window + threshold + env-gate
+4. ★ **`live_auth_watcher.rs:970`** 新獨立模組 — 5min re-verify cancel_token graceful shutdown（教訓 `project_live_auth_watcher_event_consumer_spawn.md`）
+
+### funding_arb BUSDT reject loop Bybit-side RCA
+
+- **Root cause**：Bybit demo 不支援 spot lending（mainnet `/v5/spot-margin-trade/data` 才有），funding_arb V2 long spot leg 抵押不足 → short perp leg 反覆被 Bybit 110017/110007 reject
+- **非 ToS 違規**：reject loop 是正常拒單行為，是 OpenClaw 該做 retry budget control
+- **修復狀態**：三端 `[funding_arb] active=false`（commit `a19797d` + `2d6a4057`）✅；fee_execution_calibrator.py 加 BUSDT+110017 過濾保護 ML rate estimate ✅；殘倉 ~110017 USD 待 operator 手動 dust clear
+- **未來重啟 V3 預檢**：`BybitEnvironment::is_demo()` → demo 直接拒絕 funding_arb 開倉
+
+### Bybit V5 changelog 過去 30d（2026-04-08 至 2026-05-08）
+
+7 條變動，**0 breaking change**：
+- 新欄位（symbolId / withdrawMax / openTime） — OpenClaw `serde(default)` 解析不影響
+- 新端點（/v5/finance/earn/easy-onchain/position 改、/v5/strategy/create-strategy 新、/v5/new-crypto-loan/...） — OpenClaw 不用
+- deprecated `remainAmount`（asset/coin-info） — OpenClaw 用 `chain_withdraw` 不受影響
+
+### Verdict
+
+- **技術合規度**：~95%（47 Rust endpoint 全對齊 / HMAC 100% / rate limit 100% / WS auth 100% / LIVE-GUARD 100%）
+- **政策合規度**：~70%（6 項 operator 必確認自證 0 完成）
+- **無 ship-stop blocker**；剩餘 gap 純 governance / operator action
+
+### 下次啟動需查驗項
+
+1. M5-1 是否寫入 `docs/governance_dev/YYYY-MM-DD--bybit_compliance_signoff.md`
+2. M5-2 IP whitelist operator 在 Bybit UI 確認狀態（無代碼可驗）
+3. L5-1/L5-2/L5-3/L5-4 字典是否補錄
+4. Bybit V5 changelog 更新（每月例行）
+5. funding_arb 是否真正止血（檢查 BUSDT 殘倉 + reject log 不再湧現）
+6. broker partnership 申請門檻（30d volume vs $10M）— 當前 $45K 差 222× 不申
+
