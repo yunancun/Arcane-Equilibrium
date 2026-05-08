@@ -736,6 +736,11 @@ def test_finalize_atomic_xact_rollback_on_writer_failure(monkeypatch):
         # Failure must be reported (5xx), not silently masked.
         # 失敗必須被回報（5xx），不可靜默 mask。
         assert resp.status_code == 503, resp.text
+        detail = resp.json().get("detail", {})
+        assert "replay_finalize_failed" in detail.get("reason_codes", [])
+        message = detail.get("message", "")
+        assert "RuntimeError" not in message
+        assert "simulated PG INSERT failure" not in message
         # Rollback was called; commit was NOT.
         # 必呼 rollback；不可呼 commit。
         assert len(rollback_calls) >= 1
