@@ -319,6 +319,13 @@ impl GovernanceCore {
         self.lease_transition_tx = Some(tx);
     }
 
+    /// Whether the audit-writer sender has been injected by the engine boot
+    /// pipeline. This is read-only observability for GUI/API status surfaces.
+    /// audit writer sender 是否已由 engine boot pipeline 注入；僅供只讀觀測面使用。
+    pub fn lease_transition_writer_configured(&self) -> bool {
+        self.lease_transition_tx.is_some()
+    }
+
     /// HIGH-1 retrofit: bind V054 audit-emit engine_mode tag at pipeline boot.
     /// Called from `pipeline_ctor.rs::set_endpoint_env`. Tag must be one of
     /// V054 5-value enum {paper, demo, live_demo, live_mainnet, shadow};

@@ -20,7 +20,6 @@ use openclaw_engine::tick_pipeline::{PipelineKind, TickPipeline};
 use openclaw_types::PriceEvent;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};

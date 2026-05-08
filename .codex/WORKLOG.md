@@ -209,3 +209,8 @@ YYYY-MM-DD HH:MM TZ
 - verification: Python py_compile PASS, Batch E static pytest 14/0, Phase4 route pytest 29/0, Scout route/audit pytest 46/0, Layer2 route class pytest 12/0, targeted Layer2 trigger test PASS, `cargo check -p openclaw_engine --bin openclaw-engine` PASS with pre-existing unused warnings, `cargo test -p openclaw_engine --lib database::lease_transition_writer -q` 6/0, `git diff --check` PASS
 - residual: full `test_layer2.py` still has 5 pre-existing Layer2Engine failures from local Anthropic/local-LLM availability and an older `_model_upgrade_triage` signature expectation; the W-AUDIT-2 route-auth failure in that file is fixed by the route-class/targeted trigger pass above
 - boundary: source/test/docs only; no rebuild, restart, runtime env flip, live auth mutation, scanner authority, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- continued W-AUDIT-3 source checkpoint: added F-17 lease-router dynamic status source/API/GUI wiring, F-15 lease flag flip writer/e2e regression coverage, and AMD-2026-05-09-01 draft SM-05 polling design for `ExecutorConfigCache`
+- F-01 remains blocked by `P0-DECISION-AUDIT-2`; this checkpoint does not decide whether the 5-Agent Executor is temporary demo-promotion capable or permanently shadow-only
+- verification: Python governance route pytest 113/0, Settings static pytest 48/0, Rust F-15 writer regression 1/0, risk runtime status regression 1/0, `cargo check -p openclaw_engine --bin openclaw-engine` PASS with pre-existing warnings, `git diff --check` PASS

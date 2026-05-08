@@ -390,7 +390,7 @@
       <div class="oc-metric"><div class="oc-metric-label">System Mode</div><div class="oc-metric-val" style="font-size:14px">read_only</div></div>
       <div class="oc-metric"><div class="oc-metric-label">Execution State</div><div class="oc-metric-val" style="font-size:14px">disabled</div></div>
       <div class="oc-metric"><div class="oc-metric-label">Execution Authority</div><div class="oc-metric-val" style="font-size:14px">not_granted</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Decision Lease</div><div class="oc-metric-val" style="font-size:14px">false</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Decision Lease</div><div class="oc-metric-val" id="sys-decision-lease" style="font-size:14px">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">Live Execution</div><div class="oc-metric-val red" style="font-size:14px">BLOCKED</div></div>
       <div class="oc-metric"><div class="oc-metric-label">Max Retries</div><div class="oc-metric-val" style="font-size:14px">0</div></div>
     </div>
@@ -585,13 +585,15 @@ async function submitPnl() {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadControlPlane() {
-  const [cpRes, ovRes] = await Promise.all([
+  const [cpRes, ovRes, leaseRes] = await Promise.all([
     ocApi('/api/v1/system/control-plane'),
     ocApi('/api/v1/system/overview'),
+    ocApi('/api/v1/governance/lease-router/status'),
   ]);
 
   const cp = (cpRes && cpRes.data) || {};
   const ov = (ovRes && ovRes.data) || {};
+  const lease = (leaseRes && leaseRes.data) || null;
 
   ocSetText('dc-state', cp.demo_state || cp.demo_state_switch || '--');
   ocSetText('dc-valid', cp.demo_validated ? 'Passed' : 'Not Validated');
@@ -627,6 +629,21 @@ async function loadControlPlane() {
   // Debug
   ocSetText('debug-cp', JSON.stringify(cp, null, 2));
   ocSetText('debug-ov', JSON.stringify(ov, null, 2));
+  renderDecisionLeaseStatus(lease);
+}
+
+function renderDecisionLeaseStatus(lease) {
+  const el = document.getElementById('sys-decision-lease');
+  if (!el) return;
+  if (!lease || typeof lease.enabled !== 'boolean') {
+    el.textContent = 'unknown';
+    el.className = 'oc-metric-val yellow';
+    el.title = 'source: unavailable';
+    return;
+  }
+  el.textContent = lease.enabled ? 'true' : 'false';
+  el.className = 'oc-metric-val ' + (lease.enabled ? 'green' : '');
+  el.title = 'source: ' + (lease.source || '--');
 }
 
 // 产品族中英名称对照 / Product family bilingual name mapping

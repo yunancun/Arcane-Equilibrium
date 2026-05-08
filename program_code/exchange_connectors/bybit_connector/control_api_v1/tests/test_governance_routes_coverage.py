@@ -41,6 +41,7 @@ Coverage targets:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,6 +64,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.governance_routes import (
     _sanitize_string,
     _sanitize_log,
+    _build_lease_router_status_payload,
     _require_operator_role,
     GovernanceResponse,
     AuthApprovalRequest,
@@ -95,6 +97,7 @@ from app.governance_routes import (
     reject_audit_change,
     request_de_escalation,
     get_learning_tier_status,
+    get_lease_router_status,
 )
 from app.main_legacy import AuthenticatedActor
 
@@ -298,6 +301,68 @@ class TestGovernanceResponse:
         """error() default code is 'error'. / error() 預設 code 為 'error'。"""
         result = GovernanceResponse.error("something went wrong")
         assert result["code"] == "error"
+
+
+class TestLeaseRouterStatus:
+    """W-AUDIT-3 F-17 Decision Lease router status surface."""
+
+    def test_payload_prefers_rust_ipc_status(self):
+        """Runtime IPC payload is authoritative when available."""
+        calls: list[dict[str, Any]] = []
+
+        async def fake_dispatch(method: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"method": method, "kwargs": kwargs})
+            return {
+                "governor_tier": "NORMAL",
+                "paper_paused": False,
+                "session_halted": False,
+                "lease_router": {
+                    "enabled": True,
+                    "audit_writer_configured": True,
+                    "source": "GovernanceCore.router_gate_enabled",
+                    "scope": "production_intent_router",
+                },
+            }
+
+        payload = asyncio.run(_build_lease_router_status_payload(fake_dispatch))
+        assert calls[0]["method"] == "get_risk_runtime_status"
+        assert payload["enabled"] is True
+        assert payload["router_gate_enabled"] is True
+        assert payload["status"] == "enabled"
+        assert payload["source"] == "rust_ipc:get_risk_runtime_status"
+        assert payload["ipc_available"] is True
+        assert payload["audit_writer_configured"] is True
+        assert payload["runtime_source"] == "GovernanceCore.router_gate_enabled"
+        assert payload["scope"] == "production_intent_router"
+        assert payload["warning"] is None
+
+    def test_payload_degrades_to_env_without_hardcoded_false(self, monkeypatch):
+        """IPC outage keeps a visible unknown/env-backed status, not false."""
+        monkeypatch.setenv("OPENCLAW_LEASE_ROUTER_GATE_ENABLED", "1")
+
+        async def failing_dispatch(method: str, **kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError("socket down\nretry later")
+
+        payload = asyncio.run(_build_lease_router_status_payload(failing_dispatch))
+        assert payload["enabled"] is True
+        assert payload["status"] == "enabled"
+        assert payload["source"] == "api_env_fallback"
+        assert payload["ipc_available"] is False
+        assert payload["warning"] == "rust_ipc_unavailable"
+        assert "\n" not in payload["error"]
+
+    def test_route_wraps_status_payload(self, monkeypatch):
+        """The public route returns the unified governance envelope."""
+        import app.governance_routes as mod
+
+        async def fake_builder() -> dict[str, Any]:
+            return {"enabled": False, "source": "unit_test"}
+
+        monkeypatch.setattr(mod, "_build_lease_router_status_payload", fake_builder)
+        response = asyncio.run(get_lease_router_status(actor=_make_actor()))
+        assert response["ok"] is True
+        assert response["message"] == "lease_router_status"
+        assert response["data"] == {"enabled": False, "source": "unit_test"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
