@@ -47,6 +47,13 @@ psutil>=5.9.0
 # 在 try/except 內 import — 缺少 bs4 禁用網頁內容解析。
 beautifulsoup4>=4.12.0
 
+# --- L2 推理 provider SDK（全部 try/except import；缺套件 → provider.is_available()=False；
+#       provider_client.py 統一抽象，layer2_engine 走 provider abstraction） ---
+# Anthropic SDK — Claude haiku/sonnet/opus
+anthropic>=0.40.0
+# OpenAI SDK — 同時供 OpenAI (GPT-4o/o1) 與 DeepSeek (deepseek-chat/reasoner，base_url 切到 api.deepseek.com)
+openai>=1.55.0
+
 # --- Testing / 測試 ---
 pytest>=9.0.3
 pytest-asyncio>=0.23.0

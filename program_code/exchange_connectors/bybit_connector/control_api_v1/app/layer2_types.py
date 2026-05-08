@@ -416,7 +416,11 @@ class ModelPricing:
 
 @dataclass
 class PricingTable:
-    """Complete pricing table for all models and search providers / 所有模型与搜索的完整定价表"""
+    """所有模型與搜索 provider 的完整定價表。
+
+    tier_key 在 cost_tracker.record_claude_cost(model_tier=...) 內查 pricing。
+    新增 provider 時必同步加 entry，否則 KeyError。
+    """
     models: dict[str, ModelPricing] = field(default_factory=lambda: {
         MODEL_HAIKU: ModelPricing(
             model_id=MODEL_IDS[MODEL_HAIKU],
@@ -435,6 +439,38 @@ class PricingTable:
             input_per_mtok=15.00,
             output_per_mtok=75.00,
             last_verified_date="2026-04-12",
+        ),
+        # DeepSeek（V3/V4 共用 deepseek-chat 端點；DeepSeek 公開定價，cache-miss 計）
+        "deepseek-chat": ModelPricing(
+            model_id="deepseek-chat",
+            input_per_mtok=0.27,
+            output_per_mtok=1.10,
+            last_verified_date="2026-05-08",
+        ),
+        "deepseek-reasoner": ModelPricing(
+            model_id="deepseek-reasoner",
+            input_per_mtok=0.55,
+            output_per_mtok=2.19,
+            last_verified_date="2026-05-08",
+        ),
+        # OpenAI（公開定價；GPT-4o-mini / GPT-4o / o1）
+        "gpt-4o-mini": ModelPricing(
+            model_id="gpt-4o-mini",
+            input_per_mtok=0.15,
+            output_per_mtok=0.60,
+            last_verified_date="2026-05-08",
+        ),
+        "gpt-4o": ModelPricing(
+            model_id="gpt-4o",
+            input_per_mtok=2.50,
+            output_per_mtok=10.00,
+            last_verified_date="2026-05-08",
+        ),
+        "o1": ModelPricing(
+            model_id="o1",
+            input_per_mtok=15.00,
+            output_per_mtok=60.00,
+            last_verified_date="2026-05-08",
         ),
     })
     perplexity_per_search: float = 0.005
@@ -502,6 +538,10 @@ class Layer2Config:
 
     # Model / 模型
     default_model: str = MODEL_SONNET
+    # GUI Tab-AI 「默认供应商」下拉框對應欄位。當前 client 實裝：anthropic + local_llm。
+    # 其他值（openai/deepseek/google/perplexity）寫入 secrets 後仍會落到 anthropic 路徑，
+    # 直到對應 client 實裝為止（provider_keys_store.status() 的 client_implemented=False）。
+    default_provider: str = "anthropic"
     allow_opus_upgrade: bool = True
     max_iterations: int = MAX_AGENT_ITERATIONS
 
@@ -516,6 +556,16 @@ class Layer2Config:
     confidence_threshold: float = 0.5
     edge_threshold_bps: float = 25.0  # Must exceed round-trip cost floor (~21 bps)
 
+    # Tier 2/3 預算降級 — daily_spend / hard_cap 越過閾值時切到 fallback provider+model。
+    # provider/model 用 provider_client 的 tier_key（haiku/sonnet/opus/deepseek-chat/...）。
+    # 不啟用降級 = 把 threshold 設成 1.0（永遠不觸發）；hard_cap 達標仍會 fail-closed。
+    fallback_tier2_provider: str = "deepseek"
+    fallback_tier2_model: str = "deepseek-chat"
+    fallback_tier2_threshold_pct: float = 0.5
+    fallback_tier3_provider: str = "anthropic"
+    fallback_tier3_model: str = "haiku"
+    fallback_tier3_threshold_pct: float = 0.85
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "daily_hard_cap_usd": self.daily_hard_cap_usd,
@@ -526,6 +576,7 @@ class Layer2Config:
             "adaptive_max_multiplier": self.adaptive_max_multiplier,
             "adaptive_min_multiplier": self.adaptive_min_multiplier,
             "default_model": self.default_model,
+            "default_provider": self.default_provider,
             "allow_opus_upgrade": self.allow_opus_upgrade,
             "max_iterations": self.max_iterations,
             "search_providers_enabled": self.search_providers_enabled,
@@ -533,6 +584,12 @@ class Layer2Config:
             "auto_submit_to_paper": self.auto_submit_to_paper,
             "confidence_threshold": self.confidence_threshold,
             "edge_threshold_bps": self.edge_threshold_bps,
+            "fallback_tier2_provider": self.fallback_tier2_provider,
+            "fallback_tier2_model": self.fallback_tier2_model,
+            "fallback_tier2_threshold_pct": self.fallback_tier2_threshold_pct,
+            "fallback_tier3_provider": self.fallback_tier3_provider,
+            "fallback_tier3_model": self.fallback_tier3_model,
+            "fallback_tier3_threshold_pct": self.fallback_tier3_threshold_pct,
         }
 
 

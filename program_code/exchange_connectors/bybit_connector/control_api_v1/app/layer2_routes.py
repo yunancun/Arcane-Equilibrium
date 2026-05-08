@@ -39,6 +39,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+from . import provider_keys_store
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_engine import Layer2Engine
 # ARCH-RC1 1C-3-F: Layer 2's paper-side path now goes through the Rust engine
@@ -143,7 +144,8 @@ class ConfigUpdateRequest(BaseModel):
     adaptive_base_daily_usd: float | None = Field(default=None, gt=0, le=100)
     adaptive_max_multiplier: float | None = Field(default=None, gt=0, le=5)
     adaptive_min_multiplier: float | None = Field(default=None, gt=0, le=2)
-    default_model: str | None = Field(default=None, max_length=20)
+    default_model: str | None = Field(default=None, max_length=40)
+    default_provider: str | None = Field(default=None, max_length=20)
     allow_opus_upgrade: bool | None = None
     max_iterations: int | None = Field(default=None, gt=0, le=50)
     search_providers_enabled: list[str] | None = None
@@ -151,6 +153,18 @@ class ConfigUpdateRequest(BaseModel):
     auto_submit_to_paper: bool | None = None
     confidence_threshold: float | None = Field(default=None, ge=0, le=1)
     edge_threshold_bps: float | None = Field(default=None, ge=0)
+    # Tier 2/3 預算降級（layer2_engine._resolve_effective_provider 用）
+    fallback_tier2_provider: str | None = Field(default=None, max_length=20)
+    fallback_tier2_model: str | None = Field(default=None, max_length=40)
+    fallback_tier2_threshold_pct: float | None = Field(default=None, ge=0, le=1)
+    fallback_tier3_provider: str | None = Field(default=None, max_length=20)
+    fallback_tier3_model: str | None = Field(default=None, max_length=40)
+    fallback_tier3_threshold_pct: float | None = Field(default=None, ge=0, le=1)
+    # GUI Tab-AI 「AI 供应商管理」面板新增。
+    # provider_keys: { provider_name: api_key }，由 provider_keys_store 持久化到
+    # secrets/providers/<provider>.env，並注入當前進程 env（Anthropic 還會 reset client）。
+    # 不會進 Layer2Config（不是引擎參數，是憑證 secrets）。
+    provider_keys: dict[str, str] | None = Field(default=None)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -433,19 +447,118 @@ async def update_config(
 ) -> dict[str, Any]:
     """
     Update Layer 2 configuration.
-    更新 Layer 2 配置。
+    更新 Layer 2 配置（包含 provider API keys）。
+
+    provider_keys 路由到 provider_keys_store（寫 secrets/providers/<p>.env + 注入 env）；
+    不進 Layer2Config（憑證不是引擎參數）。其餘欄位走 cost_tracker.update_config。
     """
     tracker = _get_cost_tracker()
-    updates = {k: v for k, v in req.model_dump().items() if v is not None}
-    if not updates:
+    raw = req.model_dump()
+    provider_keys: dict[str, str] | None = raw.pop("provider_keys", None)
+    updates = {k: v for k, v in raw.items() if v is not None}
+
+    # ── provider keys 寫入 + 即時 env 注入 ───────────────────────────
+    # 寫入屬狀態變更，要求 Operator 角色（API key 是憑證，比一般 config 敏感）。
+    provider_results: list[dict[str, Any]] = []
+    provider_errors: list[dict[str, Any]] = []
+    if provider_keys:
+        base.require_operator_role(actor)
+        for provider, key in provider_keys.items():
+            if provider not in provider_keys_store.ALLOWED_PROVIDERS:
+                provider_errors.append({
+                    "provider": provider,
+                    "reason_code": "provider_not_whitelisted",
+                })
+                continue
+            try:
+                result = provider_keys_store.save_key(provider, str(key))
+                provider_results.append(result)
+            except ValueError as exc:
+                provider_errors.append({
+                    "provider": provider,
+                    "reason_code": "validation_failed",
+                    "detail": str(exc),
+                })
+            except Exception as exc:
+                logger.exception("provider_keys save failed: provider=%s", provider)
+                provider_errors.append({
+                    "provider": provider,
+                    "reason_code": "io_error",
+                    "detail": str(exc),
+                })
+
+    # ── 沒有任何寫入動作 ─────────────────────────────────────────────
+    if not updates and not provider_keys:
         return _layer2_response(
             {"message": "No updates provided"},
             action_result="blocked",
             reason_codes=["empty_update"],
         )
 
-    config = tracker.update_config(updates)
+    # ── tracker 配置 ────────────────────────────────────────────────
+    config_dict: dict[str, Any] | None = None
+    if updates:
+        config = tracker.update_config(updates)
+        config_dict = config.to_dict()
+
+    # ── 回傳 envelope（含 provider 結果）──────────────────────────
+    payload: dict[str, Any] = {
+        "message": "Configuration updated",
+        "config": config_dict,
+    }
+    if provider_keys is not None:
+        payload["provider_results"] = provider_results
+        payload["provider_errors"] = provider_errors
+        payload["provider_status"] = provider_keys_store.status()
+
+    if provider_errors:
+        # 部分成功也標 partial：前端據此提示
+        return _layer2_response(
+            payload,
+            action_result="partial" if provider_results or updates else "blocked",
+            reason_codes=[err["reason_code"] for err in provider_errors],
+        )
+    return _layer2_response(payload)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Provider Key Management / 供應商密鑰管理
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@layer2_router.get("/providers/status")
+async def get_providers_status(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """
+    回 GUI Tab-AI 用的供應商狀態快照。
+    永不回明文 key（只回 masked + configured + client_implemented）。
+    """
+    return _layer2_response(provider_keys_store.status())
+
+
+@layer2_router.delete("/providers/{provider}")
+async def delete_provider_key(
+    provider: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """
+    刪除某 provider 的 API key（檔案 + env），需 Operator 角色。
+    """
+    base.require_operator_role(actor)
+    if provider not in provider_keys_store.ALLOWED_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": ["provider_not_whitelisted"], "provider": provider},
+        )
+    try:
+        result = provider_keys_store.delete_key(provider)
+    except Exception as exc:
+        logger.exception("provider_keys delete failed: provider=%s", provider)
+        raise HTTPException(
+            status_code=500,
+            detail={"reason_codes": ["io_error"], "detail": str(exc)},
+        )
     return _layer2_response({
-        "config": config.to_dict(),
-        "message": "Configuration updated successfully",
+        **result,
+        "provider_status": provider_keys_store.status(),
     })

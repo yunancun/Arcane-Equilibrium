@@ -601,6 +601,24 @@ async def _startup_integrity_check() -> None:
             _ais_exc, _ais_exc,
         )
 
+    # Provider API keys → 注入 os.environ（純本地檔案讀取，<100ms 安全）。
+    # GUI Tab-AI 寫入後重啟仍能用；Anthropic 走 ANTHROPIC_API_KEY，layer2_engine 直接 os.getenv。
+    try:
+        from . import provider_keys_store as _pks
+        _injected = _pks.load_into_environ()
+        _ready = [p for p, ok in _injected.items() if ok]
+        if _ready:
+            base.logger.info(
+                "Provider keys loaded into env: %s / 供應商密鑰已注入環境變數",
+                ", ".join(_ready),
+            )
+    except Exception as _pks_exc:
+        base.logger.warning(
+            "Provider keys load failed (fail-open): %s "
+            "/ 供應商密鑰載入失敗（不阻斷）：%s",
+            _pks_exc, _pks_exc,
+        )
+
     _elapsed_ms = (_time.monotonic() - _t0) * 1000
     base.logger.info(
         "Startup handler completed in %.1f ms (target < 100 ms) "
