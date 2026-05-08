@@ -109,7 +109,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-OPENCLAW-6/7` | 2 | DONE — proposal/approval relay backend foundation | V065 `openclaw.*` ledger applied on Linux; proposal create + approve runtime smoke passed with `side_effect_executed=false`; `[54]` PASS. |
 | `P1-AGENT-OBS-1` | 2 | DONE — explicit lineage healthcheck | `[55] agent_decision_spine_lineage` distinguishes disabled / enabled-empty / incomplete / report-pending states and surfaces `MAG-082 readiness=*`; `OPENCLAW_AGENT_SPINE_HEALTH_REQUIRED=1` escalates WARN to FAIL. |
 | `P1-AGENT-RUNTIME-1` | 2 | SOURCE-READY — runtime decision-spine lineage | Source/test wiring complete behind `OPENCLAW_AGENT_SPINE_RUNTIME_MODE`; no runtime row proof until operator authorizes rebuild/restart/env flip. |
-| `P1-DATA-1` | 3 | WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | Exit-feature accumulation, MLDE applier failures, realized edge, and pricing freshness remain quality signals. |
+| `P1-DATA-1` | 3 | WARN cluster: `[14]`, `[40]`, `[45]`; `[37]` recovered-history semantics source-fixed | Exit-feature accumulation, realized edge, and pricing freshness remain quality signals. MLDE applier failures now warn only when unrecovered or recent. |
 | `P1-DATA-2` | 3 | `[42b]` / `[42c]` low-sample attribution watch | Settled attribution improved; low-sample strategies still require maturity before promotion. |
 | `P1-DATA-3` | 3 | `[51]` scanner opportunity calibration | Scanner opportunity remains shadow/advisory until calibrated positive samples exist. |
 | `P1-EDGE-1` | 3 | ma_crossover and bb_breakout diagnosis | Re-evaluate negative/zero-fire strategy cells with replay and live-demo observations. |

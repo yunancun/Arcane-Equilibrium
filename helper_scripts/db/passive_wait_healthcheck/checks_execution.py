@@ -251,6 +251,15 @@ def check_mlde_demo_applier(cur) -> tuple[str, str]:
     if not row or not row[0]:
         return ("FAIL", "learning.mlde_param_applications missing — V032 not applied")
 
+    failure_recent_minutes = 60
+    try:
+        failure_recent_minutes = int(
+            os.environ.get("OPENCLAW_MLDE_APPLIER_FAILURE_RECENT_MINUTES", "60")
+        )
+    except ValueError:
+        failure_recent_minutes = 60
+    failure_recent_minutes = max(5, min(24 * 60, failure_recent_minutes))
+
     try:
         cur.execute(
             """
@@ -274,11 +283,33 @@ def check_mlde_demo_applier(cur) -> tuple[str, str]:
                     WHERE engine_mode IN ('live', 'live_demo')
                       AND status = 'applied'
                       AND COALESCE(decision_lease_id, '') = ''
-                )::int AS live_applied_without_lease
+                )::int AS live_applied_without_lease,
+                max(ts) FILTER (
+                    WHERE ts > now() - interval '24 hours'
+                      AND status = 'failed'
+                ) AS last_failed_ts,
+                max(ts) FILTER (
+                    WHERE ts > now() - interval '24 hours'
+                      AND status IN ('applied', 'dry_run', 'skipped', 'candidate')
+                ) AS last_non_failed_ts,
+                count(*) FILTER (
+                    WHERE ts > now() - (%s::int || ' minutes')::interval
+                      AND status = 'failed'
+                )::int AS failed_recent
             FROM learning.mlde_param_applications
-            """
+            """,
+            (failure_recent_minutes,),
         )
-        recent, demo_applied, governed_candidates, failed, live_applied_without_lease = cur.fetchone()
+        (
+            recent,
+            demo_applied,
+            governed_candidates,
+            failed,
+            live_applied_without_lease,
+            last_failed_ts,
+            last_non_failed_ts,
+            failed_recent,
+        ) = cur.fetchone()
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"MLDE demo applier query failed: {type(exc).__name__}: {exc}")
 
@@ -287,14 +318,28 @@ def check_mlde_demo_applier(cur) -> tuple[str, str]:
     governed_candidates = _as_int(governed_candidates)
     failed = _as_int(failed)
     live_applied_without_lease = _as_int(live_applied_without_lease)
+    failed_recent = _as_int(failed_recent)
     base = (
         f"24h MLDE applier rows={recent}, demo_applied={demo_applied}, "
         f"governed_live_candidates={governed_candidates}, failed={failed}, "
+        f"failed_recent_{failure_recent_minutes}m={failed_recent}, "
         f"live_applied_without_lease={live_applied_without_lease}"
     )
     if live_applied_without_lease > 0:
         return ("FAIL", base + " — live/live_demo applied row lacks Decision Lease")
     if failed > 0:
+        if (
+            failed_recent == 0
+            and last_failed_ts is not None
+            and last_non_failed_ts is not None
+            and last_non_failed_ts > last_failed_ts
+        ):
+            return (
+                "PASS",
+                base
+                + f" — historical applier failures recovered; "
+                + f"last_failed={last_failed_ts}, last_non_failed={last_non_failed_ts}",
+            )
         return ("WARN", base + " — applier failures need inspection")
     if recent == 0:
         return ("WARN", base + " — no MLDE applier decisions yet")
