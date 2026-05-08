@@ -249,3 +249,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-4 V069 source checkpoint after code-reference audit: narrowed observability cleanup to `observability.scorer_predictions` only; retained `model_performance` because `canary_promoter.py` reads it, and retained `feature_baselines`/`drift_events` pending V072 drift contract resolution
 - added rowcount/dependency guarded `V069__drop_dead_observability_scorer_predictions.sql` using `DROP TABLE ... RESTRICT`, plus fresh-start reset compatibility for missing dropped tables
 - verification: V069 migration + fresh-start missing-table pytest 4/0, py_compile PASS; source/test only, no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
+
+2026-05-09 CEST
+- continued W-AUDIT-4 V072 source checkpoint after Linux read-only contract proof: `features.online_latest` has 43 rows at 34 dims, active `observability.feature_baselines` rows are 0, and 7d `learning.decision_features` rows are 51,130 at 17 JSON keys
+- added `V072__feature_baselines_contract_guard.sql` to lock active baselines to Rust drift_detector / feature_collector 34-dim names and prevent accidental 17-dim edge_predictor `decision_features` seeding
+- remaining V072 work is a real 34-dim historical baseline writer design; this checkpoint intentionally does not seed/write baselines and does not apply DB
