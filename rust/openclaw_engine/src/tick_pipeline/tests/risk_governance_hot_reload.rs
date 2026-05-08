@@ -75,6 +75,25 @@ fn test_rc1_risk_runtime_status_no_boot_ts() {
     assert_eq!(snap["session_halted"], false);
     assert!(snap["governor_tier"].is_string());
     assert!(snap["consecutive_losses_by_symbol"].is_object());
+    assert_eq!(snap["lease_router"]["enabled"], false);
+    assert_eq!(snap["lease_router"]["audit_writer_configured"], false);
+    assert_eq!(
+        snap["lease_router"]["source"],
+        "GovernanceCore.router_gate_enabled"
+    );
+    assert_eq!(snap["lease_router"]["scope"], "production_intent_router");
+}
+
+#[test]
+fn test_rc1_risk_runtime_status_surfaces_lease_router_flag() {
+    // W-AUDIT-3 F-17: API/GUI status must read the runtime gate state instead
+    // of hardcoding Decision Lease=false.
+    // W-AUDIT-3 F-17：API/GUI 狀態需讀 runtime gate，不再硬編 false。
+    let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+    pipeline.governance.set_router_gate_enabled_for_test(true);
+    let snap = pipeline.risk_runtime_status_json(1_000_000);
+    assert_eq!(snap["lease_router"]["enabled"], true);
+    assert_eq!(snap["lease_router"]["audit_writer_configured"], false);
 }
 
 #[test]

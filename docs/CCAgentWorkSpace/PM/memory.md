@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | W-AUDIT-3 partial F-15/F-17/SM-05: dynamic lease-router Settings status, lease flag flip writer regression, draft SM-05 polling design; F-01 still blocked by P0-DECISION-AUDIT-2 | workspace/reports/2026-05-09--w_audit_3_partial_f15_f17_sm05.md |
 | 2026-05-09 | W-AUDIT-1 docs/governance sync: closed CLAUDE runtime drift, W-C authorization record, AMD §5.4.1, register/glossary/ADR/README/SCRIPT_INDEX catch-up, and MIT/BB workspace READMEs; no runtime mutation | workspace/reports/2026-05-09--w_audit_1_docs_governance_sync.md |
 | 2026-05-07 | TODO v13 Agent/OpenClaw replan: converted TODO from historical ledger to active dispatch queue, archived stale v12 context, and reordered work around executor smoke -> runtime lineage -> MAG-082 rerun -> MAG-083/MAG-084 -> OpenClaw read-only expansion | workspace/reports/2026-05-07--todo_v13_agent_openclaw_replan.md |
 | 2026-05-07 | P1 healthcheck FAIL queue + Executor fake-live source fix: inserted `[Xb]` / `[42*]` / `[50]` / `[51]` ahead of P1 work and fixed Executor IPC to use `submit_paper_order` with explicit engine plus engine-aware shadow provider | workspace/reports/2026-05-07--p1_healthcheck_fail_queue_and_executor_fake_live_fix.md |

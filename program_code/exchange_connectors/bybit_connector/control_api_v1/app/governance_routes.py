@@ -40,6 +40,7 @@ MODULE_NOTE (English):
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -326,9 +327,105 @@ class GovernanceResponse:
         }
 
 
+_LEASE_ROUTER_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _lease_router_env_snapshot() -> tuple[bool | None, str | None]:
+    """
+    Return API-process env fallback for the Rust lease-router flag.
+    返回 API 进程环境中的 Rust lease-router 旗标后备快照。
+    """
+    raw = os.environ.get("OPENCLAW_LEASE_ROUTER_GATE_ENABLED")
+    if raw is None:
+        return None, None
+    return raw.strip().lower() in _LEASE_ROUTER_TRUE_VALUES, raw
+
+
+async def _build_lease_router_status_payload(
+    dispatcher: Any | None = None,
+) -> dict[str, Any]:
+    """
+    Build a read-only Decision Lease router status payload for GUI display.
+    为 GUI 构造只读 Decision Lease router 状态。
+
+    Rust runtime state is authoritative when IPC is available. The API env var
+    is only a degraded fallback so the GUI never hardcodes a false value.
+    Rust runtime IPC 可用时是权威来源；API env 仅作降级后备，避免 GUI 硬编码 false。
+    """
+    env_enabled, env_raw = _lease_router_env_snapshot()
+    fallback_status = (
+        "unknown" if env_enabled is None else ("enabled" if env_enabled else "disabled")
+    )
+    payload: dict[str, Any] = {
+        "enabled": env_enabled,
+        "router_gate_enabled": env_enabled,
+        "status": fallback_status,
+        "source": "api_env_fallback" if env_enabled is not None else "unavailable",
+        "ipc_available": False,
+        "env_raw": env_raw,
+        "audit_writer_configured": None,
+        "risk_governor_tier": None,
+        "paper_paused": None,
+        "session_halted": None,
+        "warning": "rust_ipc_unavailable",
+    }
+
+    try:
+        if dispatcher is None:
+            from .ipc_dispatch import one_shot_ipc_call  # noqa: PLC0415
+
+            dispatcher = one_shot_ipc_call
+        runtime = await dispatcher(
+            "get_risk_runtime_status",
+            params={},
+            timeout=2.0,
+            wrap_errors_as_http=False,
+            error_context="lease_router_status",
+        )
+        if not isinstance(runtime, dict):
+            raise ValueError("get_risk_runtime_status returned a non-object payload")
+        lease_router = runtime.get("lease_router")
+        if not isinstance(lease_router, dict):
+            raise ValueError("get_risk_runtime_status missing lease_router")
+        enabled = bool(lease_router.get("enabled"))
+        payload.update(
+            {
+                "enabled": enabled,
+                "router_gate_enabled": enabled,
+                "status": "enabled" if enabled else "disabled",
+                "source": "rust_ipc:get_risk_runtime_status",
+                "ipc_available": True,
+                "audit_writer_configured": bool(
+                    lease_router.get("audit_writer_configured")
+                ),
+                "runtime_source": lease_router.get("source"),
+                "scope": lease_router.get("scope"),
+                "risk_governor_tier": runtime.get("governor_tier"),
+                "paper_paused": runtime.get("paper_paused"),
+                "session_halted": runtime.get("session_halted"),
+                "warning": None,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 - status endpoint must degrade visibly
+        payload["error"] = _sanitize_log(exc, max_len=200)
+    return payload
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Routes / 路由
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@governance_router.get("/lease-router/status")
+async def get_lease_router_status(
+    actor: Any = Depends(_get_auth_actor),
+) -> dict[str, Any]:
+    """
+    Return read-only Decision Lease router status for the Settings tab.
+    返回 Settings 页只读 Decision Lease router 状态。
+    """
+    payload = await _build_lease_router_status_payload()
+    return GovernanceResponse.success(data=payload, message="lease_router_status")
+
 
 @governance_router.get("/status")
 def get_governance_status(

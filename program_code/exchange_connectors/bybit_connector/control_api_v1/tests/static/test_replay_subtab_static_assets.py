@@ -258,6 +258,18 @@ def test_development_support_toggle_is_browser_local(
     assert "/api/v1/settings/development-mode" not in common_js
 
 
+def test_settings_decision_lease_status_is_dynamic(tab_settings_html: str) -> None:
+    """W-AUDIT-3 F-17: Settings tab must not hardcode Decision Lease=false."""
+    assert 'id="sys-decision-lease"' in tab_settings_html
+    assert "/api/v1/governance/lease-router/status" in tab_settings_html
+    assert "renderDecisionLeaseStatus" in tab_settings_html
+    hardcoded_metric = (
+        '<div class="oc-metric-label">Decision Lease</div>'
+        '<div class="oc-metric-val" style="font-size:14px">false</div>'
+    )
+    assert hardcoded_metric not in tab_settings_html
+
+
 def test_edge_gates_tab_renders_strategy_and_healthcheck_surfaces(
     tab_edge_gates_html: str,
 ) -> None:

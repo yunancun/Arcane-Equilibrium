@@ -387,6 +387,12 @@ impl TickPipeline {
             "boot_cooldown_total_ms": self.boot_cooldown_ms,
             "paper_paused": self.paper_paused,
             "session_halted": self.session_halted,
+            "lease_router": {
+                "enabled": self.governance.router_gate_enabled(),
+                "audit_writer_configured": self.governance.lease_transition_writer_configured(),
+                "source": "GovernanceCore.router_gate_enabled",
+                "scope": "production_intent_router",
+            },
         })
     }
 
