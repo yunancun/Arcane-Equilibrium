@@ -244,3 +244,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-4 V074 source checkpoint: added a live/live_demo `decision_outcomes` backfill helper, cron wrapper, and migration guard/index for the engine-mode pending scan
 - helper mirrors the fixed Rust `outcome_backfiller` SQL contract (`1m/5m/1h/4h` kline timeframe literals, engine_mode propagated from snapshots, `ON CONFLICT DO UPDATE` repair path for stale/null outcome rows) and supports dry-run rollback
 - verification: V074 migration + helper static pytest 7/0, `bash -n` PASS, py_compile PASS; source/test only, cron was not installed or run, no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
+
+2026-05-09 CEST
+- continued W-AUDIT-4 V069 source checkpoint after code-reference audit: narrowed observability cleanup to `observability.scorer_predictions` only; retained `model_performance` because `canary_promoter.py` reads it, and retained `feature_baselines`/`drift_events` pending V072 drift contract resolution
+- added rowcount/dependency guarded `V069__drop_dead_observability_scorer_predictions.sql` using `DROP TABLE ... RESTRICT`, plus fresh-start reset compatibility for missing dropped tables
+- verification: V069 migration + fresh-start missing-table pytest 4/0, py_compile PASS; source/test only, no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action

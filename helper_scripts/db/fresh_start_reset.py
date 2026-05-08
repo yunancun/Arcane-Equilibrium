@@ -405,6 +405,9 @@ def truncate_tables(cur, dry_run: bool) -> dict[str, int]:
     for tbl, desc in all_tables:
         n = _exact_count(cur, tbl)
         counts[tbl] = n
+        if n < 0:
+            logger.info("SKIPPED missing table %s  # %s", tbl, desc)
+            continue
         if dry_run:
             logger.info("[DRY-RUN] Would TRUNCATE %s (%s rows)  # %s", tbl, n, desc)
         else:
