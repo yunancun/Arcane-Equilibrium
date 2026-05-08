@@ -328,7 +328,11 @@ class ReplayRunStateManager:
         )
 
     def update_subprocess_pid(
-        self, cur: Any, run_id: str, subprocess_pid: int
+        self,
+        cur: Any,
+        run_id: str,
+        subprocess_pid: int,
+        subprocess_started_at_ms: Optional[int] = None,
     ) -> bool:
         """Update subprocess_pid + flip status starting → running.
         更新 subprocess_pid + status starting → running。
@@ -351,12 +355,19 @@ class ReplayRunStateManager:
             """
             UPDATE replay.run_state
                SET subprocess_pid = %s,
+                   subprocess_started_at_ms = %s,
                    status = %s
              WHERE run_id = %s::uuid
                AND status = %s
             RETURNING run_id::text;
             """,
-            (subprocess_pid, STATUS_RUNNING, run_id, STATUS_STARTING),
+            (
+                subprocess_pid,
+                subprocess_started_at_ms,
+                STATUS_RUNNING,
+                run_id,
+                STATUS_STARTING,
+            ),
         )
         row = cur.fetchone()
         if row is None:

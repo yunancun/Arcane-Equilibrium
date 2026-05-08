@@ -1091,23 +1091,51 @@ def write_manifest_fixture(
     return fixture_path
 
 
-def verify_replay_runner_pid(pid: int) -> Tuple[bool, Optional[str]]:
-    """Verify ``pid`` belongs to a process whose argv contains ``replay_runner``.
-    驗證 ``pid`` 的 process argv 含 ``replay_runner``。
+def resolve_process_started_at_ms(pid: int) -> Optional[int]:
+    """Return process create_time in milliseconds, or ``None`` if unavailable.
+    回傳 process create_time 毫秒；不可取時回 ``None``。
+
+    This is advisory metadata for V067 ``subprocess_started_at_ms``. Spawn
+    remains usable when psutil is absent; finalize falls back to cmdline-only
+    identity for legacy rows whose start time is NULL.
+    """
+    try:
+        import psutil  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+
+    try:
+        return int(psutil.Process(pid).create_time() * 1000)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+    except Exception as exc:  # noqa: BLE001 — advisory metadata probe
+        log.warning("psutil.Process(%d).create_time failed: %s", pid, exc)
+        return None
+
+
+def verify_replay_runner_pid(
+    pid: int,
+    expected_started_at_ms: Optional[int] = None,
+    *,
+    started_at_tolerance_ms: int = 1_000,
+) -> Tuple[bool, Optional[str]]:
+    """Verify ``pid`` belongs to the expected ``replay_runner`` process.
+    驗證 ``pid`` 屬於預期的 ``replay_runner`` process。
 
     REF-20 Sprint 1 Track A helper, also reused by Track C (P0-4 cancel
-    pid identity check). PID-reuse safe: ``psutil.Process(pid).cmdline()``
-    returns the *current* process's argv; if the original replay_runner
-    died and pid was reused by an unrelated process, cmdline is unrelated
-    string list and check returns False (fail-closed).
+    pid identity check). V067 adds optional process-start matching so a
+    recycled PID owned by a different ``replay_runner`` process is rejected
+    even when cmdline alone still contains ``replay_runner``.
 
     REF-20 Sprint 1 Track A 共用 helper，Track C（P0-4 cancel pid 身份
-    檢查）亦會用。PID reuse 安全：``psutil.Process(pid).cmdline()`` 回
-    *當前* process 的 argv；若原 replay_runner 已死且 pid 被無關 process
-    復用，cmdline 將是無關字串清單，本檢查回 False（fail-closed）。
+    檢查）亦會用。V067 增加 optional process-start match，使 PID 被另一個
+    ``replay_runner`` 復用時即使命令列仍含 ``replay_runner`` 也會拒絕。
 
     Args:
         pid: OS process id from V045 ``subprocess_pid`` column.
+        expected_started_at_ms: V067 process create_time captured at spawn.
+            ``None`` preserves legacy cmdline-only behavior.
+        started_at_tolerance_ms: ms tolerance for platform timestamp rounding.
 
     Returns / 回傳:
         (True, None) — argv contains 'replay_runner';
@@ -1115,6 +1143,8 @@ def verify_replay_runner_pid(pid: int) -> Tuple[bool, Optional[str]]:
         (False, "pid_no_cmdline") — process exists but cmdline empty (zombie);
         (False, "pid_identity_mismatch:got=<truncated_cmdline>") — argv does
             not contain 'replay_runner' (PID reuse / wrong PID).
+        (False, "pid_start_time_mismatch:expected=<ms>:got=<ms>") — cmdline
+            matched but process create_time differs from V067 metadata.
         (False, "psutil_unavailable") — psutil import failed (Mac dev fallback).
     """
     try:
@@ -1140,6 +1170,24 @@ def verify_replay_runner_pid(pid: int) -> Tuple[bool, Optional[str]]:
     if "replay_runner" not in joined:
         truncated = joined[:80]  # bound payload size
         return False, f"pid_identity_mismatch:got={truncated}"
+    if expected_started_at_ms is not None:
+        try:
+            actual_started_at_ms = int(proc.create_time() * 1000)
+        except psutil.NoSuchProcess:
+            return False, "pid_not_found"
+        except psutil.AccessDenied:
+            return False, "pid_access_denied"
+        except Exception as exc:  # noqa: BLE001 — fail-closed identity probe
+            log.warning("psutil.Process(%d).create_time failed: %s", pid, exc)
+            return False, f"psutil_error:{type(exc).__name__}"
+        delta_ms = abs(actual_started_at_ms - int(expected_started_at_ms))
+        if delta_ms > started_at_tolerance_ms:
+            return (
+                False,
+                "pid_start_time_mismatch:"
+                f"expected={int(expected_started_at_ms)}:"
+                f"got={actual_started_at_ms}",
+            )
     return True, None
 
 
@@ -1526,6 +1574,7 @@ __all__ = [
     "replay_response_envelope",
     "resolve_artifact_allowlist_root",
     "resolve_artifact_output_dir",
+    "resolve_process_started_at_ms",
     "resolve_replay_runner_bin",
     "safe_pg_select",
     "spawn_replay_runner",

@@ -187,7 +187,7 @@ def _select_run_state_for_finalize_sync(
 
     Output row_dict keys / 輸出 row_dict 鍵:
         run_id / actor_id / manifest_id / status / subprocess_pid /
-        runtime_environment / output_path
+        subprocess_started_at_ms / runtime_environment / output_path
     """
     # REF-20 Sprint A R3 round 2 fix M-1: SELECT ... FOR UPDATE row-locks the
     # V045 run_state row inside the finalize xact to prevent multi-worker
@@ -213,7 +213,8 @@ def _select_run_state_for_finalize_sync(
     cur.execute(
         """
         SELECT run_id::text, actor_id, manifest_id::text, status,
-               subprocess_pid, runtime_environment, output_path
+               subprocess_pid, subprocess_started_at_ms,
+               runtime_environment, output_path
           FROM replay.run_state
          WHERE run_id = %s::uuid
          LIMIT 1
@@ -240,8 +241,9 @@ def _select_run_state_for_finalize_sync(
         "manifest_id": row[2],
         "status": status,
         "subprocess_pid": row[4],
-        "runtime_environment": row[5],
-        "output_path": row[6],
+        "subprocess_started_at_ms": row[5],
+        "runtime_environment": row[6],
+        "output_path": row[7],
     }, None
 
 
@@ -534,7 +536,7 @@ async def run_finalize_in_pg_xact(
     get_pg_conn_fn: Callable[..., Any],
     resolve_artifact_output_dir_fn: Callable[[str], Path],
     artifact_path_within_allowlist_fn: Callable[[Path], Tuple[bool, Optional[str]]],
-    verify_replay_runner_pid_fn: Callable[[int], Tuple[bool, Optional[str]]],
+    verify_replay_runner_pid_fn: Callable[..., Tuple[bool, Optional[str]]],
     canary_writer: Any,
     simulated_fills_writer: Any,
     audit_emit_fn: Callable[..., None],
@@ -639,7 +641,13 @@ async def run_finalize_in_pg_xact(
                 # 步驟 3：subprocess 還活著？→ 409 not_yet_completed。
                 pid = row.get("subprocess_pid")
                 if pid:
-                    is_alive, _why = verify_replay_runner_pid_fn(pid)
+                    subprocess_started_at_ms = row.get("subprocess_started_at_ms")
+                    if subprocess_started_at_ms is not None:
+                        is_alive, _why = verify_replay_runner_pid_fn(
+                            pid, subprocess_started_at_ms
+                        )
+                    else:
+                        is_alive, _why = verify_replay_runner_pid_fn(pid)
                     if is_alive:
                         conn.rollback()
                         return None, (409, {

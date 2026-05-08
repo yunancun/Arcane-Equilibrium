@@ -126,12 +126,12 @@ historical wave narratives, and old date-driven reminders are archived.
 
 | ID | Task | Trigger |
 |---|---|---|
-| `P2-MIG-1` | V054 lease transitions Python migration sibling test | Next DB-migration maintenance batch. |
+| `P2-MIG-1` | DONE — V054 lease transitions Python migration sibling test | Added sibling coverage for V054 Guard A, `lease_transitions` schema/checks/indexes, Timescale hypertable branch, and `governance_audit_log` event_type extension. |
 | `P2-MIG-2` | DONE — V066 byte-size CHECK and `replay_report` artifact enum migration | Covered by `P1-REPLAY-2`; Linux runtime DB applied and idempotency-verified on 2026-05-08. |
 | `P2-SEC-1` | DONE — generic replay finalize 503 exception messages | Client 503 no longer exposes backend exception class/message; detailed failure remains in server logs under `replay_finalize_failed`. |
-| `P2-REPLAY-1` | PID reuse guard for replay runner finalize | Low-probability hardening; add `subprocess_started_at_ms`. |
+| `P2-REPLAY-1` | DONE — PID reuse guard for replay runner finalize | V067 adds nullable `subprocess_started_at_ms`; spawn captures process create_time when available, and finalize rejects reused replay_runner PIDs whose cmdline matches but start-time differs. |
 | `P2-PYDANTIC-1` | DONE — replay Pydantic V1 `@validator` -> V2 `@field_validator` migration | Removed replay validator deprecation warnings under pinned `pydantic>=2.11.0`. |
-| `P2-RUST-1` | Split `intent_processor/tests.rs` under 2000 LOC | Next Rust test maintenance batch. |
+| `P2-RUST-1` | DONE — split `intent_processor/tests.rs` under 2000 LOC | `tests.rs` is 1556 LOC; larger nested predictor/maker/router suites moved to `tests_predictor_router.rs` at 1363 LOC. |
 | `P2-LEASE-1` | Clean terminal `DecisionLeaseSm.objects` Vec entries | If long soak shows memory growth or before high-volume live. |
 | `P2-STRUCT-1` | HStateCache + CostEdgeAdvisor late-inject slot enablement | After H0/pricing ownership is clear. |
 | `P2-STRUCT-2` | Zombie/deprecated code inventory | Next architecture hygiene sweep. |
