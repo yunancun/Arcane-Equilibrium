@@ -10,10 +10,11 @@ use super::events::{
     DecisionEdgeType, DecisionObjectType, ExecutionIdempotencyKey, SpineEdge, SpineObjectEnvelope,
     SpineStateTransition,
 };
+use super::runtime_shadow::{emit_entry_lineage, RuntimeShadowLineageInput};
 use super::signal_adapter::{strategy_signal_from_open_intent, strategy_signal_to_trading_msg};
 use super::store::{AgentSpineMsg, AgentSpineStore, ChannelAgentSpineStore};
 use crate::database::TradingMsg;
-use crate::intent_processor::OrderIntent;
+use crate::intent_processor::{OrderIntent, VerdictInfo};
 use crate::order_manager::TimeInForce;
 use serde_json::json;
 use std::str::FromStr;
@@ -116,6 +117,131 @@ fn typed_strategy_signal_preserves_legacy_trading_signal_persistence_shape() {
         }
         other => panic!("expected TradingMsg::Signal, got {other:?}"),
     }
+}
+
+#[test]
+fn runtime_shadow_lineage_emits_complete_demo_chain() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let intent = sample_intent(true);
+    let verdict = VerdictInfo {
+        verdict: "Approved".to_string(),
+        risk_score: 0.22,
+        reasons: vec!["guardian_checks".to_string()],
+        modified_qty: None,
+    };
+
+    let accepted = emit_entry_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        RuntimeShadowLineageInput {
+            signal_id: "sig-demo-grid_trading-BTCUSDT-900",
+            context_id: "ctx-demo-BTCUSDT-900",
+            intent_id: "intent-demo-BTCUSDT-900",
+            verdict_id: "vrd-demo-BTCUSDT-900",
+            ts_ms: 900,
+            engine_mode: "demo",
+            intent: &intent,
+            approved_qty: 0.75,
+            reference_price: 101.20,
+            verdict_info: Some(&verdict),
+            order_link_id: Some("oc_900_1"),
+        },
+    );
+
+    assert_eq!(accepted, 10);
+    let mut objects = Vec::new();
+    let mut edges = Vec::new();
+    let mut execution_keys = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        match msg {
+            AgentSpineMsg::Object(object) => objects.push(object),
+            AgentSpineMsg::Edge(edge) => edges.push(edge),
+            AgentSpineMsg::ExecutionIdempotencyKey(key) => execution_keys.push(key),
+            AgentSpineMsg::StateTransition(_) => {
+                panic!("runtime shadow emits no state transitions")
+            }
+        }
+    }
+
+    assert_eq!(objects.len(), 5);
+    assert_eq!(edges.len(), 4);
+    assert_eq!(execution_keys.len(), 1);
+    assert!(objects
+        .iter()
+        .all(|object| object.authority_mode == AgentSpineMode::Shadow));
+    assert!(objects
+        .iter()
+        .any(|object| object.object_type == DecisionObjectType::StrategySignal));
+    assert!(objects
+        .iter()
+        .any(|object| object.object_type == DecisionObjectType::StrategistDecision));
+    assert!(objects
+        .iter()
+        .any(|object| object.object_type == DecisionObjectType::GuardianVerdict));
+    assert!(objects
+        .iter()
+        .any(|object| object.object_type == DecisionObjectType::ExecutionPlan));
+    assert!(objects
+        .iter()
+        .any(|object| object.object_type == DecisionObjectType::ExecutionReport));
+    assert!(edges
+        .iter()
+        .any(|edge| edge.edge_type == DecisionEdgeType::SignalFor));
+    assert!(edges
+        .iter()
+        .any(|edge| edge.edge_type == DecisionEdgeType::ReviewedBy));
+    assert!(edges
+        .iter()
+        .any(|edge| edge.edge_type == DecisionEdgeType::PlannedBy));
+    assert!(edges
+        .iter()
+        .any(|edge| edge.edge_type == DecisionEdgeType::ExecutedBy));
+    assert_eq!(execution_keys[0].engine_mode, "demo");
+}
+
+#[test]
+fn runtime_shadow_lineage_is_disabled_for_unscoped_modes() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let intent = sample_intent(true);
+
+    let disabled = emit_entry_lineage(
+        Some(&tx),
+        AgentSpineMode::Disabled,
+        RuntimeShadowLineageInput {
+            signal_id: "sig-demo-grid_trading-BTCUSDT-901",
+            context_id: "ctx-demo-BTCUSDT-901",
+            intent_id: "intent-demo-BTCUSDT-901",
+            verdict_id: "vrd-demo-BTCUSDT-901",
+            ts_ms: 901,
+            engine_mode: "demo",
+            intent: &intent,
+            approved_qty: 0.75,
+            reference_price: 101.20,
+            verdict_info: None,
+            order_link_id: None,
+        },
+    );
+    let paper = emit_entry_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        RuntimeShadowLineageInput {
+            signal_id: "sig-paper-grid_trading-BTCUSDT-902",
+            context_id: "ctx-paper-BTCUSDT-902",
+            intent_id: "intent-paper-BTCUSDT-902",
+            verdict_id: "vrd-paper-BTCUSDT-902",
+            ts_ms: 902,
+            engine_mode: "paper",
+            intent: &intent,
+            approved_qty: 0.75,
+            reference_price: 101.20,
+            verdict_info: None,
+            order_link_id: None,
+        },
+    );
+
+    assert_eq!(disabled, 0);
+    assert_eq!(paper, 0);
+    assert!(rx.try_recv().is_err());
 }
 
 #[test]

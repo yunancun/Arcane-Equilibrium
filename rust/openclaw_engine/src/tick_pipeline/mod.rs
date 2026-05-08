@@ -966,6 +966,11 @@ pub struct TickPipeline {
     /// INFRA-PREBUILD-1 A 部：`ShadowExitMsg` 發送端；Phase 2+ 僅在
     /// `shadow_enabled=true` 時發射。None = 停用（fail-soft）。逐引擎接線。
     shadow_exit_tx: Option<tokio::sync::mpsc::Sender<crate::database::ShadowExitMsg>>,
+    /// W-B: Optional Agent Decision Spine runtime shadow writer. Default None
+    /// keeps typed lineage emission disabled and never affects trading authority.
+    /// W-B：Agent Decision Spine runtime shadow writer，可選；None 時停用且不影響交易權限。
+    agent_spine_tx: Option<tokio::sync::mpsc::Sender<crate::agent_spine::store::AgentSpineMsg>>,
+    agent_spine_mode: crate::agent_spine::config::AgentSpineMode,
     /// Scanner symbol registry — gates new opens to scanner-active symbols only.
     /// None = gate disabled (all symbols allowed, e.g. tests / standalone).
     /// 掃描器交易對注冊表 — 新開倉僅限掃描器活躍交易對。

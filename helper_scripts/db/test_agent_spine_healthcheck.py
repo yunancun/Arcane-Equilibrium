@@ -89,6 +89,26 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
         self.assertIn("BLOCKED_ENABLED_EMPTY", msg)
         self.assertIn("objects=0/0", msg)
 
+    def test_runtime_mode_shadow_enables_check(self) -> None:
+        os.environ.pop("OPENCLAW_AGENT_SPINE_CLIENT_ENABLED", None)
+        os.environ["OPENCLAW_AGENT_SPINE_RUNTIME_MODE"] = "shadow"
+        cur = _cur(
+            [
+                (True,),
+                (True,),
+                (True,),
+                (0, 0),
+                (0, 0),
+                (0, 0),
+            ]
+        )
+
+        status, msg = check_55_agent_decision_spine_lineage(cur)
+
+        self.assertEqual(status, "WARN")
+        self.assertIn("BLOCKED_ENABLED_EMPTY", msg)
+        self.assertTrue(cur.execute.called)
+
     def test_required_empty_fails(self) -> None:
         os.environ["OPENCLAW_AGENT_SPINE_CLIENT_ENABLED"] = "1"
         os.environ["OPENCLAW_AGENT_SPINE_HEALTH_REQUIRED"] = "1"

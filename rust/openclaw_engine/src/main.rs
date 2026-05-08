@@ -642,6 +642,8 @@ async fn async_main(
         shadow_fill_tx,
         exit_feature_tx,
         shadow_exit_tx,
+        agent_spine_tx,
+        agent_spine_mode,
     ) = tasks::spawn_db_writers(
         &db_pool,
         &config,
@@ -910,6 +912,8 @@ async fn async_main(
         shadow_fill_tx: shadow_fill_tx.clone(),
         exit_feature_tx: exit_feature_tx.clone(),
         shadow_exit_tx: shadow_exit_tx.clone(),
+        agent_spine_tx: agent_spine_tx.clone(),
+        agent_spine_mode,
     };
 
     let paper_handle = main_pipelines::spawn_paper_pipeline(
@@ -1009,6 +1013,8 @@ async fn async_main(
             shadow_fill_tx: shadow_fill_tx.clone(),
             exit_feature_tx: exit_feature_tx.clone(),
             shadow_exit_tx: shadow_exit_tx.clone(),
+            agent_spine_tx: agent_spine_tx.clone(),
+            agent_spine_mode,
         });
 
     // Boot Some: direct spawn using pre-built channels. Reuses the `spawn_ctx`

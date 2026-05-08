@@ -431,10 +431,11 @@ pub(crate) fn spawn_news_pipeline(
 /// 啟動所有 DB 寫入器任務 + 特徵版本初始化。
 ///
 /// Returns the sender halves for (market, feature, trading, context,
-/// decision_feature, shadow_fill, exit_feature, shadow_exit) channels.
+/// decision_feature, shadow_fill, exit_feature, shadow_exit, agent_spine)
+/// channels plus the resolved Agent Spine runtime mode.
 /// The caller uses these to wire into EventConsumerDeps.
 /// 返回 (market, feature, trading, context, decision_feature, shadow_fill,
-/// exit_feature, shadow_exit) 通道的發送端。
+/// exit_feature, shadow_exit, agent_spine) 通道的發送端，及 Agent Spine runtime mode。
 #[allow(clippy::type_complexity)]
 pub(crate) async fn spawn_db_writers(
     db_pool: &Arc<DbPool>,
@@ -455,9 +456,23 @@ pub(crate) async fn spawn_db_writers(
     // observations (Phase 2+ shadow_enabled toggle). Dormant by default.
     // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測通道。
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ShadowExitMsg>>,
+    Option<tokio::sync::mpsc::Sender<openclaw_engine::agent_spine::store::AgentSpineMsg>>,
+    openclaw_engine::agent_spine::config::AgentSpineMode,
 ) {
+    let agent_spine_mode = openclaw_engine::agent_spine::config::AgentSpineMode::from_runtime_env();
     if !db_pool.is_available() {
-        return (None, None, None, None, None, None, None, None);
+        return (
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            agent_spine_mode,
+        );
     }
 
     // Market writer channel + task
@@ -596,6 +611,30 @@ pub(crate) async fn spawn_db_writers(
         );
     }
 
+    let agent_spine_tx = if agent_spine_mode.writes_enabled() {
+        let (agent_spine_tx, agent_spine_rx) = tokio::sync::mpsc::channel(1024);
+        {
+            let as_pool = Arc::clone(db_pool);
+            let as_config = Arc::clone(config);
+            let as_cancel = cancel.clone();
+            tokio::spawn(
+                openclaw_engine::database::agent_spine_writer::run_agent_spine_writer(
+                    agent_spine_rx,
+                    as_pool,
+                    as_config,
+                    as_cancel,
+                ),
+            );
+        }
+        info!(
+            mode = agent_spine_mode.as_str(),
+            "agent spine runtime writer wired / Agent Spine runtime writer 已接線"
+        );
+        Some(agent_spine_tx)
+    } else {
+        None
+    };
+
     // F-4 fix: Spawn REST pollers for funding/OI/LSR
     // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
     if let Some(ref client) = shared_client {
@@ -657,6 +696,8 @@ pub(crate) async fn spawn_db_writers(
         Some(shadow_fill_tx),
         Some(exit_feature_tx),
         Some(shadow_exit_tx),
+        agent_spine_tx,
+        agent_spine_mode,
     )
 }
 

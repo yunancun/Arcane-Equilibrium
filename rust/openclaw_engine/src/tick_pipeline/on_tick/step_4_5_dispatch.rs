@@ -25,8 +25,9 @@ use openclaw_core::signals::Signal;
 use tracing::{info, warn};
 
 use super::super::on_tick_helpers::{
-    build_intent, make_context_id, make_fill_id, make_order_id, make_strategy_signal_id,
-    persist_intent, persist_strategy_signal, persist_verdict, push_capped, push_display_intent,
+    build_intent, make_context_id, make_fill_id, make_intent_id, make_order_id,
+    make_strategy_signal_id, make_verdict_id, persist_intent, persist_strategy_signal,
+    persist_verdict, push_capped, push_display_intent,
     scanner_authority_enforces_legacy_new_open_gate, scanner_legacy_new_open_block_reason,
     IntentScannerContext, ScannerGateAudit,
 };
@@ -553,6 +554,27 @@ impl TickPipeline {
                                     scanner_ctx.as_ref(),
                                     Some(&scanner_gate_audit),
                                 );
+                                crate::agent_spine::runtime_shadow::emit_entry_lineage(
+                                    self.agent_spine_tx.as_ref(),
+                                    self.agent_spine_mode,
+                                    crate::agent_spine::runtime_shadow::RuntimeShadowLineageInput {
+                                        signal_id: &signal_id,
+                                        context_id: &context_id,
+                                        intent_id: &make_intent_id(em, &intent.symbol, event.ts_ms),
+                                        verdict_id: &make_verdict_id(
+                                            em,
+                                            &intent.symbol,
+                                            event.ts_ms,
+                                        ),
+                                        ts_ms: event.ts_ms,
+                                        engine_mode: em,
+                                        intent,
+                                        approved_qty: final_qty,
+                                        reference_price: event.last_price,
+                                        verdict_info: gate.verdict_info.as_ref(),
+                                        order_link_id: Some(order_link_id.as_str()),
+                                    },
+                                );
 
                                 // Dispatch to exchange / 派發到交易所
                                 // I-08 雙軌止損：compute broker-side SL from stop config
@@ -733,6 +755,27 @@ impl TickPipeline {
                                     em,
                                     scanner_ctx.as_ref(),
                                     Some(&scanner_gate_audit),
+                                );
+                                crate::agent_spine::runtime_shadow::emit_entry_lineage(
+                                    self.agent_spine_tx.as_ref(),
+                                    self.agent_spine_mode,
+                                    crate::agent_spine::runtime_shadow::RuntimeShadowLineageInput {
+                                        signal_id: &signal_id,
+                                        context_id: &context_id,
+                                        intent_id: &make_intent_id(em, &intent.symbol, event.ts_ms),
+                                        verdict_id: &make_verdict_id(
+                                            em,
+                                            &intent.symbol,
+                                            event.ts_ms,
+                                        ),
+                                        ts_ms: event.ts_ms,
+                                        engine_mode: em,
+                                        intent,
+                                        approved_qty: result.approved_qty,
+                                        reference_price: event.last_price,
+                                        verdict_info: result.verdict_info.as_ref(),
+                                        order_link_id: None,
+                                    },
                                 );
 
                                 // EDGE-P2-3 Phase 1B-4.2: router classified

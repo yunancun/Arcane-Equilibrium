@@ -135,6 +135,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         // observation. Dormant default; Phase 2+ shadow_enabled flip activates.
         // INFRA-PREBUILD-1 A 部：Combine Layer 退場時刻 shadow 觀測通道。
         shadow_exit_tx,
+        agent_spine_tx,
+        agent_spine_mode,
         exchange_event_rx,
         seed_positions,
         account_manager,
@@ -251,6 +253,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     if let Some(tx) = shadow_exit_tx.clone() {
         pipeline.set_shadow_exit_tx(tx);
     }
+
+    pipeline.set_agent_spine_runtime(agent_spine_tx.clone(), agent_spine_mode);
 
     // EDGE-P3-1 Phase B #4: Seed the IntentProcessor predictor RNG with a per-
     // engine derivation of the current wallclock (spec §7.3 F9:
