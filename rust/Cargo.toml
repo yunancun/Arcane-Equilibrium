@@ -36,3 +36,6 @@ hex = "0.4"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "uuid", "macros", "migrate"] }
 ndarray = "0.16"
 parking_lot = "0.12"
+
+[profile.release]
+strip = "symbols"

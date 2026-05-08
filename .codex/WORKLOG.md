@@ -259,3 +259,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-4 V068/V070/V071 source checkpoint: converted the original dead-schema cleanup plan into metadata-only reclassification guards after source audit found active route/cron/Rust writer/Agent Spine references across most targets
 - V068 retains or marks review-only learning/agent targets; V070 retains replay handoff/advisory/KPI/incident/tier-approval contracts; V071 retains CostEdgeAdvisor, AI budget/usage, and Claude Teacher tables
 - no destructive DB cleanup is included; no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
+
+2026-05-09 CEST
+- started W-AUDIT-5a with F-21 source checkpoint: added `rust/Cargo.toml [profile.release] strip = "symbols"` plus a static TOML regression test
+- verification: release profile strip pytest 1/0, `cargo metadata --manifest-path rust/Cargo.toml --no-deps`, `cargo check --manifest-path rust/Cargo.toml -p openclaw_engine --bin openclaw-engine` PASS with pre-existing unused/dead_code warnings, `git diff --check` PASS
+- no release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
