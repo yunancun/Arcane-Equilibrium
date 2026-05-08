@@ -26,6 +26,10 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   TradeBot. Cloud L2 calls must go through one supervisor escalation packet,
   explicit budget/model config, and durable `agent.ai_invocations` ledger
   reservation.
+- Scanner is always-on infrastructure for market context, active-universe
+  attribution, route fitness, opportunity evidence, and legacy would-block
+  audit. It is not a trading authority and cannot hard-gate opens, closes, live
+  auth, or order dispatch.
 - `MessageBus` is legacy/advisory trace. Authoritative agent promotion requires
   typed lineage: StrategySignal -> StrategistDecision -> GuardianVerdict ->
   ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport.
@@ -67,11 +71,12 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   GuardianVerdict -> ExecutionPlan -> ExecutionReport runtime rows, edges,
   and idempotency keys. This is still shadow-only and does not grant trading
   authority or complete the later Decision Lease Stage 2 gate.
-- `W-C` Stage 2 evidence collection is now started on Linux `trade-core` at
-  `8f8fb252`: `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`,
-  `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`, and scanner `[authority].mode =
-  "advisory_shadow"` are runtime-loaded. `[55]` PASSed with
-  `chains_with_lease=6`, proving router-gate bypass lineage is now written into
+- `W-C` Stage 2 evidence collection is active on Linux `trade-core` at
+  `503eeb33`: `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` and
+  `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow` are runtime-loaded. Scanner hard
+  authority is retired; `scanner_config.toml` no longer carries an `[authority]`
+  mode switch, and scanner would-blocks are evidence only. `[55]` PASSed with
+  `chains_with_lease=33`, proving router-gate bypass lineage is written into
   Agent Spine shadow ExecutionPlan rows. MAG-082 readiness remains
   `LINEAGE_READY_NOT_WINDOW_PASS`; the 24h window is not complete.
 
@@ -115,7 +120,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-OPENCLAW-3` | 2 | DONE — read-only brief/diagnostics/escalations APIs | Backend-authored view models from durable stores only; no raw frontend table stitching. |
 | `P1-OPENCLAW-6/7` | 2 | DONE — proposal/approval relay backend foundation | V065 `openclaw.*` ledger applied on Linux; proposal create + approve runtime smoke passed with `side_effect_executed=false`; `[54]` PASS. |
 | `P1-AGENT-OBS-1` | 2 | DONE — explicit lineage healthcheck | `[55] agent_decision_spine_lineage` distinguishes disabled / enabled-empty / incomplete / report-pending states and surfaces `MAG-082 readiness=*`; `OPENCLAW_AGENT_SPINE_HEALTH_REQUIRED=1` escalates WARN to FAIL. |
-| `P1-AGENT-RUNTIME-1` | 2 | DONE — runtime decision-spine + lease lineage | Linux `trade-core` is running `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow` and `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`; `[55]` PASSed after `8f8fb252` with objects=155/155, edges=124/124, idempotency=31/31, chains=31, `chains_with_lease=6`, reports=31. W-C/MAG-082 still needs the 24h window PASS. |
+| `P1-AGENT-RUNTIME-1` | 2 | DONE — runtime decision-spine + lease lineage | Linux `trade-core` is running `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow` and `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`; `[55]` PASSed after `503eeb33` with objects=290/290, edges=232/232, idempotency=58/58, chains=58, `chains_with_lease=33`, reports=58. W-C/MAG-082 still needs the 24h window PASS. |
 | `P1-DATA-1` | 3 | Runtime-reloaded WARN cluster: `[14]`, `[37]`, `[40]`, `[45]` | `[14]` distinguishes risk/cost gate suppression from writer-health evidence; `[37]` ignores recovered historical failures; `[40]` catches combined demo/live_demo negative cells and `LABUSDT` grid block source is now runtime-reloaded as of 2026-05-08; `[45]` accepts recent AccountManager fee-use proof during rejected-only demo/live_demo no-fill windows. Monitor row rolloff after reload. |
 | `P1-DATA-2` | 3 | Source-fixed `[42b]` / `[42c]` low-sample attribution watch | Settled attribution ratio failures stay fail-closed, but low-sample strategies now render as `LOW_SAMPLE(n, need)` sample-maturity watch instead of misleading `0.000` ratio drift; low-sample strategies still defer promotion until mature. |
 | `P1-DATA-3` | 3 | Source-fixed `[51]` scanner opportunity calibration watch | `[51]` now requires mature `opportunity_positive` samples before PASS, reports `MATURE/LOW_SAMPLE(n, need)`, and keeps scanner opportunity shadow-only when only exploration positive LCB samples exist or calibrated samples are immature. |
