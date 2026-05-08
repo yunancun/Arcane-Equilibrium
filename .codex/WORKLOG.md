@@ -224,3 +224,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-4 F-29 source checkpoint: Linux read-only query confirmed `trading.fills.engine_mode='demo_archive_20260418'` has 6,616 rows from 2026-04-14 13:07:50.165+02 to 2026-04-18 20:13:54.328+02 and no current engine_mode CHECK
 - added `V077__fills_engine_mode_archive_check.sql` to accept only paper/demo/live/live_demo plus bounded pre-2026-04-19 CEST archive rows, with NOT VALID + VALIDATE and no row rewrite
 - verification: V077 migration static pytest 4/0, combined V076+V077 migration static pytest 9/0, py_compile PASS, `git diff --check` PASS; no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
+
+2026-05-09 CEST
+- continued W-AUDIT-4 F-22 source checkpoint: Linux read-only schema audit showed the 9 planned retention targets are actually 5 hypertables, 2 plain tables, and 2 views
+- added corrected `V075__w_audit4_retention_compression.sql`: Timescale retention/compression only for the 5 real hypertables; dry-run-default prune function for `learning.decision_features` and non-live `trading.decision_outcomes`; views are guarded as non-policy targets
+- verification: V075 migration static pytest 5/0, combined V075+V076+V077 migration static pytest 14/0, py_compile PASS, `git diff --check` PASS; no DB apply, rebuild, restart, live auth, scanner authority change, strategy/risk config mutation, or deploy action
