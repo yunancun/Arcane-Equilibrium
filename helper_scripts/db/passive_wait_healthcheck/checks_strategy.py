@@ -412,6 +412,7 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
             # 標註以利除錯。
             per_strategy_tail = "; per_strategy: (all rows have NULL strategy_name?)"
 
+    flow_context, flow_context_tail = _query_exit_feature_flow_context(cur)
     base = f"this_week={this_week}, last_week={last_week}"
 
     # FAIL: completely silent — EDGE-P1b assumption broken.
@@ -436,19 +437,104 @@ def check_exit_features_accumulation_rate(cur) -> tuple[str, str]:
     # WARN: severe decay (< 30% of last week).
     # WARN：嚴重衰減（<30% 上週）。
     if ratio < 0.3:
-        return ("WARN", base + f" (ratio={ratio:.2f}) — severe decay <30%; "
-                "EDGE-P1b accumulation stalled, investigate fill rate + writer health"
-                + per_strategy_tail)
+        if (
+            flow_context.get("risk_verdicts_30m", 0) > 0
+            and flow_context.get("approved_risk_verdicts_30m", 0) == 0
+        ):
+            reason = (
+                "severe decay <30%; EDGE-P1b accumulation stalled because recent "
+                "risk/cost gates rejected all attempts; no approved downstream "
+                "flow means fill/exit samples are not expected, and writer health "
+                "is not implicated by this check"
+            )
+        else:
+            reason = (
+                "severe decay <30%; EDGE-P1b accumulation stalled, investigate "
+                "fill rate + writer health"
+            )
+        return ("WARN", base + f" (ratio={ratio:.2f}) — {reason}"
+                + per_strategy_tail + flow_context_tail)
 
     # WARN: moderate decay (30%-50% of last week).
     # WARN：中度衰減（30%-50% 上週）。
     if ratio < 0.5:
         return ("WARN", base + f" (ratio={ratio:.2f}) — moderate decay 30-50%; "
-                "monitor next-week trend" + per_strategy_tail)
+                "monitor next-week trend" + per_strategy_tail + flow_context_tail)
 
     # PASS: stable or growing.
     # PASS：穩定或成長。
     return ("PASS", base + f" (ratio={ratio:.2f}) — accumulation healthy" + per_strategy_tail)
+
+
+def _query_exit_feature_flow_context(cur) -> tuple[dict[str, int], str]:
+    """Best-effort context for [14] decay without changing the verdict.
+
+    [14] is a sample-accumulation monitor. When accumulation decays because
+    recent risk/cost gates rejected every attempt, the WARN should point at
+    sample-flow suppression rather than implying an exit_features writer fault.
+    """
+    keys = (
+        "intents_1h",
+        "orders_1h",
+        "fills_1h",
+        "risk_verdicts_30m",
+        "approved_risk_verdicts_30m",
+        "rejected_risk_verdicts_30m",
+    )
+    empty = {key: 0 for key in keys}
+    try:
+        cur.execute(
+            """
+            WITH recent_intents AS (
+                SELECT 1
+                  FROM trading.intents
+                 WHERE engine_mode IN ('demo', 'live', 'live_demo')
+                   AND ts > now() - interval '1 hour'
+            ), recent_orders AS (
+                SELECT 1
+                  FROM trading.orders
+                 WHERE engine_mode IN ('demo', 'live', 'live_demo')
+                   AND ts > now() - interval '1 hour'
+            ), recent_fills AS (
+                SELECT 1
+                  FROM trading.fills
+                 WHERE engine_mode IN ('demo', 'live', 'live_demo')
+                   AND ts > now() - interval '1 hour'
+            ), recent_risk AS (
+                SELECT verdict
+                  FROM trading.risk_verdicts
+                 WHERE engine_mode IN ('demo', 'live', 'live_demo')
+                   AND ts > now() - interval '30 minutes'
+            )
+            SELECT
+                (SELECT count(*) FROM recent_intents)::int AS intents_1h,
+                (SELECT count(*) FROM recent_orders)::int AS orders_1h,
+                (SELECT count(*) FROM recent_fills)::int AS fills_1h,
+                (SELECT count(*) FROM recent_risk)::int AS risk_verdicts_30m,
+                (SELECT count(*) FROM recent_risk
+                  WHERE lower(coalesce(verdict, '')) = 'approved'
+                )::int AS approved_risk_verdicts_30m,
+                (SELECT count(*) FROM recent_risk
+                  WHERE lower(coalesce(verdict, '')) = 'rejected'
+                )::int AS rejected_risk_verdicts_30m
+            """
+        )
+        row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001 - explanatory context only
+        return empty, f"; flow_context=unavailable ({type(exc).__name__})"
+    if not row:
+        return empty, "; flow_context=unavailable"
+    context = {key: int(row[idx] or 0) for idx, key in enumerate(keys)}
+    tail = (
+        "; flow_context: "
+        f"intents_1h={context['intents_1h']}, "
+        f"orders_1h={context['orders_1h']}, "
+        f"fills_1h={context['fills_1h']}, "
+        f"risk_30m={context['risk_verdicts_30m']}, "
+        f"approved_30m={context['approved_risk_verdicts_30m']}, "
+        f"rejected_30m={context['rejected_risk_verdicts_30m']}"
+    )
+    return context, tail
 
 
 def check_strategist_cycle_fresh() -> tuple[str, str]:
