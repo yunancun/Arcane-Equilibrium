@@ -57,6 +57,7 @@ docs/
 ├── archive/                           ← 已归档/过期文档（DEPRECATED 文件、旧版摘要）
 │
 ├── CCAgentWorkSpace/                  ← Agent 工作空间（profile/memory/workspace per agent）
+├── agents/                            ← Agent issue tracker / domain / triage-label 指南
 │
 ├── execution_plan/                    ← 执行计划（Sprint/Wave 排期、里程碑规划）
 │
@@ -219,6 +220,15 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md` | PM report: M8 fast-track NO-GO |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--todo_v13_agent_openclaw_replan.md` | PM report: TODO v13 Agent/OpenClaw replan, superseded by TODO v14 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-07--p1_healthcheck_fail_queue_and_executor_fake_live_fix.md` | PM report: P1 healthcheck FAIL queue and executor fake-live source fix |
+| `../helper_scripts/SCRIPT_INDEX.md` | helper_scripts 維護/啟動/CI/DB/audit/cron/operator/research 腳本索引 |
+
+### docs/agents/ — GitHub Issues / Agent triage guidance
+
+| 文件 | 内容 |
+|------|------|
+| `agents/domain.md` | Agent domain ownership and routing rules for issue triage |
+| `agents/issue-tracker.md` | GitHub Issues operating model after the 2026-05-08 tracker decision |
+| `agents/triage-labels.md` | Triage labels and severity/status conventions for Agent work |
 
 ### _indexes/ — 文档 inventory / redirect map / GUI metadata（2026-05-06+）
 
@@ -726,7 +736,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ### CCAgentWorkSpace/ — Agent 獨立工作空間（2026-03-31 新增）
 
-17 個 Agent 角色各自的獨立工作空間。每個 Agent 有 `profile.md`（角色定位）、`memory.md`（工作記憶）、`workspace/`（報告存檔）。
+19 個 Agent 角色各自的獨立工作空間。每個 Agent 有 `profile.md`（角色定位）、`memory.md`（工作記憶）、`workspace/`（報告存檔）。
 
 | 目錄 | Agent | 層次 |
 |------|-------|------|
@@ -744,6 +754,8 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/R4/` | Document Auditor | 專項審查層 |
 | `CCAgentWorkSpace/TW/` | Technical Writer | 專項審查層 |
 | `CCAgentWorkSpace/AI-E/` | AI Effectiveness Evaluator | 分析層 |
+| `CCAgentWorkSpace/MIT/` | ML / DB Foundation Auditor | 專項審查層 |
+| `CCAgentWorkSpace/BB/` | Bybit API Compatibility Auditor | 專項審查層 |
 | `CCAgentWorkSpace/QA/` | Quality Assurance | 分析層 |
 | `CCAgentWorkSpace/QC/` | Quantitative/Math Auditor | 專項審查層 |
 | `CCAgentWorkSpace/Operator/` | Operator（人類 Operator 視角） | 管理層 |
@@ -761,3 +773,48 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-30--README-pre-cleanup-snapshot.md` | 2026-04-30 清理前 `README.md` 完整快照 |
 | `2026-04-29--62finding-batch-A-to-F.md` | ★★★★ 62-Finding Audit Remediation Batch A-F 全程歸檔（commits `bc3fa70` + `6539e4e` + `5db4e29`）：6 batch × 62 findings × Linear NCY-5~10 milestone 對應 + post-deploy healthcheck status（FAIL [12]+[22] / WARN [27]，live pipeline gate v1→v2）|
 | `2026-04-29--strkusdt-p0-wave.md` | ★★★ STRKUSDT Dust Spiral P0 Wave 歸檔：F1 deploy `af48ee1` + F2-F7 6 PR merge（`1dff948` / `5ac7a80` / `310ae29` / `31c8206` / `1341c01` / `1edc6fe`）+ E4 combined 2252/0 + 8 healthcheck [22]-[29] + RCA 三層（entry_notional fail-open / Gate 2 cross-symbol / 41 phantom fills attribution）|
+| `2026-04-01--completed_todo_archive_wave0_7_phase1_3.md` | Wave 0-7 / Phase 1-3 completed TODO archive |
+| `2026-04-03--completed_todo_archive_batch9a_wave8_xp.md` | Batch 9a / Wave 8 XP completed TODO archive |
+| `2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` | Data storage architecture draft archive |
+| `2026-04-03--rust_migration_master_plan_v2.md` | Rust migration master plan v2 archive |
+| `2026-04-03--rust_migration_v2.5_consolidated.md` | Rust migration v2.5 consolidated archive |
+| `2026-04-03--system_snapshot_external_analysis.md` | External system snapshot analysis archive |
+| `2026-04-04--completed_todo_archive_phase0123_rust.md` | Phase 0-3 Rust completed TODO archive |
+| `2026-04-06--completed_todo_archive_l3_phases.md` | L3 phases completed TODO archive |
+| `2026-04-07--claude_md_section3_history_phase0_4.md` | CLAUDE.md §三 Phase 0-4 history archive |
+| `2026-04-08--arch_rc1_1c_history_archive.md` | ARCH-RC1 1C history archive |
+| `2026-04-08--main_docs_1c3_1c4_narrative.md` | Main docs 1C3/1C4 narrative archive |
+| `2026-04-09--scanner_todo_phase_a_d_spec.md` | Scanner TODO Phase A-D spec archive |
+| `2026-04-10--completed_todo_live_gui_dead_py.md` | Live GUI dead-Python completed TODO archive |
+| `2026-04-11--completed_todo_3e_arch.md` | 3E architecture completed TODO archive |
+| `2026-04-11--completed_todo_w19_w20_phase6.md` | W19/W20 Phase 6 completed TODO archive |
+| `2026-04-12--changelog_archive_pre_0408.md` | Pre-2026-04-08 changelog archive |
+| `2026-04-12--completed_todo_full_program_audit.md` | Full program audit completed TODO archive |
+| `2026-04-13--changelog_archive_0408_0409.md` | 2026-04-08/09 changelog archive |
+| `2026-04-14--completed_todo_w22_phantom_heal.md` | W22 phantom-heal completed TODO archive |
+| `2026-04-15--claude_md_section3_snapshot.md` | CLAUDE.md §三 2026-04-15 snapshot |
+| `2026-04-15--completed_todo_w22_engine_heal_edge_p3.md` | W22 engine-heal / Edge P3 completed TODO archive |
+| `2026-04-15--phase5_promotion_edge_crisis_full.md` | Phase 5 promotion edge crisis archive |
+| `2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md` | Strategy close-tag / Edge P3 dedup archive |
+| `2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md` | P0 scanner phantom-live guard archive |
+| `2026-04-20--claude_md_section3_snapshot.md` | CLAUDE.md §三 2026-04-20 snapshot |
+| `2026-04-20--completed_todo_batch.md` | 2026-04-20 completed TODO batch archive |
+| `2026-04-21--claude_md_section3_snapshot.md` | CLAUDE.md §三 2026-04-21 snapshot |
+| `2026-04-21--completed_todo_batch.md` | 2026-04-21 completed TODO batch archive |
+| `2026-04-22--step_0_derived_todo_batch.md` | Step 0 derived TODO batch archive |
+| `2026-04-24--completed_todo_batch.md` | 2026-04-24 completed TODO batch archive |
+| `2026-04-24--todo_snapshot_pre_refactor.md` | TODO pre-refactor snapshot archive |
+| `2026-04-24--todo_v1_refactor_snapshot.md` | TODO v1 refactor snapshot archive |
+| `2026-04-24--todo_v2_dual_axis_snapshot.md` | TODO v2 dual-axis snapshot archive |
+| `2026-04-29--CLAUDE-pre-trim-snapshot.md` | CLAUDE.md pre-trim snapshot archive |
+| `2026-04-29--TODO-pre-trim-snapshot.md` | TODO pre-trim snapshot archive |
+| `2026-04-29--claude_md_section3_pre_04_27_detail.md` | CLAUDE.md §三 pre-2026-04-27 detail archive |
+| `2026-04-29--wave-A-to-H-narrative.md` | Wave A-H narrative archive |
+| `2026-05-01--completed_waves_1_2_3_and_backlog.md` | Completed Waves 1-3 and backlog archive |
+| `2026-05-02--CLAUDE-pre-trim-snapshot.md` | CLAUDE.md 2026-05-02 pre-trim snapshot archive |
+| `2026-05-02--TODO-pre-trim-snapshot.md` | TODO 2026-05-02 pre-trim snapshot archive |
+| `2026-05-06--claude_md_stale_extract.md` | CLAUDE.md stale extract archive |
+| `2026-05-06--readme_stale_extract.md` | README stale extract archive |
+| `2026-05-06--todo_completed_extract.md` | TODO completed extract archive |
+| `2026-05-07--todo_v12_agent_openclaw_replan_archive.md` | TODO v12 Agent/OpenClaw replan archive |
+| `2026-05-09--w_audit_verified_closed_archive.md` | W-AUDIT-1..7 verified-closed details archive |
