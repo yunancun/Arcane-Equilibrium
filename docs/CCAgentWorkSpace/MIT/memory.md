@@ -199,3 +199,32 @@ _Last updated: 2026-04-24_
 - W-AUDIT-4 P0 4 cron 從 v1 到 v3 三天 0 進展（schema-side 推進、runtime-side 停滯 v3 加劇）
 
 **距 Mainnet ML-driven**：仍 3-4 sprint（樂觀 8/15 / 中位 9/15 / 悲觀 11/15，**未變**）。若 PA R-1 R-2 R-3 architectural amendment 加入 = 樂觀延後到 2026-Q4 末。
+
+## 2026-05-10 Sprint N+0 final MIT review
+
+**Report**: `workspace/reports/2026-05-10--sprint_n0_final_review.md` (450 行)
+
+**Scope**: V080+V082+V083+V084 + W-AUDIT-4b producer chain (M1+M2+M3 incl. E1-FIX-W2 retract) + W-AUDIT-9 T2 governance.canary_stage_log + AlphaSurface Phase A + invariant 21
+
+**Verdict**: **RETURN-TO-E4 with HIGH/MED issues** (NOT unconditional APPROVE)
+
+**核心發現**:
+
+1. **V080 PASS APPROVE**: Guard A/B/C 完整；Linux PG empirical dry-run E1-A 已驗（manual_promote NULL lease REJECTED；stage=5 REJECTED；idempotent NOTICE-only）；MED/LOW push-back: 無 FK constraint between triggered_metric ↔ metric_registry；description column 無 length CHECK
+2. **V082 PASS APPROVE**: Guard A/A2/A3/C 完整；Linux PG empirical 已驗；MED push-back: 30k/24h evaluation log 無 hypertable 無 retention（Sprint N+1 必加）；evidence_source_tier='shadow_synthetic' 可能 dead code at runtime
+3. **V083 APPROVE WITH `[Linux PG VERIFY]` MUST**: NOT VALID CHECK 設計正確（不破歷史 38% NULL close fills）；Guard A/A2/B/C 完整；E1-B Linux PG dry-run **未跑**（Mac sandbox 拒絕）— 必 E4 / operator 接手；HIGH 風險：未來 ALTER VALIDATE CONSTRAINT lock 25k+ row 30s-3min；7d window opposite-side JOIN 對 funding_arb 退役後 OK
+4. **V084 APPROVE WITH `[Linux PG VERIFY]` MUST + HIGH ML methodology risk**: UDF IMMUTABLE+PARALLEL SAFE 正確；view backward-compatible (V034 attribution_chain_ok formula 保留)；E1-C Linux PG dry-run **未跑**；**1/170 sample weight 4 大 issue**（hardcoded ratio 100x safety margin 無統計依據 / LightGBM 重複計數風險 / LinUCB Thompson 不直接消費 sample_weight / 無 trainer adapter Sprint N+0 內 ship）；type CHECK 太寬鬆（accepts double/real/numeric + LIKE 'timestamp%'）
+5. **invariant 21 P0-MIT-LABEL-CLOSE-TAG-1 mock estimate 0.5%→90% 是 over-optimistic**: 真實 estimate 60-80%（depends on signal_id propagation in 3 reject paths）；99.2% best case / 0.6% worst case；invariant 21 ≥5% 可達；E4 third-pass 0.286% runtime 是 expected（engine 跑舊 binary）— restart_all.sh --rebuild --keep-auth 後 24h ratio 累積模型；6h 警告 healthcheck 建議
+6. **W-AUDIT-4b producer chain 8 call sites 全 land**（grep emit_decision_feature_intent_rejected = 5 hits 證明 E1-FIX-W2 真補 E1-C fake-PASS）；FA invariant 5「feature_baselines first」與當前 N+0 scope 不符（feature_baselines 是 Sprint N+1 P1）— **建議 PM amend invariant 5 wording**
+7. **AlphaSurface Phase A APPROVE**: 0 行為變化，trait 升級 + Tier 1-only build 設計乾淨；R-3 Hypothesis Pipeline N+5 併入路徑無新 PG schema 需求（Sprint N+5 才需 learning.hypotheses table）
+8. **5 ML cron alignment**: 10 ML jobs 全讀 production decision_features view；split 對 trainer 透明 ✓；cron install pending operator (invariant 18)
+
+**8 必要 actions before Sprint N+0 PM sign-off**:
+1. **MUST**: E4 / operator V083 + V084 Linux PG dry-run × 2
+2. **MUST**: operator install ml_training_maintenance_cron.sh + healthcheck PASS
+3. **MUST**: operator deploy restart_all.sh --rebuild --keep-auth 激活 M3 Rust producer
+4. **SHOULD**: 24h passive obs attribution_chain_ok ≥ 5%
+5. **SHOULD**: PM amend invariant 5 wording
+6-8. **MAY**: tighten V084 type CHECK / V082 hypertable + retention (N+1) / V080 FK or healthcheck
+
+**Sprint N+1 carry-forward**: feature_baselines real writer / per-trainer sample_weight adapter / V082 hypertable+retention / signal_id RCA / AlphaSurface Phase B+C
