@@ -164,6 +164,10 @@ from .checks_replay_maintenance import (  # noqa: F401
     check_49_replay_artifact_retention,
     check_50_replay_run_state_health,
 )
+from .checks_live_pipeline import (  # noqa: F401
+    # [56] P0-NEW-ISSUE-1 Live / LiveDemo pipeline active sentinel.
+    check_56_live_pipeline_active,
+)
 
 __all__ = [
     "main",
@@ -243,4 +247,6 @@ __all__ = [
     "check_48_replay_manifest_registry_growth",
     "check_49_replay_artifact_retention",
     "check_50_replay_run_state_health",
+    # [56] P0-NEW-ISSUE-1 live pipeline active sentinel
+    "check_56_live_pipeline_active",
 ]

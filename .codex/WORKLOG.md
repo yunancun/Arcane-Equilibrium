@@ -335,3 +335,9 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-7 F-strategy-confirm source checkpoint: added shared `common.js` action risk-zone CSS, separated Strategy Pause/Stop/Delete, separated Paper run/pause/stop/dual-stop, and grouped Live Stop/Emergency Stop plus close-all/row-close destructive controls
 - extended `openConfirmModal()` for per-call metadata/classes and replaced Paper dual-stop plus Live close-position native `confirm()` paths with custom modal confirms
 - verification: strategy-action + prompt + system-mode static pytest 9/0, `node --check common.js`, `git diff --check`, and Edge headless routed smoke for Strategy/Paper/Live danger zones all PASS; source/test/static-browser only, no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- continued P0-NEW-ISSUE-1 source checkpoint: added passive healthcheck `[56] live_pipeline_active` because `[Xb]` is already occupied by `pipeline_triangulation`
+- `[56]` is read-only/filesystem-only and FAILs when the live slot is configured but signed `live/authorization.json` is missing or `pipeline_snapshot_live.json` is stale; it does not write/renew live auth
+- updated CLAUDE §三/TODO/docs to record the current Linux fact: live slot key/secret/endpoint present, `authorization.json` missing, Rust refused LiveDemo at boot and runtime is demo-only
+- verification: live pipeline healthcheck pytest 7/0, py_compile PASS, local unconfigured-slot import smoke PASS; no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

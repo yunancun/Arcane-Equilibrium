@@ -68,7 +68,7 @@
 | Runtime host | Linux `trade-core`；watchdog 2026-05-08 22:04 UTC：`engine_alive=true`，demo/live snapshots fresh。 |
 | Runtime env | `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
-| Live boundary | LiveDemo 可跑（Live pipeline -> Bybit demo endpoint），Mainnet 真 live 流量仍為 0 by design；本輪未 rebuild、未 restart、未改 live auth、未開真 live API。 |
+| Live boundary | 2026-05-09 01:37 UTC rebuild/restart 後，live slot 的 `api_key` / `api_secret` / `bybit_endpoint` 存在且 endpoint=LiveDemo，但 `$HOME/BybitOpenClaw/secrets/secret_files/bybit/live/authorization.json` 缺失；Rust log 明確 `LIVE PIPELINE REFUSED TO START error_kind="file_missing"`，所以當前 runtime 是 demo-only，`pipeline_snapshot_live.json` stale。Mainnet 真 live 流量仍為 0 by design；未改 live auth、未開真 live API。 |
 
 ### W-C / MAG-082
 
@@ -95,6 +95,7 @@
 | `[42b]/[42c]` attribution drift | settled eligible strategies ratio=1.000；低樣本策略標 `LOW_SAMPLE(n, need)`。 | WARN sample-maturity watch，不是 attribution drift。 |
 | `[45]` pricing binding | demo/live_demo source=`bybit_v5`，age >1h but <24h。 | WARN：仍需 P0-LG-2 provider pricing binding foundation。 |
 | `[51]` scanner opportunity shadow | routes/intents 100%；24h labels=39，positive_lcb_n=16，avg_net=-4.29bps，`opportunity_positive_n=0 LOW_SAMPLE`。 | WARN：shadow-only，calibrated positive sample 未成熟。 |
+| `[56]` live pipeline active | 2026-05-09 source/test added：live slot 配置時要求簽名 `authorization.json` 存在且 `pipeline_snapshot_live.json` 新鮮；當前 Linux facts 為 auth_missing + stale live snapshot。 | 預期 FAIL，直到 operator 透過 signed live-auth route renew；此 check 不寫 auth、不啟動 live。 |
 
 ### Active Blockers
 
