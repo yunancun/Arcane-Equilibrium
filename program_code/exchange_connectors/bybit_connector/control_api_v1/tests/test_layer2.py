@@ -59,6 +59,7 @@ from app.layer2_types import (
     ToolCallRecord,
 )
 from app.layer2_cost_tracker import Layer2CostTracker
+from app.provider_client import L2Response, ToolUse
 from app.layer2_tools import (
     TOOL_SCHEMAS,
     ToolExecutor,
@@ -833,7 +834,12 @@ class TestLayer2Engine:
                 engine.run_session(trigger="manual", symbol="BTCUSDT")
             )
             assert session.state == SESSION_STATE_FAILED
-            assert "not available" in session.final_summary.lower() or "not set" in session.final_summary.lower()
+            final_summary = session.final_summary.lower()
+            assert (
+                "not available" in final_summary
+                or "not set" in final_summary
+                or "不可用" in final_summary
+            )
 
     def test_run_session_budget_exceeded(self, engine_setup):
         """When daily budget is 0, session should be blocked"""
@@ -881,44 +887,42 @@ class TestLayer2Engine:
             )
             assert result.get("worth_investigating") is False
 
-    @patch("app.layer2_engine._get_anthropic_client")
-    def test_l1_triage_success(self, mock_client_fn, engine_setup):
-        """L1 triage with mocked client"""
+    def test_l1_triage_success(self, engine_setup):
+        """L1 triage with mocked provider abstraction"""
         engine, _ = engine_setup
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.usage.input_tokens = 100
-        mock_response.usage.output_tokens = 50
-        mock_response.content = [MagicMock(text='{"worth_investigating": true, "reason": "test"}')]
-        mock_client.messages.create.return_value = mock_response
-        mock_client_fn.return_value = mock_client
-
-        result = _run(
-            engine.l1_triage({"test": "context"})
+        provider_response = L2Response(
+            text='{"worth_investigating": true, "reason": "test"}',
+            input_tokens=100,
+            output_tokens=50,
         )
+
+        with patch.object(engine, "_provider_complete", new=AsyncMock(return_value=provider_response)):
+            result = _run(
+                engine.l1_triage({"test": "context"})
+            )
         assert result.get("worth_investigating") is True
 
-    @patch("app.layer2_engine._get_anthropic_client")
-    def test_full_session_mocked(self, mock_client_fn, engine_setup):
-        """Full session with mocked Anthropic client (end_turn immediately)"""
+    def test_full_session_mocked(self, engine_setup):
+        """Full session with mocked provider abstraction (end_turn immediately)"""
         engine, tracker = engine_setup
-        mock_client = MagicMock()
-
-        # Mock response that just gives a text answer (no tool use)
-        mock_response = MagicMock()
-        mock_response.usage.input_tokens = 500
-        mock_response.usage.output_tokens = 200
-        mock_response.stop_reason = "end_turn"
-        text_block = MagicMock()
-        text_block.type = "text"
-        text_block.text = "Market analysis complete. No clear opportunity at this time."
-        mock_response.content = [text_block]
-        mock_client.messages.create.return_value = mock_response
-        mock_client_fn.return_value = mock_client
-
-        session = _run(
-            engine.run_session(trigger="manual", symbol="BTCUSDT")
+        provider_response = L2Response(
+            text="Market analysis complete. No clear opportunity at this time.",
+            stop_reason="end_turn",
+            input_tokens=500,
+            output_tokens=200,
         )
+        fake_provider = MagicMock()
+        fake_provider.append_assistant_message.side_effect = (
+            lambda messages, response: messages.append({"role": "assistant", "content": response.text})
+        )
+
+        with (
+            patch.object(engine, "_provider_complete", new=AsyncMock(return_value=provider_response)),
+            patch("app.layer2_engine._pc.get_provider", return_value=fake_provider),
+        ):
+            session = _run(
+                engine.run_session(trigger="manual", symbol="BTCUSDT")
+            )
         assert session.state == SESSION_STATE_COMPLETED
         assert session.iterations == 1
         assert session.cost_usd > 0
@@ -928,63 +932,59 @@ class TestLayer2Engine:
         sessions = tracker.get_sessions()
         assert len(sessions) == 1
 
-    @patch("app.layer2_engine._get_anthropic_client")
-    def test_session_with_tool_calls(self, mock_client_fn, engine_setup):
+    def test_session_with_tool_calls(self, engine_setup):
         """Session with tool calls then end_turn"""
         engine, tracker = engine_setup
-        mock_client = MagicMock()
-
-        # First call: tool_use
-        tool_response = MagicMock()
-        tool_response.usage.input_tokens = 500
-        tool_response.usage.output_tokens = 100
-        tool_response.stop_reason = "tool_use"
-        tool_block = MagicMock()
-        tool_block.type = "tool_use"
-        tool_block.name = "get_market_state"
-        tool_block.input = {"symbol": "BTCUSDT"}
-        tool_block.id = "tool_1"
-        tool_response.content = [tool_block]
-
-        # Second call: end_turn
-        end_response = MagicMock()
-        end_response.usage.input_tokens = 800
-        end_response.usage.output_tokens = 300
-        end_response.stop_reason = "end_turn"
-        text_block = MagicMock()
-        text_block.type = "text"
-        text_block.text = "Based on market analysis, holding is recommended."
-        end_response.content = [text_block]
-
-        mock_client.messages.create.side_effect = [tool_response, end_response]
-        mock_client_fn.return_value = mock_client
-
-        session = _run(
-            engine.run_session(trigger="manual", symbol="BTCUSDT")
+        tool_response = L2Response(
+            stop_reason="tool_use",
+            tool_uses=[ToolUse(id="tool_1", name="get_market_state", input={"symbol": "BTCUSDT"})],
+            input_tokens=500,
+            output_tokens=100,
         )
+        end_response = L2Response(
+            text="Based on market analysis, holding is recommended.",
+            stop_reason="end_turn",
+            input_tokens=800,
+            output_tokens=300,
+        )
+        fake_provider = MagicMock()
+        fake_provider.append_assistant_message.side_effect = (
+            lambda messages, response: messages.append({"role": "assistant", "content": response.text})
+        )
+        fake_provider.append_tool_results.side_effect = (
+            lambda messages, results: messages.append({"role": "user", "content": json.dumps(results)})
+        )
+
+        with (
+            patch.object(
+                engine,
+                "_provider_complete",
+                new=AsyncMock(side_effect=[tool_response, end_response]),
+            ),
+            patch("app.layer2_engine._pc.get_provider", return_value=fake_provider),
+        ):
+            session = _run(
+                engine.run_session(trigger="manual", symbol="BTCUSDT")
+            )
         assert session.state == SESSION_STATE_COMPLETED
         assert session.iterations == 2
         assert len(session.tool_calls) == 1
         assert session.tool_calls[0].tool_name == "get_market_state"
 
-    @patch("app.layer2_engine._get_anthropic_client")
-    def test_model_upgrade_triage(self, mock_client_fn, engine_setup):
+    def test_model_upgrade_triage(self, engine_setup):
         """Test model upgrade triage logic"""
         engine, _ = engine_setup
-        mock_client = MagicMock()
-
-        # Upgrade triage response
-        triage_response = MagicMock()
-        triage_response.usage.input_tokens = 100
-        triage_response.usage.output_tokens = 50
-        triage_response.content = [MagicMock(text='{"upgrade_to_opus": true, "reason": "major event"}')]
-        mock_client.messages.create.return_value = triage_response
-        mock_client_fn.return_value = mock_client
+        triage_response = L2Response(
+            text='{"upgrade_to_opus": true, "reason": "major event"}',
+            input_tokens=100,
+            output_tokens=50,
+        )
 
         session = Layer2Session()
-        result = _run(
-            engine._model_upgrade_triage(session, '{"results": [{"title": "Fed rate hike"}]}', mock_client)
-        )
+        with patch.object(engine, "_provider_complete", new=AsyncMock(return_value=triage_response)):
+            result = _run(
+                engine._model_upgrade_triage(session, '{"results": [{"title": "Fed rate hike"}]}')
+            )
         assert result is True
         assert session.upgrade_reason == "major event"
 
