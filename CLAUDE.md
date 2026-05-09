@@ -82,7 +82,7 @@
 
 - 2026-05-08 12-agent audit PA PG 直查：5 策略 7d demo gross 約 `-26.44 USDT`，live_demo gross 約 `+0.43 USDT`；舊 §三 的 `-6.98 USDT` 已過期。
 - 2026-05-09 3C 7d audit：Overall `WARN`；`[40]` avg_net 比 baseline 下滑 `-1.12bps`（within tolerance），grid p50 lifetime shortened `47.6%`，demo gross PnL delta improved `+20.87 USD` vs baseline。
-- `funding_arb` 新開倉仍按現有 risk configs 禁用 / 收斂；最終 retention 或 deprecation 等 2026-05-16 14d audit 與 `P0-DECISION-AUDIT-4`。
+- `funding_arb` 新開倉仍按現有 risk configs 禁用 / 收斂；AMD-2026-05-09-02 / ADR-0018 已決定從 active strategy set 退休，W-AUDIT-6 做 RiskConfig 清理；2026-05-16 14d audit 保留作驗證/歷史工件。
 
 ### Current Observation Gates
 
@@ -106,7 +106,7 @@
 | P0-EDGE-1 | Active；realized edge 未轉正。 |
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
-| P0-DECISION-AUDIT-2/4/5 | 仍需 operator 拍板。`P0-DECISION-AUDIT-1` 由 W-C authorization file + AMD §5.4.1 補件收口；`P0-DECISION-AUDIT-3` 由本次 §三 drift 防線收口。 |
+| P0-DECISION-AUDIT-2/4/5 | 已由 AMD-2026-05-09-02 收口：SM-05 Option A、W-AUDIT-6 strategy verdict、openclaw_core sunset candidates、Layer2 manual supervisor-only。剩餘是 F-01/W-AUDIT-6/W-AUDIT-5/W-AUDIT-7 implementation，非 operator decision blocker。 |
 | W-AUDIT-1..7 | W-AUDIT-1/W-AUDIT-2 已 source-closed；下一個可做項是 W-AUDIT-3。 |
 
 ---
@@ -165,7 +165,7 @@ max_retries             = 0
 [OpenClaw Gateway]       外圍通信 / mobile / supervisor / proposal relay；非交易 hot path，非第二 GUI
 [Rust openclaw_engine]   paper / demo / live 三模式唯一引擎（1C-3-F 後）
                          tick pipeline + IntentProcessor + paper_state + governance + stop_manager
-[Compute tiers]          L0 確定性 → L1 Ollama → L1.5 (Haiku/Perplexity) → L2 Claude
+[Compute tiers]          L0 確定性 → L1 Ollama → L1.5 (Haiku/Perplexity) → L2 Claude manual/supervisor escalation only
 [風控框架]               P0/P1/P2 三層 + 對抗性止損 + AI 注意力稅
 [策略工具包]             KlineManager → IndicatorEngine → SignalEngine → 5 策略 → Orchestrator
 [管線橋接]               PipelineBridge: Tick Fan-Out + Intent→Order + 治理 gate

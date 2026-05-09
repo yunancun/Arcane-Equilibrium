@@ -1,9 +1,9 @@
-# Amendment AMD-2026-05-09-01 - SM-05 Executor Shadow-Mode Polling Design Draft
+# Amendment AMD-2026-05-09-01 - SM-05 Executor Shadow-Mode Polling Design
 
 **對應 spec**: proposed SM-05 · DOC-01 §5.3 / §5.6 / §5.10 / §5.11 · EX-06
 **日期**: 2026-05-09
 **作者**: PM
-**狀態**: Draft / BLOCKED by `P0-DECISION-AUDIT-2`
+**狀態**: Accepted policy / F-01 implementation pending
 **索引**: `SPECIFICATION_REGISTER.md` Amendments section
 **TODO 連結**: `W-AUDIT-3` / `P1-AUDIT-RUNTIME-3` / `F-spec-SM05`
 
@@ -11,20 +11,14 @@
 
 ## 1. Purpose
 
-This draft closes the narrow W-AUDIT-3 documentation gap for
-`ExecutorConfigCache.shadow_mode_provider()` polling behavior.
+This amendment closes the W-AUDIT-3 documentation gap for
+`ExecutorConfigCache.shadow_mode_provider()` polling behavior and records the
+authority decision selected by AMD-2026-05-09-02.
 
-It does **not** decide the unresolved authority question:
-
-- Option A: `executor.shadow_mode=true` is a temporary W-A demo fail-close
-  posture; after `P0-EDGE-1`, demo may flip to `false` to enable supervised
-  shadow-to-submit promotion.
-- Option B: the local 5-Agent Executor path is permanently shadow-only
-  observation; real order submission always flows through Rust `tick_pipeline`.
-
-That decision remains `P0-DECISION-AUDIT-2` and must be operator-selected
-before this draft can become active SM-05 authority policy or before F-01
-removes the `ExecutorAgent` fail-closed fallback.
+Selected policy: `executor.shadow_mode=true` is the W-A demo fail-closed
+posture. The local 5-Agent Executor path is not permanently shadow-only, but
+`shadow_mode=false` is allowed only after `P0-EDGE-1`, supervised promotion
+gates, Decision Lease, and Rust execution authority are satisfied.
 
 ---
 
@@ -58,10 +52,9 @@ Confirmed source behavior as of 2026-05-09:
 
 ---
 
-## 3. Draft SM-05 Requirements
+## 3. SM-05 Requirements
 
-Until `P0-DECISION-AUDIT-2` is resolved, SM-05 is limited to these
-implementation invariants:
+SM-05 now has these implementation invariants:
 
 1. `ExecutorConfigCache` is a Python read mirror, not a writable authority.
 2. Cache miss, IPC failure, schema failure, or provider exception must not
@@ -69,11 +62,12 @@ implementation invariants:
 3. Provider calls from `ExecutorAgent` must stay outside `ExecutorAgent` locks.
 4. The cache may retain a last known good snapshot after transient IPC failure,
    but it may not invent a `shadow_mode=false` value.
-5. `lambda: True` in `ExecutorAgent.__init__` is an unresolved F-01 fallback,
-   not final SM-05 authority semantics.
+5. `lambda: True` in `ExecutorAgent.__init__` is a transitional F-01 fallback,
+   not final SM-05 authority semantics; F-01 may remove it by wiring an
+   explicit provider that fails closed when unavailable.
 6. TOML values `risk_config_{paper,demo,live}.toml [executor].shadow_mode`
-   remain effective runtime policy until the operator resolves
-   `P0-DECISION-AUDIT-2`.
+   remain effective runtime policy until a separately authorized config
+   migration changes them.
 7. `shadow_mode=false` is never a live authorization grant by itself. Live
    still requires the existing live gate chain, signed authorization, secrets,
    Decision Lease, risk gates, and Rust execution authority.
@@ -89,26 +83,24 @@ fails closed to shadow if the provider raises.
 
 This means a provider exception can surface a lease attempt while the order
 submit remains suppressed. That behavior is acceptable only as a transitional
-diagnostic posture. Final SM-05 must choose one of:
+diagnostic posture. Final F-01 implementation must:
 
-- Option A: make provider injection fail-loud for production `ExecutorAgent`
-  wiring and remove the `lambda: True` fallback.
-- Option B: formally declare the 5-Agent Executor path shadow-only and keep
-  lease bypass semantics as observation, not submit authority.
+- make provider injection explicit for production `ExecutorAgent` wiring;
+- remove the unconditional `lambda: True` fallback;
+- keep provider failure fail-closed for submit authority.
 
 ---
 
 ## 5. Acceptance Before Active SM-05
 
-SM-05 may be promoted from Draft to Active only after:
+SM-05 implementation may be marked complete only after:
 
-1. Operator resolves `P0-DECISION-AUDIT-2`.
-2. F-01 implementation matches that decision.
-3. E2 confirms no hidden path can turn provider failure into submit authority.
-4. E4 regression covers provider success, pre-init failure, post-init failure,
+1. F-01 implementation matches AMD-2026-05-09-02 Option A.
+2. E2 confirms no hidden path can turn provider failure into submit authority.
+3. E4 regression covers provider success, pre-init failure, post-init failure,
    malformed schema, and explicit per-engine lookup.
-5. TODO and CLAUDE wording are updated from "draft / blocked" to the selected
-   authority model.
+4. TODO and CLAUDE wording no longer describe SM-05 as blocked on
+   `P0-DECISION-AUDIT-2`.
 
 ---
 

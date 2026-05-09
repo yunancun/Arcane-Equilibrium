@@ -20,9 +20,16 @@ External OpenClaw Gateway may relay briefs, diagnostics, proposals, approvals,
 and channel events, but any trading side effect must re-enter TradeBot
 governance and Rust execution authority.
 
+The legacy `openclaw_core` modules that modeled a parallel cognition/trading
+brain are permanent sunset candidates. They may be removed after source
+reference audit and tests prove the active Rust execution path no longer uses
+them.
+
 ## Consequences
 
 - No separate OpenClaw trading GUI is introduced.
 - OpenClaw Gateway does not hold Bybit credentials.
 - Gateway outage must degrade communication only, not stop the runtime engine.
 - Proposal and approval routes remain relay/audit surfaces, not order authority.
+- W-AUDIT-5 may schedule removal of the nine legacy `openclaw_core` modules;
+  that cleanup is structural only and does not change trading authority.
