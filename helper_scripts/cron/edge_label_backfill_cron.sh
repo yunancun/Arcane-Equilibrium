@@ -171,12 +171,31 @@ echo "[$(ts)] === edge_label_backfill cron start (BASE=$BASE BATCH=$BATCH) ===" 
 # Failure in either aborts the tick — operator alarm via cron mail.
 # 順序：demo 先（資料量較大 / 訊號較快），live_demo 次之。
 # 任一失敗即中止 tick，cron mailer 觸發 operator 告警。
+#
+# W-AUDIT-4b-M2 (2026-05-09): each pass now includes
+# `--backfill-fill-entry-context-id` which runs the new trading.fills
+# entry_context_id backfill BEFORE backfill_labels. Order matters:
+# entry_context_id must be populated first so backfill_labels' EXISTS
+# JOIN (trading.fills.entry_context_id = decision_features.context_id)
+# can find the matched close fills.
+#
+# Acceptance per PA spec §2.5 B-M2: 24h fill writer entry_context_id
+# 非 NULL ratio ≥ 95%（observability.fills_entry_context_id_health view 監控）。
+#
+# Window: fill entry_context_id backfill 用 30d window；backfill_labels
+# 默認 abandon_after_days=30d 對齊。
+#
+# W-AUDIT-4b-M2（2026-05-09）：新增 --backfill-fill-entry-context-id flag，
+# 先跑 fill writer 端 entry_context_id 回填，再跑 label backfill。順序關鍵：
+# entry_context_id 必先補齊，否則 backfill_labels 的 EXISTS JOIN 找不到目標。
 RC=0
 for MODE in demo live_demo; do
-    echo "[$(ts)] running --engine-mode $MODE --batch-limit $BATCH" >> "$LOG"
+    echo "[$(ts)] running --engine-mode $MODE --batch-limit $BATCH (M2 + label backfill)" >> "$LOG"
     if ! python3 -m program_code.ml_training.edge_label_backfill \
             --engine-mode "$MODE" \
-            --batch-limit "$BATCH" >> "$LOG" 2>&1; then
+            --batch-limit "$BATCH" \
+            --backfill-fill-entry-context-id \
+            --fill-entry-context-window-days 30 >> "$LOG" 2>&1; then
         echo "[$(ts)] ERROR: backfill --engine-mode $MODE failed (non-zero exit)" >> "$LOG"
         RC=1
         # fail-loud: stop the cron tick now so cron mail surfaces the issue

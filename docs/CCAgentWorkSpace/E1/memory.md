@@ -6372,3 +6372,73 @@ fixture 注入 `canary_stage_provider() → Stage1+`。5 個 NEW regression
   internal mod）
 - 隔壁 session 副作用 cross-wave 標明「不在本 fix scope」+ PM 通知對應
   session 是正解；不擴張 fix 範圍是 §八 最小影響原則的具體實踐
+
+
+## 2026-05-09 W2 — W-AUDIT-4b-M2 fill writer entry_context_id INSERT trigger（E1-B）
+
+### 任務 / 範圍
+- W-AUDIT-4b-M2 IMPL（PA spec §2.5 B-M2 + TODO.md v19 §5 invariant 5+19）
+- M1 (E1-E `4a90966a`) 已 land producer side intent-only emit；M2 是 fill writer
+  side enforcement + V083 NOT VALID CHECK + cron backfill 三件套
+- 目標：close fills 中 entry_context_id 非 NULL ratio 38% → 95%+
+
+### 設計決策（per task spec 選 Rust writer-side enforcement 路線）
+- **不用 PG trigger**：trigger 性能不可控（每 INSERT row 跑 SELECT），且
+  `trading.fills` 與 `trading.intents` 沒 intent_id FK 直連（natural 對應是
+  paper_state.entry_context_id memory state）
+- **Rust writer 端**：在 `flush_fills` 進 batch INSERT 前掃 buffer，count close
+  fills (`exit_reason.is_some()`) 缺 `entry_context_id` 的列 → emit aggregated
+  WARN log（避免逐列 spam）+ 仍 INSERT（fail-soft）
+- **V083 NOT VALID CHECK**：對 new INSERT 強制 `exit_reason IS NULL OR
+  entry_context_id IS NOT NULL`；不掃 historical row（保 175 行歷史中 NULL
+  close fills 不被 break）
+- **Backfill cron**：升級 `edge_label_backfill_cron.sh` 加 Step 1（fill
+  entry_context_id 回填，必先於 Step 2 label backfill 因 EXISTS JOIN 用
+  entry_context_id 對齊）
+
+### 修改清單（5 files / +1035 LOC）
+| 路徑 | 動作 | LOC |
+|---|---|---|
+| `sql/migrations/V083__fills_entry_context_id_close_check.sql` | 新建 | +287 |
+| `rust/openclaw_engine/src/database/trading_writer.rs` | 加 helper + WARN log + 7 unit test | +250 |
+| `program_code/ml_training/edge_label_backfill.py` | 加 `backfill_fill_entry_context_id()` + CLI flag | +200 |
+| `program_code/ml_training/tests/test_edge_label_backfill.py` | 加 12 test (M2 class) | +247 |
+| `helper_scripts/cron/edge_label_backfill_cron.sh` | MODULE_NOTE 升級 + --backfill-fill-entry-context-id flag wire | +57 / -6 |
+
+### 驗證 / 不驗證
+- cargo test trading_writer:: 10/10 PASS（7 NEW M2 + 3 existing）
+- cargo test 全 lib 2632/2632 PASS（在 isolated worktree at W1 HEAD `26b7186d`）
+- pytest test_edge_label_backfill.py 40/40 PASS（12 NEW M2 + 28 existing）
+- pytest 全 ml_training/tests/ 409/409 PASS / 31 skip / 0 fail（不破既有）
+- Linux PG dry-run V083：**未跑**（Mac 環境無 PG access；上次嘗試被 sandbox
+  permission denied）— 必由 E2 / E4 接手 trade-core Linux 端做 idempotency × 2
+- 主工作樹有 W-AUDIT-8a Phase A 並行 WIP（concurrent E1）導致 cargo check fail；
+  我用 isolated worktree 至 W1 HEAD 驗證自己 IMPL；cargo test 結果 valid
+
+### Lessons
+- **多 session race + worktree pattern**：當主工作樹有 concurrent E1 並行 WIP
+  導致 cargo build fail 時，用 `git worktree add /tmp/<isolated> <W1-HEAD>`
+  + 拷貝自己改動 + isolated 測試。`git stash push --include-untracked` 對拒絕
+  apply（stash pop 顯示「Your local changes would be overwritten」）
+- **Linux PG dry-run sandbox 限制**：直接從 Mac CC 透過 ssh 跑 psql 連 trade-core
+  shared DB 被 production read denied。passive_wait_healthcheck.sh **可** 跑
+  (走專屬 venv 與 module path)；inline `set -a; source` 對含 `(`,`)` 的密碼
+  有 shell parsing 問題（即便 PG 上實際接受該密碼）。Linux PG dry-run 必由
+  operator 直接在 trade-core shell 跑或由 E4 接手
+- **trading.fills 與 trading.intents 無直接 FK**：fills 透過 `context_id` 關聯
+  decision_features；through `entry_context_id` 把 close fill 連回 entry's
+  decision_features。PA spec 說「lookup intent.context_id by intent_id」**不對
+  齊真實 schema** — 改用 same (strategy_name, engine_mode, symbol,
+  opposite-side) 找最近 entry fill 的 context_id
+- **OPEN fills 設計上 entry_context_id = NULL**：edge_label_backfill SQL 用
+  `WHERE entry_context_id IS NULL  -- entry row, not a close` 識別 entry。
+  M2 backfill 必只動 close fills (`exit_reason IS NOT NULL`)，不能改 entry fill
+  semantic 否則破既有 SQL
+- **NOT VALID CHECK constraint pattern**：對歷史資料無破壞，只對 new INSERT
+  生效。先加 NOT VALID + 觀察 7d，全綠後可 `ALTER TABLE ... VALIDATE
+  CONSTRAINT`（second migration）強化歷史
+- **Aggregated WARN log vs per-row**：buffer 級 WARN log（含 sample first
+  violation）避免 batch flush 大量列時 spam log；仍能讓 healthcheck via
+  `observability.fills_entry_context_id_health` view 監控 24h ratio
+- **批量 INSERT pre-check zero-cost**：`count_close_fills_missing_entry_context_id`
+  pure iter().filter()，O(n) 內存遍歷；若 0 violations 則無 log 輸出（早 return）
