@@ -2,16 +2,20 @@
 //! BudgetTracker — AI 預算強制執行核心狀態。
 //!
 //! MODULE_NOTE (EN): Hot-reloadable BudgetConfig (5 scopes), atomic refresh stamp,
-//!   per-scope month-to-date USD usage cache. Three-stage degradation thresholds
-//!   are computed against the `local_total` scope (the operator-controlled monthly
-//!   budget). Pricing is a placeholder const map keyed by model id (4-17 will
-//!   replace with PG table).
+//!   per-scope month-to-date USD usage cache. Config reads use ArcSwap because
+//!   the config is read-heavy and hot-reload writes replace the whole snapshot.
+//!   Usage remains under an async RwLock because recording usage mutates per-scope
+//!   counters. Three-stage degradation thresholds are computed against the
+//!   `local_total` scope (the operator-controlled monthly budget). Pricing is a
+//!   placeholder const map keyed by model id (4-17 will replace with PG table).
 //! MODULE_NOTE (中): 可熱重載的 BudgetConfig（5 個 scope）、原子刷新時間戳、
-//!   per-scope 月內已用 USD 快取。三段降級閾值以 `local_total` scope 為基準
-//!   （operator 可調月度預算）。定價為以 model id 為鍵的占位 const map（4-17
-//!   會改用 PG 表）。
+//!   per-scope 月內已用 USD 快取。Config 讀取使用 ArcSwap，因為配置讀多寫少、
+//!   熱重載以整體快照替換；usage 仍保留 async RwLock，因為記帳會累加 per-scope
+//!   counter。三段降級閾值以 `local_total` scope 為基準（operator 可調月度預算）。
+//!   定價為以 model id 為鍵的占位 const map（4-17 會改用 PG 表）。
 
 use crate::database::pool::DbPool;
+use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -166,7 +170,7 @@ pub struct BudgetTracker {
     pool: Arc<DbPool>,
     /// Hot-reloadable config snapshot.
     /// 可熱重載的配置快照。
-    config_cache: Arc<RwLock<BudgetConfig>>,
+    config_cache: Arc<ArcSwap<BudgetConfig>>,
     /// Month-to-date usage snapshot.
     /// 月內已用快照。
     usage_cache: Arc<RwLock<UsageCache>>,
@@ -239,7 +243,7 @@ impl BudgetTracker {
 
         Ok(Self {
             pool,
-            config_cache: Arc::new(RwLock::new(config)),
+            config_cache: Arc::new(ArcSwap::from_pointee(config)),
             usage_cache: Arc::new(RwLock::new(usage)),
             pricing,
             last_config_refresh_ms: AtomicU64::new(now_ms()),
@@ -266,7 +270,7 @@ impl BudgetTracker {
         let pricing = Arc::new(super::pricing::PricingTable::from_map_for_test(map));
         Self {
             pool,
-            config_cache: Arc::new(RwLock::new(config)),
+            config_cache: Arc::new(ArcSwap::from_pointee(config)),
             usage_cache: Arc::new(RwLock::new(UsageCache::default())),
             pricing,
             last_config_refresh_ms: AtomicU64::new(now_ms()),
@@ -303,8 +307,7 @@ impl BudgetTracker {
             return Ok(());
         }
         let cfg = config_io::load_all(&self.pool).await?;
-        let mut guard = self.config_cache.write().await;
-        *guard = cfg;
+        self.config_cache.store(Arc::new(cfg));
         self.last_config_refresh_ms
             .store(now_ms(), Ordering::Relaxed);
         debug!("BudgetTracker config refreshed / 配置已重載");
@@ -407,7 +410,7 @@ impl BudgetTracker {
     /// Remaining USD for a scope this month (limit − MTD usage; clamped at 0).
     /// 該 scope 本月剩餘美元（上限 − 月內已用，下限 0）。
     pub async fn get_remaining(&self, scope: &str) -> Result<f64, String> {
-        let cfg = self.config_cache.read().await;
+        let cfg = self.config_cache.load_full();
         let usage = self.usage_cache.read().await;
         let limit = cfg.limit(scope);
         let used = usage.mtd_usd.get(scope).copied().unwrap_or(0.0);
@@ -417,7 +420,7 @@ impl BudgetTracker {
     /// Current degrade level (driven by `local_total` MTD spend).
     /// 當前降級等級（由 `local_total` 月內開銷驅動）。
     pub async fn degrade_level(&self) -> DegradeLevel {
-        let cfg = self.config_cache.read().await;
+        let cfg = self.config_cache.load_full();
         let usage = self.usage_cache.read().await;
         let limit = cfg.limit(SCOPE_LOCAL_TOTAL);
         let used = usage.mtd_usd.get(SCOPE_LOCAL_TOTAL).copied().unwrap_or(0.0);
@@ -433,7 +436,7 @@ impl BudgetTracker {
     /// 在 4-17 接入真實 PnL 之前，返回月內 `local_total` 已用 / `local_total`
     /// 上限的比率，作為「燒錢率」代理。真實 PnL 分母由 cost-edge 子任務接入。
     pub async fn cost_edge_ratio(&self) -> Result<f64, String> {
-        let cfg = self.config_cache.read().await;
+        let cfg = self.config_cache.load_full();
         let usage = self.usage_cache.read().await;
         let limit = cfg.limit(SCOPE_LOCAL_TOTAL);
         if limit <= 0.0 {
@@ -446,7 +449,7 @@ impl BudgetTracker {
     /// Read-only snapshot of current config + usage + degrade level (IPC `get_ai_budget_status`).
     /// 當前配置 + 用量 + 降級等級的只讀快照（IPC `get_ai_budget_status`）。
     pub async fn status_json(&self) -> serde_json::Value {
-        let cfg = self.config_cache.read().await;
+        let cfg = self.config_cache.load_full();
         let usage = self.usage_cache.read().await;
         let mut config_obj = serde_json::Map::new();
         let mut usage_obj = serde_json::Map::new();
@@ -478,8 +481,11 @@ impl BudgetTracker {
     /// 套用內存配置覆寫（IPC `update_ai_budget_config` 寫 DB 成功後使用，
     /// 讓 caller 立即看到新上限）。
     pub async fn override_limit(&self, scope: &str, monthly_usd: f64) {
-        let mut guard = self.config_cache.write().await;
-        guard.limits.insert(scope.to_string(), monthly_usd);
+        let mut cfg = (*self.config_cache.load_full()).clone();
+        cfg.limits.insert(scope.to_string(), monthly_usd);
+        self.config_cache.store(Arc::new(cfg));
+        self.last_config_refresh_ms
+            .store(now_ms(), Ordering::Relaxed);
     }
 
     /// Test-only: directly inject MTD usage to bypass DB.
@@ -582,7 +588,7 @@ mod tests {
         set_test_pricing_path();
         let pool = empty_pool().await;
         let tracker = BudgetTracker::new(pool).await.unwrap();
-        let cfg = tracker.config_cache.read().await.clone();
+        let cfg = tracker.config_cache.load_full();
         assert_eq!(cfg.limit(SCOPE_LOCAL_TOTAL), 100.0);
         assert_eq!(cfg.limit(SCOPE_PLATFORM_HARD_CAP), 150.0);
         assert_eq!(cfg.limit(SCOPE_AGENT_TEACHER), 60.0);
@@ -743,15 +749,9 @@ mod tests {
     async fn test_config_hot_reload_via_ipc() {
         let pool = empty_pool().await;
         let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
-        assert_eq!(
-            tracker.config_cache.read().await.limit(SCOPE_LOCAL_TOTAL),
-            100.0
-        );
+        assert_eq!(tracker.config_cache.load().limit(SCOPE_LOCAL_TOTAL), 100.0);
         tracker.override_limit(SCOPE_LOCAL_TOTAL, 200.0).await;
-        assert_eq!(
-            tracker.config_cache.read().await.limit(SCOPE_LOCAL_TOTAL),
-            200.0
-        );
+        assert_eq!(tracker.config_cache.load().limit(SCOPE_LOCAL_TOTAL), 200.0);
         // status_json reflects the override too.
         let status = tracker.status_json().await;
         assert_eq!(status["config"][SCOPE_LOCAL_TOTAL], 200.0);
