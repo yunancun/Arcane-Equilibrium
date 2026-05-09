@@ -38,14 +38,13 @@ Safety invariant:
 
 from __future__ import annotations
 
-import copy
 import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, ClassVar
 
-from .state_machine_base import StateMachineBase
+from .state_machine_base import StateMachineBase, _clone_jsonish
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +358,18 @@ class GovernorState:
         if not self.level_entered_at_ms:
             self.level_entered_at_ms = int(time.time() * 1000)
 
+    def clone(self) -> GovernorState:
+        return GovernorState(
+            level=self.level,
+            level_entered_at_ms=self.level_entered_at_ms,
+            consecutive_escalations=self.consecutive_escalations,
+            last_event=self.last_event,
+            last_initiator=self.last_initiator,
+            last_reason=self.last_reason,
+            transitions=_clone_jsonish(self.transitions),
+            version=self.version,
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Risk Governor Error / 风控总督异常
@@ -480,7 +491,7 @@ class RiskGovernorStateMachine(StateMachineBase[RiskLevel]):
             # Same level = no-op (early return preserves original semantics)
             # 相同等级 = 无操作（早期返回保留原语义）
             if from_level == to_level:
-                return copy.deepcopy(self._state)
+                return self._state.clone()
 
             # Guards 1-5 + _extra_validate (min-hold-time)
             # (Guard 1 "terminal" is a no-op because TERMINAL_STATES is empty.)
@@ -553,7 +564,7 @@ class RiskGovernorStateMachine(StateMachineBase[RiskLevel]):
                 auto_approve=None,
             )
 
-            result = copy.deepcopy(self._state)
+            result = self._state.clone()
 
         self._emit_audit(record)
         logger.info(
@@ -763,7 +774,7 @@ class RiskGovernorStateMachine(StateMachineBase[RiskLevel]):
     def get_state(self) -> GovernorState:
         """Get a copy of current governor state / 获取当前状态副本"""
         with self._lock:
-            return copy.deepcopy(self._state)
+            return self._state.clone()
 
     def get_constraints(self) -> LevelConstraints:
         """Get behavioral constraints for current level / 获取当前等级行为约束"""

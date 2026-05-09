@@ -450,6 +450,14 @@ class TestAuditTrail:
         state = gov.get_state()
         assert len(state.transitions) == 2
 
+    def test_get_state_returns_isolated_transition_snapshot(self, gov):
+        gov.escalate_to(RiskLevel.CAUTIOUS, reason="1")
+        state = gov.get_state()
+        state.transitions[0]["next_level"] = "MUTATED"
+
+        original = gov.get_state()
+        assert original.transitions[0]["next_level"] == "CAUTIOUS"
+
     def test_version_increments(self, gov):
         gov.escalate_to(RiskLevel.CAUTIOUS, reason="1")
         gov.escalate_to(RiskLevel.REDUCED, reason="2")

@@ -291,3 +291,8 @@ YYYY-MM-DD HH:MM TZ
 - reduced `dispatch.rs` 1144→683 LOC and `loop_handlers.rs` 1195→717 LOC; added `tests/structure/test_event_consumer_split_static.py` to pin the split and compatibility exports
 - verification: `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine event_consumer -q` PASS (155/0 plus one filtered target test); `cargo check --manifest-path rust/Cargo.toml -p openclaw_engine --bin openclaw-engine` PASS with pre-existing Rust warnings; structure pytest 6/0; `cargo fmt --check`, py_compile, and `git diff --check` PASS
 - boundary: source/test only; no release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- continued W-AUDIT-5b state-machine snapshot source checkpoint: removed the 10 generic `copy.deepcopy` snapshot callsites from SM-01 authorization, SM-02 decision lease, SM-04 risk governor, shared `state_machine_base`, and `learning_tier_gate`
+- added explicit `clone()` snapshot methods for `AuthorizationObject`, `DecisionLeaseObject`, `GovernorState`, and `TierState`, with `_clone_jsonish()` for mutable dict/list snapshot fields; `MultiObjectStoreMixin` now requires clone-backed snapshots instead of generic deepcopy fallback
+- added regression coverage for nested snapshot isolation plus `tests/structure/test_state_machine_snapshot_clone_static.py`; source/test only, no rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
