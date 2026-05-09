@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::database::DatabaseConfig;
-use serde_json::json;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 

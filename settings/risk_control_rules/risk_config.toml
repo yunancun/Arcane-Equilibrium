@@ -41,9 +41,6 @@ blocked_symbols = [
   "LABUSDT",
 ]
 
-[per_strategy.funding_arb]
-enabled = false
-
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 1.0

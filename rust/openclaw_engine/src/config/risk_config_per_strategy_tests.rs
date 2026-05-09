@@ -274,6 +274,49 @@ fn test_g2_03_real_toml_files_load_with_ma_crossover_section() {
 }
 
 #[test]
+fn test_w_audit_6_funding_arb_absent_from_risk_toml_files() {
+    // W-AUDIT-6: funding_arb is retired from the active strategy set. Its
+    // active bit remains in strategy_params_*.toml; RiskConfig must not carry a
+    // duplicate per-strategy enabled/override source.
+    // W-AUDIT-6：funding_arb 已從 active strategy set 退休；active bit 留在
+    // strategy_params_*.toml，RiskConfig 不再持有第二份 enabled/override 來源。
+    use std::fs;
+    use std::path::PathBuf;
+
+    let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    srv_root.pop(); // openclaw_engine -> rust
+    srv_root.pop(); // rust -> srv
+
+    for toml_name in &[
+        "risk_config.toml",
+        "risk_config_paper.toml",
+        "risk_config_demo.toml",
+        "risk_config_live.toml",
+    ] {
+        let path = srv_root
+            .join("settings")
+            .join("risk_control_rules")
+            .join(toml_name);
+        let toml_str = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {:?}: {}", path, e));
+        assert!(
+            !toml_str.contains("[per_strategy.funding_arb]"),
+            "{} must not reintroduce retired funding_arb risk override",
+            toml_name
+        );
+        let cfg: RiskConfig = toml::from_str(&toml_str)
+            .unwrap_or_else(|e| panic!("TOML parse failed for {}: {}", toml_name, e));
+        cfg.validate()
+            .unwrap_or_else(|e| panic!("validate failed for {}: {}", toml_name, e));
+        assert!(
+            !cfg.per_strategy.contains_key("funding_arb"),
+            "{} must not carry funding_arb in RiskConfig.per_strategy",
+            toml_name
+        );
+    }
+}
+
+#[test]
 fn test_g2_03_strategy_override_toml_round_trip_with_overrides() {
     // G2-03: TOML serialize/deserialize round-trip preserves override fields.
     // Locks the wire format invariant — operator-edited TOML must reach the

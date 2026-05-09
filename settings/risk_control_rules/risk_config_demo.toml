@@ -68,21 +68,6 @@ blocked_symbols = [
 # trailing_activation_pct_override = 0.6
 # trailing_distance_pct_override   = 0.4
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2026-05-03 funding_arb stop-loss RCA: disable new entries across all envs.
-# Keep the 3% SL override for any legacy funding_arb position that must still be
-# evaluated by tick risk before the strategy is fully redesigned.
-#
-# 2026-05-03 funding_arb 止損 RCA：三端統一阻擋新開倉。保留 3% SL override，
-# 供既有 funding_arb 倉位在完全重設計前繼續套用更緊風控。
-# ─────────────────────────────────────────────────────────────────────────────
-[per_strategy.funding_arb]
-enabled = false
-stop_loss_max_pct_override = 3.0
-# take_profit_max_pct_override   未設 → fall back limits.take_profit_max_pct=25.0
-# trailing_activation_pct_override 未設 → fall back agent.trailing_activation_pct
-# trailing_distance_pct_override   未設 → fall back agent.trailing_distance_pct
-
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 0.8
@@ -146,14 +131,14 @@ k_small = 2.0
 adx_trending = 20.0
 
 [dynamic_stop]
-# 2026-05-02 BUSDT funding_arb -10.12 USDT 後 operator 決策 3C(a)：
+# 2026-05-02 BUSDT demo loss 後 operator 決策 3C(a)：
 # base_ratio 0.4→0.25，全 demo 策略 dyn_stop floor 從 effective_sl*0.4 降至
 # effective_sl*0.25（25% effective_sl 下 floor 由 10%→6.25%）。
 # 目的：demo 為學習資料源，收緊 floor 減少深虧樣本以加速 EDGE-DIAG-2 收斂。
-# 影響：ma_crossover / grid_trading / bb_breakout / bb_reversion / funding_arb
-# 全部 demo 倉位 dyn_stop 趨緊 20-35%（取決 ATR）。Paper/Live TOML 不動
+# 影響：當時啟用的 demo strategy 倉位 dyn_stop 趨緊 20-35%（取決 ATR）。
+# Paper/Live TOML 不動
 # (per `feedback_env_config_independence`)。Rollback：改回 0.4 + reload_risk_config。
-# 2026-05-02 operator decision 3C(a) post BUSDT funding_arb -10.12 USDT loss.
+# 2026-05-02 operator decision 3C(a) post BUSDT demo loss.
 # Tightens dyn_stop floor across ALL demo strategies as part of EDGE-DIAG-2
 # learning-channel calibration. Paper/Live unaffected by env independence.
 base_ratio = 0.25

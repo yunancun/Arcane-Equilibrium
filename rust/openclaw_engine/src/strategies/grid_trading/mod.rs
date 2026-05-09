@@ -338,6 +338,17 @@ impl Strategy for GridTrading {
         self.on_rejection_impl(intent, reason);
     }
 
+    /// EDGE-P2-3 Phase 1B-3: exchange-side PostOnly maker rejection callback.
+    /// EDGE-P2-3 Phase 1B-3：交易所側 PostOnly maker 拒絕回調。
+    fn on_post_only_rejected(
+        &mut self,
+        symbol: &str,
+        ts_ms: i64,
+        category: &crate::strategies::maker_rejection::MakerRejectionCategory,
+    ) {
+        self.on_post_only_rejected_impl(symbol, ts_ms, category);
+    }
+
     fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
         self.on_tick_impl(ctx)
     }

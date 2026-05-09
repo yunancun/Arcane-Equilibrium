@@ -245,6 +245,27 @@ fn test_load_strategy_params_invalid_toml_live_is_fail_closed_inactive() {
 }
 
 #[test]
+fn test_w_audit_6_real_strategy_params_keep_funding_arb_retired() {
+    // W-AUDIT-6: funding_arb retirement is owned by strategy params, not by
+    // RiskConfig per_strategy overrides.
+    // W-AUDIT-6：funding_arb 退休由 strategy params 承載，不由 RiskConfig
+    // per_strategy override 承載。
+    let mut srv_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    srv_root.pop(); // openclaw_engine -> rust
+    srv_root.pop(); // rust -> srv
+    let settings_dir = srv_root.join("settings");
+
+    for kind in [PipelineKind::Paper, PipelineKind::Demo, PipelineKind::Live] {
+        let cfg = load_strategy_params_from(kind, &settings_dir);
+        assert!(
+            !cfg.funding_arb.active,
+            "{} funding_arb must stay inactive until a redesign explicitly re-enables it",
+            kind
+        );
+    }
+}
+
+#[test]
 fn test_load_strategy_params_missing_file_paper_keeps_default_fallback() {
     // Paper keeps exploration fail-open defaults for local/dev workflows.
     // Paper 保留探索 fail-open 默認回退。

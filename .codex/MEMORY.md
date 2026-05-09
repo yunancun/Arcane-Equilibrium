@@ -241,6 +241,13 @@ W-AUDIT-6 current fact:
   derives Kelly cold-start `risk_pct` plus tier fractions from
   `RiskConfig`; replay runner and `IntentProcessor::update_risk_config()` now
   consume that RiskConfig-derived snapshot
+- as of 2026-05-09, funding_arb RiskConfig cleanup is source/test closed:
+  all four `settings/risk_control_rules/risk_config*.toml` files contain no
+  `funding_arb`, while `strategy_params_{paper,demo,live}.toml` remain the
+  retirement authority with `funding_arb.active=false`; real TOML Rust
+  regressions lock this split; the same checkpoint cleaned existing lib-test
+  warnings and wired `grid_trading` PostOnly reject callback to its cooldown
+  helper
 - no rebuild, restart, or runtime apply was performed for these checkpoints
 
 P0-NEW-VULN-1 bind-host rule:

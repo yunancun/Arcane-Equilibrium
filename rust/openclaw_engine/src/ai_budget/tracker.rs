@@ -533,7 +533,6 @@ pub(crate) fn make_request_id_with_rng<R: rand::RngCore>(
     scope: &str,
     rng: &mut R,
 ) -> (String, i64) {
-    use rand::RngCore;
     let ts_ms = now_ms() as i64;
     let mut bytes = [0u8; 4];
     rng.fill_bytes(&mut bytes);

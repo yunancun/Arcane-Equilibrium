@@ -309,25 +309,25 @@ fn test_g2_03_runtime_helper_effective_sl_returns_min() {
 }
 
 // ===========================================================================
-// 2026-05-03 — risk_config_demo.toml round-trip + funding_arb kill switch
-// 2026-05-03 —— risk_config_demo.toml 解析 + funding_arb 新開倉 kill switch
+// W-AUDIT-6 — risk_config_demo.toml round-trip + retired funding_arb cleanup
+// W-AUDIT-6 —— risk_config_demo.toml 解析 + retired funding_arb 清理
 //
 // Anchors the post-RCA shape: demo `dynamic_stop.base_ratio` 0.4→0.25 plus
-// `[per_strategy.funding_arb] enabled=false` and a retained 3% SL override for
-// any legacy funding_arb position that still reaches tick risk.
+// no `[per_strategy.funding_arb]` risk override. `funding_arb` retirement now
+// belongs to `strategy_params_{paper,demo,live}.toml::funding_arb.active=false`,
+// not to RiskConfig active/override state.
 //
 // Locks the *demo TOML wire-shape* in tandem with G2-03 schema (Defense A,
-// validate) and `effective_sl_max_pct` (Defense B, runtime cap). Acts as
-// an early sentinel for any future TOML parse / schema drift that would
-// silently lose the funding_arb kill switch / override or the tightened base_ratio.
+// validate). Acts as an early sentinel for any future TOML parse / schema drift
+// that would reintroduce retired funding_arb risk overrides or lose the
+// tightened base_ratio.
 //
-// 鎖定 demo TOML 線格式：dyn_stop base_ratio=0.25 + funding_arb 新開倉關閉 +
-// 3% SL override；同檔驗 Defense A (validate) + Defense B
-// (effective_sl_max_pct = 3.0)。任何未來 TOML/schema drift 會在此哨兵點 trip。
+// 鎖定 demo TOML 線格式：dyn_stop base_ratio=0.25 + RiskConfig 不再承載
+// funding_arb active/override；同檔驗 Defense A (validate)。
 // ===========================================================================
 
 #[test]
-fn test_demo_toml_funding_arb_3pct_override_2026_05_02() {
+fn test_demo_toml_retired_funding_arb_removed_from_risk_config() {
     use std::fs;
     use std::path::PathBuf;
 
@@ -354,27 +354,12 @@ fn test_demo_toml_funding_arb_3pct_override_2026_05_02() {
         cfg.dynamic_stop.base_ratio
     );
 
-    // ── [per_strategy.funding_arb] block must parse with expected fields ──
-    // ── funding_arb override block 必齊 ──
-    let fa = cfg
-        .per_strategy
-        .get("funding_arb")
-        .expect("[per_strategy.funding_arb] missing in demo TOML");
-    assert_eq!(
-        fa.enabled, false,
-        "funding_arb.enabled must be false after 2026-05-03 kill switch"
+    // ── retired funding_arb must not live in RiskConfig overrides ──
+    // ── 已退休 funding_arb 不應再出現在 RiskConfig override ──
+    assert!(
+        !cfg.per_strategy.contains_key("funding_arb"),
+        "funding_arb active/override state belongs to strategy_params_*.toml"
     );
-    assert_eq!(
-        fa.stop_loss_max_pct_override,
-        Some(3.0),
-        "funding_arb.stop_loss_max_pct_override must be Some(3.0)"
-    );
-    // Other override fields are intentionally commented-out → None (fall back
-    // to limits / agent.* globals).
-    // 其餘 override 欄位故意註解 → None（走 limits / agent 全局）。
-    assert_eq!(fa.take_profit_max_pct_override, None);
-    assert_eq!(fa.trailing_activation_pct_override, None);
-    assert_eq!(fa.trailing_distance_pct_override, None);
 
     // ── Pre-existing ma_crossover schema-only block must remain None ──
     // ── 既有 ma_crossover schema-only 區塊維持 None（不被本次改動影響）──
@@ -395,18 +380,7 @@ fn test_demo_toml_funding_arb_3pct_override_2026_05_02() {
     );
 
     // ── Defense A: full RiskConfig::validate() must PASS ──
-    // 3.0 < limits.stop_loss_max_pct=25.0 + finite + > 0 ⇒ accepted.
-    // ── 防線 A：validate() 必通過（3.0 < 25.0 + finite + >0）──
+    // ── 防線 A：validate() 必通過 ──
     cfg.validate()
         .expect("demo TOML must pass RiskConfig::validate() (Defense A)");
-
-    // ── Defense B: effective_sl_max_pct(limits, &funding_arb) = 3.0 ──
-    // limits.stop_loss_max_pct = 25.0; min(3.0, 25.0) = 3.0 runtime cap.
-    // ── 防線 B：effective_sl = min(3.0, 25.0) = 3.0 runtime cap ──
-    let eff_sl = effective_sl_max_pct(&cfg.limits, Some(fa));
-    assert!(
-        (eff_sl - 3.0).abs() < 1e-9,
-        "effective_sl_max_pct expected 3.0, got {}",
-        eff_sl
-    );
 }
