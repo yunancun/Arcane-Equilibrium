@@ -1,7 +1,9 @@
 # ADR 0021: Alpha Source Architecture Upgrade — Strategy Interface, Strategist Scope, Hypothesis Pipeline, Per-Alpha-Source Promotion
 
 Date: 2026-05-09
-Status: Proposed / Pending Operator Decision
+Status: **Accepted**
+Operator Sign-off Date: 2026-05-09
+Sign-off Mode: Auto-mode dispatch via PM, operator approval recorded in Session N+1 handoff（中文：「ADR 0021 可以」）
 
 ## Context
 

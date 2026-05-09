@@ -1,5 +1,56 @@
 # PA Memory — 工作記憶
 
+## ADR-0021 升 Accepted + R-2..R-5 IMPL Spec 拆分（2026-05-09 後續）
+
+**觸發**：Operator 拍板 ADR-0021 從 Proposed → Accepted（中文「ADR 0021 可以」），同 batch 要求拆 R-2..R-5 IMPL spec 為獨立可派 E1 文件。
+
+**Wave 命名 schema 三套並存問題**：
+- redesign report 用 R-1..R-5 amendment 級
+- PA fix plan v2 §5 表用 W-AUDIT-8a/8e/8f/8g + W-ARCH-3 schema
+- TODO.md v18 用 W-AUDIT-8a/8b/8c/8d/8e/8f schema
+- PM 任務指定 b/c/d/e 對應 R-2/3/4/5
+
+**處置**：本次拆 spec 用 PM 任務指定命名為 SoT（W-AUDIT-8b/8c/8d/8e 對應 R-2/3/4/5），dispatch plan §0 明確標示三套對應關係，TODO.md v18 dispatch table 應在 PM Sign-off 時 alignment。教訓：跨會話 wave 編號漂移是治理 drift 的具體實例（見 R-5 Push Back 5）；本來應該在 ADR-0021 land 時鎖死 wave 編號。
+
+**Push Back 修正採納情況**：
+- Push Back 1（Strategy Interface 偏差降一檔）— **部分推翻**（4-agent consensus + 22 fail-closed defaults dead loop math 證明 R-1 architectural 級正確），但 R-2 仍接受「Strategist 不越權」修正
+- Push Back 2（Strategist 合 spec，責任在 Analyst）— **完全採納**：W-AUDIT-8b R-2 不 reframe Strategist 為「Alpha Source Orchestrator 唯一職責」，是擴展加 propose 通道；`_REGIME_STRATEGY_PREFERENCES` 漸進升 Bayesian update 而非 hard replace
+- Push Back 3（Analyst L2-L5 IMPL 獨立於 ADR-0020）— **完全採納**：W-AUDIT-8c R-3 設計明確 L0+L1 跑 95% workload，Layer 2 manual 維持 ADR-0020 invariant
+- Push Back 4（W-AUDIT-4b 必先於 R-3）— **完全採納**：W-AUDIT-8c R-3 §5.1 把 W-AUDIT-4b 標 hard prerequisite
+- Push Back 5（Spec-Runtime drift 真正 Root Cause 5）— **完全採納**：W-AUDIT-8e R-5 設計 CI gate + Module Lifecycle SM 替代原「5-Agent skeleton without soul」結論
+
+**Critical path estimate**：
+- 整 Track A R-1..R-5 IMPL 估 ~122 person-day（spec 級對齊各 wave §3 表）
+- ~11 sprint 樂觀 / 11-13 sprint 中位（22-26 weeks）
+- R-1 Phase A → R-2 開（Phase A 完即開）；R-3 等 W-AUDIT-4b；R-4 等 LG-X 1-5 baseline + R-3
+- R-5 全並行不阻塞，可 Sprint N+0 即啟動
+
+**16-tab GUI 擴展接受**：
+- 13 (current) → 14 (alpha_sources, R-2) → 15 (hypothesis_lab, R-3) → 16 (live_budgets, R-4)
+- A3 v2 NEW-7/8 已建議 13→15，本 plan 累加到 16
+- CLAUDE.md §五 13-tab dictionary 在每個 R-2/R-3/R-4 land 時同 commit 補
+
+**衝突 / 並行確認**：
+- R-1..R-5 與 Track W W-AUDIT-3b/4b/6/7/9 全無同檔案改動衝突
+- W-AUDIT-3b 必先於 W-AUDIT-9 T3（per fix plan v2 PM push back 1），與 R-1..R-5 全無衝突
+- W-AUDIT-9 graduated canary 是 R-1 alpha source candidate + R-4 per-alpha-source budget 的 deploy substrate（協同非衝突）
+- W-AUDIT-1 doc sync wave 在 R-5 land 後 reframe 為 substrate-driven（per ADR-0021 §「Supersedes / impacts」）
+
+**輸出物**（5 件 spec docs + 1 dispatch plan）：
+- `docs/adr/0021-alpha-source-architecture-upgrade.md`（升 Accepted）
+- `docs/execution_plan/2026-05-09--w_audit_8b_strategist_alpha_orchestrator_spec.md`（387 行）
+- `docs/execution_plan/2026-05-09--w_audit_8c_hypothesis_pipeline_spec.md`（483 行）
+- `docs/execution_plan/2026-05-09--w_audit_8d_per_alpha_source_promotion_gate_spec.md`（492 行）
+- `docs/execution_plan/2026-05-09--w_audit_8e_spec_as_code_spec.md`（469 行）
+- `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--track_a_dispatch_plan.md`（415 行）
+
+教訓：
+1. 收到「IMPL spec 拆分」任務時必先核 fix plan v2 / redesign report 內描述深度（< 200 行 IMPL guide 就拆）；此次 R-2..R-5 在 fix plan v2 §5 + redesign report Layer 4 合計 ~200 行但分散，按 PM 指示拆比 reference 安全（避免 IMPL 端再次 PA round-trip）。
+2. ADR Accepted 升級不只改狀態欄；應同時補 Sign-off Date + Sign-off Mode + 中文引用，留 audit trail。
+3. wave 編號 schema 漂移是 R-5 Spec-Runtime drift 的真實案例；ADR Accepted 時應同 commit 鎖死命名（本次留下 dispatch plan §0 alignment 表 + TODO.md update 後 sync）。
+
+---
+
 ## 4-Agent Loss Audit 後 Full Dispatch Plan（2026-05-09）
 
 **觸發**：Operator 拍板 4-agent loss audit 後 dispatch list（A 新策略 / B ML 三斷層 / C Promotion + Dormant / D Architectural Wave / E G3-08 enable）合計 ~140 person-day across 6 sprint。要求 sprint-by-sprint engineering plan + 11-item sign-off pre-flight checklist。
