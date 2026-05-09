@@ -274,3 +274,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-5a F-27 source checkpoint: corrected Bybit API dictionary drift for `get_open_interest` Rust `interval` -> Bybit `intervalTime`, added `/v5/user/query-api` Python credential-validation documentation, and added G9-02 UnknownHandlerGuard documentation with the actual runtime env-gate `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED`
 - documented the official Bybit `account-ratio` daily-period contradiction (`1d` on endpoint/api-explorer pages vs `4d` on enum `dataRecordingPeriod`) as exchange-smoke-required before any daily runtime polling; current Rust poller remains `"1h"`
 - verification: Bybit dictionary static pytest 4/0, py_compile PASS; source/docs/test only, no Bybit API call, rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
+
+2026-05-09 CEST
+- continued W-AUDIT-5a F-test-h-state source checkpoint: split `test_h_state_query_handler.py` from 2641 LOC into a 9-line compatibility collector plus `tests/h_state_query/common.py`, `test_core.py`, `test_h_buckets.py`, and `test_agent_states.py`
+- kept the historical pytest path working while adding `tests/structure/test_h_state_query_split_static.py` to pin the shim and split module LOC ceilings
+- verification: split package pytest 90/0, historical shim pytest 90/0, same-session `test_api_contract.py + test_h_state_query_handler.py` pytest 108/0 with pre-existing Pydantic/FastAPI warnings, structure pytest 2/0, py_compile PASS, `git diff --check` PASS; source/test only, no rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
