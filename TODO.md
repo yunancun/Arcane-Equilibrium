@@ -133,7 +133,8 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   - W-AUDIT-6: ⏸ → ✅ **大爆發收口** (13+ commits / DSR-PBO+VaR-CVaR-EVT
     wired LIVE / Kelly RiskConfig / fast_track config / per_trade_risk_pct
     雙 SSOT 統一 / funding_arb 4 risk_config 全清 / ma_crossover R:R 重寫 /
-    bb_breakout 5m IMPL 但 Donchian leak-bias 未修是隱患)
+    bb_breakout 5m IMPL；P0-V2 Donchian leak-bias 後續由 runtime snapshot
+    回歸測試鎖定 `donchian_prior`)
   - W-AUDIT-7: ✅ → ✅ openConfirmModal a11y 真補 (A 級實作) +
     LiveDemo restored 三層 closure
 - **5 P0-DECISION-AUDIT 全 closed**：AMD-2026-05-09-02 (`docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md`)
@@ -249,6 +250,13 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   Initial kline bootstrap now seeds 1m + 5m REST bars to avoid post-rebuild 5m
   cold start. Demo `bb_breakout` is active on the 5m family; paper/live remain
   inactive. This is source/test only and does not grant true-live authority.
+- **`P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` source/test closed 2026-05-09**：
+  runtime `IndicatorEngine::compute_all_with_lambda()` already emits Donchian
+  through `donchian_prior()`, not the inclusive helper `donchian()`. Added core
+  and `bb_breakout` regressions proving current-bar high/low spikes are excluded
+  from the runtime snapshot and that 5m hard-gate entry uses prior-bar upper.
+  No strategy pause, rebuild, restart, DB write, live auth mutation, or runtime
+  reload was performed in this checkpoint.
 - **W-AUDIT-6 queue ordering after source/test cleanup**：QC stand-alone fixes
   through `bb_breakout` 5m are closed. W-AUDIT-6c portfolio VaR/CVaR/EVT is
   now source/test closed at `cc6476dd`; W-AUDIT-6 has no remaining source/test
@@ -321,7 +329,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P0-NEW-VULN-1` | DONE 2026-05-09 | launchd / lifecycle bind 安全弱點 (HIGH) | Mac launchd Trading API template binds `127.0.0.1` and preflight rejects all-interface plist binds. Lifecycle scripts now use `helper_scripts/lib/api_bind_host.sh`: default `auto` binds the concrete Tailscale IPv4 when available, otherwise loopback; `OPENCLAW_BIND_HOST=tailscale` forces tailnet-only; `0.0.0.0` / `::` are rejected. Linux API-only runtime reload applied: Trading API listens on `100.91.109.86:8000`, not `0.0.0.0:8000`, preserving Tailscale GUI access without LAN/all-interface exposure. |
 | `P0-NEW-VULN-2` | DONE 2026-05-09 | lease audit runtime 0 emit (HIGH) | `e97a333b` emits one synthetic `BYPASS` audit row for Validation/Exploration facade bypass without creating SM objects. Linux rebuild/restart deployed `862e79b7`; auto-migrate applied V078 (`_sqlx_migrations version=78 success=t`); `learning.lease_transitions` is nonzero with `BYPASS` rows for `demo` and `live_demo` (final spot-check rows=103). |
 | `P0-AUDIT-NEW-LG-X-05` | DONE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 (R4 N1 CRITICAL) | Fixed in `docs/governance_dev/SPECIFICATION_REGISTER.md`: LG-X now maps historical LG-1..LG-5 as evidence window / H0 / pricing / supervised-live / constrained autonomous live; LG-X-05 registers the LG-5 constrained-autonomous RFC, eval-contract v2, R-meta amendment, and healthchecks. Live Ops moved to separate `OPS-X-01` so it no longer occupies LG-X-04. |
-| `P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` | ACTIVE 2026-05-09 v2 | bb_breakout 5m active=true 但 Donchian leak-free shift(1) 未進 runtime (QC v2-NEW-4 HIGH) | QC v2 verified: `donchian.rs::donchian` 仍 `&high[n-period..n]` 含 current bar；mod.rs:532 Hard mode 仍 current-bar-inclusive。**5m TOML active=true 在 leak-bias 未修狀態下啟動 = 學習資料 contaminated**。Action: pause bb_breakout 5m demo active=true 直到 P1-11 Phase 2 完成 `&high[n-period-1..n-1]` shift(1) IMPL。任何 5m demo OOS Sharpe / DSR / PSR 在 leak-bias 條件下都是含 bias 的 measurement。 |
+| `P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` | DONE 2026-05-09 | bb_breakout 5m active=true 但 Donchian leak-free shift(1) 未進 runtime (QC v2-NEW-4 HIGH) | Source/test closure: `donchian()` remains the explicit inclusive helper, but runtime `IndicatorEngine::compute_all_with_lambda()` feeds snapshots via `donchian_prior()`. Added regressions in `openclaw_core::indicators` and `openclaw_engine::strategies::bb_breakout` proving current-bar high/low spikes are excluded and 5m hard-gate entry uses prior-bar upper. No runtime reload/rebuild or strategy pause was performed. |
 | `P0-V2-NEW-2-STRATEGIST-CAP-NO-GATE` | ACTIVE 2026-05-09 v2 | F-strategist-cap 30%→50% 一次 67% 放寬無 supervised gate (FA v2-NEW-1 升 P0 因治理一致性) | FA v2 verified: TODO L322 W-AUDIT-7 F-strategist-cap 把 max_param_delta_pct 30→50 全 align；與 SM-05 fail-closed 預設姿態相對立；無對應 RFC / ADR / supervised gate 綁定。Action: 補 ADR 解釋 + 把 50% 綁 LIVE_PENDING 而非 paper/demo 全域生效；或回 30%。 |
 | `P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` | ACTIVE 2026-05-09 v2 | DSR/PBO promotion gate IMPL ✅ 但 evidence push 鏈缺 (QC §6.1 (a)(c) HIGH) | QC v2 verified: update_demo_selection_bias_evidence + update_demo_tail_risk_evidence 是 Python API **無自動 cron / batch backfill**；無 evidence push = `selection_bias:no_evidence` failure → 全策略卡在 DEMO_ACTIVE → LIVE_PENDING graduation。trial_sharpes 持久化機制缺 → PBO 永遠 None 退化為 DSR-only（與 W-AUDIT-6 spec 「DSR(K)>0.95 + PBO<0.5」不一致）。Action: PA 接 cron + edge_estimator_scheduler.py 同步 push；建議 PG `strategy_trial_ledger` table 持久化 K + trial_sharpes。 |
 
@@ -464,4 +472,4 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **DSR/PBO promotion gate**: **LIVE**（W-AUDIT-6 大爆發收口）
 - **VaR/CVaR/EVT**: **LIVE**（W-AUDIT-6c portfolio tail risk gate IMPL）
 - **runner.rs LOC**: 2467 → **1167**（F-12 真檔對齊；E5 v2 verified）
-- **核心 v2 verdict**: 真實飛躍 — 修復覆蓋率從 v1 23% → v2 47%（+104%）。W-AUDIT-2 從 source-only 翻 runtime verified；W-AUDIT-6 從 untouched 大爆發收口；W-AUDIT-1 從 partial 翻 5/5 CRITICAL closed；P0-DECISION-AUDIT 5/5 拍板。**剩餘核心 gap**：(1) W-AUDIT-4 6 表 0 INSERT + cron not installed → MLDE 仍 catastrophic；(2) bb_breakout 5m active 但 Donchian leak-bias 未修 → 學習資料 contaminated；(3) DSR/PBO evidence 自動化 push 鏈 + trial_sharpes 持久化缺 → promotion gate 永卡；(4) bb_reversion verdict 仍未動。距 supervised live 規劃帶仍是 6/15 悲觀 / 6/30 中位 / 7/15 樂觀，但 v2 飛躍把樂觀帶 6/30 提前可能性提升至 ~40%。
+- **核心 v2 verdict**: 真實飛躍 — 修復覆蓋率從 v1 23% → v2 47%（+104%）。W-AUDIT-2 從 source-only 翻 runtime verified；W-AUDIT-6 從 untouched 大爆發收口；W-AUDIT-1 從 partial 翻 5/5 CRITICAL closed；P0-DECISION-AUDIT 5/5 拍板。**剩餘核心 gap**：(1) W-AUDIT-4 6 表 0 INSERT + cron not installed → MLDE 仍 catastrophic；(2) DSR/PBO evidence 自動化 push 鏈 + trial_sharpes 持久化缺 → promotion gate 永卡；(3) bb_reversion verdict 仍未動。`P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` 已於 2026-05-09 source/test closed。距 supervised live 規劃帶仍是 6/15 悲觀 / 6/30 中位 / 7/15 樂觀，但 v2 飛躍把樂觀帶 6/30 提前可能性提升至 ~40%。

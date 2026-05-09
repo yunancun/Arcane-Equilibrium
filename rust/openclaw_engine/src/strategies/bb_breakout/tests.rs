@@ -12,7 +12,9 @@ use super::params::BbBreakoutParams;
 use super::BbBreakout;
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
-use openclaw_core::indicators::{AtrResult, BollingerResult, HurstResult, IndicatorSnapshot};
+use openclaw_core::indicators::{
+    AtrResult, BollingerResult, HurstResult, IndicatorEngine, IndicatorSnapshot,
+};
 
 // P-08: Test helpers use Box::leak for owned indicator data (fine for tests).
 pub(super) fn ctx(bw: f64, pct_b: f64, vol: f64, ts: u64) -> TickContext<'static> {
@@ -74,6 +76,31 @@ fn indicator(bw: f64, pct_b: f64, vol: f64) -> &'static IndicatorSnapshot {
     }))
 }
 
+fn indicator_with_runtime_donchian(bw: f64, pct_b: f64, vol: f64) -> &'static IndicatorSnapshot {
+    let mut high = vec![100.0; 21];
+    let mut low = vec![90.0; 21];
+    let close = vec![95.0; 21];
+    let volume = vec![1000.0; 21];
+    high[19] = 110.0;
+    low[19] = 88.0;
+    high[20] = 999.0;
+    low[20] = 1.0;
+    let donchian = IndicatorEngine::compute_all(&high, &low, &close, &volume).donchian;
+
+    Box::leak(Box::new(IndicatorSnapshot {
+        bollinger: Some(BollingerResult {
+            upper: 112.0,
+            middle: 100.0,
+            lower: 88.0,
+            bandwidth: bw,
+            percent_b: pct_b,
+        }),
+        volume_ratio: Some(vol),
+        donchian,
+        ..Default::default()
+    }))
+}
+
 fn ctx_dual_timeframe(
     primary_1m: (f64, f64, f64),
     secondary_5m: Option<(f64, f64, f64)>,
@@ -85,6 +112,29 @@ fn ctx_dual_timeframe(
         timestamp_ms: ts,
         indicators: Some(indicator(primary_1m.0, primary_1m.1, primary_1m.2)),
         indicators_5m: secondary_5m.map(|v| indicator(v.0, v.1, v.2)),
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+    }
+}
+
+fn ctx_dual_timeframe_runtime_donchian(
+    primary_1m: (f64, f64, f64),
+    secondary_5m: Option<(f64, f64, f64)>,
+    price: f64,
+    ts: u64,
+) -> TickContext<'static> {
+    TickContext {
+        symbol: "BTC",
+        price,
+        timestamp_ms: ts,
+        indicators: Some(indicator(primary_1m.0, primary_1m.1, primary_1m.2)),
+        indicators_5m: secondary_5m.map(|v| indicator_with_runtime_donchian(v.0, v.1, v.2)),
         signals: &[],
         h0_allowed: true,
         funding_rate: None,
@@ -169,6 +219,35 @@ fn test_w_audit_6_bb_breakout_5m_consumes_secondary_indicators() {
         StrategyAction::Open(intent) => assert!(intent.is_long),
         other => panic!("expected Open from 5m indicator, got {:?}", other),
     }
+}
+
+#[test]
+fn test_w_audit_6_bb_breakout_5m_hard_gate_uses_prior_donchian() {
+    let mut s = BbBreakout::new();
+    let mut p = BbBreakoutParams::default();
+    p.signal_timeframe = "5m".to_string();
+    p.min_persistence_ms = 0;
+    s.update_params(p).expect("valid 5m params");
+
+    s.on_tick(&ctx_dual_timeframe_runtime_donchian(
+        (0.05, 1.1, 2.0),
+        Some((0.01, 0.5, 1.0)),
+        95.0,
+        0,
+    ));
+    assert!(s.has_squeeze("BTC"));
+
+    let actions = s.on_tick(&ctx_dual_timeframe_runtime_donchian(
+        (0.05, 1.1, 2.0),
+        Some((0.05, 1.1, 2.0)),
+        110.0,
+        700_000,
+    ));
+    assert_eq!(
+        actions.len(),
+        1,
+        "5m hard Donchian gate must use prior-bar upper=110, not current-bar high=999"
+    );
 }
 
 #[test]
