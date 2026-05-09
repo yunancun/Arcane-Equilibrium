@@ -17,6 +17,19 @@ use openclaw_core::indicators::{AdxResult, BollingerResult, IndicatorSnapshot};
 
 fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
     use openclaw_core::indicators::HurstResult;
+    // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3) — pair MA confirmation gate 預設啟用，
+    // helper 依 signal 方向自動配 sma_50：long signal（pct_b < 0）必 sma_50 > price
+    // 才能過 gate；short signal（pct_b > 1）必 sma_50 < price。其餘場景（pure exit /
+    // no signal）放中間值，本身不觸發 entry path 不影響。
+    // ctx_bb auto-derives sma_50 to satisfy MA pair confirmation gate per
+    // signal direction (long: sma_50 > price / short: sma_50 < price).
+    let sma_50_value = if pct_b < 0.0 {
+        51_000.0 // long signal: price=50000 < ma=51000 ✓
+    } else if pct_b > 1.0 {
+        49_000.0 // short signal: price=50000 > ma=49000 ✓
+    } else {
+        50_000.0 // neutral / exit-only path
+    };
     let ind = Box::leak(Box::new(IndicatorSnapshot {
         bollinger: Some(BollingerResult {
             upper: 51000.0,
@@ -38,6 +51,8 @@ fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
             hurst: 0.35,
             regime: "mean_reverting".into(),
         }),
+        // W-AUDIT-6d #6: sma_50 derived above per signal direction。
+        sma_50: Some(sma_50_value),
         ..Default::default()
     }));
     TickContext {
@@ -234,11 +249,12 @@ fn test_bb_rev_update_roundtrip() {
 #[test]
 fn test_bbr_param_ranges_count() {
     let ranges = BbReversionParams::param_ranges();
-    // 5 original + 2 funding_rate + 10 confluence = 17
+    // 5 original + 2 funding_rate + 10 confluence + 1 W-AUDIT-6d #6 (require_ma_confirmation) = 18
+    // 5 原始 + 2 funding_rate + 10 匯流 + 1 W-AUDIT-6d #6 MA pair gate = 18
     assert_eq!(
         ranges.len(),
-        17,
-        "expected 17 param ranges, got {}",
+        18,
+        "expected 18 param ranges, got {}",
         ranges.len()
     );
 }
@@ -299,6 +315,15 @@ fn ctx_bb_with_funding(
     funding_rate: Option<f64>,
 ) -> TickContext<'static> {
     use openclaw_core::indicators::HurstResult;
+    // W-AUDIT-6d #6 — same auto-derive pattern as ctx_bb (sma_50 per signal direction).
+    // W-AUDIT-6d #6 — sma_50 同 ctx_bb 規則，依 signal 方向自動配。
+    let sma_50_value = if pct_b < 0.0 {
+        51_000.0
+    } else if pct_b > 1.0 {
+        49_000.0
+    } else {
+        50_000.0
+    };
     let ind = Box::leak(Box::new(IndicatorSnapshot {
         bollinger: Some(BollingerResult {
             upper: 51000.0,
@@ -317,6 +342,8 @@ fn ctx_bb_with_funding(
             hurst: 0.35,
             regime: "mean_reverting".into(),
         }),
+        // W-AUDIT-6d #6: sma_50 derived per signal direction。
+        sma_50: Some(sma_50_value),
         ..Default::default()
     }));
     TickContext {
@@ -507,6 +534,15 @@ fn ctx_bb_with_bbo_g709c(
     tick: f64,
 ) -> TickContext<'static> {
     use openclaw_core::indicators::HurstResult;
+    // W-AUDIT-6d #6 — sma_50 同 ctx_bb auto-derive 邏輯。
+    // W-AUDIT-6d #6: sma_50 same auto-derive pattern as ctx_bb.
+    let sma_50_value = if pct_b < 0.0 {
+        51_000.0
+    } else if pct_b > 1.0 {
+        49_000.0
+    } else {
+        50_000.0
+    };
     let ind = Box::leak(Box::new(IndicatorSnapshot {
         bollinger: Some(BollingerResult {
             upper: 51000.0,
@@ -525,6 +561,7 @@ fn ctx_bb_with_bbo_g709c(
             hurst: 0.35,
             regime: "mean_reverting".into(),
         }),
+        sma_50: Some(sma_50_value),
         ..Default::default()
     }));
     TickContext {
@@ -660,6 +697,14 @@ fn test_g7_09c_bb_reversion_helper_skips_when_no_bbo() {
 /// 助手：覆寫 `ctx_bb` 默認 mean_reverting 標籤；不重建 IndicatorSnapshot。
 fn ctx_bb_with_regime(pct_b: f64, rsi: f64, ts: u64, regime: &str) -> TickContext<'static> {
     use openclaw_core::indicators::HurstResult;
+    // W-AUDIT-6d #6 — sma_50 同 ctx_bb auto-derive 邏輯。
+    let sma_50_value = if pct_b < 0.0 {
+        51_000.0
+    } else if pct_b > 1.0 {
+        49_000.0
+    } else {
+        50_000.0
+    };
     let ind = Box::leak(Box::new(IndicatorSnapshot {
         bollinger: Some(BollingerResult {
             upper: 51000.0,
@@ -678,6 +723,7 @@ fn ctx_bb_with_regime(pct_b: f64, rsi: f64, ts: u64, regime: &str) -> TickContex
             hurst: 0.35,
             regime: regime.to_string(),
         }),
+        sma_50: Some(sma_50_value),
         ..Default::default()
     }));
     TickContext {
@@ -781,4 +827,238 @@ fn test_phase_b_unknown_regime_string_treated_as_random() {
             "unknown regime should not add reversion boost"
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// W-AUDIT-6d #6 (AMD-2026-05-09-02 §3) — pair MA confirmation gate tests
+// W-AUDIT-6d #6 — pair MA confirmation gate 測試
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Helper: ctx with custom sma_50 value（覆寫 ctx_bb 的 auto-derive）。
+/// W-AUDIT-6d #6 — 用於精準測試 MA gate 拒絕路徑。
+/// Helper to override sma_50 for precise MA gate rejection testing.
+fn ctx_bb_with_custom_sma_50(
+    pct_b: f64,
+    rsi: f64,
+    ts: u64,
+    sma_50: Option<f64>,
+) -> TickContext<'static> {
+    use openclaw_core::indicators::HurstResult;
+    let ind = Box::leak(Box::new(IndicatorSnapshot {
+        bollinger: Some(BollingerResult {
+            upper: 51000.0,
+            middle: 50000.0,
+            lower: 49000.0,
+            bandwidth: 0.04,
+            percent_b: pct_b,
+        }),
+        rsi_14: Some(rsi),
+        adx: Some(AdxResult {
+            adx: 15.0,
+            plus_di: 20.0,
+            minus_di: 18.0,
+        }),
+        hurst: Some(HurstResult {
+            hurst: 0.35,
+            regime: "mean_reverting".into(),
+        }),
+        sma_50,
+        ..Default::default()
+    }));
+    TickContext {
+        symbol: "BTC",
+        price: 50000.0,
+        timestamp_ms: ts,
+        indicators: Some(ind),
+        indicators_5m: None,
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+    }
+}
+
+#[test]
+fn test_w_audit_6d_ma_pair_default_on() {
+    // Default 啟用 MA pair confirmation；price=50000 + sma_50 None → fail-closed。
+    // Default ON: MA absent → no entry (fail-closed)。
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    assert!(s.require_ma_confirmation, "default 必啟用 MA pair gate");
+    assert_eq!(s.ma_confirmation_kind, "sma_50");
+
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(-0.1, 25.0, 0, None));
+    assert_eq!(
+        i.len(),
+        0,
+        "MA 不可得時必 fail-closed（§二 原則 6 失敗默認收縮）"
+    );
+}
+
+#[test]
+fn test_w_audit_6d_long_entry_blocked_when_price_above_ma() {
+    // Long entry（oversold reversion）必 price < ma；price=50000 > ma=49000 → reject。
+    // Long entry must require price < ma; price > ma → reject (would be trend-following).
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(
+        -0.1, 25.0, 0,
+        Some(49_000.0), // ma < price → long reversion 在「下方反轉」前提失敗 → 不入場。
+    ));
+    assert_eq!(
+        i.len(),
+        0,
+        "price > ma 時 long reversion 必拒（避免 trend-following）"
+    );
+}
+
+#[test]
+fn test_w_audit_6d_long_entry_passes_when_price_below_ma() {
+    // Long entry passes when price < ma (textbook downward reversion).
+    // 教科書下方反轉：price < ma → 過 gate。
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(
+        -0.1, 25.0, 0,
+        Some(51_000.0), // ma > price → 「下方反轉」確認 → 過 gate。
+    ));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_w_audit_6d_short_entry_blocked_when_price_below_ma() {
+    // Short entry（overbought reversion）必 price > ma；price=50000 < ma=51000 → reject。
+    // Short entry must require price > ma; price < ma → reject.
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(
+        1.2, 75.0, 0,
+        Some(51_000.0), // ma > price → 「上方反轉」前提失敗 → 不入場。
+    ));
+    assert_eq!(
+        i.len(),
+        0,
+        "price < ma 時 short reversion 必拒（避免 breakout）"
+    );
+}
+
+#[test]
+fn test_w_audit_6d_short_entry_passes_when_price_above_ma() {
+    // Short entry passes when price > ma (textbook upward reversion).
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(
+        1.2, 75.0, 0,
+        Some(49_000.0), // ma < price → 「上方反轉」確認 → 過 gate。
+    ));
+    assert_eq!(i.len(), 1);
+    match &i[0] {
+        StrategyAction::Open(intent) => assert!(!intent.is_long, "expected short entry"),
+        other => panic!("expected Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_w_audit_6d_disable_ma_confirmation_bypasses_gate() {
+    // require_ma_confirmation=false（W-AUDIT-9 stage rollback path）→ MA 不可得也允許。
+    // When gate disabled, MA absence is not blocking (rollback path scenario).
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    s.require_ma_confirmation = false;
+
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(-0.1, 25.0, 0, None));
+    assert_eq!(i.len(), 1, "gate disabled 時 MA 不可得仍允許");
+}
+
+#[test]
+fn test_w_audit_6d_ma_gate_with_non_finite_value_fails_closed() {
+    // sma_50 = NaN / Infinity → fail-closed（防 silent boundary slippage）。
+    // NaN/Inf MA → fail-closed (防 silent boundary slippage)。
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(
+        -0.1, 25.0, 0,
+        Some(f64::NAN),
+    ));
+    assert_eq!(i.len(), 0, "NaN MA 必 fail-closed");
+
+    s.cooldown.clear("BTC"); // reset cooldown
+    let i2 = s.on_tick(&ctx_bb_with_custom_sma_50(
+        -0.1, 25.0, 1000,
+        Some(f64::INFINITY),
+    ));
+    assert_eq!(i2.len(), 0, "Infinity MA 必 fail-closed");
+}
+
+#[test]
+fn test_w_audit_6d_params_validate_ma_kind_whitelist() {
+    // ma_confirmation_kind whitelist = {sma_20, sma_50, ema_12, ema_26}。
+    // ma_confirmation_kind whitelist enforcement.
+    use crate::strategies::StrategyParams;
+
+    let valid_kinds = ["sma_20", "sma_50", "ema_12", "ema_26"];
+    for kind in valid_kinds {
+        let p = BbReversionParams {
+            ma_confirmation_kind: kind.to_string(),
+            ..Default::default()
+        };
+        assert!(p.validate().is_ok(), "{kind} 必為合法 MA kind");
+    }
+
+    let bad = BbReversionParams {
+        ma_confirmation_kind: "donchian_20".to_string(),
+        ..Default::default()
+    };
+    let err = bad.validate().unwrap_err();
+    assert!(
+        err.contains("ma_confirmation_kind"),
+        "拒非 whitelist kind: {err}"
+    );
+}
+
+#[test]
+fn test_w_audit_6d_params_roundtrip_ma_pair_fields() {
+    // update_params + get_params 必 round-trip MA pair 欄位。
+    // Hot-reload round-trip preserves MA pair config.
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+
+    let p = BbReversionParams {
+        require_ma_confirmation: false,
+        ma_confirmation_kind: "ema_26".to_string(),
+        ..Default::default()
+    };
+    assert!(s.update_params(p).is_ok());
+
+    let got = s.get_params();
+    assert!(!got.require_ma_confirmation, "update + get 必 round-trip");
+    assert_eq!(got.ma_confirmation_kind, "ema_26");
+}
+
+#[test]
+fn test_w_audit_6d_param_ranges_includes_require_ma_confirmation() {
+    // require_ma_confirmation 必登記在 param_ranges（agent_adjustable=false）。
+    use crate::strategies::StrategyParams;
+    let ranges = BbReversionParams::param_ranges();
+    let entry = ranges
+        .iter()
+        .find(|r| r.name == "require_ma_confirmation")
+        .expect("require_ma_confirmation 必登記");
+    assert!(
+        !entry.agent_adjustable,
+        "require_ma_confirmation 不可被 agent 動態關閉"
+    );
 }

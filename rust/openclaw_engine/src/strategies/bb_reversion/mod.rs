@@ -88,6 +88,14 @@ pub struct BbReversion {
     /// G7-09c Phase 1：BBO-aware PostOnly buffer，語義見 params。注意 `use_limit`
     /// 在 ~131 行被 GAP-9 強制關閉，本欄位現為埋線。
     pub(crate) maker_price_buffer_ticks: u32,
+    /// W-AUDIT-6d #6 (AMD-2026-05-09-02 §3) — pair MA confirmation gate enabled
+    /// flag。Default true。Reversion entry 要求 long → price < ma；short → price > ma；
+    /// MA 不可得時 fail-closed（不入場）。
+    /// W-AUDIT-6d #6: pair MA confirmation gate flag (default true).
+    pub(crate) require_ma_confirmation: bool,
+    /// W-AUDIT-6d #6 — MA 種類（sma_20 / sma_50 / ema_12 / ema_26）。
+    /// W-AUDIT-6d #6: MA kind for confirmation gate.
+    pub(crate) ma_confirmation_kind: String,
 }
 
 impl BbReversion {
@@ -119,6 +127,59 @@ impl BbReversion {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): default ON。
+            require_ma_confirmation: true,
+            ma_confirmation_kind: "sma_50".to_string(),
+        }
+    }
+
+    /// W-AUDIT-6d #6 — 取對應 MA 值（依 `ma_confirmation_kind` 從 IndicatorSnapshot
+    /// 取對應字段）。warm-up 不足 / 字段未填 → 回 None；caller 必 fail-closed。
+    /// W-AUDIT-6d #6: pluck MA value per `ma_confirmation_kind`. None on warm-up.
+    fn ma_value(&self, ind: &openclaw_core::indicators::IndicatorSnapshot) -> Option<f64> {
+        match self.ma_confirmation_kind.as_str() {
+            "sma_20" => ind.sma_20,
+            "sma_50" => ind.sma_50,
+            "ema_12" => ind.ema_12,
+            "ema_26" => ind.ema_26,
+            // 不可達（params validate 已 whitelist）；fail-closed 為防 hot-reload race。
+            _ => None,
+        }
+    }
+
+    /// W-AUDIT-6d #6 — MA pair confirmation gate。
+    /// long entry: price < ma → 確認下方反轉（不違 trend）。
+    /// short entry: price > ma → 確認上方反轉。
+    /// MA 不可得 → 拒（fail-closed，§二 原則 6）。
+    /// `require_ma_confirmation == false` → 直接 PASS（W-AUDIT-9 rollback 路徑）。
+    /// W-AUDIT-6d #6: MA pair confirmation gate. Fail-closed when MA unavailable.
+    fn ma_pair_allows_entry(
+        &self,
+        is_long: bool,
+        price: f64,
+        ind: &openclaw_core::indicators::IndicatorSnapshot,
+    ) -> bool {
+        if !self.require_ma_confirmation {
+            return true;
+        }
+        match self.ma_value(ind) {
+            Some(ma) if ma.is_finite() && ma > 0.0 => {
+                // long entry → 必 price < ma；short entry → 必 price > ma。
+                if is_long {
+                    price < ma
+                } else {
+                    price > ma
+                }
+            }
+            _ => {
+                // MA 不可得（warm-up 不足或字段 None）→ fail-closed。
+                tracing::debug!(
+                    strategy = "bb_reversion",
+                    ma_kind = %self.ma_confirmation_kind,
+                    "MA confirmation skipped: MA unavailable, fail-closed (W-AUDIT-6d #6)"
+                );
+                false
+            }
         }
     }
 
@@ -154,6 +215,9 @@ impl BbReversion {
         // Plumbing-only until GAP-9 lifts (use_limit force-disabled above).
         // G7-09c Phase 1：熱重載 BBO buffer（[0, 10]），GAP-9 解禁前為埋線。
         self.maker_price_buffer_ticks = params.maker_price_buffer_ticks;
+        // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): hot-reload MA pair confirmation。
+        self.require_ma_confirmation = params.require_ma_confirmation;
+        self.ma_confirmation_kind = params.ma_confirmation_kind;
         info!(strategy = "bb_reversion", "params updated / 參數已更新");
         Ok(())
     }
@@ -184,6 +248,9 @@ impl BbReversion {
             // G7-09c Phase 1: round-trip BBO buffer for IPC consumers.
             // G7-09c Phase 1：BBO buffer 經 IPC 來回。
             maker_price_buffer_ticks: self.maker_price_buffer_ticks,
+            // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): round-trip MA pair gate config。
+            require_ma_confirmation: self.require_ma_confirmation,
+            ma_confirmation_kind: self.ma_confirmation_kind.clone(),
         }
     }
 
@@ -389,6 +456,16 @@ impl Strategy for BbReversion {
                 }
 
                 if let Some(is_long) = signal {
+                    // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): pair MA confirmation。
+                    // 反轉信號必經 MA 趨勢方向確認 — long entry → price < ma；
+                    // short entry → price > ma；MA 不可得（warm-up 不足或字段 None）
+                    // 一律 fail-closed 不入場（§二 原則 6 失敗默認收縮）。
+                    // W-AUDIT-6d #6: MA pair confirmation gate (long: price<ma /
+                    // short: price>ma; fail-closed when MA unavailable).
+                    if !self.ma_pair_allows_entry(is_long, ctx.price, ind) {
+                        return intents;
+                    }
+
                     // A2: Confluence scoring (reversion profile, inverted ADX).
                     // A2：匯流評分（回歸配置，反轉 ADX）。
                     let score = confluence::compute_score(
