@@ -3,6 +3,7 @@
 Date: 2026-05-09
 Role: PM
 Scope: W-AUDIT-6 / P0-EDGE-1
+Source checkpoint commit: `6d3ea046`
 
 ## Decision
 
