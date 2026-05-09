@@ -2050,3 +2050,59 @@ control_api_v1 sub-dir 跑 venv 時 `from program_code...` import broken（PYTHO
 - W-AUDIT-2 e2e 必查 PG runtime row（v1 用 OPENCLAW_TEST_PG opt-in 不夠真）
 - v1 NEW issue 列 BLOCKER 但 v2 commit 沒接 = PA 派工漏項；E4 應在 v2 verification 顯式 push back PA
 - v2 baseline 應更新 profile.md「2555/17」過期 → Linux control_api_v1 3925/3 + cargo lib 2584/0
+
+---
+
+## 2026-05-09 v3 verification — 5 commits sibling test 對抗性核實 (HEAD da2aba11)
+
+**範圍**：v2 baseline `faf2d131` → HEAD `da2aba11` 5 commits = ad14db07 + c2ab7b1a + 48227607 + c081029d + da2aba11
+**任務**：sibling test 同步 + 真跑 baseline 雙跑 deterministic
+
+**Verdict**：✅ PASS (5/5 commits sibling test 真實到位 + 真跑 PASS + 雙跑同綠 + 0 commit-introduced new fail)
+
+**baseline 雙跑 deterministic 一致**：
+- pytest control_api_v1: **3961/3 → 3961/3** (vs v2 3925/3, +36 PASS / 0 fail delta)
+- cargo lib: **2586/0 → 2586/0** (vs v2 2584/0, +2 PASS)
+
+**5 commits sibling test 真實到位**：
+1. **ad14db07 Donchian guard**：Rust 2 sibling test (`test_compute_all_uses_prior_bar_donchian_snapshot` + `test_w_audit_6_bb_breakout_5m_hard_gate_uses_prior_donchian`) — current-bar high=999 spike vs prior high=110 真實 cover
+2. **c2ab7b1a strategist wide skill**：Rust 1 + Python 2 sibling test (`test_build_strategist_eval_payload_includes_wide_adjustment_skill` + `test_ai_service_strategist_prompt_exposes_wide_adjustment_skill` + `test_ai_service_strategist_prompt_uses_runtime_max_delta`) — 30%/40%/50% 三窗口邊界 cover
+3. **48227607 promotion evidence**：4 file 8 sibling test (`test_edge_estimator_scheduler_promotion_evidence` × 2 + `test_promotion_pipeline.py` +2 + `test_promotion_evidence` × 4 + V079 migration × 2) — demo push / live_demo skip / V079 schema cover
+4. **c081029d freeze blocked symbols**：2 file 6 sibling test (`tests/structure/test_strategy_blocked_symbols_freeze` × 3 + `helper_scripts/db/test_blocked_symbols_counterfactual` × 3) — 3 strategy_param + 4 risk_config 跨 file 對齊 + SQL injection 防護 + RFC policy
+5. **da2aba11 f08 cron scope**：1 file 4 sibling test (`tests/helper_scripts/test_ml_training_maintenance_cron_static`) — `CORE_JOBS + AUDIT_JOBS == VALID_JOBS` + wrapper body 5 jobs + log 10 jobs token 三層 assertion
+
+**Path naming convention drift（不是 bug）**：
+- c2ab7b1a Python file 在 `test_p1_audit_smoke.py` 不是 `test_strategist_*` (PA glob 不命中但 substance 等效)
+- c081029d freeze guard 在 `tests/structure/` 不是 `tests/governance/` (PA glob 不命中但同檔)
+- da2aba11 cron static test 在 `tests/helper_scripts/` 不是 `helper_scripts/cron/test_ml_training*` (PA glob 不命中但同檔)
+- E4 教訓：path glob 不是核實標準；substance 才是；PA 派工模板可用 substring 而非完整 path glob
+
+**Mock 安全等級**：
+- 3 commits (ad14db07/c2ab7b1a/c081029d/da2aba11) **0 mock**
+- 1 commit (48227607) **borderline collaborator mock**：`_FakeGate` + `monkeypatch.setattr run_james_stein` — 但 sibling 雙層 cover：`test_promotion_pipeline.py` 用真 `PromotionGate` + `test_push_without_stress_exposure_is_honest_fail_closed_not_fake_pass` 用 `gate=None` 走 real fall-back
+- 整體：5/5 commits 守 IO 邊界，無 fake-pass via mock 整個 business chain
+
+**對抗性 push back outcomes**：
+- A: ad14db07 真測 current-bar 含污染 ✅ YES (high[20]=999 spike helper)
+- B: c2ab7b1a 真驗 30%/50% 邊界 ✅ YES (Rust + Python 雙端 normal/wide range)
+- C: c2ab7b1a path 不同 ⚠️ Equivalent
+- D: 48227607 mock 掩蓋業務邏輯 ⚠️ Borderline 雙層 cover
+- E: c081029d path 不同 ⚠️ Equivalent
+- F: c081029d freeze 真實生效 ✅ YES (跨 7 file + SQL injection + RFC policy)
+- G: da2aba11 path 不同 ⚠️ Equivalent
+- H: da2aba11 真驗 5+5=10 jobs ✅ YES (CORE_JOBS + AUDIT_JOBS + wrapper body + log 三層)
+- I: 整體 mock 安全 ✅ YES (3 commits 0 mock)
+- J: borderline `_FakeGate` 掩蓋 bug ✅ NO (caller wiring vs gate logic 分工)
+- K: pre-existing fail 新增 ✅ NO (3 fail = v2 已記)
+- L: 雙跑 deterministic ✅ YES (pytest + cargo 兩端均 1st run == 2nd run)
+
+**仍未修復清單（無新增，全是 v2 已記）**：
+- 🔴 NEW-1: `test_oe_006_close_retry_budget_has_real_timeout_guard` static path 仍未接（PA 派工漏項，v1 + v2 + v3 連續 3 round 漏接）
+- 🟡 NEW-3: 4 collection errors PYTHONPATH inject 待修
+- 🟡 NEW-4: `test_grafana_data_writer.py::test_start_sets_running` Linux leader-lock contention
+
+**經驗教訓**：
+- 對抗性核實 6 維度（source diff / sibling test 真實內容 read / 真跑 verify / mock 邊界 / path naming check / pre-existing fail 對照）都做了
+- PA 派工模板用「path glob」太嚴；實際 path naming 由 E1 / CC 自由命名（合理 topic-suite naming）；E4 應 substance 等效 → PASS，不應因 path drift FAIL
+- v3 baseline 應更新 profile.md：Linux control_api_v1 **3961/3** + cargo lib **2586/0**
+- 5 commits 全部由 ncyu (operator/codex) 提交；無 commit-introduced new fail；governance fixed test 同步加齊 — 是高品質 commit batch

@@ -163,3 +163,39 @@ _Last updated: 2026-04-24_
 - commit message「ml: add 34-dim feature baseline writer」誤導（應為「rebuild CLI tool, dry-run default, no scheduling」）
 - commit message「learning: enforce selection bias promotion gate」誤導（應為「add gate code; no caller wires to runtime」）
 - v2 的 W-AUDIT-4 closure semantic creep 持續 — schema-side 推進、runtime-side 停滯
+
+## 2026-05-09 v3 對抗性核實（v2 → v3 5 commits + PA redesign cross-check）
+
+**Report**: `workspace/reports/2026-05-09--db_ml_verification_v3.md`
+
+**HEAD drift**: `1bd55689` → `da2aba11`（5 commits, ~3h delta）
+
+**核心發現**：
+1. **V079 migration 完全未 apply**（_sqlx_migrations max=78）— 48227607 commit 的 strategy_trial_ledger + promotion_pipeline 新 column 0% 落地到 PG；engine binary 14:07 built 比 commit 18:03 早 4h，需 operator restart 才會跑 migration
+2. **ml_training_maintenance_cron.sh 未 install in crontab**（da2aba11 加 source 補 5 legacy ML jobs but cron not fire）— W-AUDIT-4 P0 4 cron 從 v1 到 v3 三天 0 進展
+3. **attribution_chain_ok 24h 0.5041% → 1.0857% 仍 denominator artifact**（absolute ok_n 65→76 only +17%，total 12894→7000 -46%）
+4. **真實 attribution root cause v3 第一次定位 = `label_close_tag IS NULL` 98.9%**（6906/6983 has signal_id+context_id+label NULL）— v1 v2 報告均未挖到此層；FUP-2 cron 只 backfill label_net_edge_bps 不 backfill label_close_tag
+5. **`feature_collector::FEATURE_NAMES` 34-dim 100% OHLCV-derived**（SMA/EMA/RSI/MACD/BB/ATR/Stoch/KAMA/ADX/Hurst/Donchian/regime/price）— 0 funding/basis/OI/orderflow/cross-asset → PA Layer 1 §1.1 「alpha-source 結構性貧乏」MIT 視角強烈 AGREE
+6. **`exit_features` 7-dim 100% OHLCV-derived**（est_net_bps / peak_pnl_pct / atr_pct / giveback_atr_norm / time_since_peak_ms / price_roc_short / entry_age_secs）
+7. **lease_transitions BYPASS 24h 7955→11133（+40%）**— 唯一 active progress（v2 V078 真 IMPL 持續生效）
+8. **decision_outcomes.live 仍 4/20 stale 19d**（v3 demo + live_demo 18:47 fresh，live cohort backfiller 仍未 install）
+9. **5 commits 全部 0 healthcheck**（違反 CLAUDE.md §七 強制規範 5/5）
+10. **V079 SQL 無 Guard A/B/C**（沿 V062/V063/V065 退化模式；E2 應 reject）
+
+**v3 commits 分類**（5 total）：0 真 runtime IMPL / 2 source-only ML pipeline（48227607, da2aba11）/ 1 governance docs + audit helper（c081029d）/ 2 N/A for ML pipeline（ad14db07 indicator guard, c2ab7b1a agent skill）
+
+**ML 基座達標率**：v2 44% → v3 **44%**（0 真進步；dormant code +2 module 但 runtime 0 升階）
+
+**PA redesign verdict**: **PARTIAL AGREE**：
+- ✅ Layer 1 §1.1 alpha-source 結構性貧乏 完全 AGREE（feature_collector 34-dim 證明）
+- ✅ Layer 1 §1.4 學習平面死 AGREE（attribution + drift + model_registry 三線 broken）
+- ⚠️ Layer 1 §4.2 attribution root cause 描述不準（PA 歸於 hypothesis loop 缺；v3 SQL 定位真實是 label_close_tag NULL writer 缺接線）
+- ❌ Layer 3 §3.5 漏列 dream_engine 在 alpha-source 升級藍圖角色（dream.rs 仍 5/7 burst dormant）
+- ✅ Layer 4 R-1/R-2/R-3 路線圖 AGREE 但需加「修底層 label writer chain 是 R-3 之前 prerequisite」
+
+**對抗性 push back**：
+- commit message「audit: correct f08 ml cron scope」誤導（應為「prepare cron scope, install pending operator」）
+- commit message「learning: push promotion evidence from edge cycle」加 +1275 LOC 但 V079 schema 不存在於 PG → 0 runtime impact + 加 dormant code 債務
+- W-AUDIT-4 P0 4 cron 從 v1 到 v3 三天 0 進展（schema-side 推進、runtime-side 停滯 v3 加劇）
+
+**距 Mainnet ML-driven**：仍 3-4 sprint（樂觀 8/15 / 中位 9/15 / 悲觀 11/15，**未變**）。若 PA R-1 R-2 R-3 architectural amendment 加入 = 樂觀延後到 2026-Q4 末。

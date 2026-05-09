@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v17
+Version: v18
 Date: 2026-05-09
-Status: PM sync after 12-agent v2 adversarial verification — 真實飛躍：✅ 74→122 (+65%) / ❌ 120→66 (-45%) / 🆕 53→21 (-60%)；5 P0-DECISION-AUDIT + 6 P0-NEW-ISSUE/VULN 全 closed；W-AUDIT-1/2/5/6/7 verified；W-AUDIT-3/4 仍 partial；v17 lifts v2 verified-closed details to `docs/archive/2026-05-09--w_audit_verified_closed_archive_v2.md` + mounts v2 NEW-ISSUE clusters as new active items
+Status: PM sync after 13-agent v3 adversarial verification + PA fix plan v2 DUAL-TRACK — operator 採納 PA R-1 啟動 W-AUDIT-8a Alpha Surface Foundation SPEC PHASE + W-AUDIT-9 Graduated Canary Foundation；MIT v3 第一次定位 attribution real root cause = label_close_tag NULL 98.9% (1-day fix)；BB v3 揭發 PA spec 3 條錯誤 (L25/liquidation/basis)；DUAL-TRACK: Track W 7 wave (~92h) + Track A 9 wave (~270-330h) / 6-12w；CC compliance B+→A- (27/30=90%)；v18 lifts v3 verified-closed to `docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -510,3 +510,64 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **VaR/CVaR/EVT**: **LIVE**（W-AUDIT-6c portfolio tail risk gate IMPL）
 - **runner.rs LOC**: 2467 → **1167**（F-12 真檔對齊；E5 v2 verified）
 - **核心 v2 verdict**: 真實飛躍 — 修復覆蓋率從 v1 23% → v2 47%（+104%）。W-AUDIT-2 從 source-only 翻 runtime verified；W-AUDIT-6 從 untouched 大爆發收口；W-AUDIT-1 從 partial 翻 5/5 CRITICAL closed；P0-DECISION-AUDIT 5/5 拍板。**剩餘核心 gap**：(1) W-AUDIT-4 6 表 0 INSERT + cron not installed → MLDE 仍 catastrophic；(2) DSR/PBO evidence 自動化 push 鏈 + trial_sharpes 持久化缺已 source/test 補上，待 V079 apply + rebuild/restart 後進入 runtime evidence；(3) bb_reversion verdict 仍未動。`P0-V2-NEW-1-DONCHIAN-LEAK-BIAS`、`P0-V2-NEW-2-STRATEGIST-CAP-NO-GATE`、`P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` 已於 2026-05-09 source/test closed。距 supervised live 規劃帶仍是 6/15 悲觀 / 6/30 中位 / 7/15 樂觀，但 v2 飛躍把樂觀帶 6/30 提前可能性提升至 ~40%。
+
+## Reference — 2026-05-09 v3 Adversarial Verification (after 5 commits) + PA Fix Plan v2 DUAL-TRACK
+
+- **PM Sign-off v3 summary**: `srv/2026-05-09--audit_fix_verification_v3_summary.md`（230 verification points 整合 + 13 v3 verdict + PA fix plan v2 DUAL-TRACK 結構）
+- **v3 Verified-closed details archive**: `srv/docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`
+- **PA Fix Plan v2 (DUAL-TRACK)**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_audit_pa_fix_plan_v2.md` + `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md`
+- **12 v3 verification reports**: `srv/docs/CCAgentWorkSpace/{FA,AI-E,E5,E4,E3,CC,QC,MIT,BB,TW,R4,A3}/workspace/reports/2026-05-09--*_v3.md`
+- **v3 Total tally**: **✅ 65 (28%) / ⚠️ 39 (17%) / ❌ 84 (37%) / 🔄 3 (1%) / 🆕 39 (17%)** = 230 points
+- **vs v2**: ✅ 122→65 (**v3 暴露更多真 outstanding**) / ❌ 66→84 (+18) / 🆕 21→39 (+18 PA redesign 引入新對齊任務)
+- **Compliance score**: B+ (25/30 = 83.3%) → **A- (27/30 = 90.0%)** (CC v3 verdict)
+- **PA Redesign cross-agent verdict**: FA AGREE / QC PARTIAL / MIT PARTIAL / E5 PARTIAL / E3 ACCEPT WITH 7 HARD-PRECON / CC ACCEPT-WITH-CONDITIONS / AI-E PARTIAL / BB CONDITIONAL APPROVE / TW 應升 ADR+AMD+Spec / R4 必建 ADR-0021+ARCH-04+CONTEXT 5 詞條 / A3 GUI HIGH 影響需新 2 tab → **整合 verdict: DUAL-TRACK 採納**
+- **PA Fix Plan v2 結構**: 16 wave / ~360-420h / 6-12 weeks
+  - **Track W**（7 wave / ~92h / 6-8w）：W-AUDIT-3b/4b/6c/6d/7c/1d/5b 收 v2 outstanding
+  - **Track A**（9 wave / ~270-330h / 6-12w）：W-AUDIT-8a/9 + 8b-8g + W-ARCH-3 alpha source 升級
+- **operator 已採納部分 PA R-1**：CLAUDE.md §三 已加 W-AUDIT-8a row + spec doc `docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`；W-AUDIT-9 AMD-2026-05-09-03 起 5-stage graduated canary supersedes AMD-02 §2 binary fail-closed
+- **MIT v3 第一次定位 attribution real root cause**: `label_close_tag` NULL 98.9%（attr_chain_ok 24h 1.0857% = 76/7000）；**1-day fix vs PA R-3 Hypothesis Pipeline 4-6 sprint，最高 ROI** → 升 P0-V3-MIT-ROOT-CAUSE
+- **BB v3 揭發 PA spec 3 條錯誤**: (1) Bybit V5 WS 沒「L25」levels（真實 1/50/200/1000）；(2) liquidation_pulse 4 weeks ago deleted 需 revert；(3) basis demo 限 observation 沒分（execution 需 mainnet）→ R-1 spec 必修
+- **5 commits 真實 cover**: ad14db07/c2ab7b1a/48227607/c081029d/da2aba11 cover P0-V2-NEW-1/2/3 + selection bias + cron scope，但**source/test only**：V079 完全未 apply / cron 未 install / engine 仍跑 5/8 binary（Donchian fix 未 runtime 落地）
+- **W-AUDIT-2 V078 lease_transitions BYPASS 24h**: 7955 → 11133 = **+40% growth**（v2 唯一真活躍 runtime 進步）
+- **核心 v3 verdict**: 架構 inflection point — operator 已採納 PA R-1；PA fix plan v2 DUAL-TRACK；MIT 第一次定位 attribution real root cause；BB 揭 PA spec 3 條錯誤。**真實 ❌ 上升非倒退**而是「v2 high-estimate 被 v3 校正」+「PA redesign 引入新對齊任務」+「runtime apply 全 outstanding 暴露 source/test 假進度模式」。**最緊要 24-48h actions**：(1) MIT label_close_tag NULL writer fix（1-day, 最高 ROI）；(2) V079 DB apply；(3) operator 授權 crontab 安裝 ml_training_maintenance；(4) PA spec 修 3 條（L25/liquidation/basis）；(5) 建 ADR-0021 + ARCH-04 + CONTEXT 5 詞條 + AMD-03/04；(6) engine restart 落地多 commits。距 supervised live 規劃帶仍是 6/15 樂觀(~40%) / 6/30 中位(~40%) / 7/15 悲觀(~20%)。
+
+## Reference — DUAL-TRACK Wave Definitions (新 16 wave，PA fix plan v2)
+
+### Track W — 收 v2 outstanding（~92h / 6-8 weeks）
+
+| Wave | 內容 | ETA |
+|---|---|---|
+| `W-AUDIT-3b` | ExecutorAgent runtime smoke + fail-closed metrics（**必先 land 避 W-AUDIT-9 衝突**）| sprint 1 |
+| `W-AUDIT-4b` | V079 DB apply + cron install + **label_close_tag NULL writer fix（MIT v3 真實 root cause，最高 ROI）** | sprint 1 |
+| `W-AUDIT-6c` | portfolio tail risk gate runtime apply | sprint 2 |
+| `W-AUDIT-6d` | 5 策略 verdict IMPL maintenance | sprint 2 |
+| `W-AUDIT-7c` | API Key clear modal + Settings 拆 sub-tab + GUI a11y 補齊（含 governance-tab.js 兩個 confirm 修）| sprint 2-3 |
+| `W-AUDIT-1d` | docs/README index sync（5 commits 期間 0/30+ 新文件登記）+ ADR-0021 草擬 | sprint 1 |
+| `W-AUDIT-5b` | H-8 H-9 sunset + runner.rs split bin/server-side | sprint 3 |
+
+### Track A — Alpha Source Architecture 升級（~270-330h / 6-12 weeks）
+
+| Wave | 內容 | ETA |
+|---|---|---|
+| `W-AUDIT-8a` | Alpha Surface Foundation SPEC PHASE | **operator 已啟動**（CLAUDE.md §三 已加 row + spec doc）|
+| `W-AUDIT-9` | Graduated Canary Foundation（5-stage canary，supersedes AMD-02 §2 binary fail-closed）| **operator 已啟動**（AMD-2026-05-09-03 起）|
+| `W-AUDIT-8b` | R-1 Alpha Surface IMPL（funding/oi 25 symbols throughput fix；BB spec 修：L50 / liquidation revive / basis observation-only）| sprint 2-4 |
+| `W-AUDIT-8c` | R-2 Strategist scope expansion（alpha-source orchestrator）| sprint 4-6 |
+| `W-AUDIT-8d` | R-3 Hypothesis Pipeline first-class | sprint 6-8 |
+| `W-AUDIT-8e` | R-4 Per-alpha-source supervised promotion | sprint 8-10 |
+| `W-AUDIT-8f` | R-5 Spec-as-Code | sprint 10-12 |
+| `W-AUDIT-8g` | Alpha Sources GUI tab + Hypothesis Lab GUI tab（A3 建議 13→15 tab）| sprint 4-6 |
+| `W-ARCH-3` | Spec drift 收口（EX-06 §6.3「自动进入 live」+ LG-X-02..05 supersedes 標記）| sprint 1 |
+
+### 關鍵協調風險
+
+W-AUDIT-9 T3 改 `executor_config_cache.py` + `_read_shadow_mode` stage-aware 與 Track W W-AUDIT-3b ExecutorAgent runtime smoke 衝突中-高 → **必須 W-AUDIT-3b 先 land**。
+
+### v3 P0 升級條目
+
+- `P0-V3-MIT-ROOT-CAUSE` ACTIVE 2026-05-09 v3：label_close_tag NULL 98.9% 1-day fix（最高 ROI；MIT v3 第一次定位）
+- `P0-V3-V079-NOT-APPLIED` ACTIVE 2026-05-09 v3：48227607 source 已落但 _sqlx_migrations max=78
+- `P0-V3-CRON-NOT-INSTALLED` ACTIVE 2026-05-09 v3：3 天 0 進展，operator 授權 crontab
+- `P0-V3-PA-SPEC-FIX` ACTIVE 2026-05-09 v3：L25→L50 / liquidation revive / basis observation-only
+- `P0-V3-ADR-0021-ARCH-04` ACTIVE 2026-05-09 v3：建 ADR-0021 + ARCH-04 + CONTEXT 5 詞條 + AMD-03/04（R4/TW 共識）
+- `P0-V3-ENGINE-RESTART` ACTIVE 2026-05-09 v3：engine 仍跑 5/8 binary 待 rebuild 含 Donchian fix + 多 commits 落地
