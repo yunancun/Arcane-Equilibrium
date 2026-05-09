@@ -6297,3 +6297,67 @@ export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 - evidence_source_tier 字串故意與 V050 replay tier 不重疊是治理層
   insight — CLAUDE.md §九「Non-training surfaces」標準下，下游 SELECT
   filter 才能用單純的 `WHERE tier IN (allowlist)` 簡單 syntax
+
+---
+
+## 2026-05-09 Sprint N+0 cross-wave fixture fix（E1-FIX）
+
+**Wave**: W-AUDIT-9 chain（T1+T2 Rust IPC test + T3 Python parity test）
+**Owner**: E1-FIX
+**Local commit**: 待 commit
+**狀態**: IMPL + 全 acceptance criteria PASS
+
+### 任務
+E2 + E4 first-pass verdict：W-AUDIT-9 引入 invariant
+`shadow_mode == canary_stage.as_shadow_mode()`，4 sub-agent 各自加 sibling
+test 但漏同步既有 IPC config patch test fixture + Python parity test
+fixture 注入 `canary_stage_provider() → Stage1+`。5 個 NEW regression
+（2 Rust IPC + 3 Python parity）。
+
+### 改動
+1. **rust/openclaw_engine/src/ipc_server/tests/config.rs** (+~80 / -~30):
+   - 改名 `test_g3_02_a2_patch_executor_shadow_mode_via_patch_risk_config`
+     → `test_g3_02_a2_patch_executor_binary_shadow_only_rejected_invariant_drift`，
+     斷言改為 reject（invariant drift 主動拒）
+   - 改 `test_g3_02_a2_patch_executor_routes_to_demo_engine` 為 5-field
+     atomic patch（Stage 2 demo cohort, 14d period）
+   - 新增 `test_g3_02_a2_patch_executor_stage_promotion_via_patch_risk_config`
+     5-field atomic Stage 1 paper cohort 成功 patch + verify
+2. **tests/test_executor_decision_parity.py** (+~20 / -~5):
+   - `_build_runtime_config` 加 stage auto-pair（shadow=True ⇄ Stage 0,
+     shadow=False ⇄ Stage 1 PAPER_SINGLE_COHORT），對齊
+     `test_executor_shadow_to_live_e2e._make_runtime_config` helper 模式
+   - `_drive_python_decision` ExecutorAgent ctor 注入
+     `canary_stage_provider=cache.canary_stage_provider()`
+
+### Verification 結果
+- cargo test ipc_server::tests::config: **16/16 PASS**（從 13 PASS / 2 fail
+  → 16 PASS / 0 fail；新增 1 個 test 抵 改名重用）
+- 完整 cargo test --lib --release -p openclaw_engine: **2625 / 0 fail**
+  （從 2622 / 2 fail → 2625 / 0；對齊 acceptance criteria #4 expected
+  「降至 0 fail」）
+- pytest test_executor_decision_parity: **5/5 PASS / 2 skipped**；
+  agree=70/70 (100.00%)（從 30 disagree → 0 disagree）
+- cargo build --release Mac: 0 error / 17 warning（pre-existing）
+
+### Lessons
+- Cross-wave invariant 改動（W-AUDIT-9 §4.4）必跑 **全 cargo test
+  scope**（不只 sub-agent 自報的 unit test scope）— sub-agent E1-A 自報
+  「config::risk_config 139 PASS」是 schema scope，沒跑
+  ipc_server::tests::config 既有 G3-02 IPC test。E1 acceptance 加全套
+  `cargo test --lib --release` 是必須
+- Test fixture builder 必跨 multi-test-file 全 grep auto-pair
+  pattern：W-AUDIT-9 T3 改 ExecutorAgent ctor 後，e2e helper
+  `_make_runtime_config` 已加 auto-pair，但 parity test
+  `_build_runtime_config` 漏同步。下次新 invariant landing 後第一個
+  動作 = grep `RuntimeConfig\(.*shadow_mode=` 或 `ExecutorAgent\(.*provider=`
+  全 codebase 確認所有 helper auto-pair
+- JsonRpcError struct `message: String`（不是 `Option<String>`）—
+  雖 IPC protocol 標 message field，Rust 端用 plain String + as_str() 取值
+  拼字檢查
+- `crate::config::risk_config_advanced::CanaryStage` 路徑不正確；正確
+  `crate::config::risk_config::CanaryStage`（risk_config.rs 用
+  `pub use advanced::CanaryStage` 重導出，advanced 是 `#[path]` 載入的
+  internal mod）
+- 隔壁 session 副作用 cross-wave 標明「不在本 fix scope」+ PM 通知對應
+  session 是正解；不擴張 fix 範圍是 §八 最小影響原則的具體實踐
