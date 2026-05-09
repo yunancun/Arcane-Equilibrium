@@ -1755,3 +1755,42 @@ E1-C T3 `_read_canary_stage` path 2b 把 legacy `shadow_mode_provider` 回 False
 - E1 commit message 出現 `Partial` / `Pending` 字眼 = 必新 commit 補完才能 sign-off；報告不可寫 PASS
 - E2 second-batch 必對應 22 invariant 逐條 verify，不接受 E1-claim 取代 E2-grep
 - Linux PG dry-run × 2 mandatory：V083 / V084 待 E4 階段補；不算 E2 退回原因但必標 watch
+
+## Sprint N+0 W2 third-pass APPROVE — E1-FIX-W2 CRITICAL + HIGH closure verify (2026-05-10)
+
+**Verdict**：APPROVE Sprint N+0 W2 整 5 wave 接 E4 final regression。
+
+### Third-pass scope
+- 限 fix delta verify（commits `a01d05ed` + `8393bcff` + `71de1cd5`）
+- 不 re-review 5 wave 內容（second-pass 已 APPROVE 4 wave + W3 conditional）
+
+### Second-pass RETURN scope 100% closure
+1. **CRITICAL fake-PASS retract** — `a01d05ed` 6 Rust file 全 land；grep `emit_decision_feature_intent_rejected` 5 hit（1 def + 3 dispatch + 1 doc）；Mac/Linux cargo build PASS；Linux cargo test --lib 2635/0；Mac/Linux stress_integration 35/0；Mac pytest test_governance_reject_negative_label 真 19/19；Mac 整 ml_training pytest 409/31s/0
+2. **HIGH bb_reversion stress fail** — `8393bcff` snap1 + snap2 補 sma_50=Some(2050.0)；35/35 stress PASS；不破 W-AUDIT-6d #6 invariant（require_ma_confirmation 仍 default true）；注釋明文「禁反向」
+3. **HIGH report 誠實性** — `71de1cd5` retract report + E1 memory 加 2 教訓（fake-PASS 4 對策 + W-AUDIT-6d 配套 fixture 3 對策）
+
+### third-pass CRITICAL detection 補充教訓
+1. **commit message 字眼 grep 是 cheap detection**：對抗思路第一步必 `git log --oneline | grep -E "(Partial|Pending|TODO|fixme)"` 篩 commit；E1 自承 partial 而 report 寫 PASS = fake-PASS pattern
+2. **fixture 補對 vs disable invariant**：W-AUDIT-6d 配套 fixture fix 必對齊「production code 業務契約」非「降低 production code 測試門檻」；E1-FIX 守此原則 + 注釋明文記載 — 是合格的 invariant change 配套修法
+3. **multi-session race 防線執行確認**：E1 memory 自加 4 對策 + 3 對策；E2 不需重複入自己 memory；對抗 detection 已 layer-up 完整
+
+### 22 invariant 第三批 verdict
+- invariant 5 + 21 IMPL 層 PASS（producer 真 emit + writer 真 INSERT V084 column）
+- runtime 真 ≥5% acceptance 由 E4 24h passive 接續驗（attribution_chain ratio 0.5% → ≥ 5%）
+
+### 5 wave 全 APPROVE 接 E4
+- W1 (E1-A 8a Phase A) APPROVE — stress fail closed by `8393bcff`
+- W2 (E1-B 4b-M2) APPROVE — 2 MED defer to E4 24h passive
+- W3 (E1-C 4b-M3) APPROVE 修後 — `a01d05ed` + `71de1cd5` 全覆蓋 CRITICAL + HIGH
+- W4 (E1-D 9 T4 + C-A6) APPROVE 不變
+- W5 (E1a 9 T5 GUI) APPROVE 不變
+
+### Pre-existing 2 doctest fail flag P2（不阻 sign-off）
+- `replay/mac_policy_guard.rs:32+88` markdown table 被 rustdoc 解析為 Rust syntax
+- 引入 commit `5a618ff3` 遠早於 W2 fix chain；E4 baseline `c73ae811` 已標 fail
+- P2 follow-up: ` ```text` markdown fence 修法
+
+### Test infrastructure note
+- ssh trade-core 非 interactive bash 不 source `~/.cargo/env`；script 內必 `source ~/.cargo/env 2>/dev/null` 才能跑 cargo
+- Cargo workspace 在 `srv/rust/` 不在 `srv/` 根；ssh 跑 cargo 必 `cd ~/BybitOpenClaw/srv/rust`
+- Mac 有 cargo + python3，可跑 cargo build/test --release + pytest；不需 100% 依賴 ssh trade-core
