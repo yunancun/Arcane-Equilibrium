@@ -1,5 +1,48 @@
 # PA Memory — 工作記憶
 
+## 4-Agent Loss Audit 後 Full Dispatch Plan（2026-05-09）
+
+**觸發**：Operator 拍板 4-agent loss audit 後 dispatch list（A 新策略 / B ML 三斷層 / C Promotion + Dormant / D Architectural Wave / E G3-08 enable）合計 ~140 person-day across 6 sprint。要求 sprint-by-sprint engineering plan + 11-item sign-off pre-flight checklist。
+
+**Critical Path**：W-AUDIT-9 graduated canary + W-AUDIT-8a Phase A trait migration → first per-alpha-source supervised live ~12 weeks（6 sprint × 2 weeks）。Stage 1/2/3 觀察期 7d/14d/21d 不可壓縮，是 first supervised live milestone 的 hard limit。
+
+**Sprint N+0 滿載 5/5 HOT**：
+- E1-A: W-AUDIT-9 T1 (Rust schema)+T3+T6
+- E1-B: W-AUDIT-9 T2 (V### migration)+T4
+- E1-C: 8a Phase A trait 升級
+- E1-D: B-M1+M2+M3 ML 三斷層
+- E1-E: W-AUDIT-6 mid-ground 6 子項 + C-A6 + D-05-wire
+- ops 並行: A2-followup G3-08 enable
+
+**3 大跨 wave conflict 處理**：
+1. **W-AUDIT-8a Phase A vs W-AUDIT-6 mid-ground 5 策略 file overlap**（bb_breakout/mod.rs / ma_crossover/strategy_impl.rs / bb_reversion/mod.rs）→ Sprint N+0 序列化（W1 mid-G + W2 Phase A），禁並行
+2. **W-AUDIT-9 T3 stage-aware vs ExecutorAgent shadow_mode 接線** → exception path 必 fail-closed Stage 0（不是 Stage 1），E2 必查 invariant
+3. **W-AUDIT-8a Phase B+C vs W-AUDIT-5 性能 wave 同 tick_pipeline/mod.rs** → 序列化或 Phase B+C 後 split
+
+**W-AUDIT-6 mid-ground 派工**（保 6 / 砍 6）：
+- 保: ma_crossover R:R audit / bb_breakout 5m sweep / bb_reversion 配 ma pair / Kelly tier config 化（4 risk_config*.toml + kelly_sizer.rs）/ funding_arb retire (done) / DSR/PBO wired (done)
+- 砍: OU σ sweep / EWMA λ sweep / Kelly sub-fraction / fast_track threshold / per-strategy cost_gate / hardcoded magic patch
+- E2 必 grep 6 砍項字面 0 命中
+
+**W-AUDIT-8f (R-3) 含 W-AUDIT-4 併入 schema**：
+- `learning.hypotheses` table state machine（DRAFT→REGISTERED→EXPERIMENTING→EVIDENCE_GATE→PROMOTED/REJECTED/EXPIRED）
+- 6 dead schema 全加 `hypothesis_id` FK column（feature_baselines / drift_events / outcome_features / attribution_chain / calibration_sets / label_distributions）
+- Decision Lease + ExecutionPlan + fills 全 propagate `originating_hypothesis_id`
+- attribution chain rewire base on hypothesis_id → trivial join → ratio 從 0.5% 拉到 80%+ via Step 1 (B-M1/M2/M3) ~30% → Step 2 (C-A6) ~50% → Step 3 (W-AUDIT-8f IMPL) ~80%+
+
+**11-Invariant Sign-off Checklist**：
+- 結構 4 條（Sprint N+0 W-AUDIT-9 7 sub-task + 8a Phase A byte-diff + W-AUDIT-6 mid-G 6 保 0 動砍 + Stage 1 7d 觀察未提前升級）
+- 安全 4 條（DOC-08 §12 / live boundary 5-gate / §二 16 原則 / shadow_mode_provider exception fail-closed Stage 0）
+- 治理 3 條（manual_promote PG NOT NULL / SM-04 L3 hard FAIL / A 群 declared_alpha_sources 對齊）
+
+**Push back 給 Operator**：Sprint N+0 5/5 HOT 任一 E1 故障 = 阻塞 critical path；建議預備 1 個 stand-by E1（6 並行 5 active + 1 stand-by）；如不接受須 operator 顯式 sign-off Sprint N+0 5/5 HOT capacity 風險。
+
+**最早 supervised live**：~2026-08-01 ± 2 weeks（Sprint N+5 結束點，event-driven），不是 hard date。對應 milestone = first per-alpha-source budget slice，不是整 system live_reserved。
+
+**報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_dispatch_engineering_plan.md`（689 行 / 51K chars / 中文+表為主）
+
+---
+
 ## 全系統虧損架構級根因 + 真升級藍圖（2026-05-09）
 
 **觸發**：Operator 拒絕「disable / 縮頻 / block bad symbols」笨辦法，要求對 5 策略 7d demo gross -26.44 USDT 做架構級根因分析；QC + MIT 並行從 alpha / ML 視角，本份從 system architect 視角。
@@ -1921,3 +1964,28 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 **PM push back 5 點**（修正後反映 W-AUDIT-8a/9 既已 active）：W-AUDIT-9 與 W-AUDIT-3b commit 衝突協調 / W-AUDIT-8e R-2 修正 / W-AUDIT-4b 串行先 W-AUDIT-8f / W-AUDIT-6 redesign 策略走 Stage 1 / Layer 2 解耦
 
 **Report**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_audit_pa_fix_plan_v2.md`
+
+---
+
+## 2026-05-09 P0-V3-PA-SPEC-FIX：BB v3 對抗性 review 揭發 PA Alpha Surface spec 3 條技術錯誤
+
+**觸發**：BB v3 verification (`docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-09--bybit_compatibility_verification_v3.md`) NEW-5/NEW-6/NEW-8 Bybit-side 對 PA Alpha Surface Bundle 投票 CONDITIONAL APPROVE，要求 PA spec 修 3 條再進 R-1 IMPL。
+
+**3 條技術錯誤**：
+1. **L25 不存在**：PA 草案多處用「L25/L50 orderbook」，但 Bybit V5 WS linear orderbook 真實 depth levels = `1 / 50 / 200 / 1000`，**沒有 25**。OpenClaw 已預設訂閱 `orderbook.50.{symbol}`；如需 deeper book 改 L200。寫 L25 進 spec 會撞 Bybit endpoint validation。
+2. **liquidation_pulse 已 4 weeks ago deleted**：PA 草案把 `LiquidationPulse` 當 W-AUDIT-8a Phase C「真接 Bybit allLiquidation WS」，但 OpenClaw 於 2026-04-06 已刪除 `allLiquidation` WS handler（字典手冊 line 990 證明）。`market.liquidations` 表 reserved 保留，但 R-1 IMPL 需 +1 sprint 重接 WS handler + 重啟 writer；期間 surface field 必須以 `requires_revival: true` flag 標 dormant，禁 stub mock。
+3. **basis 沒分 demo observation vs execution**：PA 草案把 `basis_curve` 列入 Tier 2 alpha source，但 Bybit demo **不支援 spot lending execution**（與 funding_arb v2 retire 同因 ADR-0018）。R-1 spec 必須明文「basis = observation-only until mainnet」+ 加 `requires_spot_capability: true` flag；demo 環境下吃 `Basis` 的策略 StrategyAction 必須 fail-closed 不可進 IntentProcessor。忽略此邊界 = funding_arb v2 demo n=13 -36.76 bps 陷阱重演。
+
+**3 個檔案修法**（同步 patch 結構，不破壞既有章節）：
+1. `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md` §3.1 AlphaSurface struct 注釋 + 新增 3 個對齊段落（Bybit V5 levels / liquidation 復活前置 / basis execution 邊界）
+2. `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` §2.3 三個子節 Tier 3.1 (OrderflowFeatures) / Tier 3.2 (LiquidationPulse) / Tier 2.2 (BasisCurveSnapshot) 各自加 require flag + 邊界明文 + 對應 Sprint 影響
+3. `srv/docs/CCAgentWorkSpace/Operator/2026-05-09--full_loss_architectural_root_cause_redesign.md` mirror 同步 3 條（per TW v3 push back，本次只更新核心 3 條，不字面複製整份）
+
+**核心教訓（PA 自我檢討）**：
+- **Bybit endpoint 真實能力沒在 PA spec drafting 階段查 BB**：草案寫 L25 是 mental model 從別家交易所（Binance L20 / OKX L25 等）誤帶過來，OpenClaw 唯一交易所是 Bybit V5 必對齊 1/50/200/1000。
+- **「已刪除模組」識別失敗**：liquidation_pulse 寫入 PA spec 時沒查 4 weeks ago handler 已刪事實。應在 spec 提到任何 alpha source 時呼叫 `grep -r "allLiquidation\|liquidation_handler" rust/ python/` 驗 handler 存在。
+- **demo execution capability 邊界遺漏**：basis 是 funding_arb v2 同類陷阱（perp+spot 對沖），PA 應記住 funding_arb v2 retire reason（demo 無 spot lending）並先驗 demo 是否支援 spot execution。
+
+**Push back 給未來 PA**：spec drafting 階段必跑 BB pre-review（不只 BB post-review），對任何 alpha source 提案必先確認 (1) Bybit endpoint 真實 shape、(2) 既有 handler / writer / parser 存在、(3) demo vs mainnet capability 邊界。否則 BB review 會打回，浪費 round。
+
+**Report**：本次直接 patch 3 個檔案，無單獨 report；參考 BB v3 verification 路徑。
