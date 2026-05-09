@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v14
-Date: 2026-05-08
-Status: PM replan after AgentTodo M8 fast-track NO-GO and OpenClaw repositioning; v14 mounts 12-agent full audit fix plan (PA integrated, 88 finding / 7 wave / ~140h)
+Version: v15
+Date: 2026-05-09
+Status: PM replan after 12-agent adversarial verification of W-AUDIT-1..7 24h fix sprint; v15 records verification verdict + lifts verified-closed details to `docs/archive/2026-05-09--w_audit_verified_closed_archive.md` + mounts 5 NEW-ISSUE + 4 NEW-VULN as active P0/P1
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -100,14 +100,43 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   E5 / E4 / E3 / CC / QC / MIT / BB / TW / R4 / A3) reports written to
   `srv/docs/CCAgentWorkSpace/<AGENT>/workspace/reports/2026-05-08--*.md`. PA
   integrated 88 unique findings (de-duped from 142 raw) into 7 waves
-  W-AUDIT-1..7 with ~140h estimated. Top 30 critical/high 80% VERIFIED via
-  grep + ssh trade-core PG. Full plan archived at
-  `srv/2026-05-08--full_audit_fix_plan.md` and PA workspace
-  `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md`.
-  6 cross-agent consensus criticals (K-1..K-6); K-6 (LG-5 reviewer 0 row)
-  is DISPUTED — PG actual 22,790 row, reviewer is active. 5 PM/operator
-  decision points (`P0-DECISION-AUDIT-1..5`) below need operator sign-off
-  before downstream IMPL fully unblocks.
+  W-AUDIT-1..7 with ~140h estimated. Full plan archived at
+  `srv/2026-05-08--full_audit_fix_plan.md`.
+- **2026-05-09 24h Fix Sprint** (operator) — 28 commits between `72f05aa0..7fccad06`
+  covering W-AUDIT-1/2/3/5/7 source/test work + V077 columnstore hotfix.
+- **2026-05-09 12-Agent Adversarial Verification land**：each original audit
+  proposer ran adversarial fix verification. Reports at
+  `srv/docs/CCAgentWorkSpace/<AGENT>/workspace/reports/2026-05-09--*_verification.md`.
+  Integrated summary at `srv/2026-05-09--audit_fix_verification_summary.md`.
+  Tally: **319 verification points → ✅ 74 (23%) / ⚠️ 66 (21%) / ❌ 120 (38%) /
+  🔄 6 (2%) / 🆕 53 (17%)**. Verified-closed sub-task details lifted to
+  `docs/archive/2026-05-09--w_audit_verified_closed_archive.md`.
+- **W-AUDIT-1..7 verification verdict**:
+  - W-AUDIT-1 docs sync: ⚠️ partial close (R4 CRITICAL × 5 真 closed only 2/5;
+    SPECIFICATION_REGISTER LG-X-05 缺; CCAgentWorkSpace 表仍 17 agent 缺
+    MIT/BB; archive/ 仍 7/51 索引)
+  - W-AUDIT-2 security: 🔄 source-only close, runtime not verified
+    (lease_transitions 0 row; E3 NEW-VULN-2)
+  - W-AUDIT-3 fake-live: ⚠️ true partial (F-17 ✅ / F-15 e2e DB row coverage
+    opt-in default early-return / F-01 lambda:True 0% modified, blocks on
+    `P0-DECISION-AUDIT-2`)
+  - W-AUDIT-4 ML 基座: ❌ downgraded fix (V068/V070/V071 reclassification
+    guard COMMENT only; row count still 0; cron not installed; attribution_chain_ok
+    24h 0.0188% still catastrophic)
+  - W-AUDIT-5 性能/結構: ⚠️ real progress + critical mismatch
+    (F-12 runner.rs 2467 UNCHANGED — commit modified `bin/replay_runner.rs`
+    1599→626, NOT the original 2467-LOC `runner.rs`; binary 25→20.6 MB ✅)
+  - W-AUDIT-6 策略: ⏸ untouched (0/20 量化 fixes; blocks on `P0-DECISION-AUDIT-4`)
+  - W-AUDIT-7 GUI: ✅ real GUI progress + 🆕 functional regression
+    (4/5 critical close; live_reserved 5s+hold-to-confirm 業界標準;
+    BUT 🆕 NEW-ISSUE-1 LiveDemo pipeline auth_missing — V077 hotfix
+    `restart_all.sh --keep-auth` 過程 auth file 遺失)
+- **`P0-DECISION-AUDIT-1` ✅ closed** (W-C operator auth file + AMD §5.4.1)
+- **`P0-DECISION-AUDIT-3` ✅ closed** (§三 5 stale 數字真修 + healthcheck id)
+- **`P0-DECISION-AUDIT-2/4/5` 仍 PENDING-OPERATOR** — operator 24h 內拍板
+  最緊要：P0-DECISION-AUDIT-2 解 F-01 fake-live 死鎖；P0-DECISION-AUDIT-4 解
+  W-AUDIT-6 全套 IMPL 鎖。
+- **5 NEW-ISSUE / 4 NEW-VULN 加為 active P0/P1** (見下表)。
 
 ## Dispatch Order
 
@@ -152,6 +181,10 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P0-DECISION-AUDIT-3` | DONE | CLAUDE.md §三 數值 vs runtime drift 防線改造 | §三 now keeps only active current state, every runtime number carries timestamp/healthcheck id, and stale completed history points to archive/report sources. |
 | `P0-DECISION-AUDIT-4` | PENDING-OPERATOR | 5 策略 verdict 採納 | PA 推薦 (ii)：保留 grid CONDITIONAL（限 ORDIUSDT）+ ma_crossover REVISE + bb_breakout REJECT 1m→REVISE 5m + funding_arb RETIRE（完全清 RiskConfig）+ bb_reversion 配 ma pair。或 (i) 全 RETIRE 重做 / (iii) 觀望 P0-EDGE-1 後決。 |
 | `P0-DECISION-AUDIT-5` | PENDING-OPERATOR | openclaw_core 9 模組 + Layer 2 自主循環 14 天 0 動作 sunset（FA push back #3） | PA 推薦 (i)+(ii)：ADR-0015 「openclaw_core 9 模組永久 sunset」決議 + W-AUDIT-5 接續 drop；ADR-0017「Layer 2 GUI-only by design」+ CLAUDE.md §五 圖示更正。或 (ii) 排 W-AUDIT-5 P2 修 / (iii) 接受長期共存。 |
+| `P0-NEW-ISSUE-1` | ACTIVE 2026-05-09 | LiveDemo pipeline auth_missing → engine boot demo-only (CRITICAL functional regression) | FA NEW-1 verified via `.codex/WORKLOG.md:332`：W-AUDIT-7 階段 V077 hotfix `restart_all.sh --rebuild --keep-auth` 過程 authorization file 遺失；LiveDemo 從 5/8 真實 fills 流量 → 5/9 變 0。Action: (1) 重生 authorization file via `_write_signed_live_authorization()` python route; (2) RCA `--keep-auth` 為何失效; (3) §三 補 LiveDemo `auth_missing` 狀態; (4) 加 healthcheck `[XB] live_pipeline_active`。 |
+| `P0-NEW-VULN-1` | ACTIVE 2026-05-09 | launchd plist 安全弱點 (HIGH) | E3 NEW-VULN-1 verified；待 E3+E1 出 fix plan。 |
+| `P0-NEW-VULN-2` | ACTIVE 2026-05-09 | lease audit runtime 0 emit (HIGH) | E3 NEW-VULN-2 verified: W-AUDIT-2 #4 `spawn_lease_transition_pipeline` 接到 main.rs:657 是 source 真改但 runtime 未 restart 落地；lease_transitions PG row count 仍 0。Action: 觸發 engine restart + verify row count > 0。等 NEW-ISSUE-1 LiveDemo 修復後一併 restart。 |
+| `P0-AUDIT-NEW-LG-X-05` | ACTIVE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 (R4 N1 CRITICAL) | R4 verified: 4 條 LG-5 RFC (lg5_constrained_autonomous + eval_contract + v2 + w3_fup2 amendment) 全未登記；LG-X-04 補的是 Live Ops Foundation 而非 LG-4 Supervised-Live。Action: SPECIFICATION_REGISTER LG-X 重編號使 LG-X-N ↔ LG-N 1:1 對應 + 補 LG-X-05。0.5h。 |
 
 ## P1 — Next Engineering Queue
 
@@ -200,6 +233,14 @@ historical wave narratives, and old date-driven reminders are archived.
 | `P2-AUDIT-VAR-6c` | W-AUDIT-6c portfolio VaR/CVaR/EVT IMPL | After 5 策略 verdict 落地：portfolio_var.py + cvar.py + EVT/GPD tail fit + LUNA/FTX stress test + block bootstrap CI (QC+MIT+E1, ~3d)。 |
 | `P2-AUDIT-LAYER2-7c` | W-AUDIT-7c Layer 2 autonomous loop | Hourly L1 triage cron + ContextDistiller wire (E1+AI-E ~8h)。Depends on W-AUDIT-7a operator API key 7d 累積觀察。 |
 | `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset (after P0-DECISION-AUDIT-5) | 待 ADR-0015 通過後 drop attention.rs / attribution.rs / backtest.rs / cognitive.rs / dream.rs / message_bus.rs / opportunity.rs / order_match.rs / portfolio.rs ~4468 行 Rust dead code。 |
+| `P2-AUDIT-VERIFY-1` | DOCS-1 殘缺項收口 | R4 verified W-AUDIT-1 CRITICAL × 5 真 closed 僅 2/5；剩餘需做：(C2) docs/README 補 docs/agents/ 整章 / (C3) docs/README 補 SCRIPT_INDEX 入口 / (H3) docs/README archive/ 缺漏 44 條 / (H5) docs/README CCAgentWorkSpace 表補 MIT/BB（line 727 仍寫 17 agent）/ (M5) MIT/BB workspace/README.md 位置補錯到 dir 根。詳見歸檔 §1。 |
+| `P2-AUDIT-VERIFY-2` | F-12 runner.rs 真檔對齊 | E5 verified: commit `3372eb18` 改的是 `bin/replay_runner.rs`（1599→626），不是原 finding 的 `runner.rs` 2467 行檔。**原 file 仍違反 governance 2000 cap**。需 PM/PA 對齊真實 file path 並補修。 |
+| `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix | FA NEW-2 verified: V068/V070/V071 全降級為 reclassification guard（COMMENT only），row count 仍 0；6 表 0 INSERT 必另開 functional fix wave。Action: 區分「source-only checkpoint」與「functional fix complete」並接 INSERT path。 |
+| `P2-AUDIT-VERIFY-4` | cron not installed (F-08) | FA NEW-3 + AI-E verified: 5 ML 訓練腳本 cron script 寫了但 cron not installed；attribution_chain_ok 24h 仍 0.0188%。Action: operator 授權 `crontab -e` 安裝 + verify 24h cron fire。 |
+| `P2-AUDIT-VERIFY-5` | grid blocked_symbols selection bias 加劇 | QC NEW-1 verified: P1-EDGE-1 commit 又追加 LABUSDT；selection bias 持續加劇而非 freeze。Action: 凍結列表 + 新加入需 RFC + DSR/PBO; 計算 4 blocked symbol counterfactual 7d PnL。 |
+| `P2-AUDIT-VERIFY-6` | A3 NEW-1 openConfirmModal a11y | Critical UX gap: openConfirmModal 無 Esc / 無 focus trap / 無 aria-modal。Action: 30 行 JS 對齊 openPromptModal a11y 樣式。 |
+| `P2-AUDIT-VERIFY-7` | NEW-VULN-3 / NEW-VULN-4 修復 | E3 verified: cookie secure default fail-OPEN (MEDIUM) + phase4 dead code (INFO)。 |
+| `P2-AUDIT-QC-STAND-ALONE` | QC 5 條 stand-alone fix（不需 P0-DECISION-AUDIT-4 拍板）| QC: (1) funding_arb schema 4 TOML 完全清除 1h / (2) Kelly tier 8/6/4 → RiskConfig.kelly.{young/mature/established}_fraction 3h / (3) bb_breakout cooldown 600k vs 300k 統一 0.3h / (4) DSR/PBO production caller 加進 promotion_pipeline.py demo gate (advisory) 8h / (5) CLAUDE.md §三 -26.44 加掛 healthcheck id 0.5h。共 ~13h。 |
 
 ## Schedule
 
@@ -222,6 +263,9 @@ Dates are planning windows, not automatic authorization.
 | 2026-05-15..22 | W-AUDIT-6 策略 + DSR/PBO promotion gate | After `P0-DECISION-AUDIT-4` operator 5 策略 verdict + W-AUDIT-1/3; ~30h, 3 sessions. |
 | 2026-05-12..16 | W-AUDIT-7 AI + GUI/UX 收口 | Parallel; operator API key 7d 觀察 + GUI fix; ~25h, 2 sessions urgent (7a) + 7b/7c 後期。 |
 | 2026-06-15 | Supervised live target (悲觀帶) | Conditional on W-AUDIT-1..7 完成 + 5 PENDING-OPERATOR 拍板 + 5 P0-LG/OPS 條目 + W-A/W-B/W-C/W-D PASS. PA panorama 偏向悲觀。 |
+| 2026-05-09 | 12-Agent Adversarial Verification land + TODO v15 | 12 verification reports written；總 tally ✅74 / ⚠️66 / ❌120 / 🔄6 / 🆕53；PM sign-off + verified-closed 細節歸檔到 `docs/archive/2026-05-09--w_audit_verified_closed_archive.md`；summary at `srv/2026-05-09--audit_fix_verification_summary.md`。 |
+| 2026-05-09+ | NEW-ISSUE-1 LiveDemo auth restore + RCA | P0 急。重生 authorization file + RCA `--keep-auth`；準備一次 engine restart 同時 land NEW-VULN-2 lease audit runtime emit verification。 |
+| 2026-05-10..13 | 等 P0-DECISION-AUDIT-2/4 operator 拍板 | 解 W-AUDIT-3 F-01 + W-AUDIT-6 全套 IMPL 鎖。 |
 
 ## Dispatch Rules
 
@@ -253,3 +297,14 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **12 audit reports**: `srv/docs/CCAgentWorkSpace/{FA,AI-E,E5,E4,E3,CC,QC,MIT,BB,TW,R4,A3}/workspace/reports/2026-05-08--*.md`
 - **Cross-agent consensus**: K-1..K-6 critical (見 fix plan §3.1)；K-6 (LG-5 reviewer 0 row) DISPUTED — 真實 PG 22,790 row。
 - **W-AUDIT-1 closure**: 5 策略 7d gross PA 直查 demo -26.44 USDT / live_demo +0.43 已同步到 CLAUDE §三；舊 §三 的 -6.98 USDT 是 2026-05-03 stale，不再作為 current-state。`[40]` / `[33]` / `[42b]` 等數字改以 2026-05-08/09 W-AUDIT-1 facts 為準。
+
+## Reference — 2026-05-09 Adversarial Verification + Verified-Closed Archive
+
+- **PM Sign-off summary**: `srv/2026-05-09--audit_fix_verification_summary.md`（319 verification points 整合 + 7 wave verdict + P0-DECISION 拍板狀態 + 5 NEW-ISSUE / 4 NEW-VULN 清單）
+- **Verified-closed details archive**: `srv/docs/archive/2026-05-09--w_audit_verified_closed_archive.md`（**過時 / 已修復內容單獨存放**，避免 active TODO 膨脹）
+- **12 verification reports**: `srv/docs/CCAgentWorkSpace/{FA,AI-E,E5,E4,E3,CC,QC,MIT,BB,TW,R4,A3}/workspace/reports/2026-05-09--*_verification.md`
+- **Total tally**: ✅ 74 (23%) / ⚠️ 66 (21%) / ❌ 120 (38%) / 🔄 6 (2%) / 🆕 53 (17%)
+- **Compliance score**: B- (17/30 = 56.7%) → B (21/30 = 70%) (CC verdict)
+- **ML 基座達標率**: 38% → 42% (MIT verdict; attribution_chain_ok 24h 0.0188% 仍 catastrophic)
+- **GUI 整體**: 7.4 → 8.1 / 10 (A3 verdict; Critical 4/5 close)
+- **核心 verdict**: 24h 28 commits 是高 throughput 但典型 source-only 假進度。74 真修中**沒有任何單一 finding 真改變 fake-live 結構**；NEW-ISSUE-1 LiveDemo 停是修復過程引入的 functional regression。修復節奏需從「source-checkpoint」升為「runtime-checkpoint」。

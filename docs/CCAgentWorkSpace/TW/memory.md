@@ -26,6 +26,22 @@
 | 2026-04-29 | 62-finding Batch A-F + STRKUSDT P0 wave 歸檔（TODO.md 頭部敘述瘦身）| `docs/archive/2026-04-29--62finding-batch-A-to-F.md` + `docs/archive/2026-04-29--strkusdt-p0-wave.md` |
 | 2026-04-29 | TODO.md Stage 2A refactor — 頭部敘述 + Wave 索引化 | inline final message（不寫 report file）|
 | 2026-05-08 | 04-01~05-08 範圍重複 / 合併 / 應歸檔審計（38 天 ~1850 docs/.md + ~430 .claude_reports）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-08--apr_may_doc_audit.md` |
+| 2026-05-09 | 5/8 audit 30+ findings 24h 修復對抗性核實（W-AUDIT-1 closure 真實度查驗）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification.md` |
+
+## 2026-05-09 W-AUDIT-1 對抗性驗證重點
+
+- **任務**：operator 派 TW 對抗性核實 W-AUDIT-1 closure（commit `d90f3d10`）真實度，關注 docs/README 50+ 缺漏 / MODULE_NOTE 雙語規範違反 / 重複文件合併三大議題。
+- **產出**：215 行報告，覆蓋 §1 Executive Summary 7 個分數 + §2 30+ finding 逐條（MC×9 + A×11 + N×2 + I×5 + W×3 + AG×4 + C×4 + ADR×2）+ §3 NEW-ISSUE 8 個 + §4 對抗性 push back 6 條 + §5 5/8→5/9 verdict 對比 + §6 P1/P1+72h/P2 修建議。
+- **整體文檔健康度**：5/8 70% → 5/9 78%（+8%）— W-AUDIT-1 真有實質進展不是 placebo。
+- **README 完整度**：50% → 78%（multi_agent_rework 14 + ADR 0015-0019 + audits 5/8 + W-AUDIT report 真補；archive/ + agents/ + ADR 0001-0014 三段仍缺）。
+- **SCRIPT_INDEX 完整度**：45% → 80%（5/9 W-AUDIT-1 catch-up 段補 19 條）。
+- **CONTEXT.md 完整度**：~75%（LG-X / REF-19 / REF-21 / Agent Decision Spine / 3-Config 已加）。
+- **MODULE_NOTE 雙語規範遵守**：75% → **70% 倒退**（新建 5/9 audit + 5/16 funding + 3 個 operator script 仍寫雙語對照；ref21 兩 cron 純英文未補）。
+- **重複文件 superseded 標記**：30% → 40%（REF-21 4 份 ✅；REF-20 v0.1/v1/v2/v2.1/round2/round3 6 份**仍 0 標記** ❌；REF-19 v1 雙語未標 ❌）。
+- **worklogs 斷層**：12 → 13 天**倒退**（4/27 後 0 daily_summary）。
+- **8 個 NEW-ISSUE**：NI-1 docs/agents/ 0 索引 / NI-2 ADR 0001-0014 索引未驗 / NI-3 5/9 新建腳本仍寫雙語 / NI-4 CLAUDE_CHANGELOG.md 1780 行超 cap / NI-5 KNOWN_ISSUES + REFERENCE 仍 stale 4/12 / NI-6 archive/ 0 README 索引 / NI-7 worklog 斷層惡化 / NI-8 REF-20 6 份未標 superseded。
+- **5 個對抗性 push back**：(1) docs/README 50+ 補約 60% (2) MODULE_NOTE 規範未改 + 新增 5 個違反 (3) 重複文件 11% 完成度 (4) §三 衛生 PASS 但缺 archive snapshot (5) SCRIPT_INDEX 補登充分但 README 反向引用缺。
+- **規範遵守**：中文為主 + 英文技術名詞；不動代碼/邏輯/業務文件；報告路徑 + verdict 嚴格遵守 prompt format。
 
 ## 2026-05-08 04-01~05-08 doc audit 重點
 
