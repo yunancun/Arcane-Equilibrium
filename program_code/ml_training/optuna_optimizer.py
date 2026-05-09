@@ -321,7 +321,7 @@ def _read_response_line(sock: socket.socket) -> dict[str, Any]:
     while b"\n" not in data:
         chunk = sock.recv(IPC_RECV_BUFFER)
         if not chunk:
-            raise ConnectionError("Socket closed before response / 響應前套接字已關閉")
+            raise ConnectionError("響應前套接字已關閉")
         data += chunk
     return json.loads(data.split(b"\n", 1)[0].decode("utf-8"))
 
@@ -413,7 +413,6 @@ def _send_ipc_command(
         if "error" in response:
             err = response["error"]
             raise RuntimeError(
-                f"IPC error [{err.get('code')}]: {err.get('message')} / "
                 f"IPC 錯誤 [{err.get('code')}]: {err.get('message')}"
             )
         return response.get("result", {})

@@ -5995,3 +5995,38 @@ export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 ### Commit + push
 - Mac SSOT commit b186c6c2 → push origin/main → ssh trade-core git pull --ff-only ✅
 - 中文 commit message + root cause 一句話
+
+
+---
+
+## 2026-05-09 — ml_training cron IPC __auth fix Round 2 regression test
+
+### 任務
+- E2 review (`b3607c10`) round 1 verdict = RETURN-TO-E1（業務邏輯 PASS，process gap：缺 regression test commit）
+- HIGH-1：補 program_code/ml_training/tests/test_optuna_ipc_handshake.py（4 case group 12 method）
+- LOW-1：清 optuna_optimizer.py:324, 416 中英並列錯誤訊息為純中文（廢除 bilingual 2026-05-05）
+- LOW-2：deferred P2（拆 IPC helper 至 _ipc_helpers.py 留維護週期）
+
+### 結果
+- 12/12 PASS · ml_training pytest baseline 353→365 (Mac, no regression)
+- adversarial mutation × 2 真驗 fail-closed (silent return {} → DID NOT RAISE RuntimeError)
+- LOW-1 -1 LOC (1011→1010)；新檔 +557 LOC
+
+### 教訓 1：fail-closed regression test 必做 adversarial mutation 驗證
+- 不能只跑 pytest 看 GREEN 就過。必須臨時把守門 raise 改成 silent return / pass / 任意 silent skip，re-run pytest 確認 (d) test 立即 RED 並訊息精準（DID NOT RAISE）
+- mock 不掩蓋邏輯不只是「不 stub return True 假通過」，更包含「驗證 mock 路徑能真實 catch 反向 mutation」
+- E1 round 1 自報 9/9 unit test 但 0 commit 進 repo 是 process gap 的根因 — 自跑 ad-hoc test → 不 commit → 下次 wire format drift CI 無守門
+
+### 教訓 2：FakeSocket 必須模擬 server-side sequential reply
+- `_read_response_line` 對 sock.recv 一次拿到多 line 的處理是 buggy（split("\n", 1)[0] 後丟 line2）— 但實際 Unix domain socket sequential reply 不會碰，所以此 bug 只在 mock 設計不當時暴露
+- FakeSocket recv 設計：list-of-lines queue + per-recv 釋一條 line 模擬 server sequential 行為，避免 mock buffering 把 reader bug 揭穿
+- 對齊基準：`program_code/exchange_connectors/.../tests/test_ipc_client_hmac_ts_unit.py` 的 `_FakeSocket` recv(1) byte-by-byte 模式適用 ipc_client（reader 也 byte-by-byte），但 optuna_optimizer 的 reader 用 IPC_RECV_BUFFER=65536 buffered recv，mock 必須對應 buffered semantics
+
+### 教訓 3：Mac vs Linux pytest baseline 不同（optuna importorskip）
+- Mac 無 optuna 裝（baseline 353 passed / 31 skipped, test_optuna.py 整檔 skip）
+- 解決：新 test 不依賴 optuna（IPC helper 與 optuna 解耦） — Mac/Linux 雙端皆可跑
+- Lesson：跨平台 dev 寫新 test 前先 `python3 -c "import <dep>"` 預檢，避免綁 unimportant dep 導致 Mac 跑不通
+
+### Commit
+- 待 E2 round 2 review → E4 → PM 統一 commit + push origin/main + ssh trade-core git pull --ff-only
+- 預期 commit message 含「ml_training E1 Round 2: regression test per E2 verdict RETURN-TO-E1」
