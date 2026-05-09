@@ -242,6 +242,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | P0-V2-NEW-3 DSR/PBO evidence push: added real-return promotion evidence builder, Demo-only edge scheduler push, V079 strategy_trial_ledger/report columns, and fail-closed selection evidence handling; source/test only, runtime V079 apply/rebuild pending | workspace/reports/2026-05-09--p0_v2_new_3_dsr_pbo_evidence_push.md |
 | 2026-05-09 | P0-V2-NEW-1 Donchian leak-bias source/test closure: locked runtime IndicatorEngine snapshots to prior-bar Donchian and added bb_breakout 5m hard-gate regression so current-bar spikes cannot contaminate 5m demo evidence | workspace/reports/2026-05-09--p0_v2_new_1_donchian_leak_bias.md |
 | 2026-05-09 | P0-V2-NEW-2 Strategist cap no-gate closure: kept 50% maximum freedom and implemented 30%-50% as a `wide_parameter_adjustment` Strategist skill in Rust→Python prompt payload, with targeted Rust/Python tests | workspace/reports/2026-05-09--p0_v2_new_2_strategist_wide_adjustment_skill.md |
 

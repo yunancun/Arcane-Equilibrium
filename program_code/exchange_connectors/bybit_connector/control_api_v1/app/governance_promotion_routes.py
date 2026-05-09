@@ -36,6 +36,89 @@ logger = logging.getLogger(__name__)
 _promotion_gate_lock = threading.Lock()
 
 
+def _load_promotion_pipeline_rows_from_db() -> list[dict[str, Any]]:
+    """Fail-soft DB restore for promotion pipeline rows."""
+    try:
+        from .db_pool import get_pg_conn
+    except Exception:
+        return []
+
+    try:
+        with get_pg_conn() as conn:
+            if conn is None:
+                return []
+            with conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('learning.promotion_pipeline') IS NOT NULL")
+                exists = cur.fetchone()
+                if not exists or not exists[0]:
+                    return []
+                cur.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'learning'
+                      AND table_name = 'promotion_pipeline'
+                    """
+                )
+                columns = {str(row[0]) for row in cur.fetchall()}
+                optional_reports = [
+                    col
+                    for col in (
+                        "demo_selection_bias_report",
+                        "demo_tail_risk_report",
+                    )
+                    if col in columns
+                ]
+                base_columns = [
+                    "pipeline_id",
+                    "strategy_name",
+                    "model_name",
+                    "model_version",
+                    "current_stage",
+                    "paper_start_ts",
+                    "paper_trades",
+                    "paper_win_rate",
+                    "paper_net_pnl_pct",
+                    "paper_max_drawdown_pct",
+                    "paper_sharpe",
+                    "demo_start_ts",
+                    "demo_trades",
+                    "demo_win_rate",
+                    "demo_net_pnl_pct",
+                    "demo_max_drawdown_pct",
+                    "demo_sharpe",
+                    "demo_avg_slippage_bps",
+                    "demo_api_reliability",
+                    "evaluation_report",
+                    "operator_decision",
+                    "approved_capital_pct",
+                    "approved_max_leverage",
+                ]
+                select_columns = [c for c in base_columns if c in columns] + optional_reports
+                if not select_columns:
+                    return []
+                cur.execute(
+                    "SELECT "
+                    + ", ".join(select_columns)
+                    + " FROM learning.promotion_pipeline ORDER BY updated_ts DESC"
+                )
+                rows = [dict(zip(select_columns, row)) for row in cur.fetchall()]
+                return rows
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("promotion pipeline DB restore failed (fail-soft): %s", exc)
+        return []
+
+
+def _sync_promotion_gate_from_db(gate: Any) -> None:
+    rows = _load_promotion_pipeline_rows_from_db()
+    if not rows:
+        return
+    try:
+        gate.load_from_db_rows(rows)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("promotion gate DB row load failed (fail-soft): %s", exc)
+
+
 def _get_promotion_gate():
     """
     Lazy import PromotionGate singleton (thread-safe) / 延遲導入 PromotionGate 單例（線程安全）。
@@ -52,6 +135,7 @@ def _get_promotion_gate():
                         "promotion_audit: %s", r.get("action", "unknown")
                     )
                 )
+                _sync_promotion_gate_from_db(_get_promotion_gate._instance)
         return _get_promotion_gate._instance
     except ImportError:
         return None
@@ -76,6 +160,7 @@ def get_promotion_pipeline_status(
     gate = _get_promotion_gate()
     if gate is None:
         raise HTTPException(status_code=503, detail="PromotionGate not available")
+    _sync_promotion_gate_from_db(gate)
 
     try:
         if strategy_name:
@@ -120,6 +205,7 @@ def promote_strategy(
     gate = _get_promotion_gate()
     if gate is None:
         raise HTTPException(status_code=503, detail="PromotionGate not available")
+    _sync_promotion_gate_from_db(gate)
 
     try:
         from .promotion_pipeline import PromotionStage
@@ -200,6 +286,7 @@ def set_promotion_operator_decision(
     gate = _get_promotion_gate()
     if gate is None:
         raise HTTPException(status_code=503, detail="PromotionGate not available")
+    _sync_promotion_gate_from_db(gate)
 
     try:
         strategy_name = str(request.get("strategy_name", "")).strip()

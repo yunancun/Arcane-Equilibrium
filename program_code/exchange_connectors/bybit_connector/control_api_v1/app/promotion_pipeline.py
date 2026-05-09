@@ -37,10 +37,18 @@ import time
 import copy
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from enum import IntEnum
 from typing import Any, Callable, Optional, Sequence
 
 logger = logging.getLogger(__name__)
+
+
+def _timestamp_seconds(value: Any) -> Any:
+    """Normalize DB timestamptz values to the in-memory epoch-seconds shape."""
+    if isinstance(value, datetime):
+        return value.timestamp()
+    return value
 
 
 def _selection_bias_gate_cls():
@@ -337,14 +345,26 @@ class PromotionGate:
                 }
 
         gate_cls = _selection_bias_gate_cls()
-        result = gate_cls().evaluate(
-            observed_sharpe=observed_sharpe,
-            n_trials=n_trials,
-            n_observations=n_observations,
-            candidate_oos_returns=candidate_oos_returns,
-            trial_sharpes=trial_sharpes,
-        )
-        report = result.to_dict()
+        try:
+            result = gate_cls().evaluate(
+                observed_sharpe=observed_sharpe,
+                n_trials=n_trials,
+                n_observations=n_observations,
+                candidate_oos_returns=candidate_oos_returns,
+                trial_sharpes=trial_sharpes,
+            )
+            report = result.to_dict()
+        except Exception as exc:  # noqa: BLE001 - promotion evidence must fail closed.
+            report = {
+                "verdict": "block",
+                "passes": False,
+                "reasons": [f"selection_bias_invalid:{exc}"],
+                "dsr": None,
+                "dsr_verdict": "block",
+                "pbo": None,
+                "pbo_verdict": "missing_cpcv_returns",
+                "cpcv_protocol": "cscv",
+            }
 
         with self._lock:
             entry = self._entries.get(strategy_name)
@@ -357,7 +377,7 @@ class PromotionGate:
             entry.demo_selection_bias_report = report
             entry.updated_ts = time.time()
 
-        return result.passes, report
+        return bool(report.get("passes")), report
 
     def update_demo_tail_risk_evidence(
         self,
@@ -802,13 +822,13 @@ class PromotionGate:
                     model_name=row.get("model_name"),
                     model_version=row.get("model_version"),
                     current_stage=stage,
-                    paper_start_ts=row.get("paper_start_ts"),
+                    paper_start_ts=_timestamp_seconds(row.get("paper_start_ts")),
                     paper_trades=row.get("paper_trades", 0),
                     paper_win_rate=row.get("paper_win_rate"),
                     paper_net_pnl_pct=row.get("paper_net_pnl_pct"),
                     paper_max_drawdown_pct=row.get("paper_max_drawdown_pct"),
                     paper_sharpe=row.get("paper_sharpe"),
-                    demo_start_ts=row.get("demo_start_ts"),
+                    demo_start_ts=_timestamp_seconds(row.get("demo_start_ts")),
                     demo_trades=row.get("demo_trades", 0),
                     demo_win_rate=row.get("demo_win_rate"),
                     demo_net_pnl_pct=row.get("demo_net_pnl_pct"),
