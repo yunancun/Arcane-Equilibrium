@@ -1632,3 +1632,22 @@ Round 2 commit 1448e0a1 = test 補洞 + LOW-1 清理（無新業務 logic）。E
 - regression test 依賴的 helper（FakeSocket）要 isomorphic 模擬 production wire（這次 recv 模式對齊 `recv(IPC_RECV_BUFFER)`，不對齊 ipc_client 的 `recv(1)`）— 否則 mock 跑通了 prod 仍可能掛
 - byte-equal regression 守 wire format 不變式價值 = 跨 Python/Rust serde_json hash/HMAC 對齊（separators/ensure_ascii 任改一個 token validation 在 Rust 端會直接失效）
 
+---
+
+## 2026-05-09 lessons 34-37: W-AUDIT-7c round 2 GUI review
+
+### 場景
+W-AUDIT-7c Round 2 commit `0fbed710` + `78d5d013`，E1a 自評 9/9 FIXED + jsdom 6/6 PASS + node --check 4 檔 EXIT=0。RETURN-TO-E1a verdict = 1 HIGH + 2 MEDIUM + 1 LOW。
+
+### lesson 34 — JS Promise.reject helper 必驗 caller side catch
+round 2 [#7] singleton 防雙開實裝 `console.error + Promise.reject(new Error('modal already open'))` 表象正確，但 3 處 caller `const x = await openTypedConfirmModal(...)` 在 try/finally 內無 catch → rejected promise 變 silent unhandled rejection；finally 跑 → trigger button 被 re-enable（誤導 user 以為按鈕沒反應）→ 沒 toast / banner / user-facing 反饋 → 違背 round 2 [#8] 「cancel toast 不靜默」設計初衷。**規律**：任何 helper return Promise.reject 為非 user-cancel 路徑時，E2 必跑 `grep -B2 -A5 "await <helper>"` 列所有 caller，逐一檢查是否有 `try/catch` 包 await 或 `.catch()` 鏈接 — 缺 catch = silent unhandled rejection bug。本輪 3 caller 全缺 catch = HIGH finding。**抽象**：Promise reject 設計責任 = helper 端 + caller 端共擔；只在 helper 端 reject 不在 caller 接 = 半實 bug，比不 reject 更難 debug（user 看 console.error 才知道，但 user 不開 devtools）。
+
+### lesson 35 — dead-write data state 對抗 grep 模式
+round 2 [#5][#6] 加 `_lastPendingRecovery` + `_lastPendingAudit` 兩 cache vars，design intent 是「modal body 顯示具體影響時可直接讀取」。`_lastPendingRecovery` 4 read site PASS，但 `_lastPendingAudit` 0 read site（grep 4 hit 全為 declaration / write）→ dead-write data state（宣告變了但永遠沒讀回）。bulkAudit 沒讀 cache、`govGetPendingAudit()` 直 fetch 重來，與設計意圖矛盾。**規律**：E2 對 round 改動新增 module-level mutable state（cache / flag / counter），grep 必分 write site vs read site；read site = 0 = dead state，build-up code smell。**修復方案**：YAGNI 原則優先 — 刪 declaration（方案 B）優於補 read site（方案 A），dead state 比錯設計更可維護。本輪 MEDIUM finding。
+
+### lesson 36 — rename 完整性追到所有同類 caller
+round 1 verdict 建議「outer rename ok→proceed」是因為 same-scope shadowing 觸 SyntaxError。round 2 bulkAudit (line 1589) 用 `proceed`，但 confirmApproveRecovery (line 1727) 仍 `ok`（scope 內無第二宣告所以 node --check PASS）。技術不致 bug 但**未來新增 inner counter 時又踩同樣坑**。**規律**：E2 對 round 1 SyntaxError 修法的「rename」建議要追到所有同類 caller，不只觸發 bug 的單一 site；caller 並肩使用同 helper 應命名一致（同名 = 都用 proceed 或都用 ok），inconsistent = LOW finding。**抽象**：對抗審核 rename 完整性 = (a) 觸發 site rename (b) 並肩 site 同步 rename (c) future-proofing footgun 統一；缺任一條都退回。
+
+### lesson 37 — E1a sign-off self-claim 反向 grep 交叉驗證
+round 2 E1a report 自稱「中文輸出 + 中文注釋（廢除 bilingual mandate 2026-05-05）— ✓ 新加注釋全中文（既有中英對照塊修改時保留中文移除英文）」。E2 grep `case-sensitive match` 1 hit common.js:1919 — 上輪 LOW-6 retained 英文注釋未刪 ⊥ E1a self-claim。**規律**：E2 對 E1a 自評「全 OK」類陳述，必對應寫一條反向 grep 找該 claim 的反例；本輪「新加注釋全中文」反向 grep 「`// .* match\|// .* default\|// .* check`」（典型英文註釋 token）找命中即矛盾。**抽象**：E1 / E1a self-claim 的真實性必對抗驗證，不能盲信「自評 PASS」；這是 E2 對抗審核第一原則的 GUI / docs 領域延伸。
+
