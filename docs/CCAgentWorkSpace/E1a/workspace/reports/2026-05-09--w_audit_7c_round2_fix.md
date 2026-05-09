@@ -2,8 +2,8 @@
 
 - **日期**：2026-05-09
 - **任務**：W-AUDIT-7c round 2 — 修上輪 commit `9e265ba9` + `8b766a43` 自評 IMPL DONE 但 A3 對抗性核驗判 FALSE_CLOSED 的 9 項缺陷
-- **HEAD before**：`fa9788b7`
-- **HEAD after**：見最後一節 commit hash
+- **HEAD before**：`fa9788b7`（操作期間隔壁 sub-agent push 推進到 `1d63ae9c`，我的 round 2 fix 接 `1d63ae9c` 之後）
+- **HEAD after**：`0fbed710`（已 push origin/main）
 - **A3 verdict 內容**：governance-tab.js line 1555 (const ok) + line 1581 (let ok) 同 function scope 重複宣告 → SyntaxError → governance tab 整檔 parse fail → loadAll / loadPendingApprovals / bulkAudit / confirmApproveRecovery 全部 ReferenceError；fixture 結尾殘留 `</content></invoke>` 兩行 protocol garbage 證明上輪 fixture 沒真開瀏覽器跑
 
 ## 9 項 fix 對應修法 + 證據
@@ -208,7 +208,9 @@ ${okCount} 项已${label}，${failCount} 项失败
 
 ## 三端 git log 同步狀態
 
-待 commit + push 後同步。Mac local 即將推進；Linux trade-core 由 operator 或下次 watchdog cycle 自動 fetch。
+- **Mac local**：HEAD `0fbed710`（剛 push）
+- **GitHub origin**：HEAD `0fbed710`（push 完成 `1d63ae9c..0fbed710 main -> main`）
+- **Linux trade-core**：待下次 fetch 同步（operator 或 watchdog cycle 觸發 `git pull --ff-only`）；E1a 邊界不執行 ssh trade-core pull，由 PM / E4 / cron 處理
 
 ## A3 verdict 收口
 
@@ -227,7 +229,7 @@ ${okCount} 项已${label}，${failCount} 项失败
 ## 完成判定回報
 
 1. **9 項各自狀態**：見上表，9/9 FIXED
-2. **Round 2 commit hash + 行數**：見最後一節（commit 後填）
+2. **Round 2 commit hash + 行數**：`0fbed710`，6 files changed, 485 insertions(+), 71 deletions(-)（含 198/-71 code + 287/0 docs）
 3. **`node --check` 4 檔 stdout**：上 [#2] 段
 4. **browser 實測 5 case 結果**：jsdom headless 6/6 PASS（5 case + 1 bonus）— [#3] 段詳列
 5. **governance tab 載入測試**：jsdom 載 common.js + governance-tab.js → 7 個關鍵 fn `typeof === 'function'`、0 `console.error`、bulkAudit 開真實 modal
