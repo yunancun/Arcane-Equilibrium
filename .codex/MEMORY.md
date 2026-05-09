@@ -116,7 +116,7 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 - OpenClaw 2026-05-06 repositioning: external OpenClaw Gateway is only communication / mobile / supervisor / cloud-escalation / proposal relay; it is not the trading conductor, not the local 5-Agent runtime, and not a second GUI
 - canonical GUI is the existing FastAPI console at `trade-core:8000/console`, now treated as the OpenClaw Control Console
 - local 5-Agent runtime stays inside TradeBot; cloud L2 should be reached through a supervisor escalation packet, not by every runtime agent independently
-- TODO v16 is the active dispatch queue as of 2026-05-09. It supersedes TODO v12/v13 historical layouts and mounts the 2026-05-08 12-agent full audit plan into W-AUDIT-1..7. Current order: keep W-C MAG-082 Stage 2 evidence collection running; W-AUDIT-1/2 are source-closed, W-AUDIT-3 F-01 is source/test closed, W-AUDIT-4 V072 has a dry-run-default 34-dim `feature_baseline_writer` source/test checkpoint, and W-AUDIT-6 risk/QC stand-alone source/test cleanup is closed through funding_arb RiskConfig retirement, ma_crossover R:R trailing/TP, and bb_breakout 5m RFC/IMPL source/test. F-09 FUP-2 runtime was verified on Linux: `edge_label_backfill_cron.sh` is installed, logs are current, and `[43]` PASSed. Remaining W-AUDIT-4 work is separately authorized V072 writer apply/install if runtime rows are wanted. Remaining W-AUDIT-6 order is VaR/CVaR/EVT as W-AUDIT-6c. Do not start proposal/mobile/second-GUI/Stage 3/4/true-live work from stale AgentTodo/TODO text.
+- TODO v16 is the active dispatch queue as of 2026-05-09. It supersedes TODO v12/v13 historical layouts and mounts the 2026-05-08 12-agent full audit plan into W-AUDIT-1..7. Current order: keep W-C MAG-082 Stage 2 evidence collection running; W-AUDIT-1/2 are source-closed, W-AUDIT-3 F-01 is source/test closed, W-AUDIT-4 V072 has a dry-run-default 34-dim `feature_baseline_writer` source/test checkpoint, and W-AUDIT-6 source/test cleanup is closed through funding_arb RiskConfig retirement, ma_crossover R:R trailing/TP, bb_breakout 5m RFC/IMPL, and W-AUDIT-6c portfolio VaR/CVaR/EVT promotion evidence. F-09 FUP-2 runtime was verified on Linux: `edge_label_backfill_cron.sh` is installed, logs are current, and `[43]` PASSed. Remaining W-AUDIT-4 work is separately authorized V072 writer apply/install if runtime rows are wanted. Do not start proposal/mobile/second-GUI/Stage 3/4/true-live work from stale AgentTodo/TODO text.
 - W-AUDIT-2 source close (2026-05-09): Phase4 weekly review, Scout signal/event, and Layer2 trigger mutating routes now require operator+scope gates; restart scripts/docs no longer default Trading API to all-interface bind; AI service Unix socket chmods to `0600`; Rust boot wires `spawn_lease_transition_pipeline` into Paper/Demo/Live GovernanceCore audit emitters. Follow-up P0-NEW-VULN-1 tailnet correction makes lifecycle scripts default to concrete Tailscale IPv4 when available, otherwise loopback.
 - P1-REPLAY-2 is runtime-applied: on 2026-05-08 Linux `trade-core` applied V066 twice via `linux_bootstrap_db.sh --apply V066` for idempotency, verified `replay_report` and `byte_size >= 0` constraints, passed a rollback smoke insert/reject test, and reloaded runtime with `restart_all.sh --keep-auth`. Post-reload watchdog returned `engine_alive=true`; passive healthcheck was `SUMMARY: WARN` with no hard FAIL.
 - P2-PYDANTIC-1 is complete for replay surfaces: `@validator` callsites in `replay/experiment_registry.py` and `replay/replay_models.py` were migrated to Pydantic V2 `@field_validator`; `pytest.ini` pins `asyncio_default_fixture_loop_scope=function` so deprecation warnings can be treated as errors in targeted replay tests.
@@ -268,10 +268,20 @@ W-AUDIT-6 current fact:
   and runtime `bb_breakout` skips when configured 5m data is not warm instead
   of falling back to 1m. Demo is active on the 5m family; paper/live stay
   inactive.
+- as of 2026-05-09, W-AUDIT-6c portfolio VaR/CVaR/EVT is source/test closed at
+  `cc6476dd`: `program_code/learning_engine/cvar.py` implements historical
+  VaR/CVaR, EVT/GPD tail fit, and stationary block-bootstrap VaR/CVaR
+  confidence intervals; `portfolio_var.py` implements portfolio return
+  composition, LUNA/FTX/COVID stress scenarios, and `PortfolioTailRiskGate`;
+  `PromotionGate` now requires `demo_tail_risk_report.passes=true` before
+  DEMO_ACTIVE can graduate to LIVE_PENDING. Missing stress exposures,
+  insufficient observations, EVT low confidence, historical VaR/CVaR breach,
+  or stress breach fail closed.
 - runtime apply note: the operator-requested post-sync rebuild loaded the MA R:R
   checkpoint, and the follow-up rebuild/restart loaded the BILLUSDT grid
-  blocklist. The later bb_breakout 5m checkpoint is source/test only until the
-  next explicitly authorized rebuild/restart.
+  blocklist. The later bb_breakout 5m and W-AUDIT-6c portfolio tail-risk
+  checkpoints are source/test only until the next explicitly authorized
+  rebuild/restart.
 
 P0-NEW-VULN-1 bind-host rule:
 - lifecycle scripts must not default to `0.0.0.0`
