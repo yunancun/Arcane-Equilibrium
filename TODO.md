@@ -2,7 +2,7 @@
 
 Version: v16
 Date: 2026-05-09
-Status: PM replan after 12-agent adversarial verification of W-AUDIT-1..7 24h fix sprint; v16 records V072 34-dim feature baseline writer source/test follow-through while keeping DB apply/deploy as separately authorized ops
+Status: PM sync after W-AUDIT-6 source/test checkpoints; v16 records closed risk/QC stand-alone work while keeping remaining strategy/RFC/VaR work explicitly ordered
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -130,9 +130,11 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   - W-AUDIT-5 性能/結構: ⚠️ real progress + critical mismatch
     (F-12 runner.rs 2467 UNCHANGED — commit modified `bin/replay_runner.rs`
     1599→626, NOT the original 2467-LOC `runner.rs`; binary 25→20.6 MB ✅)
-  - W-AUDIT-6 策略: ⚠️ source/test started (`bb_breakout` cooldown
-    600k vs 300k drift closed; strategy verdict selected by
-    AMD-2026-05-09-02)
+  - W-AUDIT-6 策略: ⚠️ source/test materially advanced (`bb_breakout`
+    cooldown drift, Kelly tier fractions, fast_track thresholds, F-13
+    DSR/PBO/CSCV gate, per_trade_risk_pct SSOT, and funding_arb RiskConfig
+    cleanup are closed; remaining immediate work is ma_crossover R:R rewrite
+    and bb_breakout 5m RFC/IMPL, with VaR/CVaR/EVT queued as W-AUDIT-6c)
   - W-AUDIT-7 GUI: ✅ real GUI progress + 🆕 functional regression
     (4/5 critical close; live_reserved 5s+hold-to-confirm 業界標準;
     NEW-ISSUE-1 LiveDemo auth_missing restored 2026-05-09 via signed
@@ -196,6 +198,11 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   `grid_trading`'s `on_post_only_rejected()` callback into its cooldown helper.
   No rebuild, restart, runtime reload, DB write, live auth mutation, or strategy
   activation was performed.
+- **W-AUDIT-6 queue ordering after source/test cleanup**：QC stand-alone fixes
+  are closed. Current active order is `ma_crossover` R:R trailing/TP rewrite,
+  `bb_breakout` 1m->5m RFC then IMPL, and portfolio VaR/CVaR/EVT as
+  W-AUDIT-6c. Keep the 2026-05-16 `funding_arb` 14d audit as
+  verification/history only, not retirement authority.
 - **`P0-DECISION-AUDIT-1` ✅ closed** (W-C operator auth file + AMD §5.4.1)
 - **`P0-DECISION-AUDIT-3` ✅ closed** (§三 5 stale 數字真修 + healthcheck id)
 - **`P0-DECISION-AUDIT-2/4/5` ✅ closed** — AMD-2026-05-09-02 selects

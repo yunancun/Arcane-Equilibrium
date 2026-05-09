@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | TODO three-side sync after W-AUDIT-6 cleanup: refreshed TODO/CLAUDE/Codex memory so funding_arb retirement authority is strategy params, W-AUDIT-6 closed source/test checkpoints are visible at the top of the queue, and remaining work is ma_crossover R:R, bb_breakout 5m RFC/IMPL, then VaR/CVaR/EVT | workspace/reports/2026-05-09--todo_three_side_sync_after_w_audit_6.md |
 | 2026-05-09 | QC stand-alone CLAUDE healthcheck id cleanup: attached source report + `[40] realized_edge_acceptance` to CLAUDE §三 `-26.44 USDT` 7d demo gross figure and marked P2-AUDIT-QC-STAND-ALONE complete | workspace/reports/2026-05-09--qc_standalone_claude_healthcheck_id.md |
 | 2026-05-09 | W-AUDIT-6 funding_arb RiskConfig cleanup: removed funding_arb from all four risk_config TOMLs, kept retirement in strategy_params active=false, added real TOML regressions, cleaned lib-test warnings, and wired grid_trading PostOnly reject callback to cooldown | workspace/reports/2026-05-09--w_audit_6_funding_arb_risk_cleanup.md |
 | 2026-05-09 | W-AUDIT-6 per-trade risk SSOT: made `RiskConfig.limits.per_trade_risk_pct` the Kelly cold-start sizing authority, aligned validation/runtime bounds to `0.001..=0.20`, re-anchored replay and risk hot-reload Kelly config, and covered the path with targeted Rust tests | workspace/reports/2026-05-09--w_audit_6_per_trade_risk_ssot.md |
