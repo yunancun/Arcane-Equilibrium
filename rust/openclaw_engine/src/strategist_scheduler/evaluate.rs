@@ -22,6 +22,7 @@ use tracing::{debug, error, info, warn};
 const MAX_EVALS_PER_CYCLE: usize = 10;
 const MIN_SAMPLE_COUNT: i64 = 30;
 const NORMAL_INTERVAL: Duration = Duration::from_secs(300);
+const NORMAL_PARAM_DELTA_SKILL_PCT: f64 = 0.30;
 
 /// Per-strategy×symbol aggregated metrics from fills table.
 /// 來自 fills 表的逐策略×symbol 聚合指標。
@@ -149,18 +150,9 @@ impl StrategistScheduler {
             let ranges_value: Value =
                 serde_json::to_value(&ranges_json).unwrap_or_else(|_| Value::Array(vec![]));
 
-            let params = serde_json::json!({
-                "intel": {
-                    "symbol": pair.symbol,
-                    "strategy": pair.strategy_name,
-                    "win_rate": pair.win_rate,
-                    "avg_pnl": pair.avg_pnl,
-                    "fill_count": pair.fill_count,
-                },
-                "model_tier": "l1_9b",
-                "current_params": current_json,
-                "param_ranges": ranges_value,
-            });
+            let max_delta_pct = self.current_max_param_delta_pct();
+            let params =
+                build_strategist_eval_payload(pair, &current_json, ranges_value, max_delta_pct);
 
             let response = match self.ai_client.request("strategist_evaluate", params).await {
                 Some(r) => r,
@@ -177,9 +169,8 @@ impl StrategistScheduler {
             //    RiskConfig store snapshot (or 0.30 fallback when no store wired).
             //    G3-11: every reject path tags a stable reason → CycleCounters
             //    `reject_by_reason` map → IPC `get_strategist_cycle_metrics`.
-            // 4. 根據範圍、delta、權重總和驗證建議；delta cap 從 RiskConfig 取（缺 store=0.30）。
+            // 4. 根據範圍、delta、權重總和驗證建議；delta cap 從 RiskConfig 取（缺 store=0.50）。
             //    G3-11：每條拒絕路徑都打 stable reason tag 到 CycleCounters。
-            let max_delta_pct = self.current_max_param_delta_pct();
             match validate_recommendation_with_reason(
                 &response,
                 &current_json,
@@ -404,6 +395,32 @@ impl StrategistScheduler {
     }
 }
 
+fn build_strategist_eval_payload(
+    pair: &PairMetrics,
+    current_json: &Value,
+    ranges_value: Value,
+    max_delta_pct: f64,
+) -> Value {
+    serde_json::json!({
+        "intel": {
+            "symbol": &pair.symbol,
+            "strategy": &pair.strategy_name,
+            "win_rate": pair.win_rate,
+            "avg_pnl": pair.avg_pnl,
+            "fill_count": pair.fill_count,
+        },
+        "model_tier": "l1_9b",
+        "current_params": current_json,
+        "param_ranges": ranges_value,
+        "strategist_skill": {
+            "name": "wide_parameter_adjustment",
+            "normal_delta_pct": NORMAL_PARAM_DELTA_SKILL_PCT,
+            "max_delta_pct": max_delta_pct,
+            "description": "Use <=30% as the normal working range; use 30%-max only as a deliberate wide adjustment skill when evidence is poor enough to justify a larger move."
+        }
+    })
+}
+
 /// Rank pairs by deviation score, descending (worst-performing first).
 /// 按偏差分數降序排名（表現最差的優先）。
 pub(super) fn rank_by_deviation(metrics: &[PairMetrics]) -> Vec<&PairMetrics> {
@@ -425,4 +442,40 @@ struct PairMetricsRow {
     fill_count: i64,
     avg_pnl: f64,
     win_rate: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_strategist_eval_payload_includes_wide_adjustment_skill() {
+        let pair = PairMetrics {
+            strategy_name: "ma_crossover".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            fill_count: 42,
+            avg_pnl: -1.25,
+            win_rate: 0.31,
+        };
+        let current = serde_json::json!({"cooldown_ms": 100_000});
+        let ranges = serde_json::json!([
+            {
+                "name": "cooldown_ms",
+                "min": 1_000,
+                "max": 1_000_000,
+                "agent_adjustable": true
+            }
+        ]);
+
+        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.50);
+
+        assert_eq!(
+            payload["strategist_skill"]["name"],
+            "wide_parameter_adjustment"
+        );
+        assert_eq!(payload["strategist_skill"]["normal_delta_pct"], 0.30);
+        assert_eq!(payload["strategist_skill"]["max_delta_pct"], 0.50);
+        assert_eq!(payload["intel"]["fill_count"], 42);
+        assert_eq!(payload["current_params"]["cooldown_ms"], 100_000);
+    }
 }
