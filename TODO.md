@@ -257,6 +257,17 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   from the runtime snapshot and that 5m hard-gate entry uses prior-bar upper.
   No strategy pause, rebuild, restart, DB write, live auth mutation, or runtime
   reload was performed in this checkpoint.
+  **[2026-05-09 4-agent fact-check 補述]**：QC v2-NEW-4 對「runtime contaminated /
+  Donchian shift(1) 未進 runtime」的判定為**過期 contaminated belief**。
+  `rust/openclaw_core/src/indicators/mod.rs:150` 自 commit `75741eff`
+  (2026-04-28 16:24) 起 IndicatorEngine `compute_all` 已呼 `donchian_prior(...)`
+  寫入 `IndicatorSnapshot.donchian` 作為 prior-bar leak-free snapshot；
+  `bb_breakout/mod.rs:551-571` 的 Hard/Score/Off 三 mode 全消費 prior 版本。
+  當前運行 engine PID 起於 2026-05-09 15:52，已包含 04-28 修復 11 天。
+  `ad14db07` (2026-05-09 17:01) 僅補 regression test 防 future regression，
+  並非「runtime fix」。**結論**：runtime 已 leak-free 11 天；NEW-ISSUE-1 caveat
+  「No reload/rebuild was performed」事實正確但**不再是 actionable blocker**，
+  4-agent loss audit 引用此 finding 為 active runtime 問題的論述應撤銷。
 - **W-AUDIT-6 queue ordering after source/test cleanup**：QC stand-alone fixes
   through `bb_breakout` 5m are closed. W-AUDIT-6c portfolio VaR/CVaR/EVT is
   now source/test closed at `cc6476dd`; W-AUDIT-6 has no remaining source/test
