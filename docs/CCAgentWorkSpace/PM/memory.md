@@ -2042,3 +2042,16 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   while keeping P0-NEW-VULN-1 closed.
 - Runtime applied on Linux with API-only restart: Trading API now listens on
   `100.91.109.86:8000`, not `0.0.0.0:8000`; engine was not restarted.
+
+## 2026-05-09 W-AUDIT-6 bb_breakout Cooldown Drift
+
+- Closed the `bb_breakout` 600k vs 300k source drift without runtime mutation.
+- `BbBreakoutParams::default()` and `BbBreakout::new()` now share
+  `DEFAULT_COOLDOWN_MS=300_000`.
+- Regression coverage asserts the public runtime `cooldown_ms` field and the
+  underlying `TrendCooldown` duration both match the params default.
+- Verification: `cargo test -p openclaw_engine strategies::bb_breakout --lib`
+  PASS (70/0) and `git diff --check` PASS. Cargo still emits existing
+  unrelated warnings.
+- Boundary: no strategy/risk TOML mutation, rebuild, restart, deploy, live auth
+  mutation, MAG-083/MAG-084 unlock, or true-live action.
