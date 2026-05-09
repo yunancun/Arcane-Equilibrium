@@ -279,3 +279,9 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-5a F-test-h-state source checkpoint: split `test_h_state_query_handler.py` from 2641 LOC into a 9-line compatibility collector plus `tests/h_state_query/common.py`, `test_core.py`, `test_h_buckets.py`, and `test_agent_states.py`
 - kept the historical pytest path working while adding `tests/structure/test_h_state_query_split_static.py` to pin the shim and split module LOC ceilings
 - verification: split package pytest 90/0, historical shim pytest 90/0, same-session `test_api_contract.py + test_h_state_query_handler.py` pytest 108/0 with pre-existing Pydantic/FastAPI warnings, structure pytest 2/0, py_compile PASS, `git diff --check` PASS; source/test only, no rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
+
+2026-05-09 CEST
+- continued W-AUDIT-5a F-12 source checkpoint: split `rust/openclaw_engine/src/bin/replay_runner.rs` from 1599 LOC into a 626 LOC orchestration entrypoint plus `src/bin/replay_runner/manifest.rs`, `manifest_tests.rs`, `config.rs`, and `calibration.rs`
+- kept manifest schema/verification tests under the binary test build and added `tests/structure/test_replay_runner_split_static.py` to pin the entrypoint and sibling module LOC ceilings
+- verification: `cargo check --manifest-path rust/openclaw_engine/Cargo.toml --bin replay_runner --features replay_isolated` PASS with pre-existing Rust warnings; `cargo test --manifest-path rust/openclaw_engine/Cargo.toml --bin replay_runner --features replay_isolated` 9/0; W-AUDIT-5a static pytest 12/0; `cargo fmt --check`, py_compile, and `git diff --check` PASS
+- boundary: source/test only; no release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
