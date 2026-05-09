@@ -7,7 +7,7 @@
 //!   2) Rank top-10 pairs by absolute deviation from target (R2 H-5)
 //!   3) IPC call to Python ai_service.sock → strategist_evaluate (judge_edge via Ollama)
 //!   4) Validate response: param_ranges bounds + weight sum=65±0.1 + delta clamp
-//!      (R3-4; clamp default ±30% from `RiskConfig.strategist.max_param_delta_pct`,
+//!      (R3-4; clamp default ±50% from `RiskConfig.strategist.max_param_delta_pct`,
 //!      operator-tunable since STRATEGIST-TUNE-TARGET-CONFIG-1, 2026-04-25)
 //!   5) Apply via PipelineCommand::UpdateStrategyParams
 //!   Exponential backoff on IPC failure: 5m→30m→60m→4h cap (R4-2).
@@ -17,7 +17,7 @@
 //!   1) 查詢 fills 表獲取逐策略×symbol 指標
 //!   2) 按偏差排名取 top-10
 //!   3) IPC 調用 Python ai_service.sock → strategist_evaluate
-//!   4) 驗證回應：param_ranges 範圍 + weight sum=65 + delta ≤±30%
+//!   4) 驗證回應：param_ranges 範圍 + weight sum=65 + delta ≤±50%
 //!   5) 通過 PipelineCommand::UpdateStrategyParams 應用
 //!   IPC 失敗指數退避：5m→30m→60m→4h 上限。
 
@@ -50,13 +50,12 @@ use tracing::{debug, info, warn};
 
 /// Default fallback for `RiskConfig.strategist.max_param_delta_pct` when no
 /// `ConfigStore<RiskConfig>` is wired into the scheduler (boot-edge cases /
-/// existing direct-call test paths). Mirrors the pre-config hardcoded
-/// `MAX_PARAM_DELTA_PCT = 0.30` (R3-4 ±30%) so behaviour is bit-identical
-/// when the store is absent.
-/// 缺 RiskConfig store 時的 max_param_delta_pct 後備值；對齊原 R3-4 ±30% 硬編碼。
+/// existing direct-call test paths). W-AUDIT-7 F-strategist-cap aligns this
+/// fallback with the current RiskConfig default and TOML source value (±50%).
+/// 缺 RiskConfig store 時的 max_param_delta_pct 後備值；W-AUDIT-7 對齊目前 ±50% source 預設。
 /// STRATEGIST-TUNE-TARGET-CONFIG-1（2026-04-25）：值權威落到
 /// `RiskConfig.strategist.max_param_delta_pct`，本常量僅作為缺 store 時的備援。
-pub const DEFAULT_MAX_PARAM_DELTA_PCT: f64 = 0.30;
+pub const DEFAULT_MAX_PARAM_DELTA_PCT: f64 = 0.50;
 
 /// Weight sum target for confluence weights (65-point scale).
 /// 匯合權重目標總和（65 分制）。
@@ -122,11 +121,11 @@ pub struct StrategistScheduler {
     db_pool: Arc<crate::database::pool::DbPool>,
     /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): Optional RiskConfig store
     /// for hot-reading `strategist.max_param_delta_pct` per cycle. `None`
-    /// keeps the scheduler on the `DEFAULT_MAX_PARAM_DELTA_PCT = 0.30` legacy
+    /// keeps the scheduler on the `DEFAULT_MAX_PARAM_DELTA_PCT = 0.50` source
     /// fallback (boot-edge cases / direct-call tests). Production wires this
     /// via `StrategistScheduler::with_risk_store(...)` so the existing
     /// `Arc<ArcSwap<RiskConfig>>` deep-merge IPC path drives the clamp.
-    /// STRATEGIST-TUNE-TARGET-CONFIG-1：可選 RiskConfig store；缺則走 0.30 legacy
+    /// STRATEGIST-TUNE-TARGET-CONFIG-1：可選 RiskConfig store；缺則走 0.50 source
     /// 後備（測試/啟動邊界），生產用 `with_risk_store` 接 IPC 熱重載。
     risk_store: Option<Arc<ConfigStore<RiskConfig>>>,
     /// Consecutive IPC failure counter for exponential backoff (R4-2).
@@ -192,12 +191,12 @@ impl StrategistScheduler {
     /// `ConfigStore<RiskConfig>` so the scheduler reads
     /// `strategist.max_param_delta_pct` from the live snapshot each cycle
     /// (hot-reloadable via IPC `patch_risk_config`). Without this call the
-    /// scheduler falls back to `DEFAULT_MAX_PARAM_DELTA_PCT` (0.30, the
-    /// previously hardcoded value) — preserving direct-call test paths
+    /// scheduler falls back to `DEFAULT_MAX_PARAM_DELTA_PCT` (0.50) —
+    /// preserving direct-call test paths
     /// without forcing every test to wire a store.
     /// STRATEGIST-TUNE-TARGET-CONFIG-1：builder-style 注入 RiskConfig store。
     /// 接線後 scheduler 每輪從 live snapshot 讀 max_param_delta_pct（IPC 熱重載）；
-    /// 不接時走 0.30 後備保留現行測試路徑。
+    /// 不接時走 0.50 後備保留現行測試路徑。
     pub fn with_risk_store(mut self, risk_store: Arc<ConfigStore<RiskConfig>>) -> Self {
         self.risk_store = Some(risk_store);
         self
@@ -217,7 +216,7 @@ impl StrategistScheduler {
     /// from the wired `RiskConfig` store, or fall back to `DEFAULT_MAX_PARAM_DELTA_PCT`
     /// when no store is wired. Hot-path safe (single ArcSwap load).
     /// STRATEGIST-TUNE-TARGET-CONFIG-1：從 risk_store 取當前 max_param_delta_pct，
-    /// 缺 store 時走 0.30 後備。ArcSwap 無鎖讀取。
+    /// 缺 store 時走 0.50 後備。ArcSwap 無鎖讀取。
     fn current_max_param_delta_pct(&self) -> f64 {
         self.risk_store
             .as_ref()
@@ -305,17 +304,17 @@ impl StrategistScheduler {
 /// R3-4：權重參數免除 delta 上限 — weight_sum=65 驗證已足夠。
 ///
 /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): `max_delta_pct` is now a
-/// caller-supplied parameter (was the hardcoded `MAX_PARAM_DELTA_PCT = 0.30`
+/// caller-supplied parameter (was the hardcoded `MAX_PARAM_DELTA_PCT`
 /// constant). Production callers route the live `RiskConfig.strategist
 /// .max_param_delta_pct` snapshot here so the clamp is IPC-hot-reloadable;
-/// direct-call tests pass the legacy `0.30` (or whatever value the test
-/// pins). Values are expected to satisfy `0 < max_delta_pct < 1` per
+/// direct-call tests pass `DEFAULT_MAX_PARAM_DELTA_PCT` or whatever value the
+/// test pins. Values are expected to satisfy `0 < max_delta_pct < 1` per
 /// `StrategistConfig::validate()`; out-of-range values still function (the
 /// gate just becomes either always-reject or always-accept), but the config
 /// validate path is supposed to have failed earlier so misconfigured TOML
 /// can't reach this fn at runtime.
 /// STRATEGIST-TUNE-TARGET-CONFIG-1：max_delta_pct 改為呼叫端傳入；生產接 RiskConfig
-/// live snapshot（IPC 熱重載），測試傳 0.30 或被釘的值。
+/// live snapshot（IPC 熱重載），測試傳 DEFAULT 或被釘的值。
 pub fn validate_recommendation(
     recommendation: &Value,
     current_params: &Value,
