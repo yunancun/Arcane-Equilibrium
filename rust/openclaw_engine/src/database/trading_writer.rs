@@ -325,6 +325,38 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     }
 }
 
+/// W-AUDIT-4b-M2 fill-writer 端 entry_context_id enforcement。
+///
+/// 偵測 close fill (`exit_reason.is_some()`) 卻 `entry_context_id` 為空的
+/// 違規列，emit WARN log 但 **不阻塞 INSERT**（fail-soft，避免 producer 卡死）。
+/// V083 NOT VALID CHECK 對 new INSERT 強制；歷史 NULL 由 backfill cron 回填。
+///
+/// 注意：對 unattributed:* audit row（Bybit auto action）跳過 — 那些 fill 本身
+/// 不對應策略 intent，無 entry_context_id 是預期，不應 spam log。
+///
+/// 對應 Spec：
+///   - PA spec §2.5 B-M2: 24h fill writer entry_context_id 非 NULL ratio ≥ 95%
+///   - V083 telemetry view: observability.fills_entry_context_id_health
+fn count_close_fills_missing_entry_context_id(buf: &[TradingMsg]) -> usize {
+    buf.iter()
+        .filter(|msg| {
+            if let TradingMsg::Fill {
+                exit_reason,
+                entry_context_id,
+                strategy_name,
+                ..
+            } = msg
+            {
+                let is_close = exit_reason.is_some();
+                let is_audit = strategy_name.starts_with("unattributed:");
+                is_close && entry_context_id.is_empty() && !is_audit
+            } else {
+                false
+            }
+        })
+        .count()
+}
+
 async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
@@ -336,6 +368,52 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
             return;
         }
     };
+
+    // W-AUDIT-4b-M2: pre-INSERT enforcement — 統計 close fill 缺 entry_context_id
+    // 的數量並 emit aggregated WARN log（避免逐列 spam）。背景：MIT 2026-05-09
+    // 直查 24h 175 fills 中只 67 個有 entry_context_id (38%)，致 backfill EXISTS
+    // join 99% 失敗。close fills 缺 entry_context_id 是異常，但 fail-soft 仍 INSERT
+    // 由 V083 NOT VALID CHECK + cron backfill 雙保險覆蓋。
+    let missing_entry_ctx = count_close_fills_missing_entry_context_id(buf);
+    if missing_entry_ctx > 0 {
+        // 取第一個違規列的 sample 訊息供 debug
+        // Take a sample from the first violation row for debug
+        let sample = buf.iter().find_map(|msg| {
+            if let TradingMsg::Fill {
+                exit_reason,
+                entry_context_id,
+                strategy_name,
+                symbol,
+                engine_mode,
+                fill_id,
+                ..
+            } = msg
+            {
+                let is_close = exit_reason.is_some();
+                let is_audit = strategy_name.starts_with("unattributed:");
+                if is_close && entry_context_id.is_empty() && !is_audit {
+                    Some(format!(
+                        "fill_id={} symbol={} strategy={} engine_mode={} exit_reason={:?}",
+                        fill_id, symbol, strategy_name, engine_mode, exit_reason
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+        warn!(
+            target: "fill-writer-entry-context-missing",
+            close_fills_missing_entry_ctx = missing_entry_ctx,
+            batch_total = buf.len(),
+            sample = ?sample,
+            "W-AUDIT-4b-M2: close fills with empty entry_context_id detected — \
+             rows still INSERT (fail-soft); cron backfill will reconcile / \
+             偵測到 close fill 缺 entry_context_id — 仍寫入並由 cron 回填補齊"
+        );
+    }
+
     let outcome = batch_insert_chunked(
         pg,
         pool,
@@ -1145,5 +1223,155 @@ mod tests {
         assert_eq!(state_changes.len(), 0);
         assert_eq!(scanner_snapshots.len(), 1);
         assert_eq!(scanner_decays.len(), 1);
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // W-AUDIT-4b-M2 fill writer entry_context_id enforcement tests
+    // 對齊 PA spec §2.5 B-M2 + V083 NOT VALID CHECK constraint
+    // ────────────────────────────────────────────────────────────────────
+
+    /// 構造 close fill helper（exit_reason = Some）
+    fn make_close_fill(
+        fill_id: &str,
+        symbol: &str,
+        strategy: &str,
+        engine_mode: &str,
+        entry_context_id: &str,
+    ) -> TradingMsg {
+        TradingMsg::Fill {
+            fill_id: fill_id.into(),
+            ts_ms: 1_700_000_000_000,
+            order_id: format!("close_{}_{}", engine_mode, fill_id),
+            symbol: symbol.into(),
+            side: "Sell".into(),
+            qty: 0.1,
+            price: 50000.0,
+            fee: 2.75,
+            fee_rate: 0.00055,
+            reference_price: None,
+            reference_ts_ms: None,
+            reference_source: None,
+            slippage_bps: None,
+            liquidity_role: Some("paper_sim".into()),
+            fill_latency_ms: None,
+            realized_pnl: 5.0,
+            strategy_name: strategy.into(),
+            context_id: format!("ctx-close-{}", fill_id),
+            entry_context_id: entry_context_id.into(),
+            engine_mode: engine_mode.into(),
+            exit_source: None,
+            exit_reason: Some("ma_reverse_cross".into()),
+        }
+    }
+
+    /// 構造 entry/open fill helper（exit_reason = None）
+    fn make_entry_fill(
+        fill_id: &str,
+        symbol: &str,
+        strategy: &str,
+        engine_mode: &str,
+    ) -> TradingMsg {
+        TradingMsg::Fill {
+            fill_id: fill_id.into(),
+            ts_ms: 1_700_000_000_000,
+            order_id: format!("open_{}_{}", engine_mode, fill_id),
+            symbol: symbol.into(),
+            side: "Buy".into(),
+            qty: 0.1,
+            price: 50000.0,
+            fee: 2.75,
+            fee_rate: 0.00055,
+            reference_price: None,
+            reference_ts_ms: None,
+            reference_source: None,
+            slippage_bps: None,
+            liquidity_role: Some("paper_sim".into()),
+            fill_latency_ms: None,
+            realized_pnl: 0.0,
+            strategy_name: strategy.into(),
+            context_id: format!("ctx-open-{}", fill_id),
+            entry_context_id: String::new(),
+            engine_mode: engine_mode.into(),
+            exit_source: None,
+            exit_reason: None,
+        }
+    }
+
+    #[test]
+    fn test_close_fill_with_entry_ctx_not_counted_as_violation() {
+        let buf = vec![make_close_fill("f1", "BTCUSDT", "ma_crossover", "demo", "ctx-entry-abc")];
+        assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
+    }
+
+    #[test]
+    fn test_close_fill_missing_entry_ctx_counted_as_violation() {
+        let buf = vec![make_close_fill("f1", "BTCUSDT", "ma_crossover", "demo", "")];
+        assert_eq!(count_close_fills_missing_entry_context_id(&buf), 1);
+    }
+
+    #[test]
+    fn test_entry_fill_empty_entry_ctx_not_violation() {
+        let buf = vec![make_entry_fill("f1", "BTCUSDT", "ma_crossover", "demo")];
+        assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
+    }
+
+    #[test]
+    fn test_unattributed_audit_fill_skipped() {
+        let buf = vec![make_close_fill("f1", "BTCUSDT", "unattributed:bybit_auto", "live_demo", "")];
+        assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
+    }
+
+    #[test]
+    fn test_mixed_batch_partial_violations() {
+        let buf = vec![
+            make_close_fill("c1", "BTC", "ma_crossover", "demo", ""),
+            make_close_fill("c2", "ETH", "bb_breakout", "demo", "ctx-1"),
+            make_close_fill("c3", "SOL", "grid_trading", "live_demo", ""),
+            make_close_fill("c4", "AVAX", "bb_reversion", "demo", ""),
+            make_close_fill("c5", "DOT", "ma_crossover", "demo", "ctx-2"),
+            make_entry_fill("e1", "BTC", "ma_crossover", "demo"),
+            make_entry_fill("e2", "ETH", "bb_breakout", "demo"),
+            make_entry_fill("e3", "SOL", "grid_trading", "live_demo"),
+            make_entry_fill("e4", "AVAX", "bb_reversion", "demo"),
+            make_close_fill("a1", "BTC", "unattributed:bybit_auto", "live_demo", ""),
+        ];
+        assert_eq!(count_close_fills_missing_entry_context_id(&buf), 3);
+    }
+
+    #[test]
+    fn test_non_fill_messages_ignored() {
+        let buf = vec![
+            TradingMsg::Signal {
+                signal_id: "s1".into(),
+                ts_ms: 0,
+                symbol: "BTC".into(),
+                strategy_name: "ma".into(),
+                timeframe: "1m".into(),
+                signal_type: "LONG".into(),
+                strength: 0.8,
+                context_id: "c1".into(),
+            },
+            TradingMsg::Intent {
+                intent_id: "i1".into(),
+                ts_ms: 0,
+                signal_id: "s1".into(),
+                context_id: "c1".into(),
+                symbol: "BTC".into(),
+                side: "Buy".into(),
+                qty: 0.1,
+                price: 50000.0,
+                order_type: "market".into(),
+                strategy_name: "ma".into(),
+                engine_mode: "paper".into(),
+                details: None,
+            },
+        ];
+        assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
+    }
+
+    #[test]
+    fn test_empty_buffer_zero_violations() {
+        let buf: Vec<TradingMsg> = vec![];
+        assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
     }
 }
