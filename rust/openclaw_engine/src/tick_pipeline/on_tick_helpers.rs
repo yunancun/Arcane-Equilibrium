@@ -55,19 +55,34 @@ pub(crate) fn ft_reduce_cooldown_expired(
 }
 
 /// B2: Sigma-proportional cooldown for ReduceToHalf. Severity at the moment
-/// of halving determines the recovery window: `base × (sigma / 3.0)`, clamped
-/// to `[base, FT_REDUCE_COOLDOWN_MAX_MS]`. The divisor `3.0` is not a new
-/// constant — it is the fast_track trigger threshold itself
-/// (`held_drop_sigma ≥ 3.0`, see fast_track.rs:89).
+/// of halving determines the recovery window: `base × (sigma / trigger_sigma)`,
+/// clamped to `[base, FT_REDUCE_COOLDOWN_MAX_MS]`. The default divisor `3.0`
+/// is the legacy fast_track trigger threshold itself.
 ///
 /// At sigma = 3.0 (just triggered) the cooldown equals the base 60s; at
 /// sigma = 6.0 it doubles to 120s; extreme sigma ≥ 30 saturates at 600s.
-/// Below sigma = 3.0 the caller should not be invoking this path, but as a
-/// defense we floor at the base to avoid shrinking the guard window.
+/// Below trigger sigma the caller should not be invoking this path, but as a
+/// defense we floor at the base to avoid shrinking the guard window. Invalid
+/// trigger values fall back to 3.0; `RiskConfig` validation should reject them
+/// before runtime.
 /// B2：半倉冷卻按觸發 sigma 成比例縮放，下限為基準，上限為 600s。
+#[cfg(test)]
 #[inline]
 pub(crate) fn sigma_scaled_reduce_cooldown_ms(held_drop_sigma: f64) -> i64 {
-    let ratio = (held_drop_sigma / 3.0).max(1.0);
+    sigma_scaled_reduce_cooldown_ms_with_trigger(held_drop_sigma, 3.0)
+}
+
+#[inline]
+pub(crate) fn sigma_scaled_reduce_cooldown_ms_with_trigger(
+    held_drop_sigma: f64,
+    trigger_sigma: f64,
+) -> i64 {
+    let safe_trigger = if trigger_sigma.is_finite() && trigger_sigma > 0.0 {
+        trigger_sigma
+    } else {
+        3.0
+    };
+    let ratio = (held_drop_sigma / safe_trigger).max(1.0);
     let scaled = (FT_REDUCE_COOLDOWN_MS as f64 * ratio) as i64;
     scaled.min(FT_REDUCE_COOLDOWN_MAX_MS)
 }

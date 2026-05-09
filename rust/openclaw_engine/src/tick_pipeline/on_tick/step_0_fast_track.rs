@@ -22,7 +22,8 @@ use openclaw_types::PriceEventKind;
 use tracing::info;
 
 use super::super::on_tick_helpers::{
-    ft_reduce_cooldown_expired, push_capped, sigma_scaled_reduce_cooldown_ms, FT_REDUCE_COOLDOWN_MS,
+    ft_reduce_cooldown_expired, push_capped, sigma_scaled_reduce_cooldown_ms_with_trigger,
+    FT_REDUCE_COOLDOWN_MS,
 };
 use super::super::*;
 
@@ -185,6 +186,13 @@ impl TickPipeline {
             .worst_drop_for_held(&held_symbols)
             .map(|info| (info.drop_pct, info.sigma, info.symbol))
             .unwrap_or((0.0, 0.0, String::new()));
+        let (fast_track_config, leverage) = {
+            let risk_config = self.intent_processor.risk_config();
+            (
+                risk_config.fast_track.clone(),
+                risk_config.limits.leverage_max.max(1.0),
+            )
+        };
         let margin_utilization_pct = {
             let balance = self.paper_state.balance();
             if balance > 0.0 {
@@ -201,23 +209,18 @@ impl TickPipeline {
                         p.qty * px
                     })
                     .sum();
-                let leverage = self
-                    .intent_processor
-                    .risk_config()
-                    .limits
-                    .leverage_max
-                    .max(1.0);
                 let margin_used = total_notional / leverage;
                 (margin_used / balance * 100.0).min(999.0)
             } else {
                 0.0
             }
         };
-        let ft_action = crate::fast_track::evaluate_fast_track(
+        let ft_action = crate::fast_track::evaluate_fast_track_with_config(
             self.governance.risk.level,
             held_drop_pct,
             held_drop_sigma,
             margin_utilization_pct,
+            &fast_track_config,
         );
 
         // EDGE-P0-1 + P0-5: Clear guard only when risk fully recovers to Normal.
@@ -260,10 +263,11 @@ impl TickPipeline {
             // margin, ≥15% fall-through) still reduce every position.
             // B1：分類觸發源。5%+3σ+<Defensive 為單 symbol 異常事件，限定
             //     該 symbol 減半；系統性觸發維持全倉減半。
-            let drop_scoped = crate::fast_track::is_drop_scoped_reduce(
+            let drop_scoped = crate::fast_track::is_drop_scoped_reduce_with_config(
                 self.governance.risk.level,
                 held_drop_pct,
                 held_drop_sigma,
+                &fast_track_config,
             );
 
             // B2: Compute the cooldown that will be stamped for this reduce
@@ -272,7 +276,10 @@ impl TickPipeline {
             // B2：本次半倉事件寫入冷卻表的有效 ms。drop 觸發按 sigma 縮放，
             //     系統性觸發用基準窗口。
             let effective_cooldown_ms = if drop_scoped {
-                sigma_scaled_reduce_cooldown_ms(held_drop_sigma)
+                sigma_scaled_reduce_cooldown_ms_with_trigger(
+                    held_drop_sigma,
+                    fast_track_config.outlier_sigma_threshold,
+                )
             } else {
                 FT_REDUCE_COOLDOWN_MS
             };

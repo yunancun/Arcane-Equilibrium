@@ -148,6 +148,14 @@ young_fraction = 0.125
 mature_fraction = 0.16666666666666666
 established_fraction = 0.25
 
+# W-AUDIT-6: fast_track held-drop thresholds. Defaults preserve the previous
+# hardcoded triggers: ≥15% held-symbol drop closes all; ≥5% + ≥3σ reduces or
+# escalates by risk level. Margin-crisis 90% remains a code safety constant.
+[fast_track]
+extreme_drop_pct = 15.0
+moderate_drop_pct = 5.0
+outlier_sigma_threshold = 3.0
+
 # G7-07 (2026-04-24): cost-gate slippage tiers + win-rate weighting knobs.
 # Defaults below mirror pre-G7-07 SLIPPAGE_TIERS / DEFAULT_SLIPPAGE_RATE / 0.3
 # / 1.3 hardcoded constants exactly. Operators may tune live without rebuild.

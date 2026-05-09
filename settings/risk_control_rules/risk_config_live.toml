@@ -226,6 +226,15 @@ young_fraction = 0.125
 mature_fraction = 0.16666666666666666
 established_fraction = 0.25
 
+# W-AUDIT-6 (2026-05-09) — Fast-track held-drop thresholds.
+# Live defaults are intentionally identical to the former code constants:
+# 15% extreme drop, and 5% + 3σ moderate outlier. Tune only after demo evidence.
+# W-AUDIT-6：Live 預設保留舊硬編碼觸發，需 demo 證據後再調整。
+[fast_track]
+extreme_drop_pct = 15.0
+moderate_drop_pct = 5.0
+outlier_sigma_threshold = 3.0
+
 # G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
 # Live default shadow_mode=true — Phase C operator IPC flip (auth-gated)
 # is the only way to land on shadow_mode=false in this environment.

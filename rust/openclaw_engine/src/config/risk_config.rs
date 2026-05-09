@@ -50,6 +50,13 @@ pub use regime_cfg::HurstConfig;
 pub mod cost_edge_cfg;
 pub use cost_edge_cfg::CostEdgeConfig;
 
+// W-AUDIT-6 (2026-05-09): fast_track held-drop thresholds live in a sibling
+// module to keep this primary config file from absorbing another schema block.
+// W-AUDIT-6：fast_track 持倉跌幅閾值拆至 sibling，避免主配置檔繼續膨脹。
+#[path = "risk_config_fast_track.rs"]
+pub mod fast_track_cfg;
+pub use fast_track_cfg::FastTrackConfig;
+
 // ---------------------------------------------------------------------------
 // Top-level / 頂層
 // ---------------------------------------------------------------------------
@@ -139,6 +146,11 @@ pub struct RiskConfig {
     /// 預設 50/200 + 1/8、1/6、1/4 保留原行為。
     #[serde(default)]
     pub kelly: KellyTierConfig,
+    /// W-AUDIT-6: Fast-track held-drop trigger thresholds. Defaults preserve
+    /// the prior hardcoded 15% extreme drop and 5% + 3 sigma moderate outlier.
+    /// W-AUDIT-6：fast_track 持倉跌幅觸發閾值；預設保留 15% / 5% + 3σ。
+    #[serde(default)]
+    pub fast_track: FastTrackConfig,
     /// G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
     /// Per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md`,
     /// hosts the canonical `shadow_mode` + `max_position_pct` knobs that
@@ -245,6 +257,7 @@ impl RiskConfig {
             .map_err(|e| format!("risk.exit: {}", e))?;
         self.dynamic_sizing.validate()?;
         self.kelly.validate()?;
+        self.fast_track.validate()?;
         self.executor.validate()?;
         self.ewma_vol.validate()?;
         self.cusum.validate()?;

@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | W-AUDIT-6 fast_track threshold config: moved held-drop 15% / 5%+3σ thresholds into `RiskConfig.fast_track`, wired Step 0 + scoped reduce + sigma cooldown to the config snapshot, exposed paper/demo/live defaults, and preserved the 90% margin-crisis code constant | workspace/reports/2026-05-09--w_audit_6_fast_track_config.md |
 | 2026-05-09 | P0-NEW-VULN-1 tailnet bind correction: lifecycle scripts now default to safe auto binding (Tailscale IPv4 when available, otherwise loopback), reject all-interface binds, and preserve Tailscale GUI access without `0.0.0.0` | workspace/reports/2026-05-09--p0_new_vuln_1_tailnet_bind_correction.md |
 | 2026-05-09 | Keep-auth missing-auth RCA: traced LiveDemo auth loss to prior manual sentinel consumption, restored signed auth via route, and added restart_all keep-auth preflight warning | workspace/reports/2026-05-09--keep_auth_missing_auth_rca.md |
 | 2026-05-09 | Three main blockers runtime closure: lease-bypass audit runtime rows verified, operator decision audit blockers closed, signed LiveDemo auth restored, Linux rebuilt/restarted and `[56]` PASS; true mainnet remains disabled | workspace/reports/2026-05-09--three_blockers_runtime_closure.md |
@@ -2070,6 +2071,26 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   `cargo test -p openclaw_engine risk_config --lib` PASS (130/0),
   `cargo check -p openclaw_engine --bin replay_runner --features replay_isolated`
   PASS, and `git diff --check` PASS. Existing unrelated Rust warnings remain.
+- Boundary: source/test/config-surface only; no rebuild, restart, deploy,
+  live auth mutation, strategy activation, MAG-083/MAG-084 unlock, or true-live
+  action.
+
+## 2026-05-09 W-AUDIT-6 fast_track Threshold Config
+
+- Closed the fast_track 15% / 5%+3σ hardcoded-threshold source/test gap with
+  behavior-preserving config.
+- `RiskConfig.fast_track` now exposes `extreme_drop_pct`,
+  `moderate_drop_pct`, and `outlier_sigma_threshold`, defaulting to `15.0`,
+  `5.0`, and `3.0`.
+- Step 0 consumes the config snapshot for `evaluate_fast_track`, scoped
+  ReduceToHalf classification, and sigma-scaled reduce cooldown. The margin
+  crisis `90%` check remains a code safety constant, not an operator knob.
+- Paper/demo/live risk TOMLs expose the same defaults, so runtime behavior does
+  not change unless an operator edits config and reloads later.
+- Verification: `cargo test -p openclaw_engine fast_track --lib` PASS (51/0),
+  `cargo test -p openclaw_engine risk_config --lib` PASS (134/0),
+  `cargo check -p openclaw_engine --bin openclaw-engine` PASS, and
+  `git diff --check` PASS. Existing unrelated Rust warnings remain.
 - Boundary: source/test/config-surface only; no rebuild, restart, deploy,
   live auth mutation, strategy activation, MAG-083/MAG-084 unlock, or true-live
   action.

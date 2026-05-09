@@ -6,6 +6,7 @@
 //! Flash crash / margin crisis → immediate close all.
 //! 閃崩/保證金危機 → 立即全平。
 
+use crate::config::FastTrackConfig;
 use openclaw_core::sm::risk_gov::RiskLevel;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +40,26 @@ pub fn evaluate_fast_track(
     held_drop_sigma: f64,
     margin_utilization_pct: f64,
 ) -> FastTrackAction {
+    evaluate_fast_track_with_config(
+        risk_level,
+        held_drop_pct,
+        held_drop_sigma,
+        margin_utilization_pct,
+        &FastTrackConfig::default(),
+    )
+}
+
+/// Config-aware fast-track decision. The wrapper above preserves legacy callers
+/// and tests with default thresholds; runtime Step 0 passes hot-reloaded
+/// `RiskConfig.fast_track`.
+/// 支持配置的 fast_track 決策；Step 0 傳入熱重載 `RiskConfig.fast_track`。
+pub fn evaluate_fast_track_with_config(
+    risk_level: RiskLevel,
+    held_drop_pct: f64,
+    held_drop_sigma: f64,
+    margin_utilization_pct: f64,
+    config: &FastTrackConfig,
+) -> FastTrackAction {
     // 1. Circuit Breaker / ManualReview → close everything
     //    governance already decided; execution just carries it out.
     if risk_level >= RiskLevel::CircuitBreaker {
@@ -66,17 +87,17 @@ pub fn evaluate_fast_track(
     }
 
     // 3. Extreme drop on a held symbol — true flash crash, any risk level.
-    //    15% in a 5-min window is categorically flash-crash territory and
+    //    The default 15% in a 5-min window is categorically flash-crash territory and
     //    worth closing even if sigma is uninformative (thin samples / stable
     //    symbol with std_dev ≈ 0 / edge cases).
-    //    持倉幣種極端跌幅（≥15%）→ 真閃崩，任何風控等級下 CloseAll，
+    //    持倉幣種極端跌幅（預設 ≥15%）→ 真閃崩，任何風控等級下 CloseAll，
     //    不依賴 sigma（薄樣本/穩定幣 std≈0 等邊緣情境的兜底）。
-    if held_drop_pct >= 15.0 {
+    if held_drop_pct >= config.extreme_drop_pct {
         return FastTrackAction::CloseAll;
     }
 
-    // 4. Moderate drop (≥5%) that is also a statistical outlier (≥3σ) on a
-    //    held symbol:
+    // 4. Moderate drop (default ≥5%) that is also a statistical outlier
+    //    (default ≥3σ) on a held symbol:
     //      - risk_level ≥ Defensive → CloseAll (escalated defense)
     //      - risk_level <  Defensive → ReduceToHalf (precaution, not panic)
     //    FA-PHANTOM-2 fix (2026-04-15): the legacy rule fired CloseAll on
@@ -86,7 +107,9 @@ pub fn evaluate_fast_track(
     //    blocking G-2 funding_arb validation (0/20 fills in 7h, 2026-04-15).
     //    FA-PHANTOM-2 修復：原規則任一小幣抖 5% 就 CloseAll，誤殺全策略。
     //    改為持倉幣種 + 5%+3σ 雙條件 + 依風控等級分級升級。
-    if held_drop_pct >= 5.0 && held_drop_sigma >= 3.0 {
+    if held_drop_pct >= config.moderate_drop_pct
+        && held_drop_sigma >= config.outlier_sigma_threshold
+    {
         if risk_level >= RiskLevel::Defensive {
             return FastTrackAction::CloseAll;
         }
@@ -132,13 +155,30 @@ pub fn is_drop_scoped_reduce(
     held_drop_pct: f64,
     held_drop_sigma: f64,
 ) -> bool {
-    held_drop_pct >= 5.0
-        && held_drop_sigma >= 3.0
+    is_drop_scoped_reduce_with_config(
+        risk_level,
+        held_drop_pct,
+        held_drop_sigma,
+        &FastTrackConfig::default(),
+    )
+}
+
+/// Config-aware classifier for the symbol-scoped ReduceToHalf corridor.
+/// 支持配置的單 symbol 半倉觸發分類器。
+#[inline]
+pub fn is_drop_scoped_reduce_with_config(
+    risk_level: RiskLevel,
+    held_drop_pct: f64,
+    held_drop_sigma: f64,
+    config: &FastTrackConfig,
+) -> bool {
+    held_drop_pct >= config.moderate_drop_pct
+        && held_drop_sigma >= config.outlier_sigma_threshold
         && risk_level < RiskLevel::Defensive
-        // Extreme drops (≥15%) CloseAll at any sigma — never reach ReduceToHalf.
+        // Extreme drops (default ≥15%) CloseAll at any sigma — never reach ReduceToHalf.
         // Guard mirrored here to keep the classifier independent of call order.
-        // 15% 以上 CloseAll，不會落入 ReduceToHalf，classifier 獨立守住邊界。
-        && held_drop_pct < 15.0
+        // 預設 15% 以上 CloseAll，不會落入 ReduceToHalf，classifier 獨立守住邊界。
+        && held_drop_pct < config.extreme_drop_pct
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -403,5 +443,45 @@ mod tests {
         // 14.99% + 3σ at Normal → still within the scoped-reduce corridor.
         // 14.99% + 3σ Normal → 仍在 scoped reduce 區間。
         assert!(is_drop_scoped_reduce(RiskLevel::Normal, 14.99, 3.0));
+    }
+
+    #[test]
+    fn test_w_audit_6_custom_moderate_drop_threshold_reduces() {
+        let config = FastTrackConfig {
+            extreme_drop_pct: 10.0,
+            moderate_drop_pct: 4.0,
+            outlier_sigma_threshold: 2.0,
+        };
+
+        assert_eq!(
+            evaluate_fast_track_with_config(RiskLevel::Normal, 4.0, 2.0, 20.0, &config),
+            FastTrackAction::ReduceToHalf
+        );
+        assert!(is_drop_scoped_reduce_with_config(
+            RiskLevel::Normal,
+            4.0,
+            2.0,
+            &config
+        ));
+    }
+
+    #[test]
+    fn test_w_audit_6_custom_extreme_drop_threshold_closes_all() {
+        let config = FastTrackConfig {
+            extreme_drop_pct: 10.0,
+            moderate_drop_pct: 4.0,
+            outlier_sigma_threshold: 2.0,
+        };
+
+        assert_eq!(
+            evaluate_fast_track_with_config(RiskLevel::Normal, 10.0, 0.0, 20.0, &config),
+            FastTrackAction::CloseAll
+        );
+        assert!(!is_drop_scoped_reduce_with_config(
+            RiskLevel::Normal,
+            10.0,
+            4.0,
+            &config
+        ));
     }
 }
