@@ -108,6 +108,9 @@ from .checks_agent_events import (
 from .checks_agent_spine import (
     check_55_agent_decision_spine_lineage,
 )
+from .checks_live_pipeline import (
+    check_56_live_pipeline_active,
+)
 from .checks_openclaw_gateway import (
     check_54_openclaw_proposal_relay,
 )
@@ -208,6 +211,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
     [47]                                                  REF-20 Sprint D R8 — replay_runner binary presence (filesystem)
+    [56]                                                  Live / LiveDemo pipeline active sentinel (filesystem)
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -248,6 +252,7 @@ Execution / cost sentinels added after F7:
   [54] openclaw_proposal_relay           (OC-GW-5/6/7 proposal/approval/channel ledger audit)
   [53] ref21_v058_symbol_universe_recorder (REF-21 — recurring V058 universe snapshot liveness)
   [55] agent_decision_spine_lineage       (P1-AGENT-OBS-1 — MAG-082 lineage readiness)
+  [56] live_pipeline_active               (P0-NEW-ISSUE-1 — live slot configured but LiveDemo not spawned)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -293,6 +298,7 @@ def main() -> int:
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
+                   [56]   (P0-NEW-ISSUE-1 live pipeline active filesystem)
 
     入口 — 跑全部註冊 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
@@ -301,7 +307,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55]
-      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47]
+      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -895,6 +901,15 @@ def main() -> int:
     # [47] Linux replay_runner binary 存在 + executable；filesystem only。
     s, m = check_47_replay_runner_binary()
     results.append(("[47] replay_runner_binary", s, m))
+
+    # [56] P0-NEW-ISSUE-1 (2026-05-09): LiveDemo pipeline active sentinel.
+    # If the live slot is configured, signed authorization must be present and
+    # the Rust live snapshot must be fresh. Filesystem-only and read-only:
+    # this never writes/renews authorization.json.
+    # [56] LiveDemo 管線活性哨兵。live slot 已配置時，必須有簽名授權檔且
+    # Rust live snapshot 新鮮。純 filesystem/read-only，不寫或續簽 auth。
+    s, m = check_56_live_pipeline_active()
+    results.append(("[56] live_pipeline_active", s, m))
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
