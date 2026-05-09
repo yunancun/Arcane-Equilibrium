@@ -149,6 +149,10 @@ app.include_router(risk_router)
 from .phase2_strategy_routes import phase2_router  # noqa: E402
 app.include_router(phase2_router)
 
+# ── Phase 4 Dashboard Router / Phase 4 儀表板路由注册 ──
+from .phase4_routes import phase4_router  # noqa: E402
+app.include_router(phase4_router)
+
 # ── Governance Hub Router / 治理集線器路由注册 ──
 from .governance_routes import governance_router  # noqa: E402
 app.include_router(governance_router)
