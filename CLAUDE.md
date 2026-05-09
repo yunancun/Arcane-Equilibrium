@@ -65,10 +65,10 @@
 | 項 | 目前事實 |
 |---|---|
 | W-AUDIT-1 evidence source | `b91487f2`（`healthcheck: make scanner would-block evidence advisory`）；後續 docs/governance commit 只改文檔索引，當前 repo head 以 `git log -1` 為準。 |
-| Runtime host | Linux `trade-core`；watchdog 2026-05-08 22:04 UTC：`engine_alive=true`，demo/live snapshots fresh。 |
+| Runtime host | Linux `trade-core`；watchdog 2026-05-09 09:34 UTC：`engine_alive=true`，paper/demo/live snapshots fresh。 |
 | Runtime env | `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
-| Live boundary | 2026-05-09 01:37 UTC rebuild/restart 後，live slot 的 `api_key` / `api_secret` / `bybit_endpoint` 存在且 endpoint=LiveDemo，但 `$HOME/BybitOpenClaw/secrets/secret_files/bybit/live/authorization.json` 缺失；Rust log 明確 `LIVE PIPELINE REFUSED TO START error_kind="file_missing"`，所以當前 runtime 是 demo-only，`pipeline_snapshot_live.json` stale。Mainnet 真 live 流量仍為 0 by design；未改 live auth、未開真 live API。 |
+| Live boundary | 2026-05-09 09:12 UTC operator route `/api/v1/live/auth/renew` restored signed LiveDemo authorization (`tier=T0_ENTRY`, `approved_system_mode=live_reserved`, `valid_for_engine=true`, expires_at_ms=1778405563954). 2026-05-09 09:33 UTC rebuild/restart `--keep-auth` deployed `862e79b7`; watchdog shows live pipeline fresh. Mainnet 真 live 流量仍為 0 by design；未提供真 mainnet API。 |
 
 ### W-C / MAG-082
 
@@ -95,7 +95,7 @@
 | `[42b]/[42c]` attribution drift | settled eligible strategies ratio=1.000；低樣本策略標 `LOW_SAMPLE(n, need)`。 | WARN sample-maturity watch，不是 attribution drift。 |
 | `[45]` pricing binding | demo/live_demo source=`bybit_v5`，age >1h but <24h。 | WARN：仍需 P0-LG-2 provider pricing binding foundation。 |
 | `[51]` scanner opportunity shadow | routes/intents 100%；24h labels=39，positive_lcb_n=16，avg_net=-4.29bps，`opportunity_positive_n=0 LOW_SAMPLE`。 | WARN：shadow-only，calibrated positive sample 未成熟。 |
-| `[56]` live pipeline active | 2026-05-09 source/test added：live slot 配置時要求簽名 `authorization.json` 存在且 `pipeline_snapshot_live.json` 新鮮；當前 Linux facts 為 auth_missing + stale live snapshot。 | 預期 FAIL，直到 operator 透過 signed live-auth route renew；此 check 不寫 auth、不啟動 live。 |
+| `[56]` live pipeline active | 2026-05-09 09:34 UTC direct check PASS：`live pipeline active endpoint=live_demo auth=present snapshot_age=21.4s threshold=180s`。 | LiveDemo pipeline restored through signed route; check remains read-only and does not write auth. |
 
 ### Active Blockers
 

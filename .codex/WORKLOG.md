@@ -351,3 +351,8 @@ YYYY-MM-DD HH:MM TZ
 - closed P0-NEW-VULN-1 source/test checkpoint: Mac launchd Trading API plist now binds `127.0.0.1` instead of `0.0.0.0`
 - added `launchd_preflight.sh` fail-closed guard against all-interface Trading API plist binds and extended Batch E runtime ownership regression to cover the plist/preflight
 - verification: targeted Batch E pytest PASS, plist syntax lint PASS, static grep confirms no `0.0.0.0` in deploy plist/templates except historical reports/docs; no launchd load/unload, rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- closed the operator-requested three main blockers: P0-NEW-VULN-2 lease-bypass audit runtime emit, P0-DECISION-AUDIT-2/4/5 operator decision blockers, and P0-NEW-ISSUE-1 LiveDemo auth_missing restoration
+- deployed Linux `trade-core` through `862e79b7` with authorized `restart_all.sh --rebuild --keep-auth`; V078 applied, `learning.lease_transitions` has 2 `BYPASS` rows, watchdog shows paper/demo/live fresh, and direct `[56] live_pipeline_active` PASSes
+- LiveDemo auth was restored only through signed `/api/v1/live/auth/renew`; no manual auth-file write, true mainnet API enablement, strategy/risk config mutation, scanner authority change, Executor hard authority, MAG-083/084 unlock, or true-live action
