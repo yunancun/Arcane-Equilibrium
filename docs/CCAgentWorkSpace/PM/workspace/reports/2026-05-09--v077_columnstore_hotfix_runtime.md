@@ -2,7 +2,7 @@
 
 Date: 2026-05-09
 Role: PM
-Status: RUNTIME HOTFIX IN PROGRESS
+Status: DEPLOYED / RUNTIME VERIFIED
 
 ## Trigger
 
@@ -37,6 +37,23 @@ is not disabled.
 - `git diff --check`
 - Linux PG dry-run with `BEGIN ... ROLLBACK` against the current runtime DB
   passed and produced the expected trigger-fallback notice.
+- Linux pulled hotfix commit `49ceeb61` and restarted the engine with
+  `restart_all.sh --engine-only --keep-auth`.
+- Runtime DB now records V077 in `_sqlx_migrations`, and
+  `trg_fills_engine_mode_known_values` exists on `trading.fills`.
+- Engine process restarted as PID `4080150`; API remains on PID `4076067`.
+- Passive healthcheck returned `SUMMARY: WARN` with no hard FAIL; `[55]`
+  Agent Decision Spine lineage PASSed with `chains=121`,
+  `chains_with_lease=96`, and `bad_report_quality=0`.
+
+## Runtime Caveat
+
+The live authorization file is missing at
+`/home/ncyu/BybitOpenClaw/secrets/secret_files/bybit/live/authorization.json`,
+so the Rust engine refused to spawn the LiveDemo/live pipeline at boot and is
+running demo-only after the hotfix restart. No manual live auth restore or
+renewal was performed, because that would be a live-auth mutation requiring
+separate operator approval.
 
 ## Boundary
 
@@ -44,5 +61,5 @@ The rebuild/restart was explicitly operator-authorized. No live auth mutation,
 scanner authority change, Executor hard authority, strategy/risk config
 mutation, MAG-083/MAG-084 unlock, or true-live API action was performed.
 
-PM SIGN-OFF: CONDITIONAL until the patched V077 is committed, pushed, pulled on
-Linux, and the engine restart verifies fresh snapshots.
+PM SIGN-OFF: APPROVED for V077 hotfix deployment; live pipeline remains
+operator-auth blocked until separately renewed.
