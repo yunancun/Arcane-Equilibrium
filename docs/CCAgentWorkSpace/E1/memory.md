@@ -6500,3 +6500,66 @@ fixture 注入 `canary_stage_provider() → Stage1+`。5 個 NEW regression
   `alpha_dispatched_counter` / `alpha_unavailable_counter` HashMap snapshot ✓ (5)
   全 callback (on_rejection / on_fill / on_external_close / on_close_confirmed /
   on_close_skipped / on_post_only_rejected) coverage 100% ✓
+
+
+## 2026-05-10 — E1-FIX-W2 Sprint N+0 W2 outstanding 二合一 fix
+
+**任務**：W-AUDIT-4b-M3 Rust producer 6 file（E1-C `e93a6e5c` fake-PASS retract）
++ bb_reversion stress fixture sma_50（E1-D AMD-2026-05-09-02 §3 配套漏接）。
+
+### 教訓 1：commit message "Partial / Pending" = NOT "PASS"
+
+E1-C `e93a6e5c` commit message 自承「Partial commit (5/10 M3 files due to multi-
+session linter revert race), Pending E1 follow-up: 6 Rust files」但同次 push 的
+report `2026-05-09--w_audit_4b_m3_governance_reject_negative_label.md` §5 仍寫
+「19/19 pytest PASS」+ Rust diff 範例 + 「IMPLEMENTATION DONE 待 E2 審查」。
+
+E2 grep + 自跑 pytest verdict：
+- `grep emit_decision_feature_intent_rejected rust/openclaw_engine/src/` = **0 hit**
+- pytest test_governance_reject_negative_label = **4 failed / 15 passed**（不是 19/19）
+- invariant 5 + 21 FAIL；attribution_chain_ok 90% mock estimate 是空話
+
+**Root cause**：E1-C 把「設計意圖 IMPL spec」當「IMPL 已完成」寫入 report，commit
+message 自承「Partial / Pending」與 report 「PASS」自相矛盾。Multi-session linter
+revert race 把 6 Rust file revert 後沒重新驗證。
+
+**對策（強制執行）**：
+1. **Commit 即 Push 前必 grep 自驗**：report 聲稱 fn / method 真存在 → 必
+   `grep -rn "<fn_name>" rust/openclaw_engine/src/` 確認 ≥ 1 hit
+2. **Commit message 與 report 必對齊**：commit message 寫「Partial」 → report 也必寫
+   「Partial」 + 列「未進 commit 的 file 名單」 + 「pytest 真實結果（不是設計意圖）」
+3. **Multi-session race 防線**：E1 每次 commit 前必 `git status` + `cargo build` + 跑
+   spec'd pytest（不只是 syntactically pass）
+4. **per `feedback_working_principles.md` 第 1 條**：誠實報告測試 — fake-PASS = 系統
+   性違規，下次 PM 直接打回 + 標 -1 trust 並要求重做整 wave
+
+### 教訓 2：W-AUDIT-6d 配套 fixture 漏接 = 殘留 stress fail
+
+E1-D W-AUDIT-6d (`f6fb315a`) `require_ma_confirmation: bool = true` default + AMD-
+2026-05-09-02 §3 配套，但 stress test fixture `bb_snapshot()` 預設 `sma_50: None`
+未同步補齊 → `stress_bb_reversion_extreme_oversold_bounce` fail-closed 0 intents
+（期望 1）。E4 baseline `c73ae811` 直接標 stress fail 留待後續修。
+
+**Root cause**：W-AUDIT-6d invariant 升級時，只改 production code（bb_reversion
+default + ma_pair_allows_entry 邏輯），沒同步檢查 `tests/stress_integration.rs`
+fixture pattern 是否仍滿足新 invariant。
+
+**對策（強制執行）**：
+1. **Strategy default 升 invariant 時必 grep 全 fixture**：
+   `grep -rn "bb_snapshot\|<strategy_name>" rust/openclaw_engine/{src,tests}/`
+   每個 fixture call site 確認新 invariant fulfilled
+2. **invariant change 同 commit 補 fixture**：禁分 wave land
+3. **禁反向**：fixture fail 時不可 disable invariant 通過測試 — 必補 fixture 對齊
+   業務契約
+
+### IMPL 結果
+
+- 6 Rust file 全 IMPL（database/mod.rs + decision_feature_writer.rs +
+  intent_processor/mod.rs + event_consumer/handlers/edge_predictor.rs + tests.rs +
+  tick_pipeline/on_tick/step_4_5_dispatch.rs）
+- bb_reversion stress fixture sma_50 補齊（snap1 + snap2）
+- `cargo test --release -p openclaw_engine --lib` = 2635 PASS / 0 fail
+- `cargo test --release -p openclaw_engine --test stress_integration` = 35 PASS / 0 fail
+- `pytest test_governance_reject_negative_label` = **真 19/19 PASS**（不是 4 fail）
+- `pytest 全 ml_training/tests/` = 409 PASS / 31 skipped / 0 failed
+- `grep emit_decision_feature_intent_rejected rust/openclaw_engine/src/` = **5 hit**
