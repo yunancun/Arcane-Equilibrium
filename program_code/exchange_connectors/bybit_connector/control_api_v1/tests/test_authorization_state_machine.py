@@ -616,8 +616,10 @@ class TestQueryMethods:
         """get() should return a copy, not the original / get() 应返回副本"""
         auth = sm.get(draft_auth.authorization_id)
         auth.title = "MUTATED"
+        auth.scope.setdefault("symbols", []).append("MUTATED")
         original = sm.get(draft_auth.authorization_id)
         assert original.title == "Test Auth"
+        assert "MUTATED" not in original.scope.get("symbols", [])
 
     def test_get_nonexistent_returns_none(self, sm):
         assert sm.get("auth:doesnotexist") is None

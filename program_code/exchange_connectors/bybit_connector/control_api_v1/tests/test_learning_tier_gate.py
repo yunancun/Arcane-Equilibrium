@@ -427,6 +427,18 @@ def test_promotion_recorded_in_history(gate_with_audit):
     assert state.promotions[0]["next_tier"] == "L2"
 
 
+def test_state_returns_isolated_promotion_snapshot(gate_with_audit):
+    gate, audit_log = gate_with_audit
+    gate.update_metrics(observation_count=500, win_rate=0.21)
+    gate.promote_tier(LearningTier.L2, reason="Test promotion")
+
+    state = gate.state
+    state.promotions[0]["next_tier"] = "MUTATED"
+
+    original = gate.state
+    assert original.promotions[0]["next_tier"] == "L2"
+
+
 def test_multiple_promotions_in_audit_trail(gate_with_audit):
     """Test multiple promotions are tracked in order / 测试多个晋升按顺序被追踪"""
     gate, audit_log = gate_with_audit

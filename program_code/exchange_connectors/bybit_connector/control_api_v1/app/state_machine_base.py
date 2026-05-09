@@ -49,7 +49,6 @@ Safety invariant:
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import logging
 import threading
@@ -59,6 +58,26 @@ from enum import Enum
 from typing import Any, Callable, ClassVar, Generic, TypeVar
 
 logger = logging.getLogger(__name__)
+
+
+def _clone_jsonish(value: Any) -> Any:
+    """Clone JSON-like mutable containers used in state-machine snapshots."""
+    if isinstance(value, dict):
+        return {key: _clone_jsonish(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_clone_jsonish(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_clone_jsonish(item) for item in value)
+    if isinstance(value, set):
+        return {_clone_jsonish(item) for item in value}
+    return value
+
+
+def _clone_state_object(obj: Any) -> Any:
+    clone = getattr(obj, "clone", None)
+    if callable(clone):
+        return clone()
+    raise TypeError(f"{type(obj).__name__} must define clone() for state snapshots")
 
 
 # TypeVar bound to Enum so both str-Enum (SM-01/02) and IntEnum (SM-04) work.
@@ -416,15 +435,15 @@ class MultiObjectStoreMixin:
     #   self._objects: dict[str, T] = {}
 
     def get(self, object_id: str) -> Any | None:
-        """Get a deep copy of a stored object by id / 按 id 获取对象深拷贝"""
+        """Get an isolated snapshot clone by id / 按 id 获取隔离快照副本"""
         with self._lock:  # type: ignore[attr-defined]
             obj = self._objects.get(object_id)  # type: ignore[attr-defined]
-            return copy.deepcopy(obj) if obj else None
+            return _clone_state_object(obj) if obj else None
 
     def get_all(self) -> list[Any]:
-        """Get all stored objects (deep-copied) / 获取全部对象深拷贝列表"""
+        """Get all stored objects as isolated snapshot clones / 获取全部对象隔离快照"""
         with self._lock:  # type: ignore[attr-defined]
-            return [copy.deepcopy(obj) for obj in self._objects.values()]  # type: ignore[attr-defined]
+            return [_clone_state_object(obj) for obj in self._objects.values()]  # type: ignore[attr-defined]
 
     def get_status_summary(self) -> dict[str, int]:
         """Count objects by state label / 按状态计数"""

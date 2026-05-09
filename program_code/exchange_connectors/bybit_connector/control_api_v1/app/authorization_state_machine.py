@@ -34,7 +34,6 @@ Safety invariant:
 
 from __future__ import annotations
 
-import copy
 import logging
 import time
 import uuid
@@ -42,7 +41,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from .state_machine_base import MultiObjectStoreMixin, StateMachineBase
+from .state_machine_base import MultiObjectStoreMixin, StateMachineBase, _clone_jsonish
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +274,26 @@ class AuthorizationObject:
             "is_terminal": self.is_terminal,
             "transition_count": len(self.transitions),
         }
+
+    def clone(self) -> AuthorizationObject:
+        return AuthorizationObject(
+            authorization_id=self.authorization_id,
+            state=self.state,
+            version=self.version,
+            created_at_ms=self.created_at_ms,
+            updated_at_ms=self.updated_at_ms,
+            expires_at_ms=self.expires_at_ms,
+            scope=_clone_jsonish(self.scope),
+            title=self.title,
+            description=self.description,
+            created_by=self.created_by,
+            approved_by=self.approved_by,
+            approval_reason=self.approval_reason,
+            restriction_reason=self.restriction_reason,
+            freeze_reason=self.freeze_reason,
+            revoke_reason=self.revoke_reason,
+            transitions=_clone_jsonish(self.transitions),
+        )
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AuthorizationObject:
@@ -509,7 +528,7 @@ class AuthorizationStateMachine(MultiObjectStoreMixin, StateMachineBase[AuthStat
             )
 
             # Return a copy / 返回副本
-            result = copy.deepcopy(auth)
+            result = auth.clone()
 
         # Emit audit OUTSIDE lock (load-bearing invariant)
         # 锁外发送审计（关键不变量）
@@ -611,7 +630,7 @@ class AuthorizationStateMachine(MultiObjectStoreMixin, StateMachineBase[AuthStat
         """Get all currently effective (ACTIVE or RESTRICTED) authorizations / 获取所有有效授权"""
         with self._lock:
             return [
-                copy.deepcopy(auth)
+                auth.clone()
                 for auth in self._authorizations.values()
                 if auth.state in EFFECTIVE_STATES
             ]

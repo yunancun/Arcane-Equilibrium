@@ -40,7 +40,6 @@ MODULE_NOTE (English):
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import logging
 import threading
@@ -49,6 +48,8 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional
+
+from .state_machine_base import _clone_jsonish
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,25 @@ class TierState:
         if not self.tier_promoted_at_ms:
             self.tier_promoted_at_ms = int(time.time() * 1000)
 
+    def clone(self) -> TierState:
+        return TierState(
+            current_tier=self.current_tier,
+            tier_promoted_at_ms=self.tier_promoted_at_ms,
+            observation_count=self.observation_count,
+            confirmed_patterns=self.confirmed_patterns,
+            validated_hypotheses=self.validated_hypotheses,
+            experiment_roi=self.experiment_roi,
+            win_rate=self.win_rate,
+            days_at_tier=self.days_at_tier,
+            days_operational=self.days_operational,
+            sustained_positive_live_days=self.sustained_positive_live_days,
+            last_promotion_event=self.last_promotion_event,
+            last_promotion_initiator=self.last_promotion_initiator,
+            last_promotion_reason=self.last_promotion_reason,
+            promotions=_clone_jsonish(self.promotions),
+            version=self.version,
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Promotion Record / 晋升记录
@@ -365,7 +385,7 @@ class LearningTierGate:
     def state(self) -> TierState:
         """Get current state snapshot / 获取当前状态快照"""
         with self._lock:
-            return copy.deepcopy(self._state)
+            return self._state.clone()
 
     # ── Update Metrics ──
 

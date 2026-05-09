@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | W-AUDIT-5b state-machine snapshot clone: removed 10 generic `copy.deepcopy` snapshot callsites from SM-01/SM-02/SM-04/state_machine_base/learning tier gate, added explicit clone snapshots and regression/static guards; no runtime mutation | workspace/reports/2026-05-09--w_audit_5b_state_snapshot_clone.md |
 | 2026-05-09 | W-AUDIT-3 partial F-15/F-17/SM-05: dynamic lease-router Settings status, lease flag flip writer regression, draft SM-05 polling design; F-01 still blocked by P0-DECISION-AUDIT-2 | workspace/reports/2026-05-09--w_audit_3_partial_f15_f17_sm05.md |
 | 2026-05-09 | W-AUDIT-1 docs/governance sync: closed CLAUDE runtime drift, W-C authorization record, AMD §5.4.1, register/glossary/ADR/README/SCRIPT_INDEX catch-up, and MIT/BB workspace READMEs; no runtime mutation | workspace/reports/2026-05-09--w_audit_1_docs_governance_sync.md |
 | 2026-05-07 | TODO v13 Agent/OpenClaw replan: converted TODO from historical ledger to active dispatch queue, archived stale v12 context, and reordered work around executor smoke -> runtime lineage -> MAG-082 rerun -> MAG-083/MAG-084 -> OpenClaw read-only expansion | workspace/reports/2026-05-07--todo_v13_agent_openclaw_replan.md |

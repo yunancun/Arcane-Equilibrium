@@ -30,7 +30,6 @@ Safety invariant:
 
 from __future__ import annotations
 
-import copy
 import logging
 import time
 import uuid
@@ -38,7 +37,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from .state_machine_base import MultiObjectStoreMixin, StateMachineBase
+from .state_machine_base import MultiObjectStoreMixin, StateMachineBase, _clone_jsonish
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +312,30 @@ class DecisionLeaseObject:
             "transition_count": len(self.transitions),
         }
 
+    def clone(self) -> DecisionLeaseObject:
+        return DecisionLeaseObject(
+            lease_id=self.lease_id,
+            state=self.state,
+            version=self.version,
+            created_at_ms=self.created_at_ms,
+            updated_at_ms=self.updated_at_ms,
+            valid_from_ms=self.valid_from_ms,
+            expires_at_ms=self.expires_at_ms,
+            intent=_clone_jsonish(self.intent),
+            source_pipeline_stage=self.source_pipeline_stage,
+            source_deliberation_id=self.source_deliberation_id,
+            created_by=self.created_by,
+            registered_by=self.registered_by,
+            activated_by=self.activated_by,
+            bridged_by=self.bridged_by,
+            consumed_by=self.consumed_by,
+            freeze_reason=self.freeze_reason,
+            revoke_reason=self.revoke_reason,
+            rejection_reason=self.rejection_reason,
+            risk_decision_ref=self.risk_decision_ref,
+            transitions=_clone_jsonish(self.transitions),
+        )
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DecisionLeaseObject:
         return cls(
@@ -504,7 +527,7 @@ class DecisionLeaseStateMachine(MultiObjectStoreMixin, StateMachineBase[LeaseSta
                 auto_approve=None,
             )
 
-            result = copy.deepcopy(lease)
+            result = lease.clone()
 
         self._emit_audit(record)
         logger.info("Lease transition: %s %s → %s / 租约迁移",
@@ -611,11 +634,11 @@ class DecisionLeaseStateMachine(MultiObjectStoreMixin, StateMachineBase[LeaseSta
 
     def get_live(self) -> list[DecisionLeaseObject]:
         with self._lock:
-            return [copy.deepcopy(l) for l in self._leases.values() if l.state in LIVE_STATES]
+            return [lease.clone() for lease in self._leases.values() if lease.state in LIVE_STATES]
 
     def get_bridgeable(self) -> list[DecisionLeaseObject]:
         with self._lock:
-            return [copy.deepcopy(l) for l in self._leases.values() if l.is_bridgeable]
+            return [lease.clone() for lease in self._leases.values() if lease.is_bridgeable]
 
     # ── Persistence / 持久化 ──
 
