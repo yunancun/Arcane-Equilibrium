@@ -69,6 +69,7 @@
 - [跨平台兼容性準則](feedback_cross_platform.md) — 必須隨時可部署 Mac，路徑不硬編碼/LLM抽象/服務可遷移
 - [可調參數禁止假功能](feedback_no_dead_params.md) — Agent可調參數必須真實被發現/調整/持久化
 - [restart_all --rebuild 範圍](feedback_restart_rebuild_flag_scope.md) — 2026-04-14 後 --rebuild 同時重建 engine binary + PyO3；部署 Rust fix 直接 --rebuild 即可
+- [restart_all.sh bind host safe tailnet default (2026-05-09)](feedback_restart_bind_host_default.md) — ssh non-interactive 不讀 .bashrc/.profile；script 層用 auto 解析 Tailscale IPv4，否則 loopback；禁止 `0.0.0.0`
 
 ## References
 - [Remote Access 配置](reference_remote_access.md) — Tailscale: Trading GUI / OpenClaw URLs

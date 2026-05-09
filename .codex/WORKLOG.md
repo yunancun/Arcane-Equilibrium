@@ -367,3 +367,9 @@ YYYY-MM-DD HH:MM TZ
 - `_read_shadow_mode()` now handles provider-unavailable and provider-exception paths fail-closed before IPC submit authority; production wiring remains explicit via `ExecutorConfigCache.shadow_mode_provider()`
 - updated SM-05/TODO/CLAUDE/register wording plus PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_f01_provider_fail_closed.md`
 - verification: py_compile PASS; ExecutorAgent unit pytest 30/0; executor config cache + decision parity pytest 17/0 with 7 skipped; agents routes executor/shadow pytest 7/0; source/test/docs only, no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, strategy/risk config mutation, MAG-083/084 unlock, or true-live action
+
+2026-05-09 CEST
+- corrected P0-NEW-VULN-1 bind-host model after operator clarified Tailscale GUI access requirement: lifecycle scripts no longer need `0.0.0.0`
+- added shared `helper_scripts/lib/api_bind_host.sh`: default `OPENCLAW_BIND_HOST=auto` resolves concrete Tailscale IPv4 when available and otherwise loopback; `OPENCLAW_BIND_HOST=tailscale` forces tailnet-only; `0.0.0.0` / `::` fail closed
+- updated restart/clean/fresh scripts, deploy docs, Script Index, feedback memory, TODO, and Batch E runtime ownership regressions
+- verification: bash -n PASS; Batch E pytest 15/0; helper smoke resolves local Tailscale IP and rejects all-interface bind; `git diff --check` PASS

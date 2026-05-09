@@ -113,6 +113,8 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=%h/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1
+# Use 127.0.0.1 for local/Tailscale Serve, or a concrete 100.64.0.0/10 Tailscale IP
+# for direct tailnet access. Do not use 0.0.0.0.
 Environment=OPENCLAW_BIND_HOST=127.0.0.1
 ExecStart=%h/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/uvicorn app.main:app --host ${OPENCLAW_BIND_HOST} --port 8000
 Restart=always
@@ -362,10 +364,14 @@ brew install redis
 | Redis | 6379 | TCP | 缓存（可选） |
 | Grafana | 3000 | HTTP | 监控面板（可选） |
 
-> **安全提醒 / Security Note**: Trading API 默认绑定 `127.0.0.1:8000`。
-> 远程访问请优先通过 Tailscale Serve / 反向代理转发；如需直接监听 Tailscale
-> 接口，显式设置 `OPENCLAW_BIND_HOST=<tailscale-100.x-ip>`，不要默认暴露
-> `0.0.0.0`。Gateway 绑定 loopback，不对外暴露。
+> **安全提醒 / Security Note**: lifecycle helper scripts resolve
+> `OPENCLAW_BIND_HOST=auto` by default: if Tailscale is installed and up they
+> bind Trading API to the node's concrete `100.64.0.0/10` Tailscale IPv4 address;
+> otherwise they bind `127.0.0.1:8000`. You can force tailnet binding with
+> `OPENCLAW_BIND_HOST=tailscale` or a specific `OPENCLAW_BIND_HOST=<tailscale-100.64-ip>`.
+> `0.0.0.0` / `::` are rejected because they expose the API on all interfaces.
+> Tailscale Serve / reverse proxy remains preferred for HTTPS. Gateway binds
+> loopback and is not exposed directly.
 
 ---
 

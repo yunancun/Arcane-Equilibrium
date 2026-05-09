@@ -53,7 +53,10 @@ PG_PORT="${OPENCLAW_PG_PORT:-5432}"
 # API venv 路徑。相對路徑以 control_api_v1 為基準（script 會 cd 進去再跑 uvicorn）。
 # 絕對路徑讓 Mac dev 指向共用 venv（例：srv/venvs/mac_dev）。
 API_VENV="${OPENCLAW_API_VENV:-.venv}"
-API_BIND_HOST="${OPENCLAW_BIND_HOST:-127.0.0.1}"
+# Trading API bind host. Default "auto" binds to the node's Tailscale IPv4
+# address when available, otherwise loopback. 0.0.0.0 is rejected by the helper.
+source "$REPO_ROOT/helper_scripts/lib/api_bind_host.sh"
+API_BIND_HOST="$(resolve_openclaw_api_bind_host)"
 RUNTIME_SECRET_DIR="$DATA_DIR/runtime_secrets"
 OPENCLAW_DATABASE_URL_FILE="$RUNTIME_SECRET_DIR/openclaw_database_url"
 OPENCLAW_IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"

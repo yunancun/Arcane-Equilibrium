@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | P0-NEW-VULN-1 tailnet bind correction: lifecycle scripts now default to safe auto binding (Tailscale IPv4 when available, otherwise loopback), reject all-interface binds, and preserve Tailscale GUI access without `0.0.0.0` | workspace/reports/2026-05-09--p0_new_vuln_1_tailnet_bind_correction.md |
 | 2026-05-09 | Keep-auth missing-auth RCA: traced LiveDemo auth loss to prior manual sentinel consumption, restored signed auth via route, and added restart_all keep-auth preflight warning | workspace/reports/2026-05-09--keep_auth_missing_auth_rca.md |
 | 2026-05-09 | Three main blockers runtime closure: lease-bypass audit runtime rows verified, operator decision audit blockers closed, signed LiveDemo auth restored, Linux rebuilt/restarted and `[56]` PASS; true mainnet remains disabled | workspace/reports/2026-05-09--three_blockers_runtime_closure.md |
 | 2026-05-09 | P0-NEW-VULN-1 launchd plist bind hardening: Trading API launchd template now defaults to 127.0.0.1, preflight rejects 0.0.0.0, and Batch E static regression covers plist/preflight | workspace/reports/2026-05-09--p0_new_vuln_1_launchd_bind_hardening.md |
@@ -1977,9 +1978,9 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   Scout market-signal/event-alert requires `learning:write`; Layer2 trigger
   requires `ai_budget:write`.
 - Closed F-23 deploy exposure: `restart_all.sh`, `clean_restart.sh`, and
-  `fresh_start.sh` now default API bind host to
-  `${OPENCLAW_BIND_HOST:-127.0.0.1}`; deploy README documents loopback default,
-  Tailscale Serve / reverse proxy, and explicit Tailscale-IP binding.
+  `fresh_start.sh` no longer default API bind host to all interfaces. Follow-up
+  tailnet correction defaults helper-script launches to concrete Tailscale IPv4
+  when available, otherwise loopback, and rejects `0.0.0.0` / `::`.
 - Closed AI service socket gap: Unix socket is chmod `0600` after bind and
   startup fails closed if chmod fails.
 - Closed F-03 source dependency for W-AUDIT-3 F-15: Rust boot starts
@@ -2027,3 +2028,15 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Boundary: source/test/docs only; no rebuild/restart/deploy/live auth mutation
   or true-live authority change. Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_f01_provider_fail_closed.md`.
+
+## 2026-05-09 P0-NEW-VULN-1 Tailnet Bind Correction
+
+- Corrected the post-hardening bind-host model: Tailscale GUI access does not
+  require `0.0.0.0`.
+- Lifecycle scripts now share `helper_scripts/lib/api_bind_host.sh`; default
+  `OPENCLAW_BIND_HOST=auto` resolves the concrete Tailscale IPv4 when
+  available and otherwise uses `127.0.0.1`.
+- `OPENCLAW_BIND_HOST=tailscale` forces tailnet-only binding; `0.0.0.0` / `::`
+  are rejected as all-interface exposure.
+- This addresses non-interactive SSH restarts not reading shell profile env
+  while keeping P0-NEW-VULN-1 closed.

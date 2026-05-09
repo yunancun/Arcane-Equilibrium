@@ -9,6 +9,7 @@ cannot silently re-open unsafe restart/cron/scheduler/script behaviors.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -202,8 +203,13 @@ def test_w_audit_2_mutating_learning_routes_require_operator_scopes() -> None:
     assert 'base.require_scope_and_operator(actor, "ai_budget:write")' in layer2
 
 
-def test_w_audit_2_api_launches_default_to_loopback_bind() -> None:
+def test_w_audit_2_api_launches_default_to_tailnet_or_loopback_bind() -> None:
     """Lifecycle scripts and deploy docs must not default uvicorn to all interfaces."""
+    helper = _read("helper_scripts/lib/api_bind_host.sh")
+    assert "OPENCLAW_BIND_HOST:-auto" in helper
+    assert '"0.0.0.0"|"::"' in helper
+    assert "tailscale ip -4" in helper
+
     scripts = [
         "helper_scripts/restart_all.sh",
         "helper_scripts/clean_restart.sh",
@@ -211,11 +217,11 @@ def test_w_audit_2_api_launches_default_to_loopback_bind() -> None:
     ]
     for script in scripts:
         body = _read(script)
-        assert "OPENCLAW_BIND_HOST:-127.0.0.1" in body, script
+        assert "resolve_openclaw_api_bind_host" in body, script
         assert "--host 0.0.0.0" not in body, script
 
     deploy_readme = _read("helper_scripts/deploy/README.md")
-    assert "OPENCLAW_BIND_HOST=127.0.0.1" in deploy_readme
+    assert "OPENCLAW_BIND_HOST=tailscale" in deploy_readme
     assert "--host 0.0.0.0" not in deploy_readme
     assert "Tailscale Serve" in deploy_readme
 
@@ -223,6 +229,35 @@ def test_w_audit_2_api_launches_default_to_loopback_bind() -> None:
     assert "<string>--host</string>" in launchd_api
     assert "<string>127.0.0.1</string>" in launchd_api
     assert "<string>0.0.0.0</string>" not in launchd_api
+
+
+def test_api_bind_host_helper_resolves_tailscale_and_rejects_all_interfaces(tmp_path: Path) -> None:
+    """The non-interactive SSH path should get tailnet access without 0.0.0.0."""
+    helper = _repo_root() / "helper_scripts/lib/api_bind_host.sh"
+    fake_tailscale = tmp_path / "tailscale"
+    fake_tailscale.write_text("#!/bin/sh\n[ \"$1\" = \"ip\" ] && [ \"$2\" = \"-4\" ] && echo 100.91.109.86\n", encoding="utf-8")
+    fake_tailscale.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path}:{env.get('PATH', '')}"
+
+    auto = subprocess.run(
+        ["bash", "-c", f"source '{helper}'; unset OPENCLAW_BIND_HOST; resolve_openclaw_api_bind_host"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert auto.stdout.strip() == "100.91.109.86"
+
+    rejected = subprocess.run(
+        ["bash", "-c", f"source '{helper}'; OPENCLAW_BIND_HOST=0.0.0.0 resolve_openclaw_api_bind_host"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert "all interfaces" in rejected.stderr
 
 
 def test_w_audit_2_ai_service_listener_chmods_unix_socket() -> None:
