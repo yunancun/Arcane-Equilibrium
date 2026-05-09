@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | Keep-auth missing-auth RCA: traced LiveDemo auth loss to prior manual sentinel consumption, restored signed auth via route, and added restart_all keep-auth preflight warning | workspace/reports/2026-05-09--keep_auth_missing_auth_rca.md |
 | 2026-05-09 | Three main blockers runtime closure: lease-bypass audit runtime rows verified, operator decision audit blockers closed, signed LiveDemo auth restored, Linux rebuilt/restarted and `[56]` PASS; true mainnet remains disabled | workspace/reports/2026-05-09--three_blockers_runtime_closure.md |
 | 2026-05-09 | P0-NEW-VULN-1 launchd plist bind hardening: Trading API launchd template now defaults to 127.0.0.1, preflight rejects 0.0.0.0, and Batch E static regression covers plist/preflight | workspace/reports/2026-05-09--p0_new_vuln_1_launchd_bind_hardening.md |
 | 2026-05-09 | P0-AUDIT-NEW-LG-X-05: fixed SPECIFICATION_REGISTER LG-X numbering, restored LG-X-04 to Supervised-Live Gate, added LG-X-05 constrained autonomous live with RFC/eval-contract/amendment/healthcheck references, and moved ops prerequisites to OPS-X-01 | workspace/reports/2026-05-09--p0_audit_lgx05_register_fix.md |
@@ -2005,5 +2006,8 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   authorized `--rebuild --keep-auth` restart.
 - Boundary: true mainnet remains disabled; no strategy/risk config mutation,
   no MAG-083/MAG-084 unlock, and no manual auth-file write occurred.
-- Remaining follow-up: RCA why the earlier `restart_all.sh --keep-auth` path
-  lost signed auth, then continue W-AUDIT-3 F-01 and W-AUDIT-6.
+- RCA: `engine-1778289328.log` shows the 2026-05-09T01:11:28Z boot consumed a
+  `manual` restart sentinel and cleared `authorization.json`; later
+  `--keep-auth` preserved the already-missing state. `restart_all.sh` now warns
+  when keep-auth is requested with a configured live slot but missing signed
+  auth. Continue W-AUDIT-3 F-01 and W-AUDIT-6 next.

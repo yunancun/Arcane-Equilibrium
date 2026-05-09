@@ -35,8 +35,12 @@ signed LiveDemo authorization is a readiness/runtime restoration for
 
 ## Remaining Follow-Up
 
-- RCA why the prior `restart_all.sh --keep-auth` path lost signed auth.
 - W-AUDIT-3 F-01 provider fail-closed implementation.
 - W-AUDIT-6 strategy verdict implementation.
+
+RCA update: the auth loss was traced to a 2026-05-09T01:11:28Z boot that
+consumed a `manual` restart sentinel and cleared `authorization.json` before
+the later keep-auth restart. `restart_all.sh --keep-auth` now warns if the live
+slot is configured but signed auth is already absent.
 
 PM SIGN-OFF: APPROVED.

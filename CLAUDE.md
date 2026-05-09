@@ -68,7 +68,7 @@
 | Runtime host | Linux `trade-core`；watchdog 2026-05-09 09:41 UTC：`engine_alive=true`，demo/live snapshots fresh；paper snapshot is disabled by runtime env (`OPENCLAW_ENABLE_PAPER != 1`) rather than stale active trading flow。 |
 | Runtime env | `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
-| Live boundary | 2026-05-09 09:12 UTC operator route `/api/v1/live/auth/renew` restored signed LiveDemo authorization (`tier=T0_ENTRY`, `approved_system_mode=live_reserved`, `valid_for_engine=true`, expires_at_ms=1778405563954). 2026-05-09 09:33 UTC rebuild/restart `--keep-auth` deployed `862e79b7`; watchdog shows live pipeline fresh. Mainnet 真 live 流量仍為 0 by design；未提供真 mainnet API。 |
+| Live boundary | 2026-05-09 09:12 UTC operator route `/api/v1/live/auth/renew` restored signed LiveDemo authorization (`tier=T0_ENTRY`, `approved_system_mode=live_reserved`, `valid_for_engine=true`, expires_at_ms=1778405563954). 2026-05-09 09:33 UTC rebuild/restart `--keep-auth` deployed `862e79b7`; watchdog shows live pipeline fresh. RCA: 01:11 UTC boot consumed a `manual` restart sentinel and cleared auth before the later keep-auth restart; `restart_all.sh --keep-auth` now warns if it would only preserve missing auth. Mainnet 真 live 流量仍為 0 by design；未提供真 mainnet API。 |
 
 ### W-C / MAG-082
 
