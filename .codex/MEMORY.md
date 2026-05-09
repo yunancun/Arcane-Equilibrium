@@ -260,7 +260,8 @@ W-AUDIT-6 current fact:
   is source-blocked for new grid entries across
   `strategy_params_{paper,demo,live}.toml`, while close/reduce remains allowed;
   the 24h healthcheck may remain FAIL until historical rows roll off
-- as of 2026-05-09, bb_breakout 5m RFC/IMPL is source/test closed:
+- as of 2026-05-09, bb_breakout 5m RFC/IMPL is source/test closed at
+  `6d3ea046`:
   `TickContext` carries `indicators_5m`, `TickPipeline` computes 5m indicators
   from `KlineManager`, initial kline bootstrap seeds 1m + 5m REST bars,
   `BbBreakoutParams` and `strategy_params_*.toml` expose `signal_timeframe`,
