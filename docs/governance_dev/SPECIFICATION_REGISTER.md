@@ -58,10 +58,17 @@
 
 | Code | Name | Module(s) / SoT | Status | Description |
 |------|------|------------------|--------|-------------|
-| LG-X-01 | H0 Production Caller | TODO.md `P0-LG-1` / Rust H0 hot path + Python H0 singleton cleanup | 🔴 Active Gap | H0 blocking must be wired into production decision path with metrics and fail-closed behavior; Python `H0_GATE` singleton is not the Rust hot path authority |
-| LG-X-02 | Provider Pricing Binding | TODO.md `P0-LG-2` / AccountManager + pricing healthcheck `[45]` | 🔴 Active Gap | Fee/pricing source must be bound, freshness-checked, and asserted before true live |
-| LG-X-03 | Supervised-Live State Machine | TODO.md `P0-LG-3` / future supervised-live spec | 🔴 Active Gap | Live authorization, lease, drawdown, revoke, and operator approval states must be explicit and tested |
-| LG-X-04 | Live Ops Foundation | TODO.md `P0-OPS-1..4` | 🔴 Active Gap | HTTPS/secure cookies, credential rotation, legal/ToS/geography, and first-day runbook |
+| LG-X-01 | Demo / LiveDemo Evidence Window | TODO.md `W-C` / `P0-AGENT-2` / MAG-082 | 🟡 Active Evidence | Historical LG-1 stability evidence is currently reframed as the W-C MAG-082 Stage 2 demo/live_demo lineage window; it does not grant true-live authority |
+| LG-X-02 | H0 Blocking Verification | TODO.md `P0-LG-1` / `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--lg2_h0_blocking_verification_rfc.md` / Rust H0 hot path | 🔴 Active Gap | H0 blocking must be wired into the production decision path with metrics and fail-closed behavior; Python `H0_GATE` singleton is not the Rust hot path authority |
+| LG-X-03 | Provider Pricing Binding | TODO.md `P0-LG-2` / `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--lg3_provider_pricing_binding_rfc.md` / AccountManager + healthcheck `[45]` | 🔴 Active Gap | Fee/pricing source must be bound, freshness-checked, and asserted before true live |
+| LG-X-04 | Supervised-Live Gate | TODO.md `P0-LG-3` / `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--lg4_supervised_live_gate_rfc.md` | 🔴 Active Gap | Live authorization, lease, drawdown, revoke, and operator approval states must be explicit and tested before supervised true-live sessions |
+| LG-X-05 | Constrained Autonomous Live | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-01--lg5_constrained_autonomous_live_rfc.md`<br>`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--lg5_live_candidate_eval_contract_rfc_v2.md`<br>`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-02--lg5_w3_fup2_fix2_r_meta_window_3d_amendment_rfc.md`<br>`docs/healthchecks/2026-05-02--lg5_health_checks.md` | 🟡 Design / Active Gap | Constrained autonomous live requires LG-X-02/03/04, positive edge decision, explicit autonomy envelope, Decision Lease TTL, live-cost re-evaluation, R-meta attribution guard, and reconstructable audit |
+
+### Live Operational Prerequisites (OPS-X)
+
+| Code | Name | Module(s) / SoT | Status | Description |
+|------|------|------------------|--------|-------------|
+| OPS-X-01 | Live Ops Foundation | TODO.md `P0-OPS-1..4` | 🔴 Active Gap | HTTPS/secure cookies, credential rotation, legal/ToS/geography, and first-day runbook are true-live prerequisites but are not LG-4 supervised-live state-machine specifications |
 
 ---
 
@@ -138,7 +145,8 @@
 - **SM-XX**: State Machine specifications (core governance automata)
 - **EX-XX**: Exchange specifications (trading operations and integration)
 - **DOC-XX**: Organization document specifications (policies and procedures)
-- **LG-X-XX**: Live Gate foundation specifications (true-live blockers and supervised-live prerequisites)
+- **LG-X-XX**: Live Gate foundation specifications, aligned to historical LG-1..LG-5 gates
+- **OPS-X-XX**: Live operational prerequisites adjacent to, but not numbered as, LG-X state/gate specs
 - **REF-XX**: Reference specifications (architecture contracts, design specs, cross-language boundaries; 2026-04 新增類別)
 - **ARCH-XX**: Architecture specifications (system-level design documents; 2026-04 新增類別)
 - **AUDIT-XX**: Audit catalog (major audit reports cross-referenced to SM/EX/DOC/REF; 2026-04 新增類別)
@@ -150,7 +158,8 @@
 
 | Metric | Count |
 |--------|-------|
-| Active SM/EX/DOC/LG-X specifications | 22 |
+| Active SM/EX/DOC/LG-X specifications | 24 |
+| Active OPS-X prerequisites | 1 |
 | Reserved specifications | 0 |
 | Active REF specifications | 19 |
 | Active ARCH specifications | 3 |
@@ -163,7 +172,7 @@
 
 ## How to Add New Specifications / 如何新增規範
 
-1. Assign next available code in appropriate category (SM/EX/DOC/REF/ARCH/AUDIT)
+1. Assign next available code in appropriate category (SM/EX/DOC/LG-X/OPS-X/REF/ARCH/AUDIT)
 2. Create implementation module / document following naming convention
    - Code modules：`lowercase_snake_case.py` / `.rs`
    - Documents：`YYYY-MM-DD--<topic>.md`（中文描述優先）

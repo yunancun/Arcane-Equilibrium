@@ -112,9 +112,9 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   🔄 6 (2%) / 🆕 53 (17%)**. Verified-closed sub-task details lifted to
   `docs/archive/2026-05-09--w_audit_verified_closed_archive.md`.
 - **W-AUDIT-1..7 verification verdict**:
-  - W-AUDIT-1 docs sync: ⚠️ partial close (R4 CRITICAL × 5 真 closed only 2/5;
-    SPECIFICATION_REGISTER LG-X-05 缺; CCAgentWorkSpace 表仍 17 agent 缺
-    MIT/BB; archive/ 仍 7/51 索引)
+  - W-AUDIT-1 docs sync: ⚠️ partial close (R4 CRITICAL × 5 真 closed only 2/5
+    at verification time; follow-up `P0-AUDIT-NEW-LG-X-05` is now closed;
+    CCAgentWorkSpace 表仍 17 agent 缺 MIT/BB; archive/ 仍 7/51 索引)
   - W-AUDIT-2 security: 🔄 source-only close, runtime not verified
     (lease_transitions 0 row; E3 NEW-VULN-2)
   - W-AUDIT-3 fake-live: ⚠️ true partial (F-17 ✅ / F-15 e2e DB row coverage
@@ -184,7 +184,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P0-NEW-ISSUE-1` | ACTIVE 2026-05-09 | LiveDemo pipeline auth_missing → engine boot demo-only (CRITICAL functional regression) | FA NEW-1 verified via `.codex/WORKLOG.md:332`：W-AUDIT-7 階段 V077 hotfix `restart_all.sh --rebuild --keep-auth` 過程 authorization file 遺失；LiveDemo 從 5/8 真實 fills 流量 → 5/9 變 0。Source/test partial: §三 now records `auth_missing`, and passive healthcheck `[56] live_pipeline_active` was added because `[Xb]` is already occupied by `pipeline_triangulation`. `[56]` FAILs when live slot is configured but signed auth is missing or `pipeline_snapshot_live.json` is stale. Remaining Action: (1) operator renews authorization via `_write_signed_live_authorization()` Python route; (2) RCA `--keep-auth` 為何失效; (3) rerun healthcheck to confirm `[56]` PASS after auth renewal. |
 | `P0-NEW-VULN-1` | ACTIVE 2026-05-09 | launchd plist 安全弱點 (HIGH) | E3 NEW-VULN-1 verified；待 E3+E1 出 fix plan。 |
 | `P0-NEW-VULN-2` | ACTIVE 2026-05-09 | lease audit runtime 0 emit (HIGH) | E3 NEW-VULN-2 verified: W-AUDIT-2 #4 `spawn_lease_transition_pipeline` 接到 main.rs:657 是 source 真改但 runtime 未 restart 落地；lease_transitions PG row count 仍 0。Action: 觸發 engine restart + verify row count > 0。等 NEW-ISSUE-1 LiveDemo 修復後一併 restart。 |
-| `P0-AUDIT-NEW-LG-X-05` | ACTIVE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 (R4 N1 CRITICAL) | R4 verified: 4 條 LG-5 RFC (lg5_constrained_autonomous + eval_contract + v2 + w3_fup2 amendment) 全未登記；LG-X-04 補的是 Live Ops Foundation 而非 LG-4 Supervised-Live。Action: SPECIFICATION_REGISTER LG-X 重編號使 LG-X-N ↔ LG-N 1:1 對應 + 補 LG-X-05。0.5h。 |
+| `P0-AUDIT-NEW-LG-X-05` | DONE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 (R4 N1 CRITICAL) | Fixed in `docs/governance_dev/SPECIFICATION_REGISTER.md`: LG-X now maps historical LG-1..LG-5 as evidence window / H0 / pricing / supervised-live / constrained autonomous live; LG-X-05 registers the LG-5 constrained-autonomous RFC, eval-contract v2, R-meta amendment, and healthchecks. Live Ops moved to separate `OPS-X-01` so it no longer occupies LG-X-04. |
 
 ## P1 — Next Engineering Queue
 

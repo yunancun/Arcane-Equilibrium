@@ -341,3 +341,8 @@ YYYY-MM-DD HH:MM TZ
 - `[56]` is read-only/filesystem-only and FAILs when the live slot is configured but signed `live/authorization.json` is missing or `pipeline_snapshot_live.json` is stale; it does not write/renew live auth
 - updated CLAUDE §三/TODO/docs to record the current Linux fact: live slot key/secret/endpoint present, `authorization.json` missing, Rust refused LiveDemo at boot and runtime is demo-only
 - verification: live pipeline healthcheck pytest 7/0, py_compile PASS, local unconfigured-slot import smoke PASS; no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- closed P0-AUDIT-NEW-LG-X-05 source/doc checkpoint: SPECIFICATION_REGISTER LG-X table now aligns to historical LG-1..LG-5 and adds LG-X-05 constrained autonomous live
+- moved Live Ops Foundation out of LG-X-04 into separate `OPS-X-01`, so LG-X-04 again means Supervised-Live Gate and does not hide the LG-5 RFC family
+- updated CONTEXT/docs README/TODO/PM reports; source-doc only, no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

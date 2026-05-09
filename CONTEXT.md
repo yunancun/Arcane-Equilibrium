@@ -159,10 +159,11 @@ External self-hosted agent gateway used for Telegram/WebChat/mobile/operator com
 _Avoid_: OpenClaw engine, OpenClaw trading brain, OpenClaw GUI.
 
 **LG-X**:
-The Live Gate foundation backlog family tracked after the original LG-1..LG-5
-items expanded into H0 production caller, provider pricing binding,
-supervised-live state machine, ops/security, legal, credential, and first-day
-runbook work.
+The Live Gate foundation specification family aligned to the historical
+LG-1..LG-5 gate sequence: evidence window, H0 blocking verification, provider
+pricing binding, supervised-live gate, and constrained autonomous live.
+Operational prerequisites such as HTTPS, credential rotation, legal/geography,
+and first-day runbooks are tracked separately as OPS-X.
 _Avoid_: treating LG-X as a single runtime gate.
 
 **Gateway Agent**:
