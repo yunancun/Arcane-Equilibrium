@@ -39,6 +39,16 @@ html, body {
   margin-bottom: 14px;
 }
 .live-control-bar .bar-title { font-weight: 700; font-size: 14px; }
+.live-shutdown-zone {
+  display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px; border: 1px solid rgba(248,81,73,0.42);
+  border-radius: 10px; background: rgba(248,81,73,0.08);
+  box-shadow: inset 3px 0 0 rgba(248,81,73,0.55);
+}
+.live-close-all-action {
+  border-color: rgba(248,81,73,0.48) !important;
+  color: #ff7b72 !important;
+}
 
 /* Card groups / 指標卡片組 */
 .live-card-group {
@@ -306,10 +316,10 @@ html, body {
     <span style="flex:1"></span>
     <button class="oc-btn" onclick="openLiveRisk()" title="跳转到 Live 风控页 / Open Live risk controls" style="font-weight:700;border-color:rgba(168,85,247,0.55);color:#a855f7">&#x1F6E1; 风控</button>
     <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live 实盘</button>
-    <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live 实盘</button>
-    <!-- Separator before emergency stop to prevent accidental clicks / 分隔符防止误触紧急停止 -->
-    <span style="display:inline-block;width:1px;height:24px;background:var(--border);margin:0 8px;flex-shrink:0"></span>
-    <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
+    <span class="live-shutdown-zone" data-danger-zone="live-shutdown">
+      <button class="oc-btn oc-btn-danger oc-btn-critical live-stop-action" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live 实盘</button>
+      <button class="btn-emergency live-emergency-action" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
+    </span>
   </div>
 
   <!-- Account Balance card group / 帳戶餘額卡片組 -->
@@ -382,7 +392,7 @@ html, body {
   <!-- Positions table / 持倉表格 -->
   <div class="live-section-title" style="display:flex;align-items:center;justify-content:space-between">
     <span>&#x1F4CA; 持倉 / Positions</span>
-    <button class="oc-btn" onclick="openCloseAllDialog()" style="font-size:11px;padding:3px 10px;border-color:rgba(168,85,247,0.6);color:#a855f7">&#x274C; 全部平倉</button>
+    <button class="oc-btn oc-btn-destructive oc-toolbar-danger-action live-close-all-action" onclick="openCloseAllDialog()" style="font-size:11px;padding:3px 10px">&#x274C; 全部平倉</button>
   </div>
   <div style="overflow-x:auto">
     <table class="live-table" id="live-positions-table">
@@ -513,7 +523,7 @@ html, body {
     </p>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeDialog('dlg-live-stop')">取消</button>
-      <button class="oc-btn oc-btn-danger" onclick="doLiveStop()">確認停止</button>
+      <button class="oc-btn oc-btn-danger oc-btn-critical" onclick="doLiveStop()">確認停止</button>
     </div>
   </div>
 </div>
@@ -531,7 +541,7 @@ html, body {
     <div class="note">⚠ 此操作無法撤銷，所有平倉單立即市價成交。</div>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeDialog('dlg-live-emergency')">取消</button>
-      <button class="btn-emergency" onclick="doEmergencyStop()">&#x1F6A8; 確認緊急停止</button>
+      <button class="btn-emergency live-emergency-action" onclick="doEmergencyStop()">&#x1F6A8; 確認緊急停止</button>
     </div>
   </div>
 </div>
@@ -539,15 +549,15 @@ html, body {
 <!-- ── Close All Positions Dialog (session continues) ─────────── -->
 <!-- 關閉所有倉位對話框（session 繼續運行） -->
 <div class="oc-dialog-overlay" id="dlg-live-close-all">
-  <div class="oc-dialog" style="border-color:rgba(168,85,247,0.5)">
-    <h3 style="color:#a855f7">&#x274C; 關閉所有 Live 实盘 倉位</h3>
+  <div class="oc-dialog" style="border-color:rgba(248,81,73,0.5)">
+    <h3 style="color:#ff7b72">&#x274C; 關閉所有 Live 实盘 倉位</h3>
     <p>此操作將通過 Bybit API 市價平掉所有 Live 实盘 持倉並取消掛單。<br>
       <strong>Session 不會停止</strong> — 引擎繼續運行，策略可繼續開新倉。<br>
       <span style="color:#f87171;font-size:12px">⚠ 市價成交，存在滑點風險。真實資金。</span>
     </p>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeDialog('dlg-live-close-all')">取消</button>
-      <button class="oc-btn" onclick="doLiveCloseAll()" style="border-color:rgba(168,85,247,0.7);color:#a855f7;font-weight:700">確認關閉所有倉位</button>
+      <button class="oc-btn oc-btn-destructive oc-btn-critical" onclick="doLiveCloseAll()">確認關閉所有倉位</button>
     </div>
   </div>
 </div>
@@ -1234,7 +1244,7 @@ async function loadDashboardData() {
           <td>${ocEsc(String(mark))}</td>
           <td style="${pnlCls}">${pnl.toFixed(4)}</td>
           <td>${ocEsc(String(liq))}</td>
-          <td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" data-owner-strategy="${ownerAttr}" data-frozen-reason="${reasonAttr}" onclick="closeLivePosition('${sym}', this.dataset.ownerStrategy, this.dataset.frozenReason)">${btnLabel}</button></td>
+          <td><button class="oc-btn oc-btn-danger oc-row-close-action" data-owner-strategy="${ownerAttr}" data-frozen-reason="${reasonAttr}" onclick="closeLivePosition('${sym}', this.dataset.ownerStrategy, this.dataset.frozenReason)">${btnLabel}</button></td>
         </tr>`;
       }).join('');
       // F5-RETURN/Issue-2 — re-apply action guards now that row close-buttons
@@ -1510,7 +1520,12 @@ async function closeLivePosition(symbol, ownerStrategy, frozenReason) {
                     'has auto-dispatched a close but Bybit will reject it. ' +
                     'The only real clear path is to close it manually on the ' +
                     'Bybit GUI. Try anyway?';
-    if (!confirm(warnMsg)) return;
+    if (!await openConfirmModal({
+      title: '塵埃倉位清理 / Dust Position Clear',
+      body: warnMsg,
+      confirmLabel: '仍要嘗試 / Try Anyway',
+      confirmClass: 'oc-btn-destructive oc-btn-critical'
+    })) return;
     const d = await ocPost('/api/v1/live/positions/' + encodeURIComponent(symbol) + '/close', {});
     if (d) {
       ocToast('⚠ ' + symbol + ' 清塵指令已發送，交易所可能拒單 / dust-clear dispatched, exchange may reject', 'warn');
@@ -1520,7 +1535,12 @@ async function closeLivePosition(symbol, ownerStrategy, frozenReason) {
     }
     return;
   }
-  if (!confirm('確認平倉 ' + symbol + '？\nConfirm close live position: ' + symbol + '?')) return;
+  if (!await openConfirmModal({
+    title: 'Live 平倉 / Close Live Position',
+    body: '確認平倉 ' + symbol + '？\nConfirm close live position: ' + symbol + '?',
+    confirmLabel: '確認平倉 / Confirm Close',
+    confirmClass: 'oc-btn-danger oc-btn-critical'
+  })) return;
   const d = await ocPost('/api/v1/live/positions/' + encodeURIComponent(symbol) + '/close', {});
   if (d) {
     ocToast('⚠ ' + symbol + ' 平倉指令已發送', 'warn');

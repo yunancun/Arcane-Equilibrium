@@ -984,10 +984,27 @@ function ocInjectBaseCSS() {
     .oc-btn-primary:hover { background: rgba(56,139,253,0.3); }
     .oc-btn-success { background: rgba(63,185,80,0.12); border-color: var(--green); color: var(--green); }
     .oc-btn-success:hover { background: rgba(63,185,80,0.25); }
+    .oc-btn-warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.36); color: var(--yellow); }
+    .oc-btn-warning:hover { background: rgba(210,153,34,0.22); color: #fff; }
     .oc-btn-danger { background: rgba(248,81,73,0.08); border-color: rgba(248,81,73,0.3); color: var(--red); }
     .oc-btn-danger:hover { background: rgba(248,81,73,0.2); }
+    .oc-btn-critical { border-width: 2px; font-weight: 700; }
+    .oc-btn-destructive { border-style: dashed; background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.48); color: #ff7b72; font-weight: 700; }
+    .oc-btn-destructive:hover { background: rgba(248,81,73,0.26); color: #fff; }
     .oc-btn-future { border-style: dashed; opacity: 0.4; cursor: default; }
     .oc-btn-future:hover { border-color: var(--border); color: var(--text); }
+
+    /* Action risk zoning: used to separate reversible, stop, and destructive controls. */
+    .oc-action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .oc-action-cluster { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      padding: 3px; border: 1px solid transparent; border-radius: 8px; }
+    .oc-action-cluster-state { background: rgba(139,148,158,0.06); border-color: rgba(139,148,158,0.18); }
+    .oc-action-cluster-pause { background: rgba(210,153,34,0.06); border-color: rgba(210,153,34,0.22); }
+    .oc-action-cluster-stop { background: rgba(248,81,73,0.05); border-color: rgba(248,81,73,0.24); }
+    .oc-action-cluster-destructive { background: rgba(248,81,73,0.10); border-color: rgba(248,81,73,0.42);
+      box-shadow: inset 3px 0 0 rgba(248,81,73,0.55); }
+    .oc-toolbar-danger-action, .oc-row-close-action { min-width: 72px; }
+    .oc-row-close-action { padding: 2px 8px; font-size: 10px; }
 
     /* Tables */
     .oc-table-wrap { overflow-x: auto; margin-top: 8px; }
@@ -1583,21 +1600,28 @@ var _OC_CONFIRM_ACTIONS = {
     title: "刪除策略 / Delete Strategy",
     body: "此操作無法撤銷，策略的所有參數與狀態將被永久刪除。\n策略刪除後立即生效，已開倉位不受影響但不再被該策略管理。",
     confirmLabel: "確認刪除 / Confirm Delete"
+  },
+  "paper-stop-all": {
+    title: "停止 Paper + Demo / Stop Both Engines",
+    body: "此操作會同時停止 Paper 與 Demo 引擎，並嘗試平掉對應持倉。\n請確認你不是只想暫停 Paper。",
+    confirmLabel: "確認雙停 / Confirm Stop Both"
   }
 };
 
 /**
  * Show a custom confirmation dialog and return Promise<boolean>.
  * 显示自定义确认弹窗，返回 Promise<boolean>。
- * @param {string} actionName - action key from _OC_CONFIRM_ACTIONS, or plain title text
+ * @param {string|Object} actionName - action key, plain title text, or per-call modal metadata
  * @returns {Promise<boolean>}
  */
 function openConfirmModal(actionName) {
-  const meta = _OC_CONFIRM_ACTIONS[actionName] || {
+  const meta = (actionName && typeof actionName === 'object')
+    ? actionName
+    : (_OC_CONFIRM_ACTIONS[actionName] || {
     title: actionName || '確認操作 / Confirm Action',
     body: '此操作將立即執行，無法撤銷。\nThis action cannot be undone.',
     confirmLabel: '確認 / Confirm'
-  };
+  });
 
   // Lazily inject overlay element / 懶加載注入 overlay 元素
   let overlay = document.getElementById('oc-generic-confirm-overlay');
@@ -1621,6 +1645,7 @@ function openConfirmModal(actionName) {
   document.getElementById('oc-gc-body').textContent = meta.body;
   var confirmBtn = document.getElementById('oc-gc-confirm');
   confirmBtn.textContent = meta.confirmLabel || '確認 / Confirm';
+  confirmBtn.className = 'oc-btn ' + (meta.confirmClass || 'oc-btn-danger');
   overlay.classList.add('show');
 
   return new Promise(function(resolve) {
