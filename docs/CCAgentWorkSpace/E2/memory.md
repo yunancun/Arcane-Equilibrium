@@ -1727,3 +1727,31 @@ E1-C T3 `_read_canary_stage` path 2b 把 legacy `shadow_mode_provider` 回 False
 6. **cross-session 副作用 attribution 必經 git log timing 驗**：`tests/ci/test_github_ci_workflow_static.py` fail 是 commit `0dc6d659`（W-AUDIT-9 chain 之前）副作用 → 不在 W-AUDIT-9 chain RETURN scope，PM flag 隔壁 session 處理。
 7. **production caller wiring P1 follow-up 必入 W-AUDIT-3b runtime smoke acceptance**：fixture wired stage-aware injection ≠ production wired；E2 必 grep 生產 caller 確認 wiring 狀態，發現 gap 必 documented follow-up + 不阻 second-pass approve。
 8. **E2 second-pass 重跑 acceptance 數據而非信 E1-FIX self-report**：cargo lib 2625/0 + parity 70/70 + IPC 16/0 全 E2 重跑 verified；E1-FIX claim 真實但 E2 second-pass 仍須獨立 verify。
+
+## 2026-05-10 — Sprint N+0 W2 Second-Batch Review（5 wave + cross-wave bb_reversion stress fail）
+
+### Verdict 摘要
+- **RETURN-TO-E1**：1 CRITICAL + 2 HIGH + 4 MED + 3 LOW；不可 PASS to E4
+- W1 (E1-A 8a Phase A) APPROVE with stress fail flag
+- W2 (E1-B 4b-M2) APPROVE with PG dry-run watch
+- **W3 (E1-C 4b-M3) CRITICAL：6 Rust file 完全沒 land；report fake-PASS 19/19 但實測 4/19 fail**
+- W4 (E1-D 9 T4 + C-A6) APPROVE
+- W5 (E1a 9 T5 GUI) APPROVE
+
+### CRITICAL 對抗 detection 教訓
+1. **E1 commit message 自承 `Partial commit` / `Pending E1 follow-up` = 不算 land**：必跑 grep verify (例 `grep -rn "fn emit_decision_feature_intent_rejected" rust/src/`) + 跑 pytest 對 expected count 比對 (`19/19 PASS` 實測 `4 fail / 15 pass`)
+2. **report sign-off 數字必 E2 獨立復跑驗**：E1 self-report 不可信；W3 case 是 cross-session race 把 E1-C 5 file revert 後仍寫 report 19/19 PASS — 違反 §八 第 4 條「verify-before-done」+ feedback 第 1 條「誠實報告測試」
+3. **CRITICAL pytest 重跑 grep mode**：對任何 E1 wave 含 V### migration + Rust producer side wiring，E2 必 `pytest test_<wave>_<feature>.py -v` 重跑，不只看 E1 self-claim
+4. **multi-session linter race incident 模式**：linter race 把 staged 5 Rust file revert，E1 不察直接 commit 5/10 file 然後 push — sign-off 不檢 git status mandatory（CLAUDE.md §七 P0-GOV-3 sign-off git status clean）= 必標 process violation
+
+### 22 invariant W2 對應狀態
+- invariant 5 + 21 因 W3 CRITICAL FAIL（attribution_chain_ok ratio 0.5% → 90% mock estimate 是 fake — Rust producer 0 land）
+- invariant 1 / 2 / 11 / 12 PARTIAL or PASS
+- invariant 4 / 10 PARTIAL（runtime 真 7d 觀察 + Linux apply 待）
+- invariant 13 / 16 N/A 或 PASS
+
+### 跨 wave 工作流啟示
+- 派 E1 wave 前：`git fetch && git branch -r | grep <topic>` 防隔壁 session 已開（feedback `feedback_fetch_before_dispatch.md`）
+- E1 commit message 出現 `Partial` / `Pending` 字眼 = 必新 commit 補完才能 sign-off；報告不可寫 PASS
+- E2 second-batch 必對應 22 invariant 逐條 verify，不接受 E1-claim 取代 E2-grep
+- Linux PG dry-run × 2 mandatory：V083 / V084 待 E4 階段補；不算 E2 退回原因但必標 watch
