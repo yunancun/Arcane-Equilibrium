@@ -2040,3 +2040,87 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 **Push back 給未來 PA**：spec drafting 階段必跑 BB pre-review（不只 BB post-review），對任何 alpha source 提案必先確認 (1) Bybit endpoint 真實 shape、(2) 既有 handler / writer / parser 存在、(3) demo vs mainnet capability 邊界。否則 BB review 會打回，浪費 round。
 
 **Report**：本次直接 patch 3 個檔案，無單獨 report；參考 BB v3 verification 路徑。
+
+---
+
+## 2026-05-09（夜）TODO v18 ⇄ QCTODO 統一 merge 分析
+
+**任務**：Operator 拍板「重新梳理全部工作流程」— 把 srv/QCTODO.md（4-agent loss audit dispatch；327 行）整合進 srv/TODO.md（v18；573 行）成統一 v19，最後 rm QCTODO.md。PM 寫 merge code，PA 寫 read-only merge analysis。
+
+**輸入文件**：
+- TODO v18（13-agent v3 verification + DUAL-TRACK Track W/A）
+- QCTODO（PM Sign-off banner accepted；6-sprint roadmap N+0..N+5；16 sign-off invariant + 4 追蹤；5 群 dispatch；Cross-Wave Conflict 4 條）
+- 上一份 PA full dispatch engineering plan `2026-05-09--full_dispatch_engineering_plan.md` commit d3bf7be2
+- FA business chain validation `2026-05-09--full_dispatch_business_chain_validation.md` commit 5a2dee98
+
+**結論文件**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--todo_qctodo_merge_analysis.md` + Operator mirror `srv/docs/CCAgentWorkSpace/Operator/2026-05-09--todo_qctodo_merge_analysis.md`
+
+**關鍵發現 1：3 大 wave label 衝突需重命名**
+- TODO v18 line 554-558 把 `W-AUDIT-8b/c/d/e/f` 對應到 R-1/R-2/R-3/R-4/R-5 spec wave
+- QCTODO + PA dispatch §2.4 + FA report §5 三端對齊把 `W-AUDIT-8b/c/d` 對應到 A4-A/B/C 候選新策略
+- merge verdict：採 QCTODO labeling（PA dispatch + FA report 後對齊正解）；R-1..R-5 改名 `W-AUDIT-8a/8e/8f/8g/10`
+- 影響：v19 必含 explicit Wave Label Reconciliation 表防 cross-doc 引用斷裂
+
+**關鍵發現 2：W-AUDIT-6 不是衝突而是兩個不同 wave**
+- TODO v18 line 340 `W-AUDIT-6` SOURCE/TEST CLOSED 2026-05-09（既有 8 子項 closed）
+- QCTODO 「保 6 / 砍 6」是 mid-ground 新 batch（5 既存策略 audit + sweep + Kelly tier config 化）
+- merge verdict：v18 W-AUDIT-6 closed 不變；新加 `W-AUDIT-6d` mid-ground entry；v19 保兩個 entry 不衝突
+
+**關鍵發現 3：QCTODO §5 16 sign-off invariant 大半 v18 未含**
+- 11/20 條 🆕 全新（DSR K -12 量化 / Stage 2 abort gate / canary_stage_log NOT NULL / etc）
+- 9/20 條 📦 v18 已含 IMPL-level entry 但無 sign-off form
+- merge verdict：v19 加新 §4 Sign-off Pre-flight Checklist 整 QCTODO §5 原文搬入
+
+**關鍵發現 4：6-sprint capacity 規劃全 🆕**
+- v18 line 449 只有「2026-06-15 supervised live target (悲觀帶)」一句話 calendar date
+- QCTODO §1 6-sprint table + 4 概率帶（30/40/25/5）+ 5 active + 1 stand-by capacity + stand-by 啟用 5 條 + critical path
+- merge verdict：v19 加新 §5 Sprint Roadmap N+0..N+5 完整保留 QCTODO §1
+
+**關鍵發現 5：Cross-Wave Conflict 4 條全 🆕**
+- #1 8a Phase A migration ↔ W-AUDIT-6d mid-ground 5 策略改動同 file overlap → 序列化（先 6d 再 8a Phase A）
+- #2 W-AUDIT-9 T3 stage-aware ↔ ExecutorAgent shadow_mode 接線 → T3 land 後 stage-aware reload
+- #3 W-AUDIT-8a Phase B+C ↔ W-AUDIT-5b 性能 wave 同 tick_pipeline/mod.rs → Phase B+C 並行於 N+1
+- #4 A 群新策略 ↔ W-AUDIT-9 Stage 1 cohort 選擇 → A4-C 用 Stage 1 paper cohort 入場驗 stage 機制
+- merge verdict：v19 §3 加 Cross-Wave Conflict Resolution sub-section
+
+**關鍵發現 6：A2-followup G3-08 status drift**
+- TODO v18 line 414 `P2-STRUCT-1` ACTIVE
+- QCTODO §1 標 ✅ DONE 2026-05-09 17:27 UTC commit dddc5dc1（cost_edge_advisor daemon spawned 已驗）
+- merge verdict：v19 P2-STRUCT-1 status flip → DONE，不漏 commit dddc5dc1 evidence
+
+**關鍵發現 7：2 個 Decision-2/3 是新 P0-DECISION-AUDIT，不是已 closed P0-DECISION-AUDIT-2/4**
+- TODO v18 P0-DECISION-AUDIT-2/4/5 處理的是 shadow_mode TOML / 5 策略 verdict / openclaw_core sunset
+- QCTODO Decision-2 是 W-AUDIT-6 mid-ground 保 6 / 砍 6 verdict；Decision-3 是 W-AUDIT-4 ML 基座併入 W-AUDIT-8f
+- merge verdict：v19 加 P0-DECISION-AUDIT-6（W-AUDIT-6 mid-ground）+ P0-DECISION-AUDIT-7（W-AUDIT-4 併入）
+
+**v19 Outline 7 大 section**：
+- §0 Banner（v19 + sync timestamp + PM sign-off + operator (a) 採納）
+- §1 Architecture Boundary（沿用 v18 line 11-37）
+- §2 Latest State（v18 既有 + QCTODO milestone）
+- §3 Active Dispatch Queue（v18 Dispatch Order + DUAL-TRACK Wave + Cross-Wave Conflict + Day-by-Day + P0/P1/P2 + Wave Label Reconciliation）
+- §4 Sign-off Pre-flight Checklist（QCTODO §5 整搬入 16+4 invariant）
+- §5 Sprint Roadmap N+0..N+5（QCTODO §1 整搬入）
+- §6 D-02 SOP / Push Back / Risk（QCTODO §6+§7 + FA push back 4 條）
+- §7 Schedule（v18 calendar 沿用 + 4 概率帶）
+- §8 Dispatch Rules / Handoff Checks（v18 + 砍 6 grep blacklist）
+- §9 References（v18 references + QCTODO §8）
+
+**PM 必含 5 類 anchors**（任一漏 = cross-ref 斷裂）：
+1. 文件路徑（30+ ADR/AMD/spec/audit-summary/archive 路徑全列）
+2. 命名格式（Wave / P0/P1/P2 / Sub-task A4-X B-MX C-XX T1-T7 Phase A-D / E1-A..F slot / Sprint N+X WX-WX）
+3. Cross-reference（CLAUDE.md §三/§四/§五/§九 + DOC-08 §12 + §二 16 原則 + EarnedTrust）
+4. Healthcheck id（17 條 [14] [33] [37] [38] [40] [41] [42] [42b] [42c] [43] [45] [50] [51] [54] [55] [56] [58] [Xc] [Xb]）
+5. Commit hash（24+ 條：b91487f2 / 503eeb33 / e858ae2 / 6cb1c3b / 3681f83 / dddc5dc1 / d3bf7be2 / 5a2dee98 / ad59765b / b1891023 / c13c811e / 862e79b7 / e97a333b / 276a9b17 / cc6476dd / 6d3ea046 / 75741eff / ad14db07 / e95c779 / 306993e）
+
+**v19 預估規模**：~700-750 行（v18 573 + ~150 sprint dispatch 細化 + 16 invariant + Cross-Wave Conflict + D-02 SOP - 重疊歸併 / 30 closed entries archive）
+
+**Push back 給 PM**：
+- v19 規模逼近 TODO 衛生上限（700-750 行）；v19 land 後 1-2 sprint 內若 §3 closed entries 多到 ~30+，再啟動 v20 archive cycle 防膨脹
+- archive 操作建議同 commit：`mv srv/QCTODO.md → docs/archive/2026-05-XX--qctodo_sprint_n0_n5_archive.md` + 新加 `docs/archive/2026-05-XX--todo_v18_closed_entries_archive.md`
+
+**核心教訓**：
+- 「QCTODO 是 v18 順承擴張」是正確 framing，operator 拍板「整合進統一」對 — 拒絕 v19 不是替代 v18，是擴張結構保留 + 細化 dispatch
+- 派工分析必對「衝突 vs 細化 vs 全新」三類分清，不能合併處理（label 衝突當細化 = cross-ref 斷裂；新 wave 當衝突 = 漏 entry）
+- merge analysis 必含 Wave Label Reconciliation table，cross-doc 引用 PA dispatch + FA report 三端對齊事實，避免後續 codex / agent 引用斷裂
+
+**Report**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--todo_qctodo_merge_analysis.md`
