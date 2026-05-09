@@ -316,3 +316,9 @@ YYYY-MM-DD HH:MM TZ
 - started W-AUDIT-7 F-30 source checkpoint: added shared `openPromptModal()` in `common.js` and replaced native `prompt()` in learning experiment completion plus governance audit/live-auth renewal/review flows
 - tier/confidence inputs now use modal select pickers; required text inputs validate inside the modal instead of relying on native browser dialogs
 - verification: `node --check` for `common.js`, `app-learning.js`, and `governance-tab.js`; `python3 -m pytest tests/structure/test_prompt_modal_static.py -q` 2/0; Edge headless smoke via temporary static server verified governance tier select modal and learning required textarea modal; `git diff --check` PASS; source/test/static-browser only, no backend start, rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- continued W-AUDIT-7 F-system-mode-confirm source checkpoint: `tab-system.html` `live_reserved` mode confirmation now shows a live-only guard, disables confirm for a 5s countdown, rejects single-click confirmation after the countdown, and submits only after a 1.2s hold-to-confirm
+- added `tests/structure/test_system_mode_confirm_static.py` to pin the countdown constants, live-only scope, confirm click handler, pointer cancel paths, and keyboard hold/cancel support
+- verification: system-mode + prompt modal static pytest 5/0, `git diff --check` PASS, Edge headless smoke via temporary static server verified initial disabled countdown, ready hold state, single-click rejection, and hold-to-confirm submission through stubbed `/api/v1/input/config-change`
+- boundary: source/test/static-browser only; no backend start, rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | W-AUDIT-7 F-system-mode-confirm: added `live_reserved` 5s countdown + 1.2s hold-to-confirm to `tab-system.html`, with static guard and Edge headless smoke; no backend/restart/live-auth mutation | workspace/reports/2026-05-09--w_audit_7_system_mode_confirm.md |
 | 2026-05-09 | W-AUDIT-7 F-30 prompt modal: replaced native learning/governance `prompt()` flows with shared custom prompt modal, select pickers, static guard, and Edge headless smoke; no backend/restart/live-auth mutation | workspace/reports/2026-05-09--w_audit_7_f30_prompt_modal.md |
 | 2026-05-09 | W-AUDIT-5b json_fast runtime hot paths: migrated async IPC JSON-RPC framing and local LLM HTTP JSON to `json_fast`, while leaving signature/hash/replay-manifest/canonical paths on stdlib pending byte-contract tests | workspace/reports/2026-05-09--w_audit_5b_json_fast_runtime_hot_paths.md |
 | 2026-05-09 | W-AUDIT-5b ai_budget ArcSwap: moved read-heavy `BudgetTracker.config_cache` to `ArcSwap<BudgetConfig>` whole-snapshot swaps, kept mutable usage counters on async `RwLock`, and documented that per-strategy budgets require separate schema/policy design | workspace/reports/2026-05-09--w_audit_5b_ai_budget_arcswap.md |
