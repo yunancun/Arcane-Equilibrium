@@ -333,6 +333,11 @@ def run_james_stein(
             "win_rate": es.win_rate,
             "avg_win_bps": es.avg_win_bps,
             "avg_loss_bps": es.avg_loss_bps,
+            # P0-V2-NEW-3: keep the real per-round-trip return series in the
+            # in-memory return value so the promotion-evidence push can compute
+            # DSR/PBO inputs without re-querying fills. `_write_json_snapshot`
+            # intentionally does not serialize this field.
+            "raw_bps_series": list(es.raw_bps_list),
             **validation.to_json_dict(),
         }
 

@@ -313,6 +313,14 @@ W-AUDIT-6 current fact:
   blocklist. The later bb_breakout 5m and W-AUDIT-6c portfolio tail-risk
   checkpoints are source/test only until the next explicitly authorized
   rebuild/restart.
+- as of 2026-05-09, `P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` is source/test
+  closed: James-Stein cycles return real per-cell raw return series;
+  `ml_training.promotion_evidence` builds DSR/PBO/tail-risk evidence from those
+  real series; `edge_estimator_scheduler.py` pushes Demo-only promotion
+  evidence; V079 adds `learning.strategy_trial_ledger` and promotion report
+  JSON columns. Runtime activation still needs explicit V079 apply and
+  rebuild/restart; no cron install, DB apply, live auth, or runtime mutation was
+  performed in the source checkpoint.
 
 P0-NEW-VULN-1 bind-host rule:
 - lifecycle scripts must not default to `0.0.0.0`

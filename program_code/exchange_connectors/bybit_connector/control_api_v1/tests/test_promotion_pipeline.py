@@ -5,6 +5,7 @@ Covers: 6-01 pipeline state machine, 6-02 graduation gates, 6-03 live approval.
 """
 
 import time
+from datetime import datetime, timezone
 
 import numpy as np
 import pytest
@@ -336,6 +337,20 @@ class TestGraduationGates:
         assert report["verdict"] == "defer_data"
         assert "pbo_missing_cpcv_returns" in report["reasons"]
 
+    def test_demo_selection_bias_invalid_input_fails_closed(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        ok, report = gate.update_demo_selection_bias_evidence(
+            "test",
+            observed_sharpe=4.0,
+            n_trials=10,
+            n_observations=1,
+            candidate_oos_returns=_persistent_alpha_candidates(),
+            trial_sharpes=[0.1, 0.2],
+        )
+        assert not ok
+        assert report["verdict"] == "block"
+        assert any(str(r).startswith("selection_bias_invalid:") for r in report["reasons"])
+
     def test_demo_tail_risk_stress_blocks(self, gate: PromotionGate):
         gate.register_strategy("test")
         with gate._lock:
@@ -511,6 +526,22 @@ class TestSerialization:
         assert entry.paper_trades == 200
         assert entry.demo_selection_bias_report == {"passes": True, "verdict": "promote"}
         assert entry.demo_tail_risk_report == {"passes": True, "verdict": "promote"}
+
+    def test_load_from_db_rows_normalizes_timestamptz(self):
+        gate = PromotionGate()
+        gate.load_from_db_rows(
+            [
+                {
+                    "strategy_name": "ma_crossover",
+                    "current_stage": "DEMO_ACTIVE",
+                    "paper_start_ts": datetime(2026, 5, 1, tzinfo=timezone.utc),
+                    "demo_start_ts": datetime(2026, 5, 2, tzinfo=timezone.utc),
+                }
+            ]
+        )
+        entry = gate.get_entry("ma_crossover")
+        assert isinstance(entry.paper_start_ts, float)
+        assert isinstance(entry.demo_start_ts, float)
 
     def test_round_trip(self, gate: PromotionGate):
         gate.register_strategy("test_strat")

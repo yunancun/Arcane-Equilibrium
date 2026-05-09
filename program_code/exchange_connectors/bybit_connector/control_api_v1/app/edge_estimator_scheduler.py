@@ -32,6 +32,7 @@ MODULE_NOTE (中):
 
 import datetime
 import fcntl
+import json
 import logging
 import os
 import sys
@@ -519,17 +520,138 @@ class EdgeEstimatorScheduler:
             min_observation_ts=self._min_observation_ts,
             # snapshot_path=None → mode-aware default (settings/edge_estimates*.json)
         )
+        promotion_evidence = self._run_promotion_evidence_push(mode, results)
 
         # Distill: n_cells + grand_mean_bps (other fields stay in the JSON snapshot).
         # 摘要：cell 數 + grand_mean，其他細節保留在 JSON 檔
         if not results:
-            return {"n_cells": 0, "grand_mean_bps": 0.0}
+            return {
+                "n_cells": 0,
+                "grand_mean_bps": 0.0,
+                "promotion_evidence": promotion_evidence,
+            }
 
         # results is dict[(strategy, symbol)] → row dict
         n = len(results)
         first_row = next(iter(results.values()))
         grand_mean = float(first_row.get("grand_mean_bps", first_row.get("grand_mean", 0.0)))
-        return {"n_cells": n, "grand_mean_bps": grand_mean}
+        return {
+            "n_cells": n,
+            "grand_mean_bps": grand_mean,
+            "promotion_evidence": promotion_evidence,
+        }
+
+    @staticmethod
+    def _promotion_stress_exposures_from_env() -> Optional[dict[str, dict[str, float]]]:
+        """
+        Optional stress-exposure injection for promotion tail-risk evidence.
+
+        The default is None, which intentionally lets the tail-risk gate emit
+        `stress_exposures_missing` instead of inventing exposure data. Operators
+        can provide JSON as either:
+          {"__default__": {"crypto_beta": 0.05, "liquidity": 0.02}}
+        or:
+          {"ma_crossover": {"crypto_beta": 0.04}, "*": {"crypto_beta": 0.05}}
+        """
+        raw = (
+            get_secret_value("OPENCLAW_PROMOTION_STRESS_EXPOSURES_JSON")
+            or os.environ.get("OPENCLAW_PROMOTION_STRESS_EXPOSURES_JSON")
+        )
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "EdgeEstimatorScheduler: invalid OPENCLAW_PROMOTION_STRESS_EXPOSURES_JSON "
+                "(tail-risk evidence will defer): %s",
+                exc,
+            )
+            return None
+        if not isinstance(parsed, dict):
+            return None
+
+        def _clean_exposures(value: object) -> Optional[dict[str, float]]:
+            if not isinstance(value, dict):
+                return None
+            out: dict[str, float] = {}
+            for factor, exposure in value.items():
+                try:
+                    num = float(exposure)
+                except (TypeError, ValueError):
+                    continue
+                if num == num and abs(num) != float("inf"):
+                    out[str(factor)] = num
+            return out or None
+
+        # Shorthand: {"crypto_beta": 0.05, "liquidity": 0.02}
+        # applies as __default__ for every strategy.
+        if all(not isinstance(v, dict) for v in parsed.values()):
+            cleaned = _clean_exposures(parsed)
+            return {"__default__": cleaned} if cleaned else None
+
+        out: dict[str, dict[str, float]] = {}
+        for strategy, exposures in parsed.items():
+            cleaned = _clean_exposures(exposures)
+            if cleaned:
+                out[str(strategy)] = cleaned
+        return out or None
+
+    def _run_promotion_evidence_push(self, mode: str, js_results: dict) -> dict:
+        """
+        Push DSR/PBO + tail-risk promotion evidence from the JS cycle.
+
+        Demo is the promotion evidence lane. live_demo is live-grade runtime
+        flow, but it must not overwrite Demo->LivePending promotion evidence
+        for strategy graduation.
+        """
+        if mode != "demo":
+            return {
+                "status": "skipped",
+                "reason": "demo_only_promotion_evidence",
+                "engine_mode": mode,
+            }
+        if not js_results:
+            return {
+                "status": "skipped",
+                "reason": "no_js_results",
+                "engine_mode": mode,
+            }
+        try:
+            from ml_training.promotion_evidence import (  # noqa: PLC0415
+                push_promotion_evidence_from_js_results,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": f"import_failed:{exc}"}
+
+        gate = None
+        try:
+            from .governance_promotion_routes import _get_promotion_gate  # noqa: PLC0415
+
+            gate = _get_promotion_gate()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "EdgeEstimatorScheduler: PromotionGate unavailable for evidence "
+                "push; DB-only path will be attempted: %s",
+                exc,
+            )
+
+        try:
+            return push_promotion_evidence_from_js_results(
+                js_results,
+                engine_mode=mode,
+                gate=gate,
+                dsn=get_secret_value("OPENCLAW_DATABASE_URL"),
+                stress_exposures_by_strategy=self._promotion_stress_exposures_from_env(),
+                source="edge_estimator_scheduler",
+            )
+        except Exception as exc:  # noqa: BLE001 - scheduler addon is fail-open.
+            logger.warning(
+                "EdgeEstimatorScheduler: promotion evidence push failed "
+                "(fail-open): %s",
+                exc,
+            )
+            return {"status": "error", "error": str(exc), "engine_mode": mode}
 
     def _run_mlde_unblock(self, mode: str) -> dict:
         """Run read-only/shadow MLDE producers after labels are fresh.
