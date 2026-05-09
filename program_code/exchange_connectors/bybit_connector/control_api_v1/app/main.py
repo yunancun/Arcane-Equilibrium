@@ -155,6 +155,13 @@ app.include_router(phase4_router)
 
 # ── Governance Hub Router / 治理集線器路由注册 ──
 from .governance_routes import governance_router  # noqa: E402
+# 同模組副檔（governance_extended_routes / governance_promotion_routes /
+# governance_canary_routes）會 import governance_router 並 attach decorator；
+# 必須在 include_router 前執行 import 觸發 decorator 註冊。
+from . import governance_extended_routes  # noqa: E402, F401
+from . import governance_promotion_routes  # noqa: E402, F401
+# W-AUDIT-9 T5：Graduated Canary Cohort GUI 後端端點（AMD-2026-05-09-03 §4.3）
+from . import governance_canary_routes  # noqa: E402, F401
 app.include_router(governance_router)
 
 # ── Scout Agent Router / Scout 代理路由注册 ──
