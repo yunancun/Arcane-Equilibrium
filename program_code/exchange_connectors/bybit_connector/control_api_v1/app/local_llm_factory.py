@@ -35,7 +35,6 @@ Environment:
                            one model; heavy=True returns the same client unless overridden)
 """
 
-import json
 import logging
 import os
 import threading
@@ -44,6 +43,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from . import json_fast as json
 from .ollama_client import (
     OllamaClient,
     OllamaConfig,
@@ -280,7 +280,11 @@ class LMStudioShimClient:
             "temperature": use_temp,
             "max_tokens": max_tokens,
         }
-        data = json.dumps(payload).encode("utf-8")
+        data = json.dumps_bytes(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         start = time.time()
         try:
             req = urllib.request.Request(
