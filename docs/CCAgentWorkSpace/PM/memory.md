@@ -2040,3 +2040,5 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   are rejected as all-interface exposure.
 - This addresses non-interactive SSH restarts not reading shell profile env
   while keeping P0-NEW-VULN-1 closed.
+- Runtime applied on Linux with API-only restart: Trading API now listens on
+  `100.91.109.86:8000`, not `0.0.0.0:8000`; engine was not restarted.

@@ -3,7 +3,7 @@
 **Date**: 2026-05-09  
 **Owner**: PM local implementation  
 **Scope**: P0-NEW-VULN-1 / W-AUDIT-2 F-23 follow-up  
-**Status**: Source/test closed; runtime API-only reload required to replace any already-running `0.0.0.0:8000` process.
+**Status**: Source/test closed; runtime API-only reload applied on Linux.
 
 ## Decision
 
@@ -46,9 +46,18 @@ the P0-NEW-VULN-1 safety property: no default all-interface bind.
   - `OPENCLAW_BIND_HOST=tailscale` resolved local Tailscale IPv4
   - `OPENCLAW_BIND_HOST=0.0.0.0` returned nonzero with an all-interface exposure error
 - `git diff --check`
+- Linux runtime:
+  - stashed the prior unsafe `restart_all.sh` local hot edit as
+    `stash@{0}: codex-preserve-unsafe-0.0.0.0-bind-hotedit`
+  - fast-forwarded Linux to `c187fd99`
+  - ran `bash helper_scripts/restart_all.sh --api-only --keep-auth`
+  - `ss -tlnp` shows Trading API listening on `100.91.109.86:8000`, not
+    `0.0.0.0:8000`
+  - `curl http://100.91.109.86:8000/api/v1/system/health` reaches the API and
+    returns the expected unauthenticated response
 
 ## Boundary
 
-No rebuild, DB migration, live auth mutation, true-live API use, scanner
-authority change, strategy/risk config mutation, MAG-083/084 unlock, or order
-authority change. Runtime remediation should be API-only restart after sync.
+No rebuild, DB migration, engine restart, live auth mutation, true-live API use,
+scanner authority change, strategy/risk config mutation, MAG-083/084 unlock, or
+order authority change. Runtime remediation was API-only.
