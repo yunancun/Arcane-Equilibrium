@@ -374,6 +374,186 @@ RETURNING d.context_id
 """
 
 
+# ============================================================
+# W-AUDIT-4b-M2 (2026-05-09): trading.fills.entry_context_id 回填
+# trading.fills.entry_context_id Backfill Pass
+#
+# 動機 / Motivation:
+#   MIT 2026-05-09 PG 直查 24h 175 fills 中只 67 個有 entry_context_id (38%)。
+#   38% close fills 缺 entry_context_id 致 edge_label_backfill EXISTS join
+#   99% 失敗 → label_filled_at 大量 NULL → ML training pool 缺正樣本。
+#
+#   Root cause：close fill emit 時 paper_state.entry_context_id 為空（engine
+#   restart 丟、orphan adopt、IPC close 漏設）。V083 NOT VALID CHECK 對 new
+#   INSERT 強制；歷史 NULL 由本 backfill 修補。
+#
+# 設計 / Design:
+#   對 trading.fills WHERE entry_context_id IS NULL AND exit_reason IS NOT NULL
+#     （即 close fill 缺 entry_context_id）的列：
+#   1. 找最近一筆 ENTRY fill (entry_context_id IS NULL AND exit_reason IS NULL)
+#      with same (strategy_name, engine_mode, symbol, opposite-side)
+#   2. 取該 entry fill 的 context_id 作為 close fill 的 entry_context_id
+#   3. UPDATE trading.fills SET entry_context_id = ENTRY.context_id
+#
+#   safety guards：
+#   - opposite side（entry Buy → close Sell；entry Sell → close Buy）
+#   - 7d window 防匹配古老 entry
+#   - audit row filter（unattributed:* 跳過）
+#   - V083 partial index idx_fills_entry_lookup_v083 加速 lookup
+#
+# 安全保證 / Safety:
+#   - 已有 entry_context_id 的 close fill 不被覆寫 (WHERE entry_context_id IS NULL)
+#   - 找不到匹配 entry fill 的 close 跳過（保 NULL，由下次 cron 或 abandoned pass 處理）
+#   - audit row 不參與匹配（filter strategy_name NOT LIKE 'unattributed:%')
+#   - DRY-RUN 用 conn.rollback() 不影響資料
+#
+# Acceptance:
+#   24h close fills 中 entry_context_id IS NULL ratio：38% → 5% 後（PA spec ≥ 95%）
+# ============================================================
+_BACKFILL_FILL_ENTRY_CONTEXT_SQL = """
+WITH close_fills_missing_entry AS (
+    SELECT f.fill_id, f.ts, f.symbol, f.strategy_name, f.engine_mode, f.side
+    FROM trading.fills f
+    WHERE f.entry_context_id IS NULL
+      AND f.exit_reason IS NOT NULL  -- close fill only
+      AND f.engine_mode = ANY(%(engine_modes)s)
+      AND f.ts > (now() - (%(window_days)s || ' days')::interval)
+      AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
+    ORDER BY f.ts DESC
+    LIMIT %(batch_limit)s
+),
+matched_entries AS (
+    SELECT
+        c.fill_id    AS close_fill_id,
+        c.ts         AS close_ts,
+        (
+            SELECT entry.context_id
+            FROM trading.fills entry
+            WHERE entry.entry_context_id IS NULL
+              AND entry.exit_reason IS NULL
+              AND entry.engine_mode = c.engine_mode
+              AND entry.strategy_name = c.strategy_name
+              AND entry.symbol = c.symbol
+              AND entry.side <> c.side  -- opposite side: entry Buy → close Sell
+              AND entry.ts < c.ts
+              AND entry.ts > (c.ts - INTERVAL '7 days')
+              AND (entry.strategy_name IS NULL
+                   OR entry.strategy_name NOT LIKE 'unattributed:%%')
+            ORDER BY entry.ts DESC
+            LIMIT 1
+        ) AS matched_entry_context_id
+    FROM close_fills_missing_entry c
+)
+UPDATE trading.fills f
+SET entry_context_id = m.matched_entry_context_id
+FROM matched_entries m
+WHERE f.fill_id = m.close_fill_id
+  AND f.ts = m.close_ts
+  AND m.matched_entry_context_id IS NOT NULL
+RETURNING f.fill_id, f.entry_context_id
+"""
+
+
+@dataclass
+class FillEntryContextBackfillResult:
+    """Result summary from backfill_fill_entry_context_id().
+    fill entry_context_id 回填結果摘要。"""
+    matched_count: int = 0   # 成功匹配並 UPDATE 的列數
+    candidate_count: int = 0  # 候選池大小（NULL entry_context_id close fills）
+    batch_limit_hit: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "matched":         self.matched_count,
+            "candidates":      self.candidate_count,
+            "batch_limit_hit": self.batch_limit_hit,
+        }
+
+
+def backfill_fill_entry_context_id(
+    pg_url: Optional[str] = None,
+    engine_mode: str = "demo",
+    batch_limit: int = 5000,
+    window_days: int = 30,
+    dry_run: bool = False,
+) -> FillEntryContextBackfillResult:
+    """W-AUDIT-4b-M2: backfill trading.fills.entry_context_id for close fills.
+
+    對 close fills (exit_reason NOT NULL) 缺 entry_context_id 的列，依 same
+    (strategy_name, engine_mode, symbol, opposite-side) 找最近一筆 ENTRY fill
+    並取其 context_id 作為 entry_context_id。
+
+    Args:
+        pg_url:        DSN override（不傳則讀環境變數）
+        engine_mode:   'paper' | 'demo' | 'live' | 'live_demo'
+                       'live' 自動擴展為 ('live', 'live_demo') 對齊 backfill_labels
+        batch_limit:   單次最大處理列數
+        window_days:   候選 close fills 時間窗（默認 30d）
+        dry_run:       True 則 ROLLBACK 不 COMMIT
+
+    Returns:
+        FillEntryContextBackfillResult with matched_count + candidate_count
+    """
+    engine_modes = list(engine_mode_scope(engine_mode))
+
+    result = FillEntryContextBackfillResult()
+    conn = _get_conn(pg_url)
+    try:
+        with conn.cursor() as cur:
+            # Count candidate pool first (telemetry baseline)
+            # 先查候選池大小（telemetry 基線）
+            cur.execute(
+                """
+                SELECT count(*)
+                FROM trading.fills
+                WHERE entry_context_id IS NULL
+                  AND exit_reason IS NOT NULL
+                  AND engine_mode = ANY(%(engine_modes)s)
+                  AND ts > (now() - (%(window_days)s || ' days')::interval)
+                  AND (strategy_name IS NULL
+                       OR strategy_name NOT LIKE 'unattributed:%%')
+                """,
+                {"engine_modes": engine_modes, "window_days": window_days},
+            )
+            row = cur.fetchone()
+            result.candidate_count = int(row[0]) if row else 0
+
+            cur.execute(
+                _BACKFILL_FILL_ENTRY_CONTEXT_SQL,
+                {
+                    "engine_modes": engine_modes,
+                    "window_days":  window_days,
+                    "batch_limit":  batch_limit,
+                },
+            )
+            matched = cur.fetchall()
+            result.matched_count = len(matched)
+            if result.matched_count >= batch_limit:
+                result.batch_limit_hit = True
+
+        if dry_run:
+            conn.rollback()
+            logger.info(
+                "DRY-RUN backfill_fill_entry_context_id(%s): %s",
+                engine_mode, result.to_dict(),
+            )
+        else:
+            conn.commit()
+            logger.info(
+                "backfill_fill_entry_context_id(%s) committed: matched=%d candidates=%d",
+                engine_mode,
+                result.matched_count,
+                result.candidate_count,
+            )
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return result
+
+
 def backfill_labels(
     pg_url: Optional[str] = None,
     engine_mode: str = "demo",
@@ -680,6 +860,15 @@ def _main() -> int:
                         help=("Pass 3：超過 N 天仍 unfilled 的 row 標 abandoned:no_close_fill，"
                               "防止歷史死行撐爆 attribution_chain_ok denominator；"
                               f"≤0 關閉 Pass 3。默認 {DEFAULT_ABANDON_AFTER_DAYS}d。"))
+    # W-AUDIT-4b-M2 (2026-05-09): trading.fills.entry_context_id backfill flag。
+    # 默認 off（safety fallback）；cron wrapper 顯式加 --backfill-fill-entry-context-id
+    # 啟用。實作獨立於 backfill_labels（不影響既有 ML training pipeline）。
+    parser.add_argument("--backfill-fill-entry-context-id", action="store_true",
+                        help=("W-AUDIT-4b-M2：補回 trading.fills.entry_context_id 的 NULL "
+                              "close fills（找最近 entry fill 的 context_id）。"
+                              "默認 off；cron wrapper 啟用。"))
+    parser.add_argument("--fill-entry-context-window-days", type=int, default=30,
+                        help="W-AUDIT-4b-M2：fill entry_context_id 回填的時間窗（默認 30d）")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -696,6 +885,17 @@ def _main() -> int:
         for row in stale:
             print(f"  {row}")
         return 1  # non-zero = operator alert
+
+    # W-AUDIT-4b-M2: 若顯式啟用 fill entry_context_id 回填，先跑這一 pass
+    # （需先於 backfill_labels，因為下游 EXISTS 用 entry_context_id JOIN）
+    if args.backfill_fill_entry_context_id:
+        m2_result = backfill_fill_entry_context_id(
+            engine_mode=args.engine_mode,
+            batch_limit=args.batch_limit,
+            window_days=args.fill_entry_context_window_days,
+            dry_run=args.dry_run,
+        )
+        print(f"W-AUDIT-4b-M2 fill entry_context_id backfill result: {m2_result.to_dict()}")
 
     # ≤0 關閉 Pass 3（caller-controlled safety fallback）
     abandon_days = args.abandon_after_days if args.abandon_after_days > 0 else None

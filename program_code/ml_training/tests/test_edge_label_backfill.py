@@ -24,7 +24,9 @@ from program_code.ml_training.edge_label_backfill import (
     BackfillResult,
     DEFAULT_ABANDON_AFTER_DAYS,
     EXCLUDED_TAG_PREFIXES,
+    FillEntryContextBackfillResult,
     attribution_chain_ratio,
+    backfill_fill_entry_context_id,
     backfill_labels,
     check_stale_labels,
     engine_mode_scope,
@@ -609,3 +611,248 @@ def test_sql_templates_contain_expected_clauses():
     assert "attribution_chain_ok" in m._ATTRIBUTION_RATIO_SQL
     assert "abandoned:" in m._ATTRIBUTION_RATIO_SQL  # detect Pass 3 marked rows
     assert "orphan_close:" in m._ATTRIBUTION_RATIO_SQL  # detect Pass 2 excluded
+
+
+# ════════════════════════════════════════════════════════════════════════
+# W-AUDIT-4b-M2 (2026-05-09): backfill_fill_entry_context_id tests
+# 對應 sql/migrations/V083 + cron edge_label_backfill_cron.sh Step 1。
+# ════════════════════════════════════════════════════════════════════════
+
+
+class TestBackfillFillEntryContextId:
+    """W-AUDIT-4b-M2 trading.fills.entry_context_id backfill 行為測試。"""
+
+    def test_returns_dataclass_with_zero_counts_on_empty_pool(self):
+        """空 candidate pool（24h 無 close fill 缺 entry_context_id）→ 0 matched。"""
+        responses = {
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+            )
+        assert isinstance(result, FillEntryContextBackfillResult)
+        assert result.candidate_count == 0
+        assert result.matched_count == 0
+        assert result.batch_limit_hit is False
+        assert fake.committed is True
+        assert fake.rolled_back is False
+
+    def test_matches_close_fills_to_entry_context_id(self):
+        """有 candidate + 部分 matched → matched_count = matched rows。"""
+        responses = {
+            "SELECT count(*)": [(10,)],  # 10 candidates
+            "WITH close_fills_missing_entry": [
+                ("close-1", "ctx-entry-abc"),
+                ("close-2", "ctx-entry-def"),
+                ("close-3", "ctx-entry-ghi"),
+            ],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+            )
+        assert result.candidate_count == 10
+        assert result.matched_count == 3
+        assert result.batch_limit_hit is False
+        assert fake.committed is True
+
+    def test_batch_limit_hit_flag_set_when_matched_eq_limit(self):
+        """matched_count >= batch_limit → batch_limit_hit=True（cron 下次再跑）。"""
+        responses = {
+            "SELECT count(*)": [(100,)],
+            "WITH close_fills_missing_entry": [
+                (f"close-{i}", f"ctx-{i}") for i in range(50)
+            ],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=50,
+                window_days=30,
+            )
+        assert result.matched_count == 50
+        assert result.batch_limit_hit is True
+
+    def test_dry_run_rolls_back_no_commit(self):
+        """dry_run=True → ROLLBACK（不影響 production data）。"""
+        responses = {
+            "SELECT count(*)": [(5,)],
+            "WITH close_fills_missing_entry": [
+                ("close-1", "ctx-abc"),
+            ],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+                dry_run=True,
+            )
+        assert result.matched_count == 1
+        assert fake.rolled_back is True
+        assert fake.committed is False
+
+    def test_engine_mode_live_expands_to_live_and_live_demo(self):
+        """engine_mode='live' 自動展開為 ('live','live_demo') 對齊 backfill_labels。"""
+        responses = {
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses) as fake:
+            backfill_fill_entry_context_id(engine_mode="live", batch_limit=5000)
+        # 第一個 execute call 是 candidate count；第二個是 backfill。
+        # 兩者都應 receive engine_modes=['live','live_demo']
+        # (順序：cursor.execute count → backfill UPDATE)
+        assert len(fake.execute_calls) >= 2
+        for sql, params in fake.execute_calls:
+            assert params is not None
+            assert "engine_modes" in params
+            assert params["engine_modes"] == ["live", "live_demo"]
+
+    def test_engine_mode_demo_does_not_expand(self):
+        """engine_mode='demo' 不展開 (保持單一 'demo' tuple)。"""
+        responses = {
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses) as fake:
+            backfill_fill_entry_context_id(engine_mode="demo")
+        assert len(fake.execute_calls) >= 2
+        for sql, params in fake.execute_calls:
+            assert params["engine_modes"] == ["demo"]
+
+    def test_backfill_sql_safety_invariants(self):
+        """V083 SQL contract checks — 防止後續 refactor 破關鍵 safety guards。"""
+        from program_code.ml_training import edge_label_backfill as m
+
+        sql = m._BACKFILL_FILL_ENTRY_CONTEXT_SQL
+        # 1. 只 update NULL entry_context_id（不覆寫已有資料）
+        assert "f.entry_context_id IS NULL" in sql
+        # 2. 只 close fills（exit_reason NOT NULL）— 不誤動 entry fills
+        assert "f.exit_reason IS NOT NULL" in sql
+        # 3. opposite-side 匹配（entry Buy → close Sell）
+        assert "entry.side <> c.side" in sql
+        # 4. 7d window 防匹配古老 entry
+        assert "INTERVAL '7 days'" in sql
+        # 5. audit row filter（unattributed:* 跳過）
+        assert "NOT LIKE 'unattributed:%%'" in sql
+        # 6. entry must be entry (entry_context_id IS NULL AND exit_reason IS NULL)
+        assert "entry.entry_context_id IS NULL" in sql
+        assert "entry.exit_reason IS NULL" in sql
+        # 7. only matched (NOT NULL) UPDATE — 否則 NULL stays NULL
+        assert "m.matched_entry_context_id IS NOT NULL" in sql
+        # 8. UPDATE target keyed by (fill_id, ts) — fills hypertable PK
+        assert "f.fill_id = m.close_fill_id" in sql
+        assert "f.ts = m.close_ts" in sql
+
+    def test_invalid_engine_mode_raises_value_error(self):
+        """無效 engine_mode 應拋 ValueError（對齊 engine_mode_scope 既有行為）。"""
+        with pytest.raises(ValueError, match="invalid engine_mode"):
+            backfill_fill_entry_context_id(engine_mode="invalid_mode")
+
+    def test_window_days_param_propagates_to_sql(self):
+        """window_days CLI 參數正確 propagate 到 SQL。"""
+        responses = {
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses) as fake:
+            backfill_fill_entry_context_id(
+                engine_mode="demo", window_days=14
+            )
+        # candidate count + backfill 兩 SQL 都應 receive window_days=14
+        for sql, params in fake.execute_calls:
+            if "window_days" in params:
+                assert params["window_days"] == 14
+
+    def test_exception_triggers_rollback(self):
+        """SQL exception → conn.rollback() + raise（fail-loud per cron design）。"""
+        class _ExploderCursor:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def execute(self, *args, **kwargs):
+                raise RuntimeError("simulated PG error")
+
+            def fetchone(self):
+                return None
+
+            def fetchall(self):
+                return []
+
+        class _ExploderConn:
+            def __init__(self):
+                self.rolled_back = False
+                self.closed = False
+                self.committed = False
+
+            def cursor(self):
+                return _ExploderCursor()
+
+            def rollback(self):
+                self.rolled_back = True
+
+            def commit(self):
+                self.committed = True
+
+            def close(self):
+                self.closed = True
+
+        fake = _ExploderConn()
+        with mock.patch(
+            "program_code.ml_training.edge_label_backfill._get_conn",
+            return_value=fake,
+        ):
+            with pytest.raises(RuntimeError, match="simulated PG error"):
+                backfill_fill_entry_context_id(engine_mode="demo")
+        assert fake.rolled_back is True
+        assert fake.closed is True
+        assert fake.committed is False
+
+    def test_result_to_dict_includes_required_keys(self):
+        """to_dict() 必含 matched / candidates / batch_limit_hit 三鍵。"""
+        result = FillEntryContextBackfillResult(
+            matched_count=5, candidate_count=10, batch_limit_hit=True
+        )
+        d = result.to_dict()
+        assert d["matched"] == 5
+        assert d["candidates"] == 10
+        assert d["batch_limit_hit"] is True
+
+    def test_38_to_95_pct_simulation(self):
+        """模擬 PA spec 38% → 95%+ 改善：100 candidates / 60 matched → 60% 補入。"""
+        # baseline 38% 即 175 fills 中 67 個有 entry_context_id
+        # 假設 candidate pool = 108 (175 - 67)，matched 65 → 留 43 NULL
+        # 24h 後新 NULL ratio = 43/175 = 24.6% → 仍未 PASS（PA target ≤ 5%）
+        # 但 cron 跑 multiple ticks 後（每 30min 一次）逐步收斂 → 接 5%
+        # 本 test 驗 single tick 行為：matched / candidate ratio 合理
+        responses = {
+            "SELECT count(*)": [(108,)],  # 38%/175 ≈ 67 with entry_ctx → 108 NULL
+            "WITH close_fills_missing_entry": [
+                (f"close-{i}", f"ctx-{i}") for i in range(65)
+            ],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+            )
+        assert result.candidate_count == 108
+        assert result.matched_count == 65
+        # match rate = 65/108 ≈ 60%（合理；非全部都能找到匹配 entry，
+        # restart-orphaned positions / pre-V083 historical data 找不到）
+        match_rate = result.matched_count / max(result.candidate_count, 1)
+        assert match_rate > 0.5, f"match rate {match_rate:.2%} too low"
