@@ -157,6 +157,7 @@ def test_os_005_launchd_preflight_is_present_and_fail_closed() -> None:
     assert "DB_URL_FILE" in body
     assert "IPC_SECRET_FILE" in body
     assert "fail \"unreplaced placeholder" in body
+    assert "trading API plist must not bind all interfaces" in body
 
 
 def test_os_006_mac_bootstrap_db_is_least_privilege() -> None:
@@ -217,6 +218,11 @@ def test_w_audit_2_api_launches_default_to_loopback_bind() -> None:
     assert "OPENCLAW_BIND_HOST=127.0.0.1" in deploy_readme
     assert "--host 0.0.0.0" not in deploy_readme
     assert "Tailscale Serve" in deploy_readme
+
+    launchd_api = _read("helper_scripts/deploy/com.openclaw.trading-api.plist")
+    assert "<string>--host</string>" in launchd_api
+    assert "<string>127.0.0.1</string>" in launchd_api
+    assert "<string>0.0.0.0</string>" not in launchd_api
 
 
 def test_w_audit_2_ai_service_listener_chmods_unix_socket() -> None:
