@@ -57,6 +57,10 @@ use crate::governance_emit::{
     build_bypass_transition_msg, build_msg_from_last_transition, emit_transition_fail_soft,
     EngineModeTagResolver,
 };
+// W-AUDIT-9 T6 (AMD-2026-05-09-03 §4.5)：強型別 LeaseScope + CanaryStageTransition
+// row payload；新增 acquire_canary_stage_promotion_lease() facade 在現有 acquire_lease
+// hot path 之上提供 operator-only 路徑（TTL 60s strict）。
+use crate::lease_scope::{CanaryStageTransition, LeaseScope};
 // Re-export facade + emit types so callers keep `use governance_core::*` paths.
 // 重新導出 facade + emit 端類型，使 caller 維持 `use governance_core::*` 路徑。
 pub use crate::governance_emit::{
@@ -512,6 +516,127 @@ impl GovernanceCore {
         }
 
         Ok(LeaseId::Active(lease_id_str))
+    }
+
+    /// W-AUDIT-9 T6 — manual canary stage promotion lease facade
+    /// （AMD-2026-05-09-03 §4.5）。
+    /// 為 graduated canary 5-stage 的 manual promotion 提供 operator-only 路徑：
+    /// - scope 鎖定為 `LeaseScope::CanaryStagePromotion`（強型別 enum，不接 raw &str）
+    /// - TTL 預設 60 秒（spec 強制；caller 不可覆寫，避免 silent drift）
+    /// - 必經 `is_authorized()` gate（hard fail-closed 5-gate live boundary 之一）
+    /// - 內部呼 acquire_lease 走標準 SM transition (Draft → Registered → Active)，
+    ///   保證 V054 lease_transitions audit emit 與其他 lease 一致
+    /// - 回傳 `LeaseId::Active(String)` 給 GUI / IPC caller，由 caller 將 lease_id
+    ///   寫入 `governance.canary_stage_log.decision_lease_id`（PG NOT NULL 強制）
+    ///
+    /// W-AUDIT-9 T6 — manual canary stage promotion lease facade.
+    /// Operator-only path with strict TTL 60s; auth-gated; uses standard SM
+    /// transition for V054 audit emit consistency.
+    ///
+    /// SAFETY / 不變量：
+    /// - 必為 Production profile（GovernanceProfile::Production）— graduated canary
+    ///   只適用 alpha-bearing pathway（AMD-2026-05-09-03 §3.5）；Exploration /
+    ///   Validation profile 應在 caller 端拒絕，本 facade 不重複檢查（依賴 caller
+    ///   遵守 spec）。
+    /// - `is_authorized()=true` 是 hard gate；違反 = `AuthNotEffective` 拒回，
+    ///   下游 caller MUST fail-closed（不寫 canary_stage_log row）。
+    /// - lease_id 由 SM `LeaseObject::new()` 生成；caller 拿到 `LeaseId::Active(...)`
+    ///   後須在 60 秒內完成 PG INSERT + release_lease(Consumed)；超期 ExpiryGuardian
+    ///   自動清理（與其他 lease 一致 TTL 行為）。
+    ///
+    /// # Arguments
+    /// - `intent_id`: caller 指定唯一 promote 動作 id（建議 GUI 端用 UUID v4）。
+    /// - `source_stage`: audit metadata，例如 "operator_gui" / "ipc_canary_promote"。
+    ///
+    /// # Returns
+    /// - `Ok(LeaseId::Active(s))` — 成功，lease_id 字串供 caller 寫入 audit row。
+    /// - `Err(GovernanceError::AuthNotEffective)` — `is_authorized()=false`。
+    /// - `Err(GovernanceError::LeaseSmFailure)` — SM 內部錯（極罕）。
+    pub fn acquire_canary_stage_promotion_lease(
+        &self,
+        intent_id: &str,
+        source_stage: &str,
+    ) -> Result<LeaseId, GovernanceError> {
+        // W-AUDIT-9 T6 SAFETY — operator authority hard gate。
+        // graduated canary stage promotion 是「manual」動作，per AMD-2026-05-09-03 §4.5
+        // 必由 operator 在 GUI / IPC 觸發；本路徑 100% 拒 non-Production profile + 0
+        // auth 場景。Production 標籤是 caller 義務（acquire_lease 內部已確認）。
+        let scope = LeaseScope::CanaryStagePromotion;
+        debug_assert!(
+            scope.requires_operator_authority(),
+            "CanaryStagePromotion 必觸發 operator authority gate（spec invariant）"
+        );
+
+        // 內部呼 acquire_lease — Production profile 不可繞；TTL 強制 60s（spec）。
+        // scope 字串走 LeaseScope::as_audit_str() 對齊 audit metadata。
+        self.acquire_lease(
+            intent_id,
+            scope.as_audit_str(),
+            scope.default_ttl_ms(),
+            GovernanceProfile::Production,
+            source_stage,
+        )
+    }
+
+    /// W-AUDIT-9 T6 — 為 manual_promote 構造一筆 `governance.canary_stage_log` row
+    /// 的強型別 payload。caller 必先 acquire 一個 `CanaryStagePromotion` lease 並
+    /// 把 `LeaseId::Active(String)` unwrap 後傳入；本 helper 保證 `decision_lease_id`
+    /// 必填（PG NOT NULL CHECK invariant）。實際 PG INSERT 由 caller（E1-B T2 V0XX
+    /// migration land 後的 governance_hub.py / IPC 層）完成 — 本 facade 只生成
+    /// payload contract，不接 PG。
+    ///
+    /// W-AUDIT-9 T6 — assemble typed audit row payload for manual_promote.
+    /// PG INSERT is owned by caller (governance_hub.py / IPC layer) once T2
+    /// V0XX migration lands; this helper guarantees lease_id is always carried.
+    ///
+    /// SAFETY / 不變量：
+    /// - 接收 `LeaseId::Active(String)` 的 String 內容；`LeaseId::Bypass` 不允許
+    ///   走 manual_promote 路徑（debug_assert 保護），因 graduated canary 只適用
+    ///   alpha-bearing Production（AMD-2026-05-09-03 §3.5）。
+    /// - `from_stage / to_stage` 邊界由 PG SMALLINT CHECK 強制（0..=4），本層
+    ///   不重複驗，讓 caller 拿一致 fail-loud。
+    /// - `now_ms` 由 caller 注入（例如 `openclaw_core::sm::now_ms()`），保持
+    ///   openclaw_core facade clock-free。
+    #[allow(clippy::too_many_arguments)]
+    pub fn make_canary_stage_promotion_audit_row(
+        &self,
+        now_ms: u64,
+        environment: impl Into<String>,
+        cohort_strategy: Option<String>,
+        cohort_symbol: Option<String>,
+        from_stage: u8,
+        to_stage: u8,
+        reason: impl Into<String>,
+        initiated_by: impl Into<String>,
+        lease_id: &LeaseId,
+        metric_snapshot: serde_json::Value,
+    ) -> Result<CanaryStageTransition, GovernanceError> {
+        // W-AUDIT-9 T6 SAFETY — 拒 Bypass。caller 端應確保走 Production profile
+        // acquire 路徑；Bypass = Exploration/Validation = graduated canary 不適用。
+        let lease_id_str = match lease_id {
+            LeaseId::Active(s) => s.clone(),
+            LeaseId::Bypass => {
+                // 直接回 LeaseScopeNotPermitted（已存在 enum variant，原語意「scope 在
+                // 當前 auth 不允許」），對齊 AMD-2026-05-09-03 §3.5 graduated canary
+                // 只適用 alpha-bearing Production。
+                return Err(GovernanceError::LeaseScopeNotPermitted(
+                    "CanaryStagePromotion 不適用 Bypass（非 Production profile）".to_string(),
+                ));
+            }
+        };
+
+        Ok(CanaryStageTransition::manual_promote(
+            now_ms,
+            environment,
+            cohort_strategy,
+            cohort_symbol,
+            from_stage,
+            to_stage,
+            reason,
+            initiated_by,
+            lease_id_str,
+            metric_snapshot,
+        ))
     }
 
     /// AMD-2026-05-02-01 §3 point 2: release lease per outcome.
@@ -1506,4 +1631,208 @@ mod tests {
     // module under the §9 pre-existing baseline exception buffer.
     // HIGH-1 e2e 測試置於獨立 integration test 檔（tests/engine_mode_tag_e2e.rs）
     // 維持本模組在 §九 pre-existing baseline exception buffer 內。
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // W-AUDIT-9 T6 (AMD-2026-05-09-03 §4.5) — graduated canary stage promotion
+    // 用 LeaseScope::CanaryStagePromotion 走專用 facade，並在 manual_promote
+    // audit row 中強制攜帶 decision_lease_id。
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// W-AUDIT-9 T6 happy path —
+    /// Production 授權 + acquire `CanaryStagePromotion` lease → 60s TTL →
+    /// audit row 必帶 decision_lease_id。對應 §三 invariant 11
+    /// (`canary_stage_log.decision_lease_id` for `manual_promote` PG NOT NULL)。
+    #[test]
+    fn test_canary_stage_promotion_lease_carries_decision_lease_id() {
+        let mut core = GovernanceCore::new();
+        // Production 授權（grant_paper_authorization 對 SM-1 是普通 auth grant，
+        // 內容是 paper 標籤但 is_authorized() 只檢查 effective auth 是否非空）。
+        core.grant_paper_authorization(None).unwrap();
+
+        // 經專用 facade acquire — operator-only path。
+        let lease = core
+            .acquire_canary_stage_promotion_lease("manual_promote_intent_001", "operator_gui")
+            .expect("Production+auth 必能 acquire CanaryStagePromotion lease");
+
+        // 必為 Active variant（Production profile 走 SM 真路徑）；不可為 Bypass。
+        assert!(
+            matches!(lease, LeaseId::Active(_)),
+            "CanaryStagePromotion 必走 SM Active 路徑，不可 Bypass"
+        );
+
+        let lease_id_str = match &lease {
+            LeaseId::Active(s) => s.clone(),
+            LeaseId::Bypass => unreachable!(),
+        };
+
+        // 走 make_canary_stage_promotion_audit_row 構造 row，必帶 decision_lease_id。
+        let row = core
+            .make_canary_stage_promotion_audit_row(
+                1_715_270_400_000,
+                "demo",
+                Some("ma_crossover".to_string()),
+                Some("BTCUSDT".to_string()),
+                0,
+                1,
+                "operator selected after 7d Stage 0 evidence stable",
+                "operator:supervisor",
+                &lease,
+                serde_json::json!({"observed_sharpe": 0.42, "n_trials": 13}),
+            )
+            .expect("Active lease 必可組裝 manual_promote row");
+
+        // W-AUDIT-9 T6 SAFETY 不變量驗證：
+        assert_eq!(
+            row.transition_kind, "manual_promote",
+            "row.transition_kind 必為 'manual_promote' 對齊 PG CHECK"
+        );
+        assert_eq!(
+            row.decision_lease_id,
+            Some(lease_id_str.clone()),
+            "manual_promote 必填 decision_lease_id（§5 invariant 11 PG NOT NULL）"
+        );
+        assert_eq!(row.from_stage, 0);
+        assert_eq!(row.to_stage, 1);
+        assert_eq!(row.environment, "demo");
+        assert_eq!(row.cohort_strategy, Some("ma_crossover".to_string()));
+        assert_eq!(row.cohort_symbol, Some("BTCUSDT".to_string()));
+
+        // SM 端真實 Active 狀態 + lease 物件 metadata 含 60s TTL。
+        let obj = core
+            .get_lease_by_id(&lease_id_str)
+            .expect("acquire 後 reverse lookup 必命中");
+        assert_eq!(obj.state, LeaseState::Active);
+        // intent metadata 含 scope / ttl_ms / source_stage（acquire_lease 寫入）。
+        let meta = &obj.intent;
+        assert_eq!(meta["scope"], serde_json::json!("CANARY_STAGE_PROMOTION"));
+        assert_eq!(meta["ttl_ms"], serde_json::json!(60_000));
+        assert_eq!(meta["source_stage"], serde_json::json!("operator_gui"));
+
+        // 釋放 lease 為 Consumed → SM 走 Active → Bridged → Consumed。
+        core.release_lease(&lease, LeaseOutcome::Consumed)
+            .expect("manual_promote lease release 必成功");
+    }
+
+    /// W-AUDIT-9 T6 fail-closed —
+    /// 未授權（is_authorized()=false）即拒 acquire；caller 必 fail-closed
+    /// 不寫 canary_stage_log row。
+    #[test]
+    fn test_canary_stage_promotion_lease_rejects_when_no_auth() {
+        // 全新 core，未 grant_paper_authorization → is_authorized() = false。
+        let core = GovernanceCore::new();
+        assert!(!core.is_authorized());
+
+        let result = core.acquire_canary_stage_promotion_lease("attempt_no_auth", "operator_gui");
+
+        assert!(
+            matches!(result, Err(GovernanceError::AuthNotEffective)),
+            "未授權 acquire 必 fail-closed，got: {:?}",
+            result
+        );
+    }
+
+    /// W-AUDIT-9 T6 — Bypass lease 不可走 manual_promote 路徑。
+    /// 對應 AMD-2026-05-09-03 §3.5：graduated canary 只適用 alpha-bearing
+    /// Production；Exploration / Validation profile 應在 caller 端 reject。
+    #[test]
+    fn test_canary_stage_promotion_audit_row_rejects_bypass() {
+        let core = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
+        // Validation profile 直接 acquire 任意 scope 都拿 Bypass。
+        let bypass_lease = core
+            .acquire_lease(
+                "intent_validation",
+                "CANARY_STAGE_PROMOTION",
+                60_000,
+                GovernanceProfile::Validation,
+                "irregular_path",
+            )
+            .expect("Validation acquire 永遠回 Bypass");
+        assert!(matches!(bypass_lease, LeaseId::Bypass));
+
+        // make_canary_stage_promotion_audit_row 必拒 Bypass。
+        let row_result = core.make_canary_stage_promotion_audit_row(
+            1_715_270_400_000,
+            "demo",
+            None,
+            None,
+            0,
+            1,
+            "should_fail_with_bypass",
+            "operator:supervisor",
+            &bypass_lease,
+            serde_json::json!({}),
+        );
+        assert!(
+            matches!(row_result, Err(GovernanceError::LeaseScopeNotPermitted(_))),
+            "Bypass lease 不可組 manual_promote row"
+        );
+    }
+
+    /// W-AUDIT-9 T6 — 多次連續 manual_promote 各帶獨立 lease_id（不複用）。
+    /// 對應 §三 invariant 11：每次 transition 必對應一筆 audit row + 自己的
+    /// decision_lease_id；防 lease_id 共用導致跨 transition audit 混淆。
+    #[test]
+    fn test_canary_stage_promotion_lease_id_unique_per_transition() {
+        let mut core = GovernanceCore::new();
+        core.grant_paper_authorization(None).unwrap();
+
+        let lease_a = core
+            .acquire_canary_stage_promotion_lease("promote_a", "operator_gui")
+            .expect("acquire a");
+        let lease_b = core
+            .acquire_canary_stage_promotion_lease("promote_b", "operator_gui")
+            .expect("acquire b");
+
+        // 兩 lease_id 必相異（SM 內部 LeaseObject::new 用 rand::random 生成 48-bit
+        // masked，collision 概率 < 1e-12）。
+        let id_a = match &lease_a {
+            LeaseId::Active(s) => s.clone(),
+            LeaseId::Bypass => unreachable!(),
+        };
+        let id_b = match &lease_b {
+            LeaseId::Active(s) => s.clone(),
+            LeaseId::Bypass => unreachable!(),
+        };
+        assert_ne!(id_a, id_b, "兩個 manual_promote 的 lease_id 必相異");
+
+        // 兩筆 row 各自帶自己的 lease_id。
+        let row_a = core
+            .make_canary_stage_promotion_audit_row(
+                1_715_270_400_000,
+                "demo",
+                Some("ma_crossover".to_string()),
+                Some("BTCUSDT".to_string()),
+                0,
+                1,
+                "stage 1 entry",
+                "operator:supervisor",
+                &lease_a,
+                serde_json::json!({}),
+            )
+            .unwrap();
+        let row_b = core
+            .make_canary_stage_promotion_audit_row(
+                1_715_270_500_000,
+                "demo",
+                Some("ma_crossover".to_string()),
+                Some("BTCUSDT".to_string()),
+                1,
+                2,
+                "stage 2 promote",
+                "operator:supervisor",
+                &lease_b,
+                serde_json::json!({}),
+            )
+            .unwrap();
+
+        assert_eq!(row_a.decision_lease_id, Some(id_a));
+        assert_eq!(row_b.decision_lease_id, Some(id_b));
+        // transition kind 都是 manual_promote。
+        assert_eq!(row_a.transition_kind, "manual_promote");
+        assert_eq!(row_b.transition_kind, "manual_promote");
+
+        // 釋放 lease 避免 SM leak。
+        core.release_lease(&lease_a, LeaseOutcome::Consumed).unwrap();
+        core.release_lease(&lease_b, LeaseOutcome::Consumed).unwrap();
+    }
 }
