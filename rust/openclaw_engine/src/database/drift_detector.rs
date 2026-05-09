@@ -9,6 +9,8 @@
 //!   並對特徵流運行 ADWIN。非重疊 7 天測試窗口。ADWIN delta=0.05 + 3 次多數票 + 30 天預熱。
 
 use super::pool::DbPool;
+use crate::feature_collector::{FeatureSnapshot, FEATURE_DIM, FEATURE_NAMES};
+use openclaw_core::indicators::IndicatorSnapshot;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -533,6 +535,264 @@ pub struct BaselineWindow {
     pub n_samples: usize,
 }
 
+/// Historical sample used to rebuild PSI baselines.
+/// 用於重建 PSI 基線的一條歷史 34 維特徵樣本。
+#[derive(Debug, Clone)]
+pub struct HistoricalFeatureSample {
+    pub symbol: String,
+    pub ts_ms: u64,
+    pub feature_vector: Vec<f32>,
+}
+
+/// Row candidate for `observability.feature_baselines`.
+/// `observability.feature_baselines` 的待寫入行。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeatureBaselineRow {
+    pub symbol: String,
+    pub feature_name: String,
+    pub valid_from_ms: u64,
+    pub valid_until_ms: Option<u64>,
+    pub bin_edges: Vec<f64>,
+    pub bin_counts: Vec<u32>,
+    pub n_samples: usize,
+}
+
+/// Summary returned by a feature baseline write.
+/// feature baseline 寫入摘要。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FeatureBaselineWriteSummary {
+    pub rows_written: u64,
+    pub active_rows_closed: u64,
+}
+
+/// Build a 34-dim `features.online_latest`-compatible vector from a decision
+/// context snapshot row.
+/// 從 decision context snapshot 行重建與 `features.online_latest` 相同的 34 維向量。
+pub fn feature_vector_from_decision_context_snapshot(
+    symbol: &str,
+    ts_ms: u64,
+    last_price: f64,
+    indicators: IndicatorSnapshot,
+) -> Vec<f32> {
+    FeatureSnapshot::new(
+        symbol.to_string(),
+        ts_ms,
+        last_price,
+        0.0,
+        indicators,
+        "decision_context_snapshot".to_string(),
+    )
+    .to_feature_vector()
+}
+
+/// Convert a `trading.decision_context_snapshots` row into a historical feature
+/// sample. This intentionally reconstructs the Rust 34-dim feature collector
+/// vector and does not use the 17-dim edge-predictor training schema.
+/// 將 `trading.decision_context_snapshots` 行轉成歷史特徵樣本。此處刻意重建
+/// Rust feature collector 的 34 維向量，不使用 edge predictor 的 17 維訓練 schema。
+pub fn sample_from_decision_context_snapshot(
+    symbol: String,
+    ts_ms: u64,
+    last_price: f64,
+    indicators_snapshot: serde_json::Value,
+) -> Option<HistoricalFeatureSample> {
+    if !last_price.is_finite() {
+        return None;
+    }
+    let indicators: IndicatorSnapshot = serde_json::from_value(indicators_snapshot).ok()?;
+    let feature_vector =
+        feature_vector_from_decision_context_snapshot(&symbol, ts_ms, last_price, indicators);
+    if feature_vector.len() != FEATURE_DIM {
+        return None;
+    }
+    Some(HistoricalFeatureSample {
+        symbol,
+        ts_ms,
+        feature_vector,
+    })
+}
+
+/// Fetch historical feature samples from the canonical historical context
+/// source: `trading.decision_context_snapshots.indicators_snapshot`.
+/// 從 canonical 歷史上下文來源讀取樣本：
+/// `trading.decision_context_snapshots.indicators_snapshot`。
+pub async fn fetch_historical_feature_samples_from_decision_contexts(
+    pool: &DbPool,
+    lookback_days: u32,
+    symbol_filter: Option<&str>,
+) -> Result<Vec<HistoricalFeatureSample>, sqlx::Error> {
+    let Some(pg) = pool.get() else {
+        return Ok(vec![]);
+    };
+
+    let rows = sqlx::query_as::<_, (String, i64, Option<f32>, serde_json::Value)>(
+        "SELECT symbol, \
+                COALESCE(ts_ms, FLOOR(EXTRACT(EPOCH FROM ts) * 1000)::BIGINT) AS ts_ms, \
+                last_price, \
+                indicators_snapshot \
+           FROM trading.decision_context_snapshots \
+          WHERE ts >= NOW() - ($1::INT * INTERVAL '1 day') \
+            AND ($2::TEXT IS NULL OR symbol = $2) \
+            AND last_price IS NOT NULL \
+            AND indicators_snapshot IS NOT NULL \
+          ORDER BY symbol, ts ASC",
+    )
+    .bind(lookback_days as i32)
+    .bind(symbol_filter)
+    .fetch_all(pg)
+    .await?;
+
+    let mut samples = Vec::with_capacity(rows.len());
+    for (symbol, ts_ms, last_price, indicators_snapshot) in rows {
+        let Some(price) = last_price.map(|v| v as f64).filter(|v| v.is_finite()) else {
+            continue;
+        };
+        let Ok(ts_ms) = u64::try_from(ts_ms) else {
+            continue;
+        };
+        if let Some(sample) =
+            sample_from_decision_context_snapshot(symbol, ts_ms, price, indicators_snapshot)
+        {
+            samples.push(sample);
+        }
+    }
+    Ok(samples)
+}
+
+/// Build `observability.feature_baselines` rows from 34-dim historical samples.
+/// The latest window per `(symbol, feature_name)` is emitted as active
+/// (`valid_until_ms = None`); earlier windows are emitted as closed history.
+/// 從 34 維歷史樣本建立 `feature_baselines` 行。每個 `(symbol, feature_name)` 的
+/// 最新窗口為 active（`valid_until_ms = None`），較早窗口為 closed history。
+pub fn build_feature_baseline_rows(
+    samples: &[HistoricalFeatureSample],
+    window_days: u32,
+    step_days: u32,
+    n_bins: usize,
+) -> Vec<FeatureBaselineRow> {
+    let mut grouped: HashMap<(String, usize), (Vec<f64>, Vec<u64>)> = HashMap::new();
+
+    for sample in samples {
+        if sample.feature_vector.len() != FEATURE_DIM {
+            continue;
+        }
+        for (idx, value) in sample.feature_vector.iter().enumerate() {
+            if !value.is_finite() {
+                continue;
+            }
+            let entry = grouped
+                .entry((sample.symbol.clone(), idx))
+                .or_insert_with(|| (Vec::new(), Vec::new()));
+            entry.0.push(*value as f64);
+            entry.1.push(sample.ts_ms);
+        }
+    }
+
+    let mut rows = Vec::new();
+    for ((symbol, idx), (values, timestamps_ms)) in grouped {
+        let windows =
+            compute_baseline_windows(&values, &timestamps_ms, window_days, step_days, n_bins);
+        let latest = windows.len().saturating_sub(1);
+        for (win_idx, window) in windows.into_iter().enumerate() {
+            rows.push(FeatureBaselineRow {
+                symbol: symbol.clone(),
+                feature_name: FEATURE_NAMES[idx].to_string(),
+                valid_from_ms: window.valid_from_ms,
+                valid_until_ms: if win_idx == latest {
+                    None
+                } else {
+                    Some(window.valid_until_ms)
+                },
+                bin_edges: window.bin_edges,
+                bin_counts: window.bin_counts,
+                n_samples: window.n_samples,
+            });
+        }
+    }
+
+    rows.sort_by(|a, b| {
+        let a_idx = feature_index(&a.feature_name).unwrap_or(usize::MAX);
+        let b_idx = feature_index(&b.feature_name).unwrap_or(usize::MAX);
+        a.symbol
+            .cmp(&b.symbol)
+            .then_with(|| a_idx.cmp(&b_idx))
+            .then_with(|| a.valid_from_ms.cmp(&b.valid_from_ms))
+    });
+    rows
+}
+
+fn utc_from_ms(ms: u64) -> Option<chrono::DateTime<chrono::Utc>> {
+    let ms = i64::try_from(ms).ok()?;
+    chrono::DateTime::from_timestamp_millis(ms)
+}
+
+/// Write feature baseline rows to Postgres. Existing active rows for keys that
+/// receive a new active row are closed first; inserts are idempotent on
+/// `(symbol, feature_name, valid_from)`.
+/// 將 feature baseline 行寫入 Postgres。收到新 active row 的 key 會先關閉既有
+/// active row；insert 對 `(symbol, feature_name, valid_from)` 冪等。
+pub async fn write_feature_baseline_rows(
+    pool: &DbPool,
+    rows: &[FeatureBaselineRow],
+) -> Result<FeatureBaselineWriteSummary, sqlx::Error> {
+    let Some(pg) = pool.get() else {
+        return Ok(FeatureBaselineWriteSummary::default());
+    };
+
+    let mut tx = pg.begin().await?;
+    let mut summary = FeatureBaselineWriteSummary::default();
+
+    for row in rows.iter().filter(|r| r.valid_until_ms.is_none()) {
+        let Some(valid_from) = utc_from_ms(row.valid_from_ms) else {
+            continue;
+        };
+        let result = sqlx::query(
+            "UPDATE observability.feature_baselines \
+                SET valid_until = $1 \
+              WHERE symbol = $2 \
+                AND feature_name = $3 \
+                AND valid_until IS NULL",
+        )
+        .bind(valid_from)
+        .bind(&row.symbol)
+        .bind(&row.feature_name)
+        .execute(&mut *tx)
+        .await?;
+        summary.active_rows_closed += result.rows_affected();
+    }
+
+    for row in rows {
+        let Some(valid_from) = utc_from_ms(row.valid_from_ms) else {
+            continue;
+        };
+        let valid_until = row.valid_until_ms.and_then(utc_from_ms);
+        let bin_edges: Vec<f32> = row.bin_edges.iter().map(|v| *v as f32).collect();
+        let bin_counts: Vec<i32> = row.bin_counts.iter().map(|v| *v as i32).collect();
+
+        let result = sqlx::query(
+            "INSERT INTO observability.feature_baselines \
+                (symbol, feature_name, bin_edges, bin_counts, valid_from, valid_until) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
+             ON CONFLICT (symbol, feature_name, valid_from) DO UPDATE \
+                SET bin_edges = EXCLUDED.bin_edges, \
+                    bin_counts = EXCLUDED.bin_counts, \
+                    valid_until = EXCLUDED.valid_until",
+        )
+        .bind(&row.symbol)
+        .bind(&row.feature_name)
+        .bind(bin_edges)
+        .bind(bin_counts)
+        .bind(valid_from)
+        .bind(valid_until)
+        .execute(&mut *tx)
+        .await?;
+        summary.rows_written += result.rows_affected();
+    }
+
+    tx.commit().await?;
+    Ok(summary)
+}
+
 /// Rebuild PSI baselines from historical feature data using overlapping sliding windows.
 /// 使用重疊滑動窗口從歷史特徵數據重建 PSI 基線。
 ///
@@ -965,6 +1225,71 @@ mod tests {
         assert_eq!(feature_index("price"), Some(33));
         assert_eq!(feature_index("sma_20"), Some(0));
         assert!(feature_index("not_a_feature").is_none());
+    }
+
+    #[test]
+    fn test_decision_context_sample_rebuilds_feature_collector_vector() {
+        let sample = sample_from_decision_context_snapshot(
+            "BTCUSDT".to_string(),
+            1_700_000_000_000,
+            123.45,
+            serde_json::json!({
+                "rsi_14": 65.0,
+                "macd": {"macd": 1.5, "signal": 1.0, "histogram": 0.5},
+                "hurst": {"hurst": 0.7, "regime": "trending"},
+                "ewma_vol": {"ewma_vol": 0.02, "vol_regime": "High"}
+            }),
+        )
+        .expect("valid indicator snapshot should produce a sample");
+
+        assert_eq!(sample.feature_vector.len(), FEATURE_DIM);
+        assert!((sample.feature_vector[4] - 65.0).abs() < 0.001);
+        assert!((sample.feature_vector[5] - 1.5).abs() < 0.001);
+        assert!((sample.feature_vector[25] - 1.0).abs() < 0.001);
+        assert!((sample.feature_vector[27] - 3.0).abs() < 0.001);
+        assert!((sample.feature_vector[33] - 123.45).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_build_feature_baseline_rows_emits_34_active_features() {
+        let day_ms: u64 = 86_400_000;
+        let base_ts: u64 = 1_700_000_000_000;
+        let mut samples = Vec::new();
+
+        for day in 0..32_u64 {
+            let mut feature_vector = Vec::with_capacity(FEATURE_DIM);
+            for idx in 0..FEATURE_DIM {
+                feature_vector.push((idx as f32) + (day as f32 * 0.1));
+            }
+            samples.push(HistoricalFeatureSample {
+                symbol: "BTCUSDT".to_string(),
+                ts_ms: base_ts + day * day_ms,
+                feature_vector,
+            });
+        }
+
+        let rows = build_feature_baseline_rows(&samples, 30, 7, 10);
+        assert_eq!(rows.len(), FEATURE_DIM);
+        assert!(rows.iter().all(|r| r.valid_until_ms.is_none()));
+
+        let names: std::collections::BTreeSet<&str> =
+            rows.iter().map(|r| r.feature_name.as_str()).collect();
+        let expected: std::collections::BTreeSet<&str> = FEATURE_NAMES.iter().copied().collect();
+        assert_eq!(names, expected);
+        assert!(rows.iter().all(|r| r.bin_edges.len() == 11));
+        assert!(rows.iter().all(|r| r.bin_counts.len() == 10));
+    }
+
+    #[test]
+    fn test_build_feature_baseline_rows_rejects_wrong_dimension_samples() {
+        let samples = vec![HistoricalFeatureSample {
+            symbol: "BTCUSDT".to_string(),
+            ts_ms: 1_700_000_000_000,
+            feature_vector: vec![1.0; 17],
+        }];
+
+        let rows = build_feature_baseline_rows(&samples, 30, 7, 10);
+        assert!(rows.is_empty());
     }
 
     #[test]
