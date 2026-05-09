@@ -229,6 +229,12 @@ W-AUDIT-6 current fact:
   classification, and sigma-scaled reduce cooldown consume that snapshot; the
   90% margin-crisis guard remains a code safety constant; risk TOMLs expose the
   same behavior-preserving defaults
+- as of 2026-05-09, F-13 selection-bias promotion gate is source/test closed:
+  `program_code/learning_engine/promotion_gate.py` composes existing DSR(K) and
+  PBO/CSCV math into a JSON-safe fail-closed result, and
+  `promotion_pipeline.py` now requires `demo_selection_bias_report.passes=true`
+  for Demo→LivePending graduation; missing CV returns, insufficient PBO power,
+  high PBO, DSR block, or DSR borderline prevent promotion
 - no rebuild, restart, or runtime apply was performed for these checkpoints
 
 P0-NEW-VULN-1 bind-host rule:
