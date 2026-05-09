@@ -44,13 +44,13 @@ ft_dust_qty_floor_usd = 1.0
 # ─────────────────────────────────────────────────────────────────────────────
 # G2-03 (2026-04-26) — ma_crossover SL/TP per-strategy override schema (Option B2).
 # Schema landed per PA RFC `2026-04-26--g2_03_option_b_rfc.md` § 2.4 + § 6.T3.
-# All four override fields commented out — schema-only landing, NO binding values.
-# Binding deferred until G2-02 counterfactual replay produces a QC + FA approved
-# report (~2026-05-03), then operator runs `g2_03_bind_ma_sltp.sh` SOP wrapper.
+# W-AUDIT-6 (2026-05-09) binds ma_crossover R:R values here after the
+# AMD-2026-05-09-02 strategy verdict: TP enforcement is per-strategy, not global.
 #
 # Live-specific notes:
-#   - Live binding requires INDEPENDENT operator approval per memory
-#     `feedback_env_config_independence`; never copy demo binding values blindly.
+#   - This live file currently backs live_demo flow in this deployment; true
+#     mainnet still requires INDEPENDENT operator approval per memory
+#     `feedback_env_config_independence`.
 #   - Live TOML reload still gated by §四 hard boundaries (live_reserved /
 #     authorization.json HMAC / OPENCLAW_ALLOW_MAINNET=1) — schema falls under
 #     P1 risk surface, not live-execution gates.
@@ -61,11 +61,10 @@ ft_dust_qty_floor_usd = 1.0
 #   C. counterfactual_calibrator dry-run rejects before write (offline)
 #
 # G2-03（2026-04-26）—— ma_crossover SL/TP 每策略覆蓋 schema（Option B2）。
-# 落 schema 不落值；binding 等 G2-02 counterfactual 報告（~2026-05-03）+ QC/FA
-# review 後 operator 跑 g2_03_bind_ma_sltp.sh SOP 寫入。
-# Live 特性：binding 需 operator 獨立審查（feedback_env_config_independence），
-# 不可從 demo 抄；TOML reload 仍受 §四 硬邊界（live_reserved / authorization.json
-# HMAC / Mainnet env）控制。
+# W-AUDIT-6（2026-05-09）已按 AMD-2026-05-09-02 對 MA R:R 實際落值；
+# TP enforcement 僅策略級啟用，避免全局影響 grid / BB。
+# Live 特性：當前 deployment 仍是 live_demo；真 mainnet binding 需 operator
+# 獨立審查（feedback_env_config_independence）；TOML reload 仍受 §四 硬邊界。
 # ─────────────────────────────────────────────────────────────────────────────
 [per_strategy.ma_crossover]
 enabled = true
@@ -77,10 +76,13 @@ blocked_symbols = [
   "FARTCOINUSDT",
   "LABUSDT",
 ]
-# stop_loss_max_pct_override   = 2.5   # < limits.stop_loss_max_pct (must be ≤ P1)
-# take_profit_max_pct_override = 8.0   # < limits.take_profit_max_pct
-# trailing_activation_pct_override = 0.6
-# trailing_distance_pct_override   = 0.4
+# W-AUDIT-6 2026-05-09: ma_crossover R:R rewrite. Tighten MA exits through
+# per-strategy RiskConfig so TP/trailing changes do not affect grid / BB.
+stop_loss_max_pct_override = 2.5
+take_profit_max_pct_override = 8.0
+take_profit_enforced_override = true
+trailing_activation_pct_override = 0.6
+trailing_distance_pct_override = 0.4
 
 [agent]
 trailing_enabled = true

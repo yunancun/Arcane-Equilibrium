@@ -40,6 +40,13 @@ blocked_symbols = [
   "FARTCOINUSDT",
   "LABUSDT",
 ]
+# W-AUDIT-6 2026-05-09: ma_crossover R:R rewrite. Tighten MA exits through
+# per-strategy RiskConfig so TP/trailing changes do not affect grid / BB.
+stop_loss_max_pct_override = 2.5
+take_profit_max_pct_override = 8.0
+take_profit_enforced_override = true
+trailing_activation_pct_override = 0.6
+trailing_distance_pct_override = 0.4
 
 [agent]
 trailing_enabled = true

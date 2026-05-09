@@ -77,6 +77,19 @@ pub(crate) fn effective_tp_max_pct(
     }
 }
 
+/// Effective take-profit enforcement flag. A per-strategy override lets MA
+/// enforce TP without flipping the global switch for grid / BB strategies.
+/// 每策略 TP enforcement 覆蓋；允許 MA 單獨啟用止盈，不影響其他策略。
+#[inline]
+pub(crate) fn effective_take_profit_enforced(
+    limits: &GlobalLimits,
+    per_strategy: Option<&StrategyOverride>,
+) -> bool {
+    per_strategy
+        .and_then(|o| o.take_profit_enforced_override)
+        .unwrap_or(limits.take_profit_enforced)
+}
+
 // ---------------------------------------------------------------------------
 // Order admission / 訂單准入
 // ---------------------------------------------------------------------------
@@ -286,6 +299,7 @@ pub fn check_position_on_tick_with_override(
     // G2-03：先算 effective SL/TP；per_strategy=None 與 G2-03 前位元一致。
     let effective_sl = effective_sl_max_pct(limits, per_strategy);
     let effective_tp = effective_tp_max_pct(limits, per_strategy);
+    let effective_tp_enforced = effective_take_profit_enforced(limits, per_strategy);
 
     // G2-03: trailing activation/distance — per_strategy override Some + finite + > 0
     // wins; else fall back to global agent values. Validates already enforced
@@ -332,7 +346,7 @@ pub fn check_position_on_tick_with_override(
 
     // 3. Take profit (if enforced) — uses effective_tp.
     // 3. 止盈（如強制）— 使用 effective_tp。
-    if limits.take_profit_enforced {
+    if effective_tp_enforced {
         let tp_target = effective_tp * rm.tp;
         if pnl_pct >= tp_target {
             return RiskAction::ClosePosition(format!(

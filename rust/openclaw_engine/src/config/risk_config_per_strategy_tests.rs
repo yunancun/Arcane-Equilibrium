@@ -42,6 +42,7 @@ fn test_g2_03_strategy_override_default_all_overrides_none() {
     let so = StrategyOverride::default();
     assert_eq!(so.stop_loss_max_pct_override, None);
     assert_eq!(so.take_profit_max_pct_override, None);
+    assert_eq!(so.take_profit_enforced_override, None);
     assert_eq!(so.trailing_activation_pct_override, None);
     assert_eq!(so.trailing_distance_pct_override, None);
 }
@@ -55,6 +56,7 @@ fn test_g2_03_strategy_override_valid_within_limits() {
     let mut so = StrategyOverride::default();
     so.stop_loss_max_pct_override = Some(3.0); // 3% < default 5%
     so.take_profit_max_pct_override = Some(15.0); // 15% < default 20%
+    so.take_profit_enforced_override = Some(true);
     so.trailing_activation_pct_override = Some(0.8);
     so.trailing_distance_pct_override = Some(0.5);
     cfg.per_strategy.insert("ma_crossover".into(), so);
@@ -208,12 +210,11 @@ fn test_g2_03_strategy_override_position_size_over_limit_rejected() {
 
 #[test]
 fn test_g2_03_real_toml_files_load_with_ma_crossover_section() {
-    // G2-03 (2026-04-26): all three env risk_config_*.toml files must load + validate
-    // with the new `[per_strategy.ma_crossover]` schema-only block. Catches typos
-    // in commented-out field names + section header drift across env TOMLs.
-    // Comments-only fields stay None; enabled=true is the only live setting.
-    // G2-03：3 環境真實 TOML 必須 load + validate；catch 欄位拼寫漂移。
-    // 註解欄位仍 None，僅 enabled=true 為 live 設定。
+    // W-AUDIT-6: all risk_config*.toml files must load + validate with the
+    // ma_crossover R:R binding. TP enforcement is strategy-scoped so the
+    // global switch can stay false for non-MA strategies.
+    // W-AUDIT-6：四份 risk_config TOML 必須含 MA R:R 實際落值；TP enforcement
+    // 僅在策略級啟用，不全局影響其他策略。
     use std::fs;
     use std::path::PathBuf;
     let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -223,6 +224,7 @@ fn test_g2_03_real_toml_files_load_with_ma_crossover_section() {
     srv_root.pop(); // rust -> srv
 
     for toml_name in &[
+        "risk_config.toml",
         "risk_config_paper.toml",
         "risk_config_demo.toml",
         "risk_config_live.toml",
@@ -238,9 +240,8 @@ fn test_g2_03_real_toml_files_load_with_ma_crossover_section() {
         cfg.validate()
             .unwrap_or_else(|e| panic!("validate failed for {}: {}", toml_name, e));
 
-        // Confirm the new ma_crossover section is present + override fields None
-        // (commented-out in TOML, schema-only landing).
-        // 確認 ma_crossover section 存在且 override 欄位為 None（schema-only）。
+        // Confirm the ma_crossover section is present + W-AUDIT-6 R:R values.
+        // 確認 ma_crossover section 存在且 W-AUDIT-6 R:R 落值完整。
         let ma = cfg
             .per_strategy
             .get("ma_crossover")
@@ -251,23 +252,33 @@ fn test_g2_03_real_toml_files_load_with_ma_crossover_section() {
             toml_name
         );
         assert_eq!(
-            ma.stop_loss_max_pct_override, None,
-            "{}: sl override must remain commented out (None)",
+            ma.stop_loss_max_pct_override,
+            Some(2.5),
+            "{}: sl override",
             toml_name
         );
         assert_eq!(
-            ma.take_profit_max_pct_override, None,
-            "{}: tp override must remain commented out (None)",
+            ma.take_profit_max_pct_override,
+            Some(8.0),
+            "{}: tp override",
             toml_name
         );
         assert_eq!(
-            ma.trailing_activation_pct_override, None,
-            "{}: trailing_activation override must remain commented out",
+            ma.take_profit_enforced_override,
+            Some(true),
+            "{}: TP enforcement must be strategy-scoped",
             toml_name
         );
         assert_eq!(
-            ma.trailing_distance_pct_override, None,
-            "{}: trailing_distance override must remain commented out",
+            ma.trailing_activation_pct_override,
+            Some(0.6),
+            "{}: trailing_activation override",
+            toml_name
+        );
+        assert_eq!(
+            ma.trailing_distance_pct_override,
+            Some(0.4),
+            "{}: trailing_distance override",
             toml_name
         );
     }
@@ -326,6 +337,7 @@ fn test_g2_03_strategy_override_toml_round_trip_with_overrides() {
     let mut so = StrategyOverride::default();
     so.stop_loss_max_pct_override = Some(2.0);
     so.take_profit_max_pct_override = Some(8.0);
+    so.take_profit_enforced_override = Some(true);
     so.trailing_activation_pct_override = Some(0.6);
     so.trailing_distance_pct_override = Some(0.4);
     cfg.per_strategy.insert("ma_crossover".into(), so);
@@ -334,6 +346,7 @@ fn test_g2_03_strategy_override_toml_round_trip_with_overrides() {
     let de_so = de.per_strategy.get("ma_crossover").expect("ma_crossover");
     assert_eq!(de_so.stop_loss_max_pct_override, Some(2.0));
     assert_eq!(de_so.take_profit_max_pct_override, Some(8.0));
+    assert_eq!(de_so.take_profit_enforced_override, Some(true));
     assert_eq!(de_so.trailing_activation_pct_override, Some(0.6));
     assert_eq!(de_so.trailing_distance_pct_override, Some(0.4));
     assert!(de.validate().is_ok());

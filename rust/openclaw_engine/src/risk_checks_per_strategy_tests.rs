@@ -163,6 +163,34 @@ fn test_g2_03_runtime_tp_override_tightens_take_profit() {
 }
 
 #[test]
+fn test_w_audit_6_ma_tp_enforced_override_can_enable_tp_without_global_flag() {
+    // W-AUDIT-6: ma_crossover R:R rewrite must be strategy-scoped. Global
+    // take_profit_enforced stays false so other strategies are unaffected; the
+    // MA override enables TP only when the position owner threads that override.
+    // W-AUDIT-6：MA R:R 止盈不得全局打開；per-strategy override 單獨啟用。
+    let mut cfg = default_config();
+    cfg.limits.take_profit_enforced = false;
+
+    let mut so = StrategyOverride::default();
+    so.take_profit_enforced_override = Some(true);
+    so.take_profit_max_pct_override = Some(5.0);
+
+    let action_with = call_tick_with_override(8.0, 8.0, 1.0, "unknown", Some(1.0), Some(&so), &cfg);
+    assert!(
+        matches!(action_with, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")),
+        "per-strategy TP enforcement must fire at 8% with 5% target, got {:?}",
+        action_with
+    );
+
+    let action_no = call_tick_with_override(8.0, 8.0, 1.0, "unknown", Some(1.0), None, &cfg);
+    assert!(
+        !matches!(action_no, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")),
+        "global take_profit_enforced=false must keep non-overridden strategies out of TP, got {:?}",
+        action_no
+    );
+}
+
+#[test]
 fn test_g2_03_runtime_sl_override_clamps_to_p1_when_over() {
     // G2-03 defense line B: even if a stale override > P1 survives validate
     // (race / future schema drift), runtime clamps to P1. Override 10.0 > P1
@@ -312,8 +340,9 @@ fn test_g2_03_runtime_helper_effective_sl_returns_min() {
 // W-AUDIT-6 — risk_config_demo.toml round-trip + retired funding_arb cleanup
 // W-AUDIT-6 —— risk_config_demo.toml 解析 + retired funding_arb 清理
 //
-// Anchors the post-RCA shape: demo `dynamic_stop.base_ratio` 0.4→0.25 plus
-// no `[per_strategy.funding_arb]` risk override. `funding_arb` retirement now
+// Anchors the post-RCA shape: demo `dynamic_stop.base_ratio` 0.4→0.25,
+// no `[per_strategy.funding_arb]` risk override, and ma_crossover R:R
+// overrides bound at the per-strategy layer. `funding_arb` retirement now
 // belongs to `strategy_params_{paper,demo,live}.toml::funding_arb.active=false`,
 // not to RiskConfig active/override state.
 //
@@ -323,7 +352,7 @@ fn test_g2_03_runtime_helper_effective_sl_returns_min() {
 // tightened base_ratio.
 //
 // 鎖定 demo TOML 線格式：dyn_stop base_ratio=0.25 + RiskConfig 不再承載
-// funding_arb active/override；同檔驗 Defense A (validate)。
+// funding_arb active/override + MA R:R 策略級落值；同檔驗 Defense A。
 // ===========================================================================
 
 #[test]
@@ -361,15 +390,36 @@ fn test_demo_toml_retired_funding_arb_removed_from_risk_config() {
         "funding_arb active/override state belongs to strategy_params_*.toml"
     );
 
-    // ── Pre-existing ma_crossover schema-only block must remain None ──
-    // ── 既有 ma_crossover schema-only 區塊維持 None（不被本次改動影響）──
+    // ── W-AUDIT-6 ma_crossover R:R binding must be present ──
+    // ── W-AUDIT-6 ma_crossover R:R 實際落值必存在 ──
     let ma = cfg
         .per_strategy
         .get("ma_crossover")
         .expect("[per_strategy.ma_crossover] missing in demo TOML");
     assert_eq!(
-        ma.stop_loss_max_pct_override, None,
-        "ma_crossover SL override must remain commented-out (None)"
+        ma.stop_loss_max_pct_override,
+        Some(2.5),
+        "ma_crossover SL override must be bound"
+    );
+    assert_eq!(
+        ma.take_profit_max_pct_override,
+        Some(8.0),
+        "ma_crossover TP override must be bound"
+    );
+    assert_eq!(
+        ma.take_profit_enforced_override,
+        Some(true),
+        "ma_crossover TP enforcement must be strategy-scoped"
+    );
+    assert_eq!(
+        ma.trailing_activation_pct_override,
+        Some(0.6),
+        "ma_crossover trailing activation override must be bound"
+    );
+    assert_eq!(
+        ma.trailing_distance_pct_override,
+        Some(0.4),
+        "ma_crossover trailing distance override must be bound"
     );
     assert!(
         ma.blocked_symbols

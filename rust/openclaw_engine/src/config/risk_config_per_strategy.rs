@@ -38,9 +38,11 @@ use super::{GlobalLimits, RiskConfig};
 ///
 /// G2-03 (2026-04-26) — Option B2 SL/TP per-strategy override layer:
 ///   `stop_loss_max_pct_override` / `take_profit_max_pct_override` /
-///   `trailing_activation_pct_override` / `trailing_distance_pct_override` allow
-///   ma_crossover (or any strategy) to run with tighter (never looser) SL/TP
-///   than the global `RiskConfig.limits` ceiling. Three-line enforcement:
+///   `take_profit_enforced_override` / `trailing_activation_pct_override` /
+///   `trailing_distance_pct_override` allow ma_crossover (or any strategy) to
+///   run with tighter (never looser) SL/TP than the global `RiskConfig.limits`
+///   ceiling, and to enforce TP for one strategy without globally changing all
+///   strategies. Three-line enforcement:
 ///     A. validate() rejects override > limits at IPC patch / TOML load time
 ///     B. risk_checks::check_position_on_tick clamps any survivor at runtime
 ///     C. counterfactual_calibrator dry-run rejects before write (offline)
@@ -82,6 +84,10 @@ pub struct StrategyOverride {
     /// 每策略止盈最大百分比覆蓋（必須 <= limits.take_profit_max_pct）。
     #[serde(default)]
     pub take_profit_max_pct_override: Option<f64>,
+    /// Per-strategy take-profit enforcement override. None = use global limits.
+    /// 每策略強制止盈開關覆蓋；None = 使用全局 limits。
+    #[serde(default)]
+    pub take_profit_enforced_override: Option<bool>,
     /// Per-strategy trailing activation pct override (>0 when set; not capped by P1).
     /// 每策略追蹤啟動百分比覆蓋（設值時必 >0；非 P1 上限項）。
     #[serde(default)]
@@ -103,6 +109,7 @@ impl Default for StrategyOverride {
             blocked_symbols: None,
             stop_loss_max_pct_override: None,
             take_profit_max_pct_override: None,
+            take_profit_enforced_override: None,
             trailing_activation_pct_override: None,
             trailing_distance_pct_override: None,
         }
