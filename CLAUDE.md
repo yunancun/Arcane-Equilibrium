@@ -112,6 +112,7 @@
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
 | P0-DECISION-AUDIT-2/4/5 | 已由 AMD-2026-05-09-02 收口：SM-05 Option A、W-AUDIT-6 strategy verdict、openclaw_core sunset candidates、Layer2 manual supervisor-only。剩餘是 F-01/W-AUDIT-6/W-AUDIT-5/W-AUDIT-7 implementation，非 operator decision blocker。 |
 | W-AUDIT-1..7 | W-AUDIT-1/W-AUDIT-2 已 source-closed；下一個可做項是 W-AUDIT-3。 |
+| W-AUDIT-8a Alpha Surface Foundation | SPEC PHASE 2026-05-09；R-1 architectural amendment（PA audit `2026-05-09--full_loss_architectural_root_cause_redesign.md`）— 升 Strategy `on_tick(ctx, surface)` 接口為 alpha source 一等公民。Phase A-D × 4 sprint × ~40 person-day。Spec：`docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`。並行於 W-AUDIT-2/-5；W-AUDIT-6 砍剩 minimum 後並行；W-AUDIT-3 不被觸碰；後續 R-2/R-3/R-4 留 8e/8f/8g。 |
 
 ---
 
@@ -143,6 +144,12 @@ decision_lease_emitted  = "shadow_bypass_lineage_only"  # 2026-05-08 operator-au
                                                         # ExecutionPlan rows. This is not true-live auth,
                                                         # not Executor order authority, and not MAG-083/084.
 max_retries             = 0
+# executor_canary_stage:
+#   Per AMD-2026-05-09-03 (graduated canary default for alpha-bearing pathways)
+#   path: docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md
+#   demo default = Stage 1 (1 strategy x 1 symbol cohort) after W-AUDIT-9 IMPL land;
+#   live (LiveDemo + Mainnet) default = Stage 0 (binary fail-closed unchanged);
+#   不適用 DOC-08 §12 / SM-04 ladder / Live boundary 5-gate / §二 16 原則硬不變式（仍強制 fail-closed）。
 
 # 永不允許的硬錯誤：
 # - 繞過 Operator 角色認證或 live_reserved 直接啟動 live session
