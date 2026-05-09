@@ -322,6 +322,41 @@ for-loop 內 `okCount++` / `failCount++` 之外，必收 `failedChangeIds.push(c
 ### `event.currentTarget` 在 inline `onclick="bulkAudit('approve')"` 模式下 reachable
 HTML 內 `<button onclick="bulkAudit('approve')">` 點擊時，`bulkAudit` 函數體內 `event` global ref 仍指向 click event；`event.currentTarget` 是觸發 button DOM。**規律**：inline onclick handler 內呼叫的 fn 可直接用 `typeof event !== 'undefined' && event && event.currentTarget` 三層 guard 拿 trigger button，不需修 HTML 改傳 `this` 參數（會破壞 caller 兼容）；jsdom 測試時 `w.event = { currentTarget: btn }` mock 即可。
 
+## W-AUDIT-9 T5 Graduated Canary GUI surface（2026-05-09 Sprint N+0 W2）
+
+### Tab 選擇：governance > settings — namespace 對齊比 historic placement 重要
+AMD-2026-05-09-03 §4.3 給的選擇：「Settings tab 或 Governance tab subsection，由 W-AUDIT-7 GUI implementer 拍板」。tab-settings.html 已有 4 sub-tab（engines/system/connection/debug）+ restart modal + apikey dialog，再塞 5-stage cohort 顯示 + manual promote 邏輯不對齊；tab-governance.html 已含 SM-01..04 + Decision Lease + EX-04 + Live Auth + Paper→Live Gate + Learning Tier — Graduated Canary 與這些治理元件天然同 namespace（cohort lineage / lease 走 LeaseScope::CanaryStagePromotion / observation gate / promotion semantics）。**規律**：新 governance 機制的 GUI placement 不是「找空位」，是「找 namespace」— 同 tab 內 cross-reference 才能讓 operator 在一頁看完整 治理 picture，不需 jump tab 拼湊。
+
+### 後端路由用既有 governance_router prefix，不新建 prefix
+governance_extended_routes.py / governance_promotion_routes.py 都 import `governance_router`（prefix=/api/v1/governance）並 attach decorator（@governance_router.get/post），檔案職能拆但 URL prefix 共享。新 `governance_canary_routes.py` 沿用此 pattern：兩個 endpoint `/canary/cohorts` + `/canary/manual_promote` 都 mount 在 `governance_router` 上。**main.py 必加 `from . import governance_canary_routes` 觸發 decorator 註冊**（不 import 則 endpoint 不存在；本 task land main.py 順帶加 governance_extended / governance_promotion 兩個既有 mock import，明確 documentation 觸發機制；本 commit 也修了 governance_promotion_routes 的隱性依賴）。**規律**：FastAPI router 拆檔時，sibling routes 必須在 main.py 側 explicit import 觸發 decorator 註冊；只 include_router(governance_router) 不夠（router 是 mutable container；decorator 只有 import 才執行）。
+
+### LeaseScope::CanaryStagePromotion 走字符串 facade，不擴 enum signature
+T6（E1-D 隔壁 sibling）已 IMPL `LeaseScope::CanaryStagePromotion` Rust enum + 專用 `acquire_canary_stage_promotion_lease()` 但保留既有 `acquire_lease(scope: &str, ...)` 不動 signature（避免撞 W-AUDIT-8a Phase A trait 升級時序）。**T5 後端 IMPL 的選擇**：直接呼 `governance_hub.acquire_lease(scope='CanaryStagePromotion', ttl_seconds=60.0)` — 字符串對齊 `LeaseScope::as_audit_str()`，TTL 60s strict per AMD §4.5。這保「最小影響」+ 不破隔壁 E1 sprint。**規律**：跨 wave / 跨 agent IMPL 時，downstream 用 upstream API 採「最小調用面」原則（既有 generic facade 字符串接口 > 新 typed enum 簽名）— 即使 typed enum 已存在；除非 upstream 明示 deprecate string facade。
+
+### SHADOW_BYPASS sentinel 拒寫 audit row 是 invariant 防線
+governance_hub.acquire_lease 在 `_shadow_mode_provider() == True` 時走 PA push back #2 short-circuit，回 `SHADOW_BYPASS:<intent_id>` sentinel。canary_stage_log 的 `decision_lease_id` 是 PG `UUID` type + `manual_promote` rows NOT NULL（V080 CHECK constraint）。SHADOW_BYPASS 字符串是合法 lease_id 字面值但**不是合法 UUID**，又**不是真授權鏈**（per AMD §4.5）。**雙層防線**：(1) 路由層 `_is_shadow_bypass_lease()` 顯式判斷拒 409；(2) `_write_canary_stage_log_manual_promote()` 內 `uuid.UUID(decision_lease_id)` 校驗 fail-closed 回 None。應用層 + DB 層雙鎖避免 SHADOW_BYPASS 進 audit chain。**規律**：sentinel value 不能進 audit DB（即使應用層忘 filter，PG type / CHECK 必擋）；雙鎖比單鎖好過 audit-replay correctness 邊界。
+
+### typed-confirm phrase 'PROMOTE' + window.prompt reason 雙模式分工
+governance critical 寫操作（per W-AUDIT-7c lessons）必走 `openTypedConfirmModal` typed-confirm；但 reason 不是 critical phrase（可任意字串），用 native window.prompt 可 — 對齊 settings tab restart modal 的 simple-step pattern。**分工**：phrase = 'PROMOTE' 走 typed-confirm 防誤觸；reason 走 native prompt 收上下文（用於 audit log 補充）。**規律**：UX 摩擦設計 = critical decision 走高摩擦（typed-confirm + actor/impact/rollback metadata）；audit context 走低摩擦（prompt or simple input）— 不必為了 audit 完整性把每個欄位都升級為 typed-confirm（會疲勞使 operator 簡化 input → 治理失效）。
+
+### caller try/catch 包 await openTypedConfirmModal（W-AUDIT-7c Round 3 lesson 內化）
+本檔 _onPromoteClick 直接學 W-AUDIT-7c Round 3：`let proceed; try { proceed = await openTypedConfirmModal(...); } catch (err) { ocToast warn; return; }`。三態完整收口：(a) reject (singleton/unexpected) → toast warn + return (b) resolve(false) cancel → toast neutral + return (c) resolve(true) proceed → 業務。新代碼從一開始就帶這個 pattern，避免 Round 3 retrofit 工。**規律**：lesson learned 應內化到下一個 IMPL 的 baseline；不應重犯一次再修一次（Round 3 fix 同 lesson 在新代碼可零成本套用）。
+
+### data-* attributes + addEventListener 取代 onclick="fn(...)" 字面注入
+inline `<button onclick="fn('${cohort_id}', ...)">` 在 cohort_id 含 quote / backslash 時會 break HTML parsing 或 XSS 注入。改用 `<button data-cohort-id="${ocEsc(cohort_id)}" ...>` + JS 端 `btn.addEventListener('click', ev => { const id = ev.currentTarget.dataset.cohortId; ... })`。**規律**：dynamic 字串進 attribute 必過 ocEsc + addEventListener > onclick=；onclick= 只適合純靜態無 user input 字面值。inline `<button onclick="canaryRefresh()">` OK；inline `<button onclick="canaryPromote('${id}')">` 必拒。
+
+### 5-stage 視覺合約：grid 5-col + 行動版 wrap 為 2 col
+desktop 1366x768 / 1920x1080 都 5 欄並排清晰；行動版 < 700px 5 欄太擠（11px font 仍不夠），page-scoped `@media (max-width: 700px)` 改 grid-template-columns 為 2 欄 wrap（per 之前 SEV-2 #1 retrofit 同 pattern）。Stage 0 / 1-3 / 4 三色變體（neutral / blue active / red warn）對齊 governance 顏色語義（red = LIVE_PENDING 必慎，blue = 觀察期中，gray = shadow）。**規律**：N-stage ladder 顯示在 desktop 用 grid 平鋪；mobile 必 wrap，wrap 條件 = card 最小寬 < `100vw / N`（5 stage 約 2-2.5 col 為臨界）。
+
+### test fixture 用 lenient HTMLParser + py_compile + node --check 三層
+Mac 端：`python3 -c "html.parser"` lenient 跑 stack residue + py_compile + node --check 三套（node 可能未裝；條件跳過）。Linux 端 ssh bridge 跑真 pytest（後端 25 case + GUI static 12 case 共 37 PASS）+ sibling 13 case regression（governance_routes_auth + W-AUDIT-7c）共 60 PASS。**規律**：Mac 開發只能驗 syntax + structural；Linux 必 ssh 跑 import-time + runtime business logic。後端 unit test 用 patch.object(GOV_HUB, ...) mock 即可，不需開 FastAPI app（避免 db_pool / IPC singleton 撞 Mac import-time side effect）。
+
+### XSS 防護 fixture：innerHTML 賦值點向前 1500 char 找 ocEsc
+原本想法：每個 `innerHTML =` 點向後 200 char 視窗找 ocEsc（看 RHS 是 placeholder string literal 直接通過）。實測失敗：`el.innerHTML = html;` 是 already-built var，向後找不到 ocEsc 但 html var 是同 fn body 用 ocEsc 拼出來的。改向前 1500 char 視窗（同 fn body）找 ocEsc 或 placeholder pattern。**規律**：fixture 對 `innerHTML = var` pattern 必查同 function body upstream 證據；單看 RHS 200 char 是字面字串賦值才有效；變數賦值要 trace var 來源。
+
+### 後端 25 case + GUI 12 case + sibling 13 case = 60 PASS
+後端覆蓋：payload validation 跳階 / Stage 4 / 反向 / 相鄰；SHADOW_BYPASS sentinel 4 case；DB write UUID + DB unavailable 3 case；query active cohorts / metric registry pg_unavailable 3 case；POST handler full flow 7 case（acquire fail / shadow / non-operator / skip / happy / db fail / hub unavailable）；constants 3 case。GUI 覆蓋：HTML structure / JS balance / node check / DOM IDs / function exposure / CSS / XSS / lease constants / main.py registration / a11y / typed-confirm phrase / no-native-confirm 12 case。**規律**：新 endpoint 配套 fixture 必涵蓋：(1) 路由 sad path 覆蓋 (2) DB layer fail-soft (3) auth gate (4) constants invariant (5) GUI structural / a11y / XSS / lesson learned grep — 五層全跑齊才能在 sign-off 階段守住「無 silent runtime regression」。
+
 ## W-AUDIT-7c Round 3 fix 教訓（2026-05-09，E2 senior catch HIGH-1）
 
 ### Singleton guard reject 必由 caller 接，否則「不靜默」初衷被 finally 反噬
