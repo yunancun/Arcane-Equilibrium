@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | W-AUDIT-6c portfolio VaR/CVaR/EVT: added historical VaR/CVaR, EVT/GPD tail fit, stationary block-bootstrap CI, LUNA/FTX/COVID stress scenarios, and required demo tail-risk evidence for DEMO_ACTIVE→LIVE_PENDING promotion | workspace/reports/2026-05-09--w_audit_6c_portfolio_tail_risk.md |
 | 2026-05-09 | Post-rebuild `[40]` BILLUSDT grid negative-cell guard: after MA R:R rebuild, passive healthcheck failed only `[40]` from `grid_trading/BILLUSDT` n=11 avg=-49.67bps; source-blocked BILLUSDT for new grid entries across paper/demo/live strategy params, leaving close/reduce enabled | workspace/reports/2026-05-09--post_rebuild_bill_grid_negative_cell.md |
 | 2026-05-09 | W-AUDIT-6 bb_breakout 5m RFC/IMPL: retired the 1m rescue family, added real 5m indicator delivery through TickContext, seeded 1m+5m klines at bootstrap, exposed `signal_timeframe`, and kept live disabled while demo collects 5m evidence | workspace/reports/2026-05-09--w_audit_6_bb_breakout_5m.md |
 | 2026-05-09 | W-AUDIT-6 ma_crossover R:R trailing/TP: added strategy-scoped TP enforcement override, bound four risk_config TOMLs to MA SL 2.5% / TP 8.0% / trailing 0.6%+0.4%, and passed targeted + full Rust lib tests before sync/rebuild | workspace/reports/2026-05-09--w_audit_6_ma_crossover_rr.md |
