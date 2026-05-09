@@ -2,6 +2,60 @@
 
 ## 工作記憶
 
+### 2026-05-09 Sprint N+0 Day 3-5 Regression Baseline（4 sub-agent IMPL 9 commits，HEAD `f5574c5a`）— **E4 FAIL → RETURN-TO-E1**
+
+**對象**：4 sub-agent 平行交付（W-AUDIT-9 T1+T2 + W-AUDIT-9 T3 + W-AUDIT-9 T6 + W-AUDIT-6d 4/5/6 + B-M1 + W-AUDIT-4b-M1）共 9 commits，已 push origin + Linux fast-forward sync 至 `f5574c5a`；對比 v3 baseline `da2aba11`（pytest 3961/3 fail / cargo lib 2584/0 fail）。
+
+**Verdict**：**FAIL** — 雙跑 deterministic identical（0 transient flake），但 **5 個 NEW regression 確認**：
+- 2 個 Rust IPC test fail — `ipc_server::tests::config::test_g3_02_a2_patch_executor_routes_to_demo_engine` + `test_g3_02_a2_patch_executor_shadow_mode_via_patch_risk_config` — W-AUDIT-9 T1+T2 commit `094f9914` `ExecutorConfig::validate()` §4.4 invariant `shadow_mode == canary_stage.as_shadow_mode()` 拒絕舊 IPC patch 寫 `shadow_mode=false` 但無 `canary_stage` 同步的 payload；E1-A 漏更新 sibling test fixture。在 v3 baseline `da2aba11` 工作樹下這 2 個 test 是 PASS（cargo test ipc_server::tests::config = 15/0）→ HEAD 變 fail 確認 = NEW regression。
+- 3 個 Python `test_executor_decision_parity` fail — `test_golden_fixtures_agree_rate` (10/20 fail) / `test_synthetic_handcrafted_agree_rate` (20/40 fail) / `test_overall_agree_rate_ge_95pct` (40/70 below 67) — W-AUDIT-9 T3 commit `200188ad` 改 `_read_shadow_mode()` 走 stage projection，所有 live fixture 走 fail-closed `block_shadow` 預設；fixture 沒注入 `canary_stage_provider()` 同步 stage>=1。E1-C 在 `_make_runtime_config` helper 修了但漏 parity fixture builder（IMPL report §2.2 自承）。在 v3 baseline 下 parity = 5/0 / agree=70/70 100% → HEAD 全 disagree = NEW regression。
+- 1 個 CI workflow test fail — `test_ci_workflow_runs_release_cargo_check_for_openclaw_engine` — commit `0dc6d659 ci: 拆兩個 job 取代 matrix if` 改 workflow 但沒同步 sibling structure test 的 `'rustup target add "${{ matrix.target }}"' in WORKFLOW` assertion。**非本 4 sub-agent 範圍**但仍是 N+0 chain regression。
+
+| 引擎 | run 1 | run 2 | v3 baseline | delta |
+|---|---:|---:|---:|---|
+| Linux cargo lib openclaw_engine | 2622/2 | 2622/2 | 2584/0 | +38 PASS / +2 NEW fail |
+| Linux pytest tests/ + control_api_v1/ | 4262/8 | 4262/8 | 3961/3* | +301 PASS / +5 NEW fail |
+| Mac cargo build --release engine + core | 0 error | n/a | 0 error | match ✓ |
+| V080 schema mock pytest | 21/0 | 21/0 | new | match ✓ |
+| V080 + V082 Linux PG empirical apply | OK no-op | OK no-op | n/a | idempotent ✓ |
+
+*v3 baseline 3961 是 control_api_v1 only；本 round 跑 tests/ + control_api_v1 = +301 cumulative。
+
+**Pre-existing 4 fail 不變**（v3 已記載）：`test_oe_006_close_retry_budget_has_real_timeout_guard` (NEW-3) / `test_replay_routes_safe_query_audit::test_case2_pg_kill_simulation_returns_200_degraded` (NEW-1) / `test_archive_top_level_files_are_all_indexed` (docs index drift) / `test_grafana_data_writer::test_start_sets_running` (NEW-4 leader lock flaky)。
+
+**雙端 git status clean**：Mac `git status --porcelain` = 0 lines；Linux `git status --porcelain` = 0 lines（V080+V082 apply 後無 untracked）；HEAD 兩端同步 `f5574c5a`。
+
+**Cross-language consistency**：Rust `CanaryStage::Stage0..Stage4` ↔ Python `CanaryStage` IntEnum 0..4 + `as_shadow_mode()` projection bit-exact 對齊（`matches!(self, Stage0)` ↔ `stage == SHADOW`）。整數 enum 不需 1e-4 浮點容差，bit-exact ✓。
+
+**V080 + V082 Linux PG empirical**：`bash helper_scripts/linux_bootstrap_db.sh --apply V080/V082` 兩次 idempotent NOTICE skip path 全 OK；governance/learning schema row count = 0/0/0（schema-only apply，無 test data 殘留）。
+
+**Mock 審查**：4 sub-agent IMPL mock 全限 IO boundary（IPC stub / DB writer stub / governance hub stub），業務邏輯（`as_shadow_mode()` projection / `evaluate_predictor_gate` PredictorAction outcome / `bb_reversion::ma_pair_allows_entry` / `portfolio_var.compute_var_cvar()`）真跑 ✓。
+
+**Hard-boundary scan**：14 Rust + 6 Python diff `grep '\b(live_execution_allowed|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json|decision_lease|execution_authority)\b'` = 2 hit `decision_lease_id` 在 V080 canary_stage_log + lease_scope.rs CanaryStagePromotion，**設計允許**（manual promote 路徑必須 lease audit chain）；其他 0 hit ✓。
+
+**Cross-platform path scan**：14 Rust + 6 Python `grep '/home/ncyu\|/Users/ncyu'` = 0 hit ✓。
+
+**LOC governance**：14 file 全 < 800 警告線或 pre-existing 區內 ✓。
+
+**5 個 NEW fail 修復清單**：
+1. `rust/openclaw_engine/src/ipc_server/tests/config.rs:459` 的 `test_g3_02_a2_patch_executor_shadow_mode_via_patch_risk_config` — payload 加 `canary_stage: Stage1`
+2. 同檔 line 577 `test_g3_02_a2_patch_executor_routes_to_demo_engine` — 同上
+3-5. `tests/test_executor_decision_parity.py` golden + synthetic fixture builder 注入 `canary_stage_provider() -> Stage1+`
+6. `tests/ci/test_github_ci_workflow_static.py:19` assertion 改驗 `rustup target add x86_64-unknown-linux-gnu` + `aarch64-apple-darwin` 兩個 hard target
+
+**E1 fix 派工建議**：派 1 個 sub-agent 統一處理 5 NEW（4 W-AUDIT-9 chain 同根因 + 1 CI workflow），預期 2-3 hr 完成。fix 後重 E2 → 重 E4 → PM 一次 push 9 commits + fix commit 統一上 main。
+
+**5 教訓**：
+1. **大 invariant 改動 (`shadow_mode == canary_stage.as_shadow_mode()`) 必須在 E2 review 前跑 full regression**：sub-agent 自己跑 unit test PASS ≠ 全 suite PASS。本 sprint 4 sub-agent IMPL report 都 claim「sibling test 加好」，但 cross-suite 副作用 (IPC `tests/config.rs` + Python parity fixture) 沒檢查。E2 review 應加「sub-agent 必跑 cargo test --lib 全套 + pytest invariant_keyword」要求。
+2. **Python parity test fixture 應全 codebase 自動 pair shadow_mode + canary_stage**：`_make_runtime_config` helper 已 auto-pair 但 `test_executor_decision_parity.py` 漏。新 invariant landing 必 grep 全 codebase `RuntimeConfig(.*shadow_mode=` + `RuntimeConfig(.*canary_stage=` 確認所有 helper 都同步。
+3. **CI workflow change 必伴 sibling test 同步**：commit `0dc6d659` 拆 matrix 沒同步 structure test。任何 `.github/workflows/*` 改動 PA 派工 spec 必加「sibling structure test 同步檢查」。
+4. **V080/V082 schema apply 全 NOTICE skip 表示 schema 已存在**：本 round 不證明 producer 寫入路徑正確；需 deploy 後 watch 24h `learning.decision_features_evaluations` 是否真接收 30k+ row 流量轉移。defer 給 PM 後續 deploy verification。
+5. **flaky test 跨 host vary**：`test_grafana_data_writer.test_start_sets_running` Mac round 1 PASS / round 2 FAIL；Linux 兩 round 都 FAIL = 不同 host 的 leader lock contention vary。本 round 不阻 verdict 但 NEW-4 仍是 P1 pre-existing 待修。
+
+**Report**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-09--sprint_n0_regression_baseline.md`
+
+---
+
 ### 2026-05-04 REF-20 Sprint A R3（First Real E2E Evidence：simulated_fills_writer + run_finalize_route + thin handler；round 1+2 cumulative，HEAD `353db3fe` + WIP 改動）— **E4 PASS**
 
 **對象**：PM 派 E4 regression 跑 R3 round 1+2 cumulative IMPL（11 writer + 9 finalize = 20 case；含 round 2 M-1 multi-worker race + M-2 `_FINALIZE_STATEMENT_TIMEOUT_MS` const + 4 follow-up TODO ticket）+ replay-keyword sibling 雙跑 + full control_api_v1 雙跑 + module smoke + cross-language byte-equal + cargo workspace + audit script + cross-platform grep + LOC governance + Hard-boundary scan。
