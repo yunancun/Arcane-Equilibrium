@@ -226,15 +226,18 @@ shadow_enabled = false
 
 # G7-01 (2026-04-24) — Kelly fractional-tier sample-size boundaries.
 # Drives ml::kelly_sizer::compute_kelly_qty:
-#   trades < young_threshold     → 1/8 Kelly (young, most conservative)
-#   trades < mature_threshold    → 1/6 Kelly (mature)
-#   trades >= mature_threshold   → 1/4 Kelly (established, never full Kelly)
-# Defaults 50 / 200 mirror the pre-G7-01 hardcoded constants — runtime
-# behavior is unchanged unless an operator edits these.
-# G7-01：Kelly 分層樣本量邊界。預設 50/200 保留 G7-01 前的硬編碼行為。
+#   trades < young_threshold     → young_fraction Kelly
+#   trades < mature_threshold    → mature_fraction Kelly
+#   trades >= mature_threshold   → established_fraction Kelly
+# Defaults 50 / 200 and 1/8 / 1/6 / 1/4 mirror the previous hardcoded
+# constants — runtime behavior is unchanged unless an operator edits these.
+# G7-01/W-AUDIT-6：Kelly 分層樣本量邊界與分數，預設保留原硬編碼行為。
 [kelly]
 young_threshold = 50
 mature_threshold = 200
+young_fraction = 0.125
+mature_fraction = 0.16666666666666666
+established_fraction = 0.25
 
 # G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
 # Replaces hardcoded Python `_shadow_mode = True` (executor_agent.py:482).

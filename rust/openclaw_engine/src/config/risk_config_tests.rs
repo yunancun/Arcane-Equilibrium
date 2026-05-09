@@ -527,12 +527,14 @@ ft_min_notional_ratio_of_entry = 0.25
 
 #[test]
 fn test_g7_01_kelly_tier_default_50_200() {
-    // Default RiskConfig must have Kelly thresholds = 50 / 200 (mirrors
-    // ml::kelly_sizer::KellyConfig defaults; preserves pre-G7-01 behavior).
-    // 預設 RiskConfig 的 Kelly 門檻必須為 50/200，保留 G7-01 前行為。
+    // Default RiskConfig must preserve the prior Kelly thresholds and
+    // fractional tiers.
     let cfg = RiskConfig::default();
     assert_eq!(cfg.kelly.young_threshold, 50);
     assert_eq!(cfg.kelly.mature_threshold, 200);
+    assert!((cfg.kelly.young_fraction - 1.0 / 8.0).abs() < f64::EPSILON);
+    assert!((cfg.kelly.mature_fraction - 1.0 / 6.0).abs() < f64::EPSILON);
+    assert!((cfg.kelly.established_fraction - 1.0 / 4.0).abs() < f64::EPSILON);
     assert!(cfg.validate().is_ok(), "default Kelly config must validate");
 }
 
@@ -560,16 +562,49 @@ fn test_g7_01_kelly_tier_validate_rejects_inverted_and_zero() {
 }
 
 #[test]
+fn test_w_audit_6_kelly_tier_validate_rejects_bad_fractions() {
+    let mut cfg = RiskConfig::default();
+
+    cfg.kelly.young_fraction = 0.0;
+    assert!(cfg.validate().is_err(), "young fraction 0 must reject");
+
+    cfg = RiskConfig::default();
+    cfg.kelly.mature_fraction = f64::INFINITY;
+    assert!(
+        cfg.validate().is_err(),
+        "infinite mature fraction must reject"
+    );
+
+    cfg = RiskConfig::default();
+    cfg.kelly.established_fraction = 1.1;
+    assert!(
+        cfg.validate().is_err(),
+        "established fraction > 1 must reject"
+    );
+
+    cfg = RiskConfig::default();
+    cfg.kelly.young_fraction = 0.20;
+    cfg.kelly.mature_fraction = 0.10;
+    assert!(cfg.validate().is_err(), "fraction ordering must reject");
+}
+
+#[test]
 fn test_g7_01_kelly_tier_toml_roundtrip() {
     // Custom thresholds must survive TOML round-trip cleanly.
     // 自訂門檻必須無損穿越 TOML round-trip。
     let mut cfg = RiskConfig::default();
     cfg.kelly.young_threshold = 30;
     cfg.kelly.mature_threshold = 150;
+    cfg.kelly.young_fraction = 0.10;
+    cfg.kelly.mature_fraction = 0.20;
+    cfg.kelly.established_fraction = 0.30;
     let toml_str = toml::to_string(&cfg).unwrap();
     let de: RiskConfig = toml::from_str(&toml_str).unwrap();
     assert_eq!(de.kelly.young_threshold, 30);
     assert_eq!(de.kelly.mature_threshold, 150);
+    assert!((de.kelly.young_fraction - 0.10).abs() < f64::EPSILON);
+    assert!((de.kelly.mature_fraction - 0.20).abs() < f64::EPSILON);
+    assert!((de.kelly.established_fraction - 0.30).abs() < f64::EPSILON);
     assert!(de.validate().is_ok());
 }
 
@@ -585,6 +620,9 @@ fn test_g7_01_kelly_tier_partial_toml_falls_back_to_defaults() {
     let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(cfg.kelly.young_threshold, 50);
     assert_eq!(cfg.kelly.mature_threshold, 200);
+    assert!((cfg.kelly.young_fraction - 1.0 / 8.0).abs() < f64::EPSILON);
+    assert!((cfg.kelly.mature_fraction - 1.0 / 6.0).abs() < f64::EPSILON);
+    assert!((cfg.kelly.established_fraction - 1.0 / 4.0).abs() < f64::EPSILON);
     assert!(cfg.validate().is_ok());
 }
 

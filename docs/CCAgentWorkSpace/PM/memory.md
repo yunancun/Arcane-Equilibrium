@@ -2055,3 +2055,21 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   unrelated warnings.
 - Boundary: no strategy/risk TOML mutation, rebuild, restart, deploy, live auth
   mutation, MAG-083/MAG-084 unlock, or true-live action.
+
+## 2026-05-09 W-AUDIT-6 Kelly Fraction Config
+
+- Closed the Kelly 8/6/4 hardcoded-tier source/test gap with behavior-preserving
+  config.
+- `RiskConfig.kelly` now exposes `young_fraction`, `mature_fraction`, and
+  `established_fraction`, defaulting to `1/8`, `1/6`, and `1/4`.
+- `ml::kelly_sizer::compute_kelly_qty()` consumes those fields instead of
+  hardcoded divisors; replay runner construction mirrors the RiskConfig fields.
+- All risk TOMLs expose the same defaults, so no sizing behavior changes unless
+  an operator edits config and reloads later.
+- Verification: `cargo test -p openclaw_engine kelly --lib` PASS (21/0),
+  `cargo test -p openclaw_engine risk_config --lib` PASS (130/0),
+  `cargo check -p openclaw_engine --bin replay_runner --features replay_isolated`
+  PASS, and `git diff --check` PASS. Existing unrelated Rust warnings remain.
+- Boundary: source/test/config-surface only; no rebuild, restart, deploy,
+  live auth mutation, strategy activation, MAG-083/MAG-084 unlock, or true-live
+  action.

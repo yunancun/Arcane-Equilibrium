@@ -518,6 +518,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let kelly_config = KellyConfig {
             young_threshold: risk_config.kelly.young_threshold,
             mature_threshold: risk_config.kelly.mature_threshold,
+            young_fraction: risk_config.kelly.young_fraction,
+            mature_fraction: risk_config.kelly.mature_fraction,
+            established_fraction: risk_config.kelly.established_fraction,
             ..KellyConfig::default()
         };
         let risk_adapter = ReplayRiskAdapter::new(
