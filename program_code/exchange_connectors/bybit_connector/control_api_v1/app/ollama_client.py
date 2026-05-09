@@ -26,7 +26,6 @@ Safety guarantees:
   - Cost: always 0.0 USD (local inference)
 """
 
-import json
 import logging
 import os
 import threading
@@ -36,6 +35,8 @@ from typing import Any
 
 import urllib.request
 import urllib.error
+
+from . import json_fast as json
 
 logger = logging.getLogger(__name__)
 
@@ -374,7 +375,11 @@ class OllamaClient:
     ) -> OllamaResponse:
         """Send POST request to Ollama API / 向 Ollama API 发送 POST 请求"""
         url = f"{self._config.base_url}{endpoint}"
-        data = json.dumps(payload).encode("utf-8")
+        data = json.dumps_bytes(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
         for attempt in range(1 + self._config.max_retries):
             try:

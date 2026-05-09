@@ -30,12 +30,12 @@ Safety guarantees / 安全保證:
 import asyncio
 import hashlib
 import hmac as _hmac_lib  # std-lib hmac; aliased to avoid shadowing local variables
-import json
 import logging
 import os
 import time
 from typing import Any
 
+from . import json_fast as json
 from .secret_runtime import get_secret_value
 from .ipc_client_risk_config import build_update_risk_config_params
 

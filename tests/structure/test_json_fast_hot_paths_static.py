@@ -9,8 +9,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_python_ipc_hot_paths_use_json_fast() -> None:
     for rel_path in (
         "program_code/exchange_connectors/bybit_connector/control_api_v1/app/ai_service_listener.py",
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/ipc_client.py",
         "program_code/exchange_connectors/bybit_connector/control_api_v1/app/ipc_client_sync.py",
     ):
         source = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
         assert "from . import json_fast as json" in source, rel_path
+        assert "\nimport json\n" not in source, rel_path
+
+
+def test_local_llm_http_json_hot_paths_use_json_fast_bytes() -> None:
+    for rel_path in (
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/local_llm_factory.py",
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/ollama_client.py",
+    ):
+        source = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+        assert "from . import json_fast as json" in source, rel_path
+        assert "json.dumps_bytes(" in source, rel_path
         assert "\nimport json\n" not in source, rel_path
