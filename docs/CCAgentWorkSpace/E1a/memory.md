@@ -50,6 +50,7 @@ function updateBudgetDisplay(remaining) { ... }
 | 2026-04-27 | Live Auth Renew 控制項移至 Governance Hub，打破 locked tab 死鎖 | 主會話直接報告（無單獨 .md） |
 | 2026-04-28 | Agent Tracker MVP（AI 团队工作台）— tab-learning.html 加 5 区块 + agent-tracker.js 722 行 | 主會話直接報告（無單獨 .md） |
 | 2026-04-29 | Learning tab 区块 E「影子 vs 真仓」误导文案修正 → 「Demo 引擎 vs LiveDemo 引擎成交」 | `.claude_reports/20260429_191942_e1a_gui_shadow_vs_live_text_fix.md` |
+| 2026-05-09 | W-AUDIT-7c GUI 三項修復（typed-confirm modal + Settings sub-tab + 2 governance confirm replace） | `workspace/reports/2026-05-09--w_audit_7c_gui_three_fix.md` · commit 9e265ba9 |
 
 ## F5 教訓（2026-04-26）
 
@@ -265,6 +266,26 @@ brief 明示「禁止 commit」。Mac CC IMPL 結束後：
   2. `ssh trade-core "python3 -m pytest ..."` 跑新 test
   3. 同時 git status 確認 Mac local 還是 modified/untracked 狀態，不 git add
 這流程繞開 multi-session race（隔壁 sub-agent 可能在 main branch 推他自己的 R0-T0 work，不應被 R4 frontend 改動覆蓋）。**規律**：跨 sub-agent 並行 IMPL 期 + PM 規定 not-yet-commit 時，scp 跑驗證比 commit-then-revert 安全；commit 留給 PM 統合 sign-off。
+
+## W-AUDIT-7c 三項 GUI 修復（2026-05-09）
+
+### Sub-tab 拆分時 modal overlay 必抽出 sub-tab content
+`<div [hidden]>` 套用 `display: none` 給整顆 subtree（含 fixed/absolute 後代）— 這是 CSS 規範，無法繞開。所以 sub-tab 內含 modal overlay 時，當 sub-tab 被切走，modal `.show` 也不會渲染（即使 fixed position）。**規律**：Sub-tab 拆分前必先 `grep` 該 tab 內所有 fixed-position `<div>` modal/dialog/overlay；全部抽到 sub-tab content **之外**（檔尾 `</script>` 之前），不影響 visual layout（fixed position 不依賴 DOM 位置），同時保證 sub-tab 切換不影響 modal 可用性。本任務抽出 2 個（restartModal + dlg-apikey）。
+
+### 高摩擦 typed-confirm 替代單擊 yes/no — phrase case-sensitive
+A3 v2 audit 抓出 governance-tab.js 兩個 native `confirm()` 是 critical 寫操作（bulk approve/reject + recovery approve），用 native `confirm()` UX 反人類且無 audit 證據鏈。新建 `openTypedConfirmModal(options)` helper 要求 user 鍵入 phrase（預設 'CONFIRM'，case-sensitive）才啟用「確認」按鈕。共用既有 `.oc-confirm-overlay` CSS，加 actor / impact / rollback metadata 槽位（CLAUDE.md §五 audit-aware 三原則第 2 條）。**規律**：Critical-grade governance 寫操作（system_mode 切換 / live_execution_allowed / bulk approve / recovery override）一律 typed-confirm，不能單擊 yes/no — 額外打字成本是 cognitive friction 防誤觸的設計，不是 UX 摩擦。
+
+### Settings sub-tab namespace 隔離（localStorage key + show fn）
+不重用 `ocPaperSubtabShow` 因為 Paper 與 Settings 是兩個不同 tab、不同 sub-tab 名單；硬塞同一 helper 會在 Paper 沒此 sub-tab 時走 fallback 路徑誤導。改成獨立 `ocSettingsSubtabShow` + `_OC_SETTINGS_SUBTAB_LS_KEY = 'settings_active_subtab'`（與 paper 的 `paper_active_subtab` 隔離）。**規律**：Sub-tab 系統 namespace 隔離 = `(LS key) × (function name) × (DOM ID prefix)` 三層全隔離；不要共享 helper 跨 tab 否則 fallback / restore 邏輯會互相污染。
+
+### 多 session race 守則：staged 只加自己改的檔
+派任務時 git status 已有別 session 的 modified（adr + ml_training + cron）+ untracked（execution_plan 3 檔）。`git add` 必須 explicit 列檔名，**禁** `git add .` / `git add -A`，否則吸收他人 WIP 變成不知情共 commit。本任務只 stage 5 個 W-AUDIT-7c 相關檔（4 修改 + 1 新增 fixture），其他 7 個改動完全保留 unstaged 給該 session 自己 commit。**規律**：multi-session 同工作樹下 `git add` 必 explicit；commit message 只描述自己改的。
+
+### Fixture 沿用 tests/static/ pattern + browser mock-fetch（無 jsdom/jest）
+專案無 jsdom / jest / vitest / playwright；既有 `tests/static/test_agent_tracker_contract.html` + `test_replay_subtab_readiness.html` 已是「最低線交付」pattern（純瀏覽器 mock-fetch + record/assertContains 手寫斷言）。本任務沿用同 pattern 加 `test_typed_confirm_modal.html`（5 case 覆蓋正確 phrase / 錯 phrase / 取消 / Esc / case-sensitive）。**規律**：當 codebase 已有最低線 fixture pattern 時沿用比 push back PM 改更高層 test 框架快；fixture 至少能讓 reviewer 用 browser 一鍵驗證 modal 行為。
+
+### Mac dev 環境 HTML/JS 驗證 = HTMLParser stack + grep + brace count
+Mac 沒裝 W3C validator / esprima / node JS parser；用 (1) Python `html.parser.HTMLParser` 子類追 push/pop tag stack，最終 stack residue 0 + errors 0 (2) `{}/()/[]` count 平衡 (3) 結構性 grep（function name + DOM ID + key string literals）。本任務 4 個改動檔 stack 全平衡，2 個 JS 檔 brace 全 0 diff。Production smoke test 仍由 E4 在 Linux 跑 console.html 真實渲染。**規律**：Mac dev 環境用結構性 grep + 字符 balance 不是「真 syntax check」，但能擋 80% 「不 wellformed」level bug；剩 20% 由 Linux runtime 抓。
 
 ### 28/28 pytest PASS + 169/169 sibling regression unchanged（3 pre-existing fails 不歸 R4）
 新加 28 個 R4 test 全 PASS（覆蓋 R4-T1/T2/T3/T4 + Sprint A invariants + 跨平台 sanity）。sibling regression 169 PASS / 3 FAIL — 3 FAIL 是 Linux HEAD `6e39c51d` 上 `test_replay_routes_auth.py::test_authenticated_*_post_run` 系列（POST /run active_run cap 邏輯），與我 frontend 改動 0 重疊。透過 `git stash --include-untracked` + 重跑驗證 3 fail 在我改動前已存在 → 不歸 R4 責任。
