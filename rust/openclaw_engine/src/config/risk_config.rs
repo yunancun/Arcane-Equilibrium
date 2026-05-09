@@ -27,9 +27,9 @@ use crate::exit_features::ExitConfig;
 #[path = "risk_config_advanced.rs"]
 mod advanced;
 pub use advanced::{
-    AntiCluster, Correlation, CusumConfig, DynamicStop, EdgePredictor, EdgePredictorFallback,
-    EwmaVolConfig, ExecutorConfig, Experimental, GridOuConfig, MarketGate, RuntimeKnobs,
-    SlippageConfig, SlippageTier, StrategistConfig,
+    AntiCluster, CanaryCohort, CanaryStage, Correlation, CusumConfig, DynamicStop, EdgePredictor,
+    EdgePredictorFallback, EwmaVolConfig, ExecutorConfig, Experimental, GridOuConfig, MarketGate,
+    RuntimeKnobs, SlippageConfig, SlippageTier, StrategistConfig,
 };
 
 // G7-03 (2026-04-24): Hurst + hysteresis regime detector schema lives in its

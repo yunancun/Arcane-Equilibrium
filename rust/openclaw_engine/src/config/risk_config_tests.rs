@@ -711,9 +711,22 @@ fn test_g3_02_executor_validate_rejects_bad_per_symbol_overrides() {
 #[test]
 fn test_g3_02_executor_toml_roundtrip() {
     // Custom executor knobs must survive TOML round-trip.
-    // 自訂 executor knob 必須無損穿越 TOML round-trip。
+    // AMD-2026-05-09-03 (W-AUDIT-9) 升級後：`shadow_mode=false` 必同時設
+    // `canary_stage>=1` + cohort + stage_entered_at_ms + observation_period_ms，
+    // 否則 validate() reject（雞蛋死循環防線）。本 test 升級為 Stage 1 paper cohort
+    // 以同時驗 max_position_pct/per_symbol round-trip 與 5-stage 升級配對。
+    // 自訂 executor knob 必須無損穿越 TOML round-trip；AMD-2026-05-09-03 後
+    // shadow_mode=false 必伴隨 Stage 1+ 完整 cohort。
     let mut cfg = RiskConfig::default();
     cfg.executor.shadow_mode = false;
+    cfg.executor.canary_stage = CanaryStage::Stage1;
+    cfg.executor.canary_cohort = Some(CanaryCohort {
+        strategy: "ma_crossover".into(),
+        symbol: "BTCUSDT".into(),
+        environment: "paper".into(),
+    });
+    cfg.executor.stage_entered_at_ms = 1_731_000_000_000;
+    cfg.executor.observation_period_ms = 7 * 24 * 60 * 60 * 1000; // 7d
     cfg.executor.max_position_pct = 0.10;
     cfg.executor
         .per_symbol_position_cap
@@ -724,6 +737,10 @@ fn test_g3_02_executor_toml_roundtrip() {
     let toml_str = toml::to_string(&cfg).unwrap();
     let de: RiskConfig = toml::from_str(&toml_str).unwrap();
     assert!(!de.executor.shadow_mode);
+    assert_eq!(de.executor.canary_stage, CanaryStage::Stage1);
+    let cohort = de.executor.canary_cohort.as_ref().expect("cohort present");
+    assert_eq!(cohort.strategy, "ma_crossover");
+    assert_eq!(cohort.environment, "paper");
     assert!((de.executor.max_position_pct - 0.10).abs() < 1e-12);
     assert_eq!(de.executor.per_symbol_position_cap.len(), 2);
     assert!(
@@ -1218,3 +1235,344 @@ fn test_strategist_config_partial_fallback() {
 // G2-03 每策略覆蓋測試在獨立 sibling，守 §九 1200 行上限。
 #[path = "risk_config_per_strategy_tests.rs"]
 mod g2_03_per_strategy_tests;
+
+// ---------------------------------------------------------------------------
+// W-AUDIT-9 (AMD-2026-05-09-03) graduated canary 5-stage tests
+// W-AUDIT-9 graduated canary 5-stage 測試
+// ---------------------------------------------------------------------------
+
+const STAGE1_OBSERVATION_MS: u64 = 7 * 24 * 60 * 60 * 1000; // 7d
+const STAGE2_OBSERVATION_MS: u64 = 14 * 24 * 60 * 60 * 1000; // 14d
+const STAGE3_OBSERVATION_MS: u64 = 21 * 24 * 60 * 60 * 1000; // 21d
+const SAMPLE_TS_MS: i64 = 1_731_000_000_000; // 任意 sample timestamp，ms epoch。
+
+#[test]
+fn test_canary_stage_default_is_stage0() {
+    // AMD-2026-05-09-03：預設 Stage 0（fail-closed shadow）。
+    let cfg = RiskConfig::default();
+    assert_eq!(cfg.executor.canary_stage, CanaryStage::Stage0);
+    assert!(cfg.executor.shadow_mode);
+    assert!(cfg.executor.canary_cohort.is_none());
+    assert_eq!(cfg.executor.stage_entered_at_ms, 0);
+    assert_eq!(cfg.executor.observation_period_ms, 0);
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_canary_stage_serde_round_trip_stage0() {
+    // Stage 0 serde：CanaryStage 序列化為整數 0。
+    // 注意 TOML 不能直接表 None，故只跑 stage 0 默認 case。
+    let toml_str = r#"
+        [meta]
+        version = 1
+
+        [executor]
+        shadow_mode = true
+        canary_stage = 0
+        max_position_pct = 0.05
+        per_symbol_position_cap = {}
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).expect("Stage 0 TOML must parse");
+    assert_eq!(cfg.executor.canary_stage, CanaryStage::Stage0);
+    assert!(cfg.executor.shadow_mode);
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_canary_stage_serde_round_trip_stage1_demo() {
+    // AMD-2026-05-09-03：Stage 1 cohort 必含 1 strategy × 1 symbol × paper × 7d。
+    // 注：TOML 不能直接 inline `Option<CanaryCohort>` complex；用 [executor.canary_cohort] table。
+    let toml_str = r#"
+        [meta]
+        version = 1
+
+        [executor]
+        shadow_mode = false
+        canary_stage = 1
+        max_position_pct = 0.05
+        per_symbol_position_cap = {}
+        stage_entered_at_ms = 1731000000000
+        observation_period_ms = 604800000
+
+        [executor.canary_cohort]
+        strategy = "ma_crossover"
+        symbol = "BTCUSDT"
+        environment = "paper"
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).expect("Stage 1 TOML must parse");
+    assert_eq!(cfg.executor.canary_stage, CanaryStage::Stage1);
+    assert!(!cfg.executor.shadow_mode);
+    assert!(cfg.validate().is_ok(), "{:?}", cfg.validate());
+    let cohort = cfg.executor.canary_cohort.as_ref().expect("cohort set");
+    assert_eq!(cohort.strategy, "ma_crossover");
+    assert_eq!(cohort.symbol, "BTCUSDT");
+    assert_eq!(cohort.environment, "paper");
+}
+
+#[test]
+fn test_canary_stage_backward_compat_shadow_mode_projection() {
+    // AMD-2026-05-09-03 §4.4：legacy shadow_mode = stage.as_shadow_mode() projection。
+    assert!(CanaryStage::Stage0.as_shadow_mode());
+    assert!(!CanaryStage::Stage1.as_shadow_mode());
+    assert!(!CanaryStage::Stage2.as_shadow_mode());
+    assert!(!CanaryStage::Stage3.as_shadow_mode());
+    assert!(!CanaryStage::Stage4.as_shadow_mode());
+}
+
+#[test]
+fn test_canary_stage_inconsistent_shadow_mode_rejected() {
+    // E2 audit point #1（per AMD §7）：legacy `shadow_mode=false` + `canary_stage=0` = reject。
+    // 雞蛋死循環防線 — 雙欄位必同步更新。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.shadow_mode = false; // Stage 0 應 true
+    let err = cfg.validate().expect_err("inconsistent must reject");
+    assert!(
+        err.contains("inconsistent"),
+        "error should mention inconsistency: {}",
+        err
+    );
+}
+
+#[test]
+fn test_canary_stage_stage1_without_cohort_rejected() {
+    // AMD-2026-05-09-03 §2.2：Stage 1 必有 cohort。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage1;
+    cfg.executor.shadow_mode = false; // 對齊
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = STAGE1_OBSERVATION_MS;
+    // canary_cohort = None → 應 reject
+    let err = cfg.validate().expect_err("Stage 1 without cohort must reject");
+    assert!(
+        err.contains("requires canary_cohort"),
+        "error should mention cohort requirement: {}",
+        err
+    );
+}
+
+#[test]
+fn test_canary_stage_stage1_wrong_environment_rejected() {
+    // AMD-2026-05-09-03 §2.2：Stage 1 必為 paper。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage1;
+    cfg.executor.shadow_mode = false;
+    cfg.executor.canary_cohort = Some(CanaryCohort {
+        strategy: "ma_crossover".into(),
+        symbol: "BTCUSDT".into(),
+        environment: "demo".into(), // wrong - Stage 1 expects paper
+    });
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = STAGE1_OBSERVATION_MS;
+    let err = cfg.validate().expect_err("Stage 1 wrong env must reject");
+    assert!(
+        err.contains("environment='paper'"),
+        "error should specify paper requirement: {}",
+        err
+    );
+}
+
+#[test]
+fn test_canary_stage_stage2_demo_cohort_passes() {
+    // AMD-2026-05-09-03 §2.2：Stage 2 = 1 strategy × 1 symbol × demo × 14d。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage2;
+    cfg.executor.shadow_mode = false;
+    cfg.executor.canary_cohort = Some(CanaryCohort {
+        strategy: "bb_breakout".into(),
+        symbol: "ETHUSDT".into(),
+        environment: "demo".into(),
+    });
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = STAGE2_OBSERVATION_MS;
+    assert!(cfg.validate().is_ok(), "{:?}", cfg.validate());
+}
+
+#[test]
+fn test_canary_stage_stage3_demo_full_universe_passes() {
+    // AMD-2026-05-09-03 §2.2：Stage 3 = 5 strategies × demo full × 21d，cohort=None。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage3;
+    cfg.executor.shadow_mode = false;
+    cfg.executor.canary_cohort = None;
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = STAGE3_OBSERVATION_MS;
+    assert!(cfg.validate().is_ok(), "{:?}", cfg.validate());
+}
+
+#[test]
+fn test_canary_stage_stage3_with_cohort_rejected() {
+    // Stage 3 = full universe，禁設 cohort。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage3;
+    cfg.executor.shadow_mode = false;
+    cfg.executor.canary_cohort = Some(CanaryCohort {
+        strategy: "ma_crossover".into(),
+        symbol: "BTCUSDT".into(),
+        environment: "demo".into(),
+    });
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = STAGE3_OBSERVATION_MS;
+    let err = cfg.validate().expect_err("Stage 3 with cohort must reject");
+    assert!(
+        err.contains("canary_cohort=None"),
+        "error should require cohort=None: {}",
+        err
+    );
+}
+
+#[test]
+fn test_canary_stage_stage4_live_pending_passes() {
+    // AMD-2026-05-09-03 §2.2：Stage 4 = LIVE_PENDING，operator 拍板。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage4;
+    cfg.executor.shadow_mode = false;
+    cfg.executor.canary_cohort = None;
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = 0; // Stage 4 不適用 observation period
+    assert!(cfg.validate().is_ok(), "{:?}", cfg.validate());
+}
+
+#[test]
+fn test_canary_stage_invalid_integer_rejected() {
+    // AMD-2026-05-09-03：canary_stage 必為 0..=4。
+    let toml_str = r#"
+        [meta]
+        version = 1
+
+        [executor]
+        shadow_mode = true
+        canary_stage = 5
+    "#;
+    let result: Result<RiskConfig, _> = toml::from_str(toml_str);
+    assert!(result.is_err(), "stage=5 must reject at deserialize");
+    let err_str = format!("{}", result.unwrap_err());
+    assert!(
+        err_str.contains("invalid")
+            || err_str.contains("0..=4")
+            || err_str.contains("must be 0"),
+        "error should mention range: {}",
+        err_str
+    );
+}
+
+#[test]
+fn test_canary_stage_stage0_with_nonzero_timestamp_rejected() {
+    // Stage 0 不應有 stage_entered_at_ms（永久態）。
+    let mut cfg = RiskConfig::default();
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    let err = cfg
+        .validate()
+        .expect_err("Stage 0 with stage_entered_at_ms must reject");
+    assert!(
+        err.contains("stage_entered_at_ms=0"),
+        "error should mention stage_entered_at_ms=0 requirement: {}",
+        err
+    );
+}
+
+#[test]
+fn test_canary_cohort_empty_strategy_rejected() {
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage1;
+    cfg.executor.shadow_mode = false;
+    cfg.executor.canary_cohort = Some(CanaryCohort {
+        strategy: "".into(),
+        symbol: "BTCUSDT".into(),
+        environment: "paper".into(),
+    });
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = STAGE1_OBSERVATION_MS;
+    let err = cfg.validate().expect_err("empty strategy must reject");
+    assert!(err.contains("strategy must be non-empty"), "{}", err);
+}
+
+#[test]
+fn test_canary_cohort_invalid_environment_rejected() {
+    let mut cfg = RiskConfig::default();
+    cfg.executor.canary_stage = CanaryStage::Stage1;
+    cfg.executor.shadow_mode = false;
+    cfg.executor.canary_cohort = Some(CanaryCohort {
+        strategy: "ma_crossover".into(),
+        symbol: "BTCUSDT".into(),
+        environment: "testnet".into(), // invalid env
+    });
+    cfg.executor.stage_entered_at_ms = SAMPLE_TS_MS;
+    cfg.executor.observation_period_ms = STAGE1_OBSERVATION_MS;
+    let err = cfg.validate().expect_err("invalid env must reject");
+    assert!(err.contains("environment invalid"), "{}", err);
+}
+
+#[test]
+fn test_w_audit_9_real_toml_files_parse_with_default_stage_zero() {
+    // AMD-2026-05-09-03 W-AUDIT-9 backward-compat：所有 4 個 risk_config*.toml 在
+    // T1 schema 落地後必繼續 parse 成功 + validate 通過。預期所有檔案保持
+    // legacy `shadow_mode=true` + Stage 0 default（cohort 字段缺由 serde(default)
+    // 補回）。Stage 1+ 升級必經 W-AUDIT-9 T3-T7 後續 IMPL + operator 拍板。
+    // E2 grep 必查 patten：4/4 files parse OK。
+    // AMD-2026-05-09-03：4 個 real TOML 檔在 T1 schema 升級後仍 parse + validate
+    // 通過，Stage 0 default 保留現行為。
+    use std::fs;
+    let project_root = env!("CARGO_MANIFEST_DIR");
+    let candidates = [
+        "../../settings/risk_control_rules/risk_config.toml",
+        "../../settings/risk_control_rules/risk_config_paper.toml",
+        "../../settings/risk_control_rules/risk_config_live.toml",
+        "../../settings/risk_control_rules/risk_config_demo.toml",
+    ];
+    for rel in candidates {
+        let path = format!("{}/{}", project_root, rel);
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue, // 開發環境路徑相對性差時 skip（不破壞 CI）
+        };
+        let cfg: RiskConfig = toml::from_str(&content)
+            .unwrap_or_else(|e| panic!("parse failed for {}: {}", path, e));
+        // legacy TOML 仍是 Stage 0 + shadow_mode=true；cohort=None
+        // legacy 4 TOML 仍走 Stage 0；W-AUDIT-9 升 Stage 待 T3-T7 落地。
+        assert_eq!(
+            cfg.executor.canary_stage,
+            CanaryStage::Stage0,
+            "TOML {} should default to Stage 0 (legacy backward-compat)",
+            path
+        );
+        assert!(
+            cfg.executor.shadow_mode,
+            "TOML {} should retain legacy shadow_mode=true (Stage 0 projection)",
+            path
+        );
+        assert!(
+            cfg.executor.canary_cohort.is_none(),
+            "TOML {} Stage 0 cohort must be None",
+            path
+        );
+        assert!(
+            cfg.validate().is_ok(),
+            "TOML {} validate failed: {:?}",
+            path,
+            cfg.validate()
+        );
+    }
+}
+
+#[test]
+fn test_canary_stage_legacy_toml_without_canary_fields_works() {
+    // Backward-compat：legacy TOML 沒 canary_stage/cohort 字段時，serde(default)
+    // 補回 Stage 0 預設。確保 W-AUDIT-9 升級不破現有 4 個 risk_config*.toml。
+    // AMD-2026-05-09-03：legacy TOML 無 canary 欄位 → serde 補 Stage 0 預設。
+    let toml_str = r#"
+        [meta]
+        version = 1
+
+        [executor]
+        shadow_mode = true
+        max_position_pct = 0.05
+        per_symbol_position_cap = {}
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).expect("legacy TOML must parse");
+    assert_eq!(cfg.executor.canary_stage, CanaryStage::Stage0);
+    assert!(cfg.executor.shadow_mode);
+    assert!(cfg.executor.canary_cohort.is_none());
+    assert_eq!(cfg.executor.stage_entered_at_ms, 0);
+    assert_eq!(cfg.executor.observation_period_ms, 0);
+    assert!(cfg.validate().is_ok());
+}

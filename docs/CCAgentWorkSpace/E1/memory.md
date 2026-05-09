@@ -6069,3 +6069,52 @@ export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 ### Commit
 - Local commit `200188ad` 完成（無 `[skip ci]`，per task 指示「最終 commit 不加」）
 - 待 E2 second-pass review（Day 5-7）→ E4 regression（5-stage transition + auto-rollback + SM-04 L3）→ PM 統一 push + ssh trade-core git pull
+
+---
+
+## 2026-05-09 W-AUDIT-9 T1+T2（E1-A：Rust schema + V080 migration）
+
+### 派工背景
+- Sprint N+0 Day 0-3 雙任務 W-AUDIT-9 T1+T2（per AMD-2026-05-09-03 配套）
+- 解決 P0-EDGE-1 雞生蛋蛋生雞死循環：把 binary `shadow_mode` 升級為 5-stage graduated canary
+- T1+T2 是 T3-T7 前置基礎，schema 連續邏輯適合 1 個 E1 連做
+
+### 修改範圍（5 檔）
+- `rust/openclaw_engine/src/config/risk_config_advanced.rs`：升級 `ExecutorConfig` 加 4 個新欄位（`canary_stage` / `canary_cohort` / `stage_entered_at_ms` / `observation_period_ms`）+ 新 enum `CanaryStage(0..=4)` + struct `CanaryCohort` + serde via try_from u8 + 完整 validate() invariant（manual_promote → lease 等 8 條）
+- `rust/openclaw_engine/src/config/risk_config.rs`：擴 `pub use` re-export `CanaryCohort` + `CanaryStage`
+- `rust/openclaw_engine/src/config/risk_config_tests.rs`：+14 W-AUDIT-9 unit tests（serde round-trip / shadow_mode projection / stage 1/2/3/4 cohort 不變量 / Stage 0 strict 拒絕 / legacy TOML 4 真檔 parse 驗證）
+- `sql/migrations/V080__governance_canary_stage.sql`：governance schema bootstrap + canary_stage_log（10 cols + 10 CHECK constraints + manual_promote NOT NULL constraint）+ canary_stage_metric_registry（9 cols + UNIQUE active partial index）+ Guard A×2 + Guard C×1 + 5 indexes + idempotent CREATE TABLE/INDEX IF NOT EXISTS
+- `tests/migrations/test_v080_governance_canary_stage.py`：21 個 static SQL grep tests（Guard / idempotency / E2 audit point #2 manual_promote_lease enforce / 不變量）
+
+### 結果
+- `cargo build --release -p openclaw_engine --lib`：FIRST run（在 sibling B-M1 partial commit 加 intent_processor `decision_feature_evaluation_tx` 之前）PASS。後 sibling commit `200188ad` 後不相關 break（不在我責任範圍）
+- `cargo test --lib -p openclaw_engine config::risk_config`：139 passed / 0 failed（含 14 新 W-AUDIT-9 tests + 1 既有 test 升級為 Stage 1 cohort）
+- `pytest tests/migrations/test_v080_governance_canary_stage.py`：21 passed
+- **Linux PG dry-run（empirical query 不汙染 prod）**：
+  - V080 first apply 成功（10 cols + 10 CHECK + 5 index 落下）
+  - V080 second apply NOTICE skip 全 idempotent（無 RAISE）
+  - manual_promote without lease 正確 REJECT（PG 層強制不只 application）
+  - auto_promote without lease 正確 ACCEPT
+  - stage=5 out-of-range 正確 REJECT
+  - dry-run 後 cleanup `DROP TABLE governance.canary_stage_{log,metric_registry}` 確保 DB 回未-apply 狀態（per task spec）
+- Local commit pending（multi-session race 守則：不 push origin，等 PM 統一）
+
+### Key invariants 落地
+- AMD-2026-05-09-03 §4.4 backward-compat：`shadow_mode == canary_stage.as_shadow_mode()` projection 不變量（不一致即 reject — 雞蛋死循環防線）
+- AMD-2026-05-09-03 §2.2 stage 範圍：Stage 1 必 paper / Stage 2 必 demo / Stage 3 必 cohort=None / Stage 4 LIVE_PENDING operator 拍板
+- AMD-2026-05-09-03 §4.5 + E2 audit point #2：manual_promote 必伴 decision_lease_id（**PG 層 CHECK constraint**，不只 application 層）
+- 4 個 risk_config*.toml legacy 仍 parse + validate 通過（Stage 0 default fallback，serde(default) 補回）
+- Guard A 偵測 pre-existing legacy schema drift；Guard C 偵測 hot-path index column ordering drift
+- V080 idempotency 雙跑必通過
+
+### Lessons
+- **Backward-compat 陷阱**：既有測試 `test_g3_02_executor_toml_roundtrip` 用 `shadow_mode=false` 但無 canary_stage → 升級後正確被新 invariant 拒絕。修法是把 test 升級為 Stage 1 paper cohort（測 round-trip 同時驗 5-stage 升級配對），而非削弱新 invariant
+- **Linux PG dry-run mandate（per `feedback_v_migration_pg_dry_run.md`）**：Mac mock pytest 21/21 PASS 仍不夠 — 必跑 ssh trade-core docker exec psql -f V080.sql empirical 才能驗 PL/pgSQL constraints + UUID 類型 + GENERATED ALWAYS BIGSERIAL + idempotency NOTICE 真實行為。本次 Mac 全綠後 Linux empirical 仍正常，無 false-pass，但流程必走（V055 5-round loop 教訓）
+- **Multi-session race 守則**：sibling 在我 IMPL 期間並行做 B-M1（修 intent_processor.rs / V082 / decision_feature_evaluation_writer.rs），其 partial commit 把 release build 弄破。**我只 commit 我自己的 5 個檔**，不 amend / revert / merge sibling 改動。PM push 後其 sibling 會在自己的 sub-agent thread 收尾完整 build
+- **`active=true` partial unique index**：PG 慣用 `CREATE UNIQUE INDEX ... WHERE active = TRUE` 對 audit-soft-delete 場景比 hard DELETE 更安全。drift detect 寫成 healthcheck `[58]` 直接 grep 此 index
+- **append-only audit 不裝 trigger**：V080 不裝 BEFORE/AFTER trigger（與 V077 fills 對比）— audit table 由上層 application（W-AUDIT-9 T3 / T6）顯式寫入，不靠 trigger 隱式行為
+
+### Commit
+- Local commit pending（待 add + commit message）
+- 不 push origin（per task spec multi-session race 守則）
+- 完成通知 PM 含 commit hash + cargo test summary + Linux PG dry-run summary
