@@ -239,6 +239,17 @@ young_fraction = 0.125
 mature_fraction = 0.16666666666666666
 established_fraction = 0.25
 
+# W-AUDIT-6 (2026-05-09) — Fast-track held-drop thresholds.
+# Defaults preserve the previous hardcoded triggers:
+#   held drop ≥ extreme_drop_pct             → CloseAll
+#   held drop ≥ moderate_drop_pct and ≥ sigma → ReduceToHalf / CloseAll by risk
+# Margin-crisis 90% stays in code as a physical safety constant, not a knob.
+# W-AUDIT-6：fast_track 持倉跌幅閾值配置化；預設保持舊行為不變。
+[fast_track]
+extreme_drop_pct = 15.0
+moderate_drop_pct = 5.0
+outlier_sigma_threshold = 3.0
+
 # G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
 # Replaces hardcoded Python `_shadow_mode = True` (executor_agent.py:482).
 # Phase A schema-only landing — defaults preserve forced shadow behaviour.

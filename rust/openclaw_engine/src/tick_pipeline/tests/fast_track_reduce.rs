@@ -196,10 +196,10 @@ fn test_ft_reduce_cooldown_map_stamps_once_per_window() {
 // ── B2: sigma_scaled_reduce_cooldown_ms — pure function tests ──
 // B2：sigma_scaled_reduce_cooldown_ms 純函數測試
 //
-// Formula: base (60_000) × max(1, sigma/3), capped at FT_REDUCE_COOLDOWN_MAX_MS.
-// Trigger threshold is sigma≥3 (fast_track.rs:89) — at exactly 3σ the
+// Formula: base (60_000) × max(1, sigma/trigger), capped at FT_REDUCE_COOLDOWN_MAX_MS.
+// Default trigger threshold is sigma≥3 (fast_track.rs) — at exactly 3σ the
 // cooldown equals base; each additional sigma scales linearly.
-// 公式：base × max(1, sigma/3)，上限 600_000。3σ = 1×，每多 1σ 線性放大。
+// 公式：base × max(1, sigma/trigger)，上限 600_000。預設 3σ = 1×。
 
 #[test]
 fn test_b2_sigma_scaled_at_trigger_threshold() {
@@ -250,6 +250,21 @@ fn test_b2_sigma_scaled_floors_at_base() {
     );
     assert_eq!(
         super::super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms(0.0),
+        super::super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS
+    );
+}
+
+#[test]
+fn test_w_audit_6_sigma_scaled_uses_configured_trigger() {
+    // Custom trigger sigma = 2.0: sigma 4.0 is now 2× base, preserving the
+    // "severity relative to trigger" semantics after fast_track config wiring.
+    // 自訂 trigger sigma=2 時，4σ 對應 2× base，與配置化 fast_track 對齊。
+    assert_eq!(
+        super::super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms_with_trigger(4.0, 2.0),
+        super::super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS * 2
+    );
+    assert_eq!(
+        super::super::on_tick_helpers::sigma_scaled_reduce_cooldown_ms_with_trigger(1.0, 2.0),
         super::super::on_tick_helpers::FT_REDUCE_COOLDOWN_MS
     );
 }

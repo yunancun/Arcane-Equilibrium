@@ -223,6 +223,12 @@ W-AUDIT-6 current fact:
   `1/8`, `1/6`, `1/4`, `ml::kelly_sizer::compute_kelly_qty()` consumes those
   fields instead of hardcoded divisors, and risk TOMLs expose the same
   behavior-preserving defaults
+- as of 2026-05-09, fast_track held-drop thresholds are source/test closed:
+  `RiskConfig.fast_track.{extreme_drop_pct,moderate_drop_pct,outlier_sigma_threshold}`
+  defaults to `15.0`, `5.0`, `3.0`; Step 0 fast_track decisions, scoped-reduce
+  classification, and sigma-scaled reduce cooldown consume that snapshot; the
+  90% margin-crisis guard remains a code safety constant; risk TOMLs expose the
+  same behavior-preserving defaults
 - no rebuild, restart, or runtime apply was performed for these checkpoints
 
 P0-NEW-VULN-1 bind-host rule:

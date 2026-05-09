@@ -216,6 +216,14 @@ young_fraction = 0.125
 mature_fraction = 0.16666666666666666
 established_fraction = 0.25
 
+# W-AUDIT-6 (2026-05-09) — Fast-track held-drop thresholds.
+# Paper mirrors demo/live defaults to keep three-environment config parity.
+# W-AUDIT-6：Paper 對齊 demo/live 預設，保持三端配置面一致。
+[fast_track]
+extreme_drop_pct = 15.0
+moderate_drop_pct = 5.0
+outlier_sigma_threshold = 3.0
+
 # G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
 # Paper default shadow_mode=true — paper is opt-in via OPENCLAW_ENABLE_PAPER
 # env, but the executor flag mirrors live for symmetry.
