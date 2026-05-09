@@ -84,11 +84,6 @@ blocked_symbols = [
 # trailing_activation_pct_override = 0.6
 # trailing_distance_pct_override   = 0.4
 
-# 2026-05-03: funding_arb new entries are disabled across paper/demo/live until
-# the strategy is redesigned around verified funding settlement capture.
-[per_strategy.funding_arb]
-enabled = false
-
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 0.5

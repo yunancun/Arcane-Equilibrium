@@ -819,6 +819,24 @@ fn test_g7_09c_grid_skips_when_no_bbo() {
 }
 
 #[test]
+fn test_g7_09c_post_only_reject_callback_arms_cooldown() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.reject_cooldown_ms = 60_000;
+
+    g.on_post_only_rejected(
+        "BTC",
+        1_000,
+        &crate::strategies::maker_rejection::MakerRejectionCategory::PostOnlyCross,
+    );
+
+    assert_eq!(
+        g.reject_cooldown_until_ms.get("BTC").copied(),
+        Some(61_000),
+        "PostOnly reject callback must route to grid cooldown wiring"
+    );
+}
+
+#[test]
 fn test_grid_blocked_symbol_skips_open_but_allows_close() {
     let mut g = GridTrading::new(49_000.0, 51_000.0);
     let mut params = g.get_params();

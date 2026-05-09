@@ -19,9 +19,8 @@ use openclaw_types::PriceEvent;
 use tracing::{debug, warn};
 
 use super::parsers::{
-    extract_symbol_from_topic, now_ms, parse_adl_notice_item, parse_kline_item,
-    parse_liquidation_item, parse_orderbook_snapshot, parse_price_limit_item, parse_ticker_item,
-    parse_trade_item,
+    now_ms, parse_adl_notice_item, parse_kline_item, parse_liquidation_item,
+    parse_orderbook_snapshot, parse_price_limit_item, parse_ticker_item, parse_trade_item,
 };
 use super::WsClient;
 

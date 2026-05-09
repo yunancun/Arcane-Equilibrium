@@ -68,7 +68,6 @@ pub struct FundingArb {
 struct FundingPosition {
     is_positive_funding: bool, // true = short perp (funding > 0)
     entry_ms: u64,
-    entry_funding_rate: f64,
 }
 
 impl FundingArb {
@@ -484,7 +483,6 @@ impl Strategy for FundingArb {
             FundingPosition {
                 is_positive_funding: is_positive,
                 entry_ms: now_ms,
-                entry_funding_rate: funding_rate,
             },
         );
         self.cooldown.record_signal(sym, now_ms);
@@ -554,14 +552,13 @@ mod tests {
         symbol: &str,
         is_positive: bool,
         entry_ms: u64,
-        rate: f64,
+        _rate: f64,
     ) {
         s.positions.insert(
             symbol.to_string(),
             FundingPosition {
                 is_positive_funding: is_positive,
                 entry_ms,
-                entry_funding_rate: rate,
             },
         );
     }
