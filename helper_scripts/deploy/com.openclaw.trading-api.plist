@@ -54,7 +54,7 @@
     <string>__BASE__/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/uvicorn</string>
     <string>app.main:app</string>
     <string>--host</string>
-    <string>0.0.0.0</string>
+    <string>127.0.0.1</string>
     <string>--port</string>
     <string>8000</string>
   </array>

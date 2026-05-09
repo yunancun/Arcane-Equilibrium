@@ -346,3 +346,8 @@ YYYY-MM-DD HH:MM TZ
 - closed P0-AUDIT-NEW-LG-X-05 source/doc checkpoint: SPECIFICATION_REGISTER LG-X table now aligns to historical LG-1..LG-5 and adds LG-X-05 constrained autonomous live
 - moved Live Ops Foundation out of LG-X-04 into separate `OPS-X-01`, so LG-X-04 again means Supervised-Live Gate and does not hide the LG-5 RFC family
 - updated CONTEXT/docs README/TODO/PM reports; source-doc only, no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- closed P0-NEW-VULN-1 source/test checkpoint: Mac launchd Trading API plist now binds `127.0.0.1` instead of `0.0.0.0`
+- added `launchd_preflight.sh` fail-closed guard against all-interface Trading API plist binds and extended Batch E runtime ownership regression to cover the plist/preflight
+- verification: targeted Batch E pytest PASS, plist syntax lint PASS, static grep confirms no `0.0.0.0` in deploy plist/templates except historical reports/docs; no launchd load/unload, rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

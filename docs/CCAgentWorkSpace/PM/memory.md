@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | P0-NEW-VULN-1 launchd plist bind hardening: Trading API launchd template now defaults to 127.0.0.1, preflight rejects 0.0.0.0, and Batch E static regression covers plist/preflight | workspace/reports/2026-05-09--p0_new_vuln_1_launchd_bind_hardening.md |
 | 2026-05-09 | P0-AUDIT-NEW-LG-X-05: fixed SPECIFICATION_REGISTER LG-X numbering, restored LG-X-04 to Supervised-Live Gate, added LG-X-05 constrained autonomous live with RFC/eval-contract/amendment/healthcheck references, and moved ops prerequisites to OPS-X-01 | workspace/reports/2026-05-09--p0_audit_lgx05_register_fix.md |
 | 2026-05-09 | P0-NEW-ISSUE-1 Live pipeline healthcheck: added read-only `[56] live_pipeline_active` to catch configured live slot + missing signed auth / stale live snapshot; documented current Linux LiveDemo auth_missing state; no auth mutation | workspace/reports/2026-05-09--p0_new_issue_1_live_pipeline_healthcheck.md |
 | 2026-05-09 | W-AUDIT-7 F-strategy-confirm: visually isolated Strategy/Paper/Live dangerous controls, added shared action risk-zone CSS, moved Paper dual-stop and Live close-position native confirms to custom modal confirms, and verified with static tests + Edge routed smoke | workspace/reports/2026-05-09--w_audit_7_strategy_action_visual_isolation.md |

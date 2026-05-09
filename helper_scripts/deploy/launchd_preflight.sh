@@ -55,8 +55,12 @@ for p in "${PLISTS[@]}"; do
   if rg -n "__BASE__|__HOME__" "$full" >/dev/null 2>&1; then
     fail "unreplaced placeholder found in $full"
   fi
+  if [[ "$p" == "com.openclaw.trading-api.plist" ]] \
+    && rg -n "0\\.0\\.0\\.0" "$full" >/dev/null 2>&1; then
+    fail "trading API plist must not bind all interfaces: $full"
+  fi
 done
-info "plist files exist, parse, and have no __BASE__/__HOME__ placeholders"
+info "plist files exist, parse, have no placeholders, and avoid all-interface API bind"
 
 [[ -f "$DB_URL_FILE" ]] || fail "missing DB URL file: $DB_URL_FILE"
 [[ -s "$DB_URL_FILE" ]] || fail "empty DB URL file: $DB_URL_FILE"
