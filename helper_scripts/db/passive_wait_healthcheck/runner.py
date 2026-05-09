@@ -185,6 +185,23 @@ from .checks_replay_maintenance import (
     check_50_replay_run_state_health,
     check_53_ref21_v058_symbol_universe_recorder,
 )
+from .checks_canary_stage_invariant import (
+    # W-AUDIT-9 T4 (2026-05-09) — `[58]` graduated canary stage invariant
+    # sentinel per AMD-2026-05-09-03 §4.1. Reads V080 governance.canary_stage_log
+    # + governance.canary_stage_metric_registry, evaluates 5 invariants per
+    # active cohort (metric registry presence x2, rollback trip detection,
+    # observation period consistency, cohort scope rules), plus invariant 11
+    # (manual_promote NOT NULL lease — V080 PG CHECK should block, observed
+    # for partial-rollout drift) and invariant 12 (SM-04 >= L3 escalate must
+    # auto-rollback all cohorts to Stage 0).
+    # W-AUDIT-9 T4（2026-05-09）— `[58]` 漸進式 canary stage 不變式哨兵（AMD
+    # §4.1）。讀 V080 兩表，對 active cohort 評估 5 不變式（metric registry
+    # 存在 x2 / rollback trip / observation 期 / cohort 規範），加 invariant
+    # 11（manual_promote NOT NULL lease，V080 PG CHECK 應擋，仍觀察 partial
+    # rollout drift）與 invariant 12（SM-04 ≥ L3 escalate 必觸 stage 0
+    # rollback）。
+    check_58_graduated_canary_stage_invariant,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -206,7 +223,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53][54][55]                    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage
+    [46][48][49][50][51][52][53][54][55][58]                 REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W-AUDIT-9 T4 graduated canary stage invariant
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -253,6 +270,7 @@ Execution / cost sentinels added after F7:
   [53] ref21_v058_symbol_universe_recorder (REF-21 — recurring V058 universe snapshot liveness)
   [55] agent_decision_spine_lineage       (P1-AGENT-OBS-1 — MAG-082 lineage readiness)
   [56] live_pipeline_active               (P0-NEW-ISSUE-1 — live slot configured but LiveDemo not spawned)
+  [58] graduated_canary_stage_invariant   (W-AUDIT-9 T4 — AMD-2026-05-09-03 §4.1 5-stage state-machine invariant; SM-04 ≥ L3 escalate hard FAIL → triggers stage 0 rollback per invariant 12)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -273,7 +291,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53][54][55]
+              [46][48][49][50][51][52][53][54][55][58]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -294,7 +312,8 @@ def main() -> int:
                [52] agent event-store row proof;
                [53] REF-21 V058 universe recorder;
                [54] OpenClaw proposal relay;
-               [55] Agent Decision Spine MAG-082 lineage readiness)
+               [55] Agent Decision Spine MAG-082 lineage readiness;
+               [58] W-AUDIT-9 T4 graduated canary stage invariant — AMD-2026-05-09-03 §4.1)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
@@ -306,7 +325,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][58]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -804,6 +823,23 @@ def main() -> int:
             # REQUIRED env escalates to FAIL.
             s, m = check_55_agent_decision_spine_lineage(cur)
             results.append(("[55] agent_decision_spine_lineage", s, m))
+
+            # [58] W-AUDIT-9 T4 (2026-05-09): graduated canary stage invariant
+            # sentinel. AMD-2026-05-09-03 §4.1 配套 — 對 active cohort 驗證
+            # 5 invariants（metric registry / rollback trip / observation
+            # period / cohort 規範）+ invariant 11（manual_promote NOT NULL
+            # lease，V080 PG CHECK 應擋，partial-rollout drift 仍觀察）+
+            # invariant 12（SM-04 ≥ L3 escalate 必觸 stage 0 rollback）。
+            # SM-04 hard FAIL 由 transition_kind='incident_rollback' +
+            # triggered_metric ILIKE '%sm04%' 偵測。
+            # 純 SELECT inside cursor block; defensive rollback at top.
+            # [58] W-AUDIT-9 T4（2026-05-09）— graduated canary stage 不變式
+            # 哨兵（AMD-2026-05-09-03 §4.1）。對 active cohort 驗 5 不變式 +
+            # invariant 11/12。SM-04 ≥ L3 escalate hard FAIL 由
+            # transition_kind='incident_rollback' + triggered_metric ILIKE
+            # '%sm04%' 偵測。純 SELECT，cursor 區塊內。
+            s, m = check_58_graduated_canary_stage_invariant(cur)
+            results.append(("[58] graduated_canary_stage_invariant", s, m))
     finally:
         conn.close()
 
