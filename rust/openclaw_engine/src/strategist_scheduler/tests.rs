@@ -109,7 +109,7 @@ fn test_validate_recommendation_rejects_out_of_range() {
 #[test]
 fn test_validate_recommendation_rejects_excessive_delta() {
     let rec = serde_json::json!({
-        "cooldown_ms": 100000.0,  // +100% from 50000 > ±30%
+        "cooldown_ms": 100000.0,  // +100% from 50000 > ±50%
     });
     let current = serde_json::json!({
         "cooldown_ms": 50000.0,
@@ -532,12 +532,12 @@ async fn test_promote_params_to_live_err_on_handler_failure() {
 // mutates `strategist.max_param_delta_pct` via `swap()`, and re-runs
 // `validate_recommendation` through the scheduler's
 // `current_max_param_delta_pct()` snapshot path. Ensures:
-//   - cfg=0.10 → reject a +15% delta (would have passed under 0.30)
-//   - cfg=0.50 → accept a +40% delta (would have failed under 0.30)
+//   - cfg=0.10 → reject a +15% delta (would have passed under 0.50)
+//   - cfg=0.70 → accept a +60% delta (would have failed under 0.50)
 // This is the integration check the prompt explicitly requires
 // ("不要省 e2e behavior 驗證").
 // STRATEGIST-TUNE-TARGET-CONFIG-1 e2e：把 max_param_delta_pct 改 0.10
-// 餵 +15% 須拒；改 0.50 餵 +40% 須收。驗證 schema → snapshot → validator
+// 餵 +15% 須拒；改 0.70 餵 +60% 須收。驗證 schema → snapshot → validator
 // 整鏈通暢。
 // ═══════════════════════════════════════════════════════════════════
 
@@ -576,7 +576,7 @@ fn test_param_delta_clamp_uses_config_value() {
     }];
 
     // Scenario 1: clamp = 0.10, recommend +15% delta → REJECT.
-    // 情境 1：clamp=0.10 拒 +15% delta（在 0.30 預設下原本會通過）。
+    // 情境 1：clamp=0.10 拒 +15% delta（在 0.50 預設下原本會通過）。
     let sched_tight = make_sched(0.10);
     let snapshot_tight = sched_tight.current_max_param_delta_pct();
     assert!(
@@ -591,60 +591,59 @@ fn test_param_delta_clamp_uses_config_value() {
     assert!(
         !pass_15pct_at_010,
         "+15% delta must be REJECTED when max_param_delta_pct=0.10 \
-         (would have passed at default 0.30 — proves clamp config-driven)"
+         (would have passed at default 0.50 — proves clamp config-driven)"
     );
 
-    // Sanity: same +15% delta must PASS at the legacy 0.30 default,
+    // Sanity: same +15% delta must PASS at the current 0.50 default,
     // proving scenario 1 actually depends on the configured value
     // (not some unrelated gate).
-    // 健全性：同一 +15% 在 0.30 預設下必通過，證明場景 1 拒絕的確由 clamp 驅動。
+    // 健全性：同一 +15% 在 0.50 預設下必通過，證明場景 1 拒絕的確由 clamp 驅動。
     let pass_15pct_at_default =
         validate_recommendation(&rec_15pct, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT);
     assert!(
         pass_15pct_at_default,
-        "+15% delta must PASS at legacy 0.30 (clamp difference must be observable)"
+        "+15% delta must PASS at default 0.50 (clamp difference must be observable)"
     );
 
-    // Scenario 2: clamp = 0.50, recommend +40% delta → ACCEPT.
-    // 情境 2：clamp=0.50 收 +40% delta（在 0.30 預設下原本會被拒）。
-    let sched_loose = make_sched(0.50);
+    // Scenario 2: clamp = 0.70, recommend +60% delta → ACCEPT.
+    // 情境 2：clamp=0.70 收 +60% delta（在 0.50 預設下原本會被拒）。
+    let sched_loose = make_sched(0.70);
     let snapshot_loose = sched_loose.current_max_param_delta_pct();
     assert!(
-        (snapshot_loose - 0.50).abs() < 1e-12,
-        "scheduler must read 0.50 from wired RiskConfig (got {})",
+        (snapshot_loose - 0.70).abs() < 1e-12,
+        "scheduler must read 0.70 from wired RiskConfig (got {})",
         snapshot_loose
     );
 
-    let rec_40pct = serde_json::json!({"cooldown_ms": 70_000.0}); // +40%
-    let pass_40pct_at_050 = validate_recommendation(&rec_40pct, &current, &ranges, snapshot_loose);
+    let rec_60pct = serde_json::json!({"cooldown_ms": 80_000.0}); // +60%
+    let pass_60pct_at_070 = validate_recommendation(&rec_60pct, &current, &ranges, snapshot_loose);
     assert!(
-        pass_40pct_at_050,
-        "+40% delta must be ACCEPTED when max_param_delta_pct=0.50 \
-         (would have failed at default 0.30 — proves clamp config-driven)"
+        pass_60pct_at_070,
+        "+60% delta must be ACCEPTED when max_param_delta_pct=0.70 \
+         (would have failed at default 0.50 — proves clamp config-driven)"
     );
 
-    // Symmetric sanity: same +40% must FAIL at the legacy 0.30, so
+    // Symmetric sanity: same +60% must FAIL at the current 0.50 default, so
     // scenario 2 acceptance is genuinely caused by the relaxed clamp.
-    // 對稱健全性：+40% 在 0.30 預設下必拒，證明場景 2 通過確由 clamp 放寬驅動。
-    let pass_40pct_at_default =
-        validate_recommendation(&rec_40pct, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT);
+    // 對稱健全性：+60% 在 0.50 預設下必拒，證明場景 2 通過確由 clamp 放寬驅動。
+    let pass_60pct_at_default =
+        validate_recommendation(&rec_60pct, &current, &ranges, DEFAULT_MAX_PARAM_DELTA_PCT);
     assert!(
-        !pass_40pct_at_default,
-        "+40% delta must FAIL at legacy 0.30 (clamp difference must be observable)"
+        !pass_60pct_at_default,
+        "+60% delta must FAIL at default 0.50 (clamp difference must be observable)"
     );
 
     // Final scenario: scheduler with NO risk_store wired falls back to
-    // DEFAULT_MAX_PARAM_DELTA_PCT (0.30) — the previously hardcoded
-    // value. Ensures backward compatibility for direct-call tests /
-    // boot-edge cases.
-    // 最後場景：未接 risk_store 時走 0.30 後備（保留原硬編碼行為）。
+    // DEFAULT_MAX_PARAM_DELTA_PCT (0.50) — the current source default.
+    // Ensures direct-call tests / boot-edge cases stay aligned with source.
+    // 最後場景：未接 risk_store 時走 0.50 後備（對齊 source 預設）。
     let (ai, pool, cancel) = mk_deps();
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let sched_no_store = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel);
     let snapshot_no_store = sched_no_store.current_max_param_delta_pct();
     assert!(
         (snapshot_no_store - DEFAULT_MAX_PARAM_DELTA_PCT).abs() < 1e-12,
-        "no-store scheduler must fall back to DEFAULT_MAX_PARAM_DELTA_PCT (0.30)"
+        "no-store scheduler must fall back to DEFAULT_MAX_PARAM_DELTA_PCT (0.50)"
     );
 }
 

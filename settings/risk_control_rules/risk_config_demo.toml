@@ -351,15 +351,15 @@ antipersistent_threshold = 0.45 # H < 0.45 → mean-reverting side
 
 # STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25) — StrategistScheduler param
 # tuner clamp. `max_param_delta_pct` caps `|new − cur| / |cur|` for non-weight
-# scalar params each cycle. Default `0.30` (±30%) preserves the previously
-# hardcoded `MAX_PARAM_DELTA_PCT` in strategist_scheduler/mod.rs bit-for-bit.
+# scalar params each cycle. W-AUDIT-7 F-strategist-cap raises the current
+# source default to `0.50` (±50%) while retaining the same hot-reload path.
 # Operators may flip via TOML or IPC `patch_risk_config` (`<60s` hot-reload via
 # the existing deep-merge path). validate() enforces the open interval
 # `(0.0, 1.0)` and rejects NaN/Inf.
-# STRATEGIST-TUNE-TARGET-CONFIG-1：策略師調參 delta 上限；預設 0.30 與原硬編碼一致，
+# STRATEGIST-TUNE-TARGET-CONFIG-1：策略師調參 delta 上限；source 預設升至 0.50，
 # operator 可 IPC `<60s` 熱重載；validate() 強制 (0.0, 1.0) + 拒 NaN/Inf。
 [strategist]
-max_param_delta_pct = 0.30      # ±30% cap on per-cycle non-weight param delta
+max_param_delta_pct = 0.50      # ±50% cap on per-cycle non-weight param delta
 
 # G3-09 Phase A (2026-04-27) — cost_edge_advisor schema (advisory only).
 # Lifts CLAUDE.md §二 原則 #13 「AI 資源成本感知 — 每次 AI 調用計費，
