@@ -296,3 +296,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-5b state-machine snapshot source checkpoint: removed the 10 generic `copy.deepcopy` snapshot callsites from SM-01 authorization, SM-02 decision lease, SM-04 risk governor, shared `state_machine_base`, and `learning_tier_gate`
 - added explicit `clone()` snapshot methods for `AuthorizationObject`, `DecisionLeaseObject`, `GovernorState`, and `TierState`, with `_clone_jsonish()` for mutable dict/list snapshot fields; `MultiObjectStoreMixin` now requires clone-backed snapshots instead of generic deepcopy fallback
 - added regression coverage for nested snapshot isolation plus `tests/structure/test_state_machine_snapshot_clone_static.py`; source/test only, no rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- continued W-AUDIT-5b orjson foundation source checkpoint: added `app/json_fast.py` with optional `orjson` fast path and stdlib fallback, added `orjson>=3.10.0` to control_api_v1 requirements, and migrated `ai_service_listener.py` plus `ipc_client_sync.py` newline-delimited JSON IPC hot paths
+- kept byte-contract-sensitive signature/hash JSON callsites untouched pending explicit canonical-byte tests; added `test_json_fast.py` and `tests/structure/test_json_fast_hot_paths_static.py`
+- verification: py_compile for `json_fast.py`, `ipc_client_sync.py`, and `ai_service_listener.py`; targeted pytest 21/0; `git diff --check` PASS; source/test only, no dependency install, rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

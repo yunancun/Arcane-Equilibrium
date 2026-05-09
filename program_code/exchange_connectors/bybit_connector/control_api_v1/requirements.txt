@@ -20,6 +20,7 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.27.0
 pydantic>=2.11.0
+orjson>=3.10.0
 
 # --- HTTP client (optional, Layer 2 web search) / HTTP 客戶端（可選，L2 網頁搜索）---
 # Imported inside try/except — missing httpx degrades L2 search, not core function.
