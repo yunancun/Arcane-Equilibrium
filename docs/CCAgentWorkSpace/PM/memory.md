@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | Three main blockers runtime closure: lease-bypass audit runtime rows verified, operator decision audit blockers closed, signed LiveDemo auth restored, Linux rebuilt/restarted and `[56]` PASS; true mainnet remains disabled | workspace/reports/2026-05-09--three_blockers_runtime_closure.md |
 | 2026-05-09 | P0-NEW-VULN-1 launchd plist bind hardening: Trading API launchd template now defaults to 127.0.0.1, preflight rejects 0.0.0.0, and Batch E static regression covers plist/preflight | workspace/reports/2026-05-09--p0_new_vuln_1_launchd_bind_hardening.md |
 | 2026-05-09 | P0-AUDIT-NEW-LG-X-05: fixed SPECIFICATION_REGISTER LG-X numbering, restored LG-X-04 to Supervised-Live Gate, added LG-X-05 constrained autonomous live with RFC/eval-contract/amendment/healthcheck references, and moved ops prerequisites to OPS-X-01 | workspace/reports/2026-05-09--p0_audit_lgx05_register_fix.md |
 | 2026-05-09 | P0-NEW-ISSUE-1 Live pipeline healthcheck: added read-only `[56] live_pipeline_active` to catch configured live slot + missing signed auth / stale live snapshot; documented current Linux LiveDemo auth_missing state; no auth mutation | workspace/reports/2026-05-09--p0_new_issue_1_live_pipeline_healthcheck.md |
@@ -1990,3 +1991,19 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   `git diff --check` PASS.
 - Boundary: no rebuild/restart/runtime env flip/live auth/scanner authority/
   Executor authority/strategy-risk config/MAG-083/084 unlock/true-live action.
+
+## 2026-05-09 Three Main Blockers Runtime Closure
+
+- `P0-NEW-VULN-2` is runtime-verified: `e97a333b` emits non-production
+  lease-bypass audit rows, V078 is applied on Linux, and
+  `learning.lease_transitions` has 2 `BYPASS` rows for `demo` / `live_demo`.
+- `P0-DECISION-AUDIT-2/4/5` is closed by AMD-2026-05-09-02 and ADR updates:
+  SM-05 Option A, selected five-strategy verdicts, legacy `openclaw_core`
+  sunset candidates, and Layer2 manual/supervisor-only.
+- `P0-NEW-ISSUE-1` LiveDemo auth_missing is restored via signed
+  `/api/v1/live/auth/renew`; `[56] live_pipeline_active` PASSes after the
+  authorized `--rebuild --keep-auth` restart.
+- Boundary: true mainnet remains disabled; no strategy/risk config mutation,
+  no MAG-083/MAG-084 unlock, and no manual auth-file write occurred.
+- Remaining follow-up: RCA why the earlier `restart_all.sh --keep-auth` path
+  lost signed auth, then continue W-AUDIT-3 F-01 and W-AUDIT-6.
