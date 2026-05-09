@@ -675,6 +675,10 @@ fn test_decision_feature_snapshot_full_channel_drops() {
         feature_schema_hash: "h".into(),
         feature_definition_hash: "h".into(),
         features_jsonb: "{}".into(),
+        // W-AUDIT-4b-M3：filler msg 走 intent-only 路徑（向後相容）。
+        label_close_tag: None,
+        label_net_edge_bps: None,
+        label_filled_at_now: false,
     })
     .unwrap();
     pipeline.set_decision_feature_tx(tx);

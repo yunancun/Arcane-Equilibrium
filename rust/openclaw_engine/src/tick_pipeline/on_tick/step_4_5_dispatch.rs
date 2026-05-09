@@ -417,6 +417,31 @@ impl TickPipeline {
                                     Some(&scanner_gate_audit),
                                     &reason,
                                 );
+
+                                // W-AUDIT-4b-M3 (2026-05-09)：pre_risk reject
+                                // path 寫 negative label。inline build features
+                                // —— 此 path 在 exchange/paper gate 之前，尚未
+                                // 構造過 features。Cost: 17 fields from already-
+                                // available context, identical to下方 gate path
+                                // build_feature_vector 呼叫。
+                                // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+                                //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M3
+                                let pre_risk_features =
+                                    crate::edge_predictor::feature_builder::build_feature_vector(
+                                        intent,
+                                        event,
+                                        indicators,
+                                        atr_value,
+                                        &self.paper_state,
+                                    );
+                                self.intent_processor.emit_decision_feature_intent_rejected(
+                                    intent,
+                                    &pre_risk_features,
+                                    &context_id,
+                                    event.ts_ms,
+                                    &reason,
+                                );
+
                                 tracing::debug!(
                                     strategy = %intent.strategy,
                                     symbol = %intent.symbol,
@@ -684,6 +709,18 @@ impl TickPipeline {
                                     intent,
                                     mq,
                                     format!("rejected:{}", reason),
+                                );
+
+                                // W-AUDIT-4b-M3 (2026-05-09)：exchange gate reject
+                                // path 寫 negative label。features 已於上方
+                                // build_feature_vector 構造，context_id 已 make_*
+                                // 編碼。Spec §2.5 B-M3。
+                                self.intent_processor.emit_decision_feature_intent_rejected(
+                                    intent,
+                                    &features,
+                                    &context_id,
+                                    event.ts_ms,
+                                    reason,
                                 );
                             }
                         } else {
@@ -1070,6 +1107,18 @@ impl TickPipeline {
                                     intent,
                                     mq,
                                     format!("rejected:{}", reason),
+                                );
+
+                                // W-AUDIT-4b-M3 (2026-05-09)：paper gate reject
+                                // path 寫 negative label。features 已於上方
+                                // build_feature_vector 構造，context_id 同源。
+                                // Spec §2.5 B-M3。
+                                self.intent_processor.emit_decision_feature_intent_rejected(
+                                    intent,
+                                    &features,
+                                    &context_id,
+                                    event.ts_ms,
+                                    reason,
                                 );
                             }
                         }

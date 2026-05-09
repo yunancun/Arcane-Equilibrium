@@ -601,6 +601,24 @@ pub struct DecisionFeatureMsg {
     /// it through `sqlx::types::Json::<serde_json::Value>` once.
     /// `FeatureVectorV1::to_jsonb()` 預序列化字串；writer 走一次 JSONB cast。
     pub features_jsonb: String,
+
+    // ── W-AUDIT-4b-M3 (2026-05-09): negative-label carrier fields ──
+    // Producer 端 `emit_decision_feature_intent_rejected` 在 governance / cost-gate
+    // reject path 寫入下列三欄。Writer 端依 `label_close_tag.is_some()` 分流：
+    //   Some → reject 變體 INSERT（連 label 三欄 + label_filled_at = NOW()）
+    //   None → intent-only 變體 INSERT（保 V017 default NULL，由 backfill 補）
+    //
+    // 三欄全 None / false 即為 M1 success-path 的 intent-only emit（向後相容）。
+    /// Reject 路徑的 close_tag 字串（固定 "rejected_governance"）。
+    /// `Some` 觸發 writer reject 變體 INSERT；`None` 走 intent-only 路徑（V017 default）。
+    pub label_close_tag: Option<String>,
+    /// Reject 路徑的 net_edge_bps（reject 沒成交，固定 0.0）。
+    /// 與 `label_close_tag` 配對；`None` 走 intent-only（V017 default NULL）。
+    pub label_net_edge_bps: Option<f64>,
+    /// Writer 是否用 server-side `now()` 寫 `label_filled_at` 欄位。
+    /// `true` → reject 路徑（emit 時間戳對 backfill 無意義，用 NOW() 標記寫入時刻）
+    /// `false` → intent-only 路徑（label_filled_at 保 NULL，待 backfill 回填）
+    pub label_filled_at_now: bool,
 }
 
 /// Decision feature evaluation snapshot → decision_feature_evaluation_writer task

@@ -113,29 +113,65 @@ async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFea
             }
         };
 
-        // label_* columns are intentionally omitted: they default to NULL/FALSE
-        // per V017 DDL and are populated later by edge_label_backfill.py.
-        // label_* 欄位故意省略：V017 DDL 預設 NULL/FALSE，稍後由 edge_label_backfill.py 回填。
-        let query = sqlx::query(
-            "INSERT INTO learning.decision_features \
-             (context_id, ts, engine_mode, strategy_name, symbol, side, \
-              feature_schema_version, feature_schema_hash, feature_definition_hash, \
-              features_jsonb) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) \
-             ON CONFLICT (context_id) DO NOTHING",
-        )
-        .bind(feat.context_id.clone())
-        .bind(ts)
-        .bind(feat.engine_mode.clone())
-        .bind(feat.strategy_name.clone())
-        .bind(feat.symbol.clone())
-        .bind(feat.side as i16) // SMALLINT
-        .bind(feat.feature_schema_version.clone())
-        .bind(feat.feature_schema_hash.clone())
-        .bind(feat.feature_definition_hash.clone())
-        .bind(features_value);
-
-        let outcome = exec_single_insert(pool, "learning.decision_features", query).await;
+        // W-AUDIT-4b-M3 (2026-05-09)：依 `label_close_tag.is_some()` 分流兩條 SQL。
+        //   reject 變體：INSERT 連 label 三欄 + label_filled_at 用 server-side NOW()
+        //                （emit 時間戳對 backfill 無意義；NOW() 標記 reject 寫入時刻）
+        //   intent-only：保 V017 預設行為（label_* 欄位 default NULL/FALSE，由
+        //                edge_label_backfill.py 回填）
+        // 兩條 SQL 都用 ON CONFLICT (context_id) DO NOTHING 維持冪等。
+        let outcome = if feat.label_close_tag.is_some() {
+            // ── Reject 變體：寫 label 三欄 ──
+            // $11 = label_close_tag（固定 "rejected_governance"）
+            // $12 = label_net_edge_bps（固定 0.0）
+            // $13 = label_filled_at_now（bool，true → server-side NOW()）
+            let query = sqlx::query(
+                "INSERT INTO learning.decision_features \
+                 (context_id, ts, engine_mode, strategy_name, symbol, side, \
+                  feature_schema_version, feature_schema_hash, feature_definition_hash, \
+                  features_jsonb, label_close_tag, label_net_edge_bps, label_filled_at) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, \
+                  CASE WHEN $13 THEN now() ELSE NULL END) \
+                 ON CONFLICT (context_id) DO NOTHING",
+            )
+            .bind(feat.context_id.clone())
+            .bind(ts)
+            .bind(feat.engine_mode.clone())
+            .bind(feat.strategy_name.clone())
+            .bind(feat.symbol.clone())
+            .bind(feat.side as i16) // SMALLINT
+            .bind(feat.feature_schema_version.clone())
+            .bind(feat.feature_schema_hash.clone())
+            .bind(feat.feature_definition_hash.clone())
+            .bind(features_value)
+            .bind(feat.label_close_tag.clone())
+            .bind(feat.label_net_edge_bps)
+            .bind(feat.label_filled_at_now);
+            exec_single_insert(pool, "learning.decision_features", query).await
+        } else {
+            // ── Intent-only 變體：保 V017 預設行為，label_* 欄位由 backfill 補 ──
+            // label_* columns are intentionally omitted: they default to NULL/FALSE
+            // per V017 DDL and are populated later by edge_label_backfill.py.
+            // label_* 欄位故意省略：V017 DDL 預設 NULL/FALSE，稍後由 edge_label_backfill.py 回填。
+            let query = sqlx::query(
+                "INSERT INTO learning.decision_features \
+                 (context_id, ts, engine_mode, strategy_name, symbol, side, \
+                  feature_schema_version, feature_schema_hash, feature_definition_hash, \
+                  features_jsonb) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) \
+                 ON CONFLICT (context_id) DO NOTHING",
+            )
+            .bind(feat.context_id.clone())
+            .bind(ts)
+            .bind(feat.engine_mode.clone())
+            .bind(feat.strategy_name.clone())
+            .bind(feat.symbol.clone())
+            .bind(feat.side as i16) // SMALLINT
+            .bind(feat.feature_schema_version.clone())
+            .bind(feat.feature_schema_hash.clone())
+            .bind(feat.feature_definition_hash.clone())
+            .bind(features_value);
+            exec_single_insert(pool, "learning.decision_features", query).await
+        };
         if !matches!(outcome, SingleInsertOutcome::Ok(_)) {
             pending.insert(key, feat);
         }
@@ -158,6 +194,21 @@ mod tests {
             feature_schema_hash: "sha256:0011223344556677".into(),
             feature_definition_hash: "sha256:0011223344556677".into(),
             features_jsonb: r#"{"adx_1h":25.0,"side":1}"#.into(),
+            // W-AUDIT-4b-M3：默認 intent-only path（label 欄位全 None / false）。
+            // reject path 測試用 `make_reject_feat` 變體。
+            label_close_tag: None,
+            label_net_edge_bps: None,
+            label_filled_at_now: false,
+        }
+    }
+
+    /// W-AUDIT-4b-M3：reject path filler — 模擬 governance 拒絕 path 的訊息形態。
+    fn make_reject_feat(id: &str) -> DecisionFeatureMsg {
+        DecisionFeatureMsg {
+            label_close_tag: Some("rejected_governance".into()),
+            label_net_edge_bps: Some(0.0),
+            label_filled_at_now: true,
+            ..make_feat(id)
         }
     }
 
@@ -234,5 +285,37 @@ mod tests {
         ] {
             assert!(src.contains(col), "INSERT SQL missing column/clause: {col}");
         }
+    }
+
+    #[test]
+    fn test_reject_path_sql_locks_label_columns() {
+        // W-AUDIT-4b-M3：reject 變體 SQL 必含 label 三欄 + server-side NOW() 條件。
+        let src = include_str!("decision_feature_writer.rs");
+        for token in [
+            "label_close_tag",
+            "label_net_edge_bps",
+            "label_filled_at",
+            "CASE WHEN $13 THEN now() ELSE NULL END",
+        ] {
+            assert!(src.contains(token), "reject SQL missing token: {token}");
+        }
+    }
+
+    #[test]
+    fn test_make_feat_default_is_intent_only() {
+        // W-AUDIT-4b-M3：預設 helper 不應觸發 reject 變體 SQL。
+        let feat = make_feat("ctx-default");
+        assert!(feat.label_close_tag.is_none());
+        assert!(feat.label_net_edge_bps.is_none());
+        assert!(!feat.label_filled_at_now);
+    }
+
+    #[test]
+    fn test_make_reject_feat_carries_negative_label() {
+        // W-AUDIT-4b-M3：reject helper 必寫 "rejected_governance" + 0.0 + NOW() flag。
+        let feat = make_reject_feat("ctx-reject");
+        assert_eq!(feat.label_close_tag.as_deref(), Some("rejected_governance"));
+        assert_eq!(feat.label_net_edge_bps, Some(0.0));
+        assert!(feat.label_filled_at_now);
     }
 }
