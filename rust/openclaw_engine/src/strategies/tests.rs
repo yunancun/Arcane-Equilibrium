@@ -262,6 +262,14 @@ fn test_w_audit_6_real_strategy_params_keep_funding_arb_retired() {
             "{} funding_arb must stay inactive until a redesign explicitly re-enables it",
             kind
         );
+        assert!(
+            cfg.grid_trading
+                .blocked_symbols
+                .iter()
+                .any(|s| s == "BILLUSDT"),
+            "{} grid_trading must block BILLUSDT new entries after [40] negative-cell RCA",
+            kind
+        );
     }
 }
 

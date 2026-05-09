@@ -102,6 +102,8 @@ cost_floor_multiplier = 2.0
 # existing positions can still close/reduce normally.
 # P1-DATA-1 2026-05-08: LABUSDT added from [40] combined demo/live_demo negative
 # cell (grid_trading/LABUSDT n=17 avg=-78.76bps).
+# W-AUDIT-6 2026-05-09 post-rebuild [40]: BILLUSDT added from combined
+# demo/live_demo negative cell (grid_trading/BILLUSDT n=11 avg=-49.67bps).
 # GRID-LIFECYCLE-DRIFT RFC：同步 demo robust-negative cells 到 live_demo；
 # 僅阻擋新 grid 入場，既有倉位仍可平倉 / 減倉。
 blocked_symbols = [
@@ -121,6 +123,7 @@ blocked_symbols = [
   "1000PEPEUSDT",
   "ADAUSDT",
   "LABUSDT",
+  "BILLUSDT",
 ]
 
 # OC-5: FundingArb — disabled across paper/demo/live until funding-capture
