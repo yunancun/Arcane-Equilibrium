@@ -86,7 +86,7 @@
   5 策略 7d demo gross 約 `-26.44 USDT`，live_demo gross 約 `+0.43 USDT`；
   舊 §三 的 `-6.98 USDT` 已過期。
 - 2026-05-09 3C 7d audit：Overall `WARN`；`[40]` avg_net 比 baseline 下滑 `-1.12bps`（within tolerance），grid p50 lifetime shortened `47.6%`，demo gross PnL delta improved `+20.87 USD` vs baseline。
-- `funding_arb` 新開倉仍按現有 risk configs 禁用 / 收斂；AMD-2026-05-09-02 / ADR-0018 已決定從 active strategy set 退休，W-AUDIT-6 做 RiskConfig 清理；2026-05-16 14d audit 保留作驗證/歷史工件。
+- `funding_arb` 已由 AMD-2026-05-09-02 / ADR-0018 從 active strategy set 退休；四個 `risk_config*.toml` 已完成 W-AUDIT-6 RiskConfig cleanup，不再承載 `funding_arb` per-strategy 覆蓋；策略退休 authority 保留在 `strategy_params_{paper,demo,live}.toml active=false`；2026-05-16 14d audit 保留作驗證/歷史工件。
 
 ### Current Observation Gates
 
