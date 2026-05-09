@@ -144,7 +144,7 @@ Adversarial: silent return {} mutation caught immediately (DID NOT RAISE
              RuntimeError) — fail-closed invariant真實守門
 ```
 
-實際 hash 在執行 commit 後填入。
+**實際 hash**：`1448e0a1`（Mac SSOT push origin/main 完成、ssh trade-core git pull --ff-only 完成；三端同步）
 
 ---
 
