@@ -18,6 +18,13 @@ let _currentAuthState = null;
 let _currentRiskLevel = null;
 let _currentLeaseActive = null;
 
+// W-AUDIT-7c round 2 fix [#5][#6]：cache 最近一次 pending list，
+// bulkAudit / confirmApproveRecovery modal body 內顯示具體影響時可直接讀取，
+// 避免每次點按鈕都 re-fetch（也避免 modal open 前還沒有資料可顯示）。
+// loadPendingApprovals 每次刷新都會更新此 cache。
+let _lastPendingRecovery = [];
+let _lastPendingAudit = [];
+
 // ─── Event Log (Incident Timeline & Audit Trail) ───────────────
 let _govEventLog = [];
 let _prevStatus = null;
@@ -1548,62 +1555,119 @@ async function bulkAudit(action) {
   // W-AUDIT-7c (2026-05-09): 批次 approve / reject 是 critical-grade governance 寫操作，
   // 影響可能涉及多筆 SM-01 / SM-04 / SM-02 變更；用高摩擦 typed-confirm 取代 native confirm()，
   // 避免一鍵誤觸全批通過 / 全批拒絕。phrase = 'CONFIRM'，case-sensitive。
-  const titleZh = isApprove ? '批量批准全部待审 / Bulk Approve All Pending' : '批量拒绝全部待审 / Bulk Reject All Pending';
-  const bodyZh = isApprove
-    ? '此操作將批准目前所有待審變更，立即生效。\n受影響範圍可能包含 SM-01 授權、SM-04 風險等級、Decision Lease 規則。\n建議先逐項複核後再批量通過。'
-    : '此操作將拒絕目前所有待審變更，理由將寫入 audit trail。\n拒絕後待審項回復為已關閉狀態，需重新申請。';
-  const ok = await openTypedConfirmModal({
-    title: titleZh,
-    body: bodyZh,
-    phrase: 'CONFIRM',
-    confirmLabel: isApprove ? '確認批量批准 / Approve All' : '確認批量拒絕 / Reject All',
-    confirmClass: isApprove ? 'oc-btn-primary' : 'oc-btn-danger',
-    impact: '所有 PENDING 狀態變更同時 commit',
-    rollback: '無自動回滾；需個別申請新變更覆蓋'
-  });
-  if (!ok) return;
+  // round 2 fix [#7]：trigger button 在 await modal **前** disabled，try/finally 復位，避免併發雙觸。
+  // round 2 fix [#5]：modal body 顯示具體 PENDING 筆數 + 前 5 筆 change_id，避免凌晨盲飛。
+  // round 2 fix [#8][#9]：cancel/部分失敗顯 toast + 失敗 change_id 列表。
+  const triggerBtn = (typeof event !== 'undefined' && event && event.currentTarget) ? event.currentTarget : null;
+  if (triggerBtn) triggerBtn.disabled = true;
+  try {
+    // 先 fetch pending list，modal body 才能顯示 N 筆 + 前 5 筆 change_id。
+    // 此處 fetch 失敗 = 後端不可用，直接 abort，不開 modal。
+    const pending = await govGetPendingAudit();
+    if (!pending || !pending.ok || !Array.isArray(pending.data)) {
+      ocToast('获取待审批列表失败 / Failed to load pending list', 'error');
+      return;
+    }
+    const items = pending.data;
+    if (items.length === 0) {
+      ocToast('目前沒有待審批變更 / No pending changes', 'neutral');
+      return;
+    }
+    // 同步刷新 cache（loadPendingApprovals 之外的入口也能更新）
+    _lastPendingAudit = items;
 
-  const reason = isApprove ? 'Operator bulk approved' : (
-    await openPromptModal({
-      title: '批量拒绝原因 / Bulk Rejection Reason',
-      label: '原因 / Reason',
-      required: true,
-      multiline: true,
-      confirmLabel: '拒绝全部 / Reject All'
-    }) || ''
-  ).trim();
-  if (!isApprove && !reason) { ocToast('请输入拒绝原因', 'error'); return; }
+    const sample = items.slice(0, 5).map(function(c) { return c.change_id || c.id || '(no-id)'; });
+    const overflow = items.length > 5 ? ('\n... 及其他 ' + (items.length - 5) + ' 筆') : '';
+    const sampleLines = sample.map(function(id, i) { return '  ' + (i + 1) + '. ' + id; }).join('\n');
 
-  // Fetch current pending list and process one by one
-  const pending = await govGetPendingAudit();
-  if (!pending || !pending.ok || !pending.data) { ocToast('获取待审批列表失败', 'error'); return; }
+    const titleZh = isApprove ? '批量批准全部待审 / Bulk Approve All Pending' : '批量拒绝全部待审 / Bulk Reject All Pending';
+    const bodyZh = (isApprove
+      ? '即將批准 ' + items.length + ' 筆 PENDING 變更，立即生效。\n受影響範圍可能包含 SM-01 授權、SM-04 風險等級、Decision Lease 規則。\n建議先逐項複核後再批量通過。'
+      : '即將拒絕 ' + items.length + ' 筆 PENDING 變更，理由將寫入 audit trail。\n拒絕後待審項回復為已關閉狀態，需重新申請。'
+    ) + '\n\n變更清單（前 5 筆）:\n' + sampleLines + overflow;
 
-  let ok = 0, fail = 0;
-  for (const c of pending.data) {
-    const d = isApprove
-      ? await govApproveAuditChange(c.change_id, reason)
-      : await govRejectAuditChange(c.change_id, reason);
-    if (d && d.ok) ok++; else fail++;
+    const proceed = await openTypedConfirmModal({
+      title: titleZh,
+      body: bodyZh,
+      phrase: 'CONFIRM',
+      confirmLabel: isApprove ? '確認批量批准 / Approve All' : '確認批量拒絕 / Reject All',
+      confirmClass: isApprove ? 'oc-btn-primary' : 'oc-btn-danger',
+      impact: '所有 ' + items.length + ' 筆 PENDING 同時 commit',
+      rollback: '無自動回滾；需個別申請新變更覆蓋'
+    });
+    if (!proceed) {
+      ocToast('已取消批量' + (isApprove ? '批准 / Bulk approve cancelled' : '拒絕 / Bulk reject cancelled'), 'neutral');
+      return;
+    }
+
+    let reason;
+    if (isApprove) {
+      reason = 'Operator bulk approved';
+    } else {
+      const promptResult = await openPromptModal({
+        title: '批量拒绝原因 / Bulk Rejection Reason',
+        label: '原因 / Reason',
+        required: true,
+        multiline: true,
+        confirmLabel: '拒绝全部 / Reject All'
+      });
+      reason = (promptResult || '').trim();
+      if (!reason) {
+        ocToast('已取消批量拒絕（未提供原因） / Bulk reject cancelled (no reason)', 'neutral');
+        return;
+      }
+    }
+
+    // counter 不再用 `ok` / `fail`（與外層 `proceed` 命名衝突已解，但保持語意清晰；
+    // round 2 fix [#1]：原本宣告兩次 `ok` 觸發 SyntaxError 整檔 parse fail）
+    let okCount = 0, failCount = 0;
+    const failedChangeIds = [];
+    for (const c of items) {
+      const d = isApprove
+        ? await govApproveAuditChange(c.change_id, reason)
+        : await govRejectAuditChange(c.change_id, reason);
+      if (d && d.ok) {
+        okCount++;
+      } else {
+        failCount++;
+        failedChangeIds.push(c.change_id || c.id || '(no-id)');
+      }
+    }
+
+    const label = isApprove ? '同意 approved' : '拒绝 rejected';
+    let toastMsg = okCount + ' 项已' + label + (failCount ? '，' + failCount + ' 项失败' : '');
+    if (failedChangeIds.length) {
+      // 失敗詳情 toast 後再開一個常駐 banner 顯示完整 id list（≤ 10 個直顯，超過截斷）
+      const shown = failedChangeIds.slice(0, 10).join(', ');
+      const more = failedChangeIds.length > 10 ? ' ...(+' + (failedChangeIds.length - 10) + ')' : '';
+      toastMsg += '\n失敗：[' + shown + more + ']';
+    }
+    ocToast(toastMsg, okCount ? (failCount ? 'warn' : 'success') : 'error');
+    loadPendingApprovals();
+  } finally {
+    if (triggerBtn) triggerBtn.disabled = false;
   }
-
-  const label = isApprove ? '同意 approved' : '拒绝 rejected';
-  ocToast(ok + ' 项已' + label + (fail ? '，' + fail + ' 项失败' : ''), ok ? 'success' : 'error');
-  loadPendingApprovals();
 }
 
 async function loadPendingApprovals() {
+  // round 2 fix [#5][#6]：每次刷新都同步更新 cache，
+  // 供 bulkAudit / confirmApproveRecovery modal body 顯示具體影響使用。
   const recovery = await govGetPendingRecovery();
   if (recovery && recovery.ok) {
-    renderPendingRecovery(recovery.data || []);
+    _lastPendingRecovery = Array.isArray(recovery.data) ? recovery.data : [];
+    renderPendingRecovery(_lastPendingRecovery);
   } else {
+    _lastPendingRecovery = [];
     const el = document.getElementById('pending-recovery-content');
     if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load recovery requests / 載入恢復請求失敗（治理中枢可能未启用）</p>'; // SAFE: static HTML only
   }
 
   const audit = await govGetPendingAudit();
   if (audit && audit.ok) {
-    renderPendingAudit(audit.data || []);
+    _lastPendingAudit = Array.isArray(audit.data) ? audit.data : [];
+    renderPendingAudit(_lastPendingAudit);
   } else {
+    _lastPendingAudit = [];
     const el = document.getElementById('pending-audit-content');
     if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load pending approvals / 載入待批准項目失敗（治理中枢可能未启用）</p>'; // SAFE: static HTML only
   }
@@ -1613,23 +1677,76 @@ async function confirmApproveRecovery(requestId) {
   // W-AUDIT-7c (2026-05-09): Recovery approve 是 critical-grade governance 寫操作，
   // 接受 recovery request 等於放寬已被風控擋下的執行邊界（SM-04 / Decision Lease）。
   // 用高摩擦 typed-confirm 取代 native confirm()，phrase = 'CONFIRM'。
-  const ok = await openTypedConfirmModal({
-    title: '批准恢復請求 / Approve Recovery Request',
-    body: '批准恢復請求 = 放寬已被風控阻擋的執行邊界。\n受影響範圍：SM-04 風險等級、Decision Lease 授權鏈、可能觸發 Executor 重新進入 active 狀態。\n請確認 incident root cause 已查清且風控狀態安全。',
-    phrase: 'CONFIRM',
-    confirmLabel: '確認批准恢復 / Approve Recovery',
-    confirmClass: 'oc-btn-danger',
-    impact: '放寬風控保護邊界；對賬 / 風控可能立即重新啟用',
-    rollback: '無自動回滾；需新發 recovery override 收回'
-  });
-  if (!ok) return;
-  const d = await govApprovePendingRecovery(requestId);
-  if (d && d.ok) {
-    ocToast('Recovery request approved / 恢復請求已批准', 'success');
-    loadPendingApprovals();
-    loadAll();
-  } else {
-    ocToast(d ? d.message : 'Approval failed / 批准失敗', 'error');
+  // round 2 fix [#6]：先從 _lastPendingRecovery cache 找具體 request 細節
+  //   （strategy / symbol / freeze reason / 待 review 時長），modal body 顯示，
+  //   避免 funding_arb_BTCUSDT vs bb_breakout_ETHUSDT 盲批准。
+  // round 2 fix [#7]：trigger button 在 await modal **前** disabled，try/finally 復位。
+  // round 2 fix [#8]：cancel 顯 toast，不靜默 return。
+  const triggerBtn = (typeof event !== 'undefined' && event && event.currentTarget) ? event.currentTarget : null;
+  if (triggerBtn) triggerBtn.disabled = true;
+  try {
+    // 從已 cache 的 list 中找該 request；無新 API call。
+    let req = null;
+    if (Array.isArray(_lastPendingRecovery) && _lastPendingRecovery.length) {
+      req = _lastPendingRecovery.find(function(r) { return (r.request_id || r.id) === requestId; }) || null;
+    }
+    // 若 cache 過期或沒命中（例如 user 未刷新），強制 reload 一次再找
+    if (!req) {
+      try {
+        const fresh = await govGetPendingRecovery();
+        if (fresh && fresh.ok && Array.isArray(fresh.data)) {
+          _lastPendingRecovery = fresh.data;
+          req = fresh.data.find(function(r) { return (r.request_id || r.id) === requestId; }) || null;
+        }
+      } catch (_e) { /* fallthrough — modal still 可開但只顯通用 body */ }
+    }
+
+    let detailLines = '';
+    if (req) {
+      const parts = [];
+      if (req.strategy) parts.push('策略 / Strategy: ' + req.strategy);
+      if (req.symbol) parts.push('幣種 / Symbol: ' + req.symbol);
+      if (req.freeze_reason || req.reason) parts.push('凍結原因 / Freeze reason: ' + (req.freeze_reason || req.reason));
+      if (req.description) parts.push('說明 / Description: ' + req.description);
+      if (req.created_at || req.requested_at) {
+        const tsRaw = req.created_at || req.requested_at;
+        const ts = new Date(tsRaw);
+        if (!isNaN(ts.getTime())) {
+          const ageMs = Date.now() - ts.getTime();
+          const ageMin = Math.max(0, Math.floor(ageMs / 60000));
+          parts.push('待 review 時長 / Pending for: ' + ageMin + ' min（自 ' + tsRaw + '）');
+        } else {
+          parts.push('提交時間 / Requested: ' + tsRaw);
+        }
+      }
+      if (parts.length) detailLines = '\n\n變更細節:\n  ' + parts.join('\n  ');
+    } else {
+      detailLines = '\n\n（請求細節無法載入，僅以 ID 識別）';
+    }
+
+    const ok = await openTypedConfirmModal({
+      title: '批准恢復請求 / Approve Recovery Request — ' + requestId,
+      body: '批准恢復請求 = 放寬已被風控阻擋的執行邊界。\n受影響範圍：SM-04 風險等級、Decision Lease 授權鏈、可能觸發 Executor 重新進入 active 狀態。\n請確認 incident root cause 已查清且風控狀態安全。' + detailLines,
+      phrase: 'CONFIRM',
+      confirmLabel: '確認批准恢復 / Approve Recovery',
+      confirmClass: 'oc-btn-danger',
+      impact: '放寬風控保護邊界；對賬 / 風控可能立即重新啟用',
+      rollback: '無自動回滾；需新發 recovery override 收回'
+    });
+    if (!ok) {
+      ocToast('已取消批准恢復 / Recovery approval cancelled', 'neutral');
+      return;
+    }
+    const d = await govApprovePendingRecovery(requestId);
+    if (d && d.ok) {
+      ocToast('Recovery request approved / 恢復請求已批准', 'success');
+      loadPendingApprovals();
+      loadAll();
+    } else {
+      ocToast(d ? d.message : 'Approval failed / 批准失敗', 'error');
+    }
+  } finally {
+    if (triggerBtn) triggerBtn.disabled = false;
   }
 }
 

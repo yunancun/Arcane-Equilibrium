@@ -1844,6 +1844,12 @@ function openTypedConfirmModal(options) {
   var rollback = meta.rollback || '';
 
   var overlay = document.getElementById('oc-typed-confirm-overlay');
+  // W-AUDIT-7c round 2 fix [#7]：singleton overlay 已 .show 狀態時拒絕第二次開啟，
+  // 避免併發 Promise 覆蓋第一個 resolver（onclick handler / oninput / onkeydown 都會被新呼叫覆蓋）。
+  if (overlay && overlay.classList.contains('show')) {
+    console.error('[openTypedConfirmModal] modal already open; rejecting concurrent open');
+    return Promise.reject(new Error('modal already open'));
+  }
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'oc-typed-confirm-overlay';
