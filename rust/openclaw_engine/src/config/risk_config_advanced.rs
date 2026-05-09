@@ -412,38 +412,47 @@ pub struct Experimental {
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// ExecutorConfig — ExecutorAgent shadow→live control plane (G3-02 Phase A)
-// ExecutorAgent shadow→live 控制平面（G3-02 Phase A）
+// ExecutorConfig — ExecutorAgent shadow→live control plane (G3-02 Phase A
+// + W-AUDIT-9 graduated canary upgrade per AMD-2026-05-09-03)
+// ExecutorAgent shadow→live 控制平面（G3-02 Phase A + W-AUDIT-9 5-stage 升級）
 // ---------------------------------------------------------------------------
 
-/// G3-02 Phase A (2026-04-25): canonical ExecutorAgent control plane.
+/// G3-02 Phase A (2026-04-25) + W-AUDIT-9 (AMD-2026-05-09-03, 2026-05-09)：
+/// ExecutorAgent canonical 控制平面 + graduated canary 5-stage 升級。
 ///
-/// Replaces the hardcoded `_shadow_mode = True` class attribute on Python
-/// `app/executor_agent.py:482` per RFC at
-/// `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md`.
-/// The Python attribute violated DOC-01 principle #3 (AI output ≠ immediate
-/// command) because flipping required a code edit + rebuild instead of the
-/// `<60s` IPC hot-reload turnaround used for the rest of the trading config.
+/// 演進歷史：
+/// - G3-02 Phase A：把 Python `_shadow_mode = True` 硬編碼提升為 Rust ConfigStore
+///   一級欄位（per RFC `2026-04-24--g3_01_executor_agent_ipc_rfc.md`）。
+/// - AMD-2026-05-09-03：把 binary `shadow_mode: bool` 升級為 5-stage graduated
+///   canary（Stage 0 / Stage 1 paper / Stage 2 demo / Stage 3 demo full /
+///   Stage 4 live pending）。`shadow_mode` 保留為 backward-compat projection：
+///   Stage 0 ⇄ shadow_mode=true，Stage 1+ ⇄ shadow_mode=false。
+///   權威 SoT 為 `canary_stage` + `canary_cohort` + `stage_entered_at_ms` +
+///   `observation_period_ms`。詳見：
+///   `docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md`
 ///
-/// Phase A scope: schema + TOML section + validation. Defaults preserve the
-/// pre-G3-02 Python ExecutorAgent behavior (shadow_mode = true), so this
-/// struct is dormant — no runtime change until Phase B wires Python's read
-/// path through a cache layer and Phase C connects an operator IPC flip
-/// behind the existing live-gate auth chain.
+/// 預設姿態（per AMD §2.3）：
+/// - paper TOML 預設 Stage 1（cohort 待 operator 顯式選擇前不啟用）
+/// - demo TOML 預設 Stage 1（W-AUDIT-9 IMPL land 後 cohort 待 operator 拍板）
+/// - live TOML 預設 Stage 0（live 不適用 graduated canary，仍 binary fail-closed）
 ///
-/// G3-02 Phase A：ExecutorAgent 控制平面落地。原 Python 硬編碼旗標違反
-/// 原則 #3，現提升為 Rust ConfigStore 一級欄位。Phase A 僅落 schema +
-/// TOML + validation；預設 shadow_mode=true 保留現行為，Phase B/C 後續完成。
+/// 不適用範圍（per AMD §3）：DOC-08 §12 9 條安全不變量 / SM-04 ≥ L3 / Live
+/// boundary 5-gate / §二 16 原則硬不變式 — 仍強制 binary fail-closed。
+///
+/// Phase B/C 預定（W-AUDIT-9 T3-T7）：shadow_mode_provider stage-aware（執行
+/// cohort match + observation_period 計算 + auto-promote/rollback eval）+ healthcheck
+/// `[58]` + GUI surface + Decision Lease `LeaseScope::CanaryStagePromotion`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutorConfig {
-    /// Shadow mode flag.
-    /// - `true`: log intents, do NOT submit orders to Bybit.
-    /// - `false`: submit orders (requires full live-gate chain green).
+    /// Legacy backward-compat 旗標。
+    /// - Stage 0 ⇄ `shadow_mode = true`（log intents，不下單）
+    /// - Stage 1..=4 ⇄ `shadow_mode = false`（cohort 內真實下單，cohort 外 shadow）
     ///
-    /// Default `true` preserves current Python ExecutorAgent behavior, so
-    /// Phase A landing has zero runtime impact. Phase B reads via cache;
-    /// Phase C unlocks operator IPC flip behind auth.
-    /// 影子模式旗標。true=log 但不下單；false=真實下單（需 live-gate 全綠）。
+    /// AMD-2026-05-09-03 §4.4：權威 SoT 改為 `canary_stage`，但保留此欄位給未升級
+    /// 的下游讀路徑。`validate()` 強制 `shadow_mode == (canary_stage == 0)` 一致性
+    /// — 任何不一致 = legacy config drift，fail-closed reject。
+    /// 影子模式 legacy 旗標。true=log 但不下單；false=真實下單（需 live-gate 全綠）。
+    /// AMD-2026-05-09-03：權威來源已改 canary_stage，此欄位保留 backward-compat。
     #[serde(default = "default_executor_shadow_mode")]
     pub shadow_mode: bool,
     /// Maximum position size as fraction of available margin (0.0 – 1.0).
@@ -458,19 +467,148 @@ pub struct ExecutorConfig {
     /// 逐 symbol 最大倉位比例覆蓋；空表 = 全 symbol 用 max_position_pct。
     #[serde(default)]
     pub per_symbol_position_cap: HashMap<String, f64>,
+
+    // ────────────────────────────────────────────────────────────────────
+    // W-AUDIT-9 (AMD-2026-05-09-03) graduated canary 5-stage 升級
+    // ────────────────────────────────────────────────────────────────────
+    /// AMD-2026-05-09-03：Graduated canary 階段（0..=4）。
+    /// - Stage 0：shadow only（不送 intent 到 Rust submit path），永久態
+    /// - Stage 1：1 strategy × 1 symbol × paper × 7d 觀察期
+    /// - Stage 2：1 strategy × 1 symbol × demo × 14d 觀察期
+    /// - Stage 3：5 active strategies × demo full universe × 21d
+    /// - Stage 4：LIVE_PENDING — operator 拍板 + 全 5-gate live boundary 滿足
+    ///
+    /// 默認 0（fail-closed shadow）。TOML 升 Stage 必同時設 `canary_cohort` +
+    /// `stage_entered_at_ms` + `observation_period_ms`，否則 validate() reject。
+    /// AMD-2026-05-09-03：5-stage canary 階段；Stage 0 = shadow，1..=3 cohort
+    /// 觀察，4 = live pending；升 Stage 必設 cohort 等三欄位，否則 reject。
+    #[serde(default = "default_executor_canary_stage")]
+    pub canary_stage: CanaryStage,
+
+    /// AMD-2026-05-09-03：Stage 1/2 cohort 範圍（1 strategy × 1 symbol × env）。
+    /// Stage 3/4 cohort 為全 universe（None）。Stage 0 cohort = None（shadow only）。
+    /// AMD-2026-05-09-03：cohort 範圍；Stage 1/2 必填 1×1×env，Stage 0/3/4=None。
+    #[serde(default)]
+    pub canary_cohort: Option<CanaryCohort>,
+
+    /// AMD-2026-05-09-03：當前 stage 進入時間（ms epoch）。
+    /// Stage 0 默認 0（永久態，無觀察期）。Stage 1+ 必為正值。
+    /// healthcheck `[58]` 與此欄位一致性比對 `governance.canary_stage_log` 最新 row。
+    /// AMD-2026-05-09-03：當前 stage 進入時間 ms epoch；Stage 0=0，Stage 1+ 必正。
+    #[serde(default)]
+    pub stage_entered_at_ms: i64,
+
+    /// AMD-2026-05-09-03：當前 stage 觀察期長度（ms）。
+    /// 預設 0（Stage 0 不觀察）。Stage 1=7d / Stage 2=14d / Stage 3=21d / Stage 4=不適用。
+    /// shadow_mode_provider stage-aware（W-AUDIT-9 T3）用此計算自動升級條件 eval timing。
+    /// AMD-2026-05-09-03：當前 stage 觀察期長度 ms；Stage 1=7d/2=14d/3=21d。
+    #[serde(default)]
+    pub observation_period_ms: u64,
+}
+
+/// AMD-2026-05-09-03 §2.2：5-stage graduated canary 階段列舉。
+/// 序列化為 0..=4 整數（serde transparent style）保 TOML 簡潔 + 跨 IPC schema 不變。
+/// AMD-2026-05-09-03：5-stage 階段；TOML 序列化為 0..=4 整數。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub enum CanaryStage {
+    /// Stage 0：shadow only（fail-closed default，binary 等價）
+    Stage0,
+    /// Stage 1：1 strategy × 1 symbol × paper × 7d 觀察期
+    Stage1,
+    /// Stage 2：1 strategy × 1 symbol × demo × 14d 觀察期
+    Stage2,
+    /// Stage 3：5 active strategies × demo full universe × 21d 觀察期
+    Stage3,
+    /// Stage 4：LIVE_PENDING — operator 拍板 + 全 live boundary
+    Stage4,
+}
+
+impl CanaryStage {
+    /// 把 stage 投影為 legacy `shadow_mode: bool`。
+    /// Stage 0 ⇄ true（shadow），Stage 1+ ⇄ false（live cohort/全 universe）。
+    /// AMD-2026-05-09-03 §4.4：保留給未升級的下游讀路徑。
+    /// AMD-2026-05-09-03：投影為 legacy shadow_mode bool。
+    pub fn as_shadow_mode(self) -> bool {
+        matches!(self, CanaryStage::Stage0)
+    }
+
+    /// 把 stage 編碼為 0..=4 整數。
+    /// AMD-2026-05-09-03：stage 整數編碼。
+    pub fn as_u8(self) -> u8 {
+        match self {
+            CanaryStage::Stage0 => 0,
+            CanaryStage::Stage1 => 1,
+            CanaryStage::Stage2 => 2,
+            CanaryStage::Stage3 => 3,
+            CanaryStage::Stage4 => 4,
+        }
+    }
+}
+
+impl Default for CanaryStage {
+    /// 預設 Stage 0（fail-closed shadow），與 W-AUDIT-9 land 前 `shadow_mode=true` 等價。
+    /// AMD-2026-05-09-03：預設 Stage 0 fail-closed。
+    fn default() -> Self {
+        CanaryStage::Stage0
+    }
+}
+
+impl From<CanaryStage> for u8 {
+    fn from(s: CanaryStage) -> u8 {
+        s.as_u8()
+    }
+}
+
+impl TryFrom<u8> for CanaryStage {
+    type Error = String;
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(CanaryStage::Stage0),
+            1 => Ok(CanaryStage::Stage1),
+            2 => Ok(CanaryStage::Stage2),
+            3 => Ok(CanaryStage::Stage3),
+            4 => Ok(CanaryStage::Stage4),
+            other => Err(format!(
+                "risk.executor.canary_stage invalid: {} (must be 0..=4)",
+                other
+            )),
+        }
+    }
+}
+
+/// AMD-2026-05-09-03 §2.1：cohort 範圍 — 哪 1 strategy × 1 symbol × environment
+/// 在當前 stage 真實送 intent；cohort 外仍 fail-closed shadow。
+/// AMD-2026-05-09-03：cohort 範圍 1 strategy × 1 symbol × env。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanaryCohort {
+    /// 策略名（必須屬於 active strategy set；funding_arb 已退役不可選）。
+    /// AMD-2026-05-09-03：策略名；不可為 active set 之外。
+    pub strategy: String,
+    /// Symbol（必須屬於當前 active universe）。
+    /// AMD-2026-05-09-03：symbol；必須屬於 active universe。
+    pub symbol: String,
+    /// 環境字串：'paper' | 'demo' | 'live_demo' | 'mainnet'。
+    /// W-AUDIT-9 T3 stage-aware provider 用此匹配 cohort scope。
+    /// AMD-2026-05-09-03：環境字串 paper/demo/live_demo/mainnet。
+    pub environment: String,
 }
 
 fn default_executor_shadow_mode() -> bool {
-    // Phase A safe default: preserve pre-G3-02 Python ExecutorAgent behavior
-    // (forced shadow). Phase C operator IPC flip lifts this once verified.
-    // Phase A 安全默認：保留 Python ExecutorAgent 強制 shadow 行為。
+    // Phase A safe default：保留 Python ExecutorAgent 強制 shadow 行為。
+    // AMD-2026-05-09-03：與 Stage 0 default 一致（投影 true）。
     true
 }
 
 fn default_executor_max_position_pct() -> f64 {
-    // 5% — matches the conservative starting point in P0/P1 cascade defaults.
     // 5% — 與 P0/P1 cascade 默認保守起點一致。
     0.05
+}
+
+fn default_executor_canary_stage() -> CanaryStage {
+    // AMD-2026-05-09-03：預設 Stage 0（fail-closed shadow）。
+    // demo/paper TOML 顯式設 Stage 1 才會啟用 cohort 觀察。
+    CanaryStage::Stage0
 }
 
 impl Default for ExecutorConfig {
@@ -479,13 +617,23 @@ impl Default for ExecutorConfig {
             shadow_mode: default_executor_shadow_mode(),
             max_position_pct: default_executor_max_position_pct(),
             per_symbol_position_cap: HashMap::new(),
+            canary_stage: default_executor_canary_stage(),
+            canary_cohort: None,
+            stage_entered_at_ms: 0,
+            observation_period_ms: 0,
         }
     }
 }
 
 impl ExecutorConfig {
-    /// G3-02 Phase A: validate fraction bounds.
-    /// G3-02 Phase A：驗證比例範圍。
+    /// G3-02 Phase A + AMD-2026-05-09-03：驗證比例範圍 + canary stage 一致性。
+    ///
+    /// E2 重點審查（per AMD-2026-05-09-03 §7）：
+    /// 1. `shadow_mode legacy false` + `canary_stage=0` = reject（雞蛋死循環復活防線）
+    /// 2. `canary_stage >= 1` 必伴隨 cohort + stage_entered_at_ms 等
+    /// 3. Stage 1/2 必為 1 strategy × 1 symbol cohort
+    ///
+    /// G3-02 + AMD-2026-05-09-03：驗證比例範圍 + 5-stage 不變量。
     pub fn validate(&self) -> Result<(), String> {
         if !(0.0..=1.0).contains(&self.max_position_pct) {
             return Err(format!(
@@ -504,6 +652,161 @@ impl ExecutorConfig {
                 return Err("risk.executor.per_symbol_position_cap key must be non-empty".into());
             }
         }
+
+        // ────────────────────────────────────────────────────────────────
+        // AMD-2026-05-09-03 §4.4：shadow_mode ⇄ canary_stage 一致性不變量
+        // ────────────────────────────────────────────────────────────────
+        // 任何 legacy `shadow_mode=false` 配 `canary_stage=Stage 0` 的組合 = config
+        // drift（升級不完全），fail-closed reject。同樣 `shadow_mode=true` 配
+        // `canary_stage>=1` 也是 drift，reject。
+        // PA E2 audit point #1：break 即 W-A 復活雞蛋死循環。
+        // AMD-2026-05-09-03：legacy shadow_mode 必與 canary_stage projection 對齊。
+        let projected_shadow = self.canary_stage.as_shadow_mode();
+        if self.shadow_mode != projected_shadow {
+            return Err(format!(
+                "risk.executor: shadow_mode={} inconsistent with canary_stage={} \
+                 (Stage 0 ⇄ true, Stage 1+ ⇄ false). \
+                 AMD-2026-05-09-03 §4.4 requires legacy shadow_mode equals \
+                 canary_stage.as_shadow_mode() projection. Update either field \
+                 atomically (TOML/IPC patch must set both).",
+                self.shadow_mode,
+                self.canary_stage.as_u8()
+            ));
+        }
+
+        // AMD-2026-05-09-03 §2.2：Stage 1/2 cohort 必為 1 strategy × 1 symbol。
+        // Stage 0/3/4 cohort = None（Stage 0 shadow / Stage 3/4 全 universe）。
+        // AMD-2026-05-09-03：Stage 1/2 必有 1×1 cohort，其他 stage cohort=None。
+        match self.canary_stage {
+            CanaryStage::Stage0 => {
+                if self.canary_cohort.is_some() {
+                    return Err(
+                        "risk.executor.canary_stage=0 (shadow) must have canary_cohort=None \
+                         (Stage 0 is global shadow, not cohort-scoped)"
+                            .into(),
+                    );
+                }
+                if self.stage_entered_at_ms != 0 {
+                    return Err(format!(
+                        "risk.executor.canary_stage=0 must have stage_entered_at_ms=0 \
+                         (got {}); Stage 0 is permanent default with no observation period.",
+                        self.stage_entered_at_ms
+                    ));
+                }
+                if self.observation_period_ms != 0 {
+                    return Err(format!(
+                        "risk.executor.canary_stage=0 must have observation_period_ms=0 \
+                         (got {}); Stage 0 has no observation period.",
+                        self.observation_period_ms
+                    ));
+                }
+            }
+            CanaryStage::Stage1 | CanaryStage::Stage2 => {
+                let cohort = self.canary_cohort.as_ref().ok_or_else(|| {
+                    format!(
+                        "risk.executor.canary_stage={} requires canary_cohort \
+                         (1 strategy × 1 symbol × environment) per AMD-2026-05-09-03 §2.2",
+                        self.canary_stage.as_u8()
+                    )
+                })?;
+                if cohort.strategy.is_empty() {
+                    return Err(
+                        "risk.executor.canary_cohort.strategy must be non-empty for Stage 1/2"
+                            .into(),
+                    );
+                }
+                if cohort.symbol.is_empty() {
+                    return Err(
+                        "risk.executor.canary_cohort.symbol must be non-empty for Stage 1/2"
+                            .into(),
+                    );
+                }
+                match cohort.environment.as_str() {
+                    "paper" | "demo" | "live_demo" | "mainnet" => {}
+                    other => {
+                        return Err(format!(
+                            "risk.executor.canary_cohort.environment invalid: '{}' \
+                             (must be one of paper/demo/live_demo/mainnet)",
+                            other
+                        ));
+                    }
+                }
+                // Stage 1 必為 paper；Stage 2 必為 demo（per AMD §2.2 表格）。
+                // Stage 1 = paper / Stage 2 = demo per AMD §2.2 表格。
+                let expected_env = match self.canary_stage {
+                    CanaryStage::Stage1 => "paper",
+                    CanaryStage::Stage2 => "demo",
+                    _ => unreachable!(),
+                };
+                if cohort.environment != expected_env {
+                    return Err(format!(
+                        "risk.executor.canary_stage={} requires environment='{}' \
+                         (got '{}') per AMD-2026-05-09-03 §2.2 stage table",
+                        self.canary_stage.as_u8(),
+                        expected_env,
+                        cohort.environment
+                    ));
+                }
+                if self.stage_entered_at_ms <= 0 {
+                    return Err(format!(
+                        "risk.executor.canary_stage={} requires stage_entered_at_ms > 0 \
+                         (got {}); set on stage transition.",
+                        self.canary_stage.as_u8(),
+                        self.stage_entered_at_ms
+                    ));
+                }
+                if self.observation_period_ms == 0 {
+                    return Err(format!(
+                        "risk.executor.canary_stage={} requires observation_period_ms > 0 \
+                         (Stage 1=7d=604800000ms, Stage 2=14d=1209600000ms)",
+                        self.canary_stage.as_u8()
+                    ));
+                }
+            }
+            CanaryStage::Stage3 => {
+                // Stage 3 = demo full universe，cohort=None
+                // Stage 3：demo 全 universe，cohort=None。
+                if self.canary_cohort.is_some() {
+                    return Err(
+                        "risk.executor.canary_stage=3 (demo full universe) must have \
+                         canary_cohort=None (cohort scope = all 5 active strategies × demo)"
+                            .into(),
+                    );
+                }
+                if self.stage_entered_at_ms <= 0 {
+                    return Err(
+                        "risk.executor.canary_stage=3 requires stage_entered_at_ms > 0".into(),
+                    );
+                }
+                if self.observation_period_ms == 0 {
+                    return Err(
+                        "risk.executor.canary_stage=3 requires observation_period_ms > 0 \
+                         (Stage 3=21d=1814400000ms)"
+                            .into(),
+                    );
+                }
+            }
+            CanaryStage::Stage4 => {
+                // Stage 4 = LIVE_PENDING，operator 顯式拍板，無觀察期
+                // Stage 4：LIVE_PENDING，operator 拍板，無觀察期。
+                if self.canary_cohort.is_some() {
+                    return Err(
+                        "risk.executor.canary_stage=4 (LIVE_PENDING) must have \
+                         canary_cohort=None (live runs full active strategy set, \
+                         per AMD-2026-05-09-03 §2.2)"
+                            .into(),
+                    );
+                }
+                if self.stage_entered_at_ms <= 0 {
+                    return Err(
+                        "risk.executor.canary_stage=4 requires stage_entered_at_ms > 0".into(),
+                    );
+                }
+                // Stage 4 observation_period 不適用（operator 拍板，no auto upgrade）
+                // Stage 4：observation_period 不適用 — operator 拍板模式。
+            }
+        }
+
         Ok(())
     }
 }
