@@ -54,7 +54,8 @@
 //!   `set_engine_mode_tag()` 注入。Fallback env var → "unknown"。修 HIGH-1。
 
 use crate::governance_emit::{
-    build_msg_from_last_transition, emit_transition_fail_soft, EngineModeTagResolver,
+    build_bypass_transition_msg, build_msg_from_last_transition, emit_transition_fail_soft,
+    EngineModeTagResolver,
 };
 // Re-export facade + emit types so callers keep `use governance_core::*` paths.
 // 重新導出 facade + emit 端類型，使 caller 維持 `use governance_core::*` 路徑。
@@ -401,8 +402,18 @@ impl GovernanceCore {
         source_stage: &str,
     ) -> Result<LeaseId, GovernanceError> {
         // §3 point 1 trailing clause: non-Production profile bypasses SM entirely.
-        // §3 點 1 後段：非 Production profile 完全繞過 SM。
+        // Emit one synthetic audit row so bypass stays observable without
+        // becoming a lease gate.
+        // §3 點 1 後段：非 Production profile 完全繞過 SM；emit 一筆合成
+        // audit row，保持可觀測但不把 bypass 變成 lease gate。
         if !profile.requires_lease() {
+            let msg = build_bypass_transition_msg(
+                intent_id,
+                &format!("{:?}", profile),
+                &self.resolve_engine_mode_tag(),
+                source_stage,
+            );
+            emit_transition_fail_soft(self.lease_transition_tx.as_ref(), msg);
             return Ok(LeaseId::Bypass);
         }
 
