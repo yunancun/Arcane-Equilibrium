@@ -51,7 +51,7 @@ function updateBudgetDisplay(remaining) { ... }
 | 2026-04-28 | Agent Tracker MVP（AI 团队工作台）— tab-learning.html 加 5 区块 + agent-tracker.js 722 行 | 主會話直接報告（無單獨 .md） |
 | 2026-04-29 | Learning tab 区块 E「影子 vs 真仓」误导文案修正 → 「Demo 引擎 vs LiveDemo 引擎成交」 | `.claude_reports/20260429_191942_e1a_gui_shadow_vs_live_text_fix.md` |
 | 2026-05-09 | W-AUDIT-7c GUI 三項修復（typed-confirm modal + Settings sub-tab + 2 governance confirm replace） | `workspace/reports/2026-05-09--w_audit_7c_gui_three_fix.md` · commit 9e265ba9 |
-| 2026-05-09 | W-AUDIT-7c **Round 2** fix（A3 verdict FALSE_CLOSED 後 9 項缺陷修補）— SyntaxError 整檔 parse fail / fixture garbage / button race / cancel toast / pending list 細節展示 | `workspace/reports/2026-05-09--w_audit_7c_round2_fix.md` · commit 待填 |
+| 2026-05-09 | W-AUDIT-7c **Round 2** fix（A3 verdict FALSE_CLOSED 後 9 項缺陷修補）— SyntaxError 整檔 parse fail / fixture garbage / button race / cancel toast / pending list 細節展示 | `workspace/reports/2026-05-09--w_audit_7c_round2_fix.md` · commit `0fbed710` |
 
 ## F5 教訓（2026-04-26）
 
