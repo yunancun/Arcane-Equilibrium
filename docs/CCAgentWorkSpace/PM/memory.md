@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | Post-rebuild `[40]` BILLUSDT grid negative-cell guard: after MA R:R rebuild, passive healthcheck failed only `[40]` from `grid_trading/BILLUSDT` n=11 avg=-49.67bps; source-blocked BILLUSDT for new grid entries across paper/demo/live strategy params, leaving close/reduce enabled | workspace/reports/2026-05-09--post_rebuild_bill_grid_negative_cell.md |
 | 2026-05-09 | W-AUDIT-6 ma_crossover R:R trailing/TP: added strategy-scoped TP enforcement override, bound four risk_config TOMLs to MA SL 2.5% / TP 8.0% / trailing 0.6%+0.4%, and passed targeted + full Rust lib tests before sync/rebuild | workspace/reports/2026-05-09--w_audit_6_ma_crossover_rr.md |
 | 2026-05-09 | TODO three-side sync after W-AUDIT-6 cleanup: refreshed TODO/CLAUDE/Codex memory so funding_arb retirement authority is strategy params, W-AUDIT-6 closed source/test checkpoints are visible at the top of the queue, and the then-current remaining order was ma_crossover R:R, bb_breakout 5m RFC/IMPL, then VaR/CVaR/EVT | workspace/reports/2026-05-09--todo_three_side_sync_after_w_audit_6.md |
 | 2026-05-09 | QC stand-alone CLAUDE healthcheck id cleanup: attached source report + `[40] realized_edge_acceptance` to CLAUDE §三 `-26.44 USDT` 7d demo gross figure and marked P2-AUDIT-QC-STAND-ALONE complete | workspace/reports/2026-05-09--qc_standalone_claude_healthcheck_id.md |

@@ -255,8 +255,14 @@ W-AUDIT-6 current fact:
   stop-loss `2.5%`, take-profit `8.0%`, TP enforcement `true`, trailing
   activation `0.6%`, and trailing distance `0.4%`; Rust lib tests cover
   per-strategy TP enforcement and real TOML wire shape
-- no runtime apply was performed for these source/test checkpoints before the
-  operator-requested post-sync rebuild/restart
+- as of 2026-05-09 post-rebuild, `[40] realized_edge_acceptance` surfaced a
+  `grid_trading/BILLUSDT` 24h negative cell (`n=11 avg=-49.67bps`); `BILLUSDT`
+  is source-blocked for new grid entries across
+  `strategy_params_{paper,demo,live}.toml`, while close/reduce remains allowed;
+  the 24h healthcheck may remain FAIL until historical rows roll off
+- runtime apply note: the first operator-requested post-sync rebuild loaded the
+  MA R:R checkpoint; the follow-up rebuild/restart in the same turn is required
+  to load the BILLUSDT grid blocklist
 
 P0-NEW-VULN-1 bind-host rule:
 - lifecycle scripts must not default to `0.0.0.0`

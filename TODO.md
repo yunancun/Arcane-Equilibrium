@@ -208,6 +208,12 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   and `trailing_distance_pct_override=0.4`; real TOML and runtime risk tests
   cover the wire shape and per-strategy TP enforcement. Runtime load is handled
   by the operator-requested post-sync rebuild/restart for this checkpoint.
+- **Post-rebuild `[40]` BILLUSDT grid negative-cell source guard**：the first
+  rebuild after MA R:R surfaced `[40] realized_edge_acceptance` FAIL from
+  `grid_trading/BILLUSDT` (`24h n=11 avg=-49.67bps`). `BILLUSDT` is now added
+  to `grid_trading.blocked_symbols` across paper/demo/live strategy params,
+  blocking new grid entries only; existing close/reduce paths remain enabled.
+  The 24h healthcheck window may remain FAIL until historical rows roll off.
 - **W-AUDIT-6 queue ordering after source/test cleanup**：QC stand-alone fixes
   and `ma_crossover` R:R are closed. Current active order is `bb_breakout`
   1m->5m RFC then IMPL, and portfolio VaR/CVaR/EVT as W-AUDIT-6c. Keep the
@@ -283,7 +289,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P1-DATA-2` | 3 | Source-fixed `[42b]` / `[42c]` low-sample attribution watch | Settled attribution ratio failures stay fail-closed, but low-sample strategies now render as `LOW_SAMPLE(n, need)` sample-maturity watch instead of misleading `0.000` ratio drift; low-sample strategies still defer promotion until mature. |
 | `P1-DATA-3` | 3 | Source-fixed `[51]` scanner opportunity calibration watch | `[51]` now requires mature `opportunity_positive` samples before PASS, reports `MATURE/LOW_SAMPLE(n, need)`, and keeps scanner opportunity shadow-only when only exploration positive LCB samples exist or calibrated samples are immature. |
 | `P1-DATA-4` | 3 | DONE — source-fixed `[41]` scanner would-block evidence semantics | `[41] scanner_market_gate_confirmation` no longer hard-fails when legacy scanner would-block evidence later realizes non-negative; it returns WARN calibration evidence because scanner is always-on infrastructure, not trading authority. |
-| `P1-EDGE-1` | 3 | Source-fixed ma_crossover LABUSDT block + bb_breakout diagnosis | Runtime diagnosis: 7d ma_crossover combined demo/live_demo is negative mainly from `LABUSDT` (`n=6 avg=-244.54bps`), so `LABUSDT` is source-blocked for ma_crossover new entries in risk configs while close/reduce remains allowed; bb_breakout stays demo-only/live-disabled with low negative sample (`7d n=10 avg=-5.06bps`) pending more evidence. |
+| `P1-EDGE-1` | 3 | Source-fixed ma_crossover LABUSDT block + bb_breakout diagnosis | Runtime diagnosis: 7d ma_crossover combined demo/live_demo is negative mainly from `LABUSDT` (`n=6 avg=-244.54bps`), so `LABUSDT` is source-blocked for ma_crossover new entries in risk configs while close/reduce remains allowed; bb_breakout stays demo-only/live-disabled with low negative sample (`7d n=10 avg=-5.06bps`) pending more evidence. Post-rebuild `[40]` also surfaced `grid_trading/BILLUSDT` 24h negative cell (`n=11 avg=-49.67bps`), so `BILLUSDT` is source-blocked for new grid entries across paper/demo/live strategy params. |
 | `P1-EDGE-2` | 3 | funding_arb 14d audit | Run the 2026-05-16 audit before retention or deprecation decisions. |
 | `P1-REPLAY-1` | 4 | Recorder-history maturity | Build longer local BBO/orderbook/latency history for S1/S1+ calibration; never fabricate old microstructure. |
 | `P1-REPLAY-2` | 4 | DONE — runtime-applied replay artifact type cleanup | V066 applied twice on Linux for idempotency, constraints verified, rollback smoke passed, and runtime reloaded with `restart_all.sh --keep-auth` on 2026-05-08. New finalize rows can use `replay_report`; legacy `pnl_summary` remains readable. |

@@ -82,6 +82,8 @@ min_grid_step_bps = 22.0
 cost_floor_multiplier = 2.0
 # P1-DATA-1 2026-05-08: LABUSDT added from [40] combined demo/live_demo negative
 # cell (grid_trading/LABUSDT n=17 avg=-78.76bps). Keep paper/demo/live aligned.
+# W-AUDIT-6 2026-05-09 post-rebuild [40]: BILLUSDT added from combined
+# demo/live_demo negative cell (grid_trading/BILLUSDT n=11 avg=-49.67bps).
 blocked_symbols = [
   "BSBUSDT",
   "PRLUSDT",
@@ -99,6 +101,7 @@ blocked_symbols = [
   "1000PEPEUSDT",
   "ADAUSDT",
   "LABUSDT",
+  "BILLUSDT",
 ]
 
 # OC-5: FundingArb — funding rate capture strategy.
