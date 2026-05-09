@@ -36,11 +36,29 @@ import threading
 import time
 import copy
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 logger = logging.getLogger(__name__)
+
+
+def _selection_bias_gate_cls():
+    """Load SelectionBiasPromotionGate across repo-root and app-runtime paths."""
+    try:
+        from program_code.learning_engine.promotion_gate import SelectionBiasPromotionGate
+
+        return SelectionBiasPromotionGate
+    except ModuleNotFoundError as exc:
+        if exc.name != "program_code":
+            raise
+        try:
+            from . import _path_setup  # noqa: F401
+        except Exception:  # noqa: BLE001
+            pass
+        from learning_engine.promotion_gate import SelectionBiasPromotionGate
+
+        return SelectionBiasPromotionGate
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -124,6 +142,7 @@ class PipelineEntry:
     demo_sharpe: Optional[float] = None
     demo_avg_slippage_bps: Optional[float] = None
     demo_api_reliability: Optional[float] = None
+    demo_selection_bias_report: Optional[dict] = None
 
     # Live approval / Live 審批
     evaluation_report: Optional[dict] = None
@@ -269,6 +288,51 @@ class PromotionGate:
             entry.demo_avg_slippage_bps = avg_slippage_bps
             entry.demo_api_reliability = api_reliability
             entry.updated_ts = time.time()
+
+    def update_demo_selection_bias_evidence(
+        self,
+        strategy_name: str,
+        *,
+        observed_sharpe: float,
+        n_trials: int,
+        n_observations: int,
+        candidate_oos_returns: Optional[Sequence[Sequence[float]]] = None,
+        trial_sharpes: Optional[Sequence[float]] = None,
+    ) -> tuple[bool, dict]:
+        """Update fail-closed DSR/PBO evidence for DEMO_ACTIVE graduation.
+
+        更新 DEMO_ACTIVE 畢業用的 fail-closed DSR/PBO 證據。
+        """
+        with self._lock:
+            if strategy_name not in self._entries:
+                return False, {
+                    "verdict": "block",
+                    "passes": False,
+                    "reasons": ["not_registered"],
+                }
+
+        gate_cls = _selection_bias_gate_cls()
+        result = gate_cls().evaluate(
+            observed_sharpe=observed_sharpe,
+            n_trials=n_trials,
+            n_observations=n_observations,
+            candidate_oos_returns=candidate_oos_returns,
+            trial_sharpes=trial_sharpes,
+        )
+        report = result.to_dict()
+
+        with self._lock:
+            entry = self._entries.get(strategy_name)
+            if entry is None:
+                return False, {
+                    "verdict": "block",
+                    "passes": False,
+                    "reasons": ["not_registered"],
+                }
+            entry.demo_selection_bias_report = report
+            entry.updated_ts = time.time()
+
+        return result.passes, report
 
     # ------------------------------------------------------------------
     # Graduation checks / 畢業檢查
@@ -525,6 +589,21 @@ class PromotionGate:
                     f"{gates['min_api_reliability']}"
                 )
 
+        selection_report = entry.demo_selection_bias_report
+        if not isinstance(selection_report, dict):
+            failures.append("selection_bias:no_evidence")
+        elif not bool(selection_report.get("passes")):
+            verdict = str(selection_report.get("verdict") or "unknown")
+            raw_reasons = selection_report.get("reasons") or []
+            if isinstance(raw_reasons, (list, tuple)):
+                reason_suffix = ",".join(str(reason) for reason in raw_reasons)
+            else:
+                reason_suffix = str(raw_reasons)
+            if reason_suffix:
+                failures.append(f"selection_bias:{verdict}:{reason_suffix}")
+            else:
+                failures.append(f"selection_bias:{verdict}")
+
         return len(failures) == 0, failures
 
     # ------------------------------------------------------------------
@@ -592,6 +671,7 @@ class PromotionGate:
                     "demo_sharpe": entry.demo_sharpe,
                     "demo_avg_slippage_bps": entry.demo_avg_slippage_bps,
                     "demo_api_reliability": entry.demo_api_reliability,
+                    "demo_selection_bias_report": entry.demo_selection_bias_report,
                     "evaluation_report": entry.evaluation_report,
                     "operator_decision": entry.operator_decision,
                     "approved_capital_pct": entry.approved_capital_pct,
@@ -627,6 +707,7 @@ class PromotionGate:
                     demo_sharpe=row.get("demo_sharpe"),
                     demo_avg_slippage_bps=row.get("demo_avg_slippage_bps"),
                     demo_api_reliability=row.get("demo_api_reliability"),
+                    demo_selection_bias_report=row.get("demo_selection_bias_report"),
                     evaluation_report=row.get("evaluation_report"),
                     operator_decision=row.get("operator_decision"),
                     approved_capital_pct=row.get("approved_capital_pct"),

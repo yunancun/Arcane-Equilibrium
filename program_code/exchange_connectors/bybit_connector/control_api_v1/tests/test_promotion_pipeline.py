@@ -6,6 +6,7 @@ Covers: 6-01 pipeline state machine, 6-02 graduation gates, 6-03 live approval.
 
 import time
 
+import numpy as np
 import pytest
 
 from app.promotion_pipeline import (
@@ -36,6 +37,34 @@ def audit_log() -> list:
 @pytest.fixture
 def gate_with_log(audit_log) -> PromotionGate:
     return PromotionGate(audit_callback=lambda r: audit_log.append(r))
+
+
+def _persistent_alpha_candidates(
+    n_candidates: int = 10,
+    n_periods: int = 256,
+    seed: int = 42,
+) -> list[np.ndarray]:
+    """Candidates with stable IS/OOS ranking for low PBO."""
+    rng = np.random.default_rng(seed)
+    return [
+        float(k) * 0.05 + rng.normal(0.0, 0.05, size=n_periods)
+        for k in range(n_candidates)
+    ]
+
+
+def _add_passing_selection_bias(
+    gate: PromotionGate,
+    strategy_name: str = "test",
+) -> dict:
+    ok, report = gate.update_demo_selection_bias_evidence(
+        strategy_name,
+        observed_sharpe=4.0,
+        n_trials=10,
+        n_observations=500,
+        candidate_oos_returns=_persistent_alpha_candidates(),
+    )
+    assert ok, report
+    return report
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -104,6 +133,8 @@ class TestPipelineStateMachine:
         )
         with gate._lock:
             gate._entries["full_test"].demo_start_ts = time.time() - 22 * 86400
+
+        _add_passing_selection_bias(gate, "full_test")
 
         # DEMO_ACTIVE -> LIVE_PENDING
         ok, _ = gate.promote("full_test", PromotionStage.LIVE_PENDING)
@@ -217,6 +248,60 @@ class TestGraduationGates:
         assert not eligible
         assert any("slippage:" in r for r in reasons)
 
+    def test_demo_gates_fail_without_selection_bias_evidence(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.DEMO_ACTIVE
+        gate.update_demo_metrics(
+            "test", trades=250, win_rate=0.6, net_pnl_pct=8.0,
+            max_drawdown_pct=5.0, sharpe=1.5,
+            avg_slippage_bps=10.0, api_reliability=0.99,
+        )
+        with gate._lock:
+            gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
+        eligible, reasons = gate.check_demo_graduation("test")
+        assert not eligible
+        assert "selection_bias:no_evidence" in reasons
+
+    def test_demo_selection_bias_low_dsr_blocks(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.DEMO_ACTIVE
+        gate.update_demo_metrics(
+            "test", trades=250, win_rate=0.6, net_pnl_pct=8.0,
+            max_drawdown_pct=5.0, sharpe=1.5,
+            avg_slippage_bps=10.0, api_reliability=0.99,
+        )
+        with gate._lock:
+            gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
+
+        ok, report = gate.update_demo_selection_bias_evidence(
+            "test",
+            observed_sharpe=0.1,
+            n_trials=20,
+            n_observations=200,
+            candidate_oos_returns=_persistent_alpha_candidates(),
+        )
+        assert not ok
+        assert report["verdict"] == "block"
+        assert "dsr_block" in report["reasons"]
+
+        eligible, reasons = gate.check_demo_graduation("test")
+        assert not eligible
+        assert any(r.startswith("selection_bias:block:") for r in reasons)
+
+    def test_demo_selection_bias_missing_cv_returns_defers(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        ok, report = gate.update_demo_selection_bias_evidence(
+            "test",
+            observed_sharpe=4.0,
+            n_trials=10,
+            n_observations=500,
+        )
+        assert not ok
+        assert report["verdict"] == "defer_data"
+        assert "pbo_missing_cpcv_returns" in report["reasons"]
+
     def test_demo_gates_pass(self, gate: PromotionGate):
         gate.register_strategy("test")
         with gate._lock:
@@ -228,6 +313,7 @@ class TestGraduationGates:
         )
         with gate._lock:
             gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
+        _add_passing_selection_bias(gate, "test")
         eligible, reasons = gate.check_demo_graduation("test")
         assert eligible
         assert len(reasons) == 0
@@ -331,6 +417,7 @@ class TestSerialization:
         assert rows[0]["strategy_name"] == "ma_crossover"
         assert rows[0]["current_stage"] == "LEARNING"
         assert rows[0]["model_name"] == "kama_v2"
+        assert rows[0]["demo_selection_bias_report"] is None
 
     def test_load_from_db_rows(self):
         gate = PromotionGate()
@@ -347,6 +434,7 @@ class TestSerialization:
                 "paper_net_pnl_pct": 3.0,
                 "paper_max_drawdown_pct": 6.0,
                 "paper_sharpe": 0.9,
+                "demo_selection_bias_report": {"passes": True, "verdict": "promote"},
             },
         ]
         gate.load_from_db_rows(rows)
@@ -354,6 +442,7 @@ class TestSerialization:
         assert entry is not None
         assert entry.current_stage == PromotionStage.DEMO_ACTIVE
         assert entry.paper_trades == 200
+        assert entry.demo_selection_bias_report == {"passes": True, "verdict": "promote"}
 
     def test_round_trip(self, gate: PromotionGate):
         gate.register_strategy("test_strat")
@@ -369,6 +458,13 @@ class TestSerialization:
         entry = gate2.get_entry("test_strat")
         assert entry.current_stage == PromotionStage.PAPER_SHADOW
         assert entry.paper_trades == 100
+
+    def test_demo_selection_bias_report_serializes_to_status_rows(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        report = _add_passing_selection_bias(gate, "test")
+        rows = gate.to_db_rows()
+        assert rows[0]["demo_selection_bias_report"] == report
+        assert rows[0]["demo_selection_bias_report"]["passes"] is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
