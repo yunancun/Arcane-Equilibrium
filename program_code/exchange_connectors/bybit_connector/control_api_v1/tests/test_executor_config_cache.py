@@ -1,5 +1,5 @@
 """
-G3-03 Phase B — ExecutorConfigCache unit tests.
+G3-03 Phase B + W-AUDIT-9 T3 — ExecutorConfigCache unit tests.
 Coverage:
   1. Initial fail-closed default (shadow_mode=True before any IPC fetch).
   2. Successful IPC fetch updates snapshot + marks initialized.
@@ -11,6 +11,14 @@ Coverage:
   8. Concurrent reads stay safe under interleaved polls.
   9. Malformed IPC response (missing executor) treated as error → fail-closed.
  10. Module singleton dedup via get_executor_config_cache().
+
+W-AUDIT-9 T3 新增（per AMD-2026-05-09-03 §2.1, §4.4 + TODO v19 §5 invariant 9）：
+ 11. CanaryStage.from_raw 解析（int / str / IntEnum / out-of-range / None）
+ 12. _parse_response stage 欄位 + cohort + 觀察期解析
+ 13. backward-compat reject：legacy shadow_mode=false 無 canary_stage → Stage 0
+ 14. canary_stage_provider() exception → Stage 0（不是 Stage 1）
+ 15. shadow_mode_provider() lambda：Stage 0 → True / Stage ≥ 1 → False
+ 16. legacy shadow=true 配 canary_stage=0 backward-compat 行為
 """
 
 from __future__ import annotations
@@ -29,6 +37,8 @@ if _control_api_dir not in sys.path:
 
 from app import executor_config_cache as ecc_mod
 from app.executor_config_cache import (
+    CanaryCohort,
+    CanaryStage,
     ExecutorConfigCache,
     ExecutorRuntimeConfig,
     get_executor_config_cache,
@@ -41,16 +51,28 @@ def _make_response(
     max_pos: float = 0.10,
     per_symbol: dict | None = None,
     version: int = 7,
+    canary_stage: int | None = None,
 ) -> dict:
-    """Helper: build a get_risk_config-shaped IPC response."""
+    """Helper: build a get_risk_config-shaped IPC response.
+
+    W-AUDIT-9 T3：``shadow=False`` 場景必伴隨 ``canary_stage >= 1`` 才能通過
+    AMD §4.4 backward-compat reject；shadow=True 預設配 canary_stage=0
+    （backward-compat legacy）。
+    """
+    executor_blob: dict = {
+        "shadow_mode": shadow,
+        "max_position_pct": max_pos,
+        "per_symbol_position_cap": per_symbol or {},
+    }
+    # 規則：shadow=False 必須帶 canary_stage（避 §4.4 reject）；shadow=True 配
+    # canary_stage=0 是 legacy 默認；caller 顯式 override canary_stage 優先。
+    if canary_stage is not None:
+        executor_blob["canary_stage"] = canary_stage
+    elif shadow is False:
+        # 默認 Stage 1（PAPER_SINGLE_COHORT）以與舊測試 shadow=False 語義對齊
+        executor_blob["canary_stage"] = 1
     return {
-        "config": {
-            "executor": {
-                "shadow_mode": shadow,
-                "max_position_pct": max_pos,
-                "per_symbol_position_cap": per_symbol or {},
-            },
-        },
+        "config": {"executor": executor_blob},
         "version": version,
     }
 
@@ -198,12 +220,24 @@ class TestProviderLambda(unittest.TestCase):
         cache = ExecutorConfigCache()
         provider = cache.shadow_mode_provider()
         self.assertTrue(provider())  # initial fail-closed
+        # W-AUDIT-9 T3：shadow_mode=False 必伴隨 canary_stage >= 1，否則
+        # shadow_mode_provider 投影為 True（per stage projection 不變式）
         cache._inject_snapshot_for_tests(
-            ExecutorRuntimeConfig(shadow_mode=False, config_version=1, fetched_at_ms=1)
+            ExecutorRuntimeConfig(
+                shadow_mode=False,
+                canary_stage=CanaryStage.PAPER_SINGLE_COHORT,
+                config_version=1,
+                fetched_at_ms=1,
+            )
         )
         self.assertFalse(provider())  # reads new snapshot
         cache._inject_snapshot_for_tests(
-            ExecutorRuntimeConfig(shadow_mode=True, config_version=2, fetched_at_ms=2)
+            ExecutorRuntimeConfig(
+                shadow_mode=True,
+                canary_stage=CanaryStage.SHADOW,
+                config_version=2,
+                fetched_at_ms=2,
+            )
         )
         self.assertTrue(provider())  # reads back to True
 
@@ -215,6 +249,7 @@ class TestProviderLambda(unittest.TestCase):
             "_fetch_via_ipc_blocking",
             return_value=ExecutorRuntimeConfig(
                 shadow_mode=False,
+                canary_stage=CanaryStage.PAPER_SINGLE_COHORT,
                 config_version=9,
                 fetched_at_ms=1,
             ),
@@ -230,6 +265,7 @@ class TestProviderLambda(unittest.TestCase):
             "_fetch_via_ipc_blocking",
             return_value=ExecutorRuntimeConfig(
                 shadow_mode=False,
+                canary_stage=CanaryStage.PAPER_SINGLE_COHORT,
                 config_version=10,
                 fetched_at_ms=1,
             ),
@@ -310,6 +346,314 @@ class TestModuleSingleton(unittest.TestCase):
         ecc_mod._reset_for_tests()
         b = get_executor_config_cache()
         self.assertIsNot(a, b)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# W-AUDIT-9 T3 — graduated canary stage-aware tests
+# AMD-2026-05-09-03 §2.1 / §2.2 / §4.4 + TODO v19 §5 invariant 9
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestCanaryStageEnum(unittest.TestCase):
+    """11. ``CanaryStage.from_raw`` 解析所有合法 / 異常輸入。
+
+    invariant 9：任何不可解析輸入 → SHADOW（**不是** PAPER_SINGLE_COHORT）。
+    """
+
+    def test_canary_stage_int_in_range(self):
+        """合法整數 0..=4 → 對應 enum 成員。"""
+        self.assertEqual(CanaryStage.from_raw(0), CanaryStage.SHADOW)
+        self.assertEqual(CanaryStage.from_raw(1), CanaryStage.PAPER_SINGLE_COHORT)
+        self.assertEqual(CanaryStage.from_raw(2), CanaryStage.DEMO_SINGLE_COHORT)
+        self.assertEqual(CanaryStage.from_raw(3), CanaryStage.DEMO_FULL_UNIVERSE)
+        self.assertEqual(CanaryStage.from_raw(4), CanaryStage.LIVE_PENDING)
+
+    def test_canary_stage_string_int(self):
+        """字串「0」..「4」可解析（IPC payload 容錯）。"""
+        self.assertEqual(CanaryStage.from_raw("0"), CanaryStage.SHADOW)
+        self.assertEqual(CanaryStage.from_raw("3"), CanaryStage.DEMO_FULL_UNIVERSE)
+
+    def test_canary_stage_enum_passthrough(self):
+        """傳入 CanaryStage 實例 → 原值 passthrough。"""
+        self.assertEqual(
+            CanaryStage.from_raw(CanaryStage.DEMO_SINGLE_COHORT),
+            CanaryStage.DEMO_SINGLE_COHORT,
+        )
+
+    def test_canary_stage_none_fails_closed(self):
+        """invariant 9：None → Stage 0（**不是** Stage 1）。"""
+        self.assertEqual(CanaryStage.from_raw(None), CanaryStage.SHADOW)
+
+    def test_canary_stage_out_of_range_fails_closed(self):
+        """invariant 9：5 / -1 / 100 等 out-of-range → Stage 0。"""
+        self.assertEqual(CanaryStage.from_raw(5), CanaryStage.SHADOW)
+        self.assertEqual(CanaryStage.from_raw(-1), CanaryStage.SHADOW)
+        self.assertEqual(CanaryStage.from_raw(100), CanaryStage.SHADOW)
+
+    def test_canary_stage_invalid_type_fails_closed(self):
+        """invariant 9：dict / list / 隨機字串 → Stage 0。"""
+        self.assertEqual(CanaryStage.from_raw("abc"), CanaryStage.SHADOW)
+        self.assertEqual(CanaryStage.from_raw({}), CanaryStage.SHADOW)
+        self.assertEqual(CanaryStage.from_raw([]), CanaryStage.SHADOW)
+
+    def test_canary_stage_intenum_ordering(self):
+        """IntEnum 排序：SHADOW < PAPER < DEMO_SINGLE < DEMO_FULL < LIVE_PENDING。"""
+        self.assertLess(CanaryStage.SHADOW, CanaryStage.PAPER_SINGLE_COHORT)
+        self.assertLess(
+            CanaryStage.PAPER_SINGLE_COHORT, CanaryStage.DEMO_SINGLE_COHORT,
+        )
+        self.assertLess(
+            CanaryStage.DEMO_SINGLE_COHORT, CanaryStage.DEMO_FULL_UNIVERSE,
+        )
+        self.assertLess(
+            CanaryStage.DEMO_FULL_UNIVERSE, CanaryStage.LIVE_PENDING,
+        )
+
+
+class TestCanaryStageParseResponse(unittest.TestCase):
+    """12. ``_parse_response`` stage / cohort / 觀察期欄位解析。"""
+
+    @staticmethod
+    def _make_resp(executor: dict, version: int = 1) -> dict:
+        return {"config": {"executor": executor}, "version": version}
+
+    def test_canary_stage_parsed_from_response(self):
+        """合法 canary_stage=2 + cohort + 觀察期 → snapshot 正確攜帶。"""
+        resp = self._make_resp({
+            "shadow_mode": False,
+            "canary_stage": 2,
+            "canary_cohort": {
+                "strategy": "bb_breakout",
+                "symbol": "BTCUSDT",
+                "environment": "demo",
+            },
+            "stage_entered_at_ms": 1735000000000,
+            "observation_period_ms": 14 * 24 * 3600 * 1000,
+            "max_position_pct": 0.07,
+        })
+        snap = ExecutorConfigCache._parse_response(resp)
+        self.assertEqual(snap.canary_stage, CanaryStage.DEMO_SINGLE_COHORT)
+        self.assertFalse(snap.shadow_mode)  # stage > 0 投影為 False
+        self.assertIsNotNone(snap.canary_cohort)
+        self.assertEqual(snap.canary_cohort.strategy, "bb_breakout")
+        self.assertEqual(snap.canary_cohort.symbol, "BTCUSDT")
+        self.assertEqual(snap.canary_cohort.environment, "demo")
+        self.assertEqual(snap.stage_entered_at_ms, 1735000000000)
+
+    def test_canary_stage_missing_falls_back_to_shadow(self):
+        """canary_stage 欄位缺失 + shadow_mode=true → Stage 0 backward-compat。
+
+        legacy config 場景：shadow_mode=true 不變，canary_stage 自動 fall back
+        SHADOW（與 legacy 行為等同）。
+        """
+        resp = self._make_resp({"shadow_mode": True})
+        snap = ExecutorConfigCache._parse_response(resp)
+        self.assertEqual(snap.canary_stage, CanaryStage.SHADOW)
+        self.assertTrue(snap.shadow_mode)
+
+    def test_canary_stage_out_of_range_fails_closed(self):
+        """canary_stage=99 → Stage 0（不是 Stage 1）。"""
+        resp = self._make_resp({"shadow_mode": False, "canary_stage": 99})
+        snap = ExecutorConfigCache._parse_response(resp)
+        self.assertEqual(snap.canary_stage, CanaryStage.SHADOW)
+        # stage=0 投影 → shadow_mode=True（不論 raw shadow_mode 為何）
+        self.assertTrue(snap.shadow_mode)
+
+    def test_shadow_projection_overrides_legacy_field(self):
+        """legacy shadow_mode=true 配 canary_stage=2 → stage 為 SoT，shadow=False。
+
+        AMD §4.4：shadow_mode 以 stage projection 為主，避免兩欄矛盾。
+        """
+        resp = self._make_resp({"shadow_mode": True, "canary_stage": 2})
+        snap = ExecutorConfigCache._parse_response(resp)
+        self.assertEqual(snap.canary_stage, CanaryStage.DEMO_SINGLE_COHORT)
+        self.assertFalse(snap.shadow_mode)
+
+
+class TestCanaryStageBackwardCompatReject(unittest.TestCase):
+    """13. backward-compat reject：legacy shadow=false 無 canary_stage → Stage 0。"""
+
+    def test_legacy_shadow_false_without_canary_rejects_to_shadow(self):
+        """AMD §4.4：legacy `shadow_mode=false` 但無 `canary_stage` 欄位 → Stage 0。"""
+        resp = {
+            "config": {"executor": {"shadow_mode": False}},
+            "version": 1,
+        }
+        with self.assertLogs(ecc_mod.logger, level="WARNING") as captured:
+            snap = ExecutorConfigCache._parse_response(resp)
+        self.assertEqual(snap.canary_stage, CanaryStage.SHADOW)
+        self.assertTrue(snap.shadow_mode)
+        # log 必有 backward-compat reject hint
+        self.assertTrue(
+            any("backward-compat reject" in msg for msg in captured.output),
+            f"log 中未見 backward-compat reject hint: {captured.output}",
+        )
+
+    def test_legacy_shadow_false_with_explicit_stage_zero_logs_conflict(self):
+        """legacy `shadow_mode=false` + `canary_stage=0` → 兩欄矛盾，log + Stage 0。"""
+        resp = {
+            "config": {"executor": {"shadow_mode": False, "canary_stage": 0}},
+            "version": 1,
+        }
+        with self.assertLogs(ecc_mod.logger, level="WARNING") as captured:
+            snap = ExecutorConfigCache._parse_response(resp)
+        self.assertEqual(snap.canary_stage, CanaryStage.SHADOW)
+        self.assertTrue(snap.shadow_mode)
+        self.assertTrue(
+            any("conflicts with canary_stage=0" in msg for msg in captured.output),
+            f"log 中未見矛盾 hint: {captured.output}",
+        )
+
+
+class TestCanaryStageProvider(unittest.TestCase):
+    """14. ``canary_stage_provider()`` exception → Stage 0；read live snapshot。"""
+
+    def test_provider_reads_current_stage(self):
+        """provider 讀取當前 snapshot 的 canary_stage。"""
+        cache = ExecutorConfigCache()
+        provider = cache.canary_stage_provider()
+        # 初始 fail-closed Stage 0
+        self.assertEqual(provider(), CanaryStage.SHADOW)
+        # 注入 stage 1 snapshot
+        cache._inject_snapshot_for_tests(
+            ExecutorRuntimeConfig(
+                shadow_mode=False,
+                canary_stage=CanaryStage.PAPER_SINGLE_COHORT,
+                config_version=1,
+                fetched_at_ms=1,
+            )
+        )
+        self.assertEqual(provider(), CanaryStage.PAPER_SINGLE_COHORT)
+        # 注入 stage 3
+        cache._inject_snapshot_for_tests(
+            ExecutorRuntimeConfig(
+                shadow_mode=False,
+                canary_stage=CanaryStage.DEMO_FULL_UNIVERSE,
+                config_version=2,
+                fetched_at_ms=2,
+            )
+        )
+        self.assertEqual(provider(), CanaryStage.DEMO_FULL_UNIVERSE)
+
+    def test_provider_engine_mismatch_fails_closed(self):
+        """跨 engine fetch 失敗 → fail-closed Stage 0（**不是** Stage 1）。"""
+        cache = ExecutorConfigCache(engine="paper")
+        provider = cache.canary_stage_provider()
+        with patch.object(
+            cache,
+            "_fetch_via_ipc_blocking",
+            side_effect=ConnectionError("ipc down"),
+        ):
+            self.assertEqual(provider("demo"), CanaryStage.SHADOW)
+
+    def test_provider_engine_match_returns_snapshot_stage(self):
+        """engine 匹配 self._engine → 直接讀本地 snapshot stage。"""
+        cache = ExecutorConfigCache(engine="paper")
+        cache._inject_snapshot_for_tests(
+            ExecutorRuntimeConfig(
+                shadow_mode=False,
+                canary_stage=CanaryStage.DEMO_SINGLE_COHORT,
+                config_version=1,
+                fetched_at_ms=1,
+            )
+        )
+        provider = cache.canary_stage_provider()
+        self.assertEqual(provider("paper"), CanaryStage.DEMO_SINGLE_COHORT)
+        self.assertEqual(provider(None), CanaryStage.DEMO_SINGLE_COHORT)
+
+
+class TestCanaryStageProviderShadowProjection(unittest.TestCase):
+    """15. backward-compat shadow_mode_provider lambda：Stage 0 → True / ≥ 1 → False。"""
+
+    def test_shadow_provider_stage_zero_returns_true(self):
+        """Stage 0 → shadow_mode_provider → True。"""
+        cache = ExecutorConfigCache()
+        # 默認初始 Stage 0
+        provider = cache.shadow_mode_provider()
+        self.assertTrue(provider())
+
+    def test_shadow_provider_stage_one_returns_false(self):
+        """Stage 1 → shadow_mode_provider → False。"""
+        cache = ExecutorConfigCache()
+        cache._inject_snapshot_for_tests(
+            ExecutorRuntimeConfig(
+                shadow_mode=False,
+                canary_stage=CanaryStage.PAPER_SINGLE_COHORT,
+                config_version=1,
+                fetched_at_ms=1,
+            )
+        )
+        provider = cache.shadow_mode_provider()
+        self.assertFalse(provider())
+
+    def test_shadow_provider_stage_two_returns_false(self):
+        """Stage 2 → shadow_mode_provider → False。"""
+        cache = ExecutorConfigCache()
+        cache._inject_snapshot_for_tests(
+            ExecutorRuntimeConfig(
+                shadow_mode=False,
+                canary_stage=CanaryStage.DEMO_SINGLE_COHORT,
+                config_version=1,
+                fetched_at_ms=1,
+            )
+        )
+        provider = cache.shadow_mode_provider()
+        self.assertFalse(provider())
+
+    def test_shadow_provider_higher_stages_return_false(self):
+        """Stage 3/4 → shadow_mode_provider → False。"""
+        cache = ExecutorConfigCache()
+        for stage in (CanaryStage.DEMO_FULL_UNIVERSE, CanaryStage.LIVE_PENDING):
+            cache._inject_snapshot_for_tests(
+                ExecutorRuntimeConfig(
+                    shadow_mode=False,
+                    canary_stage=stage,
+                    config_version=1,
+                    fetched_at_ms=1,
+                )
+            )
+            provider = cache.shadow_mode_provider()
+            self.assertFalse(provider(), f"stage={stage}")
+
+
+class TestCanaryStageBackwardCompatLegacyConfig(unittest.TestCase):
+    """16. backward-compat：legacy `shadow_mode=true` config（無 canary_stage）→ Stage 0。"""
+
+    def test_legacy_shadow_true_implies_stage_zero(self):
+        """legacy config（pre W-AUDIT-9）只有 shadow_mode=true → Stage 0 + shadow=True。"""
+        resp = {
+            "config": {
+                "executor": {
+                    "shadow_mode": True,
+                    "max_position_pct": 0.05,
+                },
+            },
+            "version": 1,
+        }
+        snap = ExecutorConfigCache._parse_response(resp)
+        self.assertEqual(snap.canary_stage, CanaryStage.SHADOW)
+        self.assertTrue(snap.shadow_mode)
+        # shadow_mode_provider lambda 對 legacy config 仍回 True
+        cache = ExecutorConfigCache()
+        cache._inject_snapshot_for_tests(snap)
+        self.assertTrue(cache.shadow_mode_provider()())
+
+    def test_legacy_config_via_full_polling_path(self):
+        """模擬完整 polling path：legacy IPC payload → Stage 0 snapshot。"""
+        cache = ExecutorConfigCache()
+        legacy_resp = {
+            "config": {"executor": {"shadow_mode": True}},
+            "version": 5,
+        }
+        with patch.object(
+            cache, "_fetch_via_ipc_blocking",
+            return_value=ExecutorConfigCache._parse_response(legacy_resp),
+        ):
+            cache._poll_once()
+        snap = cache.get()
+        self.assertTrue(cache.is_initialized())
+        self.assertEqual(snap.canary_stage, CanaryStage.SHADOW)
+        self.assertTrue(snap.shadow_mode)
 
 
 if __name__ == "__main__":

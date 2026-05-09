@@ -1,84 +1,140 @@
 from __future__ import annotations
 
 """
-G3-03 Phase B — ExecutorAgent runtime config cache (Rust IPC view).
-G3-03 Phase B — ExecutorAgent runtime 配置快取（Rust IPC 視圖）。
+W-AUDIT-9 T3 — ExecutorAgent stage-aware runtime config cache（Rust IPC 視圖）。
 
-MODULE_NOTE (EN):
-  Provides a process-global cache of the ExecutorConfig sub-slice of Rust's
-  authoritative RiskConfig (Phase A landed `RiskConfig.executor`). Removes the
-  hardcoded ``ExecutorAgent._shadow_mode = True`` class attribute (CLAUDE.md §二
-  principle #3 violation) by routing the runtime check through this cache.
+MODULE_NOTE：
+  Rust ``RiskConfig.executor`` 子欄位的 process-global 快取。AMD-2026-05-09-03
+  把 binary `shadow_mode` 升級為 5-stage graduated canary cohort
+  (`CanaryStage`)，本檔提供 Python 端 mirror enum + stage-aware provider，
+  並保留 `shadow_mode_provider()` 作 backward-compat lambda（Stage 0 → True；
+  Stage ≥ 1 → False）。
 
-  Design:
-    - Background daemon thread polls IPC ``get_risk_config`` every N seconds
-      (default 10s; configurable via env ``OPENCLAW_EXECUTOR_CACHE_POLL_SEC``).
-    - Reads only the ``executor.{shadow_mode, max_position_pct,
-      per_symbol_position_cap}`` sub-slice; ignores the rest of RiskConfig.
-    - Snapshots are immutable dataclasses, swapped atomically under a lock.
-    - **Fail-closed default**: if first IPC fetch has not yet succeeded (or
-      schema is malformed), ``get().shadow_mode`` returns ``True`` (safe — log
-      intents but DO NOT submit orders).  Per CLAUDE.md §二 principle #6.
-    - On transient IPC errors after the first success, retain the previous
-      good snapshot (graceful degrade).
+  graduated canary 5 階段（per AMD-2026-05-09-03 §2.2）：
+    Stage 0  SHADOW              fail-closed shadow，不送 intent 到 Rust
+    Stage 1  PAPER_SINGLE_COHORT 1 strategy × 1 symbol × paper（7d 觀察）
+    Stage 2  DEMO_SINGLE_COHORT  1 strategy × 1 symbol × demo（14d 觀察）
+    Stage 3  DEMO_FULL_UNIVERSE  5 active strategies × demo（21d 觀察）
+    Stage 4  LIVE_PENDING        operator 顯式拍板（不自動升級）
 
-  Public API:
-    - ``get_executor_config_cache()`` — module singleton getter.
-    - ``cache.start_polling()`` / ``cache.stop_polling()`` — lifecycle.
-    - ``cache.get()`` — current snapshot (always safe; fail-closed default).
-    - ``cache.is_initialized()`` — True after first successful IPC fetch.
-    - ``shadow_mode_provider()`` — lambda for ``ExecutorAgent`` constructor.
+  fail-closed 不變式（**critical**, TODO v19 §5 invariant 9）：
+    IPC failure / cache miss / schema fail / provider exception → Stage 0
+    （**不是** Stage 1）。break 即雞蛋死循環復活。
 
-  Singleton registry (CLAUDE.md §九): ``_EXECUTOR_CONFIG_CACHE``.
-
-MODULE_NOTE (中):
-  Rust ``RiskConfig.executor`` 子欄位的 process-global 快取（Phase A 已落 schema）。
-  取代 ``ExecutorAgent._shadow_mode = True`` 類別屬性硬編碼（違反根原則 #3）。
+  backward-compat（AMD §2.3 + §4.4）：
+    - legacy `shadow_mode: true` ⇔ canary_stage = Stage 0
+    - legacy `shadow_mode: false` 但無 `canary_stage` 欄位 → fail-closed
+      reject 至 Stage 0 + log（不再合法 once W-AUDIT-9 land）
+    - `shadow_mode_provider()` 仍可用：Stage 0 → True，Stage ≥ 1 → False
 
   設計：
-    - daemon thread 每 N 秒（預設 10s，env ``OPENCLAW_EXECUTOR_CACHE_POLL_SEC``）
-      呼叫 IPC ``get_risk_config`` 拉取 ``executor`` 子切片。
-    - 不可變 dataclass snapshot，於 lock 下原子交換。
-    - **失敗關閉預設**：首次 IPC 尚未成功（或 schema 異常）時，
-      ``get().shadow_mode`` 回 ``True``（安全：記錄意圖但**不**提交）。
-    - 首次成功後若遇瞬時 IPC 錯誤，保留前一個好 snapshot（優雅降級）。
+    - daemon thread 每 N 秒呼叫 IPC ``get_risk_config`` 拉 ``executor`` 子切片
+    - 不可變 dataclass snapshot；lock 下原子交換
+    - 首次成功前 IPC 失敗 → 維持 fail-closed Stage 0
+    - 首次成功後瞬時 IPC 錯誤 → 保留前一個 good snapshot（graceful degrade）
 
-  公開 API：``get_executor_config_cache()`` / ``start_polling`` /
-  ``stop_polling`` / ``get`` / ``is_initialized`` / ``shadow_mode_provider``。
+  公開 API：
+    ``get_executor_config_cache()`` / ``start_polling`` / ``stop_polling`` /
+    ``get`` / ``is_initialized`` / ``shadow_mode_provider`` /
+    ``canary_stage_provider``（W-AUDIT-9 新）
+
+  Singleton registry（CLAUDE.md §九）：``_CACHE_INSTANCE``。
 """
 
 import asyncio
+import enum
 import logging
 import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
-# Conservative defaults matching Rust ExecutorConfig::default() (Phase A).
-# 與 Phase A Rust ExecutorConfig::default() 對齊的保守預設。
-_DEFAULT_SHADOW_MODE: bool = True       # principle #6 fail-closed
+class CanaryStage(enum.IntEnum):
+    """W-AUDIT-9 T3 — 5-stage graduated canary cohort（mirror Rust）。
+
+    與 Rust 端 ``ExecutorRiskConfig.canary_stage: u8 (0..=4)`` 命名 / 序值對齊
+    （PA `2026-05-09--full_dispatch_engineering_plan.md` §2.2 T3；schema 通過
+    IPC payload 對齊，本端不需等 Rust commit hash）。
+
+    fail-closed 不變式：任何不可解析 / out-of-range / IPC 失敗 → Stage 0。
+    """
+
+    SHADOW = 0                # binary fail-closed；不送 intent；對應 legacy `shadow_mode=True`
+    PAPER_SINGLE_COHORT = 1   # 1 strategy × 1 symbol × paper（7d 觀察期）
+    DEMO_SINGLE_COHORT = 2    # 1 strategy × 1 symbol × demo（14d 觀察期）
+    DEMO_FULL_UNIVERSE = 3    # 5 active strategies × demo（21d 觀察期）
+    LIVE_PENDING = 4          # operator 顯式拍板（不自動升級）
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "CanaryStage":
+        """fail-closed parse：任何異常值返回 SHADOW（Stage 0）。
+
+        允許 int 0..=4 / 對應 IntEnum 實例 / 字串「0」..「4」。
+        out-of-range / None / 型別錯誤 → 一律 fall back SHADOW（**不是** Stage 1）。
+        """
+        if value is None:
+            return cls.SHADOW
+        if isinstance(value, cls):
+            return value
+        try:
+            int_val = int(value)
+        except (TypeError, ValueError):
+            return cls.SHADOW
+        if 0 <= int_val <= 4:
+            return cls(int_val)
+        return cls.SHADOW
+
+
+# Conservative defaults matching Rust ExecutorConfig::default()。
+# 與 Rust ExecutorConfig::default() 對齊的保守預設。
+_DEFAULT_SHADOW_MODE: bool = True       # 原則 #6 fail-closed（legacy projection）
+_DEFAULT_CANARY_STAGE: CanaryStage = CanaryStage.SHADOW  # invariant 9 fail-closed
 _DEFAULT_MAX_POSITION_PCT: float = 0.05  # 5% — matches Rust default
 _DEFAULT_POLL_SEC: float = 10.0
 _MIN_POLL_SEC: float = 0.5  # guardrail vs. typo'd env values
 
 
 @dataclass(frozen=True)
-class ExecutorRuntimeConfig:
-    """Immutable snapshot of the executor sub-slice of Rust RiskConfig.
-    Rust RiskConfig.executor 子切片的不可變快照。
+class CanaryCohort:
+    """W-AUDIT-9 — Stage 1/2 cohort scope（per AMD-2026-05-09-03 §2.4）。
 
-    Independent of Rust's ``ExecutorConfig`` struct (Python local typing
-    deliberately separate per RFC §5.2 — typed for IDE autocomplete, with
-    fail-closed defaults baked in via factory).
-    與 Rust 的 ``ExecutorConfig`` 結構獨立（RFC §5.2：刻意拆開 Python 型別，
-    內建 fail-closed 預設）。
+    Stage 0 / 3 / 4 全 universe：strategy / symbol 為 None（cohort 整體可為 None）。
+    Stage 1 / 2 必填 strategy + symbol（由 operator 在 Settings tab 顯式選擇）。
     """
 
+    strategy: Optional[str] = None
+    symbol: Optional[str] = None
+    environment: Optional[str] = None  # 'paper' | 'demo' | 'live_demo' | 'mainnet'
+
+
+@dataclass(frozen=True)
+class ExecutorRuntimeConfig:
+    """Rust RiskConfig.executor 子切片的不可變快照。
+
+    與 Rust 的 ``ExecutorConfig`` 結構獨立（RFC §5.2：刻意拆開 Python 型別，
+    內建 fail-closed 預設）。
+
+    W-AUDIT-9 新欄位（per AMD-2026-05-09-03 §2.1, §4.4）：
+      - canary_stage: 0..=4，預設 SHADOW（fail-closed）
+      - canary_cohort: Stage 1/2 cohort scope
+      - stage_entered_at_ms: stage 進入時間戳（毫秒）
+      - observation_period_ms: 當前 stage 觀察期長度
+
+    backward-compat：legacy `shadow_mode` 仍保留，等同 `(canary_stage == 0)`
+    投影。
+    """
+
+    # Legacy projection：`shadow_mode = (canary_stage == SHADOW)`。
+    # 保留為 backward-compat；新代碼讀 ``canary_stage`` 為主。
     shadow_mode: bool = _DEFAULT_SHADOW_MODE
+    canary_stage: CanaryStage = _DEFAULT_CANARY_STAGE
+    canary_cohort: Optional[CanaryCohort] = None
+    stage_entered_at_ms: int = 0    # Stage 0 永久；非 0 = stage 進入時間
+    observation_period_ms: int = 0  # Stage 0 不觀察（0）；其他 stage = spec 觀察期
     max_position_pct: float = _DEFAULT_MAX_POSITION_PCT
     per_symbol_position_cap: Dict[str, float] = field(default_factory=dict)
     config_version: int = 0  # Rust ConfigStore version; 0 = pre-init
@@ -169,14 +225,48 @@ class ExecutorConfigCache:
             return self._initialized
 
     def shadow_mode_provider(self) -> Callable[..., bool]:
-        """Return a zero-arg callable that reads current shadow_mode.
-        Used by ``ExecutorAgent`` constructor's ``shadow_mode_provider`` arg.
-        回傳零參 callable，供 ExecutorAgent ctor 的 shadow_mode_provider 注入。"""
+        """W-AUDIT-9 backward-compat：Stage 0 → True；Stage ≥ 1 → False。
+
+        舊 ExecutorAgent ctor 簽名仍以 ``shadow_mode_provider: Callable[..., bool]``
+        為主；本 lambda 包裝 ``canary_stage_provider`` 以維持 zero-impact migration。
+
+        invariant 9：fail-closed Stage 0（**不是** Stage 1）→ True
+        （legacy semantic：log intent，不下單）。
+        """
+        stage_provider = self.canary_stage_provider()
+
         def _provider(engine: Optional[str] = None) -> bool:
-            normalized = _normalize_engine_name(engine)
-            if normalized is None or normalized == self._engine:
-                return self.get().shadow_mode
-            return self._fetch_via_ipc_blocking(engine=normalized).shadow_mode
+            stage = stage_provider(engine)
+            return stage == CanaryStage.SHADOW
+
+        return _provider
+
+    def canary_stage_provider(self) -> Callable[..., "CanaryStage"]:
+        """W-AUDIT-9 T3：回傳 stage-aware callable。
+
+        每次呼叫回傳當前 ``CanaryStage``（per AMD-2026-05-09-03 §2.1）。
+        ExecutorAgent ctor 升級後可注入此 provider；舊 ctor 仍可用
+        ``shadow_mode_provider()`` lambda 包裝。
+
+        fail-closed semantic（**critical**, TODO v19 §5 invariant 9）：
+          - cache 未初始化 → SHADOW
+          - IPC 失敗 / schema 異常 → SHADOW（**不是** PAPER_SINGLE_COHORT）
+          - explicit engine arg 跨 engine fetch 失敗 → SHADOW
+          - provider 內任何 exception → SHADOW（caller 不應拋出）
+        """
+        def _provider(engine: Optional[str] = None) -> "CanaryStage":
+            try:
+                normalized = _normalize_engine_name(engine)
+                if normalized is None or normalized == self._engine:
+                    return self.get().canary_stage
+                return self._fetch_via_ipc_blocking(engine=normalized).canary_stage
+            except Exception as exc:  # noqa: BLE001 — 任何錯誤一律 fail-closed Stage 0
+                logger.warning(
+                    "canary_stage_provider exception engine=%s exc=%s — "
+                    "fail-closed Stage 0（**不是** Stage 1）",
+                    engine or "default", exc,
+                )
+                return CanaryStage.SHADOW
 
         return _provider
 
@@ -331,14 +421,21 @@ class ExecutorConfigCache:
 
     @staticmethod
     def _parse_response(resp: object) -> ExecutorRuntimeConfig:
-        """Extract the executor sub-slice from ``get_risk_config`` response.
-        Falls back to safe defaults on missing/malformed fields (fail-closed).
-        從 get_risk_config 回應抽出 executor 子切片；缺漏/異常時走安全預設。"""
+        """從 get_risk_config 回應抽出 executor 子切片；缺漏/異常時走 fail-closed 預設。
+
+        W-AUDIT-9 T3 升級：
+          - 解析 ``canary_stage`` / ``canary_cohort`` / ``stage_entered_at_ms`` /
+            ``observation_period_ms`` 4 欄
+          - **backward-compat reject**（per AMD-2026-05-09-03 §4.4）：
+            legacy `shadow_mode=false` 但無 `canary_stage` 欄位（或 stage=0）
+            → fail-closed reject 至 Stage 0 + log
+          - shadow_mode 仍為 `(canary_stage == SHADOW)` projection（避免兩欄
+            互相矛盾的隱含風險）
+        """
         if not isinstance(resp, dict):
             raise ValueError(f"unexpected IPC response type: {type(resp).__name__}")
         config_obj = resp.get("config") if isinstance(resp.get("config"), dict) else None
         if config_obj is None:
-            # Some handlers return the config directly under "result" or top-level.
             # 部分 handler 直接平鋪 config 於 result 或頂層。
             if isinstance(resp.get("result"), dict):
                 config_obj = resp["result"].get("config", resp["result"])
@@ -347,11 +444,61 @@ class ExecutorConfigCache:
         executor_blob = config_obj.get("executor") if isinstance(config_obj, dict) else None
         if not isinstance(executor_blob, dict):
             raise ValueError("IPC response missing `executor` sub-config")
-        # Defensive parse — keep schema mismatches behind fail-closed defaults.
-        # 防禦式解析：schema 不符仍走 fail-closed 預設。
+
+        # ── shadow_mode legacy 解析（保留 raw 以做 §4.4 backward-compat reject）──
         shadow_raw = executor_blob.get("shadow_mode", _DEFAULT_SHADOW_MODE)
         if not isinstance(shadow_raw, bool):
             shadow_raw = _DEFAULT_SHADOW_MODE
+
+        # ── canary_stage 解析（W-AUDIT-9 T3 SoT）──
+        # 缺欄 / out-of-range / 型別錯誤 → CanaryStage.from_raw fail-closed Stage 0。
+        stage_raw = executor_blob.get("canary_stage")
+        canary_stage = CanaryStage.from_raw(stage_raw)
+
+        # ── §4.4 backward-compat reject ──
+        # legacy `shadow_mode=false` 但 `canary_stage` 缺欄 / Stage 0 → reject。
+        # 這是 AMD-2026-05-09-03 §4.4 明文：legacy `shadow_mode=false` 在 IMPL
+        # wave land 後**不再合法**；不可繞過 5-stage canary 直接 live-equivalent。
+        if shadow_raw is False and stage_raw is None:
+            logger.warning(
+                "executor_config_cache: legacy shadow_mode=False without "
+                "canary_stage detected — fail-closed reject Stage 0 "
+                "（per AMD-2026-05-09-03 §4.4 backward-compat reject）",
+            )
+            canary_stage = CanaryStage.SHADOW
+        elif shadow_raw is False and canary_stage == CanaryStage.SHADOW:
+            # legacy `shadow_mode=false` 但 stage=0：兩欄矛盾。同樣 reject。
+            logger.warning(
+                "executor_config_cache: legacy shadow_mode=False conflicts "
+                "with canary_stage=0 — fail-closed reject Stage 0",
+            )
+
+        # ── canary_cohort 解析（Stage 1/2 必填，其他 stage 可空）──
+        cohort_blob = executor_blob.get("canary_cohort")
+        cohort: Optional[CanaryCohort] = None
+        if isinstance(cohort_blob, dict):
+            strategy_val = cohort_blob.get("strategy")
+            symbol_val = cohort_blob.get("symbol")
+            env_val = cohort_blob.get("environment")
+            cohort = CanaryCohort(
+                strategy=strategy_val if isinstance(strategy_val, str) else None,
+                symbol=symbol_val if isinstance(symbol_val, str) else None,
+                environment=env_val if isinstance(env_val, str) else None,
+            )
+
+        # ── stage_entered_at_ms / observation_period_ms ──
+        stage_entered_raw = executor_blob.get("stage_entered_at_ms", 0)
+        try:
+            stage_entered = int(stage_entered_raw) if stage_entered_raw is not None else 0
+        except (TypeError, ValueError):
+            stage_entered = 0
+        obs_period_raw = executor_blob.get("observation_period_ms", 0)
+        try:
+            obs_period = int(obs_period_raw) if obs_period_raw is not None else 0
+        except (TypeError, ValueError):
+            obs_period = 0
+
+        # ── max_position_pct / per_symbol_position_cap（既有邏輯）──
         max_pos_raw = executor_blob.get("max_position_pct", _DEFAULT_MAX_POSITION_PCT)
         try:
             max_pos = float(max_pos_raw)
@@ -372,8 +519,18 @@ class ExecutorConfigCache:
             version = int(version_raw) if version_raw is not None else 0
         except (TypeError, ValueError):
             version = 0
+
+        # shadow_mode 改為 stage 投影：保「stage 0 ⇔ shadow_mode true」不變式
+        # 避免兩欄分歧（legacy 場景 shadow=true 配 stage=0 視同 SHADOW；
+        # 升級到 stage>=1 後 shadow=false 投影自動成立）。
+        shadow_projected = canary_stage == CanaryStage.SHADOW
+
         return ExecutorRuntimeConfig(
-            shadow_mode=shadow_raw,
+            shadow_mode=shadow_projected,
+            canary_stage=canary_stage,
+            canary_cohort=cohort,
+            stage_entered_at_ms=stage_entered,
+            observation_period_ms=obs_period,
             max_position_pct=max_pos,
             per_symbol_position_cap=per_symbol,
             config_version=version,
@@ -448,6 +605,8 @@ def _reset_for_tests() -> None:
 
 
 __all__ = [
+    "CanaryStage",
+    "CanaryCohort",
     "ExecutorRuntimeConfig",
     "ExecutorConfigCache",
     "get_executor_config_cache",
