@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v16
+Version: v17
 Date: 2026-05-09
-Status: PM sync after W-AUDIT-6c portfolio VaR/CVaR/EVT source/test checkpoint; W-AUDIT-6 source/test queue is closed through tail-risk promotion evidence
+Status: PM sync after 12-agent v2 adversarial verification — 真實飛躍：✅ 74→122 (+65%) / ❌ 120→66 (-45%) / 🆕 53→21 (-60%)；5 P0-DECISION-AUDIT + 6 P0-NEW-ISSUE/VULN 全 closed；W-AUDIT-1/2/5/6/7 verified；W-AUDIT-3/4 仍 partial；v17 lifts v2 verified-closed details to `docs/archive/2026-05-09--w_audit_verified_closed_archive_v2.md` + mounts v2 NEW-ISSUE clusters as new active items
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -112,6 +112,33 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   Tally: **319 verification points → ✅ 74 (23%) / ⚠️ 66 (21%) / ❌ 120 (38%) /
   🔄 6 (2%) / 🆕 53 (17%)**. Verified-closed sub-task details lifted to
   `docs/archive/2026-05-09--w_audit_verified_closed_archive.md`.
+- **2026-05-09 v2 Adversarial Verification land (after 34 commits)**：12 v2
+  reports at `srv/docs/CCAgentWorkSpace/<AGENT>/workspace/reports/2026-05-09--*_verification_v2.md`.
+  Integrated summary at `srv/2026-05-09--audit_fix_verification_v2_summary.md`.
+  v2 Tally: **259 verification points → ✅ 122 (47%) / ⚠️ 47 (18%) / ❌ 66 (25%) /
+  🔄 3 (1%) / 🆕 21 (8%)**. **真實飛躍**：✅ +48 (+65%) / ❌ -54 (-45%) / 🆕 -32 (-60%)。
+  v2 verified-closed details archived to
+  `docs/archive/2026-05-09--w_audit_verified_closed_archive_v2.md`.
+  - W-AUDIT-1: ⚠️ partial → ✅ **真 close** (R4: CRITICAL × 5 真 closed 5/5;
+    LG-X-05 補完;　索引完整度 75→92%)
+  - W-AUDIT-2: 🔄 source-only → ✅ **runtime verified** (V078 applied;
+    learning.lease_transitions runtime rows=103; rebuild `862e79b7`)
+  - W-AUDIT-3: ⚠️ → ⚠️ 真實 partial (F-01 lambda:True 真移除 + AMD §2 fail-closed;
+    F-15 e2e DB row 仍 opt-in; runtime fail-closed metrics 未驗)
+  - W-AUDIT-4: ❌ → ❌ 仍降級 (V068/V070/V071 reclassification COMMENT;
+    row count 仍 0; cron 仍 not installed; attribution_chain_ok 24h 0.0188→0.5041%
+    denominator artifact, ok_n only +47%)
+  - W-AUDIT-5: ⚠️ → ✅ **F-12 真檔對齊** (replay/runner.rs 2467→1167 LOC) +
+    W-AUDIT-6c portfolio tail risk gate IMPL bonus
+  - W-AUDIT-6: ⏸ → ✅ **大爆發收口** (13+ commits / DSR-PBO+VaR-CVaR-EVT
+    wired LIVE / Kelly RiskConfig / fast_track config / per_trade_risk_pct
+    雙 SSOT 統一 / funding_arb 4 risk_config 全清 / ma_crossover R:R 重寫 /
+    bb_breakout 5m IMPL 但 Donchian leak-bias 未修是隱患)
+  - W-AUDIT-7: ✅ → ✅ openConfirmModal a11y 真補 (A 級實作) +
+    LiveDemo restored 三層 closure
+- **5 P0-DECISION-AUDIT 全 closed**：AMD-2026-05-09-02 (`docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md`)
+  收口 -2 (Option A) / -4 (Option ii) / -5 (Option i+ii)；ADR-0015/0017/0020 配套加入。
+- **6 P0-NEW-ISSUE/VULN 全 closed**：LiveDemo auth restored + 4 NEW-VULN (launchd/lease audit/cookie/phase4) + LG-X-05 spec gap 全 closed。
 - **W-AUDIT-1..7 verification verdict**:
   - W-AUDIT-1 docs sync: ⚠️ partial close (R4 CRITICAL × 5 真 closed only 2/5
     at verification time; follow-up `P0-AUDIT-NEW-LG-X-05` is now closed;
@@ -294,6 +321,9 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P0-NEW-VULN-1` | DONE 2026-05-09 | launchd / lifecycle bind 安全弱點 (HIGH) | Mac launchd Trading API template binds `127.0.0.1` and preflight rejects all-interface plist binds. Lifecycle scripts now use `helper_scripts/lib/api_bind_host.sh`: default `auto` binds the concrete Tailscale IPv4 when available, otherwise loopback; `OPENCLAW_BIND_HOST=tailscale` forces tailnet-only; `0.0.0.0` / `::` are rejected. Linux API-only runtime reload applied: Trading API listens on `100.91.109.86:8000`, not `0.0.0.0:8000`, preserving Tailscale GUI access without LAN/all-interface exposure. |
 | `P0-NEW-VULN-2` | DONE 2026-05-09 | lease audit runtime 0 emit (HIGH) | `e97a333b` emits one synthetic `BYPASS` audit row for Validation/Exploration facade bypass without creating SM objects. Linux rebuild/restart deployed `862e79b7`; auto-migrate applied V078 (`_sqlx_migrations version=78 success=t`); `learning.lease_transitions` is nonzero with `BYPASS` rows for `demo` and `live_demo` (final spot-check rows=103). |
 | `P0-AUDIT-NEW-LG-X-05` | DONE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 (R4 N1 CRITICAL) | Fixed in `docs/governance_dev/SPECIFICATION_REGISTER.md`: LG-X now maps historical LG-1..LG-5 as evidence window / H0 / pricing / supervised-live / constrained autonomous live; LG-X-05 registers the LG-5 constrained-autonomous RFC, eval-contract v2, R-meta amendment, and healthchecks. Live Ops moved to separate `OPS-X-01` so it no longer occupies LG-X-04. |
+| `P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` | ACTIVE 2026-05-09 v2 | bb_breakout 5m active=true 但 Donchian leak-free shift(1) 未進 runtime (QC v2-NEW-4 HIGH) | QC v2 verified: `donchian.rs::donchian` 仍 `&high[n-period..n]` 含 current bar；mod.rs:532 Hard mode 仍 current-bar-inclusive。**5m TOML active=true 在 leak-bias 未修狀態下啟動 = 學習資料 contaminated**。Action: pause bb_breakout 5m demo active=true 直到 P1-11 Phase 2 完成 `&high[n-period-1..n-1]` shift(1) IMPL。任何 5m demo OOS Sharpe / DSR / PSR 在 leak-bias 條件下都是含 bias 的 measurement。 |
+| `P0-V2-NEW-2-STRATEGIST-CAP-NO-GATE` | ACTIVE 2026-05-09 v2 | F-strategist-cap 30%→50% 一次 67% 放寬無 supervised gate (FA v2-NEW-1 升 P0 因治理一致性) | FA v2 verified: TODO L322 W-AUDIT-7 F-strategist-cap 把 max_param_delta_pct 30→50 全 align；與 SM-05 fail-closed 預設姿態相對立；無對應 RFC / ADR / supervised gate 綁定。Action: 補 ADR 解釋 + 把 50% 綁 LIVE_PENDING 而非 paper/demo 全域生效；或回 30%。 |
+| `P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` | ACTIVE 2026-05-09 v2 | DSR/PBO promotion gate IMPL ✅ 但 evidence push 鏈缺 (QC §6.1 (a)(c) HIGH) | QC v2 verified: update_demo_selection_bias_evidence + update_demo_tail_risk_evidence 是 Python API **無自動 cron / batch backfill**；無 evidence push = `selection_bias:no_evidence` failure → 全策略卡在 DEMO_ACTIVE → LIVE_PENDING graduation。trial_sharpes 持久化機制缺 → PBO 永遠 None 退化為 DSR-only（與 W-AUDIT-6 spec 「DSR(K)>0.95 + PBO<0.5」不一致）。Action: PA 接 cron + edge_estimator_scheduler.py 同步 push；建議 PG `strategy_trial_ledger` table 持久化 K + trial_sharpes。 |
 
 ## P1 — Next Engineering Queue
 
@@ -417,3 +447,21 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **ML 基座達標率**: 38% → 42% (MIT verdict; attribution_chain_ok 24h 0.0188% 仍 catastrophic)
 - **GUI 整體**: 7.4 → 8.1 / 10 (A3 verdict; Critical 4/5 close)
 - **核心 verdict**: 24h 28 commits 是高 throughput 但典型 source-only 假進度。74 真修中**沒有任何單一 finding 真改變 fake-live 結構**；NEW-ISSUE-1 LiveDemo 停是修復過程引入的 functional regression。修復節奏需從「source-checkpoint」升為「runtime-checkpoint」。
+
+## Reference — 2026-05-09 v2 Adversarial Verification (after 34 commits)
+
+- **PM Sign-off v2 summary**: `srv/2026-05-09--audit_fix_verification_v2_summary.md`（259 verification points 整合 + v2 wave verdict + 5 P0-DECISION + 6 P0-NEW-ISSUE/VULN 全 closed + v2 21 NEW-ISSUE 清單）
+- **v2 Verified-closed details archive**: `srv/docs/archive/2026-05-09--w_audit_verified_closed_archive_v2.md`（**v2 過時/已修復內容單獨存放**）
+- **12 v2 verification reports**: `srv/docs/CCAgentWorkSpace/{FA,AI-E,E5,E4,E3,CC,QC,MIT,BB,TW,R4,A3}/workspace/reports/2026-05-09--*_verification_v2.md`
+- **v2 Total tally**: **✅ 122 (47%) / ⚠️ 47 (18%) / ❌ 66 (25%) / 🔄 3 (1%) / 🆕 21 (8%)** = 259 points
+- **vs v1**: ✅ 74→122 (+48, **+65%**) / ❌ 120→66 (-54, **-45%**) / 🆕 53→21 (-32, **-60%**)
+- **Compliance score**: B (21/30 = 70%) → **B+ (25/30 = 83.3%)** (CC v2 verdict)
+- **P0-DECISION 拍板**: 2/5 → **5/5**（AMD-2026-05-09-02 收口 -2/-4/-5）
+- **6 P0-NEW-ISSUE/VULN**: **全 closed**（LiveDemo restored / 4 NEW-VULN / LG-X-05）
+- **ML 基座達標率**: 42% → **44%**（attribution_chain_ok 24h 0.0188→0.5041% denominator artifact, ok_n only +47%）
+- **GUI 整體**: 8.1 → **8.3 / 10**（Critical 4/5；openConfirmModal a11y A 級補完）
+- **5 策略 7d gross**: demo avg_net=-17.82bps / live_demo PnL delta +20.87 USD vs baseline (`[40]` 2026-05-09)
+- **DSR/PBO promotion gate**: **LIVE**（W-AUDIT-6 大爆發收口）
+- **VaR/CVaR/EVT**: **LIVE**（W-AUDIT-6c portfolio tail risk gate IMPL）
+- **runner.rs LOC**: 2467 → **1167**（F-12 真檔對齊；E5 v2 verified）
+- **核心 v2 verdict**: 真實飛躍 — 修復覆蓋率從 v1 23% → v2 47%（+104%）。W-AUDIT-2 從 source-only 翻 runtime verified；W-AUDIT-6 從 untouched 大爆發收口；W-AUDIT-1 從 partial 翻 5/5 CRITICAL closed；P0-DECISION-AUDIT 5/5 拍板。**剩餘核心 gap**：(1) W-AUDIT-4 6 表 0 INSERT + cron not installed → MLDE 仍 catastrophic；(2) bb_breakout 5m active 但 Donchian leak-bias 未修 → 學習資料 contaminated；(3) DSR/PBO evidence 自動化 push 鏈 + trial_sharpes 持久化缺 → promotion gate 永卡；(4) bb_reversion verdict 仍未動。距 supervised live 規劃帶仍是 6/15 悲觀 / 6/30 中位 / 7/15 樂觀，但 v2 飛躍把樂觀帶 6/30 提前可能性提升至 ~40%。

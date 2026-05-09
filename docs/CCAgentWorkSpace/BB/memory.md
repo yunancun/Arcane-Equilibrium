@@ -217,3 +217,49 @@
 4. Bybit V5 changelog 更新（每月例行）
 5. funding_arb 是否真正止血（檢查 BUSDT 殘倉 + reject log 不再湧現）
 6. broker partnership 申請門檻（30d volume vs $10M）— 當前 $45K 差 222× 不申
+
+---
+
+## 2026-05-09 v2 對抗性核實（v1 → v2 跨 34 commits, `455d796e` → `1bd55689`）
+
+### v1 → v2 closure 進度（6/12）
+
+✅ **v2 真前進**：
+- 字典 drift L5-1..L5-4 維持 closed（v1 → v2 無 regression）
+- W-AUDIT-6 funding_arb risk config 真清乾（4 個 risk_config TOML 全清，commit `af4942b6`）
+- ADR-0018 + ADR-0020 + AMD-2026-05-09-02 + SM-05 governance 收口
+- [56] LiveDemo healthcheck IMPL（commit `c15985a5` 加 sentinel + 158 LOC + 125 LOC test）
+- A5-4 OPENCLAW_BYBIT_PUBLIC_BASE_URL env override 維持 closed
+- 30d Bybit V5 changelog 0 breaking change
+
+⚠ **v1 → v2 stuck**：
+- A5-2 110017 Rust enum 仍缺（fee_filter 字串匹配維持工作但 enum 應補）
+- A5-6 / NEW-2 [33] fee_filter asymmetry 仍 8 天未做 1 hr fix
+- NEW-1 BUSDT PG 殘倉 12186 條仍 stale（demo 9327 + live_demo 2859，5-6 天前最後 snapshot）
+  - W-AUDIT-6 是 policy/risk authority cleanup
+  - 不是 operational dust clear → operator 仍欠 `/v5/position/list?symbol=BUSDT` 實測
+
+❌ **v2 0 進展**：
+- M5-1 ToS / KYC / 地理禁區 governance entry（v1 已列 P0 0-day）
+- M5-2 IP whitelist 自檢工具 `helper_scripts/preflight/`（v1 已列 P0 1-day，目錄仍不存在）
+- A5-1 / A5-3 / A5-5 / A5-7 / A5-9 advisory 維持
+
+🆕 **v2 NEW REGRESSION**：
+- **NEW-3 LiveDemo authorization.json 缺失**（HIGH）：14:33 UTC 直查 [56] = FAIL，pipeline_snapshot_live.json 44 min stale；commit `c15985a5` 加 sentinel 但 sentinel 真實 trip → operator 沒收到 alert（observability theatre）
+- **NEW-4 §三 [56] drift**（MED）：CLAUDE.md §三 寫 09:41 UTC PASS，5h 後實測 FAIL → §五 衛生規則 7 day 寬容期不適用 critical health gate；建議副規則 [55]/[56] ≤6h drift
+
+### Bybit-side overall
+
+- **技術合規度**：97%（funding_arb risk config +1pp 但 LiveDemo healthcheck -1pp 平手）
+- **政策合規度**：70%（M5-1 / M5-2 仍 0 進展）
+- **新增 ship-stop blocker**：authorization.json missing → 重簽 + RCA 為何 09:33 UTC --keep-auth 部署 5h 後 auth 消失
+
+### 下次啟動需查驗項
+
+1. M5-1 `docs/governance_dev/2026-05-09--bybit_compliance_signoff.md` 是否建檔
+2. M5-2 `helper_scripts/preflight/check_bybit_ip_whitelist.py` 是否 IMPL
+3. NEW-1 BUSDT PG 殘倉是否 dust clear（operator 端 `/v5/position/list` 結果）
+4. NEW-3 [56] healthcheck PASS 維持狀態 + auth lifecycle 穩
+5. A5-2 BybitRetCode enum 110017 是否補
+6. NEW-2 [33] fee_filter funding_arb 過濾是否補
+

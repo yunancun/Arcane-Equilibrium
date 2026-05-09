@@ -2004,3 +2004,49 @@ control_api_v1 sub-dir 跑 venv 時 `from program_code...` import broken（PYTHO
 - **orjson 換 stdlib JSON 無 byte-equal IPC wire-format 對比 = 風險未驗** — nested dict ordering / float precision 差異會讓 IPC 對端解 fail
 - **Mac mock pytest PASS ≠ Linux PG runtime PASS ≠ columnstore 模式 PASS**（V077 hotfix 教訓）— Linux PG dry-run mandatory 範圍應擴含 columnstore mode test
 - **audit baseline diff breakdown 不完整 = audit 自身 hidden ignore** — 必須顯式列出所有 ignore（collection errors / skip / xfail / Mac-only / Linux-only）
+
+## 2026-05-09 v2 verification — 對抗性嚴苛核實 21 gap 在 34 commit 修復
+
+**baseline 2026-05-09 v1 → v2** (455d796e..1bd55689 共 34 commits):
+
+| 引擎 | v1 | v2 | delta |
+|---|---|---|---|
+| Linux · srv/tests | 208/0 | 228/0 | +20 PASS |
+| Linux · control_api_v1 | 3871/10 | 3925/3 | **+54 PASS / -7 fail** |
+| Linux · cargo lib | 2560/0 | 2584/0 | **+24 PASS** |
+
+**雙跑 deterministic identical**：3925/3 → 3925/3 / 2584/0 → 2584/0
+
+**verdict**：✅ PASS / ✅14 / ⚠️3 / ❌4 / 🆕1（NEW-1 仍未修退回 E1）
+
+**v2 真實 closures (6)**：
+1. **F-01** (caf973fb) — lambda:True 完全移除 + 5 fail-closed test 真覆蓋 except / None branch
+2. **W-AUDIT-2** (e97a333b) — V078 schema + Rust unit + **PG runtime 7956 BYPASS rows** 5h 跨 2 engine_mode 真實 emit
+3. **W-AUDIT-6c** (cc6476dd) — VaR/CVaR/EVT/GPD 13 test + promotion integration fail-closed gate (test_demo_gates_fail_without_tail_risk_evidence)
+4. **W-AUDIT-7** (a0bbde58) — strategist cap + sibling Rust test +49
+5. **healthcheck [56]** (c15985a5) — 7 test + 5 fail-closed path (missing auth / stale snapshot)
+6. **V072 feature baseline** (7657bd25) — 14+ inline Rust test (含 build_feature_baseline_rows_emits_34_active_features 真 assert) + static guard
+
+**對抗性 push back outcomes**：
+- A: F-01 lambda:True grep verified 移除（v1 push back 完全消除）
+- B: W-AUDIT-2 PG row > 0 直查 7956 (v1 「opt-in early-return」消除)
+- C: 6 risk: commits 全帶 Rust sibling test
+- D: mock 嚴守 IO 邊界，業務邏輯真跑（不掩蓋邏輯）
+- E: NEW-1 仍未修是 PA 派工漏項
+- F: pre-existing fail 縮短 7 條
+
+**仍 untouched (8)**：G2 (xlang 1e-4) / G3 (H0 SLA <1ms) / G7 (LG-5 mock-only) / G9 (executor parity Rust↔Python) / G11-G20
+
+**仍 partial (4)**：G5 / G6 / G8 / G10
+
+**新 issue**：
+- 🔴 NEW-1：`test_oe_006_close_retry_budget_has_real_timeout_guard` 仍未修（1 行 static path 改 dispatch_tests.rs）
+- 🟡 NEW-3：4 collection errors PYTHONPATH inject 待修
+- 🟡 NEW-4：`test_grafana_data_writer.py::test_start_sets_running` Linux leader-lock contention（不是新破壞，是 Linux runtime divergence）
+- ✅ NEW-2：replay_advisory 自動消失
+
+**經驗教訓**：
+- 對抗性核實 4 維度（source grep / test 真實內容 / mock 邊界 / PG runtime row 直查）都做了
+- W-AUDIT-2 e2e 必查 PG runtime row（v1 用 OPENCLAW_TEST_PG opt-in 不夠真）
+- v1 NEW issue 列 BLOCKER 但 v2 commit 沒接 = PA 派工漏項；E4 應在 v2 verification 顯式 push back PA
+- v2 baseline 應更新 profile.md「2555/17」過期 → Linux control_api_v1 3925/3 + cargo lib 2584/0
