@@ -269,3 +269,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-5a F-26 source checkpoint: added `.github/workflows/ci.yml` with Rust release-check matrix for `x86_64-unknown-linux-gnu` on ubuntu and `aarch64-apple-darwin` on macOS
 - verification: CI workflow + release profile pytest 4/0, Ruby YAML parse PASS, `cargo metadata --manifest-path rust/Cargo.toml --no-deps`, `cargo check --manifest-path rust/Cargo.toml -p openclaw_engine --bin openclaw-engine` PASS with pre-existing unused/dead_code warnings, `git diff --check` PASS
 - no CI run, release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
+
+2026-05-09 CEST
+- continued W-AUDIT-5a F-27 source checkpoint: corrected Bybit API dictionary drift for `get_open_interest` Rust `interval` -> Bybit `intervalTime`, added `/v5/user/query-api` Python credential-validation documentation, and added G9-02 UnknownHandlerGuard documentation with the actual runtime env-gate `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED`
+- documented the official Bybit `account-ratio` daily-period contradiction (`1d` on endpoint/api-explorer pages vs `4d` on enum `dataRecordingPeriod`) as exchange-smoke-required before any daily runtime polling; current Rust poller remains `"1h"`
+- verification: Bybit dictionary static pytest 4/0, py_compile PASS; source/docs/test only, no Bybit API call, rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
