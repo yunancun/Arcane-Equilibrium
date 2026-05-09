@@ -34,6 +34,7 @@
 - [Agent 追蹤視圖 MVP shipped (2026-04-28)](project_agent_tracker_mvp_shipped.md) — Learning Cockpit 新「AI 团队工作台」5 卡+feed+shadow/live+budget+governance；A 級 UX；branch feature/agent-tracker-mvp HEAD 884531a 已 push；deploy 用 restart_all --keep-auth（純 Python+JS）
 - [funding_arb V2 棄策略路徑 (2026-05-02)](project_funding_arb_v2_deprecation_path.md) — BUSDT -10.12 USDT 後 1B+2A+3C 決策：1B demo active=true 收 EDGE-DIAG-2 樣本 / 2A 中期棄策略（QC delta-neutral 數學不成立 + Bybit demo 無 spot lending）/ 3C TOML 改動 commit a19797d (base_ratio 0.4→0.25 + funding_arb 3% override)
 - [P0 sqlx hash drift incident (2026-05-02)](project_2026_05_02_p0_sqlx_hash_drift.md) — audit-p1-1 retrofit (e858ae2/6cb1c3b) 改 V028/V030/V031/V032/V034 file 加 Guard 但 DB checksum 沒同步；3C restart 觸發暴露；治本 = repair_migration_checksum binary (3681f83)；治理盲點 = audit closure SOP 漏 engine restart 實測（cargo test PASS ≠ runtime sqlx migrate 驗證）
+- [ml_training_maintenance cron 是 weekly Sunday 非 daily (2026-05-09)](project_2026_05_09_ml_training_cron_weekly.md) — Session N+1 baseline 誤判教訓；5 個 audit job (thompson/optuna/cpcv/dl3/weekly_report) UTC weekday=6 才實質執行；ml_parameter_suggestions 需 fills>=80 是業務 gate 非 IPC bug
 
 ## Working principles & autonomy
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設global止盈止損，Agent自主決定策略/參數/時機/倉位
@@ -53,6 +54,8 @@
 - [Rolling-window breach look-ahead bias (2026-04-24)](feedback_indicator_lookahead_bias.md) — `rolling(N).max()` 含 current bar → breach=「current 是 N-bar max」必然 mean-revert；任何 sweep/研究必並列 leak-free shift(1) 對比
 - [V### migration PG dry-run mandatory (2026-05-05)](feedback_v_migration_pg_dry_run.md) — Mac mock pytest + static review cannot catch PG runtime semantic (PL/pgSQL constraints, empirical reflection function output, schema drift); V055 5-round loop 教訓：必先 Linux PG empirical query 再 E1 IMPL 設計
 - [注釋默認只寫中文 (2026-05-05)](feedback_chinese_only_comments.md) — 新代碼注釋默認只寫中文（廢除舊 bilingual mandate）；原有中英對照不主動清，修改時移除英文只保留中文；E2 不再要求英文版；token + LOC 成本顯著降低
+- [GUI sign-off SOP 必跑 node --check (2026-05-09)](feedback_gui_node_check_sop.md) — 前端 JS / inline-JS 變動 sign-off 強制 `node --check`；靜態 brace/paren/bracket diff = 0 不能代替；W-AUDIT-7c Round 1 governance-tab.js lexical scope shadow 證明 brace count 是盲區
+- [GitHub Actions cost policy (2026-05-09)](feedback_github_actions_cost.md) — Private repo 2000min/月免費；macOS 10x 倍率；macOS 不再 push-trigger，僅 PR + 週一 cron；同步寫入 `.codex/MEMORY.md`
 
 ## Workflow & roles
 - [強制工作鏈與審計模板](feedback_workflow_audit_chain.md) — E1→E2→E4→PM 不可跳過；策略改動加 QA Audit；L1/L2/L3 分級模板
@@ -62,6 +65,7 @@
 - [Meta-doc 改動用 git commit --only 隔絕 index race](feedback_git_commit_only_for_metadoc.md) — CLAUDE.md/TODO.md/docs/memory 等 meta-doc 必用 `git commit --only <file>`；multi-session 下 `git add + commit` 不安全（2026-04-23 同 session 吸收 operator WIP 兩次）
 - [多角色 adversarial review (2026-04-24)](feedback_multi_role_strategic_review.md) — 關鍵決策派 QC+FA+FM+PM 並行獨立 review；實證 EDGE-DIAG-1 Phase 2 catch 3 個 unique blind spots
 - [派 sub-agent 前 fetch + 查遠端 branch (2026-04-24)](feedback_fetch_before_dispatch.md) — Multi-agent 派發前必 `git fetch` + `git branch -r | grep <topic>`；G6-01 被重派教訓（隔壁已開 feature branch 做完）
+- [Sub-agent IMPL DONE 必走 A3+E2 對抗性核驗 (2026-05-09)](feedback_impl_done_adversarial_review.md) — 高風險 IMPL（GUI / IPC / 寫操作 / 共用 helper）sub-agent 自評 IMPL DONE 不接受單獨 sign-off；強制派 A3+E2 並行核驗；E4 regression 不能取代；W-AUDIT-7c 三方獨立 catch governance-tab.js SyntaxError 救 prod GUI 案例
 
 ## Code & architecture rules
 - [Rust 為唯一交易參數權威](feedback_rust_authoritative_config.md) — 所有交易/風控/模型參數GUI直寫Rust，Python僅只讀

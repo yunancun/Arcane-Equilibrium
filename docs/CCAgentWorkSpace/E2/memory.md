@@ -1651,3 +1651,19 @@ round 1 verdict 建議「outer rename ok→proceed」是因為 same-scope shadow
 ### lesson 37 — E1a sign-off self-claim 反向 grep 交叉驗證
 round 2 E1a report 自稱「中文輸出 + 中文注釋（廢除 bilingual mandate 2026-05-05）— ✓ 新加注釋全中文（既有中英對照塊修改時保留中文移除英文）」。E2 grep `case-sensitive match` 1 hit common.js:1919 — 上輪 LOW-6 retained 英文注釋未刪 ⊥ E1a self-claim。**規律**：E2 對 E1a 自評「全 OK」類陳述，必對應寫一條反向 grep 找該 claim 的反例；本輪「新加注釋全中文」反向 grep 「`// .* match\|// .* default\|// .* check`」（典型英文註釋 token）找命中即矛盾。**抽象**：E1 / E1a self-claim 的真實性必對抗驗證，不能盲信「自評 PASS」；這是 E2 對抗審核第一原則的 GUI / docs 領域延伸。
 
+---
+
+## 2026-05-09 lessons 38-40: W-AUDIT-7c round 3 GUI APPROVED + E2 round 2 自反
+
+### 場景
+W-AUDIT-7c Round 3 commit `e27e67ea`，E1a 收 round 2 verdict 1 HIGH + 2 MEDIUM + 1 LOW，3 actionable + 1 deferred。Verdict APPROVED。
+
+### lesson 38 — Round 3 收口完整三軸實證
+HIGH-1 收口 = (a) 3 caller 全包 try/catch（governance-tab.js:1604/1754 + tab-ai.html:673）+ (b) 二態 toast（modal already open → warn / 其他 → error）+ (c) `return; // finally 會 re-enable button` 顯式注釋落地 + (d) test fixture Case 7 補 jsdom singleton race smoke。實證軸 = (a) 寫對 + (b) 全覆蓋 + (c) 副作用清楚 + (d) regression 鎖定。**抽象**：HIGH finding 收口必同時驗 IMPL 寫對 + 所有同類 site 覆蓋 + caller-side 副作用注釋 + 補 regression test，4 軸缺 1 = round 4 retest。E1a Round 3 全 4 軸過。
+
+### lesson 39 — error.message 字串比對 robustness 評估表
+round 3 catch block 用 `err && err.message === 'modal already open'`。robustness 5 維評估：(a) **typo 風險**：源頭 `Promise.reject(new Error('modal already open'))` × 3 caller × 1 fixture 全 grep 確認 byte-equal；od 確認單空格無 leading/trailing whitespace、無 Unicode lookalike。(b) **null/undefined 守**：`err &&` 短路防 null；err.message 若不存在則 falsy 進 else 分支不誤觸 warn。(c) **錯誤類型混淆**：ocApi 自吞 network error return null 不會走 reject path，唯一 reject 來源是 modal singleton guard。(d) **i18n 風險**：error message hard-coded English，無 i18n 替換鏈，安全。(e) **future drift 防線**：源頭只有 1 處 throw，但 4 個 site 比對；若改 source 必同步改 4 site — 建議下次 refactor 用 `MODAL_ALREADY_OPEN_ERROR = 'modal already open'` 常數 import 避免分散。本輪 (a)-(d) 全 PASS，(e) advisory P3。**抽象**：text-based error.message 比對是次優方案（Sentinel constant > custom Error subclass > string match），但本輪規模小可接受；E2 review 字串比對 robustness 必跑 5 維。
+
+### lesson 40 — round 2 finding 自我修正：_lastPendingAudit 不是 dead-write（read site at 1682）
+**E2 round 2 review (940186ee) 把 `_lastPendingAudit` 標 MEDIUM-2 dead-write data state 是錯的** — round 3 grep 重驗發現 line 1682 `renderPendingAudit(_lastPendingAudit)` 是真實 read site；round 2 grep 太窄沒包括 `renderPendingAudit(...)` 用法，誤判 0 read。E1a round 3 把 MEDIUM-2 deferred 為 P2 ticket，PM brief 接受 — 但實際上根本不該 deferred，是 false positive。本輪自我糾正 = E2 對「dead-write data state」grep 必跑 multi-pattern：(a) bare variable name `_lastPendingAudit` (b) `renderXxx(_lastPendingAudit)` 函數參數位 (c) `_lastPendingAudit\.length` / `_lastPendingAudit\[`/`Array.isArray(_lastPendingAudit)` 條件位 (d) `... _lastPendingAudit ...` 三元 / template / spread 位 — 4 種 idiom 任一漏看就誤判。**規律**：E2 dead-write 判定要查 4 種 read idiom；單純查 `_lastPendingAudit` left-side `=` 不夠，會誤把 `renderPendingAudit(_lastPendingAudit)` 當 write（其實是 read）。**抽象**：E2 review 不只防 E1 出錯，自身要敢承認 round N review 看漏／誤判，下 round 主動糾正不護短。這是對抗審核的自反性。本 round 3 verdict 不重複此誤判，明確記入 closure 為「false positive 從 round 2 撤回，無真實 dead-write」。
+
