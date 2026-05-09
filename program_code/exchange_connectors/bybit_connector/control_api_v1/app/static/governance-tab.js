@@ -1545,10 +1545,23 @@ async function auditReject(changeId) {
 
 async function bulkAudit(action) {
   const isApprove = action === 'approve';
-  const msg = isApprove
-    ? '确认全部同意？\nApprove all pending changes?'
-    : '确认全部拒绝？\nReject all pending changes?';
-  if (!confirm(msg)) return;
+  // W-AUDIT-7c (2026-05-09): 批次 approve / reject 是 critical-grade governance 寫操作，
+  // 影響可能涉及多筆 SM-01 / SM-04 / SM-02 變更；用高摩擦 typed-confirm 取代 native confirm()，
+  // 避免一鍵誤觸全批通過 / 全批拒絕。phrase = 'CONFIRM'，case-sensitive。
+  const titleZh = isApprove ? '批量批准全部待审 / Bulk Approve All Pending' : '批量拒绝全部待审 / Bulk Reject All Pending';
+  const bodyZh = isApprove
+    ? '此操作將批准目前所有待審變更，立即生效。\n受影響範圍可能包含 SM-01 授權、SM-04 風險等級、Decision Lease 規則。\n建議先逐項複核後再批量通過。'
+    : '此操作將拒絕目前所有待審變更，理由將寫入 audit trail。\n拒絕後待審項回復為已關閉狀態，需重新申請。';
+  const ok = await openTypedConfirmModal({
+    title: titleZh,
+    body: bodyZh,
+    phrase: 'CONFIRM',
+    confirmLabel: isApprove ? '確認批量批准 / Approve All' : '確認批量拒絕 / Reject All',
+    confirmClass: isApprove ? 'oc-btn-primary' : 'oc-btn-danger',
+    impact: '所有 PENDING 狀態變更同時 commit',
+    rollback: '無自動回滾；需個別申請新變更覆蓋'
+  });
+  if (!ok) return;
 
   const reason = isApprove ? 'Operator bulk approved' : (
     await openPromptModal({
@@ -1597,15 +1610,26 @@ async function loadPendingApprovals() {
 }
 
 async function confirmApproveRecovery(requestId) {
-  if (confirm('Approve this recovery request? / 批准此恢復請求?')) {
-    const d = await govApprovePendingRecovery(requestId);
-    if (d && d.ok) {
-      ocToast('Recovery request approved / 恢復請求已批准', 'success');
-      loadPendingApprovals();
-      loadAll();
-    } else {
-      ocToast(d ? d.message : 'Approval failed / 批准失敗', 'error');
-    }
+  // W-AUDIT-7c (2026-05-09): Recovery approve 是 critical-grade governance 寫操作，
+  // 接受 recovery request 等於放寬已被風控擋下的執行邊界（SM-04 / Decision Lease）。
+  // 用高摩擦 typed-confirm 取代 native confirm()，phrase = 'CONFIRM'。
+  const ok = await openTypedConfirmModal({
+    title: '批准恢復請求 / Approve Recovery Request',
+    body: '批准恢復請求 = 放寬已被風控阻擋的執行邊界。\n受影響範圍：SM-04 風險等級、Decision Lease 授權鏈、可能觸發 Executor 重新進入 active 狀態。\n請確認 incident root cause 已查清且風控狀態安全。',
+    phrase: 'CONFIRM',
+    confirmLabel: '確認批准恢復 / Approve Recovery',
+    confirmClass: 'oc-btn-danger',
+    impact: '放寬風控保護邊界；對賬 / 風控可能立即重新啟用',
+    rollback: '無自動回滾；需新發 recovery override 收回'
+  });
+  if (!ok) return;
+  const d = await govApprovePendingRecovery(requestId);
+  if (d && d.ok) {
+    ocToast('Recovery request approved / 恢復請求已批准', 'success');
+    loadPendingApprovals();
+    loadAll();
+  } else {
+    ocToast(d ? d.message : 'Approval failed / 批准失敗', 'error');
   }
 }
 

@@ -1805,6 +1805,146 @@ function openPromptModal(options) {
   });
 }
 
+/**
+ * 高摩擦確認彈窗 — 要求 user 鍵入指定 phrase 才啟用「確認」按鈕。
+ *
+ * 用途：A3 v2 audit 標出 governance critical 寫操作（system_mode 切換 / live_execution_allowed
+ * / bulk approve / recovery approve 等）必須超越單擊 yes/no — 強制鍵入「CONFIRM」或自定 phrase
+ * 可降低誤觸，並讓 audit log 證據更明確。
+ *
+ * Returns Promise<boolean>：user 鍵入正確 phrase 並按確認 → true；其他路徑 → false。
+ *
+ * options 參數（純物件）：
+ *   - title:        標題（預設「確認操作 / Confirm Action」）
+ *   - body:         說明文字（預設提示「此動作影響真實資金/治理狀態」）
+ *   - phrase:       user 必須鍵入的字串（預設 'CONFIRM'，case-sensitive）
+ *   - confirmLabel: 確認按鈕文字（預設「確認執行 / Confirm」）
+ *   - confirmClass: 確認按鈕 class（預設 'oc-btn-danger'）
+ *   - hint:         input 上方的 hint 文字（預設提示鍵入 phrase）
+ *   - actor:        顯示「操作者」（audit-aware 三原則第 2 條），可選
+ *   - impact:       預期影響說明（可選）
+ *   - rollback:     回滾路徑說明（可選）
+ *
+ * 設計約束：
+ *   - 與 openConfirmModal 共用 .oc-confirm-overlay 與 .oc-confirm-dialog CSS
+ *   - case-sensitive 比對，避免「confirm」/「CONFIRM」混淆
+ *   - Esc 取消，Tab 鎖在 modal 內
+ *   - phrase 比對成功才啟用 confirmBtn；input.value 任何修改即時校驗
+ */
+function openTypedConfirmModal(options) {
+  var meta = (typeof options === 'string') ? { title: options } : (options || {});
+  var title = meta.title || '確認操作 / Confirm Action';
+  var body = meta.body || '此動作將立即執行，無法撤銷。\nThis action cannot be undone.';
+  var phrase = meta.phrase || 'CONFIRM';
+  var confirmLabel = meta.confirmLabel || '確認執行 / Confirm';
+  var confirmClass = meta.confirmClass || 'oc-btn-danger';
+  var hint = meta.hint || ('請鍵入「' + phrase + '」以確認 / Type "' + phrase + '" to confirm');
+  var actor = meta.actor || '';
+  var impact = meta.impact || '';
+  var rollback = meta.rollback || '';
+
+  var overlay = document.getElementById('oc-typed-confirm-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'oc-typed-confirm-overlay';
+    overlay.className = 'oc-confirm-overlay';
+    overlay.innerHTML =
+      '<div class="oc-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="oc-tc-title" tabindex="-1">' +
+        '<h3 id="oc-tc-title"></h3>' +
+        '<p id="oc-tc-body" style="white-space:pre-line"></p>' +
+        '<div id="oc-tc-meta" style="font-size:11px;color:var(--text-dim);margin:6px 0 10px;line-height:1.6;display:none"></div>' +
+        '<label class="oc-prompt-label" for="oc-tc-input" id="oc-tc-hint" style="display:block;margin-top:8px;font-size:12px;color:var(--text-dim)"></label>' +
+        '<input id="oc-tc-input" class="oc-prompt-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;font-family:monospace;letter-spacing:1px">' +
+        '<div class="btn-row" style="margin-top:14px">' +
+          '<button id="oc-tc-cancel" class="oc-btn">取消 / Cancel</button>' +
+          '<button id="oc-tc-confirm" class="oc-btn oc-btn-danger" disabled>確認</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+  }
+
+  document.getElementById('oc-tc-title').textContent = title;
+  document.getElementById('oc-tc-body').textContent = body;
+  var metaEl = document.getElementById('oc-tc-meta');
+  var metaParts = [];
+  if (actor) metaParts.push('Actor / 操作者：' + actor);
+  if (impact) metaParts.push('影響 / Impact：' + impact);
+  if (rollback) metaParts.push('回滾 / Rollback：' + rollback);
+  if (metaParts.length) {
+    metaEl.textContent = metaParts.join('\n');
+    metaEl.style.display = '';
+    metaEl.style.whiteSpace = 'pre-line';
+  } else {
+    metaEl.style.display = 'none';
+  }
+  var hintEl = document.getElementById('oc-tc-hint');
+  hintEl.textContent = hint;
+  var inputEl = document.getElementById('oc-tc-input');
+  inputEl.value = '';
+  inputEl.placeholder = phrase;
+  var confirmBtn = document.getElementById('oc-tc-confirm');
+  confirmBtn.textContent = confirmLabel;
+  confirmBtn.className = 'oc-btn ' + confirmClass;
+  confirmBtn.disabled = true;
+  var cancelBtn = document.getElementById('oc-tc-cancel');
+
+  overlay.classList.add('show');
+
+  return new Promise(function(resolve) {
+    var previousActive = document.activeElement;
+    function focusableNodes() {
+      return Array.prototype.slice.call(
+        overlay.querySelectorAll('button,input,[tabindex]:not([tabindex="-1"])')
+      ).filter(function(node) { return !node.disabled && node.offsetParent !== null; });
+    }
+    function close(val) {
+      overlay.classList.remove('show');
+      cancelBtn.onclick = null;
+      confirmBtn.onclick = null;
+      overlay.onkeydown = null;
+      inputEl.oninput = null;
+      if (previousActive && typeof previousActive.focus === 'function') {
+        previousActive.focus();
+      }
+      resolve(val);
+    }
+    function checkPhrase() {
+      // case-sensitive 比對；trim 避免尾部空白誤判
+      // case-sensitive match; trim trailing whitespace to avoid false-negative
+      var typed = (inputEl.value || '').replace(/\s+$/, '');
+      confirmBtn.disabled = (typed !== phrase);
+    }
+    inputEl.oninput = checkPhrase;
+    cancelBtn.onclick = function() { close(false); };
+    confirmBtn.onclick = function() {
+      if (confirmBtn.disabled) return;
+      close(true);
+    };
+    overlay.onkeydown = function(ev) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        close(false);
+        return;
+      }
+      if (ev.key === 'Enter' && !confirmBtn.disabled) {
+        ev.preventDefault();
+        close(true);
+        return;
+      }
+      if (ev.key !== 'Tab') return;
+      var nodes = focusableNodes();
+      if (!nodes.length) { ev.preventDefault(); return; }
+      var first = nodes[0], last = nodes[nodes.length - 1];
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault(); last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault(); first.focus();
+      }
+    };
+    setTimeout(function() { inputEl.focus(); }, 50);
+  });
+}
+
 // REF-20 R20-P1-U8 Disabled State Card factory (UX subdoc §8 + CognitiveModulator「能力完整但門檻提高」). API: window.OpenClawDisabledStateCard.render(containerId, { phase, icon, gate_label/_zh/_i18n_key, banner_text/_zh/_i18n_key, phase_label_zh/_en, metrics_layout: 'compare_12'|'replay_12' }). XSS-safe + A11y + i18n via t_zh.
 (function() {
   if (!document.getElementById('oc-disabled-card-css')) {
