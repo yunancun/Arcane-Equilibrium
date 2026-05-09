@@ -4,7 +4,7 @@
 >
 > - **整合輸入**：PA full dispatch plan (`d3bf7be2`) + FA business-chain validation (`5a2dee98`) + 4-agent loss audit (QC/MIT/PA/FA, 2026-05-09)
 > - **派遣依據**：Operator 拍板 5 群（A 新策略 / B ML 三斷層 / C Promotion+Dormant / D Architectural Wave / E G3-08+治理 decision）
-> - **PM Sign-off Verdict**：**ACCEPTED with 1 PENDING-OPERATOR**（Sprint N+0 5/5 HOT capacity risk acknowledgement, 見 §5）
+> - **PM Sign-off Verdict**：**ACCEPTED**（2026-05-09 operator 拍板 (a) 提供 stand-by E1 → Sprint N+0 capacity 改 **6 並行（5 active + 1 stand-by）**，PA Push Back 已解；無 pending）
 > - **與 srv/TODO.md 隔離**：QCTODO 是新檔，**不動 TODO.md**（隔壁 session 修 P0 dirty file）；Sprint N+0 結束後 PM 將 QCTODO 內容 merge 進 TODO.md（隔壁 session 完成後）
 > - **規模**：6 sprint × ~12 weeks → first per-alpha-source supervised live；~140 person-day across E1×5
 > - **A2-followup 已 DONE**：G3-08 `OPENCLAW_H_STATE_GATEWAY=1` enable + cost_edge_advisor daemon spawned (2026-05-09 17:27 UTC)
@@ -15,12 +15,19 @@
 
 | Sprint | Week | 主題 | E1 capacity | Critical path | Business chain milestone (FA) |
 |---|---|---|:---:|---|---|
-| **N+0** | W1-W2 | **FOUNDATION HEAVY**: W-AUDIT-9 + 8a Phase A + B 群 + C-A6 + 6 mid-ground | **5/5 HOT** ⚠️ | W-AUDIT-9 + 8a Phase A 序列化（共 file 衝突）| 63→65% |
-| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING: 8a Phase B+C 並行 + A4-C spec + Stage 1 cohort 7d 觀察 | 4/5 | 8a Phase B+C 並行 | 65→70% (Stage 1 standalone +5-7%) |
-| **N+2** | W5-W6 | A4-C IMPL + 8a Phase D + Stage 2 demo cohort 14d | **5/5 HOT** ⚠️ | A4-C IMPL | 70→76% |
-| **N+3** | W7-W8 | A4-B IMPL + R-2 spec + Stage 3 demo full | 4/5 | A4-B IMPL | 76→80% |
-| **N+4** | W9-W10 | R-3 spec + A4-A IMPL + 8e IMPL + Track W 收尾 | 4/5 | 8e IMPL | 80-83% |
-| **N+5** | W11-W12 | R-3 IMPL + R-4 spec + **first per-alpha-source supervised live** | **5/5 HOT** ⚠️ | first per-alpha-source live | **85-89%** |
+| **N+0** | W1-W2 | **FOUNDATION HEAVY**: W-AUDIT-9 + 8a Phase A + B 群 + C-A6 + 6 mid-ground | **5 active + 1 stand-by** | W-AUDIT-9 + 8a Phase A 序列化（共 file 衝突）| 63→65% |
+| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING: 8a Phase B+C 並行 + A4-C spec + Stage 1 cohort 7d 觀察 | 4/6 | 8a Phase B+C 並行 | 65→70% (Stage 1 standalone +5-7%) |
+| **N+2** | W5-W6 | A4-C IMPL + 8a Phase D + Stage 2 demo cohort 14d | **5 active + 1 stand-by** | A4-C IMPL | 70→76% |
+| **N+3** | W7-W8 | A4-B IMPL + R-2 spec + Stage 3 demo full | 4/6 | A4-B IMPL | 76→80% |
+| **N+4** | W9-W10 | R-3 spec + A4-A IMPL + 8e IMPL + Track W 收尾 | 4/6 | 8e IMPL | 80-83% |
+| **N+5** | W11-W12 | R-3 IMPL + R-4 spec + **first per-alpha-source supervised live** | **5 active + 1 stand-by** | first per-alpha-source live | **85-89%** |
+
+**Stand-by E1 啟用條件**（operator 拍板 2026-05-09 (a)）：
+- W-AUDIT-9 T3 stage-aware exception path 翻車 → stand-by 接 T3 重 IMPL
+- W-AUDIT-8a Phase A byte-diff fail → stand-by 接 Phase A 重做（5 策略 migration revert + retry）
+- W-AUDIT-6 mid-ground 與 8a Phase A 序列化 deadline 撞牆 → stand-by 接 mid-G spillover
+- 任一 active E1 health incident（病假 / 機器故障 / 高優先 P0 拉走）→ stand-by 即時補位
+- Stand-by 平時跑 W-AUDIT-2/-5 維護 wave（低優先 catch-up），有 critical path block 立即切換
 
 詳：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_dispatch_engineering_plan.md` §1 / FA report §1
 
@@ -120,14 +127,22 @@
 
 ### Day 0-3 Dispatch（PM 從 QCTODO sign-off 後立即派發）
 
-並行 5 個 E1 + ops：
-- `@E1` W-AUDIT-9 T1 Rust schema 升級（並行 `@QC` enum review）
-- `@E1` W-AUDIT-9 T2 V### migration（並行 `@MIT` review）
-- `@E1` W-AUDIT-9 T3 `shadow_mode_provider` stage-aware
-- `@E1` W-AUDIT-9 T6 manual promote Decision Lease
-- `@E1` W-AUDIT-6 mid-ground 6 保子項（並行 `@QC` 數學審計）
-- `@E1` B-M1 decision_features intent-only emit（並行 `@MIT` review V###）
-- `@ops` A2-followup G3-08 ✅ **已 DONE**
+**並行 5 active E1 + 1 stand-by E1 + ops**（operator 2026-05-09 拍板 (a)）：
+
+**5 active E1 IMPL slot**：
+- `@E1-A` W-AUDIT-9 T1 Rust schema 升級（並行 `@QC` enum review）
+- `@E1-B` W-AUDIT-9 T2 V### migration（並行 `@MIT` review）
+- `@E1-C` W-AUDIT-9 T3 `shadow_mode_provider` stage-aware
+- `@E1-D` W-AUDIT-9 T6 manual promote Decision Lease（後段轉 W-AUDIT-6 mid-ground 6 保子項，並行 `@QC` 數學審計）
+- `@E1-E` B-M1 decision_features intent-only emit（並行 `@MIT` review V###）
+
+**1 stand-by E1 slot**：
+- `@E1-F` (stand-by) 平時跑 W-AUDIT-2/-5 維護 wave（低優先 catch-up）；任一 active E1-A/B/C/D/E health incident → 立即切換補位
+- Day 0 啟動：先 acknowledge stand-by 角色 + 跑 W-AUDIT-2/-5 spillover 清單（PA report §3 deferred 項）
+- 每日 stand-up 25 min 對齊（active E1 status check + stand-by 是否需切換）
+
+**ops**：
+- `@ops` A2-followup G3-08 ✅ **已 DONE**（2026-05-09 17:27 UTC, daemon spawn confirmed）
 
 ### Day 3-5 E2 first-pass
 
@@ -228,15 +243,16 @@ PM Sign-off 前必跑 `git status --porcelain`，對應檔案必 clean。違反 
 
 ## §7 Push Back / Risk
 
-### PA Push Back（PENDING-OPERATOR）
+### PA Push Back（✅ RESOLVED 2026-05-09 operator 採納 (a)）
 
-**Sprint N+0 5/5 HOT capacity = 任一 E1 故障 = 阻塞 critical path**。
+**原 risk**：Sprint N+0 5/5 HOT capacity = 任一 E1 故障 = 阻塞 critical path。
 
-**選項**：
-- **(a)** Operator 提供 1 stand-by E1（6 並行: 5 active + 1 stand-by）
-- **(b)** Operator **顯式 sign-off 接受** 5/5 HOT 風險（任一 E1 故障即 Sprint N+0 延誤 ~1 sprint）
+**Operator 拍板 (a)**：提供 1 stand-by E1，Sprint N+0 capacity 升級為 **6 並行（5 active + 1 stand-by）**。Stand-by 平時跑 W-AUDIT-2/-5 維護 wave 低優先 catch-up，有 critical path block 立即切換補位。
 
-**等 operator 拍板**才能進入 Day 0-3 dispatch。
+**影響**：
+- §1 6-Sprint Roadmap N+0/N+2/N+5 capacity 全部更新為 `5 active + 1 stand-by`，N+1/N+3/N+4 為 `4/6`
+- §4 Day 0-3 Dispatch 加 `@E1-F` stand-by slot
+- 不再有 PENDING-OPERATOR；PM 可即刻進入 Day 0-3 dispatch
 
 ### FA Push Back（已採納，記入治理）
 
@@ -277,14 +293,12 @@ PM Sign-off 前必跑 `git status --porcelain`，對應檔案必 clean。違反 
 
 ## §9 PM Sign-off
 
-**Verdict**: **ACCEPTED with 1 PENDING-OPERATOR**
+**Verdict**: ✅ **ACCEPTED**（2026-05-09 operator 拍板 (a) 採納，無 pending）
 
-**Pending decision**:
-- Sprint N+0 5/5 HOT capacity risk: operator 必拍板 **(a)** 提供 stand-by E1（6 並行: 5 active + 1 stand-by）OR **(b)** 顯式 sign-off 接受 5/5 HOT 風險（任一 E1 故障 = Sprint N+0 延誤 ~1 sprint）
-
-**Operator 回應後 PM 動作**：
-- 拍 (a): 修 §1 capacity row 為 6 並行；§4 Day 0-3 加 stand-by E1 slot
-- 拍 (b): 在此 §9 加 operator sign-off line + 接受風險聲明
+**Operator 拍板**（2026-05-09）：
+- ✅ 接受 (a) 預備 stand-by E1（6 並行：5 active + 1 stand-by）
+- 拒絕 (b) 5/5 HOT 風險方案
+- 影響範圍：§1 capacity row + §4 Day 0-3 + §7 PA Push Back 標 RESOLVED
 
 **PM 簽名**：Claude Opus 4.7（Conductor，主會話 PM）
 **日期**：2026-05-09 UTC
@@ -294,12 +308,15 @@ PM Sign-off 前必跑 `git status --porcelain`，對應檔案必 clean。違反 
 - ✅ 16 sign-off invariant deduplicate from PA 11 + FA 9
 - ✅ Operator 5 group dispatch list 拍板已記
 - ✅ A2-followup G3-08 enable 已驗證 (engine.log `cost_edge_advisor spawned env=1 phase=B_shadow`)
+- ✅ PA Push Back capacity (a) 採納（stand-by E1 6 並行）
 
-**Operator sign-off line**（待 operator 填）：
-- [ ] 接受 (a) 預備 stand-by E1
-- [ ] 接受 (b) 5/5 HOT 風險顯式 sign-off
-- 簽名：____________
-- 日期：____________
+**Operator sign-off**：
+- [x] 接受 (a) 預備 stand-by E1
+- [ ] ~~接受 (b) 5/5 HOT 風險顯式 sign-off~~（拒絕）
+- 簽名：Operator (cloud@ncyu.me) — 2026-05-09 via PM session
+- PM 確認簽名：Claude Opus 4.7
+
+**狀態**：QCTODO 三端同步完成（Mac + origin + Linux）。PM 即刻進入 Sprint N+0 Day 0-3 dispatch（§4 派工）。
 
 ---
 
