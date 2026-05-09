@@ -222,6 +222,9 @@ shadow_enabled = false
 [kelly]
 young_threshold = 50
 mature_threshold = 200
+young_fraction = 0.125
+mature_fraction = 0.16666666666666666
+established_fraction = 0.25
 
 # G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
 # Live default shadow_mode=true — Phase C operator IPC flip (auth-gated)

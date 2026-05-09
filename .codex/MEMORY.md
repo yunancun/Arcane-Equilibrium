@@ -218,8 +218,12 @@ W-AUDIT-6 current fact:
   `BbBreakoutParams::default()` and `BbBreakout::new()` share
   `DEFAULT_COOLDOWN_MS=300_000`, and tests assert both `cooldown_ms` and
   `TrendCooldown` duration match the params default
-- no strategy/risk TOML mutation, rebuild, restart, or runtime apply was
-  performed for this checkpoint
+- as of 2026-05-09, Kelly tier fraction config is source/test closed:
+  `RiskConfig.kelly.{young,mature,established}_fraction` defaults to
+  `1/8`, `1/6`, `1/4`, `ml::kelly_sizer::compute_kelly_qty()` consumes those
+  fields instead of hardcoded divisors, and risk TOMLs expose the same
+  behavior-preserving defaults
+- no rebuild, restart, or runtime apply was performed for these checkpoints
 
 P0-NEW-VULN-1 bind-host rule:
 - lifecycle scripts must not default to `0.0.0.0`

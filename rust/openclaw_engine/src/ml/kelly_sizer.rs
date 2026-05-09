@@ -3,14 +3,15 @@
 //!
 //! MODULE_NOTE (EN): Ported from Python position_sizer.py. Computes Kelly-optimal
 //!   position size with conservative fractional adjustment:
-//!   - < `young_threshold` trades (default 50): 1/8 Kelly (most conservative)
-//!   - < `mature_threshold` trades (default 200): 1/6 Kelly
-//!   - >= `mature_threshold` trades: 1/4 Kelly (never full Kelly)
-//!   Tier boundaries are TOML-configurable via `RiskConfig.kelly` (G7-01,
-//!   2026-04-24). ATR-based volatility adjustment caps size in high-vol regimes.
+//!   - < `young_threshold` trades (default 50): young_fraction (default 1/8)
+//!   - < `mature_threshold` trades (default 200): mature_fraction (default 1/6)
+//!   - >= `mature_threshold` trades: established_fraction (default 1/4)
+//!   Tier boundaries and fractions are TOML-configurable via `RiskConfig.kelly`.
+//!   ATR-based volatility adjustment caps size in high-vol regimes.
 //! MODULE_NOTE (中): 從 Python position_sizer.py 移植。計算 Kelly 最優倉位，
-//!   保守分數調整：< young_threshold 筆 1/8，< mature_threshold 筆 1/6，
-//!   >= mature_threshold 筆 1/4。分級邊界 G7-01 起可由 `RiskConfig.kelly` TOML 配置。
+//!   保守分數調整：< young_threshold 筆 young_fraction，< mature_threshold 筆
+//!   mature_fraction，>= mature_threshold 筆 established_fraction。分級邊界和
+//!   分數可由 `RiskConfig.kelly` TOML 配置。
 //!   ATR 波動率調整在高波動 regime 中限制倉位。
 
 use tracing::debug;
@@ -99,6 +100,15 @@ pub struct KellyConfig {
     /// 交易數 ∈ `[young_threshold, mature_threshold)` 用 1/6 Kelly；
     /// `>= mature_threshold` 用 1/4 Kelly。預設 200 保留 G7-01 前行為。
     pub mature_threshold: u32,
+    /// Fraction applied while the cell is young (default 1/8 Kelly).
+    /// young 分層使用的 Kelly 分數（預設 1/8）。
+    pub young_fraction: f64,
+    /// Fraction applied while the cell is mature (default 1/6 Kelly).
+    /// mature 分層使用的 Kelly 分數（預設 1/6）。
+    pub mature_fraction: f64,
+    /// Fraction applied once established (default 1/4 Kelly).
+    /// established 分層使用的 Kelly 分數（預設 1/4）。
+    pub established_fraction: f64,
 }
 
 impl Default for KellyConfig {
@@ -113,6 +123,9 @@ impl Default for KellyConfig {
             vol_mult_ceil: 1.5,
             young_threshold: 50,
             mature_threshold: 200,
+            young_fraction: 1.0 / 8.0,
+            mature_fraction: 1.0 / 6.0,
+            established_fraction: 1.0 / 4.0,
         }
     }
 }
@@ -134,8 +147,24 @@ impl KellyConfig {
                 self.young_threshold, self.mature_threshold
             ));
         }
+        validate_kelly_fraction("kelly.young_fraction", self.young_fraction)?;
+        validate_kelly_fraction("kelly.mature_fraction", self.mature_fraction)?;
+        validate_kelly_fraction("kelly.established_fraction", self.established_fraction)?;
+        if self.young_fraction > self.mature_fraction {
+            return Err("kelly.young_fraction must be <= kelly.mature_fraction".into());
+        }
+        if self.mature_fraction > self.established_fraction {
+            return Err("kelly.mature_fraction must be <= kelly.established_fraction".into());
+        }
         Ok(())
     }
+}
+
+fn validate_kelly_fraction(name: &str, value: f64) -> Result<(), String> {
+    if !value.is_finite() || value <= 0.0 || value > 1.0 {
+        return Err(format!("{name} must be finite and in (0, 1]"));
+    }
+    Ok(())
 }
 
 /// Compute Kelly-optimal position quantity.
@@ -196,11 +225,11 @@ pub fn compute_kelly_qty(
     // defaults 50/200 preserve pre-G7-01 behavior.
     // G7-01：分級邊界改讀 config，預設 50/200 保留原行為。
     let fraction = if stats.total_trades < config.young_threshold {
-        kelly_full / 8.0 // 1/8 Kelly (young)
+        kelly_full * config.young_fraction
     } else if stats.total_trades < config.mature_threshold {
-        kelly_full / 6.0 // 1/6 Kelly (mature)
+        kelly_full * config.mature_fraction
     } else {
-        kelly_full / 4.0 // 1/4 Kelly (established)
+        kelly_full * config.established_fraction
     };
 
     // Cap at configured max fraction
@@ -328,11 +357,14 @@ mod tests {
 
     #[test]
     fn test_g7_01_default_tier_thresholds() {
-        // Defaults must preserve pre-G7-01 hardcoded values 50/200.
-        // 預設值必須保留 G7-01 前的硬編碼 50/200。
+        // Defaults must preserve pre-W-AUDIT-6 hardcoded values 50/200 +
+        // 1/8, 1/6, 1/4.
         let cfg = KellyConfig::default();
         assert_eq!(cfg.young_threshold, 50, "default young_threshold = 50");
         assert_eq!(cfg.mature_threshold, 200, "default mature_threshold = 200");
+        assert!((cfg.young_fraction - 1.0 / 8.0).abs() < f64::EPSILON);
+        assert!((cfg.mature_fraction - 1.0 / 6.0).abs() < f64::EPSILON);
+        assert!((cfg.established_fraction - 1.0 / 4.0).abs() < f64::EPSILON);
         assert!(cfg.validate().is_ok(), "default must validate");
     }
 
@@ -387,6 +419,27 @@ mod tests {
     }
 
     #[test]
+    fn test_w_audit_6_validate_rejects_bad_fraction_config() {
+        let mut cfg = KellyConfig::default();
+
+        cfg.young_fraction = 0.0;
+        assert!(cfg.validate().is_err(), "zero young fraction must reject");
+
+        cfg = KellyConfig::default();
+        cfg.mature_fraction = f64::NAN;
+        assert!(cfg.validate().is_err(), "NaN mature fraction must reject");
+
+        cfg = KellyConfig::default();
+        cfg.established_fraction = 1.1;
+        assert!(cfg.validate().is_err(), "fraction > 1 must reject");
+
+        cfg = KellyConfig::default();
+        cfg.young_fraction = 0.20;
+        cfg.mature_fraction = 0.10;
+        assert!(cfg.validate().is_err(), "decreasing fractions must reject");
+    }
+
+    #[test]
     fn test_g7_01_custom_thresholds_change_tier_selection() {
         // Verify that the tier boundary is actually read from `config.young_threshold`
         // and not hardcoded. With `min_trades` lowered to 10 (so the tier branch is
@@ -423,6 +476,28 @@ mod tests {
              (1/8, young=80): default={} custom={}",
             qty_default,
             qty_custom
+        );
+    }
+
+    #[test]
+    fn test_w_audit_6_custom_fractions_change_tier_size() {
+        let stats = make_stats(30, 20, 100.0, 80.0);
+        let baseline = KellyConfig {
+            min_trades: 10,
+            ..KellyConfig::default()
+        };
+        let larger_mature = KellyConfig {
+            min_trades: 10,
+            mature_fraction: 0.20,
+            ..KellyConfig::default()
+        };
+
+        let qty_baseline = compute_kelly_qty(&baseline, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        let qty_larger = compute_kelly_qty(&larger_mature, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+
+        assert!(
+            qty_larger > qty_baseline,
+            "raising mature_fraction must increase same-cell Kelly size"
         );
     }
 }

@@ -133,10 +133,10 @@ pub struct RiskConfig {
     pub dynamic_sizing: crate::dynamic_risk_sizer::DynamicRiskSizerConfig,
     /// G7-01 (2026-04-24): Kelly fractional-tier sample-size boundaries.
     /// Operator-tunable knob for `ml::kelly_sizer::compute_kelly_qty`'s
-    /// young/mature/established tier classification (defaults 50/200 mirror
-    /// the pre-G7-01 hardcoded constants).
-    /// G7-01：Kelly 分層樣本量邊界（young/mature/established）。
-    /// `ml::kelly_sizer::compute_kelly_qty` 的可調 knob，預設 50/200 保留原行為。
+    /// young/mature/established tier classification and fractional Kelly
+    /// sizing (defaults 50/200 and 1/8, 1/6, 1/4 preserve prior behavior).
+    /// G7-01/W-AUDIT-6：Kelly 分層樣本量邊界與分數。
+    /// 預設 50/200 + 1/8、1/6、1/4 保留原行為。
     #[serde(default)]
     pub kelly: KellyTierConfig,
     /// G3-02 Phase A (2026-04-25): ExecutorAgent shadow→live control plane.
@@ -758,18 +758,18 @@ impl AgentParams {
 // Kelly 分層樣本量邊界 (G7-01)
 // ---------------------------------------------------------------------------
 
-/// G7-01 (2026-04-24): Operator-tunable Kelly tier boundaries.
+/// G7-01 (2026-04-24): Operator-tunable Kelly tier boundaries and fractions.
 ///
 /// Drives `ml::kelly_sizer::compute_kelly_qty`'s sample-size tier classification:
-/// - trades `< young_threshold`: 1/8 Kelly (young, most conservative)
-/// - trades in `[young_threshold, mature_threshold)`: 1/6 Kelly (mature)
-/// - trades `>= mature_threshold`: 1/4 Kelly (established, never full Kelly)
+/// - trades `< young_threshold`: `young_fraction` Kelly
+/// - trades in `[young_threshold, mature_threshold)`: `mature_fraction` Kelly
+/// - trades `>= mature_threshold`: `established_fraction` Kelly
 ///
-/// Defaults `50` / `200` preserve the pre-G7-01 hardcoded constants;
-/// `young_threshold < mature_threshold` and both `> 0` enforced by `validate()`.
+/// Defaults `50` / `200` and `1/8` / `1/6` / `1/4` preserve the prior
+/// hardcoded constants. `validate()` enforces sane ordering and bounds.
 ///
-/// G7-01：Operator 可調的 Kelly 分層邊界。驅動 `compute_kelly_qty` 的樣本量分級。
-/// 預設 50/200 保留原硬編碼常量；`validate()` 強制 young < mature 且兩者 > 0。
+/// G7-01/W-AUDIT-6：Operator 可調的 Kelly 分層邊界與分數。
+/// 預設 50/200 + 1/8、1/6、1/4 保留原硬編碼常量。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KellyTierConfig {
     /// Boundary trades-count for young → mature tier (default 50).
@@ -780,6 +780,18 @@ pub struct KellyTierConfig {
     /// Mature → established 分層門檻（預設 200）。
     #[serde(default = "default_kelly_mature_threshold")]
     pub mature_threshold: u32,
+    /// Fraction applied while the cell is young (default 1/8 Kelly).
+    /// young 分層使用的 Kelly 分數（預設 1/8）。
+    #[serde(default = "default_kelly_young_fraction")]
+    pub young_fraction: f64,
+    /// Fraction applied while the cell is mature (default 1/6 Kelly).
+    /// mature 分層使用的 Kelly 分數（預設 1/6）。
+    #[serde(default = "default_kelly_mature_fraction")]
+    pub mature_fraction: f64,
+    /// Fraction applied once established (default 1/4 Kelly).
+    /// established 分層使用的 Kelly 分數（預設 1/4）。
+    #[serde(default = "default_kelly_established_fraction")]
+    pub established_fraction: f64,
 }
 
 fn default_kelly_young_threshold() -> u32 {
@@ -790,11 +802,26 @@ fn default_kelly_mature_threshold() -> u32 {
     200
 }
 
+fn default_kelly_young_fraction() -> f64 {
+    1.0 / 8.0
+}
+
+fn default_kelly_mature_fraction() -> f64 {
+    1.0 / 6.0
+}
+
+fn default_kelly_established_fraction() -> f64 {
+    1.0 / 4.0
+}
+
 impl Default for KellyTierConfig {
     fn default() -> Self {
         Self {
             young_threshold: default_kelly_young_threshold(),
             mature_threshold: default_kelly_mature_threshold(),
+            young_fraction: default_kelly_young_fraction(),
+            mature_fraction: default_kelly_mature_fraction(),
+            established_fraction: default_kelly_established_fraction(),
         }
     }
 }
@@ -815,8 +842,24 @@ impl KellyTierConfig {
                 self.young_threshold, self.mature_threshold
             ));
         }
+        validate_kelly_fraction("risk.kelly.young_fraction", self.young_fraction)?;
+        validate_kelly_fraction("risk.kelly.mature_fraction", self.mature_fraction)?;
+        validate_kelly_fraction("risk.kelly.established_fraction", self.established_fraction)?;
+        if self.young_fraction > self.mature_fraction {
+            return Err("risk.kelly.young_fraction must be <= mature_fraction".into());
+        }
+        if self.mature_fraction > self.established_fraction {
+            return Err("risk.kelly.mature_fraction must be <= established_fraction".into());
+        }
         Ok(())
     }
+}
+
+fn validate_kelly_fraction(name: &str, value: f64) -> Result<(), String> {
+    if !value.is_finite() || value <= 0.0 || value > 1.0 {
+        return Err(format!("{name} must be finite and in (0, 1]"));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

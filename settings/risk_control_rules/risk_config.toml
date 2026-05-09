@@ -139,6 +139,15 @@ h0_shadow_mode = true
 
 [experimental.flags]
 
+# W-AUDIT-6: Kelly tier boundaries and fractions. Defaults preserve the old
+# hardcoded 50/200 thresholds and 1/8, 1/6, 1/4 fractional Kelly tiers.
+[kelly]
+young_threshold = 50
+mature_threshold = 200
+young_fraction = 0.125
+mature_fraction = 0.16666666666666666
+established_fraction = 0.25
+
 # G7-07 (2026-04-24): cost-gate slippage tiers + win-rate weighting knobs.
 # Defaults below mirror pre-G7-07 SLIPPAGE_TIERS / DEFAULT_SLIPPAGE_RATE / 0.3
 # / 1.3 hardcoded constants exactly. Operators may tune live without rebuild.

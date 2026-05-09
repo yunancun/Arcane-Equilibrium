@@ -2362,6 +2362,9 @@ mod tests {
         let kelly_config = KellyConfig {
             young_threshold: risk_config.kelly.young_threshold,
             mature_threshold: risk_config.kelly.mature_threshold,
+            young_fraction: risk_config.kelly.young_fraction,
+            mature_fraction: risk_config.kelly.mature_fraction,
+            established_fraction: risk_config.kelly.established_fraction,
             ..KellyConfig::default()
         };
         let live_default = KellyConfig::default();
@@ -2371,6 +2374,11 @@ mod tests {
         // G7-01 預設下，replay 派生的 KellyConfig 必須欄位等同 live 預設。
         assert_eq!(kelly_config.young_threshold, live_default.young_threshold);
         assert_eq!(kelly_config.mature_threshold, live_default.mature_threshold);
+        assert!((kelly_config.young_fraction - live_default.young_fraction).abs() < 1e-12);
+        assert!((kelly_config.mature_fraction - live_default.mature_fraction).abs() < 1e-12);
+        assert!(
+            (kelly_config.established_fraction - live_default.established_fraction).abs() < 1e-12
+        );
         assert!((kelly_config.max_fraction - live_default.max_fraction).abs() < 1e-12);
         assert_eq!(kelly_config.min_trades, live_default.min_trades);
         assert!((kelly_config.risk_pct - live_default.risk_pct).abs() < 1e-12);
@@ -2427,6 +2435,9 @@ mod tests {
         let kelly_config = KellyConfig {
             young_threshold: risk_config.kelly.young_threshold,
             mature_threshold: risk_config.kelly.mature_threshold,
+            young_fraction: risk_config.kelly.young_fraction,
+            mature_fraction: risk_config.kelly.mature_fraction,
+            established_fraction: risk_config.kelly.established_fraction,
             ..KellyConfig::default()
         };
         // Cold-boot stats: 0 trades → Kelly inactive path returns
