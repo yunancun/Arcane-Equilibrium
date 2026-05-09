@@ -178,7 +178,7 @@ max_retries             = 0
                          tick pipeline + IntentProcessor + paper_state + governance + stop_manager
 [Compute tiers]          L0 確定性 → L1 Ollama → L1.5 (Haiku/Perplexity) → L2 Claude manual/supervisor escalation only
 [風控框架]               P0/P1/P2 三層 + 對抗性止損 + AI 注意力稅
-[策略工具包]             KlineManager → IndicatorEngine → SignalEngine → 5 策略 → Orchestrator
+[策略工具包]             KlineManager → IndicatorEngine → AlphaSurface (TA + Funding/OI/Orderflow/Event/Regime) → SignalEngine → 5 策略 → Orchestrator
 [管線橋接]               PipelineBridge: Tick Fan-Out + Intent→Order + 治理 gate
 [止損管理器]             StopManager: Hard/Trailing/Time Stop + ATR 動態倉位
 ```
@@ -204,6 +204,8 @@ AMD §5.4.1 補件修訂；詳
 - T0-T3：session 級 authorization TTL（24h-360h），管「整個 live session 多久重 auth」
 - Decision Lease：per-intent 執行授權（0.1-300s），管「這一筆 intent 在 30 秒內可下單」
 - 共同支撐 LG-5（Constrained Autonomous Live）
+
+**AlphaSurface 一等公民（W-AUDIT-8a SPEC PHASE 2026-05-09）**：[策略工具包] 中 AlphaSurface 是新加的 architectural object（spec phase）— 把 funding curve / OI delta panel / orderflow features / liquidation pulse / event alerts / regime tag / sentiment panel 從「策略自己 buffer」升為 first-class，4 tier 設計（Tier 1 TA / Tier 2 cross-asset panel / Tier 3 microstructure / Tier 4 information flow）。Strategy `on_tick(ctx, surface)` 接口升級 + 5 既存策略 explicit declare alpha sources。Spec：`docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`；舊 [策略工具包] framing 歸檔 `docs/archive/2026-05-09--claude_md_section5_pre_alpha_surface.md`。後續 R-2 Strategist scope reframe / R-3 Hypothesis Pipeline / R-4 Per-alpha-source Live Promotion Gate 留給 W-AUDIT-8e/8f/8g。
 
 ---
 
