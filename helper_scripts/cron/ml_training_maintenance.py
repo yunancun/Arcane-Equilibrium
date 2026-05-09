@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """F-08 ML training maintenance runner.
 
-This is the cron-facing orchestrator for the five ML paths called out by the
-2026-05-08 full-chain audit:
+This is the cron-facing orchestrator for W-AUDIT-4 F-08 ML maintenance.
+It runs both the operational MLDE maintenance jobs and the five legacy ML
+scripts explicitly called out by the 2026-05-08 full-chain audit:
 
 * mlde_demo_applier
 * linucb_trainer
 * quantile_trainer
 * scorer_trainer
 * mlde_shadow_advisor
+* thompson_sampling
+* optuna_optimizer
+* cpcv_validator
+* dl3_foundation
+* weekly_report_generator
 
 The runner is intentionally thin. It wires existing module entry points,
 records a compact status JSON, and treats insufficient training samples as a
@@ -18,23 +24,34 @@ non-fatal skip so production cron does not page on normal low-volume periods.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import os
 import sys
 import time
+from collections import defaultdict
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 
-VALID_JOBS = (
+CORE_JOBS = (
     "linucb_trainer",
     "mlde_shadow_advisor",
     "mlde_demo_applier",
     "scorer_trainer",
     "quantile_trainer",
 )
+AUDIT_JOBS = (
+    "thompson_sampling",
+    "optuna_optimizer",
+    "cpcv_validator",
+    "dl3_foundation",
+    "weekly_report_generator",
+)
+VALID_JOBS = CORE_JOBS + AUDIT_JOBS
 DEFAULT_JOBS = ",".join(VALID_JOBS)
 DEFAULT_STRATEGIES = "grid_trading,ma_crossover,bb_breakout,bb_reversion,funding_arb"
 DEFAULT_TRAINING_ENGINE_MODES = "demo"
@@ -91,6 +108,136 @@ def _elapsed_ms(start: float) -> int:
 def _expected_training_skip(error: str) -> bool:
     lowered = (error or "").lower()
     return lowered.startswith("insufficient samples")
+
+
+def _weekly_audit_due(args: argparse.Namespace) -> bool:
+    """Return whether weekly legacy-audit jobs should run this cron cycle."""
+    if args.force_audit_jobs:
+        return True
+    return datetime.now(timezone.utc).weekday() == args.audit_weekday
+
+
+def _skip_not_due(job: str, start: float, args: argparse.Namespace) -> JobResult:
+    return JobResult(
+        job,
+        "skipped",
+        _elapsed_ms(start),
+        {"audit_weekday": args.audit_weekday},
+        "not_scheduled_for_this_weekday",
+    )
+
+
+def _pg_connect(dsn: str | None):
+    if not dsn:
+        return None
+    try:
+        import psycopg2  # type: ignore
+    except ImportError:
+        return None
+    return psycopg2.connect(dsn)
+
+
+def _fetch_recent_fill_returns(
+    dsn: str,
+    *,
+    engine_modes: list[str],
+    days: int,
+    limit: int,
+) -> dict[tuple[str, str, str], list[float]]:
+    conn = _pg_connect(dsn)
+    if conn is None:
+        return {}
+    try:
+        grouped: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(strategy_name, 'unknown') AS strategy_name,
+                       symbol,
+                       COALESCE(engine_mode, 'unknown') AS engine_mode,
+                       (COALESCE(realized_pnl, 0) - ABS(COALESCE(fee, 0)))::float8
+                FROM trading.fills
+                WHERE ts >= NOW() - (%s || ' days')::interval
+                  AND engine_mode = ANY(%s)
+                  AND realized_pnl IS NOT NULL
+                ORDER BY ts DESC
+                LIMIT %s
+                """,
+                (days, engine_modes, limit),
+            )
+            for strategy, symbol, regime, net_pnl in cur.fetchall():
+                grouped[(str(strategy), str(symbol), str(regime))].append(float(net_pnl or 0.0))
+        return grouped
+    finally:
+        conn.close()
+
+
+def _fetch_kline_history(
+    dsn: str,
+    *,
+    symbol: str,
+    timeframe: str,
+    limit: int,
+) -> list[float]:
+    conn = _pg_connect(dsn)
+    if conn is None:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT close::float8
+                FROM market.klines
+                WHERE symbol = %s AND timeframe = %s
+                ORDER BY ts DESC
+                LIMIT %s
+                """,
+                (symbol, timeframe, limit),
+            )
+            rows = [float(row[0]) for row in cur.fetchall()]
+        rows.reverse()
+        return rows
+    finally:
+        conn.close()
+
+
+def _fetch_optuna_fills(
+    dsn: str,
+    *,
+    strategy: str,
+    symbol: str,
+    engine_modes: list[str],
+    days: int,
+    limit: int,
+) -> list[dict[str, float]]:
+    conn = _pg_connect(dsn)
+    if conn is None:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    (COALESCE(realized_pnl, 0) - ABS(COALESCE(fee, 0)))::float8 AS pnl,
+                    ABS(COALESCE(qty, 0) * COALESCE(price, 0))::float8 AS notional,
+                    ABS(COALESCE(qty, 0))::float8 AS qty
+                FROM trading.fills
+                WHERE ts >= NOW() - (%s || ' days')::interval
+                  AND engine_mode = ANY(%s)
+                  AND strategy_name = %s
+                  AND symbol = %s
+                  AND realized_pnl IS NOT NULL
+                ORDER BY ts DESC
+                LIMIT %s
+                """,
+                (days, engine_modes, strategy, symbol, limit),
+            )
+            return [
+                {"pnl": float(row[0] or 0.0), "notional": float(row[1] or 0.0), "qty": float(row[2] or 0.0)}
+                for row in cur.fetchall()
+            ]
+    finally:
+        conn.close()
 
 
 def _run_linucb(dsn: str | None, args: argparse.Namespace) -> JobResult:
@@ -287,6 +434,262 @@ def _run_training_pipeline(
         )
 
 
+def _run_thompson_sampling(dsn: str | None, args: argparse.Namespace) -> JobResult:
+    start = time.monotonic()
+    if not _weekly_audit_due(args):
+        return _skip_not_due("thompson_sampling", start, args)
+    if not dsn:
+        return JobResult("thompson_sampling", "skipped", _elapsed_ms(start), {}, "no_database_url")
+    try:
+        from program_code.ml_training.thompson_sampling import (  # type: ignore
+            empirical_bayes_init,
+            save_posteriors_to_pg,
+        )
+
+        returns_by_cell = _fetch_recent_fill_returns(
+            dsn,
+            engine_modes=args.audit_engine_modes,
+            days=args.audit_lookback_days,
+            limit=args.audit_fill_limit,
+        )
+        posteriors = {}
+        for (strategy, symbol, regime), returns in returns_by_cell.items():
+            if len(returns) < args.audit_min_fills_per_cell:
+                continue
+            posteriors[f"{strategy}|{symbol}|{regime}"] = empirical_bayes_init(returns)
+
+        written = save_posteriors_to_pg(posteriors, dsn) if posteriors else 0
+        return JobResult(
+            "thompson_sampling",
+            "ok",
+            _elapsed_ms(start),
+            {
+                "cells_seen": len(returns_by_cell),
+                "cells_written": len(posteriors),
+                "rows_written": written,
+                "lookback_days": args.audit_lookback_days,
+                "engine_modes": args.audit_engine_modes,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JobResult(
+            "thompson_sampling",
+            "error",
+            _elapsed_ms(start),
+            {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _resolve_optuna_param_ranges(args: argparse.Namespace) -> tuple[str | None, str]:
+    if args.optuna_param_ranges_json:
+        return args.optuna_param_ranges_json, "env"
+    try:
+        from program_code.ml_training.optuna_optimizer import _send_ipc_command  # type: ignore
+
+        result = _send_ipc_command(
+            args.ipc_socket,
+            "get_param_ranges",
+            {"engine": args.optuna_engine, "strategy_name": args.optuna_strategy},
+        )
+        if isinstance(result, str):
+            return result, "ipc"
+        if isinstance(result, list):
+            return json.dumps(result), "ipc"
+        return json.dumps(result), "ipc"
+    except Exception as exc:  # noqa: BLE001
+        return None, f"unavailable:{type(exc).__name__}"
+
+
+def _run_optuna_optimizer(dsn: str | None, args: argparse.Namespace) -> JobResult:
+    start = time.monotonic()
+    if not _weekly_audit_due(args):
+        return _skip_not_due("optuna_optimizer", start, args)
+    if not dsn:
+        return JobResult("optuna_optimizer", "skipped", _elapsed_ms(start), {}, "no_database_url")
+    try:
+        from program_code.ml_training.optuna_optimizer import (  # type: ignore
+            OptunaConfig,
+            run_optimization,
+        )
+
+        param_ranges_json, source = _resolve_optuna_param_ranges(args)
+        if not param_ranges_json:
+            return JobResult(
+                "optuna_optimizer",
+                "skipped",
+                _elapsed_ms(start),
+                {"param_ranges_source": source},
+                "param_ranges_unavailable",
+            )
+        fills = _fetch_optuna_fills(
+            dsn,
+            strategy=args.optuna_strategy,
+            symbol=args.optuna_symbol,
+            engine_modes=args.audit_engine_modes,
+            days=args.audit_lookback_days,
+            limit=args.audit_fill_limit,
+        )
+        cfg = OptunaConfig(
+            sqlite_path=str(Path(args.output_dir) / "optuna" / "optuna_studies.log"),
+            n_trials=args.optuna_trials,
+            min_fills_required=args.optuna_min_fills,
+        )
+        result = run_optimization(
+            args.optuna_strategy,
+            args.optuna_symbol,
+            args.optuna_regime,
+            fills,
+            param_ranges_json,
+            config=cfg,
+            ipc_socket_path=args.ipc_socket,
+        )
+        status = "ok" if result.get("status") in {"success", "insufficient_data", "no_adjustable_params"} else "error"
+        return JobResult(
+            "optuna_optimizer",
+            status,
+            _elapsed_ms(start),
+            {
+                "strategy": args.optuna_strategy,
+                "symbol": args.optuna_symbol,
+                "regime": args.optuna_regime,
+                "fills": len(fills),
+                "param_ranges_source": source,
+                "result": result,
+            },
+            "" if status == "ok" else str(result.get("error", "")),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JobResult(
+            "optuna_optimizer",
+            "error",
+            _elapsed_ms(start),
+            {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _run_cpcv_validator(dsn: str | None, args: argparse.Namespace) -> JobResult:
+    start = time.monotonic()
+    if not _weekly_audit_due(args):
+        return _skip_not_due("cpcv_validator", start, args)
+    if not dsn:
+        return JobResult("cpcv_validator", "skipped", _elapsed_ms(start), {}, "no_database_url")
+    result = _run_training_pipeline(
+        "cpcv_validator",
+        use_quantile=False,
+        dsn=dsn,
+        args=args,
+    )
+    result.detail["entrypoint"] = "program_code.ml_training.cpcv_validator via run_training_pipeline"
+    return result
+
+
+def _run_dl3_foundation(dsn: str | None, args: argparse.Namespace) -> JobResult:
+    start = time.monotonic()
+    if not _weekly_audit_due(args):
+        return _skip_not_due("dl3_foundation", start, args)
+    if not dsn:
+        return JobResult("dl3_foundation", "skipped", _elapsed_ms(start), {}, "no_database_url")
+    try:
+        from program_code.ml_training.dl3_foundation import (  # type: ignore
+            Dl3Config,
+            run_forecast,
+        )
+
+        runs: list[dict[str, Any]] = []
+        for symbol in args.dl3_symbols:
+            history = _fetch_kline_history(
+                dsn,
+                symbol=symbol,
+                timeframe=args.dl3_timeframe,
+                limit=args.dl3_history_limit,
+            )
+            if len(history) < args.dl3_min_history:
+                runs.append({"symbol": symbol, "status": "skipped", "error": "insufficient_history", "history": len(history)})
+                continue
+            for model_name in args.dl3_models:
+                cfg = Dl3Config(
+                    model_name=model_name,
+                    horizon_minutes=args.dl3_horizon_minutes,
+                    timeout_seconds=args.dl3_timeout_seconds,
+                )
+                result = asyncio.run(
+                    run_forecast(
+                        cfg,
+                        symbol=symbol,
+                        history_close=history,
+                        timestamp_ms=int(time.time() * 1000),
+                        dsn=dsn,
+                    )
+                )
+                runs.append(
+                    {
+                        "symbol": symbol,
+                        "model": model_name,
+                        "ok": result.ok,
+                        "latency_ms": result.latency_ms,
+                        "error": result.error_msg,
+                    }
+                )
+        return JobResult(
+            "dl3_foundation",
+            "ok",
+            _elapsed_ms(start),
+            {"runs": runs, "timeframe": args.dl3_timeframe},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JobResult(
+            "dl3_foundation",
+            "error",
+            _elapsed_ms(start),
+            {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _run_weekly_report_generator(dsn: str | None, args: argparse.Namespace) -> JobResult:
+    start = time.monotonic()
+    if not _weekly_audit_due(args):
+        return _skip_not_due("weekly_report_generator", start, args)
+    if not dsn:
+        return JobResult("weekly_report_generator", "skipped", _elapsed_ms(start), {}, "no_database_url")
+    try:
+        from program_code.ml_training.weekly_report_generator import (  # type: ignore
+            current_week_iso,
+            main as weekly_report_main,
+        )
+
+        week = current_week_iso()
+        output = Path(args.output_dir) / "weekly_report" / f"phase4_{week}.md"
+        rc = weekly_report_main(
+            [
+                "--week",
+                week,
+                "--output",
+                str(output),
+                "--dsn",
+                dsn,
+                "--persist",
+            ]
+        )
+        return JobResult(
+            "weekly_report_generator",
+            "ok" if rc == 0 else "error",
+            _elapsed_ms(start),
+            {"week_iso": week, "output": str(output), "persist": True},
+            "" if rc == 0 else f"weekly_report_generator exited {rc}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JobResult(
+            "weekly_report_generator",
+            "error",
+            _elapsed_ms(start),
+            {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
 def _run_job(job: str, dsn: str | None, args: argparse.Namespace) -> JobResult:
     if job == "linucb_trainer":
         return _run_linucb(dsn, args)
@@ -302,6 +705,16 @@ def _run_job(job: str, dsn: str | None, args: argparse.Namespace) -> JobResult:
         return _run_training_pipeline(
             "quantile_trainer", use_quantile=True, dsn=dsn, args=args
         )
+    if job == "thompson_sampling":
+        return _run_thompson_sampling(dsn, args)
+    if job == "optuna_optimizer":
+        return _run_optuna_optimizer(dsn, args)
+    if job == "cpcv_validator":
+        return _run_cpcv_validator(dsn, args)
+    if job == "dl3_foundation":
+        return _run_dl3_foundation(dsn, args)
+    if job == "weekly_report_generator":
+        return _run_weekly_report_generator(dsn, args)
     return JobResult(job, "error", 0, {}, "unknown_job")
 
 
@@ -378,6 +791,93 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
             os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"), "models", "ml_training_maintenance"),
         ),
     )
+    parser.add_argument(
+        "--audit-engine-modes",
+        default=os.environ.get("OPENCLAW_ML_CRON_AUDIT_ENGINE_MODES", "demo,live_demo"),
+    )
+    parser.add_argument(
+        "--audit-lookback-days",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_AUDIT_LOOKBACK_DAYS", "14")),
+    )
+    parser.add_argument(
+        "--audit-fill-limit",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_AUDIT_FILL_LIMIT", "5000")),
+    )
+    parser.add_argument(
+        "--audit-min-fills-per-cell",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_AUDIT_MIN_FILLS_PER_CELL", "5")),
+    )
+    parser.add_argument(
+        "--audit-weekday",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_AUDIT_WEEKDAY", "6")),
+        help="UTC weekday for legacy audit jobs; Monday=0, Sunday=6.",
+    )
+    parser.add_argument(
+        "--force-audit-jobs",
+        action="store_true",
+        default=_env_bool("OPENCLAW_ML_CRON_FORCE_AUDIT_JOBS", False),
+    )
+    parser.add_argument(
+        "--ipc-socket",
+        default=os.environ.get(
+            "OPENCLAW_IPC_SOCKET",
+            os.path.join(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"), "engine.sock"),
+        ),
+    )
+    parser.add_argument("--optuna-engine", default=os.environ.get("OPENCLAW_ML_CRON_OPTUNA_ENGINE", "demo"))
+    parser.add_argument("--optuna-strategy", default=os.environ.get("OPENCLAW_ML_CRON_OPTUNA_STRATEGY", "ma_crossover"))
+    parser.add_argument("--optuna-symbol", default=os.environ.get("OPENCLAW_ML_CRON_OPTUNA_SYMBOL", "BTCUSDT"))
+    parser.add_argument("--optuna-regime", default=os.environ.get("OPENCLAW_ML_CRON_OPTUNA_REGIME", "live_observed"))
+    parser.add_argument(
+        "--optuna-param-ranges-json",
+        default=os.environ.get("OPENCLAW_ML_CRON_OPTUNA_PARAM_RANGES_JSON", None),
+    )
+    parser.add_argument(
+        "--optuna-trials",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_OPTUNA_TRIALS", "10")),
+    )
+    parser.add_argument(
+        "--optuna-min-fills",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_OPTUNA_MIN_FILLS", "80")),
+    )
+    parser.add_argument(
+        "--dl3-symbols",
+        default=os.environ.get("OPENCLAW_ML_CRON_DL3_SYMBOLS", "BTCUSDT,ETHUSDT"),
+    )
+    parser.add_argument(
+        "--dl3-models",
+        default=os.environ.get("OPENCLAW_ML_CRON_DL3_MODELS", "chronos-t5-tiny,timesfm-1.0-200m"),
+    )
+    parser.add_argument(
+        "--dl3-timeframe",
+        default=os.environ.get("OPENCLAW_ML_CRON_DL3_TIMEFRAME", "1m"),
+    )
+    parser.add_argument(
+        "--dl3-history-limit",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_DL3_HISTORY_LIMIT", "512")),
+    )
+    parser.add_argument(
+        "--dl3-min-history",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_DL3_MIN_HISTORY", "64")),
+    )
+    parser.add_argument(
+        "--dl3-horizon-minutes",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_DL3_HORIZON_MINUTES", "60")),
+    )
+    parser.add_argument(
+        "--dl3-timeout-seconds",
+        type=int,
+        default=int(os.environ.get("OPENCLAW_ML_CRON_DL3_TIMEOUT_SECONDS", "60")),
+    )
     parser.add_argument("--status-json", default=None)
     parser.add_argument(
         "--dry-run",
@@ -393,11 +893,16 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         args.training_engine_modes, DEFAULT_TRAINING_ENGINE_MODES
     )
     args.shadow_engine_modes = _csv(args.shadow_engine_modes, DEFAULT_SHADOW_ENGINE_MODES)
+    args.audit_engine_modes = _csv(args.audit_engine_modes, "demo,live_demo")
+    args.dl3_symbols = _csv(args.dl3_symbols, "BTCUSDT,ETHUSDT")
+    args.dl3_models = _csv(args.dl3_models, "chronos-t5-tiny,timesfm-1.0-200m")
     args.symbol = None if args.symbol in {None, "", "ALL"} else args.symbol
 
     invalid = sorted(set(args.jobs) - set(VALID_JOBS))
     if invalid:
         parser.error(f"invalid jobs: {', '.join(invalid)}")
+    if args.audit_weekday < 0 or args.audit_weekday > 6:
+        parser.error("--audit-weekday must be 0..6 (Monday=0, Sunday=6)")
     return args
 
 
