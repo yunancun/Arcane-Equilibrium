@@ -1497,4 +1497,45 @@ E1 round 6 必修：(1) sibling test line 1252 stub INSERT actor_id → created_
 
 27. **R0-T0 純 refactor 反問策略：byte-equal proof 走 `diff <(git show OLD:file) <(NEW file)`**。E2 拒「重新讀 W1 文檔 + 信任 E1 claim byte-equal」的 happy-path 答案；必跑命令式 diff 對齊 line range。本 W2 跑 3 helpers diff 出 3 處 visibility widening 是 acceptable refactor（pub(crate) ⊂ crate-internal），但若 diff 跑出 method body 改動（含 1 行邏輯 if/else 順序變化）= 立即 RETURN BLOCKER。**抽象**：refactor PR 必 diff line-by-line over claimed-equal segment，不只看 LOC delta。
 
+---
+
+## 2026-05-09 — W-AUDIT-7c GUI 三項修復 E2 對抗 review
+
+### 場景
+
+E1a commit `9e265ba9` (+573/-124, 5 檔)：governance-tab.js 兩個 native confirm() / tab-ai.html provider key clear / tab-settings.html 4 sub-tab 拆分 + 共用 `openTypedConfirmModal` helper（common.js +140 LOC）+ test fixture 126 LOC。E1a sign-off claim: HTTP 200 × 5 / HTMLParser stack_residue=[] errors=0 / JS brace+paren+bracket diff 0 / fixture 5-case PASS / native confirm() 0 grep hit。
+
+### Review verdict
+
+**RETURN-TO-E1a · 6 findings (1 CRITICAL + 1 HIGH + 3 MEDIUM + 1 LOW)**
+
+### CRITICAL-1: governance-tab.js parse SyntaxError → governance tab JS 全失效
+
+`bulkAudit()` 函數 line 1555 `const ok = await openTypedConfirmModal(...)` + line 1581 `let ok = 0, fail = 0;` 同 function scope `ok` 重宣告 → `SyntaxError: Identifier 'ok' has already been declared`。整個 governance-tab.js parse 階段 fail，governance UI tab 內 `loadAll()` / `bulkAudit()` / `auditApprove()` / `auditReject()` / `confirmApproveRecovery()` / etc 全失效。Mac + Linux 雙端 `node -e "new Function(fs.readFileSync(...))"` 同樣 parse fail。
+
+### HIGH-1: sign-off process gap — 缺 file-level JS engine parse smoke
+
+E1a 「JavaScript brace/paren/bracket diff 0 0 0」是 **structural balance check**（matching `{ } ( ) [ ]` 數量），對 ES6 `let` / `const` 重宣告 **沒有偵測能力**。test fixture `test_typed_confirm_modal.html` 只載 common.js 不載 governance-tab.js → 同樣完全 missed。**E1a 從未對 governance-tab.js 跑過 JS engine 真實 parse**。
+
+### a11y baseline 4 項評估
+
+| 項 | 狀態 |
+|---|---|
+| focus trap | PASS — Tab/Shift+Tab + first/last 循環 |
+| aria | PASS（基線 role=dialog / aria-modal / aria-labelledby）/ MEDIUM-1 改進（input 缺 aria-required / aria-describedby / aria-invalid） |
+| Esc | PASS — ev.key === 'Escape' → close(false) |
+| Tab | PASS — focusableNodes() filter + setTimeout 50ms 起始 focus |
+
+### 三端 git sync
+
+Mac/origin/Linux 均在 `b186c6c2`，9e265ba9 + 8b766a43 commit chain 全 push 同步。
+
+### E2 教訓追加（lesson 29-30）
+
+29. **GUI / JavaScript 改動 sign-off 必跑 file-level JS engine parse smoke** — E1a sign-off 5 條全靜態（HTTP 200 / brace count / structural HTMLParser / grep / standalone fixture）；對 ES6 `let`/`const` redeclaration / 任何 syntax-level error 完全 blind。**單純跑 `node -e "new Function(fs.readFileSync(<file>, 'utf8'))"` 5 秒就 catch CRITICAL-1**，但 E1a process 沒這層。**抽象**：審 GUI / JS 改動，E2 必對抗反問「你跑了 file-level JS engine parse？brace count 不算數」+ 自己跑該檢測；GUI 改動 sign-off SOP 應加此 step（建議 P2 follow-up `helper_scripts/gui/parse_smoke.sh`）。Sub-issue：fixture 是 standalone test（只載部分 file）≠ 全文件 parse smoke；兩者必都要。
+
+30. **變量命名 shadow 在 same function scope 是 ES6 hard error 不是 warning** — JavaScript ES6 `const ok` 之後再 `let ok` 同 block scope = SyntaxError 整 file 不 parse（不只 runtime exception）。E2 反問模式：審 GUI 改動含「modal helper return value」+「envelope.ok / loop counter」mixed in same function 必看是否撞名。本 round CRITICAL-1 line 1555 `const ok` (modal result) + line 1581 `let ok` (counter) 是經典撞名陷阱 — modal 引入後新 const variable，counter 名與本來 envelope.ok 撞 → 雙 declaration 撞。**抽象**：modal helper 推廣 (例：openTypedConfirmModal / openConfirmModal / openPromptModal) 後，caller 的 `const ok = await modal(...)` 是新引入名稱，必檢查同 function 內其他 ok 變量；若有，同時改 caller 才安全。Modal helper 設計可考慮 return `{ confirmed: bool }` 而非 raw bool 規避 shadow。
+
+
+
 28. **R6-T3 實 wire 4 點對齊驗證：Sign-off vs Code 微 drift 是 LOW finding 不 RETURN** — Sign-off §8.1 #3(b) 寫 `young: rc.kelly.young, mature: rc.kelly.mature` shorthand，code 實際是 `young_threshold: risk_config.kelly.young_threshold, mature_threshold: risk_config.kelly.mature_threshold` 全名。E2 方法：(a) 對 KellyConfig struct definition grep `^    pub `（9 fields 確認 with `young_threshold` / `mature_threshold` 全名）+ (b) 對 `risk_config.kelly` struct grep `young_threshold|mature_threshold` 確認 source struct 一致 + (c) 對 cargo build verify compile success（field name 不對 Rust 不過 compile）。三層驗證後 = doc shorthand drift 是 LOW（不 RETURN）+ commit 後 PR 順帶 fix。**抽象**：sign-off shorthand vs code full-name drift 系統性出現在 Rust struct 改動；E2 必跑「struct definition + source struct + cargo compile」三層驗證才放行 LOW finding。Round 5 V055 LOC 1265 vs 1316 是 file-level drift，本 W2 是 token-level (field name shorthand) drift，是 same lesson family N=3。
