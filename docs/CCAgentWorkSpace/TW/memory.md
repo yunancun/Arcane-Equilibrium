@@ -27,6 +27,21 @@
 | 2026-04-29 | TODO.md Stage 2A refactor — 頭部敘述 + Wave 索引化 | inline final message（不寫 report file）|
 | 2026-05-08 | 04-01~05-08 範圍重複 / 合併 / 應歸檔審計（38 天 ~1850 docs/.md + ~430 .claude_reports）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-08--apr_may_doc_audit.md` |
 | 2026-05-09 | 5/8 audit 30+ findings 24h 修復對抗性核實（W-AUDIT-1 closure 真實度查驗）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification.md` |
+| 2026-05-09 | v2 9 commits（`1bd55689` + `85804fbd` + `8226a67f` + `29f3b8f7` + `e8a29185` + `8dcc1f17` + `48401727` + `862e79b7` + `597e866d`）對抗性核實 — 78%→81% 真升 +3%，但 4 大 NI（NI-3/4/7/8）完全未碰 | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v2.md` |
+
+## 2026-05-09 v2 對抗性驗證重點
+
+- **任務**：operator 派 TW 二輪對抗性核實 v2 9 個 follow-up commits 是否真補 v1 標 ❌ / ⚠️ + 8 NI；7 個對抗性 push back（README 真升度 / SCRIPT_INDEX 完整 / archive 缺漏 44 條 / CCAgentWorkSpace MIT/BB / W-AUDIT-1 殘缺項 / worklogs 12d 斷層 / 新 cron 同步）。
+- **產出**：260 行報告，覆蓋 §1 Executive Summary 9 維度（5/8→v1→v2 三欄）+ §2 9 commit 逐條核實（`1bd55689` + `85804fbd` + `8226a67f` + `29f3b8f7` + `e8a29185` + `8dcc1f17` + `48401727` + `862e79b7` + `597e866d`）+ §3 8 NI 表格 + §4 v1 30+ finding 殘缺項追蹤 + §5 7 對抗性 push back + §6 v2 NEW NEW-ISSUE 6 條（NI-9..14）+ §7 v1→v2 verdict 對比 + §8 P1/P1+72h/P2 修建議 15 條。
+- **整體文檔健康度**：v1 78% → v2 81%（+3%）— v2 9 commits 集中改善 [A] 結構性 index（archive/agents/SCRIPT_INDEX反向/CCAgentWorkSpace 19-row）+ [B] §三 數據可追溯性（healthcheck id binding）+ [C] AMD register sync（LG-X-05/AMD-2026-05-09-02）。
+- **README 完整度**：78% → 88%（+10%）— `1bd55689 docs: close audit index gaps` 加 archive/2026-04+05 全 44 條索引（NI-6 ✅ FIXED）+ agents/ section（NI-1 ✅ FIXED）+ SCRIPT_INDEX 反向引用 + CCAgentWorkSpace 19-row（含 MIT/BB AG3 ✅ FIXED）+ ADR-0020 索引 + tests/structure/test_docs_readme_index_static.py 5 PASS guard 加防漂移。
+- **§三 數據可追溯性**：0% → 70%（v1）→ 85%（v2）— `29f3b8f7 docs: attach edge healthcheck to audit figure` 把 §三 edge 數字綁 `[40] / [38] / [42b/c] / [51]` healthcheck id；2026-05-05 governance §三 drift 防線實際落地。
+- **AMD register sync**：90% → 95%（+5%）— `85804fbd docs: fix live gate specification register` 補 LG-X-01..05 register（含 LG-X-05 全 4 cross-link doc）+ Numbering Rules LG-X-XX/OPS-X-XX 註明。
+- **SCRIPT_INDEX**：80% 維持（v2 0 動）— **新發現 3 個未登腳本**：(1) `ml_training_maintenance.py`（W-AUDIT-4 F-08，純英文 docstring + 0 SCRIPT_INDEX）(2) `edge_label_backfill_cron.sh`（W-AUDIT-4 F-09，5/8 deploy verified + 0 SCRIPT_INDEX）(3) `g2_03_bind_ma_sltp.sh`（5/9 W-AUDIT-1 catch-up 段被遺漏，雙語對照 + 0 SCRIPT_INDEX）。
+- **8 個 NI 修復狀態**：2/8 FIXED（NI-1 + NI-6）/ 1/8 PARTIAL（NI-2 ADR 0001-0014 14 條未補 README）/ 5/8 NOT FIXED（NI-3 雙語腳本 + NI-4 CHANGELOG cap + NI-5 KNOWN_ISSUES + NI-7 worklog 13→14 倒退 + NI-8 REF-20 6 份 superseded 14 天 0 動）— 40% 真改善。
+- **6 個 v2 NEW-ISSUE**：NI-9 ml_training_maintenance.py 純英文 + 0 SCRIPT_INDEX / NI-10 edge_label_backfill_cron.sh 0 SCRIPT_INDEX / NI-11 g2_03_bind_ma_sltp.sh 0 SCRIPT_INDEX + 雙語 / NI-12 ADR 0001-0014 14 條 0 README 索引 / NI-13 §三 sprint A-D snapshot 仍未 archive / NI-14 ref21 兩 cron 純英文 14 天 carry-over。
+- **7 個對抗性 push back**：(1) README 真升 +10% ✅ (2) SCRIPT_INDEX 0 動 ❌ + 3 新發現 (3) archive 缺漏全補 ✅ (4) CCAgentWorkSpace 19-row 含 MIT/BB ✅ (5) W-AUDIT-1 殘缺 5/6 解（剩 ADR 索引）(6) worklogs 13→14 天倒退 ❌ (7) 新 cron 0 SCRIPT_INDEX 同步 ❌（違反 §七 硬規則）。
+- **規範遵守**：中文為主 + 英文技術名詞；不動代碼/邏輯/業務文件；報告路徑 + verdict 嚴格遵守 prompt format；對抗性 push back 對 PM 自評持續質疑（不接受「真補了」自宣，必 grep + Read 驗證）。
 
 ## 2026-05-09 W-AUDIT-1 對抗性驗證重點
 

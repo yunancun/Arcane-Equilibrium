@@ -81,3 +81,36 @@
 - Python H0_GATE 0 caller 對 Rust hot path 0 影響（Rust h0_gate.check 每 tick 強制 fire，shadow_mode IPC writable）
 
 報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-08--full_chain_security_audit.md`（408 行）
+
+### 2026-05-09 v2 對抗性 verification（vs v1 same-day report）
+
+**評級：A+ (vs v1 A-)**
+
+- v1 4 NEW-VULN 24h 內全 source-closed + 2 runtime verified
+- 0 新引入 attack surface (v2 範圍 0 unauth endpoint / 0 secret leak / 0 path 硬編碼)
+- 範圍 commits 455d796e..1bd55689 (34 commits, 7 security/audit + 27 strategy/risk/learning/docs)
+
+**v1 NEW-VULN 24h fix matrix**:
+1. NEW-VULN-1 launchd 0.0.0.0 → ✅ b658e18c plist 改 127.0.0.1 + c187fd99 resolver lib reject 0.0.0.0/:: + 3 helper script wire + Linux runtime ss `100.91.109.86:8000` (Tailscale tailnet, not 0.0.0.0)
+2. NEW-VULN-2 lease audit 0 row → ✅ e97a333b governance_core.rs:402-417 加 emit_transition_fail_soft(BYPASS) + V078 migration `to_state='BYPASS'`；Linux PG 實測 7950 BYPASS rows in 8h，~16/min sustained，demo/live_demo 50/50
+3. NEW-VULN-3 cookie Secure auto fail-OPEN → ✅ cfadc339 should_set_secure_cookie 加 _has_https_proxy_hint() 自動觸發（不需 OPENCLAW_TRUST_PROXY_HEADERS=1 opt-in），偽造 X-Forwarded-Proto 在 plain HTTP 下 cookie unusable = fail-closed
+4. NEW-VULN-4 phase4 dead code → ⚠️ cfadc339 main.py:153-154 加 include_router(phase4_router)，BUT uvicorn 14:07 啟動 < cfadc339 15:48 commit，runtime 仍 404；待 operator restart_all --keep-auth
+
+**仍存議題 (24h 0 commit)**:
+- 4 MEDIUM unchanged (B/C/D + E/F design fail-OPEN runtime fail-CLOSED)
+- 7 LOW unchanged (P2 backlog)
+- layer2_routes 仍 4 處 `str(exc)` 洩漏 (in 401 守護後 valid-auth 路徑)
+- P0-OPS-1/2/4 仍 0 commit
+
+**對抗測試 4 endpoint result**:
+- POST /api/v1/phase4/weekly_review/approve → 404 (uvicorn stale)
+- POST /api/v1/phase4/weekly_review/reject → 404 (uvicorn stale)
+- POST /api/v1/scout/market-signal → 401 fail-closed ✅
+- POST /api/v1/paper/layer2/trigger → 401 fail-closed ✅
+
+**push back**:
+- audit closure SOP gap: source-fix 後沒 reload uvicorn 不算 closed (NEW-VULN-4 同類復發)
+- LG-3 sub-finding F-A2: Validation profile acquire_lease 真走 SM 還是 bypass，emit msg type 需 verify
+- engine.sock mtime 15:52 確認 e97a333b lease emit 真生效，但 API uvicorn 沒一起 restart = 部署協調問題
+
+報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-09--security_verification_v2.md` (~280 行)

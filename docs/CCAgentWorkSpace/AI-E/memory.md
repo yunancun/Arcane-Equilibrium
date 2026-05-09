@@ -158,3 +158,32 @@ engine.log 證據：5-min cycle alive，Ollama IPC 真接，但 `RiskConfig.stra
 | 日期 | 任務 | 文件 | 行數 |
 |---|---|---|---|
 | 2026-05-09 | 24h verification of 2026-05-08 audit | docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-09--ai_effectiveness_verification.md | 264 |
+
+## 2026-05-09 v2 verification (34 commits since 455d796e baseline)
+
+### v1 9 finding 在 v2 的 verdict
+- ✅ 1 (NEW-3 ContextDistiller dead .pyc → 35f81a7b 加 source 解決)
+- ⚠️ 1 (P2-D ContextDistiller IMPL ✓ / runtime-dormant by AMD §4 design)
+- ❌ 7 (F-07 / P1-A degradation / P1-B / P2-A / P2-C / NEW-1 / NEW-2 / NEW-4 / NEW-5)
+- 1 個 commit 偽進步：a904e273 「cron verified」是 edge_label_backfill 不是 5 ML scripts
+
+### v2 NEW critical 發現
+1. **a0bbde58 fake-fix from runtime view**: TOML 改 0.50 但 engine 啟動 15:52:49 比 commit 16:08:42 早 15 分鐘，runtime 仍跑 30% cap（engine.log 14:23 UTC 直證 cap_pct=30.0%）
+2. **AMD-2026-05-09-02 §4 spec lock-in**: Layer2 永久 manual-only by design = Cloud L2 永久 ≈0 流量 = AI-E DOC-08 4 KPI 中 3 個本質不可量測
+3. **Strategist applied 衰減**: v1 354 → v2 221 (-37.6%)，否定 v1 hidden fix 假設
+4. **commits 分類**: 34 commits 中只有 1 個真實 AI IMPL (35f81a7b)；ai_invocations 24h 仍 0、latest_ts 仍 2026-05-06 (3 天無寫)
+5. **profile.md 過期 spec**: ContextDistiller token 預算 / 雙進程 AI 路徑 / DreamEngine 零成本 三條 unmeasurable，建議廢止
+
+### DOC-08 4 KPI v2 verdict
+- 每日 AI 成本 < $2.00: $0 = dead-AI 假合規
+- L1 Ollama 延遲 < 3s: 不可量測 (24h 0 ai_invocations 寫入)
+- AI ROI ≥ 0.5: 數學未定義 (X/0)
+- cost_edge_ratio 等級 F < 5%: 不可量測 (cost_edge_advisor_log all-time 0)
+
+### 對 v1 self-correction
+v1 樂觀「Strategist 354 applied / MLDE 41.7%」結論在 v2 不持續；v1 NEW-4 hidden fix 假設被否定（v2 衰減證明是 Ollama 自然分布變化非 hidden mechanism）。
+
+### 報告
+| 日期 | 任務 | 文件 | 行數 |
+|---|---|---|---|
+| 2026-05-09 v2 | v1 修復對抗性嚴苛核實 | docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-09--ai_effectiveness_verification_v2.md | 363 |

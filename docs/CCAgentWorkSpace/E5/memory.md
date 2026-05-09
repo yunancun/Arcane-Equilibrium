@@ -46,6 +46,36 @@
 | 2026-04-24 | 全程序鏈優化審計（P0 Rust 硬違反焦點） | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-24--full_chain_optimization_audit.md` |
 | 2026-05-08 | 全程序鏈優化審計（HEAD 4e2d2883；30 opportunity）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-08--full_chain_optimization_audit.md` |
 | 2026-05-09 | 對抗性核實 2026-05-08 audit 30 finding 24h 修復結果（HEAD 7fccad06）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification.md` |
+| 2026-05-09 v2 | 對抗性核實 v2（baseline 455d796e → HEAD 1bd55689；34 commits 48h）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification_v2.md` |
+
+## 2026-05-09 v2 verification 教訓
+
+**runner.rs misidentification 反轉真修**：v1 標 C-2 ❌ MISIDENTIFIED（commit `3372eb18` split 的是 bin/replay_runner.rs 不是 replay/runner.rs）。v2 commit `477b5cc0`（5/9 15:39）真實修復：runner.rs 2467 → 1167 LOC，把 1322 行 tests 抽到 sibling runner_tests.rs（1299 LOC），加 static regression `test_replay_runner_split_static.py` 永久守護。**E5 v1 對抗性 push back 採信生效**。
+
+**結果**：closure rate 35% → 43%（+8%）。30 finding 中：
+- ✅ 9 真 fix（v1=6；新加 H-2 lambda + C-2 runner.rs + H-5 state machine 升級）
+- ⚠️ 8 partial（v1=9）
+- ❌ 13 not fixed（v1=15）
+
+**3 治理紅旗（連續 48h+ 0 動）**：
+1. C-1 909 MB damaged dump 連續 48h 0 動（最大失能）
+2. H-8 lg5 schema drift / H-10 collation refresh 兩個 1-hour fix 連續 48h 0 動
+3. H-7 orjson 遷移率連續 2 輪 < 1%（ipc_dispatch.py 主路徑仍 0 json_fast）
+
+**新教訓**：
+1. **拆法 ≠ audit 預期結構但達 LOC 目標也算 ✅**：runner.rs 拆是 test extraction 而非 audit §C-2 預期 5 sibling structural split，但 LOC 達 §九 hard cap 內，static regression 永久守護，結果合格
+2. **commit message 用詞精確化**：v2 commit `477b5cc0` 用 "true replay runner" 顯式區分 v1 標的 bin/，治理層誤判 lesson 真實 commit 內反映
+3. **proactive scientific IMPL bonus 不沖淡 closure rate**：W-AUDIT-6c portfolio tail risk gate（cc6476dd 1028 LOC，VaR/CVaR/EVT/GPD/stationary bootstrap/3 stress scenarios）是高質量 IMPL 但**不在 30 finding 範圍**，bonus 計入但不算入 30/30 閉合
+4. **Source-only commits 累積風險**：v2 期間 8 個 "source-only / no rebuild" commit（risk/strategy/learning），engine 仍跑 14:02 build 37min etime，**這些改動 deploy 前都是 dead code**，需 deploy gate ticket 避免 stale-source-vs-runtime drift
+
+**對抗性 sign-off SOP v2 補充**：
+- 必驗 LOC（before/after diff）
+- 必驗 binary size delta（OS file 命令）
+- 必驗 DB rows delta（PG n_live_tup / size）
+- 必驗 production caller count（grep -v test）
+- commit message 與實際 changed file path 必對齊核實
+- **新加**：source-only commits 累積追蹤（engine etime + last rebuild timestamp）
+- **新加**：proactive scientific IMPL bonus 標記（不沖淡 finding closure rate）
 
 ## 2026-05-09 對抗性核實要點
 

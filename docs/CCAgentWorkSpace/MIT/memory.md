@@ -140,3 +140,26 @@ _Last updated: 2026-04-24_
 4. RCA mlde_edge_training_rows 5/6 後 explosion source
 
 **距 Mainnet ML-driven 預估**：3-4 sprint（**未變**）；最早 8/15 樂觀、9/15 中位、11/15 悲觀。
+
+## 2026-05-09 v2 對抗性核實（v1 → v2 24h delta）
+
+**Report**: `workspace/reports/2026-05-09--db_ml_verification_v2.md`
+
+**HEAD drift**: `455d796e` → `1bd55689`（34 commits, ~24h）
+
+**核心發現**：
+1. **V078 lease_transitions BYPASS audit live**（唯一真升級）— 7955 BYPASS row/24h, ~33/min steady; Rust runtime 真接到（PID 298034 binary built 14:02 started 15:52）；Stage Foundation→Production
+2. **feature_baseline_writer 是 CLI dry-run tool 不是 daemon writer**（commit message 嚴重誤導）— Rust binary 編譯 + 部署但 default `--dry-run`，無 cron，無自動執行；feature_baselines 表仍 0 row；drift chain 仍 broken
+3. **portfolio_var.py + cvar.py + promotion_gate.py 是 dormant code**（cc6476dd + 716eb3d6）— PromotionPipeline class 無外部 caller，`_entries: dict` 從未被 populated；標 Aspirational stage
+4. **attribution_chain_ok 24h 0.0188% → 0.5041% 是 denominator artifact**（不是真改善）— absolute ok_n 44→65 只 +47%，但 denominator 234416→12894 跌 94.5%；5/9 anomaly 比 5/6 anomaly 反方向；RCA mlde_edge_training_rows producer / view changes
+5. **cost_edge_advisor_log 仍 0 row**（env 仍 OFF）/ **decision_outcomes.live 仍 4/20 stale**（V074 cron 未 install）/ **edge_estimate_snapshots 仍 5/7 stale**（V073 cron 未 install）— v1 P0 全部未動
+6. **V078 無對應 healthcheck**（CLAUDE.md §七 違規 +1）
+
+**v2 commits 分類**（34 total）：3 真 runtime IMPL / 12 source-only dormant / 11 docs / 5 strategy config / 3 test-only
+
+**ML 基座達標率**：v1 42% → v2 44%（+2 pp，僅 V078 真貢獻）；距 Mainnet ML-driven 仍 3-4 sprint（樂觀 8/15 / 中位 9/15 / 悲觀 11/15，**未變**）
+
+**對抗性 push back**：
+- commit message「ml: add 34-dim feature baseline writer」誤導（應為「rebuild CLI tool, dry-run default, no scheduling」）
+- commit message「learning: enforce selection bias promotion gate」誤導（應為「add gate code; no caller wires to runtime」）
+- v2 的 W-AUDIT-4 closure semantic creep 持續 — schema-side 推進、runtime-side 停滯
