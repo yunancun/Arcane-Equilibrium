@@ -1667,3 +1667,31 @@ round 3 catch block 用 `err && err.message === 'modal already open'`。robustne
 ### lesson 40 — round 2 finding 自我修正：_lastPendingAudit 不是 dead-write（read site at 1682）
 **E2 round 2 review (940186ee) 把 `_lastPendingAudit` 標 MEDIUM-2 dead-write data state 是錯的** — round 3 grep 重驗發現 line 1682 `renderPendingAudit(_lastPendingAudit)` 是真實 read site；round 2 grep 太窄沒包括 `renderPendingAudit(...)` 用法，誤判 0 read。E1a round 3 把 MEDIUM-2 deferred 為 P2 ticket，PM brief 接受 — 但實際上根本不該 deferred，是 false positive。本輪自我糾正 = E2 對「dead-write data state」grep 必跑 multi-pattern：(a) bare variable name `_lastPendingAudit` (b) `renderXxx(_lastPendingAudit)` 函數參數位 (c) `_lastPendingAudit\.length` / `_lastPendingAudit\[`/`Array.isArray(_lastPendingAudit)` 條件位 (d) `... _lastPendingAudit ...` 三元 / template / spread 位 — 4 種 idiom 任一漏看就誤判。**規律**：E2 dead-write 判定要查 4 種 read idiom；單純查 `_lastPendingAudit` left-side `=` 不夠，會誤把 `renderPendingAudit(_lastPendingAudit)` 當 write（其實是 read）。**抽象**：E2 review 不只防 E1 出錯，自身要敢承認 round N review 看漏／誤判，下 round 主動糾正不護短。這是對抗審核的自反性。本 round 3 verdict 不重複此誤判，明確記入 closure 為「false positive 從 round 2 撤回，無真實 dead-write」。
 
+
+---
+
+## 2026-05-09 lessons 41-44: Sprint N+0 first-pass — 4 wave parallel + cross-wave IPC fail
+
+### 場景
+Sprint N+0 Day 0-3，4 sub-agent 平行交付 5 IMPL commit：E1-A `094f9914` (W-AUDIT-9 T1+T2 Rust schema + V080) / E1-C `200188ad` (T3 Python stage-aware) / E1-D `063f12d0` + `f6fb315a` (T6 LeaseScope + 6d-4/5/6) / E1-E `4a90966a` (B-M1 V082 + producer)。Verdict = RETURN-TO-E1-A（1 HIGH cross-wave + 3 MED + 1 LOW；3 wave APPROVE pending E1-A IPC fix）。
+
+### lesson 41 — E1 自評 cargo test scope 漏層的對抗檢查
+E1-A report §5.1 自報「cargo test --lib -p openclaw_engine config::risk_config 139 passed」— 看似嚴謹但**只跑 schema scope**，沒跑 `ipc_server::tests::config` scope。E2 實測 `cargo test --lib -p openclaw_engine --release` 暴露 2 IPC test fail（`test_g3_02_a2_patch_executor_*`）。E1-A 引入 schema invariant `shadow_mode != canary_stage.as_shadow_mode() = reject` 直接破既有 G3-02 binary patch IPC test，但 E1-A 漏跑 IPC scope 沒看到。**規律**：E2 對 schema invariant 級改動必檢查所有用該 schema 的 IPC / patch / round-trip / round-trip-toml / cohabitate scope，不信 E1 自報 cargo test scope 有限。**抽象**：「139 PASS」與「全套 PASS」差天涯，schema 改動對 cross-cutting test scope 影響面 = E2 必跑 `cargo test --lib --release` 全套 + grep schema 所有 callsite 並 cross-check。
+
+### lesson 42 — 多 sub-agent 並行交付的 cross-wave fail attribution
+4 sub-agent 平行做不同範圍，但 schema 升級（E1-A T1）會 ripple 到他人範圍。E1-D 報告 §5「既有失敗（**非本 task 引入**）：cargo test 顯示 2 個 IPC test fail；stash 我自己改動後 baseline 仍 fail」— **E1-D 的 attribution 是對的**：fail 不是 E1-D 引入。但 E2 必獨立追蹤 root cause 確認 fix 屬誰，不能只信 E1 之間互推。本輪 E2 用 fail message 的字串「shadow_mode=false inconsistent with canary_stage=0... AMD-2026-05-09-03 §4.4 requires...」directly point to `risk_config_advanced.rs` validate() 新代碼 → owner = E1-A。**規律**：cross-wave fail 用 fail message 反推 owner（log message 字串通常含 file/feature 標識）+ 用 git diff range 看誰引入相關代碼。**抽象**：multi-sub-agent 平行的 cross-wave attribution 不靠 「誰先報」也不靠 「誰最後 cargo test」，靠 fail message 的 source-of-truth 字串 + git blame；E2 為 ground truth arbiter。
+
+### lesson 43 — Bailey-Lopez de Prado DSR mu_0 公式 ln vs log₁₀ 的 academic standard
+E1-D `dsr_penalty_quantification.md` 自我糾正 TODO §7 引用 mu_0=2.83/2.27（log₁₀ 假設）→ 採 ln 為唯一權威：K=25 mu_0=2.5374 / K=13 mu_0=2.2649。E2 Python 實測復算公式 `mu_0 = sqrt(2 * ln(K))` 與 E1-D 數值一致 (2.5374 / 2.2649 / Δ -0.2723)。**規律**：DSR 公式來源 Bailey & Lopez de Prado (2014, 2020) "The Deflated Sharpe Ratio" 標準採 natural log；TODO 文檔錯誤引用 log₁₀ 是 documentation bug 非 spec error。E2 對量化結論 review 時必重跑公式 with both bases 驗證 academic source。**抽象**：academic formula 引用 log base 必 cross-check paper original notation；DSR 標準 = ln，日常 % 用 log₁₀，E1-D self-correct 是好範例（不護短前 round PA / FA / TODO 引用錯誤）。
+
+### lesson 44 — graduated canary backward-compat 投影邊界的 production exposure 評估
+E1-C T3 `_read_canary_stage` path 2b 把 legacy `shadow_mode_provider` 回 False 投影至 **Stage 1 PAPER_SINGLE_COHORT**（不是 Stage 0）。對抗反問：這違反 invariant 9 嗎？答：不違反 — invariant 9 的「fail-closed Stage 0」適用於 fail path（exception / cache miss / IPC fail），path 2b 是 success path 的 backward-compat 投影。但 production 風險：如果 IPC patch atomic set canary_stage=2 + shadow_mode=false，cache 解析 canary_stage=2 但 ExecutorAgent (僅 legacy provider) 看 shadow=False → 投影 Stage 1（不是 Stage 2）→ cohort scope check 看到 paper 環境而非 demo → 路由錯誤。**E2 verdict**：accept trade-off + 加 W-AUDIT-3b runtime smoke follow-up acceptance criteria：「strategy_wiring.py:549 ExecutorAgent ctor 必同時注入 `canary_stage_provider=cache.canary_stage_provider()`」。**規律**：E2 對 backward-compat 投影的「fail vs success path」要區分 — invariant 9 fail-closed 嚴格適用 fail path；success path 的 graceful degradation 是另一決策（accept / reject）；trade-off 的 production exposure 必加 runtime wiring follow-up tracker。**抽象**：backward-compat 不只是 schema parsing 兼容，還含 runtime semantics 投影；後者的 production exposure 通常需 follow-up wiring 才完整解，E2 不能只 OK source/test then close。
+
+---
+
+## 2026-05-09 反模式錄
+
+1. **E1 acceptance 漏層**：跑 scope-limited cargo test（`config::risk_config` 139 PASS）就自評 PASS，沒跑 `cargo test --lib --release` 全套 → cross-cutting test scope 漏被檢查。
+2. **multi-sub-agent cross-wave fail 互推**：A say not me / B say not me，沒人對 cross-wave fail 做 ground truth attribution → E2 必 arbiter。
+3. **academic formula 文檔誤引 log base**：TODO §7 引用 log₁₀ mu_0=2.83，但 DSR 標準是 ln → 公式 base 必 cross-check paper original。
+4. **backward-compat 投影 trade-off 不加 follow-up wiring tracker**：source/test only land 但 production wiring 補不齊就有 runtime exposure → E2 review 必加 W-AUDIT-3b follow-up acceptance criteria。
