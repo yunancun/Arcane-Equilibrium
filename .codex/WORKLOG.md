@@ -322,3 +322,9 @@ YYYY-MM-DD HH:MM TZ
 - added `tests/structure/test_system_mode_confirm_static.py` to pin the countdown constants, live-only scope, confirm click handler, pointer cancel paths, and keyboard hold/cancel support
 - verification: system-mode + prompt modal static pytest 5/0, `git diff --check` PASS, Edge headless smoke via temporary static server verified initial disabled countdown, ready hold state, single-click rejection, and hold-to-confirm submission through stubbed `/api/v1/input/config-change`
 - boundary: source/test/static-browser only; no backend start, rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- operator authorized three-side sync plus rebuild/restart after W-AUDIT-7 GUI checkpoint; Mac/origin/Linux synced at `95364596d56dcccca86f5d84e200676b6e6422ce`
+- Linux `restart_all.sh --rebuild --keep-auth` rebuilt the release engine and restarted API, but engine startup aborted during auto-migrate V077 because Timescale columnstore-enabled `trading.fills` does not support the CHECK alteration
+- verified `_sqlx_migrations` had applied V068-V076 and not V077, then hotfixed V077 to keep CHECK as the preferred path and install a same-predicate trigger fallback on `feature_not_supported`
+- verification: V077 static pytest 5/0, `git diff --check` PASS, Linux PG `BEGIN ... ROLLBACK` dry-run of the patched V077 PASS with trigger fallback notice; no live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

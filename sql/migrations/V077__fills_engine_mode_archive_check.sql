@@ -10,7 +10,35 @@
 --
 -- Do not deploy V077 ahead of the rest of the W-AUDIT-4 migration set unless
 -- the operator explicitly accepts the resulting migration version ordering.
+--
+-- Runtime note: on Timescale columnstore-enabled hypertables, ADD/VALIDATE
+-- CHECK may return feature_not_supported. In that case this migration installs
+-- a BEFORE INSERT/UPDATE trigger with the same predicate so new writes are
+-- still bounded without rewriting existing rows or disabling columnstore.
 -- ============================================================
+
+CREATE OR REPLACE FUNCTION trading.enforce_fills_engine_mode_known_values()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $fn$
+BEGIN
+    IF NOT (
+        NEW.engine_mode IN ('paper', 'demo', 'live', 'live_demo')
+        OR (
+            NEW.engine_mode = 'demo_archive_20260418'
+            AND NEW.ts < TIMESTAMPTZ '2026-04-18 22:00:00+00'
+        )
+    ) THEN
+        RAISE EXCEPTION
+            'chk_fills_engine_mode_known_values violation: engine_mode=%, ts=%',
+            NEW.engine_mode,
+            NEW.ts
+            USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+END
+$fn$;
 
 DO $$
 DECLARE
@@ -92,21 +120,40 @@ BEGIN
                 v_constraint_def;
         END IF;
     ELSE
-        ALTER TABLE trading.fills
-            ADD CONSTRAINT chk_fills_engine_mode_known_values
-            CHECK (
-                engine_mode IN ('paper', 'demo', 'live', 'live_demo')
-                OR (
-                    engine_mode = 'demo_archive_20260418'
-                    AND ts < TIMESTAMPTZ '2026-04-18 22:00:00+00'
+        BEGIN
+            ALTER TABLE trading.fills
+                ADD CONSTRAINT chk_fills_engine_mode_known_values
+                CHECK (
+                    engine_mode IN ('paper', 'demo', 'live', 'live_demo')
+                    OR (
+                        engine_mode = 'demo_archive_20260418'
+                        AND ts < TIMESTAMPTZ '2026-04-18 22:00:00+00'
+                    )
                 )
-            )
-            NOT VALID;
+                NOT VALID;
 
-        ALTER TABLE trading.fills
-            VALIDATE CONSTRAINT chk_fills_engine_mode_known_values;
+            ALTER TABLE trading.fills
+                VALIDATE CONSTRAINT chk_fills_engine_mode_known_values;
 
-        RAISE NOTICE 'V077: added and validated chk_fills_engine_mode_known_values';
+            RAISE NOTICE 'V077: added and validated chk_fills_engine_mode_known_values';
+        EXCEPTION
+            WHEN feature_not_supported THEN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_trigger
+                    WHERE tgrelid = 'trading.fills'::regclass
+                      AND tgname = 'trg_fills_engine_mode_known_values'
+                      AND NOT tgisinternal
+                ) THEN
+                    CREATE TRIGGER trg_fills_engine_mode_known_values
+                        BEFORE INSERT OR UPDATE OF engine_mode, ts ON trading.fills
+                        FOR EACH ROW
+                        EXECUTE FUNCTION trading.enforce_fills_engine_mode_known_values();
+                END IF;
+
+                RAISE NOTICE
+                    'V077: columnstore hypertable does not support CHECK; installed trigger fallback trg_fills_engine_mode_known_values';
+        END;
     END IF;
 END
 $$;
