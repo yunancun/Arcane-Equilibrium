@@ -6030,3 +6030,42 @@ export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 ### Commit
 - 待 E2 round 2 review → E4 → PM 統一 commit + push origin/main + ssh trade-core git pull --ff-only
 - 預期 commit message 含「ml_training E1 Round 2: regression test per E2 verdict RETURN-TO-E1」
+
+---
+
+## 2026-05-09 — W-AUDIT-9 T3 shadow_mode_provider stage-aware（Python）
+
+### Context
+- Sprint N+0 Day 0-3 派工，本 instance = E1-C
+- AMD-2026-05-09-03 把 binary `executor.shadow_mode` 升級為 5-stage graduated canary cohort
+- Cross-wave conflict #2：T3 source/test only，runtime apply 由 W-AUDIT-3b smoke 後執行
+
+### 修改範圍（5 檔，+898 / -167 LOC）
+- `app/executor_config_cache.py`：`CanaryStage` IntEnum + `CanaryCohort` + 升級 `ExecutorRuntimeConfig` + `canary_stage_provider()` + `_parse_response` stage 解析 + AMD §4.4 backward-compat reject
+- `app/executor_agent.py`：ctor 加 `canary_stage_provider` arg + `_read_canary_stage()` + `_read_shadow_mode()` 改為 stage projection
+- `tests/test_executor_config_cache.py`：+19 測試（5 stage transition / from_raw fail-closed / backward-compat reject / shadow projection）
+- `tests/test_executor_agent_unit.py`：+16 測試（stage 0/1/2/3/4 / exception fail-closed / legacy projection / engine-aware）
+- `tests/test_executor_shadow_to_live_e2e.py`：`_make_runtime_config` helper auto-pair shadow=False + canary_stage>=1
+
+### 結果
+- pytest -k test_executor_config_cache: 39 PASS
+- pytest -k test_canary_stage: 19 PASS
+- regression suite: 255 PASS / 7 skipped / 0 FAIL（含 162 agents/governance siblings）
+- Local commit `200188ad`（未 push，per task 指示，PM 統一 push）
+
+### Key invariants 守住
+- TODO v19 §5 invariant 9：cache miss / IPC fail / schema fail / provider exception → Stage 0（不是 Stage 1）
+- AMD-2026-05-09-01 §3 SM-05 invariants 全保留
+- backward-compat：`shadow_mode_provider()` lambda 仍可用（Stage 0 → True，Stage ≥ 1 → False）
+- legacy `shadow_mode=False` 配無 `canary_stage` → §4.4 reject Stage 0 + log（fail-closed）
+
+### Lesson
+- IntEnum mirror Rust 設計：IPC payload `canary_stage` 是 int 0..=4，Python 用 `IntEnum.from_raw()` fail-closed parse 規避不可解析值（None / out-of-range / 型別錯誤）一律 SHADOW
+- backward-compat 升級 dataclass：legacy field（`shadow_mode`）改為 stage projection（`shadow_mode = (canary_stage == SHADOW)`）以避免兩欄分歧
+- 既有 helper（`_make_runtime_config`, `_make_response`）需同步升級：當 `shadow=False` 預設帶 `canary_stage=1`，否則 §4.4 reject 觸發測試 false fail
+- 既有 log 字串（`shadow_mode_provider unavailable`）必須保留：`test_executor_agent_has_no_unconditional_lambda_true_fallback` grep source 驗證 lambda:True 不存在 + 此 log 字串存在
+- multi-session race 友好：commit `--only` 5 個 Python 檔，未碰 Rust + SQL（其他 sub-agent 範圍）
+
+### Commit
+- Local commit `200188ad` 完成（無 `[skip ci]`，per task 指示「最終 commit 不加」）
+- 待 E2 second-pass review（Day 5-7）→ E4 regression（5-stage transition + auto-rollback + SM-04 L3）→ PM 統一 push + ssh trade-core git pull
