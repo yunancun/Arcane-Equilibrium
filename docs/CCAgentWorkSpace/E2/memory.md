@@ -1695,3 +1695,35 @@ E1-C T3 `_read_canary_stage` path 2b 把 legacy `shadow_mode_provider` 回 False
 2. **multi-sub-agent cross-wave fail 互推**：A say not me / B say not me，沒人對 cross-wave fail 做 ground truth attribution → E2 必 arbiter。
 3. **academic formula 文檔誤引 log base**：TODO §7 引用 log₁₀ mu_0=2.83，但 DSR 標準是 ln → 公式 base 必 cross-check paper original。
 4. **backward-compat 投影 trade-off 不加 follow-up wiring tracker**：source/test only land 但 production wiring 補不齊就有 runtime exposure → E2 review 必加 W-AUDIT-3b follow-up acceptance criteria。
+
+---
+
+## 2026-05-09 E2 Second-Pass — Sprint N+0 W-AUDIT-9 cross-wave fix APPROVE
+
+- **Commit**：`11849c18` `e1-fix: W-AUDIT-9 cross-wave fixture pattern (5 NEW regression)`
+- **報告**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-09--sprint_n0_second_pass_review.md`
+- **Verdict**：**APPROVE** — first-pass §E1-A 3 條 RETURN scope 完整覆蓋；E1-FIX 改 2 文件 +~100 LOC 全 test fixture 層
+
+### 驗證（E2 重跑非信 E1 自報）
+
+- `cargo test --lib --release -p openclaw_engine ipc_server::tests::config` = 16/0 (was 13/2 fail)
+- `cargo test --lib --release -p openclaw_engine` full = 2625/0 (was 2622/2 fail)
+- `pytest test_executor_decision_parity.py -q` = 5 passed / 2 skipped；agree=70/70 (100%)（was 30 disagree）
+
+### Acceptance criteria 全 PASS
+
+- ✅ Rust IPC test rename + 改斷言 reject (line 426 → `binary_shadow_only_rejected_invariant_drift`)
+- ✅ Rust IPC test 5-field atomic Stage 2 demo cohort (line 549 → `routes_to_demo_engine` 升級)
+- ✅ Rust IPC 新增 Stage 1 atomic patch success test (`stage_promotion_via_patch_risk_config`)
+- ✅ Python parity `_build_runtime_config` stage auto-pair (shadow ⇄ canary_stage projection)
+- ✅ Python parity `_drive_python_decision` ExecutorAgent ctor `canary_stage_provider` injection
+- ✅ Backward-compat 0 break (Optional kwarg + 既有 caller `strategy_wiring.py:549` 仍走 legacy fallback)
+- ✅ invariant 9 fail-closed Stage 0 三 critical path 保留（priority 1.c / 2.c / 3）
+- ✅ invariant 10 Stage 0 binary fail-closed 4 範圍保留（fix 不動 source）
+
+### 教訓 / 反模式
+
+5. **second-pass scope discipline**：second-pass 限定 review fix delta，不 re-review 已 first-pass APPROVE 的 4 wave；爭取避免 review scope creep（first-pass 已 land at `87f92e69`）。
+6. **cross-session 副作用 attribution 必經 git log timing 驗**：`tests/ci/test_github_ci_workflow_static.py` fail 是 commit `0dc6d659`（W-AUDIT-9 chain 之前）副作用 → 不在 W-AUDIT-9 chain RETURN scope，PM flag 隔壁 session 處理。
+7. **production caller wiring P1 follow-up 必入 W-AUDIT-3b runtime smoke acceptance**：fixture wired stage-aware injection ≠ production wired；E2 必 grep 生產 caller 確認 wiring 狀態，發現 gap 必 documented follow-up + 不阻 second-pass approve。
+8. **E2 second-pass 重跑 acceptance 數據而非信 E1-FIX self-report**：cargo lib 2625/0 + parity 70/70 + IPC 16/0 全 E2 重跑 verified；E1-FIX claim 真實但 E2 second-pass 仍須獨立 verify。
