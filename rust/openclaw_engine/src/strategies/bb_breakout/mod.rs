@@ -37,7 +37,8 @@ mod tests_p1_11;
 
 pub use params::{BbBreakoutParams, BbBreakoutProfile, DonchianMode};
 use params::{
-    DEFAULT_COOLDOWN_MS, DEFAULT_EXPANSION_BW, DEFAULT_SQUEEZE_BW, DEFAULT_VOLUME_THRESHOLD,
+    DEFAULT_COOLDOWN_MS, DEFAULT_EXPANSION_BW, DEFAULT_SIGNAL_TIMEFRAME, DEFAULT_SQUEEZE_BW,
+    DEFAULT_VOLUME_THRESHOLD,
 };
 
 /// Per-symbol dynamic state for `BbBreakout`. All fields are independently
@@ -92,6 +93,10 @@ impl BbBreakoutPerSymbolState {
 
 pub struct BbBreakout {
     active: bool,
+    /// Indicator timeframe used by the entry/exit logic. `1m` consumes the
+    /// primary `TickContext.indicators`; `5m` consumes `indicators_5m`.
+    /// 入出場邏輯使用的指標時間框架；`5m` 不足時跳過而非回退。
+    pub(crate) signal_timeframe: String,
     /// Per-symbol state (position/squeeze/entry_price/trailing_stop).
     /// 逐 symbol 狀態（持倉/壓縮/進場價/追蹤止損），以 PerSymbolState 統一容器承載。
     pub(crate) symbols: PerSymbolState<BbBreakoutPerSymbolState>,
@@ -189,6 +194,7 @@ impl BbBreakout {
     pub fn new() -> Self {
         Self {
             active: true,
+            signal_timeframe: DEFAULT_SIGNAL_TIMEFRAME.to_string(),
             symbols: PerSymbolState::new(),
             squeeze_expiry_ms: 2_700_000, // EDGE-P1-4: 45 minutes (was 30)
             cooldown: TrendCooldown::new(DEFAULT_COOLDOWN_MS),
@@ -364,9 +370,15 @@ impl Strategy for BbBreakout {
     }
 
     fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
-        let ind = match ctx.indicators {
-            Some(i) => i,
-            None => return vec![],
+        let ind = match self.signal_timeframe.as_str() {
+            "5m" => match ctx.indicators_5m {
+                Some(i) => i,
+                None => return vec![],
+            },
+            _ => match ctx.indicators {
+                Some(i) => i,
+                None => return vec![],
+            },
         };
         let bb = match &ind.bollinger {
             Some(b) => b,

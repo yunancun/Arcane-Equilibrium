@@ -176,12 +176,14 @@ impl TickPipeline {
             .as_ref()
             .and_then(|c| c.get_tick_size(sym))
             .filter(|t| *t > 0.0);
+        let indicators_5m = self.compute_indicators_for_timeframe(sym, "5m");
 
         let ctx = TickContext {
             symbol: sym,
             price: event.last_price,
             timestamp_ms: event.ts_ms,
             indicators,
+            indicators_5m: indicators_5m.as_ref(),
             signals,
             h0_allowed, // RRC-1-A1: real H0 gate result from Step 0.5
             funding_rate,

@@ -666,7 +666,14 @@ pub struct TickContext<'a> {
     pub symbol: &'a str,
     pub price: f64,
     pub timestamp_ms: u64,
+    /// Primary indicator snapshot, currently computed from 1m klines.
+    /// 主要指標快照，目前由 1m K 線計算。
     pub indicators: Option<&'a IndicatorSnapshot>,
+    /// Optional 5m indicator snapshot for strategies that explicitly opt into
+    /// a 5m signal family. Absence means "not warm yet"; consumers must skip
+    /// rather than fall back to 1m if their configured timeframe is 5m.
+    /// 顯式切到 5m 信號族的策略可使用；缺失代表尚未 warm，不能假回退到 1m。
+    pub indicators_5m: Option<&'a IndicatorSnapshot>,
     pub signals: &'a [Signal],
     pub h0_allowed: bool,
     /// EDGE-P1-2: Latest funding rate for this symbol (from Bybit tickers).

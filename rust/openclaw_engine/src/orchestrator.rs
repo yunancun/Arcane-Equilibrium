@@ -228,6 +228,7 @@ mod tests {
             price: 50000.0,
             timestamp_ms: 0,
             indicators: None,
+            indicators_5m: None,
             signals: &[],
             h0_allowed: true,
             funding_rate: None,

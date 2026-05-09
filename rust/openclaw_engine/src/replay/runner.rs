@@ -1131,6 +1131,7 @@ fn build_tick_context<'a>(
         price: event.close,
         timestamp_ms: event.ts_ms.max(0) as u64,
         indicators: inputs.indicators.as_ref(),
+        indicators_5m: None,
         signals: &inputs.signals,
         h0_allowed: inputs.h0_allowed,
         funding_rate: inputs.funding_rate,

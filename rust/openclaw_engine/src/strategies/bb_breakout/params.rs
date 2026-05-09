@@ -21,6 +21,9 @@ pub(super) const DEFAULT_EXPANSION_BW: f64 = 0.04;
 pub(super) const DEFAULT_VOLUME_THRESHOLD: f64 = 1.2; // EDGE-P1-4: 1.5→1.2 (lower volume bar)
 /// Default per-symbol cooldown duration in milliseconds.
 pub(super) const DEFAULT_COOLDOWN_MS: u64 = 300_000;
+/// Default signal timeframe. Backward-compatible 1m; W-AUDIT-6 5m revision
+/// opts in explicitly through strategy TOML / IPC params.
+pub(super) const DEFAULT_SIGNAL_TIMEFRAME: &str = "1m";
 
 /// P1-11 (2): how the Donchian-channel breach condition combines with the
 /// BB-core gates (squeeze / expansion / volume).
@@ -100,6 +103,11 @@ pub enum BbBreakoutProfile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BbBreakoutParams {
+    /// Signal indicator timeframe. Supported values: `1m` and `5m`.
+    /// `5m` consumes `TickContext.indicators_5m` and skips when not warm rather
+    /// than falling back to the 1m snapshot.
+    /// 信號指標時間框架；支援 `1m`/`5m`。`5m` 缺資料時跳過，不假回退到 1m。
+    pub signal_timeframe: String,
     pub cooldown_ms: u64,
     pub default_qty: f64,
     pub squeeze_bw: f64,
@@ -224,10 +232,11 @@ impl BbBreakoutParams {
             // tight and only clearest breakouts should fire.
             // 嚴格 Conservative：窄 squeeze + 寬擴張 gap + 高 volume + 長 persistence。
             BbBreakoutProfile::Conservative => Self {
+                signal_timeframe: "5m".to_string(),
                 squeeze_bw: 0.02,
                 expansion_bw: 0.05,
                 volume_threshold: 1.5,
-                min_persistence_ms: 120_000, // 2 min
+                min_persistence_ms: 600_000, // 10 min = two 5m bars
                 ..Self::default()
             },
             // Balanced: bit-identical to current production default. Test
@@ -242,10 +251,11 @@ impl BbBreakoutParams {
             // 寬鬆 Aggressive：鬆 squeeze + 窄 gap + 低 volume + 短 persistence；
             // 建議與 `DonchianMode::Score` 組合 — §P1-11 (2)+(3) 救援路徑。
             BbBreakoutProfile::Aggressive => Self {
+                signal_timeframe: "5m".to_string(),
                 squeeze_bw: 0.035,
                 expansion_bw: 0.040,
                 volume_threshold: 1.05,
-                min_persistence_ms: 30_000, // 30s
+                min_persistence_ms: 30_000, // keep profile looser than Balanced
                 ..Self::default()
             },
         }
@@ -256,6 +266,7 @@ impl Default for BbBreakoutParams {
     fn default() -> Self {
         let cc = ConfluenceConfig::breakout();
         Self {
+            signal_timeframe: DEFAULT_SIGNAL_TIMEFRAME.to_string(),
             cooldown_ms: DEFAULT_COOLDOWN_MS,
             default_qty: 1e9,
             squeeze_bw: DEFAULT_SQUEEZE_BW,
@@ -495,6 +506,9 @@ impl StrategyParams for BbBreakoutParams {
     }
 
     fn validate(&self) -> Result<(), String> {
+        if self.signal_timeframe != "1m" && self.signal_timeframe != "5m" {
+            return Err("signal_timeframe must be one of: 1m, 5m".into());
+        }
         if self.squeeze_bw >= self.expansion_bw {
             return Err("squeeze_bw must be < expansion_bw".into());
         }

@@ -17,6 +17,7 @@ use tracing::info;
 impl BbBreakout {
     pub fn update_params(&mut self, params: BbBreakoutParams) -> Result<(), String> {
         params.validate()?;
+        self.signal_timeframe = params.signal_timeframe.clone();
         self.cooldown_ms = params.cooldown_ms;
         // Keep TrendCooldown duration in sync with param (hot-reloadable).
         // 保持 TrendCooldown 時長與參數同步（支援熱重載）。
@@ -71,6 +72,7 @@ impl BbBreakout {
 
     pub fn get_params(&self) -> BbBreakoutParams {
         BbBreakoutParams {
+            signal_timeframe: self.signal_timeframe.clone(),
             cooldown_ms: self.cooldown_ms,
             default_qty: self.default_qty,
             squeeze_bw: self.squeeze_bw,

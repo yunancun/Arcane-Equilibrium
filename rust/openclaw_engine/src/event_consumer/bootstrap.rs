@@ -783,40 +783,57 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         let _ = tx.send(());
     }
 
-    // Kline bootstrap: fetch 200 1m bars per symbol via REST (eliminates 30min cold start)
-    // K 線引導：通過 REST 為每個幣種獲取 200 根 1 分鐘歷史 K 線（消除 30 分鐘冷啟動）
+    // Kline bootstrap: fetch 1m + 5m bars per symbol via REST. The 5m seed
+    // keeps W-AUDIT-6 bb_breakout 5m revision from waiting ~150 minutes after
+    // planned rebuilds before the indicator snapshot becomes warm.
+    // K 線引導：通過 REST 為每個幣種獲取 1m + 5m 歷史 K 線；5m seed 避免
+    // bb_breakout 5m 改版在計畫性重啟後等待約 150 分鐘才 warm。
     if cfg_snapshot.kline_bootstrap {
         if let Some(ref client_arc) = bootstrap_client {
             let mdc = crate::market_data_client::MarketDataClient::new(Arc::clone(client_arc));
             for &sym in SYMBOLS {
-                match mdc
-                    .get_klines("linear", sym, "1", None, None, Some(200))
-                    .await
+                for (api_interval, timeframe, period_ms) in
+                    [("1", "1m", 60_000_u64), ("5", "5m", 300_000_u64)]
                 {
-                    Ok(bars) => {
-                        let now_ms = openclaw_core::now_ms();
-                        let mut core_bars: Vec<openclaw_core::klines::KlineBar> = bars
-                            .iter()
-                            .filter(|b| b.start_time + 60_000 <= now_ms)
-                            .map(|b| openclaw_core::klines::KlineBar {
-                                open_time_ms: b.start_time,
-                                close_time_ms: b.start_time + 60_000,
-                                open: b.open,
-                                high: b.high,
-                                low: b.low,
-                                close: b.close,
-                                volume: b.volume,
-                                turnover: b.turnover,
-                                tick_count: 1,
-                                is_closed: true,
-                            })
-                            .collect();
-                        core_bars.sort_by_key(|b| b.open_time_ms);
-                        let count = pipeline.kline_manager.seed_bars(sym, "1m", core_bars);
-                        info!(symbol = sym, bars = count, "kline bootstrap / K 線引導完成");
-                    }
-                    Err(e) => {
-                        warn!(symbol = sym, error = %e, "kline bootstrap failed / K 線引導失敗")
+                    match mdc
+                        .get_klines("linear", sym, api_interval, None, None, Some(200))
+                        .await
+                    {
+                        Ok(bars) => {
+                            let now_ms = openclaw_core::now_ms();
+                            let mut core_bars: Vec<openclaw_core::klines::KlineBar> = bars
+                                .iter()
+                                .filter(|b| b.start_time + period_ms <= now_ms)
+                                .map(|b| openclaw_core::klines::KlineBar {
+                                    open_time_ms: b.start_time,
+                                    close_time_ms: b.start_time + period_ms,
+                                    open: b.open,
+                                    high: b.high,
+                                    low: b.low,
+                                    close: b.close,
+                                    volume: b.volume,
+                                    turnover: b.turnover,
+                                    tick_count: 1,
+                                    is_closed: true,
+                                })
+                                .collect();
+                            core_bars.sort_by_key(|b| b.open_time_ms);
+                            let count = pipeline.kline_manager.seed_bars(sym, timeframe, core_bars);
+                            info!(
+                                symbol = sym,
+                                timeframe,
+                                bars = count,
+                                "kline bootstrap / K 線引導完成"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                symbol = sym,
+                                timeframe,
+                                error = %e,
+                                "kline bootstrap failed / K 線引導失敗"
+                            )
+                        }
                     }
                 }
             }

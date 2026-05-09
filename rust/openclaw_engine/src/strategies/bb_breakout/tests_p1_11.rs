@@ -64,6 +64,7 @@ fn ctx_p1_11(
         price,
         timestamp_ms: ts,
         indicators: Some(ind),
+        indicators_5m: None,
         signals: &[],
         h0_allowed: true,
         funding_rate: None,
