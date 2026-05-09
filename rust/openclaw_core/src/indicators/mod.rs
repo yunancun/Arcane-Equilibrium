@@ -264,6 +264,32 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_all_uses_prior_bar_donchian_snapshot() {
+        let mut high = vec![100.0; 21];
+        let mut low = vec![90.0; 21];
+        let close = vec![95.0; 21];
+        let volume = vec![1000.0; 21];
+        high[19] = 110.0;
+        low[19] = 88.0;
+        high[20] = 999.0;
+        low[20] = 1.0;
+
+        let snap = IndicatorEngine::compute_all(&high, &low, &close, &volume);
+        let donchian = snap
+            .donchian
+            .expect("21 bars should produce prior Donchian");
+
+        assert!(
+            (donchian.upper - 110.0).abs() < 1e-12,
+            "runtime indicator snapshot must exclude the current bar high"
+        );
+        assert!(
+            (donchian.lower - 88.0).abs() < 1e-12,
+            "runtime indicator snapshot must exclude the current bar low"
+        );
+    }
+
+    #[test]
     fn test_compute_all_insufficient_data() {
         // 5 bars — most indicators should return None gracefully
         // 5 根 K 線 — 大多數指標應優雅地返回 None

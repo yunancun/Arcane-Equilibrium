@@ -238,6 +238,12 @@
 | 2026-03-31 | Wave 5 完成進度報告 + 下一步安排 | workspace/reports/2026-03-31--wave5_completion_progress_report.md |
 | 2026-03-31 | Wave 6 正式派發計劃（Sprint 0~2）| workspace/reports/2026-03-31--wave6_dispatch.md |
 
+## 報告索引追加
+
+| 日期 | 報告類型 | 文件位置 |
+|------|---------|---------|
+| 2026-05-09 | P0-V2-NEW-1 Donchian leak-bias source/test closure: locked runtime IndicatorEngine snapshots to prior-bar Donchian and added bb_breakout 5m hard-gate regression so current-bar spikes cannot contaminate 5m demo evidence | workspace/reports/2026-05-09--p0_v2_new_1_donchian_leak_bias.md |
+
 ## 2026-04-24 TODO.md 全面 Audit（PM 視角）
 
 ### 關鍵發現

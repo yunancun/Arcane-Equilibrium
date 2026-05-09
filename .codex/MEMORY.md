@@ -269,6 +269,13 @@ W-AUDIT-6 current fact:
   and runtime `bb_breakout` skips when configured 5m data is not warm instead
   of falling back to 1m. Demo is active on the 5m family; paper/live stay
   inactive.
+- as of 2026-05-09, `P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` is source/test closed:
+  runtime `IndicatorEngine::compute_all_with_lambda()` emits Donchian snapshots
+  via `donchian_prior()`; `donchian()` remains the explicit inclusive helper.
+  Regression tests prove current-bar high/low spikes are excluded from runtime
+  snapshots and `bb_breakout` 5m hard-gate entry uses the prior-bar upper. No
+  runtime reload/rebuild, strategy pause, DB write, or live auth mutation was
+  performed.
 - as of 2026-05-09, W-AUDIT-6c portfolio VaR/CVaR/EVT is source/test closed at
   `cc6476dd`: `program_code/learning_engine/cvar.py` implements historical
   VaR/CVaR, EVT/GPD tail fit, and stationary block-bootstrap VaR/CVaR
