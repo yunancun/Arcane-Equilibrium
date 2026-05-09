@@ -264,3 +264,8 @@ YYYY-MM-DD HH:MM TZ
 - started W-AUDIT-5a with F-21 source checkpoint: added `rust/Cargo.toml [profile.release] strip = "symbols"` plus a static TOML regression test
 - verification: release profile strip pytest 1/0, `cargo metadata --manifest-path rust/Cargo.toml --no-deps`, `cargo check --manifest-path rust/Cargo.toml -p openclaw_engine --bin openclaw-engine` PASS with pre-existing unused/dead_code warnings, `git diff --check` PASS
 - no release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
+
+2026-05-09 CEST
+- continued W-AUDIT-5a F-26 source checkpoint: added `.github/workflows/ci.yml` with Rust release-check matrix for `x86_64-unknown-linux-gnu` on ubuntu and `aarch64-apple-darwin` on macOS
+- verification: CI workflow + release profile pytest 4/0, Ruby YAML parse PASS, `cargo metadata --manifest-path rust/Cargo.toml --no-deps`, `cargo check --manifest-path rust/Cargo.toml -p openclaw_engine --bin openclaw-engine` PASS with pre-existing unused/dead_code warnings, `git diff --check` PASS
+- no CI run, release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, or strategy/risk config mutation
