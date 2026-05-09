@@ -28,6 +28,7 @@ use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 use tracing::info;
 
 pub struct BbReversion {
@@ -332,6 +333,13 @@ impl Strategy for BbReversion {
         self.active = active;
     }
 
+    /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
+    /// `bb_reversion`：`[Ta1m]`（純 1m kline TA）。
+    fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
+        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
+        TAGS
+    }
+
     /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
     /// RC-04：拒絕時回滾該幣種的 position 和 last_trade_ms。
     fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
@@ -362,7 +370,11 @@ impl Strategy for BbReversion {
         self.persistence.clear(symbol);
     }
 
-    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+    fn on_tick(
+        &mut self,
+        ctx: &TickContext<'_>,
+        _surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         let ind = match ctx.indicators {
             Some(i) => i,
             None => return vec![],

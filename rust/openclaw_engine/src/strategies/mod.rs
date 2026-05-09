@@ -43,6 +43,7 @@ pub use registry::StrategyFactory;
 use crate::intent_processor::OrderIntent;
 use crate::strategies::maker_rejection::MakerRejectionCategory;
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 use openclaw_core::execution::FillResult;
 
 /// First-class strategy action: Open (new position, full governance) or Close (exit, lightweight path).
@@ -82,9 +83,21 @@ pub trait Strategy: Send {
     /// RRC-1-E2：通過 IPC 設置策略活躍/暫停狀態。
     fn set_active(&mut self, active: bool);
 
+    /// W-AUDIT-8a Phase A：聲明本策略消費的 alpha source tag 清單。
+    /// 由 `Orchestrator` 用於 dispatch tracking metric `alpha_source_*_total`。
+    /// 無 default impl：5 既存策略 explicit declare 強制 migration。
+    fn declared_alpha_sources(&self) -> &[AlphaSourceTag];
+
     /// Process a tick and return strategy actions (Open or Close).
     /// 處理 tick 並返回策略動作（Open 或 Close）。
-    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction>;
+    /// W-AUDIT-8a Phase A：簽名升級 + `surface: &AlphaSurface<'_>`。Tier 1 仍由
+    /// `ctx.indicators` 提供（向後相容）；策略未來消費 Tier 2-4 改走
+    /// `surface.<field>`，`None` → fail-closed 跳過自身 alpha source。
+    fn on_tick(
+        &mut self,
+        ctx: &TickContext<'_>,
+        surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction>;
 
     /// Called when an intent from this strategy was rejected by the governance pipeline.
     /// 當此策略的意圖被治理管線拒絕時調用。

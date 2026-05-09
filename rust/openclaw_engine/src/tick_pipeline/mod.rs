@@ -12,6 +12,7 @@
 //!   IntentProcessor、PaperState、StopManager、Governance）。
 
 use openclaw_core::{
+    alpha_surface::AlphaSurface,
     governance_core::{GovernanceCore, GovernanceProfile},
     h0_gate::H0Gate,
     indicators::{IndicatorEngine, IndicatorSnapshot},
@@ -705,6 +706,11 @@ pub struct TickContext<'a> {
     /// G7-09c Phase 1：由 `instrument_info` 快取查得的 tick_size；冷啟動 cache
     /// 未載入時為 None，consumer 走 bps 後備路徑。
     pub tick_size: Option<f64>,
+    /// W-AUDIT-8a Phase A：AlphaSurface 一等公民引用 — 把非-TA alpha source 從
+    /// 「策略自己 buffer」升為一等對象。Phase A：Tier 1 暴露既有 indicators，
+    /// Tier 2-4 全 None / 預設值（collector 留給 Phase B/C/D）。callsite 用
+    /// `&openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE` 作 fallback 引用。
+    pub alpha_surface_ref: &'a AlphaSurface<'a>,
 }
 
 /// Tick statistics for monitoring / Tick 統計。

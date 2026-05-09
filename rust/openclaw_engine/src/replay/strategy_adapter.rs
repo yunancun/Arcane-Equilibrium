@@ -43,6 +43,7 @@ use crate::intent_processor::OrderIntent;
 use crate::replay::profile::{ReplayIsolationError, ReplayProfile};
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::AlphaSurface;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Public types / 公開型別
@@ -143,7 +144,9 @@ impl ReplayStrategyAdapter {
     /// 驅動一個 tick 通過 wrapped strategy 並捕獲 action。回傳的
     /// `Vec<StrategyAction>` 與 live `on_tick` byte-equal。
     pub fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
-        let actions = self.strategy.on_tick(ctx);
+        // W-AUDIT-8a Phase A：取 ctx.alpha_surface_ref（由 build_tick_context 構造）。
+        let surface = ctx.alpha_surface_ref;
+        let actions = self.strategy.on_tick(ctx, surface);
         // Skip empty-tick records to keep trace bounded.
         // 略過空 tick 以限制 trace 大小。
         if !actions.is_empty() {
@@ -264,7 +267,16 @@ mod tests {
         fn set_active(&mut self, a: bool) {
             self.active = a;
         }
-        fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+        fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+            const TAGS: &[openclaw_core::alpha_surface::AlphaSourceTag] =
+                &[openclaw_core::alpha_surface::AlphaSourceTag::Ta1m];
+            TAGS
+        }
+        fn on_tick(
+            &mut self,
+            ctx: &TickContext<'_>,
+            _surface: &AlphaSurface<'_>,
+        ) -> Vec<StrategyAction> {
             vec![StrategyAction::Open(OrderIntent {
                 symbol: ctx.symbol.to_string(),
                 is_long: true,
@@ -300,6 +312,7 @@ mod tests {
             best_bid: None,
             best_ask: None,
             tick_size: None,
+            alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         }
     }
 

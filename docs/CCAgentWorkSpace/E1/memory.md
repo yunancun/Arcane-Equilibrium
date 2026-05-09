@@ -6442,3 +6442,61 @@ fixture 注入 `canary_stage_provider() → Stage1+`。5 個 NEW regression
   `observability.fills_entry_context_id_health` view 監控 24h ratio
 - **批量 INSERT pre-check zero-cost**：`count_close_fills_missing_entry_context_id`
   pure iter().filter()，O(n) 內存遍歷；若 0 violations 則無 log 輸出（早 return）
+
+### 2026-05-09 W-AUDIT-8a Phase A IMPL 教訓（E1-A Day 5-7 W2 派工）
+
+- **Spec Phase + Phase A 0 行為變化**：W-AUDIT-8a Phase A spec 明確「trait 升級 +
+  AlphaSurface struct + 5 既存策略 explicit declare，**0 行為變化**」。落地時嚴守
+  此邊界 — 5 既存策略的 `on_tick` body 不動，只加 `_surface: &AlphaSurface<'_>`
+  unused param + `declared_alpha_sources()` const slice。Phase B/C/D collector 上線
+  後才把 OI delta panel / funding curve / event alerts 從 ctx 路徑遷至 surface 路徑。
+- **`AlphaSourceTag` enum serde rename 顯式必需**：serde 的 `snake_case` 規則無法
+  把 `Ta1m` 拆成 `ta_1m`（digit 不觸發 word boundary，會輸出 `ta1m`）。每個 variant
+  顯式 `#[serde(rename = "...")]` 與 `as_metric_label()` 對齊，PG / Prometheus
+  label SoT 一致性才不破。test
+  `alpha_source_tag_serde_matches_metric_label` 是 round-trip 檢查的關鍵 acceptance。
+- **disjoint-field split borrow pattern**：hot path strategy iteration 需同時 mut
+  borrow `strategies` + `alpha_dispatched_counter` + `alpha_unavailable_counter`，
+  Rust NLL 在跨 method 時看不到欄位結構必須由 method 顯式拆解。`Orchestrator::
+  split_borrow_for_dispatch(&mut self) -> (&mut [Box<dyn Strategy>], &mut HashMap,
+  &mut HashMap)` 是標準解法。step_4_5_dispatch.rs hot path 改用此 split borrow
+  避免 `&mut self.orchestrator` + `strategies_mut()` 二次借用衝突。
+- **`tally_alpha_sources` 採 free fn 而非 method**：因為 method body 內無法同時
+  借用 strategies + counter HashMap（即使 disjoint），改成 `pub(crate) fn
+  tally_alpha_sources(name, declared, surface, &mut dispatched, &mut unavailable)`
+  接受全部引用 — caller hot path inline 呼叫，0 衝突。
+- **bulk-update test 檔的 paren-balanced parser**：275+ on_tick callsite 跨 12 檔
+  test files 不可手動逐一 Edit。寫 Python paren-balanced parser 自動找 `.on_tick(
+  EXPR)` 並追加 `, &EMPTY_ALPHA_SURFACE`，但**必需 receiver-aware**：`pipeline.
+  on_tick(...)` 是 TickPipeline::on_tick(PriceEvent) 不可動，`strat.on_tick(...)` /
+  `s.on_tick(...)` 是 Strategy::on_tick(ctx, surface) 必須 patch。Python script 加
+  `if receiver == "pipeline": skip` 守護。同樣 paren parser 加 `tick_size: None,`
+  → 自動補 `alpha_surface_ref: &EMPTY_ALPHA_SURFACE,` 的 8-space 縮排匹配。
+- **bulk-update 副作用：MakerPriceInputs / IsolatedPipeline 等也有 tick_size 欄位
+  被誤注入 alpha_surface_ref**：`MakerPriceInputs` struct 含 `tick_size: Option<f64>`
+  欄位，bulk script 不分結構 type 一律補 alpha_surface_ref → struct 構造爆 E0560。
+  必須手動逐一還原這些誤注入點（funding_arb / bb_reversion 兩處）。下次 script 改
+  進方向：附加 struct-name 上下文檢查（require previous非空白 token in `MakerPriceInputs
+  {` / `TickContext {` 範圍）。
+- **multi-session memory race / linter revert**：W-AUDIT-8a 同 session 反覆遭遇
+  另一 session（e1-d-w2 W-AUDIT-9 T4 / e1-e W-AUDIT-4b-M1 / W-AUDIT-4b-M3）的
+  uncommitted working tree 與 linter 互相 revert/merge。`git stash apply` 時其他
+  session 的 `database/mod.rs` + `intent_processor/mod.rs` 等被併回 working tree，
+  破我的 build。對策：(1) 每次 stash apply 完必 `git status`，(2) 不屬本 wave 的
+  cross-wave 檔（database/decision_feature_writer / event_consumer/handlers/
+  edge_predictor / database/trading_writer 等）一律 `git checkout HEAD -- <file>`
+  還原乾淨，(3) 我的 W-AUDIT-8a edits 反覆失蹤後必須 grep 驗證
+  `declared_alpha_sources` / `alpha_surface_ref` 確實在檔內。
+- **HEAD baseline 預存在的 stress_bb_reversion_extreme_oversold_bounce 失敗
+  非我 W-AUDIT-8a 引入**：`f6fb315a` W-AUDIT-6d mid-ground #6 引入 `bb_reversion`
+  的 `require_ma_confirmation: bool = true` gate（默認要求 `sma_50` MA confirmation）。
+  測試 `stress_bb_reversion_extreme_oversold_bounce` 用 `bb_snapshot(...)` helper
+  其中 `sma_50: None`，新 gate fail-closes 故 0 intents（baseline 預期 1）。**此失敗
+  是預存於 870a3252 HEAD 的 cross-wave regression，非我 W-AUDIT-8a 引入**。byte-equal
+  proof_5_baseline_vs_candidate_two_runs PASS 證明我未破 byte-identity。
+- **Acceptance 對齊 spec §7.1**：(1) 5 策略全 declared_alpha_sources 非空 slice ✓
+  (2) on_tick(ctx, surface) 簽名升級 0 callsite 用舊簽名 ✓ (3) E2E baseline binary
+  diff via replay_runner_e2e proof_5 PASS ✓ (4) Orchestrator 寫
+  `alpha_dispatched_counter` / `alpha_unavailable_counter` HashMap snapshot ✓ (5)
+  全 callback (on_rejection / on_fill / on_external_close / on_close_confirmed /
+  on_close_skipped / on_post_only_rejected) coverage 100% ✓

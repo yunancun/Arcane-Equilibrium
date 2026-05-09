@@ -54,6 +54,7 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -92,6 +93,7 @@ fn ctx_with_er(sma: f64, kama: f64, adx: f64, ts: u64, er: f64) -> TickContext<'
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -121,13 +123,13 @@ fn test_a1_trending_er_exits_immediately() {
     // entry-side persistence by setting min to 0 only for the entry tick.
     // 入場側 persistence 設 0 以免與 A1 出場路徑糾纏。
     s.min_persistence_ms = 0;
-    let opened = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 1.0));
+    let opened = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 1.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(opened.len(), 1, "long entry should fire");
     // Re-enable persistence before exit — A1 window uses it scaled by ER.
     // 重新啟用 persistence，讓 A1 公式生效。
     s.min_persistence_ms = 180_000;
     // ER=1.0 → window=0 → even 1 ms later the reverse exit fires.
-    let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 1.0));
+    let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 1.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(exit.len(), 1, "trending ER must exit on first reverse tick");
     match &exit[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
@@ -144,23 +146,23 @@ fn test_a1_choppy_er_delays_exit_until_window_elapses() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
     // Open long cleanly first.
-    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5));
+    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     s.min_persistence_ms = 180_000;
 
     // t=500_000: first reverse tick in choppy regime — must NOT exit yet.
     // t=500_000：盤整下首個反向 tick — 尚不可出場。
-    let first = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 0.0));
+    let first = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         first.is_empty(),
         "choppy regime must defer exit until window elapses"
     );
     // Still inside the window (only 100 s passed of 180 s).
     // 仍在窗口內（僅過 100 秒，需 180 秒）。
-    let mid = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 600_000, 0.0));
+    let mid = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 600_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(mid.is_empty(), "still inside choppy persistence window");
     // t=680_001: 180_001 ms after the onset → persistence passes, Close emits.
     // t=680_001：距首次反向 180_001 毫秒 → 持續性通過，出場。
-    let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 680_001, 0.0));
+    let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 680_001, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(exit.len(), 1, "choppy exit must fire once window elapsed");
     match &exit[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
@@ -177,23 +179,23 @@ fn test_a1_reverse_flicker_resets_exit_persistence() {
     // A1 + PersistenceTracker：中間一個對齊 tick 清空 onset。
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
-    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5));
+    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     s.min_persistence_ms = 180_000;
 
     // t=100_000: reverse tick starts timer.
     assert!(s
-        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0))
+        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
         .is_empty());
     // t=120_000: aligned tick (fast>slow, same as current long) → resets timer.
     // 對齊 tick → 重設計時。
     assert!(s
-        .on_tick(&ctx_with_er(100.0, 101.0, 25.0, 120_000, 0.0))
+        .on_tick(&ctx_with_er(100.0, 101.0, 25.0, 120_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
         .is_empty());
     // t=200_000: reverse again — 80 s elapsed since new onset, not 100 s
     // since flicker start → must NOT exit.
     // 再次反向，距新 onset 80 秒 < 180 秒 → 不可出場。
     assert!(s
-        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 200_000, 0.0))
+        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 200_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
         .is_empty());
 }
 
@@ -206,11 +208,11 @@ fn test_a1_external_close_clears_exit_persistence() {
     // 外部平倉後，exit_persistence 必須一併清空。
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
-    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5));
+    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     s.min_persistence_ms = 180_000;
     // Record an exit_persistence onset via a reverse tick.
     assert!(s
-        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0))
+        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
         .is_empty());
 
     // External close wipes everything for this symbol.
@@ -219,11 +221,11 @@ fn test_a1_external_close_clears_exit_persistence() {
     // and then a choppy reverse tick must NOT exit (exit_persistence clear).
     // 驗證：新倉可開，之後的反向 tick 不會立即觸發 A1（onset 已清）。
     s.min_persistence_ms = 0;
-    let reopen = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 1_000_000, 0.5));
+    let reopen = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 1_000_000, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(reopen.len(), 1, "should re-enter after external close");
     s.min_persistence_ms = 180_000;
     assert!(
-        s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 1_100_000, 0.0))
+        s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 1_100_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
             .is_empty(),
         "exit_persistence must start from zero after on_external_close"
     );
@@ -358,7 +360,7 @@ fn test_ma_crossover_market_entry_when_maker_disabled() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     assert!(!s.use_maker_entry, "use_maker_entry must default to false");
-    let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
+    let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -381,7 +383,7 @@ fn test_ma_crossover_buy_postonly_below_last_price() {
     s.maker_price_offset_bps = 1.0; // 1 bps
     let i = s.on_tick(&ctx_with_bbo_g709c(
         100.0, 101.0, 25.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -413,7 +415,7 @@ fn test_ma_crossover_sell_postonly_above_last_price() {
                                     // 快 KAMA 低於慢 SMA → 空頭信號。
     let i = s.on_tick(&ctx_with_bbo_g709c(
         101.0, 100.0, 25.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -516,6 +518,7 @@ fn ctx_with_bbo_g709c(
         best_bid: Some(bid),
         best_ask: Some(ask),
         tick_size: Some(tick),
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -532,7 +535,7 @@ fn test_g7_09c_ma_buy_uses_best_bid_passive() {
     // sma=100 < kama=101 → 多頭入場。
     let i = s.on_tick(&ctx_with_bbo_g709c(
         100.0, 101.0, 25.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -564,7 +567,7 @@ fn test_g7_09c_ma_sell_uses_best_ask_passive() {
     // sma=101 > kama=100 → 空頭入場。
     let i = s.on_tick(&ctx_with_bbo_g709c(
         101.0, 100.0, 25.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {

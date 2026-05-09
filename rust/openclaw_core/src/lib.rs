@@ -8,6 +8,8 @@
 
 pub use openclaw_types;
 
+// W-AUDIT-8a Phase A：Alpha Surface 一等公民接口契約。
+pub mod alpha_surface;
 pub mod attention;
 pub mod attribution;
 pub mod backtest;

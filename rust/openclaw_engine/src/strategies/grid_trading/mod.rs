@@ -41,6 +41,7 @@ use std::collections::{HashMap, HashSet};
 use crate::intent_processor::OrderIntent;
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 use openclaw_core::indicators::IndicatorSnapshot;
 
 mod constructors;
@@ -314,6 +315,13 @@ impl Strategy for GridTrading {
         self.active = active;
     }
 
+    /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
+    /// `grid_trading`：`[Ta1m]`（best_bid/ask 屬 TickContext 不屬 AlphaSurface）。
+    fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
+        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
+        TAGS
+    }
+
     /// Reset per-symbol net_inventory on external close (risk-stop) to prevent desync.
     /// 外部平倉（風控止損）時重設該幣種 net_inventory，防止與 paper_state 脫鉤。
     fn on_external_close(&mut self, symbol: &str) {
@@ -349,7 +357,11 @@ impl Strategy for GridTrading {
         self.on_post_only_rejected_impl(symbol, ts_ms, category);
     }
 
-    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+    fn on_tick(
+        &mut self,
+        ctx: &TickContext<'_>,
+        _surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         self.on_tick_impl(ctx)
     }
 
