@@ -395,6 +395,12 @@ restart_engine() {
     # blank/absent 保持預設 OFF（FA push back AMD-2026-05-09-03 後預設 ON）。
     local cost_edge_advisor
     cost_edge_advisor="${OPENCLAW_COST_EDGE_ADVISOR:-$(grep '^OPENCLAW_COST_EDGE_ADVISOR=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # G3-08 H State Gateway env-gate：Rust HStateCache + 10s poller daemon；
+    # Phase 1 Stub fetcher 回空 snapshot，Sub-task B/C 後接 Python reverse-IPC 真實 client。
+    # blank/absent 預設 OFF（DEFAULT-OFF spec by design）。enable 主要為 cost_edge_advisor
+    # daemon spawn 鋪路 + 清 engine.log WARN（A2-followup 2026-05-09 operator authorize）。
+    local h_state_gateway
+    h_state_gateway="${OPENCLAW_H_STATE_GATEWAY:-$(grep '^OPENCLAW_H_STATE_GATEWAY=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
@@ -405,6 +411,7 @@ restart_engine() {
         OPENCLAW_AGENT_SPINE_RUNTIME_MODE="${agent_spine_runtime_mode}" \
         OPENCLAW_LEASE_ROUTER_GATE_ENABLED="${lease_router_gate_enabled}" \
         OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor}" \
+        OPENCLAW_H_STATE_GATEWAY="${h_state_gateway}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
@@ -517,6 +524,10 @@ restart_api() {
     # 對齊 ENV_VAR_NAME 嚴格相等 "1" 檢查（program_code/learning_engine/cost_edge_advisor.py:79,124）。
     local cost_edge_advisor_api
     cost_edge_advisor_api="${OPENCLAW_COST_EDGE_ADVISOR:-$(grep '^OPENCLAW_COST_EDGE_ADVISOR=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # G3-08 H State Gateway env-gate (API side)：Python h_state_query_handler 讀此 env，
+    # 與 Rust 端 main_boot_tasks::spawn_h_state_poller_if_enabled 共享同一嚴格 "1" 比對。
+    local h_state_gateway_api
+    h_state_gateway_api="${OPENCLAW_H_STATE_GATEWAY:-$(grep '^OPENCLAW_H_STATE_GATEWAY=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
 
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
@@ -526,6 +537,7 @@ restart_api() {
         OPENCLAW_REPLAY_FIXTURE_DEFAULT="$replay_fixture_default" \
         OPENCLAW_REPLAY_SIGNING_KEY_FILE="$replay_signing_key_file" \
         OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor_api}" \
+        OPENCLAW_H_STATE_GATEWAY="${h_state_gateway_api}" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host "$API_BIND_HOST" --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &
