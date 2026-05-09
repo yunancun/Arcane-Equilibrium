@@ -372,4 +372,5 @@ YYYY-MM-DD HH:MM TZ
 - corrected P0-NEW-VULN-1 bind-host model after operator clarified Tailscale GUI access requirement: lifecycle scripts no longer need `0.0.0.0`
 - added shared `helper_scripts/lib/api_bind_host.sh`: default `OPENCLAW_BIND_HOST=auto` resolves concrete Tailscale IPv4 when available and otherwise loopback; `OPENCLAW_BIND_HOST=tailscale` forces tailnet-only; `0.0.0.0` / `::` fail closed
 - updated restart/clean/fresh scripts, deploy docs, Script Index, feedback memory, TODO, and Batch E runtime ownership regressions
-- verification: bash -n PASS; Batch E pytest 15/0; helper smoke resolves local Tailscale IP and rejects all-interface bind; `git diff --check` PASS
+- verification: bash -n PASS; Batch E pytest 15/0 on Mac and Linux; helper smoke resolves Tailscale IP and rejects all-interface bind; `git diff --check` PASS
+- runtime: pushed `c187fd99`, stashed the prior Linux unsafe hot edit as `codex-preserve-unsafe-0.0.0.0-bind-hotedit`, fast-forwarded Linux, and ran API-only restart; Trading API now listens on `100.91.109.86:8000` instead of `0.0.0.0:8000`, with tailnet curl reaching the authenticated API
