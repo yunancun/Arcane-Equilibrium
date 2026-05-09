@@ -725,22 +725,16 @@ impl IsolatedPipeline {
 // Module-internal unit tests / 模組內部 unit test
 // ─────────────────────────────────────────────────────────────────────────
 //
-// R0-T0 boundary (R6 W2 §5): test functions remain in `runner.rs::tests`
-// because they reach IsolatedPipeline private fields via super:: and
-// the inline test helpers (TifStub / OneShotStub / make_*) live there.
-// Splitting tests across files would force re-exporting helpers as
-// pub(super), widening attack surface for future maintainers. The 4
+// R0-T0 boundary (R6 W2 §5): test functions are declared as a child module of
+// `runner.rs` via sibling file `runner_tests.rs`, so they still reach
+// IsolatedPipeline private fields and test helpers through `super::*`. The 4
 // helpers (`replay_fee_rate_for_tif`, `replay_slippage_bps_for_tif`,
-// `apply_slippage_to_price`, `DEFAULT_*_FEE_RATE`) are visible to
-// `runner.rs::tests` via the same-crate `pub(crate)` visibility, so
-// `test_apply_fill_*` helper unit tests continue to pass without a
-// single import change.
+// `apply_slippage_to_price`, `DEFAULT_*_FEE_RATE`) remain visible via the
+// same-crate `pub(crate)` visibility.
 //
-// R0-T0 邊界（R6 W2 §5）：test 函式仍留 `runner.rs::tests`，因 test
-// 觸碰 IsolatedPipeline 的 private field（透過 super::），且 inline
-// test helper（TifStub / OneShotStub / make_*）住在那裡。把 test
-// 拆檔將迫使把 helper 改 pub(super)，擴大未來維護者的攻擊面。4 個
-// helper（`replay_fee_rate_for_tif`/`replay_slippage_bps_for_tif`/
-// `apply_slippage_to_price`/`DEFAULT_*_FEE_RATE`）以同 crate `pub(crate)`
-// 可見，runner.rs::tests 中的 `test_apply_fill_*` helper 單元測試
-// 0 import 改動即可繼續通過。
+// R0-T0 邊界（R6 W2 §5）：test 函式透過 sibling `runner_tests.rs` 仍是
+// `runner.rs` 的 child module，因此可用 `super::*` 觸碰 IsolatedPipeline
+// private field 與 test helper。4 個 helper
+//（`replay_fee_rate_for_tif`/`replay_slippage_bps_for_tif`/
+// `apply_slippage_to_price`/`DEFAULT_*_FEE_RATE`）維持同 crate `pub(crate)`
+// 可見。
