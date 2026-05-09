@@ -450,6 +450,14 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
         hurst: 0.35,
         regime: "mean_reverting".into(),
     });
+    // W-AUDIT-6d #6 (2026-05-09 AMD-2026-05-09-02 §3): bb_reversion default
+    // 啟用 require_ma_confirmation + ma_confirmation_kind="sma_50"。
+    // ma_pair_allows_entry 對 long entry 要求 price < ma；極端 oversold 場景
+    // price=2000、bollinger middle=sma=2050 → 業務上 SMA50 必 ≥ middle 才符合
+    // mean_reverting 模型（spot 跌穿下軌但 50-bar mean 還在上方）。Stress
+    // fixture sma_50 設 2050.0（與 sma_20 同值）滿足 invariant；不可 disable
+    // require_ma_confirmation 通過測試（破 W-AUDIT-6d #6 invariant）。
+    snap1.sma_50 = Some(2050.0);
     // Extreme oversold: %B = -0.5, RSI = 10
     let ctx1 = make_ctx("ETHUSDT", 2000.0, 0, Some(snap1));
     let intents = strat.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
@@ -465,6 +473,9 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
         hurst: 0.35,
         regime: "mean_reverting".into(),
     });
+    // W-AUDIT-6d #6：exit path 由 ma_value 邏輯獨立於 ma_pair_allows_entry，
+    // 這裡仍補 sma_50 對齊（保持 fixture 內聚一致）。
+    snap2.sma_50 = Some(2050.0);
     let ctx2 = make_ctx("ETHUSDT", 2050.0, 700_000, Some(snap2));
     let intents = strat.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(intents.len(), 1, "should exit at mean reversion");
