@@ -1606,3 +1606,29 @@ ssh trade-core "cat /tmp/openclaw/status/ml_training_maintenance_status.json | j
 31. **「自報 unit test pass」必對 commit diff cross-check** — E1 sign-off report §4.1 自描「9/9 unit test 通過」但 commit `3d8d543e` 0 test file added/modified；既有 test_optuna.py mtime 是 Apr 20（pre-fix）。E2 必跑 `git show <commit> --stat` 對 test/ 目錄是否有變動，與 sign-off 自報「N test 通過」做交叉驗證。**抽象**：E1 ad-hoc inline 跑（即使真跑了 9 case）+ 沒 commit 為 regression test = 下次重跑無法重現 + CI 不 catch。**RETURN 規則**：sign-off 自報 unit test 數量 N≥1 但 commit diff 0 test file = HIGH finding 退回 E1 補 regression test commit。本 round N=1 confirmed lesson — wire-equal 邏輯 + auth handshake 是高敏感（IPC 安全邊界）改動，缺 regression test 是 process gap 不是 minor。
 
 32. **byte-equal wire format 11 細項 cross-check 矩陣是新方法論** — 對抗 IPC handshake 改動必跑：(a) ts 計算 (b) HMAC key encoding (c) HMAC msg encoding (d) token format (e) dict shape + insertion order (f) separators (g) ensure_ascii (h) trailing newline (i) response check 條件 (j) secret resolution 行為 (k) error message format。每項對基準 file_line 列實際 byte 比較。**抽象**：跨 process / 跨 lang / 跨 client 的 wire-equal 改動，不是「diff 一下看 LOC delta」就放行；必逐項 byte 比較，發現偏離標 ✓ over-strict (fail-closed 方向，acceptable) / ✗ over-loose (fail-open，BLOCKER)。本 round E1 多 1 條 strict check 是 over-strict 方向，accept；若是少 1 條（如沒驗 authenticated=true），就是 BLOCKER。
+
+---
+
+## 2026-05-09 lesson 33: ml_training Round 2 APPROVED — 對抗 mutation 真驗範式
+
+### 場景
+Round 2 commit 1448e0a1 = test 補洞 + LOW-1 清理（無新業務 logic）。E1 自評 12/12 PASS + 雙輪對抗 mutation。
+
+### E2 收口要點
+- **不採信自評** — 自跑 mutation 重現：silent return {} → (d) 兩 case RED「DID NOT RAISE RuntimeError」；separators drop → (c) RED「actual ≠ reference」逐字節 diff
+- 12 test 0.14s（每 ~12ms）— 純 monkeypatch + _FakeSocket，無 socket / PG / 外部 dep，不 flake
+- (a) 5 / (b) 4 / (c) 1 / (d) 2 = 12 真覆蓋
+- _FakeSocket.recv 按 line 切片釋出（不是 recv(1) 逐字節）— 對齊 _send_ipc_command 的 `recv(IPC_RECV_BUFFER)` 模式
+- LOW-1 grep 「Socket closed」「IPC error [」 0 hit（清乾淨）
+
+### 反模式守
+1. silent return None / silent skip 把 IPC fail 偽裝成業務樣本不足（E2 round 1 反問 #4 揭示） → (d) 守
+2. wire format drift（separators / ensure_ascii / 漏 \n）→ (c) byte-equal 守
+3. env-first / file-fallback / strip / OSError fail-soft → (a) 守
+4. happy / no-secret / auth-error / timeout 4 場景 wire 計數 + exception type → (b) 守
+
+### 教訓
+- E2 對抗驗證 SOP = 自己跑 mutation 而非信「E1 已驗」自評；mutation 從 `pass` → `return None` → `return {}` 三種不同程度 silent skip 全跑一次更穩
+- regression test 依賴的 helper（FakeSocket）要 isomorphic 模擬 production wire（這次 recv 模式對齊 `recv(IPC_RECV_BUFFER)`，不對齊 ipc_client 的 `recv(1)`）— 否則 mock 跑通了 prod 仍可能掛
+- byte-equal regression 守 wire format 不變式價值 = 跨 Python/Rust serde_json hash/HMAC 對齊（separators/ensure_ascii 任改一個 token validation 在 Rust 端會直接失效）
+
