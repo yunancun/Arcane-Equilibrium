@@ -16,6 +16,7 @@
 | W-C-AUTH-2026-05-08 | AMD-2026-05-02-01 §5.4.1 · MAG-082 | `docs/governance_dev/2026-05-08--w_c_lease_router_authorized.md` | 2026-05-08 | Operator-authorized W-C evidence-mode lease-router flag ON；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` + Agent Spine shadow lineage only；not true-live auth / not MAG-083 / not MAG-084 |
 | AMD-2026-05-09-01 | SM-05 · DOC-01 §5.3/§5.6/§5.10/§5.11 · EX-06 | `docs/governance_dev/amendments/2026-05-09--SM-05_executor_shadow_mode_polling_design.md` | 2026-05-09 | Accepted SM-05 Executor shadow-mode polling policy；documents `ExecutorConfigCache` poll / fail-closed / last-good behavior；F-01 source implemented |
 | AMD-2026-05-09-02 | SM-05 · ADR-0015 · ADR-0018 · ADR-0020 | `docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md` | 2026-05-09 | Accepted operator decision audit closure for `P0-DECISION-AUDIT-2/4/5`: SM-05 Option A, W-AUDIT-6 strategy verdict, openclaw_core sunset candidates, Layer2 manual supervisor-only |
+| AMD-2026-05-09-03 | SM-05 · DOC-01 §5.5/§5.6/§5.11 · ADR-0017 · ADR-0018 · ADR-0020 | `docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md` | 2026-05-09 | Supersedes AMD-2026-05-09-02 §2 Option A 字面（fail-closed default）為 5-stage graduated canary default for alpha-bearing pathways；新 W-AUDIT-9 wave + healthcheck `[58]` + `governance.canary_stage_log` PG schema；不適用 DOC-08 §12 / SM-04 / Live boundary 5-gate / §二 16 原則硬不變式 |
 
 ---
 
@@ -29,7 +30,7 @@
 | SM-02 | Decision Lease State Machine | decision_lease_state_machine.py | ✅ Active | 9 states, TTL-based lease lifecycle |
 | SM-03 | OMS / Execution State Machine | oms_state_machine.py / Rust execution lifecycle | ✅ Active | Formal execution object lifecycle: pending/approved/submitted/filled/completed plus cancel/reconcile/fail states |
 | SM-04 | Risk Governor State Machine | risk_governor_state_machine.py | ✅ Active | 6-level risk escalation/de-escalation |
-| SM-05 | Executor Shadow-Mode Runtime Policy | executor_config_cache.py / executor_agent.py / RiskConfig.executor | 🟡 Accepted / Source Implemented | Policy records polling and fail-closed behavior; Option A authority semantics selected by AMD-2026-05-09-02; F-01 source implemented |
+| SM-05 | Executor Shadow-Mode / Graduated Canary Runtime Policy | executor_config_cache.py / executor_agent.py / RiskConfig.executor | 🟡 Accepted / Source Implemented | Polling + fail-closed policy per AMD-2026-05-09-01；Option A 字面 by AMD-2026-05-09-02 §2 已被 AMD-2026-05-09-03 修訂為 5-stage graduated canary default for alpha-bearing pathways（W-AUDIT-9 IMPL pending）；F-01 source implemented |
 
 ### Exchange Specifications (EX)
 
