@@ -1776,3 +1776,118 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 - PG 7d demo gross = funding_arb -15.43 / grid -11.15 / ma +0.20 / bb -0.06 ≈ -26.44 USDT（驗 K-5）
 
 **Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md`（同次複製到 Operator/）
+
+---
+
+## 2026-05-09 — AMD-2026-05-09-03 graduated canary default amendment（Operator Decision-1 拍板後起草）
+
+**任務**：Operator 拍板採納 4-agent (PA/FA/QC/MIT) 共識 + FA push back，把 AMD-2026-05-09-02 §2 Option A「shadow_mode = fail-closed default」修訂為 5-stage graduated canary default。PA 起草 amendment 並落地 governance。
+
+**核心邏輯**：
+- AMD-2026-05-09-02 binary `shadow_mode true/false` 與其他 21 個 fail-closed default 累加 → P(全 PASS) ≈ 0
+- 「P0-EDGE-1 雞蛋死循環」：edge 證據需要真 demo fill / 真 demo fill 需要 shadow_mode 翻 / shadow_mode 翻需要 edge 證據
+- graduated canary 改用「stage 邊界 + 觀察期 SLA」而非「binary flip」，rollback 仍是 stricter（回 Stage 0），與 §二 原則 #6 完全相容
+
+**5 stage 設計**：
+- Stage 0 = shadow only（默認；不送 intent）
+- Stage 1 = 1 strategy × 1 symbol × paper × 7d，升級條件 entry_fills ≥ 10 + boundary=0
+- Stage 2 = 1 strategy × 1 symbol × demo × 14d，升級 gross > -5 + DSR > 0.5 + n=30；rollback gross < -10 或 DSR < 0
+- Stage 3 = 5 active strategies × demo × 21d，升級 gross > 0 + DSR/PBO PASS + chain ratio ≥ 0.7；rollback gross < -20
+- Stage 4 = LIVE_PENDING（operator 顯式拍板 + 全 5-gate live boundary）
+
+**不適用範圍仍強制 fail-closed（明文列）**：
+- DOC-08 §12 9 條安全不變量
+- SM-04 CIRCUIT_BREAKER 5 ladder
+- Live boundary 5-gate
+- §二 16 原則硬不變式
+
+**配套機制**：
+- 新 healthcheck `[58] graduated_canary_stage_invariant`（升級 metric + rollback metric 必存在 + trip 偵測）
+- PG schema `governance.canary_stage_log` + `governance.canary_stage_metric_registry`（V### migration，Guard A/B/C，Linux PG dry-run）
+- GUI Settings/Governance tab 加 cohort + stage + rollback metric live + manual promote 按鈕（IPC 動作 + Decision Lease）
+- Rust schema `RiskConfig::executor.canary_stage / canary_cohort / stage_entered_at_ms / observation_period_ms`（向後相容，ArcSwap hot-reload）
+- Decision Lease 加 `LeaseScope::CanaryStagePromotion`（manual promote 必伴隨 lease）
+
+**IMPL Wave**：W-AUDIT-9（新建，不併入 W-AUDIT-1..7），1.5-2 sprint，T1-T7 七個 sub-task；T1+T2+T3+T6 四向並行，T7 final regression。R-1 Alpha Surface Foundation IMPL 之前必須完成（R-1 後新 alpha source 必走完整 5-stage canary）。
+
+**§二 16 原則合規逐條核**：14/16 ✅ + 2/16 不適用本 amendment scope（原則 12/15）；無違反 — 詳 amendment §6.3。
+
+**Push back 給 PM**：
+- AMD-2026-05-09-02 §3 / §4 / §5 不變（策略 verdict / openclaw_core sunset / Layer2 boundary）— 只取代 §2 字面
+- AMD-2026-05-09-01 SM-05 invariants（IPC failure / cache miss / schema fail / provider exception → fail-closed）完全保留
+- 不放鬆任何 live boundary（live default 仍是 Stage 0）
+- 不放鬆 §二 16 原則任何硬不變式
+
+**Commit**：`b1891023` `governance: graduated canary default amendment`
+- 3 files changed: CLAUDE.md §四 注釋引用 / SPECIFICATION_REGISTER amendment 索引 + SM-05 status 更新 / 新 amendment 文件
+- `git commit --only` 隔絕同 session 其他 WIP（multi-session race 守則，CLAUDE.md `feedback_git_commit_only_for_metadoc`）
+
+**E2 重點審查 3 點**（PA 標）：
+1. `shadow_mode` legacy `false` 配 `canary_stage=0` 必 reject；`shadow_mode_provider` exception path 仍 fail-closed 至 Stage 0（不是 Stage 1）— break 即雞蛋死循環復活
+2. `canary_stage_log.decision_lease_id` for `manual_promote` 必填 NOT NULL constraint 在 PG 層強制（不只 application 層）
+3. healthcheck `[58]` 對 SM-04 ≥ L3 escalate 必 hard FAIL → 觸 stage = 0 rollback；不可降為 WARN
+
+**Report**：`docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md`（同次同步至 SPECIFICATION_REGISTER + CLAUDE.md §四）
+
+**教訓**：
+- 4-agent 共識 + push back 採納是高 leverage point — operator Decision-1 採納 FA push back 是治理 maturity 信號
+- amendment 必明列「不適用範圍」防 scope creep — graduated canary 只動 alpha-bearing pathway，不動 hard boundary
+- 用 `git commit --only` 在 multi-session 並行寫作下隔絕對方 WIP；本次成功避開 TW memory + 4 個 v3 verification report + W-AUDIT-8a spec 等其他 session 的 untracked/staged 檔
+
+---
+
+## 2026-05-09 — W-AUDIT-8a Alpha Surface Foundation spec phase 落地
+
+**任務**：Operator 拍板開新 wave W-AUDIT-8a，把 PA audit `2026-05-09--full_loss_architectural_root_cause_redesign.md` Layer 4 R-1 動作落地為 spec phase。
+
+**輸入**：自己同日 audit 報告 + QC 候選 A/B/C/D + Rust strategies/mod.rs:72-159 Strategy trait + tick_pipeline/mod.rs:665-708 TickContext + 5 策略 IMPL + CLAUDE.md §五。
+
+**Spec 寫法決策**：
+- spec phase 嚴格 = 接口契約 + DAG，**不寫 IMPL 細節**（Rust struct 定義、字段、生命週期、來源、staleness rule、retention 規範化）
+- 4 phase 拆分：Phase A foundation schema + 5 策略 declare → Phase B Tier 2 panel collector → Phase C Tier 3 micro + liquidation 真接 → Phase D Tier 4 + 7d replay E2E
+- DAG：A 必先；B 與 C 可並行；D 必待 B+C
+- 邊界明確劃：本 wave **不含**任何具體 alpha source 業務 IMPL（候選 A/B/C/D 留 8b/c/d）/ Strategist reframe（R-2 留 8e）/ Hypothesis Pipeline（R-3 留 8f）/ per-alpha-source budget（R-4 留 8g）
+
+**接口設計核心**：
+- `AlphaSourceTag` enum 10 個 tag（TA1m/TA5m/FundingSkew/Basis/OIDeltaPanel/OrderflowImbalance/LiquidationCascade/EventDriven/CrossAsset/Sentiment）
+- `AlphaSurface<'a>` 4 tier struct + lifetime 對齊 TickContext
+- `Strategy::on_tick(ctx, surface)` 簽名升級 + `declared_alpha_sources()` 強制聲明
+- 5 既存策略 declare：bb_breakout=[TA1m,TA5m,OIDeltaPanel] / bb_reversion=[TA1m] / ma_crossover=[TA1m] / grid_trading=[TA1m] / funding_arb=[FundingSkew,Basis]
+
+**識別風險**：
+1. 5 策略 trait 簽名 migration regression → Phase A 強制 byte-identical baseline E2E
+2. collector PG 寫入 → V### migration 強制 retention（funding/oi 14d、liquidations 30d）+ MIT must-review
+3. AlphaSurface lifetime 複雜 → 採 `&'a` 單層 borrow，fallback `Cow`/`Arc`
+4. Scout IntelObject IPC schema mismatch → CC must-review Phase D EventAlert wire
+5. Bybit `allLiquidation` rate-limit → BB must-review topic spec
+6. Phase A 後 hold 風險 → Phase A 即達 R-1 80% 價值（trait 升級 + struct + declare），B-D 漸進
+
+**Mandatory review chain**：
+- Phase A：QC enum + E2 trait + E4 baseline regression
+- Phase B：MIT V### + E2 + E4
+- Phase C：BB Bybit topic + MIT V### + E2 + E4
+- Phase D：CC Scout IPC schema + E2 + E4 7d replay E2E
+
+**Side effect 落地**：
+- TODO.md 加 rank 15 W-AUDIT-8a row（用 git commit --only 規則）
+- CLAUDE.md §三 active blockers 加 W-AUDIT-8a entry
+- CLAUDE.md §五 [策略工具包] reframe：`KlineManager → IndicatorEngine → AlphaSurface → SignalEngine → 5 策略`
+- §五 加 AlphaSurface footnote 段落（與 Decision Lease/EarnedTrust 平行）
+- 舊 §五 framing 歸檔 `docs/archive/2026-05-09--claude_md_section5_pre_alpha_surface.md`
+- Spec 同次 mirror 至 Operator workspace
+
+**Spec**：`docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`（30K bytes / ~3500 字）
+
+**教訓**：
+- spec phase 不寫 IMPL — 寫接口契約 + DAG + retention rule + freshness rule + acceptance criteria，避免 overpromise
+- alpha source registry 用 Rust enum SoT 比 string-based tag 安全（exhaustive match catch 漏 tag）
+- 4 tier 設計把舊 TickContext 中已有的 raw 字段（funding_rate / index_price / open_interest / best_bid/ask）再 architectural classification 一次，避免「舊欄位已存在 = 工作已做完」陷阱：funding_rate 是 single-symbol raw，funding_curve 才是 cross-section panel；二者 architectural meaning 不同
+- E2E byte-identical baseline 是 trait 簽名升級的唯一可信驗證 — 任何 mock test / unit test 都無法 catch 邊角 callback 漏改
+- Phase A 設計成「即使 hold N sprint 仍達 R-1 80% 價值」是 spec 的 fallback insurance — 接口升級即賺，後續 phase 漸進
+
+**E2 重點審查 3 點**（PA 標）：
+1. Phase A E2E baseline binary diff test — 必跑 fixed-seed replay 1h paper session 驗 stdout fingerprint byte-identical；任何 callback 漏改（on_external_close / on_close_confirmed / on_close_skipped / on_post_only_rejected）會 silent-skip 直到生產才暴露
+2. AlphaSurface `'a` lifetime 與 TickContext `'a` 對齊 — Rust 編譯通過 ≠ 沒 dangling reference；E2 grep callsite 確認 surface 構造在 on_tick scope 內，不從 tick_pipeline state 借
+3. V### migration retention policy（Phase B 兩條 + Phase C 一條）— Guard A/B/C 強制 + idempotency double-run 強制 + MIT review row-rate 估算；漏 retention 將致 PG 4-8 GB 限額溢
+
+**Report**：`docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`（同次 mirror 至 `docs/CCAgentWorkSpace/Operator/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`）
