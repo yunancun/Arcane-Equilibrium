@@ -536,6 +536,7 @@ mod tests {
             price,
             timestamp_ms: ts,
             indicators: None,
+            indicators_5m: None,
             signals: &[],
             h0_allowed: true,
             funding_rate,
@@ -730,6 +731,7 @@ mod tests {
             price: 50000.0,
             timestamp_ms: 100_000,
             indicators: None,
+            indicators_5m: None,
             signals: &[],
             h0_allowed: true,
             funding_rate: Some(0.005),
@@ -783,6 +785,7 @@ mod tests {
             price: 50000.0,
             timestamp_ms: 100_000,
             indicators: None,
+            indicators_5m: None,
             signals: &[],
             h0_allowed: false, // H0 blocks
             funding_rate: Some(0.005),

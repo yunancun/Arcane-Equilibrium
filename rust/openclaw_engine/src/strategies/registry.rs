@@ -103,6 +103,17 @@ impl StrategyFactory {
 
         // BbBreakout
         let mut bbb = bb_breakout::BbBreakout::new();
+        bbb.signal_timeframe = match p.bb_breakout.validate_signal_timeframe() {
+            Ok(()) => p.bb_breakout.signal_timeframe.clone(),
+            Err(e) => {
+                tracing::warn!(
+                    strategy = "bb_breakout",
+                    error = %e,
+                    "BbBreakoutParams signal_timeframe failed validation, falling back to 1m"
+                );
+                "1m".to_string()
+            }
+        };
         bbb.cooldown_ms = p.bb_breakout.cooldown_ms;
         bbb.squeeze_bw = p.bb_breakout.squeeze_bw;
         bbb.expansion_bw = p.bb_breakout.expansion_bw;

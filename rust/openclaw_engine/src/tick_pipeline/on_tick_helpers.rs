@@ -540,16 +540,19 @@ impl TickPipeline {
     /// (0.97) preserves the pre-G7-02 behavior.
     /// G7-02：EWMA Vol lambda 由 RiskConfig.ewma_vol 驅動；未接 store 時回退至
     /// 0.97 保留 G7-02 前行為。
-    pub(super) fn compute_indicators(&self, symbol: &str) -> Option<IndicatorSnapshot> {
-        const TIMEFRAME: &str = "1m";
-        let ohlcv = self.kline_manager.get_ohlcv(symbol, TIMEFRAME, Some(100))?;
+    pub(super) fn compute_indicators_for_timeframe(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+    ) -> Option<IndicatorSnapshot> {
+        let ohlcv = self.kline_manager.get_ohlcv(symbol, timeframe, Some(100))?;
         if ohlcv.close.len() < 30 {
             return None;
         }
         let ewma_lambda = self
             .risk_store
             .as_ref()
-            .map(|store| store.load().ewma_vol.lambda_for_timeframe(TIMEFRAME))
+            .map(|store| store.load().ewma_vol.lambda_for_timeframe(timeframe))
             .unwrap_or(openclaw_core::indicators::DEFAULT_EWMA_VOL_LAMBDA);
         Some(IndicatorEngine::compute_all_with_lambda(
             &ohlcv.high,
@@ -558,6 +561,10 @@ impl TickPipeline {
             &ohlcv.volume,
             ewma_lambda,
         ))
+    }
+
+    pub(super) fn compute_indicators(&self, symbol: &str) -> Option<IndicatorSnapshot> {
+        self.compute_indicators_for_timeframe(symbol, "1m")
     }
 
     /// Session 11: Feed trade & orderbook events into 1-minute aggregators.

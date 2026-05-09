@@ -48,6 +48,43 @@ pub(super) fn ctx_ext(
         price,
         timestamp_ms: ts,
         indicators: Some(ind),
+        indicators_5m: None,
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+    }
+}
+
+fn indicator(bw: f64, pct_b: f64, vol: f64) -> &'static IndicatorSnapshot {
+    Box::leak(Box::new(IndicatorSnapshot {
+        bollinger: Some(BollingerResult {
+            upper: 51000.0,
+            middle: 50000.0,
+            lower: 49000.0,
+            bandwidth: bw,
+            percent_b: pct_b,
+        }),
+        volume_ratio: Some(vol),
+        ..Default::default()
+    }))
+}
+
+fn ctx_dual_timeframe(
+    primary_1m: (f64, f64, f64),
+    secondary_5m: Option<(f64, f64, f64)>,
+    ts: u64,
+) -> TickContext<'static> {
+    TickContext {
+        symbol: "BTC",
+        price: 50000.0,
+        timestamp_ms: ts,
+        indicators: Some(indicator(primary_1m.0, primary_1m.1, primary_1m.2)),
+        indicators_5m: secondary_5m.map(|v| indicator(v.0, v.1, v.2)),
         signals: &[],
         h0_allowed: true,
         funding_rate: None,
@@ -77,6 +114,61 @@ fn test_no_breakout_without_squeeze() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     assert!(s.on_tick(&ctx(0.05, 1.1, 2.0, 0)).is_empty());
+}
+
+#[test]
+fn test_w_audit_6_bb_breakout_signal_timeframe_validation() {
+    let mut p = BbBreakoutParams::default();
+    assert_eq!(p.signal_timeframe, "1m");
+    p.signal_timeframe = "5m".to_string();
+    assert!(p.validate().is_ok());
+    p.signal_timeframe = "15m".to_string();
+    assert!(p.validate().is_err());
+}
+
+#[test]
+fn test_w_audit_6_bb_breakout_5m_skips_without_5m_indicators() {
+    let mut s = BbBreakout::new();
+    let mut p = BbBreakoutParams::default();
+    p.signal_timeframe = "5m".to_string();
+    p.min_persistence_ms = 0;
+    s.update_params(p).expect("valid 5m params");
+
+    let actions = s.on_tick(&ctx(0.01, 0.5, 2.0, 0));
+    assert!(actions.is_empty());
+    assert!(
+        !s.has_squeeze("BTC"),
+        "5m mode must not record a squeeze from the primary 1m indicator"
+    );
+}
+
+#[test]
+fn test_w_audit_6_bb_breakout_5m_consumes_secondary_indicators() {
+    let mut s = BbBreakout::new();
+    let mut p = BbBreakoutParams::default();
+    p.signal_timeframe = "5m".to_string();
+    p.min_persistence_ms = 0;
+    s.update_params(p).expect("valid 5m params");
+
+    // Primary 1m snapshot is expansion on both ticks. The strategy should
+    // ignore it and use the 5m squeeze -> expansion sequence instead.
+    s.on_tick(&ctx_dual_timeframe(
+        (0.05, 1.1, 2.0),
+        Some((0.01, 0.5, 1.0)),
+        0,
+    ));
+    assert!(s.has_squeeze("BTC"));
+
+    let actions = s.on_tick(&ctx_dual_timeframe(
+        (0.05, 1.1, 2.0),
+        Some((0.05, 1.1, 2.0)),
+        700_000,
+    ));
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected Open from 5m indicator, got {:?}", other),
+    }
 }
 
 #[test]
@@ -454,6 +546,7 @@ fn test_e5_p2_4_runtime_new_matches_params_default() {
     // BbBreakout::new() 初始化值需與 BbBreakoutParams::default() 同源（單一事實來源）。
     let mut s = BbBreakout::new();
     let d = BbBreakoutParams::default();
+    assert_eq!(s.signal_timeframe, d.signal_timeframe);
     assert_eq!(s.cooldown_ms, d.cooldown_ms);
     assert_eq!(s.cooldown.duration_ms(), d.cooldown_ms);
     s.cooldown.record_signal("BTCUSDT", 1_000);
@@ -520,17 +613,20 @@ fn test_oi_params_update_hot_reloads() {
     p.enable_oi_signal = true;
     p.oi_buffer_window_ms = 30_000;
     p.oi_confluence_bonus = 0.25;
+    p.signal_timeframe = "5m".to_string();
     s.update_params(p.clone()).expect("valid OI params");
 
     // Runtime fields reflect the hot-reloaded values.
     // 運行時欄位反映熱重載後的值。
     assert!(s.enable_oi_signal, "flag must hot-reload to true");
+    assert_eq!(s.signal_timeframe, "5m", "signal_timeframe must hot-reload");
     assert_eq!(s.oi_buffer_window_ms, 30_000, "window ms must hot-reload");
     assert!((s.oi_confluence_bonus - 0.25).abs() < f64::EPSILON);
 
     // get_params round-trip echoes the mutated values.
     // get_params 回吐後須等同變更值。
     let back = s.get_params();
+    assert_eq!(back.signal_timeframe, "5m");
     assert!(back.enable_oi_signal);
     assert_eq!(back.oi_buffer_window_ms, 30_000);
     assert!((back.oi_confluence_bonus - 0.25).abs() < f64::EPSILON);
@@ -553,6 +649,7 @@ fn test_oi_params_json_round_trip() {
     let mut p: BbBreakoutParams =
         serde_json::from_str(&json_v0).expect("default params must deserialize");
     p.enable_oi_signal = true;
+    p.signal_timeframe = "5m".to_string();
     p.oi_buffer_window_ms = 15_000;
     p.oi_confluence_bonus = 0.33;
     let json_v1 = serde_json::to_string(&p).expect("params must serialize");
@@ -563,6 +660,7 @@ fn test_oi_params_json_round_trip() {
 
     // Runtime reflects the mutated JSON values.
     assert!(s.enable_oi_signal);
+    assert_eq!(s.signal_timeframe, "5m");
     assert_eq!(s.oi_buffer_window_ms, 15_000);
     assert!((s.oi_confluence_bonus - 0.33).abs() < f64::EPSILON);
 
@@ -570,6 +668,7 @@ fn test_oi_params_json_round_trip() {
     let json_v2 = s.get_params_json();
     let back: BbBreakoutParams =
         serde_json::from_str(&json_v2).expect("round-trip JSON must deserialize");
+    assert_eq!(back.signal_timeframe, "5m");
     assert!(back.enable_oi_signal);
     assert_eq!(back.oi_buffer_window_ms, 15_000);
     assert!((back.oi_confluence_bonus - 0.33).abs() < f64::EPSILON);
@@ -751,6 +850,7 @@ fn ctx_with_bbo_g709c(
         price: last,
         timestamp_ms: ts,
         indicators: Some(ind),
+        indicators_5m: None,
         signals: &[],
         h0_allowed: true,
         funding_rate: None,

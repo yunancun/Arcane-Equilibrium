@@ -314,6 +314,12 @@ impl Default for BbReversionParams {
 pub struct BbBreakoutParams {
     #[serde(default = "default_true")]
     pub active: bool,
+    /// Signal indicator timeframe. Supported values are `1m` and `5m`; the
+    /// factory falls back to `1m` on invalid TOML instead of silently wiring a
+    /// nonexistent indicator stream.
+    /// 信號指標時間框架；支援 `1m` / `5m`，非法值由 factory 回退到 `1m`。
+    #[serde(default = "default_bbb_signal_timeframe")]
+    pub signal_timeframe: String,
     #[serde(default = "default_bb_cooldown")]
     pub cooldown_ms: u64,
     #[serde(default = "default_squeeze_bw")]
@@ -428,6 +434,9 @@ fn default_entry_conf_base_bbb() -> f64 {
 fn default_exit_conf_base_bbb() -> f64 {
     0.5
 }
+pub(super) fn default_bbb_signal_timeframe() -> String {
+    "1m".to_string()
+}
 
 // E5-P2-4: BB Breakout config-driven confidence offsets (extracted from code magic numbers).
 // E5-P2-4：BB Breakout config 驅動的信心偏移（從 code 裡的魔術數字提升為 config）。
@@ -459,6 +468,15 @@ pub(super) fn default_bbb_oi_confluence_bonus() -> f64 {
 }
 
 impl BbBreakoutParams {
+    pub fn validate_signal_timeframe(&self) -> Result<(), String> {
+        match self.signal_timeframe.as_str() {
+            "1m" | "5m" => Ok(()),
+            other => Err(format!(
+                "signal_timeframe={other:?} must be one of [\"1m\", \"5m\"]"
+            )),
+        }
+    }
+
     /// Mirror of `bb_breakout::BbBreakoutParams::validate()` OI rules.
     /// Called from `StrategyFactory::create_with_params` because the TOML
     /// path bypasses the runtime `validate()` (E2 FUP #4).
@@ -510,6 +528,7 @@ impl Default for BbBreakoutParams {
     fn default() -> Self {
         Self {
             active: true,
+            signal_timeframe: default_bbb_signal_timeframe(),
             cooldown_ms: 600_000,
             squeeze_bw: 0.02,
             expansion_bw: 0.04,

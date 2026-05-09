@@ -54,13 +54,17 @@ conf_scale = 1.0
 # EDGE-DIAG-2B（2026-04-29）：套用 demo-only rescue gate。舊 1m 閾值組
 # （squeeze 0.02/0.03、expansion 0.04）在當前 1m bandwidth 分佈不可達；
 # 改用 sweep 觀測到的 1m 區間並軟化 Donchian，先讓 demo 累積驗證樣本。
+# W-AUDIT-6 (2026-05-09): 1m rescue is retired. bb_breakout now consumes the
+# real 5m indicator snapshot; missing 5m warmup skips rather than falling back
+# to 1m. Live remains inactive until demo 5m evidence is net-positive.
 active = true
+signal_timeframe = "5m"
 cooldown_ms = 600000
-squeeze_bw = 0.0015
-expansion_bw = 0.005
-volume_threshold = 1.2
+squeeze_bw = 0.02
+expansion_bw = 0.04
+volume_threshold = 1.5
 trailing_stop_atr_mult = 2.0
-min_persistence_ms = 0
+min_persistence_ms = 300000
 confluence_as_gate = false
 donchian_mode = "score"
 donchian_score_bonus = 0.15

@@ -158,6 +158,7 @@ fn test_strategy_params_config_default_matches_hardcoded() {
     assert_eq!(cfg.bb_reversion.cooldown_ms, 600_000);
     assert!(!cfg.bb_reversion.use_limit);
     assert_eq!(cfg.bb_breakout.cooldown_ms, 600_000);
+    assert_eq!(cfg.bb_breakout.signal_timeframe, "1m");
     assert!((cfg.bb_breakout.squeeze_bw - 0.02).abs() < 1e-10);
     assert!((cfg.bb_breakout.expansion_bw - 0.04).abs() < 1e-10);
     assert!(cfg.grid_trading.active);
@@ -195,6 +196,7 @@ use_limit = true
 limit_offset_bps = 15.0
 
 [bb_breakout]
+signal_timeframe = "5m"
 squeeze_bw = 0.03
 expansion_bw = 0.08
 
@@ -214,6 +216,7 @@ grid_levels = 20
     assert!(cfg.bb_reversion.use_limit);
     assert!((cfg.bb_reversion.limit_offset_bps - 15.0).abs() < 1e-10);
     assert!((cfg.bb_breakout.squeeze_bw - 0.03).abs() < 1e-10);
+    assert_eq!(cfg.bb_breakout.signal_timeframe, "5m");
     assert_eq!(cfg.grid_trading.grid_levels, 20);
 }
 
@@ -260,6 +263,11 @@ fn test_w_audit_6_real_strategy_params_keep_funding_arb_retired() {
         assert!(
             !cfg.funding_arb.active,
             "{} funding_arb must stay inactive until a redesign explicitly re-enables it",
+            kind
+        );
+        assert_eq!(
+            cfg.bb_breakout.signal_timeframe, "5m",
+            "{} bb_breakout must use the W-AUDIT-6 5m signal family",
             kind
         );
         assert!(
@@ -329,6 +337,10 @@ fn test_e5_p2_4_bbb_toml_defaults_bit_exact() {
     // `strategies::BbBreakoutParams::default()` 是 TOML 缺欄位時的回退來源，
     // 需與原硬編碼數值位元相等，以保證不改 TOML 部署時行為零差異。
     let p = BbBreakoutParams::default();
+    assert_eq!(
+        p.signal_timeframe, "1m",
+        "TOML default signal_timeframe must stay 1m for backward compatibility"
+    );
     assert!(
         (p.hurst_regime_boost - 0.1).abs() < f64::EPSILON,
         "TOML default hurst_regime_boost must be 0.1"
@@ -380,6 +392,7 @@ fn test_e5_p2_4_factory_wires_bbb_new_fields() {
     // TOML 指定的非預設值需經工廠傳遞到運行時 BbBreakout。
     let mut p = StrategyParamsConfig::default();
     p.bb_breakout.hurst_regime_boost = 0.22;
+    p.bb_breakout.signal_timeframe = "5m".to_string();
     p.bb_breakout.exit_bonus_trailing_stop = 0.33;
     p.bb_breakout.exit_bonus_regime_shift = 0.11;
     p.bb_breakout.exit_bonus_pctb_revert = 0.09;
@@ -392,6 +405,10 @@ fn test_e5_p2_4_factory_wires_bbb_new_fields() {
     // Re-serialize via get_params_json for a type-erased runtime assertion.
     // 由於 trait object 無法 downcast，改用 get_params_json 做型別無關驗證。
     let json = bbb_any.get_params_json();
+    assert!(
+        json.contains("\"signal_timeframe\":\"5m\""),
+        "factory must wire signal_timeframe=5m into runtime, got {json}"
+    );
     assert!(
         json.contains("\"hurst_regime_boost\":0.22"),
         "factory must wire hurst_regime_boost=0.22 into runtime, got {json}"
@@ -470,6 +487,24 @@ fn test_edge_p2_2_fup4_factory_passes_valid_oi() {
     assert!((bonus - 0.25).abs() < f64::EPSILON);
     let floor = v["oi_min_delta_pct"].as_f64().expect("f64");
     assert!((floor - 0.03).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_w_audit_6_factory_falls_back_on_invalid_bbb_signal_timeframe() {
+    use serde_json::Value;
+
+    let mut p = StrategyParamsConfig::default();
+    p.bb_breakout.signal_timeframe = "15m".to_string();
+
+    let strategies = StrategyFactory::create_with_params(&p);
+    let bbb = strategies
+        .iter()
+        .find(|s| s.name() == "bb_breakout")
+        .expect("bb_breakout strategy created");
+    let json = bbb.get_params_json();
+    let v: Value = serde_json::from_str(&json).expect("runtime params deserialize");
+
+    assert_eq!(v["signal_timeframe"].as_str(), Some("1m"));
 }
 
 #[test]

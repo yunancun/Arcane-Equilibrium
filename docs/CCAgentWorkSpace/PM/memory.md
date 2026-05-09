@@ -144,6 +144,7 @@
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
 | 2026-05-09 | Post-rebuild `[40]` BILLUSDT grid negative-cell guard: after MA R:R rebuild, passive healthcheck failed only `[40]` from `grid_trading/BILLUSDT` n=11 avg=-49.67bps; source-blocked BILLUSDT for new grid entries across paper/demo/live strategy params, leaving close/reduce enabled | workspace/reports/2026-05-09--post_rebuild_bill_grid_negative_cell.md |
+| 2026-05-09 | W-AUDIT-6 bb_breakout 5m RFC/IMPL: retired the 1m rescue family, added real 5m indicator delivery through TickContext, seeded 1m+5m klines at bootstrap, exposed `signal_timeframe`, and kept live disabled while demo collects 5m evidence | workspace/reports/2026-05-09--w_audit_6_bb_breakout_5m.md |
 | 2026-05-09 | W-AUDIT-6 ma_crossover R:R trailing/TP: added strategy-scoped TP enforcement override, bound four risk_config TOMLs to MA SL 2.5% / TP 8.0% / trailing 0.6%+0.4%, and passed targeted + full Rust lib tests before sync/rebuild | workspace/reports/2026-05-09--w_audit_6_ma_crossover_rr.md |
 | 2026-05-09 | TODO three-side sync after W-AUDIT-6 cleanup: refreshed TODO/CLAUDE/Codex memory so funding_arb retirement authority is strategy params, W-AUDIT-6 closed source/test checkpoints are visible at the top of the queue, and the then-current remaining order was ma_crossover R:R, bb_breakout 5m RFC/IMPL, then VaR/CVaR/EVT | workspace/reports/2026-05-09--todo_three_side_sync_after_w_audit_6.md |
 | 2026-05-09 | QC stand-alone CLAUDE healthcheck id cleanup: attached source report + `[40] realized_edge_acceptance` to CLAUDE §三 `-26.44 USDT` 7d demo gross figure and marked P2-AUDIT-QC-STAND-ALONE complete | workspace/reports/2026-05-09--qc_standalone_claude_healthcheck_id.md |
@@ -2101,3 +2102,19 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Boundary: source/test/config-surface only; no rebuild, restart, deploy,
   live auth mutation, strategy activation, MAG-083/MAG-084 unlock, or true-live
   action.
+
+## 2026-05-09 W-AUDIT-6 bb_breakout 5m RFC/IMPL
+
+- Retired the old 1m `bb_breakout` rescue family and implemented the AMD
+  verdict: reject 1m, revise as 5m.
+- `TickContext` now carries `indicators_5m`; runtime `bb_breakout` uses
+  `signal_timeframe` to choose 1m vs 5m and skips when configured 5m data is
+  not warm, with no 1m fallback.
+- Initial kline bootstrap now fetches/seeds 1m + 5m REST bars so planned
+  rebuilds do not leave the 5m strategy cold for roughly 150 minutes.
+- `strategy_params_{paper,demo,live}.toml` now expose
+  `bb_breakout.signal_timeframe = "5m"`; demo is active on the 5m family while
+  paper/live stay inactive.
+- Boundary: source/test/config/runtime-path only; no true-live authority,
+  no MAG-083/MAG-084 unlock, and live remains disabled pending fresh
+  net-positive 5m evidence.
