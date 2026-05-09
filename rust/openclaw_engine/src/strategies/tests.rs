@@ -12,6 +12,7 @@
 use super::*;
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::{PipelineKind, TickContext};
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 
 /// Minimal Strategy impl that exercises only the trait defaults.
 /// 最小 Strategy 實現，僅用於驗證 trait 預設實現。
@@ -29,7 +30,15 @@ impl Strategy for StubStrategy {
     fn set_active(&mut self, active: bool) {
         self.active = active;
     }
-    fn on_tick(&mut self, _ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+    fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
+        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
+        TAGS
+    }
+    fn on_tick(
+        &mut self,
+        _ctx: &TickContext<'_>,
+        _surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         Vec::new()
     }
 }

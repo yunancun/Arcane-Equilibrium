@@ -40,6 +40,8 @@ fn make_ctx(
         price,
         timestamp_ms: ts,
         indicators,
+        // W-AUDIT-8a Phase A：壓力測試只用 1m TA path。
+        indicators_5m: None,
         signals: NO_SIGNALS,
         h0_allowed: true,
         funding_rate: None,
@@ -52,6 +54,7 @@ fn make_ctx(
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -401,7 +404,7 @@ fn stress_ma_crossover_whipsaw_rapid_reversals() {
             ts,
             Some(bb_snapshot(0.5, 0.03, 50.0, sma, kama, 25.0, 1.0)),
         );
-        fills_throttled += strat.on_tick(&ctx).len();
+        fills_throttled += strat.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).len();
     }
     // Cooldown should prevent most trades — at most ~7 (every 3rd tick)
     assert!(fills_throttled > 0, "no trades generated");
@@ -424,7 +427,7 @@ fn stress_ma_crossover_whipsaw_rapid_reversals() {
             ts,
             Some(bb_snapshot(0.5, 0.03, 50.0, sma, kama, 25.0, 1.0)),
         );
-        fills_unthrottled += strat2.on_tick(&ctx).len();
+        fills_unthrottled += strat2.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).len();
     }
     // Should have many more trades when above cooldown
     assert!(
@@ -449,7 +452,7 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
     });
     // Extreme oversold: %B = -0.5, RSI = 10
     let ctx1 = make_ctx("ETHUSDT", 2000.0, 0, Some(snap1));
-    let intents = strat.on_tick(&ctx1);
+    let intents = strat.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(intents.len(), 1, "should enter long on extreme oversold");
     match &intents[0] {
         StrategyAction::Open(i) => assert!(i.is_long),
@@ -463,7 +466,7 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
         regime: "mean_reverting".into(),
     });
     let ctx2 = make_ctx("ETHUSDT", 2050.0, 700_000, Some(snap2));
-    let intents = strat.on_tick(&ctx2);
+    let intents = strat.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(intents.len(), 1, "should exit at mean reversion");
 }
 
@@ -479,7 +482,7 @@ fn stress_bb_breakout_false_squeeze_no_volume() {
         0,
         Some(bb_snapshot(0.5, 0.015, 50.0, 67000.0, 67000.0, 25.0, 0.8)),
     );
-    strat.on_tick(&ctx1);
+    strat.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
     // Expansion but LOW volume — should NOT enter
     let ctx2 = make_ctx(
@@ -488,7 +491,7 @@ fn stress_bb_breakout_false_squeeze_no_volume() {
         700_000,
         Some(bb_snapshot(1.1, 0.05, 60.0, 67000.0, 67100.0, 25.0, 1.0)),
     );
-    let intents = strat.on_tick(&ctx2);
+    let intents = strat.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         intents.is_empty(),
         "should not enter without volume confirmation"
@@ -507,7 +510,7 @@ fn stress_bb_breakout_valid_squeeze_with_volume() {
         0,
         Some(bb_snapshot(0.5, 0.015, 50.0, 67000.0, 67000.0, 25.0, 0.8)),
     );
-    strat.on_tick(&ctx1);
+    strat.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
     // Expansion + volume + upper breakout
     let ctx2 = make_ctx(
@@ -516,7 +519,7 @@ fn stress_bb_breakout_valid_squeeze_with_volume() {
         700_000,
         Some(bb_snapshot(1.2, 0.06, 65.0, 67000.0, 67100.0, 30.0, 2.0)),
     );
-    let intents = strat.on_tick(&ctx2);
+    let intents = strat.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(intents.len(), 1, "should enter on valid squeeze breakout");
     match &intents[0] {
         StrategyAction::Open(i) => assert!(i.is_long, "should be long on upper breakout"),
@@ -539,7 +542,7 @@ fn stress_grid_trading_wide_range_traversal() {
         };
         let ts = i as u64 * 120_000; // 2 min between ticks (above 60s cooldown)
         let ctx = make_ctx("BTCUSDT", price, ts, None);
-        total_intents += strat.on_tick(&ctx).len();
+        total_intents += strat.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).len();
     }
     // Should have multiple grid crosses
     assert!(

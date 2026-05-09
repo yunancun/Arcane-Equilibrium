@@ -212,7 +212,16 @@ impl Strategy for OneShotStub {
         true
     }
     fn set_active(&mut self, _: bool) {}
-    fn on_tick(&mut self, ctx: &crate::tick_pipeline::TickContext<'_>) -> Vec<StrategyAction> {
+    fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+        const TAGS: &[openclaw_core::alpha_surface::AlphaSourceTag] =
+            &[openclaw_core::alpha_surface::AlphaSourceTag::Ta1m];
+        TAGS
+    }
+    fn on_tick(
+        &mut self,
+        ctx: &crate::tick_pipeline::TickContext<'_>,
+        _surface: &openclaw_core::alpha_surface::AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         if self.emitted >= self.stop_after {
             return Vec::new();
         }
@@ -249,7 +258,16 @@ impl Strategy for CloseOnTickStub {
         true
     }
     fn set_active(&mut self, _: bool) {}
-    fn on_tick(&mut self, ctx: &crate::tick_pipeline::TickContext<'_>) -> Vec<StrategyAction> {
+    fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+        const TAGS: &[openclaw_core::alpha_surface::AlphaSourceTag] =
+            &[openclaw_core::alpha_surface::AlphaSourceTag::Ta1m];
+        TAGS
+    }
+    fn on_tick(
+        &mut self,
+        ctx: &crate::tick_pipeline::TickContext<'_>,
+        _surface: &openclaw_core::alpha_surface::AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         if self.emitted || ctx.symbol != self.target_symbol {
             return Vec::new();
         }
@@ -648,7 +666,16 @@ impl Strategy for TifStub {
         true
     }
     fn set_active(&mut self, _: bool) {}
-    fn on_tick(&mut self, ctx: &crate::tick_pipeline::TickContext<'_>) -> Vec<StrategyAction> {
+    fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+        const TAGS: &[openclaw_core::alpha_surface::AlphaSourceTag] =
+            &[openclaw_core::alpha_surface::AlphaSourceTag::Ta1m];
+        TAGS
+    }
+    fn on_tick(
+        &mut self,
+        ctx: &crate::tick_pipeline::TickContext<'_>,
+        _surface: &openclaw_core::alpha_surface::AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         if self.emitted {
             return Vec::new();
         }

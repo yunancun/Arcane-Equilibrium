@@ -51,6 +51,7 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -86,6 +87,7 @@ fn ctx_with_atr(sma: f64, kama: f64, adx: f64, ts: u64, atr: f64) -> TickContext
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -130,6 +132,7 @@ fn ctx_with_hurst(
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -164,6 +167,7 @@ fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> Tic
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -175,14 +179,14 @@ fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> Tic
 fn test_no_signal_low_adx() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    assert!(s.on_tick(&ctx_with(100.0, 101.0, 15.0, 0)).is_empty());
+    assert!(s.on_tick(&ctx_with(100.0, 101.0, 15.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
 }
 
 #[test]
 fn test_long_entry() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
+    let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -196,10 +200,10 @@ fn test_min_trend_snr_blocks_noisy_entry() {
     s.min_persistence_ms = 0;
     s.min_trend_snr = 1.0;
 
-    let blocked = s.on_tick(&ctx_with_atr(100.0, 101.0, 25.0, 0, 2.0));
+    let blocked = s.on_tick(&ctx_with_atr(100.0, 101.0, 25.0, 0, 2.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(blocked.is_empty(), "SNR 0.5 must be blocked");
 
-    let allowed = s.on_tick(&ctx_with_atr(100.0, 103.0, 25.0, 1_000, 2.0));
+    let allowed = s.on_tick(&ctx_with_atr(100.0, 103.0, 25.0, 1_000, 2.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(allowed.len(), 1, "SNR 1.5 must pass");
 }
 
@@ -207,8 +211,8 @@ fn test_min_trend_snr_blocks_noisy_entry() {
 fn test_exit_on_reverse() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
-    let i = s.on_tick(&ctx_with(101.0, 100.0, 25.0, 500_000));
+    s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&ctx_with(101.0, 100.0, 25.0, 500_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { symbol, reason, .. } => {
@@ -232,7 +236,7 @@ fn test_regime_filter_blocks_mean_reverting() {
                               // fast(kama=101) > slow(sma_20=100), ADX=25 → would normally enter long.
                               // 快線 > 慢線, ADX 足夠 → 正常情況會做多入場。
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         intents.is_empty(),
         "Entry must be blocked in mean_reverting regime"
@@ -246,7 +250,7 @@ fn test_regime_filter_allows_trending() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(intents.len(), 1, "Entry must be allowed in trending regime");
     match &intents[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -263,13 +267,13 @@ fn test_regime_filter_allows_exit() {
                               // Step 1: Enter long in trending regime.
                               // 步驟 1：在趨勢狀態下做多入場。
     let ctx_entry = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
-    let entry = s.on_tick(&ctx_entry);
+    let entry = s.on_tick(&ctx_entry, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(entry.len(), 1, "Should enter long");
 
     // Step 2: Regime flips to mean_reverting, but crossover reverses → exit must work.
     // 步驟 2：狀態轉為均值回歸，但交叉反轉 → 出場必須有效。
     let ctx_exit = ctx_with_hurst(101.0, 100.0, 25.0, 500_000, "mean_reverting", 0.35);
-    let exit = s.on_tick(&ctx_exit);
+    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         exit.len(),
         1,
@@ -288,7 +292,7 @@ fn test_regime_filter_blocks_random_walk() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "random_walk", 0.50);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         intents.is_empty(),
         "Entry must be blocked in random_walk regime"
@@ -303,7 +307,7 @@ fn test_regime_filter_disabled() {
     s.min_persistence_ms = 0; // disable persistence for unit tests
     s.regime_filter_enabled = false;
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         intents.len(),
         1,
@@ -327,7 +331,7 @@ fn test_higher_tf_blocks_misaligned() {
     // After one tick, higher_tf_sma ≈ 0.01*100 + 0.99*110 = 109.9, sma_50=100 < 109.9 → bearish.
     // 一個 tick 後，higher_tf_sma ≈ 109.9，sma_50=100 < 109.9 → 看跌。
     let ctx = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     // fast(101) > slow(100) → would want to go long, but higher TF is bearish → blocked.
     // 快線 > 慢線 → 想做多，但較高 TF 看跌 → 阻擋。
     assert!(
@@ -348,7 +352,7 @@ fn test_higher_tf_allows_aligned() {
     // After one tick, higher_tf_sma ≈ 0.01*100 + 0.99*90 = 90.1, sma_50=100 > 90.1 → bullish.
     // 一個 tick 後，higher_tf_sma ≈ 90.1，sma_50=100 > 90.1 → 看漲。
     let ctx = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         intents.len(),
         1,
@@ -369,7 +373,7 @@ fn test_higher_tf_blocks_short_when_bullish() {
     s.higher_tf_sma.insert("BTC".into(), 90.0);
     // sma_50=100 > 90.1 → bullish → short blocked.
     let ctx = ctx_with_sma50(101.0, 100.0, 25.0, 0, 100.0);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         intents.is_empty(),
         "Short entry must be blocked when higher TF is bullish"
@@ -385,7 +389,7 @@ fn test_higher_tf_cold_start_allows_entry() {
                               // No sma_50 in context → higher_tf_trend stays None → entry allowed.
                               // 上下文中無 sma_50 → higher_tf_trend 保持 None → 允許入場。
     let ctx = ctx_with(100.0, 101.0, 25.0, 0);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         intents.len(),
         1,
@@ -402,7 +406,7 @@ fn test_higher_tf_does_not_block_exit() {
                               // Enter long with aligned higher TF.
     s.higher_tf_sma.insert("BTC".into(), 90.0);
     let ctx_entry = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
-    let entry = s.on_tick(&ctx_entry);
+    let entry = s.on_tick(&ctx_entry, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(entry.len(), 1);
 
     // Now flip higher TF to bearish and reverse crossover → exit must still work.
@@ -410,7 +414,7 @@ fn test_higher_tf_does_not_block_exit() {
     s.higher_tf_sma.insert("BTC".into(), 110.0);
     s.higher_tf_trend.insert("BTC".into(), false);
     let ctx_exit = ctx_with_sma50(101.0, 100.0, 25.0, 500_000, 100.0);
-    let exit = s.on_tick(&ctx_exit);
+    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         exit.len(),
         1,
@@ -496,6 +500,7 @@ fn test_conf_scale_applied_to_emit() {
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     };
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
@@ -610,7 +615,7 @@ fn test_phase_b_persistent_regime_allows_entry() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         intents.len(),
         1,
@@ -626,7 +631,7 @@ fn test_phase_b_anti_persistent_regime_blocks_entry() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         intents.is_empty(),
         "AntiPersistent regime (legacy 'mean_reverting') must block entry"
@@ -641,7 +646,7 @@ fn test_phase_b_random_regime_blocks_entry() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "random_walk", 0.5);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         intents.is_empty(),
         "Random regime (legacy 'random_walk') must block entry"
@@ -657,7 +662,7 @@ fn test_phase_b_unknown_regime_string_blocks_entry() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
     let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "totally_invalid_label", 0.5);
-    let intents = s.on_tick(&ctx);
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         intents.is_empty(),
         "Unknown regime string must map to non-Persistent and block entry"

@@ -1127,6 +1127,7 @@ fn build_tick_context<'a>(
     event: &'a MarketEvent,
     inputs: &'a ReplayTickInputs,
 ) -> crate::tick_pipeline::TickContext<'a> {
+    // W-AUDIT-8a Phase A：replay 用 EMPTY_ALPHA_SURFACE 對齊 byte-identical baseline。
     crate::tick_pipeline::TickContext {
         symbol: &event.symbol,
         price: event.close,
@@ -1141,6 +1142,7 @@ fn build_tick_context<'a>(
         best_bid: event.best_bid,
         best_ask: event.best_ask,
         tick_size: inputs.tick_size,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 

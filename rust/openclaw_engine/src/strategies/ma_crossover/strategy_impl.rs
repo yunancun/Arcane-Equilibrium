@@ -17,6 +17,7 @@
 use crate::intent_processor::OrderIntent;
 use crate::strategies::{Strategy, StrategyAction, StrategyParams};
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 
 use super::{confluence, MaCrossover, MaCrossoverParams};
 
@@ -29,6 +30,13 @@ impl Strategy for MaCrossover {
     }
     fn set_active(&mut self, active: bool) {
         self.active = active;
+    }
+
+    /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
+    /// `ma_crossover`：`[Ta1m]`（純 1m kline TA + ADX + persistence）。
+    fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
+        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
+        TAGS
     }
 
     /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
@@ -64,7 +72,11 @@ impl Strategy for MaCrossover {
         self.exit_persistence.clear(symbol);
     }
 
-    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+    fn on_tick(
+        &mut self,
+        ctx: &TickContext<'_>,
+        _surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         let ind = match ctx.indicators {
             Some(i) => i,
             None => return vec![],

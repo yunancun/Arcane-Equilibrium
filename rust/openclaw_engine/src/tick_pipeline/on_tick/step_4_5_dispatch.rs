@@ -21,6 +21,7 @@
 use std::ops::ControlFlow;
 use std::time::Instant;
 
+use openclaw_core::alpha_surface::AlphaSurface;
 use openclaw_core::signals::Signal;
 use tracing::{info, warn};
 
@@ -178,6 +179,11 @@ impl TickPipeline {
             .filter(|t| *t > 0.0);
         let indicators_5m = self.compute_indicators_for_timeframe(sym, "5m");
 
+        // W-AUDIT-8a Phase A：build Tier 1 only AlphaSurface — Tier 2-4 collector
+        // 留給 Phase B/C/D。surface 引用與 ctx 同生命週期，借用 `indicators` /
+        // `indicators_5m`（與 `TickContext` 同源）。
+        let alpha_surface = AlphaSurface::tier1_only(indicators, indicators_5m.as_ref());
+
         let ctx = TickContext {
             symbol: sym,
             price: event.last_price,
@@ -192,6 +198,7 @@ impl TickPipeline {
             best_bid,
             best_ask,
             tick_size,
+            alpha_surface_ref: &alpha_surface,
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.
@@ -235,11 +242,27 @@ impl TickPipeline {
 
         let mut intents: Vec<crate::intent_processor::OrderIntent> = Vec::new();
         let mut pending_strategy_closes: Vec<(String, String)> = Vec::new();
-        for strategy in self.orchestrator.strategies_mut() {
+        // W-AUDIT-8a Phase A：disjoint-field split borrow — 同時拿到 strategies +
+        // alpha dispatch / unavailable counter 的 mutable ref，hot path inline
+        // 增量計數，避免 `&mut self.orchestrator` 與 `strategies_mut()` 二次借用。
+        let (strategies_iter, dispatched_counter, unavailable_counter) =
+            self.orchestrator.split_borrow_for_dispatch();
+        for strategy in strategies_iter {
             if !strategy.is_active() {
                 continue;
             }
-            let strategy_actions = strategy.on_tick(&ctx);
+            // W-AUDIT-8a Phase A：在 on_tick 前先 tally alpha source dispatch
+            // metric，與 spec §2.5 Prometheus 計數對齊。Phase A：Tier 2-4
+            // collector 未 wire 故吃 Tier 2-4 tag 的策略累積 unavailable，
+            // Phase B/C/D 漸進降為 0。
+            crate::orchestrator::Orchestrator::tally_alpha_sources(
+                strategy.name(),
+                strategy.declared_alpha_sources(),
+                &alpha_surface,
+                dispatched_counter,
+                unavailable_counter,
+            );
+            let strategy_actions = strategy.on_tick(&ctx, &alpha_surface);
             debug_assert!(
                 strategy_actions.len() <= 1,
                 "Strategy {} emitted {} actions in one tick — rollback assumes max 1",

@@ -8,6 +8,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
+
 use crate::config::risk_config::CusumConfig;
 use crate::risk_cusum::{evaluate_downside_cusum, CusumEvaluation};
 use crate::strategies::{Strategy, StrategyAction};
@@ -21,16 +23,26 @@ pub struct StrategyCusumAlarm {
     pub evaluation: CusumEvaluation,
 }
 
+/// W-AUDIT-8a Phase A：alpha source dispatch tracking key（tag + strategy name）。
+pub type AlphaDispatchKey = (AlphaSourceTag, String);
+
 /// Strategy orchestrator — dispatches ticks to all active strategies.
 /// 策略調度器 — 分派 tick 到所有活躍策略。
 pub struct Orchestrator {
     strategies: Vec<Box<dyn Strategy>>,
+    /// W-AUDIT-8a Phase A：dispatched 計數，pub(crate) 暴露供 step_4_5_dispatch
+    /// hot path 以 disjoint-field split borrow 增量。
+    pub(crate) alpha_dispatched_counter: HashMap<AlphaDispatchKey, u64>,
+    /// W-AUDIT-8a Phase A：surface field 為 None 的 declared tag 計數。
+    pub(crate) alpha_unavailable_counter: HashMap<AlphaDispatchKey, u64>,
 }
 
 impl Orchestrator {
     pub fn new() -> Self {
         Self {
             strategies: Vec::new(),
+            alpha_dispatched_counter: HashMap::new(),
+            alpha_unavailable_counter: HashMap::new(),
         }
     }
 
@@ -46,12 +58,24 @@ impl Orchestrator {
     /// 分派 tick 到所有策略並收集意圖。
     /// 注意：自 RC-04 起生產環境不再調用（tick_pipeline 使用逐策略循環）。
     /// 保留用於測試輔助和潛在的未來批處理。
+    /// W-AUDIT-8a Phase A：簽名升級加 `surface`，並 tally counter。
     #[allow(dead_code)]
-    pub fn dispatch_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
+    pub fn dispatch_tick(
+        &mut self,
+        ctx: &TickContext,
+        surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         let mut all_intents = Vec::new();
         for strategy in &mut self.strategies {
             if strategy.is_active() {
-                let intents = strategy.on_tick(ctx);
+                Self::tally_alpha_sources(
+                    strategy.name(),
+                    strategy.declared_alpha_sources(),
+                    surface,
+                    &mut self.alpha_dispatched_counter,
+                    &mut self.alpha_unavailable_counter,
+                );
+                let intents = strategy.on_tick(ctx, surface);
                 all_intents.extend(intents);
             }
         }
@@ -71,6 +95,7 @@ impl Orchestrator {
     pub fn dispatch_tick_with_cusum_filter(
         &mut self,
         ctx: &TickContext,
+        surface: &AlphaSurface<'_>,
         realized_net_bps_by_strategy: &HashMap<String, Vec<f64>>,
         cfg: &CusumConfig,
     ) -> Vec<StrategyAction> {
@@ -84,10 +109,57 @@ impl Orchestrator {
             if !strategy.is_active() || blocked.contains(&strategy.name().to_lowercase()) {
                 continue;
             }
-            let intents = strategy.on_tick(ctx);
+            Self::tally_alpha_sources(
+                strategy.name(),
+                strategy.declared_alpha_sources(),
+                surface,
+                &mut self.alpha_dispatched_counter,
+                &mut self.alpha_unavailable_counter,
+            );
+            let intents = strategy.on_tick(ctx, surface);
             all_intents.extend(intents);
         }
         all_intents
+    }
+
+    /// W-AUDIT-8a Phase A：tally alpha source dispatch metric。
+    pub(crate) fn tally_alpha_sources(
+        strategy_name: &str,
+        declared: &[AlphaSourceTag],
+        surface: &AlphaSurface<'_>,
+        dispatched_counter: &mut HashMap<AlphaDispatchKey, u64>,
+        unavailable_counter: &mut HashMap<AlphaDispatchKey, u64>,
+    ) {
+        for tag in declared {
+            let available = match tag {
+                AlphaSourceTag::Ta1m => surface.indicators.is_some(),
+                AlphaSourceTag::Ta5m => surface.indicators_5m.is_some(),
+                AlphaSourceTag::FundingSkew => surface.funding_curve.is_some(),
+                AlphaSourceTag::Basis => surface.basis_curve.is_some(),
+                AlphaSourceTag::OiDeltaPanel => surface.oi_delta_panel.is_some(),
+                AlphaSourceTag::OrderflowImbalance => surface.orderflow.is_some(),
+                AlphaSourceTag::LiquidationCascade => surface.liquidation_pulse.is_some(),
+                AlphaSourceTag::EventDriven => !surface.event_alerts.is_empty(),
+                AlphaSourceTag::CrossAsset => false,
+                AlphaSourceTag::Sentiment => surface.sentiment_panel.is_some(),
+            };
+            let key = (*tag, strategy_name.to_string());
+            if available {
+                *dispatched_counter.entry(key).or_insert(0) += 1;
+            } else {
+                *unavailable_counter.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+
+    /// W-AUDIT-8a Phase A：snapshot getter for healthcheck / IPC export。
+    pub fn alpha_dispatched_snapshot(&self) -> &HashMap<AlphaDispatchKey, u64> {
+        &self.alpha_dispatched_counter
+    }
+
+    /// W-AUDIT-8a Phase A：snapshot unavailable counter。
+    pub fn alpha_unavailable_snapshot(&self) -> &HashMap<AlphaDispatchKey, u64> {
+        &self.alpha_unavailable_counter
     }
 
     /// Evaluate G7-04 downside-CUSUM for registered active strategies.
@@ -157,6 +229,23 @@ impl Orchestrator {
         &mut self.strategies
     }
 
+    /// W-AUDIT-8a Phase A：disjoint-field split borrow — 同時取 strategies +
+    /// dispatch / unavailable counter 的 mutable ref，hot path 避免 NLL 衝突。
+    #[allow(clippy::type_complexity)]
+    pub fn split_borrow_for_dispatch(
+        &mut self,
+    ) -> (
+        &mut [Box<dyn Strategy>],
+        &mut HashMap<AlphaDispatchKey, u64>,
+        &mut HashMap<AlphaDispatchKey, u64>,
+    ) {
+        (
+            &mut self.strategies,
+            &mut self.alpha_dispatched_counter,
+            &mut self.alpha_unavailable_counter,
+        )
+    }
+
     /// RRC-1-E2: Set strategy active/paused by name. Returns Ok(was_active) or Err.
     /// RRC-1-E2：按名稱設置策略活躍/暫停。返回 Ok(之前是否活躍) 或 Err。
     pub fn set_strategy_active(&mut self, name: &str, active: bool) -> Result<bool, String> {
@@ -209,7 +298,15 @@ mod tests {
         fn set_active(&mut self, active: bool) {
             self.active = active;
         }
-        fn on_tick(&mut self, _ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+        fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
+            const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
+            TAGS
+        }
+        fn on_tick(
+            &mut self,
+            _ctx: &TickContext<'_>,
+            _surface: &AlphaSurface<'_>,
+        ) -> Vec<StrategyAction> {
             self.actions.clone()
         }
     }
@@ -237,7 +334,12 @@ mod tests {
             best_bid: None,
             best_ask: None,
             tick_size: None,
+            alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         }
+    }
+
+    fn empty_surface() -> &'static AlphaSurface<'static> {
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE
     }
 
     fn intent(strategy: &str) -> OrderIntent {
@@ -269,7 +371,7 @@ mod tests {
     #[test]
     fn test_empty_orchestrator() {
         let mut orch = Orchestrator::new();
-        assert!(orch.dispatch_tick(&ctx()).is_empty());
+        assert!(orch.dispatch_tick(&ctx(), empty_surface()).is_empty());
     }
 
     #[test]
@@ -281,7 +383,7 @@ mod tests {
             true,
             vec![StrategyAction::Open(intent.clone())],
         ));
-        assert_eq!(orch.dispatch_tick(&ctx()).len(), 1);
+        assert_eq!(orch.dispatch_tick(&ctx(), empty_surface()).len(), 1);
     }
 
     #[test]
@@ -292,7 +394,7 @@ mod tests {
             false,
             vec![StrategyAction::Open(intent("mock"))],
         ));
-        assert!(orch.dispatch_tick(&ctx()).is_empty());
+        assert!(orch.dispatch_tick(&ctx(), empty_surface()).is_empty());
     }
 
     #[test]
@@ -369,7 +471,7 @@ mod tests {
             vec![-2.0, -5.0, -8.0, -10.0, -12.0, -15.0, -18.0, -21.0, -24.0],
         );
         returns.insert("ma_crossover".to_string(), vec![3.0, 4.0, 5.0, 3.5, 4.5]);
-        let actions = orch.dispatch_tick_with_cusum_filter(&ctx(), &returns, &cusum_on());
+        let actions = orch.dispatch_tick_with_cusum_filter(&ctx(), empty_surface(), &returns, &cusum_on());
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             StrategyAction::Open(intent) => assert_eq!(intent.strategy, "ma_crossover"),

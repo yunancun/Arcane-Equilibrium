@@ -21,6 +21,7 @@ use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 
 // QC-H10: Constants retained as defaults only — runtime uses struct fields.
 // QC-H10：常量僅作為默認值保留 — 運行時使用 struct 欄位。
@@ -343,6 +344,13 @@ impl Strategy for FundingArb {
         self.active = active;
     }
 
+    /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
+    /// `funding_arb`：`[FundingSkew, Basis]`（已退休但保留 declare 以對齊 spec）。
+    fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
+        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::FundingSkew, AlphaSourceTag::Basis];
+        TAGS
+    }
+
     /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
     /// RC-04：拒絕時回滾該幣種的 position 和 last_trade_ms。
     fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
@@ -377,7 +385,11 @@ impl Strategy for FundingArb {
 
     /// OC-5: Funding rate capture — entry when edge > 0, exit on rate flip/basis/max hold.
     /// OC-5：資金費率捕獲 — edge > 0 時入場，費率翻轉/基差/超時出場。
-    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+    fn on_tick(
+        &mut self,
+        ctx: &TickContext<'_>,
+        _surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         let sym = ctx.symbol;
         let now_ms = ctx.timestamp_ms;
 
@@ -545,6 +557,7 @@ mod tests {
             best_bid: Some(price * 0.9999),
             best_ask: Some(price * 1.0001),
             tick_size: Some((price * 0.000001).max(0.0001)),
+            alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         }
     }
 
@@ -670,7 +683,7 @@ mod tests {
         let mut s = FundingArb::new();
         s.set_active(true);
         let ctx = make_ctx("BTC", 50000.0, 0, None, None);
-        assert!(s.on_tick(&ctx).is_empty(), "no funding rate → no action");
+        assert!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "no funding rate → no action");
     }
 
     #[test]
@@ -679,7 +692,7 @@ mod tests {
         s.set_active(true);
         // 1 bps = 0.0001, below default threshold 5 bps
         let ctx = make_ctx("BTC", 50000.0, 0, Some(0.0001), Some(50000.0));
-        assert!(s.on_tick(&ctx).is_empty(), "below threshold → no entry");
+        assert!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "below threshold → no entry");
     }
 
     #[test]
@@ -688,7 +701,7 @@ mod tests {
         s.set_active(true);
         // 50 bps funding rate, well above cost → positive edge → short entry
         let ctx = make_ctx("BTCUSDT", 50000.0, 100_000, Some(0.005), Some(50000.0));
-        let actions = s.on_tick(&ctx);
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             StrategyAction::Open(intent) => {
@@ -712,7 +725,7 @@ mod tests {
         s.set_active(true);
         // -50 bps → long entry
         let ctx = make_ctx("ETHUSDT", 3000.0, 100_000, Some(-0.005), Some(3000.0));
-        let actions = s.on_tick(&ctx);
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             StrategyAction::Open(intent) => {
@@ -740,9 +753,10 @@ mod tests {
             best_bid: None,
             best_ask: None,
             tick_size: Some(0.1),
+            alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         };
         assert!(
-            s.on_tick(&ctx).is_empty(),
+            s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(),
             "funding_arb must not fall back to market entry when BBO is missing"
         );
         assert!(
@@ -756,14 +770,14 @@ mod tests {
         let mut s = FundingArb::new();
         s.set_active(true);
         let ctx1 = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(50000.0));
-        assert_eq!(s.on_tick(&ctx1).len(), 1, "first entry");
+        assert_eq!(s.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).len(), 1, "first entry");
 
         // Manually close position but last_trade_ms still set
         s.positions.remove("BTC");
 
         // Within cooldown (1h = 3_600_000ms)
         let ctx2 = make_ctx("BTC", 50000.0, 200_000, Some(0.005), Some(50000.0));
-        assert!(s.on_tick(&ctx2).is_empty(), "cooldown blocks re-entry");
+        assert!(s.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "cooldown blocks re-entry");
 
         // After cooldown
         let ctx3 = make_ctx(
@@ -773,7 +787,7 @@ mod tests {
             Some(0.005),
             Some(50000.0),
         );
-        assert_eq!(s.on_tick(&ctx3).len(), 1, "after cooldown → entry");
+        assert_eq!(s.on_tick(&ctx3, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).len(), 1, "after cooldown → entry");
     }
 
     #[test]
@@ -794,8 +808,9 @@ mod tests {
             best_bid: None,
             best_ask: None,
             tick_size: None,
+            alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         };
-        assert!(s.on_tick(&ctx).is_empty(), "H0 blocked → no entry");
+        assert!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "H0 blocked → no entry");
     }
 
     #[test]
@@ -804,7 +819,7 @@ mod tests {
         s.set_active(true);
         // index=49750 → basis ≈ 0.503% > entry limit 0.4% → blocked
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(49750.0));
-        assert!(s.on_tick(&ctx).is_empty(), "wide basis → no entry");
+        assert!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "wide basis → no entry");
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -819,7 +834,7 @@ mod tests {
 
         // Rate flipped negative → exit
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(-0.001), Some(50000.0));
-        let actions = s.on_tick(&ctx);
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             StrategyAction::Close { symbol, reason, .. } => {
@@ -839,7 +854,7 @@ mod tests {
 
         // Rate still positive and strong → no exit
         let ctx = make_ctx("BTC", 50000.0, 1000, Some(0.005), Some(50000.0));
-        assert!(s.on_tick(&ctx).is_empty(), "no exit while profitable");
+        assert!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "no exit while profitable");
         assert!(s.positions.contains_key("BTC"), "position still held");
     }
 
@@ -854,7 +869,7 @@ mod tests {
 
         // Entry
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(50000.0));
-        let actions = s.on_tick(&ctx);
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
         assert_eq!(actions.len(), 1);
         assert!(s.positions.contains_key("BTC"));
 
@@ -885,7 +900,7 @@ mod tests {
         // index = perp / (1 + basis/100) → 50000 / 1.0045 ≈ 49776
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(49776.0));
         assert!(
-            s.on_tick(&ctx).is_empty(),
+            s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(),
             "0.45% basis blocks entry (> 0.4%)"
         );
 
@@ -904,7 +919,7 @@ mod tests {
         // basis ≈ 0.3%: below entry limit (0.4%)
         // index = 50000 / 1.003 ≈ 49850
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(49850.0));
-        assert_eq!(s.on_tick(&ctx).len(), 1, "0.3% basis allows entry (< 0.4%)");
+        assert_eq!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).len(), 1, "0.3% basis allows entry (< 0.4%)");
     }
 
     #[test]

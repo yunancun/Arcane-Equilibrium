@@ -69,6 +69,7 @@ fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -91,7 +92,7 @@ fn ctx_bb_bbo(
 fn test_long_oversold() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -103,8 +104,8 @@ fn test_long_oversold() {
 fn test_exit_mean() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    s.on_tick(&ctx_bb(-0.1, 25.0, 0));
-    let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000));
+    s.on_tick(&ctx_bb(-0.1, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "bb_mean_revert"),
@@ -123,7 +124,7 @@ fn test_limit_order_long() {
     s.min_persistence_ms = 0;
     s.use_limit = true;
     s.limit_offset_bps = 10.0; // 10 bps = 0.1%
-    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     let intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
@@ -149,7 +150,7 @@ fn test_limit_order_short() {
     s.min_persistence_ms = 0;
     s.use_limit = true;
     s.limit_offset_bps = 10.0;
-    let i = s.on_tick(&ctx_bb_bbo(1.1, 75.0, 0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_bb_bbo(1.1, 75.0, 0, 49_999.5, 50_000.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     let intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
@@ -173,7 +174,7 @@ fn test_market_order_default() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     assert!(!s.use_limit); // verify default is false / 確認默認為 false
-    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     let intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
@@ -194,14 +195,14 @@ fn test_exit_always_market() {
     s.min_persistence_ms = 0; // disable persistence for unit tests
     s.use_limit = true;
     // Enter long with limit order / 限價入場做多
-    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1));
+    let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     let entry_intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
         other => panic!("expected StrategyAction::Open, got {:?}", other),
     };
     assert_eq!(entry_intent.order_type, "limit");
     // Exit at mean reversion / 均值回歸出場
-    let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000));
+    let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => {
@@ -360,6 +361,7 @@ fn ctx_bb_with_funding(
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -372,7 +374,7 @@ fn test_funding_rate_boost_short_with_positive_funding() {
     // Short signal: %B > 1.0, RSI > 70 (overbought)
     // With extreme positive funding rate → aligned with short → boost
     let ctx_with = ctx_bb_with_funding(1.2, 75.0, 1000, Some(0.001));
-    let actions_with = s.on_tick(&ctx_with);
+    let actions_with = s.on_tick(&ctx_with, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         !actions_with.is_empty(),
         "should produce short entry with positive funding"
@@ -387,7 +389,7 @@ fn test_funding_rate_boost_short_with_positive_funding() {
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_without = ctx_bb_with_funding(1.2, 75.0, 2000, None);
-    let actions_without = s.on_tick(&ctx_without);
+    let actions_without = s.on_tick(&ctx_without, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(!actions_without.is_empty());
     let conf_without = match &actions_without[0] {
         StrategyAction::Open(intent) => intent.confidence,
@@ -408,7 +410,7 @@ fn test_funding_rate_boost_long_with_negative_funding() {
 
     // Long signal: %B < 0.0, RSI < 30 (oversold)
     let ctx_with = ctx_bb_with_funding(-0.1, 25.0, 1000, Some(-0.001));
-    let actions_with = s.on_tick(&ctx_with);
+    let actions_with = s.on_tick(&ctx_with, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         !actions_with.is_empty(),
         "should produce long entry with negative funding"
@@ -422,7 +424,7 @@ fn test_funding_rate_boost_long_with_negative_funding() {
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_without = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
-    let actions_without = s.on_tick(&ctx_without);
+    let actions_without = s.on_tick(&ctx_without, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(!actions_without.is_empty());
     let conf_without = match &actions_without[0] {
         StrategyAction::Open(intent) => intent.confidence,
@@ -443,7 +445,7 @@ fn test_funding_rate_no_boost_when_misaligned() {
 
     // Long signal with positive funding (misaligned)
     let ctx_misaligned = ctx_bb_with_funding(-0.1, 25.0, 1000, Some(0.001));
-    let actions_mis = s.on_tick(&ctx_misaligned);
+    let actions_mis = s.on_tick(&ctx_misaligned, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(!actions_mis.is_empty());
     let conf_mis = match &actions_mis[0] {
         StrategyAction::Open(intent) => intent.confidence,
@@ -454,7 +456,7 @@ fn test_funding_rate_no_boost_when_misaligned() {
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_none = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
-    let actions_none = s.on_tick(&ctx_none);
+    let actions_none = s.on_tick(&ctx_none, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(!actions_none.is_empty());
     let conf_none = match &actions_none[0] {
         StrategyAction::Open(intent) => intent.confidence,
@@ -474,7 +476,7 @@ fn test_funding_rate_below_threshold_no_boost() {
     s.min_persistence_ms = 0;
 
     let ctx_small = ctx_bb_with_funding(1.2, 75.0, 1000, Some(0.0001)); // below 0.0005 threshold
-    let actions_small = s.on_tick(&ctx_small);
+    let actions_small = s.on_tick(&ctx_small, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(!actions_small.is_empty());
     let conf_small = match &actions_small[0] {
         StrategyAction::Open(intent) => intent.confidence,
@@ -485,7 +487,7 @@ fn test_funding_rate_below_threshold_no_boost() {
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_none = ctx_bb_with_funding(1.2, 75.0, 2000, None);
-    let actions_none = s.on_tick(&ctx_none);
+    let actions_none = s.on_tick(&ctx_none, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(!actions_none.is_empty());
     let conf_none = match &actions_none[0] {
         StrategyAction::Open(intent) => intent.confidence,
@@ -578,6 +580,7 @@ fn ctx_bb_with_bbo_g709c(
         best_bid: Some(bid),
         best_ask: Some(ask),
         tick_size: Some(tick),
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -593,7 +596,7 @@ fn test_g7_09c_bb_reversion_buy_uses_best_bid_passive() {
     s.limit_offset_bps = 1.0;
     let i = s.on_tick(&ctx_bb_with_bbo_g709c(
         -0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1,
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -624,7 +627,7 @@ fn test_g7_09c_bb_reversion_sell_uses_best_ask_passive() {
     // percent_b > 1 + RSI 超買 → 空頭。
     let i = s.on_tick(&ctx_bb_with_bbo_g709c(
         1.1, 75.0, 0, 49_999.5, 50_000.5, 0.1,
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -740,6 +743,7 @@ fn ctx_bb_with_regime(pct_b: f64, rsi: f64, ts: u64, regime: &str) -> TickContex
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -752,7 +756,7 @@ fn test_phase_b_anti_persistent_label_triggers_hurst_boost() {
     // AntiPersistent regime 必須觸發加成；migration 對齊 legacy 字串比對。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
-    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "mean_reverting"));
+    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "mean_reverting"), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1, "AntiPersistent must allow oversold long entry");
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -777,7 +781,7 @@ fn test_phase_b_persistent_regime_does_not_match_reversion_boost() {
     // boost. Both prove `Persistent != AntiPersistent` enum-wise.
     // Persistent + oversold 通常被 confluence regime 權重壓下；可能 0 intent 或
     // 1 個 Open 但無 reversion boost。兩者皆證明 enum 對齊。
-    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "trending"));
+    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "trending"), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         i.len() <= 1,
         "Persistent regime must not produce more intents than 1"
@@ -802,7 +806,7 @@ fn test_phase_b_random_regime_does_not_trigger_reversion_boost() {
     // Random regime 不命中 AntiPersistent，走 _ 分支不加成。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
-    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "random_walk"));
+    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "random_walk"), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     // Same expectation as Persistent: either gated by confluence or boost-less.
     assert!(i.len() <= 1);
     if let Some(StrategyAction::Open(intent)) = i.first() {
@@ -819,7 +823,7 @@ fn test_phase_b_unknown_regime_string_treated_as_random() {
     // Mirrors bb_breakout's identical guard. 對應 bb_breakout 的同樣防禦測試。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
-    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "totally_invalid"));
+    let i = s.on_tick(&ctx_bb_with_regime(-0.1, 25.0, 0, "totally_invalid"), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(i.len() <= 1);
     if let Some(StrategyAction::Open(intent)) = i.first() {
         assert!(
@@ -879,6 +883,7 @@ fn ctx_bb_with_custom_sma_50(
         best_bid: None,
         best_ask: None,
         tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     }
 }
 
@@ -891,7 +896,7 @@ fn test_w_audit_6d_ma_pair_default_on() {
     assert!(s.require_ma_confirmation, "default 必啟用 MA pair gate");
     assert_eq!(s.ma_confirmation_kind, "sma_50");
 
-    let i = s.on_tick(&ctx_bb_with_custom_sma_50(-0.1, 25.0, 0, None));
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(-0.1, 25.0, 0, None), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         i.len(),
         0,
@@ -909,7 +914,7 @@ fn test_w_audit_6d_long_entry_blocked_when_price_above_ma() {
     let i = s.on_tick(&ctx_bb_with_custom_sma_50(
         -0.1, 25.0, 0,
         Some(49_000.0), // ma < price → long reversion 在「下方反轉」前提失敗 → 不入場。
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         i.len(),
         0,
@@ -927,7 +932,7 @@ fn test_w_audit_6d_long_entry_passes_when_price_below_ma() {
     let i = s.on_tick(&ctx_bb_with_custom_sma_50(
         -0.1, 25.0, 0,
         Some(51_000.0), // ma > price → 「下方反轉」確認 → 過 gate。
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -945,7 +950,7 @@ fn test_w_audit_6d_short_entry_blocked_when_price_below_ma() {
     let i = s.on_tick(&ctx_bb_with_custom_sma_50(
         1.2, 75.0, 0,
         Some(51_000.0), // ma > price → 「上方反轉」前提失敗 → 不入場。
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         i.len(),
         0,
@@ -962,7 +967,7 @@ fn test_w_audit_6d_short_entry_passes_when_price_above_ma() {
     let i = s.on_tick(&ctx_bb_with_custom_sma_50(
         1.2, 75.0, 0,
         Some(49_000.0), // ma < price → 「上方反轉」確認 → 過 gate。
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(!intent.is_long, "expected short entry"),
@@ -978,7 +983,7 @@ fn test_w_audit_6d_disable_ma_confirmation_bypasses_gate() {
     s.min_persistence_ms = 0;
     s.require_ma_confirmation = false;
 
-    let i = s.on_tick(&ctx_bb_with_custom_sma_50(-0.1, 25.0, 0, None));
+    let i = s.on_tick(&ctx_bb_with_custom_sma_50(-0.1, 25.0, 0, None), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1, "gate disabled 時 MA 不可得仍允許");
 }
 
@@ -992,14 +997,14 @@ fn test_w_audit_6d_ma_gate_with_non_finite_value_fails_closed() {
     let i = s.on_tick(&ctx_bb_with_custom_sma_50(
         -0.1, 25.0, 0,
         Some(f64::NAN),
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 0, "NaN MA 必 fail-closed");
 
     s.cooldown.clear("BTC"); // reset cooldown
     let i2 = s.on_tick(&ctx_bb_with_custom_sma_50(
         -0.1, 25.0, 1000,
         Some(f64::INFINITY),
-    ));
+    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i2.len(), 0, "Infinity MA 必 fail-closed");
 }
 

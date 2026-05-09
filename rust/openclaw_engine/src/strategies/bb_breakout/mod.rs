@@ -24,6 +24,7 @@ use super::{Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 
 mod params;
 mod runtime_params;
@@ -289,6 +290,17 @@ impl Strategy for BbBreakout {
         self.active = active;
     }
 
+    /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
+    /// `bb_breakout`：`[Ta1m, Ta5m, OiDeltaPanel]`。
+    fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
+        const TAGS: &[AlphaSourceTag] = &[
+            AlphaSourceTag::Ta1m,
+            AlphaSourceTag::Ta5m,
+            AlphaSourceTag::OiDeltaPanel,
+        ];
+        TAGS
+    }
+
     /// Reset per-symbol position state on external close (risk-stop).
     /// Preserves `squeeze_detected_ms` (squeeze record is preserved across
     /// close — rationale: the squeeze regime can continue observing the same
@@ -369,7 +381,11 @@ impl Strategy for BbBreakout {
         }
     }
 
-    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+    fn on_tick(
+        &mut self,
+        ctx: &TickContext<'_>,
+        _surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         let ind = match self.signal_timeframe.as_str() {
             "5m" => match ctx.indicators_5m {
                 Some(i) => i,
