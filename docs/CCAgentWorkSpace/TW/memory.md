@@ -28,6 +28,31 @@
 | 2026-05-08 | 04-01~05-08 範圍重複 / 合併 / 應歸檔審計（38 天 ~1850 docs/.md + ~430 .claude_reports）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-08--apr_may_doc_audit.md` |
 | 2026-05-09 | 5/8 audit 30+ findings 24h 修復對抗性核實（W-AUDIT-1 closure 真實度查驗）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification.md` |
 | 2026-05-09 | v2 9 commits（`1bd55689` + `85804fbd` + `8226a67f` + `29f3b8f7` + `e8a29185` + `8dcc1f17` + `48401727` + `862e79b7` + `597e866d`）對抗性核實 — 78%→81% 真升 +3%，但 4 大 NI（NI-3/4/7/8）完全未碰 | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v2.md` |
+| 2026-05-09 | v3 5 commits（`faf2d131`→`da2aba11`，含 P0-V2-NEW-1 Donchian guard + P0-V2-NEW-2 wide_parameter_adjustment skill）+ PA redesign 473 行對抗性核實 — 81%→78% **倒退** -3%；7 NEW-ISSUE NI-15..21；PA redesign verdict = **應升 ADR + Amendment + Spec doc 三層登記**（不只 PA-workspace-only）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v3.md` |
+
+## 2026-05-09 v3 對抗性驗證重點
+
+- **任務**：operator 派 TW 三輪對抗性核實 5 commits（`faf2d131`→`da2aba11`，含 P0-V2-NEW-1 Donchian guard + P0-V2-NEW-2 wide_parameter_adjustment skill）+ PA redesign 473 行（5 root cause + R-1..R-5 5 amendment proposal + 88 finding cluster A-G 結構性 verdict）的文檔治理影響核實。
+- **產出**：240 行報告，覆蓋 §1 Executive Summary（v2 81%→v3 78% 倒退 -3% 9 維度）+ §2 5 commits 文檔同步狀況（11 文檔欄 × 3 主題的 sync 矩陣）+ §3 PA redesign 治理影響（升格三層映射 + Operator mirror anti-pattern push back）+ §4 v2 7 push back carry-over 狀態 + §5 7 個 NEW-ISSUE NI-15..21 + §6 TW Verdict 16 維度對比 + §7 PA redesign 升格 8 priority action 4.5h 估時 + §8 規範遵守。
+- **整體文檔健康度**：v2 81% → **v3 78%**（**-3% 倒退**）— 5 commits 真實 source/test closed 但 0 治理 doc trace（無 SCRIPT_INDEX 條目、無 CHANGELOG 摘要、無 ADR、無 spec register、無 §三 Active Blockers update）；PA redesign 是 architectural-foundation 級分析但目前只 PA workspace report 治理權威為零（無 ADR / 無 README / 無 CONTEXT 詞彙登記 / Operator mirror 100% 字面複製重現 anti-pattern）。
+- **README 索引**：88% → 88%（0 動）— 5 commits + PA redesign 共 7 件大事 0 補。
+- **SCRIPT_INDEX**：80% → **78%**（-2%）— Donchian guard + wide_parameter_adjustment skill 0 hit；新增 NI-15/16。
+- **ADR/Amendment sync**：95% → **88%**（-7%）— PA redesign 提 R-1..R-5 5 個 architectural amendment proposal 0 governance object 形式存在 = 無 active tracking ledger。
+- **Worklog 斷層**：14 天 → **15 天**（5/9 仍 0 worklog）。
+- **Agent workspace 利用**：75% → **70%**（-5%）— Operator mirror anti-pattern（5/8 MC-7 carry-over）在 PA redesign 重現，兩檔 1-15 行字面一致。
+- **PA redesign 治理（NEW 維度）**：40% — 文件存在 + 命名 ✅，但 0 README / 0 ADR / 0 CONTEXT / Operator mirror 100% 重複 / 0 amendment formalization。
+- **7 個 NEW-ISSUE NI-15..21**：(15) Donchian guard 0 SCRIPT_INDEX + 0 ADR / (16) wide skill 0 EX-06.x amendment + 0 SPEC_REGISTER / (17) PA redesign 0 README / (18) 5 amendment proposal 0 ADR/AMD register / (19) 4 大新 concept 0 CONTEXT / (20) Operator mirror 重複 / (21) 5 commits 0 CHANGELOG 摘要。
+- **PA redesign 升格 verdict（最關鍵）**：**應升 ADR + Amendment + Spec doc 三層**：
+  - R-1 → ADR-0021 Strategy Interface Alpha-Surface Bundle
+  - R-2 → ADR-0022 Strategist as Alpha-Source Orchestrator
+  - R-3 → ADR-0023 Hypothesis Pipeline as First-Class Governance Object
+  - R-4 → AMD-2026-05-09-03 Per-Alpha-Source Live Promotion Gate（LG-X 系列補充）
+  - R-5 → AMD-2026-05-09-04 Spec-as-Code + Module Lifecycle SM
+  - 4 concept → CONTEXT.md `## Strategy / Decision Plane` 新詞彙登記
+  - PA workspace report 保留為 supplementary first-draft（不 deprecate；ADR 反向 link）
+  - Operator mirror **強制改為 short index file**（10-20 行），不允許全 473 行字面複製
+- **5 commits 應產 governance 對應**：(a) Donchian guard = ADR-0021 + §五 narrative update / (b) wide skill = AMD-2026-05-09-05 + SPEC_REGISTER `EX-06.1` 條目。
+- **規範遵守**：中文為主 + 英文技術名詞；不動代碼 / 邏輯 / 業務文件；對抗性 push back 對 commit-即-治理 + PA workspace-即-architectural-authority 持續質疑。
 
 ## 2026-05-09 v2 對抗性驗證重點
 

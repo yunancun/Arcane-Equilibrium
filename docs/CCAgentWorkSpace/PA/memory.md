@@ -1891,3 +1891,33 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 3. V### migration retention policy（Phase B 兩條 + Phase C 一條）— Guard A/B/C 強制 + idempotency double-run 強制 + MIT review row-rate 估算；漏 retention 將致 PG 4-8 GB 限額溢
 
 **Report**：`docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`（同次 mirror 至 `docs/CCAgentWorkSpace/Operator/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`）
+
+## 2026-05-09 PA — Fix Plan v2 self-adversarial + W-AUDIT-8a/9 反饋 (post 5 commits + AMD-03)
+
+**HEAD baseline**：`faf2d131`（v2 land 點）→ `da2aba11`（5 commits 後 + W-AUDIT-8a SPEC PHASE + AMD-2026-05-09-03 land）
+
+**Self-adversarial 6 點 push back 結論**（對自寫 5/9 redesign report）：
+- Push Back 1 **部分被 4-agent consensus 推翻**：原立場「Strategy Interface 偏差降一檔」過度保守；FA+PA+QC+MIT 4-agent 共識 + 22 fail-closed defaults 累加 P(全 PASS) ≈ 1e-3 死循環數學論證，operator 已採納 W-AUDIT-8a SPEC PHASE + AMD-03 graduated canary supersedes binary fail-closed
+- Push Back 2 **仍站得住**：Strategist 合 EX-06 spec（不越權），EX-06 line 159 是「策略匹配」非「策略孵化」；責任在 Analyst L2-L5；R-2 = W-AUDIT-8e 改為 Strategist→Analyst propose 通道 + Analyst L2-L3 IMPL（不 reframe Strategist scope）
+- Push Back 3 **仍站得住**：Analyst L2-L3 IMPL 不需 ADR-0020 reverse；L0+L1 Ollama 13B 可跑 95% workload；只 L4 跨策略戰略提案 escalate Layer 2 manual
+- Push Back 4 **仍站得住**：ML 0.5% 是 writer chain + cron 三段斷下游症狀；W-AUDIT-4b 是 W-AUDIT-8f Hypothesis Pipeline prerequisite，不是合併（per AMD-03 §5.4）
+- Push Back 5 **仍站得住**：原 5-Agent 拆分 root cause 無新意，replace 為「Spec-Runtime drift 自動偵測缺位」
+- Push Back 6 **仍站得住**：Alpha Surface 升級工時 3 sprint → 4-5 sprint；BB Bybit API survey + E5 LOC budget 必驗；W-AUDIT-8a operator land spec 估 4 sprint × 40 person-day（PA 估算與 operator land 一致）
+- Push Back 6.1 **仍站得住**：5 策略不是「全無 alpha territory」，是「2 個有負 alpha 證據 + 3 個樣本不足」
+
+**operator 在 PA 撰報告同時拍板**：
+- W-AUDIT-8a "Alpha Surface Foundation" SPEC PHASE 2026-05-09 / Phase A-D × 4 sprint × ~40 person-day（CLAUDE.md §三 加 row + spec doc land）
+- W-AUDIT-9 "Graduated Canary Foundation"（AMD-2026-05-09-03 起 / 1.5-2 sprint / 7 sub-task DAG / E1-A 至 E1-G）
+- AMD-03 supersedes AMD-02 §2 binary fail-closed default → 5-stage graduated canary（shadow / single-symbol-paper / single-symbol-demo / multi-symbol-demo / live-pending），每 stage 條件 fail-closed + auto-rollback
+- 4-agent consensus FA+PA+QC+MIT 集中 22 fail-closed defaults 死循環論證；CLAUDE.md §四 加 executor_canary_stage AMD-03 reference
+
+**fix plan v2 verdict**：DUAL-TRACK
+- Track W 收尾 ~92h / 9-11 session：W-AUDIT-3b/4b/6c/6d/7c/1d/5b（7 增量 wave）
+- Track A operator 已 active：W-AUDIT-8a/8b/8c/8d/8e/8f/8g + W-AUDIT-9 + W-ARCH-3（9 ARCH wave，~270-330h 6-12 weeks，含 graduated canary stage gate）
+- 整合視圖 6-12 weeks roadmap；最早 supervised live：6/15 樂觀/6/30 中位/7/15 悲觀（基本同 v2 baseline，W-AUDIT-9 IMPL land 後 P0-EDGE-1 evidence path 才真實 active 為樂觀帶補可信度）
+
+**5 commits cover**：3 個 P0-V2-NEW source/test + 1 governance（blocked symbols）+ 1 audit 校正（cron scope）；runtime apply 全 outstanding；W-AUDIT-4b 6 表 0 INSERT 仍最大 critical gap
+
+**PM push back 5 點**（修正後反映 W-AUDIT-8a/9 既已 active）：W-AUDIT-9 與 W-AUDIT-3b commit 衝突協調 / W-AUDIT-8e R-2 修正 / W-AUDIT-4b 串行先 W-AUDIT-8f / W-AUDIT-6 redesign 策略走 Stage 1 / Layer 2 解耦
+
+**Report**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_audit_pa_fix_plan_v2.md`

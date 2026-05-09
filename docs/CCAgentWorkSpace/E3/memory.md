@@ -114,3 +114,43 @@
 - engine.sock mtime 15:52 確認 e97a333b lease emit 真生效，但 API uvicorn 沒一起 restart = 部署協調問題
 
 報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-09--security_verification_v2.md` (~280 行)
+
+### 2026-05-09 v3 對抗性 verification (5 commits + PA redesign 安全 review)
+
+**評級：A+ (vs v2 A+)**
+
+**範圍**: commits `faf2d131..da2aba11` (5 commits) + PA `2026-05-09--full_loss_architectural_root_cause_redesign.md`
+
+**Task A 5 commits 結果**:
+- 0 CRITICAL / 0 HIGH / 0 MEDIUM / 2 LOW (LOW-A1 Rust↔Python normal_delta_pct mirror, LOW-A2 cron install runbook 缺顯式 user-crontab 警告) / 1 INFO (cron sh 寫好但 user crontab 未 install)
+- 0 NEW unauth endpoint / 0 NEW secret leak / 0 NEW cross-platform path violation / 0 NEW SQL injection / 0 NEW shell injection
+- ad14db07 (Donchian leak fix Rust): 0 attack surface
+- c2ab7b1a (Strategist wide skill 30→50%): Rust delta cap 仍是 RiskConfig.strategist.max_param_delta_pct 唯一權威，prompt 教 LLM 只是「指引」非審批 gate，validate_recommendation_with_reason 仍真實 enforce
+- 48227607 (DSR/PBO evidence push 558 LOC): 3 governance promotion endpoints 100% require_operator + V079 4 個 CHECK 約束 fail-closed + 100% parameterized SQL + demo-only mode 限定
+- c081029d (blocked_symbols freeze): freeze JSON 在 git tracked 區需 PR review 才能改，audit script 100% read-only
+- da2aba11 (F-08 ML cron scope): cron sh 寫好 + ssh trade-core verified user crontab + sudo + /etc/cron.d/ **都沒裝** → INFO not HIGH（sh wrapper line 4-5 explicit comment 寫「installed manually by operator」）
+
+**Task B PA redesign verdict**: **ACCEPT WITH CONDITIONS**
+
+7 條 HARD-PRECON (sprint 開工前必 confirm):
+1. learning.hypotheses 寫入只走 governance API + operator role auth
+2. Hypothesis.proposer field validate (Strategist/Analyst/Operator) + lease-bound gate
+3. 25 symbols WS subscribe ≤ 200 streams (Bybit V5 limit) + cross-symbol REST 走 bybit_rate_limiter
+4. FundingCurveSnapshot/OIDeltaPanel Rust owned, Python read-only via PyO3
+5. SentimentPanel singleton write-once-per-tick (對齊 set_scout_agent)
+6. Analyst L4 strategy evolution 走 E1+E2+E3 sign-off + operator merge, 禁 runtime auto-apply
+7. R-1 spec 明文「cross_asset = Bybit-internal cross-symbol」+ bybit_only healthcheck reject 任何新 connector
+
+**verdict 邏輯**:
+- Strategist propose Hypothesis (governance 對象) 不是 TradeIntent — 不繞 5 hard gate
+- ADR-0020 Layer 2 manual + supervisor-only 仍維持 (Layer 2 用作 alpha-source proposal 不是 trading loop)
+- ADR-0006 Bybit only 不破 (cross-asset = Bybit-internal cross-symbol)
+- 新 feature 來源 100% Bybit V5 (REST + WS), 0 第三方源
+- Hypothesis pipeline 增強 governance forcing function
+
+**push back**:
+- audit closure SOP gap 重申: source-fixed ≠ runtime closed (cron sh 寫好但 user crontab 未 install 是同類問題)
+- LOW-A1: NORMAL_PARAM_DELTA_SKILL_PCT 在 Rust + Python 兩處 hardcoded mirror — future RiskConfig 加 normal_delta_pct 會 drift
+- 建議 PA 報告附錄 §3.6 explicit 寫 Hypothesis governance API spec
+
+報告: `docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-09--security_verification_v3.md` (413 行)

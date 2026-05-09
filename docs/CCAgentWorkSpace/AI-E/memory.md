@@ -187,3 +187,44 @@ v1 樂觀「Strategist 354 applied / MLDE 41.7%」結論在 v2 不持續；v1 NE
 | 日期 | 任務 | 文件 | 行數 |
 |---|---|---|---|
 | 2026-05-09 v2 | v1 修復對抗性嚴苛核實 | docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-09--ai_effectiveness_verification_v2.md | 363 |
+
+## 2026-05-09 v3 verification (5 commits faf2d131..da2aba11 + PA redesign cross-check)
+
+### 5 commits AI 影響 verdict
+- c2ab7b1a strategist wide skill: 純 prompt engineering，仍 Ollama L1 9B，0 Cloud L2 cost；ai_invocations 不同步（writer path 漏接）；engine 未 rebuild 仍跑舊 0.30 cap
+- 48227607 promotion evidence: 純 numpy 統計（DSR/PBO/CSCV）不需 LLM；V079 在 PG 未 apply
+- da2aba11 F-08 cron: source +511 LOC 但 cron 仍未 install（第 3 次 source-only fix）
+- c081029d / ad14db07: 0 AI 影響
+
+### 24h KPI v3
+- ai_invocations 24h = 0（latest 2026-05-06 = 3+ 天無寫）
+- cost_edge_advisor_log all-time = 0
+- strategist_applied 24h = 213（v1 354 → v2 221 → v3 213 持續衰減）
+- mlde_shadow_recos 24h = 1076 / mlde_param_apply 24h = 514（活躍）
+- experiment_ledger / pattern_insights all-time = 0（PA Analyst L2-L5 dormant 主張證實）
+
+### PA redesign cross-check verdict: PARTIAL AGREE
+- ✅ Strategist 是 dict 微調器（c2ab7b1a 反證再次確認）
+- ✅ Strategist 應 reframe 為 alpha-source orchestrator
+- ✅ Analyst L2-L5 dormant（runtime 0 row 證實）
+- ✅ ADR-0020 manual-only 是 source true
+- ⚠️ PA 隱含「需要 Cloud L2 autonomous loop」假設不成立（Ollama 27B 足夠）
+- ⚠️ PA Layer 2 解封路徑與 ADR-0020 細節矛盾，需澄清為「Layer 1 autonomous + Layer 2 manual escalation」
+- AI-E 對 ADR-0020 fail-closed verdict: 合理選擇（ai_invocations writer path 漏接前 + cost cap runtime 未 tested 前，autonomous loop 是 governance 災難）
+
+### v3 NEW findings
+- E.1 P0: ai_invocations writer path 完全沒接 Strategist L1 9B 流量（grep 證實）→ DOC-08 KPI 測量點選錯
+- E.2 P1: V079 promotion_evidence migration 未 apply
+- E.3 P1: experiment_ledger / pattern_insights 0 row（Analyst L2 trigger 不 spawn）
+- E.4 P1: ContextDistiller IMPL ✓ 但 ADR-0020 manual-only → runtime-dormant by design
+- E.5 P2: 5 commits 全 source-only，engine PID 298034 啟動 15:52 早於所有 commit ts
+
+### 對 v2 self-correction
+- v2「dead-AI 假合規」結論需 nuance：實際是「writer path 不覆蓋 L1」非「AI 真死」
+- 真實活躍 AI 量: Strategist 5-min × 4 strategy × 24h × 5 agents ≈ 數百次/天 + mlde 1076/24h
+- 修 E.1 writer path 後 4 KPI 自動 unblock
+
+### 報告
+| 日期 | 任務 | 文件 | 行數 |
+|---|---|---|---|
+| 2026-05-09 v3 | 5 commits + PA redesign cross-check | docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-09--ai_effectiveness_verification_v3.md | ~290 |

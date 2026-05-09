@@ -47,6 +47,36 @@
 | 2026-05-08 | 全程序鏈優化審計（HEAD 4e2d2883；30 opportunity）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-08--full_chain_optimization_audit.md` |
 | 2026-05-09 | 對抗性核實 2026-05-08 audit 30 finding 24h 修復結果（HEAD 7fccad06）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification.md` |
 | 2026-05-09 v2 | 對抗性核實 v2（baseline 455d796e → HEAD 1bd55689；34 commits 48h）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification_v2.md` |
+| 2026-05-09 v3 | 對抗性核實 v3（baseline faf2d131 → HEAD da2aba11；5 commits）+ PA redesign architectural cross-check | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification_v3.md` |
+
+## 2026-05-09 v3 verification 教訓
+
+**任務 A 5 commits 結論**：✅ STRUCTURAL CLEAN（0 hard cap 2000 引入）；hot path 性能淨 0；`ad14db07` Donchian guard 修真實 logical leak-bias（bb_breakout `is_long && price < dc.upper` 含 current bar → Hard mode 永不通過 = 反業務 bug）。1 NEW 800 warn = `helper_scripts/cron/ml_training_maintenance.py` 430→935 (+118%)，5 EXTENDED_JOBS spec only。**5 commits 全 source-only**（v2 lesson #4 持續），engine 跑 5/9 14:02 build (etime 2:58:24)。
+
+**任務 B PA redesign 結論**：⚠️ PARTIAL AGREE
+- ✅ 5 root cause 結構診斷 4/5 證據成立（Strategy interface alpha-poverty + Strategist scope = 調參器 + Analyst L2-L5 dormant + 風控鐵血 vs alpha 放羊 全部 grep 證據成立）
+- ❌ strategist_agent.py LOC：PA 引「45000」實際 **799 LOC**（差 56×）— PA 引 CLAUDE.md §三 錯讀
+- ⚠️ Sprint 估計樂觀 2×：R-1 PA 估 3-4 sprint vs E5 真估 8-9（含 5 panel wiring + 5 既存 migration + E2E）；R-1+R-2+R-3 總 PA 8-10 vs E5 17-19 sprint
+- ⚠️ TA 高速公路隱喻過度：TickContext 已含 funding_rate/index_price/best_bid/ask/OI 5 cross-asset field（first-class），真 friction = cross-section panel + orderflow + sentiment（PA 沒區分）
+- 🟡 9 dead modules sunset 判定過度：dream 936 / cognitive 524 / opportunity 861 是 R-3 Hypothesis Pipeline + R-1 factor library 候選 IMPL 載體（4468 LOC dead production-wise 但其中 ~1900 LOC 是 R-X redesign 候選載體，不應 sunset）
+- ✅ Hypothesis Pipeline first-class（R-3）+ AlphaSurface（R-1）+ Per-alpha-source live promotion（R-4）= 真實 leverage point；E5 強烈認可
+
+**對 W-AUDIT-8a Alpha Surface Foundation 影響**：CLAUDE.md §三 已加 SPEC PHASE，spec `2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`。E5 估算 R-1 真實 8-9 sprint，與 spec 估計需對照 reconcile。
+
+**新教訓**：
+1. **PA architectural claim 必逐條 grep 證據對照** — PA「45000 LOC」明顯誤；架構級 audit 比 hot path optimization 更易引入抽象斷言
+2. **PA LOC 數字必逐檔 wc -l 對照** — 56× 差距足以 derail 重構估算
+3. **Sprint 估計拆三層**：(a) trait 改 (b) panel wiring (c) E2E + treat acceptance；PA 樂觀 2.5× 因只算 (a)
+4. **Dead module sunset 必查 R-X redesign 是否複用** — 避免砍 dream/cognitive/opportunity 後 R-3 沒了候選載體
+5. **TickContext 已含 cross-asset 5 field（funding_rate/index_price/best_bid/ask/OI）**：PA「TA 高速公路 vs 其他泥路」二分法過度，真 friction 是「cross-section panel + microstructure + sentiment」需要中央化 panel maintainer 而非 strategy own buffer
+6. **Donchian leak-bias 修法是教科書** — `donchian_prior` = `donchian(&high[..n-1], ...)` slice borrow O(1) + 同 N 元素 max/min = 0 性能成本 + 修真實業務 logical bug；對抗 lookahead bias 反模式（memory `feedback_indicator_lookahead_bias.md`）
+
+**對抗性 sign-off SOP v3 補充**：
+- PA architectural claim 必逐條 grep 證據對照
+- PA LOC 數字必逐檔 wc -l 對照
+- Sprint 估計必拆「直接 trait / 間接 panel wiring / E2E」三層
+- Dead module sunset 必查 R-X redesign 是否複用
+- 5 commits 後 source-only Rust 累積必標 → deploy gate ticket
 
 ## 2026-05-09 v2 verification 教訓
 
