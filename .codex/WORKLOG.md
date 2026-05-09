@@ -354,5 +354,5 @@ YYYY-MM-DD HH:MM TZ
 
 2026-05-09 CEST
 - closed the operator-requested three main blockers: P0-NEW-VULN-2 lease-bypass audit runtime emit, P0-DECISION-AUDIT-2/4/5 operator decision blockers, and P0-NEW-ISSUE-1 LiveDemo auth_missing restoration
-- deployed Linux `trade-core` through `862e79b7` with authorized `restart_all.sh --rebuild --keep-auth`; V078 applied, `learning.lease_transitions` has 2 `BYPASS` rows, watchdog shows paper/demo/live fresh, and direct `[56] live_pipeline_active` PASSes
+- deployed Linux `trade-core` through `862e79b7` with authorized `restart_all.sh --rebuild --keep-auth`; V078 applied, `learning.lease_transitions` has 2 `BYPASS` rows, watchdog shows demo/live fresh while paper is explicitly disabled by `OPENCLAW_ENABLE_PAPER != 1`, and direct `[56] live_pipeline_active` PASSes
 - LiveDemo auth was restored only through signed `/api/v1/live/auth/renew`; no manual auth-file write, true mainnet API enablement, strategy/risk config mutation, scanner authority change, Executor hard authority, MAG-083/084 unlock, or true-live action
