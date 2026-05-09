@@ -110,3 +110,33 @@ _Last updated: 2026-04-24_
 **ML 基座達標率 ≈ 38%**（13 component 中 4 Production / 4 Canary fragile / 4 Shadow / 4 Skeleton / 5 Foundation / 5 Aspirational）。距 Mainnet ML-driven trading **3-4 sprint**（最早 2026-08-01 樂觀 / 2026-09-01 中位 / 2026-11-01 悲觀，**完全不在 PA 5/30 中位內**）。
 
 **9 個 V068+ migration 提議**：4 砍 dead schema / 3 補 producer / 2 retention+Guard。
+
+## 2026-05-09 對抗性核實 5/8 audit 24h 後（W-AUDIT-4 修復狀態）
+
+**Report**: `workspace/reports/2026-05-09--db_ml_verification.md` (359 行)
+
+**HEAD drift**: `4e2d2883` → `7fccad06`（28 commits 中 10 W-AUDIT-4-related migration 加上 V077 columnstore fallback patch）
+
+**核心發現**：
+1. **V068-V077 全 10 condition apply 成功**（success=t）— **commit 數 ≠ runtime live**：5 真 IMPL（V069 真 drop scorer_predictions / V075 retention 9 表 / V076 Guard retrofit / V077 trigger fallback / V073/V074 source-only contract guard），4 commit message 誤導為「add cycle/backfill」實為 source-only（cron 未 install），1 truthful narrow scope。
+2. **dead schema cleanup「24→2」嚴重縮水**：V068/V070/V071 從「destructive cleanup」改為「reclassification only, COMMENT-only」— PA source audit 發現 21 表中 19 仍有 active route/cron/Rust writer/Agent Spine 引用 → MIT 接受縮水但 warns `rl_transitions / symbol_clusters / experiment_ledger / weekly_review_log / pattern_insights` 5 表實質 dead。
+3. **ML 基座達標 38% → 42%**（+4 percentage points）：13 component grid 中 +1 Production（V077 CHECK constraint）/ +1 Shadow（Replay simulated_fills 從 Foundation 升，因 5 calibrated_replay row 5/7 burst 突破 0）/ Aspirational -1（calibrated_replay 突破）；其他 component **無實質升階**。
+4. **attribution_chain_ok 24h: 0.013% → 0.0188%**（**未實質改善**）；7d 0.048%；NEW-ISSUE-7：5/6→5/7 mlde_edge_training_rows total 從 60/day → 22036 → 264546（denominator 4400×擴大）拖低 ratio — 需 RCA view definition 5/6 改動。
+5. **edge_estimate_snapshots V059 24h=0**（仍 stale 5/7 00:46）— V073 contract guard pass 但 cron `edge_estimate_snapshots_cycle_cron.sh` **未 install in crontab**。
+6. **decision_outcomes.live latest_backfill 仍 4/20**（19d stale，沒任何改善）— V074 contract guard pass 但 outcome_backfiller_live cron 未 install。
+7. **feature_baselines 仍 0 row + 0 writer** — V072 verbatim「contract guard only, does not seed baselines and does not add a writer」→ **drift chain 仍 broken**。
+8. **risk_verdicts retention 30d job 1027 真 active** + compress_after 7d；V075 對 5 hypertable 真效，但 plain table（learning.decision_features / trading.decision_outcomes）的 prune function 是 dry-run default，**未 schedule cron 自動 invoke**。
+9. **Dream Engine** code 在（dream.rs + dream_engine.py），5/7 一次性 burst 5 calibrated_replay row 後 dormant；**Teacher-Student v0.4 仍 Aspirational 0 code**。
+10. **真實 PG settings** work_mem=4MB / shared_buffers=128MB / max_connections=100 — work_mem **嚴重低**（OpenClaw 18M+ row 表大量 disk spill 風險），M5 Ultra 部署前必修。
+
+**對抗性 push back**：
+- commit message 「audit: add edge snapshot cycle wrapper」/「audit: add live outcome backfill schedule support」**誤導為 IMPL**，實為 source-only（cron 未 install）— 應寫「prepare ... cron install pending operator」更誠實。
+- W-AUDIT-4 closure semantic creep：70% schema-side land / 30% writer-side scripts written but not installed → runtime 健康度未實質提升。
+
+**P0 立即 operator action（W-AUDIT-5 提案）**：
+1. install crontab `outcome_backfiller_live_cron.sh`（V074 lifecycle）
+2. install crontab `edge_estimate_snapshots_cycle_cron.sh`（V059 active）
+3. PG `ALTER SYSTEM SET work_mem='32MB'` + reload
+4. RCA mlde_edge_training_rows 5/6 後 explosion source
+
+**距 Mainnet ML-driven 預估**：3-4 sprint（**未變**）；最早 8/15 樂觀、9/15 中位、11/15 悲觀。

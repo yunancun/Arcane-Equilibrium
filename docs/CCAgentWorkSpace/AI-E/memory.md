@@ -116,3 +116,45 @@ engine.log 證據：5-min cycle alive，Ollama IPC 真接，但 `RiskConfig.stra
 7. AI advisory ROI 月報自動產出（1 sprint / E1+AI-E）
 8. Layer2 autonomous loop（1 sprint / E1）
 9. ContextDistiller IMPL（1 sprint / PA+E1）
+
+## 2026-05-09 24h verification of 2026-05-08 audit findings
+
+### 修復率：0/5 真實修復 + 28 commits 0% runtime activation
+
+**所有 5 個 audit finding 24h 內 0 真實 runtime 修復**：
+1. **F-07 P0 Cloud L2 0 流量**：providers/ 仍 0 file，engine env 仍無 ANTHROPIC/OPENAI/DEEPSEEK_API_KEY，ai_invocations 24h=0
+2. **P1-A Strategist max_param_delta_pct=30%**：TOML 未改，但意外發現 24h 354 applied（hidden fix 機制不明，需 RCA）
+3. **P1-B CostEdgeAdvisor env-gate**：env 仍未設，cost_edge_advisor_log 仍 0 row all-time
+4. **P2-A 5 ML scripts unscheduled**：commit `268f9470` source-only fake-fix，crontab 0 entry，且 ml_training_maintenance.py 默認 jobs (linucb/mlde_shadow/mlde_demo/scorer/quantile) **不是** audit 所指 5 個 (thompson/cpcv/dl3/optuna/weekly_report)
+5. **P2-D ContextDistiller**：仍不存在 + Linux 4-3 .pyc dead artifact
+
+### 真實 24h 數值對比
+
+| 指標 | 2026-05-08 | 2026-05-09 | 結論 |
+|---|---|---|---|
+| ai_invocations 24h | 0 | 0 | dormant |
+| ai_usage_log 24h | 0 | 0 | dormant |
+| cost_edge_advisor 24h | 0 (all-time) | 0 (all-time) | dormant |
+| Cloud L2 cost 24h | $0 | $0 | 0 |
+| MLDE shadow 24h | 469 | 902 | +92% organic |
+| MLDE applied rate | 11.5% | 41.7% | +30.2pp organic |
+| strategist_applied 24h | 0 (8/8 reject) | 354 | hidden fix |
+| ml model_registry production | 0 | 0 | dead |
+
+### 5 個 NEW-ISSUE
+- NEW-1 P1: API key 路徑契約不一致（provider_keys_store vs secret_files/ai/）
+- NEW-2 P0: commit 268f9470 fake-fix（cron not installed + scope mismatch）
+- NEW-3 P1: ContextDistiller dead .pyc (Linux 4-3 殘留)
+- NEW-4 P2: Strategist applied 機制 RCA 待
+- NEW-5 P2: agent.ai_invocations writer path audit gap (Ollama L1 不寫表？)
+
+### 對抗性教訓
+1. **commit message 暗示 ≠ runtime 修復**——`audit:` prefix commits 大部分自承「leave operator activation」但 24h 內 operator 0 activation
+2. **DOC-08 4 KPI 全部因 0 流量無法量測**——dead-AI 假合規
+3. **AI-E profile.md 應廢止未 IMPL spec 引用**（ContextDistiller, 雙進程 AI 路徑等）
+4. **5/8 audit 結論「Strategist 8/8 reject」、「MLDE 11.5% applied」已過期**——需 24h 重採樣
+
+### 報告
+| 日期 | 任務 | 文件 | 行數 |
+|---|---|---|---|
+| 2026-05-09 | 24h verification of 2026-05-08 audit | docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-09--ai_effectiveness_verification.md | 264 |

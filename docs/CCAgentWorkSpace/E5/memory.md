@@ -45,6 +45,33 @@
 | 2026-04-12 | E5 Performance Optimization Wave 最終報告 | `docs/CCAgentWorkSpace/E5/2026-04-12--e5_optimization_final_report.md` |
 | 2026-04-24 | 全程序鏈優化審計（P0 Rust 硬違反焦點） | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-24--full_chain_optimization_audit.md` |
 | 2026-05-08 | 全程序鏈優化審計（HEAD 4e2d2883；30 opportunity）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-08--full_chain_optimization_audit.md` |
+| 2026-05-09 | 對抗性核實 2026-05-08 audit 30 finding 24h 修復結果（HEAD 7fccad06）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification.md` |
+
+## 2026-05-09 對抗性核實要點
+
+**核實口徑**：commit message 不算數，必驗 LOC + binary size + DB rows + 真實 caller。
+
+**結果**：30 finding 中 ✅ 6 真 fix / ⚠️ 9 partial / ❌ 15 not fixed (35% true closure rate)。
+
+**3 Critical 中 2 未解**：
+1. C-1 909 MB damaged dump 完全沒 DROP（risk_verdicts_damaged 仍 903 MB on Linux PG）
+2. C-2 `replay/runner.rs` 2467 LOC **完全沒拆** — commit `3372eb18 split replay runner binary` 誤導，實際 split 的是 `bin/replay_runner.rs` (CLI binary 1599→626) 不是 `replay/runner.rs` (production 2467)
+3. C-3 binary strip 真做：25 MB → 20.6 MB（-17.6%；少於預估 -32% 因 LTO/codegen-units 未調）
+
+**重要新教訓**：
+1. **commit message disambiguation 必查**：`bin/replay_runner.rs` ≠ `replay/runner.rs` 兩檔同名易誤讀；E5 audit/verification 必逐 commit 對照具體檔案路徑
+2. **Audit 數字校驗**：deepcopy audit 標 10 處實際 18 處（沒掃 state_compiler/runtime_bridge/learning_queries/control_ops）；E5 audit count 必含這些 cold path
+3. **「foundation only」≠「ROI realized」**：H-7 orjson 加 helper + 5 callsite 切換是 foundation；657 stdlib json 仍未動 = <1% 遷移；commit 用 "expand" 但 expand 範圍僅 5 檔
+4. **「reclassify-only」≠ DROP**：W-AUDIT-5a 用 V068/V070/V071 reclassify guard 替代真 DROP（commit body 自承找到 active references 改保守路徑）— 合理工程妥協但 audit 點不算閉合
+5. **partial scope ArcSwap**：ai_budget config_cache 真改 ArcSwap，usage_cache 仍 RwLock（mutate-on-record 不適合 ArcSwap）— PA 妥協明確標注 trade-off
+6. **0 動 high ROI 1-hour fix**：H-2 lambda:True / H-8 lg5 column drift / H-10 collation refresh — 都是 audit 標高 ROI low cost 但本輪 0 commit 觸
+
+**對抗性 sign-off SOP** (生效 2026-05-09)：
+- 必驗 LOC（before/after diff）
+- 必驗 binary size delta（OS file 命令）
+- 必驗 DB rows delta（PG 直查 n_live_tup / size）
+- 必驗 production caller count（grep -v test）
+- commit message 與實際 changed file path 必對齊核實
 
 ## 2026-05-08 全程序鏈審計 key findings
 
