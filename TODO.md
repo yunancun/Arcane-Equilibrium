@@ -273,6 +273,18 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   EVT, historical VaR/CVaR breach, or LUNA/FTX stress breach fail closed. This
   is source/test promotion evidence only: no DB apply, no runtime reload, no
   live auth mutation, and no order authority change.
+- **`P2-AUDIT-VERIFY-5` source/test closed 2026-05-09**：
+  current `blocked_symbols` lists are frozen in
+  `docs/governance_dev/strategy_blocked_symbols_freeze.json` and guarded by
+  `tests/structure/test_strategy_blocked_symbols_freeze.py`. New
+  strategy-symbol block entries now require RFC + 7d counterfactual or
+  rejected-outcome evidence + DSR/PBO or explicit QC waiver before source
+  config mutation. Read-only Linux evidence showed `grid_trading/LABUSDT`
+  7d net `-9.7539 USDT`, `grid_trading/BILLUSDT` `-3.6751 USDT`, and MA
+  blocked rejections with `decision_outcomes=0`; this prevents more
+  selection-biased list growth until rejected-outcome power exists. No strategy
+  config change, DB write, rebuild, restart, live auth mutation, or runtime
+  reload was performed.
 - **`P0-DECISION-AUDIT-1` ✅ closed** (W-C operator auth file + AMD §5.4.1)
 - **`P0-DECISION-AUDIT-3` ✅ closed** (§三 5 stale 數字真修 + healthcheck id)
 - **`P0-DECISION-AUDIT-2/4/5` ✅ closed** — AMD-2026-05-09-02 selects
@@ -384,7 +396,7 @@ historical wave narratives, and old date-driven reminders are archived.
 | `P2-AUDIT-VERIFY-2` | DONE 2026-05-09 — F-12 runner.rs 真檔對齊 | Verified true finding closed: `rust/openclaw_engine/src/replay/runner.rs` 2469→1166 and tests moved to sibling `runner_tests.rs` 1299; `tests/structure/test_replay_runner_split_static.py` now guards both files under the 2000 LOC cap. |
 | `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix | FA NEW-2 verified: V068/V070/V071 全降級為 reclassification guard（COMMENT only），row count 仍 0；6 表 0 INSERT 必另開 functional fix wave。Action: 區分「source-only checkpoint」與「functional fix complete」並接 INSERT path。 |
 | `P2-AUDIT-VERIFY-4` | cron not installed (F-08) | FA NEW-3 + AI-E verified: 5 ML 訓練腳本 cron script 寫了但 cron not installed；attribution_chain_ok 24h 仍 0.0188%。Action: operator 授權 `crontab -e` 安裝 + verify 24h cron fire。 |
-| `P2-AUDIT-VERIFY-5` | grid blocked_symbols selection bias 加劇 | QC NEW-1 verified: P1-EDGE-1 commit 又追加 LABUSDT；selection bias 持續加劇而非 freeze。Action: 凍結列表 + 新加入需 RFC + DSR/PBO; 計算 4 blocked symbol counterfactual 7d PnL。 |
+| `P2-AUDIT-VERIFY-5` | DONE 2026-05-09 — grid blocked_symbols selection-bias freeze | Current grid 17-symbol and MA 4-symbol blocklists are frozen in `docs/governance_dev/strategy_blocked_symbols_freeze.json` and guarded by `tests/structure/test_strategy_blocked_symbols_freeze.py`; new blocked cells require RFC + 7d counterfactual/rejected-outcome evidence + DSR/PBO or explicit QC waiver. Added `helper_scripts/db/audit/blocked_symbols_7d_counterfactual.py`; read-only Linux spot-check found only LAB/BILL grid and LAB MA realized fills, while MA blocked rejections had `decision_outcomes=0`, so no further blocklist growth is allowed until outcome-backed counterfactual power exists. |
 | `P2-AUDIT-VERIFY-6` | DONE 2026-05-09 — A3 NEW-1 openConfirmModal a11y | `common.js` and legacy `app.js` `openConfirmModal` paths now set dialog role/`aria-modal`, support Esc cancel, Tab focus loop, initial cancel focus, and previous-focus restore. Static a11y regression + JS syntax checks passed. |
 | `P2-AUDIT-VERIFY-7` | DONE 2026-05-09 — NEW-VULN-3 / NEW-VULN-4 修復 | Cookie Secure auto mode now treats positive HTTPS proxy hints as fail-closed Secure-cookie signals even without trust-proxy env, while explicit `OPENCLAW_COOKIE_SECURE=0` remains an operator override. Phase4 router is mounted in Control API `main.py`, so weekly-review operator+scope gates are reachable rather than dead code. Source/test only; no runtime reload. |
 | `P2-AUDIT-QC-STAND-ALONE` | QC stand-alone fixes（verdict 已由 AMD-2026-05-09-02 選定）| DONE: (1) funding_arb schema 4 TOML 完全清除 source/test; (2) Kelly tier 8/6/4 → RiskConfig.kelly.{young,mature,established}_fraction source/test; (3) bb_breakout cooldown 600k vs 300k source/test 統一；(4) DSR/PBO production caller 加進 promotion_pipeline.py demo gate source/test；(5) CLAUDE.md §三 -26.44 已加 source report + `[40]` realized_edge_acceptance healthcheck id。 |
