@@ -163,7 +163,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 13 | A 群 3 新策略 IMPL 後 `declared_alpha_sources()` 與真實邏輯對齊 | grep 3 新策略 ctor + QC review report sign-off | PA-11 |
 | 14 | W-AUDIT-8b/c/d sequence 必含 **Stage 2 abort gate**（A4-C IMPL 後 Stage 2 demo 14d gross < 0 → A 群 8b/8c 重評，**不**連續 IMPL） | Sprint sign-off report 明文記入 | FA-5 |
 | 15 | D-02 Layer 2 manual SOP 不違反 ADR-0020（manual probe 不可自動化為 cron / event-trigger） | code grep audit | FA-6 |
-| 16 | W-AUDIT-6d mid-ground 砍 6 polishing 的 **K -12 trial DSR penalty 量化結論記入 sign-off report**（mu_0 從 ~2.83 降至 ~2.27） | sign-off report 明文 | FA-7 |
+| 16 | W-AUDIT-6d mid-ground 砍 6 polishing 的 **K -12 trial DSR penalty 量化結論記入 sign-off report**（mu_0 從 ~2.54 降至 ~2.27 用 ln，z_DSR 增益 +0.30） | sign-off report 明文 | FA-7 |
 | 17 | v2-NEW-1 strategist cap 30%→50% 補 **ADR-0021**（freedom-not-gate rationale + SM-05 張力 + 50% 偏離監測指標） | ADR-0021 land + commit | FA-8 |
 
 ### §5.4 監督 / record（5 條）
@@ -251,7 +251,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 - 砍 6: K -15 trial（避免 sweep / per-symbol / per-threshold inflation）
 - **Net: K -12 trial**
 
-DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項。K 從 ~25 降至 ~13 → `mu_0` 從 ~2.83 降至 ~2.27 → DSR PASS threshold 對 5 策略 sharpe ~0.5 真實要求降低（FA report §3 量化）。
+DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log₁₀）。K 從 ~25 降至 ~13 → `mu_0` 從 ~2.54 降至 ~2.27 → Δ ≈ -0.27 → z_DSR 增益 +0.30 → 對 5 策略 sharpe ~0.5 demo n=200 樣本，DSR PASS percentile 增益 +5-10%（fat-tail 折扣後）。E1-D `2026-05-09--w_audit_6d_dsr_penalty_quantification.md` 詳細推導；早期 QCTODO/PA 引用 ~2.83 是 log₁₀ 錯算，不採。
 
 **FA Push back**：mid-ground 砍 6 polishing **正是 DSR 數學意義的 right move**，不是省工時妥協。invariant 16 必明文記入 sign-off report。
 
