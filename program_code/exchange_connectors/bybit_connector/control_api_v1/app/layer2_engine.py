@@ -62,6 +62,7 @@ from .layer2_types import (
     Recommendation,
     ToolCallRecord,
 )
+from .context_distiller import ContextDistiller
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_tools import TOOL_SCHEMAS, ToolExecutor
 from .local_llm_factory import get_local_llm_client
@@ -179,10 +180,12 @@ class Layer2Engine:
         cost_tracker: Layer2CostTracker,
         paper_engine: Any = None,
         shadow_consumer: Any = None,
+        context_distiller: ContextDistiller | None = None,
     ):
         self._cost_tracker = cost_tracker
         self._paper_engine = paper_engine
         self._shadow_consumer = shadow_consumer
+        self._context_distiller = context_distiller or ContextDistiller()
         self._session_lock = asyncio.Lock()
         self._current_session: Layer2Session | None = None
 
@@ -303,12 +306,7 @@ class Layer2Engine:
         """
         config = self._cost_tracker.get_config()
 
-        # Build triage context
-        triage_context = "Current market context:\n"
-        if context:
-            triage_context += json.dumps(context, ensure_ascii=False, indent=2)[:2000]
-        else:
-            triage_context += "No specific context provided. Check if general conditions warrant investigation."
+        triage_context = self._build_triage_context(context)
 
         try:
             # 走 provider abstraction：default_provider + tier 2/3 fallback；triage 強制 cheapest tier
@@ -784,8 +782,24 @@ class Layer2Engine:
             "Start by checking the current market state and account state, then decide if web search for recent news is warranted.",
         ]
         if context:
-            parts.insert(1, f"Additional context: {context}")
+            compact_context = self._context_distiller.distill_for_prompt(context, max_chars=2000)
+            parts.insert(1, f"Additional context: {compact_context}")
         return "\n".join(parts)
+
+    def _build_triage_context(self, context: dict[str, Any] | None = None) -> str:
+        """Build the bounded L1 triage context payload."""
+        triage_context = "Current market context:\n"
+        if context:
+            triage_context += self._context_distiller.distill_for_prompt(context, max_chars=2000)
+        else:
+            triage_context += (
+                "No specific context provided. Check if general conditions warrant investigation."
+            )
+        return triage_context
+
+    def update_context_after_cycle(self, cycle_data: dict[str, Any]) -> None:
+        """Update the cached ContextDistiller summary from a runtime cycle."""
+        self._context_distiller.update_after_each_cycle(cycle_data)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
