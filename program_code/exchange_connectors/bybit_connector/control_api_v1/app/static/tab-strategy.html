@@ -403,14 +403,16 @@ async function loadStrategies() {
     html += '</div>';
     // V2 strategy parameters row / V2 策略参数行
     html += stratV2Params(s);
-    html += '<div class="strat-actions" style="margin-top:6px;display:flex;align-items:center;gap:4px">';
-    html += '<button class="oc-btn oc-btn-danger" title="手动硬关闭 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
-    html += '<button class="oc-btn" title="暂停 / Pause" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
-    // WP-F/AH-07: Delete separated by visible divider + dashed border to distinguish it from
-    // reversible Stop/Pause actions; confirmDeleteStrategy() provides required confirm() guard.
-    // 删除按钮与 Stop/Pause 之间加分隔线 + 虚线边框以区别可逆/不可逆操作；二次确认弹窗已接好
-    html += '<span style="width:1px;height:20px;background:rgba(255,255,255,0.1);margin:0 6px;flex-shrink:0"></span>';
-    html += '<button class="oc-btn oc-btn-danger" title="永久删除策略（不可撤销） / Delete permanently — irreversible" style="font-size:10px;padding:2px 8px;border-style:dashed" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
+    html += '<div class="strat-actions oc-action-row oc-action-row-strategy" style="margin-top:8px">';
+    html += '<span class="oc-action-cluster oc-action-cluster-pause" data-danger-zone="strategy-pause">';
+    html += '<button class="oc-btn oc-btn-warning oc-action-pause" title="暂停 / Pause" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
+    html += '</span>';
+    html += '<span class="oc-action-cluster oc-action-cluster-stop" data-danger-zone="strategy-stop">';
+    html += '<button class="oc-btn oc-btn-danger oc-btn-critical oc-action-stop" title="手动硬关闭 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
+    html += '</span>';
+    html += '<span class="oc-action-cluster oc-action-cluster-destructive" data-danger-zone="strategy-delete">';
+    html += '<button class="oc-btn oc-btn-destructive oc-action-delete" title="永久删除策略（不可撤销） / Delete permanently — irreversible" style="font-size:10px;padding:2px 8px" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
+    html += '</span>';
     html += '</div>';
     html += '</div>';
   });

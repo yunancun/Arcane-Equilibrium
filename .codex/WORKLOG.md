@@ -330,3 +330,8 @@ YYYY-MM-DD HH:MM TZ
 - verification: V077 static pytest 5/0, `git diff --check` PASS, Linux PG `BEGIN ... ROLLBACK` dry-run of the patched V077 PASS with trigger fallback notice; no live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
 - deployed hotfix `49ceeb61` to Linux and restarted engine-only with `--keep-auth`; V077 is now recorded in `_sqlx_migrations`, `trg_fills_engine_mode_known_values` exists, engine PID `4080150` is alive, passive healthcheck returned `SUMMARY: WARN` with no hard FAIL, and `[55]` PASSed with `chains=121`, `chains_with_lease=96`, `bad_report_quality=0`
 - runtime caveat: live authorization file is missing, so the engine refused to spawn LiveDemo/live at boot and is running demo-only; no manual auth renewal/restoration was performed
+
+2026-05-09 CEST
+- continued W-AUDIT-7 F-strategy-confirm source checkpoint: added shared `common.js` action risk-zone CSS, separated Strategy Pause/Stop/Delete, separated Paper run/pause/stop/dual-stop, and grouped Live Stop/Emergency Stop plus close-all/row-close destructive controls
+- extended `openConfirmModal()` for per-call metadata/classes and replaced Paper dual-stop plus Live close-position native `confirm()` paths with custom modal confirms
+- verification: strategy-action + prompt + system-mode static pytest 9/0, `node --check common.js`, `git diff --check`, and Edge headless routed smoke for Strategy/Paper/Live danger zones all PASS; source/test/static-browser only, no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action

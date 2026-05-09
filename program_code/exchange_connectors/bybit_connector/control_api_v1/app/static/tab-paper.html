@@ -128,11 +128,21 @@
     <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px" title="Paper 初始餘額（USDT）/ Paper Initial Balance (USDT)">
       Balance: <input id="paper-init-bal" type="number" min="100" max="10000000" step="100" value="10000" style="width:90px;font-size:12px" />
     </label>
-    <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; 启动</button>
-    <button class="oc-btn" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
-    <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 继续</button>
-    <button class="oc-btn oc-btn-danger" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止 Paper</button>
-    <button class="oc-btn oc-btn-danger" id="btn-stop-all" onclick="sessionStopAll()" disabled title="停止 Paper + Demo 雙引擎 / Stop both Paper and Demo engines">&#x23F9;&#x23F9; 雙停</button>
+    <span class="oc-action-row" id="paper-session-controls">
+      <span class="oc-action-cluster oc-action-cluster-state" data-danger-zone="paper-session-run">
+        <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; 启动</button>
+        <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 继续</button>
+      </span>
+      <span class="oc-action-cluster oc-action-cluster-pause" data-danger-zone="paper-session-pause">
+        <button class="oc-btn oc-btn-warning" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
+      </span>
+      <span class="oc-action-cluster oc-action-cluster-stop" data-danger-zone="paper-session-stop">
+        <button class="oc-btn oc-btn-danger oc-btn-critical" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止 Paper</button>
+      </span>
+      <span class="oc-action-cluster oc-action-cluster-destructive" data-danger-zone="paper-dual-stop">
+        <button class="oc-btn oc-btn-destructive" id="btn-stop-all" onclick="sessionStopAll()" disabled title="停止 Paper + Demo 雙引擎 / Stop both Paper and Demo engines">&#x23F9;&#x23F9; 雙停</button>
+      </span>
+    </span>
     <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">余额: <strong id="balance-val">--</strong></span>
   </div>
 
@@ -188,7 +198,7 @@
   <div class="oc-card">
     <h3 style="display:flex;align-items:center;gap:10px">
       &#x1F4CA; 持仓 / Positions
-      <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="closeAllPositions()">&#x23F9; 全部平仓</button>
+      <button class="oc-btn oc-btn-destructive oc-toolbar-danger-action" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="closeAllPositions()">&#x23F9; 全部平仓</button>
     </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
@@ -359,7 +369,7 @@ async function sessionAction(action) {
 async function sessionStopAll() {
   // Dual-engine stop: close Paper + Demo positions, pause both engines.
   // 雙引擎聯停：平掉 Paper + Demo 倉位，暫停兩個引擎。
-  if (!confirm('停止 Paper + Demo 雙引擎？\nStop both Paper and Demo engines?')) return;
+  if (!await openConfirmModal("paper-stop-all")) return;
   const d = await ocPost('/api/v1/paper/session/stop-all', {});
   if (d) {
     ocToast('Paper + Demo 雙引擎已停止', 'success');
@@ -506,7 +516,7 @@ async function loadPositions() {
     html += '<td>' + (markPrice > 0 ? ocNum(markPrice, decimals) : '--') + '</td>';
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
-    html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="closePosition(\'' + ocEsc(p.symbol) + '\')">平仓</button></td>';
+    html += '<td><button class="oc-btn oc-btn-danger oc-row-close-action" onclick="closePosition(\'' + ocEsc(p.symbol) + '\')">平仓</button></td>';
     html += '</tr>';
   });
   ocSetHtml('positions-tbody', html);
@@ -872,7 +882,7 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperHandoff() {
     </div>
     <div style="padding:12px 20px;border-top:1px solid #21262d;display:flex;gap:8px;justify-content:flex-end">
       <button class="oc-btn" onclick="closePaperCloseModal()">取消 / Cancel</button>
-      <button class="oc-btn oc-btn-danger" onclick="confirmPaperClose()">确认平仓 / Confirm Close</button>
+      <button class="oc-btn oc-btn-danger oc-btn-critical" onclick="confirmPaperClose()">确认平仓 / Confirm Close</button>
     </div>
   </div>
 </div>
