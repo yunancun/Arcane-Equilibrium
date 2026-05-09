@@ -1,14 +1,22 @@
 name: ci
 
+# 觸發策略（2026-05-09 成本優化）：
+# - push to main：只跑 Linux check（macOS 10x 計費倍率太貴）
+# - pull_request：Linux + macOS 雙平台
+# - schedule：每週一跑 macOS smoke，確保 aarch64-apple-darwin target 仍編得過
 on:
   push:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: '0 3 * * 1'  # 每週一 03:00 UTC（北京 11:00）
 
 jobs:
   rust-check:
     name: rust check (${{ matrix.target }})
+    # macOS 在 push 事件跳過；僅 PR / schedule / workflow_dispatch 觸發
+    if: ${{ matrix.os != 'macos-latest' || github.event_name != 'push' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:

@@ -108,6 +108,19 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 - Governance register path in this repo is `docs/governance_dev/SPECIFICATION_REGISTER.md`. The older shorthand `docs/SPECIFICATION_REGISTER.md` is not present.
 - P2-AUDIT-VERIFY-1 DOCS-1 is source/test closed as of 2026-05-09: `docs/README.md` indexes `docs/agents/`, `../helper_scripts/SCRIPT_INDEX.md`, all top-level `docs/archive/*.md`, and CCAgentWorkSpace now says 19 agents with MIT/BB rows; MIT/BB also have `workspace/README.md`; static guard is `tests/structure/test_docs_readme_index_static.py`.
 
+## GitHub Actions cost policy (2026-05-09)
+
+- Repo is private; free tier is 2000 billable minutes per month.
+- macOS runners cost a **10x multiplier**; running Linux + macOS on every `push to main` will exhaust the monthly quota within days at current commit velocity (~99 commits / day in early May 2026, hit 90% quota by 2026-05-09).
+- Active workflow `srv/.github/workflows/ci.yml`:
+  - `push to main` → Linux only (`x86_64-unknown-linux-gnu`)
+  - `pull_request` → Linux + macOS (`aarch64-apple-darwin`)
+  - `schedule` weekly Monday 03:00 UTC → Linux + macOS smoke
+  - implementation: job-level `if: ${{ matrix.os != 'macos-latest' || github.event_name != 'push' }}` skips the macOS matrix entry on push events.
+- Do **not** revert macOS to push-trigger without operator approval; the future Apple Silicon runtime invariant is satisfied by the weekly schedule plus on-demand PR coverage.
+- If a change genuinely needs macOS verification mid-cycle outside the schedule, open a PR (triggers macOS matrix) instead of pushing direct to main; or trigger the workflow manually after adding a `workflow_dispatch:` event if needed.
+- Do not assume budget is unlimited and do not enable additional macOS jobs without recomputing the multiplier impact.
+
 ## Architecture and deployment invariants
 
 - Formal project/product name is `玄衡 · Arcane Equilibrium`; do not use `OpenClaw Bybit` as the total project name in new docs
