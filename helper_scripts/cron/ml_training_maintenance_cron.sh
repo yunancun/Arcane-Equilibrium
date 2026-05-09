@@ -5,9 +5,10 @@
 #   17 3 * * * OPENCLAW_BASE_DIR=$HOME/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/tmp/openclaw \
 #       $HOME/BybitOpenClaw/srv/helper_scripts/cron/ml_training_maintenance_cron.sh
 #
-# This wrapper schedules the five ML paths flagged as silent-unscheduled by the
-# 2026-05-08 E4 audit: mlde_demo_applier, linucb_trainer, quantile_trainer,
-# scorer_trainer, and mlde_shadow_advisor. It does not install itself.
+# This wrapper schedules operational MLDE maintenance plus the five legacy ML
+# scripts flagged as silent-unscheduled by the 2026-05-08 audit:
+# thompson_sampling, optuna_optimizer, cpcv_validator, dl3_foundation, and
+# weekly_report_generator. It does not install itself.
 
 set -euo pipefail
 
@@ -64,11 +65,13 @@ if [[ ! -f "${BASE}/helper_scripts/cron/ml_training_maintenance.py" ]]; then
     exit 1
 fi
 
-JOBS="${OPENCLAW_ML_CRON_JOBS:-linucb_trainer,mlde_shadow_advisor,mlde_demo_applier,scorer_trainer,quantile_trainer}"
+JOBS="${OPENCLAW_ML_CRON_JOBS:-linucb_trainer,mlde_shadow_advisor,mlde_demo_applier,scorer_trainer,quantile_trainer,thompson_sampling,optuna_optimizer,cpcv_validator,dl3_foundation,weekly_report_generator}"
 STRATEGIES="${OPENCLAW_ML_CRON_STRATEGIES:-grid_trading,ma_crossover,bb_breakout,bb_reversion,funding_arb}"
 TRAINING_ENGINE_MODES="${OPENCLAW_ML_CRON_TRAINING_ENGINE_MODES:-demo}"
 SHADOW_ENGINE_MODES="${OPENCLAW_ML_CRON_SHADOW_ENGINE_MODES:-demo,live_demo}"
 LINUCB_ENGINE_MODE="${OPENCLAW_MLDE_LINUCB_ENGINE_MODE:-demo_live_demo}"
+AUDIT_ENGINE_MODES="${OPENCLAW_ML_CRON_AUDIT_ENGINE_MODES:-demo,live_demo}"
+AUDIT_WEEKDAY="${OPENCLAW_ML_CRON_AUDIT_WEEKDAY:-6}"
 MIN_SAMPLES="${OPENCLAW_ML_CRON_MIN_SAMPLES:-200}"
 MAX_AGE_DAYS="${OPENCLAW_ML_CRON_MAX_AGE_DAYS:-90}"
 OUTPUT_DIR="${OPENCLAW_ML_CRON_OUTPUT_DIR:-${DATA}/models/ml_training_maintenance}"
@@ -92,6 +95,8 @@ if python3 helper_scripts/cron/ml_training_maintenance.py \
         --strategies "$STRATEGIES" \
         --training-engine-modes "$TRAINING_ENGINE_MODES" \
         --shadow-engine-modes "$SHADOW_ENGINE_MODES" \
+        --audit-engine-modes "$AUDIT_ENGINE_MODES" \
+        --audit-weekday "$AUDIT_WEEKDAY" \
         --linucb-engine-mode "$LINUCB_ENGINE_MODE" \
         --min-samples "$MIN_SAMPLES" \
         --max-age-days "$MAX_AGE_DAYS" \

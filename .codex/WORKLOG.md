@@ -363,6 +363,12 @@ YYYY-MM-DD HH:MM TZ
 - verification: `bash -n helper_scripts/restart_all.sh`, keep-auth preflight static pytest 2/0, `git diff --check` PASS; no restart, auth write/delete, true mainnet enablement, strategy/risk config mutation, MAG-083/084 unlock, or true-live action
 
 2026-05-09 CEST
+- continued W-AUDIT-4 / P2-AUDIT-VERIFY-4 source checkpoint: corrected F-08 ML cron scope so `ml_training_maintenance` covers the original audit five (`thompson_sampling`, `optuna_optimizer`, `cpcv_validator`, `dl3_foundation`, `weekly_report_generator`) plus the operational MLDE jobs
+- added real source paths from current runtime data into `bayesian_posteriors`, `ml_parameter_suggestions`, `cpcv_results`, `foundation_model_features`, and `weekly_review_log` where DB/dependencies/data exist; wrapper default job list now includes both sets
+- updated TODO/MEMORY/PM report/Script Index to mark W-AUDIT-4 as partial and F-08 as source-scope corrected but runtime-cron pending
+- verification: py_compile PASS, `tests/helper_scripts/test_ml_training_maintenance_cron_static.py` 4/0 PASS, forced audit-job dry-run PASS, and weekly_report/dl3/thompson targeted pytest 46/0 PASS; no crontab install, DB write, rebuild, restart, deploy, live auth mutation, scanner authority change, strategy/risk config mutation, MAG-083/084 unlock, or true-live action
+
+2026-05-09 CEST
 - continued W-AUDIT-3 F-01 source checkpoint: removed the hidden `lambda: True` fallback from `ExecutorAgent.__init__` and made missing `shadow_mode_provider` state explicit
 - `_read_shadow_mode()` now handles provider-unavailable and provider-exception paths fail-closed before IPC submit authority; production wiring remains explicit via `ExecutorConfigCache.shadow_mode_provider()`
 - updated SM-05/TODO/CLAUDE/register wording plus PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_f01_provider_fail_closed.md`

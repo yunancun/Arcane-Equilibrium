@@ -46,13 +46,21 @@ def test_f08_wrapper_and_runner_static_syntax() -> None:
 def test_f08_runner_pins_the_five_audit_jobs() -> None:
     runner = _load_runner()
 
-    assert runner.VALID_JOBS == (
+    assert runner.CORE_JOBS == (
         "linucb_trainer",
         "mlde_shadow_advisor",
         "mlde_demo_applier",
         "scorer_trainer",
         "quantile_trainer",
     )
+    assert runner.AUDIT_JOBS == (
+        "thompson_sampling",
+        "optuna_optimizer",
+        "cpcv_validator",
+        "dl3_foundation",
+        "weekly_report_generator",
+    )
+    assert runner.VALID_JOBS == runner.CORE_JOBS + runner.AUDIT_JOBS
     assert runner._expected_training_skip("insufficient samples: 10 < 200")
     assert not runner._expected_training_skip("lightgbm not installed")
 
@@ -68,6 +76,14 @@ def test_f08_wrapper_sources_pg_env_and_uses_lock_status_and_logs() -> None:
     assert "ml_training_maintenance_cron.log" in body
     assert "ml_training_maintenance_status.json" in body
     assert "mkdir \"$LOCK_DIR\"" in body
+    for token in (
+        "thompson_sampling",
+        "optuna_optimizer",
+        "cpcv_validator",
+        "dl3_foundation",
+        "weekly_report_generator",
+    ):
+        assert token in body
 
 
 def test_f08_wrapper_invokes_runner_with_all_jobs(tmp_path: Path) -> None:
@@ -134,5 +150,10 @@ def test_f08_wrapper_invokes_runner_with_all_jobs(tmp_path: Path) -> None:
         "mlde_demo_applier",
         "scorer_trainer",
         "quantile_trainer",
+        "thompson_sampling",
+        "optuna_optimizer",
+        "cpcv_validator",
+        "dl3_foundation",
+        "weekly_report_generator",
     ):
         assert token in log_text
