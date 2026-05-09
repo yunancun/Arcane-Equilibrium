@@ -1134,6 +1134,14 @@ function ocInjectBaseCSS() {
     .oc-confirm-dialog h3 { color:#f85149; font-size:15px; margin-bottom:8px; }
     .oc-confirm-dialog p { font-size:13px; color:#c9d1d9; white-space:pre-line; margin-bottom:16px; line-height:1.6; }
     .oc-confirm-dialog .btn-row { display:flex; gap:8px; justify-content:flex-end; }
+    .oc-prompt-label { display:block; font-size:12px; color:var(--text-dim); margin-bottom:6px; }
+    .oc-prompt-input, .oc-prompt-select, .oc-prompt-textarea { width:100%; box-sizing:border-box;
+      background:var(--bg,#0d1117); color:var(--text,#c9d1d9); border:1px solid var(--border,#30363d);
+      border-radius:8px; padding:9px 10px; font-size:13px; margin-bottom:10px; }
+    .oc-prompt-textarea { min-height:96px; resize:vertical; line-height:1.5; }
+    .oc-prompt-input:focus, .oc-prompt-select:focus, .oc-prompt-textarea:focus {
+      outline:2px solid var(--accent,#58a6ff); outline-offset:1px; border-color:var(--accent,#58a6ff); }
+    .oc-prompt-error { min-height:16px; color:var(--red,#f85149); font-size:12px; margin-bottom:10px; }
   `;
   document.head.appendChild(style);
 }
@@ -1625,6 +1633,114 @@ function openConfirmModal(actionName) {
     }
     document.getElementById('oc-gc-cancel').onclick = function() { close(false); };
     confirmBtn.onclick = function() { close(true); };
+  });
+}
+
+/**
+ * Show a custom prompt dialog and return Promise<string|null>.
+ * 顯示自定義輸入彈窗，返回 Promise<string|null>。
+ */
+function openPromptModal(options) {
+  var meta = (typeof options === 'string') ? { title: options } : (options || {});
+  var title = meta.title || '輸入內容 / Enter Value';
+  var body = meta.body || '';
+  var label = meta.label || 'Value';
+  var defaultValue = meta.defaultValue == null ? '' : String(meta.defaultValue);
+  var required = !!meta.required;
+  var confirmLabel = meta.confirmLabel || '確認 / Confirm';
+  var multiline = !!meta.multiline;
+  var choices = Array.isArray(meta.choices) ? meta.choices : null;
+
+  var overlay = document.getElementById('oc-generic-prompt-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'oc-generic-prompt-overlay';
+    overlay.className = 'oc-confirm-overlay';
+    overlay.innerHTML =
+      '<div class="oc-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="oc-gp-title">' +
+        '<h3 id="oc-gp-title"></h3>' +
+        '<p id="oc-gp-body"></p>' +
+        '<label class="oc-prompt-label" for="oc-gp-input" id="oc-gp-label"></label>' +
+        '<input id="oc-gp-input" class="oc-prompt-input" type="text" autocomplete="off">' +
+        '<textarea id="oc-gp-textarea" class="oc-prompt-textarea" style="display:none"></textarea>' +
+        '<select id="oc-gp-select" class="oc-prompt-select" style="display:none"></select>' +
+        '<div id="oc-gp-error" class="oc-prompt-error" role="alert"></div>' +
+        '<div class="btn-row">' +
+          '<button id="oc-gp-cancel" class="oc-btn">取消 / Cancel</button>' +
+          '<button id="oc-gp-confirm" class="oc-btn oc-btn-primary">確認 / Confirm</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+  }
+
+  var titleEl = document.getElementById('oc-gp-title');
+  var bodyEl = document.getElementById('oc-gp-body');
+  var labelEl = document.getElementById('oc-gp-label');
+  var inputEl = document.getElementById('oc-gp-input');
+  var textareaEl = document.getElementById('oc-gp-textarea');
+  var selectEl = document.getElementById('oc-gp-select');
+  var errorEl = document.getElementById('oc-gp-error');
+  var cancelBtn = document.getElementById('oc-gp-cancel');
+  var confirmBtn = document.getElementById('oc-gp-confirm');
+
+  titleEl.textContent = title;
+  bodyEl.textContent = body;
+  bodyEl.style.display = body ? '' : 'none';
+  labelEl.textContent = label;
+  errorEl.textContent = '';
+  confirmBtn.textContent = confirmLabel;
+
+  inputEl.style.display = choices || multiline ? 'none' : '';
+  textareaEl.style.display = multiline ? '' : 'none';
+  selectEl.style.display = choices ? '' : 'none';
+  inputEl.value = defaultValue;
+  textareaEl.value = defaultValue;
+  selectEl.innerHTML = '';
+  if (choices) {
+    choices.forEach(function(choice) {
+      var opt = document.createElement('option');
+      opt.value = String(choice.value);
+      opt.textContent = choice.label;
+      if (String(choice.value) === defaultValue) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  overlay.classList.add('show');
+
+  return new Promise(function(resolve) {
+    var activeField = choices ? selectEl : (multiline ? textareaEl : inputEl);
+    function value() {
+      return activeField.value == null ? '' : String(activeField.value);
+    }
+    function cleanup(result) {
+      overlay.classList.remove('show');
+      cancelBtn.onclick = null;
+      confirmBtn.onclick = null;
+      overlay.onkeydown = null;
+      resolve(result);
+    }
+    cancelBtn.onclick = function() { cleanup(null); };
+    confirmBtn.onclick = function() {
+      var raw = value();
+      if (required && !raw.trim()) {
+        errorEl.textContent = '必填欄位 / Required field';
+        activeField.focus();
+        return;
+      }
+      cleanup(raw);
+    };
+    overlay.onkeydown = function(ev) {
+      if (ev.key === 'Escape') cleanup(null);
+      if (ev.key === 'Enter' && !multiline && !ev.shiftKey) {
+        ev.preventDefault();
+        confirmBtn.click();
+      }
+    };
+    setTimeout(function() {
+      activeField.focus();
+      if (activeField.select) activeField.select();
+    }, 0);
   });
 }
 

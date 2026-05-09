@@ -865,14 +865,31 @@ async function govLoadLiveAuthStatus() {
  */
 async function govRenewLiveAuth() {
   // Prompt for reason (optional) / 提示輸入原因（可選）
-  const reason = prompt('Renewal reason (optional) / 續期原因（可選）：') || 'operator_renew';
+  const reasonInput = await openPromptModal({
+    title: '續期原因 / Renewal Reason',
+    body: '可選。留空將使用 operator_renew。',
+    label: '原因 / Reason',
+    defaultValue: 'operator_renew',
+    confirmLabel: '下一步 / Next'
+  });
+  if (reasonInput === null) return;  // cancelled / 取消
+  const reason = reasonInput.trim() || 'operator_renew';
 
-  // Show a tier picker via simple prompt fallback
-  // 用簡單 prompt 讓 operator 選擇階梯
-  const tierInput = prompt(
-    'Select tier / 選擇階梯:\n0 = T0 Entry (24h)\n1 = T1 Provisional (72h)\n2 = T2 Established (168h)\n3 = T3 Trusted (360h)\n\nEnter 0-3:',
-    '1'
-  );
+  // Show a tier picker via custom modal.
+  // 用自定義 modal 讓 operator 選擇階梯。
+  const tierInput = await openPromptModal({
+    title: '選擇階梯 / Select Tier',
+    label: 'Tier',
+    defaultValue: '1',
+    required: true,
+    choices: [
+      { value: '0', label: 'T0 Entry (24h)' },
+      { value: '1', label: 'T1 Provisional (72h)' },
+      { value: '2', label: 'T2 Established (168h)' },
+      { value: '3', label: 'T3 Trusted (360h)' }
+    ],
+    confirmLabel: '續期 / Renew'
+  });
   if (tierInput === null) return;  // cancelled / 取消
   const tier = parseInt(tierInput, 10);
   if (isNaN(tier) || tier < 0 || tier > 3) {
@@ -903,17 +920,33 @@ async function govRenewLiveAuth() {
  * 提示輸入審查備注和確認階梯，POST 至 /api/v1/live/auth/renew-review。
  */
 async function govRenewReview() {
-  const notes = prompt('T3 Full Review — operator review notes (min 10 chars) / 審查備注（最少10字）：');
+  const notes = await openPromptModal({
+    title: 'T3 Full Review',
+    body: 'Operator review notes, min 10 characters / 審查備注，最少10字。',
+    label: '審查備注 / Review Notes',
+    required: true,
+    multiline: true,
+    confirmLabel: '下一步 / Next'
+  });
   if (notes === null) return;  // cancelled / 取消
   if (!notes || notes.trim().length < 10) {
     ocToast('Review notes must be at least 10 characters / 審查備注最少10字', 'warn');
     return;
   }
 
-  const tierInput = prompt(
-    'Confirmed tier / 確認階梯:\n0 = T0 Entry\n1 = T1 Provisional\n2 = T2 Established\n3 = T3 Trusted\n\nEnter 0-3:',
-    '3'
-  );
+  const tierInput = await openPromptModal({
+    title: '確認階梯 / Confirmed Tier',
+    label: 'Tier',
+    defaultValue: '3',
+    required: true,
+    choices: [
+      { value: '0', label: 'T0 Entry' },
+      { value: '1', label: 'T1 Provisional' },
+      { value: '2', label: 'T2 Established' },
+      { value: '3', label: 'T3 Trusted' }
+    ],
+    confirmLabel: '提交審查 / Submit Review'
+  });
   if (tierInput === null) return;  // cancelled / 取消
   const tier = parseInt(tierInput, 10);
   if (isNaN(tier) || tier < 0 || tier > 3) {

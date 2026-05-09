@@ -356,9 +356,27 @@ async function applyExperimentApproval(experimentId, action) {
  * 实验完成 / Experiment completion.
  */
 async function applyExperimentCompletion(experimentId) {
-  const summary = prompt("请输入实验结论摘要 / Enter experiment result summary:");
+  const summary = await openPromptModal({
+    title: "实验结论摘要 / Experiment Result",
+    body: "记录实验完成后的 operator 结论。",
+    label: "摘要 / Summary",
+    required: true,
+    multiline: true,
+    confirmLabel: "提交 / Submit"
+  });
   if (!summary) return;
-  const confidence = prompt("置信度级别 / Confidence level (fact/inference/hypothesis):", "inference");
+  const confidence = await openPromptModal({
+    title: "置信度级别 / Confidence Level",
+    label: "级别 / Level",
+    defaultValue: "inference",
+    required: true,
+    choices: [
+      { value: "fact", label: "fact — 事实" },
+      { value: "inference", label: "inference — 推断" },
+      { value: "hypothesis", label: "hypothesis — 假设" }
+    ],
+    confirmLabel: "提交 / Submit"
+  });
   if (!confidence) return;
 
   try {
@@ -393,4 +411,3 @@ async function savePeriodSnapshot() {
     setActionSummary("快照保存失败 / Snapshot Failed", "failed", "-", "-", String(error), String(error));
   }
 }
-

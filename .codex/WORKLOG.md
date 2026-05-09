@@ -311,3 +311,8 @@ YYYY-MM-DD HH:MM TZ
 - continued W-AUDIT-5b json_fast runtime-hot-path source checkpoint: migrated async `ipc_client.py` JSON-RPC framing and local LLM HTTP JSON paths (`ollama_client.py`, `local_llm_factory.py`) to `app/json_fast.py`
 - kept signature/hash/replay-manifest/canonical JSON paths on stdlib JSON pending explicit byte-contract tests
 - verification: py_compile for `ipc_client.py`, `ollama_client.py`, and `local_llm_factory.py`; json_fast + static pytest 5/0; governance lease + ipc update-risk pytest 50/0; Ollama + local LLM factory pytest 45/0 with one pre-existing coroutine warning; `git diff --check` PASS; source/test only, no dependency install, rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- started W-AUDIT-7 F-30 source checkpoint: added shared `openPromptModal()` in `common.js` and replaced native `prompt()` in learning experiment completion plus governance audit/live-auth renewal/review flows
+- tier/confidence inputs now use modal select pickers; required text inputs validate inside the modal instead of relying on native browser dialogs
+- verification: `node --check` for `common.js`, `app-learning.js`, and `governance-tab.js`; `python3 -m pytest tests/structure/test_prompt_modal_static.py -q` 2/0; Edge headless smoke via temporary static server verified governance tier select modal and learning required textarea modal; `git diff --check` PASS; source/test/static-browser only, no backend start, rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
