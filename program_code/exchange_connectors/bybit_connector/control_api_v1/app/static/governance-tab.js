@@ -1509,7 +1509,12 @@ function renderPendingAudit(changes) {
 }
 
 async function auditApprove(changeId) {
-  const reason = prompt('批准原因 Approval reason (optional):') ?? '';
+  const reason = await openPromptModal({
+    title: '批准原因 / Approval Reason',
+    body: '可选。留空将按无备注批准。',
+    label: '原因 / Reason',
+    confirmLabel: '批准 / Approve'
+  });
   if (reason === null) return;  // cancelled
   const d = await govApproveAuditChange(changeId, reason);
   if (d && d.ok) {
@@ -1521,7 +1526,13 @@ async function auditApprove(changeId) {
 }
 
 async function auditReject(changeId) {
-  const reason = prompt('拒绝原因 Rejection reason (required):');
+  const reason = await openPromptModal({
+    title: '拒绝原因 / Rejection Reason',
+    label: '原因 / Reason',
+    required: true,
+    multiline: true,
+    confirmLabel: '拒绝 / Reject'
+  });
   if (!reason || !reason.trim()) { ocToast('Please enter a rejection reason / 请输入拒绝原因', 'error'); return; }
   const d = await govRejectAuditChange(changeId, reason.trim());
   if (d && d.ok) {
@@ -1539,7 +1550,15 @@ async function bulkAudit(action) {
     : '确认全部拒绝？\nReject all pending changes?';
   if (!confirm(msg)) return;
 
-  const reason = isApprove ? 'Operator bulk approved' : (prompt('拒绝原因 Rejection reason:') || '').trim();
+  const reason = isApprove ? 'Operator bulk approved' : (
+    await openPromptModal({
+      title: '批量拒绝原因 / Bulk Rejection Reason',
+      label: '原因 / Reason',
+      required: true,
+      multiline: true,
+      confirmLabel: '拒绝全部 / Reject All'
+    }) || ''
+  ).trim();
   if (!isApprove && !reason) { ocToast('请输入拒绝原因', 'error'); return; }
 
   // Fetch current pending list and process one by one
