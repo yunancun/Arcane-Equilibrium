@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "freeze_id": "P2-AUDIT-VERIFY-5-2026-05-09",
+  "status": "frozen",
+  "scope": "new_entries_only",
+  "policy": {
+    "reason": "Prevent blocked_symbols from becoming a post-hoc selection-bias sink. Current lists are frozen; new blocked strategy-symbol cells require explicit evidence before the config can change.",
+    "runtime_effect": "No runtime mutation. Existing config behavior is unchanged.",
+    "new_block_requirements": [
+      "PA or operator RFC that names the strategy-symbol cell and expected runtime scope",
+      "7d counterfactual or rejected-outcome evidence report",
+      "DSR/PBO selection-bias evidence or an explicit QC waiver explaining why the cell is not promotable evidence",
+      "TODO.md update that separates source freeze, runtime deploy, and observation follow-up"
+    ]
+  },
+  "frozen_cells": {
+    "grid_trading": {
+      "config_family": "settings/strategy_params_{paper,demo,live}.toml:grid_trading.blocked_symbols",
+      "symbols": [
+        "BSBUSDT",
+        "PRLUSDT",
+        "ZBTUSDT",
+        "FARTCOINUSDT",
+        "SOLUSDT",
+        "DOGEUSDT",
+        "GALAUSDT",
+        "ENAUSDT",
+        "AAVEUSDT",
+        "ORCAUSDT",
+        "PENGUUSDT",
+        "NAORISUSDT",
+        "TAOUSDT",
+        "1000PEPEUSDT",
+        "ADAUSDT",
+        "LABUSDT",
+        "BILLUSDT"
+      ],
+      "freeze_basis": "G2-04 robust-negative grid cells plus P1-DATA-1 LABUSDT and post-rebuild BILLUSDT negative-cell guards. No additional grid block is allowed without the policy evidence above."
+    },
+    "ma_crossover": {
+      "config_family": "settings/risk_control_rules/risk_config*.toml:per_strategy.ma_crossover.blocked_symbols",
+      "symbols": [
+        "NAORISUSDT",
+        "PENGUUSDT",
+        "FARTCOINUSDT",
+        "LABUSDT"
+      ],
+      "freeze_basis": "Existing MA per-strategy blocklist including P1-EDGE-1 LABUSDT. No additional MA block is allowed without the policy evidence above."
+    }
+  },
+  "counterfactual_report": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-09--p2_audit_verify_5_blocked_symbols_freeze.md"
+}

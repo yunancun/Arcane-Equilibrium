@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | P2-AUDIT-VERIFY-5 blocked_symbols selection-bias freeze: froze current grid 17-symbol and MA 4-symbol blocklists in governance registry, added static guard and read-only 7d counterfactual helper, and documented Linux evidence showing rejected block rows lack decision_outcomes counterfactual power | workspace/reports/2026-05-09--p2_audit_verify_5_blocked_symbols_freeze.md |
 | 2026-05-09 | P2-AUDIT-VERIFY-7 NEW-VULN-3/4: made cookie Secure auto mode fail-closed on HTTPS proxy hints and mounted Phase4 router in Control API main so weekly-review operator gates are reachable, with py_compile and targeted tests green | workspace/reports/2026-05-09--new_vuln_3_4_cookie_phase4.md |
 | 2026-05-09 | A3 NEW-1 openConfirmModal a11y: added dialog role/aria-modal, Esc cancel, Tab focus loop, initial cancel focus, and previous-focus restore to common and legacy confirm modals, with static regression and JS syntax checks | workspace/reports/2026-05-09--openconfirmmodal_a11y.md |
 | 2026-05-09 | W-AUDIT-5 F-12 true runner split: corrected the verified path mismatch by splitting `rust/openclaw_engine/src/replay/runner.rs` 2469→1166 and moving tests to `runner_tests.rs` 1299, with LOC static regression and replay runner targeted tests green | workspace/reports/2026-05-09--w_audit_5_f12_true_runner_split.md |

@@ -321,6 +321,16 @@ W-AUDIT-6 current fact:
   JSON columns. Runtime activation still needs explicit V079 apply and
   rebuild/restart; no cron install, DB apply, live auth, or runtime mutation was
   performed in the source checkpoint.
+- as of 2026-05-09, `P2-AUDIT-VERIFY-5` is source/test closed:
+  `docs/governance_dev/strategy_blocked_symbols_freeze.json` freezes the
+  current grid 17-symbol and MA 4-symbol blocklists, and
+  `tests/structure/test_strategy_blocked_symbols_freeze.py` fails if source
+  config grows the lists without updating the freeze policy. Future blocked
+  cells require RFC + 7d counterfactual/rejected-outcome evidence + DSR/PBO or
+  explicit QC waiver. Read-only Linux evidence showed blocked MA rejections
+  currently have `decision_outcomes=0`, so true rejected-outcome
+  counterfactual power is not yet available; do not add more blocked symbols as
+  a quick negative-cell reaction.
 
 P0-NEW-VULN-1 bind-host rule:
 - lifecycle scripts must not default to `0.0.0.0`
