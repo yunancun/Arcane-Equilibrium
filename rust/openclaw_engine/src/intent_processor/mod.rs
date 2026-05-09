@@ -1171,6 +1171,10 @@ impl IntentProcessor {
             feature_definition_hash: crate::edge_predictor::features::feature_definition_hash()
                 .to_string(),
             features_jsonb: features.to_jsonb(),
+            // M1 success path：label 三欄全 None / false，由 backfill 補。
+            label_close_tag: None,
+            label_net_edge_bps: None,
+            label_filled_at_now: false,
         };
 
         if let Err(e) = tx.try_send(msg) {
@@ -1178,6 +1182,100 @@ impl IntentProcessor {
                 ctx_id = %context_id, symbol = %intent.symbol, error = %e,
                 "decision_feature snapshot drop — writer channel full/closed \
                  / 特徵快照丟棄，writer 通道已滿/關閉"
+            );
+        }
+    }
+
+    /// W-AUDIT-4b-M3 (2026-05-09)：在 governance / cost-gate reject path 推送
+    /// 一條帶 negative label 的 `DecisionFeatureMsg` 到
+    /// `learning.decision_features` writer task。Mirror
+    /// `emit_decision_feature_intent_emitted` 但 carry 三 label 欄位：
+    ///   - `label_close_tag = "rejected_governance"`
+    ///   - `label_net_edge_bps = 0.0`（reject 沒成交）
+    ///   - `label_filled_at_now = true`（writer 用 server-side NOW() 寫
+    ///     `label_filled_at`，避免用 emit 時間戳造成 backfill 語意混淆）
+    ///
+    /// Caller 為 tick_pipeline `step_4_5_dispatch` 三 reject path：
+    ///   1. pre_risk reject（`per_strategy_new_entry_rejection`，demo / live_demo）
+    ///   2. exchange gate reject（`gate.rejected_reason`）
+    ///   3. paper gate reject（`result.rejected_reason`）
+    ///
+    /// 安全策略：與 `emit_decision_feature_intent_emitted` 對齊：
+    ///   - tx 未接線 → 靜默 no-op（fail-soft，不影響交易）
+    ///   - now_ms = 0 → 跳過（DB-RUN-6 epoch leak 防線）
+    ///   - try_send 滿 → best-effort drop + warn
+    ///
+    /// 動機：M1 land 後 24h 12,681 intent 中只 175 fill (1.38%) 寫
+    /// `learning.decision_features`；98.6% reject path 完全沒寫 → ML training
+    /// pool 70× 偏差 + attribution_chain_ok ratio 0.5%。M3 補 reject path 寫
+    /// negative label + V084 sample_weight UDF 配套，恢復 70:1 imbalance。
+    ///
+    /// `reject_reason` 當前**不入 schema**（V017 鎖死），保留參數方便未來
+    /// extend；當前作為 audit trail 寫 verdict_writer trace（非 schema 改動）。
+    ///
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M3
+    pub(crate) fn emit_decision_feature_intent_rejected(
+        &self,
+        intent: &OrderIntent,
+        features: &FeatureVectorV1,
+        context_id: &str,
+        now_ms: u64,
+        reject_reason: &str,
+    ) {
+        let tx = match self.decision_feature_tx.as_ref() {
+            Some(t) => t,
+            None => return, // fail-soft no-op
+        };
+        // 與 writer DB-RUN-6 對齊：無效時間戳不發射，節省通道容量。
+        if now_ms == 0 {
+            tracing::warn!(
+                ctx_id = %context_id, symbol = %intent.symbol,
+                "decision_feature reject snapshot skipped: now_ms=0 / 時間戳 0，跳過"
+            );
+            return;
+        }
+        // 空 context_id 不發射（防孤兒 row）。
+        if context_id.is_empty() {
+            tracing::warn!(
+                symbol = %intent.symbol,
+                "decision_feature reject snapshot skipped: empty context_id / 空 ctx_id，跳過"
+            );
+            return;
+        }
+
+        let msg = crate::database::DecisionFeatureMsg {
+            context_id: context_id.to_string(),
+            ts_ms: now_ms,
+            engine_mode: self.effective_engine_mode().to_string(),
+            strategy_name: intent.strategy.clone(),
+            symbol: intent.symbol.clone(),
+            side: if intent.is_long { 1 } else { -1 },
+            feature_schema_version: crate::edge_predictor::features::FEATURE_SCHEMA_VERSION
+                .to_string(),
+            feature_schema_hash: crate::edge_predictor::features::feature_schema_hash().to_string(),
+            feature_definition_hash: crate::edge_predictor::features::feature_definition_hash()
+                .to_string(),
+            features_jsonb: features.to_jsonb(),
+            // ── W-AUDIT-4b-M3 negative label payload ──
+            label_close_tag: Some("rejected_governance".to_string()),
+            label_net_edge_bps: Some(0.0),
+            label_filled_at_now: true,
+        };
+
+        if let Err(e) = tx.try_send(msg) {
+            tracing::warn!(
+                ctx_id = %context_id, symbol = %intent.symbol,
+                reason = %reject_reason, error = %e,
+                "decision_feature reject snapshot drop — writer channel full/closed \
+                 / 拒絕特徵快照丟棄，writer 通道已滿/關閉"
+            );
+        } else {
+            tracing::debug!(
+                ctx_id = %context_id, symbol = %intent.symbol,
+                strategy = %intent.strategy, reason = %reject_reason,
+                "decision_feature reject snapshot emitted (negative label) \
+                 / 拒絕特徵快照已發送（負樣本）"
             );
         }
     }

@@ -413,6 +413,13 @@ pub(super) fn handle_decision_feature_snapshot(
                 feature_schema_hash,
                 feature_definition_hash,
                 features_jsonb,
+                // W-AUDIT-4b-M3：IPC passthrough 走 intent-only 路徑（label
+                // 三欄 None / false）。Python backfill / replay tooling 不應
+                // 透過 IPC 注入 reject negative label — 那是 Rust producer
+                // step_4_5_dispatch 的 closed-loop 責任。
+                label_close_tag: None,
+                label_net_edge_bps: None,
+                label_filled_at_now: false,
             };
             if let Err(e) = tx.try_send(msg) {
                 tracing::warn!(
