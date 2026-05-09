@@ -285,3 +285,9 @@ YYYY-MM-DD HH:MM TZ
 - kept manifest schema/verification tests under the binary test build and added `tests/structure/test_replay_runner_split_static.py` to pin the entrypoint and sibling module LOC ceilings
 - verification: `cargo check --manifest-path rust/openclaw_engine/Cargo.toml --bin replay_runner --features replay_isolated` PASS with pre-existing Rust warnings; `cargo test --manifest-path rust/openclaw_engine/Cargo.toml --bin replay_runner --features replay_isolated` 9/0; W-AUDIT-5a static pytest 12/0; `cargo fmt --check`, py_compile, and `git diff --check` PASS
 - boundary: source/test only; no release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
+
+2026-05-09 CEST
+- continued W-AUDIT-5b event_consumer source checkpoint: split `dispatch.rs` tests into `dispatch_tests.rs` and moved `loop_handlers.rs` Arm C exchange-event handling into `loop_exchange.rs` while preserving `loop_handlers::handle_exchange_event` via re-export
+- reduced `dispatch.rs` 1144→683 LOC and `loop_handlers.rs` 1195→717 LOC; added `tests/structure/test_event_consumer_split_static.py` to pin the split and compatibility exports
+- verification: `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine event_consumer -q` PASS (155/0 plus one filtered target test); `cargo check --manifest-path rust/Cargo.toml -p openclaw_engine --bin openclaw-engine` PASS with pre-existing Rust warnings; structure pytest 6/0; `cargo fmt --check`, py_compile, and `git diff --check` PASS
+- boundary: source/test only; no release build, rebuild, restart, deploy, DB apply, live auth, scanner authority change, Executor hard authority, strategy/risk config mutation, MAG-083/084 unlock, or true-live API action
