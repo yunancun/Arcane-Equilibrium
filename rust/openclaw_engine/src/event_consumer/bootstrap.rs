@@ -120,6 +120,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         trading_tx,
         context_tx,
         decision_feature_tx,
+        // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+        decision_feature_evaluation_tx,
         shadow_fill_tx,
         // EXIT-FEATURES-TABLE-1 Phase 1b (2026-04-18): producer wiring landed.
         // `emit_close_fill` builds a 7-dim ExitFeatureRow and try_send's here.
@@ -225,6 +227,17 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     // no-op（fail-soft，不影響交易僅停訓練採集）。IPC passthrough 亦走同一通道。
     if let Some(tx) = decision_feature_tx.clone() {
         pipeline.set_decision_feature_tx(tx);
+    }
+
+    // W-AUDIT-4b-M1 split (V082)：把 evaluation log 通道接入 IntentProcessor。
+    // 對應每次 evaluate_predictor_gate 評估都寫一條到
+    // learning.decision_features_evaluations（candidate evaluation log）。
+    // None 時 evaluation 發射停用（fail-soft，不影響交易與 learning.decision_features
+    // 的 intent-only emit）。
+    // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    if let Some(tx) = decision_feature_evaluation_tx.clone() {
+        pipeline.set_decision_feature_evaluation_tx(tx);
     }
 
     // EDGE-P3-1 Step 7c: Wire the shadow-fill DB channel into TickPipeline so

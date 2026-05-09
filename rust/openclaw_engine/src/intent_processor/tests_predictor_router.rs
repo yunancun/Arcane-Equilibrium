@@ -472,31 +472,52 @@ mod predictor_wiring_tests {
     }
 
     // ========================================================
-    // EDGE-P3-1 Step 7a: DecisionFeatureSnapshot emission tests
+    // W-AUDIT-4b-M1 split (V082): evaluation log emission tests
+    // (former "EDGE-P3-1 Step 7a: DecisionFeatureSnapshot emission" suite)
     // ========================================================
     //
-    // Emission fires at the TOP of evaluate_predictor_gate, before any
-    // short-circuit, so Stage 0 training data flows while the gate stays
-    // on legacy shrinkage (use_edge_predictor=false). These tests cover:
-    //   (a) fires when predictor is disabled + features + ctx_id present;
-    //   (b) no emit on empty context_id;
-    //   (c) no emit on features=None;
-    //   (d) no emit on ts_ms=0 (DB-RUN-6 alignment with writer rejection).
+    // Behavioural pivot per V082:
+    //   舊：evaluate_predictor_gate 頂端 emit 一條 DecisionFeatureMsg 到
+    //   learning.decision_features（無論 outcome）。99.32% orphan root cause。
     //
-    // EDGE-P3-1 Step 7a：決策特徵快照發射測試 —
-    // gate 頂端發射、早於短路檢查，Stage 0 即採集訓練資料。
+    //   新：evaluate_predictor_gate 改 emit DecisionFeatureEvaluationMsg 到
+    //   learning.decision_features_evaluations（candidate evaluation log）；
+    //   learning.decision_features 改由 step_4_5_dispatch.rs 在 success path
+    //   呼叫 emit_decision_feature_intent_emitted 寫（intent-only emit）。
+    //
+    // 此 test suite 對應 evaluate_predictor_gate 內部的 evaluation log emission：
+    //   (a) fires when predictor is disabled + features + ctx_id present
+    //       → outcome="use_legacy_no_predictor" / tier="evaluation_log"
+    //   (b) no emit on empty context_id
+    //   (c) no emit on features=None
+    //   (d) no emit on ts_ms=0 (DB-RUN-6 alignment with writer rejection)
+    //
+    // production decision_features 通道（intent-only emit）行為由
+    // step_4_5_dispatch + emit_decision_feature_intent_emitted 直測（見
+    // database::decision_feature_writer::tests）。
+    //
+    // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
 
     #[test]
-    fn test_decision_feature_snapshot_emitted_when_predictor_disabled() {
-        // use_edge_predictor=false (default Stage 0) + features + ctx_id →
-        // snapshot still emits; writer accumulates while gate stays on legacy.
-        // use_edge_predictor=false（Stage 0 預設）仍發射；writer 累積訓練資料。
+    fn test_evaluation_log_emitted_when_predictor_disabled() {
+        // W-AUDIT-4b-M1：use_edge_predictor=false（Stage 0 預設）下，
+        // evaluate_predictor_gate 仍寫 evaluation log 通道，
+        // outcome="use_legacy_no_predictor"，tier="evaluation_log"。
+        // production decision_feature_tx 通道**不**收（已搬到 success path）。
         let mut proc = IntentProcessor::new();
         assert!(!proc.risk_config.edge_predictor.use_edge_predictor);
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
-        proc.set_decision_feature_tx(tx);
+        // production 通道（intent-only emit；此 test 不應收到）
+        let (prod_tx, mut prod_rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        proc.set_decision_feature_tx(prod_tx);
+
+        // evaluation log 通道（每次評估都收）
+        let (eval_tx, mut eval_rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureEvaluationMsg>(8);
+        proc.set_decision_feature_evaluation_tx(eval_tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
@@ -512,13 +533,37 @@ mod predictor_wiring_tests {
             1_700_000_000_000,
         );
 
-        let msg = rx.try_recv().expect("snapshot must be emitted at gate top");
+        // Production 通道：intent-only emit 由 step_4_5_dispatch 呼叫，
+        // 而此 test 直接呼 IntentProcessor.process_with_features
+        // → 不應收到 production message
+        assert!(
+            prod_rx.try_recv().is_err(),
+            "production decision_features 通道 = intent-only emit；\
+             此 test 走 IntentProcessor 內部，不應收到 message"
+        );
+
+        // Evaluation 通道：每次評估都應收到一條
+        let msg = eval_rx
+            .try_recv()
+            .expect("evaluation log must be emitted in evaluate_predictor_gate");
         assert_eq!(msg.context_id, "ctx-seed");
         assert_eq!(msg.ts_ms, 1_700_000_000_000);
         assert_eq!(msg.engine_mode, "paper");
         assert_eq!(msg.strategy_name, "test");
         assert_eq!(msg.symbol, "BTCUSDT");
         assert_eq!(msg.side, 1, "is_long=true → side=+1");
+        assert_eq!(
+            msg.evaluation_outcome, "use_legacy_no_predictor",
+            "use_edge_predictor=false → outcome use_legacy_no_predictor"
+        );
+        assert_eq!(
+            msg.evidence_source_tier, "evaluation_log",
+            "no_predictor short-circuit → tier evaluation_log"
+        );
+        assert!(
+            msg.entry_context_id.is_none(),
+            "M1 producer 一律 None；M2 trigger 後才回填"
+        );
         assert_eq!(
             msg.feature_schema_version,
             crate::edge_predictor::features::FEATURE_SCHEMA_VERSION
@@ -539,14 +584,15 @@ mod predictor_wiring_tests {
     }
 
     #[test]
-    fn test_decision_feature_snapshot_no_emit_on_empty_context() {
-        // Empty context_id → caller has nothing to join on later; skip emission.
-        // context_id 為空 → 後續無 join key，直接跳過發射。
+    fn test_evaluation_log_no_emit_on_empty_context() {
+        // W-AUDIT-4b-M1：context_id 為空 → 後續無 join key，evaluation log
+        // 仍跳過發射（與 production decision_features 同策略）。
         let mut proc = IntentProcessor::new();
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
-        proc.set_decision_feature_tx(tx);
+        let (eval_tx, mut eval_rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureEvaluationMsg>(8);
+        proc.set_decision_feature_evaluation_tx(eval_tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
@@ -558,24 +604,24 @@ mod predictor_wiring_tests {
             500.0,
             GovernanceProfile::Exploration,
             Some(&features),
-            None,
+            None, // empty context_id（process_with_features 內視為 ""）
             1_700_000_000_000,
         );
         assert!(
-            rx.try_recv().is_err(),
-            "empty context_id must not emit snapshot"
+            eval_rx.try_recv().is_err(),
+            "empty context_id must not emit evaluation log"
         );
     }
 
     #[test]
-    fn test_decision_feature_snapshot_no_emit_on_none_features() {
-        // features=None → nothing to persist; no emission.
-        // features=None → 無可持久化資料，不發射。
+    fn test_evaluation_log_no_emit_on_none_features() {
+        // W-AUDIT-4b-M1：features=None → 無 jsonb 可持久化，evaluation log 跳過。
         let mut proc = IntentProcessor::new();
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
-        proc.set_decision_feature_tx(tx);
+        let (eval_tx, mut eval_rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureEvaluationMsg>(8);
+        proc.set_decision_feature_evaluation_tx(eval_tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
@@ -590,20 +636,20 @@ mod predictor_wiring_tests {
             1_700_000_000_000,
         );
         assert!(
-            rx.try_recv().is_err(),
-            "features=None must not emit snapshot"
+            eval_rx.try_recv().is_err(),
+            "features=None must not emit evaluation log"
         );
     }
 
     #[test]
-    fn test_decision_feature_snapshot_no_emit_on_zero_timestamp() {
-        // ts_ms=0 → DB-RUN-6 writer would reject; skip at source.
-        // ts_ms=0 → writer 側 DB-RUN-6 會拒絕；源頭直接略過。
+    fn test_evaluation_log_no_emit_on_zero_timestamp() {
+        // W-AUDIT-4b-M1：ts_ms=0 → writer 側 DB-RUN-6 會拒絕；源頭直接略過。
         let mut proc = IntentProcessor::new();
         proc.set_pipeline_kind(PipelineKind::Paper);
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
-        proc.set_decision_feature_tx(tx);
+        let (eval_tx, mut eval_rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureEvaluationMsg>(8);
+        proc.set_decision_feature_evaluation_tx(eval_tx);
 
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
@@ -619,8 +665,59 @@ mod predictor_wiring_tests {
             0,
         );
         assert!(
-            rx.try_recv().is_err(),
-            "ts_ms=0 must not emit snapshot (DB-RUN-6 alignment)"
+            eval_rx.try_recv().is_err(),
+            "ts_ms=0 must not emit evaluation log (DB-RUN-6 alignment)"
+        );
+    }
+
+    #[test]
+    fn test_intent_emitted_emit_writes_decision_features() {
+        // W-AUDIT-4b-M1：直接驗 emit_decision_feature_intent_emitted method —
+        // 此為 step_4_5_dispatch 在 success path 呼叫的 intent-only emit 入口。
+        // 1:1 對齊 trading.intents 真實 INSERT。
+        let mut proc = IntentProcessor::new();
+        proc.set_pipeline_kind(PipelineKind::Paper);
+
+        let (prod_tx, mut prod_rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        proc.set_decision_feature_tx(prod_tx);
+
+        let intent = intent_btc(0.7);
+        let features = FeatureVectorV1::zeroed();
+        proc.emit_decision_feature_intent_emitted(
+            &intent,
+            &features,
+            "ctx-intent-emit",
+            1_700_000_000_000,
+        );
+
+        let msg = prod_rx
+            .try_recv()
+            .expect("emit_decision_feature_intent_emitted must push to production tx");
+        assert_eq!(msg.context_id, "ctx-intent-emit");
+        assert_eq!(msg.ts_ms, 1_700_000_000_000);
+        assert_eq!(msg.engine_mode, "paper");
+        assert_eq!(msg.symbol, "BTCUSDT");
+        assert_eq!(msg.side, 1);
+    }
+
+    #[test]
+    fn test_intent_emitted_emit_skips_zero_timestamp() {
+        // W-AUDIT-4b-M1：production intent emit 仍 DB-RUN-6 對齊，ts_ms=0 跳過
+        let mut proc = IntentProcessor::new();
+        proc.set_pipeline_kind(PipelineKind::Paper);
+
+        let (prod_tx, mut prod_rx) =
+            tokio::sync::mpsc::channel::<crate::database::DecisionFeatureMsg>(8);
+        proc.set_decision_feature_tx(prod_tx);
+
+        let intent = intent_btc(0.7);
+        let features = FeatureVectorV1::zeroed();
+        proc.emit_decision_feature_intent_emitted(&intent, &features, "ctx-zero", 0);
+
+        assert!(
+            prod_rx.try_recv().is_err(),
+            "intent emit 仍須跳過 ts_ms=0（DB-RUN-6 對齊）"
         );
     }
 

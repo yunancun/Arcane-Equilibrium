@@ -639,6 +639,8 @@ async fn async_main(
         trading_tx,
         context_tx,
         decision_feature_tx,
+        // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+        decision_feature_evaluation_tx,
         shadow_fill_tx,
         exit_feature_tx,
         shadow_exit_tx,
@@ -916,6 +918,8 @@ async fn async_main(
         trading_tx: trading_tx.clone(),
         context_tx: context_tx.clone(),
         decision_feature_tx: decision_feature_tx.clone(),
+        // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+        decision_feature_evaluation_tx: decision_feature_evaluation_tx.clone(),
         shadow_fill_tx: shadow_fill_tx.clone(),
         exit_feature_tx: exit_feature_tx.clone(),
         shadow_exit_tx: shadow_exit_tx.clone(),
@@ -1018,6 +1022,8 @@ async fn async_main(
             trading_tx: trading_tx.clone(),
             context_tx: context_tx.clone(),
             decision_feature_tx: decision_feature_tx.clone(),
+            // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+            decision_feature_evaluation_tx: decision_feature_evaluation_tx.clone(),
             shadow_fill_tx: shadow_fill_tx.clone(),
             exit_feature_tx: exit_feature_tx.clone(),
             shadow_exit_tx: shadow_exit_tx.clone(),

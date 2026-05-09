@@ -520,6 +520,22 @@ impl TickPipeline {
                                     scanner_ctx.as_ref(),
                                     Some(&scanner_gate_audit),
                                 );
+
+                                // W-AUDIT-4b-M1 split (V082)：intent-only emit
+                                // 到 production learning.decision_features。
+                                // 此路徑為 exchange (live/demo/live_demo) success
+                                // path（gate.approved == true 後 persist_intent 之
+                                // 後）。對應 trading.intents 真實 INSERT，與
+                                // ML training JOIN key 1:1 對齊。
+                                // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+                                //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+                                self.intent_processor.emit_decision_feature_intent_emitted(
+                                    intent,
+                                    &features,
+                                    &context_id,
+                                    event.ts_ms,
+                                );
+
                                 crate::agent_spine::runtime_shadow::emit_entry_lineage(
                                     self.agent_spine_tx.as_ref(),
                                     self.agent_spine_mode,
@@ -723,6 +739,21 @@ impl TickPipeline {
                                     scanner_ctx.as_ref(),
                                     Some(&scanner_gate_audit),
                                 );
+
+                                // W-AUDIT-4b-M1 split (V082)：intent-only emit
+                                // 到 production learning.decision_features。
+                                // 此路徑為 paper success path（result.submitted）；
+                                // 含 PostOnly resting 接受與 market fill 兩種，
+                                // 都對應真實 intent emit 後再寫 features。
+                                // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+                                //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+                                self.intent_processor.emit_decision_feature_intent_emitted(
+                                    intent,
+                                    &features,
+                                    &context_id,
+                                    event.ts_ms,
+                                );
+
                                 crate::agent_spine::runtime_shadow::emit_entry_lineage(
                                     self.agent_spine_tx.as_ref(),
                                     self.agent_spine_mode,
