@@ -6219,3 +6219,81 @@ export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
   每個 test 數據；這保「測試代碼就是 spec」原則
 - 砍 6 polishing 子項是 DSR 數學 right move（K trial penalty 量化）—
   不是「省工時妥協」；FA push back 採納寫進 sign-off invariant
+
+
+## 2026-05-09 — W-AUDIT-4b-M1 IMPL（E1-E session）
+
+### 任務
+- decision_features intent-only emit 改造 + V082 evaluations 拆表
+- 修復 PA 報告：learning.decision_features 24h 31,183 行 99.32% orphan
+
+### Root cause 確認
+- rust/openclaw_engine/src/intent_processor/mod.rs::evaluate_predictor_gate
+  在 cost_gate / Reject 之前頂端就 emit DecisionFeatureMsg，無論 intent
+  是否真實 emit
+- PredictorAction::Reject / RejectAdd / Fallback / use_legacy_no_predictor
+  outcome 都已寫過 row 卻不產 trading.intents → 99.32% orphan
+- mlde_edge_training_rows view LEFT JOIN intents → orphan 不會誤入 ML
+  training pool（pool 不污染），但寫入路徑 IPC channel + 表空間都浪費
+
+### IMPL 範圍
+1. V082 migration（Linux PG dry-run x2 PASS / idempotent）
+   - learning.decision_features_evaluations 新表（BIGSERIAL PK）
+   - evaluation_outcome enum 7 值（PredictorAction 對齊）
+   - evidence_source_tier enum 2 值（與 V050 replay tier 故意不重疊）
+   - entry_context_id NULL（W-AUDIT-4b-M2 trigger 鋪路）
+   - 不 DROP / 不遷 row 既有 38k（per PA spec）
+2. Producer 改造（Rust）
+   - DecisionFeatureEvaluationMsg struct + run_decision_feature_evaluation_writer
+   - intent_processor::evaluate_predictor_gate 改寫：頂端不再 emit production
+     decision_feature；改記 evaluation log 到新通道（每次評估都寫，無論 outcome）
+   - 新 method emit_decision_feature_intent_emitted：caller 在 success
+     path 才呼叫（intent-only emit）
+   - 新 method try_emit_evaluation_log：寫 evaluations 表
+   - 三 pipeline（paper/demo/live）spawn 全 wired（writer task + channel +
+     fan-out 經 main_pipelines / event_consumer/bootstrap）
+3. Caller 改造（step_4_5_dispatch.rs）
+   - Paper success path（line 713 `result.submitted`）：呼叫
+     emit_decision_feature_intent_emitted
+   - Exchange success path（line 510 `gate.approved`）：同上
+   - 兩 path 共 ~14 行新增（minimal disruption）
+4. Tests
+   - Rust：9 new (decision_feature_evaluation_writer) + 5 new
+     (predictor_wiring) + 4 既有 test 改名為 evaluation_log_*（語意對齊）
+   - Python：13 contract test (test_decision_features_intent_only_emit.py)
+
+### Verification 結果
+- Mac cargo build --release：PASS
+- cargo test -p openclaw_engine --lib：2622 passed / 2 failed（無關 — E1-A
+  W-AUDIT-9 T1 commit 094f9914 引入的 ipc_server::tests::config 2 fail）
+- decision_feature_evaluation_writer tests: 9/9 PASS
+- predictor_wiring tests: 24/24 PASS
+- pytest test_decision_features_intent_only_emit.py: 13/13 PASS
+- pytest program_code/ml_training/tests/: 378 passed / 0 fail
+- Linux PG dry-run V082 x2: idempotent confirmed (trade-core)
+
+### 預期 attribution_chain_ok 影響
+- denominator 縮 ~99% (31k → ~263 / 24h)
+- attribution_chain_ok 0.5% → 25-40%（PA spec 預期，與其他改動相加）
+
+### Multi-session race 守則
+- 不動 TODO.md / CLAUDE.md
+- 不碰 隔壁 session 的 unstaged WIP（risk_config / executor_*）
+- V082 編號避撞 E1-A 的 V080 + +2 號緩衝（V081 留空）= V082 安全
+- commit 4a90966a local 但**未 push origin**（PA 指示）
+
+### Lessons
+- evaluate_predictor_gate 內部 emit 與外部 caller 的 success path emit
+  是兩個 layer 概念；Rust 的 disjoint-field NLL 幫助 step_4_5_dispatch
+  同時持有 intent_processor + features 借用而不衝突
+- 拆 emit_decision_feature_snapshot 為兩 method（_intent_emitted /
+  try_emit_evaluation_log）讓語意清晰、test 可分隔，比 flag-based 切換
+  更乾淨
+- 預先 Linux PG empirical query（CLAUDE.md §七 V055 5-round lesson）
+  確認 schema baseline + row count + view 結構，避 Mac mock pytest 假陽性
+- PA spec 的「不遷 row data」約束清楚 — 不寫 INSERT migrate；既有 38k row
+  保留作 historic noise 自然衰減（30d retention 之內由 V075 retention
+  policy 處理）
+- evidence_source_tier 字串故意與 V050 replay tier 不重疊是治理層
+  insight — CLAUDE.md §九「Non-training surfaces」標準下，下游 SELECT
+  filter 才能用單純的 `WHERE tier IN (allowlist)` 簡單 syntax
