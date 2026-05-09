@@ -13,26 +13,32 @@ on:
     - cron: '0 3 * * 1'  # 每週一 03:00 UTC（北京 11:00）
 
 jobs:
-  rust-check:
-    name: rust check (${{ matrix.target }})
-    # macOS 在 push 事件跳過；僅 PR / schedule / workflow_dispatch 觸發
-    if: ${{ matrix.os != 'macos-latest' || github.event_name != 'push' }}
-    runs-on: ${{ matrix.os }}
+  rust-check-linux:
+    name: rust check (x86_64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
     defaults:
       run:
         working-directory: rust
     steps:
       - uses: actions/checkout@v4
       - name: Install target
-        run: rustup target add "${{ matrix.target }}"
+        run: rustup target add x86_64-unknown-linux-gnu
       - name: Cargo check
-        run: cargo check --target "${{ matrix.target }}" --release -p openclaw_engine --bin openclaw-engine
+        run: cargo check --target x86_64-unknown-linux-gnu --release -p openclaw_engine --bin openclaw-engine
+
+  rust-check-macos:
+    name: rust check (aarch64-apple-darwin)
+    # macOS 10x 計費倍率：push 事件跳過，僅 PR / schedule 觸發
+    if: github.event_name != 'push'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install target
+        run: rustup target add aarch64-apple-darwin
+      - name: Cargo check
+        run: cargo check --target aarch64-apple-darwin --release -p openclaw_engine --bin openclaw-engine
