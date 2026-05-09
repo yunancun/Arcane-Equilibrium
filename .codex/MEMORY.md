@@ -282,6 +282,11 @@ W-AUDIT-6 current fact:
   LOC by moving module-internal tests to sibling `runner_tests.rs` (1299 LOC).
   `tests/structure/test_replay_runner_split_static.py` now guards both files
   under the 2000 LOC cap; this is source/test only, no rebuild/restart.
+- as of 2026-05-09, A3 NEW-1 / `P2-AUDIT-VERIFY-6` openConfirmModal a11y is
+  source/test closed: both `common.js` and legacy `app.js` confirm modal paths
+  support dialog role/`aria-modal`, Esc cancel, Tab focus trap, initial cancel
+  focus, and previous-focus restore. Static regression and JS syntax checks
+  passed; no backend/runtime change.
 - runtime apply note: the operator-requested post-sync rebuild loaded the MA R:R
   checkpoint, and the follow-up rebuild/restart loaded the BILLUSDT grid
   blocklist. The later bb_breakout 5m and W-AUDIT-6c portfolio tail-risk
