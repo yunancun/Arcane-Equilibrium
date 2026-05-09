@@ -117,7 +117,7 @@ Operator provided an OpenClaw initialization packet and asked Codex to treat it 
 - canonical GUI is the existing FastAPI console at `trade-core:8000/console`, now treated as the OpenClaw Control Console
 - local 5-Agent runtime stays inside TradeBot; cloud L2 should be reached through a supervisor escalation packet, not by every runtime agent independently
 - TODO v14 is the active dispatch queue as of 2026-05-09. It supersedes TODO v12/v13 historical layouts and mounts the 2026-05-08 12-agent full audit plan into W-AUDIT-1..7. Current order: keep W-C MAG-082 Stage 2 evidence collection running; W-AUDIT-1 docs/governance and W-AUDIT-2 security IMPL are source-closed; next is W-AUDIT-3 runtime/fake-live alignment, then W-AUDIT-4..7. Do not start proposal/mobile/second-GUI/Stage 3/4/true-live work from stale AgentTodo/TODO text.
-- W-AUDIT-2 source close (2026-05-09): Phase4 weekly review, Scout signal/event, and Layer2 trigger mutating routes now require operator+scope gates; restart scripts/docs default Trading API bind to loopback via `OPENCLAW_BIND_HOST`; AI service Unix socket chmods to `0600`; Rust boot wires `spawn_lease_transition_pipeline` into Paper/Demo/Live GovernanceCore audit emitters. No rebuild/restart/runtime authority change in that checkpoint.
+- W-AUDIT-2 source close (2026-05-09): Phase4 weekly review, Scout signal/event, and Layer2 trigger mutating routes now require operator+scope gates; restart scripts/docs no longer default Trading API to all-interface bind; AI service Unix socket chmods to `0600`; Rust boot wires `spawn_lease_transition_pipeline` into Paper/Demo/Live GovernanceCore audit emitters. Follow-up P0-NEW-VULN-1 tailnet correction makes lifecycle scripts default to concrete Tailscale IPv4 when available, otherwise loopback.
 - P1-REPLAY-2 is runtime-applied: on 2026-05-08 Linux `trade-core` applied V066 twice via `linux_bootstrap_db.sh --apply V066` for idempotency, verified `replay_report` and `byte_size >= 0` constraints, passed a rollback smoke insert/reject test, and reloaded runtime with `restart_all.sh --keep-auth`. Post-reload watchdog returned `engine_alive=true`; passive healthcheck was `SUMMARY: WARN` with no hard FAIL.
 - P2-PYDANTIC-1 is complete for replay surfaces: `@validator` callsites in `replay/experiment_registry.py` and `replay/replay_models.py` were migrated to Pydantic V2 `@field_validator`; `pytest.ini` pins `asyncio_default_fixture_loop_scope=function` so deprecation warnings can be treated as errors in targeted replay tests.
 - P2-SEC-1 is complete for replay finalize: 503 responses now return a generic internal persistence error under `replay_finalize_failed` without exposing backend exception class/message to clients.
@@ -212,6 +212,13 @@ W-AUDIT-3 F-01 current fact:
   `ExecutorConfigCache.shadow_mode_provider()` in `strategy_wiring.py`
 - provider missing/exception paths are fail-closed in `_read_shadow_mode()`
   before IPC submit authority; source/test only, no rebuild/restart
+
+P0-NEW-VULN-1 bind-host rule:
+- lifecycle scripts must not default to `0.0.0.0`
+- default `OPENCLAW_BIND_HOST=auto` resolves the node's concrete Tailscale IPv4
+  when available, otherwise `127.0.0.1`
+- `OPENCLAW_BIND_HOST=tailscale` forces tailnet-only binding; `0.0.0.0` / `::`
+  are rejected by `helper_scripts/lib/api_bind_host.sh`
 
 Detailed 2026-04-29 A-F remediation and redeploy context was compacted out of this file and preserved in:
 - `.codex/archive/2026-04-29--pre-compaction-memory-snapshot.md`

@@ -53,7 +53,10 @@ done
 
 TS="$(date +%Y%m%d_%H%M%S)"
 DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
-API_BIND_HOST="${OPENCLAW_BIND_HOST:-127.0.0.1}"
+# Trading API bind host. Default "auto" binds to the node's Tailscale IPv4
+# address when available, otherwise loopback. 0.0.0.0 is rejected by the helper.
+source "$REPO_ROOT/helper_scripts/lib/api_bind_host.sh"
+API_BIND_HOST="$(resolve_openclaw_api_bind_host)"
 # Secrets root + archive dir (env vars for Mac / non-HOME deployment).
 # Mac dev recommendation: export OPENCLAW_SECRETS_ROOT / OPENCLAW_ARCHIVE_DIR.
 # Secrets 根 + 歸檔目錄（支援 Mac / 非 $HOME 路徑部署）。
