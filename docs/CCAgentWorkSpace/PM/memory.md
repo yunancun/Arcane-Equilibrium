@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | A3 NEW-1 openConfirmModal a11y: added dialog role/aria-modal, Esc cancel, Tab focus loop, initial cancel focus, and previous-focus restore to common and legacy confirm modals, with static regression and JS syntax checks | workspace/reports/2026-05-09--openconfirmmodal_a11y.md |
 | 2026-05-09 | W-AUDIT-5 F-12 true runner split: corrected the verified path mismatch by splitting `rust/openclaw_engine/src/replay/runner.rs` 2469→1166 and moving tests to `runner_tests.rs` 1299, with LOC static regression and replay runner targeted tests green | workspace/reports/2026-05-09--w_audit_5_f12_true_runner_split.md |
 | 2026-05-09 | W-AUDIT-6c portfolio VaR/CVaR/EVT: added historical VaR/CVaR, EVT/GPD tail fit, stationary block-bootstrap CI, LUNA/FTX/COVID stress scenarios, and required demo tail-risk evidence for DEMO_ACTIVE→LIVE_PENDING promotion | workspace/reports/2026-05-09--w_audit_6c_portfolio_tail_risk.md |
 | 2026-05-09 | Post-rebuild `[40]` BILLUSDT grid negative-cell guard: after MA R:R rebuild, passive healthcheck failed only `[40]` from `grid_trading/BILLUSDT` n=11 avg=-49.67bps; source-blocked BILLUSDT for new grid entries across paper/demo/live strategy params, leaving close/reduce enabled | workspace/reports/2026-05-09--post_rebuild_bill_grid_negative_cell.md |

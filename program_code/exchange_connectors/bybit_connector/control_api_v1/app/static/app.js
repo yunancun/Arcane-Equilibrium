@@ -334,24 +334,64 @@ function openConfirmModal(actionName) {
   const meta = CRITICAL_ACTIONS[actionName];
   if (!meta) return Promise.resolve(true);
   const modal = document.getElementById("confirmModal");
+  const dialog = modal.querySelector(".confirm-modal-dialog");
+  if (dialog) {
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "confirmModalTitle");
+    dialog.setAttribute("tabindex", "-1");
+  }
   modal.classList.remove("hidden");
   document.getElementById("confirmModalTitle").textContent = meta.title;
   document.getElementById("confirmModalSubtitle").textContent = meta.subtitle;
   document.getElementById("confirmModalRisk").textContent = meta.risk;
   document.getElementById("confirmModalConsequence").textContent = meta.consequence;
   return new Promise((resolve) => {
+    const previousActive = document.activeElement;
+    const focusableNodes = () => Array.from(
+      modal.querySelectorAll("button,[href],input,select,textarea,[tabindex]:not([tabindex='-1'])")
+    ).filter((node) => !node.disabled && node.offsetParent !== null);
     const cleanup = () => {
       modal.classList.add("hidden");
+      modal.onkeydown = null;
       document.querySelectorAll("[data-close-modal='true']").forEach((node) =>
         node.replaceWith(node.cloneNode(true))
       );
       const proceed = document.getElementById("confirmModalProceed");
       proceed.replaceWith(proceed.cloneNode(true));
+      if (previousActive && typeof previousActive.focus === "function") previousActive.focus();
+    };
+    modal.onkeydown = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        cleanup();
+        resolve(false);
+        return;
+      }
+      if (ev.key !== "Tab") return;
+      const nodes = focusableNodes();
+      if (!nodes.length) {
+        ev.preventDefault();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault();
+        first.focus();
+      }
     };
     modal.querySelectorAll("[data-close-modal='true']").forEach((node) =>
       (node.onclick = () => { cleanup(); resolve(false); })
     );
     document.getElementById("confirmModalProceed").onclick = () => { cleanup(); resolve(true); };
+    setTimeout(() => {
+      const cancel = modal.querySelector(".confirm-cancel");
+      if (cancel) cancel.focus();
+    }, 0);
   });
 }
 

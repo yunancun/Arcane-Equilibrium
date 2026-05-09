@@ -1630,7 +1630,7 @@ function openConfirmModal(actionName) {
     overlay.id = 'oc-generic-confirm-overlay';
     overlay.className = 'oc-confirm-overlay';
     overlay.innerHTML =
-      '<div class="oc-confirm-dialog">' +
+      '<div class="oc-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="oc-gc-title" tabindex="-1">' +
         '<h3 id="oc-gc-title"></h3>' +
         '<p id="oc-gc-body"></p>' +
         '<div class="btn-row">' +
@@ -1649,15 +1649,51 @@ function openConfirmModal(actionName) {
   overlay.classList.add('show');
 
   return new Promise(function(resolve) {
+    var previousActive = document.activeElement;
+    var cancelBtn = document.getElementById('oc-gc-cancel');
+    function focusableNodes() {
+      return Array.prototype.slice.call(
+        overlay.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')
+      ).filter(function(node) {
+        return !node.disabled && node.offsetParent !== null;
+      });
+    }
     function close(val) {
       overlay.classList.remove('show');
       // Remove handlers to prevent duplicate firing / 移除监听防止重复触发
-      document.getElementById('oc-gc-cancel').onclick = null;
+      cancelBtn.onclick = null;
       confirmBtn.onclick = null;
+      overlay.onkeydown = null;
+      if (previousActive && typeof previousActive.focus === 'function') {
+        previousActive.focus();
+      }
       resolve(val);
     }
-    document.getElementById('oc-gc-cancel').onclick = function() { close(false); };
+    cancelBtn.onclick = function() { close(false); };
     confirmBtn.onclick = function() { close(true); };
+    overlay.onkeydown = function(ev) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        close(false);
+        return;
+      }
+      if (ev.key !== 'Tab') return;
+      var nodes = focusableNodes();
+      if (!nodes.length) {
+        ev.preventDefault();
+        return;
+      }
+      var first = nodes[0];
+      var last = nodes[nodes.length - 1];
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault();
+        first.focus();
+      }
+    };
+    setTimeout(function() { cancelBtn.focus(); }, 0);
   });
 }
 
