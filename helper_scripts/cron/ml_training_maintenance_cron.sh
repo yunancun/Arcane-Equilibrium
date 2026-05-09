@@ -49,6 +49,15 @@ export PG_HOST PG_PORT PG_DB PG_USER PG_PASSWORD="$PG_PASS"
 export OPENCLAW_DATABASE_URL="postgresql://${PG_USER}:${PG_PASS}@${PG_HOST}:${PG_PORT}/${PG_DB}"
 export PYTHONPATH="${BASE}/program_code:${BASE}:${PYTHONPATH:-}"
 
+# 注入 IPC secret 路徑 — engine 在 OPENCLAW_IPC_SECRET 設置時要求 __auth 握手
+# optuna_optimizer 呼叫 IPC `get_param_ranges` 需要先帶 HMAC-SHA256 token；
+# 沒帶 = engine 拒收 first message must be __auth → param_ranges_unavailable
+# 對齊 restart_all.sh 的 path：$SECRETS_ROOT/environment_files/ipc_secret.txt
+IPC_SECRET_FILE_DEFAULT="$SECRETS_ROOT/environment_files/ipc_secret.txt"
+if [[ -z "${OPENCLAW_IPC_SECRET_FILE:-}" && -f "$IPC_SECRET_FILE_DEFAULT" ]]; then
+    export OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE_DEFAULT"
+fi
+
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     echo "[$(ts)] SKIP: ML training maintenance already running (lock held)" >> "$LOG"
     exit 0
