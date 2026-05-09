@@ -2106,3 +2106,91 @@ control_api_v1 sub-dir 跑 venv 時 `from program_code...` import broken（PYTHO
 - PA 派工模板用「path glob」太嚴；實際 path naming 由 E1 / CC 自由命名（合理 topic-suite naming）；E4 應 substance 等效 → PASS，不應因 path drift FAIL
 - v3 baseline 應更新 profile.md：Linux control_api_v1 **3961/3** + cargo lib **2586/0**
 - 5 commits 全部由 ncyu (operator/codex) 提交；無 commit-introduced new fail；governance fixed test 同步加齊 — 是高品質 commit batch
+
+---
+
+## 2026-05-09 W-AUDIT-7c GUI 三項修復回歸（HEAD `8b766a43` round 1 → working tree round 2）
+
+**範圍**：W-AUDIT-7c GUI typed-confirm modal + Settings sub-tab 拆分 5 file +573/-124
+- common.js +140 (新 openTypedConfirmModal helper)
+- governance-tab.js +50 -8 (兩個 native confirm 替換)
+- tab-ai.html +13 -3 (clearProviderKey native confirm 替換)
+- tab-settings.html +368 -123 (4 sub-tab 拆分 + modal 抽出)
+- tests/static/test_typed_confirm_modal.html +135 (browser fixture)
+
+**Verdict (round 2)**：✅ **PASS** — round 1 IMPL bug 已 catch（governance-tab.js ES6 SyntaxError） → E2 RETURN-TO-E1a (`9f030e5e`) + E4 同步 catch → E1a round 2 fix（變數重命名 `ok` → `okCount` + cache pending list）已 land working tree → E4 對 round 2 重跑全 10 case + 全量 baseline 全綠 deterministic
+**Verdict (round 1, historical)**：🛑 FAIL — `governance-tab.js:1581` const/let 同 scope 重複宣告，整個 governance tab broken。CASE-08 (node --check) 真實 catch。
+
+**Mac baseline 雙跑 deterministic**（control_api_v1 + tests/）：
+- Mac before W-AUDIT-7c：control_api_v1 3955/2 + srv/tests 232/1 = 4187/3 (3 fail = pre-existing, 不是 W-AUDIT-7c)
+- Mac round 1（含 IMPL bug，含新 10 case）：control_api_v1 3964/3 + srv/tests 232/1 = 4196/4 (+9 pass / +1 fail = CASE-08 真實 catch IMPL bug)
+- **Mac round 2（E1a 已修 working tree，含新 10 case）**：control_api_v1 **3965/2** + srv/tests 232/1 = **4197/3** (+10 pass / 0 fail delta — 全 10 case PASS、bug 已修)
+- Linux runtime 端：直接 `node --check governance-tab.js` 跨平台同 reproduce round 1 SyntaxError（Linux v22.22.2 + Mac v25.9.0 都 throw）；round 2 fix 後 exit=0
+- 雙跑 deterministic：1st run = 2nd run（10 passed in 0.10-0.11s）
+
+**新加測試文件**：
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/static/test_w_audit_7c_typed_confirm_modal.py` (10 case, 297 lines)
+- 涵蓋 E1a report 建議 5 case + E4 對抗性補強 5 case
+- pattern 沿用既有 test_replay_subtab_static_assets.py / test_login_redirect_contract.py
+
+**10 case 結果**：
+| case | 內容 | 結果 |
+|---|---|---|
+| 01 | 3 tab html stack_residue 空 | PASS |
+| 02 | common.js + governance-tab.js brace/paren/bracket diff = 0 | PASS |
+| 03 | governance-tab.js native confirm() 殘留 = 0 | PASS |
+| 04 | tab-ai.html native confirm() 殘留 = 0 | PASS |
+| 05 | openTypedConfirmModal 函數體 brace_balanced | PASS |
+| 06 | 4 sub-tab open/close 平衡 | PASS |
+| 07 | openTypedConfirmModal 必備 hook keys 在位 | PASS |
+| **08** | **★ governance-tab.js node -c 真實 ES6 syntax check** | **round 1 FAIL → round 2 PASS** |
+| 09 | common.js node -c 真實 ES6 syntax check | PASS |
+| 10 | tab-settings.html ocSettingsSubtabShow/Restore + button id 在位 | PASS |
+
+**真實 IMPL bug（CASE-08 catch）**：
+
+```
+governance-tab.js:1581
+  let ok = 0, fail = 0;
+      ^
+SyntaxError: Identifier 'ok' has already been declared
+```
+
+**RCA**：line 1555 `const ok = await openTypedConfirmModal(...)` 與 line 1581
+`let ok = 0, fail = 0;` 在同一 function `bulkAudit(action)` scope（line 1546）內，
+ES6 `const` + `let` 重複宣告同名變數 = SyntaxError；Chrome/Firefox/Edge 在
+load governance-tab.js 時 100% throw，**整個 governance tab 所有行為 broken**
+（不只 bulkAudit；script 整檔 parse fail 後所有 export 函數都不可用）。
+
+**最小修法（給 E1a）**：line 1581 改名為 `okCount` 或 `successCount`
+（連帶 line 1586 `if (d && d.ok) ok++; else fail++;` + line 1590 `ocToast(ok + ...)` 同步改）。
+
+**E1a IMPL report 漏抓 RCA**：
+- E1a 自評「JavaScript brace/paren/bracket diff: governance-tab.js braces=0 parens=0 brackets=0」+ 聲稱 healthy
+- 純字元計數 diff = 0 但 ES6 重複宣告（const + let same scope）是 lexical-level error，非 brace 錯位
+- E2 review 也漏抓（沒跑 `node --check`，只 review diff）；E4 才真實 catch
+
+**E4 邊界堅持**：
+- 不修 business logic（讓 E1a 修）
+- 但寫真實 catch test 給 PM 看，明確 verdict
+- 退回 E1a 而非 silent commit（「不允許刪測試使測試通過」原則）
+
+**對抗性 push back 維度**（10 維度）：
+- A: governance-tab.js brace 平衡 ✅ PASS
+- B: governance-tab.js node -c ✅ PASS（catch SyntaxError）→ 真 bug
+- C: common.js brace 平衡 ✅ PASS
+- D: common.js node -c ✅ PASS
+- E: openTypedConfirmModal hook 缺漏 ✅ PASS
+- F: native confirm 殘留 ✅ PASS
+- G: 4 sub-tab open/close ✅ PASS
+- H: pre-existing fail 增加 ✅ NO（依 baseline 2 fail 不變）
+- I: 跨平台 reproduce ✅ YES（Mac node 25 + Linux node 22 都 throw）
+- J: 不靠 mock 掩蓋業務 ✅ YES（純 syntax check，0 mock）
+
+**經驗教訓**：
+- E4 必跑 `node --check` 對所有改動 .js / 內聯 JS — pure brace 計數 false-pass 高
+- E1a + E2 應在自驗 chain 加 node --check，不只 brace diff 計數
+- ES6 `const` + `let` 重複宣告是同 scope lexical bug，常被靜態 grep 漏；只有真 parser 能 catch
+- HEAD `8b766a43` (E1a memory + report) 含 round 1 IMPL bug，不應視為「ready to deploy」；round 2 working tree 才 ready
+- E2 round 1 RETURN-TO-E1a (`9f030e5e`) 與 E4 round 1 catch 同 bug 是好現象（雙 catch 互驗）；round 2 land working tree 後 E4 對 working tree 重驗 PASS
+- E4 commit 範圍只含自己的 test + memory + report，**不吞** E1a round 2 working tree fix（E1a / PM 自己 commit）
