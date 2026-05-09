@@ -114,6 +114,8 @@ impl TickPipeline {
             open_interests: HashMap::new(),
             edge_predictor_store: None,
             decision_feature_tx: None,
+            // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+            decision_feature_evaluation_tx: None,
             shadow_fill_db_tx: None,
             exit_feature_tx: None,
             shadow_exit_tx: None,
@@ -338,6 +340,33 @@ impl TickPipeline {
         &self,
     ) -> Option<&tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>> {
         self.decision_feature_tx.as_ref()
+    }
+
+    /// W-AUDIT-4b-M1 split (V082)：接 evaluation log 通道。
+    /// 每 pipeline 啟動只呼叫一次；同時把 tx clone 傳給 IntentProcessor
+    /// 讓 evaluate_predictor_gate 內部 producer 用同一 writer。
+    /// None 時 evaluation 發射停用（fail-soft），不影響交易與舊行為。
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    pub fn set_decision_feature_evaluation_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::DecisionFeatureEvaluationMsg>,
+    ) {
+        debug_assert!(
+            self.decision_feature_evaluation_tx.is_none(),
+            "decision_feature_evaluation_tx injected twice — bootstrap should call this exactly once per pipeline"
+        );
+        self.intent_processor
+            .set_decision_feature_evaluation_tx(tx.clone());
+        self.decision_feature_evaluation_tx = Some(tx);
+    }
+
+    /// W-AUDIT-4b-M1 split (V082)：evaluation tx 取用器（debug / IPC 用）；
+    /// 未接線時返回 None。
+    pub fn decision_feature_evaluation_tx(
+        &self,
+    ) -> Option<&tokio::sync::mpsc::Sender<crate::database::DecisionFeatureEvaluationMsg>> {
+        self.decision_feature_evaluation_tx.as_ref()
     }
 
     /// EDGE-P3-1 Step 7c: Wire the shadow-fill DB channel. Call exactly once

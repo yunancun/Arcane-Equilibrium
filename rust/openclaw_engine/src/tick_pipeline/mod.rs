@@ -949,6 +949,15 @@ pub struct TickPipeline {
     /// 緩存；同時傳給 IntentProcessor 讓內部 producer 共用同一 writer。
     /// None 時發射停用（fail-soft，不影響交易）。
     decision_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    /// W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+    /// 決策特徵 evaluation log 通道；對應每次 evaluate_predictor_gate 評估
+    /// （無論 outcome 是否 emit intent），供 producer-debug / gate 行為觀測。
+    /// 與 decision_feature_tx 不同：後者改為 intent-only emit（success path）。
+    /// None = 停用（fail-soft，不影響交易）。逐引擎接線。
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    decision_feature_evaluation_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureEvaluationMsg>>,
     /// EDGE-P3-1 Step 7c: Cached sender for `ShadowFillMsg` writes, used by
     /// the `EmitShadowFill` IPC handler to forward ε-greedy paper exploration
     /// fills into `learning.decision_shadow_fills`. Paper-only (the predictor

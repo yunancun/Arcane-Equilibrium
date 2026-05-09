@@ -450,6 +450,9 @@ pub(crate) async fn spawn_db_writers(
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::TradingMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionContextMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionFeatureMsg>>,
+    // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+    // 決策特徵 evaluation log 通道（producer-debug 用，非 ML training）
+    Option<tokio::sync::mpsc::Sender<openclaw_engine::database::DecisionFeatureEvaluationMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ShadowFillMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ExitFeatureRow>>,
     // INFRA-PREBUILD-1 Part A (2026-04-23): Combine Layer exit-time shadow
@@ -467,6 +470,7 @@ pub(crate) async fn spawn_db_writers(
             None,
             None,
             None,
+            None, // decision_feature_evaluation_tx (V082)
             None,
             None,
             None,
@@ -542,6 +546,29 @@ pub(crate) async fn spawn_db_writers(
                 dfw_pool,
                 dfw_config,
                 dfw_cancel,
+            ),
+        );
+    }
+
+    // W-AUDIT-4b-M1 split (V082)：Decision feature evaluation writer channel + task.
+    // 容量 1024，與 decision_feature_tx 對齊（gate 評估 cadence 相同，新通道
+    // 採同節流）。獨立 channel 避與 production decision_features 路徑混淆。
+    // 此通道於每次 evaluate_predictor_gate 評估都收訊息（無論 outcome），
+    // decision_feature_tx 改為 intent-only emit（success path 才寫）。
+    // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    let (decision_feature_evaluation_tx, decision_feature_evaluation_rx) =
+        tokio::sync::mpsc::channel(1024);
+    {
+        let dfew_pool = Arc::clone(db_pool);
+        let dfew_config = Arc::clone(config);
+        let dfew_cancel = cancel.clone();
+        tokio::spawn(
+            openclaw_engine::database::decision_feature_evaluation_writer::run_decision_feature_evaluation_writer(
+                decision_feature_evaluation_rx,
+                dfew_pool,
+                dfew_config,
+                dfew_cancel,
             ),
         );
     }
@@ -693,6 +720,7 @@ pub(crate) async fn spawn_db_writers(
         Some(trading_tx),
         Some(context_tx),
         Some(decision_feature_tx),
+        Some(decision_feature_evaluation_tx),
         Some(shadow_fill_tx),
         Some(exit_feature_tx),
         Some(shadow_exit_tx),

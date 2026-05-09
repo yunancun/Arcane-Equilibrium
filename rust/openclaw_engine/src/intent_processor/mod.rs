@@ -365,6 +365,16 @@ pub struct IntentProcessor {
     /// 非空 context_id，於 `evaluate_predictor_gate` 頂端即發射，無論 predictor
     /// 是否啟用 — Stage 0 即刻採集訓練資料；None 時發射為 no-op（fail-soft）。
     decision_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    /// W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel。
+    /// 對應每次 evaluate_predictor_gate 評估（無論 PredictorAction outcome），
+    /// emit 到 learning.decision_features_evaluations（producer-debug / gate
+    /// 行為觀測）。**不可作 ML training data**（pool 含 reject path 污染）。
+    /// 與 decision_feature_tx 不同：後者改為 intent-only emit。
+    /// None = 停用（fail-soft，不影響交易）。
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    decision_feature_evaluation_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureEvaluationMsg>>,
     /// EDGE-P2-3 Phase 1B-5: owned snapshot of `MakerKpiConfig` consulted by the
     /// router's PostOnly KPI gate (Degraded → silent market fallback). Mirrors
     /// the `risk_config` ownership pattern: TickPipeline pushes the latest
@@ -418,6 +428,8 @@ impl IntentProcessor {
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
             decision_feature_tx: None,
+            // W-AUDIT-4b-M1 split (V082)
+            decision_feature_evaluation_tx: None,
             maker_kpi_config: crate::paper_state::MakerKpiConfig::default(),
         }
     }
@@ -446,6 +458,8 @@ impl IntentProcessor {
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
             shadow_fill_tx: None,
             decision_feature_tx: None,
+            // W-AUDIT-4b-M1 split (V082)
+            decision_feature_evaluation_tx: None,
             maker_kpi_config: crate::paper_state::MakerKpiConfig::default(),
         }
     }
@@ -910,16 +924,33 @@ impl IntentProcessor {
         self.shadow_fill_tx = Some(tx);
     }
 
-    /// EDGE-P3-1 Step 7a: Inject the `DecisionFeatureMsg` writer channel so
-    /// `evaluate_predictor_gate` can emit one training-store row per call.
-    /// None → emission no-op (fail-soft; trading unaffected).
-    /// EDGE-P3-1 Step 7a：注入 `DecisionFeatureMsg` writer 通道，供每次 gate 評估
-    /// 寫入一列訓練資料。None 時發射 no-op（fail-soft，不影響交易）。
+    /// EDGE-P3-1 Step 7a + W-AUDIT-4b-M1 split (V082)：注入 production
+    /// `DecisionFeatureMsg` writer 通道。**現為 intent-only emit**：caller
+    /// （tick_pipeline step_4_5_dispatch）於 success path（result.submitted）
+    /// 才呼叫 `emit_decision_feature_intent_emitted`。
+    /// `evaluate_predictor_gate` 內**不再**寫此通道；改用
+    /// `decision_feature_evaluation_tx`（evaluation log）。
+    /// None → emission no-op（fail-soft，不影響交易）。
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
     pub fn set_decision_feature_tx(
         &mut self,
         tx: tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>,
     ) {
         self.decision_feature_tx = Some(tx);
+    }
+
+    /// W-AUDIT-4b-M1 split (V082)：注入 candidate evaluation log writer 通道。
+    /// `evaluate_predictor_gate` 頂端對每次評估發射一條（無論 outcome），
+    /// 寫入 learning.decision_features_evaluations。
+    /// None → emission no-op（fail-soft；evaluation 不採集但不影響交易）。
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    pub fn set_decision_feature_evaluation_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::DecisionFeatureEvaluationMsg>,
+    ) {
+        self.decision_feature_evaluation_tx = Some(tx);
     }
 
     /// EDGE-P3-1 A4: Evaluate the predictor gate for an intent. Returns a
@@ -945,34 +976,43 @@ impl IntentProcessor {
         now_ms: u64,
         cost_bps: f64,
     ) -> PredictorAction {
-        // EDGE-P3-1 Step 7a: Emit a decision-feature training snapshot at the
-        // TOP of the gate — before the `use_edge_predictor` short-circuit — so
-        // that training data collection begins in Stage 0 while the predictor
-        // stays disabled and the gate short-circuits to legacy shrinkage.
-        // Only fires with a real FeatureVectorV1 + non-empty context_id; no-op
-        // otherwise. `edge_label_backfill.py` populates labels on close.
-        // EDGE-P3-1 Step 7a：在 `use_edge_predictor` 短路檢查之前於 gate 頂端
-        // 發射訓練特徵快照，使 Stage 0 即刻採集資料（此時 predictor 仍禁用且
-        // gate 走 legacy shrinkage）。僅在 features Some + context_id 非空時發射；
-        // close 時由 `edge_label_backfill.py` 回填 label。
-        if !context_id.is_empty() {
-            if let Some(feats) = features {
-                self.emit_decision_feature_snapshot(intent, feats, context_id, now_ms);
-            }
-        }
-
+        // W-AUDIT-4b-M1 split (V082)：先短路所有不能 emit evaluation 的場景，
+        // 真正評估 gate 後 emit 一條 evaluation row（無論 outcome）。
+        //
+        // 與舊行為差異（root cause: 99.32% orphan rows）：
+        //   - 舊：emit 到 learning.decision_features（PK=context_id, ON CONFLICT
+        //     DO NOTHING），所有評估都寫，無論 intent 是否真正 emit。
+        //   - 新：emit 到 learning.decision_features_evaluations（BIGSERIAL PK，
+        //     append-only），保 evaluation 流量；
+        //     learning.decision_features 改由 caller (step_4_5_dispatch) 在
+        //     intent 真正 emit (success path) 時呼叫
+        //     `emit_decision_feature_intent_emitted`。
+        //
+        // 邏輯重構：原本前段「short-circuit 不評估」+「跳出回 UseLegacyGate」
+        // 全混在一起；現在把 outcome 字串化為 V082 enum 後寫 evaluation log，
+        // 再返回 PredictorAction。
+        // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+        //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
         let cfg = &self.risk_config.edge_predictor;
-        if !cfg.use_edge_predictor {
+        let no_predictor = !cfg.use_edge_predictor
+            || self.edge_predictor_store.is_none()
+            || features.is_none();
+        if no_predictor {
+            // emit evaluation log 然後返回（與舊路徑相容）
+            self.try_emit_evaluation_log(
+                intent,
+                features,
+                context_id,
+                now_ms,
+                "use_legacy_no_predictor",
+                "evaluation_log",
+            );
             return PredictorAction::UseLegacyGate;
         }
-        let store = match self.edge_predictor_store.as_ref() {
-            Some(s) => s,
-            None => return PredictorAction::UseLegacyGate,
-        };
-        let features = match features {
-            Some(f) => f,
-            None => return PredictorAction::UseLegacyGate,
-        };
+
+        // 經短路後 store / features 一定 Some（unwrap 安全，no_predictor=false）
+        let store = self.edge_predictor_store.as_ref().expect("store checked");
+        let features_ref = features.expect("features checked");
 
         // is_add: intent side matches existing position → would add to it. Used by
         // `require_q10_positive_for_adds` (gate ignores when flag is off).
@@ -996,16 +1036,40 @@ impl IntentProcessor {
             let mut rng = self.predictor_rng.lock();
             edge_predictor_gate(
                 &inputs,
-                features,
+                features_ref,
                 store.as_ref(),
                 &mut *rng,
                 cfg,
                 // EDGE-P3-1 A5: serialize full 17-dim vector for shadow-fill
                 // JSONB payload. Lazy closure — cost only paid on ε-greedy branch.
                 // EDGE-P3-1 A5：lazy 序列化完整 17 維 feature；僅 ε-greedy 分支付代價。
-                || features.to_jsonb(),
+                || features_ref.to_jsonb(),
             )
         };
+
+        // W-AUDIT-4b-M1：把 outcome 字串化（V082 §CHECK enum）寫 evaluation log
+        let (outcome_str, evidence_tier) = match &outcome {
+            PredictorGateOutcome::Accept => ("accept", "evaluation_log"),
+            PredictorGateOutcome::Reject(_) => ("reject", "evaluation_log"),
+            PredictorGateOutcome::RejectAdd(_) => ("reject_add", "evaluation_log"),
+            PredictorGateOutcome::ShadowFill(_) => ("shadow_fill", "shadow_synthetic"),
+            PredictorGateOutcome::Fallback(_) => match cfg.fallback_on_error {
+                EdgePredictorFallback::Shrinkage => {
+                    ("fallback_use_legacy", "evaluation_log")
+                }
+                EdgePredictorFallback::FailClosed => {
+                    ("fallback_fail_closed", "evaluation_log")
+                }
+            },
+        };
+        self.try_emit_evaluation_log(
+            intent,
+            features,
+            context_id,
+            now_ms,
+            outcome_str,
+            evidence_tier,
+        );
 
         if cfg.shadow_mode {
             tracing::debug!(
@@ -1061,18 +1125,18 @@ impl IntentProcessor {
         }
     }
 
-    /// EDGE-P3-1 Step 7a: Push one `DecisionFeatureMsg` to the writer task.
-    /// Called from the top of `evaluate_predictor_gate`, before the
-    /// `use_edge_predictor` short-circuit, so training data is collected in
-    /// Stage 0 while the gate stays on the legacy shrinkage path. Uses
-    /// `try_send` to keep the intent loop off the DB backpressure path:
-    /// writer-channel full → best-effort drop + warn, matching the writer's
-    /// own resilience policy. Silent no-op when tx is not wired.
-    /// EDGE-P3-1 Step 7a：向 writer 任務推送一條 `DecisionFeatureMsg`。於
-    /// `evaluate_predictor_gate` 頂端呼叫 — 早於 `use_edge_predictor` 短路，
-    /// Stage 0 即採集訓練資料；`try_send` 避免意圖循環被 DB 背壓阻塞，
-    /// 通道滿 → best-effort drop + warn。tx 未接線時靜默 no-op。
-    fn emit_decision_feature_snapshot(
+    /// EDGE-P3-1 Step 7a + W-AUDIT-4b-M1 split (V082)：推送一條
+    /// `DecisionFeatureMsg` 到 production `learning.decision_features` writer
+    /// task。**現為 intent-only emit**：caller (tick_pipeline 的 step_4_5_dispatch)
+    /// 於 success path（result.submitted）才呼叫；evaluate_predictor_gate 內
+    /// 不再呼叫此 method（改寫 evaluation log 通道）。
+    ///
+    /// 用 `try_send` 避免意圖循環被 DB 背壓阻塞；通道滿 → best-effort drop + warn。
+    /// tx 未接線時靜默 no-op（fail-soft）。
+    ///
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    pub(crate) fn emit_decision_feature_intent_emitted(
         &self,
         intent: &OrderIntent,
         features: &FeatureVectorV1,
@@ -1114,6 +1178,82 @@ impl IntentProcessor {
                 ctx_id = %context_id, symbol = %intent.symbol, error = %e,
                 "decision_feature snapshot drop — writer channel full/closed \
                  / 特徵快照丟棄，writer 通道已滿/關閉"
+            );
+        }
+    }
+
+    /// W-AUDIT-4b-M1 split (V082)：對每次 evaluate_predictor_gate 評估發射
+    /// 一條 `DecisionFeatureEvaluationMsg` 到 evaluation log 通道
+    /// (`learning.decision_features_evaluations`)。
+    ///
+    /// 與 `emit_decision_feature_intent_emitted` 不同：
+    ///   - 對應每次 gate 評估（無論 outcome），不論 intent 是否真實 emit
+    ///   - 無 dedup（BIGSERIAL PK），同 context_id 可多次寫
+    ///   - 攜 `evaluation_outcome` + `evidence_source_tier`
+    ///   - **不可作 ML training data**（pool 含 reject path 污染）
+    ///
+    /// 安全策略：與 `emit_decision_feature_intent_emitted` 對齊：
+    ///   - tx 未接線 → 靜默 no-op（fail-soft）
+    ///   - features=None → 跳過（無 jsonb）
+    ///   - context_id 空 → 跳過
+    ///   - now_ms=0 → 跳過（DB-RUN-6 epoch leak）
+    ///   - try_send 滿 → best-effort drop + warn
+    ///
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    fn try_emit_evaluation_log(
+        &self,
+        intent: &OrderIntent,
+        features: Option<&FeatureVectorV1>,
+        context_id: &str,
+        now_ms: u64,
+        evaluation_outcome: &str,
+        evidence_source_tier: &str,
+    ) {
+        let tx = match self.decision_feature_evaluation_tx.as_ref() {
+            Some(t) => t,
+            None => return, // fail-soft no-op
+        };
+        // 短路：無 features / 空 context_id / epoch 0
+        let features = match features {
+            Some(f) => f,
+            None => return,
+        };
+        if context_id.is_empty() {
+            return;
+        }
+        if now_ms == 0 {
+            tracing::warn!(
+                ctx_id = %context_id, symbol = %intent.symbol,
+                "decision_feature_evaluation skipped: now_ms=0 / 時間戳 0，跳過"
+            );
+            return;
+        }
+
+        let msg = crate::database::DecisionFeatureEvaluationMsg {
+            context_id: context_id.to_string(),
+            ts_ms: now_ms,
+            engine_mode: self.effective_engine_mode().to_string(),
+            strategy_name: intent.strategy.clone(),
+            symbol: intent.symbol.clone(),
+            side: if intent.is_long { 1 } else { -1 },
+            feature_schema_version: crate::edge_predictor::features::FEATURE_SCHEMA_VERSION
+                .to_string(),
+            feature_schema_hash: crate::edge_predictor::features::feature_schema_hash().to_string(),
+            feature_definition_hash: crate::edge_predictor::features::feature_definition_hash()
+                .to_string(),
+            features_jsonb: features.to_jsonb(),
+            evaluation_outcome: evaluation_outcome.to_string(),
+            evidence_source_tier: evidence_source_tier.to_string(),
+            // M1 producer 一律 None；M2 trigger 才回填
+            entry_context_id: None,
+        };
+
+        if let Err(e) = tx.try_send(msg) {
+            tracing::warn!(
+                ctx_id = %context_id, symbol = %intent.symbol, error = %e,
+                "decision_feature_evaluation drop — writer channel full/closed \
+                 / 評估 log 丟棄，writer 通道已滿/關閉"
             );
         }
     }

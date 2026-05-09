@@ -200,6 +200,15 @@ pub struct EventConsumerDeps {
     /// EDGE-P3-1 Step 7a：訓練特徵寫入通道。None 時 IntentProcessor 發射為 no-op
     /// （fail-soft — 不採集訓練資料但不影響 live 交易）。Passthrough IPC 亦送入此通道。
     pub decision_feature_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureMsg>>,
+    /// W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+    /// 對應每次 evaluate_predictor_gate 評估，寫
+    /// learning.decision_features_evaluations（producer-debug / gate 行為觀測）。
+    /// 與 decision_feature_tx 不同：後者改為 intent-only emit（success path）。
+    /// None 時發射 no-op（fail-soft）。
+    /// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+    ///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+    pub decision_feature_evaluation_tx:
+        Option<tokio::sync::mpsc::Sender<crate::database::DecisionFeatureEvaluationMsg>>,
     /// EDGE-P3-1 Step 7c: Channel for ε-greedy shadow-fill rows into
     /// `learning.decision_shadow_fills`. Wired per-engine from `main.rs`; when
     /// `None` the `EmitShadowFill` IPC handler's fail-soft log path fires (no

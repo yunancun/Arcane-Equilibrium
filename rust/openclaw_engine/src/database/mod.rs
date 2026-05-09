@@ -15,6 +15,7 @@ pub mod aggregators;
 pub mod batch_insert;
 pub mod black_swan_detector;
 pub mod context_writer;
+pub mod decision_feature_evaluation_writer;
 pub mod decision_feature_writer;
 pub mod drift_detector;
 pub mod exit_feature_schema;
@@ -600,6 +601,49 @@ pub struct DecisionFeatureMsg {
     /// it through `sqlx::types::Json::<serde_json::Value>` once.
     /// `FeatureVectorV1::to_jsonb()` 預序列化字串；writer 走一次 JSONB cast。
     pub features_jsonb: String,
+}
+
+/// Decision feature evaluation snapshot → decision_feature_evaluation_writer task
+/// (W-AUDIT-4b-M1 split, V082).
+/// 決策特徵評估快照 → decision_feature_evaluation_writer 任務（W-AUDIT-4b-M1 拆表）。
+///
+/// 每條訊息在 `learning.decision_features_evaluations` 產生一列
+/// (PK=evaluation_id BIGSERIAL)。與 `DecisionFeatureMsg` 不同，此訊息對應每次
+/// `evaluate_predictor_gate` 評估（無論該 intent 是否真實 emit），用作 producer
+/// 偵錯與 gate 行為觀測。**禁作 ML training data**：pool 含 reject path 污染。
+///
+/// 與 `DecisionFeatureMsg` 主要差異：
+///   - 無 dedup（同 context_id 可多次 evaluate；BIGSERIAL PK）
+///   - 攜 `evaluation_outcome`（PredictorAction 結果字串）
+///   - 攜 `evidence_source_tier`（CLAUDE.md §九 Non-training surfaces 標準）
+///   - 攜 optional `entry_context_id`（M2 trigger 鋪路；當前一律 NULL）
+///
+/// Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
+///       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+///       sql/migrations/V082__decision_features_evaluations_split.sql
+#[derive(Debug)]
+pub struct DecisionFeatureEvaluationMsg {
+    pub context_id: String,
+    pub ts_ms: u64,
+    /// "paper" | "demo" | "live" | "live_demo"
+    pub engine_mode: String,
+    pub strategy_name: String,
+    pub symbol: String,
+    /// +1 long / -1 short (i8 → SQL SMALLINT)
+    pub side: i8,
+    pub feature_schema_version: String,
+    pub feature_schema_hash: String,
+    pub feature_definition_hash: String,
+    pub features_jsonb: String,
+    /// V082 §CHECK：accept | reject | reject_add | shadow_fill |
+    /// fallback_use_legacy | fallback_fail_closed | use_legacy_no_predictor
+    /// PredictorAction 結果字串（V082 CHECK enum）
+    pub evaluation_outcome: String,
+    /// V082 §CHECK：evaluation_log | shadow_synthetic
+    /// CLAUDE.md §九 Non-training surfaces 標準
+    pub evidence_source_tier: String,
+    /// M2 trigger 鋪路欄位；M1 producer 一律 None
+    pub entry_context_id: Option<String>,
 }
 
 /// Shadow-fill snapshot → shadow_fill_writer task (EDGE-P3-1 Step 7c).

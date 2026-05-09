@@ -34,8 +34,8 @@ use openclaw_engine::bybit_rest_client::{
 use openclaw_engine::canary_writer::CanaryWriterHandle;
 use openclaw_engine::config::{BudgetConfig, ConfigManager, ConfigStore};
 use openclaw_engine::database::{
-    DecisionContextMsg, DecisionFeatureMsg, ExitFeatureRow, MarketDataMsg, ShadowExitMsg,
-    ShadowFillMsg, TradingMsg,
+    DecisionContextMsg, DecisionFeatureEvaluationMsg, DecisionFeatureMsg, ExitFeatureRow,
+    MarketDataMsg, ShadowExitMsg, ShadowFillMsg, TradingMsg,
 };
 use openclaw_engine::edge_predictor::PerEnginePredictors;
 use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
@@ -89,6 +89,9 @@ pub(crate) struct WriterSenders {
     pub trading_tx: Option<mpsc::Sender<TradingMsg>>,
     pub context_tx: Option<mpsc::Sender<DecisionContextMsg>>,
     pub decision_feature_tx: Option<mpsc::Sender<DecisionFeatureMsg>>,
+    /// W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+    /// 決策特徵 evaluation log 通道
+    pub decision_feature_evaluation_tx: Option<mpsc::Sender<DecisionFeatureEvaluationMsg>>,
     pub shadow_fill_tx: Option<mpsc::Sender<ShadowFillMsg>>,
     pub exit_feature_tx: Option<mpsc::Sender<ExitFeatureRow>>,
     pub shadow_exit_tx: Option<mpsc::Sender<ShadowExitMsg>>,
@@ -339,6 +342,8 @@ pub(crate) fn spawn_paper_pipeline(
         // EDGE-P3-1 Step 7a: wire training-store writer for paper engine.
         // EDGE-P3-1 Step 7a：接入 paper 引擎訓練資料 writer。
         decision_feature_tx: writers.decision_feature_tx.clone(),
+        // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+        decision_feature_evaluation_tx: writers.decision_feature_evaluation_tx.clone(),
         // EDGE-P3-1 Step 7c: wire shadow-fill writer for paper engine
         // (ε-greedy fills only ever originate here by gate guard).
         // EDGE-P3-1 Step 7c：接 paper 引擎 shadow-fill writer（ε-greedy 僅此處）。
@@ -450,6 +455,8 @@ pub(crate) fn spawn_demo_pipeline(
         // EDGE-P3-1 Step 7a: wire training-store writer for demo engine.
         // EDGE-P3-1 Step 7a：接入 demo 引擎訓練資料 writer。
         decision_feature_tx: writers.decision_feature_tx.clone(),
+        // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+        decision_feature_evaluation_tx: writers.decision_feature_evaluation_tx.clone(),
         // EDGE-P3-1 Step 7c: wire shadow-fill writer for defense-in-depth
         // logging on demo (gate still guards against emission here).
         // EDGE-P3-1 Step 7c：demo 亦接 shadow-fill writer 作深度防禦日誌。
@@ -580,6 +587,8 @@ pub(crate) fn spawn_live_pipeline(
         // EDGE-P3-1 Step 7a: wire training-store writer for live engine.
         // EDGE-P3-1 Step 7a：接入 live 引擎訓練資料 writer。
         decision_feature_tx: writers.decision_feature_tx.clone(),
+        // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+        decision_feature_evaluation_tx: writers.decision_feature_evaluation_tx.clone(),
         // EDGE-P3-1 Step 7c: wire shadow-fill writer for defense-in-depth
         // logging on live (gate still guards against emission here).
         // EDGE-P3-1 Step 7c：live 亦接 shadow-fill writer 作深度防禦日誌。
@@ -779,6 +788,8 @@ pub(crate) struct LiveSpawnBundle {
     pub trading_tx: Option<mpsc::Sender<TradingMsg>>,
     pub context_tx: Option<mpsc::Sender<DecisionContextMsg>>,
     pub decision_feature_tx: Option<mpsc::Sender<DecisionFeatureMsg>>,
+    /// W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel
+    pub decision_feature_evaluation_tx: Option<mpsc::Sender<DecisionFeatureEvaluationMsg>>,
     pub shadow_fill_tx: Option<mpsc::Sender<ShadowFillMsg>>,
     pub exit_feature_tx: Option<mpsc::Sender<ExitFeatureRow>>,
     pub shadow_exit_tx: Option<mpsc::Sender<ShadowExitMsg>>,
@@ -849,6 +860,8 @@ pub(crate) fn build_live_pipeline_spawner(
     let writers_c_trading = b.trading_tx;
     let writers_c_context = b.context_tx;
     let writers_c_decision_feature = b.decision_feature_tx;
+    // W-AUDIT-4b-M1 split (V082)：candidate evaluation log channel capture
+    let writers_c_decision_feature_evaluation = b.decision_feature_evaluation_tx;
     let writers_c_shadow_fill = b.shadow_fill_tx;
     let writers_c_exit_feature = b.exit_feature_tx;
     let writers_c_shadow_exit = b.shadow_exit_tx;
@@ -876,6 +889,8 @@ pub(crate) fn build_live_pipeline_spawner(
             trading_tx: writers_c_trading.clone(),
             context_tx: writers_c_context.clone(),
             decision_feature_tx: writers_c_decision_feature.clone(),
+            // W-AUDIT-4b-M1 split (V082)
+            decision_feature_evaluation_tx: writers_c_decision_feature_evaluation.clone(),
             shadow_fill_tx: writers_c_shadow_fill.clone(),
             exit_feature_tx: writers_c_exit_feature.clone(),
             shadow_exit_tx: writers_c_shadow_exit.clone(),
