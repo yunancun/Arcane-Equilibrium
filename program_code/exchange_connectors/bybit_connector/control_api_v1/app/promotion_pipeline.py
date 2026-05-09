@@ -61,6 +61,30 @@ def _selection_bias_gate_cls():
         return SelectionBiasPromotionGate
 
 
+def _portfolio_tail_risk_classes():
+    """Load PortfolioTailRiskGate/Limits across repo-root and app-runtime paths."""
+    try:
+        from program_code.learning_engine.portfolio_var import (
+            PortfolioTailRiskGate,
+            PortfolioTailRiskLimits,
+        )
+
+        return PortfolioTailRiskGate, PortfolioTailRiskLimits
+    except ModuleNotFoundError as exc:
+        if exc.name != "program_code":
+            raise
+        try:
+            from . import _path_setup  # noqa: F401
+        except Exception:  # noqa: BLE001
+            pass
+        from learning_engine.portfolio_var import (
+            PortfolioTailRiskGate,
+            PortfolioTailRiskLimits,
+        )
+
+        return PortfolioTailRiskGate, PortfolioTailRiskLimits
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Promotion Stages / 晉升階段
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -143,6 +167,7 @@ class PipelineEntry:
     demo_avg_slippage_bps: Optional[float] = None
     demo_api_reliability: Optional[float] = None
     demo_selection_bias_report: Optional[dict] = None
+    demo_tail_risk_report: Optional[dict] = None
 
     # Live approval / Live 審批
     evaluation_report: Optional[dict] = None
@@ -333,6 +358,74 @@ class PromotionGate:
             entry.updated_ts = time.time()
 
         return result.passes, report
+
+    def update_demo_tail_risk_evidence(
+        self,
+        strategy_name: str,
+        *,
+        portfolio_returns: Sequence[float],
+        stress_exposures: Optional[dict[str, float]] = None,
+        confidence: float = 0.99,
+        max_var_loss: float = 0.05,
+        max_cvar_loss: float = 0.08,
+        max_evt_cvar_loss: float = 0.12,
+        max_stress_loss: float = 0.20,
+        min_observations: int = 200,
+        evt_threshold_quantile: float = 0.95,
+        min_evt_excesses: int = 10,
+        n_bootstrap: int = 1000,
+        seed: Optional[int] = None,
+    ) -> tuple[bool, dict]:
+        """Update fail-closed portfolio VaR/CVaR/EVT evidence.
+
+        更新 DEMO_ACTIVE 畢業用的 portfolio tail-risk 證據。
+        """
+        with self._lock:
+            if strategy_name not in self._entries:
+                return False, {
+                    "verdict": "block",
+                    "passes": False,
+                    "reasons": ["not_registered"],
+                }
+
+        gate_cls, limits_cls = _portfolio_tail_risk_classes()
+        try:
+            limits = limits_cls(
+                confidence=confidence,
+                max_var_loss=max_var_loss,
+                max_cvar_loss=max_cvar_loss,
+                max_evt_cvar_loss=max_evt_cvar_loss,
+                max_stress_loss=max_stress_loss,
+                min_observations=min_observations,
+                evt_threshold_quantile=evt_threshold_quantile,
+                min_evt_excesses=min_evt_excesses,
+            )
+            result = gate_cls(limits).evaluate(
+                portfolio_returns,
+                stress_exposures=stress_exposures,
+                n_bootstrap=n_bootstrap,
+                seed=seed,
+            )
+            report = result.to_dict()
+        except Exception as exc:  # noqa: BLE001 - promotion evidence must fail closed.
+            report = {
+                "verdict": "block",
+                "passes": False,
+                "reasons": [f"tail_risk_invalid:{exc}"],
+            }
+
+        with self._lock:
+            entry = self._entries.get(strategy_name)
+            if entry is None:
+                return False, {
+                    "verdict": "block",
+                    "passes": False,
+                    "reasons": ["not_registered"],
+                }
+            entry.demo_tail_risk_report = report
+            entry.updated_ts = time.time()
+
+        return bool(report.get("passes")), report
 
     # ------------------------------------------------------------------
     # Graduation checks / 畢業檢查
@@ -604,6 +697,21 @@ class PromotionGate:
             else:
                 failures.append(f"selection_bias:{verdict}")
 
+        tail_risk_report = entry.demo_tail_risk_report
+        if not isinstance(tail_risk_report, dict):
+            failures.append("tail_risk:no_evidence")
+        elif not bool(tail_risk_report.get("passes")):
+            verdict = str(tail_risk_report.get("verdict") or "unknown")
+            raw_reasons = tail_risk_report.get("reasons") or []
+            if isinstance(raw_reasons, (list, tuple)):
+                reason_suffix = ",".join(str(reason) for reason in raw_reasons)
+            else:
+                reason_suffix = str(raw_reasons)
+            if reason_suffix:
+                failures.append(f"tail_risk:{verdict}:{reason_suffix}")
+            else:
+                failures.append(f"tail_risk:{verdict}")
+
         return len(failures) == 0, failures
 
     # ------------------------------------------------------------------
@@ -672,6 +780,7 @@ class PromotionGate:
                     "demo_avg_slippage_bps": entry.demo_avg_slippage_bps,
                     "demo_api_reliability": entry.demo_api_reliability,
                     "demo_selection_bias_report": entry.demo_selection_bias_report,
+                    "demo_tail_risk_report": entry.demo_tail_risk_report,
                     "evaluation_report": entry.evaluation_report,
                     "operator_decision": entry.operator_decision,
                     "approved_capital_pct": entry.approved_capital_pct,
@@ -708,6 +817,7 @@ class PromotionGate:
                     demo_avg_slippage_bps=row.get("demo_avg_slippage_bps"),
                     demo_api_reliability=row.get("demo_api_reliability"),
                     demo_selection_bias_report=row.get("demo_selection_bias_report"),
+                    demo_tail_risk_report=row.get("demo_tail_risk_report"),
                     evaluation_report=row.get("evaluation_report"),
                     operator_decision=row.get("operator_decision"),
                     approved_capital_pct=row.get("approved_capital_pct"),

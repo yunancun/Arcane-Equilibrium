@@ -67,6 +67,23 @@ def _add_passing_selection_bias(
     return report
 
 
+def _add_passing_tail_risk(
+    gate: PromotionGate,
+    strategy_name: str = "test",
+) -> dict:
+    rng = np.random.default_rng(20260509)
+    returns = rng.normal(0.002, 0.006, size=320)
+    ok, report = gate.update_demo_tail_risk_evidence(
+        strategy_name,
+        portfolio_returns=returns,
+        stress_exposures={"crypto_beta": 0.05, "liquidity": 0.02},
+        n_bootstrap=120,
+        seed=42,
+    )
+    assert ok, report
+    return report
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6-01: Pipeline state machine / 管線狀態機
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -135,6 +152,7 @@ class TestPipelineStateMachine:
             gate._entries["full_test"].demo_start_ts = time.time() - 22 * 86400
 
         _add_passing_selection_bias(gate, "full_test")
+        _add_passing_tail_risk(gate, "full_test")
 
         # DEMO_ACTIVE -> LIVE_PENDING
         ok, _ = gate.promote("full_test", PromotionStage.LIVE_PENDING)
@@ -263,6 +281,22 @@ class TestGraduationGates:
         assert not eligible
         assert "selection_bias:no_evidence" in reasons
 
+    def test_demo_gates_fail_without_tail_risk_evidence(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.DEMO_ACTIVE
+        gate.update_demo_metrics(
+            "test", trades=250, win_rate=0.6, net_pnl_pct=8.0,
+            max_drawdown_pct=5.0, sharpe=1.5,
+            avg_slippage_bps=10.0, api_reliability=0.99,
+        )
+        with gate._lock:
+            gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
+        _add_passing_selection_bias(gate, "test")
+        eligible, reasons = gate.check_demo_graduation("test")
+        assert not eligible
+        assert "tail_risk:no_evidence" in reasons
+
     def test_demo_selection_bias_low_dsr_blocks(self, gate: PromotionGate):
         gate.register_strategy("test")
         with gate._lock:
@@ -302,6 +336,36 @@ class TestGraduationGates:
         assert report["verdict"] == "defer_data"
         assert "pbo_missing_cpcv_returns" in report["reasons"]
 
+    def test_demo_tail_risk_stress_blocks(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.DEMO_ACTIVE
+        gate.update_demo_metrics(
+            "test", trades=250, win_rate=0.6, net_pnl_pct=8.0,
+            max_drawdown_pct=5.0, sharpe=1.5,
+            avg_slippage_bps=10.0, api_reliability=0.99,
+        )
+        with gate._lock:
+            gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
+        _add_passing_selection_bias(gate, "test")
+        rng = np.random.default_rng(20260510)
+        ok, report = gate.update_demo_tail_risk_evidence(
+            "test",
+            portfolio_returns=rng.normal(0.002, 0.006, size=320),
+            stress_exposures={"crypto_beta": 1.0},
+            n_bootstrap=120,
+            seed=43,
+        )
+        assert not ok
+        assert report["verdict"] == "block"
+        assert any(
+            str(reason).startswith("stress:luna_2022_cascade")
+            for reason in report["reasons"]
+        )
+        eligible, reasons = gate.check_demo_graduation("test")
+        assert not eligible
+        assert any(r.startswith("tail_risk:block:") for r in reasons)
+
     def test_demo_gates_pass(self, gate: PromotionGate):
         gate.register_strategy("test")
         with gate._lock:
@@ -314,6 +378,7 @@ class TestGraduationGates:
         with gate._lock:
             gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
         _add_passing_selection_bias(gate, "test")
+        _add_passing_tail_risk(gate, "test")
         eligible, reasons = gate.check_demo_graduation("test")
         assert eligible
         assert len(reasons) == 0
@@ -418,6 +483,7 @@ class TestSerialization:
         assert rows[0]["current_stage"] == "LEARNING"
         assert rows[0]["model_name"] == "kama_v2"
         assert rows[0]["demo_selection_bias_report"] is None
+        assert rows[0]["demo_tail_risk_report"] is None
 
     def test_load_from_db_rows(self):
         gate = PromotionGate()
@@ -435,6 +501,7 @@ class TestSerialization:
                 "paper_max_drawdown_pct": 6.0,
                 "paper_sharpe": 0.9,
                 "demo_selection_bias_report": {"passes": True, "verdict": "promote"},
+                "demo_tail_risk_report": {"passes": True, "verdict": "promote"},
             },
         ]
         gate.load_from_db_rows(rows)
@@ -443,6 +510,7 @@ class TestSerialization:
         assert entry.current_stage == PromotionStage.DEMO_ACTIVE
         assert entry.paper_trades == 200
         assert entry.demo_selection_bias_report == {"passes": True, "verdict": "promote"}
+        assert entry.demo_tail_risk_report == {"passes": True, "verdict": "promote"}
 
     def test_round_trip(self, gate: PromotionGate):
         gate.register_strategy("test_strat")
@@ -465,6 +533,13 @@ class TestSerialization:
         rows = gate.to_db_rows()
         assert rows[0]["demo_selection_bias_report"] == report
         assert rows[0]["demo_selection_bias_report"]["passes"] is True
+
+    def test_demo_tail_risk_report_serializes_to_status_rows(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        report = _add_passing_tail_risk(gate, "test")
+        rows = gate.to_db_rows()
+        assert rows[0]["demo_tail_risk_report"] == report
+        assert rows[0]["demo_tail_risk_report"]["passes"] is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
