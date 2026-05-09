@@ -354,6 +354,38 @@ pub fn build_msg_from_last_transition(
     })
 }
 
+/// Build a synthetic audit row for non-Production facade bypasses.
+///
+/// Exploration / Validation profiles intentionally do not create a
+/// `DecisionLeaseSm` object. The audit trail still needs one row so runtime
+/// healthchecks can prove the facade path is active without turning bypass into
+/// a hard gate.
+pub fn build_bypass_transition_msg(
+    intent_id: &str,
+    profile: &str,
+    engine_mode: &str,
+    source_stage: &str,
+) -> LeaseTransitionMsg {
+    LeaseTransitionMsg {
+        transition_id: format!("tx:{:012x}", rand::random::<u64>() & 0xFFFF_FFFF_FFFF),
+        lease_id: format!("bypass:{:012x}", rand::random::<u64>() & 0xFFFF_FFFF_FFFF),
+        from_state: None,
+        to_state: "BYPASS".to_string(),
+        event: "non_production_bypass".to_string(),
+        initiator: format!("rust_facade::{source_stage}"),
+        reason_codes: vec![
+            "non_production_profile".to_string(),
+            "lease_sm_bypassed".to_string(),
+        ],
+        requires_approval: false,
+        approved_by: None,
+        profile: profile.to_string(),
+        engine_mode: engine_mode.to_string(),
+        context_id: intent_id.to_string(),
+        ts_ms: crate::sm::now_ms(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // emit_transition_fail_soft — fire-and-forget send (no panic, no block)
 // ---------------------------------------------------------------------------
