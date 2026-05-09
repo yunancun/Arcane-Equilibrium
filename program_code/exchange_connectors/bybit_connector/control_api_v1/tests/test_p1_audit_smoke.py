@@ -104,6 +104,62 @@ def test_ai_service_initial_state():
         assert method in svc._handlers
 
 
+def test_ai_service_strategist_prompt_exposes_wide_adjustment_skill():
+    from app.ai_service import AIService
+
+    prompt = AIService._build_strategist_prompt(
+        strategy="ma_crossover",
+        symbol="BTCUSDT",
+        win_rate=0.31,
+        avg_pnl=-1.25,
+        fill_count=42,
+        current_params={"cooldown_ms": 100_000},
+        param_ranges=[
+            {
+                "name": "cooldown_ms",
+                "min": 1_000,
+                "max": 1_000_000,
+                "agent_adjustable": True,
+            }
+        ],
+        normal_delta_pct=0.30,
+        max_delta_pct=0.50,
+    )
+
+    assert "Strategist Skill: Wide Parameter Adjustment" in prompt
+    assert "normal_range=[70000, 130000]" in prompt
+    assert "wide_skill_range=[50000, 150000]" in prompt
+    assert "This is not an approval gate" in prompt
+    assert "±30% cap" not in prompt
+
+
+def test_ai_service_strategist_prompt_uses_runtime_max_delta():
+    from app.ai_service import AIService
+
+    prompt = AIService._build_strategist_prompt(
+        strategy="grid_trading",
+        symbol="ETHUSDT",
+        win_rate=0.2,
+        avg_pnl=-2.0,
+        fill_count=80,
+        current_params={"grid_spacing_pct": 0.02},
+        param_ranges=[
+            {
+                "name": "grid_spacing_pct",
+                "min": 0.001,
+                "max": 0.05,
+                "agent_adjustable": True,
+            }
+        ],
+        normal_delta_pct=0.30,
+        max_delta_pct=0.40,
+    )
+
+    assert "normal_range=[0.014, 0.026]" in prompt
+    assert "wide_skill_range=[0.012, 0.028]" in prompt
+    assert "30%-40%" in prompt
+
+
 @pytest.mark.asyncio
 async def test_ai_service_dispatch_unknown_method_returns_error():
     from app.ai_service import AIService

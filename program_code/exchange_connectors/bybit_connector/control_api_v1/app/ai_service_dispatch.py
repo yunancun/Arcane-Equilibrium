@@ -33,6 +33,9 @@ from . import ai_service_guardian
 
 logger = logging.getLogger(__name__)
 
+_STRATEGIST_NORMAL_DELTA_PCT = 0.30
+_STRATEGIST_DEFAULT_MAX_DELTA_PCT = 0.50
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # AIService — Core dispatch logic / 核心分派邏輯
@@ -219,6 +222,9 @@ class AIService:
         # B3：來自 Rust 的當前參數和範圍（可選 — B3 增強前可能不存在）
         current_params = params.get("current_params", {})
         param_ranges = params.get("param_ranges", [])
+        strategist_skill = params.get("strategist_skill", {})
+        normal_delta_pct = strategist_skill.get("normal_delta_pct", _STRATEGIST_NORMAL_DELTA_PCT)
+        max_delta_pct = strategist_skill.get("max_delta_pct", _STRATEGIST_DEFAULT_MAX_DELTA_PCT)
 
         ollama = await asyncio.to_thread(core._get_ollama_client)
 
@@ -243,6 +249,8 @@ class AIService:
         prompt = self._build_strategist_prompt(
             strategy, symbol, win_rate, avg_pnl, fill_count,
             current_params, param_ranges,
+            normal_delta_pct=normal_delta_pct,
+            max_delta_pct=max_delta_pct,
         )
         # R-06-v2: enrich prompt with analyst insights + guardian rejection stats
         # R-06-v2：用 Analyst 洞察 + Guardian 拒絕統計增強 prompt
@@ -308,47 +316,60 @@ class AIService:
         fill_count: int,
         current_params: dict[str, Any],
         param_ranges: list[dict[str, Any]],
+        normal_delta_pct: float = _STRATEGIST_NORMAL_DELTA_PCT,
+        max_delta_pct: float = _STRATEGIST_DEFAULT_MAX_DELTA_PCT,
     ) -> str:
         """Build prompt for Ollama strategy param tuning. / 構建 Ollama 策略參數調優 prompt。
 
-        STRATEGIST-TUNE-CAP-ENFORCE-1 (2026-04-24): pre-compute ±30% allowed range
-        for each adjustable param and list it explicitly. Earlier prompt only said
-        "conservative (within ±30%)" and LLM proposals 100% violated it; Rust-side
-        cap (strategist_scheduler/mod.rs:48 MAX_PARAM_DELTA_PCT=0.30) rejected all
-        → strategist_applied_params永遠空表。Math should not be LLM's job.
-        預先算好邊界再讓 LLM 填值，不要讓 LLM 自己算 ±30%。
+        STRATEGIST-WIDE-ADJUSTMENT-SKILL-1 (2026-05-09): pre-compute both
+        the normal working range (default ±30%) and the full skill range
+        (default ±50%). This is deliberately a Strategist skill, not a new
+        approval gate: Rust still enforces only the configured maximum envelope,
+        while the prompt teaches when to spend the wider 30%-50% freedom.
+        預先算好日常範圍（默認 ±30%）與技能最大範圍（默認 ±50%）；這是
+        Strategist 技能，不是新審批 gate。
         """
+        normal_delta_pct = AIService._safe_delta_pct(
+            normal_delta_pct, _STRATEGIST_NORMAL_DELTA_PCT
+        )
+        max_delta_pct = AIService._safe_delta_pct(
+            max_delta_pct, _STRATEGIST_DEFAULT_MAX_DELTA_PCT
+        )
+        normal_delta_pct = min(normal_delta_pct, max_delta_pct)
+
         # Format adjustable param ranges for the prompt, including pre-computed
-        # ±30% delta cap bounds so the LLM doesn't have to do math.
-        # 為 prompt 格式化可調參數範圍，預算 ±30% cap 邊界避免 LLM 算錯。
+        # normal and wide-skill bounds so the LLM doesn't have to do math.
+        # 為 prompt 格式化可調參數範圍，預算日常 / wide-skill 邊界避免 LLM 算錯。
         adjustable = [
             r for r in param_ranges
             if r.get("agent_adjustable", False)
         ]
-        # Must mirror rust/openclaw_engine/src/strategist_scheduler/mod.rs:48
-        # MAX_PARAM_DELTA_PCT = 0.30 — if Rust cap changes, update here.
-        # 須與 Rust 端 MAX_PARAM_DELTA_PCT 對齊；若 Rust 調 cap 此處亦改。
-        max_delta_pct = 0.30
         range_lines = []
         for r in adjustable:
             name = r["name"]
             cur_val = current_params.get(name, None)
             outer_min = r.get("min", "?")
             outer_max = r.get("max", "?")
-            # Pre-compute ±30% inner bounds when current is numeric.
-            # current 為數值時預算 ±30% 內部邊界。
+            # Pre-compute normal and full skill bounds when current is numeric.
+            # current 為數值時預算日常與完整技能邊界。
             if isinstance(cur_val, (int, float)) and cur_val != 0:
-                lo = cur_val * (1.0 - max_delta_pct)
-                hi = cur_val * (1.0 + max_delta_pct)
+                normal_lo = cur_val * (1.0 - normal_delta_pct)
+                normal_hi = cur_val * (1.0 + normal_delta_pct)
+                skill_lo = cur_val * (1.0 - max_delta_pct)
+                skill_hi = cur_val * (1.0 + max_delta_pct)
                 # Clip to outer min/max when provided.
                 if isinstance(outer_min, (int, float)):
-                    lo = max(lo, outer_min)
+                    normal_lo = max(normal_lo, outer_min)
+                    skill_lo = max(skill_lo, outer_min)
                 if isinstance(outer_max, (int, float)):
-                    hi = min(hi, outer_max)
+                    normal_hi = min(normal_hi, outer_max)
+                    skill_hi = min(skill_hi, outer_max)
                 range_lines.append(
                     f"  - {name}: current={cur_val}, "
-                    f"allowed_range=[{lo:g}, {hi:g}] "
-                    f"(±30% cap, outer bounds min={outer_min} max={outer_max})"
+                    f"normal_range=[{normal_lo:g}, {normal_hi:g}] "
+                    f"(±{normal_delta_pct * 100:g}%), "
+                    f"wide_skill_range=[{skill_lo:g}, {skill_hi:g}] "
+                    f"(±{max_delta_pct * 100:g}%, outer bounds min={outer_min} max={outer_max})"
                 )
             else:
                 range_lines.append(
@@ -365,17 +386,36 @@ class AIService:
             f"  - Average PnL per fill: {avg_pnl:.6f}\n"
             f"  - Fill count: {fill_count}\n"
             f"\nAdjustable parameters with PRE-COMPUTED allowed ranges:\n{ranges_text}\n"
+            f"\nStrategist Skill: Wide Parameter Adjustment\n"
+            f"  - Use normal_range for ordinary tuning.\n"
+            f"  - Use the {normal_delta_pct * 100:g}%-{max_delta_pct * 100:g}% wide_skill_range "
+            f"only as a deliberate skill "
+            f"when performance is clearly poor, samples are mature enough, and the move has a "
+            f"single coherent reason.\n"
+            f"  - Prefer changing fewer parameters by a larger justified amount over changing many "
+            f"parameters at once.\n"
+            f"  - This is not an approval gate; it is your own discipline for using the available freedom.\n"
             f"\nRecommend parameter adjustments to improve this strategy's performance.\n"
             f"Respond with ONLY a JSON object of param_name: new_value pairs.\n"
             f"\n"
             f"HARD RULES (violation → rejected, your suggestion wasted):\n"
-            f"  1. Each new value MUST be WITHIN the allowed_range shown above.\n"
-            f"     Example: if allowed_range=[42000, 78000], values like 30000 or 150000 are REJECTED.\n"
-            f"  2. Do not guess bounds — use the pre-computed allowed_range exactly.\n"
+            f"  1. Each new value MUST be WITHIN the wide_skill_range shown above.\n"
+            f"     Example: if wide_skill_range=[50000, 150000], values like 30000 or 200000 are REJECTED.\n"
+            f"  2. Do not guess bounds — use the pre-computed ranges exactly.\n"
             f"  3. Only include params you want to change.\n"
             f"  4. Weight params (weight_adx, weight_regime, weight_volume, weight_momentum) must sum to 65.\n"
             f"  5. If performance is acceptable or data is insufficient, respond with {{}} (empty object).\n"
         )
+
+    @staticmethod
+    def _safe_delta_pct(value: Any, default: float) -> float:
+        try:
+            pct = float(value)
+        except (TypeError, ValueError):
+            return default
+        if not 0.0 < pct < 1.0:
+            return default
+        return pct
 
     @staticmethod
     def _parse_strategist_response(
