@@ -52,6 +52,13 @@
   .confirm-body strong { color: var(--text); }
   .confirm-body .warn-box { background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.2);
     border-radius: 8px; padding: 10px 14px; margin-top: 10px; color: var(--red); font-size: 12px; }
+  .confirm-live-guard { margin: 0 20px 16px; padding: 12px 14px; border: 1px solid rgba(168,85,247,0.45);
+    border-radius: 8px; background: rgba(168,85,247,0.08); color: #c084fc; font-size: 12px; line-height: 1.6; }
+  .confirm-live-guard[hidden] { display: none; }
+  .live-hold-progress { height: 6px; margin-top: 8px; border-radius: 999px; background: rgba(168,85,247,0.18); overflow: hidden; }
+  .live-hold-bar { width: 0%; height: 100%; border-radius: inherit; background: #a855f7; transition: width 0.08s linear; }
+  #confirm-ok.confirm-ok-live-ready { border-color: rgba(168,85,247,0.7); }
+  #confirm-ok.confirm-ok-holding { background: #7e22ce; border-color: #c084fc; }
   .confirm-footer { padding: 12px 20px; border-top: 1px solid #21262d; display: flex; justify-content: flex-end; gap: 8px; }
 </style>
 
@@ -244,9 +251,13 @@
   <div class="confirm-dialog">
     <div class="confirm-header" id="confirm-title">确认操作</div>
     <div class="confirm-body" id="confirm-body"></div>
+    <div class="confirm-live-guard" id="live-confirm-guard" hidden aria-live="polite">
+      <div id="live-confirm-status">等待实盘确认保护...</div>
+      <div class="live-hold-progress" aria-hidden="true"><div class="live-hold-bar" id="live-confirm-hold-bar"></div></div>
+    </div>
     <div class="confirm-footer">
       <button class="oc-btn" onclick="closeConfirm()">取消 / Cancel</button>
-      <button class="oc-btn oc-btn-primary" id="confirm-ok" onclick="executeConfirmed()">确认执行 / Confirm</button>
+      <button class="oc-btn oc-btn-primary" id="confirm-ok" onclick="handleConfirmOkClick(event)">确认执行 / Confirm</button>
     </div>
   </div>
 </div>
@@ -275,6 +286,16 @@ const CAP_CN = {
   'live_ready': 'Live 就绪',
   'not_ready': '未就绪',
 };
+const LIVE_RESERVED_CONFIRM_DELAY_MS = 5000;
+const LIVE_RESERVED_HOLD_MS = 1200;
+
+let _liveConfirmCountdownTimer = null;
+let _liveConfirmCountdownInterval = null;
+let _liveConfirmHoldTimer = null;
+let _liveConfirmHoldInterval = null;
+let _liveConfirmHoldStartedAt = 0;
+let _liveConfirmReady = false;
+let _liveConfirmHolding = false;
 
 function cnLabel(raw, map) {
   if (!raw) return '--';
@@ -423,7 +444,9 @@ const CONFIRM_MSGS = {
 };
 
 function confirmAction(action) {
+  resetLiveReservedConfirmGuard();
   _pendingAction = action;
+  _pendingMode = null;
   let isOn = false;
   if (action === 'paper') isOn = _paperActive;
   else if (action === 'feed') isOn = _feedRunning;
@@ -438,7 +461,170 @@ function confirmAction(action) {
   $('confirm-overlay').classList.add('show');
 }
 
+function clearLiveConfirmTimers() {
+  if (_liveConfirmCountdownTimer) clearTimeout(_liveConfirmCountdownTimer);
+  if (_liveConfirmCountdownInterval) clearInterval(_liveConfirmCountdownInterval);
+  if (_liveConfirmHoldTimer) clearTimeout(_liveConfirmHoldTimer);
+  if (_liveConfirmHoldInterval) clearInterval(_liveConfirmHoldInterval);
+  _liveConfirmCountdownTimer = null;
+  _liveConfirmCountdownInterval = null;
+  _liveConfirmHoldTimer = null;
+  _liveConfirmHoldInterval = null;
+}
+
+function resetLiveReservedConfirmGuard() {
+  clearLiveConfirmTimers();
+  _liveConfirmReady = false;
+  _liveConfirmHolding = false;
+  _liveConfirmHoldStartedAt = 0;
+
+  const guard = $('live-confirm-guard');
+  const status = $('live-confirm-status');
+  const bar = $('live-confirm-hold-bar');
+  const button = $('confirm-ok');
+  if (guard) guard.hidden = true;
+  if (status) status.textContent = '等待实盘确认保护...';
+  if (bar) bar.style.width = '0%';
+  if (button) {
+    button.disabled = false;
+    button.textContent = '确认执行 / Confirm';
+    button.classList.remove('confirm-ok-live-ready', 'confirm-ok-holding');
+  }
+}
+
+function setLiveConfirmReady() {
+  if (_pendingMode !== 'live_reserved') return;
+  if (_liveConfirmCountdownInterval) clearInterval(_liveConfirmCountdownInterval);
+  _liveConfirmCountdownInterval = null;
+  if (_liveConfirmCountdownTimer) clearTimeout(_liveConfirmCountdownTimer);
+  _liveConfirmCountdownTimer = null;
+
+  _liveConfirmReady = true;
+  const status = $('live-confirm-status');
+  const button = $('confirm-ok');
+  const bar = $('live-confirm-hold-bar');
+  if (status) status.textContent = '倒计时完成。按住确认按钮 1.2 秒以切换到 live_reserved。';
+  if (bar) bar.style.width = '0%';
+  if (button) {
+    button.disabled = false;
+    button.textContent = '按住确认 / Hold';
+    button.classList.add('confirm-ok-live-ready');
+  }
+}
+
+function startLiveReservedConfirmGuard() {
+  resetLiveReservedConfirmGuard();
+  const guard = $('live-confirm-guard');
+  const status = $('live-confirm-status');
+  const button = $('confirm-ok');
+  if (guard) guard.hidden = false;
+  if (button) {
+    button.disabled = true;
+    button.textContent = '确认可用 5s / Wait';
+  }
+
+  const startedAt = Date.now();
+  const updateCountdown = () => {
+    const remainingMs = Math.max(0, LIVE_RESERVED_CONFIRM_DELAY_MS - (Date.now() - startedAt));
+    const seconds = Math.ceil(remainingMs / 1000);
+    if (status) status.textContent = '实盘切换保护倒计时：' + seconds + ' 秒后才能确认。';
+    if (button) button.textContent = '确认可用 ' + seconds + 's / Wait';
+    if (remainingMs <= 0) setLiveConfirmReady();
+  };
+
+  updateCountdown();
+  _liveConfirmCountdownInterval = setInterval(updateCountdown, 100);
+  _liveConfirmCountdownTimer = setTimeout(setLiveConfirmReady, LIVE_RESERVED_CONFIRM_DELAY_MS);
+}
+
+function cancelLiveReservedConfirmHold() {
+  if (!_liveConfirmHolding) return;
+  if (_liveConfirmHoldTimer) clearTimeout(_liveConfirmHoldTimer);
+  if (_liveConfirmHoldInterval) clearInterval(_liveConfirmHoldInterval);
+  _liveConfirmHoldTimer = null;
+  _liveConfirmHoldInterval = null;
+  _liveConfirmHolding = false;
+  _liveConfirmHoldStartedAt = 0;
+
+  const status = $('live-confirm-status');
+  const button = $('confirm-ok');
+  const bar = $('live-confirm-hold-bar');
+  if (bar) bar.style.width = '0%';
+  if (status && _pendingMode === 'live_reserved') status.textContent = '按住已取消。需要重新按住 1.2 秒确认。';
+  if (button && _pendingMode === 'live_reserved' && _liveConfirmReady) {
+    button.textContent = '按住确认 / Hold';
+    button.classList.remove('confirm-ok-holding');
+    button.classList.add('confirm-ok-live-ready');
+  }
+}
+
+function beginLiveReservedConfirmHold(event) {
+  if (_pendingMode !== 'live_reserved') return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (!_liveConfirmReady || _liveConfirmHolding) return;
+
+  _liveConfirmHolding = true;
+  _liveConfirmHoldStartedAt = Date.now();
+  const status = $('live-confirm-status');
+  const button = $('confirm-ok');
+  const bar = $('live-confirm-hold-bar');
+  if (status) status.textContent = '继续按住，直到进度条满格。';
+  if (button) {
+    button.textContent = '保持按住... / Holding';
+    button.classList.remove('confirm-ok-live-ready');
+    button.classList.add('confirm-ok-holding');
+  }
+
+  const updateHoldProgress = () => {
+    const elapsedMs = Date.now() - _liveConfirmHoldStartedAt;
+    const progress = Math.min(100, (elapsedMs / LIVE_RESERVED_HOLD_MS) * 100);
+    if (bar) bar.style.width = progress.toFixed(0) + '%';
+  };
+  updateHoldProgress();
+  _liveConfirmHoldInterval = setInterval(updateHoldProgress, 50);
+  _liveConfirmHoldTimer = setTimeout(() => {
+    clearLiveConfirmTimers();
+    _liveConfirmHolding = false;
+    if (bar) bar.style.width = '100%';
+    executeConfirmed();
+  }, LIVE_RESERVED_HOLD_MS);
+}
+
+function handleConfirmOkClick(event) {
+  if (_pendingMode === 'live_reserved') {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (!_liveConfirmReady) {
+      const status = $('live-confirm-status');
+      if (status) status.textContent = '倒计时未完成，暂不能确认实盘模式。';
+    } else if (!_liveConfirmHolding) {
+      const status = $('live-confirm-status');
+      if (status) status.textContent = '需要按住确认按钮 1.2 秒，单击不会切换实盘模式。';
+    }
+    return false;
+  }
+  executeConfirmed();
+  return true;
+}
+
+function setupLiveReservedConfirmButton() {
+  const button = $('confirm-ok');
+  if (!button || button.dataset.liveReservedGuardBound === '1') return;
+  button.dataset.liveReservedGuardBound = '1';
+  button.addEventListener('pointerdown', beginLiveReservedConfirmHold);
+  button.addEventListener('pointerup', cancelLiveReservedConfirmHold);
+  button.addEventListener('pointerleave', cancelLiveReservedConfirmHold);
+  button.addEventListener('pointercancel', cancelLiveReservedConfirmHold);
+  button.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') beginLiveReservedConfirmHold(event);
+  });
+  button.addEventListener('keyup', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') cancelLiveReservedConfirmHold();
+  });
+}
+
 function closeConfirm() {
+  resetLiveReservedConfirmGuard();
   $('confirm-overlay').classList.remove('show');
   _pendingAction = null;
   _pendingMode = null;
@@ -484,9 +670,12 @@ function confirmMode(mode) {
   }
   const info = MODE_CONFIRM[mode];
   if (!info) return;
+  resetLiveReservedConfirmGuard();
   _pendingMode = mode;
+  _pendingAction = null;
   $('confirm-title').textContent = info.title;  // SEC-E02
   $('confirm-body').innerHTML = info.body;
+  if (mode === 'live_reserved') startLiveReservedConfirmGuard();
   $('confirm-overlay').classList.add('show');
 }
 
@@ -846,6 +1035,7 @@ async function loadAll() {
   await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies(), loadQuickStatus(), loadGovernanceStatus()]);
 }
 
+setupLiveReservedConfirmButton();
 loadAll();
 ocStartRefresh(loadAll, 15000);
 </script>
