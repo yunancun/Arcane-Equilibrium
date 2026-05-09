@@ -356,3 +356,8 @@ YYYY-MM-DD HH:MM TZ
 - closed the operator-requested three main blockers: P0-NEW-VULN-2 lease-bypass audit runtime emit, P0-DECISION-AUDIT-2/4/5 operator decision blockers, and P0-NEW-ISSUE-1 LiveDemo auth_missing restoration
 - deployed Linux `trade-core` through `862e79b7` with authorized `restart_all.sh --rebuild --keep-auth`; V078 applied, `learning.lease_transitions` has 2 `BYPASS` rows, watchdog shows demo/live fresh while paper is explicitly disabled by `OPENCLAW_ENABLE_PAPER != 1`, and direct `[56] live_pipeline_active` PASSes
 - LiveDemo auth was restored only through signed `/api/v1/live/auth/renew`; no manual auth-file write, true mainnet API enablement, strategy/risk config mutation, scanner authority change, Executor hard authority, MAG-083/084 unlock, or true-live action
+
+2026-05-09 CEST
+- closed P0-NEW-ISSUE-1 keep-auth RCA: archived engine log `engine-1778289328.log` shows the 2026-05-09T01:11:28Z boot consumed a `manual` restart sentinel and cleared `authorization.json`; later `--keep-auth` preserved the already-missing state
+- added warning-only/read-only `restart_all.sh --keep-auth` preflight for configured live slots with missing signed authorization, plus static regression coverage
+- verification: `bash -n helper_scripts/restart_all.sh`, keep-auth preflight static pytest 2/0, `git diff --check` PASS; no restart, auth write/delete, true mainnet enablement, strategy/risk config mutation, MAG-083/084 unlock, or true-live action

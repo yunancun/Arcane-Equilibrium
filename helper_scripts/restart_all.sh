@@ -57,6 +57,7 @@ API_BIND_HOST="${OPENCLAW_BIND_HOST:-127.0.0.1}"
 RUNTIME_SECRET_DIR="$DATA_DIR/runtime_secrets"
 OPENCLAW_DATABASE_URL_FILE="$RUNTIME_SECRET_DIR/openclaw_database_url"
 OPENCLAW_IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
+BYBIT_SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$SECRETS_ROOT/secret_files/bybit}"
 ENGINE_BIN_REL="rust/target/release/openclaw-engine"
 ENGINE_BIN_ABS="$REPO_ROOT/$ENGINE_BIN_REL"
 API_WORKDIR="$REPO_ROOT/program_code/exchange_connectors/bybit_connector/control_api_v1"
@@ -76,6 +77,30 @@ prepare_runtime_secret_files() {
     if [ -f "$OPENCLAW_IPC_SECRET_FILE" ]; then
         chmod 600 "$OPENCLAW_IPC_SECRET_FILE" 2>/dev/null || true
     fi
+}
+
+warn_keep_auth_missing_authorization() {
+    if [[ "$KEEP_AUTH" -ne 1 ]]; then
+        return 0
+    fi
+    if [[ "$SCOPE" == "--api-only" ]]; then
+        return 0
+    fi
+
+    local live_dir="$BYBIT_SECRETS_DIR/live"
+    local auth_path="$live_dir/authorization.json"
+    local api_key="$live_dir/api_key"
+    local api_secret="$live_dir/api_secret"
+    if [[ ! -s "$api_key" || ! -s "$api_secret" ]]; then
+        return 0
+    fi
+    if [[ -s "$auth_path" ]]; then
+        echo ">>> --keep-auth preflight: signed live authorization present at $auth_path"
+        return 0
+    fi
+
+    echo "WARN: --keep-auth requested but signed live authorization is missing at $auth_path" >&2
+    echo "WARN: restart will preserve auth absence; renew via signed /api/v1/live/auth/renew after startup" >&2
 }
 
 is_openclaw_api_pid() {
@@ -525,6 +550,7 @@ if [[ "$REBUILD" -eq 1 ]]; then
 fi
 
 prepare_runtime_secret_files
+warn_keep_auth_missing_authorization
 
 case "$SCOPE" in
     --engine-only) restart_engine; wait_and_verify ;;

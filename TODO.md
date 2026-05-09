@@ -132,15 +132,17 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
   - W-AUDIT-7 GUI: ✅ real GUI progress + 🆕 functional regression
     (4/5 critical close; live_reserved 5s+hold-to-confirm 業界標準;
     NEW-ISSUE-1 LiveDemo auth_missing restored 2026-05-09 via signed
-    `/api/v1/live/auth/renew`; `--keep-auth` RCA remains follow-up)
+    `/api/v1/live/auth/renew`; `--keep-auth` RCA closed: prior 01:11 UTC
+    boot consumed `manual` sentinel, and restart script now warns when
+    keep-auth would preserve missing auth)
 - **`P0-DECISION-AUDIT-1` ✅ closed** (W-C operator auth file + AMD §5.4.1)
 - **`P0-DECISION-AUDIT-3` ✅ closed** (§三 5 stale 數字真修 + healthcheck id)
 - **`P0-DECISION-AUDIT-2/4/5` ✅ closed** — AMD-2026-05-09-02 selects
   SM-05 Option A, W-AUDIT-6 strategy verdict Option ii, and openclaw_core /
   Layer2 sunset boundaries. This unlocks F-01 and W-AUDIT-6 implementation;
   it does not flip runtime config, live auth, or strategy risk files.
-- **NEW-ISSUE / NEW-VULN queue updated**：LiveDemo auth restored and lease
-  audit runtime emit verified; keep-auth RCA remains follow-up.
+- **NEW-ISSUE / NEW-VULN queue updated**：LiveDemo auth restored, keep-auth
+  RCA closed with warning preflight, and lease audit runtime emit verified.
 
 ## Dispatch Order
 
@@ -185,7 +187,7 @@ live autonomy while MAG-082 runtime lineage is NO-GO.
 | `P0-DECISION-AUDIT-3` | DONE | CLAUDE.md §三 數值 vs runtime drift 防線改造 | §三 now keeps only active current state, every runtime number carries timestamp/healthcheck id, and stale completed history points to archive/report sources. |
 | `P0-DECISION-AUDIT-4` | DONE 2026-05-09 | 5 策略 verdict 採納 | AMD-2026-05-09-02 selects PA option (ii): grid CONDITIONAL ORDIUSDT, ma_crossover REVISE, bb_breakout REJECT 1m→REVISE 5m, funding_arb RETIRE, bb_reversion pair with MA confirmation. W-AUDIT-6 implementation unblocked; no risk config mutated by the decision doc. |
 | `P0-DECISION-AUDIT-5` | DONE 2026-05-09 | openclaw_core 9 模組 + Layer2 自主循環 14 天 0 動作 sunset（FA push back #3） | AMD-2026-05-09-02 selects PA option (i)+(ii): ADR-0015 now records legacy `openclaw_core` modules as permanent sunset candidates; ADR-0020 records Layer2 manual supervisor-only, no autonomous loop. W-AUDIT-5/W-AUDIT-7 cleanup unblocked. |
-| `P0-NEW-ISSUE-1` | RUNTIME-RESTORED 2026-05-09 / RCA FOLLOW-UP | LiveDemo pipeline auth_missing → engine boot demo-only (CRITICAL functional regression) | Restored through signed `/api/v1/live/auth/renew` route, not manual file write: `tier=T0_ENTRY`, `approved_system_mode=live_reserved`, `valid_for_engine=true`, expires_at_ms=1778405563954. `[56]` direct check PASS after renew and after rebuild/restart: live pipeline active endpoint=live_demo auth=present snapshot fresh. Follow-up: RCA why previous `restart_all.sh --keep-auth` path lost auth. |
+| `P0-NEW-ISSUE-1` | RUNTIME-RESTORED / RCA DONE 2026-05-09 | LiveDemo pipeline auth_missing → engine boot demo-only (CRITICAL functional regression) | Restored through signed `/api/v1/live/auth/renew` route, not manual file write: `tier=T0_ENTRY`, `approved_system_mode=live_reserved`, `valid_for_engine=true`, expires_at_ms=1778405563954. `[56]` direct check PASS after renew and after rebuild/restart: live pipeline active endpoint=live_demo auth=present snapshot fresh. RCA: engine log `engine-1778289328.log` shows 2026-05-09T01:11:28Z Rust consumed a `manual` restart sentinel and cleared `authorization.json`; later `--keep-auth` preserved the already-missing state. Guard added: `restart_all.sh --keep-auth` warns when live slot is configured but signed auth is absent. |
 | `P0-NEW-VULN-1` | DONE 2026-05-09 | launchd plist 安全弱點 (HIGH) | Fixed Mac launchd Trading API template to bind `127.0.0.1` instead of `0.0.0.0`; `launchd_preflight.sh` now rejects all-interface Trading API plist binds; Batch E runtime ownership static regression covers the plist and preflight guard. Source/test only; no launchd load/unload or runtime change. |
 | `P0-NEW-VULN-2` | DONE 2026-05-09 | lease audit runtime 0 emit (HIGH) | `e97a333b` emits one synthetic `BYPASS` audit row for Validation/Exploration facade bypass without creating SM objects. Linux rebuild/restart deployed `862e79b7`; auto-migrate applied V078 (`_sqlx_migrations version=78 success=t`); `learning.lease_transitions` row count now 2 with `BYPASS` rows for `demo` and `live_demo`. |
 | `P0-AUDIT-NEW-LG-X-05` | DONE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 (R4 N1 CRITICAL) | Fixed in `docs/governance_dev/SPECIFICATION_REGISTER.md`: LG-X now maps historical LG-1..LG-5 as evidence window / H0 / pricing / supervised-live / constrained autonomous live; LG-X-05 registers the LG-5 constrained-autonomous RFC, eval-contract v2, R-meta amendment, and healthchecks. Live Ops moved to separate `OPS-X-01` so it no longer occupies LG-X-04. |
@@ -268,7 +270,7 @@ Dates are planning windows, not automatic authorization.
 | 2026-05-12..16 | W-AUDIT-7 AI + GUI/UX 收口 | Parallel; operator API key 7d 觀察 + GUI fix; ~25h, 2 sessions urgent (7a) + 7b/7c 後期。 |
 | 2026-06-15 | Supervised live target (悲觀帶) | Conditional on W-AUDIT-1..7 implementation + 5 P0-LG/OPS 條目 + W-A/W-B/W-C/W-D PASS. P0-DECISION-AUDIT-2/4/5 已收口，但不代表 true-live 授權。PA panorama 偏向悲觀。 |
 | 2026-05-09 | 12-Agent Adversarial Verification land + TODO v15 | 12 verification reports written；總 tally ✅74 / ⚠️66 / ❌120 / 🔄6 / 🆕53；PM sign-off + verified-closed 細節歸檔到 `docs/archive/2026-05-09--w_audit_verified_closed_archive.md`；summary at `srv/2026-05-09--audit_fix_verification_summary.md`。 |
-| 2026-05-09+ | NEW-ISSUE-1 keep-auth RCA | LiveDemo auth restored and `[56]` PASS. Remaining follow-up is RCA for why the prior `restart_all.sh --keep-auth` path lost authorization. |
+| 2026-05-09 | NEW-ISSUE-1 keep-auth RCA | DONE: LiveDemo auth restored and `[56]` PASS; RCA traced loss to prior `manual` sentinel consumption at 2026-05-09T01:11:28Z, and `restart_all.sh --keep-auth` now warns if auth is already absent. |
 | 2026-05-10..13 | W-AUDIT-3 F-01 + W-AUDIT-6 kickoff | Decision locks are closed; implement F-01 provider fail-closed semantics, then start W-AUDIT-6 strategy cleanup. |
 
 ## Dispatch Rules
