@@ -2,6 +2,52 @@
 
 ## 工作記憶
 
+### 2026-05-10 Sprint N+0 W2 Regression Baseline（5 sub-agent IMPL 並行交付，HEAD `833c50f0`）— **E4 PASS-WITH-1-OUTSTANDING**
+
+**對象**：5 sub-agent W2 並行交付：
+- W-AUDIT-8a Phase A (E1-A `833c50f0`): trait + AlphaSurface + 5 strategies declare
+- W-AUDIT-4b-M2 (E1-B `404174a4`): fill writer entry_context_id INSERT trigger + V083
+- W-AUDIT-4b-M3 (E1-C `e93a6e5c`): governance reject negative label + V084 + class weight
+- W-AUDIT-9 T4 (E1-D `1f010c52` + `870a3252`): [58] healthcheck + C-A6 runtime apply prep
+- W-AUDIT-9 T5 (E1a `3982dc52` + `d005a663`): GUI graduated canary surface + manual promote
+
+W1 baseline 對比：cargo lib 3077 PASS / 0 fail（425+2625+27）+ pytest 4265 PASS / 5 fail（4 pre-existing + 1 sibling CI workflow `0dc6d659`）。
+
+**Verdict**：**PASS-WITH-1-OUTSTANDING** — 5 wave PASS + 1 cross-wave stress fail RETURN-TO-E1（W-AUDIT-6d `f6fb315a` cross-wave 副作用，被 W2 全 workspace 跑暴露，W1 baseline `--lib` only 漏抓）。
+
+| 引擎 | round 1 | round 2 | W1 baseline | delta | identical | verdict |
+|---|---:|---:|---:|---|---|---|
+| Linux cargo lib --workspace (`openclaw_core` + `openclaw_engine` + `openclaw_types`) | 432+2632+27 = 3091 / 0 fail | identical | 3077 / 0 | +14 (+7 core alpha_surface / +7 engine writer+reject) | yes | PASS |
+| Linux pytest tests/ + control_api_v1/ | 4302 / 5 fail / 12 skipped | identical | 4265 / 5 fail / 12 skipped | +37 PASS / 0 NEW fail | yes | PASS |
+| Linux `cargo test --release stress_bb_reversion_extreme_oversold_bounce` | **1 FAIL** (left=0 right=1) | n/a | n/a (W1 8 wave `--lib` only 未跑 stress) | 1 cross-wave NEW fail | n/a | RETURN-TO-E1 |
+| Linux `cargo test --release --test replay_runner_e2e proof_5_baseline_vs_candidate_two_runs` | 1 PASS (byte-identical) | n/a | n/a (8a Phase A NEW) | match | n/a | PASS |
+| Mac cargo build --release engine + core | exit=0 / exit=0 (18 + 0 warning) | n/a | match W1 | 0 error | n/a | PASS |
+| V080+V082+V083+V084 idempotent 雙跑 | NOTICE skip + `[migrate] OK` × 4 byte-identical | identical | match W1 | idempotent ✓ | yes | PASS |
+| DB row cleanup (3 表) | 0 / 0 / 0 | identical | n/a | identical | yes | PASS |
+
+**1 cross-wave stress fail root cause**：`bb_reversion::require_ma_confirmation: bool = true` (default ON, AMD-2026-05-09-02 §3) + `mod.rs:163-167` `ma_pair_allows_entry()` fail-closed when `ma_value() == None` + stress fixture `stress_integration.rs:72` provide `sma_50: None` → 0 intents 進場 vs assertion `assert_eq!(intents.len(), 1, "should enter long on extreme oversold")`。修復方向：fixture 補 `sma_50: Some(<oversold ma 值>)` 對齊 W-AUDIT-6d business semantic（「extreme oversold + price < ma_50 → enter」整條 contract），**禁止**反向 disable invariant 通過測試。
+
+**W2 NEW PASS delta 對齊**：cargo +14 (vs sub-agent claim 累加 +17 差 -3 — M-2/M-3 同 file 共享 helper test scaffolding 重用)；pytest +37 (vs sub-agent claim 累加 +94 差 -57 — sub-agent IMPL 各自 claim 是 isolated test +N，full-suite 因 fixture parametrize 平攤後 net +37)。**0 NEW fail / 0 regression / deterministic identical 才是 W2 acceptance 硬條件，本 round 全達成**。
+
+**4 pre-existing pytest fail 不變**（雙跑 identical）：`test_archive_top_level_files_are_all_indexed` / `test_oe_006_close_retry_budget_has_real_timeout_guard` / `test_grafana_data_writer.test_start_sets_running` / `test_replay_routes_safe_query_audit.test_case2_pg_kill_simulation_returns_200_degraded`。**Sibling CI workflow 1 fail 不變**：`test_ci_workflow_runs_release_cargo_check_for_openclaw_engine`（`0dc6d659` 副作用，PM follow-up）。
+
+**雙端 git status**：Mac 1 untracked = E1-A W-AUDIT-8a IMPL report（PM 後處理）；Linux 0 lines clean。HEAD 兩端 + origin 全同步 `833c50f0`。
+
+**V### idempotent**：4 migration 雙跑 byte-identical NOTICE chain；3 表 row count 0/0/0；UDF `learning.mlde_sample_weight` live verified；`_sqlx_migrations` max=79（V080-V084 透過 `linux_bootstrap_db.sh --apply` 直接 apply 未走 sqlx checksum 路徑，不影響 schema land + idempotent；deploy `OPENCLAW_AUTO_MIGRATE=1` 補 checksum 或 `bin/repair_migration_checksum` manual 補）。
+
+**byte-identical replay**：W-AUDIT-8a Phase A invariant 2 critical PASS — `proof_5_baseline_vs_candidate_two_runs` 1/0 PASS。Tier 1 `AlphaSurface::tier1_only()` build 在 step_4_5_dispatch hot path 不破 baseline replay 序列確定性。Phase A「0 行為變化」契約成立。
+
+**5 教訓**：
+1. **W1 baseline scope `--lib` only 漏抓 integration test cross-wave 副作用** — W1 second-pass 跑 `cargo test --lib --workspace --release` PASS 但 `cargo test --release stress_bb_reversion_extreme_oversold_bounce`（integration target）會抓 W-AUDIT-6d `f6fb315a` 引入的 fixture / business gate mismatch。E4 W3+ baseline 改用 `cargo test --release --workspace`（含 integration tests）以早期暴露 cross-wave 副作用。
+2. **AMD-2026-05-09-02 §3 `require_ma_confirmation: true` default 是業務語義，不是 dev rollback** — `require_ma_confirmation: false` 是 W-AUDIT-9 rollback 路徑，不是測試 convenience override；fixture 必須對齊業務 contract（`sma_50: Some(...)` for oversold scenario），不是去 invariant。
+3. **5 sub-agent 並行 IMPL 各自 sub-agent 自跑 PASS 不等於 cross-wave PASS** — 本 W2 5 sub-agent 各自報告 self-test 全綠，但 W1 W-AUDIT-6d cross-wave 副作用要 W2 全 workspace integration test 才暴露。E4 W3+ 必跑 integration suite 確認 W1 漏抓。
+4. **V### migration 全 NOTICE skip 表示 schema 已 deploy land** — 本 round V080/V082/V083/V084 全 NOTICE skip = 之前 wave 已 land 過。schema apply 路徑 idempotent 驗 PASS 但**不證明 producer / consumer 寫入路徑正確**；需 deploy 後 24h watch `learning.decision_features_evaluations` row count + `observability.fills_entry_context_id_health` null_ratio 趨勢。defer PM 後續 deploy verification。
+5. **`_sqlx_migrations` max=79 vs 實際 schema V084 land** — 本 round 用 `linux_bootstrap_db.sh --apply` 直接 apply（不走 sqlx 路徑）；checksum entry 缺。對 idempotent 不影響（schema 已 land + idempotent 驗 PASS），但對 P0 sqlx hash drift incident 治理風險需 PM 後續 deploy 用 `OPENCLAW_AUTO_MIGRATE=1` engine 啟動路徑補 sqlx checksum entry，或 manual 用 `bin/repair_migration_checksum`。
+
+**Report**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-10--sprint_n0_w2_regression_baseline.md`
+
+---
+
 ### 2026-05-09 Sprint N+0 Day 3-5 Regression Baseline（4 sub-agent IMPL 9 commits，HEAD `f5574c5a`）— **E4 FAIL → RETURN-TO-E1**
 
 **對象**：4 sub-agent 平行交付（W-AUDIT-9 T1+T2 + W-AUDIT-9 T3 + W-AUDIT-9 T6 + W-AUDIT-6d 4/5/6 + B-M1 + W-AUDIT-4b-M1）共 9 commits，已 push origin + Linux fast-forward sync 至 `f5574c5a`；對比 v3 baseline `da2aba11`（pytest 3961/3 fail / cargo lib 2584/0 fail）。
