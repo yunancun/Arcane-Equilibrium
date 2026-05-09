@@ -6118,3 +6118,104 @@ export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 - Local commit pending（待 add + commit message）
 - 不 push origin（per task spec multi-session race 守則）
 - 完成通知 PM 含 commit hash + cargo test summary + Linux PG dry-run summary
+
+---
+
+## 2026-05-09 — W-AUDIT-9 T6 + W-AUDIT-6d mid-G 4/5/6（E1-D 雙任務）
+
+### Context
+- Sprint N+0 Day 0-3 派工，本 instance = E1-D（雙任務）
+- AMD-2026-05-09-03 §4.5：CanaryStagePromotion lease（TTL 60s strict）
+- AMD-2026-05-09-02 §3：bb_reversion verdict pair MA confirmation
+- Cross-wave conflict #1：W-AUDIT-8a Phase A ↔ W-AUDIT-6d mid-ground 序列化（先 6d 再 8a）
+
+### Task (a) W-AUDIT-9 T6（Rust）
+- 新檔 `rust/openclaw_core/src/lease_scope.rs`：LeaseScope enum
+  (TradeEntry/TradeExit/PositionAdjust/CanaryStagePromotion) +
+  CanaryStageTransition typed audit row payload（manual_promote 必填
+  decision_lease_id；對齊 §三 invariant 11 PG NOT NULL CHECK）
+- governance_core.rs 兩 facade method：
+  - acquire_canary_stage_promotion_lease()：TTL 60s strict / is_authorized()
+    hard gate / 內走 SM Active 路徑 → V054 audit emit 一致
+  - make_canary_stage_promotion_audit_row()：拒 Bypass lease（graduated
+    canary 只適 alpha-bearing Production，per AMD-2026-05-09-03 §3.5）
+- Test：5 lease_scope unit + 4 governance_core::test_canary_stage_*（happy /
+  no_auth / Bypass reject / unique lease_id per transition）
+- Commit `063f12d0`，cargo test -p openclaw_core --lib: 425 passed
+- LOC: governance_core 1509 → 1834（< 2000 hard cap）
+
+### Task (b) W-AUDIT-6d mid-G 4/5/6
+#### #6 bb_reversion pair MA confirmation IMPL
+- params.rs：`require_ma_confirmation: bool` (default true) + `ma_confirmation_kind:
+  String` (default "sma_50"，whitelist 限 sma_20/sma_50/ema_12/ema_26)
+- mod.rs：`ma_pair_allows_entry()` gate — long entry 必 price < ma；
+  short entry 必 price > ma；MA 不可得 / NaN / Infinity → fail-closed
+  (§二 原則 6)；`require_ma_confirmation=false` 用於 W-AUDIT-9 stage rollback
+- tests.rs：9 個新 W-AUDIT-6d #6 unit tests + ctx_bb 系列 helper auto-derive
+  sma_50 by signal direction（修既有 14 test 路徑）+ param_ranges count 17→18
+- update_params/get_params round-trip 新欄位
+
+#### #5 portfolio_var min_observations review (QC NEW-ISSUE-5)
+- 結論：200 是 statistical baseline，**不調**（VaR 99% 尾 + bootstrap CI +
+  EVT excess 三方收斂的最小 sample；下調 → false-positive promote）
+- portfolio_var.py 加詳細 docstring：sampling unit = per-trade fractional
+  return（promotion_evidence 除 10000 轉），caller 誤傳 percentage 必觸
+  fail-loud；min_evt_excesses=10 與 min_observations × 5% = 10 對齊
+- tests/test_portfolio_var.py 加 5 個 W-AUDIT-6d #5 boundary + sampling
+  unit consistency tests
+
+#### #4 portfolio VaR/CVaR/EVT runtime apply spec/test (NOT deploy)
+- tests/test_promotion_pipeline.py 加 TestWAudit6dRuntimeApplySpec 4 spec
+  tests：build_strategy_promotion_evidence → tail_risk evidence →
+  check_demo_graduation 整鏈 contract / W-A demo 低 obs defer_data not
+  block / 完全無 evidence fail-closed / runtime apply 純 in-memory（不
+  寫 PG / 不開 socket / 不修 config / 不啟 cron / 不 renew live auth）
+
+### Test 結果
+- cargo test -p openclaw_core --lib: 425 passed
+- cargo test -p openclaw_engine --lib strategies::: 363 passed
+- cargo test -p openclaw_engine --lib strategies::bb_reversion: 38 passed
+- pytest test_portfolio_var.py: 12 passed
+- pytest test_promotion_pipeline.py: 43 passed (含 4 new W-AUDIT-6d #4)
+- pytest test_cvar.py: 8 passed (regression check, untouched)
+
+### Commits（未 push, PM 統一 push）
+- 063f12d0: e1-d: W-AUDIT-9 T6 LeaseScope::CanaryStagePromotion + Rust facade
+- f6fb315a: e1-d: W-AUDIT-6d mid-ground 4/5/6 保子項 IMPL
+- 待 final commit：DSR K-12 量化 report + memory + E1 report
+
+### DSR K -12 trial 量化結論（FA-7 invariant 16）
+- Report: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-09--w_audit_6d_dsr_penalty_quantification.md`
+- baseline K=25 → mu_0 ≈ 2.54（natural log）
+- mid-ground K=13 → mu_0 ≈ 2.27
+- Δ mu_0 ≈ -0.27（report §7 TODO 引用 -0.56 可能 log 基不同；本 report
+  以 ln 為權威）
+- 對 5 策略 sharpe ~0.5 demo 樣本：z_DSR 增益 +0.30，PASS percentile
+  增益 +5-10%（fat-tail 折扣後）
+- 結論：mid-ground 砍 6 polishing **正是 DSR 數學意義 right move**
+
+### Multi-session race 守則
+- 不動 TODO.md / CLAUDE.md（§六 強制）
+- worktree 中 不是我自己的 modified files（database/mod.rs / event_consumer/* /
+  intent_processor/mod.rs / main.rs / main_pipelines.rs / tasks.rs /
+  tick_pipeline/* + V082 untracked）= 隔壁 E1 平行 session 工作；只 stage
+  自己的 6 file commit
+- 既有 IPC test fail (`test_g3_02_a2_patch_executor_*`) 是 W-AUDIT-9 T1
+  schema invariant 配套導致（risk_config 改動 worktree 未 commit）；非
+  我 commit 引入；E2 review 階段 cross-wave 解決
+
+### Key invariants 守住
+- TODO v19 §5 invariant 11：manual_promote PG NOT NULL decision_lease_id
+- TODO v19 §5 invariant 3：保 6 land + 砍 6 grep blacklist 0 命中（E2 必查）
+- TODO v19 §5 invariant 16：K -12 trial DSR penalty 量化記入 sign-off
+- §二 原則 6 失敗默認收縮：MA 不可得 / NaN / Infinity → bb_reversion 不入場
+- AMD-2026-05-09-03 §4.5：TTL 60s strict（caller 不可覆寫）
+
+### Lessons
+- 隔壁 E1 W-AUDIT-9 T1 schema 升級已修了 risk_config 但 ipc_server tests
+  沒 sync（產出 2 個 test fail）；本 session 不修，留 E2 cross-wave 解
+- bb_reversion 既有 14 test 全因 sma_50 預設 None 而 fail，**修 helper
+  auto-derive 為 best practice**（per signal direction），不要逐一改
+  每個 test 數據；這保「測試代碼就是 spec」原則
+- 砍 6 polishing 子項是 DSR 數學 right move（K trial penalty 量化）—
+  不是「省工時妥協」；FA push back 採納寫進 sign-off invariant
