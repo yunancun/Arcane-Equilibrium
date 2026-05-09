@@ -44,6 +44,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from .base_agent import BaseAgent
+# W-AUDIT-9 T3 — graduated canary 5-stage enum（mirror Rust）。
+# 用於 stage-aware ``canary_stage_provider``；舊 ``shadow_mode_provider``
+# 仍保留為 backward-compat lambda（Stage 0 → True；Stage ≥ 1 → False）。
+from .executor_config_cache import CanaryStage
 # G3-08 Phase 4 Sub-task 4-4 — Executor agent_state invalidation hint.
 # env-gated no-op when OPENCLAW_H_STATE_GATEWAY != "1" (zero overhead).
 # G3-08 Phase 4 Sub-task 4-4 — Executor agent_state 失效提示。
@@ -179,28 +183,31 @@ class ExecutorAgent(BaseAgent):
         audit_callback: Optional[Callable] = None,
         governance_hub: Optional[Any] = None,
         shadow_mode_provider: Optional[Callable[..., bool]] = None,
+        canary_stage_provider: Optional[Callable[..., "CanaryStage"]] = None,
         event_store: Optional[Any] = None,
     ):
         """
         Initialize ExecutorAgent with optional GovernanceHub for Decision Lease acquisition.
-        初始化 ExecutorAgent，支持可選的 GovernanceHub 用於 Decision Lease 申請。
+        初始化 ExecutorAgent，支援可選的 GovernanceHub 用於 Decision Lease 申請。
 
-        governance_hub: If provided, acquire_lease() will be called before any submit_order().
-                        This enforces principle 3: AI output ≠ immediate command.
-        governance_hub：若提供，執行訂單前會先調用 acquire_lease()。
+        governance_hub: 若提供，執行訂單前會先調用 acquire_lease()。
                         這強制落實根原則 3：AI 輸出不等於即時命令。
 
-        shadow_mode_provider: G3-03 Phase B — callable returning the current
-            ``shadow_mode`` flag (Rust ``RiskConfig.executor.shadow_mode`` via the cache
-            in ``executor_config_cache.py``). Production wiring must pass this
-            provider explicitly. When ``None`` (test/standalone use), the agent
-            treats the provider as unavailable and fail-closes to
-            ``shadow_mode=True`` at read time.
-        shadow_mode_provider：G3-03 Phase B — callable，每次呼叫回傳當前
-            ``shadow_mode`` 旗標（由 ``executor_config_cache.py`` 從 Rust IPC 拉取）。
-            生產 wiring 必須顯式傳入 provider。``None``（測試/獨立使用）時不再
-            使用匿名 fallback；讀取時視為 provider unavailable 並 fail-close 到
-            ``shadow_mode=True``。
+        shadow_mode_provider（legacy backward-compat）：callable，每次呼叫回傳
+            當前 ``shadow_mode`` 旗標。當 ``canary_stage_provider`` 同時提供
+            時，後者優先；否則 fall back 此 provider（投影為 stage：True →
+            Stage 0，False → Stage 1）。``None``（測試/獨立使用）時不使用匿名
+            fallback；讀取時視為 provider unavailable 並 fail-close 到
+            Stage 0（``shadow_mode=True`` legacy projection）。
+
+        canary_stage_provider（W-AUDIT-9 T3 SoT）：callable，每次呼叫回傳當前
+            ``CanaryStage`` enum（per AMD-2026-05-09-03 §2.1）。優先於
+            ``shadow_mode_provider``。``None``（測試/獨立使用）時 fall back
+            到 ``shadow_mode_provider``（如有）；雙 None → fail-closed Stage 0。
+
+        invariant 9（**critical**, TODO v19 §5）：
+            cache miss / IPC failure / schema fail / provider exception
+            → Stage 0（**不是** Stage 1）。break 即雞蛋死循環復活。
         """
         super().__init__(
             role=AgentRole.EXECUTOR,
@@ -214,16 +221,15 @@ class ExecutorAgent(BaseAgent):
         # GovernanceHub for Decision Lease — principle 3 enforcement
         # GovernanceHub 用於 Decision Lease 申請，落實根原則 3
         self._governance_hub = governance_hub
-        # G3-03 Phase B: shadow_mode now sourced from an explicit runtime
-        # provider (the Rust-IPC-backed cache). Replaces the hardcoded
-        # `_shadow_mode = True` class attribute. Missing providers are handled
-        # by _read_shadow_mode(), which fails closed without a hidden callable
-        # fallback (test fixtures / standalone use only).
-        # G3-03 Phase B：shadow_mode 改為 runtime provider 提供（Rust IPC 快取）。
-        # 取代 ``_shadow_mode = True`` 類屬性硬編碼；無 provider 時由讀取路徑
-        # 顯式 fail-closed，不再放入隱性 callable fallback。
+        # G3-03 Phase B + W-AUDIT-9 T3：shadow_mode 改為 runtime provider 提供。
+        # `_canary_stage_provider` 為 W-AUDIT-9 T3 stage-aware SoT 路徑；
+        # `_shadow_mode_provider` 保留為 backward-compat（legacy bool projection）。
+        # 無 provider 時 _read_canary_stage() / _read_shadow_mode() 顯式
+        # fail-closed Stage 0，不放入隱性 callable fallback。
         self._shadow_mode_provider: Optional[Callable[..., bool]] = shadow_mode_provider
+        self._canary_stage_provider: Optional[Callable[..., "CanaryStage"]] = canary_stage_provider
         self._shadow_mode_provider_missing_warned: bool = False
+        self._canary_stage_provider_missing_warned: bool = False
 
         # Conditional order callback (Batch 11: exchange stop-loss orders)
         # 条件单回调（Batch 11：交易所止损单）
@@ -767,40 +773,105 @@ class ExecutorAgent(BaseAgent):
             self._store_report(report)
             return report
 
-    def _read_shadow_mode(self, engine: Optional[str] = None) -> bool:
-        provider = self._shadow_mode_provider
-        if provider is None:
-            if not self._shadow_mode_provider_missing_warned:
-                logger.warning(
-                    "ExecutorAgent shadow_mode_provider unavailable for engine=%s — "
-                    "fail-closed to shadow=True / shadow_mode_provider 未配置，engine=%s，"
-                    "fail-closed",
-                    engine or "default", engine or "default",
-                )
-                self._shadow_mode_provider_missing_warned = True
-            return True
+    def _read_canary_stage(self, engine: Optional[str] = None) -> "CanaryStage":
+        """W-AUDIT-9 T3 — 讀取當前 ``CanaryStage`` for given engine。
 
-        try:
-            if engine is None:
-                return bool(provider())
-            return bool(provider(engine))
-        except TypeError:
+        provider 優先序：
+          1. ``self._canary_stage_provider``（W-AUDIT-9 SoT）
+          2. fallback 到 ``self._shadow_mode_provider``（legacy projection；
+             True → SHADOW，False → PAPER_SINGLE_COHORT）
+          3. 雙 None → fail-closed SHADOW
+
+        invariant 9（**critical**）：任何錯誤路徑均 fail-closed Stage 0
+        （**不是** Stage 1）。
+        """
+        # ── 1. 優先 stage-aware provider ──
+        stage_provider = self._canary_stage_provider
+        if stage_provider is not None:
             try:
-                return bool(provider())
-            except Exception as exc:  # noqa: BLE001
+                if engine is None:
+                    raw = stage_provider()
+                else:
+                    try:
+                        raw = stage_provider(engine)
+                    except TypeError:
+                        # provider 不接受 engine arg → 退化為 zero-arg call
+                        raw = stage_provider()
+                # 防禦：provider 應回 CanaryStage，但任何異常值 fall back SHADOW
+                if isinstance(raw, CanaryStage):
+                    return raw
+                return CanaryStage.from_raw(raw)
+            except Exception as exc:  # noqa: BLE001 — 任何錯誤一律 fail-closed Stage 0
                 logger.warning(
-                    "ExecutorAgent shadow_mode_provider raised %s — fail-closed to shadow=True "
-                    "/ shadow_mode_provider 異常，fail-closed 為 True",
-                    exc,
+                    "ExecutorAgent canary_stage_provider raised %s engine=%s — "
+                    "fail-closed Stage 0（**不是** Stage 1）",
+                    exc, engine or "default",
                 )
-                return True
-        except Exception as exc:  # noqa: BLE001
+                return CanaryStage.SHADOW
+
+        # ── 2. fallback legacy shadow_mode_provider（投影為 stage）──
+        legacy_provider = self._shadow_mode_provider
+        if legacy_provider is not None:
+            try:
+                if engine is None:
+                    is_shadow = bool(legacy_provider())
+                else:
+                    try:
+                        is_shadow = bool(legacy_provider(engine))
+                    except TypeError:
+                        is_shadow = bool(legacy_provider())
+                # legacy 投影：True → SHADOW；False → PAPER_SINGLE_COHORT
+                # （注意：這只是 backward-compat 投影；新代碼應直接注入
+                #  canary_stage_provider 以區分 Stage 1/2/3/4）
+                return CanaryStage.SHADOW if is_shadow else CanaryStage.PAPER_SINGLE_COHORT
+            except Exception as exc:  # noqa: BLE001 — invariant 9 fail-closed
+                logger.warning(
+                    "ExecutorAgent shadow_mode_provider raised %s engine=%s — "
+                    "fail-closed Stage 0（**不是** Stage 1）",
+                    exc, engine or "default",
+                )
+                return CanaryStage.SHADOW
+
+        # ── 3. 雙 provider 缺失：fail-closed Stage 0 ──
+        if not self._canary_stage_provider_missing_warned:
             logger.warning(
-                "ExecutorAgent shadow_mode_provider raised %s for engine=%s — "
-                "fail-closed to shadow=True / shadow_mode_provider 異常，engine=%s，fail-closed",
-                exc, engine, engine,
+                "ExecutorAgent provider unavailable for engine=%s — "
+                "fail-closed Stage 0（**不是** Stage 1）",
+                engine or "default",
             )
-            return True
+            self._canary_stage_provider_missing_warned = True
+        return CanaryStage.SHADOW
+
+    def _read_shadow_mode(self, engine: Optional[str] = None) -> bool:
+        """W-AUDIT-9 backward-compat — 投影 ``CanaryStage`` 至 legacy bool。
+
+        Stage 0 → True（shadow）；Stage ≥ 1 → False（live submit per cohort scope）。
+
+        本方法保留供既有 callsite（snapshot / get_stats / route layer）使用；
+        新代碼建議直接呼叫 ``_read_canary_stage()`` 以取得 stage 資訊。
+
+        provider 缺失或 exception 時 fail-closed True（=Stage 0），對齊
+        TODO v19 §5 invariant 9。
+        """
+        # 為保留 legacy `shadow_mode_provider unavailable` warning（既有測試
+        # `test_executor_agent_has_no_unconditional_lambda_true_fallback`
+        # grep source 字串 `shadow_mode_provider unavailable`），只在「兩個
+        # provider 都 None」時印該訊息。
+        if (
+            self._canary_stage_provider is None
+            and self._shadow_mode_provider is None
+            and not self._shadow_mode_provider_missing_warned
+        ):
+            logger.warning(
+                "ExecutorAgent shadow_mode_provider unavailable for engine=%s — "
+                "fail-closed to shadow=True / shadow_mode_provider 未配置，"
+                "fail-closed",
+                engine or "default",
+            )
+            self._shadow_mode_provider_missing_warned = True
+
+        stage = self._read_canary_stage(engine)
+        return stage == CanaryStage.SHADOW
 
     # ── Report Storage / 报告存储 ──
 

@@ -91,6 +91,7 @@ if _control_api_dir not in sys.path:
 from app import executor_config_cache as ecc_mod
 from app.executor_agent import ExecutorAgent, ExecutorConfig
 from app.executor_config_cache import (
+    CanaryStage,
     ExecutorConfigCache,
     ExecutorRuntimeConfig,
 )
@@ -104,11 +105,19 @@ def _make_runtime_config(
     max_pos: float = 0.10,
     per_symbol: Dict[str, float] | None = None,
     version: int = 1,
+    canary_stage: CanaryStage | None = None,
 ) -> ExecutorRuntimeConfig:
-    """Build a post-parse ExecutorRuntimeConfig (the cache's internal type).
-    建構解析後的 ExecutorRuntimeConfig（cache 內部型別）。"""
+    """Build a post-parse ExecutorRuntimeConfig (the cache's internal type)。
+
+    W-AUDIT-9 T3：``shadow=False`` 必伴隨 ``canary_stage >= 1``，否則
+    shadow_mode_provider 投影為 True（per stage projection 不變式）。helper
+    依 ``shadow`` 自動推導合理的 stage（caller 顯式 override 優先）。
+    """
+    if canary_stage is None:
+        canary_stage = CanaryStage.SHADOW if shadow else CanaryStage.PAPER_SINGLE_COHORT
     return ExecutorRuntimeConfig(
         shadow_mode=shadow,
+        canary_stage=canary_stage,
         max_position_pct=max_pos,
         per_symbol_position_cap=per_symbol or {},
         config_version=version,

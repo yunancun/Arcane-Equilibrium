@@ -625,5 +625,185 @@ class TestExecutorSnapshot(unittest.TestCase):
         )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# W-AUDIT-9 T3 — ExecutorAgent stage-aware shadow_mode 接線 unit tests
+# AMD-2026-05-09-03 §2.1 / §2.2 + TODO v19 §5 invariant 9
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestExecutorAgentCanaryStage(unittest.TestCase):
+    """W-AUDIT-9 T3：ExecutorAgent ``canary_stage_provider`` 接線 + fail-closed。
+
+    invariant 9（**critical**）：cache miss / IPC failure / schema fail /
+    provider exception → Stage 0（**不是** Stage 1）。
+    """
+
+    def _import_canary_stage(self):
+        """延遲匯入 CanaryStage 避免測試環境 import order 顧慮。"""
+        from app.executor_config_cache import CanaryStage  # noqa: PLC0415
+        return CanaryStage
+
+    def test_canary_stage_provider_returns_stage_one(self):
+        """provider 返 Stage 1 → _read_canary_stage 對應 + shadow_mode=False。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(
+            canary_stage_provider=lambda: CanaryStage.PAPER_SINGLE_COHORT,
+        )
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.PAPER_SINGLE_COHORT)
+        self.assertFalse(agent._read_shadow_mode())
+
+    def test_canary_stage_provider_returns_stage_two(self):
+        """Stage 2 → shadow_mode=False，stage 對齊。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(
+            canary_stage_provider=lambda: CanaryStage.DEMO_SINGLE_COHORT,
+        )
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.DEMO_SINGLE_COHORT)
+        self.assertFalse(agent._read_shadow_mode())
+
+    def test_canary_stage_provider_returns_stage_zero_shadows_path(self):
+        """Stage 0 → shadow_mode=True（legacy projection 不變）。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(
+            canary_stage_provider=lambda: CanaryStage.SHADOW,
+        )
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.SHADOW)
+        self.assertTrue(agent._read_shadow_mode())
+
+    def test_canary_stage_provider_exception_fails_closed_stage_zero(self):
+        """invariant 9：provider raise → Stage 0（**不是** Stage 1）。"""
+        CanaryStage = self._import_canary_stage()
+
+        def _boom():
+            raise RuntimeError("provider explode")
+
+        agent = ExecutorAgent(canary_stage_provider=_boom)
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.SHADOW)
+        self.assertTrue(agent._read_shadow_mode())
+
+    def test_canary_stage_provider_engine_aware(self):
+        """provider 接受 engine arg → 透傳；不接受則退化 zero-arg。"""
+        CanaryStage = self._import_canary_stage()
+        calls: list = []
+
+        def _provider(engine):
+            calls.append(engine)
+            return CanaryStage.DEMO_FULL_UNIVERSE
+
+        agent = ExecutorAgent(canary_stage_provider=_provider)
+        self.assertEqual(
+            agent._read_canary_stage("demo"),
+            CanaryStage.DEMO_FULL_UNIVERSE,
+        )
+        self.assertEqual(calls, ["demo"])
+
+    def test_canary_stage_provider_zero_arg_fallback(self):
+        """zero-arg provider + 傳入 engine → 退化為 zero-arg call。"""
+        CanaryStage = self._import_canary_stage()
+
+        def _zero_arg():
+            return CanaryStage.PAPER_SINGLE_COHORT
+
+        agent = ExecutorAgent(canary_stage_provider=_zero_arg)
+        # 傳 engine 應觸 TypeError → fallback to zero-arg
+        self.assertEqual(
+            agent._read_canary_stage("demo"),
+            CanaryStage.PAPER_SINGLE_COHORT,
+        )
+
+    def test_canary_stage_overrides_legacy_shadow_mode_provider(self):
+        """canary_stage_provider 優先於 legacy shadow_mode_provider。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(
+            shadow_mode_provider=lambda: True,  # legacy 說 True (=shadow)
+            canary_stage_provider=lambda: CanaryStage.DEMO_SINGLE_COHORT,
+        )
+        # canary_stage_provider 優先 → Stage 2 + shadow_mode=False
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.DEMO_SINGLE_COHORT)
+        self.assertFalse(agent._read_shadow_mode())
+
+    def test_legacy_shadow_mode_provider_true_projects_to_shadow(self):
+        """backward-compat：只有 legacy shadow_mode_provider=True → Stage 0。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(shadow_mode_provider=lambda: True)
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.SHADOW)
+        self.assertTrue(agent._read_shadow_mode())
+
+    def test_legacy_shadow_mode_provider_false_projects_to_stage_one(self):
+        """backward-compat：legacy shadow_mode_provider=False → Stage 1（最低非 shadow）。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(shadow_mode_provider=lambda: False)
+        # 注意：legacy False → Stage 1（PAPER_SINGLE_COHORT）僅作 backward-compat
+        # 投影；新代碼必須注入 canary_stage_provider 以區分 1/2/3/4。
+        self.assertEqual(
+            agent._read_canary_stage(),
+            CanaryStage.PAPER_SINGLE_COHORT,
+        )
+        self.assertFalse(agent._read_shadow_mode())
+
+    def test_legacy_shadow_mode_provider_exception_fails_closed_stage_zero(self):
+        """invariant 9：legacy shadow_mode_provider raise → Stage 0。"""
+        CanaryStage = self._import_canary_stage()
+
+        def _boom():
+            raise RuntimeError("legacy boom")
+
+        agent = ExecutorAgent(shadow_mode_provider=_boom)
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.SHADOW)
+        self.assertTrue(agent._read_shadow_mode())
+
+    def test_no_provider_fails_closed_stage_zero(self):
+        """雙 provider None → fail-closed Stage 0 + 維持 legacy log 字串。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent()
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.SHADOW)
+        self.assertTrue(agent._read_shadow_mode())
+
+    def test_canary_stage_invalid_value_fails_closed_stage_zero(self):
+        """provider 回傳不可解析值 → CanaryStage.from_raw fall back Stage 0。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(canary_stage_provider=lambda: "garbage")
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.SHADOW)
+        self.assertTrue(agent._read_shadow_mode())
+
+    def test_canary_stage_int_value_parsed(self):
+        """provider 回傳 raw int 0..=4 → CanaryStage.from_raw 對應。"""
+        CanaryStage = self._import_canary_stage()
+        agent = ExecutorAgent(canary_stage_provider=lambda: 2)
+        self.assertEqual(agent._read_canary_stage(), CanaryStage.DEMO_SINGLE_COHORT)
+        self.assertFalse(agent._read_shadow_mode())
+
+
+class TestExecutorAgentLegacyTestFixturesUnchanged(unittest.TestCase):
+    """W-AUDIT-9 T3 backward-compat：既有 fixture（lambda True / False / raise）
+    + ``test_no_engine_*`` 維持原行為，不引入 regression。
+    """
+
+    def test_legacy_lambda_true_still_shadow(self):
+        """既有 fixture: shadow_mode_provider=lambda: True → 仍 shadow。"""
+        agent = ExecutorAgent(shadow_mode_provider=lambda: True)
+        self.assertTrue(agent._read_shadow_mode())
+
+    def test_legacy_engine_aware_provider_receives_engine(self):
+        """既有 fixture: shadow_mode_provider=_provider(engine) → engine 透傳。"""
+        calls: list = []
+
+        def _provider(engine):
+            calls.append(engine)
+            return True
+
+        agent = ExecutorAgent(shadow_mode_provider=_provider)
+        self.assertTrue(agent._read_shadow_mode("demo"))
+        self.assertEqual(calls, ["demo"])
+
+    def test_legacy_provider_raise_still_fails_closed_true(self):
+        """既有 fixture: provider raise → shadow_mode=True（不變）。"""
+        def _raises(_engine):
+            raise RuntimeError("provider boom")
+
+        agent = ExecutorAgent(shadow_mode_provider=_raises)
+        self.assertTrue(agent._read_shadow_mode("live"))
+
+
 if __name__ == "__main__":
     unittest.main()
