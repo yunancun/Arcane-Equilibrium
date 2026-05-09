@@ -423,14 +423,21 @@ async fn test_p2_get_risk_config_engine_selection() {
 // ────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn test_g3_02_a2_patch_executor_shadow_mode_via_patch_risk_config() {
-    // Verify executor.shadow_mode can be flipped via the existing
-    // patch_risk_config IPC. Default is true; patch flips to false.
-    // 驗證 executor.shadow_mode 經 patch_risk_config 翻轉成 false。
+async fn test_g3_02_a2_patch_executor_binary_shadow_only_rejected_invariant_drift() {
+    // W-AUDIT-9 T1 invariant（AMD-2026-05-09-03 §4.4）：
+    //   legacy `shadow_mode` 必與 `canary_stage.as_shadow_mode()` projection 一致。
+    //   只翻 binary `shadow_mode=false` 而不同步 set `canary_stage>=1`（含 cohort +
+    //   stage_entered_at_ms + observation_period_ms 共 5-field atomic）= config drift，
+    //   validation 應主動 reject（防雞蛋死循環復活）。
+    //
+    // 改寫前語意（pre-W-AUDIT-9）：patch binary shadow_mode=false 即接受。
+    // 改寫後語意：patch binary shadow_mode=false 須帶完整 5-field 才接受；
+    //             僅 1-field 翻轉 → 必拒（保 invariant 不被 IPC 路徑繞過）。
     let config = make_test_config();
     let dd = make_test_data_dir();
     let (rs, ls, bs) = rc1_stores();
-    // Confirm default state.
+    let original_version = rs.as_ref().unwrap().paper.version();
+    // Confirm default state — paper store at Stage 0 / shadow_mode=true。
     assert!(
         rs.as_ref().unwrap().paper.load().executor.shadow_mode,
         "default executor.shadow_mode must be true"
@@ -456,19 +463,102 @@ async fn test_g3_02_a2_patch_executor_shadow_mode_via_patch_risk_config() {
         &empty_cost_edge_advisor_slot(),
     )
     .await;
-    assert!(resp.error.is_none(), "expected success: {resp:?}");
+    // Expect validation error — invariant drift rejection。
+    assert!(
+        resp.error.is_some(),
+        "expected validation error (binary shadow flip without canary_stage atomic): {resp:?}"
+    );
+    let err_msg = resp
+        .error
+        .as_ref()
+        .map(|e| e.message.as_str())
+        .unwrap_or("");
+    assert!(
+        err_msg.contains("inconsistent with canary_stage"),
+        "error message should reference canary_stage invariant; got: {err_msg}"
+    );
+    // Paper store untouched (rollback)。
+    assert_eq!(
+        rs.as_ref().unwrap().paper.version(),
+        original_version,
+        "paper version must not bump on rejected patch"
+    );
+    let snap = rs.as_ref().unwrap().paper.load();
+    assert!(
+        snap.executor.shadow_mode,
+        "executor.shadow_mode must remain true after rejected patch"
+    );
+}
+
+#[tokio::test]
+async fn test_g3_02_a2_patch_executor_stage_promotion_via_patch_risk_config() {
+    // W-AUDIT-9 T1+T2 (AMD-2026-05-09-03 §4.4)：5-field atomic patch 升 Stage 1 應接受。
+    //   shadow_mode=false + canary_stage=1 + canary_cohort{strategy,symbol,environment=paper}
+    //   + stage_entered_at_ms>0 + observation_period_ms>0（Stage 1 = 7d = 604800000ms）。
+    //
+    // 此測試驗 graduated canary stage promotion 經 IPC `patch_risk_config` 走 deep-JSON
+    // merge 一致；validate() invariant 對 Stage 1 的 cohort/ts/period 全要求滿足。
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let (rs, ls, bs) = rc1_stores();
+    // Confirm default state — paper store at Stage 0 / shadow_mode=true。
+    assert!(
+        rs.as_ref().unwrap().paper.load().executor.shadow_mode,
+        "default executor.shadow_mode must be true"
+    );
+    // 5-field atomic patch payload：Stage 1 paper cohort, 7d observation period。
+    let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"source":"operator","patch":{"executor":{"shadow_mode":false,"canary_stage":1,"canary_cohort":{"strategy":"ma_crossover","symbol":"BTCUSDT","environment":"paper"},"stage_entered_at_ms":1715270400000,"observation_period_ms":604800000}}},"id":9101}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &rs,
+        &ls,
+        &bs,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+    )
+    .await;
+    assert!(
+        resp.error.is_none(),
+        "expected success on 5-field atomic Stage 1 patch: {resp:?}"
+    );
     let r = resp.result.unwrap();
     assert_eq!(r["ok"], true);
     assert_eq!(r["version"], 1);
-    // Paper store mutated; executor.shadow_mode now false.
+    // Paper store mutated；executor 全 5 field 一致更新。
     let snap = rs.as_ref().unwrap().paper.load();
     assert!(
         !snap.executor.shadow_mode,
-        "executor.shadow_mode must be false after patch"
+        "executor.shadow_mode must be false after Stage 1 promotion"
     );
-    // Other executor fields unchanged.
+    assert_eq!(
+        snap.executor.canary_stage,
+        crate::config::risk_config::CanaryStage::Stage1,
+        "canary_stage must be Stage1 after patch"
+    );
+    let cohort = snap
+        .executor
+        .canary_cohort
+        .as_ref()
+        .expect("canary_cohort must be Some for Stage 1");
+    assert_eq!(cohort.strategy, "ma_crossover");
+    assert_eq!(cohort.symbol, "BTCUSDT");
+    assert_eq!(cohort.environment, "paper");
+    assert_eq!(snap.executor.stage_entered_at_ms, 1_715_270_400_000_i64);
+    assert_eq!(snap.executor.observation_period_ms, 604_800_000_u64);
+    // Other executor fields unchanged。
     assert!((snap.executor.max_position_pct - 0.05).abs() < 1e-12);
-    // Other risk fields untouched (no cross-section bleed).
+    // Other risk fields untouched (no cross-section bleed)。
     assert!((snap.limits.leverage_max - 20.0).abs() < f64::EPSILON);
 }
 
@@ -549,11 +639,14 @@ async fn test_g3_02_a2_patch_executor_invalid_max_position_pct_rolls_back() {
 async fn test_g3_02_a2_patch_executor_routes_to_demo_engine() {
     // Verify engine="demo" param routes the executor patch to demo store
     // (paper untouched). Mirrors the LIVE-P2-1 per-engine routing test.
+    // W-AUDIT-9 T1+T2 改寫：patch payload 升 5-field atomic Stage 2（demo cohort，14d）
+    // 通過新 invariant；驗 engine routing 仍只動 demo store, paper 不變。
     // 驗證 engine="demo" 參數路由 executor patch 至 demo store；paper 不動。
     let config = make_test_config();
     let dd = make_test_data_dir();
     let (rs, ls, bs) = rc1_stores();
-    let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"demo","source":"operator","patch":{"executor":{"shadow_mode":false}}},"id":9104}"#;
+    // 5-field atomic patch payload (Stage 2 = demo cohort, 14d observation period)。
+    let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"demo","source":"operator","patch":{"executor":{"shadow_mode":false,"canary_stage":2,"canary_cohort":{"strategy":"ma_crossover","symbol":"BTCUSDT","environment":"demo"},"stage_entered_at_ms":1715270400000,"observation_period_ms":1209600000}}},"id":9104}"#;
     let resp = dispatch_request(
         req,
         &config,
@@ -575,13 +668,29 @@ async fn test_g3_02_a2_patch_executor_routes_to_demo_engine() {
     )
     .await;
     assert!(resp.error.is_none(), "expected success: {resp:?}");
-    // Demo store mutated; paper still default.
+    // Demo store mutated; paper still default。
     let demo_snap = rs.as_ref().unwrap().demo.load();
     assert!(!demo_snap.executor.shadow_mode);
+    assert_eq!(
+        demo_snap.executor.canary_stage,
+        crate::config::risk_config::CanaryStage::Stage2,
+        "demo canary_stage must be Stage2 after patch"
+    );
+    let cohort = demo_snap
+        .executor
+        .canary_cohort
+        .as_ref()
+        .expect("canary_cohort must be Some for Stage 2");
+    assert_eq!(cohort.environment, "demo");
     let paper_snap = rs.as_ref().unwrap().paper.load();
     assert!(
         paper_snap.executor.shadow_mode,
         "paper store must remain default true"
+    );
+    assert_eq!(
+        paper_snap.executor.canary_stage,
+        crate::config::risk_config::CanaryStage::Stage0,
+        "paper canary_stage must remain Stage0 (untouched)"
     );
 }
 

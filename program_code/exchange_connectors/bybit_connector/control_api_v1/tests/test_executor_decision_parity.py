@@ -91,7 +91,11 @@ except ImportError:  # pragma: no cover — venv hygiene fallback
 
 from app import executor_config_cache as ecc_mod
 from app.executor_agent import ExecutorAgent, ExecutorConfig
-from app.executor_config_cache import ExecutorConfigCache, ExecutorRuntimeConfig
+from app.executor_config_cache import (
+    CanaryStage,
+    ExecutorConfigCache,
+    ExecutorRuntimeConfig,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,11 +208,24 @@ class _IpcCallRecorder:
 
 def _build_runtime_config(case_config: Dict[str, Any]) -> ExecutorRuntimeConfig:
     """Build a post-parse ExecutorRuntimeConfig snapshot from case fixture.
-    從 fixture 構建解析後的 ExecutorRuntimeConfig snapshot。"""
+    從 fixture 構建解析後的 ExecutorRuntimeConfig snapshot。
+
+    W-AUDIT-9 T3 fixture pattern：``shadow_mode=False`` 必伴隨 ``canary_stage>=1``，
+    否則 stage projection（``canary_stage_provider`` → ``shadow_mode_provider``）會
+    在 ExecutorAgent 內 fail-closed 至 Stage 0 / shadow=True，使 live fixture
+    跑成 block_shadow 與 reference spec 失配。對齊 e2e helper
+    `_make_runtime_config`（test_executor_shadow_to_live_e2e.py:102）的 auto-pair
+    邏輯：shadow=True → Stage 0 (SHADOW)；shadow=False → Stage 1
+    (PAPER_SINGLE_COHORT)。
+    """
     per_symbol_raw = case_config.get("per_symbol_position_cap", {}) or {}
     per_symbol = {str(k): float(v) for k, v in per_symbol_raw.items()}
+    shadow = bool(case_config["shadow_mode"])
+    # Auto-pair canary_stage 對齊 W-AUDIT-9 §4.4 invariant：shadow ⇄ stage projection。
+    canary_stage = CanaryStage.SHADOW if shadow else CanaryStage.PAPER_SINGLE_COHORT
     return ExecutorRuntimeConfig(
-        shadow_mode=bool(case_config["shadow_mode"]),
+        shadow_mode=shadow,
+        canary_stage=canary_stage,
         max_position_pct=float(case_config["max_position_pct"]),
         per_symbol_position_cap=per_symbol,
         config_version=1,
@@ -222,12 +239,16 @@ def _drive_python_decision(case: ParityCase) -> Tuple[str, str]:
 
     Real call chain exercised:
       ExecutorConfigCache snapshot patched (no IPC socket)
-        → cache.shadow_mode_provider() lambda
-        → ExecutorAgent.__init__(shadow_mode_provider=...)
+        → cache.canary_stage_provider() lambda (W-AUDIT-9 T3 SoT)
+        → ExecutorAgent.__init__(canary_stage_provider=..., shadow_mode_provider=...)
         → execute_order()
         → _execute_via_ipc()
-            → if provider() True  : ExecutionReport.error == "shadow_mode"
-            → if provider() False : real submit_paper_order IPC (recorded)
+            → if stage == SHADOW  : ExecutionReport.error == "shadow_mode"
+            → if stage >= 1       : real submit_paper_order IPC (recorded)
+
+    W-AUDIT-9 T3 fixture pattern：同時注入 ``canary_stage_provider`` 與
+    ``shadow_mode_provider``，讓 ExecutorAgent 走 stage-aware SoT 路徑（優先 stage
+    provider）；legacy ``shadow_mode_provider`` 留作 backward-compat 雙保險。
     """
     cache = ExecutorConfigCache()
     snapshot = _build_runtime_config(case.config)
@@ -243,6 +264,7 @@ def _drive_python_decision(case: ParityCase) -> Tuple[str, str]:
         governance_hub=None,
         audit_callback=None,
         shadow_mode_provider=cache.shadow_mode_provider(),
+        canary_stage_provider=cache.canary_stage_provider(),
     )
     agent.start()
     # Inject a market price so slippage math doesn't divide by zero.
