@@ -190,17 +190,17 @@ class ExecutorAgent(BaseAgent):
         governance_hub：若提供，執行訂單前會先調用 acquire_lease()。
                         這強制落實根原則 3：AI 輸出不等於即時命令。
 
-        shadow_mode_provider: G3-03 Phase B — zero-arg callable returning the current
+        shadow_mode_provider: G3-03 Phase B — callable returning the current
             ``shadow_mode`` flag (Rust ``RiskConfig.executor.shadow_mode`` via the cache
-            in ``executor_config_cache.py``). When ``None`` (default), the agent
-            fail-closes to ``shadow_mode=True`` (preserves test/standalone safety
-            and replaces the previously hardcoded ``_shadow_mode = True`` class
-            attribute, which violated CLAUDE.md §二 principle #3 — see RFC
-            ``docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md``).
-        shadow_mode_provider：G3-03 Phase B — 零參 callable，每次呼叫回傳當前
+            in ``executor_config_cache.py``). Production wiring must pass this
+            provider explicitly. When ``None`` (test/standalone use), the agent
+            treats the provider as unavailable and fail-closes to
+            ``shadow_mode=True`` at read time.
+        shadow_mode_provider：G3-03 Phase B — callable，每次呼叫回傳當前
             ``shadow_mode`` 旗標（由 ``executor_config_cache.py`` 從 Rust IPC 拉取）。
-            ``None``（預設）時 agent fail-close 到 ``shadow_mode=True``（保留測試/獨立
-            使用安全性，並取代原本違反根原則 #3 的 ``_shadow_mode = True`` 硬編碼）。
+            生產 wiring 必須顯式傳入 provider。``None``（測試/獨立使用）時不再
+            使用匿名 fallback；讀取時視為 provider unavailable 並 fail-close 到
+            ``shadow_mode=True``。
         """
         super().__init__(
             role=AgentRole.EXECUTOR,
@@ -214,15 +214,16 @@ class ExecutorAgent(BaseAgent):
         # GovernanceHub for Decision Lease — principle 3 enforcement
         # GovernanceHub 用於 Decision Lease 申請，落實根原則 3
         self._governance_hub = governance_hub
-        # G3-03 Phase B: shadow_mode now sourced from a runtime provider (the
-        # Rust-IPC-backed cache). Replaces the hardcoded `_shadow_mode = True`
-        # class attribute. Fail-closed default when no provider is supplied
-        # (test fixtures / standalone use).
+        # G3-03 Phase B: shadow_mode now sourced from an explicit runtime
+        # provider (the Rust-IPC-backed cache). Replaces the hardcoded
+        # `_shadow_mode = True` class attribute. Missing providers are handled
+        # by _read_shadow_mode(), which fails closed without a hidden callable
+        # fallback (test fixtures / standalone use only).
         # G3-03 Phase B：shadow_mode 改為 runtime provider 提供（Rust IPC 快取）。
-        # 取代 ``_shadow_mode = True`` 類屬性硬編碼；無 provider 時 fail-closed。
-        self._shadow_mode_provider: Callable[..., bool] = (
-            shadow_mode_provider if shadow_mode_provider is not None else (lambda: True)
-        )
+        # 取代 ``_shadow_mode = True`` 類屬性硬編碼；無 provider 時由讀取路徑
+        # 顯式 fail-closed，不再放入隱性 callable fallback。
+        self._shadow_mode_provider: Optional[Callable[..., bool]] = shadow_mode_provider
+        self._shadow_mode_provider_missing_warned: bool = False
 
         # Conditional order callback (Batch 11: exchange stop-loss orders)
         # 条件单回调（Batch 11：交易所止损单）
@@ -269,11 +270,11 @@ class ExecutorAgent(BaseAgent):
           intents_received / intents_deduped / executions_attempted /
           executions_success / executions_failed / total_slippage_bps (cast int) /
           errors / recent_intent_id_size / shadow_mode (bool→int via
-          ``_shadow_mode_provider``).
+          ``_read_shadow_mode``).
 
         NOTE — snapshot vs ConfigStore SSOT:
-          ``shadow_mode`` is pulled via ``self._shadow_mode_provider()`` (G3-03
-          ConfigStore lambda backed by Rust ``RiskConfig.executor.shadow_mode``).
+          ``shadow_mode`` is pulled via ``self._read_shadow_mode()`` (G3-03
+          ConfigStore provider backed by Rust ``RiskConfig.executor.shadow_mode``).
           That cache remains the single source of truth for the live flag —
           this snapshot is a *read-through observation* for h_state_cache, not
           a writable copy. Provider call is performed *outside* ``self._lock``
@@ -282,8 +283,8 @@ class ExecutorAgent(BaseAgent):
           CLAUDE.md §二 原則 #6.
 
         snapshot 與 ConfigStore SSOT 區分：
-          ``shadow_mode`` 透過 ``self._shadow_mode_provider()``（G3-03 ConfigStore
-          lambda，背後是 Rust ``RiskConfig.executor.shadow_mode``）取；該 cache
+          ``shadow_mode`` 透過 ``self._read_shadow_mode()``（G3-03 ConfigStore
+          provider，背後是 Rust ``RiskConfig.executor.shadow_mode``）取；該 cache
           仍為 live flag 的唯一真實來源 —— 本 snapshot 僅為 h_state_cache 的
           *讀通觀察*，非可寫副本。provider 呼叫於 ``self._lock`` 外執行，
           避免與 ``ExecutorConfigCache`` 內部 lock 死鎖；provider 例外
@@ -306,12 +307,7 @@ class ExecutorAgent(BaseAgent):
         # provider call OUTSIDE self._lock to avoid possible deadlock with
         # ExecutorConfigCache internal lock (G3-03 Phase B).
         # provider 呼叫於 self._lock 外，避與 ExecutorConfigCache 內部 lock 死鎖。
-        try:
-            snapshot["shadow_mode"] = int(bool(self._shadow_mode_provider()))
-        except Exception:  # noqa: BLE001 — defensive
-            # fail-closed: assume shadow on (safest) when provider raises.
-            # fail-closed：provider 拋例外時假設 shadow=on（最安全）。
-            snapshot["shadow_mode"] = 1
+        snapshot["shadow_mode"] = int(self._read_shadow_mode())
         return snapshot
 
     # ── Lifecycle / 生命周期 ──
@@ -627,13 +623,13 @@ class ExecutorAgent(BaseAgent):
 
     # G3-03 Phase B (2026-04-25): the historical class attribute
     # ``_shadow_mode: bool = True`` has been removed. Shadow mode is now read
-    # at execution time via ``self._shadow_mode_provider()`` (set in __init__),
+    # at execution time via ``self._read_shadow_mode()`` (provider set in __init__),
     # which routes through the Rust-IPC-backed ``ExecutorConfigCache``
     # (``executor_config_cache.py``). This closes CLAUDE.md §二 principle #3
     # ("AI 輸出 ≠ 即時命令") — operator IPC flip + cache poll cycle yield
     # < 60s shadow→live turnaround instead of restart-to-apply.
     # G3-03 Phase B：``_shadow_mode = True`` 類屬性硬編碼已移除，改於執行時
-    # 透過 ``_shadow_mode_provider()`` 即時讀取（背後是 Rust IPC 快取）。
+    # 透過 ``_read_shadow_mode()`` 即時讀取（背後是 Rust IPC 快取）。
     # 落實根原則 #3，operator IPC 切換 < 60s 生效，取代重啟才生效。
 
     def _execute_via_ipc(
@@ -771,12 +767,26 @@ class ExecutorAgent(BaseAgent):
             self._store_report(report)
             return report
 
-    def _read_shadow_mode(self, engine: str) -> bool:
+    def _read_shadow_mode(self, engine: Optional[str] = None) -> bool:
+        provider = self._shadow_mode_provider
+        if provider is None:
+            if not self._shadow_mode_provider_missing_warned:
+                logger.warning(
+                    "ExecutorAgent shadow_mode_provider unavailable for engine=%s — "
+                    "fail-closed to shadow=True / shadow_mode_provider 未配置，engine=%s，"
+                    "fail-closed",
+                    engine or "default", engine or "default",
+                )
+                self._shadow_mode_provider_missing_warned = True
+            return True
+
         try:
-            return bool(self._shadow_mode_provider(engine))
+            if engine is None:
+                return bool(provider())
+            return bool(provider(engine))
         except TypeError:
             try:
-                return bool(self._shadow_mode_provider())
+                return bool(provider())
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "ExecutorAgent shadow_mode_provider raised %s — fail-closed to shadow=True "
@@ -818,7 +828,7 @@ class ExecutorAgent(BaseAgent):
         relies on:
 
         * ``shadow_mode`` — bool, derived live from
-          ``self._shadow_mode_provider()`` (G3-03 Phase B Rust IPC cache
+          ``self._read_shadow_mode()`` (G3-03 Phase B Rust IPC cache
           backed by ``ExecutorConfigCache``). Provider exception →
           fail-closed ``True`` (mirrors ``get_executor_snapshot`` policy
           and CLAUDE.md §二 原則 #6 "失敗默認收縮").
@@ -839,7 +849,7 @@ class ExecutorAgent(BaseAgent):
         渲染 shadow / live（卡片底色 + banner + 數字單位）。為履行合約，
         本快照必須額外曝露兩個非 ``_stats`` 欄位：
 
-        * ``shadow_mode`` — bool；透過 ``self._shadow_mode_provider()``
+        * ``shadow_mode`` — bool；透過 ``self._read_shadow_mode()``
           即時讀取（G3-03 Phase B 的 Rust IPC 快取，背後是
           ``ExecutorConfigCache``）。provider 例外 → fail-closed 為
           ``True``（對齊 ``get_executor_snapshot`` 策略與 CLAUDE.md §二
@@ -877,13 +887,7 @@ class ExecutorAgent(BaseAgent):
         # get_executor_snapshot()).
         # provider 呼叫於 self._lock 外，避與 ExecutorConfigCache 內部 lock 死鎖
         # （G3-03 Phase B 契約；對齊 get_executor_snapshot()）。
-        try:
-            shadow_mode_bool = bool(self._shadow_mode_provider())
-        except Exception:  # noqa: BLE001 — defensive
-            # fail-closed: shadow=on is the safest assumption when provider
-            # raises; matches CLAUDE.md §二 原則 #6.
-            # fail-closed：provider 拋例外時假設 shadow=on（最安全）。
-            shadow_mode_bool = True
+        shadow_mode_bool = self._read_shadow_mode()
         base["shadow_mode"] = shadow_mode_bool
         # ``orders_submitted`` is the count of *fills produced*, not attempts —
         # plan §A copy「今日成单数」maps to executions_success (real trades).

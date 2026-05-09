@@ -361,3 +361,9 @@ YYYY-MM-DD HH:MM TZ
 - closed P0-NEW-ISSUE-1 keep-auth RCA: archived engine log `engine-1778289328.log` shows the 2026-05-09T01:11:28Z boot consumed a `manual` restart sentinel and cleared `authorization.json`; later `--keep-auth` preserved the already-missing state
 - added warning-only/read-only `restart_all.sh --keep-auth` preflight for configured live slots with missing signed authorization, plus static regression coverage
 - verification: `bash -n helper_scripts/restart_all.sh`, keep-auth preflight static pytest 2/0, `git diff --check` PASS; no restart, auth write/delete, true mainnet enablement, strategy/risk config mutation, MAG-083/084 unlock, or true-live action
+
+2026-05-09 CEST
+- continued W-AUDIT-3 F-01 source checkpoint: removed the hidden `lambda: True` fallback from `ExecutorAgent.__init__` and made missing `shadow_mode_provider` state explicit
+- `_read_shadow_mode()` now handles provider-unavailable and provider-exception paths fail-closed before IPC submit authority; production wiring remains explicit via `ExecutorConfigCache.shadow_mode_provider()`
+- updated SM-05/TODO/CLAUDE/register wording plus PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_f01_provider_fail_closed.md`
+- verification: py_compile PASS; ExecutorAgent unit pytest 30/0; executor config cache + decision parity pytest 17/0 with 7 skipped; agents routes executor/shadow pytest 7/0; source/test/docs only, no rebuild, restart, deploy, DB apply, live auth mutation, scanner authority change, strategy/risk config mutation, MAG-083/084 unlock, or true-live action

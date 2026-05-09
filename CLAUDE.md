@@ -415,7 +415,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `_SHARED_IPC_SLOTS` / `_SHARED_SLOT_LOCK` | ipc_dispatch.py | E5-P1-5 共享 IPC client |
 | `_<AGENT>_AUDIT_CB` / `_GOV_HUB_FOR_<AGENT>` × 5 | strategy_wiring.py | 由 `agent_audit_bridge.make_agent_audit_callback(...)` 構造 |
 | `_scheduler` / `_LEADER_LOCK_FD` | edge_estimator_scheduler.py | P1-7 B JS estimator 每小時 cycle + uvicorn workers leader election |
-| `_CACHE_INSTANCE` / `_CACHE_LOCK` | executor_config_cache.py | G3-03 Phase B；shadow_mode_provider lambda 注入 ExecutorAgent ctor（注：`lambda: True` fail-close default 是 P1-FAKE-1 待修） |
+| `_CACHE_INSTANCE` / `_CACHE_LOCK` | executor_config_cache.py | G3-03 Phase B；`shadow_mode_provider()` 顯式注入 ExecutorAgent ctor；F-01 已移除 `ExecutorAgent.__init__` 的隱性 `lambda: True` fallback，provider unavailable/exception 由 `_read_shadow_mode()` fail-closed |
 | `_H_STATE_INVALIDATOR` | h_state_invalidator.py | G3-08 Phase 1C；env-gated `OPENCLAW_H_STATE_GATEWAY=1` 才 spawn（P1-FAKE-3 env 未設） |
 | `MARKET_SCANNER` / `AUTO_DEPLOYER` / `_SCOUT_WORKER` | strategy_wiring_scanner.py | STRATEGY-WIRING-SPLIT P2 抽出 |
 | `HStateCacheSlot` | rust/openclaw_engine/src/ipc_server/slots.rs | Rust 端 late-injected slot；env-gated（P1-FAKE-3） |

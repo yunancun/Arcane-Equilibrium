@@ -3,7 +3,7 @@
 **對應 spec**: proposed SM-05 · DOC-01 §5.3 / §5.6 / §5.10 / §5.11 · EX-06
 **日期**: 2026-05-09
 **作者**: PM
-**狀態**: Accepted policy / F-01 implementation pending
+**狀態**: Accepted policy / F-01 source implemented
 **索引**: `SPECIFICATION_REGISTER.md` Amendments section
 **TODO 連結**: `W-AUDIT-3` / `P1-AUDIT-RUNTIME-3` / `F-spec-SM05`
 
@@ -49,6 +49,9 @@ Confirmed source behavior as of 2026-05-09:
     failure.
 12. `ExecutorAgent.get_executor_snapshot()` and `get_stats()` call the provider
     outside `self._lock` to avoid lock inversion with `ExecutorConfigCache`.
+13. `ExecutorAgent.__init__` no longer installs an unconditional `lambda: True`
+    fallback. A missing provider is represented explicitly as unavailable and
+    `_read_shadow_mode()` fails closed at read time.
 
 ---
 
@@ -62,9 +65,9 @@ SM-05 now has these implementation invariants:
 3. Provider calls from `ExecutorAgent` must stay outside `ExecutorAgent` locks.
 4. The cache may retain a last known good snapshot after transient IPC failure,
    but it may not invent a `shadow_mode=false` value.
-5. `lambda: True` in `ExecutorAgent.__init__` is a transitional F-01 fallback,
-   not final SM-05 authority semantics; F-01 may remove it by wiring an
-   explicit provider that fails closed when unavailable.
+5. Production `ExecutorAgent` wiring must inject an explicit
+   `shadow_mode_provider`; missing or failing providers are fail-closed by
+   `_read_shadow_mode()` and must not become submit authority.
 6. TOML values `risk_config_{paper,demo,live}.toml [executor].shadow_mode`
    remain effective runtime policy until a separately authorized config
    migration changes them.
@@ -82,12 +85,12 @@ real lease failures behind a shadow bypass. The later Executor submit path still
 fails closed to shadow if the provider raises.
 
 This means a provider exception can surface a lease attempt while the order
-submit remains suppressed. That behavior is acceptable only as a transitional
-diagnostic posture. Final F-01 implementation must:
+submit remains suppressed. F-01 source implementation now:
 
-- make provider injection explicit for production `ExecutorAgent` wiring;
-- remove the unconditional `lambda: True` fallback;
-- keep provider failure fail-closed for submit authority.
+- keeps provider injection explicit in production `strategy_wiring.py`;
+- removes the unconditional fallback from `ExecutorAgent.__init__`;
+- keeps missing or failing provider reads fail-closed for submit authority,
+  snapshots, and stats.
 
 ---
 
@@ -95,7 +98,7 @@ diagnostic posture. Final F-01 implementation must:
 
 SM-05 implementation may be marked complete only after:
 
-1. F-01 implementation matches AMD-2026-05-09-02 Option A.
+1. F-01 source implementation matches AMD-2026-05-09-02 Option A.
 2. E2 confirms no hidden path can turn provider failure into submit authority.
 3. E4 regression covers provider success, pre-init failure, post-init failure,
    malformed schema, and explicit per-engine lookup.
@@ -106,9 +109,9 @@ SM-05 implementation may be marked complete only after:
 
 ## 6. Boundary
 
-This amendment is documentation only. It does not rebuild, restart, mutate
-runtime env, change TOML risk config, enable true live, grant Executor order
-authority, alter scanner evidence semantics, unlock MAG-083, or sign MAG-084.
+This amendment does not rebuild, restart, mutate runtime env, change TOML risk
+config, enable true live, grant Executor hard authority, alter scanner evidence
+semantics, unlock MAG-083, or sign MAG-084.
 
 ---
 

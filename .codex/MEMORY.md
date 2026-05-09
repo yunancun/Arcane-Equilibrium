@@ -205,6 +205,14 @@ Codex continuity sources:
 - `.codex/DISPATCH_LEDGER.md`
 - `.codex/reports/`
 
+W-AUDIT-3 F-01 current fact:
+- as of 2026-05-09, `ExecutorAgent.__init__` no longer installs a hidden
+  `lambda: True` fallback for missing `shadow_mode_provider`
+- production wiring remains explicit through
+  `ExecutorConfigCache.shadow_mode_provider()` in `strategy_wiring.py`
+- provider missing/exception paths are fail-closed in `_read_shadow_mode()`
+  before IPC submit authority; source/test only, no rebuild/restart
+
 Detailed 2026-04-29 A-F remediation and redeploy context was compacted out of this file and preserved in:
 - `.codex/archive/2026-04-29--pre-compaction-memory-snapshot.md`
 
