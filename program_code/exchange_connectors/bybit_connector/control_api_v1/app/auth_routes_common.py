@@ -10,7 +10,7 @@ MODULE_NOTE (中文):
   - `check_ip_lockout` / `increment_ip_failure` / `clear_ip_failure` 必須各自
     持有 `_login_fail_lock`，保留原 legacy_routes.py 的 read-check-write 原子性。
   - Cookie 設置/刪除路徑固定 "/", HttpOnly, SameSite=Strict, 且依 request scheme
-    自動決定 Secure 屬性（FIX-11）。
+    或 HTTPS proxy hint 自動決定 Secure 屬性（FIX-11 + NEW-VULN-3）。
   - Token 驗證走 `hmac.compare_digest`，避免 timing side-channel。
 
 MODULE_NOTE (English):
@@ -24,7 +24,8 @@ MODULE_NOTE (English):
     acquire `_login_fail_lock` themselves, preserving the read-check-write
     atomicity pattern from the original legacy_routes.py (L247-308).
   - Cookie set/delete always uses path="/", HttpOnly, SameSite=Strict, and
-    auto-detects Secure from request scheme (FIX-11).
+    auto-detects Secure from request scheme or HTTPS proxy hints
+    (FIX-11 + NEW-VULN-3).
   - Token comparison uses `hmac.compare_digest` to avoid timing attacks.
 """
 
@@ -50,9 +51,25 @@ from .auth import (
 _PASSWORD_PLACEHOLDERS = frozenset({"YOUR_PASSWORD", "change-me", "CHANGE_ME", "password"})
 
 
-def _truthy(value: str | None) -> bool:
-    """Parse opt-in env strings. / 解析 opt-in 環境變量字串。"""
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+def _first_header_token(headers: Any, name: str) -> str:
+    """Return the first comma-separated proxy header token."""
+    raw = headers.get(name, "") if headers is not None else ""
+    return str(raw or "").split(",", 1)[0].strip().lower()
+
+
+def _has_https_proxy_hint(request: Request) -> bool:
+    """Treat positive HTTPS proxy hints as fail-closed Secure-cookie signals."""
+    if _first_header_token(request.headers, "x-forwarded-proto") == "https":
+        return True
+    if _first_header_token(request.headers, "x-forwarded-ssl") in {"on", "1", "true"}:
+        return True
+
+    forwarded = _first_header_token(request.headers, "forwarded")
+    for part in forwarded.split(";"):
+        key, sep, value = part.strip().partition("=")
+        if sep and key.strip().lower() == "proto" and value.strip().strip('"').lower() == "https":
+            return True
+    return False
 
 
 class AuthLoginRequest(BaseModel):
@@ -165,11 +182,15 @@ def should_set_secure_cookie(request: Request) -> bool:
     """Decide auth-cookie Secure using config plus trusted proxy headers.
     使用部署配置與可信 proxy header 判定 auth cookie 是否加 Secure。
 
-    Default remains local-dev friendly auto mode, but production/proxy
-    deployments can force Secure with OPENCLAW_COOKIE_SECURE=1 or opt into
-    trusted X-Forwarded-Proto handling with OPENCLAW_TRUST_PROXY_HEADERS=1.
-    預設保留本機開發 auto 模式；正式/proxy 部署可用
-    OPENCLAW_COOKIE_SECURE=1 強制 Secure，或明確信任 X-Forwarded-Proto。
+    Default remains local-dev friendly auto mode for plain HTTP with no proxy
+    evidence. Positive HTTPS proxy hints set Secure even when
+    OPENCLAW_TRUST_PROXY_HEADERS is not configured; spoofing such a hint on a
+    direct HTTP request fails closed by making the cookie unusable over HTTP.
+    Production deployments may still force Secure with OPENCLAW_COOKIE_SECURE=1.
+    預設保留本機開發 auto 模式；若看到正向 HTTPS proxy hint，即使未設
+    OPENCLAW_TRUST_PROXY_HEADERS 也加 Secure。直接 HTTP 偽造該 header 只會讓
+    cookie 在 HTTP 下不可用，屬 fail-closed。正式部署仍可用
+    OPENCLAW_COOKIE_SECURE=1 強制 Secure。
     """
     override = (os.getenv("OPENCLAW_COOKIE_SECURE", "auto") or "auto").strip().lower()
     if override in {"1", "true", "yes", "on"}:
@@ -178,9 +199,8 @@ def should_set_secure_cookie(request: Request) -> bool:
         return False
     if request.url.scheme == "https":
         return True
-    if _truthy(os.getenv("OPENCLAW_TRUST_PROXY_HEADERS")):
-        forwarded_proto = request.headers.get("x-forwarded-proto", "")
-        return forwarded_proto.split(",", 1)[0].strip().lower() == "https"
+    if _has_https_proxy_hint(request):
+        return True
     return False
 
 

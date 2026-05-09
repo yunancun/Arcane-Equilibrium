@@ -287,6 +287,11 @@ W-AUDIT-6 current fact:
   support dialog role/`aria-modal`, Esc cancel, Tab focus trap, initial cancel
   focus, and previous-focus restore. Static regression and JS syntax checks
   passed; no backend/runtime change.
+- as of 2026-05-09, `P2-AUDIT-VERIFY-7` NEW-VULN-3/4 is source/test closed:
+  auth cookie Secure auto mode treats positive HTTPS proxy hints as a
+  fail-closed Secure signal even without trust-proxy env, and Phase4 router is
+  mounted in Control API `main.py` so the weekly-review operator+scope gates are
+  reachable. No runtime reload/restart was performed.
 - runtime apply note: the operator-requested post-sync rebuild loaded the MA R:R
   checkpoint, and the follow-up rebuild/restart loaded the BILLUSDT grid
   blocklist. The later bb_breakout 5m and W-AUDIT-6c portfolio tail-risk
