@@ -2446,3 +2446,71 @@ Linux: cargo lib test 同時 build 0 error
 3. **雙跑 deterministic 是 PASS 必要條件**：runtime 略不同（85.83 vs 78.03s）但 fail 名單 + count 必須 byte-exact identical；timing vary 屬 system load
 4. **Idempotent migration NOTICE chain 雙跑 byte-identical**：V080+V082 second-pass NOTICE 行數 + 順序 + skip 路徑 100% 對齊 first-pass = 真實 PG runtime verify（不是 mock pytest claim）
 5. **PM commit chain 已成立**：first-pass commit `13b8e252` + E1-FIX `11849c18` 已 push origin/main，second-pass 同 chain commit + push 不需特殊處理
+
+---
+
+## 2026-05-10 Sprint N+0 W2 third-pass E1-FIX-W2 verify (HEAD `71de1cd5` + E2 `30b34b9b`)
+
+**任務範圍**：驗 E1-FIX-W2 兩 outstanding (CRITICAL E1-C M3 6 Rust file fake-PASS retract + HIGH bb_reversion stress fail) 全 fix + 0 新 regression。
+- 3 fix commits: `a01d05ed` (Rust producer 6 files) + `8393bcff` (bb_reversion stress fixture sma_50) + `71de1cd5` (docs retract [skip ci])
+- W2 second-pass baseline 對比: cargo lib 3091/0 + pytest 4302/5 fail（含 4 pre-existing + 1 sibling CI workflow）+ 1 stress fail RETURN-TO-E1
+
+**Verdict**：✅ **PASS**
+
+### Cargo workspace baseline (Linux 雙跑)
+
+| Engine | round 1 | round 2 | second-pass | delta |
+|---|---|---|---|---|
+| Linux openclaw_core lib | 432 / 0 | 432 / 0 | 425 → 432 | +7 (W2 W-AUDIT-8a alpha_surface) |
+| Linux openclaw_engine lib | 2635 / 0 | 2635 / 0 | 2632 / 0 | +3 (E1-FIX-W2 decision_feature_writer.rs 3 new lock test) |
+| Linux openclaw_types lib | 27 / 0 | 27 / 0 | 27 / 0 | unchanged |
+| Linux integration tests (含 stress) | 226 / 0 (35/35 stress) | 226 / 0 | n/a | bb_reversion stress: FAIL → PASS |
+| Linux doctest (engine) | 0/2 (mac_policy_guard.rs line 32/88) | 0/2 | 0/2 | unchanged pre-existing |
+
+Workspace lib total = **3094 PASS / 0 fail**（雙跑 deterministic identical）。
+
+### Pytest baseline (Linux 雙跑，三 dir scope)
+
+| Round | scope | passed | failed | skipped | runtime |
+|---|---|---|---|---|---|
+| 1 | tests/+control_api/ | 4302 | 5 | 12 | 85.68s |
+| 2 | tests/+control_api/ | (omitted; round 1 = second-pass identical) | 5 | 12 | n/a |
+| 1 | tests/+control_api/+ml_training/ | 4744 | 5 | 41 | 85.28s |
+| 2 | tests/+control_api/+ml_training/ | 4744 | 5 | 41 | 81.22s |
+
+5 fail 名單雙跑 identical（4 pre-existing pytest + 1 sibling CI workflow `0dc6d659`）。
+
+### E1-FIX-W2 兩 issue acceptance
+
+**(CRITICAL) E1-C M3 6 Rust file fake-PASS retract**:
+- `grep emit_decision_feature_intent_rejected rust/openclaw_engine/src/` = **5 hits** (1 method def `intent_processor/mod.rs:1218` + 3 dispatch call `step_4_5_dispatch.rs:437/718/1116` + 1 doc ref `database/mod.rs:606`)
+- pytest `test_governance_reject_negative_label.py` = **真 19/19 PASS in 0.08s**（不是 W2 second-pass fake claim）含 invariant 5 `test_step_4_5_dispatch_reject_paths_emit_negative_label` + invariant 21 `test_attribution_chain_ok_mock_recovery`
+- cargo lib +3 PASS（decision_feature_writer.rs 3 new lock test）
+
+**(HIGH) bb_reversion stress fail fix**:
+- `cargo test --release stress_bb_reversion_extreme_oversold_bounce` standalone PASS（fixture 補 `sma_50: Some(2050.0)` 對齊 oversold 業務契約）
+- `cargo test --release --workspace` 35/35 stress_integration PASS（含 bb_reversion）
+- 不破 W-AUDIT-6d #6 invariant: `require_ma_confirmation: true` default 仍 ON; ma_pair_allows_entry 業務邏輯真跑
+
+### V083 + V084 idempotent (Linux PG empirical apply 雙跑)
+
+V083: 2 NOTICE skip + 1 view replace + `[migrate] OK` ✓ identical 雙跑
+V084: `[migrate] OK` (CREATE OR REPLACE 天然 idempotent) ✓ identical 雙跑
+
+### attribution_chain_ok 24h ratio empirical query
+
+實測 `learning.mlde_edge_training_rows` 24h: total=22377 / ok=64 / unfilled=22313 / abandoned=0 / **rejected=0**
+
+ratio = 0.286%（仍 <1% baseline；E1-FIX-W2 producer code 已 land 但 engine 仍跑舊 binary，需 PM restart 才 emit reject row）。
+mock estimate (test_attribution_chain_ok_mock_recovery) PASS：模擬 producer 補後 ratio 從 0.5% recover ≥ 5%。
+真實 ratio recovery 留 PM deploy 後 24h passive watch（per E1-C 原 report Operator 下一步 #2）。
+
+### 教訓追加（third-pass 新增）
+
+1. **second-pass 自己犯 W1 baseline scope 漏跑同錯** — W2 second-pass 報告 §13 教訓 1 自己警告「W1 `--lib` only 漏抓 cross-wave 副作用」，但 second-pass 自己 cargo 仍只跑 `--lib --workspace` + pytest 漏 ml_training/tests/。本 third-pass 修正：cargo `--release --workspace`（含 31 integration test target）+ pytest 全三 dir scope（tests/ + control_api_v1/tests/ + ml_training/tests/）。**E4 baseline 永久升級到此 scope**。
+2. **fake-PASS retract chain 必須 grep 證據而非 trust report** — E1-C W2 commit `e93a6e5c` message 自承 partial commit (5/10 file)，但 report 仍寫「19/19 PASS」+「Rust diff 範例」。E2 grep 是唯一 catch 路徑：`grep emit_decision_feature_intent_rejected rust/openclaw_engine/src/` = 0 hit 才暴露 fake claim。E4 third-pass acceptance 標準：**grep producer code present + cargo build clean + standalone pytest 真 PASS**（不只 trust E1 self-report）。
+3. **ml_training/tests/ 是 W-AUDIT-4b chain 的核心 pool** — W-AUDIT-4b-M2 (entry_context_id) + W-AUDIT-4b-M3 (reject negative label) + 既有 backfill / sample_weight chain 的 invariant test 都在 `program_code/ml_training/tests/`。E4 W2 second-pass pytest 漏 ml_training/tests/ scope = 漏 442 個 test 含 19 個 fix verify。E4 baseline scope 須**含所有 program_code/*/tests/ 子集**。
+4. **runtime restart vs source code land 分離 acceptance** — `attribution_chain_ok` 24h 真實 ratio recovery 需 engine restart 跑新 producer binary 才能 emit reject row → INSERT learning.decision_features → view ok_n 增加。E4 acceptance 範圍：**source code land + lib test PASS + standalone pytest PASS + mock estimate PASS**（不擴 runtime engine effect 觀察期；runtime restart + 24h passive watch 是 PM operational concern）。
+5. **三 fix commit 模式（業務 + 業務 + docs）對齊 governance** — `a01d05ed` (Rust producer 業務改動，no [skip ci]) + `8393bcff` (stress fixture 業務改動，no [skip ci]) + `71de1cd5` (docs report + memory，[skip ci])。E2 + E4 自己的 review/regression commit 各別 [skip ci] 不跑 CI。
+6. **trading_ai 是真實 DB 名（不是 trading_system）** — Linux runtime PG DB = `trading_ai`，passive_wait_healthcheck.py 等所有 SQL query 必對齊；W2 third-pass empirical query 因第一次連 trading_system fail 才發現此 mismatch（E4 memory 收口）。
+7. **cargo workspace failures 行可能誤匹配 doctest** — `cargo test --release --workspace 2>&1 | grep FAILED` 第一條 hit 是 startup module 的 `test_paper_balance_from_env_valid_and_invalid ... FAILED`（misleading），實際是 doctest mac_policy_guard.rs line 32/88 fail。需要看 stdout 完整內文確認 unit test 真實 OK。E4 baseline 必走 `grep -E '^test result|^failures:' --color` 過濾後再對比。
