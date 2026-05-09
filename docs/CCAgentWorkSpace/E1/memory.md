@@ -5959,3 +5959,39 @@ operator 治理任務 — V3 sprint closure 後 24h delta 驗證發現 4 表 INS
 3. 評估是否需要把 lightgbm / chronos / timesfm 補到 deploy（目前 audit job 部分 silent error）
 4. 本變動範圍：~120 行 IPC auth handshake + 9 行 cron.sh env injection ≈ 130 行；建議 E2 review（>50 行業務邏輯，跨 IPC wire format + auth）
 
+
+---
+
+## 2026-05-09 — passive_wait healthcheck [20] FAIL → WARN（PYTHONPATH 修復）
+
+### 任務
+operator 報 24h `FAIL [20] h_state_gateway_freshness module import failed: h_state_invalidator: No module named 'program_code'`。修 import path 配置，非業務改動。
+
+### Root Cause（一句話）
+`passive_wait_healthcheck.sh` 用 `exec "$PY" "$HEALTHCHECK_PY"`（絕對路徑）讓 Python 把 `sys.path[0]` 設為腳本目錄 `helper_scripts/db/` 而非 BASE_DIR 根，importlib 動態 import `program_code.exchange_connectors...h_state_invalidator` 找不到 namespace package；cron wrapper 因為 `cd $BASE_DIR + 相對路徑` 意外靠 cwd 補上才沒 FAIL。
+
+### 修法（commit b186c6c2，10 行 sh）
+`passive_wait_healthcheck.sh` 在 venv 解析後、env load 前插入 1.5 步：
+```bash
+export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
+```
+不依賴呼叫端 cwd，跨 Mac/Linux portable。
+
+### 驗證
+- 修前：`bash .sh --quiet` 從任意 cwd → `FAIL [20] No module named 'program_code'`
+- 修後（Linux 同步 pull 後）：`PASS=47 / WARN=11 / FAIL=1`，[20] 變 `WARN: stub regressed from Phase 2 shape (version=0, h_states_keys=[], expected ⊇ {h1,h3})`
+- 唯一 FAIL 是 [40] realized_edge_acceptance（與本 task 無關，§三 P0-EDGE-1）
+- 鄰居 [19]/[21] 全 PASS（無 collateral damage）
+
+### 觀察 / Follow-up
+- [20] 從 FAIL 變 WARN 是好事：修完 import 後檢查邏輯能跑到 invariant 3，揭示 H1/H3 producer regression（version=0 / h_states 空）。**不在本 task 範圍** — 應另開 P2 ticket 驗 Phase 2 wiring（commits 9120948 + f2ed286）是否在 runtime 實際接線；env=0 dormant by design 的條件能被觸發代表 build_h_state_full_response() 真在跑而非 stub。
+- 教訓：**Python 絕對路徑 vs 相對路徑 vs cd cwd 對 sys.path[0] 的影響不對稱**。`python script.py` 相對路徑在 cwd → sys.path[0]=''=cwd；絕對路徑 → sys.path[0]=script_dir。寫 healthcheck 進 PG/檔案系統時依賴 cwd 是隱性 bug，必 export PYTHONPATH 或 sys.path.insert 顯式控制。
+
+### 範圍紀律
+- 只改 `helper_scripts/db/passive_wait_healthcheck.sh`（10 行 +）
+- 沒動 `passive_wait_healthcheck.py` / `checks_derived_h_state.py` / cron wrapper（已正常）
+- 沒動 `program_code/__init__.py` (不存在但 Python 3.3+ namespace package 支援，PYTHONPATH 一加即 work)
+
+### Commit + push
+- Mac SSOT commit b186c6c2 → push origin/main → ssh trade-core git pull --ff-only ✅
+- 中文 commit message + root cause 一句話
