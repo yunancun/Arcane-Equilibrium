@@ -22,8 +22,8 @@ Closed or restored the three active blockers the operator asked to continue:
 - Pushed `e97a333b` and `862e79b7` to `main`.
 - Linux `trade-core` fast-forwarded to `862e79b7` and rebuilt/restarted with
   `restart_all.sh --rebuild --keep-auth`.
-- `_sqlx_migrations` has V078 applied; `learning.lease_transitions` has 2
-  `BYPASS` rows (`demo`, `live_demo`).
+- `_sqlx_migrations` has V078 applied; `learning.lease_transitions` is
+  nonzero with `BYPASS` rows (`demo`, `live_demo`; final spot-check rows=103).
 - `[56] live_pipeline_active` PASSes after auth renewal and after restart:
   endpoint=`live_demo`, auth present, snapshot fresh.
 
