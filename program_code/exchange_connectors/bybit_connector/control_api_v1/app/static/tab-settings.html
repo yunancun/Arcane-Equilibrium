@@ -16,6 +16,55 @@
   <span style="font-size:11px;color:rgba(255,255,255,0.7)">重啟期間監控中斷，無法執行止損</span>
 </div>
 
+<!-- ═════════════════════════════════════════════════════════════════════════════
+     W-AUDIT-7c (2026-05-09)：Settings sub-tab navigation + content wrappers
+     沿用 paper tab 的 .oc-subtab-nav / .oc-subtab-btn / .oc-subtab-content 樣式
+     （定義於 common.js / tab-paper.html style block，已是 GUI 共用慣例）。
+     4 個 sub-tab 分組：
+       - engines     引擎控制：Demo / 全局模式 / 產品族 / 成本與盈虧錄入
+       - system      系統運維：計劃重啟 / Paper 引擎開關 / 開發狀態支持頁
+       - connection  連線與憑證：Bybit API Key 管理（保留 dialog）
+       - debug       調試與系統資訊：Debug JSON / System Info
+     localStorage key = 'settings_active_subtab'，與 paper 的 'paper_active_subtab' 隔離。
+     ═════════════════════════════════════════════════════════════════════════════ -->
+<style>
+/* Settings sub-tab nav 沿用 common.js / paper tab 的 .oc-subtab-* class，
+   下方僅補一條 page-scoped rule 處理 settings tab 自有 oc-card 與 sub-tab content
+   的垂直間距 */
+#settings-subtab-nav { margin-top: 4px; margin-bottom: 14px; }
+.oc-subtab-content[data-settings-pane="true"] { padding-top: 2px; }
+@media (max-width: 700px) {
+  /* 對齊 tab-paper.html SEV-2 #1：sub-tab 行動版 44px touch target */
+  #settings-subtab-nav .oc-subtab-btn { min-height: 44px; padding: 12px 14px; font-size: 13px; }
+}
+</style>
+<nav class="oc-subtab-nav" id="settings-subtab-nav" role="tablist" aria-label="Settings sub-tabs / 设定子标签导航">
+  <button type="button" class="oc-subtab-btn active" role="tab" aria-selected="true"
+    aria-controls="subtab-engines" data-subtab="engines" id="subtab-btn-engines"
+    title="引擎控制：Demo 切换 / 全局模式 / 产品族 / 成本錄入">
+    &#x1F3AE; 引擎 / Engines
+  </button>
+  <button type="button" class="oc-subtab-btn" role="tab" aria-selected="false"
+    aria-controls="subtab-system" data-subtab="system" id="subtab-btn-system"
+    title="系统运维：计划重启 / Paper 引擎开关 / 开发支持页">
+    &#x1F527; 运维 / System
+  </button>
+  <button type="button" class="oc-subtab-btn" role="tab" aria-selected="false"
+    aria-controls="subtab-connection" data-subtab="connection" id="subtab-btn-connection"
+    title="连线与凭证：Bybit API Key 管理（每个引擎槽位独立）">
+    &#x1F511; 连线 / Connection
+  </button>
+  <button type="button" class="oc-subtab-btn" role="tab" aria-selected="false"
+    aria-controls="subtab-debug" data-subtab="debug" id="subtab-btn-debug"
+    title="调试与系统资讯：Debug JSON / System Info">
+    &#x1F41B; 调试 / Debug
+  </button>
+</nav>
+
+<!-- ═══ Engines sub-tab ══════════════════════════════════════════════════════ -->
+<div id="subtab-engines" class="oc-subtab-content active" data-settings-pane="true"
+  role="tabpanel" aria-labelledby="subtab-btn-engines">
+
 <!-- ═══ Demo Control Plane ═══ -->
 <div class="oc-card">
   <h2>&#x1F3AE; Demo 控制面板 / Demo Control Plane</h2>
@@ -94,6 +143,12 @@
   </div>
 </details>
 
+</div><!-- /subtab-engines -->
+
+<!-- ═══ System sub-tab ═══════════════════════════════════════════════════════ -->
+<div id="subtab-system" class="oc-subtab-content" data-settings-pane="true"
+  role="tabpanel" aria-labelledby="subtab-btn-system" hidden>
+
 <!-- ═══ Scheduled Restart ═══ -->
 <div class="oc-card" style="border-color:rgba(239,68,68,0.25)">
   <h3>&#x1F504; 計劃重啟 / Scheduled Restart</h3>
@@ -102,89 +157,10 @@
   <button class="oc-btn oc-btn-danger" onclick="openRestartModal()" style="margin-top:4px">&#x26A0; 計劃重啟服務器</button>
 </div>
 
-<!-- ═══ Restart Multi-Step Modal ═══ -->
-<div id="restartModal" class="confirm-modal hidden">
-  <div class="confirm-modal-backdrop" onclick="closeRestartModal()"></div>
-  <div class="confirm-modal-dialog" style="width:min(560px,calc(100vw - 32px))">
-
-    <!-- Step 1: Warning + time selection -->
-    <div id="restart-step-1">
-      <div class="confirm-modal-header">
-        <h3>&#x26A0; 計劃重啟服務器</h3>
-        <button class="confirm-close" onclick="closeRestartModal()">×</button>
-      </div>
-      <div class="confirm-modal-body">
-        <div class="confirm-block" style="border-color:rgba(239,68,68,0.3);background:rgba(239,68,68,0.05)">
-          <div class="confirm-label" style="color:#f87171">風險說明 / Risks</div>
-          <div style="font-size:13px;line-height:1.6">
-            • 重啟期間（約 10-30 秒）市場監控中斷，無法執行止損<br>
-            • 未平倉的 Paper 模拟 倉位在重啟後恢復，但可能錯過止損時機<br>
-            • Bybit Demo 演示 倉位不受影響（由交易所端管理）<br>
-            • 重啟後系統自動恢復策略和市場數據訂閱
-          </div>
-        </div>
-        <div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">選擇重啟延遲時間 / Select restart delay</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="5"> 5 分鐘</label>
-            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="10" checked> 10 分鐘</label>
-            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="15"> 15 分鐘</label>
-            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="30"> 30 分鐘</label>
-            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="60"> 1 小時</label>
-          </div>
-        </div>
-      </div>
-      <div class="confirm-modal-footer">
-        <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
-        <button class="oc-btn oc-btn-primary" onclick="restartStep2()">下一步 →</button>
-      </div>
-    </div>
-
-    <!-- Step 2: Force liquidate? -->
-    <div id="restart-step-2" style="display:none">
-      <div class="confirm-modal-header">
-        <h3>強制清倉？/ Force Liquidate?</h3>
-        <button class="confirm-close" onclick="closeRestartModal()">×</button>
-      </div>
-      <div class="confirm-modal-body">
-        <div class="confirm-block">
-          <div class="confirm-label">清倉規則 / Liquidation Rules</div>
-          <div style="font-size:13px;line-height:1.6">
-            系統會立即平倉所有<strong>扣除手續費後仍為盈利</strong>的 Paper 模拟 倉位。<br>
-            虧損倉位<strong>不會</strong>被強制平倉，以避免鎖定損失。<br>
-            The system will close all Paper positions where <strong>net PnL after fees &gt; 0</strong>.<br>
-            Losing positions will <strong>not</strong> be closed.
-          </div>
-        </div>
-      </div>
-      <div class="confirm-modal-footer">
-        <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
-        <button class="oc-btn" onclick="restartStep3(false)" style="background:rgba(71,85,105,.3)">否 — 保留全部倉位</button>
-        <button class="oc-btn oc-btn-primary" onclick="restartStep3(true)">是 — 清倉盈利倉位</button>
-      </div>
-    </div>
-
-    <!-- Step 3: Final confirmation -->
-    <div id="restart-step-3" style="display:none">
-      <div class="confirm-modal-header">
-        <h3>&#x2714; 確認執行 / Confirm</h3>
-        <button class="confirm-close" onclick="closeRestartModal()">×</button>
-      </div>
-      <div class="confirm-modal-body">
-        <div class="confirm-block">
-          <div class="confirm-label">執行計劃 / Plan</div>
-          <div id="restart-summary" style="font-size:13px;line-height:1.8"></div>
-        </div>
-        <div style="font-size:12px;color:var(--text-dim)">確認後無法取消。請確保你已了解重啟期間的風險。</div>
-      </div>
-      <div class="confirm-modal-footer">
-        <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
-        <button class="oc-btn oc-btn-danger" id="restart-confirm-btn" onclick="executeRestart()">&#x1F504; 確認重啟</button>
-      </div>
-    </div>
-
-  </div>
-</div>
+<!-- W-AUDIT-7c (2026-05-09): restart modal 已從本 sub-tab 抽出移至檔尾，
+     避免 sub-tab `[hidden]` 影響 fixed-position overlay 渲染。
+     The restart modal is moved to the end of the document so that
+     sub-tab `[hidden]` doesn't suppress the fixed-position overlay rendering. -->
 
 <style>
 /* ── Modal overlay ────────────────────────────────────────────── */
@@ -320,6 +296,12 @@
   <div id="development-support-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.6">Loading...</div>
 </div>
 
+</div><!-- /subtab-system -->
+
+<!-- ═══ Connection sub-tab ═══════════════════════════════════════════════════ -->
+<div id="subtab-connection" class="oc-subtab-content" data-settings-pane="true"
+  role="tabpanel" aria-labelledby="subtab-btn-connection" hidden>
+
 <!-- ═══ API Key Management ═══ -->
 <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
   <h3>&#x1F511; API Key 管理 / API Key Management</h3>
@@ -333,33 +315,16 @@
   </div>
 </div>
 
-<!-- ── API Key Replace Dialog (modal) ──────────────────────────────── -->
-<div class="oc-dialog-overlay" id="dlg-apikey">
-  <div class="oc-dialog" style="max-width:480px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h3 style="margin:0">&#x270F; 替換 API Key — <span id="dlg-apikey-slot-label"></span></h3>
-      <button style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;padding:0 4px;line-height:1" onclick="closeApikeyDialog()">&times;</button>
-    </div>
-    <p style="margin-bottom:6px">輸入新的 Bybit API key 和 secret。系統會先驗證有效性，通過後才寫入磁盤。</p>
-    <div class="note">&#x26A0; secret 僅在此次輸入時可見。保存後將永久遮罩，請妥善備份原始 key。</div>
-    <div id="dlg-apikey-warn-box" style="display:none;font-size:11px;color:#f87171;margin-bottom:8px"></div>
-    <div style="display:grid;gap:10px;margin-bottom:14px">
-      <div>
-        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Key</label>
-        <input class="oc-input" id="dlg-apikey-key" type="text" placeholder="e.g. abcdefXXXXXXXXXX" autocomplete="off" style="width:100%;font-family:monospace" />
-      </div>
-      <div>
-        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Secret</label>
-        <input class="oc-input" id="dlg-apikey-secret" type="password" placeholder="•••••••••••••••••••••••••••••••" autocomplete="new-password" style="width:100%;font-family:monospace" />
-      </div>
-    </div>
-    <div id="dlg-apikey-status" style="font-size:12px;min-height:18px;margin-bottom:10px"></div>
-    <div class="btn-row">
-      <button class="oc-btn" onclick="closeApikeyDialog()">取消</button>
-      <button class="oc-btn oc-btn-primary" id="dlg-apikey-save-btn" onclick="doSaveApiKey()">&#x2714; 驗證並保存</button>
-    </div>
-  </div>
-</div>
+<!-- W-AUDIT-7c (2026-05-09): API Key Replace Dialog 已從本 sub-tab 抽出移至檔尾，
+     避免 sub-tab `[hidden]` 影響 fixed-position overlay 渲染。
+     The API Key Replace Dialog is moved to the end of the document so that
+     sub-tab `[hidden]` doesn't suppress the fixed-position overlay rendering. -->
+
+</div><!-- /subtab-connection -->
+
+<!-- ═══ Debug sub-tab ════════════════════════════════════════════════════════ -->
+<div id="subtab-debug" class="oc-subtab-content" data-settings-pane="true"
+  role="tabpanel" aria-labelledby="subtab-btn-debug" hidden>
 
 <!-- ═══ Debug JSON ═══ -->
 <details class="oc-collapse">
@@ -400,7 +365,190 @@
   </div>
 </details>
 
+</div><!-- /subtab-debug -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Modal overlays — 必須放在所有 sub-tab content 之外，否則 sub-tab `[hidden]`
+     會讓子層 fixed-position overlay 不渲染。
+     Modal overlays — must live outside all sub-tab containers so sub-tab
+     `[hidden]` cannot suppress fixed-position overlay rendering.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+
+<!-- ═══ Restart Multi-Step Modal ═══ -->
+<div id="restartModal" class="confirm-modal hidden">
+  <div class="confirm-modal-backdrop" onclick="closeRestartModal()"></div>
+  <div class="confirm-modal-dialog" style="width:min(560px,calc(100vw - 32px))">
+
+    <!-- Step 1: Warning + time selection -->
+    <div id="restart-step-1">
+      <div class="confirm-modal-header">
+        <h3>&#x26A0; 計劃重啟服務器</h3>
+        <button class="confirm-close" onclick="closeRestartModal()">×</button>
+      </div>
+      <div class="confirm-modal-body">
+        <div class="confirm-block" style="border-color:rgba(239,68,68,0.3);background:rgba(239,68,68,0.05)">
+          <div class="confirm-label" style="color:#f87171">風險說明 / Risks</div>
+          <div style="font-size:13px;line-height:1.6">
+            • 重啟期間（約 10-30 秒）市場監控中斷，無法執行止損<br>
+            • 未平倉的 Paper 模拟 倉位在重啟後恢復，但可能錯過止損時機<br>
+            • Bybit Demo 演示 倉位不受影響（由交易所端管理）<br>
+            • 重啟後系統自動恢復策略和市場數據訂閱
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">選擇重啟延遲時間 / Select restart delay</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="5"> 5 分鐘</label>
+            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="10" checked> 10 分鐘</label>
+            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="15"> 15 分鐘</label>
+            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="30"> 30 分鐘</label>
+            <label class="restart-time-opt"><input type="radio" name="restartDelay" value="60"> 1 小時</label>
+          </div>
+        </div>
+      </div>
+      <div class="confirm-modal-footer">
+        <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
+        <button class="oc-btn oc-btn-primary" onclick="restartStep2()">下一步 →</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Force liquidate? -->
+    <div id="restart-step-2" style="display:none">
+      <div class="confirm-modal-header">
+        <h3>強制清倉？/ Force Liquidate?</h3>
+        <button class="confirm-close" onclick="closeRestartModal()">×</button>
+      </div>
+      <div class="confirm-modal-body">
+        <div class="confirm-block">
+          <div class="confirm-label">清倉規則 / Liquidation Rules</div>
+          <div style="font-size:13px;line-height:1.6">
+            系統會立即平倉所有<strong>扣除手續費後仍為盈利</strong>的 Paper 模拟 倉位。<br>
+            虧損倉位<strong>不會</strong>被強制平倉，以避免鎖定損失。<br>
+            The system will close all Paper positions where <strong>net PnL after fees &gt; 0</strong>.<br>
+            Losing positions will <strong>not</strong> be closed.
+          </div>
+        </div>
+      </div>
+      <div class="confirm-modal-footer">
+        <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
+        <button class="oc-btn" onclick="restartStep3(false)" style="background:rgba(71,85,105,.3)">否 — 保留全部倉位</button>
+        <button class="oc-btn oc-btn-primary" onclick="restartStep3(true)">是 — 清倉盈利倉位</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Final confirmation -->
+    <div id="restart-step-3" style="display:none">
+      <div class="confirm-modal-header">
+        <h3>&#x2714; 確認執行 / Confirm</h3>
+        <button class="confirm-close" onclick="closeRestartModal()">×</button>
+      </div>
+      <div class="confirm-modal-body">
+        <div class="confirm-block">
+          <div class="confirm-label">執行計劃 / Plan</div>
+          <div id="restart-summary" style="font-size:13px;line-height:1.8"></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-dim)">確認後無法取消。請確保你已了解重啟期間的風險。</div>
+      </div>
+      <div class="confirm-modal-footer">
+        <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
+        <button class="oc-btn oc-btn-danger" id="restart-confirm-btn" onclick="executeRestart()">&#x1F504; 確認重啟</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── API Key Replace Dialog (modal) ──────────────────────────────── -->
+<div class="oc-dialog-overlay" id="dlg-apikey">
+  <div class="oc-dialog" style="max-width:480px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0">&#x270F; 替換 API Key — <span id="dlg-apikey-slot-label"></span></h3>
+      <button style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;padding:0 4px;line-height:1" onclick="closeApikeyDialog()">&times;</button>
+    </div>
+    <p style="margin-bottom:6px">輸入新的 Bybit API key 和 secret。系統會先驗證有效性，通過後才寫入磁盤。</p>
+    <div class="note">&#x26A0; secret 僅在此次輸入時可見。保存後將永久遮罩，請妥善備份原始 key。</div>
+    <div id="dlg-apikey-warn-box" style="display:none;font-size:11px;color:#f87171;margin-bottom:8px"></div>
+    <div style="display:grid;gap:10px;margin-bottom:14px">
+      <div>
+        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Key</label>
+        <input class="oc-input" id="dlg-apikey-key" type="text" placeholder="e.g. abcdefXXXXXXXXXX" autocomplete="off" style="width:100%;font-family:monospace" />
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Secret</label>
+        <input class="oc-input" id="dlg-apikey-secret" type="password" placeholder="•••••••••••••••••••••••••••••••" autocomplete="new-password" style="width:100%;font-family:monospace" />
+      </div>
+    </div>
+    <div id="dlg-apikey-status" style="font-size:12px;min-height:18px;margin-bottom:10px"></div>
+    <div class="btn-row">
+      <button class="oc-btn" onclick="closeApikeyDialog()">取消</button>
+      <button class="oc-btn oc-btn-primary" id="dlg-apikey-save-btn" onclick="doSaveApiKey()">&#x2714; 驗證並保存</button>
+    </div>
+  </div>
+</div>
+
 <script>
+// ─── Settings Sub-tab Navigation (W-AUDIT-7c 2026-05-09) ────────
+// 純 frontend show/hide + localStorage 持久化；對齊 paper tab 的 ocPaperSubtabShow pattern
+// 但用獨立 namespace（避免與 paper sub-tab handler 互相干擾）。
+const _OC_SETTINGS_SUBTAB_LS_KEY = 'settings_active_subtab';
+const _OC_SETTINGS_SUBTAB_DEFAULT = 'engines';
+const _OC_SETTINGS_SUBTAB_VALID = ['engines', 'system', 'connection', 'debug'];
+
+/**
+ * 顯示指定 settings sub-tab，隱藏其他三個。
+ * 行為：切 .active class + aria-selected + hidden attribute + 持久化 localStorage。
+ * @param {string} name - one of 'engines' / 'system' / 'connection' / 'debug'
+ * @returns {boolean} true if switched, false if invalid/no-op
+ */
+function ocSettingsSubtabShow(name) {
+  if (_OC_SETTINGS_SUBTAB_VALID.indexOf(name) === -1) {
+    console.warn('[settings-subtab] invalid sub-tab name:', name);
+    return false;
+  }
+  const btn = document.getElementById('subtab-btn-' + name);
+  if (!btn) return false;
+  // 切 nav buttons
+  document.querySelectorAll('#settings-subtab-nav .oc-subtab-btn').forEach(b => {
+    const on = b.getAttribute('data-subtab') === name;
+    if (on) { b.classList.add('active'); b.setAttribute('aria-selected', 'true'); }
+    else    { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); }
+  });
+  // 切 content divs
+  _OC_SETTINGS_SUBTAB_VALID.forEach(key => {
+    const div = document.getElementById('subtab-' + key);
+    if (!div) return;
+    if (key === name) { div.classList.add('active'); div.removeAttribute('hidden'); }
+    else              { div.classList.remove('active'); div.setAttribute('hidden', ''); }
+  });
+  // 持久化（localStorage 失效時靜默 fail）
+  try { localStorage.setItem(_OC_SETTINGS_SUBTAB_LS_KEY, name); }
+  catch (e) { console.warn('[settings-subtab] localStorage write failed:', e); }
+  return true;
+}
+
+/** Page load 時讀 localStorage 恢復上次 active sub-tab。 */
+function ocSettingsSubtabRestore() {
+  let name = _OC_SETTINGS_SUBTAB_DEFAULT;
+  try {
+    const stored = localStorage.getItem(_OC_SETTINGS_SUBTAB_LS_KEY);
+    if (stored && _OC_SETTINGS_SUBTAB_VALID.indexOf(stored) !== -1) name = stored;
+  } catch (e) { /* localStorage 無法讀 → 用 default */ }
+  ocSettingsSubtabShow(name);
+  return name;
+}
+
+/** 在 4 個 sub-tab nav button 綁 click handler。 */
+(function _ocSettingsSubtabInit() {
+  const nav = document.getElementById('settings-subtab-nav');
+  if (!nav) return;
+  nav.querySelectorAll('.oc-subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ocSettingsSubtabShow(btn.getAttribute('data-subtab'));
+    });
+  });
+  ocSettingsSubtabRestore();
+})();
+
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-demo-control').innerHTML = ocExplain(
   'Demo 控制面板管理系统从"只读观察"到"Demo 交易"的切换流程。需要按照 Validate → Arm → Enable 的顺序逐步启用。每一步都有安全检查。',

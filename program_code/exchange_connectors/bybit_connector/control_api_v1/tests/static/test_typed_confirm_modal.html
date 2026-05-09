@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>W-AUDIT-7c openTypedConfirmModal contract test</title>
+<script src="/static/common.js"></script>
+<style>
+  body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+  .case { border: 1px solid #30363d; padding: 10px; margin: 8px 0; border-radius: 6px; }
+  .pass { color: #3fb950; }
+  .fail { color: #f85149; }
+  .pending { color: #d29922; }
+  button { margin: 4px 6px 4px 0; padding: 4px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h2>W-AUDIT-7c openTypedConfirmModal contract test</h2>
+<div id="results"></div>
+
+<button onclick="runCase1()">Case 1: 正確 phrase → resolve(true)</button>
+<button onclick="runCase2()">Case 2: 錯誤 phrase → 按鈕禁用</button>
+<button onclick="runCase3()">Case 3: 取消 → resolve(false)</button>
+<button onclick="runCase4()">Case 4: Esc 鍵 → resolve(false)</button>
+<button onclick="runCase5()">Case 5: case-sensitive (CONFIRM ≠ confirm)</button>
+<button onclick="runCaseAll()" style="background:#1f6feb;color:#fff">Run all manual cases</button>
+
+<script>
+const results = document.getElementById('results');
+function record(name, status, note) {
+  const div = document.createElement('div');
+  div.className = 'case ' + status;
+  div.innerHTML = '<strong>' + name + '</strong>: <span class="' + status + '">' + status.toUpperCase() + '</span>' + (note ? ' — ' + note : '');
+  results.appendChild(div);
+}
+
+// Case 1: typed correct phrase → resolve(true)
+async function runCase1() {
+  const p = openTypedConfirmModal({
+    title: 'TEST — Case 1',
+    body: '請鍵入 CONFIRM，按確認，預期 resolve(true)',
+    phrase: 'CONFIRM'
+  });
+  // simulate user typing
+  setTimeout(() => {
+    const input = document.getElementById('oc-tc-input');
+    input.value = 'CONFIRM';
+    input.dispatchEvent(new Event('input'));
+    setTimeout(() => {
+      document.getElementById('oc-tc-confirm').click();
+    }, 100);
+  }, 100);
+  const v = await p;
+  record('Case 1 typed CONFIRM', v === true ? 'pass' : 'fail', 'resolved=' + v);
+}
+
+// Case 2: confirm button must be disabled when phrase wrong
+async function runCase2() {
+  const p = openTypedConfirmModal({ phrase: 'XYZ' });
+  setTimeout(() => {
+    const input = document.getElementById('oc-tc-input');
+    const btn = document.getElementById('oc-tc-confirm');
+    input.value = 'WRONG';
+    input.dispatchEvent(new Event('input'));
+    const isDisabled = btn.disabled;
+    document.getElementById('oc-tc-cancel').click();
+    record('Case 2 wrong phrase keeps button disabled', isDisabled ? 'pass' : 'fail',
+      'btn.disabled=' + isDisabled);
+  }, 100);
+  await p;
+}
+
+// Case 3: cancel button → resolve(false)
+async function runCase3() {
+  const p = openTypedConfirmModal({ phrase: 'CONFIRM' });
+  setTimeout(() => document.getElementById('oc-tc-cancel').click(), 100);
+  const v = await p;
+  record('Case 3 cancel button', v === false ? 'pass' : 'fail', 'resolved=' + v);
+}
+
+// Case 4: Escape key → resolve(false)
+async function runCase4() {
+  const p = openTypedConfirmModal({ phrase: 'CONFIRM' });
+  setTimeout(() => {
+    document.getElementById('oc-typed-confirm-overlay').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+  }, 100);
+  const v = await p;
+  record('Case 4 Escape key', v === false ? 'pass' : 'fail', 'resolved=' + v);
+}
+
+// Case 5: case-sensitive — typing lowercase 'confirm' should NOT enable button
+async function runCase5() {
+  const p = openTypedConfirmModal({ phrase: 'CONFIRM' });
+  setTimeout(() => {
+    const input = document.getElementById('oc-tc-input');
+    const btn = document.getElementById('oc-tc-confirm');
+    input.value = 'confirm';
+    input.dispatchEvent(new Event('input'));
+    const isDisabled = btn.disabled;
+    document.getElementById('oc-tc-cancel').click();
+    record('Case 5 case-sensitive (lowercase rejected)', isDisabled ? 'pass' : 'fail',
+      'btn.disabled=' + isDisabled);
+  }, 100);
+  await p;
+}
+
+async function runCaseAll() {
+  results.innerHTML = '';
+  await runCase1();
+  await new Promise(r => setTimeout(r, 200));
+  await runCase2();
+  await new Promise(r => setTimeout(r, 200));
+  await runCase3();
+  await new Promise(r => setTimeout(r, 200));
+  await runCase4();
+  await new Promise(r => setTimeout(r, 200));
+  await runCase5();
+  record('ALL TESTS COMPLETE', 'pass', 'see above for individual results');
+}
+</script>
+
+</body>
+</html>
+</content>
+</invoke>

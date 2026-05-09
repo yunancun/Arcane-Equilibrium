@@ -649,7 +649,18 @@ async function saveProviderKey(provider, btn) {
 
 async function clearProviderKey(provider, btn) {
   if (!PROVIDER_INPUT_ID[provider]) { ocToast('未知供应商', 'error'); return; }
-  if (!confirm('确认清除 ' + provider + ' API Key？\n（删除 secrets 文件 + 移除当前进程 env）')) return;
+  // W-AUDIT-7c (2026-05-09): API Key clear 屬 governance critical 寫操作，
+  // 直接刪除 secrets 文件 + 移除進程 env。使用 typed-confirm 取代 native confirm() 防誤觸。
+  const ok = await openTypedConfirmModal({
+    title: '清除 API Key / Clear API Key — ' + provider,
+    body: '此操作將：\n  1. 刪除磁碟上的 secrets 文件\n  2. 從當前進程 env 移除 API key\n\n清除後該 provider 在 budget fallback chain 中變為不可用，\n相關 Layer 2 推理請求會 fallback 到下一個 provider。\n如需重新啟用，須重新輸入完整 API key。',
+    phrase: 'CLEAR',
+    confirmLabel: '確認清除 / Clear Key',
+    confirmClass: 'oc-btn-danger',
+    impact: provider + ' provider 立即離線；fallback chain 重新計算',
+    rollback: '需重新輸入 API key 才能恢復'
+  });
+  if (!ok) return;
   let origText;
   if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '清除中...'; }
   try {
