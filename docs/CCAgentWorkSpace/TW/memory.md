@@ -29,6 +29,23 @@
 | 2026-05-09 | 5/8 audit 30+ findings 24h 修復對抗性核實（W-AUDIT-1 closure 真實度查驗）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification.md` |
 | 2026-05-09 | v2 9 commits（`1bd55689` + `85804fbd` + `8226a67f` + `29f3b8f7` + `e8a29185` + `8dcc1f17` + `48401727` + `862e79b7` + `597e866d`）對抗性核實 — 78%→81% 真升 +3%，但 4 大 NI（NI-3/4/7/8）完全未碰 | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v2.md` |
 | 2026-05-09 | v3 5 commits（`faf2d131`→`da2aba11`，含 P0-V2-NEW-1 Donchian guard + P0-V2-NEW-2 wide_parameter_adjustment skill）+ PA redesign 473 行對抗性核實 — 81%→78% **倒退** -3%；7 NEW-ISSUE NI-15..21；PA redesign verdict = **應升 ADR + Amendment + Spec doc 三層登記**（不只 PA-workspace-only）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v3.md` |
+| 2026-05-09 | P0-V3-ADR-0021-ARCH-04 部分 — CONTEXT.md 「Alpha source taxonomy」5 詞條 + AMD-2026-05-09-03 Strategist Wide-Adjustment Skill + AMD-2026-05-09-04 Demo→LivePending Promotion Evidence Push（R4 派 ADR-0021 + ARCH-04，TW 負責 CONTEXT + 2 amendment）| `srv/CONTEXT.md` + `srv/docs/governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` + `srv/docs/governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` |
+
+## 2026-05-09 P0-V3-ADR-0021-ARCH-04 部分（TW + R4 共識落地）
+
+- **任務**：TW + R4 v3 報告達成共識「PA redesign 應升 ADR + Amendment + Spec doc 三層登記」。R4 派 ADR-0021 + ARCH-04 SPECIFICATION_REGISTER 條目；TW 負責 CONTEXT.md 5 詞條 + AMD-2026-05-09-03/04 兩 amendment。
+- **產出**：3 檔修改/新建：
+  1. `srv/CONTEXT.md` — 在 `### Engine modes` 後 / `### Decision Lease state machine (SM-02)` 前加新 H3 section「Alpha source taxonomy」，5 詞條（Alpha Surface Bundle / AlphaSourceTag / AlphaSourceRegistry / Hypothesis (governance object) / Per-alpha-source Live Promotion Gate），全帶 `_Avoid_` 反例
+  2. `srv/docs/governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` — AMD-2026-05-09-03 — c2ab7b1a freedom-not-gate 路徑記錄（30%→50% `max_param_delta_pct` + RuntimeMaxEnvelope 兜底，不加 supervised gate 在 Strategist 提案前）
+  3. `srv/docs/governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` — AMD-2026-05-09-04 — 48227607 promotion_evidence producer + V079 schema + cross-section consistency 範圍限制（採納 QC NEW-V3-2 push back，不冒充 PBO）
+- **格式對齊**：兩 amendment 沿用 AMD-2026-05-09-01/02 既有結構（H2 章節：Decision Summary / 設計理由 / Implementation Facts / Authority Boundary / Supersedes / References / Non-Goals）。中文為主敘述 + 英文技術名詞（Sharpe / PBO / DSR / RuntimeMaxEnvelope / V079 / SM-04 / LG-X-01 / shadow_mode / Decision Lease 等）。
+- **設計理由完整捕獲**：
+  - AMD-03 §2 三層說明「為什麼選 freedom-not-gate」：與 AMD-02 §1 Option A 配合 + 為什麼不加 supervised gate 在提案前 + risk surface 三維度（shadow / promotion / envelope）
+  - AMD-04 §3 完整採納 QC NEW-V3-2 push back，明文限制 `trial_sharpes` 範圍為 cross-section consistency，**不是** PBO；真 PBO 留待 R-3 Hypothesis Pipeline IMPL；§7 References 顯式列「QC v3 push back: NEW-V3-2」
+- **CONTEXT.md 詞條設計**：每條都標註「proposed (ADR-0021 R-N)」明示是 proposal 不是 active；每條附 `_Avoid_` 列出反例詞彙避免後續 prose 漂移；位置選在「Engine modes」與「Decision Lease state machine (SM-02)」之間 = 與其他 SM/EX H3 並列的詞彙骨幹位置
+- **未做**：(1) 無 commit/push（per prompt 指示「PM 主 session 統一」）(2) 不動 ADR-0021 / SPECIFICATION_REGISTER（R4 範圍）(3) 不動代碼 / 業務文件 / TODO.md / CLAUDE.md（TW 硬約束 1）
+- **驗收**：CONTEXT.md 新 section 與既有 SM/EX section 同 H3 級；2 amendment file 命名遵守 `YYYY-MM-DD--描述.md`；frontmatter 完整（對應 spec / 日期 / 作者 / 狀態 / 索引 / TODO 連結）；中文敘述為主英文技術名詞輔
+- **規範遵守**：CLAUDE.md §七「強制同步規則 + 雙語注釋」中文為主；不擴張到 ADR / SPECIFICATION_REGISTER（R4 範圍）；對抗性審視「為什麼選這個方案而非其他」全條 amendment 完整呈現；新 amendment 沿用 §九 / §十 命名 + 索引引用
 
 ## 2026-05-09 v3 對抗性驗證重點
 

@@ -123,12 +123,19 @@ pub struct AlphaSurface<'a> {
   - FAIL：snapshot_ts > 300s → `surface.funding_curve = None`
 - Retention：14 天（V### migration 帶 retention policy；MIT must-review）
 
-#### Tier 2.2 — `BasisCurveSnapshot`
+#### Tier 2.2 — `BasisCurveSnapshot`（**`requires_spot_capability: true`** — BB v3 NEW-8）
 - 用途：perp vs index basis curve cross-section
 - 字段：`symbols`、`basis_pct`、`perp_price`、`index_price`、`snapshot_ts_ms`、`source_tier`
 - 來源：Bybit `tickers` WS（既有 `funding_arb` 用 single symbol）+ aggregator
 - Refresh / Staleness：同 §2.3 Tier 2.1
 - Retention：14 天
+- **Execution 邊界（明文）**：
+  - **basis = observation-only signal until mainnet**
+  - Bybit demo 環境**不支援 spot lending execution**（與 funding_arb v2 retire 同因，ADR-0018）；perp 與 spot 之間真 cash-and-carry 在 demo 不可行
+  - 吃 `Basis` tag 的策略 ctor 必須 declare `requires_spot_capability: true`
+  - 在 demo / live_demo 環境（無 spot account）下，吃 `Basis` 的策略產生的 `StrategyAction` **必須 fail-closed**，不可進 IntentProcessor → IntentRouter 應有 `requires_spot_capability && !env_has_spot` 檢查
+  - 只有 mainnet + 真實 spot account 接通 + operator 顯式 sign-off 後才解封 execution path
+  - **反模式警示**：若忽略此邊界 → demo 累積 edge sample 全 paper-grade（同 funding_arb v2 demo n=13 -36.76 bps），graduate live 時必死
 
 #### Tier 2.3 — `OIDeltaPanel`
 - 用途：cross-symbol open interest delta（5m / 15m / 1h 三檔）
@@ -140,16 +147,27 @@ pub struct AlphaSurface<'a> {
 #### Tier 3.1 — `OrderflowFeatures`
 - 用途：per-symbol microstructure（microprice / queue imbalance / large-trade tape rolling stats）
 - 字段：`symbol`、`microprice`、`queue_imbalance`、`large_trade_count_60s`、`large_trade_volume_60s`、`snapshot_ts_ms`、`source_tier`
-- 來源：Bybit orderbook L1（既有 `best_bid` / `best_ask`）+ trade tape；W-AUDIT-8a Phase C **stub mock** + dummy data 為主，真接 留給 W-AUDIT-8d
+- 來源（Bybit V5 真實 levels 對齊；BB v3 NEW-5）：
+  - **Bybit V5 WS linear orderbook 真實 depth levels = `1 / 50 / 200 / 1000`，沒有 L25**
+  - W-AUDIT-8a 預設使用 `orderbook.50.{symbol}`（已預設訂閱），bids5/asks5 已由 parser extract
+  - 若 W-AUDIT-8d 真 IMPL 需要 deeper book（large resting order / queue depth tail），改 `orderbook.200.{symbol}`
+  - **禁止**任何「L25」字眼進 spec / IMPL / migration / healthcheck（Bybit endpoint validation 會打回）
+  - W-AUDIT-8a Phase C **stub mock** + dummy data 為主，真接留給 W-AUDIT-8d
 - Refresh / Staleness：tick-level（best-effort），WARN > 5s，FAIL > 30s
 - Retention：N/A（Tier 3 stub 暫不寫 PG）
 
-#### Tier 3.2 — `LiquidationPulse`
+#### Tier 3.2 — `LiquidationPulse`（**`requires_revival: true`** — BB v3 NEW-6）
 - 用途：liquidation cascade detection（cross-symbol）
 - 字段：`recent_events: Vec<LiquidationEvent>`（rolling 60s 窗口）、`cluster_score: f64`、`dominant_side: LiquidationSide`、`snapshot_ts_ms`
-- 來源：Bybit `allLiquidation` WS topic（**新接** — W-AUDIT-8a Phase C 真接）；Python writer 寫新 `market.liquidations` PG 表（V### migration 新增）
-- Refresh / Staleness：tick-level，WARN > 10s，FAIL > 60s
+- **狀態 dormant — 復活前置條件**：
+  - OpenClaw 於 **2026-04-06 已刪除** `allLiquidation` WS handler（字典手冊 `docs/references/2026-04-04--bybit_api_reference.md` line 990 證明）
+  - `market.liquidations` 表 reserved 保留，但 R-1 IMPL 必須**先付 +1 sprint 重接 WS handler + 重啟 writer**
+  - 復活前 surface field 永遠 `None`，**禁止 stub mock 數據**（避免「假 alpha source dispatched」污染 dispatch tracking metric）
+  - 策略 ctor declare `LiquidationCascade` 的，在 handler 復活前 strategy `on_tick` 必須觀測到 `surface.liquidation_pulse.is_none()` → fail-closed 跳過自身 alpha source
+- 來源（復活後）：Bybit `allLiquidation` WS topic + Python `liquidation_writer.py` 寫 `market.liquidations` PG 表（V### migration 新增）
+- Refresh / Staleness（復活後）：tick-level，WARN > 10s，FAIL > 60s
 - Retention：30 天（liquidation cascade 樣本稀疏 + 高價值，可獨立保留更久）
+- **Sprint 排程影響**：W-AUDIT-8a Phase C 原規劃內含 liquidation 真接，現需拆兩段 — Phase C 先 dormant + schema reserved；Phase C+1 sprint（單獨 sub-phase）做 WS handler revert + writer 重啟 + 真接
 
 #### Tier 4.1 — `EventAlert`
 - 用途：Scout `intel_objects` 真實 wire（當前 Scout 跑著但 Strategist 不真依賴）

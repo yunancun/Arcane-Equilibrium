@@ -48,6 +48,28 @@ being safe in one engine mode does not imply the same value or authority in the
 other two modes.
 _Avoid_: "shared config" when the code path must respect per-mode authority.
 
+### Alpha source taxonomy
+
+**Alpha Surface Bundle**:
+The proposed (ADR-0021 R-1) data-rich strategy input bundle: TA indicators + funding curve + basis curve + OI delta panel + orderflow + liquidation pulse + event alerts + sentiment panel. Replaces TickContext-only strategy interface.
+_Avoid_: "context bundle" (loses alpha semantics), "feature vector" (suggests ML feature, not policy input).
+
+**AlphaSourceTag**:
+A declared dependency on a specific alpha source (TA1m, TA5m, FundingSkew, Basis, OIDeltaPanel, OrderflowImbalance, LiquidationCascade, EventDriven, CrossAsset). Every strategy must declare its alpha sources at registration; Strategy Registry rejects all-`[TA1m]` proposals without QC waiver.
+_Avoid_: "feature tag" (ML-specific), "data source" (too generic).
+
+**AlphaSourceRegistry**:
+The proposed (ADR-0021 R-2) Python class tracking active / observing / deprecated / sunset alpha sources, used by Strategist Agent for inventory tracking and dynamic Sharpe-by-regime allocation.
+_Avoid_: "strategy registry" (already overloaded).
+
+**Hypothesis (governance object)**:
+The proposed (ADR-0021 R-3) first-class governance object at parity with Decision Lease. Records statement / null hypothesis / evidence contract / experiment target / verdict / audit chain. Every new strategy / parameter / risk budget must have an originating Hypothesis. State machine: DRAFT → REGISTERED → EXPERIMENTING → EVIDENCE_GATE → PROMOTED / REJECTED / EXPIRED.
+_Avoid_: "experiment" (loses governance weight), "test" (generic).
+
+**Per-alpha-source Live Promotion Gate**:
+The proposed (ADR-0021 R-4) replacement for "system-wide live_reserved" promotion model. LiveBudget(alpha_source_id, slice) allocates capital_cap_usd / max_concurrent_positions / max_drawdown_pct per alpha source. Each alpha source has independent promotion clock concurrent to others.
+_Avoid_: "per-strategy live promotion" (alpha-source != strategy), "live budget" alone.
+
 ### Decision Lease state machine (SM-02)
 
 **Decision Lease**:
