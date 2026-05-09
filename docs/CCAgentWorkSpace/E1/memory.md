@@ -5902,3 +5902,60 @@ E1 P0-V3-MIT-ROOT-CAUSE IMPL 完成；交 PM：
 3. PM commit + push（建議 message：`fix(p0-v3-mit-root-cause): edge_label_backfill add Pass 3 abandoned marker for stuck unfilled rows`）
 4. Linux deploy 後跑一次 catchup `python3 -m program_code.ml_training.edge_label_backfill --engine-mode demo --batch-limit 100000`
 5. PM 24h 後復測 `attribution_chain_ratio(window_hours=24)` 確認 ok_ratio 顯著改善
+
+
+---
+
+## 2026-05-09 — ml_training cron IPC __auth handshake fix
+
+### 任務背景
+operator 治理任務 — V3 sprint closure 後 24h delta 驗證發現 4 表 INSERT 全 0 row：bayesian_posteriors / ml_parameter_suggestions / foundation_model_features / weekly_review_log。Cron entry `17 3 * * *` 已註冊但「上次 fire 應發生過」操作員猜測。
+
+### 三層 RCA
+
+**Layer 1（cron 沒 fire）**：cron daemon active running，`/var/log/syslog` 從 5/2-5/9 一次 ml_training_maintenance 都沒進。但 script mtime `2026-05-09 18:41` 揭露真相 — entry 是今天 18:41 才裝的，下次 fire 是 5/10 03:17。**24h delta 驗證的時間窗口本來就在 entry 安裝之前，0 row 不奇怪**。
+
+**Layer 2（writer 不通）**：手動 force run（`OPENCLAW_ML_CRON_FORCE_AUDIT_JOBS=1` bypass weekday gate）後 3/4 表寫入：thompson=219、dl3=4、weekly=1；只 ml_parameter_suggestions=0。
+
+**Layer 3（optuna IPC）**：optuna_optimizer status=skipped，error=`param_ranges_unavailable`，detail `param_ranges_source=unavailable:RuntimeError`。直接 `nc -U /tmp/openclaw/engine.sock` 投測得 `{"error":"first message must be __auth"}`。Engine 開了 `OPENCLAW_IPC_SECRET` 強制 HMAC handshake，但 `optuna_optimizer._send_ipc_command` 是手寫的 lightweight client 沒處理 auth。
+
+### Fix（2 檔，commit 3d8d543e）
+1. `helper_scripts/cron/ml_training_maintenance_cron.sh`：注入 `OPENCLAW_IPC_SECRET_FILE` 對齊 restart_all.sh 的默認 path（cron 環境不繼承 daemon env，必走 file-based secret）
+2. `program_code/ml_training/optuna_optimizer.py`：
+   - 加 `_resolve_ipc_secret()` — env-first / file-fallback 對齊 `secret_runtime.get_secret_value`
+   - 加 `_read_response_line()` — 共用 reader（auth + business call）
+   - 改 `_send_ipc_command()` — connect 後若 secret 存在先送 `__auth`（HMAC-SHA256(secret, str(ts))），再送業務 call；wire format 對齊 `ipc_client._authenticate`：id=0、ensure_ascii=False、authenticated=true 驗證
+
+### 驗證
+- 9/9 unit test 通過（resolve_ipc_secret 5 case + send_ipc_command auth wire format 4 case）
+- Linux force-run after fix：`optuna_optimizer status=ok`、`param_ranges_source="ipc"`、`fills=25 < 80, status=insufficient_data`（真實業務 ma_crossover/BTCUSDT/demo 30d 只 29 fills 不夠 80 樣本，**非 IPC 問題**）
+
+### 4 表計數 delta
+| 表 | manual run #1 | manual run #2 (after fix) |
+|---|---|---|
+| bayesian_posteriors | 219 (idempotent UPSERT) | 219 |
+| ml_parameter_suggestions | 0 (RuntimeError) | 0 (insufficient_data 25<80) |
+| foundation_model_features | 4 | 8 (+4) |
+| weekly_review_log | 1 | 2 (+1) |
+
+3/4 表 INSERT 路徑驗證可寫；ml_parameter_suggestions=0 是業務樣本不夠，等 demo 累積到 80 fills 自然會寫。
+
+### 設計決策 / 教訓
+1. **operator brief 把 weekly cron 當 daily 來檢**：5 個 audit job (thompson/optuna/cpcv/dl3/weekly) 都用 `_skip_not_due()` 限制 UTC weekday=6 (Sunday)，by FA D-10 design = weekly job。**24h 內期待 row 是錯誤期望**。
+2. **PG empirical 三段驗證範式**：pre baseline → manual fire → post count delta，足以拍板「cron entry sound 但寫入路徑通否」。比看 syslog/snapshot 高一階。
+3. **IPC auth handshake 跨入口統一**：除 ipc_client.py 外，`optuna_optimizer.py` 是另一獨立 IPC entry，當初寫的時候 OPENCLAW_IPC_SECRET 還沒成為 default 強制（SEC-08 之前），現在補 auth = 把 ml_training 接回統一 wire format。教訓：**寫獨立 IPC 客戶端時必須查 connection.rs 的 first-message 規則**，否則 silent reject。
+4. **operator 提示 logs/cron/ 路徑錯誤**：腳本本身寫到 `$DATA/logs/`（即 `/tmp/openclaw/logs/`），不是 `~/BybitOpenClaw/srv/logs/cron/`。`/tmp/openclaw/logs/ml_training_maintenance_cron.log` 才是真實 log path。**修腳本前先讀腳本 — 不盲信 brief**。
+5. **commit 前 git status 多 session WIP**：本機 9 個其他改動（ADR/GUI/E1a memory）是別 session work in progress；用 `git add` 只 stage 本任務 2 檔，commit 不吸 WIP（multi-session race 守則）。
+
+### 後續 follow-up（建議 P2 ticket）
+- **P2-ML-CRON-1**：lightgbm 沒裝 → cpcv_validator + quantile_trainer 全部 fail；應該添 `pip install lightgbm` 到 requirements.txt 或 deploy script
+- **P2-ML-CRON-2**：dl3_foundation 4/4 model_unavailable（chronos-t5-tiny、timesfm-1.0-200m）— 需驗證 model file 路徑或 download
+- **P2-ML-CRON-3**：optuna_optimizer 的 fills 累積（demo 30d 累積到 80 fills 才有 row）— 監控 ma_crossover/BTCUSDT 的 demo fill rate；若一直 <80 考慮降 `OPENCLAW_ML_CRON_OPTUNA_MIN_FILLS` 或開更多 strategy/symbol pair
+- **P2-ML-CRON-4**：weekday=6 weekly schedule 增加 P2 healthcheck `[57] check_ml_training_weekly_fire`：每週日 04:00 後 check ml_training_maintenance_status.json 是否有 `started_epoch` 在 03:17-04:00 之間
+
+### Output (PM 下一步)
+1. Review report `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-09--ml_training_cron_zero_row_rca.md`
+2. 等明天 5/10 03:17 cron 自動 fire 一次驗證真實 cron 路徑（IPC secret 在 cron env 是否正確 resolve），如失敗 E2 review optuna auth handshake fallback 行為
+3. 評估是否需要把 lightgbm / chronos / timesfm 補到 deploy（目前 audit job 部分 silent error）
+4. 本變動範圍：~120 行 IPC auth handshake + 9 行 cron.sh env injection ≈ 130 行；建議 E2 review（>50 行業務邏輯，跨 IPC wire format + auth）
+
