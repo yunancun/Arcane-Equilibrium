@@ -2194,3 +2194,71 @@ load governance-tab.js 時 100% throw，**整個 governance tab 所有行為 bro
 - HEAD `8b766a43` (E1a memory + report) 含 round 1 IMPL bug，不應視為「ready to deploy」；round 2 working tree 才 ready
 - E2 round 1 RETURN-TO-E1a (`9f030e5e`) 與 E4 round 1 catch 同 bug 是好現象（雙 catch 互驗）；round 2 land working tree 後 E4 對 working tree 重驗 PASS
 - E4 commit 範圍只含自己的 test + memory + report，**不吞** E1a round 2 working tree fix（E1a / PM 自己 commit）
+
+---
+
+## 2026-05-09 ml_training cron IPC fix Round 2 regression baseline + 5/10 SOP 簽署（HEAD `cf291d63`）
+
+**任務範圍**（E2 round 2 APPROVED 後 E4 純 baseline 簽署 + observe SOP）：
+- 工作鏈：E1 round 1 (`3d8d543e` + `fac9e386`) → E2 round 1 RETURN-TO-E1 (`b3607c10`) → E1 round 2 (`1448e0a1`，補 12 regression test + LOW-1 fix) → E2 round 2 APPROVED (`cf291d63`，含 mutation 重現驗 mock 不掩蓋)
+- 業務改動極小（cron sh +9 / IPC handshake +98/-33 / LOW-1 -1 行），E4 主要做 (1) baseline 雙跑 deterministic 確認 + (2) 5/10 03:17 cron real-fire SOP 文檔化
+
+**Verdict**：✅ **PASS**
+
+### Pytest baseline（Mac + Linux）
+
+| 環境 | 跑 | passed | failed | skipped | 解讀 |
+|---|---|---|---|---|---|
+| Mac ml_training | 1st | 365 | 0 | 31 | dev_disabled / Linux runtime 才有的 33 test 預期 skip |
+| Mac ml_training | 2nd | 365 | 0 | 31 | deterministic ✅ |
+| Linux ml_training | 1st | 398 | 0 | 29 | 與 E2 round 2 自跑 baseline 一致 |
+| Linux ml_training | 2nd | 398 | 0 | 29 | deterministic ✅ |
+| Linux test_optuna_ipc_handshake.py | 1st | 12 | 0 | 0 | 12/12 in 0.12s |
+| Linux test_optuna_ipc_handshake.py | 2nd | 12 | 0 | 0 | 12/12 in 0.11s deterministic ✅ |
+
+**baseline 不退化**：兩端 0 fail，新增 12 test 全綠 deterministic（雙跑同數）。Linux warning 3 條 (parquet_etl utcnow + realized_edge_stats utcnow) 為 pre-existing deprecation，與本次改動無關。
+
+### 5/10 03:17 cron real-fire SOP script
+
+**Path**：`srv/helper_scripts/observe/2026_05_10_cron_real_fire_check.sh`（+265 行 / executable）
+
+**設計**：
+- `--before`：5/10 03:17 UTC 前採集 baseline（4 表 row count snapshot 寫 `baseline_2026_05_10_cron.json`）
+- `--after`：5/10 03:30 UTC 後跑 4 觀察點 + 比對 delta
+
+**4 觀察點**（對齊 E2 round 1 review report SQL 觀察點）：
+1. cron log 抓 `2026-05-10 03:1X` 時間戳（驗 cron 真 fire）
+2. optuna_optimizer.detail.param_ranges_source = `"ipc"` 不是 `unavailable:RuntimeError`（驗 IPC __auth 通）
+3. weekly 5 audit job (thompson/optuna/cpcv/dl3/weekly_report) 全部 fire 在 status_json
+4. PG 4 表 row count delta：weekly_review_log 至少 +1（必 INSERT）；其他依 fills 樣本
+
+**通過判定**：
+- ✓ log 有 03:1X 紀錄
+- ✓ optuna status=ok / param_ranges_source=ipc
+- ✓ 5 weekly job 全部出現（個別 job 內部 error 標 WARN 不 FAIL，屬獨立議題）
+- ✓ wrl delta ≥ 1
+
+**Dry-run 驗證**（5/9 18:58 UTC，5/10 cron 還沒到）：
+- `--before` 採 baseline 成功：`bp=219 / mps=0 / fmf=8 / wrl=2`（注：`mps=0` 是 E2 review Q4 確認的 fills<80 樣本不足，不是 IPC fail）
+- `--after` 行為符合預期：[1/4] log FAIL（時間還沒到，正確）/ [2/4] IPC PASS（已通）/ [3/4] 5 job fire（cpcv:error 標 WARN）/ [4/4] delta=0 FAIL（時間還沒到，正確）
+
+**安全設計**：
+- PG 密碼從 `~/BybitOpenClaw/secrets/environment_files/basic_system_services.env` 動態 source（不 hardcode）
+- psql stderr 重定向 `2>/dev/null` 避免 PG WARNING 污染 baseline file
+- 跨 phase 設計（before/after 分開跑），避免一次調用 lock 拒 spawn
+- 對 missing baseline 有守（full mode 退路：直接 print usage 不亂跑）
+
+### Mock 安全審查（complement E2 round 2）
+
+E2 round 2 已對新 12 test 做 mutation review（commit `cf291d63` 含 5 維度 mutation：authentication mute / token-strict null / wire-format key 重排序 / fail-soft OSError 改 raise / silent skip 重引），E4 不重複；但確認本身範圍：
+- 0 業務邏輯 mock（純 socket / hashlib / hmac / OS env）
+- subprocess 真實 socket pair 走 wire byte（test_byte_equal_authenticate_payload）
+- monkeypatch + tmp_path file IO 是 IO 邊界 mock 屬合規
+
+### 經驗教訓（追加 E4 memory）
+
+1. **5/10 SOP 必先在 5/9 dry-run** — 確認 PG path 通 + ssh trade-core 可達 + status_json 結構穩定（避免明早 03:30 才發現 SOP 自己 broken）
+2. **Pre-existing baseline 對齊兩端**：Mac 365/0/31 與 Linux 398/0/29 差異 = 33 test 預期 skip on Mac dev_disabled；E4 必明標兩端 baseline，不能只信一端
+3. **PG psql stderr 在 At 模式仍會印 collation WARNING**：必 `2>/dev/null` 屏蔽，否則 row count 解析會吃進 noise
+4. **business改動小 ≠ E4 範圍小**：純 test commit 仍要做 deterministic 雙跑 + cross-host baseline + Linux runtime 真實打 SOP（不是 Mac mock）；E2 round 2 自跑 Linux pytest 不能省略 E4 重跑驗證
+5. **SOP script 設計反模式 = 一次跑只能單向**：必須拆 `--before` / `--after` 兩 phase，否則無法做 baseline → cron fire → delta 比對閉環
