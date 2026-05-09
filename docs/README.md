@@ -166,15 +166,17 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `governance_dev/2026-05-08--w_c_lease_router_authorized.md` | W-C Decision Lease router evidence-mode operator authorization record |
 | `governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` | AMD-2026-05-02-01 + §5.4.1 W-C early evidence flag addendum |
 | `governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md` | AMD-2026-05-03-01 Wave 7 P5 IMPL accepted / deploy blocked split |
-| `governance_dev/amendments/2026-05-09--SM-05_executor_shadow_mode_polling_design.md` | AMD-2026-05-09-01 draft SM-05 Executor shadow-mode polling design; blocked by P0-DECISION-AUDIT-2 |
+| `governance_dev/amendments/2026-05-09--SM-05_executor_shadow_mode_polling_design.md` | AMD-2026-05-09-01 accepted SM-05 Executor shadow-mode polling policy; F-01 implementation pending |
+| `governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md` | AMD-2026-05-09-02 operator decision audit closure for P0-DECISION-AUDIT-2/4/5 |
 | `governance_dev/SPECIFICATION_REGISTER.md` | SM/EX/DOC/REF/ARCH/AUDIT/LG-X/OPS-X specification register, updated through W-AUDIT-1 + LG-X-05 catch-up |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_partial_f15_f17_sm05.md` | PM sign-off report for W-AUDIT-3 partial F-15/F-17/SM-05 checkpoint |
 | `CCAgentWorkSpace/Operator/2026-05-09--w_audit_3_partial_f15_f17_sm05.md` | Operator-facing copy of W-AUDIT-3 partial checkpoint report |
 | `adr/0015-openclaw-control-plane-repositioning.md` | ADR-0015: OpenClaw is Control Plane/Gateway, not trading conductor |
 | `adr/0016-decision-lease-router-evidence-mode.md` | ADR-0016: Decision Lease router flag may run as shadow evidence |
 | `adr/0017-scanner-is-evidence-not-authority.md` | ADR-0017: scanner is always-on evidence infrastructure, not authority |
-| `adr/0018-funding-arb-v2-deprecation-watch.md` | ADR-0018: funding_arb V2 remains disabled pending audit / operator verdict |
+| `adr/0018-funding-arb-v2-deprecation-watch.md` | ADR-0018: funding_arb V2 retired from active strategy set; W-AUDIT-6 cleanup pending |
 | `adr/0019-github-issues-active-tracker.md` | ADR-0019: GitHub Issues active external tracker; git remains SoT |
+| `adr/0020-layer2-manual-supervisor-only.md` | ADR-0020: Layer2 is manual supervisor escalation, not autonomous loop |
 | `architecture/2026-05-06--openclaw_control_plane_repositioning.md` | ARCH-02: OpenClaw control-plane repositioning |
 | `architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md` | ARCH-03 parent: Agent Decision Spine engineering plan |
 | `architecture/multi_agent_rework_2026-05-05/AgentTodo.md` | Historical AgentTodo milestone board for MAG-010..084 |
