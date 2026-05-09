@@ -1997,7 +1997,8 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 
 - `P0-NEW-VULN-2` is runtime-verified: `e97a333b` emits non-production
   lease-bypass audit rows, V078 is applied on Linux, and
-  `learning.lease_transitions` has 2 `BYPASS` rows for `demo` / `live_demo`.
+  `learning.lease_transitions` is nonzero with `BYPASS` rows for `demo` /
+  `live_demo` (final spot-check rows=103).
 - `P0-DECISION-AUDIT-2/4/5` is closed by AMD-2026-05-09-02 and ADR updates:
   SM-05 Option A, selected five-strategy verdicts, legacy `openclaw_core`
   sunset candidates, and Layer2 manual/supervisor-only.
