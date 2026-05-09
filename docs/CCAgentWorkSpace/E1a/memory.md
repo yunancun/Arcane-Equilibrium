@@ -52,6 +52,7 @@ function updateBudgetDisplay(remaining) { ... }
 | 2026-04-29 | Learning tab 区块 E「影子 vs 真仓」误导文案修正 → 「Demo 引擎 vs LiveDemo 引擎成交」 | `.claude_reports/20260429_191942_e1a_gui_shadow_vs_live_text_fix.md` |
 | 2026-05-09 | W-AUDIT-7c GUI 三項修復（typed-confirm modal + Settings sub-tab + 2 governance confirm replace） | `workspace/reports/2026-05-09--w_audit_7c_gui_three_fix.md` · commit 9e265ba9 |
 | 2026-05-09 | W-AUDIT-7c **Round 2** fix（A3 verdict FALSE_CLOSED 後 9 項缺陷修補）— SyntaxError 整檔 parse fail / fixture garbage / button race / cancel toast / pending list 細節展示 | `workspace/reports/2026-05-09--w_audit_7c_round2_fix.md` · commit `0fbed710` |
+| 2026-05-09 | W-AUDIT-7c **Round 3** fix（E2 RETURN HIGH-1 silent unhandled rejection + 2 cosmetic）— 3 處 await openTypedConfirmModal 包 try/catch + ok→proceed rename + 英文 case-sensitive 注釋刪 + Case 7 singleton race fixture | `workspace/reports/2026-05-09--w_audit_7c_round3_fix.md` |
 
 ## F5 教訓（2026-04-26）
 
@@ -320,3 +321,23 @@ for-loop 內 `okCount++` / `failCount++` 之外，必收 `failedChangeIds.push(c
 
 ### `event.currentTarget` 在 inline `onclick="bulkAudit('approve')"` 模式下 reachable
 HTML 內 `<button onclick="bulkAudit('approve')">` 點擊時，`bulkAudit` 函數體內 `event` global ref 仍指向 click event；`event.currentTarget` 是觸發 button DOM。**規律**：inline onclick handler 內呼叫的 fn 可直接用 `typeof event !== 'undefined' && event && event.currentTarget` 三層 guard 拿 trigger button，不需修 HTML 改傳 `this` 參數（會破壞 caller 兼容）；jsdom 測試時 `w.event = { currentTarget: btn }` mock 即可。
+
+## W-AUDIT-7c Round 3 fix 教訓（2026-05-09，E2 senior catch HIGH-1）
+
+### Singleton guard reject 必由 caller 接，否則「不靜默」初衷被 finally 反噬
+Round 2 [#7] 在 `openTypedConfirmModal` 加 singleton guard `Promise.reject(new Error('modal already open'))`，立意是「不允許併發雙開」；但 caller 端 3 個 `await openTypedConfirmModal(...)` 寫法是 `try { await ... } finally { btn.disabled = false }` 不接 catch — 結果是：(1) JS unhandled promise rejection → console error user 看不到 (2) finally 仍跑 → trigger button 重新可點 → user 誤判「按了沒反應，再點一次」 → 違背 round 2 [#7] 設計初衷。**規律**：singleton helper 加 reject 路徑時，必同時 retrofit 所有 caller 用 try/catch 包 await；單方面在 helper 加防護 + caller 不接 = 設計矛盾，比沒防護還糟（user 行為更難預測）。E2 senior view catch 出 A3 (focus on UX flow) 漏的 lexical-scope contradiction。
+
+### `try { let proceed; ...; } catch { ... }` 兩段式 await 處理
+原本 `const proceed = await modalCall;` 一行寫法是「成功路徑 + cancel false 路徑」二態；加 try/catch 後變三態：(a) reject (singleton/unexpected) → toast warn/error + return (b) resolve(false) cancel → toast neutral + return (c) resolve(true) proceed → 後續業務。寫法：先 `let proceed;` 再 `try { proceed = await modal; } catch (err) { ... return; }` 然後 `if (!proceed) { ... return; }` 最後業務。三段都加 `return; // finally 會 re-enable button`。**規律**：async modal call 必三態完整收口；catch 與 cancel 不可合併（cancel 是有意 user choice，singleton reject 是 race condition / unexpected error），UX feedback 用不同 toast type（neutral vs warn/error）反映語意差異。
+
+### `const ok` vs `const proceed` rename = future-proofing footgun 預防
+Round 2 bulkAudit rename `const ok` → `const proceed` 因為 outer `const ok` + inner counter `let ok = 0` 衝突；confirmApproveRecovery / clearProviderKey 沒 rename 因為 outer `const ok` + 沒衝突的 inner var。E2 round 2 + A3 round 2 都點到「兩處不一致 = future-proofing footgun」。雖然不同 function scope 不衝突，但下次 maintainer 從 bulkAudit copy-paste 到別處 refactor 出 inner counter `ok` 就立刻爆 SyntaxError。round 3 統一全部 rename 成 `proceed`。**規律**：同 module 內 modal-await 結果變數命名要求 100% consistency（`proceed`），即使單獨看不衝突；naming consistency 是低成本 future-proofing。
+
+### 英文 inline 注釋預設刪（2026-05-05 governance change）
+common.js 1919 殘留 `// case-sensitive match; trim trailing whitespace to avoid false-negative` 是 round 2 修改時忘清的英文重複注釋；中文版 1918 行已自存。E2 + A3 都點到。**規律**：2026-05-05 廢除 bilingual mandate 後，新代碼僅中文；既有中英對照不主動清，但**「修改既有 block 時移除英文只保留中文」** 是 governance rule。round 3 修法：直接 Edit 刪英文行不留 placeholder。
+
+### jsdom Case 7 fixture 模擬 caller 包 try/catch 才能驗 'modal already open' 路徑
+直接 await 第二次 modal 在 jsdom 跑出 unhandled rejection；Case 7 設計 = `try { await second } catch (err) { secondError = err; }` 模擬正確 caller 行為，斷言 `secondError.message === 'modal already open'`。如果直接 await 不接 catch，jsdom 會 emit unhandledrejection event，測試 framework 看不出對錯。**規律**：jsdom singleton race smoke 必模擬「正確包 try/catch 的 caller」，這也順便驗證了 caller 端 3 個 callsite 的 try/catch pattern 能正確接 reject。
+
+### A3 漏 HIGH-1 vs E2 catch HIGH-1 — multi-reviewer 不同視角互補
+A3 round 2 verdict TRUE_CLOSED 8.4/10（B+）9/9 brief 項全 PASS — A3 從 user-facing UX flow 看（「modal 打開了 / cancel 了 / typed correct phrase 了 / button race fixed 了」），4 個 happy path 角度都 PASS 不疑。E2 senior view 從 promise lifecycle + lexical scope 看 — 看出 caller 端 await 沒 catch + helper reject + finally re-enable 三個 trace 合起來 = silent bug。**規律**：A3 (UX-focused review) 與 E2 (senior code review) 同 round 都跑必要；A3 verdict TRUE_CLOSED 不是 commit 終點，E2 verdict 才是 RETURN/APPROVED 二選一的 gate；多 reviewer 不同視角互補才能 catch lexical-level 矛盾。

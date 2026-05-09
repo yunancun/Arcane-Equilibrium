@@ -22,6 +22,7 @@
 <button onclick="runCase3()">Case 3: 取消 → resolve(false)</button>
 <button onclick="runCase4()">Case 4: Esc 鍵 → resolve(false)</button>
 <button onclick="runCase5()">Case 5: case-sensitive (CONFIRM ≠ confirm)</button>
+<button onclick="runCase7()">Case 7: singleton race (round 3 HIGH-1)</button>
 <button onclick="runCaseAll()" style="background:#1f6feb;color:#fff">Run all manual cases</button>
 
 <script>
@@ -105,6 +106,32 @@ async function runCase5() {
   await p;
 }
 
+// Case 7 (round 3 HIGH-1): 同時開兩個 modal → 第二次必 reject('modal already open')
+//   driver caller 必須收到 toast 'modal already open'，而非 silent unhandled rejection。
+//   本 fixture 模擬 caller 包 try/catch 並 record 結果。
+async function runCase7() {
+  // 第一次開：正常 pending
+  const p1 = openTypedConfirmModal({ phrase: 'CONFIRM', title: 'TEST — Case 7 first modal' });
+  // 第二次開（同步）：應立即 reject
+  let secondError = null;
+  try {
+    await openTypedConfirmModal({ phrase: 'CONFIRM', title: 'TEST — Case 7 second modal' });
+  } catch (err) {
+    secondError = err;
+  }
+  // 關掉第一個 modal 讓 promise resolve
+  setTimeout(() => {
+    const cancel = document.getElementById('oc-tc-cancel');
+    if (cancel) cancel.click();
+  }, 100);
+  await p1;
+  const isModalAlreadyOpenError = !!(secondError && secondError.message === 'modal already open');
+  record('Case 7 singleton race rejects 2nd open',
+    isModalAlreadyOpenError ? 'pass' : 'fail',
+    'secondError=' + (secondError ? secondError.message : 'null') +
+    ' (expect "modal already open")');
+}
+
 async function runCaseAll() {
   results.innerHTML = '';
   await runCase1();
@@ -116,6 +143,8 @@ async function runCaseAll() {
   await runCase4();
   await new Promise(r => setTimeout(r, 200));
   await runCase5();
+  await new Promise(r => setTimeout(r, 200));
+  await runCase7();
   record('ALL TESTS COMPLETE', 'pass', 'see above for individual results');
 }
 </script>

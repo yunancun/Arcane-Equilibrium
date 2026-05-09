@@ -1916,7 +1916,6 @@ function openTypedConfirmModal(options) {
     }
     function checkPhrase() {
       // case-sensitive 比對；trim 避免尾部空白誤判
-      // case-sensitive match; trim trailing whitespace to avoid false-negative
       var typed = (inputEl.value || '').replace(/\s+$/, '');
       confirmBtn.disabled = (typed !== phrase);
     }

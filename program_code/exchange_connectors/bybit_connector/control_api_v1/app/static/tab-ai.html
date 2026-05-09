@@ -657,16 +657,28 @@ async function clearProviderKey(provider, btn) {
   let origText;
   if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '清除中...'; }
   try {
-    const ok = await openTypedConfirmModal({
-      title: '清除 API Key / Clear API Key — ' + provider,
-      body: '此操作將：\n  1. 刪除磁碟上的 secrets 文件\n  2. 從當前進程 env 移除 API key\n\n清除後該 provider 在 budget fallback chain 中變為不可用，\n相關 Layer 2 推理請求會 fallback 到下一個 provider。\n如需重新啟用，須重新輸入完整 API key。',
-      phrase: 'CLEAR',
-      confirmLabel: '確認清除 / Clear Key',
-      confirmClass: 'oc-btn-danger',
-      impact: provider + ' provider 立即離線；fallback chain 重新計算',
-      rollback: '需重新輸入 API key 才能恢復'
-    });
-    if (!ok) {
+    // round 3 fix HIGH-1：await openTypedConfirmModal 必包 try/catch；singleton guard reject 不靜默。
+    // round 3 fix LOW-1：rename `const ok` → `let proceed` 與 governance-tab.js 一致避免 future-proofing footgun。
+    let proceed;
+    try {
+      proceed = await openTypedConfirmModal({
+        title: '清除 API Key / Clear API Key — ' + provider,
+        body: '此操作將：\n  1. 刪除磁碟上的 secrets 文件\n  2. 從當前進程 env 移除 API key\n\n清除後該 provider 在 budget fallback chain 中變為不可用，\n相關 Layer 2 推理請求會 fallback 到下一個 provider。\n如需重新啟用，須重新輸入完整 API key。',
+        phrase: 'CLEAR',
+        confirmLabel: '確認清除 / Clear Key',
+        confirmClass: 'oc-btn-danger',
+        impact: provider + ' provider 立即離線；fallback chain 重新計算',
+        rollback: '需重新輸入 API key 才能恢復'
+      });
+    } catch (err) {
+      if (err && err.message === 'modal already open') {
+        ocToast('已有確認對話框打開，請先完成當前操作 / Another confirm dialog is open', 'warn');
+      } else {
+        ocToast('開啟確認對話框失敗 / Open confirm dialog failed: ' + (err && err.message || err), 'error');
+      }
+      return; // finally 會 re-enable button
+    }
+    if (!proceed) {
       ocToast('已取消清除 ' + provider + ' / Clear cancelled', 'neutral');
       return;
     }
