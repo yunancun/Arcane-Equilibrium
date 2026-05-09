@@ -18,7 +18,7 @@
 > **SSOT 規則 / SSOT Rule**：本檔為 Bybit endpoint 唯一字典；新增/修改端點時 **同 commit** 更新本檔。
 > This file is the single source of truth for Bybit endpoints; add/modify endpoints in same commit as dictionary update.
 
-**版本**: v1.1 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正
+**版本**: v1.2 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正
 
 ---
 
@@ -134,7 +134,7 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 - **Input**:
   - `category: &str` — 品類
   - `symbol: &str` — 交易對
-  - `interval: &str` — 統計間隔 ("5min", "15min", "30min", "1h", "4h", "1d")
+  - `interval: &str` — Rust 方法參數；發送到 Bybit 時必須映射為 request key `intervalTime`，不是 `interval`。值域：("5min", "15min", "30min", "1h", "4h", "1d")。
   - `limit: Option<u32>` — 數量
   - `start: Option<u64>`, `end: Option<u64>` — 時間範圍 ms
 - **Output**: `BybitResult<Vec<OpenInterestRecord>>`
@@ -168,7 +168,7 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 - **Bybit 路徑**: `GET /v5/market/account-ratio`
 - **Input**:
   - `symbol: &str` — 交易對
-  - `period: &str` — 統計週期 ("5min", "15min", "30min", "1h", "4h", "1d")
+  - `period: &str` — Bybit request key；目前 Rust poller 只使用 `"1h"`。官方 endpoint/api-explorer 2026-05-09 仍列 ("5min", "15min", "30min", "1h", "4h", "1d")，但 enum `dataRecordingPeriod` 頁列 ("5min", "15min", "30min", "1h", "4h", "4d")，兩處官方文檔互相漂移。若新增日級 polling，先做 exchange smoke 確認 `"1d"` vs `"4d"`，再同 commit 更新本字典與測試。
   - `limit: Option<u32>` — 數量
 - **Output**: `BybitResult<Vec<LongShortRecord>>`
   ```
@@ -679,6 +679,22 @@ Client 創建：`AccountManager::new()` — 無需 Arc<BybitRestClient>，在調
 
 ---
 
+### 1.5a User / API Key Validation — `settings_routes.py`
+
+#### query_api_key
+- **服務**: 驗證 Bybit API key/secret 是否能完成簽名 REST 調用，並讀取 key 元資料/權限。這是 Python settings GUI 的 credential validation path；不是 Rust trading hot path，也不授予 live/session/trading authority。
+- **調用**: `_validate_bybit_credentials(api_key, api_secret, slot)`
+- **Bybit 路徑**: `GET /v5/user/query-api`
+- **Input**:
+  - signed headers: `X-BAPI-API-KEY`, `X-BAPI-SIGN`, `X-BAPI-TIMESTAMP`, `X-BAPI-RECV-WINDOW`, `X-BAPI-SIGN-TYPE=2`
+  - no query/body payload; signature preimage is `timestamp + api_key + recv_window + ""`
+  - slot routing: `demo` and `live_demo` validate against `https://api-demo.bybit.com`; `live` validates against `https://api.bybit.com`
+- **Output**: Bybit V5 response with `retCode`/`retMsg` and API-key metadata/permissions in `result`.
+- **關聯程式**: `program_code/exchange_connectors/bybit_connector/control_api_v1/app/settings_routes.py:_VALIDATE_PATH` and `_validate_bybit_credentials()`
+- **邊界**: success here only proves credential validity for the chosen Bybit environment. True-live still requires Operator role, `live_reserved`, Rust mainnet env gate, non-empty live secret slot, and signed `authorization.json`.
+
+---
+
 #### set_hedging_mode
 - **服務**: 啟用或禁用帳戶級對沖模式。
 - **調用**: `client.set_hedging_mode(rest_client, hedging)`
@@ -1004,7 +1020,19 @@ Topic 生成函數（`multi_interval_topics.rs` — 2026-04-19 E5-P2-3 rename）
 
 ---
 
-### 2.3 Shadow Order Sync Channel — 影子訂單同步通道
+### 2.3 G9-02 Unknown Handler Guard — `ws_unknown_handler_guard.rs`
+
+- **服務**: 對公共/私有 WS 已連線但持續出現未知 topic、`handler not found`、或 dispatcher 無匹配分支的場景提供強制重連防線，避免 subscription set 已腐化但 TCP/heartbeat 仍健康的靜默失敗。
+- **Public WS 接線**: `ws_client/dispatch.rs::process_message()` 對未匹配 topic 調用 `UnknownHandlerGuard::record_unknown()`；達閾值且 env-gate armed 時返回 `ProcessOutcome::ForceReconnect`，`ws_client/run_loop.rs` 關閉 write half 並落入既有 reconnect + cached subscriptions 重訂閱路徑。
+- **Private WS 接線**: `bybit_private_ws.rs::parse_message_with_guard()` 僅在 auth 後主循環區分 control message 與未知 data-shaped topic；達閾值時返回 `PrivateMsgOutcome::ForceReconnect`，並重新走 `BybitEnvironment::private_ws_topics()` 訂閱。
+- **Env-gate**: `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED=1` 才 arm；未設、`0`、`true`、`yes`、typo 都是 default-off。BB 2026-05-08 audit 報告裡的 `OPENCLAW_WS_UNKNOWN_GUARD_ARMED` 是審計 shorthand，runtime SSOT 是此 env var。
+- **閾值**: 60s sliding window；`unique_count >= 3` 或 `total_count >= 5` 觸發。未 arm 時仍累加 metrics，但不 force reconnect。
+- **Metrics**: `unknown_handler_total`, `forced_reconnect_total` 由 guard lifetime counters 提供；window 觸發後清空，lifetime counters 不清零。
+- **關聯程式**: `rust/openclaw_engine/src/ws_unknown_handler_guard.rs`, `rust/openclaw_engine/src/ws_client/dispatch.rs`, `rust/openclaw_engine/src/ws_client/run_loop.rs`, `rust/openclaw_engine/src/bybit_private_ws.rs`
+
+---
+
+### 2.4 Shadow Order Sync Channel — 影子訂單同步通道
 
 > Session 5 新增（2026-04-04）。Paper Trading 成交鏡像到 Demo API 用於校準驗證。
 
