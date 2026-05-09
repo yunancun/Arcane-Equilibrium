@@ -62,6 +62,35 @@ pub struct BbReversionParams {
     /// 注意：GAP-9 在 runtime ctor 強制關閉 `use_limit`，本欄位現為埋線；GAP-9 解禁後生效。
     #[serde(default = "default_maker_price_buffer_ticks_bbr")]
     pub maker_price_buffer_ticks: u32,
+
+    /// W-AUDIT-6d #6 (AMD-2026-05-09-02 §3 verdict "pair bb_reversion with MA
+    /// confirmation")：reversion 入場必經 MA 趨勢方向確認 gate，預設 `true`。
+    /// 語義：long entry（oversold reversion）必 `price < ma_value`；short entry
+    /// （overbought reversion）必 `price > ma_value`。若 MA 不可得（warm-up 不足）
+    /// 一律 fail-closed 不入場（§二 原則 6 失敗默認收縮）。
+    /// `false` 僅用於 W-AUDIT-9 stage rollback 路徑（grade-down 時放寬 gate；不
+    /// 用於日常 demo/live runtime — operator 不應主動關此 gate）。
+    /// 配套 `ma_confirmation_kind` 選 SMA20/SMA50/EMA12/EMA26。
+    /// W-AUDIT-6d #6: pair MA confirmation gate. Default true. False only used
+    /// for W-AUDIT-9 stage rollback paths.
+    #[serde(default = "default_require_ma_confirmation")]
+    pub require_ma_confirmation: bool,
+
+    /// W-AUDIT-6d #6 — MA 種類選擇，default `"sma_50"`（中期趨勢過濾，與 ma_crossover
+    /// RC-02 用法對齊）。Validate 限 `{"sma_20", "sma_50", "ema_12", "ema_26"}`。
+    /// W-AUDIT-6d #6: MA selection for confirmation gate. Default "sma_50".
+    #[serde(default = "default_ma_confirmation_kind")]
+    pub ma_confirmation_kind: String,
+}
+
+/// W-AUDIT-6d #6 — MA pair confirmation 預設啟用（per AMD-2026-05-09-02 §3）。
+fn default_require_ma_confirmation() -> bool {
+    true
+}
+
+/// W-AUDIT-6d #6 — 預設 MA 種類為 SMA50（中期趨勢，與 ma_crossover RC-02 對齊）。
+fn default_ma_confirmation_kind() -> String {
+    "sma_50".to_string()
 }
 
 /// G7-09c Phase 1: default buffer = 1 tick (one tick inside the inside quote).
@@ -97,6 +126,9 @@ impl Default for BbReversionParams {
             // G7-09c Phase 1: default 1 tick inside the inside quote.
             // G7-09c Phase 1：預設退一 tick。
             maker_price_buffer_ticks: 1,
+            // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3) — 預設啟用 MA pair confirmation。
+            require_ma_confirmation: true,
+            ma_confirmation_kind: "sma_50".to_string(),
         }
     }
 }
@@ -248,6 +280,17 @@ impl StrategyParams for BbReversionParams {
                 agent_adjustable: false,
                 db_persisted: true,
             },
+            // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3) — MA pair confirmation 是治理層
+            // 強制 gate；agent 不可自關（agent_adjustable=false），W-AUDIT-9 stage
+            // rollback 路徑或 operator 顯式批准才能切換。db_persisted=true 留歷史。
+            ParamRange {
+                name: "require_ma_confirmation".into(),
+                min: 0.0,
+                max: 1.0,
+                step: Some(1.0),
+                agent_adjustable: false,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -288,6 +331,18 @@ impl StrategyParams for BbReversionParams {
         // G7-09c Phase 1：限定 BBO buffer，防 IPC 寫入過大。
         if self.maker_price_buffer_ticks > 10 {
             return Err("maker_price_buffer_ticks must be <= 10".into());
+        }
+        // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3) — MA confirmation kind whitelist。
+        // 對齊 IndicatorSnapshot 的 sma_20 / sma_50 / ema_12 / ema_26 字段；
+        // 其他值（含拼寫錯誤）拒絕，避免 silent fall-through 到「無 MA gate」。
+        match self.ma_confirmation_kind.as_str() {
+            "sma_20" | "sma_50" | "ema_12" | "ema_26" => {}
+            other => {
+                return Err(format!(
+                    "ma_confirmation_kind must be one of \
+                     {{sma_20, sma_50, ema_12, ema_26}}, got '{other}'"
+                ));
+            }
         }
         Ok(())
     }

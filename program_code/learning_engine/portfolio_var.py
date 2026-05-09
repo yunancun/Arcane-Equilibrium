@@ -3,6 +3,25 @@
 The gate is source/test math for W-AUDIT-6c. It is intentionally pure and
 side-effect free; production callers decide where to persist the returned
 report. Positive loss values use the same unit as input returns.
+
+W-AUDIT-6d #5 (2026-05-09 review)：
+    `min_observations=200` 是 statistical baseline，不是 arbitrary：
+    - 99% VaR 尾部需 ≥ 200 obs 才能穩定估計（n_tail = ⌊(1-0.99) × 200⌋ = 2）；
+    - CVaR / Expected Shortfall 在 n=100 時 sampling variance 過大；
+    - stationary block bootstrap CI 對 200+ obs 有效（_politis_white_block_size
+      推薦 block_size = ⌈n^(1/3)⌉ ≈ 6 for n=200）。
+
+    sampling unit = **per-trade fractional return**（不是日 / 小時 aggregated）：
+    - `promotion_evidence.py::_return_series_from_bps()` 把 `raw_bps_series`
+      除以 10_000 轉 fractional decimal，每元素是一筆 trade 的 PnL/notional；
+    - 對 W-A demo 階段（22 個 fail-closed default 累積 ≈ 0 fill rate），
+      可能長期返回 `verdict="defer_data"` — **這是預期 fail-closed 行為**，
+      不該被誤判為 bug 並下調 min_observations。下調 → false-positive 提前
+      promote 真壞策略。
+
+    sampling unit ambiguity warning：caller 必確保 portfolio_returns 是
+    **fractional return**（例如 0.005 表 0.5%）；若誤傳 percentage（0.5 表
+    0.5%），max_var_loss=0.05 會永遠被超過，gate 永遠 block。
 """
 
 from __future__ import annotations
@@ -57,13 +76,44 @@ class StressResult:
 
 @dataclass(frozen=True)
 class PortfolioTailRiskLimits:
+    """Portfolio tail-risk limits / W-AUDIT-6c gate 配置。
+
+    sampling unit (W-AUDIT-6d #5 review)：所有 *_loss 欄位以 **fractional**
+    形式傳入（0.05 表 5% loss），與 `portfolio_returns` 的 fractional return
+    單位嚴格對齊。誤用 percentage（0.05 表 0.05% / 5 bps）會致 max_var_loss=0.05
+    被永遠超過、gate 永遠 block。
+
+    Limits are in *fractional* units (0.05 = 5% loss). MUST match the unit of
+    `portfolio_returns` passed to `evaluate()`.
+
+    Fields:
+    - confidence: VaR 信心水平（默認 0.99 = 99%）。
+    - max_var_loss: 99% 歷史 VaR 上限（fractional，0.05 = 5%）。
+    - max_cvar_loss: 99% 歷史 CVaR / Expected Shortfall 上限（fractional）。
+    - max_evt_cvar_loss: EVT/GPD tail CVaR 上限（fractional，比 historical CVaR
+      寬，因 EVT 對極端事件更敏感）。
+    - max_stress_loss: stress scenario portfolio_loss 上限（fractional）。
+    - min_observations: 觸發完整 gate evaluation 所需最少 observation 數
+      （W-AUDIT-6d #5 review：200 是 statistical baseline，VaR 尾部 +
+      bootstrap CI + EVT excess 三方收斂的最小 sample size；下調為 false-pass
+      提前 promote 風險，不接受）。
+    - evt_threshold_quantile: EVT POT 閾值分位（默認 0.95 = 取 top 5%）。
+    - min_evt_excesses: EVT GPD fit 所需最少 excess 數（默認 10；
+      `min_observations × (1 - evt_threshold_quantile) = 200 × 0.05 = 10`，
+      與 200 一致）。
+    """
+
     confidence: float = DEFAULT_CONFIDENCE
     max_var_loss: float = 0.05
     max_cvar_loss: float = 0.08
     max_evt_cvar_loss: float = 0.12
     max_stress_loss: float = 0.20
+    # W-AUDIT-6d #5 (2026-05-09 review)：見模塊頭 docstring 量化分析。
+    # statistical baseline；下調風險見 promotion_evidence.py 文檔。
+    # See module docstring for the quantitative justification.
     min_observations: int = 200
     evt_threshold_quantile: float = 0.95
+    # W-AUDIT-6d #5: aligned with min_observations (200 × 5% = 10).
     min_evt_excesses: int = 10
 
     def to_dict(self) -> dict[str, Any]:

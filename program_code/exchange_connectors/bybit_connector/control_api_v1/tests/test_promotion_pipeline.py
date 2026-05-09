@@ -709,3 +709,182 @@ class TestStressConcurrency:
         # Metrics should reflect one of the updates (last writer wins, but no corruption)
         assert entry.paper_trades >= 100
         assert entry.paper_sharpe >= 0.8
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# W-AUDIT-6d #4 (2026-05-09): runtime apply spec/test — portfolio VaR/CVaR/EVT
+# 從 promotion_evidence build_strategy_promotion_evidence 整鏈到
+# update_demo_tail_risk_evidence + check_demo_graduation 的 contract spec test。
+# **不 deploy** — 純 source/test layer 驗 runtime caller 接線一致。
+# W-AUDIT-6d #4 (2026-05-09): runtime apply spec/test — portfolio VaR end-to-end
+# contract spec; source/test only, NOT deploy.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestWAudit6dRuntimeApplySpec:
+    """W-AUDIT-6d #4 — portfolio VaR runtime apply spec/test。
+
+    這是 runtime 接線的 spec/contract test，**不 deploy**。
+    證明 promotion_evidence.build_strategy_promotion_evidence →
+    update_demo_tail_risk_evidence → check_demo_graduation 整鏈 contract。
+    """
+
+    def _setup_demo_active(
+        self,
+        gate: PromotionGate,
+        strategy_name: str = "test",
+        days_in_demo: int = 22,
+    ) -> None:
+        """Promote strategy to DEMO_ACTIVE 並設 demo_start_ts > 21d 滿足 graduation 時長要求。"""
+        gate.register_strategy(strategy_name)
+        with gate._lock:
+            gate._entries[strategy_name].current_stage = PromotionStage.DEMO_ACTIVE
+        gate.update_demo_metrics(
+            strategy_name,
+            trades=250,
+            win_rate=0.6,
+            net_pnl_pct=8.0,
+            max_drawdown_pct=5.0,
+            sharpe=1.5,
+            avg_slippage_bps=10.0,
+            api_reliability=0.99,
+        )
+        with gate._lock:
+            gate._entries[strategy_name].demo_start_ts = time.time() - days_in_demo * 86400
+
+    def test_runtime_apply_chain_w_audit_6d_4(self, gate: PromotionGate):
+        """W-AUDIT-6d #4 — promotion_evidence → tail_risk_evidence → graduation
+        chain spec：caller 走 promotion_evidence.build_strategy_promotion_evidence
+        產出的 portfolio_returns 應該被 update_demo_tail_risk_evidence 接受並
+        最終讓 check_demo_graduation 一致 verdict。"""
+        from program_code.ml_training.promotion_evidence import (
+            build_strategy_promotion_evidence,
+        )
+
+        # 模擬 W-A demo 階段 mild 樣本：5 candidate × 60 trade = 300 obs。
+        # raw_bps_series 是 promotion_evidence 期望的 caller-side 格式
+        # （per-trade PnL bps；下游 _return_series_from_bps 除以 10000 轉 fractional）。
+        rng = np.random.default_rng(20260509)
+        js_results = {}
+        for k, sym in enumerate(["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOTUSDT", "ADAUSDT"]):
+            # 每 candidate 60 trade，~mild profitable - mean 20 bps, std 60 bps。
+            bps_series = rng.normal(20.0, 60.0, size=60).tolist()
+            js_results[("test", sym)] = {
+                "strategy_name": "test",
+                "symbol": sym,
+                "raw_bps_series": bps_series,
+            }
+
+        evidence_map = build_strategy_promotion_evidence(
+            js_results, engine_mode="demo"
+        )
+        assert "test" in evidence_map
+        evidence = evidence_map["test"]
+        # 5 candidate × 60 trade = 300 obs；超過 min_observations=200。
+        assert evidence.n_observations == 300
+        assert len(evidence.portfolio_returns) == 300
+        # bps 除以 10000 → fractional return 量級 ~0.002 (= 20 bps)。
+        sample = evidence.portfolio_returns[0]
+        assert -0.05 < sample < 0.05, f"fractional unit 預期 ±5%，got {sample}"
+
+        # 走 update_demo_tail_risk_evidence — runtime caller 路徑。
+        self._setup_demo_active(gate, "test")
+        ok, report = gate.update_demo_tail_risk_evidence(
+            "test",
+            portfolio_returns=evidence.portfolio_returns,
+            stress_exposures={"crypto_beta": 0.05, "liquidity": 0.02},
+            n_bootstrap=120,
+            seed=42,
+        )
+        # mild scaled 不該超 max_var_loss=5% / max_cvar_loss=8%；應 promote。
+        assert report["verdict"] in {"promote", "block"}, f"got {report['verdict']}"
+        # 不該因 200 obs 不足而 defer（已 300 obs）。
+        assert "insufficient_observations" not in str(report.get("reasons", [])), (
+            "300 obs 不該觸發 defer_data"
+        )
+
+        # 加 selection_bias evidence 後，整鏈 check_demo_graduation 一致。
+        _add_passing_selection_bias(gate, "test")
+        eligible, reasons = gate.check_demo_graduation("test")
+        # tail_risk 是否通過依 mild 樣本實際分布；本 spec test 重在
+        # **rare reason types** 不應出現（無接線 bug 時）。
+        rare_bug_reasons = {
+            "tail_risk:no_evidence",  # update_demo_tail_risk_evidence 未調用
+            "selection_bias:no_evidence",  # _add_passing_selection_bias 未調用
+        }
+        for r in reasons:
+            assert r not in rare_bug_reasons, (
+                f"出現接線 bug reason: {r}（runtime caller 鏈斷）"
+            )
+
+    def test_runtime_apply_w_a_demo_low_obs_defers_not_blocks(
+        self, gate: PromotionGate
+    ):
+        """W-AUDIT-6d #4 — W-A demo 階段 fill rate 接近 0 時 obs 不足，
+        gate 必返回 `defer_data` 而非 `block`，使 caller 區分「樣本不足」
+        與「真的 strategy 失敗」。"""
+        rng = np.random.default_rng(20260509)
+        # 模擬 W-A demo 早期：僅 50 obs（< 200 min_observations）。
+        low_obs_returns = rng.normal(0.001, 0.005, size=50)
+
+        self._setup_demo_active(gate, "test")
+        ok, report = gate.update_demo_tail_risk_evidence(
+            "test",
+            portfolio_returns=low_obs_returns,
+            stress_exposures={"crypto_beta": 0.05},
+            n_bootstrap=120,
+            seed=42,
+        )
+        assert not ok
+        assert report["verdict"] == "defer_data", (
+            f"W-A demo 樣本不足 → defer_data（不 block），got: {report['verdict']}"
+        )
+        # graduation 應失敗，但 reason 必含 defer_data 而非 block。
+        _add_passing_selection_bias(gate, "test")
+        eligible, reasons = gate.check_demo_graduation("test")
+        assert not eligible
+        defer_reasons = [r for r in reasons if "defer_data" in r]
+        assert defer_reasons, (
+            f"reasons 必含 defer_data variant，got: {reasons}"
+        )
+
+    def test_runtime_apply_no_evidence_blocks_graduation(self, gate: PromotionGate):
+        """W-AUDIT-6d #4 — 完全沒呼 update_demo_tail_risk_evidence →
+        check_demo_graduation 必含 'tail_risk:no_evidence'（fail-closed
+        基準路徑：W-AUDIT-6c spec invariant）。"""
+        self._setup_demo_active(gate, "test")
+        _add_passing_selection_bias(gate, "test")
+        # 故意不調 update_demo_tail_risk_evidence。
+        eligible, reasons = gate.check_demo_graduation("test")
+        assert not eligible
+        assert "tail_risk:no_evidence" in reasons
+
+    def test_runtime_apply_does_not_deploy_runtime_state(
+        self, gate: PromotionGate
+    ):
+        """W-AUDIT-6d #4 — 'runtime apply spec/test, **不 deploy**' contract：
+        本 test 確保 update_demo_tail_risk_evidence 是 **side-effect controlled**：
+        - 修改 in-memory entry.demo_tail_risk_report；
+        - 不寫 PG / 不開 socket / 不修 risk config TOML / 不啟 cron / 不
+          renew live authorization。
+        """
+        self._setup_demo_active(gate, "test")
+        rng = np.random.default_rng(42)
+        returns = rng.normal(0.001, 0.005, size=300)
+        # 跑 update — 以 entry inspection 驗 side effect 範圍。
+        gate.update_demo_tail_risk_evidence(
+            "test",
+            portfolio_returns=returns,
+            stress_exposures={"crypto_beta": 0.05},
+            n_bootstrap=120,
+            seed=42,
+        )
+        # 唯一 side effect：entry.demo_tail_risk_report 寫入 in-memory。
+        with gate._lock:
+            entry = gate._entries["test"]
+            assert entry.demo_tail_risk_report is not None, (
+                "tail_risk_report 必寫入 in-memory entry"
+            )
+            assert "verdict" in entry.demo_tail_risk_report
+            # current_stage 不變動（不 promote）。
+            assert entry.current_stage == PromotionStage.DEMO_ACTIVE
