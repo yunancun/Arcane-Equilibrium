@@ -557,7 +557,10 @@ impl IntentProcessor {
     /// Set P1 risk cap percentage (e.g. 0.03 = 3%, 0.05 = 5%).
     /// 設定 P1 風險上限百分比。
     pub fn set_p1_risk_pct(&mut self, pct: f64) {
-        self.p1_risk_pct = pct.clamp(0.001, 0.20); // Min 0.1%, max 20%
+        self.p1_risk_pct = pct.clamp(
+            crate::config::MIN_PER_TRADE_RISK_PCT,
+            crate::config::MAX_PER_TRADE_RISK_PCT,
+        );
     }
 
     /// Get Guardian config for read-modify-write updates.
@@ -587,6 +590,11 @@ impl IntentProcessor {
         let new_p1 = config.limits.per_trade_risk_pct;
         self.risk_config = config;
         self.set_p1_risk_pct(new_p1);
+        if self.kelly_config.is_some() {
+            self.kelly_config = Some(crate::ml::kelly_sizer::KellyConfig::from_risk_config(
+                &self.risk_config,
+            ));
+        }
     }
 
     /// RRC-1-B4: Read-only access to risk config.

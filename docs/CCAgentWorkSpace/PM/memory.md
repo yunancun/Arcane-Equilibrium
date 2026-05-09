@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | W-AUDIT-6 per-trade risk SSOT: made `RiskConfig.limits.per_trade_risk_pct` the Kelly cold-start sizing authority, aligned validation/runtime bounds to `0.001..=0.20`, re-anchored replay and risk hot-reload Kelly config, and covered the path with targeted Rust tests | workspace/reports/2026-05-09--w_audit_6_per_trade_risk_ssot.md |
 | 2026-05-09 | W-AUDIT-6 F-13 selection-bias promotion gate: composed DSR(K)+PBO/CSCV into a JSON-safe fail-closed gate, wired Demo→LivePending to require `demo_selection_bias_report.passes=true`, and covered promote/block/defer paths with targeted tests | workspace/reports/2026-05-09--w_audit_6_promotion_gate.md |
 | 2026-05-09 | W-AUDIT-6 fast_track threshold config: moved held-drop 15% / 5%+3σ thresholds into `RiskConfig.fast_track`, wired Step 0 + scoped reduce + sigma cooldown to the config snapshot, exposed paper/demo/live defaults, and preserved the 90% margin-crisis code constant | workspace/reports/2026-05-09--w_audit_6_fast_track_config.md |
 | 2026-05-09 | P0-NEW-VULN-1 tailnet bind correction: lifecycle scripts now default to safe auto binding (Tailscale IPv4 when available, otherwise loopback), reject all-interface binds, and preserve Tailscale GUI access without `0.0.0.0` | workspace/reports/2026-05-09--p0_new_vuln_1_tailnet_bind_correction.md |

@@ -235,6 +235,12 @@ W-AUDIT-6 current fact:
   `promotion_pipeline.py` now requires `demo_selection_bias_report.passes=true`
   for Demo→LivePending graduation; missing CV returns, insufficient PBO power,
   high PBO, DSR block, or DSR borderline prevent promotion
+- as of 2026-05-09, per_trade_risk_pct SSOT is source/test closed:
+  shared `MIN/MAX/DEFAULT_PER_TRADE_RISK_PCT` constants define the
+  `0.001..=0.20` validation/runtime clamp bounds; `KellyConfig::from_risk_config()`
+  derives Kelly cold-start `risk_pct` plus tier fractions from
+  `RiskConfig`; replay runner and `IntentProcessor::update_risk_config()` now
+  consume that RiskConfig-derived snapshot
 - no rebuild, restart, or runtime apply was performed for these checkpoints
 
 P0-NEW-VULN-1 bind-host rule:
