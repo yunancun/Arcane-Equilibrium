@@ -1,7 +1,7 @@
 # V077 Columnstore Runtime Hotfix Brief
 
 Date: 2026-05-09
-Status: HOTFIX IN PROGRESS
+Status: DEPLOYED / RUNTIME VERIFIED
 
 ## What Happened
 
@@ -23,6 +23,16 @@ INSERT/UPDATE writes.
 - `git diff --check`: passed.
 - Linux PG `BEGIN ... ROLLBACK` dry-run: passed with the expected trigger
   fallback notice.
+- Linux pulled `49ceeb61`, engine restarted, V077 is now recorded in
+  `_sqlx_migrations`, and `trg_fills_engine_mode_known_values` exists.
+- Passive healthcheck returned `SUMMARY: WARN` with no hard FAIL; `[55]`
+  Agent Decision Spine lineage PASSed.
+
+## Caveat
+
+The live authorization file is currently missing, so the engine refused to
+spawn the LiveDemo/live pipeline and is running demo-only after the hotfix
+restart. I did not renew or recreate live auth.
 
 No live auth mutation, scanner authority change, Executor hard authority,
 strategy/risk mutation, MAG-083/MAG-084 unlock, or true-live API action was
