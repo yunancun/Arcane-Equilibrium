@@ -66,6 +66,16 @@ if ! "$PY" -c 'import psycopg2' 2>/dev/null; then
     exit 2
 fi
 
+# ─── 1.5 將 BASE_DIR 加入 PYTHONPATH ──────────────────────────────────
+# 原因：[20] check_h_state_gateway_freshness 用 importlib 動態 import
+# `program_code....h_state_invalidator`；Python 起 .py 時 sys.path[0] 是腳本
+# 所在目錄（helper_scripts/db/），不含 BASE_DIR 根。cron wrapper 因為跑相對
+# 路徑 `python3 helper_scripts/db/...` 才意外靠 cwd 補上，但 .sh 用絕對路徑
+# `exec "$PY" "$HEALTHCHECK_PY"` 不享這個 fallback → 觸發
+# `No module named 'program_code'` FAIL。顯式 export PYTHONPATH 讓兩條入口
+# 一致且跨 Mac/Linux portable，不依賴呼叫端 cwd。
+export PYTHONPATH="$BASE_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
 # ─── 2. Load Postgres env (mirrors restart_all.sh:212 + fresh_start.sh:188) ──
 if [[ -f "$SECRETS_ENV" ]]; then
     set -a
