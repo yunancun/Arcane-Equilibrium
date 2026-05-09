@@ -3,7 +3,7 @@
 **對應 spec**: SM-05 · DOC-01 §5.3/§5.6/§5.10/§5.11 · ADR-0015 · ADR-0018 · ADR-0020
 **日期**: 2026-05-09
 **作者**: PM
-**狀態**: Accepted / implementation pending
+**狀態**: Accepted / F-01 source implemented for SM-05
 **索引**: `SPECIFICATION_REGISTER.md` Amendments section
 **TODO 連結**: `P0-DECISION-AUDIT-2` / `P0-DECISION-AUDIT-4` / `P0-DECISION-AUDIT-5`
 
@@ -34,9 +34,10 @@ The selected SM-05 policy is:
 4. Promotion requires positive edge scope, supervised-live gates, Decision
    Lease, risk gates, signed live authorization where applicable, and Rust
    execution authority.
-5. F-01 may now remove the unconditional `lambda: True` fallback by wiring
-   production Executor construction to an explicit config provider that fails
-   closed when unavailable.
+5. F-01 has removed the unconditional `lambda: True` fallback in
+   `ExecutorAgent`; production construction remains wired to the explicit
+   `ExecutorConfigCache.shadow_mode_provider()`, and unavailable provider reads
+   fail closed.
 
 ---
 

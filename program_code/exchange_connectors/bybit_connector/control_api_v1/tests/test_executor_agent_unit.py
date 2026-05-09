@@ -51,6 +51,19 @@ class TestExecutorLifecycle(unittest.TestCase):
         self.assertEqual(agent.state, AgentState.STOPPED)
 
 
+class TestExecutorShadowProviderContract(unittest.TestCase):
+
+    def test_executor_agent_has_no_unconditional_lambda_true_fallback(self):
+        """F-01: ExecutorAgent source must not hide provider absence behind lambda True."""
+        source_path = os.path.join(_control_api_dir, "app", "executor_agent.py")
+        with open(source_path, encoding="utf-8") as handle:
+            source = handle.read()
+
+        self.assertNotIn("lambda: True", source)
+        self.assertIn("self._shadow_mode_provider: Optional", source)
+        self.assertIn("shadow_mode_provider unavailable", source)
+
+
 class TestExecutorExecution(unittest.TestCase):
     """Test order execution."""
 
@@ -128,6 +141,63 @@ class TestExecutorExecution(unittest.TestCase):
         self.assertTrue(report.success)
         self.assertEqual(report.error, "shadow_mode")
         self.assertEqual(report.metadata.get("execution_path"), "ipc_shadow")
+        self.assertEqual(report.metadata.get("execution_engine"), "paper")
+
+    def test_no_engine_missing_provider_fail_closed_no_ipc_submit(self):
+        """F-01: missing provider is explicit fail-closed, not an implicit callable fallback."""
+        agent = ExecutorAgent()
+        agent.start()
+        report = agent.execute_order(
+            intent_id="i3_missing_provider",
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.01,
+            metadata={"engine": "demo"},
+        )
+        self.assertTrue(report.success)
+        self.assertEqual(report.error, "shadow_mode")
+        self.assertEqual(report.metadata.get("execution_path"), "ipc_shadow")
+        self.assertEqual(report.metadata.get("execution_engine"), "demo")
+
+    def test_no_engine_provider_failure_fail_closed_no_ipc_submit(self):
+        """F-01: provider exception must fail closed before IPC submit authority."""
+        def _raises(_engine):
+            raise RuntimeError("provider boom")
+
+        agent = ExecutorAgent(shadow_mode_provider=_raises)
+        agent.start()
+        report = agent.execute_order(
+            intent_id="i3_provider_fail",
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.01,
+            metadata={"engine": "live"},
+        )
+        self.assertTrue(report.success)
+        self.assertEqual(report.error, "shadow_mode")
+        self.assertEqual(report.metadata.get("execution_path"), "ipc_shadow")
+        self.assertEqual(report.metadata.get("execution_engine"), "live")
+
+    def test_no_engine_shadow_provider_receives_explicit_engine(self):
+        """F-01: engine-aware providers are consulted with the resolved engine."""
+        calls = []
+
+        def _provider(engine):
+            calls.append(engine)
+            return True
+
+        agent = ExecutorAgent(shadow_mode_provider=_provider)
+        agent.start()
+        report = agent.execute_order(
+            intent_id="i3_engine_provider",
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.01,
+            metadata={"engine": "demo"},
+        )
+        self.assertTrue(report.success)
+        self.assertEqual(report.metadata.get("execution_path"), "ipc_shadow")
+        self.assertEqual(calls, ["demo"])
 
     def test_engine_exception_handled(self):
         """Engine exception produces failed report, doesn't crash."""
@@ -346,7 +416,7 @@ class TestExecutorSnapshot(unittest.TestCase):
 
     def test_get_executor_snapshot_initial_state(self):
         """Fresh agent -> all 9 keys present; counter values 0; shadow_mode
-        defaults to 1 (provider absent -> fail-closed lambda returns True).
+        defaults to 1 (provider absent -> explicit fail-closed read).
         新建 agent -> 9 keys 全在；counter 為 0；shadow_mode 預設 1。"""
         agent = self._make_agent()
         snap = agent.get_executor_snapshot()
@@ -356,7 +426,7 @@ class TestExecutorSnapshot(unittest.TestCase):
         self.assertEqual(snap["intents_received"], 0)
         self.assertEqual(snap["executions_attempted"], 0)
         self.assertEqual(snap["recent_intent_id_size"], 0)
-        # Default fail-closed provider returns True -> shadow_mode=1.
+        # Missing provider fail-closes to shadow_mode=1.
         self.assertEqual(snap["shadow_mode"], 1)
 
     def test_get_executor_snapshot_independent_dicts(self):

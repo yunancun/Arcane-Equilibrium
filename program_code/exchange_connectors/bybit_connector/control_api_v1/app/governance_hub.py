@@ -778,8 +778,8 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
              when ``_shadow_mode_provider()`` returns True, return a
              ``SHADOW_BYPASS:<intent_id>`` sentinel WITHOUT engaging IPC.
              This prevents fake Rust SM transitions and AC-1 假綠 when
-             ExecutorAgent shadow_mode=True (the lambda True fail-close path
-             at executor_agent.py:185).
+             ExecutorAgent shadow_mode=True (including provider-unavailable
+             fail-closed reads in executor_agent.py).
           2. IPC bridge (env-gated by ``OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1``):
              when enabled, dispatch to Rust ``governance.acquire_lease`` via
              one_shot_ipc_call; Rust SM is the single source of truth.

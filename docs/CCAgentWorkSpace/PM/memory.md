@@ -2012,3 +2012,18 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   `--keep-auth` preserved the already-missing state. `restart_all.sh` now warns
   when keep-auth is requested with a configured live slot but missing signed
   auth. Continue W-AUDIT-3 F-01 and W-AUDIT-6 next.
+
+## 2026-05-09 W-AUDIT-3 F-01 Provider Fail-Closed
+
+- F-01 is source/test closed: `ExecutorAgent.__init__` no longer installs a
+  hidden `lambda: True` fallback when `shadow_mode_provider` is absent.
+- Production Executor construction remains explicit through
+  `ExecutorConfigCache.shadow_mode_provider()` in `strategy_wiring.py`.
+- Missing or raising providers are handled by `_read_shadow_mode()` and
+  fail-closed to `shadow_mode=True` before IPC submit authority.
+- Verification: ExecutorAgent unit pytest 30/0, executor config cache +
+  decision parity pytest 17/0 with 7 skipped, agents routes executor/shadow
+  pytest 7/0, and py_compile PASS.
+- Boundary: source/test/docs only; no rebuild/restart/deploy/live auth mutation
+  or true-live authority change. Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_f01_provider_fail_closed.md`.

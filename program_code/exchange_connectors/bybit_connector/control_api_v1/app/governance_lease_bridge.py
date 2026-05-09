@@ -531,14 +531,13 @@ def shadow_short_circuit_acquire(
     """Return a SHADOW_BYPASS sentinel if the provider reports shadow mode.
     若 provider 回報 shadow mode，回 SHADOW_BYPASS sentinel。
 
-    PA push back #2 HIGH: ExecutorAgent shadow_mode default lambda True
-    fail-close path must NOT engage IPC (which would falsely populate Rust SM
-    + lease_transitions audit row, inflating V054 noise and creating
-    AC-1 假綠).
+    PA push back #2 HIGH: ExecutorAgent shadow_mode fail-close paths must NOT
+    engage IPC (which would falsely populate Rust SM + lease_transitions audit
+    row, inflating V054 noise and creating AC-1 假綠).
 
-    PA push back #2 HIGH：ExecutorAgent shadow_mode 預設 lambda True 的
-    fail-close 路徑不可進 IPC（否則會偽造 Rust SM transition + lease_transitions
-    audit row，推高 V054 噪聲並讓 AC-1 假綠）。
+    PA push back #2 HIGH：ExecutorAgent shadow_mode fail-close 路徑不可進 IPC
+    （否則會偽造 Rust SM transition + lease_transitions audit row，推高 V054
+    噪聲並讓 AC-1 假綠）。
 
     Args / 參數:
         intent_id: trade intent id / 交易 intent id
