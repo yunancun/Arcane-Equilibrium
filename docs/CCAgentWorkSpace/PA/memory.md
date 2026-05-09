@@ -1,5 +1,46 @@
 # PA Memory — 工作記憶
 
+## 全系統虧損架構級根因 + 真升級藍圖（2026-05-09）
+
+**觸發**：Operator 拒絕「disable / 縮頻 / block bad symbols」笨辦法，要求對 5 策略 7d demo gross -26.44 USDT 做架構級根因分析；QC + MIT 並行從 alpha / ML 視角，本份從 system architect 視角。
+
+**5 個結構性 root cause（不是 88 finding 列表）**：
+1. **Strategy interface alpha-poverty** — `TickContext` 字段已含 funding_rate/index_price/OI/orderbook（`tick_pipeline/mod.rs:665-708`）但 IndicatorEngine + SignalEngine 中央化使「TA 路徑」是高速公路，funding skew / orderflow / liquidation cascade / cross-asset basis 等都是策略自己 buffer 的二等公民。5 策略全 OHLCV-driven 是必然輸出。
+2. **Strategist scope 是「調參器」非「策略發現器」** — `_REGIME_STRATEGY_PREFERENCES` 4×5 hardcoded（`strategist_agent.py:128-134`）+ `max_param_delta_pct` 30→50 微調，沒有 alpha-discovery 路徑。EX-06 V1 寫「自主孵化策略」但代碼層 0 IMPL。
+3. **Analyst L2-L5 進化階梯 100% dormant + Layer 2 ADR-0020 manual-only** — alpha discovery loop 是 spec 但 IMPL 0%。attribution_chain_ok 0.5% 不是 ML bug，是「沒有 hypothesis 來歸因」的必然。
+4. **風控側 forcing function 完備 vs alpha 側放羊** — risk 有 5-step state machine + 4 TOML + Guardian veto + Cost Gate + StopManager，alpha 只有「Strategist 自由發揮」+ Ollama 提示詞。
+5. **5-Agent 是合法骨架但靈魂沒裝** — Scout / Strategist / Guardian / Analyst / Executor 拆分職責正確，但運行時 4 個是空殼（Scout IntelObject 主要 logging / Strategist alpha-discovery 缺 / Analyst L2-L5 dormant / Layer 2 manual-only）。不是 over-engineered，是 under-implemented over-spec。
+
+**88 finding 公因式聚類**（2026-05-09 verification v2 後）：
+- **Cluster A 策略 alpha 貧乏 ~25-30 findings**（包含 5 策略 verdict / DSR/PBO / Kelly / Donchian leak / VaR/CVaR）：88 patch 修不到根
+- **Cluster B 學習 loop 死 ~15-20 findings**（attribution_chain / feature_baselines / 5 ML 腳本 / Layer 2 / ContextDistiller）：部分修能解，但無頂層架構支撐
+- **Cluster C 治理 drift ~12-15**（shadow_mode / lease flag stale / spec-runtime 漂移）：v2 已修部分，仍需 forcing function
+- **Cluster D dead weight ~10-15**（24 表 0 row / 909MB damaged / openclaw_core 9 模組 sunset）
+- **Cluster E doc churn ~10-15**（CLAUDE.md / docs/README / SCRIPT_INDEX / SPEC_REGISTER / ADR）
+- **Cluster F 性能/平台 ~8-10**：v2 部分 closed
+- **Cluster G security edge ~5-8**：v2 部分 closed
+
+**Architectural Redesign Sketch**：
+- **R-1（Tier-1, 3-4 sprint）**：升級 Strategy Interface 為 AlphaSurface Bundle + AlphaSourceTag declared dependency；Strategy Registry 拒絕全 [TA1m] 新提案
+- **R-2（Tier-1, 2-3 sprint）**：Strategist 重定義為 Alpha Source Orchestrator + AlphaSourceRegistry；移除 4×5 hardcoded；Layer 2 解封路徑 = alpha-source proposal（vs trade signal）
+- **R-3（Tier-1, 2-3 sprint）**：Hypothesis Pipeline as first-class governance object（與 Decision Lease 同層級）；Decision Lease + ExecutionPlan + fills propagate `originating_hypothesis_id`；attribution chain rewire base on hypothesis_id
+- **R-4（Tier-2, 2 sprint）**：Per-alpha-source Live Promotion Gate（取代 LG-2/3/4/5 整 system 線性放權）；LiveBudget(alpha_source_id, slice) 動態 risk budget
+- **R-5（Tier-2, 1-2 sprint）**：Spec-as-Code + Module Lifecycle SM（自動化 doc plane）
+
+**W-AUDIT-1..7 vs R-1..R-5**：W-AUDIT-2/-5 純維護必做；W-AUDIT-3 是 R-4 baseline 必做；W-AUDIT-4 應併入 R-3；W-AUDIT-7 Layer 2 部分換成 R-2；**W-AUDIT-6 戰略 ROI 低 — 5 既存 TA 策略修完仍會 gross negative 高機率，建議只做 minimum**（funding_arb 退役 + DSR/PBO + Kelly config 化），不重寫 ma / bb，把帶寬留給 R-1/R-2/R-3。
+
+**核心 push back（給 Operator）**：
+- 「先修完 88 再說架構」是錯的順序 — 它讓系統繼續精煉一條結構性無回報路徑
+- 5 策略不是「需要更好參數」，是站在已無 alpha 的 territory（5 個 TA 策略其實是 1 個 TA alpha 上的 5 種包裝）
+- CLAUDE.md §一「Agent 自主完成交易決策」+ 原則 #11 與代碼 scope（Agent 實際自主範圍 = [P2 參數 ± 50%]）強烈不一致，**架構在生產 Agent 微調權，不是 Agent 自主**
+- §五「KlineManager → IndicatorEngine → SignalEngine」措辭強化 TA-default mental model；建議改寫為「市場數據 → AlphaSurface (kline + funding + basis + orderflow + xasset) → Strategy → Orchestrator」
+
+**最早 supervised live 重定義**：不是「整 system live_reserved」，而是「first alpha source 拿到 budget slice」；6-8 sprint。同數量級 vs 88 finding patch，但長期收斂可能性提升（不是修一條已知必虧路徑）。
+
+**報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md`
+
+---
+
 ## REF-20 Sprint 2 Track E — Decision Lease retrofit AMD-2026-05-02-01（2026-05-03）
 
 **Sprint scope：** Sprint 1 close 後接續開工；解 18 Live Blocker #5（Decision Lease Rust 熱路徑 0 觸發）+ #6（agent 三表 all-time 0 row）；對應 amendment `docs/governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md`。
