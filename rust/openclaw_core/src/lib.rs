@@ -27,6 +27,10 @@ pub mod guardian;
 pub mod h0_gate;
 pub mod indicators;
 pub mod klines;
+// W-AUDIT-9 T6 (AMD-2026-05-09-03 §4.5): 強型別 LeaseScope enum + 為 graduated
+// canary stage promotion 提供專用 LeaseScope::CanaryStagePromotion variant 與
+// CanaryStageTransition row payload。
+pub mod lease_scope;
 pub mod message_bus;
 pub mod opportunity;
 pub mod order_match;
