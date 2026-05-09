@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac as _hmac_lib
-import json
 import logging
 import os
 import time
 
+from . import json_fast as json
 from .secret_runtime import get_secret_value
 
 logger = logging.getLogger(__name__)
@@ -65,8 +65,7 @@ def sync_ipc_call(
                     buf += ch
 
             def _send(msg: dict) -> None:
-                data = (json.dumps(msg) + "\n").encode("utf-8")
-                sock.sendall(data)
+                sock.sendall(json.dumps_line_bytes(msg))
 
             # Authenticate if secret configured / 如果配置了密鑰則進行認證
             #

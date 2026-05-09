@@ -23,13 +23,13 @@ from __future__ import annotations
 
 import asyncio
 import errno
-import json
 import logging
 import os
 import socket as _socket_stdlib
 import time
 from typing import Any
 
+from . import json_fast as json
 from . import ai_service as core
 from .ai_service_dispatch import AIService
 
@@ -246,8 +246,8 @@ class AIServiceListener:
 
                 # Parse JSON-RPC request / 解析 JSON-RPC 請求
                 try:
-                    request = json.loads(line.decode("utf-8"))
-                except (json.JSONDecodeError, UnicodeDecodeError) as parse_err:
+                    request = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as parse_err:
                     self._listener_stats["protocol_errors"] += 1
                     logger.error("JSON parse error: %s", str(parse_err)[:100])
                     await self._write_error(writer, None, -32700, "parse_error")
@@ -328,8 +328,7 @@ class AIServiceListener:
         Write a newline-delimited JSON response (matches Rust IPC protocol).
         寫入換行分隔的 JSON 回應（與 Rust IPC 協議一致）。
         """
-        payload = json.dumps(response, separators=(",", ":")) + "\n"
-        writer.write(payload.encode("utf-8"))
+        writer.write(json.dumps_line_bytes(response))
         await writer.drain()
 
     async def _write_error(
