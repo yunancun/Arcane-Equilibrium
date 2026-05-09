@@ -143,6 +143,7 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-09 | V077 runtime hotfix: authorized rebuild/restart exposed Timescale columnstore CHECK limitation on `trading.fills`; V077 now keeps CHECK preferred path and uses same-predicate trigger fallback when CHECK is unsupported | workspace/reports/2026-05-09--v077_columnstore_hotfix_runtime.md |
 | 2026-05-09 | W-AUDIT-7 F-system-mode-confirm: added `live_reserved` 5s countdown + 1.2s hold-to-confirm to `tab-system.html`, with static guard and Edge headless smoke; no backend/restart/live-auth mutation | workspace/reports/2026-05-09--w_audit_7_system_mode_confirm.md |
 | 2026-05-09 | W-AUDIT-7 F-30 prompt modal: replaced native learning/governance `prompt()` flows with shared custom prompt modal, select pickers, static guard, and Edge headless smoke; no backend/restart/live-auth mutation | workspace/reports/2026-05-09--w_audit_7_f30_prompt_modal.md |
 | 2026-05-09 | W-AUDIT-5b json_fast runtime hot paths: migrated async IPC JSON-RPC framing and local LLM HTTP JSON to `json_fast`, while leaving signature/hash/replay-manifest/canonical paths on stdlib pending byte-contract tests | workspace/reports/2026-05-09--w_audit_5b_json_fast_runtime_hot_paths.md |

@@ -61,13 +61,25 @@ def test_v077_adds_idempotent_named_check_constraint() -> None:
     assert "v077: added and validated chk_fills_engine_mode_known_values" in sql
 
 
+def test_v077_has_columnstore_trigger_fallback() -> None:
+    sql = _normalized_sql()
+
+    assert "when feature_not_supported then" in sql
+    assert "trg_fills_engine_mode_known_values" in sql
+    assert "create trigger trg_fills_engine_mode_known_values" in sql
+    assert "before insert or update of engine_mode, ts on trading.fills" in sql
+    assert "execute function trading.enforce_fills_engine_mode_known_values()" in sql
+    assert "using errcode = '23514'" in sql
+    assert "columnstore hypertable does not support check" in sql
+
+
 def test_v077_does_not_rewrite_existing_fill_rows() -> None:
     sql = _normalized_sql()
 
     for forbidden in (
-        "insert into",
-        "update ",
-        "delete from",
+        "insert into trading.fills",
+        "update trading.fills",
+        "delete from trading.fills",
         "drop table",
         "drop constraint",
         "create table",
