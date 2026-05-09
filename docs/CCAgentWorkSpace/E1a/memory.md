@@ -51,6 +51,7 @@ function updateBudgetDisplay(remaining) { ... }
 | 2026-04-28 | Agent Tracker MVP（AI 团队工作台）— tab-learning.html 加 5 区块 + agent-tracker.js 722 行 | 主會話直接報告（無單獨 .md） |
 | 2026-04-29 | Learning tab 区块 E「影子 vs 真仓」误导文案修正 → 「Demo 引擎 vs LiveDemo 引擎成交」 | `.claude_reports/20260429_191942_e1a_gui_shadow_vs_live_text_fix.md` |
 | 2026-05-09 | W-AUDIT-7c GUI 三項修復（typed-confirm modal + Settings sub-tab + 2 governance confirm replace） | `workspace/reports/2026-05-09--w_audit_7c_gui_three_fix.md` · commit 9e265ba9 |
+| 2026-05-09 | W-AUDIT-7c **Round 2** fix（A3 verdict FALSE_CLOSED 後 9 項缺陷修補）— SyntaxError 整檔 parse fail / fixture garbage / button race / cancel toast / pending list 細節展示 | `workspace/reports/2026-05-09--w_audit_7c_round2_fix.md` · commit 待填 |
 
 ## F5 教訓（2026-04-26）
 
@@ -290,3 +291,32 @@ Mac 沒裝 W3C validator / esprima / node JS parser；用 (1) Python `html.parse
 ### 28/28 pytest PASS + 169/169 sibling regression unchanged（3 pre-existing fails 不歸 R4）
 新加 28 個 R4 test 全 PASS（覆蓋 R4-T1/T2/T3/T4 + Sprint A invariants + 跨平台 sanity）。sibling regression 169 PASS / 3 FAIL — 3 FAIL 是 Linux HEAD `6e39c51d` 上 `test_replay_routes_auth.py::test_authenticated_*_post_run` 系列（POST /run active_run cap 邏輯），與我 frontend 改動 0 重疊。透過 `git stash --include-untracked` + 重跑驗證 3 fail 在我改動前已存在 → 不歸 R4 責任。
 **規律**：sibling regression 報出 FAIL 必先「stash --include-untracked + 重跑」確認是否 pre-existing；只有 「stash 後 PASS / unstash 後 FAIL」才是真退化；同 stash 兩邊都 fail 屬於 pre-existing baseline，IMPL 報告必明文標出避免 reviewer 誤解為 IMPL 引入退化。
+
+## W-AUDIT-7c Round 2 fix 教訓（2026-05-09，A3 verdict FALSE_CLOSED 修補）
+
+### Brace/paren/bracket diff = 0 對 lexical-scope shadow 無效
+上輪 sign-off 自評「JS brace=0 parens=0 brackets=0」字符 balance check **完全無法捕捉** same-scope `const ok` + `let ok` 重複宣告的 SyntaxError。governance-tab.js 整檔 parse fail，user 一進 governance tab 所有 fn ReferenceError。**規律**：GUI E1a 任務 sign-off 必跑 `node --check <file>` 真實 V8 parser；character balance 是輔助，不能替代 syntax check。Mac 開發環境裝 `node` (homebrew) 即可，不需 jsdom。
+
+### Fixture 結尾殘留 `</content></invoke>` 是「沒真開瀏覽器」鐵證
+上輪 fixture 結尾 line 125-126 是 Write 工具 XML payload 殘留（`</content></invoke>` 是 tool call closing tag）。如果上輪真在瀏覽器打開過，瀏覽器會視這 2 行為 invalid HTML 並 console error；事實是寫完就放著沒驗證。**規律**：Write tool 用於寫整檔時若 prompt 內 XML payload 殘留，必須回頭 grep `</content>` / `</invoke>` 字面值清掉；fixture sign-off 必有「真開瀏覽器跑」或「裝 jsdom 跑 headless runner」的證據（screenshot / stdout / DOM dump）。
+
+### Cancel path 靜默 return 是 anti-UX
+modal 取消後純 `return` 沒任何 toast → user 沒得到反饋以為按錯了會再點一次。本輪 4 cancel path 全加 `ocToast('已取消...', 'neutral')`。**規律**：governance ux-checklist §5「audit-aware: 最近 5 次 actor + ts + 結果」原則延伸 — cancel 也算結果，必須 surface visible feedback。所有 modal-based critical 寫操作 cancel path 都加 cancel toast。
+
+### 「事先 fetch list 才開 modal」是 audit-aware UX 準則
+governance critical 寫操作 modal body 不能只給通用 phrase（「即將批准全部待審」），必須含具體影響：N 筆、change_id 樣本、strategy/symbol/freeze reason/age 等。本輪 [#5] bulkAudit 改先 fetch 再開 modal、[#6] confirmApproveRecovery 從 cache `_lastPendingRecovery` 找 detail 顯示。**規律**：bulk 操作 modal 必含「N 筆 + 前 5 筆 ID + overflow `... 及其他 M 筆`」；single 操作 modal 必含 cache lookup 取得 entity detail（無需新 API call，從 list cache `find()`）；cache 過期則強制 reload 一次再顯。
+
+### Modal singleton 防雙開 + button disable 雙道防線
+critical 寫操作 race protection：
+1. trigger button 在 await modal **前** `disabled = true`（try/finally 復位）— 第一道
+2. `openTypedConfirmModal` 內 detect overlay 已 `.show` 狀態時 `console.error` + `Promise.reject('modal already open')`— 第二道
+兩道並用避免 fast 連點覆蓋第一個 Promise resolver。**規律**：singleton modal helper（如 openTypedConfirmModal / openPromptModal / openConfirmModal）必有「already open」guard；caller 也必有 button disable + finally 復位；兩者協作不可省略其中一個。
+
+### bulk 部分失敗必收 failedChangeIds + toast 帶 detail
+for-loop 內 `okCount++` / `failCount++` 之外，必收 `failedChangeIds.push(change_id)`，最終 toast 在 base counter 訊息後追加「失敗：[id1, id2, ...(+N)]」（≤ 10 直顯，> 10 截斷）。toast type 改三態：全成功 success / 部分失敗 warn / 全失敗 error。**規律**：所有「one user action 觸發 N backend write」的 bulk 操作必有 partial-fail visibility — operator 看到「7 項已同意」但實際 5 成功 2 失敗時必須能立刻看到哪 2 個失敗，否則 audit trail 斷層。
+
+### jsdom 裝起來跑 fixture > Mac 純結構驗證
+上輪用 Python HTMLParser stack + brace count 是 80% bug 防線，但漏了 same-scope shadow（lexical layer）。本輪改裝 jsdom (`npm install jsdom` 在 /tmp/jsdom-runner)，跑 5 case fixture + 2 e2e（bulkAudit/confirmApproveRecovery modal real flow）。jsdom 完整支援 input/dispatchEvent/click/KeyboardEvent/Promise/setTimeout/classList，行為與 Chrome V8 + Blink 等價（V8 同源），唯一差異 layout/paint 不影響 GUI logic test。**規律**：Mac 環境一次性 `npm install jsdom` 是值得的工作流投資；下次 GUI E1a 任務若涉及 modal / event / async UX 路徑，先 jsdom headless 驗一次，再 push back 給 E4 在 Linux real-browser 跑 visual + a11y。
+
+### `event.currentTarget` 在 inline `onclick="bulkAudit('approve')"` 模式下 reachable
+HTML 內 `<button onclick="bulkAudit('approve')">` 點擊時，`bulkAudit` 函數體內 `event` global ref 仍指向 click event；`event.currentTarget` 是觸發 button DOM。**規律**：inline onclick handler 內呼叫的 fn 可直接用 `typeof event !== 'undefined' && event && event.currentTarget` 三層 guard 拿 trigger button，不需修 HTML 改傳 `this` 參數（會破壞 caller 兼容）；jsdom 測試時 `w.event = { currentTarget: btn }` mock 即可。
