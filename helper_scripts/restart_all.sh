@@ -391,6 +391,10 @@ restart_engine() {
     # durable across restarts; blank/absent preserves the code default OFF.
     local lease_router_gate_enabled
     lease_router_gate_enabled="${OPENCLAW_LEASE_ROUTER_GATE_ENABLED:-$(grep '^OPENCLAW_LEASE_ROUTER_GATE_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # cost_edge_advisor env-gate（FA D-04）：Rust + Python 雙端讀；
+    # blank/absent 保持預設 OFF（FA push back AMD-2026-05-09-03 後預設 ON）。
+    local cost_edge_advisor
+    cost_edge_advisor="${OPENCLAW_COST_EDGE_ADVISOR:-$(grep '^OPENCLAW_COST_EDGE_ADVISOR=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
@@ -400,6 +404,7 @@ restart_engine() {
         OPENCLAW_ENABLE_PAPER="${enable_paper}" \
         OPENCLAW_AGENT_SPINE_RUNTIME_MODE="${agent_spine_runtime_mode}" \
         OPENCLAW_LEASE_ROUTER_GATE_ENABLED="${lease_router_gate_enabled}" \
+        OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
@@ -507,6 +512,12 @@ restart_api() {
         replay_signing_key_file=""
     fi
 
+    # cost_edge_advisor env-gate（FA D-04）：API（Python learning_engine.cost_edge_advisor）
+    # 與 engine（Rust cost_edge_advisor_boot）雙端均讀此 env；blank/absent 預設 OFF
+    # 對齊 ENV_VAR_NAME 嚴格相等 "1" 檢查（program_code/learning_engine/cost_edge_advisor.py:79,124）。
+    local cost_edge_advisor_api
+    cost_edge_advisor_api="${OPENCLAW_COST_EDGE_ADVISOR:-$(grep '^OPENCLAW_COST_EDGE_ADVISOR=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
@@ -514,6 +525,7 @@ restart_api() {
         OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \
         OPENCLAW_REPLAY_FIXTURE_DEFAULT="$replay_fixture_default" \
         OPENCLAW_REPLAY_SIGNING_KEY_FILE="$replay_signing_key_file" \
+        OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor_api}" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host "$API_BIND_HOST" --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &
