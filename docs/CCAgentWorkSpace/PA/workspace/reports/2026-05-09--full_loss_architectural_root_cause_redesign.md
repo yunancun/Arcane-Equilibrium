@@ -239,8 +239,8 @@ pub struct AlphaSurface<'a> {
     pub oi_delta_panel: Option<&'a OIDeltaPanel>,           // cross-symbol OI 動量
 
     // Tier 3 — Microstructure（新一等對象）
-    pub orderflow: Option<&'a OrderflowFeatures>,           // microprice, queue imbalance, large-trade tape
-    pub liquidation_pulse: Option<&'a LiquidationPulse>,
+    pub orderflow: Option<&'a OrderflowFeatures>,           // microprice, queue imbalance from L50 (or L200), large-trade tape
+    pub liquidation_pulse: Option<&'a LiquidationPulse>,    // requires_revival flag — handler 已 4 weeks ago deleted（見 BB v3 NEW-6）
 
     // Tier 4 — 信息流（從 Scout 真實接入）
     pub event_alerts: &'a [EventAlert],
@@ -253,6 +253,12 @@ pub enum AlphaSourceTag {
     LiquidationCascade, EventDriven, CrossAsset, ...
 }
 ```
+
+**Bybit V5 真實 levels 對齊**（BB v3 NEW-5）：Bybit V5 WS linear orderbook 真實 depth levels = `1 / 50 / 200 / 1000`，**沒有 L25**。`OrderflowFeatures` 的 microprice / queue imbalance / orderbook imbalance 必須從 `orderbook.50.{symbol}`（已預設訂閱）抽取；如需 deeper book context（large order resting、queue depth tail）改 `orderbook.200.{symbol}`，禁止任何「L25」字眼進 spec / IMPL / migration / healthcheck。
+
+**`liquidation_pulse` 復活前置條件**（BB v3 NEW-6）：OpenClaw 於 2026-04-06 已刪除 `allLiquidation` WS handler（字典手冊 line 990 證明）。`market.liquidations` 表雖 reserved 保留，但 R-1 IMPL 必須**先付 +1 sprint 重接 WS handler + 重啟 writer**，期間此 alpha source 必須以 `requires_revival: true` flag 標記為 dormant；策略 ctor 階段 declare `LiquidationCascade` 的，在 handler 復活前 surface 永遠 `None`，而不是 stub mock 數據。
+
+**`Basis` execution 邊界**（BB v3 NEW-8）：`basis_curve` (perp - spot) 在 Bybit demo 環境**僅支援 observation**（demo 無 spot lending execution capability，與 funding_arb v2 retire 同因 ADR-0018）。R-1 spec 必須明文「`basis = observation-only signal until mainnet`」，並對 `Basis` tag 的策略加 `requires_spot_capability: true` flag — 在 demo 環境下任何吃 `Basis` tag 的策略產生的 `StrategyAction` **必須 fail-closed**，不可進 IntentProcessor；只有 mainnet + 真實 spot account 接通後才解封 execution path。否則跟 funding_arb v2 同陷阱（demo edge sample 全是 paper-grade，graduate live 時必死）。
 
 **強制機制**：
 - 每個 Strategy 必須在 ctor 聲明 `declared_alpha_sources()`

@@ -159,6 +159,22 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
+### 2026-05-09 v3 verification + PA redesign + DUAL-TRACK index addendum
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md` | PA architectural root cause redesign blueprint — R-1..R-5 upgrade roadmap; alpha-poverty / Strategist scope / Analyst dormant / forcing function gap / 5-Agent skeleton without soul 5 root causes |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_audit_pa_fix_plan_v2.md` | DUAL-TRACK fix plan v2 — Track W (88 finding maintenance) + Track A (R-1..R-5 architectural) parallel |
+| `execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` | W-AUDIT-8a SPEC PHASE — Alpha Surface Foundation interface contract + DAG (R-1 spec phase, no IMPL) |
+| `adr/0021-alpha-source-architecture-upgrade.md` | ADR-0021 (Proposed / Pending Operator Decision) — Alpha Source Architecture Upgrade R-1..R-5; supersedes LG-X-02..05 system-wide promotion design |
+| `governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` | AMD-2026-05-09-03 — Strategist wide-adjustment skill (30%→50% freedom-not-gate path) |
+| `governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` | AMD-2026-05-09-04 — Demo→LivePending Promotion Evidence Push (V079 + DSR/PBO + tail risk wired into SM-04) |
+| `archive/2026-05-09--w_audit_verified_closed_archive_v2.md` | v2 verified-closed archive (R4 v2 errata 補登) |
+| `archive/2026-05-09--w_audit_verified_closed_archive_v3.md` | v3 verified-closed archive — DUAL-TRACK structure + 5 commits real cover + cross-agent PA Redesign verdict |
+| `../2026-05-09--audit_fix_verification_v3_summary.md` | PM v3 sign-off summary (top-level operator-facing) |
+| `CCAgentWorkSpace/{FA,AI-E,E5,E4,E3,CC,QC,MIT,BB,TW,R4,A3}/workspace/reports/2026-05-09--*_v3.md` | 12 v3 verification reports (per-agent re-audit after v2 land) |
+| `../2026-05-09--audit_fix_verification_v2_summary.md` | PM v2 sign-off summary (intermediate, superseded by v3) |
+
 ### 2026-05 W-AUDIT-1 index addendum（AgentTodo / audit / governance）
 
 | 文件 | 内容 |
