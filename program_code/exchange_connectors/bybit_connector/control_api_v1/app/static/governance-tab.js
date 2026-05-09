@@ -1586,15 +1586,29 @@ async function bulkAudit(action) {
       : '即將拒絕 ' + items.length + ' 筆 PENDING 變更，理由將寫入 audit trail。\n拒絕後待審項回復為已關閉狀態，需重新申請。'
     ) + '\n\n變更清單（前 5 筆）:\n' + sampleLines + overflow;
 
-    const proceed = await openTypedConfirmModal({
-      title: titleZh,
-      body: bodyZh,
-      phrase: 'CONFIRM',
-      confirmLabel: isApprove ? '確認批量批准 / Approve All' : '確認批量拒絕 / Reject All',
-      confirmClass: isApprove ? 'oc-btn-primary' : 'oc-btn-danger',
-      impact: '所有 ' + items.length + ' 筆 PENDING 同時 commit',
-      rollback: '無自動回滾；需個別申請新變更覆蓋'
-    });
+    // round 3 fix HIGH-1：await openTypedConfirmModal 必包 try/catch；
+    //   singleton guard 在已開 modal 時 reject('modal already open')，
+    //   caller 若不接 → unhandled rejection + finally 仍 re-enable button =
+    //   user 誤判「按了沒反應」再點一次。本 try/catch 把 reject 顯式 toast 出來。
+    let proceed;
+    try {
+      proceed = await openTypedConfirmModal({
+        title: titleZh,
+        body: bodyZh,
+        phrase: 'CONFIRM',
+        confirmLabel: isApprove ? '確認批量批准 / Approve All' : '確認批量拒絕 / Reject All',
+        confirmClass: isApprove ? 'oc-btn-primary' : 'oc-btn-danger',
+        impact: '所有 ' + items.length + ' 筆 PENDING 同時 commit',
+        rollback: '無自動回滾；需個別申請新變更覆蓋'
+      });
+    } catch (err) {
+      if (err && err.message === 'modal already open') {
+        ocToast('已有確認對話框打開，請先完成當前操作 / Another confirm dialog is open', 'warn');
+      } else {
+        ocToast('開啟確認對話框失敗 / Open confirm dialog failed: ' + (err && err.message || err), 'error');
+      }
+      return; // finally 會 re-enable button
+    }
     if (!proceed) {
       ocToast('已取消批量' + (isApprove ? '批准 / Bulk approve cancelled' : '拒絕 / Bulk reject cancelled'), 'neutral');
       return;
@@ -1724,16 +1738,28 @@ async function confirmApproveRecovery(requestId) {
       detailLines = '\n\n（請求細節無法載入，僅以 ID 識別）';
     }
 
-    const ok = await openTypedConfirmModal({
-      title: '批准恢復請求 / Approve Recovery Request — ' + requestId,
-      body: '批准恢復請求 = 放寬已被風控阻擋的執行邊界。\n受影響範圍：SM-04 風險等級、Decision Lease 授權鏈、可能觸發 Executor 重新進入 active 狀態。\n請確認 incident root cause 已查清且風控狀態安全。' + detailLines,
-      phrase: 'CONFIRM',
-      confirmLabel: '確認批准恢復 / Approve Recovery',
-      confirmClass: 'oc-btn-danger',
-      impact: '放寬風控保護邊界；對賬 / 風控可能立即重新啟用',
-      rollback: '無自動回滾；需新發 recovery override 收回'
-    });
-    if (!ok) {
+    // round 3 fix HIGH-1：await openTypedConfirmModal 必包 try/catch；singleton guard reject 不靜默。
+    // round 3 fix LOW-1：rename `const ok` → `const proceed`，與 bulkAudit 保持一致避免 future-proofing footgun。
+    let proceed;
+    try {
+      proceed = await openTypedConfirmModal({
+        title: '批准恢復請求 / Approve Recovery Request — ' + requestId,
+        body: '批准恢復請求 = 放寬已被風控阻擋的執行邊界。\n受影響範圍：SM-04 風險等級、Decision Lease 授權鏈、可能觸發 Executor 重新進入 active 狀態。\n請確認 incident root cause 已查清且風控狀態安全。' + detailLines,
+        phrase: 'CONFIRM',
+        confirmLabel: '確認批准恢復 / Approve Recovery',
+        confirmClass: 'oc-btn-danger',
+        impact: '放寬風控保護邊界；對賬 / 風控可能立即重新啟用',
+        rollback: '無自動回滾；需新發 recovery override 收回'
+      });
+    } catch (err) {
+      if (err && err.message === 'modal already open') {
+        ocToast('已有確認對話框打開，請先完成當前操作 / Another confirm dialog is open', 'warn');
+      } else {
+        ocToast('開啟確認對話框失敗 / Open confirm dialog failed: ' + (err && err.message || err), 'error');
+      }
+      return; // finally 會 re-enable button
+    }
+    if (!proceed) {
       ocToast('已取消批准恢復 / Recovery approval cancelled', 'neutral');
       return;
     }
