@@ -19,6 +19,8 @@ pub(super) const DEFAULT_SQUEEZE_BW: f64 = 0.03; // EDGE-P1-4: 0.02→0.03 (rela
 pub(super) const DEFAULT_EXPANSION_BW: f64 = 0.04;
 /// Default volume ratio threshold for breakout confirmation (成交量確認閾值默認)
 pub(super) const DEFAULT_VOLUME_THRESHOLD: f64 = 1.2; // EDGE-P1-4: 1.5→1.2 (lower volume bar)
+/// Default per-symbol cooldown duration in milliseconds.
+pub(super) const DEFAULT_COOLDOWN_MS: u64 = 300_000;
 
 /// P1-11 (2): how the Donchian-channel breach condition combines with the
 /// BB-core gates (squeeze / expansion / volume).
@@ -254,7 +256,7 @@ impl Default for BbBreakoutParams {
     fn default() -> Self {
         let cc = ConfluenceConfig::breakout();
         Self {
-            cooldown_ms: 300_000,
+            cooldown_ms: DEFAULT_COOLDOWN_MS,
             default_qty: 1e9,
             squeeze_bw: DEFAULT_SQUEEZE_BW,
             expansion_bw: DEFAULT_EXPANSION_BW,

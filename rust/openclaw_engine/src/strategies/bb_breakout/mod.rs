@@ -36,7 +36,9 @@ mod tests_oi;
 mod tests_p1_11;
 
 pub use params::{BbBreakoutParams, BbBreakoutProfile, DonchianMode};
-use params::{DEFAULT_EXPANSION_BW, DEFAULT_SQUEEZE_BW, DEFAULT_VOLUME_THRESHOLD};
+use params::{
+    DEFAULT_COOLDOWN_MS, DEFAULT_EXPANSION_BW, DEFAULT_SQUEEZE_BW, DEFAULT_VOLUME_THRESHOLD,
+};
 
 /// Per-symbol dynamic state for `BbBreakout`. All fields are independently
 /// optional: absence of a squeeze, an entry-price, or a trailing-stop each have
@@ -189,8 +191,8 @@ impl BbBreakout {
             active: true,
             symbols: PerSymbolState::new(),
             squeeze_expiry_ms: 2_700_000, // EDGE-P1-4: 45 minutes (was 30)
-            cooldown: TrendCooldown::new(600_000),
-            cooldown_ms: 600_000,
+            cooldown: TrendCooldown::new(DEFAULT_COOLDOWN_MS),
+            cooldown_ms: DEFAULT_COOLDOWN_MS,
             default_qty: 1e9,
             trailing_stop_atr_mult: 2.0,
             squeeze_bw: DEFAULT_SQUEEZE_BW,

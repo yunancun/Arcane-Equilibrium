@@ -213,6 +213,14 @@ W-AUDIT-3 F-01 current fact:
 - provider missing/exception paths are fail-closed in `_read_shadow_mode()`
   before IPC submit authority; source/test only, no rebuild/restart
 
+W-AUDIT-6 current fact:
+- as of 2026-05-09, `bb_breakout` cooldown drift is source/test closed:
+  `BbBreakoutParams::default()` and `BbBreakout::new()` share
+  `DEFAULT_COOLDOWN_MS=300_000`, and tests assert both `cooldown_ms` and
+  `TrendCooldown` duration match the params default
+- no strategy/risk TOML mutation, rebuild, restart, or runtime apply was
+  performed for this checkpoint
+
 P0-NEW-VULN-1 bind-host rule:
 - lifecycle scripts must not default to `0.0.0.0`
 - default `OPENCLAW_BIND_HOST=auto` resolves the node's concrete Tailscale IPv4

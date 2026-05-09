@@ -452,8 +452,15 @@ fn test_e5_p2_4_runtime_new_matches_params_default() {
     // BbBreakout::new() must seed the runtime fields with the same literals
     // as BbBreakoutParams::default() — enforces a single source of truth.
     // BbBreakout::new() 初始化值需與 BbBreakoutParams::default() 同源（單一事實來源）。
-    let s = BbBreakout::new();
+    let mut s = BbBreakout::new();
     let d = BbBreakoutParams::default();
+    assert_eq!(s.cooldown_ms, d.cooldown_ms);
+    assert_eq!(s.cooldown.duration_ms(), d.cooldown_ms);
+    s.cooldown.record_signal("BTCUSDT", 1_000);
+    assert!(!s
+        .cooldown
+        .is_cooled_down("BTCUSDT", 1_000 + d.cooldown_ms - 1));
+    assert!(s.cooldown.is_cooled_down("BTCUSDT", 1_000 + d.cooldown_ms));
     assert!((s.hurst_regime_boost - d.hurst_regime_boost).abs() < f64::EPSILON);
     assert!((s.exit_bonus_trailing_stop - d.exit_bonus_trailing_stop).abs() < f64::EPSILON);
     assert!((s.exit_bonus_regime_shift - d.exit_bonus_regime_shift).abs() < f64::EPSILON);
