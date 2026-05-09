@@ -277,6 +277,11 @@ W-AUDIT-6 current fact:
   DEMO_ACTIVE can graduate to LIVE_PENDING. Missing stress exposures,
   insufficient observations, EVT low confidence, historical VaR/CVaR breach,
   or stress breach fail closed.
+- as of 2026-05-09, W-AUDIT-5 F-12 true-file mismatch is source/test closed:
+  `rust/openclaw_engine/src/replay/runner.rs` was split from 2469 LOC to 1166
+  LOC by moving module-internal tests to sibling `runner_tests.rs` (1299 LOC).
+  `tests/structure/test_replay_runner_split_static.py` now guards both files
+  under the 2000 LOC cap; this is source/test only, no rebuild/restart.
 - runtime apply note: the operator-requested post-sync rebuild loaded the MA R:R
   checkpoint, and the follow-up rebuild/restart loaded the BILLUSDT grid
   blocklist. The later bb_breakout 5m and W-AUDIT-6c portfolio tail-risk
