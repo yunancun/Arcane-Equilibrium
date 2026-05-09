@@ -2347,45 +2347,42 @@ mod tests {
 
     use crate::ml::kelly_sizer::{compute_kelly_qty, TradeStats};
 
-    /// R6-T3 — verify KellyConfig built from risk_config snapshot mirrors
-    /// the bin entry's exact construction pattern + matches live IntentProcessor
-    /// `set_kelly_config(KellyConfig::default())` when risk_config.kelly is at
-    /// G7-01 defaults (50/200).
-    /// R6-T3 — 驗從 risk_config 快照建出的 KellyConfig 鏡射 bin entry 完整
-    /// 構造模式；當 risk_config.kelly 為 G7-01 預設（50/200）時與 live
-    /// IntentProcessor `set_kelly_config(KellyConfig::default())` 等價。
+    /// R6-T3 / W-AUDIT-6 — verify KellyConfig is derived from the authoritative
+    /// RiskConfig snapshot rather than carrying a separate risk_pct source.
+    /// R6-T3 / W-AUDIT-6 — 驗 KellyConfig 從權威 RiskConfig 快照派生，
+    /// 不再持有另一套 risk_pct 來源。
     #[test]
-    fn test_r6t3_kelly_config_construction_matches_live_default_at_g7_01_defaults() {
-        let risk_config = crate::config::RiskConfig::default();
-        // Mirror bin/replay_runner.rs:507-523 KellyConfig construction.
-        // 鏡射 bin/replay_runner.rs:507-523 KellyConfig 構造。
-        let kelly_config = KellyConfig {
-            young_threshold: risk_config.kelly.young_threshold,
-            mature_threshold: risk_config.kelly.mature_threshold,
-            young_fraction: risk_config.kelly.young_fraction,
-            mature_fraction: risk_config.kelly.mature_fraction,
-            established_fraction: risk_config.kelly.established_fraction,
-            ..KellyConfig::default()
-        };
-        let live_default = KellyConfig::default();
+    fn test_r6t3_kelly_config_construction_reads_risk_config_snapshot() {
+        let mut risk_config = crate::config::RiskConfig::default();
+        risk_config.limits.per_trade_risk_pct = crate::config::MIN_PER_TRADE_RISK_PCT;
+        risk_config.kelly.young_fraction = 0.10;
+        risk_config.kelly.mature_fraction = 0.20;
+        risk_config.kelly.established_fraction = 0.30;
+
+        let kelly_config = KellyConfig::from_risk_config(&risk_config);
         // At G7-01 defaults, replay-derived KellyConfig must field-equal
-        // the live default (both have young=50 / mature=200 / risk_pct=0.03 /
-        // enabled=true / max_fraction=0.25 / min_trades=50).
-        // G7-01 預設下，replay 派生的 KellyConfig 必須欄位等同 live 預設。
-        assert_eq!(kelly_config.young_threshold, live_default.young_threshold);
-        assert_eq!(kelly_config.mature_threshold, live_default.mature_threshold);
-        assert!((kelly_config.young_fraction - live_default.young_fraction).abs() < 1e-12);
-        assert!((kelly_config.mature_fraction - live_default.mature_fraction).abs() < 1e-12);
-        assert!(
-            (kelly_config.established_fraction - live_default.established_fraction).abs() < 1e-12
+        // the risk_config snapshot for tunables while keeping structural defaults.
+        // G7-01 預設下，replay 派生的 KellyConfig 必須讀 risk_config 中的可調欄位，
+        // 其餘結構欄位保留 KellyConfig 預設。
+        assert_eq!(
+            kelly_config.young_threshold,
+            risk_config.kelly.young_threshold
         );
-        assert!((kelly_config.max_fraction - live_default.max_fraction).abs() < 1e-12);
-        assert_eq!(kelly_config.min_trades, live_default.min_trades);
-        assert!((kelly_config.risk_pct - live_default.risk_pct).abs() < 1e-12);
-        assert_eq!(kelly_config.enabled, live_default.enabled);
-        assert!((kelly_config.reference_atr_pct - live_default.reference_atr_pct).abs() < 1e-12);
-        assert!((kelly_config.vol_mult_floor - live_default.vol_mult_floor).abs() < 1e-12);
-        assert!((kelly_config.vol_mult_ceil - live_default.vol_mult_ceil).abs() < 1e-12);
+        assert_eq!(
+            kelly_config.mature_threshold,
+            risk_config.kelly.mature_threshold
+        );
+        assert!((kelly_config.risk_pct - risk_config.limits.per_trade_risk_pct).abs() < 1e-12);
+        assert!((kelly_config.young_fraction - 0.10).abs() < 1e-12);
+        assert!((kelly_config.mature_fraction - 0.20).abs() < 1e-12);
+        assert!((kelly_config.established_fraction - 0.30).abs() < 1e-12);
+        let defaults = KellyConfig::default();
+        assert!((kelly_config.max_fraction - defaults.max_fraction).abs() < 1e-12);
+        assert_eq!(kelly_config.min_trades, defaults.min_trades);
+        assert_eq!(kelly_config.enabled, defaults.enabled);
+        assert!((kelly_config.reference_atr_pct - defaults.reference_atr_pct).abs() < 1e-12);
+        assert!((kelly_config.vol_mult_floor - defaults.vol_mult_floor).abs() < 1e-12);
+        assert!((kelly_config.vol_mult_ceil - defaults.vol_mult_ceil).abs() < 1e-12);
         // Validate KellyConfig itself (G7-01 invariant: young < mature, both > 0).
         kelly_config
             .validate()
@@ -2432,14 +2429,7 @@ mod tests {
     #[test]
     fn test_r6t3_kelly_qty_finite_with_calibrated_kelly_config() {
         let risk_config = crate::config::RiskConfig::default();
-        let kelly_config = KellyConfig {
-            young_threshold: risk_config.kelly.young_threshold,
-            mature_threshold: risk_config.kelly.mature_threshold,
-            young_fraction: risk_config.kelly.young_fraction,
-            mature_fraction: risk_config.kelly.mature_fraction,
-            established_fraction: risk_config.kelly.established_fraction,
-            ..KellyConfig::default()
-        };
+        let kelly_config = KellyConfig::from_risk_config(&risk_config);
         // Cold-boot stats: 0 trades → Kelly inactive path returns
         // `min(balance * risk_pct / price, max_qty)`.
         // 冷啟動 stats：0 trades → Kelly 未啟動路徑回 `min(balance*risk_pct/price, max_qty)`。

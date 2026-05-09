@@ -61,6 +61,10 @@ pub use fast_track_cfg::FastTrackConfig;
 // Top-level / 頂層
 // ---------------------------------------------------------------------------
 
+pub const MIN_PER_TRADE_RISK_PCT: f64 = 0.001;
+pub const MAX_PER_TRADE_RISK_PCT: f64 = 0.20;
+pub const DEFAULT_PER_TRADE_RISK_PCT: f64 = 0.03;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meta {
     #[serde(default = "default_meta_version")]
@@ -484,7 +488,7 @@ fn default_guardian_modification_leverage_cap() -> f64 {
     2.0
 }
 fn default_per_trade_risk_pct() -> f64 {
-    0.03
+    DEFAULT_PER_TRADE_RISK_PCT
 }
 fn default_ft_min_notional_ratio_of_entry() -> f64 {
     // MICRO-PROFIT-FIX-1: 0.25 maps to "two halvings then stop" — a 4th halve
@@ -581,10 +585,11 @@ impl GlobalLimits {
         if self.guardian_modification_leverage_cap < 1.0 {
             return Err("risk.limits.guardian_modification_leverage_cap must be >= 1".into());
         }
-        if !(0.0001..=0.20).contains(&self.per_trade_risk_pct) {
-            return Err(
-                "risk.limits.per_trade_risk_pct must be in [0.0001, 0.20] (0.01–20%)".into(),
-            );
+        if !(MIN_PER_TRADE_RISK_PCT..=MAX_PER_TRADE_RISK_PCT).contains(&self.per_trade_risk_pct) {
+            return Err(format!(
+                "risk.limits.per_trade_risk_pct must be in [{MIN_PER_TRADE_RISK_PCT}, \
+                 {MAX_PER_TRADE_RISK_PCT}] (0.1–20%)",
+            ));
         }
         // MICRO-PROFIT-FIX-1: ft_min_notional_ratio_of_entry ∈ [0, 1]; 0 disables the filter.
         // MICRO-PROFIT-FIX-1：ft_min_notional_ratio_of_entry ∈ [0, 1]，0 = 關閉。

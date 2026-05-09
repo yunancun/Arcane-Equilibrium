@@ -116,7 +116,7 @@ impl Default for KellyConfig {
         Self {
             max_fraction: 0.25,
             min_trades: 50,
-            risk_pct: 0.03,
+            risk_pct: crate::config::DEFAULT_PER_TRADE_RISK_PCT,
             enabled: true,
             reference_atr_pct: 0.02,
             vol_mult_floor: 0.5,
@@ -131,6 +131,20 @@ impl Default for KellyConfig {
 }
 
 impl KellyConfig {
+    /// Build Kelly config from the authoritative risk snapshot.
+    /// 從權威 RiskConfig 快照派生 Kelly 配置。
+    pub fn from_risk_config(config: &crate::config::RiskConfig) -> Self {
+        Self {
+            risk_pct: config.limits.per_trade_risk_pct,
+            young_threshold: config.kelly.young_threshold,
+            mature_threshold: config.kelly.mature_threshold,
+            young_fraction: config.kelly.young_fraction,
+            mature_fraction: config.kelly.mature_fraction,
+            established_fraction: config.kelly.established_fraction,
+            ..Self::default()
+        }
+    }
+
     /// G7-01 (2026-04-24): Validate Kelly tier boundaries.
     /// Both thresholds must be > 0 and `young_threshold < mature_threshold`.
     /// G7-01：驗證 Kelly 分級邊界。兩個門檻必須 > 0 且 young < mature。
@@ -499,5 +513,24 @@ mod tests {
             qty_larger > qty_baseline,
             "raising mature_fraction must increase same-cell Kelly size"
         );
+    }
+
+    #[test]
+    fn test_w_audit_6_from_risk_config_uses_per_trade_risk_pct() {
+        let mut risk_config = crate::config::RiskConfig::default();
+        risk_config.limits.per_trade_risk_pct = crate::config::MIN_PER_TRADE_RISK_PCT;
+        risk_config.kelly.young_fraction = 0.10;
+        risk_config.kelly.mature_fraction = 0.20;
+        risk_config.kelly.established_fraction = 0.30;
+
+        let cfg = KellyConfig::from_risk_config(&risk_config);
+
+        assert!(
+            (cfg.risk_pct - risk_config.limits.per_trade_risk_pct).abs() < 1e-12,
+            "Kelly cold-start risk_pct must be derived from RiskConfig.limits"
+        );
+        assert!((cfg.young_fraction - 0.10).abs() < 1e-12);
+        assert!((cfg.mature_fraction - 0.20).abs() < 1e-12);
+        assert!((cfg.established_fraction - 0.30).abs() < 1e-12);
     }
 }

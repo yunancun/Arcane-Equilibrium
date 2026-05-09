@@ -515,14 +515,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 於 bin/ entry 就地組合使 snapshot 顯式且可稽核。SAFETY：0
         // endpoint / IPC / lease — V3 §6.2 forbidden surface 0 觸碰。
         let p1_risk_pct = risk_config.limits.per_trade_risk_pct;
-        let kelly_config = KellyConfig {
-            young_threshold: risk_config.kelly.young_threshold,
-            mature_threshold: risk_config.kelly.mature_threshold,
-            young_fraction: risk_config.kelly.young_fraction,
-            mature_fraction: risk_config.kelly.mature_fraction,
-            established_fraction: risk_config.kelly.established_fraction,
-            ..KellyConfig::default()
-        };
+        let kelly_config = KellyConfig::from_risk_config(&risk_config);
         let risk_adapter = ReplayRiskAdapter::new(
             profile,
             GuardianConfig::default(),

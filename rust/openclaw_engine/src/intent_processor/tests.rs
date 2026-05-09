@@ -206,6 +206,35 @@ fn test_position_sizing_caps_qty() {
 }
 
 #[test]
+fn test_kelly_config_reanchors_to_risk_config_per_trade_pct() {
+    let mut proc = IntentProcessor::new();
+    proc.set_kelly_config(crate::ml::kelly_sizer::KellyConfig::default());
+
+    let mut cfg = RiskConfig::default();
+    cfg.limits.per_trade_risk_pct = crate::config::MIN_PER_TRADE_RISK_PCT;
+    cfg.kelly.young_fraction = 0.10;
+    cfg.kelly.mature_fraction = 0.20;
+    cfg.kelly.established_fraction = 0.30;
+    proc.update_risk_config(cfg.clone());
+
+    let kelly = proc
+        .kelly_config
+        .as_ref()
+        .expect("existing KellyConfig must be re-derived on risk update");
+    assert!(
+        (proc.p1_risk_pct - crate::config::MIN_PER_TRADE_RISK_PCT).abs() < 1e-12,
+        "IntentProcessor P1 cap should share the RiskConfig lower bound"
+    );
+    assert!(
+        (kelly.risk_pct - cfg.limits.per_trade_risk_pct).abs() < 1e-12,
+        "Kelly cold-start risk_pct must come from RiskConfig.limits"
+    );
+    assert!((kelly.young_fraction - cfg.kelly.young_fraction).abs() < 1e-12);
+    assert!((kelly.mature_fraction - cfg.kelly.mature_fraction).abs() < 1e-12);
+    assert!((kelly.established_fraction - cfg.kelly.established_fraction).abs() < 1e-12);
+}
+
+#[test]
 fn test_governor_cautious_scales_new_entry_qty() {
     // RC-005: governor constraints must participate in admission.
     // Cautious multiplier=0.7 should scale post-P1 qty.

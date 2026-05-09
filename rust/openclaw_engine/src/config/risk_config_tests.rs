@@ -26,6 +26,26 @@ fn test_default_limits_match_python_legacy() {
 }
 
 #[test]
+fn test_per_trade_risk_pct_bounds_match_runtime_sizer() {
+    let mut cfg = RiskConfig::default();
+
+    cfg.limits.per_trade_risk_pct = MIN_PER_TRADE_RISK_PCT;
+    assert!(cfg.validate().is_ok(), "0.1% lower bound must validate");
+
+    cfg.limits.per_trade_risk_pct = MIN_PER_TRADE_RISK_PCT / 10.0;
+    assert!(
+        cfg.validate().is_err(),
+        "below 0.1% must reject instead of being silently clamped later"
+    );
+
+    cfg.limits.per_trade_risk_pct = MAX_PER_TRADE_RISK_PCT;
+    assert!(cfg.validate().is_ok(), "20% upper bound must validate");
+
+    cfg.limits.per_trade_risk_pct = MAX_PER_TRADE_RISK_PCT + 0.001;
+    assert!(cfg.validate().is_err(), "above 20% must reject");
+}
+
+#[test]
 fn test_invalid_stop_loss_rejected() {
     let mut cfg = RiskConfig::default();
     cfg.limits.stop_loss_max_pct = 150.0;
