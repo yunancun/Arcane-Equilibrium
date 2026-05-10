@@ -2238,3 +2238,28 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 - ma_crossover self.positions 跟 paper_state 不同步是「策略內部 state vs runtime authority state」典型 sync bug — 5 策略都該 audit on_fill / bootstrap / rollback 三條 sync path
 
 **Report**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_rfc_pa_questions_self_answer.md`
+
+## 2026-05-10 — Sprint N+1 W2 PA C-1 spec phase pre-run（A4-C BTC→Alt Lead-Lag）
+
+dispatch v3.3 §3.2 W2 fast-track 預跑：A4-C 是 W-AUDIT-8c 候選 C 的 N+1 paper-only fast-track，operator 2026-05-10 拍板 B 路徑（不只 spec，直接派 paper IMPL 拿 7d evidence，gate avg_net_bps ≥ +5 bps 進 N+2 demo IMPL）。
+
+**Spec land path**：`srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md`（draft v1，QC C-2 + MIT C-3 三角 review pending D+1，1 day）
+
+**關鍵設計決策**：
+- Cohort = BTCUSDT (lead) + ETHUSDT/SOLUSDT/XRPUSDT/DOGEUSDT/ADAUSDT/AVAXUSDT/DOTUSDT (7 alt follower)；BUSDT (ADR-0018) + INXUSDT (W7-3 hot loop 殘留風險) + grid_trading.blocked_symbols 全列入 excluded
+- Lead signal = btc_lead_return_pct(N) + btc_volume_z + btc_book_imbalance；N 預設 120s（QC C-2 拍板 60/120/300）；strict shift(N) 必排除 current bar（per `feedback_indicator_lookahead_bias`）
+- Predicted dir = expected_dir(±1/0)，threshold_X = 10 bps + threshold_Y = 0.40 預設
+- V088 panel `panel.btc_lead_lag_panel` hypertable 1d chunk + 14d retention（paper-only 期；N+2 升 30d 開新 V###）
+- Strategy 接收：ma_crossover + grid_trading paper engine only **shadow log no trade**（C-IMPL-3）；bb_breakout/bb_reversion/funding_arb 不接（避免污染既有 oi_delta panel evidence + 既有 demo edge baseline）
+- 三層 paper-only fence：Layer 1 step_4_5_dispatch engine_mode gate（主防線，default → None）+ Layer 2 Python writer paper-only fence（OPENCLAW_ENABLE_PAPER）+ Layer 3 Strategy if let Some guard（被 contract 覆蓋）
+- E1 派發：C-IMPL-1 NO-OP（trait 已 PA D+0 c9fb0b8f land）+ C-IMPL-2 producer + V088 + IPC slot（~350 LOC）+ C-IMPL-3 strategy paper-only shadow（~80 LOC）+ C-IMPL-4 paper engine 7d evidence collection
+- Bybit V5 rate budget = 9 req/min (BTC kline + BTC orderbook + 7 alt kline)，well under 120 req/s upper bound；W1+W2+W3 同窗 BB 必審
+
+**E2 重點審查 3 點**：
+1. Layer 1 paper-only fence default `_ => None`（不是 `_ => Some(...)`）— 漏 = 主路徑污染
+2. Strict shift(N) lookahead-free：所有 BTC return / volume z 計算 grep `rolling()` / `[t-N..t]` slice 確認 strict shift 排除 current bar
+3. V088 hypertable retention `add_retention_policy('panel.btc_lead_lag_panel', INTERVAL '14 days')` 必設 + idempotency dry-run 兩次
+
+**16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項**：全 0 觸碰（W2 paper-only shadow log no trade，不動 lease / auth / SM-04 / live boundary 任何路徑）。
+
+**Risk**：MIT 揭露 W6-5 同類 category error 風險待 D+1 三角 review；如類似 → revise spec 重派；如三輪 revise 仍 < +5 bps → A4-C archive，W-AUDIT-8c 候選 D（orderbook imbalance）替補 fast-track。
