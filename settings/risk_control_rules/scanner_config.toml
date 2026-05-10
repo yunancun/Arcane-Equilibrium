@@ -7,7 +7,7 @@ version = 1
 saved_ts_ms = 0
 
 [scheduling]
-scan_interval_secs = 1800   # 30 minutes / 30 分鐘
+scan_interval_secs = 60     # 1 minute / 1 分鐘
 warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等待 60 秒
 
 [universe]
@@ -21,9 +21,9 @@ min_price_usdt = 0.001
 btc_min_move_pct = 0.3   # BTC must move ≥0.3% for beta_proxy to be valid
 
 [anti_churn]
-min_hold_cycles = 2           # minimum scan cycles before removal
+min_hold_cycles = 15          # 15 scan cycles = ~15 min at 60s scans
 challenger_threshold = 15.0   # new symbol must beat worst by ≥15 pts
-removal_cooldown_minutes = 90
+removal_cooldown_minutes = 30
 
 [correlation]
 max_high_beta_symbols = 8   # max symbols with BTC beta > threshold
