@@ -1162,14 +1162,25 @@ async function loadPricing(forceRefresh) {
   if (!d || !d.data) { ocSetHtml('pricing-body', '<div class="oc-loading">No pricing data</div>'); return; }
   renderPricingRefreshStatus(d.data);
   const pricing = d.data.models || d.data;
+  const mtokPrice = (row, side) => {
+    if (!row || typeof row !== 'object') return 0;
+    const mtokKey = side + '_per_mtok';
+    const mKey = side + '_cost_per_1m';
+    const kKey = side + '_cost_per_1k';
+    if (row[mtokKey] != null) return Number(row[mtokKey]) || 0;
+    if (row[mKey] != null) return Number(row[mKey]) || 0;
+    if (row[kKey] != null) return (Number(row[kKey]) || 0) * 1000;
+    if (row[side] != null) return Number(row[side]) || 0;
+    return 0;
+  };
   let html = '<div class="oc-table-wrap"><table class="oc-table"><thead><tr><th>模型</th><th>供应商</th><th>Input $/1M</th><th>Output $/1M</th></tr></thead><tbody>';
   if (Array.isArray(pricing)) {
     pricing.forEach(p => {
-      html += '<tr><td>' + ocEsc(p.model || p.name) + '</td><td>' + ocEsc(p.provider || '--') + '</td><td>$' + ocNum((p.input_cost_per_1k || 0) * 1000, 2) + '</td><td>$' + ocNum((p.output_cost_per_1k || 0) * 1000, 2) + '</td></tr>';
+      html += '<tr><td>' + ocEsc(p.model || p.name || p.model_id || '--') + '</td><td>' + ocEsc(p.provider || '--') + '</td><td>$' + ocNum(mtokPrice(p, 'input'), 3) + '</td><td>$' + ocNum(mtokPrice(p, 'output'), 3) + '</td></tr>';
     });
   } else if (typeof pricing === 'object') {
     Object.entries(pricing).forEach(([model, costs]) => {
-      html += '<tr><td>' + ocEsc(model) + '</td><td>--</td><td>$' + ocNum((costs.input || 0) * 1000, 2) + '</td><td>$' + ocNum((costs.output || 0) * 1000, 2) + '</td></tr>';
+      html += '<tr><td>' + ocEsc(model) + '</td><td>--</td><td>$' + ocNum(mtokPrice(costs, 'input'), 3) + '</td><td>$' + ocNum(mtokPrice(costs, 'output'), 3) + '</td></tr>';
     });
   }
   html += '</tbody></table></div>';

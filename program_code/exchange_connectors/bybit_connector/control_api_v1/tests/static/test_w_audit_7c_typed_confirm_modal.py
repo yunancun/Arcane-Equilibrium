@@ -175,6 +175,14 @@ def test_w_audit_7c_case04_tab_ai_no_native_confirm() -> None:
     )
 
 
+def test_tab_ai_pricing_table_reads_backend_mtok_fields() -> None:
+    """Pricing table must render Layer2 PricingTable.to_dict field names."""
+    src = _read(_TAB_AI_HTML)
+    assert "side + '_per_mtok'" in src
+    assert "mtokPrice(costs, 'input')" in src
+    assert "mtokPrice(costs, 'output')" in src
+
+
 # ─────────────────────────────────────────────────────────────
 # CASE-05  common.js openTypedConfirmModal 函數體 brace_balanced
 # ─────────────────────────────────────────────────────────────
