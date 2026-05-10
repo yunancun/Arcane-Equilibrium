@@ -166,9 +166,11 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md` | PA architectural root cause redesign blueprint — R-1..R-5 upgrade roadmap; alpha-poverty / Strategist scope / Analyst dormant / forcing function gap / 5-Agent skeleton without soul 5 root causes |
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_audit_pa_fix_plan_v2.md` | DUAL-TRACK fix plan v2 — Track W (88 finding maintenance) + Track A (R-1..R-5 architectural) parallel |
 | `execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` | W-AUDIT-8a SPEC PHASE — Alpha Surface Foundation interface contract + DAG (R-1 spec phase, no IMPL) |
-| `adr/0021-alpha-source-architecture-upgrade.md` | ADR-0021 (Proposed / Pending Operator Decision) — Alpha Source Architecture Upgrade R-1..R-5; supersedes LG-X-02..05 system-wide promotion design |
-| `governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` | AMD-2026-05-09-03 — Strategist wide-adjustment skill (30%→50% freedom-not-gate path) |
-| `governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` | AMD-2026-05-09-04 — Demo→LivePending Promotion Evidence Push (V079 + DSR/PBO + tail risk wired into SM-04) |
+| `adr/0021-alpha-source-architecture-upgrade.md` | ADR-0021 — Alpha Source Architecture Upgrade R-1..R-5; supersedes LG-X-02..05 system-wide promotion design |
+| `adr/0022-strategist-cap-wide-parameter-adjustment-skill.md` | ADR-0022 — Strategist 30%→50% cap as wide_parameter_adjustment skill (freedom-not-gate; SM-05 invariants 完全保留 + 50% 偏離監測 ledger + monthly Guardian veto review) |
+| `architecture/2026-05-10--ARCH-04-graduated-canary-5-stage.md` | ARCH-04 — Graduated Canary 5-Stage Architecture spec (Stage 0 shadow / 1 paper × 7d / 2 demo single × 14d / 3 demo full × 21d / 4 LIVE_PENDING) + component diagram + transition criteria + boundary (Live 5-gate / DOC-08 §12 / SM-04 ladder / §二 16 原則 4 範圍仍硬不變) |
+| `governance_dev/amendments/2026-05-10--AMD-2026-05-10-03-invariant-5-wording-n0-scope.md` | AMD-2026-05-10-03 — invariant 5 wording 對齊 N+0 actual IMPL (option A per operator 2026-05-10 sign-off discussion；commit `0b9a03ef` 已 land) + invariant 5b N+1 預告 |
+| `governance_dev/amendments/2026-05-10--AMD-2026-05-10-04-toml-drift-fix-sop.md` | AMD-2026-05-10-04 — TOML drift gap 治理 SOP (option B-later per operator 2026-05-10；Sprint N+1 W3 cohort 拍板 + atomic patch + W-AUDIT-9 T7 regression + W-AUDIT-3b runtime smoke pre-launch) |
 | `archive/2026-05-09--w_audit_verified_closed_archive_v2.md` | v2 verified-closed archive (R4 v2 errata 補登) |
 | `archive/2026-05-09--w_audit_verified_closed_archive_v3.md` | v3 verified-closed archive — DUAL-TRACK structure + 5 commits real cover + cross-agent PA Redesign verdict |
 | `../2026-05-09--audit_fix_verification_v3_summary.md` | PM v3 sign-off summary (top-level operator-facing) |
