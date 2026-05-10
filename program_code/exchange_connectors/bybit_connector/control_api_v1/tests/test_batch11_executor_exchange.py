@@ -419,6 +419,28 @@ class TestExecutorAgentDecisionLease(unittest.TestCase):
             ttl_seconds=30.0,
         )
 
+    def test_28b_execute_order_uses_plan_lease_scope_metadata(self):
+        """ExecutionPlan metadata controls lease scope/TTL for real submit."""
+        engine = FakePaperEngine(fill_price=67000.0)
+        hub = self._make_hub(lease_result="lease_exit_001")
+
+        agent = ExecutorAgent(paper_engine=engine, governance_hub=hub)
+        agent.start()
+        report = agent.execute_order(
+            intent_id="lease_test_exit",
+            symbol="BTCUSDT",
+            side="Sell",
+            qty=0.001,
+            metadata={"lease_scope": "TRADE_EXIT", "lease_ttl_ms": 15_000},
+        )
+
+        self.assertTrue(report.success)
+        hub.acquire_lease.assert_called_once_with(
+            intent_id="lease_test_exit",
+            scope="TRADE_EXIT",
+            ttl_seconds=15.0,
+        )
+
     def test_29_lease_rejection_stats_updated(self):
         """Stats correctly reflect lease-rejected executions."""
         # 統計正確反映被 lease 拒絕的執行

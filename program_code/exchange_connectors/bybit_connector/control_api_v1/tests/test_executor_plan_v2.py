@@ -10,6 +10,7 @@ from app.agent_contracts import (
 from app.executor_plan_v2 import (
     acquire_execution_plan_lease,
     build_execution_plan,
+    execution_plan_from_approved_intent_payload,
     prepare_execution_plan_for_submit,
     require_execution_plan_lease_for_submit,
 )
@@ -99,6 +100,48 @@ def test_approved_open_with_price_becomes_post_only_plan() -> None:
     assert plan.idempotency_key == f"execution_plan:paper:{plan.order_plan_id}"
     assert plan.metadata["builder"] == "executor_plan_v2"
     assert plan.metadata["guardian_reasons"] == ["shadow_lineage_ok"]
+
+
+def test_approved_intent_payload_adapter_builds_typed_market_plan() -> None:
+    plan = execution_plan_from_approved_intent_payload(
+        {
+            "intent_id": "intent-legacy-1",
+            "symbol": "BTCUSDT",
+            "strategy": "grid_trading",
+            "direction": "long",
+            "size": 0.25,
+            "metadata": {
+                "engine_mode": "demo",
+                "guardian_reasons": ["guardian_approved"],
+                "executor_symbol": "ETHUSDT",
+                "executor_direction": "short",
+            },
+        },
+        ts_ms=1_700_000_000_100,
+    )
+
+    assert plan.symbol == "BTCUSDT"
+    assert plan.direction == "long"
+    assert plan.qty == 0.25
+    assert plan.order_style == "market"
+    assert plan.order_type == "market"
+    assert plan.symbol_source == "strategist_decision"
+    assert plan.direction_source == "strategist_decision"
+    assert plan.metadata["guardian_reasons"] == ["guardian_approved"]
+    assert plan.metadata["decision_metadata"]["legacy_intent_id"] == "intent-legacy-1"
+
+
+def test_approved_intent_payload_adapter_rejects_non_trading_payload() -> None:
+    with pytest.raises(ValueError, match="approved_intent_size_required"):
+        execution_plan_from_approved_intent_payload(
+            {
+                "intent_id": "intent-bad",
+                "symbol": "BTCUSDT",
+                "direction": "long",
+                "size": 0,
+            },
+            ts_ms=1_700_000_000_100,
+        )
 
 
 def test_guardian_p2_modifications_tighten_qty_stop_cooldown_without_scope_change() -> None:

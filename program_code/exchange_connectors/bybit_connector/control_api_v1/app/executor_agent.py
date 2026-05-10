@@ -48,6 +48,7 @@ from .base_agent import BaseAgent
 # 用於 stage-aware ``canary_stage_provider``；舊 ``shadow_mode_provider``
 # 仍保留為 backward-compat lambda（Stage 0 → True；Stage ≥ 1 → False）。
 from .executor_config_cache import CanaryStage
+from .executor_plan_v2 import execution_plan_from_approved_intent_payload
 # G3-08 Phase 4 Sub-task 4-4 — Executor agent_state invalidation hint.
 # env-gated no-op when OPENCLAW_H_STATE_GATEWAY != "1" (zero overhead).
 # G3-08 Phase 4 Sub-task 4-4 — Executor agent_state 失效提示。
@@ -97,6 +98,15 @@ def _normalize_execution_engine(value: Any) -> Optional[str]:
     if engine in {"paper", "demo", "live"}:
         return engine
     return None
+
+
+def _side_from_execution_direction(direction: str) -> str:
+    normalized = str(direction).strip().lower()
+    if normalized in {"long", "close_short"}:
+        return "Buy"
+    if normalized in {"short", "close_long"}:
+        return "Sell"
+    raise ValueError("execution_plan_direction_not_executable")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -392,10 +402,25 @@ class ExecutorAgent(BaseAgent):
             _invalidate_h_state_async("agent.executor.intent_empty")
             return
 
-        intent_id = payload.get("intent_id", "unknown")
-        symbol = payload.get("symbol", "")
-        direction = payload.get("direction", "")
-        size = float(payload.get("size", 0.0))
+        try:
+            plan = execution_plan_from_approved_intent_payload(
+                payload,
+                ts_ms=message.timestamp_ms,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Invalid approved intent contract: %s / 批准意圖契約無效：%s",
+                exc,
+                exc,
+            )
+            with self._lock:
+                self._stats["errors"] += 1
+            _invalidate_h_state_async("agent.executor.intent_invalid")
+            return
+
+        intent_id = str(payload.get("intent_id") or plan.decision_id or "unknown")
+        symbol = plan.symbol
+        size = float(plan.qty)
 
         # ARCH-1: Dedup check — reject if intent_id was already executed within window
         # ARCH-1：去重檢查 — 若 intent_id 在窗口內已執行則拒絕
@@ -410,21 +435,47 @@ class ExecutorAgent(BaseAgent):
             _invalidate_h_state_async("agent.executor.intent_deduped")
             return
 
-        if not symbol or not direction or size <= 0:
-            logger.warning("Invalid approved intent: symbol=%s dir=%s size=%s", symbol, direction, size)
+        if not symbol or size <= 0:
+            logger.warning(
+                "Invalid approved intent plan: symbol=%s direction=%s size=%s",
+                symbol,
+                plan.direction,
+                size,
+            )
             with self._lock:
                 self._stats["errors"] += 1
             _invalidate_h_state_async("agent.executor.intent_invalid")
             return
 
-        side = "Buy" if direction == "long" else "Sell"
+        try:
+            side = _side_from_execution_direction(plan.direction)
+        except ValueError as exc:
+            logger.warning("Invalid execution plan direction: %s / 執行計畫方向無效：%s", exc, exc)
+            with self._lock:
+                self._stats["errors"] += 1
+            _invalidate_h_state_async("agent.executor.intent_invalid")
+            return
+
+        plan_metadata = {
+            **(payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}),
+            "execution_plan": plan.model_dump(mode="json"),
+            "order_plan_id": plan.order_plan_id,
+            "decision_id": plan.decision_id,
+            "verdict_id": plan.verdict_id,
+            "verdict_version": plan.verdict_version,
+            "lease_scope": plan.lease_scope,
+            "lease_ttl_ms": plan.lease_ttl_ms,
+            "reduce_only": plan.reduce_only,
+        }
 
         report = self.execute_order(
             intent_id=intent_id,
             symbol=symbol,
             side=side,
             qty=size,
-            metadata=payload.get("metadata", {}),
+            order_type=plan.order_type,
+            price=plan.limit_price,
+            metadata=plan_metadata,
         )
 
         # G3-08 Phase 4 Sub-task 4-4: invalidate h_state_cache hint after the
@@ -483,6 +534,7 @@ class ExecutorAgent(BaseAgent):
         with self._lock:
             self._stats["executions_attempted"] += 1
             expected_price = self._market_prices.get(symbol, 0.0)
+        metadata = metadata or {}
 
         # ── Decision Lease acquisition — principle 3: AI output ≠ immediate command ──
         # ── Decision Lease 申請 — 根原則 3：AI 輸出不等於即時命令 ──
@@ -491,11 +543,19 @@ class ExecutorAgent(BaseAgent):
         # Guardian 批准是質量門；Lease 提供時效授權。兩層獨立，必須同時通過。
         lease_id: Optional[str] = None
         if self._governance_hub is not None:
-            lease_id = self._governance_hub.acquire_lease(
-                intent_id=intent_id,
-                scope="TRADE_ENTRY",
-                ttl_seconds=30.0,
-            )
+            existing_lease = metadata.get("lease_id")
+            if existing_lease is None and isinstance(metadata.get("execution_plan"), dict):
+                existing_lease = metadata["execution_plan"].get("lease_id")
+            if existing_lease:
+                lease_id = str(existing_lease)
+            else:
+                lease_scope = str(metadata.get("lease_scope") or "TRADE_ENTRY")
+                lease_ttl_ms = float(metadata.get("lease_ttl_ms") or 30_000.0)
+                lease_id = self._governance_hub.acquire_lease(
+                    intent_id=intent_id,
+                    scope=lease_scope,
+                    ttl_seconds=lease_ttl_ms / 1000.0,
+                )
             if lease_id is None:
                 # fail-closed: lease acquisition failed → reject execution
                 # Reasons: hub disabled, not authorized, auth doesn't permit TRADE_ENTRY,
@@ -518,7 +578,7 @@ class ExecutorAgent(BaseAgent):
                     expected_price=expected_price,
                     success=False,
                     error="governance_lease_acquisition_failed",
-                    metadata=metadata or {},
+                    metadata=metadata,
                 )
                 with self._lock:
                     self._stats["executions_failed"] += 1
@@ -536,7 +596,7 @@ class ExecutorAgent(BaseAgent):
             return self._execute_via_ipc(
                 intent_id=intent_id, symbol=symbol, side=side, qty=qty,
                 order_type=order_type, price=price, expected_price=expected_price,
-                start_time=start_time, metadata=metadata,
+                start_time=start_time, metadata={**metadata, "lease_id": lease_id} if lease_id else metadata,
             )
 
         try:
@@ -563,7 +623,7 @@ class ExecutorAgent(BaseAgent):
                     fill_time_ms=fill_time_ms,
                     success=False,
                     error=f"Order rejected: {rejected_reason}",
-                    metadata=metadata or {},
+                    metadata={**metadata, "lease_id": lease_id} if lease_id else metadata,
                 )
                 with self._lock:
                     self._stats["executions_failed"] += 1
@@ -587,7 +647,7 @@ class ExecutorAgent(BaseAgent):
                     slippage_bps=round(slippage_bps, 2),
                     fill_time_ms=round(fill_time_ms, 2),
                     success=True,
-                    metadata=metadata or {},
+                    metadata={**metadata, "lease_id": lease_id} if lease_id else metadata,
                 )
                 with self._lock:
                     self._stats["executions_success"] += 1
@@ -616,7 +676,7 @@ class ExecutorAgent(BaseAgent):
                 fill_time_ms=round(fill_time_ms, 2),
                 success=False,
                 error="Execution failed — see server logs",
-                metadata=metadata or {},
+                metadata={**metadata, "lease_id": lease_id} if lease_id else metadata,
             )
             with self._lock:
                 self._stats["executions_failed"] += 1
