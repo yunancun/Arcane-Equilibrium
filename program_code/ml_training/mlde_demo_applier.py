@@ -38,6 +38,17 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
+try:
+    from .live_candidate_lineage import (
+        LINEAGE_PAYLOAD_KEY,
+        build_live_candidate_lineage_payload,
+    )
+except ImportError:  # pragma: no cover - direct script execution fallback
+    from live_candidate_lineage import (  # type: ignore
+        LINEAGE_PAYLOAD_KEY,
+        build_live_candidate_lineage_payload,
+    )
+
 
 # LG-5 RFC v2 §2.1 schema version constant.
 # Consumer side (`GovernanceHub.review_live_candidate`) fail-closes on
@@ -1227,9 +1238,19 @@ def _build_live_candidate_payload(
         cur,
         strategy_name if isinstance(strategy_name, str) else None,
     )
+    source_payload = _as_dict(source_row.get("payload"))
+    lineage = build_live_candidate_lineage_payload(
+        source_row=source_row,
+        application_id=application_id,
+        application_type=application_type,
+        patch=patch,
+        strategy_name=strategy_name,
+        source_payload=source_payload,
+    )
     return {
         "policy": "live_governed_promotion_candidate",
         "schema_version": _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION,
+        LINEAGE_PAYLOAD_KEY: lineage,
         "source_demo_recommendation_id": source_row.get("id"),
         "source_demo_application_id": application_id,
         "application_type": application_type,

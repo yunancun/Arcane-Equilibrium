@@ -24,6 +24,9 @@ from ml_training.mlde_demo_applier import (
     build_strategy_patch,
     should_create_live_candidate,
 )
+from ml_training.live_candidate_lineage import (
+    LIVE_CANDIDATE_LINEAGE_SCHEMA_VERSION,
+)
 
 
 class _Cursor:
@@ -1065,3 +1068,93 @@ def test_payload_includes_per_strategy_sample_count(monkeypatch):
     # constants exposed for downstream consumer tests
     # 對下游 consumer 測試暴露的常數
     assert _R_META_MIN_SAMPLE_PER_STRATEGY == 10
+
+
+def test_payload_includes_live_candidate_lineage(monkeypatch):
+    """Live candidate payload carries Hypothesis/Experiment lineage refs."""
+    fake_baseline = {
+        "as_of_ts": "2026-05-02T12:00:00+00:00",
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.30,
+        "fee_drop_only_7d": 0.50,
+        "avg_realized_net_bps_7d": 4.0,
+        "avg_realized_fee_bps_7d": 2.5,
+        "avg_realized_slippage_bps_7d": 1.0,
+        "sample_count": 200,
+        "source_healthchecks": ["[33]", "[40]"],
+    }
+    fake_window = {
+        "start_ts": "2026-04-25T12:00:00+00:00",
+        "end_ts": "2026-05-02T12:00:00+00:00",
+        "n_fills": 200,
+        "n_strategy_fills": 80,
+        "window_days": 7,
+    }
+    fake_attribution = {k: 0.55 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    fake_sample_counts = {k: 25 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_cost_baseline",
+        lambda _cur: fake_baseline,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_realized_window",
+        lambda _cur, _strategy=None: fake_window,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_chain_ratio_by_strategy",
+        lambda _cur: fake_attribution,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_sample_count_by_strategy",
+        lambda _cur: fake_sample_counts,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_sample_count_strategy_cell",
+        lambda _cur, _strategy: 80,
+    )
+
+    class _NoopCursor:
+        def execute(self, sql, params=()):
+            pass
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 12,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "source": "ml_shadow",
+            "recommendation_type": "parameter_proposal",
+            "context_id": "ctx-1",
+            "intent_id": "intent-1",
+            "replay_experiment_id": "replay-1",
+            "manifest_hash": "manifest-a",
+            "payload": {
+                "originating_hypothesis_id": "hyp-alpha-1",
+                "experiment_id": "exp-alpha-1",
+                "alpha_source_id": "alpha:carry",
+            },
+        },
+        application_id=333,
+        application_type="strategy_params",
+        patch={"sma_fast": 7, "sma_slow": 21},
+        strategy_name="ma_crossover",
+    )
+
+    lineage = payload["lineage"]
+    assert lineage["schema_version"] == LIVE_CANDIDATE_LINEAGE_SCHEMA_VERSION
+    assert lineage["lineage_source"] == "producer_payload"
+    assert lineage["originating_hypothesis_id"] == "hyp-alpha-1"
+    assert lineage["originating_experiment_id"] == "exp-alpha-1"
+    assert lineage["replay_experiment_id"] == "replay-1"
+    assert lineage["manifest_hash"] == "manifest-a"
+    assert lineage["alpha_source_id"] == "alpha:carry"
+    assert lineage["source_demo_recommendation_id"] == 12
+    assert lineage["source_demo_application_id"] == 333
+    assert lineage["patch_keys"] == ["sma_fast", "sma_slow"]

@@ -561,6 +561,43 @@ class TestReviewLiveCandidateRound2:
         assert atomic_lease == "lease-approve-1"
         assert atomic_verdict.decision == "approve"
 
+    def test_approve_audit_snapshot_carries_lineage(self, monkeypatch) -> None:
+        """Lineage payload survives review and reaches the approve audit snapshot."""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        payload = self._approve_path_payload()
+        payload["lineage"] = {
+            "schema_version": "live_candidate_lineage_v1",
+            "originating_hypothesis_id": "hyp-alpha-1",
+            "originating_experiment_id": "exp-alpha-1",
+            "replay_experiment_id": "replay-1",
+            "manifest_hash": "manifest-a",
+            "alpha_source_id": "alpha:carry",
+            "source_demo_recommendation_id": 7,
+            "source_demo_application_id": 42,
+            "strategy_name": "grid_trading",
+            "promotion_stage": "demo_to_live_candidate",
+            "patch_keys": ["cooldown_ms"],
+        }
+
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            atomic_ok=True,
+            payload=payload,
+        )
+        hub = self._FakeHub(lease_id="lease-lineage-1")
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "approve"
+        lineage = atomic_calls[0][1].payload_snapshot["lineage"]
+        assert lineage["lineage_source"] == "payload"
+        assert lineage["originating_hypothesis_id"] == "hyp-alpha-1"
+        assert lineage["originating_experiment_id"] == "exp-alpha-1"
+        assert lineage["replay_experiment_id"] == "replay-1"
+        assert lineage["source_demo_application_id"] == 42
+        assert lineage["strategy_name"] == "grid_trading"
+
     def test_high1_data_gap_seven_days_all_negative_rejects_hard_veto(self, monkeypatch) -> None:
         """7/7 negative → R6 hard veto → reject_hard_veto (NOT defer).
         7/7 負 → R6 hard veto → reject_hard_veto（不是 defer）。"""
