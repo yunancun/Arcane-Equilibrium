@@ -164,7 +164,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 14 | W-AUDIT-8b/c/d sequence 必含 **Stage 2 abort gate**（A4-C IMPL 後 Stage 2 demo 14d gross < 0 → A 群 8b/8c 重評，**不**連續 IMPL） | Sprint sign-off report 明文記入 | FA-5 |
 | 15 | D-02 Layer 2 manual SOP 不違反 ADR-0020（manual probe 不可自動化為 cron / event-trigger） | code grep audit | FA-6 |
 | 16 | W-AUDIT-6d mid-ground 砍 6 polishing 的 **K -12 trial DSR penalty 量化結論記入 sign-off report**（mu_0 從 ~2.54 降至 ~2.27 用 ln，z_DSR 增益 +0.30） | sign-off report 明文 | FA-7 |
-| 17 | v2-NEW-1 strategist cap 30%→50% 補 **ADR-0021**（freedom-not-gate rationale + SM-05 張力 + 50% 偏離監測指標） | ADR-0021 land + commit | FA-8 |
+| 17 | v2-NEW-1 strategist cap 30%→50% 補 **ADR-0022**（編號衝突自動移位：ADR-0021 已用 = alpha-source-architecture-upgrade；strategist-cap-wide-parameter-adjustment-skill 改 ADR-0022；含 freedom-not-gate rationale + SM-05 張力 + 50% 偏離監測指標） | ADR-0022 land + commit `75b6e5f2` (PA `2026-05-10`) | FA-8 |
 
 ### §5.4 監督 / record（5 條）
 
