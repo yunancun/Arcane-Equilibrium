@@ -285,3 +285,20 @@ _Last updated: 2026-04-24_
 
 **Report**: srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md
 
+
+## 2026-05-10 Governance reject baseline W6 RFC (預跑 raw data)
+
+**Trigger**: W-AUDIT-4b M3 reject negative producer 99.5% reject rate triage；W6 RFC 三角共用 baseline。
+
+**Report**: `workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md` (120 行)
+
+**核心發現**:
+1. **F1 HIGH (W-AUDIT-4b M3 schema gap)**: reject reason **不入** decision_features schema (Rust intent_processor/mod.rs:1213 source comment 「V017 鎖死，當前作為 audit trail 寫 verdict_writer trace」); 真正 reject reason SoT = `trading.risk_verdicts.{reason, checks_failed, details}` (context_id 1:1 對應 decision_features); learning.governance_audit_log 全是 LG-5 review_live_candidate (post-V082 = 0)
+2. **Reject reason 只 2 大類**: cost_gate(JS-demo) negative edge (4079/63.5%, ma_crossover ETHUSDT 3568 + grid ETH/BTC/ZEC ~700) + duplicate_position INXUSDT SHORT 1810 (2331/36.3%); 0 條 scanner_advisory/volatility/DSR/position_size/margin_util reject post-V082 3.5h
+3. **F2 MED**: reject rate pre-V082 0% → post-V082 99.55% 是 producer 切上線新行為**非 governance 收緊** (pre-V082 7d baseline 88587 row 全 label_close_tag NULL)
+4. **F3 HIGH (severe class imbalance)**: 6415 reject : 10 fill = 642:1; V084 sample_weight 1/170 修正後仍 ~4:1 long-tail; INXUSDT 兩 outlier (+200/+112.91 bps) 占 grid total edge 96%; 真實 10 fill 全 grid_trading (3 symbol: SOLAYER/INX/SAHARA, 1 cell: ZEC); ma_crossover 100% reject 0 fill
+5. **時間趨勢**: 11:00 0.23%/12:00 0.10%/13:00 n=18 太少; bb_breakout/bb_reversion/funding_arb 0 fire post-V082
+6. **概念修正**: 上次 chain integrity report 暗示「INXUSDT 2331 reject 可能 over-fit」是錯的; 真實是 duplicate_position guard (策略想加倉但被 guard 阻 SHORT 1810)
+
+**輸出邊界**: 純 data dive baseline; 不寫 RFC 結論; 不建議 governance 閾值數值; 12 個 question (PA/QC/MIT 各 4) 留給 W6 RFC
+

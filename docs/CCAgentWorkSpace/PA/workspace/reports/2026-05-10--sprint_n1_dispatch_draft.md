@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v2 — QC + MIT replay evidence integrated 2026-05-10 11:00 UTC；pending HIGH-5 forward watch metric 2/3 sign-off (~21:30 UTC，metric 1 已 MIT 提早 close)
+**Status**: DRAFT v3 — W6 RFC baseline 預跑後**結論 180° 反轉**：governance **沒有** over-fit；99.5% reject 是 cost_gate 拒 negative edge + duplicate_position guard（**正確行為**）；真正 bottleneck 仍是策略無 alpha。pending HIGH-5 forward watch metric 2/3 sign-off (~21:30 UTC，metric 1 已 MIT 提早 close)
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -21,6 +21,26 @@
 - 集中於：ma_crossover (ETHUSDT 3568, INXUSDT 2331) + grid (ETH/BTC/ZEC 各 130-188)
 - **設計上正確**（reject 寫 0 bps 為 negative class 給 LinUCB / LightGBM 訓練），但 99.5% reject 必須驗證**是否 governance over-fit 拒所有正常信號**
 - 直接後果：W-AUDIT-9 graduated canary Stage 1→2 promotion 等不到 ≥200 sample
+
+### §0.2.B 【v3 重大反轉】W6 baseline 預跑揭露（2026-05-10 13:00 UTC）
+
+MIT 預跑 6361 條 rejected_governance 樣本後，**§0.2 v2 推論「governance 過嚴 over-fit」被推翻**：
+
+| 真相 | 證據 |
+|---|---|
+| **真實 reject reason SoT 在 `trading.risk_verdicts.{reason, checks_failed, details}`** — 不在 decision_features，不在 governance_audit_log | risk_verdicts 6454 row context_id 1:1 對應；W-AUDIT-4b M3 自承 V017 schema 鎖死不寫 reason |
+| **99.8% reject 只有 2 大類**：cost_gate(JS-demo) negative edge (63.7%, 4092) + duplicate_position INXUSDT SHORT (36.3%, 2331) | risk_verdicts.reason 分群 |
+| **0 條 scanner_advisory / volatility / DSR / position_size / margin_util reject**（這 4 條 governance gate 在 post-V082 3.5h 內 0 觸發） | 同上 |
+| **Pre-V082 7d baseline reject rate = 0%**（M3 producer 還沒接通）；post-V082 99.55% **是 producer 切上線新行為，非 governance 收緊** | risk_verdicts pre/post 對比 |
+| **INXUSDT 2331 reject 不是 over-fit**：全是 duplicate_position guard（策略想對已 SHORT 的 1810 倉位加碼） | reason 字串 "already SHORT 1810" |
+| **真實 close fill 10 條全 grid_trading**（avg +33.47 / median -2.10 / hit 5/10）；INXUSDT 兩 outlier (+200/+112.91 bps) 占 grid total edge 96% | fills detail |
+| **642:1 imbalance**；V084 sample_weight 1/170 修正後仍 ~4:1 long-tail | label 分布 |
+
+**新結論**：
+- W6 不是「relax governance threshold」— 那會讓 cost_gate 拒掉的 negative edge 真的下單，**犯錯**
+- 真正 bottleneck **仍是策略本身輸出 negative edge**（4-agent loss audit consensus 再次被驗證 — 5 textbook 策略結構性 alpha-deficient）
+- ma_crossover INXUSDT 2331 duplicate_position 暗示 **entry signal 跟 position state 沒對齊**（潛在 bug，策略反復想加碼）→ 新 P1 ticket
+- decision_features 不寫 reject reason → ML 訓練只學「在這 market state 下會被拒」不學「為何拒」→ V086 加 reject_reason_code metadata（per F1）
 
 ### §0.3 TONUSDT verdict C（QC verdict）
 - n=10 不足以判結構性 negative（t-test power < 0.3）
@@ -58,41 +78,57 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 
 ## §3 Wave 詳細 spec
 
-### §3.0 W6 — Governance Reject Rate Audit + M4 Monitor（**新 P0** — 必先於 W3）
+### §3.0 W6 — Reject Reason Metadata + ML Imbalance Handling（**v3 重寫** — 不再叫 governance relax）
 
-**目標**：MIT replay 揭露 governance 在 W2 baseline 期間 reject 99.5%（6361/6394 evaluations），真實 close fill 僅 9 條。這是 ML pipeline upstream bottleneck — 修了 chain 但餵 ML 的 input 嚴重不足。
+**目標**：W6 baseline 預跑揭露 99.5% reject **不是 governance over-fit**（cost_gate 拒 negative edge + duplicate_position guard 都是正確行為）。W6 真正方向：(1) 補 reject reason metadata 入 schema 讓 ML 學「為何拒」；(2) 解決 642:1 imbalance long-tail bias；(3) 修 ma_crossover INXUSDT duplicate intent bug；(4) M4 monitor 監測 reject reason mix drift。
 
-**Sub-task**:
-- W6-1. **Governance reject root cause RFC**（PA + QC + MIT 三角，2 day）
-  - 拉 6361 條 rejected_governance 樣本，分群分析 reject reason（cost_gate / volatility_gate / DSR_gate / position_size_gate 等）
-  - 對比 7d 前（pre-W2 baseline）reject rate 趨勢，看是否 governance threshold 在 N+0 期間被收緊
-  - 判斷：是 threshold over-fit 還是 market regime 自然 reject
-- W6-2. **M4 governance reject rate healthcheck**（E1 IMPL 1 day）
-  - 加 `helper_scripts/db/passive_wait_healthcheck/checks_governance_reject_rate.py`（編號預留 [59]）
-  - SLA：連續 24h reject rate > 95% 觸 alert（per MIT M4 建議）
-  - 支援 per-strategy / per-symbol / per-reason 分群輸出
-- W6-3. **Governance threshold conditional relaxation**（如 W6-1 verdict = over-fit，PA + CC 1 day）
-  - 寫 AMD 描述 conditional relax 範圍 + sample size requirement + rollback trigger
-  - **不直接 relax**，先 RFC + 等 W3 Stage 1 cohort 同窗驗
-- W6-4. **M5 evaluations.entry_context_id healthcheck**（E1 IMPL 1 day, 等 ML predictor 接通後 enable）
+**Sub-task v3**:
+- W6-1. **W6 對齊 RFC**（PA + QC + MIT 三角，1 day **縮短**因 baseline 已預跑）
+  - 共用 baseline：`srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md`
+  - 三角各回 12 個預備 questions（report §6）
+  - **預期結論方向**：governance 沒問題 → reject reason metadata 是真 gap → ML imbalance 是真 gap → 策略 alpha-deficient 不可由 W6 解
+  - **不**寫 conditional relax AMD（v2 設計取消，此方向會犯錯）
+- W6-2. **V086 reject_reason_code metadata schema add**（E1 IMPL 1 day）
+  - 在 `learning.decision_features` 加 `reject_reason_code text` + `reject_reason_details jsonb` columns（per F1）
+  - 從 `trading.risk_verdicts.{reason, checks_failed}` join 寫入
+  - W-AUDIT-4b M3 producer 同步 update（`intent_processor/mod.rs:1213` 解 V017 lock）
+  - V086 加 Guard A/B/C + idempotency
+- W6-3. **Multi-class label split**（PA spec + E1 IMPL 1 day）
+  - 把單一 `rejected_governance` label 拆 `rejected_cost_gate` / `rejected_duplicate_position` / `rejected_other`
+  - LightGBM 訓練改 multi-class（per MIT Q3）
+  - 效果：模型學「在這 state 下會被 cost_gate 拒（能改 cost）」vs「會被 duplicate_position 拒（能改 entry timing）」
+- W6-4. **M4 reject reason mix monitor**（E1 IMPL 1 day）
+  - 加 `helper_scripts/db/passive_wait_healthcheck/checks_reject_reason_mix.py`（[59]）
+  - **alert 條件**改：cost_gate ratio 24h 變化 > 20pp（暗示 producer drift）；duplicate_position ratio 突增（暗示策略 entry bug 加劇）
+  - **不**用 reject rate > 95% 作 alert（這是 normal）
+- W6-5. **LightGBM imbalance handling 試行**（E1 IMPL 1 day）
+  - V084 sample_weight 1/170 後仍 ~4:1 long-tail
+  - 試行 `is_unbalance=True` 或 `scale_pos_weight=4`（per MIT Q1）
+  - 跑 train + dev set 對比 baseline AUC / precision / recall
+  - **不直接 deploy** ML predictor — 等 V086 land 後 multi-class 再評估
+- W6-6. **M5 evaluations.entry_context_id healthcheck**（E1 IMPL 1 day, 等 ML predictor 接通後 enable）
   - per MIT M5 建議：`check_evaluations_entry_ctx_coverage()`
-  - ML predictor 接通後 evaluations.entry_context_id 必須非空（對 reject_add）
   - 編號預留 [60]
 
 **Sub-agent assignment**:
-- D+0: PA + QC + MIT 三角 RFC parallel（2 day）
-- D+2: E1 IMPL M4 + M5 healthcheck（1 day）
-- D+3: E2 review + E4 regression + AMD land
+- D+0: PA + QC + MIT 三角 RFC parallel（1 day，baseline 已備）
+- D+1 ~ D+2: E1 IMPL V086 schema + M3 producer update + multi-class label split（並行）
+- D+3: E1 IMPL M4 + M5 healthcheck + LightGBM imbalance 試行
+- D+4: E2 review + E4 regression + MIT verify
+- D+5: PM sign-off
 
-**Acceptance criteria**:
-- W6-1 RFC land + verdict 明確（over-fit / regime / mixed）
-- M4 healthcheck [59] passive_wait 顯示 reject rate baseline + alert threshold
-- 如 verdict = over-fit：governance threshold AMD 寫好，等 W3 Stage 1 cohort sample 達 n≥30 後試行
+**Acceptance criteria（v3）**:
+- W6-1 三角 RFC verdict 明確（預期：governance 正確 + 真 gap = metadata + imbalance）
+- V086 在 Linux PG `_sqlx_migrations` success=t（auto-migrate 後驗）；W-AUDIT-4b M3 producer 寫 reject_reason_code 100% coverage（post-V086 sample）
+- Multi-class label 在 decision_features 顯示 3 類分布（cost_gate / duplicate_position / other）
+- M4 [59] healthcheck baseline + alert 設好；24h dry-run 0 spurious alert
+- LightGBM imbalance 試行報告 land；對比 AUC / precision / recall
 - 22 + invariant 23 全 PASS
 
 **Risk**:
-- Conditional relax 是高風險動作（governance 是最後安全網），必須有 rollback trigger（24h 內 reject rate < 70% 觸發 auto-revert）
-- W3 Stage 1 cohort 必等 W6 RFC verdict + healthcheck 上線後才能進
+- V086 加 column + jsonb 對 9.5M decision_features row 是大 schema change — Linux PG dry-run mandatory
+- Multi-class label 改寫 LightGBM training pipeline，可能影響 cron 5 job 穩定性（cron weekly 跑，evaluation cycle 1 週）
+- LightGBM `scale_pos_weight=4` 過頭可能 over-correct → false positive 暴增 → 需 backtest counterfactual
 
 ### §3.1 W1 — W-AUDIT-8a Phase B Tier 2 Panel Collector（**降為 P1**，與 W6 並行）
 
@@ -133,9 +169,15 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 - Bybit V5 funding history endpoint 在某些 mid-cap 缺數據 → fail-closed 設計必須 graceful（不可 crash）
 - panel table partition / hypertable 設計（TimescaleDB）— MIT 必確認
 
-### §3.2 W2 — A4-C BTC→Alt Lead-Lag Spec Phase（spec only, 無 IMPL）
+### §3.2 W2 — A4-C BTC→Alt Lead-Lag Spec Phase（**v3 升級評估**：操作員可決定 fast-track）
 
-**目標**：5 textbook 策略結構性 alpha-deficient，A 群（Track A）已開三條候選：A-1 mean-reversion / A-2 momentum-of-momentum / A-3 cross-section sector rotation；本次新增 **A4-C BTC→Alt Lead-Lag** spec 階段（不 IMPL）。
+**v3 update**：W6 baseline 預跑再次驗證「5 textbook 策略結構性 alpha-deficient」結論（cost_gate 拒 4079 條 negative edge）。**A4-C 是真正能解 P0-EDGE-1 的路徑**。原 spec only / N+2 IMPL 設計可能太慢，**operator 可選**：
+- A. 維持原計劃（N+1 spec only / N+2 IMPL）— 安全，4-agent review 完整
+- B. **Fast-track**（N+1 spec + paper IMPL 並行）— 提早 N+1 拿到 paper edge evidence
+
+PA 推薦 B（fast-track）但需 operator 拍板。
+
+**目標**（不變）：5 textbook 策略結構性 alpha-deficient，A 群（Track A）已開三條候選：A-1 mean-reversion / A-2 momentum-of-momentum / A-3 cross-section sector rotation；本次新增 **A4-C BTC→Alt Lead-Lag** spec 階段。
 
 **核心假設**：BTC price/volume movement leads alt symbols 60-300s（crypto microstructure 文獻 well-documented）；構造 lead signal → 預測 alt symbol 短期 mean reversion / momentum。
 
@@ -210,13 +252,15 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 | **P1-TONUSDT-CONDITIONAL-WATCH** *(改名)* | QC verdict C | RFC + Linux CC SQL | 2 day（30d evidence 收滿才升 freeze） | PA + Linux CC |
 | **P1-DYNAMIC-UNBLOCK-CHECK-1** *(新)* | QC v3 NEW-ISSUE-V3-4 | PA spec + IMPL | 2 day | PA + E1 |
 | **P1-V083-CONSTRAINT-VALIDATE** *(新)* | MIT M5 建議 | PA + E1 + MIT | 1 day | PA + E1 |
+| **P1-MA-CROSSOVER-DUPLICATE-INTENT** *(v3 新)* | W6 baseline F-bug 暗示 | PA + E1 audit | 2 day | PA + E1 |
 
 **新加 ticket 詳情**:
 - **P1-TONUSDT-CONDITIONAL-WATCH**（替代原 P1-TONUSDT-GRID-BLOCK）：QC verdict C（n=10 不足以判結構性 negative）；不立即 freeze；分階段：(1) Linux CC 跑 30d regime split SELECT 補 evidence；(2) 若 30d sample n≥30 且仍 negative → 升 freeze；(3) 若 sample 不足 → 維持 watch；(4) 復評 30d cycle
 - **P1-DYNAMIC-UNBLOCK-CHECK-1**：解 QC v3 NEW-ISSUE-V3-4 — 17 frozen cells 多數現 0 fills 0 rejected_outcomes（無 counterfactual power），需 30d cycle 機制 reuse `helper_scripts/db/audit/blocked_symbols_7d_counterfactual.py` 改 30d 版；達 positive edge 條件可解封；避免 17→18→N permanent dormant 負反饋環路
 - **P1-V083-CONSTRAINT-VALIDATE**：V083 加的 check_constraint NOT VALID 對舊 row 不 enforce；MIT 建議追蹤 何時 VALIDATE（老 fills 不過 backfill 直接 VALIDATE 會 fail 全表）；先寫 backfill plan + 預估 VALIDATE date
+- **P1-MA-CROSSOVER-DUPLICATE-INTENT**（v3 新）：W6 baseline 揭露 ma_crossover INXUSDT 在 post-V082 3.5h 內觸發 duplicate_position guard 2331 次（已 SHORT 1810 還反復想加碼）；暗示 entry signal 跟 position state 沒對齊（潛在 bug，非 governance 問題）；audit ma_crossover entry logic：(1) 是否每 tick 都 evaluate signal 不 dedup；(2) is_entry_eligible() 是否 cross-check exists position；(3) 若是 by-design pyramiding 為何被 duplicate guard 阻；fix scope 不超過 ma_crossover 模組
 
-**派發策略**：分散到 N+1 Day 1-7 並行；**P1-CANARY-STAGE-CRITERIA-1** + **P1-CANARY-COHORT-FREQ-23** 與 W3 同窗（依賴）；**P1-BB-BREAKOUT-FAIL-CLOSED-1** 與 W1 同窗（依賴 Phase B consumer 驗收）；**P1-TONUSDT-CONDITIONAL-WATCH** 跟 **P1-DYNAMIC-UNBLOCK-CHECK-1** 同窗（dynamic unblock 機制是 freeze 前置）；**P1-V083-CONSTRAINT-VALIDATE** 與 W6 同窗（governance reject 整修同次）。
+**派發策略**：分散到 N+1 Day 1-7 並行；**P1-CANARY-STAGE-CRITERIA-1** + **P1-CANARY-COHORT-FREQ-23** 與 W3 同窗（依賴）；**P1-BB-BREAKOUT-FAIL-CLOSED-1** 與 W1 同窗（依賴 Phase B consumer 驗收）；**P1-TONUSDT-CONDITIONAL-WATCH** 跟 **P1-DYNAMIC-UNBLOCK-CHECK-1** 同窗（dynamic unblock 機制是 freeze 前置）；**P1-V083-CONSTRAINT-VALIDATE** 與 W6 同窗（governance reject 整修同次）；**P1-MA-CROSSOVER-DUPLICATE-INTENT** 與 W6 同窗（同樣是 W6 baseline 衍生 finding）。
 
 ---
 
@@ -279,21 +323,27 @@ D+9 ~ D+10（緩衝 buffer）
 
 ---
 
-## §6 Acceptance Gate（Sprint N+2 hand-off conditions — v2 加 W6 + governance gate）
+## §6 Acceptance Gate（Sprint N+2 hand-off conditions — v3 重寫 W6 gate）
 
 **全部** 達標才能 N+1 sign-off 進 N+2：
 
-1. ✅ **W6 governance reject RFC verdict 明確**（over-fit / regime / mixed）+ M4 healthcheck [59] passive_wait baseline 入 console
-2. ✅ **如 W6 verdict = over-fit**：conditional relax AMD land + W3 Stage 1 cohort 試行 24h 無 auto-revert trigger
-3. ✅ W1 Phase B funding_curve + oi_delta_panel writer 上線；25-symbol 1h 內 ≥ 100 row each
-4. ✅ W2 A4-C spec 三方（PA / QC / MIT）APPROVE land
-5. ✅ W3 Stage 1 cohort 第一個 atomic patch 通過 [58] healthcheck；3-day observation attribution_chain_ok ≥ 80%
-6. ✅ W4 W-AUDIT-3b runtime smoke pytest PASS + [55] chains_with_lease ≥ 1
-7. ✅ W5 9 P1 至少 5 closed（含 CANARY-STAGE-CRITERIA-1 + COHORT-FREQ-23 + DYNAMIC-UNBLOCK-CHECK-1 + V083-CONSTRAINT-VALIDATE plan land）
-8. ✅ **Governance reject rate 趨勢驗**：M4 [59] 連續 7d reject rate 不再 99.5% 而是進入合理區間（70-90%）
-9. ✅ 22 invariant + 新 invariant 23 全 PASS
-10. ✅ CC + QC + MIT + BB 4-agent final review 全 APPROVE / APPROVE-CONDITIONAL
-11. ✅ Memory persist + N+2 dispatch draft
+1. ✅ **W6 對齊 RFC verdict 明確**（預期：governance 正確、real gap = metadata + imbalance + duplicate_intent bug）
+2. ✅ **V086 reject_reason_code metadata land**：sqlx success=t；M3 producer 寫 reason 100% coverage（post-V086 sample）；features_jsonb + reject_reason_code dual-write
+3. ✅ **Multi-class label split**：decision_features `label_close_tag` 顯示 3 類分布（rejected_cost_gate / rejected_duplicate_position / rejected_other）
+4. ✅ **M4 reject reason mix monitor [59]**：baseline + alert 設好；24h dry-run 0 spurious alert（**不**用 reject rate > 95% 作 alert，這是 normal）
+5. ✅ **LightGBM imbalance handling 試行報告 land**（`is_unbalance` / `scale_pos_weight=4` AUC + precision + recall 對比）
+6. ✅ W1 Phase B funding_curve + oi_delta_panel writer 上線；25-symbol 1h 內 ≥ 100 row each
+7. ✅ W2 A4-C spec 三方（PA / QC / MIT）APPROVE land（如 operator 選 fast-track，paper IMPL 同時 land）
+8. ✅ W3 Stage 1 cohort 第一個 atomic patch 通過 [58] healthcheck；3-day observation attribution_chain_ok ≥ 80%
+9. ✅ W4 W-AUDIT-3b runtime smoke pytest PASS + [55] chains_with_lease ≥ 1
+10. ✅ W5 10 P1 至少 6 closed（含 CANARY-STAGE-CRITERIA-1 + COHORT-FREQ-23 + DYNAMIC-UNBLOCK-CHECK-1 + V083-CONSTRAINT-VALIDATE plan land + MA-CROSSOVER-DUPLICATE-INTENT audit + 1）
+11. ✅ 22 invariant + 新 invariant 23 全 PASS
+12. ✅ CC + QC + MIT + BB 4-agent final review 全 APPROVE / APPROVE-CONDITIONAL
+13. ✅ Memory persist + N+2 dispatch draft
+
+**v3 移除（v2 設計取消）**：
+- ❌ ~~如 W6 verdict = over-fit：conditional relax AMD land~~ — W6 baseline 預跑揭露 governance 沒 over-fit，conditional relax 會犯錯
+- ❌ ~~Governance reject rate 進入 70-90% 合理區間~~ — 99.5% 是 normal（cost_gate 拒 negative edge 是正確），不應 force 降
 
 ---
 
@@ -319,21 +369,24 @@ D+9 ~ D+10（緩衝 buffer）
 
 ---
 
-**已整合 evidence**（v2 update）:
+**已整合 evidence**（v3 update）:
 - ✅ QC replay: TONUSDT 7-30d structural edge → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--tonusdt_structural_edge_replay.md`（verdict C，conditional path）
-- ✅ MIT replay: chain integrity 4-7d historical → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md`（chain 100%，governance reject 99.5% 是新 P0）
+- ✅ MIT chain integrity replay → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md`（chain 100%，governance reject 99.5% 提名 P0）
+- ✅ **MIT W6 baseline 預跑** → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md`（governance 沒 over-fit，真 gap 是 metadata + imbalance + duplicate_intent bug）
 
 **Final Step**: 21:30 UTC HIGH-5 forward watch metric 2/3 sign-off 後此 draft v2 升 final（metric 1 已 MIT 提早 close），TODO v19 §6.5 加入 Sprint N+1 banner + reference link。
 
 ---
 
-## §9 Replay 整合對 Sprint N+0 closure memory 修正建議（land 後同次 commit）
+## §9 Replay 整合對 Sprint N+0 closure memory 修正建議（v3 land 後同次 commit）
 
-`srv/memory/project_2026_05_10_sprint_n0_closure.md` 須修正以下兩條描述：
+`srv/memory/project_2026_05_10_sprint_n0_closure.md` 須修正以下三條描述：
 
 1. **「attribution_chain_ok 0.5%→100%」這條改為**：
    > 「decision_features chain integrity（fills.entry_context_id → context_id）pre-V083 已 100%（n=312, 0 orphan）；V083 是新增 column + check_constraint NOT VALID 不修 broken chain；memory v1 「0.5% mock baseline → 100% prod」描述為 narrow window 樣本誤讀，**真實全期均 100%**」
-2. **新增「真正 bottleneck」段**：
-   > 「W2 baseline 期間 governance reject rate 99.5%（6361/6394 evaluations 標 rejected_governance），真實 close fill 僅 9 條 grid_trading；ML 學習 input 嚴重不足；新增 P0 W6 (Sprint N+1) 處理」
+2. **「governance reject 99.5% 是 ML input 不足」這條（v2 草稿）改為**：
+   > 「W2 baseline 期間 reject rate 99.5%（6361/6394）是 W-AUDIT-4b M3 producer 切上線新行為（pre-V082 = 0%，producer 還沒接通）+ 99.8% 集中於 cost_gate negative edge (63.7%) + duplicate_position guard (36.3%) — **governance 沒有 over-fit，是正確行為**；真正問題是 (1) reject reason 不入 schema → ML 訓練只學 market state 不學 reject reason → V086 補 (2) 642:1 imbalance long-tail bias → multi-class label split + LightGBM imbalance handling (3) ma_crossover INXUSDT 反復 duplicate_position trigger 暗示 entry signal bug」
+3. **「真實 close fill 9 條」補正**：
+   > 「post-V082 3.5h 內真實 close fill 10 條（不是 9，9 是初步計數誤差）；全 grid_trading；avg +33.47 / median -2.10 / hit 5/10；INXUSDT 兩 outlier (+200/+112.91 bps) 占 grid total edge 96%，去 outlier 後 hit rate / Sharpe / DSR 需重算」
 
 修正方式：N+1 dispatch fire 後同次 commit 帶 memory file edit；不另起 commit。
