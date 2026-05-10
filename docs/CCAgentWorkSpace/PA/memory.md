@@ -1,5 +1,92 @@
 # PA Memory — 工作記憶
 
+## W2 A4-C spec v1 → v1.1 落 QC 5 conditions + σ MIT prerequisite（2026-05-10）
+
+**觸發**：QC C-2 review CONDITIONAL APPROVE 5 conditions 必修 → PA inline edit spec 跳過 D+1 PA + QC integrate phase，MIT C-3 D+1 直接收。
+
+**5 conditions 落地（spec v1 → v1.1）**：
+1. §8.1 DSR K 6 → 95（active strategy×symbol cell 總數），引 Bailey-López de Prado 2014 §4.2；mu_0 = √(2 ln 95) = 3.018
+2. §8.1 paper edge gate 單檔 +5 → 三檔（+15 promote N+2 / +5~+15 extend 14d / <+5 revise）；理由錨：demo cost 15-20 bps round-trip → +5 必虧 net −10~−15 bps
+3. §3.1 N 鎖 120s + §4.1 schema 加 60s/300s shadow value column + §7.1 metric (4) R²(N=60/120/300) 7d rolling 30-min bucket decay curve 強制
+4. §7.1 mandatory metric set 從 5 條擴 6 條：(a) per-symbol gate n≥100+t>2.0 (b) DSR K=95 deflate non-negotiable (c) PSR(0)≥0.95 skew/kurt-aware (d) Alpha decay regime test (e) Block-bootstrap 95% CI block_size=60min 1000 iter (f) Per-cohort counterfactual delta；§7.3 strict shift(N) 並列對比差異 > 30% 失敗
+5. §9 BTC regime extreme guard \|1h return\| > 200 bps → regime_tag='extreme' shadow log 不計入 7d edge avg；§4.1 schema 加 regime_tag column；§7.2 SQL FILTER；§4.2 writer 步驟 4 加 1h kline regime 計算（strict shift(1)）；§4.3 rate budget 9→10 req/min
+
+**σ MIT prerequisite（extra condition）**：§7.1 加 acceptance prerequisite「σ verified by MIT C-3」 — BTCUSDT 1m forward-return realized σ 7d 經驗值；σ ≥ 60 bps → 重算 power（t-stat 4.71 → 2.36）+ PSR(0) 必含 skew/kurt deflation；σ < 60 bps → 採 baseline σ=30 bps 繼續。為何 prerequisite 不是 risk：σ 是 power calculation foundation，σ 錯整套 power test 失效；不是 mitigation 後果可接受的「risk」。
+
+**衝擊副作用**：
+- V088 migration 加 3 columns（btc_lead_return_pct_60s + btc_lead_return_pct_300s + regime_tag）
+- C-IMPL-2 LOC ~350 → ~400（+50 LOC for regime + shadow value + 1h kline）
+- §7.1 metric 5 條 → 6 條 + acceptance prerequisite，D+12 paper edge report scope 擴大
+- 16 原則 / DOC-08 §12 9 條 / 硬邊界 5 項 — **0 觸碰**（unchanged from v1）
+- 改動風險評級 = 低（paper-only evidence + statistical metric 補強，無 runtime 邏輯改動）
+
+**Sign-off path 變更**：QC 已 sign-off CONDITIONAL APPROVE → MIT C-3 D+1 直接收（**不需 D+1 PA + QC integrate phase**）。MIT focus 4 點：(1) σ verify (2) strict shift grep (3) V088 hypertable PL/pgSQL + retention (4) 60s/300s shadow value 寫入路徑與主 N=120 disjoint。MIT APPROVE → D+3 起派 C-IMPL-1..4 paper IMPL → D+5 paper engine deploy → D+12 paper edge report land 含三檔 gate verdict。
+
+**E2 重點審查 3 點 v1.1 補強**：
+1. Layer 1 paper-only fence default → None（unchanged）
+2. Strict shift(N) 補：含 N=60/120/300 三檔 shadow value + BTCUSDT 1h kline regime 同 strict shift(1)
+3. V088 hypertable retention + 必含 btc_lead_return_pct_60s + btc_lead_return_pct_300s + regime_tag 三新欄位
+
+**核心教訓**：
+- QC review 出 5 conditions 時，PA 直接 inline edit spec 而非開 D+1 integrate phase，省 1 day 又確保 W2 IMPL 走正確方向（避免 sub-agent 收 v1 spec 開工後又因為 v1.1 改動 rework）
+- σ assumption 必須 verify 不是 estimate — power calculation foundation 是 prerequisite 不是 risk，需獨立 acceptance gate
+- gate threshold 必須對應 demo cost baseline — 單檔 +5 bps 在 demo 必虧 net −10 bps 是 PA 草稿 blind spot；三檔（fast track / extend / revise）對應實際 cost 結構
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w2_a4c_spec_v1_1_qc_5_conditions_revision.md`
+**Spec edited**：`srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md` v1.1
+
+---
+
+## W6-1 RFC Final Verdict Draft — 三角共識整合 + Track A/B 解分歧（2026-05-10）
+
+**觸發**：D+1 W6-1 RFC 三角 sign-off 入場前 PA 整合 PA + QC + MIT 3 視角立場為 final verdict draft，省 1 day RFC 討論。
+
+**3 視角共識（Verdict 1+2+3+4 全 capture）**：
+- Verdict 1：cost_gate hard rule 維持，不引 advisory mode（PA Q1 + QC Q1 + 16 root principle #4/#5/#6）
+- Verdict 2：JS shrinkage 強收縮到 grand_mean 是設計預期；high B-factor signature（QC Q1 數學論證）
+- Verdict 3：cost_gate 放行 expected new fills net edge ≈ -14 bps，不需也不應做 counterfactual backtest（QC Q2）
+- Verdict 4：trainer task type confirm = LightGBM regression；W6-5 撤回 imbalance flag 試行改 sample_weight ratio sensitivity（MIT W6-5 category error 揭露）
+
+**3 視角分歧（PA Q3 hold A vs MIT Q2 hold B）解決 = Track A / Track B 拆分**：
+- Track A (regression scorer 微調 immediate, N+1)：trainer task type confirm = regression → 立即跑 W6-5；不需 V086；W6 N+1 acceptance 只需 Track A PASS
+- Track B (multi-class / classification future, N+2/N+3)：4-gate (V086 land + dual-write 24h 0 NULL + multi-class 18+ enum 各 class ≥ 200 sample + classification trainer task 升級 spec) 全達才 enable
+- 三方立場全保留：PA「立刻做 V086」+ MIT「regression 不需等」+ Track B 4-gate spec 同時成立
+
+**8 sub-task 對齊 W6-1 ~ W6-10**（PA spec ready, E1/MIT IMPL D+1~D+5）：
+- W6-1 RFC verdict (本 draft) → AMD 件 D+1
+- W6-2 V086 schema add D+1~D+2
+- W6-3a/b DONE (MIT close_tag audit + PA enum spec final)
+- W6-3c/d/e V086 IMPL + ALTER VALIDATE D+1~D+2
+- W6-4/5/6/7/9/10 healthcheck + sample_weight 試行 D+2~D+3
+
+**真實 enum spec**：12 reject + 14 close = 26 enum + 2 catch-all（per W6-3b 5 ambiguous A1-A5 全 ACCEPT MIT）；V086 兩 column TEXT + Guard A/B/C + NOT VALID CHECK + one-shot 30-90s backfill in migration（不開 cron）；同次 backfill 加 trading.fills 17 row 雙前綴 normalize（per PA P2 RCA）。
+
+**healthcheck 新增 4 + 1 enhancement**：[59] M4 reject reason mix + [60] M5 evaluations.entry_context_id + [61] strategy fire silence + [62] per_strategy_sample_gate + [40] fills/day rate snapshot baseline。
+
+**16 root principles compliance = 16/16**；**DOC-08 §12 9 不變量觸碰 = 0**；**§四 5 硬邊界觸碰 = 0**。
+
+**E2 重點審查 3 點**：
+1. Backfill SQL CASE WHEN 評估順序（ATR unavailable 先於 JS-demo 先於 cost_gate_other；雙前綴先於單前綴；bare-name 先於 prefix）— PG dry-run 9757 row distribution 比對
+2. Guard A/B/C 完整性（缺一拒簽，per memory `feedback_v_migration_pg_dry_run`）
+3. Producer dual-write race（V086 land 與 dual-write deploy 差 ≤ 5 min；否則 ALTER VALIDATE 會失敗）
+
+**D+1 sign-off 流程預期**：
+- Phase 1 (上午 1.5h 並行)：PA + QC + MIT 各 verify draft 是否如實 capture 各自立場
+- Phase 2 (下午 1h 三角 sync)：3 全 APPROVE → 升 AMD-2026-05-1X-W6-1-rfc-verdict.md，dispatch v3.5 §6 對齊 commit
+- 如 ≥1 CONDITIONAL → PA 24h 內補修 draft 重 sign-off
+- 如 ≥1 REJECT → 重 RFC（不應發生，三方立場已預跑且 draft 全 capture）
+
+**核心教訓**：
+- 三角 RFC 立場分歧不一定要重 RFC 解；找到 trade-off 維度（regression vs multi-class）拆 Track 即可保全 3 立場
+- counterfactual backtest 一切看 ROI：known expected -14 bps 跑 1 sprint backtest 工程 ROI 為負
+- LightGBM imbalance flag 對 regression silently ignore 是經典 category error；reviewer 必先 grep `_lgb_params` objective 再批評 imbalance 算法
+- enum spec 「保留 empty enum」(A3 cost_gate_atr_unavailable / A5 strategy_close_regime_shift) 比「合 catch-all」更安全；NOT VALID CHECK 一旦鎖死不可逆
+- backfill 從 raw column 取字串會繼承上游所有 historical bug；trainer schema migration 是 cleansing 機會（不必另開 producer fix）
+
+**完整報告**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_1_rfc_final_verdict_draft.md`
+
+---
+
 ## P2-DECISION-FEATURES-DOUBLE-PREFIX 預跑 RCA — bug 早已 fix（2026-05-10）
 
 **觸發**：MIT W6-3a §1.2 揭露 `learning.decision_features.label_close_tag` 16 row 雙前綴 `risk_close:risk_close:phys_lock_gate4_giveback`，dispatch v3.3 W5 P2 ticket 預跑。
@@ -2389,3 +2476,35 @@ E2 重點審查 3 點：(1) TickContext clone 成本（per-iteration shallow cop
 派生發現：RC-04 rollback 到 None 設計 4/5 策略共用（grid_trading 例外用 inventory + M-2）。Hot loop 風險差別不在 RC-04 而在「entry path 後是否有 reject backoff」。Sprint N+2 候選：考慮為 4 策略引入「strategy 通用 reject backoff」trait default 對齊 grid_trading M-2 模式（設計題，不阻當前任務）。
 
 Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_4_systemic_position_sync_audit.md`
+
+---
+## 2026-05-10 17:50 UTC — Sprint N+1 W5 三 P1 ticket spec 預寫（W5 IMPL phase E1 直接收）
+
+PM 派 PA 預寫 W5 三 P1 ticket spec 省 PA D+1-3 spec phase；W5 sub-agent E1 IMPL 直接收 spec。
+
+**三 spec land 路徑**（並行寫，互不依賴）：
+1. `srv/docs/execution_plan/2026-05-10--p1_canary_stage_criteria_1_spec.md`（QC HIGH push back 2 Stage 1→2→3 promotion + demote criteria 寫死；對齊 AMD-2026-05-09-03 §2.2；新 AMD-2026-05-10-05 起草）
+2. `srv/docs/execution_plan/2026-05-10--p1_canary_cohort_freq_23_spec.md`（CC 22 invariant gap → 新 invariant 23 cohort frequency cap 30d ≤2 + PA+QC override SOP；新 healthcheck `[63]`；對齊 AMD-2026-05-09-03 §2.4）
+3. `srv/docs/execution_plan/2026-05-10--p1_dynamic_unblock_check_1_spec.md`（QC v3 NEW-ISSUE-V3-4 — reuse `blocked_symbols_7d_counterfactual.py` 改 30d 版 + auto unblock criteria + manual override SOP + reverse audit chain；新 healthcheck `[64]`；新 `governance.unblock_candidates` table）
+
+**設計核心**（共用 pattern）：
+- 全部 read-only design 階段，0 IMPL 落地（W5 sub-agent E1 phase 才寫 code）
+- 三 spec 加總 LOC 估 ~1100-1200 LOC + ~260 LOC test
+- 三 spec 都對齊 §二 16 原則（特別是 #4/#6/#16）+ DOC-08 §12 9 不變式 + 硬邊界 5 項 0 觸碰
+- 都加新 healthcheck（`[58]` enrich + `[63]` + `[64]`）對應 silent-dead 偵測
+- 都需 V086+ migration（cohort_freq_cap V086 + unblock_candidates V0XX）+ Guard A/B/C + Linux PG dry-run 強制
+
+**E2 重點審查 3 點**（PA 跨 spec 標）：
+1. `boundary_violation_count` 在 P1-CANARY-STAGE-CRITERIA-1 §2.4 list 7 source 必與 §4.1 healthcheck 對齊（drift = `[58]` invariant break）
+2. P1-CANARY-COHORT-FREQ-23 「cohort identity 三元組」(strategy, symbol, environment) 在 Rust + Python + SQL 三處比對 case-sensitive 一致
+3. P1-DYNAMIC-UNBLOCK-CHECK-1 §5.1 force_eval API **不可 override §3 criteria**（force_eval 只插隊跑，不放寬條件）— 違反即 selection-bias 機制失效
+
+**派發策略**（dispatch v3.5 §3.5）：
+- P1-CANARY-STAGE-CRITERIA-1 + P1-CANARY-COHORT-FREQ-23 與 W3 同窗（W3 stage 1 cohort entry 必先 close 此兩 spec）
+- P1-DYNAMIC-UNBLOCK-CHECK-1 與 P1-TONUSDT-CONDITIONAL-WATCH 同窗（TONUSDT 30d evidence 是此 spec 的 first real customer）
+
+**派生教訓**（補入 memory）：
+- spec 預寫 pattern：PA 在 dispatch sign-off 後立即預寫高 priority P1 spec → W5 sub-agent E1 IMPL 直接收 → 省 PA D+1-3 spec phase 約 2-3 day 並行壓縮
+- AMD wording 起草必 cross-ref 既有 AMD（如 AMD-2026-05-09-03 §2.2/§2.4/§4.2/§4.5）— 避免 spec drift；新 AMD 編號預留（AMD-2026-05-10-05 / -06）
+- healthcheck `[63]` `[64]` 編號續 `[58]`-`[62]`（W6/W-AUDIT-9 已用），與既有 family `checks_governance.py` 同 module
+- frozen cells unblock 是治理空白：當前 17 cells 無自動 reverse 機制 → selection-bias 累積；此 spec 是 first formal unblock 治理框架
