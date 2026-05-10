@@ -192,6 +192,27 @@ pub type FundingCurvePanelSlot =
 // W1 E1-β (B-2) 在此下方加 `pub type OIDeltaPanelSlot = Arc<RwLock<Option<...>>>;`
 // 對應 `panel.oi_delta_panel` (V087 migration) + Python collector
 
+/// W-AUDIT-8a Phase B B-2: late-injected slot for OIDeltaPanel。
+///
+/// MODULE_NOTE：oi_delta panel aggregator 在 IPC server detach 後 spawn；
+///   slot 用 `Arc<RwLock<Option<OIDeltaPanel>>>` 讓 main.rs late-inject。
+///   None = uninitialized，dispatch step_4_5 取 None → surface.oi_delta_panel
+///   = None → declared OiDeltaPanel tag 的策略（bb_breakout）fail-closed 寫
+///   evaluation_outcome='oi_panel_unavailable'（per W1 spec §4.1）。
+///
+///   Aggregator 負責 flush 寫 PG (audit) + write slot (hot path)；slot 寫入
+///   是 latest snapshot replace 語意（不 append），dispatch step_4_5 直接
+///   `RwLock::read().clone()` 取 Option<OIDeltaPanel>。
+///
+///   與 FundingCurvePanelSlot 區別：OIDeltaPanel.symbols / oi_abs / oi_delta_*_pct
+///   是 Vec<...>（cross-symbol panel；25 sym 同一 snapshot），FundingCurveSnapshot
+///   是 per-snapshot single value（funding_rate_bps / next_funding_ms）。
+///
+/// W1 sub-task 2 (本 PR) 階段：typedef declare only；late-inject 寫入由
+/// sub-task 3 (E1-γ) 完成。
+pub type OIDeltaPanelSlot =
+    Arc<RwLock<Option<openclaw_core::alpha_surface::OIDeltaPanel>>>;
+
 // === W2 BtcLeadLagPanelSlot insertion point ===
 // W2 E1-δ (C-IMPL-2) 在此下方加 `pub type BtcLeadLagPanelSlot = Arc<RwLock<Option<...>>>;`
 // 對應 `panel.btc_lead_lag_panel` (V088 migration) + BTC lead-lag aggregator
