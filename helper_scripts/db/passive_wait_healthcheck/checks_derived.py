@@ -56,7 +56,15 @@ from pathlib import Path
 
 from .checks_derived_observer import check_observer_pipeline_alive
 from .checks_derived_h_state import check_h_state_gateway_freshness
-from .checks_derived_ml_hygiene import check_dust_spiral_noise_in_ef
+from .checks_derived_ml_hygiene import (
+    check_dust_spiral_noise_in_ef,
+    # [65] MIT W6-1 RFC SHOULD 7 (2026-05-10) — W-AUDIT-4b M3 producer
+    # post-deploy chain integrity sentinel; era filter
+    # `f.ts > '2026-05-09 09:22 UTC'` 排除 pre-M3 historical artifact。
+    # [65] MIT W6-1 RFC SHOULD 7（2026-05-10）— W-AUDIT-4b M3 producer
+    # 接通後 chain integrity 哨兵；era filter 排除 pre-M3 歷史 orphan。
+    check_chain_integrity_post_audit_4b_m3,
+)
 
 
 def check_disabled_strategy_inventory() -> tuple[str, str]:

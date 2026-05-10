@@ -70,6 +70,11 @@ from .checks_derived import (  # noqa: F401
     check_h_state_gateway_freshness,
     # F7 (2026-04-26) ML hygiene derived sentinel
     check_dust_spiral_noise_in_ef,
+    # [65] MIT W6-1 RFC SHOULD 7 (2026-05-10) W-AUDIT-4b M3 producer
+    # post-deploy chain integrity sentinel.
+    # [65] MIT W6-1 RFC SHOULD 7（2026-05-10）W-AUDIT-4b M3 producer
+    # 接通後 chain integrity 哨兵。
+    check_chain_integrity_post_audit_4b_m3,
 )
 from .checks_cost_edge import (  # noqa: F401
     # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
@@ -249,4 +254,6 @@ __all__ = [
     "check_50_replay_run_state_health",
     # [56] P0-NEW-ISSUE-1 live pipeline active sentinel
     "check_56_live_pipeline_active",
+    # [65] MIT W6-1 RFC SHOULD 7 (2026-05-10) W-AUDIT-4b M3 chain integrity
+    "check_chain_integrity_post_audit_4b_m3",
 ]
