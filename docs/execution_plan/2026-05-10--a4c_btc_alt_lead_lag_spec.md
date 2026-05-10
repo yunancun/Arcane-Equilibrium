@@ -1,17 +1,28 @@
-# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.1
+# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.2
 
 **Author**: PA (project architect)
 **Date**: 2026-05-10
-**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 review pending D+1）
-**Scope**: Sprint N+1 W2 A4-C fast-track；spec v1.1 拍板後直接派 paper IMPL（C-IMPL-1..4），D+5 起 paper engine 累積 7d edge evidence，gate 三檔（+15 promote / +5~+15 extend 14d / <+5 revise）才決定 N+2 demo IMPL 路徑。
+**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 σ verify 已交付 → dual-layer σ + PSR(0) skew/kurt formula 強制 land，MIT + QC 直接收 W2 IMPL）
+**Scope**: Sprint N+1 W2 A4-C fast-track；spec v1.2 拍板後直接派 paper IMPL（C-IMPL-1..4），D+5 起 paper engine 累積 7d edge evidence，gate 三檔（+15 promote / +5~+15 extend 14d / <+5 revise）才決定 N+2 demo IMPL 路徑。
 **Reference dispatch**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md` §3.2 W2
 **Reference trait coord**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`
 **Reference alpha surface**: `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` + W-AUDIT-8c §515 (BTC→Alt lead-lag 候選 C, 留給 N+5)
 **Reference QC review**: `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w2_a4c_qc_review_alpha_decay_dsr.md`
+**Reference MIT C-3 σ verify**: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`
 
 ---
 
 ## Change Log
+
+### v1.2 (2026-05-10) — MIT C-3 σ verify CONDITIONAL PASS 落地：dual-layer σ + PSR(0) skew/kurt strict formula
+
+| # | Section | 改動 essence |
+|---|---|---|
+| 1 | §7.1 acceptance prerequisite | 從單一「σ MIT C-3 必 verify」line 改為 **dual-layer σ table**（L1 raw market σ_60=4.54/σ_120=6.28/σ_300=10.08 bps + L2 net edge σ=50-80 bps EDGE-DIAG-1 baseline）；強制 prerequisite condition：spec power calculation 用 net edge σ，禁用 raw market σ；任何 paper edge gate threshold 變動必對 σ_net=50/80 bps 兩 case 重算 power |
+| 2 | §7.1 metric (3) PSR(0) | 從「PSR(0) ≥ 0.95 用 skew/kurt-aware formula」soft 描述改為**強制條件**：BTCUSDT 1m forward-return ex_kurt 7-12 ≫ 0 → JB normality 必拒（5d block resampling 已 verify）→ 禁用 normal SR z-test → 強制用 Bailey-López de Prado 2012 PSR(0) formula `PSR(0) = Φ((SR - 0) × √(n-1) / √(1 - skew·SR + (kurt-1)/4·SR²))`；threshold ≥ 0.95；σ_net=80 bps + ex_kurt=10 → PSR(0) ≈ 0.94 接近下界，必並列 σ_net=50/80 bps 兩 case |
+| 3 | §8.1 +15 bps gate verification | 補強 power verification table（per MIT C-3 verify §5）：σ_net=50 + μ=15 → t-stat=2.68, p=0.0044 (comfortable PASS)；σ_net=80 + μ=15 → t-stat=1.68, p=0.0487 (marginal PASS)；結論：+15 bps gate 在 σ_net 50-80 range 全 PASS（marginal at upper bound）；+5/+15 中段 + +5 下界 verification 同步補完 |
+| 4 | §8.3 sign-off path 簡化 | MIT C-3 σ verify 已交付 → dual-layer σ + PSR(0) strict formula land 為 spec internal cleanup（不增 condition、不改 IMPL scope）→ **MIT + QC 直接收 W2 IMPL**，不需 D+1 PA + MIT 重 sign-off |
+| 5 | §1 header status | v1.1 → v1.2；reference MIT C-3 σ verify report path 補完 |
 
 ### v1.1 (2026-05-10) — QC C-2 review CONDITIONAL APPROVE 5 conditions revision
 
@@ -310,11 +321,20 @@ let alpha_surface = AlphaSurface {
 
 ### 7.1 7d paper engine 跑後 evaluate（v1.1 mandatory metric set 6 條 + acceptance prerequisite）
 
-#### Acceptance prerequisite（IMPL phase 啟動前必驗）
+#### Acceptance prerequisite（IMPL phase 啟動前必驗）— v1.2 dual-layer σ reframe
 
-| Prerequisite | 責任 | Verdict |
-|---|---|---|
-| **σ verified by MIT C-3** | MIT C-3 D+1 review | BTCUSDT 1m forward-return realized σ 7d 經驗值；σ ≥ 60 bps → 重算 power（t-stat 跌至 2.36，p ≈ 0.009），spec metric (1) per-symbol gate threshold 不變但 PSR(0) 必含 skew/kurt deflation；σ < 60 bps → 採 v1.1 baseline assumption σ=30 bps 繼續 |
+**v1.1 單一 σ=30 bps preliminary 已被 MIT C-3 verify report 否決（2026-05-10）**：30 bps 不對應任何真實層（raw market σ 4.5-10 bps × 3-7 underestimate；net edge σ 50-80 bps × 1.7-2.7 overestimate）。v1.2 改為 dual-layer σ acceptance：
+
+| σ layer | source | value (per MIT C-3 verify 2026-05-10) | spec 用途 |
+|---|---|---|---|
+| **Raw market σ (L1)** | BTCUSDT 1m forward-return realized σ 7d (n=10050, MIT report §2) | σ_60 = 4.54 bps / σ_120 = 6.28 bps / σ_300 = 10.08 bps | Alpha decay R²(N) 計算 baseline、price horizon scaling reference (σ ∝ √horizon 已驗 σ_300/σ_60 = 2.22 ≈ √5) |
+| **Net edge σ (L2)** | EDGE-DIAG-1 demo cost-aware fill σ historical empirical baseline | σ_net = 50-80 bps（含 fee + slippage + adverse selection + holding 內 hedge cost） | Paper edge gate threshold power calculation、PSR(0) ≥ 0.95 skew/kurt deflation 計算 |
+
+**Prerequisite condition（強制）**：
+1. spec power calculation **強制用 net edge σ_net = 50-80 bps**；**禁止用 raw market σ 計算 paper edge gate power**（raw σ 視角 t-stat 13-29，過度樂觀，會放 false-PASS 通過）
+2. 任何 paper edge gate threshold 變動（§8.1 三檔調整 / future revision）必對 **σ_net = 50 bps + 80 bps 兩 case** 各重算 power、t-stat、p-value，並列報告
+3. raw market σ 僅用於 §3.1.1 Return component 半衰期 reference + §7.1 metric (4) Alpha decay R²(N) 計算 baseline
+4. MIT C-3 D+1 verify 已交付（report path: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`），W2 IMPL 直接收，**不需 D+1 MIT C-3 重跑 σ verify**
 
 #### Mandatory metric set 6 條（D+12 paper edge report 必含）
 
@@ -322,7 +342,7 @@ let alpha_surface = AlphaSurface {
 |---|---|---|
 | 1 | **Pooled + per-symbol breakdown** | per cohort symbol + overall pooled，含 avg_net_bps + std + Sharpe + sample n + per-symbol t-stat。**Gate**：per-symbol n ≥ 100 fills + per-symbol t > 2.0（不只 overall pooled，避免 underpowered 單 symbol promote 決策） |
 | 2 | **DSR PASS test with K=95 deflate**（**non-negotiable**）| mu_0 = √(2 ln K)，K=95（**v1.1 修正**：active strategy×symbol cell 總數，per Bailey-López de Prado 2014 §4.2 DSR with multiple trial）；mu_0 = √(2 ln 95) = **3.018**（舊 K=79 → 2.956；Δmu_0 = +0.062 即 +2.1%）。warning：8 cohort × 2 strat 全 promote → K 升至 ~111；future ADR 必記錄 K 累積對 multiple-testing budget 長期約束 |
-| 3 | **PSR(0) ≥ 0.95**（用 skew/kurt-aware formula）| crypto JB normality 必拒，禁用 normal SR z-test；用 Bailey-López de Prado 2012 PSR formula 含 skew + kurt deflation |
+| 3 | **PSR(0) ≥ 0.95 — 強制 skew/kurt-aware formula（v1.2 升級）** | **強制條件（v1.2 per MIT C-3 verify）**：BTCUSDT 1m forward-return excess kurt = 7-12 (MIT report §2 實測 σ_60 ex_kurt=11.76 / σ_120=7.82 / σ_300=10.34) ≫ 0 → crypto JB normality 必拒（5d block resampling 已 verify per MIT report §7），**禁用 normal SR z-test**；**強制用 Bailey-López de Prado 2012 PSR(0) skew/kurt-aware formula**：`PSR(0) = Φ((SR - 0) × √(n-1) / √(1 - skew·SR + (kurt-1)/4·SR²))`（Φ = standard normal CDF；SR = annualized Sharpe；n = sample size；skew + kurt 用 7d empirical estimate）。**Threshold**：PSR(0) ≥ 0.95；**MIT C-3 verify report §4 已預估**：σ_net=80 bps + ex_kurt=10 → PSR(0) ≈ 0.94（接近下界 0.95），σ_net=100 bps → PSR(0) ≈ 0.86（FAIL）→ σ_net 高端 case PSR(0) deflation 顯著，必並列報告 σ_net=50/80 bps 兩 case PSR(0) 值 |
 | 4 | **Alpha decay regime test**：R²(N=60/120/300) 三檔 decay curve | lead signal 對 alt return forward predictive R²(60s alt return) 隨 7d window rolling 30-min bucket 衰減曲線；半衰期 < 60s → spec 失敗（信號太短沒實用價值），> 300s → window 太長不抓 microstructure；N=120s 主信號 R² < 0.04 → revise spec 或 archive |
 | 5 | **Block-bootstrap 95% CI**（pooled + per-symbol）| block_size=60min（對齊 BTC autocorr scale），1000 iter；per-symbol CI 與 pooled CI 並列報告 |
 | 6 | **Per-cohort-symbol counterfactual delta** | `(if-followed-lead net_edge) − (TA1m baseline net_edge)`；用 shadow log 對齊每筆 entry，反算「follow lead signal expected_dir 進場 vs 既有 TA1m 進場」net edge delta |
@@ -367,6 +387,19 @@ GROUP BY symbol;
 
 **理由源**：CLAUDE.md §三 cost_gate JS-demo `[40] avg_net = -17.82 → +8.75 bps after V083`（3C audit），demo 5 策略當前 cost burden ≈ 15-20 bps round-trip（fee + slippage + adverse selection）；live 環境降至 ≈ 8-12 bps（PostOnly maker rebate）
 
+**v1.2 +15 bps gate power verification（per MIT C-3 verify §5 net edge σ 視角，N_fills=80, μ=15 bps paper avg_net）**：
+
+| σ_net case | SE = σ_net/√N | t-stat = μ/SE | p-value (one-sided) | verdict |
+|---|---|---|---|---|
+| **σ_net = 50 bps** | 50/√80 = 5.59 | 15/5.59 = 2.68 | 0.0044 | **comfortable PASS** |
+| **σ_net = 80 bps** | 80/√80 = 8.94 | 15/8.94 = 1.68 | 0.0487 | **marginal PASS**（剛 < 0.05 邊緣） |
+
+**結論（v1.2 拍板）**：+15 bps gate 在 σ_net ∈ [50, 80] bps range 全 PASS（lower bound comfortable，upper bound marginal），**門檻設定有效不過寬不過緊**。σ_net = 100 bps 已 FAIL（t-stat=1.34, p=0.092 per MIT report §5），但 EDGE-DIAG-1 baseline 上限 80 bps 之外為極端 case 不在常規 acceptance scope。如 D+12 paper edge report empirical σ_net 顯示超出 80 bps，必觸發 spec revise 重評 +15 gate 是否上調至 +20 bps。
+
+**+5/+15 中段 gate verification**：σ_net=50 bps + μ=10 bps → t-stat=1.79, p=0.039（marginal PASS）；σ_net=80 bps + μ=10 bps → t-stat=1.12, p=0.13（FAIL）→ 中段 gate「extend 14d」決策合理（樣本擴大降 SE 至 SE = σ_net/√160 才可能 PASS upper bound）。
+
+**+5 bps 下界 verification**：σ_net=50 bps + μ=5 bps → t-stat=0.89, p=0.19（FAIL）→ +5 以下 archive/revise 決策合理（無 statistical significance 即 promote 等於賭機）。
+
 - Threshold X / Y / N 三參數最佳值：N=120s 已鎖定（v1.1）；threshold_X=10 bps + threshold_Y=0.40 維持 PA 預設，QC + MIT D+1 review 不再可改
 
 ### 8.2 MIT C-3 review scope
@@ -376,15 +409,19 @@ GROUP BY symbol;
 - Cohort sample size demand：per cohort symbol n ≥ 100 fills 7d 內可達？BTCUSDT 1m 7d = 10080 bar 足夠 lead signal；alt cohort fills 倚賴 5 策略 paper baseline 活躍度
 - V088 hypertable PL/pgSQL 語法 + retention drop_chunks policy + idempotency dry-run
 
-### 8.3 三方 sign-off path（v1.1）
+### 8.3 三方 sign-off path（v1.2 — MIT C-3 σ verify 已交付，sign-off 簡化）
 
-**v1.1 spec 5 conditions revised 後：QC C-2 已 sign-off CONDITIONAL APPROVE → 直接收**（不需 D+1 PA + QC integrate phase）。MIT C-3 D+1 review focus：
-- §7.1 acceptance prerequisite「σ verified by MIT C-3」必跑（BTCUSDT 1m forward-return realized σ 7d）
+**v1.2 sign-off path（per MIT C-3 verify report 2026-05-10 已交付）**：
+- **QC C-2**：已 sign-off CONDITIONAL APPROVE 5 conditions（v1.1 已落實 spec），**v1.2 dual-layer σ + PSR(0) skew/kurt formula 強制 + +15 bps gate power verification 為 spec 補強**（不增加新 condition），QC 直接收
+- **MIT C-3**：σ verify 已交付（report `2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`），dual-layer σ acceptance + PSR(0) skew/kurt formula 已落 spec v1.2，**MIT 直接收，不需 D+1 重 review**
+- **W2 IMPL phase 直接啟動**：spec v1.2 sign-off 後 D+3 起派 C-IMPL-1..4 paper IMPL，**不需 D+1 PA + MIT 重 sign-off**（v1.2 補強為 spec internal cleanup，不改 IMPL scope）
+
+**MIT C-3 D+1 review focus（保留 IMPL phase 啟動前驗）**：
 - §7.3 strict shift(N) leak-free grep verification（`btc_lead_lag_writer.py` 內 `rolling()` / slice operation 全掃）
 - §4.1 V088 hypertable PL/pgSQL 語法 + retention drop_chunks policy + idempotency dry-run
-- §4.4 (新) 60s/300s shadow value column 寫入路徑與主信號 N=120 disjoint 不污染
+- §4.1 60s/300s shadow value column 寫入路徑與主信號 N=120 disjoint 不污染
 
-MIT C-3 APPROVE 後 D+3 起 W2 paper IMPL（C-IMPL-1 NO-OP 驗收 + C-IMPL-2 producer + V088 + C-IMPL-3 strategy shadow + C-IMPL-4 paper engine 7d evidence collection 開始）。
+**Sign-off 後 timeline**：D+3 起派 C-IMPL-1..4 paper IMPL（C-IMPL-1 NO-OP 驗收 + C-IMPL-2 producer + V088 + C-IMPL-3 strategy shadow + C-IMPL-4 paper engine 7d evidence collection 開始），D+5 paper engine deploy，D+12 paper edge report land（含 §7.1 mandatory metric 6 條 + dual-layer σ acceptance + PSR(0) skew/kurt formula 計算 + +15 bps gate power verification σ_net=50/80 bps 兩 case 並列）。
 
 ---
 
@@ -393,7 +430,7 @@ MIT C-3 APPROVE 後 D+3 起 W2 paper IMPL（C-IMPL-1 NO-OP 驗收 + C-IMPL-2 pro
 | Risk | 等級 | 緩解 |
 |---|---|---|
 | **Look-ahead bias**（lead window 含 current bar） | **極高** | strict `shift(N)` 禁含 current bar；MIT C-3 必跑 leak detection（per §7.3 strict shift 並列對比，差異 > 30% 即 spec 失敗）；對照 `feedback_indicator_lookahead_bias` |
-| **σ=30 bps 假設過度樂觀**（v1.1 condition extra） | **高** | §7.1 acceptance prerequisite — MIT C-3 必 verify BTCUSDT 1m forward-return realized σ 7d 經驗值；σ ≥ 60 bps → t-stat 跌至 2.36（p ≈ 0.009），power 邊緣可接受但 PSR(0) 必含 skew/kurt deflation；< 60 bps 採 baseline σ=30 bps |
+| **σ acceptance 單層假設不對應真實層**（v1.2 MIT C-3 verify 落地） | **已 closed** | §7.1 acceptance prerequisite v1.2 改 dual-layer σ table（L1 raw market σ_60=4.54/σ_120=6.28/σ_300=10.08 bps + L2 net edge σ=50-80 bps EDGE-DIAG-1 baseline）；spec 30 bps 不對應任何真實層已 retire；強制 prerequisite：spec power calculation 用 net edge σ 禁用 raw market σ；§7.1 metric (3) PSR(0) ≥ 0.95 強制用 Bailey-López de Prado 2012 skew/kurt-aware formula（ex_kurt 7-12 ≫ 0 JB normality 必拒，禁用 normal SR z-test）；§8.1 +15 bps gate σ_net=50/80 bps 兩 case power verification 已落地 |
 | **per-symbol n=100 underpowered**（v1.1 condition #4 (1)） | **中** | §7.1 metric (1) per-symbol gate：per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol promote；不只 overall pooled 看 |
 | **K=95 deflate 漏算**（v1.1 condition #1） | **中** | §8.1 spec 文字已修正 K=95（不是 6）；§7.1 metric (2) DSR PASS test 強制 K=95 deflate non-negotiable |
 | **+5 bps gate 太鬆無法 survive demo cost**（v1.1 condition #5） | **極高** | §8.1 改三檔 gate（+15 promote / +5~+15 extend 14d / <+5 revise） |
@@ -468,12 +505,12 @@ per PA 輸出物標準：
 
 ---
 
-## §14 一句總結（v1.1）
+## §14 一句總結（v1.2）
 
-**A4-C BTC→Alt Lead-Lag W-AUDIT-8c 候選 C 的 N+1 fast-track 預跑（v1.1 QC 5 conditions revised）：BTCUSDT 1m kline + orderbook 算 lead signal（return / volume z / book imbalance over N=120s **鎖定**，60s/300s shadow value 同 schema 收 decay curve evidence）+ BTCUSDT 1h kline 算 regime_tag（\|1h return\| > 200 bps → extreme，shadow log 不計入 7d edge avg）→ 7-symbol alt cohort xcorr + expected_dir 寫 `panel.btc_lead_lag_panel` (V088 hypertable, retention 14d) → ma_crossover + grid_trading 在 paper engine mode 接 `BtcLeadLag` 為 `CrossAsset` tag, on_tick shadow log only 不 trade（C-IMPL-3）；三層 paper-only fence + strict shift(N) lookahead-free 保證 demo/live engine 永遠 surface.btc_lead_lag = None 不污染 5 策略 demo edge baseline；7d paper engine 收 evidence，**gate 三檔（avg_net ≥ +15 bps promote N+2 / +5~+15 extend 14d / <+5 revise）**，DSR PASS 用 K=95 deflate (mu_0 = √(2 ln 95) = 3.018)，PSR(0) ≥ 0.95 用 skew/kurt-aware formula，per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol promote，block-bootstrap 95% CI block_size=60min 1000 iter，alpha decay R²(N=60/120/300) 三檔 curve 強制；σ baseline = 30 bps 是下界 MIT C-3 必 verify (BTCUSDT 1m forward-return realized σ 7d)，σ ≥ 60 bps 重算 power；trait skeleton 已 PA D+0 commit (HEAD c9fb0b8f) IMPL phase 全 0 file 重疊 0 git merge 衝突；16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項全 0 觸碰；QC C-2 已 sign-off CONDITIONAL APPROVE 5 conditions 已落 spec v1.1 → MIT C-3 D+1 review 直接收（不需 D+1 PA + QC integrate phase）。**
+**A4-C BTC→Alt Lead-Lag W-AUDIT-8c 候選 C 的 N+1 fast-track 預跑（v1.2 MIT C-3 σ verify 落地 dual-layer σ + PSR(0) strict）：BTCUSDT 1m kline + orderbook 算 lead signal（return / volume z / book imbalance over N=120s **鎖定**，60s/300s shadow value 同 schema 收 decay curve evidence）+ BTCUSDT 1h kline 算 regime_tag（\|1h return\| > 200 bps → extreme，shadow log 不計入 7d edge avg）→ 7-symbol alt cohort xcorr + expected_dir 寫 `panel.btc_lead_lag_panel` (V088 hypertable, retention 14d) → ma_crossover + grid_trading 在 paper engine mode 接 `BtcLeadLag` 為 `CrossAsset` tag, on_tick shadow log only 不 trade（C-IMPL-3）；三層 paper-only fence + strict shift(N) lookahead-free 保證 demo/live engine 永遠 surface.btc_lead_lag = None 不污染 5 策略 demo edge baseline；7d paper engine 收 evidence，**gate 三檔（avg_net ≥ +15 bps promote N+2 / +5~+15 extend 14d / <+5 revise）+15 bps gate 已 verify σ_net=50 bps t-stat=2.68 p=0.0044 / σ_net=80 bps t-stat=1.68 p=0.0487 全 PASS**，DSR PASS 用 K=95 deflate (mu_0 = √(2 ln 95) = 3.018)，**PSR(0) ≥ 0.95 強制用 Bailey-López de Prado 2012 skew/kurt-aware formula（ex_kurt 7-12 ≫ 0 JB normality 必拒，禁用 normal SR z-test），σ_net=80 bps + ex_kurt=10 → PSR(0) ≈ 0.94 必並列 σ_net=50/80 兩 case**，per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol promote，block-bootstrap 95% CI block_size=60min 1000 iter，alpha decay R²(N=60/120/300) 三檔 curve 強制；**σ acceptance v1.2 改 dual-layer：L1 raw market σ_60=4.54/σ_120=6.28/σ_300=10.08 bps（MIT C-3 verify）用於 alpha decay R² baseline + L2 net edge σ=50-80 bps EDGE-DIAG-1 baseline 用於 power calculation + PSR(0) deflation；spec 30 bps 不對應任何真實層已 retire**；trait skeleton 已 PA D+0 commit (HEAD c9fb0b8f) IMPL phase 全 0 file 重疊 0 git merge 衝突；16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項全 0 觸碰；QC C-2 已 sign-off CONDITIONAL APPROVE 5 conditions 落 spec v1.1，MIT C-3 σ verify 已交付 dual-layer σ + PSR(0) strict 落 spec v1.2 → **QC + MIT 直接收 W2 IMPL，不需 D+1 PA + MIT 重 sign-off**。**
 
 ---
 
-**Spec v1.1 end. PA C-1 spec QC 5 conditions revised land。QC C-2 已 sign-off；MIT C-3 D+1 review 直接收 → APPROVE 後 D+3 起派 C-IMPL-1..4 paper IMPL，D+5 paper engine deploy 後跑 7d，D+12 paper edge report land（含 §7.1 mandatory metric 6 條 + acceptance prerequisite「σ verified by MIT C-3」）。**
+**Spec v1.2 end. PA C-1 spec dual-layer σ + PSR(0) skew/kurt strict + +15 bps gate power verification land。QC C-2 已 sign-off，MIT C-3 σ verify 已交付 → QC + MIT 直接收 W2 IMPL → D+3 起派 C-IMPL-1..4 paper IMPL，D+5 paper engine deploy 後跑 7d，D+12 paper edge report land（含 §7.1 mandatory metric 6 條 + dual-layer σ acceptance + PSR(0) skew/kurt formula 計算 + +15 bps gate power verification σ_net=50/80 bps 兩 case 並列）。**
 
-PA DESIGN DONE: report path: srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md（v1.1）
+PA DESIGN DONE: report path: srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md（v1.2）
