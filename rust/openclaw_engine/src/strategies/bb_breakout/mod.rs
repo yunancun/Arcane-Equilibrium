@@ -372,29 +372,78 @@ impl Strategy for BbBreakout {
         }
     }
 
-    /// RC-04: Revert per-symbol state on rejection. Snapshot is the full
-    /// `BbBreakoutPerSymbolState` (or `None` if the symbol was unseen); restoring
-    /// it exactly reproduces the pre-tick per-symbol state.
+    /// RC-04 + W7-3 Option B（P1-2 propagation, mirror ma_crossover/strategy_impl.rs:55-91
+    /// + bb_reversion/mod.rs:343-424）：拒絕時的 1-tick 防衛（cross-strategy desync hot loop 修復）。
     ///
-    /// EDGE-P2-2 FUP (E2 finding #2): `oi_buffer` is a market-observation
-    /// series, not a strategy decision state. Rolling it back on rejection
-    /// would discard the OI sample pushed earlier this tick, and under a high
-    /// rejection rate (budget/风控) this systematically starves the delta
-    /// estimator. We therefore preserve the live `oi_buffer` across rollback:
-    /// - `prev_st = Some(...)`: clone prev_st but overwrite its oi_buffer with
-    ///   the current live buffer (carry the new sample forward).
-    /// - `prev_st = None`: symbol was unseen pre-tick. If a sample was just
-    ///   pushed, seed a fresh Default state with only the oi_buffer populated
-    ///   so trading state stays "unseen" but market observation survives.
+    /// 原 RC-04 行為：回滾該幣種 PerSymbolState 至 mutation 前快照。
+    /// EDGE-P2-2 FUP：`oi_buffer` 是市場觀察序列不是策略決策狀態；rollback 時保留
+    /// 活 buffer（prev=Some → 克隆 prev_st 但覆寫 oi_buffer；prev=None 且有新樣本
+    /// → 創建只含 oi_buffer 的 Default state）。trading state 保持「未見」但
+    /// OI 觀察續存。
     ///
-    /// EDGE-P2-2 FUP（E2 #2）：`oi_buffer` 是市場觀察序列不是策略決策狀態，
-    /// 若一起回滾，在高拒絕率下會系統性餓死 delta 估計。故保留活 buffer：
-    /// prev=Some → 克隆 prev_st 但覆寫 oi_buffer；prev=None 且有新樣本 → 創建只
-    /// 含 oi_buffer 的 Default 狀態（trading state 保持 unseen，OI 觀察續存）。
-    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
+    /// W7-3 Option B 補丁背景：W7-4 audit §3 P1-2 揭露 bb_breakout 缺 W7-3
+    /// 1-tick defense + 缺 W7-2 entry path query（兩層皆缺，gap 比 bb_reversion 大）。
+    /// 6 concentric gates（squeeze 45min + bandwidth>expansion + vol_ratio>threshold +
+    /// Donchian breach Hard mode + persistence 60s + confluence score）使 hot loop
+    /// 歷史 occurrence = 0；W7 chain consistency 仍有價值（防 future bug）。
+    /// reason 字串契約見 `rejection_coding.rs:147-152`：
+    /// 格式 `"duplicate_position: {symbol} already {LONG|SHORT} {qty}"`。
+    /// fallback：reason 含 `duplicate_position` 但無 `already LONG/SHORT` 子串
+    /// → 標 warn 並走原 RC-04 rollback。
+    ///
+    /// W7-3 sync 路徑與 ma_crossover / bb_reversion 設計一致：
+    ///   1. **不觸碰** oi_buffer（保持 EDGE-P2-2 FUP 既有市場觀察契約）
+    ///   2. **不觸碰** entry_price / trailing_stop / squeeze_detected_ms
+    ///      （原因：本策略當前 tick 並未真正開倉；只 sync position 為 paper_state
+    ///      真實方向，下個 tick 走 Some(is_long) exit 分支即可。entry_price 是
+    ///      bb_breakout-specific trailing_stop math 來源，使用 cross-strategy
+    ///      entry_price 會 mis-calibrate trailing；留 None 直到下次 bb_breakout
+    ///      自己開倉再寫。）
+    ///   3. cooldown 不 rollback：保留 entry tick 寫入的 last_trade_ms，配合
+    ///      cooldown gate 多擋一輪（與 ma_crossover / bb_reversion 一致）。
+    fn on_rejection(&mut self, intent: &OrderIntent, reason: &str) {
         let sym = &intent.symbol;
-        // Snapshot the current (live) OI buffer so rollback of trading state
-        // does not discard the sample pushed earlier this tick.
+
+        // W7-3 Option B：duplicate_position 識別 + 立即 sync self.symbols[sym].position。
+        if reason.contains("duplicate_position") {
+            let existing_is_long = if reason.contains("already LONG") {
+                Some(true)
+            } else if reason.contains("already SHORT") {
+                Some(false)
+            } else {
+                None
+            };
+
+            if let Some(is_long) = existing_is_long {
+                // 同步 paper_state 真實方向；下個 tick 進 Some(is_long) exit 分支。
+                // 只動 position 欄位，不觸碰 oi_buffer / entry_price / trailing_stop /
+                // squeeze_detected_ms（mirror W7-4 §3 P1-2 設計：保 EDGE-P2-2 FUP 既有契約）。
+                let st = self.symbols.get_or_init(sym);
+                st.position = Some(is_long);
+                // **不** rollback cooldown：保留 entry tick 寫入的 last_trade_ms。
+                tracing::debug!(
+                    target: "strategy_position_sync",
+                    strategy = "bb_breakout",
+                    symbol = %sym,
+                    existing_is_long,
+                    "bb_breakout.on_rejection: duplicate_position 1-tick defense — \
+                     synced PerSymbolState.position to paper_state direction (W7-3 Option B propagation)"
+                );
+                return;
+            }
+            // reason 含 duplicate_position 但無 already LONG/SHORT 子串 → 字串契約破裂，
+            // fallback 走原 RC-04 rollback 並標 warn 提醒 contract drift。
+            tracing::warn!(
+                target: "strategy_position_sync",
+                strategy = "bb_breakout",
+                symbol = %sym,
+                reason = %reason,
+                "bb_breakout.on_rejection: duplicate_position reason missing \
+                 'already LONG/SHORT' marker; falling back to RC-04 rollback"
+            );
+        }
+
+        // 原 RC-04 rollback：non-duplicate_position rejection 走此路徑。
         // 先取當前活 OI buffer 快照，以免 rollback 丟掉本 tick push 的新樣本。
         let live_oi_buffer = self
             .symbols
@@ -568,6 +617,35 @@ impl Strategy for BbBreakout {
         let current_position = self.symbols.get(sym).and_then(|s| s.position);
         match current_position {
             None => {
+                // ── W7-2 Option A 治本（P2-1 propagation）：cross-strategy paper_state 查詢 ──
+                // 進入 entry 計算前先查 paper_state 是否已有同 symbol 倉位（不論哪策略開的）。
+                // W7-4 audit `2026-05-10--w7_4_5_strategy_position_sync_systemic_audit.md`
+                // §3 P2-1 揭露 bb_breakout 缺此 query，雖 6-gate 自然限頻歷史 occurrence=0
+                // 但 W7 chain consistency 仍有架構價值（防 future bug + alpha-source 6 strategy
+                // 擴充時 trait-level invariant 已就緒）。Option A 直接 skip 並 sync
+                // self.symbols[sym].position，從根源終結 hot loop。
+                //
+                // entry_price 不 cross-strategy 同步（W7-4 §3 P2-1 trade-off）：
+                // bb_breakout entry_price 是 ATR trailing_stop math 來源（line 808-816），
+                // 使用 cross-strategy entry_price 會 mis-calibrate trailing；留 None 直到
+                // 下次 bb_breakout 自己開倉再寫。trailing_stop / squeeze_detected_ms /
+                // oi_buffer 同樣不動（mirror W7-3 path 治理一致）。
+                if let Some(existing) = ctx.position_state {
+                    // paper_state 已持倉；同步 self.symbols[sym].position 為 paper_state
+                    // 真實方向，下個 tick 直接進 Some(is_long) exit 分支，不再進入 entry path。
+                    let st = self.symbols.get_or_init(sym);
+                    st.position = Some(existing.is_long);
+                    tracing::debug!(
+                        target: "strategy_position_sync",
+                        strategy = "bb_breakout",
+                        symbol = %sym,
+                        existing_is_long = existing.is_long,
+                        "skip entry: ctx.position_state present (cross-strategy paper_state holding) — \
+                         W7-2 Option A treats as cross-strategy desync, sync PerSymbolState.position and skip"
+                    );
+                    return vec![];
+                }
+
                 // FIX-26: Check squeeze exists AND hasn't expired.
                 // FIX-26-DEADLOCK-1 audit (2026-04-24): use saturating_add to
                 // match the auto-clear at line ~410 — the original `ts +

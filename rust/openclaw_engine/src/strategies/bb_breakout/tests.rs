@@ -1248,3 +1248,304 @@ fn test_bbb_bootstrap_imports_paper_state_positions() {
     assert_eq!(st.entry_price, Some(50_000.0), "entry_price 必還原");
     assert!(s.symbols.get("ETH").is_none(), "不可 import ma_crossover 倉位");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W7-3 Option B regression — bb_breakout on_rejection duplicate_position 1-tick defense
+// W7-3 Option B 回歸（P1-2 propagation）— bb_breakout on_rejection 1-tick 防衛
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 背景：W7-4 systemic audit `2026-05-10--w7_4_5_strategy_position_sync_systemic_audit.md`
+// §3 P1-2 揭露 bb_breakout 缺 W7-3 Option B 1-tick defense（且也缺 W7-2 Option A
+// entry path query；P2-1 同批處理）。雖 6 concentric gates 自然限頻使 hot loop
+// 歷史 occurrence=0，W7 chain consistency 仍有架構價值（防 future bug）。
+//
+// 本批 propagation 與 ma_crossover `strategy_impl.rs:55-91` + bb_reversion
+// `mod.rs:343-424` 同 pattern；測試 mirror ma_crossover `tests.rs:678-810`
+// 4-case 結構：
+// - test 1：already SHORT → sync false（不觸碰 oi_buffer / entry_price / trailing_stop）
+// - test 2：already LONG → sync true
+// - test 3：unknown duplicate_position format → fallback to RC-04 rollback
+// - test 4：non-duplicate rejection → full RC-04 rollback (state + cooldown)
+//
+// reason 字串契約見 rejection_coding.rs:147-152。
+
+/// W7-3 Option B #1（bb_breakout）：reason "duplicate_position ... already SHORT" 命中
+/// → self.symbols[sym].position sync 為 Some(false)（SHORT），不被 RC-04 rollback。
+/// 額外驗證：oi_buffer 不被觸碰（保 EDGE-P2-2 FUP 既有契約）。
+#[test]
+fn test_bbb_on_rejection_duplicate_position_already_short_syncs_position() {
+    let mut s = BbBreakout::new();
+    // Pre-condition：模擬 entry path 已寫過 prev_state（None → 沒有舊狀態）
+    // + oi_buffer 已有觀察樣本（驗證 W7-3 sync 不觸碰）。
+    s.prev_state.insert("INXUSDT".to_string(), None);
+    let st = s.symbols.get_or_init("INXUSDT");
+    st.oi_buffer.push_back((1_000, 100.0));
+    st.oi_buffer.push_back((2_000, 105.0));
+    let buf_len_before = st.oi_buffer.len();
+
+    let intent = make_intent_bbb("INXUSDT", true); // strategy 想開 LONG（被 reject）
+    let reason = "duplicate_position: INXUSDT already SHORT 1810";
+    s.on_rejection(&intent, reason);
+
+    // 期望：self.symbols[INXUSDT].position = Some(false)（SHORT），不是被 RC-04 rollback。
+    let st_after = s.symbols.get("INXUSDT").expect("symbol still tracked");
+    assert_eq!(
+        st_after.position,
+        Some(false),
+        "duplicate_position already SHORT 必須 sync PerSymbolState.position 為 Some(false)"
+    );
+    // 額外驗證：oi_buffer 必被保留（W7-3 sync path 不觸碰市場觀察序列）。
+    assert_eq!(
+        st_after.oi_buffer.len(),
+        buf_len_before,
+        "W7-3 sync 必保留 oi_buffer（市場觀察契約 EDGE-P2-2 FUP）"
+    );
+}
+
+/// W7-3 Option B #2（bb_breakout）：reason "duplicate_position ... already LONG" 命中
+/// → self.symbols[sym].position sync 為 Some(true)（LONG）。
+#[test]
+fn test_bbb_on_rejection_duplicate_position_already_long_syncs_position() {
+    let mut s = BbBreakout::new();
+    s.prev_state.insert("BTCUSDT".to_string(), None);
+
+    let intent = make_intent_bbb("BTCUSDT", false); // strategy 想開 SHORT（被 reject）
+    let reason = "duplicate_position: BTCUSDT already LONG 0.5";
+    s.on_rejection(&intent, reason);
+
+    let st = s.symbols.get("BTCUSDT").expect("symbol still tracked");
+    assert_eq!(
+        st.position,
+        Some(true),
+        "duplicate_position already LONG 必須 sync PerSymbolState.position 為 Some(true)"
+    );
+}
+
+/// W7-3 Option B #3（bb_breakout）：reason 含 "duplicate_position" 但無 "already LONG/SHORT"
+/// 子串（字串契約 drift / future 改寫）→ fallback 走原 RC-04 rollback 路徑。
+/// pre_state = Some(LONG with entry_price/trailing_stop) → rollback 後狀態還原。
+#[test]
+fn test_bbb_on_rejection_unknown_duplicate_format_fallback_to_rollback() {
+    let mut s = BbBreakout::new();
+    let intent = make_intent_bbb("ETHUSDT", true);
+    // 缺 "already LONG/SHORT" 子串 — 模擬 reason 字串契約破裂。
+    let reason = "duplicate_position: ETHUSDT something_unparseable";
+
+    // 模擬 entry path 寫過 prev_state = Some(LONG with entry_price/trailing_stop)；
+    // mutation 後 self.symbols[ETHUSDT] 變成另一個（被 rollback 還原回舊的）。
+    let prev_st = super::BbBreakoutPerSymbolState {
+        position: Some(true),
+        squeeze_detected_ms: Some(1_000),
+        entry_price: Some(3_000.0),
+        trailing_stop: Some(2_950.0),
+        oi_buffer: std::collections::VecDeque::new(),
+    };
+    s.prev_state.insert("ETHUSDT".to_string(), Some(prev_st.clone()));
+    // mutation 後狀態（將被 rollback 覆蓋）
+    let cur = s.symbols.get_or_init("ETHUSDT");
+    cur.position = Some(false); // 暫時被 mutation
+    cur.entry_price = Some(2_500.0);
+
+    s.on_rejection(&intent, reason);
+
+    // Fallback rollback 把 self.symbols[ETHUSDT] 還原到 prev_state。
+    let st_after = s.symbols.get("ETHUSDT").expect("symbol still tracked");
+    assert_eq!(
+        st_after.position,
+        Some(true),
+        "unknown duplicate_position format 必 fallback 走 RC-04 prev_state rollback"
+    );
+    assert_eq!(
+        st_after.entry_price,
+        Some(3_000.0),
+        "RC-04 rollback 必還原 entry_price"
+    );
+    assert_eq!(
+        st_after.trailing_stop,
+        Some(2_950.0),
+        "RC-04 rollback 必還原 trailing_stop"
+    );
+}
+
+/// W7-3 Option B #4（bb_breakout）：reason 不含 "duplicate_position"（其他類拒絕，
+/// 例如 cost_gate / risk_gate）→ 必走原 RC-04 完整 rollback（state + cooldown 都還原）。
+/// pre-condition：prev_state = None（mutation 前未見）→ rollback 後 self.symbols[sym]
+/// 必被 remove（不留下偽狀態，除非有活 oi_buffer 需保留）。
+#[test]
+fn test_bbb_on_rejection_non_duplicate_position_runs_full_rollback() {
+    let mut s = BbBreakout::new();
+    let intent = make_intent_bbb("SOLUSDT", true);
+    let reason = "cost_gate(JS-demo): estimated=-12.50bps < 0 — blocked / 負估計阻擋";
+
+    // 模擬 entry path mutation：prev_state = None（變更前未見），mutation 後
+    // self.symbols[SOLUSDT] 已被寫入 LONG，prev_last_trade_ms = 0（未交易過），
+    // 沒有 oi_buffer 觀察樣本。
+    s.prev_state.insert("SOLUSDT".to_string(), None);
+    let cur = s.symbols.get_or_init("SOLUSDT");
+    cur.position = Some(true);
+    cur.entry_price = Some(150.0);
+    s.prev_last_trade_ms.insert("SOLUSDT".to_string(), 0);
+    s.cooldown.record_signal("SOLUSDT", 100_000);
+
+    s.on_rejection(&intent, reason);
+
+    // Rollback：self.symbols[SOLUSDT] 必被 remove（prev_state=None + 無 oi_buffer）。
+    assert!(
+        s.symbols.get("SOLUSDT").is_none(),
+        "non-duplicate_position rejection 必走 RC-04 把 PerSymbolState 還原到 None"
+    );
+    // Cooldown 也應 clear（因 prev_last_trade_ms == 0 哨兵）。
+    assert!(
+        s.cooldown.last_ms("SOLUSDT").is_none(),
+        "non-duplicate_position rejection 必走 RC-04 把 cooldown 還原到未交易狀態"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W7-2 Option A regression — bb_breakout cross-strategy paper_state pre-entry check
+// W7-2 Option A 回歸（P2-1 propagation）— bb_breakout entry path 起點查 ctx.position_state
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 背景：W7-4 audit §3 P2-1 指出 bb_breakout 缺 entry path Option A query；
+// 配合 P1-2 W7-3 1-tick defense propagation 一起實作（避免 entry-only 或 reject-only 半套）。
+// Sprint N+1 W7-1 trait skeleton (`c9fb0b8f`) 已把 `position_state: Option<&PaperPosition>`
+// wire 到 TickContext，由 step_4_5_dispatch.rs:289 per-strategy iteration 注入。
+// 本批 tests 驗證 bb_breakout.on_tick 在 entry path 起點查到 ctx.position_state 後即
+// skip + sync self.symbols[sym].position 的契約：
+//
+// - test 1：position_state=Some(SHORT) + bb_breakout breakout signal=LONG → 0 actions
+// - test 2：position_state=None + valid breakout signal → 1 entry intent（baseline regression）
+// - test 3：sync 後 entry_price 不被 cross-strategy 同步（per W7-4 §3 P2-1 trade-off）
+//
+// W7-3 Option B 仍保留作 reason 字串契約 fallback（W7-4 §7 重點 3）。
+//
+// PaperPosition helper：模擬 paper_state.get_position 的回傳。
+
+use crate::paper_state::PaperPosition;
+
+/// W7-2 helper（bb_breakout）：構建 PaperPosition 模擬 paper_state 真實持倉。
+/// 全欄位最小可行值；owner_strategy 模擬其他策略持倉場景。
+fn make_paper_position_bbb(symbol: &str, is_long: bool) -> PaperPosition {
+    PaperPosition {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        entry_price: 50_000.0,
+        best_price: 50_000.0,
+        entry_fee: 0.0,
+        entry_ts_ms: 0,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: "grid_trading".to_string(), // 模擬 grid 已開倉場景
+        entry_notional: 1.0 * 50_000.0,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
+    }
+}
+
+/// W7-2 #1（bb_breakout）：ctx.position_state = Some(SHORT) + bb_breakout breakout signal=LONG
+/// → 必 0 actions（skip entry）+ self.symbols[sym].position 同步為 Some(false)（SHORT）。
+/// 對應 W7-4 §3 P2-1 設計場景：grid 已開 SHORT、bb_breakout squeeze→expansion 想 LONG。
+#[test]
+fn test_bbb_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0; // disable persistence for unit tests
+    // squeeze 階段 → 寫 squeeze_detected_ms（不觸發 entry）。
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    assert!(s.has_squeeze("BTC"), "squeeze 必登記");
+
+    // breakout tick + ctx.position_state = Some(SHORT)（grid 已持倉）。
+    let pp = make_paper_position_bbb("BTC", false); // grid 已開 SHORT
+    let mut ctx_breakout = ctx(0.05, 1.1, 2.0, 700_000); // breakout signal = LONG (percent_b > 1)
+    ctx_breakout.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx_breakout, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    // (1) 必 0 intents（skip entry）。
+    assert!(
+        intents.is_empty(),
+        "ctx.position_state present 必 skip entry，但發了 {} intents",
+        intents.len()
+    );
+    // (2) self.symbols[BTC].position 必同步為 paper_state.is_long（false = SHORT）。
+    let st = s.symbols.get("BTC").expect("symbol must be tracked after sync");
+    assert_eq!(
+        st.position,
+        Some(false),
+        "skip 後必 sync PerSymbolState.position 為 paper_state 真實方向（SHORT）"
+    );
+}
+
+/// W7-2 #2（bb_breakout）：ctx.position_state = None + valid breakout signal
+/// → 1 entry intent（baseline regression）。確認本檢查不誤殺正常 entry 路徑。
+/// 等同既有 `test_squeeze_then_breakout` 的契約再驗 + 顯式 ctx.position_state=None。
+#[test]
+fn test_bbb_on_tick_proceeds_entry_when_paper_state_is_none() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    // squeeze
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    assert!(s.has_squeeze("BTC"));
+
+    let mut ctx_breakout = ctx(0.05, 1.1, 2.0, 700_000); // signal = LONG
+    ctx_breakout.position_state = None; // 顯式 None；ctx() default 已 None，這裡再強調契約。
+
+    let intents = s.on_tick(&ctx_breakout, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert_eq!(
+        intents.len(),
+        1,
+        "ctx.position_state=None 時 valid signal 必發 entry intent"
+    );
+    match &intents[0] {
+        StrategyAction::Open(intent) => {
+            assert!(intent.is_long, "expected LONG breakout entry");
+        }
+        other => panic!("expected StrategyAction::Open, got {:?}", other),
+    }
+}
+
+/// W7-2 #3（bb_breakout）：W7-2 sync 後 entry_price 不被 cross-strategy 同步
+/// （per W7-4 §3 P2-1 trade-off：避免 cross-strategy entry_price mis-calibrate trailing_stop）。
+/// 驗證契約：（1）必 skip，（2）self.symbols[sym].position 同步 paper_state 方向，
+/// （3）self.symbols[sym].entry_price 必為 None（不從 paper_state cross-strategy 寫）。
+#[test]
+fn test_bbb_on_tick_entry_price_not_synced_from_paper_state() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let pp = make_paper_position_bbb("BTC", false);
+    // 故意：paper_state.entry_price = 50_000，若 W7-2 sync 誤寫會造成 trailing math 錯。
+    let mut ctx_breakout = ctx(0.05, 1.1, 2.0, 700_000);
+    ctx_breakout.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx_breakout, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    // (1) 必 0 intent — W7-2 skip path 觸發。
+    assert!(
+        intents.is_empty(),
+        "ctx.position_state present 必 W7-2 skip，但發了 {} intents",
+        intents.len()
+    );
+    // (2) self.symbols[BTC].position 必 sync 為 paper_state.is_long（SHORT）。
+    let st = s.symbols.get("BTC").expect("symbol tracked");
+    assert_eq!(
+        st.position,
+        Some(false),
+        "W7-2 sync 必反映 paper_state.is_long（SHORT）"
+    );
+    // (3) entry_price 必 None — 不從 paper_state cross-strategy 同步（W7-4 §3 P2-1 trade-off）。
+    //     bb_breakout entry_price 是 ATR trailing_stop math 來源，使用 cross-strategy
+    //     entry_price 會 mis-calibrate trailing。
+    assert_eq!(
+        st.entry_price,
+        None,
+        "W7-2 sync 必 NOT 寫 entry_price（trade-off：cross-strategy entry_price 會 mis-calibrate trailing）"
+    );
+    // 額外：trailing_stop / squeeze_detected_ms 也不被 W7-2 sync 觸碰
+    // squeeze_detected_ms 是 squeeze 階段在 line 506 寫的，本 tick 不應被 W7-2 清除。
+    assert!(
+        st.squeeze_detected_ms.is_some(),
+        "W7-2 sync 必 NOT 觸碰 squeeze_detected_ms（squeeze 階段已寫的觀察狀態）"
+    );
+}
