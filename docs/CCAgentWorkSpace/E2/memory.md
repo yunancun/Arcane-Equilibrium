@@ -1794,3 +1794,15 @@ E1-C T3 `_read_canary_stage` path 2b 把 legacy `shadow_mode_provider` 回 False
 - ssh trade-core 非 interactive bash 不 source `~/.cargo/env`；script 內必 `source ~/.cargo/env 2>/dev/null` 才能跑 cargo
 - Cargo workspace 在 `srv/rust/` 不在 `srv/` 根；ssh 跑 cargo 必 `cd ~/BybitOpenClaw/srv/rust`
 - Mac 有 cargo + python3，可跑 cargo build/test --release + pytest；不需 100% 依賴 ssh trade-core
+
+---
+
+## 2026-05-10 W7-3 Emergency 1-Tick Defense — APPROVE
+
+- Commit `d8697c41`, ma_crossover/strategy_impl.rs +48 / tests.rs +152
+- PA Option B 補丁式（rejection_coding.rs byte-identical reason 字串契約）
+- 4 unit test 對齊 PA spec：already SHORT / already LONG / contract drift fallback / non-duplicate full rollback
+- regression 2639 PASS / 0 fail；ma_crossover 58 PASS
+- 重點 audit confirm：(1) early-return 僅跳 prev_position rollback **保留 cooldown** 是有意 PA §8 設計；(2) reason 字串 = pub(super) enum 唯一 producer，contains() 容忍前綴；(3) TickContext signature 0 動 (PA dispatch 邊界守住)；(4) prev_position 每 tick line 180 必 overwrite，無 stale leak
+- LOW finding：fallback (contract drift) cooldown clear 沒獨立 unit test，留 W-AUDIT-8a 治本時補
+- 反模式 catch：sibling bb_breakout / bb_reversion 同設計風險已標 PA §7，補丁邊界 ma_crossover only 治本留 W-AUDIT-8a Option A
