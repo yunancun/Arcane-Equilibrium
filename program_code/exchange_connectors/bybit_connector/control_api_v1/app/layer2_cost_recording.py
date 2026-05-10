@@ -95,6 +95,12 @@ def record_claude_cost(
          Sub-task 3-3 RFC §6 + §8.2 線程安全 contract。
     """
     with tracker._lock:
+        if str(model_tier or "").startswith("local:"):
+            cost = 0.0
+            session.input_tokens += input_tokens
+            session.output_tokens += output_tokens
+            _add_daily_claude_cost(tracker, cost)
+            return cost
         if model_tier not in tracker._pricing.models:
             logger.warning("Unknown model tier: %s, using sonnet pricing", model_tier)
             model_tier = "sonnet"

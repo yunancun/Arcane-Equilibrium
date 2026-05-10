@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_DEEPSEEK = "deepseek"
 PROVIDER_OPENAI = "openai"
+PROVIDER_LOCAL_LLM = "local_llm"
 
 # Provider 白名單（L2 推理可用，與 provider_keys_store 同步但更窄
 # — perplexity 是搜索專用，google 客戶端尚未實裝在這層）。
@@ -45,50 +46,91 @@ L2_PROVIDERS: frozenset[str] = frozenset({
     PROVIDER_ANTHROPIC,
     PROVIDER_DEEPSEEK,
     PROVIDER_OPENAI,
+    PROVIDER_LOCAL_LLM,
 })
 
 # tier_key → 各 provider 的實際 model_id。
 # tier_key 是 cost_tracker 記帳用的鍵（PricingTable.models 字典 key）。
-# 改 tier_key 必同步改 layer2_types.PricingTable 與 GUI 下拉框。
+# 改 tier_key 必同步改 layer2_types.PricingTable 與 provider_model_catalog。
 TIER_HAIKU = "haiku"
 TIER_SONNET = "sonnet"
 TIER_OPUS = "opus"
+TIER_DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
+TIER_DEEPSEEK_V4_PRO = "deepseek-v4-pro"
 TIER_DEEPSEEK_CHAT = "deepseek-chat"
 TIER_DEEPSEEK_REASONER = "deepseek-reasoner"
+TIER_GPT_5_4_MINI = "gpt-5.4-mini"
+TIER_GPT_5_4 = "gpt-5.4"
+TIER_GPT_5_5 = "gpt-5.5"
 TIER_GPT_4O_MINI = "gpt-4o-mini"
 TIER_GPT_4O = "gpt-4o"
 TIER_O1 = "o1"
+LOCAL_TIER_PREFIX = "local:"
 
 # 每個 provider 提供的 tier key 列表（GUI 下拉 + tier fallback 用）。
 PROVIDER_TIERS: dict[str, list[str]] = {
     PROVIDER_ANTHROPIC: [TIER_HAIKU, TIER_SONNET, TIER_OPUS],
-    PROVIDER_DEEPSEEK: [TIER_DEEPSEEK_CHAT, TIER_DEEPSEEK_REASONER],
-    PROVIDER_OPENAI: [TIER_GPT_4O_MINI, TIER_GPT_4O, TIER_O1],
+    PROVIDER_DEEPSEEK: [
+        TIER_DEEPSEEK_V4_FLASH,
+        TIER_DEEPSEEK_V4_PRO,
+        # Legacy compatibility aliases; DeepSeek discontinues these on 2026-07-24.
+        TIER_DEEPSEEK_CHAT,
+        TIER_DEEPSEEK_REASONER,
+    ],
+    PROVIDER_OPENAI: [
+        TIER_GPT_5_4_MINI,
+        TIER_GPT_5_4,
+        TIER_GPT_5_5,
+        # Legacy selectable tiers retained for existing configs.
+        TIER_GPT_4O_MINI,
+        TIER_GPT_4O,
+        TIER_O1,
+    ],
+    PROVIDER_LOCAL_LLM: [],
 }
 
 # tier 在「成本/能力」軸上的對位（用於跨 provider 自動 mapping）。
-# 例如 default_model=sonnet + fallback to deepseek → 用 deepseek-chat（同檔次）。
+# 例如 default_model=sonnet + fallback to deepseek → 用 deepseek-v4-flash（同檔次）。
 TIER_RANK: dict[str, int] = {
-    TIER_HAIKU: 1, TIER_GPT_4O_MINI: 1, TIER_DEEPSEEK_CHAT: 2,
+    TIER_HAIKU: 1, TIER_GPT_4O_MINI: 1, TIER_GPT_5_4_MINI: 1,
+    TIER_DEEPSEEK_V4_FLASH: 2, TIER_DEEPSEEK_CHAT: 2,
     TIER_SONNET: 3, TIER_GPT_4O: 3,
-    TIER_DEEPSEEK_REASONER: 4, TIER_OPUS: 5, TIER_O1: 5,
+    TIER_DEEPSEEK_V4_PRO: 4, TIER_DEEPSEEK_REASONER: 4,
+    TIER_GPT_5_4: 4,
+    TIER_OPUS: 5, TIER_O1: 5, TIER_GPT_5_5: 5,
 }
 
 # Tier 哪些不支援 function-calling / tool use。
-# DeepSeek-reasoner (R1) 當前 API 不支援 tools；agent loop 命中時呼叫端必降級。
-TIERS_WITHOUT_TOOLS: frozenset[str] = frozenset({TIER_DEEPSEEK_REASONER})
+TIERS_WITHOUT_TOOLS: frozenset[str] = frozenset()
+
+
+def make_local_tier(model_name: str) -> str:
+    """Return the config/pricing-safe tier key for a local model."""
+    model_name = (model_name or "").strip()
+    return f"{LOCAL_TIER_PREFIX}{model_name}"
+
+
+def is_local_tier(tier: str) -> bool:
+    return str(tier or "").startswith(LOCAL_TIER_PREFIX)
+
+
+def local_model_name(tier: str) -> str:
+    tier = str(tier or "")
+    return tier[len(LOCAL_TIER_PREFIX):] if tier.startswith(LOCAL_TIER_PREFIX) else tier
 
 
 def map_tier_to_provider(tier: str, provider: str) -> str:
     """
     把 cost_tracker 用的 tier_key 映射到指定 provider 的最接近 tier。
-    例：tier="sonnet" + provider="deepseek" → "deepseek-chat"
+    例：tier="sonnet" + provider="deepseek" → "deepseek-v4-flash"
     例：tier="opus"   + provider="openai"   → "o1"
     當 provider 內的 tier 列表為空 → 回原 tier（不改變）。
     """
     if provider not in PROVIDER_TIERS:
         return tier
     available = PROVIDER_TIERS[provider]
+    if provider == PROVIDER_LOCAL_LLM:
+        return tier if is_local_tier(tier) else make_local_tier(tier)
     if tier in available:
         return tier
     target_rank = TIER_RANK.get(tier, 3)
@@ -522,6 +564,89 @@ class OpenAICompatProvider(L2ProviderBase):
         messages.append({"role": "user", "content": content})
 
 
+class LocalLLMProvider(L2ProviderBase):
+    """Local Ollama / LM Studio provider. It is zero-cost and does not expose
+    tool-calling through the current local client abstraction."""
+
+    name = PROVIDER_LOCAL_LLM
+
+    def _client(self) -> Any:
+        from .local_llm_factory import get_local_llm_client
+        return get_local_llm_client()
+
+    def is_available(self) -> bool:
+        try:
+            return bool(self._client().is_available())
+        except Exception as exc:
+            logger.warning("LocalLLMProvider availability failed: %s", exc)
+            return False
+
+    def supports_tools(self, tier: str) -> bool:
+        return False
+
+    def complete(
+        self,
+        *,
+        tier: str,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]] = None,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+    ) -> L2Response:
+        client = self._client()
+        if not client.is_available():
+            raise RuntimeError("LocalLLMProvider unavailable")
+
+        model = local_model_name(tier) or getattr(client, "model", "")
+        prompt_parts: list[str] = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                prompt_parts.append(f"{role}: {content}")
+            elif isinstance(content, list):
+                blocks = []
+                for block in content:
+                    if isinstance(block, dict):
+                        blocks.append(str(block.get("text") or block.get("content") or block))
+                    else:
+                        blocks.append(str(block))
+                prompt_parts.append(f"{role}: " + "\n".join(blocks))
+            else:
+                prompt_parts.append(f"{role}: {content}")
+
+        resp = client.generate(
+            "\n\n".join(prompt_parts),
+            system=system_prompt,
+            model=model or None,
+            max_tokens=max_tokens,
+            timeout=int(timeout),
+            think=False,
+        )
+        if not getattr(resp, "success", False):
+            raise RuntimeError(getattr(resp, "error", "") or "local LLM generation failed")
+        return L2Response(
+            text=getattr(resp, "text", "") or "",
+            tool_uses=[],
+            stop_reason="end_turn",
+            input_tokens=0,
+            output_tokens=int(getattr(resp, "eval_count", 0) or 0),
+            raw_response=resp,
+        )
+
+    def append_assistant_message(self, messages: list[dict[str, Any]], response: L2Response) -> None:
+        messages.append({"role": "assistant", "content": response.text})
+
+    def append_tool_results(
+        self,
+        messages: list[dict[str, Any]],
+        tool_results: list[dict[str, Any]],
+    ) -> None:
+        content = "\n\n".join(str(tr.get("output_str", "")) for tr in tool_results)
+        messages.append({"role": "user", "content": content})
+
+
 def _block_type(block: Any) -> str:
     """支援 dict block 與 SDK obj（getattr）。"""
     if isinstance(block, dict):
@@ -550,10 +675,12 @@ def _build_provider(name: str) -> L2ProviderBase:
             env_var="DEEPSEEK_API_KEY",
             base_url="https://api.deepseek.com",
             tier_to_model={
+                TIER_DEEPSEEK_V4_FLASH: "deepseek-v4-flash",
+                TIER_DEEPSEEK_V4_PRO: "deepseek-v4-pro",
                 TIER_DEEPSEEK_CHAT: "deepseek-chat",
                 TIER_DEEPSEEK_REASONER: "deepseek-reasoner",
             },
-            default_tier=TIER_DEEPSEEK_CHAT,
+            default_tier=TIER_DEEPSEEK_V4_FLASH,
         )
     if name == PROVIDER_OPENAI:
         return OpenAICompatProvider(
@@ -561,12 +688,17 @@ def _build_provider(name: str) -> L2ProviderBase:
             env_var="OPENAI_API_KEY",
             base_url=None,  # SDK 預設
             tier_to_model={
+                TIER_GPT_5_4_MINI: "gpt-5.4-mini",
+                TIER_GPT_5_4: "gpt-5.4",
+                TIER_GPT_5_5: "gpt-5.5",
                 TIER_GPT_4O_MINI: "gpt-4o-mini",
                 TIER_GPT_4O: "gpt-4o",
                 TIER_O1: "o1",
             },
-            default_tier=TIER_GPT_4O_MINI,
+            default_tier=TIER_GPT_5_4_MINI,
         )
+    if name == PROVIDER_LOCAL_LLM:
+        return LocalLLMProvider()
     raise ValueError(f"unknown L2 provider: {name}")
 
 
@@ -611,12 +743,15 @@ def list_implemented_providers() -> list[str]:
 
 
 __all__ = [
-    "PROVIDER_ANTHROPIC", "PROVIDER_DEEPSEEK", "PROVIDER_OPENAI", "L2_PROVIDERS",
+    "PROVIDER_ANTHROPIC", "PROVIDER_DEEPSEEK", "PROVIDER_OPENAI", "PROVIDER_LOCAL_LLM", "L2_PROVIDERS",
     "PROVIDER_TIERS", "TIER_RANK", "TIERS_WITHOUT_TOOLS", "map_tier_to_provider",
+    "LOCAL_TIER_PREFIX", "make_local_tier", "is_local_tier", "local_model_name",
     "TIER_HAIKU", "TIER_SONNET", "TIER_OPUS",
+    "TIER_DEEPSEEK_V4_FLASH", "TIER_DEEPSEEK_V4_PRO",
     "TIER_DEEPSEEK_CHAT", "TIER_DEEPSEEK_REASONER",
+    "TIER_GPT_5_4_MINI", "TIER_GPT_5_4", "TIER_GPT_5_5",
     "TIER_GPT_4O_MINI", "TIER_GPT_4O", "TIER_O1",
     "L2Response", "ToolUse",
-    "L2ProviderBase", "AnthropicProvider", "OpenAICompatProvider",
+    "L2ProviderBase", "AnthropicProvider", "OpenAICompatProvider", "LocalLLMProvider",
     "get_provider", "reset_provider", "reset_all_providers", "list_implemented_providers",
 ]
