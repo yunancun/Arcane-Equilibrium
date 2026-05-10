@@ -32,9 +32,9 @@ use super::connection::handle_connection;
 use super::engine_routing::{EngineCommandChannels, LiveCmdSenderSlot};
 use super::protocol::IpcError;
 use super::slots::{
-    AuditPoolSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, EdgeReloadSenderSlot,
-    FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot, StrategistCountersSlot,
-    TeacherLoopSlot,
+    AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot,
+    EdgeReloadSenderSlot, FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot,
+    StrategistCountersSlot, TeacherLoopSlot,
 };
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
@@ -128,6 +128,12 @@ pub struct IpcServer {
     /// 與 funding_curve_panel 對稱；bb_breakout 等 declared OiDeltaPanel tag 策略
     /// fail-closed 寫 `evaluation_outcome='oi_panel_unavailable'` 當 None。
     oi_delta_panel: OIDeltaPanelSlot,
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): late-injected slot for BtcLeadLagPanel。
+    /// BtcLeadLagProducer run loop 每 60s tick 寫此 slot；step_4_5_dispatch 在
+    /// paper-only fence 通過後讀取。Layer 2 fence 由 dispatch 端 engine_mode gate
+    /// 主防線，slot 本身不知 fence；trait 端 surface.btc_lead_lag = None 即等
+    /// 同於 producer 尚未 emit / fence 拒絕讀取，consumer skip 不需查 engine_mode。
+    btc_lead_lag_panel: BtcLeadLagPanelSlot,
 }
 
 impl IpcServer {
@@ -161,6 +167,10 @@ impl IpcServer {
             // PanelAggregator spawn 時透過 set_*_panel_slot 注入既有 Arc。
             funding_curve_panel: Arc::new(RwLock::new(None)),
             oi_delta_panel: Arc::new(RwLock::new(None)),
+            // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot 同 W1 預設
+            // None；BtcLeadLagProducer spawn 時透過 set_btc_lead_lag_panel_slot
+            // 注入既有 Arc。
+            btc_lead_lag_panel: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -199,6 +209,23 @@ impl IpcServer {
     /// W1 sub-task 3 (E1-γ, 2026-05-11): 對稱 setter。
     pub fn set_oi_delta_panel_slot(&mut self, slot: OIDeltaPanelSlot) {
         self.oi_delta_panel = slot;
+    }
+
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): 取 btc_lead_lag panel slot Arc clone 給
+    /// BtcLeadLagProducer 在 IPC server detach 後注入。對齊 funding_curve_panel_slot
+    /// pattern。IPC handler（後續 W-AUDIT-8c phase）讀此 slot 暴露 panel snapshot
+    /// 給 Python 端 GUI / monitoring；目前只有 BtcLeadLagProducer 寫入 + step_4_5_dispatch
+    /// 讀（主路徑）。
+    pub fn btc_lead_lag_panel_slot(&self) -> BtcLeadLagPanelSlot {
+        Arc::clone(&self.btc_lead_lag_panel)
+    }
+
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): 用既有 Arc 替換 btc_lead_lag panel slot。
+    /// main.rs 用 `panel_aggregator::create_btc_lead_lag_slot()` 預先建立 slot，
+    /// 此 setter 把同一 Arc clone 注入 IpcServer，確保 BtcLeadLagProducer 寫 slot 後
+    /// IPC handler / GUI / step_4_5_dispatch 能讀到同一 panel snapshot（共享 Arc）。
+    pub fn set_btc_lead_lag_panel_slot(&mut self, slot: BtcLeadLagPanelSlot) {
+        self.btc_lead_lag_panel = slot;
     }
 
     /// F6 PH5-WIRE-1 RELOAD (2026-04-26): get a clone of the edge reload

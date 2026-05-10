@@ -73,7 +73,7 @@ pub use engine_routing::{EngineCommandChannels, LiveCmdSenderSlot, PerEngineRisk
 pub use protocol::{IpcError, JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 pub use server::IpcServer;
 pub use slots::{
-    AuditPoolSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, EdgeReloadSenderSlot,
+    AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, EdgeReloadSenderSlot,
     FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot, StrategistCountersSlot,
     TeacherLoopHandles, TeacherLoopSlot,
 };

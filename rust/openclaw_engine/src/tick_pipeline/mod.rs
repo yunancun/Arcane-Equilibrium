@@ -665,6 +665,23 @@ pub struct OrderDispatchRequest {
     pub reference_price: Option<f64>,
     pub reference_ts_ms: Option<u64>,
     pub reference_source: Option<String>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 計算的 Spine
+    /// order_plan_id，由 step_4_5_dispatch 在 lineage emit 後注入；下游
+    /// dispatch.rs 構造 PendingOrder 時鏡射至 `spine_order_plan_id`，再由
+    /// loop_exchange.rs fully_filled 區塊讀取以呼叫
+    /// emit_fill_completion_lineage。None = 該筆未過 lineage gate 或舊路徑漏注入。
+    pub spine_order_plan_id: Option<String>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 計算的 Spine
+    /// decision_id；用途同 `spine_order_plan_id`，下游 fill_completion 必填。
+    pub spine_decision_id: Option<String>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 對應的 Spine
+    /// verdict_id；當前 fill_completion 未使用，保留以供未來 partial-fill
+    /// metadata + audit cross-ref。None 為預設。
+    pub spine_verdict_id: Option<String>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 寫入的 stub
+    /// ExecutionReport id；供 fill_completion 在 quality_metrics 寫
+    /// stub_report_id cross-ref。
+    pub spine_stub_report_id: Option<String>,
 }
 
 /// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.
@@ -1044,6 +1061,15 @@ pub struct TickPipeline {
     /// DYNAMIC-RISK-1：引擎私有的 Sharpe 調整器，平倉後上調/下調
     /// `IntentProcessor::p1_risk_pct`。預設停用，`[risk.dynamic_sizing]` 啟用。
     pub dynamic_risk_sizer: crate::dynamic_risk_sizer::DynamicRiskSizer,
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): late-injected slot for BtcLeadLagPanel
+    /// IPC handle。step_4_5_dispatch 在 paper-only fence 通過後 try_read 取
+    /// `Option<BtcLeadLagPanel>` 賽進 surface.btc_lead_lag。`None` = slot 未注入
+    /// （test / W2 sub-task 4 deploy 前），等同於 BtcLeadLagProducer 尚未 emit
+    /// → step_4_5_dispatch 寫 surface.btc_lead_lag = None（與 paper-only fence
+    /// 拒絕讀取同等語意）。Layer 2 fence 由 dispatch 端 engine_mode gate 主防線。
+    /// `set_btc_lead_lag_panel_slot()` setter 由 main.rs 在 BtcLeadLagProducer
+    /// spawn 同時注入既有 Arc。
+    pub(crate) btc_lead_lag_panel_slot: Option<crate::ipc_server::BtcLeadLagPanelSlot>,
 }
 
 // ---------------------------------------------------------------------------

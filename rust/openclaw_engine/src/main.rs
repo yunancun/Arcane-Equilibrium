@@ -63,6 +63,20 @@ fn panel_aggregator_cohort() -> Vec<String> {
     .collect()
 }
 
+/// W2 sub-task 4 (E1-δ, 2026-05-11) — BtcLeadLag alt cohort hardcoded snapshot。
+///
+/// Per W2 spec v1.2 §2.2（7-symbol alt cohort，不含 BTCUSDT 因為 BTCUSDT 是 lead
+/// source 獨立緩衝區）；BUSDT 排除（per ADR-0018 funding_arb 棄路徑 demote）。
+/// 7-sym mid-large cap：ETH/SOL/XRP/DOGE/ADA/AVAX/DOT。
+fn btc_lead_lag_alt_cohort() -> Vec<String> {
+    vec![
+        "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "DOTUSDT",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
 // ----------------------------------------------------------------------
 // Crash-only pipeline wrapper / crash-only 管線包裝器
 // ----------------------------------------------------------------------
@@ -500,6 +514,13 @@ async fn async_main(
         openclaw_engine::panel_aggregator::create_panel_slots();
     ipc_server.set_funding_curve_panel_slot(Arc::clone(&funding_curve_panel_slot));
     ipc_server.set_oi_delta_panel_slot(Arc::clone(&oi_delta_panel_slot));
+
+    // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot 預建 + 注入 IpcServer。
+    // 對齊 W1 panel slot pair pattern：slot 在 IPC detach **之前**注入；
+    // BtcLeadLagProducer spawn 在 db_pool ready 之後（line ~944），會 clone 同 Arc。
+    // step_4_5_dispatch（後續 sub-task 完成 wire-up）讀 slot 拿 BtcLeadLagPanel。
+    let btc_lead_lag_panel_slot = openclaw_engine::panel_aggregator::create_btc_lead_lag_slot();
+    ipc_server.set_btc_lead_lag_panel_slot(Arc::clone(&btc_lead_lag_panel_slot));
 
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
@@ -941,6 +962,36 @@ async fn async_main(
         panel_aggregator.run(panel_event_rx).await;
     });
 
+    // W2 sub-task 4 (E1-δ, 2026-05-11): 啟動 BtcLeadLagProducer run_loop。
+    // 與 W1 PanelAggregator 平行 spawn（兩者完全獨立）：
+    //   - W1 PanelAggregator：subscribe panel_event_rx (push pattern)
+    //     funding/oi 從 WS Ticker variant 取
+    //   - W2 BtcLeadLagProducer：60s timer (pull pattern)
+    //     從 PG market.klines 拉 BTCUSDT + 7-sym alt cohort 1m close/volume
+    // db_pool 必為 ready 狀態（line ~566 已 Arc::new(DbPool::connect)）；
+    // pool 不可用 → producer 內 fail-soft skip tick（不 panic，不阻 slot writer）。
+    // alt cohort 7-sym hardcoded snapshot（per W2 spec v1.2 §2.2）；BUSDT 排除。
+    let btc_lead_lag_db_pool = Arc::clone(&db_pool);
+    let btc_lead_lag_cancel = cancel.clone();
+    let btc_lead_lag_alt_cohort_vec = btc_lead_lag_alt_cohort();
+    let btc_lead_lag_slot_for_producer = Arc::clone(&btc_lead_lag_panel_slot);
+    let btc_lead_lag_producer =
+        openclaw_engine::panel_aggregator::BtcLeadLagProducer::new(btc_lead_lag_alt_cohort_vec.clone());
+    info!(
+        alt_cohort_size = btc_lead_lag_alt_cohort_vec.len(),
+        tick_secs = 60,
+        "BtcLeadLagProducer spawning (W2 W-AUDIT-8c candidate fast-track lead-lag producer)"
+    );
+    let _btc_lead_lag_handle = tokio::spawn(async move {
+        btc_lead_lag_producer
+            .run_loop(
+                btc_lead_lag_db_pool,
+                btc_lead_lag_slot_for_producer,
+                btc_lead_lag_cancel,
+            )
+            .await;
+    });
+
     // ------------------------------------------------------------------
     // 3E-ARCH pipeline spawns extracted to `main_pipelines.rs` (G1-03 Wave 1).
     //   * `spawn_paper_pipeline` handles opt-in paper (OPENCLAW_ENABLE_PAPER=1)
@@ -951,6 +1002,11 @@ async fn async_main(
     // 3E-ARCH 管線啟動已抽出至 `main_pipelines.rs`（G1-03 Wave 1）：三管線個別
     // spawn fn 封裝 EventConsumerDeps 構建與 crash-only 包裝。
     // ------------------------------------------------------------------
+    // W2 sub-task 4 (E1-δ, 2026-05-11): wrap btc_lead_lag_panel_slot in Option
+    // 給 PipelineSpawnContext。三 pipeline 透過 EventConsumerDeps 拿到 Arc clone，
+    // 在 bootstrap.rs 注入 TickPipeline.btc_lead_lag_panel_slot。
+    let btc_lead_lag_slot_for_pipelines = Some(Arc::clone(&btc_lead_lag_panel_slot));
+
     let spawn_ctx = main_pipelines::PipelineSpawnContext {
         config: &config,
         cancel: &cancel,
@@ -970,6 +1026,8 @@ async fn async_main(
         global_exposure_usdt: &global_exposure_usdt,
         has_live,
         has_demo,
+        // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot 注入三 pipeline
+        btc_lead_lag_panel_slot: &btc_lead_lag_slot_for_pipelines,
     };
     let writers = main_pipelines::WriterSenders {
         market_tx: market_tx.clone(),
@@ -1089,6 +1147,9 @@ async fn async_main(
             agent_spine_tx: agent_spine_tx.clone(),
             agent_spine_mode,
             lease_transition_tx: lease_transition_tx.clone(),
+            // W2 sub-task 4 (E1-δ, 2026-05-11): live respawn 拿同 BtcLeadLagPanelSlot
+            // Arc clone（與 paper / demo 三引擎共享 producer 寫入端）
+            btc_lead_lag_panel_slot: Some(Arc::clone(&btc_lead_lag_panel_slot)),
         });
 
     // Boot Some: direct spawn using pre-built channels. Reuses the `spawn_ctx`
