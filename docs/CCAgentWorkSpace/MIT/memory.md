@@ -330,3 +330,54 @@ _Last updated: 2026-04-24_
 - Q4 MIT 修正 PA 隱含「2 週純累積」假設（fill rate 比 baseline 快、cron 是 daily 非 weekly）
 
 **核心**：W6 真正是 ML pipeline architecture 重 design 不是 schema add column 工作。dispatch v3.2 W6-5/W6-3 嚴重低估範圍；硬邊界觸碰 0（all read-only audit + spec change）
+
+
+## 2026-05-10 W6-3a close_tag distribution audit (D+1 W6-3b PA enum baseline)
+
+**Trigger**: W6 RFC §3 揭露 close_tag >100 unique values；給 D+1 PA W6-3b enum spec baseline 避免重抽 PG data。
+
+**Report**: `workspace/reports/2026-05-10--w6_3a_close_tag_distribution_audit.md` (327 行)
+
+**核心 raw data** (PG live 2026-05-10 14:53 UTC):
+1. `learning.decision_features` labeled=9757 (rejected 7528 / closed 2229)；unlabeled=9.51M (pre-W-AUDIT-4b M3 era)
+2. `trading.risk_verdicts` 全期 18.5M row；post-V082 (3.5h): Approved=48 / Rejected=7587
+3. close_tag 68 unique row → 15 category (strategy_close_grid 689 / fill_strategy_label 615 / risk_close_phys_lock_gate4_giveback 511 + 雙前綴 16 row / strategy_close_ma 315 等)
+4. risk_verdicts.reason 12 reason_head 全期；post-V082 收斂到 3 (cost_gate_js_demo_negative_edge 5239 / duplicate_position 2333 / cost_gate_other 15)
+
+**Refined enum spec**:
+- **reject_reason_code 12 enum** (PA preliminary 8 → MIT 12)：cost_gate 拆 3 (js_demo_negative_edge / atr_unavailable / other)；補進 5 歷史 reason (direction_conflict 2.77M / position_count 732k / scanner_market_gate 401k / scanner_opportunity_canary 138k / drawdown_breach 91k / symbol_blocklist 35k / risk_gate_other) + catch-all
+- **close_reason_code 14 enum** (PA preliminary 10+ → MIT 14)：phys_lock 拆 2 (gate4_giveback 511 / gate4_stale 20)；新增 strategy_close_legacy_bare_name (615 row W-AUDIT-4b M2 早期約定 bare strategy name) + catch-all
+- 全 26 enum + 2 catch-all (other_reject + other_close)
+
+**Producer bug 揭露**:
+- 16 row `risk_close:risk_close:phys_lock_gate4_giveback` 雙前綴 → Rust producer string concat 漏 prefix-aware；P1 ticket 修
+- 615 fill 用 bare strategy name (grid_trading/ma_crossover/...) 不是 bug 是 W-AUDIT-4b M2 早期約定；backfill 收 strategy_close_legacy_bare_name 單一 enum
+
+**5 ambiguous mapping 待 D+1 PA 拍板**:
+- A1: legacy bare name 615 row 是否拆 5 sub-enum (per-strategy)？MIT 推薦不拆
+- A2: 雙前綴 16 row 是否在 V086 backfill SQL 加 normalize regex (s/^risk_close:risk_close:/risk_close:/)
+- A3: cost_gate_atr_unavailable 0 row post-V082 — 保留 enum slot? MIT 推薦保留 (SEC-11 fail-closed signal)
+- A4: funding_arb 29 sub-reason 全合 1 enum? MIT 推薦合 (ADR-0018 退役無 future 增量)
+- A5: strategy_close_regime_shift 1 row enum 值得保留? MIT 推薦保留 (R-3 hypothesis pipeline 未來可能爆量)
+
+**Backfill cron 設計**:
+- 9757 labeled row UPDATE + JOIN 18.5M risk_verdicts (indexed context_id) → 估 30-90 sec single-pass
+- **不需 cron**：one-shot UPDATE 直接寫 V086 migration body
+- 全 mapping deterministic (regex / exact match)；0 manual review
+- producer dual-write 從 V086 land 之刻 enable
+
+**V086 schema spec preview** (D+1 W6-3c E1 IMPL 寫實 SQL):
+- ALTER TABLE ADD COLUMN reject_reason_code TEXT + close_reason_code TEXT (additive, NULL allowed pre-backfill)
+- one-shot UPDATE backfill 9757 row
+- ADD CONSTRAINT chk_*_enum NOT VALID (forward-only, 不破歷史 9.5M unlabeled)
+- D+2 14:30 UTC: ALTER VALIDATE CONSTRAINT (lock <30 sec on 9757+ row)
+- Guard A/B/C 完整 (column existence / type check / hot-path index 比對)
+- 24h dual-write drift healthcheck check_reject_reason_code_dual_write_drift() 必 PASS
+
+**對 dispatch v3.3 §3.0 W6-3b 影響**：
+- enum 數量 +8 (reject 8→12, close 10+→14)
+- ambiguous mapping 5 項列出 (dispatch 未列)
+- backfill 機制改 "cron" → "one-shot UPDATE in V086" (不需 ongoing cron)
+
+**邊界遵守**: read-only audit；不寫 V086 SQL (留 D+1 W6-3c E1 IMPL)；不修 dispatch v3.3 (出 spec 給 PA 拍板)；不寫業務 code
+
