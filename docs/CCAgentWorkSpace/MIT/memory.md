@@ -302,3 +302,31 @@ _Last updated: 2026-04-24_
 
 **輸出邊界**: 純 data dive baseline; 不寫 RFC 結論; 不建議 governance 閾值數值; 12 個 question (PA/QC/MIT 各 4) 留給 W6 RFC
 
+
+## 2026-05-10 W6 RFC 預跑 MIT 視角 4 questions 自答
+
+**Trigger**: D+1 W6 RFC 三角入場前 MIT 預備立場（PA #2 已答 PA-view，QC 留三角）
+
+**Report**: `workspace/reports/2026-05-10--w6_rfc_mit_questions_self_answer.md` (174 行)
+
+**4 立場 + 對 dispatch v3.2 影響**:
+1. **Q1 imbalance 算法** — **hold A 都不適用**：scorer_trainer.py:94-95 是 `objective='regression'/metric='rmse'`，`is_unbalance/scale_pos_weight` 是 LightGBM classification 專用，對 regression silently ignore。MIT Q1 隱含「LightGBM 把 reject 當 negative class」是錯的；V084 sample_weight 1/170 走 `lgb.Dataset(weight=...)` 是「L2 loss 加權」非 class balancing。dispatch W6-5 設計需重整
+2. **Q2 V086 prerequisite** — **hold B（反 PA #2 Q3 hold A）**：當前 regression scorer 預測 net PnL，reject row label_net_edge_bps=0 是「中性樣本」，reject_reason 對 task 冗餘；V086 是 future-proof（multi-task 升級才需），不阻塞當前 retrain；建議 acceptance 4-gate 拆 Track A (regression immediate) / Track B (multi-class future)
+3. **Q3 multi-class label split** — **hold A 但 3 類遠不夠**：PG 實測 close_tag distribution >100 unique values（risk_close:phys_lock_gate4_giveback 495 / strategy_close:grid_close_short 399 / cost_edge ratio 各種 sub-reason 字串拍平）；正確 schema = 兩 column（reject_reason_code 8 enum + close_reason_code 10+ enum）；W6-3 從 1d extend 3d
+4. **Q4 sample rate vs cron** — **depends**：fills 24h=112 / 7d=652 / 全期 5-strat 615 fill；fill rate 93/day actual 比 baseline 70 高；cron 是 daily 03:17 不是 weekly（per project_2026_05_09_ml_training_cron_weekly memory 已修正）；TOTAL pool 已過 1000 baseline；per-strategy MIN_SAMPLES=200 gate 4/5 策略仍不過（grid 374 過，ma 167 / bb_breakout 27 / bb_reversion 4 / funding_arb 43 不過）
+
+**7 dispatch v3.2 update 建議**：
+1. W6-1 RFC 加 trainer task type confirm document
+2. W6-3 重 scope 1d→3d (close_tag audit + enum spec + V086 兩 column + trainer pipeline read)
+3. W6-5 重設計 (不直接套 is_unbalance；先確認 task type；regression case 改 sample_weight ratio sensitivity)
+4. W6-7 補 [62] `check_per_strategy_sample_gate()` 同窗
+5. §6 acceptance ML retrain 4-gate 拆 Track A / Track B
+6. §6 acceptance 補 fills/day rate snapshot 健檢
+7. W6-2 acceptance 補 24h dual-write drift healthcheck
+
+**MIT vs PA #2 立場差**：
+- Q3 strong agree（要 split）但 MIT 點出範圍 6× larger（18+ class vs PA 3 class）
+- Q2 MIT push back（不必等 V086；當前 regression 不需要 reason_code）
+- Q4 MIT 修正 PA 隱含「2 週純累積」假設（fill rate 比 baseline 快、cron 是 daily 非 weekly）
+
+**核心**：W6 真正是 ML pipeline architecture 重 design 不是 schema add column 工作。dispatch v3.2 W6-5/W6-3 嚴重低估範圍；硬邊界觸碰 0（all read-only audit + spec change）
