@@ -14,6 +14,8 @@ pub mod agent_spine_writer;
 pub mod aggregators;
 pub mod batch_insert;
 pub mod black_swan_detector;
+// Sprint N+1 W2 sub-task 1：V088 panel.btc_lead_lag_panel writer。
+pub mod btc_lead_lag_writer;
 pub mod context_writer;
 pub mod decision_feature_evaluation_writer;
 pub mod decision_feature_writer;

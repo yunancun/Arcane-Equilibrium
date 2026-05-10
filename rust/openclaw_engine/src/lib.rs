@@ -46,6 +46,9 @@ pub mod news;
 pub mod orchestrator;
 pub mod order_manager;
 pub mod paper_state;
+// Sprint N+1 W1 + W2：cross-asset / cross-strategy panel aggregator namespace
+// （funding_curve / oi_delta / btc_lead_lag panel collector + producer）。
+pub mod panel_aggregator;
 pub mod persistence;
 pub mod pipeline_types;
 pub mod platform_client;
