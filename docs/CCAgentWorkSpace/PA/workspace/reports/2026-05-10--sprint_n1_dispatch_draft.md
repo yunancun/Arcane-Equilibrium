@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v3.1 — operator 2026-05-10 拍板 A4-C fast-track（N+1 spec + paper IMPL 並行）；W6 RFC baseline 預跑後**結論 180° 反轉**：governance **沒有** over-fit。pending HIGH-5 forward watch metric 2/3 sign-off (~21:30 UTC)
+**Status**: DRAFT v3.2 — 3 PA 預跑 reports 整合（trait coord / W6 RFC PA-view / P1-MA-CROSSOVER audit）；P1-MA-CROSSOVER **升 P0** 為 W7（systemic strategy↔position state architectural gap）；W7 + W2 PA D+0 trait skeleton 合併 commit；W6 加 W6-7 + 加 P1-BB-REVERSION-FIRE-AUDIT + ML retrain 4-gate
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -42,6 +42,50 @@ MIT 預跑 6361 條 rejected_governance 樣本後，**§0.2 v2 推論「governan
 - ma_crossover INXUSDT 2331 duplicate_position 暗示 **entry signal 跟 position state 沒對齊**（潛在 bug，策略反復想加碼）→ 新 P1 ticket
 - decision_features 不寫 reject reason → ML 訓練只學「在這 market state 下會被拒」不學「為何拒」→ V086 加 reject_reason_code metadata（per F1）
 
+### §0.4 【v3.2 整合】3 PA 預跑 reports 重大發現（2026-05-10 14:00 UTC）
+
+operator 2026-05-10 拍板 A4-C fast-track 後，PA 並行 3 預跑 sub-agent 揭露：
+
+#### §0.4.A AlphaSurface trait coord — 好消息
+- W-AUDIT-8a Phase A 已 land 9/10 type，**W1 funding_curve / oi_delta_panel struct 已完整 typedef，0 新增需求**
+- W2 BtcAltLeadLag 唯一新加 ~40 LOC（PA D+0 single commit）
+- 5 個 E1 sub-agent 完全並行 0 file 重疊（anchor comment 隔離 + V### 編號 V085/V087/V088 預先 reserved）
+- W2 paper-only fence 三層深度防禦（step_4_5_dispatch.rs engine_mode gate 主防線 + Python writer fence + Strategy if let Some guard）
+- 16 原則 / DOC-08 §12 9 不變量 / 硬邊界 5 項全 0 觸碰
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`
+
+#### §0.4.B 【最重大】P1-MA-CROSSOVER 升 P0 — systemic strategy↔position state gap
+
+MIT W6 baseline 揭露 ma_crossover INXUSDT 2331 reject 不是 governance 問題，PA audit confirm **HIGH confidence** 是 architecture-level bug：
+
+| 證據 | 細節 |
+|---|---|
+| **Cross-strategy desync** | ma_crossover 用 `self.positions: HashMap` 追蹤**自己策略**倉位，**不查 paper_state**；router gate 1.5 用 `paper_state.get_position(symbol)` 做 **symbol-level（不分策略）** dedup |
+| **Hot loop pattern** | grid_trading 在 INXUSDT 11:29 開 SHORT 1810 後，ma_crossover 看不見，每 tick 持續發 entry intent 撞 gate 1.5；`on_rejection` rollback `strategy.positions` 到 None 形成 infinite loop |
+| **Burst 證據** | **11:34:00 一分鐘內 reject 2319 次（每秒 30-50 次）** — 遠超 KAMA cross 物理頻率；INXUSDT 1m vol 正常無 abnormal cross |
+| **Pollution 鏈** | W-AUDIT-4b M3 在 pre_risk reject 也寫 negative label → noise 進 production decision_features → ML training pollution |
+| **Live 嚴重度** | HIGH — 真 live 下 lease/SM-02 throughput 浪費；OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1 下 lease acquire→cancel 浪費 |
+| **Systemic** | bb_breakout / bb_reversion 同樣設計（用 self.positions 不查 paper_state）— W6 baseline 沒看到只是 signal 沒對齊 |
+
+**升 P0 理由**：
+- 不只是 ma_crossover bug，是**全策略 architectural gap**（5 策略都用 self.positions 不查 paper_state）
+- 跟 §二 16 根原則 #16「組合級風險意識」直接相關（cross-strategy coordinator 缺 gap）
+- Fix scope: TickContext 加 read-only position handle → **5 策略 signature 對齊** → 與 W2 trait extension 同窗 → **必合併 PA D+0 trait skeleton commit**
+
+Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
+
+#### §0.4.C W6 RFC PA-view 立場 + 6 條 dispatch update
+
+PA 預備立場（D+1 W6 RFC 三角入場帶這個）：
+- Q1 cost_gate **hold A** — 維持 hard rule，不引 advisory（違反根原則 #5/#4）
+- Q2 duplicate_position pyramiding **hold A** — 不開；2331 reject 是 ma_crossover state sync bug（→ §0.4.B）
+- Q3 V086 metadata **hold A** — 立刻做（W6-2 D+1~D+2）；ML retrain enable 等 4-gate
+- Q4 bb_*/funding_arb 0 fire **depends** — funding_arb dormant by design / bb_breakout = AlphaSurface consumer gap / bb_reversion 三源因素需另查
+
+6 條 dispatch update 全部納入 v3.2（見下文各 §3 update）。
+
+Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_rfc_pa_questions_self_answer.md`
+
 ### §0.3 TONUSDT verdict C（QC verdict）
 - n=10 不足以判結構性 negative（t-test power < 0.3）
 - DSR mu_0 = sqrt(2 ln 79) ≈ 2.79；TONUSDT naive SR ≈ -0.34，DSR PASS 機率 0
@@ -63,20 +107,69 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 
 ---
 
-## §2 Wave 結構（W1-W6 — v3.1 update W2 fast-track）
+## §2 Wave 結構（W1-W7 — v3.2 加 W7 P0 STRATEGY-POSITION-SYNC）
 
 | Wave | 名稱 | 性質 | 優先 | 依賴 | 估時 | 並行性 |
 |---|---|---|---|---|---|---|
-| **W6** | Reject Reason Metadata + ML Imbalance Handling（v3 重寫） | RFC + IMPL | **P0** | 無 | 5 day | 與 W1 並行；阻 W3 Stage 2 |
-| W1 | W-AUDIT-8a Phase B Tier 2 panel collector | IMPL | P1 | N+0 Phase A trait | 6 day | 不可與 W3 同 ML cron | 
-| **W2** | **A4-C BTC→Alt Lead-Lag spec + paper IMPL（v3.1 fast-track）** | **spec + IMPL** | **P1**（升） | N+0 Phase A trait | **7 day**（從 2 升） | 與 W1 同窗 AlphaSurface trait extension |
-| W3 | W-AUDIT-9 Stage 1 cohort observation | ops + IMPL | P1 | N+0 W-AUDIT-9 land + W6 完成 | 5 day | 不可與 W1 同 ML cron 觸發窗 |
+| **W7** | **STRATEGY-POSITION-SYNC**（v3.2 新 P0，從 P1 升）— TickContext + 5 策略 signature 對齊 + ma_crossover state sync fix | architecture IMPL | **P0** | 無 | 4 day | **必與 W2 合併 PA D+0 trait skeleton commit**；W7 + W2 同 commit |
+| **W6** | Reject Reason Metadata + ML Imbalance Handling（v3 重寫，v3.2 加 W6-7） | RFC + IMPL | **P0** | 無 | 5 day | 與 W1 並行；阻 W3 Stage 2 |
+| W1 | W-AUDIT-8a Phase B Tier 2 panel collector | IMPL | P1 | PA D+0 trait skeleton（W7+W2 合併 commit） | 6 day | W1 + W7 + W2 完全並行 0 file 重疊（PA #1 確認） |
+| W2 | A4-C BTC→Alt Lead-Lag spec + paper IMPL（v3.1 fast-track） | spec + IMPL | P1 | PA D+0 trait skeleton（含 W7 + W2） | 7 day | 同上 |
+| W3 | W-AUDIT-9 Stage 1 cohort observation | ops + IMPL | P1 | N+0 W-AUDIT-9 land + W6 完成 + W7 完成（避 ma_crossover hot loop 干擾觀察） | 5 day | 不可與 W1 同 ML cron 觸發窗 |
 | W4 | W-AUDIT-3b runtime smoke | test only | P2 | N+0 W-AUDIT-3b land | 1 day | 完全並行 |
-| W5 | 10 P1 tickets backlog（v3 從 7→10） | mixed | P1/P2 | per-ticket | 分散 | 完全並行 |
+| W5 | 11 P1/P2 tickets backlog（v3.2 從 10→11，移 ma_crossover 出 W5 升 W7） | mixed | P1/P2 | per-ticket | 分散 | 完全並行 |
 
 ---
 
 ## §3 Wave 詳細 spec
+
+### §3.−1 W7 — STRATEGY-POSITION-SYNC（**v3.2 新 P0**，與 W6 sibling）
+
+**目標**：解 PA #3 audit 揭露的 architecture-level gap — 5 策略用 `self.positions` 追蹤自己策略倉位，**完全不查 paper_state**；router gate 1.5 用 paper_state symbol-level dedup → cross-strategy desync 形成 infinite reject hot loop（11:34 一分鐘 2319 次）。修 ma_crossover 同時做全策略 architectural fix。
+
+**Sub-task v3.2**:
+- W7-1. **PA TickContext extension spec**（PA D+0，與 W2 trait skeleton 同次 commit）
+  - `TickContext` 加 `position_state: Option<&PaperPosition>` field（read-only handle from paper_state）
+  - 5 策略 `on_tick(ctx, surface)` signature 對齊：grid_trading / ma_crossover / bb_breakout / bb_reversion / funding_arb
+  - **必與 W2 BtcLeadLagPanel field 合併 PA D+0 trait skeleton commit**（避免後續 5 sub-agent IMPL 撞 trait file）
+  - LOC 預估：~30 (TickContext) + ~15 (tick_pipeline call site) = ~45 LOC
+- W7-2. **ma_crossover entry path fix**（E1 IMPL D+1-2, 1 day）
+  - `strategies/ma_crossover/strategy_impl.rs:140-234` entry path：進 entry 前查 `ctx.position_state`；如同 symbol 已有任何策略倉位 → skip entry，不發 intent
+  - **不**改 `self.positions` HashMap 設計（保持 strategy-level shadow，但 entry decision 必查 paper_state）
+  - 預估 LOC：~20
+- W7-3. **on_rejection 識別 duplicate_position 並 sync**（E1 IMPL D+2, 0.5 day, 補 1-tick 防衛）
+  - `strategy_impl.rs:44-65` on_rejection 加分支：if reason starts_with "duplicate_position" → 解析 `existing_is_long` 寫入 `self.positions`
+  - 立即終結 hot loop（下 tick 進 exit path 而非 rollback to None）
+  - 依賴 reason 字串格式（rejection_coding.rs:148 byte-identical 契約）— E2 必審契約鎖
+- W7-4. **5 策略 systemic audit**（PA + E1 D+2-3, 1 day）
+  - 對 grid_trading / bb_breakout / bb_reversion / funding_arb 各跑 same audit pattern
+  - 找其他 cross-strategy desync 風險點（e.g., bb_reversion 的 `prev_position` rollback 是否同樣 bug）
+  - 出 audit report；發現的 issue 開 P2 ticket（不在 N+1 fix，留 N+2 if not blocking）
+- W7-5. **on_fill update + bootstrap import_positions**（E1 IMPL D+3, 0.5 day, per PA #2 Q2 建議）
+  - 確認 `on_fill()` 正確 update self.positions（遠端真實 fill 後）
+  - bootstrap 階段從 paper_state import_positions 重建 strategy.positions（避 cold-start desync）
+
+**Sub-agent assignment**:
+- D+0: PA spec + trait skeleton 合併 W2 commit（~85 LOC: 40 BtcLeadLagPanel + 45 TickContext.position_state）
+- D+1-2: E1 IMPL W7-2 + W7-3（ma_crossover fix + on_rejection sync）
+- D+2-3: PA + E1 W7-4 (5 策略 systemic audit) + W7-5 (on_fill + bootstrap)
+- D+3: E2 review（必審 RC-04 prev_position rollback 邏輯刪除前 spec / TickContext signature lifetime）
+- D+4: E4 regression + Linux runtime 24h 驗 ma_crossover INXUSDT reject < 10/h（從 666/h 降）+ PM sign-off
+
+**Acceptance criteria**:
+- ma_crossover INXUSDT 24h reject rate < 10/h（從 baseline 666/h 降，**60+ x 改善**）
+- 全策略 cross-strategy hot loop 0（grep `risk_verdicts.reason='duplicate_position'` 24h 無 burst pattern）
+- 5 策略 systemic audit report land；發現的其他 issue 開 P2 ticket
+- TickContext signature 變動不 break 既有 5 策略 on_tick callsite
+- on_fill / bootstrap 更新邏輯通過 E2 + E4
+- 22 + invariant 23 全 PASS
+- DOC-08 §12 9 條安全不變量 + 硬邊界 5 項 0 觸碰
+
+**Risk**:
+- **TickContext signature 變動是 cross-strategy 改動** — PA 必統一審 5 策略 on_tick 對齊（PA #3 audit §8 已點 E2 重點 3 點）
+- on_rejection 刪除 prev_position rollback 邏輯前必 audit RC-04 spec — 為什麼一開始要 rollback？是否有 cooldown clear 副作用
+- paper_state.get_position() 在 strategy on_tick 是否違反 borrow checker（paper_state 已被 step_4_5_dispatch.rs 同層 borrow）
+- W3 Stage 1 cohort 觀察期必等 W7 完成（hot loop 干擾 attribution_chain 觀察）
 
 ### §3.0 W6 — Reject Reason Metadata + ML Imbalance Handling（**v3 重寫** — 不再叫 governance relax）
 
@@ -109,6 +202,14 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 - W6-6. **M5 evaluations.entry_context_id healthcheck**（E1 IMPL 1 day, 等 ML predictor 接通後 enable）
   - per MIT M5 建議：`check_evaluations_entry_ctx_coverage()`
   - 編號預留 [60]
+- W6-7. **[61] strategy fire silence healthcheck**（v3.2 新，per PA #2 Q4 建議，E1 IMPL 0.5 day）
+  - 加 `helper_scripts/db/passive_wait_healthcheck/checks_strategy_fire_silence.py`（[61]）
+  - 5 策略 24h 0 fire 報 WARN（funding_arb 排除清單 hard-code 防 false WARN per ADR-0018）
+  - root cause 列舉：cooldown / regime / panel_unavailable / scanner_threshold / **strategy↔position desync (W7 fix 後應消失)**
+  - 與 W6-4 [59] 同窗
+- W6-8. **W6-1 RFC verdict 明文化**（v3.2 新，per PA #2 Q1 建議）
+  - RFC verdict 明文記「cost_gate hard rule 維持，不引 advisory mode」入 RFC report
+  - 避免 N+2 又重提 advisory 路徑
 
 **Sub-agent assignment**:
 - D+0: PA + QC + MIT 三角 RFC parallel（1 day，baseline 已備）
@@ -275,49 +376,64 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 | **P1-TONUSDT-CONDITIONAL-WATCH** *(改名)* | QC verdict C | RFC + Linux CC SQL | 2 day（30d evidence 收滿才升 freeze） | PA + Linux CC |
 | **P1-DYNAMIC-UNBLOCK-CHECK-1** *(新)* | QC v3 NEW-ISSUE-V3-4 | PA spec + IMPL | 2 day | PA + E1 |
 | **P1-V083-CONSTRAINT-VALIDATE** *(新)* | MIT M5 建議 | PA + E1 + MIT | 1 day | PA + E1 |
-| **P1-MA-CROSSOVER-DUPLICATE-INTENT** *(v3 新)* | W6 baseline F-bug 暗示 | PA + E1 audit | 2 day | PA + E1 |
+| ~~P1-MA-CROSSOVER-DUPLICATE-INTENT~~ *(v3.2 升 P0 移到 W7)* | — | — | — | — |
+| **P1-BB-REVERSION-FIRE-AUDIT** *(v3.2 新, per PA #2 Q4)* | W6 baseline + PA Q4 | PA audit | 1 day | PA |
+| **P2-BB-BREAKOUT-POSITION-SYNC** *(v3.2 新, per PA #3 systemic)* | W7-4 audit 衍生 | E1 fix（如 W7-4 確認 systemic）| 1-2 day | E1 |
+| **P2-BB-REVERSION-POSITION-SYNC** *(v3.2 新, per PA #3 systemic)* | W7-4 audit 衍生 | E1 fix（如 W7-4 確認 systemic）| 1-2 day | E1 |
 
 **新加 ticket 詳情**:
 - **P1-TONUSDT-CONDITIONAL-WATCH**（替代原 P1-TONUSDT-GRID-BLOCK）：QC verdict C（n=10 不足以判結構性 negative）；不立即 freeze；分階段：(1) Linux CC 跑 30d regime split SELECT 補 evidence；(2) 若 30d sample n≥30 且仍 negative → 升 freeze；(3) 若 sample 不足 → 維持 watch；(4) 復評 30d cycle
 - **P1-DYNAMIC-UNBLOCK-CHECK-1**：解 QC v3 NEW-ISSUE-V3-4 — 17 frozen cells 多數現 0 fills 0 rejected_outcomes（無 counterfactual power），需 30d cycle 機制 reuse `helper_scripts/db/audit/blocked_symbols_7d_counterfactual.py` 改 30d 版；達 positive edge 條件可解封；避免 17→18→N permanent dormant 負反饋環路
 - **P1-V083-CONSTRAINT-VALIDATE**：V083 加的 check_constraint NOT VALID 對舊 row 不 enforce；MIT 建議追蹤 何時 VALIDATE（老 fills 不過 backfill 直接 VALIDATE 會 fail 全表）；先寫 backfill plan + 預估 VALIDATE date
-- **P1-MA-CROSSOVER-DUPLICATE-INTENT**（v3 新）：W6 baseline 揭露 ma_crossover INXUSDT 在 post-V082 3.5h 內觸發 duplicate_position guard 2331 次（已 SHORT 1810 還反復想加碼）；暗示 entry signal 跟 position state 沒對齊（潛在 bug，非 governance 問題）；audit ma_crossover entry logic：(1) 是否每 tick 都 evaluate signal 不 dedup；(2) is_entry_eligible() 是否 cross-check exists position；(3) 若是 by-design pyramiding 為何被 duplicate guard 阻；fix scope 不超過 ma_crossover 模組
+- ~~P1-MA-CROSSOVER-DUPLICATE-INTENT~~ → **v3.2 升 P0 移到 W7**（PA #3 audit confirm 是 architecture-level systemic gap，全策略 5 個都用 self.positions 不查 paper_state）
+- **P1-BB-REVERSION-FIRE-AUDIT**（v3.2 新，per PA #2 Q4）：bb_reversion post-V082 0 fire 三源因素 grep — (1) entry condition 是否太嚴 (2) scanner threshold 過濾掉 (3) AlphaSurface consumer gap（同 bb_breakout）；找出 root cause 給 N+2 fix scope；不在 N+1 IMPL 修
+- **P2-BB-BREAKOUT-POSITION-SYNC** + **P2-BB-REVERSION-POSITION-SYNC**（v3.2 新，per PA #3 systemic）：W7-4 全策略 audit 如確認 bb_breakout / bb_reversion 同樣 self.positions 不查 paper_state → 開 P2 fix；如 W7 fix scope 已涵蓋（TickContext.position_state 給全 5 策略） → close as duplicate
 
 **派發策略**：分散到 N+1 Day 1-7 並行；**P1-CANARY-STAGE-CRITERIA-1** + **P1-CANARY-COHORT-FREQ-23** 與 W3 同窗（依賴）；**P1-BB-BREAKOUT-FAIL-CLOSED-1** 與 W1 同窗（依賴 Phase B consumer 驗收）；**P1-TONUSDT-CONDITIONAL-WATCH** 跟 **P1-DYNAMIC-UNBLOCK-CHECK-1** 同窗（dynamic unblock 機制是 freeze 前置）；**P1-V083-CONSTRAINT-VALIDATE** 與 W6 同窗（governance reject 整修同次）；**P1-MA-CROSSOVER-DUPLICATE-INTENT** 與 W6 同窗（同樣是 W6 baseline 衍生 finding）。
 
 ---
 
-## §4 Schedule（Day-by-Day — v3.1 加 W2 fast-track + W1/W2 trait coord）
+## §4 Schedule（Day-by-Day — v3.2 加 W7 + PA D+0 trait skeleton 合併 commit）
 
 ```
 D+0 (2026-05-11 等 N+0 21:30 UTC forward watch metric 2/3 sign-off)
-  PA: Sprint N+1 dispatch v3.1 finalize
-  PA: AlphaSurface trait final shape 拍板（W1 + W2 共用 trait 一致）
-  PM: 派發 W6 三角 RFC / W1 spec / W2 三角 spec / W4 E4 / W5 多 P1 並行
-  ⚠️ W3 Stage 1 cohort 暫不派（等 W6 verdict）
+  PA: Sprint N+1 dispatch v3.2 finalize
+  PA: 【critical 1 commit】 AlphaSurface trait skeleton 合併 commit:
+       - W2 BtcLeadLagPanel struct + AlphaSurface.btc_lead_lag field + 3 constructor
+       - W7 TickContext.position_state field + 5 策略 signature 對齊 + slots/dispatch anchor
+       - ~85 LOC, single commit, no business logic
+  PM: 派發 W7 IMPL / W6 三角 RFC / W1 spec / W2 三角 spec / W4 E4 / W5 多 P1 並行
+  ⚠️ W3 Stage 1 cohort 暫不派（等 W6 verdict + W7 完成）
 
-D+1 ~ D+2 (spec phase 並行)
+D+1 ~ D+2 (spec + W7 IMPL phase 並行)
+  W7 E1 IMPL W7-2 ma_crossover entry path fix + W7-3 on_rejection sync (1.5 day)
   W6 PA + QC + MIT 三角 RFC（governance reject 對齊，1 day baseline 已備）
   W2 PA + QC + MIT 三角 spec（A4-C BTC→Alt Lead-Lag，2 day）
   W1 PA spec finalize（W-AUDIT-8a Phase B Tier 2 panel）
   W4 E4 runtime smoke（D+1 完）
-  W5 多 P1 並行 spec phase
+  W5 多 P1 並行 spec phase（含 P1-BB-REVERSION-FIRE-AUDIT）
 
-D+3 ~ D+5 (IMPL phase 大爆發)
-  W6 E1 IMPL V086 reject_reason_code + multi-class label split + M4 monitor [59]（並行 3 sub-task）
+D+2 ~ D+3 (W7 systemic audit + IMPL 大爆發)
+  W7 PA + E1 W7-4 5 策略 systemic audit (1 day)
+  W7 E1 W7-5 on_fill + bootstrap import_positions (0.5 day)
+  W7 E2 review (D+3)
+  W6 E1 IMPL V086 reject_reason_code + multi-class label split + M4 monitor [59] + [61] silence healthcheck
   W1 E1-α IMPL B-1 (funding_curve writer + V085, 3 day)
-  W1 E1-β IMPL B-2 (oi_delta_panel + V086 → 改 V087 避撞，3 day)
-  W2 E1-γ IMPL C-IMPL-1 AlphaSurface trait extension (BtcAltLeadLag variant, 2 day)
+  W1 E1-β IMPL B-2 (oi_delta_panel + V087, 3 day)
+  W2 E1-γ NO-OP (trait extension 已 PA D+0 commit, 範圍縮為 typedef 驗收)
   W2 E1-δ IMPL C-IMPL-2 lead-lag producer + V088 migration (2 day)
-  W3 PA cohort 拍板（D+3，等 W6 verdict）+ atomic patch IMPL（D+4）
-  W3 Stage 1 cohort 3-day passive observation 開始（D+4-D+7）
-  W5 多 P1 IMPL（含 P1-MA-CROSSOVER-DUPLICATE-INTENT audit）
+  W5 P1 IMPL
 
-⚠️ V### 編號重排（v3.1 因 W1 + W2 + W6 三 wave 都加 migration）:
+⚠️ V### 編號重排（v3.2 確認 4 wave 都加 migration）:
   V085 = W1 funding_curve
   V086 = W6 reject_reason_code metadata（先級高，governance writer 改）
   V087 = W1 oi_delta_panel
   V088 = W2 panel.btc_lead_lag_panel
+
+D+3 ~ D+4 (W7 sign-off + W3 啟動)
+  W7 E4 regression + Linux runtime 24h 驗 ma_crossover INXUSDT reject < 10/h + PM sign-off
+  W3 PA cohort 拍板（D+4，等 W6 + W7 完成）+ atomic patch IMPL
+  W3 Stage 1 cohort 3-day passive observation 開始（D+4-D+7）
 
 D+5 ~ D+7
   W2 C-IMPL-3 strategy paper-only 接收 (ma_crossover + grid 接 BtcAltLeadLag feature, 1 day)
@@ -344,10 +460,13 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ## §5 Risk + Dependency
 
-### §5.1 Cross-Wave Conflict
+### §5.1 Cross-Wave Conflict（v3.2 update）
+- **W7 ↔ W2 trait coord 已被 PA D+0 合併 commit 解決**（PA #1 設計）— 5 個 E1 sub-agent 完全並行 0 file 重疊
+- **W7 ↔ W3**：W3 Stage 1 cohort 觀察期必等 W7 fix（避 ma_crossover hot loop 干擾 attribution_chain 觀察）
 - **W1 ↔ W3**：W3 Stage 1 cohort 觀察期不可同窗 W1 ML cron 觸發；建議 W1 land 後 ≥ 24h 再進 W3 Stage 1
 - **W1 ↔ W5 (BB-BREAKOUT-FAIL-CLOSED-1)**：B-4 acceptance 直接 close 此 P1
 - **W3 ↔ W5 (CANARY-STAGE-CRITERIA-1, COHORT-FREQ-23)**：兩個 P1 是 W3 dependency，必先 close
+- **W7 ↔ W5 (P2-BB-BREAKOUT-POSITION-SYNC, P2-BB-REVERSION-POSITION-SYNC)**：W7-4 systemic audit 結果決定這兩 P2 是否 IMPL 或 close as duplicate
 
 ### §5.2 External Dependency
 - **HIGH-5 12h watch sign-off**：21:30 UTC 失敗會觸發 Sprint N+0 部分 rollback；rollback 範圍 = W-AUDIT-9 GUI graduated tab + W-AUDIT-4b M3 reject negative label（保 W-AUDIT-9 trait + V082/83 不動）
@@ -360,27 +479,37 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ---
 
-## §6 Acceptance Gate（Sprint N+2 hand-off conditions — v3 重寫 W6 gate）
+## §6 Acceptance Gate（Sprint N+2 hand-off conditions — v3.2 加 W7 + ML retrain 4-gate）
 
 **全部** 達標才能 N+1 sign-off 進 N+2：
 
-1. ✅ **W6 對齊 RFC verdict 明確**（預期：governance 正確、real gap = metadata + imbalance + duplicate_intent bug）
-2. ✅ **V086 reject_reason_code metadata land**：sqlx success=t；M3 producer 寫 reason 100% coverage（post-V086 sample）；features_jsonb + reject_reason_code dual-write
-3. ✅ **Multi-class label split**：decision_features `label_close_tag` 顯示 3 類分布（rejected_cost_gate / rejected_duplicate_position / rejected_other）
-4. ✅ **M4 reject reason mix monitor [59]**：baseline + alert 設好；24h dry-run 0 spurious alert（**不**用 reject rate > 95% 作 alert，這是 normal）
-5. ✅ **LightGBM imbalance handling 試行報告 land**（`is_unbalance` / `scale_pos_weight=4` AUC + precision + recall 對比）
-6. ✅ W1 Phase B funding_curve + oi_delta_panel writer 上線；25-symbol 1h 內 ≥ 100 row each
-7. ✅ W2 A4-C spec 三方（PA / QC / MIT）APPROVE land + **paper IMPL fast-track**：AlphaSurface trait extension + lead-lag producer + V088 panel migration sqlx success + paper engine 7d 累積 sample n ≥ 100 fills per cohort symbol + paper edge report land（avg_net_bps + DSR + sample size）
-8. ✅ W3 Stage 1 cohort 第一個 atomic patch 通過 [58] healthcheck；3-day observation attribution_chain_ok ≥ 80%
-9. ✅ W4 W-AUDIT-3b runtime smoke pytest PASS + [55] chains_with_lease ≥ 1
-10. ✅ W5 10 P1 至少 6 closed（含 CANARY-STAGE-CRITERIA-1 + COHORT-FREQ-23 + DYNAMIC-UNBLOCK-CHECK-1 + V083-CONSTRAINT-VALIDATE plan land + MA-CROSSOVER-DUPLICATE-INTENT audit + 1）
-11. ✅ 22 invariant + 新 invariant 23 全 PASS
-12. ✅ CC + QC + MIT + BB 4-agent final review 全 APPROVE / APPROVE-CONDITIONAL
-13. ✅ Memory persist + N+2 dispatch draft
+1. ✅ **W7 STRATEGY-POSITION-SYNC fix**：ma_crossover INXUSDT 24h reject rate < 10/h（從 baseline 666/h, **60+ x 改善**）；全策略 cross-strategy hot loop 0；5 策略 systemic audit report land
+2. ✅ **W6 對齊 RFC verdict 明確**（預期：governance 正確、real gap = metadata + imbalance + duplicate_intent bug）+ **W6-1 verdict 明文「cost_gate hard rule 維持，不引 advisory mode」記入 RFC report**
+3. ✅ **V086 reject_reason_code metadata land**：sqlx success=t；M3 producer 寫 reason 100% coverage（post-V086 sample）；features_jsonb + reject_reason_code dual-write
+4. ✅ **Multi-class label split**：decision_features `label_close_tag` 顯示 3 類分布（rejected_cost_gate / rejected_duplicate_position / rejected_other）
+5. ✅ **M4 reject reason mix monitor [59]**：baseline + alert 設好；24h dry-run 0 spurious alert（**不**用 reject rate > 95% 作 alert，這是 normal）
+6. ✅ **[61] strategy fire silence healthcheck**（W6-7）：5 策略 24h 監控 baseline 入 console；funding_arb 排除清單 hard-code 已驗
+7. ✅ **LightGBM imbalance handling 試行報告 land**（`is_unbalance` / `scale_pos_weight=4` AUC + precision + recall 對比）— **僅報告對比，不 deploy 入 production cron**（per PA #2 Q3 建議）
+8. ✅ **ML retrain 4-gate 全達**（per PA #2 Q3）：(a) V086 land + dual-write 24h 0 NULL drift (b) multi-class label 3 類各 sample ≥ 200 row (c) LightGBM imbalance 試行報告 PASS (d) 全部 4 條才 enable production retrain
+9. ✅ W1 Phase B funding_curve + oi_delta_panel writer 上線；25-symbol 1h 內 ≥ 100 row each
+10. ✅ W2 A4-C spec 三方（PA / QC / MIT）APPROVE land + **paper IMPL fast-track**：AlphaSurface trait extension + lead-lag producer + V088 panel migration sqlx success + paper engine 7d 累積 sample n ≥ 100 fills per cohort symbol + paper edge report land（avg_net_bps + DSR + sample size）
+11. ✅ W3 Stage 1 cohort 第一個 atomic patch 通過 [58] healthcheck；3-day observation attribution_chain_ok ≥ 80%
+12. ✅ W4 W-AUDIT-3b runtime smoke pytest PASS + [55] chains_with_lease ≥ 1
+13. ✅ W5 11 P1/P2 至少 6 closed（含 CANARY-STAGE-CRITERIA-1 + COHORT-FREQ-23 + DYNAMIC-UNBLOCK-CHECK-1 + V083-CONSTRAINT-VALIDATE plan land + BB-REVERSION-FIRE-AUDIT + 1）
+14. ✅ 22 invariant + 新 invariant 23 全 PASS
+15. ✅ CC + QC + MIT + BB 4-agent final review 全 APPROVE / APPROVE-CONDITIONAL
+16. ✅ Memory persist + N+2 dispatch draft
 
 **v3 移除（v2 設計取消）**：
 - ❌ ~~如 W6 verdict = over-fit：conditional relax AMD land~~ — W6 baseline 預跑揭露 governance 沒 over-fit，conditional relax 會犯錯
 - ❌ ~~Governance reject rate 進入 70-90% 合理區間~~ — 99.5% 是 normal（cost_gate 拒 negative edge 是正確），不應 force 降
+
+**v3.2 新增（per PA 預跑）**：
+- ✅ W7 STRATEGY-POSITION-SYNC（ma_crossover hot loop fix + 5 策略 architectural audit）
+- ✅ W6-7 [61] strategy fire silence healthcheck
+- ✅ W6-1 cost_gate hard rule 明文化
+- ✅ ML retrain 4-gate
+- ✅ LightGBM 試行不 deploy production
 
 ---
 
@@ -407,10 +536,13 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ---
 
-**已整合 evidence**（v3 update）:
+**已整合 evidence**（v3.2 update）:
 - ✅ QC replay: TONUSDT 7-30d structural edge → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--tonusdt_structural_edge_replay.md`（verdict C，conditional path）
 - ✅ MIT chain integrity replay → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md`（chain 100%，governance reject 99.5% 提名 P0）
-- ✅ **MIT W6 baseline 預跑** → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md`（governance 沒 over-fit，真 gap 是 metadata + imbalance + duplicate_intent bug）
+- ✅ MIT W6 baseline 預跑 → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md`（governance 沒 over-fit，真 gap = metadata + imbalance + duplicate_intent bug）
+- ✅ **PA #1 AlphaSurface trait coord** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`（W1+W2 並行 0 file 重疊，PA D+0 commit ~85 LOC 含 W7 TickContext）
+- ✅ **PA #2 W6 RFC PA-view** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_rfc_pa_questions_self_answer.md`（4 立場 + 6 條 dispatch update）
+- ✅ **PA #3 P1-MA-CROSSOVER audit** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`（HIGH confidence cross-strategy desync hot loop，升 P0 W7）
 
 **Final Step**: 21:30 UTC HIGH-5 forward watch metric 2/3 sign-off 後此 draft v2 升 final（metric 1 已 MIT 提早 close），TODO v19 §6.5 加入 Sprint N+1 banner + reference link。
 
