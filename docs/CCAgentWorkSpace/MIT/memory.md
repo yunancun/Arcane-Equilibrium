@@ -421,3 +421,59 @@ _Last updated: 2026-04-24_
 
 **邊界**: read-only audit; 不修 PA W2 spec v1.1; 不修 dispatch v3.6; 不寫業務 code
 
+
+## 2026-05-10 W6-1 RFC final verdict — MIT sign-off APPROVE-CONDITIONAL
+
+**Trigger**: PA + QC + MIT 三角 sign-off draft cold review；W6 V086 IMPL 完成，Phase 2 dispatch fire 啟動
+
+**Report**: `workspace/reports/2026-05-10--w6_1_rfc_mit_signoff_verdict.md` (307 行)
+
+**Verdict**: **APPROVE-CONDITIONAL** (5 必修條件 + 2 SHOULD)
+
+**4 Verdict 對應 MIT 立場**:
+1. cost_gate hard rule 維持 → APPROVE (db-schema audit 三層設計結構正確 + 16 root principles)
+2. JS shrinkage 強收縮設計預期 → APPROVE (Lehmann & Casella Ch.5 textbook signature)
+3. cost_gate 放行期望 -14 bps → APPROVE (JS estimate = unbiased point estimate)
+4. scorer_trainer regression task confirm + W6-5 撤回 → APPROVE FULLY (W6-5 撤回是 MIT 自己揭露的 category error 修正)
+
+**5 必修條件 (MUST)**:
+1. V086 SQL §2 spec 註解修正「lossless deterministic re-UPDATE」(D+2 14:30 UTC ALTER VALIDATE 之前)
+2. V086 SQL 補互斥不變式 schema-level CHECK (NOT VALID) 防 future producer bug
+3. W6-5 試行 acceptance 補 5 ML pipeline metrics (per-fold RMSE+95%CI / IS-OOS gap / cross-fold std/mean / PSI+KS / cost_gate decision distribution shift) + purge+embargo CV
+4. CLAUDE.md §七 idempotency wording 修正「lossless on repeated apply」(不要求 0 row UPDATE)
+5. MIT memory chain integrity replay 100% 結論補註 + 樣本擴大後 ratio 40% RCA 入 N+2
+
+**2 SHOULD**:
+6. Track B prerequisite (b) 改「核心 5 策略中 ≥3 策略各 class sample ≥ 200」+ funding_arb 排除
+7. 新 healthcheck `check_chain_integrity_post_audit_4b_m3()` 入 W-AUDIT-4b 24h passive
+
+**核心 empirical findings (ssh trade-core PG live 20:35 UTC)**:
+- total_labeled = 51113, reject_with_code = 17810 (✅ backfill PASS pre-22:00), close_with_code = 2247
+- **reject_NULL_code = 31053** (🚨 22:00+1h producer 寫 36352 reject 但 backfill 只 cover 5299 → producer dual-write code 未 deploy)
+- overlap_both = 0 (✅ 互斥不變式 PASS)
+- close_NULL_code = 3 (邊角 case)
+- **chain integrity 60% orphan**: fills_w_entry_ctx=5939, fills_in_df=2369, **orphan=3570 (60%)**；對比前次 100% (n=331) 是窄窗 artifact，全表 ratio = **40%**
+- pre-5/10 reject = 0 (W-AUDIT-4b M3 producer 5/10 才接通)；no time bias
+- _sqlx_migrations max=84 (V086 NOT registered, E1 SKIPPED 等 PM `repair_migration_checksum`)
+- double_prefix_remain = 0 (V086 17 row UPDATE PASS)
+
+**V086 OR-filter 缺陷 governance 推薦**: 方案 A (accept + spec annotation fix)，工程成本最低，PG empirical lossless idempotent
+
+**W6-5 sample_weight 替代 ML pipeline sound check**:
+- algorithm 正確 (LightGBM regression L2 weighted standard WLS)
+- 但 100× safety margin engineering choice 沒統計依據；建議 1/15 lower bound
+- evaluation metric 缺 OOS purged k-fold；MUST 補
+
+**W6-3 兩 column TEXT vs alternatives**:
+- APPROVE 兩 column TEXT (12 + 14 enum) — semantic separation + NOT VALID 不破歷史 + Track B 直讀 enum
+- REJECT single column / FK enum table / PG ENUM type / jsonb (理由列出)
+- Push back: overlap=0 互斥不變式缺 schema-level CHECK constraint，建議補 NOT VALID CHECK
+
+**Track B N+2/N+3 deferred sound** (REJECT N+1 fast-track):
+- (a) producer dual-write 24h 0 NULL drift: 22:00 UTC 31053 NULL 證明 producer 未 deploy
+- (b) per-class 200 sample: 4/5 策略不過 → fast-track 等於 grid-only 過擬合風險
+- (c) classification trainer architecture: ≥1 sprint hierarchical / multi-task spec
+- (d) imbalance handling: regression 不需，classification 才適用
+
+**Confidence**: 全 11 项 verdict + push back HIGH 以上 (8 HIGH + 1 HIGHEST + 2 MED)
+
