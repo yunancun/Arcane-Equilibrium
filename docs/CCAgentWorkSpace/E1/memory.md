@@ -6655,3 +6655,38 @@ dispatch 估計 ~85 LOC，實際 +180 LOC（2.1×）。原因：BtcLeadLagPanel 
 `git status --short` 顯示 3 個非我修改的檔（MIT memory.md / memory/MEMORY.md / memory/project_*.md）+ 2 個 untracked report 來自其他並行 session。處理：**不動別人的檔**，PM commit 時用 `git add <我的 16 file>` 精確 stage。
 
 per `feedback_git_commit_only_for_metadoc.md`，meta-doc（memory.md / TODO.md）必用 `git commit --only <file>` 避免吸收別人 WIP。本次 trait skeleton 全是 code file，可正常 add，但 PM 必選擇性 stage 不誤 commit 別人 WIP。
+
+
+## 2026-05-10 W6 V086 SQL skeleton 預寫 (NOT_COMMITTED)
+
+**Task**: PA W6-3c IMPL 預寫；NOT_COMMITTED · NOT_DEPLOYED · NOT_RUN；sign-off 後 D+1 W6 V086 IMPL 直接收。
+
+**Output**: `srv/sql/migrations/V086__governance_reject_close_reason_code.sql` 483 LOC
+
+**Report**: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w6_v086_sql_skeleton_prewrite.md`
+
+### 教訓 1：PA spec 與 task 描述衝突時以 PA spec 為 SoT
+
+Task 描述 §6 講 trading.fills 17 row UPDATE 用 `label_close_tag` column；但 V003 schema (line 270-286) trading.fills **沒有** label_close_tag column，真 source 是 `strategy_name` column。
+
+PA P2 RCA §1 / §4 Option A point 3 明確指出 source 是 `trading.fills.strategy_name`。我以 PA spec 為準，task 描述當作高層摘要不當 ground truth。
+
+PA spec §4 Option A 同時拍板「**不污染 raw label_close_tag**」（保留歷史 bug fingerprint，未來 forensic 可追），只在新 close_reason_code enum 收 normalize 後值 → 不做 task 描述 §6 講的 16 row decision_features label_close_tag REPLACE。
+
+**教訓**：multi-source spec 衝突時，PA RCA + spec final = SoT；task 描述是 dispatch 摘要可能簡化／誤寫；E1 必檢實際 schema + PA spec 後 push back，不盲執行 task 描述。
+
+### 教訓 2：constraint name 約定不固定 — V083/V084 用描述名 + 部分用 chk_*_enum
+
+V083 用 `fills_close_must_have_entry_context_id` (描述式)；V086 我用 `chk_reject_reason_code_enum` / `chk_close_reason_code_enum` (chk_*_enum pattern)。預期 E2 review 時可能要求對齊 V083 描述式或 accept chk_*_enum 雙 pattern 都 OK。Sign-off report §7 #1 標為 D+1 IMPL 階段需 E2 review 補充。
+
+### 教訓 3：CASE WHEN evaluation order 是 backfill 唯一風險
+
+PA W6-3b §6 #1 高風險：CASE WHEN 順序錯會誤分類（ATR unavailable 必先於 JS-demo / cost_gate_other; 雙前綴必先於單前綴; bare-name exact 必先於 prefix regex; catch-all 必 ELSE 兜底）。我嚴格按 PA §4.4 順序排列，但 D+1 W6 IMPL phase Linux PG dry-run 9757 row 必走 distribution 比對 (per PA §6 #1 E2 必查) 確保 0 mismatch。
+
+### 教訓 4：Guard A 必含 cross-table dependency（A2/A3）
+
+V086 backfill 不只動 decision_features，還跨 trading.fills (上游清理) + trading.risk_verdicts (JOIN 來源)。所以 Guard A (decision_features) + Guard A2 (trading.fills) + Guard A3 (risk_verdicts) 三層 schema check。V083 的 Guard A2 (trading.fills) 是同樣 pattern，跨表 backfill / JOIN 必驗 source table 存在。
+
+### 教訓 5：idempotency 在 ADD CONSTRAINT 路徑要 DO block
+
+Postgres `ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS` 不存在（only ADD COLUMN / CREATE INDEX 有 IF NOT EXISTS 語法）；ADD CONSTRAINT 必走 DO block + `pg_constraint` exists check (line 240 + 269)。第二次跑時兩 IF NOT EXISTS 會 skip ALTER。
