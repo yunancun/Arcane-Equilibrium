@@ -13,6 +13,22 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+SCANNER_ADVISORY_BOUNDARY: dict[str, Any] = {
+    "module": "scanner",
+    "output_class": "advisory_evidence",
+    "can_directly_approve_orders": False,
+    "can_directly_dispatch_orders": False,
+    "can_directly_close_positions": False,
+    "position_decay_requires_review": True,
+    "execution_path": [
+        "OpportunityCandidate",
+        "StrategistDecision",
+        "GuardianVerdict",
+        "ExecutionPlan",
+        "DecisionLease",
+    ],
+}
+
 ScannerAuthorityMode = Literal[
     "legacy_gate",
     "advisory_shadow",

@@ -16,7 +16,23 @@ if _control_api_dir not in sys.path:
 from app.scanner_advisory_contracts import (  # noqa: E402
     OpportunityCandidate,
     OpportunityDecay,
+    SCANNER_ADVISORY_BOUNDARY,
 )
+
+
+def test_scanner_advisory_boundary_has_no_direct_execution_authority() -> None:
+    assert SCANNER_ADVISORY_BOUNDARY["output_class"] == "advisory_evidence"
+    assert SCANNER_ADVISORY_BOUNDARY["can_directly_approve_orders"] is False
+    assert SCANNER_ADVISORY_BOUNDARY["can_directly_dispatch_orders"] is False
+    assert SCANNER_ADVISORY_BOUNDARY["can_directly_close_positions"] is False
+    assert SCANNER_ADVISORY_BOUNDARY["position_decay_requires_review"] is True
+    assert SCANNER_ADVISORY_BOUNDARY["execution_path"] == [
+        "OpportunityCandidate",
+        "StrategistDecision",
+        "GuardianVerdict",
+        "ExecutionPlan",
+        "DecisionLease",
+    ]
 
 
 def test_opportunity_candidate_json_round_trip() -> None:

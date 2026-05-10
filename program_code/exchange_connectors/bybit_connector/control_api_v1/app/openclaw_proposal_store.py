@@ -16,6 +16,11 @@ import logging
 import time
 from typing import Any
 
+from .openclaw_authority_contracts import (
+    OPENCLAW_FORBIDDEN_SIDE_EFFECT_FRAGMENTS,
+    OPENCLAW_SAFE_APPROVAL_RISK_CLASSES,
+    OPENCLAW_SAFE_APPROVAL_TYPES,
+)
 from .db_pool import get_pg_conn
 
 try:  # pragma: no cover - exercised when psycopg2 is installed
@@ -42,25 +47,6 @@ _SENSITIVE_KEYS = {
     "token",
     "traceback",
 }
-_SAFE_APPROVAL_TYPES = {"read_only_report", "diagnosis_followup", "offline_replay"}
-_SAFE_APPROVAL_RISK_CLASSES = {"read_only", "offline"}
-_FORBIDDEN_SIDE_EFFECT_FRAGMENTS = (
-    "order",
-    "cancel",
-    "close",
-    "secret",
-    "key",
-    "live-auth",
-    "session/start",
-    "risk-config",
-    "strategy-config",
-    "toml",
-    "deploy",
-    "restart",
-    "shell",
-    "migration",
-)
-
 
 class OpenClawProposalStoreUnavailable(RuntimeError):
     pass
@@ -147,7 +133,7 @@ def _validate_side_effect_route(route: str | None) -> str | None:
     if not route_text:
         return None
     lowered = route_text.lower()
-    if any(fragment in lowered for fragment in _FORBIDDEN_SIDE_EFFECT_FRAGMENTS):
+    if any(fragment in lowered for fragment in OPENCLAW_FORBIDDEN_SIDE_EFFECT_FRAGMENTS):
         raise OpenClawProposalValidationError("forbidden_side_effect_route")
     if not lowered.startswith("/api/v1/governance/"):
         raise OpenClawProposalValidationError("unsupported_side_effect_route")
@@ -582,8 +568,8 @@ class OpenClawProposalStore:
 
     def _approval_can_complete_without_delegation(self, proposal: dict[str, Any]) -> bool:
         return (
-            proposal.get("proposal_type") in _SAFE_APPROVAL_TYPES
-            and proposal.get("risk_class") in _SAFE_APPROVAL_RISK_CLASSES
+            proposal.get("proposal_type") in OPENCLAW_SAFE_APPROVAL_TYPES
+            and proposal.get("risk_class") in OPENCLAW_SAFE_APPROVAL_RISK_CLASSES
             and not proposal.get("side_effect_route")
             and proposal.get("required_approval_class") in {"operator", "none"}
         )

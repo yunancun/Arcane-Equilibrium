@@ -26,6 +26,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from . import agents_routes_helpers as _agent_h
 from . import main_legacy as base
 from .db_pool import get_pg_conn
+from .openclaw_authority_contracts import (
+    OPENCLAW_CONTEXT_HEADERS as _OPENCLAW_CONTEXT_HEADERS,
+    OPENCLAW_PROPOSAL_LEDGER_ROUTES as _OPENCLAW_PROPOSAL_LEDGER_ROUTES,
+    OPENCLAW_READ_ONLY_ROUTES as _OPENCLAW_READ_ONLY_ROUTES,
+    build_openclaw_authority_posture,
+)
 from .openclaw_models import (
     OpenClawEnvelope,
     OpenClawEvidenceRef,
@@ -56,63 +62,6 @@ _AGENT_EVENT_TABLES = (
     "agent.ai_invocations",
 )
 _LOCAL_AGENT_ROLES = ("scout", "strategist", "guardian", "executor", "analyst")
-_OPENCLAW_CONTEXT_HEADERS = {
-    "source": "x-openclaw-source",
-    "channel": "x-openclaw-channel",
-    "sender": "x-openclaw-sender",
-    "auth_profile": "x-openclaw-auth-profile",
-    "request_id": "x-openclaw-request-id",
-}
-_OPENCLAW_READ_ONLY_ROUTES = (
-    (
-        "GET",
-        "/api/v1/openclaw/status",
-        "OpenClaw status view",
-    ),
-    (
-        "GET",
-        "/api/v1/openclaw/self-state",
-        "OpenClaw self-state view",
-    ),
-    (
-        "GET",
-        "/api/v1/openclaw/brief/latest",
-        "OpenClaw latest brief view",
-    ),
-    (
-        "GET",
-        "/api/v1/openclaw/diagnostics",
-        "OpenClaw diagnostics view",
-    ),
-    (
-        "GET",
-        "/api/v1/openclaw/escalations",
-        "OpenClaw supervisor escalation ledger view",
-    ),
-)
-_OPENCLAW_PROPOSAL_ROUTES = (
-    (
-        "GET",
-        "/api/v1/openclaw/proposals",
-        "OpenClaw proposal ledger view",
-    ),
-    (
-        "POST",
-        "/api/v1/openclaw/proposals",
-        "OpenClaw proposal intake ledger route",
-    ),
-    (
-        "POST",
-        "/api/v1/openclaw/proposals/{proposal_id}/approve",
-        "OpenClaw approval decision ledger route",
-    ),
-    (
-        "POST",
-        "/api/v1/openclaw/proposals/{proposal_id}/reject",
-        "OpenClaw rejection decision ledger route",
-    ),
-)
-_OPENCLAW_ACTIVE_ROUTES = _OPENCLAW_READ_ONLY_ROUTES + _OPENCLAW_PROPOSAL_ROUTES
 _SUPERVISOR_ESCALATION_PURPOSE = "openclaw_supervisor_escalation"
 
 
@@ -361,32 +310,7 @@ def _build_agent_states() -> list[dict[str, Any]]:
 
 
 def _build_authority_posture() -> dict[str, Any]:
-    return {
-        "trading_authority": "rust_openclaw_engine",
-        "gateway_role": "read_only_supervisor_relay",
-        "active_allowlist": [
-            {"method": method, "path": path}
-            for method, path, _label in _OPENCLAW_ACTIVE_ROUTES
-        ],
-        "deferred_workflows_enabled": True,
-        "proposal_creation_enabled": True,
-        "external_approval_relay_enabled": True,
-        "enabled_write_classes": [
-            "proposal_ledger",
-            "approval_decision_ledger",
-            "channel_event_audit",
-        ],
-        "can_submit_orders": False,
-        "can_cancel_orders": False,
-        "can_close_positions": False,
-        "can_mutate_live_config": False,
-        "can_mutate_risk_config": False,
-        "can_read_secrets": False,
-        "can_restart_or_deploy": False,
-        "requires_governance_hub_for_side_effects": True,
-        "requires_decision_lease_for_execution": True,
-        "request_context_required": list(_OPENCLAW_CONTEXT_HEADERS.keys()),
-    }
+    return dict(build_openclaw_authority_posture())
 
 
 def _build_gateway_posture() -> dict[str, Any]:
@@ -540,7 +464,7 @@ def _evidence_refs(generated_at_ms: int) -> list[OpenClawEvidenceRef]:
             safe_url=path,
         )
         for method, path, label in _OPENCLAW_READ_ONLY_ROUTES
-        + _OPENCLAW_PROPOSAL_ROUTES
+        + _OPENCLAW_PROPOSAL_LEDGER_ROUTES
     ]
     return [
         *route_refs,
