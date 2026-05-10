@@ -804,3 +804,44 @@ fn test_on_rejection_non_duplicate_position_runs_full_rollback() {
         "non-duplicate_position rejection 必須走 RC-04 把 cooldown 還原到未交易狀態"
     );
 }
+
+/// W7-3 Option B SLA：1000 次 on_rejection burst 不 panic / 不 hang / HashMap O(1) 更新。
+/// 模擬 INXUSDT 11:34 hot loop 場景（單 symbol 一分鐘 reject 2319 次的縮量回放）。
+/// 由 E4 W7-3 regression 加入，pure test scope，不修 business logic。
+///
+/// 驗證契約：
+///  1. burst 完成不 panic（HashMap insert / contains / String 解析 robust）。
+///  2. self.positions 在單 symbol 多次 sync 後保持 size=1（O(1) update 不累積）。
+///  3. 終態 self.positions[symbol] 應為最後一次 reason 的 direction（這裡是 SHORT）。
+///  4. wall-clock < 100ms（1000 op，mac_release 應 < 5ms；保留 100ms 防 CI 噪音）。
+#[test]
+fn test_on_rejection_duplicate_position_burst_no_panic_no_hang() {
+    let mut s = MaCrossover::new();
+    let intent = make_test_intent("INXUSDT", true);
+    let reason = "duplicate_position: INXUSDT already SHORT 1810";
+
+    let start = std::time::Instant::now();
+    for _ in 0..1000 {
+        s.on_rejection(&intent, reason);
+    }
+    let elapsed = start.elapsed();
+
+    // 1. HashMap O(1) update：1000 次同 symbol 後仍只有 1 entry。
+    assert_eq!(
+        s.positions.len(),
+        1,
+        "1000 次同 symbol on_rejection 後 positions HashMap 應只有 1 entry (O(1) update 不累積)"
+    );
+    // 2. 終態正確：最後一次 sync 為 SHORT。
+    assert_eq!(
+        s.positions.get("INXUSDT").copied(),
+        Some(false),
+        "burst 結束 positions[INXUSDT] 應為 Some(false)（SHORT）"
+    );
+    // 3. SLA：1000 op < 100ms（防 hot loop 引入 O(n) 病灶）。
+    assert!(
+        elapsed.as_millis() < 100,
+        "1000 次 on_rejection 應 < 100ms，實測 {} ms",
+        elapsed.as_millis()
+    );
+}
