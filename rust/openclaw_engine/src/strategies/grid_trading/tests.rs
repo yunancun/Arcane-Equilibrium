@@ -913,3 +913,37 @@ fn test_grid_churn_breaker_skips_open_but_allows_close() {
         other => panic!("churn breaker must still allow close, got {other:?}"),
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W7-5 — grid_trading import_positions（inventory model：is_long → +qty / is_short → -qty）
+// on_fill = no-op by-design（W7-4 §1 LOW，inventory 由 entry path 自管）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// W7-5 (grid_trading)：bootstrap import_positions 重建 net_inventory（含 sign convention）。
+#[test]
+fn test_grid_bootstrap_imports_signed_inventory_from_paper_state() {
+    use crate::paper_state::PaperState;
+
+    let mut paper = PaperState::new(10_000.0);
+    paper.apply_fill("BTC", true, 1.5, 50_000.0, 0.5, 1_000, "grid_trading");
+    paper.apply_fill("ETH", false, 2.0, 3_000.0, 0.3, 1_001, "grid_trading");
+    paper.apply_fill("SOL", true, 5.0, 100.0, 0.1, 1_002, "ma_crossover"); // 不應被 grid import
+
+    let mut g = GridTrading::new_adaptive_with_mode(GridSpacingMode::Linear);
+    g.import_positions(&paper);
+
+    assert_eq!(
+        g.net_inventory.get("BTC").copied(),
+        Some(1.5),
+        "grid_trading import LONG 必為 +qty"
+    );
+    assert_eq!(
+        g.net_inventory.get("ETH").copied(),
+        Some(-2.0),
+        "grid_trading import SHORT 必為 -qty"
+    );
+    assert!(
+        g.net_inventory.get("SOL").is_none(),
+        "ma_crossover owner 倉位不可被 grid import"
+    );
+}

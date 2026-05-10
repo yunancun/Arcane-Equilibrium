@@ -1183,3 +1183,68 @@ fn test_bbr_on_tick_w7_2_logs_skip_reason_via_state_sync() {
         "W7-2 sync 必 O(1) insert，positions 應只有 1 entry"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W7-5 — bb_reversion on_fill + import_positions（與 ma_crossover 同 pattern）
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::intent_processor::OrderIntent;
+use crate::paper_state::PaperState;
+
+fn make_intent_bbr(symbol: &str, is_long: bool) -> OrderIntent {
+    OrderIntent {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        confidence: 0.5,
+        strategy: "bb_reversion".to_string(),
+        order_type: "limit".to_string(),
+        limit_price: Some(50_000.0),
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+    }
+}
+
+/// W7-5 (bb_reversion)：on_fill 後 self.positions 必 sync。
+#[test]
+fn test_bbr_on_fill_updates_self_positions() {
+    let mut s = BbReversion::new();
+    let intent = make_intent_bbr("BTC", true);
+    let fill = openclaw_core::execution::FillResult {
+        fill_price: 50_000.0,
+        fill_qty: 1.0,
+        fee: 0.5,
+        slippage_bps: 1.0,
+        is_taker: false,
+    };
+    s.on_fill(&intent, &fill);
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(true),
+        "bb_reversion on_fill (LONG) 必 sync self.positions[BTC] = Some(true)"
+    );
+}
+
+/// W7-5 (bb_reversion)：bootstrap import_positions 過濾 owner_strategy = bb_reversion only。
+#[test]
+fn test_bbr_bootstrap_imports_paper_state_positions() {
+    let mut paper = PaperState::new(10_000.0);
+    paper.apply_fill("BTC", true, 1.0, 50_000.0, 0.5, 1_000, "bb_reversion");
+    paper.apply_fill("ETH", false, 1.0, 3_000.0, 0.3, 1_001, "ma_crossover");
+
+    let mut s = BbReversion::new();
+    s.import_positions(&paper);
+
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(true),
+        "bb_reversion 必 import 自己的倉位"
+    );
+    assert!(
+        s.positions.get("ETH").is_none(),
+        "bb_reversion 不可 import ma_crossover 的倉位"
+    );
+    assert_eq!(s.positions.len(), 1);
+}

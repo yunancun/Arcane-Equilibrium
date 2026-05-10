@@ -325,6 +325,53 @@ impl Strategy for BbBreakout {
         self.persistence.clear(symbol);
     }
 
+    /// W7-5 part 1：真實 fill confirmed 後同步 `BbBreakoutPerSymbolState.position`。
+    ///
+    /// callsite：`step_4_5_dispatch.rs:925`，於 paper_state.apply_fill 之前。
+    /// 入場路徑（`on_tick` 主流程）已 eager mutate `st.position = Some(is_long)` 在
+    /// intent emit 時（`bb_breakout/mod.rs:756`）；on_fill 此處作為 fill-confirm
+    /// safety net。entry_price / trailing_stop / squeeze_detected_ms 由 entry path
+    /// 一同寫入，on_fill 不重複寫（避免覆寫 trailing_stop 已調整值）。
+    fn on_fill(
+        &mut self,
+        intent: &OrderIntent,
+        _fill: &openclaw_core::execution::FillResult,
+    ) {
+        let st = self.symbols.get_or_init(&intent.symbol);
+        st.position = Some(intent.is_long);
+        tracing::debug!(
+            target: "bb_breakout",
+            symbol = %intent.symbol,
+            is_long = intent.is_long,
+            "on_fill: synced PerSymbolState.position to fill direction (W7-5 part 1)"
+        );
+    }
+
+    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 `self.symbols`。
+    ///
+    /// 過濾條件：`pos.owner_strategy == "bb_breakout"`。寫 `position` +
+    /// `entry_price`；trailing_stop 留 `None`（首個 1m tick 由 `on_tick` 內 ATR
+    /// 計算重新設定）；squeeze_detected_ms 留 `None`（外部開倉非 squeeze 觸發）。
+    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
+        let mut imported = 0_usize;
+        for pos in paper_state.positions() {
+            if pos.owner_strategy == self.name() {
+                let st = self.symbols.get_or_init(&pos.symbol);
+                st.position = Some(pos.is_long);
+                st.entry_price = Some(pos.entry_price);
+                imported += 1;
+            }
+        }
+        if imported > 0 {
+            tracing::info!(
+                strategy = "bb_breakout",
+                imported,
+                "W7-5 import_positions: rebuilt self.symbols.position from paper_state \
+                 / 從 paper_state 重建 self.symbols.position"
+            );
+        }
+    }
+
     /// RC-04: Revert per-symbol state on rejection. Snapshot is the full
     /// `BbBreakoutPerSymbolState` (or `None` if the symbol was unseen); restoring
     /// it exactly reproduces the pre-tick per-symbol state.

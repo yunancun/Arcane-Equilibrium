@@ -52,6 +52,17 @@ impl Orchestrator {
         self.strategies.push(strategy);
     }
 
+    /// W7-5 part 2：bootstrap 階段呼叫每個策略的 `import_positions(&paper_state)`，
+    /// 讓策略各自從 paper_state 已 seed 的倉位重建內部 self.positions /
+    /// self.net_inventory / self.symbols。對應 `event_consumer/bootstrap.rs` 中
+    /// `StrategyFactory::create_for_engine` register 之後、grant_paper_auth 之前
+    /// 的單次呼叫。各策略 override 內以 `pos.owner_strategy == self.name()` 過濾。
+    pub fn import_positions_for_all(&mut self, paper_state: &crate::paper_state::PaperState) {
+        for strategy in &mut self.strategies {
+            strategy.import_positions(paper_state);
+        }
+    }
+
     /// Dispatch tick to all strategies and collect intents.
     /// NOTE: Not called in production since RC-04 (per-strategy loop in tick_pipeline).
     /// Retained for test helpers and potential future batch-processing use.

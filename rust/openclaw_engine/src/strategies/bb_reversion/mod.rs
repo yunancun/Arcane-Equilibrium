@@ -370,6 +370,49 @@ impl Strategy for BbReversion {
         self.persistence.clear(symbol);
     }
 
+    /// W7-5 part 1：真實 fill confirmed 後同步 self.positions 為 fill direction。
+    ///
+    /// callsite：`step_4_5_dispatch.rs:925`，於 paper_state.apply_fill 之前。
+    /// 入場路徑（`on_tick` 主流程）已 eager mutate `self.positions.insert(...)` 在
+    /// intent emit 時（`bb_reversion/mod.rs:553`），on_fill 此處作為 fill-confirm
+    /// safety net；與 ma_crossover 同 pattern。
+    fn on_fill(
+        &mut self,
+        intent: &OrderIntent,
+        _fill: &openclaw_core::execution::FillResult,
+    ) {
+        self.positions
+            .insert(intent.symbol.clone(), intent.is_long);
+        tracing::debug!(
+            target: "bb_reversion",
+            symbol = %intent.symbol,
+            is_long = intent.is_long,
+            "on_fill: synced self.positions to fill direction (W7-5 part 1)"
+        );
+    }
+
+    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 self.positions。
+    ///
+    /// 過濾條件：`pos.owner_strategy == "bb_reversion"`。與 ma_crossover 同 pattern；
+    /// `PerSymbolState<bool>::insert(String, bool)` 與 `HashMap` 同簽名。
+    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
+        let mut imported = 0_usize;
+        for pos in paper_state.positions() {
+            if pos.owner_strategy == self.name() {
+                self.positions.insert(pos.symbol.clone(), pos.is_long);
+                imported += 1;
+            }
+        }
+        if imported > 0 {
+            tracing::info!(
+                strategy = "bb_reversion",
+                imported,
+                "W7-5 import_positions: rebuilt self.positions from paper_state \
+                 / 從 paper_state 重建 self.positions"
+            );
+        }
+    }
+
     fn on_tick(
         &mut self,
         ctx: &TickContext<'_>,

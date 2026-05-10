@@ -328,6 +328,52 @@ impl Strategy for GridTrading {
         self.on_external_close_impl(symbol);
     }
 
+    /// W7-5 part 1：grid_trading 用 `net_inventory: HashMap<String, f64>` 而非
+    /// boolean position；entry path 路徑 inventory 已在 `signal.rs:185`
+    /// `self.net_inventory.insert(sym, inv)` 隨 cross signal 寫入；fill confirmed
+    /// 後 inventory 不需再次同步（idempotent）。on_fill 此處 W7-4 §1 verdict =
+    /// LOW（M-2 backoff + churn breaker 已護），保留 default no-op + tracing 提醒
+    /// 而不重複寫 inventory（避免與 entry path qty_per_grid 偏移計算相撞）。
+    fn on_fill(
+        &mut self,
+        intent: &OrderIntent,
+        _fill: &openclaw_core::execution::FillResult,
+    ) {
+        // grid_trading inventory 由 entry path 自管，on_fill 不重複寫。
+        // 留 trace 便於 debug：fill 路徑與既有 inventory model 不對齊時可診斷。
+        tracing::trace!(
+            target: "grid_trading",
+            symbol = %intent.symbol,
+            is_long = intent.is_long,
+            current_inventory = self.net_inventory.get(&intent.symbol).copied().unwrap_or(0.0),
+            "on_fill: inventory unchanged (W7-5 part 1, by-design no-op for inventory model)"
+        );
+    }
+
+    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 `self.net_inventory`。
+    ///
+    /// 過濾條件：`pos.owner_strategy == "grid_trading"`；is_long → +qty，is_short → -qty。
+    /// 重啟後 paper_state 已由 bootstrap 種入；此處讓 grid 知道既有部位數量，
+    /// 避免 cold-start 時把已存倉位視為 0 inventory 而產生與真實狀態偏差的 cross signal。
+    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
+        let mut imported = 0_usize;
+        for pos in paper_state.positions() {
+            if pos.owner_strategy == self.name() {
+                let signed_qty = if pos.is_long { pos.qty } else { -pos.qty };
+                self.net_inventory.insert(pos.symbol.clone(), signed_qty);
+                imported += 1;
+            }
+        }
+        if imported > 0 {
+            tracing::info!(
+                strategy = "grid_trading",
+                imported,
+                "W7-5 import_positions: rebuilt self.net_inventory from paper_state \
+                 / 從 paper_state 重建 self.net_inventory"
+            );
+        }
+    }
+
     /// Pipeline confirmed a strategy-emitted Close was executed — adjust per-symbol inventory.
     /// 管線確認策略平倉已執行 — 調整該幣種庫存。
     fn on_close_confirmed(&mut self, symbol: &str) {

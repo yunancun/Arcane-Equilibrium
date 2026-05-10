@@ -109,7 +109,30 @@ pub trait Strategy: Send {
 
     /// Called when an order from this strategy was filled.
     /// 當此策略的訂單成交時調用。
+    /// W7-5：策略應 override 此方法在真實 fill confirmed 後同步 self.positions
+    /// 為 fill direction，作為 entry path eager mutate（intent emit 時已寫入）的
+    /// fill-confirm safety net。Open 路徑時 callsite 在 step_4_5_dispatch.rs:925，
+    /// paper_state.apply_fill 之前；Close 路徑不走 on_fill（走 on_close_confirmed）。
     fn on_fill(&mut self, _intent: &OrderIntent, _fill: &FillResult) {
+        // Default no-op / 默認無操作
+    }
+
+    /// Called once during engine bootstrap after `paper_state.import_positions(...)`
+    /// has seeded exchange positions. Strategies that maintain internal position
+    /// state (`self.positions` / `self.net_inventory` / `self.symbols`) should
+    /// override to filter `paper_state.positions()` by `pos.owner_strategy ==
+    /// self.name()` and rebuild internal state, breaking cold-start desync where
+    /// engine restart leaves `paper_state` populated (from `bybit_sync` snapshot)
+    /// but `self.positions = HashMap::new()` (empty), causing entry-path eager
+    /// re-emit on the very first tick (the W6 INXUSDT 11:34 hot-loop class).
+    /// W7-5 part 2：bootstrap 階段於 `paper_state.import_positions` 之後呼叫一次，
+    /// 5 策略應 override：以 `pos.owner_strategy == self.name()` 過濾 paper_state
+    /// 倉位重建 self.positions / self.net_inventory / self.symbols，避免重啟後
+    /// strategy 端為空、paper_state 已載入而 entry path 在第一個 tick 撞 router
+    /// gate 1.5 duplicate_position 的 cold-start desync hot loop。
+    /// `bybit_sync` / `orphan_adopted` owner 不對應任何策略 name，自然不被任何
+    /// 策略 import（避免誤領 orphan）。
+    fn import_positions(&mut self, _paper_state: &crate::paper_state::PaperState) {
         // Default no-op / 默認無操作
     }
 
