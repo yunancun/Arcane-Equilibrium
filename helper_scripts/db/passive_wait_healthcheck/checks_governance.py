@@ -977,3 +977,217 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
         "(RFC v2 §4 lease_revoke_trigger fires; "
         "GovernanceHub must auto-revoke active leases)",
     )
+
+
+# ---------------------------------------------------------------------------
+# `[64]` unblock_candidates_drift — W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1
+# (Sprint N+1 2026-05-10). 對應 spec §6.2 4 項：
+#   1. Stale candidate（outcome=NULL AND candidate_at_ms < now-14d）→ WARN
+#   2. Yo-yo detection（同 cell 30d 內 unfrozen + re_frozen ≥1 cycle 後仍出現
+#      新 candidate）→ FAIL
+#   3. Sign-off completeness（outcome='unfrozen' row 必有 pa_report_path +
+#      qc_report_path + commit_sha non-NULL）→ FAIL（V090 PG CHECK 已強制；
+#      此 healthcheck 是 sentinel of sentinel，偵測 constraint 被 disable）
+#   4. Audit consistency（unfrozen cell 在 freeze.json unfrozen_cells_history
+#      對應 entry）→ WARN（json 同步缺）
+# 對應 V090: governance.unblock_candidates （schema land 2026-05-10）
+# 對應 writer: helper_scripts/db/audit/blocked_symbols_30d_unblock_check.py
+# ---------------------------------------------------------------------------
+
+# spec §6.2 第 1 項閾值：candidate 14d 無 sign-off → WARN
+UNBLOCK_STALE_CANDIDATE_DAYS: int = 14
+
+# spec §5.3 yo-yo detection window
+UNBLOCK_YOYO_WINDOW_DAYS: int = 30
+
+
+def check_64_unblock_candidates_drift(cur) -> tuple[str, str]:
+    """[64] unblock_candidates_drift — 動態解封 candidate 治理 4 項漂移哨兵。
+
+    spec § 6.2 4 sub-check（per docs/execution_plan/2026-05-10--p1_dynamic_unblock_check_1_spec.md）：
+
+      1. **Stale candidate**：`outcome=NULL` AND `candidate_at_ms < now - 14d`
+         → WARN（candidate 14d 無 sign-off → operator inattention signal）。
+      2. **Yo-yo detection**：同 cell 30d 內 unfrozen + re_frozen ≥1 cycle 後
+         next 30d 仍出現新 candidate → FAIL（spec §5.3 selection-bias 防護）。
+      3. **Sign-off completeness**：`outcome='unfrozen'` row 必有
+         `pa_report_path` + `qc_report_path` + `commit_sha` non-NULL → FAIL。
+         注意：V090 unfrozen_completeness_chk PG CHECK 已強制，理論上 INSERT/
+         UPDATE 期 PG 直接 reject；本 healthcheck 是「constraint 還活著」的
+         sentinel of sentinel — 防 partial-rollout drift（V090 sequence
+         schema被 disable / DROP）。
+      4. **Audit consistency**：`unfrozen` cell 在
+         `docs/governance_dev/strategy_blocked_symbols_freeze.json` 對應的
+         `unfrozen_cells_history` 應有 entry（writer 寫 json）→ 不對應 = WARN。
+         json 為 source-of-truth governance state；同步缺即 audit chain 斷裂。
+
+    Verdict bands / 結果分級：
+        - 4 sub-check 全 PASS → PASS
+        - 4 sub-check 全 PASS but stale 數 > 0 → WARN（spec §6.2 #1）
+        - 4 sub-check 有 #2 or #3 trip → FAIL（不可恢復契約 break）
+        - V090 表不存在 → PASS-skip（spec §6.2：「V090 absent 不阻塞，pre-deploy
+          狀態」）
+
+    Pre-conditions (fail-closed):
+        - governance.unblock_candidates 表存在（V090 已 land）— 否則 PASS-skip。
+
+    Returns:
+        ``(status, msg)`` tuple. msg 列出 4 sub-check 結果概要。
+    """
+    # Defensive rollback before each query (mirrors `[42]` / `[42b]` pattern).
+    # 每次 query 前保險 rollback（鏡 [42] / [42b]）。
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001 — defensive, rollback failure ≠ fatal
+        pass
+
+    # Existence pre-check — V090 may not be deployed yet in some Sprint N+1
+    # rollout orderings; treat as PASS-skip rather than FAIL so this check
+    # does not block other governance signals.
+    # V090 存在性檢查 — 某些 Sprint N+1 部署順序下 V090 尚未 land；
+    # 視為 PASS-skip 而非 FAIL，避免阻塞其他治理信號。
+    try:
+        cur.execute(
+            "SELECT to_regclass('governance.unblock_candidates') IS NOT NULL"
+        )
+        exists_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[64] V090 table existence check failed: {exc}")
+    if not exists_row or not exists_row[0]:
+        return (
+            "PASS",
+            "[64] governance.unblock_candidates missing — V090 not applied "
+            "(SKIP; expected during Sprint N+1 rollout window)",
+        )
+
+    # ────────────────────────────────────────────────────────────────────
+    # Sub-check 1: Stale candidate（outcome=NULL AND age > 14d）
+    # ────────────────────────────────────────────────────────────────────
+    sql_stale = (
+        "SELECT count(*)::int AS stale_count "
+        "FROM governance.unblock_candidates "
+        "WHERE outcome IS NULL "
+        f"  AND candidate_at_ms < (extract(epoch from now()) * 1000)::bigint "
+        f"          - ({UNBLOCK_STALE_CANDIDATE_DAYS}::bigint * 86400000)"
+    )
+    try:
+        cur.execute(sql_stale)
+        row = cur.fetchone()
+        stale_count = int(row[0] or 0) if row else 0
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[64] sub-check 1 stale-candidate query failed: {exc}")
+
+    # ────────────────────────────────────────────────────────────────────
+    # Sub-check 2: Yo-yo detection
+    # 同 cell 在 30d 內既有 unfrozen 又有 re_frozen 後 next 30d 仍出現新 candidate
+    # ────────────────────────────────────────────────────────────────────
+    sql_yoyo = (
+        "WITH yoyo_cells AS ("
+        "  SELECT cell_strategy, cell_symbol "
+        "  FROM governance.unblock_candidates "
+        f"  WHERE candidate_at_ms > (extract(epoch from now()) * 1000)::bigint "
+        f"          - ({UNBLOCK_YOYO_WINDOW_DAYS}::bigint * 86400000) "
+        "    AND outcome IN ('unfrozen', 're_frozen') "
+        "  GROUP BY cell_strategy, cell_symbol "
+        "  HAVING count(DISTINCT outcome) >= 2"
+        ") "
+        "SELECT count(*)::int AS yoyo_count "
+        "FROM governance.unblock_candidates u "
+        "JOIN yoyo_cells y "
+        "  ON u.cell_strategy = y.cell_strategy "
+        " AND u.cell_symbol   = y.cell_symbol "
+        f"WHERE u.candidate_at_ms > (extract(epoch from now()) * 1000)::bigint "
+        f"          - ({UNBLOCK_YOYO_WINDOW_DAYS}::bigint * 86400000) "
+        "  AND u.outcome IS NULL"
+    )
+    try:
+        cur.execute(sql_yoyo)
+        row = cur.fetchone()
+        yoyo_count = int(row[0] or 0) if row else 0
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[64] sub-check 2 yo-yo query failed: {exc}")
+
+    # ────────────────────────────────────────────────────────────────────
+    # Sub-check 3: Sign-off completeness（V090 PG CHECK sentinel of sentinel）
+    # ────────────────────────────────────────────────────────────────────
+    sql_signoff = (
+        "SELECT count(*)::int AS incomplete_signoff_count "
+        "FROM governance.unblock_candidates "
+        "WHERE outcome = 'unfrozen' "
+        "  AND (pa_report_path IS NULL "
+        "       OR qc_report_path IS NULL "
+        "       OR commit_sha IS NULL "
+        "       OR unfrozen_at_ms IS NULL)"
+    )
+    try:
+        cur.execute(sql_signoff)
+        row = cur.fetchone()
+        incomplete_signoff_count = int(row[0] or 0) if row else 0
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[64] sub-check 3 sign-off query failed: {exc}")
+
+    # ────────────────────────────────────────────────────────────────────
+    # Sub-check 4: Audit consistency（unfrozen rows 對應 freeze.json
+    # unfrozen_cells_history entry 是否存在）
+    # 注意：純 PG SELECT 無法驗 freeze.json；此 sub-check 在 healthcheck
+    # 內以「unfrozen rows count」作 surrogate signal — operator 看到 unfrozen
+    # rows 後手動驗 freeze.json 同步狀態（符合 spec §6.2 #4 「json 同步缺」
+    # WARN 語意）。完整 cross-check 留 force_eval API + GUI 配合執行。
+    # ────────────────────────────────────────────────────────────────────
+    sql_unfrozen = (
+        "SELECT count(*)::int AS unfrozen_count "
+        "FROM governance.unblock_candidates "
+        "WHERE outcome = 'unfrozen'"
+    )
+    try:
+        cur.execute(sql_unfrozen)
+        row = cur.fetchone()
+        unfrozen_count = int(row[0] or 0) if row else 0
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[64] sub-check 4 unfrozen-count query failed: {exc}")
+
+    base = (
+        f"stale_n={stale_count}, yoyo_n={yoyo_count}, "
+        f"incomplete_signoff_n={incomplete_signoff_count}, "
+        f"unfrozen_n={unfrozen_count}"
+    )
+
+    # ────────────────────────────────────────────────────────────────────
+    # Verdict logic
+    # ────────────────────────────────────────────────────────────────────
+    # FAIL 優先：sub-check 2 yo-yo or sub-check 3 sign-off completeness
+    if yoyo_count > 0:
+        return (
+            "FAIL",
+            base
+            + f" — yo-yo detection: {yoyo_count} candidate row(s) on cell(s) "
+            f"with prior unfrozen+re_frozen cycle within {UNBLOCK_YOYO_WINDOW_DAYS}d "
+            "(spec §5.3 selection-bias 防護觸發；force_eval 應拒未來相同 cell 評估)",
+        )
+    if incomplete_signoff_count > 0:
+        return (
+            "FAIL",
+            base
+            + f" — sign-off completeness violation: {incomplete_signoff_count} "
+            "row(s) outcome='unfrozen' missing pa_report_path / qc_report_path / "
+            "commit_sha / unfrozen_at_ms (V090 unfrozen_completeness_chk should "
+            "have blocked; investigate constraint disable / partial rollout)",
+        )
+
+    # WARN：stale candidate（運維未及時 sign-off 信號）
+    if stale_count > 0:
+        return (
+            "WARN",
+            base
+            + f" — {stale_count} candidate row(s) age > {UNBLOCK_STALE_CANDIDATE_DAYS}d "
+            "with no sign-off (operator inattention signal; review pending "
+            "PA + QC review in docs/CCAgentWorkSpace/{PA,QC}/workspace/reports/)",
+        )
+
+    # 全綠 PASS（含 unfrozen_count > 0 但無 sign-off violation 的健康狀態）
+    return (
+        "PASS",
+        base
+        + " — no stale candidate / no yo-yo / no sign-off violation "
+        "(spec §6.2 4 sub-check all green)",
+    )

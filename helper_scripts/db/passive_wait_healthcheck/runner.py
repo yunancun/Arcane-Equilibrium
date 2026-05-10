@@ -152,6 +152,16 @@ from .checks_governance import (
     # 部署的 in-flight run。WARN-only 過渡 gate（V042 SQL-backed archive
     # 於 Wave 6+ land 後取代）。
     check_44_replay_manifest_key_presence,
+    # W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1（2026-05-10 Sprint N+1）— `[64]`
+    # unblock_candidates_drift sentinel。spec §6.2 4 sub-check：
+    # (1) stale candidate >14d 無 sign-off → WARN
+    # (2) yo-yo detection 30d 內 unfrozen+re_frozen 後新 candidate → FAIL
+    # (3) sign-off completeness violation（V090 PG CHECK sentinel of
+    #     sentinel）→ FAIL
+    # (4) unfrozen rows count（freeze.json sync surrogate）。
+    # 配對 writer: helper_scripts/db/audit/blocked_symbols_30d_unblock_check.py
+    # 配對 V090: governance.unblock_candidates。
+    check_64_unblock_candidates_drift,
 )
 from .checks_pricing_binding import (
     # REF-20 Sprint C R6-T7 (2026-05-05) — `[45]` LG-3 provider pricing
@@ -202,6 +212,21 @@ from .checks_canary_stage_invariant import (
     # rollback）。
     check_58_graduated_canary_stage_invariant,
 )
+from .checks_canary_stage_criteria import (
+    # W5-E1-A P1-CANARY-STAGE-CRITERIA-1 (2026-05-10) — `[58a]` enrich evidence
+    # collection per spec §7.4. Reads V089 governance.canary_stage_metric_registry
+    # seed and reports per-stage metric coverage + active cohort metric set
+    # (promote / rollback row counts). Verdict-preserving: WARN on V089 seed
+    # drift (per stage row count below EXPECTED), PASS on full seed. Evidence
+    # only — actual cohort metric value computation deferred to W3 cohort SQL
+    # pipeline land. Spec source:
+    # docs/execution_plan/2026-05-10--p1_canary_stage_criteria_1_spec.md §7.4.
+    # W5-E1-A（2026-05-10）— `[58a]` 補強證據收集（spec §7.4）。讀 V089 metric
+    # registry seed 報告每 stage metric 覆蓋率 + active cohort 對應 metric set；
+    # WARN-only verdict（不 hard FAIL，避免阻塞 silent-dead 偵測）。實際 cohort
+    # metric 值計算等 W3 cohort SQL pipeline land 後 enrich。
+    check_58a_stage_criteria_eval,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -223,7 +248,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53][54][55][58]                 REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W-AUDIT-9 T4 graduated canary stage invariant
+    [46][48][49][50][51][52][53][54][55][58][64]             REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W-AUDIT-9 T4 graduated canary stage invariant + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -271,6 +296,7 @@ Execution / cost sentinels added after F7:
   [55] agent_decision_spine_lineage       (P1-AGENT-OBS-1 — MAG-082 lineage readiness)
   [56] live_pipeline_active               (P0-NEW-ISSUE-1 — live slot configured but LiveDemo not spawned)
   [58] graduated_canary_stage_invariant   (W-AUDIT-9 T4 — AMD-2026-05-09-03 §4.1 5-stage state-machine invariant; SM-04 ≥ L3 escalate hard FAIL → triggers stage 0 rollback per invariant 12)
+  [64] unblock_candidates_drift           (W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 2026-05-10 Sprint N+1 — spec §6.2 4 sub-check: stale candidate / yo-yo detection / sign-off completeness / unfrozen rows count; pairs with V090 governance.unblock_candidates + 30d cycle writer)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -291,7 +317,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53][54][55][58]
+              [46][48][49][50][51][52][53][54][55][58][64]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -313,7 +339,8 @@ def main() -> int:
                [53] REF-21 V058 universe recorder;
                [54] OpenClaw proposal relay;
                [55] Agent Decision Spine MAG-082 lineage readiness;
-               [58] W-AUDIT-9 T4 graduated canary stage invariant — AMD-2026-05-09-03 §4.1)
+               [58] W-AUDIT-9 T4 graduated canary stage invariant — AMD-2026-05-09-03 §4.1;
+               [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift — spec §6.2 4 sub-check)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
@@ -325,7 +352,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][58]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][58][64]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -840,6 +867,29 @@ def main() -> int:
             # '%sm04%' 偵測。純 SELECT，cursor 區塊內。
             s, m = check_58_graduated_canary_stage_invariant(cur)
             results.append(("[58] graduated_canary_stage_invariant", s, m))
+
+            # [58a] W5-E1-A P1-CANARY-STAGE-CRITERIA-1 (2026-05-10 Sprint N+1):
+            # spec §7.4 enrich evidence collection — per-stage metric registry
+            # coverage + active cohort metric set summary. Verdict-preserving
+            # WARN-on-V089-seed-drift / PASS-on-full-seed (does not hard FAIL,
+            # avoiding silent-dead noise). Actual cohort metric value computation
+            # deferred to W3 cohort SQL pipeline land. Pure SELECT inside cursor
+            # block; defensive rollback at top.
+            # [58a] W5-E1-A（2026-05-10）— spec §7.4 enrich 證據收集；報告 V089
+            # metric registry 每 stage 覆蓋 + active cohort 對應 metric set。
+            # WARN-on-drift / PASS-on-full-seed；實際 cohort metric 計算等 W3 land。
+            s, m = check_58a_stage_criteria_eval(cur)
+            results.append(("[58a] stage_criteria_eval", s, m))
+
+            # [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 (2026-05-10 Sprint N+1):
+            # 動態解封 candidate 治理 4 項漂移哨兵（spec §6.2）。
+            # (1) stale candidate >14d / (2) yo-yo / (3) sign-off completeness /
+            # (4) unfrozen rows count（freeze.json 同步 surrogate）。
+            # V090 缺即 PASS-skip（pre-deploy 不阻塞）。純 SELECT cursor 區塊內。
+            # [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1（2026-05-10 Sprint N+1）：
+            # 動態解封候選漂移 4 哨兵。spec §6.2；V090 缺 PASS-skip。
+            s, m = check_64_unblock_candidates_drift(cur)
+            results.append(("[64] unblock_candidates_drift", s, m))
     finally:
         conn.close()
 
