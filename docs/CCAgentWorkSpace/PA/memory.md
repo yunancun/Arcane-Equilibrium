@@ -2606,3 +2606,38 @@ PM 派 PA 預寫 W5 三 P1 ticket spec 省 PA D+1-3 spec phase；W5 sub-agent E1
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--ma_crossover_billusdt_scope_verify.md`
 
 **Lesson**: 同 symbol 在不同 alpha source 策略間「freeze cluster verdict 不可傳遞」是 governance pattern — grid mean-reversion 在 BILLUSDT 失敗 ≠ ma trend-following 在 BILLUSDT 失敗；frozen JSON 設計成 per-strategy cell 正是此意。多策略治理 sign-off 必檢「cluster verdict scope = 哪策略」，避免錯誤套用導致過早 freeze 縮 trade-eligible universe（會與 W5 selection-bias unblock 機制反向衝突）。
+
+## 2026-05-10 W7-4 5 策略 position sync post-W7-deploy systemic audit refresh
+
+PA refresh of W7-4 systemic audit done **post-W7 chain land**：W7-3 `b42731f6` deployed (engine PID 1441249 baseline), W7-1 `c9fb0b8f` + W7-2 `22efd9de` + W7-5 `bb7cb293` PR ready (NOT DEPLOYED, pending sign-off restart). HEAD `94d688fb`. Audit framework = 4 audit point matrix per CC dispatch (entry query / on_fill / on_rejection 1-tick defense / bootstrap import).
+
+### Post-IMPL coverage matrix
+- **ma_crossover** = A (full coverage：W7-2 entry query @ strategy_impl.rs:253-266 + W7-3 on_rejection 1-tick defense @ :55-91 + W7-5 on_fill @ :131-148 + import_positions @ :159-175)
+- **bb_reversion** = B (W7-2 entry query land @ mod.rs:500-512 + W7-5 on_fill+import 全 land；but **on_rejection W7-3 Option B 1-tick defense 缺**)
+- **bb_breakout** = C (only W7-5 on_fill+import 包；**entry path 完全沒查 ctx.position_state** + **on_rejection 沒 W7-3 1-tick defense**)
+- **grid_trading** = A (by-design alternative：inventory model + M-2 30s reject_cooldown 結構性護欄 + W7-5 on_fill 顯式 by-design no-op + import_positions sign convention preserved)
+- **funding_arb** = A (RETIRED-LOW dormant ADR-0018 + 1h cooldown + 8h funding cycle 結構性護欄 + W7-5 defensive 寫入)
+
+### Discovered tickets
+- **P1-1** bb_reversion on_rejection 1-tick defense missing (~30 LOC mirror ma_crossover) — Sprint N+1 W5 if capacity
+- **P1-2** bb_breakout on_rejection 1-tick defense missing (~35 LOC, oi_buffer interaction needs care) — Sprint N+2 W5
+- **P2-1** bb_breakout entry path Option A query missing (~30 LOC, entry_price 不應 cross-strategy 同步) — Sprint N+2 paired with P1-2
+- **P3** trait-level invariant strengthening (Option 1 doc / Option 2 helper / Option 3 trait method) — Sprint N+3 RFC
+
+### 系統性結論
+W7-3 Option B (on_rejection duplicate_position 1-tick defense) **未被傳播到 bb_reversion/bb_breakout**；W7-2 (entry path Option A) 被傳到 bb_reversion 但 **沒推到 bb_breakout**。W7 chain 是「partial systemic fix」— W7-2 entry-path Option A 跟 W7-3 on_rejection Option B 在 4 策略中只有 ma_crossover 同時擁有兩道防線。
+
+### 治理盲點 finding
+Strategy trait (`strategies/mod.rs`) 對 W7 pattern **不強制**：on_rejection / on_fill / import_positions 全是 default no-op，rely on 策略作者主動 override。W7-5 design 把 on_fill+import 的 callsite 拉到 trait（orchestrator 對所有策略 blind iterate），所以這兩點 100% uniform；但 entry-path Option A + on_rejection Option B 是 strategy-internal pattern，沒 trait-level 強制 → 未來 6th strategy 重蹈同樣 desync hot-loop 風險的 systemic gap 存在。
+
+### 執行影響
+- bb_reversion residual race window 估計 <10/day per cohort（W6 baseline 0 visible burst）— P1 修復 cost-benefit 高
+- bb_breakout 0 historical occurrence（6-gate 自然限頻）— P1+P2 paired 修復對齊 ma_crossover gold standard，治理完備性
+- 不阻 N+1 D+0 deploy；P1-1 + P1-2 + P2-1 進 dispatch v3.X §3.5 W5 list
+
+### 16 原則 + DOC-08 §12 + 硬邊界
+全 0 觸碰（純 read-only audit, 無 IMPL 改動）。
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_4_5_strategy_position_sync_systemic_audit.md`
+
+**Lesson**: 「partial systemic fix」是 governance 失蹤 — 認識到 root-cause 結構是 systemic（W7-2 commit 訊息明確說「bb_reversion 同 pattern apply (per W7-4 §3 verdict HIGH risk)」）但 fix coverage 只覆蓋部分 surface（W7-3 沒有 propagation policy）。後續 systemic audit 必明文 verify「fix pattern 是否覆蓋全 surface 而不只 commit 訊息列出的 surface」，避免 W7 chain 這類 Option B 1-tick defense 三策略漏二的盲區。
