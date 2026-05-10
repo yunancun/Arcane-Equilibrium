@@ -28,6 +28,13 @@ _EXIT_ACTIONS = {"reduce", "close"}
 _ENTRY_DIRECTIONS = {"long", "short"}
 _EXIT_DIRECTIONS = {"close_long", "close_short"}
 _URGENCY_ORDER = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
+_CANONICAL_STRATEGIES = {
+    "ma_crossover",
+    "grid_trading",
+    "bb_reversion",
+    "bb_breakout",
+    "funding_arb",
+}
 
 
 @dataclass(frozen=True)
@@ -107,6 +114,7 @@ def build_execution_plan(
             item.model_dump(mode="json") for item in verdict.p2_modifications
         ],
         "applied_p2_modifications": applied_modifications,
+        "decision_metadata": dict(decision.metadata),
         "strategy_signal_id": decision.signal_id,
         "selected_candidate_id": decision.selected_candidate_id,
         "expected_net_edge_bps": decision.expected_net_edge_bps,
@@ -142,6 +150,94 @@ def build_execution_plan(
         lease_id=None,
         idempotency_key=generated_idempotency_key,
         metadata=metadata,
+    )
+
+
+def execution_plan_from_approved_intent_payload(
+    payload: dict[str, Any],
+    *,
+    ts_ms: int | None = None,
+    order_plan_id: str | None = None,
+) -> ExecutionPlan:
+    """Adapt legacy APPROVED_INTENT payloads into the typed ExecutionPlan seam."""
+
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError("approved_intent_payload_required")
+    explicit_plan = payload.get("execution_plan")
+    if isinstance(explicit_plan, ExecutionPlan):
+        return explicit_plan
+    if isinstance(explicit_plan, dict):
+        return ExecutionPlan(**explicit_plan)
+
+    metadata = _dict_or_empty(payload.get("metadata"))
+    params = _dict_or_empty(payload.get("params"))
+    intent_id = str(payload.get("intent_id") or payload.get("decision_id") or "").strip()
+    if not intent_id:
+        raise ValueError("approved_intent_intent_id_required")
+
+    generated_ts_ms = int(ts_ms or payload.get("timestamp_ms") or metadata.get("ts_ms") or 0)
+    if generated_ts_ms <= 0:
+        import time
+
+        generated_ts_ms = int(time.time() * 1000)
+
+    strategy = str(payload.get("strategy") or metadata.get("strategy") or "agent_executor")
+    direction = str(payload.get("direction") or "").strip().lower()
+    decision_action = str(payload.get("decision_action") or metadata.get("decision_action") or "open")
+    if decision_action in _EXIT_ACTIONS and direction in {"long", "short"}:
+        direction = "close_long" if direction == "long" else "close_short"
+
+    proposed_price = (
+        payload.get("price")
+        if payload.get("price") is not None
+        else payload.get("limit_price", params.get("limit_price"))
+    )
+    decision = StrategistDecision(
+        decision_id=str(payload.get("decision_id") or f"decision:{intent_id}"),
+        signal_id=str(payload.get("signal_id") or metadata.get("signal_id") or f"signal:{intent_id}"),
+        ts_ms=generated_ts_ms,
+        engine_mode=str(payload.get("engine_mode") or metadata.get("engine_mode") or "paper"),
+        symbol=str(payload.get("symbol") or ""),
+        strategy=strategy,
+        direction=direction,
+        confidence=float(payload.get("confidence", metadata.get("confidence", 0.0)) or 0.0),
+        decision_action=decision_action,
+        selected_strategy=strategy if strategy in _CANONICAL_STRATEGIES else None,
+        expected_net_edge_bps=_optional_float(
+            payload.get("expected_net_edge_bps", metadata.get("expected_net_edge_bps"))
+        ),
+        proposed_qty=_positive_float(payload.get("size"), "approved_intent_size_required"),
+        proposed_price=_optional_float(proposed_price),
+        rationale=str(payload.get("thesis") or metadata.get("rationale") or ""),
+        evidence_refs=list(payload.get("evidence_refs") or metadata.get("evidence_refs") or []),
+        metadata={
+            "source_message_type": "approved_intent",
+            "legacy_intent_id": intent_id,
+            **metadata,
+        },
+    )
+    verdict = GuardianVerdict(
+        verdict_id=str(payload.get("verdict_id") or metadata.get("verdict_id") or f"verdict:{intent_id}:approved"),
+        decision_id=decision.decision_id,
+        verdict_version=int(payload.get("verdict_version", metadata.get("verdict_version", 1)) or 1),
+        ts_ms=int(payload.get("verdict_ts_ms", metadata.get("verdict_ts_ms", generated_ts_ms)) or generated_ts_ms),
+        engine_mode=decision.engine_mode,
+        symbol=decision.symbol,
+        strategy=decision.strategy,
+        allow=True,
+        risk_level=str(payload.get("risk_level") or metadata.get("risk_level") or "low"),
+        reasons=list(payload.get("guardian_reasons") or metadata.get("guardian_reasons") or ["approved_intent_adapter"]),
+        p2_modifications=[
+            item if isinstance(item, GuardianP2Modification) else GuardianP2Modification(**item)
+            for item in list(payload.get("p2_modifications") or metadata.get("p2_modifications") or [])
+        ],
+        metadata={"source_message_type": "approved_intent", **metadata},
+    )
+    return build_execution_plan(
+        decision,
+        verdict,
+        ts_ms=generated_ts_ms,
+        order_plan_id=order_plan_id,
     )
 
 
@@ -221,6 +317,16 @@ def _validate_lineage(decision: StrategistDecision, verdict: GuardianVerdict) ->
         raise ValueError("open_decision_requires_entry_direction_from_strategist")
     if decision.decision_action in _EXIT_ACTIONS and decision.direction not in _EXIT_DIRECTIONS:
         raise ValueError("exit_decision_requires_close_direction_from_strategist")
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
 
 
 def _apply_p2_modification(

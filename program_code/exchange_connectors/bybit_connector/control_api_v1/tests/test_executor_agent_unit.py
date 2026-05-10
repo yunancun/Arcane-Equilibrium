@@ -300,6 +300,41 @@ class TestExecutorMessageHandling(unittest.TestCase):
         agent.on_message(msg)
         engine.submit_order.assert_called_once()
 
+    def test_approved_intent_uses_execution_plan_scope_not_metadata_decoys(self):
+        """Legacy APPROVED_INTENT payload is adapted to a typed ExecutionPlan before execution."""
+        engine = MagicMock()
+        engine.submit_order.return_value = {
+            "order": {"avg_fill_price": 60000.0, "filled_qty": 0.02},
+            "fills": [],
+            "rejected_reason": None,
+        }
+        agent = ExecutorAgent(paper_engine=engine)
+        agent.start()
+
+        msg = AgentMessage(
+            sender=AgentRole.STRATEGIST,
+            receiver=AgentRole.EXECUTOR,
+            message_type=MessageType.APPROVED_INTENT,
+            payload={
+                "intent_id": "i-plan-scope",
+                "symbol": "BTCUSDT",
+                "strategy": "grid_trading",
+                "direction": "long",
+                "size": 0.02,
+                "metadata": {
+                    "executor_symbol": "ETHUSDT",
+                    "executor_direction": "short",
+                    "engine_mode": "demo",
+                },
+            },
+        )
+        agent.on_message(msg)
+
+        call = engine.submit_order.call_args.kwargs
+        self.assertEqual(call["symbol"], "BTCUSDT")
+        self.assertEqual(call["side"], "Buy")
+        self.assertEqual(call["qty"], 0.02)
+
     def test_invalid_intent_ignored(self):
         """Invalid intent (missing fields) doesn't crash."""
         engine = MagicMock()
