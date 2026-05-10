@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v3 — W6 RFC baseline 預跑後**結論 180° 反轉**：governance **沒有** over-fit；99.5% reject 是 cost_gate 拒 negative edge + duplicate_position guard（**正確行為**）；真正 bottleneck 仍是策略無 alpha。pending HIGH-5 forward watch metric 2/3 sign-off (~21:30 UTC，metric 1 已 MIT 提早 close)
+**Status**: DRAFT v3.1 — operator 2026-05-10 拍板 A4-C fast-track（N+1 spec + paper IMPL 並行）；W6 RFC baseline 預跑後**結論 180° 反轉**：governance **沒有** over-fit。pending HIGH-5 forward watch metric 2/3 sign-off (~21:30 UTC)
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -63,16 +63,16 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 
 ---
 
-## §2 Wave 結構（W1-W6 — v2 加 W6 governance reject P0）
+## §2 Wave 結構（W1-W6 — v3.1 update W2 fast-track）
 
 | Wave | 名稱 | 性質 | 優先 | 依賴 | 估時 | 並行性 |
 |---|---|---|---|---|---|---|
-| **W6** | **Governance Reject Rate Audit + M4 Monitor**（**新 P0**） | RFC + IMPL | **P0** | 無 | 3-4 day | 與 W1 並行；阻 W3 Stage 2 promotion |
+| **W6** | Reject Reason Metadata + ML Imbalance Handling（v3 重寫） | RFC + IMPL | **P0** | 無 | 5 day | 與 W1 並行；阻 W3 Stage 2 |
 | W1 | W-AUDIT-8a Phase B Tier 2 panel collector | IMPL | P1 | N+0 Phase A trait | 6 day | 不可與 W3 同 ML cron | 
-| W2 | A4-C BTC→Alt Lead-Lag spec | spec only | P2 | 無 | 2 day | 完全並行 |
-| W3 | W-AUDIT-9 Stage 1 cohort observation | ops + IMPL | P1 | N+0 W-AUDIT-9 land **+ W6 完成** | 5 day | 不可與 W1 同 ML cron 觸發窗 |
+| **W2** | **A4-C BTC→Alt Lead-Lag spec + paper IMPL（v3.1 fast-track）** | **spec + IMPL** | **P1**（升） | N+0 Phase A trait | **7 day**（從 2 升） | 與 W1 同窗 AlphaSurface trait extension |
+| W3 | W-AUDIT-9 Stage 1 cohort observation | ops + IMPL | P1 | N+0 W-AUDIT-9 land + W6 完成 | 5 day | 不可與 W1 同 ML cron 觸發窗 |
 | W4 | W-AUDIT-3b runtime smoke | test only | P2 | N+0 W-AUDIT-3b land | 1 day | 完全並行 |
-| W5 | 9 P1 tickets backlog（v2 從 7 加到 9） | mixed | P1/P2 | per-ticket | 分散 | 完全並行 |
+| W5 | 10 P1 tickets backlog（v3 從 7→10） | mixed | P1/P2 | per-ticket | 分散 | 完全並行 |
 
 ---
 
@@ -169,35 +169,58 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 - Bybit V5 funding history endpoint 在某些 mid-cap 缺數據 → fail-closed 設計必須 graceful（不可 crash）
 - panel table partition / hypertable 設計（TimescaleDB）— MIT 必確認
 
-### §3.2 W2 — A4-C BTC→Alt Lead-Lag Spec Phase（**v3 升級評估**：操作員可決定 fast-track）
+### §3.2 W2 — A4-C BTC→Alt Lead-Lag Spec + Paper IMPL（**v3.1 Fast-track 已拍板** — operator 2026-05-10 confirm）
 
-**v3 update**：W6 baseline 預跑再次驗證「5 textbook 策略結構性 alpha-deficient」結論（cost_gate 拒 4079 條 negative edge）。**A4-C 是真正能解 P0-EDGE-1 的路徑**。原 spec only / N+2 IMPL 設計可能太慢，**operator 可選**：
-- A. 維持原計劃（N+1 spec only / N+2 IMPL）— 安全，4-agent review 完整
-- B. **Fast-track**（N+1 spec + paper IMPL 並行）— 提早 N+1 拿到 paper edge evidence
-
-PA 推薦 B（fast-track）但需 operator 拍板。
-
-**目標**（不變）：5 textbook 策略結構性 alpha-deficient，A 群（Track A）已開三條候選：A-1 mean-reversion / A-2 momentum-of-momentum / A-3 cross-section sector rotation；本次新增 **A4-C BTC→Alt Lead-Lag** spec 階段。
+**目標**：5 textbook 策略結構性 alpha-deficient（W6 baseline + 4-agent loss audit 雙重確認）→ A4-C 是真正能解 P0-EDGE-1 的路徑。N+1 不只 spec，**直接派 paper IMPL** 拿 7d paper edge evidence；如 paper edge > +5 bps → N+2 promote demo IMPL；如 < +5 bps → revise spec 不浪費 N+2。
 
 **核心假設**：BTC price/volume movement leads alt symbols 60-300s（crypto microstructure 文獻 well-documented）；構造 lead signal → 預測 alt symbol 短期 mean reversion / momentum。
 
-**Sub-task**:
-- C-1. **PA spec**：信號公式 + cohort symbol scope + leakage 防護（lead window strict shift(N) 不可含 current bar；參考 feedback `lookahead_bias`）
-- C-2. **QC review**：alpha decay 估算 + DSR penalty K 量化（A4-C 加入 K → mu_0 重算）
-- C-3. **MIT review**：time-series CV 設計（purged k-fold + embargo）+ leak detection + cohort sample size demand
-- **三角獨立 review** — 不 sequential，2 day 內並行
+**Sub-task v3.1（spec + paper IMPL 並行）**:
 
-**Acceptance criteria**:
+**Spec phase（Day 1-2，PA + QC + MIT 三角並行 review）**:
+- C-1. **PA spec**：信號公式 + cohort symbol scope + leakage 防護（lead window strict `shift(N)` 不可含 current bar；參考 feedback `lookahead_bias`）；落 `srv/docs/execution_plan/2026-05-1X--a4c_btc_alt_lead_lag_spec.md`
+- C-2. **QC review**：alpha decay 估算 + DSR penalty K 量化（A4-C 加入 K → mu_0 重算）+ paper edge gate threshold（≥ +5 bps 進 N+2）
+- C-3. **MIT review**：time-series CV 設計（purged k-fold + embargo）+ leak detection + cohort sample size demand（paper 7d 預估能拿多少 sample）
+
+**Paper IMPL phase（Day 3-7，spec sign-off 後啟動）**:
+- C-IMPL-1. **AlphaSurface trait extension**（E1, 2 day）
+  - W-AUDIT-8a Phase A 已 declare `AlphaSurface` trait；A4-C 新增 `BtcAltLeadLag` source variant
+  - Rust 端 `openclaw_core/src/alpha_surface.rs` 加 enum variant + producer hook
+  - 與 W1 Phase B funding_curve / oi_delta_panel writers 同 trait pattern（共用 producer interface）
+- C-IMPL-2. **Lead-lag signal producer**（E1, 2 day）
+  - 從 BTCUSDT 1m kline 計算 lead signal（return / volume / orderbook imbalance over N=60-300s window）
+  - Per cohort alt symbol cross-correlate
+  - 寫 `panel.btc_lead_lag_panel` table（V### migration 預留 V087）
+- C-IMPL-3. **Strategy 接收 paper-only**（E1, 1 day）
+  - ma_crossover + grid_trading 在 paper engine mode 接 `BtcAltLeadLag` 作 feature input（**不直接 trade**，先 shadow + log）
+  - bb_breakout / bb_reversion / funding_arb **不接**（避免污染 5 策略 demo edge baseline）
+  - paper engine 跑 7d 累積 evidence
+- C-IMPL-4. **Paper edge evidence collection**（D+5 ~ D+10）
+  - 每 24h 跑 [40] paper avg_net_bps + maker_pct + sample size 對比 baseline
+  - 7d window 累積 paper edge evidence
+  - **不**跑 demo 也**不**跑 live_demo（Phase 1 fast-track 邊界）
+
+**Acceptance criteria（v3.1 加 paper IMPL）**:
 - PA spec 文件 land `srv/docs/execution_plan/`
-- QC review 給 expected DSR penalty + alpha decay 半衰期
+- QC review 給 expected DSR penalty + alpha decay 半衰期 + paper edge gate threshold
 - MIT review 給 CV 設計 + cohort sample demand
-- **三方都 APPROVE** 後才能進 Sprint N+2 IMPL phase
-- **不**在 Sprint N+1 IMPL — IMPL 留 N+2
+- **三方都 APPROVE** 後才能進 paper IMPL（spec 是 prerequisite）
+- AlphaSurface trait extension + lead-lag producer + V087 migration 在 Linux PG `_sqlx_migrations` success=t
+- Paper engine 跑 7d 累積 sample n ≥ 100 fills per cohort symbol
+- Paper edge evidence report land：avg_net_bps + DSR + sample size
+- **如 paper edge > +5 bps**：N+2 promote demo IMPL（PA + QC + MIT 重 review）
+- **如 paper edge < +5 bps**：revise spec（不浪費 N+2）
 
-**Cohort symbol 限制**：
+**Cohort symbol 限制**:
 - BUSDT **不可** cohort（已 demote per funding_arb 棄路徑 ADR-0018）
 - BTCUSDT 必含（lead source）
 - alt scope: ETHUSDT / SOLUSDT / DOGEUSDT / XRPUSDT / ADAUSDT / AVAXUSDT / DOTUSDT 等 7-10 個 mid-large cap
+
+**Risk（v3.1 fast-track 加風險）**:
+- AlphaSurface trait extension 與 W1 Phase B 同窗 — 兩個 wave 都動 trait 文件，合併衝突風險高 → 派 sub-agent 前 PA 先拍板 trait final shape，W1 + W2 IMPL 用 trait 同一 commit
+- Paper IMPL 在 paper engine mode 跑，**OPENCLAW_ENABLE_PAPER=1** env 必先設（per `feedback_paper_pipeline_disabled_by_default`）
+- 不能讓 Lead-Lag signal 污染 5 策略 demo edge baseline — 必須 paper-only fence
+- V087 是 panel table，hypertable partition 設計 MIT 必確認
 
 ### §3.3 W3 — W-AUDIT-9 Stage 1 Cohort Observation Start
 
@@ -264,43 +287,57 @@ PA 推薦 B（fast-track）但需 operator 拍板。
 
 ---
 
-## §4 Schedule（Day-by-Day — v2 加 W6 critical path）
+## §4 Schedule（Day-by-Day — v3.1 加 W2 fast-track + W1/W2 trait coord）
 
 ```
 D+0 (2026-05-11 等 N+0 21:30 UTC forward watch metric 2/3 sign-off)
-  PA: Sprint N+1 dispatch finalize v2（已吸收 replay evidence）
-  PM: 派發 W6 三角 RFC / W1 spec / W2 三角 / W4 E4 / W5 多 P1 並行
-  ⚠️ W3 Stage 1 cohort **暫不派**（等 W6 verdict）
+  PA: Sprint N+1 dispatch v3.1 finalize
+  PA: AlphaSurface trait final shape 拍板（W1 + W2 共用 trait 一致）
+  PM: 派發 W6 三角 RFC / W1 spec / W2 三角 spec / W4 E4 / W5 多 P1 並行
+  ⚠️ W3 Stage 1 cohort 暫不派（等 W6 verdict）
 
-D+1 ~ D+3 (3 day 並行 W6 + W1 + W2 + W4 + W5)
-  W6 PA + QC + MIT 三角 RFC（governance reject root cause，2 day）
-  W6 E1 IMPL M4 healthcheck [59]（D+2，1 day）
-  W1 E1-α IMPL B-1 (funding_curve writer + V085, 3 day)
-  W1 E1-β IMPL B-2 (oi_delta_panel + V086, 3 day)
-  W2 PA + QC + MIT 三角 spec parallel（D+1-2 完）
+D+1 ~ D+2 (spec phase 並行)
+  W6 PA + QC + MIT 三角 RFC（governance reject 對齊，1 day baseline 已備）
+  W2 PA + QC + MIT 三角 spec（A4-C BTC→Alt Lead-Lag，2 day）
+  W1 PA spec finalize（W-AUDIT-8a Phase B Tier 2 panel）
   W4 E4 runtime smoke（D+1 完）
-  W5 多 P1 並行（PA spec + E1 IMPL）
+  W5 多 P1 並行 spec phase
 
-D+3 ~ D+5 (W6 verdict + W3 啟動)
-  W6 RFC verdict land + AMD（如 over-fit 寫 conditional relax）
-  W6 M5 evaluations.entry_context_id healthcheck IMPL（等 ML predictor 接通 enable）
-  W3 PA cohort 拍板（D+3，等 W6 verdict）
-  W3 atomic patch IMPL（D+4，1 day）
+D+3 ~ D+5 (IMPL phase 大爆發)
+  W6 E1 IMPL V086 reject_reason_code + multi-class label split + M4 monitor [59]（並行 3 sub-task）
+  W1 E1-α IMPL B-1 (funding_curve writer + V085, 3 day)
+  W1 E1-β IMPL B-2 (oi_delta_panel + V086 → 改 V087 避撞，3 day)
+  W2 E1-γ IMPL C-IMPL-1 AlphaSurface trait extension (BtcAltLeadLag variant, 2 day)
+  W2 E1-δ IMPL C-IMPL-2 lead-lag producer + V088 migration (2 day)
+  W3 PA cohort 拍板（D+3，等 W6 verdict）+ atomic patch IMPL（D+4）
   W3 Stage 1 cohort 3-day passive observation 開始（D+4-D+7）
-  W1 MIT review + E2 review (D+4-D+5)
-  P1-TONUSDT-CONDITIONAL-WATCH Linux CC 30d regime split SELECT
-  P1-DYNAMIC-UNBLOCK-CHECK-1 PA spec + E1 IMPL
+  W5 多 P1 IMPL（含 P1-MA-CROSSOVER-DUPLICATE-INTENT audit）
 
-D+6 ~ D+8
-  W1 E4 regression + BB rate limit + PM sign-off
-  W3 Stage 1 → Stage 2 promotion 嘗試（如達 criteria）
-  W6 conditional governance threshold relax 試行（如 W6-3 verdict approve）
+⚠️ V### 編號重排（v3.1 因 W1 + W2 + W6 三 wave 都加 migration）:
+  V085 = W1 funding_curve
+  V086 = W6 reject_reason_code metadata（先級高，governance writer 改）
+  V087 = W1 oi_delta_panel
+  V088 = W2 panel.btc_lead_lag_panel
+
+D+5 ~ D+7
+  W2 C-IMPL-3 strategy paper-only 接收 (ma_crossover + grid 接 BtcAltLeadLag feature, 1 day)
+  W2 C-IMPL-4 paper engine 7d evidence collection 開始（D+5 起，跑到 D+12 後 review）
+  W6 LightGBM imbalance 試行（D+5）+ M5 healthcheck（D+6）
+  W1 MIT review + E2 review (D+5-D+6)
+  W1 E4 regression + BB rate limit final + PM sign-off (D+7)
+  W3 Stage 1 → Stage 2 promotion 嘗試（如達 criteria, D+7）
+
+D+8 ~ D+10（4-agent final review）
+  W6 PM sign-off + AMD land
+  ALL except W2 paper IMPL → CC + QC + MIT + BB final review（4-agent parallel）
   W5 P1 closure 收尾
-  ALL → CC + QC + MIT + BB final review（4-agent parallel）
 
-D+9 ~ D+10（緩衝 buffer）
+D+11 ~ D+12（W2 paper edge evidence review）
+  W2 7d paper edge report land（QC 評估 +5 bps gate）
   Sprint N+1 sign-off + 22 + 新 invariant 23 全 PASS
-  Memory persist + Sprint N+2 dispatch draft
+  如 paper edge > +5 bps：N+2 dispatch draft 加 A4-C demo IMPL phase
+  如 paper edge < +5 bps：N+2 dispatch draft 加 A4-C revise spec
+  Memory persist
 ```
 
 ---
@@ -333,7 +370,7 @@ D+9 ~ D+10（緩衝 buffer）
 4. ✅ **M4 reject reason mix monitor [59]**：baseline + alert 設好；24h dry-run 0 spurious alert（**不**用 reject rate > 95% 作 alert，這是 normal）
 5. ✅ **LightGBM imbalance handling 試行報告 land**（`is_unbalance` / `scale_pos_weight=4` AUC + precision + recall 對比）
 6. ✅ W1 Phase B funding_curve + oi_delta_panel writer 上線；25-symbol 1h 內 ≥ 100 row each
-7. ✅ W2 A4-C spec 三方（PA / QC / MIT）APPROVE land（如 operator 選 fast-track，paper IMPL 同時 land）
+7. ✅ W2 A4-C spec 三方（PA / QC / MIT）APPROVE land + **paper IMPL fast-track**：AlphaSurface trait extension + lead-lag producer + V088 panel migration sqlx success + paper engine 7d 累積 sample n ≥ 100 fills per cohort symbol + paper edge report land（avg_net_bps + DSR + sample size）
 8. ✅ W3 Stage 1 cohort 第一個 atomic patch 通過 [58] healthcheck；3-day observation attribution_chain_ok ≥ 80%
 9. ✅ W4 W-AUDIT-3b runtime smoke pytest PASS + [55] chains_with_lease ≥ 1
 10. ✅ W5 10 P1 至少 6 closed（含 CANARY-STAGE-CRITERIA-1 + COHORT-FREQ-23 + DYNAMIC-UNBLOCK-CHECK-1 + V083-CONSTRAINT-VALIDATE plan land + MA-CROSSOVER-DUPLICATE-INTENT audit + 1）
@@ -350,7 +387,8 @@ D+9 ~ D+10（緩衝 buffer）
 ## §7 Sprint N+2 預告（不在本 dispatch 範圍）
 
 - W-AUDIT-8a Phase C/D（Tier 3 microstructure / Tier 4 info-flow signal collectors）
-- A 群 alpha 候選 IMPL（A-1 / A-2 / A-3 + A4-C 從 spec 進 IMPL phase）
+- A 群 alpha 候選 IMPL（A-1 / A-2 / A-3）
+- **A4-C demo IMPL**（v3.1 fast-track 後 N+1 paper edge > +5 bps 才走此路徑）OR **A4-C revise spec**（如 paper edge < +5 bps）
 - 8b/8c/8d alpha source IMPL（基於 Phase B/C/D panel data）
 - W-AUDIT-9 Stage 2 / Stage 3 promotion gate runtime 驗
 - 5 textbook 策略 sunset evaluation（per AMD-2026-05-09-02）
