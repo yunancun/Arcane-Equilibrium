@@ -100,21 +100,13 @@
 BEGIN;
 
 -- ============================================================
--- §1 CREATE SCHEMA panel（首個 panel.* 表）
+-- §1 CREATE SCHEMA panel（idempotent, 對齊 V085/V087 panel.* sibling pattern）
 -- per spec §4.1：panel schema 為 cross-asset / cross-strategy collector 專用
--- panel schema 為 W-AUDIT-8a Phase B Tier 2 預留 namespace；V088 為 a4c
--- 首批 panel.* 表，schema 不存在則 CREATE
+-- panel schema 為 W-AUDIT-8a Phase B Tier 2 namespace；V085 (funding_curve) /
+-- V087 (oi_delta_panel) / V088 (btc_lead_lag_panel) 三 sibling 都用同樣 idempotent
+-- CREATE SCHEMA IF NOT EXISTS（whoever runs first creates；其餘 no-op）
 -- ============================================================
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.schemata
-        WHERE schema_name = 'panel'
-    ) THEN
-        CREATE SCHEMA panel;
-        RAISE NOTICE 'V088: CREATE SCHEMA panel (W-AUDIT-8a Phase B namespace)';
-    END IF;
-END $$;
+CREATE SCHEMA IF NOT EXISTS panel;
 
 -- ============================================================
 -- Guard A: panel.btc_lead_lag_panel 若已存在則必含 12 必要欄位
