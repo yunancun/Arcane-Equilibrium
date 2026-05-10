@@ -20,6 +20,7 @@
 //!   風控/槓桿/回撤的重複欄位將在 Session 1C 由 call site 遷移後移除。
 
 pub mod budget_config;
+pub mod canary_promotion;
 pub mod io;
 pub mod learning_config;
 pub mod legacy_migration;
