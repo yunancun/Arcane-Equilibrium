@@ -2558,3 +2558,24 @@ PM 派 PA 預寫 W5 三 P1 ticket spec 省 PA D+1-3 spec phase；W5 sub-agent E1
 
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w1_spec_v1_1_bb_ws_first_revision.md`
 
+
+---
+
+## 2026-05-10 W2 A4-C spec v1.1 → v1.2 inline edit (dual-layer σ + PSR(0) strict + +15 gate power verify)
+
+**Trigger**: MIT C-3 σ verify report CONDITIONAL PASS（path: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`）
+
+**Key finding from MIT C-3**: BTCUSDT 7d raw market σ_60=4.54 / σ_120=6.28 / σ_300=10.08 bps（比 spec 30 bps preliminary 低 3-7×）；EDGE-DIAG-1 net edge σ=50-80 bps（含 fee+slippage+adverse selection）；spec 30 bps 不對應任何真實層；excess kurt 7-12 ≫ 0 → 必用 PSR(0) skew/kurt-aware formula。
+
+**5 inline edits to spec `srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md`**:
+1. §7.1 acceptance prerequisite — 從單一 σ verify line 改 dual-layer σ table（L1 raw + L2 net edge）+ 強制 prerequisite condition（spec power calc 用 net edge σ，禁 raw σ）
+2. §7.1 metric (3) PSR(0) — 從 soft 描述改強制條件 formula `Φ((SR - 0) × √(n-1) / √(1 - skew·SR + (kurt-1)/4·SR²))` + σ_net=50/80 bps 兩 case 並列要求
+3. §8.1 +15 bps gate power verification table 補完（σ_net=50: t=2.68 p=0.0044 / σ_net=80: t=1.68 p=0.0487 全 PASS marginal at upper bound）+ 中段 + 下界 verification
+4. §8.3 sign-off path — v1.2 為 spec internal cleanup（不增 condition、不改 IMPL scope）→ MIT + QC 直接收 W2 IMPL，不需 D+1 PA + MIT 重 sign-off
+5. §1 header status v1.1 → v1.2 + §9 risk row σ=30 bps 假設 mark closed + Reference MIT C-3 σ verify report path 補完 + §14 一句總結 update
+
+**Lesson**: σ acceptance 不是「驗一個 σ 數字」是「定明哪一層 σ 對應哪一個 spec 用途」。raw market σ vs net edge σ 差 5-15× 的時候，混用 single-σ acceptance = 用 raw σ 算 power 全 false-PASS（t=29 vs t=1.68）。任何 spec acceptance 涉統計 power 必先 split 「price σ vs edge σ」兩層。
+
+**Sign-off path**: QC C-2 已 sign-off（v1.1 5 conditions revised）；MIT C-3 σ verify 已交付；W2 IMPL 直接收 D+3 起派 C-IMPL-1..4 paper IMPL；不需 D+1 PA + MIT 重 sign-off。
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w2_a4c_spec_v1_2_dual_layer_sigma_revision.md`
