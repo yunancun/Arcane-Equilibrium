@@ -600,6 +600,8 @@ const TRUST_TIER_COLORS = {
   3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
 };
 let _livePnlRange = '24h';
+let _liveMetricsLoadedOnce = false;
+let _liveFillsLoadedOnce = false;
 
 /**
  * Load and render Earned-Trust tier status bars (read-only, no renew controls).
@@ -1180,7 +1182,7 @@ async function loadDashboardData() {
       _liveStratMap = _buildLiveStratMap(fArr);
     }
   } catch (_) { _liveStratMap = {}; }
-  _applyLiveTodayPnl(metricsData);
+  if (metricsData) _applyLiveTodayPnl(metricsData);
 
   // Balance — from /api/v1/live/balance (httpx BybitClient → real exchange data)
   // 餘額 — 來自實盤端點（httpx BybitClient → 真實交易所帳戶資料）
@@ -1588,7 +1590,9 @@ async function closeLivePosition(symbol, ownerStrategy, frozenReason) {
 async function loadLiveMetrics() {
   const d = await ocApi('/api/v1/live/metrics');
   if (!d || !d.data) {
-    ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無指標數據</div>');
+    if (!_liveMetricsLoadedOnce) {
+      ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無指標數據</div>');
+    }
     return;
   }
   // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
@@ -1596,15 +1600,19 @@ async function loadLiveMetrics() {
     const msg = ocEsc(d.data.error_zh || d.data.error || 'Live slot not configured');
     ocSetHtml('live-perf-metrics',
       '<div style="color:#f87171;font-size:12px;padding:12px">⚠ ' + msg + '</div>');
+    _liveMetricsLoadedOnce = true;
     return;
   }
   const m = d.data;
   const metrics = m.performance_metrics || ((m.db_true_metrics || {}).performance_metrics || []);
   if (Array.isArray(metrics) && metrics.length) {
     ocSetHtml('live-perf-metrics', ocRenderPerformanceMetrics(metrics));
+    _liveMetricsLoadedOnce = true;
     return;
   }
-  ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無後端性能指標</div>');
+  if (!_liveMetricsLoadedOnce) {
+    ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無後端性能指標</div>');
+  }
 }
 
 function setLivePnlRange(rangeKey) {
@@ -1615,21 +1623,33 @@ function setLivePnlRange(rangeKey) {
 async function loadLivePnlSeries() {
   ocSetPnlRangeButtons('live-pnl-range-controls', _livePnlRange);
   ocSetText('live-pnl-range-label', '(' + String(_livePnlRange).toUpperCase() + ')');
+  let payload = null;
+  let points = [];
   try {
     const d = await ocApi('/api/v1/live/pnl-series?range=' + encodeURIComponent(_livePnlRange));
-    const payload = d && d.data;
+    payload = d && d.data;
     if (_isPhantomViewError(payload)) {
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
       ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
       ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:#f87171;text-align:center;padding:12px">⚠ ' + msg + '</td></tr>');
       return;
     }
-    const points = (payload && Array.isArray(payload.points)) ? payload.points : [];
+    points = (payload && Array.isArray(payload.points)) ? payload.points : [];
+  } catch (_) {}
+  if (!payload || payload.available === false || !points.length) {
+    try {
+      const fd = await ocApi('/api/v1/live/fills?limit=200&offset=0');
+      const fallbackFills = (fd && fd.data && Array.isArray(fd.data.list)) ? fd.data.list : [];
+      payload = ocPnlSeriesFromFills(fallbackFills, _livePnlRange);
+      points = payload.points || [];
+    } catch (_) {}
+  }
+  if (points.length) {
     ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', points, 'live-pnl-zero', payload || { range: _livePnlRange });
     ocSetHtml('live-pnl-series-rows', ocPnlSeriesTableRows(points));
-  } catch (_) {
+  } else {
     ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
-    ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:var(--text-dim);text-align:center;padding:12px">無法加載 PnL 序列</td></tr>');
+    ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:var(--text-dim);text-align:center;padding:12px">暫無 PnL bucket；後端序列待載入或當前區間無成交</td></tr>');
   }
 }
 
@@ -1966,7 +1986,9 @@ async function loadFills() {
   _liveFillState.loading = true;
   _liveUpdateFillControls(null, []);
   document.getElementById('live-fills-head').innerHTML = _liveFillHead(_liveFillState.tab);
-  body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  if (!_liveFillsLoadedOnce) {
+    body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  }
   try {
     const d = await ocApi('/api/v1/live/fills' + qs);
     const payload = d && d.data;
@@ -1980,6 +2002,7 @@ async function loadFills() {
       return;
     }
     const arr = (payload && Array.isArray(payload.list)) ? payload.list : [];
+    _liveFillsLoadedOnce = true;
     _fillsLoaded = true;
     _liveFillState.loading = false;
     _liveUpdateFillControls(payload, arr);
@@ -1994,7 +2017,9 @@ async function loadFills() {
   } catch(e) {
     _liveFillState.loading = false;
     _liveUpdateFillControls(null, []);
-    body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
+    if (!_liveFillsLoadedOnce) {
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
+    }
   }
 }
 

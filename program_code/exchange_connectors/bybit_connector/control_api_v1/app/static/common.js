@@ -859,6 +859,67 @@ function ocPnlSeriesTableRows(points) {
   }).join('');
 }
 
+function ocPnlSeriesFromFills(fills, rangeKey) {
+  var rows = Array.isArray(fills) ? fills.slice() : [];
+  rows = rows.map(function(f) {
+    var ts = f && (f.exec_time || f.execTime || f.ts_ms || f.ts || f.time);
+    var d = ocDate(ts);
+    var grossRaw = f && (f.realized_pnl != null ? f.realized_pnl
+      : (f.closedPnl != null ? f.closedPnl : (f.pnl != null ? f.pnl : 0)));
+    var feeRaw = f && (f.fee != null ? f.fee : (f.execFee != null ? f.execFee : 0));
+    var gross = Number(grossRaw);
+    var fee = Number(feeRaw);
+    if (!Number.isFinite(gross)) gross = 0;
+    if (!Number.isFinite(fee)) fee = 0;
+    return {
+      ts_ms: d ? d.getTime() : 0,
+      gross_pnl: gross,
+      fees: fee,
+      funding_pnl: 0,
+      net_pnl: gross - fee,
+      fills: 1,
+    };
+  }).filter(function(p) {
+    return p.ts_ms > 0;
+  }).sort(function(a, b) {
+    return a.ts_ms - b.ts_ms;
+  });
+  var rangeMsMap = {
+    '1h': 60 * 60 * 1000,
+    '6h': 6 * 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+  };
+  var key = String(rangeKey || '').toLowerCase();
+  if (rangeMsMap[key]) {
+    var cutoff = Date.now() - rangeMsMap[key];
+    rows = rows.filter(function(p) { return p.ts_ms >= cutoff; });
+  }
+
+  var cumulative = 0;
+  var points = rows.map(function(p) {
+    cumulative += Number(p.net_pnl) || 0;
+    return {
+      ts_ms: p.ts_ms,
+      fills: p.fills,
+      gross_pnl: Number(p.gross_pnl) || 0,
+      fees: Number(p.fees) || 0,
+      funding_pnl: 0,
+      net_pnl: Number(p.net_pnl) || 0,
+      cumulative_net_pnl: cumulative,
+      source: 'recent_fills_fallback',
+    };
+  });
+  return {
+    available: points.length > 0,
+    source: 'recent_fills_fallback',
+    range: rangeKey || 'fills',
+    fills: points.length,
+    points: points,
+  };
+}
+
 function ocSetPnlRangeButtons(containerId, activeRange) {
   var el = document.getElementById(containerId);
   if (!el) return;
@@ -906,12 +967,15 @@ function $(id) { return document.getElementById(id); }
 
 function ocSetText(id, text) {
   const el = $(id);
-  if (el) el.textContent = text != null ? text : '--';
+  if (el) {
+    const next = text != null ? String(text) : '--';
+    if (el.textContent !== next) el.textContent = next;
+  }
 }
 
 function ocSetHtml(id, html) {
   const el = $(id);
-  if (el) el.innerHTML = html;
+  if (el && el.innerHTML !== html) el.innerHTML = html;
 }
 
 function ocSetClass(id, cls) {
