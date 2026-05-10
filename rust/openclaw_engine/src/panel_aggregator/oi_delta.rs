@@ -37,6 +37,7 @@ use tracing::{debug, warn};
 
 use crate::database::batch_insert::{exec_single_insert, SingleInsertOutcome};
 use crate::database::pool::DbPool;
+use openclaw_core::alpha_surface::OIDeltaPanel;
 
 /// 5 分鐘 window 毫秒（5 * 60 * 1000）。
 pub const WINDOW_5M_MS: i64 = 5 * 60 * 1000;
@@ -136,6 +137,71 @@ impl OIDeltaAggregator {
     /// 取 cohort 大小（test + observability 用）。
     pub fn cohort_size(&self) -> usize {
         self.cohort.len()
+    }
+
+    /// W1 sub-task 3 (E1-γ, 2026-05-11) — 從當前 history 構造 OIDeltaPanel snapshot。
+    ///
+    /// 設計：caller (panel_subscriber.rs run loop) 在 1m flush boundary
+    /// 呼叫此函數取 snapshot 寫 IPC slot；history 不會被 drain（與 funding_curve 不同），
+    /// 故 snapshot/flush 順序不影響 history。
+    ///
+    /// 行為：
+    /// - history 空 → 回 None（caller 不更新 slot；既有 panel 保留）
+    /// - 對每個 cohort sym 取 history 最後 entry 為 current_oi，算 5m/15m/1h delta
+    ///   （window 不足 → NaN）
+    /// - 對齊 OIDeltaPanel 不變式：symbols[i] ↔ oi_abs[i] ↔ oi_delta_*_pct[i]
+    /// - source_tier = "bybit_v5_ws_open_interest"（與 PG INSERT 保持一致）
+    /// - delta None → f64::NAN（OIDeltaPanel.oi_delta_*_pct 為 Vec<f64> 不支援 Option，
+    ///   consumer 端必判 NaN 走 fail-closed；對齊 V087 SQL 寫 NULL → consumer NaN check 同語意）
+    pub fn snapshot_panel(&self, snapshot_ts_ms: i64) -> Option<OIDeltaPanel> {
+        if self.history.is_empty() {
+            return None;
+        }
+        // 對 history iter 順序穩定化：取 key 排序 → 跨 process 一致 + 利於診斷
+        let mut entries: Vec<(&String, &VecDeque<(i64, f64)>)> = self.history.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+
+        let mut symbols: Vec<String> = Vec::with_capacity(entries.len());
+        let mut oi_abs_vec: Vec<f64> = Vec::with_capacity(entries.len());
+        let mut oi_delta_5m_pct: Vec<f64> = Vec::with_capacity(entries.len());
+        let mut oi_delta_15m_pct: Vec<f64> = Vec::with_capacity(entries.len());
+        let mut oi_delta_1h_pct: Vec<f64> = Vec::with_capacity(entries.len());
+
+        for (sym, hist) in entries {
+            let (last_ts, last_oi) = match hist.back().copied() {
+                Some(v) => v,
+                None => continue, // empty deque (理論不應發生; defensive skip)
+            };
+            symbols.push(sym.clone());
+            oi_abs_vec.push(last_oi);
+            // window 不足 → None → 寫 NaN（consumer 端必 NaN check fail-closed）
+            oi_delta_5m_pct.push(
+                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_5M_MS)
+                    .unwrap_or(f64::NAN),
+            );
+            oi_delta_15m_pct.push(
+                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_15M_MS)
+                    .unwrap_or(f64::NAN),
+            );
+            oi_delta_1h_pct.push(
+                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_1H_MS)
+                    .unwrap_or(f64::NAN),
+            );
+        }
+
+        if symbols.is_empty() {
+            return None;
+        }
+
+        Some(OIDeltaPanel {
+            symbols,
+            oi_delta_5m_pct,
+            oi_delta_15m_pct,
+            oi_delta_1h_pct,
+            oi_abs: oi_abs_vec,
+            snapshot_ts_ms,
+            source_tier: "bybit_v5_ws_open_interest".to_string(),
+        })
     }
 
     /// 計算 window_ms 對應的 OI delta percent。
@@ -328,6 +394,31 @@ mod tests {
             "SOLUSDT".to_string(),
         ];
         OIDeltaAggregator::new(pool, cohort)
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_panel_empty_history_returns_none() {
+        // PASS：empty history → snapshot_panel 回 None
+        let agg = make_aggregator().await;
+        assert!(agg.snapshot_panel(1_700_000_060_000).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_panel_history_with_data_returns_some_with_nan_when_window_short() {
+        // PASS：history 有 1 entry → snapshot 回 Some 但所有 delta 為 NaN（window 不足）
+        let mut agg = make_aggregator().await;
+        agg.on_oi_update("BTCUSDT", 12345.6, 1_700_000_000_000);
+        let snap = agg
+            .snapshot_panel(1_700_000_060_000)
+            .expect("snapshot must be Some when history has data");
+        assert_eq!(snap.symbols.len(), 1);
+        assert_eq!(snap.oi_abs.len(), 1);
+        assert_eq!(snap.snapshot_ts_ms, 1_700_000_060_000);
+        assert_eq!(snap.source_tier, "bybit_v5_ws_open_interest");
+        // 1 entry → 5m/15m/1h window 全不足 → all NaN
+        assert!(snap.oi_delta_5m_pct[0].is_nan(), "5m delta should be NaN");
+        assert!(snap.oi_delta_15m_pct[0].is_nan(), "15m delta should be NaN");
+        assert!(snap.oi_delta_1h_pct[0].is_nan(), "1h delta should be NaN");
     }
 
     #[tokio::test]

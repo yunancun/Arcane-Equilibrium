@@ -100,10 +100,15 @@ pub(crate) fn spawn_fan_out(
     paper_ready_rx: oneshot::Receiver<()>,
     demo_ready_rx: Option<oneshot::Receiver<()>>,
     live_ready_rx: Option<oneshot::Receiver<()>>,
+    // W1 sub-task 3 (E1-γ, 2026-05-11): 額外 panel arm — fan-out 把每 tick 的
+    // Arc<PriceEvent> try_send 給 PanelAggregator 的 mpsc。本 arm Optional，
+    // None 時 silent skip（panel 未啟用時行為不變）。
+    panel_event_tx: Option<mpsc::Sender<Arc<PriceEvent>>>,
 ) {
     let paper_tx = paper_event_tx;
     let demo_tx = demo_event_tx;
     let live_slot = live_event_slot;
+    let panel_tx = panel_event_tx;
     let fan_cancel = cancel;
     tokio::spawn(async move {
         let barrier_timeout = tokio::time::Duration::from_secs(60);
@@ -169,7 +174,7 @@ pub(crate) fn spawn_fan_out(
                             // 跨 try_send 安全。
                             let live_guard = live_slot.read();
                             if let Some(ref ltx) = *live_guard {
-                                if ltx.try_send(arc_event).is_err() {
+                                if ltx.try_send(Arc::clone(&arc_event)).is_err() {
                                     tracing::warn!(
                                         "fan-out: live pipeline lagging, tick dropped / Live 管線延遲，tick 已丟棄"
                                     );
@@ -181,6 +186,20 @@ pub(crate) fn spawn_fan_out(
                             // the tick.
                             // slot == None（無授權）為正常 — 靜默丟棄 live
                             // 對應，demo / paper 仍收到 tick。
+                            drop(live_guard);
+
+                            // W1 sub-task 3 (E1-γ, 2026-05-11): panel arm
+                            // PanelAggregator 消費 Ticker variant 算 funding/OI panel；
+                            // None = panel 未啟用（極早期 boot 或環境停用），silent skip。
+                            // try_send 失敗（ch 滿）= panel run loop 卡住，warn 但不阻塞
+                            // paper/demo/live tick 流。
+                            if let Some(ref ptx) = panel_tx {
+                                if ptx.try_send(arc_event).is_err() {
+                                    tracing::debug!(
+                                        "fan-out: panel pipeline lagging, tick dropped / Panel 管線延遲，tick 已丟棄"
+                                    );
+                                }
+                            }
                         }
                         None => break,
                     }

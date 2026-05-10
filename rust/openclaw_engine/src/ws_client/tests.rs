@@ -139,6 +139,75 @@ fn test_parse_ticker_item() {
     assert!(event.open_interest.is_none());
 }
 
+/// W1 sub-task 3 (E1-γ, 2026-05-11): parser extracts nextFundingTime
+/// (string-encoded i64 ms epoch); absent → None；malformed → None；非正整數 → None。
+#[test]
+fn test_parse_ticker_item_next_funding_ms() {
+    // 1) absent → None
+    let item = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "lastPrice": "65500.50",
+        "volume24h": "12345.67",
+        "bid1Price": "65500.0",
+        "ask1Price": "65501.0",
+        "ts": "1700000000000"
+    });
+    let ev = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+    assert!(ev.next_funding_ms.is_none(), "absent → None");
+
+    // 2) string-encoded ms epoch → Some
+    let item = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "lastPrice": "65500.50",
+        "volume24h": "12345.67",
+        "bid1Price": "65500.0",
+        "ask1Price": "65501.0",
+        "ts": "1700000000000",
+        "nextFundingTime": "1700000028800000"
+    });
+    let ev = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+    assert_eq!(ev.next_funding_ms, Some(1_700_000_028_800_000));
+
+    // 3) malformed string → None
+    let item = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "lastPrice": "65500.50",
+        "volume24h": "12345.67",
+        "bid1Price": "65500.0",
+        "ask1Price": "65501.0",
+        "ts": "1700000000000",
+        "nextFundingTime": "not-a-number"
+    });
+    let ev = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+    assert!(ev.next_funding_ms.is_none(), "malformed → None");
+
+    // 4) zero or negative → None (filter t > 0)
+    let item = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "lastPrice": "65500.50",
+        "volume24h": "12345.67",
+        "bid1Price": "65500.0",
+        "ask1Price": "65501.0",
+        "ts": "1700000000000",
+        "nextFundingTime": "0"
+    });
+    let ev = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+    assert!(ev.next_funding_ms.is_none(), "zero → None");
+
+    // 5) integer encoded (defensive — Bybit always uses string but be liberal)
+    let item = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "lastPrice": "65500.50",
+        "volume24h": "12345.67",
+        "bid1Price": "65500.0",
+        "ask1Price": "65501.0",
+        "ts": "1700000000000",
+        "nextFundingTime": 1_700_000_028_800_000_i64
+    });
+    let ev = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+    assert_eq!(ev.next_funding_ms, Some(1_700_000_028_800_000));
+}
+
 /// EDGE-P2-2: parser extracts openInterest (string-encoded f64).
 /// EDGE-P2-2：parser 正確提取 openInterest（字串 f64）。
 #[test]

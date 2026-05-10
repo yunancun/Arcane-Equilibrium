@@ -71,6 +71,13 @@ pub struct PriceEvent {
     /// 當前資金費率（Ticker 事件，來自 Bybit tickers 流）。
     #[serde(default)]
     pub funding_rate: Option<f64>,
+    /// W1 sub-task 3 (E1-γ, 2026-05-11) — 下次 funding 結算時間戳（ms epoch）。
+    /// 來自 Bybit V5 tickers stream `nextFundingTime`。
+    /// 用於 panel.funding_rates_panel.next_funding_ms 寫入（V085 schema）+
+    /// FundingCurveSnapshot.next_funding_ms[i] 同步索引。
+    /// 解析失敗或缺欄 → None（panel aggregator 端 None 視為「skip 本筆 update」）。
+    #[serde(default)]
+    pub next_funding_ms: Option<i64>,
     /// OC-5: Index price for basis calculation (from Bybit tickers stream).
     /// OC-5：用於基差計算的指數價格（來自 Bybit tickers 流）。
     #[serde(default)]
@@ -105,6 +112,9 @@ impl PriceEvent {
             asks5: None,
             adl_rank: None,
             funding_rate: None,
+            // W1 sub-task 3 (E1-γ, 2026-05-11) — next_funding_ms 預設 None
+            // （tickers payload 可能無此 field 或 cold-start 階段 unparseable）。
+            next_funding_ms: None,
             index_price: None,
             // EDGE-P2-2: open_interest defaults to None (ticker-only field).
             // EDGE-P2-2：open_interest 預設 None（僅 tickers 事件會填充）。

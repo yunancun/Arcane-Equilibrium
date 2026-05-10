@@ -31,6 +31,7 @@ use tracing::{debug, warn};
 
 use crate::database::batch_insert::{exec_single_insert, SingleInsertOutcome};
 use crate::database::pool::DbPool;
+use openclaw_core::alpha_surface::FundingCurveSnapshot;
 
 /// `FundingCurveAggregator` — 25-symbol cohort funding rate aggregator。
 ///
@@ -96,6 +97,42 @@ impl FundingCurveAggregator {
     /// 取 cohort 大小（test + observability 用）。
     pub fn cohort_size(&self) -> usize {
         self.cohort.len()
+    }
+
+    /// W1 sub-task 3 (E1-γ, 2026-05-11) — 從當前 buffer 構造 FundingCurveSnapshot。
+    ///
+    /// 設計：caller (panel_subscriber.rs run loop) 在 1m flush boundary
+    /// **先**呼叫此函數取 snapshot，**再**呼叫 `flush()` 把 buffer 寫 PG。
+    /// 順序重要：`flush()` 會 drain buffer，先 snapshot 後 flush 才能取得本 snapshot 內容。
+    ///
+    /// 行為：
+    /// - buffer 空 → 回 None（caller 不更新 slot；既有 panel 保留）
+    /// - buffer 有資料 → 構造 same-index `Vec<String>` / `Vec<f64>` / `Vec<i64>`
+    ///   對齊 `FundingCurveSnapshot` 不變式（symbols[i] ↔ funding_rates_bps[i] ↔ next_funding_ms[i]）
+    /// - source_tier = "bybit_v5_ws_tickers"（與 PG INSERT 保持一致）
+    pub fn snapshot_panel(&self, snapshot_ts_ms: i64) -> Option<FundingCurveSnapshot> {
+        if self.buffer.is_empty() {
+            return None;
+        }
+        // 對 buffer iter 順序穩定化：取 key 排序 → 跨 process 一致 + 利於診斷
+        let mut entries: Vec<(&String, &(f64, i64))> = self.buffer.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+
+        let mut symbols: Vec<String> = Vec::with_capacity(entries.len());
+        let mut funding_rates_bps: Vec<f64> = Vec::with_capacity(entries.len());
+        let mut next_funding_ms: Vec<i64> = Vec::with_capacity(entries.len());
+        for (sym, (rate_bps, next_ms)) in entries {
+            symbols.push(sym.clone());
+            funding_rates_bps.push(*rate_bps);
+            next_funding_ms.push(*next_ms);
+        }
+        Some(FundingCurveSnapshot {
+            symbols,
+            funding_rates_bps,
+            next_funding_ms,
+            snapshot_ts_ms,
+            source_tier: "bybit_v5_ws_tickers".to_string(),
+        })
     }
 
     /// Flush buffer 寫 V085 panel.funding_rates_panel。
@@ -309,6 +346,44 @@ mod tests {
         let agg = FundingCurveAggregator::new(pool, dup_cohort);
         assert_eq!(agg.cohort_size(), 3, "duplicate cohort entries deduped");
         assert_eq!(agg.buffer_len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_panel_empty_buffer_returns_none() {
+        // PASS：empty buffer → snapshot_panel 回 None（caller 不更新 slot）
+        let agg = make_aggregator().await;
+        assert!(agg.snapshot_panel(1_700_000_060_000).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_panel_buffer_has_data_returns_some() {
+        // PASS：buffer 有資料 → 回 Some(FundingCurveSnapshot)；symbols/rates/next 同 index 對齊
+        let mut agg = make_aggregator().await;
+        agg.on_funding_update("BTCUSDT", 0.0001, 1_700_000_028_800_000);
+        agg.on_funding_update("ETHUSDT", 0.0002, 1_700_000_028_800_000);
+
+        let snap = agg
+            .snapshot_panel(1_700_000_060_000)
+            .expect("snapshot must be Some when buffer has data");
+        assert_eq!(snap.symbols.len(), 2);
+        assert_eq!(snap.funding_rates_bps.len(), 2);
+        assert_eq!(snap.next_funding_ms.len(), 2);
+        assert_eq!(snap.snapshot_ts_ms, 1_700_000_060_000);
+        assert_eq!(snap.source_tier, "bybit_v5_ws_tickers");
+
+        // 驗 symbols 排序穩定（HashMap iter 不穩 → snapshot_panel 內 sort）
+        // 同 index 對齊驗：symbols[i] / funding_rates_bps[i] / next_funding_ms[i]
+        for (i, sym) in snap.symbols.iter().enumerate() {
+            assert!(sym == "BTCUSDT" || sym == "ETHUSDT");
+            // BTCUSDT 0.0001 → 1.0 bps；ETHUSDT 0.0002 → 2.0 bps
+            let expected_rate = if sym == "BTCUSDT" { 1.0 } else { 2.0 };
+            assert!(
+                (snap.funding_rates_bps[i] - expected_rate).abs() < 1e-9,
+                "rate alignment for sym {}",
+                sym
+            );
+            assert_eq!(snap.next_funding_ms[i], 1_700_000_028_800_000);
+        }
     }
 
     #[test]

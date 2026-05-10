@@ -228,6 +228,18 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok());
 
+    // W1 sub-task 3 (E1-γ, 2026-05-11)：從 tickers 流提取下次 funding 時間戳。
+    // Bybit V5 tickers `nextFundingTime` 是字串編碼的 ms epoch；缺欄/不可解 → None。
+    // 為 panel.funding_rates_panel.next_funding_ms 寫入提供來源（V085 schema）。
+    let next_funding_ms = item
+        .get("nextFundingTime")
+        .and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<i64>().ok())
+                .or_else(|| v.as_i64())
+        })
+        .filter(|&t| t > 0);
+
     // OC-5: Extract index price from tickers for FundingArb basis calculation.
     // OC-5：從 tickers 提取指數價格，用於 FundingArb 基差計算。
     let index_price = item
@@ -259,6 +271,7 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
     event.bid_price = bid;
     event.ask_price = ask;
     event.funding_rate = funding_rate;
+    event.next_funding_ms = next_funding_ms;
     event.index_price = index_price;
     event.open_interest = open_interest;
     event.event_kind = Some(PriceEventKind::Ticker);
