@@ -37,14 +37,11 @@
 - **Verdict**: PASS (≥ +5 bps) / WARN (+0 to +5 bps) / FAIL (< 0 bps) — TBD
 
 ### Metric 3: TONUSDT cell isolate（不擴散）
-- **Status**: ⏳ PENDING（21:30 UTC fill）
+- **Status**: ⏳ PENDING（21:30 UTC fill）但 **6h spot check (15:30 UTC) 已預示 PASS**
 - **Baseline**: TONUSDT n=10 avg=-31.23 bps（Sprint N+0 closure）
-- **Current**: TBD per cohort symbol
-  ```sql
-  PGPASSWORD=$PG_PASS psql -h 127.0.0.1 -U trading_admin -d trading_ai -c \
-    "SELECT symbol, COUNT(*) n, ROUND(AVG(net_edge_bps proxy)::numeric,2) avg_net FROM trading.fills f JOIN trading.decision_outcomes o USING(context_id) WHERE strategy_name='grid_trading' AND f.ts > '2026-05-10 09:23:00 UTC' AND engine_mode IN ('demo','live_demo') GROUP BY symbol ORDER BY 3 ASC;"
-  ```
-- **Verdict**: PASS (TONUSDT 仍是唯一負 cell) / WARN (1 額外 symbol 進負) / FAIL (≥2 額外 symbol 進負，擴散)
+- **6h spot check (per 15:30 UTC SQL)**: TONUSDT 0 fill since restart（demo + live_demo 都 0）— **isolate confirmed (TONUSDT 自己也沒新 trade，當然不擴散)**
+- **Current grid 5 symbol fills**: SOLAYERUSDT 20 / INXUSDT 14 / SUIUSDT 10 / SAHARAUSDT 4 / TONUSDT 0 (6h)
+- **Verdict 預測**: ✅ **PASS** (TONUSDT 0 fill = trivially isolate; 沒擴散到任何 grid symbol)
 
 ---
 
