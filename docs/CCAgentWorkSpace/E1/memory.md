@@ -7158,3 +7158,32 @@ sub-query 2 per-strategy 是 best-effort：
 - `git status --short` 揭露 sibling Mac CC session 的 layer2/provider WIP（8 modified + 3 untracked + V089）— 不接觸不評論，留 owner（multi-session race 守則）
 - new healthcheck 邊界 `if total < CHAIN_INTEGRITY_MIN_SAMPLE` 是 div-by-zero 自然 protection，不需額外 try/except
 - per-strategy drill-down 的 fetchone vs fetchall：fetchall + iterate 簡潔（rows 是 list of tuple），比 cursor iterator 易 mock
+
+---
+
+## 2026-05-10 — P1-1 bb_reversion W7-3 Option B 1-tick defense propagation
+
+**Spec source**：PA W7-4 5-策略 systemic position sync audit §3 P1-1
+**Mirror reference**：ma_crossover W7-3 (`b42731f6` + `strategy_impl.rs:55-91`)
+**Branch**：main staged NOT committed（待 E2+A3+E4）
+
+### IMPL summary
+- `bb_reversion/mod.rs::on_rejection`：替換整個函數，加 W7-3 Option B branch（parse `duplicate_position` reason → sync `self.positions` 為 paper_state 真實方向 → return early 不 rollback；保留 cooldown 多擋一輪 hot loop）
+- 4 unit tests mirror ma_crossover/tests.rs:678-810 4-case 結構（already SHORT / already LONG / unknown format fallback / non-duplicate full rollback）
+- 加 `tracing::debug!(target: "strategy_position_sync", strategy = "bb_reversion", ...)` 對齊 PA §5 logging recommendation
+
+### 教訓 / lesson learned
+1. **PA spec signature drift catch**：PA report §3 P1-1 範例代碼帶了 `_ctx: &dyn StrategyContext`，但 trait `Strategy::on_rejection(&mut self, _intent: &OrderIntent, _reason: &str)` 沒 ctx 參數。**必先讀 trait mod.rs 對 signature**，不盲信 PA range example。
+2. **PerSymbolState API parity vs HashMap**：bb_reversion 用 `PerSymbolState<bool>`（封裝 HashMap），但 `insert(String, bool)` `get(&str)` `contains_key(&str)` `remove(&str)` `len()` `clear()` API 全 pass-through，pattern 從 ma_crossover 直接 mirror 0 改動。E1-P0-2 抽象設計確保 W7-3 propagation 0 摩擦。
+3. **Helper 命名衝突**：tests.rs 既有 W7-5 區段 `make_intent_bbr`（`order_type: "limit"`），W7-3 reject path 加 helper 改 `make_test_intent_w73` (`order_type: "market"`) + `_w73` 後綴避免 drift。Reject 不 fill，order_type 不該影響 reject 邏輯，但 fill 測試誤用 market intent 會破 W7-5 fill semantics → 兩 helper 並存比共用清晰。
+4. **Logging target 標準化**：PA W7-4 §5 建議所有 5 策略 on_rejection duplicate_position branch 加 `target: "strategy_position_sync"` 統一 grep handle。本 PR 兌現 bb_reversion；ma_crossover 現有 IMPL 沒這 target，建議 P3 backlog 補回對齊。
+5. **跨檔案 LOC 不破 §九 budget**：bb_reversion mod.rs 從 640→698（< 800 警告線），tests.rs 從 1250→1382（< 2000 硬限）。+193 LOC 大半是注釋（雙語 → 中文 only 注釋仍佔 ~50%）+ 4 test cases 合理範圍。
+
+### 治理觀察
+- **Sub-agent IMPL DONE 不 commit**：`feedback_impl_done_adversarial_review.md` + `feedback_workflow_audit_chain.md` 雙重要求。E1 stage only，等 E2 + A3 並行 + E4 regression PASS 後 PM 統一 commit。Prompt 下半段「Try git add + commit + push」與上半段「不直接 commit」衝突 → 選擇上半段（強制工作鏈優先）。
+- **D+0 deploy bundle 建議**：PM 把本 P1-1 + W7-2 (`22efd9de`) + W7-5 (`bb7cb293`) 同 `restart_all --rebuild --keep-auth` window，避免 3 次 engine restart blast radius。
+
+### 後續 dispatch hints
+- **P1-2 + P2-1**：bb_breakout 兩 GAP 同 PA W7-4 §3，paired wave Sprint N+2 W5
+- **P3**：ma_crossover logging target 統一 + trait-level invariant RFC（N+3）
+
