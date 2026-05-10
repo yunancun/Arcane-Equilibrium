@@ -95,9 +95,18 @@ esac
 
 cd "$BASE"
 
-echo "[$(ts)] === ML training maintenance start (BASE=$BASE JOBS=$JOBS) ===" >> "$LOG"
+# OPENCLAW_PYTHON env override (recommended) → fallback control_api_v1 .venv
+# (Linux runtime path with lightgbm/scikit-learn installed) → fallback system python3.
+# Mac dev / CI 走 OPENCLAW_PYTHON env override 或自帶 venv path.
+PYTHON_BIN="${OPENCLAW_PYTHON:-${BASE}/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/python3}"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+    echo "[$(ts)] WARN: $PYTHON_BIN not found; falling back to system python3 (lightgbm-dependent jobs may fail)" >> "$LOG"
+    PYTHON_BIN="python3"
+fi
 
-if python3 helper_scripts/cron/ml_training_maintenance.py \
+echo "[$(ts)] === ML training maintenance start (BASE=$BASE JOBS=$JOBS PYTHON_BIN=$PYTHON_BIN) ===" >> "$LOG"
+
+if "$PYTHON_BIN" helper_scripts/cron/ml_training_maintenance.py \
         --base-dir "$BASE" \
         --dsn "$OPENCLAW_DATABASE_URL" \
         --jobs "$JOBS" \
