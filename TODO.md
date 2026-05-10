@@ -272,6 +272,103 @@ V085 (W1 funding_curve) / V086 (W6 reject_reason_code) / V087 (W1 oi_delta_panel
 
 ---
 
+## §6.6 Sprint N+1 D+0 EXECUTION Snapshot（2026-05-10 20:08-21:46 UTC, HEAD `e661144e`）
+
+**Status**: D+0 dispatch fire 大規模執行；Phase 1 + Phase 2 全收口；Phase 3 部分收口（含 V091 + chain integrity HC + V089 fix）；AMD-2026-05-1X-W6-1 absorb in flight；Phase 4 (W1/W2 IMPL chain) 待派。
+
+### ✅ DONE 已完成
+
+#### Sign-off + Deploy
+- ✅ N+0 sign-off FINAL APPROVED 2026-05-10 20:08 UTC（提前 1h22m, A 路徑）+ commit `94d688fb` push
+- ✅ engine restart_all --rebuild --keep-auth deploy（OPENCLAW_AUTO_MIGRATE=0 暫關保 skeleton NOT_RUN）
+- ✅ 新 engine PID 1441249，3 pipelines (paper/demo/live) alive，1h37m+ stable
+- ✅ post-deploy validation: ma_crossover INXUSDT reject 50min = 0（W7-3 持續工作）
+
+#### W7 chain (deployed via sign-off restart)
+- ✅ W7-3 Option B 補丁 (`b42731f6`) deployed
+- ✅ W7-1 trait skeleton (`c9fb0b8f`) deployed
+- ✅ W7-2 + bb_reversion sync (`22efd9de`) deployed
+- ✅ W7-5 on_fill + bootstrap (`bb7cb293`) deployed
+- ✅ W4 RouterLeaseGuard Drop test (`22efd9de`) deployed (test code in regression baseline)
+
+#### Phase 1 dispatch fire
+- ✅ W7-4 5 策略 systemic position sync audit (commit `eb9efab5`, 3 ticket P1-1/P1-2/P2-1, 0 P0 blocker)
+- ✅ W6 V086 IMPL DONE (commit `05e44ede` writer code + `91a7b1c9` report)：production V086 applied (reject_n=17810/close_n=2247/overlap=0)，writer code 304 unit test PASS
+
+#### Phase 2 dispatch fire (5/5 sub-agent SUCCESS)
+- ✅ PA W6-1 RFC verdict APPROVE-CONDITIONAL (3 push back)
+- ✅ QC W6-1 RFC verdict APPROVE-CONDITIONAL (4 push back, inline 由 PM 落 file)
+- ✅ MIT W6-1 RFC verdict APPROVE-CONDITIONAL (5 MUST + 2 SHOULD, 含 chain integrity 40% empirical 推翻)
+- ✅ V085 + V087 + V088 dry-run + apply + register (3 panel.* hypertable + retention + integer_now_func + sha384sum INSERT)
+- ✅ W5-E1-A CANARY-STAGE-CRITERIA-1 IMPL (commit `6529e37e`, +2441 LOC, V089 SQL seed + AMD-2026-05-10-05 draft + [58a] enrich, 2695 cargo test PASS)
+- ✅ W5-E1-C DYNAMIC-UNBLOCK IMPL (commit `d17d7863`, +1700 LOC, V090 dry-run + apply + healthcheck [64], 31 PASS)
+
+#### Phase 3 部分 (5/9 done)
+- ✅ V086 + V089 + V090 _sqlx_migrations register (sha384sum mode, V85/V87/V88 隨 sub-agent)
+- ✅ V089 fix commit `ba5388e2` (7 trailing comma PG INSERT VALUES grammar) + Linux sha384 match registered checksum (`05428bf5...`)
+- ✅ Memory `project_2026_05_10_sprint_n0_closure.md` chain integrity era-split 精細化 (commit `332a2f9c` + `9159362c`)
+- ✅ MIT MUST 7: chain integrity HC `[65]` (commit `db17e205`, +642 LOC, 18 unit test + 307 regression PASS)
+- ✅ MIT MUST 2: V091 schema CHECK NOT VALID 互斥不變式 (commit `50e75bff`, 215 LOC NOT_RUN, 推 D+2 14:30 UTC ALTER VALIDATE)
+- ✅ Sub-agent reports + E1 memory governance trail (commit `e661144e`, 教訓 13-37)
+
+#### V### state (10 land + 1 NOT_RUN)
+| V### | Status | applied |
+|---|---|---|
+| V080 | ✅ success=t | governance_canary_stage |
+| V082 | ✅ success=t | decision_features_evaluations_split |
+| V083 | ✅ success=t | fills_entry_context_id_close_check |
+| V084 | ✅ success=t | decision_features_reject_negative_label |
+| V085 | ✅ success=t | panel_funding_curve |
+| V086 | ✅ success=t | governance_reject_close_reason_code |
+| V087 | ✅ success=t | panel_oi_delta_panel |
+| V088 | ✅ success=t | panel_btc_lead_lag_panel |
+| V089 | ✅ success=t | governance_canary_stage_metric_seed (after fix) |
+| V090 | ✅ success=t | governance_unblock_candidates |
+| V091 | ⏳ NOT_RUN | decision_features_reject_close_mutex_check (D+1 evening + D+2 ALTER VALIDATE) |
+
+### ⏳ PENDING / IN FLIGHT
+
+- 🟢 **AMD-2026-05-1X-W6-1 absorb 14 push back** (sub-agent `aaa66222` in flight, ~21:13 UTC dispatch, ETA 22:30-23:00 UTC) — PA write 200-300 LOC AMD draft + sign-off report
+- ⏳ **MIT MUST 4**: CLAUDE.md §七 idempotency wording 修正 "lossless on repeated apply"（**operator 動 CLAUDE.md**）
+- ⏳ **MIT MUST 3**: W6-5 試行 acceptance 補 5 ML pipeline metrics (W6-5 phase work)
+- ⏳ **D+1 evening engine restart_all --rebuild --keep-auth**：deploy V086 producer code (commit `05e44ede`) + V091 NOT_RUN deploy
+- ⏳ **D+2 14:30 UTC**：ALTER TABLE learning.decision_features VALIDATE CONSTRAINT decision_features_evaluations_reject_close_mutex_chk (V091 enforce; 前提 24h post-V086-producer drift PASS reject_NULL_code = 0)
+
+### ⏳ Phase 4 待派 (long-running)
+
+- ⏳ **W1 IMPL chain** (Rust panel_aggregator WS-first, V085/V087 producer integration, ~5-7d, 3 sub-agent)
+- ⏳ **W2 IMPL v1.2 chain** (lead-lag producer + V088 + ma/grid 接 BtcAltLeadLag paper-only shadow, ~5-7d, 5 sub-agent)
+- ⏳ **W3 Stage 1 cohort** observation start（等 W6 + W7 完成 ~D+3-4 啟動）
+- ⏳ **P1-1 / P1-2 / P2-1 W7 propagation**（per W7-4 audit findings, bb_reversion + bb_breakout 缺 W7-3 1-tick defense / bb_breakout 缺 W7-2 entry query, ~95 LOC total, schedule N+1 W5 if capacity 或 N+2）
+
+### Stats 累計 (single session 2026-05-10)
+
+- **40+ commits** (PM + 9 sub-agent successful)
+- **~7000+ LOC delivered** (Rust + Python + SQL + AMD draft + spec + report + memory)
+- **9 sub-agent dispatch 全 successful**: W7-4 / V086 IMPL / 3 RFC verify (PA+QC+MIT) / V085-V088 dry-run / V089 dry-run / W5-E1-A IMPL / W5-E1-C IMPL / chain integrity HC / V091 / AMD draft (in flight)
+- **11 V### managed** (V085-V091)，10 land + 1 NOT_RUN (V091)
+- **Memory + 7+ workspace report governance trail 完整**
+- **Triple sync (Mac / origin / Linux)**: 100% maintained at every commit
+
+### Critical findings discovered + closed in session
+
+- ✅ V087/V088 retention BIGINT bug (V085 sub-agent adversarial catch, fix commit `3ed7047d`)
+- ✅ V086 OR-filter idempotency 缺陷 (E1 finding, MIT confirm 方案 A lossless deterministic)
+- ✅ V089 7 trailing comma PG syntax error (V089 sub-agent catch, PM perl fix)
+- ✅ chain integrity 40% (MIT empirical) → era-split: post-M3 100% / pre-M3 39% historical (PM re-audit 精細化)
+- ✅ W7 chain 是 partial systemic fix (PA W7-4 audit: bb_reversion 缺 W7-3 / bb_breakout 缺 W7-2 + W7-3) → 3 ticket
+- ⏳ V086 producer code commit `05e44ede` 在 main 但 engine 跑舊 code → D+1 evening restart 收口
+
+### 14 Push back items (W6-1 RFC 三角 sign-off, 進 AMD-2026-05-1X-W6-1)
+
+PA (3) / QC (4) / MIT (5 MUST + 2 SHOULD) — 詳 AMD draft（sub-agent in flight）。簡列：
+- **Doc/wording fix (5)**: PA PB#1 / QC PB#1 / MIT MUST 1 / PA PB#3 / MIT MUST 4
+- **Quant/acceptance gate (5)**: QC PB#2 / QC PB#3 / QC PB#4 / PA PB#2 / MIT SHOULD 6
+- **IMPL 已 land (3)**: ✅ MIT MUST 2 (V091) / ✅ MIT MUST 5 (memory) / ✅ MIT SHOULD 7 (HC [65])
+- **IMPL 待 D+1+ (1)**: MIT MUST 3 (W6-5 試行 5 ML pipeline metrics)
+
+---
+
 ## §7 W-AUDIT-6d Mid-Ground（保 6 / 砍 6 + DSR K -12 量化）
 
 ### 保 6 結構性子項（Sprint N+0, 5 person-day, QC review）
