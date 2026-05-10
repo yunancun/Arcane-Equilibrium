@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v3.5 — 3 sub-agent 預跑全完成（QC W2 alpha decay + DSR / PA W7-4 systemic / E4 W4 smoke design）；W2 CONDITIONAL APPROVE 5 conditions（K=95 修正 + σ verify + per-symbol gate + leak-free strict shift + +5→+15 階梯 gate）；W7-4 揭露 bb_reversion 同 ma_crossover HIGH risk → W7-2 同 Wave 推 ~15 LOC fix 提早結 P2-BB-REVERSION-POSITION-SYNC；W4 acceptance 改 4 invariant（既有 9 case 已涵蓋重寫=fake coverage）
+**Status**: DRAFT v3.6 — 3 sub-agent 預跑全完成（PA W2 spec v1.1 5 conditions revision / PA W6-1 RFC final verdict draft / PA W5 三 P1 specs predraft）；W2 spec v1.1 已 inline edit (K=95 + σ MIT prerequisite + R²(N) decay + 6 metric + leak-free + BTC regime extreme)；W6-1 RFC verdict draft 4 條 statement + Track A/B 拆分；W5 三 P1 spec land + V### 編號重排加 V089/V090；D+1 sign-off 後純執行
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -74,7 +74,52 @@ MIT W6 baseline 揭露 ma_crossover INXUSDT 2331 reject 不是 governance 問題
 
 Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
 
-#### §0.7 【v3.5 整合】3 sub-agent 預跑全完成（2026-05-10 17:30 UTC）
+#### §0.8 【v3.6 整合】3 sub-agent 預跑全完成（2026-05-10 18:30 UTC）
+
+#### §0.8.A PA W2 A4-C spec v1 → v1.1 — 5 conditions inline edit
+- §8.1 K=6 → **K=95**（Bailey-López de Prado 2014 §4.2），mu_0 = √(2 ln 95) = **3.018**
+- §8.1 gate threshold **改三檔**：+15 promote N+2 / +5~+15 extend 14d / <+5 revise
+- §3.1+§4.1+§7.1 N 鎖 120s + schema 加 60s/300s shadow value column + R²(N) decay curve 強制
+- §7.1 mandatory metric set 從 5 → **6 條**（per-symbol gate / DSR K=95 / PSR(0) skew/kurt / Alpha decay / block-bootstrap CI / counterfactual delta）
+- §7.3 strict shift(N) leak-free 並列對比，差異 > 30% spec 失敗
+- §9+§4.1+§7.2+§4.2 BTC regime extreme guard |1h return| > 200 bps → regime_tag='extreme' shadow log 不計入 7d edge avg
+- σ MIT C-3 prerequisite：必 verify BTCUSDT 1m forward-return realized σ 7d，σ ≥ 60 bps 重算 power
+- 衝擊：V088 加 3 column / C-IMPL-2 LOC ~350→400 / rate budget 9→10 req/min / 16/9/5 全 0 觸碰
+- Sign-off path：QC 已 APPROVE → MIT C-3 D+1 直接收 → D+3 派 C-IMPL-1..4
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w2_a4c_spec_v1_1_qc_5_conditions_revision.md`
+- Spec edit: `srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md` (v1.1)
+
+#### §0.8.B PA W6-1 RFC final verdict draft — 8 section
+- §1 verdict 4 條明文：(a) cost_gate hard rule 維持 (b) JS shrinkage 設計預期 (c) 不需 counterfactual backtest (d) trainer task type confirm = regression
+- §2 8 sub-task 對齊（W6-1~W6-10）
+- §3 ML retrain Track A/B 拆分 close PA Q3 vs MIT Q2 分歧
+- §4 真實 enum spec 12+14 + 兩 column V086 + one-shot in-migration backfill
+- §5 5 ambiguous A1-A5 全 ACCEPT MIT
+- §6 雙前綴 16+17 row 處理 V086 同 migration UPDATE
+- §7 healthcheck [59]/[60]/[61]/[62]/[40]
+- §8 W6 N+1 acceptance gate 9 條
+- D+1 sign-off path：上午 1.5h 三角 verify + 下午 1h sync → AMD-2026-05-1X-W6-1-rfc-verdict land
+- 16/9/5 全 0 觸碰
+- Draft: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_1_rfc_final_verdict_draft.md`
+
+#### §0.8.C PA W5 三 P1 specs predraft — V### 編號重排
+- 3 spec land path:
+  - `srv/docs/execution_plan/2026-05-10--p1_canary_stage_criteria_1_spec.md` (~340 LOC, AMD-2026-05-10-05 起草, [58] healthcheck enrich)
+  - `srv/docs/execution_plan/2026-05-10--p1_canary_cohort_freq_23_spec.md` (~360 LOC, AMD-2026-05-10-06 起草, [63] healthcheck + V089)
+  - `srv/docs/execution_plan/2026-05-10--p1_dynamic_unblock_check_1_spec.md` (~760 LOC, [64] healthcheck + V090, reuse blocked_symbols_7d_counterfactual.py 改 30d)
+- 預估 W5 IMPL phase E1 總 LOC：**~1460 LOC**（含 ~260 test + optional GUI ~140）
+- 3 sub-agent 並行設計（W5-E1-A/B/C）：A 做 STAGE-CRITERIA / B 做 COHORT-FREQ-23（Rust 同 A file sequential）/ C 做 DYNAMIC-UNBLOCK 100% 並行
+- E2 跨 spec 重點 3 點：boundary_violation_count 7 source 對齊 / cohort identity 三元組 case-sensitive / `force_eval` API 不放寬 §3 criteria
+- **V### 編號重排（v3.6 update）**：
+  - V085 = W1 funding_curve
+  - V086 = W6 reject_reason_code (high priority)
+  - V087 = W1 oi_delta_panel
+  - V088 = W2 btc_lead_lag_panel
+  - **V089 = W5 cohort_freq_cap_attempts (NEW)**
+  - **V090 = W5 unblock_candidates (NEW)**
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w5_three_p1_specs_predraft.md`
+
+### §0.7 【v3.5 整合】3 sub-agent 預跑全完成（2026-05-10 17:30 UTC）
 
 #### §0.7.A QC W2 A4-C alpha decay + DSR — **CONDITIONAL APPROVE 5 conditions**
 - Q1 alpha decay 半衰期 30-180s；推薦 N=120s（PA 預設一致）；強制 R²(N=60/120/300) decay curve
@@ -692,7 +737,16 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ---
 
-**已整合 evidence**（v3.5 update）:
+**已整合 evidence**（v3.6 update）:
+- ✅ **PA W2 spec v1.1 5 conditions revision** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w2_a4c_spec_v1_1_qc_5_conditions_revision.md`（spec inline edit, V088 加 3 column, +5→+15 階梯 gate）
+- ✅ **PA W6-1 RFC final verdict draft** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_1_rfc_final_verdict_draft.md`（8 section, 4 條 verdict, Track A/B 拆分）
+- ✅ **PA W5 三 P1 specs predraft** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w5_three_p1_specs_predraft.md`（3 spec land + V089/V090 reserved + ~1460 LOC est）
+- ✅ **3 W5 P1 spec land**: 
+  - `srv/docs/execution_plan/2026-05-10--p1_canary_stage_criteria_1_spec.md`
+  - `srv/docs/execution_plan/2026-05-10--p1_canary_cohort_freq_23_spec.md`
+  - `srv/docs/execution_plan/2026-05-10--p1_dynamic_unblock_check_1_spec.md`
+
+
 - ✅ **QC W2 alpha decay + DSR review** → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w2_a4c_qc_review_alpha_decay_dsr.md`（CONDITIONAL APPROVE 5 conditions）
 - ✅ **PA W7-4 systemic position sync audit** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_4_systemic_position_sync_audit.md`（5 策略 verdict HIGH×2/MED×1/LOW×1/RETIRED-LOW×1）
 - ✅ **E4 W4 W-AUDIT-3b smoke design** → `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-10--w_audit_3b_runtime_smoke_test_design.md`（push back acceptance 改 4 invariant + RouterLeaseGuard Drop ~40 LOC）

@@ -1,12 +1,30 @@
-# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase Draft v1
+# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.1
 
 **Author**: PA (project architect)
 **Date**: 2026-05-10
-**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 + MIT C-3 三角 review pending）
-**Scope**: Sprint N+1 W2 A4-C fast-track 第一份 spec draft；spec 拍板後直接派 paper IMPL（C-IMPL-1..4），D+5 起 paper engine 累積 7d edge evidence，gate ≥ +5 bps 才進 N+2 demo IMPL。
+**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 review pending D+1）
+**Scope**: Sprint N+1 W2 A4-C fast-track；spec v1.1 拍板後直接派 paper IMPL（C-IMPL-1..4），D+5 起 paper engine 累積 7d edge evidence，gate 三檔（+15 promote / +5~+15 extend 14d / <+5 revise）才決定 N+2 demo IMPL 路徑。
 **Reference dispatch**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md` §3.2 W2
 **Reference trait coord**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`
 **Reference alpha surface**: `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` + W-AUDIT-8c §515 (BTC→Alt lead-lag 候選 C, 留給 N+5)
+**Reference QC review**: `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w2_a4c_qc_review_alpha_decay_dsr.md`
+
+---
+
+## Change Log
+
+### v1.1 (2026-05-10) — QC C-2 review CONDITIONAL APPROVE 5 conditions revision
+
+| # | Section | 改動 essence |
+|---|---|---|
+| 1 | §8.1 | DSR K 從 6 修正為 95（active strategy×symbol cell 總數，引 Bailey-López de Prado 2014 §4.2「DSR with multiple trial」）；mu_0 從錯誤值改為 √(2 ln 95) = 3.018 |
+| 2 | §8.1 | paper edge gate 從 「≥ +5 bps」單檔改為三檔（+15 promote N+2 demo IMPL / +5~+15 extend paper window 14d 重評 / <+5 revise spec 或 archive） |
+| 3 | §3.1 + §7.1 | N 鎖 120s 但 §7.1 evaluate 強制要求 R²(N=60/120/300) 三檔 decay curve；半衰期 < 60s → archive |
+| 4 | §7.1 | Mandatory metric set 補完：(a) per-symbol breakdown + per-symbol n ≥ 100 + per-symbol t > 2.0 (b) block-bootstrap 95% CI block_size=60min 1000 iter (c) DSR with K=95 deflate（non-negotiable）+ PSR(0) ≥ 0.95 用 skew/kurt-aware formula (d) Alpha decay regime test |
+| 5 | §9 | 加 BTC regime extreme guard（\|1h return\| > 200 bps shadow-only，shadow log 標 `regime=extreme` 不計入 7d edge avg） |
+| extra | §7.1 | σ=30 bps 是下界假設，**MIT C-3 必 verify**（BTCUSDT 1m forward-return realized σ 7d 經驗值）；若 σ ≥ 60 bps 需重算 power → spec metric set 加「σ verified by MIT C-3」 acceptance prerequisite |
+
+### v1.0 (2026-05-10) — PA C-1 spec phase Day 1-2 initial draft
 
 ---
 
@@ -79,7 +97,14 @@ btc_lead_return_pct(N) =
     (close_btc[t] - close_btc[t-N]) / close_btc[t-N] * 10000   // bps
 ```
 
-**N 候選**：60s / 120s / 300s 三檔（QC C-2 拍板最佳 N；spec draft 預設 120s）。
+**N 鎖定 = 120s**（QC C-2 review v1.1 拍板，per Easley/López de Prado/O'Hara *Microstructure in the Age of Machine Learning* 2021 + Makarov & Schoar JFE 2020 BTC→alt informational lead 半衰期 30-180s estimate；N=120s 對應預期 R²=0.06-0.10，half-life ≈ 90s 折衷 sweet spot）。
+
+**N=60/120/300 三檔 decay curve 強制要求（v1.1 condition #3）**：D+12 paper edge report **必含** 三檔 N 對應的 forward predictive R²(60s alt return) decay curve，per §7.1 mandatory metric (4)。實測判定：
+- N=120s R² < 0.04 → revise spec 改 N=60s
+- N=60s R² 也 < 0.04 → archive A4-C 路徑
+- N=300s R² > N=120s → 重評 N 選擇（trend-continuation 未被 arbitrage 完全消化）
+
+**保留 60/120/300 三 lead_window_secs evidence**：writer 同 1m grain 寫 1 row 含 lead_window_secs=120 主信號 + 同 row metadata 帶 (60s, 300s) shadow value（per §4.1 schema 微調）。
 
 #### 3.1.2 Volume z-score
 
@@ -139,13 +164,16 @@ PA spec draft 預設：`threshold_X = 10 bps`、`threshold_Y = 0.40`、`N = 120s
 | Column | Type | Notes |
 |---|---|---|
 | `snapshot_ts_ms` | bigint | snapshot timestamp（1m grain） |
-| `lead_window_secs` | int | 60 / 120 / 300（spec 預設 120） |
-| `btc_lead_return_pct` | real | bps，per §3.1.1 |
-| `btc_volume_z` | real | per §3.1.2 |
+| `lead_window_secs` | int | 主信號固定 120（v1.1 N 鎖定） |
+| `btc_lead_return_pct` | real | bps，per §3.1.1，主信號 N=120 |
+| `btc_lead_return_pct_60s` | real | bps，shadow value N=60（v1.1 condition #3 decay curve evidence） |
+| `btc_lead_return_pct_300s` | real | bps，shadow value N=300（v1.1 condition #3 decay curve evidence） |
+| `btc_volume_z` | real | per §3.1.2，主信號 N=120 |
 | `btc_book_imbalance` | real | per §3.1.3 |
 | `alt_symbols` | text[] | cohort symbol list（per §2.2） |
-| `alt_xcorr` | real[] | per §3.2，與 alt_symbols 同序，NaN 表 sample 不足 |
-| `alt_expected_dir` | smallint[] | −1 / 0 / +1，per §3.3 |
+| `alt_xcorr` | real[] | per §3.2，主 N=120，與 alt_symbols 同序，NaN 表 sample 不足 |
+| `alt_expected_dir` | smallint[] | −1 / 0 / +1，per §3.3，主 N=120 |
+| `regime_tag` | text | v1.1 §9 regime extreme guard：`'normal'` / `'extreme'`（\|BTC 1h return\| > 200 bps 標 extreme，shadow log only 不計入 7d edge avg） |
 | `source_tier` | text | 固定 `'cross_asset_btc_lead_lag'` |
 
 **Hypertable 設計**（per W-AUDIT-8a Phase B 模板）：
@@ -160,22 +188,25 @@ PA spec draft 預設：`threshold_X = 10 bps`、`threshold_Y = 0.40`、`N = 120s
 
 **新檔（W2 E1-δ C-IMPL-2 IMPL）**。職責：
 
-1. 從 Bybit V5 `/v5/market/kline` 拉 BTCUSDT 1m kline + alt cohort 1m kline（rolling 1h buffer）
+1. 從 Bybit V5 `/v5/market/kline` 拉 BTCUSDT 1m kline + BTCUSDT 1h kline（v1.1 regime_tag 用）+ alt cohort 1m kline（rolling 1h buffer）
 2. 從 Bybit V5 `/v5/market/orderbook` 拉 BTCUSDT top-10 snapshot（每 1m）
-3. 計算 lead signal（§3.1）、xcorr（§3.2）、expected_dir（§3.3）
-4. 1m grain bucketing：每 60 秒 1 個 snapshot 寫入 `panel.btc_lead_lag_panel`
-5. 更新 Rust IPC slot `BtcLeadLagPanelSlot`（per `slots.rs` 新增）
-6. **paper-only fence Layer 2**：啟動讀 `OPENCLAW_ENABLE_PAPER` env；若未設 + 偵測 demo/live engine active → writer 不啟動（per PA #1 trait final shape §5）
+3. 計算 lead signal（§3.1）、xcorr（§3.2）、expected_dir（§3.3）；**主信號 N=120s**，同時計算 N=60s + N=300s shadow value 寫 `btc_lead_return_pct_60s` + `btc_lead_return_pct_300s` columns（v1.1 condition #3 decay curve evidence）
+4. **v1.1 regime_tag 計算（§9 condition #5）**：每 1m 用 BTCUSDT 1h kline shift(1) 算 1h return；`abs(btc_1h_return_bps) > 200` → `regime_tag = 'extreme'`，否則 `'normal'`；shadow log 標記不影響 main signal 寫入
+5. 1m grain bucketing：每 60 秒 1 個 snapshot 寫入 `panel.btc_lead_lag_panel`
+6. 更新 Rust IPC slot `BtcLeadLagPanelSlot`（per `slots.rs` 新增）；**主 N=120 信號寫主 panel 欄位，60s/300s shadow value 寫 schema column 但不寫 IPC slot**（避免 Rust 端 surface 接 60s/300s 引發 strategy 接觸下游）
+7. **paper-only fence Layer 2**：啟動讀 `OPENCLAW_ENABLE_PAPER` env；若未設 + 偵測 demo/live engine active → writer 不啟動（per PA #1 trait final shape §5）
+8. **strict shift(N) lookahead-free（v1.1 condition #4）**：所有 `rolling()` / `[t-N..t]` slice operation 必用 `shift(1)` 後 N 秒前 BTC value，禁含 current bar；MIT C-3 grep verification gate
 
 ### 4.3 Bybit V5 rate budget 整合
 
 Bybit V5 market endpoint group rate limit = **120 req/s**（per `docs/references/2026-04-04--bybit_api_reference.md:1131`）。
 
 **W2 預估流量**（per minute）：
-- BTCUSDT kline: 1 req
+- BTCUSDT 1m kline: 1 req
+- BTCUSDT 1h kline (v1.1 §9 regime_tag 計算用): 1 req
 - BTCUSDT orderbook: 1 req
 - Alt cohort kline (7 symbol): 7 req
-- 合計 9 req/min = 0.15 req/s — well under 120 req/s budget
+- 合計 10 req/min = 0.17 req/s — well under 120 req/s budget
 
 **與其他 wave 同窗整合**：W1 Phase B Tier 2 collector + W3 Stage 1 cohort + W2 同 market endpoint group；BB review 必確認 W1+W2+W3 合計 budget < 50% upper bound（per BB review 慣例）。
 
@@ -277,15 +308,24 @@ let alpha_surface = AlphaSurface {
 
 ## §7 Backtest Counterfactual Spec
 
-### 7.1 7d paper engine 跑後 evaluate
+### 7.1 7d paper engine 跑後 evaluate（v1.1 mandatory metric set 6 條 + acceptance prerequisite）
 
-| Metric | 計算 |
-|---|---|
-| paper avg_net_bps (overall) | per cohort symbol + overall，含成本 fee + slippage |
-| paper sample size n | per cohort symbol，gate n ≥ 100 fills |
-| DSR PASS test | mu_0 = sqrt(2 ln K)，K 含 A4-C 加入後重算（per QC C-2 量化） |
-| Alpha decay 半衰期 | lead signal 對 alt return 的 forward predictive R^2 隨 lead window 增長的衰減速率 |
-| Counterfactual net edge | 用 shadow log 對齊每筆 entry，反算「follow lead signal expected_dir 進場 vs 既有 TA1m 進場」net edge delta |
+#### Acceptance prerequisite（IMPL phase 啟動前必驗）
+
+| Prerequisite | 責任 | Verdict |
+|---|---|---|
+| **σ verified by MIT C-3** | MIT C-3 D+1 review | BTCUSDT 1m forward-return realized σ 7d 經驗值；σ ≥ 60 bps → 重算 power（t-stat 跌至 2.36，p ≈ 0.009），spec metric (1) per-symbol gate threshold 不變但 PSR(0) 必含 skew/kurt deflation；σ < 60 bps → 採 v1.1 baseline assumption σ=30 bps 繼續 |
+
+#### Mandatory metric set 6 條（D+12 paper edge report 必含）
+
+| # | Metric | 計算 + 拍板 |
+|---|---|---|
+| 1 | **Pooled + per-symbol breakdown** | per cohort symbol + overall pooled，含 avg_net_bps + std + Sharpe + sample n + per-symbol t-stat。**Gate**：per-symbol n ≥ 100 fills + per-symbol t > 2.0（不只 overall pooled，避免 underpowered 單 symbol promote 決策） |
+| 2 | **DSR PASS test with K=95 deflate**（**non-negotiable**）| mu_0 = √(2 ln K)，K=95（**v1.1 修正**：active strategy×symbol cell 總數，per Bailey-López de Prado 2014 §4.2 DSR with multiple trial）；mu_0 = √(2 ln 95) = **3.018**（舊 K=79 → 2.956；Δmu_0 = +0.062 即 +2.1%）。warning：8 cohort × 2 strat 全 promote → K 升至 ~111；future ADR 必記錄 K 累積對 multiple-testing budget 長期約束 |
+| 3 | **PSR(0) ≥ 0.95**（用 skew/kurt-aware formula）| crypto JB normality 必拒，禁用 normal SR z-test；用 Bailey-López de Prado 2012 PSR formula 含 skew + kurt deflation |
+| 4 | **Alpha decay regime test**：R²(N=60/120/300) 三檔 decay curve | lead signal 對 alt return forward predictive R²(60s alt return) 隨 7d window rolling 30-min bucket 衰減曲線；半衰期 < 60s → spec 失敗（信號太短沒實用價值），> 300s → window 太長不抓 microstructure；N=120s 主信號 R² < 0.04 → revise spec 或 archive |
+| 5 | **Block-bootstrap 95% CI**（pooled + per-symbol）| block_size=60min（對齊 BTC autocorr scale），1000 iter；per-symbol CI 與 pooled CI 並列報告 |
+| 6 | **Per-cohort-symbol counterfactual delta** | `(if-followed-lead net_edge) − (TA1m baseline net_edge)`；用 shadow log 對齊每筆 entry，反算「follow lead signal expected_dir 進場 vs 既有 TA1m 進場」net edge delta |
 
 ### 7.2 Counterfactual reconstruction
 
@@ -296,22 +336,38 @@ SELECT
     AVG(net_edge_bps) AS avg_net_bps,
     COUNT(*) AS sample_n,
     -- counterfactual: if expected_dir=+1 → assume LONG entry; net_edge_bps proxy from forward 30s-300s alt return
-    AVG(CASE WHEN expected_dir = +1 THEN forward_return_bps ELSE 0 END) AS cf_long_avg
+    AVG(CASE WHEN expected_dir = +1 THEN forward_return_bps ELSE 0 END) AS cf_long_avg,
+    -- v1.1: regime extreme exclusion，per §9
+    AVG(net_edge_bps) FILTER (WHERE regime_tag = 'normal') AS avg_net_bps_normal_regime,
+    COUNT(*) FILTER (WHERE regime_tag = 'extreme') AS extreme_regime_n
 FROM btc_alt_lead_lag_shadow_with_forward_returns
 WHERE engine_mode = 'paper' AND ts >= NOW() - INTERVAL '7 days'
 GROUP BY symbol;
 ```
 
+### 7.3 Strict shift(N) leak-free 對比強制（v1.1 condition #4）
+
+**Counterfactual backtest 必並列 strict `shift(N)` 版 vs naive `[t-N..t]` 版**，差異 > 30% → spec 失敗（log 內含 current bar leak），對照 `feedback_indicator_lookahead_bias.md` Donchian RETRACT 教訓。MIT C-3 D+1 review 同步必跑 strict shift grep verification（`btc_lead_lag_writer.py` 內所有 `rolling()` / `[t-N..t]` slice operation）。
+
 ---
 
 ## §8 Acceptance Gate（QC + MIT review 必審）
 
-### 8.1 QC C-2 review scope
+### 8.1 QC C-2 review scope（v1.1 sign-off CONDITIONAL APPROVE — 5 conditions revised in spec）
 
-- Alpha decay 估算（critical）：lead window 60s/120s/300s 對應 forward predictive R^2 衰減；半衰期 < 60s → spec 失敗（信號太短沒實用價值），> 300s → window 太長不抓 microstructure
-- DSR penalty K 量化：A4-C 加入後 mu_0 = sqrt(2 ln K) 重算，K 含 5 textbook + A4-C 共 6
-- Paper edge gate threshold：≥ +5 bps avg_net 進 N+2 demo IMPL；< +5 bps 進 revise spec 不浪費 N+2
-- Threshold X / Y / N 三參數最佳值拍板
+- **Alpha decay 估算（critical, v1.1 condition #3）**：lead window 60s/120s/300s 對應 forward predictive R² 衰減；N 鎖定 = 120s（per §3.1 Easley/De Prado/O'Hara 2021 + Makarov-Schoar JFE 2020 estimate），但 D+12 evaluate 強制報三檔 decay curve；半衰期 < 60s → spec 失敗，> 300s → window 太長不抓 microstructure
+- **DSR penalty K 量化（v1.1 condition #1）**：mu_0 = √(2 ln K)，**K = 95**（active strategy×symbol cell 總數，per Bailey-López de Prado *The Deflated Sharpe Ratio* (2014) §4.2「DSR with multiple trial」；舊草稿錯寫 K=6 = 策略 family 數）→ **mu_0 = √(2 ln 95) = 3.018**。對既有 5 策略 cells DSR PASS shift < 1 σ 空間可忽略；warning：8 cohort × 2 strat 全 promote → K ≈ 111，future ADR 必記錄 K 累積對 multiple-testing budget 長期約束
+- **Paper edge gate threshold 三檔（v1.1 condition #5 — 替代原單檔 ≥ +5 bps）**：
+
+| paper avg_net_bps | 動作 | 理由 |
+|---|---|---|
+| **≥ +15 bps** | promote N+2 demo IMPL（fast track） | demo cost 15-20 bps round-trip → +15 paper edge → demo 環境 ~0 buffer，promote 後 live cost 8-12 bps 才有正 edge headroom |
+| **+5 ≤ avg_net_bps < +15** | extend paper window 至 14d，重評（marginal） | 樣本不足 + edge 邊緣，再收 7d 確認；不浪費 N+2 demo |
+| **< +5 bps** | revise spec 或 archive | demo cost 下無 net edge survive；單檔 ≥ +5 拍板門檻在 demo 必虧 net −10 ~ −15 bps |
+
+**理由源**：CLAUDE.md §三 cost_gate JS-demo `[40] avg_net = -17.82 → +8.75 bps after V083`（3C audit），demo 5 策略當前 cost burden ≈ 15-20 bps round-trip（fee + slippage + adverse selection）；live 環境降至 ≈ 8-12 bps（PostOnly maker rebate）
+
+- Threshold X / Y / N 三參數最佳值：N=120s 已鎖定（v1.1）；threshold_X=10 bps + threshold_Y=0.40 維持 PA 預設，QC + MIT D+1 review 不再可改
 
 ### 8.2 MIT C-3 review scope
 
@@ -320,9 +376,15 @@ GROUP BY symbol;
 - Cohort sample size demand：per cohort symbol n ≥ 100 fills 7d 內可達？BTCUSDT 1m 7d = 10080 bar 足夠 lead signal；alt cohort fills 倚賴 5 策略 paper baseline 活躍度
 - V088 hypertable PL/pgSQL 語法 + retention drop_chunks policy + idempotency dry-run
 
-### 8.3 三方 APPROVE 後才 paper IMPL phase
+### 8.3 三方 sign-off path（v1.1）
 
-D+3 起 W2 paper IMPL（C-IMPL-1 NO-OP 驗收 + C-IMPL-2 producer + V088 + C-IMPL-3 strategy shadow + C-IMPL-4 paper engine 7d evidence collection 開始）。
+**v1.1 spec 5 conditions revised 後：QC C-2 已 sign-off CONDITIONAL APPROVE → 直接收**（不需 D+1 PA + QC integrate phase）。MIT C-3 D+1 review focus：
+- §7.1 acceptance prerequisite「σ verified by MIT C-3」必跑（BTCUSDT 1m forward-return realized σ 7d）
+- §7.3 strict shift(N) leak-free grep verification（`btc_lead_lag_writer.py` 內 `rolling()` / slice operation 全掃）
+- §4.1 V088 hypertable PL/pgSQL 語法 + retention drop_chunks policy + idempotency dry-run
+- §4.4 (新) 60s/300s shadow value column 寫入路徑與主信號 N=120 disjoint 不污染
+
+MIT C-3 APPROVE 後 D+3 起 W2 paper IMPL（C-IMPL-1 NO-OP 驗收 + C-IMPL-2 producer + V088 + C-IMPL-3 strategy shadow + C-IMPL-4 paper engine 7d evidence collection 開始）。
 
 ---
 
@@ -330,14 +392,20 @@ D+3 起 W2 paper IMPL（C-IMPL-1 NO-OP 驗收 + C-IMPL-2 producer + V088 + C-IMP
 
 | Risk | 等級 | 緩解 |
 |---|---|---|
-| **Look-ahead bias**（lead window 含 current bar） | **極高** | strict `shift(N)` 禁含 current bar；MIT C-3 必跑 leak detection；對照 `feedback_indicator_lookahead_bias` |
+| **Look-ahead bias**（lead window 含 current bar） | **極高** | strict `shift(N)` 禁含 current bar；MIT C-3 必跑 leak detection（per §7.3 strict shift 並列對比，差異 > 30% 即 spec 失敗）；對照 `feedback_indicator_lookahead_bias` |
+| **σ=30 bps 假設過度樂觀**（v1.1 condition extra） | **高** | §7.1 acceptance prerequisite — MIT C-3 必 verify BTCUSDT 1m forward-return realized σ 7d 經驗值；σ ≥ 60 bps → t-stat 跌至 2.36（p ≈ 0.009），power 邊緣可接受但 PSR(0) 必含 skew/kurt deflation；< 60 bps 採 baseline σ=30 bps |
+| **per-symbol n=100 underpowered**（v1.1 condition #4 (1)） | **中** | §7.1 metric (1) per-symbol gate：per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol promote；不只 overall pooled 看 |
+| **K=95 deflate 漏算**（v1.1 condition #1） | **中** | §8.1 spec 文字已修正 K=95（不是 6）；§7.1 metric (2) DSR PASS test 強制 K=95 deflate non-negotiable |
+| **+5 bps gate 太鬆無法 survive demo cost**（v1.1 condition #5） | **極高** | §8.1 改三檔 gate（+15 promote / +5~+15 extend 14d / <+5 revise） |
+| **Alpha decay quick (half-life < N)**（v1.1 condition #3） | **中-高** | §7.1 metric (4) R²(N=60/120/300) decay curve 強制；半衰期 < 60s → archive；§4.1 schema 加 60s/300s shadow value column 收 evidence |
+| **BTC regime extreme**（pump 時 lead signal saturate）（v1.1 condition #5） | **中** | xcorr threshold_Y ≥ 0.40 + return threshold_X clamp ≤ 50 bps（避 outlier 主導）；**v1.1 新加：\|BTCUSDT 1h return\| > 200 bps 視為 regime extreme，shadow log 標 `regime=extreme`（per §4.1 `regime_tag` column）不計入 7d edge avg**（per §7.2 `FILTER (WHERE regime_tag = 'normal')` SQL pattern）；BB regime data 來源：BTCUSDT 1h kline shift(1)，writer 同 1m grain 內每分鐘重算 |
 | Self-fulfilling bias（paper engine 自己 trade BTC alt 推動 BTC lead signal） | 高 | 5 策略 paper engine 流量極小（demo 7d gross −26 USDT），對 BTC global liquidity 無影響；但仍 paper-only fence 三層防禦避免 demo 污染 |
 | ML pipeline 污染（demo/live 期 BtcLeadLag 寫進 ML training table） | 高 | bb_breakout/bb_reversion/funding_arb 不接收 + paper-only fence Layer 2 Python writer 不啟動 → 5 策略 demo edge baseline 不污染 |
 | Cohort 樣本不足 7d 內 < 100 fills | 中 | n ≥ 100 是 gate；不達標延長收 evidence 至 14d 或 cohort 縮減；QC C-2 量化 |
-| Bybit rate limit 撞 W1+W3 同窗 | 低 | W2 預估 9 req/min 占 < 1% upper bound（per §4.3）；BB review 確認三 wave 合計 < 50% |
+| Bybit rate limit 撞 W1+W3 同窗 | 低 | W2 預估 9 req/min（v1.1 加 BTCUSDT 1h kline 1 req/min = 10 req/min）占 < 1% upper bound（per §4.3）；BB review 確認三 wave 合計 < 50% |
 | W6 ML retrain 4-gate 衝突（Q&A pending） | 低 | A4-C 是新 alpha source，不是 ML feature retrain；走 W6 4-gate 不適用本 wave |
 | `CrossAsset` enum tag 對應多個未來 panel | 中 | 接受；W-AUDIT-8c 真接 generic 跨資產 panel 時拆 `BtcAltLeadLag` 為獨立 enum variant（ADR 觸發） |
-| MIT 揭露 W2 與 W6-5 同類 category error | 待 D+1 review | QC + MIT 三角 review 1 day 必揭露；如類似 W6-5 → revise spec 重派 |
+| MIT 揭露 W2 與 W6-5 同類 category error | 待 D+1 review | MIT C-3 D+1 review 必揭露；QC C-2 已 sign-off CONDITIONAL APPROVE 5 conditions 已落地 spec v1.1 |
 
 ---
 
@@ -367,7 +435,7 @@ per dispatch v3.3 §3.2 W2 fast-track：
 | Sub-agent | Scope | 動的 file | est LOC |
 |---|---|---|---|
 | **W2 E1-γ (C-IMPL-1)** | trait extension **NO-OP**（PA D+0 已 land） | **無檔可動** — 範圍縮為 BtcLeadLagPanel typedef 驗收 + 對照 producer schema | 0 LOC |
-| **W2 E1-δ (C-IMPL-2)** | lead-lag producer + V088 + IPC slot | `program_code/.../btc_lead_lag_writer.py`（新）+ `sql/migrations/V088__btc_lead_lag_panel.sql`（新）+ `rust/openclaw_engine/src/ipc_server/slots.rs`（加 `BtcLeadLagPanelSlot`） + `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`（一行 surface field assignment + paper-only engine_mode gate） | ~350 LOC |
+| **W2 E1-δ (C-IMPL-2)** | lead-lag producer + V088 + IPC slot（v1.1 含 60s/300s shadow value column + regime_tag column + BTCUSDT 1h kline regime 計算 + strict shift(N) lookahead-free） | `program_code/.../btc_lead_lag_writer.py`（新）+ `sql/migrations/V088__btc_lead_lag_panel.sql`（新）+ `rust/openclaw_engine/src/ipc_server/slots.rs`（加 `BtcLeadLagPanelSlot`） + `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`（一行 surface field assignment + paper-only engine_mode gate） | ~400 LOC（v1.1 +50 LOC for regime_tag + 60s/300s shadow value + 1h kline integration） |
 | **W2 E1-ε (C-IMPL-3)** | strategy paper-only shadow | `ma_crossover/strategy_impl.rs`（declare `CrossAsset` + on_tick shadow log）+ `grid_trading/mod.rs`（同） | ~80 LOC |
 | **W2 E1-ζ (C-IMPL-4)** | paper engine 7d evidence collection 開始 | 操作 only，無代碼；D+5 起 paper engine deploy 後跑 7d；D+12 land paper edge report | 0 LOC |
 
@@ -375,15 +443,15 @@ per dispatch v3.3 §3.2 W2 fast-track：
 
 ---
 
-## §12 E2 重點審查 3 點
+## §12 E2 重點審查 3 點（v1.1 補強）
 
 per PA 輸出物標準：
 
 1. **Layer 1 paper-only fence default → None**：E2 必 grep `btc_lead_lag = match self.effective_engine_mode()` in step_4_5_dispatch.rs，confirm `_ => None`（**不是** `_ => Some(...)`）。漏 `None` default = demo/live 污染主路徑。
 
-2. **Strict shift(N) lookahead-free 驗證**：E2 必 grep `btc_lead_lag_writer.py` 內所有 `rolling()` / `[t-N..t]` slice operation，確認 BTC return / volume z-score 計算 strict 用 `shift(1)` 後的 N 秒前 value，**禁** include current bar。對照 `feedback_indicator_lookahead_bias` Rolling-window breach 反模式。
+2. **Strict shift(N) lookahead-free 驗證（v1.1 condition #4）**：E2 必 grep `btc_lead_lag_writer.py` 內所有 `rolling()` / `[t-N..t]` slice operation，確認 BTC return（含 N=60s + N=120s + N=300s 三檔 shadow value）/ volume z-score 計算 strict 用 `shift(1)` 後的 N 秒前 value，**禁** include current bar；BTCUSDT 1h kline regime 計算同樣 strict shift(1)。對照 `feedback_indicator_lookahead_bias` Rolling-window breach 反模式。MIT C-3 D+1 review 同步必跑 grep（Q4 strict shift 並列對比 §7.3，差異 > 30% spec 失敗）。
 
-3. **V088 hypertable retention drop_chunks policy 必設**：E2 + MIT 必審 V088 SQL 含 `SELECT add_retention_policy('panel.btc_lead_lag_panel', INTERVAL '14 days');`；漏設 → PG table 永久膨脹。同時 idempotency dry-run 兩次，第二次必須不 RAISE。
+3. **V088 hypertable retention drop_chunks policy 必設 + v1.1 schema 完整**：E2 + MIT 必審 V088 SQL 含 `SELECT add_retention_policy('panel.btc_lead_lag_panel', INTERVAL '14 days');`；漏設 → PG table 永久膨脹。**v1.1 schema 補完驗證**：必含 `btc_lead_return_pct_60s` + `btc_lead_return_pct_300s` + `regime_tag` 三新欄位（per §4.1 condition #3 + condition #5）。idempotency dry-run 兩次，第二次必須不 RAISE。
 
 ---
 
@@ -400,12 +468,12 @@ per PA 輸出物標準：
 
 ---
 
-## §14 一句總結
+## §14 一句總結（v1.1）
 
-**A4-C BTC→Alt Lead-Lag 是 W-AUDIT-8c 候選 C 的 N+1 fast-track 預跑：BTCUSDT 1m kline + orderbook 算 lead signal（return / volume z / book imbalance over N=120s 預設）→ 7-symbol alt cohort xcorr + expected_dir 寫 `panel.btc_lead_lag_panel` (V088 hypertable, retention 14d) → ma_crossover + grid_trading 在 paper engine mode 接 `BtcLeadLag` 為 `CrossAsset` tag, on_tick shadow log only 不 trade（C-IMPL-3）；三層 paper-only fence（step_4_5_dispatch engine_mode gate 主防線 + Python writer fence + Strategy if let Some guard）保證 demo/live engine 永遠 surface.btc_lead_lag = None 不污染 5 策略 demo edge baseline；7d paper engine 收 evidence，gate avg_net_bps ≥ +5 bps 進 N+2 demo IMPL，否則 revise spec 不浪費 N+2；trait skeleton 已 PA D+0 commit (HEAD c9fb0b8f) IMPL phase 全 0 file 重疊 0 git merge 衝突；16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項全 0 觸碰；QC C-2 alpha decay + DSR + threshold + paper edge gate / MIT C-3 purged k-fold + embargo + leak detection + cohort sample demand 三角 review pending D+1。**
+**A4-C BTC→Alt Lead-Lag W-AUDIT-8c 候選 C 的 N+1 fast-track 預跑（v1.1 QC 5 conditions revised）：BTCUSDT 1m kline + orderbook 算 lead signal（return / volume z / book imbalance over N=120s **鎖定**，60s/300s shadow value 同 schema 收 decay curve evidence）+ BTCUSDT 1h kline 算 regime_tag（\|1h return\| > 200 bps → extreme，shadow log 不計入 7d edge avg）→ 7-symbol alt cohort xcorr + expected_dir 寫 `panel.btc_lead_lag_panel` (V088 hypertable, retention 14d) → ma_crossover + grid_trading 在 paper engine mode 接 `BtcLeadLag` 為 `CrossAsset` tag, on_tick shadow log only 不 trade（C-IMPL-3）；三層 paper-only fence + strict shift(N) lookahead-free 保證 demo/live engine 永遠 surface.btc_lead_lag = None 不污染 5 策略 demo edge baseline；7d paper engine 收 evidence，**gate 三檔（avg_net ≥ +15 bps promote N+2 / +5~+15 extend 14d / <+5 revise）**，DSR PASS 用 K=95 deflate (mu_0 = √(2 ln 95) = 3.018)，PSR(0) ≥ 0.95 用 skew/kurt-aware formula，per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol promote，block-bootstrap 95% CI block_size=60min 1000 iter，alpha decay R²(N=60/120/300) 三檔 curve 強制；σ baseline = 30 bps 是下界 MIT C-3 必 verify (BTCUSDT 1m forward-return realized σ 7d)，σ ≥ 60 bps 重算 power；trait skeleton 已 PA D+0 commit (HEAD c9fb0b8f) IMPL phase 全 0 file 重疊 0 git merge 衝突；16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項全 0 觸碰；QC C-2 已 sign-off CONDITIONAL APPROVE 5 conditions 已落 spec v1.1 → MIT C-3 D+1 review 直接收（不需 D+1 PA + QC integrate phase）。**
 
 ---
 
-**Spec end. PA C-1 spec phase Day 1-2 deliverable land. QC C-2 + MIT C-3 三角 review pending D+1（1 day）；APPROVE 後 D+3 起派 C-IMPL-1..4 paper IMPL，D+5 paper engine deploy 後跑 7d，D+12 paper edge report land。**
+**Spec v1.1 end. PA C-1 spec QC 5 conditions revised land。QC C-2 已 sign-off；MIT C-3 D+1 review 直接收 → APPROVE 後 D+3 起派 C-IMPL-1..4 paper IMPL，D+5 paper engine deploy 後跑 7d，D+12 paper edge report land（含 §7.1 mandatory metric 6 條 + acceptance prerequisite「σ verified by MIT C-3」）。**
 
-PA DESIGN DONE: report path: srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md
+PA DESIGN DONE: report path: srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md（v1.1）
