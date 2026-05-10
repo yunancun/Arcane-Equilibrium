@@ -67,6 +67,24 @@ from typing import Any, Iterable, Literal, Optional
 
 from .db_pool import get_conn, put_conn
 
+try:
+    from . import _path_setup  # noqa: F401
+    from ml_training.live_candidate_lineage import (
+        LINEAGE_PAYLOAD_KEY,
+        extract_live_candidate_lineage_payload,
+    )
+except Exception:  # pragma: no cover - keep LG-5 review available without program_code path
+    LINEAGE_PAYLOAD_KEY = "lineage"
+
+    def extract_live_candidate_lineage_payload(
+        payload: dict[str, Any],
+        *,
+        candidate_row: Optional[dict[str, Any]] = None,
+        source_recommendation: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        lineage = payload.get(LINEAGE_PAYLOAD_KEY)
+        return lineage if isinstance(lineage, dict) else {}
+
 logger = logging.getLogger(__name__)
 
 
@@ -869,6 +887,17 @@ def _make_verdict(
     )
 
 
+def _with_lineage_snapshot(
+    payload_snapshot: Optional[dict[str, Any]],
+    lineage_snapshot: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach live-candidate lineage without disturbing existing rule payloads."""
+    snapshot = dict(payload_snapshot or {})
+    if lineage_snapshot:
+        snapshot[LINEAGE_PAYLOAD_KEY] = dict(lineage_snapshot)
+    return snapshot
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Pure rule evaluators / 純函數規則評估器 — no DB access, easy to unit test
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1211,6 +1240,11 @@ def review_live_candidate(
         or (source_rec or {}).get("strategy_name", "")
         or ""
     )
+    lineage_snapshot = extract_live_candidate_lineage_payload(
+        payload,
+        candidate_row=candidate,
+        source_recommendation=source_rec,
+    )
 
     # ── Step 2: read live regime / R6 snapshots / pending pool (NO hub lock) ──
     live_regime = _fetch_live_cost_regime()
@@ -1244,12 +1278,12 @@ def review_live_candidate(
             "defer", "defer_data_insufficient",
             rule_failures=["R6_data_gap"],
             expected_net_bps_demo=expected_net_bps_demo,
-            payload_snapshot={
+            payload_snapshot=_with_lineage_snapshot({
                 "r6_data_gap": True,
                 "n_snapshots": n_snap_pre,
                 "n_negative": daily_snapshots.get("n_negative", 0),
                 "required": R6_DAILY_NEG_SNAPSHOTS_REQUIRED,
-            },
+            }, lineage_snapshot),
             decided_by=decided_by_full,
         )
         _emit_audit_row("review_live_candidate", candidate_id, verdict)
@@ -1268,8 +1302,11 @@ def review_live_candidate(
             "reject", "reject_hard_veto",
             rule_failures=["R6"],
             expected_net_bps_demo=expected_net_bps_demo,
-            payload_snapshot={"r6_msg": r6_msg, "live_regime": live_regime,
-                              "daily_snapshots": daily_snapshots},
+            payload_snapshot=_with_lineage_snapshot(
+                {"r6_msg": r6_msg, "live_regime": live_regime,
+                 "daily_snapshots": daily_snapshots},
+                lineage_snapshot,
+            ),
             decided_by=decided_by_full,
         )
         _emit_audit_row("review_live_candidate", candidate_id, verdict)
@@ -1283,6 +1320,11 @@ def review_live_candidate(
         expected_net_bps_demo, decided_by_full,
     )
     if r_meta_kwargs is not None:
+        r_meta_kwargs = dict(r_meta_kwargs)
+        r_meta_kwargs["payload_snapshot"] = _with_lineage_snapshot(
+            r_meta_kwargs.get("payload_snapshot"),
+            lineage_snapshot,
+        )
         verdict = _make_verdict(**r_meta_kwargs)
         _emit_audit_row("review_live_candidate", candidate_id, verdict)
         return verdict
@@ -1320,7 +1362,10 @@ def review_live_candidate(
             cost_regime_ratio=cost_ratio,
             cost_regime_ratio_clamped=cost_ratio_clamped,
             psr_n_samples=psr_n,
-            payload_snapshot={"r3_msg": r3_msg},
+            payload_snapshot=_with_lineage_snapshot(
+                {"r3_msg": r3_msg},
+                lineage_snapshot,
+            ),
             decided_by=decided_by_full,
         )
         _emit_audit_row("review_live_candidate", candidate_id, verdict)
@@ -1386,10 +1431,10 @@ def review_live_candidate(
             psr_kurt=psr_kurt,
             sr_0_deflation=sr_0,
             v_pending_net_bps=v_pending,
-            payload_snapshot={
+            payload_snapshot=_with_lineage_snapshot({
                 "r1_msg": r1_msg, "r2_msg": r2_msg, "r3_msg": r3_msg,
                 "r4_msg": r4_msg, "r5_msg": r5_msg,
-            },
+            }, lineage_snapshot),
             decided_by=decided_by_full,
         )
         if not _emit_audit_row("review_live_candidate", candidate_id, verdict):
@@ -1398,6 +1443,10 @@ def review_live_candidate(
                 rule_failures=rule_failures,
                 expected_net_bps_demo=expected_net_bps_demo,
                 decided_by=decided_by_full,
+                payload_snapshot=_with_lineage_snapshot(
+                    {"audit_write_failed": True},
+                    lineage_snapshot,
+                ),
             )
         return verdict
 
@@ -1426,13 +1475,11 @@ def review_live_candidate(
         lease_ttl_ms=lease_ttl_ms,
         lease_revoke_triggers=list(DEFAULT_LEASE_REVOKE_TRIGGERS),
         decided_by=decided_by_full,
-        payload_snapshot={
+        payload_snapshot=_with_lineage_snapshot({
             "r1_msg": r1_msg, "r2_msg": r2_msg, "r3_msg": r3_msg,
             "r4_msg": r4_msg, "r5_msg": r5_msg, "r_meta_msg": r_meta_msg,
-        },
+        }, lineage_snapshot),
     )
-
-    # ── Step 4: hub.acquire_lease() FIRST (HIGH-2, RFC §2.3 line 215) ────────
     # Step 4 acquire (fail → defer); Step 5 atomic single-tx audit+UPDATE.
     # KNOWN GAP MEDIUM-2 round 1: authorization.json has no ``scope.lease_scopes``
     # — ``_auth_permits_scope`` returns True when empty, so dynamic
@@ -1493,10 +1540,10 @@ def review_live_candidate(
             expected_net_bps_demo=expected_net_bps_demo,
             expected_net_bps_live_adjusted=adjusted,
             decided_by=decided_by_full,
-            payload_snapshot={
+            payload_snapshot=_with_lineage_snapshot({
                 "atomic_commit_failed": True,
                 "orphaned_lease_id": lease_id,
-            },
+            }, lineage_snapshot),
         )
         # Best-effort secondary audit (independent conn; primary tx rolled back).
         _emit_audit_row("review_live_candidate", candidate_id, downgrade)
