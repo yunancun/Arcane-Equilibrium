@@ -55,6 +55,7 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -94,6 +95,7 @@ fn ctx_with_er(sma: f64, kama: f64, adx: f64, ts: u64, er: f64) -> TickContext<'
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -519,6 +521,7 @@ fn ctx_with_bbo_g709c(
         best_ask: Some(ask),
         tick_size: Some(tick),
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 

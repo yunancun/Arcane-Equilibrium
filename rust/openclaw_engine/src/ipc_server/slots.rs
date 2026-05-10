@@ -160,3 +160,21 @@ pub type CostEdgeAdvisorSlot = Arc<RwLock<Option<Arc<crate::cost_edge_advisor::C
 ///   有值時依 `try_send` 結果回 `accepted` / `coalesced` / `reloader_closed`，
 ///   對齊 `trigger_live_auth_recheck`（PIPELINE-SLOT-1 Phase 3）advisory shape。
 pub type EdgeReloadSenderSlot = Arc<RwLock<Option<tokio::sync::mpsc::Sender<()>>>>;
+
+// =============================================================================
+// Sprint N+1 W1 + W2 panel slot insertion anchors
+// PA D+0 預留 anchor，避免 W1/W2 五個 E1 sub-agent 並行 IMPL 時撞 line collision
+// 詳 srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md §6 + §7
+// =============================================================================
+
+// === W1 FundingCurvePanelSlot insertion point ===
+// W1 E1-α (B-1) 在此下方加 `pub type FundingCurvePanelSlot = Arc<RwLock<Option<...>>>;`
+// 對應 `panel.funding_rates_panel` (V085 migration) + Python collector
+
+// === W1 OIDeltaPanelSlot insertion point ===
+// W1 E1-β (B-2) 在此下方加 `pub type OIDeltaPanelSlot = Arc<RwLock<Option<...>>>;`
+// 對應 `panel.oi_delta_panel` (V087 migration) + Python collector
+
+// === W2 BtcLeadLagPanelSlot insertion point ===
+// W2 E1-δ (C-IMPL-2) 在此下方加 `pub type BtcLeadLagPanelSlot = Arc<RwLock<Option<...>>>;`
+// 對應 `panel.btc_lead_lag_panel` (V088 migration) + BTC lead-lag aggregator

@@ -1143,6 +1143,9 @@ fn build_tick_context<'a>(
         best_ask: event.best_ask,
         tick_size: inputs.tick_size,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        // Sprint N+1 W7-1：replay 模式無 paper_state context，position_state = None。
+        // strategy on_tick 內若聲稱讀此 handle，replay path 一律跳 entry path。
+        position_state: None,
     }
 }
 

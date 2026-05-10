@@ -70,6 +70,7 @@ fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -362,6 +363,7 @@ fn ctx_bb_with_funding(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -581,6 +583,7 @@ fn ctx_bb_with_bbo_g709c(
         best_ask: Some(ask),
         tick_size: Some(tick),
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -744,6 +747,7 @@ fn ctx_bb_with_regime(pct_b: f64, rsi: f64, ts: u64, regime: &str) -> TickContex
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -884,6 +888,7 @@ fn ctx_bb_with_custom_sma_50(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 

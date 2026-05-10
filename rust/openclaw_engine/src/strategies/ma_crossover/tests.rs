@@ -52,6 +52,7 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -88,6 +89,7 @@ fn ctx_with_atr(sma: f64, kama: f64, adx: f64, ts: u64, atr: f64) -> TickContext
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -133,6 +135,7 @@ fn ctx_with_hurst(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -168,6 +171,7 @@ fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> Tic
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -501,6 +505,7 @@ fn test_conf_scale_applied_to_emit() {
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     };
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests

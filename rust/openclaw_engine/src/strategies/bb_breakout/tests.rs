@@ -60,6 +60,7 @@ pub(super) fn ctx_ext(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -122,6 +123,7 @@ fn ctx_dual_timeframe(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -146,6 +148,7 @@ fn ctx_dual_timeframe_runtime_donchian(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -942,6 +945,7 @@ fn ctx_with_bbo_g709c(
         best_ask: Some(ask),
         tick_size: Some(tick),
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 

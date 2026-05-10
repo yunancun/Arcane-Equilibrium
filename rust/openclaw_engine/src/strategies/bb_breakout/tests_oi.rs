@@ -57,6 +57,7 @@ fn ctx_oi(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
@@ -111,6 +112,7 @@ fn ctx_full_entry(
         best_ask: None,
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
     }
 }
 
