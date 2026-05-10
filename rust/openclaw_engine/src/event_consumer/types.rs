@@ -11,7 +11,7 @@ use crate::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use crate::config::ConfigManager;
 use crate::instrument_info::InstrumentInfoCache;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
-use openclaw_core::governance_core::LeaseTransitionSender;
+use openclaw_core::governance_core::{LeaseOutcome, LeaseTransitionSender};
 use openclaw_types::PriceEvent;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -113,6 +113,18 @@ pub struct PendingOrder {
 #[derive(Debug, Clone)]
 pub enum PendingOrderEvent {
     Register(PendingOrder),
+    /// Terminal release for the decision lease handed off by the router.
+    /// Kept on the pending-registration channel so order lifecycle audit and
+    /// lease lifecycle audit remain ordered inside one event-consumer loop.
+    /// Router 交出的決策租約終態釋放事件；與 pending 註冊共用 channel，讓訂單與
+    /// lease 生命週期在同一 event loop 內有序處理。
+    ReleaseDecisionLease {
+        order_link_id: String,
+        decision_lease_id: Option<String>,
+        outcome: LeaseOutcome,
+        reason: String,
+        ts_ms: u64,
+    },
     DispatchFailed {
         order_link_id: String,
         symbol: String,

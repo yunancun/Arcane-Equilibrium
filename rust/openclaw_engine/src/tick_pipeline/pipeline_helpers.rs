@@ -29,6 +29,8 @@
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use openclaw_core::governance_core::{GovernanceCore, LeaseId, LeaseOutcome};
+
 use crate::instrument_info::InstrumentInfoCache;
 
 use super::{
@@ -36,7 +38,54 @@ use super::{
     TimestampedFill,
 };
 
+pub(crate) fn release_decision_lease_for_governance(
+    governance: &GovernanceCore,
+    lease_id: Option<&str>,
+    outcome: LeaseOutcome,
+    stage: &str,
+) {
+    let Some(raw) = lease_id.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let lease = if raw == "bypass" {
+        LeaseId::Bypass
+    } else {
+        LeaseId::Active(raw.to_string())
+    };
+    if let Err(e) = governance.release_lease(&lease, outcome) {
+        warn!(
+            lease_id = %raw,
+            outcome = ?outcome,
+            stage = %stage,
+            error = %e,
+            "decision lease release failed; ExpiryGuardian will sweep if needed \
+             / 決策租約釋放失敗，必要時由 ExpiryGuardian 清理"
+        );
+    } else {
+        info!(
+            lease_id = %raw,
+            outcome = ?outcome,
+            stage = %stage,
+            "decision lease released / 決策租約已釋放"
+        );
+    }
+}
+
 impl TickPipeline {
+    /// Release a decision lease that was handed off by the router success path.
+    ///
+    /// The router intentionally stops owning the lease once an intent/order is
+    /// accepted. This adapter keeps the release semantics local to the pipeline
+    /// outcome that actually consumed or failed the authorized action.
+    pub(crate) fn release_decision_lease(
+        &self,
+        lease_id: Option<&str>,
+        outcome: LeaseOutcome,
+        stage: &str,
+    ) {
+        release_decision_lease_for_governance(&self.governance, lease_id, outcome, stage);
+    }
+
     /// PNL-FIX-1: Close a single position at its OWN symbol's latest market price.
     /// Returns (is_long, qty, close_price, pnl) on success — caller passes the
     /// returned price to emit_close_fill so the fill record matches the close.

@@ -791,6 +791,7 @@ impl TickPipeline {
                 paper_fill_ts: event.ts_ms,
                 is_close: true,
                 order_link_id: format!("{}_{}_{}", prefix, event.ts_ms, self.exchange_seq),
+                decision_lease_id: None,
                 is_primary,
                 stop_loss: None,
                 take_profit: None,
@@ -949,6 +950,7 @@ impl TickPipeline {
                         paper_fill_ts: ts_ms,
                         is_close: true,
                         order_link_id,
+                        decision_lease_id: None,
                         is_primary: true, // exchange mode: primary order / 交易所模式主訂單
                         stop_loss: None,
                         take_profit: None,
@@ -1106,6 +1108,7 @@ impl TickPipeline {
                     paper_fill_ts: ts_ms,
                     is_close: true,
                     order_link_id,
+                    decision_lease_id: None,
                     is_primary: true,
                     stop_loss: None,
                     take_profit: None,
