@@ -2367,3 +2367,25 @@ dispatch v3.3 §3.2 W2 fast-track 預跑：A4-C 是 W-AUDIT-8c 候選 C 的 N+1 
 **16 原則 + DOC-08 §12 + 硬邊界 5 項全 0 觸碰**（spec §7）。
 
 **Next action**: D+1 BB B-3 review final → PA integrate rate budget table → push spec → dispatch W1 E1-α/β/γ → D+5-D+6 land + E2/E4 → W1 land 後 ≥ 24h 再進 W3 Stage 1。
+
+## 2026-05-10 W7-4 — 5 策略 cross-strategy position sync systemic audit
+
+PA #3 P1-MA-CROSSOVER root cause `da2d2a46` 揭露 ma_crossover 用 `self.positions: HashMap` 不查 paper_state、router gate 1.5 symbol-level dedup、RC-04 rollback 到 None → cross-strategy desync hot loop（INXUSDT 11:34 一分鐘 reject 2319 次）。W7-3 Option B 補丁 `d8697c41` 已 land 提供 1-tick defense + W7-1 trait skeleton `c9fb0b8f` 已加 `TickContext.position_state: Option<&'a PaperPosition>`（step_4_5_dispatch.rs:219 暫 None 待 W7-2 wire）。
+
+W7-4 systemic audit verdict（read-only，不改 code）：
+- **HIGH (P1)**：`ma_crossover` (confirmed) + `bb_reversion` (potential，與 ma_crossover 同結構：用 `PerSymbolState<bool>` + RC-04 rollback 到 None + 不查 paper_state；W6 0 顯眼是 RSI/percent_b/MA gate 苛刻未對齊，結構性風險高)
+- **MEDIUM**：`bb_breakout` — 同結構但 6 重 gate（squeeze 45min + expansion + vol + Donchian + persistence 60s + confluence）自然限頻到 ~1/min reject
+- **LOW**：`grid_trading` — M-2 30s `reject_cooldown_until_ms` backoff 結構性護欄（on_rejection arm + signal.rs 開頭 check），hot loop 不可能；inventory model 與 boolean position 不對齊，硬塞 W7-2 pattern 反引入複雜度
+- **RETIRED-LOW**：`funding_arb` — ADR-0018 dormant `active=false` + 1h cooldown + funding 8h cycle 自然限頻
+
+W7-2 fix pattern（Option A 治本）：(1) step_4_5_dispatch.rs per-iteration borrow `paper_state.get_position(sym)` 寫入 ctx.position_state ~10 LOC；(2) ma_crossover/strategy_impl.rs None 分支 query ctx.position_state 命中即 sync self.positions + skip entry ~15 LOC。保留 W7-3 Option B 作為 reason 字串契約 fallback 冗餘，不可拿掉。
+
+W7-5 same-Wave optional 建議：bb_reversion 同 pattern apply ~15 LOC + 3 tests，與 W7-2 共用 trait skeleton 邊際成本低，提早結 P2-BB-REVERSION-POSITION-SYNC。
+
+P2 ticket refinement：(a) 保留 P2-BB-BREAKOUT-POSITION-SYNC 降為 MEDIUM 延 Sprint N+2；(b) 保留 P2-BB-REVERSION-POSITION-SYNC 升為 HIGH 建議 W5 一併 IMPL；(c) 不開 grid_trading / funding_arb 新 P2。
+
+E2 重點審查 3 點：(1) TickContext clone 成本（per-iteration shallow copy ns 級，需 1000 burst micro-bench）；(2) paper_state borrow scope（strategy on_tick 完才 mirror_insert/apply_fill，immutable get 在前可行，PA #3 §8 重點 3 已驗）；(3) Option A + Option B 共存無衝突，但不可拿掉 Option B（reason 字串契約 fallback 最後防線）。
+
+派生發現：RC-04 rollback 到 None 設計 4/5 策略共用（grid_trading 例外用 inventory + M-2）。Hot loop 風險差別不在 RC-04 而在「entry path 後是否有 reject backoff」。Sprint N+2 候選：考慮為 4 策略引入「strategy 通用 reject backoff」trait default 對齊 grid_trading M-2 模式（設計題，不阻當前任務）。
+
+Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_4_systemic_position_sync_audit.md`

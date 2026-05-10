@@ -2,6 +2,35 @@
 
 ## 工作記憶
 
+### 2026-05-10 Sprint N+1 W4 W-AUDIT-3b Runtime Smoke Test DESIGN（pre-dispatch, HEAD `4bb5d485`）— **E4 DESIGN PASS**
+
+**對象**：dispatch v3.4 §3.4 W4 (W-AUDIT-3b runtime smoke test, 1 day E4 預跑 design)。任務 = read-only design + spec, 不寫 IMPL test code，留 W4 sub-agent IMPL phase。
+
+**關鍵發現**：
+1. **既有 9 fail-closed test case 已涵蓋 dispatch §3.4 acceptance 「≥ 1 fail-closed test case」**：`test_executor_plan_v2.py` 5 + `test_executor_agent_unit.py` 3 + `test_executor_shadow_to_live_e2e.py` 1。Rust 端 `intent_processor/tests.rs:892-1335` 兩條真路徑（AuthNotEffective Production / Validation profile bypass）。重複新寫 `test_executor_fail_closed.py` 是 fake coverage。
+2. **唯一 gap = RouterLeaseGuard Drop release on rejection path**：既有 test 無 assertion 驗 rejection 路徑下 Drop 真的呼 release(Cancelled)。建議 W4 IMPL 加 1 條 Rust unit test (~40 LOC) 補。
+3. **[55] healthcheck SQL 在 `checks_agent_spine.py:109-208`** (`_complete_chain_counts` CTE)：4-hop JOIN strategy_signal→decision→verdict→plan + LEFT JOIN idem + report，5 個指標含 `chains_with_lease` (`plan.lease_id IS NOT NULL AND <> ''`)。
+4. **2026-05-08 22:09 UTC baseline (CLAUDE.md §三)**：`chains=101, chains_with_lease=76, chains_with_report=101, bad_report_quality=0`，但 `LINEAGE_READY_NOT_WINDOW_PASS window=1440m` (Stage 2 evidence 已收，等 24h window PASS)。Smoke test 5min window 抽要從 `_complete_chain_counts` CTE 改 `interval '5 minutes'`。
+
+**W4 IMPL phase 預估**：~120 LOC, ~3.5h（W4-1a baseline 10min + W4-1b Rust Drop test 1h + W4-2 smoke shell 1.5h + W4-3 跑 + report 30min 含 5min window wait），符合 dispatch v3.4 「1 day」上限。
+
+**對 PA push back (acceptance criteria refinement 建議)**：
+- pytest 規格改寫：「既有 9 case 全 PASS + 補 1 條 Rust Drop release test」（避免 fake coverage 重寫）
+- Smoke test 加 4 條 invariant：`chains_with_lease ≥ 1` + `bad_report_quality = 0` + `chains_with_report ≥ 1` + `engine_alive=true 在 60s 內`
+- 5min window 不夠分辨「pre-restart 累積混入」，建議跑 baseline-vs-window 兩次對比
+
+**Test order 強制**：pytest first (fast, ~2min) → runtime smoke (slow, ~6min ssh trade-core)。pytest FAIL → 不跑 smoke (省 6min)。
+
+**報告檔**：`docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-10--w_audit_3b_runtime_smoke_test_design.md`
+
+**教訓追加**：
+1. **預跑 design 任務優於 IMPL phase 才寫 spec**：W4 sub-agent 進 IMPL 前已有 scenario matrix + LOC/時間預估 + acceptance 修訂建議，省 W4 sub-agent 自己摸 既有 9 case 的 30min。
+2. **acceptance 「≥ 1 test case」是模糊規格 → 必先掃既有 case** ：dispatch v3.4 §3.4 寫得太寬，若 W4 sub-agent 不查就硬寫新 test，會重複 9 個既有 case 的 fake coverage。E4 預跑 design 抓出此 gap。
+3. **healthcheck SQL CTE 是 SoT，smoke shell 必抽縮 window 版本**：別在 shell 重寫 4-hop JOIN，改剪 CTE + `interval '5 minutes'` 維持與 [55] 同口徑，避免 smoke PASS 但 [55] FAIL 的不一致。
+4. **runtime smoke 用 ssh trade-core 而非 Mac 跑**：Mac engine_alive=false 是預期（CLAUDE.md §四）；smoke 必透過 ssh trade-core 才有 real runtime。
+
+---
+
 ### 2026-05-10 Sprint N+0 W2 Regression Baseline（5 sub-agent IMPL 並行交付，HEAD `833c50f0`）— **E4 PASS-WITH-1-OUTSTANDING**
 
 **對象**：5 sub-agent W2 並行交付：
