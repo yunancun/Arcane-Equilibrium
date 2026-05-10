@@ -92,34 +92,42 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 
 **Dispatch Order** — 不再啟動 proposal relay / Telegram/WebChat / 第二 GUI / Stage 3/4 / true live autonomy 直到 MAG-082 runtime lineage PASS。
 
+**Status Legend**: ✅ DONE / ⏳ PENDING / 🟡 PARTIAL / 🔵 ACTIVE / ⛔ DEFER
+
 ### §4.1 Wave Roster (DUAL-TRACK + 8a-8h)
 
 | Rank | Wave | Tag | Owner Chain | Status / Target | Exit Criteria |
 |---:|---|---|---|---|---|
-| 1 | `W-A` Executor fake-live runtime smoke | alpha-neutral | PM → E4 → PM | DONE 2026-05-07 | P1-FAKE-1 path routes explicit live_demo metadata through real Rust IPC. |
-| 2 | `W-B` Runtime decision-spine lineage wiring | alpha-neutral | PM → PA → E1 → E2 → E4 → PM | DONE 2026-05-08 | Runtime shadow path writes nonzero typed decision objects/edges/idempotency. |
-| 3 | `W-C` MAG-082 Stage 2 evidence window | alpha-neutral | PM → E3 → E4 → QA → PM | ACTIVE 2026-05-08 | Fresh 24h demo/live_demo canary proves typed lineage chain. |
-| 4 | `W-D` MAG-083 / MAG-084 | alpha-neutral | QA → PM | after W-C PASS only | Final release audit + operator sign-off. |
-| 5 | `W-E` OpenClaw read-only observability | alpha-neutral | PM → PA → E1 → E2 → E4 → PM | DONE 2026-05-07 | `/brief/latest` `/diagnostics` `/escalations` view models. |
-| 6 | `W-F` Edge/data quality + Live Gate foundation | alpha-bearing | PM → QC/MIT/PA → E1/E4 → PM | after W-A; before true-live | H0 production caller, pricing binding, supervised-live state machine. |
-| 7 | `W-G` Proposal/approval/mobile relay | alpha-neutral | PM → CC/FA/PA → E1/E2/E4 → PM | BACKEND FOUNDATION DONE 2026-05-07 | Gateway/console proposal/approval relay; no direct order/config/live-auth. |
-| 8 | `W-AUDIT-1` Docs sync + governance compliance | alpha-neutral | TW + R4 + PM + PA | DONE 2026-05-09 | CLAUDE.md §三/§五/§四 lease drift sync + AMD §5.4.1 + W-C auth file + docs/README + SPECIFICATION_REGISTER + ADR-0015..0019 + SCRIPT_INDEX + MIT/BB workspace READMEs. |
-| 9 | `W-AUDIT-2` Security IMPL (4 HIGH) | alpha-neutral | E1×4 + E2 + E4 + E3 | DONE 2026-05-09 | F-24/F-25 mutating routes gated; F-23 tailnet auto bind; F-03 lease writer; AI socket chmod 0600. Runtime deploy `862e79b7`: V078 applied, lease_transitions rows=103. |
-| 10 | `W-AUDIT-3` ExecutorAgent fake-live | alpha-neutral | E1 + E1a + E2 + E4 + PA + PM | PARTIAL → `W-AUDIT-3b` runtime smoke pending Sprint N+0 | F-17 ✅ / F-15 ⚠️ / SM-05 Option A / F-01 source/test closed. **`W-AUDIT-3b` Sprint N+0 必先 land**（解 D-01 + 避 W-AUDIT-9 衝突）。 |
-| 11 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 並行 + MIT + E2 + E4 | PARTIAL → `W-AUDIT-4b` Sprint N+1 串行 IMPL | V068/V070/V071 reclassification COMMENT only; row count 仍 0. **`W-AUDIT-4b` Sprint N+1 6 表 INSERT path 串行**（feature_baselines first → mlde_edge_training_rows → scorer_predictions → 3 advisor 並行）。Decision-3 採納合併入 `W-AUDIT-8f` (R-3) Hypothesis Pipeline 同 wave 做。 |
-| 12 | `W-AUDIT-5a/5b` 性能/結構/CI/跨平台 | alpha-neutral | E1×6 並行 + E5 + E2 + E4 | ACTIVE 2026-05-09 | F-21 strip / F-26 CI matrix / F-27 字典修正 / F-test-h-state split / F-12 runner.rs split / W-AUDIT-5b event_consumer + state-machine clone snapshot + orjson + ai_budget ArcSwap; 剩 F-20 909MB damaged dump drop ops。 |
-| 13 | `W-AUDIT-6` 策略 + 量化 promotion gate | alpha-bearing | E1×5 + QC + E2 + E4 + PM | SOURCE/TEST CLOSED 2026-05-09 → `W-AUDIT-6c` runtime apply + `W-AUDIT-6d` mid-ground Sprint N+0 | AMD-02 Option ii: grid CONDITIONAL ORDIUSDT, ma_crossover REVISE, bb_breakout 5m, funding_arb RETIRE, bb_reversion pair MA. W-AUDIT-6c VaR/CVaR/EVT IMPL `cc6476dd`. **`W-AUDIT-6d` mid-ground 保 6 / 砍 6** (見 §8)。 |
-| 14 | `W-AUDIT-7` AI 棧 + GUI/UX | alpha-neutral | E1×4 + AI-E + A3 + E2 + E4 + ops | ACTIVE → `W-AUDIT-7c` Sprint N+2 | F-30 prompt modal / F-system-mode-confirm 5s countdown / F-strategist-cap 30→50 ADR-0021 待 / F-28 ContextDistiller IMPL. 剩 F-07 ANTHROPIC_API_KEY + cea-env. Layer2 autonomous loop sunset by ADR-0020. |
-| 15 | `W-AUDIT-8a` Alpha Surface Foundation (R-1 spec) | alpha-bearing | PA → E1 → E2 → E4 + MIT/QC/CC/BB → PM | SPEC PHASE 2026-05-09 / **Phase A target Sprint N+0** | Strategy on_tick(ctx, surface) 升級 + AlphaSurface<'a> 4 tier + AlphaSourceTag enum + 5 既存策略 declare alpha sources + Phase B Tier 2 cross-symbol panel collector + Phase C Tier 3 microstructure + Phase D Tier 4 + 7d replay E2E byte-identical baseline。Spec: `docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`. |
-| 16 | `W-AUDIT-8b` A4-A Funding Skew Directional 新策略 | alpha-bearing | PA spec → E1 IMPL + QC + MIT + BB review | Sprint N+3 spec → N+4 IMPL (1 sprint) | funding rate 期限結構 directional alpha；demo signal noise（mainnet 才能完整驗證）；25-symbol funding curve 消費 AlphaSurface Tier 2。 |
-| 17 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction 新策略 | alpha-bearing | PA spec → E1 (Rust hot-path) + QC + BB review WS | Sprint N+2 spec → N+3 IMPL (1.5 sprint) | Bybit `allLiquidation` WS topic 真接；event-trigger 模式；消費 AlphaSurface Tier 3 microstructure。 |
-| 18 | `W-AUDIT-8d` A4-C BTC→Alt Lead-Lag 新策略 | alpha-bearing | PA spec → E1 IMPL + QC review | Sprint N+1 spec → N+2 IMPL (1.5 sprint，**最高 impact + 第一 IMPL**) | BTC 1m 急動 ≥1.5σ 信號；alt 同方向 entry 60s 內（前提 alt-BTC 60s ρ>0.7 + alt 仍未動 ≥50%）；半衰期 30-180s 與 1m sampling 完美匹配。 |
-| 19 | `W-AUDIT-8e` (R-2) Strategist Alpha Source Orchestrator | alpha-bearing | PA spec → E1 IMPL | Sprint N+4 spec → N+5 IMPL (2-3 sprint) | Strategist 從 4×5 hardcoded regime preferences → AlphaSourceRegistry + 動態 Sharpe-by-regime + Hypothesis sourcing。 |
-| 20 | `W-AUDIT-8f` (R-3) Hypothesis Pipeline + W-AUDIT-4 ML 併入 | alpha-bearing | PA spec → E1 IMPL + MIT spec | Sprint N+5 IMPL (2-3 sprint) | learning.hypotheses table state machine + Decision Lease + Hypothesis 關係 + W-AUDIT-4 6 dead schema 併入解 attribution_chain 0.5%→80% root cause（Decision-3 confirmed）。 |
-| 21 | `W-AUDIT-8g` (R-4) Per-alpha-source Live Promotion Gate | alpha-bearing | PA spec → E1 IMPL | Sprint N+7+ defer (2 sprint) | LiveBudget(alpha_source_id, slice) 替代「整 system live_reserved」線性 LG-2/3/4/5；FA defer 至 N+7（W-AUDIT-9 已部分覆蓋）。 |
-| 22 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 review | Sprint N+4-N+6 (1 sprint) | A3 建議 13→15 tab。 |
-| 23 | `W-AUDIT-9` Graduated Canary Foundation IMPL | alpha-bearing | E1 (5 active + 1 stand-by 並行) | **Sprint N+0 IMPL T1-T7 (1.5-2 sprint)** | AMD-2026-05-09-03 配套：Rust schema executor_canary_stage + V### migration + shadow_mode_provider stage-aware + healthcheck [58] + governance.canary_stage_log + GUI surface + LeaseScope::CanaryStagePromotion + E4 regression。**`W-AUDIT-9` Stage 1 launch 是 standalone milestone**（FA 估 +5-7%，不混 Track A funding skew Stage 1 行）。 |
-| 24 | `W-AUDIT-10` (R-5) Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec → E1 IMPL | defer 中期 (1-2 sprint) | CI gate spec drift > 7d auto-fail + module/table lifecycle header + 自動抽 SCRIPT_INDEX/SPEC_REGISTER。 |
+| 1 | `W-A` Executor fake-live runtime smoke | alpha-neutral | PM → E4 → PM | ✅ **DONE 2026-05-07** | P1-FAKE-1 path routes explicit live_demo metadata through real Rust IPC. |
+| 2 | `W-B` Runtime decision-spine lineage wiring | alpha-neutral | PM → PA → E1 → E2 → E4 → PM | ✅ **DONE 2026-05-08** | Runtime shadow path writes nonzero typed decision objects/edges/idempotency. |
+| 3 | `W-C` MAG-082 Stage 2 evidence window | alpha-neutral | PM → E3 → E4 → QA → PM | 🔵 **ACTIVE** since 2026-05-08 | Fresh 24h demo/live_demo canary proves typed lineage chain. |
+| 4 | `W-D` MAG-083 / MAG-084 | alpha-neutral | QA → PM | ⏳ **BLOCKED** after W-C PASS only | Final release audit + operator sign-off. |
+| 5 | `W-E` OpenClaw read-only observability | alpha-neutral | PM → PA → E1 → E2 → E4 → PM | ✅ **DONE 2026-05-07** | `/brief/latest` `/diagnostics` `/escalations` view models. |
+| 6 | `W-F` Edge/data quality + Live Gate foundation | alpha-bearing | PM → QC/MIT/PA → E1/E4 → PM | ⏳ **PENDING** after W-A; before true-live | H0 production caller, pricing binding, supervised-live state machine. |
+| 7 | `W-G` Proposal/approval/mobile relay | alpha-neutral | PM → CC/FA/PA → E1/E2/E4 → PM | 🟡 **BACKEND FOUNDATION DONE 2026-05-07**（待 mobile relay）| Gateway/console proposal/approval relay; no direct order/config/live-auth. |
+| 8 | `W-AUDIT-1` Docs sync + governance compliance | alpha-neutral | TW + R4 + PM + PA | ✅ **DONE 2026-05-09** | CLAUDE.md §三/§五/§四 lease drift sync + AMD §5.4.1 + W-C auth file + docs/README + SPECIFICATION_REGISTER + ADR-0015..0019 + SCRIPT_INDEX + MIT/BB workspace READMEs. |
+| 9 | `W-AUDIT-2` Security IMPL (4 HIGH) | alpha-neutral | E1×4 + E2 + E4 + E3 | ✅ **DONE 2026-05-09** | F-24/F-25 mutating routes gated; F-23 tailnet auto bind; F-03 lease writer; AI socket chmod 0600. Runtime deploy `862e79b7`: V078 applied, lease_transitions rows=103. |
+| 10 | `W-AUDIT-3` ExecutorAgent fake-live | alpha-neutral | E1 + E1a + E2 + E4 + PA + PM | 🟡 **PARTIAL** → `W-AUDIT-3b` runtime smoke pending Sprint N+1 | F-17 ✅ / F-15 ⚠️ / SM-05 Option A / F-01 source/test closed. **`W-AUDIT-3b` Sprint N+1 W4 RouterLeaseGuard Drop test 已 land** (commit `22efd9de`)；runtime smoke 仍待 ssh trade-core 驗。 |
+| 11 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 並行 + MIT + E2 + E4 | 🟡 **PARTIAL** → `W-AUDIT-4b` M1+M2+M3 ✅ DONE Sprint N+0 (commits `4a90966a` + `404174a4` + `e93a6e5c` + `a01d05ed`); 6 表 INSERT path 6/6 仍 待 N+1+ | V068/V070/V071 reclassification COMMENT only; row count 仍 0 (3 advisor 表)。M3 producer chain integrity post-M3 100% ✅ (per 2026-05-10 PG empirical)。Decision-3 採納合併入 `W-AUDIT-8f` (R-3) Hypothesis Pipeline 同 wave 做。 |
+| 12 | `W-AUDIT-5a/5b` 性能/結構/CI/跨平台 | alpha-neutral | E1×6 並行 + E5 + E2 + E4 | 🔵 **ACTIVE** since 2026-05-09 | F-21 strip / F-26 CI matrix / F-27 字典修正 / F-test-h-state split / F-12 runner.rs split / W-AUDIT-5b event_consumer + state-machine clone snapshot + orjson + ai_budget ArcSwap; 剩 F-20 909MB damaged dump drop ops。 |
+| 13 | `W-AUDIT-6` 策略 + 量化 promotion gate | alpha-bearing | E1×5 + QC + E2 + E4 + PM | 🟡 **SOURCE/TEST CLOSED 2026-05-09** + `W-AUDIT-6c` runtime apply + `W-AUDIT-6d` mid-ground Sprint N+0 + `W-AUDIT-6-3c` V086 ✅ DONE 2026-05-10 (production applied) | AMD-02 Option ii: grid CONDITIONAL ORDIUSDT, ma_crossover REVISE, bb_breakout 5m, funding_arb RETIRE (per ADR-0018), bb_reversion pair MA. W-AUDIT-6c VaR/CVaR/EVT IMPL `cc6476dd`. **`W-AUDIT-6d` mid-ground 保 6 / 砍 6** (見 §8)。**`W-AUDIT-6-3c` V086 reject_reason_code 12+14 enum** ✅ production deploy + writer code (commit `05e44ede`) — D+1 evening engine restart deploy producer。 |
+| 14 | `W-AUDIT-7` AI 棧 + GUI/UX | alpha-neutral | E1×4 + AI-E + A3 + E2 + E4 + ops | 🔵 **ACTIVE** → `W-AUDIT-7c` Sprint N+2 | F-30 prompt modal / F-system-mode-confirm 5s countdown / F-strategist-cap 30→50 ADR-0022 ✅ land 2026-05-10 / F-28 ContextDistiller IMPL. 剩 F-07 ANTHROPIC_API_KEY + cea-env. Layer2 autonomous loop sunset by ADR-0020. |
+| 15 | `W-AUDIT-8a` Alpha Surface Foundation (R-1 spec) | alpha-bearing | PA → E1 → E2 → E4 + MIT/QC/CC/BB → PM | 🟡 **Phase A ✅ DONE Sprint N+0** (commit `c9fb0b8f` HEAD trait skeleton) / **Phase B Tier 2 panel.* SQL skeleton ✅ DONE D+0** (V085 funding_curve + V087 oi_delta_panel deployed 2026-05-10) / Phase B Rust panel_aggregator IMPL ⏳ N+1 W1 / Phase C+D 待 N+2-N+3 | Strategy on_tick(ctx, surface) 升級 + AlphaSurface<'a> 4 tier + AlphaSourceTag enum + 5 既存策略 declare alpha sources + Phase B Tier 2 cross-symbol panel collector + Phase C Tier 3 microstructure + Phase D Tier 4 + 7d replay E2E byte-identical baseline。Spec: `docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`. Phase B spec v1.1 BB WS-first revision: `docs/execution_plan/2026-05-10--w_audit_8a_phase_b_tier_2_collector_spec.md`. |
+| 16 | `W-AUDIT-8b` A4-A Funding Skew Directional 新策略 | alpha-bearing | PA spec → E1 IMPL + QC + MIT + BB review | ⏳ **DEFER** Sprint N+3 spec → N+4 IMPL (1 sprint) | funding rate 期限結構 directional alpha；demo signal noise（mainnet 才能完整驗證）；25-symbol funding curve 消費 AlphaSurface Tier 2。 |
+| 17 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction 新策略 | alpha-bearing | PA spec → E1 (Rust hot-path) + QC + BB review WS | ⏳ **DEFER** Sprint N+2 spec → N+3 IMPL (1.5 sprint) | Bybit `allLiquidation` WS topic 真接；event-trigger 模式；消費 AlphaSurface Tier 3 microstructure。 |
+| 18 | `W-AUDIT-8d` A4-C BTC→Alt Lead-Lag 新策略 | alpha-bearing | PA spec → E1 IMPL + QC review | 🟡 **Spec v1.2 ✅ DONE D+0** (dual-layer σ + PSR(0) + 5 conditions + +15/+5-15/<+5 階梯 gate) / V088 panel.btc_lead_lag_panel SQL skeleton ✅ DONE D+0 / IMPL ⏳ N+1 W2 (5 sub-agent)，最高 impact + 第一 IMPL | BTC 1m 急動 ≥1.5σ 信號；alt 同方向 entry 60s 內（前提 alt-BTC 60s ρ>0.7 + alt 仍未動 ≥50%）；半衰期 30-180s 與 1m sampling 完美匹配。Spec: `docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md`. |
+| 19 | `W-AUDIT-8e` (R-2) Strategist Alpha Source Orchestrator | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+4 spec → N+5 IMPL (2-3 sprint) | Strategist 從 4×5 hardcoded regime preferences → AlphaSourceRegistry + 動態 Sharpe-by-regime + Hypothesis sourcing。 |
+| 20 | `W-AUDIT-8f` (R-3) Hypothesis Pipeline + W-AUDIT-4 ML 併入 | alpha-bearing | PA spec → E1 IMPL + MIT spec | ⛔ **DEFER** Sprint N+5 IMPL (2-3 sprint) | learning.hypotheses table state machine + Decision Lease + Hypothesis 關係 + W-AUDIT-4 6 dead schema 併入解 attribution_chain 0.5%→80% root cause（Decision-3 confirmed）。 |
+| 21 | `W-AUDIT-8g` (R-4) Per-alpha-source Live Promotion Gate | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+7+ (2 sprint) | LiveBudget(alpha_source_id, slice) 替代「整 system live_reserved」線性 LG-2/3/4/5；FA defer 至 N+7（W-AUDIT-9 已部分覆蓋）。 |
+| 22 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 review | ⛔ **DEFER** Sprint N+4-N+6 (1 sprint) | A3 建議 13→15 tab。 |
+| 23 | `W-AUDIT-9` Graduated Canary Foundation IMPL | alpha-bearing | E1 (5 active + 1 stand-by 並行) | ✅ **T1-T7 DONE Sprint N+0 closure 2026-05-10** (HEAD `b6ed4975`)；W5-E1-A CANARY-STAGE-CRITERIA-1 ✅ DONE D+0 (commit `6529e37e` +2441 LOC) + V089 SQL seed deployed；W5-E1-C DYNAMIC-UNBLOCK ✅ DONE D+0 (commit `d17d7863` +1700 LOC) + V090 deployed；Stage 1 cohort 待 W6+W7 完成 ~D+3-4 啟動 | AMD-2026-05-09-03 配套：Rust schema executor_canary_stage + V### migration + shadow_mode_provider stage-aware + healthcheck [58] + governance.canary_stage_log + GUI surface + LeaseScope::CanaryStagePromotion + E4 regression。**`W-AUDIT-9` Stage 1 launch 是 standalone milestone**（FA 估 +5-7%）。|
+| 24 | `W-AUDIT-10` (R-5) Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec → E1 IMPL | ⛔ **DEFER** 中期 (1-2 sprint) | CI gate spec drift > 7d auto-fail + module/table lifecycle header + 自動抽 SCRIPT_INDEX/SPEC_REGISTER。 |
+
+### §4.1.1 Sprint N+0 + D+0 EXECUTION 統計（per §6.6 詳）
+
+✅ **Sprint N+0 closure** (HEAD `b6ed4975`)：W-AUDIT-9 T1-T7 + W-AUDIT-8a Phase A + W-AUDIT-4b M1/M2/M3 + W-AUDIT-6d mid-ground 全 land
+✅ **Sprint N+1 D+0 EXECUTION** (HEAD `bca4a43d`)：sign-off APPROVED 提前 1h22m + Phase 1+2 全收口（W7-4 / V086 IMPL / W6-1 RFC 三角 / V085-V088 land / W5-E1-A / W5-E1-C）+ Phase 3 5/9 done
+⏳ **Phase 3 餘**：AMD-2026-05-1X-W6-1 absorb (in flight) / CLAUDE.md §七 wording / D+1 evening engine restart deploy V086 producer / Phase 4 W1+W2 IMPL chain (5-7d)
 
 ### §4.2 Cross-Wave Conflict Resolution（4 條，PA §3.3 必繼承）
 
@@ -134,47 +142,51 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 
 ## §5 PM Sign-off Pre-flight Checklist（22 invariant，FA §4 + PA §6 deduplicate；任一 FAIL = BLOCKER）
 
-### §5.1 結構 invariant（5 條）
+**Sprint N+0 sign-off status (2026-05-10 closure)**: ✅ **14 PASS / ⏳ 6 DEFER / 🟡 2 PARTIAL / ❌ 0 FAIL** (per `memory/project_2026_05_10_sprint_n0_closure.md` §22 invariant ledger)
 
-| # | Invariant | 驗證 | 來源 |
-|---|---|---|---|
-| 1 | Sprint N+0 W-AUDIT-9 7 sub-task 全 land + `[58]` PASS + `governance.canary_stage_log` active | `git log --grep=W-AUDIT-9` 7 commit + healthcheck PASS | PA-1 |
-| 2 | Sprint N+0 W-AUDIT-8a Phase A trait 升級 land + 5 策略 byte-identical replay PASS + `cargo build --release` 綠 | E2E byte-diff test PASS | PA-2 |
-| 3 | W-AUDIT-6d mid-ground 6 保子項 land + 砍 6 子項 grep blacklist 0 命中 | grep audit + 6 commit 存在 | PA-3 |
-| 4 | W-AUDIT-9 Stage 1 cohort active + 7d wall-clock 觀察期未提前升級（**standalone milestone**） | `governance.canary_stage_log` Stage 1 entered_at_ms + auto-promote 條件未提前觸 | PA-4 + FA-Critique-2 |
-| 5 | W-AUDIT-4b N+0 IMPL chain 已串行 land（M1 decision_features producer 改 intent-only emit + V082 拆 `decision_features_evaluations` 表 → M2 fill writer `entry_context_id` enforcement + V083 NOT VALID CHECK → M3 reject negative label + V084 `mlde_sample_weight` UDF + 6 Rust producer file `emit_decision_feature_intent_rejected` 5 hits） | commit ordering 驗 (`4a90966a` → `404174a4` → `e93a6e5c` → `a01d05ed`) + grep 5 hits + pytest 真 19/19 PASS | FA-2 (N+0 actual IMPL 對齊；feature_baselines / mlde_edge_training_rows / scorer_predictions / 3 advisor 6 表 INSERT path 留 **N+1 invariant 5b**) |
+**標識**：✅ PASS / ⏳ DEFER (依賴後續 wave) / 🟡 PARTIAL (部分達成) / ❌ FAIL
 
-### §5.2 安全 invariant（5 條）
+### §5.1 結構 invariant（5 條：4 ✅ + 1 ⏳）
 
-| # | Invariant | 驗證 | 來源 |
-|---|---|---|---|
-| 6 | DOC-08 §12 9 條安全不變量未違反 | 逐條 grep + healthcheck pass | PA-5 |
-| 7 | live boundary 5-gate 所有 stage active 期間未繞過 | LiveDemo authorization.json 簽名+TTL+env_allowed 全 pass | PA-6 |
-| 8 | §二 16 根原則合規（especially 1/4/5/6/9） | 逐條 grep + AMD-2026-05-09-03 §6.3 校核 | PA-7 |
-| 9 | `shadow_mode_provider` exception path fail-closed Stage 0（**不是** Stage 1） | E2 review T3 + unit test PASS | PA-8 |
-| 10 | W-AUDIT-9 Stage 0 binary fail-closed 不變式保留（Live boundary 5-gate / SM-04 ladder / DOC-08 §12 / §二 16 原則 4 範圍均不被 graduated canary 觸碰） | 4 範圍逐條 invariant test | FA-4 |
+| # | Status | Invariant | 驗證 | 來源 |
+|---|---|---|---|---|
+| 1 | ✅ | Sprint N+0 W-AUDIT-9 7 sub-task 全 land + `[58]` PASS + `governance.canary_stage_log` active | `git log --grep=W-AUDIT-9` 7 commit + healthcheck PASS | PA-1 |
+| 2 | ✅ | Sprint N+0 W-AUDIT-8a Phase A trait 升級 land + 5 策略 byte-identical replay PASS + `cargo build --release` 綠 | E2E byte-diff test PASS | PA-2 |
+| 3 | ✅ | W-AUDIT-6d mid-ground 6 保子項 land + 砍 6 子項 grep blacklist 0 命中 | grep audit + 6 commit 存在 | PA-3 |
+| 4 | ⏳ | W-AUDIT-9 Stage 1 cohort active + 7d wall-clock 觀察期未提前升級（**standalone milestone**） | `governance.canary_stage_log` Stage 1 entered_at_ms + auto-promote 條件未提前觸 | PA-4 + FA-Critique-2; **DEFER 等 W6+W7 完成 ~D+3-4 啟動** |
+| 5 | ✅ | W-AUDIT-4b N+0 IMPL chain 已串行 land（M1 decision_features producer 改 intent-only emit + V082 拆 `decision_features_evaluations` 表 → M2 fill writer `entry_context_id` enforcement + V083 NOT VALID CHECK → M3 reject negative label + V084 `mlde_sample_weight` UDF + 6 Rust producer file `emit_decision_feature_intent_rejected` 5 hits） | commit ordering 驗 (`4a90966a` → `404174a4` → `e93a6e5c` → `a01d05ed`) + grep 5 hits + pytest 真 19/19 PASS | FA-2 (N+0 actual IMPL 對齊；feature_baselines / mlde_edge_training_rows / scorer_predictions / 3 advisor 6 表 INSERT path 留 **N+1 invariant 5b**) |
 
-### §5.3 治理 invariant（7 條）
+### §5.2 安全 invariant（5 條：5 ✅ 全 PASS per CC A 93.3% APPROVE）
 
-| # | Invariant | 驗證 | 來源 |
-|---|---|---|---|
-| 11 | `canary_stage_log.decision_lease_id` for `manual_promote` PG NOT NULL 強制 | V0XX migration 含 `CHECK (transition_kind != 'manual_promote' OR decision_lease_id IS NOT NULL)` | PA-9 |
-| 12 | healthcheck `[58]` 對 SM-04 ≥ L3 escalate 必 hard FAIL → 觸 stage = 0 rollback | `[58]` IMPL 對 SM-04 L3 邏輯 explicit + unit test PASS | PA-10 |
-| 13 | A 群 3 新策略 IMPL 後 `declared_alpha_sources()` 與真實邏輯對齊 | grep 3 新策略 ctor + QC review report sign-off | PA-11 |
-| 14 | W-AUDIT-8b/c/d sequence 必含 **Stage 2 abort gate**（A4-C IMPL 後 Stage 2 demo 14d gross < 0 → A 群 8b/8c 重評，**不**連續 IMPL） | Sprint sign-off report 明文記入 | FA-5 |
-| 15 | D-02 Layer 2 manual SOP 不違反 ADR-0020（manual probe 不可自動化為 cron / event-trigger） | code grep audit | FA-6 |
-| 16 | W-AUDIT-6d mid-ground 砍 6 polishing 的 **K -12 trial DSR penalty 量化結論記入 sign-off report**（mu_0 從 ~2.54 降至 ~2.27 用 ln，z_DSR 增益 +0.30） | sign-off report 明文 | FA-7 |
-| 17 | v2-NEW-1 strategist cap 30%→50% 補 **ADR-0022**（編號衝突自動移位：ADR-0021 已用 = alpha-source-architecture-upgrade；strategist-cap-wide-parameter-adjustment-skill 改 ADR-0022；含 freedom-not-gate rationale + SM-05 張力 + 50% 偏離監測指標） | ADR-0022 land + commit `75b6e5f2` (PA `2026-05-10`) | FA-8 |
+| # | Status | Invariant | 驗證 | 來源 |
+|---|---|---|---|---|
+| 6 | ✅ | DOC-08 §12 9 條安全不變量未違反 | 逐條 grep + healthcheck pass | PA-5 |
+| 7 | ✅ | live boundary 5-gate 所有 stage active 期間未繞過 | LiveDemo authorization.json 簽名+TTL+env_allowed 全 pass | PA-6 |
+| 8 | ✅ | §二 16 根原則合規（especially 1/4/5/6/9） | 逐條 grep + AMD-2026-05-09-03 §6.3 校核 | PA-7 |
+| 9 | ✅ | `shadow_mode_provider` exception path fail-closed Stage 0（**不是** Stage 1） | E2 review T3 + unit test PASS | PA-8 |
+| 10 | ✅ | W-AUDIT-9 Stage 0 binary fail-closed 不變式保留（Live boundary 5-gate / SM-04 ladder / DOC-08 §12 / §二 16 原則 4 範圍均不被 graduated canary 觸碰） | 4 範圍逐條 invariant test | FA-4 |
 
-### §5.4 監督 / record（5 條）
+### §5.3 治理 invariant（7 條：4 ✅ + 2 ⏳ + 1 🟡）
 
-| # | Invariant | 驗證 | 來源 |
-|---|---|---|---|
-| 18 | F-08 5 ML cron `crontab -e` install + 24h 真 fire 驗 | `[Xc] ml_training_cron_active` PASS（A1 cron 已 install at `17 3 * * *`，24h fire 待驗）| FA-3 |
-| 19 | 6 表 0 INSERT 18 天無變動 gap 必有 owner + ETA（individual P1 ticket：`P1-INSERT-PATH-1..6`） | TODO entry P1 標記 | FA-9 |
-| 20 | W-AUDIT-3b runtime smoke 已從 Linux 驗（`pytest -k test_executor_fail_closed` + engine restart 後 `[55] chains_with_lease > 0`） | ssh trade-core run + log evidence | FA-1 |
-| 21 | **`P0-MIT-LABEL-CLOSE-TAG-1`** 1-day fix 已 IMPL + `attribution_chain_ok` 24h ≥ 5%（從 0.5% → 5%） | `[42b]` healthcheck PASS + writer fix commit | merged FA |
-| 22 | Sprint N+0/N+2/N+5 capacity = 5 active + 1 stand-by E1 explicit recorded（不允許「臨時降級為 5/5 HOT」） | Sprint sign-off report 明文 | merged FA |
+| # | Status | Invariant | 驗證 | 來源 |
+|---|---|---|---|---|
+| 11 | ✅ | `canary_stage_log.decision_lease_id` for `manual_promote` PG NOT NULL 強制 | V0XX migration 含 `CHECK (transition_kind != 'manual_promote' OR decision_lease_id IS NOT NULL)` | PA-9 |
+| 12 | ✅ | healthcheck `[58]` 對 SM-04 ≥ L3 escalate 必 hard FAIL → 觸 stage = 0 rollback | `[58]` IMPL 對 SM-04 L3 邏輯 explicit + unit test PASS | PA-10 |
+| 13 | ⏳ | A 群 3 新策略 IMPL 後 `declared_alpha_sources()` 與真實邏輯對齊 | grep 3 新策略 ctor + QC review report sign-off; **DEFER A 群 (8b/8c/8d) IMPL 完成後驗** | PA-11 |
+| 14 | ⏳ | W-AUDIT-8b/c/d sequence 必含 **Stage 2 abort gate**（A4-C IMPL 後 Stage 2 demo 14d gross < 0 → A 群 8b/8c 重評，**不**連續 IMPL） | Sprint sign-off report 明文記入; **DEFER W2 A4-C IMPL 後 Stage 2 demo 14d 才有效** | FA-5 |
+| 15 | ✅ | D-02 Layer 2 manual SOP 不違反 ADR-0020（manual probe 不可自動化為 cron / event-trigger） | code grep audit | FA-6 |
+| 16 | 🟡 | W-AUDIT-6d mid-ground 砍 6 polishing 的 **K -12 trial DSR penalty 量化結論記入 sign-off report**（mu_0 從 ~2.54 降至 ~2.27 用 ln，z_DSR 增益 +0.30） | sign-off report 明文; **PARTIAL — 量化記入 N+0 sign-off report ✅，但 mid-ground active phase 仍待 N+1 evaluate** | FA-7 |
+| 17 | ✅ | v2-NEW-1 strategist cap 30%→50% 補 **ADR-0022**（編號衝突自動移位：ADR-0021 已用 = alpha-source-architecture-upgrade；strategist-cap-wide-parameter-adjustment-skill 改 ADR-0022；含 freedom-not-gate rationale + SM-05 張力 + 50% 偏離監測指標） | ADR-0022 land + commit `75b6e5f2` (PA `2026-05-10`) | FA-8 |
+
+### §5.4 監督 / record（5 條：2 ✅ + 2 ⏳ + 1 🟡）
+
+| # | Status | Invariant | 驗證 | 來源 |
+|---|---|---|---|---|
+| 18 | 🟡 | F-08 5 ML cron `crontab -e` install + 24h 真 fire 驗 | `[Xc] ml_training_cron_active` PASS（A1 cron 已 install at `17 3 * * *`，**24h fire 已驗 success per memory `project_2026_05_09_ml_training_cron_weekly.md` hybrid 5 daily + 5 weekly Sunday**） | FA-3 |
+| 19 | ⏳ | 6 表 0 INSERT 18 天無變動 gap 必有 owner + ETA（individual P1 ticket：`P1-INSERT-PATH-1..6`） | TODO entry P1 標記; **DEFER 6 P1 owner pending；W-AUDIT-4b M3 已修 chain integrity post-M3 100%，但 3 advisor 表 row count 仍 0** | FA-9 |
+| 20 | ⏳ | W-AUDIT-3b runtime smoke 已從 Linux 驗（`pytest -k test_executor_fail_closed` + engine restart 後 `[55] chains_with_lease > 0`） | ssh trade-core run + log evidence; **DEFER W4 RouterLeaseGuard Drop test ✅ land (commit `22efd9de`)，但 ssh runtime smoke 仍待 verify** | FA-1 |
+| 21 | ✅ | **`P0-MIT-LABEL-CLOSE-TAG-1`** 1-day fix 已 IMPL + `attribution_chain_ok` 24h ≥ 5%（從 0.5% → 5%） | `[42b]` healthcheck PASS + writer fix commit; **post-M3 100%（PM era-split empirical 推翻 prior "全表 40%" misleading; per `db17e205` chain integrity HC `[65]`）** | merged FA |
+| 22 | ✅ | Sprint N+0/N+2/N+5 capacity = 5 active + 1 stand-by E1 explicit recorded（不允許「臨時降級為 5/5 HOT」） | Sprint sign-off report 明文 | merged FA |
 
 **git status clean 強制**（CLAUDE.md §七 P0-GOV-3）：merge 後 mandatory，process gate（不算 22 條 invariant 之內）。`git status --porcelain` 對應檔案必 clean，違反 = PM 拒絕 sign-off。
 
@@ -227,7 +239,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 
 ## §6.5 Sprint N+1 D+0 Pre-dispatch Readiness Snapshot（2026-05-10, HEAD `bf66f1b2`）
 
-**Status**: Sprint N+0 已 closure（HEAD `b6ed4975`）；Sprint N+1 D+0 提前準備清單 **25 項全 land**；HIGH-5 12h passive watch metric 2/3 forward observation 進行中（21:30 UTC sign-off 窗口）。
+**Status**: ✅ **DONE** — Sprint N+0 已 closure（HEAD `b6ed4975`）；Sprint N+1 D+0 **提前準備清單 25 項全 land** ✅；HIGH-5 12h passive watch sign-off ✅ **APPROVED 2026-05-10 20:08 UTC**（提前 1h22m）；Phase 1+2+3 EXECUTION 詳 **§6.6**。
 
 **詳完整 dispatch v3.7 + 25 D+0 提前準備清單**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md`
 
