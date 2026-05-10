@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v3.3 — QC + MIT W6 RFC 預備立場 + E1 PA D+0 trait skeleton 預寫 land；W7-1 trait skeleton 已 PR ready（HEAD `c9fb0b8f`，0 borrow checker, 433+2640+35+replay 全 PASS）；W6 大幅重設計（MIT 揭露 W6-5 category error，撤回原 imbalance flag 試行；W6-3 從 3 類 → 18+ 類兩 column；ML retrain 4-gate 拆 Track A/B）
+**Status**: DRAFT v3.4 — 4 sub-agent 預跑全完成（PA W6-3b enum spec final / BB W1+W2 rate budget / PA P2 雙前綴 RCA / PA W1 Phase B writer spec）；W6-3 enum 確定 12+14；BB push back W1 WS-first (over-engineering)；雙前綴 16+17 row 已 4-23 fix 走 V086 backfill normalize 不需 P2 ticket；W1 PA spec land 等 BB integration WS-first revise
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -74,7 +74,48 @@ MIT W6 baseline 揭露 ma_crossover INXUSDT 2331 reject 不是 governance 問題
 
 Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
 
-#### §0.5 【v3.3 整合】QC + MIT W6 RFC 三角預備立場 + E1 trait skeleton 完成（2026-05-10 15:30 UTC）
+#### §0.6 【v3.4 整合】4 sub-agent 預跑全完成（2026-05-10 16:30 UTC）
+
+#### §0.6.A PA W6-3b enum spec final（HEAD pending commit）
+- **5 ambiguous (A1-A5) 全 ACCEPT MIT** 提案
+- **reject_reason_code: 12 enum final**（含 `reject_other` catch-all）
+- **close_reason_code: 14 enum final**（含 `close_other` catch-all）
+- V086 schema migration final spec：**two TEXT column + Guard A/B/C + NOT VALID CHECK + one-shot 30-90s backfill in migration（不開 cron）**
+- ALTER VALIDATE D+2 14:30 UTC
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_3b_enum_spec_final_pa_decision.md`
+
+#### §0.6.B BB W1+W2 rate budget review — **HIGH push back W1 over-engineering**
+- **Verdict: PASS（~99% headroom）**，0 burst risk, 0 ToS/KYC/地理風險
+- 真實 Bybit V5 cap：**120 req/s per IP HTTP**, market endpoint 120 req/s per UID
+- 既有 baseline 0.7 req/s + W1+W2+W3 增量 0-1 req/s = **總利用率 0.6-1.0% IP cap**
+- **HIGH push back**：W1 spec "1500 req/h REST polling" 是 over-engineering
+  - `tickers` WS topic 已 broadcast funding rate + open interest field
+  - 建議 **WS-first pattern**：REST 僅 cold-start backfill (25 calls 1 batch ~0.21s) 或 WS reconnect gap fill
+  - 採納 → W1 真實增量 **~0 req/s** 而非 0.83 req/s
+- **MEDIUM**：若 PA 堅持 REST polling → 必加 `is_group_near_limit(Market, 30)` 預警 + W3 Stage 1 cohort 排除 BUSDT
+- Report: `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-10--w1_w2_bybit_v5_rate_budget_review.md`
+
+#### §0.6.C PA W1 Phase B writer spec land — **未對齊 BB push back（待 D+1 PA + BB 整合）**
+- PA W1 spec 走 **REST tickers + open-interest polling**（基於 dispatch v3.3 §3.1 1500 req/h 假設）
+- BB 揭露 tickers 是 WS topic（既有 broadcast funding+OI），WS-first pattern 更省（0 req/s）
+- **D+1 PA + BB final integration**：W1 spec revision to WS-first（per BB push back，仍 PASS budget 但 over-engineering）
+- 其他 finding 仍正確：
+  - Cohort 25 symbol = grid ∪ ma ∪ bb_breakout active union；exclude BUSDT (ADR-0018) + frozen list；W1 hardcoded
+  - **Schema 校正**：5m/15m/1h NOT 1m/5m/15m；funding_rate_bps scalar (not curve_8h/curve_24h)
+  - W1 vs W2 engine_mode 對比：W1 demo+live 都接（**NO** paper-only fence；Phase B 是 production foundation）；W2 paper-only fence by step_4_5_dispatch.rs engine_mode gate
+  - bb_breakout fail-closed 設計：surface.oi_delta_panel `is_none()` OR symbol not in cohort OR oi_delta_5m_pct=NaN → write `evaluation_outcome='oi_panel_unavailable'`（V086 ADD VALUE TO ENUM）
+  - 3 E1 sub-agent 完全並行 0 file 重疊（V085/V086/V087 reserved + slots/dispatch anchor 隔離）
+- Spec: `srv/docs/execution_plan/2026-05-10--w_audit_8a_phase_b_tier_2_collector_spec.md`
+
+#### §0.6.D PA P2 雙前綴 RCA — 確認 W6-3b 預測 + 補充 finding
+- bug 早已 2026-04-23 13:54 commit `46a9cadc` fix（idempotent `build_risk_close_tag()` helper）
+- post-fix **17 天 0 regression**
+- **16 row decision_features** + **17 row trading.fills** 都是 Python `edge_label_backfill.py` 從 fills 歷史 raw 字串複製副作用
+- **無需 P2 ticket**
+- 走 MIT W6-3a §6.2 V086 backfill normalize；**PA 補充：V086 同 migration 加 trading.fills 17 row UPDATE 上游清理**（W6-3c sub-task scope 略擴）
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p2_decision_features_double_prefix_bug_audit.md`
+
+### §0.5 【v3.3 整合】QC + MIT W6 RFC 三角預備立場 + E1 trait skeleton 完成（2026-05-10 15:30 UTC）
 
 #### §0.5.A E1 PA D+0 trait skeleton 預寫成功（HEAD `c9fb0b8f`，PR ready）
 - **Tier 1 + Tier 2 全達成 0 borrow checker 撞牆**（PA #3 audit §8 重點 3 警告解掉）
@@ -234,12 +275,13 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
   - W-AUDIT-4b M3 producer 同步 update（`intent_processor/mod.rs:1213` 解 V017 lock）
   - V086 加 Guard A/B/C + idempotency
 - W6-3. **【v3.3 重 scope】Multi-class label split — 18+ enum 兩 column**（PA spec + E1 IMPL，**從 1 day extend 3 day**，per MIT Q3）
-  - **W6-3a. close_tag distribution audit**（PA + MIT 0.5 day）— PG 全 SELECT distinct close_tag + frequency；MIT 已驗 >100 unique values
-  - **W6-3b. 兩 column enum spec**（PA 0.5 day）：
-    - `reject_reason_code` **8 enum**（cost_gate / duplicate_position / atr_unavailable / scanner_advisory / volatility / dsr / position_size / margin_util）
-    - `close_reason_code` **10+ enum**（strategy_close_grid / strategy_close_ma / strategy_close_bb / strategy_close_funding / risk_close_dynamic_stop / risk_close_trailing_stop / risk_close_phys_lock / risk_close_fast_track / cost_edge_close_profit / cost_edge_close_loss / ipc_close_all / regime_shift_close / abandoned_no_close）
-  - **W6-3c. V086 兩 column add**（E1 IMPL 1 day）：reject_reason_code text + close_reason_code text + Guard A/B/C + NOT VALID CHECK + backfill cron 從 risk_verdicts.reason regex parse + label_close_tag string prefix split
+  - **W6-3a. close_tag distribution audit**（MIT 已完成 HEAD `da6c1f80`）— 9757 row PG 實測，68 unique close_tag → 15 category
+  - **W6-3b. 兩 column enum spec**（PA 已完成，pending commit）：
+    - `reject_reason_code` **12 enum final**（含 `reject_other` catch-all）— 5 ambiguous A1-A5 全 ACCEPT MIT
+    - `close_reason_code` **14 enum final**（含 `close_other` catch-all）
+  - **W6-3c. V086 兩 column add**（E1 IMPL 1 day, v3.4 update）：reject_reason_code text + close_reason_code text + Guard A/B/C + NOT VALID CHECK + **one-shot 30-90s backfill in migration（不開 cron）**；同次 backfill 加 trading.fills 17 row 雙前綴 normalize（per PA P2 audit 補充）
   - **W6-3d. Trainer pipeline read schema update**（E1 IMPL 1 day）：scorer_trainer 仍 ignore（regression 看 label_net_edge_bps 不看 reason code）；future multi-task 接口準備好（add column 不 break read schema）
+  - **W6-3e. ALTER VALIDATE CONSTRAINT** D+2 14:30 UTC（per V086 spec preview）
   - W6-3 land 後 multi-class trainer 升級**留 N+2/N+3**（multi-task learning 或 hierarchical model 設計範圍超 W6 scope）
 - W6-4. **M4 reject reason mix monitor**（E1 IMPL 1 day）
   - 加 `helper_scripts/db/passive_wait_healthcheck/checks_reject_reason_mix.py`（[59]）
@@ -294,7 +336,12 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 - Multi-class label 改寫 LightGBM training pipeline，可能影響 cron 5 job 穩定性（cron weekly 跑，evaluation cycle 1 週）
 - LightGBM `scale_pos_weight=4` 過頭可能 over-correct → false positive 暴增 → 需 backtest counterfactual
 
-### §3.1 W1 — W-AUDIT-8a Phase B Tier 2 Panel Collector（**降為 P1**，與 W6 並行）
+### §3.1 W1 — W-AUDIT-8a Phase B Tier 2 Panel Collector（v3.4 update：**WS-first per BB push back**）
+
+**v3.4 update**：BB W1+W2 rate budget review 揭露 W1 spec REST polling 是 over-engineering — `tickers` WS topic 已 broadcast funding rate + open interest field。建議 W1 IMPL 改 **WS-first pattern**（REST 僅 cold-start backfill），W1 真實 Bybit 增量從 ~0.83 req/s 降到 ~0 req/s。仍 PASS budget 但 WS-first 為更好設計。
+
+PA W1 spec 已 land `srv/docs/execution_plan/2026-05-10--w_audit_8a_phase_b_tier_2_collector_spec.md`（draft v1，REST-based）；**D+1 PA + BB 必合併 WS-first revision**。
+
 
 **目標**：Phase A 在 Rust 宣告了 `AlphaSurface` trait 與 5 策略 `alpha_sources`，但實際 Tier 2 panel data（funding curve / OI delta panel）**沒有 producer**。Phase B 把 producer 接起來，讓 8b/8c/8d 後續 alpha 候選有真實 input。
 
@@ -606,7 +653,13 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ---
 
-**已整合 evidence**（v3.3 update）:
+**已整合 evidence**（v3.4 update）:
+- ✅ **PA W6-3b enum spec final** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_3b_enum_spec_final_pa_decision.md`（5 ambiguous A1-A5 全 ACCEPT MIT，12+14 enum final）
+- ✅ **BB W1+W2 rate budget review** → `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-10--w1_w2_bybit_v5_rate_budget_review.md`（PASS 99% headroom + HIGH push back W1 WS-first）
+- ✅ **PA P2 雙前綴 RCA** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p2_decision_features_double_prefix_bug_audit.md`（4-23 已 fix，16+17 row 走 V086 backfill normalize, 不需 P2 ticket）
+- ✅ **PA W1 Phase B Tier 2 collector spec draft v1** → `srv/docs/execution_plan/2026-05-10--w_audit_8a_phase_b_tier_2_collector_spec.md`（REST-based, 等 BB WS-first integration D+1）
+
+
 - ✅ QC replay TONUSDT structural edge → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--tonusdt_structural_edge_replay.md`（verdict C, conditional path）
 - ✅ MIT chain integrity replay → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md`（chain 100%, governance reject 99.5% 提名 P0）
 - ✅ MIT W6 baseline 預跑 → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md`（governance 沒 over-fit，真 gap = metadata + imbalance + duplicate_intent bug）
