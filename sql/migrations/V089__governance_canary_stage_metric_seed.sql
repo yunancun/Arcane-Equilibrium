@@ -117,7 +117,7 @@ INSERT INTO governance.canary_stage_metric_registry (
     (1, 'boundary_violation_count', 'promote_lower', 1, 604800000, TRUE,
      'Stage 1 → 2 boundary fail-closed; trip count must be 0 (spec §2.1 + §2.4)'),
     (1, 'sample_size_floor_ms', 'promote_upper', 259200000, 604800000, TRUE,
-     'Stage 1 → 2 sample floor 72h (spec §2.3 QC HIGH push back 2)'),
+     'Stage 1 → 2 sample floor 72h (spec §2.3 QC HIGH push back 2)')
 ON CONFLICT (stage, metric_name) WHERE active = TRUE DO NOTHING;
 
 
@@ -140,7 +140,7 @@ INSERT INTO governance.canary_stage_metric_registry (
     (2, 'DSR', 'promote_upper', 0.5, 1209600000, TRUE,
      'Stage 2 → 3 Deflated Sharpe Ratio floor 0.5 (spec §3 + W-AUDIT-6 acceptance)'),
     (2, 'sample_size_floor_ms', 'promote_upper', 604800000, 1209600000, TRUE,
-     'Stage 2 → 3 sample floor 7d hard for demo (spec §3)'),
+     'Stage 2 → 3 sample floor 7d hard for demo (spec §3)')
 ON CONFLICT (stage, metric_name) WHERE active = TRUE DO NOTHING;
 
 
@@ -165,7 +165,7 @@ INSERT INTO governance.canary_stage_metric_registry (
     (3, 'PBO', 'promote_lower', 0.5, 1814400000, TRUE,
      'Stage 3 → 4 PBO ceiling 0.5 (spec §4)'),
     (3, 'attribution_chain_ok_ratio', 'promote_upper', 0.7, 1814400000, TRUE,
-     'Stage 3 → 4 attribution chain ok ratio floor 0.7 (spec §4 + [55] healthcheck)'),
+     'Stage 3 → 4 attribution chain ok ratio floor 0.7 (spec §4 + [55] healthcheck)')
 ON CONFLICT (stage, metric_name) WHERE active = TRUE DO NOTHING;
 
 
@@ -181,7 +181,7 @@ INSERT INTO governance.canary_stage_metric_registry (
     active, description
 ) VALUES
     (1, 'boundary_violation_count_rollback', 'rollback_upper', 0, 21600000, TRUE,
-     'Stage 1 → 0 demote: any boundary violation in 6h sliding (spec §5 第 1 列)'),
+     'Stage 1 → 0 demote: any boundary violation in 6h sliding (spec §5 第 1 列)')
 ON CONFLICT (stage, metric_name) WHERE active = TRUE DO NOTHING;
 
 
@@ -197,7 +197,7 @@ INSERT INTO governance.canary_stage_metric_registry (
     (2, 'gross_pnl_usdt_rollback', 'rollback_lower', -10.0, 86400000, TRUE,
      'Stage 2 → 1 demote: gross PnL drops below -10 USDT in 24h sliding (spec §5 第 2 列)'),
     (2, 'DSR_rollback', 'rollback_lower', 0.0, 86400000, TRUE,
-     'Stage 2 → 1 demote: DSR drops below 0 in 24h sliding (spec §5 第 2 列)'),
+     'Stage 2 → 1 demote: DSR drops below 0 in 24h sliding (spec §5 第 2 列)')
 ON CONFLICT (stage, metric_name) WHERE active = TRUE DO NOTHING;
 
 
@@ -214,7 +214,7 @@ INSERT INTO governance.canary_stage_metric_registry (
     (3, 'gross_pnl_usdt_rollback', 'rollback_lower', -20.0, 86400000, TRUE,
      'Stage 3 → 2 demote: gross PnL drops below -20 USDT in 24h sliding (spec §5 第 3 列)'),
     (3, 'attribution_chain_ok_ratio_rollback', 'rollback_lower', 0.3, 86400000, TRUE,
-     'Stage 3 → 2 demote: attribution chain ok ratio < 0.3 in 24h sliding (spec §5 第 3 列)'),
+     'Stage 3 → 2 demote: attribution chain ok ratio < 0.3 in 24h sliding (spec §5 第 3 列)')
 ON CONFLICT (stage, metric_name) WHERE active = TRUE DO NOTHING;
 
 
@@ -229,7 +229,7 @@ INSERT INTO governance.canary_stage_metric_registry (
     active, description
 ) VALUES
     (4, 'boundary_violation_count_rollback', 'rollback_upper', 0, 3600000, TRUE,
-     'Stage 4 → 0 demote: any boundary violation in 1h sliding triggers cancel_token shutdown (spec §5 第 4 列)'),
+     'Stage 4 → 0 demote: any boundary violation in 1h sliding triggers cancel_token shutdown (spec §5 第 4 列)')
 ON CONFLICT (stage, metric_name) WHERE active = TRUE DO NOTHING;
 
 
