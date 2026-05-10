@@ -8,11 +8,13 @@
 //!   CostGate EV 過濾 → Kelly 倉位 → OMS。持有 RiskConfig 快照用於逐 tick 限制。
 
 mod gates;
+mod reject_reason_code;
 mod rejection_coding;
 mod router;
 #[cfg(test)]
 mod tests;
 
+use reject_reason_code::map_reject_reason_to_code;
 use rejection_coding::RejectionCode;
 
 use crate::config::risk_config::EdgePredictorFallback;
@@ -1175,6 +1177,11 @@ impl IntentProcessor {
             label_close_tag: None,
             label_net_edge_bps: None,
             label_filled_at_now: false,
+            // ── W6-3c V086 reject/close_reason_code 兩欄 intent-only path 全 None ──
+            // 後續 close 走 backfill (`edge_label_backfill.py`) 或下游 W6-3d Python 端寫
+            // close_reason_code 並 dual-write 到此 column。
+            reject_reason_code: None,
+            close_reason_code: None,
         };
 
         if let Err(e) = tx.try_send(msg) {
@@ -1244,6 +1251,12 @@ impl IntentProcessor {
             return;
         }
 
+        // ── W6-3c V086 (2026-05-10): reject_reason_code producer-side mapping ──
+        // reject_reason: &str → V086 §4.1 12 enum 之一；無匹配走 'reject_other'。
+        // evaluation order 鏡像 V086 SQL backfill CASE WHEN（line 316-333），E2 必驗。
+        // close_reason_code 在 reject path 永遠 None（與 V086 §3 互斥不變式對齊）。
+        let reject_code = map_reject_reason_to_code(reject_reason);
+
         let msg = crate::database::DecisionFeatureMsg {
             context_id: context_id.to_string(),
             ts_ms: now_ms,
@@ -1261,6 +1274,9 @@ impl IntentProcessor {
             label_close_tag: Some("rejected_governance".to_string()),
             label_net_edge_bps: Some(0.0),
             label_filled_at_now: true,
+            // ── W6-3c V086 reject_reason_code（12 enum）+ close_reason_code（None for reject path）──
+            reject_reason_code: Some(reject_code.to_string()),
+            close_reason_code: None,
         };
 
         if let Err(e) = tx.try_send(msg) {

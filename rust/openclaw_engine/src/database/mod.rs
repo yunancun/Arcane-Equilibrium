@@ -619,6 +619,31 @@ pub struct DecisionFeatureMsg {
     /// `true` → reject 路徑（emit 時間戳對 backfill 無意義，用 NOW() 標記寫入時刻）
     /// `false` → intent-only 路徑（label_filled_at 保 NULL，待 backfill 回填）
     pub label_filled_at_now: bool,
+
+    // ── W6-3c V086 (2026-05-10): governance reject/close reason enum 兩欄 ──
+    // Producer 端 `emit_decision_feature_intent_rejected` 在 reject path 把
+    // free-form `reject_reason: &str` 映射為 V086 §4.1 12 enum 之一寫進
+    // `reject_reason_code`；`close_reason_code` 在 reject path 永遠 None
+    // （V086 §3 互斥不變式：reject_reason_code IS NOT NULL ⇔ close_reason_code IS NULL）。
+    //
+    // intent-only path：兩欄全 None；後續 close 走 backfill / W6-3d Python 端
+    // dual-write 到 close_reason_code。
+    //
+    // Source spec：
+    //   - PA W6-3b enum spec final §4.1（12 reject + 14 close）
+    //     docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_3b_enum_spec_final_pa_decision.md
+    //   - V086 SQL CHECK constraint chk_reject_reason_code_enum / chk_close_reason_code_enum
+    //     sql/migrations/V086__governance_reject_close_reason_code.sql
+    //   - reject_reason_code mapping function
+    //     intent_processor::reject_reason_code::map_reject_reason_to_code
+    /// V086 12 reject enum 之一（11 + reject_other catch-all）。
+    /// `Some` 觸發 writer reject 變體 INSERT；`None` 走 intent-only 路徑。
+    /// 與 `close_reason_code` 互斥（per V086 §3 不變式）。
+    pub reject_reason_code: Option<String>,
+    /// V086 14 close enum 之一（13 + close_other catch-all）。
+    /// 當前 producer reject path 永遠 None；future close path 由 W6-3d Python
+    /// 端 `edge_label_backfill.py` dual-write，或在 fill 後在 close handler 寫入。
+    pub close_reason_code: Option<String>,
 }
 
 /// Decision feature evaluation snapshot → decision_feature_evaluation_writer task

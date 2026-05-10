@@ -679,6 +679,9 @@ fn test_decision_feature_snapshot_full_channel_drops() {
         label_close_tag: None,
         label_net_edge_bps: None,
         label_filled_at_now: false,
+        // W6-3c V086：filler 走 intent-only path 兩欄 None。
+        reject_reason_code: None,
+        close_reason_code: None,
     })
     .unwrap();
     pipeline.set_decision_feature_tx(tx);
