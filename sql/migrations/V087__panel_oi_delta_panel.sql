@@ -265,10 +265,58 @@ IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
         chunk_time_interval => 86400000,
         if_not_exists => TRUE
     );
+END IF;
+END $$;
 
+-- ============================================================
+-- §3a integer_now_func for BIGINT time column hypertable (idempotent)
+-- TimescaleDB 硬條件：BIGINT time column hypertable 加 retention policy
+-- 前必先註冊 integer_now_func；否則 add_retention_policy background job
+-- 在 fire 時 RAISE（per TimescaleDB issue #6197 + set_integer_now_func 文檔）。
+-- 對齊 V085 sibling pattern (defensive CREATE OR REPLACE FUNCTION;
+-- V085 已 land 重跑無副作用; V087 部分先跑也自含完整 dependency)。
+-- 函數簽名：返回 BIGINT，單位對齊 time column (ms epoch)。
+-- ============================================================
+CREATE OR REPLACE FUNCTION panel.unix_now_ms()
+    RETURNS BIGINT
+    LANGUAGE SQL
+    STABLE
+AS $$
+    SELECT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+$$;
+
+-- 註冊 integer_now_func 到 panel.oi_delta_panel hypertable
+-- replace_if_exists => TRUE 是 idempotent 必需 (默認 false 重跑會 RAISE)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')
+       AND EXISTS (
+           SELECT 1 FROM _timescaledb_catalog.hypertable
+           WHERE schema_name = 'panel'
+             AND table_name  = 'oi_delta_panel'
+       )
+    THEN
+        PERFORM set_integer_now_func(
+            'panel.oi_delta_panel'::regclass,
+            'panel.unix_now_ms'::regproc,
+            replace_if_exists => TRUE
+        );
+    END IF;
+END $$;
+
+-- ============================================================
+-- §3b Retention policy 14 days (idempotent)
+-- 對 BIGINT time column hypertable 必須給 BIGINT drop_after (ms 對齊單位)；
+-- 14 days = 14 * 86400 * 1000 = 1209600000 ms。
+-- ❌ 之前用 INTERVAL '14 days' 在 BIGINT time column 上會 RAISE
+-- (per TimescaleDB issue #2877 + add_retention_policy 文檔)。
+-- 對齊 V085 sibling pattern (BIGINT 不用 INTERVAL)。
+-- ============================================================
+DO $$ BEGIN
+IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
     PERFORM add_retention_policy(
         'panel.oi_delta_panel',
-        INTERVAL '14 days',
+        BIGINT '1209600000',
         if_not_exists => TRUE
     );
 END IF;
