@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v3.6 — 3 sub-agent 預跑全完成（PA W2 spec v1.1 5 conditions revision / PA W6-1 RFC final verdict draft / PA W5 三 P1 specs predraft）；W2 spec v1.1 已 inline edit (K=95 + σ MIT prerequisite + R²(N) decay + 6 metric + leak-free + BTC regime extreme)；W6-1 RFC verdict draft 4 條 statement + Track A/B 拆分；W5 三 P1 spec land + V### 編號重排加 V089/V090；D+1 sign-off 後純執行
+**Status**: DRAFT v3.7 — 2 sub-agent 預跑全完成（PA W1 spec v1.1 BB WS-first revision / MIT C-3 σ verify CONDITIONAL PASS）；W1 producer 從 Python REST → Rust panel_aggregator 訂閱既有 WS tickers broadcast，rate budget 100 req/min → 0 req/s ongoing；MIT σ verify dual-layer reframe (raw market 4.5-10 bps vs net edge 50-80 bps)；excess kurt 7-12 必 PSR(0) skew/kurt formula；D+1 sign-off cycle 全省，純執行
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -74,7 +74,35 @@ MIT W6 baseline 揭露 ma_crossover INXUSDT 2331 reject 不是 governance 問題
 
 Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
 
-#### §0.8 【v3.6 整合】3 sub-agent 預跑全完成（2026-05-10 18:30 UTC）
+#### §0.9 【v3.7 整合】2 sub-agent 預跑全完成（2026-05-10 19:30 UTC）
+
+#### §0.9.A PA W1 spec v1 → v1.1 — BB WS-first revision
+- **採納 BB HIGH push back**：producer 從 Python REST writer 切換為 **Rust `panel_aggregator/{funding_curve,oi_delta}.rs`** 訂閱既有 WS `tickers.{sym}` topic broadcast
+- Rate budget：**100 req/min (16.7%) → 0 req/s ongoing + 75 req cold-start once**
+- Event channel mpsc → broadcast migration 是 **critical gating dependency**（E1-α leader 先 land；E1-β/γ rebase parallel）
+- bb_breakout consumer 邏輯不變（surface.oi_delta_panel `is_none()` → `oi_panel_unavailable`）
+- D+1 PA + BB joint sign-off 直接收（省 1 day cycle）
+- 16/9/5 全 0 觸碰
+- Spec edit: `srv/docs/execution_plan/2026-05-10--w_audit_8a_phase_b_tier_2_collector_spec.md` (v1 → v1.1)
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w1_spec_v1_1_bb_ws_first_revision.md`
+
+#### §0.9.B MIT C-3 σ verify BTCUSDT 1m forward-return — CONDITIONAL PASS
+- BTCUSDT 7d raw market σ：σ_60=**4.54** / σ_120=**6.28** / σ_300=**10.08** bps
+- **比 PA W2 preliminary 30 bps 低 3-7×**，但這是 **raw market σ** 不對應 **net edge σ**（含 fee/slippage/adverse selection σ_net=50-80 bps per EDGE-DIAG-1）
+- PA spec 30 bps 不對應任何真實層 → **建議 dual-layer reframe**：明寫 raw market σ vs net edge σ
+- Power recalc：σ_net=80 bps 時 paper avg_net=+15 bps t-stat=1.93, p=0.027（剛 PASS marginal）；σ_net=50 bps 時 t-stat=2.83 PASS comfortable
+- excess kurt 7-12 ≫ 0 → **必用 PSR(0) skew/kurt-aware formula**（不可用 normal SR z-test, per QC condition #4 已加）
+- **W2 v1.1 sign-off path**：D+1 PA sign-off 同次 update spec acceptance language（不需重跑 MIT C-3）
+- W2 paper edge gate threshold 三檔 (+15/+5-15/<+5) **仍合理**（σ_net=80 bps 下 +15 bps 剛 PASS）
+- Report: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`
+
+#### §0.9.C W2 spec v1.1 acceptance language update（D+1 PA sign-off 同次 land）
+- §7.1 加 **dual-layer σ acceptance**：raw market σ (per MIT C-3 verify 4.5-10 bps) vs net edge σ (per EDGE-DIAG-1 50-80 bps)
+- §7.1 PSR(0) acceptance 語言改 **「skew/kurt-aware formula 必用」**（excess kurt 7-12 已 verify）
+- gate threshold +15 bps 仍合理（σ_net=80 bps 下 marginal PASS）
+- 不需重跑 MIT C-3，spec language 更新即可
+
+### §0.8 【v3.6 整合】3 sub-agent 預跑全完成（2026-05-10 18:30 UTC）
 
 #### §0.8.A PA W2 A4-C spec v1 → v1.1 — 5 conditions inline edit
 - §8.1 K=6 → **K=95**（Bailey-López de Prado 2014 §4.2），mu_0 = √(2 ln 95) = **3.018**
@@ -737,7 +765,11 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ---
 
-**已整合 evidence**（v3.6 update）:
+**已整合 evidence**（v3.7 update）:
+- ✅ **PA W1 spec v1 → v1.1 BB WS-first revision** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w1_spec_v1_1_bb_ws_first_revision.md`（producer Python REST → Rust panel_aggregator WS, rate 100 req/min → 0 req/s ongoing）
+- ✅ **MIT C-3 σ verify BTCUSDT 1m forward-return** → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`（CONDITIONAL PASS, dual-layer reframe, σ_net=80 bps 下 +15 bps gate marginal PASS, excess kurt 7-12 必 PSR(0) skew/kurt formula）
+
+
 - ✅ **PA W2 spec v1.1 5 conditions revision** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w2_a4c_spec_v1_1_qc_5_conditions_revision.md`（spec inline edit, V088 加 3 column, +5→+15 階梯 gate）
 - ✅ **PA W6-1 RFC final verdict draft** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_1_rfc_final_verdict_draft.md`（8 section, 4 條 verdict, Track A/B 拆分）
 - ✅ **PA W5 三 P1 specs predraft** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w5_three_p1_specs_predraft.md`（3 spec land + V089/V090 reserved + ~1460 LOC est）

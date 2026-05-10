@@ -2508,3 +2508,53 @@ PM 派 PA 預寫 W5 三 P1 ticket spec 省 PA D+1-3 spec phase；W5 sub-agent E1
 - AMD wording 起草必 cross-ref 既有 AMD（如 AMD-2026-05-09-03 §2.2/§2.4/§4.2/§4.5）— 避免 spec drift；新 AMD 編號預留（AMD-2026-05-10-05 / -06）
 - healthcheck `[63]` `[64]` 編號續 `[58]`-`[62]`（W6/W-AUDIT-9 已用），與既有 family `checks_governance.py` 同 module
 - frozen cells unblock 是治理空白：當前 17 cells 無自動 reverse 機制 → selection-bias 累積；此 spec 是 first formal unblock 治理框架
+
+## 2026-05-10 W1 spec v1 → v1.1 BB WS-first revision (採納 HIGH push back)
+
+**Trigger**: BB W1+W2 rate budget review report `2026-05-10--w1_w2_bybit_v5_rate_budget_review.md` §6 HIGH push back — v1 spec 100 req/min REST polling 是 over-engineering，`tickers` WS topic 已 broadcast `fundingRate` + `openInterest`。
+
+**v1.1 design**：
+- Producer 從 Python writer 切換到 **Rust `panel_aggregator/{funding_curve,oi_delta}.rs`** 訂閱既有 WS `tickers.{sym}` topic broadcast (`enable_extended_ws=true` 預設 25 sym subscribed)
+- WS event_rx 從 mpsc → broadcast::channel(2048) migration（critical gating dependency by E1-α leader）
+- Funding ongoing **0 req/s** (WS broadcast)，OI ongoing **0 req/s** (WS broadcast)，cold-start 僅 75 req batch (OI history) once at startup
+- WS reconnect gap 由既有 RE-2 supervisor (main_ws.rs:75-131) 自動重連 + cold-start backfill 重跑（aggregator broadcast Lagged event 觸發）
+- Aggregator 60s flush 視窗：buffer Vec → 雙寫 PG (audit/training) + Rust slot (hot path)；`panel_puller.rs` 不建（v1 設計刪除）
+- bb_breakout consumer 邏輯**完全不變** with producer side 切換無關
+- 5s WS-tick freshness threshold（嚴於 v1 30s 因 WS push-based）；PG-side healthcheck [57]/[58] 30s WARN / 300s FAIL 寬鬆閾值
+
+**Source code 取證**：
+- `srv/rust/openclaw_engine/src/main_ws.rs:47-66` — `enable_extended_ws=true` 預設加 tickers topic
+- `srv/rust/openclaw_engine/src/multi_interval_topics.rs:128-147` — `full_subscription_list()` 含 `ticker_topic()`
+- `srv/rust/openclaw_engine/src/ws_client/parsers.rs:225-263` — `parse_ticker_item()` 已 extract `fundingRate` + `openInterest`
+- `srv/rust/openclaw_engine/src/ws_client/dispatch.rs:111-114` — `topic.starts_with("tickers.")` route to parser
+- `srv/rust/openclaw_types/src/price.rs:73,84` — `PriceEvent.funding_rate / open_interest` Option<f64> 已存在
+- **`PriceEvent.next_funding_ms` 缺，W1 IMPL E1-α 必加 field + parsers.rs 加 `nextFundingTime` extract**
+
+**E1 sub-agent dispatch sequence (v1.1 critical change)**：
+- E1-α (B-1) leader：先 land event channel mpsc → broadcast migration + funding_curve aggregator + V085 + slot + dispatch wire + healthcheck [57]
+- E1-β (B-2)：D+3 等 E1-α push 後 rebase 接 broadcast::Receiver pattern + oi_delta aggregator + V087 + slot + dispatch wire + cold-start REST backfill helper + healthcheck [58]
+- E1-γ (B-4)：parallel with E1-β（B-4 邏輯 producer-side agnostic）+ V086 + bb_breakout consume + fail-closed evaluation_outcome
+- **E1-α gating critical**：mpsc → broadcast migration 影響全 PriceEvent caller（dispatch / paper_state / scanner / tap），E1-α 必須先 grep 全 caller 寫 migration 表，E2 必驗 migration 完整性
+
+**E2 重點審查 3 點 (v1.1)**：
+1. Event channel mpsc → broadcast migration 完整性 — 全 caller 是否適配 broadcast::Receiver + Lagged variant handling（漏接 = 策略 silent starve）
+2. V085 / V087 schema 對齊 trait struct field + V086 V082 enum 加 `oi_panel_unavailable` value via Guard A IF NOT EXISTS
+3. bb_breakout fail-closed 路徑無 silent fallback to internal `oi_buffer` + Aggregator broadcast Lagged 走 WARN log + 計數 + 下次 flush slot 寫 None
+
+**新 risk (v1.1)**：
+- Event channel migration silent break：**極高**（E1-α IMPL 必先寫 caller migration 表 + E2 verify）
+- WS reconnect gap stale：中（既有 RE-2 supervisor 60s exponential backoff cap，gap 預期 < 60s）
+- OI WS rolling delta vs Bybit 5m close-bar 偏差 > ±0.5%：中（W3 Stage 2 evidence 監測，超開 P2 + 啟用 5min REST baseline 加固）
+
+**16 原則 + DOC-08 §12 + 硬邊界 5 項**：v1.1 全 0 觸碰（producer side 切換為純 read-only WS broadcast subscribe + PG write，不動 lease/auth/SM-04/live boundary/IntentProcessor 寫入路徑）
+
+**D+1 sign-off 預期**：PA + BB joint sign-off 直接收（無需 D+1 PA edit + BB integrate 再走一輪）。PM 把 spec v1.1 整合進 dispatch v3.6 §3.1 W1 update（producer side 從 Python writer 改 Rust aggregator + B-3 status DONE + sub-agent dispatch sequence v1.1 update）→ D+2 dispatch W1 IMPL E1-α leader。
+
+**派生教訓**：
+- BB push back 採納 pattern：BB 是 Bybit 立場 push back 設計，看似 over-engineering 但 BB 從 rate budget + WS broadcast 既有資源 + 架構一致性三角度正當化 — **HIGH 級 push back 採納省下 100 req/min 永久成本 + lateny 從 60s grain → 即時**
+- WS-first vs REST-first 設計選擇：當 WS topic 已 broadcast 所需 field 且 connection 已預設訂閱 → WS-first 永遠優於 REST polling（zero ongoing cost + 即時 + 既有 connection reuse）
+- Producer side 切換不影響 consumer：bb_breakout consumer 邏輯與 producer 是 Python writer / Rust aggregator / WS push 完全 decoupled — 設計 boundary 清晰
+- Sub-agent sequential gating：mpsc → broadcast 這類 channel migration 類型 IMPL 必有 leader 先 land + 後續 rebase 才安全並行，不可 3 sub-agent 同時改 main.rs
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w1_spec_v1_1_bb_ws_first_revision.md`
+
