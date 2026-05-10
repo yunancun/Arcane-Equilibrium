@@ -259,6 +259,27 @@ pub(super) fn handle_pending_registration(
             );
         }
         state.pending_orders.insert(po.order_link_id.clone(), po);
+    } else if let Some(PendingOrderEvent::ReleaseDecisionLease {
+        order_link_id,
+        decision_lease_id,
+        outcome,
+        reason,
+        ts_ms,
+    }) = reg
+    {
+        tracing::info!(
+            order_link_id = %order_link_id,
+            lease_id = decision_lease_id.as_deref().unwrap_or(""),
+            outcome = ?outcome,
+            reason = %reason,
+            ts_ms = ts_ms,
+            "decision lease terminal event received / 收到決策租約終態事件"
+        );
+        pipeline.release_decision_lease(
+            decision_lease_id.as_deref(),
+            outcome,
+            "event_consumer_pending_order",
+        );
     } else if let Some(PendingOrderEvent::DispatchFailed {
         order_link_id,
         symbol,

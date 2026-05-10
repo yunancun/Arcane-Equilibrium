@@ -22,6 +22,7 @@ use std::ops::ControlFlow;
 use std::time::Instant;
 
 use openclaw_core::alpha_surface::AlphaSurface;
+use openclaw_core::governance_core::LeaseOutcome;
 use openclaw_core::signals::Signal;
 use tracing::{info, warn};
 
@@ -31,6 +32,7 @@ use super::super::on_tick_helpers::{
     persist_verdict, push_capped, push_display_intent, scanner_legacy_new_open_block_reason,
     IntentScannerContext, ScannerGateAudit,
 };
+use super::super::pipeline_helpers::release_decision_lease_for_governance;
 use super::super::*;
 
 fn execution_reference(
@@ -649,6 +651,7 @@ impl TickPipeline {
                                 } else {
                                     None
                                 };
+                                let decision_lease_id = gate.lease_id.clone();
                                 if let Some(ref tx) = self.order_dispatch_tx {
                                     // F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1
                                     // audit (2026-04-26): `event.last_price`
@@ -684,7 +687,8 @@ impl TickPipeline {
                                         best_ask,
                                         event.last_price,
                                     );
-                                    let _ = tx.send(OrderDispatchRequest {
+                                    let order_link_id_for_log = order_link_id.clone();
+                                    let send_result = tx.send(OrderDispatchRequest {
                                         symbol: intent.symbol.clone(),
                                         is_long: intent.is_long,
                                         qty: final_qty,
@@ -693,6 +697,7 @@ impl TickPipeline {
                                         paper_fill_ts: event.ts_ms,
                                         is_close: is_reducing_order,
                                         order_link_id,
+                                        decision_lease_id: decision_lease_id.clone(),
                                         is_primary: true,
                                         stop_loss: broker_sl,
                                         take_profit: None,
@@ -715,15 +720,46 @@ impl TickPipeline {
                                         reference_ts_ms: reference_price.map(|_| event.ts_ms),
                                         reference_source,
                                     });
-                                    // FUP-RACE: proactively mark true opens only.
-                                    // Reducing strategy flips are reduce_only close orders
-                                    // and must not insert an opposite-side mirror.
-                                    if !is_reducing_order {
-                                        self.paper_state.proactive_mirror_insert(
-                                            &intent.symbol,
-                                            intent.is_long,
-                                        );
+                                    match send_result {
+                                        Ok(()) => {
+                                            // FUP-RACE: proactively mark true opens only.
+                                            // Reducing strategy flips are reduce_only close orders
+                                            // and must not insert an opposite-side mirror.
+                                            if !is_reducing_order {
+                                                self.paper_state.proactive_mirror_insert(
+                                                    &intent.symbol,
+                                                    intent.is_long,
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                symbol = %intent.symbol,
+                                                order_link_id = %order_link_id_for_log,
+                                                error = %e,
+                                                "order dispatch channel closed — releasing decision lease as failed \
+                                                 / 訂單派發 channel 已關閉，決策租約標記失敗"
+                                            );
+                                            release_decision_lease_for_governance(
+                                                &self.governance,
+                                                decision_lease_id.as_deref(),
+                                                LeaseOutcome::Failed,
+                                                "exchange_dispatch_channel_closed",
+                                            );
+                                        }
                                     }
+                                } else {
+                                    warn!(
+                                        symbol = %intent.symbol,
+                                        "exchange gate approved but order dispatch channel is unavailable — releasing decision lease as failed \
+                                         / exchange gate 已批准但訂單派發 channel 不可用，決策租約標記失敗"
+                                    );
+                                    release_decision_lease_for_governance(
+                                        &self.governance,
+                                        decision_lease_id.as_deref(),
+                                        LeaseOutcome::Failed,
+                                        "exchange_dispatch_channel_missing",
+                                    );
                                 }
                             } else if let Some(ref reason) = gate.rejected_reason {
                                 strategy.on_rejection(intent, reason);
@@ -875,6 +911,12 @@ impl TickPipeline {
                                 // 自然跳過 apply_fill 路徑。
                                 if let Some(draft) = result.resting_order.clone() {
                                     self.paper_state.enqueue_resting_limit_order(draft);
+                                    release_decision_lease_for_governance(
+                                        &self.governance,
+                                        result.lease_id.as_deref(),
+                                        LeaseOutcome::Consumed,
+                                        "paper_resting_order_enqueued",
+                                    );
                                     continue;
                                 }
 
@@ -920,6 +962,12 @@ impl TickPipeline {
                                     // 防護：跳過零數量成交（合約精度取整可能降為 0）
                                     if fill.fill_qty <= 0.0 {
                                         warn!(symbol = %intent.symbol, "paper fill skipped: qty=0 after rounding");
+                                        release_decision_lease_for_governance(
+                                            &self.governance,
+                                            result.lease_id.as_deref(),
+                                            LeaseOutcome::Failed,
+                                            "paper_market_fill_qty_zero",
+                                        );
                                         continue;
                                     }
                                     strategy.on_fill(intent, &fill);
@@ -940,6 +988,12 @@ impl TickPipeline {
                                         fill.fee,
                                         event.ts_ms,
                                         &intent.strategy,
+                                    );
+                                    release_decision_lease_for_governance(
+                                        &self.governance,
+                                        result.lease_id.as_deref(),
+                                        LeaseOutcome::Consumed,
+                                        "paper_market_fill_applied",
                                     );
                                     // EDGE-P3-1 R2: stamp entry_context_id for fresh opens only.
                                     // Uses the same make_context_id signature used below for the
@@ -1096,6 +1150,7 @@ impl TickPipeline {
                                                 "sh_{}_{}",
                                                 event.ts_ms, self.exchange_seq
                                             ),
+                                            decision_lease_id: None,
                                             is_primary: false,
                                             stop_loss: None,
                                             take_profit: None,

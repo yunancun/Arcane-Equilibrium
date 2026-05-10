@@ -24,6 +24,7 @@ use crate::database::TradingMsg;
 use crate::event_consumer::types::{ExchangeEvent, PendingOrder, PendingOrderEvent};
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::{PipelineKind, TickPipeline};
+use openclaw_core::governance_core::{GovernanceProfile, LeaseId, LeaseOutcome};
 use tokio::sync::mpsc;
 
 use super::super::loop_handlers::handle_exchange_event;
@@ -298,6 +299,48 @@ fn test_dispatch_failed_removes_pending_order_and_emits_terminal_state() {
     assert_eq!(order_id, link_id);
     assert_eq!(to_status, "Rejected");
     assert_eq!(reason.as_deref(), Some("dispatch_structural: test"));
+}
+
+#[test]
+fn test_decision_lease_release_event_consumes_active_lease() {
+    let mut pipeline = make_test_pipeline();
+    pipeline
+        .governance
+        .grant_paper_authorization(None)
+        .expect("grant auth for production lease fixture");
+    let lease = pipeline
+        .governance
+        .acquire_lease(
+            "intent:test_decision_lease_release",
+            "TRADE_ENTRY",
+            60_000,
+            GovernanceProfile::Production,
+            "event_consumer_test",
+        )
+        .expect("active production lease");
+    let lease_id = match lease {
+        LeaseId::Active(id) => id,
+        LeaseId::Bypass => panic!("production lease fixture must be active"),
+    };
+    let mut state = make_loop_state();
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::ReleaseDecisionLease {
+            order_link_id: "oc_test_release".into(),
+            decision_lease_id: Some(lease_id.clone()),
+            outcome: LeaseOutcome::Consumed,
+            reason: "exchange_dispatch_accepted".into(),
+            ts_ms: 1_700_000_000_123,
+        }),
+        &mut pipeline,
+        &mut state,
+        None,
+    );
+
+    assert!(
+        pipeline.governance.get_lease_by_id(&lease_id).is_err(),
+        "Consumed decision lease must be pruned from reverse lookup"
+    );
 }
 
 #[tokio::test]

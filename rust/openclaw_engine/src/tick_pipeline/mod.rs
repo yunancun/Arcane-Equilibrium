@@ -619,6 +619,14 @@ pub struct OrderDispatchRequest {
     pub paper_fill_ts: u64,    // Intent generation timestamp (ms) / 意圖生成時間戳
     pub is_close: bool,        // true = closing position (reduce_only) / 平倉
     pub order_link_id: String, // EXT-1: Client order link ID / 客戶端連結 ID
+    /// AMD-2026-05-02-01 Track E E-3: decision lease handed off by the router
+    /// success path. Dispatch emits the terminal lease outcome once the
+    /// authorized action is accepted by, or rejected before reaching, the
+    /// exchange. `None` means router-gate flag off; `Some("bypass")` is the
+    /// non-Production no-op lease.
+    /// 決策租約 id；由 router 成功路徑交給 dispatch，下游在交易所接受或派發失敗
+    /// 時回寫終態。None 表示 gate flag off；"bypass" 為非 Production no-op。
+    pub decision_lease_id: Option<String>,
     /// EXT-1: true = exchange primary (track pending); false = paper shadow (fire-and-forget)
     pub is_primary: bool,
     pub stop_loss: Option<f64>,   // I-08: broker-side SL / 券商側止損

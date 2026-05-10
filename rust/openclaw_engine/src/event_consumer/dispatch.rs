@@ -12,7 +12,8 @@
 use super::types::{PendingOrder, PendingOrderEvent};
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient};
 use crate::instrument_info::InstrumentInfoCache;
-use crate::tick_pipeline::TickPipeline;
+use crate::tick_pipeline::{OrderDispatchRequest, TickPipeline};
+use openclaw_core::governance_core::LeaseOutcome;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -46,6 +47,32 @@ pub(super) const CLOSE_RETRY_DELAY_MS: [u64; 2] = [100, 400];
 /// Ensures "fast-exit" close retry budget is real wall-clock, not only sleep.
 /// 關倉單次派發硬逾時（毫秒），避免「快退場」只限制 sleep 而不限制請求等待。
 pub(super) const CLOSE_ATTEMPT_TIMEOUT_MS: u64 = 500;
+
+fn send_decision_lease_release(
+    pending_reg_tx: &mpsc::UnboundedSender<PendingOrderEvent>,
+    req: &OrderDispatchRequest,
+    outcome: LeaseOutcome,
+    reason: impl Into<String>,
+) {
+    if !req.is_primary || req.decision_lease_id.is_none() {
+        return;
+    }
+    if let Err(e) = pending_reg_tx.send(PendingOrderEvent::ReleaseDecisionLease {
+        order_link_id: req.order_link_id.clone(),
+        decision_lease_id: req.decision_lease_id.clone(),
+        outcome,
+        reason: reason.into(),
+        ts_ms: openclaw_core::now_ms(),
+    }) {
+        warn!(
+            order_link_id = %req.order_link_id,
+            outcome = ?outcome,
+            error = %e,
+            "decision lease release event dropped — ExpiryGuardian may need to sweep \
+             / 決策租約釋放事件丟失，可能需由 ExpiryGuardian 清理"
+        );
+    }
+}
 
 /// Classification of a dispatch error for retry decisioning.
 /// DISPATCH-RETRY-1 (2026-04-19) — distinguish transient network / rate-limit
@@ -386,6 +413,12 @@ pub(super) fn spawn_order_dispatch(
             let is_qty_zero_full_close = req.is_close && req.qty == 0.0;
             if req.qty < 0.0 || (req.qty == 0.0 && !is_qty_zero_full_close) {
                 warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
+                send_decision_lease_release(
+                    &pending_reg_tx,
+                    &req,
+                    LeaseOutcome::Failed,
+                    "dispatch_preflight_qty_zero",
+                );
                 continue;
             }
 
@@ -410,6 +443,12 @@ pub(super) fn spawn_order_dispatch(
                                 est_notional = est_notional,
                                 min_notional = spec.min_notional,
                                 "order dispatch skipped: notional below exchange minimum / 訂單跳過：名義值低於交易所最小值"
+                            );
+                            send_decision_lease_release(
+                                &pending_reg_tx,
+                                &req,
+                                LeaseOutcome::Failed,
+                                "dispatch_preflight_min_notional",
                             );
                             continue;
                         }
@@ -557,6 +596,12 @@ pub(super) fn spawn_order_dispatch(
                         attempts = attempts,
                         "order dispatched / 訂單已派發"
                     );
+                    send_decision_lease_release(
+                        &pending_reg_tx,
+                        &req,
+                        LeaseOutcome::Consumed,
+                        "exchange_dispatch_accepted",
+                    );
                 }
                 DispatchRetryResult::NoOp {
                     last_error,
@@ -578,6 +623,12 @@ pub(super) fn spawn_order_dispatch(
                         ret_msg = ret_msg_opt.as_deref(),
                         attempts = attempts,
                         "order dispatch noop / 訂單派發等效成功"
+                    );
+                    send_decision_lease_release(
+                        &pending_reg_tx,
+                        &req,
+                        LeaseOutcome::Consumed,
+                        "exchange_dispatch_noop_success",
                     );
                 }
                 DispatchRetryResult::Structural {
@@ -621,6 +672,12 @@ pub(super) fn spawn_order_dispatch(
                                  / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
                             );
                         }
+                        send_decision_lease_release(
+                            &pending_reg_tx,
+                            &req,
+                            LeaseOutcome::Failed,
+                            "exchange_dispatch_structural_failed",
+                        );
                     }
                 }
                 DispatchRetryResult::TransientExhausted {
@@ -665,6 +722,12 @@ pub(super) fn spawn_order_dispatch(
                                  / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
                             );
                         }
+                        send_decision_lease_release(
+                            &pending_reg_tx,
+                            &req,
+                            LeaseOutcome::Failed,
+                            "exchange_dispatch_transient_exhausted",
+                        );
                     }
                 }
             }
