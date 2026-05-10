@@ -589,7 +589,6 @@ def build_performance_metrics(
     tab 直接渲染此列表，讓 label、排序、tooltip 與 source 語義一致。
     """
     account = db_metrics.get("account_metrics") or {}
-    account_today = db_metrics.get("account_metrics_today") or {}
     account_24h = db_metrics.get("account_metrics_24h") or {}
     trade = db_metrics.get("trade_metrics") or {}
     edge = db_metrics.get("edge_metrics") or {}
@@ -630,8 +629,6 @@ def build_performance_metrics(
         _metric("attributed_trades_7d", "7D 已归因交易 / ATTRIBUTED TRADES",
                 "最近 7 天已通过 MLDE 归因链并带有净 bps 标签的交易数。", edge_count, "count", edge.get("metric_source")),
 
-        _metric("net_pnl_today", "今日净盈亏 / NET TODAY",
-                "今日（DB 当地日）后端按 realized_pnl - 手续费 + 资金费计算的净盈亏；不含 rolling 24h、session 累计或未实现盈亏。", account_today.get("net_pnl"), "money", "trading.fills + trading.funding_settlements", "pnl"),
         _metric("net_pnl_24h", "24H 净盈亏 / NET PNL",
                 "最近 24 小时后端按 realized_pnl - 手续费 + 资金费计算的净盈亏。", account_24h.get("net_pnl"), "money", "trading.fills + trading.funding_settlements", "pnl"),
         _metric("net_pnl_7d", "7D 净盈亏 / NET PNL",

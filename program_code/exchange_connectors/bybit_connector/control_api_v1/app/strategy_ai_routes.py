@@ -1154,6 +1154,18 @@ async def get_demo_fills(
         raise HTTPException(status_code=502, detail=f"Bybit fills fetch failed: {exc}")
 
 
+@phase2_router.get("/demo/pnl-series")
+async def get_demo_pnl_series(
+    range_key: str = Query("24h", alias="range"),
+    bucket_sec: int | None = Query(None, ge=60, le=86400),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Get Demo bucketed PnL series for GUI chart/table. / 獲取 Demo 分桶 PnL 序列。"""
+    from .pnl_series import fetch_pnl_series  # noqa: PLC0415
+
+    return _envelope(fetch_pnl_series(["demo"], range_key=range_key, bucket_sec=bucket_sec))
+
+
 @phase2_router.get("/demo/metrics")
 async def get_demo_metrics(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get DB-truth Demo performance metrics. / 獲取 DB 真實 Demo 績效指標。"""

@@ -53,9 +53,15 @@
     </div>
     <!-- PnL Trend Sparkline / 盈亏趋势图 -->
     <div style="margin-top:10px">
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
-        <span>累计收益趋势 / Cumulative PnL Trend</span>
-        <span style="color:var(--text-dim);font-size:9px">（最近 50 笔 Demo 成交 / last 50 Demo fills）</span>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span>累计收益时间序列 / Cumulative PnL Timeline <span id="demo-pnl-range-label" style="font-size:9px;color:var(--text-dim)"></span></span>
+        <div id="demo-pnl-range-controls" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          <button class="oc-btn" data-pnl-range="1h" onclick="setDemoPnlRange('1h')" style="font-size:10px;padding:2px 8px">1H</button>
+          <button class="oc-btn" data-pnl-range="6h" onclick="setDemoPnlRange('6h')" style="font-size:10px;padding:2px 8px">6H</button>
+          <button class="oc-btn" data-pnl-range="24h" onclick="setDemoPnlRange('24h')" style="font-size:10px;padding:2px 8px">24H</button>
+          <button class="oc-btn" data-pnl-range="7d" onclick="setDemoPnlRange('7d')" style="font-size:10px;padding:2px 8px">7D</button>
+          <button class="oc-btn" data-pnl-range="30d" onclick="setDemoPnlRange('30d')" style="font-size:10px;padding:2px 8px">30D</button>
+        </div>
       </div>
       <svg id="demo-pnl-sparkline" width="100%" height="120"
         style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
@@ -64,6 +70,12 @@
         <polyline id="demo-pnl-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
         <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="demo-pnl-label">no data</text>
       </svg>
+      <div class="oc-table-wrap" style="margin-top:8px;max-height:190px;overflow:auto">
+        <table class="oc-table">
+          <thead><tr><th>时间 / Time</th><th>成交</th><th>区间净 PnL</th><th>累计净 PnL</th><th>手续费</th></tr></thead>
+          <tbody id="demo-pnl-series-rows"><tr class="empty-row"><td colspan="5">loading...</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -228,6 +240,7 @@ try {
 } catch (e) {}
 
 let _demoFillsCache = []; // Cache recent aggregate fills for metrics/strategy mapping.
+let _demoPnlRange = '24h';
 const DEMO_FILL_PAGE_SIZE = 50;
 const DEMO_FILL_TABS = {
   aggregate: { label: '聚合 / Aggregate', side: '' },
@@ -373,6 +386,7 @@ async function loadDemoStatus() {
     loadPositions();
     loadDemoOrders();
     await loadDemoMetrics(balD.data);
+    await loadDemoPnlSeries();
     loadComparison();
     return;
   }
@@ -790,14 +804,12 @@ async function loadDemoFills() {
     _demoUpdateFillControls(payload, fills);
     if (!fills.length) {
       ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">暂无成交</td></tr>');
-      ocPnlTrend('demo-pnl-line', 'demo-pnl-label', [], 'demo-pnl-zero');
       return;
     }
     const html = _demoFillState.tab === 'profit'
       ? (_demoBuildProfitRows(fills).map(_demoProfitRow).join('') || '<tr class="empty-row"><td colspan="8">本页没有可关联收益</td></tr>')
       : fills.map(_demoFillRow).join('');
     ocSetHtml('demo-fills', html);
-    ocPnlTrend('demo-pnl-line', 'demo-pnl-label', fills, 'demo-pnl-zero');
   } catch (e) {
     _demoFillState.loading = false;
     _demoUpdateFillControls(null, []);
@@ -955,6 +967,26 @@ async function loadDemoMetrics(raw) {
     return;
   }
   ocSetHtml('demo-perf-metrics', ocRenderPerformanceMetrics(metrics));
+}
+
+function setDemoPnlRange(rangeKey) {
+  _demoPnlRange = rangeKey || '24h';
+  loadDemoPnlSeries();
+}
+
+async function loadDemoPnlSeries() {
+  ocSetPnlRangeButtons('demo-pnl-range-controls', _demoPnlRange);
+  ocSetText('demo-pnl-range-label', '(' + String(_demoPnlRange).toUpperCase() + ')');
+  try {
+    const d = await ocApi('/api/v1/strategy/demo/pnl-series?range=' + encodeURIComponent(_demoPnlRange));
+    const payload = d && d.data;
+    const points = (payload && Array.isArray(payload.points)) ? payload.points : [];
+    ocPnlSeriesTrend('demo-pnl-line', 'demo-pnl-label', points, 'demo-pnl-zero', payload || { range: _demoPnlRange });
+    ocSetHtml('demo-pnl-series-rows', ocPnlSeriesTableRows(points));
+  } catch (_) {
+    ocPnlSeriesTrend('demo-pnl-line', 'demo-pnl-label', [], 'demo-pnl-zero', null);
+    ocSetHtml('demo-pnl-series-rows', '<tr class="empty-row"><td colspan="5">无法加载 PnL 序列</td></tr>');
+  }
 }
 
 // ─── Demo Session Controls / Demo 会话控制 ──────────────────────

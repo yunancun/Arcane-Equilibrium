@@ -215,10 +215,10 @@
         <div class="mc-sub" id="s-live-balance-detail"></div>
       </div>
       <div class="mc" id="live-pnl-section" style="opacity:0.5">
-        <!-- Sidebar and Live tab both consume backend metric net_pnl_today.
+        <!-- Sidebar and Live tab both consume account_metrics_today.
              This is DB-local-day realized_pnl - fees + funding, not position
              cumRealisedPnl and not session/lifetime total fees.
-             側欄與 Live tab 統一讀後端 net_pnl_today：DB 當地日
+             側欄與 Live tab 統一讀 account_metrics_today：DB 當地日
              realized_pnl - 手續費 + funding；不讀持倉 cumRealisedPnl，也不混入
              session/lifetime total fees。 -->
         <div class="mc-label"><abbr title="今日淨 PnL = 今日 realized_pnl − 手續費 + funding；與 Live Tab 口徑一致 / Net Today = today realized_pnl - fees + funding">Net Today · 今日淨</abbr></div>
@@ -770,7 +770,7 @@ async function refreshSidebar() {
   // F5/A1+A2 — fetch session status + balance + metrics in one go.
   //   session/status → mode label + actual_endpoint (LiveDemo / Mainnet / unconfigured)
   //   balance        → equity / available
-  //   metrics        → backend net_pnl_today DB-local-day identity
+  //   metrics        → account_metrics_today DB-local-day identity
   // F5/A1+A2：一次抓 status + balance + metrics。前者給 mode + endpoint 標籤，
   // 後者算與 tab-live「今日淨 PnL」一致的口徑。
   let sessionData = null, balData = null, metricsData = null;
@@ -842,10 +842,6 @@ async function refreshSidebar() {
       document.getElementById('s-live-balance-detail').textContent =
         available > 0 ? 'Available: ' + ocBalance(available, 2) : (b.source || 'connecting...');
 
-      const perf = (metricsData && metricsData.performance_metrics)
-        || (metricsData && metricsData.db_true_metrics && metricsData.db_true_metrics.performance_metrics)
-        || [];
-      const netMetric = Array.isArray(perf) ? perf.find(m => m && m.key === 'net_pnl_today') : null;
       const today = (metricsData && metricsData.db_true_metrics && metricsData.db_true_metrics.account_metrics_today)
         || (metricsData && metricsData.account_metrics_today)
         || {};
@@ -853,8 +849,7 @@ async function refreshSidebar() {
       const fees = Number(today.total_fees);
       const funding = Number(today.funding_pnl);
       const fills = Number(today.total_fills);
-      const netMetricValue = netMetric ? Number(netMetric.value) : NaN;
-      const netPnl = Number.isFinite(netMetricValue) ? netMetricValue : Number(today.net_pnl);
+      const netPnl = Number(today.net_pnl);
       const pnlEl = document.getElementById('s-live-pnl');
       pnlEl.textContent = Number.isFinite(netPnl) && netPnl !== 0 ? ocMoney(netPnl) : '--';
       pnlEl.className = 'mc-val' + (netPnl > 0 ? ' green' : netPnl < 0 ? ' red' : '');

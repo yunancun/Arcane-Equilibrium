@@ -375,9 +375,15 @@ html, body {
     </div>
     <!-- PnL Trend Sparkline / 盈虧趨勢圖 -->
     <div style="margin-top:10px">
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
-        <span>累計收益趨勢 / Cumulative PnL Trend</span>
-        <span style="color:var(--text-dim);font-size:9px">（最近 50 筆 Live 成交 / last 50 Live fills）</span>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span>累計收益時間序列 / Cumulative PnL Timeline <span id="live-pnl-range-label" style="font-size:9px;color:var(--text-dim)"></span></span>
+        <div id="live-pnl-range-controls" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          <button class="oc-btn" data-pnl-range="1h" onclick="setLivePnlRange('1h')" style="font-size:10px;padding:2px 8px">1H</button>
+          <button class="oc-btn" data-pnl-range="6h" onclick="setLivePnlRange('6h')" style="font-size:10px;padding:2px 8px">6H</button>
+          <button class="oc-btn" data-pnl-range="24h" onclick="setLivePnlRange('24h')" style="font-size:10px;padding:2px 8px">24H</button>
+          <button class="oc-btn" data-pnl-range="7d" onclick="setLivePnlRange('7d')" style="font-size:10px;padding:2px 8px">7D</button>
+          <button class="oc-btn" data-pnl-range="30d" onclick="setLivePnlRange('30d')" style="font-size:10px;padding:2px 8px">30D</button>
+        </div>
       </div>
       <svg id="live-pnl-sparkline" width="100%" height="120"
         style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
@@ -386,6 +392,12 @@ html, body {
         <polyline id="live-pnl-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
         <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="live-pnl-label">no data</text>
       </svg>
+      <div style="overflow:auto;max-height:190px;margin-top:8px">
+        <table class="live-table" style="margin-bottom:0">
+          <thead><tr><th>時間 / Time</th><th>成交</th><th>區間淨 PnL</th><th>累計淨 PnL</th><th>手續費</th></tr></thead>
+          <tbody id="live-pnl-series-rows"><tr><td colspan="5" style="color:var(--text-dim);text-align:center;padding:12px">loading...</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -587,6 +599,7 @@ const TRUST_TIER_COLORS = {
   2: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
   3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
 };
+let _livePnlRange = '24h';
 
 /**
  * Load and render Earned-Trust tier status bars (read-only, no renew controls).
@@ -940,11 +953,7 @@ async function refreshPage() {
   loadDashboardData();
   loadLiveMetrics();
   loadPreLiveEdgeGates();
-  // Always keep the PnL trend chart fresh (cheap Bybit API call; fills table
-  // itself is still lazy-rendered by the collapsible section's toggleFills()).
-  // 始終保持 PnL 趨勢圖即時（Bybit API 呼叫成本低；下方可折疊的成交表仍由
-  // toggleFills() 懶加載）。
-  loadFills();
+  loadLivePnlSeries();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1124,8 +1133,7 @@ function _applyLiveTodayPnl(metricsData) {
   const fees = Number(today.total_fees);
   const funding = Number(today.funding_pnl);
   const fills = Number(today.total_fills);
-  const netFromMetric = _liveMetricValue(metricsData, 'net_pnl_today');
-  const net = Number.isFinite(netFromMetric) ? netFromMetric : Number(today.net_pnl);
+  const net = Number(today.net_pnl);
 
   realizedEl.textContent = _formatSignedMoneyValue(gross);
   realizedEl.className = 'live-metric-val' + (gross > 0 ? ' pos' : gross < 0 ? ' neg' : ' neutral');
@@ -1599,6 +1607,32 @@ async function loadLiveMetrics() {
   ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無後端性能指標</div>');
 }
 
+function setLivePnlRange(rangeKey) {
+  _livePnlRange = rangeKey || '24h';
+  loadLivePnlSeries();
+}
+
+async function loadLivePnlSeries() {
+  ocSetPnlRangeButtons('live-pnl-range-controls', _livePnlRange);
+  ocSetText('live-pnl-range-label', '(' + String(_livePnlRange).toUpperCase() + ')');
+  try {
+    const d = await ocApi('/api/v1/live/pnl-series?range=' + encodeURIComponent(_livePnlRange));
+    const payload = d && d.data;
+    if (_isPhantomViewError(payload)) {
+      const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
+      ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
+      ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:#f87171;text-align:center;padding:12px">⚠ ' + msg + '</td></tr>');
+      return;
+    }
+    const points = (payload && Array.isArray(payload.points)) ? payload.points : [];
+    ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', points, 'live-pnl-zero', payload || { range: _livePnlRange });
+    ocSetHtml('live-pnl-series-rows', ocPnlSeriesTableRows(points));
+  } catch (_) {
+    ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
+    ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:var(--text-dim);text-align:center;padding:12px">無法加載 PnL 序列</td></tr>');
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Pre-Live edge gates / Pre-Live 邊際 gate
 // ═══════════════════════════════════════════════════════════════
@@ -1940,7 +1974,6 @@ async function loadFills() {
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
       body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
       if (badge) badge.textContent = '';
-      ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
       _fillsLoaded = false;
       _liveFillState.loading = false;
       _liveUpdateFillControls(payload, []);
@@ -1953,13 +1986,11 @@ async function loadFills() {
     if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
     if (arr.length === 0) {
       body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
-      ocPnlTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero');
       return;
     }
     body.innerHTML = _liveFillState.tab === 'profit'
       ? (_liveBuildProfitRows(arr).map(_liveProfitRow).join('') || '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">本页没有可关联收益</td></tr>')
       : arr.map(_liveFillRow).join('');
-    ocPnlTrend('live-pnl-line', 'live-pnl-label', arr, 'live-pnl-zero');
   } catch(e) {
     _liveFillState.loading = false;
     _liveUpdateFillControls(null, []);
