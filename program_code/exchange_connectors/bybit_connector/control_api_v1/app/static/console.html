@@ -215,13 +215,13 @@
         <div class="mc-sub" id="s-live-balance-detail"></div>
       </div>
       <div class="mc" id="live-pnl-section" style="opacity:0.5">
-        <!-- F5/A2 — sidebar uses Live metrics endpoint (unrealized + realized − fees)
-                     same identity as tab-live "今日淨 PnL"; NO LONGER unrealized-only
-                     to prevent the inconsistent definition that confused operators.
-             F5/A2 — 側欄改用 /api/v1/live/metrics 與 tab-live「今日淨 PnL」對齊：
-                     unrealized + realized − fees。原本只顯示 unrealized 的定義不一致
-                     會讓 operator 一看側欄一看主面板對不上號。 -->
-        <div class="mc-label"><abbr title="淨 PnL = 未實現 + 已實現 − 手續費，與 Live Tab『今日淨 PnL』口徑一致 / Net PnL = unrealized + realized − fees, aligned with Live Tab definition">Net PnL · 淨</abbr></div>
+        <!-- Sidebar and Live tab both consume backend metric net_pnl_today.
+             This is DB-local-day realized_pnl - fees + funding, not position
+             cumRealisedPnl and not session/lifetime total fees.
+             側欄與 Live tab 統一讀後端 net_pnl_today：DB 當地日
+             realized_pnl - 手續費 + funding；不讀持倉 cumRealisedPnl，也不混入
+             session/lifetime total fees。 -->
+        <div class="mc-label"><abbr title="今日淨 PnL = 今日 realized_pnl − 手續費 + funding；與 Live Tab 口徑一致 / Net Today = today realized_pnl - fees + funding">Net Today · 今日淨</abbr></div>
         <div class="mc-val" id="s-live-pnl">--</div>
         <div class="mc-sub" id="s-live-pnl-detail"></div>
       </div>
@@ -769,8 +769,8 @@ async function refreshSidebar() {
 
   // F5/A1+A2 — fetch session status + balance + metrics in one go.
   //   session/status → mode label + actual_endpoint (LiveDemo / Mainnet / unconfigured)
-  //   balance        → equity / available / engine_total_fees
-  //   metrics        → realized_pnl identity (unrealized + realized − fees)
+  //   balance        → equity / available
+  //   metrics        → backend net_pnl_today DB-local-day identity
   // F5/A1+A2：一次抓 status + balance + metrics。前者給 mode + endpoint 標籤，
   // 後者算與 tab-live「今日淨 PnL」一致的口徑。
   let sessionData = null, balData = null, metricsData = null;
@@ -837,32 +837,33 @@ async function refreshSidebar() {
       const b = balData;
       const equity = parseFloat(b.total_equity || b.totalEquity || b.equity || 0);
       const available = parseFloat(b.total_available_balance || b.totalAvailableBalance || b.available_balance || 0);
-      const unrealized = parseFloat(b.total_unrealised_pnl || b.totalPerpUPL || b.unrealized_pnl || 0);
-      const engineFees = parseFloat(b.engine_total_fees || 0) || 0;
 
       document.getElementById('s-live-balance').textContent = equity > 0 ? ocBalance(equity, 2) : '--';
       document.getElementById('s-live-balance-detail').textContent =
         available > 0 ? 'Available: ' + ocBalance(available, 2) : (b.source || 'connecting...');
 
-      // F5/A2 — Net PnL = unrealized + realized − fees (same identity as tab-live)
-      // F5/A2 — Net PnL = 未實現 + 已實現 − 手續費（與 Live Tab 一致）
-      let realized = 0;
-      if (metricsData && metricsData.error !== 'live_slot_not_configured') {
-        const tm = (metricsData.trade_metrics) || {};
-        const dm = (metricsData.dollar_metrics) || {};
-        realized = parseFloat(
-          dm.total_realized_pnl ?? tm.total_realized_pnl ?? metricsData.realized_pnl ?? 0
-        ) || 0;
-      }
-      const netPnl = unrealized + realized - engineFees;
+      const perf = (metricsData && metricsData.performance_metrics)
+        || (metricsData && metricsData.db_true_metrics && metricsData.db_true_metrics.performance_metrics)
+        || [];
+      const netMetric = Array.isArray(perf) ? perf.find(m => m && m.key === 'net_pnl_today') : null;
+      const today = (metricsData && metricsData.db_true_metrics && metricsData.db_true_metrics.account_metrics_today)
+        || (metricsData && metricsData.account_metrics_today)
+        || {};
+      const realizedGross = Number(today.gross_pnl);
+      const fees = Number(today.total_fees);
+      const funding = Number(today.funding_pnl);
+      const fills = Number(today.total_fills);
+      const netMetricValue = netMetric ? Number(netMetric.value) : NaN;
+      const netPnl = Number.isFinite(netMetricValue) ? netMetricValue : Number(today.net_pnl);
       const pnlEl = document.getElementById('s-live-pnl');
-      pnlEl.textContent = netPnl !== 0 ? ocMoney(netPnl) : '--';
+      pnlEl.textContent = Number.isFinite(netPnl) && netPnl !== 0 ? ocMoney(netPnl) : '--';
       pnlEl.className = 'mc-val' + (netPnl > 0 ? ' green' : netPnl < 0 ? ' red' : '');
-      // Show breakdown so operator sees why net differs from unrealized alone.
-      // 顯示拆解，讓 operator 一看就懂淨 PnL 與單獨 UPL 的差異來源。
-      document.getElementById('s-live-pnl-detail').textContent =
-        'UPL ' + unrealized.toFixed(2) + ' + Realized ' + realized.toFixed(2) +
-        ' − Fees ' + engineFees.toFixed(2);
+      const detailParts = [];
+      if (Number.isFinite(realizedGross)) detailParts.push('Realized ' + realizedGross.toFixed(2));
+      if (Number.isFinite(fees)) detailParts.push('Fees ' + fees.toFixed(4));
+      if (Number.isFinite(funding) && funding !== 0) detailParts.push('Funding ' + funding.toFixed(4));
+      if (Number.isFinite(fills)) detailParts.push('fills ' + String(Math.round(fills)));
+      document.getElementById('s-live-pnl-detail').textContent = detailParts.join(' · ');
     } else {
       document.getElementById('s-live-balance').textContent = '--';
       document.getElementById('s-live-balance-detail').textContent = 'connecting...';

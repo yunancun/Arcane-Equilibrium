@@ -50,6 +50,7 @@ def fetch_db_true_metrics(
             return _empty(window_days, "pg_unavailable")
         with conn.cursor() as cur:
             account = _fetch_account_metrics(cur, modes, window_days)
+            account_today = _fetch_account_metrics_today(cur, modes)
             account_24h = _fetch_account_metrics(cur, modes, 1)
             trade = _fetch_close_trade_metrics(cur, modes, window_days)
             edge = _fetch_mlde_edge_metrics(cur, edge_modes, window_days)
@@ -61,6 +62,7 @@ def fetch_db_true_metrics(
             "engine_modes": modes,
             "edge_engine_modes": edge_modes,
             "account_metrics": account,
+            "account_metrics_today": account_today,
             "account_metrics_24h": account_24h,
             "trade_metrics": trade,
             "edge_metrics": edge,
@@ -101,6 +103,7 @@ def _empty(window_days: int, reason: str) -> dict[str, Any]:
         "window_days": window_days,
         "engine_modes": [],
         "account_metrics": _zero_account(),
+        "account_metrics_today": _zero_account(),
         "account_metrics_24h": _zero_account(),
         "trade_metrics": _zero_trade("trading.fills_close_realized", "usdt"),
         "edge_metrics": _zero_trade("learning.mlde_edge_training_rows", "bps"),
@@ -124,6 +127,15 @@ def _window_clause(alias: str = "") -> str:
     """
     prefix = f"{alias}." if alias else ""
     return f" AND {prefix}ts > now() - (%s::int || ' days')::interval "
+
+
+def _today_clause(alias: str = "") -> str:
+    """Return the DB-session local-day predicate for "today" metrics.
+
+    回傳 DB session 當地日的今日 predicate；GUI 的「今日」值不得使用 rolling 24h。
+    """
+    prefix = f"{alias}." if alias else ""
+    return f" AND {prefix}ts >= date_trunc('day', now()) "
 
 
 def _fetch_account_metrics(cur: Any, modes: list[str], window_days: int) -> dict[str, Any]:
@@ -166,6 +178,45 @@ def _fetch_account_metrics(cur: Any, modes: list[str], window_days: int) -> dict
     }
 
 
+def _fetch_account_metrics_today(cur: Any, modes: list[str]) -> dict[str, Any]:
+    """Fetch money-denominated aggregates for the current DB local day.
+
+    讀取 DB 當地日的金額口徑彙總；用於 GUI「今日」卡片，避免混入 24h 或 session 累計。
+    """
+    mode_sql = _placeholders(len(modes))
+    cur.execute(
+        f"""
+        SELECT
+            COUNT(*)::int,
+            COALESCE(SUM(realized_pnl), 0)::float8,
+            COALESCE(SUM(fee), 0)::float8,
+            COALESCE(AVG(NULLIF(fee_rate, 0)), 0)::float8,
+            MIN(ts),
+            MAX(ts)
+        FROM trading.fills
+        WHERE engine_mode IN ({mode_sql})
+        {_today_clause()}
+        """,
+        tuple(modes),
+    )
+    row = cur.fetchone() or (0, 0.0, 0.0, 0.0, None, None)
+    funding = _fetch_funding_pnl_today(cur, modes)
+    total_fills = _as_int(row[0])
+    gross_pnl = _as_float(row[1])
+    fees = _as_float(row[2])
+    net_pnl = gross_pnl - fees + funding
+    return {
+        "total_fills": total_fills,
+        "gross_pnl": round(gross_pnl, 6),
+        "total_fees": round(fees, 6),
+        "funding_pnl": round(funding, 6),
+        "net_pnl": round(net_pnl, 6),
+        "avg_fee_rate": round(_as_float(row[3]), 8),
+        "first_ts": row[4].isoformat() if row[4] is not None and hasattr(row[4], "isoformat") else None,
+        "last_ts": row[5].isoformat() if row[5] is not None and hasattr(row[5], "isoformat") else None,
+    }
+
+
 def _fetch_funding_pnl(cur: Any, modes: list[str], window_days: int) -> float:
     """Fetch funding PnL when the settlements table exists.
 
@@ -185,6 +236,32 @@ def _fetch_funding_pnl(cur: Any, modes: list[str], window_days: int) -> float:
             {_window_clause()}
             """,
             tuple([*modes, window_days]),
+        )
+        row = cur.fetchone()
+        return _as_float(row[0]) if row else 0.0
+    except Exception:
+        return 0.0
+
+
+def _fetch_funding_pnl_today(cur: Any, modes: list[str]) -> float:
+    """Fetch today's funding PnL when the settlements table exists.
+
+    讀取今日 funding PnL；缺表或查詢失敗時 fail-soft 為 0。
+    """
+    try:
+        cur.execute("SELECT to_regclass('trading.funding_settlements') IS NOT NULL")
+        exists = cur.fetchone()
+        if not exists or not exists[0]:
+            return 0.0
+        mode_sql = _placeholders(len(modes))
+        cur.execute(
+            f"""
+            SELECT COALESCE(SUM(amount), 0)::float8
+            FROM trading.funding_settlements
+            WHERE engine_mode IN ({mode_sql})
+            {_today_clause()}
+            """,
+            tuple(modes),
         )
         row = cur.fetchone()
         return _as_float(row[0]) if row else 0.0
@@ -512,6 +589,7 @@ def build_performance_metrics(
     tab 直接渲染此列表，讓 label、排序、tooltip 與 source 語義一致。
     """
     account = db_metrics.get("account_metrics") or {}
+    account_today = db_metrics.get("account_metrics_today") or {}
     account_24h = db_metrics.get("account_metrics_24h") or {}
     trade = db_metrics.get("trade_metrics") or {}
     edge = db_metrics.get("edge_metrics") or {}
@@ -552,6 +630,8 @@ def build_performance_metrics(
         _metric("attributed_trades_7d", "7D 已归因交易 / ATTRIBUTED TRADES",
                 "最近 7 天已通过 MLDE 归因链并带有净 bps 标签的交易数。", edge_count, "count", edge.get("metric_source")),
 
+        _metric("net_pnl_today", "今日净盈亏 / NET TODAY",
+                "今日（DB 当地日）后端按 realized_pnl - 手续费 + 资金费计算的净盈亏；不含 rolling 24h、session 累计或未实现盈亏。", account_today.get("net_pnl"), "money", "trading.fills + trading.funding_settlements", "pnl"),
         _metric("net_pnl_24h", "24H 净盈亏 / NET PNL",
                 "最近 24 小时后端按 realized_pnl - 手续费 + 资金费计算的净盈亏。", account_24h.get("net_pnl"), "money", "trading.fills + trading.funding_settlements", "pnl"),
         _metric("net_pnl_7d", "7D 净盈亏 / NET PNL",
