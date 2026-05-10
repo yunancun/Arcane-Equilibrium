@@ -264,3 +264,24 @@ _Last updated: 2026-04-24_
 1. CLAUDE.md §七 V055 mandate is correct: any V### with PG reflection / CHECK constraint / UDF semantic MUST be empirically Linux PG verified, not Mac mock pytest. Today's V083/V084 dry-run took 12 commands + 6 logs; the equivalent Mac static-parse review would have missed the sqlx checksum drift, the hypertable chunk-multiplication artifact, and the boundary case empirical reject behavior.
 2. Idempotent migrations should NOTICE-skip not RAISE — V083/V084 design is correct; first/second apply identical output is the gold standard.
 3. CHECK constraint NOT VALID is exactly right for forward-only enforcement when historical has known violations — confirmed empirically with Case 3 reject.
+
+---
+## 2026-05-10 — W-AUDIT-4b chain integrity historical replay
+
+**Trigger**: HIGH-5 12h watch metric 1 補強 evidence (Sprint N+0 closure 後)
+
+**Key findings**:
+1. fills.entry_context_id → decision_features.context_id chain **真實 100%** (pre+post V083, 0 orphan, n=331 fills_w_entry pre + 10 post)
+2. **memory baseline 修正**: decision_features 早 V082 install (2026-05-10 09:22) 之前已大量寫 (從 2026-04-15 起, ma 9.4M / grid 112k)。Sprint N+0 memory 「100% n=199/59/11」是 narrow window 樣本不是新接線
+3. V083 是 schema 加 entry_context_id column + check constraint NOT VALID (不對舊 row enforce); writer code 早於 V083 land 部分接線
+4. **W-AUDIT-4b M3 reject negative producer 已激活**: post-V082 6361/6394 (99.5%) 標 `label_close_tag='rejected_governance'` + edge=0 集中於 ma_crossover ETHUSDT/INXUSDT + grid ETH/BTC/ZEC
+5. 真實 fill+close 只 9 條 (grid_trading, avg edge +40.32 bps 變動 -11.94 ~ +200.37)
+6. evaluations 表全 use_legacy_no_predictor + entry_context_id 100% NULL = ML predictor 未接 (W2 baseline 設計範圍, W3 才接)
+7. decision_outcomes backfill 100% (backfilled_ts NOT NULL); 24h coverage 78-85% 是 last 7d 內 last 24h 視窗未到
+
+**HIGH-5 metric 1 結論**: chain integrity 結束 watch 提早 sign-off 充足 evidence
+
+**新風險發現**: governance reject rate 99.5% 可能 over-fit 純 negative class — 建議 W-AUDIT-4b M4 reject_rate alert; M5 ML predictor 接通後加 evaluations.entry_context_id healthcheck
+
+**Report**: srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md
+
