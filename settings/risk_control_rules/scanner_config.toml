@@ -11,7 +11,7 @@ scan_interval_secs = 60     # 1 minute / 1 分鐘
 warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等待 60 秒
 
 [universe]
-max_symbols = 25
+max_symbols = 40
 pinned_symbols = ["BTCUSDT", "ETHUSDT"]
 
 [hard_filters]
@@ -21,14 +21,14 @@ min_price_usdt = 0.001
 btc_min_move_pct = 0.3   # BTC must move ≥0.3% for beta_proxy to be valid
 
 [anti_churn]
-min_hold_cycles = 15          # 15 scan cycles = ~15 min at 60s scans
+min_hold_cycles = 30          # 30 scan cycles = ~30 min at 60s scans
 challenger_threshold = 15.0   # new symbol must beat worst by ≥15 pts
 removal_cooldown_minutes = 30
 
 [correlation]
-max_high_beta_symbols = 8   # max symbols with BTC beta > threshold
-max_per_strategy = 8
-max_per_sector = 4
+max_high_beta_symbols = 12  # max symbols with BTC beta > threshold
+max_per_strategy = 12
+max_per_sector = 6
 high_beta_threshold = 0.8
 
 [edge_routing]
