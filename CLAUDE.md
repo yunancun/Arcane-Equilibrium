@@ -54,7 +54,7 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-09 W-AUDIT-1 sync）
+## 三、真實狀態全景（2026-05-10 Sprint N+0 closure + Sprint N+1 D+0 pre-dispatch readiness）
 
 本節只保留當前活躍狀態。歷史長敘述移到 `docs/CLAUDE_CHANGELOG.md`、
 `docs/archive/`、`docs/CCAgentWorkSpace/*/workspace/reports/` 和 `TODO.md`。
@@ -94,7 +94,7 @@
 |---|---|---|
 | `[33]` maker fill rate | 7d demo/live_demo entry_fills=298，maker_like=89.6%，fee_drop=59.5%（target >=60%）。 | WARN：接近 fee-drop target，但未過。 |
 | `[38]` grid lifecycle drift | passive 24h live_demo re_entry_rate=0.52；3C 7d audit post window p50 3.79min vs baseline 7.23min（-47.6%）。 | WARN：grid lifecycle 需 review，但不阻 passive observation。 |
-| `[40]` realized edge | passive 24h MLDE rows=42，avg_net=-6.02bps；3C 7d audit demo current avg_net=-17.82bps vs baseline -16.70bps。 | WARN：edge 未轉正；P0-EDGE-1 仍 active。 |
+| `[40]` realized edge | **2026-05-10 09:23 UTC engine restart 後（V80/82/83/84 land + W-AUDIT-9 graduated canary state machine）**: 24h MLDE avg_net **+8.75 bps**（從 baseline -17.82 bps 翻正，per Sprint N+0 closure memory）；single cell `live_demo/grid_trading/TONUSDT` n=10 avg=-31.23 bps 拖累整體（QC verdict C small-sample，TONUSDT P1-CONDITIONAL-WATCH 30d evidence 收集中）。 | PARTIAL：avg_net 翻正但 5 textbook 策略結構性 alpha-deficient 結論不變（4-agent loss audit consensus）；P0-EDGE-1 root closure pending W-AUDIT-8a Phase B/C/D + A 群 alpha 候選 8b/8c/8d IMPL（Sprint N+1 W2 A4-C BTC→Alt Lead-Lag fast-track 為首）。 |
 | `[41]` scanner would-block evidence | `b91487f2` 後 WARN-only：legacy scanner would-block evidence later non-negative，scanner remains evidence-only。 | 源碼已修正：scanner contradiction 不再 hard FAIL。 |
 | `[42b]/[42c]` attribution drift | settled eligible strategies ratio=1.000；低樣本策略標 `LOW_SAMPLE(n, need)`。 | WARN sample-maturity watch，不是 attribution drift。 |
 | `[45]` pricing binding | demo/live_demo source=`bybit_v5`，age >1h but <24h。 | WARN：仍需 P0-LG-2 provider pricing binding foundation。 |
@@ -111,8 +111,10 @@
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
 | P0-DECISION-AUDIT-2/4/5 | 已由 AMD-2026-05-09-02 收口：SM-05 Option A、W-AUDIT-6 strategy verdict、openclaw_core sunset candidates、Layer2 manual supervisor-only。剩餘是 F-01/W-AUDIT-6/W-AUDIT-5/W-AUDIT-7 implementation，非 operator decision blocker。 |
-| W-AUDIT-1..7 | W-AUDIT-1/W-AUDIT-2 已 source-closed；下一個可做項是 W-AUDIT-3。 |
-| W-AUDIT-8a Alpha Surface Foundation | SPEC PHASE 2026-05-09；R-1 architectural amendment（PA audit `2026-05-09--full_loss_architectural_root_cause_redesign.md`）— 升 Strategy `on_tick(ctx, surface)` 接口為 alpha source 一等公民。Phase A-D × 4 sprint × ~40 person-day。Spec：`docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`。並行於 W-AUDIT-2/-5；W-AUDIT-6 砍剩 minimum 後並行；W-AUDIT-3 不被觸碰；後續 R-2/R-3/R-4 留 8e/8f/8g。 |
+| W-AUDIT-1..7 | W-AUDIT-1/W-AUDIT-2 已 source-closed；W-AUDIT-3..7 進入 Sprint N+1 W4 (W-AUDIT-3b runtime smoke 提早設計, RouterLeaseGuard Drop ~40 LOC)。 |
+| W-AUDIT-8a Alpha Surface Foundation | **Phase A 已 land**（Sprint N+0 W-AUDIT-9 同次, HEAD `c9fb0b8f` PR ready trait skeleton）；Phase B Tier 2 panel collector spec v1.1 land 走 Rust panel_aggregator WS-first（per BB push back 採納，rate 100→0 req/s ongoing）；後續 Phase C/D + R-2/R-3/R-4 留 N+2/N+3。 |
+| **Sprint N+0 closure**（2026-05-10）| W-AUDIT-9 graduated canary state machine T1-T7 + W-AUDIT-4b ML pipeline 3-fault fix V082/83/84 + W-AUDIT-8a Phase A trait declare + AMD-2026-05-09-03/05-10-03/04 + ARCH-04 + ADR-0022 全 land；commit chain HEAD `b6ed4975`；engine restart 後 attribution chain 100%、`[40]` 24h MLDE avg_net **+8.75 bps**（從 -17.82 翻正）。 |
+| **Sprint N+1 D+0 pre-dispatch readiness**（2026-05-10, HEAD `9695b59a`）| 24 項提前準備 land：W7-3 Option B 補丁 (`b42731f6`) + W7-1 trait skeleton (`c9fb0b8f`) PR ready NOT DEPLOYED；W6 RFC 3 視角預備立場 + final verdict draft；W2 A4-C spec v1.2 (dual-layer σ + +15/+5-15/<+5 階梯 gate)；W1 spec v1.1 (BB WS-first)；W5 三 P1 specs (V089/V090)；CC pre-check A- 92.0% APPROVE-CONDITIONAL；E3 ALL PASS 5 hard gate 全綠；R4 docs audit 8 fix；N+0 sign-off + N+1 dispatch fire SOP。Sprint N+1 D+0 sign-off 後純執行 deploy + 派 9 wave 並行（W7-2/W7-4/W7-5 + W6 RFC verdict + W6 V086 + W1 IMPL + W2 IMPL + W3 等 W6+W7 + W4 + W5）。 |
 
 ---
 
@@ -448,7 +450,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：活躍任務以 `TODO.md` v14 為準。2026-05-08 已把 12-agent full audit PA fix plan 掛入 W-AUDIT-1..7。當前順序是：保持 `W-C` MAG-082 Stage 2 evidence window 觀察；`W-AUDIT-1` docs sync/governance compliance 與 `W-AUDIT-2` security IMPL 已 source-closed；下一步接 W-AUDIT-3 runtime/fake-live alignment，再接 W-AUDIT-4..7。仍不是 Telegram/WebChat、第二 GUI、Stage 3/4，或 true-live autonomy。
+**當前焦點（2026-05-10）**：Sprint N+0 closure 完成（HEAD `b6ed4975`），Sprint N+1 D+0 pre-dispatch readiness 24 項全提前完成（HEAD `9695b59a`）。HIGH-5 12h passive watch metric 2/3 forward observation 進行中（21:30 UTC sign-off 窗口）。sign-off 後 D+0 純執行：一次 restart_all --rebuild --keep-auth 同次 deploy W7-3 + W7-1 + W2 trait skeleton；派 W7-2 (含 bb_reversion) + W7-4 + W7-5 + W6 RFC verdict 三角 sign-off + W6 V086 IMPL + W1 IMPL Rust panel_aggregator WS-first + W2 IMPL v1.2 + W3 等 W6+W7 完成 + W4 RouterLeaseGuard Drop test + W5 三 P1 IMPL 並行。Sprint N+1 dispatch v3.7：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md`。仍不是 true-live autonomy。
 
 **關鍵路徑**：`W-C 24h PASS → MAG-083 QA audit → MAG-084 operator sign-off → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
