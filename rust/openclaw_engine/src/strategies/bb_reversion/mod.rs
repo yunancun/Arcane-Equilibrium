@@ -340,10 +340,68 @@ impl Strategy for BbReversion {
         TAGS
     }
 
-    /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
-    /// RC-04：拒絕時回滾該幣種的 position 和 last_trade_ms。
-    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
+    /// RC-04 + W7-3 Option B（P1-1 propagation, mirror ma_crossover/strategy_impl.rs:55-91）：
+    /// 拒絕時的 1-tick 防衛（cross-strategy desync hot loop 修復）。
+    ///
+    /// 原 RC-04 行為：回滾該幣種的 position 與 last_trade_ms 至 mutation 前狀態。
+    ///
+    /// W7-3 Option B 補丁背景：W7-2 entry path Option A（`mod.rs:500-512`）
+    /// 已涵蓋 99% cross-strategy desync 場景。殘留 1-tick race window：
+    /// `ctx.position_state == None` 在 on_tick 起點，但另一策略 fill 在
+    /// on_tick→intent_emit 期間落地，router gate 1.5 仍會 reject。原 RC-04
+    /// rollback 把 self.positions 還原到 None → 下個 tick 又走 entry 分支
+    /// → 1 tick 後 W7-2 才 catch（ctx.position_state 已 Some）。Option B
+    /// 直接把 self.positions sync 為 paper_state 真實方向，下個 tick 即進
+    /// `Some(_)` exit 分支，**0 tick** 終結。
+    ///
+    /// reason 字串契約見 `rejection_coding.rs:147-152`：
+    /// 格式 `"duplicate_position: {symbol} already {LONG|SHORT} {qty}"`。
+    /// fallback：reason 含 `duplicate_position` 但無 `already LONG/SHORT` 子串
+    /// → 標 warn 並走原 RC-04 rollback。
+    ///
+    /// cooldown 不 rollback 也是設計：reject 觸發時 entry 已寫過 last_trade_ms，
+    /// 保留它讓下個 tick 必走 cooldown gate，多一層 hot loop 防護。
+    fn on_rejection(&mut self, intent: &OrderIntent, reason: &str) {
         let sym = &intent.symbol;
+
+        // W7-3 Option B：duplicate_position 識別 + 立即 sync self.positions。
+        if reason.contains("duplicate_position") {
+            let existing_is_long = if reason.contains("already LONG") {
+                Some(true)
+            } else if reason.contains("already SHORT") {
+                Some(false)
+            } else {
+                None
+            };
+
+            if let Some(is_long) = existing_is_long {
+                // 同步 paper_state 真實方向；下個 tick 進 exit 分支不再撞 gate 1.5。
+                self.positions.insert(sym.clone(), is_long);
+                // **不** rollback cooldown：保留 entry tick 寫入的 last_trade_ms，
+                // 配合 cooldown gate 多擋一輪。
+                tracing::debug!(
+                    target: "strategy_position_sync",
+                    strategy = "bb_reversion",
+                    symbol = %sym,
+                    existing_is_long,
+                    "bb_reversion.on_rejection: duplicate_position 1-tick defense — \
+                     synced self.positions to paper_state direction (W7-3 Option B propagation)"
+                );
+                return;
+            }
+            // reason 含 duplicate_position 但無 already LONG/SHORT 子串 → 字串契約破裂，
+            // fallback 走原 RC-04 rollback 並標 warn 提醒 contract drift。
+            tracing::warn!(
+                target: "strategy_position_sync",
+                strategy = "bb_reversion",
+                symbol = %sym,
+                reason = %reason,
+                "bb_reversion.on_rejection: duplicate_position reason missing \
+                 'already LONG/SHORT' marker; falling back to RC-04 rollback"
+            );
+        }
+
+        // 原 RC-04 rollback：non-duplicate_position rejection 走此路徑。
         if let Some(prev) = self.prev_position.get(sym) {
             match prev {
                 Some(b) => {

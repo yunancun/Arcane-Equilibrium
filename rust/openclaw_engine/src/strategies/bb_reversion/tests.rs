@@ -1248,3 +1248,135 @@ fn test_bbr_bootstrap_imports_paper_state_positions() {
     );
     assert_eq!(s.positions.len(), 1);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W7-3 Option B regression — on_rejection duplicate_position 1-tick defense
+// W7-3 Option B 回歸 — on_rejection 對 duplicate_position 的 1-tick 防衛
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 背景：W7-4 systemic audit `2026-05-10--w7_4_5_strategy_position_sync_systemic_audit.md`
+// §3 P1-1 揭露 bb_reversion 缺 W7-3 Option B 1-tick defense（W7-2 Option A 已
+// land entry path query，但 race window 殘留）。本批 propagation 與 ma_crossover
+// `strategy_impl.rs:55-91` 同 pattern；測試 mirror `ma_crossover/tests.rs:678-1006`
+// W7-3 4-case 結構：
+// - test 1：already SHORT → sync false
+// - test 2：already LONG → sync true
+// - test 3：unknown duplicate_position format → fallback to RC-04 rollback
+// - test 4：non-duplicate rejection → full RC-04 rollback (positions + cooldown)
+//
+// reason 字串契約見 rejection_coding.rs:147-152。
+
+/// W7-3 helper：構建一筆模擬 OrderIntent 給 on_rejection 用（最小可行欄位）。
+/// 與 W7-5 區段的 make_intent_bbr 區隔（命名上 _w73 後綴），避免日後 helper drift。
+fn make_test_intent_w73(symbol: &str, is_long: bool) -> OrderIntent {
+    OrderIntent {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        confidence: 0.5,
+        strategy: "bb_reversion".to_string(),
+        order_type: "market".to_string(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+    }
+}
+
+/// W7-3 Option B #1：reason "duplicate_position ... already SHORT" 命中
+/// → self.positions[symbol] sync 為 false（SHORT），不被 RC-04 rollback。
+/// 對應 W7-4 §3 P1-1 race window：grid 已開 SHORT、bb_reversion oversold 想 LONG。
+#[test]
+fn test_bbr_on_rejection_duplicate_position_already_short_syncs_position() {
+    let mut s = BbReversion::new();
+    let intent = make_test_intent_w73("INXUSDT", true); // strategy 想開 LONG（被 reject）
+    let reason = "duplicate_position: INXUSDT already SHORT 1810";
+
+    // Pre-condition：模擬 entry path 已寫過 prev_position（None → 沒有舊倉位）
+    s.prev_position.insert("INXUSDT".to_string(), None);
+
+    s.on_rejection(&intent, reason);
+
+    // 期望：self.positions[INXUSDT] = Some(false)（SHORT），不是被 RC-04 rollback 到 None。
+    assert_eq!(
+        s.positions.get("INXUSDT").copied(),
+        Some(false),
+        "duplicate_position already SHORT 必須 sync self.positions 為 false（SHORT）"
+    );
+}
+
+/// W7-3 Option B #2：reason "duplicate_position ... already LONG" 命中
+/// → self.positions[symbol] sync 為 true（LONG）。
+#[test]
+fn test_bbr_on_rejection_duplicate_position_already_long_syncs_position() {
+    let mut s = BbReversion::new();
+    let intent = make_test_intent_w73("BTCUSDT", false); // strategy 想開 SHORT（被 reject）
+    let reason = "duplicate_position: BTCUSDT already LONG 0.5";
+
+    s.prev_position.insert("BTCUSDT".to_string(), None);
+
+    s.on_rejection(&intent, reason);
+
+    assert_eq!(
+        s.positions.get("BTCUSDT").copied(),
+        Some(true),
+        "duplicate_position already LONG 必須 sync self.positions 為 true（LONG）"
+    );
+}
+
+/// W7-3 Option B #3：reason 含 "duplicate_position" 但無 "already LONG/SHORT" 子串
+/// （字串契約 drift / future 改寫）→ fallback 走原 RC-04 rollback 路徑。
+/// pre_position = Some(true)（LONG）→ rollback 後 positions 必為 LONG。
+#[test]
+fn test_bbr_on_rejection_unknown_duplicate_format_fallback_to_rollback() {
+    let mut s = BbReversion::new();
+    let intent = make_test_intent_w73("ETHUSDT", true);
+    // 缺 "already LONG/SHORT" 子串 — 模擬 reason 字串契約破裂。
+    let reason = "duplicate_position: ETHUSDT something_unparseable";
+
+    // 模擬 entry path 寫過 prev_position = Some(true)（LONG），mutation 後 positions
+    // 也是 LONG（不變）；現在 reject → fallback 走 RC-04，positions 仍應為 LONG。
+    s.prev_position.insert("ETHUSDT".to_string(), Some(true));
+    s.positions.insert("ETHUSDT".to_string(), true);
+
+    s.on_rejection(&intent, reason);
+
+    // Fallback rollback 把 positions 還原到 prev_position（Some(true)）。
+    assert_eq!(
+        s.positions.get("ETHUSDT").copied(),
+        Some(true),
+        "unknown duplicate_position format 必須 fallback 走 RC-04 prev_position rollback"
+    );
+}
+
+/// W7-3 Option B #4：reason 不含 "duplicate_position"（其他類拒絕，例如 cost_gate / risk_gate）
+/// → 必走原 RC-04 完整 rollback（positions + cooldown 都還原）。
+/// pre-condition：prev_position = None（mutation 前未持倉）→ rollback 後 positions
+/// 必須被 remove（不留下偽倉位）。
+#[test]
+fn test_bbr_on_rejection_non_duplicate_position_runs_full_rollback() {
+    let mut s = BbReversion::new();
+    let intent = make_test_intent_w73("SOLUSDT", true);
+    let reason = "cost_gate(JS-demo): estimated=-12.50bps < 0 — blocked / 負估計阻擋";
+
+    // 模擬 entry path mutation：prev_position = None（變更前未持倉），
+    // mutation 後 positions = LONG，prev_last_trade_ms = 0（未交易過）。
+    s.prev_position.insert("SOLUSDT".to_string(), None);
+    s.positions.insert("SOLUSDT".to_string(), true);
+    s.prev_last_trade_ms.insert("SOLUSDT".to_string(), 0);
+    s.cooldown.record_signal("SOLUSDT", 100_000);
+
+    s.on_rejection(&intent, reason);
+
+    // Rollback：positions 必須被 remove（還原到 None）。
+    assert!(
+        !s.positions.contains_key("SOLUSDT"),
+        "non-duplicate_position rejection 必須走 RC-04 把 positions 還原到 None"
+    );
+    // Cooldown 也應 clear（因 prev_last_trade_ms == 0 哨兵）。
+    assert!(
+        s.cooldown.last_ms("SOLUSDT").is_none(),
+        "non-duplicate_position rejection 必須走 RC-04 把 cooldown 還原到未交易狀態"
+    );
+}
