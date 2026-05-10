@@ -7187,3 +7187,39 @@ sub-query 2 per-strategy 是 best-effort：
 - **P1-2 + P2-1**：bb_breakout 兩 GAP 同 PA W7-4 §3，paired wave Sprint N+2 W5
 - **P3**：ma_crossover logging target 統一 + trait-level invariant RFC（N+3）
 
+
+---
+
+## 2026-05-11 — P1-2 + P2-1 bb_breakout W7-3 + W7-2 paired wave propagation
+
+**Spec source**：PA W7-4 5-策略 systemic position sync audit §3 P1-2 + P2-1
+**Mirror references**：
+- W7-3 → ma_crossover (`b42731f6` strategy_impl.rs:55-91) + bb_reversion P1-1 (`df0e2269` mod.rs:343-424)
+- W7-2 → ma_crossover (`22efd9de` strategy_impl.rs:253-266)
+**Branch**：main staged NOT committed（待 E2+A3+E4）
+
+### IMPL summary
+- `bb_breakout/mod.rs::on_rejection` (P1-2)：替換整個函數，加 W7-3 Option B branch（parse `duplicate_position` reason → sync `self.symbols.get_or_init(sym).position = Some(is_long)` → return early）。**只動 .position 欄位**，不觸碰 `oi_buffer` (preserves EDGE-P2-2 FUP) / `entry_price` / `trailing_stop` / `squeeze_detected_ms`
+- `bb_breakout/mod.rs::on_tick` (P2-1)：在 `current_position` match `None` 分支起點加 W7-2 Option A query（`if let Some(existing) = ctx.position_state { sync .position; return vec![]; }`）。**不寫 entry_price**（per W7-4 §3 P2-1 trade-off：避免 cross-strategy entry_price mis-calibrate trailing_stop）
+- 7 unit tests：4 W7-3 (mirror ma_crossover/tests.rs:678-810) + 3 W7-2 (mirror :816-928)
+- Helper `make_paper_position_bbb`（mirror ma_crossover `make_paper_position`）
+- `tracing::debug!(target: "strategy_position_sync", strategy = "bb_breakout", ...)` 對齊 bb_reversion P1-1 + W7-4 §5 logging rec
+
+### 教訓 / lesson learned
+1. **PerSymbolState container with multiple fields 的 W7-3 sync 設計**：bb_breakout `BbBreakoutPerSymbolState` 含 5 fields (position, squeeze_detected_ms, entry_price, trailing_stop, oi_buffer)，W7-3 只 sync `.position` 一欄屬正確設計。Mirror ma_crossover/bb_reversion 直覺是「sync container」，但 bb_breakout 要顯式設計成「只動 .position」(見 mod.rs:393 注釋 `// 只動 position 欄位，不觸碰 oi_buffer / entry_price / trailing_stop / squeeze_detected_ms`)。Test #1 顯式驗證 oi_buffer preservation 是 IMPL 設計合理性自我證明。
+2. **W7-2 entry_price not-cross-sync 屬顯式 trade-off**：bb_breakout `entry_price` 是 ATR trailing_stop math 來源（mod.rs:808-816 `trailing_stop = price ± atr × mult`）。若 W7-2 sync 從 paper_state 拿其他策略的 entry_price，會讓 trailing math 用「別人的開倉價」算，bug 嚴重但難 catch（trailing 只是「不準」非 panic）。**Test #3 顯式回歸 entry_price = None** 是 PA W7-4 §3 P2-1 trade-off 的代碼級鎖定。
+3. **PaperPosition struct 新欄位 `peak_reached_ts_ms`**：構造 PaperPosition test fixture 時，`max_favorable_pnl_pct` (f32) 後跟 `peak_reached_ts_ms` (u64) — 比 ma_crossover/tests.rs:836 既有 helper 多 1 欄。grep `pub struct PaperPosition` + 對齊 fields 順序，避免 compile fail。
+4. **mod.rs LOC 932→1010 突破 800 警告但非 2000 硬限**：CLAUDE.md §九 800 是警告 / 2000 硬限。本 PR pre-existing 已 932（squeeze + Donchian + OI 多功能堆疊），加 78 LOC W7 IMPL 屬必要 chain consistency。E5 N+2 backlog 候選：抽 `position_sync.rs` 共用 helper（W7-2 + W7-3 邏輯所有 strategies 共用）。CLAUDE.md §九 pre-existing baseline exception clause 適用此 case（baseline ≤ pre-existing + 5 LOC 不適用因為超 78，但屬 IMPL 必要性 justified）。
+5. **Multi-session race protocol 嚴守**：working tree 有 3 隔壁 session WIP（scanner/mod.rs + scanner_config.toml + panel_aggregator/）。E1 只 stage 本 PR 2 file，**不接觸**隔壁 WIP。`git diff --cached --stat` 確認 staged 範圍 = 2 PR file 是合規證明。
+
+### 治理觀察
+- **Paired wave 命名**：PA W7-4 §3 明確 recommend「pair P1-2 + P2-1 in same wave」，避免 entry-only 或 reject-only 半套。本 PR 同 commit 同 stage，per W7-4 §5 推薦結構。E2 review 時可單獨評 P1-2 / P2-1 各自，但合併 land 是治理意圖。
+- **Sub-agent IMPL DONE 不 commit（再次）**：與 P1-1 同 pattern，stage only 等 E2 + A3 + E4 PASS 後 PM 統一 commit。`feedback_workflow_audit_chain.md` + `feedback_impl_done_adversarial_review.md` 雙重要求。
+- **D+0+1 deploy bundle 升級**：PM 應把本 P1-2/P2-1 + P1-1 (`df0e2269`) + W7-2 (`22efd9de`) + W7-5 (`bb7cb293`) 同 `restart_all --rebuild --keep-auth` window；3/5 strategies 達 W7 full coverage A 級（grid_trading + funding_arb 仍 by-design A）。
+
+### 後續 dispatch hints
+- **W7-4 §1 verdict 升級**：bb_breakout C → A（post P1-2 + P2-1 land + deploy）；systemic 5-strategy coverage 表 5/5 達 A 級
+- **PA D+1 follow-up**：W7 systemic audit closure note（無剩餘 P1/P2 from §3）
+- **P3 ma_crossover logging target**：對齊 bb_reversion + bb_breakout 的 `target: "strategy_position_sync"`，N+2 backlog
+- **E5 N+2 backlog**：bb_breakout/mod.rs + tests.rs LOC topical split（pair with W-AUDIT-8a 6 strategy 擴充）
+- **P3 RFC N+3**：trait-level `should_proceed_to_entry` invariant（W7-4 §4 Option 2/3）
