@@ -668,3 +668,139 @@ fn test_phase_b_unknown_regime_string_blocks_entry() {
         "Unknown regime string must map to non-Persistent and block entry"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W7-3 Option B regression — on_rejection duplicate_position 1-tick defense
+// W7-3 Option B 回歸 — on_rejection 對 duplicate_position 的 1-tick 防衛
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 背景：PA audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
+// 揭露 ma_crossover 的 self.positions 不查 paper_state，當 grid_trading 在
+// 同 symbol 先開倉，ma_crossover 每 tick 撞 router gate 1.5 duplicate_position
+// 形成 hot loop（INXUSDT 11:34 一分鐘 2319 reject）。Option B 補丁讓
+// on_rejection 識別 duplicate_position reason → 把 self.positions sync 成
+// paper_state 真實方向，下個 tick 直接進 exit 分支終結 hot loop。
+//
+// 測試契約：
+// - reason 格式由 rejection_coding.rs:147-152 定義
+//   `"duplicate_position: {symbol} already {LONG|SHORT} {qty}"`
+// - 4 case：already SHORT / already LONG / unknown format / non-duplicate
+
+use crate::intent_processor::OrderIntent;
+
+/// Helper：構建一筆模擬 OrderIntent 給 on_rejection 用。
+/// W7-3 測試專用，所有欄位使用最小可行值。
+fn make_test_intent(symbol: &str, is_long: bool) -> OrderIntent {
+    OrderIntent {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1810.0,
+        confidence: 0.5,
+        strategy: "ma_crossover".to_string(),
+        order_type: "market".to_string(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+    }
+}
+
+/// W7-3 Option B：reason "duplicate_position ... already SHORT" 命中
+/// → self.positions[symbol] sync 為 false（SHORT）。
+/// 對應 PA audit INXUSDT 11:34 grid 已開 SHORT 1810 場景。
+#[test]
+fn test_on_rejection_duplicate_position_already_short_syncs_position() {
+    let mut s = MaCrossover::new();
+    let intent = make_test_intent("INXUSDT", true); // strategy 想開 LONG（被 reject）
+    let reason = "duplicate_position: INXUSDT already SHORT 1810";
+
+    // Pre-condition：模擬 entry path 已寫過 prev_position（None → 沒有舊倉位）
+    s.prev_position
+        .insert("INXUSDT".to_string(), None);
+
+    s.on_rejection(&intent, reason);
+
+    // 期望：self.positions[INXUSDT] = Some(false)（SHORT），不是被 RC-04 rollback 到 None。
+    assert_eq!(
+        s.positions.get("INXUSDT").copied(),
+        Some(false),
+        "duplicate_position already SHORT 必須 sync self.positions 為 false（SHORT）"
+    );
+}
+
+/// W7-3 Option B：reason "duplicate_position ... already LONG" 命中
+/// → self.positions[symbol] sync 為 true（LONG）。
+#[test]
+fn test_on_rejection_duplicate_position_already_long_syncs_position() {
+    let mut s = MaCrossover::new();
+    let intent = make_test_intent("BTCUSDT", false); // strategy 想開 SHORT（被 reject）
+    let reason = "duplicate_position: BTCUSDT already LONG 0.5";
+
+    s.prev_position.insert("BTCUSDT".to_string(), None);
+
+    s.on_rejection(&intent, reason);
+
+    assert_eq!(
+        s.positions.get("BTCUSDT").copied(),
+        Some(true),
+        "duplicate_position already LONG 必須 sync self.positions 為 true（LONG）"
+    );
+}
+
+/// W7-3 Option B：reason 含 "duplicate_position" 但無 "already LONG/SHORT" 子串
+/// （字串契約 drift / future 改寫）→ fallback 走原 RC-04 rollback 路徑。
+/// pre_position = Some(true)（LONG）→ rollback 後 positions 必為 LONG。
+#[test]
+fn test_on_rejection_unknown_duplicate_format_fallback_to_rollback() {
+    let mut s = MaCrossover::new();
+    let intent = make_test_intent("ETHUSDT", true);
+    // 缺 "already LONG/SHORT" 子串 — 模擬 reason 字串契約破裂。
+    let reason = "duplicate_position: ETHUSDT something_unparseable";
+
+    // 模擬 entry path 寫過 prev_position = Some(true)（LONG），mutation 後 positions
+    // 也是 LONG（不變）；現在 reject → fallback 走 RC-04，positions 仍應為 LONG。
+    s.prev_position
+        .insert("ETHUSDT".to_string(), Some(true));
+    s.positions.insert("ETHUSDT".to_string(), true);
+
+    s.on_rejection(&intent, reason);
+
+    // Fallback rollback 把 positions 還原到 prev_position（Some(true)）。
+    assert_eq!(
+        s.positions.get("ETHUSDT").copied(),
+        Some(true),
+        "unknown duplicate_position format 必須 fallback 走 RC-04 prev_position rollback"
+    );
+}
+
+/// W7-3 Option B：reason 不含 "duplicate_position"（其他類拒絕，例如 cost_gate / risk_gate）
+/// → 必走原 RC-04 完整 rollback（positions + cooldown 都還原）。
+/// pre-condition：prev_position = None（mutation 前未持倉）→ rollback 後 positions
+/// 必須被 remove（不留下偽倉位）。
+#[test]
+fn test_on_rejection_non_duplicate_position_runs_full_rollback() {
+    let mut s = MaCrossover::new();
+    let intent = make_test_intent("SOLUSDT", true);
+    let reason = "cost_gate(JS-demo): estimated=-12.50bps < 0 — blocked / 負估計阻擋";
+
+    // 模擬 entry path mutation：prev_position = None（變更前未持倉），
+    // mutation 後 positions = LONG，prev_last_trade_ms = 0（未交易過）。
+    s.prev_position.insert("SOLUSDT".to_string(), None);
+    s.positions.insert("SOLUSDT".to_string(), true);
+    s.prev_last_trade_ms.insert("SOLUSDT".to_string(), 0);
+    s.cooldown.record_signal("SOLUSDT", 100_000);
+
+    s.on_rejection(&intent, reason);
+
+    // Rollback：positions 必須被 remove（還原到 None）。
+    assert!(
+        !s.positions.contains_key("SOLUSDT"),
+        "non-duplicate_position rejection 必須走 RC-04 把 positions 還原到 None"
+    );
+    // Cooldown 也應 clear（因 prev_last_trade_ms == 0 哨兵）。
+    assert!(
+        s.cooldown.last_ms("SOLUSDT").is_none(),
+        "non-duplicate_position rejection 必須走 RC-04 把 cooldown 還原到未交易狀態"
+    );
+}

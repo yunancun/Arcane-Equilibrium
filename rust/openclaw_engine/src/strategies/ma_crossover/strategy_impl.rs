@@ -39,10 +39,58 @@ impl Strategy for MaCrossover {
         TAGS
     }
 
-    /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
-    /// RC-04：拒絕時回滾該幣種的 position 和 last_trade_ms。
-    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
+    /// RC-04 + W7-3 Option B：拒絕時的 1-tick 防衛（cross-strategy desync hot loop 修復）。
+    ///
+    /// 原 RC-04 行為：回滾該幣種的 position 與 last_trade_ms 至 mutation 前狀態。
+    ///
+    /// W7-3 Option B 補丁（PA audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
+    /// §6 Option B）：當 reason 是 router gate 1.5 `duplicate_position` 時，
+    /// 解析「已存在的方向」並把 self.positions 同步成該方向，**不**走 prev_position
+    /// rollback。這樣下一 tick 進入 `Some(is_long)` exit 分支而非 None entry 分支，
+    /// 立即終結 INXUSDT 11:34 那種 5 分鐘 2319 次 reject 的 hot loop。
+    ///
+    /// cooldown 不 rollback 也是設計：reject 觸發時 entry 已寫過 last_trade_ms，
+    /// 保留它讓下個 tick 必走 cooldown gate，多一層 hot loop 防護。
+    /// （治本是 W-AUDIT-8a Option A — strategy 端查 paper_state；此補丁僅應急。）
+    fn on_rejection(&mut self, intent: &OrderIntent, reason: &str) {
         let sym = &intent.symbol;
+
+        // W7-3 Option B：duplicate_position 識別 + 立即 sync self.positions。
+        // reason 字串契約見 rejection_coding.rs:147-152 —
+        // 格式 "duplicate_position: {symbol} already {LONG|SHORT} {qty}"。
+        if reason.contains("duplicate_position") {
+            let existing_is_long = if reason.contains("already LONG") {
+                Some(true)
+            } else if reason.contains("already SHORT") {
+                Some(false)
+            } else {
+                None
+            };
+
+            if let Some(is_long) = existing_is_long {
+                // 同步 paper_state 真實方向；下個 tick 進 exit 分支不再撞 gate 1.5。
+                self.positions.insert(sym.clone(), is_long);
+                // **不** rollback cooldown：保留 entry tick 寫入的 last_trade_ms，
+                // 配合 cooldown gate 多擋一輪。
+                tracing::debug!(
+                    symbol = %sym,
+                    existing_is_long,
+                    "ma_crossover.on_rejection: duplicate_position 1-tick defense — \
+                     synced self.positions to paper_state direction (W7-3 Option B)"
+                );
+                return;
+            }
+            // reason 含 duplicate_position 但無 already LONG/SHORT 子串 → 字串契約破裂，
+            // fallback 走原 RC-04 rollback 並標 warn 提醒 contract drift。
+            tracing::warn!(
+                symbol = %sym,
+                reason = %reason,
+                "ma_crossover.on_rejection: duplicate_position reason missing \
+                 'already LONG/SHORT' marker; falling back to RC-04 rollback"
+            );
+        }
+
+        // 原 RC-04 rollback：non-duplicate_position rejection 走此路徑。
         if let Some(prev) = self.prev_position.get(sym) {
             match prev {
                 Some(b) => {
@@ -55,7 +103,6 @@ impl Strategy for MaCrossover {
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                // Sentinel 0 → unseen prior to mutation; restore by clearing.
                 // 哨兵 0 → 變更前為未見；清除以還原。
                 self.cooldown.clear(sym);
             } else {

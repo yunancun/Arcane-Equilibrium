@@ -6563,3 +6563,34 @@ fixture pattern 是否仍滿足新 invariant。
 - `pytest test_governance_reject_negative_label` = **真 19/19 PASS**（不是 4 fail）
 - `pytest 全 ml_training/tests/` = 409 PASS / 31 skipped / 0 failed
 - `grep emit_decision_feature_intent_rejected rust/openclaw_engine/src/` = **5 hit**
+
+---
+
+## 2026-05-10 — W7-3 ma_crossover 1-tick defense IMPL
+
+**Scope**: PA #3 audit Option B 補丁 — `on_rejection` 識別 `duplicate_position` reason → sync `self.positions` → 終結 cross-strategy desync hot loop（INXUSDT 11:34 一分鐘 2319 reject）
+
+**修改 files**:
+- `srv/rust/openclaw_engine/src/strategies/ma_crossover/strategy_impl.rs` (+48 LOC)
+- `srv/rust/openclaw_engine/src/strategies/ma_crossover/tests.rs` (+152 LOC, +4 tests)
+
+**契約依據**: `rejection_coding.rs:147-152` `RejectionCode::DuplicatePosition.format()` 輸出 `"duplicate_position: {symbol} already {LONG|SHORT} {qty}"`，本檔測試 `tests:373-385` 已釘 byte-identical。
+
+**設計決策**:
+1. `reason.contains("duplicate_position")` 而非 `starts_with` — 防外層加 prefix
+2. 命中時 **不** rollback cooldown — 保留 entry tick last_trade_ms 多擋一輪 hot loop
+3. fallback warn (contract drift) 用 tracing::warn 級別避免 GUI 噪音
+4. `_reason: &str` → `reason: &str`（參數 underscore 拿掉）
+
+**測試**: 58/58 ma_crossover + 2639/2639 lib full = 0 regression. Mac cargo check release binary 0 errors.
+
+**邊界守則**: 未動 TickContext signature / router.rs gate 1.5 / paper_state.rs / 5 策略 systemic fix（留 W-AUDIT-8a Option A 治本）
+
+**Status**: NOT DEPLOYED — E2 審查 → E4 regression → PM `restart_all.sh --rebuild` 部署
+
+**Report**: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w7_3_emergency_1tick_defense.md`
+
+**教訓**:
+- on_rejection rollback 邏輯歷史上是「reject 後可立即重試」的設計，但跨策略 desync 場景下 = hot loop 加速器；需依 reason 大類做差異化
+- reason 字串契約（rejection_coding.rs）可用 `contains()` 解析 + warn 級 fallback 防 contract drift
+- E1 memory.md 已 787KB（>256KB read limit），未來改用 grep / 短 append 策略；接手 E1 任務時 PA dispatch 通常已含背景，不必硬讀全 memory
