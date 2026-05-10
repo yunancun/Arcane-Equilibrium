@@ -6827,3 +6827,67 @@ git commit --only sql/migrations/V087__panel_oi_delta_panel.sql -m "..."
 - Guard B 必對 `'double precision'` canonical name（小寫，不是 `'float8'` 別名）；`information_schema.columns.data_type` 回 PG 規範名
 - Guard C `pg_get_indexdef()` substring `'snapshot_ts_ms DESC'` + `'symbol'` 兩 check 防漏 DESC 或欄位順序顛倒
 - COMMENT ON TABLE / COMMENT ON COLUMN 是 idempotent（可重跑），用作下游 reader runbook 友好
+
+---
+
+## 2026-05-10 — W6-3c V086 IMPL：dry-run apply + writer code（commit `05e44ede`）
+
+### 任務
+W6-3c full IMPL：(1) Linux PG V086 dry-run + apply，(2) idempotency 第 2 次 apply 驗證，(3) sqlx_migrations register（skipped），(4) writer code IMPL（producer-side reject_reason_code mapping + writer dual-write）。
+
+### V086 apply 結果
+- 1st run 8.5 sec, UPDATE 18696 (decision_features) + UPDATE 17 (trading.fills double-prefix), Guard C PASS
+- 2nd run 6.7 sec, UPDATE 20057 (← 不是 0!) + UPDATE 0, Guard C PASS, 無 RAISE EXCEPTION
+- Final state: total labeled=51110, reject_n=17810 (4 enum), close_n=2247 (13 enum), overlap=0 互斥
+
+### 教訓 13：spec idempotency 註解 vs 實際 PG behaviour 漂移
+V086 SQL line 372 idempotency filter 是 `AND (df.reject_reason_code IS NULL OR df.close_reason_code IS NULL)`。spec §2 註解寫「第二次跑時兩 column 已 NOT NULL → WHERE filter 0 row no-op」。但**互斥不變式下**（reject path: reject_reason_code=Some, close_reason_code=NULL；close path: 反之），每 row 兩 column 必有一 NULL，**OR filter 永遠 true**，第 2 次又 UPDATE 全部 labeled row（同樣 deterministic 值）。
+
+實際結果：
+- 不是 RAISE EXCEPTION（沒 hard fail）
+- 不是 schema 損壞（值寫入 deterministic 同樣，Guard C PASS）
+- 但 lossless re-UPDATE 18696 unchanged row + 1361 期間新增 row backfill
+
+E1 push back 推薦方案 A（accept；spec 註解修正即可，PG 行為 lossless idempotent）。方案 B（OR→AND）並不修問題（producer 後續寫的新 row reject_reason_code 寫入後 close_reason_code 仍 NULL，AND 也 trigger UPDATE）。教訓：dry-run 第 2 次必跑 + 比對 row count 與 spec §2 idempotency 預期，發現 drift 必 push back PA 修 spec 註解（不是修 SQL）。
+
+### 教訓 14：dry-run pre-data 與 final state 數據解讀 discrepancy
+Dry-run pre-data：labeled_n=18696, rejected_n=16449, closed_n=2247。
+Final state：total_labeled=51110, reject_n=17810, close_n=2247。
+51110 - 17810 - 2247 = 31053 row labeled 但**不在 reject 不在 close**（如 `abandoned:%` / `orphan_close:%` / `adopted_close:%` / `shadow_fill:%` 等 W-AUDIT-4b backfill domain）。
+
+V086 §3 互斥不變式 only cover reject + close 兩類 label_close_tag。W6-3a baseline + W6-3b spec **沒** 把這 31053 row 算進來（pre-data query filter 用 `label_close_tag IS NOT NULL` 但 distribution table only count reject + close label）。實際 18696 是 V086 §3 cover 範圍的 labeled row 總數（reject + close mutually exclusive），其他 31053 不在範圍內所以 reject_reason_code + close_reason_code 都 NULL（與 18696 互斥定義一致）。
+
+教訓：dry-run pre-data 必明文對比 spec scope 範圍（V086 §3 互斥不變式 only cover reject + close）；超出範圍 row 必明文標 SCOPE_OUT_OF_BAND，避免 final state count 解讀混淆。
+
+### 教訓 15：sqlx checksum sha384 + content normalization 不確定 → skip 不 INSERT
+PM 端 `bin/repair_migration_checksum`（per `project_2026_05_02_p0_sqlx_hash_drift.md`）是處理 V### file edit 後 DB checksum 沒同步的工具。E1 不能瞎猜 sqlx checksum 算法（normalization 規則不確定，包括 line-ending / trailing whitespace 等），跑錯會造成下次 engine restart hash mismatch panic。
+
+E1 IMPL 結束前 _sqlx_migrations register **絕對不能** 自己 INSERT（即使 task 提供 sample SQL）。Skip + report 給 PM `repair_migration_checksum` 處理是正確 fail-safe。task spec 也明文「如 sqlx checksum 不確定...先 skip」。
+
+### 教訓 16：producer code byte-identical 鏡像 SQL backfill — evaluation order critical
+W6-3c writer code 兩階段 IMPL：(a) Rust producer-side `map_reject_reason_to_code(&str) -> &'static str` mapping function，(b) writer SQL 加 column。**Producer mapping 必逐字節鏡像 V086 SQL CASE WHEN evaluation order**：
+- ATR unavailable 必先於 JS-demo（V086 line 320-321）
+- JS-demo 必先於 cost_gate_other（line 321-322）
+- symbol_blocklist 必先於 risk_gate_other（line 329-330，嵌套字串）
+
+E1 寫 producer 端時用 substring + 結構檢查（`is_symbol_blocklist_reason()`）取代正則庫依賴 — hot path 友好。3 個專測 evaluation order 的 unit test：
+- test_evaluation_order_atr_unavailable_precedes_cost_gate_other
+- test_evaluation_order_js_demo_precedes_cost_gate_other  
+- test_evaluation_order_symbol_blocklist_precedes_risk_gate_other
+
+任何 mapping 順序變更 = 與 V086 SQL backfill 的歷史 row 語意漂移 = ML training pool 污染。
+
+### 教訓 17：DecisionFeatureMsg struct 加新欄位必同步搜全 sibling 構造點
+`grep -rn "DecisionFeatureMsg\s*{" rust/openclaw_engine/src/` 揭露 4 個構造點（生產 + 2 helper + 2 test）。`#[derive(Debug)]` no `#[serde(default)]` 沒有 default 行為，Rust struct literal 必明文列所有 field — 漏 1 個 cargo build 直接 fail。
+
+實作步驟：(1) struct definition 加 field, (2) 生產 callsite 加邏輯, (3) helper / test 構造點加 None / 默認值 (4) 跑 cargo build verify。本次 4 個構造點全更新 + cargo build PASS 一次過。
+
+### 教訓 18：producer / writer 兩端必同 commit 一次 land
+W6-3c writer code 6 檔 commit `05e44ede` 是「producer + msg struct + writer + IPC + tests」一次 land，避免 partial deploy 造成 producer 寫了 reject_reason_code 但 writer SQL 未加 column 報 sqlx prepare error。E2 必驗 deployment runbook 確保 6 檔同 commit / 同 deploy。
+
+### 工具偏好補充
+- `cargo test --release --lib intent_processor::reject_reason_code` 跑單一 module test 比 cargo test 全跑快 10×；7 test 0.00s
+- `cargo test --release --lib database` regression 178/178 PASS in 0.01s
+- Mac sandbox push deny "main bypass review" 是預期 — E1 commit 即停，PM 統一 push
+- `git status --short` 揭露 sibling Mac CC session 的 GUI/Python WIP（10 modified + 2 untracked）— 不接觸不評論，留 owner（Multi-session race 守則）
+- `ssh trade-core 'PGPASSWORD=$(...) psql -c "..."'` SELECT query 不被 sandbox deny；只有 git push / merge 等 state-change 動作會被拒
