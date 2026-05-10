@@ -1,16 +1,33 @@
-# Sprint N+0 HIGH-5 12h Watch Sign-off Report (DRAFT)
+# Sprint N+0 HIGH-5 12h Watch Sign-off Report (FINAL)
 
 **Date**: 2026-05-10
-**Watch window**: 09:23 UTC start → 21:30 UTC sign-off (12h passive forward observation)
+**Watch window**: 09:23 UTC start → 20:08 UTC sign-off (10h45m passive forward observation, **提前 1h22m**)
 **Author**: PM
-**Status**: DRAFT — 21:30 UTC 跑 healthcheck 填數值後 land
+**Status**: ✅ **APPROVED** at 20:08 UTC（提前 sign-off）+ deploy + dispatch fire 進行中
 **Predecessor**: Sprint N+0 closure HEAD `b6ed4975`
+**Post-deploy HEAD**: `3ed7047d`（5 SQL skeleton + V087/V088 retention bug fix + W7 chain + W4 全 land）
+**Engine restart**: 2026-05-10 20:08 UTC → PID 1441249，3 pipelines (paper/demo/live) alive
+
+---
+
+## Sign-off rationale（提前 1h22m）
+
+**3 metric 全 PASS 強勁**：
+- Metric 1 chain integrity: ✅ CLOSED EARLY (MIT replay 100%)
+- Metric 2 [40] avg_net since restart: demo +9.18 / live_demo +38.46 / 24h baseline +22.77 (vs N+0 closure +8.75, 再進步 +14)
+- Metric 3 TONUSDT cell isolate: TONUSDT 0 fill since restart (trivially PASS)
+- bad cells (n≥10 avg<-10): 0
+- ma_crossover INXUSDT hot loop: 0/30min, 0/2h, 0/5min post-restart (W7-3 fix 已 deploy 並驗 prevention value)
+
+**12h 觀察承諾 trade-off accepted**：short 1h22m。Governance trade-off 由 data 強度 + D+0 prep 完整 + V087/V088 bug fix bonus + Linux PG dry-run gate 仍守 (auto-migrate=0 keep 5 SQL skeleton NOT_RUN per design) 共同支撐。
+
+**Auto-migrate governance**：sign-off restart 時 OPENCLAW_AUTO_MIGRATE 從 1 → 0 暫關，5 SQL skeleton (V085/V086/V087/V088/V090) 保 NOT_RUN per design。D+1 W6 V086 IMPL E1 sub-agent 走 Linux PG dry-run gate 後 explicit apply。
 
 ---
 
 ## §1 Sign-off Verdict
 
-**Status (10h17m spot check at 19:38 UTC)**: ✅ **APPROVE 預先預示** (3 metric 全 PASS, 待 21:30 UTC 正式 sign-off 或 operator 拍板提前)
+**Status (FINAL at 20:08 UTC, 提前 1h22m)**: ✅ **APPROVED** — operator 拍板提前 sign-off + deploy + dispatch fire 流程啟動
 
 **Spot check 證據**：
 - Metric 1 chain_integrity: ✅ CLOSED EARLY（per MIT replay 100%）
@@ -141,19 +158,27 @@
 
 ---
 
-## §7 PM Sign-off Statement（21:30 UTC 填）
+## §7 PM Sign-off Statement（FINAL at 20:08 UTC，提前 1h22m）
 
 PM 確認：
-- [ ] HIGH-5 watch 3 metric 全 verify
-- [ ] CC + E3 + R4 + QC + MIT + BB pre-check 全 land
-- [ ] 25 項 D+0 提前準備清單全 ready
-- [ ] Deploy SOP + dispatch fire SOP + rollback plan 全備齊
-- [ ] Operator final approval
+- [x] HIGH-5 watch 3 metric 全 verify (10h45m，data 強勁 — demo +9.18 / live_demo +38.46 / TONUSDT 0 / 24h baseline +22.77)
+- [x] CC A- 92.0% + E3 ALL PASS + R4 8 fix + QC APPROVE + MIT APPROVE + BB APPROVE pre-check 全 land
+- [x] 25 項 D+0 readiness + 4 SQL skeleton (V085/V087/V088/V090, 1925 LOC NOT_RUN) + V086 (483 LOC NOT_RUN) + V087/V088 retention bug fix 全 ready
+- [x] Deploy SOP + dispatch fire SOP + rollback plan 全備齊
+- [x] Operator final approval：提前 sign-off A 拍板 (12h 觀察 short 1h22m governance trade-off accepted given data 強度)
 
-**Final verdict**: ⏳ PENDING
+**Final verdict**: ✅ **APPROVED**
 
-**Signed**: PM @ 2026-05-10 21:30 UTC TBD
+**Deploy result（2026-05-10 20:08 UTC）**:
+- env OPENCLAW_AUTO_MIGRATE: 1 → 0（暫關，5 SQL skeleton 保 NOT_RUN per design；D+1 IMPL E1 走 Linux PG dry-run gate 後 explicit apply）
+- restart_all --rebuild --keep-auth：成功 (33s rebuild + ~10s engine warmup)
+- 新 engine PID: 1441249（替代舊 PID 1234876）
+- 3 pipelines (paper/demo/live) alive，snapshot age <10s
+- Post-restart validation: ma_crossover INXUSDT reject 5min = 0 ✅，V85+ migration NOT applied ✅
+- Live authorization preserved（--keep-auth）
+
+**Signed**: PM @ 2026-05-10 20:08 UTC
 
 ---
 
-**End of draft**. 21:30 UTC 跑 healthcheck → 填 §2 數值 + §1 verdict + §7 PM sign-off → land final report → trigger §5 dispatch fire 流程。
+**End of FINAL report**. Sign-off complete + deploy verified + dispatch fire 9 wave 流程啟動（Phase 1 = W6 V086 IMPL + W7-4 5 策略 systemic audit + W5-E1-A CANARY-STAGE，3 sub-agent 並行；後續 Phase 2 dispatch W6 RFC verdict 三角 + W5-E1-C + W1/W2 IMPL chains）。
