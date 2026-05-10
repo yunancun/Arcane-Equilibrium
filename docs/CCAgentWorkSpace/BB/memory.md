@@ -263,3 +263,59 @@
 5. A5-2 BybitRetCode enum 110017 是否補
 6. NEW-2 [33] fee_filter funding_arb 過濾是否補
 
+
+---
+
+## 2026-05-10 Sprint N+0 final review (HEAD `18e212f9`, 28 commits since v3 baseline)
+
+### Verdict: **APPROVE** (Sprint N+0 整體 BB 視角)
+
+### Sprint N+0 28 commits Bybit-side impact 核實
+
+- `git diff --stat 1bd55689..HEAD -- 'rust/openclaw_engine/src/{bybit_*,ws_client*,market_data_client*}'` = **空** (0 Bybit endpoint 接線變動)
+- Strategy trait 升級 (W-AUDIT-8a Phase A) + W-AUDIT-9 IMPL 全部 internal struct/enum/PG schema/Python provider/GUI surface
+- W-AUDIT-9 7 sub-task 全 land + E2/E4 third-pass APPROVE/PASS
+
+### W-AUDIT-9 graduated canary 對 Bybit live 影響
+
+- Stage 0/1 = 0 Bybit API call (shadow + paper simulation)
+- Stage 2/3 = api-demo.bybit.com + wss://stream-demo.bybit.com (與 LiveDemo 同 endpoint, 不需 LiveDemo authorization.json)
+- Stage 4 = LIVE_PENDING, 仍受 Live boundary 5-gate 全強制 (CLAUDE.md §四 line 125-136 不放寬)
+- canary_stage_log entry **0 影響** Bybit broker rebate / market maker / VIP tier (純 internal governance audit table)
+- LiveDemo authorization.json 5min re-verify 與 canary stage transitions 完全解耦 (無 deadlock 可能)
+
+### W-AUDIT-8a Phase A AlphaSurface Tier 2/3 對 Bybit 影響
+
+- Phase A IMPL = 0 Bybit endpoint 變動 (純 Rust struct/enum/trait migration + 5 策略 declare)
+- BB v3 三 push back NEW-5/6/8 全採納 ✅:
+  - **NEW-5 PA spec L25 不存在** — spec line 151-156 「禁止 L25」+ 預設 orderbook.50 + alpha_surface.rs `OrderflowImbalance` 0 「L25」字串
+  - **NEW-6 liquidation_pulse 已 deleted 需 revert** — spec line 162-170 `requires_revival: true` + alpha_surface.rs dormant 註釋 + 永遠 `None`
+  - **NEW-8 basis demo 限 observation 沒分** — spec line 132-138 `requires_spot_capability: true` + IntentRouter 檢查 + alpha_surface.rs 「永遠是 observation-only signal」
+
+### 字典 drift verify
+
+- Sprint N+0 0 endpoint 變動 → 字典 v1.2 vs source = 0 drift
+- 30d Bybit V5 changelog 0 breaking change (繼承 v3)
+
+### 政策合規度仍 70% (與 v3 持平)
+
+- M5-1 / M5-2 / BUSDT PG 殘倉 dust clear / A5-2 / A5-6 維持 outstanding
+- 不阻 Sprint N+0 sign-off (W-AUDIT-9 不引入新地區/KYC 變動;Stage 4 才需 5-gate 全 closed)
+
+### N+1+ FLAG follow-up
+
+- **HIGH**:
+  1. W-AUDIT-8a Phase B Sprint N+1 Tier 2 collector IMPL 必 BB review (WS 優先於 REST / 25-sym aggregator pattern / IntentRouter `requires_spot_capability && !env_has_spot` 檢查)
+  2. W-AUDIT-8c Sprint N+2 spec Liquidation 復活前必跑 BB rate-limit 估算 + UnknownHandlerGuard 串接
+- **MEDIUM**:
+  1. W-AUDIT-9 Stage 1 cohort symbol 不可為 BUSDT
+  2. Stage 1 cohort symbol 必於 30d listing/delisting 確認
+
+### 下次啟動需查驗項
+
+1. W-AUDIT-9 Stage 1 啟動時 operator 拍板的 cohort symbol 是否 BB pre-flight pass (BUSDT 排除 + listing 確認)
+2. W-AUDIT-8a Phase B IMPL 是否 BB review 25-sym collector pattern
+3. W-AUDIT-8a Phase C+1 sprint Liquidation 復活 spec 是否 BB rate-limit 估算
+4. M5-1 governance entry / M5-2 IP whitelist preflight 是否 IMPL (Stage 4 前 mandatory)
+5. BUSDT PG 殘倉 (12186 條,11 天延遲) operator 是否手動 dust clear
+
