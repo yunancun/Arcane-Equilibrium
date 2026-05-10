@@ -186,6 +186,30 @@ impl Strategy for MaCrossover {
 
         match self.positions.get(ctx.symbol).copied() {
             None => {
+                // ── W7-2 Option A 治本：cross-strategy paper_state 查詢（PA #3 §6 Option A）──
+                // 進入 entry 計算前先查 paper_state 是否已有同 symbol 倉位（不論哪個策略開的）。
+                // PA audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md` 揭露：
+                // ma_crossover 的 self.positions 不查 paper_state，當 grid_trading 在同 symbol
+                // 先開倉，ma_crossover 每 tick 撞 router gate 1.5 duplicate_position 形成 hot loop
+                // （INXUSDT 11:34 一分鐘 2319 reject）。Option A 在 entry path 起點直接 skip 並
+                // sync self.positions，從根源終結 hot loop。W7-3 Option B（on_rejection 1-tick
+                // 防衛）保留作為 reason 字串契約 fallback（W7-4 §7 重點 3）。
+                // ── W7-2 Option A: cross-strategy paper_state pre-entry check ──
+                if let Some(existing) = ctx.position_state {
+                    // paper_state 已持倉；同步 self.positions 為 paper_state 真實方向，
+                    // 下個 tick 直接進 Some(is_long) exit 分支，不再進入 entry path。
+                    self.positions
+                        .insert(ctx.symbol.to_string(), existing.is_long);
+                    tracing::debug!(
+                        target: "ma_crossover",
+                        symbol = %ctx.symbol,
+                        existing_is_long = existing.is_long,
+                        "skip entry: ctx.position_state present (cross-strategy paper_state holding) — \
+                         W7-2 Option A treats as cross-strategy desync, sync self.positions and skip"
+                    );
+                    return vec![];
+                }
+
                 // Entry path — apply RC-01 regime filter + RC-02 higher-TF confirmation.
                 // 入場路徑 — 套用 RC-01 狀態過濾 + RC-02 較高時間框架確認。
                 if !self.regime_allows_entry(ctx) {

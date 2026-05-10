@@ -1072,3 +1072,114 @@ fn test_w_audit_6d_param_ranges_includes_require_ma_confirmation() {
         "require_ma_confirmation 不可被 agent 動態關閉"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W7-2 Option A regression — cross-strategy paper_state pre-entry check
+// W7-2 Option A 回歸 — entry path 起點查 ctx.position_state（同 ma_crossover pattern）
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 背景：W7-4 systemic audit `2026-05-10--w7_4_systemic_position_sync_audit.md`
+// 將 bb_reversion 評為 HIGH 風險（同 ma_crossover 結構）。Sprint N+1 W7-2
+// IMPL 同 wave apply 同 pattern，提早結 P2-BB-REVERSION-POSITION-SYNC。
+//
+// 3 case：
+// - test 1：position_state=Some + bb_reversion oversold signal → 0 actions
+// - test 2：position_state=None + valid signal → 1 entry intent（baseline）
+// - test 3：W7-2 skip 後 self.positions O(1) 同步 + burst 不累積
+
+use crate::paper_state::PaperPosition;
+
+/// W7-2 helper：構建 PaperPosition 模擬 paper_state 真實持倉（同 ma_crossover helper 模式）。
+fn make_paper_position_bbr(symbol: &str, is_long: bool) -> PaperPosition {
+    PaperPosition {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        entry_price: 50_000.0,
+        best_price: 50_000.0,
+        entry_fee: 0.0,
+        entry_ts_ms: 0,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: "grid_trading".to_string(), // 模擬 grid 已開倉場景
+        entry_notional: 50_000.0,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
+    }
+}
+
+/// W7-2 #1（bb_reversion）：ctx.position_state = Some(SHORT) + oversold long signal
+/// → 必 0 actions（skip entry）+ self.positions sync 為 false。
+/// 對應 W7-4 §3 bb_reversion HIGH 風險場景：grid 已開 SHORT，bb_reversion oversold 想 LONG。
+#[test]
+fn test_bbr_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position_bbr("BTC", false); // grid 已開 SHORT
+    let mut ctx = ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1); // oversold long signal
+    ctx.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert!(
+        intents.is_empty(),
+        "ctx.position_state present 必 skip entry，但發了 {} intents",
+        intents.len()
+    );
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(false),
+        "skip 後必 sync self.positions 為 paper_state 真實方向（SHORT）"
+    );
+}
+
+/// W7-2 #2（bb_reversion）：ctx.position_state = None + valid signal → 1 entry intent。
+/// Baseline regression — 確認 W7-2 check 不誤殺正常 entry。
+#[test]
+fn test_bbr_on_tick_proceeds_entry_when_paper_state_is_none() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    let mut ctx = ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1); // oversold long signal
+    ctx.position_state = None;
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert_eq!(intents.len(), 1, "ctx.position_state=None 時 oversold 必發 long entry");
+    match &intents[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long, "expected LONG entry"),
+        other => panic!("expected StrategyAction::Open, got {:?}", other),
+    }
+}
+
+/// W7-2 #3（bb_reversion）：W7-2 skip 後 self.positions O(1) 同步 + size=1（不累積）。
+/// 對齊 ma_crossover #4 single-tick contract verification（避免 second tick 進 exit 分支
+/// 觸發策略特有的 reverse / mean-revert 邏輯混淆 W7-2 sync 契約）。
+#[test]
+fn test_bbr_on_tick_w7_2_logs_skip_reason_via_state_sync() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position_bbr("BTC", false); // grid SHORT
+    let mut ctx = ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1); // oversold long signal
+    ctx.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    // (1) 必 0 intent — W7-2 skip path 觸發。
+    assert!(
+        intents.is_empty(),
+        "first cross-strategy desync tick 必 W7-2 skip，但發了 {} intents",
+        intents.len()
+    );
+    // (2) self.positions 必 sync 為 paper_state 真實方向（SHORT）。
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(false),
+        "W7-2 sync 後 self.positions 必反映 paper_state.is_long（SHORT）"
+    );
+    // (3) HashMap size = 1（O(1) insert，不洩漏多 entry）。
+    assert_eq!(
+        s.positions.len(),
+        1,
+        "W7-2 sync 必 O(1) insert，positions 應只有 1 entry"
+    );
+}

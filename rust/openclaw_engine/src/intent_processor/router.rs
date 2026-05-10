@@ -1035,3 +1035,135 @@ impl IntentProcessor {
         }
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Sprint N+1 W4 (W-AUDIT-3b runtime smoke 預跑) — RouterLeaseGuard isolated
+// unit test 補 1 條 Drop release on rejection assertion gap。
+//
+// 既有 7 條 router_gate_lease_tests（tests_predictor_router.rs:1067-1460）
+// 透過完整 process_with_features / process_gates_only_with_features pipeline
+// 間接驗證 Drop 行為（Test 5 + Test 6 sub-case 3）。本 isolated test 直接驗
+// RouterLeaseGuard struct-level RAII contract，讓 Drop 行為脫離 pipeline 變動
+// 風險：未來 tick_pipeline / cost_gate / SEC-11 路徑改動不再會連帶污染 Drop
+// 行為的迴歸偵測。
+//
+// Sprint N+1 W4（W-AUDIT-3b runtime smoke 預跑）— 為 RouterLeaseGuard 補 1 條
+// Drop release on rejection 的隔離單元測試。既有 7 條測試透過完整管線間接驗
+// 證；本測試直接驗 struct-level RAII contract，讓 Drop 行為不受未來 pipeline
+// 改動牽連。
+// ════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// W4 isolated test：直接驗 RouterLeaseGuard Drop 在 reject 路徑下釋放
+    /// Active lease 為 Cancelled (Active → Revoked)；同時驗 consume() 路徑
+    /// Drop 不釋放（caller / fill consumer 接管）。
+    ///
+    /// W4 isolated test: directly verifies RouterLeaseGuard Drop releases an
+    /// Active lease as Cancelled (Active → Revoked) on the rejection path; also
+    /// verifies that after consume() Drop does NOT release (caller / fill
+    /// consumer takes over).
+    #[test]
+    fn test_router_lease_guard_drop_releases_active_lease_cancelled() {
+        // Sub-case 1: Drop on rejection path → release Cancelled.
+        // 子案 1：rejection 路徑下 Drop → 釋放 Cancelled。
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None)
+            .expect("grant_paper_authorization must succeed");
+
+        let intent = OrderIntent {
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.01,
+            confidence: 0.7,
+            strategy: "w4_test".into(),
+            order_type: "market".into(),
+            limit_price: None,
+            confluence_score: None,
+            persistence_elapsed_ms: None,
+            time_in_force: None,
+            maker_timeout_ms: None,
+        };
+        let now_ms: u64 = 1_700_000_000_000;
+
+        let lease = acquire_lease_for_gate_1_4(
+            &intent,
+            &gov,
+            GovernanceProfile::Production,
+            "router_w4_drop_test",
+            now_ms,
+        )
+        .expect("Production acquire must succeed with auth effective");
+        assert!(lease.is_active(), "Production profile → Active lease");
+
+        // Pre-drop sanity：1 Active lease 在 SM live set 中。
+        // Pre-drop sanity: 1 Active lease in SM live set.
+        assert_eq!(
+            gov.lease.lock().get_live().len(),
+            1,
+            "before guard drop, lease must be live (Active)"
+        );
+
+        // Wrap into guard，模擬 router gate 取得 lease 後 downstream gate reject。
+        // Wrap into guard, simulating router-gate acquired lease followed by
+        // downstream gate rejection (no consume() call).
+        {
+            let _guard = RouterLeaseGuard::new(&gov, Some(lease));
+            // _guard 出 scope 即 Drop → release_lease(Cancelled)
+            // _guard exits scope → Drop → release_lease(Cancelled)
+        }
+
+        // Post-drop assertion：Drop 必釋放 lease (Active → Revoked)。
+        // Post-drop assertion: Drop must release lease (Active → Revoked).
+        assert_eq!(
+            gov.lease.lock().get_live().len(),
+            0,
+            "RouterLeaseGuard Drop on rejection path MUST release Cancelled (live=0)"
+        );
+        // SM 仍保留 lease object 作 audit trail (revoked state 非 live 但仍存在)。
+        // SM still retains lease object as audit trail (revoked state not live but present).
+        assert_eq!(
+            gov.lease.lock().len(),
+            1,
+            "SM retains revoked lease object for audit"
+        );
+
+        // ───────────────────────────────────────────────────────────────────
+        // Sub-case 2: consume() 後 Drop 不再釋放（caller / fill consumer 接管）。
+        // Sub-case 2: After consume(), Drop must NOT release (caller / fill
+        // consumer takes over via downstream IPC release_lease(Consumed)).
+        // ───────────────────────────────────────────────────────────────────
+        let lease2 = acquire_lease_for_gate_1_4(
+            &intent,
+            &gov,
+            GovernanceProfile::Production,
+            "router_w4_drop_test_consume",
+            now_ms + 1,
+        )
+        .expect("second acquire must succeed");
+        assert!(lease2.is_active());
+        // 此時 SM 共 2 個 lease object，1 個 live（lease2）+ 1 個 revoked（lease1）。
+        // SM now has 2 lease objects total: 1 live (lease2) + 1 revoked (lease1).
+        assert_eq!(gov.lease.lock().get_live().len(), 1, "lease2 is live");
+
+        let inner = {
+            let guard = RouterLeaseGuard::new(&gov, Some(lease2));
+            // consume() 取出 lease + 停用 Drop release。
+            // consume() takes lease out + disables Drop release.
+            guard.consume()
+        };
+        assert!(
+            matches!(inner, Some(LeaseId::Active(_))),
+            "consume() must yield Active lease for caller to retain"
+        );
+
+        // Post-consume Drop assertion：lease2 仍 live（caller 持有，未被釋放）。
+        // Post-consume Drop: lease2 remains live (caller retains; Drop did NOT release).
+        assert_eq!(
+            gov.lease.lock().get_live().len(),
+            1,
+            "after consume(), Drop must NOT release; lease stays live for fill consumer"
+        );
+    }
+}

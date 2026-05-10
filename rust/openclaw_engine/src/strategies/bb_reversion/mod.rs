@@ -447,6 +447,27 @@ impl Strategy for BbReversion {
         let mut intents = Vec::new();
         match self.positions.get(ctx.symbol).copied() {
             None => {
+                // ── W7-2 Option A 治本：cross-strategy paper_state 查詢（W7-4 §3 同 ma_crossover）──
+                // 與 ma_crossover/strategy_impl.rs 同 pattern。PA W7-4 systemic audit
+                // `2026-05-10--w7_4_systemic_position_sync_audit.md` 將 bb_reversion
+                // 評為 HIGH 風險（同 ma_crossover 結構：用 self.positions 不查
+                // paper_state + RC-04 rollback 到 None）。Sprint N+1 W7-2 IMPL 同 wave
+                // apply 同 pattern，提早結 P2-BB-REVERSION-POSITION-SYNC。
+                // ── W7-2 Option A: cross-strategy paper_state pre-entry check (mirrors ma_crossover) ──
+                if let Some(existing) = ctx.position_state {
+                    // paper_state 已持倉；同步 self.positions，下個 tick 走 exit 分支。
+                    self.positions
+                        .insert(ctx.symbol.to_string(), existing.is_long);
+                    tracing::debug!(
+                        target: "bb_reversion",
+                        symbol = %ctx.symbol,
+                        existing_is_long = existing.is_long,
+                        "skip entry: ctx.position_state present (cross-strategy paper_state holding) — \
+                         W7-2 Option A treats as cross-strategy desync, sync self.positions and skip"
+                    );
+                    return intents;
+                }
+
                 // G-SR-1 A1: Determine signal for persistence check.
                 let signal: Option<bool> = if bb.percent_b < 0.0 && rsi < self.rsi_oversold {
                     Some(true) // oversold → long
