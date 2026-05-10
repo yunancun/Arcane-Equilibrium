@@ -45,6 +45,24 @@ use startup::*;
 // SYMBOLS moved to event_consumer.rs (Phase 1 Day 0-A extraction)
 // STATUS_INTERVAL_SECS moved to event_consumer.rs
 
+/// W1 sub-task 3 (E1-γ, 2026-05-11) — PanelAggregator cohort 25-sym hardcoded snapshot。
+///
+/// Per W1 spec §2.1（hardcoded W1 IMPL；W-AUDIT-8c phase 改 dynamic SymbolRegistry subset）。
+/// 對齊既有 SymbolRegistry pinned core symbols（main_scanner_init.rs 種子），
+/// 但 panel cohort 與 scanner cohort 邏輯獨立：scanner pinned 是 boot-time WS 訂閱集合，
+/// panel cohort 是 funding/OI panel 計算範圍。Bybit V5 USDT-M perp 主力 25 sym。
+fn panel_aggregator_cohort() -> Vec<String> {
+    vec![
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+        "DOTUSDT", "MATICUSDT", "LTCUSDT", "BCHUSDT", "NEARUSDT", "UNIUSDT", "ATOMUSDT", "ETCUSDT",
+        "FILUSDT", "ICPUSDT", "TRXUSDT", "ARBUSDT", "OPUSDT", "APTUSDT", "SUIUSDT", "TONUSDT",
+        "INJUSDT",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
 // ----------------------------------------------------------------------
 // Crash-only pipeline wrapper / crash-only 管線包裝器
 // ----------------------------------------------------------------------
@@ -473,6 +491,16 @@ async fn async_main(
     // late-inject manual trigger sender。對齊 h_state_cache_slot G3-08 pattern。
     let edge_reload_sender_slot_handle = ipc_server.edge_reload_sender_slot();
 
+    // W1 sub-task 3 (E1-γ, 2026-05-11): panel slot pair 預建 + 注入 IpcServer。
+    // PanelAggregator spawn 在 fan-out 之後（接 panel_event_rx），但 slot 必須在
+    // IPC detach **之前**注入（IpcServer 用 `set_*_panel_slot` 持有同 Arc 的 clone）。
+    // PanelAggregator 也持同 Arc 的 clone，每 60s flush 寫 slot；IPC handler /
+    // step_4_5_dispatch 後續 phase 讀 slot 拿 panel snapshot。
+    let (funding_curve_panel_slot, oi_delta_panel_slot) =
+        openclaw_engine::panel_aggregator::create_panel_slots();
+    ipc_server.set_funding_curve_panel_slot(Arc::clone(&funding_curve_panel_slot));
+    ipc_server.set_oi_delta_panel_slot(Arc::clone(&oi_delta_panel_slot));
+
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -862,6 +890,14 @@ async fn async_main(
         openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
     ));
 
+    // W1 sub-task 3 (E1-γ, 2026-05-11): panel pipeline channel + spawn。
+    // Cohort 25-sym hardcoded snapshot per W1 spec §2.1（cohort dynamic 改 W-AUDIT-8c）。
+    // mpsc cap=1024 對齊 paper/demo arm（短突發容忍 ~3.5s @ 280 tps）。
+    // PanelAggregator spawn 在 fan-out 之後馬上接 panel_event_rx；
+    // 60s flush timer 內部，無需與 fan-out ready barrier 同步。
+    let (panel_event_tx, panel_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
+    let panel_cohort: Vec<String> = panel_aggregator_cohort();
+
     // Fan-out task extracted to `main_fanout.rs` (G1-03 Wave 1).
     // Consumes upstream event_rx and paper/demo/live senders (moved),
     // awaits ready barriers (60s timeout) then distributes Arc-wrapped
@@ -880,7 +916,30 @@ async fn async_main(
         paper_ready_rx,
         demo_ready_rx,
         live_ready_rx,
+        // W1 sub-task 3 (E1-γ, 2026-05-11): panel arm sender。
+        Some(panel_event_tx),
     );
+
+    // W1 sub-task 3 (E1-γ, 2026-05-11): 啟動 PanelAggregator run loop。
+    // db_pool 必須在 spawn 前就緒（line 538 已 Arc::new(DbPool::connect)）；
+    // panel_aggregator/funding_curve.rs flush 用 pool.is_available() fail-soft。
+    // cohort empty 仍 spawn — run loop 內 cohort_size=0 + 60s flush 永遠 (0,0) no-op。
+    let panel_db_pool = Arc::clone(&db_pool);
+    let panel_cancel = cancel.clone();
+    let panel_aggregator = openclaw_engine::panel_aggregator::PanelAggregator::new(
+        panel_db_pool,
+        panel_cohort.clone(),
+        panel_cancel,
+        Arc::clone(&funding_curve_panel_slot),
+        Arc::clone(&oi_delta_panel_slot),
+    );
+    info!(
+        cohort_size = panel_cohort.len(),
+        "PanelAggregator spawning (W1 W-AUDIT-8a Phase B Tier 2 panel collector)"
+    );
+    let _panel_handle = tokio::spawn(async move {
+        panel_aggregator.run(panel_event_rx).await;
+    });
 
     // ------------------------------------------------------------------
     // 3E-ARCH pipeline spawns extracted to `main_pipelines.rs` (G1-03 Wave 1).

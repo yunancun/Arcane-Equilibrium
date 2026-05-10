@@ -78,6 +78,10 @@ from .checks_derived import (
     # MIT W6-1 RFC SHOULD 7（2026-05-10）— `[65]` W-AUDIT-4b M3 producer
     # 接通後 chain integrity 哨兵；era filter 排除 pre-M3 歷史 orphan。
     check_chain_integrity_post_audit_4b_m3,
+    # W1 sub-task 3 (E1-γ, 2026-05-11) — `[66]` panel.* freshness sentinel
+    # for W-AUDIT-8a Phase B Tier 2 panel collector (PanelAggregator + V085/V087)。
+    # PASS_SKIP if V085/V087 not yet deployed (pre-deploy 不阻塞)。
+    check_panel_freshness,
 )
 from .checks_cost_edge import (
     # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
@@ -913,6 +917,14 @@ def main() -> int:
             # 歷史 orphan。PASS ≥ 95% / WARN 80-95% / FAIL < 80%。
             s, m = check_chain_integrity_post_audit_4b_m3(cur)
             results.append(("[65] chain_integrity_post_audit_4b_m3", s, m))
+
+            # [66] W1 sub-task 3 (E1-γ, 2026-05-11): panel.* freshness sentinel
+            # 監控 PanelAggregator (W-AUDIT-8a Phase B Tier 2) 寫入 panel.funding_rates_panel
+            # + panel.oi_delta_panel 的 snapshot 新鮮度。
+            # PASS < 5min / WARN 5-15min / FAIL > 15min。V085/V087 未 deploy → PASS_SKIP。
+            # 對應 cron: helper_scripts/cron/panel_aggregator_health_cron.sh（雙保險）
+            s, m = check_panel_freshness(cur)
+            results.append(("[66] panel_freshness", s, m))
     finally:
         conn.close()
 

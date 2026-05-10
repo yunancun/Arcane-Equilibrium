@@ -361,3 +361,127 @@ def check_chain_integrity_post_audit_4b_m3(cur) -> tuple[str, str]:
 
     # PASS: global ≥ 95% + per-strategy 全 ≥ 95% (or sample too small to judge)
     return ("PASS", base + " — chain integrity holding (W-AUDIT-4b M3 healthy)")
+
+
+# ---------------------------------------------------------------------------
+# [66] W1 sub-task 3 (E1-γ, 2026-05-11) — panel.* freshness sentinel。
+#
+# Sprint N+1 W1 W-AUDIT-8a Phase B Tier 2 panel collector 上線後，PanelAggregator
+# 每 60s flush 寫 panel.funding_rates_panel + panel.oi_delta_panel。本哨兵每
+# passive cycle 跑，檢查兩表最後 snapshot 與 now() 的差距：
+#   < 5min   → PASS
+#   5-15min  → WARN
+#   > 15min  → FAIL（panel collector dead 或 BB WS subscription 斷）
+# 任一表 ABSENT（V085/V087 未 deploy）→ PASS_SKIP（pre-deploy 不阻塞）
+#
+# Sister checks:
+#   - [57] funding_curve_panel_freshness（規劃中，本 IMPL 暫 deferred）
+#   - [58] oi_delta_panel_freshness（同上）
+# 本 [66] 是合併版（單一 cron-friendly check）。後續 [57]/[58] 拆分時可廢棄 [66]。
+# ---------------------------------------------------------------------------
+PANEL_FRESHNESS_PASS_THRESHOLD_MS: int = 5 * 60 * 1000  # 5min
+PANEL_FRESHNESS_WARN_FAIL_BOUNDARY_MS: int = 15 * 60 * 1000  # 15min
+
+
+def check_panel_freshness(cur) -> tuple[str, str]:
+    """[66] panel.* freshness sentinel — W1 sub-task 3 (E1-γ, 2026-05-11)。
+
+    Verifies PanelAggregator (W-AUDIT-8a Phase B Tier 2 collector) is producing
+    fresh snapshots into panel.funding_rates_panel + panel.oi_delta_panel.
+
+    Three-state verdict per table（取 worst case 為 overall）:
+      PASS: max(snapshot_ts_ms) age < 5min
+      WARN: 5-15min（PanelAggregator slow / BB WS lagging）
+      FAIL: > 15min（panel collector dead 或 WS subscription 斷）
+    Special:
+      ABSENT: V085/V087 未 deploy → PASS_SKIP（pre-deploy 不阻塞）
+      NO_ROWS: 表存在但無 row → PASS_SKIP（首次 deploy 後 60s 內預期）
+
+    Cron entry sister: helper_scripts/cron/panel_aggregator_health_cron.sh
+      （本 check 從 PG side 跑；cron 從 shell + pgrep 跑；雙保險）
+    """
+    # Defensive rollback to keep cursor clean across checks.
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001 - defensive cleanup must not raise
+        pass
+
+    panel_tables = [
+        ("panel.funding_rates_panel", "funding"),
+        ("panel.oi_delta_panel", "oi_delta"),
+    ]
+    statuses: list[tuple[str, str]] = []  # [(label, verdict), ...]
+    skip_count = 0
+    fail_count = 0
+    warn_count = 0
+
+    for table, label in panel_tables:
+        # Existence check — V085/V087 未 deploy 時 PASS_SKIP
+        try:
+            cur.execute("SELECT to_regclass(%s) IS NOT NULL", (table,))
+            exists = cur.fetchone()[0]
+        except Exception as e:  # noqa: BLE001 - sentinel must surface DB errors
+            return (
+                "WARN",
+                f"[66] {table} existence query failed: {type(e).__name__}: {e}",
+            )
+        if not exists:
+            statuses.append((label, "ABSENT"))
+            skip_count += 1
+            continue
+
+        # Freshness query
+        try:
+            cur.execute(
+                "SELECT extract(epoch FROM now())*1000 - max(snapshot_ts_ms) "
+                f"FROM {table}"
+            )
+            row = cur.fetchone()
+        except Exception as e:  # noqa: BLE001 - sentinel must surface DB errors
+            return (
+                "WARN",
+                f"[66] {table} freshness query failed: {type(e).__name__}: {e}",
+            )
+        age_ms_raw = row[0] if row else None
+        if age_ms_raw is None:
+            statuses.append((label, "NO_ROWS"))
+            skip_count += 1
+            continue
+
+        age_ms = int(age_ms_raw)
+        if age_ms < PANEL_FRESHNESS_PASS_THRESHOLD_MS:
+            statuses.append((label, f"PASS({age_ms // 1000}s)"))
+        elif age_ms < PANEL_FRESHNESS_WARN_FAIL_BOUNDARY_MS:
+            statuses.append((label, f"WARN({age_ms // 1000}s)"))
+            warn_count += 1
+        else:
+            statuses.append((label, f"FAIL({age_ms // 1000}s)"))
+            fail_count += 1
+
+    # 全 ABSENT/NO_ROWS → PASS（pre-deploy 不阻塞 passive runner）
+    if skip_count == len(panel_tables):
+        annotation = ", ".join(f"{lbl}={st}" for lbl, st in statuses)
+        return (
+            "PASS",
+            f"[66] panel collector pre-deploy ({annotation}) — "
+            "V085/V087 not yet applied or table empty",
+        )
+
+    annotation = ", ".join(f"{lbl}={st}" for lbl, st in statuses)
+    if fail_count > 0:
+        return (
+            "FAIL",
+            f"[66] panel freshness ({annotation}) — PanelAggregator likely dead "
+            "or BB WS subscription stale > 15min; investigate engine logs + "
+            "tickers WS supervisor",
+        )
+    if warn_count > 0:
+        return (
+            "WARN",
+            f"[66] panel freshness ({annotation}) — PanelAggregator slow or "
+            "BB WS lagging (5-15min)",
+        )
+    return (
+        "PASS",
+        f"[66] panel freshness ({annotation}) — collector healthy < 5min",
+    )

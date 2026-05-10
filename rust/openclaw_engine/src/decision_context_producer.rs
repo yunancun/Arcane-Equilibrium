@@ -227,6 +227,8 @@ mod tests {
             asks5: None,
             adl_rank: None,
             funding_rate: None,
+            // W1 sub-task 3 (E1-γ, 2026-05-11): test fixture 預設無 next_funding_ms。
+            next_funding_ms: None,
             index_price: None,
             // EDGE-P2-2: Default test fixtures carry no OI (tickers-only signal).
             // EDGE-P2-2：測試 fixture 預設無 OI（僅 tickers 事件攜帶）。

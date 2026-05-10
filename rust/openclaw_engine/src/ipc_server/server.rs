@@ -32,8 +32,9 @@ use super::connection::handle_connection;
 use super::engine_routing::{EngineCommandChannels, LiveCmdSenderSlot};
 use super::protocol::IpcError;
 use super::slots::{
-    AuditPoolSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, EdgeReloadSenderSlot, HStateCacheSlot,
-    StrategistCountersSlot, TeacherLoopSlot,
+    AuditPoolSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, EdgeReloadSenderSlot,
+    FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot, StrategistCountersSlot,
+    TeacherLoopSlot,
 };
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
@@ -118,6 +119,15 @@ pub struct IpcServer {
     /// `OPENCLAW_COST_EDGE_ADVISOR=1` is not set (DEFAULT-OFF).
     /// G3-09 Phase A：cost_edge_advisor slot；env-gate 未設時保持 None。
     cost_edge_advisor: CostEdgeAdvisorSlot,
+    /// W1 sub-task 3 (E1-γ, 2026-05-11): late-injected slot for funding curve panel。
+    /// PanelAggregator run loop 每 60s flush 寫此 slot；下游 step_4_5_dispatch
+    /// `RwLock::read().await.clone()` 取 Option<FundingCurveSnapshot>。
+    /// None = panel 尚未產生（boot 後 60s 內 / cohort empty / 永遠無 funding update）。
+    funding_curve_panel: FundingCurvePanelSlot,
+    /// W1 sub-task 3 (E1-γ, 2026-05-11): late-injected slot for OI delta panel。
+    /// 與 funding_curve_panel 對稱；bb_breakout 等 declared OiDeltaPanel tag 策略
+    /// fail-closed 寫 `evaluation_outcome='oi_panel_unavailable'` 當 None。
+    oi_delta_panel: OIDeltaPanelSlot,
 }
 
 impl IpcServer {
@@ -147,6 +157,10 @@ impl IpcServer {
             h_state_invalidation_tx: None,
             edge_reload_sender: Arc::new(RwLock::new(None)),
             cost_edge_advisor: Arc::new(RwLock::new(None)),
+            // W1 sub-task 3 (E1-γ, 2026-05-11): panel slots 預設 None，
+            // PanelAggregator spawn 時透過 set_*_panel_slot 注入既有 Arc。
+            funding_curve_panel: Arc::new(RwLock::new(None)),
+            oi_delta_panel: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -158,6 +172,33 @@ impl IpcServer {
     /// G3-09 Phase A：取 advisor slot handle 給 main_boot_tasks 在 env-gate 通過後注入。
     pub fn cost_edge_advisor_slot(&self) -> CostEdgeAdvisorSlot {
         Arc::clone(&self.cost_edge_advisor)
+    }
+
+    /// W1 sub-task 3 (E1-γ, 2026-05-11): 取 funding_curve panel slot Arc clone 給
+    /// PanelAggregator 在 IPC server detach 後注入。對齊 h_state_cache_slot pattern。
+    /// IPC handler（後續 W-AUDIT-8c phase）讀此 slot 暴露 panel snapshot 給
+    /// Python 端 GUI / monitoring；目前只有 PanelAggregator 寫入。
+    pub fn funding_curve_panel_slot(&self) -> FundingCurvePanelSlot {
+        Arc::clone(&self.funding_curve_panel)
+    }
+
+    /// W1 sub-task 3 (E1-γ, 2026-05-11): 取 oi_delta panel slot Arc clone。
+    /// 對齊 funding_curve_panel_slot 對稱 pattern。
+    pub fn oi_delta_panel_slot(&self) -> OIDeltaPanelSlot {
+        Arc::clone(&self.oi_delta_panel)
+    }
+
+    /// W1 sub-task 3 (E1-γ, 2026-05-11): 用既有 Arc 替換 funding_curve panel slot。
+    /// PanelAggregator 在 main.rs 用 `create_panel_slots()` 預先建立 slot pair，
+    /// 此 setter 把同一 Arc clone 注入 IpcServer，確保 PanelAggregator 寫 slot 後
+    /// IPC handler / GUI 能讀到同一 panel snapshot（共享 Arc）。
+    pub fn set_funding_curve_panel_slot(&mut self, slot: FundingCurvePanelSlot) {
+        self.funding_curve_panel = slot;
+    }
+
+    /// W1 sub-task 3 (E1-γ, 2026-05-11): 對稱 setter。
+    pub fn set_oi_delta_panel_slot(&mut self, slot: OIDeltaPanelSlot) {
+        self.oi_delta_panel = slot;
     }
 
     /// F6 PH5-WIRE-1 RELOAD (2026-04-26): get a clone of the edge reload
