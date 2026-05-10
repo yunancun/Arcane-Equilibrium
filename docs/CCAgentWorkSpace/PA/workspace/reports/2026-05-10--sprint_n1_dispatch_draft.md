@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v3.2 — 3 PA 預跑 reports 整合（trait coord / W6 RFC PA-view / P1-MA-CROSSOVER audit）；P1-MA-CROSSOVER **升 P0** 為 W7（systemic strategy↔position state architectural gap）；W7 + W2 PA D+0 trait skeleton 合併 commit；W6 加 W6-7 + 加 P1-BB-REVERSION-FIRE-AUDIT + ML retrain 4-gate
+**Status**: DRAFT v3.3 — QC + MIT W6 RFC 預備立場 + E1 PA D+0 trait skeleton 預寫 land；W7-1 trait skeleton 已 PR ready（HEAD `c9fb0b8f`，0 borrow checker, 433+2640+35+replay 全 PASS）；W6 大幅重設計（MIT 揭露 W6-5 category error，撤回原 imbalance flag 試行；W6-3 從 3 類 → 18+ 類兩 column；ML retrain 4-gate 拆 Track A/B）
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -74,7 +74,50 @@ MIT W6 baseline 揭露 ma_crossover INXUSDT 2331 reject 不是 governance 問題
 
 Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
 
-#### §0.4.C W6 RFC PA-view 立場 + 6 條 dispatch update
+#### §0.5 【v3.3 整合】QC + MIT W6 RFC 三角預備立場 + E1 trait skeleton 完成（2026-05-10 15:30 UTC）
+
+#### §0.5.A E1 PA D+0 trait skeleton 預寫成功（HEAD `c9fb0b8f`，PR ready）
+- **Tier 1 + Tier 2 全達成 0 borrow checker 撞牆**（PA #3 audit §8 重點 3 警告解掉）
+- 16 Rust file modified / +182 LOC
+- W2: BtcLeadLagPanel + AlphaSurface.btc_lead_lag field + 3 constructor + slots/dispatch anchor
+- **W7-1: TickContext.position_state field per-iteration borrow pattern + 5 策略 callsite signature 對齊**（提早完成原 W7-1）
+- 433 openclaw_core PASS + 2640 openclaw_engine PASS + 35 stress + replay proof_5 byte-identical
+- **NOT DEPLOYED**，21:30 UTC sign-off + N+1 dispatch fire 同次 restart
+
+→ **W7 從 4 day 估時 縮到 2 day**（W7-1 提前 land，剩 W7-2/W7-4/W7-5）
+
+#### §0.5.B QC W6 RFC 4 questions 全 hold A
+- Q1 cost_gate -14 bps 是 high-B JS shrinkage 收斂 grand_mean 設計預期，3 symbol 回 +0 機率 < 5%
+- Q2 cost_gate 開放 expected new fills net edge ≈ -14 bps，數學上不需 backtest 即可拒
+- Q3 INX 兩 outlier 去後 grid n=8 avg +2.68 / hit 37.5% / Sharpe 0.107 / DSR PASS≈0；power<0.2 「噪音非結構性」
+- Q4 pyramiding 10-20% / reverse 30-40% P[+EV]，duplicate_position guard hold 是 Bayesian-optimal
+- 6 條 dispatch update 建議
+- Report: `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w6_rfc_qc_questions_self_answer.md`
+
+#### §0.5.C 【最重大】MIT W6 RFC 揭露 W6-5 設計 category error
+**MIT Q1**：W6-5 LightGBM `is_unbalance=True / scale_pos_weight=4` 試行**整個錯**：
+- `scorer_trainer.py:94-95` 是 `objective='regression', metric='rmse'` — 預測 ATR-normalized PnL（連續變量）
+- `is_unbalance / scale_pos_weight` 是 LightGBM **classification 專用**參數，對 regression **silently ignore**（lgb.train 不報錯但無效）
+- V084 sample_weight 走 `lgb.Dataset(weight=...)` 路徑對 regression 是 **L2 loss 加權**，不是 class balancing
+- → **dispatch v3.2 W6-5 設計從根本錯**，必撤回重設計
+
+**MIT Q2 反 PA #2 hold A**：當前 regression task 不需 reason_code（reject row label_net_edge_bps=0 是「中性樣本」）；V086 是 future-proof 不阻塞 immediate retrain；建議拆 Track A (regression immediate, 不需 V086) + Track B (multi-class future, 需 V086 + 4-gate)
+
+**MIT Q3**：multi-class label split 真實 close_tag distribution **>100 unique values**，不是 dispatch 寫的「3 類」；正確設計：
+- reject_reason_code **8 enum**（cost_gate / duplicate_position / atr_unavailable / scanner_advisory / volatility / dsr / position_size / margin_util）
+- close_reason_code **10+ enum**（strategy_close_* / risk_close_dynamic_stop / risk_close_phys_lock_* / cost_edge_close_profit / regime_shift_close 等）
+- **兩 column** 不是一個 jsonb；W6-3 從 1 day extend 3 day
+
+**MIT Q4 修正多項假設**：
+- fill rate **93/day actual**（不是 baseline 70/day extrapolate）
+- cron **daily 03:17** 不是 weekly（5 training daily + 5 audit DAILY fire 但 weekday=6 gate；修正 memory 過早 weekly 結論）
+- TOTAL pool 7038 reject + 615 fill **已過 1000 baseline**
+- per-strategy **MIN_SAMPLES=200 4/5 策略不過**（grid 374 PASS / ma 167 / bb_breakout 27 / bb_reversion 4 / funding_arb 43 dormant）
+
+7 條 dispatch update 建議  
+Report: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w6_rfc_mit_questions_self_answer.md`
+
+### §0.4.C W6 RFC PA-view 立場 + 6 條 dispatch update
 
 PA 預備立場（D+1 W6 RFC 三角入場帶這個）：
 - Q1 cost_gate **hold A** — 維持 hard rule，不引 advisory（違反根原則 #5/#4）
@@ -123,16 +166,17 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 
 ## §3 Wave 詳細 spec
 
-### §3.−1 W7 — STRATEGY-POSITION-SYNC（**v3.2 新 P0**，與 W6 sibling）
+### §3.−1 W7 — STRATEGY-POSITION-SYNC（v3.2 新 P0，**v3.3 update：W7-1 trait skeleton 已 PR ready 提早 land**）
 
 **目標**：解 PA #3 audit 揭露的 architecture-level gap — 5 策略用 `self.positions` 追蹤自己策略倉位，**完全不查 paper_state**；router gate 1.5 用 paper_state symbol-level dedup → cross-strategy desync 形成 infinite reject hot loop（11:34 一分鐘 2319 次）。修 ma_crossover 同時做全策略 architectural fix。
 
-**Sub-task v3.2**:
-- W7-1. **PA TickContext extension spec**（PA D+0，與 W2 trait skeleton 同次 commit）
-  - `TickContext` 加 `position_state: Option<&PaperPosition>` field（read-only handle from paper_state）
-  - 5 策略 `on_tick(ctx, surface)` signature 對齊：grid_trading / ma_crossover / bb_breakout / bb_reversion / funding_arb
-  - **必與 W2 BtcLeadLagPanel field 合併 PA D+0 trait skeleton commit**（避免後續 5 sub-agent IMPL 撞 trait file）
-  - LOC 預估：~30 (TickContext) + ~15 (tick_pipeline call site) = ~45 LOC
+**Sub-task v3.3 update**:
+- W7-1. ✅ **PA D+0 預寫 land HEAD `c9fb0b8f`**（提早完成）
+  - TickContext 加 `position_state: Option<&'a PaperPosition>` field — per-iteration borrow pattern 解掉 PA #3 audit §8 borrow checker 警告
+  - 5 策略 callsite signature 對齊（ma_crossover / grid_trading / bb_breakout / bb_reversion / funding_arb）
+  - 與 W2 BtcLeadLagPanel skeleton 合併 single commit (16 file, +182 LOC)
+  - 433 openclaw_core + 2640 openclaw_engine + 35 stress + replay proof_5 byte-identical 全 PASS
+  - **NOT DEPLOYED**，等 21:30 sign-off 同次 restart
 - W7-2. **ma_crossover entry path fix**（E1 IMPL D+1-2, 1 day）
   - `strategies/ma_crossover/strategy_impl.rs:140-234` entry path：進 entry 前查 `ctx.position_state`；如同 symbol 已有任何策略倉位 → skip entry，不發 intent
   - **不**改 `self.positions` HashMap 設計（保持 strategy-level shadow，但 entry decision 必查 paper_state）
@@ -149,12 +193,15 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
   - 確認 `on_fill()` 正確 update self.positions（遠端真實 fill 後）
   - bootstrap 階段從 paper_state import_positions 重建 strategy.positions（避 cold-start desync）
 
-**Sub-agent assignment**:
-- D+0: PA spec + trait skeleton 合併 W2 commit（~85 LOC: 40 BtcLeadLagPanel + 45 TickContext.position_state）
-- D+1-2: E1 IMPL W7-2 + W7-3（ma_crossover fix + on_rejection sync）
-- D+2-3: PA + E1 W7-4 (5 策略 systemic audit) + W7-5 (on_fill + bootstrap)
-- D+3: E2 review（必審 RC-04 prev_position rollback 邏輯刪除前 spec / TickContext signature lifetime）
-- D+4: E4 regression + Linux runtime 24h 驗 ma_crossover INXUSDT reject < 10/h（從 666/h 降）+ PM sign-off
+**Sub-agent assignment v3.3 update**（W7-1 trait skeleton + W7-3 Option B 補丁均已 PR ready）:
+- ✅ **W7-1 已提早 land HEAD `c9fb0b8f`**（PA D+0 預寫，省 1 day）
+- ✅ **W7-3 Option B 已 land HEAD `b42731f6`**（補丁式 1-tick defense，省 0.5 day）
+- D+1: E1 IMPL **W7-2**（ma_crossover entry path 用 ctx.position_state query before entry, ~10 LOC + 1 unit test）
+- D+1-2: PA + E1 **W7-4**（5 策略 systemic audit using 已 land 的 ctx.position_state field）
+- D+2: E1 IMPL **W7-5**（on_fill + bootstrap import_positions, ~20 LOC + tests）
+- D+3: E2 review + E4 regression + Linux runtime 24h 驗 ma_crossover INXUSDT reject < 10/h + PM sign-off
+
+→ **W7 從原 4 day 估時 縮到 2-3 day**（W7-1 + W7-3 提早 land 共省 1.5 day）
 
 **Acceptance criteria**:
 - ma_crossover INXUSDT 24h reject rate < 10/h（從 baseline 666/h 降，**60+ x 改善**）
@@ -186,19 +233,23 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
   - 從 `trading.risk_verdicts.{reason, checks_failed}` join 寫入
   - W-AUDIT-4b M3 producer 同步 update（`intent_processor/mod.rs:1213` 解 V017 lock）
   - V086 加 Guard A/B/C + idempotency
-- W6-3. **Multi-class label split**（PA spec + E1 IMPL 1 day）
-  - 把單一 `rejected_governance` label 拆 `rejected_cost_gate` / `rejected_duplicate_position` / `rejected_other`
-  - LightGBM 訓練改 multi-class（per MIT Q3）
-  - 效果：模型學「在這 state 下會被 cost_gate 拒（能改 cost）」vs「會被 duplicate_position 拒（能改 entry timing）」
+- W6-3. **【v3.3 重 scope】Multi-class label split — 18+ enum 兩 column**（PA spec + E1 IMPL，**從 1 day extend 3 day**，per MIT Q3）
+  - **W6-3a. close_tag distribution audit**（PA + MIT 0.5 day）— PG 全 SELECT distinct close_tag + frequency；MIT 已驗 >100 unique values
+  - **W6-3b. 兩 column enum spec**（PA 0.5 day）：
+    - `reject_reason_code` **8 enum**（cost_gate / duplicate_position / atr_unavailable / scanner_advisory / volatility / dsr / position_size / margin_util）
+    - `close_reason_code` **10+ enum**（strategy_close_grid / strategy_close_ma / strategy_close_bb / strategy_close_funding / risk_close_dynamic_stop / risk_close_trailing_stop / risk_close_phys_lock / risk_close_fast_track / cost_edge_close_profit / cost_edge_close_loss / ipc_close_all / regime_shift_close / abandoned_no_close）
+  - **W6-3c. V086 兩 column add**（E1 IMPL 1 day）：reject_reason_code text + close_reason_code text + Guard A/B/C + NOT VALID CHECK + backfill cron 從 risk_verdicts.reason regex parse + label_close_tag string prefix split
+  - **W6-3d. Trainer pipeline read schema update**（E1 IMPL 1 day）：scorer_trainer 仍 ignore（regression 看 label_net_edge_bps 不看 reason code）；future multi-task 接口準備好（add column 不 break read schema）
+  - W6-3 land 後 multi-class trainer 升級**留 N+2/N+3**（multi-task learning 或 hierarchical model 設計範圍超 W6 scope）
 - W6-4. **M4 reject reason mix monitor**（E1 IMPL 1 day）
   - 加 `helper_scripts/db/passive_wait_healthcheck/checks_reject_reason_mix.py`（[59]）
   - **alert 條件**改：cost_gate ratio 24h 變化 > 20pp（暗示 producer drift）；duplicate_position ratio 突增（暗示策略 entry bug 加劇）
   - **不**用 reject rate > 95% 作 alert（這是 normal）
-- W6-5. **LightGBM imbalance handling 試行**（E1 IMPL 1 day）
-  - V084 sample_weight 1/170 後仍 ~4:1 long-tail
-  - 試行 `is_unbalance=True` 或 `scale_pos_weight=4`（per MIT Q1）
-  - 跑 train + dev set 對比 baseline AUC / precision / recall
-  - **不直接 deploy** ML predictor — 等 V086 land 後 multi-class 再評估
+- W6-5. **【v3.3 重設計】Sample weight ratio sensitivity 試行**（per MIT Q1 揭露 category error，撤回原 LightGBM imbalance flag 試行）
+  - **trainer task type confirm**：scorer_trainer 是 LightGBM regression（`objective='regression'`），不是 classification → `is_unbalance/scale_pos_weight` 對 regression silently ignore
+  - **改試行內容**：sample_weight ratio 1/100 / 1/170 / 1/300 / 1/500 對 RMSE + Sharpe + 對 cost_gate decision distribution 影響
+  - **僅報告對比，不 deploy 入 production cron**
+  - 留 classification 升級的 imbalance 試行給 W6-3 multi-task pipeline 落地後（N+2/N+3 spec）
 - W6-6. **M5 evaluations.entry_context_id healthcheck**（E1 IMPL 1 day, 等 ML predictor 接通後 enable）
   - per MIT M5 建議：`check_evaluations_entry_ctx_coverage()`
   - 編號預留 [60]
@@ -207,9 +258,21 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
   - 5 策略 24h 0 fire 報 WARN（funding_arb 排除清單 hard-code 防 false WARN per ADR-0018）
   - root cause 列舉：cooldown / regime / panel_unavailable / scanner_threshold / **strategy↔position desync (W7 fix 後應消失)**
   - 與 W6-4 [59] 同窗
-- W6-8. **W6-1 RFC verdict 明文化**（v3.2 新，per PA #2 Q1 建議）
-  - RFC verdict 明文記「cost_gate hard rule 維持，不引 advisory mode」入 RFC report
-  - 避免 N+2 又重提 advisory 路徑
+- W6-8. **W6-1 RFC verdict 明文化**（v3.2 新，per PA #2 Q1 建議 + QC + MIT 補強）
+  - RFC verdict 明文記三條：
+    - 「cost_gate hard rule 維持，不引 advisory mode」（PA Q1 + QC Q1）
+    - 「JS shrinkage 強收縮到 grand_mean 是設計預期；cost_gate 拒擋 shrunk negative 即拒擋 cell-level alpha 在當前 grand_mean negative 環境下」（QC Q1）
+    - 「QC 數學分析確認 cost_gate 放行 expected new fills net edge ≈ -14 bps，不需要也不應做 counterfactual backtest」（QC Q2）
+    - 「**trainer task type confirm: scorer_trainer 是 regression**，W6-5 不套 LightGBM imbalance flag」（MIT Q1）
+  - 避免 N+2 又重提 advisory / counterfactual / imbalance flag 路徑
+- W6-9. **【v3.3 新】[62] check_per_strategy_sample_gate healthcheck**（per MIT Q4，E1 IMPL 0.5 day，與 W6-7 同窗）
+  - 加 `helper_scripts/db/passive_wait_healthcheck/checks_per_strategy_sample_gate.py`（[62]）
+  - 5 策略各列 30d sample 對比 MIN_SAMPLES (200)；標 PASS/WARN/FAIL
+  - funding_arb 排除清單 hard-code（dormant by design ADR-0018）
+  - 用途：監測 ma_crossover (167→200 預估 6d) / bb_breakout (27→200 預估 7w+) per-strategy training readiness
+- W6-10. **【v3.3 新】fills/day rate snapshot baseline 健檢項**（per MIT Q4，加入 [40] healthcheck enhancement，0.25 day）
+  - 每週 grid_trading / ma_crossover / bb_breakout / bb_reversion 各 fills/day baseline snapshot 入 console
+  - 避免 N+2 用 stale 70/day baseline 作決策（修正：當前 actual 93/day）
 
 **Sub-agent assignment**:
 - D+0: PA + QC + MIT 三角 RFC parallel（1 day，baseline 已備）
@@ -393,34 +456,38 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 
 ---
 
-## §4 Schedule（Day-by-Day — v3.2 加 W7 + PA D+0 trait skeleton 合併 commit）
+## §4 Schedule（Day-by-Day — v3.3 update：W7-1 + W7-3 + W6 RFC 三角預備立場 + trait skeleton 全提早 land）
 
 ```
-D+0 (2026-05-11 等 N+0 21:30 UTC forward watch metric 2/3 sign-off)
-  PA: Sprint N+1 dispatch v3.2 finalize
-  PA: 【critical 1 commit】 AlphaSurface trait skeleton 合併 commit:
-       - W2 BtcLeadLagPanel struct + AlphaSurface.btc_lead_lag field + 3 constructor
-       - W7 TickContext.position_state field + 5 策略 signature 對齊 + slots/dispatch anchor
-       - ~85 LOC, single commit, no business logic
-  PM: 派發 W7 IMPL / W6 三角 RFC / W1 spec / W2 三角 spec / W4 E4 / W5 多 P1 並行
+D-0 (2026-05-10, 已完成提前準備):
+  ✅ W7-3 Option B 補丁 (HEAD b42731f6): ma_crossover.on_rejection sync, NOT DEPLOYED
+  ✅ W7-1 + W2 trait skeleton (HEAD c9fb0b8f): TickContext.position_state + BtcLeadLagPanel, NOT DEPLOYED
+  ✅ W6 RFC 3 視角預備立場 land (HEAD db8d57ae): PA hold A 4 / QC hold A 4 / MIT hold B Q2 + W6-5 category error 揭露
+  ✅ memory 修正: cron daily 非 weekly (hybrid 5 daily training + 5 weekly Sunday audit)
+
+D+0 (2026-05-11 等 N+0 21:30 UTC forward watch metric 2/3 sign-off):
+  PA: Sprint N+1 dispatch v3.3 finalize
+  PM: 一次 restart_all --rebuild --keep-auth deploy W7-3 + W7-1 + W2 trait skeleton (省 3 次 restart cost)
+  PM: 派發 W7-2/W7-4/W7-5 + W6 三角 RFC (1 day, baseline + 3 視角預備立場已備) + W1 spec + W2 三角 spec + W4 E4 + W5 多 P1 並行
   ⚠️ W3 Stage 1 cohort 暫不派（等 W6 verdict + W7 完成）
 
-D+1 ~ D+2 (spec + W7 IMPL phase 並行)
-  W7 E1 IMPL W7-2 ma_crossover entry path fix + W7-3 on_rejection sync (1.5 day)
-  W6 PA + QC + MIT 三角 RFC（governance reject 對齊，1 day baseline 已備）
-  W2 PA + QC + MIT 三角 spec（A4-C BTC→Alt Lead-Lag，2 day）
-  W1 PA spec finalize（W-AUDIT-8a Phase B Tier 2 panel）
-  W4 E4 runtime smoke（D+1 完）
-  W5 多 P1 並行 spec phase（含 P1-BB-REVERSION-FIRE-AUDIT）
+D+1 (spec + W7-2 IMPL phase 並行)
+  W7-2 E1 IMPL ma_crossover entry path 用 ctx.position_state query (~10 LOC + unit test, 0.5 day)
+  W6 PA + QC + MIT 三角 RFC (1 day, baseline + 3 視角預備立場已備, 直接 sign-off)
+  W2 PA + QC + MIT 三角 spec (A4-C BTC→Alt Lead-Lag, 2 day)
+  W1 PA spec finalize (W-AUDIT-8a Phase B Tier 2 panel)
+  W4 E4 runtime smoke (D+1 完)
+  W5 多 P1 並行 spec phase (含 P1-BB-REVERSION-FIRE-AUDIT)
 
-D+2 ~ D+3 (W7 systemic audit + IMPL 大爆發)
-  W7 PA + E1 W7-4 5 策略 systemic audit (1 day)
+D+1 ~ D+2 (W7 + W6 IMPL 大爆發)
+  W7 PA + E1 W7-4 5 策略 systemic audit using ctx.position_state (1 day)
   W7 E1 W7-5 on_fill + bootstrap import_positions (0.5 day)
-  W7 E2 review (D+3)
-  W6 E1 IMPL V086 reject_reason_code + multi-class label split + M4 monitor [59] + [61] silence healthcheck
+  W7 E2 review + E4 regression (D+2)
+  W6 E1 IMPL V086 兩 column (reject_reason_code + close_reason_code) + W6-3 18+ enum spec + M4 monitor [59] + [61] silence + [62] per-strategy sample gate + [40] fills/day baseline
+  W6-5 sample_weight ratio sensitivity 試行 (regression, 不再用 LightGBM imbalance flag)
   W1 E1-α IMPL B-1 (funding_curve writer + V085, 3 day)
   W1 E1-β IMPL B-2 (oi_delta_panel + V087, 3 day)
-  W2 E1-γ NO-OP (trait extension 已 PA D+0 commit, 範圍縮為 typedef 驗收)
+  W2 E1-γ NO-OP (trait extension 已 c9fb0b8f land, 範圍縮為 typedef 驗收)
   W2 E1-δ IMPL C-IMPL-2 lead-lag producer + V088 migration (2 day)
   W5 P1 IMPL
 
@@ -489,8 +556,11 @@ D+11 ~ D+12（W2 paper edge evidence review）
 4. ✅ **Multi-class label split**：decision_features `label_close_tag` 顯示 3 類分布（rejected_cost_gate / rejected_duplicate_position / rejected_other）
 5. ✅ **M4 reject reason mix monitor [59]**：baseline + alert 設好；24h dry-run 0 spurious alert（**不**用 reject rate > 95% 作 alert，這是 normal）
 6. ✅ **[61] strategy fire silence healthcheck**（W6-7）：5 策略 24h 監控 baseline 入 console；funding_arb 排除清單 hard-code 已驗
-7. ✅ **LightGBM imbalance handling 試行報告 land**（`is_unbalance` / `scale_pos_weight=4` AUC + precision + recall 對比）— **僅報告對比，不 deploy 入 production cron**（per PA #2 Q3 建議）
-8. ✅ **ML retrain 4-gate 全達**（per PA #2 Q3）：(a) V086 land + dual-write 24h 0 NULL drift (b) multi-class label 3 類各 sample ≥ 200 row (c) LightGBM imbalance 試行報告 PASS (d) 全部 4 條才 enable production retrain
+7. ✅ **【v3.3 重設計】Sample weight ratio sensitivity 試行報告**（per MIT Q1 揭露 W6-5 category error）— sample_weight 1/100 / 1/170 / 1/300 / 1/500 對 RMSE + Sharpe + cost_gate decision 影響對比；**僅報告對比，不 deploy 入 production cron**；不再用 LightGBM imbalance flag（regression silently ignore）
+8. ✅ **【v3.3 重設計】ML retrain 拆兩 Track**（per MIT Q2 反 PA hold A）：
+   - **Track A (regression scorer 微調 immediate)**：trainer task type confirm = regression → 可立即跑 W6-5 sample_weight ratio sensitivity；不需 V086；不需 multi-class；達 W6-5 試行報告 PASS 即可
+   - **Track B (multi-class / classification future, 留 N+2/N+3)**：(a) V086 兩 column land + dual-write 24h 0 NULL drift (b) multi-class label 18+ enum 各 class sample ≥ 200 row (c) classification trainer task 升級設計 spec (d) imbalance handling 試行報告 PASS — 4 條全達才 enable production multi-class retrain
+   - **W6 N+1 acceptance 只需 Track A PASS**（Track B 留 N+2/N+3）
 9. ✅ W1 Phase B funding_curve + oi_delta_panel writer 上線；25-symbol 1h 內 ≥ 100 row each
 10. ✅ W2 A4-C spec 三方（PA / QC / MIT）APPROVE land + **paper IMPL fast-track**：AlphaSurface trait extension + lead-lag producer + V088 panel migration sqlx success + paper engine 7d 累積 sample n ≥ 100 fills per cohort symbol + paper edge report land（avg_net_bps + DSR + sample size）
 11. ✅ W3 Stage 1 cohort 第一個 atomic patch 通過 [58] healthcheck；3-day observation attribution_chain_ok ≥ 80%
@@ -536,13 +606,18 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ---
 
-**已整合 evidence**（v3.2 update）:
-- ✅ QC replay: TONUSDT 7-30d structural edge → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--tonusdt_structural_edge_replay.md`（verdict C，conditional path）
-- ✅ MIT chain integrity replay → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md`（chain 100%，governance reject 99.5% 提名 P0）
+**已整合 evidence**（v3.3 update）:
+- ✅ QC replay TONUSDT structural edge → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--tonusdt_structural_edge_replay.md`（verdict C, conditional path）
+- ✅ MIT chain integrity replay → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md`（chain 100%, governance reject 99.5% 提名 P0）
 - ✅ MIT W6 baseline 預跑 → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md`（governance 沒 over-fit，真 gap = metadata + imbalance + duplicate_intent bug）
-- ✅ **PA #1 AlphaSurface trait coord** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`（W1+W2 並行 0 file 重疊，PA D+0 commit ~85 LOC 含 W7 TickContext）
-- ✅ **PA #2 W6 RFC PA-view** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_rfc_pa_questions_self_answer.md`（4 立場 + 6 條 dispatch update）
-- ✅ **PA #3 P1-MA-CROSSOVER audit** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`（HIGH confidence cross-strategy desync hot loop，升 P0 W7）
+- ✅ PA #1 AlphaSurface trait coord → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`
+- ✅ PA #2 W6 RFC PA-view → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_rfc_pa_questions_self_answer.md`
+- ✅ PA #3 P1-MA-CROSSOVER audit → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
+- ✅ **QC W6 RFC 自答** → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w6_rfc_qc_questions_self_answer.md`（4 hold A + 6 dispatch update）
+- ✅ **MIT W6 RFC 自答** → `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w6_rfc_mit_questions_self_answer.md`（揭露 W6-5 category error + 7 dispatch update）
+- ✅ **E1 PA D+0 trait skeleton 預寫** → `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w2_w7_1_trait_skeleton_prewrite.md`（HEAD `c9fb0b8f`，W7-1 提早 land，0 borrow checker）
+- ✅ **W7-3 Option B 補丁** → `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w7_3_emergency_1tick_defense.md`（HEAD `b42731f6`，補丁式 1-tick defense）
+- ✅ **Deploy SOP** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_3_deploy_sop.md`
 
 **Final Step**: 21:30 UTC HIGH-5 forward watch metric 2/3 sign-off 後此 draft v2 升 final（metric 1 已 MIT 提早 close），TODO v19 §6.5 加入 Sprint N+1 banner + reference link。
 
