@@ -2691,3 +2691,51 @@ Strategy trait (`strategies/mod.rs`) 對 W7 pattern **不強制**：on_rejection
 7. PA memory.md 追加 W6-1 verdict 摘要（即本條）
 
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_1_rfc_pa_signoff_verdict.md`
+
+## 2026-05-10 AMD-2026-05-11-W6-1 Draft — 14 Push Back Absorb (PA APPROVE-DRAFT)
+
+**性質**：W6-1 RFC final verdict draft 三角 sign-off 完成（PA + QC + MIT 全 APPROVE-CONDITIONAL）後，PA 起草 AMD 正式件 absorb 14 push back items 為 governance amendment。
+**Verdict**: APPROVE-DRAFT（14/14 push back 全 capture HIGH fidelity；4/4 verdict fidelity HIGH；PA 對抗性自評 PASS；待 QC + MIT verify push back absorb fidelity + PM 統合 sign-off + Operator 拍板）
+
+**14 push back 分類處理**：
+- **5 條 doc/wording fix 立即 land**：PA PB#1 + QC PB#1 + MIT MUST 1 (V086 SQL §2 註解三方同源) + PA PB#3 (4-agent loss audit cross-ref) + MIT MUST 4 (CLAUDE.md §七 idempotency wording — operator 動)
+- **5 條 quant/acceptance gate update**：QC PB#2 + MIT SHOULD 6 (Track B (b) per-class N + 核心 5 策略 ≥3 整合) + QC PB#3 (Track A pre-M3 era filter) + QC PB#4 ([40] LOW_SAMPLE flag) + PA PB#2 (Track B (e) gate weekly HC [63])
+- **3 條 IMPL 已 land/IN FLIGHT**：MIT MUST 5 memory chain era-split ✅ DONE (commits 332a2f9c + 9159362c) / MIT SHOULD 7 chain integrity HC [65] ✅ DONE (commit db17e205) / MIT MUST 2 V091 schema mutex CHECK NOT VALID 🟢 IN FLIGHT (skeleton commit 50e75bff + sub-agent a254b07d 跑中)
+- **1 條 IMPL 待 D+1+**：MIT MUST 3 W6-5 試行 5 ML pipeline metrics + purge+embargo CV (per-fold RMSE 95% CI / IS-OOS gap / cross-fold std/mean / PSI+KS / cost_gate decision distribution shift)
+
+**4 verdict fidelity verify (三角 sign-off 結果)**：
+- Verdict 1 cost_gate hard rule 維持: PA APPROVE / QC APPROVE FULL / MIT APPROVE — 16 root principles + Rust source + 數學否決鏈 + 反指 + N+2 防線 全保留
+- Verdict 2 JS shrinkage signature: PA APPROVE / QC APPROVE FULL / MIT APPROVE — JS B 公式 + 4 cells std=1.04 bps + Unwind 唯一途徑 grand_mean 翻正 全保留
+- Verdict 3 expected -14 bps 不需 counterfactual: PA APPROVE / QC APPROVE FULL / MIT APPROVE — 數學論據 + 4 bias 修正成本 + Kelly/DSR 雙重否決 全保留
+- Verdict 4 scorer regression task type: PA APPROVE / QC APPROVE FULL / MIT APPROVE FULLY — MIT category error + sample_weight contribution weighting + QC PB#1 wording 修正 (移除 "cost_gate decision distribution" 誤導)
+
+**整合 wording 設計** (QC PB#2 + MIT SHOULD 6 同源不同 wording)：
+- MIT SHOULD 6 wording 主：「核心 5 策略中 ≥3 策略各 class sample ≥ 200」+ funding_arb 排除清單 hard-code per ADR-0018
+- QC PB#2 wording 補強：對選定 ≥3 策略內，per-class N ≥ 60 for ≥80% enum (detect Δ=0.5 with α=0.05 Bonferroni 修正後 power ≈ 0.65) OR per-class N ≥ 240 全 enum
+- 兩條件擇一滿足即 (b) gate PASS；解 funding_arb 永遠 blocking 風險 + per-class N quant 統計 power 要求兩維度
+
+**Track B 5-gate 修訂** (原 4-gate + (e) gate per PA PB#2)：(a) V086 land + 24h dual-write 0 NULL drift / (b) 核心 5 策略中 ≥3 策略 + per-class N quant 標準 / (c) classification trainer task spec / (d) imbalance handling 試行 / (e) N+1 期間 weekly sample 累積 healthcheck [63]
+
+**16/16 root principles compliance + 0 DOC-08 §12 不變量觸碰 + 0 §四 硬邊界觸碰** — 評級 A
+
+**D+1 critical path** (per AMD §10)：
+1. D+1 08:00 UTC: AMD draft commit + push
+2. D+1 09:00 UTC: V091 sub-agent IMPL 完成 + commit + push
+3. D+1 12:00 UTC: PA + QC + MIT verify 本 AMD push back absorb fidelity
+4. D+1 20:00 UTC: engine restart_all --rebuild --keep-auth deploy V086 producer code
+5. D+2 14:30 UTC: ALTER TABLE VALIDATE CONSTRAINT V091 ENFORCE
+
+**E2 重點審查 3 點** (V086 SQL §2 註解 wording / V091 Guard A/B/C 完整性 / W6-9 [63] healthcheck SQL design)
+
+**Confidence**: HIGH (14 push back 全 capture + 4 verdict fidelity HIGH + IMPL status transparent + PA 對抗性自評 PASS + 16 principles A 級 + 副作用 transparent)
+
+**Open items**:
+1. CLAUDE.md §七 idempotency wording 修正屬 operator 動作 (per MIT MUST 4)，時點不在 PA 控制
+2. V091 sub-agent (a254b07d) IMPL 完成 timing 取決於 sub-agent runtime
+3. (b) gate 4 close enum < 200 永不過 risk — N+2 spec phase work item
+
+**Lesson** (與 W6 chain 5 round 教訓延續): AMD absorb 14 push back 整合處理「兩源 push back 同事項」(PA PB#1 + MIT MUST 1 V086 SQL 註解 / QC PB#2 + MIT SHOULD 6 Track B (b) gate) 必明標兩源並合併 acceptance criteria — 不可任一 push back 獨立 absorb 而把另一視為 redundant，三角 sign-off 各自立場必全保留。
+
+**Reports**:
+- AMD draft: `srv/docs/governance_dev/amendments/2026-05-11--AMD-2026-05-11-W6-1-rfc-final-verdict-absorb.md` (608 LOC)
+- PA sign-off: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--amd_w6_1_draft_pa_signoff.md` (264 LOC)
