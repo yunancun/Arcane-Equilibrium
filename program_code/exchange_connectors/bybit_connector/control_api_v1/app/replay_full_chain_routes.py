@@ -35,9 +35,9 @@ from .replay_quick_routes import (
     _fetch_current_scanner_snapshot,
     _fetch_full_chain_events,
     _fetch_full_chain_strategy_params,
-    _max_full_chain_bars_per_symbol,
-    _max_full_chain_events,
+    _raise_prepare_rejection,
     _require_full_chain_bulk_prod_ip_allowed,
+    _replay_prepare_policy,
     _resolve_full_chain_symbols,
     _rh,
     _to_utc_ms,
@@ -1005,6 +1005,7 @@ async def _prepare_full_chain_run_fixture(
     strategies: list[str],
 ) -> dict[str, Any]:
     _require_full_chain_bulk_prod_ip_allowed()
+    policy = _replay_prepare_policy()
     start_ms = _to_utc_ms(body.data_window_start)
     end_ms = _to_utc_ms(body.data_window_end)
     estimated_bars_per_symbol = _estimate_bar_count(
@@ -1012,19 +1013,12 @@ async def _prepare_full_chain_run_fixture(
         end_ms,
         body.timeframe,
     )
-    max_bars_per_symbol = _max_full_chain_bars_per_symbol()
-    if estimated_bars_per_symbol > max_bars_per_symbol:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_full_chain_window_too_large_per_symbol"],
-                "message": (
-                    f"requested window estimates {estimated_bars_per_symbol} "
-                    f"bars per symbol; full-chain per-symbol limit is "
-                    f"{max_bars_per_symbol}"
-                ),
-            },
-        )
+    max_bars_per_symbol = policy.full_chain_max_bars_per_symbol
+    rejection = policy.validate_full_chain_bars_per_symbol(
+        estimated_bars_per_symbol=estimated_bars_per_symbol,
+    )
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
 
     scanner_snapshot: dict[str, Any] = {}
     scanner_warning: Optional[str] = None
@@ -1068,18 +1062,12 @@ async def _prepare_full_chain_run_fixture(
         warnings.append(scanner_warning)
 
     estimated_events = estimated_bars_per_symbol * len(symbols)
-    max_events = _max_full_chain_events()
-    if estimated_events > max_events:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_full_chain_window_too_large"],
-                "message": (
-                    f"requested window estimates {estimated_events} events across "
-                    f"{len(symbols)} symbols; full-chain limit is {max_events}"
-                ),
-            },
-        )
+    rejection = policy.validate_full_chain_event_window(
+        estimated_events=estimated_events,
+        symbol_count=len(symbols),
+    )
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
 
     try:
         market_task = _fetch_full_chain_events(
@@ -1277,6 +1265,7 @@ async def _prepare_full_chain_run_fixture(
 async def _resolve_full_chain_coverage_scope(
     body: ReplayFullChainRunRequest,
 ) -> dict[str, Any]:
+    policy = _replay_prepare_policy()
     start_ms = _to_utc_ms(body.data_window_start)
     end_ms = _to_utc_ms(body.data_window_end)
     estimated_bars_per_symbol = _estimate_bar_count(
@@ -1284,19 +1273,11 @@ async def _resolve_full_chain_coverage_scope(
         end_ms,
         body.timeframe,
     )
-    max_bars_per_symbol = _max_full_chain_bars_per_symbol()
-    if estimated_bars_per_symbol > max_bars_per_symbol:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_full_chain_window_too_large_per_symbol"],
-                "message": (
-                    f"requested window estimates {estimated_bars_per_symbol} "
-                    f"bars per symbol; full-chain per-symbol limit is "
-                    f"{max_bars_per_symbol}"
-                ),
-            },
-        )
+    rejection = policy.validate_full_chain_bars_per_symbol(
+        estimated_bars_per_symbol=estimated_bars_per_symbol,
+    )
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
 
     scanner_snapshot: dict[str, Any] = {}
     historical_universe: dict[str, Any] = {}
@@ -1340,18 +1321,12 @@ async def _resolve_full_chain_coverage_scope(
         warnings.extend(resolved_warnings)
 
     estimated_events = estimated_bars_per_symbol * len(symbols)
-    max_events = _max_full_chain_events()
-    if estimated_events > max_events:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_full_chain_window_too_large"],
-                "message": (
-                    f"requested window estimates {estimated_events} events across "
-                    f"{len(symbols)} symbols; full-chain limit is {max_events}"
-                ),
-            },
-        )
+    rejection = policy.validate_full_chain_event_window(
+        estimated_events=estimated_events,
+        symbol_count=len(symbols),
+    )
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
     return {
         "start_ms": start_ms,
         "end_ms": end_ms,

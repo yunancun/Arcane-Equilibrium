@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field, validator
 from . import main_legacy as base
 from .auth import require_scope_and_operator
 from .ipc_dispatch import one_shot_ipc_call
+from .replay_prepare_policy import ReplayPreparePolicy, ReplayPrepareRejection
 
 try:
     from ..replay import route_helpers as _rh  # type: ignore[no-redef]
@@ -230,67 +231,48 @@ def _estimate_bar_count(start_ms: int, end_ms: int, timeframe: str) -> int:
     return int(math.ceil((end_ms - start_ms) / interval_ms))
 
 
+def _replay_prepare_policy() -> ReplayPreparePolicy:
+    return ReplayPreparePolicy.from_env()
+
+
+def _raise_prepare_rejection(rejection: ReplayPrepareRejection) -> None:
+    raise HTTPException(
+        status_code=rejection.status_code,
+        detail=rejection.as_detail(),
+    )
+
+
 def _max_quick_bars() -> int:
-    raw = os.environ.get("OPENCLAW_REPLAY_QUICK_MAX_BARS", "5000")
-    try:
-        parsed = int(raw)
-    except ValueError:
-        parsed = 5000
-    return max(200, min(parsed, 20_000))
+    return _replay_prepare_policy().quick_max_bars
 
 
 def _max_full_chain_events() -> int:
-    raw = os.environ.get("OPENCLAW_REPLAY_FULL_CHAIN_MAX_EVENTS", "100000")
-    try:
-        parsed = int(raw)
-    except ValueError:
-        parsed = 100_000
-    return max(1_000, min(parsed, 300_000))
+    return _replay_prepare_policy().full_chain_max_events
 
 
 def _full_chain_prepare_enabled() -> bool:
-    raw = os.environ.get("OPENCLAW_REPLAY_PREPARE_ENABLED", "0")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return _replay_prepare_policy().full_chain_prepare_enabled
 
 
 def _bulk_prod_ip_allowed() -> bool:
-    raw = os.environ.get("OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP", "0")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return _replay_prepare_policy().full_chain_bulk_prod_ip_allowed
 
 
 def _require_full_chain_bulk_prod_ip_allowed() -> None:
     """Block bulk Bybit fetches from the live release host unless explicitly enabled."""
-    if not _rh.is_live_release_profile() or _bulk_prod_ip_allowed():
-        return
-    raise HTTPException(
-        status_code=403,
-        detail={
-            "reason_codes": ["replay_full_chain_prod_ip_blocked"],
-            "message": (
-                "full-chain replay prepare is enabled, but bulk Bybit fetches "
-                "from the live release host are blocked unless "
-                "OPENCLAW_REPLAY_BULK_ALLOW_PROD_IP=1 is set for a governed run"
-            ),
-        },
+    rejection = _replay_prepare_policy().validate_full_chain_bulk_prod_ip(
+        is_live_release_profile=_rh.is_live_release_profile(),
     )
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
 
 
 def _max_full_chain_bars_per_symbol() -> int:
-    raw = os.environ.get("OPENCLAW_REPLAY_FULL_CHAIN_MAX_BARS_PER_SYMBOL", "12000")
-    try:
-        parsed = int(raw)
-    except ValueError:
-        parsed = 12_000
-    return max(200, min(parsed, 50_000))
+    return _replay_prepare_policy().full_chain_max_bars_per_symbol
 
 
 def _full_chain_fetch_concurrency() -> int:
-    raw = os.environ.get("OPENCLAW_REPLAY_FULL_CHAIN_FETCH_CONCURRENCY", "3")
-    try:
-        parsed = int(raw)
-    except ValueError:
-        parsed = 3
-    return max(1, min(parsed, 5))
+    return _replay_prepare_policy().full_chain_fetch_concurrency
 
 
 def _fixture_root() -> Path:
@@ -622,18 +604,10 @@ async def post_replay_quick_prepare(
     start_ms = _to_utc_ms(body.data_window_start)
     end_ms = _to_utc_ms(body.data_window_end)
     estimated_bars = _estimate_bar_count(start_ms, end_ms, body.timeframe)
-    max_bars = _max_quick_bars()
-    if estimated_bars > max_bars:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_quick_window_too_large"],
-                "message": (
-                    f"requested window estimates {estimated_bars} bars; "
-                    f"quick replay limit is {max_bars}"
-                ),
-            },
-        )
+    policy = _replay_prepare_policy()
+    rejection = policy.validate_quick_window(estimated_bars=estimated_bars)
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
 
     try:
         market_task = asyncio.to_thread(
@@ -717,34 +691,20 @@ async def post_replay_full_chain_prepare(
 ) -> dict[str, Any]:
     """Prepare a REF-21 full-chain multi-symbol S2 fixture + config snapshots."""
     _require_replay_write(actor)
-    if not _full_chain_prepare_enabled():
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "reason_codes": ["replay_full_chain_prepare_disabled"],
-                "message": (
-                    "full-chain replay prepare is disabled; set "
-                    "OPENCLAW_REPLAY_PREPARE_ENABLED=1 only for governed R1 hardening"
-                ),
-            },
-        )
+    policy = _replay_prepare_policy()
+    rejection = policy.validate_full_chain_prepare_enabled()
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
     _require_full_chain_bulk_prod_ip_allowed()
     start_ms = _to_utc_ms(body.data_window_start)
     end_ms = _to_utc_ms(body.data_window_end)
     estimated_bars_per_symbol = _estimate_bar_count(start_ms, end_ms, body.timeframe)
-    max_bars_per_symbol = _max_full_chain_bars_per_symbol()
-    if estimated_bars_per_symbol > max_bars_per_symbol:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_full_chain_window_too_large_per_symbol"],
-                "message": (
-                    f"requested window estimates {estimated_bars_per_symbol} "
-                    f"bars per symbol; full-chain per-symbol limit is "
-                    f"{max_bars_per_symbol}"
-                ),
-            },
-        )
+    max_bars_per_symbol = policy.full_chain_max_bars_per_symbol
+    rejection = policy.validate_full_chain_bars_per_symbol(
+        estimated_bars_per_symbol=estimated_bars_per_symbol,
+    )
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
 
     scanner_snapshot: dict[str, Any] = {}
     scanner_warning: Optional[str] = None
@@ -763,18 +723,12 @@ async def post_replay_full_chain_prepare(
         warnings.append(scanner_warning)
 
     estimated_events = estimated_bars_per_symbol * len(symbols)
-    max_events = _max_full_chain_events()
-    if estimated_events > max_events:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason_codes": ["replay_full_chain_window_too_large"],
-                "message": (
-                    f"requested window estimates {estimated_events} events across "
-                    f"{len(symbols)} symbols; full-chain limit is {max_events}"
-                ),
-            },
-        )
+    rejection = policy.validate_full_chain_event_window(
+        estimated_events=estimated_events,
+        symbol_count=len(symbols),
+    )
+    if rejection is not None:
+        _raise_prepare_rejection(rejection)
 
     try:
         market_task = _fetch_full_chain_events(
