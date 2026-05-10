@@ -418,13 +418,29 @@ def test_live_today_pnl_uses_backend_metric_not_position_cumulative(
     console_html: str,
     tab_live_html: str,
 ) -> None:
-    """Live Today PnL must come from backend net_pnl_today, not cumRealisedPnl."""
-    assert "net_pnl_today" in tab_live_html
-    assert "net_pnl_today" in console_html
+    """Live Today PnL must come from backend today account metrics, not cumRealisedPnl."""
     assert "account_metrics_today" in tab_live_html
     assert "account_metrics_today" in console_html
     assert "cumRealisedPnl" not in tab_live_html
     assert "cum_realised_pnl" not in tab_live_html
+
+
+def test_demo_and_live_pnl_charts_use_time_series_not_recent_fill_page(
+    tab_demo_html: str,
+    tab_live_html: str,
+    common_js: str,
+) -> None:
+    """Demo/Live PnL charts must use range-adjustable backend series."""
+    assert "last 50 Demo fills" not in tab_demo_html
+    assert "last 50 Live fills" not in tab_live_html
+    assert "/api/v1/strategy/demo/pnl-series?range=" in tab_demo_html
+    assert "/api/v1/live/pnl-series?range=" in tab_live_html
+    assert "demo-pnl-range-controls" in tab_demo_html
+    assert "live-pnl-range-controls" in tab_live_html
+    assert "ocPnlTrend('demo-pnl-line'" not in tab_demo_html
+    assert "ocPnlTrend('live-pnl-line'" not in tab_live_html
+    assert "ocPnlSeriesTrend" in common_js
+    assert "ocPnlSeriesTableRows" in common_js
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(

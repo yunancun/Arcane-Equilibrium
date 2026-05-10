@@ -749,6 +749,32 @@ def get_live_metrics(
     return core._live_response(full)
 
 
+@core.live_router.get("/pnl-series")
+def get_live_pnl_series(
+    range_key: str = Query("24h", alias="range"),
+    bucket_sec: int | None = Query(None, ge=60, le=86400),
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """GET /api/v1/live/pnl-series — bucketed Live PnL series. / Live 分桶 PnL 序列。"""
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
+    from .pnl_series import fetch_pnl_series
+
+    engine_kind = core._get_live_engine_kind()
+    actual_endpoint = core._resolve_live_endpoint_label()
+    if actual_endpoint == "live_demo":
+        db_modes = ["live_demo"]
+    elif actual_endpoint == "mainnet":
+        db_modes = ["live"]
+    elif engine_kind == "live":
+        db_modes = ["live"]
+    else:
+        db_modes = ["live"]
+    return core._live_response(fetch_pnl_series(db_modes, range_key=range_key, bucket_sec=bucket_sec))
+
+
 def _fetch_total_ai_cost_30d_safe() -> float | None:
     """Fetch AI cost for metrics without failing the Live route.
 

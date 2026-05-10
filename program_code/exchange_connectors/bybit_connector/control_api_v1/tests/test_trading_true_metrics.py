@@ -74,7 +74,7 @@ def test_build_performance_metrics_prefers_mlde_edge_quality() -> None:
     )
 
     assert _metric(metrics, "total_fills_7d")["value"] == 12
-    assert _metric(metrics, "net_pnl_today")["value"] == 0.75
+    assert not any(m["key"] == "net_pnl_today" for m in metrics)
     assert _metric(metrics, "net_pnl_24h")["value"] == -1.25
     assert _metric(metrics, "avg_net_edge")["value"] == -7.25
     assert _metric(metrics, "avg_net_edge")["unit"] == "bps"

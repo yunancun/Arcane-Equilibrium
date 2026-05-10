@@ -792,6 +792,87 @@ function ocPnlTrend(lineId, labelId, fills, zeroLineId) {
   }
 }
 
+function ocPnlSeriesTrend(lineId, labelId, points, zeroLineId, summary) {
+  var lineEl = document.getElementById(lineId);
+  var labelEl = document.getElementById(labelId);
+  if (!lineEl) return;
+  var rows = Array.isArray(points) ? points : [];
+  if (!rows.length) {
+    lineEl.setAttribute('points', '');
+    if (labelEl) { labelEl.textContent = 'no data'; labelEl.setAttribute('fill', 'var(--text-dim)'); }
+    return;
+  }
+  var series = rows.map(function(p) {
+    var n = Number(p && p.cumulative_net_pnl);
+    return Number.isFinite(n) ? n : 0;
+  });
+  var W = 400, H = 120, pad = 8;
+  var minV = Math.min(0, Math.min.apply(null, series));
+  var maxV = Math.max(0, Math.max.apply(null, series));
+  var range = (maxV - minV) || 1;
+  var yFor = function(v) { return H - pad - ((v - minV) / range) * (H - pad * 2); };
+  var pointsAttr = series.map(function(v, i) {
+    var x = series.length > 1 ? pad + (i / (series.length - 1)) * (W - pad * 2) : W / 2;
+    return x.toFixed(1) + ',' + yFor(v).toFixed(1);
+  }).join(' ');
+  lineEl.setAttribute('points', pointsAttr);
+  var last = series[series.length - 1];
+  lineEl.setAttribute('stroke', last >= 0 ? 'var(--green)' : 'var(--red)');
+  if (zeroLineId) {
+    var zEl = document.getElementById(zeroLineId);
+    if (zEl) {
+      var zy = yFor(0).toFixed(1);
+      zEl.setAttribute('x1', pad);
+      zEl.setAttribute('x2', W - pad);
+      zEl.setAttribute('y1', zy);
+      zEl.setAttribute('y2', zy);
+    }
+  }
+  if (labelEl) {
+    var fills = summary && Number.isFinite(Number(summary.fills)) ? Number(summary.fills) : 0;
+    var rangeLabel = summary && summary.range ? String(summary.range).toUpperCase() : '';
+    labelEl.textContent = (last >= 0 ? '+' : '') + last.toFixed(4) + ' USDT' +
+      (rangeLabel ? ' · ' + rangeLabel : '') + ' · ' + fills + ' fills';
+    labelEl.setAttribute('fill', last >= 0 ? 'var(--green)' : 'var(--red)');
+  }
+}
+
+function ocPnlSeriesTableRows(points) {
+  var rows = Array.isArray(points) ? points.slice() : [];
+  rows = rows.filter(function(p) {
+    return p && (Number(p.fills) || Number(p.net_pnl) || Number(p.funding_pnl));
+  }).slice(-14).reverse();
+  if (!rows.length) {
+    return '<tr class="empty-row"><td colspan="5">no PnL buckets</td></tr>';
+  }
+  return rows.map(function(p) {
+    var net = Number(p.net_pnl);
+    var cum = Number(p.cumulative_net_pnl);
+    var fees = Number(p.fees);
+    return '<tr>' +
+      '<td>' + ocEsc(ocTime(p.ts_ms)) + '</td>' +
+      '<td>' + (Number(p.fills) || 0) + '</td>' +
+      '<td class="' + ocPnlClass(net) + '">' + ocMoney(Number.isFinite(net) ? net : 0, 4) + '</td>' +
+      '<td class="' + ocPnlClass(cum) + '">' + ocMoney(Number.isFinite(cum) ? cum : 0, 4) + '</td>' +
+      '<td>' + ocBalance(Number.isFinite(fees) ? fees : 0, 4) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function ocSetPnlRangeButtons(containerId, activeRange) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  var active = String(activeRange || '').toLowerCase();
+  el.querySelectorAll('button[data-pnl-range]').forEach(function(btn) {
+    var isActive = String(btn.getAttribute('data-pnl-range') || '').toLowerCase() === active;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    btn.style.borderColor = isActive ? 'rgba(56,139,253,0.75)' : '';
+    btn.style.background = isActive ? 'rgba(56,139,253,0.16)' : '';
+    btn.style.color = isActive ? 'var(--blue)' : '';
+  });
+}
+
 // Render a colored PnL <td> cell. Opening fills (PnL≈0) show as dim dash;
 // closing fills show signed value tinted green (profit) or red (loss).
 // Accepts multiple field names: realized_pnl (Rust engine) / closedPnl (Bybit API).

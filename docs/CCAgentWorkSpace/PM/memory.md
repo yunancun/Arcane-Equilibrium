@@ -2136,3 +2136,12 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Boundary: source/test/config/runtime-path only; no true-live authority,
   no MAG-083/MAG-084 unlock, and live remains disabled pending fresh
   net-positive 5m evidence.
+
+## 2026-05-10 Live/Demo PnL Series GUI Fix
+
+- Removed duplicated `net_pnl_today` from shared Performance Metrics; Today PnL now stays in the dedicated Live/Demo overview/sidebar surfaces via `account_metrics_today`.
+- Added read-only DB-backed Demo/Live `/pnl-series` endpoints with selectable ranges (`1h`, `6h`, `24h`, `7d`, `30d`) and bucketed `realized_pnl - fee + funding`.
+- Demo/Live charts no longer depend on recent fill-page data, so fast trading does not overwrite the visual trend through the last-50-fills pagination path.
+- Grafana/TradingView review: Grafana iframe embedding adds auth/anonymous-access/`allow_embedding` constraints; TradingView custom PnL requires a custom datafeed. Native backend series is the least-coupled first step and can later feed Lightweight Charts.
+- Verification: targeted pytest 14 passed, static pytest 51 passed, `py_compile`, `node --check`, embedded script parse, `git diff --check`.
+- Boundary: no restart, no rebuild, no DB migration, no live auth mutation, no strategy/risk parameter change.
