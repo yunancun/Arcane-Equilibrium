@@ -1,6 +1,6 @@
 ---
-name: Sprint N+0 closure 2026-05-10 — runtime impact verified
-description: Sprint N+0 完整 IMPL+fix+review chain land；engine restart 後 attribution_chain_ok 0.5%→100%、avg_net -17.82→+8.75bps；HIGH-5 12h watch in progress；4-agent loss audit follow-through 真實 runtime 效果
+name: Sprint N+0 closure 2026-05-10 — runtime impact verified (chain integrity 後續推翻)
+description: Sprint N+0 完整 IMPL+fix+review chain land；engine restart 後 attribution_chain_ok 0.5%→**「100% 是 n=331 窄窗 artifact, 全表 40% chain ratio」**(MIT 2026-05-10 20:35 UTC PG live empirical 推翻 prior 結論)、avg_net -17.82→+8.75bps；HIGH-5 12h watch SIGN-OFF FINAL APPROVED 20:08 UTC (提前 1h22m, A 路徑)；4-agent loss audit follow-through 真實 runtime 效果
 type: project
 originSessionId: 4111ef84-e51d-4d16-99bf-f40bf3aa8fe8
 ---
@@ -36,7 +36,7 @@ originSessionId: 4111ef84-e51d-4d16-99bf-f40bf3aa8fe8
 
 | Metric | W2 baseline | Post-restart | Delta |
 |---|---|---|---|
-| attribution_chain_ok ratio | 0.5% (mock) / 0.286% (runtime) | grid 100% n=199 / ma 100% n=59 / bb_breakout 100% n=11 | +99.5% |
+| attribution_chain_ok ratio | 0.5% (mock) / 0.286% (runtime) | ⚠️ **「100% (n=199 grid + 59 ma + 11 bb_breakout = 269 row 窄窗)」是 narrow window artifact**<br>**全表 chain ratio = 40%**（fills_w_entry_ctx=5939, fills_in_df=2369, orphan=3570/60% — MIT 2026-05-10 20:35 UTC PG live 推翻 prior 結論 per W6-1 RFC sign-off MUST 5）| 提升真實但非 100% |
 | [40] 24h MLDE avg_net | -17.82 bps | +8.75 bps | **翻正** |
 | [40] maker_like / fee_drop | 89.6% / 59.5% | 98.1% / 84.4% | 顯著好轉 |
 | _sqlx_migrations max | V79 | V84 (V80/82/83/84 全 success=t auto-migrate) | +5 |
@@ -64,14 +64,27 @@ PM session 用 `[skip ci]` commit 可 push origin/main（sandbox policy 允許 s
 - **6 P1 tickets** (per QC suggestions): WEIGHT-DYNAMIC-1 / ALPHA-SURFACE-ENUM-2 / CANARY-STAGE-CRITERIA-1 / BB-BREAKOUT-FAIL-CLOSED-1 / INVARIANT-21-THRESHOLD / CANARY-COHORT-FREQ-23
 - **加 P1-TONUSDT-GRID-BLOCK**（[40] cell -31.23bps；per W-AUDIT-6d freeze SOP 7d counterfactual evidence + DSR/PBO + RFC）
 
-## HIGH-5 12h passive watch (in progress)
+## HIGH-5 12h passive watch (✅ FINAL APPROVED 2026-05-10 20:08 UTC, 提前 1h22m, A 路徑)
 
-12h confirm window：~2026-05-10 21:30 UTC（restart at 09:30 UTC）。verify metric:
-- attribution_chain_ok ratio 持續 ≥ 80% per strategy
-- [40] avg_net 維持 ≥ 5bps 不衰退
-- TONUSDT cell 是否單獨可 isolate
+10h17m spot check 全 PASS（demo +9.18 / live_demo +38.46 / TONUSDT 0 / 24h baseline +22.77 vs N+0 +8.75）→ operator 拍板提前 sign-off A → engine restart deploy W7 chain (W7-3 + W7-1 + W7-2 + W7-5) + W4 + V087/V088 retention bug fix → engine PID 1441249 stable post-deploy 30min+。
 
-12h 後 final sign-off → Sprint N+1 dispatch.
+Sprint N+1 D+0 dispatch fire 啟動：
+- Phase 1 ✅ DONE: W6 V086 IMPL (commit `05e44ede`, production V086 applied) + W7-4 5 策略 systemic audit (3 ticket P1-1/P1-2/P2-1, 0 P0)
+- Phase 2 ✅ 部分 DONE: W6-1 RFC 三角 sign-off COMPLETE 3/3 (PA + QC + MIT 全 APPROVE-CONDITIONAL, 14 push backs)；W5-E1-A + W5-E1-C IMPL 仍 in flight
+- Phase 3 待派: W1 IMPL chain + W2 IMPL v1.2 chain + P1-1/P1-2 W7 propagation
+
+## ⚠️ MIT 2026-05-10 20:35 UTC empirical 推翻 prior chain integrity 100% 結論
+
+MIT W6-1 RFC sign-off 期間 ssh trade-core PG live audit 揭露：
+1. **chain integrity 全表 40%**（fills_w_entry_ctx=5939, fills_in_df=2369, **orphan=3570 (60%)**）
+2. **prior "100%" 是 n=331 + 269 = 窄窗 artifact**（5/10 chain replay 用窄樣本）
+3. **真實 chain coverage** 跨 4 strategies × 全 fills 後是 40%, 不是 100%
+
+**對 [40] 影響**: avg_net +8.75 bps (post-N+0 closure) / +22.77 bps (24h current) 仍 valid 因為 [40] 過 attribution_chain_ok filter 內計算，剩 40% chain 樣本仍給可信 metric — 但「chain coverage 100%」claim 必更正。
+
+**MIT MUST 5 收口**: MIT memory 補註「窄窗 n=331」+ 樣本擴大 ratio 40% RCA 入 N+2；新 healthcheck `check_chain_integrity_post_audit_4b_m3()` 入 W-AUDIT-4b 24h passive 防 re-drift。
+
+**對 V086 producer code**: MIT 22:00 UTC PG live: reject_NULL_code = 31053 / 36352 (98% NULL) — V086 producer code commit `05e44ede` 在 main 但 engine PID 1441249 跑舊 code 不 dual-write；D+1 evening restart_all --rebuild 才 deploy。D+2 14:30 UTC ALTER VALIDATE CONSTRAINT 必先確保 24h drift PASS。
 
 ## Reference paths (absolute)
 
