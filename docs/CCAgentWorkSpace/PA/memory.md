@@ -1,5 +1,41 @@
 # PA Memory — 工作記憶
 
+## Sprint N+0 sign-off invariant 17 closure 4 governance docs land（2026-05-10）
+
+**觸發**：Operator 拍板 Sprint N+0 sign-off invariant 17 closure-blocking action — 起草 ADR-0021 (strategist cap)、ARCH-04 (graduated canary 5-stage)、AMD-2026-05-09-03 (invariant 5 wording)、AMD-2026-05-09-03 配套 (TOML drift) 4 governance docs。
+
+**Action 採納**：
+1. **ADR 編號衝突**：原任務指定 ADR-0021 = strategist cap，但 ADR-0021 已被 alpha-source-architecture-upgrade 占用（2026-05-09 land）；改為 **ADR-0022** strategist-cap-wide-parameter-adjustment-skill。Push back 採納：ADR 編號漂移是 multi-session drift 的具體實例（見 R-5 Push Back 5 + W-AUDIT-1 sync issue）。
+2. **AMD 編號**：AMD-2026-05-09-03 actual 已是 graduated-canary-default（land 在 governance_dev/amendments/）；invariant 5 wording 改為 **AMD-2026-05-10-03**；TOML drift fix 改為 **AMD-2026-05-10-04**（2026-05-10 series）。docs/README.md line 170-171 兩條 phantom AMD-03/04 entry（標 strategist_wide_adjustment_skill 和 demo_promotion_evidence_push 為 AMD-03/04，但實際檔不存在）已修正。
+3. **ARCH-04**：放在 architecture/（之前無 ARCH-XX 系列檔；ARCH-02/03 是 README 標的 alias 而非檔名）；新建 `2026-05-10--ARCH-04-graduated-canary-5-stage.md` 含完整 component diagram、stage transition 表、boundary 4 範圍、IMPL wave 對應、failure fallback。
+
+**核心設計決策（4 docs 通識）**：
+- **freedom-not-gate**（ADR-0022）：30%→50% 是 Strategist LLM payload skill 升級，不是風控 ceiling 放鬆；雙 zone 教學 (normal 0-30% / wide_skill 30-50%) + ledger + monthly Guardian review；對齊 §二 原則 11
+- **graduated canary 5-stage**（ARCH-04）：Stage 0/1/2/3/4 + cohort scope；DOC-08 §12 / SM-04 ladder / Live 5-gate / §二 16 原則 4 範圍仍硬不變；rollback 永遠回 Stage 0
+- **invariant 5 wording**（AMD-03）：option A 對齊 N+0 actual M1→M2→M3 IMPL；invariant 5b N+1 預告 feature_baselines→drift_events→scorer→3 advisor
+- **TOML drift B-later**（AMD-04）：Sprint N+0 守 Stage 0 baseline；Sprint N+1 W3 cohort 拍板時同 commit atomic patch 4 欄位（shadow_mode/canary_stage/cohort/stage_entered_at_ms）+ W-AUDIT-9 T7 regression + W-AUDIT-3b runtime smoke pre-launch
+
+**commit + push status**：
+- 本地 commit `75b6e5f2` 已 land main（5 files / 1189 insertions / 3 deletions）
+- `git push origin main` 被 permission rule 阻擋（main = default branch protected）；需 operator 手動執行 `cd srv && git push origin main` 或拍板開 feature branch + PR
+- 4 docs untracked → staged 用 `git add` 個別檔；commit 用 `--only` 隔絕 BB WIP（race-safe per `feedback_git_commit_only_for_metadoc.md`）
+
+**未動的檔**（per dispatch 守則「不動 TODO.md / CLAUDE.md」）：
+- TODO.md v19 §5.3 invariant 17 wording 不動（仍 reference ADR-0021 — 需 PM commit 時順手修正為 ADR-0022 或加 cross-ref note）
+- CLAUDE.md §四 / §五 不動（dispatch 寫「如需」；本次認定不需 — ADR-0022 + ARCH-04 + AMD-03/04 互引足夠 + docs/README.md index 完整覆蓋；CLAUDE.md §三 W-AUDIT-9 IMPL land 後同 commit 加 healthcheck `[58]` 時順手 cross-ref ARCH-04 即可）
+
+**E2 重點審查 3 點**（PA 標）：
+1. ADR-0022 §配套機制 V### migration `agent.strategist_wide_skill_invocations` schema 是 W-AUDIT-7 IMPL land 時拍板，現在只是 spec；E2 不應 reject「未 IMPL」
+2. ARCH-04 §3.3 `shadow_mode_provider` exception path fail-closed Stage 0 invariant（不是 Stage 1）— 是雞蛋死循環防線，break 即 W-A 復活；W-AUDIT-9 T3 IMPL 必逐字實踐
+3. AMD-04 §2.4 W-AUDIT-3b runtime smoke pre-launch — Stage 1 launch 必先 ssh trade-core run + engine restart + log evidence；不可只跑 Mac mock
+
+**Sprint N+0 sign-off 後續配對動作**（PM 接手）：
+- 通知 PM commit 已 land + 通知 push origin main 阻擋（operator 手動 push）
+- TODO §5.3 invariant 17 wording 補正：「ADR-0021」→「ADR-0022」（或加註：「ADR-0022 完成 ADR-0021 占用後重編號」）
+- 對 22 invariant 全 PASS 後 PM 可拍板 Sprint N+0 sign-off
+
+---
+
 ## ADR-0021 升 Accepted + R-2..R-5 IMPL Spec 拆分（2026-05-09 後續）
 
 **觸發**：Operator 拍板 ADR-0021 從 Proposed → Accepted（中文「ADR 0021 可以」），同 batch 要求拆 R-2..R-5 IMPL spec 為獨立可派 E1 文件。
