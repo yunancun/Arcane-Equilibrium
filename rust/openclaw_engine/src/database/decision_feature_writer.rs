@@ -118,19 +118,26 @@ async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFea
         //                （emit 時間戳對 backfill 無意義；NOW() 標記 reject 寫入時刻）
         //   intent-only：保 V017 預設行為（label_* 欄位 default NULL/FALSE，由
         //                edge_label_backfill.py 回填）
+        // W6-3c V086 (2026-05-10)：兩變體 SQL 同步擴 reject_reason_code +
+        // close_reason_code 兩欄；reject 變體用 producer 端映射的 enum；intent-only
+        // 變體兩欄保 NULL（V086 §3 互斥不變式：close_reason_code 走 fill 後 backfill
+        // 路徑寫，不在此處 producer 入口寫）。
         // 兩條 SQL 都用 ON CONFLICT (context_id) DO NOTHING 維持冪等。
         let outcome = if feat.label_close_tag.is_some() {
-            // ── Reject 變體：寫 label 三欄 ──
+            // ── Reject 變體：寫 label 三欄 + W6-3c reject_reason_code ──
             // $11 = label_close_tag（固定 "rejected_governance"）
             // $12 = label_net_edge_bps（固定 0.0）
             // $13 = label_filled_at_now（bool，true → server-side NOW()）
+            // $14 = reject_reason_code（V086 12 enum 之一；producer 端 map 後）
+            // $15 = close_reason_code（reject path 固定 NULL，per V086 §3 互斥）
             let query = sqlx::query(
                 "INSERT INTO learning.decision_features \
                  (context_id, ts, engine_mode, strategy_name, symbol, side, \
                   feature_schema_version, feature_schema_hash, feature_definition_hash, \
-                  features_jsonb, label_close_tag, label_net_edge_bps, label_filled_at) \
+                  features_jsonb, label_close_tag, label_net_edge_bps, label_filled_at, \
+                  reject_reason_code, close_reason_code) \
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, \
-                  CASE WHEN $13 THEN now() ELSE NULL END) \
+                  CASE WHEN $13 THEN now() ELSE NULL END, $14, $15) \
                  ON CONFLICT (context_id) DO NOTHING",
             )
             .bind(feat.context_id.clone())
@@ -145,13 +152,18 @@ async fn flush_features(pool: &DbPool, pending: &mut HashMap<String, DecisionFea
             .bind(features_value)
             .bind(feat.label_close_tag.clone())
             .bind(feat.label_net_edge_bps)
-            .bind(feat.label_filled_at_now);
+            .bind(feat.label_filled_at_now)
+            .bind(feat.reject_reason_code.clone())
+            .bind(feat.close_reason_code.clone());
             exec_single_insert(pool, "learning.decision_features", query).await
         } else {
             // ── Intent-only 變體：保 V017 預設行為，label_* 欄位由 backfill 補 ──
             // label_* columns are intentionally omitted: they default to NULL/FALSE
             // per V017 DDL and are populated later by edge_label_backfill.py.
             // label_* 欄位故意省略：V017 DDL 預設 NULL/FALSE，稍後由 edge_label_backfill.py 回填。
+            // W6-3c V086 (2026-05-10): reject_reason_code + close_reason_code 兩欄
+            // 也省略；intent-only path 兩欄全 NULL（V086 default），下游 backfill / Python
+            // edge_label_backfill.py 在 fill 後 update close_reason_code（W6-3d phase）。
             let query = sqlx::query(
                 "INSERT INTO learning.decision_features \
                  (context_id, ts, engine_mode, strategy_name, symbol, side, \
@@ -199,15 +211,22 @@ mod tests {
             label_close_tag: None,
             label_net_edge_bps: None,
             label_filled_at_now: false,
+            // W6-3c V086: intent-only path 兩 reason_code 欄位 None（V086 default）。
+            reject_reason_code: None,
+            close_reason_code: None,
         }
     }
 
     /// W-AUDIT-4b-M3：reject path filler — 模擬 governance 拒絕 path 的訊息形態。
+    /// W6-3c V086：reject path 必帶 reject_reason_code（12 enum 之一），close_reason_code None。
     fn make_reject_feat(id: &str) -> DecisionFeatureMsg {
         DecisionFeatureMsg {
             label_close_tag: Some("rejected_governance".into()),
             label_net_edge_bps: Some(0.0),
             label_filled_at_now: true,
+            // W6-3c V086: reject path 帶 enum；測試用 cost_gate_other 作 default。
+            reject_reason_code: Some("cost_gate_other".into()),
+            close_reason_code: None,
             ..make_feat(id)
         }
     }
@@ -290,15 +309,59 @@ mod tests {
     #[test]
     fn test_reject_path_sql_locks_label_columns() {
         // W-AUDIT-4b-M3：reject 變體 SQL 必含 label 三欄 + server-side NOW() 條件。
+        // W6-3c V086：reject 變體 SQL 必含 reject_reason_code + close_reason_code 兩欄。
         let src = include_str!("decision_feature_writer.rs");
         for token in [
             "label_close_tag",
             "label_net_edge_bps",
             "label_filled_at",
             "CASE WHEN $13 THEN now() ELSE NULL END",
+            // W6-3c V086 兩新欄
+            "reject_reason_code",
+            "close_reason_code",
+            "$14",
+            "$15",
         ] {
             assert!(src.contains(token), "reject SQL missing token: {token}");
         }
+    }
+
+    #[test]
+    fn test_make_reject_feat_carries_reason_code() {
+        // W6-3c V086：reject helper 必帶 reject_reason_code（12 enum 之一）+
+        // close_reason_code None（V086 §3 互斥不變式）。
+        let feat = make_reject_feat("ctx-reject-w6");
+        assert!(feat.reject_reason_code.is_some());
+        assert!(feat.close_reason_code.is_none());
+        // 預設值對齊 V086 §4.1 enum
+        let code = feat.reject_reason_code.as_deref().unwrap();
+        let valid_enum = [
+            "cost_gate_js_demo_negative_edge",
+            "cost_gate_atr_unavailable",
+            "cost_gate_other",
+            "duplicate_position",
+            "direction_conflict",
+            "position_count_limit",
+            "scanner_market_gate",
+            "scanner_opportunity_canary",
+            "drawdown_breach",
+            "symbol_blocklist",
+            "risk_gate_other",
+            "reject_other",
+        ];
+        assert!(
+            valid_enum.contains(&code),
+            "reject_reason_code '{code}' not in V086 12 enum"
+        );
+    }
+
+    #[test]
+    fn test_make_feat_default_omits_reason_codes() {
+        // W6-3c V086：intent-only path（make_feat default）兩欄全 None；不會走 reject 變體 SQL。
+        let feat = make_feat("ctx-intent-only");
+        assert!(feat.reject_reason_code.is_none());
+        assert!(feat.close_reason_code.is_none());
+        assert!(feat.label_close_tag.is_none());
     }
 
     #[test]

@@ -420,6 +420,12 @@ pub(super) fn handle_decision_feature_snapshot(
                 label_close_tag: None,
                 label_net_edge_bps: None,
                 label_filled_at_now: false,
+                // W6-3c V086：IPC passthrough 走 intent-only path 兩欄 None。
+                // 與 W-AUDIT-4b-M3 同邏輯：reject_reason_code 是 Rust producer reject
+                // path 的責任，IPC passthrough 不能注入；close_reason_code 走 fill
+                // 後 backfill 路徑寫，不在 IPC 入口寫。
+                reject_reason_code: None,
+                close_reason_code: None,
             };
             if let Err(e) = tx.try_send(msg) {
                 tracing::warn!(
