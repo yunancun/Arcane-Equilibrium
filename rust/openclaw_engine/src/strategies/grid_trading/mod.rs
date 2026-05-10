@@ -317,8 +317,14 @@ impl Strategy for GridTrading {
 
     /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
     /// `grid_trading`：`[Ta1m]`（best_bid/ask 屬 TickContext 不屬 AlphaSurface）。
+    ///
+    /// Sprint N+1 W2 sub-task 2（per spec v1.2 §5.1.1）：宣告 `CrossAsset` tag
+    /// 表示本策略消費 BtcLeadLagPanel（**paper-only shadow log，不影響 grid
+    /// inventory model decision**；fence Layer 1 由 step_4_5_dispatch 構造
+    /// surface 階段控制，demo / live_demo / live → surface.btc_lead_lag = None
+    /// → 本策略 on_tick 內 `if let Some(panel) = surface.btc_lead_lag` 即 skip）。
     fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
-        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
+        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m, AlphaSourceTag::CrossAsset];
         TAGS
     }
 
@@ -406,8 +412,23 @@ impl Strategy for GridTrading {
     fn on_tick(
         &mut self,
         ctx: &TickContext<'_>,
-        _surface: &AlphaSurface<'_>,
+        surface: &AlphaSurface<'_>,
     ) -> Vec<StrategyAction> {
+        // Sprint N+1 W2 sub-task 2：BtcLeadLagPanel paper-only shadow log。
+        // 在 grid inventory model on_tick_impl 之前 evaluate（per spec §5.1.2 + §6 Layer 3）。
+        // - paper-only fence Layer 1：surface.btc_lead_lag 在 demo/live_demo/live
+        //   永遠 None（fence 由 step_4_5_dispatch engine_mode gate 主防線控制）
+        // - 本端 `if let Some(panel) = ...` 為 redundant safety guard
+        // - shadow log emit 後 **不**改 grid cross signal / inventory state；
+        //   下游 7d 後跑離線 SQL 對齊真實 fill 算 counterfactual edge
+        if let Some(panel) = surface.btc_lead_lag {
+            let _shadow = crate::strategies::cross_asset::evaluate_shadow_signal(
+                self.name(),
+                ctx,
+                panel,
+            );
+            // _shadow 純評估快照，丟棄不影響 grid inventory model 決策。
+        }
         self.on_tick_impl(ctx)
     }
 

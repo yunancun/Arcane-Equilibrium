@@ -18,6 +18,8 @@ pub mod bb_breakout;
 pub mod bb_reversion;
 pub mod common;
 pub mod confluence;
+// Sprint N+1 W2 sub-task 2：BtcLeadLagPanel paper-only shadow log 共用 helper。
+pub mod cross_asset;
 pub mod funding_arb;
 pub mod grid_helpers;
 pub mod grid_trading;
