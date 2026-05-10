@@ -1,7 +1,59 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-09（W-AUDIT-1 docs/governance sync）
+> 最後更新：2026-05-10（Sprint N+0 closure + Sprint N+1 D+0 pre-dispatch readiness）
+
+### Sprint N+1 D+0 Pre-dispatch Readiness — 2026-05-10
+
+**Scope**: 24 項提前準備完成等待 21:30 UTC HIGH-5 sign-off 後 dispatch fire；HEAD `9695b59a`（v3.8 4 sub-agent: CC + E3 + R4 + W2 v1.2）
+
+**主要 land**:
+- W7-3 Option B 補丁 (`b42731f6` PR ready NOT DEPLOYED): ma_crossover.on_rejection 識別 duplicate_position → sync self.positions 補丁式 1-tick defense, +48 LOC strategy_impl.rs + 152 LOC tests, 4 unit test, E1+E2 APPROVE+E4 PASS (Mac+Linux 2639 deterministic identical)
+- W7-1 + W2 trait skeleton (`c9fb0b8f` PR ready NOT DEPLOYED): TickContext.position_state per-iteration borrow + BtcLeadLagPanel struct + AlphaSurface field, 16 file +182 LOC, 0 borrow checker, 433+2640+35 PASS
+- W6 RFC 3 視角預備立場 (PA + QC + MIT) + W6-1 RFC final verdict draft (8 section, 4 條 verdict statement, Track A/B 拆分 close PA Q3 vs MIT Q2 V086 timing 分歧)
+- W6-3a close_tag distribution audit (12+14 enum + V086 spec preview)
+- W6-3b enum spec final (5 ambiguous A1-A5 全 ACCEPT MIT, V086 two TEXT column + one-shot 30-90s in-migration backfill)
+- W2 A4-C BTC→Alt Lead-Lag spec v1.2 (5 conditions + dual-layer σ + PSR(0) skew/kurt + +15/+5-15/<+5 階梯 gate, V088 加 3 column, MIT C-3 σ verify CONDITIONAL PASS)
+- W1 Phase B Tier 2 collector spec v1.1 (BB WS-first revision, Rust panel_aggregator/{funding_curve,oi_delta} 訂閱既有 WS tickers broadcast, rate 100→0 req/s ongoing)
+- W7-4 5 策略 systemic position sync audit (HIGH×2 ma_cross + bb_reversion 同結構, W7-2 同 Wave 推 ~15 LOC 提早結 P2-BB-REVERSION-POSITION-SYNC)
+- E4 W4 W-AUDIT-3b smoke design (push back: 既有 9 case 已涵蓋, 唯一 gap = RouterLeaseGuard Drop ~40 LOC, 4 invariant acceptance)
+- W5 三 P1 specs (CANARY-STAGE-CRITERIA-1 / CANARY-COHORT-FREQ-23 + V089 / DYNAMIC-UNBLOCK-CHECK-1 + V090, ~1460 LOC est, AMD-2026-05-10-05/06)
+- N+0 sign-off + N+1 dispatch fire SOP
+- CC compliance pre-check APPROVE-CONDITIONAL Score A- 92.0% (vs N+0 A 93.3% -1.3pp)
+- E3 security pre-audit ALL PASS (0 CRITICAL/HIGH/MEDIUM, 3 LOW backlog, 5 hard gate 全綠)
+- R4 docs audit (docs/README.md addendum + CLAUDE.md §三 [40] update + Active Blockers + §十 v3.7 dispatch path)
+
+### Sprint N+0 Closure — 2026-05-10
+
+**Scope**: W-AUDIT-9 graduated canary 5-stage state machine + W-AUDIT-4b ML pipeline 3-fault fix + W-AUDIT-8a Phase A AlphaSurface trait declare 全 land；commit chain HEAD `b6ed4975`
+
+**主要 land**:
+- V80/82/83/84 SQL migrations 全 sqlx success=t auto-migrate (engine restart 09:23 UTC)
+- W-AUDIT-9 T1-T7: ExecutorCanaryConfig + CanaryStage enum (Rust schema) + Python stage-aware fail-closed Stage 0 + LeaseScope::CanaryStagePromotion + governance.canary_stage_log + GUI graduated tab + [58] healthcheck
+- W-AUDIT-4b M1/M2/M3: decision_features producer (V082) + fill writer (V083 fills.entry_context_id) + reject negative label (V084 + 6 Rust file emit_decision_feature_intent_rejected)
+- W-AUDIT-8a Phase A: AlphaSurface trait + 5 策略 declare alpha_sources（Phase B-D 留 Sprint N+1+）
+- ARCH-04 graduated canary 5-stage architecture
+- ADR-0022 strategist-cap-wide-parameter-adjustment-skill
+- AMD-2026-05-09-03 graduated canary default (alpha-bearing)
+- AMD-2026-05-10-03 invariant 5 wording 對齊 N+0 actual IMPL (option A)
+- AMD-2026-05-10-04 TOML drift fix SOP (option B-later)
+
+**Runtime impact verified**:
+- attribution_chain_ok ratio 0.5% (mock baseline) → 100% (grid 199/ma 59/bb_breakout 11) — 後 MIT chain integrity replay 揭露 mock baseline 是誤讀，pre+post V083 真實全期均 100%
+- `[40]` 24h MLDE avg_net **-17.82 → +8.75 bps**（翻正）
+- `[33]` maker_like 89.6% → 98.1%；fee_drop 59.5% → 84.4%
+- 5 ML cron jobs install 後 status=ok 真實 fire (lightgbm via venv fix + optuna install)
+- FAIL only 1 cell：live_demo/grid_trading/TONUSDT n=10 avg=-31.23 bps（QC verdict C small-sample 非結構性，P1-CONDITIONAL-WATCH 30d evidence）
+
+**4 final reviews verdict (Sprint N+0 sign-off)**:
+- CC: APPROVE-CONDITIONAL Compliance Score A 93.3% (v3 90% → N+0 93.3%)
+- QC: APPROVE 3 MED + 4 caveat + 3 push back（mid-ground K -12 是擋槍 / Stage 2/3 sample size vs wall-clock 矛盾）
+- MIT: APPROVE FULL post V083+V084 dry-run
+- BB: APPROVE 0 Bybit risk
+
+**22 sign-off invariant**: 14 ✅ / 6 DEFER / 2 PARTIAL / 0 FAIL
+
+**4-agent loss audit consensus 維持**: 5 textbook 策略結構性 alpha-deficient（grid + ma + bb_breakout + bb_reversion + funding_arb）；P0-EDGE-1 root closure pending W-AUDIT-8a Phase B/C/D collector + A 群 alpha 候選 8b/8c/8d IMPL（Sprint N+1 W2 A4-C BTC→Alt Lead-Lag fast-track 為首）。
 
 ### W-AUDIT-1 docs/governance sync — 2026-05-09
 
