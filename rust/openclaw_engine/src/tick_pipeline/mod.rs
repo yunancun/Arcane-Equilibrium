@@ -29,7 +29,7 @@ use tracing::info;
 use crate::instrument_info::InstrumentInfoCache;
 use crate::intent_processor::IntentProcessor;
 use crate::orchestrator::Orchestrator;
-use crate::paper_state::PaperState;
+use crate::paper_state::{PaperPosition, PaperState};
 use crate::strategies::StrategyAction;
 
 /// Global system operating mode — synced from Python GUI `global_execution_mode_switch`.
@@ -711,6 +711,14 @@ pub struct TickContext<'a> {
     /// Tier 2-4 全 None / 預設值（collector 留給 Phase B/C/D）。callsite 用
     /// `&openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE` 作 fallback 引用。
     pub alpha_surface_ref: &'a AlphaSurface<'a>,
+    /// Sprint N+1 W7-1：read-only handle 到 paper_state.get_position(symbol)。
+    /// PA #3 P1-MA-CROSSOVER §6 Option A — 解 cross-strategy position state 盲區。
+    /// `None` = symbol 當前無倉位。strategy on_tick 進 entry path 前查此 handle，
+    /// 已有同 symbol 倉位 → fail-closed skip entry，避免無限 reject hot loop。
+    /// 借用 scope 與 ctx 同生命週期；ctx 必每 strategy iteration 內構造，避免與
+    /// 同 step 後續 `paper_state.proactive_mirror_insert` / `apply_fill` 等
+    /// mutable borrow 衝突（NLL per-iteration 釋放）。
+    pub position_state: Option<&'a PaperPosition>,
 }
 
 /// Tick statistics for monitoring / Tick 統計。

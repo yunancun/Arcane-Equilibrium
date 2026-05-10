@@ -182,6 +182,20 @@ impl TickPipeline {
         // W-AUDIT-8a Phase A：build Tier 1 only AlphaSurface — Tier 2-4 collector
         // 留給 Phase B/C/D。surface 引用與 ctx 同生命週期，借用 `indicators` /
         // `indicators_5m`（與 `TickContext` 同源）。
+        //
+        // === Sprint N+1 W1 funding_curve / oi_delta_panel surface field assignment ===
+        // W1 E1-α (B-1) 在 surface field 處加 `funding_curve: self.funding_slot.latest()`
+        // W1 E1-β (B-2) 在 surface field 處加 `oi_delta_panel: self.oi_slot.latest()`
+        //
+        // === W2 btc_lead_lag surface field assignment ===
+        // W2 E1-δ (C-IMPL-2) 在 surface 構造處加 paper-only engine_mode gate：
+        //   let btc_lead_lag = match self.effective_engine_mode() {
+        //       "paper" => self.btc_lead_lag_slot.latest(),
+        //       _ => None,  // demo / live_demo / live → 永遠 None
+        //   };
+        //   AlphaSurface { ..tier1_only_base, btc_lead_lag, ... }
+        //
+        // 詳 srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md §5 Layer 1 + §7
         let alpha_surface = AlphaSurface::tier1_only(indicators, indicators_5m.as_ref());
 
         let ctx = TickContext {
@@ -199,6 +213,10 @@ impl TickPipeline {
             best_ask,
             tick_size,
             alpha_surface_ref: &alpha_surface,
+            // Sprint N+1 W7-1：base ctx position_state default None；真實值由 for-loop
+            // 內 per-strategy iteration 從 self.paper_state.get_position(sym) 取
+            // 並 Clone ctx 覆寫，避免與後續 paper_state mutable borrow 衝突。
+            position_state: None,
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.
@@ -262,7 +280,14 @@ impl TickPipeline {
                 dispatched_counter,
                 unavailable_counter,
             );
-            let strategy_actions = strategy.on_tick(&ctx, &alpha_surface);
+            // Sprint N+1 W7-1：per-strategy iteration 取 read-only position handle，
+            // borrow scope 在本次 strategy.on_tick 結束即釋放，不與後續
+            // paper_state.proactive_mirror_insert / apply_fill 等 mutable borrow 衝突。
+            // PA #3 Option A — 解 cross-strategy position state 盲區。
+            let position_state = self.paper_state.get_position(sym);
+            let mut iter_ctx = ctx.clone();
+            iter_ctx.position_state = position_state;
+            let strategy_actions = strategy.on_tick(&iter_ctx, &alpha_surface);
             debug_assert!(
                 strategy_actions.len() <= 1,
                 "Strategy {} emitted {} actions in one tick — rollback assumes max 1",

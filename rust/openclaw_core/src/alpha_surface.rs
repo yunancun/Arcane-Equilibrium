@@ -27,6 +27,15 @@
 //!   跳過自身 alpha source（不可 fallback 到 TA1m）；
 //! - **`AlphaSourceTag` enum 變更必經 ADR**：本 enum 是 alpha source SoT，添加 /
 //!   刪除 / 重命名都觸發 ADR；W-AUDIT-8a 落地後 enum 為權威。
+//!
+//! Sprint N+1 W2 BtcLeadLagPanel paper-only fence（trait 不知此 fence）：
+//! - paper-only fence 由 `tick_pipeline/on_tick/step_4_5_dispatch.rs`
+//!   `effective_engine_mode()` gate 主防線實施（demo / live_demo / live →
+//!   `surface.btc_lead_lag = None`）。trait 端對 fence 不知情；
+//! - 策略消費端 `surface.btc_lead_lag.is_none()` → skip 即可，不需查
+//!   engine_mode；契約 = AlphaSurface::None 永遠是 fail-closed signal；
+//! - Python writer 端 + Strategy guard 是第二、三層深度防禦
+//!   （per PA `2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md` §5）。
 
 use serde::{Deserialize, Serialize};
 
@@ -298,6 +307,39 @@ pub struct SentimentPanel {
     pub source_tier: String,
 }
 
+/// BtcLeadLagPanel — Sprint N+1 W2 BTC→Alt 跨資產 lead-lag panel（候選 C
+/// W-AUDIT-8c 落地版 stub）。
+///
+/// 來源（Sprint N+1 W2 IMPL）：BTCUSDT 1m kline → lead signal（return / volume /
+/// orderbook imbalance over N=60-300s window）→ Python writer 寫
+/// `panel.btc_lead_lag_panel`（V088 migration；retention 14d）。
+///
+/// **執行邊界（Sprint N+1 W2 paper-only）**：本 wave Strategy 只在 paper engine
+/// mode 接此 panel；demo / live_demo / live → `AlphaSurface.btc_lead_lag = None`
+/// （fence 由 `tick_pipeline/on_tick/step_4_5_dispatch.rs` engine_mode gate
+/// 主防線實施，trait 端不知此 fence；策略消費端 `surface.btc_lead_lag.is_none()`
+/// → skip 即可，不需查 engine_mode）。BUSDT cohort 排除（per ADR-0018）。
+///
+/// **Lead-lag 信號契約**：`btc_lead_return_pct` 必為 strict `shift(N)` 不含
+/// current bar（避免 look-ahead bias，per `feedback_indicator_lookahead_bias`）。
+/// `lead_window_secs` 三檔之一（60 / 120 / 300）；`alt_xcorr` 為 rolling 1h
+/// cross-correlation；`alt_expected_dir` 三值（−1 / 0 / +1）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BtcLeadLagPanel {
+    /// Cohort alt symbols（不含 BTCUSDT；BUSDT 排除 per ADR-0018）。
+    pub alt_symbols: Vec<String>,
+    /// BTC lead signal：N 秒 return（strict shift(N) 禁含 current bar）。
+    pub btc_lead_return_pct: f64,
+    /// BTC lead window seconds（60 / 120 / 300 三檔之一）。
+    pub lead_window_secs: u32,
+    /// 各 alt symbol 對 BTC lead signal 的 cross-correlation（rolling 1h）。
+    pub alt_xcorr: Vec<f64>,
+    /// 各 alt symbol 預期 mean reversion / momentum direction（−1 / 0 / +1）。
+    pub alt_expected_dir: Vec<i8>,
+    pub snapshot_ts_ms: i64,
+    pub source_tier: String,
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // AlphaSurface — Tier 1-4 first-class bundle
 // ─────────────────────────────────────────────────────────────────────────
@@ -335,6 +377,11 @@ pub struct AlphaSurface<'a> {
     /// Market regime tag。Default `RegimeTag::Unknown`。
     pub regime: RegimeTag,
     pub sentiment_panel: Option<&'a SentimentPanel>,
+
+    // ── Sprint N+1 W2 — 跨資產 lead-lag panel（paper-only） ──
+    /// BTC→Alt lead-lag panel 引用（**paper-only**；fence 由 step_4_5_dispatch
+    /// engine_mode gate 實施，demo / live_demo / live 永遠 None）。
+    pub btc_lead_lag: Option<&'a BtcLeadLagPanel>,
 }
 
 impl<'a> AlphaSurface<'a> {
@@ -358,6 +405,7 @@ impl<'a> AlphaSurface<'a> {
             event_alerts: &[],
             regime: RegimeTag::Unknown,
             sentiment_panel: None,
+            btc_lead_lag: None,
         }
     }
 
@@ -374,6 +422,7 @@ impl<'a> AlphaSurface<'a> {
             event_alerts: &[],
             regime: RegimeTag::Unknown,
             sentiment_panel: None,
+            btc_lead_lag: None,
         }
     }
 }
@@ -397,6 +446,7 @@ pub static EMPTY_ALPHA_SURFACE: AlphaSurface<'static> = AlphaSurface {
     event_alerts: &[],
     regime: RegimeTag::Unknown,
     sentiment_panel: None,
+    btc_lead_lag: None,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -463,6 +513,7 @@ mod tests {
         assert!(s.event_alerts.is_empty());
         assert_eq!(s.regime, RegimeTag::Unknown);
         assert!(s.sentiment_panel.is_none());
+        assert!(s.btc_lead_lag.is_none());
     }
 
     /// Tier 1 only constructor 把 indicator 引用 wire 進，其餘 Tier 維持 default。
@@ -481,6 +532,53 @@ mod tests {
         assert!(s.event_alerts.is_empty());
         assert_eq!(s.regime, RegimeTag::Unknown);
         assert!(s.sentiment_panel.is_none());
+        assert!(s.btc_lead_lag.is_none());
+    }
+
+    /// Sprint N+1 W2 BtcLeadLagPanel: trait skeleton 預寫 acceptance — 三
+    /// constructor 全部 default `btc_lead_lag = None`，paper-only fence 由
+    /// step_4_5_dispatch 構造階段控制；trait 端永遠 default None。
+    #[test]
+    fn btc_lead_lag_default_none() {
+        let snap = IndicatorSnapshot::default();
+        // empty / tier1_only / EMPTY_ALPHA_SURFACE 三 constructor 全 None
+        let e = AlphaSurface::empty();
+        assert!(
+            e.btc_lead_lag.is_none(),
+            "AlphaSurface::empty() must default btc_lead_lag to None"
+        );
+        let t1 = AlphaSurface::tier1_only(Some(&snap), Some(&snap));
+        assert!(
+            t1.btc_lead_lag.is_none(),
+            "AlphaSurface::tier1_only() must default btc_lead_lag to None"
+        );
+        let s = &EMPTY_ALPHA_SURFACE;
+        assert!(
+            s.btc_lead_lag.is_none(),
+            "EMPTY_ALPHA_SURFACE static must default btc_lead_lag to None"
+        );
+        // Default impl 自動繼承
+        let d: AlphaSurface<'static> = AlphaSurface::default();
+        assert!(d.btc_lead_lag.is_none());
+
+        // 顯式構造一個 panel borrow，確認 lifetime 約束 OK
+        let panel = BtcLeadLagPanel {
+            alt_symbols: vec!["ETHUSDT".to_string()],
+            btc_lead_return_pct: 0.5,
+            lead_window_secs: 60,
+            alt_xcorr: vec![0.7],
+            alt_expected_dir: vec![1],
+            snapshot_ts_ms: 1715000000000,
+            source_tier: "test".to_string(),
+        };
+        let s_with_panel = AlphaSurface {
+            btc_lead_lag: Some(&panel),
+            ..AlphaSurface::empty()
+        };
+        assert!(s_with_panel.btc_lead_lag.is_some());
+        let p = s_with_panel.btc_lead_lag.unwrap();
+        assert_eq!(p.lead_window_secs, 60);
+        assert_eq!(p.alt_symbols, vec!["ETHUSDT".to_string()]);
     }
 
     /// EMPTY_ALPHA_SURFACE 靜態常量 cheap reference — 測 Default 結果一致。

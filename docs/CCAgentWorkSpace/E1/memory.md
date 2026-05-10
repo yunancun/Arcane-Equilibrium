@@ -6594,3 +6594,64 @@ fixture pattern 是否仍滿足新 invariant。
 - on_rejection rollback 邏輯歷史上是「reject 後可立即重試」的設計，但跨策略 desync 場景下 = hot loop 加速器；需依 reason 大類做差異化
 - reason 字串契約（rejection_coding.rs）可用 `contains()` 解析 + warn 級 fallback 防 contract drift
 - E1 memory.md 已 787KB（>256KB read limit），未來改用 grep / 短 append 策略；接手 E1 任務時 PA dispatch 通常已含背景，不必硬讀全 memory
+
+## 2026-05-10 — Sprint N+1 D+0 Trait Skeleton Prewrite（W2 + W7-1）
+
+**Scope**: 預寫 trait skeleton 給 N+1 W1+W2 五個 E1 sub-agent 並行 0 file 重疊。Tier 1（W2 BtcLeadLagPanel typedef + AlphaSurface field + 3 constructor + slots/dispatch anchor comment）+ Tier 2 try-best（W7-1 TickContext.position_state per PA #3 Option A）。
+
+**修改 files**: 16 Rust file / +182 / -2
+- `rust/openclaw_core/src/alpha_surface.rs` (+98 / -0)
+- `rust/openclaw_engine/src/{ipc_server/slots.rs, tick_pipeline/mod.rs, tick_pipeline/on_tick/step_4_5_dispatch.rs, replay/runner.rs, replay/strategy_adapter.rs, orchestrator.rs, strategies/funding_arb.rs}` 
+- 8 個 strategy test 檔（bb_breakout x3 / bb_reversion x1 / grid_trading x1 / ma_crossover x2 / stress_integration x1）
+
+**測試**:
+- `cargo test --lib --release -p openclaw_core` = 433 PASS（+1 new btc_lead_lag_default_none）
+- `cargo test --lib --release -p openclaw_engine` = 2640 PASS（baseline 維持）
+- `cargo test --release -p openclaw_engine --test stress_integration` = 35 PASS
+- `cargo test --release -p openclaw_engine --test replay_runner_e2e proof_5` = PASS（byte-identical）
+
+**Status**: NOT COMMITTED, NOT DEPLOYED — 留 PM 21:30 sign-off 後 commit
+
+**Report**: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w2_w7_1_trait_skeleton_prewrite.md`
+
+### 教訓 1：Tier 2 borrow checker 預判 vs 實證
+
+PA #3 §8 重點 3 警告「paper_state.get_position() 在 strategy on_tick 是否會違反 borrow checker」。預判：高機率撞牆。實證：**未撞牆**，per-iteration `ctx.clone()` + `iter_ctx.position_state = self.paper_state.get_position(sym)` pattern 工作。
+
+關鍵 NLL 觀察：
+1. ctx 主結構建構 `position_state: None`，此時無 paper_state immutable borrow
+2. 進 for-loop iteration 才取 immutable borrow，scope 限定在 strategy.on_tick 呼叫
+3. iteration 結束 borrow 自然釋放，下游同 paper_state 的 mutable borrow（proactive_mirror_insert / apply_fill）暢通
+4. Rust NLL 在 single-iteration scope 內正確判定 disjoint
+
+代價：每 iteration 一次 ctx.clone()（TickContext derives Clone，shallow copy borrow 引用，~120 bytes，per-tick × 5 strategy = ~600 bytes 額外，可忽略）。
+
+### 教訓 2：bulk-update Python script 對 alpha_surface_ref 安全
+
+W-AUDIT-8a Phase A 教訓「MakerPriceInputs / IsolatedPipeline 等也有 tick_size 欄位被誤注入 alpha_surface_ref」— 因 bulk script 對 `tick_size:` 做 anchor。
+
+本次 bulk-patch 用 `^(\s*)alpha_surface_ref:\s*.+,\s*$` regex anchor，**比 tick_size 更安全**：alpha_surface_ref 是 W-AUDIT-8a 新加 unique field，無其他 struct 含此命名。28 個 file callsite 全 PATCH 成功 0 false positive。
+
+未來 bulk-update 優先選 unique field name 作 anchor，避免重名 struct 誤注入。
+
+### 教訓 3：D+0 prewrite scope 邊界 — Tier 2 LOC 超估
+
+dispatch 估計 ~85 LOC，實際 +180 LOC（2.1×）。原因：BtcLeadLagPanel 完整 doc + 28 callsite mechanical patch 未估計。
+
+教訓：D+0 prewrite scope 估算時，需包含 callsite blast radius + 完整 doc + anchor comment。下次估算公式：
+- struct typedef + doc：~30 LOC
+- AlphaSurface field + doc：~5 LOC
+- 3 constructor patch：~3 LOC
+- 1 new test：~30 LOC（含 lifetime acceptance check）
+- MODULE_NOTE 段：~10 LOC
+- slots.rs / dispatch anchor comment：~30 LOC
+- TickContext field + per-iteration wire pattern：~15 LOC
+- 28 callsite bulk-patch：~28 LOC
+- 28 LOC documentation noise：~30 LOC
+**Total estimate**：~180 LOC（與本實證 +182 對齊）
+
+### 教訓 4：multi-session race 認領 — git diff --stat 區分自己 vs 別人
+
+`git status --short` 顯示 3 個非我修改的檔（MIT memory.md / memory/MEMORY.md / memory/project_*.md）+ 2 個 untracked report 來自其他並行 session。處理：**不動別人的檔**，PM commit 時用 `git add <我的 16 file>` 精確 stage。
+
+per `feedback_git_commit_only_for_metadoc.md`，meta-doc（memory.md / TODO.md）必用 `git commit --only <file>` 避免吸收別人 WIP。本次 trait skeleton 全是 code file，可正常 add，但 PM 必選擇性 stage 不誤 commit 別人 WIP。

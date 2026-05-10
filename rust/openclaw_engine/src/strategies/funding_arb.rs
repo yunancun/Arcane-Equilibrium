@@ -558,6 +558,7 @@ mod tests {
             best_ask: Some(price * 1.0001),
             tick_size: Some((price * 0.000001).max(0.0001)),
             alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+            position_state: None,
         }
     }
 
@@ -754,6 +755,7 @@ mod tests {
             best_ask: None,
             tick_size: Some(0.1),
             alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+            position_state: None,
         };
         assert!(
             s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(),
@@ -809,6 +811,7 @@ mod tests {
             best_ask: None,
             tick_size: None,
             alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+            position_state: None,
         };
         assert!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "H0 blocked → no entry");
     }
