@@ -555,6 +555,8 @@ const PROVIDER_BADGE_ID = {
   perplexity: 'prov-perplexity-badge', google: 'prov-google-badge', local_llm: 'prov-local-badge',
 };
 let L2_MODEL_CATALOG = null;
+let AI_CONFIG_DIRTY = false;
+let AI_CONFIG_SAVING = false;
 let L2_PROVIDER_MODELS = {
   anthropic: [
     { value: 'haiku', label: 'haiku — Claude Haiku 4.5' },
@@ -710,6 +712,10 @@ function syncModelSelectsFromProviders() {
   setModelOptions('ai-model', $('ai-provider').value, $('ai-model').value);
   setModelOptions('ai-tier2-model', $('ai-tier2-provider').value, $('ai-tier2-model').value);
   setModelOptions('ai-tier3-model', $('ai-tier3-provider').value, $('ai-tier3-model').value);
+}
+
+function markAIConfigDirty() {
+  AI_CONFIG_DIRTY = true;
 }
 
 // 根據 (configured, client_implemented) 計算 badge 顯示。
@@ -912,11 +918,21 @@ async function saveAIConfig(btn) {
   // UX-06: loading state / 保存中状态
   let origText;
   if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '保存中... / Saving...'; }
+  AI_CONFIG_SAVING = true;
   try {
     const d = await ocPost('/api/v1/paper/layer2/config', body);
-    if (d) { ocToast('AI 设置已保存', 'success'); loadAll(); }
-    else ocToast('保存失败', 'error');
+    if (d && d.action_result === 'success') {
+      AI_CONFIG_DIRTY = false;
+      ocToast('AI 设置已保存', 'success');
+      loadAll();
+    } else if (d && d.action_result) {
+      const codes = (d.reason_codes || []).join(', ') || d.action_result;
+      ocToast('保存失败：' + codes, 'error');
+    } else {
+      ocToast('保存失败：后端拒绝或无响应，当前选择不会自动覆盖', 'error');
+    }
   } finally {
+    AI_CONFIG_SAVING = false;
     if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
 }
@@ -1117,6 +1133,8 @@ async function loadConfig() {
   html += '</div>';
   ocSetHtml('ai-config', html);
 
+  if (AI_CONFIG_DIRTY || AI_CONFIG_SAVING) return;
+
   // Populate input fields
   if (!$('ai-hard-cap').value) $('ai-hard-cap').value = cfg.daily_hard_cap_usd || 2;
   if (!$('ai-base-daily').value) $('ai-base-daily').value = cfg.adaptive_base_daily_usd || 8;
@@ -1248,7 +1266,14 @@ async function loadAll() {
 
 ['ai-provider', 'ai-tier2-provider', 'ai-tier3-provider'].forEach(id => {
   const el = $(id);
-  if (el) el.addEventListener('change', syncModelSelectsFromProviders);
+  if (el) el.addEventListener('change', () => {
+    markAIConfigDirty();
+    syncModelSelectsFromProviders();
+  });
+});
+['ai-model', 'ai-tier2-model', 'ai-tier3-model'].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener('change', markAIConfigDirty);
 });
 syncModelSelectsFromProviders();
 loadAll();
