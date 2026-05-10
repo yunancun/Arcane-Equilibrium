@@ -1,6 +1,6 @@
 # Sprint N+1 Dispatch Draft（PA, 2026-05-10）
 
-**Status**: DRAFT v3.4 — 4 sub-agent 預跑全完成（PA W6-3b enum spec final / BB W1+W2 rate budget / PA P2 雙前綴 RCA / PA W1 Phase B writer spec）；W6-3 enum 確定 12+14；BB push back W1 WS-first (over-engineering)；雙前綴 16+17 row 已 4-23 fix 走 V086 backfill normalize 不需 P2 ticket；W1 PA spec land 等 BB integration WS-first revise
+**Status**: DRAFT v3.5 — 3 sub-agent 預跑全完成（QC W2 alpha decay + DSR / PA W7-4 systemic / E4 W4 smoke design）；W2 CONDITIONAL APPROVE 5 conditions（K=95 修正 + σ verify + per-symbol gate + leak-free strict shift + +5→+15 階梯 gate）；W7-4 揭露 bb_reversion 同 ma_crossover HIGH risk → W7-2 同 Wave 推 ~15 LOC fix 提早結 P2-BB-REVERSION-POSITION-SYNC；W4 acceptance 改 4 invariant（既有 9 case 已涵蓋重寫=fake coverage）
 **Authority**: PA design + PM dispatch；E1 IMPL；E2/E4 review；CC/QC/MIT/BB sign-off
 **Estimated duration**: 7-10 calendar day（並行壓縮可到 5-7 day）
 **Hand-off conditions**: see §6 Acceptance Gate
@@ -74,7 +74,46 @@ MIT W6 baseline 揭露 ma_crossover INXUSDT 2331 reject 不是 governance 問題
 
 Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
 
-#### §0.6 【v3.4 整合】4 sub-agent 預跑全完成（2026-05-10 16:30 UTC）
+#### §0.7 【v3.5 整合】3 sub-agent 預跑全完成（2026-05-10 17:30 UTC）
+
+#### §0.7.A QC W2 A4-C alpha decay + DSR — **CONDITIONAL APPROVE 5 conditions**
+- Q1 alpha decay 半衰期 30-180s；推薦 N=120s（PA 預設一致）；強制 R²(N=60/120/300) decay curve
+- Q2 K 修正 79+16=**95**（PA spec §8.1 寫 K=6 是錯）；mu_0=√(2 ln 95)=**3.018**
+- Q3 paper edge gate power：σ=30 bps **是下界**（EDGE-DIAG-1 demo σ ≈ 50-80 bps，MIT C-3 必 verify）；per-symbol n=100 **underpowered**，必加 per-symbol gate
+- Q4 counterfactual backtest 必含 leak-free `shift(N)` vs naive 對比（差異 > 30% spec 失敗）
+- Q5 **+5 bps gate REJECT-AS-IS**（demo cost 15-20 bps round-trip 無法 survive），改三檔：
+  - **+15 bps** promote N+2 demo IMPL
+  - +5~+15 bps extend paper window 14d 重評
+  - <+5 bps revise spec 或 archive
+- Q6 風險：alpha decay quick + BTC pump saturate + σ assumption + leak-free + +5 太鬆 全 mitigation
+- 5 conditions 修補後即可進 paper IMPL；無黑名單觸碰
+- Report: `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w2_a4c_qc_review_alpha_decay_dsr.md`
+
+#### §0.7.B PA W7-4 5 策略 systemic position sync audit
+- **HIGH × 2**: ma_crossover (confirmed) + **bb_reversion (同結構，未 fire 是運氣)**
+- **MEDIUM × 1**: bb_breakout (gate 多自然限頻，hot loop 風險低)
+- **LOW × 1**: grid_trading (M-2 30s backoff 結構性護欄)
+- **RETIRED-LOW × 1**: funding_arb (dormant + 1h cooldown, ADR-0018)
+- RC-04 rollback to None 是 **4/5 共用設計**（差別 grid_trading 有 M-2 backoff）
+- **建議 W7-2 IMPL 同 Wave 推 W7-5 bb_reversion 同 pattern apply** (~15 LOC + 3 tests)：
+  - 邊際成本低 + 提早結 P2-BB-REVERSION-POSITION-SYNC
+- W7-3 Option B 補丁保留作 reason 字串契約 fallback 冗餘**不可拿掉**
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_4_systemic_position_sync_audit.md`
+
+#### §0.7.C E4 W4 W-AUDIT-3b runtime smoke design — **PA push back acceptance 改 4 invariant**
+- **dispatch v3.4 §3.4 W4「≥ 1 fail-closed test case」已被既有 9 case 涵蓋**（5 Python `test_executor_plan_v2.py` + 3 `test_executor_agent_unit.py` + 1 `test_executor_shadow_to_live_e2e.py` + Rust `intent_processor/tests.rs` 兩條真路徑）
+- **重複新寫 `test_executor_fail_closed.py` 是 fake coverage** — push back acceptance
+- **唯一 gap = RouterLeaseGuard Drop release on rejection path** 沒 assertion → 補 1 條 Rust unit test (~40 LOC)
+- [55] healthcheck SQL 在 `checks_agent_spine.py:109-208` (`_complete_chain_counts` CTE)；smoke shell 抽剪 5min window 版維持同口徑
+- **建議 acceptance 改 4 invariant**：
+  - `chains_with_lease ≥ 1`
+  - `bad_report_quality = 0`
+  - `chains_with_report ≥ 1`
+  - `engine_alive=true 60s 內`
+- W4 IMPL 預估 **~120 LOC, ~3.5h**（符合 dispatch「1 day」上限）
+- Report: `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-10--w_audit_3b_runtime_smoke_test_design.md`
+
+### §0.6 【v3.4 整合】4 sub-agent 預跑全完成（2026-05-10 16:30 UTC）
 
 #### §0.6.A PA W6-3b enum spec final（HEAD pending commit）
 - **5 ambiguous (A1-A5) 全 ACCEPT MIT** 提案
@@ -237,7 +276,7 @@ Sprint N+1 是 **alpha source build-out 起步**（4-agent loss audit 共識：5
 **Sub-agent assignment v3.3 update**（W7-1 trait skeleton + W7-3 Option B 補丁均已 PR ready）:
 - ✅ **W7-1 已提早 land HEAD `c9fb0b8f`**（PA D+0 預寫，省 1 day）
 - ✅ **W7-3 Option B 已 land HEAD `b42731f6`**（補丁式 1-tick defense，省 0.5 day）
-- D+1: E1 IMPL **W7-2**（ma_crossover entry path 用 ctx.position_state query before entry, ~10 LOC + 1 unit test）
+- D+1: E1 IMPL **W7-2 + bb_reversion 同 pattern apply** (per W7-4 audit HIGH risk, ~10 LOC ma_crossover + ~15 LOC bb_reversion + 4 unit tests; **提早結 P2-BB-REVERSION-POSITION-SYNC**)
 - D+1-2: PA + E1 **W7-4**（5 策略 systemic audit using 已 land 的 ctx.position_state field）
 - D+2: E1 IMPL **W7-5**（on_fill + bootstrap import_positions, ~20 LOC + tests）
 - D+3: E2 review + E4 regression + Linux runtime 24h 驗 ma_crossover INXUSDT reject < 10/h + PM sign-off
@@ -489,7 +528,7 @@ PA W1 spec 已 land `srv/docs/execution_plan/2026-05-10--w_audit_8a_phase_b_tier
 | ~~P1-MA-CROSSOVER-DUPLICATE-INTENT~~ *(v3.2 升 P0 移到 W7)* | — | — | — | — |
 | **P1-BB-REVERSION-FIRE-AUDIT** *(v3.2 新, per PA #2 Q4)* | W6 baseline + PA Q4 | PA audit | 1 day | PA |
 | **P2-BB-BREAKOUT-POSITION-SYNC** *(v3.2 新, per PA #3 systemic)* | W7-4 audit 衍生 | E1 fix（如 W7-4 確認 systemic）| 1-2 day | E1 |
-| **P2-BB-REVERSION-POSITION-SYNC** *(v3.2 新, per PA #3 systemic)* | W7-4 audit 衍生 | E1 fix（如 W7-4 確認 systemic）| 1-2 day | E1 |
+| ~~P2-BB-REVERSION-POSITION-SYNC~~ *(v3.5 提早結, W7-2 同 Wave 推 ~15 LOC fix)* | W7-4 確認 HIGH risk | — | — | — |
 
 **新加 ticket 詳情**:
 - **P1-TONUSDT-CONDITIONAL-WATCH**（替代原 P1-TONUSDT-GRID-BLOCK）：QC verdict C（n=10 不足以判結構性 negative）；不立即 freeze；分階段：(1) Linux CC 跑 30d regime split SELECT 補 evidence；(2) 若 30d sample n≥30 且仍 negative → 升 freeze；(3) 若 sample 不足 → 維持 watch；(4) 復評 30d cycle
@@ -653,7 +692,13 @@ D+11 ~ D+12（W2 paper edge evidence review）
 
 ---
 
-**已整合 evidence**（v3.4 update）:
+**已整合 evidence**（v3.5 update）:
+- ✅ **QC W2 alpha decay + DSR review** → `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w2_a4c_qc_review_alpha_decay_dsr.md`（CONDITIONAL APPROVE 5 conditions）
+- ✅ **PA W7-4 systemic position sync audit** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_4_systemic_position_sync_audit.md`（5 策略 verdict HIGH×2/MED×1/LOW×1/RETIRED-LOW×1）
+- ✅ **E4 W4 W-AUDIT-3b smoke design** → `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-10--w_audit_3b_runtime_smoke_test_design.md`（push back acceptance 改 4 invariant + RouterLeaseGuard Drop ~40 LOC）
+- ✅ **N+0 sign-off + N+1 dispatch fire SOP** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--n0_signoff_n1_dispatch_fire_sop.md`
+
+
 - ✅ **PA W6-3b enum spec final** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_3b_enum_spec_final_pa_decision.md`（5 ambiguous A1-A5 全 ACCEPT MIT，12+14 enum final）
 - ✅ **BB W1+W2 rate budget review** → `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-10--w1_w2_bybit_v5_rate_budget_review.md`（PASS 99% headroom + HIGH push back W1 WS-first）
 - ✅ **PA P2 雙前綴 RCA** → `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p2_decision_features_double_prefix_bug_audit.md`（4-23 已 fix，16+17 row 走 V086 backfill normalize, 不需 P2 ticket）
