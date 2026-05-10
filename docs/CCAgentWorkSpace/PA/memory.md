@@ -1,5 +1,41 @@
 # PA Memory — 工作記憶
 
+## P2-DECISION-FEATURES-DOUBLE-PREFIX 預跑 RCA — bug 早已 fix（2026-05-10）
+
+**觸發**：MIT W6-3a §1.2 揭露 `learning.decision_features.label_close_tag` 16 row 雙前綴 `risk_close:risk_close:phys_lock_gate4_giveback`，dispatch v3.3 W5 P2 ticket 預跑。
+
+**RCA verdict = NO P2 NEEDED**：
+- True source = `trading.fills.strategy_name` 17 row（PG empirical，2026-04-23 02:39-11:55 +0200）
+- Bug commit `46a9cadc` 已 fix 於 2026-04-23 13:54:11 +0200（`build_risk_close_tag()` idempotent helper in `tick_pipeline/on_tick/helpers.rs:38-45`）
+- 16 row in `learning.decision_features` 是 `edge_label_backfill.py:285,304` Python backfill 從 trading.fills `array_agg(strategy_name)` 複製字串的副作用
+- Rust `decision_feature_writer` + `intent_processor:1261` 寫入路徑只 emit `Some("rejected_governance")`，**不寫 `risk_close:*`** → Rust producer chain 0 bug
+- Post-fix 17 天運行 0 新增雙前綴 row（PG 驗：495 row `risk_close:phys_lock_gate4_giveback` 全單前綴）
+
+**影響範圍**（極小）：
+- 16 row demo only（live/paper 0），9.3 hours window，PENGUUSDT 100% 單一 cluster
+- grid_trading (10) / ma_crossover (5) / bb_reversion (1)，單一 reason `phys_lock_gate4_giveback`
+
+**修補 plan = Option A in V086 backfill normalize**（不開 P2 ticket）：
+- MIT W6-3a §6.2 spec line 189 已含 `WHEN label_close_tag LIKE 'risk_close:risk_close:phys_lock_gate4_giveback%' THEN 'risk_close_phys_lock_gate4_giveback'` mapping
+- **PA 補充**：V086 同 migration 加 `UPDATE trading.fills SET strategy_name = REPLACE(strategy_name, 'risk_close:risk_close:', 'risk_close:') WHERE strategy_name LIKE 'risk_close:risk_close:%'` 對 17 row trading.fills 上游清理
+- 不污染 raw `label_close_tag` 欄位，保留歷史 bug fingerprint
+
+**dispatch v3.3 update**：
+- W5 P2 list 不加任何雙前綴 ticket（無 IMPL 需求）
+- W6-3c V086 SQL spec 補充 trading.fills 17 row 上游 UPDATE
+- §5 A2 PA 拍板：採 V086 normalize（與 MIT 推薦一致）
+
+**Lesson learned**：
+- 「producer bug」假設前必先 grep producer chain 確認寫入點 + git log 看 fix 是否已落地 + PG 看分布時窗
+- MIT 報告「open new P1 ticket」推薦在 PA RCA 下被推翻 → MIT 看到 raw 字串就推 P1 是合理的，但 PA 必須親自確認 fix 狀態，避免 ticket inflation
+- backfill 從 raw column 取字串時會繼承上游所有 historical bug，trainer 端 schema migration 是 cleansing 機會（不必另開 producer fix）
+- bug 早已 fix 案例（17 天前）但 backfill 表面看仍有 bug fingerprint → 預跑 RCA 是必要 dispatch hygiene
+- PG empirical（fix commit timestamp vs 16 row ts）是 single most decisive evidence，先 grep code + 後 PG 驗 timeline 是標準 RCA chain
+
+**完整報告**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p2_decision_features_double_prefix_bug_audit.md`
+
+---
+
 ## P1-MA-CROSSOVER-DUPLICATE-INTENT root cause audit（2026-05-10）
 
 **觸發**：Sprint N+1 W5 ticket — W6 baseline 揭露 ma_crossover INXUSDT live_demo 6.87h 內 duplicate_position guard reject 2331 次（其中 11:34 一分鐘 burst 2319 次，~50/sec），audit phase 找 root cause。
@@ -2263,3 +2299,71 @@ dispatch v3.3 §3.2 W2 fast-track 預跑：A4-C 是 W-AUDIT-8c 候選 C 的 N+1 
 **16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項**：全 0 觸碰（W2 paper-only shadow log no trade，不動 lease / auth / SM-04 / live boundary 任何路徑）。
 
 **Risk**：MIT 揭露 W6-5 同類 category error 風險待 D+1 三角 review；如類似 → revise spec 重派；如三輪 revise 仍 < +5 bps → A4-C archive，W-AUDIT-8c 候選 D（orderbook imbalance）替補 fast-track。
+
+---
+
+## 2026-05-10 PA — W6-3b enum spec final + 5 ambiguous (A1-A5) 拍板
+
+**Trigger**: MIT W6-3a audit `2026-05-10--w6_3a_close_tag_distribution_audit.md` (HEAD `da6c1f80`) 揭露 real enum 比 dispatch v3.3 preliminary 多 30% (preliminary 8+10 → real 12+14 含 catch-all)；5 ambiguous A1-A5 標需 PA 拍板才能進 V086 IMPL。
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_3b_enum_spec_final_pa_decision.md`
+
+**5 拍板結論（全 ACCEPT MIT）**：
+- A1 strategy_close_legacy_bare_name 615 row → 1 enum 不拆（strategy column SoT 區分）
+- A2 雙前綴 16 row → backfill SQL 加 normalize；**無需 P1 producer ticket**（PA grep 確認 `helpers.rs:38` `build_risk_close_tag()` 已 2026-04-23 land = idempotent helper；step_6_risk_checks.rs:275 已 migrate；雙前綴是歷史污染，post-2026-04-23 active code 正確）
+- A3 cost_gate_atr_unavailable empty-but-reserved → 保留（SEC-11 fail-closed signal，與 cost_gate_other 不同 trader semantic）
+- A4 funding_arb 29 sub-reason → 合 1 enum (ADR-0018 退役，0 future incremental)
+- A5 strategy_close_regime_shift 1 row → 保留 (R-3 hypothesis pipeline pilot)
+
+**Final spec**：
+- reject_reason_code 12 enum (11 + catch-all `reject_other`)
+- close_reason_code 14 enum (13 + catch-all `close_other`)
+- catch-all 命名 rename `other_reject` → `reject_other` / `other_close` → `close_other`（prefix consistency）
+- V086 兩 column TEXT not jsonb (per MIT Q3)，partial index `(reject_reason_code, close_reason_code) WHERE NOT NULL`
+- backfill **one-shot** 30-90 sec UPDATE in V086（不開 cron，dispatch v3.3 §3.0 修文）
+- ALTER VALIDATE CONSTRAINT timing: D+2 14:30 UTC (24h dual-write drift PASS 後)
+
+**Code grep evidence (副作用 audit)**：
+- `rust/openclaw_engine/src/tick_pipeline/on_tick/helpers.rs:38` `build_risk_close_tag(reason)` idempotent helper RUST-DOUBLE-PREFIX-1 (2026-04-23) = 雙前綴 fix 已落地
+- `step_6_risk_checks.rs:275` 用 `super::build_risk_close_tag(&reason)`，無雙前綴
+- `risk_checks.rs:400` `format!("risk_close:{}", reason)` 傳入裸字串 (`"phys_lock_gate4_giveback"`) → 單前綴
+
+**Dispatch v3.3 §3.0 修建議**：
+- W6-3a/W6-3b checkbox flip DONE
+- W6-3c E1 IMPL 立即可派（spec final）
+- W6-3d 改為 W6-3c sibling 並行（不依賴 V086 deploy timing）
+- 數量改：reject 8→12 enum / close 10+→14 enum
+
+**E2 必查 3 點**：
+1. Backfill SQL CASE WHEN evaluation order（ATR unavailable 必先於 JS-demo / cost_gate_other；雙前綴必先於單前綴；bare-name exact 必先於 prefix regex）— PG dry-run 9757 row distribution 比對 audit table
+2. Guard A/B/C 完整性（V086 缺一 = E2 拒簽，per memory `feedback_v_migration_pg_dry_run`）
+3. Producer dual-write race（V086 land 與 dual-write code deploy 不能差 >5 min；否則 24h 後 ALTER VALIDATE 會失敗）
+
+**16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項**：全 0 觸碰（W6-3 是 ML 平面 schema add column + read-only backfill，不動 lease / auth / SM-04 / live boundary / IntentProcessor 寫入路徑）。
+
+## 2026-05-10 W-AUDIT-8a Phase B Tier 2 panel collector spec (W1 PA spec phase deliverable)
+
+**Spec path**: `srv/docs/execution_plan/2026-05-10--w_audit_8a_phase_b_tier_2_collector_spec.md`
+
+**Pre-condition**: PA D+0 trait skeleton 已 land HEAD `c9fb0b8f`（FundingCurveSnapshot + OIDeltaPanel typedef + AlphaSurface 對應 field + slots.rs/dispatch anchor 全預留）。
+
+**關鍵設計決策**：
+1. **Schema 對齊 trait struct field 校正**（task scope 與 trait 不一致 → 以 trait 為準）：
+   - V085 `funding_rate_bps` (NOT scalar `funding_rate` + `curve_8h/curve_24h`) 對齊 `FundingCurveSnapshot.funding_rates_bps: Vec<f64>`
+   - V087 `oi_delta_5m_pct / 15m_pct / 1h_pct` (NOT 1m/5m/15m) 對齊 `OIDeltaPanel.{oi_delta_5m_pct, oi_delta_15m_pct, oi_delta_1h_pct}: Vec<f64>` — 1m delta 噪音太高，5m/15m/1h 才是 informational tier
+2. **Bybit endpoint 選用**：`/v5/market/tickers` 拿 funding rate + next_funding_time 一次（既有 layer2_tools_g3_07 pattern 對齊；不用 funding-history endpoint）；OI 用 `/v5/market/open-interest` 三 interval (5min/15min/1h) 各一 GET
+3. **Cohort = 25 symbol**（grid_trading active ∪ ma_crossover active ∪ bb_breakout active；exclude BUSDT + frozen list；W1 hardcoded snapshot；W-AUDIT-8c 才 dynamic discovery）
+4. **W1 vs W2 engine_mode 範圍**：W1 demo+live 都接（NO paper-only fence），W2 paper-only fence by step_4_5_dispatch.rs engine_mode gate
+5. **bb_breakout fail-closed**：surface.oi_delta_panel.is_none() OR symbol 不在 cohort OR oi_delta_5m_pct=NaN → write `evaluation_outcome='oi_panel_unavailable'` 入 V082 decision_features_evaluations；V086 migration ADD VALUE TO V082 enum；對齊 P1-BB-BREAKOUT-FAIL-CLOSED-1 (dispatch v3.3 §3.5)
+6. **3 E1 sub-agent 完全並行 0 file 重疊**：E1-α (B-1 funding) / E1-β (B-2 OI) / E1-γ (B-4 bb_breakout consume)；slots.rs + step_4_5_dispatch.rs anchor 隔離
+7. **Rate budget 待 BB B-3 final**：funding 25 req/min (4.2%) + OI 75 req/min (12.5%) = 100 req/min (16.7% production budget)；若超推 90s cycle fallback；D+1 PA + BB final review
+8. **Freshness gate**: 30s WARN / 300s FAIL（同 task scope 要求）；puller 自檢 + healthcheck [57]/[58] 監測
+
+**E2 重點審查 3 點（spec §6）**：
+1. V085/V087 schema 名稱嚴格對齊 trait struct field（funding_rate_bps NOT funding_rate；5m/15m/1h_pct NOT 1m/5m/15m）— grep verify
+2. V086 V082 enum 加 `oi_panel_unavailable` value via Guard A IF NOT EXISTS + backward-compat 既有 row 不變
+3. bb_breakout fail-closed 路徑無 silent fallback to internal `oi_buffer`（W-AUDIT-8d 才完全移除 buffer）
+
+**16 原則 + DOC-08 §12 + 硬邊界 5 項全 0 觸碰**（spec §7）。
+
+**Next action**: D+1 BB B-3 review final → PA integrate rate budget table → push spec → dispatch W1 E1-α/β/γ → D+5-D+6 land + E2/E4 → W1 land 後 ≥ 24h 再進 W3 Stage 1。

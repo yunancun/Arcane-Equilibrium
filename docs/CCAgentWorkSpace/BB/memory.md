@@ -319,3 +319,63 @@
 4. M5-1 governance entry / M5-2 IP whitelist preflight 是否 IMPL (Stage 4 前 mandatory)
 5. BUSDT PG 殘倉 (12186 條,11 天延遲) operator 是否手動 dust clear
 
+
+---
+
+## 2026-05-10 W1+W2 Bybit V5 rate budget review (Sprint N+1 pre-flight)
+
+### Trigger
+
+Sprint N+1 W1 (W-AUDIT-8a Phase B Tier 2 collector funding_curve + oi_delta_panel) + W2 (A4-C BTC→Alt Lead-Lag) + W3 Stage 1 cohort observation 啟動前 PM 預跑 rate budget review。
+
+### 真實 Bybit V5 cap (verified 2026-05-10)
+
+- Per IP HTTP: **600 req / 5s = 120 req/s**（公共 `/v5/market/*` 端點）
+- Per UID Order/Position/Account: **20 req/s each**（VIP 升）
+- Per UID Market: **120 req/s**
+- Per UID Asset: 5 req/s
+- 違反 IP cap → 403 + 10 min cooldown
+- WS conn cap: 500/5min, market data 1000/IP
+
+### 既有 baseline rate (verified `rest_poller.rs` HEAD)
+
+- Funding poller: 25 sym / 900s = 0.028 req/s
+- OI poller: 25 sym / 300s = 0.083 req/s
+- LSR poller: 25 sym / 900s = 0.028 req/s
+- WS public (kline.1 + tickers + orderbook.50 × 25 sym): 0 REST cost
+- Authenticated REST cycle: < 0.5 req/s
+- Healthcheck: < 0.1 req/s
+- **Baseline 合計 ~0.7 req/s**
+
+### W1+W2+W3 增量
+
+- W1 dispatch v3.3 寫 25 sym × 60 = 1500 req/h = 0.42 req/s × 2 endpoint = 0.83 req/s 增量（如走 REST polling）
+- W1 BB 推薦 **WS-first pattern**：tickers topic 已 broadcast fundingRate + openInterest field（字典 line 974）→ 真實增量 = **0 ~ 0.5 req/s**
+- W2 (BTCUSDT 1m kline + orderbook): WS 已預設訂閱 → **0 REST 增量**
+- W3 Stage 1: shadow + paper simulator → **0 真實 Bybit API**
+
+### Verdict: PASS（~99% headroom）
+
+- 總和（WS-first IMPL）: 0.7 ~ 1.2 req/s = 利用率 0.6 ~ 1.0% Bybit IP cap
+- 多 writer 同 launch burst: 25 sym × 3 endpoint cold-start = 75 req 瞬發 ≪ 600/5s
+- ToS / KYC / 地理: **0 風險**（read-only market data, no order, no quote, 25 sym 全 USDT-perp linear, demo + LiveDemo 不觸 KYC tier 3, 不觸 broker rebate volume tally）
+
+### 主要 push back (HIGH)
+
+W1 spec "1500 req/h REST polling" = over-engineering。`tickers` WS topic 已 broadcast 全部 funding + OI field。建議 PA Phase B IMPL **WS-first**, REST 只 cold-start backfill。如 PA 採納 → W1 真實增量 ~0 req/s 而非 0.83 req/s。
+
+### 次要 push back (MEDIUM)
+
+- 若 PA 堅持 REST polling，加 `is_group_near_limit(Market, 30)` 預警（防未來 cohort scale 觸 cap）
+- W3 Stage 1 cohort 拍板必排除 BUSDT（funding_arb retire 殘倉風險，v3 carry-over）
+
+### Report path
+
+srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-10--w1_w2_bybit_v5_rate_budget_review.md
+
+### 下次啟動需查驗項
+
+1. PA Phase B spec 是否採納 WS-first pattern
+2. 若採納 → W1 collector IMPL 是否真用 `tickers` WS topic 解析 fundingRate / openInterest field（不重複 REST poll）
+3. 若未採納 → collector 是否加 rate group monitoring + aggregator pattern
+4. W3 Stage 1 cohort 拍板 symbol 是否確認 BUSDT 排除
