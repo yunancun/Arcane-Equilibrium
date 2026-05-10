@@ -73,16 +73,32 @@ Sprint N+1 D+0 dispatch fire 啟動：
 - Phase 2 ✅ 部分 DONE: W6-1 RFC 三角 sign-off COMPLETE 3/3 (PA + QC + MIT 全 APPROVE-CONDITIONAL, 14 push backs)；W5-E1-A + W5-E1-C IMPL 仍 in flight
 - Phase 3 待派: W1 IMPL chain + W2 IMPL v1.2 chain + P1-1/P1-2 W7 propagation
 
-## ⚠️ MIT 2026-05-10 20:35 UTC empirical 推翻 prior chain integrity 100% 結論
+## ⚠️ Chain integrity 真相（PM 2026-05-10 21:00 UTC era-split 重驗精細化 MIT 全表 40%）
 
-MIT W6-1 RFC sign-off 期間 ssh trade-core PG live audit 揭露：
-1. **chain integrity 全表 40%**（fills_w_entry_ctx=5939, fills_in_df=2369, **orphan=3570 (60%)**）
-2. **prior "100%" 是 n=331 + 269 = 窄窗 artifact**（5/10 chain replay 用窄樣本）
-3. **真實 chain coverage** 跨 4 strategies × 全 fills 後是 40%, 不是 100%
+**MIT 20:35 UTC 全表 audit 結果**：chain ratio = 40% (orphan 3570/5939) — 正確但 **era-mixed misleading**。
 
-**對 [40] 影響**: avg_net +8.75 bps (post-N+0 closure) / +22.77 bps (24h current) 仍 valid 因為 [40] 過 attribution_chain_ok filter 內計算，剩 40% chain 樣本仍給可信 metric — 但「chain coverage 100%」claim 必更正。
+**PM 21:00 UTC era-split empirical re-audit** (`learning.decision_features` 表，filter `f.ts > '2026-05-09 09:22 UTC'`):
 
-**MIT MUST 5 收口**: MIT memory 補註「窄窗 n=331」+ 樣本擴大 ratio 40% RCA 入 N+2；新 healthcheck `check_chain_integrity_post_audit_4b_m3()` 入 W-AUDIT-4b 24h passive 防 re-drift。
+| Era | fills_w_entry_ctx | in_df | chain_pct |
+|---|---|---|---|
+| **post-M3** (since 2026-05-09 09:22 UTC, W-AUDIT-4b M3 producer 上線) | 92 | 92 | **100.00%** ✅ |
+| pre-M3 (歷史，producer 不存在前) | 5854 | 2284 | 39.02% |
+
+**per-strategy post-M3** 全 100%: grid_trading 73/73 / ma_crossover 17/17 / bb_breakout 2/2
+
+**真實結論**：
+1. **W-AUDIT-4b M3 producer 在當前 production 系統 100% 工作** ✅（無 bug，post-M3 92/92 全 link 通）
+2. **prior "100%" claim 缺 era qualification** — 在 post-M3 era 是真的，但全表混入 pre-M3 historical 後變 40% → governance 上應明確 era
+3. **MIT WARN 在 governance 層仍對**：所有 chain integrity claim 必含 era qualification (post-M3 only or pre+post-M3 explicit)
+4. **真實 chain coverage**：post-M3 = 100% (current production) / pre-M3 = 39% (historical, producer 不存在)
+
+**對 [40] 影響**: [40] avg_net 用 `attribution_chain_ok = TRUE` filter 計算（內部隱含 chain join 通過）；post-M3 era 100% chain → [40] sample 完全有效。avg_net +8.75 bps (post-N+0 closure) / +22.77 bps (24h baseline) 全 valid。
+
+**MIT MUST 5 收口**:
+- ✅ Memory 補註 era-split (本 section)
+- 🟢 新 healthcheck `check_chain_integrity_post_audit_4b_m3()` 入 W-AUDIT-4b 24h passive 防 re-drift（含 era filter `ts > '2026-05-09 09:22 UTC'`）— sub-agent dispatch 中
+
+**Pre-M3 backfill 評估**：3570 orphan 是歷史資料（producer 上線前），不影響新 trading；backfill 純 data integrity exercise，**不阻 D+1 deploy + D+2 ALTER VALIDATE**。決策：**defer pre-M3 backfill 至 N+2 W-AUDIT-4b followup**（可選，ROI 低）。
 
 **對 V086 producer code**: MIT 22:00 UTC PG live: reject_NULL_code = 31053 / 36352 (98% NULL) — V086 producer code commit `05e44ede` 在 main 但 engine PID 1441249 跑舊 code 不 dual-write；D+1 evening restart_all --rebuild 才 deploy。D+2 14:30 UTC ALTER VALIDATE CONSTRAINT 必先確保 24h drift PASS。
 
