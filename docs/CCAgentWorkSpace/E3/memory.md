@@ -154,3 +154,37 @@
 - 建議 PA 報告附錄 §3.6 explicit 寫 Hypothesis governance API spec
 
 報告: `docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-09--security_verification_v3.md` (413 行)
+
+### 2026-05-10 Sprint N+1 D+0 安全 pre-audit（HEAD 1d9dccf1）
+
+**評級：A（vs 2026-05-09 v3 A+）**
+- 0 CRITICAL / 0 HIGH / 0 MEDIUM / 3 LOW / 1 INFO
+- 0 新 unauth endpoint / 0 新 secret leak / 0 新 SQL injection / 0 新 shell injection / 0 新 path hardcode in runtime code
+
+**Verdict**: ALL PASS — D+0 sub-agent dispatch fire 可進
+
+**範圍**: PR ready code (b42731f6 W7-3 + c9fb0b8f W7-1) + spec (W1 v1.1 WS-first / W2 v1.1 paper-only fence / W5 P1 V089/V090 / W6 V086) + dispatch SOP
+
+**核心發現**:
+1. W7-3 reason parse: reason 來源 = Rust enum `RejectionCode::format()` 100% 內部，無外部 user input 注入路徑（rejection_coding.rs:147-152 byte-identical contract）
+2. W7-1 TickContext.position_state: `&'a PaperPosition` immutable borrow + NLL per-iteration 釋放，0 use-after-free 風險，0 unsafe block
+3. W2 paper-only fence: Layer 1 (Rust enum match `_ => None`) + Layer 2 (Python env gate) + Layer 3 (Rust Option<T> type system) 三層 fail-closed
+4. W1 WS payload parse: `parsers.rs:225-263` 全 `.parse::<f64>().ok()` + `.filter()` NaN/Inf reject，0 panic 風險
+5. V086 backfill: 純 DDL/parameterized SQL，9757 row UPDATE + 17 row trading.fills REPLACE，audit chain 可從 commit `46a9cadc` 重建
+6. V088/V089/V090 schema: 0 secret column / 100% DDL 無 user input concat / DB role = trading_admin migration only
+7. BB ToS / KYC / geographic 0 觸發（W2 BTCUSDT spot orderbook public market data，0 redistribution risk）
+
+**3 LOW backlog**:
+- LOW-N1-1: reason contract drift（W7-2 ctx.position_state Option A 落地後自然 close）
+- LOW-N1-2: trading.fills UPDATE 缺 governance audit hook（forensic 仍可從 git commit 重建）
+- LOW-N1-3: N+0 sign-off SOP shell 含 PG_PASS env 變數展開（same-uid trust boundary，建議改 ~/.pgpass）
+
+**IMPL phase E2 必驗 4 點 sign-off carry-over**:
+1. W2 step_4_5_dispatch.rs paper-only fence Layer 1 default branch grep verify `_ => None`
+2. W2 Python writer Layer 2 fence: OPENCLAW_ENABLE_PAPER env gate fail-closed branch
+3. W7-2 future ma_crossover entry path 加 ctx.position_state query 後 LOW-N1-1 自然 close
+4. W5 V089 cohort_freq_cap_attempts promote override LeaseScope::CanaryStagePromotion 接線
+
+**5 hard gate 全綠 (W7-1 + W7-3 deploy 後仍維持)**
+
+報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-10--n1_d0_security_pre_audit.md`
