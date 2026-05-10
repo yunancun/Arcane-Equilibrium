@@ -29,11 +29,13 @@
 //!
 //!   Profile-vs-OS matrix:
 //!
+//! ```text
 //!         OS           | profile        | result
 //!         -------------|----------------|---------------------------
 //!         macOS        | Isolated       | check ENV; Ok if "1"
 //!         macOS        | non-Isolated   | RealDataAttemptedOnMac (regardless of ENV)
 //!         non-macOS    | (any)          | Ok (this guard does not enforce on Linux)
+//! ```
 //!
 //!   Why non-macOS is a no-op:
 //!     - V3 §6.3 explicitly scopes the policy to Mac; Linux `linux_trade_core`
@@ -85,11 +87,13 @@
 //!
 //!   Profile-vs-OS 矩陣：
 //!
+//! ```text
 //!         OS           | profile        | 結果
 //!         -------------|----------------|---------------------------
 //!         macOS        | Isolated       | 檢查 ENV；"1" 則 Ok
 //!         macOS        | non-Isolated   | RealDataAttemptedOnMac（不論 ENV）
 //!         non-macOS    | (任何)         | Ok（本 guard 在 Linux 不 enforce）
+//! ```
 //!
 //!   為何 non-macOS no-op：
 //!     - V3 §6.3 顯式將政策限於 Mac；Linux `linux_trade_core` 是 actionable
