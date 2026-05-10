@@ -441,6 +441,23 @@ def test_demo_and_live_pnl_charts_use_time_series_not_recent_fill_page(
     assert "ocPnlTrend('live-pnl-line'" not in tab_live_html
     assert "ocPnlSeriesTrend" in common_js
     assert "ocPnlSeriesTableRows" in common_js
+    assert "ocPnlSeriesFromFills" in common_js
+    assert "/api/v1/strategy/demo/fills?limit=200&offset=0" in tab_demo_html
+    assert "/api/v1/live/fills?limit=200&offset=0" in tab_live_html
+
+
+def test_demo_and_live_refresh_preserve_existing_dom_on_transient_loading(
+    tab_demo_html: str,
+    tab_live_html: str,
+    common_js: str,
+) -> None:
+    """Refresh should not clear populated panels back to loading on every poll."""
+    assert "if (el && el.innerHTML !== html) el.innerHTML = html" in common_js
+    assert "_demoMetricsLoadedOnce" in tab_demo_html
+    assert "_demoFillsLoadedOnce" in tab_demo_html
+    assert "_liveMetricsLoadedOnce" in tab_live_html
+    assert "_liveFillsLoadedOnce" in tab_live_html
+    assert "if (metricsData) _applyLiveTodayPnl(metricsData)" in tab_live_html
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(

@@ -241,6 +241,9 @@ try {
 
 let _demoFillsCache = []; // Cache recent aggregate fills for metrics/strategy mapping.
 let _demoPnlRange = '24h';
+let _demoConnectedOnce = false;
+let _demoMetricsLoadedOnce = false;
+let _demoFillsLoadedOnce = false;
 const DEMO_FILL_PAGE_SIZE = 50;
 const DEMO_FILL_TABS = {
   aggregate: { label: '聚合 / Aggregate', side: '' },
@@ -371,6 +374,7 @@ async function loadDemoStatus() {
   // Accept both Rust-first (source=rust_engine, no retCode) and raw Bybit (retCode=0) responses
   // 同時接受 Rust 優先路徑（無 retCode）和原始 Bybit（retCode=0）的回應格式
   if (balD && balD.data && (balD.data.source === 'rust_engine' || balD.data.retCode === 0)) {
+    _demoConnectedOnce = true;
     $('demo-badge').textContent = '已连接';
     $('demo-badge').className = 'oc-chip oc-chip-good';
     $('demo-api-info').textContent = 'demo-trading.bybit.com';
@@ -390,7 +394,7 @@ async function loadDemoStatus() {
     loadComparison();
     return;
   }
-  showOffline();
+  if (!_demoConnectedOnce) showOffline();
 }
 
 function showOffline() {
@@ -794,12 +798,15 @@ async function loadDemoFills() {
   _demoFillState.loading = true;
   _demoUpdateFillControls(null, []);
   ocSetHtml('demo-fills-head', _demoFillHead(_demoFillState.tab));
-  ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">加载中...</td></tr>');
+  if (!_demoFillsLoadedOnce) {
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">加载中...</td></tr>');
+  }
   try {
     const d = await ocApi('/api/v1/strategy/demo/fills' + qs);
     const payload = d && d.data;
     const fills = _demoExtractFills(payload);
     if (_demoFillState.tab === 'aggregate' && _demoFillState.offset === 0) _demoFillsCache = fills;
+    _demoFillsLoadedOnce = true;
     _demoFillState.loading = false;
     _demoUpdateFillControls(payload, fills);
     if (!fills.length) {
@@ -813,7 +820,9 @@ async function loadDemoFills() {
   } catch (e) {
     _demoFillState.loading = false;
     _demoUpdateFillControls(null, []);
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">无法加载成交</td></tr>');
+    if (!_demoFillsLoadedOnce) {
+      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">无法加载成交</td></tr>');
+    }
   }
 }
 
@@ -938,7 +947,10 @@ async function loadDemoMetrics(raw) {
   if (raw && raw.result && raw.result.list && raw.result.list[0]) {
     b = raw.result.list[0];
   }
-  if (!b) { ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无数据</div>'); return; }
+  if (!b) {
+    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无数据</div>');
+    return;
+  }
 
   let m = null;
   try {
@@ -963,10 +975,11 @@ async function loadDemoMetrics(raw) {
   ocSetText('d-maxdd', maxDdMetric ? ocFormatPerformanceMetric(maxDdMetric) : '--');
 
   if (!m || !Array.isArray(metrics) || metrics.length === 0) {
-    ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无 DB 指标</div>');
+    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无 DB 指标</div>');
     return;
   }
   ocSetHtml('demo-perf-metrics', ocRenderPerformanceMetrics(metrics));
+  _demoMetricsLoadedOnce = true;
 }
 
 function setDemoPnlRange(rangeKey) {
@@ -977,15 +990,27 @@ function setDemoPnlRange(rangeKey) {
 async function loadDemoPnlSeries() {
   ocSetPnlRangeButtons('demo-pnl-range-controls', _demoPnlRange);
   ocSetText('demo-pnl-range-label', '(' + String(_demoPnlRange).toUpperCase() + ')');
+  let payload = null;
+  let points = [];
   try {
     const d = await ocApi('/api/v1/strategy/demo/pnl-series?range=' + encodeURIComponent(_demoPnlRange));
-    const payload = d && d.data;
-    const points = (payload && Array.isArray(payload.points)) ? payload.points : [];
+    payload = d && d.data;
+    points = (payload && Array.isArray(payload.points)) ? payload.points : [];
+  } catch (_) {}
+  if (!payload || payload.available === false || !points.length) {
+    try {
+      const fd = await ocApi('/api/v1/strategy/demo/fills?limit=200&offset=0');
+      const fallbackFills = _demoExtractFills(fd && fd.data);
+      payload = ocPnlSeriesFromFills(fallbackFills, _demoPnlRange);
+      points = payload.points || [];
+    } catch (_) {}
+  }
+  if (points.length) {
     ocPnlSeriesTrend('demo-pnl-line', 'demo-pnl-label', points, 'demo-pnl-zero', payload || { range: _demoPnlRange });
     ocSetHtml('demo-pnl-series-rows', ocPnlSeriesTableRows(points));
-  } catch (_) {
+  } else {
     ocPnlSeriesTrend('demo-pnl-line', 'demo-pnl-label', [], 'demo-pnl-zero', null);
-    ocSetHtml('demo-pnl-series-rows', '<tr class="empty-row"><td colspan="5">无法加载 PnL 序列</td></tr>');
+    ocSetHtml('demo-pnl-series-rows', '<tr class="empty-row"><td colspan="5">暂无 PnL bucket；后端序列待加载或当前区间无成交</td></tr>');
   }
 }
 

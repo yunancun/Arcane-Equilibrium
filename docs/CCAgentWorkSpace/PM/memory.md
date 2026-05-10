@@ -2145,3 +2145,11 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Grafana/TradingView review: Grafana iframe embedding adds auth/anonymous-access/`allow_embedding` constraints; TradingView custom PnL requires a custom datafeed. Native backend series is the least-coupled first step and can later feed Lightweight Charts.
 - Verification: targeted pytest 14 passed, static pytest 51 passed, `py_compile`, `node --check`, embedded script parse, `git diff --check`.
 - Boundary: no restart, no rebuild, no DB migration, no live auth mutation, no strategy/risk parameter change.
+
+## 2026-05-10 Live/Demo PnL Series Refresh Fix
+
+- Added a static fallback from `/pnl-series` to `/fills?limit=200&offset=0` so tables render before the running API process loads the new backend route.
+- Made the fallback range-aware and kept the canonical backend series as the preferred path.
+- Reduced auto-refresh flicker by preserving populated panels during transient failures and avoiding same-HTML rewrites in `ocSetHtml`.
+- Verification: static pytest 52 passed, targeted Python pytest 14 passed, JS parse, `git diff --check`.
+- Boundary: source/static only; no restart, no rebuild, no DB migration, no live auth mutation.
