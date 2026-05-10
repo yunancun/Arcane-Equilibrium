@@ -2641,3 +2641,53 @@ Strategy trait (`strategies/mod.rs`) 對 W7 pattern **不強制**：on_rejection
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w7_4_5_strategy_position_sync_systemic_audit.md`
 
 **Lesson**: 「partial systemic fix」是 governance 失蹤 — 認識到 root-cause 結構是 systemic（W7-2 commit 訊息明確說「bb_reversion 同 pattern apply (per W7-4 §3 verdict HIGH risk)」）但 fix coverage 只覆蓋部分 surface（W7-3 沒有 propagation policy）。後續 systemic audit 必明文 verify「fix pattern 是否覆蓋全 surface 而不只 commit 訊息列出的 surface」，避免 W7 chain 這類 Option B 1-tick defense 三策略漏二的盲區。
+
+---
+
+## 2026-05-10 W6-1 RFC final verdict — PA sign-off (APPROVE-CONDITIONAL)
+
+**性質**：D+1 W6-1 RFC final verdict draft PA 視角 cold review + sign-off。
+**Verdict**: APPROVE-CONDITIONAL（4 verdict fidelity HIGH；2 push back fix-forward 同次 commit；Track A 由現資源吸收；Track B (e) gate 補完）
+
+**4 verdict fidelity verify**：
+- Verdict 1 (cost_gate hard rule 維持) — APPROVE，與 PA 原 RFC Q1 hold A 全 capture，反指 + 16 root principle 對照 + N+2 重提防線完整
+- Verdict 2 (JS shrinkage 強收縮 grand_mean 是設計) — APPROVE，QC 視角主導但與 PA cost_gate 立場 consistent，N+2 重評觸發點 (W2 A4-C 或 W-AUDIT-8a Phase B/C/D) 明文
+- Verdict 3 (cost_gate 放行 expected -14 bps) — APPROVE，Kelly/DSR 雙重否決邏輯加分，4 項 bias 修正成本 ≥1 sprint vs 已知 -14 bps ROI 計算正確
+- Verdict 4 (scorer_trainer LightGBM regression confirm) — APPROVE，MIT W6-5 category error 完整 capture，Track A/B 拆分解 PA Q3 hold A vs MIT Q2 hold B 分歧
+
+**V086 IMPL E1 finding 接收**：
+- E1 §3.2 OR-filter 缺陷 + 推薦方案 A（accept + spec 註解修正）
+- PA 立場：ACCEPT 方案 A — Guard C 兩次都 PASS、overlap_n=0、deterministic CASE WHEN 寫同值是 lossless idempotent；方案 B 不可行（驗證過 producer dual-write 後 AND 也會 trigger UPDATE）；方案 C 成本高收益低
+- 修正 action：D+1 evening W6-3c E2 review 同次 commit V086 SQL §2 註解 wording 修正
+
+**Track A immediate path 安排**：
+- 由現有 W6-5 dispatch 吸收（不需新 wave）
+- W6-5 sample_weight ratio sensitivity (1/100/1/170/1/300/1/500) 在 LightGBM regression `lgb.Dataset(weight=...)` 路徑上是 1-line config sweep，MIT 1 day 充裕
+- 與 W6-2/W6-3c/W6-3d/W6-4/W6-6/W6-7/W6-9/W6-10 全部正交，可 D+3 起 MIT 並行跑
+
+**3 push back（2 fix-forward + 1 informational）**：
+1. **PB#1 (低 severity)**：W6-3c E2 review wave 同次 commit V086 SQL §2 註解 wording 修正（避免 D+1 evening engine restart 後 SQL 註解與 PG runtime 行為 inconsistency window）
+2. **PB#2 (中 severity)**：補 Track B 4-gate 之 (e) gate「W6 N+1 期間每週 reject + close 各 enum sample 累積進度週報 healthcheck `[63]`」（為 N+2 spec phase 啟動 timing 提供 evidence stream）
+3. **PB#3 (informational)**：AMD-2026-05-1X-W6-1 件加 cross-ref 4-agent loss audit 4 報告 evidence path
+
+**N+2/N+3 Track B 啟動 dependency**（5 gate map）：
+- (a) V086 land + 24h dual-write 0 NULL drift — N+1 D+2 14:30 UTC 後
+- (b) multi-class 18+ enum 各 ≥ 200 row — N+2 mid-Sprint（4 reject ≥200, 4 close <200 待累，funding_arb 永不過 per ADR-0018）
+- (c) classification trainer task 升級 spec — N+2 spec phase + N+3 IMPL phase
+- (d) imbalance handling 試行報告 PASS — N+3 IMPL phase
+- (e) [63] weekly sample 累積 healthcheck（PA 新加） — N+1 D+2 起 cron continuous
+
+**Confidence**: HIGH（4 verdict fidelity HIGH + 2 push back fix-forward + Track A 現資源吸收 + Track B sequence 清晰）
+
+**唯一不確定**：QC + MIT 視角 verify 結果未知（task spec 不跨範圍）；D+1 下午 1h 三角 sync 解決
+
+**Sign-off Action Items (D+1 evening 同次 commit)**：
+1. PM 升 draft 為 AMD-2026-05-1X-W6-1-rfc-verdict.md
+2. AMD 件加 §11 cross-ref evidence chain
+3. W6-3c E2 review wave 加 V086 SQL §2 註解 wording 修正
+4. W6-9 wave 加 [63] healthcheck IMPL
+5. dispatch v3.7 §3.0 + §6 cross-ref AMD
+6. CLAUDE.md §三 W6 wave 一行總結 land
+7. PA memory.md 追加 W6-1 verdict 摘要（即本條）
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_1_rfc_pa_signoff_verdict.md`
