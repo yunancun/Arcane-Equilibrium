@@ -194,7 +194,11 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 
 ## §6 Sprint N+0 Day-by-Day Dispatch（PM 從 v19 sign-off 後立即派發）
 
-### Day 0-3 並行 5 active E1 + 1 stand-by E1 + ops（operator 2026-05-09 拍板 (a)）
+**Status**: ✅ **DONE Sprint N+0 closure 2026-05-10** (HEAD `b6ed4975`)；Day 0-15 全 milestone 執行完成；Day 14-15 PM Sign-off 跑 §5 22 invariant ✅ (14 ✅ / 6 ⏳ / 2 🟡 / 0 ❌)；HIGH-5 12h passive watch 後續 Sprint N+1 D+0 提前 sign-off APPROVED 2026-05-10 20:08 UTC（提前 1h22m, A 路徑）；後續 Sprint N+1 dispatch fire 詳 §6.5 + §6.6。
+
+詳完整 Sprint N+0 closure runtime impact + 4-agent loss audit 真實 runtime 效果 + V80/82/83/84 auto-migrate + W-AUDIT-9 graduated canary state machine + W-AUDIT-8a Phase A trait skeleton + W-AUDIT-4b M1/M2/M3：見 `memory/project_2026_05_10_sprint_n0_closure.md`。
+
+### ✅ Day 0-3 並行 5 active E1 + 1 stand-by E1 + ops（operator 2026-05-09 拍板 (a)）
 
 **5 active E1 IMPL slot**：
 - `@E1-A` W-AUDIT-9 T1 Rust schema 升級（並行 `@QC` enum review）
@@ -210,30 +214,35 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 **ops**：
 - `@ops` A2-followup G3-08 ✅ DONE（2026-05-09 17:27 UTC, daemon spawn confirmed）
 
-### Day 3-5 E2 first-pass
+### ✅ Day 3-5 E2 first-pass
 
-- `@E2` review T1+T2+W-AUDIT-6d mid-G+W-AUDIT-4b-M1
-- `@E4` regression schema test
+- ✅ `@E2` review T1+T2+W-AUDIT-6d mid-G+W-AUDIT-4b-M1
+- ✅ `@E4` regression schema test
 
-### Day 5-7 Dispatch（W-AUDIT-6d mid-G done 後 8a Phase A 序列化開始）
+### ✅ Day 5-7 Dispatch（W-AUDIT-6d mid-G done 後 8a Phase A 序列化開始）
 
-- `@E1-A` W-AUDIT-8a Phase A trait 升級 + 5 策略 declare
-- `@E1-B` W-AUDIT-4b-M2 entry_context_id INSERT trigger
-- `@E1-C` W-AUDIT-4b-M3 negative label + class weight
-- `@E1-D` W-AUDIT-6c runtime apply (V079 + cron + DSR/PBO evidence pipeline)
-- `@E1-E` W-AUDIT-9 T4 healthcheck `[58]`
-- `@E1-F` 切換補位 W-AUDIT-9 T5 GUI surface（從 stand-by 進 active）
+- ✅ `@E1-A` W-AUDIT-8a Phase A trait 升級 + 5 策略 declare
+- ✅ `@E1-B` W-AUDIT-4b-M2 entry_context_id INSERT trigger (V083 + fill writer)
+- ✅ `@E1-C` W-AUDIT-4b-M3 negative label + class weight (V084 + 6 Rust producer file emit)
+- ✅ `@E1-D` W-AUDIT-6c runtime apply (V079 + cron + DSR/PBO evidence pipeline) — VaR/CVaR/EVT IMPL `cc6476dd`
+- ✅ `@E1-E` W-AUDIT-9 T4 healthcheck `[58]`
+- ✅ `@E1-F` 切換補位 W-AUDIT-9 T5 GUI surface（從 stand-by 進 active）
 
-### Day 12-14 Full review chain
+### ✅ Day 12-14 Full review chain
 
-- `@E2` second-pass review T3+T4+T5+T6+8a Phase A+M2+M3+W-AUDIT-6c
-- `@E4` regression 5-stage transition + byte-diff E2E + 6 表 INSERT schema + DSR/PBO query
-- `@QC` 5 策略數學審計 + AlphaSourceTag enum 完整性
-- `@MIT` V### migration row-rate 估算 + cron install
-- `@CC` Scout IPC schema preview（為 8a Phase D Sprint N+2）
-- `@BB` Bybit V5 levels 對齊 review（為 Phase C Sprint N+1）
+- ✅ `@E2` second-pass review T3+T4+T5+T6+8a Phase A+M2+M3+W-AUDIT-6c
+- ✅ `@E4` regression 5-stage transition + byte-diff E2E + 6 表 INSERT schema + DSR/PBO query
+- ✅ `@QC` 5 策略數學審計 + AlphaSourceTag enum 完整性 (3 push back + 4 caveat APPROVE)
+- ✅ `@MIT` V### migration row-rate 估算 + cron install — RETURN-TO-E4 (8 actions) → MIT V083+V084 dry-run subsequently APPROVE FULL
+- ✅ `@CC` Scout IPC schema preview（為 8a Phase D Sprint N+2）— APPROVE-CONDITIONAL Compliance Score A 93.3%
+- ✅ `@BB` Bybit V5 levels 對齊 review（為 Phase C Sprint N+1）— APPROVE 0 Bybit risk
 
-### Day 14-15 PM Sign-off Sprint N+0 milestone（跑 §5 22 invariant）
+### ✅ Day 14-15 PM Sign-off Sprint N+0 milestone（跑 §5 22 invariant）
+
+- ✅ Sprint N+0 sign-off 2026-05-10 完成: 14 ✅ / 6 ⏳ DEFER / 2 🟡 PARTIAL / 0 ❌ FAIL
+- ✅ Operator AMD-2026-05-09-03 graduated canary 5-stage default + AMD-2026-05-10-03 invariant 5 wording amend + AMD-2026-05-10-04 TOML drift fix SOP + ADR-0022 strategist-cap-wide-parameter-adjustment-skill + ARCH-04 graduated-canary-5-stage architecture
+- ✅ Sprint N+0 closure HEAD `b6ed4975` (chain: ad59765b→...→b6ed4975)
+- ✅ engine restart 後 attribution chain post-M3 100% (per PM era-split empirical)、`[40]` 24h MLDE avg_net **+8.75 bps**（從 baseline -17.82 bps 翻正）— 真實 runtime 效果驗證
 
 ---
 
