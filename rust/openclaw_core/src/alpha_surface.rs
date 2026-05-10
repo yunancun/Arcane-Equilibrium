@@ -385,6 +385,27 @@ pub struct AlphaSurface<'a> {
 }
 
 impl<'a> AlphaSurface<'a> {
+    /// Return whether a declared alpha source has concrete data on this surface.
+    ///
+    /// This is the single mapping from `AlphaSourceTag` to the corresponding
+    /// `AlphaSurface` field. Dispatch metrics, future fail-closed strategy
+    /// guards, and tests should use this Interface instead of re-encoding the
+    /// match at each call site.
+    pub fn is_source_available(&self, tag: AlphaSourceTag) -> bool {
+        match tag {
+            AlphaSourceTag::Ta1m => self.indicators.is_some(),
+            AlphaSourceTag::Ta5m => self.indicators_5m.is_some(),
+            AlphaSourceTag::FundingSkew => self.funding_curve.is_some(),
+            AlphaSourceTag::Basis => self.basis_curve.is_some(),
+            AlphaSourceTag::OiDeltaPanel => self.oi_delta_panel.is_some(),
+            AlphaSourceTag::OrderflowImbalance => self.orderflow.is_some(),
+            AlphaSourceTag::LiquidationCascade => self.liquidation_pulse.is_some(),
+            AlphaSourceTag::EventDriven => !self.event_alerts.is_empty(),
+            AlphaSourceTag::CrossAsset => self.btc_lead_lag.is_some(),
+            AlphaSourceTag::Sentiment => self.sentiment_panel.is_some(),
+        }
+    }
+
     /// 構造 Tier 1 only surface（Phase A 預設用法）：把 `indicators` /
     /// `indicators_5m` 引用搬入 surface，Tier 2-4 全 `None` / 預設值。
     ///
@@ -581,13 +602,39 @@ mod tests {
         assert_eq!(p.alt_symbols, vec!["ETHUSDT".to_string()]);
     }
 
+    #[test]
+    fn alpha_surface_availability_maps_cross_asset_panel() {
+        let panel = BtcLeadLagPanel {
+            alt_symbols: vec!["ETHUSDT".to_string()],
+            btc_lead_return_pct: 0.4,
+            lead_window_secs: 60,
+            alt_xcorr: vec![0.6],
+            alt_expected_dir: vec![1],
+            snapshot_ts_ms: 1715000000000,
+            source_tier: "test".to_string(),
+        };
+        let surface = AlphaSurface {
+            btc_lead_lag: Some(&panel),
+            ..AlphaSurface::empty()
+        };
+
+        assert!(surface.is_source_available(AlphaSourceTag::CrossAsset));
+        assert!(!AlphaSurface::empty().is_source_available(AlphaSourceTag::CrossAsset));
+    }
+
     /// EMPTY_ALPHA_SURFACE 靜態常量 cheap reference — 測 Default 結果一致。
     #[test]
     fn static_empty_alpha_surface_matches_empty_constructor() {
         let dyn_empty = AlphaSurface::empty();
         let static_empty = &EMPTY_ALPHA_SURFACE;
-        assert_eq!(dyn_empty.indicators.is_none(), static_empty.indicators.is_none());
-        assert_eq!(dyn_empty.event_alerts.len(), static_empty.event_alerts.len());
+        assert_eq!(
+            dyn_empty.indicators.is_none(),
+            static_empty.indicators.is_none()
+        );
+        assert_eq!(
+            dyn_empty.event_alerts.len(),
+            static_empty.event_alerts.len()
+        );
         assert_eq!(dyn_empty.regime, static_empty.regime);
     }
 

@@ -142,18 +142,7 @@ impl Orchestrator {
         unavailable_counter: &mut HashMap<AlphaDispatchKey, u64>,
     ) {
         for tag in declared {
-            let available = match tag {
-                AlphaSourceTag::Ta1m => surface.indicators.is_some(),
-                AlphaSourceTag::Ta5m => surface.indicators_5m.is_some(),
-                AlphaSourceTag::FundingSkew => surface.funding_curve.is_some(),
-                AlphaSourceTag::Basis => surface.basis_curve.is_some(),
-                AlphaSourceTag::OiDeltaPanel => surface.oi_delta_panel.is_some(),
-                AlphaSourceTag::OrderflowImbalance => surface.orderflow.is_some(),
-                AlphaSourceTag::LiquidationCascade => surface.liquidation_pulse.is_some(),
-                AlphaSourceTag::EventDriven => !surface.event_alerts.is_empty(),
-                AlphaSourceTag::CrossAsset => false,
-                AlphaSourceTag::Sentiment => surface.sentiment_panel.is_some(),
-            };
+            let available = surface.is_source_available(*tag);
             let key = (*tag, strategy_name.to_string());
             if available {
                 *dispatched_counter.entry(key).or_insert(0) += 1;
@@ -399,6 +388,37 @@ mod tests {
     }
 
     #[test]
+    fn test_alpha_tally_uses_surface_availability_for_cross_asset() {
+        let panel = openclaw_core::alpha_surface::BtcLeadLagPanel {
+            alt_symbols: vec!["ETHUSDT".to_string()],
+            btc_lead_return_pct: 0.25,
+            lead_window_secs: 60,
+            alt_xcorr: vec![0.5],
+            alt_expected_dir: vec![1],
+            snapshot_ts_ms: 1715000000000,
+            source_tier: "test".to_string(),
+        };
+        let surface = AlphaSurface {
+            btc_lead_lag: Some(&panel),
+            ..AlphaSurface::empty()
+        };
+        let mut dispatched = HashMap::new();
+        let mut unavailable = HashMap::new();
+
+        Orchestrator::tally_alpha_sources(
+            "lead_lag_strategy",
+            &[AlphaSourceTag::CrossAsset],
+            &surface,
+            &mut dispatched,
+            &mut unavailable,
+        );
+
+        let key = (AlphaSourceTag::CrossAsset, "lead_lag_strategy".to_string());
+        assert_eq!(dispatched.get(&key), Some(&1));
+        assert!(!unavailable.contains_key(&key));
+    }
+
+    #[test]
     fn test_inactive_strategy_skipped() {
         let mut orch = Orchestrator::new();
         orch.register(mock_strategy(
@@ -483,7 +503,8 @@ mod tests {
             vec![-2.0, -5.0, -8.0, -10.0, -12.0, -15.0, -18.0, -21.0, -24.0],
         );
         returns.insert("ma_crossover".to_string(), vec![3.0, 4.0, 5.0, 3.5, 4.5]);
-        let actions = orch.dispatch_tick_with_cusum_filter(&ctx(), empty_surface(), &returns, &cusum_on());
+        let actions =
+            orch.dispatch_tick_with_cusum_filter(&ctx(), empty_surface(), &returns, &cusum_on());
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             StrategyAction::Open(intent) => assert_eq!(intent.strategy, "ma_crossover"),
