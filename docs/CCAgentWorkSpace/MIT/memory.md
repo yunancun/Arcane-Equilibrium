@@ -381,3 +381,43 @@ _Last updated: 2026-04-24_
 
 **邊界遵守**: read-only audit；不寫 V086 SQL (留 D+1 W6-3c E1 IMPL)；不修 dispatch v3.3 (出 spec 給 PA 拍板)；不寫業務 code
 
+
+## 2026-05-10 W2 A4-C σ verify (BTCUSDT 1m forward return realized σ 7d)
+
+**Trigger**: PA W2 spec v1.1 §7.1 acceptance prerequisite — pre-run before D+1 sign-off
+
+**Report**: `workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md` (92 行)
+
+**核心 raw data** (PG live 2026-05-10 7d window, n=10050):
+1. `market.klines` BTCUSDT 1m: 42628 row / 35d coverage; ts/symbol/timeframe('1m')/OHLC schema
+2. **σ_60 = 4.5397 bps** (skew -0.18, ex_kurt 11.76)
+3. **σ_120 = 6.2760 bps** (skew -0.01, ex_kurt 7.82)
+4. **σ_300 = 10.0838 bps** (skew 0.03, ex_kurt 10.34)
+5. **均比 PA spec preliminary σ=30 bps 低 0.15-0.34×**
+6. BTCUSDT 7d decision_outcomes n=7, sigma_1m=5.27 bps 對齊 raw σ_60 (一致)
+
+**核心發現 (語意分歧)**:
+- **PA spec 30 bps 不對應任何真實層** — 既不是 raw price σ (5-10) 也不是 EDGE-DIAG-1 net edge σ (50-80)
+- **dual-layer reframe 建議**: L1 raw σ_300=10 bps baseline / L2 net edge σ ≈ 50-80 bps (EDGE-DIAG-1 historical)
+
+**Power recalc (μ=15 bps paper avg_net, N_fills=80)**:
+- Raw σ 視角: t-stat 13-30 (過度樂觀 PASS)
+- Net σ=50: t-stat 2.68 / p=0.0044
+- Net σ=60: t-stat 2.24 / p=0.0141 (QC W2 review 警告線 σ ≥ 60 bps 命中)
+- Net σ=80: t-stat 1.68 / p=0.0487 (邊緣 PASS)
+- Net σ=100: t-stat 1.34 / p=0.0918 (FAIL)
+
+**PSR(0) skew/kurt deflation**:
+- Raw 視角: PSR(0) ~1.0
+- Net σ=80 視角: PSR(0) ~0.94 (接近 0.95 標準下界)
+- Excess kurt 7-12 ≫ 0 → JB normality 假設 FAIL → 必用 PSR(0) skew/kurt 修正而非 normal-assumed t-test
+
+**W2 sign-off verdict**: **CONDITIONAL PASS**
+1. Raw σ verify PASS (實測交付)
+2. PA W2 spec v1.1 §7.1 必修 (dual-layer language)
+3. Power 不需重算 dispatch (raw t-stat>>2 充分；spec 文檔需註明)
+4. PSR(0) net σ deflate 至接近下界
+5. 不需 D+1 MIT C-3 重跑 (本次完整交付)
+
+**邊界**: read-only audit; 不修 PA W2 spec v1.1; 不修 dispatch v3.6; 不寫業務 code
+
