@@ -142,7 +142,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 2 | Sprint N+0 W-AUDIT-8a Phase A trait 升級 land + 5 策略 byte-identical replay PASS + `cargo build --release` 綠 | E2E byte-diff test PASS | PA-2 |
 | 3 | W-AUDIT-6d mid-ground 6 保子項 land + 砍 6 子項 grep blacklist 0 命中 | grep audit + 6 commit 存在 | PA-3 |
 | 4 | W-AUDIT-9 Stage 1 cohort active + 7d wall-clock 觀察期未提前升級（**standalone milestone**） | `governance.canary_stage_log` Stage 1 entered_at_ms + auto-promote 條件未提前觸 | PA-4 + FA-Critique-2 |
-| 5 | W-AUDIT-4b 6 表 INSERT path 已**串行** IMPL（feature_baselines first → mlde_edge_training_rows → scorer_predictions → 3 advisor 並行） | commit ordering 驗 + schema relationship test PASS | FA-2 |
+| 5 | W-AUDIT-4b N+0 IMPL chain 已串行 land（M1 decision_features producer 改 intent-only emit + V082 拆 `decision_features_evaluations` 表 → M2 fill writer `entry_context_id` enforcement + V083 NOT VALID CHECK → M3 reject negative label + V084 `mlde_sample_weight` UDF + 6 Rust producer file `emit_decision_feature_intent_rejected` 5 hits） | commit ordering 驗 (`4a90966a` → `404174a4` → `e93a6e5c` → `a01d05ed`) + grep 5 hits + pytest 真 19/19 PASS | FA-2 (N+0 actual IMPL 對齊；feature_baselines / mlde_edge_training_rows / scorer_predictions / 3 advisor 6 表 INSERT path 留 **N+1 invariant 5b**) |
 
 ### §5.2 安全 invariant（5 條）
 
