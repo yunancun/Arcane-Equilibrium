@@ -2579,3 +2579,30 @@ PM 派 PA 預寫 W5 三 P1 ticket spec 省 PA D+1-3 spec phase；W5 sub-agent E1
 **Sign-off path**: QC C-2 已 sign-off（v1.1 5 conditions revised）；MIT C-3 σ verify 已交付；W2 IMPL 直接收 D+3 起派 C-IMPL-1..4 paper IMPL；不需 D+1 PA + MIT 重 sign-off。
 
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w2_a4c_spec_v1_2_dual_layer_sigma_revision.md`
+
+---
+
+## 2026-05-10 PA — ma_crossover BILLUSDT scope pre-verify (D+1 SOP §1.2 Tier 1 #5 預驗)
+
+**Trigger**: PM N+0 sign-off draft 6h spot check 揭露 ma_crossover 6h post-restart 4 fill 全 BILLUSDT (demo 2 + live_demo 2) — 是否 scope drift / cluster transfer 自 grid_trading BILLUSDT n=11 avg=-49.67 bps frozen？
+
+**Verdict**: **Case A** — ma_crossover scope 包 BILLUSDT 合法 (read-only audit 確認三 risk_config + freeze.json 對齊：ma_crossover ban 僅 NAORISUSDT/PENGUUSDT/FARTCOINUSDT/LABUSDT，**不含** BILLUSDT)；**非 bug**；**無需 P1/P2 ticket**；維持觀察。
+
+**核心發現**：
+- Frozen JSON 結構 = per-strategy independent cell（grid_trading config_family = strategy_params*.toml；ma_crossover config_family = risk_config*.toml:per_strategy.ma_crossover.blocked_symbols）— 兩者完全獨立，grid freeze 不傳遞至 ma
+- ma_crossover BILLUSDT 全期 16 fill (10 demo + 6 live_demo, 4 day window 2026-05-07 至 2026-05-10)，組成 8 round-trip
+- 8 round-trip aggregated: demo gross +0.45 / fee 0.53 → net **-0.075 USDT**（fee 吃光）；live_demo gross +0.48 / fee 0.13 → net **+0.346 USDT**（maker entry 費率低）；**combined net = +0.27 USDT**
+- 6h post-restart 4 fill = 2 round-trip：demo Buy→Sell 3min DYNAMIC STOP -0.48 USDT；live_demo Buy→Sell 6min trailing +0.27 USDT；duplicate_position reject 0 in BILLUSDT 6h window（**非** P1-MA-CROSSOVER-DUPLICATE-INTENT hot loop pattern）
+- **QC W6 RFC §3 cluster verdict 不可傳遞**：grid 走 mean-reversion / ma 走 trend-following，alpha source 不同；ma BILLUSDT trailing exit 1-3min hold 顯示 ma 對該 symbol 短期動量 capture 工作
+
+**派生發現**：BILLUSDT ma_crossover 8 round-trip 中 3 個 (37.5%) phys_lock_gate4_giveback 平倉（高於 W6 整體 ~10-15%）— 可能 BILLUSDT 0.01 級價格 + bps noise 與 phys_lock gate 4 threshold 互動效應；**屬 phys_lock 算法 vs low-price symbol 互動，非 BILLUSDT scope 問題**；歸入 W-AUDIT-8a Phase B/C 觀察 (alpha surface 升級後重評) 或 W-AUDIT-9 stage stats
+
+**承接機制**：W5 P1-DYNAMIC-UNBLOCK-CHECK-1 spec land 後，30d evaluation queue 自動承接 ma_crossover BILLUSDT（無需 manual P2）
+
+**D+1 SOP update**: §1.2 Tier 1 #5 ma_crossover BILLUSDT scope verify 已 pre-verified，D+1 EOD spot check **drop**；改為 monitor 24h backfill 進來的 net_bps via `[40]` MLDE 平面 attribution，若 24h cumulative ma_crossover BILLUSDT avg_net_bps < -50 bps 才升 P2 freeze evaluation
+
+**16 原則 + DOC-08 §12 + 硬邊界 5 項**：全 0 觸碰（純 read-only audit, 無 IMPL 改動）
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--ma_crossover_billusdt_scope_verify.md`
+
+**Lesson**: 同 symbol 在不同 alpha source 策略間「freeze cluster verdict 不可傳遞」是 governance pattern — grid mean-reversion 在 BILLUSDT 失敗 ≠ ma trend-following 在 BILLUSDT 失敗；frozen JSON 設計成 per-strategy cell 正是此意。多策略治理 sign-off 必檢「cluster verdict scope = 哪策略」，避免錯誤套用導致過早 freeze 縮 trade-eligible universe（會與 W5 selection-bias unblock 機制反向衝突）。
