@@ -1,5 +1,49 @@
 # PA Memory — 工作記憶
 
+## P1-MA-CROSSOVER-DUPLICATE-INTENT root cause audit（2026-05-10）
+
+**觸發**：Sprint N+1 W5 ticket — W6 baseline 揭露 ma_crossover INXUSDT live_demo 6.87h 內 duplicate_position guard reject 2331 次（其中 11:34 一分鐘 burst 2319 次，~50/sec），audit phase 找 root cause。
+
+**Root cause（HIGH confidence）= cross-strategy position state 盲區**：
+- ma_crossover 用 `self.positions: HashMap<String, bool>` 追蹤**自己策略**的倉位（strategy_impl.rs:140）
+- router gate 1.5 用 `paper_state.get_position(&intent.symbol)` 比對 **symbol-level（不分 strategy）** dedup（router.rs:228-241）
+- 兩個獨立 source of truth：strategy 內部 cache vs paper_state singleton；strategy 看不見其他策略開的倉
+- on_rejection rollback（strategy_impl.rs:44-65）把 strategy.positions 還原到 prev_position（None），形成 infinite hot loop
+
+**Smoking gun SQL 證據**：
+- `trading.fills` INXUSDT 7d 內**只有 grid_trading 真實成交**（11 fills，11:29 SHORT 1810 → 11:39 close）；ma_crossover **0 fills**
+- `trading.risk_verdicts` 11:34:00 burst 2319 次 → 11:35:00 12 次 → 立即停（not 高頻 cross，是 hot loop）
+- `market.klines` INXUSDT 4h 1m close-to-close diff ±5-400bps，物理上不可能 50/sec cross
+
+**Hypothesis verdict**：
+- **A 變體 = CONFIRMED**（cross-strategy 不 dedup，非單策略每 tick 不 dedup）
+- B（pyramiding by-design）= REJECTED（strategy 設計是 1 leg；router gate 1.5 沒 pyramiding awareness 是 architectural gap）
+- C（INXUSDT 高 vol）= REJECTED（vol 正常）
+- D（timing race）= REJECTED（grid 開倉 11:29 vs reject burst 11:34，5 min gap，不是 race）
+
+**Fix scope 建議（D+3-5 W5 IMPL）**：
+- **Option A 推薦**：strategy.on_tick 進 entry path 前查 paper_state.get_position；TickContext 加 read-only position handle；副作用 = 5 策略 on_tick signature 全動 → PA 統一審
+- **Option B 應急**：on_rejection 識別 "duplicate_position" reason 後解析寫 strategy.positions（補丁，依賴 reason 字串契約）
+- Option C（observability only）非治本
+
+**Risk if not fix**：
+- HIGH: 真 live 下 hot loop + lease cancel 浪費 SM-02 throughput
+- MEDIUM: demo/live_demo audit pollute（[40] avg_net + W-AUDIT-4b-M3 negative label）
+- HIGH (architectural): single-strategy assumption vs multi-strategy reality 不對齊；DOC-01 §16 組合級風險未來必修
+
+**Systemic 風險**：bb_breakout / bb_reversion 同樣設計（self.positions 不查 paper_state）— W6 沒看到只是 signal 沒對齊；W5 IMPL phase 同 phase 開 P2 ticket audit 全策略。
+
+**核心教訓**：strategy 內部 state machine 跟 paper_state 是兩個 SoT 是 architectural debt；2026-04-26 G2-03 ma_crossover SL/TP RFC 當時也指出 separation of concerns 邊界；本案是同 architectural gap 的不同表現面。
+
+**E2 重點審查 3 點**：
+1. TickContext signature 變動是否 break 4 其他策略 on_tick borrow 對齊
+2. on_rejection rollback 邏輯改前 audit RC-04 spec（cooldown clear 副作用）
+3. paper_state.get_position() 在 strategy on_tick 是否違反 borrow checker（已被 step_4_5_dispatch.rs 同層 borrow）
+
+**報告**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
+
+---
+
 ## Sprint N+0 sign-off invariant 17 closure 4 governance docs land（2026-05-10）
 
 **觸發**：Operator 拍板 Sprint N+0 sign-off invariant 17 closure-blocking action — 起草 ADR-0021 (strategist cap)、ARCH-04 (graduated canary 5-stage)、AMD-2026-05-09-03 (invariant 5 wording)、AMD-2026-05-09-03 配套 (TOML drift) 4 governance docs。
@@ -2160,3 +2204,37 @@ PM 派發 V3 Wave 1 三 task 合併同一 PA owner：
 - merge analysis 必含 Wave Label Reconciliation table，cross-doc 引用 PA dispatch + FA report 三端對齊事實，避免後續 codex / agent 引用斷裂
 
 **Report**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--todo_qctodo_merge_analysis.md`
+
+---
+
+## 2026-05-10 — W6 RFC PA 預備立場（4 questions 自答）
+
+**性質**：D+1 W6 RFC 三角入場前 PA read-only 預跑；MIT W6 baseline `2026-05-10--governance_reject_baseline_w6_rfc.md` 揭露 govern 沒 over-fit 後 PA 視角立場固化
+
+**Source code 取證**：
+- `intent_processor/gates.rs:14-260` — cost_gate 三層 paper/moderate/live by-design fail-closed
+- `intent_processor/tests.rs:1360-1421` — duplicate_position 同方向 reject + 反方向 allow 是架構級不變式（test 雙證）
+- `strategies/ma_crossover/strategy_impl.rs:75-170` — on_tick 內部已有 `match self.positions.get()` None 才 entry → 被 duplicate 阻 2331 次 = self.positions 跟 paper_state 不同步 bug
+
+**4 立場**：
+- Q1 cost_gate hard vs advisory → **hold A** 維持 hard，降 advisory + LinUCB 自學會違反根原則 #5/#4
+- Q2 duplicate_position pyramiding → **hold A** 不開（架構級不變式）；2331 reject 是 ma_crossover state sync bug 不是 guard 過嚴
+- Q3 V086 metadata 時機 → **hold A** V086 立刻做（producer-side 改動越早越好）；ML retrain enable 等 4-gate（V086 land + dual-write 24h 0 NULL + multi-class 3 類 sample ≥ 200 + imbalance 試行 PASS）
+- Q4 bb_*/funding_arb 0 fire → **depends** funding_arb dormant by design（ADR-0018）；bb_breakout = AlphaSurface consumer gap（W1 B-4）；bb_reversion 三源因素需另查
+
+**核心整體立場**：W6 不是 governance 工程而是 observability + ML metadata 工程。三方向都不觸碰 §四 三硬邊界 / DOC-08 §12 9 條 / cost_gate / duplicate_position 不變式。**16 根原則合規 16/16；硬邊界觸碰 0**。
+
+**對 v3.1 dispatch 6 條 update 建議**（出建議 only operator 拍板）：
+1. §3.0 W6-1 RFC verdict 明文「cost_gate hard rule 維持」記入
+2. §3.0 加 W6-7 [60] strategy fire silence healthcheck (funding_arb 排除)
+3. §3.5 P1-MA-CROSSOVER-DUPLICATE-INTENT audit 補 3 fix 候選（on_fill / bootstrap / RC-04 rollback）
+4. §3.5 加新 P1-BB-REVERSION-FIRE-AUDIT
+5. §6 acceptance 第 5 條明「LightGBM imbalance 試行不 deploy production cron」
+6. §6 acceptance 加 ML retrain 4-gate
+
+**教訓**：
+- W6 baseline 預跑後 v2「conditional relax governance」設計轉 v3 已正確。本 PA 立場固化，避免 N+2 又重提 advisory 路徑
+- duplicate_position guard 是 router Gate 1.5 + paper_state + Guardian 三方共識的架構級不變式，下次有人提 pyramiding 必走 ARCH-AMD 三角不能 hack
+- ma_crossover self.positions 跟 paper_state 不同步是「策略內部 state vs runtime authority state」典型 sync bug — 5 策略都該 audit on_fill / bootstrap / rollback 三條 sync path
+
+**Report**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--w6_rfc_pa_questions_self_answer.md`
