@@ -171,6 +171,23 @@ pub type EdgeReloadSenderSlot = Arc<RwLock<Option<tokio::sync::mpsc::Sender<()>>
 // W1 E1-α (B-1) 在此下方加 `pub type FundingCurvePanelSlot = Arc<RwLock<Option<...>>>;`
 // 對應 `panel.funding_rates_panel` (V085 migration) + Python collector
 
+/// W-AUDIT-8a Phase B B-1: late-injected slot for FundingCurveSnapshot panel。
+///
+/// MODULE_NOTE：funding_curve panel aggregator 在 IPC server detach 後 spawn；
+///   slot 用 `Arc<RwLock<Option<FundingCurveSnapshot>>>` 讓 main.rs late-inject。
+///   None = uninitialized，dispatch step_4_5 取 None → surface.funding_curve
+///   = None → declared FundingSkew tag 的策略 fail-closed 寫
+///   evaluation_outcome='funding_panel_unavailable'（per W1 spec §2.4）。
+///
+///   Aggregator 負責 flush 寫 PG (audit) + write slot (hot path)；slot 寫入
+///   是 latest snapshot replace 語意（不 append），dispatch step_4_5 直接
+///   `RwLock::read().clone()` 取 Option<FundingCurveSnapshot>。
+///
+/// W1 sub-task 1 (本 PR) 階段：typedef declare only；late-inject 寫入由
+/// sub-task 3 (E1-γ) 完成。
+pub type FundingCurvePanelSlot =
+    Arc<RwLock<Option<openclaw_core::alpha_surface::FundingCurveSnapshot>>>;
+
 // === W1 OIDeltaPanelSlot insertion point ===
 // W1 E1-β (B-2) 在此下方加 `pub type OIDeltaPanelSlot = Arc<RwLock<Option<...>>>;`
 // 對應 `panel.oi_delta_panel` (V087 migration) + Python collector
