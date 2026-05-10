@@ -228,3 +228,39 @@ _Last updated: 2026-04-24_
 6-8. **MAY**: tighten V084 type CHECK / V082 hypertable + retention (N+1) / V080 FK or healthcheck
 
 **Sprint N+1 carry-forward**: feature_baselines real writer / per-trainer sample_weight adapter / V082 hypertable+retention / signal_id RCA / AlphaSurface Phase B+C
+
+---
+
+## 2026-05-10 V083 + V084 Linux PG dry-run verify (MIT self-executed, HIGH-2 closure)
+
+**Trigger**: Sprint N+0 sign-off HIGH-2 closure-blocking action — operator chose option B per CLAUDE.md §七 V055 mandate.
+
+**Method**: ssh trade-core → docker exec trading_postgres psql for empirical Linux PG dry-run of V083 + V084 × 2 rounds + boundary case verify.
+
+**Critical pre-audit finding**:
+- `_sqlx_migrations` latest = V079, but V083/V084 objects ALREADY EXIST in PG (manually applied via `psql -f`, not via OPENCLAW_AUTO_MIGRATE=1 sqlx path).
+- Implies sqlx checksum drift will trigger at next engine restart with AUTO_MIGRATE=1 — operator should run `bin/repair_migration_checksum` per V028-V034 SOP precedent (`memory/project_2026_05_02_p0_sqlx_hash_drift.md`).
+- Dry-run path (re-apply existing) = NOTICE skip = idempotent verified, no production breakage.
+
+**Verdict: PASS (full APPROVE, HIGH-2 closure CLEARED)**:
+- V083 round 1 + 2: idempotent verified ✓ (4 Guards PASS, 0 RAISE)
+- V084 round 1 + 2: idempotent verified ✓ (2 Guards PASS, 0 RAISE)
+- V083 CHECK boundary 3 cases: PASS / PASS / REJECT (Case 3 entry_context_id NULL on close fill) ✓
+- V084 UDF boundary 5 inputs: rejected_governance→1/170, all else (filled/NULL/orphan_close/shadow_fill/abandoned)→1.0 ✓
+- V084 UDF properties: IMMUTABLE + PARALLEL SAFE ✓
+- View sample_weight column: double precision NULLABLE, 54 cols, V034 backward compat preserved ✓
+- 0 leaked test rows (3 boundary INSERT all ROLLBACKed via SAVEPOINT) ✓
+- 5/5 existing V083/V084 objects intact (production not broken) ✓
+- Telemetry view live: demo 16.1% / live_demo 22.6% close fills NULL ctx (WARN range, expected) ✓
+
+**Beyond scope observations**:
+- V084 view 24h shows 19565 rows label_close_tag IS NULL — confirms W-AUDIT-4b-M3 root cause; V084 view+UDF infra-ready, Rust producer (a01d05ed retract chain) needs further deploy + restart to materialize 'rejected_governance' rows.
+- V083 historical close fills 16-23% NULL ctx — V083 NOT VALID correctly protects; cleanup is downstream cron (`edge_label_backfill_cron.sh` M2 step).
+- TimescaleDB hypertable: chk constraint reflects 6 times in pg_constraint (1 main + 5 active chunks) — expected internal behavior, NOT a Guard bug.
+
+**Report**: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--v083_v084_linux_pg_dry_run_verify.md` (299 lines).
+
+**Lessons reinforced**:
+1. CLAUDE.md §七 V055 mandate is correct: any V### with PG reflection / CHECK constraint / UDF semantic MUST be empirically Linux PG verified, not Mac mock pytest. Today's V083/V084 dry-run took 12 commands + 6 logs; the equivalent Mac static-parse review would have missed the sqlx checksum drift, the hypertable chunk-multiplication artifact, and the boundary case empirical reject behavior.
+2. Idempotent migrations should NOTICE-skip not RAISE — V083/V084 design is correct; first/second apply identical output is the gold standard.
+3. CHECK constraint NOT VALID is exactly right for forward-only enforcement when historical has known violations — confirmed empirically with Case 3 reject.
