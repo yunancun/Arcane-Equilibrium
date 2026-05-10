@@ -264,7 +264,7 @@
 **Issue**: 新 healthcheck `check_chain_integrity_post_audit_4b_m3()` 入 W-AUDIT-4b M3 producer deploy 後 24h passive observation 範圍 — post-5/10 11:00 fills 對應 decision_features 必 100%；pre-5/10 fills 接受 orphan。
 
 **Action**: ✅ DONE — chain integrity HC `[65]` IMPL DONE per commit `db17e205`：
-- `helper_scripts/db/passive_wait_healthcheck/checks_chain_integrity_post_m3.py` IMPL
+- `helper_scripts/db/passive_wait_healthcheck/checks_derived_ml_hygiene.py` IMPL (per E1 IMPL §2 file placement decision: sibling [26] family `checks_derived_ml_hygiene.py` 內 +255 LOC; runner.py + __init__.py 註冊；非獨立 `checks_chain_integrity_post_m3.py` file)
 - 與 `[55]` agent_decision_spine_lineage 同 family，pre-M3 vs post-M3 era 分群評估
 - post-M3 era 100% chain 強制；pre-M3 era WARN-on-orphan（不 hard FAIL，避免阻塞 silent-dead 偵測）
 
@@ -281,10 +281,13 @@
 **Action**: V091 補 schema-level CHECK constraint (NOT VALID)：
 
 ```sql
-ALTER TABLE learning.decision_features_evaluations
-  ADD CONSTRAINT decision_features_evaluations_reject_close_mutex_chk
-    CHECK ((reject_reason_code IS NULL OR close_reason_code IS NULL))
+-- V091 IMPL 實際 target table = learning.decision_features (per V086 ALTER 對象)
+-- constraint name = chk_reason_code_mutually_exclusive
+ALTER TABLE learning.decision_features
+  ADD CONSTRAINT chk_reason_code_mutually_exclusive
+    CHECK (NOT (reject_reason_code IS NOT NULL AND close_reason_code IS NOT NULL))
     NOT VALID;
+-- (per E1 V091 IMPL §5.1 task spec drift correction; De Morgan 等價 MIT 原 spec wording)
 ```
 
 **Status**: 🟢 IN FLIGHT — V091 SQL skeleton 已 land per commit `50e75bff`（V091 sub-agent a254b07d 跑中）；E1 IMPL 階段含 5 Guard + Linux PG dry-run mandatory + ALTER TABLE VALIDATE CONSTRAINT 走 D+2 14:30 UTC.
@@ -385,7 +388,7 @@ ALTER TABLE learning.decision_features_evaluations
 | 時點 | 動作 | Owner | Acceptance |
 |---|---|---|---|
 | 14:00 | 24h drift healthcheck verify post-V086 producer deploy | Operator + watchdog | reject_reason_code IS NULL count = 0 for new fills（24h post-deploy）|
-| 14:30 | ALTER TABLE learning.decision_features_evaluations VALIDATE CONSTRAINT decision_features_evaluations_reject_close_mutex_chk (V091 ENFORCE) | Operator | lock window <30 sec on 9757+ rows; PASS = 0 violation row |
+| 14:30 | ALTER TABLE learning.decision_features VALIDATE CONSTRAINT chk_reason_code_mutually_exclusive (V091 ENFORCE) | Operator | lock window <30 sec on 9757+ rows; PASS = 0 violation row (per V091 IMPL §5.1 actual target table + constraint name) |
 
 ### D+3~D+4
 
@@ -558,7 +561,8 @@ This amendment does not:
 | 10 | W6-9 wave 加 [63] healthcheck IMPL (per PA PB#2) | E1 | D+3 | weekly cron 啟用 |
 | 11 | W6-10 [40] healthcheck enhancement 加 LOW_SAMPLE flag (per QC PB#4) | E1 | D+3 | 24h dry-run 0 spurious "strategy edge" claim from n<30 cell |
 | 12 | W6-5 sample_weight 試行 acceptance 補 5 ML pipeline metrics + (a)+(b) variant (per MIT MUST 3 + QC PB#3) | MIT | D+3~D+4 | 試行報告 land；5 metric 全含；(a)+(b) variant 對比 |
-| 13 | D+2 14:30 UTC ALTER TABLE VALIDATE CONSTRAINT V091 ENFORCE | Operator | D+2 14:30 UTC | lock window <30 sec on 9757+ rows; PASS = 0 violation row |
+| 12a | **W6-5 IMPL D+3 morning pre-IMPL dry-run probe metric #5 可觀測性** (cost_gate decision distribution shift trace 是否真能 capture, per MIT verify PB#A.3 acceptance gate strengthen)；如 D+3 12:00 UTC 證明不可觀測，提撤回 metric #5 並走 N+2 重 spec，acceptance 改 4 metrics + 緊縮 OOS gap 從 50% → 40% | MIT | D+3 09:00-12:00 UTC | dry-run probe report；metric #5 retain or drop decision |
+| 13 | D+2 14:30 UTC `ALTER TABLE learning.decision_features VALIDATE CONSTRAINT chk_reason_code_mutually_exclusive` (V091 ENFORCE, per V091 IMPL §5.1 actual table + constraint name) | Operator | D+2 14:30 UTC | lock window <30 sec on 9757+ rows; PASS = 0 violation row |
 | 14 | PA memory.md 追加 W6-1 verdict + 14 push back absorb 摘要 | PA | D+1 21:30 UTC sign-off 後 | memory entry land |
 
 **E2 重點審查 3 點**（V086 SQL §2 註解修正 + V091 IMPL + W6-9 [63] healthcheck IMPL）：
