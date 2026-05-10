@@ -10,11 +10,26 @@
 
 ## §1 Sign-off Verdict
 
-**Status**: ⏳ PENDING / ✅ APPROVE / ❌ REJECT （21:30 UTC 後選定）
+**Status (10h17m spot check at 19:38 UTC)**: ✅ **APPROVE 預先預示** (3 metric 全 PASS, 待 21:30 UTC 正式 sign-off 或 operator 拍板提前)
+
+**Spot check 證據**：
+- Metric 1 chain_integrity: ✅ CLOSED EARLY（per MIT replay 100%）
+- Metric 2 [40] avg_net since restart: ✅ PASS — demo +9.18 (n=18, 50% wr) / live_demo +38.46 (n=14, 78.6% wr)
+- Metric 2 24h baseline current: ✅ +22.77 bps（vs N+0 closure +8.75，再進步 +14）
+- Metric 3 TONUSDT isolate: ✅ PASS — 0 fill since restart trivially isolate
+- bad cells (n≥10 avg<-10 bps): ✅ 0
+- Per-strategy: grid_trading 顯著正 (+13/+27 bps)；ma_crossover 樣本 2 不顯著 (D+1 W7-2 deploy 後再評)
 
 **Conditional Notes**:
 - W7-3 Option B 補丁 (commit `b42731f6`) PR ready NOT DEPLOYED — 隨 sign-off + dispatch fire 同次 restart deploy
 - W7-1 + W2 trait skeleton (commit `c9fb0b8f`) PR ready NOT DEPLOYED — 同上
+- W7-2 + bb_reversion sync (commit `22efd9de`) PR ready NOT DEPLOYED — 同上
+- W7-5 on_fill + bootstrap (commit `bb7cb293`) PR ready NOT DEPLOYED — 同上
+- W4 RouterLeaseGuard Drop test (commit `22efd9de`) PR ready NOT DEPLOYED — 同上
+- W6 V086 SQL skeleton (commit `87da03b7`) NOT_RUN — D+1 dry-run + verify + deploy
+- V085/V087/V088/V090 SQL skeleton 4 並行 D+0 預跑中（背景，~30-60min）
+
+**12h 觀察承諾 trade-off**：若 operator 選擇提前 sign-off (~19:38 UTC)，則 short 1h13m governance commitment；若選擇等 21:30 UTC formal window 則完整履行（推薦後者並善用時間派 4 SQL skeleton 預跑）。
 
 ---
 
@@ -26,22 +41,29 @@
 - **Report**: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md`
 
 ### Metric 2: [40] avg_net forward trajectory ≥ 5 bps
-- **Status**: ⏳ PENDING（21:30 UTC fill）
+- **Status**: ✅ **PASS（10h17m spot check at 19:38 UTC）**
 - **Baseline (Sprint N+0 closure 09:23 UTC)**: +8.75 bps（從 -17.82 翻正）
-- **Current (12h post-restart)**: TBD bps（21:30 UTC 跑）
+- **10h17m spot check (since restart)**:
+  - **demo**: n=18, avg_net **+9.18 bps**, wins 9/18 (50%)
+  - **live_demo**: n=14, avg_net **+38.46 bps**, wins 11/14 (78.6%)
+  - per-strategy drill: grid_trading/demo +13.17 / grid_trading/live_demo +27.35 / ma_crossover 樣本 2 不顯著
+- **[40] 24h baseline (now)**: total=33, wins=21, avg_net **+22.77 bps**（vs N+0 closure +8.75，**再進步 +14**）
+- **bad cells (n≥10 avg<-10 bps)**: 0
+- **Source SQL**（修正 [40] check_realized_edge_acceptance 真實口徑）：
   ```sql
-  PG_PASS=$(awk -F= '/^POSTGRES_PASSWORD=/{print $2}' $SECRETS/basic_system_services.env)
+  PG_PASS=$(awk -F= '/^POSTGRES_PASSWORD=/{print $2}' /home/ncyu/BybitOpenClaw/secrets/environment_files/basic_system_services.env)
   PGPASSWORD=$PG_PASS psql -h 127.0.0.1 -U trading_admin -d trading_ai -c \
-    "SELECT engine_mode, COUNT(*) n, ROUND(AVG(net_edge_bps proxy)::numeric,2) avg_net FROM trading.fills f JOIN trading.decision_outcomes o USING(context_id) WHERE f.ts > '2026-05-10 09:23:00 UTC' AND engine_mode IN ('demo','live_demo') GROUP BY engine_mode;"
+    "SELECT engine_mode, COUNT(*) n, ROUND(AVG(net_bps_after_fee)::numeric,2) avg_net, COUNT(*) FILTER (WHERE net_bps_after_fee > 0) wins FROM learning.mlde_edge_training_rows WHERE ts > '2026-05-10 09:23:00 UTC'::timestamptz AND engine_mode IN ('demo','live_demo') AND attribution_chain_ok AND net_bps_after_fee IS NOT NULL GROUP BY engine_mode;"
   ```
-- **Verdict**: PASS (≥ +5 bps) / WARN (+0 to +5 bps) / FAIL (< 0 bps) — TBD
+- **Verdict**: ✅ **PASS** (両 mode 均 >+5 bps target；live_demo 強勁 +38.46)
 
 ### Metric 3: TONUSDT cell isolate（不擴散）
-- **Status**: ⏳ PENDING（21:30 UTC fill）但 **6h spot check (15:30 UTC) 已預示 PASS**
+- **Status**: ✅ **PASS（10h17m spot check at 19:38 UTC）**
 - **Baseline**: TONUSDT n=10 avg=-31.23 bps（Sprint N+0 closure）
-- **6h spot check (per 15:30 UTC SQL)**: TONUSDT 0 fill since restart（demo + live_demo 都 0）— **isolate confirmed (TONUSDT 自己也沒新 trade，當然不擴散)**
-- **Current grid 5 symbol fills**: SOLAYERUSDT 20 / INXUSDT 14 / SUIUSDT 10 / SAHARAUSDT 4 / TONUSDT 0 (6h)
-- **Verdict 預測**: ✅ **PASS** (TONUSDT 0 fill = trivially isolate; 沒擴散到任何 grid symbol)
+- **10h17m spot check**: TONUSDT 0 fill since restart（demo + live_demo 都 0）— **isolate confirmed (TONUSDT 自己也沒新 trade，當然不擴散)**
+- **Current 5 symbol fills (since 09:23 UTC)**: SUIUSDT 22 / SOLAYERUSDT 20 / INXUSDT 14 / BILLUSDT 4 / SAHARAUSDT 4 / TONUSDT 0
+  - 6h → 10h17m delta: SUI +12 / SOLAYER 0 / INX 0 / BILL +4 (ma_crossover Case A 合法 per Wave 5 verify) / SAHARA 0 / TON 0
+- **Verdict**: ✅ **PASS** (TONUSDT 0 fill = trivially isolate; 沒擴散到任何 symbol)
 
 ---
 
@@ -109,9 +131,13 @@
 
 ## §6 Risk Assessment
 
-- ma_crossover INXUSDT hot loop 已自然 cool down (last 30min 1 reject)；W7-3 deploy 仍價值（防止 cross-strategy desync 重燃）
-- 4 策略 (ma_crossover/bb_breakout/bb_reversion/funding_arb) 12h 0 fill — funding_arb dormant by design；其他 3 待 W6-7 [61] silence healthcheck land 後監測
-- HIGH-5 metric 2 forward trajectory 受 ML cron 5 jobs daily fire 影響（grid 374 PASS gate, 4/5 策略 sample 不過 200 gate per MIT W6 RFC Q4）
+- ma_crossover INXUSDT hot loop 已自然 cool down (per session summary 11:00 hour 2331 → 13:00 1 → 14:00+ 0)；W7-3 deploy 仍價值（防止 cross-strategy desync 重燃）
+- 4 策略 (ma_crossover/bb_breakout/bb_reversion/funding_arb) 10h17m 樣本 0/0/0/0 (ma_crossover 在 BILLUSDT 4 fill + ml live_demo 2 樣本)：
+  - **funding_arb**: dormant by design ✅
+  - **bb_breakout / bb_reversion**: 仍 0 fill — 待 W6-7 [61] silence healthcheck land 後監測 + W7-2 + W7-5 D+1 deploy 後再評
+  - **ma_crossover**: BILLUSDT 4 entry 合法 (Wave 5 verify), demo 2 / live_demo 2 ml 樣本（小樣本含 1 巨贏 +105 bps）
+- HIGH-5 metric 2 forward trajectory **驗證為強勁正向** — grid_trading 顯著正 +13/+27 bps；24h [40] +22.77 vs baseline +8.75 = 再進步 +14 bps；4-agent loss audit 「5 textbook 策略結構性 alpha-deficient」結論不變但 grid 系結構性正向短期確認
+- 4 SQL skeleton (V085/V087/V088/V090) D+0 並行預跑進行中（背景，~30-60min）— 不影響 sign-off verdict
 
 ---
 
