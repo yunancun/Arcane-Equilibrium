@@ -27,6 +27,14 @@
 
 ## 條目
 
+## 2026-05-10 · improve-codebase-architecture 中文輸出偏好
+
+- **場景**：使用 `improve-codebase-architecture` skill 做架構候選、deepening opportunities、grilling loop 或後續總結。
+- **錯誤模式**：雖然 repo 記憶已有 operator-facing responses should be Chinese-first，但架構 review 候選仍可能以英文為主，增加 operator 閱讀與決策成本。
+- **預防規則**：該 skill 的候選清單、追問、方案比較與總結默認中文；skill 強制詞彙 `Module` / `Interface` / `Implementation` / `Depth` / `Seam` / `Adapter` / `Leverage` / `Locality` 保留英文原詞，可搭配中文解釋；`CONTEXT.md` domain terms 按 glossary 原文使用。
+- **相關檔案 / 指令**：`.codex/MEMORY.md`; `/improve-codebase-architecture`
+- **來源 commit / session**：2026-05-10 Codex PM session
+
 ## 2026-04-26 · 並行派發中「commit B 應 invalidate commit A doc」的時序 hazard
 
 - **場景**：PM 在同一 session 並行派發多個 sub-agent（5+），其中部分任務有**doc 依賴關係**（commit A 的 doc/comment 提及「直到 X 條件達成才移除」，commit B 完成 X 條件）。並行派發無時序保證，A 與 B 完成時序不可預測。
