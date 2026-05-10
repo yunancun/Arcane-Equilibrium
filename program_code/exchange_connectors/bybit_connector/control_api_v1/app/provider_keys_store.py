@@ -36,6 +36,9 @@ import logging
 import os
 import re
 import threading
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,7 +80,7 @@ _SPECS: dict[str, _ProviderSpec] = {
         env_var="ANTHROPIC_API_KEY",
         prefix="sk-ant-",
         min_len=20,
-        description="Claude Opus / Sonnet / Haiku",
+        description="Claude Opus 4.7 / Sonnet 4.6 / Haiku 4.5",
         client_implemented=True,  # layer2_engine._get_anthropic_client 已實裝
     ),
     PROVIDER_OPENAI: _ProviderSpec(
@@ -91,7 +94,7 @@ _SPECS: dict[str, _ProviderSpec] = {
         env_var="DEEPSEEK_API_KEY",
         prefix="sk-",
         min_len=20,
-        description="DeepSeek-Chat (V4) / DeepSeek-Reasoner (R1)",
+        description="DeepSeek V4 Flash / V4 Pro",
         client_implemented=True,  # provider_client.OpenAICompatProvider + base_url=api.deepseek.com
     ),
     PROVIDER_PERPLEXITY: _ProviderSpec(
@@ -171,6 +174,98 @@ def validate_key(provider: str, key: str) -> tuple[bool, str | None]:
     return True, None
 
 
+def _validation_headers(provider: str, key: str) -> dict[str, str]:
+    if provider == PROVIDER_ANTHROPIC:
+        return {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "Accept": "application/json",
+        }
+    return {
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+    }
+
+
+def _validation_urls(provider: str) -> list[str]:
+    if provider == PROVIDER_ANTHROPIC:
+        return ["https://api.anthropic.com/v1/models"]
+    if provider == PROVIDER_OPENAI:
+        return ["https://api.openai.com/v1/models"]
+    if provider == PROVIDER_DEEPSEEK:
+        return [
+            "https://api.deepseek.com/models",
+            "https://api.deepseek.com/v1/models",
+        ]
+    return []
+
+
+def probe_key(provider: str, key: str, *, timeout: float = 12.0) -> dict[str, Any]:
+    """
+    對支援的雲端 L2 provider 做只讀 auth probe。
+
+    這裡只打 models/list 類 endpoint，不發 chat/completion，因此不消耗 token
+    成本。返回值永不包含 key 明文。
+    """
+    key = (key or "").strip()
+    urls = _validation_urls(provider)
+    if not urls:
+        return {
+            "validated": False,
+            "validation_status": "not_supported",
+            "validation_error": "",
+        }
+
+    last_result: dict[str, Any] = {
+        "validated": False,
+        "validation_status": "not_run",
+        "validation_error": "",
+    }
+    for url in urls:
+        req = urllib.request.Request(
+            url,
+            headers=_validation_headers(provider, key),
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                resp.read(256)
+                return {
+                    "validated": True,
+                    "validation_status": "auth_ok",
+                    "validation_http_status": int(resp.status),
+                    "validation_endpoint": url,
+                    "validation_error": "",
+                }
+        except urllib.error.HTTPError as exc:
+            # 404/405 可能只是 endpoint 版本不匹配；DeepSeek 有兩個候選 endpoint。
+            last_result = {
+                "validated": False,
+                "validation_status": "http_error",
+                "validation_http_status": int(exc.code),
+                "validation_endpoint": url,
+                "validation_error": f"HTTP {exc.code}",
+            }
+            if exc.code in {404, 405}:
+                continue
+            return last_result
+        except urllib.error.URLError as exc:
+            return {
+                "validated": False,
+                "validation_status": "network_error",
+                "validation_endpoint": url,
+                "validation_error": str(exc.reason)[:160],
+            }
+        except Exception as exc:
+            return {
+                "validated": False,
+                "validation_status": "probe_error",
+                "validation_endpoint": url,
+                "validation_error": type(exc).__name__,
+            }
+    return last_result
+
+
 # ─── 寫入 / 讀取 / 刪除 ──────────────────────────────────────────────
 
 _lock = threading.Lock()
@@ -219,11 +314,22 @@ def save_key(provider: str, key: str) -> dict[str, Any]:
     key = key.strip()
     path = _provider_file(provider)
 
-    # env 檔案內容：簡單 KEY=value，兩行（時間戳當注釋方便人類稽核）
-    import time
+    probe = probe_key(provider, key)
+    if provider in {PROVIDER_ANTHROPIC, PROVIDER_OPENAI, PROVIDER_DEEPSEEK} and not probe.get("validated"):
+        status = probe.get("validation_status") or "unknown"
+        http_status = probe.get("validation_http_status")
+        suffix = f" HTTP {http_status}" if http_status else ""
+        raise ValueError(f"live validation failed: {status}{suffix}")
+
+    # env 檔案內容：簡單 KEY=value，附 metadata 注釋方便 GUI 誠實顯示驗證狀態。
+    updated_at_ms = int(time.time() * 1000)
     content = (
         f"# {provider} API key — managed by Control API GUI\n"
-        f"# updated_at_ms={int(time.time() * 1000)}\n"
+        f"# updated_at_ms={updated_at_ms}\n"
+        f"# validation_status={probe.get('validation_status', 'not_supported')}\n"
+        f"# validation_checked_at_ms={updated_at_ms if probe.get('validated') else ''}\n"
+        f"# validation_http_status={probe.get('validation_http_status', '')}\n"
+        f"# validation_endpoint={probe.get('validation_endpoint', '')}\n"
         f"{spec.env_var}={key}\n"
     )
 
@@ -248,6 +354,11 @@ def save_key(provider: str, key: str) -> dict[str, Any]:
                 hot_reloaded = True
             except Exception as exc:
                 logger.warning("anthropic legacy client reset failed: %s", exc)
+        try:
+            from . import provider_model_catalog as _catalog
+            _catalog.invalidate_provider(provider)
+        except Exception as exc:
+            logger.debug("provider model catalog invalidation skipped (%s): %s", provider, exc)
 
     logger.info("provider_keys: saved %s (path=%s, hot_reloaded=%s)", provider, path, hot_reloaded)
     return {
@@ -257,6 +368,7 @@ def save_key(provider: str, key: str) -> dict[str, Any]:
         "configured": True,
         "client_implemented": spec.client_implemented,
         "hot_reloaded": hot_reloaded,
+        **probe,
     }
 
 
@@ -285,6 +397,11 @@ def delete_key(provider: str) -> dict[str, Any]:
                 _pc.reset_provider(provider)
         except Exception:
             pass
+        try:
+            from . import provider_model_catalog as _catalog
+            _catalog.invalidate_provider(provider)
+        except Exception:
+            pass
         if provider == PROVIDER_ANTHROPIC:
             try:
                 from .layer2_engine import reset_anthropic_client
@@ -296,25 +413,39 @@ def delete_key(provider: str) -> dict[str, Any]:
     return {"provider": provider, "deleted": existed, "configured": False}
 
 
-def _read_key_from_file(provider: str) -> str | None:
-    """從 .env 檔案讀回 key（不含注釋）。檔案缺失或解析失敗回 None。"""
+def _read_key_record(provider: str) -> tuple[str | None, dict[str, str]]:
+    """從 .env 檔案讀回 key 與 metadata。檔案缺失或解析失敗回空值。"""
     spec = _SPECS[provider]
     path = _provider_file(provider)
     if not path.exists():
-        return None
+        return None, {}
+    metadata: dict[str, str] = {}
+    key: str | None = None
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
-            if not line or line.startswith("#"):
+            if not line:
+                continue
+            if line.startswith("#"):
+                comment = line[1:].strip()
+                if "=" in comment:
+                    k, _, v = comment.partition("=")
+                    metadata[k.strip()] = v.strip()
                 continue
             if "=" not in line:
                 continue
             k, _, v = line.partition("=")
             if k.strip() == spec.env_var:
-                return v.strip()
+                key = v.strip()
     except OSError as exc:
         logger.warning("read provider key failed: %s", exc)
-    return None
+    return key, metadata
+
+
+def _read_key_from_file(provider: str) -> str | None:
+    """從 .env 檔案讀回 key（不含注釋）。檔案缺失或解析失敗回 None。"""
+    key, _metadata = _read_key_record(provider)
+    return key
 
 
 def _mask(key: str) -> str:
@@ -342,8 +473,9 @@ def status() -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
     for provider, spec in _SPECS.items():
-        key = _read_key_from_file(provider)
+        key, metadata = _read_key_record(provider)
         configured = bool(key)
+        validation_status = metadata.get("validation_status")
         out[provider] = {
             "configured": configured,
             "client_implemented": spec.client_implemented,
@@ -351,6 +483,10 @@ def status() -> dict[str, Any]:
             "description": spec.description,
             "is_url": spec.is_url,
             "masked": _mask(key) if key else None,
+            "validated": validation_status == "auth_ok",
+            "validation_status": validation_status if configured else None,
+            "validation_checked_at_ms": metadata.get("validation_checked_at_ms") or None,
+            "validation_http_status": metadata.get("validation_http_status") or None,
         }
     try:
         keys_dir = str(_resolve_keys_dir())

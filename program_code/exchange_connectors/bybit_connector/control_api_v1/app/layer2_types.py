@@ -50,8 +50,8 @@ MODEL_OPUS = "opus"
 # Model IDs (Anthropic API) / 模型 ID
 MODEL_IDS: dict[str, str] = {
     MODEL_HAIKU: "claude-haiku-4-5-20251001",
-    MODEL_SONNET: "claude-sonnet-4-6-20250326",
-    MODEL_OPUS: "claude-opus-4-6-20250326",
+    MODEL_SONNET: "claude-sonnet-4-6",
+    MODEL_OPUS: "claude-opus-4-7",
 }
 
 # Default budget limits / 默认预算限制
@@ -424,34 +424,66 @@ class PricingTable:
     models: dict[str, ModelPricing] = field(default_factory=lambda: {
         MODEL_HAIKU: ModelPricing(
             model_id=MODEL_IDS[MODEL_HAIKU],
-            input_per_mtok=0.80,
-            output_per_mtok=4.00,
-            last_verified_date="2026-04-12",
+            input_per_mtok=1.00,
+            output_per_mtok=5.00,
+            last_verified_date="2026-04-16",
         ),
         MODEL_SONNET: ModelPricing(
             model_id=MODEL_IDS[MODEL_SONNET],
             input_per_mtok=3.00,
             output_per_mtok=15.00,
-            last_verified_date="2026-04-12",
+            last_verified_date="2026-04-16",
         ),
         MODEL_OPUS: ModelPricing(
             model_id=MODEL_IDS[MODEL_OPUS],
-            input_per_mtok=15.00,
-            output_per_mtok=75.00,
-            last_verified_date="2026-04-12",
+            input_per_mtok=5.00,
+            output_per_mtok=25.00,
+            last_verified_date="2026-04-16",
         ),
-        # DeepSeek（V3/V4 共用 deepseek-chat 端點；DeepSeek 公開定價，cache-miss 計）
+        # DeepSeek V4 cache-miss pricing. Legacy aliases point to V4 Flash
+        # until DeepSeek discontinues them on 2026-07-24.
+        "deepseek-v4-flash": ModelPricing(
+            model_id="deepseek-v4-flash",
+            input_per_mtok=0.14,
+            output_per_mtok=0.28,
+            last_verified_date="2026-04-26",
+        ),
+        "deepseek-v4-pro": ModelPricing(
+            model_id="deepseek-v4-pro",
+            input_per_mtok=0.435,
+            output_per_mtok=0.87,
+            last_verified_date="2026-04-26",
+        ),
         "deepseek-chat": ModelPricing(
             model_id="deepseek-chat",
-            input_per_mtok=0.27,
-            output_per_mtok=1.10,
-            last_verified_date="2026-05-08",
+            input_per_mtok=0.14,
+            output_per_mtok=0.28,
+            last_verified_date="2026-04-26",
         ),
         "deepseek-reasoner": ModelPricing(
             model_id="deepseek-reasoner",
-            input_per_mtok=0.55,
-            output_per_mtok=2.19,
-            last_verified_date="2026-05-08",
+            input_per_mtok=0.14,
+            output_per_mtok=0.28,
+            last_verified_date="2026-04-26",
+        ),
+        # OpenAI current L2-supported tiers plus legacy fallbacks.
+        "gpt-5.4-mini": ModelPricing(
+            model_id="gpt-5.4-mini",
+            input_per_mtok=0.75,
+            output_per_mtok=4.50,
+            last_verified_date="2026-05-10",
+        ),
+        "gpt-5.4": ModelPricing(
+            model_id="gpt-5.4",
+            input_per_mtok=2.50,
+            output_per_mtok=15.00,
+            last_verified_date="2026-05-10",
+        ),
+        "gpt-5.5": ModelPricing(
+            model_id="gpt-5.5",
+            input_per_mtok=5.00,
+            output_per_mtok=30.00,
+            last_verified_date="2026-05-10",
         ),
         # OpenAI（公開定價；GPT-4o-mini / GPT-4o / o1）
         "gpt-4o-mini": ModelPricing(
@@ -475,6 +507,7 @@ class PricingTable:
     })
     perplexity_per_search: float = 0.005
     perplexity_last_verified_date: str = "2026-04-12"
+    source_meta: dict[str, Any] = field(default_factory=dict)
 
     def is_stale(self, current_date: str = "") -> bool:
         """Check if any pricing entry is older than 30 days / 检查定价是否超过 30 天未核实"""
@@ -517,6 +550,7 @@ class PricingTable:
             "perplexity_per_search": self.perplexity_per_search,
             "perplexity_last_verified_date": self.perplexity_last_verified_date,
             "is_stale": self.is_stale(),
+            "source_meta": self.source_meta,
         }
 
 
@@ -557,10 +591,10 @@ class Layer2Config:
     edge_threshold_bps: float = 25.0  # Must exceed round-trip cost floor (~21 bps)
 
     # Tier 2/3 預算降級 — daily_spend / hard_cap 越過閾值時切到 fallback provider+model。
-    # provider/model 用 provider_client 的 tier_key（haiku/sonnet/opus/deepseek-chat/...）。
+    # provider/model 用 provider_client 的 tier_key（haiku/sonnet/opus/deepseek-v4-flash/...）。
     # 不啟用降級 = 把 threshold 設成 1.0（永遠不觸發）；hard_cap 達標仍會 fail-closed。
     fallback_tier2_provider: str = "deepseek"
-    fallback_tier2_model: str = "deepseek-chat"
+    fallback_tier2_model: str = "deepseek-v4-flash"
     fallback_tier2_threshold_pct: float = 0.5
     fallback_tier3_provider: str = "anthropic"
     fallback_tier3_model: str = "haiku"

@@ -39,7 +39,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+from . import provider_client
 from . import provider_keys_store
+from . import provider_model_catalog
+from . import provider_pricing_catalog
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_engine import Layer2Engine
 # ARCH-RC1 1C-3-F: Layer 2's paper-side path now goes through the Rust engine
@@ -144,7 +147,7 @@ class ConfigUpdateRequest(BaseModel):
     adaptive_base_daily_usd: float | None = Field(default=None, gt=0, le=100)
     adaptive_max_multiplier: float | None = Field(default=None, gt=0, le=5)
     adaptive_min_multiplier: float | None = Field(default=None, gt=0, le=2)
-    default_model: str | None = Field(default=None, max_length=40)
+    default_model: str | None = Field(default=None, max_length=128)
     default_provider: str | None = Field(default=None, max_length=20)
     allow_opus_upgrade: bool | None = None
     max_iterations: int | None = Field(default=None, gt=0, le=50)
@@ -155,16 +158,73 @@ class ConfigUpdateRequest(BaseModel):
     edge_threshold_bps: float | None = Field(default=None, ge=0)
     # Tier 2/3 預算降級（layer2_engine._resolve_effective_provider 用）
     fallback_tier2_provider: str | None = Field(default=None, max_length=20)
-    fallback_tier2_model: str | None = Field(default=None, max_length=40)
+    fallback_tier2_model: str | None = Field(default=None, max_length=128)
     fallback_tier2_threshold_pct: float | None = Field(default=None, ge=0, le=1)
     fallback_tier3_provider: str | None = Field(default=None, max_length=20)
-    fallback_tier3_model: str | None = Field(default=None, max_length=40)
+    fallback_tier3_model: str | None = Field(default=None, max_length=128)
     fallback_tier3_threshold_pct: float | None = Field(default=None, ge=0, le=1)
     # GUI Tab-AI 「AI 供应商管理」面板新增。
     # provider_keys: { provider_name: api_key }，由 provider_keys_store 持久化到
     # secrets/providers/<provider>.env，並注入當前進程 env（Anthropic 還會 reset client）。
     # 不會進 Layer2Config（不是引擎參數，是憑證 secrets）。
     provider_keys: dict[str, str] | None = Field(default=None)
+
+
+_PROVIDER_MODEL_CONFIG_KEYS = frozenset({
+    "default_provider",
+    "default_model",
+    "fallback_tier2_provider",
+    "fallback_tier2_model",
+    "fallback_tier3_provider",
+    "fallback_tier3_model",
+})
+
+
+def _validate_provider_model_pair(provider: str, model: str, *, field_prefix: str) -> None:
+    if provider not in provider_client.L2_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_codes": ["provider_not_l2_capable"],
+                "field": f"{field_prefix}_provider",
+                "provider": provider,
+            },
+        )
+    allowed = provider_model_catalog.allowed_model_values(provider)
+    if model not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_codes": ["model_not_supported_by_provider"],
+                "field": f"{field_prefix}_model",
+                "provider": provider,
+                "model": model,
+                "allowed_models": allowed,
+            },
+        )
+
+
+def _validate_layer2_model_config(updates: dict[str, Any], current: Any) -> None:
+    """拒絕會讓 provider/model 配對失真的 GUI/API 寫入。"""
+    if not (_PROVIDER_MODEL_CONFIG_KEYS & updates.keys()):
+        return
+    candidate = current.to_dict()
+    candidate.update(updates)
+    _validate_provider_model_pair(
+        str(candidate.get("default_provider") or ""),
+        str(candidate.get("default_model") or ""),
+        field_prefix="default",
+    )
+    _validate_provider_model_pair(
+        str(candidate.get("fallback_tier2_provider") or ""),
+        str(candidate.get("fallback_tier2_model") or ""),
+        field_prefix="fallback_tier2",
+    )
+    _validate_provider_model_pair(
+        str(candidate.get("fallback_tier3_provider") or ""),
+        str(candidate.get("fallback_tier3_model") or ""),
+        field_prefix="fallback_tier3",
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -310,6 +370,7 @@ async def reset_today_costs(
 
 @layer2_router.get("/cost/pricing")
 async def get_pricing(
+    force_refresh: bool = Query(default=False),
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict[str, Any]:
     """
@@ -317,7 +378,12 @@ async def get_pricing(
     获取定价表和核实状态。
     """
     tracker = _get_cost_tracker()
-    return _layer2_response(tracker.get_pricing().to_dict())
+    return _layer2_response(
+        provider_pricing_catalog.refresh_pricing_if_needed(
+            tracker,
+            force_refresh=force_refresh,
+        )
+    )
 
 
 @layer2_router.post("/cost/pricing")
@@ -457,6 +523,7 @@ async def update_config(
     raw = req.model_dump()
     provider_keys: dict[str, str] | None = raw.pop("provider_keys", None)
     updates = {k: v for k, v in raw.items() if v is not None}
+    _validate_layer2_model_config(updates, tracker.get_config())
 
     # ── provider keys 寫入 + 即時 env 注入 ───────────────────────────
     # 寫入屬狀態變更，要求 Operator 角色（API key 是憑證，比一般 config 敏感）。
@@ -535,6 +602,18 @@ async def get_providers_status(
     永不回明文 key（只回 masked + configured + client_implemented）。
     """
     return _layer2_response(provider_keys_store.status())
+
+
+@layer2_router.get("/providers/models")
+async def get_providers_models(
+    force_refresh: bool = Query(default=False),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """
+    回 GUI Engine Settings 用的 provider model catalog。
+    只打 models/list 類只讀 endpoint；結果做 TTL cache，force_refresh=true 可手動刷新。
+    """
+    return _layer2_response(provider_model_catalog.get_model_catalog(force_refresh=force_refresh))
 
 
 @layer2_router.delete("/providers/{provider}")

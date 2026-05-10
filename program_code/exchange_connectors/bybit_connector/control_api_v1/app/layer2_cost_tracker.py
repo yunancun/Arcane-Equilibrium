@@ -166,6 +166,7 @@ class Layer2CostTracker:
                 self._pricing.models[tier].last_verified_date = mp.get("last_verified_date", "")
         self._pricing.perplexity_per_search = pricing_data.get("perplexity_per_search", self._pricing.perplexity_per_search)
         self._pricing.perplexity_last_verified_date = pricing_data.get("perplexity_last_verified_date", "")
+        self._pricing.source_meta = pricing_data.get("source_meta", {}) if isinstance(pricing_data.get("source_meta", {}), dict) else {}
 
         # Adaptive
         adp = data.get("adaptive", {})
@@ -393,6 +394,8 @@ class Layer2CostTracker:
                 self._pricing.perplexity_per_search = updates["perplexity_per_search"]
             if "perplexity_last_verified_date" in updates:
                 self._pricing.perplexity_last_verified_date = updates["perplexity_last_verified_date"]
+            if isinstance(updates.get("source_meta"), dict):
+                self._pricing.source_meta = updates["source_meta"]
             self._save()
             return self._pricing
 

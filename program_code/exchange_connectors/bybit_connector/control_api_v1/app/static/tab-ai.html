@@ -114,7 +114,7 @@
     <!-- Anthropic / Claude -->
     <div class="provider-card">
       <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-neutral" id="prov-anthropic-badge">检测中...</span></div>
-      <div class="prov-models">模型：Claude Opus / Sonnet / Haiku</div>
+      <div class="prov-models">模型：Claude Opus 4.7 / Sonnet 4.6 / Haiku 4.5</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-anthropic" type="password" placeholder="sk-ant-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('anthropic',this)">保存</button>
@@ -138,13 +138,13 @@
     <!-- DeepSeek -->
     <div class="provider-card">
       <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">检测中...</span></div>
-      <div class="prov-models">模型：DeepSeek-V4 / DeepSeek-R1</div>
+      <div class="prov-models">模型：DeepSeek V4 Flash / V4 Pro</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-deepseek" type="password" placeholder="sk-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('deepseek',this)">保存</button>
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('deepseek',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：V3 $0.27/R1 $0.55 per 1M tokens（极低成本）</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：V4 Flash $0.14/$0.28 per 1M input/output tokens</div>
     </div>
 
     <!-- Local LLM (Ollama) -->
@@ -198,8 +198,13 @@
 
 <!-- ═══ Engine Settings ═══ -->
 <div class="oc-card">
-  <h3>&#x1F527; 引擎设置 / Engine Settings</h3>
+  <h3>
+    &#x1F527; 引擎设置 / Engine Settings
+    <button class="oc-btn" onclick="refreshProviderModels(this)" title="刷新 provider 模型目录" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB; Models</button>
+  </h3>
   <div id="explain-settings"></div>
+  <div id="ai-model-catalog-status" style="font-size:11px;color:var(--text-dim);margin-top:8px">模型目录：载入中</div>
+  <div id="ai-local-model-options-status" style="font-size:11px;color:var(--text-dim);margin-top:4px">本地模型：载入中</div>
 
   <div class="oc-grid-2" style="margin-top:10px">
     <div style="display:grid;gap:10px">
@@ -213,21 +218,27 @@
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openai">OpenAI (GPT)</option>
+          <option value="local_llm">Local LLM</option>
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div><div style="font-size:12px;font-weight:600">默认模型 / Default Model</div><div style="font-size:10px;color:var(--text-dim)">tier_key — provider adapter 自动映射到具体 model_id</div></div>
         <select class="oc-select" id="ai-model" style="width:160px">
           <optgroup label="Anthropic">
-            <option value="haiku">haiku — Claude Haiku</option>
-            <option value="sonnet">sonnet — Claude Sonnet</option>
-            <option value="opus">opus — Claude Opus</option>
+            <option value="haiku">haiku — Claude Haiku 4.5</option>
+            <option value="sonnet">sonnet — Claude Sonnet 4.6</option>
+            <option value="opus">opus — Claude Opus 4.7</option>
           </optgroup>
           <optgroup label="DeepSeek">
-            <option value="deepseek-chat">deepseek-chat — V4</option>
-            <option value="deepseek-reasoner">deepseek-reasoner — R1（无 tools）</option>
+            <option value="deepseek-v4-flash">deepseek-v4-flash — V4 Flash</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro — V4 Pro</option>
+            <option value="deepseek-chat">deepseek-chat — deprecated 2026-07-24</option>
+            <option value="deepseek-reasoner">deepseek-reasoner — deprecated 2026-07-24</option>
           </optgroup>
           <optgroup label="OpenAI">
+            <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+            <option value="gpt-5.4">gpt-5.4</option>
+            <option value="gpt-5.5">gpt-5.5</option>
             <option value="gpt-4o-mini">gpt-4o-mini</option>
             <option value="gpt-4o">gpt-4o</option>
             <option value="o1">o1（reasoner）</option>
@@ -278,14 +289,15 @@
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openai">OpenAI (GPT)</option>
+          <option value="local_llm">Local LLM</option>
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="font-size:11px">Tier 2 模型 / Model</div>
         <select class="oc-select" id="ai-tier2-model" style="width:160px">
           <optgroup label="Anthropic"><option value="haiku">haiku</option><option value="sonnet">sonnet</option></optgroup>
-          <optgroup label="DeepSeek"><option value="deepseek-chat">deepseek-chat</option><option value="deepseek-reasoner">deepseek-reasoner</option></optgroup>
-          <optgroup label="OpenAI"><option value="gpt-4o-mini">gpt-4o-mini</option><option value="gpt-4o">gpt-4o</option></optgroup>
+          <optgroup label="DeepSeek"><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option><option value="deepseek-chat">deepseek-chat</option><option value="deepseek-reasoner">deepseek-reasoner</option></optgroup>
+          <optgroup label="OpenAI"><option value="gpt-5.4-mini">gpt-5.4-mini</option><option value="gpt-5.4">gpt-5.4</option><option value="gpt-4o-mini">gpt-4o-mini</option><option value="gpt-4o">gpt-4o</option></optgroup>
         </select>
       </div>
 
@@ -304,14 +316,15 @@
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openai">OpenAI (GPT)</option>
+          <option value="local_llm">Local LLM</option>
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="font-size:11px">Tier 3 模型 / Model</div>
         <select class="oc-select" id="ai-tier3-model" style="width:160px">
           <optgroup label="Anthropic"><option value="haiku">haiku</option></optgroup>
-          <optgroup label="DeepSeek"><option value="deepseek-chat">deepseek-chat</option></optgroup>
-          <optgroup label="OpenAI"><option value="gpt-4o-mini">gpt-4o-mini</option></optgroup>
+          <optgroup label="DeepSeek"><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-chat">deepseek-chat</option></optgroup>
+          <optgroup label="OpenAI"><option value="gpt-5.4-mini">gpt-5.4-mini</option><option value="gpt-4o-mini">gpt-4o-mini</option></optgroup>
         </select>
       </div>
 
@@ -349,9 +362,10 @@
 
 <!-- ═══ Pricing Table ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F4B2; 定价表 / Pricing Table</summary>
+  <summary>&#x1F4B2; 定价表 / Pricing Table <button class="oc-btn" onclick="refreshPricing(this);event.preventDefault();" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB; Pricing</button></summary>
   <div class="oc-collapse-body">
     <div id="explain-pricing"></div>
+    <div id="pricing-refresh-status" style="font-size:11px;color:var(--text-dim);margin:8px 0">定价刷新：载入中</div>
     <div id="pricing-body" class="oc-loading">Loading...</div>
   </div>
 </details>
@@ -506,7 +520,7 @@ $('explain-settings').innerHTML = ocExplain(
 
 $('explain-pricing').innerHTML = ocExplain(
   '各 AI 模型的详细定价。系统根据此表计算每次 AI 调用的费用。',
-  '定价分为 input tokens（发送给模型的文本）和 output tokens（模型生成的回复）。不同模型的价格差异巨大：DeepSeek-V3 约为 Claude Opus 的 1/50。'
+  '定价分为 input tokens（发送给模型的文本）和 output tokens（模型生成的回复）。不同模型的价格差异巨大：DeepSeek V4 Flash 明显低于 Claude Opus。'
 );
 
 // ─── Trigger Session ─────────────────────────────────────────
@@ -540,6 +554,163 @@ const PROVIDER_BADGE_ID = {
   anthropic: 'prov-anthropic-badge', openai: 'prov-openai-badge', deepseek: 'prov-deepseek-badge',
   perplexity: 'prov-perplexity-badge', google: 'prov-google-badge', local_llm: 'prov-local-badge',
 };
+let L2_MODEL_CATALOG = null;
+let L2_PROVIDER_MODELS = {
+  anthropic: [
+    { value: 'haiku', label: 'haiku — Claude Haiku 4.5' },
+    { value: 'sonnet', label: 'sonnet — Claude Sonnet 4.6' },
+    { value: 'opus', label: 'opus — Claude Opus 4.7' },
+  ],
+  deepseek: [
+    { value: 'deepseek-v4-flash', label: 'deepseek-v4-flash — V4 Flash' },
+    { value: 'deepseek-v4-pro', label: 'deepseek-v4-pro — V4 Pro' },
+    { value: 'deepseek-chat', label: 'deepseek-chat — deprecated 2026-07-24' },
+    { value: 'deepseek-reasoner', label: 'deepseek-reasoner — deprecated 2026-07-24' },
+  ],
+  openai: [
+    { value: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
+    { value: 'gpt-5.4', label: 'gpt-5.4' },
+    { value: 'gpt-5.5', label: 'gpt-5.5' },
+    { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+    { value: 'gpt-4o', label: 'gpt-4o' },
+    { value: 'o1', label: 'o1（reasoner）' },
+  ],
+  local_llm: [
+    { value: 'local:', label: 'Local LLM — 等待本地模型目录', providerAvailable: false },
+  ],
+};
+const L2_SELECT_DEFAULTS = {
+  'ai-model': { anthropic: 'sonnet', deepseek: 'deepseek-v4-flash', openai: 'gpt-5.4-mini' },
+  'ai-tier2-model': { anthropic: 'haiku', deepseek: 'deepseek-v4-flash', openai: 'gpt-5.4-mini' },
+  'ai-tier3-model': { anthropic: 'haiku', deepseek: 'deepseek-v4-flash', openai: 'gpt-5.4-mini' },
+};
+
+function _catalogModelLabel(m) {
+  let label = m.label || m.value || m.model_id || 'model';
+  if (m.model_id && m.model_id !== m.value && !label.includes(m.model_id)) label += ' [' + m.model_id + ']';
+  if (m.deprecated) label += ' · deprecated ' + (m.deprecation_date || '');
+  if (m.availability_source === 'documented_alias') label += ' · alias';
+  if (m.supports_tools === false) label += ' · no tools';
+  if (m.provider_available === false) label += ' · provider 未列出';
+  return label;
+}
+
+function applyLocalModelsFromStatus(status) {
+  if (!status) return;
+  const models = Array.isArray(status.models) ? status.models.filter(Boolean) : [];
+  const defaultModel = status.default_model || '';
+  if (defaultModel && !models.includes(defaultModel)) models.unshift(defaultModel);
+
+  if (status.available && models.length) {
+    L2_PROVIDER_MODELS.local_llm = models.map(name => ({
+      value: 'local:' + name,
+      label: name + ' — Local LLM · no tools',
+      providerAvailable: true,
+    }));
+    ocSetText(
+      'ai-local-model-options-status',
+      '本地模型：' + (status.provider || 'local') + ' · ' + models.join(', '),
+    );
+  } else {
+    L2_PROVIDER_MODELS.local_llm = [{
+      value: 'local:',
+      label: 'Local LLM — 当前不可用',
+      providerAvailable: false,
+    }];
+    ocSetText(
+      'ai-local-model-options-status',
+      '本地模型：不可用' + (status.base_url ? ' · ' + status.base_url : ''),
+    );
+  }
+  if ($('ai-provider').value === 'local_llm' || $('ai-tier2-provider').value === 'local_llm' || $('ai-tier3-provider').value === 'local_llm') {
+    syncModelSelectsFromProviders();
+  }
+}
+
+function applyProviderModelCatalog(catalog) {
+  if (!catalog || !catalog.providers) return;
+  L2_MODEL_CATALOG = catalog;
+  ['anthropic', 'deepseek', 'openai', 'local_llm'].forEach(provider => {
+    const p = catalog.providers[provider];
+    const rows = (p && Array.isArray(p.models)) ? p.models : [];
+    const usable = rows.filter(m => m && m.l2_supported !== false);
+    if (usable.length) {
+      L2_PROVIDER_MODELS[provider] = usable.map(m => ({
+        value: m.value || m.model_id,
+        label: _catalogModelLabel(m),
+        providerAvailable: m.provider_available !== false,
+        deprecated: !!m.deprecated,
+      }));
+    }
+  });
+  renderModelCatalogStatus(catalog);
+  syncModelSelectsFromProviders();
+}
+
+function renderModelCatalogStatus(catalog) {
+  const el = $('ai-model-catalog-status');
+  if (!el || !catalog || !catalog.providers) return;
+  const parts = ['anthropic', 'deepseek', 'openai', 'local_llm'].map(provider => {
+    const p = catalog.providers[provider] || {};
+    const status = p.refresh_status || 'unknown';
+    const source = p.cache_hit ? 'cache' : status;
+    const count = p.provider_models_count != null ? p.provider_models_count : '?';
+    return provider + ':' + source + '(' + count + ')';
+  });
+  const ttlHours = catalog.ttl_seconds ? Math.round(catalog.ttl_seconds / 3600) : '?';
+  const localTtl = catalog.local_ttl_seconds || 60;
+  el.textContent = '模型目录：' + parts.join(' · ') + ' · cloud TTL ' + ttlHours + 'h · local TTL ' + localTtl + 's';
+}
+
+async function loadProviderModelCatalog(forceRefresh) {
+  const qs = forceRefresh ? '?force_refresh=true' : '';
+  const d = await ocApi('/api/v1/paper/layer2/providers/models' + qs);
+  if (!d || !d.data) {
+    ocSetText('ai-model-catalog-status', '模型目录：加载失败');
+    await loadLocalModelsForEngineSettings();
+    return;
+  }
+  applyProviderModelCatalog(d.data);
+}
+
+async function loadLocalModelsForEngineSettings() {
+  const d = await ocApi('/api/v1/paper/layer2/ollama/status');
+  if (d && d.data) applyLocalModelsFromStatus(d.data);
+}
+
+async function refreshProviderModels(btn) {
+  let origText;
+  if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '刷新中...'; }
+  try {
+    await loadProviderModelCatalog(true);
+    ocToast('模型目录已刷新 / Model catalog refreshed', 'success');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
+}
+
+function setModelOptions(selectId, provider, selectedValue) {
+  const select = $(selectId);
+  if (!select) return;
+  const models = L2_PROVIDER_MODELS[provider] || L2_PROVIDER_MODELS.anthropic;
+  if (!models.length) {
+    select.innerHTML = '<option value="" disabled>无可用模型</option>';
+    return;
+  }
+  select.innerHTML = models.map(m => {
+    const disabled = m.providerAvailable === false ? ' disabled' : '';
+    return '<option value="' + ocEsc(m.value) + '"' + disabled + '>' + ocEsc(m.label) + '</option>';
+  }).join('');
+  const values = models.map(m => m.value);
+  const fallback = (L2_SELECT_DEFAULTS[selectId] || {})[provider] || values[0];
+  select.value = values.includes(selectedValue) ? selectedValue : fallback;
+}
+
+function syncModelSelectsFromProviders() {
+  setModelOptions('ai-model', $('ai-provider').value, $('ai-model').value);
+  setModelOptions('ai-tier2-model', $('ai-tier2-provider').value, $('ai-tier2-model').value);
+  setModelOptions('ai-tier3-model', $('ai-tier3-provider').value, $('ai-tier3-model').value);
+}
 
 // 根據 (configured, client_implemented) 計算 badge 顯示。
 // 客戶端未實裝時即使存了 key 也只顯示「已存储」並黃色提示，避免假成功。
@@ -549,8 +720,13 @@ function _renderProviderBadge(provider, info) {
   if (!badge) return;
   if (info.configured) {
     if (info.client_implemented) {
-      badge.textContent = '已配置 / Active';
-      badge.className = 'oc-chip oc-chip-good';
+      if (info.validated) {
+        badge.textContent = '已验证 / Active';
+        badge.className = 'oc-chip oc-chip-good';
+      } else {
+        badge.textContent = '已存储 · 未验证';
+        badge.className = 'oc-chip oc-chip-warn';
+      }
     } else {
       badge.textContent = '已存储 · 客户端未接';
       badge.className = 'oc-chip oc-chip-warn';
@@ -568,7 +744,8 @@ function _renderProviderBadge(provider, info) {
   const input = $(PROVIDER_INPUT_ID[provider]);
   if (input) {
     if (info.configured && info.masked) {
-      input.placeholder = '已存储：' + info.masked + '（输入新值替换）';
+      const v = info.validated ? '已验证' : '已存储未验证';
+      input.placeholder = v + '：' + info.masked + '（输入新值替换）';
     } else if (provider === 'anthropic') {
       input.placeholder = 'sk-ant-...';
     } else if (provider === 'perplexity') {
@@ -625,7 +802,11 @@ async function saveProviderKey(provider, btn) {
       $(inputId).value = '';
       if (myResult.client_implemented) {
         const hot = myResult.hot_reloaded ? '（已热重载客户端）' : '';
-        ocToast(provider + ' API Key 已保存并就绪 ' + hot, 'success');
+        if (myResult.validated) {
+          ocToast(provider + ' API Key 已验证并保存 ' + hot, 'success');
+        } else {
+          ocToast(provider + ' API Key 已保存，但未完成可用性验证', 'warn');
+        }
       } else {
         // 誠實提示：key 落地了但推理路徑還沒接，避免使用者以為立即生效。
         ocToast(provider + ' Key 已存储；客户端尚未实装（仅存盘待用）', 'warn');
@@ -636,6 +817,9 @@ async function saveProviderKey(provider, btn) {
           ([name, info]) => _renderProviderBadge(name, info));
       } else {
         loadProviderStatus();
+      }
+      if (['anthropic', 'openai', 'deepseek', 'local_llm'].includes(provider)) {
+        await loadProviderModelCatalog(true);
       }
     } else {
       // envelope 沒帶結果（理論上不會），保守降級
@@ -695,6 +879,9 @@ async function clearProviderKey(provider, btn) {
     } else {
       loadProviderStatus();
     }
+    if (['anthropic', 'openai', 'deepseek', 'local_llm'].includes(provider)) {
+      await loadProviderModelCatalog(true);
+    }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
@@ -702,6 +889,7 @@ async function clearProviderKey(provider, btn) {
 
 // ─── Save AI Config ──────────────────────────────────────────
 async function saveAIConfig(btn) {
+  syncModelSelectsFromProviders();
   const body = {
     daily_hard_cap_usd: parseFloat($('ai-hard-cap').value) || 2,
     adaptive_base_daily_usd: parseFloat($('ai-base-daily').value) || 8,
@@ -938,20 +1126,41 @@ async function loadConfig() {
   $('ai-allow-opus').value = cfg.allow_opus_upgrade !== false ? 'true' : 'false';
   $('ai-enabled').value = cfg.adaptive_enabled !== false ? 'true' : 'false';
   $('ai-auto-submit').value = cfg.auto_submit_to_paper ? 'true' : 'false';
-  if (cfg.default_model) $('ai-model').value = cfg.default_model;
   if (cfg.default_provider) $('ai-provider').value = cfg.default_provider;
+  setModelOptions('ai-model', $('ai-provider').value, cfg.default_model);
   // Tier 2/3 fallback 欄位回填
   if (cfg.fallback_tier2_threshold_pct != null) $('ai-tier2-threshold').value = cfg.fallback_tier2_threshold_pct;
   if (cfg.fallback_tier2_provider) $('ai-tier2-provider').value = cfg.fallback_tier2_provider;
-  if (cfg.fallback_tier2_model) $('ai-tier2-model').value = cfg.fallback_tier2_model;
+  setModelOptions('ai-tier2-model', $('ai-tier2-provider').value, cfg.fallback_tier2_model);
   if (cfg.fallback_tier3_threshold_pct != null) $('ai-tier3-threshold').value = cfg.fallback_tier3_threshold_pct;
   if (cfg.fallback_tier3_provider) $('ai-tier3-provider').value = cfg.fallback_tier3_provider;
-  if (cfg.fallback_tier3_model) $('ai-tier3-model').value = cfg.fallback_tier3_model;
+  setModelOptions('ai-tier3-model', $('ai-tier3-provider').value, cfg.fallback_tier3_model);
 }
 
-async function loadPricing() {
-  const d = await ocApi('/api/v1/paper/layer2/cost/pricing');
+function renderPricingRefreshStatus(data) {
+  const meta = data && data.source_meta || {};
+  const status = data && data.refresh_status || 'unknown';
+  const last = meta.last_refresh_date || '--';
+  const changed = meta.source_changed ? ' · 官方页面有变化，需复核' : '';
+  const reasons = (data && data.refresh_reasons || meta.refresh_reasons || []).join(',');
+  ocSetText('pricing-refresh-status', '定价刷新：' + status + ' · last=' + last + (reasons ? ' · ' + reasons : '') + changed);
+}
+
+async function refreshPricing(btn) {
+  let origText;
+  if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '刷新中...'; }
+  try {
+    await loadPricing(true);
+    ocToast('定价表已刷新 / Pricing refreshed', 'success');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
+}
+
+async function loadPricing(forceRefresh) {
+  const d = await ocApi('/api/v1/paper/layer2/cost/pricing' + (forceRefresh ? '?force_refresh=true' : ''));
   if (!d || !d.data) { ocSetHtml('pricing-body', '<div class="oc-loading">No pricing data</div>'); return; }
+  renderPricingRefreshStatus(d.data);
   const pricing = d.data.models || d.data;
   let html = '<div class="oc-table-wrap"><table class="oc-table"><thead><tr><th>模型</th><th>供应商</th><th>Input $/1M</th><th>Output $/1M</th></tr></thead><tbody>';
   if (Array.isArray(pricing)) {
@@ -993,6 +1202,7 @@ async function checkOllamaStatus() {
   }
 
   const s = d.data;
+  applyLocalModelsFromStatus(s);
   if (s.available) {
     // Ollama is up and responded — show model list
     // Ollama 正常运行并已响应 — 显示模型列表
@@ -1011,6 +1221,7 @@ async function checkOllamaStatus() {
 }
 
 async function loadAll() {
+  await loadProviderModelCatalog(false);
   await Promise.allSettled([
     loadCost(),
     loadAdaptive(),
@@ -1024,6 +1235,11 @@ async function loadAll() {
   checkOllamaStatus();
 }
 
+['ai-provider', 'ai-tier2-provider', 'ai-tier3-provider'].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener('change', syncModelSelectsFromProviders);
+});
+syncModelSelectsFromProviders();
 loadAll();
 ocStartRefresh(loadAll, 30000);
 ocInitFx();
