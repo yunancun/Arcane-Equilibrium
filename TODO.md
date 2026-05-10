@@ -225,6 +225,53 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 
 ---
 
+## §6.5 Sprint N+1 D+0 Pre-dispatch Readiness Snapshot（2026-05-10, HEAD `bf66f1b2`）
+
+**Status**: Sprint N+0 已 closure（HEAD `b6ed4975`）；Sprint N+1 D+0 提前準備清單 **25 項全 land**；HIGH-5 12h passive watch metric 2/3 forward observation 進行中（21:30 UTC sign-off 窗口）。
+
+**詳完整 dispatch v3.7 + 25 D+0 提前準備清單**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md`
+
+### Code change PR ready (NOT DEPLOYED)
+- W7-3 Option B 補丁 (`b42731f6`): ma_crossover.on_rejection sync, +48 LOC + 152 LOC tests, E1+E2 APPROVE+E4 PASS
+- W7-1 + W2 trait skeleton (`c9fb0b8f`): TickContext.position_state per-iteration borrow + BtcLeadLagPanel, 16 file +182 LOC, 0 borrow checker, 433+2640+35 PASS
+
+### Specs / RFC drafts land
+- W2 A4-C spec **v1.2** (5 conditions + dual-layer σ + PSR(0) skew/kurt + +15/+5-15/<+5 階梯 gate)
+- W1 Phase B spec **v1.1** (BB WS-first revision, Rust panel_aggregator)
+- W6-1 RFC final verdict draft (8 section, 4 條 verdict, Track A/B 拆分)
+- W6-3a/b 12+14 enum + V086 spec preview
+- W5 三 P1 specs (CANARY-STAGE / COHORT-FREQ-23 + V089 / DYNAMIC-UNBLOCK + V090)
+- N+0 sign-off + N+1 dispatch fire SOP
+
+### v3.8 governance pre-checks
+- CC compliance APPROVE-CONDITIONAL Score **A- 92.0%** (vs N+0 A 93.3%, -1.3pp)
+- E3 security ALL PASS (0 CRITICAL/HIGH/MEDIUM, 3 LOW backlog, 5 hard gate 全綠)
+- R4 docs audit 8 fix CRITICAL+HIGH+MED 已 land
+
+### V### 編號 reserved
+V085 (W1 funding_curve) / V086 (W6 reject_reason_code) / V087 (W1 oi_delta_panel) / V088 (W2 panel.btc_lead_lag) / V089 (W5 cohort_freq_cap_attempts) / V090 (W5 unblock_candidates)
+
+### Sign-off + Dispatch Fire 流程（21:30 UTC 後）
+
+詳 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-10--n0_high5_signoff_draft.md` + `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--n0_signoff_n1_dispatch_fire_sop.md`
+
+**Phase 1**：一次 restart_all --rebuild --keep-auth deploy W7-3 + W7-1 + W2 trait skeleton + 30min observation
+**Phase 2**：派 9 wave 並行 sub-agent dispatch：W7-2 (含 bb_reversion) / W7-4 / W7-5 / W6 RFC verdict 三角 / W6 V086 IMPL / W1 IMPL Rust panel_aggregator WS-first / W2 IMPL v1.2 / W4 RouterLeaseGuard Drop / W5 三 P1 IMPL
+**W3 Stage 1 cohort 暫不派**（等 W6 + W7 完成 ~D+3-4 啟動）
+
+### Sprint N+1 estimated duration
+7-10 day（W7 從 4 day 縮到 2-3 day per W7-1+W7-3 提早 land 共省 1.5 day）
+
+### Critical realities (4-agent loss audit consensus 維持)
+1. 5 textbook 策略結構性 alpha-deficient — W6 governance 沒 over-fit 確認；真正解是 alpha source 補充
+2. TONUSDT P1-CONDITIONAL-WATCH 30d evidence（QC verdict C, 不立即 freeze 避 selection-bias 環路）
+3. W6-5 LightGBM imbalance handling 撤回（MIT category error）— 改 sample_weight ratio sensitivity
+4. W6-3 真實 18+ 類兩 column (vs preliminary 3 類)
+5. ML retrain Track A/B 拆分 close PA Q3 vs MIT Q2 V086 timing 分歧
+6. dual-layer σ acceptance（raw market σ vs net edge σ）
+
+---
+
 ## §7 W-AUDIT-6d Mid-Ground（保 6 / 砍 6 + DSR K -12 量化）
 
 ### 保 6 結構性子項（Sprint N+0, 5 person-day, QC review）
