@@ -160,6 +160,9 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         canary_handle,
         edge_predictor_store,
         positions_mirror,
+        // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for
+        // pipeline；構造後 inject TickPipeline.btc_lead_lag_panel_slot。
+        btc_lead_lag_panel_slot,
     } = deps;
 
     // MARKET-KLINES-STALE-1 (2026-04-18): the original D19 invariant
@@ -189,6 +192,15 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     }
     if let Some(tx) = lease_transition_tx {
         pipeline.governance.set_lease_transition_tx(tx);
+    }
+
+    // W2 sub-task 4 (E1-δ, 2026-05-11): 注入 BtcLeadLagPanel IPC slot Arc clone。
+    // step_4_5_dispatch 在 paper-only fence 通過後 try_read 讀此 slot。
+    // None = main.rs 未啟動 BtcLeadLagProducer（test path），slot 維持
+    // pipeline_ctor.rs default None；step_4_5_dispatch fence 通過後拿到 None
+    // → surface.btc_lead_lag = None，不影響既有行為。
+    if let Some(slot) = btc_lead_lag_panel_slot {
+        pipeline.set_btc_lead_lag_panel_slot(slot);
     }
 
     // EDGE-P3-1 Phase B #1: Inject per-engine EdgePredictorStore. None preserves

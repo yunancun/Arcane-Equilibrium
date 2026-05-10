@@ -216,3 +216,24 @@ pub type OIDeltaPanelSlot =
 // === W2 BtcLeadLagPanelSlot insertion point ===
 // W2 E1-δ (C-IMPL-2) 在此下方加 `pub type BtcLeadLagPanelSlot = Arc<RwLock<Option<...>>>;`
 // 對應 `panel.btc_lead_lag_panel` (V088 migration) + BTC lead-lag aggregator
+
+/// W2 sub-task 4 (E1-δ, 2026-05-11): late-injected slot for BtcLeadLagPanel。
+///
+/// MODULE_NOTE：BtcLeadLagProducer run loop 每 60s tick 寫此 slot；下游
+///   step_4_5_dispatch 在 paper-only fence 通過後 `try_read().ok()` 取
+///   Option<BtcLeadLagPanel> 賽進 surface.btc_lead_lag。slot type 用 trait 端
+///   `BtcLeadLagPanel` 而非 producer 端 `BtcLeadLagPanelSnapshot` — producer
+///   負責 snapshot → trait struct adaptor，IPC slot 對齊 trait 契約。
+///
+///   None = 尚未產生（boot 後第一個 60s tick 內 / pool 不可用 /
+///   regime extreme & 全 NaN）。
+///
+///   Aggregator 寫入是 latest snapshot replace 語意（不 append）；
+///   step_4_5_dispatch 直接 `try_read().ok().and_then(|g| g.clone())` 取
+///   值，async-free 對 sync on_tick path 友好。
+///
+///   **paper-only fence Layer 2**：slot 本身不知 fence，永遠由 producer 寫入；
+///   step_4_5_dispatch 做 engine_mode gate 主防線（demo / live_demo / live →
+///   surface.btc_lead_lag = None，不讀 slot）。
+pub type BtcLeadLagPanelSlot =
+    Arc<RwLock<Option<openclaw_core::alpha_surface::BtcLeadLagPanel>>>;

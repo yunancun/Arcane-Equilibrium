@@ -58,7 +58,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::database::pool::DbPool;
-use crate::ipc_server::{FundingCurvePanelSlot, OIDeltaPanelSlot};
+use crate::ipc_server::{BtcLeadLagPanelSlot, FundingCurvePanelSlot, OIDeltaPanelSlot};
 
 /// W1 sub-task 3 (E1-γ, 2026-05-11) — flush 視窗 60 秒，per spec §2.3 + §3.3。
 const FLUSH_INTERVAL_SECS: u64 = 60;
@@ -307,6 +307,16 @@ pub fn create_panel_slots() -> (FundingCurvePanelSlot, OIDeltaPanelSlot) {
         Arc::new(RwLock::new(None)),
         Arc::new(RwLock::new(None)),
     )
+}
+
+/// W2 sub-task 4 (E1-δ, 2026-05-11) — BtcLeadLag IPC slot 工廠。
+///
+/// main.rs 在 IpcServer detach 前呼叫此函數產生 slot 給 IpcServer 持有，
+/// 同時 clone Arc 給 BtcLeadLagProducer 寫入 + clone Arc 給 TickPipeline
+/// step_4_5_dispatch 讀取。typedef 已在 `ipc_server::slots::BtcLeadLagPanelSlot`
+/// 定義。對齊 `create_panel_slots` 命名 + 行為 pattern。
+pub fn create_btc_lead_lag_slot() -> BtcLeadLagPanelSlot {
+    Arc::new(RwLock::new(None))
 }
 
 #[cfg(test)]

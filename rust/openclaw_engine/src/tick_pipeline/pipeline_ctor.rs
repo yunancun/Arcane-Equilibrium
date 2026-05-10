@@ -135,6 +135,11 @@ impl TickPipeline {
                 0.03,
                 crate::dynamic_risk_sizer::DynamicRiskSizerConfig::default(),
             ),
+            // W2 sub-task 4 (E1-δ, 2026-05-11): default None；main.rs 在
+            // BtcLeadLagProducer spawn 同時透過 set_btc_lead_lag_panel_slot()
+            // 注入。test / dev 不注入 → step_4_5_dispatch surface.btc_lead_lag = None
+            // 不影響既有行為（trait 端 None 即 fail-soft）。
+            btc_lead_lag_panel_slot: None,
         }
     }
 
@@ -216,6 +221,23 @@ impl TickPipeline {
     #[inline]
     pub fn effective_engine_mode(&self) -> &'static str {
         crate::mode_state::effective_engine_mode(self.pipeline_kind, self.endpoint_env)
+    }
+
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): 注入 BtcLeadLagPanel IPC slot Arc clone。
+    /// main.rs 在 BtcLeadLagProducer spawn 後呼叫此 setter，把 producer 寫入端
+    /// 的同一 Arc<RwLock<Option<BtcLeadLagPanel>>> clone 進來。step_4_5_dispatch
+    /// 在 paper-only fence 通過後 try_read 拿 panel snapshot。
+    ///
+    /// **paper-only fence Layer 1**：fence 由 step_4_5_dispatch engine_mode gate 主防線；
+    /// 本 setter 對 paper / demo / live_demo / live 任何 pipeline 都允許注入
+    /// （producer 全局 emit；fence 控制是否 dispatch surface field）。
+    /// 即使 demo / live pipeline 拿到 slot，dispatch 端仍會 None；slot 注入是
+    /// boot-time 一致性，runtime gate 是 dispatch-time 主防線。
+    pub fn set_btc_lead_lag_panel_slot(
+        &mut self,
+        slot: crate::ipc_server::BtcLeadLagPanelSlot,
+    ) {
+        self.btc_lead_lag_panel_slot = Some(slot);
     }
 
     /// Endpoint-aware GovernanceProfile for per-intent cost-gate selection
@@ -460,6 +482,20 @@ impl TickPipeline {
         );
         self.agent_spine_tx = tx;
         self.agent_spine_mode = mode;
+    }
+
+    /// W-C Caveat 2 修復（2026-05-11）：唯讀取用器，供 event_consumer
+    /// loop_exchange.rs 在 fully_filled 後呼叫 emit_fill_completion_lineage
+    /// 補寫真實 ExecutionReport row。crate-internal pub 限定，避免外洩。
+    pub(crate) fn agent_spine_tx_ref(
+        &self,
+    ) -> Option<&tokio::sync::mpsc::Sender<crate::agent_spine::store::AgentSpineMsg>> {
+        self.agent_spine_tx.as_ref()
+    }
+
+    /// W-C Caveat 2 修復（2026-05-11）：唯讀取用器；同上。
+    pub(crate) fn agent_spine_mode_ref(&self) -> crate::agent_spine::config::AgentSpineMode {
+        self.agent_spine_mode
     }
 
     /// EXIT-FEATURES-TABLE-1: Read-only accessor to the pre-existing

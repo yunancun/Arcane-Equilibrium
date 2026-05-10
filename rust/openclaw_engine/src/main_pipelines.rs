@@ -79,6 +79,13 @@ pub(crate) struct PipelineSpawnContext<'a> {
     pub global_exposure_usdt: &'a Arc<std::sync::atomic::AtomicU64>,
     pub has_live: bool,
     pub has_demo: bool,
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for all
+    /// pipelines。main.rs 預建 slot + clone 給 BtcLeadLagProducer 寫入端 +
+    /// clone 給 IpcServer + clone 給三 pipeline 的 EventConsumerDeps。
+    /// `None` = 未開啟 panel collector（test / 早期 boot）；step_4_5_dispatch
+    /// 拿到 None slot → surface.btc_lead_lag = None（fence + slot 兩層 None
+    /// 邏輯一致）。
+    pub btc_lead_lag_panel_slot: &'a Option<openclaw_engine::ipc_server::BtcLeadLagPanelSlot>,
 }
 
 /// Writer channel senders shared across pipelines.
@@ -383,6 +390,10 @@ pub(crate) fn spawn_paper_pipeline(
         canary_handle: ctx.canary_handle.clone(),
         edge_predictor_store: Some(Arc::clone(&ctx.per_engine_predictors.paper)),
         positions_mirror: Some(Arc::clone(&paper.positions_mirror)),
+        // W2 sub-task 4 (E1-δ, 2026-05-11): paper engine 接 BtcLeadLagPanelSlot
+        // Arc clone；step_4_5_dispatch 在 effective_engine_mode()=="paper" 時
+        // 才 try_read 此 slot（fence Layer 1 主防線）。
+        btc_lead_lag_panel_slot: ctx.btc_lead_lag_panel_slot.clone(),
     };
     // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
     // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
@@ -493,6 +504,11 @@ pub(crate) fn spawn_demo_pipeline(
         canary_handle: ctx.canary_handle.clone(),
         edge_predictor_store: Some(Arc::clone(&ctx.per_engine_predictors.demo)),
         positions_mirror: Some(Arc::clone(&demo.positions_mirror)),
+        // W2 sub-task 4 (E1-δ, 2026-05-11): demo engine 接 BtcLeadLagPanelSlot
+        // Arc clone；step_4_5_dispatch fence Layer 1 阻 demo engine 讀 slot
+        // （effective_engine_mode()=="demo" → surface.btc_lead_lag = None），
+        // 但 slot Arc 仍注入以保 boot 一致性（producer 全局 emit）。
+        btc_lead_lag_panel_slot: ctx.btc_lead_lag_panel_slot.clone(),
     };
     // Fix 3 (2026-04-14): same crash-only wrapper as paper.
     // 修復 3：同 paper 的 crash-only 包裝。
@@ -625,6 +641,11 @@ pub(crate) fn spawn_live_pipeline(
         canary_handle: ctx.canary_handle.clone(),
         edge_predictor_store: Some(Arc::clone(&ctx.per_engine_predictors.live)),
         positions_mirror: Some(Arc::clone(&live.positions_mirror)),
+        // W2 sub-task 4 (E1-δ, 2026-05-11): live engine 接 BtcLeadLagPanelSlot
+        // Arc clone；step_4_5_dispatch fence Layer 1 阻 live engine 讀 slot
+        // （effective_engine_mode()=="live" or "live_demo" → surface.btc_lead_lag = None）。
+        // slot Arc 仍注入以保 boot 一致性（producer 全局 emit）。
+        btc_lead_lag_panel_slot: ctx.btc_lead_lag_panel_slot.clone(),
     };
 
     // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.
@@ -796,6 +817,9 @@ pub(crate) struct LiveSpawnBundle {
     pub agent_spine_tx: Option<mpsc::Sender<AgentSpineMsg>>,
     pub agent_spine_mode: AgentSpineMode,
     pub lease_transition_tx: Option<LeaseTransitionSender>,
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for
+    /// live respawn cycle；spawner closure 把此 slot 注入每次重生的 PipelineSpawnContext。
+    pub btc_lead_lag_panel_slot: Option<openclaw_engine::ipc_server::BtcLeadLagPanelSlot>,
 }
 
 /// Build the `LivePipelineSpawner` closure from a `LiveSpawnBundle`.
@@ -868,6 +892,8 @@ pub(crate) fn build_live_pipeline_spawner(
     let writers_c_agent_spine = b.agent_spine_tx;
     let writers_c_agent_spine_mode = b.agent_spine_mode;
     let writers_c_lease_transition = b.lease_transition_tx;
+    // W2 sub-task 4 (E1-δ, 2026-05-11): capture BtcLeadLagPanelSlot for closure
+    let btc_lead_lag_panel_slot_c = b.btc_lead_lag_panel_slot;
 
     Arc::new(move |spawn_output: crate::pipeline_slot::SpawnOutput| -> crate::live_auth_watcher::LivePipelineSpawnResult {
         // Build fresh channels for this spawn cycle.
@@ -917,6 +943,8 @@ pub(crate) fn build_live_pipeline_spawner(
             global_exposure_usdt: &global_exposure_c,
             has_live: true,
             has_demo,
+            // W2 sub-task 4 (E1-δ, 2026-05-11): live respawn 拿 slot
+            btc_lead_lag_panel_slot: &btc_lead_lag_panel_slot_c,
         };
         let live_channels = LiveChannels {
             bindings: spawn_output.bindings,

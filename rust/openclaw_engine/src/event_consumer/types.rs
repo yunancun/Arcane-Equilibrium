@@ -104,6 +104,32 @@ pub struct PendingOrder {
     /// maker timeout cancel 已派發的時間。Some 時保留 row，讓 cancel ack 前 race
     /// 到的成交仍能匹配原始 context；Cancelled/Rejected/Filled 或 grace 到期後移除。
     pub cancel_requested_ts_ms: Option<u64>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 同步計算的
+    /// Spine `order_plan_id`（stable_id("plan", &[engine_mode, decision_id,
+    /// verdict_id])）。由 step_4_5_dispatch 在 emit_entry_lineage 之後注入
+    /// OrderDispatchRequest → 派發 channel → 對端 dispatch.rs 構造
+    /// PendingOrder 時鏡射至此。成交（fully_filled）時 loop_exchange.rs 呼叫
+    /// emit_fill_completion_lineage 帶入此 id 寫真實 ExecutionReport。
+    /// None 表示本筆未過 lineage emit gate（mode disabled / paper / qty<=0）
+    /// 或舊 path 漏注入，下游 fill_completion 自然 short-circuit。
+    pub spine_order_plan_id: Option<String>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 同步計算的 Spine
+    /// `decision_id`（stable_id("decision", &[engine_mode, signal_id])）。
+    /// 用途同 `spine_order_plan_id`，於 emit_fill_completion_lineage 必填。
+    pub spine_decision_id: Option<String>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 對應的 Spine
+    /// `verdict_id`（即 make_verdict_id(em, symbol, ts_ms)）。當前
+    /// emit_fill_completion_lineage 未使用此欄；保留為下游 partial-fill
+    /// metadata 擴展與 reviewer audit pack cross-ref 預留位。None 為預設。
+    pub spine_verdict_id: Option<String>,
+    /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 計算的 stub
+    /// ExecutionReport `execution_report_id`（stable_id("report", &[
+    /// engine_mode, order_plan_id, "shadow_planned"])）。供
+    /// emit_fill_completion_lineage 在 quality_metrics 寫 stub_report_id
+    /// cross-ref，方便 [55] healthcheck `bad_report_value_quality` 從
+    /// `executed_by` edge details.fill_completion=true 篩出真實 fill row
+    /// 並對應到 stub 對端。
+    pub spine_stub_report_id: Option<String>,
 }
 
 /// Pending-order lifecycle messages sent from the dispatch task to the event
@@ -365,4 +391,11 @@ pub struct EventConsumerDeps {
     /// `paper_state.set_positions_mirror(mirror)`，對帳器讀鏡像抑制
     /// 「自家剛開倉」的假 Orphan。None 時停用抑制（回退 Phase 1 行為）。
     pub positions_mirror: Option<Arc<parking_lot::RwLock<HashMap<String, bool>>>>,
+    /// W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for
+    /// pipeline。bootstrap.rs 構造 TickPipeline 後呼叫
+    /// `pipeline.set_btc_lead_lag_panel_slot(slot)` 注入。`None` = 未注入
+    /// （test / 早期 boot），TickPipeline.btc_lead_lag_panel_slot 維持
+    /// pipeline_ctor.rs default None；step_4_5_dispatch fence 通過後拿到 None
+    /// → surface.btc_lead_lag = None（與 paper-only fence 拒絕讀取同等語意）。
+    pub btc_lead_lag_panel_slot: Option<crate::ipc_server::BtcLeadLagPanelSlot>,
 }

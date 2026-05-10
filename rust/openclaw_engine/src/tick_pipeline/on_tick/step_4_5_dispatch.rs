@@ -21,7 +21,7 @@
 use std::ops::ControlFlow;
 use std::time::Instant;
 
-use openclaw_core::alpha_surface::AlphaSurface;
+use openclaw_core::alpha_surface::{AlphaSurface, BtcLeadLagPanel};
 use openclaw_core::governance_core::LeaseOutcome;
 use openclaw_core::signals::Signal;
 use tracing::{info, warn};
@@ -189,16 +189,31 @@ impl TickPipeline {
         // W1 E1-α (B-1) 在 surface field 處加 `funding_curve: self.funding_slot.latest()`
         // W1 E1-β (B-2) 在 surface field 處加 `oi_delta_panel: self.oi_slot.latest()`
         //
-        // === W2 btc_lead_lag surface field assignment ===
-        // W2 E1-δ (C-IMPL-2) 在 surface 構造處加 paper-only engine_mode gate：
-        //   let btc_lead_lag = match self.effective_engine_mode() {
-        //       "paper" => self.btc_lead_lag_slot.latest(),
-        //       _ => None,  // demo / live_demo / live → 永遠 None
-        //   };
-        //   AlphaSurface { ..tier1_only_base, btc_lead_lag, ... }
+        // === W2 sub-task 4 (E1-δ, 2026-05-11) btc_lead_lag wire-up ===
+        // paper-only fence Layer 1（主防線，per spec §6.1）：
+        //   - effective_engine_mode() == "paper" → 從 IPC slot try_read 取 panel
+        //   - 其他 (demo / live_demo / live) → 永遠 None（fence 主防線拒絕讀 slot）
+        // try_read fail-soft：reader 永不被 writer block；contention 時 None；
+        // BtcLeadLagProducer 60s tick 寫入是 latest replace 語意，try_read 拿到
+        // 的是上次成功 emit 的 BtcLeadLagPanel clone。
+        //
+        // **lifetime 約束**：surface 借用必須在 dispatch scope 內 valid，因此
+        // 把 panel 先 clone 到 `btc_lead_lag_panel_owned: Option<BtcLeadLagPanel>`
+        // local var，再 borrow 進 surface（&btc_lead_lag_panel_owned）。clone
+        // 成本 ~7 alt symbol Vec + 4 f64 + ~30 bytes，每 60s tick 一次可接受。
         //
         // 詳 srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md §5 Layer 1 + §7
-        let alpha_surface = AlphaSurface::tier1_only(indicators, indicators_5m.as_ref());
+        let btc_lead_lag_panel_owned: Option<BtcLeadLagPanel> = match em {
+            "paper" => self
+                .btc_lead_lag_panel_slot
+                .as_ref()
+                .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone())),
+            _ => None, // demo / live_demo / live → fence 主防線
+        };
+        let alpha_surface = AlphaSurface {
+            btc_lead_lag: btc_lead_lag_panel_owned.as_ref(),
+            ..AlphaSurface::tier1_only(indicators, indicators_5m.as_ref())
+        };
 
         let ctx = TickContext {
             symbol: sym,
@@ -611,6 +626,39 @@ impl TickPipeline {
                                     event.ts_ms,
                                 );
 
+                                // W-C Caveat 2 修復（2026-05-11）：與 emit_entry_lineage
+                                // 內部使用相同算法計算 4 個 Spine id（順序 +
+                                // 參數對齊 runtime_shadow.rs:65-80），下游
+                                // PendingOrder 鏡射用，最終 loop_exchange.rs
+                                // 在 fully_filled 時讀 PendingOrder.spine_*
+                                // 呼叫 emit_fill_completion_lineage 補寫真實
+                                // ExecutionReport（status=shadow_filled）。
+                                let verdict_id_for_dispatch =
+                                    make_verdict_id(em, &intent.symbol, event.ts_ms);
+                                let spine_decision_id =
+                                    crate::agent_spine::events::stable_id(
+                                        "decision",
+                                        &[em, signal_id.as_str()],
+                                    );
+                                let spine_order_plan_id =
+                                    crate::agent_spine::events::stable_id(
+                                        "plan",
+                                        &[
+                                            em,
+                                            spine_decision_id.as_str(),
+                                            verdict_id_for_dispatch.as_str(),
+                                        ],
+                                    );
+                                let spine_stub_report_id =
+                                    crate::agent_spine::events::stable_id(
+                                        "report",
+                                        &[
+                                            em,
+                                            spine_order_plan_id.as_str(),
+                                            "shadow_planned",
+                                        ],
+                                    );
+
                                 crate::agent_spine::runtime_shadow::emit_entry_lineage(
                                     self.agent_spine_tx.as_ref(),
                                     self.agent_spine_mode,
@@ -618,11 +666,7 @@ impl TickPipeline {
                                         signal_id: &signal_id,
                                         context_id: &context_id,
                                         intent_id: &make_intent_id(em, &intent.symbol, event.ts_ms),
-                                        verdict_id: &make_verdict_id(
-                                            em,
-                                            &intent.symbol,
-                                            event.ts_ms,
-                                        ),
+                                        verdict_id: verdict_id_for_dispatch.as_str(),
                                         ts_ms: event.ts_ms,
                                         engine_mode: em,
                                         intent,
@@ -719,6 +763,14 @@ impl TickPipeline {
                                         reference_price,
                                         reference_ts_ms: reference_price.map(|_| event.ts_ms),
                                         reference_source,
+                                        // W-C Caveat 2 修復（2026-05-11）：注入 4 個
+                                        // Spine id，下游 dispatch.rs 鏡射到
+                                        // PendingOrder，loop_exchange.rs 成交時
+                                        // 呼叫 emit_fill_completion_lineage。
+                                        spine_order_plan_id: Some(spine_order_plan_id),
+                                        spine_decision_id: Some(spine_decision_id),
+                                        spine_verdict_id: Some(verdict_id_for_dispatch),
+                                        spine_stub_report_id: Some(spine_stub_report_id),
                                     });
                                     match send_result {
                                         Ok(()) => {
@@ -1174,6 +1226,15 @@ impl TickPipeline {
                                             reference_price,
                                             reference_ts_ms: reference_price.map(|_| event.ts_ms),
                                             reference_source,
+                                            // W-C Caveat 2 修復（2026-05-11）：paper shadow
+                                            // order 在 paper engine_mode，emit_entry_lineage
+                                            // 已 short-circuit（runtime_shadow.rs:57），
+                                            // 不會寫 Spine row；故下游 emit_fill_completion_lineage
+                                            // 也不會被觸發，全填 None 是 by-design fail-soft。
+                                            spine_order_plan_id: None,
+                                            spine_decision_id: None,
+                                            spine_verdict_id: None,
+                                            spine_stub_report_id: None,
                                         });
                                     }
                                 }
