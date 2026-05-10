@@ -81,6 +81,7 @@ Current known paths and remote:
 ## Operator preferences
 
 - operator-facing responses should be Chinese-first
+- when using the `improve-codebase-architecture` skill, answer in Chinese by default for candidate lists, grilling questions, and follow-up summaries; preserve the skill's exact architecture vocabulary (`Module`, `Interface`, `Implementation`, `Depth`, `Seam`, `Adapter`, `Leverage`, `Locality`) and use `CONTEXT.md` domain terms unchanged
 - minimize confirmation loops; act unless the risk is truly high
 - operator needs pushback and judgment, not blind obedience
 - agent autonomy within boundaries is preferred over over-constraining decision logic
