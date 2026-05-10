@@ -381,6 +381,52 @@ def test_demo_and_live_fill_history_has_paged_subtabs(
         assert "BuildProfitRows" in html
 
 
+def test_demo_live_tabs_use_matching_backend_surfaces(
+    console_html: str,
+    tab_demo_html: str,
+    tab_live_html: str,
+) -> None:
+    """Demo and Live tabs should not cross-read each other's account APIs."""
+    for endpoint in [
+        "/api/v1/strategy/demo/balance",
+        "/api/v1/strategy/demo/positions",
+        "/api/v1/strategy/demo/orders",
+        "/api/v1/strategy/demo/fills",
+        "/api/v1/strategy/demo/metrics",
+    ]:
+        assert endpoint in tab_demo_html
+
+    for endpoint in [
+        "/api/v1/live/balance",
+        "/api/v1/live/positions",
+        "/api/v1/live/orders",
+        "/api/v1/live/fills",
+        "/api/v1/live/metrics",
+    ]:
+        assert endpoint in tab_live_html
+
+    assert "/api/v1/live/balance" not in tab_demo_html
+    assert "/api/v1/live/positions" not in tab_demo_html
+    assert "/api/v1/strategy/demo/balance" not in tab_live_html
+    assert "/api/v1/strategy/demo/positions" not in tab_live_html
+
+    assert "api('/api/v1/live/metrics')" in console_html
+    assert "api('/api/v1/strategy/demo/metrics')" in console_html
+
+
+def test_live_today_pnl_uses_backend_metric_not_position_cumulative(
+    console_html: str,
+    tab_live_html: str,
+) -> None:
+    """Live Today PnL must come from backend net_pnl_today, not cumRealisedPnl."""
+    assert "net_pnl_today" in tab_live_html
+    assert "net_pnl_today" in console_html
+    assert "account_metrics_today" in tab_live_html
+    assert "account_metrics_today" in console_html
+    assert "cumRealisedPnl" not in tab_live_html
+    assert "cum_realised_pnl" not in tab_live_html
+
+
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(
     console_html: str,
 ) -> None:

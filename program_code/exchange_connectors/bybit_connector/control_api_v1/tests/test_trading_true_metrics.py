@@ -40,6 +40,7 @@ def test_build_performance_metrics_prefers_mlde_edge_quality() -> None:
                 "total_fees": 4.7,
                 "funding_pnl": 0.0,
             },
+            "account_metrics_today": {"net_pnl": 0.75},
             "account_metrics_24h": {"net_pnl": -1.25},
             "trade_metrics": {
                 "metric_source": "trading.fills_close_realized",
@@ -73,6 +74,7 @@ def test_build_performance_metrics_prefers_mlde_edge_quality() -> None:
     )
 
     assert _metric(metrics, "total_fills_7d")["value"] == 12
+    assert _metric(metrics, "net_pnl_today")["value"] == 0.75
     assert _metric(metrics, "net_pnl_24h")["value"] == -1.25
     assert _metric(metrics, "avg_net_edge")["value"] == -7.25
     assert _metric(metrics, "avg_net_edge")["unit"] == "bps"
@@ -90,6 +92,7 @@ def test_build_performance_metrics_uses_fallback_risk_when_db_risk_missing() -> 
     metrics = build_performance_metrics(
         {
             "account_metrics": {},
+            "account_metrics_today": {},
             "account_metrics_24h": {},
             "trade_metrics": {
                 "metric_source": "trading.fills_close_realized",

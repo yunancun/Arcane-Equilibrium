@@ -1,7 +1,21 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-10（Sprint N+0 closure + Sprint N+1 D+0 pre-dispatch readiness）
+> 最後更新：2026-05-10（Live/Demo GUI 今日 PnL 口徑修正）
+
+### Live/Demo GUI 今日 PnL 口徑修正 — 2026-05-10
+
+**Scope**: 修正 Live GUI / console 側欄「今日淨 PnL」混入 session/lifetime 手續費的顯示錯誤，並補 Demo/Live tab 前後端 endpoint contract。
+
+**主要 land**:
+- `trading_true_metrics.py` 新增 `account_metrics_today` + canonical `net_pnl_today`，以 DB 當地日 `date_trunc('day', now())` 聚合 `realized_pnl - fee + funding`。
+- `tab-live.html` 頂部 PnL 概覽改讀 `/api/v1/live/metrics` 的 `net_pnl_today` / `account_metrics_today`；不再從持倉 `cumRealisedPnl` 或 `engine_total_fees` 推算今日值。
+- `console.html` Live 側欄改讀同一 `net_pnl_today`，與 Live tab 對齊；Demo 側欄仍使用 Demo balance/session 口徑，Demo metrics grid 共享 canonical backend metrics。
+- 新增靜態 contract：Demo tab 只讀 `/api/v1/strategy/demo/*`，Live tab 只讀 `/api/v1/live/*`，Live 今日 PnL 不得出現 `cumRealisedPnl` fallback。
+
+**Runtime evidence used**: Linux `trade-core` read-only DB query showed LiveDemo `today_db_tz net=+1.578890`, `rolling_24h net=+1.584620`, `rolling_7d net=-0.549938`, `lifetime fees=45.711300` / `lifetime net=-36.093800`。因此 operator 看到的約 `-45.45` 是舊前端把 lifetime/session fee bucket 當今日淨虧損的錯誤推算。
+
+**Verification**: `pytest test_performance_metrics_gui_contract.py test_trading_true_metrics.py` 10 passed；`pytest tests/static/test_replay_subtab_static_assets.py` 50 passed；`py_compile trading_true_metrics.py` PASS。No restart, no rebuild, no runtime mutation。
 
 ### Sprint N+1 D+0 Pre-dispatch Readiness — 2026-05-10
 

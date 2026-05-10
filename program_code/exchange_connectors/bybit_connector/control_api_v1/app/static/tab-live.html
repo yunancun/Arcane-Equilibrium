@@ -1082,6 +1082,65 @@ function _isPhantomViewError(payload) {
   return !!(payload && payload.error === 'live_slot_not_configured');
 }
 
+function _livePerformanceMetrics(payload) {
+  return (payload && payload.performance_metrics)
+    || (payload && payload.db_true_metrics && payload.db_true_metrics.performance_metrics)
+    || [];
+}
+
+function _liveMetricValue(payload, key) {
+  const metric = ocPerformanceMetricByKey(_livePerformanceMetrics(payload), key);
+  const value = metric ? Number(metric.value) : NaN;
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function _formatSignedMoneyValue(value) {
+  return Number.isFinite(value) && value !== 0
+    ? (value >= 0 ? '+' : '') + value.toFixed(4)
+    : '--';
+}
+
+function _applyLiveTodayPnl(metricsData) {
+  const realizedEl = document.getElementById('live-realized-pnl');
+  const realizedSub = document.getElementById('live-realized-sub');
+  const netEl = document.getElementById('live-net-pnl');
+  if (!realizedEl || !netEl) return;
+
+  if (_isPhantomViewError(metricsData)) {
+    const msg = metricsData.error_zh || metricsData.error || '';
+    realizedEl.textContent = 'N/A';
+    realizedEl.title = msg;
+    realizedEl.className = 'live-metric-val neutral';
+    if (realizedSub) realizedSub.textContent = '';
+    netEl.textContent = 'N/A';
+    netEl.title = msg;
+    netEl.className = 'live-metric-val neutral';
+    return;
+  }
+
+  const db = (metricsData && metricsData.db_true_metrics) || {};
+  const today = db.account_metrics_today || (metricsData && metricsData.account_metrics_today) || {};
+  const gross = Number(today.gross_pnl);
+  const fees = Number(today.total_fees);
+  const funding = Number(today.funding_pnl);
+  const fills = Number(today.total_fills);
+  const netFromMetric = _liveMetricValue(metricsData, 'net_pnl_today');
+  const net = Number.isFinite(netFromMetric) ? netFromMetric : Number(today.net_pnl);
+
+  realizedEl.textContent = _formatSignedMoneyValue(gross);
+  realizedEl.className = 'live-metric-val' + (gross > 0 ? ' pos' : gross < 0 ? ' neg' : ' neutral');
+  if (realizedSub) {
+    const parts = [];
+    if (Number.isFinite(fees)) parts.push('Fees ' + fees.toFixed(4));
+    if (Number.isFinite(funding) && funding !== 0) parts.push('Funding ' + funding.toFixed(4));
+    if (Number.isFinite(fills)) parts.push('fills ' + String(Math.round(fills)));
+    realizedSub.textContent = parts.join(' · ');
+  }
+
+  netEl.textContent = _formatSignedMoneyValue(net);
+  netEl.className = 'live-metric-val' + (net > 0 ? ' pos' : net < 0 ? ' neg' : ' neutral');
+}
+
 async function loadDashboardData() {
   // F5/A1: if integrity-fail view is showing, skip data loaders entirely.
   //        refreshPage() already handles this but loadDashboardData() may be
@@ -1090,20 +1149,20 @@ async function loadDashboardData() {
   // 此處再加一層防衛（loadDashboardData 可能被其他路徑呼叫）。
   if (_liveModeState.actual_engine_kind !== 'live') return;
 
-  // Load balance, positions, orders, fills in parallel. Fills are needed for
-  // the symbol→strategy map used by Positions and Orders tables (strategy_name
-  // is not on Bybit's position/order responses — it only lives on engine fills).
-  // The fills section below is still lazy-rendered, but the cache/map is populated
-  // now so the tables above can show strategy attribution.
-  // 並行加載餘額、倉位、掛單、成交。fills 端點提供 symbol→策略 映射（Bybit 持倉/掛單
+  // Load balance, positions, orders, fills, and DB metrics in parallel. Fills
+  // are needed for the symbol→strategy map used by Positions/Orders tables;
+  // DB metrics are the authority for today's realized/net PnL.
+  // 並行加載餘額、倉位、掛單、成交與 DB 指標。fills 端點提供 symbol→策略 映射（Bybit 持倉/掛單
   // 回應不含 strategy_name，僅引擎 fills 帶）。下方 fills 區段仍懶渲染，但快取/映射在此
-  // 就緒，上方表格得以顯示策略歸屬。
-  const [balRes, posRes, ordRes, fillsRes] = await Promise.allSettled([
+  // 就緒，上方表格得以顯示策略歸屬；今日 PnL 則只吃後端 canonical metric。
+  const [balRes, posRes, ordRes, fillsRes, metricsRes] = await Promise.allSettled([
     ocApi('/api/v1/live/balance'),
     ocApi('/api/v1/live/positions'),
     ocApi('/api/v1/live/orders'),
     ocApi('/api/v1/live/fills'),
+    ocApi('/api/v1/live/metrics'),
   ]);
+  const metricsData = metricsRes.status === 'fulfilled' && metricsRes.value && metricsRes.value.data;
   try {
     const fd = fillsRes.status === 'fulfilled' && fillsRes.value && fillsRes.value.data;
     if (_isPhantomViewError(fd)) {
@@ -1113,6 +1172,7 @@ async function loadDashboardData() {
       _liveStratMap = _buildLiveStratMap(fArr);
     }
   } catch (_) { _liveStratMap = {}; }
+  _applyLiveTodayPnl(metricsData);
 
   // Balance — from /api/v1/live/balance (httpx BybitClient → real exchange data)
   // 餘額 — 來自實盤端點（httpx BybitClient → 真實交易所帳戶資料）
@@ -1142,15 +1202,6 @@ async function loadDashboardData() {
         balData.wallet_balance || balData.walletBalance || balData.total_wallet_balance || equity || 0
       );
       const marginUsed = equity > 0 && avail > 0 ? equity - avail : 0;
-      // Net-of-fees identity: cache engine_total_fees on window so the
-      // positions-derived realized PnL below can subtract it for both
-      // displayed "Realized" and "Net PnL". Engine snapshot attaches this
-      // to /api/v1/live/balance payload.
-      // 淨利恆等式：快取 engine_total_fees，讓下方以倉位推算的 realized PnL
-      // 能減掉手續費，同步影響「已實現」與「淨 PnL」顯示。
-      const engineFees = parseFloat(balData.engine_total_fees);
-      window._liveEngineFees = Number.isFinite(engineFees) ? engineFees : 0;
-
       document.getElementById('live-equity').textContent = equity > 0 ? '₮' + equity.toFixed(2) : '--';
       document.getElementById('live-available').textContent = avail > 0 ? '₮' + avail.toFixed(2) : '--';
       document.getElementById('live-wallet-balance').textContent = wallet > 0 ? '₮' + wallet.toFixed(2) : '--';
@@ -1183,13 +1234,6 @@ async function loadDashboardData() {
     } else {
     const arr = (posData && Array.isArray(posData.positions)) ? posData.positions : [];
     document.getElementById('live-position-count').textContent = arr.length;
-    // Also update net PnL if we have realized data from fills
-    // 若有成交記錄的已實現 PnL，更新淨 PnL 顯示
-    const realizedEl = document.getElementById('live-realized-pnl');
-    const netEl = document.getElementById('live-net-pnl');
-    const upnlEl = document.getElementById('live-unrealized-pnl');
-    let realizedPnl = 0;
-    // Try to compute realized from positions cumRealisedPnl sum
     if (arr.length === 0) {
       posBody.innerHTML = '<tr><td colspan="11" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
     } else {
@@ -1213,8 +1257,6 @@ async function loadDashboardData() {
         const mark = p.markPrice || p.mark_price || '--';
         const liq = p.liqPrice || p.liq_price || '--';
         const leverage = p.leverage || p.lev || '--';
-        const cumPnl = parseFloat(p.cumRealisedPnl || p.cum_realised_pnl || 0);
-        realizedPnl += cumPnl;
         const symRaw = p.symbol || '';
         const sym = ocEsc(symRaw);
         // Prefer authoritative owner_strategy injected by backend from Rust paper_state
@@ -1254,25 +1296,6 @@ async function loadDashboardData() {
       // F5-RETURN/Issue-2 — row close-button 進 DOM 後重套 guard。
       //   _applyLiveActionGuards() 中新增的 selector 只在 button 存在時生效。
       _applyLiveActionGuards();
-      // Net-of-fees identity applied to both Realized and Net PnL:
-      //   displayed_realized = cumRealisedPnl_sum - engine_total_fees
-      //   displayed_net      = unrealized + displayed_realized
-      // so displayed realized + unrealized = equity - initial.
-      // 「已實現」與「淨 PnL」同步採淨利口徑：
-      //   displayed_realized = cumRealisedPnl_sum - engine_total_fees
-      //   displayed_net      = unrealized + displayed_realized
-      const fees = window._liveEngineFees || 0;
-      const realizedNet = realizedPnl - fees;
-      if (realizedEl) {
-        realizedEl.textContent = realizedNet !== 0 ? (realizedNet >= 0 ? '+' : '') + realizedNet.toFixed(4) : '--';
-        realizedEl.className = 'live-metric-val' + (realizedNet > 0 ? ' pos' : realizedNet < 0 ? ' neg' : ' neutral');
-      }
-      const upnlVal = parseFloat(upnlEl && upnlEl.textContent !== '--' ? upnlEl.textContent.replace('+', '') : '0') || 0;
-      const netPnl = upnlVal + realizedNet;
-      if (netEl) {
-        netEl.textContent = (netPnl !== 0) ? (netPnl >= 0 ? '+' : '') + netPnl.toFixed(4) : '--';
-        netEl.className = 'live-metric-val' + (netPnl > 0 ? ' pos' : netPnl < 0 ? ' neg' : ' neutral');
-      }
     }
     }  // end of !_isPhantomViewError(posData) branch / 非幽靈視圖分支結束
   } catch (_) {

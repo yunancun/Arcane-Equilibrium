@@ -9,6 +9,7 @@ EXPECTED_KEYS = [
     "total_fills_7d",
     "round_trips_7d",
     "attributed_trades_7d",
+    "net_pnl_today",
     "net_pnl_24h",
     "net_pnl_7d",
     "gross_pnl_7d",
@@ -40,6 +41,13 @@ def _db_metrics(engine_modes: list[str]) -> dict:
             "total_fees": 1.25,
             "funding_pnl": -0.1,
             "net_pnl": 11.15,
+        },
+        "account_metrics_today": {
+            "total_fills": 2,
+            "gross_pnl": 1.8,
+            "total_fees": 0.2,
+            "funding_pnl": 0.1,
+            "net_pnl": 1.7,
         },
         "account_metrics_24h": {
             "total_fills": 5,
@@ -78,7 +86,7 @@ def _db_metrics(engine_modes: list[str]) -> dict:
     }
 
 
-def test_build_performance_metrics_has_canonical_order_tooltips_and_24h_pnl() -> None:
+def test_build_performance_metrics_has_canonical_order_tooltips_and_today_pnl() -> None:
     metrics = build_performance_metrics(_db_metrics(["demo"]), total_ai_cost=0.42)
 
     assert [m["key"] for m in metrics] == EXPECTED_KEYS
@@ -87,6 +95,9 @@ def test_build_performance_metrics_has_canonical_order_tooltips_and_24h_pnl() ->
     assert all("source" in m for m in metrics)
 
     by_key = {m["key"]: m for m in metrics}
+    assert by_key["net_pnl_today"]["value"] == 1.7
+    assert by_key["net_pnl_today"]["unit"] == "money"
+    assert by_key["net_pnl_today"]["polarity"] == "pnl"
     assert by_key["net_pnl_24h"]["value"] == 2.8
     assert by_key["net_pnl_24h"]["unit"] == "money"
     assert by_key["net_pnl_24h"]["polarity"] == "pnl"
@@ -117,7 +128,7 @@ def test_paper_metrics_route_reads_paper_db_only(monkeypatch) -> None:
 
     assert captured == [(["paper"], ["paper"], 7)]
     assert out["data"]["db_true_metrics"]["engine_modes"] == ["paper"]
-    assert out["data"]["performance_metrics"][3]["key"] == "net_pnl_24h"
+    assert out["data"]["performance_metrics"][3]["key"] == "net_pnl_today"
 
 
 @pytest.mark.asyncio
@@ -145,7 +156,7 @@ async def test_demo_metrics_route_reads_demo_db_only(monkeypatch) -> None:
 
     assert captured == [(["demo"], ["demo"], 7)]
     assert out["data"]["db_true_metrics"]["engine_modes"] == ["demo"]
-    assert out["data"]["performance_metrics"][3]["key"] == "net_pnl_24h"
+    assert out["data"]["performance_metrics"][3]["key"] == "net_pnl_today"
 
 
 @pytest.mark.parametrize(
@@ -189,4 +200,4 @@ def test_live_metrics_route_uses_endpoint_specific_db_modes(
 
     assert captured == [(expected_modes, expected_modes, 7)]
     assert out["data"]["db_true_metrics"]["engine_modes"] == expected_modes
-    assert out["data"]["performance_metrics"][3]["key"] == "net_pnl_24h"
+    assert out["data"]["performance_metrics"][3]["key"] == "net_pnl_today"
