@@ -1192,3 +1192,59 @@ fn test_phase_b_unknown_regime_string_treated_as_random() {
         other => panic!("expected Close, got {:?}", other),
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W7-5 — bb_breakout on_fill + import_positions（PerSymbolState<...>::position）
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::intent_processor::OrderIntent;
+use crate::paper_state::PaperState;
+
+fn make_intent_bbb(symbol: &str, is_long: bool) -> OrderIntent {
+    OrderIntent {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        confidence: 0.5,
+        strategy: "bb_breakout".to_string(),
+        order_type: "market".to_string(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+    }
+}
+
+/// W7-5 (bb_breakout)：on_fill 後 PerSymbolState.position 必 sync 為 Some(is_long)。
+#[test]
+fn test_bbb_on_fill_updates_per_symbol_state_position() {
+    let mut s = BbBreakout::new();
+    let intent = make_intent_bbb("BTC", true);
+    let fill = openclaw_core::execution::FillResult {
+        fill_price: 50_000.0,
+        fill_qty: 1.0,
+        fee: 0.5,
+        slippage_bps: 1.0,
+        is_taker: true,
+    };
+    s.on_fill(&intent, &fill);
+    let st = s.symbols.get("BTC").expect("symbol state must exist");
+    assert_eq!(st.position, Some(true), "bb_breakout on_fill (LONG) 必 sync");
+}
+
+/// W7-5 (bb_breakout)：bootstrap import_positions 重建 self.symbols.position + entry_price。
+#[test]
+fn test_bbb_bootstrap_imports_paper_state_positions() {
+    let mut paper = PaperState::new(10_000.0);
+    paper.apply_fill("BTC", false, 1.0, 50_000.0, 0.5, 1_000, "bb_breakout");
+    paper.apply_fill("ETH", true, 1.0, 3_000.0, 0.3, 1_001, "ma_crossover");
+
+    let mut s = BbBreakout::new();
+    s.import_positions(&paper);
+
+    let st = s.symbols.get("BTC").expect("BTC must be imported");
+    assert_eq!(st.position, Some(false), "bb_breakout 必 import 自己的倉位 SHORT");
+    assert_eq!(st.entry_price, Some(50_000.0), "entry_price 必還原");
+    assert!(s.symbols.get("ETH").is_none(), "不可 import ma_crossover 倉位");
+}

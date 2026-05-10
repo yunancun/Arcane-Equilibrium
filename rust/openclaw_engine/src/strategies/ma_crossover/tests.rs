@@ -1004,3 +1004,174 @@ fn test_on_rejection_duplicate_position_burst_no_panic_no_hang() {
         elapsed.as_millis()
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W7-5 — on_fill update self.positions + bootstrap import_positions
+// 對應 PA W7-4 systemic audit §6 + W6 RFC PA-view Q2(a)/(b)
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::paper_state::PaperState;
+
+/// W7-5 #1：on_fill (LONG entry fill confirmed) → self.positions sync = Some(true)。
+/// 對應 step_4_5_dispatch.rs:925 callsite，於 paper_state.apply_fill 之前。
+#[test]
+fn test_on_fill_updates_self_positions_long() {
+    let mut s = MaCrossover::new();
+    let intent = make_test_intent("BTC", true); // LONG
+    let fill = openclaw_core::execution::FillResult {
+        fill_price: 50_000.0,
+        fill_qty: 0.01,
+        fee: 0.5,
+        slippage_bps: 1.0,
+        is_taker: true,
+    };
+    // self.positions 開始為空（cold-start 或 entry path 已被某 race 清空）。
+    assert!(s.positions.get("BTC").is_none());
+    s.on_fill(&intent, &fill);
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(true),
+        "on_fill (LONG) 必 sync self.positions[BTC] = Some(true)"
+    );
+}
+
+/// W7-5 #2：on_fill (SHORT entry fill confirmed) → self.positions sync = Some(false)。
+#[test]
+fn test_on_fill_updates_self_positions_short() {
+    let mut s = MaCrossover::new();
+    let intent = make_test_intent("ETH", false); // SHORT
+    let fill = openclaw_core::execution::FillResult {
+        fill_price: 3_000.0,
+        fill_qty: 0.5,
+        fee: 0.3,
+        slippage_bps: 1.0,
+        is_taker: true,
+    };
+    s.on_fill(&intent, &fill);
+    assert_eq!(
+        s.positions.get("ETH").copied(),
+        Some(false),
+        "on_fill (SHORT) 必 sync self.positions[ETH] = Some(false)"
+    );
+}
+
+/// W7-5 #3：bootstrap import_positions 從 paper_state 重建 self.positions。
+/// 模擬重啟後 paper_state 已載入 ma_crossover 既有倉位、self.positions 為空場景。
+#[test]
+fn test_bootstrap_imports_paper_state_positions_for_ma_crossover() {
+    let mut paper = PaperState::new(10_000.0);
+    // ma_crossover 早先持倉：BTC LONG（重啟前 ma_crossover 開的）。
+    paper.apply_fill("BTC", true, 0.01, 50_000.0, 0.5, 1_000, "ma_crossover");
+    // 加一個其他 strategy 的倉位（grid_trading 開的 SHORT）— 不應被 ma_crossover import。
+    paper.apply_fill("ETH", false, 0.5, 3_000.0, 0.3, 1_001, "grid_trading");
+    // 加一個 bybit_sync owner（交易所 snapshot orphan）— 不應被任何 strategy import。
+    paper.apply_fill("SOL", true, 5.0, 100.0, 0.1, 1_002, "bybit_sync");
+
+    let mut s = MaCrossover::new();
+    assert!(s.positions.get("BTC").is_none(), "import 前必為空");
+
+    s.import_positions(&paper);
+
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(true),
+        "ma_crossover owner 倉位 BTC LONG 必被 import"
+    );
+    assert!(
+        s.positions.get("ETH").is_none(),
+        "其他 strategy (grid_trading) owner 倉位 ETH 不可被 ma_crossover import"
+    );
+    assert!(
+        s.positions.get("SOL").is_none(),
+        "bybit_sync owner 倉位 SOL 不可被任何 strategy import（避免誤領 orphan）"
+    );
+    assert_eq!(s.positions.len(), 1, "ma_crossover 應只 import 1 個倉位");
+}
+
+/// W7-5 #4：bootstrap import_positions 過濾 non-eligible owner（不誤領 orphan）。
+/// paper_state 全是非 ma_crossover owner（bybit_sync / orphan_adopted / 其他 strategy）。
+#[test]
+fn test_bootstrap_filters_non_eligible_symbol_for_ma_crossover() {
+    let mut paper = PaperState::new(10_000.0);
+    paper.apply_fill("BTC", true, 0.01, 50_000.0, 0.5, 1_000, "bb_breakout");
+    paper.apply_fill("ETH", false, 0.5, 3_000.0, 0.3, 1_001, "grid_trading");
+    paper.apply_fill("SOL", true, 5.0, 100.0, 0.1, 1_002, "bybit_sync");
+    paper.apply_fill("AVAX", false, 2.0, 30.0, 0.05, 1_003, "orphan_adopted");
+
+    let mut s = MaCrossover::new();
+    s.import_positions(&paper);
+
+    assert_eq!(
+        s.positions.len(),
+        0,
+        "ma_crossover 不應 import 任何非 ma_crossover owner 的倉位"
+    );
+}
+
+/// W7-5 #5：W7-3 + W7-2 + W7-5 三 wave 一致性 end-to-end test。
+/// 流程：
+///  1. cold-start：paper_state 已有 ma_crossover BTC LONG 倉位（前次 session 殘留）
+///  2. bootstrap import_positions → self.positions[BTC] = Some(true)
+///  3. on_tick W7-2 path：reverse cross + ctx.position_state = Some(LONG) → 走 Some(true) exit
+///  4. fill confirmed → on_fill (假設仍是 LONG fill direction，實際生產 close 走 on_close_confirmed)
+///  5. 確認 self.positions 始終一致 (W7-2 ctx.position_state 查詢 + W7-5 sync)
+#[test]
+fn test_w7_5_consistent_with_w7_3_w7_2_chain() {
+    // ── Step 1: cold-start paper_state has ma_crossover BTC LONG ──
+    let mut paper = PaperState::new(10_000.0);
+    paper.apply_fill("BTC", true, 0.01, 50_000.0, 0.5, 1_000, "ma_crossover");
+
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    assert!(s.positions.get("BTC").is_none(), "step 1: pre-import 為空");
+
+    // ── Step 2: bootstrap import_positions 重建 self.positions ──
+    s.import_positions(&paper);
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(true),
+        "step 2: W7-5 import 後 self.positions[BTC] = LONG"
+    );
+
+    // ── Step 3: on_tick reverse cross；既有 self.positions=Some(true) → 走 Some exit 分支 ──
+    // 注意：W7-2 entry path query (ctx.position_state) 在 None 分支內，本 step
+    // 走的是 Some(true) exit 分支，故 ctx.position_state 設不設無影響（exit path 不查）。
+    let ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000); // fast < slow → reverse for LONG
+    let exit_actions = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    assert_eq!(exit_actions.len(), 1, "step 3: reverse cross 必發 1 close intent");
+    match &exit_actions[0] {
+        StrategyAction::Close { reason, .. } => {
+            assert_eq!(reason, "ma_reverse_cross");
+        }
+        other => panic!("step 3: expected Close, got {:?}", other),
+    }
+    // exit path 已 self.positions.remove(BTC)（strategy_impl.rs:348）。
+    assert!(
+        s.positions.get("BTC").is_none(),
+        "step 3: exit path 走完 self.positions 已 remove"
+    );
+
+    // ── Step 4: 接著新一筆 LONG entry intent fill confirmed → on_fill sync ──
+    // 模擬 W7-2 + W7-5 chain：reverse 後馬上又有 LONG entry（cross-strategy 場景）。
+    let new_intent = make_test_intent("BTC", true);
+    let fill = openclaw_core::execution::FillResult {
+        fill_price: 50_500.0,
+        fill_qty: 0.01,
+        fee: 0.5,
+        slippage_bps: 1.0,
+        is_taker: true,
+    };
+    s.on_fill(&new_intent, &fill);
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(true),
+        "step 4: W7-5 on_fill 後 self.positions[BTC] = LONG（與 fill direction 一致）"
+    );
+
+    // ── Step 5: HashMap O(1) 一致性：5 步操作後 size=1（不洩漏 entry）──
+    assert_eq!(
+        s.positions.len(),
+        1,
+        "step 5: chain 結束 self.positions size=1（O(1) 操作不洩漏）"
+    );
+}

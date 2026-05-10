@@ -383,6 +383,67 @@ impl Strategy for FundingArb {
         self.positions.remove(symbol);
     }
 
+    /// W7-5 part 1：funding_arb 已由 ADR-0018 dormant（`active=false` default），
+    /// W7-4 §2 verdict = RETIRED-LOW；理論上 fill 不會發生（active=false 時 on_tick
+    /// 也不會被 dispatch）。on_fill 此處保險寫 self.positions 為「正確 funding
+    /// position（is_positive_funding 由 fill direction 推導：is_long → negative
+    /// funding，is_short → positive funding，per `mod.rs:461-462` 既有規則）」+
+    /// 一條 warn log 提醒 active=true 才應觸發。
+    fn on_fill(
+        &mut self,
+        intent: &OrderIntent,
+        _fill: &openclaw_core::execution::FillResult,
+    ) {
+        // funding direction 反推：is_long => 負 funding（收 funding），is_short => 正 funding。
+        let is_positive_funding = !intent.is_long;
+        self.positions.insert(
+            intent.symbol.clone(),
+            FundingPosition {
+                is_positive_funding,
+                entry_ms: 0, // entry_ms 由真正 entry path 寫入；on_fill 後置 sync 不覆寫真實時間。
+            },
+        );
+        if !self.active {
+            tracing::warn!(
+                strategy = "funding_arb",
+                symbol = %intent.symbol,
+                is_long = intent.is_long,
+                "on_fill: dormant strategy received fill — possible orphan or pipeline race \
+                 / dormant 策略收到 fill — 可能是 orphan 或 pipeline race"
+            );
+        }
+    }
+
+    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 self.positions。
+    ///
+    /// 過濾條件：`pos.owner_strategy == "funding_arb"`；funding_arb dormant
+    /// （ADR-0018），通常 paper_state 不會有 funding_arb owner 倉位 → import 0。
+    /// 但保留 impl 以對齊 trait pattern + 防 dormant 日後重啟時 cold-start desync。
+    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
+        let mut imported = 0_usize;
+        for pos in paper_state.positions() {
+            if pos.owner_strategy == self.name() {
+                let is_positive_funding = !pos.is_long;
+                self.positions.insert(
+                    pos.symbol.clone(),
+                    FundingPosition {
+                        is_positive_funding,
+                        entry_ms: pos.entry_ts_ms,
+                    },
+                );
+                imported += 1;
+            }
+        }
+        if imported > 0 {
+            tracing::info!(
+                strategy = "funding_arb",
+                imported,
+                "W7-5 import_positions: rebuilt self.positions from paper_state \
+                 / 從 paper_state 重建 self.positions"
+            );
+        }
+    }
+
     /// OC-5: Funding rate capture — entry when edge > 0, exit on rate flip/basis/max hold.
     /// OC-5：資金費率捕獲 — edge > 0 時入場，費率翻轉/基差/超時出場。
     fn on_tick(
@@ -1056,5 +1117,62 @@ mod tests {
         }
         // `active` intentionally omitted from agent-tunable search space.
         assert!(!names.contains("active"), "active should not be a tunable");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // W7-5 — funding_arb on_fill + import_positions（dormant 仍 sync）
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// W7-5 (funding_arb)：on_fill 後 self.positions sync；is_long → is_positive_funding=false。
+    /// dormant 場景發出 warn log（active=false），但仍 sync 倉位狀態。
+    #[test]
+    fn test_funding_arb_on_fill_updates_self_positions() {
+        let mut s = FundingArb::new(); // active=false (dormant default)
+        let intent = OrderIntent {
+            symbol: "BTC".to_string(),
+            is_long: false, // SHORT → positive funding direction
+            qty: 1.0,
+            confidence: 0.5,
+            strategy: "funding_arb".to_string(),
+            order_type: "limit".to_string(),
+            limit_price: Some(50_000.0),
+            confluence_score: None,
+            persistence_elapsed_ms: None,
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(45_000),
+        };
+        let fill = openclaw_core::execution::FillResult {
+            fill_price: 50_000.0,
+            fill_qty: 1.0,
+            fee: 0.5,
+            slippage_bps: 1.0,
+            is_taker: false,
+        };
+        s.on_fill(&intent, &fill);
+        let pos = s.positions.get("BTC").expect("BTC position must exist");
+        assert!(
+            pos.is_positive_funding,
+            "is_long=false → is_positive_funding=true（短永續收正費率）"
+        );
+    }
+
+    /// W7-5 (funding_arb)：bootstrap import_positions 從 paper_state 重建 self.positions。
+    #[test]
+    fn test_funding_arb_bootstrap_imports_paper_state_positions() {
+        use crate::paper_state::PaperState;
+
+        let mut paper = PaperState::new(10_000.0);
+        paper.apply_fill("BTC", true, 1.0, 50_000.0, 0.5, 1_000, "funding_arb");
+        paper.apply_fill("ETH", false, 1.0, 3_000.0, 0.3, 1_001, "ma_crossover");
+
+        let mut s = FundingArb::new();
+        s.import_positions(&paper);
+
+        let pos = s.positions.get("BTC").expect("BTC must be imported");
+        assert!(
+            !pos.is_positive_funding,
+            "is_long=true → is_positive_funding=false"
+        );
+        assert!(s.positions.get("ETH").is_none(), "不可 import ma_crossover 倉位");
     }
 }

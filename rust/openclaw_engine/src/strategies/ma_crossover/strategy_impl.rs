@@ -119,6 +119,61 @@ impl Strategy for MaCrossover {
         self.exit_persistence.clear(symbol);
     }
 
+    /// W7-5 part 1：真實 fill confirmed 後同步 self.positions 為 fill direction。
+    ///
+    /// callsite：`step_4_5_dispatch.rs:925`，於 paper_state.apply_fill 之前。
+    /// 入場路徑（`on_tick` 主流程）已 eager mutate `self.positions.insert(...)`
+    /// 在 intent emit 時（`strategy_impl.rs:301`），on_fill 此處作為 fill-confirm
+    /// safety net：若 fill 真實成交方向與 intent.is_long 一致則重複寫一次（idempotent
+    /// O(1) HashMap 操作）；若上游 race 導致 self.positions 被 W7-2/W7-3 改動但
+    /// fill 仍沿用原 intent 方向，這裡確保 self.positions 與真實成交方向一致。
+    /// Close 路徑不走 on_fill（走 on_close_confirmed），無需 remove 處理。
+    fn on_fill(
+        &mut self,
+        intent: &OrderIntent,
+        _fill: &openclaw_core::execution::FillResult,
+    ) {
+        // Open 路徑 fill confirmed → sync self.positions 為 intent.is_long。
+        // 加倉場景：intent.is_long 與既有 self.positions 一致，重複寫無副作用。
+        // 反向 race（intent LONG fill 卻來自跨策略 SHORT path）：以 fill source
+        // 即 intent.is_long 為準（fill 觸發者 strategy 自身發的 intent）。
+        self.positions
+            .insert(intent.symbol.clone(), intent.is_long);
+        tracing::debug!(
+            target: "ma_crossover",
+            symbol = %intent.symbol,
+            is_long = intent.is_long,
+            "on_fill: synced self.positions to fill direction (W7-5 part 1)"
+        );
+    }
+
+    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 self.positions。
+    ///
+    /// 過濾條件：`pos.owner_strategy == "ma_crossover"`。`bybit_sync` /
+    /// `orphan_adopted` 倉位不被任何策略 import（owner_strategy 不對應任何 strategy
+    /// name）。重啟後 paper_state 已由 `event_consumer/bootstrap.rs:308`
+    /// `paper_state.import_positions(seed_positions)` 從交易所 snapshot 種入；
+    /// 此處進一步把屬於本策略的倉位寫入 self.positions，避免第一個 tick 進
+    /// entry path 時 self.positions 為空、撞 router gate 1.5 duplicate_position
+    /// 形成 cold-start desync hot loop。
+    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
+        let mut imported = 0_usize;
+        for pos in paper_state.positions() {
+            if pos.owner_strategy == self.name() {
+                self.positions.insert(pos.symbol.clone(), pos.is_long);
+                imported += 1;
+            }
+        }
+        if imported > 0 {
+            tracing::info!(
+                strategy = "ma_crossover",
+                imported,
+                "W7-5 import_positions: rebuilt self.positions from paper_state \
+                 / 從 paper_state 重建 self.positions"
+            );
+        }
+    }
+
     fn on_tick(
         &mut self,
         ctx: &TickContext<'_>,

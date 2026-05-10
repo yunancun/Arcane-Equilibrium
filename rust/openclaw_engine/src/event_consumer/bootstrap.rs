@@ -762,6 +762,17 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         pipeline.orchestrator.register(strategy);
     }
 
+    // W7-5 part 2：bootstrap 階段從 paper_state 重建 5 策略內部 self.positions。
+    // 必經順序：line 308 `pipeline.paper_state.import_positions(seed_positions)`
+    // → 上方 `StrategyFactory::create_for_engine` register → 此處
+    // `import_positions_for_all`。任一前置 missing 此 call 仍 idempotent（paper_state
+    // 為空 → 5 策略各自迴圈 0 次 → no-op）。避免重啟後 paper_state 已載入
+    // bybit_sync 倉位、strategy 端 self.positions 為空，第一個 tick 進 entry path
+    // 撞 router gate 1.5 duplicate_position 形成 cold-start desync hot loop。
+    pipeline
+        .orchestrator
+        .import_positions_for_all(&pipeline.paper_state);
+
     // Grant paper authorization (redundant for Paper/Demo since with_kind() auto-grants,
     // but kept for backward compat until 3E-4 cleans up). Harmless double-grant.
     // 授予紙盤授權（Paper/Demo 用 with_kind() 已自動授權，保留向後兼容直到 3E-4 清理）
