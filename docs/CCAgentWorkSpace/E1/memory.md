@@ -6690,3 +6690,34 @@ V086 backfill 不只動 decision_features，還跨 trading.fills (上游清理) 
 ### 教訓 5：idempotency 在 ADD CONSTRAINT 路徑要 DO block
 
 Postgres `ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS` 不存在（only ADD COLUMN / CREATE INDEX 有 IF NOT EXISTS 語法）；ADD CONSTRAINT 必走 DO block + `pg_constraint` exists check (line 240 + 269)。第二次跑時兩 IF NOT EXISTS 會 skip ALTER。
+
+---
+
+## 2026-05-10 Sprint N+1 W7-2 — ma_crossover + bb_reversion entry path query 治本
+
+**任務**：PA #3 §6 Option A + W7-4 §3 同 wave apply。Entry path None 分支起點查 `ctx.position_state`（W7-1 已 wire），如 paper_state 已持倉同 symbol → skip + sync self.positions。
+
+### 教訓 1：unit test "burst loop 驗證" 要避開 strategy exit-path 邏輯
+
+第一輪寫 `test_on_tick_w7_2_burst_no_accumulation_no_intent_emit` 跑 100 tick 同 ctx → tick 1 fail (1 intent)。原因：W7-2 sync 後 self.positions = SHORT，第二 tick 進 `Some(false)` exit 分支，fast > slow 觸發 reverse signal → close intent。**burst test 不適合驗 W7-2 contract**，因 second tick 已脫離 W7-2 scope（進入 strategy 自己的 exit 邏輯）。
+
+修法：burst → single-tick verification（ma_crossover/bb_reversion 都改成 `test_*_w7_2_logs_skip_reason_via_state_sync`）。3 個 invariants：（1）skip = 0 intent，（2）self.positions 同步為 paper_state 真實方向，（3）HashMap size = 1（O(1) insert 不洩漏）。**契約驗證 vs hot loop 行為驗證**是兩回事，前者用 single tick 即可；後者需 mock 整個 tick 序列且要避開策略本身 exit reactions。
+
+### 教訓 2：cargo test parallel filesystem race transient ≠ regression
+
+第一輪 cargo test --lib release 跑出 `persistence::tests::test_three_pipeline_concurrent_writes` 等 7 個 failure。第二輪同 cmd 全 PASS（2648/2648）。`--test-threads=1` 跑 26 個相關 test 也全 PASS。判定：parallel test 寫 disk 順序敏感的 transient race，不是 W7-2 引入的 regression。
+
+教訓：cargo test 偶發 filesystem-related failure（temp file / advisory lock / chmod 0600）在 parallel run 下是常見 baseline noise。Sign-off 前必跑 ≥2 輪確認；單輪 failure 第二輪 PASS 不算 regression。
+
+### 教訓 3：W7-2 + W7-3 共存（Option A 治本 + Option B 1-tick 防衛）不衝突
+
+W7-2 在 entry path 起點 sync self.positions → 下 tick 走 Some(is_long) exit 分支不撞 router gate 1.5 → W7-3 on_rejection 不會被觸發 happy path。但 W7-3 仍是 reason 字串契約 fallback（若 sync race / paper_state 分區同步失敗）。**E2 不可拿掉 W7-3**（W7-4 §7 重點 3）。
+
+### 教訓 4：跨策略同 pattern apply 邊際成本
+
+ma_crossover (~30 LOC code + 4 test) + bb_reversion (~22 LOC code + 3 test)。同模板差異點：
+- ma_crossover 用 `vec![]` return；bb_reversion 用 `intents` (已先 init Vec::new())
+- bb_reversion `positions: PerSymbolState<bool>` vs ma_crossover `HashMap<String, bool>`，但 `.insert(String, S)` API 對齊（per_symbol_state.rs:50 包裝 HashMap）
+- tracing target 各別 ("ma_crossover" / "bb_reversion") 但 message 一致
+
+**跨策略同 fix pattern 推廣準則**：先讀對方 strategy mod.rs 確認 positions field 型別 + insert API 對齊；再對齊 entry None 分支起點插入；test helper 各別 (make_paper_position vs make_paper_position_bbr) 以避免跨 mod re-export 複雜度。

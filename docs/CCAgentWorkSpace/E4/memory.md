@@ -2642,3 +2642,57 @@ Trait contract clean — 0 sibling strategy 受影響。
 5. **PM 統一 commit chain 守則 (task §邊界「不 deploy」解讀)** — E4 自加 SLA test 不獨立 commit + push，留 unstaged 給 PM 決定（PM 可選 (a) 併入 W7-3 主 commit / (b) 單獨 [skip ci] commit / (c) 拒絕加入）。E4 報告獨立寫入 workspace/reports/ 仍 OK（按 E4 啟動序列硬要求）。
 6. **Sibling-session pytest fail name swap 必標 commit hash + scope 區分** — W2 third-pass `0dc6d659` CI workflow swap 出 → `268f9470/da2aba11` ml_training cron audit swap 入；總 fail count 仍 5（pre-existing 4 + sibling 1），但**個別 test 名變動**；E4 baseline 比對必 catch swap，否則誤判為 W7-3 引入。
 7. **Linux runtime engine 仍跑舊 binary** — W7-3 commit `d8697c41` 已 land main，但 Linux engine 須 `restart_all.sh --rebuild --keep-auth` 才會跑新 binary；W7-3 1-tick defense 真實 hot loop fix 需 PM deploy 後 30min observation 才 verify (per PA W7-3 deploy SOP)。E4 acceptance 範圍**僅含 source code land + lib test + SLA test PASS**，不擴 runtime hot loop 觀察期。
+
+## 2026-05-10 (Sprint N+1 D+0 W4 RouterLeaseGuard Drop test pre-write)
+
+### 任務 = W4 IMPL pre-write，per PM 21:30 sign-off + D+1 deploy
+
+PM 預寫 W4 W-AUDIT-3b runtime smoke 的 RouterLeaseGuard Drop unit test ~40 LOC（task spec），讓 D+1 W4 sub-agent 直接 commit + 寫 runtime smoke shell + deploy，不需重新設計階段。**邊界**：不 commit + 不 deploy + 不 ssh。
+
+### 1. 真正 unique gap ≠ task description
+
+Task 描述：「RouterLeaseGuard Drop release on rejection path 沒 assertion → 補 1 條 Rust unit test」。**事實上**：
+- Test 5 `test_router_gate_on_production_drop_cancels_on_atr_zero` (`tests_predictor_router.rs:1248-1286`) 透過完整 `process_with_features` pipeline (ATR=0 觸發 SEC-11) 驗 `live=0` 證明 Drop release Cancelled
+- Test 6 `test_router_gate_exchange_path_lease_id_states` sub-case 3 (line 1339-1380) 透過完整 `process_gates_only_with_features` pipeline 驗 Drop release on rejection (no leak)
+- 所以「Drop release」**已被間接覆蓋**
+
+**真正 unique gap** = isolated struct-level RAII contract test（不通過完整 pipeline）。Pipeline-based test 未來在 cost_gate / SEC-11 / tick_pipeline 改動時可能連帶破壞 → Drop 行為迴歸偵測會失準。Isolated unit test 把 Drop 行為脫離 pipeline 變動風險，是 W4 真正 coverage 補強價值。
+
+### 2. RouterLeaseGuard private struct → 必在同 file 內加 #[cfg(test)] mod tests
+
+`RouterLeaseGuard` 是 `router.rs:22` `struct RouterLeaseGuard<'a>`（無 `pub`，module-private）。`tests_predictor_router.rs::router_gate_lease_tests` 透過 `super::*` 看不到 `RouterLeaseGuard`（在 `router` private module 內）。
+
+**唯一 isolated unit test 寫法** = 在 `router.rs` 末尾加 `#[cfg(test)] mod tests`，透過 `super::RouterLeaseGuard` / `super::acquire_lease_for_gate_1_4` 訪問。E4 必查 struct visibility 才能正確選 test 位置；`tests_predictor_router.rs` 是錯誤位置（會破編譯）。
+
+### 3. Sub-case 設計 = 必 cover Drop 兩態
+
+Sub-case 1 (rejection path)：`RouterLeaseGuard::new(&gov, Some(lease))` 包進 scope，scope 結束 auto Drop → assert `live=0` (Active → Revoked)。
+Sub-case 2 (consume path)：`guard.consume()` 取出 inner lease → guard auto Drop 看到 `self.lease.is_none()` → no-op → assert `live=1` (caller 接管)。
+
+**僅 cover Sub-case 1 不夠**：consume() 接 success path 是 Drop 的另一條 contract path，Drop impl 用 `self.lease.take()` match Some/None 兩態；只測 Some 漏 None 路徑（雖無「真實 Drop release」但漏「success path Drop NOT release」假設）。完整 RAII contract 必雙 sub-case。
+
+### 4. cargo test 結果 = 2640 → 2648 (W4 +1, 隔壁 uncommitted W7-2 +7)
+
+| State | Run | Result |
+|---|---|---|
+| Pristine baseline (`git stash` 後) | - | 2640 / 0 |
+| W4 test 加入後 (含隔壁 W7-2 uncommitted) | Run 1 | 2645 / 3 (persistence flaky) |
+| 同上 | Run 2 | 2648 / 0 |
+| 同上 | Run 3 | 2648 / 0 |
+| W4 isolated 單跑 | - | 1 / 0 (filtered_out=2647) |
+| persistence 隔離跑 | - | 7 / 0 (隔離無 race) |
+
+**flaky 結論**：`persistence::tests::test_audit_writer_append` / `test_dual_state_writer_no_compat` / `test_dual_state_writer_writes_both` 是 pre-existing concurrent tmp-file write race；隔離跑全 PASS；與 W4 test (純 in-memory `GovernanceCore` + Mutex SM) 完全隔離。Run 2/3 全綠證 W4 test 100% deterministic。
+
+### 5. 隔壁 uncommitted W7-2 wave +7 tests 不可動
+
+`git stash pop` 後看到 5 個 modified files (memory.md / project_*.md / bb_reversion/{mod,tests}.rs / ma_crossover/{strategy_impl,tests}.rs)，新加 7 tests。按 multi-session race 守則 (`feedback_git_commit_only_for_metadoc.md`)：**不認得改動禁 revert**。E4 staging 範圍只含 `router.rs`；隔壁工作（W7-2 wave）由各自 session 處理。
+
+### 教訓追加 (W4 round 新增)
+
+1. **Task description ≠ 真實 gap，必 grep 既有 test 確認** — Task 說「沒 assertion」，實際 Test 5/6 已透過 pipeline 間接驗。E4 必先 `grep RouterLeaseGuard tests_predictor_router.rs` 釐清「有 vs 沒 vs 部分覆蓋」三態，再決定是「拒絕重寫 fake coverage」還是「補 unique angle」。本任務最後選後者（isolated struct-level RAII contract test，避免未來 pipeline 改動連帶污染 Drop 迴歸偵測）。
+2. **Module-private struct test 必在同 file 內** — `RouterLeaseGuard` 是 `struct` (無 `pub`)，跨 file `tests_predictor_router.rs` 透過 `super::*` 看不到（module hierarchy 限制）。必在 `router.rs` 末尾加 `#[cfg(test)] mod tests` 才能訪問私有 struct。E4 必先確認目標 struct visibility (`pub` / `pub(crate)` / private) 才能正確選 test 位置。
+3. **Drop test 必 cover 兩態 (Some / None)** — RAII Drop impl 通常用 `self.x.take()` match Some/None；只測 Some 漏 None contract path。本 W4 test sub-case 2 (consume() 後 Drop NOT release) 是 success path RAII contract 必驗點。
+4. **Pristine baseline 必透過 git stash 重跑** — 隔壁 session uncommitted changes 會虛增 test count；E4 baseline 報告必跑 `git stash + cargo test + git stash pop` 取真 pristine 數，否則 W4 net delta 計算錯誤（誤把 W7-2 +7 算進 W4 範圍）。
+5. **persistence flaky 是 pre-existing concurrent tmp-file race** — 並發跑 ~2648 test 時 file_writer 偶撞；隔離跑 (`cargo test persistence::tests`) 全 PASS。E4 跑兩遍策略可 confirm flaky vs real bug；本任務 Run 2/3 同 2648 PASS 證 W4 test 100% deterministic，不需 deflake。
+6. **NOT COMMITTED + NOT DEPLOYED 標記是 W4 sub-agent 接手契約** — E4 pre-write 完成後改動仍 uncommitted，留給 D+1 W4 sub-agent commit + push + ssh deploy。報告獨立寫入 `workspace/reports/` 是 E4 啟動序列硬要求；報告同時是 W4 sub-agent 接手憑證（含 acceptance 對照表 + 修改檔案清單 + cargo test 結果摘要）。

@@ -810,6 +810,160 @@ fn test_on_rejection_non_duplicate_position_runs_full_rollback() {
     );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// W7-2 Option A regression — cross-strategy paper_state pre-entry check
+// W7-2 Option A 回歸 — entry path 起點查 ctx.position_state
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 背景：PA #3 audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
+// §6 Option A 指出治本是「strategy 端 query paper_state」。Sprint N+1
+// W7-1 trait skeleton (`c9fb0b8f`) 已把 `position_state: Option<&PaperPosition>`
+// wire 到 TickContext，並由 step_4_5_dispatch.rs:287-289 per-strategy iteration
+// 注入。本批 tests 驗證 ma_crossover.on_tick 在 entry path 起點查到
+// ctx.position_state 後即 skip + sync self.positions 的契約：
+//
+// - test 1：position_state=Some(SHORT) + ma_crossover signal=LONG → 0 actions
+// - test 2：position_state=None + valid signal → 1 entry intent（baseline regression）
+// - test 3：exit path 不被新 check 影響（已持倉 → 走 Some 分支）
+// - test 4：debug log 結構完整性（pure function check via internal state）
+//
+// W7-3 Option B 仍保留作 reason 字串契約 fallback（W7-4 §7 重點 3）。
+//
+// PaperPosition helper：模擬 paper_state.get_position 的回傳。
+
+use crate::paper_state::PaperPosition;
+
+/// W7-2 helper：構建一個 PaperPosition 模擬 paper_state 真實持倉。
+/// 全欄位用最小可行值，僅 is_long 由參數決定。
+fn make_paper_position(symbol: &str, is_long: bool) -> PaperPosition {
+    PaperPosition {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1810.0,
+        entry_price: 0.015,
+        best_price: 0.015,
+        entry_fee: 0.0,
+        entry_ts_ms: 0,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: "grid_trading".to_string(), // 模擬 grid 已開倉場景
+        entry_notional: 1810.0 * 0.015,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
+    }
+}
+
+/// W7-2 #1：ctx.position_state = Some(SHORT) + ma_crossover entry signal=LONG
+/// → 必 0 actions（skip entry）+ self.positions 同步為 false（SHORT）。
+/// 對應 INXUSDT 11:34 grid 已開 SHORT、ma_crossover 想 LONG 的真實場景。
+#[test]
+fn test_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0; // disable persistence for unit tests
+    let pp = make_paper_position("BTC", false); // grid 已開 SHORT 1810
+    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // ma_crossover signal = LONG (fast > slow)
+    ctx.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    // 1. 必 0 intents（skip entry）。
+    assert!(
+        intents.is_empty(),
+        "ctx.position_state present 必 skip entry，但發了 {} intents",
+        intents.len()
+    );
+    // 2. self.positions 必同步為 paper_state.is_long（false = SHORT），下個 tick 走 exit 分支。
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(false),
+        "skip 後必 sync self.positions 為 paper_state 真實方向（SHORT）"
+    );
+}
+
+/// W7-2 #2：ctx.position_state = None + valid signal → 1 entry intent（baseline regression）。
+/// 確認本檢查不誤殺正常 entry 路徑。
+#[test]
+fn test_on_tick_proceeds_entry_when_paper_state_is_none() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // signal = LONG
+    ctx.position_state = None; // 顯式 None；ctx_with 已 default None，這裡再強調契約。
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert_eq!(intents.len(), 1, "ctx.position_state=None 時 valid signal 必發 entry");
+    match &intents[0] {
+        StrategyAction::Open(intent) => {
+            assert!(intent.is_long, "expected LONG entry");
+        }
+        other => panic!("expected StrategyAction::Open, got {:?}", other),
+    }
+}
+
+/// W7-2 #3：exit path 不被新 check 影響。
+/// 已持有 LONG → reverse cross → 必走 Some(is_long) exit 分支（不過 None entry 分支即無 W7-2 check）。
+/// 即使 ctx.position_state = Some(LONG)，因 self.positions 已是 LONG 直接走 Some(true) → exit。
+#[test]
+fn test_on_tick_exit_path_unchanged_by_w7_2_check() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    // Step 1：先入場 LONG（ctx.position_state=None，走正常 entry path）。
+    let entry = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    assert_eq!(entry.len(), 1, "Step 1 必入場 LONG");
+    assert_eq!(s.positions.get("BTC").copied(), Some(true));
+
+    // Step 2：reverse cross（fast < slow）+ ctx.position_state 即使 Some(LONG)，
+    // 因 self.positions=Some(true) 直接走 Some(true) exit 分支（W7-2 check 在 None 分支內，不觸及）。
+    let pp = make_paper_position("BTC", true);
+    let mut ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000); // fast < slow → reverse
+    ctx_exit.position_state = Some(&pp);
+    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert_eq!(exit.len(), 1, "exit path 必照走，不受 W7-2 check 影響");
+    match &exit[0] {
+        StrategyAction::Close { reason, .. } => {
+            assert_eq!(reason, "ma_reverse_cross", "exit reason 必為 ma_reverse_cross");
+        }
+        other => panic!("expected StrategyAction::Close, got {:?}", other),
+    }
+}
+
+/// W7-2 #4：debug log path + W7-2 sync 後 first tick 即 skip（hot loop 即時終結驗證）。
+/// 對應 INXUSDT 11:34 場景：第一次撞到 cross-strategy desync 即立刻被 W7-2 skip + sync。
+/// 不做 100-tick burst（second tick 會走 Some(is_long) exit 分支進入 KAMA reverse 邏輯，
+/// 屬 exit-path 行為，與 W7-2 sync 契約無關）；改驗單 tick：（1）必 skip，（2）self.positions
+/// 必同步 paper_state 方向，（3）self.positions size 為 1（O(1) HashMap insert 不累積）。
+#[test]
+fn test_on_tick_w7_2_logs_skip_reason_via_state_sync() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position("BTC", false); // grid SHORT
+    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // ma_crossover signal = LONG (fast > slow)
+    ctx.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    // (1) 必 0 intent — W7-2 skip path 觸發。
+    assert!(
+        intents.is_empty(),
+        "first cross-strategy desync tick 必 W7-2 skip，但發了 {} intents",
+        intents.len()
+    );
+    // (2) self.positions 必 sync 為 paper_state 真實方向（SHORT）— W7-2 contract。
+    //     若 sync 失敗（仍 None），下個 tick 又走 entry path → hot loop 仍存在 → bug。
+    assert_eq!(
+        s.positions.get("BTC").copied(),
+        Some(false),
+        "W7-2 sync 後 self.positions 必反映 paper_state.is_long（SHORT）"
+    );
+    // (3) HashMap size = 1（O(1) insert，不洩漏多 entry）。
+    assert_eq!(
+        s.positions.len(),
+        1,
+        "W7-2 sync 必 O(1) insert，positions 應只有 1 entry"
+    );
+}
+
 /// W7-3 Option B SLA：1000 次 on_rejection burst 不 panic / 不 hang / HashMap O(1) 更新。
 /// 模擬 INXUSDT 11:34 hot loop 場景（單 symbol 一分鐘 reject 2319 次的縮量回放）。
 /// 由 E4 W7-3 regression 加入，pure test scope，不修 business logic。
