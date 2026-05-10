@@ -70,6 +70,14 @@ from .checks_derived import (
     check_h_state_gateway_freshness,
     # F7 (2026-04-26) ML hygiene derived sentinel
     check_dust_spiral_noise_in_ef,
+    # MIT W6-1 RFC SHOULD 7 (2026-05-10) — `[65]` chain integrity post
+    # W-AUDIT-4b M3 producer deploy. Era filter
+    # `f.ts > '2026-05-09 09:22 UTC'` 排除 pre-M3 historical artifact
+    # (3570 row orphan, 39%, producer 不存在不可修)。spec ref: MIT W6-1
+    # RFC verdict §6 / Sprint N+0 closure memory「Chain integrity 真相」。
+    # MIT W6-1 RFC SHOULD 7（2026-05-10）— `[65]` W-AUDIT-4b M3 producer
+    # 接通後 chain integrity 哨兵；era filter 排除 pre-M3 歷史 orphan。
+    check_chain_integrity_post_audit_4b_m3,
 )
 from .checks_cost_edge import (
     # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
@@ -248,7 +256,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53][54][55][58][64]             REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W-AUDIT-9 T4 graduated canary stage invariant + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift
+    [46][48][49][50][51][52][53][54][55][58][64][65]         REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W-AUDIT-9 T4 graduated canary stage invariant + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -297,6 +305,7 @@ Execution / cost sentinels added after F7:
   [56] live_pipeline_active               (P0-NEW-ISSUE-1 — live slot configured but LiveDemo not spawned)
   [58] graduated_canary_stage_invariant   (W-AUDIT-9 T4 — AMD-2026-05-09-03 §4.1 5-stage state-machine invariant; SM-04 ≥ L3 escalate hard FAIL → triggers stage 0 rollback per invariant 12)
   [64] unblock_candidates_drift           (W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 2026-05-10 Sprint N+1 — spec §6.2 4 sub-check: stale candidate / yo-yo detection / sign-off completeness / unfrozen rows count; pairs with V090 governance.unblock_candidates + 30d cycle writer)
+  [65] chain_integrity_post_audit_4b_m3   (MIT W6-1 RFC SHOULD 7 2026-05-10 — W-AUDIT-4b M3 producer post-deploy chain integrity sentinel; era filter `f.ts > '2026-05-09 09:22 UTC'` excludes pre-M3 historical orphan; PASS ≥ 95% / WARN 80-95% / FAIL < 80% / WARN_LOW_SAMPLE n<30; per-strategy drill-down annotation)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -317,7 +326,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53][54][55][58][64]
+              [46][48][49][50][51][52][53][54][55][58][64][65]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -340,7 +349,8 @@ def main() -> int:
                [54] OpenClaw proposal relay;
                [55] Agent Decision Spine MAG-082 lineage readiness;
                [58] W-AUDIT-9 T4 graduated canary stage invariant — AMD-2026-05-09-03 §4.1;
-               [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift — spec §6.2 4 sub-check)
+               [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift — spec §6.2 4 sub-check;
+               [65] MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity — era filter post 2026-05-09 09:22 UTC)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
@@ -352,7 +362,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][58][64]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][58][64][65]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -890,6 +900,19 @@ def main() -> int:
             # 動態解封候選漂移 4 哨兵。spec §6.2；V090 缺 PASS-skip。
             s, m = check_64_unblock_candidates_drift(cur)
             results.append(("[64] unblock_candidates_drift", s, m))
+
+            # [65] MIT W6-1 RFC SHOULD 7 (2026-05-10): W-AUDIT-4b M3
+            # producer post-deploy chain integrity sentinel. Era filter
+            # `f.ts > '2026-05-09 09:22 UTC'` excludes pre-M3 historical
+            # orphan (3570/5854 = 39%, producer didn't exist, unfixable).
+            # PASS ≥ 95% / WARN 80-95% / FAIL < 80% / WARN_LOW_SAMPLE n<30.
+            # Per-strategy drill-down annotation; verdict driven by global ratio.
+            # Pure SELECT inside cursor block; defensive rollback at top.
+            # [65] MIT W6-1 RFC SHOULD 7（2026-05-10）：W-AUDIT-4b M3
+            # producer 接通後 chain integrity 哨兵；era filter 排除 pre-M3
+            # 歷史 orphan。PASS ≥ 95% / WARN 80-95% / FAIL < 80%。
+            s, m = check_chain_integrity_post_audit_4b_m3(cur)
+            results.append(("[65] chain_integrity_post_audit_4b_m3", s, m))
     finally:
         conn.close()
 
