@@ -104,11 +104,18 @@ pub(crate) fn spawn_fan_out(
     // Arc<PriceEvent> try_send 給 PanelAggregator 的 mpsc。本 arm Optional，
     // None 時 silent skip（panel 未啟用時行為不變）。
     panel_event_tx: Option<mpsc::Sender<Arc<PriceEvent>>>,
+    // W2-IMPL-1 (2026-05-11): 額外 book arm — fan-out 把每 tick Arc<PriceEvent>
+    // try_send 給 BtcOrderbookIngest 的 mpsc。**Orderbook-only filtering 在 ingest
+    // task 端**：本 fan-out 不過濾 variant / symbol（保持 fan-out 純 fan-out 哲學）。
+    // None 時 silent skip（orderbook ingest 未啟用時行為不變，例：Layer 2 fence
+    // 觸發時 producer 不 spawn，ingest task 也不 spawn）。
+    book_event_tx: Option<mpsc::Sender<Arc<PriceEvent>>>,
 ) {
     let paper_tx = paper_event_tx;
     let demo_tx = demo_event_tx;
     let live_slot = live_event_slot;
     let panel_tx = panel_event_tx;
+    let book_tx = book_event_tx;
     let fan_cancel = cancel;
     tokio::spawn(async move {
         let barrier_timeout = tokio::time::Duration::from_secs(60);
@@ -193,13 +200,43 @@ pub(crate) fn spawn_fan_out(
                             // None = panel 未啟用（極早期 boot 或環境停用），silent skip。
                             // try_send 失敗（ch 滿）= panel run loop 卡住，warn 但不阻塞
                             // paper/demo/live tick 流。
+                            //
+                            // W2-IMPL-1 (2026-05-11): panel + book arm 共用同一 Arc clone，
+                            // 但 book arm 在 panel arm 之後 send（不能 move arc_event 兩次）。
+                            // 為避免 partial drop 競賽，先 clone Arc 再分發到 panel/book。
+                            let panel_arc_for_send = if panel_tx.is_some() || book_tx.is_some() {
+                                Some(arc_event.clone())
+                            } else {
+                                None
+                            };
                             if let Some(ref ptx) = panel_tx {
-                                if ptx.try_send(arc_event).is_err() {
+                                let p_evt = panel_arc_for_send
+                                    .as_ref()
+                                    .map(Arc::clone)
+                                    .unwrap_or_else(|| Arc::clone(&arc_event));
+                                if ptx.try_send(p_evt).is_err() {
                                     tracing::debug!(
                                         "fan-out: panel pipeline lagging, tick dropped / Panel 管線延遲，tick 已丟棄"
                                     );
                                 }
                             }
+                            // W2-IMPL-1 (2026-05-11): book arm — BtcOrderbookIngest
+                            // 消費 Orderbook variant (其他 variant silent drop)，計算
+                            // BTC top-N book imbalance 寫入 slot。None = ingest 未啟用
+                            // （Layer 2 fence 觸發時 producer 不 spawn → ingest 也不
+                            // spawn → book_tx=None），silent skip。
+                            if let Some(ref btx) = book_tx {
+                                let b_evt = panel_arc_for_send
+                                    .as_ref()
+                                    .map(Arc::clone)
+                                    .unwrap_or_else(|| Arc::clone(&arc_event));
+                                if btx.try_send(b_evt).is_err() {
+                                    tracing::debug!(
+                                        "fan-out: btc_orderbook ingest lagging, tick dropped / BTC orderbook ingest 延遲，tick 已丟棄"
+                                    );
+                                }
+                            }
+                            drop(arc_event);
                         }
                         None => break,
                     }

@@ -922,6 +922,16 @@ async fn async_main(
     let (panel_event_tx, panel_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
     let panel_cohort: Vec<String> = panel_aggregator_cohort();
 
+    // W2-IMPL-1 (2026-05-11): book pipeline channel — BtcOrderbookIngest 消費 Orderbook
+    // variant 算 BTC top-N book imbalance。fan-out 永遠把 tick 送本 channel；
+    // ingest task 是否 spawn 由 W2-IMPL-2 Layer 2 fence gate（同 producer）：
+    //   - Layer 2 fence pass → spawn ingest task + producer
+    //   - Layer 2 fence fail → 不 spawn 兩者；channel rx 立即 drop（fan-out send
+    //     會 try_send-fail，silent drop tick；既有 fan-out 行為一致）
+    // mpsc cap=256 對齊 single-symbol Orderbook update rate（~100 Hz × short burst
+    // tolerance ~2.5s = 256 sufficient）；對比 panel 1024 是因 cohort 25-sym 廣度。
+    let (book_event_tx, book_event_rx) = mpsc::channel::<Arc<PriceEvent>>(256);
+
     // Fan-out task extracted to `main_fanout.rs` (G1-03 Wave 1).
     // Consumes upstream event_rx and paper/demo/live senders (moved),
     // awaits ready barriers (60s timeout) then distributes Arc-wrapped
@@ -942,6 +952,9 @@ async fn async_main(
         live_ready_rx,
         // W1 sub-task 3 (E1-γ, 2026-05-11): panel arm sender。
         Some(panel_event_tx),
+        // W2-IMPL-1 (2026-05-11): book arm sender — fan-out 每 tick try_send；
+        // 若 Layer 2 fence skip spawn → book_event_rx drop → try_send fail silent。
+        Some(book_event_tx),
     );
 
     // W1 sub-task 3 (E1-γ, 2026-05-11): 啟動 PanelAggregator run loop。
@@ -974,26 +987,95 @@ async fn async_main(
     // db_pool 必為 ready 狀態（line ~566 已 Arc::new(DbPool::connect)）；
     // pool 不可用 → producer 內 fail-soft skip tick（不 panic，不阻 slot writer）。
     // alt cohort 7-sym hardcoded snapshot（per W2 spec v1.2 §2.2）；BUSDT 排除。
-    let btc_lead_lag_db_pool = Arc::clone(&db_pool);
-    let btc_lead_lag_cancel = cancel.clone();
-    let btc_lead_lag_alt_cohort_vec = btc_lead_lag_alt_cohort();
-    let btc_lead_lag_slot_for_producer = Arc::clone(&btc_lead_lag_panel_slot);
-    let btc_lead_lag_producer =
-        openclaw_engine::panel_aggregator::BtcLeadLagProducer::new(btc_lead_lag_alt_cohort_vec.clone());
-    info!(
-        alt_cohort_size = btc_lead_lag_alt_cohort_vec.len(),
-        tick_secs = 60,
-        "BtcLeadLagProducer spawning (W2 W-AUDIT-8c candidate fast-track lead-lag producer)"
-    );
-    let _btc_lead_lag_handle = tokio::spawn(async move {
-        btc_lead_lag_producer
-            .run_loop(
-                btc_lead_lag_db_pool,
-                btc_lead_lag_slot_for_producer,
-                btc_lead_lag_cancel,
+    //
+    // W2-IMPL-2 (2026-05-11): paper-only fence Layer 2 — Producer env-gate。
+    // 原 spec v1.2 §6.2 Layer 2 是「Python writer paper-only fence」；但 producer
+    // 在 PA D+0 階段已從 Python writer 改為 Rust producer（panel_aggregator/btc_lead_lag.rs），
+    // Python writer 從不存在。Layer 2 改為 **Producer 端 env-gate**：
+    //   (a) OPENCLAW_ENABLE_PAPER=1                → spawn producer（paper 正路徑）
+    //   (b) OPENCLAW_ENABLE_PAPER 未設 + paper-only（!has_demo && !has_live）→ spawn producer
+    //   (c) OPENCLAW_ENABLE_PAPER 未設 + has_demo|has_live = true            → **skip spawn**
+    // 三狀態邏輯：env=1 / (env unset + 純 paper 配置) 都 spawn；只有 env unset
+    // 且 demo/live 已 active 才 skip（避免 panel.btc_lead_lag_panel 累積 demo/live
+    // 期樣本污染下游 ML pipeline 與 5 策略 demo edge baseline）。
+    // 注意：Layer 1（step_4_5_dispatch.rs effective_engine_mode() 主防線）已保證
+    // demo/live engine_mode 不會把 panel 注入 surface；本 Layer 2 是深度防禦，
+    // 避免在 mixed mode（paper + demo 同 host）時 paper-disabled 但 demo 跑的
+    // 場景下 producer 還在寫 PG。
+    let btc_lead_lag_paper_enabled_env = std::env::var("OPENCLAW_ENABLE_PAPER")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+    let btc_lead_lag_producer_should_spawn = if btc_lead_lag_paper_enabled_env {
+        // (a) 顯式 OPENCLAW_ENABLE_PAPER=1 → spawn
+        true
+    } else if !has_demo && !has_live {
+        // (b) env unset + paper-only 配置（既無 demo 亦無 live binding）→ spawn
+        // 此 case 對應 dev/test 工作流（單跑 paper engine 無 demo/live secret slot）
+        true
+    } else {
+        // (c) env unset + demo|live active → skip（fence Layer 2 fired）
+        false
+    };
+    if btc_lead_lag_producer_should_spawn {
+        let btc_lead_lag_db_pool = Arc::clone(&db_pool);
+        let btc_lead_lag_cancel = cancel.clone();
+        let btc_lead_lag_alt_cohort_vec = btc_lead_lag_alt_cohort();
+        let btc_lead_lag_slot_for_producer = Arc::clone(&btc_lead_lag_panel_slot);
+        let btc_lead_lag_producer =
+            openclaw_engine::panel_aggregator::BtcLeadLagProducer::new(btc_lead_lag_alt_cohort_vec.clone());
+        // W2-IMPL-1 (2026-05-11): orderbook 接線完成。
+        // - 建立 BtcOrderbookSlot（producer & ingest task 共享）
+        // - 從 fan-out 接 book_event_rx（line ~922 alloc），spawn ingest task
+        // - 把 slot Arc clone 傳給 producer.run_loop，每 60s tick 讀真實 imbalance
+        // 兩 spawn 都 gate 在 Layer 2 fence 內（producer + ingest 共用同 fence）；
+        // fence skip 路徑（else 分支）下方會 drop book_event_rx，fan-out send fail
+        // silent drop，無 leak / 無 panic。
+        let btc_lead_lag_book_slot =
+            openclaw_engine::panel_aggregator::create_btc_orderbook_slot();
+        let btc_lead_lag_ingest_slot = Arc::clone(&btc_lead_lag_book_slot);
+        let btc_lead_lag_ingest_cancel = cancel.clone();
+        info!(
+            alt_cohort_size = btc_lead_lag_alt_cohort_vec.len(),
+            tick_secs = 60,
+            paper_enabled_env = btc_lead_lag_paper_enabled_env,
+            has_demo,
+            has_live,
+            "BtcLeadLagProducer + BtcOrderbookIngest spawning \
+             (W2 W-AUDIT-8c lead-lag producer + W2-IMPL-1 orderbook接線)"
+        );
+        let _btc_lead_lag_handle = tokio::spawn(async move {
+            btc_lead_lag_producer
+                .run_loop(
+                    btc_lead_lag_db_pool,
+                    btc_lead_lag_slot_for_producer,
+                    btc_lead_lag_book_slot,
+                    btc_lead_lag_cancel,
+                )
+                .await;
+        });
+        // W2-IMPL-1: spawn ingest task；消費 book_event_rx，過濾 BTCUSDT Orderbook
+        // variant，計算 top-N book imbalance 寫入 slot。run loop 端 60s read 即可。
+        let _btc_book_ingest_handle = tokio::spawn(async move {
+            openclaw_engine::panel_aggregator::spawn_btc_orderbook_ingest_task(
+                book_event_rx,
+                btc_lead_lag_ingest_slot,
+                btc_lead_lag_ingest_cancel,
             )
             .await;
-    });
+        });
+    } else {
+        // W2-IMPL-1 (2026-05-11): fence skip 路徑 — 顯式 drop book_event_rx，
+        // fan-out 的 try_send 會立即 fail（silent debug log），no leak。
+        drop(book_event_rx);
+        info!(
+            paper_enabled_env = btc_lead_lag_paper_enabled_env,
+            has_demo,
+            has_live,
+            "BtcLeadLagProducer + BtcOrderbookIngest skipped (Layer 2 fence: \
+             OPENCLAW_ENABLE_PAPER unset + demo|live active) / \
+             BtcLeadLagProducer + 訂單簿 ingest 跳過 spawn（Layer 2 paper-only fence 觸發）"
+        );
+    }
 
     // ------------------------------------------------------------------
     // 3E-ARCH pipeline spawns extracted to `main_pipelines.rs` (G1-03 Wave 1).

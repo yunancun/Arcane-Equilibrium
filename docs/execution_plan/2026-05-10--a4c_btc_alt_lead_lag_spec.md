@@ -1,8 +1,8 @@
-# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.2
+# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.3
 
 **Author**: PA (project architect)
-**Date**: 2026-05-10
-**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 σ verify 已交付 → dual-layer σ + PSR(0) skew/kurt formula 強制 land，MIT + QC 直接收 W2 IMPL）
+**Date**: 2026-05-10（v1.0-v1.2）/ 2026-05-11（v1.3 inline edit）
+**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 σ verify 已交付 → dual-layer σ + PSR(0) skew/kurt formula 強制 land，MIT + QC 直接收 W2 IMPL）；v1.3 W2-IMPL-2 amendment：§6.2 Layer 2 從「Python writer paper-only fence」改為「Producer env-gate fence」（producer 在 PA D+0 階段就改 Rust，Python writer 從不存在），§7.1 + §8.1 0 動
 **Scope**: Sprint N+1 W2 A4-C fast-track；spec v1.2 拍板後直接派 paper IMPL（C-IMPL-1..4），D+5 起 paper engine 累積 7d edge evidence，gate 三檔（+15 promote / +5~+15 extend 14d / <+5 revise）才決定 N+2 demo IMPL 路徑。
 **Reference dispatch**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md` §3.2 W2
 **Reference trait coord**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`
@@ -13,6 +13,15 @@
 ---
 
 ## Change Log
+
+### v1.3 (2026-05-11) — W2-IMPL-2 amendment：Layer 2 fence 從 Python writer 改 Producer env-gate
+
+| # | Section | 改動 essence |
+|---|---|---|
+| 1 | §6.2 Layer 2 | 從「Python writer paper-only fence」改為「BtcLeadLagProducer env-gate fence」。Producer 在 PA D+0 trait skeleton 階段就 IMPL 為 Rust producer（`rust/openclaw_engine/src/panel_aggregator/btc_lead_lag.rs`），Python writer 從不存在；舊 v1.2 §6.2 描述為 spec 與 code 失步殘留。Layer 2 改為 main.rs spawn 前 env-gate 三狀態邏輯：(a) `OPENCLAW_ENABLE_PAPER=1` → spawn producer；(b) env unset + `!has_demo && !has_live`（paper-only 配置）→ spawn；(c) env unset + `has_demo || has_live` → skip spawn（fence fired，避免 PG panel.btc_lead_lag_panel 累積 demo/live 期樣本污染下游 ML pipeline 與 5 策略 demo edge baseline）。 |
+| 2 | §11 E1 派發計劃 | C-IMPL-2 row 註明：`btc_lead_lag_writer.py` 從不存在；producer 是 Rust `panel_aggregator/btc_lead_lag.rs`；本 spec 引用「Python writer」字樣為歷史殘留（v1.0-v1.2），v1.3 amend 後一律以 Rust producer 為準。 |
+
+**v1.3 不動 §7.1 mandatory metric 6 條 + §8.1 三檔 step gate + §13 16 原則合規（amend 為 spec internal cleanup，IMPL phase 不需重 sign-off）**。
 
 ### v1.2 (2026-05-10) — MIT C-3 σ verify CONDITIONAL PASS 落地：dual-layer σ + PSR(0) skew/kurt strict formula
 
@@ -301,9 +310,32 @@ let alpha_surface = AlphaSurface {
 
 **Critical**：default branch 必為 `_ => None`（不是 `_ => Some(...)`）；E2 必 grep verify。
 
-### 6.2 Layer 2：Python writer paper-only fence
+### 6.2 Layer 2：BtcLeadLagProducer env-gate fence（v1.3 amendment 2026-05-11）
 
-`btc_lead_lag_writer.py` 啟動讀 `OPENCLAW_ENABLE_PAPER` env；未設 + 偵測 demo/live engine active → writer 不啟動或只寫 placeholder row。**目的**：避免 PG `panel.btc_lead_lag_panel` 累積 demo/live 期樣本污染下游 ML pipeline。
+**Producer 端 env-gate**（main.rs spawn 前判斷）：
+
+```rust
+// main.rs:977-1004 (W2-IMPL-2, 2026-05-11)
+let paper_enabled = std::env::var("OPENCLAW_ENABLE_PAPER")
+    .map(|v| v.trim() == "1")
+    .unwrap_or(false);
+let should_spawn = if paper_enabled {
+    true                          // (a) 顯式 OPENCLAW_ENABLE_PAPER=1 → spawn
+} else if !has_demo && !has_live {
+    true                          // (b) env unset + paper-only 配置 → spawn
+} else {
+    false                         // (c) env unset + demo|live active → skip
+};
+```
+
+**三狀態**：
+- (a) `OPENCLAW_ENABLE_PAPER=1` → spawn producer（paper 正路徑）
+- (b) `OPENCLAW_ENABLE_PAPER` 未設 + `!has_demo && !has_live`（paper-only 配置；dev/test 工作流無 demo/live secret slot）→ spawn producer
+- (c) `OPENCLAW_ENABLE_PAPER` 未設 + `has_demo || has_live` → **skip spawn**（fence Layer 2 觸發）
+
+**目的**：避免 PG `panel.btc_lead_lag_panel` 累積 demo/live 期樣本污染下游 ML pipeline 與 5 策略 demo edge baseline。Layer 1（step_4_5_dispatch.rs effective_engine_mode() 主防線）已保證 demo/live engine_mode 不會把 panel 注入 surface；本 Layer 2 是**深度防禦**（mixed mode 場景下 paper-disabled 但 demo 跑時 producer 仍不寫 PG）。
+
+**v1.3 amendment 歷史**：v1.0-v1.2 §6.2 描述「Python writer paper-only fence」是 spec 與 code 失步殘留（PA D+0 階段 producer 已 IMPL 為 Rust `panel_aggregator/btc_lead_lag.rs`，Python writer 從不存在）；W2-IMPL-2 amend 為 Rust Producer env-gate 表達，與 main.rs 實際代碼對齊。
 
 ### 6.3 Layer 3：Strategy 端 defensive guard（被 §5.1.2 contract 覆蓋）
 
