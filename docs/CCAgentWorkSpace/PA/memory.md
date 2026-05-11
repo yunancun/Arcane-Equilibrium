@@ -2898,3 +2898,38 @@ Strategy trait (`strategies/mod.rs`) 對 W7 pattern **不強制**：on_rejection
 
 **Reports**:
 - 設計報告：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_v083_ipc_close_fix_design.md`
+- 設計報告：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_rca1_f1_f2_emergency_fix_plan.md`
+
+---
+
+## 2026-05-11 P1-RCA-1 F1+F2 emergency fix dispatch plan（4-bug chain）
+
+**背景**：E1 RCA `ed6b2619` 升級 W-D MAG-083 R-1 從 QA 原判 non-systemic → **SYSTEMIC**。Root cause = 4-bug chain：
+- B1 P0: V083 NOT VALID CHECK × IPC close path empty entry_context_id × sqlx 多 row batch INSERT = 整 chunk reject 持續 retry 直至 engine shutdown buffer drop（3min 26s window trading.fills 0 row）
+- B2 P1: trading_writer.rs:411-414 WARN「rows still INSERT (fail-soft)」誤導，實際整 chunk reject
+- B3 P1: batch_insert.rs:run_chunks 無 bad-row isolation
+- B4 P1: PostOnly partial vs Bybit Filled reconcile gap（loop_exchange.rs:357+）
+
+**PA 派發決策**：
+1. **F1 + F2 必同次 deploy**（4 並行 sub-agent ~4-6h workload）：
+   - E1-F1 改 `commands.rs` 4 callsite（ipc_close_symbol exchange + paper / execute_position_close / ipc_close_all）用 fallback chain `paper_state.get_entry_context_id(symbol).map(...).unwrap_or_else(|| make_context_id(em, symbol, ts_ms))`；correct E1 RCA 文字（line 1108-1112 已用 get_entry_context_id 但 `unwrap_or("")` 退到空串）
+   - E1-F2 改 `batch_insert.rs:run_chunks` 加 `binary_split_isolate` async helper（Box::pin recurse 防 infinite-size future）+ `BatchInsertOutcome.bad_rows` 新欄位
+   - 兩 E1 並行 0 file 重疊
+2. **緊急 mitigation verdict = 不 drop V083 CHECK**（Option B）：
+   - 理由：F1+F2 4-6h workload 短；DROP + reapply 1-2h 反更破 W-AUDIT-4b-M2 設計；F1 fallback chain 已 fail-soft；F1 deploy 後 V083 violation 自動消除
+   - Option A trigger gate：F1+F2 撞硬阻塞 ≥ 24h 才 escalate
+3. **PA verdict synthetic context_id 用 make_context_id 格式**（不是 sentinel "unknown_context_id"）：保持下游 ML JOIN schema 一致；Telemetry-friendly identify
+4. **F3 / F4 N+1 schedule**：F3 single E1 30min（trading_writer.rs:406-414 WARN→ERROR + 文案修正），F4 single E1 1h（OrderUpdate(Filled) 殘量 reconcile + bybit_reconcile_done idempotency flag）
+5. **跨 wave 衝突檢查**：F1+F2 vs W2 IMPL `0e88b4a9` / E2 P1-1 review `a45f0978` / Phase 3 V091 deploy / W6/W7/W3/W4/W5 11 active wave **0 file 重疊**；可立即派發
+
+**MAG-084 status update 建議**：§5 P1-RCA-1 升 BLOCKED；建議開新 **W-E wave**（不 reopen W-D），W-E-T1..T6 6 track 結構。最終 verdict 留 operator。
+
+**架構新教訓 4**：E1 RCA `unwrap_or("")` 退 empty string 比「沒設」更隱蔽 — empty string 是 producer 端「我嘗試了但沒拿到」的 silent signal，不是 silent NULL；trading_writer 把 empty → NULL transform（line 486-490）只是 schema 上拿到 NULL，但 producer 端 TradingMsg::Fill 的 entry_context_id 字段是 String 不是 Option，empty 是「合法值」但語意上是「缺值」。**PA 設計準則**：任何 fallback 路徑必有 deterministic fill（不能 empty string），且必須在 producer 端就解決，不依賴 writer-side transform。
+
+**架構新教訓 5**：F1+F2 必同次 deploy 是 **「fix chain 完整性」原則** — single deploy intermediate state 兩面都有風險：F1 alone 只修一個 close path（7 個 close path 仍可能漏）；F2 alone 不修源頭 → 持續 noise + telemetry pollution。**PA 設計準則**：root cause 是 chain 時，每個 link 都不可單 deploy，必同一 restart_all 生效。
+
+**架構新教訓 6**：binary-split recurse 的 Rust async 限制 — async fn 直接遞迴 → infinite-size future compile error；必用 `Box::pin(async move {...})` 包裝 + `BoxFuture`。Test 必 verify recurse depth bounded by ceil(log2(chunk_rows))；MAX_CHUNK_ROWS = 10_000 → max depth 14，stack safe。
+
+**Reports**:
+- 設計報告：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_rca1_f1_f2_emergency_fix_plan.md`
+- E1 RCA 對齊：`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_rca1_orphan_er_missed_fill.md`
