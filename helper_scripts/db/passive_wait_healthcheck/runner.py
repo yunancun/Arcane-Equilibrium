@@ -70,13 +70,11 @@ from .checks_derived import (
     check_h_state_gateway_freshness,
     # F7 (2026-04-26) ML hygiene derived sentinel
     check_dust_spiral_noise_in_ef,
-    # MIT W6-1 RFC SHOULD 7 (2026-05-10) — `[65]` chain integrity post
-    # W-AUDIT-4b M3 producer deploy. Era filter
-    # `f.ts > '2026-05-09 09:22 UTC'` 排除 pre-M3 historical artifact
-    # (3570 row orphan, 39%, producer 不存在不可修)。spec ref: MIT W6-1
-    # RFC verdict §6 / Sprint N+0 closure memory「Chain integrity 真相」。
+)
+from .checks_derived_ml_hygiene import (
     # MIT W6-1 RFC SHOULD 7（2026-05-10）— `[65]` W-AUDIT-4b M3 producer
-    # 接通後 chain integrity 哨兵；era filter 排除 pre-M3 歷史 orphan。
+    # 接通後 chain integrity 哨兵；era filter `f.ts > '2026-05-09 09:22 UTC'`
+    # 排除 pre-M3 historical artifact (3570 row orphan, 39%, producer 不存在不可修)。
     check_chain_integrity_post_audit_4b_m3,
     # W1 sub-task 3 (E1-γ, 2026-05-11) — `[66]` panel.* freshness sentinel
     # for W-AUDIT-8a Phase B Tier 2 panel collector (PanelAggregator + V085/V087)。
