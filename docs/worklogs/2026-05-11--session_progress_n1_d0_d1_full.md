@@ -347,4 +347,65 @@ Linux:  HEAD 4b267dff (Fast-forward pull 完成)
 
 ---
 
-**End of session worklog（updated post-deploy REBUILD #3）**. Final HEAD `4b267dff`. Engine PID 1630049 running with W1 funding cache fix active + W2+V086+W7 deploy. [66] healthcheck PASS funding=54s + oi_delta=54s. P1 殘留: WS subscription scope < cohort 25（W-AUDIT-8c 範圍）。Operator pending: AMD-W6-1 final approval + CLAUDE.md §七 idempotency wording fix (MIT MUST 4).
+## §13 P1 fix W1 funding panel cohort coverage — full 25/25 (2026-05-11 ~01:15 UTC)
+
+**HEAD `89ffca7b`**。承接 §12 partial cache fix 後 P1 殘留：cohort 25 中只 5-6 sym 有 ticker WS 訂閱。
+
+### Step A: 擴 `pinned_symbols` 至 cohort 25 sym（commit `ff3282a6`）
+
+`settings/risk_control_rules/scanner_config.toml:15-22` `pinned_symbols` 從 `["BTCUSDT","ETHUSDT"]` 擴成 panel_aggregator_cohort 同 25 sym snapshot。`max_symbols=40` 仍夠（25 pinned + 動態 ≤15）。
+
+**Restart no-rebuild** (toml-only): new PID 1643551 @ 01:13 UTC，WS `subscribed=175 topics batches=18`（vs 前 14 topics）。
+
+**首輪 flush evidence**: 24/25 cohort syms 寫入 panel.funding_rates_panel；唯一漏 MATICUSDT。
+
+### Step B: MATICUSDT → POLUSDT (commit `89ffca7b`)
+
+Bybit V5 query 證實：
+- `MATICUSDT`: status=`Closed`, deliveryTime=2024-09-06
+- `POLUSDT`: status=`Trading`, launched 2024-09-05
+
+Polygon Labs 2024-09-04 啟動 MATIC→POL token migration（90% supply 已轉換）。Bybit 2024-09-06 closed MATICUSDT perp，同時 list POLUSDT。
+
+**Fix**:
+- `rust/openclaw_engine/src/main.rs:55` `panel_aggregator_cohort()`：MATICUSDT → POLUSDT
+- `settings/risk_control_rules/scanner_config.toml:18` `pinned_symbols`：同步替換
+
+### REBUILD #4 deploy
+
+```
+build: 15.44s release（增量編譯，僅 main.rs）
+old PID: 1643551 → graceful exit (~500ms)
+new PID: 1647446 (01:15:42 UTC)
+auth: --keep-auth signed live authorization preserved
+3 pipelines: paper/demo/live age 6.1-8.7s ✅
+```
+
+### Runtime evidence (post-rebuild#4, ~80s uptime)
+
+| 項 | 實測 | 結論 |
+|---|---|---|
+| WS boot subscribe | 175 topics in 18 batches (per pinned 25 + 10 channels per sym) | ✅ |
+| `panel.funding_rates_panel` first flush | **25/25 cohort syms, 25 rows** in single 60s window | 🎉 完整覆蓋 |
+| Per-sym pattern | 全 25 sym 各 1 row (BTC/ETH/SOL/XRP/DOGE/ADA/AVAX/LINK/DOT/POL/LTC/BCH/NEAR/UNI/ATOM/ETC/FIL/ICP/TRX/ARB/OP/APT/SUI/TON/INJ) | ✅ POLUSDT 取代 MATICUSDT 確認 |
+
+### 三端 sync
+
+```
+Mac:    HEAD 89ffca7b
+origin: HEAD 89ffca7b
+Linux:  HEAD 89ffca7b (Fast-forward pull 完成)
+```
+
+### Commit chain
+
+```
+4b267dff  P0 fix W1 funding partial cache (Rust mod.rs +185 LOC + 4 unit tests)
+0b47e71f  PM session worklog §12 P0 deploy verification
+ff3282a6  P1 fix scanner pinned_symbols 擴 cohort 25 (toml-only)
+89ffca7b  P1 fix MATICUSDT → POLUSDT (Polygon Labs token migration)
+```
+
+---
+
+**End of session worklog（updated post-deploy REBUILD #4）**. Final HEAD `89ffca7b`. Engine PID 1647446 running with W1 funding panel **25/25 cohort full coverage active** + W2+V086+W7 deploy. [66] healthcheck PASS funding=<60s + oi_delta=<60s. P1 W-AUDIT-8c cohort dynamic 已 close（不再 pending）。Operator pending: AMD-W6-1 final approval + CLAUDE.md §七 idempotency wording fix (MIT MUST 4).
