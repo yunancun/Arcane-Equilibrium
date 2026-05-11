@@ -8432,3 +8432,59 @@ SQL 反事實：移除所有 `strategy_name='grid_trading' AND symbol NOT IN pin
 ### 完整報告路徑
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_c_per_symbol_price.md`
 
+
+
+## Sprint N+1 D+1 P0 Replay Tier A E1-D T6 acceptance test pack IMPL DONE（2026-05-11）
+
+**觸發**：PA `2026-05-11--p0_replay_engine_counterfactual_fix_design.md` Tier A §3.3 T6 + §3.4 E1-D 派發；operator 拍板 ship；E1-A (`ffc57d7f`) + E1-B (`7f6182b2`) + E1-C (`a17ff37a`) 已 land。
+
+**範圍**：T6 acceptance test pack — 新檔 `tests/replay_tier_a_acceptance.rs` 集中 6 個 test 驗 T1+T2+T2.5+T3+T4+T5 五個 land 後的 wire-up 鏈在 IsolatedPipeline 行為層產生可觀測差異；1 新檔；686 LOC。
+
+### 6 個 test
+1. **`test_replay_pinned_tier_excludes_dynamic_add_symbols`**（T1 wire 整合）：scanner_timeline 帶 BTCUSDT pinned + HYPEUSDT dynamic-add + WLDUSDT 未列入 active；WLDUSDT 因 `should_skip_for_scanner_timeline` 被 timeline gate 不入 strategy；對齊 Option 2 SCANNER-PINNED-GATE-1
+2. **`test_replay_cross_strategy_position_blocks_secondary_open`**（T2 + T2.5）：first-tick ma_crossover open BTCUSDT 後 paper_snapshot 內存帶 owner_strategy="ma_crossover" 倉位；second-tick observer first-tick-emit-once 不再 emit，fills.count == 1
+3. **`test_replay_uses_production_strategy_params`**（T4 整合 via factory）：baseline `StrategyParamsConfig::default()` 與 candidate `bb_reversion.min_persistence_ms=120000`（對齊 P2 demo TOML commit 27e86f89）兩條 factory path 都通過 IsolatedPipeline，兩 pipeline status=Completed 證 T4 wire-up 不破 factory
+4. **`test_per_symbol_price_anchor_independence`**（T5 unit）：3 symbol 各預種 price 50000/3000/200 + 全域 fallback 0.2717（污染樣本），`latest_price_for` 對 3 sym 取 per-symbol 真值不退；unmapped sym 退 fallback；全空 → None
+5. **`test_position_state_lifecycle_tracked_in_replay`**（T2 unit）：OpenThenCloseStub first-tick Open + second-tick Close；2 BTC fills + ending_balance 與 starting_balance 差異於 fee 範圍內
+6. **`test_scanner_config_parsed_into_pinned_set`**（T3 unit via scanner_timeline）：`from_scan_results` 注入 cycle pinned/dynamic-add/未列入三類，`is_active_at` 對 4 種 case 正確判定（including case-insensitive + pre-cycle ts_ms<scan_ts → false）
+
+### 驗證
+- `cargo build --release -p openclaw_engine --test replay_tier_a_acceptance --features replay_isolated --no-run` PASS
+- `cargo test --release -p openclaw_engine --test replay_tier_a_acceptance --features replay_isolated` → **6/6 PASS**（0.00s 純 unit + 短 fixture replay）
+- `cargo test --release -p openclaw_engine --lib` baseline 2807 → post-IMPL **2807 passed**（acceptance test 在 --test 不在 --lib count；0 regression）
+- 既有 replay regression 全 PASS：
+  - `replay_runner_e2e` 6/6（含 proof_1/4/5 byte-equal）
+  - `replay_runner_e2e_param_delta` 2/2（R5-T7 xlang proof_7/8）
+  - `replay_forbidden_guard_acceptance` 4/4
+  - `replay_profile_acceptance` 5/5
+  - `replay_mac_policy_acceptance` 4/4
+  - `replay_manifest_signer_xlang_consistency` 8/8
+- forbidden_guard / V3 §6.2 0 violation；§四 5 硬邊界 0 觸碰
+- 跨平台 grep `/home/ncyu` `/Users/[a-z]+` 0 hit
+- 文件大小：tests/replay_tier_a_acceptance.rs **686 LOC** < 800 警告線 < 2000 hard cap
+
+### 關鍵設計決定
+1. **`from_scan_results` 直接注入 cycle 避免重跑 scorer pipeline**：`ReplayScannerTimeline::new(events, config, estimates)` 會跑 score + correlation filter + anti-churn 整鏈，acceptance test 需要的只是 active_symbols 投影；用 `from_scan_results(scan_interval_ms, vec![ScanResult{...}])` 直接 inject 1 cycle 即可驗 is_active_at 行為 — 顯著簡化 fixture 維度
+2. **ContextObserver stub strategy 紀錄 ctx state**：因 Strategy trait `on_tick(&mut self, ...)` 被 ReplayStrategyAdapter consumed-by-into_result，無法跨 boundary 取 self.observations 出來。retreat to indirect 證據（decision_traces + fills count），用 `emitted_once` 語意控制只 first-sighting 出 Open，second-tick 即可斷言 `fills.count == 1` 等價於「second-tick observer 看見 position_state.is_some()，依設定不再 emit」
+3. **test 6 用 scan_ts_ms=1000 而非 0**：原寫 scan_ts_ms=0 + 查 ts_ms=-1 → `latest_cycle_at` 內部 `ts_ms.max(0) as u64=0` + binary_search find 0 → Ok(0) → 返 Some(cycle)，pre-cycle 路徑不觸發。改 scan_ts_ms=1000 + 查 ts_ms=500（< 1000）→ binary_search Err(0) → None → false，pre-cycle 路徑正確驗證
+4. **test 3 用 factory propagation 而非 trait field accessor**：Strategy trait 沒 public field accessor，但 factory create_with_params 是「TOML → StrategyParamsConfig → strategy.field=...」鏈的最後一步；驗 candidate factory 接受 120000 ms 不 panic + pipeline run 完成 status=Completed = T4 manifest.strategy_params echo → Rust deserialise → factory wiring 三段鏈通的 sufficient 證據
+5. **test 5 OpenThenCloseStub 內聯 closure-trait impl**：用 nested struct + Strategy trait impl inline 在 #[test] body 內，避免污染 module top-level（test-only stub）
+
+### 核心教訓
+1. **scanner_timeline.is_active_at 對 ts_ms<0 clamps to 0**：產生 silent 行為不對齊 — i.e. 查 ts_ms=-1 + scan_ts=0 仍返 true。第一輪 assertion 沒考慮這個 clamp 路徑 fail；改用非 0 scan_ts_ms 正確驗 pre-cycle 路徑
+2. **integration test 不算 lib test count**：cargo test --lib 永遠 2807，新 acceptance test 必須跑 --test replay_tier_a_acceptance 才會 invoke。Memory 不要寫成「lib count 從 2807 升到 2813」(錯)，應寫 「lib 2807 不變 + new --test pack 6/6 PASS」
+3. **acceptance test scope ≠ unit test**：1/2/3 號 acceptance 是 integration（IsolatedPipeline + strategy adapter + risk adapter + fixture），4/5/6 號是 unit（ReplayPaperSnapshot helper / lifecycle / timeline API）。一個檔案內混兩種 acceptance 模式在 PA spec §3.3 T6 allowed（spec 寫「`tests/replay_counterfactual_tier_a.rs` 新檔 + 既有 `runner_tests.rs` 加 3 test」可選兩種；我選一個檔集中所有 acceptance 提升可讀性）
+4. **memory 累積大小 1MB+**：E1 memory.md 已 ~1MB，繼續 append 接近 max readable size。後續 sub-agent 啟動可能要 selective Read offset，不能整檔 Read
+
+### 治理對照
+- **CLAUDE.md §一**：玄衡 replay isolated subprocess，0 動 main pipeline
+- **§二 16 原則**：16/16（特別 #8 交易可解釋 — acceptance test 驗 decision_trace + fills 路徑可重建）
+- **§四 5 硬邊界**：0 觸碰
+- **§五 架構**：replay 仍是 isolated subprocess
+- **§七 跨平台**：0 硬編碼路徑
+- **§七 注釋（2026-05-05 中文默認）**：新檔 MODULE_NOTE + 全部 inline 注釋中文
+- **§九 文件大小**：1 新檔 686 LOC < 800 警告線
+- **forbidden_guard / V3 §6.2**：6 acceptance test 全於 IsolatedPipeline 內，0 引 forbidden surface
+
+### 完整報告路徑
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_d_acceptance_pack.md`
