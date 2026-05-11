@@ -485,6 +485,15 @@ pub(super) fn spawn_order_dispatch(
                     reference_ts_ms: req.reference_ts_ms,
                     reference_source: req.reference_source.clone(),
                     cancel_requested_ts_ms: None,
+                    // W-C Caveat 2 修復（2026-05-11）：鏡射 OrderDispatchRequest
+                    // 帶來的 4 個 Spine id，loop_exchange.rs 成交確認後讀此
+                    // 4 欄位呼叫 emit_fill_completion_lineage 補寫真實
+                    // ExecutionReport。req.is_primary=false 的 paper shadow
+                    // 路徑全為 None，下游自然 short-circuit。
+                    spine_order_plan_id: req.spine_order_plan_id.clone(),
+                    spine_decision_id: req.spine_decision_id.clone(),
+                    spine_verdict_id: req.spine_verdict_id.clone(),
+                    spine_stub_report_id: req.spine_stub_report_id.clone(),
                 }));
             }
             let side = if req.is_long {

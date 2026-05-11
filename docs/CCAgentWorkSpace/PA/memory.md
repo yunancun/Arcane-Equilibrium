@@ -1,5 +1,56 @@
 # PA Memory — 工作記憶
 
+## W-C MAG-082 Caveat 1+2 Fix Plan + No-24h Short-Window Verification（2026-05-10）
+
+**觸發**：QA `2026-05-10--w_c_signoff_audit.md` 裁決 CONDITIONAL_PASS；operator Option B（先修再 sign-off）+ 拒絕重等 24h；需設計修復方案 + 並行 E1 task 拆分 + 短窗驗證協議。
+
+**Caveat 1 RCA（PG + Rust empirical verified）**：`agent.decision_state_changes` 0 row 不是 schema 缺失，是 producer 0 caller — `put_state_transition` 在 `store.rs:105` ChannelAgentSpineStore::impl 完整 + `agent_spine_writer.rs:217-260` flush SQL 完整 + V064 schema 完整，但 `grep -rn put_state_transition rust/` 只回 trait/impl/test 4 個位置，**0 producer call**。Sprint 2 Track E 寫 wiring 但忘 emit。
+
+**Caveat 2 RCA**：`runtime_shadow.rs:195+203` `filled_qty: Some(0.0)` + `liquidity_role: "unknown"` 是 by-design stub（status=`shadow_planned`，在 intent dispatch 後 emit）；真實 fill 在 `loop_exchange.rs:213 apply_confirmed_fill` 寫 trading.fills 但**沒 propagate** 回 agent.decision_objects.execution_report.payload。`PendingOrder` 沒 `order_plan_id` 鏡射欄位 → cross-ref join 不上。
+
+**關鍵架構發現**：V064 `chk_agent_decision_state_changes_object_type` 列舉 6 object_type 不含 `decision_lease` — SM-02 lease lifecycle 已在 `learning.lease_transitions`（V054，24h 62,600 row 在跑）獨立寫。Spine state_changes 是 **Spine 自己的 5 object（signal/decision/verdict/plan/report）lifecycle SM**，不要重複層級。
+
+**修復策略（3 task 並行）**：
+- E1-W-C-FIX-1（Caveat 1 wiring, ~80-120 LOC）：在 `emit_entry_lineage` 末尾加 5 條 build SpineStateTransition + 在 `loop_exchange.rs:259 fully_filled` 加 2 條 change SpineStateTransition
+- E1-W-C-FIX-2（Caveat 2 real-fill, ~180-250 LOC）：在 `PendingOrder` 加 3 個 Option id（order_plan_id/decision_id/verdict_id 鏡射）+ 新 `emit_fill_completion_lineage` fn + `loop_exchange.rs` fully_filled 呼叫 → 寫**新一條** ExecutionReport row 帶真值（**Option α additive**，不動 ON CONFLICT DO NOTHING）+ 一條 `executed_by + details.fill_completion=true` edge
+- E1-W-C-FIX-3（[55] healthcheck, ~80-120 LOC）：加 `bad_report_value_quality` + `chains_with_real_fill_report` + `state_changes_24h` 指標；env var `OPENCLAW_AGENT_SPINE_VALUE_QUALITY_CUTOFF_TS` 排除 historical stub
+- FIX-1+FIX-2 同檔（loop_exchange.rs）合 1 個 sub-agent；FIX-3 完全獨立可並行
+
+**Option α vs β vs γ 設計取捨**：α = 寫新一條 filled ExecutionReport row（推薦，0 migration + audit-friendly + W-D compatible）；β = ON CONFLICT DO UPDATE（棄 — 違反 append-only event log + hypertable corner case）；γ = trading.fills writer dual-write spine（棄 — 耦合 hot path + 違反 spine fail-soft）。
+
+**Historical 51h stub rows 處理**：留著 + healthcheck SQL 加 `WHERE created_at > $DEPLOY_TS::timestamptz` cutoff filter（env var `OPENCLAW_AGENT_SPINE_VALUE_QUALITY_CUTOFF_TS`）；不寫 backfill SQL（保 append-only event log 原則）。
+
+**短窗驗證協議（取代 24h，核心）**：
+- 為何短窗夠：24h 是 evidence accumulation **量**需求，現 W-C 已累 51h；caveat 修是 producer **correctness** wiring fix，短窗能證 wiring 正確即可
+- (a) Unit test：8/8 test PASS（5 build transitions / fill_completion emit / paper disable / partial fill no-emit / value_quality cutoff / passes real / fails stub / state_changes count）
+- (b) Post-deploy 30 min sample：state_changes rate ≥ 5/min + bad_report_value_quality=0 + chains_with_real_fill_report ≥ 50% complete_chains（50% baseline 來自 trading.fills 86/174=49.4% 真實 ratio）+ trading.fills↔agent.decision_objects 對抗 SQL missed_n=0
+- (c) 退守 60 min；若無 fill 等到首筆（demo fill rate ~2/h）
+- (d) MAG-083 audit pack 必加「Caveat 1+2 wiring delta verified at deploy+30min」章節
+
+**[55] PASS 判定升級**：
+- BLOCKED_STATE_CHANGES_EMPTY 若 state_changes_24h <= 0
+- BLOCKED_REPORT_VALUE_QUALITY 若 bad_report_value_quality > 0
+- WARN_REAL_FILL_PROPAGATION_PARTIAL 若 chains_with_real_fill_report < complete_chains × 0.5
+- chains_with_real_fill_report ratio target 50%（不是 90%）— 因 unfilled intent = cancel/reject 合法 outcome
+
+**E2 重點審查 4 點**：(1) hot path SLA bench < 50us 延遲增；(2) 0 unsafe/unwrap；(3) stable_id(`shadow_planned`) vs stable_id(`shadow_filled`) 必產生不同 id + 不同 idempotency_key；(4) emit_fill_completion_lineage 必過濾 paper 不 emit
+
+**E4 regression 必跑**：cross-language 1e-4 + 1000 intent/sec SLA bench + 9 new unit test GREEN + 既有 runtime_shadow tests 不破 + 既有 loop_exchange tests 不破
+
+**風險評級**：中。hot path 影響可忽略（5 try_send + 1 emit_fn，mpsc 非阻塞）；LiveDemo 30s 中斷可接受；硬邊界 0 觸碰；16 原則強化（原則 8 交易可解釋更完整）；DOC-08 §12 9 不變量 0 觸碰。
+
+**核心教訓**：
+1. **Spine state_changes 不是 lease SM**：V064 CHECK 列 6 object_type 不含 decision_lease；不要把 SM-02 lease 5-state 重複寫進 Spine（已在 learning.lease_transitions）
+2. **stub row 是 by-design 不是 bug**：emit_entry_lineage 在 intent dispatch 後立刻 emit ExecutionReport 是 lineage chain 結構完整性的設計；修法是 **加新 row** 不改舊 row（append-only event log 哲學）
+3. **PendingOrder 持 SoT id 是 propagation 盲區**：FILL-CONTEXT-LINKAGE-1 已示範鏡射 context_id；spine 對應補 3 個 id 鏡射（order_plan_id/decision_id/verdict_id）是 obvious follow-up；E5 後續 P2 candidate 統一 propagate
+4. **24h vs 短窗本質**：24h 證量；短窗證 wiring correctness。Caveat 修正改後者，不需重等前者
+5. **healthcheck keyspace vs value**：`bad_report_quality` v1 只查 key existence 是 limitation；`bad_report_value_quality` 才是真 evidence guard；所有 healthcheck 應同時設計 key + value 兩層 gate
+6. **WriteAndConfirm 對等性**：PG empirical（producer 0 caller grep verify）+ Rust source line range 是 single most decisive evidence；先 grep 後 PG 驗 timeline 是標準 RCA chain
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/2026-05-10--w_c_caveat_fix_plan.md`
+
+---
+
 ## W2 A4-C spec v1 → v1.1 落 QC 5 conditions + σ MIT prerequisite（2026-05-10）
 
 **觸發**：QC C-2 review CONDITIONAL APPROVE 5 conditions 必修 → PA inline edit spec 跳過 D+1 PA + QC integrate phase，MIT C-3 D+1 直接收。

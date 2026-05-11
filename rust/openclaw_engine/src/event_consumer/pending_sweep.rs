@@ -180,6 +180,11 @@ mod tests {
             reference_ts_ms: None,
             reference_source: None,
             cancel_requested_ts_ms: None,
+            // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
+            spine_order_plan_id: None,
+            spine_decision_id: None,
+            spine_verdict_id: None,
+            spine_stub_report_id: None,
         }
     }
 
@@ -201,6 +206,11 @@ mod tests {
             reference_ts_ms: None,
             reference_source: None,
             cancel_requested_ts_ms: None,
+            // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
+            spine_order_plan_id: None,
+            spine_decision_id: None,
+            spine_verdict_id: None,
+            spine_stub_report_id: None,
         }
     }
 
