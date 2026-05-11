@@ -16,7 +16,21 @@ import os
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Optional
+
+# Python 3.11+ stdlib tomllib；Mac dev 在 py3.10 可裝 tomli 1.x backport
+# （runtime 跑於 Linux py 3.12.3 已驗，tomllib 直接可用）
+try:
+    import tomllib  # type: ignore[unresolved-import]
+    _TOMLLIB_DECODE_ERROR: type = tomllib.TOMLDecodeError
+except ImportError:  # pragma: no cover — Mac py3.10 dev only path
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+        _TOMLLIB_DECODE_ERROR = tomllib.TOMLDecodeError
+    except ImportError:
+        tomllib = None  # type: ignore[assignment]
+        _TOMLLIB_DECODE_ERROR = Exception
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field, validator
@@ -154,6 +168,138 @@ def _canonical_sha256(payload: Any) -> str:
         ensure_ascii=False,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Production TOML loaders — P0 Replay Tier A T3 + T4 (2026-05-11)
+# 生產 TOML 讀取器 — P0 Replay Tier A T3 + T4
+#
+# 目的：讓 replay manifest 直接 echo production TOML 內的 scanner_config /
+#       strategy_params / risk_overrides，使 replay 真實 reflect 生產環境配置
+#       （pinned 25 sym + per-strategy gate + per-engine risk limits），而不是
+#       依賴 Rust replay_default_scanner_config 或 hardcoded fallback。
+#
+# 設計取捨：
+# - 用 tomllib（py 3.11+ stdlib，Linux runtime py 3.12.3 已驗）
+# - 路徑來自 OPENCLAW_BASE_DIR；fallback 用 Path(__file__).resolve().parents[5]
+#   對齊 paper_trading_routes.py:1128 既有 pattern
+# - 每次 build_manifest_jsonb 重讀 TOML（不 cache），確保 manifest 反映當下
+#   production 配置；run 是 ad-hoc 觸發，重讀成本可忽略
+# - load 失敗（檔案不存在/parse 失敗）回 None，不 raise — replay 退化為
+#   舊 Rust replay_default_scanner_config 行為，與 production 不對齊但不阻斷
+#
+# SAFETY / 不變量：
+# - manifest_jsonb 加 top-level "scanner_config" / "strategy_params" /
+#   "risk_overrides" key 不破 V3 §5 sha256(manifest_jsonb)==manifest_hash 不變式
+#   （experiment_registry compute_manifest_canonical_bytes 對整 dict 做 sort_keys
+#   canonical sha256；新 key 直接 land canonical bytes）
+# - manifest_jsonb size cap 256KB（_size_cap validator）— scanner_config <2KB、
+#   strategy_params <5KB、risk_overrides <10KB 全 OK
+# - 新 key 都不以 "_" 開頭 → M-4 _no_reserved_prefix_keys validator 不報拒
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _resolve_settings_root() -> Path:
+    """解析 settings/ 根目錄。Resolve settings/ root directory.
+
+    優先用 OPENCLAW_BASE_DIR env var；fallback 用相對路徑回推 srv/。
+    對齊 paper_trading_routes._PAPER_CONFIG_PATH 既有 pattern。
+    """
+    base = os.environ.get("OPENCLAW_BASE_DIR")
+    if base:
+        return Path(base) / "settings"
+    # fallback: app/<this>.py → parents[5] = srv/
+    return Path(__file__).resolve().parents[5] / "settings"
+
+
+def _load_production_scanner_config() -> Optional[dict[str, Any]]:
+    """讀 settings/risk_control_rules/scanner_config.toml 為 dict。
+
+    回 None 表示 tomllib 不可用 / 檔案不可讀 / parse 失敗
+    （replay 退化為 Rust replay_default_scanner_config）。
+    """
+    if tomllib is None:
+        logger.warning(
+            "replay_full_chain: tomllib unavailable (py < 3.11 + no tomli); "
+            "scanner_config echo skipped",
+        )
+        return None
+    toml_path = _resolve_settings_root() / "risk_control_rules" / "scanner_config.toml"
+    if not toml_path.exists():
+        logger.warning(
+            "replay_full_chain: scanner_config.toml not found at %s; "
+            "replay falls back to Rust replay_default_scanner_config",
+            toml_path,
+        )
+        return None
+    try:
+        with open(toml_path, "rb") as f:
+            return tomllib.load(f)
+    except (OSError, _TOMLLIB_DECODE_ERROR) as exc:
+        logger.warning(
+            "replay_full_chain: failed to load scanner_config.toml %s: %s",
+            toml_path, exc,
+        )
+        return None
+
+
+def _load_production_strategy_params_toml(*, engine: str) -> Optional[dict[str, Any]]:
+    """讀 settings/strategy_params_<engine>.toml 為 dict。
+
+    engine ∈ {"demo", "live", "paper"}；replay 主要走 demo / live。
+    Returns None on failure（manifest 不含此 key，replay 退化為策略默認）。
+    """
+    if tomllib is None:
+        return None
+    engine_norm = (engine or "").strip().lower()
+    if engine_norm not in ("demo", "live", "paper"):
+        return None
+    toml_path = _resolve_settings_root() / f"strategy_params_{engine_norm}.toml"
+    if not toml_path.exists():
+        logger.warning(
+            "replay_full_chain: strategy_params_%s.toml not found at %s",
+            engine_norm, toml_path,
+        )
+        return None
+    try:
+        with open(toml_path, "rb") as f:
+            return tomllib.load(f)
+    except (OSError, _TOMLLIB_DECODE_ERROR) as exc:
+        logger.warning(
+            "replay_full_chain: failed to load strategy_params_%s.toml %s: %s",
+            engine_norm, toml_path, exc,
+        )
+        return None
+
+
+def _load_production_risk_overrides_toml(*, engine: str) -> Optional[dict[str, Any]]:
+    """讀 settings/risk_control_rules/risk_config_<engine>.toml 為 dict。
+
+    engine ∈ {"demo", "live", "paper"}。Returns None on failure。
+    """
+    if tomllib is None:
+        return None
+    engine_norm = (engine or "").strip().lower()
+    if engine_norm not in ("demo", "live", "paper"):
+        return None
+    toml_path = (
+        _resolve_settings_root() / "risk_control_rules" / f"risk_config_{engine_norm}.toml"
+    )
+    if not toml_path.exists():
+        logger.warning(
+            "replay_full_chain: risk_config_%s.toml not found at %s",
+            engine_norm, toml_path,
+        )
+        return None
+    try:
+        with open(toml_path, "rb") as f:
+            return tomllib.load(f)
+    except (OSError, _TOMLLIB_DECODE_ERROR) as exc:
+        logger.warning(
+            "replay_full_chain: failed to load risk_config_%s.toml %s: %s",
+            engine_norm, toml_path, exc,
+        )
+        return None
 
 
 def _iso_from_ms(ms: int) -> str:
@@ -1439,9 +1585,26 @@ def _build_manifest_jsonb(
     microstructure_overlay: dict[str, Any],
     input_fidelity: dict[str, Any],
     execution_calibration: dict[str, Any],
+    strategy_params: Optional[dict[str, Any]] = None,
+    risk_overrides: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    return {
-        "manifest_version": 1,
+    """組 V049 replay.experiments.manifest_jsonb 結構。
+
+    P0 Replay Tier A T3 + T4（2026-05-11）echo 3 個 production 配置：
+    - scanner_config：production scanner_config.toml 整檔（max_symbols / pinned 25 sym
+      / anti_churn / market_judgment / opportunity）→ Rust replay_runner 透過
+      config.rs:7-31 deserialise 為 ScannerConfig 使用，不再退到 default 2-sym
+    - strategy_params：caller 經 IPC 抓的當前 production strategy params blob
+      （per-strategy active / cooldown / threshold / maker entry 等）
+    - risk_overrides：caller 經 IPC 抓的當前 risk_config blob（limits / per_strategy
+      override / agent / cascade / regime）
+
+    這 3 個 key 一起進 manifest_jsonb top-level，V049 register handler 計算
+    `sha256(manifest_jsonb)==manifest_hash` 自動 cover；M-4 _no_reserved_prefix_keys
+    validator 不報拒（無 "_" 前綴）。
+    """
+    manifest: dict[str, Any] = {
+        "manifest_version": 2,
         "mode": "full_chain",
         "execution_scope": "historical_scanner_timeline_to_strategy_risk_exit",
         "source": "s2_bybit_public_full_chain",
@@ -1472,6 +1635,27 @@ def _build_manifest_jsonb(
         "promotion_allowed": False,
         "promotion_block_reason": "current_config_in_sample_sandbox",
     }
+
+    # T3：scanner_config production TOML echo
+    # 讀 settings/risk_control_rules/scanner_config.toml，含 pinned 25 sym
+    # + anti-churn 30 cycle + market_judgment per-strategy gate + opportunity
+    # canary_block_new_entries 等。失敗回 None → replay 退化用 Rust default。
+    scanner_config = _load_production_scanner_config()
+    if scanner_config is not None:
+        manifest["scanner_config"] = scanner_config
+
+    # T4：strategy_params + risk_overrides echo
+    # caller 已從 IPC 抓 production runtime 配置（_fetch_full_chain_strategy_params
+    # / _fetch_current_risk_config），這裡直接 echo 進 manifest top-level。
+    # V049 既有 _replay_strategy_params / _replay_risk_overrides reserved blob
+    # 路徑由 register handler 在 server-side 注入；T4 加 top-level 是顯式版本，
+    # 讓 manifest_jsonb 自我充分（V049 SELECT manifest_jsonb 直接看到生產配置）。
+    if strategy_params is not None:
+        manifest["strategy_params"] = strategy_params
+    if risk_overrides is not None:
+        manifest["risk_overrides"] = risk_overrides
+
+    return manifest
 
 
 async def _register_full_chain_experiment(
@@ -1662,6 +1846,13 @@ async def post_replay_full_chain_run(
             microstructure_overlay=prepared["microstructure_overlay"],
             input_fidelity=prepared["input_fidelity"],
             execution_calibration=prepared["execution_calibration"],
+            # P0 Replay Tier A T4（2026-05-11）：把 prepared 階段 IPC fetched 的
+            # production strategy_params / risk_overrides 直接 echo 進 manifest
+            # top-level，讓 replay engine 能讀生產配置；register handler 仍會走
+            # _replay_strategy_params / _replay_risk_overrides reserved blob path
+            # 作 backward compat 雙保險。
+            strategy_params=prepared["strategy_params"],
+            risk_overrides=prepared["risk_overrides"],
         )
         registered.append(
             await _register_full_chain_experiment(
