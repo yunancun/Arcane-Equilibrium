@@ -1,22 +1,27 @@
-//! Funding Rate Arbitrage Strategy V2 — directional funding rate capture.
-//! 資金費率套利策略 V2 — 方向性資金費率捕獲。
+//! 資金費率套利策略 V2 — 方向性資金費率捕獲（dormant per ADR-0018 / AMD-2026-05-09-02）。
 //!
-//! MODULE_NOTE (EN): Entry: |funding_rate| > threshold + edge > 0 after cost
-//!   amortization + basis < max_basis_pct. Positive funding → short perp (receive
-//!   funding), negative funding → long perp. Exit: rate flipped | rate < exit_threshold
-//!   | basis > max_basis_pct | max hold 72h. Uses TickContext.funding_rate (WS tickers)
-//!   + TickContext.index_price (WS tickers) for basis calculation.
-//! MODULE_NOTE (中): 入場：|資金費率| > 閾值 + 扣除成本後 edge > 0 + 基差 < 上限。
+//! MODULE_NOTE：入場：|資金費率| > 閾值 + 扣除成本後 edge > 0 + 基差 < 上限。
 //!   正資金費率 → 做空永續（收取資金費率），負資金費率 → 做多永續。
-//!   出場：費率反轉 | 費率 < 退出閾值 | 基差 > 上限 | 最大持有 72h。
+//!   出場：費率反轉 | edge ≤ 0 | 基差 > 上限 | 最大持有 72h。
 //!   使用 TickContext.funding_rate（WS tickers）+ TickContext.index_price 計算基差。
+//!
+//! P0 Option A-Lite Wave 1（2026-05-11）：以 paper_state 為 position SSoT。
+//!   - 移除 `self.positions: PerSymbolState<FundingPosition>`
+//!   - on_tick 透過 `ctx.position_state.owner_strategy == self.name()` 判斷自家倉位
+//!   - FundingPosition 兩欄位均可從 PaperPosition 推導（`is_positive_funding = !is_long`，
+//!     `entry_ms = entry_ts_ms`），不需保留任何 strategy-internal position state。
+//!   - 對比 bb_breakout：funding_arb 無 trailing_stop / squeeze_detected_ms / oi_buffer 等
+//!     必保留的 strategy-internal state，可全套 Option A-Lite 模式。
+//!   - dormant active=false 不變；本 wave 為純結構同步，零 runtime 影響。
+//!
+//! 保留：`cooldown` + `prev_last_trade_ms`（用作拒絕回滾 cooldown，與 positions 解耦）。
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use super::common::{compute_post_only_price, MakerPriceInputs, PerSymbolState, TrendCooldown};
+use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
@@ -37,45 +42,28 @@ const FUNDING_ARB_MAKER_TIMEOUT_MS: u64 = 45_000;
 
 pub struct FundingArb {
     active: bool,
-    /// #17: Per-symbol position tracking (was single Option<FundingPosition>).
-    /// E1-P0-2: Migrated from `HashMap<String, FundingPosition>` to
-    /// `PerSymbolState<FundingPosition>` (semantic-preserving wrapper).
-    /// #17：每幣種持倉追蹤（原為單一 Option<FundingPosition>）。
-    /// E1-P0-2：改用 `PerSymbolState<FundingPosition>` 包裝器（語意不變）。
-    positions: PerSymbolState<FundingPosition>,
-    /// E1-P0-2: Per-symbol last-signal time. Migrated from `HashMap<String, u64>`
-    /// to `TrendCooldown`. Semantics preserved: unseen symbol is "cooled",
-    /// `saturating_sub` guards backward clock skew.
-    /// E1-P0-2：逐幣種最後信號時間，改用 `TrendCooldown`，語意完全相同。
+    /// 逐幣種冷卻時間。Option A-Lite 後：cooldown 與 positions 解耦，純粹防 re-entry。
+    /// 未見 symbol 視為 "cooled"，`saturating_sub` 防時鐘回退。
     cooldown: TrendCooldown,
     pub cooldown_ms: u64,
     default_qty: f64,
-    // QC-H10: Parameterized constants (was module-level consts).
     // QC-H10：參數化常量（原為模組級常量）。
     pub(crate) total_cost_bps: f64,
     pub(crate) expected_periods: f64,
     pub(crate) funding_threshold: f64,
     pub(crate) max_basis_pct: f64,
     pub(crate) max_hold_ms: u64,
-    // Entry basis = max_basis_pct * entry_basis_ratio; hysteresis prevents instant exit.
     // 入場基差 = max_basis_pct * entry_basis_ratio；遲滯防止瞬間出場。
     pub(crate) entry_basis_ratio: f64,
-    // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
-    prev_positions: HashMap<String, Option<FundingPosition>>,
+    // RC-04 + Option A-Lite：僅保留 cooldown rollback 所需的前一次 trade_ms 快照。
+    // positions rollback 已移除（paper_state 為 SSoT，rejection 不撤銷 paper_state）。
     prev_last_trade_ms: HashMap<String, u64>,
-}
-
-#[derive(Debug, Clone)]
-struct FundingPosition {
-    is_positive_funding: bool, // true = short perp (funding > 0)
-    entry_ms: u64,
 }
 
 impl FundingArb {
     pub fn new() -> Self {
         Self {
             active: false,
-            positions: PerSymbolState::new(),
             cooldown: TrendCooldown::new(3_600_000),
             cooldown_ms: 3_600_000, // 1h cooldown
             default_qty: 1e9,       // sentinel → IntentProcessor applies risk sizing
@@ -85,7 +73,6 @@ impl FundingArb {
             max_basis_pct: DEFAULT_MAX_BASIS_PCT,
             max_hold_ms: DEFAULT_MAX_HOLD_MS,
             entry_basis_ratio: DEFAULT_ENTRY_BASIS_RATIO,
-            prev_positions: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
         }
     }
@@ -106,49 +93,54 @@ impl FundingArb {
         }
     }
 
-    /// #17: Per-symbol exit check (was single-position).
-    /// #17：每幣種出場檢查（原為單一持倉）。
-    fn should_exit(&self, symbol: &str, funding_rate: f64, basis_pct: f64, now_ms: u64) -> bool {
-        let pos = match self.positions.get(symbol) {
-            Some(p) => p,
-            None => return false,
-        };
+    /// Option A-Lite：以 ctx.position_state 作為持倉 SSoT，由 on_tick 傳入 `is_long` + `entry_ms`。
+    /// 之前簽名 `(symbol, ...)` 帶 self.positions lookup；現改為純函式風格。
+    ///
+    /// Args:
+    /// - `is_long_position`：是否持多。對應原 `is_positive_funding = !is_long`，這裡反向折算回來，
+    ///   `is_positive_funding = !is_long_position`（與 on_tick 入場時 `is_long = !is_positive` 一致）。
+    /// - `entry_ms`：對應 PaperPosition.entry_ts_ms。
+    fn should_exit(
+        &self,
+        is_long_position: bool,
+        funding_rate: f64,
+        basis_pct: f64,
+        now_ms: u64,
+        entry_ms: u64,
+    ) -> bool {
+        // 反推 funding direction：is_long=true ⇔ 進場時 funding<0（is_positive_funding=false）
+        // 與 on_tick 入場規則 `is_long = !is_positive` 一致。
+        let is_positive_funding = !is_long_position;
 
-        // Rate flipped sign / 費率翻轉
-        if pos.is_positive_funding && funding_rate < 0.0 {
+        // 費率翻轉
+        if is_positive_funding && funding_rate < 0.0 {
             return true;
         }
-        if !pos.is_positive_funding && funding_rate > 0.0 {
+        if !is_positive_funding && funding_rate > 0.0 {
             return true;
         }
 
-        // Edge no longer positive — consistent with entry logic.
         // Edge 不再為正 — 與入場邏輯一致。
         if self.compute_edge(funding_rate) <= 0.0 {
             return true;
         }
 
-        // Basis risk — QC-H10: uses struct field / 基差風險
+        // 基差風險
         if basis_pct > self.max_basis_pct {
             return true;
         }
 
-        // Max hold time — QC-H10: uses struct field / 超過最大持有時間
-        if now_ms.saturating_sub(pos.entry_ms) > self.max_hold_ms {
+        // 超過最大持有時間
+        if now_ms.saturating_sub(entry_ms) > self.max_hold_ms {
             return true;
         }
 
         false
     }
 
-    /// RC-04: Snapshot current state before mutation for rejection rollback.
-    /// Preserves the pre-extraction "unseen → 0" sentinel convention by mapping
-    /// `TrendCooldown::last_ms(sym) == None` to 0.
-    /// RC-04：突變前快照當前狀態，用於拒絕回滾。
+    /// Option A-Lite：僅快照 cooldown，positions 由 paper_state SSoT 管理。
     /// 將 TrendCooldown 未記錄的 symbol 映射為 0，保留原先「未見 → 0」的哨兵慣例。
-    fn snapshot_prev(&mut self, sym: &str) {
-        self.prev_positions
-            .insert(sym.to_string(), self.positions.get(sym).cloned());
+    fn snapshot_prev_cooldown(&mut self, sym: &str) {
         self.prev_last_trade_ms
             .insert(sym.to_string(), self.cooldown.last_ms(sym).unwrap_or(0));
     }
@@ -351,24 +343,16 @@ impl Strategy for FundingArb {
         TAGS
     }
 
-    /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
-    /// RC-04：拒絕時回滾該幣種的 position 和 last_trade_ms。
+    /// Option A-Lite：拒絕時僅回滾 cooldown（positions 由 paper_state SSoT 管理，無需回滾）。
+    ///
+    /// 與舊版差異：
+    /// - 移除 `prev_positions` rollback 路徑（self.positions 已不存在）
+    /// - 保留 cooldown rollback：rejection 後 cooldown 應回到入場前的「未見」/前次狀態，
+    ///   讓策略有機會在 cooldown 邊界附近重新嘗試（與 ma_crossover / bb_reversion 風格一致）
     fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
-        if let Some(prev) = self.prev_positions.get(sym) {
-            match prev {
-                Some(p) => {
-                    self.positions.insert(sym.clone(), p.clone());
-                }
-                None => {
-                    self.positions.remove(sym);
-                }
-            }
-        }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                // Sentinel 0 → symbol had no prior record; clear cooldown entry
-                // to restore "unseen" state (matches pre-extraction HashMap.remove).
                 // 哨兵 0 → 原本無紀錄；清掉 cooldown 條目回到「未見」狀態。
                 self.cooldown.clear(sym);
             } else {
@@ -377,75 +361,19 @@ impl Strategy for FundingArb {
         }
     }
 
-    /// Reset internal position on external close (risk-stop/halt).
-    /// 外部平倉時重置內部倉位（風控止損/暫停）。
-    fn on_external_close(&mut self, symbol: &str) {
-        self.positions.remove(symbol);
-    }
+    // on_external_close / on_fill / import_positions：
+    // Option A-Lite 後 funding_arb 不再持有 strategy-local position state，
+    // 全部由 ctx.position_state 從 paper_state 注入，這 3 個 hook 改用 trait default no-op。
+    // 對比 bb_breakout：funding_arb 無 trailing_stop / squeeze_detected_ms / oi_buffer 等
+    // 必保留的 strategy-internal lifecycle 欄位，可乾淨退化為 trait default。
 
-    /// W7-5 part 1：funding_arb 已由 ADR-0018 dormant（`active=false` default），
-    /// W7-4 §2 verdict = RETIRED-LOW；理論上 fill 不會發生（active=false 時 on_tick
-    /// 也不會被 dispatch）。on_fill 此處保險寫 self.positions 為「正確 funding
-    /// position（is_positive_funding 由 fill direction 推導：is_long → negative
-    /// funding，is_short → positive funding，per `mod.rs:461-462` 既有規則）」+
-    /// 一條 warn log 提醒 active=true 才應觸發。
-    fn on_fill(
-        &mut self,
-        intent: &OrderIntent,
-        _fill: &openclaw_core::execution::FillResult,
-    ) {
-        // funding direction 反推：is_long => 負 funding（收 funding），is_short => 正 funding。
-        let is_positive_funding = !intent.is_long;
-        self.positions.insert(
-            intent.symbol.clone(),
-            FundingPosition {
-                is_positive_funding,
-                entry_ms: 0, // entry_ms 由真正 entry path 寫入；on_fill 後置 sync 不覆寫真實時間。
-            },
-        );
-        if !self.active {
-            tracing::warn!(
-                strategy = "funding_arb",
-                symbol = %intent.symbol,
-                is_long = intent.is_long,
-                "on_fill: dormant strategy received fill — possible orphan or pipeline race \
-                 / dormant 策略收到 fill — 可能是 orphan 或 pipeline race"
-            );
-        }
-    }
-
-    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 self.positions。
-    ///
-    /// 過濾條件：`pos.owner_strategy == "funding_arb"`；funding_arb dormant
-    /// （ADR-0018），通常 paper_state 不會有 funding_arb owner 倉位 → import 0。
-    /// 但保留 impl 以對齊 trait pattern + 防 dormant 日後重啟時 cold-start desync。
-    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
-        let mut imported = 0_usize;
-        for pos in paper_state.positions() {
-            if pos.owner_strategy == self.name() {
-                let is_positive_funding = !pos.is_long;
-                self.positions.insert(
-                    pos.symbol.clone(),
-                    FundingPosition {
-                        is_positive_funding,
-                        entry_ms: pos.entry_ts_ms,
-                    },
-                );
-                imported += 1;
-            }
-        }
-        if imported > 0 {
-            tracing::info!(
-                strategy = "funding_arb",
-                imported,
-                "W7-5 import_positions: rebuilt self.positions from paper_state \
-                 / 從 paper_state 重建 self.positions"
-            );
-        }
-    }
-
-    /// OC-5: Funding rate capture — entry when edge > 0, exit on rate flip/basis/max hold.
     /// OC-5：資金費率捕獲 — edge > 0 時入場，費率翻轉/基差/超時出場。
+    ///
+    /// Option A-Lite：以 ctx.position_state 為 SSoT 判斷自家持倉。
+    /// 三分支：
+    ///   1. 自家倉位（owner=self.name()）→ exit logic
+    ///   2. 他家倉位（cross-strategy occupied）→ skip entry，不動 cooldown
+    ///   3. 無倉位（None）→ entry logic
     fn on_tick(
         &mut self,
         ctx: &TickContext<'_>,
@@ -454,7 +382,7 @@ impl Strategy for FundingArb {
         let sym = ctx.symbol;
         let now_ms = ctx.timestamp_ms;
 
-        // Must have funding rate data / 必須有資金費率數據
+        // 必須有資金費率數據
         let funding_rate = match ctx.funding_rate {
             Some(fr) if fr.abs() > f64::EPSILON => fr,
             _ => return vec![],
@@ -462,38 +390,52 @@ impl Strategy for FundingArb {
 
         let basis_pct = Self::compute_basis_pct(ctx.price, ctx.index_price);
 
-        // ── Exit check: if holding a position, evaluate exit conditions ──
-        // ── 出場檢查：持有倉位時評估出場條件 ──
-        if self.positions.contains_key(sym) {
-            if self.should_exit(sym, funding_rate, basis_pct, now_ms) {
-                // RC-04: snapshot before mutation
-                self.snapshot_prev(sym);
+        // ── Position SSoT 判定（Option A-Lite）──
+        // 過濾 owner_strategy == self.name()：只有「自家」倉位才走 exit 分支；
+        // bybit_sync / orphan_adopted / 其他策略 owner 視為 cross-strategy occupied。
+        let owned_position = ctx
+            .position_state
+            .filter(|p| p.owner_strategy == self.name());
 
-                self.positions.remove(sym);
-                self.cooldown.record_signal(sym, now_ms);
+        match owned_position {
+            // ── Exit 分支：自家倉位，評估出場 ──
+            Some(pos) => {
+                if self.should_exit(pos.is_long, funding_rate, basis_pct, now_ms, pos.entry_ts_ms) {
+                    // 出場前快照 cooldown（rejection 時可回滾）
+                    self.snapshot_prev_cooldown(sym);
+                    self.cooldown.record_signal(sym, now_ms);
 
-                return vec![StrategyAction::Close {
-                    symbol: sym.to_string(),
-                    confidence: 0.8,
-                    reason: format!(
-                        "funding_arb_exit: rate={:.6} basis={:.3}%",
-                        funding_rate, basis_pct
-                    ),
-                }];
+                    return vec![StrategyAction::Close {
+                        symbol: sym.to_string(),
+                        confidence: 0.8,
+                        reason: format!(
+                            "funding_arb_exit: rate={:.6} basis={:.3}%",
+                            funding_rate, basis_pct
+                        ),
+                    }];
+                }
+                // 持倉中，無出場信號
+                return vec![];
             }
-            // Holding, no exit signal → do nothing / 持倉中，無出場信號
-            return vec![];
+            // ── Cross-strategy 占用：跳過入場（避免 router gate 1.5 duplicate_position 撞）──
+            None if ctx.position_state.is_some() => {
+                tracing::debug!(
+                    strategy = "funding_arb",
+                    symbol = %sym,
+                    cross_owner = %ctx.position_state.map(|p| p.owner_strategy.as_str()).unwrap_or(""),
+                    "skip entry: cross-strategy holds position"
+                );
+                return vec![];
+            }
+            // ── Entry 分支：無持倉，評估入場 ──
+            None => {}
         }
 
-        // ── Entry evaluation: no position, check if we should open ──
-        // ── 入場評估：無持倉，判斷是否開倉 ──
-
-        // H0 gate / H0 門控
+        // H0 門控
         if !ctx.h0_allowed {
             return vec![];
         }
 
-        // Cooldown / 冷卻期 (E1-P0-2: delegated to TrendCooldown, semantics preserved)
         // 冷卻期（E1-P0-2：委派給 TrendCooldown，語意不變）
         if !self.cooldown.is_cooled_down(sym, now_ms) {
             return vec![];
@@ -547,17 +489,11 @@ impl Strategy for FundingArb {
             None => return vec![],
         };
 
-        // RC-04: snapshot before mutation
-        self.snapshot_prev(sym);
+        // 入場前快照 cooldown（rejection 時可回滾，與 ma_crossover / bb_reversion 一致）
+        self.snapshot_prev_cooldown(sym);
 
-        // Record entry / 記錄入場
-        self.positions.insert(
-            sym.to_string(),
-            FundingPosition {
-                is_positive_funding: is_positive,
-                entry_ms: now_ms,
-            },
-        );
+        // Option A-Lite：不再寫 self.positions；paper_state 由 IntentProcessor 在 fill 後寫入。
+        // 在 fill confirm 前 cooldown 已 record，防 same-tick re-emit。
         self.cooldown.record_signal(sym, now_ms);
 
         vec![StrategyAction::Open(OrderIntent {
@@ -623,20 +559,41 @@ mod tests {
         }
     }
 
-    fn insert_position(
-        s: &mut FundingArb,
-        symbol: &str,
-        is_positive: bool,
+    /// Option A-Lite test helper：以 PaperPosition 建立 ctx 模擬「自家持倉」
+    /// `is_positive_funding=true` ⇔ `is_long=false`（與 on_tick 入場規則一致）。
+    /// 注意：呼叫端若需要其他 ctx 欄位，請直接構造 TickContext，不要依賴此 helper。
+    fn make_position(
+        symbol: String,
+        is_positive_funding: bool,
         entry_ms: u64,
-        _rate: f64,
-    ) {
-        s.positions.insert(
-            symbol.to_string(),
-            FundingPosition {
-                is_positive_funding: is_positive,
-                entry_ms,
-            },
-        );
+        owner: &str,
+    ) -> crate::paper_state::containers::PaperPosition {
+        crate::paper_state::containers::PaperPosition {
+            symbol,
+            is_long: !is_positive_funding,
+            qty: 1.0,
+            entry_price: 50_000.0,
+            best_price: 50_000.0,
+            entry_fee: 0.0,
+            entry_ts_ms: entry_ms,
+            unrealized_pnl: 0.0,
+            entry_context_id: String::new(),
+            owner_strategy: owner.to_string(),
+            entry_notional: 50_000.0,
+            peak_reached_ts_ms: entry_ms as i64,
+            max_favorable_pnl_pct: 0.0,
+        }
+    }
+
+    /// 構造 ctx 並附帶自家持倉（owner=funding_arb），便於測試 exit 分支。
+    fn ctx_with_owned_position<'a>(
+        base: TickContext<'a>,
+        position: &'a crate::paper_state::containers::PaperPosition,
+    ) -> TickContext<'a> {
+        TickContext {
+            position_state: Some(position),
+            ..base
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -692,48 +649,43 @@ mod tests {
     // Exit conditions / 出場條件
     // ═════════════════════════════════════════════════════════════════════
 
+    // Option A-Lite：should_exit 簽名改為 (is_long_position, rate, basis, now, entry_ms)。
+    // is_positive_funding=true ⇔ is_long_position=false（short perp）。
+
     #[test]
     fn test_should_exit_rate_flip() {
-        let mut s = FundingArb::new();
-        insert_position(&mut s, "BTC", true, 0, 0.001);
-        assert!(s.should_exit("BTC", -0.001, 0.1, 1000));
+        let s = FundingArb::new();
+        // 原 insert_position(true, ..) ⇔ is_long_position=false（short perp / positive funding）
+        assert!(s.should_exit(false, -0.001, 0.1, 1000, 0));
     }
 
     #[test]
     fn test_should_exit_max_hold() {
-        let mut s = FundingArb::new();
-        insert_position(&mut s, "BTC", true, 0, 0.001);
-        assert!(s.should_exit("BTC", 0.001, 0.1, DEFAULT_MAX_HOLD_MS + 1));
+        let s = FundingArb::new();
+        assert!(s.should_exit(false, 0.001, 0.1, DEFAULT_MAX_HOLD_MS + 1, 0));
     }
 
     #[test]
     fn test_should_exit_basis_risk() {
-        let mut s = FundingArb::new();
-        insert_position(&mut s, "BTC", true, 0, 0.001);
-        assert!(s.should_exit("BTC", 0.001, 0.6, 1000)); // basis > 0.5%
+        let s = FundingArb::new();
+        // basis > 0.5%
+        assert!(s.should_exit(false, 0.001, 0.6, 1000, 0));
     }
 
     #[test]
     fn test_no_exit_normal() {
-        let mut s = FundingArb::new();
-        insert_position(&mut s, "BTC", true, 0, 0.005);
+        let s = FundingArb::new();
         // Rate 0.005 → edge = 0.005 - 0.001133 = 0.00387 > 0 → no exit
-        assert!(!s.should_exit("BTC", 0.005, 0.1, 1000));
+        assert!(!s.should_exit(false, 0.005, 0.1, 1000, 0));
     }
 
     #[test]
     fn test_multi_symbol_positions() {
-        let mut s = FundingArb::new();
-        insert_position(&mut s, "BTC", true, 0, 0.001);
-        insert_position(&mut s, "ETH", false, 0, 0.002);
-        assert_eq!(s.positions.len(), 2);
-        // BTC rate flip → exit; ETH unaffected
-        assert!(s.should_exit("BTC", -0.001, 0.1, 1000));
-        assert!(!s.should_exit("ETH", -0.003, 0.1, 1000));
-        // External close BTC
-        s.positions.remove("BTC");
-        assert_eq!(s.positions.len(), 1);
-        assert!(!s.should_exit("BTC", -0.001, 0.1, 1000)); // no position → no exit
+        let s = FundingArb::new();
+        // BTC short（positive_funding=true ⇔ is_long=false）rate flip → exit
+        assert!(s.should_exit(false, -0.001, 0.1, 1000, 0));
+        // ETH long（positive_funding=false ⇔ is_long=true）rate -0.003 仍負 → no flip → no exit
+        assert!(!s.should_exit(true, -0.003, 0.1, 1000, 0));
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -778,7 +730,11 @@ mod tests {
             }
             other => panic!("expected Open, got {:?}", other),
         }
-        assert!(s.positions.contains_key("BTCUSDT"), "position recorded");
+        // Option A-Lite：策略不再持有 self.positions；改驗 cooldown 已記錄。
+        assert!(
+            s.cooldown.last_ms("BTCUSDT").is_some(),
+            "cooldown recorded after entry"
+        );
     }
 
     #[test]
@@ -822,9 +778,11 @@ mod tests {
             s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(),
             "funding_arb must not fall back to market entry when BBO is missing"
         );
+        // Option A-Lite：maker skip 不應記錄 cooldown（snapshot_prev_cooldown + record_signal
+        // 在 maker price 計算後才執行，這裡 limit_price=None 提前 return 故 cooldown 未動）。
         assert!(
-            !s.positions.contains_key("BTCUSDT"),
-            "maker skip must not mutate strategy position state"
+            s.cooldown.last_ms("BTCUSDT").is_none(),
+            "maker skip must not record cooldown"
         );
     }
 
@@ -835,8 +793,8 @@ mod tests {
         let ctx1 = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(50000.0));
         assert_eq!(s.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).len(), 1, "first entry");
 
-        // Manually close position but last_trade_ms still set
-        s.positions.remove("BTC");
+        // Option A-Lite：策略本地無 positions，cooldown 在 entry 後已 record。
+        // 第二 tick 無持倉（position_state=None）走 entry 分支但被 cooldown 擋住。
 
         // Within cooldown (1h = 3_600_000ms)
         let ctx2 = make_ctx("BTC", 50000.0, 200_000, Some(0.005), Some(50000.0));
@@ -894,10 +852,12 @@ mod tests {
     fn test_on_tick_exit_on_rate_flip() {
         let mut s = FundingArb::new();
         s.set_active(true);
-        insert_position(&mut s, "BTC", true, 0, 0.005);
+        // Option A-Lite：以 ctx.position_state 模擬自家持倉（positive funding=true ⇔ is_long=false）。
+        let pos = make_position("BTC".to_string(), true, 0, "funding_arb");
+        let base = make_ctx("BTC", 50000.0, 100_000, Some(-0.001), Some(50000.0));
+        let ctx = ctx_with_owned_position(base, &pos);
 
         // Rate flipped negative → exit
-        let ctx = make_ctx("BTC", 50000.0, 100_000, Some(-0.001), Some(50000.0));
         let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -907,50 +867,61 @@ mod tests {
             }
             other => panic!("expected Close, got {:?}", other),
         }
-        assert!(!s.positions.contains_key("BTC"), "position cleared");
+        // Option A-Lite：策略不再清 self.positions；paper_state 由 IntentProcessor close 後 mutate。
+        // 此測試驗證 close 已 emit + cooldown 已 record。
+        assert!(s.cooldown.last_ms("BTC").is_some(), "cooldown stamped on exit");
     }
 
     #[test]
     fn test_on_tick_no_exit_while_profitable() {
         let mut s = FundingArb::new();
         s.set_active(true);
-        insert_position(&mut s, "BTC", true, 0, 0.005);
+        let pos = make_position("BTC".to_string(), true, 0, "funding_arb");
+        let base = make_ctx("BTC", 50000.0, 1000, Some(0.005), Some(50000.0));
+        let ctx = ctx_with_owned_position(base, &pos);
 
         // Rate still positive and strong → no exit
-        let ctx = make_ctx("BTC", 50000.0, 1000, Some(0.005), Some(50000.0));
-        assert!(s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(), "no exit while profitable");
-        assert!(s.positions.contains_key("BTC"), "position still held");
+        assert!(
+            s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(),
+            "no exit while profitable"
+        );
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // RC-04 rejection rollback / 拒絕回滾
+    // RC-04 rejection rollback（cooldown only）/ 拒絕回滾
     // ═════════════════════════════════════════════════════════════════════
 
     #[test]
-    fn test_rejection_rollback_entry() {
+    fn test_rejection_rollback_cooldown_only() {
         let mut s = FundingArb::new();
         s.set_active(true);
 
-        // Entry
+        // 進場前 cooldown 為「未見」
+        assert!(s.cooldown.last_ms("BTC").is_none());
+
+        // Entry — 寫入 cooldown + snapshot prev=0（未見）
         let ctx = make_ctx("BTC", 50000.0, 100_000, Some(0.005), Some(50000.0));
         let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
         assert_eq!(actions.len(), 1);
-        assert!(s.positions.contains_key("BTC"));
+        assert!(
+            s.cooldown.last_ms("BTC").is_some(),
+            "cooldown recorded after entry"
+        );
 
-        // Simulate rejection → rollback
+        // Simulate rejection → rollback cooldown 回到「未見」狀態
         if let StrategyAction::Open(ref intent) = actions[0] {
             s.on_rejection(intent, "max_drawdown");
         }
-        assert!(!s.positions.contains_key("BTC"), "position rolled back");
+        // Option A-Lite：strategy 不再撤 paper_state；只回滾 cooldown。
+        assert!(
+            s.cooldown.last_ms("BTC").is_none(),
+            "cooldown cleared back to unseen state via prev_last_trade_ms=0 sentinel"
+        );
     }
 
-    #[test]
-    fn test_on_external_close() {
-        let mut s = FundingArb::new();
-        insert_position(&mut s, "BTC", true, 0, 0.005);
-        s.on_external_close("BTC");
-        assert!(!s.positions.contains_key("BTC"));
-    }
+    // Option A-Lite：on_external_close 已退化為 trait default no-op
+    // （funding_arb 無 strategy-internal lifecycle 欄位需清理；paper_state 由 PaperState SSoT 管理）。
+    // 對應舊 test_on_external_close 移除，由 trait-level 行為涵蓋。
 
     // ═════════════════════════════════════════════════════════════════════
     // Hysteresis: entry/exit basis gap / 遲滯：進出場基差間距
@@ -969,9 +940,9 @@ mod tests {
         );
 
         // But if already holding, 0.45% does NOT trigger exit
-        insert_position(&mut s, "BTC", true, 0, 0.005);
+        // Option A-Lite：positive_funding=true ⇔ is_long_position=false
         assert!(
-            !s.should_exit("BTC", 0.005, 0.45, 1000),
+            !s.should_exit(false, 0.005, 0.45, 1000, 0),
             "0.45% basis allows hold (< 0.5%)"
         );
     }
@@ -988,19 +959,17 @@ mod tests {
 
     #[test]
     fn test_exit_edge_zero_consistent_with_entry() {
-        let mut s = FundingArb::new();
+        let s = FundingArb::new();
         // amortized_fee = 34/10000/3 ≈ 0.001133
         // rate = 0.0011 → edge = 0.0011 - 0.001133 < 0 → should exit
-        insert_position(&mut s, "BTC", true, 0, 0.005);
-        assert!(s.should_exit("BTC", 0.0011, 0.1, 1000), "edge <= 0 → exit");
+        assert!(s.should_exit(false, 0.0011, 0.1, 1000, 0), "edge <= 0 → exit");
     }
 
     #[test]
     fn test_no_exit_edge_positive() {
-        let mut s = FundingArb::new();
+        let s = FundingArb::new();
         // rate = 0.002 → edge = 0.002 - 0.001133 ≈ 0.000867 > 0 → no exit
-        insert_position(&mut s, "BTC", true, 0, 0.005);
-        assert!(!s.should_exit("BTC", 0.002, 0.1, 1000), "edge > 0 → hold");
+        assert!(!s.should_exit(false, 0.002, 0.1, 1000, 0), "edge > 0 → hold");
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -1120,17 +1089,73 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // W7-5 — funding_arb on_fill + import_positions（dormant 仍 sync）
+    // P0 Option A-Lite Wave 1 — Cross-strategy ownership / Race acceptance
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// W7-5 (funding_arb)：on_fill 後 self.positions sync；is_long → is_positive_funding=false。
-    /// dormant 場景發出 warn log（active=false），但仍 sync 倉位狀態。
+    /// Option A-Lite §3.2 #4：cross-strategy occupied 時跳過 entry，不誤觸 exit。
+    /// 模擬 paper_state 已被 ma_crossover 開倉，funding_arb 在同 tick 看到正費率仍應 skip。
     #[test]
-    fn test_funding_arb_on_fill_updates_self_positions() {
-        let mut s = FundingArb::new(); // active=false (dormant default)
+    fn test_funding_arb_skips_entry_on_cross_strategy_position() {
+        let mut s = FundingArb::new();
+        s.set_active(true);
+        // 他家持倉（owner=ma_crossover），funding_arb 不應當作自家視之
+        let pos = make_position("BTC".to_string(), true, 0, "ma_crossover");
+        let base = make_ctx("BTC", 50_000.0, 100_000, Some(0.005), Some(50_000.0));
+        let ctx = ctx_with_owned_position(base, &pos);
+
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+        assert!(
+            actions.is_empty(),
+            "cross-strategy occupancy must skip entry (no Open, no Close)"
+        );
+        // cooldown 不應因為 cross-strategy 影響而 record
+        assert!(
+            s.cooldown.last_ms("BTC").is_none(),
+            "cross-strategy skip must not record cooldown"
+        );
+    }
+
+    /// Option A-Lite §7 #5：bybit_sync owner 視為 cross-strategy（skip entry, no exit）。
+    /// boot 後 bybit_sync 寫入的倉位 owner="bybit_sync" 不對應任何策略；
+    /// funding_arb 應 backoff 等下個 fill 自然 attribute。
+    #[test]
+    fn test_funding_arb_treats_bybit_sync_owner_as_cross_strategy() {
+        let mut s = FundingArb::new();
+        s.set_active(true);
+        let pos = make_position("BTC".to_string(), true, 0, "bybit_sync");
+        let base = make_ctx("BTC", 50_000.0, 100_000, Some(0.005), Some(50_000.0));
+        let ctx = ctx_with_owned_position(base, &pos);
+
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+        assert!(actions.is_empty(), "bybit_sync occupancy must skip entry");
+    }
+
+    /// Option A-Lite：on_external_close 預設 trait no-op。funding_arb 移除 override 後
+    /// 呼叫此 hook 應不 panic，且 cooldown 與其他內部狀態保持不變。
+    #[test]
+    fn test_funding_arb_on_external_close_is_noop() {
+        let mut s = FundingArb::new();
+        // 預先記錄 cooldown，確認 hook 不會誤動
+        s.cooldown.record_signal("BTC", 100_000);
+        let before = s.cooldown.last_ms("BTC");
+
+        s.on_external_close("BTC");
+
+        assert_eq!(
+            s.cooldown.last_ms("BTC"),
+            before,
+            "on_external_close trait default no-op 不應動 cooldown / 其他內部狀態"
+        );
+    }
+
+    /// Option A-Lite：on_fill 預設 trait no-op。funding_arb 移除 override 後
+    /// 呼叫此 hook 應不 panic，且不寫入任何策略本地 position state（已不存在）。
+    #[test]
+    fn test_funding_arb_on_fill_is_noop_no_local_state() {
+        let mut s = FundingArb::new();
         let intent = OrderIntent {
             symbol: "BTC".to_string(),
-            is_long: false, // SHORT → positive funding direction
+            is_long: false,
             qty: 1.0,
             confidence: 0.5,
             strategy: "funding_arb".to_string(),
@@ -1148,31 +1173,23 @@ mod tests {
             slippage_bps: 1.0,
             is_taker: false,
         };
+
+        // trait default no-op：不 panic、不寫任何 local state（self.positions 已不存在）。
         s.on_fill(&intent, &fill);
-        let pos = s.positions.get("BTC").expect("BTC position must exist");
-        assert!(
-            pos.is_positive_funding,
-            "is_long=false → is_positive_funding=true（短永續收正費率）"
-        );
     }
 
-    /// W7-5 (funding_arb)：bootstrap import_positions 從 paper_state 重建 self.positions。
+    /// Option A-Lite：import_positions 預設 trait no-op。funding_arb 不再持有
+    /// strategy-local positions；bootstrap 後策略直接從 ctx.position_state 讀取
+    /// paper_state SSoT，不需自行重建。
     #[test]
-    fn test_funding_arb_bootstrap_imports_paper_state_positions() {
+    fn test_funding_arb_import_positions_is_noop() {
         use crate::paper_state::PaperState;
 
         let mut paper = PaperState::new(10_000.0);
-        paper.apply_fill("BTC", true, 1.0, 50_000.0, 0.5, 1_000, "funding_arb");
-        paper.apply_fill("ETH", false, 1.0, 3_000.0, 0.3, 1_001, "ma_crossover");
+        paper.apply_fill("BTC", false, 1.0, 50_000.0, 0.5, 1_000, "funding_arb");
 
         let mut s = FundingArb::new();
+        // trait default no-op：不 panic、無策略本地 state 需重建。
         s.import_positions(&paper);
-
-        let pos = s.positions.get("BTC").expect("BTC must be imported");
-        assert!(
-            !pos.is_positive_funding,
-            "is_long=true → is_positive_funding=false"
-        );
-        assert!(s.positions.get("ETH").is_none(), "不可 import ma_crossover 倉位");
     }
 }
