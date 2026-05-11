@@ -8488,3 +8488,142 @@ SQL 反事實：移除所有 `strategy_name='grid_trading' AND symbol NOT IN pin
 
 ### 完整報告路徑
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_d_acceptance_pack.md`
+
+
+
+## Sprint N+1 D+1 P0 Replay Tier A 27h validation run DONE — ⚠️ PARTIAL（2026-05-11）
+
+**觸發**：E1-A/B/C/D Tier A IMPL chain 全 land + E2 APPROVE + E4 PASS 後，跑真實 27h counterfactual replay 驗 Phase 0 + A-Lite + Option 2 是否扭轉虧損
+
+**Verdict**：⚠️ **PARTIAL — Tier A wire-up 部分工作 + alpha-deficient 結構性問題殘留**
+
+### 執行摘要
+- Time window：`2026-05-10T09:00:00Z` → `2026-05-11T12:00:00Z` (27h UTC)
+- 5 strategy × 25 sym × 40525 events × 1m timeframe
+- 5 subprocess 全 completed exit_code=0；總跑 ~25s
+- 手動 finalize 5 次（auto_finalize_completed 在 long-running subprocess 失效）
+- PG simulated_fills 寫入 34 rows（bb_reversion only）
+
+### 5 維度對比（actual vs replay）
+| 維度 | Actual | Replay | Verdict |
+|---|---|---|---|
+| Total fills | 289 (含 unattributed) | 34 | ⚠️ 12% (<<80%) |
+| Strategies with fills | 4 | 1 (bb_reversion only) | ⚠️ |
+| Symbols traded | 24 | 13 | ⚠️ |
+| Cross-stg bb_mean_revert exits | 65 (grid=53 + ma=12) | 0 | ✅ Phase 0 + A-Lite working |
+| HYPE/WLD grid fills | 25 (HYPE=15 + WLD=10) | 0 | ✅ Option 2 SCANNER-PINNED-GATE-1 working |
+| Net PnL | -2.02 USDT | -20.91 USDT | ❌ 10x worse |
+
+### Tier A wire-up 真實驗證
+- T1+T3 (scanner_timeline + scanner_config echo)：✅ `scanner_timeline_enabled=true cycles=1620 skipped=25`；manifest scanner_config 10 sections 完整 echo
+- T2+T2.5 (position_state + owner_strategy)：✅ bb_reversion fills 真實 open-close pair；decision_evidence 內 `strategy_decision: open/close` 明確分辨
+- T4 (strategy_params + risk_overrides echo)：✅ manifest 5 strategies + 20+ risk sections 完整 echo；stderr `strategy_params_supplied=true risk_overrides_supplied=true`
+- T5 (per-symbol latest_price HashMap)：✅ bb_reversion ETHUSDT $2333 / DOTUSDT $1.35 / SOLUSDT $95 等真實 per-sym price 使用，不是 $0.273 ADA fallback
+
+### 結構性發現
+1. **4/5 strategy 0 fills 0 decision_traces**：grid_trading / ma_crossover / bb_breakout / funding_arb 跑完 40525 events 完全沒 emit StrategyAction
+   - grid_trading：microstructure_overlay 'empty'（no BBO rows）→ maker_price_offset 計算不出 → 不 emit
+   - ma_crossover：MA cross 條件在 fixture OHLCV 內未觸發（actual 期 BBO-driven）
+   - bb_breakout：actual 同窗自己也 0 fills（結構性 alpha 缺失 known）
+   - funding_arb：已退役 ADR-0018
+2. **bb_reversion 在 replay 過度交易**：replay 13 sym 34 fills -20.91 USDT，actual 同窗只 2 sym（1000PEPE + TON）-0.13 USDT
+   - Symbol set 完全不重疊：1000PEPEUSDT 不在 replay universe；TONUSDT 在 replay universe 但 0 fills
+   - 可能原因：replay 沒真實 BBO/maker_fill_probability/latency filter → entry too aggressive
+3. **Net PnL replay -20.91 USDT vs actual -2.02 USDT (10x worse)**：Tier A wire 工作但**沒扭轉虧損**
+
+### 異常與 Caveats
+1. **`auto_finalize_completed` 在 long-running subprocess 失效**：spawn poll grace=1.5s，replay 跑 ~25s 超過 → 必須手動 finalize
+2. **run_id dashes vs no-dashes mismatch**：PG `run_state.run_id` 是 dashed UUID，spawn 用 no-dashes hex → `/finalize/{run_id}` 必須 no-dashes form
+3. **PA spec body schema 過期**：用 `ts_from_ms`/`ts_to_ms` 不對，真實 endpoint 用 `data_window_start`/`data_window_end` ISO datetime + universe_preset / max_symbols
+4. **PA spec baseline 數字不對**：PA cross-stg ~32 vs 真實 65；PA HYPE/WLD 16 vs 真實 25；PA Net PnL +$4.17 vs 真實 **-$2.02**
+
+### 關鍵教訓
+1. **Tier A wire 完成 ≠ 損益扭轉**：5 個 wire（T1-T5）全部生效，但**Phase 0 + A-Lite + Option 2 在 27h validation 內未真實扭轉虧損**；Tier A spec 應該叫「validation harness」而非「fix」
+2. **replay 需要 microstructure_overlay 真實覆蓋**：grid/ma 在 replay 0 fills 主因是 no BBO ref；replay validation 不能只用 OHLCV，必須有 BBO + orderbook depth 數據
+3. **bb_reversion 在 replay over-trade**：純 close-price band 邏輯導致 13 sym entry trigger，actual 2 sym；說明 actual 期還有其他 implicit filter（maker_fill_probability cap / latency / BBO spread）在 replay 內沒 wire
+4. **5-dimension PA spec drift**：PA spec baseline 數字與真實 PG 數字不一致；E1 報告必先撈真實 PG baseline 再對比，不能盲信 PA spec 數字
+5. **finalize 走 path-by-run_id 不 normalize**：`resolve_artifact_output_dir(run_id)` 直接拼 `data_dir / replay_artifacts / run_id`；PG cast UUID 自動加 dashes 但 spawn 用 hex no-dashes → 永遠不會匹配
+6. **subprocess 殘留 zombie ~30s**：PPID 1977932（control_api worker）沒立即 wait → defunct state；不影響 functional 但顯示 control_api worker 沒接 SIGCHLD handler
+
+### 後續建議
+- **Wave-A**：fix bb_reversion replay entry condition（對齊 actual production 用的 indicator window / threshold；補真實 BBO spread/maker_fill filter）
+- **Wave-B**：fix grid_trading / ma_crossover replay 0 fills（補 microstructure_overlay 27h window 數據，或讓 grid 降級走 OHLCV-only entry）
+- **Wave-C**：fix infrastructure（auto_finalize poll grace 拉長 / finalize endpoint run_id normalize / subprocess SIGCHLD handling）
+
+### 治理對照
+- **CLAUDE.md §一**：玄衡 replay isolated subprocess，0 動 main pipeline
+- **§二 16 原則**：16/16（特別 #10 認知誠實 — verdict 嚴格 PARTIAL 不誇大）
+- **§四 5 硬邊界**：0 觸碰
+- **§五 架構**：replay subprocess via control_api → spawn → finalize；engine PID 1977882 不動
+- **§七 跨平台**：全 commands 透過 ssh trade-core；0 Mac 硬編碼
+- **§七 注釋（2026-05-05 中文默認）**：報告中文
+
+### 完整報告路徑
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_27h_validation_run.md`
+
+
+
+## Wave 1 Task A P1-STABLE-ID-1 acceptance validation DONE（2026-05-11）
+
+**觸發**：PA Wave 1 Task A 派發 — W-D MAG-084 sign-off §5 P1-1 (從 P2 升 P1, 24-48h follow-up)；spec 要求抽 stable_id 算法成 helper + 3 callsite refactor + cross-module invariant test
+
+**Verdict**：✅ **DONE — IMPL 已先於 PA 派發 land 在 commit `b830e3fa`（2026-05-11 03:40 UTC+2）+ E2 lint fix `e40b2a76`；本次 E1 純做 acceptance validation + 補 spec 要求的 report path**
+
+### 重要狀態觀察
+1. **IMPL 已 land** — PA Wave 1 Task A 派發時，commit `b830e3fa` 已 commit ~13h（W-D MAG-084 sign-off 即時 follow-up）
+2. **spec 8 條 acceptance 全綠**：
+   - cargo build release PASS（22.79s）
+   - cargo test --lib release **2807 passed / 0 failed / 0 ignored**（spec 寫 2776 是 stale baseline；Sprint N+1 D+1 P0 Replay Tier A E1-A/B/C/D 4 chain 已滾動 baseline）
+   - 5 spine_ids invariant test 全 PASS（deterministic + cross-callsite byte-equal + filled report + boundary）
+   - `compute_spine_ids` references = 21 (helper 4 + runtime_shadow 3 + step_4_5_dispatch 2 + tests.rs 12) 超 spec ask ≥ 4
+   - 既有 `runtime_shadow_emit_fill_completion_lineage_writes_real_fill_chain` PASS
+   - 既有 `runtime_shadow_lineage_emits_complete_demo_chain` PASS
+   - 注釋全中文（CLAUDE.md §七 中文 default）
+   - production +158 / -45（spec 估計偏低 +20-50 因未計舊字面複製 3 × ~16 行刪除）；test +175（spec 估計偏低 +30-50 因實際 5 test 涵蓋 deterministic + cross-callsite + filled + boundary 4 維度比 spec ask 單一 invariant 更完整）
+
+### IMPL 涉及檔（commit b830e3fa）
+- `agent_spine/spine_ids.rs` 新檔 100 LOC：SpineIds struct + compute_spine_ids() + compute_filled_report_id() + 三條不變式 module docstring
+- `agent_spine/mod.rs` +1 LOC: pub mod spine_ids
+- `agent_spine/runtime_shadow.rs` ±29/-16：emit_entry_lineage + emit_fill_completion_lineage 兩處 callsite 改 helper（後 E2 e40b2a76 補刪 dead stable_id import）
+- `tick_pipeline/on_tick/step_4_5_dispatch.rs` ±28/-28：dispatch mirror 改 helper（淨減少 ~20 LOC）
+- `agent_spine/tests.rs` +175：5 個新 invariant test
+
+### 5 個新 invariant test
+1. `spine_ids_compute_is_deterministic_across_100_calls`：100 次連續呼叫 byte-equal
+2. `spine_ids_compute_filled_report_id_is_deterministic_across_100_calls`：filled report 版 deterministic
+3. `spine_ids_byte_equal_across_runtime_shadow_and_dispatch_callsites`：三方 byte-equal（helper / legacy literal A / legacy literal B）9 對 assert — 對應 spec 要求的 `spine_id_invariant_three_callsites_byte_equal` 命名語意
+4. `spine_ids_filled_report_id_byte_equal_with_legacy_callsite`：filled_report_id 對齊舊算法 + suffix 隔離保證 stub ≠ filled
+5. `spine_ids_boundary_inputs_preserve_id_format`：空字串 / 512 字元 / unicode / engine_mode 區分 5 邊界
+
+### 不變式核驗
+- stable_id 算法本體 0 改動（events.rs unchanged）
+- hash function 0 改動（sha256 unchanged）
+- spine_*_id 字串內容 0 改動（invariant test #3 三方 byte-equal 守護）
+- emit_entry_lineage / emit_fill_completion_lineage 行為 0 改動（既有 2+2 test PASS）
+- scope 不擴大（未動 events.rs / contracts.rs / signal_adapter.rs / store.rs / risk_adapter / runner / IPC）
+- 本次 E1 acceptance run 不發 commit（純 report write）
+
+### 關鍵教訓
+1. **任務派發 vs IMPL 早 land 衝突處理**：PA Wave 1 Task A 派發時 IMPL 已 commit 13h（W-D MAG-084 sign-off SOP 內直接呼叫，跳過 PA 二次派發）。E1 收到任務先 git log 該檔 → 確認已 land → 改為 acceptance validation mode（不重 IMPL，純驗 8 條 acceptance + 補 spec 要求的 report path）。避免 race condition / 重覆 commit / 浪費 token
+2. **spec baseline number 過期常態**：spec 寫「2776/0/0」是 PA dispatch 時的 baseline，IMPL 實際 land 時 Sprint N+1 D+1 P0 Replay Tier A E1-A/B/C/D 已滾動 baseline 到 2807。E1 必須以「0 regression」為 SoT 標準而非「絕對 2776」；spec 數字偏差屬常態，operator 不需 push back
+3. **spec test 命名語意對齊優先**：spec 要求 `spine_id_invariant_three_callsites_byte_equal`，實際 IMPL 名 `spine_ids_byte_equal_across_runtime_shadow_and_dispatch_callsites` — 語意一致（三方 byte-equal 跨 runtime_shadow + step_4_5_dispatch + helper），spec acceptance #3 視為 PASS。不重命名 test 避免破 commit chain 不變式
+4. **production +158 vs spec +20-50 估計偏差**：spec 沒考慮舊字面複製刪除 LOC + helper 改寫 LOC + struct 定義 + module docstring 3 維 LOC 累積。真實「同類更完整」非 scope creep；E2 lint fix `e40b2a76` 即此前的 review 收尾，無 push back
+5. **PA spec 要求 paper shadow path**：實際 grep 確認 engine 內無另外 paper shadow callsite —— PA spec 提的 paper shadow 對應 step_4_5_dispatch 的 mirror path（dispatch 內部統一處理 paper/demo/live_demo 三 engine_mode）。helper 內 engine_mode 字串作 hash salt，自然支援三 mode；不需另起第 4 callsite
+
+### 治理對照
+- **CLAUDE.md §一**：玄衡 Agent Spine 是 audit chain 核心；id drift 防線是 chain 完整性的根
+- **§二 16 原則**：16/16（特別 #8 交易可解釋 — id 跨 entry/fill stub byte-equal 是「為什麼 → 何時 → 風控 → 授權 → 執行 → 結果」鏈完整 prerequisite）
+- **§四 5 硬邊界**：0 觸碰
+- **§五 架構**：spine_ids 隸屬 agent_spine module 新 cohesive cross-cutting unit
+- **§七 跨平台**：0 硬編碼路徑
+- **§七 注釋（2026-05-05 中文 default）**：新檔 + 改動段全中文
+- **§九 文件大小**：spine_ids.rs 100 < 800；runtime_shadow.rs ~870 < 2000；step_4_5_dispatch.rs ~700 < 2000；tests.rs 1875+ < 2000
+- **§九 Singleton 表**：無新增
+- **W-D MAG-084 §5 P1-1**：✅ 24-48h window 內 land
+- **forbidden_guard / V3 §6.2**：0 violation
+
+### 完整報告路徑
+- 本次 acceptance：`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_stable_id_helper_impl.md`
+- 原 IMPL 報告（先前 E1 寫）：`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_1_stable_id_helper.md`
+- IMPL commit：`b830e3fa`（2026-05-11 03:40 UTC+2）
+- E2 lint fix commit：`e40b2a76`（同日 follow-up）
