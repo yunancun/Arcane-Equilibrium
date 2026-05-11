@@ -2981,3 +2981,43 @@ PG fills 直查證據：
 **16 原則 + Hard Boundary**: 0 觸碰；違反原則 #5（生存>利潤）+ #6（失敗默認收縮）— grid restart 後缺保守 warmup
 
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_22h08_deploy_edge_regression_rca.md`
+
+---
+
+## 2026-05-11 — P0 Option A SSoT Refactor push back（連續虧損 9h+ 救火）
+
+**Operator 提的方案**：Option A 單一方案，消除 5 策略本地 `self.positions`，全 paper_state SSoT。
+
+**PA push back**：65% NO-GO atomic Option A，理由 3 個 BLOCKER：
+1. **grid_trading.net_inventory 是 grid-level 累積 qty**（-2/-1/0/+1/+2），不是 boolean；paper_state 無此資訊。直接搬走 → grid signal 邏輯破。
+2. **bb_breakout.entry_price + trailing_stop 強耦合 position lifecycle**：trailing_stop ratchet math 需要本地 entry_price，paper_state 不存。
+3. **on_external_close 對 strategy-internal state cleanup 必保留**（trailing_stop / squeeze / oi_buffer / grid level）。
+
+**Option A-Lite（PA 推薦，85% GO）**：
+- ma_crossover + bb_reversion + funding_arb：移除 self.positions（純 boolean direction marker），改查 ctx.position_state + owner_strategy gate
+- bb_breakout：移除 BbBreakoutPerSymbolState.position 一個欄位；保留 entry_price/trailing_stop/squeeze_detected_ms/oi_buffer
+- grid_trading：不動 net_inventory；加 cross_strategy_holds gate
+
+**真正 root bug**：不是「策略本地持有 state」，而是「策略 exit gate 沒查 `paper_state.owner_strategy == self.name()`」。W7-2 entry-path 同步 self.positions=paper_state.is_long 反而把策略「升級」成「我擁有所有 cross-strategy 倉位」→ bb_reversion 寬 exit zone [0.2, 0.8] 觸發 mass close → emit_close_fill 取 paper_state 真實 owner (grid_trading) + close_tag (bb_mean_revert) → fills 表混合 row。
+
+**緊急 hot-fix 推薦（不等 Option A-Lite，30 min ship）**：
+1. bb_reversion exit zone [0.2, 0.8] 縮 [0.45, 0.55]（textbook 0.5 ± 0.05）TOML
+2. bb_reversion on_tick exit 分支加 `ctx.position_state.owner_strategy == "bb_reversion"` gate（~10 LOC）
+3. ssh restart_all --rebuild --keep-auth
+
+**E1 IMPL spec**：5 並行（E1-A ma / E1-B bb_reversion / E1-C bb_breakout / E1-D grid / E1-E funding_arb dormant）+ E1-F merge wave；總工時 5-7h，~-280 LOC + 162 tests 改寫 + 30 W7-* tests 刪除。
+
+**部署順序**：分 3 wave（funding_arb dormant smoke → bb_breakout+grid_trading → ma+bb_reversion atomic），每 wave 後 30 min 觀察 [40] avg_net + fills 混合 row 檢查。
+
+**E2 重點審查 3 點**：
+1. exit gate 必查 owner_strategy（grep `match.*position_state` 或 `Some(is_long)` exit branch 必含 owner check）
+2. bb_breakout 保留 entry_price/trailing_stop/squeeze_detected_ms/oi_buffer 4 欄位（不能砍）
+3. grid_trading net_inventory 不能砍（E1-D 只加 cross_strategy_holds gate）
+
+**16 原則 + Hard Boundary**：0 觸碰；強化 #4（策略不繞風控 — exit owner check 是新加 gate）+ #5（生存>利潤 — Phase 0 立即止血）+ #6（失敗默認收縮 — cross-strategy 持倉時 strategy backoff）
+
+**架構教訓 6**：「策略本地 state 全消除」這個 framing 太宏觀，真正 root bug 是「exit gate 缺 owner_strategy 判斷」。Operator 的 SSoT 直覺對，但實作必先做 5 策略 audit 確認 state 結構差異（boolean direction vs 累積 qty vs lifecycle 強耦合 math state）。
+
+**Confidence**：HIGH for「Option A-Lite」可行；HIGH for「Phase 0 hot-fix 救火」；MEDIUM for「Wave 1-3 部署順序」（仍可選 atomic）；LOW for「operator 是否接受 Option A-Lite 而非堅持純 Option A」（推薦 fallback：paper_state +2 columns(grid_level, trailing_stop) 重設計 + 2-3d 工作量）
+
+**Report**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md`
