@@ -1888,3 +1888,16 @@ QA W-C audit CONDITIONAL_PASS 揭 2 caveat（decision_state_changes 0 row + Exec
 ### 反模式錄追加（item 9）
 9. **append-only event log + state transition 雙存時 transition 的 object_id 應對「既有 row」而非「新建 row」**：W-C Caveat 2 Option α-A 推薦新建 filled_report row 不改 stub row；transition 表達「狀態真變了」應對 stub_report_id 寫，不對 filled_report_id 寫；對 filled row 寫 transition from_state=shadow_planned 會破壞 SM 語意（filled row 從未經 shadow_planned）。E2 review 必檢查此設計細節。
 
+
+---
+
+## 2026-05-11 P1-1 stable_id helper E2 adversarial review
+
+49. **白盒對等性 test = byte-equal byte-equal 充分證據**：P1-1 helper 抽出時 E1 5 個 cross-module invariant test 全用 white-box equivalence 設計（test 直接重現 pre-fix 字面複製代碼結構，assert helper output == legacy A == legacy B）。對 **deterministic hash 函數**（如 sha256-based stable_id），同 input 必同 output 的數學性質保證了「helper 內部與舊字面在代碼結構等價 → 任意 input 必 byte-equal」，不需要 brute-force fuzz 真實 input space。E2 不要因「test fixture 是 toy value」就誤判 cross-module byte-equal 證據不足。
+50. **3 處字面複製 ≠ 3 個 module**：PA W-D MAG-083 audit 原文寫「stable_id 字面複製 3 處（step_4_5_dispatch.rs vs runtime_shadow.rs vs paper shadow path）」實際 grep 後是 runtime_shadow entry path + step_4_5_dispatch mirror + runtime_shadow fill completion。**paper shadow path 不存在獨立 stable_id callsite**（paper engine_mode 在 emit_entry_lineage 開頭 short-circuit）。E1 reality-check grep 後決定第 3 處解讀為 fill completion 是正確的；E2 必驗 grep 結果而非盲信 PA 原文 phrasing。
+51. **抽 helper 後 dead import warning 是 E2 lint scope 直接修**：runtime_shadow.rs:24 `stable_id` import 在 P1-1 helper 抽出後變 unused（所有原本 callsite 改走 helper），cargo build 釋出 `unused import: stable_id` warning。屬 E2 邊界 §九.9 LOW（typo/lint/dead import）→ E2 直接修，不退 E1。**抽象規律**：任何 helper 抽出 / refactor 必跑 cargo build 看 unused import warning，並當下修；單獨命題不寫業務代碼不適用 lint。
+52. **events.rs:280 edge_id + :334 transition_id 不在 P1-1 scope**：E2 grep 全 repo 所有 `stable_id(` callsite 後發現 `events.rs` constructor 內仍有 edge_id 和 transition_id 字面計算。但這兩個 ID **只在單一檔（events.rs）內出現**（struct 自身 constructor），不是「字面複製跨多處」的 silent drift 風險。P1-1 scope 是「跨 module 字面複製防漂移」，edge_id/transition_id 因為**沒跨 module 複製**所以不需抽 helper。如未來有他 module 自己構造 edge_id 才需 propagate helper。
+53. **5 test 是 white-box equivalence 不是 strict cross-module integration**：P1-1 5 個新 test 寫在 `agent_spine/tests.rs` 但仍只 call `compute_spine_ids` + `stable_id` 字面（不從 `emit_entry_lineage()` 或 `step_4_5_dispatch` 入口進入）。嚴格說它們是「helper 對等性 unit test」非「callsite wiring integration test」。但**配合 baseline 2780→2785 + 0 regression 的 sibling functional tests**（line 615-953 跑完整 emit_entry_lineage / emit_fill_completion_lineage 路徑）一起構成「test pyramid」充分證據。E2 不需要要求 strict cross-module integration test。
+
+### 反模式錄追加（item 10）
+10. **「字面複製 N 處」grep 必驗：盲信 PA phrasing 會偏移 scope**：PA audit 寫「字面複製 3 處」時必 grep 驗具體 callsite，不依賴 PA 原文 phrasing 一字不差解讀（paper_shadow vs fill_completion 第 3 處解讀差異即此類）。E1/E2 必雙方 grep 反覆 verify 才信「N 處」結論。
