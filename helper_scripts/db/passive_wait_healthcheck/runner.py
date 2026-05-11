@@ -242,9 +242,24 @@ from .checks_canary_stage_criteria import (
     # docs/execution_plan/2026-05-10--p1_canary_stage_criteria_1_spec.md §7.4.
     # W5-E1-A（2026-05-10）— `[58a]` 補強證據收集（spec §7.4）。讀 V089 metric
     # registry seed 報告每 stage metric 覆蓋率 + active cohort 對應 metric set；
-    # WARN-only verdict（不 hard FAIL，避免阻塞 silent-dead 偵測）。實際 cohort
+    # WARN-only verdict（不 hard FAIL,避免阻塞 silent-dead 偵測）。實際 cohort
     # metric 值計算等 W3 cohort SQL pipeline land 後 enrich。
     check_58a_stage_criteria_eval,
+)
+from .checks_h0_block_acceptance import (
+    # LG1-T2 (2026-05-11) — `[59]` H0 hard-block production caller acceptance
+    # sentinel per PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §1.4 T2.
+    # 讀 ``pipeline_snapshot_{demo,live_demo}.json`` 的 `h0_gate_stats` 與
+    # `risk_manager_config.runtime.h0_shadow_mode`,並跨檢 ``trading.fills``
+    # 1h 入場 fill 計數,推斷 H0 hard-block 是否真實生效:
+    #   PASS:  shadow=false + 充足樣本 + 無 block leakage
+    #   WARN:  shadow_mode=true / 低樣本 / snapshot stale / pipeline quiet
+    #   FAIL:  block dominant 但 entry fills > 0(block invariant 失效)
+    # OPENCLAW_H0_BLOCK_HEALTH_REQUIRED=1 升 WARN → FAIL。
+    # LG1-T2(2026-05-11)— `[59]` H0 hard-block 生產調用驗收哨兵
+    # (PA tech plan §1.4 T2)。哨兵讀 snapshot.h0_gate_stats + h0_shadow_mode
+    # 並跨檢 trading.fills 1h entry fills 推斷 hard-block 失效。
+    check_59_h0_block_acceptance,
 )
 
 
@@ -267,7 +282,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53][54][55][57][58][64][65]    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions + W-AUDIT-9 T4 graduated canary stage invariant + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity
+    [46][48][49][50][51][52][53][54][55][57][58][59][64][65]    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions + W-AUDIT-9 T4 graduated canary stage invariant + LG1-T2 H0 block acceptance + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -316,6 +331,7 @@ Execution / cost sentinels added after F7:
   [56] live_pipeline_active               (P0-NEW-ISSUE-1 — live slot configured but LiveDemo not spawned)
   [57] btc_lead_lag_panel_health          (W2-IMPL-3 — W2 A4-C BTC→Alt Lead-Lag panel 4 conditions: freshness < 120s + cohort=7 + regime extreme < 5% + book_imbalance non-zero/non-null; default-off OPENCLAW_W2_HEALTHCHECK_ENABLED=1 opt-in)
   [58] graduated_canary_stage_invariant   (W-AUDIT-9 T4 — AMD-2026-05-09-03 §4.1 5-stage state-machine invariant; SM-04 ≥ L3 escalate hard FAIL → triggers stage 0 rollback per invariant 12)
+  [59] h0_block_acceptance                (LG1-T2 — PA tech plan §1.4 T2 H0 hard-block production caller acceptance; reads pipeline_snapshot_{demo,live_demo}.json h0_gate_stats + risk_manager_config.runtime.h0_shadow_mode, cross-joins trading.fills 1h entry fills; 4 sub-check: snapshot fresh / shadow_mode / sample size / block leakage; OPENCLAW_H0_BLOCK_HEALTH_REQUIRED=1 escalates WARN→FAIL)
   [64] unblock_candidates_drift           (W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 2026-05-10 Sprint N+1 — spec §6.2 4 sub-check: stale candidate / yo-yo detection / sign-off completeness / unfrozen rows count; pairs with V090 governance.unblock_candidates + 30d cycle writer)
   [65] chain_integrity_post_audit_4b_m3   (MIT W6-1 RFC SHOULD 7 2026-05-10 — W-AUDIT-4b M3 producer post-deploy chain integrity sentinel; era filter `f.ts > '2026-05-09 09:22 UTC'` excludes pre-M3 historical orphan; PASS ≥ 95% / WARN 80-95% / FAIL < 80% / WARN_LOW_SAMPLE n<30; per-strategy drill-down annotation)
 
@@ -338,7 +354,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53][54][55][57][58][64][65]
+              [46][48][49][50][51][52][53][54][55][57][58][59][64][65]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -362,6 +378,7 @@ def main() -> int:
                [55] Agent Decision Spine MAG-082 lineage readiness;
                [57] W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions (freshness/cohort/regime/book_imb);
                [58] W-AUDIT-9 T4 graduated canary stage invariant — AMD-2026-05-09-03 §4.1;
+               [59] LG1-T2 H0 hard-block production caller acceptance — PA tech plan §1.4 T2;
                [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift — spec §6.2 4 sub-check;
                [65] MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity — era filter post 2026-05-09 09:22 UTC)
       post-cursor: [7][13][11][Xa][16][18][19][20]
@@ -375,7 +392,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][58][64][65]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][58][59][64][65]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -925,6 +942,27 @@ def main() -> int:
             # WARN-on-drift / PASS-on-full-seed；實際 cohort metric 計算等 W3 land。
             s, m = check_58a_stage_criteria_eval(cur)
             results.append(("[58a] stage_criteria_eval", s, m))
+
+            # [59] LG1-T2 (2026-05-11): H0 hard-block production caller
+            # acceptance sentinel per PA tech plan `2026-05-11--lg_2_3_4_
+            # design_plan.md` §1.4 T2. 讀 ``pipeline_snapshot_{demo,live_demo}.
+            # json`` 的 `h0_gate_stats` + `risk_manager_config.runtime.
+            # h0_shadow_mode`，並跨檢 ``trading.fills`` 1h 入場 fill 計數，
+            # 推斷 H0 hard-block 是否真實生效。Per-engine 4 sub-check：
+            #   A. snapshot fresh < 5min (否則 WARN_NO_SNAPSHOT skip engine)
+            #   B. shadow_mode 旗標 (demo/live_demo 預設 false; true → WARN)
+            #   C. stats sample (total_checks >= 100; 否則 WARN_LOW_SAMPLE)
+            #   D. block leakage (blocked ratio > 0.5 + entry_fills > 0 →
+            #      FAIL_BLOCK_LEAKAGE; invariant 失效)
+            # OPENCLAW_H0_BLOCK_HEALTH_REQUIRED=1 升 WARN → FAIL。預設
+            # WARN-only 避免 Mac dev / engine cold-start false-FAIL。
+            # [59] LG1-T2（2026-05-11）H0 hard-block 生產調用驗收哨兵
+            # （PA tech plan §1.4 T2）。讀 snapshot.h0_gate_stats +
+            # h0_shadow_mode，跨檢 trading.fills 1h entry fills 推斷
+            # hard-block 失效。OPENCLAW_H0_BLOCK_HEALTH_REQUIRED=1 升
+            # WARN → FAIL。
+            s, m = check_59_h0_block_acceptance(cur)
+            results.append(("[59] h0_block_acceptance", s, m))
 
             # [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 (2026-05-10 Sprint N+1):
             # 動態解封 candidate 治理 4 項漂移哨兵（spec §6.2）。

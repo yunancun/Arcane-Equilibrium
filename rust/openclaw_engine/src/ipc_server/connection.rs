@@ -30,7 +30,9 @@
 
 use super::dispatch::dispatch_request;
 use super::engine_routing::EngineCommandChannels;
-use super::slots::{BudgetTrackerSlot, CostEdgeAdvisorSlot, HStateCacheSlot, TeacherLoopSlot};
+use super::slots::{
+    AccountManagerSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, HStateCacheSlot, TeacherLoopSlot,
+};
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
 use crate::h_state_cache::poller::InvalidationSender;
@@ -98,6 +100,10 @@ pub(super) async fn handle_connection(
     // G3-09 Phase A：cost_edge_advisor slot；advisor 由 main_boot_tasks
     // 在 env-gate 通過後 late-inject。
     cost_edge_advisor_slot: CostEdgeAdvisorSlot,
+    // LG-2 T3 (2026-05-11): AccountManager slot；main.rs 在
+    // init_shared_clients_and_instruments 後 late-inject。slot=None 時 IPC
+    // handler 回結構化 uninitialized payload。
+    account_manager_slot: AccountManagerSlot,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -199,7 +205,7 @@ pub(super) async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx, &h_state_cache, &h_state_invalidation_tx, &edge_reload_sender, &cost_edge_advisor_slot).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry, &strategist_counters, &live_auth_recheck_tx, &h_state_cache, &h_state_invalidation_tx, &edge_reload_sender, &cost_edge_advisor_slot, &account_manager_slot).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');

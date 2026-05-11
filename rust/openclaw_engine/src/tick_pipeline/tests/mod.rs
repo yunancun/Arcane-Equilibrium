@@ -45,6 +45,10 @@ mod engine_event_snapshot;
 mod exit_features;
 mod fanout_canary;
 mod fast_track_reduce;
+// LG1-T1（Wave 2.2，2026-05-11）：H0 Blocking Production Caller E2E integration test。
+// 對應 PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §1.4。
+mod h0_blocking;
+mod h0_ctor_default;
 mod maker_kpi_hot_reload;
 mod per_symbol_price_pnl;
 mod pipeline_kind_governance;

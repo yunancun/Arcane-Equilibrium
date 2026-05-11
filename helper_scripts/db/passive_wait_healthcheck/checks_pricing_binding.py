@@ -104,6 +104,7 @@ LG-3 RFC closure：T1 留 Sprint D / T2 = 本檔 / T3 留 LG-4 前提。
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -123,6 +124,55 @@ DEFAULT_TAKER_FEE: float = 0.00055
 # precision floor 1e-4 per CLAUDE.md memory note `engineering:debug`).
 # 默認費率匹配的浮點容差（CLAUDE.md xlang 1e-4 容差）。
 DEFAULT_FEE_MATCH_EPSILON: float = 1e-6
+
+# ---------------------------------------------------------------------------
+# LG-2 T3 (2026-05-11) dual-source compare 常量。
+# IPC route `query_fee_source` 回的 Rust enum 字串集；對照 PG proxy 推斷字串。
+# 兩端 enum/inference 字串對照表詳 Rust 端 `account_manager::FeeSource::is_compatible_with_proxy`。
+# ---------------------------------------------------------------------------
+
+# IPC dual-source compare 啟用旗標。
+# OPENCLAW_LG2_T3_DUAL_SOURCE=1 → healthcheck [45] 嘗試呼 IPC query_fee_source
+# 比對 Rust enum 與 PG proxy；disagree → 升 WARN（首階段 2 週觀察期不直接 FAIL，
+# per PA tech plan §2.5 risk #4）。
+# 預設關 — IPC 不可用（engine 未啟動 / socket 不存在）絕不阻 healthcheck。
+DUAL_SOURCE_ENV_VAR: str = "OPENCLAW_LG2_T3_DUAL_SOURCE"
+
+# Dual-source compare 用的 sentinel symbol — 取代表性的高流量交易對，
+# 既有 Bybit fee table 也常涵蓋。Mainnet / LiveDemo / Demo 都會 cache BTCUSDT。
+DUAL_SOURCE_PROBE_SYMBOL: str = "BTCUSDT"
+
+# IPC timeout (秒)。dual-source 是 advisory，超時 fail-soft 不阻 healthcheck。
+DUAL_SOURCE_IPC_TIMEOUT_SECONDS: float = 2.0
+
+# Rust 端 FeeSource enum 字串集（snake_case）。
+# 對齊 `rust/openclaw_engine/src/account_manager.rs::FeeSource::as_str`。
+RUST_FEE_SOURCE_BYBIT_API: str = "bybit_api"
+RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT: str = "demo_conservative_default"
+RUST_FEE_SOURCE_COLD_DEFAULT: str = "cold_default"
+
+# Rust enum ↔ PG proxy 相容性表 (Rust enum 字串 → 相容 PG proxy 集合)。
+# 用於 dual-source compare：disagree → WARN，不直接 FAIL（首階段觀察期）。
+_FEE_SOURCE_COMPAT: dict[str, set[str]] = {
+    RUST_FEE_SOURCE_BYBIT_API: {"bybit_v5", "inactive_mainnet"},
+    RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT: {"seed_default", "inactive_mainnet"},
+    RUST_FEE_SOURCE_COLD_DEFAULT: {"cold_default", "inactive_mainnet"},
+}
+
+
+def _is_rust_pg_source_compatible(rust_enum: str, pg_proxy: str) -> bool:
+    """判斷 Rust enum 字串與 PG proxy 字串是否語意相容。
+
+    對齊 Rust 端 ``FeeSource::is_compatible_with_proxy`` 對照表。
+    未知 rust_enum 視為 disagree（fail-closed）。
+
+    Returns:
+        True = 相容（PASS）/ False = disagree（首階段升 WARN）。
+    """
+    compat = _FEE_SOURCE_COMPAT.get(rust_enum)
+    if compat is None:
+        return False
+    return pg_proxy in compat
 
 # Refresh-age verdict thresholds per RFC §2.2 ``Refresh Cadence``.
 # RFC §2.2 刷新節奏判定閾值。
@@ -170,8 +220,6 @@ def _mainnet_live_enabled() -> bool:
     explicitly enabled and the slot has no fills, treating it as a warm-engine
     quiet warning creates permanent noise for the designed 0-mainnet state.
     """
-    import os
-
     return os.environ.get("OPENCLAW_ALLOW_MAINNET", "").strip() == "1"
 
 
@@ -322,6 +370,125 @@ def _demo_livedemo_stale_fill_age_explained(mode: str, ctx: dict[str, int]) -> b
         and ctx.get("risk_verdicts_30m", 0) > 0
         and ctx.get("approved_risk_verdicts_30m", 0) == 0
     )
+
+
+# ---------------------------------------------------------------------------
+# LG-2 T3 (2026-05-11) dual-source IPC compare helper。
+# ---------------------------------------------------------------------------
+
+def _dual_source_enabled() -> bool:
+    """是否啟用 LG-2 T3 IPC dual-source compare。
+
+    `OPENCLAW_LG2_T3_DUAL_SOURCE=1` → 啟用。預設關（向後相容）。
+    """
+    return os.environ.get(DUAL_SOURCE_ENV_VAR, "").strip() == "1"
+
+
+def _query_rust_fee_source(symbol: str) -> dict[str, Any] | None:
+    """呼 IPC `query_fee_source` 取 Rust 端 FeeSource enum 真值。
+
+    Returns 結構化 dict 含 ``fee_source / status / last_refresh_ms / fee_rate_count``，
+    任何 IPC 錯誤（socket 不存在 / timeout / auth 失敗 / engine 未跑）一律
+    fail-soft 回 ``None`` — dual-source compare 是 advisory，不阻 healthcheck。
+
+    Args:
+        symbol: 探針 symbol（通常 ``BTCUSDT``，取最常被 cache 的）。
+
+    Returns:
+        IPC result dict 或 None（任一錯誤）。
+    """
+    try:
+        # Lazy import 避免 cron-time 對缺套件的硬依賴。
+        # ipc_client_sync 是 fire-and-best-effort 同步呼叫（per docstring）。
+        from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client_sync import (
+            sync_ipc_call,
+        )
+    except Exception:  # noqa: BLE001 — import 失敗 fail-soft
+        return None
+
+    try:
+        result = sync_ipc_call(
+            "query_fee_source",
+            {"symbol": symbol},
+            timeout=DUAL_SOURCE_IPC_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError:
+        # engine socket 不存在（engine 未跑） → fail-soft
+        return None
+    except Exception:  # noqa: BLE001 — IPC 任何錯誤 fail-soft
+        return None
+
+    # 預期 shape：{"status": "ok"|"uninitialized"|"invalid_params",
+    #              "symbol": ..., "fee_source": "...", "last_refresh_ms": N,
+    #              "fee_rate_count": N}
+    if not isinstance(result, dict):
+        return None
+    return result
+
+
+def _dual_source_compare(
+    per_mode: dict[str, dict[str, Any]],
+    probe_symbol: str = DUAL_SOURCE_PROBE_SYMBOL,
+) -> tuple[bool, str]:
+    """LG-2 T3 (2026-05-11) — IPC dual-source compare。
+
+    對賬 Rust enum 真值 vs PG proxy 推斷字串。disagree → 升 WARN（首階段 2 週
+    觀察期不直接 FAIL，per PA tech plan §2.5 risk #4）。
+
+    PG proxy source 從 ``per_mode`` 字典取（demo / live_demo / live 同 binding
+    意味 fee table 共享；以 demo 為優先 PG 端代表，live 仍可能 inactive_mainnet）。
+
+    Returns:
+        ``(disagree, summary_str)``：
+        - disagree=True → 觸發 WARN 升級條件
+        - summary_str：append 到 healthcheck output 的 dual-source 區段
+    """
+    if not _dual_source_enabled():
+        return False, ""
+
+    ipc_result = _query_rust_fee_source(probe_symbol)
+    if ipc_result is None:
+        # IPC 不可用 — fail-soft，不改變 verdict
+        return False, "dual_source=ipc_unavailable"
+
+    status = str(ipc_result.get("status", ""))
+    rust_enum = str(ipc_result.get("fee_source", ""))
+    last_refresh_ms = int(ipc_result.get("last_refresh_ms") or 0)
+    fee_rate_count = int(ipc_result.get("fee_rate_count") or 0)
+
+    # IPC slot 未注入 → 用 ``cold_default`` 一致對賬規則（payload 已是該值）。
+    if status not in {"ok", "uninitialized"}:
+        # invalid_params 或未知 status → 視為 IPC noise，fail-soft
+        return False, (
+            f"dual_source=ipc_status_unexpected status={status} rust_enum={rust_enum}"
+        )
+
+    # 取 demo / live_demo / live 任一非 cold_default PG proxy 來代表 share fee table。
+    # 邏輯：fee table 是跨 engine_mode 共享的 in-memory state（per
+    # main_pipelines.rs::shared_account_manager wiring）；任一 mode 推斷出
+    # 真實 source 就代表 Rust 端應與其相容。優先序：demo > live_demo > live。
+    pg_proxy_canonical = None
+    pg_proxy_per_mode_str = []
+    for mode in ("demo", "live_demo", "live"):
+        slot = per_mode.get(mode, {})
+        src = slot.get("source")
+        if isinstance(src, str):
+            pg_proxy_per_mode_str.append(f"{mode}={src}")
+            # cold_default 是最弱信號，最後才取；其他 source 優先
+            if src != "cold_default" and pg_proxy_canonical is None:
+                pg_proxy_canonical = src
+    if pg_proxy_canonical is None:
+        pg_proxy_canonical = "cold_default"
+
+    is_compat = _is_rust_pg_source_compatible(rust_enum, pg_proxy_canonical)
+    summary = (
+        f"dual_source: rust_enum={rust_enum} pg_proxy_canonical={pg_proxy_canonical} "
+        f"compatible={is_compat} ipc_status={status} "
+        f"last_refresh_ms={last_refresh_ms} fee_rate_count={fee_rate_count} "
+        f"pg_per_mode=[{', '.join(pg_proxy_per_mode_str)}]"
+    )
+
+    return (not is_compat), summary
 
 
 # ---------------------------------------------------------------------------
@@ -544,10 +711,23 @@ SELECT engine_mode,
             if worst == "PASS":
                 worst = "WARN"
 
+    # LG-2 T3 (2026-05-11): IPC dual-source compare — Rust enum vs PG proxy。
+    # disagree → 升 WARN（首階段 2 週觀察期不直接 FAIL，per PA §2.5 risk #4）。
+    # OPENCLAW_LG2_T3_DUAL_SOURCE=1 才啟用；IPC 不可用 fail-soft 不影響 verdict。
+    ds_disagree, ds_summary = _dual_source_compare(per_mode)
+    if ds_disagree and worst == "PASS":
+        worst = "WARN"
+        warn_reasons.append(
+            "LG-2 T3 dual_source disagree (rust_enum vs pg_proxy); "
+            "首階段升 WARN 不 FAIL（2 週觀察期）"
+        )
+
     # RFC §2.4 ``Healthcheck Shape`` formatted summary.
     # RFC §2.4 標準格式輸出。
     summary = _format_per_mode_summary(per_mode)
     base = f"category=linear; {summary}; {fee_proxy_summary}"
+    if ds_summary:
+        base += f"; {ds_summary}"
 
     if worst == "FAIL":
         return (

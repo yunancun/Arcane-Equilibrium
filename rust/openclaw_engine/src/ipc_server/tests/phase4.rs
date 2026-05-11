@@ -3,7 +3,7 @@
 
 use super::super::*;
 use super::{
-    empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot,
+    empty_budget_slot, empty_cost_edge_advisor_slot, empty_account_manager_slot, empty_h_state_cache_slot, empty_teacher_slot,
     make_test_config, make_test_data_dir,
 };
 
@@ -32,6 +32,7 @@ async fn test_get_phase4_status_returns_grey_initial() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "phase4 status must succeed");
@@ -67,6 +68,7 @@ async fn test_get_phase4_status_response_schema() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none());
@@ -110,6 +112,7 @@ async fn test_dispatch_phase4_status() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert_eq!(resp.id, serde_json::json!(4002));

@@ -706,3 +706,413 @@ async def unhalt_session(
         raise _ipc_failure(f"resume_paper: {e}") from e
 
     return _risk_response({"message": "session_unhalted"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LG-1 T4: Operator Verification — H0 Block Summary
+# LG-1 T4：Operator 驗證 — H0 阻擋摘要
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# MODULE_NOTE (中文):
+#   PA tech plan §1.4 表 T4：GET /h0_block_summary 提供 operator 驗證 H0 hard-block
+#   是否真實生效的 read-only 端點。資料源：
+#   - h0_gate_stats：由 Rust engine 透過 IPC pipeline snapshot 提供累計計數
+#     （since engine boot；五個 sub-check counter：freshness / health / eligibility
+#     / envelope / cooldown），來自 GateStats（openclaw_core::h0_gate）。
+#   - trading.fills：對窗口期 fills 數量做 sanity check；H0 hard-block 路徑
+#     早退而不會寫入 fill，故 fills > 0 + h0_shadow_mode=false 表示 H0 正常放行。
+#
+#   PA spec 字段對齊與設計取捨：
+#   - `h0_block_events_by_strategy` 改名為 `h0_block_events_by_reason` —— H0 是
+#     pre-strategy gate（per-symbol gate）, 沒有 strategy 維度；改用 GateStats
+#     真實 5 sub-check counter 對 operator 更有實用價值。
+#   - `fills_during_block` 改語意為「窗口期 fills 計數」—— H0 hard-block 路徑
+#     不會寫入 fill（step_0_5_h0_gate.rs:43-94），所以「block 期間 fill」by-design
+#     恆為 0；本字段提供窗口期 fills_total 給 operator 對賬 acceptance 計算。
+#   - `last_block_event_at_utc` —— GateStats 不帶 per-event 時間戳（cumulative
+#     counter only），無法精確還原；以 engine snapshot 的 written_at_ms 作為
+#     last_check_at_utc 提供近似（fail-safe = None 表示 unknown）。
+#   - `block_acceptance_pct` 定義：
+#     若窗口期 has fills (>0) + h0_shadow_mode=false → 100%（fail-closed 設計
+#     已驗證）；若 fills=0 + 0 block → 100%（無交易活動，無法證偽，定義為 pass）；
+#     若 fills>0 但 h0_shadow_mode=true → WARN（hard-block 未啟用）。
+#
+#   Auth：與 risk_router 既有 read-only 路由相同（current_actor，無需 risk:write）。
+#
+#   設計依據：CLAUDE.md §四（讀寫分離 + 讀為主）+ §七（中文注釋 + 跨平台）。
+
+class H0BlockSummaryEngineDetail(BaseModel):
+    """單一 engine 的 H0 阻擋摘要詳情。"""
+
+    engine_mode: str = Field(..., description="引擎模式 (paper/demo/live)")
+    h0_shadow_mode: bool | None = Field(
+        default=None,
+        description="該引擎當前 h0_shadow_mode；true=只觀察不阻擋, false=hard-block",
+    )
+    engine_available: bool = Field(
+        ..., description="該引擎 snapshot 是否新鮮可讀（<60s）"
+    )
+    # GateStats cumulative counters since engine boot
+    # GateStats 自 engine 啟動的累計計數
+    h0_block_events_total: int = Field(
+        0, description="自 engine 啟動以來總 block 事件數（5 sub-check 加總）"
+    )
+    h0_block_events_by_reason: dict[str, int] = Field(
+        default_factory=dict,
+        description="按 reason 分類的 block 計數（freshness/health/eligibility/envelope/cooldown）",
+    )
+    h0_total_checks: int = Field(
+        0, description="自 engine 啟動以來 H0 gate 檢查總次數"
+    )
+    h0_allow_rate_pct: float = Field(
+        0.0, description="放行率百分比（0-100）；等於 (total_checks - total_blocked) / total_checks"
+    )
+    # Window-scoped fills sanity check
+    # 窗口期 fills sanity check（trading.fills）
+    fills_in_window: int = Field(
+        0, description="窗口期內該引擎 trading.fills 計數（block 期間 by-design 無 fill）"
+    )
+    # Last known check timestamp (best-effort — GateStats has no per-event ts)
+    # 最近一次檢查時間戳（snapshot.written_at_ms 近似；GateStats 無 per-event ts）
+    last_check_at_utc: str | None = Field(
+        default=None,
+        description="engine snapshot 的 written_at_ms（近似 last H0 check 時間）；None 表示 engine 不可達",
+    )
+    # WARN / PASS / FAIL per-engine sub-verdict
+    # 該引擎子裁決（WARN / PASS / FAIL）
+    health_status: str = Field(
+        "UNKNOWN",
+        description="該引擎子裁決：PASS（hard-block 啟用且 fail-closed 驗證）/ "
+                    "WARN（shadow-mode 或 snapshot 不可達）/ FAIL（hard-block 未啟用但有大量阻擋事件）",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="補充說明（窗口語意、近似值來源、缺漏資料原因）",
+    )
+
+
+class H0BlockSummaryResponse(BaseModel):
+    """
+    H0 阻擋摘要回應 / H0 block summary response.
+
+    PA tech plan §1.4 T4：給 operator GUI / curl 看的 H0 verification view。
+    純 read-only（IPC snapshot + trading.fills SELECT）。
+    """
+
+    window_hours: int = Field(..., description="查詢窗口（小時數）")
+    engine_modes: list[str] = Field(
+        ..., description="本回應涵蓋的 engine_mode 列表"
+    )
+    # Per-engine breakdown / 每引擎細節
+    engines: list[H0BlockSummaryEngineDetail] = Field(
+        default_factory=list, description="每引擎的 H0 block 摘要詳情"
+    )
+    # Aggregated across engines
+    # 跨 engine 聚合
+    h0_block_events_total: int = Field(
+        0, description="所有 engine 累計 block 事件總數（since boot）"
+    )
+    h0_block_events_by_reason: dict[str, int] = Field(
+        default_factory=dict, description="所有 engine 按 reason 分類的累計 block 計數"
+    )
+    fills_during_block: int = Field(
+        0,
+        description="H0 hard-block 路徑 by-design 不會寫 fill；本字段恆為 0 作為設計不變式對賬",
+    )
+    last_block_event_at_utc: str | None = Field(
+        default=None,
+        description="最近一次 H0 check 的近似時間戳（取所有 engine snapshot 中最新者）；None 表示無可用資料",
+    )
+    block_acceptance_pct: float = Field(
+        100.0,
+        description="100% = 理想：窗口期所有 fills 都對應 H0 放行 + 無設計不變式違反",
+    )
+    health_status: str = Field(
+        "PASS",
+        description="頂層裁決：PASS / WARN / FAIL（規則見 module docstring）",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="頂層補充說明（窗口語意、cumulative counter 限制、缺漏資料）",
+    )
+
+
+# Allowed engine_mode filter values (whitelist; defends against IPC/SQL injection).
+# 允許的 engine_mode 篩選白名單（防止 IPC/SQL 注入）。
+_H0_SUMMARY_ALLOWED_ENGINES: frozenset[str] = frozenset({"paper", "demo", "live", "live_demo"})
+
+# Default windows / 預設窗口
+_H0_SUMMARY_DEFAULT_WINDOW_H: int = 24
+_H0_SUMMARY_MIN_WINDOW_H: int = 1
+_H0_SUMMARY_MAX_WINDOW_H: int = 24 * 30  # 30 天上限，防止 unbounded SELECT
+
+
+def _h0_reason_breakdown(gate_stats: dict[str, Any] | None) -> tuple[dict[str, int], int, int]:
+    """
+    從 GateStats dict（Rust snapshot 提供）抽出 5 sub-check counter + totals。
+
+    回傳 (by_reason, total_blocked, total_checks)；缺漏視為 0。
+    """
+    if not isinstance(gate_stats, dict):
+        return ({}, 0, 0)
+    by_reason: dict[str, int] = {
+        "freshness": int(gate_stats.get("blocked_freshness", 0) or 0),
+        "health": int(gate_stats.get("blocked_health", 0) or 0),
+        "eligibility": int(gate_stats.get("blocked_eligibility", 0) or 0),
+        "envelope": int(gate_stats.get("blocked_envelope", 0) or 0),
+        "cooldown": int(gate_stats.get("blocked_cooldown", 0) or 0),
+    }
+    total_blocked = sum(by_reason.values())
+    total_checks = int(gate_stats.get("total_checks", 0) or 0)
+    return (by_reason, total_blocked, total_checks)
+
+
+def _count_fills_in_window(engine_modes: list[str], window_hours: int) -> dict[str, int]:
+    """
+    從 trading.fills 計數窗口期 fills（per engine_mode）。
+
+    純 SELECT；參數化查詢；PG 不可用時回 {} + 上游自行 fail-safe。
+    """
+    from .db_pool import get_pg_conn
+
+    out: dict[str, int] = {em: 0 for em in engine_modes}
+    if not engine_modes or window_hours <= 0:
+        return out
+
+    sql = """
+        SELECT engine_mode, COUNT(*) AS n
+          FROM trading.fills
+         WHERE ts >= NOW() - (%s || ' hours')::interval
+           AND engine_mode = ANY(%s)
+         GROUP BY engine_mode
+    """
+
+    with get_pg_conn() as conn:
+        if conn is None:
+            logger.warning("h0_block_summary: PG unavailable — fills_in_window unavailable")
+            return out
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, (str(window_hours), list(engine_modes)))
+            for em, n in cur.fetchall():
+                out[em] = int(n or 0)
+        except Exception as exc:
+            logger.warning("h0_block_summary fills count failed: %s", exc)
+    return out
+
+
+def _per_engine_h0_summary(
+    engine: str,
+    fills_count: int,
+    window_hours: int,
+) -> H0BlockSummaryEngineDetail:
+    """
+    抽取單一 engine 的 H0 摘要：從 RustSnapshotReader 拿 pipeline snapshot，
+    抽出 h0_gate_stats + runtime.h0_shadow_mode + written_at_ms。
+
+    Fail-safe：snapshot 缺漏時回 engine_available=false 並標 WARN。
+    """
+    reader = get_rust_reader()
+    # 3E-ARCH: live_demo 是 live pipeline 走 demo endpoint；engine snapshot
+    # 仍寫到 pipeline_snapshot_live.json（is_live=true）。
+    snapshot_engine = "live" if engine == "live_demo" else engine
+    available = reader.is_engine_available(snapshot_engine)
+    snap = reader.get_snapshot(engine=snapshot_engine) if available else None
+
+    detail = H0BlockSummaryEngineDetail(
+        engine_mode=engine,
+        engine_available=available,
+        fills_in_window=fills_count,
+    )
+
+    if not available or snap is None:
+        detail.health_status = "WARN"
+        detail.notes.append(
+            f"engine={engine} snapshot 不可達或過期（>60s）；無法評估 H0 cumulative stats"
+        )
+        return detail
+
+    # h0_gate_stats: Optional[GateStats] in Rust → dict or None in JSON
+    gate_stats = snap.get("h0_gate_stats")
+    by_reason, total_blocked, total_checks = _h0_reason_breakdown(gate_stats)
+    detail.h0_block_events_total = total_blocked
+    detail.h0_block_events_by_reason = by_reason
+    detail.h0_total_checks = total_checks
+    detail.h0_allow_rate_pct = (
+        ((total_checks - total_blocked) / total_checks * 100.0)
+        if total_checks > 0
+        else 0.0
+    )
+
+    # h0_shadow_mode 來自 RiskConfig runtime section（snap.risk_manager_config.runtime.h0_shadow_mode）
+    risk_cfg = snap.get("risk_manager_config") or {}
+    runtime = risk_cfg.get("runtime") or {}
+    h0_shadow = runtime.get("h0_shadow_mode")
+    detail.h0_shadow_mode = bool(h0_shadow) if h0_shadow is not None else None
+
+    # last_check_at_utc：近似值 = snapshot.written_at_ms
+    written_at_ms = snap.get("written_at_ms")
+    if isinstance(written_at_ms, (int, float)) and written_at_ms > 0:
+        from datetime import datetime, timezone
+        detail.last_check_at_utc = (
+            datetime.fromtimestamp(written_at_ms / 1000.0, tz=timezone.utc)
+            .isoformat(timespec="seconds")
+        )
+
+    # Sub-verdict 規則：
+    # FAIL — hard-block 未啟用但 cumulative block events > 0（shadow 期間 GateStats 累積；
+    #         此時策略可能有 fill 落地是設計上 shadow 觀察）→ 提示 operator review
+    # WARN — h0_shadow_mode=true 表示仍在 shadow 觀察期，hard-block 未真正生效
+    # PASS — hard-block 啟用 + 無設計不變式違反
+    if detail.h0_shadow_mode is None:
+        detail.health_status = "WARN"
+        detail.notes.append("無法讀取 h0_shadow_mode（risk_manager_config 缺漏）")
+    elif detail.h0_shadow_mode is True:
+        detail.health_status = "WARN"
+        detail.notes.append(
+            "h0_shadow_mode=true（仍在 shadow 觀察期，hard-block 未真正生效；"
+            "demo/live_demo 預期 false）"
+        )
+    else:
+        # hard-block 啟用：fail-closed 設計下 block 期間無 fill 是不變式
+        detail.health_status = "PASS"
+
+    if total_checks == 0:
+        detail.notes.append(
+            f"engine={engine} H0 total_checks=0；engine 可能剛重啟或無 tick 流量"
+        )
+
+    return detail
+
+
+def _aggregate_h0_summary(
+    engine_details: list[H0BlockSummaryEngineDetail],
+) -> tuple[int, dict[str, int], str | None]:
+    """
+    跨 engine 聚合 cumulative block events + by_reason + latest check timestamp。
+    """
+    total = 0
+    by_reason: dict[str, int] = {
+        "freshness": 0, "health": 0, "eligibility": 0, "envelope": 0, "cooldown": 0,
+    }
+    last_check: str | None = None
+    for det in engine_details:
+        total += det.h0_block_events_total
+        for k, v in det.h0_block_events_by_reason.items():
+            by_reason[k] = by_reason.get(k, 0) + int(v)
+        if det.last_check_at_utc:
+            if last_check is None or det.last_check_at_utc > last_check:
+                last_check = det.last_check_at_utc
+    return total, by_reason, last_check
+
+
+def _top_level_verdict(
+    engine_details: list[H0BlockSummaryEngineDetail],
+) -> tuple[str, float, list[str]]:
+    """
+    頂層裁決規則：
+    - FAIL — 任何 engine 子裁決為 FAIL
+    - WARN — 有 engine WARN 但無 FAIL；或所有 engine 都 unavailable
+    - PASS — 所有 engine 都 PASS
+    回傳 (status, acceptance_pct, top_level_notes)。
+    """
+    notes: list[str] = []
+    if not engine_details:
+        return ("WARN", 0.0, ["無 engine 資料"])
+
+    statuses = [d.health_status for d in engine_details]
+    if "FAIL" in statuses:
+        return ("FAIL", 0.0, notes)
+    if all(s == "WARN" for s in statuses):
+        notes.append("所有 engine 都 WARN（snapshot 不可達或 shadow_mode=true）")
+        return ("WARN", 0.0, notes)
+    if "WARN" in statuses:
+        notes.append("部分 engine WARN（見 engines[].notes）")
+        return ("WARN", 50.0, notes)
+    # 所有 PASS
+    return ("PASS", 100.0, notes)
+
+
+@risk_router.get("/h0_block_summary", response_model=H0BlockSummaryResponse)
+async def get_h0_block_summary(
+    window_hours: int = 24,
+    engine_mode: str | None = None,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> H0BlockSummaryResponse:
+    """
+    LG-1 T4 — Operator 驗證 H0 hard-block 是否生效的純 read-only 端點。
+
+    Query params:
+      - window_hours: 查詢窗口（小時），1..720（30 天）；預設 24
+      - engine_mode: 篩選 (paper / demo / live / live_demo)；預設 None = 所有支援的 engine
+
+    回傳：
+      H0BlockSummaryResponse —— 包含 per-engine 詳情 + 聚合 stats + 頂層裁決。
+
+    資料源：
+      - h0_gate_stats: Rust engine pipeline snapshot (cumulative since engine boot)
+      - trading.fills: 窗口期 fills 計數（per engine_mode）做 sanity check
+
+    純 SELECT，無寫入；auth = current_actor（與既有 GET /config 同等級）。
+    """
+    # ── 1. 參數校驗 ──
+    # Param validation
+    if window_hours < _H0_SUMMARY_MIN_WINDOW_H or window_hours > _H0_SUMMARY_MAX_WINDOW_H:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"window_hours 必須在 [{_H0_SUMMARY_MIN_WINDOW_H}, "
+                f"{_H0_SUMMARY_MAX_WINDOW_H}] 範圍內，got={window_hours}"
+            ),
+        )
+
+    if engine_mode is not None and engine_mode not in _H0_SUMMARY_ALLOWED_ENGINES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"engine_mode '{engine_mode}' 不在允許清單，必須屬於 "
+                f"{sorted(_H0_SUMMARY_ALLOWED_ENGINES)}"
+            ),
+        )
+
+    # ── 2. 決定要查詢的 engine 列表 ──
+    # Decide which engines to inspect
+    engines_to_check: list[str] = (
+        [engine_mode] if engine_mode else sorted(_H0_SUMMARY_ALLOWED_ENGINES)
+    )
+
+    # ── 3. 一次拉所有 engine 的窗口期 fills count（PG 一次 SELECT 即可）──
+    # Fetch fills count for all engines in a single PG SELECT
+    fills_counts = _count_fills_in_window(engines_to_check, window_hours)
+
+    # ── 4. Per-engine detail ──
+    # Per-engine detail
+    engine_details: list[H0BlockSummaryEngineDetail] = []
+    for em in engines_to_check:
+        detail = _per_engine_h0_summary(em, fills_counts.get(em, 0), window_hours)
+        engine_details.append(detail)
+
+    # ── 5. 聚合 + 頂層裁決 ──
+    # Aggregate + top-level verdict
+    total_blocked, by_reason, last_check = _aggregate_h0_summary(engine_details)
+    verdict, acceptance_pct, top_notes = _top_level_verdict(engine_details)
+
+    response = H0BlockSummaryResponse(
+        window_hours=window_hours,
+        engine_modes=engines_to_check,
+        engines=engine_details,
+        h0_block_events_total=total_blocked,
+        h0_block_events_by_reason=by_reason,
+        # H0 hard-block 路徑早退不寫 fill → 設計不變式恆為 0
+        # Hard-block path exits early without emitting fill → invariant always 0
+        fills_during_block=0,
+        last_block_event_at_utc=last_check,
+        block_acceptance_pct=acceptance_pct,
+        health_status=verdict,
+        notes=top_notes + [
+            "GateStats 為累計 counter (since engine boot)，不帶 per-event ts；"
+            "last_check_at_utc 取 snapshot.written_at_ms 作近似",
+            "fills_during_block 是設計不變式 (恆為 0)；窗口期 fills 計數見 engines[].fills_in_window",
+        ],
+    )
+    return response

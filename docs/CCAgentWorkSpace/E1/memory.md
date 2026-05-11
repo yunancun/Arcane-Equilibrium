@@ -8706,3 +8706,490 @@ process-wide AtomicU64 + Relaxed ordering（counter 統計屬性，無 happens-b
 
 ### 完整報告路徑
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_fill_lineage_drop_fix.md`
+
+---
+
+## 2026-05-11 LG-1 T4 — H0 Block Summary Operator Verification Route
+
+### Scope
+PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §1.4 表 T4：新增 `GET /api/v1/paper/risk/h0_block_summary` operator verification 端點。read-only / 純 SELECT / IPC snapshot 拉 GateStats + PG count fills。
+
+### 改動
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/app/risk_routes.py`：+410 LOC（708→1118）末尾新增 5 helper + 2 Pydantic model + 1 route。
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_h0_block_summary_route.py`：新檔 468 LOC，21 tests 全 PASS（0.40s）。
+
+### 設計取捨（push back PA spec）
+1. `h0_block_events_by_strategy` 改名 `h0_block_events_by_reason` — H0 是 pre-strategy gate（per-symbol），無 strategy 維度；用 GateStats 真實 5 sub-check counter（freshness/health/eligibility/envelope/cooldown）。
+2. `fills_during_block` 改語意為「H0 hard-block 路徑 by-design 不寫 fill」設計不變式恆為 0；窗口期 fills 計數另存 `engines[].fills_in_window`。
+3. `last_block_event_at_utc` — GateStats 無 per-event ts（cumulative counter only），改用 snapshot.written_at_ms 作 last_check_at_utc 近似；None = engine 不可達。
+4. PA spec 寫 `/api/v1/risk/h0_block_summary` 但 `risk_router` prefix 是 `/api/v1/paper/risk`；遵 既有 router prefix 寫為 `/api/v1/paper/risk/h0_block_summary`（cross-engine 字段對 operator 透明）。
+
+### Linux PG dry-run
+SQL `SELECT engine_mode, COUNT(*) ... WHERE ts >= NOW() - (interval) AND engine_mode = ANY(...)` 走 TimescaleDB `_hyper_*_fills_ts_idx` index scan。24h window EXPLAIN ANALYZE：planning 10ms / execution 0.461ms。返 demo=253 + live_demo=200（2026-05-11 採樣）。
+
+### 教訓
+1. **PA spec 不能盲執**：`by_strategy` 對 H0（pre-strategy gate）語意錯；push back 改 `by_reason`。
+2. **Cumulative counter vs windowed query 衝突**：GateStats since-engine-boot monotonic counter 無法 derive「last N hours events」；windowed 部分讓給 trading.fills join。
+3. **engine_mode whitelist 加 live_demo**：3E-ARCH live_demo = live pipeline + demo endpoint；snapshot 仍寫 `pipeline_snapshot_live.json`；`live_demo→live` mapping 在 `_per_engine_h0_summary`。
+4. **PG `interval` cast 用 `(VAR || ' hours')::interval`** 避免 SQL injection（参数化 + cast 連用）。
+5. **routes.py 1118 LOC > 800 warning** 但 < 2000 hard；建議 P3 拆 `h0_block_summary_routes.py` sibling。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t4_h0_block_summary_route.md`
+
+---
+
+## 2026-05-11 Wave 2.2 LG1-T1：H0 Blocking E2E integration test
+
+### 任務
+Wave 2 LG-1（H0 blocking production caller）4 並行之 T1：新建
+`rust/openclaw_engine/src/tick_pipeline/tests/h0_blocking.rs` (~300 LOC) 覆蓋
+PA tech plan §1.4 LG1-T1 全部 acceptance（不變式 / perf / race / E2E）。
+
+### Scope
+- **6 新 test** ALL PASS：
+  1. `test_h0_hard_block_zero_lease_consumption` — H0 hard-block → governance.lease.lock().len()==0
+  2. `test_h0_hard_block_intent_not_dispatched` — recent_intents/recent_fills/position_count 全 0
+  3. `test_h0_shadow_mode_does_not_hard_block` — shadow=true 時 allowed +1 / blocked 0 / would_block +1
+  4. `test_h0_check_p99_latency_under_1ms` — 10k iter release build p99 < 1000us（實測 p99=0us / max=0us，micros 太粗）
+  5. `test_h0_shadow_to_hardblock_race_safe` — set_shadow_mode flip 前後 stats 一致 + lease store 永遠 = 0
+  6. `test_h0_hard_block_emits_canary_record_with_no_intents` — canary_mode=true 仍 emit record，order_intents/signals 空
+
+### 教訓 / 工具偏好
+1. **PA 計畫文檔 vs runtime 真實狀態 drift**：PA tech plan §1.4 寫 ctor `shadow_mode: true`，但 LG1-T3（同 wave 並行）已把 ctor 預設改為 `false`。我第一輪測試失敗才發現。**啟示**：sub-agent 並行時 baseline 可能在你寫測試的同期被改；測試代碼必加防呆 `debug_assert!` 而不是 `assert_eq!(true)`。
+2. **`update_price_ts` 在 step_0_5 內**：直覺以為「不發 tick = freshness fail」但 step_0_5_h0_gate.rs:40 在 `check()` 前先 `update_price_ts(symbol, ts)`，所以單次 tick 的同 symbol 必 fresh。要實際觸發 H0 hard-block 必 mutate risk/health snapshot 而非「不送 tick」。`kill_switch_active=true` 是最乾淨觸發 risk_envelope sub-check 的 case。
+3. **release build perf assertion 用 micros 太粗**：H0Gate.finalize_* 用 `as_micros()`，release build 下 10k iter 每 iter 可能 <1us → `max_latency_us=0` 是合法。不能 assert `stats_max > 0`，必須只 assert p99 SLA 上界。
+4. **GovernanceCore.lease 為 `Mutex<DecisionLeaseSm>`**：用 `pipeline.governance.lease.lock().len()` 才可數 lease store 條目。Paper/Demo profile 走 LeaseId::Bypass 不推 SM；Production 才會 push（PA push back #4 強調）。但 H0 hard-block 早退在 step_0_5 → step_4_5 從未跑 → `acquire_lease` 從未呼 → 任何 profile 下 SM 都不會增 entry。
+5. **`OPENCLAW_LEASE_ROUTER_GATE_ENABLED` env var 啟動 race**：GovernanceCore::new() 在 env var 讀取時是 boot-time once；test 環境注意 set_var 在 cargo parallel runner 有 race（已知 issue per `set_router_gate_enabled_for_test` 註解）。本 T1 不踩此 trap，無新增依賴。
+
+### 不確定 / E2 必查
+- **release build 下 max_latency_us=0** 是 micros 解析度極限，非 H0 真實零 latency。E2 / E4 review 時可能對 perf assertion 形式有意見（建議用 nanoseconds for benchmark？但 cmt #PA §1.5 risk #5 只要求 <1ms SLA，已滿足）。
+- 我用 `kill_switch_active` trigger 是 production 真實場景；另一個合理 trigger 是 `update_health(cpu_pct=95)` (health sub-check)。E2 可能想 cover 多種 sub-check trigger（5 sub-check 各一）— 但 PA spec 沒要求；本 T1 範圍 = 「lease consumption=0」「intent not dispatched」「shadow not block」「perf」「race」「canary」6 條，已對齊 PA spec 6 點。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t1_h0_blocking_test.md`
+
+---
+
+## 2026-05-11 — Wave 2.2 LG1-T3 SOP runbook + pipeline_ctor.rs shadow_mode default fix
+
+### 任務
+Wave 2.2 LG-1 T3：
+- Part A：新建 `docs/runbooks/2026-05-11--lg1_h0_flip_rollback.md`（flip/rollback SOP，12 章節）
+- Part B：`pipeline_ctor.rs:75-78` ctor 預設 `shadow_mode: true → false`（fail-closed safety net）
+- Part C：sibling unit test `tests/h0_ctor_default.rs`
+- Part D：E2 reviewer note
+
+並行 LG1-T1（h0_blocking.rs）/ LG1-T2（healthcheck `[59]`）/ LG1-T4（route）。
+
+### 結果
+- ✅ 4 sibling test PASS（new / with_balance / with_kind ×3 / set_shadow_mode IPC override）
+- ✅ 1 sibling test #[ignore]（記錄 IMPL 期間發現的 hot-reload gap，留作 reviewer 證據）
+- ✅ `cargo test --lib --release -p openclaw_engine` 全綠 2827 passed / 0 failed / 1 ignored
+- ✅ Runbook 316 行；中文 only
+- ✅ pipeline_ctor.rs 改動 ≤ 5 effective LOC（+22 / -4 含 18 行中文注釋）
+
+### 真實發現 — PA §1.5 risk #1 假設不完全成立
+- PA 假設「TOML 載入路徑 always 覆蓋 ctor default」
+- 實測（sibling test #4 第一版 fail）：`ConfigStore.replace(next_with_shadow_mode_true)` + 首個 tick → h0_gate.config().shadow_mode **仍是 ctor default**
+- Root cause：`pipeline_config.rs:97-109` H0Gate RMW 區塊**沒** 把 `snap.runtime.h0_shadow_mode` 推進 `h0.shadow_mode`；注釋（行 98）「shadow_mode fields don't live in RiskConfig」**已過時**
+- Runtime SoT 實際路徑 = IPC `patch_risk_config` → `risk.rs:313` → `H0Gate::set_shadow_mode(v)`（直接設）
+- T3 改 ctor default `false` 已治本（fail-closed safety net）；TOML→H0Gate hot-reload ≤5 LOC fix 留新子任務
+
+### 設計決策
+- 把 fail 的 sibling test #4 改名為 #5 標 `#[ignore]` 留作 reviewer 證據，**不擴大 scope** 修 hot-reload gap（嚴守 T3 範圍）
+- 把這個發現升級為 **runbook §10 reviewer note** + **report §4** + **sibling test #5 docstring**，三處對齊
+- ctor default fail-closed 對 paper 是 micro-regression（paper TOML `h0_shadow_mode = true`，現 startup 瞬間是 hard-block），但對 paper observation 是更保守，不誤觸發新單
+
+### 工具偏好
+- Sibling test pattern：新建 `tests/h0_ctor_default.rs` + 一行 `mod h0_ctor_default;` 在 `tests/mod.rs`；與並行 LG1-T1 的 `mod h0_blocking;` 0 conflict
+- Runbook 12 章節：用途/治理約束/預設矩陣/Flip 步驟/Rollback 步驟/監測指標/失敗模式/Operator checklist/Rollback procedure/Reviewer note/修訂歷史/Cross-ref；對齊 sibling `replay_signing_key_rotation.md` 風格
+- Reviewer note 三處對齊（runbook + sibling test + report）= operator/E2 從任一入口都能看到完整脈絡 + 可執行證據（`#[ignore]` cargo test）
+
+### 與並行 sibling 的 race 觀察
+- 跑全 lib 第一次 2819 passed / 1 failed（很可能是 release build artifact lock 與 LG1-T1 並行 race）
+- 第二次 2827 passed / 0 failed（W-AUDIT-3b sibling 並行 land 後總數增加，無 conflict）
+- 教訓：cargo lib test 在 multi-sibling 並行 release build 期間第一次可能 race；retest 比追 false-failed 高效
+
+### Acceptance criteria self-check（per PM dispatch）
+1. ✅ `cargo build --release -p openclaw_engine` 綠
+2. ✅ `cargo test --lib --release pipeline_ctor` PASS（我用 `h0_ctor_default` filter，5 test 4 PASS / 1 ignored）
+3. ✅ `cargo test --lib --release -p openclaw_engine` 整體 PASS no regression（2827 passed / 0 failed / 1 ignored）
+4. ✅ Runbook docs/runbooks/2026-05-11--lg1_h0_flip_rollback.md 存在 + 12 章節
+5. ✅ pipeline_ctor.rs 改動 ≤ 5 行（effective value change：1 行 `true→false`；其餘是 18 行中文注釋說明）
+6. ✅ 注釋全中文（無 EN MODULE_NOTE / docstring）
+7. ✅ 無 hardcoded path（`$OPENCLAW_DATA_DIR` / `$OPERATOR_SESSION_COOKIE` / 文檔相對路徑）
+8. ✅ 無 unsafe / unwrap 新增
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t3_h0_flip_runbook_ctor.md`
+
+---
+
+## 2026-05-11 — LG-2 T4 RiskConfig [pricing] section + hot-reload（Wave 2.2 sub-agent）
+
+### 任務
+PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §2.4 表 T4：將 24h pricing freshness gate config 從散落硬編碼（healthcheck `[45]` 86400s + LG-3 RFC 60min warn 文檔）統一為 RiskConfig 一級欄位。
+
+### 改動清單
+**Rust（5 檔）**：
+- `rust/openclaw_types/Cargo.toml` 加 `[dev-dependencies] toml`（單元測試 round-trip）
+- `rust/openclaw_types/src/risk.rs` 新 `PricingConfig` struct + 3 default 函數 + validate() + 8 unit test；MODULE_NOTE 中文化
+- `rust/openclaw_types/src/lib.rs` `pub use risk::PricingConfig` re-export
+- `rust/openclaw_engine/src/config/risk_config.rs` 加 `pub pricing: Option<openclaw_types::PricingConfig>` + validate() 整合
+- `rust/openclaw_engine/src/config/risk_config_tests.rs` 8 個 RiskConfig 層整合測試（含 1 個實 TOML smoke）
+
+**TOML（3 檔，非 PA plan 寫的 4 檔）**：
+- `risk_config_paper.toml` `[pricing]` warn=1440 / fail=10080 / modes=[paper, demo, live_demo]
+- `risk_config_demo.toml` `[pricing]` warn=60 / fail=1440 / modes=[paper, demo, live_demo]
+- `risk_config_live.toml` `[pricing]` warn=30 / fail=720 / modes=[demo, live_demo]
+
+### Push back（記入報告）
+1. **PA plan 寫「4 個 TOML 包含 live_demo」是錯的** — 代碼真實狀態 `settings/risk_control_rules/` 只有 risk_config.toml + paper + demo + live 共 4 個檔，無 `risk_config_live_demo.toml`。LiveDemo runtime 走 `risk_config_live.toml`（startup/mod.rs:208-210）。
+   - 採取行動：以代碼真實狀態為準，**3 個 TOML 加 [pricing]**（paper/demo/live），legacy `risk_config.toml` 走 Option None fallback
+2. **PricingConfig 放 openclaw_types 是對的**（PA plan 已採此 plan）— RiskConfig 主 struct 在 openclaw_engine::config，但 PricingConfig 跨 crate 共用故升為 types crate，跨 crate 引用模式與 H0GateConfig 一致
+
+### Per-env default 設計理由
+per memory `feedback_env_config_independence`（禁衛生合併）+ `feedback_demo_loose_live_strict_policy`：
+- paper 寬鬆（24h warn / 7d fail）：paper pipeline dormant by default，數值僅作 schema parity
+- demo 中庸（60min warn / 24h fail）：learning / edge 累積主通道，hourly refresh fail 1 次即觀測
+- live 嚴格（30min warn / 12h fail）：LiveDemo + Mainnet，fail-closed strict；whitelist 移除 "paper" 且**永不可含 "live"**（LG-3 RFC §2.3 mainnet hard-block 不變式，validate() 強制）
+
+### Hot-reload 整合
+**不需動 pipeline_config.rs**。`apply_risk_snapshot` RMW 是給「下游 owned 派生 copy（H0GateConfig 等）」用的；PricingConfig 在 LG2-T4 階段無 tick hot-path 消費者（passive read-only field），下游讀 `cfg.pricing` 自動拿 ArcSwap 新 snapshot。TOML hot-reload + IPC patch_risk_config 走既有路徑無破壞。
+
+### 測試結果
+- `cargo build --release -p openclaw_engine -p openclaw_types`：**綠**（18 warnings pre-existing dead-code）
+- `openclaw_types::risk::tests::test_pricing*`：**8/8 PASS**
+- `openclaw_engine::config::risk_config::tests::test_pricing*`：**7/7 PASS**
+- `test_lg2_t4_real_toml_files_parse_and_validate`（4 個實際 TOML 端對端）：**1/1 PASS**
+- 整體 `cargo test --lib --release -p openclaw_engine`：**2828 passed / 0 failed / 1 ignored**
+- 整體 `cargo test --lib --release -p openclaw_types`：**35 passed / 0 failed / 0 ignored**
+- **0 regression**
+
+### 教訓
+- **stale build artifact 假失敗**：第一次跑 `cargo test --lib --release -p openclaw_types -p openclaw_engine` 時 h0_blocking 2 個失敗；隔離 stash 我的改動後仍跑同 test 全綠（6/6），unstash 後完整 rerun 也 2828/2828 全綠。失敗來自並行 LG1-T1 sibling 與 LG1-T3 ctor 改動需要 incremental rebuild 但 release artifact lock 競爭 race。**Multi-sibling 並行 release build 後第一次 fail，retest 比追 false-fail 高效**（同 LG1-T3 教訓）
+- **PathBuf `.parent()` 借用陷阱**：`PathBuf::from(env!).parent().expect()` 返 `Option<&Path>`，臨時 PathBuf 提早 drop，需先 `let crate_root = PathBuf::from(...)` 才能 chain `.parent().to_path_buf()`
+- **`#[serde(default)]` 配 `Option<T>`** 是「TOML section 缺失 → None」最乾淨的模式（非 `T + serde default`，那會丟失「config 顯式設定 vs 走 default」的訊號）
+
+### 並行 sub-agent 同時改動的檔（與我無 conflict）
+- `pipeline_ctor.rs`：LG1-T3 改 `shadow_mode: true → false`
+- `tick_pipeline/tests/{mod,h0_blocking,h0_ctor_default}.rs`：LG1-T1 + LG1-T3 新測試
+- `runner.py` + `checks_h0_block_acceptance.py`：LG1-T2 healthcheck `[59]`
+- `risk_routes.py` + `test_h0_block_summary_route.py`：LG1-T4 SQL summary route
+- `lg_3_spec_v1.md`：LG-3 spec phase
+
+我**沒動**任何上述檔，scope 嚴格 LG2-T4 only。
+
+### Acceptance criteria self-check
+1. ✅ `cargo build --release -p openclaw_engine -p openclaw_types` 綠
+2. ✅ `cargo test pricing` PASS（openclaw_types 8/8 + openclaw_engine 7/7 + smoke 1/1）
+3. ✅ `cargo test --lib --release` 整體 PASS no regression（2828 + 35 / 0 failed）
+4. ✅ 4 個實際 TOML 全 PASS（含 legacy `risk_config.toml` 走 None fallback）
+5. ✅ 舊 TOML（無 [pricing]）fallback default OK
+6. ✅ ArcSwap hot-reload 不破既有 RiskConfig 行為（2828 既有 test 全綠證實）
+7. ✅ 中文注釋（MODULE_NOTE / inline / docstring）
+8. ✅ 4 TOML（實際 3 + legacy 1）配置 per env 合理：paper 1440/10080 / demo 60/1440 / live 30/720（live 較 paper 嚴 240×）
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t4_riskconfig_pricing.md`
+
+## 2026-05-11 — LG1-T2 IMPL：[59] h0_block_acceptance healthcheck
+
+### 任務性質
+Wave 2 LG-1 T2 per PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §1.4。
+新建 `checks_h0_block_acceptance.py` 哨兵 + 註冊 runner.py + 單元測試。
+
+### 重要技術發現（PA §1.5 mitigation 誤導修正）
+PA §1.5 寫「T2 healthcheck 讀 canary_records 與 trading.fills 對 join；不需新增 PG 表」。
+實際 grep 結果：
+1. **PG 沒有 canary_records 表**。CanaryRecord 是 Rust internal struct，序列化到
+   filesystem `engine_results.jsonl`（replay/canary mode 用，非 Live runtime）。
+2. **H0 block 不寫 risk_verdicts**。step_0_5_h0_gate 早退（ControlFlow::Break），
+   根本沒走到 IntentProcessor / Guardian。
+3. **真正 data source**：`pipeline_snapshot_{engine}.json`（filesystem，~30s 一次）
+   含 `h0_gate_stats: GateStats` + `risk_manager_config.runtime.h0_shadow_mode`。
+
+故 IMPL 改採 **filesystem snapshot + PG cross-validation** 雙軸：
+- snapshot 讀 H0 stats（total_checks / blocked_* / shadow_would_block）
+- PG `trading.fills` 跨檢 1h 內 entry fills（discriminator: strategy_name NOT
+  LIKE 'risk_close:%' AND NOT LIKE 'strategy_close:%'，鏡 `checks_execution.py:
+  1015-1017` 既有 pattern）
+
+### 4 sub-check verdict
+- A. snapshot fresh < 5min（缺即 WARN_NO_SNAPSHOT skip engine，避 Mac dev false-FAIL）
+- B. shadow_mode 旗標（demo/live_demo 預設 false；true → WARN_SHADOW_MODE）
+- C. stats sample（total_checks >= 100；否則 WARN_LOW_SAMPLE）
+- D. block leakage（blocked ratio > 0.5 + entry fills > 0 → FAIL_BLOCK_LEAKAGE）
+
+### Test pattern - importlib spec workaround
+與 `test_agent_spine_healthcheck.py` 相同 pattern：直接 `importlib.util.
+spec_from_file_location` load 模組繞 package `__init__.py` 的 runner.py
+import chain（避 W1 panel_aggregator pre-existing breakage：runner.py 預先
+import check_panel_freshness 但對應 check 函數可能尚未 land 即 ImportError）。
+
+### 教訓
+- PA tech plan 的 mitigation 文字可能與真實 codebase 對不上（canary_records
+  PG 表不存在）；E1 必須 grep 確認 data source 真實位置再 IMPL。
+- snapshot.json 是 H0 stats 最 fresh data source（~30s vs PG ~min），且不需新
+  IPC route，符合 PA「不需新增 PG 表」精神，但 mitigation 寫的 source 名錯。
+- entry fill discriminator 使用既有 pattern `strategy_name NOT LIKE
+  'risk_close:%' AND NOT LIKE 'strategy_close:%'`，避免重新發明判別邏輯。
+
+### Linux PG timing 實測
+- `to_regclass('trading.fills')`: 1.9ms
+- `COUNT(*) entry fills 1h demo`: 8.8ms
+- `COUNT(*) entry fills 1h live_demo`: 1.0ms
+- 24h scale check: 0.7ms
+
+全部 sub-10ms（PA target <1s 達標）。
+
+### Self-check 8 acceptance（全綠）
+1. ✅ `python3 -m py_compile checks_h0_block_acceptance.py` PY_COMPILE_OK
+2. ✅ pytest 14/14 PASS（10 verdict + 4 helper）
+3. ✅ Linux PG SQL <10ms（target <1s）
+4. ✅ 中文注釋（MODULE_NOTE / inline / docstring）
+5. ✅ runner.py 註冊（grep `check_59_h0_block_acceptance` 2 hits）
+6. ✅ Mock 不掩蓋邏輯（test 用真實 dict 結構模擬 snapshot + 真實 cursor sequence）
+7. ✅ `(status, message)` tuple contract 保留（4 個 helper 函數另回 sub-tuple）
+8. ✅ 無 hardcoded path（grep `/home/ncyu|/Users/[^/]+` 0 hits）
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t2_h0_block_acceptance.md`
+
+---
+
+## 2026-05-11 — LG-2 T1 Contract Tests (Rust)
+
+PA tech plan: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md` §2.4 表 T1
+
+### 任務範圍
+LG-2 T1 = pricing-binding contract test pinning current behavior。覆蓋 PA §2.2 5 子項：
+- (a) Bybit V5 fee-rate response parser
+- (b) PostOnly→maker / GTC→taker dispatch
+- (c) Demo unsupported → seed_default fallback
+- (d) Mainnet unsupported endpoint refusal
+- (e) Hourly refresh task scheduling
+
+### 修改清單
+- `rust/openclaw_engine/src/account_manager.rs` — 6 個 LG2-T1 inline tests（+275 LOC）
+- `rust/openclaw_engine/tests/lg3_contract.rs` — 新檔，11 個 integration tests（+521 LOC）
+
+### Test 結果
+- inline: 32 passed / 0 failed（含 LG2-T1 6 個 + LG2-T3 sibling 7 個）
+- integration `lg3_contract`: 11 passed / 0 failed
+- 整體 lib regression: 2849 passed / 0 failed / 1 ignored（baseline ~2828 → 0 regression）
+
+### 教訓
+1. **PA plan 文件 vs 代碼真實狀態 drift**：plan 寫 `account_manager_tests.rs` 但實際是 inline `mod tests`；plan 4 TOML 但實際 3 TOML（LG2-T4 push back 已記錄）— `find` 確認後以代碼為準
+2. **Binary crate vs lib pub API 邊界**：`tasks::spawn_fee_rate_tasks` 是 `pub(crate)` in binary，integration test 不可直接驗；解法 = 「等價語意」測試 + 標記 binary 已有 inline coverage
+3. **Sibling parallel land**：LG2-T3 同 session 加 FeeSource enum + getter；我的 LG2-T1 test 在第二輪 cross-ref 之，0 衝突。Read 後 patch 是必要 — Edit 時遇 stale file 必 Read 再 Edit
+4. **`#[tokio::test(start_paused = true)]` 需要 `test-util` feature**：當前 workspace `tokio = "full"` 不必然 include；改用 `#[tokio::test]` + 真實短 interval（50ms）穩定 cross-platform
+5. **Web fetch Bybit API official docs** 對 V5 response shape 對齊：`baseCoin` 只 options 有 / linear 不含 / parse_fee_rate_item 必前向相容 multi-category response
+6. **LG2-T4 cross-ref 真實 TOML disk load**：跨三環境 PricingConfig 對齊 default 用 `srv_root()` helper（per migrations_test.rs pattern）+ `CARGO_MANIFEST_DIR.parent().parent()` 跨平台
+
+### Acceptance 自評
+| # | Acceptance | 結果 |
+|---|---|---|
+| 1 | cargo build --release 綠 | ✅ |
+| 2 | inline account_manager 新 test PASS | ✅ 32/32 |
+| 3 | integration lg3_contract PASS | ✅ 11/11 |
+| 4 | 整體 lib 無 regression | ✅ 2849/2828 |
+| 5 | 注釋中文 | ✅ 新加全中文 |
+| 6 | ~400 LOC 合理 | ⚠️ ~796 LOC（PA 估超出但無冗餘） |
+| 7 | Mock 不掩蓋邏輯 | ✅ 真實 JSON shape |
+| 8 | LG2-T4 cross-ref 真實 TOML load | ✅ 3 環境 disk load |
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t1_contract_tests.md`
+
+---
+
+## 2026-05-11 — LG-2 T3 FeeSource enum + IPC route + healthcheck [45] dual-source
+
+PA tech plan §2.4 LG-2 T3 (Mix Rust + Python)：(1) `account_manager.rs` 加
+FeeSource enum + `fee_source(symbol)` getter；(2) 新 IPC route
+`query_fee_source` (read-only)；(3) `checks_pricing_binding.py [45]` 加 IPC
+dual-source compare（首階段 disagree 升 WARN，不直 FAIL）。
+
+### 設計關鍵
+- **FeeSource enum**：3 變體 BybitApi / DemoConservativeDefault / ColdDefault；
+  snake_case serde 對齊 PA §2.5 risk #5 字串契約（healthcheck [45] source 字串集）
+- **`fee_source(symbol)` 推斷**：純讀 in-memory state 無 PG / 網絡 I/O，4 條 rule：
+  (1) last_fee_refresh_ms==0 → ColdDefault
+  (2) cache 無 symbol → ColdDefault
+  (3) cache 有 + maker+taker 精確等於 DEFAULT_* → DemoConservativeDefault
+  (4) 否則 → BybitApi
+- **AccountManagerSlot late-inject pattern**：對齊 cost_edge_advisor / h_state_cache。
+  IpcServer::new() 時 slot=None；main.rs 在 `init_shared_clients_and_instruments`
+  回傳後 `write().await.replace(am)` 注入。slot 未注入時 IPC handler 回
+  structured `{"status":"uninitialized"}` payload，不爆 error。
+- **dual-source compat 字典**（雙端對齊）：
+  - `bybit_api` ↔ `bybit_v5`
+  - `demo_conservative_default` ↔ `seed_default`
+  - `cold_default` ↔ `cold_default`
+  - `inactive_mainnet` → 任一 enum 都 compat（PG 對 live slot 未啟用的標記）
+- **IPC dual-source 首階段 WARN**：disagree → PASS 升 WARN，不直接 FAIL；
+  per PA §2.5 risk #4 2 週觀察期；IPC unavailable (engine 未跑/socket 不存在)
+  → fail-soft 不阻 healthcheck
+
+### 結果
+- Rust release `cargo build --release -p openclaw_engine` ✅
+- Rust release `cargo test --release --lib` **2849 passed / 0 failed** ✅
+- 11 new fee_source tests pass（7 enum + getter + 4 IPC handler smoke）
+- Python `pytest test_pricing_binding_healthcheck.py` **21 passed / 0 failed**
+  （12 既有 + 9 new dual-source：5 compat 字典 + 4 端對端 WARN/PASS/fail-soft/disabled）
+
+### Self-check 8 acceptance ✅
+1. cargo build --release green ✅
+2. cargo test --lib fee_source 11 passed ✅
+3. cargo test --lib 整體 2849/0 no regression ✅
+4. pytest 21/0 pass（含 9 new） ✅
+5. IPC route smoke 通過（unit-level mock async test on release binary）✅
+6. 注釋全中文（CLAUDE.md §七 2026-05-05 規） ✅
+7. Cross-lang serialize 對齊：`bybit_api / demo_conservative_default / cold_default` ✅
+8. healthcheck [45] disagree → WARN 不 FAIL（2 週觀察期 per PA §2.5 risk #4）✅
+
+### 教訓
+- `shared_account_manager` 在 IPC server detach **之後**才建（依賴 main_instruments）；
+  用 late-inject slot pattern 解決，與 cost_edge_advisor / h_state_cache 完全對稱。
+- Test fixture 需小心 RFC §2.3 mainnet fail-closed rule：live + seed_default
+  + OPENCLAW_ALLOW_MAINNET=1 → 直接 FAIL（不被 WARN 升級覆蓋）。設計 dual-source
+  WARN 升級的 test，必須讓 PG 端 verdict 是 PASS 才能驗證 WARN 升級邏輯，
+  否則 dual_source disagree 被既有 FAIL rule 蓋住。
+- 46 個 ipc_server/tests/*.rs 既有 dispatch_request callsite 需加 slot arg：
+  Python script 批量 regex 替換最有效（手改成本高）。同時 6 個 test file 的
+  import 也要批量加 `empty_account_manager_slot`。
+- 整套 LG-2 T3 IMPL **不破任何既有 IPC contract / Python contract / PG schema**：
+  純加法（FeeSource enum 新增 + IPC route 新增 + healthcheck WARN 升級分支
+  env-gated），向後相容。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t3_fee_source_enum.md`
+
+---
+
+## 2026-05-11 — LG-2 T2 Startup Pricing Binding Assertion
+
+PA tech plan §2.4 LG-2 T2 (Rust hot path)：build_exchange_pipeline 對 Live
+(Mainnet + LiveDemo) 加裝 pricing binding 三項斷言（fee_rate_count + per-symbol
+FeeSource + wait_for_first_refresh_or_timeout(30s)）；fail-closed reject spawn。
+
+### 必要設計判斷（push back）
+
+1. **build_exchange_pipeline 不在 `bybit_rest_client.rs`**（PA plan §2.4 寫此檔
+   位置 drift）— 真實位置是 `startup/mod.rs:496`。以代碼真實狀態為準（per
+   LG2-T1 教訓 + memory）。
+2. **新 module 放 lib crate 不放 binary crate**：原計畫 `startup/pricing_assert.rs`
+   但 `startup` 是 binary crate；AccountManager 的 `set_last_fee_refresh_ms_for_test`
+   是 `pub(crate)` 對 binary 不可見。最乾淨 = 整個 module 放 lib crate
+   `openclaw_engine/src/live_spawn_assert.rs`。
+3. **Audit log 走 tracing 不走 PG**：startup-time pre-check 在 db_pool 連線前
+   觸發，**無法寫 PG audit row**；採 `tracing::error!` + `tracing::info!` 結構化
+   寫到 systemd journalctl / engine.log（target=`openclaw_engine::live_spawn_audit`），
+   下游 healthcheck `[45]` runtime drift detection 接力。governance_audit_log
+   既有 V035 schema 強耦合 R2/R3/R4 fields 不適合塞 startup audit。
+4. **LiveDemo + ColdDefault**：PA spec acceptance 寫「不在 acceptable_modes」
+   但 T4 land 的 `risk_config_live.toml` 是 `["demo","live_demo"]` **含**
+   "live_demo"，正常情境 LiveDemo + ColdDefault 應 accept。spec 的「reject」
+   是測試 fixture 故意設 modes **不含** live_demo 的場景 — IMPL 用統一邏輯
+   `mode_label 在 acceptable_modes → accept 任何 source`。
+
+### 修改清單
+
+| 檔 | 改動類型 | LOC delta |
+|---|---|---|
+| `rust/openclaw_engine/src/live_spawn_assert.rs` | **新檔** | +540 (含 11 tests) |
+| `rust/openclaw_engine/src/lib.rs` | `pub mod live_spawn_assert` | +3 |
+| `rust/openclaw_engine/src/startup/mod.rs` | `build_exchange_pipeline` 加 `pricing_config` param + Live kind pre-check call (~60 LOC) | +66 |
+| `rust/openclaw_engine/src/pipeline_slot.rs` | `SpawnConfig.pricing_config` field + try_spawn pass-through | +12 |
+| `rust/openclaw_engine/src/main.rs` | 2 處 SpawnConfig (live/demo) 加 `pricing_config` field; LiveAuthWatcher::from_parts 加 `risk_live_store` param | +20 |
+| `rust/openclaw_engine/src/live_auth_watcher.rs` | LiveAuthWatcher 加 `risk_live_store` field + 3 ctor 對齊 + run loop try_spawn 取 pricing | +35 |
+
+### 設計關鍵
+
+1. **三項斷言順序**（per PA §2.2 第 2 點）：
+   - A. `wait_for_first_refresh_or_timeout(30s)`（defensive net，PA §2.5 risk #2）
+   - B. `fee_rate_count() ≥ 25 (MIN_REQUIRED_FEE_RATE_COUNT)`
+   - C. per-symbol FeeSource 對照 env：
+     - Mainnet：任一非 BybitApi → reject 無論 modes
+     - LiveDemo：mode_label "live_demo" 在 acceptable_modes → 全 accept；
+       不在 → 任一非 BybitApi → reject (LiveDemoNonApiSourceWhenStrict)
+2. **engine_mode label mapping**：用 `effective_engine_mode(PipelineKind::Live,
+   Some(env))` — Mainnet→"live", LiveDemo→"live_demo"。與 engine_mode tag 寫
+   PG (per memory `engine_mode_tag_live_demo`) 字串集一致。
+3. **wait_for_first_refresh poll-based**：刻意不用 oneshot channel + retry hook
+   （避免 account_manager.rs cross-thread notify 接線）；poll 200ms 最差 30s
+   = 150 次 poll，startup 路徑可接受。Fast path（refresh 已完成）立即回 Ok。
+4. **risk_live_store 在 watcher 為 Option**：boot 路徑（main.rs）必傳；
+   watcher 構造路徑 `with_params` / `with_pipeline_spawner` 維持 None
+   單測相容（pre-2026-05-11 callers）；`from_parts` 強制傳 Option，main.rs
+   prod 路徑傳 `Some(Arc::clone(&risk_stores.live))`。
+5. **錯誤類別 reason_code 字串**：4 種錯誤 `no_refresh / insufficient_symbol_coverage
+   / mainnet_non_api_source / live_demo_non_api_source_when_strict`，與 healthcheck
+   `[45]` reason code 集對齊（per PA §2.5 risk #5 跨語言 source 字串契約）。
+
+### Test 結果
+
+- `cargo build --release -p openclaw_engine` ✅ 0 errors
+- `cargo test --lib --release -p openclaw_engine live_spawn_assert` ✅ **11/11 PASS**
+- `cargo test --lib --release` 整體 **2860 passed / 0 failed / 1 ignored**
+  （baseline LG-2 T3 ship 後 2849 + 11 new = 2860 ✓ 完全對齊，0 regression）
+- `cargo test --release --bin openclaw-engine` **58 passed / 0 failed**
+  （包含 live_auth_watcher 既有 watcher_tears_down / watcher_respects_backoff /
+  watcher_without_spawner_keeps_handle_slot_empty）
+- 整合 test 1 個 fail (`stress_bb_reversion_extreme_oversold_bounce`)
+  pre-existing sibling W7-2 P0 Option A-Lite paper_state SSoT refactor 後
+  test fixture 未同步更新（owns_self filter + position_state SSoT），與
+  LG-2 T2 無關（無觸碰 bb_reversion / stress_integration）。
+
+### 教訓
+
+1. **PA plan vs codebase drift（再次發現）**：PA §2.4 寫
+   "bybit_rest_client.rs::build_exchange_pipeline" 但真實在 `startup/mod.rs`；
+   與 LG2-T1 同模式（plan 寫 `account_manager_tests.rs` 但實際 inline `mod tests`）。
+   E1 必先 `grep -rn 'fn build_exchange_pipeline'` 確認真實位置。
+2. **lib crate vs binary crate test 可見性**：`pub(crate)` 在 lib crate 對
+   binary crate **不可見**。要讓 test util 跨 crate 共用必：(a) 改成 pub +
+   `#[doc(hidden)]` 或 (b) test module 放同 lib crate 內。本 IMPL 選 (b)。
+3. **bilingual error Display 必含中英 + 對應字串測**：error code 字串是
+   跨 Rust + Python healthcheck 契約 — 一改即破 healthcheck `[45]` dual-source
+   compare 邏輯。test_reason_code_strings_aligned + test_display_format_safe
+   兩個獨立 test 鎖此契約。
+4. **`risk_live_store: Option<Arc<...>>` 不 break 單測**：watcher 三條 ctor
+   路徑（new / with_params / with_pipeline_spawner / from_parts）只 from_parts
+   接 `Option` 強制傳；其餘 ctor 內部 set None。watcher.run() loop 內
+   `risk_live_store.as_ref().and_then(...).unwrap_or_default()` 對 None 走
+   `PricingConfig::default()`，行為一致。
+5. **Audit log target 字串 = healthcheck grep contract**：
+   `openclaw_engine::live_spawn_audit` 是 systemd journalctl 過濾 + 後續
+   healthcheck 解析 event_type 的 stable contract。改字串 = 破 audit chain。
+
+### Acceptance criteria self-check
+1. ✅ `cargo build --release -p openclaw_engine` 綠
+2. ✅ 新 11 個 test 全 PASS
+3. ✅ `cargo test --lib --release` 2860/0 no regression (baseline 2849+11)
+4. ✅ Live spawn pre-check 三項任一失敗 → 拒 spawn + structured tracing audit
+5. ✅ Demo / paper spawn 不 enforce（per PA §2.5 risk #1，kind != Live 跳過）
+6. ✅ wait_for_first_refresh_or_timeout 30s 超時後 → reject + warn audit
+7. ✅ 注釋全中文（CLAUDE.md §七 2026-05-05 規）
+8. ✅ Live 5-gate（HMAC + freshness + env_allowed + secret + ALLOW_MAINNET）
+   + LG-2 T2 = 第 6 gate。Order：HMAC verify (line 511-538) → BybitRestClient
+   credentials check (line 540-553) → fee_rate refresh (line 666-715) →
+   **LG-2 T2 pre-check (新插入 line 716+)** → balance fetch → WS spawn。
+   既有 5 gate 不破。
+
+### 並行 sub-agent 同時改動的檔（與我無 conflict）
+
+- W7-2 sibling 改 `strategies/bb_reversion/mod.rs` + `bb_reversion/tests.rs`（is_pinned guard）
+- W7-2 sibling 改 `strategies/ma_crossover/strategy_impl.rs` + `ma_crossover/tests.rs`
+- LG-2 T3 sibling 改 `account_manager.rs` + `ipc_server/handlers/fee_source.rs` + 多個 ipc_server/tests/*.rs
+- LG-2 T4 sibling 改 `risk_config.rs` + `risk_config_tests.rs` + 3 個 TOML
+
+我**只動 LG-2 T2 範圍**：`live_spawn_assert.rs` (新) + `lib.rs` (re-export) +
+`startup/mod.rs` (call site) + `pipeline_slot.rs` (SpawnConfig field) +
+`main.rs` (2 處 SpawnConfig + from_parts) + `live_auth_watcher.rs` (3 ctor +
+1 field + run loop)。0 重疊。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t2_startup_assertion.md`

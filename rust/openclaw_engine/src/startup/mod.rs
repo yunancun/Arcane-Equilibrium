@@ -493,11 +493,17 @@ pub(crate) struct ExchangePipelineBindings {
 /// 於 slot-scoped teardown（授權撤銷/過期）時乾淨停止，不波及其他 slot。
 /// 回傳 `(bindings, task_handles)`，讓呼叫者把 handle 放入
 /// `SlotState::Spawned.task_handles` 以供 teardown 時確定性地 join。
+/// LG-2 T2 (2026-05-11)：build_exchange_pipeline 新增 `pricing_config` 參數，
+/// 攜帶 per-env RiskConfig.pricing 的 [pricing] section 配置（含
+/// max_age_warn_minutes / max_age_fail_minutes / cold_default_acceptable_modes）。
+/// 對 Live 路徑（Mainnet + LiveDemo）強制執行 pricing binding 三項斷言。
+/// Demo / Paper 路徑不受影響（per PA tech plan §2.5 risk #1）。
 pub(crate) async fn build_exchange_pipeline(
     kind: PipelineKind,
     env: BybitEnvironment,
     cancel: CancellationToken,
     cfg_snapshot: &openclaw_engine::config::EngineBootstrap,
+    pricing_config: openclaw_types::PricingConfig,
 ) -> Option<(ExchangePipelineBindings, Vec<JoinHandle<()>>)> {
     // LIVE-GATE-BINDING-1 (2026-04-18): Enforce the signed Earned-Trust
     // authorization for the Live pipeline. Python writes a HMAC-signed
@@ -662,6 +668,17 @@ pub(crate) async fn build_exchange_pipeline(
     );
 
     // Fetch fee rates / 獲取費率
+    //
+    // LG-2 T2 (2026-05-11)：fee refresh + LG-2 pricing-binding assertion 三項
+    // pre-check（per PA tech plan §2.2 第 2 點）對 Live (Mainnet + LiveDemo)
+    // 路徑強制執行；任一失敗 → 拒絕 spawn + 寫 audit log。
+    //
+    // 順序：
+    //   1. refresh_fee_rates await（既有路徑，含 demo seed_default fallback）
+    //   2. wait_for_first_refresh_or_timeout(30s)（PA §2.5 risk #2 defensive）
+    //   3. assert_pricing_binding_for_live_spawn（B fee_rate_count + C per-symbol）
+    //
+    // Demo / Paper kind 不執行 pre-check（per PA §2.5 risk #1）。
     let acct = Arc::new(AccountManager::new());
     let taker_fee = match acct.refresh_fee_rates(&*client_arc, "linear").await {
         Ok(count) => {
@@ -696,6 +713,71 @@ pub(crate) async fn build_exchange_pipeline(
             }
         }
     };
+
+    // ------------------------------------------------------------------
+    // LG-2 T2 (2026-05-11)：Live spawn pricing binding assertion。
+    // ------------------------------------------------------------------
+    // 本 pre-check 是 Live 路徑（Mainnet + LiveDemo）的第 6 個 gate（per
+    // CLAUDE.md §四），與既有 5 個 gate（HMAC + freshness + env_allowed +
+    // secret slot + OPENCLAW_ALLOW_MAINNET）並列；任一失敗即 fail-closed。
+    //
+    // - Paper / Demo kind：跳過（per PA tech plan §2.5 risk #1）
+    // - Live kind：
+    //     1. wait_for_first_refresh_or_timeout(30s) — defensive net 確認
+    //        refresh path（BybitApi 或 seed_default）至少一條成功
+    //     2. assert_pricing_binding_for_live_spawn — fee_rate_count + per-symbol
+    //        FeeSource 對照 env + cold_default_acceptable_modes
+    //
+    // 設計選擇：startup-time pre-check 在 db_pool 連線前，無法寫 PG audit row；
+    // 採 structured tracing audit log（target=`openclaw_engine::live_spawn_audit`）
+    // 留 systemd journalctl / engine.log 證據；下游 healthcheck `[45]`
+    // pricing_binding 接力做 runtime drift detection。
+    if kind == PipelineKind::Live {
+        use openclaw_engine::live_spawn_assert::{
+            assert_pricing_binding_for_live_spawn, wait_for_first_refresh_or_timeout,
+            write_audit_log, write_wait_timeout_audit, DEFAULT_FIRST_REFRESH_TIMEOUT,
+        };
+
+        // Step 1：wait_for_first_refresh_or_timeout（30s）
+        let wait_start = std::time::Instant::now();
+        if let Err(_e) = wait_for_first_refresh_or_timeout(&acct, DEFAULT_FIRST_REFRESH_TIMEOUT)
+            .await
+        {
+            let elapsed = wait_start.elapsed().as_secs();
+            write_wait_timeout_audit(env, elapsed);
+            warn!(
+                kind = %kind,
+                env = ?env,
+                elapsed_secs = elapsed,
+                "LIVE PIPELINE REFUSED — fee refresh did not complete within 30s. \
+                 Operator: check network / Bybit endpoint / API key validity. \
+                 / Live 管線拒絕啟動 — fee 刷新 30 秒內未成功。請檢查網路/端點/憑證。"
+            );
+            return None;
+        }
+
+        // Step 2：assert_pricing_binding_for_live_spawn（count + per-symbol）
+        let assert_result =
+            assert_pricing_binding_for_live_spawn(env, &acct, &pricing_config);
+        write_audit_log(
+            env,
+            &assert_result,
+            acct.fee_rate_count(),
+            acct.last_fee_refresh_ms(),
+        );
+        if let Err(e) = assert_result {
+            warn!(
+                kind = %kind,
+                env = ?env,
+                reason_code = e.reason_code(),
+                error = %e,
+                "LIVE PIPELINE REFUSED — pricing binding assertion failed. \
+                 See audit log target `openclaw_engine::live_spawn_audit` for details. \
+                 / Live 管線拒絕啟動 — pricing 斷言失敗。詳見 audit log。"
+            );
+            return None;
+        }
+    }
 
     // BALANCE-REAL-1: Fetch initial balance with retry + hard-fail.
     // 3 attempts, exponential backoff 500ms / 1s / 2s. On final failure the

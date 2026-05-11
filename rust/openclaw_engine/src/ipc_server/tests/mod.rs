@@ -94,6 +94,12 @@ pub(super) fn empty_cost_edge_advisor_slot() -> CostEdgeAdvisorSlot {
     Arc::new(RwLock::new(None))
 }
 
+/// LG-2 T3 (2026-05-11): 給未演練 query_fee_source 路徑的測試使用的空
+/// AccountManager slot。對齊 `empty_cost_edge_advisor_slot` pattern。
+pub(super) fn empty_account_manager_slot() -> super::slots::AccountManagerSlot {
+    Arc::new(RwLock::new(None))
+}
+
 /// Write a test snapshot file to a temp dir, return the dir path.
 /// 寫入測試快照文件到臨時目錄，返回目錄路徑。
 pub(super) fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {

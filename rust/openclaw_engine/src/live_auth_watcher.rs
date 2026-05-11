@@ -135,7 +135,7 @@ use crate::pipeline_slot::{
 use crate::spawn_backoff::SpawnBackoff;
 use async_trait::async_trait;
 use openclaw_engine::bybit_rest_client::BybitEnvironment;
-use openclaw_engine::config::ConfigManager;
+use openclaw_engine::config::{ConfigManager, ConfigStore, RiskConfig};
 use openclaw_engine::ipc_server::LiveCmdSenderSlot;
 use openclaw_engine::live_authorization::{auth_error_kind, load_and_verify};
 use parking_lot::Mutex as ParkingMutex;
@@ -386,6 +386,11 @@ pub struct LiveAuthWatcher {
     /// 單測中為 None（生產中由 main.rs 擁有）。
     live_cmd_slot: Option<LiveCmdSenderSlot>,
     live_event_slot: Option<LiveEventSenderSlot>,
+    /// LG-2 T2 (2026-05-11)：watcher respawn 路徑下游傳給 SpawnConfig 的
+    /// per-env RiskConfig；對 Live 路徑取 `.pricing.clone().unwrap_or_default()`
+    /// 給 build_exchange_pipeline pricing binding assertion 用。
+    /// `None` 時走 `PricingConfig::default()`（單測 + pre-2026-05-11 callers）。
+    risk_live_store: Option<Arc<ConfigStore<RiskConfig>>>,
 }
 
 impl LiveAuthWatcher {
@@ -450,6 +455,9 @@ impl LiveAuthWatcher {
                 thread_handle_slot: None,
                 live_cmd_slot: None,
                 live_event_slot: None,
+                // LG-2 T2 (2026-05-11)：with_params 為單測 + pre-2026-05-11 callers
+                // 入口，None 表示 watcher 不知 risk_live → respawn 走 default PricingConfig。
+                risk_live_store: None,
             },
             IpcTriggerHandle { tx },
         )
@@ -496,6 +504,10 @@ impl LiveAuthWatcher {
         );
         w.pipeline_spawner = Some(pipeline_spawner);
         w.thread_handle_slot = Some(thread_handle_slot);
+        // LG-2 T2 (2026-05-11)：with_pipeline_spawner 是 pre-2026-05-11 callers
+        // 入口，未注入 risk_live_store → 走 default PricingConfig。新 callers
+        // 應用 from_parts 路徑接入完整 risk_live_store。
+        w.risk_live_store = None;
         (w, h)
     }
 
@@ -551,6 +563,10 @@ impl LiveAuthWatcher {
         thread_handle_slot: Option<LiveThreadHandleSlot>,
         live_cmd_slot: Option<LiveCmdSenderSlot>,
         live_event_slot: Option<LiveEventSenderSlot>,
+        // LG-2 T2 (2026-05-11)：per-env Live RiskConfig store；watcher
+        // 在 respawn 之 try_spawn 前讀 `.load().pricing.clone()` 拿 PricingConfig，
+        // 給 SpawnConfig.pricing_config 用。Option 以維持單測相容性（單測注入 None）。
+        risk_live_store: Option<Arc<ConfigStore<RiskConfig>>>,
     ) -> Self {
         Self {
             slot_op,
@@ -564,6 +580,7 @@ impl LiveAuthWatcher {
             thread_handle_slot,
             live_cmd_slot,
             live_event_slot,
+            risk_live_store,
         }
     }
 
@@ -712,11 +729,19 @@ impl LiveAuthWatcher {
                     return;
                 }
                 let cfg_snapshot = self.config.get();
+                // LG-2 T2 (2026-05-11)：watcher respawn 路徑取 Live RiskConfig.pricing；
+                // None → 走 PricingConfig::default()（單測 + pre-2026-05-11 callers）。
+                let pricing_config = self
+                    .risk_live_store
+                    .as_ref()
+                    .and_then(|s| s.load().pricing.clone())
+                    .unwrap_or_default();
                 let spawn_cfg = SpawnConfig {
                     kind: SlotKind::Live,
                     env: self.env,
                     parent_shutdown_token: self.engine_shutdown.clone(),
                     cfg_snapshot: &cfg_snapshot,
+                    pricing_config,
                 };
                 match self.slot_op.try_spawn(&spawn_cfg).await {
                     Ok(Some(spawn_output)) => {

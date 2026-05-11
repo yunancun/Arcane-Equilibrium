@@ -7,6 +7,10 @@ version = 1
 saved_ts_ms = 0
 
 [scheduling]
+# SCANNER-TRADEABLE-TIER-1 (2026-05-11):
+# Keep scanner high-frequency for market awareness / panel freshness. Trading
+# strategies that are fee-sensitive use the pinned tier as their entry universe
+# while dynamic slots remain observation-first.
 scan_interval_secs = 60     # 1 minute / 1 分鐘
 warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等待 60 秒
 
@@ -17,6 +21,10 @@ max_symbols = 40
 # 原因：panel.funding_rates_panel + panel.oi_delta_panel 需 cohort 全 sym
 # 有 ticker WS 訂閱才能寫入；scanner pinned 是唯一 boot-time WS subscribe set。
 # Scanner 收到 25 pinned 後 anti-churn 保護全 cohort，max_symbols=40 留 15 動態 slot。
+# Tradeable tier: pinned 25. Observation tier: pinned 25 + 15 dynamic slots.
+# grid_trading / ma_crossover / bb_reversion only open on the pinned tier;
+# dynamic slots still feed scanner snapshots, WS market data, panels, and
+# future alpha-surface observation.
 # Side effect: 動態探索 long-tail sym 機會減少 ~23 slot；接受換 panel 全覆蓋。
 # POLUSDT 取代 MATICUSDT（後者 Bybit V5 status=Closed since 2024-09-06）。
 pinned_symbols = [

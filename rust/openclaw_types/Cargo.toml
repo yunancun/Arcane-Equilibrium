@@ -10,3 +10,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+
+# LG-2 T4 (2026-05-11)：PricingConfig 單元測試需 toml::from_str / to_string
+# 驗 TOML round-trip。只在 dev-deps，runtime artifact 不受影響。
+[dev-dependencies]
+toml = { workspace = true }

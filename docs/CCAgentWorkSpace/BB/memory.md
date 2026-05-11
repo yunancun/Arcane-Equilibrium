@@ -379,3 +379,65 @@ srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-10--w1_w2_bybit_v5_rate_b
 2. 若採納 → W1 collector IMPL 是否真用 `tickers` WS topic 解析 fundingRate / openInterest field（不重複 REST poll）
 3. 若未採納 → collector 是否加 rate group monitoring + aggregator pattern
 4. W3 Stage 1 cohort 拍板 symbol 是否確認 BUSDT 排除
+
+
+---
+
+## 2026-05-11 LG-3 Supervised-Live State Machine Spec v1 review (Wave 2.1.5)
+
+### Trigger
+
+PM 派 Wave 2.1.5 三方並行 review (QC math + BB Bybit + MIT data/audit) on PA spec v1
+`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v1.md` (1221 行).
+
+### Verdict: **APPROVE WITH 6 BYBIT CAVEATS** (5 spec 必補章節 + 1 mainnet checklist + 1 meta pre-flight)
+
+### Bybit V5 endpoint alignment
+
+LG-3 觸發 endpoint inventory (5 endpoint + Private WS):
+- `POST /v5/order/create` (close_position on kill) — Order 20 r/s — 字典 line 306/1054
+- `POST /v5/order/cancel-all` (pending on kill) — Order 20 r/s — 字典 line 389
+- `GET /v5/account/wallet-balance` (engine boot) — Account 20 r/s — 字典 line 638
+- `GET /v5/position/list` (reconcile) — Position 20 r/s — 字典 line 502
+- Private WS `[order, execution, position, wallet, dcp]` — 字典 line 1000
+
+**字典 v1.2 vs PA spec v1 = 0 drift**. 30d Bybit V5 changelog 0 breaking change.
+
+### 6 Caveats for PA spec v2
+
+| # | 嚴重度 | spec v2 章節 | 補 |
+|---|---|---|---|
+| 1 | MEDIUM | §7.6 new | WS reconnect 不觸 SM transition |
+| 2 | HIGH | §6.6 new + §1.2 | Kill batch_wait rate-limit pattern (per-symbol 0.3s margin) |
+| 3 | LOW | §3.6 new | Renew 走既有 `live_trust_routes.renew()` 不重複 |
+| 4 | HIGH | §6.3 改 | Cancel-all THEN close-position THEN revoke 順序，DCP 不可作 primary |
+| 5 | MEDIUM | §7.4 改 + §3.3 Gate 7 加 | Bybit KYC tier 與 EarnedTrust tier cross-ref |
+| 6 | HIGH | §15.4 new | Mainnet 解鎖前 8 項 BB mandatory checklist |
+| 7 (meta) | LOW | §13.4 改 | Wave 2.4 IMPL pre-flight changelog 自查 |
+
+### Bybit-side overall
+
+- 技術合規度: 97% (LG-3 0 endpoint 變動，仍維持 v3 baseline)
+- 政策合規度: 70% (M5-1 + M5-2 12+ day 0 進展，mainnet 解鎖前 mandatory)
+- 0 ship-stop blocker
+- 0 endpoint deprecation 觸碰
+- 5-gate live boundary 不放寬
+
+### 關鍵 push back 重點
+
+1. **caveat 2 + 4 HIGH**：`/kill` IMPL 必走「per-symbol 序列化 cancel-all → close-position → revoke」順序，每 step 0.3s safety margin。**禁止**先 revoke → engine cancel_token → cancel-all 沒 fire 靠 DCP fallback (DCP 是 backup 不是 primary)。
+2. **caveat 6 HIGH**：Mainnet 解鎖前 BB mandatory 8 項 checklist 進 spec v2 §15.4，覆蓋 M5-1 / M5-2 / API key / runbook / KYC / IP whitelist / first-day limit 等。
+3. **caveat 5 MEDIUM**：EarnedTrust T0-T3 與 Bybit KYC tier cross-ref，approval Gate 7 加 `bybit_kyc_tier_below_trust_tier_requirement` reason code。
+
+### 下次啟動需查驗項
+
+1. PA spec v2 是否採納 6 caveats (特別 caveat 2 + 4)
+2. Wave 2.4 IMPL 前 Bybit V5 changelog 0 breaking change verify
+3. LG3-T5 IMPL `/kill` 是否真用 0.3s safety margin
+4. LG3-T3 approval Gate 7 是否加 Bybit KYC tier check
+5. spec v2 §15.4 Mainnet 解鎖 8 項 checklist 是否完整入 spec
+6. M5-1 / M5-2 進展 (仍 stale；mainnet 解鎖 mandatory)
+
+### Report path
+
+`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-11--lg3_spec_bb_review.md`

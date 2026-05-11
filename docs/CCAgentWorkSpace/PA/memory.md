@@ -3248,3 +3248,242 @@ PG fills 直查證據：
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md`
 
 **Confidence**: HIGH for code state findings (1-6 全 grep verify);  HIGH for E1 任務拆分 (對齊 profile.md 動態 isolation 派工準則); HIGH for Risk 排序 (LG-3 SM split-brain 在 5 個 SoT 散落事實上明顯); MEDIUM for E1 capacity 估 (依 §0 Sprint Milestone Banner 推算，sprint mid 可能調整); MEDIUM for spec phase 工時 1-1.5d 估 (LG-3 SM 複雜度高，可能需 2d)
+
+---
+
+## 2026-05-11 LG-3 SupervisedLive SM Spec v1 — Wave 2.1 spec phase 完成
+
+**Trigger**: PM Wave 2.1 self-task per D-prep §6.1。post W-D MAG-084 closure + Wave 1.6 P1-FILL-LINEAGE-DROP land (e17ead2b)，啟動 LG-3 IMPL 前的 spec phase。
+
+**Deliverable**: 16 章節 spec doc `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v1.md` (~1700 行 spec doc)
+
+**Spec 設計關鍵點**:
+
+1. **7-state SM**：DRAFT → REGISTERED → ACTIVE_PRE_AUTH → ACTIVE_AUTHED → ACTIVE_TRADING → DRAWDOWN_PAUSE → CLOSED；16 條合法 transition + 6 個 illegal_transition_attempted test case；非法 transition fail-closed 留 src state（不 crash engine 破 stops）
+
+2. **5 SoT reconciler 30s loop**：authority order = audit_table (SoT) > Rust SM > Python SM > authorization.json > lease_transitions。Disagree 連 2 cycle 才升 force_close（防 transient 1-cycle false-positive）。reconciler 在 Rust async task，非 hot path
+
+3. **V094 audit 17 欄**：RFC 11 欄 + 6 補欄（session_id JOIN key / src_state+dst_state debug / alpha_source_id R-4 forward-compat / cohort_ref W-AUDIT-9 cross-ref / payload JSONB extra）；CHECK constraint 17 action enum；TimescaleDB hypertable + 4 hot-path indexes
+
+4. **session_override 嚴格 min-only**：`effective = min(P1, session_override, strategy_config)`；12 TC 三角必審覆蓋 attack vector TC-3（override > P1）；E2 grep `\bmax\(.*p1` returns 0 強制；SessionOverrideLimits parsing 階段拒 NaN/負/零
+
+5. **Approval RPC 6 Gate**：operator role + envelope HMAC + live_reserved mode + scope/limits validation + 5-gate live boundary + W-AUDIT-9 cohort awareness（informational）+ atomic transition + authorization.json write
+
+6. **Kill switch dual-path**：API `/api/v1/live/supervised/kill` 走 5s countdown modal + IPC `trigger_kill_switch` Rust-local cancel；兩條都 idempotent + 同 audit event；GUI A3 review 必活（per W-AUDIT-7c precedent）
+
+7. **R-4 forward-compat**：alpha_source_id NULLable + metadata.cohort_ref，N+7+ W-AUDIT-8g land 不破 V094
+
+**LG3-T1..T7 IMPL-ready task breakdown**:
+- T1 Rust SM core ~1700 LOC（4 file 拆 ≤800 警告線）
+- T2 Python SM mirror ~500 LOC
+- T3 Approval RPC route ~400 LOC（extend live_session_routes.py 734→984）
+- T4 Audit V094 + writer ~780 LOC（含 SQL + Rust writer + 2 healthcheck）
+- T5 Kill + session_override + intent_processor binding ~370 LOC
+- T6 E2E test ~1000 LOC（LG-4 RFC 10 條件全 cover）
+- T7 GUI ~550 LOC（5s countdown modal per W-AUDIT-7 precedent）
+- Total ~5300 LOC（Rust ~3300 / Python ~1300 / SQL ~180 / Frontend ~550）
+
+**Parallel capacity**: Phase 1 = 4 並行（T1/T2/T4/T7 獨立）→ Phase 2 = 2 並行（T3+T5 依 T1+T2）→ Phase 3 = 1（T6 依 T1-T5）
+
+**Healthcheck 新增**: [59] supervised_live_sm_invariant / [60] approval_rpc_health / [61] audit_mirror_freshness（與既有 [33]/[40]/[45]/[55]/[56]/[58] 互補不重疊）
+
+**Max Risk 排序（spec v1 更新）**:
+1. (極高) SM 5-SoT split-brain → reconciler 30s + 連 2 cycle 防 transient + audit SoT 權威
+2. (極高) session_override 變相突破 P1 → min-only formula + 12 TC + grep guard + E2+QC+MIT 三角
+3. (高) GUI kill button 誤操作 → 5s countdown + A3 review + node --check sop
+4. (中) outbox mpsc buffer 滿 SM 不 advance（fail-closed OK，control plane）
+5. (中) Approval RPC 6 gate 序列繞過 attack
+6. (中) Rust+Python SM IPC broadcast race（audit SoT 自動 reconcile）
+7. (低) R-4 backward-compat 破壞（NULLable column 預留）
+
+**Cross-wave 衝突**: 0 file 重疊 with LG-1 / LG-2 / W-AUDIT-8a / W-AUDIT-9 / W2 IMPL / F3+F4 / Wave 1.6（既 land）
+
+**16 原則 + DOC-08 §12 + 硬邊界 compliance**: A 級 0 硬邊界觸碰；強化原則 #4/#5/#6/#7/#8
+
+**spec phase status**: PA spec v1 ship；下步 PM 派 QC+BB+MIT parallel review (Wave 2.1.5, 1d)；PA spec v2 final 0.5d；PM 派 Wave 2.4 IMPL 7-8d
+
+**架構教訓 7**：**reconciler 連 2 cycle 才升 force_close** 是 split-brain SM 的關鍵設計範式。1 cycle disagree 可能來自 transient IPC delay（Rust→Python broadcast 微秒級 race），1 cycle 就 force_close 會 false-positive 殺 valid session。但 2 cycle 60s window 仍 disagree = 真實 desync，必須 fail-closed。設計準則：multi-SoT reconciler 必加 N-cycle 確認窗，N≥2，cycle interval ≥ 最慢 broadcast 路徑的 2 倍。
+
+**架構教訓 8**：**session_override 反 attack vector TC-3**（`override > P1` 必反成 effective=P1）是 spec phase 唯一要明示反例的 TC。普通 TC 證正常路徑 work；但 attack vector TC 必證 fail-closed 真實生效。E2 grep 為靜態防線，TC-3 為動態防線，缺一不可。Spec v2 收 QC review 反饋若有「TC-3 還不夠」，可加 TC-13 fuzz test（隨機 1000 個 override > P1 sample，全部 reject）。
+
+**架構教訓 9**：**audit table 作 SoT 真值權威**（5 SoT 中 #5 為主，#1-#4 derived）是 multi-process SM 最乾淨的設計。理由：(a) PG append-only history 是不可變 truth；(b) reconciler 不打 PG 同步（30s 拉一次，非 hot path）；(c) 任何 SM crash 重啟可由 audit table 重建 state；(d) 跨 process audit 一致 (Rust + Python 寫同表)。對比方案「Rust SM 為 SoT」會破 audit 重啟可恢復性。
+
+
+---
+
+## 2026-05-11 LG-3 Spec v2 Final — Wave 2.2 incorporate 26 caveat
+
+**Trigger**: PM Wave 2.2 self-task per D-prep §6.1。post Wave 2.1.5 三方 review 全 APPROVE（QC + MIT + BB；0 REQUEST CHANGES），25+ caveat 必 incorporate 進 spec v2 final。
+
+**Deliverable**: spec v2 final doc `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v2_final.md` (1767 行, v1 1221 → +546 行 / < 2000 hard cap)
+
+**26 Caveat 全 incorporated（無 deferred）**:
+
+| Source | Total | All Incorporated |
+|---|---|---|
+| QC | 6 必補 + 4 SHOULD = 10 條 | ✅ 10/10 |
+| MIT | 6 MUST + 3 SHOULD = 9 條 | ✅ 9/9 |
+| BB | 5 spec 補章節 + 1 mainnet checklist + 1 meta pre-flight = 7 條 | ✅ 7/7 |
+| **Total** | **26** | **✅ 26/26** |
+
+**主要設計決策（v2 incorporate）**:
+
+1. **session_override immutable for session lifetime**（QC CAVEAT 7 Option 1 採納，§3.5）
+   - 杜絕 mid-session attack surface（operator 在 reconcile cycle 邊界改 override 可能誤觸 reconcile_force_close）
+   - 簡化 audit table 不需新增 `session_override_updated` enum
+   - 簡化 reconciler inverse map（§2.2A 維持 17 action 不擴）
+   - 對齊 EarnedTrust authorization TTL 設計（一次性鎖定）
+   - GUI 修改 session_override = kill + new approve
+
+2. **§2.2A inverse map (17 action × 7 state) 完整表**（MIT MUST-6，§2.2A）
+   - audit `action` → projected_state mapping 7 type cover 17 enum
+   - Rust `audit_action_to_projected_state(action: &str) -> Option<SmState>` 完整 match
+   - Python mirror `supervised_live_state.py` 必 1:1 對應同一 dict（IMPL phase E2 check 等價性）
+   - 防 split-brain epidemic（Rust + Python 兩端解讀不一致 = SM mirror disagree）
+
+3. **/kill cancel-all THEN close-position THEN revoke 順序**（BB caveat 4 + 2，§6.3 + §6.6）
+   - 禁止：先 revoke → engine cancel_token → cancel-all 沒 fire → DCP fallback 救場
+   - DCP 是 backup 而非 primary；operator 視 DCP fire 為「kill 沒做完整」應觸發 RCA
+   - 序列化 batch_wait 0.3s per symbol（Order group 20 r/s × 0.3s safety margin）
+   - 25 symbol × 0.3s = 7.5s + cancel/close ~3s = 完整 kill ≤ 10s
+   - 6.7 r/s utilization 33% Order group cap，留 67% headroom
+
+4. **Approval Gate 7 Bybit KYC tier cross-ref**（BB caveat 5，§3.3 Gate 7 + §3.7 + §7.4A）
+   - REQUIRED_KYC_FOR_TRUST_TIER: T0 Tier 0+ / T1 Tier 1+ / T2-T3 Tier 2+
+   - `query_bybit_kyc_tier_cached()` 5min cache（GET /v5/user/query-api permissions）
+   - 失效時間：cache miss / TTL expire / 手動清 cache
+   - Cache miss + Bybit unreachable → fail-closed reject（reason: `bybit_kyc_check_unreachable`）
+   - 避免 retCode=10005 (PermissionDenied) lease + audit 浪費
+
+5. **TC 從 12 升到 19**（QC CAVEAT 1/2/3/4/5/6 + TC-19 split-brain）
+   - TC-13: Zero override at parse layer
+   - TC-14: Lease re-acquire 不重設 override
+   - TC-15: Sequential kill+approve scope-widen audit forensic
+   - TC-16: Outbox PG retry exhaustion + in-memory recovery
+   - TC-17: u32 saturating at boundary
+   - TC-18: P1 per-intent vs aggregate semantic
+   - TC-19: Split-brain reconcile clears override
+
+6. **V094 schema 加 2 forward-compat column**（MIT SHOULD-2/3，§4.1）
+   - `strategy_alpha_score FLOAT8`（R-4 alpha routing 評分依據）
+   - `regime_tag TEXT`（R-2 Strategist reframe regime-aware 配套）
+   - Backward-compat: N+1 ship 時全 NULL；W-AUDIT-8g land 時 UPDATE backfill 不破 V094
+
+7. **§4.1 Guard A part 2 + ADD CONSTRAINT block**（MIT MUST-1/2，§4.1）
+   - Part 2: supervised_live_audit own 21-column allowlist check（mirror V054 §155-188）
+   - 4 CHECK constraint via ADD CONSTRAINT IF NOT EXISTS block：action / result / engine_mode / ts_ms > 0
+   - idempotent: re-runs no RAISE
+
+8. **PG retry exhaustion in-memory recovery**（QC CAVEAT 4，§4.4A）
+   - PG retry 3 fail → engine graceful shutdown（cancel_token fire）
+   - pending vec 內 audit row 永久遺失（accepted trade-off per `_REGISTER_IDEM_CACHE` 同精神）
+   - engine 重啟後 reconciler 第一 cycle 觀察 disagree → 連 2 cycle 確認 → reconcile_force_close 自動清空
+   - operator GUI 顯示 reason=`engine_crashed_pending_audit_lost` 必手動 acknowledge before 重 approve
+   - 禁 pending vec 寫盤再 replay（破 audit append-only + 引入 disk write hot path）
+
+9. **Linux PG dry-run dispatch SOP**（MIT MUST-3，§13.4.1）
+   - E1 IMPL on Mac → Linux dry-run round 1（`psql -f V094` + INSERT test data 驗 CHECK） → round 2（idempotency verify no RAISE） → sqlx checksum verify（含 `bin/repair_migration_checksum` 處理） → E2 / E4 / A3 → sign-off
+   - 禁 Mac mock pytest PASS = Linux PG runtime semantic PASS（V055 5-round loop 教訓）
+
+10. **GUI Approval response panel submitted vs effective**（QC CAVEAT 10，§6.5A）
+    - 表格 4 row: max_position / max_daily_loss / max_orders / max_leverage
+    - Submitted / Effective / Reason 三 column
+    - 對應 audit payload `submitted_override` + `effective_after_min` + `submitted_vs_effective_reason` JSONB subfield
+
+11. **Non-training surface invariant**（MIT MUST-5，§4.4B + §4.1）
+    - schema-level safety statement + E3 grep rule
+    - allowlist 路徑：healthcheck + reconciler + writer
+    - blocklist 路徑：program_code/**/{ml,training,learning,scorer,linucb,mlde,dream,optuna,thompson}/**
+    - 對齊既有 CLAUDE.md §九 `replay.simulated_fills synthetic_replay` 防護 SOP
+    - E3 IMPL after Wave 2.4 Phase 3：補 `helper_scripts/audit/e3_grep_non_training_surface.sh`
+
+12. **Mainnet 解鎖前 BB mandatory 8 項 checklist**（BB caveat 6，§15.4）
+    - M5-1 governance entry（KYC + 地理 + API permission + IP whitelist + ToS）
+    - M5-2 IP whitelist preflight 工具 IMPL
+    - mainnet API key（withdraw=false + IP whitelist 24h cool-down）
+    - P0-OPS-4 首日 runbook
+    - mainnet authorization.json env_allowed=['mainnet'] 分隔（既有 code handle）
+    - 首日 limit T0 30min cap + 1 strategy + 1 symbol cohort
+    - mainnet 切 LiveDemo restart 規程
+    - broker partnership eligibility 例行驗（每月）
+
+**v2 新章節 / sub-section 摘要**:
+- §2.2A audit→state inverse map（17 action × 7 state）
+- §3.5 immutability declaration + §3.5.1 Sequential kill+approve audit forensic
+- §3.6 Renew clarification
+- §3.7 Gate 7 KYC cross-ref（簡述）
+- §4.1 Guard A part 2 + ADD CONSTRAINT block + SHOULD column
+- §4.4A PG retry exhaustion in-memory recovery
+- §4.4B Non-training surface invariant
+- §5.1 fn body amendments（u32 saturating + P1 cap semantic comments）
+- §5.3 TC-13~TC-19（7 new TC）
+- §6.5A Approval response panel
+- §6.6 Kill rate-limit batch_wait pattern
+- §7.4A EarnedTrust × Bybit KYC tier cross-ref table
+- §7.6 WS reconnect 不觸 SM
+- §10 [59] baseline KS test + [60] 30d budget gate + KYC reject rate sub-check
+- §11.9 Kill rate-limit competition risk
+- §13.4.1 Linux PG dry-run dispatch SOP
+- §13.4.2 Wave 2.4 IMPL pre-flight Bybit changelog check
+- §15.4 Mainnet 解鎖前 BB mandatory 8 項 checklist
+- §16 **Caveat Resolution Table**（26 caveat full audit trail）
+
+**LOC 微調**:
+- LG3-T4: 780 → 980 LOC（+200 加 Guard A part 2 + CHECK constraint + healthcheck sub-check + E3 grep script）
+- LG3-T5: 370 → 420 LOC（+50 加 batch_wait pattern + u32 saturating）
+- LG3-T6: 1000 → 1100 LOC（+100 加 5 new AC test）
+- LG3-T7: 550 → 620 LOC（+70 加 Approval response panel）
+- Total: ~5300 → ~5720 LOC
+
+**Max Risk 排序（v2 更新後）**:
+1. (極高) SM 5-SoT split-brain → 加 §2.2A inverse map IMPL 一致性
+2. (極高) session_override 變相突破 P1 → 19 TC（從 12 升）+ immutable lifetime + grep guard
+3. (高) GUI kill button 誤操作 → 5s countdown + A3 + 序列化 batch_wait + cancel-then-revoke + Approval response panel
+4. (中) outbox mpsc buffer 滿 SM 不 advance → §4.4A PG retry exhaustion recovery
+5. (中) Approval RPC 8-gate（v2 升）序列繞過 attack → Gate 7 KYC cross-ref + immutability + audit forensic
+6. (中) Rust+Python SM IPC broadcast race → §2.2A inverse map 1:1 等價
+7. (低) R-4 backward-compat 破壞 → 3 NULLable column 預留（v2 +2 SHOULD column）
+8. (中) Kill 序列化 vs Bybit rate-limit 競爭（v2 new 11.9）→ 序列化 + 0.3s safety margin + DCP backup
+
+**Cross-Wave 衝突**: unchanged from v1（0 file 重疊 with LG-1 / LG-2 / W-AUDIT-8a / W-AUDIT-9 / W2 IMPL / F3+F4 / Wave 1.6）
+
+**16 原則 + DOC-08 §12 + 硬邊界 5 項 compliance**: **A 級** — 0 硬邊界觸碰；強化原則 #4/#5/#6/#7/#8（v2 加原則 #7 Non-training surface invariant 顯式 schema-level safety）。
+
+**spec v2 final status**: ✅ ship；下步 PM 派 Wave 2.4 IMPL E1×7（per §8 task breakdown, 7-8d）；後續 Wave 2.5 sign-off。
+
+**架構教訓 10（v2 新增）**：**26 caveat incorporate without redesign 的關鍵設計範式**：
+- v1 spec 結構良好（16 章節 + 12 TC + 7-state SM）→ v2 不大改結構
+- 各章節 inline amendment 加 reviewer ref → 維持 spec 連貫性
+- 新章節按 reviewer 建議位置加 → 避免散亂
+- §16 Caveat Resolution Table 給 reviewer 快查 + 0 deferred audit trail
+- 對 reviewer 而言 = 完整看到他的 caveat 在哪裡被 incorporate；對 IMPL E1 而言 = 19 TC + 23 AC 全 explicit
+- 重點：caveat 接納度 = 100%；但採納 != redesign，是「補強而非結構性 redesign」（per 3 reviewer 共識）
+
+**架構教訓 11（v2 新增）**：**immutable session_override 是 5-SoT SM 必然選擇**：
+- mutable override 必加新 audit action `session_override_updated`，破 §2.2A 17 action × 7 state 完整性
+- mutable 引入 reconcile cycle 邊界 attack vector（QC §C 場景 X 真實存在）
+- 對應 EarnedTrust authorization TTL 一次性鎖定 = 同設計範式
+- 「不要在 active session 中動 config」是 multi-process SM 的健康原則
+- 代價：operator 需 kill + new approve 才能改 override → 但 5s countdown + Approval form 完整 GUI 流程已 cover
+
+**架構教訓 12（v2 新增）**：**Bybit KYC cross-ref Gate 7 是 spec 與真實交易所之間的必補橋樑**：
+- spec 內部 EarnedTrust tier 是治理層概念；Bybit KYC tier 是交易所層真實 permission
+- 缺 Gate 7：approval pass → live order create → retCode=10005 → lease + audit 浪費 + operator 困惑
+- 加 Gate 7（5min cache + fail-closed unreachable）→ approval 階段就 reject，零 lease 浪費
+- 對 supervised live operator → 「我的 KYC 配置不對」清楚知道（reason_codes 明示）
+- 對其他 governance gate（W-AUDIT-9 cohort / EarnedTrust tier / lease）→ 同範式：spec 內部 gate vs 交易所層 permission 必明文 cross-ref，否則 production 撞牆
+
+**Confidence**:
+- HIGH for caveat 全 incorporate（26/26 line-by-line ref to §16 table）
+- HIGH for 0 deferred / 0 不接納
+- HIGH for 0 redesign（三方共識「補強而非結構性 redesign」）
+- HIGH for §2.2A inverse map 完整性（17 action × 7 state 全 cover）
+- HIGH for session_override immutable 設計選 Option 1 推薦理由（4 個獨立理由）
+- HIGH for /kill cancel-then-revoke 順序明文 + DCP backup 角色定位
+- HIGH for V094 Guard A part 2 + ADD CONSTRAINT idempotent
+- MEDIUM for spec v2 LOC 控制（1767 行 / 2000 hard cap，~88% 空間）
+- MEDIUM for Wave 2.4 IMPL 工期估（7-8d 仍適用，LOC 微升 ~5300→5720 不破 sprint budget）
+- LOW for 26 caveat 全文 1767 行單檔閱讀負擔（reviewer 可走 §16 table 快查）
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v2_final.md`
+**Mirror path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/Operator/2026-05-11--lg_3_spec_v2_final.md`

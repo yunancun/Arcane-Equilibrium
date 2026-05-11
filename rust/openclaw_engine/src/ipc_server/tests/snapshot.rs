@@ -3,7 +3,7 @@
 
 use super::super::*;
 use super::{
-    empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot,
+    empty_budget_slot, empty_cost_edge_advisor_slot, empty_account_manager_slot, empty_h_state_cache_slot, empty_teacher_slot,
     make_test_config, make_test_data_dir, write_test_snapshot,
 };
 
@@ -30,6 +30,7 @@ async fn test_get_paper_state_no_file() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(
@@ -61,6 +62,7 @@ async fn test_get_paper_state_with_snapshot() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -93,6 +95,7 @@ async fn test_get_latest_prices_with_snapshot() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);
@@ -124,6 +127,7 @@ async fn test_get_tick_stats_with_snapshot() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none(), "error: {:?}", resp.error);

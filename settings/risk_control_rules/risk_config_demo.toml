@@ -406,3 +406,22 @@ sampling_normal_pct = 10        # NORMAL priority (0-100)
 sampling_high_pct = 50          # HIGH priority (0-100)
 sampling_critical_pct = 100     # CRITICAL priority (always 100 for audit completeness)
 fail_soft_on_db_error = true    # PG outage → log warn + drop, never block MessageBus.send
+
+# LG-2 T4 (2026-05-11) — 24h pricing freshness gate config（per PA tech plan
+# `2026-05-11--lg_2_3_4_design_plan.md` §2.4 表 T4 + LG-3 RFC
+# `2026-05-01--lg3_provider_pricing_binding_rfc.md` §Refresh Cadence）。
+#
+# Demo 預設：中庸閾值 — demo 是 learning / edge 累積主通道（per memory
+# `project_edge_data_isolation`），hourly fee refresh task 失敗一次即觀測
+# (60min warn)，超過 24h hard-fail（mainnet 風險面對齊 LG-3 RFC §2.3）。
+# cold_default_acceptable_modes 列 paper/demo/live_demo — demo Bybit endpoint
+# fee-rate API 不支援故 seed_default fallback 可接受。
+#
+# 三環境獨立 per memory `feedback_env_config_independence`：demo 配置故意比
+# live 寬鬆（learning posture），不可衛生合併。validate() 強制 warn < fail
+# / fail > 0 / 白名單非空且不含 "live"（LG-3 RFC §2.3 mainnet fail-closed
+# 不變式）。
+[pricing]
+max_age_warn_minutes = 60       # 60min — hourly refresh fail 一次即 WARN
+max_age_fail_minutes = 1440     # 24h  — RFC §2.3 mainnet hard-block 等同門檻
+cold_default_acceptable_modes = ["paper", "demo", "live_demo"]

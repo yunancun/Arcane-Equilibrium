@@ -161,6 +161,25 @@ pub type CostEdgeAdvisorSlot = Arc<RwLock<Option<Arc<crate::cost_edge_advisor::C
 ///   對齊 `trigger_live_auth_recheck`（PIPELINE-SLOT-1 Phase 3）advisory shape。
 pub type EdgeReloadSenderSlot = Arc<RwLock<Option<tokio::sync::mpsc::Sender<()>>>>;
 
+/// LG-2 T3 (2026-05-11): 延後注入的 AccountManager slot，供 IPC route
+/// `query_fee_source` 讀取 fee 來源類別給 healthcheck [45] dual-source compare。
+///
+/// MODULE_NOTE：
+///   AccountManager 由 `main_instruments::init_shared_clients_and_instruments`
+///   在 IPC server detach **之後**建立（依賴 pipeline bindings 而 binding 又依
+///   `init_pipelines`）。所以 IpcServer::new() 構造時 slot 為 None，main.rs 在
+///   `init_shared_clients_and_instruments` 回傳 SharedClientsBundle 後透過
+///   slot.write().await.replace(am.clone()) 注入。
+///
+///   IPC handler `handle_query_fee_source` 在 slot=None 時回結構化
+///   `{"status": "uninitialized"}` payload 而非 error — 對齊
+///   cost_edge_advisor / h_state_cache 既有 pattern。
+///
+///   Phase A 純唯讀 IPC，hot path 不讀此 slot（hot path 直接呼
+///   `AccountManager::fee_source` 用 pipeline binding 的 Arc，不經 IPC）。
+pub type AccountManagerSlot =
+    Arc<RwLock<Option<Arc<crate::account_manager::AccountManager>>>>;
+
 // =============================================================================
 // Sprint N+1 W1 + W2 panel slot insertion anchors
 // PA D+0 預留 anchor，避免 W1/W2 五個 E1 sub-agent 並行 IMPL 時撞 line collision

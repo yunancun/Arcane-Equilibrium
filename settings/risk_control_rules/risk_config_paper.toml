@@ -365,3 +365,21 @@ sampling_normal_pct = 10        # NORMAL priority (0-100)
 sampling_high_pct = 50          # HIGH priority (0-100)
 sampling_critical_pct = 100     # CRITICAL priority (always 100)
 fail_soft_on_db_error = true    # PG outage → log warn + drop, never block MessageBus
+
+# LG-2 T4 (2026-05-11) — 24h pricing freshness gate config（per PA tech plan
+# `2026-05-11--lg_2_3_4_design_plan.md` §2.4 表 T4 + LG-3 RFC
+# `2026-05-01--lg3_provider_pricing_binding_rfc.md` §Refresh Cadence）。
+#
+# Paper 預設：寬鬆閾值 — paper pipeline 預設 dormant（OPENCLAW_ENABLE_PAPER=1
+# 才 spawn），且 paper 不接 Bybit fee endpoint（無 fill 即無 pricing 行），
+# 此處數值僅作 schema parity 與三環境配置面一致；24h warn / 7d fail 給
+# operator 充足 forensic 窗。cold_default_acceptable_modes 列 paper/demo/
+# live_demo，與 demo 對齊 — paper 整體無 mainnet 暴露故無需嚴格收緊。
+#
+# 三環境獨立 per memory `feedback_env_config_independence`：本 section 預設
+# 與 demo/live 不同，禁衛生合併。validate() 強制 warn < fail / fail > 0 /
+# 白名單非空且不含 "live"（LG-3 RFC §2.3 mainnet fail-closed 不變式）。
+[pricing]
+max_age_warn_minutes = 1440     # 24h — paper 寬鬆觀察門檻
+max_age_fail_minutes = 10080    # 7d  — paper hard-fail 門檻（mainnet 無關）
+cold_default_acceptable_modes = ["paper", "demo", "live_demo"]

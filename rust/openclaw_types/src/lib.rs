@@ -16,7 +16,9 @@ pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, PriceEventKind, OHLCV};
-pub use risk::{H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot};
+pub use risk::{
+    H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot, PricingConfig,
+};
 pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitiator, RiskLevel};
 
 // ---------------------------------------------------------------------------
