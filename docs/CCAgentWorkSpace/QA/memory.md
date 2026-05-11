@@ -349,3 +349,50 @@ Round 5 曾預警 round 6 可能再被「/finalize 拒接 subprocess_pid IS NULL
 - **deploy-cutoff SQL UTC mandatory**：任何 post-deploy verification SQL 用 `+00:00` 或 `at time zone 'utc'`，禁混 local timezone（CEST/EST/etc）。納入 PA spec template + QA audit template default。
 - **entry vs risk_exit 分流必要**：trading.fills cross-join 必區分 `oc_*` 與 `oc_risk_*`；spine lineage 是 entry-path-only，stopmanager 走獨立 path（fix scope 之外）。
 - **[55] WARN vs FAIL 細分**：bad_report_value_quality=0 + state_changes ≥ N 是 fix correctness gate；chains_with_real_fill_report ratio 是 calibration / transition gate。前者強 fail-closed，後者接受 WARN transition。
+
+---
+
+## 2026-05-11 W-D MAG-083 QA Audit
+
+**任務**：W-D MAG-083 final release audit（QA 視角，三角之 1/3）；PA + QC 平行 audit。
+**Verdict**：**APPROVE WITH RESERVATIONS**
+**Report**：`docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-11--w_d_mag083_qa_audit.md`
+
+### 關鍵 finding
+
+1. **時間軸初步誤判**：engine etime `ps -o etime` 顯示 `23:01` 我誤讀為 23h，實際為 23min（MM:SS）。後續用 `etimes`（秒）+ `lstart`（絕對時間）確認 engine 從 deploy+51s 起跑，audit 時間為 deploy+78min。SOP：**`ps -o etime` 後續必同步取 `etimes` 或 `lstart` 雙確認**，避免類似誤讀。
+
+2. **Caveat 2 fix 有 emergent edge case（R-1 new finding）**：
+   - deploy+10min adversarial：4/4 100% matched (re-audit baseline)
+   - deploy+78min adversarial：30/31 matched (96.8%)；6 個 orphan real-fill ER（real ER 寫了但 trading.fills 沒對應 row）；1 個 missed
+   - 6 個 orphan 集中在 deploy+72-73min 4-min burst window（03:13-03:14 UTC+2 = 01:13-01:14 UTC），symbol = grid_trading DOTUSDT/SUIUSDT/ARBUSDT/ETCUSDT × demo/live_demo
+   - orphan ER `fill_id` 在 trading.fills 完全找不到（strip `bybit-` 後也沒有）；後續 DOTUSDT/ETCUSDT 真實 fill 用了**不同 fill_id**
+   - 經 audit 期 5 分鐘後再查仍是 6+1，不是 lag = 是 stuck，但新累積仍 100% propagation
+   - 可能成因：trading_writer dispatch race / 同 order Bybit 多 exec event / fully_filled 路徑邊緣 case；非系統性 wiring failure
+   - **不阻 MAG-084**：fix correctness 邊界 case 不破，符合 PA 50% 觀察期 gate；reviewer brief 章節 2 升級
+
+3. **Cross-wave Sprint N+1 D+0/D+1 source-land 60+ commit**：W-C sign-off `1ebdb9c9` 之後 W7-3/W6 V086/W1 V085/V087/V088/W2 cross_asset/IPC slot/W1 BB WS V092 都 source land；9 SQL migration V082-V092 applied；3 panel writer 活躍（V085=251 row / V087=996 row / V088=75 row）。但 **engine PID 1597560 自 deploy 後未重啟**（binary mtime 02:01:30 stable），所有 Rust source change 未進 runtime。
+
+4. **W-AUDIT-9 canary_stage_log 0 row（dormant）**：Stage 0 binary fail-closed 不變式 hold；等 W6+W7 完成 ~D+3-4 cohort 啟動。W-C 修復不誤觸 stage 機制。
+
+5. **Sign-off file PID typo（R-3）**：寫 `1596779` 實際 `1597560`，純 doc accuracy。建議 PM 在 MAG-084 commit 同次修正。
+
+### Reviewer brief 從 4 章節擴 5 章節
+
+| # | 章節 | 升級點 |
+|---|---|---|
+| 1 | Caveat 1+2 fix wiring verified | 無變 |
+| 2 | **Real-fill propagation transition (升級)** | 加 burst window emergent edge case 描述；long-term ratio 96-100% range |
+| 3 | Caveat 3 by-design | 無變 |
+| 4 | Cross-language byte-equal | 無變 |
+| **5 (新)** | **Cross-wave Sprint N+1 D+0/D+1 source-land status** | 60+ commit + 9 migration source land 不破 W-C；engine 未 restart；後續 rebuild 視為 fresh window |
+
+### 治理 SOP 加固
+
+- **`ps -o etime` MM:SS 陷阱**：未來 audit 時間軸計算必雙確認（`etimes` 秒 + `lstart` 絕對）；避免被 MM:SS vs HH:MM 誤讀
+- **Caveat 2 propagation 不是 100% 穩態**：未來 [55] healthcheck 應加 gate 區分「100% (deploy+0~30min)」vs「96-100% (deploy+30min+)」，前者是 wiring correctness gate，後者是穩態 propagation gate
+- **engine restart = fresh evidence window 起點**：任何 rebuild --rebuild --keep-auth 後續，前次 audit 證據不可繼承；MAG-083 / MAG-084 governance reviewer brief 顯式 reset
+
+### 5-stage business chain 全 PASS（含 R-1 邊際 case）
+### Cross-wave regression count = 0 critical
+### release blocker 不阻 MAG-083：W-AUDIT-3..7 + LG-2/3/4 + ops gates + edge net-positive + 5 textbook structural alpha-deficient — 仍是 true live promote 前 blocker，本 audit 不擴 scope
