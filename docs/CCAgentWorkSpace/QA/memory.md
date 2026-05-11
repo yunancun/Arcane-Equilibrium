@@ -396,3 +396,65 @@ Round 5 曾預警 round 6 可能再被「/finalize 拒接 subprocess_pid IS NULL
 ### 5-stage business chain 全 PASS（含 R-1 邊際 case）
 ### Cross-wave regression count = 0 critical
 ### release blocker 不阻 MAG-083：W-AUDIT-3..7 + LG-2/3/4 + ops gates + edge net-positive + 5 textbook structural alpha-deficient — 仍是 true live promote 前 blocker，本 audit 不擴 scope
+
+---
+
+## 2026-05-11 P1-RCA-1 — R-1 orphan ER 系統性根因（顛覆 MAG-083 R-1 非系統性判斷）
+
+**任務**：W-D MAG-084 sign-off §5 schedule 24-48h follow-up；對 R-1 6 orphan + 1 missed entry 做 RCA
+**Verdict**：**SYSTEMIC**（顛覆 MAG-083 audit "non-systemic" 判斷）
+**Report**：`srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-11--p1_rca_1_orphan_er_investigation.md`
+
+### 數量規模顛覆
+
+| 視角 | snapshot | total fills | matched | missed | orphan | drop rate |
+|---|---|---|---|---|---|---|
+| MAG-083 audit (deploy+78min) | 30/31 entry matched | 31 | 30 | 1 | 6 | 22.6% |
+| **此 RCA (deploy+15h)** | engine 1 + 2 mixed | **163** | **132** | **31** | **11** | **25.8%** |
+| Engine 1 only (14.5h) | post-deploy_ts1 | 144 | 116 | 28 | 11 | **19.4%** |
+| Engine 2 only (3h) | post 14:30 UTC rebuild | 21 | 18 | 3 | 0 | **14.3%** |
+
+R-1 報告為「deploy+72-73min 4-min burst window 集中」；實證為 **9 個小時都有 missed**（02:00 33% / 12:00 37.5% / 14:00 21.1% 是峰，但分佈不止 burst）。
+
+### 4 suspects + 1 new root cause
+
+| Suspect | Verdict | Key evidence |
+|---|---|---|
+| A trading_writer dispatch race | REJECTED | 165/165 entry fills in trading.fills；drop 在 spine side |
+| B Bybit multi-exec event | REJECTED | 17 個 multi-fill 都是 **engine dual-rail demo+live_demo 並行** 同 order_id 副本，非 Bybit partial-fill |
+| C fully_filled 邊緣 path | REJECTED | A.5 empirical 0 case 同 order_plan_id 多 real-fill ER |
+| D engine state lost 跨 restart | PARTIAL | Engine 2 post-restart 仍 14% 漏；restart 不修，restart 觸發另一 burst |
+| **E mpsc try_send silent-drop** | **CONFIRMED** | runtime_shadow.rs:600-618 try_send fail-soft；channel cap 1024；flush 2000ms；burst 30 ER/min × 4-10 try_send/ER 超 ingress |
+
+### 推薦 fix（給 PM dispatch，QA 不執行）
+
+**Option F4 (hybrid)**: channel cap 1024→8192 + try_send retry 3x with 50ms sleep。
+- effort: 1-1.5h IMPL + 30 min E2 + 24h monitor
+
+### 4 個 followup ticket 建議
+
+| ID | Priority | Description |
+|---|---|---|
+| P1-FILL-LINEAGE-DROP | P1 | mpsc spine channel silent-drop fix per F4 |
+| P1-HEALTHCHECK-55-INVARIANT | P1 | [55] 加 per-fill bidirectional invariant（非 ratio threshold）|
+| P1-FILL-LINEAGE-MONITOR | P1 | metric agent_spine_channel_drop_total + alert 5/min |
+| P2-DUAL-RAIL-ORDER-ID | P2 | Engine dual-rail same order_id design review |
+
+### 關鍵教訓
+
+1. **R-1 短窗 snapshot 不可外推 long-term**：deploy+78min 看到 1 個 missed，drop 率看起來 3%（1/31）；deploy+15h 累積看到 19%。**任何 audit snapshot 必標明 sample window + 給 long-term extrapolation 風險警示**。R-1 "non-systemic" 判斷在 6+1 sample 下合理，但作為 long-term verdict 風險高。
+
+2. **wiring deterministic correctness ≠ propagation rate**（再次驗證 QC S1）：caveat 2 fix wiring 100% 正確（cross-language byte-equal contract），但 throughput infra（channel cap / flush interval / try_send fail-soft）會 silent-drop ER。fix correctness 看 unit test PASS，但**真實 propagation rate 需要 long window empirical**。
+
+3. **`try_send` 是 silent-drop 反模式 — 在 audit 路徑必偵測**：runtime_shadow.rs `try_send` + 1024 cap + 2000ms flush 共同形成 silent-drop。WARN log 確實寫，但沒進 healthcheck。「emit X 個 lineage row 都成功」≠「rx 確認收到」。**Caveat 2 類修復 + 任何 `try_send` 路徑必驗 long-window drop rate**。
+
+4. **Engine restart 不是 fix**：post-restart 3h 仍 14% drop；restart 觸發另一個 warm-up burst。restart 對 throughput 瓶頸毫無用處。Audit reviewer brief 強調「post-restart 是 fresh evidence window」是時間軸對齊，但**不是 silent-drop rate fix evidence**。
+
+5. **Multi-fill order_id pair 是 engine dual-rail 不是 Bybit**：deeper drill 揭示 trading.fills 17 個 "same order_id 多 fill" 其實是 demo + live_demo 並行 pipelines 各自跑 dispatch 用相同 sequence number。如果未來看到「同 order_id 多 fill」第一直覺不是 Bybit multi-exec，先驗 engine_mode 是否成對。
+
+6. **Healthcheck ratio vs invariant**：[55] 用 50% ratio gate 是 hand-tuned，**不是 statistical 衍生**。改為 deterministic per-fill bidirectional invariant 才能在 silent-drop 出現時 fail-closed。QC S3 已 P2 提此建議，本 RCA 升至 P1。
+
+7. **PM action vs QA self-fix 邊界**：QA 知道 F1-F4 4 個 fix 選項 + LOC + effort 估算，**禁自己 patch**（per CLAUDE.md §八 強制工作鏈 + memory `feedback_pushback`）。將完整 fix plan 寫進報告 §D.3 給 PM 派工。違反 = 越權。
+
+| 報告 | 日期 | 關鍵發現 |
+| 2026-05-11 P1-RCA-1 orphan ER RCA | 2026-05-11 | **SYSTEMIC** — mpsc try_send silent-drop；deploy+15h drop 19-26%；fix plan F4 hybrid 給 PM；R-1 "non-systemic" 判斷顛覆但不阻 MAG-084（wiring correctness 仍對）|

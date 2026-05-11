@@ -3181,3 +3181,70 @@ PG fills 直查證據：
 **Confidence**: HIGH for F3 spec + Risk 評估；HIGH for F4 option 拍板理由；HIGH for 跨 wave 衝突 verify；MEDIUM for Schedule W5 D+2~D+3（仍可由 operator override 排 D+0 或 D+1）；MEDIUM for F4 reconcile dust 對 [40] avg_net 統計實際影響估計（需 manual demo verify 真實樣本）
 
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--f3_f4_writer_defense_n1_dispatch_plan.md`
+
+
+---
+
+## 2026-05-11 P1-LG-DESIGN — PA tech plan for P0-LG-1 + P0-LG-2 + P0-LG-3
+
+**Trigger**: PM Wave 1 D-prep / Sprint N+1。Post W-D MAG-084 closure，critical path 推進 P0-LG 三項。
+
+**Key code state findings** (2026-05-11):
+
+1. **H0 Gate already in production hot path**: `rust/openclaw_engine/src/tick_pipeline/on_tick/step_0_5_h0_gate.rs:41` 已調用 `pipeline.h0_gate.check()`，hard-block 路徑 `ControlFlow::Break` → stops only → 早退。
+2. **Demo + LiveDemo TOML 已 `h0_shadow_mode=false`** (hard-block); paper `=true` (shadow only). Production hard-block 已生效多月。
+3. **ctor `shadow_mode: true` (pipeline_ctor.rs:75-76)** RRC-1-A3 註釋「observe-only until proven stable」— 啟動瞬窗 1-3s shadow → TOML 覆蓋 hard-block；風險點但不破。
+4. **Fee runtime complete**: AccountManager (903 LOC) + IntentProcessor::fee_rate_for_intent + spawn_fee_rate_tasks hourly refresh + last_fee_refresh_ms AtomicU64 + DEFAULT_TAKER_FEE 0.00055 / DEFAULT_MAKER_FEE 0.0002 fallback.
+5. **Healthcheck `[45]` pricing_binding 已 DONE Sprint C R6-T7** (2026-05-05) — PG-side proxy via `MAX(ts) WHERE fee_rate IS NOT NULL` + source 推斷 (seed_default / bybit_v5 / cold_default) + 3 fail-closed rules.
+6. **LG-3 supervised live SM 是 5 個元件 5 個 SoT 散落**: LiveAuthorization HMAC + EarnedTrustEngine T0-T3 (817 LOC) + LiveAuthWatcher 5s respawn (970 LOC) + drawdown_revoke (441 LOC) + Decision Lease (Sprint 3 Track H+I)；**未集中表達為 7-state SM**。
+
+**LG-1 真正剩餘** (P0-LG-1):
+- E2E mock blocked-intent Rust integration test (`tests/h0_blocking.rs`)
+- Healthcheck `[59]` h0_block_acceptance (新 `checks_h0_block_acceptance.py`)
+- Flip/rollback runbook + ctor 預設修正
+- Operator verification SQL endpoint
+- 24h passive observation 後 sign-off
+
+**LG-2 真正剩餘** (P0-LG-2):
+- Contract test pin Bybit fee response parse + TIF dispatch + fallback (新 `tests/lg3_contract.rs`)
+- Startup assertion `wait_for_first_refresh_or_timeout(30s)` + 3 條件 (refresh_ms>0 / fee_rate_count>=25 / live!=seed_default)
+- FeeSource enum 公開 API + healthcheck `[45]` dual-source 對賬
+- RiskConfig `[pricing]` section + hot-reload ArcSwap RMW (4 TOML 加 section)
+- ⚠️ Demo/LiveDemo 可接受 `seed_default`，Mainnet 不可（RFC §Pricing Sources）
+
+**LG-3 真正剩餘** (P0-LG-3):
+- SupervisedLiveStateMachine 集中表達 (Rust `supervised_live_sm/` + Python `supervised_live_state.py`)
+- Approval RPC `/api/v1/live/supervised/approve` (LG-4 RFC 13 欄)
+- Session-scoped risk_limits override (lease binding; `compute_effective_limits = min(P1, session_override, strategy_config)`)
+- Kill switch dual-path (API + IPC) 集中
+- Audit mirror table V09x__supervised_live_audit.sql (11 欄 append-only)
+- E2E acceptance tests (LG-4 RFC 10 條件)
+- GUI surface in live tab
+- ⚠️ Spec phase 必先 (PA 1-1.5d) → 5 E1 並行 IMPL
+
+**E1 並行能力**:
+- LG-1: 4 並行 (T1 Rust test / T2 Python healthcheck / T3 docs+ctor / T4 Python route)
+- LG-2: 3 序列推薦 (T4 RiskConfig 先 → T1+T3 並行 → T2 startup assertion 後)
+- LG-3: 5 並行 (T1+T2+T4+T7 + (T3+T5 依 T1+T2) + T6 ship 後)
+
+**Max Risk 排序**:
+1. LG-3 SM bypass paths split-brain (極高) — external observer reconcile loop 是 critical defense
+2. LG-3 Session override 變相突破 P1 (極高) — `min`-only compute_effective_limits + E2+QC+MIT 三角
+3. LG-2 Startup assertion timing race (高) — fee_rate task 首次 refresh 之前 spawn live
+4. LG-1 ctor `shadow_mode:true` 預設啟動瞬窗 (中)
+5. LG-3 GUI kill button 誤操作 (高) — 5s countdown + A3
+
+**Sprint N+1 capacity 估**:
+- W3-W4: LG-1 (4 並行) + LG-2 (3 序列) + LG-3 spec phase = 7 E1-week (8 budget OK)
+- W5-W6: LG-3 IMPL phase 4 並行 = 4 E1-week
+- W7-W8: LG-3 序列 T3+T5+T6 + sign-off = 3 E1-week
+
+**RFC v1 (2026-05-01) → 本 tech plan v1 (2026-05-11) 變化**:
+- 本 tech plan 不重寫 RFC，**識別 RFC 與 production 之間的 gap**
+- RFC 把 LG-2 描述為「verification 而非新建」→ 本 plan 確認 demo + live_demo TOML 已 hard-block，純驗證
+- RFC LG-3 healthcheck T2 已 DONE Sprint C → 本 plan focus 在 contract test + startup assertion + FeeSource enum
+- RFC LG-4 SM 是 spec only → 本 plan 拆 spec phase + 5 E1 IMPL phase
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md`
+
+**Confidence**: HIGH for code state findings (1-6 全 grep verify);  HIGH for E1 任務拆分 (對齊 profile.md 動態 isolation 派工準則); HIGH for Risk 排序 (LG-3 SM split-brain 在 5 個 SoT 散落事實上明顯); MEDIUM for E1 capacity 估 (依 §0 Sprint Milestone Banner 推算，sprint mid 可能調整); MEDIUM for spec phase 工時 1-1.5d 估 (LG-3 SM 複雜度高，可能需 2d)

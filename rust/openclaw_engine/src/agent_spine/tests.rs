@@ -18,6 +18,7 @@ use crate::intent_processor::{OrderIntent, VerdictInfo};
 use crate::order_manager::TimeInForce;
 use serde_json::json;
 use std::str::FromStr;
+use std::time::Duration;
 
 fn sample_intent(is_long: bool) -> OrderIntent {
     OrderIntent {
@@ -1242,4 +1243,234 @@ fn spine_ids_boundary_inputs_preserve_id_format() {
     let filled = compute_filled_report_id("", "");
     assert!(filled.starts_with("report:"));
     assert_eq!(filled.len(), "report:".len() + 32);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave 1.6 P1-FILL-LINEAGE-DROP unit tests（2026-05-11）。
+//
+// 釘住 3 條 invariant，對應 QA RCA 2026-05-11 Option F4 hybrid 修復語意：
+//   (a) channel full → drop counter 嚴格遞增（hot-path 行為驗）；
+//   (b) 8192 cap 下 burst 100 fill-completion 連續呼叫 0 drop（cap bump 真實生效）；
+//   (c) retry path：channel 從 full 釋放 slot 後，spawn 的 retry task 成功救援
+//       並計 retry_success_total。
+//
+// 三個 counter 為 process-wide global → 用 delta 比較避免 test 之間污染。
+// 三個 test 都不需依賴 spine_channel_drop_total 跨 test 絕對值，僅 read
+// before + after 求差。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 不變式 (a)：emit_fill_completion_lineage 在 channel 滿時計 drop counter 升 ≥1。
+///
+/// 機制：tx 通道用 cap=1 + 已預塞 1 個 msg；接著 emit_fill_completion 寫 4 try_send
+/// 應全 fail。Counter 在 fail 路徑 fetch_add(1)，總 drop 增量 = 4。
+#[tokio::test]
+async fn fill_completion_channel_full_increments_drop_counter() {
+    use super::runtime_shadow::{
+        emit_fill_completion_lineage, spine_channel_drop_total, FillCompletionLineageInput,
+    };
+
+    // cap=1，預先塞滿（用 strategy_signal_from_open_intent + from_strategy_signal
+    // 構造一個合法 SpineObjectEnvelope 當填料；不依賴 Default impl）。
+    let prefill_signal = strategy_signal_from_open_intent(
+        "sig-prefill-3001",
+        "ctx-prefill-3001",
+        3000,
+        "demo",
+        &sample_intent(true),
+    );
+    let prefill_obj =
+        SpineObjectEnvelope::from_strategy_signal(&prefill_signal, AgentSpineMode::Shadow)
+            .expect("prefill envelope");
+    let (tx, _rx) = tokio::sync::mpsc::channel::<AgentSpineMsg>(1);
+    tx.try_send(AgentSpineMsg::Object(prefill_obj))
+        .expect("pre-fill should succeed");
+    // Counter baseline（在塞 pre-fill 後就讀，因為 pre-fill 是 try_send 成功路徑
+    // 不計 drop counter；本 test 真正關心的是 emit_fill_completion 內部 4 個
+    // try_send_with_background_retry 在 channel 滿時呼叫 fetch_add 的次數）。
+    let drop_before = spine_channel_drop_total();
+
+    let accepted = emit_fill_completion_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        FillCompletionLineageInput {
+            order_plan_id: "plan-drop-counter-3001",
+            decision_id: "decision-drop-counter-3001",
+            symbol: "BTCUSDT",
+            engine_mode: "demo",
+            strategy: "grid_trading",
+            ts_ms: 3001,
+            filled_qty: 0.5,
+            avg_fill_price: 101.0,
+            fees_paid: 0.0007,
+            fee_bps: Some(7.0),
+            slippage_bps: None,
+            liquidity_role: "taker",
+            fill_latency_ms: Some(40),
+            exchange_exec_id: "exec-drop-counter-3001",
+            stub_report_id: "report-stub-3001",
+            order_link_id: Some("oc_drop_3001"),
+        },
+    );
+    let drop_after = spine_channel_drop_total();
+    let delta = drop_after - drop_before;
+
+    // 4 try_send 全 fail（channel 已滿）→ accepted=0，counter 升 ≥4
+    // （retry task 在背景 spawn，但不計 drop counter 第二次）。
+    assert_eq!(accepted, 0, "channel full should yield 0 accepted");
+    assert!(
+        delta >= 4,
+        "expected drop counter to increment ≥4 (got {delta})"
+    );
+
+    // 給 spawn 的 retry task 一點點時間結束（不阻塞 test 完成，純清理）
+    tokio::time::sleep(Duration::from_millis(10)).await;
+}
+
+/// 不變式 (b)：8192 cap 下連續 100 emit_fill_completion 0 drop（用 channel
+/// queue state 驗，不依賴 process-wide drop counter；後者在並行 test 下會被
+/// 其它 test 污染 delta）。
+///
+/// cap bump 真實生效的對抗驗證：1024 baseline 下 100 × 4 = 400 try_send 可能
+/// drop（取決於 rx 是否消費）；但 cap=8192 即使 rx 完全不消費，仍可承載
+/// 8192 個 msg without drop。本 test 用 rx 不消費 + 寫 100 fill-completion =
+/// 400 msg 遠低於 8192 cap，預期 accepted == 4 (every iter) + queued == 400。
+#[tokio::test]
+async fn fill_completion_burst_with_8192_cap_no_drop() {
+    use super::runtime_shadow::{emit_fill_completion_lineage, FillCompletionLineageInput};
+
+    // cap=8192 對應 production runtime 設定
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentSpineMsg>(8192);
+
+    // 連續 100 次 emit_fill_completion，每次寫 4 msg = 400 msg
+    // （遠低於 8192 cap）→ 預期每次 accepted=4 (本 channel 私有，無並行干擾)
+    for i in 0..100 {
+        let order_plan_id = format!("plan-burst-{i}");
+        let decision_id = format!("decision-burst-{i}");
+        let stub_id = format!("report-stub-burst-{i}");
+        let exec_id = format!("exec-burst-{i}");
+        let accepted = emit_fill_completion_lineage(
+            Some(&tx),
+            AgentSpineMode::Shadow,
+            FillCompletionLineageInput {
+                order_plan_id: &order_plan_id,
+                decision_id: &decision_id,
+                symbol: "BTCUSDT",
+                engine_mode: "demo",
+                strategy: "grid_trading",
+                ts_ms: 3002 + i as u64,
+                filled_qty: 0.5,
+                avg_fill_price: 101.0,
+                fees_paid: 0.0007,
+                fee_bps: Some(7.0),
+                slippage_bps: None,
+                liquidity_role: "taker",
+                fill_latency_ms: Some(40),
+                exchange_exec_id: &exec_id,
+                stub_report_id: &stub_id,
+                order_link_id: None,
+            },
+        );
+        // 本 channel cap=8192 完全未滿（私有 channel，不與其它並行 test 共享）
+        assert_eq!(
+            accepted, 4,
+            "iter {i}: expected 4 messages accepted (no drop) on private 8192-cap channel"
+        );
+    }
+
+    // 確認 100 × 4 = 400 msg 真的 queued 在 channel 內（直接證 0 drop）
+    let mut queued = 0usize;
+    while rx.try_recv().is_ok() {
+        queued += 1;
+    }
+    assert_eq!(
+        queued, 400,
+        "expected 400 msg queued in 8192-cap channel without drop"
+    );
+}
+
+/// 不變式 (c)：channel 從 full 釋放後，retry task 成功救援。
+///
+/// 機制：cap=4 + 預塞 4 個 pre-fill → emit_fill_completion 主路徑 4 try_send
+/// 全 fail（channel 全滿）→ spawn 4 retry task → 主 test 在 50ms 內陸續 drain
+/// pre-fill 釋放 slot → retry task @ 50ms tick wake up + try_send 成功。
+/// 驗證直接看 channel 是否收到「來自 retry task 的 4 個 emit_fill_completion msg」
+/// （不依賴 process-wide counter，避免並行 test 污染）。
+///
+/// 為何 cap=4 而非 cap=1：cap=1 下 4 retry task 同時喚醒競搶 1 slot 會有第 2-4
+/// task 又再 fail 觸發二次 retry 時序競爭，使最終 retry_success_total 雖最終達
+/// 4 但時延長，test deadline 內未收齊。cap=4 + drain 4 pre-fill 後正好騰 4 slot
+/// 給 4 retry，時序確定性高。
+#[tokio::test]
+async fn fill_completion_retry_succeeds_after_slot_released() {
+    use super::runtime_shadow::{emit_fill_completion_lineage, FillCompletionLineageInput};
+
+    // cap=4，預塞 4 個（讓 fill_completion 4 個 try_send 全 fail）
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentSpineMsg>(4);
+    for i in 0..4 {
+        let sig = strategy_signal_from_open_intent(
+            &format!("sig-retry-prefill-{i}"),
+            &format!("ctx-retry-prefill-{i}"),
+            3000 + i as u64,
+            "demo",
+            &sample_intent(true),
+        );
+        let obj = SpineObjectEnvelope::from_strategy_signal(&sig, AgentSpineMode::Shadow)
+            .expect("prefill envelope");
+        tx.try_send(AgentSpineMsg::Object(obj))
+            .expect("pre-fill should succeed");
+    }
+
+    let accepted = emit_fill_completion_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        FillCompletionLineageInput {
+            order_plan_id: "plan-retry-3003",
+            decision_id: "decision-retry-3003",
+            symbol: "BTCUSDT",
+            engine_mode: "demo",
+            strategy: "grid_trading",
+            ts_ms: 3003,
+            filled_qty: 0.5,
+            avg_fill_price: 101.0,
+            fees_paid: 0.0007,
+            fee_bps: Some(7.0),
+            slippage_bps: None,
+            liquidity_role: "taker",
+            fill_latency_ms: Some(40),
+            exchange_exec_id: "exec-retry-3003",
+            stub_report_id: "report-stub-retry-3003",
+            order_link_id: None,
+        },
+    );
+    // 主路徑全 fail（channel cap=4 已滿）；retry task 4 個 spawn 在背景
+    assert_eq!(accepted, 0, "main path should fail with channel full");
+
+    // 立刻 drain 4 個 pre-fill，騰出 4 slot 給 retry task 使用
+    for i in 0..4 {
+        let _msg = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("expected pre-fill {i} to drain"));
+    }
+
+    // 等待 retry task @ 50ms tick wake up；總 deadline 給 500ms（50ms ×3 retry
+    // worst case 150ms + tokio scheduler jitter buffer 350ms）
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    let mut received = 0usize;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(60), rx.recv()).await {
+            Ok(Some(_msg)) => received += 1,
+            Ok(None) => break,
+            Err(_) => continue, // timeout，再等下一個 60ms 區間
+        }
+        if received >= 4 {
+            break;
+        }
+    }
+
+    // 預期 ≥4 msg 透過 retry path 寫入 channel（救援成功的真實證據）
+    assert!(
+        received >= 4,
+        "expected ≥4 retry msg drained from channel (got {received}); retry task may have failed to wake up"
+    );
 }

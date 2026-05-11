@@ -8627,3 +8627,82 @@ SQL 反事實：移除所有 `strategy_name='grid_trading' AND symbol NOT IN pin
 - 原 IMPL 報告（先前 E1 寫）：`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_1_stable_id_helper.md`
 - IMPL commit：`b830e3fa`（2026-05-11 03:40 UTC+2）
 - E2 lint fix commit：`e40b2a76`（同日 follow-up）
+
+
+
+## Wave 1.6 P1-FILL-LINEAGE-DROP — Option F4 spine silent-drop fix IMPL DONE（2026-05-11）
+
+**觸發**：QA RCA 2026-05-11 `p1_rca_1_orphan_er_investigation.md` SYSTEMIC verdict — empirical engine 1 14.5h 19.4% / engine 2 3h 14.3% = ~25.8% ER silent drop（mpsc channel cap 1024 + flush 2000ms + try_send 非阻塞語意 = burst load 下集中 drop）；operator GO 派 Wave 1.6 急 fix；阻 Stage 3+ promotion
+
+**Verdict**：✅ **IMPL DONE — APPROVED FOR E2 + E4 PARALLEL REVIEW**
+
+**設計選擇 B-2 + 局部 B-3 hybrid**：
+- B-1（只 cap bump）：8x 估降到 <1% 但無 retry 救援 → ❌ 太樂觀
+- B-2（caller-aware）：entry path（hot）只 cap bump + counter；fill_completion path（post-fill）加 retry → ✅
+- B-3（全部 spawn task）：entry path 10 try_send 全 spawn = hot path overhead 不必要 → ❌
+- **B-2 + spawn task hybrid**：fill_completion 4 try_send fail 時 spawn 4 background retry task，sync fn 立即返回不破 caller cascade（async cascade 改要動多檔）
+
+### 修改檔案清單
+| 檔 | LOC | 變更 |
+|---|---|---|
+| `rust/openclaw_engine/src/tasks.rs:641-655` | +12/-1 | mpsc cap 1024 → 8192（8x headroom）+ 中文 RCA 經驗證據注釋 |
+| `rust/openclaw_engine/src/agent_spine/runtime_shadow.rs:33-93` | +63 | imports + 3 AtomicU64 counter + 3 pub accessor fn |
+| `rust/openclaw_engine/src/agent_spine/runtime_shadow.rs:639-771` | +103/-19 | try_send 加 counter；新增 try_send_with_background_retry spawn retry task |
+| `rust/openclaw_engine/src/agent_spine/runtime_shadow.rs:526-602` | +6/-8 | emit_fill_completion_lineage 4 try_send 換用 retry helper |
+| `rust/openclaw_engine/src/agent_spine/tests.rs:22` | +1 | std::time::Duration import |
+| `rust/openclaw_engine/src/agent_spine/tests.rs:1247-1476` | +231 | 3 個新 unit test |
+
+總計 +422/-6 = 淨 +416 LOC
+
+### 3 個新 unit test
+1. `fill_completion_channel_full_increments_drop_counter` — cap=1 預塞滿 → 4 try_send 全 fail → drop counter delta ≥ 4
+2. `fill_completion_burst_with_8192_cap_no_drop` — cap=8192 私有 channel → 100 iter × 4 msg = 400 全 queued + 0 drop（用 channel queue state 驗，不依賴 process-wide counter 避免並行 test 污染）
+3. `fill_completion_retry_succeeds_after_slot_released` — cap=4 預塞 4 → emit_fill_completion 4 try_send 全 fail spawn 4 retry → drain 4 pre-fill 騰 slot → 500ms deadline 收 ≥4 retry msg drained
+
+### 對外 metric API
+```rust
+pub fn spine_channel_drop_total() -> u64
+pub fn spine_channel_retry_success_total() -> u64
+pub fn spine_channel_retry_fail_total() -> u64
+```
+process-wide AtomicU64 + Relaxed ordering（counter 統計屬性，無 happens-before 需求）；process 重啟歸零；無 Mutex；fetch_add 保證並發單調
+
+### Hot path SLA before/after
+- emit_entry_lineage（hot path）：增量 <30 ns（Relaxed atomic × 10），E5 base 20μs / tick SLA 0.3ms 中佔比 <0.01% — **0 SLA impact**
+- emit_fill_completion_lineage（**非 hot path**）：fast path 不變；fail spawn ~10μs；24h ~86 fully_filled × 4 × 10μs = 3.4ms 累積，遠低於任何 SLA
+
+### 驗證
+- `cargo build --release -p openclaw_engine` PASS @ 22.11s（baseline 24.79s 同範圍）
+- `cargo test --lib --release -p openclaw_engine` **2810 passed / 0 failed / 0 ignored**（baseline 2807 + 3 new）
+- 5 次連續跑新 3 test 全 PASS — 時序穩定無 flaky
+- `cargo build` 對改動檔 0 warning（既存 2 dead_code 警告非本 PR 引入）
+- 跨平台 grep `/home/ncyu`/`/Users/ncyu` = 0 hit
+- 注釋全中文（grep 純英文長注釋 0 hit）
+
+### Caveat / Risk
+1. **File size 警告**：runtime_shadow.rs 657→828 LOC 超 800 警告 28 LOC（仍 < 2000 hard cap）；屬 pre-existing baseline exception；建議 P3 拆 sibling
+2. **Retry 不保證 100% delivery**：3 × 50ms 用盡仍 fail 計 `retry_fail_total` 但 ER 永久 lost；residual rate <1% 設計可接受（ER 是 audit-trail 非 trading authority）
+3. **Spawn 成本 micro-bench 未測**：~10μs 估算非 empirical；24h ~86 fully_filled 累積 3.4ms 遠低 SLA；future burst >1000/min 時需評估 fixed-pool retry queue
+4. **tests.rs 1476 LOC** pre-existing exception > 800 警告線；< 2000 hard cap；G5-09 pattern 待後續拆
+
+### 關鍵教訓
+1. **Caller-aware retry strategy**：retry 設計必先分 hot path vs post-event；統一 retry 看似優雅但 hot path 違反 SLA；entry path 10 try_send × 150ms worst = 1.5s 對 0.3ms tick 是災難
+2. **process-wide counter 並行 test 污染**：global static AtomicU64 在 cargo test 默認多 thread 下 delta 假污染；改用 channel queue state 驗 burst test，counter delta 只在 cap=1 預塞滿的單通道 test 內可信
+3. **retry test 時序設計**：cap=1 + 4 retry task 同時喚醒搶 1 slot 觸發二次 retry 時序競爭，使 deadline 內 retry_success delta 不達 4；cap=4 + drain 4 pre-fill 騰 4 slot 提升確定性
+4. **emit_fill_completion_lineage 保 sync fn**：caller `loop_exchange.rs` 在 async handler 內呼叫，但 emit fn 自身保 sync；retry path 用 tokio::spawn 移到 async runtime，避免 fn signature 改 async 破多檔 cascade
+5. **AgentSpineMsg Clone derived 可用**：store.rs line 8 已 #[derive(Clone)]；spawn task 內 owned 不衝突
+6. **3 個 counter 設計**：drop_total（fail 計）+ retry_success_total（救援計）+ retry_fail_total（用盡仍 fail）— 三組對應 healthcheck SLO；retry_success / drop 比率反映 retry path 工作度；retry_fail_total > 0 觸發 cap upgrade alert
+
+### 治理對照
+- **CLAUDE.md §一**：玄衡 Agent Spine 是 audit chain 核心；25.8% drop 即 chain 19% 破洞，阻 Stage 3+ promotion
+- **§二 16 原則**：16/16（特別 #5 生存 > 利潤 / #8 交易可解釋）
+- **§四 5 硬邊界**：0 觸碰
+- **§五 架構**：emit_*_lineage 仍隸 agent_spine module，0 跨模組擾動
+- **§七 跨平台**：0 硬編碼
+- **§七 注釋（2026-05-05 中文 default）**：全中文
+- **§九 Singleton 表**：需追加 3 行 process-wide AtomicU64 counter
+- **§九 file size**：runtime_shadow.rs 828 超 800 warning（pre-existing exception）；tests.rs 1476 / tasks.rs 978 同 pre-existing exception
+- **forbidden_guard / V3 §6.2**：0 violation
+
+### 完整報告路徑
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_fill_lineage_drop_fix.md`

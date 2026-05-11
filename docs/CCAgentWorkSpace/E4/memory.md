@@ -3121,3 +3121,140 @@ grep -rEn 'owner_strategy\s*==\s*self\.name|owner_strategy\s*==\s*"<name>"|cross
 
 5 策略對應 5 條 hits（4 個 exit branch filter + grid 1 個 entry gate）。**0
 hits 在某策略 = E1 漏 IMPL** 直接退回。本次 5/5 全綠。
+
+---
+
+## 2026-05-11 — W-AUDIT-3b Runtime Smoke Verify (Wave 1 Task C)
+
+**Context**: W-D MAG-084 closure 後 Wave 1 Task C P1-W-AUDIT-3b-SMOKE。W-AUDIT-3b
+RouterLeaseGuard Drop test 已 land 在 commit `22efd9de` (Linux HEAD `c39ac9cc`,
+124 commits ahead)。runtime smoke 待 ssh trade-core 驗。**僅 verification — 不修
+代碼、不發 commit、不重啟 engine。**
+
+**Verdict**: PASS · report path
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w_audit_3b_runtime_smoke.md`
+
+### 1. Rust test name CamelCase struct vs snake_case test 命名差別
+
+Task spec 給的 cargo test filter `RouterLeaseGuard` 是 case-sensitive substring
+0 命中（test 名實際 `test_router_lease_guard_drop_releases_active_lease_cancelled`
+snake_case）。E4 修正改 filter `test_router_lease_guard_drop` 拿 1/1 PASS。**未來
+sub-agent dispatch spec 寫 Rust test filter 應對齊真實 snake_case test name，不
+寫 CamelCase struct 名做 filter**。
+
+### 2. Task spec 引不存在的 pytest 檔名時應退回 design doc 找實際 test set
+
+Task spec 給 `-k test_executor_fail_closed` 假設有檔 `test_executor_fail_closed.py`。
+W-AUDIT-3b design doc §3 (`2026-05-10--w_audit_3b_runtime_smoke_test_design.md`)
+明白標：「重複新寫 test_executor_fail_closed.py 是 fake coverage」— 既有 9 case 分
+布於 `test_executor_plan_v2.py` (5) + `test_executor_agent_unit.py` (3) +
+`test_executor_shadow_to_live_e2e.py` (1)，已 cover dispatch v3.4 §3.4
+acceptance 「≥ 1 fail-closed test case」。E4 修正改跑 3 個既有 test_executor_*
+檔總 73/73 PASS。**Lesson: sub-agent 收到 dispatch SOP 不存在的 test 名時，應退回
+W-AUDIT-X design doc 找實際 test set，而非順著 SOP 字面新寫 fake test**。
+
+### 3. 廣譜 pytest filter 撞 pre-existing unrelated baseline failure 隔離方法
+
+第一次跑 `-k 'fail_closed or lease'` (廣譜) 拿 237/3861/1 failed。失敗 test
+`test_oe_006_close_retry_budget_has_real_timeout_guard` 是 grep static check
+找 `dispatch.rs` 內 `test_close_attempt_timeout_constant_is_500ms` 字串 — 但實
+際 test 已 refactor 到 `dispatch_tests.rs`。**隔離 reproduce 驗證 = pre-existing
+baseline drift，與 W-AUDIT-3b RouterLeaseGuard 0 因果關係**。E4 縮窄到 W-AUDIT-3b
+範圍跑 73/73 PASS = 0 regression。**Lesson: pre-existing failure 隔離 reproduce
+是 flaky vs regression 判別標準動作，不能因為 broad filter 撞到就退 E1。**
+
+### 4. SQL filter schema 過舊不阻 chains_with_lease 真實 verify
+
+Task spec 給 SQL `payload->>'status' IN ('shadow_planned','shadow_filled')` 在
+當前 schema 0 row 命中。execution_plan payload 真實 keys：`lease_id` / `decision_id`
+/ `verdict_id` / `engine_mode` 等 29 個，**沒有 status 字段**。即時 lifecycle
+state 在 `learning.lease_transitions` V054 表。**E4 修正用真實 `payload->>'lease_id'
+IS NOT NULL AND != ''` filter 拿 chains_with_lease=610**，sample 5/5 lease_id='bypass'
+字面字串（非 NULL 非 empty）— Producer wiring 真實生效。
+
+### 5. V054 lease_transitions 是 9-state lifecycle SoT corroborate execution_plan
+
+execution_plan payload 只記 lease_id 字面值（bypass 或 active leaseId）；完整
+9-state lifecycle 寫 `learning.lease_transitions` V054。**本次直查 79032 BYPASS
+transitions 在 Validation profile**，confirming bypass evidence mode (W-C
+operator-authorized `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` per Sprint 3 Track
+H/I) 真實大規模生效，**非 hardcode**。Cross-check 兩表確認 lineage 一致 =
+最可靠的 bypass real-wiring 證據。
+
+### 6. bypass lineage 100% 與 §三 caveat 3 一致
+
+100% lease_id='bypass'（610/610，sample 5/5）符合 §三 W-C / MAG-082 表 Caveat 3
+DEFERRED by-design：真實 Production profile lease 在 W-AUDIT-3..7 + true-live
+boundary 後才可預期 chains_with_real_lease > 0。W-D MAG-084 sign-off 已涵蓋此
+DEFER：bypass lineage Stage 3+ true-live promotion 必須由真實 Production profile
+lease（將來 W-C flag 翻 OFF 後）取代。**Lesson: bypass evidence mode 在 shadow
+階段是正常工件不是 BLOCKER；reviewer 看到 100% bypass 應 retrieve §三 caveat 3
+context 確認 DEFER status 而非當 regression。**
+
+### 7. Non-flaky verify 雙跑強制 (regression-testing-protocol §5 reminder)
+
+Rust + Python 都跑兩遍同綠 non-flaky verified：
+- Rust: cold compile (40s) → warm cache (0.07s) 1/1 PASS
+- Python: 0.39s → 0.33s 73/73 PASS
+
+第一次 PASS 不等於真綠（race / flaky）；第二次同綠才算 PASS。本次成本 ~50s 不
+牽涉 engine restart 或 5min window wait，符合 W-AUDIT-3b design doc §4 "pytest
+first, fast, isolated, dev env" 順序。
+
+### 8. 三端 git sync verify 必跑
+
+```
+Linux trade-core HEAD: c39ac9cc3115c9100986f807c01f06fb82ce00fc
+Mac 本地 HEAD: c39ac9cc (session env)
+22efd9de 在 history: ✅ 124 commits behind HEAD
+```
+
+W-AUDIT-3b 源碼穩固落地，且本次 verify 在最新 HEAD `c39ac9cc` 上跑（非
+22efd9de 上跑）— 後續 124 commits 沒回退這個 test。**Lesson: 任務描述指定
+verify commit 不等於只在那 commit 上 verify；E4 在 HEAD 跑驗 commit 落地後
+是否仍存活更有 forward-looking 價值**。
+
+
+## 2026-05-11 Wave 1.6 P1-FILL-LINEAGE-DROP — pre-deploy regression gate (PASS)
+
+**Trigger**: PA dispatch Wave 1.6 Option F4 Spine Channel Silent-Drop Fix；QA RCA SYSTEMIC 25.8% drop empirical；E1 IMPL DONE / E2 APPROVE WITH MINOR / E5 APPROVE WITH 3 P3；PM 已 land 4 commit-前 minor fix
+
+### Verdict
+**PASS · deploy READY**
+
+### 數字
+| 項 | Value | Baseline | Delta |
+|---|---|---|---|
+| Rust lib release | 2810 / 0 / 0 | 2807 | +3 new ✅ |
+| Rust lib debug | 2810 / 0 | 2807 | +3 new ✅ |
+| Python helper_scripts/db | 320 / 0 | 320 | 0 ✅ |
+| Python tests/ broader | 253 / 1* / 2 skip | n/a | *docs index pre-existing not Wave 1.6 |
+
+連跑驗證：A.1 lib test 2 連跑同 2810；A.4 3 new test 5 連跑 0 flaky。
+
+### Key invariants verified
+- entry path 4 callsite 全 sync try_send (0 spawn/sleep/lock) — hot path SLA 嚴守
+- fill_completion path 4 callsite 全 try_send_with_background_retry — retry 救援設計
+- 5 W-C P1-1 spine_ids invariant 全 PASS（Wave 1.6 0 觸碰）
+- 3 W-C 既有 runtime_shadow test 全 PASS（emit_fill_completion 改 retry 不破既有）
+- agent_spine module-wide 21 test 全 PASS
+
+### Mock audit
+3 new test = 0 mock framework / 0 fake / 0 patch；用真 tokio mpsc + 真 emit_fill_completion + 真 SpineObjectEnvelope + 真 spawn + 真 sleep。
+
+### Cross-language contract
+Rust `executed_by` + `fill_completion=true` (runtime_shadow.rs:558-562) ↔ Python `checks_agent_spine.py:141, 234` 對齊不破。
+
+### Governance
+- runtime_shadow.rs 843 LOC (pre-fix 657 + Wave 1.6 ~171 + PM commit-前 MEDIUM-2 注釋 ~15) — P2 tracked, < 2000 hard cap，不阻 merge
+- tests.rs 1476 LOC — pre-existing exception
+- tasks.rs 978 LOC — pre-existing baseline
+- CLAUDE.md §九 Singleton row `SPINE_CHANNEL_*` 1 row PM 已 land
+- 0 hardcoded path / 0 unsafe / 0 unwrap 新增
+
+### Lesson learned
+- 1 unexpected: E1 self-report 828 vs 實際 843（PM commit-前 land E2 MEDIUM-2 drop_total 語意警告擴充注釋）—PM Sign-off process 補件，不破 governance
+- pre-existing tests/structure docs_readme_index 失敗 = docs/archive 索引 debt 與 Wave 1.6 完全無關（git diff --stat 驗證）；A4 lesson：Python pytest 廣域跑時必驗失敗是 commit 前還是 commit 後
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--p1_fill_lineage_drop_e4_regression.md`

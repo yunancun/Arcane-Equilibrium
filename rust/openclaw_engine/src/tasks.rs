@@ -639,7 +639,18 @@ pub(crate) async fn spawn_db_writers(
     }
 
     let agent_spine_tx = if agent_spine_mode.writes_enabled() {
-        let (agent_spine_tx, agent_spine_rx) = tokio::sync::mpsc::channel(1024);
+        // Wave 1.6 P1-FILL-LINEAGE-DROP（2026-05-11）：mpsc cap 1024 → 8192（8x headroom）。
+        // 經 QA RCA 2026-05-11 確認 cap=1024 + flush 2000ms 在 burst load 下
+        // 觸發 try_send 靜默 drop（empirical engine 1 14.5h: 19.4% drop / engine 2
+        // 3h: 14.3% drop = 系統性 ~25.8% miss rate / 阻 Stage 3+ promotion）。
+        // 每筆 ER entry 寫 10 try_send，每筆 fill_completion 寫 4 try_send；
+        // 1024 / 10 = 102 chain in-flight 上限在 1s 內 >100 intent/s burst 不足。
+        // 8192 / 10 = 819 chain in-flight 可吸收實況觀測 burst 峰；24h ~870
+        // build transition + 172 change transition + 696 edge + 174 idempotency
+        // 累積遠低於 8192 cap，DB flush 端 2000ms interval 不變仍排得乾。
+        // 注意：本 fix 配合 runtime_shadow.rs 的 retry helper 構成 hybrid F4
+        // 方案（Option F4 per QA RCA §D.3）。
+        let (agent_spine_tx, agent_spine_rx) = tokio::sync::mpsc::channel(8192);
         {
             let as_pool = Arc::clone(db_pool);
             let as_config = Arc::clone(config);

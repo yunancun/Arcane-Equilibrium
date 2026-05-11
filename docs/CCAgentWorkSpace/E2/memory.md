@@ -1,5 +1,62 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-11 — Wave 1.6 P1-FILL-LINEAGE-DROP Option F4 對抗 review (APPROVE WITH MINOR · PASS to E4)
+
+**對象**：working tree HEAD未 commit + 3 檔 / +422 / -6 LOC
+- `tasks.rs:641-655` mpsc cap 1024 → 8192（QA RCA 25.8% drop rate fix）
+- `runtime_shadow.rs:33-93` 3 個 static AtomicU64 counter + 3 pub accessor
+- `runtime_shadow.rs:580-792` emit_fill_completion 接 retry helper + `try_send_with_background_retry` 新增
+- `tests.rs:1247-1476` 3 new unit test
+- Parallel：E5 hot-path perf re-audit（同時跑）
+
+**Verdict**：**APPROVE WITH MINOR · PASS to E4** · 0 BLOCKER / 0 HIGH / 2 MEDIUM / 3 LOW / 2 P2-governance-ticket
+
+**驗證手段**：
+1. Mac cargo test --lib --release 親跑：2810 PASS / 0 fail / 0 ignored
+2. retry test (`fill_completion_retry_succeeds_after_slot_released`) 3 連跑 0 flaky（每次 in 0.05s）
+3. grep `tokio::spawn|spawn|.lock()|Mutex::|RwLock::|tokio::time::sleep` 在 emit_entry_lineage 函式體 (line 105-426) = 0 hit → hot path SLA 守住
+4. grep callsites verify：emit_entry_lineage 唯一 caller = `step_4_5_dispatch.rs:664/932` (tick hot path)；emit_fill_completion_lineage 唯一 caller = `loop_exchange.rs:283` (WS Fill event consumer，非 tick path) — caller-aware 設計成立
+5. AgentSpineMsg `store.rs:8 #[derive(Debug, Clone, PartialEq)]` + variants 全 owned struct → retry_msg.clone() 在 loop 內合法安全
+6. PG bind param 計算：65535 / Object 20col = 3276 chunk_rows，cap 增到 8192 不破 batch_insert
+7. 跨平台 grep diff = 0 hit `/home/ncyu|/Users/[^/]+`
+8. unsafe / unwrap / expect 新增 = 0（既有 4 處全 pre-fix safe pattern）
+9. 注釋中文密度 28 hit；混技術詞合法
+
+**Findings**：
+- **MEDIUM-1**：E1 report §9 Caveat 1 引用 §九 Pre-existing baseline exception clause 為 runtime_shadow.rs 657→828 辯護**錯誤**（§九 明確「僅適用 baseline > 2000」；657 < 2000 不適用）。建議 E1 修報告表述為「警告線 watch + P2 split ticket」，**不阻 merge**；屬與 W2 IMPL btc_lead_lag.rs 1771 同型。
+- **MEDIUM-2**：SPINE_CHANNEL_DROP_TOTAL 同時計「entry path 永久丟失」+「fill_completion path 初始失敗（多數會 retry 救回）」；下游 healthcheck 直接用此 counter 當「最終丟失」會 over-report；建議注釋明確語意，或拆兩個 counter（P1-FILL-LINEAGE-MONITOR 接線時必對齊）
+- **LOW-1/2/3**：注釋 + 函式名 + test 緊密綁 counter 設計（不阻 deploy）
+- **P2-1/2**：runtime_shadow.rs 828 LOC + tests.rs 1476 LOC 開 split ticket（與 W2 lesson #1 + 既有 W-C E5 §D-5/6 同方向）
+
+**核心對抗發現**：
+1. **§九 pre-existing baseline exception clause 引用範圍嚴格**：原文「僅適用 baseline > 2000 行」；657 < 2000 場景**不適用**；屬「新 wave 推 ≤2000 到 ≤2000」常規 path（警告線 watch + 開 P2 split ticket）— E2 memory 2026-05-11 W2 lesson #1 已立。本次 E1 引用錯誤可能因「657→828 +171 LOC 突破警告線情緒上類比 baseline」誤用 — 需強化 E1 governance training。
+2. **drop_total counter 語意混淆風險**：counter 在 entry path（hot, 0 retry）+ fill_completion path（spawn retry 95%+ 救回）都做 fetch_add(1)；下游 healthcheck 用此值當「最終丟失」會 over-report。E1 留 P1-FILL-LINEAGE-MONITOR ticket 處理可接受，但 metric 注釋必明確「= initial fail occurrences, NOT final loss」。
+3. **caller-aware 設計合理**：emit_entry_lineage hot path 全 sync try_send + 0 retry / emit_fill_completion 非 hot path 用 try_send_with_background_retry。`tokio::spawn` 在 fill_completion path 是合理 trade-off（保 emit_fill_completion sync fn 避免破 caller cascade 改 async）。
+4. **3 個新 test 真實驗 invariant，非 mock-pass**：用真實 tokio mpsc + 真實 emit + 真實 try_recv；retry test 用真實 tokio::spawn + time::sleep + 500ms deadline 給 retry msg 收齊；連跑 3 次 0 flaky。
+5. **AgentSpineMsg #[derive(Clone)] verify**：retry_msg.clone() 在 spawn task loop 內合法；variants 全 owned struct，無 raw pointer 無 unsafe，clone 安全且 ns 級成本。
+
+**Trade-off accepted**：
+- Counter 語意混淆走 P1-FILL-LINEAGE-MONITOR follow-up（E1 自報已點此 ticket）
+- runtime_shadow.rs 828 / tests.rs 1476 LOC 警告線兩檔開 P2 split ticket
+- spawn 成本未做 micro-bench（理論推算 24h ~860μs 可忽略；E5 perf re-audit 可補實測）
+
+**經驗教訓 / Lesson learned**：
+
+1. **§九 pre-existing baseline exception clause 引用範圍 = baseline > 2000 only**：是 §九 原文嚴格限定；657 baseline < 2000 不能 invoke；E2 memory 2026-05-11 W2 lesson #1 已立同型；本次 E1 同 misapplication，需強化 governance reading SOP。
+2. **counter 語意完整性對 metric 對外接口必明確**：當一個 counter 既包含「初始失敗」又包含「最終丟失」，下游 healthcheck 必語意混淆；要么注釋明確「= initial fail」要么拆兩個 counter。本次 E1 自報 P1-FILL-LINEAGE-MONITOR follow-up 屬合理，但 commit 前必修注釋語意。
+3. **hot path SLA E2 grep 4 pattern verify**：`tokio::spawn|spawn|.lock()|Mutex::|RwLock::|tokio::time::sleep` 在 emit_entry_lineage 函式體 0 hit 是 SLA 守住的強證據；caller-aware 設計需 grep callsite verify 真實在 hot path 還是非 hot path（不能 trust E1 自報）。
+4. **Atomic Relaxed counter 對 metric 屬性 correct**：counter 屬統計屬性無 happens-before 需求；fetch_add(1, Relaxed) 並發單調遞增 race-free；對 metric 屬性是 Rust 最佳實踐（與 Lock-free 慣例對齊）。
+5. **spawn task 過量風險評估**：worst case 1秒 1000 fail → 1000 spawn × 3 retry × 50ms = 同時點積壓 ~1000 task × 200-500 bytes ≈ ~200-500KB memory，遠低於 tokio runtime 承載；實況 24h 86 fully_filled × 4 try_send = 344 spawn / 24h 可忽略。spawn 過量是常見 concern 但對 tokio 輕量級實現往往是「過早優化」担憂。
+
+**Cross-References**：
+- PA dispatch (隱含): QA RCA `2026-05-11--p1_rca_1_orphan_er_investigation.md` §D.3 Option F4 建議
+- E1 IMPL report: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_fill_lineage_drop_fix.md`
+- QA RCA: `docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-11--p1_rca_1_orphan_er_investigation.md`
+- E2 R2 review: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--p1_fill_lineage_drop_e2_review.md`
+- 與 W2 lesson #1 對齊（btc_lead_lag.rs 1771 LOC pre-existing clause misapplication 同型）
+
+---
+
 ## 2026-05-11 — P0 Replay Tier A 4 sub-task post-IMPL 對抗 review (APPROVE to E4)
 
 **對象**：8 local commits `ffc57d7f` → `d9a52572`（main HEAD，未 push origin）
