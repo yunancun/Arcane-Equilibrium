@@ -275,3 +275,46 @@
 
 **報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-04-26--g5_09_tick_pipeline_tests_split.md`
 
+---
+
+### 2026-05-11 Wave 1.6 P1-FILL-LINEAGE-DROP perf re-audit（QA RCA empirical 25.8% drop fix）
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--p1_fill_lineage_drop_e5_perf.md`
+
+**Context**：QA RCA 2026-05-11 證實 W-C E5 baseline estimate（1024 channel cap / 68 chain in-flight）過樂觀，empirical 25.8% silent drop rate。E1 完成 Option F4 hybrid fix（cap 1024→8192 + try_send_with_background_retry + 3 AtomicU64 metric counter）。E5 re-audit perf 視角。
+
+**Verdict**：APPROVE WITH 3 P3 NOTES（不阻 deploy）
+- ✅ Hot path SLA PASS：emit_entry_lineage +<30ns / 0.3ms = <0.01%
+- ✅ Spawn cost 可忽略：24h 86 event × ~40μs worst = 3.4ms 累積（per E1 self-claim）
+- ✅ Channel memory PASS：worst 6.5 MB / 128 GB unified = 0.005%
+- ✅ 預測新 drop rate at cap 8192：24h 0.1% - 1%（對 Stage 3+ promotion gate 1% 對齊）
+- ⚠️ 3 P3 minor concerns：counter cache-line false sharing / runtime_shadow.rs 828 LOC（超 800 警告 28 LOC）/ 缺 emit path bench
+
+**F 反思（E5 過樂觀根因）**：
+1. 用 24h avg rate 推 burst peak（線性外推沒考慮 power-law tail；avg 7.25 chain/h ≠ peak 270 msg burst）
+2. 忽略 PG INSERT 200-500ms flush 期間 rx 阻塞 → producer 仍寫，msg 累積
+3. 沒模擬 6 producer parallel（grid + ma + bb_reversion × demo + live_demo）
+4. 沒做真實 burst stress test bench harness（hot_path_baseline 只測 tick）
+
+**未來 perf review SOP**（**E5 必加 checklist**）：
+- [ ] 列出所有 producer 並算 sum throughput
+- [ ] 列出所有 consumer/flush 阻塞時段（PG INSERT latency × 2 加入累積 window）
+- [ ] 用 burst factor 5-10x avg rate 估上界
+- [ ] 多 producer parallel 必納 producer count multiplier
+- [ ] 有 empirical evidence（QA RCA drop rate）必反推 capacity ceiling
+- [ ] 不足時補 bench harness 跑 burst stress test 至 cap
+
+**P3 ticket 建議**：
+1. P3-COUNTER-CACHELINE-PADDING（3 AtomicU64 加 `#[repr(align(64))]` padding 避免 false sharing；< 200ns/event 影響非 SLA）
+2. P3-RUNTIME-SHADOW-SPLIT（runtime_shadow.rs 828 → `lineage_emit.rs` + `channel_helpers.rs`）
+3. P3-AGENT-SPINE-BENCH（補 emit_entry_lineage + emit_fill_completion bench harness）
+
+E1 P1-FILL-LINEAGE-MONITOR follow-up（接 counter 到 IPC + healthcheck [55]/[N] SLO 監測）**E5 同意 P1（fix 部署後 0 SLO 監測等於盲飛）**。
+
+**經驗教訓**：
+1. **Avg rate ≠ burst peak**：power-law tail 在 multi-producer + 阻塞 consumer 下放大 5-10x
+2. **rx 消費阻塞時段 必入 throughput equation**：PG INSERT batch flush 200-500ms 是 producer 累積窗口
+3. **empirical evidence > theoretical capacity**：當有真實 runtime 證據（QA RCA empirical 25.8% drop）必反推 capacity ceiling
+4. **false sharing pattern**：連續 static AtomicU64 宣告會撞同 cache line；多 thread 並發 fetch_add 互相 invalidate → 50-200ns extra latency / contention（cosmetic 非 SLA）
+
+

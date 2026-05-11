@@ -439,6 +439,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `CostEdgeAdvisorDbSlot` | rust/openclaw_engine/src/cost_edge_advisor_boot.rs | Rust 端 late-injected slot；G3-09 Phase B；env-gated（P1-FAKE-3） |
 | `Lg5ReviewConsumer` | program_code/exchange_connectors/bybit_connector/control_api_v1/app/lg5_review_consumer_scheduler.py | LG-5 W3 FUP-1 sibling CC commit `463890d`；待 deploy 後 spawn `/tmp/openclaw/lg5_review_consumer.leader.lock` |
 | `_REGISTER_IDEM_CACHE` / `_REGISTER_IDEM_CACHE_THREAD_LOCK` | replay/experiment_registry.py | REF-20 Sprint A R2 round 2 fix H-1：register endpoint 的 in-memory idempotency cache（取代 manifest_jsonb `_idempotency_key` 注入，避免破 sha256(manifest_jsonb)==manifest_hash 不變式）。重啟丟 cache 是 accepted trade-off（V3 §5 30d TTL 跨重啟丟保證）；race-safe via threading.Lock + PG advisory xact lock 多層（caller 在 `asyncio.to_thread` 內，thread-level Lock 是正確原語；round 3 M-DEAD-LOCK 刪了 0 callsite 的 asyncio Lock）|
+| `SPINE_CHANNEL_DROP_TOTAL` / `SPINE_CHANNEL_RETRY_SUCCESS_TOTAL` / `SPINE_CHANNEL_RETRY_FAIL_TOTAL` | rust/openclaw_engine/src/agent_spine/runtime_shadow.rs:57-59 | Wave 1.6 P1-FILL-LINEAGE-DROP（2026-05-11）：mpsc spine channel try_send 失敗 / retry 成功 / retry 用盡仍失敗 三 AtomicU64 counter，process-wide，Relaxed ordering。**語意警告**：drop_total NOT 等於 final loss（含 entry path 真實丟 + fill_completion path 初始失敗被 retry 救回，per E2 MEDIUM-2 fix）。P1-FILL-LINEAGE-MONITOR 後續接 healthcheck。|
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。詳述 5 條 long-form 注釋 → `docs/archive/2026-05-02--CLAUDE-pre-trim-snapshot.md`。
 
