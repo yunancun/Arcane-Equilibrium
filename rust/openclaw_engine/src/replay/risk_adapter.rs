@@ -83,12 +83,22 @@ use openclaw_core::guardian::{
 
 /// Per-symbol position snapshot — replay-pure mirror of `paper_state::PaperPosition`.
 /// 逐 symbol 持倉 snapshot — `paper_state::PaperPosition` 的 replay-pure 鏡射。
+///
+/// Sprint N+1 D+1 Tier A T2.5：`owner_strategy` 新增 — 為了讓 cross-strategy
+/// attribution（例如 ma_crossover 打開 BTCUSDT、bb_reversion 後續 tick 看見
+/// `ctx.position_state.owner_strategy == "ma_crossover"` → fail-closed skip）
+/// 在 replay 內可重現，對齊 production `PaperPosition.owner_strategy` 語義。
+/// `apply_fill_open` 寫入 `intent.strategy.clone()`，未提供時 fallback 空串
+/// （與 production pre-Phase-2A 舊快照行為一致）。
 #[derive(Debug, Clone)]
 pub struct ReplayPosition {
     pub symbol: String,
     pub is_long: bool,
     pub qty: f64,
     pub entry_price: f64,
+    /// Sprint N+1 D+1 Tier A T2.5：策略歸屬，鏡射 `PaperPosition.owner_strategy`。
+    /// 由 `apply_fill_open` 從 `OrderIntent.strategy` 寫入。
+    pub owner_strategy: String,
 }
 
 /// In-memory snapshot of paper state at evaluation time. R5-T3 owns
@@ -502,6 +512,7 @@ mod tests {
                 is_long: true,
                 qty: 0.3,
                 entry_price: 100.0,
+                owner_strategy: String::new(),
             }],
         );
         let intent = mk_intent("BTCUSDT", true, 0.5);
