@@ -1,5 +1,43 @@
 # PA Memory — 工作記憶
 
+## P2 N+2 sprint backlog tickets integration doc（2026-05-11）
+
+**觸發**：W2 IMPL chain FULL CLOSURE (HEAD `a771226d` → `ebbcc038` → `9463f778`) + E2 W2 chain review (`d4186c86`) + W2 signoff_pack §4 → 3 P2 N+2 sprint ticket 需正式入 backlog tracker；額外加 P1-1 stable_id helper CI grep rule follow-up（per PA memory 2026-05-11 §架構教訓 2）。
+
+**4 P2 ticket scope**：
+- **P2-N2-1** `panel_aggregator/btc_lead_lag.rs` 1771 LOC → 4-split (producer.rs / ingest_task.rs / snapshot.rs / db_writer.rs)，與 W1 sibling funding_curve/oi_delta pattern 對稱；~1.5 E1-day
+- **P2-N2-2** `helper_scripts/reports/w2_paper_edge_report.py` NEW 1257 LOC → 4-split (metrics / render / smoke / report.py CLI)，CLI byte-equal output + smoke 3 case PASS + 1 sprint thin wrapper compat；~1 E1-day
+- **P2-N2-3** Layer 2 helper share-code：抽 `panel_aggregator/mod.rs::should_spawn_btc_lead_lag_producer(paper_enabled_env, has_demo, has_live)`，main.rs:1005-1018 + integration test:119 mirror 兩 callsite 改 import；+30/−30 LOC 淨 0；~0.5 E1-day
+- **P2-N2-4** stable_id CI grep rule：`helper_scripts/ci/check_no_literal_stable_id.sh` 攔截 `stable_id("decision"|"plan"|"report", &[…])` 字面複製違規（spine_ids.rs / events.rs / tests.rs / runtime_shadow.rs allowlist），與 W-D MAG-083 P1-1 helper 抽出搭配「正面導引 + 負面攔截」雙防線；~0.5 E1-day
+
+**Aggregate P2 backlog**：active = 8 條（含本 doc 新增 4 條）+ DONE = 7 條 + N+5 mounted = 1 條；W-AUDIT-7c R2 7 P2 實際是 single false-positive round 3 撤回（非真 backlog）。
+
+**N+2 capacity 評估**：N+2 (W5-W6) 48 E1-days；主線 W-AUDIT-8a Phase D + Stage 2 demo cohort 14d 觀察 + W-AUDIT-8d IMPL ~37 days；buffer 11 days；本 doc 4 ticket 3.5 days；剩 ~7.5 days buffer。**完全可吸收，不擠壓 N+2 主線**。
+
+**Priority 排序**：P2-N2-2 (純 Python smoke-driven) → P2-N2-1 (Rust 對稱 W1 pattern) → P2-N2-3 (與 1 同 wave marginal cost ~0) → P2-N2-4 (E1a stand-by 吸收)。
+
+**Operator 拍板項**：
+1. P2-N2-1 4-split (PA Option A 推薦) vs single-file + MODULE_NOTE (Option B accept) vs 2-split (Option C 不夠細)
+2. P2-N2-3 Layer 2 helper share-code (PA 略偏好 silent drift 防護) vs accept inline mirror + 強標注釋
+
+**16 原則 + DOC-08 §12 + §四 5 硬邊界 觸碰**：全 0（純 refactor + CI script + 純治理改動，0 hot path touch / 0 lease 接觸 / 0 authorization 改動）。
+
+**架構教訓**：
+1. **「Pre-existing baseline exception clause」適用嚴格**：§九 clause 僅適用 baseline > 2000；W2-IMPL-1 baseline 1253 + 本 wave +518 → 1771 雖在 hard cap 內但 > 800 警告，必開 P2 ticket + 不阻 merge；signoff_pack §4 accept rationale 必明文「W1 sibling 已拆對稱」+「N+2 拆對齊」雙理由
+2. **CI grep rule = silent drift 治本防線**：W-D MAG-083 P1-1 抽 stable_id helper 是「正面導引」(用 helper 就對了)；P2-N2-4 CI grep rule 是「負面攔截」(不用 helper 就 CI fail)；兩者並行才完整。類似 over-engineering ratio 30 LOC script vs 「audit chain silent drift = MAG-082 evidence 信任崩塌」風險
+3. **W2 sibling 對稱優先級**：N+2 拆 btc_lead_lag.rs 對齊 W1 已拆 funding_curve.rs/oi_delta.rs pattern，後續 W-AUDIT-8a Phase B panel_aggregator 群家族 pattern 統一可借鑒
+4. **N+2 capacity rule**：5 active + 1 stand-by × 8d = 48 E1-days；4 P2 ticket 3.5d = 7.3% capacity；可吸收且 7.5d buffer 充足，不需推 N+3
+
+**Cross-reference**：
+- PA W2 dispatch plan: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w2_impl_v12_dispatch_plan.md` (commit `0e88b4a9`)
+- E2 W2 chain review: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_chain_e2_adversarial_review.md` (commit `d4186c86`) §5.5/§5.6
+- W2 signoff_pack §4: `srv/docs/governance_dev/2026-05-11--w2_impl_signoff_pack.md` §4.1/§4.2/§10.1
+- PA W-D MAG-083 audit: PA memory 2026-05-11 §架構教訓 2 + 報告 `2026-05-11--w_d_mag083_pa_audit.md`
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p2_n2_backlog_tickets.md`（~390 行）
+
+---
+
 ## P1-RCA STRATEGIST-PARAMS-PERSIST-1 ma_crossover restore reject（2026-05-11）
 
 **觸發**：每次 engine restart WARN `STRATEGIST-PARAMS-PERSIST-1: restore handler rejected strategy=ma_crossover error=validation failed: confluence weight sum must be 65, got 73.00 (adx=13.75, regime=28.75, volume=22.5, momentum=8)`；operator 要求 ≤ 45 min read-only RCA。
@@ -3073,3 +3111,44 @@ PG fills 直查證據：
 **Confidence**：HIGH for「Option A-Lite」可行；HIGH for「Phase 0 hot-fix 救火」；MEDIUM for「Wave 1-3 部署順序」（仍可選 atomic）；LOW for「operator 是否接受 Option A-Lite 而非堅持純 Option A」（推薦 fallback：paper_state +2 columns(grid_level, trailing_stop) 重設計 + 2-3d 工作量）
 
 **Report**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md`
+
+---
+
+## 2026-05-11 — F3/F4 Writer-Side Defense N+1 Dispatch Plan
+
+**Scope**: P1-RCA-1 4-bug chain 剩餘 writer-side 永久防線 F3/F4 spec 加深 + Sprint N+1 W5 schedule + F4 option 拍板。F1+F2 emergency closed earlier today + B1 Option B `d4867676` producer-side land + W2 IMPL chain `a771226d` + Option A-Lite Wave 1 `ebbcc038` 全 closed。
+
+**F3 Spec**: `trading_writer.rs:406-414` WARN→ERROR + 文案準確化（移除「rows still INSERT (fail-soft)」「cron backfill will reconcile」誤導字樣，加 cross-ref F1 + B1 producer-side defense）。30min IMPL + ~10 LOC + 1 unit test + 4 AC。Risk = TRIVIAL（純 log message + level，0 業務語意改）。grep target `fill-writer-entry-context-missing` 不變（contract）。
+
+**F4 拍板 Option (a) refined = E1 RCA Option A**：
+- 保留 fully_filled gate 0.999 語意全 path 不變
+- 用 Bybit OrderUpdate(status="Filled") 為 authoritative trigger（CLAUDE.md §二 原則 9「交易所即真實」衍生）
+- 殘量補一次 apply_confirmed_fill + emit_fill_completion_lineage（stub_report_id 加 `:bybit_reconcile` suffix 供 reviewer audit）
+- idempotency = `state.pending_orders.remove(&order.order_link_id)` post-reconcile 自然 guard（**0 PendingOrder struct field 改動**，比原 §5.2 草案 `bybit_reconcile_done: bool` flag 更乾淨）
+- 1h IMPL + ~50-60 LOC + 3 unit test + 1 manual demo Bybit verify + 6 AC
+
+**reject 其他 option 理由**：
+- (a) 對齊 epsilon 0.999→0.99 全 path 容忍 1% 殘量 = 模糊 fully_filled 邊界
+- (b) 不問 gate 強制 emit = 跳過 W-C Caveat 2 partial-fill protection
+- (c) 純 internal tolerance < 1 tick = 缺乏「Bybit Filled」authoritative 信號
+
+**跨 wave 衝突**: F3+F4 vs Sprint N+1 W1-W7 全 9 wave + 隔壁 producer-side fix + V091 + MAG-085 全 **0 file 重疊**。
+
+**Schedule**: **Sprint N+1 W5 backlog 第 12+13 ticket**，D+2~D+3 cycle。**不在 D+0 首日 deploy 窗口**（D+0 已派 9 wave 並行 + ops 擠 + F4 medium risk 需 manual demo verify 污染 baseline）。
+
+**Deploy 順序建議**: **F3 + F4 同次** `restart_all --rebuild --keep-auth`（非拆 2 次）— 降 ops 成本 + W-E wave closure semantic + 0 sequencing constraint。E1-F3 + E1-F4 兩 sub-agent 完全並行 IMPL（2 file 0 重疊）2.5h workload 收口。
+
+**Risk**: F3 = TRIVIAL（0 業務語意，純 log）；F4 = MEDIUM（reconciliation 觸 fill attribution rate per MAG-082 Caveat 2 SoT，可能微推 healthcheck [40] avg_net ≤±0.1 bps，已 mitigate AC-F4-5 manual demo verify + 24h passive watch）。
+
+**16 原則 + DOC-08 §12 + 硬邊界 5 項 compliance**: **A 級** — 強化原則 5/6/8/12，0 硬邊界觸碰。
+
+**MAG-085 sign-off**: F3+F4 同次 deploy + 24h verify PASS 後合併 W-E wave closure（W-E-T4/T5/T6 對齊 `2026-05-11--p1_rca1_f1_f2_emergency_fix_plan.md` §8.2）。
+
+**架構教訓**：
+1. **PA 拍板 F4 Option A** 的關鍵 = 「交易所即真實」原則（Bybit Filled = authoritative），不是純內部 epsilon 算法問題。CLAUDE.md §二 原則 9 災難保護衍生「相信 Bybit 終態 vs 相信 engine 內部 cum」是 trade-off 拍板點。
+2. **idempotency 用「natural state guard」優於「explicit flag」**：原草案 `bybit_reconcile_done: bool` 屬 over-engineering；`pending_orders.remove` post-reconcile 等於同類效果，0 struct field 改動。E2 review 必確認 remove 在 emit 完成 **後** 才呼叫。
+3. **stub_report_id suffix `:bybit_reconcile`** 是輕量 audit cross-ref pattern — 無 schema 改動 + reviewer 可區分。healthcheck `[55]` query 必順帶補認此 suffix（E1-F4 IMPL 包含 ~10 LOC `passive_wait_healthcheck.py` 改動）。
+
+**Confidence**: HIGH for F3 spec + Risk 評估；HIGH for F4 option 拍板理由；HIGH for 跨 wave 衝突 verify；MEDIUM for Schedule W5 D+2~D+3（仍可由 operator override 排 D+0 或 D+1）；MEDIUM for F4 reconcile dust 對 [40] avg_net 統計實際影響估計（需 manual demo verify 真實樣本）
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--f3_f4_writer_defense_n1_dispatch_plan.md`
