@@ -8,6 +8,7 @@ pub mod contracts;
 pub mod events;
 pub mod runtime_shadow;
 pub mod signal_adapter;
+pub mod spine_ids;
 pub mod store;
 
 #[cfg(test)]
