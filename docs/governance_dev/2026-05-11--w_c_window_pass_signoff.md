@@ -43,7 +43,7 @@ Operator 確認 W-C MAG-082 Stage 2 evidence window 達成 WINDOW_PASS 並授權
 - Origin push: 2026-05-11 ~00:00 UTC
 - Linux pull + cargo build --release 32.99s clean
 - `bash helper_scripts/restart_all.sh --rebuild --keep-auth` 完成
-- Engine PID 1596779（paper/demo/live 全 alive，snapshot fresh）
+- Engine PID 1597560（paper/demo/live 全 alive，snapshot fresh；2026-05-11 audit QA verified；earlier draft 寫 1596779 是 PM typo）
 - Deploy_ts UTC: **2026-05-11T00:01:55+00:00**
 
 ### 2.4 Empirical post-deploy verification

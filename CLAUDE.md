@@ -108,7 +108,7 @@
 | Blocker | 狀態 |
 |---|---|
 | W-C / MAG-082 | ✅ WINDOW_PASS 2026-05-11（post Caveat 1+2 fix `ccf7a4bc`；sign-off `2026-05-11--w_c_window_pass_signoff.md`）。 |
-| MAG-083 / MAG-084 | MAG-083 READY for dispatch（QA + PA + QC 三角）；MAG-084 待 MAG-083 PASS 後 operator sign。 |
+| MAG-083 / MAG-084 | ✅ MAG-083 PASS + MAG-084 signed 2026-05-11（QA/PA/QC 三角 APPROVE WITH N caveats；sign-off `2026-05-11--w_d_mag084_signoff.md`）。**W-D wave CLOSED**。 |
 | P0-EDGE-1 | Active；realized edge 未轉正。 |
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
@@ -454,11 +454,11 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **當前焦點（2026-05-10）**：Sprint N+0 closure 完成（HEAD `b6ed4975`），Sprint N+1 D+0 pre-dispatch readiness 24 項全提前完成（HEAD `9695b59a`）。HIGH-5 12h passive watch metric 2/3 forward observation 進行中（21:30 UTC sign-off 窗口）。sign-off 後 D+0 純執行：一次 restart_all --rebuild --keep-auth 同次 deploy W7-3 + W7-1 + W2 trait skeleton；派 W7-2 (含 bb_reversion) + W7-4 + W7-5 + W6 RFC verdict 三角 sign-off + W6 V086 IMPL + W1 IMPL Rust panel_aggregator WS-first + W2 IMPL v1.2 + W3 等 W6+W7 完成 + W4 RouterLeaseGuard Drop test + W5 三 P1 IMPL 並行。Sprint N+1 dispatch v3.7：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md`。仍不是 true-live autonomy。
 
-**關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 QA+PA+QC 三角 audit (READY) → MAG-084 operator sign-off → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
+**關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 三角 audit ✅ + MAG-084 sign-off ✅ 2026-05-11 → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
 **REF-20 / REF-21 狀態**：REF-20 Sprint A-D 與 REF-21 replay usability foundation 已收口；剩餘 replay 工作是 empirical calibration maturity、recorder history、baseline library，不替代 runtime lineage 或 live promotion。
 
-**最早 Live 日期**（事件驅動，非 hard date）：以 2026-06-15 悲觀規劃帶為主。PA full audit 偏悲觀：edge 未轉正、LG-2/3/4 尚未 IMPL、W-AUDIT-1..7 未完；**MAG-082 已 PASS 2026-05-11**，MAG-083 READY；其餘 blocker 不變。
+**最早 Live 日期**（事件驅動，非 hard date）：以 2026-06-15 悲觀規劃帶為主。PA full audit 偏悲觀：edge 未轉正、LG-2/3/4 尚未 IMPL、W-AUDIT-1..7 未完；**MAG-082/083/084 全 ✅ 2026-05-11 closed**（W-D wave done），其餘 blocker 不變。
 
 **路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor fake-live smoke + runtime Agent Spine shadow lineage + Decision Lease bypass lineage + REF-20/REF-21 replay foundation 均已落地。仍未完成的是 MAG-082 24h PASS、MAG-083/MAG-084、W-AUDIT-3..7、edge / execution-quality 驗收、Live Gate LG-2/3/4、Live infra、以及 true live 前的受監督/受限自主放權。
 
