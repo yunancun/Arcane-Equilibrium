@@ -744,6 +744,15 @@ pub struct TickContext<'a> {
     /// 同 step 後續 `paper_state.proactive_mirror_insert` / `apply_fill` 等
     /// mutable borrow 衝突（NLL per-iteration 釋放）。
     pub position_state: Option<&'a PaperPosition>,
+    /// SCANNER-PINNED-GATE-1 (2026-05-11)：當前 symbol 是否在 scanner 的 pinned tier。
+    /// True = pinned 25 列表內（含 BTC/ETH 永鎖 + 23 個 scanner 可 rotate 的 slot），
+    /// False = scanner 動態探索的 15 slot 之一（HYPE/WLD/ZEC 等高波動長尾）。
+    /// 由 step_4_5_dispatch 從 `symbol_registry.is_pinned(symbol)` 注入；
+    /// 無 registry 時預設 true（test setup 不模擬 scanner）。
+    /// grid_trading entry path 用此 gate 防止在不適合的高波動 symbol 上開新倉
+    /// （HYPE/WLD 等 dynamic-add 對 grid 結構性虧）；exit path 不受影響。
+    /// 其他策略（ma/bb_r/bb_b/funding）可繼續在 dynamic-add 上交易。
+    pub is_pinned: bool,
 }
 
 /// Tick statistics for monitoring / Tick 統計。

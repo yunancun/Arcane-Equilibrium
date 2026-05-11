@@ -38,6 +38,7 @@ fn ctx(price: f64, ts: u64) -> TickContext<'static> {
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
+            is_pinned: true,
     }
 }
 
@@ -729,6 +730,7 @@ fn ctx_with_bbo(price: f64, ts: u64, bid: f64, ask: f64, tick: f64) -> TickConte
         tick_size: Some(tick),
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
+            is_pinned: true,
     }
 }
 
@@ -999,6 +1001,7 @@ fn ctx_with_position(
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: Some(pp),
+        is_pinned: true,
     }
 }
 
@@ -1118,5 +1121,73 @@ fn test_grid_treats_orphan_adopted_owner_as_legitimate() {
     assert!(
         !intents.is_empty(),
         "owner=orphan_adopted 時 gate 必不阻擋（PA §7 #5 watch：視為未知 owner）"
+    );
+}
+
+/// SCANNER-PINNED-GATE-1 helper：構造 ctx with is_pinned flag。
+fn ctx_with_pinned(price: f64, ts: u64, is_pinned: bool) -> TickContext<'static> {
+    TickContext {
+        symbol: "BTC",
+        price,
+        timestamp_ms: ts,
+        indicators: None,
+        indicators_5m: None,
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
+        is_pinned,
+    }
+}
+
+/// SCANNER-PINNED-GATE-1 #1：is_pinned=false 時 grid 必跳過 new entry。
+/// 對應實證：03:15 scanner expand 後 HYPE/WLD（dynamic-add，is_pinned=false）虧 −$0.46。
+#[test]
+fn test_grid_skip_entry_when_symbol_not_pinned() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    // 首 tick 初始化網格，使用 default pinned ctx
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    // 第二 tick：非 pinned symbol，down-cross 信號（would_open=true）
+    let ctx_not_pinned = ctx_with_pinned(49_500.0, 100_000, false);
+    let intents = g.on_tick(
+        &ctx_not_pinned,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    assert!(
+        intents.is_empty(),
+        "is_pinned=false 時 grid 必跳過 new entry（防 dynamic-add HYPE/WLD 結構性虧）"
+    );
+}
+
+/// SCANNER-PINNED-GATE-1 #2：is_pinned=true 時 grid 走正常邏輯。
+#[test]
+fn test_grid_proceeds_entry_when_symbol_pinned() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    // 第二 tick：pinned symbol + down-cross 信號 → 必開新倉
+    let ctx_pinned = ctx_with_pinned(49_500.0, 100_000, true);
+    let intents = g.on_tick(
+        &ctx_pinned,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    assert!(
+        !intents.is_empty(),
+        "is_pinned=true 且 would_open=true 時 gate 必不阻擋"
     );
 }

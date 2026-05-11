@@ -76,6 +76,7 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
+            is_pinned: true,
     }
 }
 
@@ -116,6 +117,7 @@ fn ctx_with_er(sma: f64, kama: f64, adx: f64, ts: u64, er: f64) -> TickContext<'
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
+            is_pinned: true,
     }
 }
 
@@ -563,6 +565,7 @@ fn ctx_with_bbo_g709c(
         tick_size: Some(tick),
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
+            is_pinned: true,
     }
 }
 
