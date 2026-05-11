@@ -388,6 +388,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     });
 
+    // Tier A T5：one-pass 掃 fixture 取每個 symbol 首次 close 作 per-symbol
+    // anchor seed。修原 bug：若 fixture 第一個 event 是 ADAUSDT 0.2717，後續
+    // ETHUSDT 首 intent 在收到 ETHUSDT event 之前評估時，會借用 ADAUSDT 0.2717
+    // 算 Gate 2.6 P1 cap → ETH-equivalent qty 失控（PA spec §2.6）。
+    // 預種 per-symbol first-touch close 後，無論策略在哪個 tick 對哪個 symbol
+    // 出 intent，evaluate 端 `latest_price_for(symbol)` 都能取到該 symbol
+    // 自己的真實 anchor。
+    let initial_price_by_symbol: std::collections::HashMap<String, f64> = {
+        let mut map = std::collections::HashMap::new();
+        for event in &events {
+            map.entry(event.symbol.clone()).or_insert(event.close);
+        }
+        map
+    };
+
     let mut pipeline = runner::build_isolated_pipeline(
         profile,
         manifest.experiment_id.clone(),
@@ -535,6 +550,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             drawdown_pct: 0.0,
             positions: Vec::new(),
             latest_price: Some(starting_price),
+            // Tier A T5：per-symbol first-touch close 預種，修 Gate 2.6 cross-symbol
+            // anchor 污染 bug（ADAUSDT 0.2717 被誤用為 ETHUSDT P1 cap anchor）。
+            latest_price_by_symbol: initial_price_by_symbol.clone(),
             exposure_pct: 0.0,
             correlated_exposure_pct: 0.0,
             leverage: 0.0,
@@ -586,7 +604,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // walker path tolerates empty fixtures via AbortedFixtureExhausted).
         // 釋放 first_event_price（無錯誤表面 — synthetic walker 容忍空
         // fixture，由 AbortedFixtureExhausted 處理）。
+        // Tier A T5：synthetic walker path 不接 adapter snapshot；
+        // `initial_price_by_symbol` 同樣丟棄不影響 byte-equal baseline。
         let _ = first_event_price;
+        let _ = initial_price_by_symbol;
         eprintln!(
             "replay_runner: synthetic walker path (manifest.strategy absent; \
              R5-T3 e2e proof_1/4/5 baseline)"
