@@ -947,3 +947,176 @@ fn test_grid_bootstrap_imports_signed_inventory_from_paper_state() {
         "ma_crossover owner 倉位不可被 grid import"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPTION-A-LITE-E1D (2026-05-11) — cross_strategy_holds entry gate
+// 防 ma/bb_reversion/bb_breakout 已開的 paper_state 倉位讓 grid 誤觸發新入場。
+// 接受的合法 owner：grid_trading（自己）/ bybit_sync / orphan_adopted。
+// 不動 net_inventory 任何 read/write（PA §7 BLOCKER #2）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::paper_state::PaperPosition;
+
+/// OPTION-A-LITE-E1D helper：構建 PaperPosition 模擬 paper_state 真實持倉。
+/// 全欄位最小可行值；owner_strategy 由 caller 指定以驗證 gate 行為。
+fn make_paper_position_grid(symbol: &str, is_long: bool, owner: &str) -> PaperPosition {
+    PaperPosition {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        entry_price: 50_000.0,
+        best_price: 50_000.0,
+        entry_fee: 0.0,
+        entry_ts_ms: 0,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: owner.to_string(),
+        entry_notional: 1.0 * 50_000.0,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
+    }
+}
+
+/// 帶 ctx.position_state 的 helper（複用 ctx 簽名）。
+fn ctx_with_position(
+    price: f64,
+    ts: u64,
+    pp: &PaperPosition,
+) -> TickContext<'_> {
+    TickContext {
+        symbol: "BTC",
+        price,
+        timestamp_ms: ts,
+        indicators: None,
+        indicators_5m: None,
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: Some(pp),
+    }
+}
+
+/// OPTION-A-LITE-E1D #1：cross-strategy paper_state 持倉時 grid skip new entry。
+/// Setup：paper_state has bb_reversion LONG BTC，grid signal would_open=true（down cross）。
+/// Verify：grid.on_tick 返回 0 Open intents（cross_strategy_holds gate 阻擋）。
+#[test]
+fn test_grid_skip_entry_when_cross_strategy_holds_paper_state() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    // 首 tick 初始化網格 + 設 last_cross_idx，無 position_state（baseline）。
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    // 第二 tick：down cross（would_open=true）+ paper_state 有 bb_reversion LONG。
+    let pp = make_paper_position_grid("BTC", true, "bb_reversion");
+    let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
+    let intents = g.on_tick(
+        &ctx2,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    assert!(
+        intents.is_empty(),
+        "cross-strategy paper_state holds 時 grid 必 skip new entry，但發了 {} intents",
+        intents.len()
+    );
+    // net_inventory 不應被修改（gate 在 net_inventory 寫入路徑之前 return）。
+    assert_eq!(
+        g.net_inventory.get("BTC").copied().unwrap_or(0.0),
+        0.0,
+        "gate skip 後 net_inventory 必保持 0（未進入 buy/sell dispatch）"
+    );
+}
+
+/// OPTION-A-LITE-E1D #2：grid 自己擁有的 paper_state 倉位不應被 gate 阻擋。
+/// Setup：paper_state has grid_trading LONG BTC，grid signal would_open=true（down cross）。
+/// Verify：gate 不阻擋；依舊由 net_inventory 決定 Open vs Close。
+/// 註：cur_inventory=0（net_inventory 未寫，因 paper_state 不影響 grid 本地 inventory）
+/// 故 would_open=true && cross_strategy_holds=false → 正常 emit Open intent。
+#[test]
+fn test_grid_accepts_own_inventory_position() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    let pp = make_paper_position_grid("BTC", true, "grid_trading");
+    let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
+    let intents = g.on_tick(
+        &ctx2,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    assert!(
+        !intents.is_empty(),
+        "owner=grid_trading 時 gate 必不阻擋；intents 應 ≥1"
+    );
+    // down cross + cur_inventory=0 → Open（new long）。
+    match &intents[0] {
+        StrategyAction::Open(intent) => assert!(
+            intent.is_long,
+            "down cross with own owner 必發 LONG Open"
+        ),
+        other => panic!("expected StrategyAction::Open, got {:?}", other),
+    }
+}
+
+/// OPTION-A-LITE-E1D #3：owner=bybit_sync（boot 後 exchange sync 寫入）視為合法。
+/// Setup：paper_state has bybit_sync LONG BTC（如 boot 後從 Bybit re-sync 拿回真實倉）。
+/// Verify：gate 不阻擋；grid signal 正常進入 entry dispatch（Open or Close 由 net_inventory 決定）。
+#[test]
+fn test_grid_treats_bybit_sync_owner_as_legitimate() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    let pp = make_paper_position_grid("BTC", true, "bybit_sync");
+    let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
+    let intents = g.on_tick(
+        &ctx2,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    assert!(
+        !intents.is_empty(),
+        "owner=bybit_sync 時 gate 必不阻擋（boot re-sync 視為合法）"
+    );
+    match &intents[0] {
+        StrategyAction::Open(_) => {} // expected
+        other => panic!("expected StrategyAction::Open, got {:?}", other),
+    }
+}
+
+/// OPTION-A-LITE-E1D #4：owner=orphan_adopted 視為合法（接受未知 owner，待 next fill 自然 re-attribute）。
+/// Setup：paper_state has orphan_adopted LONG BTC。
+/// Verify：gate 不阻擋。
+#[test]
+fn test_grid_treats_orphan_adopted_owner_as_legitimate() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    let pp = make_paper_position_grid("BTC", true, "orphan_adopted");
+    let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
+    let intents = g.on_tick(
+        &ctx2,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    assert!(
+        !intents.is_empty(),
+        "owner=orphan_adopted 時 gate 必不阻擋（PA §7 #5 watch：視為未知 owner）"
+    );
+}
