@@ -1993,3 +1993,33 @@ HEAD: `4bc7be60` (3 端 sync) · Pre-E1: `d4186c86` (E2 prev pass) → E4 NEEDS_
 
 12. **E4 「fixed SQL self-test」需 diff 對齊 E1 SQL**：E4 跑 retrofit-validation 自驗 fixed SQL 跑通 N row 時，必同步在 report 中列出**所有**改動點而非只列 BLOCKER 清單。否則 retrofit round E1 收到 NEEDS_FIX 後修 N BLOCKER 仍會撞 hidden N+1 bug → 二次 retrofit round → 治理流程拉長。E2 對 E4 NEEDS_FIX 報告 SOP review 必驗 fixed-SQL 「BLOCKER 全修是否真能跑」 — 否定 = E4 內部已 ad-hoc 補了未列改動 = blind spot。
 
+---
+
+## 2026-05-11 W2-IMPL-5 stalled sub-agent collateral review → APPROVED
+
+Report: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_impl_5_e2_review.md`
+HEAD: `73bcc1f5` (Mac = Linux trade-core = origin/main 三端 100% sync)
+Stalled sub-agent: `a0e1741f` 600s watchdog killed in memory append phase
+
+### Verdict 概要
+- ✅ Integration test 534 LOC + signoff pack 342 LOC 兩 file 完整 land (HEAD `73bcc1f5`)
+- ✅ Cargo test 9/9 PASS (E2 Mac release 獨測 verify) + baseline 2797 lib + 434 core 不退化
+- ✅ 三層 fence 各對應 1 explicit assert function — Layer 1 `layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot` 9 case (PipelineKind × BybitEnvironment) + Layer 2 `layer_2_fence_env_gate_three_states` 8 子 assert + Layer 3 `layer_3_fence_panel_none_yields_no_signal_sentinel` 3 case
+- ✅ NaN safety + cross-language NaN propagation (Rust struct in-memory verify) + file ≤ 800 LOC + 跨平台 grep clean + 中文注釋政策對齊 + §九 16 + DOC-08 §12 + 硬邊界 5 項 0 觸碰
+- ❌ Stalled point 1: E1 memory 缺 W2-IMPL-5 自身 entry（INFO，E2 不補留 PM）
+- ❌ Stalled point 2: Signoff_pack §3 line 99 `trading.klines` drift (MEDIUM-1，留 PM/E1 順手清)
+- ❌ Test-only mirror 維護債 (MEDIUM-2，N+2 P2 ticket 抽 pub helper)
+- **不需重派 W2-IMPL-5 Round 2** — IMPL artifact 完整 + 缺失全可由 PM/E1 順手帶；重派浪費 token + 拖延 W2 IMPL chain 收尾
+
+### Pattern 學習追加（item 64-68）
+
+64. **stalled sub-agent ≠ unfinished IMPL — distinguish artifact-on-disk vs trailing-loop-step**：watchdog 600s 殺 sub-agent 不代表 IMPL 失敗，可能只是收尾 phase（memory append / report finalize / git commit）超時。E2 對抗 review SOP：(1) 先驗 artifact-on-disk 完整性（test PASS + file exists + LOC 對齊 self-claim）；(2) 列出 stalled point gap（通常是 collateral memory/log/governance）；(3) 判斷 gap 能否由 PM 收尾補（**通常可**）；(4) 重派只有當 artifact 本身缺陷時才必要。本次 IMPL artifact 100% 完整 + 9/9 test PASS → 不重派；只標 2 MEDIUM 留 PM 順手清 + 1 INFO memory append。**規律**：stalled report 看到時 90% 是收尾 phase 不是 IMPL phase。
+
+65. **Layer test-only mirror 是必要 trade-off 但有債**：Rust binary 端 inline 計算（不是 pub fn）無法在 integration test 直接 import；test-only mirror helper 是當前唯一 ABI-compatible 解。Trade-off 接受條件 = (a) source 邏輯與 mirror 結構 1:1 / (b) explicit "test-only mirror" comment + N+1 改 source 必同步改 mirror 警告 / (c) 同 PR 開 P2 ticket 抽 pub helper share code。三條 met = MEDIUM accept；缺任一 = HIGH push back 強制抽 helper。signoff_pack §10.1 explicit declare 此 trade-off → MEDIUM accept。
+
+66. **Signoff_pack 寫於 fix 之後但描述未同步 = governance doc drift**：sub-agent 多 sibling task 並行時，後寫者引用前寫者 fix 結果**必同步描述**。本次 W2-IMPL-5 stalled 寫 signoff_pack 在 W2-IMPL-4 SQL fix 之後但 §3 line 99 仍寫 `trading.klines`。**規律**：E2 review signoff_pack 時必 cross-check 所有 sibling fix commit 是否在 signoff_pack 描述中被正確 trace（grep schema identifier / column name / fix scope tag）。發現 drift = MEDIUM 退回 PM 收尾。
+
+67. **cross-language consistency 兩層驗證 — Rust struct in-memory + PG round-trip 分屬 E2 + E4 gate**：W2-IMPL-5 test verify Rust 端 `BtcLeadLagPanel` struct NaN propagation 自然到 evaluator cond 3/4 fail — 是 Rust 端 cross-language consistency 第一層；Python SQL reader (psycopg2) 讀 V088 PG REAL 'NaN' literal → Python pandas NaN sentinel byte-equal — 是 PG round-trip 第二層。第一層在 E2 cargo test 內驗；第二層在 E4 Linux PG dry-run 驗（per `feedback_v_migration_pg_dry_run` 強制）。**規律**：cross-language test scope 分層 → E2 不需要求一個 test 一鍵 cover 兩層；signoff_pack §10.2 explicit declare 兩層 delegate 是 acceptable。
+
+68. **9 case effective_engine_mode iter test pattern**：Rust enum 全 variant × Bybit env 全 variant 列舉 + iter `for (kind, env, expected_em, should_read) in cases` + 每 case `assert_eq!(em, expected_em) + assert_match_arm_behavior` = 雙重 protection（功能契約 + 結構契約）。本 test 9 case：Paper×2 + Demo×2 + Live×5 = 9，每 case `should_read = (em == "paper")` 邏輯精確；任一 effective_engine_mode 改動 → cargo test 紅。**規律**：enum × enum 組合 test 必 iter pattern 而非分散寫 9 個獨立 test —— DRY + 完整性 + 後續加 variant 改一行即可。E2 看到此 pattern = APPROVE 結構良好。
+
