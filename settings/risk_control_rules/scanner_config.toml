@@ -18,9 +18,10 @@ max_symbols = 40
 # 有 ticker WS 訂閱才能寫入；scanner pinned 是唯一 boot-time WS subscribe set。
 # Scanner 收到 25 pinned 後 anti-churn 保護全 cohort，max_symbols=40 留 15 動態 slot。
 # Side effect: 動態探索 long-tail sym 機會減少 ~23 slot；接受換 panel 全覆蓋。
+# POLUSDT 取代 MATICUSDT（後者 Bybit V5 status=Closed since 2024-09-06）。
 pinned_symbols = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
-    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "MATICUSDT",
+    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "POLUSDT",
     "LTCUSDT", "BCHUSDT", "NEARUSDT", "UNIUSDT", "ATOMUSDT",
     "ETCUSDT", "FILUSDT", "ICPUSDT", "TRXUSDT", "ARBUSDT",
     "OPUSDT", "APTUSDT", "SUIUSDT", "TONUSDT", "INJUSDT",
