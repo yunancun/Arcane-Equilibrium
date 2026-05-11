@@ -24,6 +24,26 @@ use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot, KamaR
 
 // P-08: Test helpers use Box::leak for owned indicator data (fine for tests).
 
+/// P0 Option A-Lite (2026-05-11) helper：構建 PaperPosition 模擬 paper_state 真實持倉。
+/// 用於 A1/A2 tests 注入 self-owned 倉位以走 exit 分支。
+fn make_paper_position_a1(symbol: &str, is_long: bool, owner: &str) -> crate::paper_state::PaperPosition {
+    crate::paper_state::PaperPosition {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        entry_price: 50_000.0,
+        best_price: 50_000.0,
+        entry_fee: 0.0,
+        entry_ts_ms: 0,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: owner.to_string(),
+        entry_notional: 50_000.0,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
+    }
+}
+
 /// Helper: build a TickContext with given indicator values.
 /// 輔助函數：用給定指標值構建 TickContext。
 fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
@@ -116,22 +136,24 @@ fn test_a1_exit_persistence_formula() {
 
 #[test]
 fn test_a1_trending_er_exits_immediately() {
+    // P0 Option A-Lite (2026-05-11)：exit path 由顯式 ctx.position_state
+    // 注入 self-owned 倉位來觸發（原 self.positions local state 已移除）。
     // Clean trend (ER=1.0) → window collapses to 0 → exit fires on the
-    // first reverse-cross tick, matching pre-A1 behavior in trending regimes.
-    // 乾淨趨勢（ER=1.0）→ 窗口為 0 → 首個反向交叉 tick 即出場。
+    // first reverse-cross tick.
     let mut s = MaCrossover::new();
-    s.min_persistence_ms = 180_000;
-    // Entry with ER=0 to pass persistence=0 exit semantics cleanly; bypass
-    // entry-side persistence by setting min to 0 only for the entry tick.
-    // 入場側 persistence 設 0 以免與 A1 出場路徑糾纏。
     s.min_persistence_ms = 0;
-    let opened = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 1.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let opened = s.on_tick(
+        &ctx_with_er(100.0, 101.0, 25.0, 0, 1.0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(opened.len(), 1, "long entry should fire");
-    // Re-enable persistence before exit — A1 window uses it scaled by ER.
-    // 重新啟用 persistence，讓 A1 公式生效。
+
+    // Step 2：ER=1.0 → window=0 + 反向 cross + self-owned LONG 注入 → exit。
     s.min_persistence_ms = 180_000;
-    // ER=1.0 → window=0 → even 1 ms later the reverse exit fires.
-    let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 1.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let pp = make_paper_position_a1("BTC", true, "ma_crossover");
+    let mut ctx_exit = ctx_with_er(101.0, 100.0, 25.0, 500_000, 1.0);
+    ctx_exit.position_state = Some(&pp);
+    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(exit.len(), 1, "trending ER must exit on first reverse tick");
     match &exit[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
@@ -141,30 +163,36 @@ fn test_a1_trending_er_exits_immediately() {
 
 #[test]
 fn test_a1_choppy_er_delays_exit_until_window_elapses() {
+    // P0 Option A-Lite (2026-05-11)：exit path 由 ctx.position_state 注入 self-owned LONG 觸發。
     // Choppy market (ER=0.0) → full min_persistence_ms window demanded.
-    // First reverse tick records onset but does NOT emit Close; only after
-    // ≥ window elapses does the persisted reverse fire.
-    // 盤整（ER=0.0）→ 全 min_persistence_ms 窗口；首個反向 tick 僅記錄。
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
-    // Open long cleanly first.
-    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let _ = s.on_tick(
+        &ctx_with_er(100.0, 101.0, 25.0, 0, 0.5),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     s.min_persistence_ms = 180_000;
+    let pp = make_paper_position_a1("BTC", true, "ma_crossover");
 
-    // t=500_000: first reverse tick in choppy regime — must NOT exit yet.
-    // t=500_000：盤整下首個反向 tick — 尚不可出場。
-    let first = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 500_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    // t=500_000：首個反向 tick + self-owned LONG → 進 exit 分支但 persistence 不足。
+    let mut ctx_first = ctx_with_er(101.0, 100.0, 25.0, 500_000, 0.0);
+    ctx_first.position_state = Some(&pp);
+    let first = s.on_tick(&ctx_first, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
         first.is_empty(),
         "choppy regime must defer exit until window elapses"
     );
-    // Still inside the window (only 100 s passed of 180 s).
-    // 仍在窗口內（僅過 100 秒，需 180 秒）。
-    let mid = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 600_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    // t=600_000：仍在窗口內。
+    let mut ctx_mid = ctx_with_er(101.0, 100.0, 25.0, 600_000, 0.0);
+    ctx_mid.position_state = Some(&pp);
+    let mid = s.on_tick(&ctx_mid, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(mid.is_empty(), "still inside choppy persistence window");
-    // t=680_001: 180_001 ms after the onset → persistence passes, Close emits.
-    // t=680_001：距首次反向 180_001 毫秒 → 持續性通過，出場。
-    let exit = s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 680_001, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    // t=680_001：persistence 通過，emit Close。
+    let mut ctx_exit = ctx_with_er(101.0, 100.0, 25.0, 680_001, 0.0);
+    ctx_exit.position_state = Some(&pp);
+    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(exit.len(), 1, "choppy exit must fire once window elapsed");
     match &exit[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
@@ -174,61 +202,74 @@ fn test_a1_choppy_er_delays_exit_until_window_elapses() {
 
 #[test]
 fn test_a1_reverse_flicker_resets_exit_persistence() {
+    // P0 Option A-Lite (2026-05-11)：exit path 由 ctx.position_state 注入 self-owned LONG 觸發。
     // A flicker back to position-aligned (no reverse signal) between two
-    // reverse ticks must reset the onset — classic PersistenceTracker
-    // semantics. Otherwise a 10-min-old flicker would let the very next
-    // reverse tick exit instantly in a choppy regime.
-    // A1 + PersistenceTracker：中間一個對齊 tick 清空 onset。
+    // reverse ticks must reset the onset.
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
-    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let _ = s.on_tick(
+        &ctx_with_er(100.0, 101.0, 25.0, 0, 0.5),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     s.min_persistence_ms = 180_000;
+    let pp = make_paper_position_a1("BTC", true, "ma_crossover");
 
-    // t=100_000: reverse tick starts timer.
-    assert!(s
-        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
-        .is_empty());
-    // t=120_000: aligned tick (fast>slow, same as current long) → resets timer.
-    // 對齊 tick → 重設計時。
-    assert!(s
-        .on_tick(&ctx_with_er(100.0, 101.0, 25.0, 120_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
-        .is_empty());
-    // t=200_000: reverse again — 80 s elapsed since new onset, not 100 s
-    // since flicker start → must NOT exit.
-    // 再次反向，距新 onset 80 秒 < 180 秒 → 不可出場。
-    assert!(s
-        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 200_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
-        .is_empty());
+    // t=100_000：reverse tick starts timer。
+    let mut ctx1 = ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0);
+    ctx1.position_state = Some(&pp);
+    assert!(s.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
+
+    // t=120_000：aligned tick → resets timer。
+    let mut ctx2 = ctx_with_er(100.0, 101.0, 25.0, 120_000, 0.0);
+    ctx2.position_state = Some(&pp);
+    assert!(s.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
+
+    // t=200_000：再次反向，距新 onset 80 秒 < 180 秒 → 不可出場。
+    let mut ctx3 = ctx_with_er(101.0, 100.0, 25.0, 200_000, 0.0);
+    ctx3.position_state = Some(&pp);
+    assert!(s.on_tick(&ctx3, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
 }
 
 #[test]
 fn test_a1_external_close_clears_exit_persistence() {
+    // P0 Option A-Lite (2026-05-11)：exit_persistence onset 需 self-owned 倉位
+    // 才能在 exit 分支記錄；改造後本 test 用顯式 ctx.position_state 注入。
     // After external close (risk-stop / hard-stop / ft_scoped_reduce),
     // on_external_close must wipe the exit_persistence onset, else a
     // stale onset from the now-closed position would let the *next*
     // entry exit prematurely on its first reverse-looking tick.
-    // 外部平倉後，exit_persistence 必須一併清空。
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
-    let _ = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 0, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let _ = s.on_tick(
+        &ctx_with_er(100.0, 101.0, 25.0, 0, 0.5),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     s.min_persistence_ms = 180_000;
-    // Record an exit_persistence onset via a reverse tick.
-    assert!(s
-        .on_tick(&ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
-        .is_empty());
 
-    // External close wipes everything for this symbol.
+    // Step 1：reverse tick + self-owned LONG 注入 → exit 分支記錄 onset。
+    let pp = make_paper_position_a1("BTC", true, "ma_crossover");
+    let mut ctx_reverse = ctx_with_er(101.0, 100.0, 25.0, 100_000, 0.0);
+    ctx_reverse.position_state = Some(&pp);
+    assert!(s.on_tick(&ctx_reverse, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
+
+    // Step 2：External close wipes exit_persistence onset。
     s.on_external_close("BTC");
-    // Verify via public API: a fresh long entry must succeed (positions clear)
-    // and then a choppy reverse tick must NOT exit (exit_persistence clear).
-    // 驗證：新倉可開，之後的反向 tick 不會立即觸發 A1（onset 已清）。
+
+    // Step 3：fresh re-entry path 走 entry 分支（無 position_state）。
     s.min_persistence_ms = 0;
-    let reopen = s.on_tick(&ctx_with_er(100.0, 101.0, 25.0, 1_000_000, 0.5), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let reopen = s.on_tick(
+        &ctx_with_er(100.0, 101.0, 25.0, 1_000_000, 0.5),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(reopen.len(), 1, "should re-enter after external close");
     s.min_persistence_ms = 180_000;
+
+    // Step 4：再次注入 self-owned LONG + reverse tick → 因 onset 已清，必須重新累積。
+    let pp2 = make_paper_position_a1("BTC", true, "ma_crossover");
+    let mut ctx_reverse2 = ctx_with_er(101.0, 100.0, 25.0, 1_100_000, 0.0);
+    ctx_reverse2.position_state = Some(&pp2);
     assert!(
-        s.on_tick(&ctx_with_er(101.0, 100.0, 25.0, 1_100_000, 0.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE)
-            .is_empty(),
+        s.on_tick(&ctx_reverse2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty(),
         "exit_persistence must start from zero after on_external_close"
     );
 }
