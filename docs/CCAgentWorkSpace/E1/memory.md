@@ -7911,3 +7911,70 @@ docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_paper_edge_repo
 4. **memory 巨型化**：E1 memory 930KB 超 Read 256KB limit → 後續 E1 接手用 `tail` / 分段 Read；建議 PA 評估 rotation。
 5. **E4 fixed-SQL self-claim 可能隱含未列 BLOCKER**：E4 report 「3 BLOCKER fix 後 → final row N」實驗描述若未顯式列出每個 BLOCKER fix 內容，E1 retrofit round 可能撞同 hidden bug；rule: E1 IMPL 前若 E4 fixed-SQL 驗證 implies 額外 fix，必 ad-hoc empirical 重驗（本次 caller smoke 先撞才發現）。
 6. **scp + ssh `python3` script 寫遠端 /tmp 不要嵌密碼**：sandbox 會偵測 password 寫文件而拒；改用 `PGPASSWORD=... python3 script.py` env var 注入 + `os.environ['PGPASSWORD']` 讀取。
+
+---
+
+## 2026-05-11 P0 Option A-Lite E1-D grid_trading cross_strategy_holds gate
+
+**Commit**: `07045e99` (branch `worktree-agent-ae9241f31ad50ac82`，已 push origin)
+**Report**: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_d_grid_trading.md`
+**PA spec**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md` §3.2 #3 + §7 BLOCKER #2 + §9 #3
+
+### 修復概要
+- grid_trading entry path 加 `cross_strategy_holds` skip gate
+- gate 邏輯：`ctx.position_state.owner_strategy ∉ {grid_trading, bybit_sync, orphan_adopted}` + `would_open=true` → return vec![]
+- 完全不動 net_inventory / on_external_close / on_fill / position_mgmt.rs / 4 other 策略 files
+- signal.rs +35 LOC（10 LOC code + 25 LOC bilingual 注釋）
+- tests.rs +173 LOC（4 new tests + 2 helper + section comment）
+
+### 驗證結果
+- cargo build --release: PASS (38.41s)
+- cargo test --release grid_trading: 50/50 pass
+- cargo test --release full lib: 2801/2801 pass (target ≥2785 exceeded by 16)
+- E2 grep 驗收: net_inventory mutation paths 0 變化、cross_strategy_holds marker 4 hits、其他 5 files byte-identical
+
+### 教訓（補 E1 全局）
+1. **Worktree absolute path 陷阱**：在 git worktree 工作時，Edit tool 用絕對路徑時容易誤寫 parent repo（`/Users/ncyu/Projects/TradeBot/srv/rust/...`）而非 agent worktree（`/Users/ncyu/Projects/TradeBot/srv/.claude/worktrees/.../rust/...`）。發現症狀：`git diff HEAD` 在 worktree 內為空但 grep 顯示 code 已寫入。**Recover**: cp parent → worktree + `git checkout --` 還原 parent。**防護 SOP**: 接手 worktree task 必先 `pwd` + `git rev-parse --show-toplevel` 對齊；Edit 前再次 `realpath` 確認；本次 cp+revert 完整還原無 contamination。
+2. **避免 unwrap defensive pattern 0 cost**：PA pseudocode 寫 `ctx.position_state.unwrap().owner_strategy` 在 `cross_strategy_holds=true` 邏輯成立時 unwrap 邏輯安全，但程式碼演進後 filter 條件改了 unwrap 可能破。改 `.map(|p| p.owner_strategy.as_str()).unwrap_or("unknown")` 0 runtime cost + future-proof，且 log 中 "unknown" 立即可辨識為「程式碼演進破不變量」訊號。
+3. **net_inventory 是 grid-level layered qty 不可搬 SSoT**：grid 累積 -2/-1/0/+1/+2 grid level qty，paper_state.qty 是 absolute qty 不含 grid-level 資訊。所以即使 cross-strategy SSoT 重構，grid_trading 仍必保留 net_inventory；只能在 entry path 加 owner_strategy gate 不能消除欄位。
+4. **gate 位置選擇影響 race semantics**：放 nearest_grid_idx 計算前可省微小開銷，但會增 gate fail 後仍寫 last_cross_idx 的 race 機率。放在 would_open 計算後（PA 建議）保證 gate fail 時所有 mutation 0 觸發 — race-safe 優先於 perf。
+5. **多策略 PaperPosition helper 重複問題**：bb_breakout / bb_reversion / grid_trading 各自有 `make_paper_position_*`。應抽到 `strategies/common/mod.rs` 但屬 PA §8.1 E1-F aggregator scope，E1-D 不擴張。**反模式**：PR 內順手抽 helper 違反「最小影響」原則。
+6. **isolation worktree 與 parallel E1 race 場景**：當 E1-A/B/E 在 main branch 半 land（field 已 drop in mod.rs，但 tests.rs / strategy_impl.rs 還引用），cargo test full lib 在 main 失敗（54 errors in ma_crossover/bb_reversion/funding_arb）。**但 grid_trading 是 isolation file scope，my code 全綠**。Rule: E1-D 不負責修其他 strategy 的破缺；report 明標 baseline 破缺 + 我的 grid_trading code clean。
+
+## 2026-05-11 — P0 Option A-Lite Wave 1 E1-E：funding_arb dormant align
+
+### 任務
+- PA dispatch：`P0 Option A-Lite IMPL — E1-E` per `2026-05-11--p0_option_a_position_state_ssot_refactor.md` §3.2 #4 + §4.1
+- 範圍：`rust/openclaw_engine/src/strategies/funding_arb.rs` (PA 預估 -100/+30，actual +278/-261)
+- dormant active=false 不變；本任務作為 Wave 1 smoke（零 runtime 影響）驗 trait + ctx.position_state pattern 可行
+
+### 修復概要
+- 移除 `FundingPosition` struct（is_positive_funding + entry_ms 都可從 PaperPosition 反推）
+- 移除 `positions: PerSymbolState<FundingPosition>` + `prev_positions: HashMap<String, Option<FundingPosition>>`
+- 保留 `cooldown: TrendCooldown` + `prev_last_trade_ms: HashMap<String, u64>`（cooldown rollback 用，與 positions 解耦）
+- `should_exit` 簽名改為純函數風格 `(is_long_position, rate, basis, now, entry_ms)`，吃 ctx.position_state 推出的值
+- `snapshot_prev()` → `snapshot_prev_cooldown()`：只快照 cooldown
+- on_tick 三分支：自家持倉（owner=self.name()）→ exit / 他家持倉 → skip / None → entry
+- on_rejection：保留 cooldown rollback，移除 positions rollback
+- on_external_close / on_fill / import_positions：退化為 trait default no-op（funding_arb 無 strategy-internal lifecycle 欄位）
+
+### 驗證結果
+- cargo build --release lib: PASS (13.67s, 0 new warning)
+- cargo test --release funding_arb: 42/42 pass（含 32 funding_arb 自家 + 10 sibling tests 含 funding_arb name）
+- cargo test --release full lib: 2799/2799 pass（前 E1-D run 2801 是因 grid_trading 加 4 tests；本次無增）
+- grep validation: non-test scope `self.positions` / `prev_positions` / `FundingPosition` = 0 hit
+- LOC: 非-test 595→531（-64），tests 600→681（+81 = 5 new tests 用 PaperPosition helper），net +17
+- 5 new tests: cross_strategy_skip / bybit_sync_skip / on_external_close_noop / on_fill_noop / import_positions_noop
+- 5 deleted tests: test_on_external_close (改 noop) / test_funding_arb_on_fill_updates_self_positions (改 noop) / test_funding_arb_bootstrap_imports_paper_state_positions (改 noop)；其餘 should_exit / rejection 系列改寫不刪
+
+### Worktree 隔離教訓
+- **接 worktree 必 `git status` 驗無 leaked changes**：E1-E 進 `agent-a01629ea158b1d262` worktree 時發現 `bb_reversion/mod.rs + tests.rs` 也是 unstaged，源自前一 E1-B sub-agent 的 leak。stash 觀察訊息 = "On main: concurrent E1 work — temp during E1-B M2 rebase"。
+- **stash 隔離保護**：`git stash push -m "E1-B bb_reversion leaked changes (not E1-E scope)" <bb_reversion files>` 把不屬自己範圍的 dirty file 推到 stash，保留我的 funding_arb 工作。**不能 drop**（不是我的工作），讓 PM 決定。
+- **cargo test lib 在 sibling 半 land 場景必失敗**：本次因 ma_crossover/bb_reversion 在他人 working tree 已半 land，cargo test 失敗 17 errors 全在 sibling tests.rs。stash 隔離後本身 lib + funding_arb tests 全通過。
+
+### 教訓
+1. **dormant strategy align 與 active strategy 同等嚴格**：funding_arb 雖 active=false 不會 dispatch on_tick，但結構仍需與 sibling 一致。否則 future re-enable 時帶 cross-strategy bug（PA spec rationale）。
+2. **PaperPosition 推導比 strategy-internal state 更乾淨**：FundingPosition 兩個欄位都能從 PaperPosition 推導，所以可全套 Option A-Lite 模式（不像 bb_breakout 必保留 trailing_stop / squeeze / oi_buffer 4 個 strategy-internal lifecycle 欄位）。
+3. **test helper 抽到 strategies/common**：本次與 E1-D 一樣面對「mock PaperPosition」reuse 問題；E1-E 在 funding_arb tests 內聯定義 `make_position` + `ctx_with_owned_position`，與 E1-D 重複 helper pattern；屬 PA §8.1 E1-F aggregator scope，E1-E 不擴張。
+4. **`let _ = is_positive;` 反模式**：曾誤加此行作「閱讀注釋」，但 is_positive 在 `let is_long = !is_positive` 已使用，Rust 不會 unused warning，添加只是 LOC 噪音 — 立即刪除。Edit minimal principle 嚴守。
+5. **trait default no-op 後 test 仍需保留**：on_external_close / on_fill / import_positions 雖然退化為 default，但仍 5 個 noop test 驗證 hook 呼叫不 panic + 不誤動其他內部狀態。default-impl 不等於「無需測」。
