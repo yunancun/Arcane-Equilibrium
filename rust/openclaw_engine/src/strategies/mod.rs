@@ -232,3 +232,10 @@ pub trait Strategy: Send {
 // ── 測試逐字搬到 sibling `tests.rs`，維持 mod.rs 精簡 ──
 #[cfg(test)]
 mod tests;
+
+// ── E4 cross-strategy holistic integration test (P0 Option A-Lite post-merge) ──
+// ── E4 跨策略 holistic 整合測試（P0 Option A-Lite post-merge）──
+// 補充 5 個 E1 sibling acceptance test 之外的「多策略同 symbol 視角」覆蓋。
+// 對應 PA report §5.3 cross-strategy integration 設計初衷。
+#[cfg(test)]
+mod cross_strategy_attribution_integrity;

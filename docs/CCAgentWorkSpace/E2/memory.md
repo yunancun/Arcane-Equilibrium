@@ -1,5 +1,45 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-11 — P0 Replay Tier A 4 sub-task post-IMPL 對抗 review (APPROVE to E4)
+
+**對象**：8 local commits `ffc57d7f` → `d9a52572`（main HEAD，未 push origin）
+- E1-A `ffc57d7f` runner.rs is_pinned + position_state + ReplayPosition.owner_strategy (+224 LOC)
+- E1-B `7f6182b2` Python manifest scanner_config + strategy_params + risk_overrides echo (+570 含 test)
+- E1-C `a17ff37a` per-symbol latest_price_by_symbol HashMap (+265 LOC)
+- E1-D `01b05e29` 6 acceptance test pack (+686 LOC)
+
+**Verdict**：**APPROVE to E4** · 0 BLOCKER / 0 HIGH / 1 MEDIUM (trait limitation trade-off) / 2 LOW / 1 WATCH
+
+**驗證手段**：
+1. nm symbol audit `replay_runner | grep -E 'router|ipc_server|build_exchange_pipeline|place_order|live_authorization'` → 0 hit
+2. cargo test 全 PASS：lib 2807 + tier_a_acceptance 6/6 + forbidden_guard 4/4 + e2e 6/6 + xlang param_delta 2/2 + profile 5/5 + mac_policy 4/4 + xlang signer 8/8 = **35 replay-specific test 全綠**
+3. PaperPosition import 合規驗證：`crate::paper_state::PaperPosition` = `pub use containers::PaperPosition`（containers.rs:17 #[derive] pure data，唯一 method refresh_max_favorable in-struct field update 無 forbidden side-effect）
+4. T2 lifetime borrow 反查：`stack_pp_opt` owned by-value（field clone 不持 self borrow）→ `pp_ref` borrow stack_pp_opt → `ctx` borrow pp_ref，per-iteration NLL，process_open_intent as_mut() 不衝突；cargo build PASS 證實
+5. manifest_version 1→2 backward compat：Rust signer 對 version field 0 hard match；Python register handler 0 schema validation；forward-compat 自然
+6. T5 fallback `.unwrap_or(0.0)` 比 PA spec 建議 1.0 **更安全**：Kelly sizer `price<=0.0` 早期 return max_qty passthrough，不會失控放大；bin/replay_runner.rs one-pass 預種所有 fixture symbol，production replay 不會觸 fallback
+7. TOML size 實測：scanner 4.2KB + strategy_params 8.3KB + risk_config_demo 18.3KB = 30.8KB raw << 256KB cap（8x headroom）
+8. 跨平台 grep `/home/ncyu` `/Users/*ncyu` 0 hit
+9. 文件大小：runner.rs 1237 / risk_adapter.rs 613 / apply_fill.rs 761 / runner_tests.rs 1645 / acceptance 686 / bin 643 / Python routes 1931 全 ≤ 2000 hard cap
+
+**Findings**：
+- **MEDIUM**：test 3 `test_replay_uses_production_strategy_params` 因 Strategy trait 無 public field accessor，只能驗 factory accept 而非 `bb_reversion.min_persistence_ms=120000` 真實 propagate 到 strategy internal field；E1-D 自承 trade-off；不阻 deploy，follow-up 評估加 trait method
+- **LOW-1**：E1-B 自承 manifest size ~17KB 估算偏低（實測 30.8KB raw），仍 << 256KB；不阻
+- **LOW-2**：mk_snapshot 預種 BTCUSDT/ETHUSDT default 100.0 hardcoded 耦合 production 25-sym pinned；E1-C 自承 trade-off；不阻
+- **WATCH**：E1 memory.md ~1MB 超 Read 256KB；下個 sprint 評估 archive 切分
+
+**核心對抗發現**：
+1. **T5 fallback IMPL `.unwrap_or(0.0)` 比 PA spec 建議的 1.0 更安全**：PA §10 第 1 點 expressed concern about fallback 1.0 放大 qty；IMPL 反而用 0.0 觸發 Kelly sizer `price<=0.0` 早期 return（kelly_sizer.rs:197）+ Gate 2.6 fallback 至 guardian_qty + Gate 2.7 admission 用 price=0 算 notional 自動 reject。real-world 風險 = 0
+2. **T2 lifetime 用 owned stack_pp_opt + borrow pp_ref**：避免 PA §3.5 #1 預期的 owned-by-value to TickContext 重構，更乾淨且 borrow checker 自然過
+3. **manifest_version bump 兩端 0 hard match**：forward-compat 自然滿足，無 IMPL 風險
+4. **forbidden_guard 0 violation**：nm symbol audit + grep import 雙重驗證；V3 §6.2 isolation invariant 不變
+5. **PaperPosition import 合規邊界**：runner.rs 既存 SAFETY 注釋禁的是 `PaperState` mutate module，PaperPosition data struct 從 containers.rs 引出與 production tick_pipeline 對稱
+
+**Trade-off accepted**：test 3 用 factory accept 作等價證據（Strategy trait limitation）；單獨 MEDIUM follow-up 不阻 current deploy。
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--replay_tier_a_post_impl_audit.md`
+
+---
+
 ## 2026-05-11 — W2 IMPL chain 4 sub-task 對抗 review (APPROVE-CONDITIONAL · PASS to E4)
 
 **對象**：commit `1f0354cf` W2 A4-C BTC→Alt Lead-Lag fast-track IMPL chain，4 sub-agent 並行 + sibling V083 E2 review
