@@ -2790,3 +2790,45 @@ Strategy trait (`strategies/mod.rs`) 對 W7 pattern **不強制**：on_rejection
 **Reports**:
 - AMD draft: `srv/docs/governance_dev/amendments/2026-05-11--AMD-2026-05-11-W6-1-rfc-final-verdict-absorb.md` (608 LOC)
 - PA sign-off: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--amd_w6_1_draft_pa_signoff.md` (264 LOC)
+
+---
+
+## W-D MAG-083 Final Release Audit — PA View（2026-05-11）
+
+**Verdict**: APPROVE WITH P1 FOLLOW-UP
+
+**Subject**: W-D MAG-083 final release audit 三角第 2 角（PA 架構視角）；並行 QA（端到端）+ QC（統計/數學）。Pre-condition：W-C MAG-082 Stage 2 WINDOW_PASS sign-off `2026-05-11--w_c_window_pass_signoff.md` 已 sign（cloud@ncyu.me 2026-05-11）+ deploy commit `ccf7a4bc`。
+
+**架構整合 sound**：
+- Caveat 1+2 修復鏈字面對齊 PA spec § 1/2 + Option α + Migration A 三層設計
+- 新增 callsite hot path SLA 安全（emit_entry_lineage +3-6μs / emit_fill_completion_lineage 10-20μs）
+- mpsc channel 容量充裕（68 chain in-flight vs 7 chain/h avg）
+- 硬邊界 5 項 0 觸碰 / DOC-08 §12 9 不變量 0 觸碰 / 16 原則 0 違反（#8 strengthened）
+
+**0 P0 architectural gap**；**7 個 P1 follow-up + 3 個 P2**：
+- P1-1 `stable_id` 算法字面複製 3 處（E5 D-1 P2 升 P1，silent id drift 風險）
+- P1-2 Stage 3+ promotion 與真實 Decision Lease 9-state lifecycle 證據要求（W-C bypass 不可繼承）
+- P1-3 `executor_canary_stage_log` (W-AUDIT-9) 與 `agent.decision_state_changes` (W-C) 跨 SM 對齊
+- P1-4 AlphaSurface (W-AUDIT-8a) 與 spine writer alpha source tagging 接線（per-alpha-source live promotion gate R-4 隱性依賴）
+- P1-5 PendingOrder.spine_verdict_id 保留位 N+2 前必須使用或移除
+- P1-6 `[55]` healthcheck 24h transition window 不能成 silent FAIL 漂移源
+- P1-7 commit `ccf7a4bc` 27 file 含 sibling W2 wave 結構性改動 — reviewer brief 必明文 W-C 純度
+
+**PA self-review on Caveat 1+2 修復方案完整度**：
+- 8/9 動作項 land 完整
+- 3 IMPL Deviation（PendingOrder 4 欄位非 3 / Historical stub option c 非 a / R2 fix C-A.2）全部 PA 接受
+- 1 spec ambiguity acknowledged：transition.object_id 應對既有 row 寫的 SM 不變式（spec § 1.3 表內未明確區分）
+- 整體 A-（A 是 spec 0 ambiguity；A- 是 transition.object_id ambiguity 留教訓）
+
+**架構教訓 1**：spec 寫 transition table 時必須明文「transition 描述既有 object 狀態變化，不在新建 object 自身上掛 from_state」— append-only event log 哲學的 SM 不變式表達需強化
+
+**架構教訓 2**：升 P1（從 E5 D-1 P2）`stable_id` helper 抽出 — 跨檔字面複製 3 處是 sub-architectural silent drift 風險源；當改算法時漏改一處 = audit chain 沉默斷裂 = MAG-082 evidence 信任崩塌；30min effort 緊接 MAG-084 後 24-48h 內 fix
+
+**架構教訓 3**：W-AUDIT-9 graduated canary 5-stage 與 W-C 兩條 SM log 是不同抽象層（cohort 級 vs chain 級）— 不需強制 cross-ref，但建議 W-AUDIT-9 T5 GUI surface spec 加 cross-table join query；同 commit 加 P2 schema cross-ref ticket
+
+**架構教訓 4**：commit 純度政策補強 — sibling wave 結構性改動跟 W-C 同 commit `ccf7a4bc` 27 file 後，reviewer brief 必明文 W-C scope = 4 primary + 11 secondary file；sibling W2 wave separate wave authority；未來大 PR 同 commit policy 需強化「pre-existing baseline exception clause」配套說明
+
+**Reports**:
+- PA audit: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w_d_mag083_pa_audit.md`
+- W-C WINDOW_PASS sign-off: `srv/docs/governance_dev/2026-05-11--w_c_window_pass_signoff.md`
+- PA Caveat 1+2 fix plan: `srv/docs/CCAgentWorkSpace/PA/2026-05-10--w_c_caveat_fix_plan.md`
