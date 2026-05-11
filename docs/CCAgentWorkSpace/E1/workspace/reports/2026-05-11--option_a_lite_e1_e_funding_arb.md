@@ -4,7 +4,7 @@
 **Agent**：E1-E
 **Status**：IMPL DONE — 待 E2 審查 + E4 regression
 **Worktree**：`agent-a01629ea158b1d262`
-**Commit**：等本報告寫完 + memory append 後一次性 commit；SHA 報告底部回填
+**Commit**：`0427346ff07f4700162640b28ce5bc4b85fcb3b8`（short `0427346f`，local main HEAD；sandbox denied `git push origin main`，待 operator 授權 push）
 
 ## 1. 任務摘要
 
@@ -283,4 +283,4 @@ ADR-0018 sets `funding_arb.active=false`；理論上 orchestrator 不會 dispatc
 
 E1-E IMPLEMENTATION DONE：待 E2 審查（report path: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_e_funding_arb.md`）。
 
-Commit SHA：待 commit 後回填。
+**Commit SHA**：`0427346f`（local main HEAD，push 受 sandbox 拒；待 operator 授權 `git push origin main`）
