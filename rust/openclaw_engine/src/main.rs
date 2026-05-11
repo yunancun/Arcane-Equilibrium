@@ -52,9 +52,12 @@ use startup::*;
 /// 但 panel cohort 與 scanner cohort 邏輯獨立：scanner pinned 是 boot-time WS 訂閱集合，
 /// panel cohort 是 funding/OI panel 計算範圍。Bybit V5 USDT-M perp 主力 25 sym。
 fn panel_aggregator_cohort() -> Vec<String> {
+    // POLUSDT 取代 MATICUSDT（後者 Bybit V5 status=Closed since 2024-09-06，
+    // Polygon Labs MATIC→POL token migration）；Bybit 上 POLUSDT contract since
+    // 2024-09-05 active。post-restart#4 empirical 證實只 MATICUSDT 0 funding row。
     vec![
         "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
-        "DOTUSDT", "MATICUSDT", "LTCUSDT", "BCHUSDT", "NEARUSDT", "UNIUSDT", "ATOMUSDT", "ETCUSDT",
+        "DOTUSDT", "POLUSDT", "LTCUSDT", "BCHUSDT", "NEARUSDT", "UNIUSDT", "ATOMUSDT", "ETCUSDT",
         "FILUSDT", "ICPUSDT", "TRXUSDT", "ARBUSDT", "OPUSDT", "APTUSDT", "SUIUSDT", "TONUSDT",
         "INJUSDT",
     ]
