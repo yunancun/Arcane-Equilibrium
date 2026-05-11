@@ -580,7 +580,7 @@ This amendment does not:
 | QC | verify quant accuracy of PB absorb (QC PB#1/2/3/4 + Verdict 2/3 數學)| 2026-05-11 commit `be947fe3` | ✅ APPROVE 0 new PB |
 | MIT | verify ML pipeline + DB schema accuracy (MIT MUST 1-5 + SHOULD 6/7 + Verdict 4)| 2026-05-11 commit `be947fe3` + 3 PB absorb `89f9aad0` | ✅ APPROVE-CONDITIONAL 3 PB absorbed |
 | PM | consolidate sign-off + dispatch v3.8 + CLAUDE.md §三 land | 2026-05-11 commit `7f0b6940` | ✅ APPROVE PENDING OPERATOR FINAL |
-| Operator | final approval + CLAUDE.md §七 wording fix (per MIT MUST 4) + D+1 evening engine restart deploy + D+2 14:30 UTC ALTER VALIDATE | 2026-05-11 path B authorization | ✅ ACCEPTED — V091 NOT VALID schema applied 2026-05-11 (idempotent verified, constraint `chk_reason_code_mutually_exclusive` 0 violation); CLAUDE.md §七 wording fix + D+1 evening engine restart + D+2 14:30 UTC ALTER VALIDATE 仍待 operator 自行執行 |
+| Operator | final approval + CLAUDE.md §七 wording fix (per MIT MUST 4) + D+1 evening engine restart deploy + D+2 14:30 UTC ALTER VALIDATE | 2026-05-11 path B authorization | ✅ FULL CLOSURE — (1) V091 NOT VALID schema applied 2026-05-11 (idempotent verified, 0 historical row violation); (2) CLAUDE.md §七 wording fix `b483dcdf` (lossless on repeated apply + UPDATE row count 非 0 是預期); (3) Engine rebuild done (PID 1925102, paper+demo+live 3 pipelines alive, V086 producer code + V091 enforcement deployed); (4) **ALTER VALIDATE CONSTRAINT `chk_reason_code_mutually_exclusive` executed 2026-05-11** — `convalidated=true`，提早於 D+2 14:30 UTC schedule（RCA verdict close_reason_code=0 last 21h by design, W6-3d backfill phase responsibility, NOT V086 producer bug; mutex constraint 兩 path（reject vs backfill close UPDATE）不撞，0 violation 確認） |
 
 ---
 
