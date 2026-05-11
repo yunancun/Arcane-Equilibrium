@@ -2907,3 +2907,72 @@ E1 修 3 BLOCKER (commit 98a9d35f) + 4th syntax bug (163a5cba) + report (4bc7be6
 
 9. **cross-language consistency 1e-4 容差對純 SQL fix N/A**：W2-IMPL-4 SQL fix 不觸浮點計算 — 不適用 §4.6 跨語言一致性驗證（指 indicator/calculator 才有意義）。E4 任務 §G 仍記錄此「不適用」結論避免 audit 漏項。
 
+## 2026-05-11 (W2-IMPL-5 stalled sub-agent collateral E4 regression)
+
+### 任務 = W2-IMPL-5 sub-agent stalled 600s killed in memory append；working tree 已 commit + push 2 files (commit `73bcc1f5`)：
+- `rust/openclaw_engine/tests/btc_lead_lag_panel_fence_integration.rs` (534 LOC, 9 tests)
+- `docs/governance_dev/2026-05-11--w2_impl_signoff_pack.md` (342 LOC)
+
+E4 verify integration test 真 cargo test 跑通 + baseline 不退化 + stalled IMPL 真完整。
+
+### Verdict = APPROVED（全 5 維度 GREEN）
+
+| 維度 | 結論 |
+|---|---|
+| cargo test --release lib baseline | ✅ Linux 2797/0 ×2（與 W2 chain 上輪 baseline 完全一致） |
+| Integration test 9/9 PASS | ✅ Linux release ×2 + Mac release ×1 = 27 個 test run 全 PASS |
+| 三層 fence 各 test PASS | ✅ Layer 1 / 2 / 3 各 1 assert function + 6 額外 invariant 全 PASS |
+| Cross-language consistency | ✅ Rust in-memory NaN propagation PASS；PG→Python 由 IMPL-3 sibling 覆蓋 |
+| File 大小 | ✅ 534 + 342 LOC 全在 800 警告線下 |
+| Stalled IMPL 真完整 | ✅ 9/9 test PASS = compile + 全 assert 通過 = ground truth |
+
+### 1. Full engine cargo test 撞 stress_tick_latency_benchmark 是 pre-existing flaky 非 W2-IMPL-5 regression
+
+第一次跑 `cargo test --release -p openclaw_engine`（lib + all integration）在 stress_integration suite 撞 `stress_tick_latency_benchmark`：`tick avg should be <100μs, got 181.9μs`。
+
+**驗證 = W2-IMPL-5 0 因果關係**：
+- `git diff 1f0354cf..HEAD --stat` W2-IMPL-5 collateral 0 source code 改動（純 docs / E4 report / 1 isolated integration test 新檔）
+- tick_pipeline / alpha_surface / panel_aggregator hot path 0 touched
+- stress_integration.rs 自 `c9fb0b8f` (W7-1 + W2 trait skeleton land 2026-05-10) latency assertion threshold 100μs 對機器負載敏感
+- `--test-threads=1` 隔離跑 → 35/35 stress_integration PASS
+- W2 chain 上輪 baseline scope = `--lib` only（2797/0），不含 integration tests — 本次撞 stress 是 scope expand 引入的 pre-existing flaky pattern
+
+**結論**：stress_tick_latency_benchmark 為 pre-existing latency-threshold flaky（trade-core 共享機器 parallel test CPU contention），不算 W2-IMPL-5 regression。長期改進屬 W4 / W-AUDIT-3b runtime smoke 範圍。
+
+### 2. Layer 2 fence test 用 test-only mirror Bool 邏輯（acceptable + explicit MODULE_NOTE）
+
+W2-IMPL-5 integration test `layer_2_should_spawn` helper 是 `main.rs:1005-1018` Bool 邏輯的 test-only mirror（不操作真實 std::env::var 避免 cargo test 並行 race）。Mock 安全規則檢查：
+- 純 Bool 邏輯 mirror（不掩蓋業務邏輯，是邏輯複製）
+- MODULE_NOTE 已 explicit 標「test-only mirror...若 main.rs 改邏輯 → 本 helper 同步改才能維持 layer 2 assertion 真實對應」
+- acceptable mitigation；長期改進 = 把 main.rs Bool 邏輯抽 helper function 讓 test 直接 import — 但屬 W-AUDIT-8a Option A architectural reform 非 W2-IMPL-5 scope
+
+### 3. Cross-language consistency 工件分工
+
+W2 chain 5 sub-task 跨語言驗證分工原則：
+- **Rust 端 in-memory byte-equal NaN propagation** → W2-IMPL-5 integration test `cross_language_consistency_nan_in_panel_propagates_to_cond_4_fail`（Layer 3 evaluate_shadow_signal 端到端 NaN sentinel）
+- **PG → Python reader byte-equal** → W2-IMPL-3 healthcheck unit test (`checks_btc_lead_lag.py`) + Linux PG empirical dry-run（IMPL-3 sibling 範圍已 cover）
+
+E4 不重做 IMPL-3 PG empirical（per task scope）。
+
+### 4. Stalled sub-agent IMPL 完整性驗 = cargo test 9/9 PASS 是 ground truth
+
+sub-agent 600s killed in memory append 不損 IMPL 工件完整性，前提是工件已 commit + push。E4 透過 cargo test --release 9/9 PASS + 跨平台一致驗證真實工件完整 — 是檢查 stalled IMPL 最可靠的證據（compile pass + 全 assert pass = 邏輯 + 結構 + 一致性 三層交叉驗）。E4 本輪追加 memory（per 完成序列硬要求）涵蓋 W2-IMPL-5 regression 教訓，補回 sub-agent stall 在 memory append 漏項。
+
+### 教訓追加 (W2-IMPL-5 stalled sub-agent regression round 新增)
+
+1. **Stalled sub-agent IMPL 完整性 verify = test PASS 是 ground truth** — sub-agent 600s killed in memory append 不損 IMPL 工件完整性，前提是工件已 commit + push。cargo test --release 9/9 PASS + 跨平台一致 = 真實工件完整最可靠的證據（compile pass + 全 assert pass = 邏輯 + 結構 + 一致性 三層交叉驗）。
+
+2. **Full engine `cargo test`（lib + integration）vs --lib only 範圍區別必對齊上輪 baseline scope** — W2 chain 上輪 baseline 是 `--lib` only（2797/0），W2-IMPL-5 第一次跑 full engine 撞 stress_tick_latency_benchmark（181.9μs > 100μs release threshold）。是 stress_integration suite 在 trade-core 共享機器上 parallel 跑 + CPU contention 的 pre-existing flaky pattern，與 W2-IMPL-5 0 因果關係。E4 baseline 比對必對齊上輪 scope（lib only），避免 noise 引入虛 BLOCKER。
+
+3. **`--test-threads=1` 隔離 + reproduce verify 是 flaky vs regression 判別工具** — 第一次跑 fail 不能直接退 E1，必：(a) 隔離 single-thread 跑驗是否 race; (b) `git diff` 確認改動是否 touch hot path; (c) check pre-existing 是否同 fail。W2-IMPL-5 撞 stress 後 (a)(b)(c) 三條全證 pre-existing flaky → 標記非 W2-IMPL-5 regression 不退 E1。
+
+4. **test-only mirror Bool 邏輯模式 + explicit MODULE_NOTE = acceptable mock 規則** — `layer_2_should_spawn` 複製 main.rs Bool 邏輯到 test helper（避免 std::env::var 並行 race）是 acceptable，前提是 MODULE_NOTE 明標「test-only mirror...若 main.rs 改邏輯 → 本 helper 同步改」。長期改進是把 main.rs Bool 抽 helper function 讓 test import，屬 architectural reform 非當前 scope。
+
+5. **Cross-language consistency 工件分工原則** — Rust in-memory NaN propagation = W2-IMPL-5 integration test 範圍；PG → Python reader byte-equal = W2-IMPL-3 healthcheck unit test + Linux PG empirical 範圍。E4 不重做 sibling sub-task 範圍工件，避免 audit 工作冗餘。
+
+6. **File 大小 800 警告線 / 2000 硬上限 check 是 pure measurement** — 不涉邏輯，simple grep wc。534 + 342 LOC 全在警告線下。E4 在 §D 直接結論不展開。
+
+7. **Sub-agent 並行 review（E2 + E4）read-only 不衝突** — E4 read-only 跑 cargo test + pytest（不寫 source）；E2 read-only 看 diff + 寫 review report；workspace 不重疊 = 0 衝突。並行省時 ~20min vs 串行。
+
+8. **E4 完成序列補回 stalled sub-agent 漏 memory append** — sub-agent stall 後 E4 在自身 memory 追加 W2-IMPL-5 regression 教訓 = 補回 E1 memory append 漏項的部分（E1 memory log 需 E1 sub-agent 重 dispatch 才能補；W2-IMPL-5 collateral 已 commit + push，PM 後續決定是否重派 E1 補 memory）。
+
