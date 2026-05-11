@@ -464,12 +464,14 @@ impl IsolatedPipeline {
                     effective_ts_ms: effective_ts_ms(ts_ms, self.execution_latency_ms),
                 });
                 if partial.filled_qty > 0.0 {
+                    // Tier A T2.5：傳入 intent.strategy 寫進 ReplayPosition.owner_strategy。
                     self.apply_fill_open(
                         &intent.symbol,
                         intent.is_long,
                         partial.filled_qty,
                         fill_price,
                         fee,
+                        &intent.strategy,
                     );
                 }
                 self.last_action = if partial.fill_status == "partial" {
@@ -621,6 +623,10 @@ impl IsolatedPipeline {
     /// Sprint B2 R5-T3 — open-side snapshot mutation. Inserts/extends a
     /// position and deducts execution fee from the snapshot balance so
     /// `pnl_summary.net_pnl` is fee-net.
+    ///
+    /// Tier A T2.5：新增 `owner_strategy` 參數寫進 ReplayPosition，鏡射
+    /// production `PaperPosition.owner_strategy` 的 first-write-wins 語義 —
+    /// 同向加倉保留首次寫入者，減倉只 net qty 不改 owner。
     pub(super) fn apply_fill_open(
         &mut self,
         symbol: &str,
@@ -628,6 +634,7 @@ impl IsolatedPipeline {
         qty: f64,
         fill_price: f64,
         fee: f64,
+        owner_strategy: &str,
     ) {
         let snap = match self.paper_snapshot.as_mut() {
             Some(s) => s,
@@ -639,6 +646,7 @@ impl IsolatedPipeline {
             // direction adds; reducing path nets the qty).
             // 同 symbol 既有倉 → 擴 qty + 重算加權入場價（罕見路徑 — Gate
             // 1.5 應已拒同向加倉；減倉路徑 net qty）。
+            // T2.5：first-write-wins — 既有倉位的 owner_strategy 不被覆寫。
             let pos = &mut snap.positions[idx];
             if pos.is_long == is_long {
                 let new_qty = pos.qty + qty;
@@ -671,11 +679,13 @@ impl IsolatedPipeline {
         } else {
             // Fresh open.
             // 全新開倉。
+            // T2.5：寫入 owner_strategy（intent.strategy.clone() upstream）。
             snap.positions.push(ReplayPosition {
                 symbol: symbol.to_string(),
                 is_long,
                 qty,
                 entry_price: fill_price,
+                owner_strategy: owner_strategy.to_string(),
             });
         }
         snap.balance -= fee;

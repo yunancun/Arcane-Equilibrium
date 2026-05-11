@@ -1002,7 +1002,29 @@ impl IsolatedPipeline {
                 continue;
             }
 
-            let ctx = build_tick_context(event, &tick_inputs);
+            // Tier A T1 wire：is_pinned 由 scanner_timeline.is_active_at 推算；
+            // 無 timeline 時保留 true（synthetic walker / 未配置 scanner 情境
+            // 維持既有 byte-equal baseline）。
+            let is_pinned = self
+                .scanner_timeline
+                .as_ref()
+                .map(|tl| tl.is_active_at(&event.symbol, event.ts_ms))
+                .unwrap_or(true);
+
+            // Tier A T2 wire：從 paper_snapshot 查當前 symbol 是否有倉位 →
+            // 若有則構造 stack-local PaperPosition borrow 餵 ctx.position_state。
+            // 借用鏈：stack_pp_opt（local 自己）→ pp_ref（借 stack_pp_opt）→
+            // ctx.position_state（借 pp_ref），per-iteration NLL 釋放後進
+            // process_open_intent 的 self.paper_snapshot.as_mut() mutable borrow，
+            // 不衝突。無倉位時 None。
+            let stack_pp_opt: Option<crate::paper_state::PaperPosition> = self
+                .paper_snapshot
+                .as_ref()
+                .and_then(|snap| snap.get_position(&event.symbol))
+                .map(|rp| build_replay_position_borrow(rp, event.ts_ms));
+            let pp_ref: Option<&crate::paper_state::PaperPosition> = stack_pp_opt.as_ref();
+
+            let ctx = build_tick_context(event, &tick_inputs, is_pinned, pp_ref);
 
             // Strategy emits actions (mut borrow on adapter).
             // 策略發出 action（adapter 取 mut borrow）。
@@ -1126,8 +1148,15 @@ impl IsolatedPipeline {
 fn build_tick_context<'a>(
     event: &'a MarketEvent,
     inputs: &'a ReplayTickInputs,
+    is_pinned: bool,
+    position_state: Option<&'a crate::paper_state::PaperPosition>,
 ) -> crate::tick_pipeline::TickContext<'a> {
     // W-AUDIT-8a Phase A：replay 用 EMPTY_ALPHA_SURFACE 對齊 byte-identical baseline。
+    // Tier A T1 + T2（2026-05-11）：is_pinned 改由 caller 依
+    // scanner_timeline.is_active_at 推算；position_state 改由 caller 從
+    // ReplayPaperSnapshot.get_position 映射為 stack-local PaperPosition borrow。
+    // synthetic walker 路徑（無 timeline + 無 snapshot）caller 傳
+    // (is_pinned=true, position_state=None) 維持 byte-equal baseline。
     crate::tick_pipeline::TickContext {
         symbol: &event.symbol,
         price: event.close,
@@ -1143,12 +1172,38 @@ fn build_tick_context<'a>(
         best_ask: event.best_ask,
         tick_size: inputs.tick_size,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-        // Sprint N+1 W7-1：replay 模式無 paper_state context，position_state = None。
-        // strategy on_tick 內若聲稱讀此 handle，replay path 一律跳 entry path。
-        position_state: None,
-        // SCANNER-PINNED-GATE-1：replay 無 scanner registry，預設 true（與 test setup 對齊）。
-        // replay 不模擬 scanner pinned tier rotation，等同假設所有 symbol 皆 pinned。
-        is_pinned: true,
+        position_state,
+        is_pinned,
+    }
+}
+
+/// Tier A T2 helper：將 ReplayPosition 構造成 stack-local PaperPosition，
+/// 餵 build_tick_context 的 position_state 借用。生命週期與 caller scope 對齊
+/// （per-iteration NLL 釋放），不引 paper_state mutate side（PaperState 全域
+/// 變更面 + DB writer channel）— 僅借同模組 containers.rs 的 pure data struct。
+///
+/// 對齊 production PaperPosition field 預設值：tick_pipeline 讀的 entry path
+/// gate 主要關心 symbol / is_long / owner_strategy；其餘 field 在 replay
+/// 內沒有真實源，用合理 default 填（best_price 同 entry_price，fee/unrealized 等 0）。
+fn build_replay_position_borrow(
+    rp: &crate::replay::risk_adapter::ReplayPosition,
+    event_ts_ms: i64,
+) -> crate::paper_state::PaperPosition {
+    crate::paper_state::PaperPosition {
+        symbol: rp.symbol.clone(),
+        is_long: rp.is_long,
+        qty: rp.qty,
+        entry_price: rp.entry_price,
+        // best_price 對 entry path gate 不參與決策；用 entry_price 為合理 baseline。
+        best_price: rp.entry_price,
+        entry_fee: 0.0,
+        entry_ts_ms: event_ts_ms.max(0) as u64,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: rp.owner_strategy.clone(),
+        entry_notional: rp.qty * rp.entry_price,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
     }
 }
 

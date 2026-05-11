@@ -520,6 +520,7 @@ fn adapter_pipeline_preserves_open_position_tick_after_scanner_drop() {
             is_long: true,
             qty: 1.0,
             entry_price: 100.0,
+            owner_strategy: String::new(),
         }],
     );
     let scan = crate::scanner::types::ScanResult {
@@ -615,6 +616,7 @@ fn adapter_pipeline_records_ghost_fill_on_risk_reject() {
             is_long: true, // same direction as stub
             qty: 0.5,
             entry_price: 100.0,
+            owner_strategy: String::new(),
         }],
     );
     let mut wired = pipeline
@@ -1165,6 +1167,7 @@ fn test_apply_fill_ghost_row_records_zero_fee_with_intent_metadata() {
             is_long: true,
             qty: 0.5,
             entry_price: 100.0,
+            owner_strategy: String::new(),
         }],
     );
     let mut wired = pipeline
@@ -1323,4 +1326,142 @@ fn test_r6t3_kelly_qty_finite_with_calibrated_kelly_config() {
         "Isolated profile + Some(KellyConfig) must construct, got {:?}",
         risk_adapter.err()
     );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Tier A T1 + T2 + T2.5 sanity test（2026-05-11 E1-A）
+// 對齊 PA design §3.3 / §3.5 acceptance：is_pinned 由 scanner_timeline 注入、
+// position_state 由 ReplayPaperSnapshot 映射為 stack-local borrow、
+// ReplayPosition.owner_strategy 由 apply_fill_open 寫入。
+// ────────────────────────────────────────────────────────────────────────
+
+/// 構造一個 ETHUSDT MarketEvent，方便 test 重用。
+fn synthetic_event(symbol: &str, ts_ms: i64, close: f64) -> MarketEvent {
+    MarketEvent {
+        ts_ms,
+        symbol: symbol.to_string(),
+        open: close,
+        high: close * 1.01,
+        low: close * 0.99,
+        close,
+        volume: 1.0,
+        turnover: None,
+        turnover_24h: None,
+        best_bid: None,
+        best_ask: None,
+        bid_size: None,
+        ask_size: None,
+        bid_depth_5: None,
+        ask_depth_5: None,
+        spread_bps: None,
+        microstructure_source: None,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        tick_size: None,
+        h0_allowed: None,
+        indicators: None,
+        signals: Vec::new(),
+    }
+}
+
+#[test]
+fn build_replay_position_borrow_preserves_owner_strategy() {
+    // Tier A T2.5：驗證 helper 將 ReplayPosition.owner_strategy 對齊
+    // 寫進 stack-local PaperPosition，供 ctx.position_state 借用。
+    let rp = crate::replay::risk_adapter::ReplayPosition {
+        symbol: "BTCUSDT".to_string(),
+        is_long: true,
+        qty: 0.5,
+        entry_price: 64_000.0,
+        owner_strategy: "ma_crossover".to_string(),
+    };
+    let pp = super::build_replay_position_borrow(&rp, 1_700_000_000_000);
+    assert_eq!(pp.symbol, "BTCUSDT");
+    assert_eq!(pp.is_long, true);
+    assert_eq!(pp.qty, 0.5);
+    assert_eq!(pp.entry_price, 64_000.0);
+    assert_eq!(pp.best_price, 64_000.0);
+    assert_eq!(pp.owner_strategy, "ma_crossover");
+    assert_eq!(pp.entry_notional, 0.5 * 64_000.0);
+    assert_eq!(pp.entry_ts_ms, 1_700_000_000_000u64);
+}
+
+#[test]
+fn build_replay_position_borrow_clamps_negative_ts() {
+    // 對齊 build_tick_context 的 ts_ms.max(0) as u64 行為。
+    let rp = crate::replay::risk_adapter::ReplayPosition {
+        symbol: "ADAUSDT".to_string(),
+        is_long: false,
+        qty: 100.0,
+        entry_price: 0.5,
+        owner_strategy: String::new(),
+    };
+    let pp = super::build_replay_position_borrow(&rp, -42);
+    assert_eq!(pp.entry_ts_ms, 0u64, "negative ts_ms must clamp to 0");
+}
+
+#[test]
+fn build_tick_context_threads_is_pinned_and_position_state() {
+    // Tier A T1 + T2：驗證 build_tick_context 把 caller 注入的 is_pinned
+    // 與 position_state 透傳到 TickContext。對齊 production 行為。
+    let event = synthetic_event("BTCUSDT", 100, 64_000.0);
+    // 顯式構造 ReplayTickInputs（無 Default impl）。
+    let inputs = crate::replay::context_builder::ReplayTickInputs {
+        indicators: None,
+        signals: Vec::new(),
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        tick_size: None,
+        turnover_24h: None,
+    };
+    let pp = crate::paper_state::PaperPosition {
+        symbol: "BTCUSDT".to_string(),
+        is_long: true,
+        qty: 0.5,
+        entry_price: 64_000.0,
+        best_price: 64_000.0,
+        entry_fee: 0.0,
+        entry_ts_ms: 100,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: "ma_crossover".to_string(),
+        entry_notional: 32_000.0,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
+    };
+
+    // Case 1：is_pinned=true + Some(position) → ctx 取到等值。
+    let ctx = super::build_tick_context(&event, &inputs, true, Some(&pp));
+    assert_eq!(ctx.symbol, "BTCUSDT");
+    assert!(ctx.is_pinned, "is_pinned=true must propagate");
+    let ctx_pos = ctx.position_state.expect("position_state must be Some");
+    assert_eq!(ctx_pos.symbol, "BTCUSDT");
+    assert_eq!(ctx_pos.owner_strategy, "ma_crossover");
+    assert_eq!(ctx_pos.qty, 0.5);
+
+    // Case 2：is_pinned=false + None position → fail-closed 路徑可被策略觀察。
+    let ctx2 = super::build_tick_context(&event, &inputs, false, None);
+    assert!(!ctx2.is_pinned, "is_pinned=false must propagate");
+    assert!(
+        ctx2.position_state.is_none(),
+        "position_state=None must propagate"
+    );
+}
+
+#[test]
+fn replay_position_owner_strategy_default_empty_string() {
+    // Backward-compat：未提供 owner_strategy 時（test seed / 既有 ghost fill）
+    // 預期空字串作為 first-write-wins 的初始值（與 production PaperPosition
+    // pre-Phase-2A 行為一致）。
+    let rp = crate::replay::risk_adapter::ReplayPosition {
+        symbol: "ETHUSDT".to_string(),
+        is_long: false,
+        qty: 0.1,
+        entry_price: 2_300.0,
+        owner_strategy: String::new(),
+    };
+    assert_eq!(rp.owner_strategy, "");
 }
