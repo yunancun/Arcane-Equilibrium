@@ -1,5 +1,42 @@
 # PA Memory — 工作記憶
 
+## W2 IMPL v1.2 chain dispatch plan — 5 sub-agent 拆分（2026-05-11）
+
+**觸發**：Sprint N+1 Phase 4 待派；operator 要求 PA 寫 5 sub-agent dispatch plan（不寫業務 code）。
+
+**重大發現**（reality check before dispatch）：operator 任務描述假設 W2 IMPL 未開工，但 Sprint N+1 D+0 pre-dispatch readiness 階段已把舊 spec §11 4 個 sub-task 大半 land：trait skeleton (alpha_surface.rs 650 LOC) / V088 migration (456 LOC) / BtcLeadLagPanelSlot / BtcLeadLagProducer (panel_aggregator/btc_lead_lag.rs 1253 LOC + run_loop + PG INSERT) / step_4_5_dispatch.rs paper-only fence Layer 1 / main.rs spawn / main_pipelines.rs 三 pipeline slot inject / ma_crossover + grid_trading declare CrossAsset + on_tick shadow log via cross_asset/mod.rs (441 LOC) / bb_breakout + bb_reversion 確認**不** declare CrossAsset。
+
+**真實剩餘 W2 gap = 5 個（G1-G5）**：
+- G1 orderbook 接線（`btc_book_imbalance: 0.0` placeholder line 113/271/273）— 用 既有 WS `orderbook.50.BTCUSDT` topic（per BB push back, 0 req/s ongoing）
+- G2 Layer 2 fence spec amendment（Python writer obsolete → Producer env-gate；spec v1.2 → v1.3 inline edit + cross_asset/mod.rs MODULE_NOTE 同步）
+- G3 healthcheck [57]（`passive_wait_healthcheck.py` 加 check_57：age < 120s + cohort 7-sym + regime_tag extreme ratio + book_imbalance != 0/NULL）
+- G4 D+12 paper edge report 工具鏈（`helper_scripts/reports/w2_paper_edge_report.py` + `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql`：spec §7.1 mandatory metric 6 條 + dual-layer σ acceptance + PSR(0) skew/kurt formula + +15/+5-15/<+5 三檔 gate verdict）
+- G5 E2 三層 fence 對抗 + E4 regression test pack + sub-task sign-off pack（`tests/btc_lead_lag_panel_fence_integration.rs` 新檔 + signoff_pack.md）
+
+**5 sub-agent 拆分**：W2-IMPL-1 (1.5d, G1) / W2-IMPL-2 (1d, G2) / W2-IMPL-3 (1d, G3) / W2-IMPL-4 (2d, G4) / W2-IMPL-5 (1.5d, G5)；前 4 個全並行 0 file 重疊（唯一弱衝突 main.rs:977-996 兩 hunk 改動方向正交：IMPL-1 加 orderbook slot inject、IMPL-2 加 env-gate wrap）；IMPL-5 rebase 等 IMPL-1+2 land。Acceptance window 5-7d，D+5 deploy paper engine，D+12 paper edge report land。
+
+**Cross-wave 衝突檢查（全 0 撞）**：
+- vs W1 IMPL chain（5/11 active funding panel staleness fix / cohort coverage / POLUSDT migration）：W1 panel.funding_rates_panel + panel.oi_delta_panel；W2 panel.btc_lead_lag_panel；三 sibling 檔 PA D+0 已預留 anchor，0 重疊
+- vs Phase 3 V091 deploy（D+1 evening + D+2 ALTER VALIDATE）：V091 改 learning.decision_features reject/close reason CHECK NOT VALID；W2 改 panel namespace 不同
+- vs P1-RCA-1 + P1-1 並行 sub-agent：弱衝突（P1-1 改 strategy_impl.rs on_rejection rollback；W2-IMPL-5 test rebase）；PM dispatch 排序：P1-1 / P1-RCA-1 先 land
+- vs W6 RFC verdict + V086 IMPL / W7-2/4/5 / W3 Stage 1 / W4 RouterLeaseGuard Drop / W5 V089/V090：全不撞 file
+
+**E2 重點審查 3 點**：
+1. 三層 fence 主防線完整性（Layer 1 step_4_5_dispatch.rs default → None / Layer 2 IMPL-2 spawn env-gate 三狀態完整 / Layer 3 cross_asset/mod.rs evaluate_shadow_signal None handle）— 缺一 fence 失靈
+2. Strict shift(N) lookahead-free（orderbook IMPL-1 必 shift(1) close-aligned 禁含 current tick；paper edge report IMPL-4 SQL 必對齊 producer 端 strict shift(N) past close 計算）
+3. CC compliance + 硬邊界 5 項 + DOC-08 §12 9 條 0 觸碰（W2 IMPL chain 不動 lease / authorization / SM-04 Guardian / IntentProcessor / paper_state singleton）
+
+**16 原則合規 16/16**；**DOC-08 §12 9 不變量觸碰 = 0**；**§四 5 硬邊界觸碰 = 0**；**改動風險評級 = 中-低**（hot path 影響可忽略：producer 60s tick + 11 strategy declare flag + 1 healthcheck + 1 report tool；3 層 fence 守住 demo/live 不污染）。
+
+**核心教訓**：
+1. **PA 派 sub-agent 前必先 reality check**：operator 任務描述基於數天前認知，spec §11 4 sub-task 大半已 land；直接重派 = duplicate work + sub-agent 撞既有 commit；應 grep + ls + wc -l 親自盤點再拆 dispatch plan
+2. **Spec §11 IMPL 拆分 ≠ dispatch plan**：spec §11 是 spec-time 設計，dispatch plan 是 wave-time 真實 gap 收尾；現實 land 後新拆 dispatch 對齊真實剩餘 5 個 gap 比硬套 spec §11 4 sub-task 重派更合適
+3. **Python writer Layer 2 fence 已 obsolete**：Producer 改 Rust pull 後，原 Python writer fence 設計失效；spec v1.2 → v1.3 必補 inline edit 對齊 code 現實，避免後續 reviewer 困惑
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w2_impl_v12_dispatch_plan.md`（301 行）
+
+---
+
 ## W-C MAG-082 Caveat 1+2 Fix Plan + No-24h Short-Window Verification（2026-05-10）
 
 **觸發**：QA `2026-05-10--w_c_signoff_audit.md` 裁決 CONDITIONAL_PASS；operator Option B（先修再 sign-off）+ 拒絕重等 24h；需設計修復方案 + 並行 E1 task 拆分 + 短窗驗證協議。
