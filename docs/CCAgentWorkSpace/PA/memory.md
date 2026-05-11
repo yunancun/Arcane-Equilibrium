@@ -1,5 +1,57 @@
 # PA Memory — 工作記憶
 
+## P1-RCA STRATEGIST-PARAMS-PERSIST-1 ma_crossover restore reject（2026-05-11）
+
+**觸發**：每次 engine restart WARN `STRATEGIST-PARAMS-PERSIST-1: restore handler rejected strategy=ma_crossover error=validation failed: confluence weight sum must be 65, got 73.00 (adx=13.75, regime=28.75, volume=22.5, momentum=8)`；operator 要求 ≤ 45 min read-only RCA。
+
+**Verdict = A 級（fallback 工作正常 + 不是 BLOCKER）**：runtime in-memory 跑 `ConfluenceConfig::default()` TOML defaults (25/20/12/8 sum=65)，**不是 stale 73 也不是任何持久化值**。restore reject = 設計上 fail-soft 邊界，PERSIST-1 commit `f1f7403` 明示「Fail-soft: DB unavailable / migration V019 not applied → empty vec, log single warn, engine starts normally」；雖然這個 case 不是 DB unavailable 是「persist 寫入質量退化」，但 fail-soft 仍守住。
+
+**Root cause**：strategist_scheduler 對「weight 參數缺 key」處理 validate/apply/persist 三路徑不對稱：
+- `validate_recommendation_with_reason` (mod.rs:365-368) 缺 key `continue` 跳過 weight_sum，sum=13.75+28.75+22.5=65 PASS
+- `apply_params` → `handle_update_strategy_params` → `merge_strategy_params_json` (strategy_params.rs:79) 用 in-memory current 補入缺 key，cycle 跑時 in-memory mom=0（首次 explicit 設置 row id=5855 / 2026-05-05 17:16 UTC），sum=65 PASS
+- `persist_applied_params` (persist.rs:67-81) 寫入 raw response（缺 weight_momentum）→ DB row 缺 key
+- restart 後 `MaCrossover::new()` (mod.rs:437) `ConfluenceConfig::default()` 重置 mom=8 → restore handler 走同個 merge 用 TOML 8.0 補入 → sum=73 → `params.validate()` reject
+
+**PG empirical 確認**：
+- row 7143（2026-05-07 05:52，當前 restore target）weight_adx=13.75, weight_regime=28.75, weight_volume=22.5，**weight_momentum 缺**
+- first partial weight row = 5924（2026-05-05 19:15）；first explicit mom=0 = 5855（2026-05-05 17:16）；first 4-weight loss transition = 5849→5855
+- ma_crossover 24h Strategist activity = **0 row**（最後 4 天沒新推薦）；grid_trading 573 rows/24h 正常
+- engine restart log（2026-05-11T10:57:42.492514Z）n=1 total=2：grid_trading 8936 PASS（row 只含 cooldown/max_cooldown_boost 無 weight key 不破 sum）；ma_crossover 7143 FAIL
+
+**3 個 fix option**：
+- **Option 1 改進版（推薦立即跑）**：PG DELETE `WHERE strategy_name='ma_crossover' AND engine_mode='demo' AND (params_json->>'weight_adx') IS NOT NULL AND (params_json->>'weight_momentum') IS NULL` — 5 SQL 5 秒消 WARN noise，destructive 需 operator sign-off
+- **Option 2（Sprint N+2 治本）**：evaluate.rs:210-218 persist 前先 `merge_strategy_params_json(current_json, response)` 補完 → 寫 DB self-contained row；~50 LOC + E4 test 1-2h
+- **Option 3（棄）**：放寬 sum=65 validate — 違反原則 4+5+6，破壞 confluence::compute_score 設計合約
+- **架構級加固 4（建議 P3）**：restore reject 自動 DELETE row（GC，破壞 audit trail 需配合 audit log）
+- **架構級加固 5（建議 P3 + QC）**：Ollama prompt schema constraint + validate_recommendation 加嚴 partial weight set
+
+**Impact 評估**：
+- ✅ 16 原則 0 觸碰、DOC-08 §12 9 不變量 0 觸碰、§四 5 硬邊界 0 觸碰
+- ⚠️ 14 個 ML-tuned 非 weight 持久化值（cooldown_ms 2772000 / adx_threshold 13.75 / min_persistence_ms 231000 等）每次 restart 重置回 TOML default — Strategist 學習成果無持久性
+- ⚠️ STRATEGIST-AUTO-PROMOTE-CRITERIA-1 「穩定計數器」設計意圖被破壞（但 ma_crossover 4 天沒新 row 即穩定計數器早已停滯，restart 影響 = 0）
+
+**核心教訓**：
+1. **Three-path inconsistency 反模式**：對同一 input（partial weight payload），validate / apply / persist 三條路徑用「current 補入 / 不補入」處理不一致 → 同時 PASS 與 FAIL 的 schism。新代碼設計 invariant gate（如 sum=65）時必確保所有 entry point 對同 input 收斂到同個 verdict
+2. **Fail-soft != 設計不變式可違反**：fallback 守住 runtime 但 audit trail 不完整（row 7143 缺 weight_momentum 字段 → 無法重建「當時 in-memory mom=0」事實），原則 8「交易可解釋」實質受損
+3. **PG empirical verify 必跑**：Mac 上只看 grep 規則 + log message 不夠，必 ssh trade-core + PG 直查 timeline transitions 才能精準鎖定 first partial row（5924 / 5855）和 root cause owner（Ollama L1 prompt design 演化）
+4. **Strategist 24h 活躍度 cross-check**：「為什麼 ma_crossover restart 沒自動修」必查 `learning.strategist_applied_params` 24h 活躍度 — 0 row 表示 Strategist 對該策略無新推薦 → restart 重置永久卡 TOML default，不會被新 cycle overwrite
+5. **persist 寫入質量是 latent risk**：寫入路徑用 raw response 短期看「省 LOC 與 cycle delta 對應」更乾淨，但 restore 需要 self-contained schema — 應始終 persist merged 結果，不是 raw delta
+
+**E1 派發建議（Sprint N+2 Option 2 治本）**：
+- 文件：`rust/openclaw_engine/src/strategist_scheduler/evaluate.rs` (1 hunk persist 前 merge)
+- 公開：`event_consumer/handlers/strategy_params.rs::merge_strategy_params_json` 從 `pub(super)` 改 `pub(crate)`
+- E4 test：persist round-trip — partial weight response in → DB row out → load + restore handler 過 validate
+- 風險：低（只改 persist 寫入路徑，不動 cycle 邏輯）
+
+**E2 重點審查 3 點**：
+1. `merge_strategy_params_json` 從 `pub(super)` 改 `pub(crate)` 是否破壞 module encapsulation — 建議 wrap 一層 `strategist_scheduler` 內部 helper 不直接 expose
+2. 對 ma_crossover 以外 4 個策略（grid_trading / bb_breakout / bb_reversion / funding_arb）同樣套用 — 是否有策略對 partial payload 有合法 reset semantics（部分 reset 是 feature 不是 bug）
+3. 持久化 audit trail 變大（row 從 ~30 lines JSON 變 ~80 lines full schema）— V019 schema 字段大小 + idx 索引性能 + 90d retention rolling size impact
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_strategist_params_persist_ma_crossover_rca.md`
+
+---
+
 ## W2 IMPL v1.2 chain dispatch plan — 5 sub-agent 拆分（2026-05-11）
 
 **觸發**：Sprint N+1 Phase 4 待派；operator 要求 PA 寫 5 sub-agent dispatch plan（不寫業務 code）。
