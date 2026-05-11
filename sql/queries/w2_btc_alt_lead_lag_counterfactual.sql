@@ -207,7 +207,9 @@ paper_fills_bucketed AS (
       AND f.symbol = ANY(params.cohort_symbols)
       AND f.is_paper = TRUE  -- W2 paper-only fence Layer 1+2 已保證；此處再過濾
     GROUP BY f.symbol, DATE_TRUNC('minute', f.ts)
-),
+)
+-- 注意：CTE chain 最後一個（paper_fills_bucketed）後不可帶逗號；
+-- PostgreSQL WITH 語法只允許 CTE 與 CTE 間用逗號分隔。
 
 -- ============================================================
 -- §5 final — panel_expanded LEFT JOIN alt_klines LEFT JOIN paper_fills_bucketed
