@@ -121,6 +121,15 @@ from .checks_agent_spine import (
 from .checks_live_pipeline import (
     check_56_live_pipeline_active,
 )
+from .checks_btc_lead_lag import (
+    # W2-IMPL-3 (2026-05-11) — `[57]` W2 A4-C BTC→Alt Lead-Lag panel 4 條件
+    # 健康監測（PA dispatch plan §3.3：panel freshness + cohort coverage +
+    # regime extreme ratio + book_imbalance 非 0 非 NULL）。Default-off
+    # OPENCLAW_W2_HEALTHCHECK_ENABLED=1 opt-in；V088 未 deploy → PASS-skip。
+    # OPENCLAW_W2_HEALTHCHECK_BOOK_REQUIRED=1 (W2-IMPL-1 orderbook 接線 land 後設)
+    # 把 book_imb_avg=0/NULL 升 FAIL；W2-IMPL-1 land 前維持 WARN。
+    check_57_btc_lead_lag_panel_health,
+)
 from .checks_openclaw_gateway import (
     check_54_openclaw_proposal_relay,
 )
@@ -258,7 +267,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53][54][55][58][64][65]         REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W-AUDIT-9 T4 graduated canary stage invariant + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity
+    [46][48][49][50][51][52][53][54][55][57][58][64][65]    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions + W-AUDIT-9 T4 graduated canary stage invariant + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -305,6 +314,7 @@ Execution / cost sentinels added after F7:
   [53] ref21_v058_symbol_universe_recorder (REF-21 — recurring V058 universe snapshot liveness)
   [55] agent_decision_spine_lineage       (P1-AGENT-OBS-1 — MAG-082 lineage readiness)
   [56] live_pipeline_active               (P0-NEW-ISSUE-1 — live slot configured but LiveDemo not spawned)
+  [57] btc_lead_lag_panel_health          (W2-IMPL-3 — W2 A4-C BTC→Alt Lead-Lag panel 4 conditions: freshness < 120s + cohort=7 + regime extreme < 5% + book_imbalance non-zero/non-null; default-off OPENCLAW_W2_HEALTHCHECK_ENABLED=1 opt-in)
   [58] graduated_canary_stage_invariant   (W-AUDIT-9 T4 — AMD-2026-05-09-03 §4.1 5-stage state-machine invariant; SM-04 ≥ L3 escalate hard FAIL → triggers stage 0 rollback per invariant 12)
   [64] unblock_candidates_drift           (W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 2026-05-10 Sprint N+1 — spec §6.2 4 sub-check: stale candidate / yo-yo detection / sign-off completeness / unfrozen rows count; pairs with V090 governance.unblock_candidates + 30d cycle writer)
   [65] chain_integrity_post_audit_4b_m3   (MIT W6-1 RFC SHOULD 7 2026-05-10 — W-AUDIT-4b M3 producer post-deploy chain integrity sentinel; era filter `f.ts > '2026-05-09 09:22 UTC'` excludes pre-M3 historical orphan; PASS ≥ 95% / WARN 80-95% / FAIL < 80% / WARN_LOW_SAMPLE n<30; per-strategy drill-down annotation)
@@ -328,7 +338,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53][54][55][58][64][65]
+              [46][48][49][50][51][52][53][54][55][57][58][64][65]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -350,6 +360,7 @@ def main() -> int:
                [53] REF-21 V058 universe recorder;
                [54] OpenClaw proposal relay;
                [55] Agent Decision Spine MAG-082 lineage readiness;
+               [57] W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions (freshness/cohort/regime/book_imb);
                [58] W-AUDIT-9 T4 graduated canary stage invariant — AMD-2026-05-09-03 §4.1;
                [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift — spec §6.2 4 sub-check;
                [65] MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity — era filter post 2026-05-09 09:22 UTC)
@@ -862,6 +873,28 @@ def main() -> int:
             # REQUIRED env escalates to FAIL.
             s, m = check_55_agent_decision_spine_lineage(cur)
             results.append(("[55] agent_decision_spine_lineage", s, m))
+
+            # [57] W2-IMPL-3 (2026-05-11): W2 A4-C BTC→Alt Lead-Lag panel
+            # 4 條件健康監測（PA dispatch plan §3.3）。Pure SELECT inside
+            # cursor block；走 V088 hot-path index idx_btc_lead_lag_panel_ts_window。
+            #   (1) panel freshness：max(snapshot_ts_ms) age < 120s PASS /
+            #       120-300s WARN / ≥ 300s FAIL
+            #   (2) cohort coverage：alt_symbols cohort_size = 7 PASS（spec §2.2
+            #       7-sym ETHUSDT/SOLUSDT/XRPUSDT/DOGEUSDT/ADAUSDT/AVAXUSDT/DOTUSDT）
+            #   (3) regime extreme ratio：extreme_n/total < 5% PASS /
+            #       5-20% WARN / ≥ 20% FAIL（spec §9 condition #5
+            #       |BTC 1h return| > 200 bps 標 extreme）
+            #   (4) book_imbalance：W2-IMPL-1 orderbook 接線後 abs(avg) > 0
+            #       PASS；W2-IMPL-1 land 前全 0 / 全 NULL WARN
+            #       (OPENCLAW_W2_HEALTHCHECK_BOOK_REQUIRED=1 後升 FAIL)
+            # Verdict matrix (PA §3.3)：PASS = 4 全綠 / WARN = 1-2 偏移 /
+            # FAIL = age ≥ 300s OR cohort < 7 OR extreme ≥ 20% OR ≥3 條件破。
+            # Default-off：OPENCLAW_W2_HEALTHCHECK_ENABLED=1 opt-in；
+            # V088 panel.btc_lead_lag_panel 未 deploy → PASS-skip。
+            # CLAUDE.md §七「被動等待 TODO 必附 healthcheck」強制配對 W2 paper
+            # engine 7d evidence collection（D+5 deploy → D+12 paper edge report）。
+            s, m = check_57_btc_lead_lag_panel_health(cur)
+            results.append(("[57] btc_lead_lag_panel_health", s, m))
 
             # [58] W-AUDIT-9 T4 (2026-05-09): graduated canary stage invariant
             # sentinel. AMD-2026-05-09-03 §4.1 配套 — 對 active cohort 驗證

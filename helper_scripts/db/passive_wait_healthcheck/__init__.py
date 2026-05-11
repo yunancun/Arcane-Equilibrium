@@ -173,6 +173,13 @@ from .checks_live_pipeline import (  # noqa: F401
     # [56] P0-NEW-ISSUE-1 Live / LiveDemo pipeline active sentinel.
     check_56_live_pipeline_active,
 )
+from .checks_btc_lead_lag import (  # noqa: F401
+    # [57] W2-IMPL-3 (2026-05-11) W2 A4-C BTC→Alt Lead-Lag panel 4 條件健康
+    # 監測：panel freshness + cohort coverage + regime extreme ratio +
+    # book_imbalance 非 0 / 非 NULL。default-off (OPENCLAW_W2_HEALTHCHECK_ENABLED=1
+    # opt-in)；V088 未 deploy → PASS-skip pre-deploy 不阻塞。
+    check_57_btc_lead_lag_panel_health,
+)
 
 __all__ = [
     "main",
@@ -254,6 +261,8 @@ __all__ = [
     "check_50_replay_run_state_health",
     # [56] P0-NEW-ISSUE-1 live pipeline active sentinel
     "check_56_live_pipeline_active",
+    # [57] W2-IMPL-3 (2026-05-11) W2 A4-C BTC→Alt Lead-Lag panel 4 條件健康監測
+    "check_57_btc_lead_lag_panel_health",
     # [65] MIT W6-1 RFC SHOULD 7 (2026-05-10) W-AUDIT-4b M3 chain integrity
     "check_chain_integrity_post_audit_4b_m3",
 ]

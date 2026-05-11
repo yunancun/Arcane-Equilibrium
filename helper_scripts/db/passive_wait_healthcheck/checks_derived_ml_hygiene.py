@@ -374,10 +374,13 @@ def check_chain_integrity_post_audit_4b_m3(cur) -> tuple[str, str]:
 #   > 15min  → FAIL（panel collector dead 或 BB WS subscription 斷）
 # 任一表 ABSENT（V085/V087 未 deploy）→ PASS_SKIP（pre-deploy 不阻塞）
 #
-# Sister checks:
-#   - [57] funding_curve_panel_freshness（規劃中，本 IMPL 暫 deferred）
-#   - [58] oi_delta_panel_freshness（同上）
-# 本 [66] 是合併版（單一 cron-friendly check）。後續 [57]/[58] 拆分時可廢棄 [66]。
+# Sister checks（2026-05-11 更新）:
+#   - [57] btc_lead_lag_panel_health（W2-IMPL-3 land：W2 A4-C BTC→Alt Lead-Lag
+#     panel 4 條件健康，PA dispatch plan §3.3；不撞 [66] 範圍，[66] 專注 W1
+#     funding/oi_delta freshness 二表合併）
+# 註：原註釋預留「[57] funding_curve / [58] oi_delta_panel」拆分 deferred；
+#     [57] 已 land 為 W2 panel 專屬 check。W1 funding/oi_delta freshness
+#     繼續走 [66] 合併版，不另開新 check ID 拆分。
 # ---------------------------------------------------------------------------
 PANEL_FRESHNESS_PASS_THRESHOLD_MS: int = 5 * 60 * 1000  # 5min
 PANEL_FRESHNESS_WARN_FAIL_BOUNDARY_MS: int = 15 * 60 * 1000  # 15min

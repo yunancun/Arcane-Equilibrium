@@ -45,6 +45,13 @@ pub mod funding_curve;
 pub mod oi_delta;
 
 pub use btc_lead_lag::BtcLeadLagProducer;
+// W2-IMPL-1 (2026-05-11) — orderbook 接線完整 re-export：BtcOrderbookSlot typedef +
+// create_btc_orderbook_slot 工廠 + spawn_btc_orderbook_ingest_task async task。
+// （sibling W2-IMPL-2 sub-agent 早先預先 re-export create_btc_orderbook_slot 工廠
+// 滿足 producer.run_loop 簽名 stub；本 IMPL-1 補完 ingest task 與 slot 公共型別。）
+pub use btc_lead_lag::{
+    create_btc_orderbook_slot, spawn_btc_orderbook_ingest_task, BtcOrderbookSlot,
+};
 pub use funding_curve::FundingCurveAggregator;
 pub use oi_delta::OIDeltaAggregator;
 

@@ -1901,3 +1901,17 @@ QA W-C audit CONDITIONAL_PASS 揭 2 caveat（decision_state_changes 0 row + Exec
 
 ### 反模式錄追加（item 10）
 10. **「字面複製 N 處」grep 必驗：盲信 PA phrasing 會偏移 scope**：PA audit 寫「字面複製 3 處」時必 grep 驗具體 callsite，不依賴 PA 原文 phrasing 一字不差解讀（paper_shadow vs fill_completion 第 3 處解讀差異即此類）。E1/E2 必雙方 grep 反覆 verify 才信「N 處」結論。
+
+
+---
+
+## 2026-05-11 P1 V083 ipc_close_symbol fix + P2 demo freq params E2 adversarial review
+
+54. **PA spec stale LOC 標號 vs E1 IMPL 實際 LOC 必對齊**：PA design 寫 commands.rs:512 + 749 為「execute_position_close 兩處」，但實際 line 512 屬 `apply_confirmed_fill` 不屬 `execute_position_close`。E1 按代碼語義替換正確 5 處。**抽象規律**：PA spec 給 LOC 標號常 stale（LOC 隨改動 shift），E1/E2 必按 function 名稱重定位確認 callsite。helper docstring 引用 PA spec LOC 也會 stale（本 review §4.2 LOW 即此類）— 建議 docstring 不寫 LOC 數字，改寫 function 名稱避免 future LOC drift。
+55. **E1 push back 真實 latent bug 必標 MEDIUM 不能 LOW**：E1 IMPL DONE §6.1 push back line 167 `submit_external_order` 同 pattern `unwrap_or("")` 未動。E2 親 read line 158-218 + line 299-334 dispatch 後確認：line 320 `entry_context_id: fill_entry_ctx.clone()` close case `is_close_fill_for_db == true` 時真實會走 trading.fills 撞 V083。E2 不能因 user prompt scope 限制就視為 LOW housekeeping — 真實有 V083 violation 後門必標 MEDIUM 退 PA decide。**抽象**：E1 push back 是真誠標警報就要 E2 嚴格驗證影響面（grep callsite + read close/entry 分流 + verify Fill TradingMsg dispatch path），不能照單全收信「不在 scope 不修」。
+56. **white-box deterministic helper test 4 維覆蓋夠**：P1 V083-FIX-1 helper `resolve_close_entry_context_id` 4 unit test 覆蓋 4 invariant：(1) real id present (2) missing position (3) empty string (4) pattern well-formed。test 用真 `TickPipeline::with_balance` + 真 `apply_fill` 建倉，不是 stub mock；test name 與行為對齊。覆蓋 helper 全部 branch（Some(id) if !id.is_empty / _）+ format string pattern + parse u64 cast。E2 不需要要求多 fuzz test。**抽象**：deterministic 純讀 helper 4 unit test = (truthy path) + (falsy path: 2 種) + (output pattern verify) 即充分。
+57. **TOML 改動 demo only verify 必 grep 三 env 同 key**：P2 commit 改 demo.toml 必跑 `grep -nE '<key>' settings/strategy_params_{demo,paper,live}.toml` 確認 paper + live 不被誤改。**規律**：env-specific config 改動 必驗其餘 env 留原值（feedback_env_config_independence 2026-04-19）。本次 grep 確認 live.toml/paper.toml `min_trend_snr=0.75` `min_persistence_ms=240000` 全留原值，demo only scope 嚴格。
+58. **TOML inline `#` comment 不破 parser 必跑 lib verify**：commit 2 兩 inline comment 用 `#` 加說明（`min_trend_snr = 0.60   # P2-A2 ...`）。Verify with tomli/tomllib parse 成功 + 實際讀回 `0.6` / `120000`，不破 parser。E2 對 TOML 改動必跑 lib parse verify 不能只 grep 行數。
+
+### 反模式錄追加（item 11）
+11. **E1 push back 不能因 scope 限制就 dismiss**：E1 主動 push back 同 pattern latent bug（line 167 `submit_external_order` V083 same-bug）時，E2 必親查影響面（read function full body + grep dispatch downstream + verify whether 真會走進 trading.fills）。如真實有 latent bug 即使 user prompt scope 限制也要標 MEDIUM 退 PA decide，不能因「不在 scope」就無痕通過。本次本來可能 dismiss line 167 為「不在 5 處 scope」，但 read code 後確認真實走 close fill 寫 trading.fills 撞 V083 → 標 MEDIUM follow-up。

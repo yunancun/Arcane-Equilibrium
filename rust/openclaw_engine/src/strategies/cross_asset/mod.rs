@@ -9,8 +9,16 @@
 //!   **paper-only fence Layer 3（深度防禦）**：
 //!     Layer 1（主防線）：step_4_5_dispatch.rs 構造 surface 階段 engine_mode
 //!         gate，demo / live_demo / live → surface.btc_lead_lag = None
-//!     Layer 2：Python writer paper-only fence（避免 panel.btc_lead_lag_panel
-//!         累積 demo/live 樣本污染下游 ML pipeline）
+//!     Layer 2：BtcLeadLagProducer env-gate（W2-IMPL-2, 2026-05-11 amendment）
+//!         — main.rs spawn 前 三狀態邏輯：
+//!             (a) OPENCLAW_ENABLE_PAPER=1 → spawn producer（paper 正路徑）
+//!             (b) env unset + paper-only（!has_demo && !has_live）→ spawn
+//!             (c) env unset + demo|live active → skip spawn（fence fired）
+//!         producer skip 時 PG `panel.btc_lead_lag_panel` 永不寫入 → 下游
+//!         ML pipeline / 5 策略 demo edge baseline 不污染。原 spec v1.2 §6.2
+//!         「Python writer paper-only fence」已 obsolete — producer 從 PA D+0
+//!         階段就是 Rust（`panel_aggregator/btc_lead_lag.rs`），Python writer
+//!         從不存在；spec v1.3 §6.2 改為 Producer env-gate 表達。
 //!     Layer 3（本模組）：策略消費端 `if let Some(panel) = surface.btc_lead_lag`
 //!         隱含 None → skip；本模組 evaluate_shadow_signal 再次 trust panel != None
 //!         的契約，純 emit tracing log，**永不**改 strategy decision

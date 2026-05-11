@@ -15,6 +15,7 @@
 | `db/passive_wait_healthcheck/runner.py` | Passive healthcheck orchestrator and output formatter |
 | `db/passive_wait_healthcheck/checks_agent_spine.py` | `[55]` Agent Decision Spine lineage / MAG-082 readiness check |
 | `db/passive_wait_healthcheck/checks_live_pipeline.py` | `[56]` Live / LiveDemo pipeline active healthcheck |
+| `db/passive_wait_healthcheck/checks_btc_lead_lag.py` | `[57]` W2 A4-C BTC→Alt Lead-Lag panel 4 conditions healthcheck (W2-IMPL-3 2026-05-11) — panel freshness < 120s + cohort=7 + regime extreme < 5% + book_imbalance non-zero/non-null; opt-in `OPENCLAW_W2_HEALTHCHECK_ENABLED=1` |
 | `db/passive_wait_healthcheck/checks_openclaw_gateway.py` | `[54]` OpenClaw proposal relay healthcheck |
 | `db/passive_wait_healthcheck/checks_scanner_market.py` | `[41]` scanner would-block evidence and `[51]` opportunity shadow checks |
 | `cron/ref21_market_microstructure_recorder.py` | REF-21 local BBO/orderbook/latency recorder |
@@ -26,6 +27,7 @@
 | `research/bb_breakout_threshold_sweep.py` | bb_breakout threshold research sweep |
 | `research/ma_crossover_counterfactual_replay.py` | ma_crossover counterfactual replay research helper |
 | `research/shadow_disagreement_breakdown.py` | Shadow disagreement breakdown analysis |
+| `reports/w2_paper_edge_report.py` | W2 A4-C BTC→Alt Lead-Lag — D+12 paper edge report generator (spec v1.2 §7.1 6 mandatory metric + dual-layer σ + PSR(0) Bailey-LdP 2012 skew/kurt formula + +15/+5~+15/<+5 step gate verdict). 配 `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql`。`--smoke-test` 跑 3 mock case (plus15/plus5_15/minus5) 不連 PG。 |
 | `deploy/launchd_preflight.sh` | macOS launchd deployment preflight |
 
 ## REF-20 Sprint 1+2 新增 cron 與 helper
