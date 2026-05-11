@@ -1,5 +1,34 @@
 # PA Memory — 工作記憶
 
+## P0 Replay engine counterfactual fix design — Tier A v1（2026-05-11）
+
+**觸發**：operator「修 replay engine 讓它能對策略修改做真實 counterfactual validation」；E1 a9729bbc4d61a 報告 6 hardcoded blockers。
+
+**核心發現（PA empirical re-check after E1 report）**：
+1. **#1 is_pinned**：真 hardcoded line 1151；scanner_timeline.is_active_at() 已存在；fix ≈ 30 LOC
+2. **#2 position_state**：真 hardcoded；ReplayPaperSnapshot.positions Vec 已 mutate（apply_fill_open/close 1648-1745）；fix 需在 build_tick_context 構造 stack-local PaperPosition borrow 餵 ctx，~50 LOC + ReplayPosition 加 owner_strategy 是關鍵 attribution wire
+3. **#3 alpha_surface_ref**：production runtime 今日也是 EMPTY（W-AUDIT-8a Phase B/C/D 未 land）— replay 用 EMPTY **反而與 production 對齊**，不是 bug；Tier A 不修，Tier B 等 alpha collector land
+4. **#4 scanner_config**：Rust 端 config.rs:7-31 已可從 manifest.scanner_config 讀；Python `_build_manifest_jsonb` 從不寫該 key；fix = Python +25 LOC + 0 Rust
+5. **#5 strategy_params**：Rust replay_runner.rs:435 已 deserialise；Python 路徑用 V049 detour（route_helpers.py:922-928）不可靠；fix = Python `_build_manifest_jsonb` 直接 echo +15 LOC
+6. **#6 Kelly 3 億 ETH**：根因不是 Kelly bug 是 `ReplayPaperSnapshot.latest_price: Option<f64>` **全域單一 anchor** — 不同 symbol 共用 last-touched price；fix = 加 `latest_price_by_symbol: HashMap<String, f64>` per-symbol anchor，~50 LOC
+
+**Tier A 設計**：~210 LOC，5 sub-agent 並行（E1-A T1+T2 / E1-B T3+T4 / E1-C T5 / E1-D T6 test / E1-E docs）；1.5 E1 days；風險中；forbidden_guard 全綠；16 原則 16/16；DOC-08 §12 0 觸碰；§四 5 硬邊界 0 觸碰。
+
+**Tier B 推遲**：依賴 W-AUDIT-8a Phase B/C/D land；~500 LOC；N+2 末 / N+3 初規劃。
+
+**E2 重點 3**：(1) T2 PaperPosition stack-local borrow lifetime per-iteration NLL；(2) T3 scanner TOML→JSON→ScannerConfig serde rename 對齊；(3) T5 grep `.latest_price` 全 callsite review backward compat
+
+**核心教訓**：
+1. **「Hardcoded」誤判 vs「wire-up 缺」**：E1 報告 6 hardcoded 中只有 #1/#2/#3 是真硬 code；#4/#5 是 Rust 端早就支援但 Python 從不寫；#6 是 ReplayPaperSnapshot 結構性局限。PA 真實復查 binary source > E1 categoric 判斷
+2. **PaperPosition import 合規邊界**：`paper_state::containers.rs` 是 pure data struct（#[derive(Clone, Serialize)]），TickContext 已直接 import。forbidden_guard 禁的是 `PaperState mutate side`（全域 mutable + DB writer channel），data container 同 module 不同 layer。replay 引 PaperPosition data type 不破 forbidden invariant，但 E2 nm symbol audit 仍要驗
+3. **Tier B 不應現在做**：alpha_surface 真值依賴 collector，collector 在 W-AUDIT-8a Phase B/C/D；現在做 Tier B = 重複 work + 設計可能變。Phase A spec 強調 EMPTY_ALPHA_SURFACE 與 production runtime 一致（CLAUDE.md §五 W-AUDIT-8a SPEC PHASE 2026-05-09），Tier A accept 是正確 trade-off
+4. **per-symbol anchor 不只 Kelly cap 修正**：對齊 live `router.rs:373` price anchor 邏輯 = 強化 cross-language R5-T7 invariant equivalence，**理論上 replay 更綠**（不是更紅）
+5. **§九 2000 LOC cap headroom**：Tier A 改 runner.rs +80 (1175→1255) / risk_adapter.rs +50 (562→612) 都安全；不需 pre-existing baseline exception clause
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_replay_engine_counterfactual_fix_design.md`
+
+---
+
 ## P2 N+2 sprint backlog tickets integration doc（2026-05-11）
 
 **觸發**：W2 IMPL chain FULL CLOSURE (HEAD `a771226d` → `ebbcc038` → `9463f778`) + E2 W2 chain review (`d4186c86`) + W2 signoff_pack §4 → 3 P2 N+2 sprint ticket 需正式入 backlog tracker；額外加 P1-1 stable_id helper CI grep rule follow-up（per PA memory 2026-05-11 §架構教訓 2）。
