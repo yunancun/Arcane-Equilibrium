@@ -1,5 +1,59 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-11 — W2 IMPL chain 4 sub-task 對抗 review (APPROVE-CONDITIONAL · PASS to E4)
+
+**對象**：commit `1f0354cf` W2 A4-C BTC→Alt Lead-Lag fast-track IMPL chain，4 sub-agent 並行 + sibling V083 E2 review
+- W2-IMPL-1 Orderbook 接線 +644 LOC（btc_lead_lag.rs / main.rs / main_fanout.rs / panel_aggregator/mod.rs）
+- W2-IMPL-2 Layer 2 fence amendment（main.rs env-gate 三狀態 + spec v1.2→v1.3 inline edit + cross_asset MODULE_NOTE）
+- W2-IMPL-3 Healthcheck [57]（NEW checks_btc_lead_lag.py 321 + test 273 + runner wire）
+- W2-IMPL-4 Paper edge report 工具鏈（NEW w2_paper_edge_report.py 1257 + counterfactual SQL 279）
+
+**Verdict**：**APPROVE-CONDITIONAL · PASS to E4** · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 4 LOW / 2 P2 governance ticket
+
+**驗證手段**：
+1. Mac cargo test 2797/0/0 親跑 verify（含 31 panel_aggregator::btc_lead_lag test 全 PASS）
+2. Mac pytest 10/10 healthcheck fixture 親跑 verify
+3. Mac smoke-test ALL PASS（plus15/plus5_15/minus5 + PSR/DSR/CI/R²）
+4. 三層 fence 對抗 grep verify：
+   - Layer 1 `step_4_5_dispatch.rs:211 _ => None` 未動
+   - Layer 2 main.rs:1005-1018 env-gate 三狀態 (a) ENABLE=1 / (b) unset+!has_demo&&!has_live / (c) unset+has_demo|has_live skip
+   - Layer 3 cross_asset/mod.rs:12-21 MODULE_NOTE 同步 Python writer→Producer env-gate
+5. spec v1.2→v1.3 inline edit § 6.2 Layer 2 描述 amend，§7.1 mandatory metric 6 + §8.1 三檔 step gate 0 動
+6. WS-first rate budget 0 req/s 驗：`full_subscription_list("BTCUSDT")` 含 `orderbook_topic(symbol)`，`main_ws.rs:50/89` 對每 watch symbol 調用，0 新 connection
+7. PSR(0) Bailey-LdP 2012 formula 嚴格：raw kurtosis vs excess kurtosis equivalence 證明 ((raw-1)/4 = (excess+2)/4)，denom_sq≤0 → None fail-closed
+8. DSR mu_0=√(2 ln 95) Python `math.log` 默認自然對數 ✓ (= 3.0179 對齊 smoke-test print)
+9. SQL counterfactual 三 CASE WHEN expected_dir +1/-1/0 byte-equal spec §7.2，60/120/300 三 forward window 並列
+10. 跨平台 grep 0 hit / 16 原則 / 5 硬邊界 / DOC-08 §12 9 條 / SM-04 / Guardian / IntentProcessor / paper_state / decision_lease / authorization.json 全 0 觸碰
+
+**Findings**：
+- **LOW-1** W2-IMPL-1 E1 report §3.2/§3.3 NaN propagation 描述錯誤：寫「NaN→PG 'NaN'::REAL literal」但實際 writer `nan_to_null_f32` 轉 PG NULL；runtime 對 [57] healthcheck `FILTER (WHERE IS NOT NULL)` fail-soft 仍正確；E1 follow-up 修報告
+- **LOW-2** block-bootstrap truncation 偏移：n=150 / block=60 case 抽 120 sample 而非 150（mean 基於 120 vs 150），對 D+12 real-data N=70000 場景不偏；學術精確性 P3 ticket
+- **LOW-3** main_fanout.rs Arc clone awkward fallback：`panel_arc_for_send.as_ref().map(Arc::clone).unwrap_or_else(|| Arc::clone(&arc_event))` 中 unwrap_or_else 永不執行 dead-code fallback；建議精簡 P3
+- **LOW-4** checks_btc_lead_lag.py line 138 exception message 露出 PG detail：對齊 sibling [55]/[58]/[66] passive sentinel pattern + trusted caller，accept
+- **P2-1** btc_lead_lag.rs 1771 LOC（baseline 1253 → +518）pre-existing 已 >800 警告 < 2000 cap；§九 「pre-existing baseline exception clause」**僅適用 baseline >2000，本 case 不適用**；P2 ticket N+2 sprint 拆 file（建議 producer.rs / ingest_task.rs / snapshot.rs / db_writer.rs 4-split）
+- **P2-2** w2_paper_edge_report.py NEW 1257 LOC > 800 警告；P2 ticket 拆 4-file（metrics / render / smoke / report.py CLI）
+
+**跨 sub-task 整合 risk**：
+- W2-IMPL-1 + W2-IMPL-2 main.rs 同 hunk range（933 / 957 / 1005-1078）但改動方向正交（IMPL-1 加 mpsc channel + fan-out arm；IMPL-2 加 env-gate wrap），merge 後正確
+- W2-IMPL-3 [57] check 對 W2-IMPL-1 deploy 前後切換正確 — default-off `OPENCLAW_W2_HEALTHCHECK_BOOK_REQUIRED=0` (WARN) → IMPL-1 land 後升 `=1` (FAIL) 漸進式
+- W2-IMPL-4 SQL panel.btc_lead_lag_panel 12 column 與 V088 + IMPL-3 healthcheck schema 100% 對齊
+
+**經驗教訓 / Lesson learned**：
+
+1. **「pre-existing baseline exception clause」適用範圍嚴格**：§九 clause **僅適用 baseline > 2000 行**；本 W2-IMPL-1 baseline 1253 > 800 警告但 < 2000，不適用 exception clause；屬「新 wave 推 ≤2000 到 ≤2000」場景 — 警告線 E2 必標記 + 開 P2 split ticket，但不禁 merge。
+2. **NaN sentinel vs PG NULL 文檔 vs 代碼一致性**：Rust 端用 NaN sentinel 表「無資料」是合理 fail-soft pattern，但 PG schema REAL column 接 NaN literal 是異常路徑；project 用 `nan_to_null_f32` helper 統一轉 NULL；E1 report 描述「PG 寫 'NaN'::REAL literal」與實際 PG NULL 行為脫節；E2 對抗審核必查 writer 的 NaN handling 邏輯，不能 trust E1 自報。
+3. **三層 fence 深度防禦的 E2 grep checklist**：Layer 1 (step_4_5_dispatch `_ => None`) + Layer 2 (main.rs env-gate spawn wrap) + Layer 3 (cross_asset `if let Some` defensive guard) — 每層 1 個 grep assertion 必跑；改動 main.rs spawn 區段時必驗 Layer 1 + Layer 3 仍綁。
+4. **block-bootstrap 樣本截斷的學術精確性 vs runtime 影響**：n // block_size truncate 邏輯對小 n（mock test）偏移大，對大 n（real-data 7d × 1m × 7 sym ~70000）幾乎無偏；E2 對抗審核接受 mock test 偏移但對 real-data invariant 必驗 (CI 寬度 / verdict label boundary)。
+5. **跨 sub-agent 並行 同 file hunk 衝突管理**：W2-IMPL-1 + W2-IMPL-2 同改 main.rs:1005-1078 區段但 hunks 正交（一加 alloc + fan-out arm / 一加 env-gate wrap），E2 對抗審核必 read 完整 hunk 確認 merge 後語意正確 — 不能單 trust E1 自報「不撞檔」結論。
+6. **WS-first rate budget 0 req/s 對抗驗證 SOP**：grep `orderbook_topic` callsite + `full_subscription_list` production caller (`main_ws.rs`) + `multi_interval_topics.rs` 對 watch symbol 都加 BTCUSDT orderbook topic → 0 新 connection 真實成立；不能 trust E1 「既有 subscription」自報，必 grep 證據。
+
+**Cross-References**：
+- PA dispatch: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w2_impl_v12_dispatch_plan.md`
+- 4 E1 IMPL reports: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_{1,3,4}_*.md` + IMPL-2 在 commit body
+- E2 review: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_chain_e2_adversarial_review.md`
+
+---
+
 ## 2026-05-11 — W-C MAG-082 Caveat 1+2+3 Round 2 mini re-review (APPROVE)
 
 **對象**：E1 R2 極小 fix（Round 1 已 APPROVE WITH CONDITIONS，C-A.2 MEDIUM operator 拍 Option B）
