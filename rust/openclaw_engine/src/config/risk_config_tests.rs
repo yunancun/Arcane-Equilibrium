@@ -1576,3 +1576,237 @@ fn test_canary_stage_legacy_toml_without_canary_fields_works() {
     assert_eq!(cfg.executor.observation_period_ms, 0);
     assert!(cfg.validate().is_ok());
 }
+
+// ---------------------------------------------------------------------------
+// LG-2 T4 (2026-05-11) — RiskConfig.pricing 整合測試
+// 驗 PricingConfig 走 RiskConfig 一級欄位 + 向後相容 + cross-env TOML 解析。
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_pricing_config_default_riskconfig_omits_pricing() {
+    // RiskConfig::default() 不主動填 [pricing]（None），避免衝擊既有 4 TOML
+    // 中尚未加 section 的 deploy。validate() 應 PASS（None 略過）。
+    let cfg = RiskConfig::default();
+    assert!(cfg.pricing.is_none());
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_pricing_config_legacy_toml_without_section_parses() {
+    // 模擬「舊 TOML 無 [pricing] section」場景 — round 1 deploy 前狀態。
+    // serde 應走 #[serde(default)] → None，validate() PASS。
+    let toml_str = r#"
+[limits]
+stop_loss_max_pct = 5.0
+
+[agent]
+size_multiplier = 0.5
+"#;
+    let cfg: RiskConfig = toml::from_str(toml_str).expect("legacy TOML must parse");
+    assert!(cfg.pricing.is_none());
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_pricing_config_new_toml_section_parses() {
+    // 模擬「新 TOML 加 [pricing] section」場景 — round 1 deploy 後狀態。
+    // 4 TOML 解析 PASS + validate() PASS + 欄位值正確讀入。
+    let toml_str = r#"
+[limits]
+stop_loss_max_pct = 5.0
+
+[pricing]
+max_age_warn_minutes = 30
+max_age_fail_minutes = 720
+cold_default_acceptable_modes = ["paper", "demo", "live_demo"]
+"#;
+    let cfg: RiskConfig = toml::from_str(toml_str).expect("new TOML with [pricing]");
+    let pricing = cfg.pricing.as_ref().expect("pricing section should parse");
+    assert_eq!(pricing.max_age_warn_minutes, 30);
+    assert_eq!(pricing.max_age_fail_minutes, 720);
+    assert_eq!(
+        pricing.cold_default_acceptable_modes,
+        vec![
+            "paper".to_string(),
+            "demo".to_string(),
+            "live_demo".to_string()
+        ],
+    );
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_pricing_config_invalid_section_rejected_at_validate() {
+    // [pricing] section 內違反不變量（warn ≥ fail）應在 RiskConfig::validate()
+    // 階段被拒，而非 deserialize 階段（serde 不跑 invariant check）。
+    let toml_str = r#"
+[limits]
+stop_loss_max_pct = 5.0
+
+[pricing]
+max_age_warn_minutes = 1440
+max_age_fail_minutes = 1440
+cold_default_acceptable_modes = ["demo"]
+"#;
+    let cfg: RiskConfig = toml::from_str(toml_str).expect("toml parse should succeed");
+    let err = cfg.validate().expect_err("warn=fail must fail validate");
+    assert!(err.contains("risk.pricing"), "err={err}");
+}
+
+#[test]
+fn test_pricing_config_live_in_whitelist_rejected_at_validate() {
+    // LG-3 RFC §2.3 mainnet fail-closed：[pricing].cold_default_acceptable_modes
+    // 含 "live" 必拒。守 mainnet hard-stop 不變式。
+    let toml_str = r#"
+[pricing]
+max_age_warn_minutes = 60
+max_age_fail_minutes = 1440
+cold_default_acceptable_modes = ["paper", "demo", "live_demo", "live"]
+"#;
+    let cfg: RiskConfig = toml::from_str(toml_str).expect("toml parse");
+    let err = cfg.validate().expect_err("'live' in whitelist must fail");
+    assert!(err.contains("'live'"), "err={err}");
+}
+
+#[test]
+fn test_pricing_config_round_trip_via_riskconfig() {
+    // 完整 round-trip：RiskConfig 帶 pricing → toml → parse → 與原一致。
+    let mut cfg = RiskConfig::default();
+    cfg.pricing = Some(openclaw_types::PricingConfig {
+        max_age_warn_minutes: 15,
+        max_age_fail_minutes: 360,
+        cold_default_acceptable_modes: vec!["demo".into(), "live_demo".into()],
+    });
+    assert!(cfg.validate().is_ok());
+
+    let serialized = toml::to_string(&cfg).expect("RiskConfig with pricing serialize");
+    let de: RiskConfig = toml::from_str(&serialized).expect("RiskConfig with pricing parse");
+    let pricing = de.pricing.expect("pricing round-trip should preserve Some");
+    assert_eq!(pricing.max_age_warn_minutes, 15);
+    assert_eq!(pricing.max_age_fail_minutes, 360);
+    assert_eq!(
+        pricing.cold_default_acceptable_modes,
+        vec!["demo".to_string(), "live_demo".to_string()],
+    );
+}
+
+#[test]
+fn test_pricing_config_three_env_toml_strings_parse() {
+    // 三環境 TOML inline 字串覆蓋（per memory `feedback_env_config_independence`）。
+    // 各環境用不同 default 值；同次 build 對 3 環境配置面進行 sanity check。
+
+    // Paper：dev/explore 環境放寬（24h warn / 7d fail）。
+    let paper_toml = r#"
+[pricing]
+max_age_warn_minutes = 1440
+max_age_fail_minutes = 10080
+cold_default_acceptable_modes = ["paper", "demo", "live_demo"]
+"#;
+    let paper: RiskConfig = toml::from_str(paper_toml).expect("paper toml");
+    let p = paper.pricing.as_ref().unwrap();
+    assert_eq!(p.max_age_warn_minutes, 1440);
+    assert_eq!(p.max_age_fail_minutes, 10080);
+    assert!(paper.validate().is_ok());
+
+    // Demo：學習/edge 累積環境中庸（60min warn / 24h fail）。
+    let demo_toml = r#"
+[pricing]
+max_age_warn_minutes = 60
+max_age_fail_minutes = 1440
+cold_default_acceptable_modes = ["paper", "demo", "live_demo"]
+"#;
+    let demo: RiskConfig = toml::from_str(demo_toml).expect("demo toml");
+    let d = demo.pricing.as_ref().unwrap();
+    assert_eq!(d.max_age_warn_minutes, 60);
+    assert_eq!(d.max_age_fail_minutes, 1440);
+    assert!(demo.validate().is_ok());
+
+    // Live：嚴格（30min warn / 12h fail / 不含 live）。
+    let live_toml = r#"
+[pricing]
+max_age_warn_minutes = 30
+max_age_fail_minutes = 720
+cold_default_acceptable_modes = ["demo", "live_demo"]
+"#;
+    let live: RiskConfig = toml::from_str(live_toml).expect("live toml");
+    let l = live.pricing.as_ref().unwrap();
+    assert_eq!(l.max_age_warn_minutes, 30);
+    assert_eq!(l.max_age_fail_minutes, 720);
+    assert_eq!(l.cold_default_acceptable_modes, vec!["demo", "live_demo"]);
+    assert!(live.validate().is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// LG-2 T4 ad-hoc smoke：實際 4 個 settings TOML 端對端解析 + validate。
+// 走 fs::read_to_string + toml::from_str + RiskConfig::validate() 鏈，
+// 對齊 production startup `bootstrap::load_per_engine_risk_configs`
+// 的載入路徑語意。預期：4 個 TOML 全 PASS；paper/demo/live 含 [pricing]
+// section（新 LG-2 T4 加入），legacy `risk_config.toml` 無 section 走
+// Option None fallback。
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_lg2_t4_real_toml_files_parse_and_validate() {
+    use std::path::PathBuf;
+
+    // 走相對 repo root 的路徑（cargo test 在 srv/rust 下跑時 CWD=srv/rust，
+    // CARGO_MANIFEST_DIR=srv/rust/openclaw_engine，往上兩層 = srv/）。
+    // PathBuf own，避免 .parent() 借用臨時 PathBuf 提早 drop。
+    let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let rust_dir = crate_root.parent().expect("crate parent").to_path_buf();
+    let repo_root = rust_dir.parent().expect("srv root").to_path_buf();
+    let base = repo_root.join("settings").join("risk_control_rules");
+
+    // 4 個 TOML：legacy（risk_config.toml）走 None fallback；其餘 3 個有 [pricing]
+    let cases: &[(&str, bool)] = &[
+        ("risk_config.toml", false),       // legacy fallback；無 [pricing]
+        ("risk_config_paper.toml", true),  // LG-2 T4 加入 [pricing]
+        ("risk_config_demo.toml", true),   // LG-2 T4 加入 [pricing]
+        ("risk_config_live.toml", true),   // LG-2 T4 加入 [pricing]
+    ];
+
+    let mut failures: Vec<String> = Vec::new();
+    for (fname, expect_pricing) in cases {
+        let path = base.join(fname);
+        if !path.is_file() {
+            failures.push(format!("{} missing on disk", fname));
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+        let cfg: RiskConfig = match toml::from_str(&content) {
+            Ok(c) => c,
+            Err(e) => {
+                failures.push(format!("{} parse: {}", fname, e));
+                continue;
+            }
+        };
+        if let Err(e) = cfg.validate() {
+            failures.push(format!("{} validate: {}", fname, e));
+            continue;
+        }
+        let has_pricing = cfg.pricing.is_some();
+        if has_pricing != *expect_pricing {
+            failures.push(format!(
+                "{} pricing presence mismatch: got={} expect={}",
+                fname, has_pricing, expect_pricing
+            ));
+        }
+        // 額外健全：有 [pricing] 的環境，warn < fail / 白名單不含 "live"。
+        if let Some(p) = cfg.pricing.as_ref() {
+            assert!(
+                p.max_age_warn_minutes < p.max_age_fail_minutes,
+                "{} warn>=fail: {}>={}",
+                fname,
+                p.max_age_warn_minutes,
+                p.max_age_fail_minutes
+            );
+            assert!(
+                !p.cold_default_acceptable_modes.iter().any(|m| m == "live"),
+                "{} whitelist must not contain 'live'",
+                fname
+            );
+        }
+    }
+    assert!(failures.is_empty(), "LG-2 T4 TOML smoke failures: {failures:?}");
+}

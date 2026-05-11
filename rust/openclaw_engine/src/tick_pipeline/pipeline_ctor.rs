@@ -72,8 +72,26 @@ impl TickPipeline {
             endpoint_env: None,
             exchange_seq: 0,
             pending_close_symbols: std::collections::HashSet::new(),
+            // LG1-T3 (2026-05-11)：ctor 預設改為 shadow_mode=false（hard-block）。
+            // 理由（PA tech plan §1.5 risk #1 mitigation）：
+            //   - Demo / Live TOML 均已長期 `runtime.h0_shadow_mode = false`，
+            //     ctor 舊預設 `true` 會在 engine 啟動到首次 TOML 載入 / 熱重載完成
+            //     之間留 1–3 秒「shadow 觀察窗」，期間若有觸發 H0 阻斷條件
+            //     會被誤放行（fail-open）。
+            //   - Paper 仍以 TOML `risk_config_paper.toml` 中 `h0_shadow_mode = true`
+            //     維持影子模式；TOML always-覆蓋契約由 `apply_risk_snapshot` 中
+            //     H0Gate RMW 路徑保證（pipeline_config.rs:97-109）。
+            //   - 切換預設值不會破壞既有 hot-reload 行為：apply_risk_snapshot
+            //     的 read-modify-write 會把 TOML `runtime.h0_shadow_mode` 值
+            //     寫回 H0GateConfig.shadow_mode。
+            //   - 對齊 §四「失敗默認收縮」原則：未載 TOML 時 fail-closed 優於
+            //     fail-open。
+            // E2 必驗：apply_risk_snapshot / sync_risk_config_if_changed 在
+            // 首次 set_risk_store + 首次 tick 內把 TOML `h0_shadow_mode` 正確
+            // 傳入 H0GateConfig.shadow_mode；測試覆蓋見
+            // tests/h0_ctor_default.rs。
             h0_gate: H0Gate::new(Some(openclaw_types::H0GateConfig {
-                shadow_mode: true, // RRC-1-A3: observe-only until proven stable
+                shadow_mode: false,
                 ..Default::default()
             })),
             price_tracker: PriceHistoryTracker::new(),

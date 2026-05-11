@@ -109,11 +109,8 @@ impl Strategy for MaCrossover {
         // - shadow log emit 後 **不**改 actions / **不**改 strategy state；
         //   下游 7d 後跑離線 SQL 對齊真實 fill 算 counterfactual edge
         if let Some(panel) = surface.btc_lead_lag {
-            let _shadow = crate::strategies::cross_asset::evaluate_shadow_signal(
-                self.name(),
-                ctx,
-                panel,
-            );
+            let _shadow =
+                crate::strategies::cross_asset::evaluate_shadow_signal(self.name(), ctx, panel);
             // _shadow 純評估快照，丟棄不影響後續 strategy decision。
         }
 
@@ -201,6 +198,19 @@ impl Strategy for MaCrossover {
                 return vec![];
             }
             None => {
+                // SCANNER-TRADEABLE-TIER-1 (2026-05-11): scanner can keep a
+                // larger 60s observation universe, but this fee-sensitive TA
+                // strategy only opens on the pinned tradeable tier. Existing
+                // self-owned positions still reach the exit branch above.
+                if !ctx.is_pinned {
+                    tracing::debug!(
+                        target: "ma_crossover",
+                        symbol = %ctx.symbol,
+                        "skip entry: symbol not in scanner pinned tradeable tier"
+                    );
+                    return vec![];
+                }
+
                 // 無倉位 → entry path。RC-01 regime filter + RC-02 higher-TF confirmation 套用。
                 if !self.regime_allows_entry(ctx) {
                     return vec![];

@@ -373,3 +373,25 @@ sampling_normal_pct = 5         # NORMAL — Live tightened from demo 10% → 5%
 sampling_high_pct = 50          # HIGH priority (0-100)
 sampling_critical_pct = 100     # CRITICAL — always 100% (audit completeness)
 fail_soft_on_db_error = true    # PG outage → log warn + drop, never block MessageBus.send
+
+# LG-2 T4 (2026-05-11) — 24h pricing freshness gate config（per PA tech plan
+# `2026-05-11--lg_2_3_4_design_plan.md` §2.4 表 T4 + LG-3 RFC
+# `2026-05-01--lg3_provider_pricing_binding_rfc.md` §Refresh Cadence）。
+#
+# Live 預設：嚴格閾值 — Live（mainnet + LiveDemo）走真實/模擬真實流量，
+# pricing 必須極新；30min warn 給 fast-track 1 個 hourly refresh cycle 內
+# observability，12h fail 比 demo 1440min 進一步收緊（LiveDemo 模擬 mainnet
+# 嚴苛度 per memory `feedback_live_no_degradation_by_endpoint`）。
+#
+# cold_default_acceptable_modes：**移除 "paper"**（live 配置無 paper 路徑）
+# 並**永不可含 "live"**（LG-3 RFC §2.3 mainnet hard-block 不變式 — mainnet
+# 必須拒 seed_default，validate() 強制）。LiveDemo（engine_mode='live_demo'）
+# 與 demo 同視為 Bybit endpoint 不支援 fee-rate API → 可接受 seed_default；
+# 真 mainnet 'live' 不在白名單，後續 LG2-T2 startup assertion 必拒。
+#
+# 三環境獨立 per memory `feedback_env_config_independence`：live 比 demo
+# 嚴格、比 paper 嚴格甚多；禁衛生合併。
+[pricing]
+max_age_warn_minutes = 30       # 30min — hourly refresh fail 30min 內即 WARN
+max_age_fail_minutes = 720      # 12h  — Live 比 demo (24h) 收緊（per `feedback_demo_loose_live_strict_policy`）
+cold_default_acceptable_modes = ["demo", "live_demo"]

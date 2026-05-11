@@ -18,6 +18,7 @@
 mod budget;
 mod cost_edge_advisor;
 mod dynamic_risk;
+mod fee_source;
 mod governance;
 mod h_state;
 mod misc;
@@ -40,6 +41,7 @@ pub(in crate::ipc_server) use cost_edge_advisor::handle_get_cost_edge_advisor_st
 pub(in crate::ipc_server) use dynamic_risk::{
     handle_get_dynamic_risk_status, handle_set_dynamic_risk_enabled,
 };
+pub(in crate::ipc_server) use fee_source::handle_query_fee_source;
 pub(in crate::ipc_server) use governance::{
     handle_force_governor_looser, handle_force_governor_tighter, handle_set_system_mode_broadcast,
 };

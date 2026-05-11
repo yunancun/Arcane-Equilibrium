@@ -376,11 +376,7 @@ impl Strategy for BbReversion {
     /// paper_state.apply_fill 已寫入真實倉位，策略下個 tick 從
     /// `ctx.position_state` 自然讀取，不需本地 sync。顯式 override 為 no-op
     /// 是為了明確標示意圖（取代舊 W7-5 part 1 self.positions.insert sync）。
-    fn on_fill(
-        &mut self,
-        _intent: &OrderIntent,
-        _fill: &openclaw_core::execution::FillResult,
-    ) {
+    fn on_fill(&mut self, _intent: &OrderIntent, _fill: &openclaw_core::execution::FillResult) {
         // 倉位由 paper_state 持有；本地不需同步。
     }
 
@@ -481,6 +477,19 @@ impl Strategy for BbReversion {
                 return intents;
             }
             None => {
+                // SCANNER-TRADEABLE-TIER-1 (2026-05-11): keep scanner's 60s
+                // 40-symbol market-awareness universe, but restrict this
+                // fee-sensitive textbook TA entry path to the pinned
+                // tradeable tier. Self-owned positions still exit normally.
+                if !ctx.is_pinned {
+                    tracing::debug!(
+                        target: "bb_reversion",
+                        symbol = %ctx.symbol,
+                        "skip entry: symbol not in scanner pinned tradeable tier"
+                    );
+                    return intents;
+                }
+
                 // Entry path — 無人持倉，按既有 reversion 訊號邏輯走。
 
                 // G-SR-1 A1：判斷 signal 給 persistence check。

@@ -176,6 +176,12 @@ pub struct SpawnConfig<'a> {
     pub env: BybitEnvironment,
     pub parent_shutdown_token: CancellationToken,
     pub cfg_snapshot: &'a EngineBootstrap,
+    /// LG-2 T2 (2026-05-11)：per-env RiskConfig.pricing 配置（owned clone
+    /// 避免跨 await 借用問題）。傳入 build_exchange_pipeline 後對 Live
+    /// (Mainnet + LiveDemo) 路徑執行 pricing binding 三項斷言；Demo / Paper
+    /// 不消費此欄位。建構端從對應 `risk_stores.{live,demo,paper}.load()
+    /// .pricing.clone().unwrap_or_default()` 取得。
+    pub pricing_config: openclaw_types::PricingConfig,
 }
 
 /// Successful spawn output — exchange-pipeline bindings + slot-scoped child
@@ -369,6 +375,9 @@ impl PipelineSlot {
             cfg.env,
             slot_cancel_token.clone(),
             cfg.cfg_snapshot,
+            // LG-2 T2 (2026-05-11)：clone 給 build_exchange_pipeline，owned 避免
+            // 跨 await 的生命週期糾結（SpawnConfig 是 borrowed ref，本欄位 owned）。
+            cfg.pricing_config.clone(),
         )
         .await;
 

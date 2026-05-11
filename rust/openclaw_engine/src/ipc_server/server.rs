@@ -32,9 +32,9 @@ use super::connection::handle_connection;
 use super::engine_routing::{EngineCommandChannels, LiveCmdSenderSlot};
 use super::protocol::IpcError;
 use super::slots::{
-    AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot,
-    EdgeReloadSenderSlot, FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot,
-    StrategistCountersSlot, TeacherLoopSlot,
+    AccountManagerSlot, AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot,
+    CostEdgeAdvisorSlot, EdgeReloadSenderSlot, FundingCurvePanelSlot, HStateCacheSlot,
+    OIDeltaPanelSlot, StrategistCountersSlot, TeacherLoopSlot,
 };
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig};
@@ -134,6 +134,11 @@ pub struct IpcServer {
     /// 主防線，slot 本身不知 fence；trait 端 surface.btc_lead_lag = None 即等
     /// 同於 producer 尚未 emit / fence 拒絕讀取，consumer skip 不需查 engine_mode。
     btc_lead_lag_panel: BtcLeadLagPanelSlot,
+    /// LG-2 T3 (2026-05-11): 延後注入的 AccountManager slot，供 IPC route
+    /// `query_fee_source` 讀取 fee 來源類別給 healthcheck [45] dual-source compare。
+    /// `main_instruments::init_shared_clients_and_instruments` 完成後 main.rs
+    /// 透過 `set_account_manager_slot` 注入 Arc。None = 尚未注入 / 無 binding。
+    account_manager: AccountManagerSlot,
 }
 
 impl IpcServer {
@@ -171,6 +176,10 @@ impl IpcServer {
             // None；BtcLeadLagProducer spawn 時透過 set_btc_lead_lag_panel_slot
             // 注入既有 Arc。
             btc_lead_lag_panel: Arc::new(RwLock::new(None)),
+            // LG-2 T3 (2026-05-11): AccountManagerSlot 預設 None；
+            // main_instruments::init_shared_clients_and_instruments 完成後由
+            // main.rs 透過 set_account_manager_slot / account_manager_slot 注入。
+            account_manager: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -226,6 +235,13 @@ impl IpcServer {
     /// IPC handler / GUI / step_4_5_dispatch 能讀到同一 panel snapshot（共享 Arc）。
     pub fn set_btc_lead_lag_panel_slot(&mut self, slot: BtcLeadLagPanelSlot) {
         self.btc_lead_lag_panel = slot;
+    }
+
+    /// LG-2 T3 (2026-05-11): 取 AccountManager slot Arc clone 給 main.rs 在
+    /// `init_shared_clients_and_instruments` 回傳 SharedClientsBundle 後 late-inject。
+    /// 對齊 cost_edge_advisor_slot / h_state_cache_slot pattern。
+    pub fn account_manager_slot(&self) -> AccountManagerSlot {
+        Arc::clone(&self.account_manager)
     }
 
     /// F6 PH5-WIRE-1 RELOAD (2026-04-26): get a clone of the edge reload
@@ -458,8 +474,12 @@ impl IpcServer {
                             // G3-09 Phase A：複製 advisor slot Arc handle，每連線
                             // 自動看到 late-injected advisor 不需重啟 IPC。
                             let cost_edge_advisor_slot = Arc::clone(&self.cost_edge_advisor);
+                            // LG-2 T3 (2026-05-11): clone AccountManager slot Arc handle；
+                            // main.rs 在 init_shared_clients_and_instruments 後 late-inject，
+                            // 每連線自動看到注入後的 AccountManager，無需 IPC 重啟。
+                            let account_manager_slot = Arc::clone(&self.account_manager);
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx, h_state_cache, h_state_invalidation_tx, edge_reload_sender, cost_edge_advisor_slot).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg, strategist_counters, live_auth_recheck_tx, h_state_cache, h_state_invalidation_tx, edge_reload_sender, cost_edge_advisor_slot, account_manager_slot).await;
                             });
                         }
                         Err(e) => {

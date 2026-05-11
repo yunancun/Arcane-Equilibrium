@@ -59,7 +59,7 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -97,7 +97,7 @@ fn ctx_with_atr(sma: f64, kama: f64, adx: f64, ts: u64, atr: f64) -> TickContext
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -144,7 +144,7 @@ fn ctx_with_hurst(
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -181,7 +181,7 @@ fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> Tic
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -193,14 +193,22 @@ fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> Tic
 fn test_no_signal_low_adx() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    assert!(s.on_tick(&ctx_with(100.0, 101.0, 15.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
+    assert!(s
+        .on_tick(
+            &ctx_with(100.0, 101.0, 15.0, 0),
+            &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE
+        )
+        .is_empty());
 }
 
 #[test]
 fn test_long_entry() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(
+        &ctx_with(100.0, 101.0, 25.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -214,10 +222,16 @@ fn test_min_trend_snr_blocks_noisy_entry() {
     s.min_persistence_ms = 0;
     s.min_trend_snr = 1.0;
 
-    let blocked = s.on_tick(&ctx_with_atr(100.0, 101.0, 25.0, 0, 2.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let blocked = s.on_tick(
+        &ctx_with_atr(100.0, 101.0, 25.0, 0, 2.0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(blocked.is_empty(), "SNR 0.5 must be blocked");
 
-    let allowed = s.on_tick(&ctx_with_atr(100.0, 103.0, 25.0, 1_000, 2.0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let allowed = s.on_tick(
+        &ctx_with_atr(100.0, 103.0, 25.0, 1_000, 2.0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(allowed.len(), 1, "SNR 1.5 must pass");
 }
 
@@ -237,7 +251,10 @@ fn test_exit_on_reverse() {
     let pp = make_paper_position("BTC", true, "ma_crossover");
     let mut ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000);
     ctx_exit.position_state = Some(&pp);
-    let i = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(
+        &ctx_exit,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { symbol, reason, .. } => {
@@ -292,14 +309,20 @@ fn test_regime_filter_allows_exit() {
     s.min_persistence_ms = 0;
     // Step 1：trending regime 入場 LONG（cold-start，ctx.position_state=None）
     let ctx_entry = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
-    let entry = s.on_tick(&ctx_entry, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let entry = s.on_tick(
+        &ctx_entry,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(entry.len(), 1, "Should enter long");
 
     // Step 2：regime 翻 mean_reverting + reverse cross + self-owned ma_crossover LONG 注入
     let pp = make_paper_position("BTC", true, "ma_crossover");
     let mut ctx_exit = ctx_with_hurst(101.0, 100.0, 25.0, 500_000, "mean_reverting", 0.35);
     ctx_exit.position_state = Some(&pp);
-    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let exit = s.on_tick(
+        &ctx_exit,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(
         exit.len(),
         1,
@@ -433,7 +456,10 @@ fn test_higher_tf_does_not_block_exit() {
     // Step 1：entry LONG（aligned higher TF）
     s.higher_tf_sma.insert("BTC".into(), 90.0);
     let ctx_entry = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
-    let entry = s.on_tick(&ctx_entry, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let entry = s.on_tick(
+        &ctx_entry,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(entry.len(), 1);
 
     // Step 2：翻轉 higher TF + reverse cross + self-owned LONG 注入 → exit
@@ -442,7 +468,10 @@ fn test_higher_tf_does_not_block_exit() {
     let pp = make_paper_position("BTC", true, "ma_crossover");
     let mut ctx_exit = ctx_with_sma50(101.0, 100.0, 25.0, 500_000, 100.0);
     ctx_exit.position_state = Some(&pp);
-    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let exit = s.on_tick(
+        &ctx_exit,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(
         exit.len(),
         1,
@@ -530,7 +559,7 @@ fn test_conf_scale_applied_to_emit() {
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     };
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
@@ -840,6 +869,24 @@ fn test_on_tick_proceeds_entry_when_paper_state_is_none() {
     }
 }
 
+/// SCANNER-TRADEABLE-TIER-1：scanner 可高頻觀察 dynamic-add symbols，
+/// 但 ma_crossover 只能在 pinned tradeable tier 開新倉。
+#[test]
+fn test_non_pinned_symbol_skips_entry() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // valid LONG signal
+    ctx.position_state = None;
+    ctx.is_pinned = false;
+
+    let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert!(
+        actions.is_empty(),
+        "dynamic-add/non-pinned symbol must not produce ma_crossover entry"
+    );
+}
+
 /// Self-owned ctx.position_state + reverse cross → 走 exit 分支（emit Close）。
 /// 驗證 owner_strategy == "ma_crossover" filter 命中時，exit path 觸發正常。
 #[test]
@@ -851,7 +898,10 @@ fn test_self_owned_position_triggers_exit_on_reverse_cross() {
     let mut ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000); // fast < slow → reverse for LONG
     ctx_exit.position_state = Some(&pp);
 
-    let exit_actions = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let exit_actions = s.on_tick(
+        &ctx_exit,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(
         exit_actions.len(),
         1,
@@ -859,8 +909,37 @@ fn test_self_owned_position_triggers_exit_on_reverse_cross() {
     );
     match &exit_actions[0] {
         StrategyAction::Close { reason, .. } => {
-            assert_eq!(reason, "ma_reverse_cross", "exit reason 必為 ma_reverse_cross");
+            assert_eq!(
+                reason, "ma_reverse_cross",
+                "exit reason 必為 ma_reverse_cross"
+            );
         }
+        other => panic!("expected StrategyAction::Close, got {:?}", other),
+    }
+}
+
+/// SCANNER-TRADEABLE-TIER-1：pinned gate 只限制新開倉，不阻擋自家倉位出場。
+#[test]
+fn test_non_pinned_self_owned_position_can_exit() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position("BTC", true, "ma_crossover");
+    let mut ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000); // reverse for LONG
+    ctx_exit.position_state = Some(&pp);
+    ctx_exit.is_pinned = false;
+
+    let exit_actions = s.on_tick(
+        &ctx_exit,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    assert_eq!(
+        exit_actions.len(),
+        1,
+        "non-pinned self-owned ma_crossover position must still be allowed to exit"
+    );
+    match &exit_actions[0] {
+        StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
         other => panic!("expected StrategyAction::Close, got {:?}", other),
     }
 }
@@ -931,11 +1010,15 @@ fn test_on_external_close_mutation_does_not_panic() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 180_000;
     let _ = s.persistence.check("BTC", Some(true), 0, 180_000, false);
-    let _ = s.exit_persistence.check("BTC", Some(false), 100_000, 180_000, false);
+    let _ = s
+        .exit_persistence
+        .check("BTC", Some(false), 100_000, 180_000, false);
 
     s.on_external_close("BTC");
 
     // clear 過後 fresh check 不 panic（mutation 完整生效）。
     let _ = s.persistence.check("BTC", Some(true), 1_000_000, 0, false);
-    let _ = s.exit_persistence.check("BTC", Some(false), 1_000_000, 0, false);
+    let _ = s
+        .exit_persistence
+        .check("BTC", Some(false), 1_000_000, 0, false);
 }

@@ -39,8 +39,13 @@ sys.path.insert(0, _SRV_ROOT)
 from helper_scripts.db.passive_wait_healthcheck.checks_pricing_binding import (  # noqa: E402
     DEFAULT_MAKER_FEE,
     DEFAULT_TAKER_FEE,
+    DUAL_SOURCE_ENV_VAR,
     REFRESH_AGE_PASS_MAX_SECONDS,
     REFRESH_AGE_WARN_MAX_SECONDS,
+    RUST_FEE_SOURCE_BYBIT_API,
+    RUST_FEE_SOURCE_COLD_DEFAULT,
+    RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT,
+    _is_rust_pg_source_compatible,
     check_45_pricing_binding,
 )
 
@@ -282,6 +287,196 @@ class TestSourceInferenceHelpers(unittest.TestCase):
         """
         self.assertEqual(REFRESH_AGE_PASS_MAX_SECONDS, 3600)
         self.assertEqual(REFRESH_AGE_WARN_MAX_SECONDS, 86400)
+
+
+# ---------------------------------------------------------------------------
+# LG-2 T3 (2026-05-11) IPC dual-source compare test cases。
+# 對賬 Rust enum 真值與 PG proxy 推斷字串；disagree 升 WARN（首階段 2 週觀察期）。
+# ---------------------------------------------------------------------------
+class TestLg2T3DualSourceCompat(unittest.TestCase):
+    """Rust FeeSource ↔ PG proxy 字串相容性表測試。"""
+
+    def test_bybit_api_compatible_with_bybit_v5(self) -> None:
+        self.assertTrue(
+            _is_rust_pg_source_compatible(RUST_FEE_SOURCE_BYBIT_API, "bybit_v5")
+        )
+
+    def test_demo_conservative_default_compatible_with_seed_default(self) -> None:
+        self.assertTrue(
+            _is_rust_pg_source_compatible(
+                RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT, "seed_default"
+            )
+        )
+
+    def test_cold_default_compatible_with_cold_default(self) -> None:
+        self.assertTrue(
+            _is_rust_pg_source_compatible(RUST_FEE_SOURCE_COLD_DEFAULT, "cold_default")
+        )
+
+    def test_inactive_mainnet_compatible_with_all_enum(self) -> None:
+        """inactive_mainnet 是 PG 對 live slot 在 OPENCLAW_ALLOW_MAINNET 未啟用
+        時的標記；不視為 disagree。
+        """
+        self.assertTrue(
+            _is_rust_pg_source_compatible(RUST_FEE_SOURCE_BYBIT_API, "inactive_mainnet")
+        )
+        self.assertTrue(
+            _is_rust_pg_source_compatible(
+                RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT, "inactive_mainnet"
+            )
+        )
+        self.assertTrue(
+            _is_rust_pg_source_compatible(
+                RUST_FEE_SOURCE_COLD_DEFAULT, "inactive_mainnet"
+            )
+        )
+
+    def test_disagree_cases(self) -> None:
+        """跨類別不相容 → disagree。"""
+        self.assertFalse(
+            _is_rust_pg_source_compatible(RUST_FEE_SOURCE_BYBIT_API, "seed_default")
+        )
+        self.assertFalse(
+            _is_rust_pg_source_compatible(
+                RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT, "bybit_v5"
+            )
+        )
+        self.assertFalse(
+            _is_rust_pg_source_compatible(RUST_FEE_SOURCE_COLD_DEFAULT, "bybit_v5")
+        )
+        # 未知 rust_enum 視為 disagree（fail-closed compatibility check）
+        self.assertFalse(
+            _is_rust_pg_source_compatible("unknown_enum", "bybit_v5")
+        )
+
+
+class TestLg2T3DualSourceWarn(unittest.TestCase):
+    """check_45 主流程在 dual-source disagree 時升 WARN 的端對端測試。"""
+
+    def test_dual_source_disagree_promotes_pass_to_warn(self) -> None:
+        """Rust 端 IPC 報 bybit_api，但 PG 端推斷 seed_default → 升 WARN。
+        IPC 啟用旗標：OPENCLAW_LG2_T3_DUAL_SOURCE=1。
+
+        Setup：demo+live_demo 全 100% default fees（PG 推斷 seed_default 但
+        RFC §2.3 demo+live_demo 是 accepted source）；live 走 inactive_mainnet
+        （OPENCLAW_ALLOW_MAINNET 未啟用），因此 PG verdict 為 PASS。Rust 端
+        IPC mock 回 bybit_api → dual-source disagree → 升 WARN。
+        """
+        rows = [
+            # demo / live_demo 全 100% default → PG 推斷 seed_default
+            ("demo", 100, 100, 0, 12, 600),
+            ("live_demo", 50, 50, 0, 8, 900),
+            # live 無 fills；OPENCLAW_ALLOW_MAINNET 未啟用 → 走 inactive_mainnet PG path
+        ]
+        cur = _build_cur(True, rows)
+
+        # 模擬 Rust 端 IPC 回真實 bybit_api（與 PG 推斷 seed_default 不相容）
+        mock_ipc = MagicMock(
+            return_value={
+                "status": "ok",
+                "symbol": "BTCUSDT",
+                "fee_source": RUST_FEE_SOURCE_BYBIT_API,
+                "last_refresh_ms": 1_700_000_000_000,
+                "fee_rate_count": 25,
+            }
+        )
+        with patch.dict(
+            os.environ,
+            {DUAL_SOURCE_ENV_VAR: "1", "OPENCLAW_ALLOW_MAINNET": ""},
+            clear=False,
+        ), patch(
+            "helper_scripts.db.passive_wait_healthcheck.shared._engine_process_age_minutes",
+            return_value=(120.0, "ok"),
+        ), patch(
+            # 注入到模組命名空間的 sync_ipc_call lazy import 路徑
+            "program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client_sync.sync_ipc_call",
+            mock_ipc,
+        ):
+            status, msg = check_45_pricing_binding(cur)
+        # PG demo+live_demo seed_default 可接受 + live inactive_mainnet skip →
+        # PG verdict=PASS；dual-source disagree (Rust bybit_api vs PG seed_default)
+        # → 升 WARN（首階段 2 週觀察期不直接 FAIL）
+        self.assertEqual(status, "WARN", msg)
+        self.assertIn("dual_source", msg)
+        self.assertIn("rust_enum=bybit_api", msg)
+        self.assertIn("pg_proxy_canonical=seed_default", msg)
+        self.assertIn("compatible=False", msg)
+        self.assertIn("LG-2 T3 dual_source disagree", msg)
+
+    def test_dual_source_compat_no_verdict_change(self) -> None:
+        """Rust 端與 PG 推斷相容 → verdict 不變，但 summary 含 dual_source。"""
+        rows = [
+            ("demo", 100, 5, 95, 12, 600),
+            ("live_demo", 50, 0, 50, 8, 900),
+            ("live", 30, 0, 30, 5, 1200),
+        ]
+        cur = _build_cur(True, rows)
+        mock_ipc = MagicMock(
+            return_value={
+                "status": "ok",
+                "symbol": "BTCUSDT",
+                "fee_source": RUST_FEE_SOURCE_BYBIT_API,
+                "last_refresh_ms": 1_700_000_000_000,
+                "fee_rate_count": 25,
+            }
+        )
+        with patch.dict(
+            os.environ, {DUAL_SOURCE_ENV_VAR: "1"}, clear=False
+        ), patch(
+            "helper_scripts.db.passive_wait_healthcheck.shared._engine_process_age_minutes",
+            return_value=(120.0, "ok"),
+        ), patch(
+            "program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client_sync.sync_ipc_call",
+            mock_ipc,
+        ):
+            status, msg = check_45_pricing_binding(cur)
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("dual_source", msg)
+        self.assertIn("compatible=True", msg)
+
+    def test_dual_source_ipc_unavailable_fail_soft(self) -> None:
+        """IPC socket 不存在 → fail-soft（dual_source=ipc_unavailable，不改 verdict）。"""
+        rows = [
+            ("demo", 100, 5, 95, 12, 600),
+            ("live_demo", 50, 0, 50, 8, 900),
+            ("live", 30, 0, 30, 5, 1200),
+        ]
+        cur = _build_cur(True, rows)
+
+        # 模擬 sync_ipc_call raise FileNotFoundError（engine socket 不存在）
+        mock_ipc = MagicMock(side_effect=FileNotFoundError("no engine"))
+        with patch.dict(
+            os.environ, {DUAL_SOURCE_ENV_VAR: "1"}, clear=False
+        ), patch(
+            "helper_scripts.db.passive_wait_healthcheck.shared._engine_process_age_minutes",
+            return_value=(120.0, "ok"),
+        ), patch(
+            "program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client_sync.sync_ipc_call",
+            mock_ipc,
+        ):
+            status, msg = check_45_pricing_binding(cur)
+        # PG 三 mode 都 PASS，IPC 不可用 fail-soft 不阻 healthcheck
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("dual_source=ipc_unavailable", msg)
+
+    def test_dual_source_disabled_by_default(self) -> None:
+        """OPENCLAW_LG2_T3_DUAL_SOURCE 未設 → dual_source compare 不執行；
+        msg 應不含 dual_source 字串（保持向後相容）。"""
+        rows = [
+            ("demo", 100, 5, 95, 12, 600),
+            ("live_demo", 50, 0, 50, 8, 900),
+            ("live", 30, 0, 30, 5, 1200),
+        ]
+        cur = _build_cur(True, rows)
+        with patch.dict(
+            os.environ, {DUAL_SOURCE_ENV_VAR: ""}, clear=False
+        ), patch(
+            "helper_scripts.db.passive_wait_healthcheck.shared._engine_process_age_minutes",
+            return_value=(120.0, "ok"),
+        ):
+            status, msg = check_45_pricing_binding(cur)
+        self.assertEqual(status, "PASS", msg)
+        self.assertNotIn("dual_source", msg)
 
 
 if __name__ == "__main__":

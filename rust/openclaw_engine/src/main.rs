@@ -324,12 +324,22 @@ async fn async_main(
     // Boot tries Live try_spawn; if authorized, direct spawn path follows.
     // Watcher handles (None, None) + mid-session respawn. (2026-04-27 fix)
     // Boot 嘗試 try_spawn；授權 → 直接 spawn；否則 watcher 接管。
+    // LG-2 T2 (2026-05-11)：boot 路徑 Live spawn 傳 risk_live.pricing 配置；
+    // build_exchange_pipeline 對 Live (Mainnet + LiveDemo) 路徑執行 pricing
+    // binding 三項斷言。`Option<PricingConfig>` 為 None 時走 default。
+    let live_pricing_config = risk_stores
+        .live
+        .load()
+        .pricing
+        .clone()
+        .unwrap_or_default();
     let (live_bindings, live_slot_cancel) = match live_slot
         .try_spawn(&pipeline_slot::SpawnConfig {
             kind: pipeline_slot::SlotKind::Live,
             env: live_bybit_environment(),
             parent_shutdown_token: cancel.clone(),
             cfg_snapshot: &cfg_snapshot_pipelines,
+            pricing_config: live_pricing_config,
         })
         .await
     {
@@ -343,12 +353,22 @@ async fn async_main(
             (None, None)
         }
     };
+    // LG-2 T2 (2026-05-11)：demo spawn 不 enforce pricing assertion，但仍
+    // 傳遞 pricing config 保持 SpawnConfig API 對齊；build_exchange_pipeline
+    // 內部對 kind != Live 直接跳過 pre-check。
+    let demo_pricing_config = risk_stores
+        .demo
+        .load()
+        .pricing
+        .clone()
+        .unwrap_or_default();
     let (demo_bindings, demo_slot_cancel) = match demo_slot
         .try_spawn(&pipeline_slot::SpawnConfig {
             kind: pipeline_slot::SlotKind::Demo,
             env: BybitEnvironment::Demo,
             parent_shutdown_token: cancel.clone(),
             cfg_snapshot: &cfg_snapshot_pipelines,
+            pricing_config: demo_pricing_config,
         })
         .await
     {
@@ -525,6 +545,11 @@ async fn async_main(
     let btc_lead_lag_panel_slot = openclaw_engine::panel_aggregator::create_btc_lead_lag_slot();
     ipc_server.set_btc_lead_lag_panel_slot(Arc::clone(&btc_lead_lag_panel_slot));
 
+    // LG-2 T3 (2026-05-11): 取 AccountManager slot handle，main_instruments
+    // 完成後（line ~564）透過 `write().await.replace()` 注入。對齊
+    // cost_edge_advisor / h_state_cache 的 late-inject pattern。
+    let account_manager_slot_handle = ipc_server.account_manager_slot();
+
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -562,6 +587,16 @@ async fn async_main(
         &demo_bindings,
     )
     .await;
+
+    // LG-2 T3 (2026-05-11): late-inject AccountManager 給 IPC server 的 slot，
+    // 讓 `query_fee_source` IPC route 可讀真值。slot=None（無任何 binding）
+    // 時 handler 維持回 structured `uninitialized` payload，不爆 error。
+    if let Some(am) = shared_account_manager.as_ref() {
+        account_manager_slot_handle
+            .write()
+            .await
+            .replace(Arc::clone(am));
+    }
 
     // ------------------------------------------------------------------
     // Public WS supervisor — extracted to `main_ws.rs` (G1-03 Wave 1).
@@ -1291,6 +1326,9 @@ async fn async_main(
     // BLOCKER-2（2026-04-27）：傳入 live_cmd_slot / live_event_slot，
     // 讓 teardown arm 清空兩個 slot，防止 governance broadcast 迴圈
     // 和 fan-out 在 teardown 後仍往死管線投命令 / tick。
+    // LG-2 T2 (2026-05-11)：from_parts 注入 Live RiskConfig store，watcher
+    // 在 respawn 取 `.load().pricing` 給 SpawnConfig.pricing_config 用，
+    // 與 boot 路徑（main.rs `live_pricing_config` 上方）保持 ArcSwap 熱重載一致。
     let live_auth_watcher = live_auth_watcher::LiveAuthWatcher::from_parts(
         Arc::clone(&live_slot) as Arc<dyn live_auth_watcher::SpawnOp>,
         Arc::clone(&config),
@@ -1301,6 +1339,7 @@ async fn async_main(
         Some(Arc::clone(&live_thread_handle_slot)),
         Some(Arc::clone(&live_cmd_slot)),
         Some(Arc::clone(&live_event_slot)),
+        Some(Arc::clone(&risk_stores.live)),
     );
 
     // Spawn the watcher run loop. From here on, mid-session authorization

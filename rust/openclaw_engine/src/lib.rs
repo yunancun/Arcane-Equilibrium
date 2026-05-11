@@ -38,6 +38,9 @@ pub mod intent_processor;
 pub mod ipc_server;
 pub mod linucb;
 pub mod live_authorization;
+// LG-2 T2 (2026-05-11)：Live spawn pricing binding assertion module。
+// build_exchange_pipeline 對 Live (Mainnet + LiveDemo) 路徑加裝的 pre-check。
+pub mod live_spawn_assert;
 pub mod market_data_client;
 pub mod ml;
 pub mod mode_state;

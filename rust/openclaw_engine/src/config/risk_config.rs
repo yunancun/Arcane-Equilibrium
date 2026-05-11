@@ -238,6 +238,24 @@ pub struct RiskConfig {
     /// + `trigger_threshold=-0.5`（PM Tier 9 lock-in）；Phase A runtime 零影響。
     #[serde(default)]
     pub cost_edge: CostEdgeConfig,
+    /// LG-2 T4 (2026-05-11): 24h pricing freshness gate 配置。
+    ///
+    /// Per PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §2.2 第 5 點 +
+    /// §2.4 表 T4。`Option` 是為向後相容：舊 TOML 無 `[pricing]` section 時
+    /// deserialize 後是 `None`，下游消費者（後續 LG2-T1 contract test /
+    /// LG2-T2 startup assertion / LG2-T3 healthcheck cross-check）會 fallback
+    /// 到 `PricingConfig::default()`（60min warn / 24h fail /
+    /// paper+demo+live_demo 可接受 seed_default），對齊 LG-3 RFC
+    /// §Refresh Cadence 硬編碼語意。
+    ///
+    /// 三個 risk_config*.toml（paper/demo/live）獨立 override（per memory
+    /// `feedback_env_config_independence`：禁衛生合併）。Hot-reload 走既有
+    /// `ConfigStore<RiskConfig>` + ArcSwap 路徑，與其餘 RiskConfig 欄位
+    /// 同源 — `tick_pipeline::pipeline_config::apply_risk_snapshot` 自動
+    /// 把整個 snapshot 推下游，無需新增 RMW 邏輯（LG2-T4 階段 pricing 為
+    /// passive read-only field，無 tick hot-path 消費者）。
+    #[serde(default)]
+    pub pricing: Option<openclaw_types::PricingConfig>,
 }
 
 impl RiskConfig {
@@ -272,6 +290,14 @@ impl RiskConfig {
             .map_err(|e| format!("risk.hurst: {}", e))?;
         self.strategist.validate()?;
         self.cost_edge.validate()?;
+        // LG-2 T4 (2026-05-11)：PricingConfig 啟用時走完整 invariant 檢查
+        // （warn < fail / fail > 0 / 白名單非空且不含 "live"）。Option 為
+        // None 時略過（舊 TOML 向後相容）。
+        if let Some(ref pricing) = self.pricing {
+            pricing
+                .validate()
+                .map_err(|e| format!("risk.pricing: {e}"))?;
+        }
 
         // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
         // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。

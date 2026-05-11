@@ -87,6 +87,76 @@ pub struct FeeRate {
 }
 
 // ---------------------------------------------------------------------------
+// FeeSource — LG-2 T3 (2026-05-11) fee 來源類別
+// LG-2 T3 (2026-05-11) — 對外暴露 fee 來源類別給 healthcheck [45] / IPC route
+// query_fee_source 雙寫對賬使用。
+//
+// 字串值對齊 healthcheck [45] source 字串（per PA tech plan §2.5 risk #5）：
+//   BybitApi                 → "bybit_api"
+//   DemoConservativeDefault  → "demo_conservative_default"
+//   ColdDefault              → "cold_default"
+//
+// 與 Python 端既有 `checks_pricing_binding.py:_infer_source` 推斷的 3 種值
+// `bybit_v5 / seed_default / cold_default` 為兩套字典：
+// - Python 端是 PG 端 24h fee_rate 分佈統計推斷
+// - Rust 端是 in-memory cache 直接讀真值
+// healthcheck [45] dual-source compare 透過 `is_compatible_with_proxy` 對賬。
+// ---------------------------------------------------------------------------
+
+/// 對外暴露 fee 來源類別（per LG-2 T3）。
+///
+/// 用途：healthcheck [45] / IPC route `query_fee_source` 雙寫對賬。
+/// 序列化採 snake_case string enum，與既有 healthcheck source 字串集對齊。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeeSource {
+    /// 真實 Bybit V5 `GET /v5/account/fee-rate` 回傳；refresh_fee_rates 成功路徑。
+    BybitApi,
+    /// Demo / LiveDemo endpoint 不支援 fee-rate；fallback 到
+    /// DEFAULT_TAKER_FEE / DEFAULT_MAKER_FEE（seed_default_fee_rates 注入）。
+    /// 對應 healthcheck [45] PG proxy 的 `seed_default`。
+    DemoConservativeDefault,
+    /// 連 demo fallback 也沒有 — refresh 從未完成、或該 symbol 未涵蓋；
+    /// `last_fee_refresh_ms == 0` 或 cache 內無此 symbol entry。
+    ColdDefault,
+}
+
+impl FeeSource {
+    /// 取對應 snake_case 字串（與 serde 序列化值一致）。
+    /// 用於 IPC payload 直接寫字串、healthcheck dual-source compare。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FeeSource::BybitApi => "bybit_api",
+            FeeSource::DemoConservativeDefault => "demo_conservative_default",
+            FeeSource::ColdDefault => "cold_default",
+        }
+    }
+
+    /// 判斷本 FeeSource 與 PG proxy 推斷字串是否語意相容（healthcheck [45] dual-source）。
+    ///
+    /// PG proxy 字串集（per `checks_pricing_binding.py:_infer_source`）：
+    /// - `bybit_v5`       ↔ FeeSource::BybitApi
+    /// - `seed_default`   ↔ FeeSource::DemoConservativeDefault
+    /// - `cold_default`   ↔ FeeSource::ColdDefault
+    /// - `inactive_mainnet` → live slot 在 OPENCLAW_ALLOW_MAINNET 未開時不視為 disagree
+    ///
+    /// healthcheck 首階段 disagree 升 WARN（不 FAIL），2 週觀察期後再升 FAIL
+    /// per PA tech plan §2.5 risk #4。
+    pub fn is_compatible_with_proxy(self, pg_proxy_source: &str) -> bool {
+        match (self, pg_proxy_source) {
+            (FeeSource::BybitApi, "bybit_v5") => true,
+            (FeeSource::DemoConservativeDefault, "seed_default") => true,
+            (FeeSource::ColdDefault, "cold_default") => true,
+            // inactive_mainnet 是 PG 端對 live slot 無 fills + Mainnet 未啟用的標記，
+            // Rust 端 cache 仍可能是任一狀態（取決於 demo binding 是否 seed）；
+            // 不視為 disagree，由 healthcheck 上層邏輯處理。
+            (_, "inactive_mainnet") => true,
+            _ => false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AccountInfo — account configuration / 帳戶配置
 // ---------------------------------------------------------------------------
 
@@ -386,6 +456,43 @@ impl AccountManager {
             .read()
             .get(symbol)
             .map_or(DEFAULT_MAKER_FEE, |r| r.maker_fee_rate)
+    }
+
+    /// LG-2 T3 (2026-05-11) — 推斷該 symbol 當前的 fee 來源類別。
+    ///
+    /// 推斷規則（純讀 in-memory state，無 PG / 網絡 I/O）：
+    /// 1. `last_fee_refresh_ms == 0` → ColdDefault（從未 refresh）。
+    /// 2. cache 內無此 symbol → ColdDefault（symbol 未涵蓋）。
+    /// 3. cache 有 symbol，maker + taker 兩者都精確等於 DEFAULT_*_FEE
+    ///    → DemoConservativeDefault（seed_default_fee_rates 注入）。
+    /// 4. 否則 → BybitApi（refresh_fee_rates 真實 API 寫入）。
+    ///
+    /// SAFETY / 不變量：
+    /// - 純讀 RwLock，hot path 友好（healthcheck cron / IPC query 都不在 tick path）。
+    /// - 浮點精確相等比對：seed_default_fee_rates 寫入時直接賦 DEFAULT_*_FEE 常量，
+    ///   無中間運算，可安全精確比對；Bybit API 回傳浮點不會剛好等於常量。
+    pub fn fee_source(&self, symbol: &str) -> FeeSource {
+        // Rule 1：從未 refresh → ColdDefault。
+        if self.last_fee_refresh_ms() == 0 {
+            return FeeSource::ColdDefault;
+        }
+        // Rule 2 / 3 / 4：cache 內查
+        let cache = self.fee_rates.read();
+        match cache.get(symbol) {
+            None => FeeSource::ColdDefault,
+            Some(rate) => {
+                // 兩個值都精確匹配 default → DemoConservativeDefault
+                // (seed_default_fee_rates 直接寫入 DEFAULT_*_FEE，無浮點誤差)
+                if rate.maker_fee_rate == DEFAULT_MAKER_FEE
+                    && rate.taker_fee_rate == DEFAULT_TAKER_FEE
+                {
+                    FeeSource::DemoConservativeDefault
+                } else {
+                    // Bybit API 回傳 = 至少一邊非 default
+                    FeeSource::BybitApi
+                }
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -899,5 +1006,399 @@ mod tests {
         let deser: BorrowRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(deser.currency, "USDT");
         assert!((deser.borrow_amount - 5000.0).abs() < 1e-10);
+    }
+
+    // -- LG-2 T3 (2026-05-11) FeeSource enum + getter 測試 --
+    // Coverage：4 fee_source 推斷 path + 2 enum 字串對齊 + 1 PG proxy compat
+
+    #[test]
+    fn test_fee_source_cold_default_when_never_refreshed() {
+        // last_fee_refresh_ms == 0 → ColdDefault 無關 cache 內容。
+        let mgr = AccountManager::new();
+        assert_eq!(mgr.fee_source("BTCUSDT"), FeeSource::ColdDefault);
+        assert_eq!(mgr.last_fee_refresh_ms(), 0);
+    }
+
+    #[test]
+    fn test_fee_source_cold_default_when_symbol_missing() {
+        // refresh 完成（ts > 0）但 symbol 未涵蓋 → ColdDefault。
+        let mgr = AccountManager::new();
+        mgr.set_last_fee_refresh_ms_for_test(1_700_000_000_000);
+        // 注入別的 symbol，但查不在 cache 內的 symbol
+        {
+            let mut cache = mgr.fee_rates.write();
+            cache.insert(
+                "BTCUSDT".to_string(),
+                FeeRate {
+                    symbol: "BTCUSDT".to_string(),
+                    maker_fee_rate: 0.0001, // 非 default
+                    taker_fee_rate: 0.0004,
+                },
+            );
+        }
+        assert_eq!(mgr.fee_source("UNKNOWN"), FeeSource::ColdDefault);
+    }
+
+    #[test]
+    fn test_fee_source_demo_conservative_default_when_both_match() {
+        // seed_default_fee_rates 注入後查命中 symbol → DemoConservativeDefault。
+        let mgr = AccountManager::new();
+        let count = mgr.seed_default_fee_rates(["BTCUSDT", "ETHUSDT"]);
+        assert_eq!(count, 2);
+        assert!(mgr.last_fee_refresh_ms() > 0);
+        assert_eq!(mgr.fee_source("BTCUSDT"), FeeSource::DemoConservativeDefault);
+        assert_eq!(mgr.fee_source("ETHUSDT"), FeeSource::DemoConservativeDefault);
+        // 未涵蓋的 symbol 仍是 ColdDefault
+        assert_eq!(mgr.fee_source("SOLUSDT"), FeeSource::ColdDefault);
+    }
+
+    #[test]
+    fn test_fee_source_bybit_api_when_real_rates_cached() {
+        // 真實 Bybit API 回傳的 fee（非 default）→ BybitApi。
+        let mgr = AccountManager::new();
+        mgr.set_last_fee_refresh_ms_for_test(1_700_000_000_000);
+        {
+            let mut cache = mgr.fee_rates.write();
+            // 模擬 Bybit VIP-1 等級 fee（與 DEFAULT_*_FEE 不同）
+            cache.insert(
+                "BTCUSDT".to_string(),
+                FeeRate {
+                    symbol: "BTCUSDT".to_string(),
+                    maker_fee_rate: 0.0001,
+                    taker_fee_rate: 0.0005,
+                },
+            );
+            // 邊界情況：只有 taker 是 default，maker 不是 → 仍 BybitApi
+            cache.insert(
+                "ETHUSDT".to_string(),
+                FeeRate {
+                    symbol: "ETHUSDT".to_string(),
+                    maker_fee_rate: 0.00018,
+                    taker_fee_rate: DEFAULT_TAKER_FEE,
+                },
+            );
+        }
+        assert_eq!(mgr.fee_source("BTCUSDT"), FeeSource::BybitApi);
+        assert_eq!(mgr.fee_source("ETHUSDT"), FeeSource::BybitApi);
+    }
+
+    #[test]
+    fn test_fee_source_as_str_alignment() {
+        // 字串對齊 healthcheck [45] / IPC payload 契約。
+        assert_eq!(FeeSource::BybitApi.as_str(), "bybit_api");
+        assert_eq!(
+            FeeSource::DemoConservativeDefault.as_str(),
+            "demo_conservative_default"
+        );
+        assert_eq!(FeeSource::ColdDefault.as_str(), "cold_default");
+    }
+
+    #[test]
+    fn test_fee_source_serde_snake_case() {
+        // serde 序列化也應對齊 snake_case；確保 IPC JSON wire format 一致。
+        let v = serde_json::to_string(&FeeSource::BybitApi).unwrap();
+        assert_eq!(v, "\"bybit_api\"");
+        let v = serde_json::to_string(&FeeSource::DemoConservativeDefault).unwrap();
+        assert_eq!(v, "\"demo_conservative_default\"");
+        let v = serde_json::to_string(&FeeSource::ColdDefault).unwrap();
+        assert_eq!(v, "\"cold_default\"");
+        // Round-trip
+        let deser: FeeSource = serde_json::from_str("\"bybit_api\"").unwrap();
+        assert_eq!(deser, FeeSource::BybitApi);
+    }
+
+    #[test]
+    fn test_fee_source_compatible_with_proxy() {
+        // Rust enum ↔ Python PG proxy 字串映射對賬。
+        assert!(FeeSource::BybitApi.is_compatible_with_proxy("bybit_v5"));
+        assert!(
+            FeeSource::DemoConservativeDefault.is_compatible_with_proxy("seed_default")
+        );
+        assert!(FeeSource::ColdDefault.is_compatible_with_proxy("cold_default"));
+        // inactive_mainnet 是 PG 對 live slot 未啟用的標記；任一 Rust 端對應都不算 disagree
+        assert!(FeeSource::ColdDefault.is_compatible_with_proxy("inactive_mainnet"));
+        assert!(FeeSource::BybitApi.is_compatible_with_proxy("inactive_mainnet"));
+        // Disagree cases
+        assert!(!FeeSource::BybitApi.is_compatible_with_proxy("seed_default"));
+        assert!(!FeeSource::DemoConservativeDefault.is_compatible_with_proxy("bybit_v5"));
+        assert!(!FeeSource::ColdDefault.is_compatible_with_proxy("bybit_v5"));
+        // 未知 PG proxy 字串 → 視為 disagree（fail-closed compatibility check）
+        assert!(!FeeSource::BybitApi.is_compatible_with_proxy("unknown_label"));
+    }
+
+    // -----------------------------------------------------------------------
+    // LG-2 T1 contract tests — 對應 PA 2026-05-11 LG-2/3/4 design plan §2.2
+    // 第 1 點「Contract test pinning current behavior」(a)/(c)/(e) 子項：
+    //   (a) Bybit fee-rate response parsing
+    //   (c) demo unsupported endpoint fallback → seed_default
+    //   (e) hourly refresh task scheduling
+    // (b) PostOnly→maker / GTC→taker / (d) mainnet refusal 由
+    // `tests/lg3_contract.rs` 跨模組 integration 補完，與 LG-3 RFC v1
+    // §Pricing Sources 對齊。LG-2 T2 (startup assertion) / T3 (FeeSource enum)
+    // 屬 sibling task，本檔不交叉。
+    // -----------------------------------------------------------------------
+
+    /// (a) 完整 Bybit V5 `GET /v5/account/fee-rate?category=linear` 真實 response
+    /// shape parse；驗 retCode/retMsg 包裝層 + result.list[].{symbol, takerFeeRate,
+    /// makerFeeRate} 端對端塞入 HashMap<symbol, FeeRate> 不漏。
+    ///
+    /// 真實 shape 來源：https://bybit-exchange.github.io/docs/v5/account/fee-rate
+    /// （2026-05-11 web fetch 驗證）— linear 不含 baseCoin（options 才出現）。
+    #[test]
+    fn test_lg2_t1_fee_rate_response_parser_v5_linear_shape() {
+        // 模擬 Bybit V5 linear category 真實 response（已剝離 BybitResponse 外殼，
+        // 對應 `client.get(...)` 回的 `resp.result`）。3 個 symbol cover 主流交易對。
+        let result = serde_json::json!({
+            "list": [
+                {
+                    "symbol": "BTCUSDT",
+                    "takerFeeRate": "0.00055",
+                    "makerFeeRate": "0.0002"
+                },
+                {
+                    "symbol": "ETHUSDT",
+                    "takerFeeRate": "0.00055",
+                    "makerFeeRate": "0.0002"
+                },
+                {
+                    "symbol": "SOLUSDT",
+                    "takerFeeRate": "0.0006",
+                    "makerFeeRate": "0.00018"
+                }
+            ]
+        });
+
+        // 直接走 parse_fee_rate_item module-private path（refresh_fee_rates 內部
+        // 等同迴圈呼叫）；驗每筆完整還原。
+        let list = result["list"].as_array().unwrap();
+        assert_eq!(list.len(), 3, "expect 3 items in linear list");
+
+        let mut parsed = Vec::new();
+        for item in list {
+            let rate = parse_fee_rate_item(item).expect("parse_fee_rate_item must succeed");
+            parsed.push(rate);
+        }
+
+        let by_sym: std::collections::HashMap<_, _> =
+            parsed.iter().map(|r| (r.symbol.clone(), r)).collect();
+
+        let btc = by_sym.get("BTCUSDT").unwrap();
+        assert!((btc.taker_fee_rate - 0.00055).abs() < 1e-10);
+        assert!((btc.maker_fee_rate - 0.0002).abs() < 1e-10);
+
+        let eth = by_sym.get("ETHUSDT").unwrap();
+        assert!((eth.taker_fee_rate - 0.00055).abs() < 1e-10);
+
+        let sol = by_sym.get("SOLUSDT").unwrap();
+        assert!((sol.taker_fee_rate - 0.0006).abs() < 1e-10);
+        assert!((sol.maker_fee_rate - 0.00018).abs() < 1e-10);
+    }
+
+    /// (a) Options category 多帶 `baseCoin` 字段；parser 必須不被多餘字段
+    /// 破壞（前向兼容）。Bybit V5 linear / spot / inverse 全用此 parser 共用
+    /// path，options-only `baseCoin` 不可造成 None。
+    #[test]
+    fn test_lg2_t1_fee_rate_response_parser_extra_basecoin_field_tolerated() {
+        // 模擬 option category response（含 baseCoin）— parser 應忽略 baseCoin
+        // 不報錯，symbol 存在則返回正常 FeeRate。
+        let item_with_symbol = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "baseCoin": "BTC",
+            "takerFeeRate": "0.0006",
+            "makerFeeRate": "0.0001"
+        });
+        let rate = parse_fee_rate_item(&item_with_symbol).expect("symbol present");
+        assert_eq!(rate.symbol, "BTCUSDT");
+        assert!((rate.taker_fee_rate - 0.0006).abs() < 1e-10);
+
+        // Bybit option 路徑可能 symbol 缺失 → parse_fee_rate_item 返 None。
+        // LG-2 T3 sibling 已加 FeeSource enum 區分 option 與 linear；T1 此檔
+        // 僅 pin current behavior（symbol missing → None），不引新驗。
+        let item_no_symbol = serde_json::json!({
+            "takerFeeRate": "0.0006",
+            "makerFeeRate": "0.0001"
+        });
+        let parsed = parse_fee_rate_item(&item_no_symbol);
+        assert!(
+            parsed.is_none(),
+            "missing symbol must return None (current behavior pinned by test)"
+        );
+    }
+
+    /// (c) Demo unsupported endpoint fallback — `seed_default_fee_rates` 用作
+    /// fallback 路徑：當 demo endpoint 不支援 `/v5/account/fee-rate`（產 retCode
+    /// 10001 + 空 retMsg）時，tasks::refresh_fee_rate_binding 走 seed_default。
+    /// 此測試 pin `seed_default_fee_rates` 的不變式（cache 填 + ts stamp）+ 與
+    /// LG-2 T3 `fee_source()` 推斷的 DemoConservativeDefault 交叉驗證。
+    /// 真實 unsupported detection 邏輯（is_demo_fee_endpoint_unsupported）在
+    /// binary `tasks.rs`，由其 inline tests 覆蓋（test_demo_fee_endpoint_
+    /// unsupported_detection_allows_demo_only）。
+    #[test]
+    fn test_lg2_t1_seed_default_fallback_post_demo_unsupported_response() {
+        let mgr = AccountManager::new();
+        // 初始狀態：cache 空、ts=0（cold boot）→ T3 fee_source = ColdDefault
+        assert_eq!(mgr.fee_rate_count(), 0);
+        assert_eq!(mgr.last_fee_refresh_ms(), 0);
+        assert_eq!(mgr.fee_source("BTCUSDT"), FeeSource::ColdDefault);
+
+        // 模擬 tasks::refresh_fee_rate_binding 偵測到 demo endpoint 不支援後
+        // 呼叫 seed_default_fee_rates(SYMBOLS) 路徑；此處用 5 symbol 樣本。
+        // 真實 production 走 `SYMBOLS.iter().copied()`（25 個 active symbol）。
+        let count = mgr
+            .seed_default_fee_rates(["BTCUSDT", "ETHUSDT", "SOLUSDT", "TONUSDT", "XRPUSDT"]);
+
+        assert_eq!(count, 5, "all 5 symbols must be seeded");
+        assert_eq!(mgr.fee_rate_count(), 5, "cache must contain 5 entries");
+        assert!(
+            mgr.last_fee_refresh_ms() > 0,
+            "seed_default must stamp refresh timestamp (cost gate uses this)"
+        );
+
+        // 每個 symbol 都拿到保守預設費率（DEFAULT_TAKER_FEE / DEFAULT_MAKER_FEE）
+        // + T3 fee_source 推斷為 DemoConservativeDefault
+        for sym in &["BTCUSDT", "ETHUSDT", "SOLUSDT", "TONUSDT", "XRPUSDT"] {
+            assert!((mgr.taker_fee(sym) - DEFAULT_TAKER_FEE).abs() < 1e-10);
+            assert!((mgr.maker_fee(sym) - DEFAULT_MAKER_FEE).abs() < 1e-10);
+            assert_eq!(mgr.fee_source(sym), FeeSource::DemoConservativeDefault);
+        }
+
+        // 未 seed 的 symbol fallback to 預設（get_fee_rate 路徑）+ T3 ColdDefault
+        let fallback = mgr.get_fee_rate("UNKNOWN_SYM");
+        assert!((fallback.taker_fee_rate - DEFAULT_TAKER_FEE).abs() < 1e-10);
+        assert!((fallback.maker_fee_rate - DEFAULT_MAKER_FEE).abs() < 1e-10);
+        assert_eq!(mgr.fee_source("UNKNOWN_SYM"), FeeSource::ColdDefault);
+    }
+
+    /// (c) seed_default 後再 refresh_fee_rates 真實回 → cache 從 default 升級
+    /// 為 API 真值；驗 `fee_rates.write().insert()` 路徑 key collision 走
+    /// overwrite 語意。
+    /// 同時驗 T3 fee_source 從 DemoConservativeDefault 翻 BybitApi
+    /// （healthcheck `[45]` 升 fresh 路徑必走此 transition）。
+    /// 此測試走 cache 直接寫不靠 reqwest HTTP，避免 integration overhead。
+    #[test]
+    fn test_lg2_t1_fee_rate_cache_overwrite_on_refresh_after_seed_default() {
+        let mgr = AccountManager::new();
+
+        // Step 1：seed_default 注入 BTCUSDT 走保守值
+        mgr.seed_default_fee_rates(["BTCUSDT"]);
+        assert!((mgr.taker_fee("BTCUSDT") - DEFAULT_TAKER_FEE).abs() < 1e-10);
+        assert_eq!(mgr.fee_source("BTCUSDT"), FeeSource::DemoConservativeDefault);
+
+        // Step 2：模擬 refresh_fee_rates API 真值回後 cache insert（refresh_fee_rates
+        // 內部走 `cache.insert(rate.symbol.clone(), rate)`）— 用真實 VIP-X 等級
+        // 樣本（taker=0.0005, maker=0.00018，低於保守 default）
+        {
+            let mut cache = mgr.fee_rates.write();
+            cache.insert(
+                "BTCUSDT".to_string(),
+                FeeRate {
+                    symbol: "BTCUSDT".to_string(),
+                    maker_fee_rate: 0.00018,
+                    taker_fee_rate: 0.0005,
+                },
+            );
+        }
+
+        // Step 3：驗 cache 已 overwrite，不是 merge / append + T3 翻 BybitApi
+        assert!((mgr.taker_fee("BTCUSDT") - 0.0005).abs() < 1e-10);
+        assert!((mgr.maker_fee("BTCUSDT") - 0.00018).abs() < 1e-10);
+        assert_eq!(
+            mgr.fee_rate_count(),
+            1,
+            "cache must remain 1 entry after overwrite (not duplicate)"
+        );
+        assert_eq!(mgr.fee_source("BTCUSDT"), FeeSource::BybitApi);
+    }
+
+    /// (e) Hourly refresh task scheduling contract — pin `tokio::time::interval`
+    /// + `cancel_token` 模式。真實 `spawn_fee_rate_tasks` 在 binary crate
+    /// (tasks.rs) 走 `Duration::from_secs(3600)` + `spawn_cancellable_interval`，
+    /// 本檔測試「等價語意」：
+    ///   - interval tick 觸發（首 tick 立即 + 後續按 interval 觸發）
+    ///   - cancellation 立即停止（不等下一 tick）
+    /// 用 50ms interval + 短時間多 tick 證明模式（避免 start_paused 依賴 +
+    /// 真實 sleep 在 release build 仍 <500ms 完成）。
+    /// 對齊 RFC LG-3 §Refresh Cadence「1h refresh」契約的可測試切片。
+    #[tokio::test]
+    async fn test_lg2_t1_hourly_refresh_task_interval_pattern_with_cancel() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use tokio_util::sync::CancellationToken;
+
+        // tick_count 用 Arc<AtomicU64> 跨 task 計數；模擬 fee_rate refresh callback
+        let tick_count = Arc::new(AtomicU64::new(0));
+        let cancel = CancellationToken::new();
+
+        // 對齊 tasks::spawn_fee_rate_tasks 模式但 interval 從 3600s 切到 50ms。
+        // 真實 time（非 paused）下 ≥3 tick 對應 ≥100ms 真實 sleep；測試端容忍度足。
+        let tc = Arc::clone(&tick_count);
+        let cancel_inner = cancel.clone();
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
+            loop {
+                tokio::select! {
+                    _ = cancel_inner.cancelled() => break,
+                    _ = interval.tick() => {
+                        tc.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        });
+
+        // 推 150ms = 期待 ≥3 次 tick（0ms 立即 + 50/100/150ms）
+        // 對齊 production `interval.tick().await` 行為（first tick 立即）
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let mid_count = tick_count.load(Ordering::Relaxed);
+        assert!(
+            mid_count >= 3,
+            "interval should tick >=3 times by 150ms; got {}",
+            mid_count
+        );
+
+        // 觸發 cancel；task 應在下一 select! 迴圈 break
+        cancel.cancel();
+        // 等 task join → cancellation 必須能完成（不卡 deadlock）
+        handle.await.expect("task must terminate after cancel");
+
+        // 等一段時間確認 tick 已停（cancel 後不再 fetch_add）
+        let post_cancel_count = tick_count.load(Ordering::Relaxed);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let final_count = tick_count.load(Ordering::Relaxed);
+        assert_eq!(
+            final_count, post_cancel_count,
+            "no tick after cancel; expected stable at {} got {}",
+            post_cancel_count, final_count
+        );
+    }
+
+    /// (e) 額外契約：fee_rate_count() 與 last_fee_refresh_ms() 是 healthcheck
+    /// `[45]` pricing_binding 的 Rust → Python IPC dual-source 對賬基礎
+    /// （LG-2 T3 sibling 已加 FeeSource enum 用此 pair 作 source-of-truth）。
+    /// 此測試 pin 兩者 setter 不變式：seed_default 同時改兩者；cache 空時兩者皆 0。
+    #[test]
+    fn test_lg2_t1_fee_rate_count_and_refresh_ms_invariants_for_healthcheck_45() {
+        let mgr = AccountManager::new();
+        assert_eq!(mgr.fee_rate_count(), 0);
+        assert_eq!(mgr.last_fee_refresh_ms(), 0);
+        // T3 fee_source 在 ts=0 下回 ColdDefault（與 fee_rate_count 對齊）
+        assert_eq!(mgr.fee_source("BTCUSDT"), FeeSource::ColdDefault);
+
+        mgr.seed_default_fee_rates(["BTCUSDT", "ETHUSDT"]);
+        assert_eq!(mgr.fee_rate_count(), 2);
+        let ts1 = mgr.last_fee_refresh_ms();
+        assert!(ts1 > 0);
+
+        // 第二次 seed 同 symbol → count 仍 2（HashMap insert overwrite，不增加 entry）
+        mgr.seed_default_fee_rates(["BTCUSDT", "ETHUSDT"]);
+        let ts2 = mgr.last_fee_refresh_ms();
+        assert_eq!(
+            mgr.fee_rate_count(),
+            2,
+            "key collision overwrites, not append"
+        );
+        assert!(
+            ts2 >= ts1,
+            "second seed must re-stamp ts (monotonic non-decreasing)"
+        );
     }
 }

@@ -3,7 +3,7 @@
 
 use super::super::*;
 use super::{
-    empty_budget_slot, empty_cost_edge_advisor_slot, empty_h_state_cache_slot, empty_teacher_slot,
+    empty_budget_slot, empty_cost_edge_advisor_slot, empty_account_manager_slot, empty_h_state_cache_slot, empty_teacher_slot,
     make_test_config, make_test_data_dir,
 };
 
@@ -43,6 +43,7 @@ async fn test_dispatch_ping() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none());
@@ -76,6 +77,7 @@ async fn test_dispatch_get_state() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none());
@@ -113,6 +115,7 @@ async fn test_dispatch_method_not_found() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_some());
@@ -142,6 +145,7 @@ async fn test_dispatch_invalid_json() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_some());
@@ -171,6 +175,7 @@ async fn test_dispatch_missing_version() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_some());
@@ -200,6 +205,7 @@ async fn test_dispatch_missing_method() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_some());
@@ -229,6 +235,7 @@ async fn test_dispatch_reload_config() {
         &None,
         &None,
         &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
     )
     .await;
     assert!(resp.error.is_none());

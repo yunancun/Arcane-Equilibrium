@@ -38,7 +38,9 @@ use super::handlers_config::{handle_get_config, handle_patch_config};
 use super::protocol::{
     JsonRpcRequest, JsonRpcResponse, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND,
 };
-use super::slots::{BudgetTrackerSlot, CostEdgeAdvisorSlot, HStateCacheSlot, TeacherLoopSlot};
+use super::slots::{
+    AccountManagerSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, HStateCacheSlot, TeacherLoopSlot,
+};
 use super::PerEngineRiskStores;
 use crate::config::{BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig};
 use crate::h_state_cache::poller::InvalidationSender;
@@ -75,6 +77,10 @@ pub(crate) async fn dispatch_request(
     // G3-09 Phase A：cost_edge_advisor slot。None = env=0 / 未注入 → handler
     // 回 advisor_disabled payload。
     cost_edge_advisor_slot: &CostEdgeAdvisorSlot,
+    // LG-2 T3 (2026-05-11): AccountManager slot 供 `query_fee_source` IPC route。
+    // None = main_instruments 尚未注入 / 沒任何 exchange binding；handler 回
+    // structured uninitialized payload，不爆 error。
+    account_manager_slot: &AccountManagerSlot,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -441,6 +447,14 @@ pub(crate) async fn dispatch_request(
         // slot 為 None，handler 回 `Uninitialized` payload。
         "get_cost_edge_advisor_status" => {
             handle_get_cost_edge_advisor_status(id, cost_edge_advisor_slot).await
+        }
+        // ── LG-2 T3 (2026-05-11) query_fee_source ──
+        // Read-only IPC handler；回 AccountManager.fee_source(symbol) 真值快照
+        // 供 healthcheck [45] dual-source compare（Rust enum vs PG proxy 推斷）。
+        // slot=None 時回 structured uninitialized payload；params 缺 symbol
+        // 時回 invalid_params payload — 對齊 cost_edge_advisor / h_state pattern。
+        "query_fee_source" => {
+            handle_query_fee_source(id, &req.params, account_manager_slot).await
         }
         _ => JsonRpcResponse::error(
             id,

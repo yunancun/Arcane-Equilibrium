@@ -477,3 +477,35 @@ _Last updated: 2026-04-24_
 
 **Confidence**: 全 11 项 verdict + push back HIGH 以上 (8 HIGH + 1 HIGHEST + 2 MED)
 
+
+
+## 2026-05-11 LG-3 spec v1 MIT review (Wave 2.1.5)
+
+**Trigger**: PA LG-3 Supervised-Live State Machine spec v1 (`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v1.md`) 完成；MIT + QC + BB 並行 review。
+
+**Report**: `workspace/reports/2026-05-11--lg3_spec_mit_review.md` (405 行)
+
+**Verdict**: **APPROVE WITH 6 MUST + 3 SHOULD** (接近 unconditional APPROVE；0 redesign)
+
+**核心發現**:
+1. **Schema design PASS**：V094 supervised_live_audit hypertable + PK + 4 index + append-only design 對齊既有 V054 lease_transitions / V064 decision_state_changes / V035 governance_audit_log 三條 audit precedent；無新 schema pattern 引入
+2. **ML data integrity VERY LOW risk**：sub-agent grep `learning.supervised_live_audit` 確認 0 Python/Rust reader 路徑 in ml/training/learning；spec §9.3 + §15.1 原則 7 明文「supervised_live_audit 不直接餵 ML pipeline」；6 維 leakage (look-ahead/target/survivorship/cross-section/time-zone/resample) 全不適用 (audit table 不在 ML pipeline)
+3. **5 SoT outbox 設計 PASS**：mirror lease_transition_writer.rs 既有 pattern (bridge thread / batch / fail-soft retry / fail-closed at buffer overflow)；SoT 真值權威 = #5 supervised_live_audit；連 2 cycle 防 false-positive
+4. **ML pipeline maturity categorical mismatch**：LG-3 audit 是 governance audit foundation table (與 W-AUDIT-9 governance.canary_stage_log 同類)，**不適用** ML pipeline 5 階段 Foundation/Skeleton/Shadow/Canary/Production 評級框架
+5. **W-AUDIT-4b conflict = 0**：disjoint domain，可同期並行 IMPL
+
+**6 MUST 全為 spec v2 編輯級工作 (~1-2h PA edit)**:
+- MUST-1: §4.1 Guard A part 2 加 19-column allowlist check (mirror V054 §155-188)
+- MUST-2: §4.1 ADD CONSTRAINT IF NOT EXISTS block 4 條 (action/result/engine_mode/ts_ms>0; mirror V054 §245-317)
+- MUST-3: §13.4 Linux PG dry-run dispatch SOP (對齊 V055+V083+V084 precedent)
+- MUST-4: §4.1 sqlx checksum SOP 注釋 (對齊 V028-V034 教訓)
+- MUST-5: §4.1 Non-training surface invariant 注釋 + E3 grep rule (對齊 replay.simulated_fills synthetic_replay 防護 SOP)
+- MUST-6: §2.2 inverse map 完整表 (17 action × 7 state, 防 Rust/Python SM mirror split-brain)
+
+**3 SHOULD**:
+- SHOULD-1: `[59]` healthcheck 補 KS test baseline (per data-drift-detection skill)
+- SHOULD-2: schema +1 NULLable `strategy_alpha_score FLOAT(8)` (R-4 forward-compat)
+- SHOULD-3: schema +1 NULLable `regime_tag TEXT` (R-2 配套)
+
+**邊界遵守**: read-only spec review；不寫 V094 SQL；不修 PA spec v1；不啟 E1；不發 commit；不改 TODO/CLAUDE.md (硬約束 100% 遵守)
+
