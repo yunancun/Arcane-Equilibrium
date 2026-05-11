@@ -1969,3 +1969,27 @@ QA W-C audit CONDITIONAL_PASS 揭 2 caveat（decision_state_changes 0 row + Exec
 
 ### 反模式錄追加（item 11）
 11. **E1 push back 不能因 scope 限制就 dismiss**：E1 主動 push back 同 pattern latent bug（line 167 `submit_external_order` V083 same-bug）時，E2 必親查影響面（read function full body + grep dispatch downstream + verify whether 真會走進 trading.fills）。如真實有 latent bug 即使 user prompt scope 限制也要標 MEDIUM 退 PA decide，不能因「不在 scope」就無痕通過。本次本來可能 dismiss line 167 為「不在 5 處 scope」，但 read code 後確認真實走 close fill 寫 trading.fills 撞 V083 → 標 MEDIUM follow-up。
+
+---
+
+## 2026-05-11 W2-IMPL-4 SQL fix re-review (E4 NEEDS_FIX retrofit) → APPROVED
+
+Report: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_impl_4_sql_fix_e2_review.md`
+HEAD: `4bc7be60` (3 端 sync) · Pre-E1: `d4186c86` (E2 prev pass) → E4 NEEDS_FIX `78fd678d`
+
+### Pattern 學習追加（item 59-63）
+
+59. **E4 fixed-SQL self-claim row count 是 BLOCKER 盲區指標**：E4 跑 fixed SQL empirical 自承 "3948 row 返回" 但只列 3 BLOCKER 時 = 數學上必有第 4 個 hidden fix。E1 retrofit 撞到才暴露 4th syntax bug (CTE chain trailing `,`)。**規律**：E2 re-review E1 retrofit 時必先驗算 E4 「fixed-SQL row count」與 「自承 BLOCKER 全修後是否能跑」 — 若數學上必需 N+1 fix 則 N+1 hidden bug 必存在。SOP push back PA / 治理層補上 E4 fixed-SQL 必 diff vs E1-SQL 列出所有差異 SOP。
+
+60. **B4 trailing comma syntax 1 char fix 屬 fix-completion 非 scope expansion**：判斷準則 = (a) 不修則 N BLOCKER fix 零價值 (b) 修法 = identifier/標點層 (c) 0 業務語意變動 (d) 不擴 spec / 不重構 — 全 4 條 met → 接受 scope-creep；缺任一 → push back PA 走正式新 BLOCKER 流程。E2 拍板權集中於此判斷。
+
+61. **psycopg2 注釋 placeholder 字面字串撞 KeyError 治理 SOP**：psycopg2 不跳過 `--` SQL 注釋內 placeholder（per psycopg2 PEP 249 paramstyle 'pyformat'）。SQL file 注釋區若 reference parameter 必用反引號 `` ` `` 包裹標識符 + 純文字描述；禁注釋內出現 `%(...)s` / `:name` / `?` 字面。**規律**：E2 新 SQL file review 必 grep 注釋區（`grep -nE '%\(.*\)s' <-- 1..NN 行注釋 only`）= 0 hit；違反 = MEDIUM push back。
+
+62. **E2 獨測 caller smoke 用同 PG conn pool**：E1 self-claim row count 必 E2 重跑驗。via `db_pool.get_pg_conn()` context manager（不是 `get_conn()` deprecated）；driver 同 psycopg2 → 同 placeholder 解析路徑。E2 4088 / 4095 vs E1 4046 三個數字差距 = 時間累積每 1m bar 增 7 row × N min，數學完全對得上 (panel 585 × 7 cohort = 4095 = panel_expanded UNNEST 結果)。
+
+63. **caller MODULE_NOTE schema drift = LOW 不阻 E4**：W2-IMPL-4 caller `helper_scripts/reports/w2_paper_edge_report.py:6` docstring 仍寫 `trading.klines`，與 SQL 真實使用 `market.klines` 不一致。LOW severity（pure docstring，不影響執行 — caller 走 `_read_counterfactual_sql()` 動態 load SQL file）。建議 E1 下次 commit 順手清；E2 不為此 push back 阻 E4 pass。**規律**：caller docstring 與引用 SQL identifier drift = LOW；引用實際邏輯 SQL identifier drift = HIGH。
+
+### 反模式錄追加（item 12）
+
+12. **E4 「fixed SQL self-test」需 diff 對齊 E1 SQL**：E4 跑 retrofit-validation 自驗 fixed SQL 跑通 N row 時，必同步在 report 中列出**所有**改動點而非只列 BLOCKER 清單。否則 retrofit round E1 收到 NEEDS_FIX 後修 N BLOCKER 仍會撞 hidden N+1 bug → 二次 retrofit round → 治理流程拉長。E2 對 E4 NEEDS_FIX 報告 SOP review 必驗 fixed-SQL 「BLOCKER 全修是否真能跑」 — 否定 = E4 內部已 ad-hoc 補了未列改動 = blind spot。
+

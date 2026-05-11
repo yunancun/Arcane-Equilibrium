@@ -2863,3 +2863,47 @@ trading_writer / batch_insert / emit_close_fill subset 全 PASS（含 writer-sid
 4. **Close path helper 屬非 per-tick frequency** — 5 call site (513/744/938/1121/1194) 都是「條件觸發」 (fill confirm / IPC / risk close)，非每 tick fan-out 主迴圈。SLA 評估可定性論證 (~50-100ns × ~100-200 calls/24h)，無需 micro-bench。
 5. **Push back 接受邊界 = 不擴大 scope** — E1 報告 §6.1 標 line 167 latent bug 但 user prompt 嚴格只列 5 close path。E4 接受 push back（不阻 V083 fix deploy），不主動修代碼（E4 角色限制）。建議 PA / PM 後續決定是否同 helper 化 line 167。
 6. **E4 報告 commit message 必標兩 commit hash** — 本次任務跨兩個獨立 commit (`d4867676` V083 + `27e86f89` P2 TOML)，commit message 標 both hash + 對應 verdict 表，避免 PM 後續追溯誤把 V083 fix 與 P2 TOML 視為單一 wave。
+
+## 2026-05-11 (W2-IMPL-4 SQL fix E4 re-dry-run post commit 4bc7be60)
+
+### 任務 = re-dry-run W2-IMPL-4 SQL post-fix verify
+
+E1 修 3 BLOCKER (commit 98a9d35f) + 4th syntax bug (163a5cba) + report (4bc7be60) push 後，E4 re-dry-run 5 項 verify：
+1. Linux PG empirical SQL smoke
+2. psycopg2 caller smoke 0 KeyError
+3. EXPLAIN ANALYZE hot-path index
+4. cargo test 2797/0/0
+5. B4 4th fix accept / push back 拍板
+
+### Verdict = APPROVED（全 GREEN）
+
+| 維度 | 結論 |
+|---|---|
+| SQL re-dry-run (user prompt cohort) | ✅ rows=3498, col_count=19 對齊 spec §7.2 |
+| SQL re-dry-run (default cohort fallback) | ✅ rows=4088, col_count=19 |
+| psycopg2 caller 0 KeyError | ✅ B3 fix 真生效（注釋區 0 placeholder 字面殘留） |
+| EXPLAIN ANALYZE hot-path | ✅ panel.btc_lead_lag_panel Index Scan _hyper_75_486_chunk_btc_lead_lag_panel_snapshot_ts_ms_idx 命中 |
+| Rust cargo test | ✅ 2797/0/0 跑兩遍同綠 non-flaky (與 W2 chain baseline 一致) |
+| Python pytest | ✅ 253/1/2 跑兩遍同綠（1 failure pre-existing docs/README.md drift） |
+| B4 4th fix 拍板 | ✅ ACCEPT as scope completion（不退回正式 BLOCKER #4） |
+
+### 教訓追加 (W2-IMPL-4 SQL fix round 新增)
+
+1. **Row count 不是 oracle - 必驗 cohort overlap 數學**：3498 (user prompt cohort BNBUSDT 不在 panel) / 3948 (E4 上輪 self-fix) / 4046 (E1 self-claim) / 4088 (default cohort) 四個 row count 源自 cohort 配置 + 時間衰減 + LEFT JOIN drift。未來 E4 跑 SQL smoke 必同 query panel cohort enumerate 比對 user prompt cohort overlap，避免誤判 row count discrepancy 為 bug。Panel writer 端 cohort 固定 = {ADAUSDT, AVAXUSDT, DOGEUSDT, DOTUSDT, ETHUSDT, SOLUSDT, XRPUSDT}（與 spec §2.2 default 一致）。
+
+2. **E4 fixed-SQL self-claim 必完整列正式 BLOCKER（盲區 lesson）**：E4 上輪 §C.2 自報「3 BLOCKER fix 後 3948 row」隱含已 ad-hoc fix B4 trailing comma 但未列為正式 BLOCKER → 導致 E1 retrofit round 撞同樣 hidden bug → 順手修 + push back at PA/E2/E4。未來 E4 跑 fixed-SQL empirical 時必窮舉所有實際 fix item 列入 verdict，不只 task spec 範圍內 BLOCKER（含 caller-path-blocking pre-existing bug）。
+
+3. **psycopg2 注釋區 placeholder 字面陷阱（PA spec / E2 review / E4 上輪都未 catch）**：line 42/87 注釋裡 `%(window_days)s` / `%(cohort_symbols)s` 字面被 psycopg2 當 placeholder（psycopg2 不跳過 `--` 內 placeholder）→ caller dict 缺鍵 KeyError。未來 SQL fix 涉 psycopg2 placeholder 必：(a) 跑 caller smoke 真實 cur.execute() (b) grep 注釋區 `-- ... %(...)s` pattern (c) 改寫 placeholder 字面為反引號標識（`` `window_days` ``）或純文字。
+
+4. **PG WITH 語法 CTE chain 末尾不可帶逗號（pre-existing bug）**：line 210 paper_fills_bucketed 末 `),` 自 commit `1f0354cf` 即帶入，導致 caller 撞 `SyntaxError at LINE 221`。empirical verify: `WITH a AS (...), b AS (...), SELECT * ...` → SyntaxError。E1 順手修 1 char `),` → `)` + 2 行防退化注釋（line 211-212）。未來新加 CTE 時必加 trailing comma 規則注釋。
+
+5. **B4 ad-hoc fix accept vs 退回 BLOCKER #4 正式流程 trade-off**：E4 雙視角拍板 ACCEPT（不退回），理由：(a) 修法 1 char delete + 2 行注釋 = 0 業務語意 (b) caller path 真實阻斷（不修則 3 BLOCKER fix 零價值） (c) E4 上輪 §C.2 self-fix 3948 row 隱含已驗（盲區） (d) 退回需 4-day 額外 round-trip 不增加實質審查價值。E2 雙視角追加 review B4 PASS。Lesson：scope expansion vs scope completion 判斷依「不修則 fix 零價值」+ 「修法 0 業務語意」雙條件，符合 = scope completion 不算 expansion。E4 兼任 E2 視角拍板是當 E2 review 時間早於 E1 ad-hoc fix 提交時間時的合理 process workaround。
+
+6. **`market.klines` Sort + WindowAgg vs panel.btc_lead_lag_panel Index Scan 對比**：同一個 SQL 對兩個 hypertable 走不同 plan node。panel.btc_lead_lag_panel (584 row 7d) → Index Scan（hot-path index 命中）；market.klines (25k row 7d × 7 cohort) → Sort + WindowAgg（per-symbol Sort + LEAD() window）。PG cost-based optimizer 正確決策 - 25k row + LEAD() 場景 sort-once + window 比 per-symbol Index Scan + nested LEAD 便宜。未來 panel row count 達 100k+ scale，PG 可能自動切 Index Scan per-symbol path（與 panel 同規律）。
+
+7. **三端 git sync verify 必跑（Mac/Linux/origin 全在同 HEAD）**：本輪 E4 透過 ssh trade-core 直接 git rev-parse HEAD 確認 Linux trade-core 在 4bc7be60 = origin = Mac，避免 Sprint N+0 等多 sibling 情景下三端不同步的判斷錯誤。E4 任務 audit report 必含 §J 三端 git sync verify subsection。
+
+8. **mock 安全規則對純 SQL fix N/A**：W2-IMPL-4 SQL fix 是純資料層 identifier rename + 注釋字面字串轉純文字 + CTE syntax 修復，無 Python/Rust 業務邏輯 mock 適用空間。psycopg2 caller smoke 連 Linux PG (IO boundary 合法 mock) 走 production query plan + 真實 row 返回 — 不存在 mock 掩蓋業務邏輯風險。E4 任務 §F 仍記錄此「不適用」結論避免 audit 漏項。
+
+9. **cross-language consistency 1e-4 容差對純 SQL fix N/A**：W2-IMPL-4 SQL fix 不觸浮點計算 — 不適用 §4.6 跨語言一致性驗證（指 indicator/calculator 才有意義）。E4 任務 §G 仍記錄此「不適用」結論避免 audit 漏項。
+
