@@ -48,5 +48,6 @@ mod fast_track_reduce;
 mod maker_kpi_hot_reload;
 mod per_symbol_price_pnl;
 mod pipeline_kind_governance;
+mod resolve_close_entry_context_id;
 mod risk_governance_hot_reload;
 mod signal_throttle;
