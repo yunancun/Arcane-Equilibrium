@@ -12,7 +12,19 @@ warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等�
 
 [universe]
 max_symbols = 40
-pinned_symbols = ["BTCUSDT", "ETHUSDT"]
+# pinned_symbols 對齊 main.rs panel_aggregator_cohort() 25-sym 名單
+# （per W1 P0 fix follow-up 2026-05-11）。
+# 原因：panel.funding_rates_panel + panel.oi_delta_panel 需 cohort 全 sym
+# 有 ticker WS 訂閱才能寫入；scanner pinned 是唯一 boot-time WS subscribe set。
+# Scanner 收到 25 pinned 後 anti-churn 保護全 cohort，max_symbols=40 留 15 動態 slot。
+# Side effect: 動態探索 long-tail sym 機會減少 ~23 slot；接受換 panel 全覆蓋。
+pinned_symbols = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "MATICUSDT",
+    "LTCUSDT", "BCHUSDT", "NEARUSDT", "UNIUSDT", "ATOMUSDT",
+    "ETCUSDT", "FILUSDT", "ICPUSDT", "TRXUSDT", "ARBUSDT",
+    "OPUSDT", "APTUSDT", "SUIUSDT", "TONUSDT", "INJUSDT",
+]
 
 [hard_filters]
 min_turnover_24h_usdt = 50000000.0   # 50M USDT minimum 24h volume
