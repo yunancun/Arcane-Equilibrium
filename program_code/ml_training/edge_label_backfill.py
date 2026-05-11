@@ -454,18 +454,123 @@ RETURNING f.fill_id, f.entry_context_id
 """
 
 
+# ============================================================
+# P2 follow-up (2026-05-11): orphan_recovery_ctx synthetic id 升級。
+# Path 2: recognize synthetic id and rewrite to real entry's context_id.
+#
+# 背景 / Context:
+#   P1 V083 修復（2026-05-10 commit d4867676）為 risk_close path（如
+#   ipc_close_symbol）的 orphan close 加 synthetic id
+#   `orphan_recovery_ctx:{symbol}:{ts_ms}` 滿足 V083 NOT NULL CHECK。但 ML
+#   training data 完整性要求 close fill.entry_context_id == 真 entry fill 的
+#   context_id（不是 synthetic）。原有 Path 1（_BACKFILL_FILL_ENTRY_CONTEXT_SQL）
+#   strict 要求 `entry.strategy_name = c.strategy_name`，但 risk_close path
+#   寫的 strategy_name（如 ma_crossover）跟原 entry（如 grid_trading）不對應
+#   → Path 1 100% miss（Linux PG 實測 candidates=27 matched=0）。
+#
+# 設計 / Design:
+#   針對 close fill 中 entry_context_id LIKE 'orphan_recovery_ctx:%' 的 row：
+#   1. 解析 synthetic pattern 不必（symbol 直接用 close fill 自己的 symbol）
+#   2. 用 (symbol, engine_mode, ts<close.ts, opposite side, 7d window) 找
+#      最近一筆 entry fill，**不限定 strategy_name**（risk_close 是 orphan
+#      adopt，原 entry 可能是任何 strategy）
+#   3. UPDATE entry_context_id = 真 entry's context_id（保留原 strategy_name
+#      不動，因為 close 本身的 strategy_name 是 risk_close path 的合法歸屬）
+#   4. 找不到 candidate → 留 synthetic id 不動（telemetry view 持續 WARN）
+#
+# 安全保證 / Safety:
+#   - 只更新 LIKE 'orphan_recovery_ctx:%' 的 row，不碰其他 entry_context_id
+#   - 7d window 防匹配古老 entry
+#   - opposite side 防誤匹（entry Buy → close Sell）
+#   - audit row filter（unattributed:* 跳過）
+#   - 多 candidate 取最近（ORDER BY ts DESC LIMIT 1）
+#   - dry_run 用 conn.rollback() 不影響資料
+#
+# Acceptance:
+#   cron output 變化：matched_synthetic > 0；candidates_synthetic 應 ≈
+#   trading.fills WHERE entry_context_id LIKE 'orphan_recovery_ctx:%' AND
+#   exit_reason IS NOT NULL 的 count。
+# ============================================================
+_BACKFILL_FILL_SYNTHETIC_CONTEXT_SQL = """
+WITH synthetic_close_fills AS (
+    SELECT f.fill_id, f.ts, f.symbol, f.strategy_name, f.engine_mode, f.side
+    FROM trading.fills f
+    WHERE f.entry_context_id LIKE 'orphan_recovery_ctx:%%'
+      AND f.exit_reason IS NOT NULL  -- close fill only
+      AND f.engine_mode = ANY(%(engine_modes)s)
+      AND f.ts > (now() - (%(window_days)s || ' days')::interval)
+      AND (f.strategy_name IS NULL OR f.strategy_name NOT LIKE 'unattributed:%%')
+    ORDER BY f.ts DESC
+    LIMIT %(batch_limit)s
+),
+matched_entries AS (
+    SELECT
+        c.fill_id    AS close_fill_id,
+        c.ts         AS close_ts,
+        (
+            SELECT entry.context_id
+            FROM trading.fills entry
+            WHERE entry.entry_context_id IS NULL
+              AND entry.exit_reason IS NULL
+              AND entry.engine_mode = c.engine_mode
+              -- NOTE: 不限 strategy_name —— synthetic id close 是 risk_close
+              -- path 的 orphan adopt，原 entry 策略可能與 close 不同（PG 實證
+              -- NEARUSDT live_demo close=ma_crossover 對應 entry=grid_trading）
+              AND entry.symbol = c.symbol
+              AND entry.side <> c.side  -- opposite side
+              AND entry.ts < c.ts
+              AND entry.ts > (c.ts - INTERVAL '7 days')
+              AND (entry.strategy_name IS NULL
+                   OR entry.strategy_name NOT LIKE 'unattributed:%%')
+            ORDER BY entry.ts DESC
+            LIMIT 1
+        ) AS matched_entry_context_id
+    FROM synthetic_close_fills c
+)
+UPDATE trading.fills f
+SET entry_context_id = m.matched_entry_context_id
+FROM matched_entries m
+WHERE f.fill_id = m.close_fill_id
+  AND f.ts = m.close_ts
+  AND m.matched_entry_context_id IS NOT NULL
+RETURNING f.fill_id, f.entry_context_id
+"""
+
+
 @dataclass
 class FillEntryContextBackfillResult:
-    """Result summary from backfill_fill_entry_context_id().
-    fill entry_context_id 回填結果摘要。"""
+    """Result summary from backfill_fill_entry_context_id() + synthetic path.
+    fill entry_context_id 回填結果摘要（含 Path 2 synthetic id 升級）。
+
+    Buckets:
+      matched_count           = Path 1 成功匹配並 UPDATE 的列數（NULL → real）
+                                = 對應 cron 舊版 `matched=N`，保留同 key 防回歸。
+      candidate_count         = Path 1 候選池大小（NULL entry_context_id close fills）
+                                = 對應 cron 舊版 `candidates=N`，保留同 key。
+      matched_synthetic_count   = Path 2 成功匹配並 UPDATE 的列數
+                                  （orphan_recovery_ctx → real entry context_id）
+      candidate_synthetic_count = Path 2 候選池大小（synthetic id close fills）
+      not_matched_synthetic_count = Path 2 候選池但無對應 entry 的列數
+                                    （留 synthetic 不動，telemetry view 持續 WARN）
+    """
     matched_count: int = 0   # 成功匹配並 UPDATE 的列數
     candidate_count: int = 0  # 候選池大小（NULL entry_context_id close fills）
+    matched_synthetic_count: int = 0    # P2: synthetic id 成功改寫真 context_id 數
+    candidate_synthetic_count: int = 0  # P2: synthetic id close fill 候選池大小
+    not_matched_synthetic_count: int = 0  # P2: 候選池但無對應 entry（留 synthetic）
     batch_limit_hit: bool = False
 
     def to_dict(self) -> dict:
         return {
+            # 保留 cron 舊版鍵（matched / candidates）防回歸
             "matched":         self.matched_count,
             "candidates":      self.candidate_count,
+            # P2 follow-up 新增鍵（無歧義命名，避免 grep tooling 混淆）
+            "matched_real":    self.matched_count,
+            "candidates_null": self.candidate_count,
+            "matched_synthetic":     self.matched_synthetic_count,
+            "candidates_synthetic":  self.candidate_synthetic_count,
+            "not_matched_synthetic": self.not_matched_synthetic_count,
             "batch_limit_hit": self.batch_limit_hit,
         }
 
@@ -477,22 +582,31 @@ def backfill_fill_entry_context_id(
     window_days: int = 30,
     dry_run: bool = False,
 ) -> FillEntryContextBackfillResult:
-    """W-AUDIT-4b-M2: backfill trading.fills.entry_context_id for close fills.
+    """W-AUDIT-4b-M2 + P2 follow-up: backfill trading.fills.entry_context_id.
 
-    對 close fills (exit_reason NOT NULL) 缺 entry_context_id 的列，依 same
-    (strategy_name, engine_mode, symbol, opposite-side) 找最近一筆 ENTRY fill
-    並取其 context_id 作為 entry_context_id。
+    對 close fills (exit_reason NOT NULL) 兩條 path：
+
+    Path 1（W-AUDIT-4b-M2 原有）：entry_context_id IS NULL 的 close fill →
+       依 same (strategy_name, engine_mode, symbol, opposite-side) 找最近一筆
+       ENTRY fill 並取其 context_id 作為 entry_context_id。
+
+    Path 2（P2 follow-up 2026-05-11）：entry_context_id LIKE 'orphan_recovery_ctx:%'
+       的 synthetic id close fill → 依 (engine_mode, symbol, opposite-side,
+       7d window) **不限 strategy_name** 找最近一筆 ENTRY fill 並取其
+       context_id 改寫；找不到則留 synthetic 不動。
 
     Args:
         pg_url:        DSN override（不傳則讀環境變數）
         engine_mode:   'paper' | 'demo' | 'live' | 'live_demo'
                        'live' 自動擴展為 ('live', 'live_demo') 對齊 backfill_labels
-        batch_limit:   單次最大處理列數
-        window_days:   候選 close fills 時間窗（默認 30d）
+        batch_limit:   單次最大處理列數（Path 1 + Path 2 各獨立用此 limit）
+        window_days:   候選 close fills 時間窗（默認 30d，兩 path 共用）
         dry_run:       True 則 ROLLBACK 不 COMMIT
 
     Returns:
-        FillEntryContextBackfillResult with matched_count + candidate_count
+        FillEntryContextBackfillResult 含 matched_count + candidate_count
+        (Path 1) + matched_synthetic_count + candidate_synthetic_count +
+        not_matched_synthetic_count (Path 2)
     """
     engine_modes = list(engine_mode_scope(engine_mode))
 
@@ -500,6 +614,7 @@ def backfill_fill_entry_context_id(
     conn = _get_conn(pg_url)
     try:
         with conn.cursor() as cur:
+            # ─── Path 1（W-AUDIT-4b-M2）：NULL entry_context_id 回填 ───
             # Count candidate pool first (telemetry baseline)
             # 先查候選池大小（telemetry 基線）
             cur.execute(
@@ -528,7 +643,49 @@ def backfill_fill_entry_context_id(
             )
             matched = cur.fetchall()
             result.matched_count = len(matched)
-            if result.matched_count >= batch_limit:
+
+            # ─── Path 2（P2 follow-up）：synthetic id 升級為真 context_id ───
+            # 先查 synthetic candidate pool（telemetry 基線；用 fetchone 取單行 count）
+            cur.execute(
+                """
+                SELECT count(*)
+                FROM trading.fills
+                WHERE entry_context_id LIKE 'orphan_recovery_ctx:%%'
+                  AND exit_reason IS NOT NULL
+                  AND engine_mode = ANY(%(engine_modes)s)
+                  AND ts > (now() - (%(window_days)s || ' days')::interval)
+                  AND (strategy_name IS NULL
+                       OR strategy_name NOT LIKE 'unattributed:%%')
+                """,
+                {"engine_modes": engine_modes, "window_days": window_days},
+            )
+            row_synth = cur.fetchone()
+            result.candidate_synthetic_count = int(row_synth[0]) if row_synth else 0
+
+            cur.execute(
+                _BACKFILL_FILL_SYNTHETIC_CONTEXT_SQL,
+                {
+                    "engine_modes": engine_modes,
+                    "window_days":  window_days,
+                    "batch_limit":  batch_limit,
+                },
+            )
+            matched_synth = cur.fetchall()
+            result.matched_synthetic_count = len(matched_synth)
+            # not_matched_synthetic = 候選池（受 batch_limit 限制）− 成功匹配
+            # 注意：candidate_synthetic_count 是全池 count，未受 batch_limit 限制；
+            #       這裡的 not_matched 是 actual processed pool 中找不到 entry 的數，
+            #       即 min(candidate, batch_limit) − matched_synthetic
+            processed_synthetic = min(result.candidate_synthetic_count, batch_limit)
+            result.not_matched_synthetic_count = max(
+                0, processed_synthetic - result.matched_synthetic_count
+            )
+
+            # batch_limit_hit 任一 path 命中即 True（給 cron 下次再跑訊號）
+            if (
+                result.matched_count >= batch_limit
+                or result.matched_synthetic_count >= batch_limit
+            ):
                 result.batch_limit_hit = True
 
         if dry_run:
@@ -540,10 +697,16 @@ def backfill_fill_entry_context_id(
         else:
             conn.commit()
             logger.info(
-                "backfill_fill_entry_context_id(%s) committed: matched=%d candidates=%d",
+                "backfill_fill_entry_context_id(%s) committed: "
+                "matched_real=%d candidates_null=%d "
+                "matched_synthetic=%d candidates_synthetic=%d "
+                "not_matched_synthetic=%d",
                 engine_mode,
                 result.matched_count,
                 result.candidate_count,
+                result.matched_synthetic_count,
+                result.candidate_synthetic_count,
+                result.not_matched_synthetic_count,
             )
     except Exception:
         conn.rollback()
@@ -895,7 +1058,12 @@ def _main() -> int:
             window_days=args.fill_entry_context_window_days,
             dry_run=args.dry_run,
         )
-        print(f"W-AUDIT-4b-M2 fill entry_context_id backfill result: {m2_result.to_dict()}")
+        # P2 follow-up 2026-05-11：log 訊息含 W-AUDIT-4b-M2 (Path 1 real)
+        # + P2 (Path 2 synthetic) 兩 path 結果，方便 cron log grep。
+        print(
+            f"W-AUDIT-4b-M2 + P2 fill entry_context_id backfill result: "
+            f"{m2_result.to_dict()}"
+        )
 
     # ≤0 關閉 Pass 3（caller-controlled safety fallback）
     abandon_days = args.abandon_after_days if args.abandon_after_days > 0 else None

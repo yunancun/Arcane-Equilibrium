@@ -623,10 +623,18 @@ class TestBackfillFillEntryContextId:
     """W-AUDIT-4b-M2 trading.fills.entry_context_id backfill 行為測試。"""
 
     def test_returns_dataclass_with_zero_counts_on_empty_pool(self):
-        """空 candidate pool（24h 無 close fill 缺 entry_context_id）→ 0 matched。"""
+        """空 candidate pool（24h 無 close fill 缺 entry_context_id）→ 0 matched。
+        包含 P2 follow-up Path 2 (synthetic id) 也應為 0。"""
+        # NOTE 2026-05-11 P2 follow-up: 加入兩 path 的 fixture。
+        # _FakeCursor.execute 用 first-match dict key（Python 3.7+ 保插入順序）。
+        # Path 2 main SQL 同時含 'WITH synthetic_close_fills' 和 'orphan_recovery_ctx:'；
+        # 必須把 'WITH synthetic_close_fills' rule 放 dict 最前，否則 'orphan_recovery_ctx:'
+        # 會先 match 把 main SQL 拿來當 count（[(0,)] fetchall → 1 row 而非 0 rows）。
         responses = {
-            "SELECT count(*)": [(0,)],
-            "WITH close_fills_missing_entry": [],
+            "WITH synthetic_close_fills": [],   # Path 2 main SQL → 0 matched
+            "orphan_recovery_ctx:": [(0,)],     # Path 2 count SQL
+            "SELECT count(*)": [(0,)],          # Path 1 count SQL
+            "WITH close_fills_missing_entry": [],  # Path 1 main SQL
         }
         with _patch_conn(responses) as fake:
             result = backfill_fill_entry_context_id(
@@ -637,14 +645,20 @@ class TestBackfillFillEntryContextId:
         assert isinstance(result, FillEntryContextBackfillResult)
         assert result.candidate_count == 0
         assert result.matched_count == 0
+        assert result.candidate_synthetic_count == 0
+        assert result.matched_synthetic_count == 0
+        assert result.not_matched_synthetic_count == 0
         assert result.batch_limit_hit is False
         assert fake.committed is True
         assert fake.rolled_back is False
 
     def test_matches_close_fills_to_entry_context_id(self):
-        """有 candidate + 部分 matched → matched_count = matched rows。"""
+        """有 candidate + 部分 matched → matched_count = matched rows。
+        Path 2 synthetic pool 給 0 不影響此 Path 1-only 路徑驗證。"""
         responses = {
-            "SELECT count(*)": [(10,)],  # 10 candidates
+            "WITH synthetic_close_fills": [],   # Path 2 main 0 matched
+            "orphan_recovery_ctx:": [(0,)],     # Path 2 count
+            "SELECT count(*)": [(10,)],         # Path 1 count
             "WITH close_fills_missing_entry": [
                 ("close-1", "ctx-entry-abc"),
                 ("close-2", "ctx-entry-def"),
@@ -659,12 +673,16 @@ class TestBackfillFillEntryContextId:
             )
         assert result.candidate_count == 10
         assert result.matched_count == 3
+        assert result.candidate_synthetic_count == 0
+        assert result.matched_synthetic_count == 0
         assert result.batch_limit_hit is False
         assert fake.committed is True
 
     def test_batch_limit_hit_flag_set_when_matched_eq_limit(self):
         """matched_count >= batch_limit → batch_limit_hit=True（cron 下次再跑）。"""
         responses = {
+            "WITH synthetic_close_fills": [],
+            "orphan_recovery_ctx:": [(0,)],
             "SELECT count(*)": [(100,)],
             "WITH close_fills_missing_entry": [
                 (f"close-{i}", f"ctx-{i}") for i in range(50)
@@ -682,6 +700,8 @@ class TestBackfillFillEntryContextId:
     def test_dry_run_rolls_back_no_commit(self):
         """dry_run=True → ROLLBACK（不影響 production data）。"""
         responses = {
+            "WITH synthetic_close_fills": [],
+            "orphan_recovery_ctx:": [(0,)],
             "SELECT count(*)": [(5,)],
             "WITH close_fills_missing_entry": [
                 ("close-1", "ctx-abc"),
@@ -701,15 +721,17 @@ class TestBackfillFillEntryContextId:
     def test_engine_mode_live_expands_to_live_and_live_demo(self):
         """engine_mode='live' 自動展開為 ('live','live_demo') 對齊 backfill_labels。"""
         responses = {
+            "WITH synthetic_close_fills": [],
+            "orphan_recovery_ctx:": [(0,)],
             "SELECT count(*)": [(0,)],
             "WITH close_fills_missing_entry": [],
         }
         with _patch_conn(responses) as fake:
             backfill_fill_entry_context_id(engine_mode="live", batch_limit=5000)
-        # 第一個 execute call 是 candidate count；第二個是 backfill。
+        # P2 follow-up：execute calls 增至 4（Path 1 count + main + Path 2 count + main）
         # 兩者都應 receive engine_modes=['live','live_demo']
-        # (順序：cursor.execute count → backfill UPDATE)
-        assert len(fake.execute_calls) >= 2
+        # (順序：Path 1 count → Path 1 main → Path 2 count → Path 2 main)
+        assert len(fake.execute_calls) >= 4
         for sql, params in fake.execute_calls:
             assert params is not None
             assert "engine_modes" in params
@@ -718,12 +740,14 @@ class TestBackfillFillEntryContextId:
     def test_engine_mode_demo_does_not_expand(self):
         """engine_mode='demo' 不展開 (保持單一 'demo' tuple)。"""
         responses = {
+            "WITH synthetic_close_fills": [],
+            "orphan_recovery_ctx:": [(0,)],
             "SELECT count(*)": [(0,)],
             "WITH close_fills_missing_entry": [],
         }
         with _patch_conn(responses) as fake:
             backfill_fill_entry_context_id(engine_mode="demo")
-        assert len(fake.execute_calls) >= 2
+        assert len(fake.execute_calls) >= 4
         for sql, params in fake.execute_calls:
             assert params["engine_modes"] == ["demo"]
 
@@ -822,13 +846,27 @@ class TestBackfillFillEntryContextId:
         assert fake.committed is False
 
     def test_result_to_dict_includes_required_keys(self):
-        """to_dict() 必含 matched / candidates / batch_limit_hit 三鍵。"""
+        """to_dict() 必含 matched / candidates / batch_limit_hit 三鍵 (legacy)，
+        以及 P2 follow-up 新增 matched_real / candidates_null / matched_synthetic /
+        candidates_synthetic / not_matched_synthetic。"""
         result = FillEntryContextBackfillResult(
-            matched_count=5, candidate_count=10, batch_limit_hit=True
+            matched_count=5,
+            candidate_count=10,
+            matched_synthetic_count=2,
+            candidate_synthetic_count=3,
+            not_matched_synthetic_count=1,
+            batch_limit_hit=True,
         )
         d = result.to_dict()
+        # Legacy keys（cron output 舊版兼容）
         assert d["matched"] == 5
         assert d["candidates"] == 10
+        # P2 follow-up keys（無歧義命名）
+        assert d["matched_real"] == 5
+        assert d["candidates_null"] == 10
+        assert d["matched_synthetic"] == 2
+        assert d["candidates_synthetic"] == 3
+        assert d["not_matched_synthetic"] == 1
         assert d["batch_limit_hit"] is True
 
     def test_38_to_95_pct_simulation(self):
@@ -839,6 +877,8 @@ class TestBackfillFillEntryContextId:
         # 但 cron 跑 multiple ticks 後（每 30min 一次）逐步收斂 → 接 5%
         # 本 test 驗 single tick 行為：matched / candidate ratio 合理
         responses = {
+            "WITH synthetic_close_fills": [],
+            "orphan_recovery_ctx:": [(0,)],
             "SELECT count(*)": [(108,)],  # 38%/175 ≈ 67 with entry_ctx → 108 NULL
             "WITH close_fills_missing_entry": [
                 (f"close-{i}", f"ctx-{i}") for i in range(65)
@@ -856,3 +896,175 @@ class TestBackfillFillEntryContextId:
         # restart-orphaned positions / pre-V083 historical data 找不到）
         match_rate = result.matched_count / max(result.candidate_count, 1)
         assert match_rate > 0.5, f"match rate {match_rate:.2%} too low"
+
+    # ════════════════════════════════════════════════════════════════════════
+    # P2 follow-up 2026-05-11：synthetic id 升級為真 entry context_id
+    # ════════════════════════════════════════════════════════════════════════
+
+    def test_p2_synthetic_id_with_matching_entry(self):
+        """close fill 帶 synthetic id + 有對應 entry → matched_synthetic > 0。"""
+        # Path 1 0 candidate；Path 2 3 candidate + 2 matched
+        # 用兩個獨立 substring key 分別控制 Path 2 count + main SQL
+        # Path 2 count SQL 含 'orphan_recovery_ctx:' substring → match first
+        # Path 2 main SQL 含 'WITH synthetic_close_fills' substring
+        # NOTE: _FakeCursor first-match dict iter；'orphan_recovery_ctx:' substring
+        # 同時在 count + main SQL 出現，所以這 rule 被命中 2 次（count fetchone +
+        # main fetchall）。要讓 count 返回 (3,) 又讓 main 返回 2 rows 不可能用同
+        # 一 rule；改用 dict ordering trick：
+        #   - 'WITH synthetic_close_fills' rule 放前 → 只 match main SQL（含此 substring）
+        #   - 'orphan_recovery_ctx:' rule 放後 → match count SQL（不含 'WITH synthetic_close_fills'）
+        responses = {
+            "WITH synthetic_close_fills": [
+                ("close-near", "ctx-entry-near"),
+                ("close-ton",  "ctx-entry-ton"),
+            ],
+            "orphan_recovery_ctx:": [(3,)],  # Path 2 candidate count
+            "SELECT count(*)": [(0,)],        # Path 1 candidate count
+            "WITH close_fills_missing_entry": [],  # Path 1 main empty
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+            )
+        assert result.candidate_synthetic_count == 3
+        assert result.matched_synthetic_count == 2
+        # 3 候選 - 2 matched = 1 not_matched
+        assert result.not_matched_synthetic_count == 1
+        assert fake.committed is True
+
+    def test_p2_synthetic_id_no_matching_entry(self):
+        """close fill 帶 synthetic id + 無對應 entry → matched_synthetic=0；
+        not_matched_synthetic 等於 candidate_synthetic（留 synthetic 不動）。"""
+        responses = {
+            "WITH synthetic_close_fills": [],  # 0 matched（沒對應 entry）
+            "orphan_recovery_ctx:": [(2,)],     # 2 candidates
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+            )
+        assert result.candidate_synthetic_count == 2
+        assert result.matched_synthetic_count == 0
+        assert result.not_matched_synthetic_count == 2
+        # 真 production 中 telemetry view 會 WARN，這裡用 dataclass shape 驗證
+        assert fake.committed is True
+
+    def test_p2_pure_null_path_unchanged_regression(self):
+        """Path 1 NULL entry_context_id 既有行為不破回歸：Path 2 給 0 不影響 Path 1。"""
+        responses = {
+            "WITH synthetic_close_fills": [],   # Path 2 main empty
+            "orphan_recovery_ctx:": [(0,)],     # Path 2 count
+            "SELECT count(*)": [(5,)],          # Path 1 count
+            "WITH close_fills_missing_entry": [
+                ("close-1", "ctx-entry-1"),
+                ("close-2", "ctx-entry-2"),
+                ("close-3", "ctx-entry-3"),
+            ],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+            )
+        # Path 1 既有行為
+        assert result.candidate_count == 5
+        assert result.matched_count == 3
+        # Path 2 都 0
+        assert result.candidate_synthetic_count == 0
+        assert result.matched_synthetic_count == 0
+        assert result.not_matched_synthetic_count == 0
+        assert fake.committed is True
+
+    def test_p2_synthetic_sql_safety_invariants(self):
+        """Path 2 SQL 必含關鍵 safety guards（防後續 refactor 破）。"""
+        from program_code.ml_training import edge_label_backfill as m
+
+        sql = m._BACKFILL_FILL_SYNTHETIC_CONTEXT_SQL
+        # 1. 只 update LIKE 'orphan_recovery_ctx:%' 的 row（不碰其他 entry_context_id）
+        assert "f.entry_context_id LIKE 'orphan_recovery_ctx:%%'" in sql
+        # 2. 只 close fills（exit_reason NOT NULL）— 不誤動 entry fills
+        assert "f.exit_reason IS NOT NULL" in sql
+        # 3. opposite-side 匹配（entry Buy → close Sell）
+        assert "entry.side <> c.side" in sql
+        # 4. 7d window 防匹配古老 entry
+        assert "INTERVAL '7 days'" in sql
+        # 5. audit row filter（unattributed:* 跳過）
+        assert "NOT LIKE 'unattributed:%%'" in sql
+        # 6. entry must be entry (entry_context_id IS NULL AND exit_reason IS NULL)
+        assert "entry.entry_context_id IS NULL" in sql
+        assert "entry.exit_reason IS NULL" in sql
+        # 7. only matched (NOT NULL) UPDATE — 否則 NULL stays NULL
+        assert "m.matched_entry_context_id IS NOT NULL" in sql
+        # 8. UPDATE target keyed by (fill_id, ts) — fills hypertable PK
+        assert "f.fill_id = m.close_fill_id" in sql
+        assert "f.ts = m.close_ts" in sql
+        # 9. **KEY 設計**：Path 2 不限 strategy_name（risk_close orphan adopt 設計）
+        #    Path 1 SQL 有 entry.strategy_name = c.strategy_name；Path 2 不該有此行
+        assert "entry.strategy_name = c.strategy_name" not in sql
+
+    def test_p2_dry_run_rolls_back_no_commit_synthetic_path(self):
+        """dry_run=True + Path 2 命中 → ROLLBACK（防 production data 改動）。"""
+        responses = {
+            "WITH synthetic_close_fills": [
+                ("close-near", "ctx-entry-near"),
+            ],
+            "orphan_recovery_ctx:": [(1,)],
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=5000,
+                window_days=30,
+                dry_run=True,
+            )
+        assert result.matched_synthetic_count == 1
+        assert fake.rolled_back is True
+        assert fake.committed is False
+
+    def test_p2_not_matched_capped_by_batch_limit(self):
+        """candidate_synthetic_count 超 batch_limit 時，not_matched 用 min(c, limit) 計算。"""
+        # 5000 candidates but batch_limit=10 → processed = 10，matched = 0 → not_matched = 10
+        responses = {
+            "WITH synthetic_close_fills": [],  # 0 matched
+            "orphan_recovery_ctx:": [(5000,)],  # 5000 candidates total
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses) as fake:
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=10,
+                window_days=30,
+            )
+        assert result.candidate_synthetic_count == 5000
+        assert result.matched_synthetic_count == 0
+        # not_matched = min(5000, 10) - 0 = 10
+        assert result.not_matched_synthetic_count == 10
+
+    def test_p2_batch_limit_hit_triggered_by_synthetic_path(self):
+        """matched_synthetic_count >= batch_limit → batch_limit_hit=True。"""
+        responses = {
+            "WITH synthetic_close_fills": [
+                (f"close-{i}", f"ctx-{i}") for i in range(50)
+            ],
+            "orphan_recovery_ctx:": [(100,)],
+            "SELECT count(*)": [(0,)],
+            "WITH close_fills_missing_entry": [],
+        }
+        with _patch_conn(responses):
+            result = backfill_fill_entry_context_id(
+                engine_mode="demo",
+                batch_limit=50,
+                window_days=30,
+            )
+        assert result.matched_synthetic_count == 50
+        assert result.batch_limit_hit is True
