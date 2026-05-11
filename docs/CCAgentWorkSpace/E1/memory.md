@@ -8376,3 +8376,59 @@ SQL 反事實：移除所有 `strategy_name='grid_trading' AND symbol NOT IN pin
 - **§九 文件大小**：4 檔全 < 2000 hard cap
 - **forbidden_guard / V3 §6.2**：proof_4 PASS + nm audit ok
 - **V3 §12 #10/#11/#14**：proof_1/4/5 byte-equal + R5-T7 xlang param delta proof_7/8 全 PASS
+
+---
+
+## Sprint N+1 D+1 P0 Replay Tier A E1-C T5 per-symbol price anchor IMPL DONE（2026-05-11）
+
+**觸發**：PA `2026-05-11--p0_replay_engine_counterfactual_fix_design.md` Tier A §T5 派發；operator 拍板 ship；E1-A (`ffc57d7f`) + E1-B (`7f6182b2`) 已 land。
+
+**範圍**：T5 `ReplayPaperSnapshot.latest_price_by_symbol: HashMap<String, f64>` + `latest_price_for(symbol)` fallback chain helper + apply_fill / tick ingestion 三處 update + bin one-pass first-touch 預種；6 檔；~263 LOC（含 ~115 LOC sanity test）。
+
+### 6 個改動檔
+- `rust/openclaw_engine/src/replay/risk_adapter.rs`：+41 LOC（573→613），`ReplayPaperSnapshot` 加 `latest_price_by_symbol: HashMap<String, f64>` field + `latest_price_for(symbol)` fallback chain helper；evaluate Gate 2.5 改 `latest_price_for(&intent.symbol)` per-symbol query；mk_snapshot test helper 預種 BTCUSDT/ETHUSDT
+- `rust/openclaw_engine/src/replay/apply_fill.rs`：+10 LOC（750→761），`apply_fill_open` / `apply_fill_close` fill 後同步 `insert(symbol, fill_price)` + 全域 fallback 同步寫
+- `rust/openclaw_engine/src/replay/runner.rs`：+6 LOC（1230→1237），event tick ingestion `insert(symbol, event.close)`；保留全域 `latest_price` 寫 last-touched
+- `rust/openclaw_engine/src/replay/runner_tests.rs`：+178 LOC（1467→1645），新加 `make_snapshot_seed_with_prices` 顯式 helper + 3 個 T5 unit test
+- `rust/openclaw_engine/src/bin/replay_runner.rs`：+21 LOC（622→643），one-pass `initial_price_by_symbol` 預種掃 fixture events
+- `rust/openclaw_engine/tests/replay_runner_e2e_param_delta.rs`：+7 LOC（375→382），build_snapshot literal 加 HashMap field（BTCUSDT 預種 starting_price）
+
+### 3 個新加 T5 unit test
+1. `test_replay_kelly_sizer_uses_per_symbol_price`：全域 latest_price=0.2717（污染樣本）+ per-symbol {ETHUSDT: 2335.0}，ETHUSDT intent 應用 2335.0 算 P1 cap
+2. `test_replay_latest_price_updates_on_tick`：snapshot update + lookup 對應 per-symbol value 取對 + fallback 切換
+3. `test_replay_latest_price_fallback_when_missing`：三場景驗 fallback chain — per-symbol 優先 / 缺則 fallback 全域 / 兩缺回 None
+
+### 驗證
+- `cargo build --release --bin replay_runner --features replay_isolated` PASS（14.18s）
+- `cargo test --release -p openclaw_engine --lib` baseline 2804 → post-IMPL **2807 passed**（+3 sanity test）；0 regression
+- `cargo test --lib replay` **116 passed**（+3 from baseline 113）
+- forbidden_guard acceptance **4/4 PASS**
+- replay_runner_e2e **6/6 PASS**（含 proof_1/4/5 byte-equal）
+- replay_runner_e2e_param_delta R5-T7 **2/2 PASS**（cross-language proof_7/8 — 對齊 live router.rs:364 後 xlang equivalence 理論上更綠）
+- profile / mac_policy / xlang signer **5+4+8 PASS**
+- forbidden_guard / V3 §6.2 0 violation；§四 5 硬邊界 0 觸碰
+- 跨平台 grep `/home/ncyu` `/Users/[a-z]+` 0 hit
+- 文件大小：risk_adapter.rs 613 / apply_fill.rs 761 / runner.rs 1237 / runner_tests.rs 1645 / bin/replay_runner.rs 643 / replay_runner_e2e_param_delta.rs 382 全 < 2000
+
+### 關鍵教訓
+1. **PA §2.6 真根因**：不是 Kelly bug 是 `ReplayPaperSnapshot.latest_price: Option<f64>` 全域單一 anchor。Live PaperState 內部本就是 per-symbol HashMap，replay 對齊就消除這個結構性失準。
+2. **HashMap field add blast radius**：4 處 ReplayPaperSnapshot literal constructor 全要 update（mk_snapshot + make_snapshot_seed + build_snapshot + bin/replay_runner）；rust E0063 強制，避免靜默漏接。
+3. **one-pass 預種 vs lazy build**：先掃整 fixture 取每 symbol first-touch 比靠 tick ingestion 逐步填更 fail-loud：第一個 tick 還沒 process 前若策略 emit 跨 symbol intent，per-symbol 已備好；不依靠 tick 順序假設。
+4. **backward-compat field 保留**：`latest_price` field 不刪 — with_adapter_pipeline guard 條件不變、既有 test seed 通過 fallback 不破；新代碼用 `latest_price_for(symbol)` 而非直接訪問 field。
+5. **R5-T7 xlang test 影響**：T5 對齊 live `router.rs:364` 邏輯 → cross-language equivalence 理論上更綠（不是更紅）；proof_7/8 已驗 PASS。
+6. **PA §3.5 #3 grep 全 callsite review 嚴格遵循**：6 處 `.latest_price` direct field access（evaluate / mk_snapshot / with_adapter_pipeline guard / tick ingestion / make_snapshot_seed / bin/replay_runner literal）全部明確 review，確保 update vs fallback 邏輯一致。
+
+### 治理對照
+- **CLAUDE.md §一**：玄衡 replay isolated subprocess，0 動 main pipeline
+- **§二 16 原則**：16/16（特別 #16 組合級風險意識 — per-symbol anchor 直接強化）
+- **§四 5 硬邊界**：0 觸碰
+- **§五 架構**：replay 仍是 isolated subprocess
+- **§七 跨平台**：0 硬編碼路徑
+- **§七 注釋（2026-05-05 中文默認）**：新增注釋全中文
+- **§九 文件大小**：6 檔全 < 2000 hard cap
+- **forbidden_guard / V3 §6.2**：proof_4 PASS
+- **V3 §12 #10/#11/#14**：proof_1/4/5 byte-equal + R5-T7 xlang param delta proof_7/8 全 PASS
+
+### 完整報告路徑
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_c_per_symbol_price.md`
+
