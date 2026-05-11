@@ -42,30 +42,28 @@ use params::{
     DEFAULT_VOLUME_THRESHOLD,
 };
 
-/// Per-symbol dynamic state for `BbBreakout`. All fields are independently
-/// optional: absence of a squeeze, an entry-price, or a trailing-stop each have
-/// distinct meanings from "no position". `Default` → all `None`, matching the
-/// behaviour of the previous 4 parallel `HashMap`s.
-/// `BbBreakout` 的逐 symbol 動態狀態；4 個欄位各自獨立可選，等價於原先 4 個平行
-/// HashMap 的語意。`Default` = 全 `None`，對應「從未見過該 symbol」。
+/// `BbBreakout` 的逐 symbol 動態狀態。
+///
+/// P0 Option A-Lite 重構（2026-05-11）：`position` 欄位移除，position direction 改由
+/// `ctx.position_state` 統一查 `paper_state` SSoT（owner_strategy gate 在 on_tick
+/// exit 分支執行）。保留四個 strategy-internal 欄位：
+///   * `entry_price` — ATR trailing-stop math 起點，與 position lifecycle 強耦合
+///     （cross-strategy entry_price 會 mis-calibrate trailing；只由本策略 entry path 寫）。
+///   * `trailing_stop` — Chandelier exit ratchet 狀態，僅由本策略寫入並維持單向棘輪。
+///   * `squeeze_detected_ms` — FIX-26 壓縮窗口錨點，與 position 解耦（squeeze regime
+///     跨平倉延續，受 squeeze_expiry_ms 約束）。
+///   * `oi_buffer` — EDGE-P2-2 OI 觀察序列，市場觀察契約獨立於倉位狀態。
+///
+/// `Default` = 全 `None` + 空 buffer，對應「從未見過該 symbol」。
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BbBreakoutPerSymbolState {
-    /// Current position direction if open: `Some(true)` = long, `Some(false)` = short.
-    /// 當前方向：Some(true)=多, Some(false)=空, None=空倉。
-    pub position: Option<bool>,
-    /// First timestamp squeeze was detected (FIX-26 expiry window anchor).
     /// FIX-26：首次偵測壓縮的時間戳（作為 squeeze_expiry_ms 的錨點）。
     pub squeeze_detected_ms: Option<u64>,
-    /// Entry price at position open (for PnL/trail math).
-    /// 開倉價（供 PnL/追蹤止損計算）。
+    /// 開倉價（供 PnL/追蹤止損計算）。P0 Option A-Lite 後僅由 entry path 寫入；
+    /// W7-2 cross-strategy skip 路徑不同步（避免 mis-calibrate trailing math）。
     pub entry_price: Option<f64>,
-    /// Current ATR trailing stop level.
-    /// 當前 ATR 追蹤止損價位。
+    /// 當前 ATR 追蹤止損價位（Chandelier 單向棘輪）。
     pub trailing_stop: Option<f64>,
-    /// EDGE-P2-2: rolling (ts_ms, open_interest) samples. Front = oldest,
-    /// back = newest. Maintained by `on_tick`; only pushed when
-    /// `ctx.open_interest` is `Some`. Window length is controlled by
-    /// `BbBreakout.oi_buffer_window_ms`.
     /// EDGE-P2-2：滾動 (ts_ms, OI) 樣本；front=最舊、back=最新。
     /// 只在 `ctx.open_interest` 有值時追加；窗口長度由 `oi_buffer_window_ms` 控制。
     pub oi_buffer: std::collections::VecDeque<(u64, f64)>,
@@ -98,8 +96,8 @@ pub struct BbBreakout {
     /// primary `TickContext.indicators`; `5m` consumes `indicators_5m`.
     /// 入出場邏輯使用的指標時間框架；`5m` 不足時跳過而非回退。
     pub(crate) signal_timeframe: String,
-    /// Per-symbol state (position/squeeze/entry_price/trailing_stop).
-    /// 逐 symbol 狀態（持倉/壓縮/進場價/追蹤止損），以 PerSymbolState 統一容器承載。
+    /// 逐 symbol 狀態（壓縮/進場價/追蹤止損/OI buffer），以 PerSymbolState 統一容器承載。
+    /// P0 Option A-Lite（2026-05-11）：position direction 移交 paper_state，本欄位不再帶。
     pub(crate) symbols: PerSymbolState<BbBreakoutPerSymbolState>,
     /// FIX-26: Max duration (ms) a squeeze remains valid. Default 30 min.
     /// FIX-26：壓縮狀態最長有效期（ms）。默認 30 分鐘。
@@ -246,29 +244,22 @@ impl BbBreakout {
 
     // ── Per-symbol accessors (test-facing; also handy for observability) ──
     // 逐 symbol 存取器（供測試使用，外部觀察亦可調用）。
+    //
+    // P0 Option A-Lite（2026-05-11）後 `position_of` 已移除：position direction 由
+    // `paper_state` SSoT 承載；測試端改驗 paper_state 而非 strategy-internal flag。
 
-    /// Current position direction for `symbol` (None if flat or unseen).
-    /// 該 symbol 當前持倉方向，平倉或未見則為 None。
-    #[inline]
-    pub fn position_of(&self, symbol: &str) -> Option<bool> {
-        self.symbols.get(symbol).and_then(|s| s.position)
-    }
-
-    /// Recorded entry price for `symbol` (None if flat or unseen).
-    /// 該 symbol 最近一次開倉價，平倉或未見則為 None。
+    /// 該 symbol 最近一次開倉價，未見/未開則為 None。
     #[inline]
     pub fn entry_price_of(&self, symbol: &str) -> Option<f64> {
         self.symbols.get(symbol).and_then(|s| s.entry_price)
     }
 
-    /// Current ATR trailing stop for `symbol` (None if flat / not yet set).
-    /// 該 symbol 當前 ATR 追蹤止損價，平倉或尚未設定則為 None。
+    /// 該 symbol 當前 ATR 追蹤止損價，未見/尚未設定則為 None。
     #[inline]
     pub fn trailing_stop_of(&self, symbol: &str) -> Option<f64> {
         self.symbols.get(symbol).and_then(|s| s.trailing_stop)
     }
 
-    /// True if `symbol` has a recorded squeeze-detection timestamp.
     /// 該 symbol 是否登記了壓縮起始時間戳。
     #[inline]
     pub fn has_squeeze(&self, symbol: &str) -> bool {
@@ -301,63 +292,51 @@ impl Strategy for BbBreakout {
         TAGS
     }
 
-    /// Reset per-symbol position state on external close (risk-stop).
-    /// Preserves `squeeze_detected_ms` (squeeze record is preserved across
-    /// close — rationale: the squeeze regime can continue observing the same
-    /// market condition).
+    /// 外部平倉（風控止損）清 strategy-internal state（與 position lifecycle 強耦合的欄位）。
     ///
-    /// FIX-26-DEADLOCK-1 note (2026-04-24): post-fix, `squeeze_detected_ms`
-    /// is auto-cleared in `on_tick` when it has expired (see line ~346+).
-    /// So the preservation across close is now bounded by the 45-min expiry
-    /// window rather than being indefinite. This is the intended semantic
-    /// — external close no longer creates a permanent-dormant hole.
-    ///
-    /// 外部平倉（風控止損）時重設該幣種內部狀態；`squeeze_detected_ms` 保留
-    /// （壓縮狀態可跨越平倉延續）。FIX-26-DEADLOCK-1（2026-04-24）修復後，
-    /// squeeze_detected_ms 在過期時會由 on_tick 自動清除，跨平倉保留現受
-    /// 45min expiry 窗口約束（而非原本無限保留）。
+    /// P0 Option A-Lite（2026-05-11）後 `position` 欄位移除 → `position direction` 統一查
+    /// `paper_state.get_position()`；此 hook 只負責清「本策略寫過且依賴 position open」的
+    /// 內部狀態：
+    ///   * `entry_price` → 清（trailing math 起點，平倉後失效）
+    ///   * `trailing_stop` → 清（ratchet 狀態，下次 entry 重新初始化）
+    ///   * `squeeze_detected_ms` → **保留**（squeeze regime 跨平倉延續，受 FIX-26 45min
+    ///     expiry 窗口約束，由 on_tick 自動清過期，docstring 對齊 mod.rs:281-291 原契約）
+    ///   * `oi_buffer` → **保留**（市場觀察序列，與倉位完全解耦）
+    ///   * `persistence` → 清（W7-* 一致性：cross-strategy close 後重新累積信號持續度）
     fn on_external_close(&mut self, symbol: &str) {
         if let Some(st) = self.symbols.get_mut(symbol) {
-            st.position = None;
             st.entry_price = None;
             st.trailing_stop = None;
         }
         self.persistence.clear(symbol);
     }
 
-    /// W7-5 part 1：真實 fill confirmed 後同步 `BbBreakoutPerSymbolState.position`。
+    /// P0 Option A-Lite（2026-05-11）：on_fill 不再寫 strategy-internal position。
     ///
-    /// callsite：`step_4_5_dispatch.rs:925`，於 paper_state.apply_fill 之前。
-    /// 入場路徑（`on_tick` 主流程）已 eager mutate `st.position = Some(is_long)` 在
-    /// intent emit 時（`bb_breakout/mod.rs:756`）；on_fill 此處作為 fill-confirm
-    /// safety net。entry_price / trailing_stop / squeeze_detected_ms 由 entry path
-    /// 一同寫入，on_fill 不重複寫（避免覆寫 trailing_stop 已調整值）。
+    /// 變更說明：position direction 由 `paper_state.apply_fill` 統一寫入 paper_state SSoT；
+    /// 策略下個 tick 經 `ctx.position_state` 自動讀到。本 hook 保留簽名以維持 Strategy
+    /// trait 一致性，但 body no-op；entry_price / trailing_stop 已於 entry path
+    /// （`bb_breakout/mod.rs:880-893`，本檔下方 on_tick）一併寫入，on_fill 不重複寫。
     fn on_fill(
         &mut self,
-        intent: &OrderIntent,
+        _intent: &OrderIntent,
         _fill: &openclaw_core::execution::FillResult,
     ) {
-        let st = self.symbols.get_or_init(&intent.symbol);
-        st.position = Some(intent.is_long);
-        tracing::debug!(
-            target: "bb_breakout",
-            symbol = %intent.symbol,
-            is_long = intent.is_long,
-            "on_fill: synced PerSymbolState.position to fill direction (W7-5 part 1)"
-        );
+        // no-op：position SSoT 已歸 paper_state；策略下個 tick 從 ctx.position_state 讀。
     }
 
-    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 `self.symbols`。
+    /// P0 Option A-Lite（2026-05-11）：bootstrap import_positions 不再回寫 position field
+    /// （field 已移除），但保留 `entry_price` 還原以維持 ATR trailing-stop math 連續性。
     ///
-    /// 過濾條件：`pos.owner_strategy == "bb_breakout"`。寫 `position` +
-    /// `entry_price`；trailing_stop 留 `None`（首個 1m tick 由 `on_tick` 內 ATR
-    /// 計算重新設定）；squeeze_detected_ms 留 `None`（外部開倉非 squeeze 觸發）。
+    /// 過濾條件：`pos.owner_strategy == "bb_breakout"`，僅本策略擁有的倉位才還原。
+    /// trailing_stop 留 `None` — bootstrap 後第一個有 ATR 的 tick 由 on_tick 內 ATR
+    /// 計算重新初始化（與 cold-start 行為一致）。squeeze_detected_ms 留 `None`（外部
+    /// 開倉非 squeeze 觸發）。
     fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
         let mut imported = 0_usize;
         for pos in paper_state.positions() {
             if pos.owner_strategy == self.name() {
                 let st = self.symbols.get_or_init(&pos.symbol);
-                st.position = Some(pos.is_long);
                 st.entry_price = Some(pos.entry_price);
                 imported += 1;
             }
@@ -366,84 +345,27 @@ impl Strategy for BbBreakout {
             tracing::info!(
                 strategy = "bb_breakout",
                 imported,
-                "W7-5 import_positions: rebuilt self.symbols.position from paper_state \
-                 / 從 paper_state 重建 self.symbols.position"
+                "P0 Option A-Lite import_positions：從 paper_state 還原本策略 entry_price"
             );
         }
     }
 
-    /// RC-04 + W7-3 Option B（P1-2 propagation, mirror ma_crossover/strategy_impl.rs:55-91
-    /// + bb_reversion/mod.rs:343-424）：拒絕時的 1-tick 防衛（cross-strategy desync hot loop 修復）。
+    /// RC-04：拒絕時回滾該幣種 strategy-internal state（cooldown + entry_price +
+    /// trailing_stop + squeeze_detected_ms）至 mutation 前快照。
     ///
-    /// 原 RC-04 行為：回滾該幣種 PerSymbolState 至 mutation 前快照。
-    /// EDGE-P2-2 FUP：`oi_buffer` 是市場觀察序列不是策略決策狀態；rollback 時保留
-    /// 活 buffer（prev=Some → 克隆 prev_st 但覆寫 oi_buffer；prev=None 且有新樣本
-    /// → 創建只含 oi_buffer 的 Default state）。trading state 保持「未見」但
-    /// OI 觀察續存。
+    /// P0 Option A-Lite（2026-05-11）後 W7-3 Option B sync 路徑已移除：
+    ///   * `position` field 不存在，無從 sync（direction SSoT 在 paper_state；
+    ///     duplicate_position rejection 下個 tick 由 `ctx.position_state` 自動反映）。
+    ///   * `duplicate_position` reason 仍可能命中（router gate），但本策略不再需要
+    ///     「同步 position 為 paper_state 方向」這一步；W7-2 entry-path 已先 skip。
+    ///   * cooldown 仍需 rollback（entry tick 已寫，rejection 時要還原以允許下次嘗試）。
     ///
-    /// W7-3 Option B 補丁背景：W7-4 audit §3 P1-2 揭露 bb_breakout 缺 W7-3
-    /// 1-tick defense + 缺 W7-2 entry path query（兩層皆缺，gap 比 bb_reversion 大）。
-    /// 6 concentric gates（squeeze 45min + bandwidth>expansion + vol_ratio>threshold +
-    /// Donchian breach Hard mode + persistence 60s + confluence score）使 hot loop
-    /// 歷史 occurrence = 0；W7 chain consistency 仍有價值（防 future bug）。
-    /// reason 字串契約見 `rejection_coding.rs:147-152`：
-    /// 格式 `"duplicate_position: {symbol} already {LONG|SHORT} {qty}"`。
-    /// fallback：reason 含 `duplicate_position` 但無 `already LONG/SHORT` 子串
-    /// → 標 warn 並走原 RC-04 rollback。
-    ///
-    /// W7-3 sync 路徑與 ma_crossover / bb_reversion 設計一致：
-    ///   1. **不觸碰** oi_buffer（保持 EDGE-P2-2 FUP 既有市場觀察契約）
-    ///   2. **不觸碰** entry_price / trailing_stop / squeeze_detected_ms
-    ///      （原因：本策略當前 tick 並未真正開倉；只 sync position 為 paper_state
-    ///      真實方向，下個 tick 走 Some(is_long) exit 分支即可。entry_price 是
-    ///      bb_breakout-specific trailing_stop math 來源，使用 cross-strategy
-    ///      entry_price 會 mis-calibrate trailing；留 None 直到下次 bb_breakout
-    ///      自己開倉再寫。）
-    ///   3. cooldown 不 rollback：保留 entry tick 寫入的 last_trade_ms，配合
-    ///      cooldown gate 多擋一輪（與 ma_crossover / bb_reversion 一致）。
-    fn on_rejection(&mut self, intent: &OrderIntent, reason: &str) {
+    /// EDGE-P2-2 FUP：`oi_buffer` 是市場觀察序列，**rollback 時保留活 buffer**（prev=Some
+    /// → 克隆 prev_st 但覆寫 oi_buffer；prev=None 且有新樣本 → 創建只含 oi_buffer 的
+    /// Default state）。trading state 保持「未見」但 OI 觀察續存。
+    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
 
-        // W7-3 Option B：duplicate_position 識別 + 立即 sync self.symbols[sym].position。
-        if reason.contains("duplicate_position") {
-            let existing_is_long = if reason.contains("already LONG") {
-                Some(true)
-            } else if reason.contains("already SHORT") {
-                Some(false)
-            } else {
-                None
-            };
-
-            if let Some(is_long) = existing_is_long {
-                // 同步 paper_state 真實方向；下個 tick 進 Some(is_long) exit 分支。
-                // 只動 position 欄位，不觸碰 oi_buffer / entry_price / trailing_stop /
-                // squeeze_detected_ms（mirror W7-4 §3 P1-2 設計：保 EDGE-P2-2 FUP 既有契約）。
-                let st = self.symbols.get_or_init(sym);
-                st.position = Some(is_long);
-                // **不** rollback cooldown：保留 entry tick 寫入的 last_trade_ms。
-                tracing::debug!(
-                    target: "strategy_position_sync",
-                    strategy = "bb_breakout",
-                    symbol = %sym,
-                    existing_is_long,
-                    "bb_breakout.on_rejection: duplicate_position 1-tick defense — \
-                     synced PerSymbolState.position to paper_state direction (W7-3 Option B propagation)"
-                );
-                return;
-            }
-            // reason 含 duplicate_position 但無 already LONG/SHORT 子串 → 字串契約破裂，
-            // fallback 走原 RC-04 rollback 並標 warn 提醒 contract drift。
-            tracing::warn!(
-                target: "strategy_position_sync",
-                strategy = "bb_breakout",
-                symbol = %sym,
-                reason = %reason,
-                "bb_breakout.on_rejection: duplicate_position reason missing \
-                 'already LONG/SHORT' marker; falling back to RC-04 rollback"
-            );
-        }
-
-        // 原 RC-04 rollback：non-duplicate_position rejection 走此路徑。
         // 先取當前活 OI buffer 快照，以免 rollback 丟掉本 tick push 的新樣本。
         let live_oi_buffer = self
             .symbols
@@ -614,34 +536,38 @@ impl Strategy for BbBreakout {
         }
 
         let mut intents = Vec::new();
-        let current_position = self.symbols.get(sym).and_then(|s| s.position);
+        // P0 Option A-Lite（2026-05-11）：position direction 取自 paper_state SSoT，
+        // 並以 `owner_strategy == self.name()` filter 確保只對「本策略擁有的倉位」走
+        // exit 分支；任何 cross-strategy（grid / ma / bb_reversion / bybit_sync /
+        // orphan_adopted）持倉一律不觸發 bb_breakout 的 exit logic。
+        //
+        // 這層 owner_strategy gate 是本次 P0 重構的核心 — 它從根源杜絕 22:08 mass scalp
+        // 事件中 bb_reversion exit zone 觸發 cross-strategy mass close 的同類 bug
+        // （PA report §9 重點 1：「exit gate owner_strategy 必查」）。
+        let current_position = ctx
+            .position_state
+            .filter(|p| p.owner_strategy == self.name())
+            .map(|p| p.is_long);
         match current_position {
             None => {
-                // ── W7-2 Option A 治本（P2-1 propagation）：cross-strategy paper_state 查詢 ──
-                // 進入 entry 計算前先查 paper_state 是否已有同 symbol 倉位（不論哪策略開的）。
-                // W7-4 audit `2026-05-10--w7_4_5_strategy_position_sync_systemic_audit.md`
-                // §3 P2-1 揭露 bb_breakout 缺此 query，雖 6-gate 自然限頻歷史 occurrence=0
-                // 但 W7 chain consistency 仍有架構價值（防 future bug + alpha-source 6 strategy
-                // 擴充時 trait-level invariant 已就緒）。Option A 直接 skip 並 sync
-                // self.symbols[sym].position，從根源終結 hot loop。
+                // P0 Option A-Lite（2026-05-11）：cross-strategy 倉位（paper_state 有持倉
+                // 但 owner_strategy != self.name()）一律 skip entry，避免重複下單與
+                // duplicate_position router-loop。原 W7-2 Option A 的「sync self.symbols.
+                // position」步驟已移除（field 已不存在；direction SSoT 在 paper_state）。
                 //
-                // entry_price 不 cross-strategy 同步（W7-4 §3 P2-1 trade-off）：
-                // bb_breakout entry_price 是 ATR trailing_stop math 來源（line 808-816），
-                // 使用 cross-strategy entry_price 會 mis-calibrate trailing；留 None 直到
-                // 下次 bb_breakout 自己開倉再寫。trailing_stop / squeeze_detected_ms /
-                // oi_buffer 同樣不動（mirror W7-3 path 治理一致）。
-                if let Some(existing) = ctx.position_state {
-                    // paper_state 已持倉；同步 self.symbols[sym].position 為 paper_state
-                    // 真實方向，下個 tick 直接進 Some(is_long) exit 分支，不再進入 entry path。
-                    let st = self.symbols.get_or_init(sym);
-                    st.position = Some(existing.is_long);
+                // entry_price / trailing_stop / squeeze_detected_ms / oi_buffer 不動：
+                //   * entry_price 是 ATR trailing math 起點，使用 cross-strategy 入場價
+                //     會 mis-calibrate trailing；留 None 待本策略自己 entry。
+                //   * trailing_stop 由本策略 entry tick + 後續 tick 棘輪更新。
+                //   * squeeze_detected_ms 跨 cross-strategy 倉位仍視為有效（squeeze regime
+                //     與倉位歸屬解耦）。
+                //   * oi_buffer 完全與倉位解耦，繼續累積。
+                if ctx.position_state.is_some() {
                     tracing::debug!(
                         target: "strategy_position_sync",
                         strategy = "bb_breakout",
                         symbol = %sym,
-                        existing_is_long = existing.is_long,
-                        "skip entry: ctx.position_state present (cross-strategy paper_state holding) — \
-                         W7-2 Option A treats as cross-strategy desync, sync PerSymbolState.position and skip"
+                        "skip entry: paper_state held by another strategy (cross-strategy occupancy)"
                     );
                     return vec![];
                 }
@@ -874,14 +800,13 @@ impl Strategy for BbBreakout {
                             time_in_force,
                             maker_timeout_ms,
                         }));
-                        // Commit per-symbol state in a single get_or_init call
-                        // to avoid four separate HashMap lookups.
-                        // 單次 get_or_init 寫入所有欄位，避免多次查找。
+                        // 入場時寫 strategy-internal lifecycle state：squeeze 清空、entry_price
+                        // 與 trailing_stop 初始化；position direction 不由本策略寫（P0 Option
+                        // A-Lite：paper_state.apply_fill 統一寫入 SSoT，下個 tick 經
+                        // ctx.position_state 自然反映）。
                         let st = self.symbols.get_or_init(sym);
-                        st.position = Some(is_long);
                         st.squeeze_detected_ms = None;
                         self.cooldown.record_signal(sym, ctx.timestamp_ms);
-                        // V2: Record entry price and initialize trailing stop per-symbol
                         st.entry_price = Some(ctx.price);
                         if let Some(atr_res) = &ind.atr_14 {
                             let dist = atr_res.atr * self.trailing_stop_atr_mult;
@@ -976,11 +901,11 @@ impl Strategy for BbBreakout {
                         ),
                         reason: reason.into(),
                     });
-                    // V2: Reset per-symbol trailing stop state on exit; squeeze
-                    // tracking is preserved (same semantics as pre-refactor).
-                    // V2：出場時重置 position/entry_price/trailing_stop，squeeze 追蹤保留。
+                    // 出場時清 strategy-internal lifecycle state（entry_price / trailing_stop）；
+                    // P0 Option A-Lite（2026-05-11）後 position field 不存在，paper_state.apply_fill
+                    // 已寫平倉並由下個 tick 經 ctx.position_state 反映；squeeze_detected_ms 保留
+                    // （pre-refactor 語意：squeeze 追蹤跨平倉延續，受 FIX-26 expiry 約束）。
                     if let Some(st) = self.symbols.get_mut(sym) {
-                        st.position = None;
                         st.entry_price = None;
                         st.trailing_stop = None;
                     }
