@@ -226,4 +226,51 @@ BtcLeadLagProducer run_loop start (W2 sub-task 4 wired) cohort_size=7 tick_secs=
 
 ---
 
-**End of session worklog**. Final HEAD `ccf7a4bc`. Engine PID 1597560 running with full W1+W2+V086+W7 deploy. Monitor 24h for D+2 14:30 UTC ALTER VALIDATE prereq + paper engine 7d evidence accumulation start.
+## §11 Post-precompact runtime verification (2026-05-11 ~00:25 UTC)
+
+新 session 開頭 runtime 盤點 + 1 P0 healthcheck import bug 修復。HEAD `e4669dd8`。
+
+### Runtime evidence (engine uptime ~25min since 00:02 UTC restart)
+
+| 項 | 實測 | 結論 |
+|---|---|---|
+| Engine PID 1597560 binary `openclaw-engine` | 跑了 25min CPU 4m25s | ✅ HEALTHY |
+| `panel.btc_lead_lag_panel` lag | 44s（每 60s tick 預期）| ✅ W2 producer 正常 |
+| `panel.oi_delta_panel` lag | 44s + 455 rows in 21min | ✅ W1 oi_delta producer 正常 |
+| `panel.funding_rates_panel` lag | 6.7-26.7 min（10/25 syms 有 row）| ⚠️ BB WS Ticker funding_rate field 不穩；非 producer bug |
+| V086 reject_reason_code coverage（last 2h）| 10416/10744 = 96.95% (post-rebuild#2 99.78%) | ✅ producer dual-write working |
+| V091 mutex chk violation count（9.6M rows）| 0 | ✅ ALTER VALIDATE D+2 14:30 UTC 預期 PASS |
+| W-C MAG-082 Stage 2 | WINDOW_PASS sign-off `1ebdb9c9`（operator parallel session）| ✅ MAG-083 unblocked |
+
+### P0 fix: `[65]+[66]` healthcheck import path bug
+
+W1 sub-task 3 (E1-γ, commit `ddf0cebe`) 加 `[66] check_panel_freshness` 時 import 寫 `from .checks_derived`，但 function 實裝在 `checks_derived_ml_hygiene.py`（`[65] check_chain_integrity_post_audit_4b_m3` 同樣）。整個 `passive_wait_healthcheck.sh` 因 ImportError 失能（67 個 check 全停）。
+
+**Fix**: `runner.py:65-83` 拆 import — 5 個真實 `.checks_derived` function 留原 block；`[65]+[66]` 抽出新 `from .checks_derived_ml_hygiene import (...)` block。
+
+**Verify**:
+- python3 ast.parse PASS
+- spot test PG: `[65] PASS post-M3 ratio 100% (n=106)`, `[66] WARN funding=781s lag oi_delta=1s lag` (funding 慢預期)
+
+Commit `a8e24ed9` (Mac→origin→Linux pull all sync).
+
+### Sub-agent IMPL report ratify
+
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_3_strategy_paper_shadow_log.md`（400 LOC, ae77196b sub-agent W2-IMPL-3 cross_asset paper-only shadow signal report）原 stage 但未 commit。本 session 入庫 `e4669dd8` 保治理 trail。
+
+### Operator parallel session activity
+
+- `1ebdb9c9` W-C MAG-082 Stage 2 WINDOW_PASS sign-off + W-D unblock：證實 W-C Caveat 1+2 fix `ccf7a4bc` empirical 生效 → 已可 unblock MAG-083 reviewer brief。
+
+### 結論
+
+新 session 自主完成：
+1. Runtime 盤點：engine + W1+W2+V086 全 healthy
+2. V091 mutex 0 violation → ALTER VALIDATE D+2 14:30 UTC prereq 已驗
+3. P0 healthcheck import bug → 修復 + push + Linux sync
+
+**Engine 不需 restart**（fix 是 helper script，不動 engine binary）。
+
+---
+
+**End of session worklog（updated post-precompact）**. Final HEAD `e4669dd8`. Engine PID 1597560 running with full W1+W2+V086+W7 deploy. Monitor 24h for D+2 14:30 UTC ALTER VALIDATE prereq + paper engine 7d evidence accumulation start. Operator action pending: AMD-W6-1 final approval + CLAUDE.md §七 idempotency wording fix (MIT MUST 4).
