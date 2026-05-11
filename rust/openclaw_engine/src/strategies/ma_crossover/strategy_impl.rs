@@ -45,71 +45,26 @@ impl Strategy for MaCrossover {
         TAGS
     }
 
-    /// RC-04 + W7-3 Option B：拒絕時的 1-tick 防衛（cross-strategy desync hot loop 修復）。
+    /// P0 Option A-Lite (2026-05-11)：拒絕時的 cooldown rollback only。
     ///
-    /// 原 RC-04 行為：回滾該幣種的 position 與 last_trade_ms 至 mutation 前狀態。
+    /// 改造前 W7-3 Option B + RC-04 行為：position 與 cooldown 雙 rollback +
+    /// reason 字串解析 duplicate_position 1-tick 防衛。
+    /// 改造後：positions 不再本地維護（`ctx.position_state` 為 SSoT）。
+    /// 移除清單：
+    /// - self.positions.insert/remove 全部移除（field 已消失）
+    /// - prev_position rollback 移除（rollback 對象消失）
+    /// - W7-3 Option B reason 解析移除（owner_strategy gate 已涵蓋）
+    /// - cooldown rollback 保留（與 positions 解耦的獨立狀態，
+    ///   prev_last_trade_ms 沿用「0 = 未見」哨兵語意）
     ///
-    /// W7-3 Option B 補丁（PA audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
-    /// §6 Option B）：當 reason 是 router gate 1.5 `duplicate_position` 時，
-    /// 解析「已存在的方向」並把 self.positions 同步成該方向，**不**走 prev_position
-    /// rollback。這樣下一 tick 進入 `Some(is_long)` exit 分支而非 None entry 分支，
-    /// 立即終結 INXUSDT 11:34 那種 5 分鐘 2319 次 reject 的 hot loop。
-    ///
-    /// cooldown 不 rollback 也是設計：reject 觸發時 entry 已寫過 last_trade_ms，
-    /// 保留它讓下個 tick 必走 cooldown gate，多一層 hot loop 防護。
-    /// （治本是 W-AUDIT-8a Option A — strategy 端查 paper_state；此補丁僅應急。）
-    fn on_rejection(&mut self, intent: &OrderIntent, reason: &str) {
+    /// 詳：PA report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md` §4.1
+    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
 
-        // W7-3 Option B：duplicate_position 識別 + 立即 sync self.positions。
-        // reason 字串契約見 rejection_coding.rs:147-152 —
-        // 格式 "duplicate_position: {symbol} already {LONG|SHORT} {qty}"。
-        if reason.contains("duplicate_position") {
-            let existing_is_long = if reason.contains("already LONG") {
-                Some(true)
-            } else if reason.contains("already SHORT") {
-                Some(false)
-            } else {
-                None
-            };
-
-            if let Some(is_long) = existing_is_long {
-                // 同步 paper_state 真實方向；下個 tick 進 exit 分支不再撞 gate 1.5。
-                self.positions.insert(sym.clone(), is_long);
-                // **不** rollback cooldown：保留 entry tick 寫入的 last_trade_ms，
-                // 配合 cooldown gate 多擋一輪。
-                tracing::debug!(
-                    symbol = %sym,
-                    existing_is_long,
-                    "ma_crossover.on_rejection: duplicate_position 1-tick defense — \
-                     synced self.positions to paper_state direction (W7-3 Option B)"
-                );
-                return;
-            }
-            // reason 含 duplicate_position 但無 already LONG/SHORT 子串 → 字串契約破裂，
-            // fallback 走原 RC-04 rollback 並標 warn 提醒 contract drift。
-            tracing::warn!(
-                symbol = %sym,
-                reason = %reason,
-                "ma_crossover.on_rejection: duplicate_position reason missing \
-                 'already LONG/SHORT' marker; falling back to RC-04 rollback"
-            );
-        }
-
-        // 原 RC-04 rollback：non-duplicate_position rejection 走此路徑。
-        if let Some(prev) = self.prev_position.get(sym) {
-            match prev {
-                Some(b) => {
-                    self.positions.insert(sym.clone(), *b);
-                }
-                None => {
-                    self.positions.remove(sym);
-                }
-            }
-        }
+        // Cooldown rollback：reject 時還原該幣種的 last_trade_ms 至 mutation 前狀態。
+        // 變更前 last_ms == 0（未見）→ 清除；非 0 → 回寫原值。
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                // 哨兵 0 → 變更前為未見；清除以還原。
                 self.cooldown.clear(sym);
             } else {
                 self.cooldown.record_signal(sym, ts);
@@ -117,68 +72,29 @@ impl Strategy for MaCrossover {
         }
     }
 
-    /// Reset internal position for the closed symbol (risk-stop).
-    /// 外部平倉（風控止損）時重設該幣種的內部倉位狀態。
+    /// P0 Option A-Lite (2026-05-11)：外部平倉時清理 signal-time persistence。
+    /// 改造前：`self.positions.remove(symbol)` + `persistence` 清理。
+    /// 改造後：positions 已不存在（field 移除）；persistence / exit_persistence
+    /// 仍需清理 — signal-time state 與 position lifecycle 強耦合，無 SSoT 替代。
     fn on_external_close(&mut self, symbol: &str) {
-        self.positions.remove(symbol);
         self.persistence.clear(symbol);
         self.exit_persistence.clear(symbol);
     }
 
-    /// W7-5 part 1：真實 fill confirmed 後同步 self.positions 為 fill direction。
-    ///
-    /// callsite：`step_4_5_dispatch.rs:925`，於 paper_state.apply_fill 之前。
-    /// 入場路徑（`on_tick` 主流程）已 eager mutate `self.positions.insert(...)`
-    /// 在 intent emit 時（`strategy_impl.rs:301`），on_fill 此處作為 fill-confirm
-    /// safety net：若 fill 真實成交方向與 intent.is_long 一致則重複寫一次（idempotent
-    /// O(1) HashMap 操作）；若上游 race 導致 self.positions 被 W7-2/W7-3 改動但
-    /// fill 仍沿用原 intent 方向，這裡確保 self.positions 與真實成交方向一致。
-    /// Close 路徑不走 on_fill（走 on_close_confirmed），無需 remove 處理。
-    fn on_fill(
-        &mut self,
-        intent: &OrderIntent,
-        _fill: &openclaw_core::execution::FillResult,
-    ) {
-        // Open 路徑 fill confirmed → sync self.positions 為 intent.is_long。
-        // 加倉場景：intent.is_long 與既有 self.positions 一致，重複寫無副作用。
-        // 反向 race（intent LONG fill 卻來自跨策略 SHORT path）：以 fill source
-        // 即 intent.is_long 為準（fill 觸發者 strategy 自身發的 intent）。
-        self.positions
-            .insert(intent.symbol.clone(), intent.is_long);
-        tracing::debug!(
-            target: "ma_crossover",
-            symbol = %intent.symbol,
-            is_long = intent.is_long,
-            "on_fill: synced self.positions to fill direction (W7-5 part 1)"
-        );
-    }
+    // P0 Option A-Lite (2026-05-11)：on_fill 化為 trait default no-op。
+    // 改造前 W7-5 part 1：strategy.on_fill 同步 self.positions = intent.is_long。
+    // 改造後：paper_state.apply_fill 是 SSoT 寫入點（callsite
+    // `step_4_5_dispatch.rs:1026`）；strategy 端無需 mirror。下個 tick 走
+    // ctx.position_state（`paper_state.get_position(symbol)`）讀。
+    // fn on_fill 不再 override，使用 Strategy trait default no-op。
 
-    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 self.positions。
-    ///
-    /// 過濾條件：`pos.owner_strategy == "ma_crossover"`。`bybit_sync` /
-    /// `orphan_adopted` 倉位不被任何策略 import（owner_strategy 不對應任何 strategy
-    /// name）。重啟後 paper_state 已由 `event_consumer/bootstrap.rs:308`
-    /// `paper_state.import_positions(seed_positions)` 從交易所 snapshot 種入；
-    /// 此處進一步把屬於本策略的倉位寫入 self.positions，避免第一個 tick 進
-    /// entry path 時 self.positions 為空、撞 router gate 1.5 duplicate_position
-    /// 形成 cold-start desync hot loop。
-    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
-        let mut imported = 0_usize;
-        for pos in paper_state.positions() {
-            if pos.owner_strategy == self.name() {
-                self.positions.insert(pos.symbol.clone(), pos.is_long);
-                imported += 1;
-            }
-        }
-        if imported > 0 {
-            tracing::info!(
-                strategy = "ma_crossover",
-                imported,
-                "W7-5 import_positions: rebuilt self.positions from paper_state \
-                 / 從 paper_state 重建 self.positions"
-            );
-        }
-    }
+    // P0 Option A-Lite (2026-05-11)：import_positions 化為 trait default no-op。
+    // 改造前 W7-5 part 2：bootstrap 從 paper_state 重建 self.positions。
+    // 改造後：self.positions 已不存在；bootstrap 後第一個 tick 自然從
+    // ctx.position_state 讀。cold-start desync 風險改由 on_tick 內
+    // owner_strategy gate 涵蓋（任何 cross-strategy 倉位持有都 skip entry，
+    // 不再撞 router gate 1.5 形成 hot loop）。
+    // fn import_positions 不再 override，使用 Strategy trait default no-op。
 
     fn on_tick(
         &mut self,
@@ -205,8 +121,7 @@ impl Strategy for MaCrossover {
             Some(i) => i,
             None => return vec![],
         };
-        // Snapshot pre-mutation last_ms for RC-04 (sentinel 0 when unseen, as before).
-        // 為 RC-04 快照變更前的 last_ms（未見時沿用哨兵 0）。
+        // 為 on_rejection cooldown rollback 快照變更前 last_ms（未見時哨兵 0）。
         let last_ms = self.cooldown.last_ms(ctx.symbol).unwrap_or(0);
         // A2: trend-adaptive cooldown — extends cooldown in strong-trend markets
         // to prevent re-entering into a continuing trend that just closed us out.
@@ -252,48 +167,45 @@ impl Strategy for MaCrossover {
 
         let mut intents = Vec::new();
 
-        // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
-        // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_position.insert(
-            ctx.symbol.to_string(),
-            self.positions.get(ctx.symbol).copied(),
-        );
+        // 為 on_rejection cooldown rollback 快照變更前 last_ms（未見時沿用哨兵 0）。
+        // P0 Option A-Lite (2026-05-11)：prev_position snapshot 移除；prev_last_trade_ms 保留。
         self.prev_last_trade_ms
             .insert(ctx.symbol.to_string(), last_ms);
 
-        match self.positions.get(ctx.symbol).copied() {
-            None => {
-                // ── W7-2 Option A 治本：cross-strategy paper_state 查詢（PA #3 §6 Option A）──
-                // 進入 entry 計算前先查 paper_state 是否已有同 symbol 倉位（不論哪個策略開的）。
-                // PA audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md` 揭露：
-                // ma_crossover 的 self.positions 不查 paper_state，當 grid_trading 在同 symbol
-                // 先開倉，ma_crossover 每 tick 撞 router gate 1.5 duplicate_position 形成 hot loop
-                // （INXUSDT 11:34 一分鐘 2319 reject）。Option A 在 entry path 起點直接 skip 並
-                // sync self.positions，從根源終結 hot loop。W7-3 Option B（on_rejection 1-tick
-                // 防衛）保留作為 reason 字串契約 fallback（W7-4 §7 重點 3）。
-                // ── W7-2 Option A: cross-strategy paper_state pre-entry check ──
-                if let Some(existing) = ctx.position_state {
-                    // paper_state 已持倉；同步 self.positions 為 paper_state 真實方向，
-                    // 下個 tick 直接進 Some(is_long) exit 分支，不再進入 entry path。
-                    self.positions
-                        .insert(ctx.symbol.to_string(), existing.is_long);
-                    tracing::debug!(
-                        target: "ma_crossover",
-                        symbol = %ctx.symbol,
-                        existing_is_long = existing.is_long,
-                        "skip entry: ctx.position_state present (cross-strategy paper_state holding) — \
-                         W7-2 Option A treats as cross-strategy desync, sync self.positions and skip"
-                    );
-                    return vec![];
-                }
+        // ── P0 Option A-Lite (2026-05-11)：position state SSoT 改造 ──
+        // 改造前：`match self.positions.get(ctx.symbol).copied()` 走本地 state。
+        // 改造後：以 `ctx.position_state` filter 出 self-owned position 做為 SSoT；
+        // owner_strategy != self.name() 視為 cross-strategy 持倉 → skip entry。
+        //
+        // - `owns = Some(is_long)`：self-owned 倉位 → exit 分支
+        // - `owns = None` + `ctx.position_state.is_some()`：cross-strategy 持倉 → skip
+        // - `owns = None` + `ctx.position_state.is_none()`：無倉 → entry 分支
+        //
+        // 詳：PA report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md` §3.2
+        let owns: Option<bool> = ctx
+            .position_state
+            .filter(|p| p.owner_strategy == self.name())
+            .map(|p| p.is_long);
 
-                // Entry path — apply RC-01 regime filter + RC-02 higher-TF confirmation.
-                // 入場路徑 — 套用 RC-01 狀態過濾 + RC-02 較高時間框架確認。
+        match owns {
+            None if ctx.position_state.is_some() => {
+                // Cross-strategy 持倉（owner_strategy != "ma_crossover"，
+                // 可能是 grid_trading / bb_breakout / bb_reversion / bybit_sync / orphan_adopted
+                // 等任一）→ 主動 backoff，不發 entry 也不嘗試 exit（exit 由 owner strategy
+                // 負責）。symbol 真釋放（close）後下個 tick 自動恢復 entry path。
+                tracing::debug!(
+                    target: "ma_crossover",
+                    symbol = %ctx.symbol,
+                    "skip entry: cross-strategy paper_state position holds (P0 Option A-Lite owner gate)"
+                );
+                return vec![];
+            }
+            None => {
+                // 無倉位 → entry path。RC-01 regime filter + RC-02 higher-TF confirmation 套用。
                 if !self.regime_allows_entry(ctx) {
                     return vec![];
                 }
 
-                // G-SR-1 A1: Determine signal direction for persistence check.
                 // G-SR-1 A1：確定信號方向供持續性檢查。
                 let signal: Option<bool> = if fast > slow {
                     Some(true)
@@ -309,7 +221,6 @@ impl Strategy for MaCrossover {
                     return vec![];
                 }
 
-                // A1: Time-based persistence filter — signal must hold ≥ min_persistence_ms.
                 // A1：基於時間的持續性過濾 — 信號必須持續 ≥ min_persistence_ms。
                 if !self.persistence.check(
                     ctx.symbol,
@@ -321,7 +232,6 @@ impl Strategy for MaCrossover {
                     return vec![];
                 }
 
-                // A2: Confluence scoring — primary signal is mandatory gate.
                 // A2：匯流評分 — 主信號是強制門控。
                 let score = confluence::compute_score(
                     &self.confluence_config,
@@ -340,14 +250,13 @@ impl Strategy for MaCrossover {
                     return vec![];
                 }
                 let qty = self.default_qty * qty_pct;
-                // R3-9: Min notional guard / 最小名義值守衛
+                // R3-9：最小名義值守衛
                 if qty * ctx.price < self.min_notional_usd {
                     return vec![];
                 }
 
                 let regime = ind.hurst.as_ref().map(|h| h.regime.as_str());
                 let entry_conf = self.compute_entry_confidence(adx, regime);
-                // R3-2: Reuse confidence field for confluence score.
                 // R3-2：復用 confidence 欄位存放匯流分數。
                 let conf_with_score = match score {
                     Some(s) if s > 0.0 => s / 65.0, // normalize to [0,1]
@@ -358,9 +267,6 @@ impl Strategy for MaCrossover {
                     if !self.higher_tf_allows_entry(ctx.symbol, is_long) {
                         return vec![];
                     }
-                    // EDGE-P3-1 A6: snapshot confluence + persistence elapsed at
-                    // decision time so predictor sees the same numbers the gate
-                    // used. Clamp score to f32 for feature vector.
                     // EDGE-P3-1 A6：抓取決策時的 confluence/persistence 供預測器。
                     let confluence_score = score.map(|s| s as f32);
                     let persistence_elapsed_ms =
@@ -375,7 +281,8 @@ impl Strategy for MaCrossover {
                     );
                     if let Some(intent) = maybe_intent {
                         intents.push(StrategyAction::Open(intent));
-                        self.positions.insert(ctx.symbol.to_string(), is_long);
+                        // P0 Option A-Lite (2026-05-11)：self.positions.insert 移除
+                        // — paper_state.apply_fill 是 SSoT 寫入點。cooldown 仍需 record。
                         self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                     }
                 }
@@ -383,14 +290,8 @@ impl Strategy for MaCrossover {
             Some(is_long) => {
                 // Exit path — RC-01/RC-02 filters do NOT apply to exits.
                 // KAMA crosses back through SMA20 = trend reversal (Kaufman).
-                // Exit urgency > entry selectivity: no ADX/regime/higher-TF filter on exit.
                 // 出場路徑 — KAMA 回穿 SMA20 = 趨勢反轉。出場不套用入場過濾器。
                 //
-                // A1: instead of firing Close on the first reverse tick, require
-                // the reverse signal to persist for `min_persistence_ms × (1 − ER)`.
-                // Choppy markets (ER→0) demand confirmation; clean trends (ER→1)
-                // exit nearly instantly. Hard stop / trailing / fast_track paths
-                // operate independently and remain unaffected.
                 // A1：反向交叉不再單 tick 出場，以 KAMA ER 縮放的持續性窗口過濾假反轉。
                 let reverse_signal: Option<bool> = if is_long && fast < slow {
                     Some(false) // bearish reverse for long position
@@ -400,10 +301,7 @@ impl Strategy for MaCrossover {
                     None // aligned with position, no reverse signal
                 };
 
-                // ER-scaled exit persistence window. KAMA-less snapshots fall
-                // back to ER=0.5 (mid) rather than 0 to avoid pinning exit at
-                // the entry-level threshold on cold starts.
-                // ER 縮放的出場持續性窗口；無 KAMA 時退回 ER=0.5。
+                // ER 縮放的出場持續性窗口；無 KAMA 時退回 ER=0.5 避免冷啟動 pin 在入場門檻。
                 let er = ind.kama.as_ref().map(|k| k.efficiency_ratio).unwrap_or(0.5);
                 let exit_persistence_ms = self.compute_exit_persistence_ms(er);
 
@@ -422,7 +320,8 @@ impl Strategy for MaCrossover {
                         confidence: exit_conf,
                         reason: "ma_reverse_cross".into(),
                     });
-                    self.positions.remove(ctx.symbol);
+                    // P0 Option A-Lite (2026-05-11)：self.positions.remove 移除
+                    // — paper_state.apply_fill 平倉路徑會清 paper_state position。
                     self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                     self.exit_persistence.clear(ctx.symbol);
                 }
