@@ -7978,3 +7978,50 @@ docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_paper_edge_repo
 3. **test helper 抽到 strategies/common**：本次與 E1-D 一樣面對「mock PaperPosition」reuse 問題；E1-E 在 funding_arb tests 內聯定義 `make_position` + `ctx_with_owned_position`，與 E1-D 重複 helper pattern；屬 PA §8.1 E1-F aggregator scope，E1-E 不擴張。
 4. **`let _ = is_positive;` 反模式**：曾誤加此行作「閱讀注釋」，但 is_positive 在 `let is_long = !is_positive` 已使用，Rust 不會 unused warning，添加只是 LOC 噪音 — 立即刪除。Edit minimal principle 嚴守。
 5. **trait default no-op 後 test 仍需保留**：on_external_close / on_fill / import_positions 雖然退化為 default，但仍 5 個 noop test 驗證 hook 呼叫不 panic + 不誤動其他內部狀態。default-impl 不等於「無需測」。
+
+## 2026-05-11 — P0 Option A-Lite E1-B：bb_reversion paper_state SSoT 重構
+
+### 任務
+PA P0 Option A-Lite spec (2026-05-11) 之 E1-B：bb_reversion 完整改造為 paper_state SSoT，移除 self.positions / prev_position field + W7-2 / W7-3 / W7-5 全部疊加防護碼。Phase 0 stop-bleed gate (commit 77a52796) 改成乾淨 owner_strategy match。
+
+### 修改範圍
+- `rust/openclaw_engine/src/strategies/bb_reversion/mod.rs` (-229 / +65 net -164 LOC)：
+  - 移除 `positions: PerSymbolState<bool>` field
+  - 移除 `prev_position: HashMap<String, Option<bool>>` field
+  - 保留 `prev_last_trade_ms` 給 cooldown rollback
+  - on_tick：`owns_self = ctx.position_state.filter(|p| p.owner_strategy == self.name()).map(|p| p.is_long)`，match `Some(_) => exit / None if some => skip / None => entry`
+  - on_rejection：化簡為純 cooldown rollback（移除 W7-3 Option B duplicate_position sync + RC-04 prev_position rollback，~100 LOC 縮 ~10 LOC）
+  - on_external_close：只 clear persistence
+  - on_fill：顯式 no-op（明確標示意圖，舊 W7-5 part 1 sync 完全移除）
+  - import_positions：移除 override 用 trait default no-op
+  - 移除 Phase 0 stop-bleed gate（owner_strategy match 後變多餘）
+  - 移除 entry path eager mutate `self.positions.insert` + exit path `self.positions.remove`
+- `rust/openclaw_engine/src/strategies/bb_reversion/tests.rs` (-348 / +201 net -147 LOC)：
+  - 移除 W7-2 sync 驗證 (3 tests) / W7-5 part 1+2 (2 tests) / W7-3 Option B (4 tests) = 9 tests 刪除
+  - 新增 P0 Option A-Lite acceptance tests (6 tests)：
+    - `test_bbr_p0_skip_entry_when_cross_strategy_position_holds`
+    - `test_bbr_p0_proceeds_entry_when_no_position`
+    - `bb_reversion_does_not_close_grid_position_on_pctb_zone`（核心 acceptance）
+    - `test_bbr_p0_self_owned_position_exits_on_pctb_zone`
+    - `test_bbr_p0_on_rejection_unseen_clears_cooldown`
+    - `test_bbr_p0_on_rejection_seen_restores_prior_cooldown`
+  - test_exit_mean + test_exit_always_market 改為第二 tick 注入 `ctx.position_state = Some(self-owned LONG)` 才走 exit zone（必須 mock paper_state）
+  - funding_rate 4 tests 移除 `s.positions.clear()` 行（field 已沒）
+  - 新 helper `make_paper_position_bbr_with_owner(symbol, is_long, owner)` 參數化 owner_strategy
+  - 新 helper `make_paper_position_bbr_for_self_exit(symbol, is_long)` 供 self-exit baseline
+
+### 驗證
+- `cargo build --release -p openclaw_engine --lib`: PASS (14.79s, 18 unrelated warnings)
+- `cargo test --release -p openclaw_engine --lib bb_reversion`: **46/46 PASS**
+- `cargo test --release -p openclaw_engine --lib`: **2794 PASS / 0 fail**（baseline post Phase 0 = 2797，2794 因 9 W7 tests 刪除 + 6 P0 tests 新增 = net -3）
+- grep `\bself\.positions\b|\bself\.prev_position\b` non-test scope = 0 hit
+- grep `PHASE-0-STOP-BLEED` = 0 hit
+- commit: `6cdfe0dc` + push 到 `worktree-agent-ae33b896804323f52`
+
+### 教訓
+1. **Multi-worktree race 警示再現**：sibling worktree 把我的初版 stash 走（"E1-B bb_reversion leaked changes (not E1-E scope)"），我 `git stash pop` 恢復。但 Read tool 用主 worktree 絕對路徑 cache 仍是舊內容 → 之後 cargo build error log 全在主 worktree path 的舊 strategy_impl.rs（line 173 prev_position）— **誤判 sibling broken**。實際 cargo cwd 用我的 worktree，build PASS。教訓：multi-worktree 工作必先 `pwd` 確認 cwd + 用 relative path 給 Read tool。
+2. **第二 tick exit test 必須 mock paper_state**：改造後策略不持本地 state，舊「entry tick → exit tick」測試模式必須在第二 tick 顯式 inject ctx.position_state = Some(self-owned)。否則 owns_self=None → cooldown 阻擋 → 返回 0 actions。
+3. **W7-2/W7-3/W7-5 是 root trigger**：RCA 已揭露 W7-2 sync self.positions = mass scalp root trigger（把 cross-strategy 倉位 sync 進本地 → 下個 tick 進 exit zone）。Option A-Lite 從根源移除 self.positions 後，W7-2/W7-3 全變 dead code 可清。
+4. **prev_last_trade_ms 與 prev_position 解耦保留**：cooldown rollback 不依賴 position state；entry tick 寫 cooldown 前需快照，rejection 時還原。設計上獨立模塊，移除 positions 後仍需要。
+5. **trait default no-op vs explicit no-op**：on_fill 改 explicit override no-op（不用 trait default）為了明確標示「舊 W7-5 part 1 sync 邏輯主動移除」；import_positions 改 trait default no-op（直接刪 override），兩種 pattern 都正確，差別在「是否需要 self-documenting intent comment」。
+6. **strategies/common helper 抽出 deferred to E1-F**：本次與 E1-D / E1-E 一樣面對「mock PaperPosition」reuse 問題；E1-B 內聯定義 helper（make_paper_position_bbr_with_owner / make_paper_position_bbr_for_self_exit）；屬 PA §8.1 E1-F aggregator scope，E1-B 不擴張。
