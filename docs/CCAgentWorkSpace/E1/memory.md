@@ -8308,3 +8308,71 @@ SQL 反事實：移除所有 `strategy_name='grid_trading' AND symbol NOT IN pin
 - **文件 §九**：1740→1931（< 2000 hard cap）
 - **§四 5 硬邊界**：0 觸碰
 - **forbidden_guard / V3 §6.2**：0 violation
+
+## 2026-05-11 — P0 Replay Tier A E1-A：runner.rs T1 (is_pinned) + T2 (position_state) + T2.5 (ReplayPosition.owner_strategy)
+
+**Branch**: `worktree-agent-ae6ec4e1d8b2064af` (Mac CC E1-A worktree)；待 E2 + E4 + PM bundle commit
+**Report**: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_a_runner_position_state.md`
+
+### 修復概要
+
+依 PA 設計 (`2026-05-11--p0_replay_engine_counterfactual_fix_design.md`) §3.3.1 + §3.3.2 + §T2.5：
+
+- **T1**：`runner.rs build_tick_context` 從 hardcoded `is_pinned: true` 改為 caller-injected；caller 由 `scanner_timeline.is_active_at(symbol, ts_ms)` 推算；無 timeline（synthetic walker baseline）保留 true。
+- **T2**：`build_tick_context` 從 hardcoded `position_state: None` 改為 caller 由 `ReplayPaperSnapshot.get_position(symbol)` 映射為 stack-local `PaperPosition` borrow；新增 `build_replay_position_borrow` helper。
+- **T2.5**：`ReplayPosition` 加 `owner_strategy: String` field；`apply_fill_open` 簽名加 `owner_strategy: &str` 參數；fresh open path 寫入；callsite 傳 `&intent.strategy`。
+
+### 修改清單
+
+- `rust/openclaw_engine/src/replay/risk_adapter.rs`：+11 LOC（562→573）
+  - `ReplayPosition` 加 `owner_strategy: String`
+  - 1 個既有 test seed 補 owner_strategy
+- `rust/openclaw_engine/src/replay/apply_fill.rs`：+10 LOC（740→750）
+  - `apply_fill_open` 簽名加 `owner_strategy: &str`
+  - fresh open path `ReplayPosition.owner_strategy: owner_strategy.to_string()`
+  - 同向加倉 first-write-wins（與 production PaperPosition 對齊）
+- `rust/openclaw_engine/src/replay/runner.rs`：+69 LOC（1175→1230）
+  - `build_tick_context` 簽名加 `is_pinned: bool` + `position_state: Option<&'a PaperPosition>`
+  - `execute_adapter_pipeline` caller 推算 `is_pinned` + 構造 stack-local `pp_ref` 注入
+  - 新增 `build_replay_position_borrow(ReplayPosition, ts_ms)` helper
+- `rust/openclaw_engine/src/replay/runner_tests.rs`：+141 LOC（1326→1467）
+  - 3 個既有 ReplayPosition test seed 補 owner_strategy
+  - 4 個新 sanity test：
+    1. `build_replay_position_borrow_preserves_owner_strategy`
+    2. `build_replay_position_borrow_clamps_negative_ts`
+    3. `build_tick_context_threads_is_pinned_and_position_state`
+    4. `replay_position_owner_strategy_default_empty_string`
+
+### 驗證
+- `cargo build --release --bin replay_runner --features replay_isolated` PASS（14.08s）
+- `cargo test --release -p openclaw_engine --lib` baseline 2800 → post-IMPL **2804 passed**（+4 sanity test）；0 regression
+- `cargo test --lib replay` **113 passed**
+- forbidden_guard acceptance **4/4 PASS**（含 proof_4 env trip）
+- replay_runner_e2e **6/6 PASS**（含 proof_1/4/5 byte-equal + proof_5 baseline_vs_candidate）
+- replay_runner_e2e_param_delta R5-T7 **2/2 PASS**（cross-language proof_7/8）
+- profile / mac_policy / xlang signer **5+4+8 PASS**
+- forbidden_guard / V3 §6.2 0 violation；§四 5 硬邊界 0 觸碰
+- 跨平台 grep `/home/ncyu` `/Users/[a-z]+` 0 hit
+- 文件大小：runner.rs 1230 / risk_adapter.rs 573 / apply_fill.rs 750 / runner_tests.rs 1467 全 < 2000
+
+### 關鍵教訓
+
+1. **PaperPosition stack-local borrow lifetime 設計**：`stack_pp_opt: Option<PaperPosition>` 是 per-iteration local owned value；`pp_ref: Option<&PaperPosition>` 借它；ctx 借 pp_ref。NLL per-iteration 釋放後不衝突後續 `self.paper_snapshot.as_mut()` mutable borrow（apply_fill 內）。設計成 owned helper 比 直接餵 TickContext owned-by-value 更穩，後者需改 production TickContext ABI（unacceptable scope expansion）。
+2. **`crate::paper_state::PaperPosition` import 合規**：containers.rs 是 pure data struct（`#[derive(Debug, Clone, Serialize, Deserialize)]`），與 forbidden 的 `PaperState`（DB writer + 全域 mutate）同 module 不同 layer；TickContext 既有 import，replay 對稱。proof_4 forbidden_guard env trip 仍 PASS = enforce_at_runtime 邏輯不被 import 觸發；E2 nm symbol audit 必跑 Linux release binary 確認 mangled `paper_state::PaperState::*` symbol 不洩漏（Mac strip 後 nm 看不到 mangled symbol，linux release binary 更可靠）。
+3. **ReplayPosition struct add field blast radius**：E0063 强制更新所有 4 個 callsite（risk_adapter.rs:510 既有 tests + runner_tests.rs:518/613/1163 既有 tests）；E1-D 將寫 acceptance tests 也需傳 owner_strategy。struct add 在 Rust 是 expected mechanical work。
+4. **owner_strategy first-write-wins**：對齊 production `PaperPosition.owner_strategy` 語義（ORPHAN-ADOPT-1 Phase 2A）；同向加倉只 net qty 不覆寫 owner，減倉不改。fresh open 寫 intent.strategy.clone()，replay 與 production 對齊。
+5. **UTF-8 中文標點對齊**：Edit tool old_string 必匹配原文字節（含中文 `，`/`、` U+FF0C/U+3001 vs ASCII `,`）；CC 主動輸入 ASCII `,` 與檔內 UTF-8 中文逗號 不會 match。發生時 `od -c` 確認字節後重 Edit。
+6. **build_replay_position_borrow 預設 field 值**：production PaperPosition 有 11 個 field（best_price / entry_fee / unrealized_pnl / entry_context_id / entry_notional / max_favorable_pnl_pct / peak_reached_ts_ms 等），replay 無真實源；用合理 default（best_price = entry_price / 其餘 0 / 空字串）。Tier A acceptance §3.1 不要求策略讀這些 field，可接受 trade-off；若未來 strategy on_tick 改讀 unrealized_pnl 等 → enhance helper。
+7. **multi-session race 守則**：本 E1-A 在 Mac `worktree-agent-ae6ec4e1d8b2064af`；隔壁 E1-B 在 `worktree-agent-a558256f65b2d2af2` 已改 replay_full_chain_routes.py + tests。我不碰 E1-B 的 file；我的 4 個 Rust file 也與 E1-C 將動的 risk_adapter HashMap 不衝突（E1-C 加 `latest_price_by_symbol` field 是新增，與我 add `owner_strategy` 互相獨立）。PM bundle commit 時一次 include 所有 sibling file。
+8. **commit-first push 守則**：CC 不主動 push（PA spec 明確「本地 commit + push」但 worktree base HEAD `17d95d67` 有多個 sibling 並行進行；按工作流序 `E1 IMPL → E2 review → E4 regression → PM bundle commit + push`）。我寫完 report 即 stop；不調 `git add` / `git commit`。
+
+### 治理對照
+- **CLAUDE.md §一**：玄衡 replay isolated subprocess，0 動 main pipeline
+- **§二 16 原則**：16/16（生存>利潤、失敗收縮、認知誠實、持續進化）
+- **§四 5 硬邊界**：0 觸碰
+- **§五 架構**：replay 仍是 isolated subprocess
+- **§七 跨平台**：0 硬編碼路徑，0 平台特定 API
+- **§七 注釋（2026-05-05 中文默認）**：新增注釋全中文，原英文未動
+- **§九 文件大小**：4 檔全 < 2000 hard cap
+- **forbidden_guard / V3 §6.2**：proof_4 PASS + nm audit ok
+- **V3 §12 #10/#11/#14**：proof_1/4/5 byte-equal + R5-T7 xlang param delta proof_7/8 全 PASS
