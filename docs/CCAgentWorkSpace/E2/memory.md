@@ -1,5 +1,38 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-11 — W-C MAG-082 Caveat 1+2+3 Round 2 mini re-review (APPROVE)
+
+**對象**：E1 R2 極小 fix（Round 1 已 APPROVE WITH CONDITIONS，C-A.2 MEDIUM operator 拍 Option B）
+
+**Scope**：production 1 LOC (`runtime_shadow.rs:567` `filled_report_id` → `input.stub_report_id.to_string()`) + tests 2 LOC (`tests.rs:946 + 956` 新 plan/report invariant assertion) + 注釋 8 行
+
+**Verdict**：**APPROVE** · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW（R1 6 個 LOW unchanged）
+
+**驗證手段**：
+1. `grep filled_report_id|stub_report_id runtime_shadow.rs` — 確認 line 567 已換、其他 7 處 production 引用（line 414/454/465/489/520/559-564 註釋/576 audit hint）unchanged
+2. `grep report_change.object_id|report_transition.object_id tests.rs` — 確認 R2 只動 1 個 test 中的 1 個 assertion；其他 6 個 runtime_shadow test 0 副作用
+3. Mac 本地 `cargo test --lib --release -p openclaw_engine`：**2776/0/0**（對齊 E1 自報），runtime_shadow series 7/7 PASS 含 R2 改的 `..._writes_real_fill_chain`（0.00s in 2769 filtered out）
+4. `git diff main_pipelines.rs` 確認 R2 對它 0 字節接觸 — bin build error `btc_lead_lag_panel_slot` 屬 sibling W2 sub-task 4 E1-δ wave 累積，不歸屬 R2
+5. R1 跨語言契約結論不破：R2 未動 ExecutedBy edge / details JSON / 新建 filled ExecutionReport row，Python `[55] check_55` SQL 不對 `decision_state_changes.object_id` 做 JOIN → R2 改 transition.object_id 對 healthcheck gate 無影響
+
+**接受 caveat**：
+- comment 8 行（acceptance #6 上限 5）— 接受 E1 caveat C-Round2-1：runtime_shadow 6 行對 SM-04 不變式 + reviewer 防回退提示有實質價值；tests 4 行對 plan vs report transition object_id 對稱說明合理。不強制精簡。
+- test count baseline 2757→2776 漂（acceptance #2 字面期望 2757）— 接受 E1 caveat C-Round2-3：sibling W2 wave 在 R1→R2 期間 land +19 test，0 failed 維持。
+- bin build error（acceptance #1 字面期望含 bin）— 接受 E1 caveat C-Round2-2：sibling W2 sub-task 4 E1-δ BtcLeadLagPanelSlot WIP 累積，PM holistic commit 一併打包。
+
+**經驗教訓 / Lesson learned**：
+
+1. **Mini re-review SOP 化**：R1 APPROVE WITH CONDITIONS + R2 極小 delta → mini re-review 只驗 R1→R2 delta，不重跑對抗審查；節約 token 對接 reviewer brief 而非每輪重頭分析。
+2. **多 wave 並行下 sibling 進展自然漂移**：W2 panel_aggregator + canary_writer 在 R1→R2 期間 land +19 test；E1 自報 baseline 漂移應接受為 work-in-progress 自然現象（核心 invariant = 0 failed/ignored）。
+3. **語意對齊 vs 設計 trade-off**：append-only event log 哲學下 transition.object_id 應對「既有 object 真實狀態變化」寫，而非「新建 row」。R1 IMPL 用 filled_report_id 雖然 from_state=shadow_planned 自圓其說（plan→report 對應 plan 的 state 變了），但 R2 改用 stub_report_id 在 SM-04 reviewer 視角更不歧義。MAG-083 audit pack 可省 1 章節 reviewer brief。
+
+**Cross-References**：
+- E2 R1 review：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-10--w_c_fix_e2_review.md`
+- E2 R2 review：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w_c_fix_e2_review_round2.md`
+- E1 R2 report：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w_c_fix_rust_impl_round2.md`
+
+---
+
 ## 2026-05-05 — REF-20 Sprint C R6 W1 review (PASS to E4 + 1 LOW + 1 P2 + 1 LOC budget concern)
 
 **對象**：兩 sub-agent 並行 deliverable
@@ -1806,3 +1839,52 @@ E1-C T3 `_read_canary_stage` path 2b 把 legacy `shadow_mode_provider` 回 False
 - 重點 audit confirm：(1) early-return 僅跳 prev_position rollback **保留 cooldown** 是有意 PA §8 設計；(2) reason 字串 = pub(super) enum 唯一 producer，contains() 容忍前綴；(3) TickContext signature 0 動 (PA dispatch 邊界守住)；(4) prev_position 每 tick line 180 必 overwrite，無 stale leak
 - LOW finding：fallback (contract drift) cooldown clear 沒獨立 unit test，留 W-AUDIT-8a 治本時補
 - 反模式 catch：sibling bb_breakout / bb_reversion 同設計風險已標 PA §7，補丁邊界 ma_crossover only 治本留 W-AUDIT-8a Option A
+
+---
+
+## 2026-05-10 W-C MAG-082 Caveat 1+2+3 Fix — APPROVE WITH CONDITIONS
+
+### 場景
+QA W-C audit CONDITIONAL_PASS 揭 2 caveat（decision_state_changes 0 row + ExecutionReport stub-only），PA 派 3 並行 E1 sub-agent 修：Rust E1（FIX-1+2 合併）15 file +877 LOC / Python E1（FIX-3）2 file +254 LOC。報告路徑 `2026-05-10--w_c_fix_e2_review.md`。
+
+### Verdict 摘要
+**APPROVE WITH CONDITIONS** — 1 MEDIUM + 6 LOW + advisory；可派 E4。MEDIUM = `report_transition.object_id = filled_report_id` 對「新建 row from_state=shadow_planned」語意不嚴格；operator/PM 1 分鐘裁定 A（接受 design + reviewer brief 補解釋）/ B（小 round 2 改 stub_report_id 1-2hr）。E2 推薦 A。
+
+### 真實對抗驗證（E2 重跑非信 E1 自報）
+- `cargo test --lib --release -p openclaw_engine` = 2757/0/0；E1 自報 2757 PASS 對齊 ✓
+- agent_spine 13/13 / event_consumer 156/156 / tick_pipeline 166/166 PASS
+- `pytest helper_scripts/db/test_agent_spine_healthcheck.py -v` = 14 passed in 0.02s；E1 自報對齊 ✓
+- cargo build --release 0 error 含 sibling W2 slots.rs WIP 不破 build ✓
+
+### Caveat C 跨語言契約 empirical 驗證（重點）
+| 項 | Rust | Python SQL | 結論 |
+|---|---|---|---|
+| edge_type 序列化 | `DecisionEdgeType::ExecutedBy → "executed_by"` (events.rs:58) | `edge_type='executed_by'` (line 233) | byte-equal ✓ |
+| details JSON key | `"fill_completion": true` (3 處) | `(details->>'fill_completion')::boolean IS TRUE` (line 234) | snake_case identical ✓ |
+| Edge 方向 | from=plan_id, to=filled_report_id | from_object_id=c.order_plan_id, to_object_id=filled_report.object_id | aligned ✓ |
+| engine_mode filter | both `matches!(engine_mode, "demo" \| "live_demo")` byte-equal | engine_mode=ANY(modes) param | 不衝突 ✓ |
+
+### Findings 表
+| # | 嚴重性 | 位置 | 描述 |
+|---|---|---|---|
+| C-A.1 | LOW | step_4_5_dispatch.rs:614-642 + runtime_shadow.rs:72-80 | stable_id 字面複製，當前 byte-equal 對齊；P3 抽 helper |
+| **C-A.2** | **MEDIUM** | runtime_shadow.rs:566-585 | `report_transition.object_id=filled_report_id` 對「新建 row from_state=shadow_planned」語意不嚴格；不破 [55] gate 但混淆 MAG-083 reviewer |
+| C-A.3 | LOW | tests.rs 缺 partial fill skip integration test | PA §4.2 期望 8 test，IMPL 給 5+3 數量達；缺 loop_exchange 端 integration test，但靜態 if fully_filled 互斥+雙 guard |
+| C-A.4 | LOW | runtime_shadow.rs:470 | fill_latency_ms u64→f64 SAFETY 注釋未明寫 2^53 範圍 |
+| C-A.5 | LOW | commands.rs 1365/mod.rs 1188/step_4_5_dispatch.rs 1557 | ≥800 警告線，但 pre-existing baseline +56/+17/+17 |
+| C-B.1 | LOW | test_agent_spine_healthcheck.py:1-43 | isolation import workaround；W1 wave land 後撤回 |
+| C-B.2 | LOW | checks_agent_spine.py | function LOC ~112 略超 prompt 50；PA spec 本就要求 SQL extension |
+
+### 教訓追加（lesson 45-48）
+
+45. **跨語言 contract empirical 驗證必拆 byte-level 5 維**：W-C Caveat C `details.fill_completion=true` 對齊 = (a) Rust enum→str serialize byte-equal Python SQL string literal (b) JSON key case-sensitive snake_case 對齊 (c) Value type `serde_json::Value::Bool(true)` → PG `->>'<key>'::boolean IS TRUE` (d) Edge 方向 from/to 對齊 (e) engine_mode filter 兩端對齊。**抽象**：跨語言 contract 不是「Rust 寫 + Python 讀」單向 OK 就行；必 byte-level diff 5 維（serialize / case / value type / direction / filter），缺一不行。本次 5 維全 PASS = 合格 cross-language contract review 範式。
+
+46. **stub vs filled row 在 append-only event log 哲學下的 transition 語意陷阱**：Option α-A「新建 filled row 不改 stub row」是 append-only event log；但 state transition 表達「該 row 狀態變了」應對 **既有持續存在的 row** 寫（stub_report_id），不對新建 row 寫；新 row 一建立就 shadow_filled，transition 表達的是 stub 的狀態變化（shadow_planned → shadow_filled）。**規律**：append-only event log + state transition 並存時，必檢查 transition 的 object_id 對應「狀態真變了的 row」而非「新建 row」。本 round MEDIUM C-A.2 是這條反模式 N=1，未來看到 append-only + transition 設計必先反問。
+
+47. **caller wiring grep 不同 emit pattern 數法**：E1 自報「`put_state_transition` grep 4 命中是 trait method 計數，真實 emit 經 `AgentSpineMsg::StateTransition(` enum」是對的對抗反問結果。**規律**：對抗審核「producer wiring」grep 必跑兩種：(a) trait method 名稱 (b) enum variant constructor。本 IMPL 不走 trait method 而是直接構造 enum variant 寫 mpsc，是正確設計 choice — 與 emit_entry_lineage 既有 pattern 同源。**抽象**：「caller grep 命中數」不是唯一證據；必確認 emit point 真實走的路徑（trait/enum/closure）+ end-to-end 從 sender → consumer 對齊。
+
+48. **multi-sub-agent 並行交付期 PM holistic commit 的 build 影響檢查**：W-C E1 IMPL DONE 時 `ipc_server/slots.rs` 有 W2 sub-task 4 E1-δ WIP modification（不在 W-C 範圍）；E2 grep diff 確認屬 sibling wave，cargo build --release 0 error。**規律**：multi-sub-agent 並行交付期，PM holistic commit 前 E2 必跑 `cargo build --release` 含所有 WIP file（不只 E1 自報的 15 file），確保 PM commit 不破 build。**抽象**：sub-agent isolation 假設「各做各範圍」，但 build 必含全 working tree；E2 必驗 PM holistic commit 整體 build 綠，不只本 IMPL build 綠。本 round 已驗 0 error，OK。
+
+### 反模式錄追加（item 9）
+9. **append-only event log + state transition 雙存時 transition 的 object_id 應對「既有 row」而非「新建 row」**：W-C Caveat 2 Option α-A 推薦新建 filled_report row 不改 stub row；transition 表達「狀態真變了」應對 stub_report_id 寫，不對 filled_report_id 寫；對 filled row 寫 transition from_state=shadow_planned 會破壞 SM 語意（filled row 從未經 shadow_planned）。E2 review 必檢查此設計細節。
+

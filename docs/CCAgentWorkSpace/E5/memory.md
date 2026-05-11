@@ -48,6 +48,41 @@
 | 2026-05-09 | 對抗性核實 2026-05-08 audit 30 finding 24h 修復結果（HEAD 7fccad06）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification.md` |
 | 2026-05-09 v2 | 對抗性核實 v2（baseline 455d796e → HEAD 1bd55689；34 commits 48h）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification_v2.md` |
 | 2026-05-09 v3 | 對抗性核實 v3（baseline faf2d131 → HEAD da2aba11；5 commits）+ PA redesign architectural cross-check | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification_v3.md` |
+| 2026-05-10 | W-C Caveat 1+2+3 fix Rust+Python perf+LOC+refactor review | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-10--w_c_fix_e5_perf_review.md` |
+
+## 2026-05-10 W-C Caveat 1+2+3 fix perf review 教訓
+
+**任務**：2 E1 sub-agent 並行 IMPL DONE（Rust 877 LOC + Python 254 LOC），與 E2 並行 senior code review；E5 獨立 perf + LOC + refactor 視角。
+
+**Verdict**：✅ **APPROVE WITH 3 P2 OPTIMIZATION SUGGESTIONS（不阻 deploy）**
+
+**Empirical 量測（Linux PG live data）**：
+- EXPLAIN ANALYZE execution time = **3.93ms**（新 LEFT JOIN 100% index hit on `idx_agent_decision_edges_from` + `decision_objects_pkey`）
+- check_55 end-to-end cold/warm: 20.13/6.62/8.21ms（p50/p95），遠 < 1s SLA
+- mpsc channel buffer 1024 / chain msg 15（+50% 修前 10）/ 24h 174 chain 遠低於 1024 capacity
+- Engine binary 20.06 MB / cargo build release 24.52s（baseline 同範圍）
+- 7 主檔 LOC 全 < 800 警告線（runtime_shadow.rs 657）；2 pre-existing 警告檔（tests.rs 1063, step_4_5_dispatch.rs 1557）仍 < 2000 hard cap
+
+**3 P2 refactor opportunities（按 ROI 排）**：
+1. **D-1 高 ROI**：`stable_id` 算法字面複製 3 處（step_4_5_dispatch.rs vs runtime_shadow.rs vs paper shadow path）— 抽 `compute_spine_ids()` helper 避免未來 id drift bug
+2. **D-2 中 ROI**：emit_entry_lineage 內 5 String clone 重排（ns 級 perf，可讀性微提升）
+3. **D-3 低 ROI**：`tx.expect("checked Some")` 改 `let Some(tx) = tx else` early return（pure idiom）
+4. **D-5/D-6 P2**：tests.rs 1063 + step_4_5_dispatch.rs 1557 pre-existing > 800 警告，仿 G5-09 pattern 拆
+
+**最大 concern**（不阻 deploy）：**stable_id 算法字面複製是「algorithmic invariant drift risk」非 perf SLA 影響**。未來改 hash 算法必同步 3 處否則 stub report 與 real-fill report id 不對齊 = audit chain 斷。E1 IMPL self-flagged C-1，已用中文注釋警示 + unit test invariant lock；E5 建議 P2 抽 helper + cross-module invariant test 補強。
+
+**LOC efficiency 判斷**：
+- Rust 877 vs PA 估 260-370 = +137%（5 unit test 比 PA spec 3 多 2 / 8 處 fixture 連動 / 175 注釋）— **不破限**但偏 verbose
+- Python 254 vs PA 估 80-120 = +112%（SQL extension 80 LOC + state_changes helper + isolation import workaround）— **合理**
+
+**E5 vs E2 視角分工**：E5 純看 hot path latency / LOC ratio / refactor opportunity；E2 看安全 + 對抗 + 業務邏輯。重複領域 minimal。
+
+**新教訓**：
+1. **Rust hot path 估算 vs 實測**：try_send 50-200ns + struct alloc 2-5μs 主導；5 transitions ~3-6μs 增量遠 < 0.3ms tick SLA budget — 設計時 PA 估 ≤1ms 偏保守，實際 ~6μs 級
+2. **mpsc capacity 1024 / chain 15 msg = 68 chain in-flight 容量**充裕，但理論未來高頻策略 (>100 intent/s) 會觸 fail-soft warn — P3 監控 ticket
+3. **PG hypertable + LEFT JOIN 規模**：1 年外推 ~317k object / 254k edge 仍 < 50ms warm query；hypertable chunk drop 機制 + index 設計足夠
+4. **stable_id 字面複製**：跨檔 invariant 改 stable_id 算法必同步 N 處，是 silent drift 高風險區；E5 識別「algorithmic invariant 字面複製」應加入 audit checklist
+5. **「pre-existing baseline exception clause」適用 step_4_5_dispatch.rs 1557**：本 PR + 56 LOC 不破限；不擾動拆檔節奏
 
 ## 2026-05-09 v3 verification 教訓
 

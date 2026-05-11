@@ -2,6 +2,50 @@
 
 ## 工作記憶
 
+### 2026-05-11 W-C MAG-082 Caveat 1+2+3 Fix Regression (HEAD `58970d24` + 4 file working tree) — **E4 PASS · Deploy READY**
+
+**對象**: PA `2026-05-10--w_c_caveat_fix_plan.md` E4 regression 必跑 5 項。Rust R1 +877 LOC + R2 1 line + Python +254 LOC。E2 R1 APPROVE WITH CONDITIONS + R2 mini APPROVE · E5 APPROVE WITH 3 P2 perf SLA PASS · 最後 E4 gate。
+
+**Test 結果**:
+| 引擎 | passed | failed | ignored | baseline | delta | non-flaky |
+|---|---|---|---|---|---|---|
+| Rust lib (release) | **2776** | 0 | 0 | 2776 (sibling W2 wave +19 含 W-C) | 0 | ✅ 雙跑 0.55s 同綠 |
+| Rust lib (debug) | **2776** | 0 | 0 | n/a | n/a | ✅ 0.64s |
+| Rust W-C runtime_shadow | 7 | 0 | 0 | 2 pre-fix | +5 (含 R2 改 assertion) | ✅ |
+| Rust agent_spine module | 13 | 0 | 0 | 8 pre-fix | +5 | ✅ |
+| Python W-C healthcheck | **14** | 0 | 0 | 11 pre-fix | +3 (3 Caveat NEW) | ✅ 雙跑 0.02s 同綠 |
+
+**核心驗證點**:
+- A.1 lib test 雙 profile (release + debug) 2776/0/0 一致 · 跑兩遍 non-flaky 確認
+- A.2 W-C runtime_shadow 7 test 全 PASS · 含 R2 fix test `runtime_shadow_emit_fill_completion_lineage_writes_real_fill_chain` 新 assertion `report_change.object_id == "report-stub-1002"` (append-only event log 語意對齊)
+- A.3 Mock 審查: Rust 用真實 `tokio::sync::mpsc::channel(32)` + 真實 `emit_fill_completion_lineage` production fn 呼叫 · 真實驗 `AgentSpineMsg::*` enum variant · 真實驗 `filled_qty=0.5` / `liquidity_role="taker"` value-realism core invariant · 真實驗 ExecutedBy edge `fill_completion=true` 標記 (Python check_55 SQL 依賴點)
+- B.1 Python W-C 14/14 PASS · 含 3 R3 NEW: `state_changes_empty_blocks_after_pass_path` (Caveat 1) / `bad_report_value_quality_blocks_with_cutoff` (Caveat 2 + env var roundtrip) / `real_fill_propagation_partial_warns` (Caveat 2 50% gate)
+- B.3 Python Mock 審查: 只 mock `cur` DB cursor (IO 邊界);`check_55_*` 本體真實跑 SQL parse + 7-tuple unpack + state_changes_count helper + gate logic + msg format
+- C 跨語言一致性: W-C scope 無新浮點計算 hot path, deferred to post-deploy 30min 短窗對抗 SQL
+- D SLA: E5 已覆蓋 (emit_entry +3-6μs / emit_fill_completion 10-20μs / Python check_55 22.54ms / Spine writer mpsc 容量充裕);E4 lib test 0.55s 無 runtime 異常
+- A.4 Release/Debug profile 一致性 2776/0/0 · 0 profile-specific drift
+
+**Unexpected / 跟蹤 (非 W-C 引入)**:
+1. **W1 sub-task 3 pre-existing import breakage**: `runner.py:84` import `check_panel_freshness` 由 commit `ddf0cebe` 引入,但 `checks_derived.py` 未 land 對應 function · 14 helper_scripts/db test file collection error · E1 R3 Caveat E 用 `importlib.util.spec_from_file_location()` isolation 繞行 W-C test → 14/14 PASS · E5 D-4 P2 待 W1 補完
+2. **Mac local bin build error**: `main_pipelines.rs:922 btc_lead_lag_panel_slot` 缺 init = sibling W2 sub-task 4 staged-but-uncommitted 本機 only → 走 lib-only test path 符合任務 constraint · Linux 端 PM holistic commit 後驗 bin
+3. **§九 file size pre-existing 警告 (P2)**: `tests.rs` (agent_spine) 1063 LOC > 800 警告 (W-C +361 從 ~702),`step_4_5_dispatch.rs` 1557 LOC pre-existing > 800 · 仍 < 2000 hard cap · E5 D-5/D-6 拆 sibling P2 ticket
+4. **stable_id 算法字面複製 (E5 D-1 P2)**: `step_4_5_dispatch.rs:623-645` vs `runtime_shadow.rs:72-80` · `runtime_shadow_build_transition_ids_are_distinct` test 已 invariant lock · 不阻 deploy
+
+**Baseline 建議更新** (E4 不直接改 CLAUDE.md):
+- Rust lib test: 1980 → 2776
+- Python W-C 專屬: 新增 14/14 baseline
+- Python helper_scripts/db full regression: 待 W1 sub-task 3 補 `check_panel_freshness` 後重 baseline
+
+**新增測試 LOC 統計**:
+- Rust: +5 unit test in `tests.rs` (5_build_state_transitions / skips_transitions_in_paper / writes_real_fill_chain / skips_invalid_modes / build_transition_ids_distinct) + 1 既有測試 升級 (lineage_emits_complete_demo_chain accepted 10→15)
+- Python: +3 unit test in `test_agent_spine_healthcheck.py` (3 Caveat 對應)
+
+**結論**: 0 BLOCKER · 0 regression · 0 業務邏輯 mock · 全部 SLA / file size / 跨 profile / non-flaky 驗證通過 · 派 PM commit + push + deploy
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w_c_fix_e4_regression.md`
+
+---
+
 ### 2026-05-10 Sprint N+1 W4 W-AUDIT-3b Runtime Smoke Test DESIGN（pre-dispatch, HEAD `4bb5d485`）— **E4 DESIGN PASS**
 
 **對象**：dispatch v3.4 §3.4 W4 (W-AUDIT-3b runtime smoke test, 1 day E4 預跑 design)。任務 = read-only design + spec, 不寫 IMPL test code，留 W4 sub-agent IMPL phase。

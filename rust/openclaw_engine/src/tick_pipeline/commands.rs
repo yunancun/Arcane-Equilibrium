@@ -813,6 +813,13 @@ impl TickPipeline {
                 } else {
                     None
                 },
+                // W-C Caveat 2 修復（2026-05-11）：close 路徑不寫 entry lineage
+                // （emit_entry_lineage 僅 open intent 使用），下游
+                // emit_fill_completion_lineage 自然 short-circuit。
+                spine_order_plan_id: None,
+                spine_decision_id: None,
+                spine_verdict_id: None,
+                spine_stub_report_id: None,
             };
             match tx.send(request) {
                 Ok(()) => {
@@ -972,6 +979,11 @@ impl TickPipeline {
                         } else {
                             None
                         },
+                        // W-C Caveat 2 修復（2026-05-11）：close 路徑不寫 entry lineage。
+                        spine_order_plan_id: None,
+                        spine_decision_id: None,
+                        spine_verdict_id: None,
+                        spine_stub_report_id: None,
                     };
                     match tx.send(request) {
                         Ok(()) => {
@@ -1130,6 +1142,11 @@ impl TickPipeline {
                     } else {
                         None
                     },
+                    // W-C Caveat 2 修復（2026-05-11）：close 路徑不寫 entry lineage。
+                    spine_order_plan_id: None,
+                    spine_decision_id: None,
+                    spine_verdict_id: None,
+                    spine_stub_report_id: None,
                 };
                 match tx.send(request) {
                     Ok(()) => {

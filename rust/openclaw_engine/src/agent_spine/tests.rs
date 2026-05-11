@@ -149,24 +149,30 @@ fn runtime_shadow_lineage_emits_complete_demo_chain() {
         },
     );
 
-    assert_eq!(accepted, 10);
+    // W-C Caveat 1 修復（2026-05-11）：5 objects + 4 edges + 1 idempotency
+    // key + 5 state_transitions（建立期，from_state=None → to_state=<initial>）
+    // = 15 messages。
+    assert_eq!(accepted, 15);
     let mut objects = Vec::new();
     let mut edges = Vec::new();
     let mut execution_keys = Vec::new();
+    let mut transitions = Vec::new();
     while let Ok(msg) = rx.try_recv() {
         match msg {
             AgentSpineMsg::Object(object) => objects.push(object),
             AgentSpineMsg::Edge(edge) => edges.push(edge),
             AgentSpineMsg::ExecutionIdempotencyKey(key) => execution_keys.push(key),
-            AgentSpineMsg::StateTransition(_) => {
-                panic!("runtime shadow emits no state transitions")
-            }
+            AgentSpineMsg::StateTransition(t) => transitions.push(t),
         }
     }
 
     assert_eq!(objects.len(), 5);
     assert_eq!(edges.len(), 4);
     assert_eq!(execution_keys.len(), 1);
+    // W-C Caveat 1 修復：5 條建立期 transitions（5 object 各一條，
+    // from_state=None → to_state ∈ {emitted, approved_open, approved,
+    // shadow_planned, shadow_planned}）。
+    assert_eq!(transitions.len(), 5);
     assert!(objects
         .iter()
         .all(|object| object.authority_mode == AgentSpineMode::Shadow));
@@ -716,4 +722,349 @@ fn shadow_spine_chain_is_complete_while_legacy_signal_msg_stays_unchanged() {
     );
     assert_eq!(legacy_after["Signal"]["signal_type"], "OpenLong");
     assert_eq!(legacy_after["Signal"]["strategy_name"], "grid_trading");
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// W-C Caveat 1+2 fix（2026-05-11）— 新增測試
+// ─────────────────────────────────────────────────────────────────────────
+
+/// W-C Caveat 1 修復測試：emit_entry_lineage 末尾須發 5 條建立期
+/// SpineStateTransition，5 object_type 各一條，from_state 皆 None。
+#[test]
+fn runtime_shadow_emit_entry_lineage_emits_5_build_state_transitions() {
+    use super::runtime_shadow::{emit_entry_lineage, RuntimeShadowLineageInput};
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let intent = sample_intent(true);
+    let verdict = VerdictInfo {
+        verdict: "Approved".to_string(),
+        risk_score: 0.30,
+        reasons: vec!["build_check".to_string()],
+        modified_qty: None,
+    };
+
+    let accepted = emit_entry_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        RuntimeShadowLineageInput {
+            signal_id: "sig-build-demo-1000",
+            context_id: "ctx-build-1000",
+            intent_id: "intent-build-1000",
+            verdict_id: "vrd-build-1000",
+            ts_ms: 1000,
+            engine_mode: "demo",
+            intent: &intent,
+            approved_qty: 1.0,
+            reference_price: 100.0,
+            verdict_info: Some(&verdict),
+            lease_id: Some("bypass"),
+            order_link_id: Some("oc_build_1"),
+        },
+    );
+
+    // 5 objects + 4 edges + 1 idempotency + 5 transitions = 15
+    assert_eq!(accepted, 15);
+
+    let mut transitions = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        if let AgentSpineMsg::StateTransition(t) = msg {
+            transitions.push(t);
+        }
+    }
+    assert_eq!(transitions.len(), 5, "expected 5 build-phase transitions");
+
+    // 全部 from_state=None；engine_mode='demo'。
+    assert!(transitions.iter().all(|t| t.from_state.is_none()));
+    assert!(transitions.iter().all(|t| t.engine_mode == "demo"));
+
+    // 對應 5 種 object_type，5 種 trigger，5 種 to_state。
+    // DecisionObjectType 未實作 Hash → 用 linear scan helper。
+    fn find_transition<'a>(
+        transitions: &'a [SpineStateTransition],
+        ty: DecisionObjectType,
+    ) -> &'a SpineStateTransition {
+        transitions
+            .iter()
+            .find(|t| t.object_type == ty)
+            .unwrap_or_else(|| panic!("missing transition for {:?}", ty))
+    }
+
+    let signal_t = find_transition(&transitions, DecisionObjectType::StrategySignal);
+    assert_eq!(signal_t.to_state, "emitted");
+    assert_eq!(signal_t.trigger, "runtime_signal_emit");
+
+    let decision_t = find_transition(&transitions, DecisionObjectType::StrategistDecision);
+    assert_eq!(decision_t.to_state, "approved_open");
+    assert_eq!(decision_t.trigger, "runtime_decision_emit");
+
+    let verdict_t = find_transition(&transitions, DecisionObjectType::GuardianVerdict);
+    assert_eq!(verdict_t.to_state, "approved");
+    assert_eq!(verdict_t.trigger, "runtime_verdict_emit");
+
+    let plan_t = find_transition(&transitions, DecisionObjectType::ExecutionPlan);
+    assert_eq!(plan_t.to_state, "shadow_planned");
+    assert_eq!(plan_t.trigger, "runtime_plan_emit");
+
+    let report_t = find_transition(&transitions, DecisionObjectType::ExecutionReport);
+    assert_eq!(report_t.to_state, "shadow_planned");
+    assert_eq!(report_t.trigger, "runtime_report_emit");
+
+    // 5 object_type 全現一次（distinct check）。
+    let mut types: Vec<DecisionObjectType> = transitions.iter().map(|t| t.object_type).collect();
+    types.sort_by_key(|t| t.as_str().to_string());
+    types.dedup();
+    assert_eq!(types.len(), 5, "expected one transition per object_type");
+}
+
+/// W-C Caveat 1 修復測試：paper engine_mode 不寫任何 transition（保留
+/// paper 不污染 spine 的不變式）。
+#[test]
+fn runtime_shadow_emit_entry_lineage_skips_transitions_in_paper() {
+    use super::runtime_shadow::{emit_entry_lineage, RuntimeShadowLineageInput};
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let intent = sample_intent(true);
+
+    let accepted = emit_entry_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        RuntimeShadowLineageInput {
+            signal_id: "sig-paper-skip-1001",
+            context_id: "ctx-paper-skip-1001",
+            intent_id: "intent-paper-skip-1001",
+            verdict_id: "vrd-paper-skip-1001",
+            ts_ms: 1001,
+            engine_mode: "paper",
+            intent: &intent,
+            approved_qty: 1.0,
+            reference_price: 100.0,
+            verdict_info: None,
+            lease_id: None,
+            order_link_id: None,
+        },
+    );
+    assert_eq!(accepted, 0, "paper engine_mode must not emit any spine row");
+    assert!(rx.try_recv().is_err());
+}
+
+/// W-C Caveat 2 修復測試：emit_fill_completion_lineage 寫一條真實
+/// ExecutionReport row（filled_qty>0、liquidity_role∈{maker,taker}）+ 1 條
+/// ExecutedBy edge with details.fill_completion=true + 2 條變更期 transitions
+/// （execution_plan + execution_report）。
+#[test]
+fn runtime_shadow_emit_fill_completion_lineage_writes_real_fill_chain() {
+    use super::runtime_shadow::{emit_fill_completion_lineage, FillCompletionLineageInput};
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+    let accepted = emit_fill_completion_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        FillCompletionLineageInput {
+            order_plan_id: "plan-fill-1002",
+            decision_id: "decision-fill-1002",
+            symbol: "BTCUSDT",
+            engine_mode: "demo",
+            strategy: "grid_trading",
+            ts_ms: 1002,
+            filled_qty: 0.5,
+            avg_fill_price: 101.30,
+            fees_paid: 0.0007,
+            fee_bps: Some(7.0),
+            slippage_bps: Some(1.5),
+            liquidity_role: "taker",
+            fill_latency_ms: Some(42),
+            exchange_exec_id: "exec-fill-1002",
+            stub_report_id: "report-stub-1002",
+            order_link_id: Some("oc_fill_1002"),
+        },
+    );
+    // 1 envelope + 1 edge + 2 transitions = 4
+    assert_eq!(accepted, 4);
+
+    let mut envelopes = Vec::new();
+    let mut edges = Vec::new();
+    let mut transitions = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        match msg {
+            AgentSpineMsg::Object(o) => envelopes.push(o),
+            AgentSpineMsg::Edge(e) => edges.push(e),
+            AgentSpineMsg::StateTransition(t) => transitions.push(t),
+            AgentSpineMsg::ExecutionIdempotencyKey(_) => {
+                panic!("fill completion must not emit ExecutionIdempotencyKey")
+            }
+        }
+    }
+
+    // 必須只發一條 ExecutionReport envelope（status=shadow_filled，filled_qty
+    // 真值 > 0，liquidity_role 真值，與 stub row 結構同類但內容真實）。
+    assert_eq!(envelopes.len(), 1);
+    let env = &envelopes[0];
+    assert_eq!(env.object_type, DecisionObjectType::ExecutionReport);
+    assert_eq!(env.state, "shadow_filled");
+    assert_eq!(env.symbol, "BTCUSDT");
+    assert_eq!(env.engine_mode, "demo");
+    // payload 中 filled_qty 真值 + liquidity_role 真值（PA §3.5 新指標
+    // bad_report_value_quality 的兩個查驗欄）。
+    assert_eq!(
+        env.payload["filled_qty"].as_f64().unwrap(),
+        0.5,
+        "fill completion must carry real filled_qty"
+    );
+    assert_eq!(
+        env.payload["liquidity_role"].as_str().unwrap(),
+        "taker",
+        "fill completion must carry real liquidity_role (maker/taker)"
+    );
+    // idempotency_key 必含 shadow_filled 後綴語意，與 stub `shadow_planned`
+    // row 區隔（避免 ON CONFLICT DO NOTHING 撞舊 row）。
+    assert!(env.idempotency_key.starts_with("execution_report:"));
+
+    // 唯一 edge 必為 ExecutedBy + details.fill_completion=true。
+    assert_eq!(edges.len(), 1);
+    let edge = &edges[0];
+    assert_eq!(edge.edge_type, DecisionEdgeType::ExecutedBy);
+    assert_eq!(edge.from_object_id, "plan-fill-1002");
+    assert_eq!(
+        edge.details["fill_completion"].as_bool().unwrap(),
+        true,
+        "ExecutedBy edge must carry fill_completion marker"
+    );
+
+    // 2 條變更期 transitions：execution_plan + execution_report，
+    // from_state='shadow_planned'，trigger='runtime_fill_confirmed'。
+    assert_eq!(transitions.len(), 2);
+    assert!(transitions
+        .iter()
+        .all(|t| t.from_state.as_deref() == Some("shadow_planned")));
+    assert!(transitions
+        .iter()
+        .all(|t| t.trigger == "runtime_fill_confirmed"));
+    let plan_change = transitions
+        .iter()
+        .find(|t| t.object_type == DecisionObjectType::ExecutionPlan)
+        .expect("plan change transition");
+    assert_eq!(plan_change.to_state, "shadow_executed");
+    // plan transition object_id = plan_id（既有 execution_plan row 真的轉態）。
+    assert_eq!(plan_change.object_id, "plan-fill-1002");
+    let report_change = transitions
+        .iter()
+        .find(|t| t.object_type == DecisionObjectType::ExecutionReport)
+        .expect("report change transition");
+    assert_eq!(report_change.to_state, "shadow_filled");
+    // Round 2 E2 C-A.2 修復：report transition object_id 對應**既有** stub_report_id
+    // （shadow_planned → shadow_filled 是 stub row 真實狀態變化）；新 filled_report
+    // row 不會出現在 transition.object_id，它由 ExecutedBy edge 連回（append-only
+    // event log 語意對齊）。
+    assert_eq!(report_change.object_id, "report-stub-1002");
+}
+
+/// W-C Caveat 2 修復測試：paper engine_mode / disabled mode / qty<=0 全 0 emit
+/// （fail-soft 與 emit_entry_lineage 對齊）。
+#[test]
+fn runtime_shadow_emit_fill_completion_lineage_skips_invalid_modes() {
+    use super::runtime_shadow::{emit_fill_completion_lineage, FillCompletionLineageInput};
+
+    fn make_input<'a>(engine_mode: &'a str, filled_qty: f64) -> FillCompletionLineageInput<'a> {
+        FillCompletionLineageInput {
+            order_plan_id: "plan-skip-1003",
+            decision_id: "decision-skip-1003",
+            symbol: "BTCUSDT",
+            engine_mode,
+            strategy: "ma_crossover",
+            ts_ms: 1003,
+            filled_qty,
+            avg_fill_price: 100.0,
+            fees_paid: 0.0,
+            fee_bps: None,
+            slippage_bps: None,
+            liquidity_role: "maker",
+            fill_latency_ms: None,
+            exchange_exec_id: "exec-skip-1003",
+            stub_report_id: "report-stub-1003",
+            order_link_id: None,
+        }
+    }
+
+    // paper 模式（被 Caveat 2 emit_fill_completion_lineage 第 4 個 short-circuit
+    // guard 攔截：engine_mode 非 demo/live_demo）。
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    let r = emit_fill_completion_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        make_input("paper", 0.5),
+    );
+    assert_eq!(r, 0, "paper engine_mode must skip");
+    assert!(rx.try_recv().is_err());
+
+    // disabled mode（被 writes_enabled() guard 攔）。
+    let (tx2, mut rx2) = tokio::sync::mpsc::channel(8);
+    let r2 = emit_fill_completion_lineage(
+        Some(&tx2),
+        AgentSpineMode::Disabled,
+        make_input("demo", 0.5),
+    );
+    assert_eq!(r2, 0, "disabled mode must skip");
+    assert!(rx2.try_recv().is_err());
+
+    // tx=None（被第 2 個 guard 攔）。
+    let r3 = emit_fill_completion_lineage(
+        None,
+        AgentSpineMode::Shadow,
+        make_input("demo", 0.5),
+    );
+    assert_eq!(r3, 0, "missing tx must skip");
+
+    // filled_qty<=0（被 finite/positive guard 攔；對齊 partial fill 不寫的設計）。
+    let (tx4, mut rx4) = tokio::sync::mpsc::channel(8);
+    let r4 = emit_fill_completion_lineage(
+        Some(&tx4),
+        AgentSpineMode::Shadow,
+        make_input("demo", 0.0),
+    );
+    assert_eq!(r4, 0, "filled_qty<=0 must skip");
+    assert!(rx4.try_recv().is_err());
+
+    // NaN filled_qty（finite guard 攔）。
+    let (tx5, mut rx5) = tokio::sync::mpsc::channel(8);
+    let r5 = emit_fill_completion_lineage(
+        Some(&tx5),
+        AgentSpineMode::Shadow,
+        make_input("demo", f64::NAN),
+    );
+    assert_eq!(r5, 0, "NaN filled_qty must skip");
+    assert!(rx5.try_recv().is_err());
+}
+
+/// W-C Caveat 1 修復測試：build transition transition_id 各不相同
+/// （避免 5 條同 ts_ms 撞 PRIMARY KEY (transition_id, ts)）。
+#[test]
+fn runtime_shadow_build_transition_ids_are_distinct() {
+    use super::runtime_shadow::{emit_entry_lineage, RuntimeShadowLineageInput};
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let intent = sample_intent(true);
+
+    emit_entry_lineage(
+        Some(&tx),
+        AgentSpineMode::Shadow,
+        RuntimeShadowLineageInput {
+            signal_id: "sig-ident-1004",
+            context_id: "ctx-ident-1004",
+            intent_id: "intent-ident-1004",
+            verdict_id: "vrd-ident-1004",
+            ts_ms: 1004,
+            engine_mode: "live_demo",
+            intent: &intent,
+            approved_qty: 0.5,
+            reference_price: 99.5,
+            verdict_info: None,
+            lease_id: Some("bypass"),
+            order_link_id: Some("oc_1004"),
+        },
+    );
+
+    let mut tids = std::collections::HashSet::new();
+    while let Ok(msg) = rx.try_recv() {
+        if let AgentSpineMsg::StateTransition(t) = msg {
+            assert!(tids.insert(t.transition_id), "transition_id collision detected");
+        }
+    }
+    assert_eq!(tids.len(), 5, "expected 5 unique transition ids");
 }

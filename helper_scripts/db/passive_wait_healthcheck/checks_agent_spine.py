@@ -30,6 +30,15 @@ _CORE_OBJECT_TYPES = (
 _DISPLAY_OBJECT_TYPES = _CORE_OBJECT_TYPES + ("execution_report",)
 _RUNTIME_ENABLED_MODES = {"shadow", "canary", "primary"}
 
+# value_quality cutoff 預設「不過濾」哨兵：1970 epoch 確保所有 row 都在 cutoff 之後;
+# 真正用法是部署完 Caveat 1+2 fix 後 operator 設定 OPENCLAW_AGENT_SPINE_VALUE_QUALITY_CUTOFF_TS=
+# <deploy_ts ISO8601 with tz> 排除歷史 stub row。
+_VALUE_QUALITY_CUTOFF_DEFAULT = "1970-01-01T00:00:00+00"
+
+# chains_with_real_fill_report 階段性 partial 門檻;
+# 取 50% 作為 PA §3.3 push back-ready 推導門檻（24h trading.fills 86 vs 174 chains ≈ 49.4%）。
+_REAL_FILL_PARTIAL_RATIO = 0.5
+
 
 def _enabled(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip() == "1"
@@ -54,6 +63,15 @@ def _engine_modes() -> list[str]:
     raw = os.getenv("OPENCLAW_AGENT_SPINE_HEALTH_ENGINE_MODES", "demo,live_demo")
     modes = [part.strip() for part in raw.split(",") if part.strip()]
     return modes or ["demo", "live_demo"]
+
+
+def _value_quality_cutoff_ts() -> str:
+    # 讀取 deploy_ts cutoff; 未設則使用 1970 epoch 哨兵（等同不過濾）。
+    raw = os.getenv(
+        "OPENCLAW_AGENT_SPINE_VALUE_QUALITY_CUTOFF_TS",
+        _VALUE_QUALITY_CUTOFF_DEFAULT,
+    ).strip()
+    return raw or _VALUE_QUALITY_CUTOFF_DEFAULT
 
 
 def _runtime_mode() -> str:
@@ -110,7 +128,18 @@ def _complete_chain_counts(
     cur,
     modes: list[str],
     window_minutes: int,
-) -> tuple[int, int, int, int, int]:
+    value_quality_cutoff_ts: str,
+) -> tuple[int, int, int, int, int, int, int]:
+    # 回傳 7-tuple:
+    #   (complete_chains, chains_with_idempotency, chains_with_lease,
+    #    chains_with_report, bad_report_quality,
+    #    bad_report_value_quality, chains_with_real_fill_report)
+    #
+    # 新增兩個 value-realism 指標（PA `2026-05-10--w_c_caveat_fix_plan.md` §3）:
+    #   - bad_report_value_quality: cutoff 後但 filled_qty<=0 或 liquidity_role 非 maker/taker 的 real-fill row 數
+    #   - chains_with_real_fill_report: cutoff 後且 filled_qty>0 且 liquidity_role IN (maker,taker) 的 row 數
+    # real-fill row 由新 edge filter 抓: edge_type='executed_by' AND details->>'fill_completion'='true'
+    # （Caveat 2 Option α / Migration A: 既有 edge_type + JSON 標記，不需新 enum / migration）
     cur.execute(
         """
         WITH chains AS (
@@ -171,7 +200,21 @@ def _complete_chain_counts(
                     OR NOT (report.payload ? 'filled_qty')
                     OR NOT (report.payload ? 'liquidity_role')
                   )
-            )::int AS bad_report_quality
+            )::int AS bad_report_quality,
+            count(DISTINCT filled_report.object_id) FILTER (
+                WHERE filled_report.object_id IS NOT NULL
+                  AND filled_report.created_at > %s::timestamptz
+                  AND (
+                    (filled_report.payload->>'filled_qty')::numeric <= 0
+                    OR filled_report.payload->>'liquidity_role' NOT IN ('maker','taker')
+                  )
+            )::int AS bad_report_value_quality,
+            count(DISTINCT filled_report.object_id) FILTER (
+                WHERE filled_report.object_id IS NOT NULL
+                  AND filled_report.created_at > %s::timestamptz
+                  AND (filled_report.payload->>'filled_qty')::numeric > 0
+                  AND filled_report.payload->>'liquidity_role' IN ('maker','taker')
+            )::int AS chains_with_real_fill_report
         FROM chains c
         LEFT JOIN agent.execution_idempotency_keys idem
           ON idem.order_plan_id = c.order_plan_id
@@ -185,6 +228,15 @@ def _complete_chain_counts(
          AND report.object_type = 'execution_report'
          AND report.engine_mode = c.engine_mode
          AND report.created_at > now() - (%s::text || ' minutes')::interval
+        LEFT JOIN agent.decision_edges filled_report_edge
+          ON filled_report_edge.from_object_id = c.order_plan_id
+         AND filled_report_edge.edge_type = 'executed_by'
+         AND (filled_report_edge.details->>'fill_completion')::boolean IS TRUE
+        LEFT JOIN agent.decision_objects filled_report
+          ON filled_report.object_id = filled_report_edge.to_object_id
+         AND filled_report.object_type = 'execution_report'
+         AND filled_report.engine_mode = c.engine_mode
+         AND filled_report.created_at > now() - (%s::text || ' minutes')::interval
         """,
         (
             modes,
@@ -195,17 +247,44 @@ def _complete_chain_counts(
             window_minutes,
             window_minutes,
             window_minutes,
+            value_quality_cutoff_ts,
+            value_quality_cutoff_ts,
+            window_minutes,
             window_minutes,
         ),
     )
-    row = cur.fetchone() or (0, 0, 0, 0, 0)
+    row = cur.fetchone() or (0, 0, 0, 0, 0, 0, 0)
     return (
         _count(row, 0),
         _count(row, 1),
         _count(row, 2),
         _count(row, 3),
         _count(row, 4),
+        _count(row, 5),
+        _count(row, 6),
     )
+
+
+def _state_changes_count_24h(
+    cur,
+    modes: list[str],
+    window_minutes: int,
+) -> int:
+    # 補 Caveat 1 揭露 SoT: agent.decision_state_changes 是否被 producer 寫入。
+    # 0 row → Spine 5 個 object 的 SM lifecycle 沒接 caller。
+    cur.execute(
+        """
+        SELECT count(*)::int
+        FROM agent.decision_state_changes
+        WHERE engine_mode = ANY(%s)
+          AND ts > now() - (%s::text || ' minutes')::interval
+        """,
+        (modes, window_minutes),
+    )
+    row = cur.fetchone()
+    if not row:
+        return 0
+    return int(row[0] or 0)
 
 
 def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
@@ -277,6 +356,7 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             f"MAG-082 readiness=BLOCKED_NO_RECENT_LINEAGE {base_detail}",
         )
 
+    value_quality_cutoff_ts = _value_quality_cutoff_ts()
     try:
         cur.execute(
             """
@@ -298,7 +378,10 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             chains_with_lease,
             chains_with_report,
             bad_report_quality,
-        ) = _complete_chain_counts(cur, modes, window_minutes)
+            bad_report_value_quality,
+            chains_with_real_fill_report,
+        ) = _complete_chain_counts(cur, modes, window_minutes, value_quality_cutoff_ts)
+        state_changes_24h = _state_changes_count_24h(cur, modes, window_minutes)
     except Exception as exc:  # noqa: BLE001 - passive sentinel
         return (_status(required), f"agent decision spine lineage query failed: {exc}")
 
@@ -307,11 +390,17 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
         for object_type in _CORE_OBJECT_TYPES
         if type_counts.get(object_type, 0) <= 0
     ]
+    # detail message 含全部新舊指標 + cutoff 時間戳，供 reviewer 與 W-D MAG-083
+    # 解讀 caveat fix delta（PA §3.4 message format）。
     detail = (
         f"{base_detail} types={_type_detail(type_counts)} "
         f"chains={complete_chains} chains_with_idempotency={chains_with_idempotency} "
         f"chains_with_lease={chains_with_lease} chains_with_report={chains_with_report} "
-        f"bad_report_quality={bad_report_quality}"
+        f"bad_report_quality={bad_report_quality} "
+        f"bad_report_value_quality={bad_report_value_quality} "
+        f"chains_with_real_fill_report={chains_with_real_fill_report} "
+        f"state_changes_24h={state_changes_24h} "
+        f"value_quality_cutoff={value_quality_cutoff_ts}"
     )
     if missing_types or complete_chains <= 0:
         missing_text = ",".join(missing_types) if missing_types else "complete_chain"
@@ -337,6 +426,29 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             _status(required),
             "agent decision spine execution report quality incomplete; "
             f"MAG-082 readiness=BLOCKED_REPORT_QUALITY {detail}",
+        )
+    # Caveat 1+2 fix 後新加 3 個語意 gate（PA §3.3）：
+    #   - state_changes_24h<=0: Spine SM producer 未接 caller (Caveat 1)
+    #   - bad_report_value_quality>0: cutoff 後 ExecutionReport 仍是 stub (Caveat 2)
+    #   - chains_with_real_fill_report < complete_chains * 50%: real-fill propagation 仍 partial
+    if state_changes_24h <= 0:
+        return (
+            _status(required),
+            "agent decision spine state-changes empty; "
+            f"MAG-082 readiness=BLOCKED_STATE_CHANGES_EMPTY {detail}",
+        )
+    if bad_report_value_quality > 0:
+        return (
+            _status(required),
+            "agent decision spine execution report value-realism incomplete; "
+            f"MAG-082 readiness=BLOCKED_REPORT_VALUE_QUALITY {detail}",
+        )
+    real_fill_threshold = int(complete_chains * _REAL_FILL_PARTIAL_RATIO)
+    if chains_with_real_fill_report < real_fill_threshold:
+        return (
+            _status(required),
+            "agent decision spine real-fill propagation partial; "
+            f"MAG-082 readiness=WARN_REAL_FILL_PROPAGATION_PARTIAL {detail}",
         )
 
     return (

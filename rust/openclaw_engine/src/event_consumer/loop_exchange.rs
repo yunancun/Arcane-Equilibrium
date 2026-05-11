@@ -258,6 +258,51 @@ pub(super) async fn handle_exchange_event(
                     }
 
                     if fully_filled {
+                        // ─────────────────────────────────────────────────────
+                        // W-C Caveat 2 修復（2026-05-11）：成交完成後補寫真實
+                        // ExecutionReport row 至 Agent Spine。PendingOrder 在
+                        // emit_entry_lineage 階段已注入 4 個 spine id
+                        // （見 tick_pipeline/on_tick/step_4_5_dispatch.rs），
+                        // 此處讀 spine_order_plan_id / spine_decision_id /
+                        // spine_stub_report_id 呼叫 emit_fill_completion_lineage。
+                        //
+                        // 三個必要欄位皆 Some 時才 emit；任一 None 即 short-circuit
+                        // （paper shadow path / engine_mode!=demo/live_demo / 舊
+                        // path 漏注入皆然），fail-soft 設計與 emit_entry_lineage
+                        // 對齊（spine 寫入永不阻塞 hot path）。
+                        //
+                        // partial fill 不 emit（PA §1.3 / §2.3 by-design），
+                        // 此區塊已被外層 `fully_filled` 守門。
+                        // ─────────────────────────────────────────────────────
+                        if let (Some(plan_id), Some(decision_id), Some(stub_id)) = (
+                            po.spine_order_plan_id.as_deref(),
+                            po.spine_decision_id.as_deref(),
+                            po.spine_stub_report_id.as_deref(),
+                        ) {
+                            let em_str = pipeline.effective_engine_mode().to_string();
+                            crate::agent_spine::runtime_shadow::emit_fill_completion_lineage(
+                                pipeline.agent_spine_tx_ref(),
+                                pipeline.agent_spine_mode_ref(),
+                                crate::agent_spine::runtime_shadow::FillCompletionLineageInput {
+                                    order_plan_id: plan_id,
+                                    decision_id,
+                                    symbol: &exec.symbol,
+                                    engine_mode: em_str.as_str(),
+                                    strategy: &po.strategy,
+                                    ts_ms: exec_ts,
+                                    filled_qty: po.cum_filled_qty,
+                                    avg_fill_price: exec_price,
+                                    fees_paid: exec_fee,
+                                    fee_bps: Some(fee_rate_used * 10_000.0),
+                                    slippage_bps,
+                                    liquidity_role,
+                                    fill_latency_ms,
+                                    exchange_exec_id: &exec.exec_id,
+                                    stub_report_id: stub_id,
+                                    order_link_id: Some(po.order_link_id.as_str()),
+                                },
+                            );
+                        }
                         tracing::info!(order_link_id = %key, "pending order fully filled, removing / 待處理訂單完全成交，移除");
                         state.pending_orders.remove(&key);
                     } else if pending_sweep::tighten_postonly_entry_after_partial(po, exec_ts) {

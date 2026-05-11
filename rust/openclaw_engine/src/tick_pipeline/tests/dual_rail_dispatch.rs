@@ -60,6 +60,11 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,
+        // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
     };
     assert_eq!(req.stop_loss, Some(49000.0));
     assert_eq!(req.take_profit, Some(52000.0));
@@ -111,6 +116,11 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,
+        // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
     };
     assert!(req.stop_loss.is_none());
     assert!(req.is_close);
@@ -142,6 +152,11 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,
+        // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
     };
     assert!(!req.is_primary);
     assert!(req.stop_loss.is_none());
