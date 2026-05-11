@@ -17,7 +17,7 @@
 
 **日期**: 2026-05-11 (D+1 land timing)
 **作者**: PA（W6-1 RFC final verdict draft author + 14 push back absorb author）
-**狀態**: ⏳ DRAFT — 待 PA + QC + MIT verify push back absorb fidelity + PM 統合 sign-off + Operator 拍板
+**狀態**: ✅ ACCEPTED — Operator final approval 2026-05-11 path B authorization；三角 verify chain (PA `2afd76d6` + QC + MIT `be947fe3` + 3 PB absorb `89f9aad0`) + PM consolidate sign-off `7f0b6940` 全 APPROVE；詳 §11
 **索引**: `docs/README.md` Amendments index
 **TODO 連結**: Sprint N+1 D+1+ W6 sub-task chain dispatch v3.7 §6.2 / §6.7 / §6.8 acceptance
 
@@ -576,11 +576,11 @@ This amendment does not:
 
 | Role | Source | Date | Status |
 |---|---|---|---|
-| PA | 本 AMD draft author + W6-1 RFC final verdict draft author | 2026-05-11 | ⏳ DRAFT (本 AMD) |
-| QC | verify quant accuracy of PB absorb (QC PB#1/2/3/4 + Verdict 2/3 數學)| TBD | ⏳ PENDING |
-| MIT | verify ML pipeline + DB schema accuracy (MIT MUST 1-5 + SHOULD 6/7 + Verdict 4)| TBD | ⏳ PENDING |
-| PM | consolidate sign-off + dispatch v3.8 + CLAUDE.md §三 land | TBD | ⏳ PENDING |
-| Operator | final approval + CLAUDE.md §七 wording fix (per MIT MUST 4) + D+1 evening engine restart deploy + D+2 14:30 UTC ALTER VALIDATE | TBD | ⏳ PENDING |
+| PA | 本 AMD draft author + W6-1 RFC final verdict draft author | 2026-05-11 commit `2afd76d6` | ✅ ACCEPTED |
+| QC | verify quant accuracy of PB absorb (QC PB#1/2/3/4 + Verdict 2/3 數學)| 2026-05-11 commit `be947fe3` | ✅ APPROVE 0 new PB |
+| MIT | verify ML pipeline + DB schema accuracy (MIT MUST 1-5 + SHOULD 6/7 + Verdict 4)| 2026-05-11 commit `be947fe3` + 3 PB absorb `89f9aad0` | ✅ APPROVE-CONDITIONAL 3 PB absorbed |
+| PM | consolidate sign-off + dispatch v3.8 + CLAUDE.md §三 land | 2026-05-11 commit `7f0b6940` | ✅ APPROVE PENDING OPERATOR FINAL |
+| Operator | final approval + CLAUDE.md §七 wording fix (per MIT MUST 4) + D+1 evening engine restart deploy + D+2 14:30 UTC ALTER VALIDATE | 2026-05-11 path B authorization | ✅ ACCEPTED — V091 NOT VALID schema applied 2026-05-11 (idempotent verified, constraint `chk_reason_code_mutually_exclusive` 0 violation); CLAUDE.md §七 wording fix + D+1 evening engine restart + D+2 14:30 UTC ALTER VALIDATE 仍待 operator 自行執行 |
 
 ---
 
