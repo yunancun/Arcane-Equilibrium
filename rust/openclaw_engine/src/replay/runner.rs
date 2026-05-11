@@ -985,7 +985,14 @@ impl IsolatedPipeline {
             // execute() ensures strategy_adapter / paper_snapshot pair is set
             // (with_adapter_pipeline is the sole construction path).
             if let Some(snap) = self.paper_snapshot.as_mut() {
+                // Tier A T5：per-symbol price anchor 更新 — 每個 event 推入該
+                // symbol 的最新 close 至 `latest_price_by_symbol`，使下游 evaluate
+                // 用對應 symbol 的真實 anchor 計 Gate 2.6 P1 cap。保留全域
+                // `latest_price = Some(event.close)` 為 last-touched fallback +
+                // backward-compat 守衛條件。
                 snap.latest_price = Some(event.close);
+                snap.latest_price_by_symbol
+                    .insert(event.symbol.clone(), event.close);
             }
             let atr: f64 = tick_inputs
                 .indicators

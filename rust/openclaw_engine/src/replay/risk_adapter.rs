@@ -117,7 +117,18 @@ pub struct ReplayPaperSnapshot {
     pub balance: f64,
     pub drawdown_pct: f64,
     pub positions: Vec<ReplayPosition>,
+    /// Last-touched 全域 price 錨（pre-Tier A 既存 field；保留作 backward-compat
+    /// fallback 與 with_adapter_pipeline fail-loud guard 條件）。
+    /// 新代碼應優先寫入 `latest_price_by_symbol`，evaluate 端優先 per-symbol query。
     pub latest_price: Option<f64>,
+    /// Sprint N+1 D+1 Tier A T5：per-symbol price anchor。鏡射 live
+    /// `PaperState::latest_price(symbol)` 的逐 symbol 語意，避免 Gate 2.6
+    /// P1 cap（`balance * p1_risk_pct / price`）誤用其他 symbol 的 last-touched
+    /// price 當 anchor（原 bug：ETHUSDT intent 用 ADAUSDT 0.2717 算 cap → 3 億
+    /// ETH-equivalent qty）。
+    /// `runner.rs` 在 tick event ingestion 時 `insert(symbol, event.close)`；
+    /// `apply_fill_open` / `apply_fill_close` 在 fill 後 `insert(symbol, fill_price)`。
+    pub latest_price_by_symbol: std::collections::HashMap<String, f64>,
     /// Aggregate exposure %% (mirrors `IntentProcessor::compute_exposure_pct`).
     /// 總曝險 %（鏡射 `IntentProcessor::compute_exposure_pct`）。
     pub exposure_pct: f64,
@@ -140,6 +151,22 @@ impl ReplayPaperSnapshot {
     /// 查既有持倉；鏡射 `PaperState::get_position`。
     pub fn get_position(&self, symbol: &str) -> Option<&ReplayPosition> {
         self.positions.iter().find(|p| p.symbol == symbol)
+    }
+
+    /// Sprint N+1 D+1 Tier A T5：per-symbol price 查詢（fallback chain）。
+    ///
+    /// 優先 `latest_price_by_symbol.get(symbol)`（per-symbol anchor）；
+    /// 缺值時 fallback 到全域 `latest_price`（last-touched，backward-compat）；
+    /// 兩者皆缺時回 `None`（caller 端 `unwrap_or(0.0)` 觸發 Gate 2.6 fallback 至 kelly_qty）。
+    ///
+    /// 鏡射 live `PaperState::latest_price(symbol)` 的 per-symbol 語意，
+    /// 與 `intent_processor::router.rs:364 paper_state.latest_price(&intent.symbol)`
+    /// 對齊。
+    pub fn latest_price_for(&self, symbol: &str) -> Option<f64> {
+        self.latest_price_by_symbol
+            .get(symbol)
+            .copied()
+            .or(self.latest_price)
     }
 }
 
@@ -335,7 +362,12 @@ impl ReplayRiskAdapter {
 
         // ─── Gate 2.5: Kelly position sizing ───
         // ─── Gate 2.5：Kelly 倉位 ───
-        let price = snapshot.latest_price.unwrap_or(0.0);
+        // Tier A T5：per-symbol price anchor — 取 `latest_price_for(intent.symbol)`
+        // 對齊 live `paper_state.latest_price(&intent.symbol)`；缺值時 fallback
+        // 0.0 觸發 Gate 2.6 P1 cap fallback 至 kelly_qty 路徑（原本既有行為）。
+        // 若 caller 未對該 symbol 預種任何 price 且未全域 fallback，會在
+        // `with_adapter_pipeline` 守衛階段 fail-loud。
+        let price = snapshot.latest_price_for(&intent.symbol).unwrap_or(0.0);
         let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
             let stats = snapshot.trade_stats.clone().unwrap_or_default();
             // GAP-4 mirror: real ATR% from atr param.
@@ -448,11 +480,19 @@ mod tests {
     }
 
     fn mk_snapshot(balance: f64, positions: Vec<ReplayPosition>) -> ReplayPaperSnapshot {
+        // Tier A T5：default test snapshot 預種全域 latest_price=100.0 + 同值寫入
+        // per-symbol map for "BTCUSDT" / "ETHUSDT" 兩個常用 test symbol；既有 test
+        // 多以 BTCUSDT 為主，per-symbol lookup hit → 100.0；其他 symbol fallback
+        // 走全域 latest_price=Some(100.0) 不變。
+        let mut latest_price_by_symbol = std::collections::HashMap::new();
+        latest_price_by_symbol.insert("BTCUSDT".to_string(), 100.0);
+        latest_price_by_symbol.insert("ETHUSDT".to_string(), 100.0);
         ReplayPaperSnapshot {
             balance,
             drawdown_pct: 0.0,
             positions,
             latest_price: Some(100.0),
+            latest_price_by_symbol,
             exposure_pct: 0.0,
             correlated_exposure_pct: 0.0,
             leverage: 0.0,

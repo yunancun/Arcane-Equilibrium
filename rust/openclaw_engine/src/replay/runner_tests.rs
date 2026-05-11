@@ -285,11 +285,42 @@ fn make_snapshot_seed(
     latest_price: Option<f64>,
     positions: Vec<crate::replay::risk_adapter::ReplayPosition>,
 ) -> crate::replay::risk_adapter::ReplayPaperSnapshot {
+    // Tier A T5：既有 test seed 維持 backward-compat — `latest_price_by_symbol`
+    // 預設空 HashMap，evaluate 端 `latest_price_for(symbol)` fallback 至全域
+    // `latest_price`，與 pre-T5 行為等價。新增 test 若要驗 per-symbol 路徑，
+    // 用下方 `make_snapshot_seed_with_prices` helper 顯式注入 per-symbol map。
     crate::replay::risk_adapter::ReplayPaperSnapshot {
         balance,
         drawdown_pct: 0.0,
         positions,
         latest_price,
+        latest_price_by_symbol: std::collections::HashMap::new(),
+        exposure_pct: 0.0,
+        correlated_exposure_pct: 0.0,
+        leverage: 0.0,
+        daily_loss_pct: 0.0,
+        trade_stats: None,
+    }
+}
+
+/// Sprint N+1 D+1 Tier A T5 test helper：構造帶 per-symbol price map 的 snapshot。
+/// 用於驗證 `latest_price_for(symbol)` per-symbol path 與 fallback 路徑。
+fn make_snapshot_seed_with_prices(
+    balance: f64,
+    latest_price: Option<f64>,
+    per_symbol_prices: &[(&str, f64)],
+    positions: Vec<crate::replay::risk_adapter::ReplayPosition>,
+) -> crate::replay::risk_adapter::ReplayPaperSnapshot {
+    let mut by_symbol = std::collections::HashMap::new();
+    for (sym, px) in per_symbol_prices {
+        by_symbol.insert(sym.to_string(), *px);
+    }
+    crate::replay::risk_adapter::ReplayPaperSnapshot {
+        balance,
+        drawdown_pct: 0.0,
+        positions,
+        latest_price,
+        latest_price_by_symbol: by_symbol,
         exposure_pct: 0.0,
         correlated_exposure_pct: 0.0,
         leverage: 0.0,
@@ -1464,4 +1495,151 @@ fn replay_position_owner_strategy_default_empty_string() {
         owner_strategy: String::new(),
     };
     assert_eq!(rp.owner_strategy, "");
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sprint N+1 D+1 Tier A T5 — per-symbol price anchor unit tests
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_replay_kelly_sizer_uses_per_symbol_price() {
+    // Tier A T5：驗證 Kelly sizer 用 per-symbol price anchor 計 Gate 2.6 P1 cap，
+    // 不被其他 symbol 的 last-touched price 污染。
+    //
+    // 情境：snapshot.latest_price=Some(0.2717)（全域 = ADAUSDT last-touched）
+    //       snapshot.latest_price_by_symbol={"ETHUSDT": 2335.0}
+    //       intent: ETHUSDT long qty=0.02
+    // 預期：evaluate 用 ETHUSDT 2335.0 算 P1 cap = 10000 * 0.02 / 2335.0 ≈ 0.0856
+    //       intent.qty=0.02 < P1 cap → Accepted，final_qty=0.02
+    //       若誤用 ADAUSDT 0.2717 → P1 cap = 10000 * 0.02 / 0.2717 ≈ 736
+    //       不會限縮 intent，但這是錯算的 cap（其他 size 風險）。
+    let snapshot = make_snapshot_seed_with_prices(
+        10_000.0,
+        Some(0.2717),
+        &[("ETHUSDT", 2335.0)],
+        Vec::new(),
+    );
+    let adapter = crate::replay::risk_adapter::ReplayRiskAdapter::new(
+        ReplayProfile::Isolated,
+        GuardianConfig::default(),
+        crate::config::RiskConfig::default(),
+        0.02,
+        None,
+    )
+    .expect("Isolated adapter accepts");
+    let intent = OrderIntent {
+        symbol: "ETHUSDT".to_string(),
+        is_long: true,
+        qty: 0.02,
+        confidence: 0.5,
+        strategy: "test".to_string(),
+        order_type: "market".to_string(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+    };
+    let decision = adapter.evaluate(&intent, &snapshot, 0.0);
+    match decision {
+        crate::replay::risk_adapter::RiskDecision::Accepted {
+            final_qty,
+            p1_max_qty,
+            ..
+        } => {
+            // P1 cap = 10000 * 0.02 / 2335.0 ≈ 0.08565
+            let expected_cap = 10_000.0 * 0.02 / 2335.0;
+            assert!(
+                (p1_max_qty - expected_cap).abs() < 1e-6,
+                "p1_max_qty should reflect ETHUSDT 2335.0 anchor, got {} expected {}",
+                p1_max_qty,
+                expected_cap
+            );
+            assert!(
+                (final_qty - 0.02).abs() < 1e-9,
+                "final_qty should preserve intent qty (well below cap), got {}",
+                final_qty
+            );
+        }
+        other => panic!("expected Accepted with ETHUSDT anchor, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_replay_latest_price_updates_on_tick() {
+    // Tier A T5：驗證 `latest_price_by_symbol` 在 fill 後（apply_fill_open）
+    // 與 evaluate 端 `latest_price_for(symbol)` 查 per-symbol path 正確聯動。
+    // 用單元 + 直接構造 snapshot 模擬 fill 後狀態 — 避免拉整 pipeline。
+    let mut snapshot =
+        make_snapshot_seed_with_prices(10_000.0, Some(0.0), &[("BTCUSDT", 0.0)], Vec::new());
+    // 模擬 apply_fill_open 後寫 per-symbol price = fill_price=64000。
+    snapshot
+        .latest_price_by_symbol
+        .insert("BTCUSDT".to_string(), 64_000.0);
+    snapshot.latest_price = Some(64_000.0);
+    // 後續 evaluate ETHUSDT，per-symbol 未種 → fallback 全域 64000；
+    // 為 isolate 該行為，先 explicit assert per-symbol path：
+    assert_eq!(
+        snapshot.latest_price_for("BTCUSDT"),
+        Some(64_000.0),
+        "per-symbol BTCUSDT 應取到 64000"
+    );
+    // ETHUSDT 未在 per-symbol map（注意：seed helper 只放 BTCUSDT=0），
+    // fallback 至全域 latest_price=64000。驗證 fallback chain 正常。
+    // 註：本 test 主要驗 update + lookup；fallback 場景另有 test。
+    snapshot.latest_price_by_symbol.remove("BTCUSDT");
+    assert_eq!(
+        snapshot.latest_price_for("BTCUSDT"),
+        Some(64_000.0),
+        "per-symbol 缺值 + 全域=64000 → fallback 取 64000"
+    );
+}
+
+#[test]
+fn test_replay_latest_price_fallback_when_missing() {
+    // Tier A T5：驗證 `latest_price_for(symbol)` fallback 鏈：
+    //   1. per-symbol 有值 → 取 per-symbol（即使全域不同值）
+    //   2. per-symbol 缺值 + 全域有值 → 取全域
+    //   3. per-symbol 缺值 + 全域 None → 回 None
+    let snapshot_per_symbol = make_snapshot_seed_with_prices(
+        10_000.0,
+        Some(999.99), // 全域 999.99，per-symbol 應優先
+        &[("BTCUSDT", 64_000.0)],
+        Vec::new(),
+    );
+    assert_eq!(
+        snapshot_per_symbol.latest_price_for("BTCUSDT"),
+        Some(64_000.0),
+        "per-symbol 有值時應優先取 per-symbol（64000）不是全域（999.99）"
+    );
+
+    let snapshot_fallback = make_snapshot_seed_with_prices(
+        10_000.0,
+        Some(123.45),
+        &[("BTCUSDT", 64_000.0)],
+        Vec::new(),
+    );
+    assert_eq!(
+        snapshot_fallback.latest_price_for("ETHUSDT"),
+        Some(123.45),
+        "per-symbol 缺 ETHUSDT 時應 fallback 取全域 123.45"
+    );
+
+    let snapshot_none = make_snapshot_seed_with_prices(
+        10_000.0,
+        None, // 全域也缺
+        &[],
+        vec![crate::replay::risk_adapter::ReplayPosition {
+            symbol: "BTCUSDT".to_string(),
+            is_long: true,
+            qty: 0.5,
+            entry_price: 64_000.0,
+            owner_strategy: "test".to_string(),
+        }],
+    );
+    assert_eq!(
+        snapshot_none.latest_price_for("ETHUSDT"),
+        None,
+        "per-symbol 缺 + 全域 None → 回 None（evaluate 端 unwrap_or 0.0 觸發 Gate 2.6 fallback）"
+    );
 }

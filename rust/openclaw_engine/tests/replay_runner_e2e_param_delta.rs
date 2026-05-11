@@ -78,11 +78,18 @@ fn fixture_synthetic_path() -> PathBuf {
 /// 構造 baseline ``ReplayPaperSnapshot``：1 萬 balance、無庫存、
 /// ``latest_price`` 用首個 fixture 事件，使 Gate 2.6 P1 cap 有真錨。
 fn build_snapshot(starting_price: f64) -> ReplayPaperSnapshot {
+    // Tier A T5：cross-language proof_7/8 sanity — synthetic fixture 只用一個
+    // symbol（BTCUSDT），per-symbol map 預種 BTCUSDT=starting_price，與全域
+    // `latest_price=Some(starting_price)` 一致。evaluate 端 `latest_price_for`
+    // 取 per-symbol 不退 fallback，byte-equal 與 pre-T5 等價。
+    let mut latest_price_by_symbol = std::collections::HashMap::new();
+    latest_price_by_symbol.insert("BTCUSDT".to_string(), starting_price);
     ReplayPaperSnapshot {
         balance: 10_000.0,
         drawdown_pct: 0.0,
         positions: Vec::new(),
         latest_price: Some(starting_price),
+        latest_price_by_symbol,
         exposure_pct: 0.0,
         correlated_exposure_pct: 0.0,
         leverage: 0.0,

@@ -689,6 +689,12 @@ impl IsolatedPipeline {
             });
         }
         snap.balance -= fee;
+        // Tier A T5：fill 後同步 per-symbol price anchor。避免後續 tick / risk
+        // evaluate 時用其他 symbol 的 last-touched price 當該 symbol 的 cap anchor。
+        // 全域 latest_price 也同步更新（保留 last-touched fallback 語意）。
+        snap.latest_price_by_symbol
+            .insert(symbol.to_string(), fill_price);
+        snap.latest_price = Some(fill_price);
         self.balance = snap.balance;
     }
 
@@ -726,6 +732,11 @@ impl IsolatedPipeline {
             } else if let Some(existing) = snap.positions.get_mut(idx) {
                 existing.qty -= close_qty;
             }
+            // Tier A T5：close-side fill 也同步 per-symbol price anchor，避免
+            // 後續 evaluate 用過時錨。全域 latest_price 同步更新。
+            snap.latest_price_by_symbol
+                .insert(symbol.to_string(), fill_price);
+            snap.latest_price = Some(fill_price);
         }
         self.balance = snap.balance;
     }
