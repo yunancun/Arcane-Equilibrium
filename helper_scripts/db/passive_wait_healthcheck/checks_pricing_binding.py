@@ -107,6 +107,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from .pricing_binding_model import (
+    RUST_FEE_SOURCE_BYBIT_API,
+    RUST_FEE_SOURCE_COLD_DEFAULT,
+    RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT,
+    infer_pricing_source,
+    is_rust_pg_source_compatible,
+)
+
 # ---------------------------------------------------------------------------
 # Bybit V5 linear default fee rate constants — mirrored from Rust
 # ``rust/openclaw_engine/src/account_manager.rs:136-138``. Any drift between
@@ -145,21 +153,6 @@ DUAL_SOURCE_PROBE_SYMBOL: str = "BTCUSDT"
 # IPC timeout (秒)。dual-source 是 advisory，超時 fail-soft 不阻 healthcheck。
 DUAL_SOURCE_IPC_TIMEOUT_SECONDS: float = 2.0
 
-# Rust 端 FeeSource enum 字串集（snake_case）。
-# 對齊 `rust/openclaw_engine/src/account_manager.rs::FeeSource::as_str`。
-RUST_FEE_SOURCE_BYBIT_API: str = "bybit_api"
-RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT: str = "demo_conservative_default"
-RUST_FEE_SOURCE_COLD_DEFAULT: str = "cold_default"
-
-# Rust enum ↔ PG proxy 相容性表 (Rust enum 字串 → 相容 PG proxy 集合)。
-# 用於 dual-source compare：disagree → WARN，不直接 FAIL（首階段觀察期）。
-_FEE_SOURCE_COMPAT: dict[str, set[str]] = {
-    RUST_FEE_SOURCE_BYBIT_API: {"bybit_v5", "inactive_mainnet"},
-    RUST_FEE_SOURCE_DEMO_CONSERVATIVE_DEFAULT: {"seed_default", "inactive_mainnet"},
-    RUST_FEE_SOURCE_COLD_DEFAULT: {"cold_default", "inactive_mainnet"},
-}
-
-
 def _is_rust_pg_source_compatible(rust_enum: str, pg_proxy: str) -> bool:
     """判斷 Rust enum 字串與 PG proxy 字串是否語意相容。
 
@@ -169,10 +162,7 @@ def _is_rust_pg_source_compatible(rust_enum: str, pg_proxy: str) -> bool:
     Returns:
         True = 相容（PASS）/ False = disagree（首階段升 WARN）。
     """
-    compat = _FEE_SOURCE_COMPAT.get(rust_enum)
-    if compat is None:
-        return False
-    return pg_proxy in compat
+    return is_rust_pg_source_compatible(rust_enum, pg_proxy)
 
 # Refresh-age verdict thresholds per RFC §2.2 ``Refresh Cadence``.
 # RFC §2.2 刷新節奏判定閾值。
@@ -233,12 +223,7 @@ def _infer_source(default_count: int, non_default_count: int) -> str:
     - ``"seed_default"``  — 100% match defaults (AccountManager.seed_default_fee_rates fallback).
     - ``"bybit_v5"``      — at least one non-default value (assume Bybit-sourced).
     """
-    total = default_count + non_default_count
-    if total == 0:
-        return "cold_default"
-    if non_default_count == 0:
-        return "seed_default"
-    return "bybit_v5"
+    return infer_pricing_source(default_count, non_default_count)
 
 
 def _format_per_mode_summary(per_mode: dict[str, dict[str, Any]]) -> str:

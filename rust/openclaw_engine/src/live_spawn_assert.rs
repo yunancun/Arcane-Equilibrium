@@ -226,14 +226,52 @@ pub fn assert_pricing_binding_for_live_spawn(
         //   - acceptable_modes 含 mode_label → 全 accept（不檢查 source）
         //   - 不含 → 與 mainnet 同嚴格，非 BybitApi reject
         if !mode_in_acceptable && !matches!(source, FeeSource::BybitApi) {
-            return Err(LivePricingBindingError::LiveDemoNonApiSourceWhenStrict {
-                symbol,
-                source,
-            });
+            return Err(LivePricingBindingError::LiveDemoNonApiSourceWhenStrict { symbol, source });
         }
     }
 
     Ok(())
+}
+
+/// Live spawn pricing readiness 的單一 Interface。
+///
+/// 呼叫端不再需要知道 wait/assert/audit 的 ordering：本函式先等 first
+/// refresh，再跑 coverage + per-symbol assertion，並負責寫 audit log。
+pub async fn enforce_live_spawn_pricing_readiness(
+    env: BybitEnvironment,
+    account_manager: &AccountManager,
+    pricing_config: &PricingConfig,
+) -> Result<(), LivePricingBindingError> {
+    enforce_live_spawn_pricing_readiness_with_timeout(
+        env,
+        account_manager,
+        pricing_config,
+        DEFAULT_FIRST_REFRESH_TIMEOUT,
+    )
+    .await
+}
+
+/// 測試與特殊 caller 可指定 timeout；production 走 default wrapper。
+pub async fn enforce_live_spawn_pricing_readiness_with_timeout(
+    env: BybitEnvironment,
+    account_manager: &AccountManager,
+    pricing_config: &PricingConfig,
+    timeout: Duration,
+) -> Result<(), LivePricingBindingError> {
+    let wait_start = std::time::Instant::now();
+    if let Err(e) = wait_for_first_refresh_or_timeout(account_manager, timeout).await {
+        write_wait_timeout_audit(env, wait_start.elapsed().as_secs());
+        return Err(e);
+    }
+
+    let assert_result = assert_pricing_binding_for_live_spawn(env, account_manager, pricing_config);
+    write_audit_log(
+        env,
+        &assert_result,
+        account_manager.fee_rate_count(),
+        account_manager.last_fee_refresh_ms(),
+    );
+    assert_result
 }
 
 /// 寫 structured tracing audit log（用於 systemd journalctl / engine.log 留證）。
@@ -369,11 +407,7 @@ mod tests {
 
         let cfg = make_pricing_config(vec!["paper", "demo", "live_demo"]);
 
-        let result = assert_pricing_binding_for_live_spawn(
-            BybitEnvironment::LiveDemo,
-            &acct,
-            &cfg,
-        );
+        let result = assert_pricing_binding_for_live_spawn(BybitEnvironment::LiveDemo, &acct, &cfg);
         assert!(
             result.is_ok(),
             "LiveDemo + DemoConservativeDefault + modes 含 live_demo 應接受，得 {:?}",
@@ -395,11 +429,7 @@ mod tests {
 
         let cfg = make_pricing_config(vec!["paper", "demo", "live_demo"]);
 
-        let result = assert_pricing_binding_for_live_spawn(
-            BybitEnvironment::LiveDemo,
-            &acct,
-            &cfg,
-        );
+        let result = assert_pricing_binding_for_live_spawn(BybitEnvironment::LiveDemo, &acct, &cfg);
         assert!(
             result.is_ok(),
             "LiveDemo + ColdDefault + modes 含 live_demo 應接受，得 {:?}",
@@ -422,11 +452,7 @@ mod tests {
         // acceptable_modes 只含 paper / demo，不含 live_demo（嚴格模式）
         let cfg = make_pricing_config(vec!["paper", "demo"]);
 
-        let result = assert_pricing_binding_for_live_spawn(
-            BybitEnvironment::LiveDemo,
-            &acct,
-            &cfg,
-        );
+        let result = assert_pricing_binding_for_live_spawn(BybitEnvironment::LiveDemo, &acct, &cfg);
         assert!(
             matches!(
                 result,
@@ -450,8 +476,7 @@ mod tests {
         // 即使 modes 含所有 mode label，mainnet hard-block
         let cfg = make_pricing_config(vec!["paper", "demo", "live_demo", "live"]);
 
-        let result =
-            assert_pricing_binding_for_live_spawn(BybitEnvironment::Mainnet, &acct, &cfg);
+        let result = assert_pricing_binding_for_live_spawn(BybitEnvironment::Mainnet, &acct, &cfg);
         assert!(
             matches!(
                 result,
@@ -477,8 +502,7 @@ mod tests {
 
         let cfg = make_pricing_config(vec!["paper", "demo", "live_demo"]);
 
-        let result =
-            assert_pricing_binding_for_live_spawn(BybitEnvironment::Mainnet, &acct, &cfg);
+        let result = assert_pricing_binding_for_live_spawn(BybitEnvironment::Mainnet, &acct, &cfg);
         assert!(
             matches!(
                 result,
@@ -503,11 +527,7 @@ mod tests {
 
         let cfg = make_pricing_config(vec!["paper", "demo", "live_demo"]);
 
-        let result = assert_pricing_binding_for_live_spawn(
-            BybitEnvironment::LiveDemo,
-            &acct,
-            &cfg,
-        );
+        let result = assert_pricing_binding_for_live_spawn(BybitEnvironment::LiveDemo, &acct, &cfg);
         assert!(
             matches!(
                 result,
@@ -518,12 +538,54 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_readiness_interface_rejects_wait_timeout() {
+        let acct = AccountManager::new();
+        let cfg = make_pricing_config(vec!["paper", "demo", "live_demo"]);
+
+        let result = enforce_live_spawn_pricing_readiness_with_timeout(
+            BybitEnvironment::LiveDemo,
+            &acct,
+            &cfg,
+            Duration::from_millis(50),
+        )
+        .await;
+
+        assert!(matches!(result, Err(LivePricingBindingError::NoRefresh)));
+    }
+
+    #[tokio::test]
+    async fn test_readiness_interface_accepts_live_demo_seed_default() {
+        let acct = AccountManager::new();
+        let extras: Vec<String> = (0..25).map(|i| format!("READY{}USDT", i)).collect();
+        let extras_refs: Vec<&str> = extras.iter().map(|s| s.as_str()).collect();
+        let _ = acct.seed_default_fee_rates(extras_refs.iter().copied());
+        let _ = acct.seed_default_fee_rates(SYMBOLS.iter().copied());
+        let cfg = make_pricing_config(vec!["paper", "demo", "live_demo"]);
+
+        let result = enforce_live_spawn_pricing_readiness_with_timeout(
+            BybitEnvironment::LiveDemo,
+            &acct,
+            &cfg,
+            Duration::from_secs(1),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "readiness interface 應接受 LiveDemo seed default"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Test 10：reason_code 字串正確（healthcheck 對接契約）
     // -----------------------------------------------------------------------
     #[test]
     fn test_reason_code_strings_aligned() {
-        assert_eq!(LivePricingBindingError::NoRefresh.reason_code(), "no_refresh");
+        assert_eq!(
+            LivePricingBindingError::NoRefresh.reason_code(),
+            "no_refresh"
+        );
         assert_eq!(
             LivePricingBindingError::InsufficientSymbolCoverage { count: 5 }.reason_code(),
             "insufficient_symbol_coverage"

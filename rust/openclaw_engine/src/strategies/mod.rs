@@ -31,6 +31,8 @@ pub mod maker_rejection;
 pub mod params;
 pub mod registry;
 pub mod strategy_params;
+#[cfg(test)]
+pub(crate) mod test_harness;
 
 // Re-export public API surface so external call-sites keep using
 // `crate::strategies::X` unchanged.

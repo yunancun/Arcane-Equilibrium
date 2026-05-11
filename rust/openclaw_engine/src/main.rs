@@ -327,12 +327,7 @@ async fn async_main(
     // LG-2 T2 (2026-05-11)：boot 路徑 Live spawn 傳 risk_live.pricing 配置；
     // build_exchange_pipeline 對 Live (Mainnet + LiveDemo) 路徑執行 pricing
     // binding 三項斷言。`Option<PricingConfig>` 為 None 時走 default。
-    let live_pricing_config = risk_stores
-        .live
-        .load()
-        .pricing
-        .clone()
-        .unwrap_or_default();
+    let live_pricing_config = risk_stores.live.load().pricing_config();
     let (live_bindings, live_slot_cancel) = match live_slot
         .try_spawn(&pipeline_slot::SpawnConfig {
             kind: pipeline_slot::SlotKind::Live,
@@ -356,12 +351,7 @@ async fn async_main(
     // LG-2 T2 (2026-05-11)：demo spawn 不 enforce pricing assertion，但仍
     // 傳遞 pricing config 保持 SpawnConfig API 對齊；build_exchange_pipeline
     // 內部對 kind != Live 直接跳過 pre-check。
-    let demo_pricing_config = risk_stores
-        .demo
-        .load()
-        .pricing
-        .clone()
-        .unwrap_or_default();
+    let demo_pricing_config = risk_stores.demo.load().pricing_config();
     let (demo_bindings, demo_slot_cancel) = match demo_slot
         .try_spawn(&pipeline_slot::SpawnConfig {
             kind: pipeline_slot::SlotKind::Demo,

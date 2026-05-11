@@ -47,6 +47,7 @@ mod dispatch;
 mod engine_routing;
 mod handlers;
 mod handlers_config;
+mod method_registry;
 // E5-P1-5: JSON-RPC params extraction & validation helpers (orphan §九).
 //         Exposed as a sibling module so existing handlers.rs can adopt
 //         incrementally without requiring a coordinated migration PR.
