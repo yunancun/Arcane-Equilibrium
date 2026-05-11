@@ -273,4 +273,78 @@ Commit `a8e24ed9` (Mac→origin→Linux pull all sync).
 
 ---
 
-**End of session worklog（updated post-precompact）**. Final HEAD `e4669dd8`. Engine PID 1597560 running with full W1+W2+V086+W7 deploy. Monitor 24h for D+2 14:30 UTC ALTER VALIDATE prereq + paper engine 7d evidence accumulation start. Operator action pending: AMD-W6-1 final approval + CLAUDE.md §七 idempotency wording fix (MIT MUST 4).
+## §12 P0 fix W1 funding panel staleness — RCA + IMPL + REBUILD #3 deploy (2026-05-11 ~00:50 UTC)
+
+**HEAD `4b267dff`**. Engine REBUILD #3 PID 1630049（00:53 UTC restart）。
+
+### RCA
+
+| 層 | 觀察 / 結論 |
+|---|---|
+| 症狀 | post-rebuild#2 25min runtime 後 `panel.funding_rates_panel` 只 10/25 cohort syms 有 row；每 sym 1-3 rows 在 13.7-26.7 min 前停滯 |
+| Bybit V5 ticker delta 行為 | tickers 流 delta 只夾帶 changed field；`fundingRate` 只 8h 結算才變動 → 大部分 delta 此 field=None |
+| 原 producer guard | `panel_aggregator/mod.rs:271` `(Some(rate), Some(next_ms))` AND guard 拒絕大部分 delta，只 initial snapshot per sym 通過 |
+| Drain semantics | `funding_curve.rs:162` flush 後 buffer 清空，下個 cycle 若無新 ticker 則該 sym 不再寫入 → 永久停滯 |
+
+### IMPL (commit 4b267dff, +185 LOC)
+
+`PanelAggregator` 加 `funding_partial_state: HashMap<sym, (Option<f64>, Option<i64>)>` 持久 cache（不隨 inner buffer drain）：
+
+1. **Event handler** (`mod.rs:283-296`): `ingest_funding_partial(sym, rate, next_ms)` 任一 field Some 即 update cache 對應位置；兩 field 皆 None silent skip（避免 cache 為非 cohort sym 膨脹）。
+2. **Flush timer arm** (`mod.rs:222-237`): `repopulate_funding_buffer_from_cache() -> usize` 從 cache 為 cohort 全 sym（兩 field 皆 Some 者）push inner aggregator buffer。
+3. **Cache 不 drain**: cache 持有 8h 內 latest 已知值，每 60s flush 為 cohort 全 sym（已 receive initial snapshot 者）寫一 row。
+
+**Helper API** (test + future maintenance):
+- `ingest_funding_partial(sym, rate, next_funding_ms)` — public ingest entry
+- `repopulate_funding_buffer_from_cache() -> usize` — public flush helper
+- `funding_partial_state_size() -> usize` — observability
+- `funding_partial_state_get(sym)` — `#[cfg(test)]` only
+
+### Tests (4 新 + 49 既有 = 53/53 PASS)
+
+| Test | 驗 |
+|---|---|
+| `test_funding_partial_state_initial_snapshot_both_some` | initial snapshot 兩 Some → cache 完整 + repopulate push |
+| `test_funding_partial_state_delta_only_rate` | event 1 只 rate → cache (Some, None) 不 push；event 2 補 next_ms → cache 全 push |
+| `test_funding_partial_state_persistence_across_repopulate` | inner flush drain 後 cache 仍持有，下個 cycle 重 push |
+| `test_funding_partial_state_no_op_for_both_none` | cohort 邊界 cache 不膨脹（兩 None silent skip） |
+
+`cargo check --release`: PASS（only pre-existing dead_code warnings）
+`cargo test --release --lib panel_aggregator`: 53/53 PASS
+
+### Deploy REBUILD #3
+
+```
+restart_all.sh --rebuild --keep-auth
+build: 35.83s release（增量編譯）
+old PID: 1597560 → graceful exit (~500ms)
+new PID: 1630049 (02:53 UTC+02 = 00:53 UTC)
+auth: --keep-auth signed live authorization preserved
+3 pipelines (paper/demo/live): age 5.8-8.3s post-restart ✅
+```
+
+### Runtime evidence (post-restart, 5min uptime)
+
+| 項 | 實測 | 結論 |
+|---|---|---|
+| `[66] check_panel_freshness` | `PASS funding=54s, oi_delta=54s` (前 funding=781s WARN) | ✅ panel collector healthy |
+| Panel rows post-restart | 5 cycles, 18 rows, 6 distinct syms (BTC/ETH/SUI/TON/UNI/SOL) | Fix working — 每 sym 收 initial snapshot 後每 flush 寫 1 row |
+| Per-sym pattern | BTC/ETH 4 rows (each flush) / SUI/TON/UNI 3 rows (joined cycle 2) / SOL 1 row (joined cycle 5) | ✅ cache persists across flush；每 sym 保證 ≥1 row/min |
+
+### 殘留 P1 (不阻 deploy)
+
+`pinned_symbols=["BTCUSDT","ETHUSDT"]` (`settings/risk_control_rules/scanner_config.toml:15`) + scanner runtime subscribe ~13 syms = 共 ~15 syms 有 ticker WS 訂閱；其中 5-6 在 panel_aggregator_cohort 25 內。剩 ~20 cohort syms 永遠無 ticker event 即無 funding row。
+
+**P1 fix 路徑（不在本 P0 範圍）**：W-AUDIT-8c cohort dynamic phase 應將 panel_aggregator_cohort 25 sym 加入 WS subscription（option A: 擴 scanner pinned_symbols；option B: panel_aggregator 自行 spawn ticker subscription）。
+
+### 三端 sync 確認
+
+```
+Mac:    HEAD 4b267dff (push 4b267dff)
+origin: HEAD 4b267dff (a781f624..4b267dff main -> main)
+Linux:  HEAD 4b267dff (Fast-forward pull 完成)
+```
+
+---
+
+**End of session worklog（updated post-deploy REBUILD #3）**. Final HEAD `4b267dff`. Engine PID 1630049 running with W1 funding cache fix active + W2+V086+W7 deploy. [66] healthcheck PASS funding=54s + oi_delta=54s. P1 殘留: WS subscription scope < cohort 25（W-AUDIT-8c 範圍）。Operator pending: AMD-W6-1 final approval + CLAUDE.md §七 idempotency wording fix (MIT MUST 4).
