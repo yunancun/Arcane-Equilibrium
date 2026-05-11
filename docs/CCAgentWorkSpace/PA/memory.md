@@ -2869,3 +2869,32 @@ Strategy trait (`strategies/mod.rs`) 對 W7 pattern **不強制**：on_rejection
 - PA audit: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w_d_mag083_pa_audit.md`
 - W-C WINDOW_PASS sign-off: `srv/docs/governance_dev/2026-05-11--w_c_window_pass_signoff.md`
 - PA Caveat 1+2 fix plan: `srv/docs/CCAgentWorkSpace/PA/2026-05-10--w_c_caveat_fix_plan.md`
+
+---
+
+## 2026-05-11 P1 V083 ipc_close_symbol entry_context_id 卡 buffer 設計
+
+**問題**：engine restart 後 V083 chk_fills_close_has_entry_context_id_v083 constraint 每 2 秒拒寫 risk_close:ipc_close_symbol fill；22 min 518 INSERT 失敗、buffer 卡住、PnL 帳目漏接。
+
+**Operator RCA 給的根因確認**：
+- commands.rs:1108-1112 `unwrap_or("")` → 空字串 → V083 reject
+
+**PA 親查新發現的閉環失效**：
+1. **Writer 假 fail-soft**：trading_writer.rs:194-208 `should_clear_buffer` 是 chunk 級失敗→buf 不清→無限重試。V083 SQL line 39-41「writer-side WARN log fail-soft」設計只有 WARN log 落地，INSERT 路徑沒做 row-level fallback。單一違規 row 永久卡 buf 頭。
+2. **Cron backfill SQL 約束破洞**：edge_label_backfill.py:435 `entry.strategy_name = c.strategy_name` 嚴格匹配。但 ipc_close_symbol 寫 strategy_name=`risk_close:ipc_close_symbol`、ipc_close_all 寫 `ipc_close_all`，與原 entry 的 strategy（`ma_crossover` 等）不一致 → cron 永遠 match 不到 → 無法後補。
+
+**設計方案**：Option B + Option C 混合
+- **Option B 第一波止血（≤1h）**：抽 `resolve_close_entry_context_id(symbol, ts_ms)` helper，paper_state 沒有時 fallback 為 `orphan_recovery_ctx:{symbol}:{ts_ms}` synthetic id。改 4-5 處 close call site（commands.rs:1108、945、1183、512、749）。~30 LOC，無 SQL 改動，無新依賴。
+- **Option C 第二波永久防線**：trading_writer.rs row-level fail-soft + V088 sidecar table。下 sprint 處理。
+- **Option A/D 否決**：A 違 H0 <1ms SLA；D 破 ML training 完整性。
+
+**Cross-strategy 影響廣度**：所有 risk_close:* / ipc_close_* / orphan close 共用 bug；不是單點。
+
+**架構教訓 1**：「fail-soft 設計」要驗證**真實 INSERT 路徑的 fail-soft**，不只 log 維度。V083 設計時 SQL 注釋寫了「WARN log fail-soft 不阻 INSERT」，但 writer 端沒實作 row-level fallback，整個 chunk 仍 fail → buffer 卡死。設計→落地 gap，IMPL 端未捕。
+
+**架構教訓 2**：cron backfill SQL 約束（`entry.strategy_name = c.strategy_name`）vs producer 端 strategy_name 標籤（`risk_close:*` / `ipc_close_*`）不對齊 = 設計時未跨 path 對齊「strategy_name semantic」。M2 wave 設計時應強制：close path strategy_name 與 entry strategy_name 不同時，backfill SQL 必須有 fallback path。
+
+**架構教訓 3**：synthetic id pattern 是好的「placeholder + 後補」設計範式 — `orphan_recovery_ctx:{symbol}:{ts_ms}` well-formed 可被 cron 識別。優於 silent NULL 或 silent drop。
+
+**Reports**:
+- 設計報告：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_v083_ipc_close_fix_design.md`
