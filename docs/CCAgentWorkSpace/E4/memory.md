@@ -2740,3 +2740,78 @@ Sub-case 2 (consume path)：`guard.consume()` 取出 inner lease → guard auto 
 4. **Pristine baseline 必透過 git stash 重跑** — 隔壁 session uncommitted changes 會虛增 test count；E4 baseline 報告必跑 `git stash + cargo test + git stash pop` 取真 pristine 數，否則 W4 net delta 計算錯誤（誤把 W7-2 +7 算進 W4 範圍）。
 5. **persistence flaky 是 pre-existing concurrent tmp-file race** — 並發跑 ~2648 test 時 file_writer 偶撞；隔離跑 (`cargo test persistence::tests`) 全 PASS。E4 跑兩遍策略可 confirm flaky vs real bug；本任務 Run 2/3 同 2648 PASS 證 W4 test 100% deterministic，不需 deflake。
 6. **NOT COMMITTED + NOT DEPLOYED 標記是 W4 sub-agent 接手契約** — E4 pre-write 完成後改動仍 uncommitted，留給 D+1 W4 sub-agent commit + push + ssh deploy。報告獨立寫入 `workspace/reports/` 是 E4 啟動序列硬要求；報告同時是 W4 sub-agent 接手憑證（含 acceptance 對照表 + 修改檔案清單 + cargo test 結果摘要）。
+
+## 2026-05-11 (P1 V083 ipc_close entry_context_id fix + P2 demo TOML 回歸)
+
+### 任務 = 兩 commit 連環回歸
+
+- Commit `d4867676` E1 IMPL: P1 V083 close path producer-side fix (Option B) — `commands.rs` +9 LOC + 4 unit test +86 LOC
+- Commit `27e86f89` P2 fix: demo TOML A1+A2 (`bb_reversion.min_persistence_ms` 180→120s + `ma_crossover.min_trend_snr` 0.75→0.60) — pure config delta
+
+### 1. PG dry-run 4/4 預期結果
+
+| Test | INSERT 內容 | 結果 |
+|---|---|---|
+| (a) close fill + NULL entry_context_id | REJECT `ERROR: ... chk_fills_close_has_entry_context_id_v083` | ✅ V083 對 NULL fail-closed |
+| (b) close fill + synthetic `orphan_recovery_ctx:BTCUSDT:1700000000000` | ACCEPT `INSERT 0 1` | ✅ Fix 後 producer-side 通過 |
+| (c) close fill + 空字串 `''` (跳過 writer NULL-coerce) | ACCEPT `INSERT 0 1` | ✅ V083 不對空字串 reject — 真兇是 writer NULL-coerce |
+| (d) entry fill + NULL entry_context_id | ACCEPT `INSERT 0 1` | ✅ V083 對 entry path no-op (by-design) |
+
+### 2. PA spec disambiguation: V083 拒的是 NULL 不是空字串
+
+PA spec 第 26 行 `unwrap_or("") → 寫入空字串` 是省略中間 writer NULL-coerce 細節。實際邏輯閉環：
+1. producer `unwrap_or("")` → 空字串
+2. writer `trading_writer.rs:486-489 if entry_context_id.is_empty() { push_bind(None) }` → 把空字串 coerce 成 NULL
+3. PG INSERT NULL → V083 `chk_..._v083` REJECT
+
+E2 review 同未 catch 此細節（兩端 spec 都直接框成「producer 寫空字串 → V083 reject」）。Fix 仍 100% 正確，因為 producer 改成送 well-formed synthetic id → writer 看到非空 → push_bind Some → PG 看到 NOT NULL → 通過。
+
+### 3. P2 TOML 真實 wired 確認 (非 dead config)
+
+| 改動 | TOML loader struct | Strategy 邏輯 use site |
+|---|---|---|
+| `ma_crossover.min_trend_snr=0.6` | `strategy_params.rs:80 pub min_trend_snr: f64` (#[serde(default)]) | `ma_crossover/helpers.rs:256 snr >= self.min_trend_snr` (entry SNR gate) |
+| `bb_reversion.min_persistence_ms=120000` | `strategy_params.rs:225-226 pub min_persistence_ms: u64` (#[serde(default = "default_min_persistence_ms")]) | `bb_reversion/mod.rs:586 ... self.min_persistence_ms ...` (confluence persistence gate) |
+
+兩個 P2 參數**真實 wired**，從 TOML 通過 serde + Strategy::set_params 抵達策略 hot path。**非 dead config**（[no-dead-params](feedback_no_dead_params.md) 規則 PASS）。
+
+### 4. 5 個 close path call site 實際替換驗證
+
+```
+513:  let existing_entry_ctx = self.resolve_close_entry_context_id(symbol, ts_ms);          (apply_confirmed_fill)
+744:  let entry_ctx = self.resolve_close_entry_context_id(symbol, event.ts_ms);             (execute_position_close)
+938:  let entry_ctx = self.resolve_close_entry_context_id(&symbol, ts_ms);                  (ipc_close_all)
+1040: pub(super) fn resolve_close_entry_context_id(&self, symbol: &str, ts_ms: u64) -> ...  (helper definition)
+1121: let entry_ctx = self.resolve_close_entry_context_id(symbol, ts_ms);                   (ipc_close_symbol exchange)
+1194: let entry_ctx = self.resolve_close_entry_context_id(symbol, ts_ms);                   (ipc_close_symbol paper)
+```
+
+`grep get_entry_context_id commands.rs` 殘留 2 hit：line 167 (submit_external_order, E1 push back §6.1 接受) + line 1041 (helper internal)。**0 production close path 漏改**。
+
+### 5. SLA 影響定性 (zero,negligible)
+
+- Helper cost: ~50-100ns / call (HashMap lookup + format! fallback)
+- 頻率: ~100-200 calls/24h (close path 條件觸發,非 per-tick fan-out)
+- 24h cumulative: 130ns × 200 = 26,000ns = 0.026ms
+- 對 H0 < 1ms / Tick < 0.3ms / IPC < 5ms 預算 = **0.043% per call,0.0009% / 24h**
+- 無需 micro-bench (cost 量級遠小於 measurement noise)
+
+### 6. cargo test 結果 (2789/0/0,跑兩遍 non-flaky)
+
+| Phase | passed | failed |
+|---|---|---|
+| W-C closure baseline 2026-05-11 01:50 | 2776 | 0 |
+| Sibling N+1 D+0 land (P2 stable_id 等) | +9 | 0 |
+| V083 fix +4 unit test (resolve_close_entry_context_id::*) | +4 | 0 |
+| **本次實測 (2 runs 同綠)** | **2789** | **0** |
+
+trading_writer / batch_insert / emit_close_fill subset 全 PASS（含 writer-side `test_emit_close_fill_accepts_empty_entry_context_id` fail-soft 不變式 — V083 fix 與 writer 容忍性是兩條獨立防線，並存無破壞）。
+
+### 教訓追加 (V083 fix round 新增)
+
+1. **V083 spec 「寫入空字串 → reject」框架是省略中間 writer NULL-coerce** — 真實邏輯：producer 空字串 → writer line 486-489 coerce NULL → PG REJECT NULL（不是 PG REJECT 空字串）。E4 dry-run Test (c) 證實 V083 對空字串 ACCEPT，PA spec / E1 報告 / E2 review 都未 catch 此細節。Fix 正確性不受影響（producer 送 well-formed → writer 不 coerce → PG 看到 NOT NULL → 通過）。E4 必跑 PG 直查 constraint 定義 + 4-test 真實 dry-run 才能驗證完整邏輯閉環。
+2. **PG dry-run 必拆 BEGIN/ROLLBACK pair,不單一 transaction** — 第一次 single transaction 內跑 4 test，第一個 ERROR 觸發 `current transaction is aborted` 後續全部跳過。改 4 個獨立 BEGIN/ROLLBACK pair 才能跑完所有測試。E4 PG dry-run 模板必用 pair pattern。
+3. **TOML wire-check 必 trace 從 loader struct 到策略 hot path use site** — `min_trend_snr` 在 strategy_params.rs (TOML loader) → ma_crossover/config.rs (set_params) → ma_crossover/helpers.rs (snr gate) 三段都要 grep 確認，缺任一段都是 dead config。本次 [no-dead-params] 規則確認 PASS。
+4. **Close path helper 屬非 per-tick frequency** — 5 call site (513/744/938/1121/1194) 都是「條件觸發」 (fill confirm / IPC / risk close)，非每 tick fan-out 主迴圈。SLA 評估可定性論證 (~50-100ns × ~100-200 calls/24h)，無需 micro-bench。
+5. **Push back 接受邊界 = 不擴大 scope** — E1 報告 §6.1 標 line 167 latent bug 但 user prompt 嚴格只列 5 close path。E4 接受 push back（不阻 V083 fix deploy），不主動修代碼（E4 角色限制）。建議 PA / PM 後續決定是否同 helper 化 line 167。
+6. **E4 報告 commit message 必標兩 commit hash** — 本次任務跨兩個獨立 commit (`d4867676` V083 + `27e86f89` P2 TOML)，commit message 標 both hash + 對應 verdict 表，避免 PM 後續追溯誤把 V083 fix 與 P2 TOML 視為單一 wave。
