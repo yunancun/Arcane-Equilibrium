@@ -159,6 +159,41 @@ impl GridTrading {
         let is_up_cross = idx > prev_idx;
         let would_open =
             (is_down_cross && cur_inventory >= 0.0) || (is_up_cross && cur_inventory <= 0.0);
+
+        // OPTION-A-LITE-E1D (2026-05-11)：cross-strategy paper_state holding 防 race。
+        // grid_trading 的 net_inventory 是 grid-level 累積（-2/-1/0/+1/+2 layered qty），
+        // 必須保留本地累積（PA §7 BLOCKER #2：paper_state 不含 grid-level 資訊）。
+        // 但若 paper_state 已有非 grid 來源（ma_crossover / bb_reversion / bb_breakout 等）
+        // 開的倉位，grid 的 would_open 路徑會誤觸發新入場，導致 cross-strategy
+        // mass scalp 混合（如 strategy=grid_trading + exit_reason=bb_mean_revert）。
+        // 解法：在 entry path 偵測非 grid owner 倉位即 skip new entry；接受的合法 owner
+        // 為 "grid_trading"（自己）/ "bybit_sync"（boot 後 sync）/ "orphan_adopted"
+        // （PA §7 #5 watch：視為未知 owner，下次 fill 自然 re-attribute）。
+        // 不動 net_inventory / on_external_close / on_fill 等任何 read/write 路徑。
+        let cross_strategy_holds = ctx
+            .position_state
+            .filter(|p| {
+                let owner = p.owner_strategy.as_str();
+                owner != "grid_trading" && owner != "bybit_sync" && owner != "orphan_adopted"
+            })
+            .is_some();
+        if would_open && cross_strategy_holds {
+            // SAFETY 不變量：unwrap 安全 — cross_strategy_holds=true 蘊含
+            // ctx.position_state.is_some() 為真（filter 對 None 永遠回 None）。
+            let owner = ctx
+                .position_state
+                .map(|p| p.owner_strategy.as_str())
+                .unwrap_or("unknown");
+            debug!(
+                strategy = "grid_trading",
+                symbol = sym,
+                owner = owner,
+                "skip grid new entry: cross-strategy paper_state position holds \
+                 / grid 新開倉跳過：cross-strategy paper_state 已持倉"
+            );
+            return vec![];
+        }
+
         if would_open && self.blocked_symbols.contains(sym) {
             debug!(
                 strategy = "grid_trading",
