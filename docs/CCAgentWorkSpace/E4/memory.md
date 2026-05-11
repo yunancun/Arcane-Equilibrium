@@ -2,6 +2,54 @@
 
 ## 工作記憶
 
+### 2026-05-11 W2 IMPL Chain 4 Sub-agent Regression (HEAD `1f0354cf`) — **NEEDS_FIX · 3 HIGH BLOCKER in IMPL-4 SQL**
+
+**對象**: W2 A4-C BTC→Alt Lead-Lag 4 sub-agent commit `1f0354cf`（IMPL-1 orderbook +568 LOC / IMPL-2 fence amendment / IMPL-3 check_57 +321 + test +273 / IMPL-4 paper edge report +1257 LOC + counterfactual SQL +279 LOC）。E4 必跑 5 項 per PA dispatch §3.4 §3.5 §5 + 必跑 Linux PG empirical dry-run per `feedback_v_migration_pg_dry_run.md`。
+
+**Test 結果**:
+| 引擎 | passed | failed | ignored | baseline | delta | non-flaky |
+|---|---|---|---|---|---|---|
+| Rust lib (release) | **2797** | 0 | 0 | 2789 pre-W2 | +8 (IMPL-1) | ✅ 雙跑 0.56/0.57s 同綠 |
+| Rust W2 btc_lead_lag specific | 35 | 0 | 0 | n/a | +8 | ✅ 含 ingest task / 5-tick integration / cancel-safe |
+| W2 healthcheck Python fixture (Mac) | 10 | 0 | 0 | n/a | +10 | ✅ 真實 cover PASS/WARN/FAIL 三段 |
+| Python tests/ | 253 | 1 | 2 skipped | n/a | **0 W2 regression** | 1 fail 是 pre-existing docs/README.md drift (c13c811e) |
+| **IMPL-4 SQL Linux PG dry-run** | **0** | **3 BLOCKER** | - | n/a | -3 | ❌ NEEDS_FIX |
+
+**3 HIGH BLOCKER**:
+1. **B1**: `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql:182` `trading.klines` 不存在 → 真實 schema = `market.klines`（Linux PG `\dt trading.*` 證實）
+2. **B2**: 同檔 line 185 `k.interval = '1m'` column 不存在 → 真實 column = `k.timeframe`（Linux PG `\d market.klines` 證實 schema）
+3. **B3**: 同檔 line 42 + line 87 SQL 注釋裡的 `%(window_days)s` / `%(cohort_symbols)s` 字面字串 → psycopg2 不跳過 `--` 注釋，當 placeholder 解析 → caller `KeyError`（Mac empirical caller test 100% fail）
+
+**Fixed-SQL 驗證**: 3 BLOCKER fix 後跑 Linux PG → 3948 row 返回（panel 565 × 7 cohort sym ≈ 3955 panel_expanded LEFT JOIN klines + fills）→ 設計結構 OK，只是 schema/syntax 失誤。
+
+**IMPL-3 Linux PG runtime verify (re-verify per task)**: status=`WARN`, msg=`window=60m total_n=60 age=56.0s/PASS cohort=7/7/PASS extreme=0(0.0%)/PASS book=placeholder_zero/WARN`. Hot-path index `idx_btc_lead_lag_panel_ts_window` 存在 + chunk `_hyper_75_486_chunk` 對齊 IMPL-3 sub-agent self-report；EXPLAIN ANALYZE 走 Seq Scan 是 PG cost-based 對 565 row 正確選擇（不是 index miss bug）；execution time 0.497ms well within SLA。
+
+**核心驗證點**:
+- A.1 lib test 跑兩遍 2797/0/0 non-flaky 確認；IMPL-2 sub-agent 報告中提到的 IMPL-1 line 82 註釋語法錯 + line 1279 test signature 不齊 — 實際 build PASS（IMPL-1 commit 前已修補）
+- A.2 W2 btc_lead_lag 35 test 含 `ingest_task_to_producer_5_tick_integration`（真實 spawn tokio task + 5 tick fixture 餵不同 imbalance pattern + assert ∈ {0.333, -0.500, 0.0, 0.714, -0.818}）+ `ingest_task_drops_non_btc_or_non_orderbook_event`（真實 ETHUSDT Orderbook + BTCUSDT Ticker 過濾 silent drop）+ `run_loop_responds_to_cancel`（CancellationToken 真實退出）— **0 業務邏輯 mock**，tokio mpsc 是合法 IO 邊界
+- D 跨語言一致性: Rust `f32` → PG `real` → Python `f64` 是 f32→f64 擴展 cast 精度差 < 1e-7 遠優於 1e-4 容差；schema 對齊 7-symbol cohort `text[]` + regime enum `text` + BIGINT epoch ms 完全一致；empirical PG sample 3 row 證實
+- E Mock 4 sub-task each:
+  - IMPL-1 ✅ 0 業務邏輯 mock；公式 `(bid_top_n - ask_top_n) / (bid+ask)` 真實跑進 fixture
+  - IMPL-2 ⚠️ env-gate logic 等 IMPL-5 cover（per PA dispatch 設計，非 BLOCKER）
+  - IMPL-3 ✅ DB cursor IO mock 合法；verdict logic + SQL aggregate 真跑（Linux PG real check 確認）
+  - IMPL-4 ✅ smoke 3 case PSR/DSR/CI/R²(N) 公式真實計算（Bailey-LdP 2012 / Künsch 1989 / OLS 回歸 / Φ via math.erf 跨平台）；唯一 mock = `_make_mock_row` SQL row constructor 是合法 input fixture，下游 helper 真跑
+
+**Unexpected / 跟蹤 (非 W2 引入)**:
+1. **docs/README.md drift**: archive `2026-05-09--claude_md_section5_pre_alpha_surface.md` 由 commit `c13c811e` (2026-05-09 W-AUDIT-8a) 引入，但 README 索引未補登 → `tests/structure/test_docs_readme_index_static.py` FAIL；非 W2 引入；P2 followup
+2. **btc_book_imbalance 全 0**: Linux engine 載入 pre-IMPL-1 binary 仍寫 placeholder 0；待 `restart_all --rebuild --keep-auth` deploy 後翻 non-0（per IMPL-3 sub-agent dry-run note）— **預期 deploy gating 行為**
+
+**教訓 (記錄 lesson)**:
+1. **psycopg2 不跳過 SQL `--` 注釋裡的 `%(...)s` 字面字串**：注釋裡寫 placeholder 字面字符會被當 binding 解析 → caller KeyError。設計 hygiene：SQL 注釋若需提及 placeholder 名，用 Markdown 反引號或全角符或純文字描述（如「window_days 變數」）。**Mac mock pytest false-pass 不夠**（IMPL-4 sub-agent smoke-test 不連 PG 所以 mock cursor 不踩 binding 邏輯）→ `feedback_v_migration_pg_dry_run.md` 再次 reinforce
+2. **schema namespace 跨 table 異質**: `panel.btc_lead_lag_panel`（新建）/ `trading.fills`（trading 域）/ `market.klines`（market 域）— 三個 schema namespace 不同 → 寫 SQL 時必先做 Linux empirical schema check 不能憑記憶寫 `trading.<table>` template
+3. **Seq Scan ≠ Index miss bug**：低 cardinality + 全 row 在 window 內，PG 正確選擇 Seq Scan 比 Index 便宜；驗 hot-path index 命中不能只看 `Index Scan` 字樣，要看 cost 模型 + execution time 是否 within SLA + row count 是否在 cardinality threshold
+4. **跨語言浮點容差自然滿足條件**: f32→f64 cast precision diff < 1e-7 → 1e-4 容差 trivially satisfied；W2 scope 內無新計算 hot path（panel field 大多 input pass-through）所以 cross-language tolerance 不是 critical
+
+**Verdict**: **NEEDS_FIX**（W2-IMPL-1/2/3 + cargo test PASS，IMPL-4 SQL 3 BLOCKER 退回 E1 → 修 → E2 re-review → E4 重 dry-run → W2-IMPL-5 派發前必收口）
+
+**Report**: `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w2_chain_e4_regression.md`
+
+---
+
 ### 2026-05-11 W-C MAG-082 Caveat 1+2+3 Fix Regression (HEAD `58970d24` + 4 file working tree) — **E4 PASS · Deploy READY**
 
 **對象**: PA `2026-05-10--w_c_caveat_fix_plan.md` E4 regression 必跑 5 項。Rust R1 +877 LOC + R2 1 line + Python +254 LOC。E2 R1 APPROVE WITH CONDITIONS + R2 mini APPROVE · E5 APPROVE WITH 3 P2 perf SLA PASS · 最後 E4 gate。
