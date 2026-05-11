@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use super::common::{ConfidenceBuilder, PerSymbolState, TrendCooldown};
+use super::common::{ConfidenceBuilder, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, StrategyParams};
 
@@ -325,10 +325,13 @@ impl MaCrossoverParams {
 
 pub struct MaCrossover {
     active: bool,
-    /// Per-symbol position tracking: symbol → is_long direction.
-    /// E1-P0-2: Migrated from `HashMap<String, bool>` to `PerSymbolState<bool>`.
-    /// 每幣種獨立持倉追蹤：symbol → 多空方向（E1-P0-2：改用 `PerSymbolState<bool>`）。
-    positions: PerSymbolState<bool>,
+    // P0 Option A-Lite (2026-05-11)：本策略不再維護本地 position state。
+    // `self.positions: PerSymbolState<bool>` 已移除，由 `ctx.position_state`
+    // （`paper_state.get_position(symbol)`）作為 SSoT。on_tick 內以
+    // `ctx.position_state.filter(|p| p.owner_strategy == self.name())` 判定
+    // self-owned vs cross-strategy；cross-strategy 持倉時 entry path 跳過。
+    // 同步移除 `prev_position`（rollback 對象消失）+ W7-2/W7-3/W7-5 hook 化簡。
+    // 詳：PA report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md`
     /// Per-symbol last trade timestamp for cooldown.
     /// E1-P0-2: Migrated from `HashMap<String, u64>` to `TrendCooldown`.
     /// The trend-adaptive cooldown multiplier still lives in
@@ -364,11 +367,9 @@ pub struct MaCrossover {
     pub(crate) entry_regime_bonus: f64,
     /// QC-H1: Exit confidence base (default 0.5). / 出場信心基礎值。
     pub(crate) exit_conf_base: f64,
-    // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
-    // prev_last_trade_ms keeps the "0 = unseen" sentinel semantics so RC-04
-    // rollback can restore the "never traded" state via `TrendCooldown::clear`.
-    // prev_last_trade_ms 沿用「0 = 未見」哨兵，RC-04 透過 TrendCooldown::clear 回復「未交易」狀態。
-    prev_position: HashMap<String, Option<bool>>,
+    // P0 Option A-Lite (2026-05-11)：positions SSoT 化後移除 prev_position（rollback
+    // 對象消失）。prev_last_trade_ms 保留供 cooldown rollback；沿用「0 = 未見」哨兵，
+    // on_rejection 透過 TrendCooldown::clear 回復「未交易」狀態。
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     /// CONF-D：發出 intent.confidence 的乘數（默認 1.0，範圍 [0,2]）。
@@ -418,7 +419,8 @@ impl MaCrossover {
     pub fn new() -> Self {
         Self {
             active: true,
-            positions: PerSymbolState::new(),
+            // P0 Option A-Lite (2026-05-11)：positions / prev_position 已移除，
+            // ctx.position_state 為 SSoT。
             cooldown: TrendCooldown::new(300_000),
             cooldown_ms: 300_000,
             adx_threshold: 20.0,
@@ -430,7 +432,6 @@ impl MaCrossover {
             entry_conf_base: 0.45,
             entry_regime_bonus: 0.15,
             exit_conf_base: 0.5,
-            prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
             confluence_config: ConfluenceConfig::default(),
