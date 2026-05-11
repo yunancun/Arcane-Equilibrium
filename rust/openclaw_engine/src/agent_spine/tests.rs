@@ -1068,3 +1068,178 @@ fn runtime_shadow_build_transition_ids_are_distinct() {
     }
     assert_eq!(tids.len(), 5, "expected 5 unique transition ids");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W-D MAG-083 P1-1 cross-module invariant tests for spine_ids helper。
+// 釘住 compute_spine_ids() / compute_filled_report_id() 三個契約：
+//   (a) deterministic：同輸入跑 100 次必 byte-equal。
+//   (b) byte-equal across callsites：模擬 runtime_shadow / step_4_5_dispatch /
+//       fill completion 三處輸入，assert 共用 helper 出 id 完全相同。
+//   (c) edge / boundary input：空字串 / 極長字串 / unicode signal_id / 不同
+//       engine_mode 之間互不撞 id。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 不變式 (a)：相同輸入跑 100 次必 byte-equal（無 nonce/timestamp）。
+#[test]
+fn spine_ids_compute_is_deterministic_across_100_calls() {
+    use super::spine_ids::compute_spine_ids;
+    let baseline = compute_spine_ids("demo", "sig-deterministic-2001", "vrd-deterministic-2001");
+    for i in 0..100 {
+        let again =
+            compute_spine_ids("demo", "sig-deterministic-2001", "vrd-deterministic-2001");
+        assert_eq!(
+            baseline, again,
+            "iteration {i}: compute_spine_ids must be deterministic"
+        );
+    }
+}
+
+/// 不變式 (a) 補充：compute_filled_report_id 也必確定性。
+#[test]
+fn spine_ids_compute_filled_report_id_is_deterministic_across_100_calls() {
+    use super::spine_ids::compute_filled_report_id;
+    let baseline = compute_filled_report_id("demo", "plan:abc123");
+    for i in 0..100 {
+        let again = compute_filled_report_id("demo", "plan:abc123");
+        assert_eq!(
+            baseline, again,
+            "iteration {i}: compute_filled_report_id must be deterministic"
+        );
+    }
+}
+
+/// 不變式 (b)：runtime_shadow (entry path) 與 step_4_5_dispatch (mirror path)
+/// 用相同 (engine_mode, signal_id, verdict_id) 必出完全相同的 3 個 id。
+/// 此 test 直接重現舊字面複製的 stable_id 三呼叫，與 helper 輸出 byte-equal
+/// 比對；若有人未來改 helper 邏輯但忘了同步舊路徑語意，本 test 立刻失敗。
+#[test]
+fn spine_ids_byte_equal_across_runtime_shadow_and_dispatch_callsites() {
+    use super::events::stable_id;
+    use super::spine_ids::compute_spine_ids;
+
+    let engine_mode = "demo";
+    let signal_id = "sig-cohort-A-2002";
+    let verdict_id = "vrd-cohort-A-2002";
+
+    // Helper-path 輸出（emit_entry_lineage / step_4_5_dispatch 改造後共用）。
+    let helper_out = compute_spine_ids(engine_mode, signal_id, verdict_id);
+
+    // Legacy literal-copy path A：mirror runtime_shadow.rs 抽取前的舊算法。
+    let legacy_decision_a = stable_id("decision", &[engine_mode, signal_id]);
+    let legacy_plan_a = stable_id(
+        "plan",
+        &[engine_mode, legacy_decision_a.as_str(), verdict_id],
+    );
+    let legacy_report_a = stable_id(
+        "report",
+        &[engine_mode, legacy_plan_a.as_str(), "shadow_planned"],
+    );
+
+    // Legacy literal-copy path B：mirror step_4_5_dispatch.rs 抽取前的舊算法。
+    let legacy_decision_b = stable_id("decision", &[engine_mode, signal_id]);
+    let legacy_plan_b = stable_id(
+        "plan",
+        &[
+            engine_mode,
+            legacy_decision_b.as_str(),
+            verdict_id,
+        ],
+    );
+    let legacy_report_b = stable_id(
+        "report",
+        &[engine_mode, legacy_plan_b.as_str(), "shadow_planned"],
+    );
+
+    // 三方 byte-equal：helper / legacy A / legacy B 共生同一組 id。
+    assert_eq!(helper_out.decision_id, legacy_decision_a);
+    assert_eq!(helper_out.decision_id, legacy_decision_b);
+    assert_eq!(helper_out.order_plan_id, legacy_plan_a);
+    assert_eq!(helper_out.order_plan_id, legacy_plan_b);
+    assert_eq!(helper_out.stub_report_id, legacy_report_a);
+    assert_eq!(helper_out.stub_report_id, legacy_report_b);
+
+    // legacy A vs legacy B 自比，pin 住「兩條 callsite 路徑完全等價」這層
+    // invariant — 即使未來 helper 重寫，這條都不應該失敗（hash 算法本身穩定）。
+    assert_eq!(legacy_decision_a, legacy_decision_b);
+    assert_eq!(legacy_plan_a, legacy_plan_b);
+    assert_eq!(legacy_report_a, legacy_report_b);
+}
+
+/// 不變式 (b) 補充：compute_filled_report_id 對齊 emit_fill_completion_lineage
+/// 抽取前的舊字面複製。
+#[test]
+fn spine_ids_filled_report_id_byte_equal_with_legacy_callsite() {
+    use super::events::stable_id;
+    use super::spine_ids::compute_filled_report_id;
+
+    let engine_mode = "live_demo";
+    let order_plan_id = "plan:fixture-fill-2003";
+
+    let helper_out = compute_filled_report_id(engine_mode, order_plan_id);
+
+    // mirror runtime_shadow.rs:454-461 抽取前的舊算法。
+    let legacy = stable_id(
+        "report",
+        &[engine_mode, order_plan_id, "shadow_filled"],
+    );
+
+    assert_eq!(
+        helper_out, legacy,
+        "compute_filled_report_id must equal legacy literal stable_id call"
+    );
+
+    // stub_report_id 與 filled_report_id 必 byte-不同（V064 唯一索引保護）。
+    let stub = stable_id(
+        "report",
+        &[engine_mode, order_plan_id, "shadow_planned"],
+    );
+    assert_ne!(
+        helper_out, stub,
+        "filled_report_id vs stub_report_id must differ to avoid V064 idempotency_key collision"
+    );
+}
+
+/// 不變式 (c)：邊界輸入下 id 仍滿足結構契約（prefix + ":" + 32 hex chars）。
+#[test]
+fn spine_ids_boundary_inputs_preserve_id_format() {
+    use super::spine_ids::{compute_filled_report_id, compute_spine_ids};
+
+    // 邊界 1：空字串 — 計算仍須穩定不 panic，雖然語意上不應出現（caller 端
+    // 應已過濾），但 helper 必須 fail-soft 不爆炸。
+    let empty_ids = compute_spine_ids("", "", "");
+    assert!(empty_ids.decision_id.starts_with("decision:"));
+    assert!(empty_ids.order_plan_id.starts_with("plan:"));
+    assert!(empty_ids.stub_report_id.starts_with("report:"));
+    // stable_id 輸出固定為 "<prefix>:<32-hex-chars>"。
+    assert_eq!(empty_ids.decision_id.len(), "decision:".len() + 32);
+    assert_eq!(empty_ids.order_plan_id.len(), "plan:".len() + 32);
+    assert_eq!(empty_ids.stub_report_id.len(), "report:".len() + 32);
+
+    // 邊界 2：極長 signal_id（512 字元）— stable_id 內部 sha256 hash 長度
+    // 與輸入無關，輸出仍為固定 32 hex chars。
+    let long_sig = "s".repeat(512);
+    let long_ids = compute_spine_ids("demo", &long_sig, "vrd-long-2004");
+    assert_eq!(long_ids.decision_id.len(), "decision:".len() + 32);
+
+    // 邊界 3：含 unicode 的 signal_id — 不可 panic，輸出長度仍穩定。
+    let unicode_sig = "sig-玄衡-壹貳參-🚀-2005";
+    let unicode_ids = compute_spine_ids("demo", unicode_sig, "vrd-unicode-2005");
+    assert_eq!(unicode_ids.decision_id.len(), "decision:".len() + 32);
+
+    // 邊界 4：不同 engine_mode 之間互不撞 id（demo vs live_demo）。
+    let demo_ids =
+        compute_spine_ids("demo", "sig-same-2006", "vrd-same-2006");
+    let live_demo_ids =
+        compute_spine_ids("live_demo", "sig-same-2006", "vrd-same-2006");
+    assert_ne!(
+        demo_ids.decision_id, live_demo_ids.decision_id,
+        "engine_mode must be part of hash salt"
+    );
+    assert_ne!(demo_ids.order_plan_id, live_demo_ids.order_plan_id);
+    assert_ne!(demo_ids.stub_report_id, live_demo_ids.stub_report_id);
+
+    // 邊界 5：compute_filled_report_id 同等邊界穩定性。
+    let filled = compute_filled_report_id("", "");
+    assert!(filled.starts_with("report:"));
+    assert_eq!(filled.len(), "report:".len() + 32);
+}

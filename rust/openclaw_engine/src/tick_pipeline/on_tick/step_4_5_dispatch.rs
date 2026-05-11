@@ -626,38 +626,29 @@ impl TickPipeline {
                                     event.ts_ms,
                                 );
 
-                                // W-C Caveat 2 修復（2026-05-11）：與 emit_entry_lineage
-                                // 內部使用相同算法計算 4 個 Spine id（順序 +
-                                // 參數對齊 runtime_shadow.rs:65-80），下游
-                                // PendingOrder 鏡射用，最終 loop_exchange.rs
-                                // 在 fully_filled 時讀 PendingOrder.spine_*
-                                // 呼叫 emit_fill_completion_lineage 補寫真實
+                                // W-C Caveat 2 修復（2026-05-11）：透過
+                                // agent_spine::spine_ids::compute_spine_ids() 統一
+                                // 計算 entry triplet（decision_id / order_plan_id /
+                                // stub_report_id），與 runtime_shadow::emit_entry_lineage
+                                // 內部 callsite byte-equal；下游 PendingOrder
+                                // 鏡射用，最終 loop_exchange.rs 在 fully_filled
+                                // 時讀 PendingOrder.spine_* 呼叫
+                                // emit_fill_completion_lineage 補寫真實
                                 // ExecutionReport（status=shadow_filled）。
+                                //
+                                // W-D MAG-083 P1-1（2026-05-11）：抽 helper 集中
+                                // 字面複製；不變式見 spine_ids.rs module docstring。
                                 let verdict_id_for_dispatch =
                                     make_verdict_id(em, &intent.symbol, event.ts_ms);
-                                let spine_decision_id =
-                                    crate::agent_spine::events::stable_id(
-                                        "decision",
-                                        &[em, signal_id.as_str()],
+                                let spine_ids =
+                                    crate::agent_spine::spine_ids::compute_spine_ids(
+                                        em,
+                                        signal_id.as_str(),
+                                        verdict_id_for_dispatch.as_str(),
                                     );
-                                let spine_order_plan_id =
-                                    crate::agent_spine::events::stable_id(
-                                        "plan",
-                                        &[
-                                            em,
-                                            spine_decision_id.as_str(),
-                                            verdict_id_for_dispatch.as_str(),
-                                        ],
-                                    );
-                                let spine_stub_report_id =
-                                    crate::agent_spine::events::stable_id(
-                                        "report",
-                                        &[
-                                            em,
-                                            spine_order_plan_id.as_str(),
-                                            "shadow_planned",
-                                        ],
-                                    );
+                                let spine_decision_id = spine_ids.decision_id;
+                                let spine_order_plan_id = spine_ids.order_plan_id;
+                                let spine_stub_report_id = spine_ids.stub_report_id;
 
                                 crate::agent_spine::runtime_shadow::emit_entry_lineage(
                                     self.agent_spine_tx.as_ref(),

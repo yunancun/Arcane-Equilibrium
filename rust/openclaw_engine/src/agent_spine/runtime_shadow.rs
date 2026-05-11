@@ -24,6 +24,7 @@ use super::events::{
     stable_id, DecisionEdgeType, DecisionObjectType, ExecutionIdempotencyKey, SpineEdge,
     SpineObjectEnvelope, SpineStateTransition,
 };
+use super::spine_ids::{compute_filled_report_id, compute_spine_ids};
 use super::signal_adapter::strategy_signal_from_open_intent;
 use super::store::AgentSpineMsg;
 use crate::intent_processor::{OrderIntent, VerdictInfo};
@@ -69,15 +70,13 @@ pub fn emit_entry_lineage(
         input.engine_mode,
         input.intent,
     );
-    let decision_id = stable_id("decision", &[input.engine_mode, input.signal_id]);
-    let order_plan_id = stable_id(
-        "plan",
-        &[input.engine_mode, decision_id.as_str(), input.verdict_id],
-    );
-    let report_id = stable_id(
-        "report",
-        &[input.engine_mode, order_plan_id.as_str(), "shadow_planned"],
-    );
+    // W-D MAG-083 P1-1：抽出 compute_spine_ids() helper，集中三處字面複製。
+    // 不變式：相同 (engine_mode, signal_id, verdict_id) 必出相同 3 個 id；
+    // step_4_5_dispatch 端鏡射 callsite 與此處跨 module byte-equal。
+    let ids = compute_spine_ids(input.engine_mode, input.signal_id, input.verdict_id);
+    let decision_id = ids.decision_id;
+    let order_plan_id = ids.order_plan_id;
+    let report_id = ids.stub_report_id;
     let proposed_price = finite_positive(input.intent.limit_price)
         .or_else(|| finite_positive(Some(input.reference_price)));
     let risk_level = input
@@ -451,14 +450,10 @@ pub fn emit_fill_completion_lineage(
     // V064 schema 的 `idx_agent_decision_objects_object_type_idempotency_key`
     // 唯一索引判定為重複；suffix `shadow_filled` 與 stub 的 `shadow_planned`
     // 對應，stable_id 自然產生不同 hash。
-    let filled_report_id = stable_id(
-        "report",
-        &[
-            input.engine_mode,
-            input.order_plan_id,
-            "shadow_filled",
-        ],
-    );
+    //
+    // W-D MAG-083 P1-1：透過 compute_filled_report_id() helper 統一 suffix 字面值，
+    // 避免未來在他處再次字面複製 "shadow_filled" 字串造成 silent drift。
+    let filled_report_id = compute_filled_report_id(input.engine_mode, input.order_plan_id);
 
     let report = ExecutionReport {
         schema_version: EXECUTION_REPORT_SCHEMA_VERSION.to_string(),
