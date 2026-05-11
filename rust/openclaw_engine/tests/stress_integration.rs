@@ -56,6 +56,7 @@ fn make_ctx(
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
+        is_pinned: true,
     }
 }
 

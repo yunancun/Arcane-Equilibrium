@@ -215,6 +215,16 @@ impl TickPipeline {
             ..AlphaSurface::tier1_only(indicators, indicators_5m.as_ref())
         };
 
+        // SCANNER-PINNED-GATE-1 (2026-05-11)：注入 scanner 當前 pinned tier 標記。
+        // True = 在 scanner registry 的 pinned 25 內（BTC/ETH 永鎖 + 23 個 scanner
+        // 可 rotate 的 slot）；False = dynamic-add 15 個（高波動長尾如 HYPE/WLD）。
+        // 無 registry 時預設 true（test setup 不模擬 scanner）。
+        let is_pinned = self
+            .symbol_registry
+            .as_ref()
+            .map(|reg| reg.is_pinned(sym))
+            .unwrap_or(true);
+
         let ctx = TickContext {
             symbol: sym,
             price: event.last_price,
@@ -234,6 +244,7 @@ impl TickPipeline {
             // 內 per-strategy iteration 從 self.paper_state.get_position(sym) 取
             // 並 Clone ctx 覆寫，避免與後續 paper_state mutable borrow 衝突。
             position_state: None,
+            is_pinned,
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.

@@ -194,6 +194,28 @@ impl GridTrading {
             return vec![];
         }
 
+        // SCANNER-PINNED-GATE-1 (2026-05-11)：grid 只在 scanner 當前 pinned tier 開新倉。
+        // 22:08 mass scalp event 已修，但 03:15 scanner config 將 universe 25→40 後
+        // dynamic-add 15 slot（HYPE/WLD/ZEC/AAVE/SOLAYER/ONDO/BILL 等高波動長尾）
+        // 對 grid 結構性虧（grid 喜歡 ranging，這些常 trending/chaotic）。實證：
+        // 13-14h grid 28 fills 中 16 fills（57%）在 HYPE+WLD 共虧 −$0.46 net。
+        // 解法：grid 新開倉前驗 ctx.is_pinned；False 則 skip。
+        // 注意：本 gate 只擋 entry，**不影響** 既有 inventory 平倉路徑（line 252+
+        // 的 grid_close_short / grid_close_long 不經 would_open 也能觸發）；
+        // 已在 dynamic-add 上的倉位仍能自然 close 出場。
+        // 其他策略（ma_crossover / bb_reversion / bb_breakout）不受此 gate 影響，
+        // 可繼續在 dynamic-add 上交易。
+        // 未來 scanner 加上 23 slot 自動 rotation 後（BTC/ETH 永鎖），grid 自動跟隨。
+        if would_open && !ctx.is_pinned {
+            debug!(
+                strategy = "grid_trading",
+                symbol = sym,
+                "skip grid new entry: symbol not in scanner pinned tier \
+                 / grid 新開倉跳過：symbol 非 scanner pinned tier"
+            );
+            return vec![];
+        }
+
         if would_open && self.blocked_symbols.contains(sym) {
             debug!(
                 strategy = "grid_trading",

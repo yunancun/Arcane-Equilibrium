@@ -1146,6 +1146,9 @@ fn build_tick_context<'a>(
         // Sprint N+1 W7-1：replay 模式無 paper_state context，position_state = None。
         // strategy on_tick 內若聲稱讀此 handle，replay path 一律跳 entry path。
         position_state: None,
+        // SCANNER-PINNED-GATE-1：replay 無 scanner registry，預設 true（與 test setup 對齊）。
+        // replay 不模擬 scanner pinned tier rotation，等同假設所有 symbol 皆 pinned。
+        is_pinned: true,
     }
 }
 
