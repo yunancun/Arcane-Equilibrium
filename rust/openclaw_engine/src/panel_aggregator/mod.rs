@@ -48,6 +48,7 @@ pub use btc_lead_lag::BtcLeadLagProducer;
 pub use funding_curve::FundingCurveAggregator;
 pub use oi_delta::OIDeltaAggregator;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -101,6 +102,18 @@ pub struct PanelAggregator {
     funding_curve_slot: FundingCurvePanelSlot,
     /// W1 sub-task 3 (E1-γ, 2026-05-11) — IPC slot for OI delta panel late-injection。
     oi_delta_slot: OIDeltaPanelSlot,
+    /// W1 P0 fix (2026-05-11 ~01:00 UTC) — per-symbol partial funding state cache。
+    ///
+    /// 解 root cause：Bybit V5 ticker WS delta 只夾帶 changed field；funding_rate
+    /// 只在 8h 結算時刻變動，故大部分 ticker delta 兩個 field 皆 None。原 event
+    /// handler 用 `(Some, Some)` guard 拒絕所有 delta，僅 initial snapshot 通過 →
+    /// 25 syms 中 ≤10 受惠（且只 1 row 入 buffer，flush drain 後永遠不再寫）。
+    ///
+    /// 設計：每 sym 維護 latest known (rate, next_ms)；event handler 只更新 cache，
+    /// flush_timer arm 從 cache 為 cohort 全 sym repopulate inner aggregator buffer。
+    /// flush 後 buffer drain 不影響 cache（cache 仍持有 8h 內 latest 已知值）。
+    /// 結果：每 60s flush 為 cohort 全 sym 寫一 row（前提收過 initial snapshot）。
+    funding_partial_state: HashMap<String, (Option<f64>, Option<i64>)>,
 }
 
 impl PanelAggregator {
@@ -128,6 +141,7 @@ impl PanelAggregator {
             cancel,
             funding_curve_slot,
             oi_delta_slot,
+            funding_partial_state: HashMap::new(),
         }
     }
 
@@ -158,6 +172,66 @@ impl PanelAggregator {
     /// 取 oi_delta aggregator 不可變引用（test + observability 用）。
     pub fn oi_delta(&self) -> &OIDeltaAggregator {
         &self.oi_delta_aggregator
+    }
+
+    /// W1 P0 fix (2026-05-11) — funding partial state cache 大小（observability 用）。
+    pub fn funding_partial_state_size(&self) -> usize {
+        self.funding_partial_state.len()
+    }
+
+    /// W1 P0 fix (2026-05-11) — funding partial state 取單 sym（test only）。
+    #[cfg(test)]
+    pub(crate) fn funding_partial_state_get(
+        &self,
+        sym: &str,
+    ) -> Option<(Option<f64>, Option<i64>)> {
+        self.funding_partial_state.get(sym).copied()
+    }
+
+    /// W1 P0 fix (2026-05-11) — partial event ingest（test + future hot path）。
+    ///
+    /// 模擬 event handler `evt = event_rx.recv()` arm 內 partial state update 邏輯。
+    /// 任一 field Some 即 update cache 同位置；兩 field 皆 None silent return。
+    pub fn ingest_funding_partial(
+        &mut self,
+        sym: &str,
+        rate: Option<f64>,
+        next_funding_ms: Option<i64>,
+    ) {
+        if rate.is_none() && next_funding_ms.is_none() {
+            return;
+        }
+        let entry = self
+            .funding_partial_state
+            .entry(sym.to_string())
+            .or_insert((None, None));
+        if rate.is_some() {
+            entry.0 = rate;
+        }
+        if next_funding_ms.is_some() {
+            entry.1 = next_funding_ms;
+        }
+    }
+
+    /// W1 P0 fix (2026-05-11) — flush_timer arm 內 cache→buffer repopulate 邏輯
+    /// 抽 helper（test + future maintenance）。
+    pub fn repopulate_funding_buffer_from_cache(&mut self) -> usize {
+        let mut pushed = 0usize;
+        // 為 borrow checker 收集 (sym, rate, next_ms) tuple 後再 dispatch
+        let ready: Vec<(String, f64, i64)> = self
+            .funding_partial_state
+            .iter()
+            .filter_map(|(sym, (r_opt, n_opt))| match (*r_opt, *n_opt) {
+                (Some(r), Some(n)) => Some((sym.clone(), r, n)),
+                _ => None,
+            })
+            .collect();
+        for (sym, rate, next_ms) in ready {
+            self.funding_curve_aggregator
+                .on_funding_update(&sym, rate, next_ms);
+            pushed += 1;
+        }
+        pushed
     }
 
     /// W1 sub-task 3 (E1-γ, 2026-05-11) — 真實 run loop。
@@ -207,6 +281,21 @@ impl PanelAggregator {
                 _ = flush_timer.tick() => {
                     let snapshot_ts_ms = now_ms() as i64;
 
+                    // W1 P0 fix (2026-05-11)：每 flush 用 partial cache repopulate buffer。
+                    // 因 Bybit V5 ticker delta 不夾帶 unchanged funding_rate（只 8h 結算才有），
+                    // 原 event handler `(Some, Some)` guard 拒絕大部分 delta，改 cache 後
+                    // cohort 全 sym（已 receive initial snapshot 者）每 flush 寫一 row。
+                    let cache_pushed = self.repopulate_funding_buffer_from_cache();
+                    if cache_pushed > 0 {
+                        debug!(
+                            target: "panel_aggregator",
+                            snapshot_ts_ms = snapshot_ts_ms,
+                            cache_pushed = cache_pushed,
+                            cache_size = self.funding_partial_state.len(),
+                            "funding partial cache repopulated buffer"
+                        );
+                    }
+
                     // ── funding_curve：snapshot 先（buffer 即將被 drain），slot 寫，flush ──
                     if let Some(snapshot) = self.funding_curve_aggregator.snapshot_panel(snapshot_ts_ms) {
                         let snapshot_size = snapshot.symbols.len();
@@ -253,12 +342,17 @@ impl PanelAggregator {
                             // 只處理 Ticker variant；其他 variant（Trade / Orderbook / Kline）
                             // 不含 funding/OI panel 所需 field，silent drop（per spec §2.3 + §3.3）
                             if price_event.event_kind == Some(PriceEventKind::Ticker) {
-                                // funding update：rate + next_funding_ms 缺一不可
-                                if let (Some(rate), Some(next_ms)) =
-                                    (price_event.funding_rate, price_event.next_funding_ms)
-                                {
-                                    self.funding_curve_aggregator
-                                        .on_funding_update(&price_event.symbol, rate, next_ms);
+                                // W1 P0 fix (2026-05-11)：partial state cache，避開 Bybit V5
+                                // ticker delta 只夾帶 changed field 的丟失（funding_rate
+                                // 多 ticker 為 None，cache 持有 8h 內 latest 已知值）。
+                                let touched = price_event.funding_rate.is_some()
+                                    || price_event.next_funding_ms.is_some();
+                                if touched {
+                                    self.ingest_funding_partial(
+                                        &price_event.symbol,
+                                        price_event.funding_rate,
+                                        price_event.next_funding_ms,
+                                    );
                                     funding_updates = funding_updates.saturating_add(1);
                                 }
                                 // OI update：open_interest 有就更新
@@ -363,6 +457,91 @@ mod tests {
         agg.funding_curve_mut()
             .on_funding_update("BTCUSDT", 0.0001, 1_700_000_000_000);
         assert_eq!(agg.funding_curve().buffer_len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_funding_partial_state_initial_snapshot_both_some() {
+        // PASS：W1 P0 fix — initial snapshot 兩 field 都 Some → cache 完整 +
+        // repopulate 後 inner buffer 含該 sym
+        let pool = make_disconnected_pool().await;
+        let cancel = CancellationToken::new();
+        let cohort = vec!["BTCUSDT".to_string()];
+        let (fc_slot, oi_slot) = make_slots();
+        let mut agg = PanelAggregator::new(pool, cohort, cancel, fc_slot, oi_slot);
+        agg.ingest_funding_partial("BTCUSDT", Some(0.0001), Some(1_700_000_000_000));
+        assert_eq!(
+            agg.funding_partial_state_get("BTCUSDT"),
+            Some((Some(0.0001), Some(1_700_000_000_000)))
+        );
+        let pushed = agg.repopulate_funding_buffer_from_cache();
+        assert_eq!(pushed, 1);
+        assert_eq!(agg.funding_curve().buffer_len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_funding_partial_state_delta_only_rate() {
+        // PASS：W1 P0 fix — 第一個 event 只 rate（無 next_ms）→ cache rate-only，
+        // repopulate 不 push（缺 next_ms）；第二個 event 補 next_ms → cache 全 +
+        // repopulate 後 inner buffer 入庫
+        let pool = make_disconnected_pool().await;
+        let cancel = CancellationToken::new();
+        let cohort = vec!["BTCUSDT".to_string()];
+        let (fc_slot, oi_slot) = make_slots();
+        let mut agg = PanelAggregator::new(pool, cohort, cancel, fc_slot, oi_slot);
+        // event 1: 只 rate
+        agg.ingest_funding_partial("BTCUSDT", Some(0.0001), None);
+        assert_eq!(
+            agg.funding_partial_state_get("BTCUSDT"),
+            Some((Some(0.0001), None))
+        );
+        let pushed1 = agg.repopulate_funding_buffer_from_cache();
+        assert_eq!(pushed1, 0); // 缺 next_ms 不 push
+        assert_eq!(agg.funding_curve().buffer_len(), 0);
+        // event 2: 補 next_ms（不動 rate）
+        agg.ingest_funding_partial("BTCUSDT", None, Some(1_700_000_000_000));
+        assert_eq!(
+            agg.funding_partial_state_get("BTCUSDT"),
+            Some((Some(0.0001), Some(1_700_000_000_000)))
+        );
+        let pushed2 = agg.repopulate_funding_buffer_from_cache();
+        assert_eq!(pushed2, 1); // 全齊 push
+        assert_eq!(agg.funding_curve().buffer_len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_funding_partial_state_persistence_across_repopulate() {
+        // PASS：W1 P0 fix — cache 不隨 repopulate（或 inner flush drain）清空；
+        // 模擬：snapshot → repopulate → flush drain inner buffer → repopulate
+        // 仍 push 同 sym（每 60s flush 為 cohort 全 sym 寫一 row 的關鍵不變式）
+        let pool = make_disconnected_pool().await;
+        let cancel = CancellationToken::new();
+        let cohort = vec!["BTCUSDT".to_string()];
+        let (fc_slot, oi_slot) = make_slots();
+        let mut agg = PanelAggregator::new(pool, cohort, cancel, fc_slot, oi_slot);
+        agg.ingest_funding_partial("BTCUSDT", Some(0.0001), Some(1_700_000_000_000));
+        // first cycle
+        let pushed1 = agg.repopulate_funding_buffer_from_cache();
+        assert_eq!(pushed1, 1);
+        // simulate inner flush drain
+        let _ = agg.funding_curve_mut().flush(1_700_000_001_000).await;
+        assert_eq!(agg.funding_curve().buffer_len(), 0);
+        // 不再 ingest，下個 cycle 仍能 repopulate（cache 仍有值）
+        let pushed2 = agg.repopulate_funding_buffer_from_cache();
+        assert_eq!(pushed2, 1);
+        assert_eq!(agg.funding_curve().buffer_len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_funding_partial_state_no_op_for_both_none() {
+        // PASS：W1 P0 fix — event 兩 field 都 None → 不建 cache entry（避免 cache
+        // 為 cohort 外或無 funding sym 無界長大）
+        let pool = make_disconnected_pool().await;
+        let cancel = CancellationToken::new();
+        let cohort = vec!["BTCUSDT".to_string()];
+        let (fc_slot, oi_slot) = make_slots();
+        let mut agg = PanelAggregator::new(pool, cohort, cancel, fc_slot, oi_slot);
+        agg.ingest_funding_partial("BTCUSDT", None, None);
+        assert_eq!(agg.funding_partial_state_size(), 0);
     }
 
     #[tokio::test]
