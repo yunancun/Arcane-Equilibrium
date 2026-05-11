@@ -21,7 +21,7 @@ use super::contracts::{
     GUARDIAN_VERDICT_SCHEMA_VERSION, STRATEGIST_DECISION_SCHEMA_VERSION,
 };
 use super::events::{
-    stable_id, DecisionEdgeType, DecisionObjectType, ExecutionIdempotencyKey, SpineEdge,
+    DecisionEdgeType, DecisionObjectType, ExecutionIdempotencyKey, SpineEdge,
     SpineObjectEnvelope, SpineStateTransition,
 };
 use super::spine_ids::{compute_filled_report_id, compute_spine_ids};
