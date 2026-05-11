@@ -826,3 +826,378 @@ def test_maker_order_outcome_summary_clamps_to_conservative_cap() -> None:
     assert summary["latency_ms"]["q50"] == 30_000
     assert summary["latency_ms"]["q90"] == 30_000
     assert summary["recommended_latency_ms"] == 30_000
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P0 Replay Tier A T3 + T4 tests（2026-05-11）— manifest config echo
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _write_minimal_scanner_config(settings_root: Path) -> Path:
+    """寫 minimal scanner_config.toml fixture（含 25 pinned sym）。"""
+    risk_dir = settings_root / "risk_control_rules"
+    risk_dir.mkdir(parents=True, exist_ok=True)
+    toml_path = risk_dir / "scanner_config.toml"
+    pinned_25 = [
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+        "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "POLUSDT",
+        "LTCUSDT", "BCHUSDT", "NEARUSDT", "UNIUSDT", "ATOMUSDT",
+        "ETCUSDT", "FILUSDT", "ICPUSDT", "TRXUSDT", "ARBUSDT",
+        "OPUSDT", "APTUSDT", "SUIUSDT", "TONUSDT", "INJUSDT",
+    ]
+    pinned_lines = ",\n    ".join(f'"{sym}"' for sym in pinned_25)
+    toml_path.write_text(
+        "[meta]\nversion = 1\nsaved_ts_ms = 0\n\n"
+        "[scheduling]\nscan_interval_secs = 60\nwarmup_delay_secs = 60\n\n"
+        "[universe]\nmax_symbols = 40\n"
+        f"pinned_symbols = [\n    {pinned_lines}\n]\n\n"
+        "[hard_filters]\nmin_turnover_24h_usdt = 50000000.0\n"
+        "max_spread_bps = 8.0\nmin_price_usdt = 0.001\nbtc_min_move_pct = 0.3\n\n"
+        "[anti_churn]\nmin_hold_cycles = 30\n"
+        "challenger_threshold = 15.0\nremoval_cooldown_minutes = 30\n\n"
+        "[market_judgment]\nenabled = true\ngate_score_cap = 25.0\n"
+        "grid_max_trend_score = 0.55\n\n"
+        "[opportunity]\nenabled = true\ncanary_block_new_entries = true\n",
+        encoding="utf-8",
+    )
+    return toml_path
+
+
+def _write_minimal_strategy_params(
+    settings_root: Path,
+    engine: str,
+    *,
+    bb_min_persistence_ms: int = 120000,
+    ma_min_trend_snr: float = 0.60,
+) -> Path:
+    """寫 minimal strategy_params_<engine>.toml fixture，含 P0 Option A-Lite 值。"""
+    settings_root.mkdir(parents=True, exist_ok=True)
+    toml_path = settings_root / f"strategy_params_{engine}.toml"
+    toml_path.write_text(
+        f"[ma_crossover]\nactive = true\ncooldown_ms = 600000\n"
+        f"min_trend_snr = {ma_min_trend_snr}\n\n"
+        f"[bb_reversion]\nactive = true\ncooldown_ms = 600000\n"
+        f"min_persistence_ms = {bb_min_persistence_ms}\n\n"
+        f"[grid_trading]\nactive = true\ncooldown_ms = 180000\n",
+        encoding="utf-8",
+    )
+    return toml_path
+
+
+def _write_minimal_risk_config(settings_root: Path, engine: str) -> Path:
+    """寫 minimal risk_config_<engine>.toml fixture。"""
+    risk_dir = settings_root / "risk_control_rules"
+    risk_dir.mkdir(parents=True, exist_ok=True)
+    toml_path = risk_dir / f"risk_config_{engine}.toml"
+    toml_path.write_text(
+        "[meta]\nversion = 2\nsaved_ts_ms = 0\n\n"
+        "[limits]\nstop_loss_max_pct = 25.0\nposition_size_max_pct = 25.0\n"
+        "open_positions_max = 25\nper_trade_risk_pct = 0.1\n\n"
+        "[per_strategy.ma_crossover]\nenabled = true\n"
+        "stop_loss_max_pct_override = 2.5\ntake_profit_max_pct_override = 8.0\n",
+        encoding="utf-8",
+    )
+    return toml_path
+
+
+def test_scanner_config_echo_includes_pinned_25(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """T3: manifest 應含 production scanner_config.toml echo（25 pinned sym）。"""
+    import app.replay_full_chain_routes as mod
+
+    settings_root = tmp_path / "settings"
+    _write_minimal_scanner_config(settings_root)
+    monkeypatch.setenv("OPENCLAW_BASE_DIR", str(tmp_path))
+
+    registered: list[Any] = []
+
+    async def fake_events(**kwargs):
+        return ([_sample_event("BTCUSDT", 1_700_000_000_000)], {"BTCUSDT": 1})
+
+    def fake_register(get_pg_conn, actor, body, **kwargs):
+        registered.append(body)
+        return {
+            "experiment_id": str(uuid.uuid4()),
+            "manifest_hash": "e" * 64,
+            "status": "created",
+            "idempotency_hit": False,
+        }, None
+
+    def fake_run(**kwargs):
+        return uuid.uuid4().hex, 1234, None, tmp_path / "artifact"
+
+    monkeypatch.setattr(mod, "_fetch_full_chain_events", fake_events)
+    monkeypatch.setattr(mod, "_fetch_edge_estimate_snapshot_sync", _empty_edge_snapshot)
+    monkeypatch.setattr(mod._er, "run_register_in_pg_xact", fake_register)
+    monkeypatch.setattr(mod._rrun, "_do_pg_path_for_run_sync", fake_run)
+
+    client = _client(monkeypatch, tmp_path / "fixtures")
+    resp = client.post(
+        "/api/v1/replay/full-chain/run",
+        json={
+            "universe_preset": "custom",
+            "symbols": ["BTCUSDT"],
+            "strategies": ["grid_trading"],
+            "engine": "demo",
+            "timeframe": "1m",
+            "category": "linear",
+            "data_window_start": "2026-05-01T00:00:00Z",
+            "data_window_end": "2026-05-01T00:02:00Z",
+            "use_current_config": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    manifest = registered[0].manifest_jsonb
+    # T3 acceptance：scanner_config 進 manifest top-level
+    assert "scanner_config" in manifest
+    sc = manifest["scanner_config"]
+    # production 25 pinned sym 完整 echo
+    assert sc["universe"]["max_symbols"] == 40
+    pinned = sc["universe"]["pinned_symbols"]
+    assert len(pinned) == 25
+    assert "BTCUSDT" in pinned
+    assert "TONUSDT" in pinned
+    assert "INJUSDT" in pinned
+    # 其他 production block 也存在
+    assert sc["anti_churn"]["min_hold_cycles"] == 30
+    assert sc["market_judgment"]["enabled"] is True
+    assert sc["opportunity"]["canary_block_new_entries"] is True
+
+
+def test_strategy_params_echo_matches_production_toml(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """T4: manifest 應含 caller IPC fetched 的 production strategy_params echo。"""
+    import app.replay_full_chain_routes as mod
+
+    settings_root = tmp_path / "settings"
+    _write_minimal_scanner_config(settings_root)
+    _write_minimal_strategy_params(
+        settings_root, "demo",
+        bb_min_persistence_ms=120000,
+        ma_min_trend_snr=0.60,
+    )
+    _write_minimal_risk_config(settings_root, "demo")
+    monkeypatch.setenv("OPENCLAW_BASE_DIR", str(tmp_path))
+
+    registered: list[Any] = []
+
+    async def fake_events(**kwargs):
+        return ([_sample_event("BTCUSDT", 1_700_000_000_000)], {"BTCUSDT": 1})
+
+    # caller IPC fetched production strategy params（P0 Option A-Lite 後值）
+    async def fake_strategy_params(**kwargs):
+        assert kwargs == {"engine": "demo"}
+        return {
+            "ma_crossover": {"active": True, "min_trend_snr": 0.60},
+            "bb_reversion": {"active": True, "min_persistence_ms": 120000},
+            "grid_trading": {"active": True, "grid_levels": 7},
+        }
+
+    async def fake_risk_config(**kwargs):
+        return {
+            "limits": {"position_size_max_pct": 25.0, "open_positions_max": 25},
+            "per_strategy": {
+                "ma_crossover": {
+                    "enabled": True,
+                    "stop_loss_max_pct_override": 2.5,
+                    "take_profit_max_pct_override": 8.0,
+                }
+            },
+        }
+
+    def fake_register(get_pg_conn, actor, body, **kwargs):
+        registered.append(body)
+        return {
+            "experiment_id": str(uuid.uuid4()),
+            "manifest_hash": "f" * 64,
+            "status": "created",
+            "idempotency_hit": False,
+        }, None
+
+    def fake_run(**kwargs):
+        return uuid.uuid4().hex, 1234, None, tmp_path / "artifact"
+
+    monkeypatch.setattr(mod, "_fetch_full_chain_events", fake_events)
+    monkeypatch.setattr(mod, "_fetch_full_chain_strategy_params", fake_strategy_params)
+    monkeypatch.setattr(mod, "_fetch_current_risk_config", fake_risk_config)
+    monkeypatch.setattr(mod, "_fetch_edge_estimate_snapshot_sync", _empty_edge_snapshot)
+    monkeypatch.setattr(mod._er, "run_register_in_pg_xact", fake_register)
+    monkeypatch.setattr(mod._rrun, "_do_pg_path_for_run_sync", fake_run)
+
+    client = _client(monkeypatch, tmp_path / "fixtures")
+    resp = client.post(
+        "/api/v1/replay/full-chain/run",
+        json={
+            "universe_preset": "custom",
+            "symbols": ["BTCUSDT"],
+            "strategies": ["grid_trading", "ma_crossover", "bb_reversion"],
+            "engine": "demo",
+            "timeframe": "1m",
+            "category": "linear",
+            "data_window_start": "2026-05-01T00:00:00Z",
+            "data_window_end": "2026-05-01T00:02:00Z",
+            "use_current_config": True,
+        },
+    )
+
+    assert resp.status_code == 200
+    # 三 strategy 都有對應 register call；每個 manifest 都帶相同 strategy_params blob
+    assert len(registered) == 3
+    for body in registered:
+        manifest = body.manifest_jsonb
+        # T4 acceptance：strategy_params + risk_overrides 進 manifest top-level
+        assert "strategy_params" in manifest
+        assert "risk_overrides" in manifest
+        # P0 Option A-Lite 後值（QC approved demo-only）verbatim echo
+        assert manifest["strategy_params"]["bb_reversion"]["min_persistence_ms"] == 120000
+        assert manifest["strategy_params"]["ma_crossover"]["min_trend_snr"] == 0.60
+        # per_strategy override 也 echo
+        assert (
+            manifest["risk_overrides"]["per_strategy"]["ma_crossover"][
+                "stop_loss_max_pct_override"
+            ] == 2.5
+        )
+
+
+def test_manifest_jsonb_hash_changes_when_scanner_config_changes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """T3 invariant：scanner_config 變動 → manifest_jsonb canonical hash 變動。
+
+    V3 §5 sha256(manifest_jsonb)==manifest_hash 不變式 — 新加 key 改變
+    canonical bytes 應產生不同 hash。
+    """
+    import app.replay_full_chain_routes as mod
+
+    settings_root = tmp_path / "settings"
+    monkeypatch.setenv("OPENCLAW_BASE_DIR", str(tmp_path))
+
+    # 場景 1：完整 25-sym scanner_config
+    _write_minimal_scanner_config(settings_root)
+    sc_full = mod._load_production_scanner_config()
+    assert sc_full is not None
+    assert len(sc_full["universe"]["pinned_symbols"]) == 25
+    hash_full = mod._canonical_sha256({"scanner_config": sc_full})
+
+    # 場景 2：縮成 5-sym scanner_config（模擬 production 改動）
+    risk_dir = settings_root / "risk_control_rules"
+    (risk_dir / "scanner_config.toml").write_text(
+        "[meta]\nversion = 1\nsaved_ts_ms = 0\n\n"
+        "[scheduling]\nscan_interval_secs = 60\nwarmup_delay_secs = 60\n\n"
+        "[universe]\nmax_symbols = 40\n"
+        'pinned_symbols = [\n    "BTCUSDT",\n    "ETHUSDT",\n    "SOLUSDT",\n'
+        '    "XRPUSDT",\n    "DOGEUSDT"\n]\n\n'
+        "[hard_filters]\nmin_turnover_24h_usdt = 50000000.0\n"
+        "max_spread_bps = 8.0\nmin_price_usdt = 0.001\nbtc_min_move_pct = 0.3\n\n"
+        "[anti_churn]\nmin_hold_cycles = 30\n"
+        "challenger_threshold = 15.0\nremoval_cooldown_minutes = 30\n\n"
+        "[market_judgment]\nenabled = true\ngate_score_cap = 25.0\n"
+        "grid_max_trend_score = 0.55\n\n"
+        "[opportunity]\nenabled = true\ncanary_block_new_entries = true\n",
+        encoding="utf-8",
+    )
+    sc_small = mod._load_production_scanner_config()
+    assert sc_small is not None
+    assert len(sc_small["universe"]["pinned_symbols"]) == 5
+    hash_small = mod._canonical_sha256({"scanner_config": sc_small})
+
+    # 不變式驗證：scanner_config 內容改變 → canonical sha256 改變
+    assert hash_full != hash_small
+
+
+def test_scanner_config_load_failure_returns_none_does_not_break_replay(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """T3 fail-soft：scanner_config.toml 不存在時 _load 回 None，replay 不阻斷。"""
+    import app.replay_full_chain_routes as mod
+
+    monkeypatch.setenv("OPENCLAW_BASE_DIR", str(tmp_path))  # 無 settings/ 目錄
+    sc = mod._load_production_scanner_config()
+    assert sc is None  # fail-soft
+
+    # 跑 full-chain run 仍應 OK，manifest 不含 scanner_config key
+    registered: list[Any] = []
+
+    async def fake_events(**kwargs):
+        return ([_sample_event("BTCUSDT", 1_700_000_000_000)], {"BTCUSDT": 1})
+
+    def fake_register(get_pg_conn, actor, body, **kwargs):
+        registered.append(body)
+        return {
+            "experiment_id": str(uuid.uuid4()),
+            "manifest_hash": "9" * 64,
+            "status": "created",
+            "idempotency_hit": False,
+        }, None
+
+    def fake_run(**kwargs):
+        return uuid.uuid4().hex, 1234, None, tmp_path / "artifact"
+
+    monkeypatch.setattr(mod, "_fetch_full_chain_events", fake_events)
+    monkeypatch.setattr(mod, "_fetch_edge_estimate_snapshot_sync", _empty_edge_snapshot)
+    monkeypatch.setattr(mod._er, "run_register_in_pg_xact", fake_register)
+    monkeypatch.setattr(mod._rrun, "_do_pg_path_for_run_sync", fake_run)
+
+    client = _client(monkeypatch, tmp_path / "fixtures")
+    resp = client.post(
+        "/api/v1/replay/full-chain/run",
+        json={
+            "universe_preset": "custom",
+            "symbols": ["BTCUSDT"],
+            "strategies": ["grid_trading"],
+            "engine": "demo",
+            "timeframe": "1m",
+            "category": "linear",
+            "data_window_start": "2026-05-01T00:00:00Z",
+            "data_window_end": "2026-05-01T00:02:00Z",
+            "use_current_config": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    manifest = registered[0].manifest_jsonb
+    # scanner_config load 失敗 → manifest 不含此 key（fail-soft）
+    assert "scanner_config" not in manifest
+    # 其他既有 manifest field 仍 OK
+    assert manifest["mode"] == "full_chain"
+    assert manifest["strategy"] == "grid_trading"
+
+
+def test_strategy_params_toml_loader_engine_normalization(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """T4 helper unit test：_load_production_strategy_params_toml engine 正規化。"""
+    import app.replay_full_chain_routes as mod
+
+    settings_root = tmp_path / "settings"
+    monkeypatch.setenv("OPENCLAW_BASE_DIR", str(tmp_path))
+    _write_minimal_strategy_params(settings_root, "demo")
+    _write_minimal_strategy_params(settings_root, "live")
+
+    # 正規化大小寫
+    demo = mod._load_production_strategy_params_toml(engine="DEMO")
+    assert demo is not None
+    assert "ma_crossover" in demo
+
+    live = mod._load_production_strategy_params_toml(engine="live")
+    assert live is not None
+    assert "ma_crossover" in live
+
+    # 未知 engine 回 None
+    assert mod._load_production_strategy_params_toml(engine="mainnet") is None
+    assert mod._load_production_strategy_params_toml(engine="") is None
+
+    # risk config loader 對稱行為
+    _write_minimal_risk_config(settings_root, "demo")
+    risk_demo = mod._load_production_risk_overrides_toml(engine="demo")
+    assert risk_demo is not None
+    assert risk_demo["limits"]["open_positions_max"] == 25
+    assert mod._load_production_risk_overrides_toml(engine="unknown") is None
