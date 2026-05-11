@@ -162,11 +162,11 @@ impl TickPipeline {
         // of opposite direction; was_open=false + realized==0 → accumulate same direction.
         // EDGE-P3-1 R2：關倉前先捕獲 entry_context_id（apply_fill 平倉會清除 position）。
         let was_open = self.paper_state.get_position(symbol).is_none();
-        let existing_entry_ctx = self
-            .paper_state
-            .get_entry_context_id(symbol)
-            .unwrap_or("")
-            .to_string();
+        // V083-FIX-1 propagation (2026-05-11)：submit_external_order 同走 resolve helper
+        // 滿足 V083 NOT NULL CHECK；對 OPEN fill 不受影響（fill_entry_ctx 仍走 String::new()），
+        // 對 orphan CLOSE 提供 synthetic id 防 batch insert reject。E1 P1 修復 5 條 close
+        // path 後此處為唯一殘留 unwrap_or("") pattern（E2 §6.1 push back）。
+        let existing_entry_ctx = self.resolve_close_entry_context_id(symbol, now_ms);
         // EXIT-FEATURES-TABLE-1 (E2 P1 fix): also capture PositionExitSnapshot so
         // we can emit an ExitFeatureRow if this external fill turns out to be
         // a close (realized_pnl != 0). apply_fill mutates/removes the position
