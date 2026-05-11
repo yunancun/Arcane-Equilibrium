@@ -7911,3 +7911,41 @@ docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_paper_edge_repo
 4. **memory 巨型化**：E1 memory 930KB 超 Read 256KB limit → 後續 E1 接手用 `tail` / 分段 Read；建議 PA 評估 rotation。
 5. **E4 fixed-SQL self-claim 可能隱含未列 BLOCKER**：E4 report 「3 BLOCKER fix 後 → final row N」實驗描述若未顯式列出每個 BLOCKER fix 內容，E1 retrofit round 可能撞同 hidden bug；rule: E1 IMPL 前若 E4 fixed-SQL 驗證 implies 額外 fix，必 ad-hoc empirical 重驗（本次 caller smoke 先撞才發現）。
 6. **scp + ssh `python3` script 寫遠端 /tmp 不要嵌密碼**：sandbox 會偵測 password 寫文件而拒；改用 `PGPASSWORD=... python3 script.py` env var 注入 + `os.environ['PGPASSWORD']` 讀取。
+
+---
+
+## 2026-05-11 P0 Option A-Lite E1-C — bb_breakout 策略本地 position state 重構
+
+**任務範圍**：`rust/openclaw_engine/src/strategies/bb_breakout/mod.rs` + `tests.rs`，按 PA spec `2026-05-11--p0_option_a_position_state_ssot_refactor.md` §3.2 #2 + §4.2。
+
+**核心改動**：
+- 移除 `BbBreakoutPerSymbolState.position: Option<bool>` field（**保留** entry_price/trailing_stop/squeeze_detected_ms/oi_buffer，PA §7 BLOCKER #1）
+- `on_tick` 用 `ctx.position_state.filter(|p| p.owner_strategy == self.name()).map(|p| p.is_long)` 替代 `self.symbols.get(sym).and_then(|s| s.position)`
+- 移除 W7-2 Option A entry block 內 `st.position = Some(existing.is_long)` sync 步驟
+- 移除 W7-3 Option B `on_rejection` 內 duplicate_position sync 區塊（保留 RC-04 rollback）
+- `on_fill` 改為 no-op；`import_positions` 只還原 entry_price（trailing math 起點），不再寫 position
+- `on_external_close` 不再清 position，但仍清 entry_price/trailing_stop（與 lifecycle 強耦合）
+- 移除 `position_of()` accessor（語義已破壞）
+
+**測試遷移**：
+- 受影響 ~13 tests（含 entry-exit 兩 tick 序列、phase B regime tests、W7-* tests）
+- 新增 helper `make_owned_paper_position` 構建 `PaperPosition { owner_strategy: "bb_breakout" }`
+- 改寫策略：「entry 後第二 tick」注入 `ctx.position_state = Some(&pp_owned)` 模擬 paper_state.apply_fill 完成
+- W7-3 Option B sync tests #1 #2 刪除；#3 #4 改寫為 RC-04 rollback regression
+- W7-2 重寫為 4 tests：cross-strategy skip entry / None proceed entry / **cross-strategy NOT close** acceptance / owned exit emits Close
+
+**驗收**：84/84 bb_breakout tests passed；2796/2796 engine lib tests passed；grep `pub position` = 0 hit；`entry_price|trailing_stop|squeeze_detected_ms|oi_buffer` = 85 hit（保留）。
+
+### 教訓（補 E1 全局）
+
+1. **本地 SSoT field 移除 ≠ 整體簡化**：移除 `position` field 必須**同步**重寫所有「entry 後驗 exit 路徑」test，因為 ctx.position_state 在單元測試中不自動隨策略 emit 而更新（沒有 paper_state.apply_fill engine bridge）。改 production code 1 line 但測試重寫 LOC 30%。
+2. **owner_strategy gate 是 P0 重構核心而非附帶**：22:08 mass scalp 事件根因是「exit 分支誤殺 cross-strategy 倉位」；本批重構若漏掉 `.filter(|p| p.owner_strategy == self.name())` 就 0 治本價值。E2 必查、acceptance test 必驗。
+3. **strategy-internal state 與 position lifecycle 解耦的分類**：
+   - **強耦合**（隨 position 開/平 mutate）：entry_price / trailing_stop → 隨 on_external_close 清
+   - **解耦**（與倉位歸屬無關）：squeeze_detected_ms（regime 訊號）/ oi_buffer（市場觀察）→ 不隨平倉清
+   - 這條分類在 E2 review 對抗性測試是核心，PA §4.2 也有對照表
+4. **W7-5 part 1 on_fill no-op vs 移除整個 hook**：保留 trait impl 為 no-op 比 trait default + 移除 override 更安全：將來 strategy trait 升級新增 invariant 時 hook 簽名仍在，less surprise
+5. **prev_state struct 兼容性**：移除 field 後 `prev_state.insert` 的 snapshot 也跟著縮（runtime 自動，因 struct 重 derive）。但若 `prev_state` 是跨進程序列化（不是本場景）需要 schema versioning
+6. **`position_of()` public accessor 移除是 contract breaking**：對於僅 test 用的 accessor，直接移除 + 更新 tests 比保留「永遠 None」更誠實；若有 external observability（GUI / Python）讀過則需 deprecation runway（本次 mod.rs grep external = 0 callers，安全）
+7. **W7-2/W7-3/W7-5 wave 設計時序衝突可能**：本次 P0 重構移除了 W7-3 Option B sync 步驟，但 Sprint N+1 dispatch v3.7 仍將 W7-2/W7-4/W7-5 列為 wave；PA report §9 已預警「W7-2/W7-3/W7-5 系列 sync 驗證 test 刪除」但 E1 IMPL 端落地時要 cross-check wave dispatch spec，避免 sibling E1 拿舊 spec 撞 conflict
+8. **owned paper_state 注入測試 helper 命名 convention**：新增 `make_owned_paper_position` 與 `make_cross_strategy_paper_position` 兩 helper 明確 owner 語義；舊 `make_paper_position_bbb` 保留向後相容（owner="grid_trading"）但日後可考慮 deprecate
