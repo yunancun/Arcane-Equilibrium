@@ -8060,3 +8060,35 @@ PA P0 Option A-Lite spec (2026-05-11) 之 E1-B：bb_reversion 完整改造為 pa
 6. **`position_of()` public accessor 移除是 contract breaking**：對於僅 test 用的 accessor，直接移除 + 更新 tests 比保留「永遠 None」更誠實；若有 external observability（GUI / Python）讀過則需 deprecation runway（本次 mod.rs grep external = 0 callers，安全）
 7. **W7-2/W7-3/W7-5 wave 設計時序衝突可能**：本次 P0 重構移除了 W7-3 Option B sync 步驟，但 Sprint N+1 dispatch v3.7 仍將 W7-2/W7-4/W7-5 列為 wave；PA report §9 已預警「W7-2/W7-3/W7-5 系列 sync 驗證 test 刪除」但 E1 IMPL 端落地時要 cross-check wave dispatch spec，避免 sibling E1 拿舊 spec 撞 conflict
 8. **owned paper_state 注入測試 helper 命名 convention**：新增 `make_owned_paper_position` 與 `make_cross_strategy_paper_position` 兩 helper 明確 owner 語義；舊 `make_paper_position_bbb` 保留向後相容（owner="grid_trading"）但日後可考慮 deprecate
+## 2026-05-11 P0 Option A-Lite E1-A — ma_crossover position state SSoT 重構
+
+**Branch**: `worktree-agent-a6625ba20ee9efbea`（staged 4 files，NOT committed — 等 E2 + E4 + PM bundle）
+
+**Report**: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_a_ma_crossover.md`
+
+### 修復概要
+1. **`mod.rs`**：移除 `positions: PerSymbolState<bool>` field + `prev_position: HashMap<String, Option<bool>>` field + `PerSymbolState` import；保留 `prev_last_trade_ms` 供 cooldown rollback
+2. **`strategy_impl.rs`**：on_tick match 改為 `ctx.position_state.filter(|p| p.owner_strategy == self.name())` 為 SSoT，cross-strategy 持倉時主動 backoff；on_rejection 化簡為 cooldown rollback only；on_external_close 移除 positions.remove；on_fill / import_positions 改用 trait default no-op
+3. **`tests.rs`**：移除 W7-2/W7-3/W7-5 test block（10 tests），新增 9 acceptance tests + 改寫 entry+exit sequence tests（注入 `ctx.position_state` with `owner_strategy: "ma_crossover"`）
+4. **`tests_a1_a2_maker.rs`**：4 A1 tests 改寫 + 新增 `make_paper_position_a1` helper
+
+### 驗證結果
+- `cargo build --release -p openclaw_engine --lib` PASS (18 pre-existing warnings)
+- `cargo test --release -p openclaw_engine --lib ma_crossover` = **63/63 PASS**
+- `cargo test --release -p openclaw_engine --lib` = **2792/0/0 PASS**（PA target ≥ 2785，超達 +7）
+- Grep acceptance：0 active code `self.positions` / `prev_position` / `W7-*` 引用（皆在歷史注釋）
+
+### LOC 變化
+- strategy_impl.rs: 454 → 353（-101）
+- mod.rs: 452 → 452（內容變但行數平衡）
+- tests.rs: 1177 → 936（-241，刪 W7 block 多於新增 acceptance）
+- tests_a1_a2_maker.rs: 589 → 630（+41，新增 helper）
+- **Net**：-308 LOC
+
+### 教訓（補 E1 全局）
+1. **多 E1 worktree 並行 + 主 repo 衍生 commits 混淆 mind model**：dispatch worktree 是 `/Users/ncyu/Projects/TradeBot/srv/.claude/worktrees/agent-a6625ba20ee9efbea/`，但 absolute path 我 Edit 寫到 `/Users/ncyu/Projects/TradeBot/srv/...` 落在 main repo（被其他 sibling agent 同時改的工作樹）。Rule：worktree dispatch 必確認 cwd resolve 一致；首次 Edit 前 `pwd && ls -la <target>` 比對檔案路徑、必要時用 `<worktree>/...` 絕對前綴。本次幸而能 `git checkout --` 還原 main repo 我的 ma_crossover 改動，重做於 worktree 路徑。
+2. **`tests.rs` 大量 entry+exit sequence test 改造後須注入 `ctx.position_state`**：之前 strategy 自己記得 position state，「on_tick 入場 → 同 sym on_tick 反轉」即觸發 exit；改造後 strategy 不記，必須由 caller（test 或 step_4_5_dispatch）注入 `ctx.position_state = Some(&pp)`。4 個 A1 tests 隱性依賴此「strategy 記憶」也需同步改寫。建議 sibling E1 (B/C/D/E) 同樣注意檢查 tests/*_a1*.rs 等子集。
+3. **Helper function 跨 file 不可共用**：`tests.rs` 的 `make_paper_position(symbol, is_long, owner)` 不能被 `tests_a1_a2_maker.rs` 直接調用（不同 mod scope），所以 a1 file 重新定義 `make_paper_position_a1`。避免改全 helper signature，保持本地化。
+4. **PA spec §3.2 example 字面與實際差異**：PA spec 寫 `let owns = ctx.position_state.filter(|p| p.owner_strategy == self.name()).map(|p| p.is_long);` 然後 `match owns { Some(_is_long) => { /* exit */ }, None if ctx.position_state.is_some() => { /* cross-strategy skip */ }, None => { /* entry */ } }`。我採用全等的結構（`Some(is_long)` 不加 underscore 因為 exit 分支用到 `is_long` 計算 reverse signal）。E2 確認 spec 字面解讀 ✓。
+5. **Trait default override 移除 = code path 完全消失**：on_fill / import_positions 不再 override → 編譯時連 method body 都不存在，運行時 Strategy::on_fill 走 trait default no-op。grep 結果展示這「無代碼」的成效（W7-5 markers 全在注釋）。
+6. **MODULE_NOTE 雙語注釋 governance change 2026-05-05**：新代碼默認只寫中文。本 PR 注釋全中文，舊既存中英對照不主動清理 ✓。

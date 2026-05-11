@@ -13,6 +13,12 @@
 //!   Phase 3a `StrategyParams` 來回 + JSON、信心 clamp，以及 G-SR-1 匯流參數
 //!   範圍/驗證檢查。A1（ER 縮放出場持續）+ A2（趨勢自適應冷卻）+ EDGE-P2-3
 //!   PostOnly maker 入場測試在 sibling `tests_a1_a2_maker.rs`。
+//!
+//! P0 Option A-Lite (2026-05-11)：position state SSoT 改造後，W7-2 / W7-3 /
+//! W7-5 系列 sync tests 已移除（functionality 由 ctx.position_state
+//! owner_strategy gate 涵蓋）；改加 cross-strategy skip acceptance tests + on_rejection
+//! cooldown rollback regression。詳：PA report
+//! `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md`。
 
 use super::*;
 use crate::strategies::{Strategy, StrategyAction};
@@ -213,10 +219,21 @@ fn test_min_trend_snr_blocks_noisy_entry() {
 
 #[test]
 fn test_exit_on_reverse() {
+    // P0 Option A-Lite (2026-05-11)：position state SSoT 改造後，exit path 由
+    // `ctx.position_state` 注入 self-owned 倉位來觸發。原 tests 透過連續 on_tick
+    // 期望「strategy 自己記得有倉位」已失效；改為顯式注入 paper_state position。
     let mut s = MaCrossover::new();
-    s.min_persistence_ms = 0; // disable persistence for unit tests
-    s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = s.on_tick(&ctx_with(101.0, 100.0, 25.0, 500_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.min_persistence_ms = 0;
+    // Step 1：entry (cold-start，ctx.position_state=None)
+    s.on_tick(
+        &ctx_with(100.0, 101.0, 25.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    // Step 2：reverse cross + self-owned paper_state position 注入 → exit branch
+    let pp = make_paper_position("BTC", true, "ma_crossover");
+    let mut ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000);
+    ctx_exit.position_state = Some(&pp);
+    let i = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { symbol, reason, .. } => {
@@ -266,17 +283,18 @@ fn test_regime_filter_allows_trending() {
 /// 即使在均值回歸狀態下，已持有的倉位仍可出場。
 #[test]
 fn test_regime_filter_allows_exit() {
+    // P0 Option A-Lite (2026-05-11)：exit path 由顯式 ctx.position_state 注入觸發。
     let mut s = MaCrossover::new();
-    s.min_persistence_ms = 0; // disable persistence for unit tests
-                              // Step 1: Enter long in trending regime.
-                              // 步驟 1：在趨勢狀態下做多入場。
+    s.min_persistence_ms = 0;
+    // Step 1：trending regime 入場 LONG（cold-start，ctx.position_state=None）
     let ctx_entry = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
     let entry = s.on_tick(&ctx_entry, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(entry.len(), 1, "Should enter long");
 
-    // Step 2: Regime flips to mean_reverting, but crossover reverses → exit must work.
-    // 步驟 2：狀態轉為均值回歸，但交叉反轉 → 出場必須有效。
-    let ctx_exit = ctx_with_hurst(101.0, 100.0, 25.0, 500_000, "mean_reverting", 0.35);
+    // Step 2：regime 翻 mean_reverting + reverse cross + self-owned ma_crossover LONG 注入
+    let pp = make_paper_position("BTC", true, "ma_crossover");
+    let mut ctx_exit = ctx_with_hurst(101.0, 100.0, 25.0, 500_000, "mean_reverting", 0.35);
+    ctx_exit.position_state = Some(&pp);
     let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         exit.len(),
@@ -405,19 +423,21 @@ fn test_higher_tf_cold_start_allows_entry() {
 /// 無論較高時間框架趨勢方向如何，出場均有效。
 #[test]
 fn test_higher_tf_does_not_block_exit() {
+    // P0 Option A-Lite (2026-05-11)：exit path 由顯式 ctx.position_state 注入觸發。
     let mut s = MaCrossover::new();
-    s.min_persistence_ms = 0; // disable persistence for unit tests
-                              // Enter long with aligned higher TF.
+    s.min_persistence_ms = 0;
+    // Step 1：entry LONG（aligned higher TF）
     s.higher_tf_sma.insert("BTC".into(), 90.0);
     let ctx_entry = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
     let entry = s.on_tick(&ctx_entry, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(entry.len(), 1);
 
-    // Now flip higher TF to bearish and reverse crossover → exit must still work.
-    // 現在將較高 TF 翻轉為看跌並反轉交叉 → 出場仍必須有效。
+    // Step 2：翻轉 higher TF + reverse cross + self-owned LONG 注入 → exit
     s.higher_tf_sma.insert("BTC".into(), 110.0);
     s.higher_tf_trend.insert("BTC".into(), false);
-    let ctx_exit = ctx_with_sma50(101.0, 100.0, 25.0, 500_000, 100.0);
+    let pp = make_paper_position("BTC", true, "ma_crossover");
+    let mut ctx_exit = ctx_with_sma50(101.0, 100.0, 25.0, 500_000, 100.0);
+    ctx_exit.position_state = Some(&pp);
     let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(
         exit.len(),
@@ -675,26 +695,28 @@ fn test_phase_b_unknown_regime_string_blocks_entry() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// W7-3 Option B regression — on_rejection duplicate_position 1-tick defense
-// W7-3 Option B 回歸 — on_rejection 對 duplicate_position 的 1-tick 防衛
+// P0 Option A-Lite (2026-05-11) — position state SSoT 改造後 acceptance tests
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// 背景：PA audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
-// 揭露 ma_crossover 的 self.positions 不查 paper_state，當 grid_trading 在
-// 同 symbol 先開倉，ma_crossover 每 tick 撞 router gate 1.5 duplicate_position
-// 形成 hot loop（INXUSDT 11:34 一分鐘 2319 reject）。Option B 補丁讓
-// on_rejection 識別 duplicate_position reason → 把 self.positions sync 成
-// paper_state 真實方向，下個 tick 直接進 exit 分支終結 hot loop。
+// 改造背景：
+// - 22:08 May 10 watchdog Auto restart 後 cross-strategy mass scalp
+//   （bb_reversion 寬 exit zone + W7-2 sync self.positions = cross-strategy
+//   倉位 → 走 exit 分支大量平 grid/ma 開的單）
+// - PA `2026-05-11--p0_option_a_position_state_ssot_refactor.md` Option A-Lite
+//   結論：ma_crossover 移除 `self.positions: PerSymbolState<bool>`，由
+//   `ctx.position_state.filter(owner_strategy == self.name())` 作 SSoT
+// - W7-2/W7-3/W7-5 防護碼層全移除（functionality 由 owner gate 涵蓋）
 //
-// 測試契約：
-// - reason 格式由 rejection_coding.rs:147-152 定義
-//   `"duplicate_position: {symbol} already {LONG|SHORT} {qty}"`
-// - 4 case：already SHORT / already LONG / unknown format / non-duplicate
+// 本批 tests 驗證新 contract：
+// - acceptance：cross-strategy ctx.position_state → skip entry，0 actions
+// - baseline regression：ctx.position_state=None → entry path 正常
+// - self-owned 倉位 + reverse cross → 走 exit 分支（emit Close）
+// - on_rejection cooldown rollback 仍生效（與 positions 解耦）
 
 use crate::intent_processor::OrderIntent;
+use crate::paper_state::PaperPosition;
 
-/// Helper：構建一筆模擬 OrderIntent 給 on_rejection 用。
-/// W7-3 測試專用，所有欄位使用最小可行值。
+/// Helper：構建一筆模擬 OrderIntent 給 on_rejection 用。所有欄位最小可行值。
 fn make_test_intent(symbol: &str, is_long: bool) -> OrderIntent {
     OrderIntent {
         symbol: symbol.to_string(),
@@ -711,131 +733,9 @@ fn make_test_intent(symbol: &str, is_long: bool) -> OrderIntent {
     }
 }
 
-/// W7-3 Option B：reason "duplicate_position ... already SHORT" 命中
-/// → self.positions[symbol] sync 為 false（SHORT）。
-/// 對應 PA audit INXUSDT 11:34 grid 已開 SHORT 1810 場景。
-#[test]
-fn test_on_rejection_duplicate_position_already_short_syncs_position() {
-    let mut s = MaCrossover::new();
-    let intent = make_test_intent("INXUSDT", true); // strategy 想開 LONG（被 reject）
-    let reason = "duplicate_position: INXUSDT already SHORT 1810";
-
-    // Pre-condition：模擬 entry path 已寫過 prev_position（None → 沒有舊倉位）
-    s.prev_position
-        .insert("INXUSDT".to_string(), None);
-
-    s.on_rejection(&intent, reason);
-
-    // 期望：self.positions[INXUSDT] = Some(false)（SHORT），不是被 RC-04 rollback 到 None。
-    assert_eq!(
-        s.positions.get("INXUSDT").copied(),
-        Some(false),
-        "duplicate_position already SHORT 必須 sync self.positions 為 false（SHORT）"
-    );
-}
-
-/// W7-3 Option B：reason "duplicate_position ... already LONG" 命中
-/// → self.positions[symbol] sync 為 true（LONG）。
-#[test]
-fn test_on_rejection_duplicate_position_already_long_syncs_position() {
-    let mut s = MaCrossover::new();
-    let intent = make_test_intent("BTCUSDT", false); // strategy 想開 SHORT（被 reject）
-    let reason = "duplicate_position: BTCUSDT already LONG 0.5";
-
-    s.prev_position.insert("BTCUSDT".to_string(), None);
-
-    s.on_rejection(&intent, reason);
-
-    assert_eq!(
-        s.positions.get("BTCUSDT").copied(),
-        Some(true),
-        "duplicate_position already LONG 必須 sync self.positions 為 true（LONG）"
-    );
-}
-
-/// W7-3 Option B：reason 含 "duplicate_position" 但無 "already LONG/SHORT" 子串
-/// （字串契約 drift / future 改寫）→ fallback 走原 RC-04 rollback 路徑。
-/// pre_position = Some(true)（LONG）→ rollback 後 positions 必為 LONG。
-#[test]
-fn test_on_rejection_unknown_duplicate_format_fallback_to_rollback() {
-    let mut s = MaCrossover::new();
-    let intent = make_test_intent("ETHUSDT", true);
-    // 缺 "already LONG/SHORT" 子串 — 模擬 reason 字串契約破裂。
-    let reason = "duplicate_position: ETHUSDT something_unparseable";
-
-    // 模擬 entry path 寫過 prev_position = Some(true)（LONG），mutation 後 positions
-    // 也是 LONG（不變）；現在 reject → fallback 走 RC-04，positions 仍應為 LONG。
-    s.prev_position
-        .insert("ETHUSDT".to_string(), Some(true));
-    s.positions.insert("ETHUSDT".to_string(), true);
-
-    s.on_rejection(&intent, reason);
-
-    // Fallback rollback 把 positions 還原到 prev_position（Some(true)）。
-    assert_eq!(
-        s.positions.get("ETHUSDT").copied(),
-        Some(true),
-        "unknown duplicate_position format 必須 fallback 走 RC-04 prev_position rollback"
-    );
-}
-
-/// W7-3 Option B：reason 不含 "duplicate_position"（其他類拒絕，例如 cost_gate / risk_gate）
-/// → 必走原 RC-04 完整 rollback（positions + cooldown 都還原）。
-/// pre-condition：prev_position = None（mutation 前未持倉）→ rollback 後 positions
-/// 必須被 remove（不留下偽倉位）。
-#[test]
-fn test_on_rejection_non_duplicate_position_runs_full_rollback() {
-    let mut s = MaCrossover::new();
-    let intent = make_test_intent("SOLUSDT", true);
-    let reason = "cost_gate(JS-demo): estimated=-12.50bps < 0 — blocked / 負估計阻擋";
-
-    // 模擬 entry path mutation：prev_position = None（變更前未持倉），
-    // mutation 後 positions = LONG，prev_last_trade_ms = 0（未交易過）。
-    s.prev_position.insert("SOLUSDT".to_string(), None);
-    s.positions.insert("SOLUSDT".to_string(), true);
-    s.prev_last_trade_ms.insert("SOLUSDT".to_string(), 0);
-    s.cooldown.record_signal("SOLUSDT", 100_000);
-
-    s.on_rejection(&intent, reason);
-
-    // Rollback：positions 必須被 remove（還原到 None）。
-    assert!(
-        !s.positions.contains_key("SOLUSDT"),
-        "non-duplicate_position rejection 必須走 RC-04 把 positions 還原到 None"
-    );
-    // Cooldown 也應 clear（因 prev_last_trade_ms == 0 哨兵）。
-    assert!(
-        s.cooldown.last_ms("SOLUSDT").is_none(),
-        "non-duplicate_position rejection 必須走 RC-04 把 cooldown 還原到未交易狀態"
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// W7-2 Option A regression — cross-strategy paper_state pre-entry check
-// W7-2 Option A 回歸 — entry path 起點查 ctx.position_state
-// ═══════════════════════════════════════════════════════════════════════════
-//
-// 背景：PA #3 audit `2026-05-10--p1_ma_crossover_duplicate_intent_audit.md`
-// §6 Option A 指出治本是「strategy 端 query paper_state」。Sprint N+1
-// W7-1 trait skeleton (`c9fb0b8f`) 已把 `position_state: Option<&PaperPosition>`
-// wire 到 TickContext，並由 step_4_5_dispatch.rs:287-289 per-strategy iteration
-// 注入。本批 tests 驗證 ma_crossover.on_tick 在 entry path 起點查到
-// ctx.position_state 後即 skip + sync self.positions 的契約：
-//
-// - test 1：position_state=Some(SHORT) + ma_crossover signal=LONG → 0 actions
-// - test 2：position_state=None + valid signal → 1 entry intent（baseline regression）
-// - test 3：exit path 不被新 check 影響（已持倉 → 走 Some 分支）
-// - test 4：debug log 結構完整性（pure function check via internal state）
-//
-// W7-3 Option B 仍保留作 reason 字串契約 fallback（W7-4 §7 重點 3）。
-//
-// PaperPosition helper：模擬 paper_state.get_position 的回傳。
-
-use crate::paper_state::PaperPosition;
-
-/// W7-2 helper：構建一個 PaperPosition 模擬 paper_state 真實持倉。
-/// 全欄位用最小可行值，僅 is_long 由參數決定。
-fn make_paper_position(symbol: &str, is_long: bool) -> PaperPosition {
+/// Helper：構建一個 PaperPosition 模擬 paper_state 真實持倉。
+/// `owner` 由參數決定，用以模擬 cross-strategy vs self-owned 場景。
+fn make_paper_position(symbol: &str, is_long: bool, owner: &str) -> PaperPosition {
     PaperPosition {
         symbol: symbol.to_string(),
         is_long,
@@ -846,52 +746,87 @@ fn make_paper_position(symbol: &str, is_long: bool) -> PaperPosition {
         entry_ts_ms: 0,
         unrealized_pnl: 0.0,
         entry_context_id: String::new(),
-        owner_strategy: "grid_trading".to_string(), // 模擬 grid 已開倉場景
+        owner_strategy: owner.to_string(),
         entry_notional: 1810.0 * 0.015,
         max_favorable_pnl_pct: 0.0,
         peak_reached_ts_ms: 0,
     }
 }
 
-/// W7-2 #1：ctx.position_state = Some(SHORT) + ma_crossover entry signal=LONG
-/// → 必 0 actions（skip entry）+ self.positions 同步為 false（SHORT）。
-/// 對應 INXUSDT 11:34 grid 已開 SHORT、ma_crossover 想 LONG 的真實場景。
+/// Acceptance test：cross-strategy paper_state 倉位 → ma_crossover.on_tick 必 skip entry。
+///
+/// 對應 PA report §5.3 acceptance test 契約：
+/// - paper_state 已有 grid_trading owned LONG BTCUSDT 倉位
+/// - ma_crossover 同 tick signal = LONG（fast > slow）
+/// - 期望：on_tick 回 0 actions（不發 entry intent，也不誤觸 exit）
+/// - 對比 P0 22:08 場景：bb_reversion 寬 exit zone + cross-strategy 倉位 → mass close
+///   現 owner_strategy gate 直接 skip，從根源終結 cross-strategy desync
 #[test]
-fn test_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
+fn test_cross_strategy_position_skips_entry() {
     let mut s = MaCrossover::new();
-    s.min_persistence_ms = 0; // disable persistence for unit tests
-    let pp = make_paper_position("BTC", false); // grid 已開 SHORT 1810
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position("BTC", true, "grid_trading"); // grid 已開 LONG
     let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // ma_crossover signal = LONG (fast > slow)
     ctx.position_state = Some(&pp);
 
     let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
-    // 1. 必 0 intents（skip entry）。
     assert!(
         intents.is_empty(),
-        "ctx.position_state present 必 skip entry，但發了 {} intents",
+        "cross-strategy paper_state 持倉時 ma_crossover 必 skip entry，但發了 {} intents",
         intents.len()
-    );
-    // 2. self.positions 必同步為 paper_state.is_long（false = SHORT），下個 tick 走 exit 分支。
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(false),
-        "skip 後必 sync self.positions 為 paper_state 真實方向（SHORT）"
     );
 }
 
-/// W7-2 #2：ctx.position_state = None + valid signal → 1 entry intent（baseline regression）。
-/// 確認本檢查不誤殺正常 entry 路徑。
+/// 額外 acceptance：cross-strategy SHORT 持倉 + ma_crossover entry signal=LONG
+/// → 仍 skip（與 sign 無關，純看 owner_strategy gate）。
+/// 對應 INXUSDT 11:34 場景 — grid 已開 SHORT，ma_crossover 想 LONG 即跳過。
+#[test]
+fn test_cross_strategy_position_skips_entry_opposite_direction() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position("BTC", false, "grid_trading"); // grid SHORT
+    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // ma_crossover signal = LONG
+    ctx.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    assert!(
+        intents.is_empty(),
+        "cross-strategy SHORT 持倉時亦必 skip LONG entry"
+    );
+}
+
+/// 額外 acceptance：bybit_sync owner 也算 cross-strategy（不對應任何策略 name）。
+#[test]
+fn test_bybit_sync_owner_treated_as_cross_strategy_skip() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position("BTC", true, "bybit_sync");
+    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0);
+    ctx.position_state = Some(&pp);
+
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    assert!(
+        intents.is_empty(),
+        "bybit_sync owner 視同 cross-strategy（owner != ma_crossover）必 skip entry"
+    );
+}
+
+/// Baseline regression：ctx.position_state = None + valid signal → 1 entry intent。
+/// 確認新 owner gate 不誤殺正常 entry 路徑。
 #[test]
 fn test_on_tick_proceeds_entry_when_paper_state_is_none() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
     let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // signal = LONG
-    ctx.position_state = None; // 顯式 None；ctx_with 已 default None，這裡再強調契約。
+    ctx.position_state = None;
 
     let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-
-    assert_eq!(intents.len(), 1, "ctx.position_state=None 時 valid signal 必發 entry");
+    assert_eq!(
+        intents.len(),
+        1,
+        "ctx.position_state=None 時 valid signal 必發 entry"
+    );
     match &intents[0] {
         StrategyAction::Open(intent) => {
             assert!(intent.is_long, "expected LONG entry");
@@ -900,27 +835,24 @@ fn test_on_tick_proceeds_entry_when_paper_state_is_none() {
     }
 }
 
-/// W7-2 #3：exit path 不被新 check 影響。
-/// 已持有 LONG → reverse cross → 必走 Some(is_long) exit 分支（不過 None entry 分支即無 W7-2 check）。
-/// 即使 ctx.position_state = Some(LONG)，因 self.positions 已是 LONG 直接走 Some(true) → exit。
+/// Self-owned ctx.position_state + reverse cross → 走 exit 分支（emit Close）。
+/// 驗證 owner_strategy == "ma_crossover" filter 命中時，exit path 觸發正常。
 #[test]
-fn test_on_tick_exit_path_unchanged_by_w7_2_check() {
+fn test_self_owned_position_triggers_exit_on_reverse_cross() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
-    // Step 1：先入場 LONG（ctx.position_state=None，走正常 entry path）。
-    let entry = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    assert_eq!(entry.len(), 1, "Step 1 必入場 LONG");
-    assert_eq!(s.positions.get("BTC").copied(), Some(true));
-
-    // Step 2：reverse cross（fast < slow）+ ctx.position_state 即使 Some(LONG)，
-    // 因 self.positions=Some(true) 直接走 Some(true) exit 分支（W7-2 check 在 None 分支內，不觸及）。
-    let pp = make_paper_position("BTC", true);
-    let mut ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000); // fast < slow → reverse
+    // 模擬：上次 tick 已 entry LONG（paper_state 寫入 ma_crossover owned LONG）
+    let pp = make_paper_position("BTC", true, "ma_crossover");
+    let mut ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000); // fast < slow → reverse for LONG
     ctx_exit.position_state = Some(&pp);
-    let exit = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
-    assert_eq!(exit.len(), 1, "exit path 必照走，不受 W7-2 check 影響");
-    match &exit[0] {
+    let exit_actions = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    assert_eq!(
+        exit_actions.len(),
+        1,
+        "self-owned LONG 倉位 + reverse cross 必發 Close"
+    );
+    match &exit_actions[0] {
         StrategyAction::Close { reason, .. } => {
             assert_eq!(reason, "ma_reverse_cross", "exit reason 必為 ma_reverse_cross");
         }
@@ -928,250 +860,77 @@ fn test_on_tick_exit_path_unchanged_by_w7_2_check() {
     }
 }
 
-/// W7-2 #4：debug log path + W7-2 sync 後 first tick 即 skip（hot loop 即時終結驗證）。
-/// 對應 INXUSDT 11:34 場景：第一次撞到 cross-strategy desync 即立刻被 W7-2 skip + sync。
-/// 不做 100-tick burst（second tick 會走 Some(is_long) exit 分支進入 KAMA reverse 邏輯，
-/// 屬 exit-path 行為，與 W7-2 sync 契約無關）；改驗單 tick：（1）必 skip，（2）self.positions
-/// 必同步 paper_state 方向，（3）self.positions size 為 1（O(1) HashMap insert 不累積）。
+/// Self-owned ctx.position_state + aligned cross（無 reverse 信號）→ 不 emit Close。
+/// 驗證 exit 條件仍要求 KAMA reverse cross，不是「self-owned 就 close」。
 #[test]
-fn test_on_tick_w7_2_logs_skip_reason_via_state_sync() {
+fn test_self_owned_position_no_exit_when_aligned() {
     let mut s = MaCrossover::new();
     s.min_persistence_ms = 0;
-    let pp = make_paper_position("BTC", false); // grid SHORT
-    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // ma_crossover signal = LONG (fast > slow)
+    let pp = make_paper_position("BTC", true, "ma_crossover"); // LONG owned
+    let mut ctx = ctx_with(100.0, 101.0, 25.0, 0); // fast > slow → aligned LONG
     ctx.position_state = Some(&pp);
 
-    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-
-    // (1) 必 0 intent — W7-2 skip path 觸發。
+    let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert!(
-        intents.is_empty(),
-        "first cross-strategy desync tick 必 W7-2 skip，但發了 {} intents",
-        intents.len()
-    );
-    // (2) self.positions 必 sync 為 paper_state 真實方向（SHORT）— W7-2 contract。
-    //     若 sync 失敗（仍 None），下個 tick 又走 entry path → hot loop 仍存在 → bug。
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(false),
-        "W7-2 sync 後 self.positions 必反映 paper_state.is_long（SHORT）"
-    );
-    // (3) HashMap size = 1（O(1) insert，不洩漏多 entry）。
-    assert_eq!(
-        s.positions.len(),
-        1,
-        "W7-2 sync 必 O(1) insert，positions 應只有 1 entry"
+        actions.is_empty(),
+        "self-owned LONG + aligned cross (no reverse) → 不可 emit Close（exit 不該 fire）"
     );
 }
 
-/// W7-3 Option B SLA：1000 次 on_rejection burst 不 panic / 不 hang / HashMap O(1) 更新。
-/// 模擬 INXUSDT 11:34 hot loop 場景（單 symbol 一分鐘 reject 2319 次的縮量回放）。
-/// 由 E4 W7-3 regression 加入，pure test scope，不修 business logic。
-///
-/// 驗證契約：
-///  1. burst 完成不 panic（HashMap insert / contains / String 解析 robust）。
-///  2. self.positions 在單 symbol 多次 sync 後保持 size=1（O(1) update 不累積）。
-///  3. 終態 self.positions[symbol] 應為最後一次 reason 的 direction（這裡是 SHORT）。
-///  4. wall-clock < 100ms（1000 op，mac_release 應 < 5ms；保留 100ms 防 CI 噪音）。
+/// on_rejection cooldown rollback：reject 時還原 last_trade_ms 至 mutation 前。
+/// pre-condition：prev_last_trade_ms == 0（哨兵：未交易過）→ rollback 後 cooldown 應 clear。
 #[test]
-fn test_on_rejection_duplicate_position_burst_no_panic_no_hang() {
+fn test_on_rejection_cooldown_rollback_unseen_sentinel() {
     let mut s = MaCrossover::new();
-    let intent = make_test_intent("INXUSDT", true);
-    let reason = "duplicate_position: INXUSDT already SHORT 1810";
+    let intent = make_test_intent("SOLUSDT", true);
 
-    let start = std::time::Instant::now();
-    for _ in 0..1000 {
-        s.on_rejection(&intent, reason);
-    }
-    let elapsed = start.elapsed();
+    // 模擬 entry path mutation：prev_last_trade_ms = 0（變更前未交易過）。
+    s.prev_last_trade_ms.insert("SOLUSDT".to_string(), 0);
+    s.cooldown.record_signal("SOLUSDT", 100_000);
 
-    // 1. HashMap O(1) update：1000 次同 symbol 後仍只有 1 entry。
-    assert_eq!(
-        s.positions.len(),
-        1,
-        "1000 次同 symbol on_rejection 後 positions HashMap 應只有 1 entry (O(1) update 不累積)"
-    );
-    // 2. 終態正確：最後一次 sync 為 SHORT。
-    assert_eq!(
-        s.positions.get("INXUSDT").copied(),
-        Some(false),
-        "burst 結束 positions[INXUSDT] 應為 Some(false)（SHORT）"
-    );
-    // 3. SLA：1000 op < 100ms（防 hot loop 引入 O(n) 病灶）。
+    s.on_rejection(&intent, "cost_gate: estimated=-12.50bps");
+
+    // Cooldown 必 clear（prev_last_trade_ms == 0 哨兵）。
     assert!(
-        elapsed.as_millis() < 100,
-        "1000 次 on_rejection 應 < 100ms，實測 {} ms",
-        elapsed.as_millis()
+        s.cooldown.last_ms("SOLUSDT").is_none(),
+        "on_rejection 必還原 cooldown 至未交易狀態（prev_last_trade_ms=0 哨兵）"
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// W7-5 — on_fill update self.positions + bootstrap import_positions
-// 對應 PA W7-4 systemic audit §6 + W6 RFC PA-view Q2(a)/(b)
-// ─────────────────────────────────────────────────────────────────────────────
-
-use crate::paper_state::PaperState;
-
-/// W7-5 #1：on_fill (LONG entry fill confirmed) → self.positions sync = Some(true)。
-/// 對應 step_4_5_dispatch.rs:925 callsite，於 paper_state.apply_fill 之前。
+/// on_rejection cooldown rollback：reject 時還原非 0 last_trade_ms 至原值。
+/// pre-condition：prev_last_trade_ms == 50_000（有舊紀錄）→ rollback 後 cooldown 必為 50_000。
 #[test]
-fn test_on_fill_updates_self_positions_long() {
+fn test_on_rejection_cooldown_rollback_preserves_prior_ts() {
     let mut s = MaCrossover::new();
-    let intent = make_test_intent("BTC", true); // LONG
-    let fill = openclaw_core::execution::FillResult {
-        fill_price: 50_000.0,
-        fill_qty: 0.01,
-        fee: 0.5,
-        slippage_bps: 1.0,
-        is_taker: true,
-    };
-    // self.positions 開始為空（cold-start 或 entry path 已被某 race 清空）。
-    assert!(s.positions.get("BTC").is_none());
-    s.on_fill(&intent, &fill);
+    let intent = make_test_intent("ETHUSDT", true);
+
+    // 模擬：prev_last_trade_ms = 50_000（變更前有交易紀錄），mutation 後寫入 100_000。
+    s.prev_last_trade_ms.insert("ETHUSDT".to_string(), 50_000);
+    s.cooldown.record_signal("ETHUSDT", 100_000);
+
+    s.on_rejection(&intent, "risk_gate: portfolio_overexposure");
+
+    // Cooldown 必回滾為 50_000。
     assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(true),
-        "on_fill (LONG) 必 sync self.positions[BTC] = Some(true)"
+        s.cooldown.last_ms("ETHUSDT"),
+        Some(50_000),
+        "on_rejection 必還原 cooldown 至 prev_last_trade_ms 原值"
     );
 }
 
-/// W7-5 #2：on_fill (SHORT entry fill confirmed) → self.positions sync = Some(false)。
+/// on_external_close 清理 signal-time persistence trackers（mutation 不 panic）。
+/// 確認改造後（positions 已不存在）persistence/exit_persistence 仍正確清理。
+/// 詳 sibling tests_a1_a2_maker.rs::test_a1_external_close_clears_exit_persistence 做完整覆蓋。
 #[test]
-fn test_on_fill_updates_self_positions_short() {
+fn test_on_external_close_mutation_does_not_panic() {
     let mut s = MaCrossover::new();
-    let intent = make_test_intent("ETH", false); // SHORT
-    let fill = openclaw_core::execution::FillResult {
-        fill_price: 3_000.0,
-        fill_qty: 0.5,
-        fee: 0.3,
-        slippage_bps: 1.0,
-        is_taker: true,
-    };
-    s.on_fill(&intent, &fill);
-    assert_eq!(
-        s.positions.get("ETH").copied(),
-        Some(false),
-        "on_fill (SHORT) 必 sync self.positions[ETH] = Some(false)"
-    );
-}
+    s.min_persistence_ms = 180_000;
+    let _ = s.persistence.check("BTC", Some(true), 0, 180_000, false);
+    let _ = s.exit_persistence.check("BTC", Some(false), 100_000, 180_000, false);
 
-/// W7-5 #3：bootstrap import_positions 從 paper_state 重建 self.positions。
-/// 模擬重啟後 paper_state 已載入 ma_crossover 既有倉位、self.positions 為空場景。
-#[test]
-fn test_bootstrap_imports_paper_state_positions_for_ma_crossover() {
-    let mut paper = PaperState::new(10_000.0);
-    // ma_crossover 早先持倉：BTC LONG（重啟前 ma_crossover 開的）。
-    paper.apply_fill("BTC", true, 0.01, 50_000.0, 0.5, 1_000, "ma_crossover");
-    // 加一個其他 strategy 的倉位（grid_trading 開的 SHORT）— 不應被 ma_crossover import。
-    paper.apply_fill("ETH", false, 0.5, 3_000.0, 0.3, 1_001, "grid_trading");
-    // 加一個 bybit_sync owner（交易所 snapshot orphan）— 不應被任何 strategy import。
-    paper.apply_fill("SOL", true, 5.0, 100.0, 0.1, 1_002, "bybit_sync");
+    s.on_external_close("BTC");
 
-    let mut s = MaCrossover::new();
-    assert!(s.positions.get("BTC").is_none(), "import 前必為空");
-
-    s.import_positions(&paper);
-
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(true),
-        "ma_crossover owner 倉位 BTC LONG 必被 import"
-    );
-    assert!(
-        s.positions.get("ETH").is_none(),
-        "其他 strategy (grid_trading) owner 倉位 ETH 不可被 ma_crossover import"
-    );
-    assert!(
-        s.positions.get("SOL").is_none(),
-        "bybit_sync owner 倉位 SOL 不可被任何 strategy import（避免誤領 orphan）"
-    );
-    assert_eq!(s.positions.len(), 1, "ma_crossover 應只 import 1 個倉位");
-}
-
-/// W7-5 #4：bootstrap import_positions 過濾 non-eligible owner（不誤領 orphan）。
-/// paper_state 全是非 ma_crossover owner（bybit_sync / orphan_adopted / 其他 strategy）。
-#[test]
-fn test_bootstrap_filters_non_eligible_symbol_for_ma_crossover() {
-    let mut paper = PaperState::new(10_000.0);
-    paper.apply_fill("BTC", true, 0.01, 50_000.0, 0.5, 1_000, "bb_breakout");
-    paper.apply_fill("ETH", false, 0.5, 3_000.0, 0.3, 1_001, "grid_trading");
-    paper.apply_fill("SOL", true, 5.0, 100.0, 0.1, 1_002, "bybit_sync");
-    paper.apply_fill("AVAX", false, 2.0, 30.0, 0.05, 1_003, "orphan_adopted");
-
-    let mut s = MaCrossover::new();
-    s.import_positions(&paper);
-
-    assert_eq!(
-        s.positions.len(),
-        0,
-        "ma_crossover 不應 import 任何非 ma_crossover owner 的倉位"
-    );
-}
-
-/// W7-5 #5：W7-3 + W7-2 + W7-5 三 wave 一致性 end-to-end test。
-/// 流程：
-///  1. cold-start：paper_state 已有 ma_crossover BTC LONG 倉位（前次 session 殘留）
-///  2. bootstrap import_positions → self.positions[BTC] = Some(true)
-///  3. on_tick W7-2 path：reverse cross + ctx.position_state = Some(LONG) → 走 Some(true) exit
-///  4. fill confirmed → on_fill (假設仍是 LONG fill direction，實際生產 close 走 on_close_confirmed)
-///  5. 確認 self.positions 始終一致 (W7-2 ctx.position_state 查詢 + W7-5 sync)
-#[test]
-fn test_w7_5_consistent_with_w7_3_w7_2_chain() {
-    // ── Step 1: cold-start paper_state has ma_crossover BTC LONG ──
-    let mut paper = PaperState::new(10_000.0);
-    paper.apply_fill("BTC", true, 0.01, 50_000.0, 0.5, 1_000, "ma_crossover");
-
-    let mut s = MaCrossover::new();
-    s.min_persistence_ms = 0;
-    assert!(s.positions.get("BTC").is_none(), "step 1: pre-import 為空");
-
-    // ── Step 2: bootstrap import_positions 重建 self.positions ──
-    s.import_positions(&paper);
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(true),
-        "step 2: W7-5 import 後 self.positions[BTC] = LONG"
-    );
-
-    // ── Step 3: on_tick reverse cross；既有 self.positions=Some(true) → 走 Some exit 分支 ──
-    // 注意：W7-2 entry path query (ctx.position_state) 在 None 分支內，本 step
-    // 走的是 Some(true) exit 分支，故 ctx.position_state 設不設無影響（exit path 不查）。
-    let ctx_exit = ctx_with(101.0, 100.0, 25.0, 500_000); // fast < slow → reverse for LONG
-    let exit_actions = s.on_tick(&ctx_exit, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    assert_eq!(exit_actions.len(), 1, "step 3: reverse cross 必發 1 close intent");
-    match &exit_actions[0] {
-        StrategyAction::Close { reason, .. } => {
-            assert_eq!(reason, "ma_reverse_cross");
-        }
-        other => panic!("step 3: expected Close, got {:?}", other),
-    }
-    // exit path 已 self.positions.remove(BTC)（strategy_impl.rs:348）。
-    assert!(
-        s.positions.get("BTC").is_none(),
-        "step 3: exit path 走完 self.positions 已 remove"
-    );
-
-    // ── Step 4: 接著新一筆 LONG entry intent fill confirmed → on_fill sync ──
-    // 模擬 W7-2 + W7-5 chain：reverse 後馬上又有 LONG entry（cross-strategy 場景）。
-    let new_intent = make_test_intent("BTC", true);
-    let fill = openclaw_core::execution::FillResult {
-        fill_price: 50_500.0,
-        fill_qty: 0.01,
-        fee: 0.5,
-        slippage_bps: 1.0,
-        is_taker: true,
-    };
-    s.on_fill(&new_intent, &fill);
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(true),
-        "step 4: W7-5 on_fill 後 self.positions[BTC] = LONG（與 fill direction 一致）"
-    );
-
-    // ── Step 5: HashMap O(1) 一致性：5 步操作後 size=1（不洩漏 entry）──
-    assert_eq!(
-        s.positions.len(),
-        1,
-        "step 5: chain 結束 self.positions size=1（O(1) 操作不洩漏）"
-    );
+    // clear 過後 fresh check 不 panic（mutation 完整生效）。
+    let _ = s.persistence.check("BTC", Some(true), 1_000_000, 0, false);
+    let _ = s.exit_persistence.check("BTC", Some(false), 1_000_000, 0, false);
 }
