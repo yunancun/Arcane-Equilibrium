@@ -2933,3 +2933,51 @@ Strategy trait (`strategies/mod.rs`) 對 W7 pattern **不強制**：on_rejection
 **Reports**:
 - 設計報告：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_rca1_f1_f2_emergency_fix_plan.md`
 - E1 RCA 對齊：`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_rca1_orphan_er_missed_fill.md`
+
+---
+
+## 2026-05-11 P0 22:08 deploy edge regression RCA — 3 commit 排除 + 真實 root cause
+
+**性質**：Operator P0 RCA — 22:08 +0200 May 10 engine restart 後 edge 連續 9h 翻負；分析 6 個業務 [skip ci] commit 嫌疑（5de8df5f Wire decision lease / 8070f98d Route executor intents / ca5f4305 Centralize alpha source / 97658947 live candidate / fb7ac290 replay prepare / 2c258238 OpenClaw boundary）
+
+**Verdict**：3 嫌疑 commit + 3 次嫌疑 commit **ALL CLEARED**；真實 root cause = 22:08 watchdog **Auto restart**（kind=Auto, NOT --rebuild deploy）後 paper_state reset 引發 grid_trading 大量 0-duration scalping
+
+**關鍵發現 1（時序錯位）**：
+- 22:08 engine boot log 顯示 `kind=Auto`，**不是 operator restart_all --rebuild**
+- 22:08 binary = 15:48 binary（同一 build artifact），6 個 [skip ci] commit **不在內**
+- Auto restart 不重編譯，operator 認知「22:08 是 deploy 引入 6 commit」**錯誤**
+
+**關鍵發現 2（嫌疑全清）**：
+- **5de8df5f Wire decision lease**：即使含此 commit，bypass mode = LeaseId::Bypass.release_lease() return Ok(()) NO-OP；channel = mpsc::unbounded 不阻塞；全 path 早退（is_primary 守衛）→ 0 影響
+- **8070f98d Route executor intents**：真實 demo runtime 不走 ExecutorAgent.on_message（OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow），整個 commit 對交易 hot path 0 影響
+- **ca5f4305 Centralize alpha source**：唯一語義變化 `AlphaSourceTag::CrossAsset` false → btc_lead_lag.is_some()，**只影響 dispatched_counter 統計**，不影響 strategy dispatching logic
+- **97658947 / fb7ac290 / 2c258238**：純 Python 非熱路徑
+
+**關鍵發現 3（真實 cause）**：
+PG fills 直查證據：
+- 18-19h（Sprint N+0 morning regime）：12 fills，gross $2.95，**avg $0.246/fill**，「Buy 跨 N 分鐘 Sell」（grid hold）
+- 22h-23h（22:08 Auto restart 後）：20 fills，gross $0.031，**avg $0.0015/fill**，**「Sell + Buy 同 ts」instant scalp**
+- 01-05h（持續）：124 fills，gross $1.18，avg $0.0095/fill，持續 instant scalp pattern
+
+22:08 watchdog Auto restart 後 paper_state.positions seed count=0；grid_layout 重 rebuild 所有 grid level；EU evening 22h market liquidity 低 + grid scanner stale memory → grid layout 立即 fire instant scalp。fees 結構性 > gross。
+
+**架構教訓 1**：**deploy verify 必先 check engine boot kind**（Manual=operator --rebuild / Auto=watchdog respawn）；前者才是 deploy event，後者不引入新代碼。Operator 認知「22:08 deploy 6 commit」未驗證 boot kind = 時序錯位 root error。
+
+**架構教訓 2**：**watchdog Auto restart 對策略 hot path 是有害事件，不是無害事件**。paper_state reset → grid_trading 立即重建 layout → 0-duration scalp fee bleeding。grid_trading restart warmup 邏輯缺。
+
+**架構教訓 3**：**5 textbook 策略結構性 alpha-deficient 結論進一步驗證**（與 Sprint N+0 closure memory 對齊）。grid_trading 沒真實 alpha，只賺 grid spread；paper_state reset = grid 重建 = fee bleeding 機制。
+
+**架構教訓 4**：Cross-check Decision Lease 路徑覆蓋率時，**必看 LeaseId::Bypass return path**——所有 Bypass 路徑 release_lease return Ok(()) 是 NO-OP。runtime 在 W-C shadow mode 下整條 lease release 鏈條都是裝飾性的（只發 LeaseTransitionMsg + log），對交易行為 0 影響。
+
+**架構教訓 5**：Mac PA cold review PG query 透過 ssh + PGPASSWORD 順利，但 fills schema 假設錯（ts_ms vs ts timestamp）trial-error 浪費 ~3min。Mac 端應在 RCA 啟動序列加 `psql \d trading.fills` schema verify。
+
+**Operator action 推薦**：
+1. **emergency disable grid_trading** 1h 觀察 bleed 是否止住（最快驗證）
+2. 派 E1 design grid_trading restart warmup（engine boot 後 N min 內 grid 不發單，等 paper_state cohesion）
+3. cost_gate 在 grid instant scalp（fill_qty same ts 內 Sell+Buy）的 fee check 加強
+
+**Confidence**: HIGH for「3 commit 排除」「22:08 是 watchdog Auto」「root cause = paper_state reset + grid instant scalp」；MEDIUM-HIGH for「為什麼 morning 15:48 Manual restart 後沒爆量」（推測 EU morning liquidity 高 + scanner 30min cycle 起 warmup_delay 生效，未深查 grid_trading 源碼）
+
+**16 原則 + Hard Boundary**: 0 觸碰；違反原則 #5（生存>利潤）+ #6（失敗默認收縮）— grid restart 後缺保守 warmup
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_22h08_deploy_edge_regression_rca.md`
