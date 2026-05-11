@@ -2,7 +2,7 @@
 -- W2 A4-C BTC→Alt Lead-Lag — D+12 paper edge counterfactual SQL
 -- ============================================================
 -- 用途：D+12 paper engine 跑 7d 後，對齊 panel.btc_lead_lag_panel
---        / klines / trading.fills 三表，重建 lead signal 與 alt
+--        / market.klines / trading.fills 三表，重建 lead signal 與 alt
 --        forward return 的 counterfactual edge；給 w2_paper_edge_report.py
 --        當輸入。對應 spec §7.2 + §7.1 mandatory metric 6 條的資料基礎。
 -- 純 READ-ONLY：無 INSERT / UPDATE / DELETE / DDL。
@@ -29,7 +29,7 @@
 --   - panel.btc_lead_lag_panel.lead_window_secs 主信號固定 120（v1.1 N 鎖定）
 --   - panel.btc_lead_lag_panel.regime_tag IN ('normal','extreme')
 --   - trading.fills.ts 為 TIMESTAMPTZ；is_paper=TRUE 為 paper engine 行
---   - trading.klines.ts 為 TIMESTAMPTZ；interval='1m'；symbol 對齊 cohort
+--   - market.klines.ts 為 TIMESTAMPTZ；timeframe='1m'；symbol 對齊 cohort
 --
 -- E2 對抗審查重點（per dispatch plan §3.4）：
 --   - SQL 對齊 expected_dir +1/-1/0 三方向（counterfactual 三方向 verdict）
@@ -38,11 +38,13 @@
 --   - 不寫 reg_tag='extreme' 樣本（per §7.2 + §9 condition #5）
 -- ============================================================
 --
--- 主要參數（caller 從 Python 端透過 psycopg2 cur.execute() 注入；本檔
--- 用 :param 占位符方便 grep；實際 cur.execute() 用 %(param)s）：
---   :window_days        — paper engine 7d edge collection window（int, default 7）
---   :cohort_symbols     — alt cohort symbol list (text[], per spec §2.2)
+-- 主要參數（caller 從 Python 端透過 psycopg2 cur.execute() 注入；
+-- 實際 SQL body 用 psycopg2 named placeholder 標準語法）：
+--   `window_days`        — paper engine 7d edge collection window（int, default 7）
+--   `cohort_symbols`     — alt cohort symbol list (text[], per spec §2.2)
 --                          default {ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,DOTUSDT}
+-- 注意：注釋區內**不**使用 psycopg2 placeholder 字面字串（避免 caller 解析為
+--       必填參數鍵），僅在 SQL body §0 params CTE 內出現 placeholder。
 --
 -- 預期回傳 row 結構：
 --   symbol TEXT            -- alt symbol
@@ -84,7 +86,11 @@
 
 WITH params AS (
     -- ============================================================
-    -- 參數標準化：caller 注入 %(window_days)s（default 7）+ %(cohort_symbols)s
+    -- 參數標準化：caller 必注入兩個 psycopg2 named parameter：
+    --   1. window_days  (int)   — paper edge collection window in days
+    --   2. cohort_symbols (text[]) — alt cohort，spec §2.2
+    -- 兩者均可為 NULL（注入 None），由下方 COALESCE 套用 default fallback。
+    -- 注釋區刻意不寫 placeholder 字面，psycopg2 不跳過 `--` 內 placeholder。
     -- ============================================================
     SELECT
         COALESCE(%(window_days)s, 7)::INT AS window_days,
@@ -95,7 +101,7 @@ WITH params AS (
         -- 7d window 起始 epoch ms（對齊 panel.btc_lead_lag_panel BIGINT 時間維）
         ((EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
             - COALESCE(%(window_days)s, 7)::BIGINT * 86400000) AS window_start_ms,
-        -- 7d window 起始 TIMESTAMPTZ（對齊 trading.fills / trading.klines）
+        -- 7d window 起始 TIMESTAMPTZ（對齊 trading.fills / market.klines）
         (NOW() - (COALESCE(%(window_days)s, 7)::TEXT || ' days')::INTERVAL) AS window_start_ts
 ),
 
@@ -157,7 +163,7 @@ panel_expanded AS (
 
 -- ============================================================
 -- §3 alt_klines — 每個 cohort symbol 的 1m kline + LEAD() forward return
--- 對齊 trading.klines.interval='1m'；取 close price，並用 window
+-- 對齊 market.klines.timeframe='1m'；取 close price，並用 window
 -- function LEAD() 取未來 1/2/5 bar 的 close (= forward 60/120/300 秒)。
 -- 對齊 panel.snapshot_ts_ms（epoch ms）= klines.ts（TIMESTAMPTZ）的轉換：
 --   bucket_ts_ms = (EXTRACT(EPOCH FROM k.ts) * 1000)::BIGINT
@@ -179,10 +185,10 @@ alt_klines AS (
         LEAD(k.close, 5) OVER (
             PARTITION BY k.symbol ORDER BY k.ts
         ) AS close_forward_300s
-    FROM trading.klines k, params
+    FROM market.klines k, params
     WHERE k.ts >= params.window_start_ts - INTERVAL '10 minutes'  -- buffer 對齊 LEAD()
       AND k.symbol = ANY(params.cohort_symbols)
-      AND k.interval = '1m'
+      AND k.timeframe = '1m'
 ),
 
 -- ============================================================
