@@ -2023,3 +2023,33 @@ Stalled sub-agent: `a0e1741f` 600s watchdog killed in memory append phase
 
 68. **9 case effective_engine_mode iter test pattern**：Rust enum 全 variant × Bybit env 全 variant 列舉 + iter `for (kind, env, expected_em, should_read) in cases` + 每 case `assert_eq!(em, expected_em) + assert_match_arm_behavior` = 雙重 protection（功能契約 + 結構契約）。本 test 9 case：Paper×2 + Demo×2 + Live×5 = 9，每 case `should_read = (em == "paper")` 邏輯精確；任一 effective_engine_mode 改動 → cargo test 紅。**規律**：enum × enum 組合 test 必 iter pattern 而非分散寫 9 個獨立 test —— DRY + 完整性 + 後續加 variant 改一行即可。E2 看到此 pattern = APPROVE 結構良好。
 
+## 2026-05-11 — P0 Option A-Lite post-merge adversarial audit (PASS to E4)
+
+**對象**：HEAD `dc8b7ffe`（5 worktree merge chain post Phase 0 `77a52796`）
+- E1-A `f579e479` ma_crossover full SSoT
+- E1-B `6cdfe0dc` bb_reversion full SSoT
+- E1-C `cbbd9c40` bb_breakout partial SSoT (entry_price/trailing_stop/squeeze/oi_buffer 保留)
+- E1-D `07045e99` grid_trading cross_strategy_holds gate (net_inventory 0 動)
+- E1-E `0427346f/ebbcc038` funding_arb dormant align
+
+**Verdict**：**PASS to E4** · 0 BLOCKER / 0 HIGH / 2 MEDIUM (tech debt) / 2 LOW / 1 WATCH
+
+**8 個 audit angle**：A test count align (5 worktree 2792-2801 → main 2794 / 各策略 63+46+84+50+42=285 對齊各 E1 報告) ✓ / B Phase 0 marker 全清 (`PHASE-0` 0 hit) ✓ / C W7-2/3/5 active 死絕 (self.positions/prev_position 全注釋；grid+bb_breakout `import_positions` override 為 PA spec 例外 net_inventory/entry_price 重建) ✓ / D cross-strategy gate semantics 一致 (4 SSoT 策略 `filter(|p| p.owner_strategy == self.name())`；grid_trading 3-owner whitelist exception) ✓ / E PaperPosition test helper 重複 antipattern (5 策略 8 helper，PA spec E1-F aggregator scope 未完成 = MEDIUM tech debt) / F memory.md 5 sections 全在 (heading format 不規範化 = MEDIUM) ✓ / G 18 warning 0 new (`make_intent` pre-P0 dead) ✓ / H per-tick performance 0 regression (≤2-3 borrow read，pre-injected by step_4_5_dispatch.rs) ✓
+
+**PA §9 三條必查**：(1) exit gate owner_strategy 4 SSoT 策略全有 / (2) bb_breakout 4 fields 85 hits 保留 / (3) grid_trading net_inventory 33 hits 保留 全 PASS
+
+**5 個 E1 IMPL 結構完全一致**：
+1. `let owned = ctx.position_state.filter(|p| p.owner_strategy == self.name())`
+2. match 三分支：`Some(_)` exit / `None if is_some()` cross-strategy skip / `None` entry
+
+對抗反問結果：5 E1 各加 acceptance test 直接驗 cross-strategy owner gate（非 happy-path mock）；PA spec line 號對應準確；race 不可能（step_4_5_dispatch 預 inject + read-only borrow）
+
+**Phase 0 spec partial adoption (WATCH)**：PA §6.1 兩條 hot-fix 中只實作 owner_strategy gate (10 LOC)，`exit_pctb [0.2,0.8] → [0.45,0.55]` 寬縮跳過。Acceptable trade-off — owner_strategy gate 已治本 cross-strategy mass close；exit_pctb 寬度只影響自家持倉 textbook mean-reversion 過早 exit (策略質量 issue 非 P0 BLOCKER)；留 follow-up 策略 calibration wave
+
+**規律**：
+- **Multi-worktree merge audit 不需要 re-run 各 worktree test，只需要 merged HEAD 的 cargo test --lib + 各策略 focused test 對齊各 E1 報告數字** — pre-merge worktree 數字 = baseline + 各 E1 改動，post-merge 整合後數字應 = baseline + 5 sets E1 改動，5 策略 focused test 數字應與各 E1 報告精確對齊（test shadow 偵測法）
+- **Phase 0 hot-fix vs root cause fix 同 issue 兩條路**：當 root cause fix 已治本（owner_strategy gate 從根源杜絕 cross-strategy mass close），Phase 0 副作用 fix（exit_pctb 寬縮）可降級為策略 calibration follow-up，不阻 main deploy
+- **PaperPosition test helper 5 策略並行 IMPL 必然重複**：PA spec 應在 dispatch 階段預告 E1-F aggregator 範圍並要求各 E1 用 `// FIXME: 待 E1-F 抽 common helper` 注釋 marker（5 E1 都自承此問題 = pattern 反證 PA spec 未足夠強制）
+- **5 並行 E1 IMPL chain test 數 align 規律**：worktree pre-merge 數字差異 = 該 E1 加 N acceptance test (E1-A 9 / E1-B 6 / E1-C 2 / E1-D 4 / E1-E 5 = 26 new) + 各 worktree baseline drift（前 sibling stash leak / 後 sibling not merged 影響）。Merge 後 main HEAD 為**最終 sibling 數字**而非 sum (5 E1 改動最終整合到 same baseline 上)。看到 worktree 2801 vs main 2794 不要慌，先 focused test 對齊
+- **dead code warning 是否為改造引入**：必 git show baseline commit 抓 fn/method 用法 vs 改造後是否減少；若 baseline 已 visibility 邊界 dead 而 P0 沒新增 caller 也沒移 caller = pre-existing 不算改造引入
+
