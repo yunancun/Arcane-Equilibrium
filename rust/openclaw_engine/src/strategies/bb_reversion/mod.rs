@@ -657,6 +657,20 @@ impl Strategy for BbReversion {
                 }
             }
             Some(_is_long) => {
+                // PHASE-0-STOP-BLEED (2026-05-11)：owner_strategy gate 防 cross-strategy mass close。
+                // 22:08 May 10 watchdog restart 後，bb_reversion 透過 W7-2 Option A 把
+                // paper_state cross-strategy 倉位 sync 進 self.positions，下個 tick 進 Some(_)
+                // exit 分支，撞 [0.2, 0.8] 寬 exit zone → mass close grid/ma 開的倉
+                // (close fill 寫 strategy=opener owner + exit_reason=bb_mean_revert)。
+                // Phase 0 守門：ctx.position_state 有值且 owner != self → 清 stale state 跳過 exit。
+                // ctx.position_state = None 時保留舊行為（信 self.positions；test setup 不模擬 paper_state）。
+                // 完整 Option A-Lite refactor 移除 self.positions + W7-2 sync 後此 gate 變 redundant。
+                if let Some(pos) = ctx.position_state {
+                    if pos.owner_strategy != self.name() {
+                        self.positions.remove(ctx.symbol);
+                        return intents;
+                    }
+                }
                 // Exit: %B returns to [0.2, 0.8] = textbook mean-reversion target reached.
                 // Wider than exact 0.5 to handle crypto mean-overshoot.
                 // 出場：%B 回到 [0.2, 0.8] = 教科書均值回歸目標。比精確 0.5 更寬以應對加密貨幣超調。
