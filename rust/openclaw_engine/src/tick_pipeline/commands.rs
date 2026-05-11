@@ -503,15 +503,14 @@ impl TickPipeline {
         fill_latency_ms: Option<u64>,
         exchange_exec_id: Option<&str>,
     ) {
-        // EDGE-P3-1 R2: snapshot was_open + existing entry_context_id BEFORE apply_fill.
-        // Exchange-confirmed fills can be open/close/accumulate; thread id on close fills.
-        // EDGE-P3-1 R2：apply_fill 前先捕獲 was_open 與 existing entry_context_id。
+        // EDGE-P3-1 R2 + V083-FIX-1（2026-05-11）：apply_fill 前先捕獲 was_open
+        // 與 existing entry_context_id；close fill 走 helper 拿 well-formed id
+        // （真 id 或 synthetic `orphan_recovery_ctx:{symbol}:{ts_ms}`），避免
+        // V083 NOT NULL CHECK reject + batch buffer 卡死（W-D MAG-083 P1-RCA-1）。
+        // entry case（line ~587 `if is_close_fill_for_db` 分流）不關心本 ctx —
+        // 仍寫 `String::new()`，對齊 V083 設計（entry fill 的 entry_context_id 為 NULL）。
         let was_open = self.paper_state.get_position(symbol).is_none();
-        let existing_entry_ctx = self
-            .paper_state
-            .get_entry_context_id(symbol)
-            .unwrap_or("")
-            .to_string();
+        let existing_entry_ctx = self.resolve_close_entry_context_id(symbol, ts_ms);
         // EXIT-FEATURES-TABLE-1 Phase 1b GAP-1 (2026-04-19): capture pre-close
         // snapshot on the exchange-confirmed fill path. Before this, only
         // emit_close_fill / process_external_fill / ipc_close_symbol paper
@@ -737,18 +736,12 @@ impl TickPipeline {
         if let Some(ref tx) = self.order_dispatch_tx {
             self.exchange_seq = self.exchange_seq.wrapping_add(1);
             let prefix = if is_primary { "oc_risk" } else { "sh_risk" };
-            // FILL-CONTEXT-LINKAGE-1: carry the open position's entry id
-            // on the close dispatch so the close fill's entry_context_id
-            // (written via existing_entry_ctx in apply_confirmed_fill) stays
-            // bit-identical to what was stamped at entry time. Empty when
-            // paper_state has no entry id (legacy pre-stamp positions).
-            // FILL-CONTEXT-LINKAGE-1：平倉派發攜帶當前持倉 entry id，
-            // 平倉 fill 的 entry_context_id 與當初開倉 id 一致。
-            let entry_ctx = self
-                .paper_state
-                .get_entry_context_id(symbol)
-                .unwrap_or("")
-                .to_string();
+            // V083-FIX-1（2026-05-11）：close 路徑帶 entry_context_id 滿足
+            // V083 NOT NULL CHECK；paper_state 缺則 helper 回 synthetic
+            // `orphan_recovery_ctx:{symbol}:{event.ts_ms}`，避免 batch INSERT
+            // 整 chunk 卡死（W-D MAG-083 P1-RCA-1）。本函數無 local ts_ms，
+            // 用 `event.ts_ms`（PriceEvent 的 tick 時間戳）作為 synthetic key。
+            let entry_ctx = self.resolve_close_entry_context_id(symbol, event.ts_ms);
             // F2 CROSS-SYMBOL-PRICE-CONTAMINATION-1 (2026-04-26): resolve the
             // dispatched `price` from `symbol`'s own ladder, not from the outer
             // tick. NaN-aware: `latest_price` may carry NaN when an
@@ -940,13 +933,9 @@ impl TickPipeline {
                 if let Some(ref tx) = self.order_dispatch_tx {
                     self.exchange_seq = self.exchange_seq.wrapping_add(1);
                     let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
-                    // FILL-CONTEXT-LINKAGE-1: carry entry id on close dispatch.
-                    // FILL-CONTEXT-LINKAGE-1：平倉派發帶當前持倉 entry id。
-                    let entry_ctx = self
-                        .paper_state
-                        .get_entry_context_id(&symbol)
-                        .unwrap_or("")
-                        .to_string();
+                    // V083-FIX-1（2026-05-11）：close 路徑帶 entry_context_id；
+                    // paper_state 缺則 helper 回 synthetic（W-D MAG-083 P1-RCA-1）。
+                    let entry_ctx = self.resolve_close_entry_context_id(&symbol, ts_ms);
                     let dispatch_qty = self.close_dispatch_qty_for_full_close(qty, true);
                     let request = OrderDispatchRequest {
                         symbol: symbol.clone(),
@@ -1028,6 +1017,33 @@ impl TickPipeline {
     /// When paper_state has no position but valid hints are provided, a shadow reduce_only
     /// market order is dispatched directly — Rust handles the Bybit API call.
     ///
+    /// V083-FIX-1（2026-05-11）：close 路徑 entry_context_id 解析 helper，orphan
+    /// 安全。paper_state 有則用真 id；否則回 synthetic
+    /// `orphan_recovery_ctx:{symbol}:{ts_ms}` 滿足 V083 NOT NULL CHECK 並讓 cron
+    /// 後補映射回真 entry context_id。
+    ///
+    /// 背景：paper_state 的 entry_context_id map 是 in-memory，engine restart 後
+    /// 全部清空；orphan-adopted positions 也起始為空字串。原 `unwrap_or("")` →
+    /// V083 CHECK reject → batch INSERT 整 chunk 失敗 → buffer 卡死無限重試。
+    /// 詳見 W-D MAG-083 P1-RCA-1（commands.rs:1108 / 945 / 1183 / 512 / 749 五處
+    /// close-path call site 全走本 helper）。
+    ///
+    /// 為什麼用 `&self` 而非 `&mut self`：close path 通常已 `&mut self` 借了
+    /// paper_state，再對 paper_state 取 `&mut` 會 borrow conflict；本 helper 純讀
+    /// 即可滿足契約（只查 in-memory map，不寫回；synthetic id 由呼叫端攜帶下游）。
+    ///
+    /// Synthetic id pattern 必須嚴格 `orphan_recovery_ctx:{symbol}:{ts_ms}` —
+    /// P2 cron backfill (`edge_label_backfill.py`) 識別此 prefix → 用 (symbol,
+    /// ts_ms) 反查 entry fill → UPDATE 真 entry's context_id。E2 必跑 grep 確認
+    /// `get_entry_context_id.*unwrap_or` 在本檔 close path 0 hit。
+    #[inline]
+    pub(super) fn resolve_close_entry_context_id(&self, symbol: &str, ts_ms: u64) -> String {
+        match self.paper_state.get_entry_context_id(symbol) {
+            Some(id) if !id.is_empty() => id.to_string(),
+            _ => format!("orphan_recovery_ctx:{}:{}", symbol, ts_ms),
+        }
+    }
+
     /// IPC 觸發單倉平倉。
     /// hint_is_long / hint_qty：呼叫方提供的交易所側倉位資訊（孤兒倉位用）。
     /// paper_state 無倉但有有效 hints 時，直接發 shadow reduce_only 市價單，
@@ -1098,18 +1114,11 @@ impl TickPipeline {
             if let Some(ref tx) = self.order_dispatch_tx {
                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
                 let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
-                // FILL-CONTEXT-LINKAGE-1: carry entry id when paper_state
-                // knows the open position; orphan closes (hint-only path)
-                // pass empty, which fails back to exec-time recompute in
-                // apply_confirmed_fill — matches pre-fix behaviour for
-                // orphans that never had a signal-time id to begin with.
-                // FILL-CONTEXT-LINKAGE-1：paper_state 有倉時帶 entry id；
-                // 孤兒倉（只有 hint）傳空字串，退回 exec-time 重算（與修前行為一致）。
-                let entry_ctx = self
-                    .paper_state
-                    .get_entry_context_id(symbol)
-                    .unwrap_or("")
-                    .to_string();
+                // V083-FIX-1（2026-05-11）：close 路徑帶 entry_context_id 滿足
+                // V083 NOT NULL CHECK；paper_state 有倉用真 id，否則 helper 回
+                // synthetic `orphan_recovery_ctx:{symbol}:{ts_ms}`，避免 batch
+                // INSERT 整 chunk 卡死（W-D MAG-083 P1-RCA-1）。
+                let entry_ctx = self.resolve_close_entry_context_id(symbol, ts_ms);
                 let dispatch_qty = self.close_dispatch_qty_for_full_close(qty, true);
                 let request = OrderDispatchRequest {
                     symbol: symbol.to_string(),
@@ -1178,11 +1187,11 @@ impl TickPipeline {
             // EXIT-FEATURES-TABLE-1 E2 P1：關倉前捕獲快照/entry_context_id/價格/qty，
             // 僅補 exit feature 發送，不動 Fill 寫入路徑（維持本 patch 範圍）。
             let snap = self.paper_state.position_exit_snapshot(symbol);
-            let entry_ctx = self
-                .paper_state
-                .get_entry_context_id(symbol)
-                .unwrap_or("")
-                .to_string();
+            // V083-FIX-1（2026-05-11）：paper close 路徑也統一走 helper；雖然
+            // paper 不直接寫 trading.fills（fail-safe by-design），但 exit
+            // feature row 的 context_id 同樣需要 well-formed，避免下游 ML
+            // training JOIN miss（與 exchange path 對齊一致）。
+            let entry_ctx = self.resolve_close_entry_context_id(symbol, ts_ms);
             let (close_qty, close_price) = self
                 .paper_state
                 .get_position(symbol)
