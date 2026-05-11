@@ -103,14 +103,40 @@ fn test_long_oversold() {
 
 #[test]
 fn test_exit_mean() {
+    // P0 Option A-Lite — 改造後策略不持本地 state，第二 tick 必須注入
+    // ctx.position_state = Some(self-owned LONG) 才能進 exit 分支。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
+    // Tick 1：entry（無需 mock position）。
     s.on_tick(&ctx_bb(-0.1, 25.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    // Tick 2：mock paper_state 顯示 bb_reversion 已開 LONG → 走 exit zone。
+    let pp = make_paper_position_bbr_for_self_exit("BTC", true);
+    let mut ctx2 = ctx_bb(0.5, 50.0, 700_000);
+    ctx2.position_state = Some(&pp);
+    let i = s.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "bb_mean_revert"),
         other => panic!("expected StrategyAction::Close, got {:?}", other),
+    }
+}
+
+/// Helper for self-exit tests — owner = bb_reversion（自家持倉）。
+fn make_paper_position_bbr_for_self_exit(symbol: &str, is_long: bool) -> crate::paper_state::PaperPosition {
+    crate::paper_state::PaperPosition {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        entry_price: 50_000.0,
+        best_price: 50_000.0,
+        entry_fee: 0.0,
+        entry_ts_ms: 0,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: "bb_reversion".to_string(),
+        entry_notional: 50_000.0,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
     }
 }
 
@@ -192,18 +218,22 @@ fn test_exit_always_market() {
     // With StrategyAction::Close, exit is no longer an OrderIntent —
     // it's a Close action that the pipeline handles directly.
     // 使用 StrategyAction::Close 後，出場不再是 OrderIntent。
+    // P0 Option A-Lite — exit tick 必須注入 self-owned position 才走 exit。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     s.use_limit = true;
-    // Enter long with limit order / 限價入場做多
+    // Enter long with limit order / 限價入場做多。
     let i = s.on_tick(&ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     let entry_intent = match &i[0] {
         StrategyAction::Open(intent) => intent,
         other => panic!("expected StrategyAction::Open, got {:?}", other),
     };
     assert_eq!(entry_intent.order_type, "limit");
-    // Exit at mean reversion / 均值回歸出場
-    let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    // Exit at mean reversion — 注入 owner=bb_reversion 持倉。
+    let pp = make_paper_position_bbr_for_self_exit("BTC", true);
+    let mut ctx2 = ctx_bb(0.5, 50.0, 700_000);
+    ctx2.position_state = Some(&pp);
+    let i = s.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => {
@@ -387,7 +417,7 @@ fn test_funding_rate_boost_short_with_positive_funding() {
     };
 
     // Same signal without funding rate
-    s.positions.clear();
+    // P0 Option A-Lite — positions field 已移除；仍需 cooldown + persistence reset。
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_without = ctx_bb_with_funding(1.2, 75.0, 2000, None);
@@ -422,7 +452,7 @@ fn test_funding_rate_boost_long_with_negative_funding() {
         _ => panic!("expected Open"),
     };
 
-    s.positions.clear();
+    // P0 Option A-Lite — positions field 已移除；仍需 cooldown + persistence reset。
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_without = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
@@ -454,7 +484,7 @@ fn test_funding_rate_no_boost_when_misaligned() {
         _ => panic!("expected Open"),
     };
 
-    s.positions.clear();
+    // P0 Option A-Lite — positions field 已移除；仍需 cooldown + persistence reset。
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_none = ctx_bb_with_funding(-0.1, 25.0, 2000, None);
@@ -485,7 +515,7 @@ fn test_funding_rate_below_threshold_no_boost() {
         _ => panic!("expected Open"),
     };
 
-    s.positions.clear();
+    // P0 Option A-Lite — positions field 已移除；仍需 cooldown + persistence reset。
     s.cooldown = TrendCooldown::new(600_000);
     s.persistence = PersistenceTracker::new();
     let ctx_none = ctx_bb_with_funding(1.2, 75.0, 2000, None);
@@ -1074,23 +1104,33 @@ fn test_w_audit_6d_param_ranges_includes_require_ma_confirmation() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// W7-2 Option A regression — cross-strategy paper_state pre-entry check
-// W7-2 Option A 回歸 — entry path 起點查 ctx.position_state（同 ma_crossover pattern）
+// P0 Option A-Lite (2026-05-11) — paper_state SSoT acceptance tests
+// P0 Option A-Lite — paper_state 為 SSoT 的接收性測試
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// 背景：W7-4 systemic audit `2026-05-10--w7_4_systemic_position_sync_audit.md`
-// 將 bb_reversion 評為 HIGH 風險（同 ma_crossover 結構）。Sprint N+1 W7-2
-// IMPL 同 wave apply 同 pattern，提早結 P2-BB-REVERSION-POSITION-SYNC。
+// 背景：22:08 May 10 watchdog Auto restart 引爆 cross-strategy mass scalp。
+// bb_reversion 透過 W7-2 sync self.positions 把 paper_state cross-strategy
+// 倉位拉進本地 state，下個 tick 走 Some(_) exit 分支撞 [0.2, 0.8] 寬 exit
+// zone 大量平掉 grid/ma 的倉。SSoT 改造後：self.positions 完全消失，倉位
+// 唯一來源為 paper_state（透過 ctx.position_state 注入），策略以
+// owner_strategy gate 過濾自家持倉，cross-strategy 倉位自然 skip entry
+// 且不觸發 exit zone。從根源杜絕同 RCA scenario 再現。
 //
-// 3 case：
-// - test 1：position_state=Some + bb_reversion oversold signal → 0 actions
-// - test 2：position_state=None + valid signal → 1 entry intent（baseline）
-// - test 3：W7-2 skip 後 self.positions O(1) 同步 + burst 不累積
+// 留存 4 case：
+// - test 1：ctx.position_state owner=grid_trading → entry skip
+// - test 2：ctx.position_state = None → normal entry（baseline regression）
+// - test 3：grid 持倉 + bb 進 exit zone → 0 Close（核心 acceptance）
+// - test 4：bb_reversion 自家持倉 + bb 進 exit zone → 1 Close（self-exit 回歸）
 
 use crate::paper_state::PaperPosition;
 
-/// W7-2 helper：構建 PaperPosition 模擬 paper_state 真實持倉（同 ma_crossover helper 模式）。
-fn make_paper_position_bbr(symbol: &str, is_long: bool) -> PaperPosition {
+/// Helper：構建 PaperPosition 模擬 paper_state 真實持倉，可指定 owner_strategy。
+/// `owner` 留參數化以同時測試 grid_trading / bb_reversion / bybit_sync 三種 owner 場景。
+fn make_paper_position_bbr_with_owner(
+    symbol: &str,
+    is_long: bool,
+    owner: &str,
+) -> PaperPosition {
     PaperPosition {
         symbol: symbol.to_string(),
         is_long,
@@ -1101,21 +1141,21 @@ fn make_paper_position_bbr(symbol: &str, is_long: bool) -> PaperPosition {
         entry_ts_ms: 0,
         unrealized_pnl: 0.0,
         entry_context_id: String::new(),
-        owner_strategy: "grid_trading".to_string(), // 模擬 grid 已開倉場景
+        owner_strategy: owner.to_string(),
         entry_notional: 50_000.0,
         max_favorable_pnl_pct: 0.0,
         peak_reached_ts_ms: 0,
     }
 }
 
-/// W7-2 #1（bb_reversion）：ctx.position_state = Some(SHORT) + oversold long signal
-/// → 必 0 actions（skip entry）+ self.positions sync 為 false。
-/// 對應 W7-4 §3 bb_reversion HIGH 風險場景：grid 已開 SHORT，bb_reversion oversold 想 LONG。
+/// Test 1：ctx.position_state owner = grid_trading + bb_reversion oversold signal
+/// → 必 0 actions（owner_strategy gate skip entry）。
+/// 替代舊 W7-2 #1 test。SSoT 改造後策略不持本地 state，純靠 paper_state。
 #[test]
-fn test_bbr_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
+fn test_bbr_p0_skip_entry_when_cross_strategy_position_holds() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
-    let pp = make_paper_position_bbr("BTC", false); // grid 已開 SHORT
+    let pp = make_paper_position_bbr_with_owner("BTC", false, "grid_trading");
     let mut ctx = ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1); // oversold long signal
     ctx.position_state = Some(&pp);
 
@@ -1123,20 +1163,15 @@ fn test_bbr_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
 
     assert!(
         intents.is_empty(),
-        "ctx.position_state present 必 skip entry，但發了 {} intents",
+        "cross-strategy 持倉（owner=grid_trading）必 skip entry，但發了 {} intents",
         intents.len()
-    );
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(false),
-        "skip 後必 sync self.positions 為 paper_state 真實方向（SHORT）"
     );
 }
 
-/// W7-2 #2（bb_reversion）：ctx.position_state = None + valid signal → 1 entry intent。
-/// Baseline regression — 確認 W7-2 check 不誤殺正常 entry。
+/// Test 2：ctx.position_state = None + valid oversold signal → 1 entry intent。
+/// Baseline regression：owner gate 不誤殺正常 entry。
 #[test]
-fn test_bbr_on_tick_proceeds_entry_when_paper_state_is_none() {
+fn test_bbr_p0_proceeds_entry_when_no_position() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
     let mut ctx = ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1); // oversold long signal
@@ -1144,131 +1179,80 @@ fn test_bbr_on_tick_proceeds_entry_when_paper_state_is_none() {
 
     let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
-    assert_eq!(intents.len(), 1, "ctx.position_state=None 時 oversold 必發 long entry");
+    assert_eq!(intents.len(), 1, "無倉位時 oversold 必發 long entry");
     match &intents[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long, "expected LONG entry"),
         other => panic!("expected StrategyAction::Open, got {:?}", other),
     }
 }
 
-/// W7-2 #3（bb_reversion）：W7-2 skip 後 self.positions O(1) 同步 + size=1（不累積）。
-/// 對齊 ma_crossover #4 single-tick contract verification（避免 second tick 進 exit 分支
-/// 觸發策略特有的 reverse / mean-revert 邏輯混淆 W7-2 sync 契約）。
+/// Test 3（核心 acceptance）：grid 已持 LONG 倉，bb.percent_b = 0.5 在 exit zone
+/// [0.2, 0.8] 內 → bb_reversion 必發 0 Close action。
+/// 對應 RCA root scenario：22:08 watchdog restart 後 bb_reversion 不再 mass close
+/// grid 的倉。spec §3.2 #1 + §5.3 第 2 個 acceptance test。
 #[test]
-fn test_bbr_on_tick_w7_2_logs_skip_reason_via_state_sync() {
+fn bb_reversion_does_not_close_grid_position_on_pctb_zone() {
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
-    let pp = make_paper_position_bbr("BTC", false); // grid SHORT
-    let mut ctx = ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1); // oversold long signal
+    // grid_trading 已持 LONG BTC（owner ≠ bb_reversion）。
+    let pp = make_paper_position_bbr_with_owner("BTC", true, "grid_trading");
+    // bb.percent_b = 0.5 落在 bb_reversion 預設 exit zone [0.2, 0.8] 中央。
+    let mut ctx = ctx_bb(0.5, 50.0, 0);
     ctx.position_state = Some(&pp);
 
     let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
-    // (1) 必 0 intent — W7-2 skip path 觸發。
+    // 關鍵 invariant：cross-strategy 倉位即使在 bb_reversion exit zone 中也不觸發 Close。
+    let close_count = intents
+        .iter()
+        .filter(|a| matches!(a, StrategyAction::Close { .. }))
+        .count();
+    assert_eq!(
+        close_count, 0,
+        "bb_reversion 必不平 cross-strategy（grid_trading）持倉，\
+         即使 bb.percent_b 在 exit zone 內；發了 {} Close",
+        close_count
+    );
     assert!(
         intents.is_empty(),
-        "first cross-strategy desync tick 必 W7-2 skip，但發了 {} intents",
+        "cross-strategy 持倉應 skip 全路徑（entry + exit），但發了 {} actions",
         intents.len()
-    );
-    // (2) self.positions 必 sync 為 paper_state 真實方向（SHORT）。
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(false),
-        "W7-2 sync 後 self.positions 必反映 paper_state.is_long（SHORT）"
-    );
-    // (3) HashMap size = 1（O(1) insert，不洩漏多 entry）。
-    assert_eq!(
-        s.positions.len(),
-        1,
-        "W7-2 sync 必 O(1) insert，positions 應只有 1 entry"
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// W7-5 — bb_reversion on_fill + import_positions（與 ma_crossover 同 pattern）
-// ─────────────────────────────────────────────────────────────────────────────
+/// Test 4：ctx.position_state owner = bb_reversion + bb 進 exit zone → 必 1 Close。
+/// 確保 self-owned 持倉仍正常觸發 mean-reversion exit（baseline self-exit regression）。
+#[test]
+fn test_bbr_p0_self_owned_position_exits_on_pctb_zone() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position_bbr_with_owner("BTC", true, "bb_reversion");
+    let mut ctx = ctx_bb(0.5, 50.0, 0);
+    ctx.position_state = Some(&pp);
 
-use crate::intent_processor::OrderIntent;
-use crate::paper_state::PaperState;
+    let intents = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
-fn make_intent_bbr(symbol: &str, is_long: bool) -> OrderIntent {
-    OrderIntent {
-        symbol: symbol.to_string(),
-        is_long,
-        qty: 1.0,
-        confidence: 0.5,
-        strategy: "bb_reversion".to_string(),
-        order_type: "limit".to_string(),
-        limit_price: Some(50_000.0),
-        confluence_score: None,
-        persistence_elapsed_ms: None,
-        time_in_force: None,
-        maker_timeout_ms: None,
+    assert_eq!(intents.len(), 1, "self-owned 持倉在 exit zone 應觸發 Close");
+    match &intents[0] {
+        StrategyAction::Close { reason, .. } => {
+            assert_eq!(reason, "bb_mean_revert", "exit reason 必為 bb_mean_revert");
+        }
+        other => panic!("expected StrategyAction::Close, got {:?}", other),
     }
 }
 
-/// W7-5 (bb_reversion)：on_fill 後 self.positions 必 sync。
-#[test]
-fn test_bbr_on_fill_updates_self_positions() {
-    let mut s = BbReversion::new();
-    let intent = make_intent_bbr("BTC", true);
-    let fill = openclaw_core::execution::FillResult {
-        fill_price: 50_000.0,
-        fill_qty: 1.0,
-        fee: 0.5,
-        slippage_bps: 1.0,
-        is_taker: false,
-    };
-    s.on_fill(&intent, &fill);
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(true),
-        "bb_reversion on_fill (LONG) 必 sync self.positions[BTC] = Some(true)"
-    );
-}
-
-/// W7-5 (bb_reversion)：bootstrap import_positions 過濾 owner_strategy = bb_reversion only。
-#[test]
-fn test_bbr_bootstrap_imports_paper_state_positions() {
-    let mut paper = PaperState::new(10_000.0);
-    paper.apply_fill("BTC", true, 1.0, 50_000.0, 0.5, 1_000, "bb_reversion");
-    paper.apply_fill("ETH", false, 1.0, 3_000.0, 0.3, 1_001, "ma_crossover");
-
-    let mut s = BbReversion::new();
-    s.import_positions(&paper);
-
-    assert_eq!(
-        s.positions.get("BTC").copied(),
-        Some(true),
-        "bb_reversion 必 import 自己的倉位"
-    );
-    assert!(
-        s.positions.get("ETH").is_none(),
-        "bb_reversion 不可 import ma_crossover 的倉位"
-    );
-    assert_eq!(s.positions.len(), 1);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
-// W7-3 Option B regression — on_rejection duplicate_position 1-tick defense
-// W7-3 Option B 回歸 — on_rejection 對 duplicate_position 的 1-tick 防衛
+// P0 Option A-Lite — on_rejection cooldown rollback（化簡後）
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// 背景：W7-4 systemic audit `2026-05-10--w7_4_5_strategy_position_sync_systemic_audit.md`
-// §3 P1-1 揭露 bb_reversion 缺 W7-3 Option B 1-tick defense（W7-2 Option A 已
-// land entry path query，但 race window 殘留）。本批 propagation 與 ma_crossover
-// `strategy_impl.rs:55-91` 同 pattern；測試 mirror `ma_crossover/tests.rs:678-1006`
-// W7-3 4-case 結構：
-// - test 1：already SHORT → sync false
-// - test 2：already LONG → sync true
-// - test 3：unknown duplicate_position format → fallback to RC-04 rollback
-// - test 4：non-duplicate rejection → full RC-04 rollback (positions + cooldown)
-//
-// reason 字串契約見 rejection_coding.rs:147-152。
+// W7-3 Option B + RC-04 position rollback 已隨 self.positions 移除消失。
+// on_rejection 化簡為純 cooldown rollback：reject 時還原 last_trade_ms
+// 至 entry path 寫入前狀態，避免下次 entry 被舊冷卻誤鎖。
+// 對齊 ma_crossover/strategy_impl.rs 同 pattern。
 
-/// W7-3 helper：構建一筆模擬 OrderIntent 給 on_rejection 用（最小可行欄位）。
-/// 與 W7-5 區段的 make_intent_bbr 區隔（命名上 _w73 後綴），避免日後 helper drift。
-fn make_test_intent_w73(symbol: &str, is_long: bool) -> OrderIntent {
+use crate::intent_processor::OrderIntent;
+
+fn make_test_intent_p0(symbol: &str, is_long: bool) -> OrderIntent {
     OrderIntent {
         symbol: symbol.to_string(),
         is_long,
@@ -1284,99 +1268,39 @@ fn make_test_intent_w73(symbol: &str, is_long: bool) -> OrderIntent {
     }
 }
 
-/// W7-3 Option B #1：reason "duplicate_position ... already SHORT" 命中
-/// → self.positions[symbol] sync 為 false（SHORT），不被 RC-04 rollback。
-/// 對應 W7-4 §3 P1-1 race window：grid 已開 SHORT、bb_reversion oversold 想 LONG。
+/// on_rejection cooldown rollback：prev_last_trade_ms = 0（未見哨兵）→ cooldown clear。
 #[test]
-fn test_bbr_on_rejection_duplicate_position_already_short_syncs_position() {
+fn test_bbr_p0_on_rejection_unseen_clears_cooldown() {
     let mut s = BbReversion::new();
-    let intent = make_test_intent_w73("INXUSDT", true); // strategy 想開 LONG（被 reject）
-    let reason = "duplicate_position: INXUSDT already SHORT 1810";
-
-    // Pre-condition：模擬 entry path 已寫過 prev_position（None → 沒有舊倉位）
-    s.prev_position.insert("INXUSDT".to_string(), None);
-
-    s.on_rejection(&intent, reason);
-
-    // 期望：self.positions[INXUSDT] = Some(false)（SHORT），不是被 RC-04 rollback 到 None。
-    assert_eq!(
-        s.positions.get("INXUSDT").copied(),
-        Some(false),
-        "duplicate_position already SHORT 必須 sync self.positions 為 false（SHORT）"
-    );
-}
-
-/// W7-3 Option B #2：reason "duplicate_position ... already LONG" 命中
-/// → self.positions[symbol] sync 為 true（LONG）。
-#[test]
-fn test_bbr_on_rejection_duplicate_position_already_long_syncs_position() {
-    let mut s = BbReversion::new();
-    let intent = make_test_intent_w73("BTCUSDT", false); // strategy 想開 SHORT（被 reject）
-    let reason = "duplicate_position: BTCUSDT already LONG 0.5";
-
-    s.prev_position.insert("BTCUSDT".to_string(), None);
-
-    s.on_rejection(&intent, reason);
-
-    assert_eq!(
-        s.positions.get("BTCUSDT").copied(),
-        Some(true),
-        "duplicate_position already LONG 必須 sync self.positions 為 true（LONG）"
-    );
-}
-
-/// W7-3 Option B #3：reason 含 "duplicate_position" 但無 "already LONG/SHORT" 子串
-/// （字串契約 drift / future 改寫）→ fallback 走原 RC-04 rollback 路徑。
-/// pre_position = Some(true)（LONG）→ rollback 後 positions 必為 LONG。
-#[test]
-fn test_bbr_on_rejection_unknown_duplicate_format_fallback_to_rollback() {
-    let mut s = BbReversion::new();
-    let intent = make_test_intent_w73("ETHUSDT", true);
-    // 缺 "already LONG/SHORT" 子串 — 模擬 reason 字串契約破裂。
-    let reason = "duplicate_position: ETHUSDT something_unparseable";
-
-    // 模擬 entry path 寫過 prev_position = Some(true)（LONG），mutation 後 positions
-    // 也是 LONG（不變）；現在 reject → fallback 走 RC-04，positions 仍應為 LONG。
-    s.prev_position.insert("ETHUSDT".to_string(), Some(true));
-    s.positions.insert("ETHUSDT".to_string(), true);
-
-    s.on_rejection(&intent, reason);
-
-    // Fallback rollback 把 positions 還原到 prev_position（Some(true)）。
-    assert_eq!(
-        s.positions.get("ETHUSDT").copied(),
-        Some(true),
-        "unknown duplicate_position format 必須 fallback 走 RC-04 prev_position rollback"
-    );
-}
-
-/// W7-3 Option B #4：reason 不含 "duplicate_position"（其他類拒絕，例如 cost_gate / risk_gate）
-/// → 必走原 RC-04 完整 rollback（positions + cooldown 都還原）。
-/// pre-condition：prev_position = None（mutation 前未持倉）→ rollback 後 positions
-/// 必須被 remove（不留下偽倉位）。
-#[test]
-fn test_bbr_on_rejection_non_duplicate_position_runs_full_rollback() {
-    let mut s = BbReversion::new();
-    let intent = make_test_intent_w73("SOLUSDT", true);
-    let reason = "cost_gate(JS-demo): estimated=-12.50bps < 0 — blocked / 負估計阻擋";
-
-    // 模擬 entry path mutation：prev_position = None（變更前未持倉），
-    // mutation 後 positions = LONG，prev_last_trade_ms = 0（未交易過）。
-    s.prev_position.insert("SOLUSDT".to_string(), None);
-    s.positions.insert("SOLUSDT".to_string(), true);
+    let intent = make_test_intent_p0("SOLUSDT", true);
+    // 模擬 entry tick：snapshot 哨兵 0（變更前未見） + cooldown.record_signal。
     s.prev_last_trade_ms.insert("SOLUSDT".to_string(), 0);
     s.cooldown.record_signal("SOLUSDT", 100_000);
 
-    s.on_rejection(&intent, reason);
+    s.on_rejection(&intent, "cost_gate(JS-demo): negative edge");
 
-    // Rollback：positions 必須被 remove（還原到 None）。
-    assert!(
-        !s.positions.contains_key("SOLUSDT"),
-        "non-duplicate_position rejection 必須走 RC-04 把 positions 還原到 None"
-    );
-    // Cooldown 也應 clear（因 prev_last_trade_ms == 0 哨兵）。
     assert!(
         s.cooldown.last_ms("SOLUSDT").is_none(),
-        "non-duplicate_position rejection 必須走 RC-04 把 cooldown 還原到未交易狀態"
+        "prev_last_trade_ms == 0（未見）→ on_rejection 必 clear cooldown 還原未交易狀態"
+    );
+}
+
+/// on_rejection cooldown rollback：prev_last_trade_ms != 0 → cooldown 回寫原值。
+#[test]
+fn test_bbr_p0_on_rejection_seen_restores_prior_cooldown() {
+    let mut s = BbReversion::new();
+    let intent = make_test_intent_p0("ETHUSDT", true);
+    // 模擬：上次交易在 50_000；entry tick 又寫入 200_000；reject 後應還原為 50_000。
+    let prior_ts = 50_000_u64;
+    s.prev_last_trade_ms
+        .insert("ETHUSDT".to_string(), prior_ts);
+    s.cooldown.record_signal("ETHUSDT", 200_000);
+
+    s.on_rejection(&intent, "cost_gate(JS-demo): negative edge");
+
+    assert_eq!(
+        s.cooldown.last_ms("ETHUSDT"),
+        Some(prior_ts),
+        "prev_last_trade_ms != 0 → on_rejection 必還原 cooldown 為原 last_trade_ms"
     );
 }
