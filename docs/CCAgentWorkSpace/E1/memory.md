@@ -7884,3 +7884,30 @@ docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_paper_edge_repo
 4. **multi-session WIP 共存 attribution 必明標**：4 file modified 含 sibling IMPL-2/3/4 變動 + 本 IMPL-1；report 必明標哪些是 mine vs sibling，commit chain PM 才能正確拆分
 5. **既有 baseline > 800 LOC governance exception clause 適用**：btc_lead_lag.rs baseline 1253（> 800）+ 本 IMPL +518 = 1771（< 2000）；per §九 (b) 需開 P2 ticket 處理 pre-existing violation + (c) PM Sign-off 明標 accept 理由
 6. **WS subscription 已存在不需新增**：spec 字面 "orderbook subscription" 但 grep `full_subscription_list` 證實 `orderbook.50.BTCUSDT` 已在 default subscription；rate budget 0 req/s 自動達成
+
+---
+
+## 2026-05-11 W2-IMPL-4 SQL fix per E4 NEEDS_FIX verdict
+
+**Commit chain**: `98a9d35f`（3 BLOCKER）+ `163a5cba`（4th syntax bug，順手修）— Mac 本地，待 PM push（sandbox 阻直推 main）。
+
+**Report**: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_sql_fix.md`
+
+### 修復概要
+1. **B1 schema rename**：`trading.klines` → `market.klines`（1 runtime line + 4 doc lines）
+2. **B2 column rename**：`k.interval` → `k.timeframe`（1 runtime line + doc）
+3. **B3 placeholder hygiene**：注釋區 `%(window_days)s` / `%(cohort_symbols)s` 字面字串改純文字描述 + 反引號（psycopg2 不跳過 `--` 內 placeholder → caller dict 不缺鍵）
+4. **B4 syntax bug 順手修**：CTE chain 最後 `paper_fills_bucketed AS (...)` 結尾 `),` → `)` （PostgreSQL WITH 語法 last CTE 不可帶逗號；E4 §C.2 fixed-SQL 隱含已修但未列正式 BLOCKER）
+
+### 驗證結果
+- Linux PG empirical caller smoke: `SMOKE_OK rows=4046`（19 column 對齊 spec §7.2）
+- EXPLAIN ANALYZE: `panel.btc_lead_lag_panel` 走 `_hyper_75_486_chunk_btc_lead_lag_panel_snapshot_ts_ms_idx` Index Scan 命中 ✓
+- Execution Time: 1097ms（7d backfill scope，非 hot-path）
+
+### 教訓（補 E1 全局）
+1. **psycopg2 不跳過 `--` 注釋**：caller `cur.execute(sql, params_dict)` 時 psycopg2 用 simple regex 掃 `%(name)s`，**不**辨注釋；任何 SQL 注釋寫 `%(...)s` 字面字串 → caller dict 缺鍵 KeyError。Rule: 注釋區 placeholder 改用反引號 `` `name` `` 或純文字描述。
+2. **PG WITH chain 末尾不可帶逗號**：`WITH a AS (...), b AS (...) SELECT ...` ✓；`WITH a AS (...), b AS (...), SELECT ...` ✗ SyntaxError。E4 §C.2 fixed-SQL 隱含已修但未列入正式 BLOCKER → E4 report 盲區，後續 E4 在「fixed-SQL empirical 驗 N row」自承句必須同步列出所有必修項。
+3. **scope expansion vs fix completion 判斷**：4th bug 不修則 3 BLOCKER fix 零價值（caller path 仍阻斷）— 屬「同一 fix scope 的完成」非 expansion；修法是 1 char delete + 防退化注釋，遵守 §八「最小影響 + root cause」。
+4. **memory 巨型化**：E1 memory 930KB 超 Read 256KB limit → 後續 E1 接手用 `tail` / 分段 Read；建議 PA 評估 rotation。
+5. **E4 fixed-SQL self-claim 可能隱含未列 BLOCKER**：E4 report 「3 BLOCKER fix 後 → final row N」實驗描述若未顯式列出每個 BLOCKER fix 內容，E1 retrofit round 可能撞同 hidden bug；rule: E1 IMPL 前若 E4 fixed-SQL 驗證 implies 額外 fix，必 ad-hoc empirical 重驗（本次 caller smoke 先撞才發現）。
+6. **scp + ssh `python3` script 寫遠端 /tmp 不要嵌密碼**：sandbox 會偵測 password 寫文件而拒；改用 `PGPASSWORD=... python3 script.py` env var 注入 + `os.environ['PGPASSWORD']` 讀取。
