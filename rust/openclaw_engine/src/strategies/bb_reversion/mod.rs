@@ -23,7 +23,7 @@ mod tests;
 
 use std::collections::HashMap;
 
-use super::common::{compute_post_only_price, MakerPriceInputs, PerSymbolState, TrendCooldown};
+use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
@@ -33,10 +33,13 @@ use tracing::info;
 
 pub struct BbReversion {
     active: bool,
-    /// Per-symbol position tracking: symbol → is_long direction.
-    /// E1-P0-2: Migrated from `HashMap<String, bool>` to `PerSymbolState<bool>`.
-    /// 每幣種獨立持倉追蹤：symbol → 多空方向（E1-P0-2 包裝）。
-    pub(crate) positions: PerSymbolState<bool>,
+    // P0 Option A-Lite (2026-05-11) — `self.positions` 與 `prev_position` 已移除。
+    // 倉位狀態唯一來源為 `paper_state` (透過 `ctx.position_state` 注入)；
+    // 策略以 `owner_strategy == self.name()` 過濾自家持倉，cross-strategy 倉位
+    // 自然 skip entry 不觸發 exit zone，從根源杜絕 22:08 watchdog restart 後
+    // 的 cross-strategy mass scalp（W7-2 sync self.positions = root trigger，
+    // 移除後 race window 整體消失）。詳設計：
+    //   `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md`
     /// Per-symbol last trade timestamp for cooldown.
     /// E1-P0-2: Migrated from `HashMap<String, u64>` to `TrendCooldown`. The
     /// original check `last_ms > 0 && ts < last_ms + cooldown_ms` maps exactly
@@ -71,8 +74,8 @@ pub struct BbReversion {
     /// EDGE-P1-2: Confidence boost when extreme funding rate aligns with signal.
     /// EDGE-P1-2：資金費率極端且方向一致時的信心加成。
     pub(crate) funding_rate_boost: f64,
-    // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
-    prev_position: HashMap<String, Option<bool>>,
+    // P0 Option A-Lite — 保留供 on_rejection cooldown rollback；
+    // 與 self.positions/prev_position 解耦（cooldown 不依賴本地 position state）。
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
@@ -103,7 +106,8 @@ impl BbReversion {
     pub fn new() -> Self {
         Self {
             active: true,
-            positions: PerSymbolState::new(),
+            // P0 Option A-Lite — 不再持 `positions` / `prev_position`，
+            // 倉位 SSoT 為 paper_state。
             cooldown: TrendCooldown::new(600_000),
             cooldown_ms: 600_000,
             default_qty: 1e9,
@@ -118,7 +122,6 @@ impl BbReversion {
             hurst_regime_boost: 0.1,
             funding_rate_threshold: 0.0005,
             funding_rate_boost: 0.08,
-            prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
             confluence_config: ConfluenceConfig::reversion(),
@@ -340,82 +343,21 @@ impl Strategy for BbReversion {
         TAGS
     }
 
-    /// RC-04 + W7-3 Option B（P1-1 propagation, mirror ma_crossover/strategy_impl.rs:55-91）：
-    /// 拒絕時的 1-tick 防衛（cross-strategy desync hot loop 修復）。
+    /// P0 Option A-Lite (2026-05-11) — on_rejection 化簡為純 cooldown rollback。
     ///
-    /// 原 RC-04 行為：回滾該幣種的 position 與 last_trade_ms 至 mutation 前狀態。
+    /// 完全移除 W7-3 Option B duplicate_position sync（self.positions 已不存在）
+    /// + RC-04 prev_position rollback。倉位 sync 改由下個 tick 從 paper_state
+    /// 自然讀取（owner_strategy gate 過濾自家持倉），cross-strategy desync 從
+    /// 根源消失。
     ///
-    /// W7-3 Option B 補丁背景：W7-2 entry path Option A（`mod.rs:500-512`）
-    /// 已涵蓋 99% cross-strategy desync 場景。殘留 1-tick race window：
-    /// `ctx.position_state == None` 在 on_tick 起點，但另一策略 fill 在
-    /// on_tick→intent_emit 期間落地，router gate 1.5 仍會 reject。原 RC-04
-    /// rollback 把 self.positions 還原到 None → 下個 tick 又走 entry 分支
-    /// → 1 tick 後 W7-2 才 catch（ctx.position_state 已 Some）。Option B
-    /// 直接把 self.positions sync 為 paper_state 真實方向，下個 tick 即進
-    /// `Some(_)` exit 分支，**0 tick** 終結。
-    ///
-    /// reason 字串契約見 `rejection_coding.rs:147-152`：
-    /// 格式 `"duplicate_position: {symbol} already {LONG|SHORT} {qty}"`。
-    /// fallback：reason 含 `duplicate_position` 但無 `already LONG/SHORT` 子串
-    /// → 標 warn 並走原 RC-04 rollback。
-    ///
-    /// cooldown 不 rollback 也是設計：reject 觸發時 entry 已寫過 last_trade_ms，
-    /// 保留它讓下個 tick 必走 cooldown gate，多一層 hot loop 防護。
-    fn on_rejection(&mut self, intent: &OrderIntent, reason: &str) {
+    /// 保留 cooldown rollback：避免 reject 後 last_trade_ms 留在 entry tick
+    /// 寫入的不可達狀態；rollback 確保下次 entry 仍受 cooldown_ms gate 阻擋
+    /// hot loop（與 ma_crossover 同 pattern）。
+    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
-
-        // W7-3 Option B：duplicate_position 識別 + 立即 sync self.positions。
-        if reason.contains("duplicate_position") {
-            let existing_is_long = if reason.contains("already LONG") {
-                Some(true)
-            } else if reason.contains("already SHORT") {
-                Some(false)
-            } else {
-                None
-            };
-
-            if let Some(is_long) = existing_is_long {
-                // 同步 paper_state 真實方向；下個 tick 進 exit 分支不再撞 gate 1.5。
-                self.positions.insert(sym.clone(), is_long);
-                // **不** rollback cooldown：保留 entry tick 寫入的 last_trade_ms，
-                // 配合 cooldown gate 多擋一輪。
-                tracing::debug!(
-                    target: "strategy_position_sync",
-                    strategy = "bb_reversion",
-                    symbol = %sym,
-                    existing_is_long,
-                    "bb_reversion.on_rejection: duplicate_position 1-tick defense — \
-                     synced self.positions to paper_state direction (W7-3 Option B propagation)"
-                );
-                return;
-            }
-            // reason 含 duplicate_position 但無 already LONG/SHORT 子串 → 字串契約破裂，
-            // fallback 走原 RC-04 rollback 並標 warn 提醒 contract drift。
-            tracing::warn!(
-                target: "strategy_position_sync",
-                strategy = "bb_reversion",
-                symbol = %sym,
-                reason = %reason,
-                "bb_reversion.on_rejection: duplicate_position reason missing \
-                 'already LONG/SHORT' marker; falling back to RC-04 rollback"
-            );
-        }
-
-        // 原 RC-04 rollback：non-duplicate_position rejection 走此路徑。
-        if let Some(prev) = self.prev_position.get(sym) {
-            match prev {
-                Some(b) => {
-                    self.positions.insert(sym.clone(), *b);
-                }
-                None => {
-                    self.positions.remove(sym);
-                }
-            }
-        }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
             if ts == 0 {
-                // Sentinel 0 → unseen prior to mutation; clear to restore.
-                // 哨兵 0 → 變更前未見；清除以還原。
+                // 哨兵 0 → 變更前未見；清除以還原冷卻基線。
                 self.cooldown.clear(sym);
             } else {
                 self.cooldown.record_signal(sym, ts);
@@ -423,53 +365,29 @@ impl Strategy for BbReversion {
         }
     }
 
+    /// P0 Option A-Lite — 倉位被外部風控/止損平掉後，僅清 strategy-internal
+    /// 訊號狀態（persistence）。本地 positions 已不存在；paper_state 端 close
+    /// 後 ctx.position_state 自然為 None，策略下個 tick 即視為「未持倉」。
     fn on_external_close(&mut self, symbol: &str) {
-        self.positions.remove(symbol);
         self.persistence.clear(symbol);
     }
 
-    /// W7-5 part 1：真實 fill confirmed 後同步 self.positions 為 fill direction。
-    ///
-    /// callsite：`step_4_5_dispatch.rs:925`，於 paper_state.apply_fill 之前。
-    /// 入場路徑（`on_tick` 主流程）已 eager mutate `self.positions.insert(...)` 在
-    /// intent emit 時（`bb_reversion/mod.rs:553`），on_fill 此處作為 fill-confirm
-    /// safety net；與 ma_crossover 同 pattern。
+    /// P0 Option A-Lite — on_fill no-op。
+    /// paper_state.apply_fill 已寫入真實倉位，策略下個 tick 從
+    /// `ctx.position_state` 自然讀取，不需本地 sync。顯式 override 為 no-op
+    /// 是為了明確標示意圖（取代舊 W7-5 part 1 self.positions.insert sync）。
     fn on_fill(
         &mut self,
-        intent: &OrderIntent,
+        _intent: &OrderIntent,
         _fill: &openclaw_core::execution::FillResult,
     ) {
-        self.positions
-            .insert(intent.symbol.clone(), intent.is_long);
-        tracing::debug!(
-            target: "bb_reversion",
-            symbol = %intent.symbol,
-            is_long = intent.is_long,
-            "on_fill: synced self.positions to fill direction (W7-5 part 1)"
-        );
+        // 倉位由 paper_state 持有；本地不需同步。
     }
 
-    /// W7-5 part 2：bootstrap 階段從 paper_state 重建 self.positions。
-    ///
-    /// 過濾條件：`pos.owner_strategy == "bb_reversion"`。與 ma_crossover 同 pattern；
-    /// `PerSymbolState<bool>::insert(String, bool)` 與 `HashMap` 同簽名。
-    fn import_positions(&mut self, paper_state: &crate::paper_state::PaperState) {
-        let mut imported = 0_usize;
-        for pos in paper_state.positions() {
-            if pos.owner_strategy == self.name() {
-                self.positions.insert(pos.symbol.clone(), pos.is_long);
-                imported += 1;
-            }
-        }
-        if imported > 0 {
-            tracing::info!(
-                strategy = "bb_reversion",
-                imported,
-                "W7-5 import_positions: rebuilt self.positions from paper_state \
-                 / 從 paper_state 重建 self.positions"
-            );
-        }
-    }
+    // P0 Option A-Lite — import_positions 不再 override。
+    // 使用 Strategy trait default no-op（mod.rs:137-139）。
+    // bootstrap 後策略下個 tick 自然從 ctx.position_state 讀取 paper_state
+    // 已 seed 的倉位（owner_strategy gate 過濾自家持倉）。
 
     fn on_tick(
         &mut self,
@@ -536,40 +454,36 @@ impl Strategy for BbReversion {
             }
         };
 
-        // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
-        // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_position.insert(
-            ctx.symbol.to_string(),
-            self.positions.get(ctx.symbol).copied(),
-        );
+        // P0 Option A-Lite — cooldown rollback 快照（與 prev_position 解耦）。
+        // entry 路徑 mutate cooldown 前 snapshot；on_rejection 由此 rollback。
         self.prev_last_trade_ms
             .insert(ctx.symbol.to_string(), last_ms);
 
-        let mut intents = Vec::new();
-        match self.positions.get(ctx.symbol).copied() {
-            None => {
-                // ── W7-2 Option A 治本：cross-strategy paper_state 查詢（W7-4 §3 同 ma_crossover）──
-                // 與 ma_crossover/strategy_impl.rs 同 pattern。PA W7-4 systemic audit
-                // `2026-05-10--w7_4_systemic_position_sync_audit.md` 將 bb_reversion
-                // 評為 HIGH 風險（同 ma_crossover 結構：用 self.positions 不查
-                // paper_state + RC-04 rollback 到 None）。Sprint N+1 W7-2 IMPL 同 wave
-                // apply 同 pattern，提早結 P2-BB-REVERSION-POSITION-SYNC。
-                // ── W7-2 Option A: cross-strategy paper_state pre-entry check (mirrors ma_crossover) ──
-                if let Some(existing) = ctx.position_state {
-                    // paper_state 已持倉；同步 self.positions，下個 tick 走 exit 分支。
-                    self.positions
-                        .insert(ctx.symbol.to_string(), existing.is_long);
-                    tracing::debug!(
-                        target: "bb_reversion",
-                        symbol = %ctx.symbol,
-                        existing_is_long = existing.is_long,
-                        "skip entry: ctx.position_state present (cross-strategy paper_state holding) — \
-                         W7-2 Option A treats as cross-strategy desync, sync self.positions and skip"
-                    );
-                    return intents;
-                }
+        // P0 Option A-Lite — 倉位 SSoT = paper_state；策略以 owner_strategy
+        // 過濾自家持倉。cross-strategy 倉位自然 skip entry 且不觸發 exit zone，
+        // 從根源杜絕 22:08 watchdog restart 後 W7-2 sync 引發的 mass scalp。
+        let owns_self = ctx
+            .position_state
+            .filter(|p| p.owner_strategy == self.name())
+            .map(|p| p.is_long);
 
-                // G-SR-1 A1: Determine signal for persistence check.
+        let mut intents = Vec::new();
+        match owns_self {
+            None if ctx.position_state.is_some() => {
+                // cross-strategy 持倉中（owner 非本策略）→ skip entry，不觸發 exit zone。
+                // owner_strategy 過濾後直接跳出，杜絕 cross-strategy mass close。
+                tracing::debug!(
+                    target: "bb_reversion",
+                    symbol = %ctx.symbol,
+                    owner = %ctx.position_state.map(|p| p.owner_strategy.as_str()).unwrap_or(""),
+                    "skip entry: cross-strategy paper_state position holds"
+                );
+                return intents;
+            }
+            None => {
+                // Entry path — 無人持倉，按既有 reversion 訊號邏輯走。
+
+                // G-SR-1 A1：判斷 signal 給 persistence check。
                 let signal: Option<bool> = if bb.percent_b < 0.0 && rsi < self.rsi_oversold {
                     Some(true) // oversold → long
                 } else if bb.percent_b > 1.0 && rsi > self.rsi_overbought {
@@ -651,30 +565,16 @@ impl Strategy for BbReversion {
                     );
                     if let Some(intent) = maybe_intent {
                         intents.push(StrategyAction::Open(intent));
-                        self.positions.insert(ctx.symbol.to_string(), is_long);
+                        // P0 Option A-Lite — 不再 eager mutate self.positions，
+                        // 由 paper_state.apply_fill 在 router accept + fill 後寫入。
                         self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                     }
                 }
             }
             Some(_is_long) => {
-                // PHASE-0-STOP-BLEED (2026-05-11)：owner_strategy gate 防 cross-strategy mass close。
-                // 22:08 May 10 watchdog restart 後，bb_reversion 透過 W7-2 Option A 把
-                // paper_state cross-strategy 倉位 sync 進 self.positions，下個 tick 進 Some(_)
-                // exit 分支，撞 [0.2, 0.8] 寬 exit zone → mass close grid/ma 開的倉
-                // (close fill 寫 strategy=opener owner + exit_reason=bb_mean_revert)。
-                // Phase 0 守門：ctx.position_state 有值且 owner != self → 清 stale state 跳過 exit。
-                // ctx.position_state = None 時保留舊行為（信 self.positions；test setup 不模擬 paper_state）。
-                // 完整 Option A-Lite refactor 移除 self.positions + W7-2 sync 後此 gate 變 redundant。
-                if let Some(pos) = ctx.position_state {
-                    if pos.owner_strategy != self.name() {
-                        self.positions.remove(ctx.symbol);
-                        return intents;
-                    }
-                }
-                // Exit: %B returns to [0.2, 0.8] = textbook mean-reversion target reached.
-                // Wider than exact 0.5 to handle crypto mean-overshoot.
+                // Exit path — paper_state 確認本策略持倉；進 mean-reversion exit zone。
                 // 出場：%B 回到 [0.2, 0.8] = 教科書均值回歸目標。比精確 0.5 更寬以應對加密貨幣超調。
-                // QC-H3: exit %B range + exit_conf_base configurable (was [0.2, 0.8] / 0.55)
+                // QC-H3：exit %B range + exit_conf_base configurable（預設 [0.2, 0.8] / 0.55）。
                 if bb.percent_b >= self.exit_pctb_lower && bb.percent_b <= self.exit_pctb_upper {
                     let exit_conf = (self.exit_conf_base + hurst_boost).clamp(0.4, 0.8);
                     intents.push(StrategyAction::Close {
@@ -682,7 +582,8 @@ impl Strategy for BbReversion {
                         confidence: exit_conf,
                         reason: "bb_mean_revert".into(),
                     });
-                    self.positions.remove(ctx.symbol);
+                    // P0 Option A-Lite — 不再 mutate self.positions；
+                    // paper_state 端 close fill 後 ctx.position_state 自然變 None。
                     self.cooldown.record_signal(ctx.symbol, ctx.timestamp_ms);
                 }
             }
