@@ -734,7 +734,7 @@ impl LiveAuthWatcher {
                 let pricing_config = self
                     .risk_live_store
                     .as_ref()
-                    .and_then(|s| s.load().pricing.clone())
+                    .map(|s| s.load().pricing_config())
                     .unwrap_or_default();
                 let spawn_cfg = SpawnConfig {
                     kind: SlotKind::Live,

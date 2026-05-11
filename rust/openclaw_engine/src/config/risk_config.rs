@@ -57,6 +57,13 @@ pub use cost_edge_cfg::CostEdgeConfig;
 pub mod fast_track_cfg;
 pub use fast_track_cfg::FastTrackConfig;
 
+// LG architecture pass (2026-05-11): runtime-facing projection lives outside
+// the primary config schema so callers do not duplicate fallback semantics.
+// LG 架構修復：runtime-facing 投影拆出，避免 callers 重複理解 fallback。
+#[path = "risk_runtime_projection.rs"]
+mod risk_runtime_projection;
+pub use risk_runtime_projection::RiskRuntimeProjection;
+
 // ---------------------------------------------------------------------------
 // Top-level / 頂層
 // ---------------------------------------------------------------------------

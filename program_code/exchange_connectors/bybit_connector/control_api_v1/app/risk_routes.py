@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+from .h0_block_evidence import H0GateEvidence, h0_reason_breakdown
 from .ipc_client import EngineIPCClient
 from .ipc_state_reader import get_rust_reader
 from .risk_view_client import RiskViewClient
@@ -810,18 +811,20 @@ class H0BlockSummaryResponse(BaseModel):
     # Aggregated across engines
     # 跨 engine 聚合
     h0_block_events_total: int = Field(
-        0, description="所有 engine 累計 block 事件總數（since boot）"
+        0,
+        description="所有 engine 累計 block 事件總數 since engine boot。**0 = 健康狀態**（H0 active 但本期間 5 sub-check 未觸發 reject 條件），不是 H0 broken。",
     )
     h0_block_events_by_reason: dict[str, int] = Field(
-        default_factory=dict, description="所有 engine 按 reason 分類的累計 block 計數"
+        default_factory=dict,
+        description="按 5 sub-check 分類 block 計數：freshness=資料新鮮度 / health=系統健康 / eligibility=symbol 可交易 / envelope=風險上限 / cooldown=冷卻期",
     )
     fills_during_block: int = Field(
         0,
-        description="H0 hard-block 路徑 by-design 不會寫 fill；本字段恆為 0 作為設計不變式對賬",
+        description="**設計不變式（invariant）：恆為 0**。H0 hard-block 路徑早退（step_0_5_h0_gate.rs:43-94），by-design 不會寫 fill。非觀察量，是 invariant proof。窗口期實際 fills 計數見 engines[].fills_in_window。",
     )
     last_block_event_at_utc: str | None = Field(
         default=None,
-        description="最近一次 H0 check 的近似時間戳（取所有 engine snapshot 中最新者）；None 表示無可用資料",
+        description="**近似值**：取所有 engine pipeline_snapshot.written_at_ms 中最新者，非 per-event 時間戳。GateStats 是 cumulative counter 無 per-event ts；operator 看到此 timestamp 應理解為 'snapshot 寫入時間' 非 'block 發生時間'。None = engine 不可達。",
     )
     block_acceptance_pct: float = Field(
         100.0,
@@ -853,18 +856,7 @@ def _h0_reason_breakdown(gate_stats: dict[str, Any] | None) -> tuple[dict[str, i
 
     回傳 (by_reason, total_blocked, total_checks)；缺漏視為 0。
     """
-    if not isinstance(gate_stats, dict):
-        return ({}, 0, 0)
-    by_reason: dict[str, int] = {
-        "freshness": int(gate_stats.get("blocked_freshness", 0) or 0),
-        "health": int(gate_stats.get("blocked_health", 0) or 0),
-        "eligibility": int(gate_stats.get("blocked_eligibility", 0) or 0),
-        "envelope": int(gate_stats.get("blocked_envelope", 0) or 0),
-        "cooldown": int(gate_stats.get("blocked_cooldown", 0) or 0),
-    }
-    total_blocked = sum(by_reason.values())
-    total_checks = int(gate_stats.get("total_checks", 0) or 0)
-    return (by_reason, total_blocked, total_checks)
+    return h0_reason_breakdown(gate_stats)
 
 
 def _count_fills_in_window(engine_modes: list[str], window_hours: int) -> dict[str, int]:
@@ -932,32 +924,13 @@ def _per_engine_h0_summary(
         )
         return detail
 
-    # h0_gate_stats: Optional[GateStats] in Rust → dict or None in JSON
-    gate_stats = snap.get("h0_gate_stats")
-    by_reason, total_blocked, total_checks = _h0_reason_breakdown(gate_stats)
-    detail.h0_block_events_total = total_blocked
-    detail.h0_block_events_by_reason = by_reason
-    detail.h0_total_checks = total_checks
-    detail.h0_allow_rate_pct = (
-        ((total_checks - total_blocked) / total_checks * 100.0)
-        if total_checks > 0
-        else 0.0
-    )
-
-    # h0_shadow_mode 來自 RiskConfig runtime section（snap.risk_manager_config.runtime.h0_shadow_mode）
-    risk_cfg = snap.get("risk_manager_config") or {}
-    runtime = risk_cfg.get("runtime") or {}
-    h0_shadow = runtime.get("h0_shadow_mode")
-    detail.h0_shadow_mode = bool(h0_shadow) if h0_shadow is not None else None
-
-    # last_check_at_utc：近似值 = snapshot.written_at_ms
-    written_at_ms = snap.get("written_at_ms")
-    if isinstance(written_at_ms, (int, float)) and written_at_ms > 0:
-        from datetime import datetime, timezone
-        detail.last_check_at_utc = (
-            datetime.fromtimestamp(written_at_ms / 1000.0, tz=timezone.utc)
-            .isoformat(timespec="seconds")
-        )
+    evidence = H0GateEvidence.from_snapshot(snap)
+    detail.h0_block_events_total = evidence.total_blocked
+    detail.h0_block_events_by_reason = evidence.by_reason
+    detail.h0_total_checks = evidence.total_checks
+    detail.h0_allow_rate_pct = evidence.allow_rate_pct
+    detail.h0_shadow_mode = evidence.h0_shadow_mode
+    detail.last_check_at_utc = evidence.last_check_at_utc
 
     # Sub-verdict 規則：
     # FAIL — hard-block 未啟用但 cumulative block events > 0（shadow 期間 GateStats 累積；
@@ -977,7 +950,7 @@ def _per_engine_h0_summary(
         # hard-block 啟用：fail-closed 設計下 block 期間無 fill 是不變式
         detail.health_status = "PASS"
 
-    if total_checks == 0:
+    if evidence.total_checks == 0:
         detail.notes.append(
             f"engine={engine} H0 total_checks=0；engine 可能剛重啟或無 tick 流量"
         )

@@ -21,6 +21,7 @@
 //! `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md`。
 
 use super::*;
+use crate::strategies::test_harness::StrategyHarness;
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
 use openclaw_core::indicators::{AdxResult, AtrResult, HurstResult, IndicatorSnapshot, KamaResult};
@@ -30,75 +31,45 @@ use openclaw_core::indicators::{AdxResult, AtrResult, HurstResult, IndicatorSnap
 /// Helper: build a TickContext with given indicator values.
 /// 輔助函數：用給定指標值構建 TickContext。
 fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
-    let ind = Box::leak(Box::new(IndicatorSnapshot {
-        sma_20: Some(sma),
-        kama: Some(KamaResult {
-            kama,
-            efficiency_ratio: 0.5,
-        }),
-        adx: Some(AdxResult {
-            adx,
-            plus_di: 25.0,
-            minus_di: 15.0,
-        }),
-        ..Default::default()
-    }));
-    TickContext {
-        symbol: "BTC",
-        price: 50000.0,
-        timestamp_ms: ts,
-        indicators: Some(ind),
-        indicators_5m: None,
-        signals: &[],
-        h0_allowed: true,
-        funding_rate: None,
-        index_price: None,
-        open_interest: None,
-        best_bid: None,
-        best_ask: None,
-        tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-        position_state: None,
-        is_pinned: true,
-    }
+    StrategyHarness::new("BTC")
+        .timestamp_ms(ts)
+        .indicators(IndicatorSnapshot {
+            sma_20: Some(sma),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: 0.5,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            ..Default::default()
+        })
+        .build()
 }
 
 fn ctx_with_atr(sma: f64, kama: f64, adx: f64, ts: u64, atr: f64) -> TickContext<'static> {
-    let ind = Box::leak(Box::new(IndicatorSnapshot {
-        sma_20: Some(sma),
-        kama: Some(KamaResult {
-            kama,
-            efficiency_ratio: 0.5,
-        }),
-        adx: Some(AdxResult {
-            adx,
-            plus_di: 25.0,
-            minus_di: 15.0,
-        }),
-        atr_14: Some(AtrResult {
-            atr,
-            atr_percent: atr / 50000.0 * 100.0,
-        }),
-        ..Default::default()
-    }));
-    TickContext {
-        symbol: "BTC",
-        price: 50000.0,
-        timestamp_ms: ts,
-        indicators: Some(ind),
-        indicators_5m: None,
-        signals: &[],
-        h0_allowed: true,
-        funding_rate: None,
-        index_price: None,
-        open_interest: None,
-        best_bid: None,
-        best_ask: None,
-        tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-        position_state: None,
-        is_pinned: true,
-    }
+    StrategyHarness::new("BTC")
+        .timestamp_ms(ts)
+        .indicators(IndicatorSnapshot {
+            sma_20: Some(sma),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: 0.5,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            atr_14: Some(AtrResult {
+                atr,
+                atr_percent: atr / 50000.0 * 100.0,
+            }),
+            ..Default::default()
+        })
+        .build()
 }
 
 /// Helper: build a TickContext with Hurst regime data.
@@ -111,78 +82,48 @@ fn ctx_with_hurst(
     regime: &str,
     hurst_val: f64,
 ) -> TickContext<'static> {
-    let ind = Box::leak(Box::new(IndicatorSnapshot {
-        sma_20: Some(sma),
-        kama: Some(KamaResult {
-            kama,
-            efficiency_ratio: 0.5,
-        }),
-        adx: Some(AdxResult {
-            adx,
-            plus_di: 25.0,
-            minus_di: 15.0,
-        }),
-        hurst: Some(HurstResult {
-            hurst: hurst_val,
-            regime: regime.to_string(),
-        }),
-        ..Default::default()
-    }));
-    TickContext {
-        symbol: "BTC",
-        price: 50000.0,
-        timestamp_ms: ts,
-        indicators: Some(ind),
-        indicators_5m: None,
-        signals: &[],
-        h0_allowed: true,
-        funding_rate: None,
-        index_price: None,
-        open_interest: None,
-        best_bid: None,
-        best_ask: None,
-        tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-        position_state: None,
-        is_pinned: true,
-    }
+    StrategyHarness::new("BTC")
+        .timestamp_ms(ts)
+        .indicators(IndicatorSnapshot {
+            sma_20: Some(sma),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: 0.5,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            hurst: Some(HurstResult {
+                hurst: hurst_val,
+                regime: regime.to_string(),
+            }),
+            ..Default::default()
+        })
+        .build()
 }
 
 /// Helper: build a TickContext with sma_50 for higher-TF testing.
 /// 輔助函數：用 sma_50 構建 TickContext 以測試較高時間框架。
 fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> TickContext<'static> {
-    let ind = Box::leak(Box::new(IndicatorSnapshot {
-        sma_20: Some(sma_20),
-        sma_50: Some(sma_50),
-        kama: Some(KamaResult {
-            kama,
-            efficiency_ratio: 0.5,
-        }),
-        adx: Some(AdxResult {
-            adx,
-            plus_di: 25.0,
-            minus_di: 15.0,
-        }),
-        ..Default::default()
-    }));
-    TickContext {
-        symbol: "BTC",
-        price: 50000.0,
-        timestamp_ms: ts,
-        indicators: Some(ind),
-        indicators_5m: None,
-        signals: &[],
-        h0_allowed: true,
-        funding_rate: None,
-        index_price: None,
-        open_interest: None,
-        best_bid: None,
-        best_ask: None,
-        tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-        position_state: None,
-        is_pinned: true,
-    }
+    StrategyHarness::new("BTC")
+        .timestamp_ms(ts)
+        .indicators(IndicatorSnapshot {
+            sma_20: Some(sma_20),
+            sma_50: Some(sma_50),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: 0.5,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            ..Default::default()
+        })
+        .build()
 }
 
 // ═══════════════════════════════════════════════════════════════════════

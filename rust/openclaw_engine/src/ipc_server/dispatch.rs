@@ -35,6 +35,7 @@
 use super::engine_routing::{extract_engine_tx, EngineCommandChannels};
 use super::handlers::*;
 use super::handlers_config::{handle_get_config, handle_patch_config};
+use super::method_registry::{method_spec, IpcSlotRequirement};
 use super::protocol::{
     JsonRpcRequest, JsonRpcResponse, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND,
 };
@@ -454,6 +455,10 @@ pub(crate) async fn dispatch_request(
         // slot=None 時回 structured uninitialized payload；params 缺 symbol
         // 時回 invalid_params payload — 對齊 cost_edge_advisor / h_state pattern。
         "query_fee_source" => {
+            debug_assert_eq!(
+                method_spec(method).map(|spec| spec.slot),
+                Some(IpcSlotRequirement::AccountManager)
+            );
             handle_query_fee_source(id, &req.params, account_manager_slot).await
         }
         _ => JsonRpcResponse::error(

@@ -733,39 +733,9 @@ pub(crate) async fn build_exchange_pipeline(
     // 留 systemd journalctl / engine.log 證據；下游 healthcheck `[45]`
     // pricing_binding 接力做 runtime drift detection。
     if kind == PipelineKind::Live {
-        use openclaw_engine::live_spawn_assert::{
-            assert_pricing_binding_for_live_spawn, wait_for_first_refresh_or_timeout,
-            write_audit_log, write_wait_timeout_audit, DEFAULT_FIRST_REFRESH_TIMEOUT,
-        };
+        use openclaw_engine::live_spawn_assert::enforce_live_spawn_pricing_readiness;
 
-        // Step 1：wait_for_first_refresh_or_timeout（30s）
-        let wait_start = std::time::Instant::now();
-        if let Err(_e) = wait_for_first_refresh_or_timeout(&acct, DEFAULT_FIRST_REFRESH_TIMEOUT)
-            .await
-        {
-            let elapsed = wait_start.elapsed().as_secs();
-            write_wait_timeout_audit(env, elapsed);
-            warn!(
-                kind = %kind,
-                env = ?env,
-                elapsed_secs = elapsed,
-                "LIVE PIPELINE REFUSED — fee refresh did not complete within 30s. \
-                 Operator: check network / Bybit endpoint / API key validity. \
-                 / Live 管線拒絕啟動 — fee 刷新 30 秒內未成功。請檢查網路/端點/憑證。"
-            );
-            return None;
-        }
-
-        // Step 2：assert_pricing_binding_for_live_spawn（count + per-symbol）
-        let assert_result =
-            assert_pricing_binding_for_live_spawn(env, &acct, &pricing_config);
-        write_audit_log(
-            env,
-            &assert_result,
-            acct.fee_rate_count(),
-            acct.last_fee_refresh_ms(),
-        );
-        if let Err(e) = assert_result {
+        if let Err(e) = enforce_live_spawn_pricing_readiness(env, &acct, &pricing_config).await {
             warn!(
                 kind = %kind,
                 env = ?env,
