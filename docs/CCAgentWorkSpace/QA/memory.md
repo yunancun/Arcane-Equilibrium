@@ -310,3 +310,42 @@ Round 5 曾預警 round 6 可能再被「/finalize 拒接 subprocess_pid IS NULL
 | 報告 | 日期 | 關鍵發現 |
 | 2026-05-04 REF-20 Sprint A R3 round 6 FINAL | 2026-05-05 02:05 | **PASS — Sprint A 達成**；6 layer blocker chain 100% 清；4 表 acceptance 4/4 GREEN（first-ever simulated_fills + report_artifacts）；Wave 9 safety GREEN（0 trading.fills leak / 0 critical audit / FK 4/4 valid）；Layer 7 預警 NOT triggered；唯一邊角警告 strategy_name_missing manifest_jsonb (non-BLOCKER, Sprint B 處理); push back PM 進行 close commit + Sprint B 派工 |
 
+
+## 2026-05-11 W-C MAG-082 Stage 2 RE-AUDIT — PASS
+
+**Trigger**: 2026-05-10 1st audit CONDITIONAL_PASS（3 caveat）→ operator Option B 修 → PA/E1×3/E2×2/E5/E4 全 APPROVE → deploy ccf7a4bc → re-audit
+**Deploy_ts (UTC)**: 2026-05-11T00:01:55+00:00
+**Verdict**: **PASS** — W-C → WINDOW_PASS operator-ready；W-D MAG-083 可派
+**Report**: `srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-11--w_c_reaudit_post_fix.md`
+
+### Caveat 對齊（1st audit → re-audit）
+- **Caveat 1** decision_state_changes 0 rows → **CLOSED**：post-deploy 82 rows / 24 last 5min / ~4.8 row/min
+- **Caveat 2** ExecutionReport stub-only → **CLOSED**：6/6 entry-fill 100% real-fill ER propagation；UTC strict cutoff adversarial SQL missed_n=0；payload 真實 filled_qty/maker/avg_price/fees/fee_bps
+- **Caveat 3** lease_id='bypass' → **DEFERRED**：by-design per 2026-05-08 auth，不在 fix scope，W-D reviewer brief 處理
+
+### 關鍵教訓
+
+1. **時區陷阱**：對抗 SQL 用 `+02::timestamptz` 等同 CEST = UTC-2，會把 deploy 前 1.5h fills 算進 post-deploy → missed_n 假性 18。**UTC strict `+00:00`** cutoff 後 entry=6 missed=0 100% PASS。Operator 給 deploy_ts 寫 UTC，QA SQL 必對齊 UTC。**未來 SOP**：任何 deploy-cutoff SQL 必用 `+00:00` 或 `'<ts>'::timestamptz at time zone 'utc'`，禁混 CEST/UTC。
+
+2. **trading.fills 含 entry + risk_exit**：原 PA §4.3 對抗 SQL 沒區分 `oc_*` (entry) vs `oc_risk_*` (risk_exit)。risk_exit 走 StopManager 不走 spine emit_fill_completion_lineage（by-design），分子分母混算會誤判 fix 失敗。SQL 必加 `order_id LIKE 'oc_%' AND order_id NOT LIKE 'oc_risk_%'`。
+
+3. **[55] WARN ≠ FAIL**：分母 chains_with_real_fill_report=6/210=2.86% 是 transition 期，分母含 204 pre-deploy stub-only chains。24h steady-state rolling 後分母換新 chains 自動 ≥ 50% gate。WARN 接受為 transition characteristic，不是 fix failure。
+
+4. **短窗 vs 24h 重等**：PA §4.4 論證 5 點全接受。caveat 修正是 deterministic wiring fix 而不是 statistical sampling fix；30min empirical 已證 missed_n=0 + cross-language byte-equal contract，比預期更快收斂；歷史 51h evidence 不消失。**短窗有效**節省 23-23.5h critical path。
+
+5. **Cross-language byte-equal contract empirical 驗證**：Rust `DecisionEdgeType::ExecutedBy → "executed_by"` + `details = {"fill_completion": true}` 字面對齊 Python SQL `edge_type='executed_by' AND (details->>'fill_completion')::boolean IS TRUE`。實機驗證 6 命中 = 6 real ER = 6 entry fills 1:1:1。設計時若 enum→string serialization / JSON key snake_case 對不齊，整個 healthcheck 會 silent zero — empirical join 是唯一保護。
+
+6. **W1 wave pre-existing breakage 不阻本 audit**：helper_scripts/db full pytest collection ImportError `check_panel_freshness` 是 W1 sub-task 3 wave WIP，E1/E2/E5/E4 全已 flag；isolation import workaround 合理；W-C unit test 14/14 PASS 不掩蓋此 breakage。**規律**：sibling wave pre-existing breakage 接受作為 LOW caveat 但不阻 deploy；E1/E2/E4 必 cross-flag。
+
+### 為何能短窗收斂這麼快
+- spine writer 2s flush interval；try_send 非阻塞
+- 5 build transitions per chain × 7 chains/min × 2 mode = ~70 transitions/min build path
+- 2 change transitions per fill × ~2 fills/min ~= 4 transitions/min change path
+- emit_fill_completion_lineage 在 loop_exchange.rs fully_filled 區塊；24h ~86 fill 但 deploy+10min 已有 6 fill empirically 驗 propagation
+- Cross-language byte-equal contract 是 deterministic，第一個 entry-fill 即可驗
+
+### 治理 SOP 加固
+
+- **deploy-cutoff SQL UTC mandatory**：任何 post-deploy verification SQL 用 `+00:00` 或 `at time zone 'utc'`，禁混 local timezone（CEST/EST/etc）。納入 PA spec template + QA audit template default。
+- **entry vs risk_exit 分流必要**：trading.fills cross-join 必區分 `oc_*` 與 `oc_risk_*`；spine lineage 是 entry-path-only，stopmanager 走獨立 path（fix scope 之外）。
+- **[55] WARN vs FAIL 細分**：bad_report_value_quality=0 + state_changes ≥ N 是 fix correctness gate；chains_with_real_fill_report ratio 是 calibration / transition gate。前者強 fail-closed，後者接受 WARN transition。
