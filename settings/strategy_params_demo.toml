@@ -19,7 +19,7 @@ use_maker_entry = true
 maker_price_offset_bps = 1.0
 maker_limit_timeout_ms = 45000
 maker_price_buffer_ticks = 0
-min_trend_snr = 0.75
+min_trend_snr = 0.60   # P2-A2 (2026-05-11) QC approved demo-only：解 ML training 200-trade 閾值；live + paper 保留 0.75
 
 [bb_reversion]
 active = true
@@ -27,6 +27,7 @@ cooldown_ms = 600000
 use_limit = false
 limit_offset_bps = 10.0
 conf_scale = 1.0
+min_persistence_ms = 120000   # P2-A1 (2026-05-11) QC approved demo-only：Rust 默認 180s 對 dormant 策略過嚴；demo 縮 120s 給 minimum statistical sample，live + paper 維持 180s 默認
 
 [bb_breakout]
 # G2-06 (2026-04-26): permanently disabled — 7d 0 fills + 1m bandwidth mis-scale
