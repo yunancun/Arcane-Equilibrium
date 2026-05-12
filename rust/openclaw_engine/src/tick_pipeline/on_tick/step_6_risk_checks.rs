@@ -484,11 +484,10 @@ impl TickPipeline {
                         // 的那個交易對的價，會把這一個價蓋到 halt 時每個其他交易對的平倉
                         // fill，正是 ETHUSDT 觸發 halt 時 learning.decision_features 出現
                         // `-17M bps` realized edge 列的根因。
-                        let ectx = self
-                            .paper_state
-                            .get_entry_context_id(sym)
-                            .unwrap_or("")
-                            .to_string();
+                        // V083-FIX-3（2026-05-12）：halt_session 也是 close path，
+                        // 必須走 synthetic fallback；否則重啟後 orphan position
+                        // 會寫空 entry_context_id，觸發 V083 CHECK 並卡住 fill writer。
+                        let ectx = self.resolve_close_entry_context_id(sym, event.ts_ms);
                         // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
                         // EXIT-FEATURES-TABLE-1：先取快照再平倉。
                         let snap = self.paper_state.position_exit_snapshot(sym);

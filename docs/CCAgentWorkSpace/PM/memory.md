@@ -2153,3 +2153,11 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Reduced auto-refresh flicker by preserving populated panels during transient failures and avoiding same-HTML rewrites in `ocSetHtml`.
 - Verification: static pytest 52 passed, targeted Python pytest 14 passed, JS parse, `git diff --check`.
 - Boundary: source/static only; no restart, no rebuild, no DB migration, no live auth mutation.
+
+## 2026-05-12 V083 halt_session entry_context_id source/test fix
+
+- 接手 TODO 時按三連查到 Linux runtime drift：`engine.log` 持續每 2s 報 `chk_fills_close_has_entry_context_id_v083`，樣本為 `risk_close:halt_session` close fill 缺 `entry_context_id`；watchdog 近期有多次 stale / auto-restart。
+- Root cause: 5/11 V083 producer-side helper 已覆蓋 commands.rs close paths，但 `step_6_risk_checks.rs` HaltSession loop 還在用 `paper_state.get_entry_context_id(sym).unwrap_or("")`，重啟/orphan position 下仍會寫空值。
+- Source fix: halt loop 改走 `resolve_close_entry_context_id(sym, event.ts_ms)`；`per_symbol_price_pnl` 回歸新增 close fill `entry_context_id` 非空斷言。
+- Verification: `cargo test -q -p openclaw_engine test_halt_session_uses_per_symbol_price_not_triggering_tick` PASS；tick_pipeline 舊 `get_entry_context_id(...).unwrap_or("")` grep 0 hit；`git diff --check` PASS。
+- Boundary: source/test only；未 rebuild / restart / renew live auth。Runtime 仍需 operator-approved deploy/restart 後驗 engine.log 無 V083 retry；LiveDemo auth_missing 是獨立 operator renew 事項。
