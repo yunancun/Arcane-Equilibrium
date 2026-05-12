@@ -1,7 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-10（Live/Demo GUI 今日 PnL 口徑修正）
+> 最後更新：2026-05-12（V083 halt_session entry_context_id source/test fix）
+
+### V083 halt_session entry_context_id source/test fix — 2026-05-12
+
+**Scope**: 修 `RiskAction::HaltSession` close loop 仍用空字串 fallback 的漏網路徑，避免 close fill 撞 `chk_fills_close_has_entry_context_id_v083` 後讓 `trading_writer` buffer 每 2s 重試。
+
+**主要 land**:
+- `step_6_risk_checks.rs` halt-session close path 改走既有 `resolve_close_entry_context_id()`，與 commands.rs 的 orphan-safe synthetic fallback 對齊。
+- `per_symbol_price_pnl` halt-session 回歸新增 `entry_context_id` 非空斷言，允許真 `ctx-*` 或 synthetic `orphan_recovery_ctx:*`。
+
+**Runtime evidence used**: 2026-05-12 `trade-core` read-only log 顯示 `risk_close:halt_session` close fill 缺 `entry_context_id`，`trading.fills` batch 每 2s 撞 `chk_fills_close_has_entry_context_id_v083`；watchdog 同時記錄多次 snapshot stale / auto-restart。LiveDemo pipeline 另因 `authorization.json` missing 未啟動，需 operator renew，未在本修復中變更。
+
+**Verification**: `cargo test -q -p openclaw_engine test_halt_session_uses_per_symbol_price_not_triggering_tick` PASS；`rg 'get_entry_context_id\\([^)]*\\).*unwrap_or\\(\"\"\\)' rust/openclaw_engine/src/tick_pipeline` 0 hit；`git diff --check` PASS。No rebuild, no restart, no live auth mutation。
 
 ### Live/Demo GUI 今日 PnL 口徑修正 — 2026-05-10
 
