@@ -688,6 +688,12 @@ window.addEventListener('message', function(ev) {
       riskTab: ev.data.riskTab || 'monitor',
       scrollTo: ev.data.scrollTo || 'top'
     });
+  } else if (tabId === 'governance') {
+    postToTabFrame('governance', {
+      type: 'openclaw-governance-scroll',
+      section: ev.data.governanceSection || ev.data.section || ev.data.scrollTo || 'top',
+      scrollTo: ev.data.scrollTo || ev.data.governanceSection || ev.data.section || 'top'
+    });
   }
 });
 

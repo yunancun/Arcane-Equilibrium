@@ -44,6 +44,7 @@ _TAB_DEVELOPMENT_HTML = _STATIC_DIR / "tab-development.html"
 _TAB_EDGE_GATES_HTML = _STATIC_DIR / "tab-edge-gates.html"
 _TAB_DEMO_HTML = _STATIC_DIR / "tab-demo.html"
 _TAB_LIVE_HTML = _STATIC_DIR / "tab-live.html"
+_TAB_GOVERNANCE_HTML = _STATIC_DIR / "tab-governance.html"
 _TAB_STRATEGY_HTML = _STATIC_DIR / "tab-strategy.html"
 _TAB_RISK_HTML = _STATIC_DIR / "tab-risk.html"
 _TAB_SETTINGS_HTML = _STATIC_DIR / "tab-settings.html"
@@ -121,6 +122,15 @@ def tab_live_html() -> str:
     """Read tab-live.html once per test module / 每模組讀一次。"""
     assert _TAB_LIVE_HTML.exists(), f"tab-live.html not found at {_TAB_LIVE_HTML}"
     return _TAB_LIVE_HTML.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def tab_governance_html() -> str:
+    """Read tab-governance.html once per test module / 每模組讀一次。"""
+    assert _TAB_GOVERNANCE_HTML.exists(), (
+        f"tab-governance.html not found at {_TAB_GOVERNANCE_HTML}"
+    )
+    return _TAB_GOVERNANCE_HTML.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -312,6 +322,20 @@ def test_demo_and_live_tabs_have_risk_shortcuts(
     assert "applyPaperRiskAvailability" in risk_tab_js
     assert "/api/v1/settings/paper-engine" in risk_tab_js
     assert "openclaw-risk-select" in risk_tab_js
+
+
+def test_live_locked_view_routes_to_governance_live_auth(
+    console_html: str,
+    tab_live_html: str,
+    tab_governance_html: str,
+) -> None:
+    """Locked Live tab CTA must open Governance Hub → Live Auth, not Risk."""
+    assert "openLiveAuth" in tab_live_html
+    assert "governanceSection: 'live-auth-card'" in tab_live_html
+    assert "跳转 Live Auth / Open Live Auth" in tab_live_html
+    assert "openclaw-governance-scroll" in console_html
+    assert "live-auth-card" in tab_governance_html
+    assert "openclaw-governance-scroll" in tab_governance_html
 
 
 def test_demo_and_live_fill_history_show_strategy(

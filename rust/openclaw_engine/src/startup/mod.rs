@@ -6,7 +6,8 @@
 use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{BybitApiError, BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{
-    load_toml_or_default, BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig,
+    BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig, ScannerConfig,
+    load_toml_or_default,
 };
 use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::PerEngineRiskStores;
@@ -63,6 +64,44 @@ pub(crate) fn paper_balance_from_toml() -> Option<f64> {
     } else {
         None
     }
+}
+
+/// Resolve the symbol set used for conservative fee-rate seeding.
+///
+/// LiveDemo 的 Bybit demo endpoint 目前會拒絕 `/v5/account/fee-rate`，所以
+/// startup fallback 需要 seed 一組明確保守費率。LG-2 T2 startup assertion 要求
+/// 至少 25 個 fee-rate 覆蓋；只 seed legacy `SYMBOLS` 5 個會讓授權有效但 Live
+/// pipeline 永遠被拒啟動。這裡以 scanner pinned tier 作為 startup tradeable cohort，
+/// 同時保留 legacy `SYMBOLS` 作最小 fallback。
+pub(crate) fn fee_rate_seed_symbols() -> Vec<String> {
+    let scanner_config_path = {
+        let base = std::env::var("OPENCLAW_RISK_CONFIG_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("settings/risk_control_rules"));
+        std::env::var("OPENCLAW_SCANNER_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| base.join("scanner_config.toml"))
+    };
+
+    let mut symbols: Vec<String> = SYMBOLS.iter().map(|s| (*s).to_string()).collect();
+    match load_toml_or_default(&scanner_config_path, |c: &ScannerConfig| c.validate()) {
+        Ok(scanner_cfg) => {
+            for symbol in scanner_cfg.universe.pinned_symbols {
+                if !symbols.iter().any(|existing| existing == &symbol) {
+                    symbols.push(symbol);
+                }
+            }
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                path = %scanner_config_path.display(),
+                "fee-rate seed symbol load fell back to legacy SYMBOLS \
+                 / fee-rate seed symbol 載入失敗，回退到 legacy SYMBOLS"
+            );
+        }
+    }
+    symbols
 }
 
 /// Resolve paper initial balance with unified priority (MAJOR-4):
@@ -695,13 +734,15 @@ pub(crate) async fn build_exchange_pipeline(
                             if ret_msg.trim().is_empty()
                     );
             if demo_fee_endpoint_unsupported {
-                let count = acct.seed_default_fee_rates(SYMBOLS.iter().copied());
+                let fee_symbols = fee_rate_seed_symbols();
+                let count = acct.seed_default_fee_rates(fee_symbols.iter().map(String::as_str));
                 let rate = acct.taker_fee("BTCUSDT");
                 warn!(
                     kind = %kind,
                     env = ?env,
                     error = %e,
                     symbols = count,
+                    cache_count = acct.fee_rate_count(),
                     taker_rate = format!("{:.5}", rate),
                     "fee-rate endpoint unavailable on demo endpoint; seeded conservative defaults \
                      / demo 費率端點不可用，已注入保守預設費率"
@@ -1183,6 +1224,57 @@ mod tests {
         } else {
             std::env::remove_var("OPENCLAW_BASE_DIR");
         }
+    }
+
+    /// LG-2 T2：LiveDemo fee fallback 必須覆蓋 scanner pinned tier，
+    /// 否則 25-symbol pricing assertion 會在授權 valid 後仍拒啟 Live。
+    #[test]
+    fn test_fee_rate_seed_symbols_includes_scanner_pinned_tier() {
+        let prev_risk_dir = std::env::var("OPENCLAW_RISK_CONFIG_DIR").ok();
+        let prev_scanner = std::env::var("OPENCLAW_SCANNER_CONFIG").ok();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("openclaw_scanner_cfg_{unique}"));
+        let risk_dir = dir.join("settings").join("risk_control_rules");
+        std::fs::create_dir_all(&risk_dir).unwrap();
+        let scanner_path = risk_dir.join("scanner_config.toml");
+        let pinned: Vec<String> = (0..25).map(|i| format!("PIN{i}USDT")).collect();
+        let pinned_toml = pinned
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        std::fs::write(
+            &scanner_path,
+            format!("[universe]\nmax_symbols = 40\npinned_symbols = [{pinned_toml}]\n"),
+        )
+        .unwrap();
+
+        std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", &risk_dir);
+        std::env::remove_var("OPENCLAW_SCANNER_CONFIG");
+
+        let symbols = fee_rate_seed_symbols();
+        assert!(symbols.iter().any(|s| s == "BTCUSDT"));
+        assert!(symbols.iter().any(|s| s == "PIN24USDT"));
+        assert!(
+            symbols.len() >= 25,
+            "fee-rate fallback must satisfy LG-2 25-symbol coverage, got {}",
+            symbols.len()
+        );
+
+        if let Some(v) = prev_risk_dir {
+            std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", v);
+        } else {
+            std::env::remove_var("OPENCLAW_RISK_CONFIG_DIR");
+        }
+        if let Some(v) = prev_scanner {
+            std::env::set_var("OPENCLAW_SCANNER_CONFIG", v);
+        } else {
+            std::env::remove_var("OPENCLAW_SCANNER_CONFIG");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// RC-004: missing demo/live risk configs fail closed.
