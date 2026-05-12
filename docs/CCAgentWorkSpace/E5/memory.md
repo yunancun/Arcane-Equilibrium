@@ -49,6 +49,8 @@
 | 2026-05-09 v2 | 對抗性核實 v2（baseline 455d796e → HEAD 1bd55689；34 commits 48h）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification_v2.md` |
 | 2026-05-09 v3 | 對抗性核實 v3（baseline faf2d131 → HEAD da2aba11；5 commits）+ PA redesign architectural cross-check | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-09--optimization_verification_v3.md` |
 | 2026-05-10 | W-C Caveat 1+2+3 fix Rust+Python perf+LOC+refactor review | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-10--w_c_fix_e5_perf_review.md` |
+| 2026-05-11 | Wave 1.6 P1-FILL-LINEAGE-DROP perf re-audit | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--p1_fill_lineage_drop_e5_perf.md` |
+| 2026-05-11 | Wave 2.2 LG-1 + LG-2 (8 task) perf+LOC+refactor review | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--wave2_2_e5_perf.md` |
 
 ## 2026-05-10 W-C Caveat 1+2+3 fix perf review 教訓
 
@@ -316,5 +318,66 @@ E1 P1-FILL-LINEAGE-MONITOR follow-up（接 counter 到 IPC + healthcheck [55]/[N
 2. **rx 消費阻塞時段 必入 throughput equation**：PG INSERT batch flush 200-500ms 是 producer 累積窗口
 3. **empirical evidence > theoretical capacity**：當有真實 runtime 證據（QA RCA empirical 25.8% drop）必反推 capacity ceiling
 4. **false sharing pattern**：連續 static AtomicU64 宣告會撞同 cache line；多 thread 並發 fetch_add 互相 invalidate → 50-200ns extra latency / contention（cosmetic 非 SLA）
+
+---
+
+### 2026-05-11 Wave 2.2 LG-1 + LG-2 (8 task) perf+LOC+refactor review
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--wave2_2_e5_perf.md`
+
+**Context**：Wave 2.2 = LG1-T1/T2/T3/T4 (H0 blocking production caller acceptance) + LG2-T1/T2/T3/T4 (Provider pricing binding)。8 個 E1 sub-agent IMPL DONE，並行 E2 (correctness) + A3 (UX) + E5 (perf)。
+
+**Verdict**：✅ **APPROVE-PERF-SOUND WITH 6 P2/P3 NOTES（不阻 deploy）**
+
+**Hot path SLA**：✅ PASS
+- H0 check p99 < 1ms 維持（LG1-T1 10k iter empirical）
+- emit_entry_lineage W-C 路徑不變
+- AccountManager.taker_fee/maker_fee hot path 0 影響
+- query_fee_source 是 observability-only IPC，非 tick hot path
+
+**Startup latency**：
+- Fast path（99% 場景）：+100ns wait fast-path + 10μs assert = 可忽略
+- Worst case：+30s wait timeout（fee refresh 全失敗 + reject spawn 路徑）— 設計上 reject 場景不啟動，0 production 影響
+
+**ArcSwap 影響**：✅ PASS
+- PricingConfig 走 RiskConfig snapshot 既有 ArcSwap，clone ~200ns startup/respawn-time only
+- LG2-T4 self-claim「不需 apply_risk_snapshot RMW」— PricingConfig 無下游 owned consumer
+
+**Filesystem read healthcheck**：✅ PASS
+- check_59 ~42ms total（2 snapshot file × 12ms + 2 SQL × 9ms）< 1s SLA
+- 5min cron 間隔，無 burst
+
+**LOC efficiency**：Rust 2086 + Python 1063 = 3149 vs PA 估 ~1440 = **+118%**
+- LG1-T4 +632%（route + 21 test + Pydantic + helpers），E1 self-flag 1118 > 800 警告
+- LG2-T2 +745%（5 wiring file + LiveAuthWatcher 整合 + 11 test，PA 嚴重低估）
+- LG2-T3 +286%（47 callsite batch plumbing）
+
+**文件大小 §九**：3 新 WARN（account_manager.rs 1404 / risk_config_tests.rs 1812 / risk_routes.py 1118），**0 hard cap 破限**
+
+**6 P2/P3 ticket 建議**：
+1. P2-FILE-SPLIT-ACCT-MGR（2h）: account_manager.rs 1404 → split LG2-T1/T3 tests sibling
+2. P2-FILE-SPLIT-RISK-CONFIG-TESTS（2h）: risk_config_tests.rs 1812 接近 2000 hard cap → split
+3. P2-FILE-SPLIT-RISK-ROUTES（3h）: risk_routes.py 1118 → split h0_block_summary_routes.py sibling
+4. **P2-HOT-RELOAD-AUDIT（1d，高 ROI）**: 系統性 audit RiskConfig.runtime.* 所有 field 的 hot-reload contract；LG1-T3 已自承 H0 shadow_mode RMW gap 真實存在（grep `apply_risk_snapshot` 內 `h0_shadow_mode` = 0 hits）
+5. P3-SLOT-MACRO（待 N=6 累積）: IPC Slot late-inject pattern 第 4 次重複（cost_edge_advisor / h_state_cache / panel_aggregator / account_manager）
+6. P3-SNAPSHOT-READER-HELPER（30min）: passive_wait healthcheck pipeline_snapshot read DRY 抽 helper
+
+**最大 1 concern（不阻 deploy）**：
+- **LG-2 T2 + T4 雙重 hot-reload silent gap**：LG1-T3 E1 自承 pipeline_config.rs::apply_risk_snapshot 沒寫 `h0_shadow_mode`；LG2-T4 self-claim「不需 RMW」（PricingConfig 無下游 owned consumer）。兩個性質一樣：TOML reload → ConfigStore.swap → 下游派生 copy 沒同步。
+- **觸發條件**：未來 operator 期望「TOML / IPC 改 RiskConfig.runtime.* 立即生效」時 silent stale。
+- **Mitigation**：LG1-T3 已留 `#[ignore]` test 證據 + reviewer note。建議 PA W-AUDIT-10 ticket。
+
+**對比 W-C / W-1.6 baseline reflection**：本 Wave 2.2 **不過樂觀**。三大差異：
+1. W-C 是高頻 channel path（174 chain/24h × 15 msg/chain），需 burst factor 5-10x；本 Wave 2.2 全 startup/cron/observability
+2. W-C 沒做 burst stress test；本 Wave 2.2 startup 一次性，無 burst 場景
+3. W-C 沒考慮多 producer parallel；本 Wave 2.2 startup 路徑單一
+
+**新教訓**：
+1. **PA LOC 估算對 startup/wiring 整合特別不準**：LG2-T2 PA 估 ~80 LOC vs 實際 676 LOC（含 5 wiring file），「+ wait + assert」是 logical claim 但 wiring overhead 必要時可能 6× 設計估算
+2. **Slot late-inject pattern N=4 是 LOC 累積警訊**：account_manager.rs 1404 主因是 LG2-T1 + LG2-T3 累積 ~415 LOC sibling tests；每加新 slot pattern 累積 ~50 LOC × 5 file wiring
+3. **hot-reload contract gap 是 silent class**：LG1-T3 自承 + LG2-T4 self-claim 共同表示治理層沒系統性 audit RiskConfig.runtime.* field RMW 完備性；未來 operator 改 TOML 期望生效但 silent stale = critical incident class
+4. **E1 self-flag empirical 解析度問題（micros vs nanos）值得 ack**：LG1-T1 p99 0us 不是「沒跑」是 micros 飽和；E1 識別 + report 明寫提醒未來改 nanos 是正確 self-aware
+5. **三環境 PricingConfig 跨 invariant test 是 contract pinning 過勝**：LG2-T1 真實 TOML disk load 跨三環境 invariant test = 防回歸最強；+99% LOC 但每行對應一個 assert，**E5 強烈認可**
+6. **`fee_source` rule 3 浮點精確比對是隱性 algorithmic invariant**：依賴 seed_default_fee_rates 直接賦 DEFAULT_* 常量無中間運算；若未來改實作為 `xxx * 1.0` → 精確比對失敗 → 分類錯成 BybitApi；LG2-T3 加 test 偵測 regression 是正確 algorithmic invariant lock
 
 

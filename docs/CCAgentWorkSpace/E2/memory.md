@@ -1,5 +1,82 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-11 — Wave 2.2 LG-1 + LG-2 batch (8 task) 對抗 review (APPROVE WITH MINOR · PASS to E4)
+
+**對象**：commit `a11a4df6 LG live gate checkpoint` 已 land main (16882+/121- LOC across 67 files)，working tree clean (only 1 stale report)
+
+**8 task scope**：
+- LG-1 T1 h0_blocking.rs E2E test (374) / T2 [59] healthcheck (468+532) / T3 ctor flip + runbook (179+316) / T4 H0 block summary route (410+468)
+- LG-2 T1 contract tests (275 inline + 521 integration) / T2 startup assertion (578 NEW) / T3 FeeSource enum + IPC + dual-source (501+203+184) / T4 RiskConfig [pricing] section (211+27+218 + 3 TOML +59)
+
+**Verdict**：**APPROVE WITH 4 MEDIUM / 2 LOW / 3 P2 / 1 HIGH governance flag · PASS to E4** · 0 BLOCKER
+
+**驗證手段**：
+1. 8 E1 report 全讀 + PA spec full read
+2. 跨平台 grep `/home/ncyu|/Users/[a-zA-Z]*ncyu` 11 個新 / 大改檔 = 0 hit
+3. unsafe / production unwrap / production expect grep new Rust modules = 0 hit (only test code)
+4. SQL injection grep: risk_routes.py + checks_pricing_binding.py + checks_h0_block_acceptance.py 全 parameterized (`%s`/ANY(%s)) + engine_mode whitelist
+5. Hot path SLA grep `fee_source\|fee_rate_count\|assert_pricing_binding\|tokio::spawn|.lock()|Mutex::|RwLock::` 在 tick_pipeline/ + strategies/ = 0 hit（無人在 tick path 用 LG-2 API）
+6. `live_spawn_assert.rs` production code unique tokio::spawn check = 0 hit (line 346 是 test code in mod tests)
+7. Live 5-gate ordering verify: `startup/mod.rs:517-553` (HMAC + BybitRestClient::new + has_credentials) 全保留；LG-2 T2 是第 6 gate 並列；fee refresh + balance fetch + WS spawn 順序 unchanged
+8. PricingConfig Mainnet hard-block 三層 defense verify (validate() 禁 "live" / BybitEnvironment::Mainnet endpoint URL distinct / assert_pricing_binding is_mainnet 硬規則 reject 任何非 BybitApi)
+9. risk_config_live.toml `cold_default_acceptable_modes=["demo", "live_demo"]` 確含 "live_demo" → LiveDemo + ColdDefault accept 邏輯統一一致
+10. `pipeline_config.rs:97-109` H0Gate RMW 確實**沒**推 `snap.runtime.h0_shadow_mode`（line 98 stale comment 「shadow_mode fields don't live in RiskConfig」與 `risk_config_advanced.rs:366` 矛盾）— 證實 LG1-T3 reviewer note 「PA mitigation 不成立」是真實 finding
+
+**8 PA spec push back 逐條 ACCEPT**：
+1. LG1-T2 PA「讀 canary_records」不存在 PG → E1 改 filesystem snapshot + PG join 等價，符合「不新增 PG 表」精神
+2. LG1-T3 PA「TOML always 覆蓋 ctor default」實證不成立 → 5 LOC fix 不在 T3 scope，ctor flip 已治本 fail-closed，建議 P1 follow-up
+3. LG2-T1 PA「account_manager_tests.rs」實為 inline `mod tests` → grep 確認真實 baseline
+4. LG2-T1 PA「(e) hourly refresh integration 直驗」binary crate 限制 → 等價語意接受
+5. LG2-T2 PA「build_exchange_pipeline in bybit_rest_client.rs」真實位置 `startup/mod.rs:496`
+6. LG2-T2 PA「audit write」未指明 storage → tracing 是 db_pool 連線前必選，建議 P2 retrofit
+7. LG2-T2 PA「LiveDemo + ColdDefault → reject」改統一邏輯「mode_label in acceptable_modes → accept」 → toml 確實 contains live_demo
+8. LG2-T4 PA「4 個 TOML」實為 3 active + 1 legacy fallback → grep 確認 risk_config_live_demo.toml 不存在
+
+**核心對抗發現**：
+1. **HIGH governance flag — SCOPE CREEP**：commit `a11a4df6` 同時 land bb_reversion + ma_crossover SCANNER-TRADEABLE-TIER-1 `is_pinned` entry guard（+19+248+20+119 LOC across 4 strategy file），**不在 PA spec §1.4/§2.4 任何 8 task scope**，commit message body 未 disclose。屬「checkpoint 同次 land 的 follow-up」OR PA spec 未派發業務邏輯改動，PM 必 sign-off
+2. **MEDIUM — PA §1.5 risk #1 mitigation 假設不成立 (LG1-T3)**：`pipeline_config.rs:97-109` H0Gate RMW 漏推 h0_shadow_mode；E1 sibling `#[ignore]` test 證實 + stale comment line 98；ctor flip 已治本 fail-closed；建議 P1 follow-up 5 LOC fix 同 LG-2 T4 risk.rs 一道 commit
+3. **MEDIUM — 2-week dual-source FAIL schedule 無代碼層 enforcement (LG2-T3)**：4 hit grep '2 週\|two weeks' 全 narrative only；`OPENCLAW_LG2_T3_DUAL_SOURCE` env 預設關，operator 必手動 flip；無 timer / TODO ticket。建議 P2 calendar reminder / healthcheck check
+4. **MEDIUM — wait_for_first_refresh_or_timeout cancel discipline (LG2-T2)**：30s poll 內無 `tokio::select! { sleep => {} cancel.cancelled() => return Err }` 對齊 production cancel discipline。trade-off 接受（startup 一次性 + 30s 短窗），建議 P3
+5. **MEDIUM — Singleton 表漏 AccountManagerSlot (LG2-T3)**：CLAUDE.md §九 表個別列 HStateCacheSlot + CostEdgeAdvisorDbSlot 但未列 AccountManagerSlot。建議 P2 ticket meta-doc commit 加 row
+6. **§九 LOC 8 檔超 800 警告線**：account_manager.rs 1404 / risk_routes.py 1118 / risk_config_tests.rs 1796 接近 2000 + 其他 5 pre-existing；全 baseline < 2000，**§九 exception clause 不適用**（per E2 memory 2026-05-11 W2 lesson #1）；3 P2 split ticket（其他 4 pre-existing 微增量是 P3）
+7. **Live 5-gate 不變式驗證**：LG-2 T2 是第 6 gate 並列；既有 5 gate（HMAC + freshness + env_allowed + secret + ALLOW_MAINNET）全 unchanged；ordering 在 startup/mod.rs:511-780 證實
+8. **stress_bb_reversion_extreme_oversold_bounce pre-existing fail**：E1 自報 100% W7-2 P0 Option A-Lite refactor fixture 未同步，與 LG-2 T2 無關；E2 cross-check `git log` 確認 6cdfe0dc/77a52796/df0e2269；accept；但 5.3 SCOPE CREEP 揭示 a11a4df6 也 land bb_reversion entry guard，E4 必驗 entry guard fix 了 stress test OR 仍 fail
+
+**驗證 unsafe path**：
+- `live_spawn_assert.rs` production code unique tokio::spawn = 0 hit；test mod 內 spawn line 346 合法
+- AccountManagerSlot `Arc<RwLock<Option<Arc<AccountManager>>>>` late-inject pattern 對齊 CostEdgeAdvisorDbSlot / HStateCacheSlot sibling
+- IPC handler `read().await` 純讀 RwLock + slot=None → fail-soft uninitialized payload；不爆 JSON-RPC error
+- LiveAuthWatcher respawn 取 pricing `Option::and_then(...).unwrap_or_default()` 雙層 fallback safe
+
+**Trade-off accepted**：
+- LG1-T3 5 LOC pipeline_config.rs RMW fix 不在 T3 scope（合理 push back，建議 P1 follow-up）
+- LG2-T2 audit log 走 tracing 非 PG（db_pool 連線前限制，建議 P2 retrofit）
+- LG2-T1 (e) hourly refresh 用等價語意 50ms interval（binary crate 限制接受）
+- 8 task 多檔 800-1500 LOC 警告但 < 2000 hard cap（per §九 exception clause 不適用，開 P2 split ticket）
+- SCOPE CREEP 不阻 8 task review（PM 決策）
+
+**經驗教訓 / Lesson learned**：
+
+1. **SCOPE CREEP detection through git show**：`git show --stat <commit>` 揭露 commit body 未 disclose 的 file 改動；commit message body 與 stat 不一致時，必對 stat 範圍做 grep cross-check。本次 a11a4df6 commit body 只提 LG-1/LG-2 surface 但 stat 含 strategies/ + scanner_config.toml；典型 checkpoint 「same wave land」風險，PM sign-off 是必要 governance gate。
+2. **PA spec mitigation 假設必 grep cross-check 真實代碼**：LG1-T3 reviewer note 揭示 PA §1.5 risk #1 「TOML always 覆蓋 ctor default」是 stale 假設；E1 sibling `#[ignore]` test 留證據是高品質 reviewer pattern；E2 verify pipeline_config.rs:97-109 + line 98 stale comment 雙重證實 PA spec drift。
+3. **Live gate ordering 對抗驗證 SOP**：對任何「新 gate」改動，必逐行 read `startup/mod.rs` 從 HMAC 到 WS spawn 完整 ordering；確認既有 N gate 全 unchanged + 新 gate 真實 fail-closed return None（not just warn）；E2 grep `fee refresh + balance fetch + WS spawn` 順序對齊。
+4. **Hot path SLA grep 多 file scope**：對「新 enum / new API」必 grep tick_pipeline/ + strategies/ 確認無人在 tick hot path 用；本 wave fee_source / fee_rate_count / assert_pricing_binding 全 0 hit，證實 LG-2 T2/T3 純 startup + healthcheck IPC + spawn-time 對齊 PA spec。
+5. **late-inject IPC slot fail-soft 必驗 None branch payload contract**：本 wave AccountManagerSlot 對齊 cost_edge_advisor pattern 走 structured `status=uninitialized` payload 不爆 JSON-RPC error；Python 端視 silent-dead branch 處理；contract test 必驗 slot=None 路徑回正確 enum fallback (cold_default)。
+6. **tracing audit log 在 db_pool 連線前 startup-time 路徑是合理 trade-off**：but 必開 P2 retrofit ticket（待 LG-3 supervised_live_audit table land 後對齊 PG row）；不能無限期 narrative-only。
+7. **commit message body 完整披露 wave scope 是 governance discipline**：commit `a11a4df6` body 只提 8 task 但 stat 含 strategies/ 業務邏輯改動 — 屬「同 wave land 的 follow-up」常見 pattern，但 disclosure 缺失 = E2 必 flag HIGH governance + PM 必 amend；此 lesson 加入 commit discipline SOP。
+
+**Cross-References**：
+- PA tech plan: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md`
+- 8 E1 reports: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg{1_t1,1_t2,1_t3,1_t4,2_t1,2_t2,2_t3,2_t4}_*.md`
+- E2 report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--wave2_2_lg1_lg2_e2_review.md`
+- LG-1 runbook: `docs/runbooks/2026-05-11--lg1_h0_flip_rollback.md`
+- Commit: `a11a4df6 LG live gate checkpoint [skip ci]` (HEAD `a11a4df6` after `b28c6a83`)
+- Sibling: `070ff0a3 P0 Option 2: SCANNER-PINNED-GATE-1` (grid_trading 已 dispatch；本次 a11a4df6 sibling land bb_reversion/ma_crossover)
+- E2 W2 IMPL chain lesson #1 (pre-existing baseline exception clause 範圍嚴格)
+- E2 Wave 1.6 P1-FILL-LINEAGE-DROP lesson #1 (governance LOC enforcement)
+
+---
+
 ## 2026-05-11 — Wave 1.6 P1-FILL-LINEAGE-DROP Option F4 對抗 review (APPROVE WITH MINOR · PASS to E4)
 
 **對象**：working tree HEAD未 commit + 3 檔 / +422 / -6 LOC

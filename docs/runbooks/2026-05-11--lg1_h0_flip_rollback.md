@@ -80,10 +80,9 @@ H0 是 §五 [架構總覽] 中 5-Agent runtime 的 **第一道防線**；任何
 
 1. **發送 IPC patch**（operator 角色 auth）:
    ```bash
-   curl -X POST http://localhost:8001/api/v1/risk/config/global \
-        -H 'Content-Type: application/json' \
-        -H "Cookie: $OPERATOR_SESSION_COOKIE" \
-        -d '{"h0_shadow_mode": false}'
+   # OPERATOR_SESSION_COOKIE 來源：GUI 登入後 DevTools → Application → Cookies → 取 `session=` 值；
+   # 或 `curl -c cookies.txt -X POST -d 'username=...&password=...' http://localhost:8001/api/v1/auth/login` 拿 + export OPERATOR_SESSION_COOKIE=$(grep '^session' cookies.txt | awk '{print "session="$7}')
+   curl -sS -X POST -H 'Content-Type: application/json' -H "Cookie: $OPERATOR_SESSION_COOKIE" -d '{"h0_shadow_mode": false}' http://localhost:8001/api/v1/risk/config/global
    ```
    - Route：`risk_routes.py::update_global_config`（行 222–243）
    - 內部：FastAPI → RiskViewClient → IPC `patch_risk_config{runtime.h0_shadow_mode: false}` → Rust `event_consumer/handlers/risk.rs::handle_patch_config` 行 313 `pipeline.h0_gate.set_shadow_mode(false)`
@@ -144,10 +143,7 @@ bash helper_scripts/restart_all.sh
 
 1. **發送反向 IPC patch**:
    ```bash
-   curl -X POST http://localhost:8001/api/v1/risk/config/global \
-        -H 'Content-Type: application/json' \
-        -H "Cookie: $OPERATOR_SESSION_COOKIE" \
-        -d '{"h0_shadow_mode": true}'
+   curl -sS -X POST -H 'Content-Type: application/json' -H "Cookie: $OPERATOR_SESSION_COOKIE" -d '{"h0_shadow_mode": true}' http://localhost:8001/api/v1/risk/config/global
    ```
 
 2. **驗證 IPC 已生效**：同 §4.2 step 2，expect `true`
@@ -192,10 +188,12 @@ bash helper_scripts/restart_all.sh
 | `engine_watchdog.py --status` | 30 s | `engine_alive=true` + snapshot age < 45s |
 | `[45] pricing_binding` | 5 min | PASS / WARN |
 
-### 6.3 GUI surface（LG1-T4 land 後）
+### 6.3 GUI surface（route ready；GUI integration TBD `[Phase B 後續]`）
 
-- 新 route：`GET /api/v1/risk/h0_block_summary`（per RFC §T2 / PA §1.4 T4）
-- 13-tab console `risk` tab 內新增 H0 block summary card：
+- 新 route ✅ ready：`GET /api/v1/risk/h0_block_summary`（per RFC §T2 / PA §1.4 T4）— 21 unit tests + Linux PG 0.461ms / 24h scan
+- ❗**13-tab console `risk` tab GUI card** ⏳ **Phase B 後續 wave**：route 已 ship，GUI 整合留後續（per A3 R2 audit, 避 operator 撲空）
+- 當前驗證方式：直接 `curl -sS http://localhost:8001/api/v1/risk/h0_block_summary` 或經 `/api/v1/openapi.json` 看 schema
+- 預計 GUI card 含內容（待 ship）：
   - 5 sub-check 各自 block count
   - Latest block reason by symbol（last 100）
   - 24h block rate trend
