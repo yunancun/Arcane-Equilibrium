@@ -256,8 +256,8 @@ html, body {
       To authorize, go to <strong>Governance Hub → Live Auth</strong>.
     </div>
     <div style="margin-top:12px">
-      <button class="oc-btn" onclick="openLiveRisk()" style="border-color:rgba(168,85,247,0.55);color:#a855f7">
-        &#x1F6E1; 跳转 Live 风控 / Open Live Risk
+      <button class="oc-btn" onclick="openLiveAuth()" style="border-color:rgba(168,85,247,0.55);color:#a855f7">
+        &#x1F511; 跳转 Live Auth / Open Live Auth
       </button>
     </div>
   </div>
@@ -763,6 +763,17 @@ function openLiveRisk() {
       riskEngine: 'live',
       riskTab: 'config',
       scrollTo: 'engine-risk-selector-card'
+    }, window.location.origin);
+  } catch (_) {}
+}
+
+function openLiveAuth() {
+  try {
+    window.parent.postMessage({
+      type: 'openclaw-console-switch-tab',
+      tab: 'governance',
+      governanceSection: 'live-auth-card',
+      scrollTo: 'live-auth-card'
     }, window.location.origin);
   } catch (_) {}
 }

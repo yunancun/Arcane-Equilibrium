@@ -1196,6 +1196,21 @@ async function govRenewReview() {
 // 每 30s 輪詢實盤授權狀態 — 不依賴引擎狀態
 setInterval(govLoadLiveAuthStatus, 30000);
 
+window.addEventListener('message', function(ev) {
+  if (ev.origin !== window.location.origin) return;
+  if (!ev.data || ev.data.type !== 'openclaw-governance-scroll') return;
+  const targetId = ev.data.scrollTo || ev.data.section || 'top';
+  if (targetId === 'top') {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  target.style.boxShadow = '0 0 0 2px rgba(168,85,247,0.65)';
+  setTimeout(() => { target.style.boxShadow = ''; }, 1800);
+});
+
 // Initial load on tab open / tab 開啟時立即載入
 govLoadLiveAuthStatus();
 </script>
