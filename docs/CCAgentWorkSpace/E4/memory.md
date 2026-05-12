@@ -3258,3 +3258,72 @@ Rust `executed_by` + `fill_completion=true` (runtime_shadow.rs:558-562) ↔ Pyth
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--p1_fill_lineage_drop_e4_regression.md`
+
+
+## 2026-05-11 Wave 2.2 LG-1 + LG-2 (8 task) — pre-deploy regression gate (PASS)
+
+**Trigger**: PA dispatch Wave 2.2 8 task pre-deploy gate；E1 IMPL ×8 DONE / E2 APPROVE WITH 4 MEDIUM + 2 LOW + 3 P2 + 1 HIGH governance flag (SCOPE CREEP) / E5 APPROVE-PERF-SOUND WITH 6 P2/P3 NOTES / A3 APPROVE WITH UX FIX 7.4/10（4 commit-前 必修 PM apply 中）
+
+### Verdict
+**PASS · deploy READY**（pending operator SCOPE CREEP sign-off）
+
+### 數字
+| 項 | Value | Baseline (Wave 1.6) | Delta |
+|---|---|---|---|
+| Rust lib release | 2867 / 0 / 1 ignored | 2810 / 0 / 0 | +57 ✅ |
+| Rust lib debug | 2867 / 0 / 1 ignored | 2810 / 0 / 0 | +57 ✅ |
+| Python helper_scripts/db | 343 / 0 | 320 / 0 | +23 ✅ |
+| Python tests/ broader | 253 / 1 pre-existing / 2 skip | 253 / 1 pre-existing / 2 skip | 0 (docs index pre-existing) |
+| stress_integration (integration test) | 34 / 1 failed (pre-existing W7-2) | 34 / 1 failed | 0 (Wave 2.2 0 因果) |
+
+連跑驗證：A.1 lib test 3 連跑（2866 → 2867 → 2867），run 2/3 同綠 non-flaky；config::tests pre-existing 8-thread race per LG1-T1 E1 §5 已 identify。
+
+### 8 task new test 實測（全 ≥ E1 預期）
+| Task | E1 預期 | 實測 | Verdict |
+|---|---|---|---|
+| LG-1 T1 h0_blocking | 6 | 6 PASS | ✅ |
+| LG-1 T2 [59] (Python) | 14 | 14 PASS | ✅ |
+| LG-1 T3 h0_ctor_default | 5 (含 1 ignored) | 4 PASS + 1 ignored | ✅ |
+| LG-1 T4 (Python) | 21 | 21 PASS | ✅ |
+| LG-2 T1 contract | 17 (6 inline + 11 integration) | 6 inline + 11 integration | ✅ |
+| LG-2 T2 live_spawn_assert | 11 | 13 (含 2 readiness 整合) | ✅ |
+| LG-2 T3 fee_source | Rust 11 + Python 9 | Rust 12 + Python 9 new | ✅ |
+| LG-2 T4 pricing | Rust 16 | Rust 16 | ✅ |
+
+### C SCOPE CREEP coverage
+SCOPE CREEP commit `a11a4df6` 含 bb_reversion +5 entry guard + ma_crossover +4 entry guard test：
+- `strategies::bb_reversion` **46/46 PASS** (含 `test_non_pinned_symbol_skips_entry` + `test_non_pinned_self_owned_position_can_exit` SCANNER-TRADEABLE-TIER-1 新 entry guard)
+- `strategies::ma_crossover` **62/62 PASS**
+
+Pre-existing fail `stress_bb_reversion_extreme_oversold_bounce` 仍 FAIL：
+- `git log` 顯示 a11a4df6 **NOT in stress_integration.rs touch list**
+- Wave 2.2 + SCOPE CREEP 0 因果引入 / 0 修好
+- E1 LG-2 T2 §10.5 / E2 §6.1 / Wave 1.6 E4 已 identify 為 W7-2 P0 Option A-Lite paper_state SSoT refactor 後 fixture 未同步
+- Accept pre-existing, W7 owner 修；不阻 Wave 2.2 deploy
+
+### D Cross-language consistency
+Rust `FeeSource::as_str()` snake_case + `is_compatible_with_proxy` 對賬表 vs Python `FEE_SOURCE_COMPAT` **byte-equal 完美對齊**：
+- `bybit_api ↔ bybit_v5 + inactive_mainnet`
+- `demo_conservative_default ↔ seed_default + inactive_mainnet`
+- `cold_default ↔ cold_default + inactive_mainnet`
+
+Python `TestLg2T3DualSourceCompat` 5 test 全 PASS 驗每個組合 + disagree case。
+
+### Mock 不掩邏輯
+- 4 Rust new test file 全 0 mockall / fake / stub
+- 2 Python new test file 用 MagicMock cursor (PG IO 邊界) + patch (env/IPC client 邊界) — 業務邏輯 (verdict aggregation / check_59 推斷) 真實跑
+- LG2-T2 mainnet (2 reject) + LiveDemo (3 accept + 1 reject) + Paper (skip by design) 核心場景全 cover；Mainnet+BybitApi happy path E1 自承缺 test 是 acceptable trade-off
+
+### 0 unexpected (3 marginal observation)
+1. Run 1 vs Run 2 release lib 數字差 1 (2866 → 2867) = config::tests 8-thread file lock race，run 2/3 穩定 non-flaky
+2. LG2-T2 實測 13 vs E1 自報 11 = sibling `readiness_interface` 2 整合 test 演化補強
+3. LG2-T3 fee_source 實測 12 vs E1 自報 11 = method_registry IPC slot declare invariant 1 個（已被 CLAUDE.md §九 PM 同 commit land `AccountManagerSlot` row）
+
+### Lesson learned
+- 8-thread cargo test pre-existing race 由 LG1-T1 E1 §5 已 identify 為 `config::tests::test_config_manager_load_and_reload`；連跑 3 次穩定 PASS 是 non-flaky 判別動作
+- SCOPE CREEP entry guard 新 test 在 strategy module 全綠不代表修 pre-existing stress fail（stress_integration.rs 是 sibling W7 fixture 問題）；E4 必跑 integration test 不只 lib test 才能 catch 此類「strategy module green + integration red」分裂
+- Cross-lang FeeSource compat byte-equal 驗證 = 兩端 `match (rust_enum, pg_proxy)` 表 grep 對照 + Python `FEE_SOURCE_COMPAT` dict 對照 + 兩端 `inactive_mainnet` 通用接受規則對齊；不只看 enum string 必看 compat table
+- LG2-T2 30s wait timeout 不阻 tick hot path = startup_path `kind == PipelineKind::Live` gate + `build_exchange_pipeline()` 一次性 async；驗證方法 = grep 確認 call site 在 startup 不在 on_tick
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--wave2_2_e4_regression.md`
