@@ -2161,3 +2161,10 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Source fix: halt loop 改走 `resolve_close_entry_context_id(sym, event.ts_ms)`；`per_symbol_price_pnl` 回歸新增 close fill `entry_context_id` 非空斷言。
 - Verification: `cargo test -q -p openclaw_engine test_halt_session_uses_per_symbol_price_not_triggering_tick` PASS；tick_pipeline 舊 `get_entry_context_id(...).unwrap_or("")` grep 0 hit；`git diff --check` PASS。
 - Boundary: source/test only；未 rebuild / restart / renew live auth。Runtime 仍需 operator-approved deploy/restart 後驗 engine.log 無 V083 retry；LiveDemo auth_missing 是獨立 operator renew 事項。
+
+## 2026-05-14 TODO v20 lightweight sync
+
+- Checked TODO freshness: body had 2026-05-13 runtime / attribution updates, but header still showed v19 / 2026-05-09.
+- Promoted TODO to v20 / 2026-05-14 and added a TODO Sync Checkpoint documenting pre-sync Mac/origin/Linux head `7c9fd444`, unrelated dirty Rust WIP preservation, and no runtime action.
+- Marked `P2-V19-CYCLE` as started via lightweight sync; full archive compaction remains pending before/at the 800-line hygiene threshold.
+- Boundary: docs/TODO governance only; no rebuild, restart, DB migration, live auth mutation, strategy/risk parameter change, or deploy.

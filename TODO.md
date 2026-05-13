@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v19
-Date: 2026-05-09
-Status: PM merge of v18 (13-agent v3 audit verification + DUAL-TRACK) + QCTODO (4-agent loss audit + Sprint N+0..N+5 + 22 invariant) + PA merge analysis (`2026-05-09--todo_qctodo_merge_analysis.md`) + FA business-chain merge advice (`2026-05-09--todo_qctodo_merge_business_chain_advice.md`). QCTODO archived to `docs/archive/2026-05-09--qctodo_sprint_n0_n5_archive.md`; v18 closed historical narrative remains in git history (`5789a175..e7d58774`). Wave Label Reconciliation per PA §1; 22 sign-off invariant per FA §4.
+Version: v20
+Date: 2026-05-14
+Status: PM lightweight maintenance sync of v19 with 2026-05-13 runtime recheck, corrected W-AUDIT-4b scope, M0 Follow-Up freeze, `P1-MIT-REJECTED-GOVERNANCE-LABEL-VOLUME`, and TODO hygiene checkpoint. v19 was PM merge of v18 (13-agent v3 audit verification + DUAL-TRACK) + QCTODO (4-agent loss audit + Sprint N+0..N+5 + 22 invariant) + PA merge analysis (`2026-05-09--todo_qctodo_merge_analysis.md`) + FA business-chain merge advice (`2026-05-09--todo_qctodo_merge_business_chain_advice.md`). QCTODO archived to `docs/archive/2026-05-09--qctodo_sprint_n0_n5_archive.md`; v18 closed historical narrative remains in git history (`5789a175..e7d58774`). Wave Label Reconciliation per PA §1; 22 sign-off invariant per FA §4.
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -86,6 +86,11 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 - 2026-05-13 runtime recheck: 7d realized gross 改善為 demo **+5.8857 USDT** / live_demo **+0.3576 USDT**，但 net after fee 仍為 demo **-12.3609 USDT** / live_demo **-3.5900 USDT**；`[40]` 24h `n=8` avg **+2.94bps** = LOW_SAMPLE，不能 close edge。
 - `P0-MIT-LABEL-CLOSE-TAG-1` close-tag writer root cause 已關閉：post-M3 `[65]` chain integrity **368/369 = 99.73% PASS**（2026-05-13 trade-core recheck）；`[65]` 保留 drift sentinel。
 - W-AUDIT-2 V078 lease_transitions BYPASS 24h 7955 → 11133 = +40% growth（v2 唯一真活躍 runtime 進步）
+
+### TODO Sync Checkpoint (2026-05-14 CEST)
+- Fact: pre-sync Mac / origin / Linux repo heads were all `7c9fd444`; `TODO.md` body already carried 2026-05-13 updates, but header still said `v19 / 2026-05-09`.
+- This v20 checkpoint makes that partial update explicit, preserves unrelated dirty Rust WIP in the main worktree, and commits only TODO / PM governance docs.
+- Boundary: no rebuild, restart, DB migration, live auth mutation, strategy/risk parameter edit, or runtime deploy in this TODO-only sync.
 
 ---
 
@@ -638,7 +643,7 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 | `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → **mounted into `W-AUDIT-8f` (R-3) Hypothesis Pipeline per Decision-3 (P0-DECISION-AUDIT-7)** | Sprint N+5 |
 | `P2-AUDIT-VERIFY-4` | F-08 cron install ✅ DONE 2026-05-09 (P1-CRON-ML-1 24h fire pending) | invariant 18 |
 | `P2-AUDIT-QC-STAND-ALONE` | DONE — QC stand-alone fixes (funding_arb / Kelly / cooldown / DSR-PBO / §三 -26.44) | (see git history) |
-| `P2-V19-CYCLE` | TODO v19 land 後 1-2 sprint 啟動 v20 archive cycle | 防 v19 突破 800 行衛生線 |
+| `P2-V19-CYCLE` | 🟡 STARTED 2026-05-14: TODO v20 lightweight sync land；full archive compaction still pending before/at 800-line hygiene limit | Current file size at sync: 733 lines；防 active queue 重新膨脹成 historical ledger。 |
 
 ---
 
