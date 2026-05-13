@@ -81,6 +81,12 @@ from .checks_derived_ml_hygiene import (
     # PASS_SKIP if V085/V087 not yet deployed (pre-deploy 不阻塞)。
     check_panel_freshness,
 )
+from .checks_feature_baseline import (
+    # W-AUDIT-4b retained INSERT table readiness — `[67]` verifies
+    # observability.feature_baselines active rows >0 and the 34-dim feature
+    # vector contract before drift_events can mature through the burn-in gate.
+    check_67_feature_baseline_readiness,
+)
 from .checks_cost_edge import (
     # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
     # — extracted into sibling by HIGH-1 fix (2026-04-28) so checks_derived.py
@@ -282,7 +288,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53][54][55][57][58][59][64][65]    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions + W-AUDIT-9 T4 graduated canary stage invariant + LG1-T2 H0 block acceptance + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity
+    [46][48][49][50][51][52][53][54][55][57][58][59][64][65][66][67]    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions + W-AUDIT-9 T4 graduated canary stage invariant + LG1-T2 H0 block acceptance + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity + W1 panel freshness + W-AUDIT-4b feature baseline readiness
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -334,6 +340,8 @@ Execution / cost sentinels added after F7:
   [59] h0_block_acceptance                (LG1-T2 — PA tech plan §1.4 T2 H0 hard-block production caller acceptance; reads pipeline_snapshot_{demo,live_demo}.json h0_gate_stats + risk_manager_config.runtime.h0_shadow_mode, cross-joins trading.fills 1h entry fills; 4 sub-check: snapshot fresh / shadow_mode / sample size / block leakage; OPENCLAW_H0_BLOCK_HEALTH_REQUIRED=1 escalates WARN→FAIL)
   [64] unblock_candidates_drift           (W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 2026-05-10 Sprint N+1 — spec §6.2 4 sub-check: stale candidate / yo-yo detection / sign-off completeness / unfrozen rows count; pairs with V090 governance.unblock_candidates + 30d cycle writer)
   [65] chain_integrity_post_audit_4b_m3   (MIT W6-1 RFC SHOULD 7 2026-05-10 — W-AUDIT-4b M3 producer post-deploy chain integrity sentinel; era filter `f.ts > '2026-05-09 09:22 UTC'` excludes pre-M3 historical orphan; PASS ≥ 95% / WARN 80-95% / FAIL < 80% / WARN_LOW_SAMPLE n<30; per-strategy drill-down annotation)
+  [66] panel_freshness                     (W1 sub-task 3 — panel.funding_rates_panel + panel.oi_delta_panel freshness)
+  [67] feature_baseline_readiness          (W-AUDIT-4b retained INSERT table readiness — active feature_baselines >0 + 34-dim vector contract; drift_events burn-in remains intact)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -354,7 +362,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53][54][55][57][58][59][64][65]
+              [46][48][49][50][51][52][53][54][55][57][58][59][64][65][66][67]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -380,7 +388,8 @@ def main() -> int:
                [58] W-AUDIT-9 T4 graduated canary stage invariant — AMD-2026-05-09-03 §4.1;
                [59] LG1-T2 H0 hard-block production caller acceptance — PA tech plan §1.4 T2;
                [64] W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift — spec §6.2 4 sub-check;
-               [65] MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity — era filter post 2026-05-09 09:22 UTC)
+               [65] MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity — era filter post 2026-05-09 09:22 UTC;
+               [66] W1 panel_freshness; [67] W-AUDIT-4b feature_baseline_readiness)
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
@@ -994,6 +1003,15 @@ def main() -> int:
             # 對應 cron: helper_scripts/cron/panel_aggregator_health_cron.sh（雙保險）
             s, m = check_panel_freshness(cur)
             results.append(("[66] panel_freshness", s, m))
+
+            # [67] W-AUDIT-4b retained INSERT table readiness:
+            # observability.feature_baselines must have active rows and preserve
+            # the Rust 34-dim feature-vector contract. This check intentionally
+            # does not bypass drift_detector ADWIN burn-in; it only proves the
+            # baseline dependency is populated so drift_events can activate when
+            # the configured burn-in matures.
+            s, m = check_67_feature_baseline_readiness(cur)
+            results.append(("[67] feature_baseline_readiness", s, m))
     finally:
         conn.close()
 
