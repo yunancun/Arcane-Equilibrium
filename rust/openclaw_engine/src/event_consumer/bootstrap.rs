@@ -160,6 +160,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         canary_handle,
         edge_predictor_store,
         positions_mirror,
+        funding_curve_panel_slot,
+        oi_delta_panel_slot,
         // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for
         // pipeline；構造後 inject TickPipeline.btc_lead_lag_panel_slot。
         btc_lead_lag_panel_slot,
@@ -192,6 +194,13 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     }
     if let Some(tx) = lease_transition_tx {
         pipeline.governance.set_lease_transition_tx(tx);
+    }
+
+    if let Some(slot) = funding_curve_panel_slot {
+        pipeline.set_funding_curve_panel_slot(slot);
+    }
+    if let Some(slot) = oi_delta_panel_slot {
+        pipeline.set_oi_delta_panel_slot(slot);
     }
 
     // W2 sub-task 4 (E1-δ, 2026-05-11): 注入 BtcLeadLagPanel IPC slot Arc clone。

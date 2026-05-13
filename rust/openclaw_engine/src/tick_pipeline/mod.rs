@@ -1070,6 +1070,13 @@ pub struct TickPipeline {
     /// DYNAMIC-RISK-1：引擎私有的 Sharpe 調整器，平倉後上調/下調
     /// `IntentProcessor::p1_risk_pct`。預設停用，`[risk.dynamic_sizing]` 啟用。
     pub dynamic_risk_sizer: crate::dynamic_risk_sizer::DynamicRiskSizer,
+    /// W-AUDIT-8a Phase B consumer wiring: late-injected slot for
+    /// FundingCurveSnapshot. step_4_5_dispatch uses try_read + clone so no
+    /// lock is held across strategy dispatch.
+    pub(crate) funding_curve_panel_slot: Option<crate::ipc_server::FundingCurvePanelSlot>,
+    /// W-AUDIT-8a Phase B consumer wiring: late-injected slot for OIDeltaPanel.
+    /// Consumers fail closed when this remains None or the snapshot is stale.
+    pub(crate) oi_delta_panel_slot: Option<crate::ipc_server::OIDeltaPanelSlot>,
     /// W2 sub-task 4 (E1-δ, 2026-05-11): late-injected slot for BtcLeadLagPanel
     /// IPC handle。step_4_5_dispatch 在 paper-only fence 通過後 try_read 取
     /// `Option<BtcLeadLagPanel>` 賽進 surface.btc_lead_lag。`None` = slot 未注入

@@ -42,6 +42,62 @@ use params::{
     DEFAULT_VOLUME_THRESHOLD,
 };
 
+const OI_PANEL_MAX_AGE_MS: i64 = 15 * 60 * 1000;
+
+fn oi_panel_delta_5m_pct(
+    surface: &AlphaSurface<'_>,
+    symbol: &str,
+    now_ms: u64,
+) -> Result<f64, &'static str> {
+    let panel = surface.oi_delta_panel.ok_or("missing_panel")?;
+    let now_ms_i64 = now_ms.min(i64::MAX as u64) as i64;
+    let age_ms = now_ms_i64.saturating_sub(panel.snapshot_ts_ms);
+    if age_ms > OI_PANEL_MAX_AGE_MS {
+        return Err("stale_panel");
+    }
+    let idx = panel
+        .symbols
+        .iter()
+        .position(|s| s == symbol)
+        .ok_or("symbol_missing")?;
+    match panel.oi_abs.get(idx) {
+        Some(v) if v.is_finite() => {}
+        _ => return Err("oi_abs_missing"),
+    }
+    let delta = *panel.oi_delta_5m_pct.get(idx).ok_or("delta_missing")?;
+    if !delta.is_finite() {
+        return Err("delta_not_finite");
+    }
+    Ok(delta)
+}
+
+#[cfg(test)]
+pub(super) fn test_oi_surface(
+    symbols: &[&str],
+    deltas_5m: &[f64],
+    snapshot_ts_ms: i64,
+) -> &'static AlphaSurface<'static> {
+    let symbols: Vec<String> = symbols.iter().map(|s| (*s).to_string()).collect();
+    let panel = Box::leak(Box::new(openclaw_core::alpha_surface::OIDeltaPanel {
+        symbols,
+        oi_delta_5m_pct: deltas_5m.to_vec(),
+        oi_delta_15m_pct: deltas_5m.to_vec(),
+        oi_delta_1h_pct: deltas_5m.to_vec(),
+        oi_abs: vec![100.0; deltas_5m.len()],
+        snapshot_ts_ms,
+        source_tier: "test".to_string(),
+    }));
+    Box::leak(Box::new(AlphaSurface {
+        oi_delta_panel: Some(panel),
+        ..AlphaSurface::empty()
+    }))
+}
+
+#[cfg(test)]
+pub(super) fn fresh_oi_surface() -> &'static AlphaSurface<'static> {
+    test_oi_surface(&["BTC", "BTCUSDT"], &[0.02, 0.02], i64::MAX / 4)
+}
+
 /// `BbBreakout` 的逐 symbol 動態狀態。
 ///
 /// P0 Option A-Lite 重構（2026-05-11）：`position` 欄位移除，position direction 改由
@@ -317,11 +373,7 @@ impl Strategy for BbBreakout {
     /// 策略下個 tick 經 `ctx.position_state` 自動讀到。本 hook 保留簽名以維持 Strategy
     /// trait 一致性，但 body no-op；entry_price / trailing_stop 已於 entry path
     /// （`bb_breakout/mod.rs:880-893`，本檔下方 on_tick）一併寫入，on_fill 不重複寫。
-    fn on_fill(
-        &mut self,
-        _intent: &OrderIntent,
-        _fill: &openclaw_core::execution::FillResult,
-    ) {
+    fn on_fill(&mut self, _intent: &OrderIntent, _fill: &openclaw_core::execution::FillResult) {
         // no-op：position SSoT 已歸 paper_state；策略下個 tick 從 ctx.position_state 讀。
     }
 
@@ -402,7 +454,7 @@ impl Strategy for BbBreakout {
     fn on_tick(
         &mut self,
         ctx: &TickContext<'_>,
-        _surface: &AlphaSurface<'_>,
+        surface: &AlphaSurface<'_>,
     ) -> Vec<StrategyAction> {
         let ind = match self.signal_timeframe.as_str() {
             "5m" => match ctx.indicators_5m {
@@ -424,6 +476,20 @@ impl Strategy for BbBreakout {
         // Whole-struct snapshot = exact pre-tick state (or None if unseen).
         // RC-04：於任何變更前快照該 symbol 整包狀態（None = 本 tick 之前未見）。
         let sym = ctx.symbol;
+        let oi_panel_delta_pct = match oi_panel_delta_5m_pct(surface, sym, ctx.timestamp_ms) {
+            Ok(delta) => delta,
+            Err(cause) => {
+                tracing::debug!(
+                    target: "bb_breakout.oi",
+                    strategy = "bb_breakout",
+                    symbol = %sym,
+                    reason = "oi_panel_unavailable",
+                    cause = %cause,
+                    "bb_breakout fail-closed: oi_panel_unavailable"
+                );
+                return vec![];
+            }
+        };
         self.prev_state
             .insert(sym.to_string(), self.symbols.get(sym).cloned());
         let last_ms = self.cooldown.last_ms(sym).unwrap_or(0);
@@ -688,7 +754,7 @@ impl Strategy for BbBreakout {
                         );
                         // EDGE-P2-2: OI confluence modifier.
                         // When `enable_oi_signal=false`, `score` is untouched (bit-exact).
-                        // When enabled + buffer has a valid delta, add bonus on confirmation
+                        // When enabled + surface.oi_delta_panel has a valid delta, add bonus on confirmation
                         // (rising OI + long, falling OI + short) or subtract on divergence.
                         // `compute_score` may return `None` (confluence disabled upstream);
                         // in that case we do not fabricate a score from OI alone — the
@@ -700,15 +766,14 @@ impl Strategy for BbBreakout {
                         // filters WS snapshot quantisation noise (±1 contract → ~1e-8
                         // delta) from being treated as a confirmation signal.
                         // EDGE-P2-2：OI 合流修飾器。flag=false 時 score 完全不變（bit-exact）。
-                        // 開啟且 buffer 有有效 delta 時：方向一致加 bonus，背離則扣 bonus。
+                        // 開啟且 surface.oi_delta_panel 有有效 delta 時：方向一致加 bonus，背離則扣 bonus。
                         // score=None（上游合流停用）時不憑 OI 偽造 score。
                         // FUP：需 `|d| > oi_min_delta_pct` 才套 bonus；預設 0.0 保留 pre-FUP 行為。
                         let score = if self.enable_oi_signal {
-                            let delta_opt =
-                                self.symbols.get(sym).and_then(|s| s.compute_oi_delta_pct());
-                            match (score, delta_opt) {
-                                (Some(s), Some(d)) if d.abs() > self.oi_min_delta_pct => {
-                                    let confirms = (d > 0.0 && is_long) || (d < 0.0 && !is_long);
+                            match score {
+                                Some(s) if oi_panel_delta_pct.abs() > self.oi_min_delta_pct => {
+                                    let confirms = (oi_panel_delta_pct > 0.0 && is_long)
+                                        || (oi_panel_delta_pct < 0.0 && !is_long);
                                     let adj = if confirms {
                                         self.oi_confluence_bonus
                                     } else {
