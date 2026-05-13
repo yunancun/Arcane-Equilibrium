@@ -391,6 +391,14 @@ pub struct EventConsumerDeps {
     /// `paper_state.set_positions_mirror(mirror)`，對帳器讀鏡像抑制
     /// 「自家剛開倉」的假 Orphan。None 時停用抑制（回退 Phase 1 行為）。
     pub positions_mirror: Option<Arc<parking_lot::RwLock<HashMap<String, bool>>>>,
+    /// W-AUDIT-8a Phase B consumer wiring: FundingCurvePanelSlot Arc clone for
+    /// pipeline. `None` = test / pre-wire path, so AlphaSurface.funding_curve
+    /// remains unavailable.
+    pub funding_curve_panel_slot: Option<crate::ipc_server::FundingCurvePanelSlot>,
+    /// W-AUDIT-8a Phase B consumer wiring: OIDeltaPanelSlot Arc clone for
+    /// pipeline. `None` = test / pre-wire path, so AlphaSurface.oi_delta_panel
+    /// remains unavailable and consumers fail closed.
+    pub oi_delta_panel_slot: Option<crate::ipc_server::OIDeltaPanelSlot>,
     /// W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for
     /// pipeline。bootstrap.rs 構造 TickPipeline 後呼叫
     /// `pipeline.set_btc_lead_lag_panel_slot(slot)` 注入。`None` = 未注入

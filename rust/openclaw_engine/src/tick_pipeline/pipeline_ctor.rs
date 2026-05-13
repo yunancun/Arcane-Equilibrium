@@ -153,6 +153,8 @@ impl TickPipeline {
                 0.03,
                 crate::dynamic_risk_sizer::DynamicRiskSizerConfig::default(),
             ),
+            funding_curve_panel_slot: None,
+            oi_delta_panel_slot: None,
             // W2 sub-task 4 (E1-δ, 2026-05-11): default None；main.rs 在
             // BtcLeadLagProducer spawn 同時透過 set_btc_lead_lag_panel_slot()
             // 注入。test / dev 不注入 → step_4_5_dispatch surface.btc_lead_lag = None
@@ -241,6 +243,16 @@ impl TickPipeline {
         crate::mode_state::effective_engine_mode(self.pipeline_kind, self.endpoint_env)
     }
 
+    /// W-AUDIT-8a Phase B: inject the shared FundingCurvePanelSlot for
+    /// dispatch-time AlphaSurface fill.
+    pub fn set_funding_curve_panel_slot(&mut self, slot: crate::ipc_server::FundingCurvePanelSlot) {
+        self.funding_curve_panel_slot = Some(slot);
+    }
+
+    pub fn set_oi_delta_panel_slot(&mut self, slot: crate::ipc_server::OIDeltaPanelSlot) {
+        self.oi_delta_panel_slot = Some(slot);
+    }
+
     /// W2 sub-task 4 (E1-δ, 2026-05-11): 注入 BtcLeadLagPanel IPC slot Arc clone。
     /// main.rs 在 BtcLeadLagProducer spawn 後呼叫此 setter，把 producer 寫入端
     /// 的同一 Arc<RwLock<Option<BtcLeadLagPanel>>> clone 進來。step_4_5_dispatch
@@ -251,10 +263,7 @@ impl TickPipeline {
     /// （producer 全局 emit；fence 控制是否 dispatch surface field）。
     /// 即使 demo / live pipeline 拿到 slot，dispatch 端仍會 None；slot 注入是
     /// boot-time 一致性，runtime gate 是 dispatch-time 主防線。
-    pub fn set_btc_lead_lag_panel_slot(
-        &mut self,
-        slot: crate::ipc_server::BtcLeadLagPanelSlot,
-    ) {
+    pub fn set_btc_lead_lag_panel_slot(&mut self, slot: crate::ipc_server::BtcLeadLagPanelSlot) {
         self.btc_lead_lag_panel_slot = Some(slot);
     }
 
@@ -571,5 +580,30 @@ impl TickPipeline {
         &self,
     ) -> Option<&std::sync::Arc<crate::config::ConfigStore<crate::config::RiskConfig>>> {
         self.risk_store.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod phase_b_consumer_slot_tests {
+    use std::sync::Arc;
+
+    use tokio::sync::RwLock;
+
+    use super::TickPipeline;
+
+    #[test]
+    fn phase_b_panel_slots_default_none_and_setters_inject() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert!(pipeline.funding_curve_panel_slot.is_none());
+        assert!(pipeline.oi_delta_panel_slot.is_none());
+
+        let funding_slot = Arc::new(RwLock::new(None));
+        let oi_slot = Arc::new(RwLock::new(None));
+
+        pipeline.set_funding_curve_panel_slot(funding_slot);
+        pipeline.set_oi_delta_panel_slot(oi_slot);
+
+        assert!(pipeline.funding_curve_panel_slot.is_some());
+        assert!(pipeline.oi_delta_panel_slot.is_some());
     }
 }

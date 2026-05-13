@@ -56,9 +56,9 @@ fn ctx_oi(
         best_bid: None,
         best_ask: None,
         tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        alpha_surface_ref: super::fresh_oi_surface(),
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -112,9 +112,9 @@ fn ctx_full_entry(
         best_bid: None,
         best_ask: None,
         tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        alpha_surface_ref: super::fresh_oi_surface(),
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -126,6 +126,80 @@ fn state_with_oi(samples: &[(u64, f64)]) -> BbBreakoutPerSymbolState {
         st.oi_buffer.push_back((*ts, *oi));
     }
     st
+}
+
+fn prime_panel_backed_squeeze(strat: &mut BbBreakout) {
+    let _ = strat.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50_000.0, None),
+        super::fresh_oi_surface(),
+    );
+}
+
+#[test]
+fn test_oi_panel_missing_fail_closed() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    prime_panel_backed_squeeze(&mut s);
+
+    let actions = s.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51_000.0, None),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(actions.is_empty(), "missing OI panel must fail closed");
+}
+
+#[test]
+fn test_oi_panel_stale_fail_closed() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    prime_panel_backed_squeeze(&mut s);
+    let stale_surface = super::test_oi_surface(&["BTC"], &[0.02], 0);
+
+    let actions = s.on_tick(
+        &ctx_full_entry(
+            0.05,
+            1.1,
+            2.0,
+            super::OI_PANEL_MAX_AGE_MS as u64 + 1,
+            51_000.0,
+            None,
+        ),
+        stale_surface,
+    );
+    assert!(actions.is_empty(), "stale OI panel must fail closed");
+}
+
+#[test]
+fn test_oi_panel_symbol_missing_fail_closed() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    prime_panel_backed_squeeze(&mut s);
+    let eth_only_surface = super::test_oi_surface(&["ETH"], &[0.02], i64::MAX / 4);
+
+    let actions = s.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51_000.0, None),
+        eth_only_surface,
+    );
+    assert!(
+        actions.is_empty(),
+        "symbol-missing OI panel must fail closed"
+    );
+}
+
+#[test]
+fn test_oi_panel_present_allows_breakout_path() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    prime_panel_backed_squeeze(&mut s);
+
+    let actions = s.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51_000.0, None),
+        super::fresh_oi_surface(),
+    );
+    assert!(
+        !actions.is_empty(),
+        "fresh OI panel should keep breakout path open"
+    );
 }
 
 /// TEST 1: oi_buffer fills on every ticker event carrying OI and evicts
@@ -141,7 +215,10 @@ fn test_oi_buffer_fills_and_evicts() {
         let ts = i * 12_000;
         // Use squeeze-neutral bandwidth; this exercises the buffer path only.
         // 用普通帶寬只驗 buffer 路徑。
-        s.on_tick(&ctx_oi(0.03, 0.5, 1.0, ts, 50000.0, Some(100.0 + i as f64)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+        s.on_tick(
+            &ctx_oi(0.03, 0.5, 1.0, ts, 50000.0, Some(100.0 + i as f64)),
+            super::fresh_oi_surface(),
+        );
     }
     let st = s.symbols.get("BTC").expect("symbol tracked");
     // Newest ts = 108_000; anything older than (108_000 - 60_000) = 48_000 evicted.
@@ -205,31 +282,32 @@ fn test_confluence_bonus_disabled_by_default() {
 
     // Seed squeeze on both.
     // 雙方都先進入壓縮。
-    baseline.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, None), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    with_oi.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    baseline.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, None),
+        super::fresh_oi_surface(),
+    );
+    with_oi.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
 
     // Feed mid-tick with OI climb (only affects buffer, not score, because flag=false).
     // 中途加入 OI 上升樣本（flag=false 時不應影響 score）。
-    with_oi.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        300_000,
-        50000.0,
-        Some(110.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    with_oi.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(110.0)),
+        super::fresh_oi_surface(),
+    );
 
     // Breakout tick (long).
     // 突破 tick（多頭）。
-    let i_baseline = baseline.on_tick(&ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, None), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i_oi = with_oi.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        700_000,
-        51000.0,
-        Some(120.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i_baseline = baseline.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, None),
+        super::fresh_oi_surface(),
+    );
+    let i_oi = with_oi.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, Some(120.0)),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i_baseline.len(), 1);
     assert_eq!(i_oi.len(), 1);
     let (sb, so) = match (&i_baseline[0], &i_oi[0]) {
@@ -259,6 +337,9 @@ fn test_confluence_bonus_disabled_by_default() {
 fn test_confluence_bonus_applied_when_flag_on() {
     // Two instances: both OI-enabled, one with OI rising, one flat.
     // 兩個實例：都啟用 OI，一個 OI 上升、一個持平。
+    let rising_surface = super::test_oi_surface(&["BTC"], &[0.02], i64::MAX / 4);
+    let flat_surface = super::test_oi_surface(&["BTC"], &[0.0], i64::MAX / 4);
+
     let mut rising = BbBreakout::new();
     rising.min_persistence_ms = 0;
     rising.enable_oi_signal = true;
@@ -273,44 +354,34 @@ fn test_confluence_bonus_applied_when_flag_on() {
 
     // Squeeze tick (same OI base on both).
     // 壓縮 tick（兩者 OI 相同基準）。
-    rising.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    rising.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
+    flat.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Mid tick — rising climbs, flat holds.
     // 中段：rising 上升，flat 不變。
-    rising.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        300_000,
-        50000.0,
-        Some(110.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    flat.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        300_000,
-        50000.0,
-        Some(100.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    rising.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(110.0)),
+        super::fresh_oi_surface(),
+    );
+    flat.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Breakout long on both.
-    // 突破多頭。
-    let i_rising = rising.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        700_000,
-        51000.0,
-        Some(120.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i_flat = flat.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        700_000,
-        51000.0,
-        Some(100.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    // 突破多頭。OI confluence now comes from AlphaSurface, not ctx.open_interest.
+    let i_rising = rising.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, Some(120.0)),
+        rising_surface,
+    );
+    let i_flat = flat.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, Some(100.0)),
+        flat_surface,
+    );
     assert_eq!(i_rising.len(), 1);
     assert_eq!(i_flat.len(), 1);
     let (sr, sf) = match (&i_rising[0], &i_flat[0]) {
@@ -337,6 +408,9 @@ fn test_confluence_bonus_applied_when_flag_on() {
 /// 測試 7：flag=on + OI 下降 + 多頭（背離）→ confluence_score 較對照組低 -bonus。
 #[test]
 fn test_confluence_penalty_on_divergence() {
+    let falling_surface = super::test_oi_surface(&["BTC"], &[-0.02], i64::MAX / 4);
+    let flat_surface = super::test_oi_surface(&["BTC"], &[0.0], i64::MAX / 4);
+
     let mut falling = BbBreakout::new();
     falling.min_persistence_ms = 0;
     falling.enable_oi_signal = true;
@@ -350,42 +424,32 @@ fn test_confluence_penalty_on_divergence() {
     flat.oi_buffer_window_ms = 600_000;
 
     // Squeeze baseline.
-    falling.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    falling.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
+    flat.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Mid: falling drops, flat holds.
-    falling.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        300_000,
-        50000.0,
-        Some(95.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    flat.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        300_000,
-        50000.0,
-        Some(100.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    falling.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(95.0)),
+        super::fresh_oi_surface(),
+    );
+    flat.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Breakout long on both.
-    let i_falling = falling.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        700_000,
-        51000.0,
-        Some(90.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i_flat = flat.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        700_000,
-        51000.0,
-        Some(100.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i_falling = falling.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, Some(90.0)),
+        falling_surface,
+    );
+    let i_flat = flat.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, Some(100.0)),
+        flat_surface,
+    );
     let (sfall, sflat) = match (&i_falling[0], &i_flat[0]) {
         (StrategyAction::Open(a), StrategyAction::Open(b)) => (
             a.confluence_score.expect("score present"),
@@ -451,9 +515,18 @@ fn make_open_intent(symbol: &str) -> OrderIntent {
 fn test_oi_buffer_deduplicates_same_value() {
     let mut s = BbBreakout::new();
     s.oi_buffer_window_ms = 60_000;
-    s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 1_000, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 2_000, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_oi(0.03, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
+    s.on_tick(
+        &ctx_oi(0.03, 0.5, 1.0, 1_000, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
+    s.on_tick(
+        &ctx_oi(0.03, 0.5, 1.0, 2_000, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     let st = s.symbols.get("BTC").expect("symbol tracked");
     assert_eq!(
         st.oi_buffer.len(),
@@ -463,7 +536,10 @@ fn test_oi_buffer_deduplicates_same_value() {
     );
     // A genuine change should push a new sample.
     // 真實變動必須入隊。
-    s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 3_000, 50000.0, Some(100.0001)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_oi(0.03, 0.5, 1.0, 3_000, 50000.0, Some(100.0001)),
+        super::fresh_oi_surface(),
+    );
     let st = s.symbols.get("BTC").unwrap();
     assert_eq!(st.oi_buffer.len(), 2, "change-of-state must append");
 }
@@ -475,13 +551,22 @@ fn test_oi_buffer_deduplicates_same_value() {
 fn test_oi_buffer_skips_ts_regression() {
     let mut s = BbBreakout::new();
     s.oi_buffer_window_ms = 60_000;
-    s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 10_000, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_oi(0.03, 0.5, 1.0, 10_000, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Stale sample with older ts → must be dropped even though OI changed.
     // 舊 ts（即使 OI 變動）必須丟棄。
-    s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 5_000, 50000.0, Some(95.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_oi(0.03, 0.5, 1.0, 5_000, 50000.0, Some(95.0)),
+        super::fresh_oi_surface(),
+    );
     // Equal ts → must also drop (strict >).
     // 相同 ts → 也丟（嚴格 >）。
-    s.on_tick(&ctx_oi(0.03, 0.5, 1.0, 10_000, 50000.0, Some(105.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_oi(0.03, 0.5, 1.0, 10_000, 50000.0, Some(105.0)),
+        super::fresh_oi_surface(),
+    );
     let st = s.symbols.get("BTC").expect("symbol tracked");
     assert_eq!(st.oi_buffer.len(), 1, "ts regressions must not push");
     let (ts, oi) = *st.oi_buffer.back().unwrap();
@@ -498,25 +583,20 @@ fn test_on_rejection_preserves_oi_buffer() {
     s.min_persistence_ms = 0;
     s.oi_buffer_window_ms = 600_000;
     // Seed squeeze → OI sample #1.
-    s.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Mid tick → OI sample #2 (change of state pushes).
-    s.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        10_000,
-        50000.0,
-        Some(105.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 10_000, 50000.0, Some(105.0)),
+        super::fresh_oi_surface(),
+    );
     // Breakout tick → emits Open intent + stashes prev_state snapshot.
-    let actions = s.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        20_000,
-        51000.0,
-        Some(110.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let actions = s.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 20_000, 51000.0, Some(110.0)),
+        super::fresh_oi_surface(),
+    );
     assert!(
         matches!(actions.first(), Some(StrategyAction::Open(_))),
         "expected Open intent on breakout tick"
@@ -569,43 +649,33 @@ fn test_oi_min_delta_pct_below_threshold_no_effect() {
     flat.oi_min_delta_pct = 0.05;
 
     // Squeeze baseline.
-    guarded.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    flat.on_tick(&ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    guarded.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
+    flat.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Mid-tick: guarded rises 2% (< floor); flat stays.
     // 中段：guarded 上升 2%（< 地板）；flat 不動。
-    guarded.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        300_000,
-        50000.0,
-        Some(102.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    flat.on_tick(&ctx_full_entry(
-        0.02,
-        0.5,
-        1.0,
-        300_000,
-        50000.0,
-        Some(100.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    guarded.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(102.0)),
+        super::fresh_oi_surface(),
+    );
+    flat.on_tick(
+        &ctx_full_entry(0.02, 0.5, 1.0, 300_000, 50000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     // Breakout long.
-    let i_g = guarded.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        700_000,
-        51000.0,
-        Some(102.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i_f = flat.on_tick(&ctx_full_entry(
-        0.05,
-        1.1,
-        2.0,
-        700_000,
-        51000.0,
-        Some(100.0),
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i_g = guarded.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, Some(102.0)),
+        super::fresh_oi_surface(),
+    );
+    let i_f = flat.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51000.0, Some(100.0)),
+        super::fresh_oi_surface(),
+    );
     let (sg, sf) = match (&i_g[0], &i_f[0]) {
         (StrategyAction::Open(a), StrategyAction::Open(b)) => (
             a.confluence_score.expect("score present"),
