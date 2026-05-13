@@ -1046,8 +1046,9 @@ async fn async_main(
         let btc_lead_lag_cancel = cancel.clone();
         let btc_lead_lag_alt_cohort_vec = btc_lead_lag_alt_cohort();
         let btc_lead_lag_slot_for_producer = Arc::clone(&btc_lead_lag_panel_slot);
-        let btc_lead_lag_producer =
-            openclaw_engine::panel_aggregator::BtcLeadLagProducer::new(btc_lead_lag_alt_cohort_vec.clone());
+        let btc_lead_lag_producer = openclaw_engine::panel_aggregator::BtcLeadLagProducer::new(
+            btc_lead_lag_alt_cohort_vec.clone(),
+        );
         // W2-IMPL-1 (2026-05-11): orderbook 接線完成。
         // - 建立 BtcOrderbookSlot（producer & ingest task 共享）
         // - 從 fan-out 接 book_event_rx（line ~922 alloc），spawn ingest task
@@ -1055,8 +1056,7 @@ async fn async_main(
         // 兩 spawn 都 gate 在 Layer 2 fence 內（producer + ingest 共用同 fence）；
         // fence skip 路徑（else 分支）下方會 drop book_event_rx，fan-out send fail
         // silent drop，無 leak / 無 panic。
-        let btc_lead_lag_book_slot =
-            openclaw_engine::panel_aggregator::create_btc_orderbook_slot();
+        let btc_lead_lag_book_slot = openclaw_engine::panel_aggregator::create_btc_orderbook_slot();
         let btc_lead_lag_ingest_slot = Arc::clone(&btc_lead_lag_book_slot);
         let btc_lead_lag_ingest_cancel = cancel.clone();
         info!(
@@ -1115,6 +1115,8 @@ async fn async_main(
     // W2 sub-task 4 (E1-δ, 2026-05-11): wrap btc_lead_lag_panel_slot in Option
     // 給 PipelineSpawnContext。三 pipeline 透過 EventConsumerDeps 拿到 Arc clone，
     // 在 bootstrap.rs 注入 TickPipeline.btc_lead_lag_panel_slot。
+    let funding_curve_slot_for_pipelines = Some(Arc::clone(&funding_curve_panel_slot));
+    let oi_delta_slot_for_pipelines = Some(Arc::clone(&oi_delta_panel_slot));
     let btc_lead_lag_slot_for_pipelines = Some(Arc::clone(&btc_lead_lag_panel_slot));
 
     let spawn_ctx = main_pipelines::PipelineSpawnContext {
@@ -1136,6 +1138,8 @@ async fn async_main(
         global_exposure_usdt: &global_exposure_usdt,
         has_live,
         has_demo,
+        funding_curve_panel_slot: &funding_curve_slot_for_pipelines,
+        oi_delta_panel_slot: &oi_delta_slot_for_pipelines,
         // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot 注入三 pipeline
         btc_lead_lag_panel_slot: &btc_lead_lag_slot_for_pipelines,
     };
@@ -1257,6 +1261,8 @@ async fn async_main(
             agent_spine_tx: agent_spine_tx.clone(),
             agent_spine_mode,
             lease_transition_tx: lease_transition_tx.clone(),
+            funding_curve_panel_slot: Some(Arc::clone(&funding_curve_panel_slot)),
+            oi_delta_panel_slot: Some(Arc::clone(&oi_delta_panel_slot)),
             // W2 sub-task 4 (E1-δ, 2026-05-11): live respawn 拿同 BtcLeadLagPanelSlot
             // Arc clone（與 paper / demo 三引擎共享 producer 寫入端）
             btc_lead_lag_panel_slot: Some(Arc::clone(&btc_lead_lag_panel_slot)),
