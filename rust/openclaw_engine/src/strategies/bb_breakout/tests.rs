@@ -82,9 +82,9 @@ pub(super) fn ctx_ext(
         best_bid: None,
         best_ask: None,
         tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        alpha_surface_ref: super::fresh_oi_surface(),
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -146,9 +146,9 @@ fn ctx_dual_timeframe(
         best_bid: None,
         best_ask: None,
         tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        alpha_surface_ref: super::fresh_oi_surface(),
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -172,9 +172,9 @@ fn ctx_dual_timeframe_runtime_donchian(
         best_bid: None,
         best_ask: None,
         tick_size: None,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        alpha_surface_ref: super::fresh_oi_surface(),
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -182,8 +182,8 @@ fn ctx_dual_timeframe_runtime_donchian(
 fn test_squeeze_then_breakout() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
+    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -195,7 +195,9 @@ fn test_squeeze_then_breakout() {
 fn test_no_breakout_without_squeeze() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    assert!(s.on_tick(&ctx(0.05, 1.1, 2.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
+    assert!(s
+        .on_tick(&ctx(0.05, 1.1, 2.0, 0), super::fresh_oi_surface())
+        .is_empty());
 }
 
 #[test]
@@ -216,7 +218,7 @@ fn test_w_audit_6_bb_breakout_5m_skips_without_5m_indicators() {
     p.min_persistence_ms = 0;
     s.update_params(p).expect("valid 5m params");
 
-    let actions = s.on_tick(&ctx(0.01, 0.5, 2.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let actions = s.on_tick(&ctx(0.01, 0.5, 2.0, 0), super::fresh_oi_surface());
     assert!(actions.is_empty());
     assert!(
         !s.has_squeeze("BTC"),
@@ -234,18 +236,16 @@ fn test_w_audit_6_bb_breakout_5m_consumes_secondary_indicators() {
 
     // Primary 1m snapshot is expansion on both ticks. The strategy should
     // ignore it and use the 5m squeeze -> expansion sequence instead.
-    s.on_tick(&ctx_dual_timeframe(
-        (0.05, 1.1, 2.0),
-        Some((0.01, 0.5, 1.0)),
-        0,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_dual_timeframe((0.05, 1.1, 2.0), Some((0.01, 0.5, 1.0)), 0),
+        super::fresh_oi_surface(),
+    );
     assert!(s.has_squeeze("BTC"));
 
-    let actions = s.on_tick(&ctx_dual_timeframe(
-        (0.05, 1.1, 2.0),
-        Some((0.05, 1.1, 2.0)),
-        700_000,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let actions = s.on_tick(
+        &ctx_dual_timeframe((0.05, 1.1, 2.0), Some((0.05, 1.1, 2.0)), 700_000),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(actions.len(), 1);
     match &actions[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -261,20 +261,21 @@ fn test_w_audit_6_bb_breakout_5m_hard_gate_uses_prior_donchian() {
     p.min_persistence_ms = 0;
     s.update_params(p).expect("valid 5m params");
 
-    s.on_tick(&ctx_dual_timeframe_runtime_donchian(
-        (0.05, 1.1, 2.0),
-        Some((0.01, 0.5, 1.0)),
-        95.0,
-        0,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_dual_timeframe_runtime_donchian((0.05, 1.1, 2.0), Some((0.01, 0.5, 1.0)), 95.0, 0),
+        super::fresh_oi_surface(),
+    );
     assert!(s.has_squeeze("BTC"));
 
-    let actions = s.on_tick(&ctx_dual_timeframe_runtime_donchian(
-        (0.05, 1.1, 2.0),
-        Some((0.05, 1.1, 2.0)),
-        110.0,
-        700_000,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let actions = s.on_tick(
+        &ctx_dual_timeframe_runtime_donchian(
+            (0.05, 1.1, 2.0),
+            Some((0.05, 1.1, 2.0)),
+            110.0,
+            700_000,
+        ),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(
         actions.len(),
         1,
@@ -287,8 +288,8 @@ fn test_entry_price_recorded() {
     // After entry, entry_price should be set / 入場後 entry_price 應被設置
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-    s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // breakout long
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+    s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), super::fresh_oi_surface()); // breakout long
     assert_eq!(s.entry_price_of("BTC"), Some(50000.0));
     assert!(s.trailing_stop_of("BTC").is_none()); // no ATR data, no trailing stop yet
 }
@@ -307,8 +308,11 @@ fn test_atr_trailing_stop_long_exit() {
     };
 
     // Enter long
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-    let entry = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, atr(), None), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+    let entry = s.on_tick(
+        &ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, atr(), None),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(entry.len(), 1);
     assert!(matches!(&entry[0], StrategyAction::Open(intent) if intent.is_long));
     assert_eq!(s.entry_price_of("BTC"), Some(50000.0));
@@ -321,14 +325,14 @@ fn test_atr_trailing_stop_long_exit() {
     // 價格上漲 -> 追蹤止損上移，不出場
     let mut tick2 = ctx_ext(0.05, 1.2, 2.0, 1_400_000, 52000.0, atr(), None);
     tick2.position_state = Some(&pp_long);
-    let i = s.on_tick(&tick2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick2, super::fresh_oi_surface());
     assert!(i.is_empty()); // still in trend
     assert_eq!(s.trailing_stop_of("BTC"), Some(51000.0)); // 52000 - 1000
 
     // 價格跌至追蹤止損 -> 出場
     let mut tick3 = ctx_ext(0.05, 0.9, 2.0, 2_100_000, 51000.0, atr(), None);
     tick3.position_state = Some(&pp_long);
-    let i = s.on_tick(&tick3, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick3, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close {
@@ -359,8 +363,11 @@ fn test_atr_trailing_stop_short_exit() {
     };
 
     // Enter short
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-    let entry = s.on_tick(&ctx_ext(0.05, -0.1, 2.0, 700_000, 50000.0, atr(), None), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+    let entry = s.on_tick(
+        &ctx_ext(0.05, -0.1, 2.0, 700_000, 50000.0, atr(), None),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(entry.len(), 1);
     assert!(matches!(&entry[0], StrategyAction::Open(intent) if !intent.is_long));
     assert_eq!(s.entry_price_of("BTC"), Some(50000.0));
@@ -372,14 +379,14 @@ fn test_atr_trailing_stop_short_exit() {
     // 價格下跌 -> 追蹤止損下移
     let mut tick2 = ctx_ext(0.05, -0.2, 2.0, 1_400_000, 48000.0, atr(), None);
     tick2.position_state = Some(&pp_short);
-    let i = s.on_tick(&tick2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick2, super::fresh_oi_surface());
     assert!(i.is_empty());
     assert_eq!(s.trailing_stop_of("BTC"), Some(49000.0)); // 48000 + 1000
 
     // 價格漲破追蹤止損 -> 出場
     let mut tick3 = ctx_ext(0.05, 0.1, 2.0, 2_100_000, 49000.0, atr(), None);
     tick3.position_state = Some(&pp_short);
-    let i = s.on_tick(&tick3, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick3, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "trailing_stop"),
@@ -406,8 +413,11 @@ fn test_regime_exit() {
     };
 
     // Enter long (with trending regime boost)
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+    let i = s.on_tick(
+        &ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -421,17 +431,9 @@ fn test_regime_exit() {
     let pp_long = make_owned_paper_position("BTC", true);
 
     // Regime shifts to mean_reverting -> exit
-    let mut tick2 = ctx_ext(
-        0.05,
-        1.1,
-        2.0,
-        1_400_000,
-        51000.0,
-        None,
-        ranging(),
-    );
+    let mut tick2 = ctx_ext(0.05, 1.1, 2.0, 1_400_000, 51000.0, None, ranging());
     tick2.position_state = Some(&pp_long);
-    let i = s.on_tick(&tick2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick2, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close {
@@ -453,14 +455,14 @@ fn test_configurable_volume_threshold() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
     s.volume_threshold = 3.0; // require 3x volume instead of default 1.5x
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-                                        // vol=2.0 passes default (1.5) but fails custom (3.0)
-                                        // vol=2.0 通過默認閾值(1.5)但不通過自訂閾值(3.0)
-    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+                                                                   // vol=2.0 passes default (1.5) but fails custom (3.0)
+                                                                   // vol=2.0 通過默認閾值(1.5)但不通過自訂閾值(3.0)
+    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), super::fresh_oi_surface());
     assert!(i.is_empty(), "volume 2.0 should not pass threshold 3.0");
 
     // vol=3.5 passes custom threshold / vol=3.5 通過自訂閾值
-    let i = s.on_tick(&ctx(0.05, 1.1, 3.5, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&ctx(0.05, 1.1, 3.5, 700_000), super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
@@ -478,15 +480,15 @@ fn test_configurable_squeeze_expansion_bw() {
     s.expansion_bw = 0.06; // require stronger expansion / 要求更強擴張
 
     // bw=0.025 triggers squeeze with custom threshold (< 0.03)
-    s.on_tick(&ctx(0.025, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.025, 0.5, 1.0, 0), super::fresh_oi_surface());
     assert!(s.has_squeeze("BTC"));
 
     // bw=0.05 is expansion for default (> 0.04) but NOT for custom (< 0.06)
-    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), super::fresh_oi_surface());
     assert!(i.is_empty(), "bw 0.05 should not pass expansion_bw 0.06");
 
     // bw=0.07 passes custom expansion threshold / 通過自訂擴張閾值
-    let i = s.on_tick(&ctx(0.07, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&ctx(0.07, 1.1, 2.0, 700_000), super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
 }
 
@@ -525,8 +527,8 @@ fn test_pctb_revert_exit() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
                               // Enter long (no ATR, no Hurst — only pctb/bw exits active)
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-    let entry = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+    let entry = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), super::fresh_oi_surface());
     assert!(matches!(entry.first(), Some(StrategyAction::Open(intent)) if intent.is_long));
     assert_eq!(s.entry_price_of("BTC"), Some(50000.0));
 
@@ -535,7 +537,7 @@ fn test_pctb_revert_exit() {
     // %B reverts to 0.5 (mid-band) → should trigger pctb_revert exit
     let mut tick2 = ctx(0.05, 0.5, 2.0, 1_400_000);
     tick2.position_state = Some(&pp_long);
-    let i = s.on_tick(&tick2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick2, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close {
@@ -557,8 +559,8 @@ fn test_bw_squeeze_exit() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
                               // Enter long
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-    let entry = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+    let entry = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), super::fresh_oi_surface());
     assert!(matches!(entry.first(), Some(StrategyAction::Open(intent)) if intent.is_long));
     assert_eq!(s.entry_price_of("BTC"), Some(50000.0));
 
@@ -568,7 +570,7 @@ fn test_bw_squeeze_exit() {
     // → pctb_revert doesn't trigger, but bw_squeeze does
     let mut tick2 = ctx(0.015, 1.1, 2.0, 1_400_000);
     tick2.position_state = Some(&pp_long);
-    let i = s.on_tick(&tick2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick2, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close {
@@ -831,8 +833,8 @@ fn test_bb_breakout_market_entry_when_maker_disabled() {
     assert!(!s.use_maker_entry, "use_maker_entry must default to false");
     // Squeeze then expansion long breakout (mirrors test_squeeze_then_breakout).
     // 先壓縮再擴張多頭突破（與 test_squeeze_then_breakout 同模式）。
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
+    let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000), super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -856,12 +858,14 @@ fn test_bb_breakout_buy_postonly_below_last_price() {
     s.maker_limit_timeout_ms = 45_000;
     // Long setup: pctb=1.1 > 1.0 -> is_long
     // 多頭設置：pctb=1.1 > 1.0 → is_long
-    s.on_tick(&ctx_with_bbo_g709c(
-        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = s.on_tick(&ctx_with_bbo_g709c(
-        0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
+    let i = s.on_tick(
+        &ctx_with_bbo_g709c(0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -892,12 +896,14 @@ fn test_bb_breakout_sell_postonly_above_last_price() {
     s.maker_limit_timeout_ms = 45_000;
     // Short setup: pctb=-0.1 < 0.0 -> is_short
     // 空頭設置：pctb=-0.1 < 0.0 → is_short
-    s.on_tick(&ctx_with_bbo_g709c(
-        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = s.on_tick(&ctx_with_bbo_g709c(
-        0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
+    let i = s.on_tick(
+        &ctx_with_bbo_g709c(0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -1002,9 +1008,9 @@ fn ctx_with_bbo_g709c(
         best_bid: Some(bid),
         best_ask: Some(ask),
         tick_size: Some(tick),
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        alpha_surface_ref: super::fresh_oi_surface(),
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -1019,14 +1025,16 @@ fn test_g7_09c_bb_breakout_buy_uses_best_bid_passive() {
     s.maker_price_offset_bps = 1.0;
     // Squeeze first.
     // 先壓縮。
-    s.on_tick(&ctx_with_bbo_g709c(
-        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
     // Expansion + high vol + percent_b > 1 → long breakout.
     // 擴張 + 高量 + percent_b > 1 → 多頭突破。
-    let i = s.on_tick(&ctx_with_bbo_g709c(
-        0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(
+        &ctx_with_bbo_g709c(0.05, 1.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -1053,14 +1061,16 @@ fn test_g7_09c_bb_breakout_sell_uses_best_ask_passive() {
     s.use_maker_entry = true;
     s.maker_price_buffer_ticks = 1;
     s.maker_price_offset_bps = 1.0;
-    s.on_tick(&ctx_with_bbo_g709c(
-        0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(
+        &ctx_with_bbo_g709c(0.01, 0.5, 1.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
     // Expansion + high vol + percent_b < 0 → short breakout.
     // 擴張 + 高量 + percent_b < 0 → 空頭突破。
-    let i = s.on_tick(&ctx_with_bbo_g709c(
-        0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1,
-    ), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(
+        &ctx_with_bbo_g709c(0.05, -0.1, 2.0, 700_000, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -1103,8 +1113,11 @@ fn test_phase_b_persistent_label_triggers_hurst_boost() {
             regime: "trending".into(), // == RegimeLabel::Persistent.as_legacy_str()
         })
     };
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // squeeze
-    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface()); // squeeze
+    let i = s.on_tick(
+        &ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -1132,8 +1145,11 @@ fn test_phase_b_random_label_does_not_trigger_hurst_boost() {
             regime: "random_walk".into(), // RegimeLabel::Random
         })
     };
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, random()), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
+    let i = s.on_tick(
+        &ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, random()),
+        super::fresh_oi_surface(),
+    );
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Open(intent) => {
@@ -1165,13 +1181,16 @@ fn test_phase_b_anti_persistent_triggers_regime_shift_exit() {
             regime: "mean_reverting".into(),
         })
     };
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
+    s.on_tick(
+        &ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()),
+        super::fresh_oi_surface(),
+    );
 
     let pp_long = make_owned_paper_position("BTC", true);
     let mut tick3 = ctx_ext(0.05, 1.1, 2.0, 1_400_000, 51000.0, None, anti());
     tick3.position_state = Some(&pp_long);
-    let i = s.on_tick(&tick3, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick3, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => {
@@ -1202,13 +1221,16 @@ fn test_phase_b_random_walk_triggers_regime_shift_exit() {
             regime: "random_walk".into(),
         })
     };
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
+    s.on_tick(
+        &ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()),
+        super::fresh_oi_surface(),
+    );
 
     let pp_long = make_owned_paper_position("BTC", true);
     let mut tick3 = ctx_ext(0.05, 1.1, 2.0, 1_400_000, 51000.0, None, random());
     tick3.position_state = Some(&pp_long);
-    let i = s.on_tick(&tick3, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick3, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => {
@@ -1239,14 +1261,17 @@ fn test_phase_b_unknown_regime_string_treated_as_random() {
             regime: "totally_invalid_label".into(),
         })
     };
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
+    s.on_tick(
+        &ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()),
+        super::fresh_oi_surface(),
+    );
 
     let pp_long = make_owned_paper_position("BTC", true);
     let mut tick3 = ctx_ext(0.05, 1.1, 2.0, 1_400_000, 51000.0, None, bogus());
     tick3.position_state = Some(&pp_long);
     // Unknown → Random → triggers regime_shift exit (Random branch matches).
-    let i = s.on_tick(&tick3, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = s.on_tick(&tick3, super::fresh_oi_surface());
     assert_eq!(i.len(), 1);
     match &i[0] {
         StrategyAction::Close { reason, .. } => {
@@ -1321,9 +1346,19 @@ fn test_bbb_bootstrap_imports_paper_state_entry_price_only() {
     s.import_positions(&paper);
 
     let st = s.symbols.get("BTC").expect("BTC must be imported");
-    assert_eq!(st.entry_price, Some(50_000.0), "entry_price 必還原（trailing math 起點）");
-    assert!(st.trailing_stop.is_none(), "trailing_stop bootstrap 後留 None，待首 tick 重算");
-    assert!(s.symbols.get("ETH").is_none(), "不可 import ma_crossover 倉位");
+    assert_eq!(
+        st.entry_price,
+        Some(50_000.0),
+        "entry_price 必還原（trailing math 起點）"
+    );
+    assert!(
+        st.trailing_stop.is_none(),
+        "trailing_stop bootstrap 後留 None，待首 tick 重算"
+    );
+    assert!(
+        s.symbols.get("ETH").is_none(),
+        "不可 import ma_crossover 倉位"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1353,7 +1388,8 @@ fn test_bbb_on_rejection_duplicate_position_runs_rc04_rollback() {
         trailing_stop: Some(2_950.0),
         oi_buffer: std::collections::VecDeque::new(),
     };
-    s.prev_state.insert("ETHUSDT".to_string(), Some(prev_st.clone()));
+    s.prev_state
+        .insert("ETHUSDT".to_string(), Some(prev_st.clone()));
     // mutation 後狀態（將被 rollback 覆蓋）
     let cur = s.symbols.get_or_init("ETHUSDT");
     cur.entry_price = Some(2_500.0);
@@ -1450,8 +1486,8 @@ fn make_cross_strategy_paper_position(symbol: &str, is_long: bool) -> PaperPosit
 fn test_bbb_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    // squeeze 階段 → 寫 squeeze_detected_ms（不觸發 entry）。
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+                              // squeeze 階段 → 寫 squeeze_detected_ms（不觸發 entry）。
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
     assert!(s.has_squeeze("BTC"), "squeeze 必登記");
 
     // breakout tick + ctx.position_state = Some(SHORT)，owner="grid_trading"。
@@ -1459,7 +1495,7 @@ fn test_bbb_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
     let mut ctx_breakout = ctx(0.05, 1.1, 2.0, 700_000); // breakout signal = LONG
     ctx_breakout.position_state = Some(&pp);
 
-    let intents = s.on_tick(&ctx_breakout, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let intents = s.on_tick(&ctx_breakout, super::fresh_oi_surface());
 
     // (1) 必 0 intents（skip entry，cross-strategy 倉位）。
     assert!(
@@ -1468,7 +1504,10 @@ fn test_bbb_on_tick_skips_entry_when_paper_state_has_other_strategy_position() {
         intents.len()
     );
     // (2) strategy-internal entry_price 必 None（不從 cross-strategy entry_price 寫）。
-    let st = s.symbols.get("BTC").expect("squeeze tick already created entry");
+    let st = s
+        .symbols
+        .get("BTC")
+        .expect("squeeze tick already created entry");
     assert!(
         st.entry_price.is_none(),
         "cross-strategy skip 必 NOT 寫 entry_price（避免 mis-calibrate trailing）"
@@ -1486,13 +1525,13 @@ fn test_bbb_on_tick_proceeds_entry_when_paper_state_is_none() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0;
     // squeeze
-    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    s.on_tick(&ctx(0.01, 0.5, 1.0, 0), super::fresh_oi_surface());
     assert!(s.has_squeeze("BTC"));
 
     let mut ctx_breakout = ctx(0.05, 1.1, 2.0, 700_000); // signal = LONG
     ctx_breakout.position_state = None; // 顯式 None；ctx() default 已 None，這裡再強調契約。
 
-    let intents = s.on_tick(&ctx_breakout, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let intents = s.on_tick(&ctx_breakout, super::fresh_oi_surface());
 
     assert_eq!(
         intents.len(),
@@ -1527,7 +1566,7 @@ fn test_bbb_does_not_close_cross_strategy_position_on_exit_signal() {
     let mut tick = ctx(0.05, 0.5, 2.0, 1_400_000);
     tick.position_state = Some(&pp_cross);
 
-    let intents = s.on_tick(&tick, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let intents = s.on_tick(&tick, super::fresh_oi_surface());
 
     // 期望：0 Close（owner_strategy != bb_breakout，exit 分支根本不進）。
     // 由於 ctx.position_state.is_some() 走「cross-strategy skip entry」路徑，
@@ -1551,9 +1590,13 @@ fn test_bbb_emits_close_on_owned_position_with_exit_signal() {
     let mut tick = ctx(0.05, 0.5, 2.0, 1_400_000);
     tick.position_state = Some(&pp_owned);
 
-    let intents = s.on_tick(&tick, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let intents = s.on_tick(&tick, super::fresh_oi_surface());
 
-    assert_eq!(intents.len(), 1, "owned paper_state + exit signal 必 emit Close");
+    assert_eq!(
+        intents.len(),
+        1,
+        "owned paper_state + exit signal 必 emit Close"
+    );
     match &intents[0] {
         StrategyAction::Close { reason, .. } => {
             assert_eq!(reason, "pctb_revert", "expected pctb_revert exit reason");

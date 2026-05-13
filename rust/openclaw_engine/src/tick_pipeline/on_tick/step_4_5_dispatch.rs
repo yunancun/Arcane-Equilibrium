@@ -21,7 +21,9 @@
 use std::ops::ControlFlow;
 use std::time::Instant;
 
-use openclaw_core::alpha_surface::{AlphaSurface, BtcLeadLagPanel};
+use openclaw_core::alpha_surface::{
+    AlphaSurface, BtcLeadLagPanel, FundingCurveSnapshot, OIDeltaPanel,
+};
 use openclaw_core::governance_core::LeaseOutcome;
 use openclaw_core::signals::Signal;
 use tracing::{info, warn};
@@ -181,13 +183,18 @@ impl TickPipeline {
             .filter(|t| *t > 0.0);
         let indicators_5m = self.compute_indicators_for_timeframe(sym, "5m");
 
-        // W-AUDIT-8a Phase A：build Tier 1 only AlphaSurface — Tier 2-4 collector
-        // 留給 Phase B/C/D。surface 引用與 ctx 同生命週期，借用 `indicators` /
-        // `indicators_5m`（與 `TickContext` 同源）。
-        //
-        // === Sprint N+1 W1 funding_curve / oi_delta_panel surface field assignment ===
-        // W1 E1-α (B-1) 在 surface field 處加 `funding_curve: self.funding_slot.latest()`
-        // W1 E1-β (B-2) 在 surface field 處加 `oi_delta_panel: self.oi_slot.latest()`
+        // W-AUDIT-8a Phase B consumer wiring: clone Tier 2 panel snapshots
+        // from late-injected slots before AlphaSurface construction. try_read
+        // keeps the on_tick hot path fail-soft; no lock is held across strategy
+        // dispatch.
+        let funding_curve_owned: Option<FundingCurveSnapshot> = self
+            .funding_curve_panel_slot
+            .as_ref()
+            .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone()));
+        let oi_delta_panel_owned: Option<OIDeltaPanel> = self
+            .oi_delta_panel_slot
+            .as_ref()
+            .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone()));
         //
         // === W2 sub-task 4 (E1-δ, 2026-05-11) btc_lead_lag wire-up ===
         // paper-only fence Layer 1（主防線，per spec §6.1）：
@@ -211,6 +218,8 @@ impl TickPipeline {
             _ => None, // demo / live_demo / live → fence 主防線
         };
         let alpha_surface = AlphaSurface {
+            funding_curve: funding_curve_owned.as_ref(),
+            oi_delta_panel: oi_delta_panel_owned.as_ref(),
             btc_lead_lag: btc_lead_lag_panel_owned.as_ref(),
             ..AlphaSurface::tier1_only(indicators, indicators_5m.as_ref())
         };
@@ -651,12 +660,11 @@ impl TickPipeline {
                                 // 字面複製；不變式見 spine_ids.rs module docstring。
                                 let verdict_id_for_dispatch =
                                     make_verdict_id(em, &intent.symbol, event.ts_ms);
-                                let spine_ids =
-                                    crate::agent_spine::spine_ids::compute_spine_ids(
-                                        em,
-                                        signal_id.as_str(),
-                                        verdict_id_for_dispatch.as_str(),
-                                    );
+                                let spine_ids = crate::agent_spine::spine_ids::compute_spine_ids(
+                                    em,
+                                    signal_id.as_str(),
+                                    verdict_id_for_dispatch.as_str(),
+                                );
                                 let spine_decision_id = spine_ids.decision_id;
                                 let spine_order_plan_id = spine_ids.order_plan_id;
                                 let spine_stub_report_id = spine_ids.stub_report_id;
