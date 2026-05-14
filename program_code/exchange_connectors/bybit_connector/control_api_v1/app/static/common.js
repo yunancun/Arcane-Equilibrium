@@ -532,6 +532,18 @@ function ocPerformanceMetricValue(metrics, key) {
   return metric ? metric.value : null;
 }
 
+// Choose canonical metrics from an API payload; empty legacy arrays must fall back to DB truth.
+// 從 API payload 選 canonical metrics；空 legacy 陣列必須回落到 DB truth。
+function ocPerformanceMetricsFromPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  const top = payload && Array.isArray(payload.performance_metrics) ? payload.performance_metrics : null;
+  const dbMetrics = payload && payload.db_true_metrics && Array.isArray(payload.db_true_metrics.performance_metrics)
+    ? payload.db_true_metrics.performance_metrics : null;
+  if (top && top.length > 0) return top;
+  if (dbMetrics && dbMetrics.length > 0) return dbMetrics;
+  return top || dbMetrics || [];
+}
+
 // Format backend metric descriptors without each tab duplicating unit logic.
 // 格式化後端 metric 描述，避免各 tab 重複實作單位邏輯。
 function ocFormatPerformanceMetric(metric) {

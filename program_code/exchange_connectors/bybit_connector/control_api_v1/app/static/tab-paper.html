@@ -672,8 +672,7 @@ async function loadMetrics() {
   const d = await ocApi('/api/v1/paper/metrics');
   if (!d || !d.data) { ocSetHtml('perf-metrics', '<div class="oc-loading">暂无指标数据</div>'); return; }
   const m = d.data;
-  const db = m.db_true_metrics || {};
-  const metrics = m.performance_metrics || db.performance_metrics || [];
+  const metrics = ocPerformanceMetricsFromPayload(m);
   const dm = m.drawdown_metrics || {};
   ocSetHtml('perf-metrics', ocRenderPerformanceMetrics(metrics));
 

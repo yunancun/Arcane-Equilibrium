@@ -1105,9 +1105,7 @@ function _isPhantomViewError(payload) {
 }
 
 function _livePerformanceMetrics(payload) {
-  return (payload && payload.performance_metrics)
-    || (payload && payload.db_true_metrics && payload.db_true_metrics.performance_metrics)
-    || [];
+  return ocPerformanceMetricsFromPayload(payload);
 }
 
 function _liveMetricValue(payload, key) {
@@ -1615,7 +1613,7 @@ async function loadLiveMetrics() {
     return;
   }
   const m = d.data;
-  const metrics = m.performance_metrics || ((m.db_true_metrics || {}).performance_metrics || []);
+  const metrics = ocPerformanceMetricsFromPayload(m);
   if (Array.isArray(metrics) && metrics.length) {
     ocSetHtml('live-perf-metrics', ocRenderPerformanceMetrics(metrics));
     _liveMetricsLoadedOnce = true;

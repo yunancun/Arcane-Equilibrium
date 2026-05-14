@@ -893,9 +893,7 @@ async function refreshSidebar() {
       const realizedGross = parseFloat(b.engine_realized_pnl || 0) || 0;
       const fees = parseFloat(b.engine_total_fees || 0) || 0;
       let net = realizedGross - fees + unrealized;
-      const perf = (metricsPayload && metricsPayload.performance_metrics)
-        || (metricsPayload && metricsPayload.db_true_metrics && metricsPayload.db_true_metrics.performance_metrics)
-        || [];
+      const perf = ocPerformanceMetricsFromPayload(metricsPayload);
       const netMetric = Array.isArray(perf) ? perf.find(m => m && m.key === 'net_pnl_7d') : null;
       if (!Number.isFinite(net) && netMetric) net = Number(netMetric.value);
 

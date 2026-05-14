@@ -957,8 +957,7 @@ async function loadDemoMetrics(raw) {
     const d = await ocApi('/api/v1/strategy/demo/metrics');
     m = d && d.data ? d.data : null;
   } catch (_) {}
-  const db = (m && m.db_true_metrics) || {};
-  const metrics = (m && m.performance_metrics) || db.performance_metrics || [];
+  const metrics = ocPerformanceMetricsFromPayload(m);
   const winRateMetric = ocPerformanceMetricByKey(metrics, 'win_rate');
   const wlMetric = ocPerformanceMetricByKey(metrics, 'win_loss_ratio');
   const maxDdMetric = ocPerformanceMetricByKey(metrics, 'max_drawdown');
@@ -975,7 +974,7 @@ async function loadDemoMetrics(raw) {
   ocSetText('d-maxdd', maxDdMetric ? ocFormatPerformanceMetric(maxDdMetric) : '--');
 
   if (!m || !Array.isArray(metrics) || metrics.length === 0) {
-    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无 DB 指标</div>');
+    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无指标数据</div>');
     return;
   }
   ocSetHtml('demo-perf-metrics', ocRenderPerformanceMetrics(metrics));
