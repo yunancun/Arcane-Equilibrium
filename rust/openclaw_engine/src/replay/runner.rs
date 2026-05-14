@@ -101,7 +101,9 @@
 use serde::Serialize;
 use std::collections::HashMap;
 
-use crate::replay::context_builder::{ReplayContextBuilder, ReplayTickInputs};
+use crate::replay::context_builder::{
+    build_replay_position_borrow, build_tick_context, ReplayContextBuilder,
+};
 use crate::replay::fixture_loader::MarketEvent;
 use crate::replay::forbidden_guard::{self, ForbiddenPathError};
 use crate::replay::profile::ReplayProfile;
@@ -1144,73 +1146,6 @@ impl IsolatedPipeline {
             status: self.status,
             decision_traces,
         }
-    }
-}
-
-/// Build a replay TickContext from fixture event + replay-safe derived inputs.
-///
-/// SAFETY: this helper borrows owned inputs from the current replay loop only;
-/// it imports no production singleton, DB writer, exchange, IPC, or live-auth
-/// surface.
-fn build_tick_context<'a>(
-    event: &'a MarketEvent,
-    inputs: &'a ReplayTickInputs,
-    is_pinned: bool,
-    position_state: Option<&'a crate::paper_state::PaperPosition>,
-) -> crate::tick_pipeline::TickContext<'a> {
-    // W-AUDIT-8a Phase A：replay 用 EMPTY_ALPHA_SURFACE 對齊 byte-identical baseline。
-    // Tier A T1 + T2（2026-05-11）：is_pinned 改由 caller 依
-    // scanner_timeline.is_active_at 推算；position_state 改由 caller 從
-    // ReplayPaperSnapshot.get_position 映射為 stack-local PaperPosition borrow。
-    // synthetic walker 路徑（無 timeline + 無 snapshot）caller 傳
-    // (is_pinned=true, position_state=None) 維持 byte-equal baseline。
-    crate::tick_pipeline::TickContext {
-        symbol: &event.symbol,
-        price: event.close,
-        timestamp_ms: event.ts_ms.max(0) as u64,
-        indicators: inputs.indicators.as_ref(),
-        indicators_5m: None,
-        signals: &inputs.signals,
-        h0_allowed: inputs.h0_allowed,
-        funding_rate: inputs.funding_rate,
-        index_price: inputs.index_price,
-        open_interest: inputs.open_interest,
-        best_bid: event.best_bid,
-        best_ask: event.best_ask,
-        tick_size: inputs.tick_size,
-        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-        position_state,
-        is_pinned,
-    }
-}
-
-/// Tier A T2 helper：將 ReplayPosition 構造成 stack-local PaperPosition，
-/// 餵 build_tick_context 的 position_state 借用。生命週期與 caller scope 對齊
-/// （per-iteration NLL 釋放），不引 paper_state mutate side（PaperState 全域
-/// 變更面 + DB writer channel）— 僅借同模組 containers.rs 的 pure data struct。
-///
-/// 對齊 production PaperPosition field 預設值：tick_pipeline 讀的 entry path
-/// gate 主要關心 symbol / is_long / owner_strategy；其餘 field 在 replay
-/// 內沒有真實源，用合理 default 填（best_price 同 entry_price，fee/unrealized 等 0）。
-fn build_replay_position_borrow(
-    rp: &crate::replay::risk_adapter::ReplayPosition,
-    event_ts_ms: i64,
-) -> crate::paper_state::PaperPosition {
-    crate::paper_state::PaperPosition {
-        symbol: rp.symbol.clone(),
-        is_long: rp.is_long,
-        qty: rp.qty,
-        entry_price: rp.entry_price,
-        // best_price 對 entry path gate 不參與決策；用 entry_price 為合理 baseline。
-        best_price: rp.entry_price,
-        entry_fee: 0.0,
-        entry_ts_ms: event_ts_ms.max(0) as u64,
-        unrealized_pnl: 0.0,
-        entry_context_id: String::new(),
-        owner_strategy: rp.owner_strategy.clone(),
-        entry_notional: rp.qty * rp.entry_price,
-        max_favorable_pnl_pct: 0.0,
-        peak_reached_ts_ms: 0,
     }
 }
 

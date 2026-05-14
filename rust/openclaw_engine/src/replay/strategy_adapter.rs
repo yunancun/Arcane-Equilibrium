@@ -43,7 +43,6 @@ use crate::intent_processor::OrderIntent;
 use crate::replay::profile::{ReplayIsolationError, ReplayProfile};
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
-use openclaw_core::alpha_surface::AlphaSurface;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Public types / 公開型別
@@ -248,6 +247,7 @@ fn compute_intent_signature(intent: &OrderIntent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openclaw_core::alpha_surface::AlphaSurface;
 
     /// Stub strategy: emits one `Open` per call with caller-supplied qty.
     /// 測試 stub：每次發出一個 `Open`，qty 由 caller 指定。

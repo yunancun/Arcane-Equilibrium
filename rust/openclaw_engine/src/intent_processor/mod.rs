@@ -252,6 +252,7 @@ const DEFAULT_MAKER_FEE_RATE: f64 = 0.0002;
 /// G7-07：默認滑點率回退；僅供 test helper / 無 RiskConfig 的舊 caller 使用。
 /// 運行時滑點現由 `RiskConfig.slippage.lookup_rate(volume_24h)` 提供，可
 /// 從 `risk_config*.toml` 熱重載 tier 表。
+#[cfg(test)]
 pub(crate) const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
 
 /// Maximum age for API-fetched fee rates before exchange cost gates fail closed.
@@ -996,9 +997,8 @@ impl IntentProcessor {
         // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
         //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
         let cfg = &self.risk_config.edge_predictor;
-        let no_predictor = !cfg.use_edge_predictor
-            || self.edge_predictor_store.is_none()
-            || features.is_none();
+        let no_predictor =
+            !cfg.use_edge_predictor || self.edge_predictor_store.is_none() || features.is_none();
         if no_predictor {
             // emit evaluation log 然後返回（與舊路徑相容）
             self.try_emit_evaluation_log(
@@ -1056,12 +1056,8 @@ impl IntentProcessor {
             PredictorGateOutcome::RejectAdd(_) => ("reject_add", "evaluation_log"),
             PredictorGateOutcome::ShadowFill(_) => ("shadow_fill", "shadow_synthetic"),
             PredictorGateOutcome::Fallback(_) => match cfg.fallback_on_error {
-                EdgePredictorFallback::Shrinkage => {
-                    ("fallback_use_legacy", "evaluation_log")
-                }
-                EdgePredictorFallback::FailClosed => {
-                    ("fallback_fail_closed", "evaluation_log")
-                }
+                EdgePredictorFallback::Shrinkage => ("fallback_use_legacy", "evaluation_log"),
+                EdgePredictorFallback::FailClosed => ("fallback_fail_closed", "evaluation_log"),
             },
         };
         self.try_emit_evaluation_log(
