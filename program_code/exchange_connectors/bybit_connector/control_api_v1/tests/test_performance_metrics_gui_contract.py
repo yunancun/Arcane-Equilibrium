@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.trading_true_metrics import build_performance_metrics
 
+
+STATIC_DIR = Path(__file__).resolve().parents[1] / "app" / "static"
 
 EXPECTED_KEYS = [
     "total_fills_7d",
@@ -25,6 +29,23 @@ EXPECTED_KEYS = [
     "sharpe_ratio",
     "avg_hold_time",
 ]
+
+
+def test_static_gui_uses_non_empty_performance_metric_payload_fallback() -> None:
+    common = (STATIC_DIR / "common.js").read_text(encoding="utf-8")
+
+    assert "function ocPerformanceMetricsFromPayload(payload)" in common
+    assert "if (top && top.length > 0) return top" in common
+    assert "if (dbMetrics && dbMetrics.length > 0) return dbMetrics" in common
+
+
+@pytest.mark.parametrize("filename", ["console.html", "tab-demo.html", "tab-live.html", "tab-paper.html"])
+def test_static_gui_performance_metric_callers_use_canonical_payload_helper(filename: str) -> None:
+    source = (STATIC_DIR / filename).read_text(encoding="utf-8")
+
+    assert "ocPerformanceMetricsFromPayload(" in source
+    assert "performance_metrics) ||" not in source
+    assert "performance_metrics ||" not in source
 
 
 def _db_metrics(engine_modes: list[str]) -> dict:
