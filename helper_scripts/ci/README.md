@@ -8,6 +8,7 @@ feature gates and runtime profile guards.
 
 | File | Purpose |
 |---|---|
+| `check_stable_id_duplication.sh` | W-D MAG-083 P1-1 follow-up — fast grep guard that fails CI if Rust source outside the canonical Agent Spine helper/caller files reintroduces literal `stable_id` seed formatting (`format!("{}:{}:{}:{}"...`) with stable-id-like variable names. |
 | `replay_runner_symbol_audit.sh` | REF-20 Wave 3 R20-P2b-S10 — `nm` / `objdump` symbol grep on `replay_runner` release binary; verifies zero forbidden symbol class (Decision Lease / IPC server / exchange pipeline / Bybit connector / live auth write / order placement / DB writer). Cross-platform (macOS BSD nm + Linux GNU nm). |
 | `test_replay_runner_symbol_audit.sh` | Mock-based bash test harness for the audit script (5 cases: clean / forbidden hit / nm absent / binary missing / multi-class hit). |
 
@@ -23,6 +24,20 @@ REF-20 V3 §3 G7/G8 mandates three independent isolation layers for the
 | **L3 binary symbol** | **`nm` / `objdump` symbol grep on stripped release artifact** | **`replay_runner_symbol_audit.sh`** | **Wave 3 R20-P2b-S10 (this dir)** |
 
 Any single layer breach shall be rejected; **all three** must pass.
+
+## `check_stable_id_duplication.sh` Usage
+
+```bash
+bash helper_scripts/ci/check_stable_id_duplication.sh
+```
+
+Exit code `0` means no duplicated literal seed pattern was found. Exit code
+`1` means at least one non-canonical Rust file contains the guarded
+`format!("{}:{}:{}:{}"...` signature together with stable-id-like identifiers;
+the output lists offending files and line numbers.
+
+This check is wired into `.github/workflows/ci.yml` as
+`stable_id duplication guard`.
 
 ## `replay_runner_symbol_audit.sh` Usage
 

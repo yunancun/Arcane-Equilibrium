@@ -1,7 +1,26 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-12（V083 halt_session entry_context_id source/test fix）
+> 最後更新：2026-05-14（P2-N2-4 stable_id duplication CI guard）
+
+### P2-N2-4 stable_id duplication CI guard — 2026-05-14
+
+**Scope**: 新增快速 grep-based CI guard，防止 W-D MAG-083 P1-1 已集中到
+`compute_spine_ids()` / `compute_filled_report_id()` 的 Agent Spine stable_id
+seed 計算被未來 Rust callsite 重新用 literal `format!("{}:{}:{}:{}"...`
+複製，避免 entry/fill audit chain silent drift。
+
+**主要 land**:
+- 新增 `helper_scripts/ci/check_stable_id_duplication.sh`，掃描 `.rs` 檔案，
+  canonical helper/caller 以外若同時命中 signature pattern 與 stable-id-like
+  變數名即 exit 1，並列 offending file:line。
+- `.github/workflows/ci.yml` 新增 `stable_id duplication guard` job，push / PR /
+  weekly schedule 都會跑，無 Rust compilation。
+- 更新 `helper_scripts/ci/README.md` 與 `helper_scripts/SCRIPT_INDEX.md`。
+
+**Verification**: `bash helper_scripts/ci/check_stable_id_duplication.sh` PASS；
+`bash -n helper_scripts/ci/check_stable_id_duplication.sh` PASS；`git diff --check`
+PASS。No rebuild, no restart, no DB migration, no live auth mutation。
 
 ### V083 halt_session entry_context_id source/test fix — 2026-05-12
 
