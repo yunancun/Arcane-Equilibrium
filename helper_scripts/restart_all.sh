@@ -65,6 +65,59 @@ ENGINE_BIN_REL="rust/target/release/openclaw-engine"
 ENGINE_BIN_ABS="$REPO_ROOT/$ENGINE_BIN_REL"
 API_WORKDIR="$REPO_ROOT/program_code/exchange_connectors/bybit_connector/control_api_v1"
 
+read_env_assignment_value() {
+    local env_file="$1"
+    local env_name="$2"
+    local line value
+    [ -f "$env_file" ] || return 0
+    line="$(grep -E "^[[:space:]]*${env_name}=" "$env_file" 2>/dev/null | tail -1 || true)"
+    [ -n "$line" ] || return 0
+    value="${line#*=}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    printf '%s' "$value"
+}
+
+read_trimmed_secret_file() {
+    local secret_file="$1"
+    [ -s "$secret_file" ] || return 0
+    tr -d '\r\n' < "$secret_file"
+}
+
+resolve_provider_secret_env() {
+    local env_name="$1"
+    local provider="$2"
+    local legacy_filename="$3"
+    local current value path
+
+    current="${!env_name:-}"
+    if [ -n "$current" ]; then
+        printf '%s' "$current"
+        return 0
+    fi
+
+    value="$(read_env_assignment_value "$SECRETS_ROOT/providers/${provider}.env" "$env_name")"
+    if [ -n "$value" ]; then
+        printf '%s' "$value"
+        return 0
+    fi
+
+    for path in \
+        "$SECRETS_ROOT/secret_files/ai/$legacy_filename" \
+        "$REPO_ROOT/settings/secret_files/ai/$legacy_filename"
+    do
+        value="$(read_trimmed_secret_file "$path")"
+        if [ -n "$value" ]; then
+            printf '%s' "$value"
+            return 0
+        fi
+    done
+}
+
 prepare_runtime_secret_files() {
     mkdir -p "$RUNTIME_SECRET_DIR"
     chmod 700 "$RUNTIME_SECRET_DIR" 2>/dev/null || true
@@ -403,6 +456,12 @@ restart_engine() {
     h_state_gateway="${OPENCLAW_H_STATE_GATEWAY:-$(grep '^OPENCLAW_H_STATE_GATEWAY=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
+    # W-AUDIT-7 F-07: feed provider keys to Rust as process env. Provider
+    # store wins over legacy secret_files/ai; parent env wins over both.
+    local anthropic_api_key openai_api_key deepseek_api_key
+    anthropic_api_key="$(resolve_provider_secret_env ANTHROPIC_API_KEY anthropic anthropic_api_key)"
+    openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
+    deepseek_api_key="$(resolve_provider_secret_env DEEPSEEK_API_KEY deepseek deepseek_api_key)"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
@@ -413,6 +472,9 @@ restart_engine() {
         OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor}" \
         OPENCLAW_H_STATE_GATEWAY="${h_state_gateway}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
+        ANTHROPIC_API_KEY="${anthropic_api_key}" \
+        OPENAI_API_KEY="${openai_api_key}" \
+        DEEPSEEK_API_KEY="${deepseek_api_key}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 &
     echo "    PID: $!"
 }
@@ -528,6 +590,10 @@ restart_api() {
     # 與 Rust 端 main_boot_tasks::spawn_h_state_poller_if_enabled 共享同一嚴格 "1" 比對。
     local h_state_gateway_api
     h_state_gateway_api="${OPENCLAW_H_STATE_GATEWAY:-$(grep '^OPENCLAW_H_STATE_GATEWAY=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    local anthropic_api_key openai_api_key deepseek_api_key
+    anthropic_api_key="$(resolve_provider_secret_env ANTHROPIC_API_KEY anthropic anthropic_api_key)"
+    openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
+    deepseek_api_key="$(resolve_provider_secret_env DEEPSEEK_API_KEY deepseek deepseek_api_key)"
 
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
@@ -538,6 +604,9 @@ restart_api() {
         OPENCLAW_REPLAY_SIGNING_KEY_FILE="$replay_signing_key_file" \
         OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor_api}" \
         OPENCLAW_H_STATE_GATEWAY="${h_state_gateway_api}" \
+        ANTHROPIC_API_KEY="${anthropic_api_key}" \
+        OPENAI_API_KEY="${openai_api_key}" \
+        DEEPSEEK_API_KEY="${deepseek_api_key}" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host "$API_BIND_HOST" --port 8000 --workers "$WORKERS" \
         > "$DATA_DIR/api.log" 2>&1 &

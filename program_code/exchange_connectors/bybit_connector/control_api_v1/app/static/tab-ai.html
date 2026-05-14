@@ -121,6 +121,7 @@
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('anthropic',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
+      <div id="prov-anthropic-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
     </div>
 
     <!-- OpenAI -->
@@ -133,6 +134,7 @@
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('openai',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
+      <div id="prov-openai-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
     </div>
 
     <!-- DeepSeek -->
@@ -145,6 +147,7 @@
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('deepseek',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：V4 Flash $0.14/$0.28 per 1M input/output tokens</div>
+      <div id="prov-deepseek-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
     </div>
 
     <!-- Local LLM (Ollama) -->
@@ -169,6 +172,7 @@
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('google',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Flash $0.075/Pro $1.25 per 1M tokens</div>
+      <div id="prov-google-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
     </div>
   </div>
 </div>
@@ -192,6 +196,7 @@
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('perplexity',this)">清除</button>
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：$5/1000 requests（含实时搜索）</div>
+      <div id="prov-perplexity-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
     </div>
   </div>
 </div>
@@ -554,6 +559,10 @@ const PROVIDER_BADGE_ID = {
   anthropic: 'prov-anthropic-badge', openai: 'prov-openai-badge', deepseek: 'prov-deepseek-badge',
   perplexity: 'prov-perplexity-badge', google: 'prov-google-badge', local_llm: 'prov-local-badge',
 };
+const PROVIDER_DETAIL_ID = {
+  anthropic: 'prov-anthropic-detail', openai: 'prov-openai-detail', deepseek: 'prov-deepseek-detail',
+  perplexity: 'prov-perplexity-detail', google: 'prov-google-detail',
+};
 let L2_MODEL_CATALOG = null;
 let AI_CONFIG_DIRTY = false;
 let AI_CONFIG_SAVING = false;
@@ -718,6 +727,14 @@ function markAIConfigDirty() {
   AI_CONFIG_DIRTY = true;
 }
 
+function _providerSourceLabel(info) {
+  if (!info || !info.configured) return '未配置';
+  if (info.source === 'provider_store') return 'GUI provider store';
+  if (info.source === 'env') return 'process env';
+  if (info.source === 'legacy_secret_file') return 'legacy secret file';
+  return info.source || 'unknown';
+}
+
 // 根據 (configured, client_implemented) 計算 badge 顯示。
 // 客戶端未實裝時即使存了 key 也只顯示「已存储」並黃色提示，避免假成功。
 function _renderProviderBadge(provider, info) {
@@ -745,6 +762,13 @@ function _renderProviderBadge(provider, info) {
       badge.textContent = '客户端未接 / Not wired';
       badge.className = 'oc-chip oc-chip-neutral';
     }
+  }
+  const detail = $(PROVIDER_DETAIL_ID[provider]);
+  if (detail) {
+    const source = _providerSourceLabel(info);
+    const validation = info && info.validation_status ? ' · ' + info.validation_status : '';
+    const clearHint = info && info.configured && info.source_clearable === false ? ' · read-only source' : '';
+    detail.textContent = '来源：' + source + validation + clearHint;
   }
   // 已存儲時把 placeholder 改成 masked 提示，input 留空表示「不替換」。
   const input = $(PROVIDER_INPUT_ID[provider]);
@@ -853,7 +877,7 @@ async function clearProviderKey(provider, btn) {
     try {
       proceed = await openTypedConfirmModal({
         title: '清除 API Key / Clear API Key — ' + provider,
-        body: '此操作將：\n  1. 刪除磁碟上的 secrets 文件\n  2. 從當前進程 env 移除 API key\n\n清除後該 provider 在 budget fallback chain 中變為不可用，\n相關 Layer 2 推理請求會 fallback 到下一個 provider。\n如需重新啟用，須重新輸入完整 API key。',
+        body: '此操作將：\n  1. 刪除 GUI provider-store secrets 文件\n  2. 從當前進程 env 移除 API key\n\n若該 provider 仍由 process env 或 legacy secret file 提供，清除後仍會以 read-only source 顯示。\n如需完全停用，需同步移除部署 env 或 legacy secret file。',
         phrase: 'CLEAR',
         confirmLabel: '確認清除 / Clear Key',
         confirmClass: 'oc-btn-danger',

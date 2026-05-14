@@ -324,6 +324,27 @@ impl TickPipeline {
             let position_state = self.paper_state.get_position(sym);
             let mut iter_ctx = ctx.clone();
             iter_ctx.position_state = position_state;
+            let bb_breakout_has_ta = indicators.and_then(|i| i.bollinger.as_ref()).is_some()
+                || indicators_5m
+                    .as_ref()
+                    .and_then(|i| i.bollinger.as_ref())
+                    .is_some();
+            if strategy.name() == "bb_breakout" && bb_breakout_has_ta {
+                if let Err(cause) = crate::strategies::bb_breakout::oi_panel_delta_5m_pct(
+                    &alpha_surface,
+                    sym,
+                    event.ts_ms,
+                ) {
+                    self.intent_processor.emit_panel_unavailable_evaluation(
+                        strategy.name(),
+                        sym,
+                        event.ts_ms,
+                        "oi_delta_panel",
+                        cause,
+                    );
+                    continue;
+                }
+            }
             let strategy_actions = strategy.on_tick(&iter_ctx, &alpha_surface);
             debug_assert!(
                 strategy_actions.len() <= 1,

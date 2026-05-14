@@ -44,7 +44,7 @@ use params::{
 
 const OI_PANEL_MAX_AGE_MS: i64 = 15 * 60 * 1000;
 
-fn oi_panel_delta_5m_pct(
+pub(crate) fn oi_panel_delta_5m_pct(
     surface: &AlphaSurface<'_>,
     symbol: &str,
     now_ms: u64,

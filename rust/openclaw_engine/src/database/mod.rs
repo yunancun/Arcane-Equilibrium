@@ -674,17 +674,18 @@ pub struct DecisionFeatureEvaluationMsg {
     pub engine_mode: String,
     pub strategy_name: String,
     pub symbol: String,
-    /// +1 long / -1 short (i8 → SQL SMALLINT)
+    /// +1 long / -1 short; 0 is reserved for pre-direction fail-closed evaluation rows.
     pub side: i8,
     pub feature_schema_version: String,
     pub feature_schema_hash: String,
     pub feature_definition_hash: String,
     pub features_jsonb: String,
-    /// V082 §CHECK：accept | reject | reject_add | shadow_fill |
-    /// fallback_use_legacy | fallback_fail_closed | use_legacy_no_predictor
+    /// V082 + V093 §CHECK：accept | reject | reject_add | shadow_fill |
+    /// fallback_use_legacy | fallback_fail_closed | use_legacy_no_predictor |
+    /// oi_panel_unavailable
     /// PredictorAction 結果字串（V082 CHECK enum）
     pub evaluation_outcome: String,
-    /// V082 §CHECK：evaluation_log | shadow_synthetic
+    /// V082 + V093 §CHECK：evaluation_log | shadow_synthetic | panel_fail_closed
     /// CLAUDE.md §九 Non-training surfaces 標準
     pub evidence_source_tier: String,
     /// M2 trigger 鋪路欄位；M1 producer 一律 None

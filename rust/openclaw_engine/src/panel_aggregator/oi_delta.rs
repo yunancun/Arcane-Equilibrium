@@ -105,11 +105,7 @@ impl OIDeltaAggregator {
         // Trim：刪除舊於 (snapshot_ts_ms - WINDOW_RETAIN_MS) 的 entry
         // 保留邊際 60s 確保 1h window lookup 一定找得到 candidate
         let cutoff = snapshot_ts_ms - WINDOW_RETAIN_MS;
-        while window
-            .front()
-            .map(|(t, _)| *t < cutoff)
-            .unwrap_or(false)
-        {
+        while window.front().map(|(t, _)| *t < cutoff).unwrap_or(false) {
             window.pop_front();
         }
 
@@ -121,6 +117,34 @@ impl OIDeltaAggregator {
             history_len = window.len(),
             "oi update buffered"
         );
+    }
+
+    /// Cold-start seed helper：把 REST open-interest history 灌入同一個 sliding
+    /// window，讓啟動後第一個 60s flush 就能計算 5m/15m/1h delta。
+    ///
+    /// `points` 可由多個 Bybit intervalTime response 合併而來；本函數會過濾
+    /// 非有限值 / 非正 timestamp，並按 timestamp 升序寫入，避免 REST 回傳順序
+    /// 影響 deque 的 window lookup。
+    pub fn seed_history_points<I>(&mut self, symbol: &str, points: I) -> usize
+    where
+        I: IntoIterator<Item = (i64, f64)>,
+    {
+        if !self.cohort.contains(symbol) {
+            return 0;
+        }
+        let mut rows: Vec<(i64, f64)> = points
+            .into_iter()
+            .filter(|(ts, oi)| *ts > 0 && oi.is_finite() && *oi >= 0.0)
+            .collect();
+        rows.sort_by_key(|(ts, _)| *ts);
+        rows.dedup_by_key(|(ts, _)| *ts);
+
+        let mut seeded = 0usize;
+        for (ts, oi) in rows {
+            self.on_oi_update(symbol, oi, ts);
+            seeded += 1;
+        }
+        seeded
     }
 
     /// 取當前 history 大小（test + observability 用）。
@@ -137,6 +161,13 @@ impl OIDeltaAggregator {
     /// 取 cohort 大小（test + observability 用）。
     pub fn cohort_size(&self) -> usize {
         self.cohort.len()
+    }
+
+    /// Sorted cohort snapshot for startup backfill and deterministic diagnostics.
+    pub fn cohort_symbols_sorted(&self) -> Vec<String> {
+        let mut symbols: Vec<String> = self.cohort.iter().cloned().collect();
+        symbols.sort();
+        symbols
     }
 
     /// W1 sub-task 3 (E1-γ, 2026-05-11) — 從當前 history 構造 OIDeltaPanel snapshot。
@@ -176,16 +207,13 @@ impl OIDeltaAggregator {
             oi_abs_vec.push(last_oi);
             // window 不足 → None → 寫 NaN（consumer 端必 NaN check fail-closed）
             oi_delta_5m_pct.push(
-                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_5M_MS)
-                    .unwrap_or(f64::NAN),
+                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_5M_MS).unwrap_or(f64::NAN),
             );
             oi_delta_15m_pct.push(
-                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_15M_MS)
-                    .unwrap_or(f64::NAN),
+                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_15M_MS).unwrap_or(f64::NAN),
             );
             oi_delta_1h_pct.push(
-                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_1H_MS)
-                    .unwrap_or(f64::NAN),
+                Self::compute_delta_pct(hist, last_ts, last_oi, WINDOW_1H_MS).unwrap_or(f64::NAN),
             );
         }
 
@@ -428,7 +456,10 @@ mod tests {
         agg.on_oi_update("BTCUSDT", 12345.6, 1_700_000_000_000);
         assert_eq!(agg.history_len(), 1);
         assert_eq!(agg.history_len_for("BTCUSDT"), 1);
-        let hist = agg.history.get("BTCUSDT").expect("BTCUSDT must be in history");
+        let hist = agg
+            .history
+            .get("BTCUSDT")
+            .expect("BTCUSDT must be in history");
         let (ts, oi) = hist.back().unwrap();
         assert_eq!(*ts, 1_700_000_000_000);
         assert!((oi - 12345.6).abs() < 1e-9);
@@ -439,10 +470,34 @@ mod tests {
         // PASS：non-cohort symbol → history 不變、無 panic
         let mut agg = make_aggregator().await;
         agg.on_oi_update("DOGEUSDT", 999.9, 1_700_000_000_000);
-        assert_eq!(agg.history_len(), 0, "non-cohort sym must not enter history");
+        assert_eq!(
+            agg.history_len(),
+            0,
+            "non-cohort sym must not enter history"
+        );
         // cohort symbol 仍可正常 buffer
         agg.on_oi_update("ETHUSDT", 5000.0, 1_700_000_000_000);
         assert_eq!(agg.history_len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_seed_history_points_sorts_filters_and_dedupes() {
+        let mut agg = make_aggregator().await;
+        let seeded = agg.seed_history_points(
+            "BTCUSDT",
+            vec![
+                (1_700_000_300_000, 1100.0),
+                (0, 999.0),
+                (1_700_000_000_000, 1000.0),
+                (1_700_000_000_000, 1001.0),
+                (1_700_000_600_000, f64::NAN),
+            ],
+        );
+        assert_eq!(seeded, 2);
+        let hist = agg.history.get("BTCUSDT").expect("seeded history");
+        assert_eq!(hist.len(), 2);
+        assert_eq!(hist[0], (1_700_000_000_000, 1000.0));
+        assert_eq!(hist[1], (1_700_000_300_000, 1100.0));
     }
 
     #[tokio::test]
@@ -458,16 +513,15 @@ mod tests {
         agg.on_oi_update("BTCUSDT", 1100.0, current_ts);
 
         let hist = agg.history.get("BTCUSDT").unwrap();
-        let delta = OIDeltaAggregator::compute_delta_pct(
-            hist,
-            current_ts,
-            1100.0,
-            WINDOW_5M_MS,
-        );
+        let delta = OIDeltaAggregator::compute_delta_pct(hist, current_ts, 1100.0, WINDOW_5M_MS);
         assert!(delta.is_some(), "5m window 充足 → must return Some");
         let d = delta.unwrap();
         // (1100 - 1000) / 1000 * 100 = 10.0
-        assert!((d - 10.0).abs() < 1e-6, "delta_5m_pct expected ~10.0, got {}", d);
+        assert!(
+            (d - 10.0).abs() < 1e-6,
+            "delta_5m_pct expected ~10.0, got {}",
+            d
+        );
     }
 
     #[tokio::test]
@@ -479,12 +533,7 @@ mod tests {
         agg.on_oi_update("BTCUSDT", 1000.0, current_ts);
 
         let hist = agg.history.get("BTCUSDT").unwrap();
-        let delta = OIDeltaAggregator::compute_delta_pct(
-            hist,
-            current_ts,
-            1000.0,
-            WINDOW_5M_MS,
-        );
+        let delta = OIDeltaAggregator::compute_delta_pct(hist, current_ts, 1000.0, WINDOW_5M_MS);
         // history 最舊 entry = current_ts；target_ts = current_ts - 5m
         // oldest_ts (current_ts) > target_ts (current_ts - 5m) → None
         assert!(delta.is_none(), "insufficient window must return None");
