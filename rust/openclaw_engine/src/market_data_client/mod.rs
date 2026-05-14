@@ -218,6 +218,31 @@ impl MarketDataClient {
         Ok(records)
     }
 
+    /// Batch open-interest history helper for panel cold-start.
+    ///
+    /// W-AUDIT-8a Phase B uses this once at startup for the fixed 25-symbol
+    /// cohort × {5min, 15min, 1h}. Requests are intentionally sequential here:
+    /// cold-start latency is non-critical, and the helper must not create a
+    /// burst that surprises the shared Bybit Market rate-limit group.
+    pub async fn get_open_interest_batch(
+        &self,
+        category: &str,
+        symbols: &[String],
+        intervals: &[&str],
+        limit: Option<u32>,
+    ) -> Vec<(String, String, BybitResult<Vec<OpenInterestRecord>>)> {
+        let mut out = Vec::with_capacity(symbols.len().saturating_mul(intervals.len()));
+        for symbol in symbols {
+            for interval in intervals {
+                let result = self
+                    .get_open_interest(category, symbol, interval, limit)
+                    .await;
+                out.push((symbol.clone(), (*interval).to_string(), result));
+            }
+        }
+        out
+    }
+
     // -----------------------------------------------------------------------
     // Funding rate / 資金費率
     // -----------------------------------------------------------------------

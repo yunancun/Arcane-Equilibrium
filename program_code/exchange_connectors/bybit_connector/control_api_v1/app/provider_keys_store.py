@@ -7,8 +7,8 @@ AI 供應商 API Key 持久化模組（Control API GUI Tab-AI 後端支撐）。
   - 持久化 / 讀取 / 刪除 GUI 提交的 API Key
   - 將寫入動作同步到當前進程 env（Anthropic 走 ANTHROPIC_API_KEY）
   - 對外只回 status（masked / boolean），永不回明文
-  - 不負責 L2 推理路由（DeepSeek/OpenAI/Google/Perplexity 客戶端尚未實裝；
-    本模組僅落地存儲層，client_implemented=False 由 status() 顯式標記）
+  - 不負責 L2 推理路由；本模組僅落地存儲層，client_implemented 由
+    provider spec/status() 顯式標記
 
 跨平台路徑解析（CLAUDE.md §七 .★★.1）：
   優先級：
@@ -16,6 +16,10 @@ AI 供應商 API Key 持久化模組（Control API GUI Tab-AI 後端支撐）。
     2. <OPENCLAW_SECRETS_ROOT>/providers/  （與其他 secrets 一致）
     3. ~/BybitOpenClaw/secrets/providers/  （前端 hint 的預設路徑）
   目錄不存在時自動建立（mode=0700）；檔案以 0600 寫入。
+  兼容讀取：
+    - <OPENCLAW_SECRETS_ROOT>/secret_files/ai/{provider}_api_key
+    - <OPENCLAW_BASE_DIR>/settings/secret_files/ai/{provider}_api_key
+    這些 legacy secret 只讀不刪，避免 GUI 清除動作誤刪 operator-managed 憑證。
 
 Provider 白名單：
   anthropic / openai / deepseek / perplexity / google / local_llm
@@ -123,6 +127,14 @@ _SPECS: dict[str, _ProviderSpec] = {
 
 _PROVIDER_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
+_LEGACY_SECRET_FILENAMES: dict[str, str] = {
+    PROVIDER_ANTHROPIC: "anthropic_api_key",
+    PROVIDER_OPENAI: "openai_api_key",
+    PROVIDER_DEEPSEEK: "deepseek_api_key",
+    PROVIDER_PERPLEXITY: "perplexity_api_key",
+    PROVIDER_GOOGLE: "google_api_key",
+}
+
 
 # ─── 路徑解析 ────────────────────────────────────────────────────────
 
@@ -157,6 +169,68 @@ def _provider_file(provider: str) -> Path:
     if provider not in ALLOWED_PROVIDERS:
         raise ValueError(f"provider not in whitelist: {provider!r}")
     return _resolve_keys_dir() / f"{provider}.env"
+
+
+def _legacy_secret_candidates(provider: str) -> list[Path]:
+    """Return read-only legacy secret files for provider key migration support."""
+    filename = _LEGACY_SECRET_FILENAMES.get(provider)
+    if not filename:
+        return []
+
+    candidates: list[Path] = []
+    explicit_ai_dir = os.environ.get("OPENCLAW_AI_SECRETS_DIR")
+    if explicit_ai_dir:
+        candidates.append(Path(explicit_ai_dir).expanduser() / filename)
+
+    secrets_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if secrets_root:
+        candidates.append(Path(secrets_root).expanduser() / "secret_files" / "ai" / filename)
+
+    base_dir = os.environ.get("OPENCLAW_BASE_DIR")
+    if base_dir:
+        candidates.append(Path(base_dir).expanduser() / "settings" / "secret_files" / "ai" / filename)
+
+    # Only use the HOME default when provider storage was not explicitly
+    # redirected; this keeps tests and isolated deployments from accidentally
+    # seeing an operator's real ~/BybitOpenClaw secrets.
+    if not os.environ.get("OPENCLAW_PROVIDER_KEYS_DIR") and not secrets_root:
+        candidates.append(Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "ai" / filename)
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        marker = str(path)
+        if marker not in seen:
+            unique.append(path)
+            seen.add(marker)
+    return unique
+
+
+def _read_legacy_secret_record(provider: str) -> tuple[str | None, dict[str, str]]:
+    """Read legacy plain-text AI secret files without creating or mutating them."""
+    for path in _legacy_secret_candidates(provider):
+        if not path.exists():
+            continue
+        try:
+            key = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            logger.warning("read legacy provider key failed: %s", exc)
+            continue
+        if not key:
+            continue
+        ok, err = validate_key(provider, key)
+        if not ok:
+            logger.warning(
+                "legacy provider key ignored: provider=%s path=%s reason=%s",
+                provider, path, err,
+            )
+            continue
+        return key, {
+            "source": "legacy_secret_file",
+            "source_label": "legacy secret file",
+            "validation_status": "not_run",
+        }
+    return None, {}
 
 
 # ─── 格式驗證 ────────────────────────────────────────────────────────
@@ -373,7 +447,7 @@ def save_key(provider: str, key: str) -> dict[str, Any]:
 
 
 def delete_key(provider: str) -> dict[str, Any]:
-    """刪除 provider 的 key 檔案 + 從當前進程 env 移除。"""
+    """刪除 GUI-managed provider key 檔案 + 從當前進程 env 移除。"""
     if provider not in _SPECS:
         raise ValueError(f"unknown provider: {provider}")
     spec = _SPECS[provider]
@@ -409,8 +483,15 @@ def delete_key(provider: str) -> dict[str, Any]:
             except Exception:
                 pass
 
+    current = status()["providers"].get(provider, {})
     logger.info("provider_keys: deleted %s (existed=%s)", provider, existed)
-    return {"provider": provider, "deleted": existed, "configured": False}
+    return {
+        "provider": provider,
+        "deleted": existed,
+        "configured": bool(current.get("configured")),
+        "source": current.get("source"),
+        "source_clearable": bool(current.get("source_clearable")),
+    }
 
 
 def _read_key_record(provider: str) -> tuple[str | None, dict[str, str]]:
@@ -442,9 +523,50 @@ def _read_key_record(provider: str) -> tuple[str | None, dict[str, str]]:
     return key, metadata
 
 
+def _read_effective_key_record(provider: str) -> tuple[str | None, dict[str, str]]:
+    """
+    Resolve a provider key using runtime precedence.
+
+    Precedence:
+      1. GUI-managed provider store
+      2. Existing process env
+      3. Read-only legacy secret file
+    """
+    spec = _SPECS[provider]
+    key, metadata = _read_key_record(provider)
+    if key:
+        merged = {
+            **metadata,
+            "source": "provider_store",
+            "source_label": "GUI provider store",
+            "source_clearable": "true",
+        }
+        return key, merged
+
+    env_key = os.environ.get(spec.env_var, "").strip()
+    if env_key:
+        ok, err = validate_key(provider, env_key)
+        if ok:
+            return env_key, {
+                "source": "env",
+                "source_label": "process env",
+                "source_clearable": "false",
+                "validation_status": "not_run",
+            }
+        logger.warning(
+            "provider env key ignored: provider=%s env_var=%s reason=%s",
+            provider, spec.env_var, err,
+        )
+
+    key, metadata = _read_legacy_secret_record(provider)
+    if key:
+        metadata["source_clearable"] = "false"
+    return key, metadata
+
+
 def _read_key_from_file(provider: str) -> str | None:
-    """從 .env 檔案讀回 key（不含注釋）。檔案缺失或解析失敗回 None。"""
-    key, _metadata = _read_key_record(provider)
+    """Read the effective provider key without returning metadata."""
+    key, _metadata = _read_effective_key_record(provider)
     return key
 
 
@@ -473,9 +595,10 @@ def status() -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
     for provider, spec in _SPECS.items():
-        key, metadata = _read_key_record(provider)
+        key, metadata = _read_effective_key_record(provider)
         configured = bool(key)
         validation_status = metadata.get("validation_status")
+        source = metadata.get("source") if configured else None
         out[provider] = {
             "configured": configured,
             "client_implemented": spec.client_implemented,
@@ -487,6 +610,12 @@ def status() -> dict[str, Any]:
             "validation_status": validation_status if configured else None,
             "validation_checked_at_ms": metadata.get("validation_checked_at_ms") or None,
             "validation_http_status": metadata.get("validation_http_status") or None,
+            "source": source,
+            "source_label": metadata.get("source_label") if configured else None,
+            "source_clearable": metadata.get("source_clearable") == "true",
+            "provider_store_present": bool(_read_key_record(provider)[0]),
+            "env_present": bool(os.environ.get(spec.env_var, "").strip()),
+            "legacy_secret_present": bool(_read_legacy_secret_record(provider)[0]),
         }
     try:
         keys_dir = str(_resolve_keys_dir())
@@ -497,8 +626,8 @@ def status() -> dict[str, Any]:
 
 def load_into_environ() -> dict[str, bool]:
     """
-    啟動時呼叫：把所有已存的 key 注入當前進程 os.environ。
-    冪等；返回 {provider: injected_bool}。
+    啟動時呼叫：把可解析 provider key 注入當前進程 os.environ。
+    冪等；返回 {provider: ready_bool}。
 
     用途：API process 啟動時把 secrets 目錄的 key 加載到 env，
     讓 layer2_engine._get_anthropic_client() 等能直接 os.getenv 拿到。
@@ -506,11 +635,13 @@ def load_into_environ() -> dict[str, bool]:
     injected: dict[str, bool] = {}
     for provider, spec in _SPECS.items():
         try:
-            key = _read_key_from_file(provider)
+            key, metadata = _read_effective_key_record(provider)
         except Exception:
             key = None
+            metadata = {}
         if key:
-            os.environ[spec.env_var] = key
+            if metadata.get("source") != "env":
+                os.environ[spec.env_var] = key
             injected[provider] = True
         else:
             injected[provider] = False

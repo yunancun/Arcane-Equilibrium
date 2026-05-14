@@ -1368,6 +1368,65 @@ impl IntentProcessor {
         }
     }
 
+    /// W-AUDIT-8a Phase B B-4：panel 不可用時寫 producer-debug evaluation row。
+    ///
+    /// 這條路徑發生在 strategy 尚未形成真實 OrderIntent 前，因此 side=0、
+    /// features_jsonb 使用最小診斷 payload。`panel_fail_closed` tier 和
+    /// `oi_panel_unavailable` outcome 由 V093 allowlist 擴展；evaluations
+    /// 表仍是 non-training surface。
+    pub(crate) fn emit_panel_unavailable_evaluation(
+        &self,
+        strategy_name: &str,
+        symbol: &str,
+        now_ms: u64,
+        panel_name: &str,
+        reason: &str,
+    ) {
+        let tx = match self.decision_feature_evaluation_tx.as_ref() {
+            Some(t) => t,
+            None => return,
+        };
+        if strategy_name.is_empty() || symbol.is_empty() || now_ms == 0 {
+            return;
+        }
+
+        let context_id = format!("panel_fail_closed:{strategy_name}:{symbol}:{now_ms}");
+        let features_jsonb = serde_json::json!({
+            "panel": panel_name,
+            "reason": reason,
+            "strategy_name": strategy_name,
+            "symbol": symbol
+        })
+        .to_string();
+        let msg = crate::database::DecisionFeatureEvaluationMsg {
+            context_id,
+            ts_ms: now_ms,
+            engine_mode: self.effective_engine_mode().to_string(),
+            strategy_name: strategy_name.to_string(),
+            symbol: symbol.to_string(),
+            side: 0,
+            feature_schema_version: "panel_fail_closed_v1".to_string(),
+            feature_schema_hash: crate::edge_predictor::features::feature_schema_hash().to_string(),
+            feature_definition_hash: crate::edge_predictor::features::feature_definition_hash()
+                .to_string(),
+            features_jsonb,
+            evaluation_outcome: "oi_panel_unavailable".to_string(),
+            evidence_source_tier: "panel_fail_closed".to_string(),
+            entry_context_id: None,
+        };
+
+        if let Err(e) = tx.try_send(msg) {
+            tracing::warn!(
+                strategy = %strategy_name,
+                symbol = %symbol,
+                panel = %panel_name,
+                error = %e,
+                "panel unavailable evaluation drop — writer channel full/closed \
+                 / panel 不可用評估 log 丟棄，writer 通道已滿/關閉"
+            );
+        }
+    }
+
     /// EDGE-P3-1 A4 · spec §7.4: apply first-level Fallback policy.
     /// Shrinkage → UseLegacyGate; FailClosed → Reject with metric-name suffix.
     /// EDGE-P3-1 A4 · §7.4：第一級 Fallback 策略。

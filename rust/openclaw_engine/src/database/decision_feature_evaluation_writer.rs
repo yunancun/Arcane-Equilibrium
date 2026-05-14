@@ -97,8 +97,7 @@ async fn flush_evaluations(pool: &DbPool, pending: &mut Vec<DecisionFeatureEvalu
             continue;
         }
 
-        let ts =
-            chrono::DateTime::from_timestamp_millis(eval.ts_ms as i64).unwrap_or_default();
+        let ts = chrono::DateTime::from_timestamp_millis(eval.ts_ms as i64).unwrap_or_default();
 
         // 解析預先序列化的 JSONB（與 decision_feature_writer 同策略）
         // 解析失敗代表 producer 退化，log + skip
@@ -137,12 +136,8 @@ async fn flush_evaluations(pool: &DbPool, pending: &mut Vec<DecisionFeatureEvalu
         .bind(eval.evidence_source_tier.clone())
         .bind(eval.entry_context_id.clone());
 
-        let outcome = exec_single_insert(
-            pool,
-            "learning.decision_features_evaluations",
-            query,
-        )
-        .await;
+        let outcome =
+            exec_single_insert(pool, "learning.decision_features_evaluations", query).await;
 
         if !matches!(outcome, SingleInsertOutcome::Ok(_)) {
             // INSERT 失敗暫留以便重試（不像 decision_features 無 ON CONFLICT
@@ -230,13 +225,18 @@ mod tests {
             side: -1,
             ..make_eval("ctx-short", "reject")
         };
+        let eval_flat = DecisionFeatureEvaluationMsg {
+            side: 0,
+            ..make_eval("ctx-flat", "oi_panel_unavailable")
+        };
         assert_eq!(eval_long.side as i16, 1);
         assert_eq!(eval_short.side as i16, -1);
+        assert_eq!(eval_flat.side as i16, 0);
     }
 
     #[test]
     fn test_evaluation_outcome_enum_strings() {
-        // V082 CHECK enum：lock 7 個合法字串避免 producer 與 schema 漂移
+        // V082 + V093 CHECK enum：lock 合法字串避免 producer 與 schema 漂移
         let allowed = [
             "accept",
             "reject",
@@ -245,6 +245,7 @@ mod tests {
             "fallback_use_legacy",
             "fallback_fail_closed",
             "use_legacy_no_predictor",
+            "oi_panel_unavailable",
         ];
         for s in &allowed {
             let eval = make_eval("ctx-x", s);
@@ -254,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_evidence_source_tier_enum_strings() {
-        // V082 CHECK enum：lock 2 個合法 tier
+        // V082 + V093 CHECK enum：lock 合法 tier
         // V050 replay tier 故意不重疊
         let mut eval_log = make_eval("ctx-1", "reject");
         eval_log.evidence_source_tier = "evaluation_log".into();
@@ -263,6 +264,11 @@ mod tests {
         let mut eval_shadow = make_eval("ctx-2", "shadow_fill");
         eval_shadow.evidence_source_tier = "shadow_synthetic".into();
         assert_eq!(eval_shadow.evidence_source_tier, "shadow_synthetic");
+
+        let mut eval_panel = make_eval("ctx-3", "oi_panel_unavailable");
+        eval_panel.evidence_source_tier = "panel_fail_closed".into();
+        eval_panel.side = 0;
+        assert_eq!(eval_panel.evidence_source_tier, "panel_fail_closed");
     }
 
     #[test]
@@ -300,10 +306,7 @@ mod tests {
             "entry_context_id",
             "decision_features_evaluations",
         ] {
-            assert!(
-                src.contains(col),
-                "INSERT SQL missing column/clause: {col}"
-            );
+            assert!(src.contains(col), "INSERT SQL missing column/clause: {col}");
         }
         // **必須**沒有 ON CONFLICT 子句（BIGSERIAL PK 不會撞）
         // **不可有** ON CONFLICT (context_id) — 此語意只屬 V017 decision_features

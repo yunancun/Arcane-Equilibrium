@@ -67,6 +67,7 @@ use tracing::{debug, info, warn};
 
 use crate::database::pool::DbPool;
 use crate::ipc_server::{BtcLeadLagPanelSlot, FundingCurvePanelSlot, OIDeltaPanelSlot};
+use crate::market_data_client::MarketDataClient;
 
 /// W1 sub-task 3 (E1-γ, 2026-05-11) — flush 視窗 60 秒，per spec §2.3 + §3.3。
 const FLUSH_INTERVAL_SECS: u64 = 60;
@@ -179,6 +180,75 @@ impl PanelAggregator {
     /// 取 oi_delta aggregator 不可變引用（test + observability 用）。
     pub fn oi_delta(&self) -> &OIDeltaAggregator {
         &self.oi_delta_aggregator
+    }
+
+    /// W-AUDIT-8a Phase B B-2：startup-only OI REST backfill。
+    ///
+    /// WS tickers 只給 current openInterest；5m/15m/1h delta 的 baseline 需在
+    /// 啟動時用 Bybit `/v5/market/open-interest` 補一次。失敗採 fail-soft：
+    /// 對應 symbol 仍會由 WS 更新 `oi_abs`，但 window 不足時 delta 為 NaN，
+    /// bb_breakout 按 `oi_panel_unavailable` fail-closed。
+    pub async fn cold_start_oi_backfill(&mut self, market_client: &MarketDataClient) {
+        const INTERVALS: [&str; 3] = ["5min", "15min", "1h"];
+        let cohort: Vec<String> = self
+            .oi_delta_aggregator
+            .cohort_symbols_sorted()
+            .into_iter()
+            .collect();
+        if cohort.is_empty() {
+            return;
+        }
+
+        let batch = market_client
+            .get_open_interest_batch("linear", &cohort, &INTERVALS, Some(2))
+            .await;
+        let mut grouped: HashMap<String, Vec<(i64, f64)>> = HashMap::new();
+        let mut ok_requests = 0usize;
+        let mut failed_requests = 0usize;
+
+        for (symbol, interval, result) in batch {
+            match result {
+                Ok(records) => {
+                    ok_requests += 1;
+                    let rows = grouped.entry(symbol.clone()).or_default();
+                    for record in records {
+                        let ts = record.timestamp.parse::<i64>().unwrap_or(0);
+                        rows.push((ts, record.open_interest));
+                    }
+                    debug!(
+                        target: "panel_aggregator",
+                        symbol = %symbol,
+                        interval = %interval,
+                        "OI cold-start interval backfilled"
+                    );
+                }
+                Err(e) => {
+                    failed_requests += 1;
+                    warn!(
+                        target: "panel_aggregator",
+                        symbol = %symbol,
+                        interval = %interval,
+                        error = ?e,
+                        "OI cold-start interval backfill failed"
+                    );
+                }
+            }
+        }
+
+        let mut seeded_points = 0usize;
+        for (symbol, points) in grouped {
+            seeded_points += self
+                .oi_delta_aggregator
+                .seed_history_points(&symbol, points);
+        }
+
+        info!(
+            target: "panel_aggregator",
+            ok_requests = ok_requests,
+            failed_requests = failed_requests,
+            seeded_points = seeded_points,
+            "OI cold-start backfill complete"
+        );
     }
 
     /// W1 P0 fix (2026-05-11) — funding partial state cache 大小（observability 用）。
@@ -404,10 +474,7 @@ impl PanelAggregator {
 /// main.rs 在 IpcServer detach 前呼叫此函數產生 slot pair 給 IpcServer 持有，
 /// 同時 clone Arc 給 PanelAggregator 寫入。typedef 已在 ipc_server::slots 定義。
 pub fn create_panel_slots() -> (FundingCurvePanelSlot, OIDeltaPanelSlot) {
-    (
-        Arc::new(RwLock::new(None)),
-        Arc::new(RwLock::new(None)),
-    )
+    (Arc::new(RwLock::new(None)), Arc::new(RwLock::new(None)))
 }
 
 /// W2 sub-task 4 (E1-δ, 2026-05-11) — BtcLeadLag IPC slot 工廠。
@@ -601,7 +668,13 @@ mod tests {
         let cancel = CancellationToken::new();
         let cohort = vec!["BTCUSDT".to_string()];
         let (fc_slot, oi_slot) = make_slots();
-        let agg = PanelAggregator::new(pool, cohort, cancel.clone(), fc_slot.clone(), oi_slot.clone());
+        let agg = PanelAggregator::new(
+            pool,
+            cohort,
+            cancel.clone(),
+            fc_slot.clone(),
+            oi_slot.clone(),
+        );
 
         let (event_tx, event_rx) = mpsc::channel::<Arc<PriceEvent>>(8);
 
@@ -615,12 +688,18 @@ mod tests {
         ev.funding_rate = Some(0.0001);
         ev.next_funding_ms = Some(1_700_000_028_800_000);
         ev.open_interest = Some(12345.6);
-        event_tx.send(Arc::new(ev)).await.expect("send must succeed");
+        event_tx
+            .send(Arc::new(ev))
+            .await
+            .expect("send must succeed");
 
         // 送 non-Ticker event：應 silent drop
         let mut trade_ev = PriceEvent::new("BTCUSDT".to_string(), 65001.0, 1_700_000_001_000);
         trade_ev.event_kind = Some(PriceEventKind::Trade);
-        event_tx.send(Arc::new(trade_ev)).await.expect("send 2 must succeed");
+        event_tx
+            .send(Arc::new(trade_ev))
+            .await
+            .expect("send 2 must succeed");
 
         // 等 dispatch 處理 + cancel
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -630,8 +709,14 @@ mod tests {
         assert!(result.is_ok(), "run must exit on cancel after dispatch");
 
         // 60s 未到 → slot 仍 None（驗證 flush 沒在 cancel 之間誤觸）
-        assert!(fc_slot.read().await.is_none(), "slot updated only on flush tick");
-        assert!(oi_slot.read().await.is_none(), "slot updated only on flush tick");
+        assert!(
+            fc_slot.read().await.is_none(),
+            "slot updated only on flush tick"
+        );
+        assert!(
+            oi_slot.read().await.is_none(),
+            "slot updated only on flush tick"
+        );
     }
 
     #[test]

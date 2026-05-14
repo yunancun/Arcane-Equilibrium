@@ -988,13 +988,24 @@ async fn async_main(
     // cohort empty 仍 spawn — run loop 內 cohort_size=0 + 60s flush 永遠 (0,0) no-op。
     let panel_db_pool = Arc::clone(&db_pool);
     let panel_cancel = cancel.clone();
-    let panel_aggregator = openclaw_engine::panel_aggregator::PanelAggregator::new(
+    let mut panel_aggregator = openclaw_engine::panel_aggregator::PanelAggregator::new(
         panel_db_pool,
         panel_cohort.clone(),
         panel_cancel,
         Arc::clone(&funding_curve_panel_slot),
         Arc::clone(&oi_delta_panel_slot),
     );
+    if let Some(ref client) = shared_client {
+        let panel_market_client = MarketDataClient::new(Arc::clone(client));
+        panel_aggregator
+            .cold_start_oi_backfill(&panel_market_client)
+            .await;
+    } else {
+        warn!(
+            "PanelAggregator OI cold-start backfill skipped: no REST client \
+             / PanelAggregator OI 啟動回填跳過：無 REST client"
+        );
+    }
     info!(
         cohort_size = panel_cohort.len(),
         "PanelAggregator spawning (W1 W-AUDIT-8a Phase B Tier 2 panel collector)"

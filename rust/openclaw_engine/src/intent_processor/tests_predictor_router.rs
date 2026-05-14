@@ -60,6 +60,35 @@ mod predictor_wiring_tests {
     }
 
     #[test]
+    fn test_panel_unavailable_evaluation_emit() {
+        let mut proc = IntentProcessor::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        proc.set_decision_feature_evaluation_tx(tx);
+
+        proc.emit_panel_unavailable_evaluation(
+            "bb_breakout",
+            "BTCUSDT",
+            1_700_000_000_123,
+            "oi_delta_panel",
+            "missing_panel",
+        );
+
+        let msg = rx
+            .try_recv()
+            .expect("panel unavailable evaluation row must be emitted");
+        assert_eq!(msg.context_id, "panel_fail_closed:bb_breakout:BTCUSDT:1700000000123");
+        assert_eq!(msg.engine_mode, "paper");
+        assert_eq!(msg.strategy_name, "bb_breakout");
+        assert_eq!(msg.symbol, "BTCUSDT");
+        assert_eq!(msg.side, 0);
+        assert_eq!(msg.feature_schema_version, "panel_fail_closed_v1");
+        assert_eq!(msg.evaluation_outcome, "oi_panel_unavailable");
+        assert_eq!(msg.evidence_source_tier, "panel_fail_closed");
+        assert!(msg.features_jsonb.contains("\"panel\":\"oi_delta_panel\""));
+        assert!(msg.features_jsonb.contains("\"reason\":\"missing_panel\""));
+    }
+
+    #[test]
     fn test_process_with_features_none_behaves_identically_to_legacy() {
         // features=None → predictor skipped regardless of store/config.
         // features=None → 忽略 predictor，行為等同舊路徑。

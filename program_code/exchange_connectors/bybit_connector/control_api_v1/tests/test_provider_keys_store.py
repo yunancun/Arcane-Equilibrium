@@ -119,6 +119,91 @@ def test_status_marks_legacy_saved_key_as_unverified(
     assert info["configured"] is True
     assert info["validated"] is False
     assert info["validation_status"] is None
+    assert info["source"] == "provider_store"
+    assert info["source_clearable"] is True
+
+
+def test_status_loads_legacy_secret_file_when_provider_store_missing(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    secrets_root = tmp_path / "secrets"
+    legacy_dir = secrets_root / "secret_files" / "ai"
+    legacy_dir.mkdir(parents=True)
+    legacy_key = "sk-ant-" + "l" * 40
+    (legacy_dir / "anthropic_api_key").write_text(legacy_key + "\n", encoding="utf-8")
+
+    monkeypatch.delenv("OPENCLAW_PROVIDER_KEYS_DIR", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(secrets_root))
+
+    info = provider_keys_store.status()["providers"]["anthropic"]
+
+    assert info["configured"] is True
+    assert info["source"] == "legacy_secret_file"
+    assert info["source_clearable"] is False
+    assert info["masked"] == "sk-a…" + "l" * 4
+    assert provider_keys_store.load_into_environ()["anthropic"] is True
+    assert os.environ["ANTHROPIC_API_KEY"] == legacy_key
+
+
+def test_provider_store_takes_precedence_over_legacy_secret_file(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    keys_dir = tmp_path / "providers"
+    secrets_root = tmp_path / "secrets"
+    legacy_dir = secrets_root / "secret_files" / "ai"
+    keys_dir.mkdir(parents=True)
+    legacy_dir.mkdir(parents=True)
+    store_key = "sk-ant-" + "s" * 40
+    legacy_key = "sk-ant-" + "l" * 40
+    (keys_dir / "anthropic.env").write_text(
+        "# validation_status=auth_ok\nANTHROPIC_API_KEY=" + store_key + "\n",
+        encoding="utf-8",
+    )
+    (legacy_dir / "anthropic_api_key").write_text(legacy_key + "\n", encoding="utf-8")
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENCLAW_PROVIDER_KEYS_DIR", str(keys_dir))
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(secrets_root))
+
+    info = provider_keys_store.status()["providers"]["anthropic"]
+
+    assert info["configured"] is True
+    assert info["source"] == "provider_store"
+    assert info["source_clearable"] is True
+    assert info["validated"] is True
+    assert provider_keys_store.load_into_environ()["anthropic"] is True
+    assert os.environ["ANTHROPIC_API_KEY"] == store_key
+
+
+def test_delete_key_leaves_legacy_secret_as_readonly_source(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    keys_dir = tmp_path / "providers"
+    secrets_root = tmp_path / "secrets"
+    legacy_dir = secrets_root / "secret_files" / "ai"
+    keys_dir.mkdir(parents=True)
+    legacy_dir.mkdir(parents=True)
+    store_key = "sk-ant-" + "s" * 40
+    legacy_key = "sk-ant-" + "l" * 40
+    provider_file = keys_dir / "anthropic.env"
+    provider_file.write_text("ANTHROPIC_API_KEY=" + store_key + "\n", encoding="utf-8")
+    legacy_file = legacy_dir / "anthropic_api_key"
+    legacy_file.write_text(legacy_key + "\n", encoding="utf-8")
+
+    monkeypatch.setenv("OPENCLAW_PROVIDER_KEYS_DIR", str(keys_dir))
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(secrets_root))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", store_key)
+
+    result = provider_keys_store.delete_key("anthropic")
+
+    assert result["deleted"] is True
+    assert result["configured"] is True
+    assert result["source"] == "legacy_secret_file"
+    assert result["source_clearable"] is False
+    assert not provider_file.exists()
+    assert legacy_file.exists()
+    assert "ANTHROPIC_API_KEY" not in os.environ
 
 
 def test_layer2_model_config_rejects_provider_model_mismatch() -> None:
