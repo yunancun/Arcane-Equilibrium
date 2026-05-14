@@ -1,7 +1,7 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-14（P2-N2-4 stable_id duplication CI guard；保留 W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck 與 2026-05-09 W-AUDIT-1 catch-up 索引）
+最後更新：2026-05-14（P2-N2-2 W2 paper edge report 4-split；保留 W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck 與 2026-05-09 W-AUDIT-1 catch-up 索引）
 
 ## 2026-05-09 W-AUDIT-1 補登
 
@@ -28,7 +28,11 @@
 | `research/bb_breakout_threshold_sweep.py` | bb_breakout threshold research sweep |
 | `research/ma_crossover_counterfactual_replay.py` | ma_crossover counterfactual replay research helper |
 | `research/shadow_disagreement_breakdown.py` | Shadow disagreement breakdown analysis |
-| `reports/w2_paper_edge_report.py` | W2 A4-C BTC→Alt Lead-Lag — D+12 paper edge report generator (spec v1.2 §7.1 6 mandatory metric + dual-layer σ + PSR(0) Bailey-LdP 2012 skew/kurt formula + +15/+5~+15/<+5 step gate verdict). 配 `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql`。`--smoke-test` 跑 3 mock case (plus15/plus5_15/minus5) 不連 PG。 |
+| `reports/w2_paper_edge_report.py` | W2 A4-C BTC→Alt Lead-Lag — legacy thin CLI shim；保留舊入口相容 1 sprint，委派至 `reports/w2/w2_paper_edge_report.py`。 |
+| `reports/w2/w2_paper_edge_report.py` | W2 A4-C BTC→Alt Lead-Lag — D+12 paper edge report CLI (read-only PG query + metrics→render orchestration)。配 `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql`。 |
+| `reports/w2/w2_paper_edge_metrics.py` | W2 spec v1.2 §7.1 6 mandatory metric 計算層：PSR(0) Bailey-LdP 2012、DSR K=95、block-bootstrap CI、R²(N)、counterfactual delta、step gate verdict。 |
+| `reports/w2/w2_paper_edge_render.py` | W2 paper edge report 展現層：`render_markdown` / `render_csv` / `render_json` / `per_symbol_breakdown_table`。 |
+| `reports/w2/w2_paper_edge_smoke.py` | W2 paper edge report smoke：3 mock case (plus15/plus5_15/minus5) 不連 PG，可獨立執行。 |
 | `deploy/launchd_preflight.sh` | macOS launchd deployment preflight |
 
 ## REF-20 Sprint 1+2 新增 cron 與 helper
