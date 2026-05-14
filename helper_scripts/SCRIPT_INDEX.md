@@ -1,7 +1,7 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-09（W-AUDIT-1 catch-up；新增 REF-21 recorder / passive healthcheck split / 3C and funding_arb audits / operator helpers）
+最後更新：2026-05-14（W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck；保留 2026-05-09 W-AUDIT-1 catch-up 索引）
 
 ## 2026-05-09 W-AUDIT-1 補登
 
@@ -16,6 +16,7 @@
 | `db/passive_wait_healthcheck/checks_agent_spine.py` | `[55]` Agent Decision Spine lineage / MAG-082 readiness check |
 | `db/passive_wait_healthcheck/checks_live_pipeline.py` | `[56]` Live / LiveDemo pipeline active healthcheck |
 | `db/passive_wait_healthcheck/checks_btc_lead_lag.py` | `[57]` W2 A4-C BTC→Alt Lead-Lag panel 4 conditions healthcheck (W2-IMPL-3 2026-05-11) — panel freshness < 120s + cohort=7 + regime extreme < 5% + book_imbalance non-zero/non-null; opt-in `OPENCLAW_W2_HEALTHCHECK_ENABLED=1` |
+| `db/passive_wait_healthcheck/checks_feature_baseline.py` | `[67]` W-AUDIT-4b feature_baselines readiness: active rows >0 + 34-dim feature vector contract |
 | `db/passive_wait_healthcheck/checks_openclaw_gateway.py` | `[54]` OpenClaw proposal relay healthcheck |
 | `db/passive_wait_healthcheck/checks_scanner_market.py` | `[41]` scanner would-block evidence and `[51]` opportunity shadow checks |
 | `cron/ref21_market_microstructure_recorder.py` | REF-21 local BBO/orderbook/latency recorder |
@@ -72,6 +73,7 @@
 | `cron_observer_cycle.sh` | 每 5 分鐘執行 Observer 循環 + runtime snapshot 橋接 |
 | `cron/ml_training_maintenance.py` | W-AUDIT-4 F-08 ML maintenance runner：covers operational MLDE jobs plus original audit targets `thompson_sampling` / `optuna_optimizer` / `cpcv_validator` / `dl3_foundation` / `weekly_report_generator`; source runner only, runtime crontab install requires operator authorization. |
 | `cron/ml_training_maintenance_cron.sh` | F-08 cron wrapper around `ml_training_maintenance.py`; loads PG env, writes status JSON/log, uses lock dir, and does not install itself. |
+| `cron/feature_baseline_writer_cron.sh` | W-AUDIT-4b cron wrapper around Rust `feature_baseline_writer`; uses `OPENCLAW_FEATURE_BASELINE_APPLY=1` env gate, no CLI apply/force flags, then runs `[67]` healthcheck. |
 | `schema_diff.py` | CI 類型一致性：比對 Python shared_types vs Rust golden JSON schema |
 | `golden_dataset_gen.py` | Rust↔Python 指標交叉驗證黃金數據集（確定性 OHLCV + 13 指標） |
 
@@ -81,6 +83,7 @@
 |------|------|
 | `db/fresh_start_reset.py` | 開發噪音清理：保留客觀市場數據，清除系統經驗數據。支援 `--report-only`（默認）/ `--dry-run` / `--execute --confirm "FRESH_START_YYYY_MM_DD"`。通常透過 `fresh_start.sh` 調用（一併停引擎/歸檔/重啟），獨立使用需自行停引擎。 |
 | `db/canary_promote_cron.sh` | G4-03 Phase B canary auto-promote cron wrapper。默認 dry-run/read-only；apply 需 `OPENCLAW_CANARY_CRON_APPLY=1` + `OPENCLAW_AUTO_PROMOTE_ENABLED=1`。可選 `OPENCLAW_CANARY_EMIT_SIGHUP=1` + `OPENCLAW_ENGINE_PID_FILE` 在 applied promoting→production 後 SIGHUP engine。 |
+| `db/feature_baseline_healthcheck.py` | Standalone `[67]` W-AUDIT-4b feature_baselines readiness check; used by `cron/feature_baseline_writer_cron.sh` after apply. |
 | `db/counterfactual_exit_replay.py` | EDGE-DIAG-1 #3 反事實退場回放：READ-ONLY SELECT `learning.exit_features` 最近 N 天，模擬「peak − k × ATR 鎖利」net vs 實際 net。旗標：`--days N`（>0）/ `--cost-model {proxy,fee_only,both}`（default both；proxy 代數退化保留作透明度核驗、fee_only 為經驗有效模型）/ `--fee-bps-per-side 5.5`（Bybit taker default）/ `--include-funding-arb`（預設排除 funding_arb，含 funding payment 失真）/ `--engine-mode`（default demo,live_demo）/ `--cf-multiplier 0.3`（v2 asymptotic floor 線性近似）。產 stdout 雙表 + VERDICT + `$OPENCLAW_DATA_DIR/audit/counterfactual_exit_replay_latest.json` + dated sibling。**v1 Gate-4-only 線性 k=0.3；v2 non-linear + Gate 1/2/3 parity FUP**。 |
 | `db/counterfactual_daily_cron.sh` | EDGE-DIAG-1 Phase 4 daily refresh wrapper：crontab 每日 06:00 UTC 呼叫 `counterfactual_exit_replay.py --days 2 --v2-parity --split-window --cost-model fee_only --bootstrap-ci --per-strategy-median --trimmed-mean-pct 5` 刷新 latest JSON，讓 `passive_wait_healthcheck.py [11]` 可讀到當日最新 post-P013-clean 樣本數。WRITE 端（刷 JSON）+ READ 端 check[11] 分離。載入 `$SECRETS_ROOT/environment_files/basic_system_services.env` POSTGRES_*、activate `$HOME/.venv`、log tee `$OPENCLAW_DATA_DIR/audit/counterfactual_daily_cron.log`；PIPESTATUS[0] 透傳 python 退出碼。CLAUDE.md §七「被動等待 TODO 必附 healthcheck」Phase 3 延後的 gate 守衛。 |
 | `db/audit/blocked_symbols_7d_counterfactual.py` | P2-AUDIT-VERIFY-5 blocked-symbol freeze audit：READ-ONLY SELECT `trading.fills` + `trading.risk_verdicts` for cells frozen in `docs/governance_dev/strategy_blocked_symbols_freeze.json`，輸出 7d observed fill PnL、blocked rejection count、`decision_outcomes` counterfactual coverage；若 rejected rows 沒有 outcome labels，明確標 `no_rejected_outcome_labels`，不偽造 would-have-traded PnL。 |
