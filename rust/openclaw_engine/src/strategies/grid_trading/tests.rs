@@ -20,10 +20,15 @@ use super::*;
 use crate::order_manager::TimeInForce;
 use crate::strategies::{Strategy, StrategyAction, StrategyParams};
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSurface, BtcLeadLagPanel};
 
 fn ctx(price: f64, ts: u64) -> TickContext<'static> {
+    ctx_for_symbol("BTC", price, ts)
+}
+
+fn ctx_for_symbol(symbol: &'static str, price: f64, ts: u64) -> TickContext<'static> {
     TickContext {
-        symbol: "BTC",
+        symbol,
         price,
         timestamp_ms: ts,
         indicators: None,
@@ -38,7 +43,26 @@ fn ctx(price: f64, ts: u64) -> TickContext<'static> {
         tick_size: None,
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
+    }
+}
+
+fn btc_panel(symbol: &str, expected_dir: i8) -> BtcLeadLagPanel {
+    BtcLeadLagPanel {
+        alt_symbols: vec![symbol.to_string()],
+        btc_lead_return_pct: 25.0,
+        lead_window_secs: 120,
+        alt_xcorr: vec![0.65],
+        alt_expected_dir: vec![expected_dir],
+        snapshot_ts_ms: 1_715_000_000_000,
+        source_tier: "cross_asset_btc_lead_lag".to_string(),
+    }
+}
+
+fn surface_with_btc(panel: &BtcLeadLagPanel) -> AlphaSurface<'_> {
+    AlphaSurface {
+        btc_lead_lag: Some(panel),
+        ..AlphaSurface::empty()
     }
 }
 
@@ -51,7 +75,10 @@ fn test_grid_creation() {
         g.grid_levels.is_empty(),
         "grid_levels should be empty before first tick"
     );
-    g.on_tick(&ctx(50000.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // triggers lazy init with template_bounds
+    g.on_tick(
+        &ctx(50000.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // triggers lazy init with template_bounds
     let levels = g.grid_levels.get("BTC").unwrap();
     assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
     assert!((levels[0] - 49000.0).abs() < 0.01);
@@ -60,8 +87,14 @@ fn test_grid_creation() {
 #[test]
 fn test_grid_buy_on_down_cross() {
     let mut g = GridTrading::new(49000.0, 51000.0);
-    g.on_tick(&ctx(50500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // initial
-    let i = g.on_tick(&ctx(49500.0, 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // cross down
+    g.on_tick(
+        &ctx(50500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // initial
+    let i = g.on_tick(
+        &ctx(49500.0, 100_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // cross down
     assert!(!i.is_empty());
     // net_inventory was 0 before buy → Open (new long)
     match &i[0] {
@@ -73,8 +106,14 @@ fn test_grid_buy_on_down_cross() {
 #[test]
 fn test_grid_sell_on_up_cross() {
     let mut g = GridTrading::new(49000.0, 51000.0);
-    g.on_tick(&ctx(49500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = g.on_tick(&ctx(50500.0, 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(49500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let i = g.on_tick(
+        &ctx(50500.0, 100_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(!i.is_empty());
     // net_inventory was 0 before sell → Open (new short)
     match &i[0] {
@@ -84,14 +123,57 @@ fn test_grid_sell_on_up_cross() {
 }
 
 #[test]
+fn test_grid_btc_lead_lag_blocks_counter_direction_open() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.on_tick(
+        &ctx_for_symbol("ETHUSDT", 50500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let panel = btc_panel("ETHUSDT", -1);
+    let surface = surface_with_btc(&panel);
+
+    let actions = g.on_tick(&ctx_for_symbol("ETHUSDT", 49500.0, 100_000), &surface);
+
+    assert!(
+        actions.is_empty(),
+        "down-cross long open must be blocked when BTC lead-lag expects down"
+    );
+}
+
+#[test]
+fn test_grid_btc_lead_lag_allows_aligned_open() {
+    let mut g = GridTrading::new(49000.0, 51000.0);
+    g.on_tick(
+        &ctx_for_symbol("ETHUSDT", 50500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let panel = btc_panel("ETHUSDT", 1);
+    let surface = surface_with_btc(&panel);
+
+    let actions = g.on_tick(&ctx_for_symbol("ETHUSDT", 49500.0, 100_000), &surface);
+
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected aligned long Open, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_no_inventory_cap_blocking() {
     // Inventory cap removed — intent_processor Gate 1.5 handles duplicates.
     // 庫存上限已移除 — intent_processor Gate 1.5 處理重複。
     let mut g = GridTrading::new(49000.0, 51000.0);
     // First tick initializes grid lazily / 首次 tick 延遲初始化網格
-    g.on_tick(&ctx(50500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(50500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     g.net_inventory.insert("BTC".into(), g.max_inventory);
-    let i = g.on_tick(&ctx(49500.0, 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = g.on_tick(
+        &ctx(49500.0, 100_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(!i.is_empty()); // Grid always emits; intent_processor decides
 }
 
@@ -104,8 +186,14 @@ fn test_grid_close_on_inventory_reduction() {
     let mut g = GridTrading::new(49000.0, 51000.0);
 
     // Step 1: Buy to build positive inventory / 步驟 1：買入建立正庫存
-    g.on_tick(&ctx(50500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = g.on_tick(&ctx(49500.0, 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(50500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let i = g.on_tick(
+        &ctx(49500.0, 100_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(!i.is_empty());
     assert!(*g.net_inventory.get("BTC").unwrap_or(&0.0) > 0.0);
     match &i[0] {
@@ -114,7 +202,10 @@ fn test_grid_close_on_inventory_reduction() {
     }
 
     // Step 2: Sell with positive inventory → Close / 步驟 2：正庫存賣出 → Close
-    let i = g.on_tick(&ctx(50500.0, 200_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = g.on_tick(
+        &ctx(50500.0, 200_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(!i.is_empty());
     match &i[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
@@ -144,13 +235,22 @@ fn test_grid_close_skipped_rolls_back() {
     // 管線跳過 Close（無倉位）時，on_close_skipped 回滾交叉狀態。
     let mut g = GridTrading::new(49000.0, 51000.0);
     // Build positive inventory via Open
-    g.on_tick(&ctx(50500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    g.on_tick(&ctx(49500.0, 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(50500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    g.on_tick(
+        &ctx(49500.0, 100_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     let prev_cross = g.last_cross_idx.get("BTC").copied();
     let prev_inventory = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
 
     // Emit Close (sell with positive inventory)
-    let i = g.on_tick(&ctx(50500.0, 200_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = g.on_tick(
+        &ctx(50500.0, 200_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(!i.is_empty());
     match &i[0] {
         StrategyAction::Close { .. } => {}
@@ -175,7 +275,10 @@ fn test_adaptive_grid_init_on_first_tick() {
     // 自适应网格初始为空，首次 tick 时自动初始化
     let mut g = GridTrading::new_adaptive();
     assert!(g.grid_levels.is_empty());
-    let intents = g.on_tick(&ctx(50000.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let intents = g.on_tick(
+        &ctx(50000.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     let levels = g.grid_levels.get("BTC").unwrap();
     assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
     // Range should be ±10% of 50000 → 45000..55000
@@ -186,8 +289,11 @@ fn test_adaptive_grid_init_on_first_tick() {
 #[test]
 fn test_ou_spacing_update() {
     let mut g = GridTrading::new(49000.0, 51000.0);
-    g.on_tick(&ctx(50000.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // lazy init
-                                 // Fill price history for BTC
+    g.on_tick(
+        &ctx(50000.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // lazy init
+       // Fill price history for BTC
     let history = g.price_history.entry("BTC".into()).or_default();
     for i in 0..60 {
         history.push(50000.0 + (i as f64 * 0.1).sin() * 100.0);
@@ -204,7 +310,10 @@ fn test_geometric_grid_levels() {
     // Verify geometric spacing produces correct ratio-based levels.
     // 驗證幾何間距產生正確的等比層級。
     let mut g = GridTrading::new_geometric(1000.0, 2000.0);
-    g.on_tick(&ctx(1500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // lazy init with template_bounds
+    g.on_tick(
+        &ctx(1500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // lazy init with template_bounds
     let levels = g.grid_levels.get("BTC").unwrap();
     assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
     assert!((levels[0] - 1000.0).abs() < 0.01);
@@ -232,8 +341,14 @@ fn test_geometric_vs_linear() {
     // 相同邊界下，幾何層級應與線性層級不同。
     let mut lin = GridTrading::new(1000.0, 2000.0);
     let mut geo = GridTrading::new_geometric(1000.0, 2000.0);
-    lin.on_tick(&ctx(1500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // lazy init
-    geo.on_tick(&ctx(1500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // lazy init
+    lin.on_tick(
+        &ctx(1500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // lazy init
+    geo.on_tick(
+        &ctx(1500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // lazy init
     let lin_l = lin.grid_levels.get("BTC").unwrap();
     let geo_l = geo.grid_levels.get("BTC").unwrap();
 
@@ -263,7 +378,10 @@ fn test_health_check_in_range() {
     // Price within grid → Healthy.
     // 價格在網格範圍內 → Healthy。
     let mut g = GridTrading::new(49000.0, 51000.0);
-    g.on_tick(&ctx(50000.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // lazy init
+    g.on_tick(
+        &ctx(50000.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // lazy init
     let h = g.check_health("BTC", 50000.0);
     assert_eq!(h, GridHealth::Healthy);
     assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 0);
@@ -274,7 +392,10 @@ fn test_health_check_out_of_range() {
     // Price outside grid → OutOfRange (but not yet NeedsRebalance).
     // 價格超出網格 → OutOfRange（但尚未到 NeedsRebalance）。
     let mut g = GridTrading::new(49000.0, 51000.0);
-    g.on_tick(&ctx(50000.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // lazy init
+    g.on_tick(
+        &ctx(50000.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // lazy init
 
     // Price below grid
     let h = g.check_health("BTC", 48000.0);
@@ -306,7 +427,10 @@ fn test_auto_rebalance() {
     // Feed ticks at the far price. Health check runs every tick.
     // 以遠離價格餵入 tick。每 tick 執行健康檢查。
     for ts in 0..10 {
-        g.on_tick(&ctx(far_price, ts * 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+        g.on_tick(
+            &ctx(far_price, ts * 100_000),
+            &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        );
     }
 
     // Grid should have rebalanced around 60000 (±10% → 54000..66000).
@@ -337,7 +461,10 @@ fn test_geometric_rebalance() {
 
     let far_price = 60000.0;
     for ts in 0..8 {
-        g.on_tick(&ctx(far_price, ts * 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+        g.on_tick(
+            &ctx(far_price, ts * 100_000),
+            &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        );
     }
 
     // Grid should have rebalanced with geometric spacing.
@@ -375,7 +502,10 @@ fn test_adaptive_geometric_init() {
     assert!(g.grid_levels.is_empty());
     assert_eq!(g.spacing_mode, GridSpacingMode::Geometric);
 
-    g.on_tick(&ctx(50000.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(50000.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     let btc_levels = g
         .grid_levels
         .get("BTC")
@@ -585,8 +715,14 @@ fn test_grid_maker_disabled_by_default() {
 fn test_grid_market_entry_when_maker_disabled() {
     let mut g = GridTrading::new(49000.0, 51000.0);
     assert!(!g.use_maker_entry);
-    g.on_tick(&ctx(50500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = g.on_tick(&ctx(49500.0, 100_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(50500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let i = g.on_tick(
+        &ctx(49500.0, 100_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     match &i[0] {
         StrategyAction::Open(intent) => {
             assert_eq!(intent.order_type, "market");
@@ -604,8 +740,14 @@ fn test_grid_buy_postonly_below_last_price() {
     let mut g = GridTrading::new(49000.0, 51000.0);
     g.use_maker_entry = true;
     g.maker_price_offset_bps = 1.0; // 1 bps
-    g.on_tick(&ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = g.on_tick(&ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let i = g.on_tick(
+        &ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     match &i[0] {
         StrategyAction::Open(intent) => {
             assert!(intent.is_long);
@@ -630,8 +772,14 @@ fn test_grid_sell_postonly_above_last_price() {
     let mut g = GridTrading::new(49000.0, 51000.0);
     g.use_maker_entry = true;
     g.maker_price_offset_bps = 2.0; // 2 bps
-    g.on_tick(&ctx_with_bbo(49500.0, 0, 49_499.9, 49_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = g.on_tick(&ctx_with_bbo(50500.0, 100_000, 50_499.9, 50_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx_with_bbo(49500.0, 0, 49_499.9, 49_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let i = g.on_tick(
+        &ctx_with_bbo(50500.0, 100_000, 50_499.9, 50_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     match &i[0] {
         StrategyAction::Open(intent) => {
             assert!(!intent.is_long);
@@ -656,8 +804,14 @@ fn test_grid_maker_buffer_scales_linearly() {
     let mut g = GridTrading::new(49000.0, 51000.0);
     g.use_maker_entry = true;
     g.maker_price_buffer_ticks = 5;
-    g.on_tick(&ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let i = g.on_tick(&ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let i = g.on_tick(
+        &ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     match &i[0] {
         StrategyAction::Open(intent) => {
             let lp = intent.limit_price.unwrap();
@@ -677,10 +831,19 @@ fn test_grid_close_stays_market_with_maker_enabled() {
     g.use_maker_entry = true;
     g.maker_price_offset_bps = 1.0;
     // Build positive inventory via Open
-    g.on_tick(&ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    g.on_tick(&ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx_with_bbo(50500.0, 0, 50_499.9, 50_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    g.on_tick(
+        &ctx_with_bbo(49500.0, 100_000, 49_499.9, 49_500.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     // Sell with positive inventory → Close (not Open)
-    let i = g.on_tick(&ctx(50500.0, 200_000), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let i = g.on_tick(
+        &ctx(50500.0, 200_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     match &i[0] {
         StrategyAction::Close { reason, .. } => {
             assert_eq!(reason, "grid_close_long");
@@ -730,7 +893,7 @@ fn ctx_with_bbo(price: f64, ts: u64, bid: f64, ask: f64, tick: f64) -> TickConte
         tick_size: Some(tick),
         alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
         position_state: None,
-            is_pinned: true,
+        is_pinned: true,
     }
 }
 
@@ -747,8 +910,14 @@ fn test_g7_09c_grid_buy_uses_best_bid_passive() {
     g.maker_price_offset_bps = 1.0; // fallback only — should not be exercised here
                                     // First tick at 50_500 sets last_cross_idx; second tick at 49_700 crosses.
                                     // 首 tick 50_500 設 last_cross_idx；第二 tick 49_700 跨越網格。
-    g.on_tick(&ctx_with_bbo(50_500.0, 0, 50_499.5, 50_500.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let actions = g.on_tick(&ctx_with_bbo(49_700.0, 60_001, 49_699.9, 49_700.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx_with_bbo(50_500.0, 0, 50_499.5, 50_500.5, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let actions = g.on_tick(
+        &ctx_with_bbo(49_700.0, 60_001, 49_699.9, 49_700.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     let mut found_buy_limit = false;
     for action in &actions {
         if let StrategyAction::Open(intent) = action {
@@ -781,8 +950,14 @@ fn test_g7_09c_grid_sell_uses_best_ask_passive() {
     g.maker_price_offset_bps = 1.0;
     // First tick at 49_500 sets last_cross_idx; second tick at 50_300 crosses up.
     // 首 tick 49_500 設 last_cross_idx；第二 tick 50_300 向上跨越。
-    g.on_tick(&ctx_with_bbo(49_500.0, 0, 49_499.5, 49_500.5, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let actions = g.on_tick(&ctx_with_bbo(50_300.0, 60_001, 50_299.9, 50_300.1, 0.1), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx_with_bbo(49_500.0, 0, 49_499.5, 49_500.5, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let actions = g.on_tick(
+        &ctx_with_bbo(50_300.0, 60_001, 50_299.9, 50_300.1, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     let mut found_sell_limit = false;
     for action in &actions {
         if let StrategyAction::Open(intent) = action {
@@ -813,8 +988,14 @@ fn test_g7_09c_grid_skips_when_no_bbo() {
     g.use_maker_entry = true;
     g.maker_price_buffer_ticks = 1;
     g.maker_price_offset_bps = 5.0; // retained for config compatibility; not fallback
-    g.on_tick(&ctx(50_500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // BBO=None
-    let actions = g.on_tick(&ctx(49_700.0, 60_001), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE); // BUY trigger, BBO=None
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // BBO=None
+    let actions = g.on_tick(
+        &ctx(49_700.0, 60_001),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    ); // BUY trigger, BBO=None
     assert!(
         actions.is_empty(),
         "maker entry must skip without BBO; got {actions:?}"
@@ -851,16 +1032,28 @@ fn test_grid_blocked_symbol_skips_open_but_allows_close() {
     params.blocked_symbols = vec!["btc".to_string()];
     g.update_params(params).expect("update_params");
 
-    g.on_tick(&ctx(50_500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let blocked = g.on_tick(&ctx(49_700.0, 60_001), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let blocked = g.on_tick(
+        &ctx(49_700.0, 60_001),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(blocked.is_empty(), "blocked symbol must skip new grid open");
 
     g.blocked_symbols.clear();
-    let opened = g.on_tick(&ctx(49_700.0, 120_002), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let opened = g.on_tick(
+        &ctx(49_700.0, 120_002),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(opened.len(), 1, "unblocked symbol should open");
 
     g.blocked_symbols.insert("BTC".to_string());
-    let close = g.on_tick(&ctx(50_300.0, 240_003), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let close = g.on_tick(
+        &ctx(50_300.0, 240_003),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     match &close[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
         other => panic!("blocked symbol must still allow close, got {other:?}"),
@@ -899,17 +1092,32 @@ fn test_grid_churn_breaker_skips_open_but_allows_close() {
     blocked
         .churn_breaker_until_ms
         .insert("BTC".to_string(), 300_000);
-    blocked.on_tick(&ctx(50_500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let skipped = blocked.on_tick(&ctx(49_700.0, 60_001), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    blocked.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let skipped = blocked.on_tick(
+        &ctx(49_700.0, 60_001),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert!(skipped.is_empty(), "churn breaker must skip new grid open");
 
     let mut g = GridTrading::new(49_000.0, 51_000.0);
-    g.on_tick(&ctx(50_500.0, 0), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    let opened = g.on_tick(&ctx(49_700.0, 60_001), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let opened = g.on_tick(
+        &ctx(49_700.0, 60_001),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     assert_eq!(opened.len(), 1, "setup should create a long grid position");
 
     g.churn_breaker_until_ms.insert("BTC".to_string(), 500_000);
-    let close = g.on_tick(&ctx(50_300.0, 240_003), &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let close = g.on_tick(
+        &ctx(50_300.0, 240_003),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
     match &close[0] {
         StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
         other => panic!("churn breaker must still allow close, got {other:?}"),
@@ -980,11 +1188,7 @@ fn make_paper_position_grid(symbol: &str, is_long: bool, owner: &str) -> PaperPo
 }
 
 /// 帶 ctx.position_state 的 helper（複用 ctx 簽名）。
-fn ctx_with_position(
-    price: f64,
-    ts: u64,
-    pp: &PaperPosition,
-) -> TickContext<'_> {
+fn ctx_with_position(price: f64, ts: u64, pp: &PaperPosition) -> TickContext<'_> {
     TickContext {
         symbol: "BTC",
         price,
@@ -1020,10 +1224,7 @@ fn test_grid_skip_entry_when_cross_strategy_holds_paper_state() {
     // 第二 tick：down cross（would_open=true）+ paper_state 有 bb_reversion LONG。
     let pp = make_paper_position_grid("BTC", true, "bb_reversion");
     let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
-    let intents = g.on_tick(
-        &ctx2,
-        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-    );
+    let intents = g.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
     assert!(
         intents.is_empty(),
@@ -1053,10 +1254,7 @@ fn test_grid_accepts_own_inventory_position() {
 
     let pp = make_paper_position_grid("BTC", true, "grid_trading");
     let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
-    let intents = g.on_tick(
-        &ctx2,
-        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-    );
+    let intents = g.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
     assert!(
         !intents.is_empty(),
@@ -1064,10 +1262,9 @@ fn test_grid_accepts_own_inventory_position() {
     );
     // down cross + cur_inventory=0 → Open（new long）。
     match &intents[0] {
-        StrategyAction::Open(intent) => assert!(
-            intent.is_long,
-            "down cross with own owner 必發 LONG Open"
-        ),
+        StrategyAction::Open(intent) => {
+            assert!(intent.is_long, "down cross with own owner 必發 LONG Open")
+        }
         other => panic!("expected StrategyAction::Open, got {:?}", other),
     }
 }
@@ -1085,10 +1282,7 @@ fn test_grid_treats_bybit_sync_owner_as_legitimate() {
 
     let pp = make_paper_position_grid("BTC", true, "bybit_sync");
     let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
-    let intents = g.on_tick(
-        &ctx2,
-        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-    );
+    let intents = g.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
     assert!(
         !intents.is_empty(),
@@ -1113,10 +1307,7 @@ fn test_grid_treats_orphan_adopted_owner_as_legitimate() {
 
     let pp = make_paper_position_grid("BTC", true, "orphan_adopted");
     let ctx2 = ctx_with_position(49_500.0, 100_000, &pp);
-    let intents = g.on_tick(
-        &ctx2,
-        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
-    );
+    let intents = g.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
 
     assert!(
         !intents.is_empty(),
