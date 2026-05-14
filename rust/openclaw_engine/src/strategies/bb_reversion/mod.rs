@@ -27,9 +27,21 @@ use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
+use crate::strategies::cross_asset::{evaluate_shadow_signal, BtcLeadLagShadowSignal};
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 use tracing::info;
+
+fn btc_lead_lag_allows_reversion_entry(
+    is_long: bool,
+    signal: Option<&BtcLeadLagShadowSignal>,
+) -> bool {
+    let Some(signal) = signal else {
+        return true;
+    };
+    let expected_dir = if is_long { 1 } else { -1 };
+    signal.condition_pass_count >= 4 && signal.expected_dir == expected_dir
+}
 
 pub struct BbReversion {
     active: bool,
@@ -338,8 +350,10 @@ impl Strategy for BbReversion {
 
     /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
     /// `bb_reversion`：`[Ta1m]`（純 1m kline TA）。
+    /// Sprint N+1 W2：BtcLeadLagPanel 可用時作 cross-asset regime filter，
+    /// 只允許與 BTC→Alt expected_dir 對齊的 mean-reversion entry。
     fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
-        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
+        const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m, AlphaSourceTag::CrossAsset];
         TAGS
     }
 
@@ -388,12 +402,15 @@ impl Strategy for BbReversion {
     fn on_tick(
         &mut self,
         ctx: &TickContext<'_>,
-        _surface: &AlphaSurface<'_>,
+        surface: &AlphaSurface<'_>,
     ) -> Vec<StrategyAction> {
         let ind = match ctx.indicators {
             Some(i) => i,
             None => return vec![],
         };
+        let btc_lead_lag_signal = surface
+            .btc_lead_lag
+            .map(|panel| evaluate_shadow_signal(self.name(), ctx, panel));
         // Snapshot pre-mutation last_ms for RC-04 (sentinel 0 when unseen).
         // 為 RC-04 快照變更前的 last_ms（未見時為 0 哨兵）。
         let last_ms = self.cooldown.last_ms(ctx.symbol).unwrap_or(0);
@@ -513,6 +530,26 @@ impl Strategy for BbReversion {
                 }
 
                 if let Some(is_long) = signal {
+                    if !btc_lead_lag_allows_reversion_entry(is_long, btc_lead_lag_signal.as_ref()) {
+                        self.persistence.clear(ctx.symbol);
+                        let expected_dir = btc_lead_lag_signal
+                            .as_ref()
+                            .map(|s| s.expected_dir)
+                            .unwrap_or(0);
+                        let condition_pass_count = btc_lead_lag_signal
+                            .as_ref()
+                            .map(|s| s.condition_pass_count)
+                            .unwrap_or(0);
+                        tracing::debug!(
+                            target: "bb_reversion",
+                            symbol = %ctx.symbol,
+                            is_long = is_long,
+                            expected_dir = expected_dir,
+                            condition_pass_count = condition_pass_count,
+                            "skip entry: btc_lead_lag regime filter not aligned"
+                        );
+                        return intents;
+                    }
                     // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): pair MA confirmation。
                     // 反轉信號必經 MA 趨勢方向確認 — long entry → price < ma；
                     // short entry → price > ma；MA 不可得（warm-up 不足或字段 None）

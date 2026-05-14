@@ -24,6 +24,7 @@ use super::*;
 use crate::strategies::test_harness::StrategyHarness;
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSurface, BtcLeadLagPanel};
 use openclaw_core::indicators::{AdxResult, AtrResult, HurstResult, IndicatorSnapshot, KamaResult};
 
 // P-08: Test helpers use Box::leak for owned indicator data (fine for tests).
@@ -47,6 +48,25 @@ fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
             ..Default::default()
         })
         .build()
+}
+
+fn btc_panel(symbol: &str, expected_dir: i8) -> BtcLeadLagPanel {
+    BtcLeadLagPanel {
+        alt_symbols: vec![symbol.to_string()],
+        btc_lead_return_pct: 25.0,
+        lead_window_secs: 120,
+        alt_xcorr: vec![0.65],
+        alt_expected_dir: vec![expected_dir],
+        snapshot_ts_ms: 1_715_000_000_000,
+        source_tier: "cross_asset_btc_lead_lag".to_string(),
+    }
+}
+
+fn surface_with_btc(panel: &BtcLeadLagPanel) -> AlphaSurface<'_> {
+    AlphaSurface {
+        btc_lead_lag: Some(panel),
+        ..AlphaSurface::empty()
+    }
 }
 
 fn ctx_with_atr(sma: f64, kama: f64, adx: f64, ts: u64, atr: f64) -> TickContext<'static> {
@@ -154,6 +174,37 @@ fn test_long_entry() {
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
         other => panic!("expected StrategyAction::Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_btc_lead_lag_blocks_counter_direction_long_entry() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let panel = btc_panel("BTC", -1);
+    let surface = surface_with_btc(&panel);
+
+    let actions = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &surface);
+
+    assert!(
+        actions.is_empty(),
+        "long MA entry must be blocked when BTC lead-lag expects down"
+    );
+}
+
+#[test]
+fn test_btc_lead_lag_confirms_aligned_long_entry() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let panel = btc_panel("BTC", 1);
+    let surface = surface_with_btc(&panel);
+
+    let actions = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0), &surface);
+
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected aligned long Open, got {:?}", other),
     }
 }
 

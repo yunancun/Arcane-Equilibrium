@@ -13,6 +13,7 @@ use crate::strategies::common::TrendCooldown;
 use crate::strategies::confluence::PersistenceTracker;
 use crate::strategies::StrategyAction;
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::{AlphaSurface, BtcLeadLagPanel};
 use openclaw_core::indicators::{AdxResult, BollingerResult, IndicatorSnapshot};
 
 fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
@@ -90,6 +91,25 @@ fn ctx_bb_bbo(
     ctx
 }
 
+fn btc_panel(symbol: &str, expected_dir: i8) -> BtcLeadLagPanel {
+    BtcLeadLagPanel {
+        alt_symbols: vec![symbol.to_string()],
+        btc_lead_return_pct: 25.0,
+        lead_window_secs: 120,
+        alt_xcorr: vec![0.65],
+        alt_expected_dir: vec![expected_dir],
+        snapshot_ts_ms: 1_715_000_000_000,
+        source_tier: "cross_asset_btc_lead_lag".to_string(),
+    }
+}
+
+fn surface_with_btc(panel: &BtcLeadLagPanel) -> AlphaSurface<'_> {
+    AlphaSurface {
+        btc_lead_lag: Some(panel),
+        ..AlphaSurface::empty()
+    }
+}
+
 #[test]
 fn test_long_oversold() {
     let mut s = BbReversion::new();
@@ -102,6 +122,43 @@ fn test_long_oversold() {
     match &i[0] {
         StrategyAction::Open(intent) => assert!(intent.is_long),
         other => panic!("expected StrategyAction::Open, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_btc_lead_lag_regime_filter_blocks_counter_direction_long() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    let panel = btc_panel("BTC", -1);
+    let surface = surface_with_btc(&panel);
+
+    let actions = s.on_tick(
+        &ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1),
+        &surface,
+    );
+
+    assert!(
+        actions.is_empty(),
+        "oversold long reversion must be blocked when BTC lead-lag expects down"
+    );
+}
+
+#[test]
+fn test_btc_lead_lag_regime_filter_allows_aligned_long() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    let panel = btc_panel("BTC", 1);
+    let surface = surface_with_btc(&panel);
+
+    let actions = s.on_tick(
+        &ctx_bb_bbo(-0.1, 25.0, 0, 49_999.5, 50_000.5, 0.1),
+        &surface,
+    );
+
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected aligned long Open, got {:?}", other),
     }
 }
 
@@ -128,7 +185,7 @@ fn test_exit_mean() {
     // ctx.position_state = Some(self-owned LONG) 才能進 exit 分支。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0; // disable persistence for unit tests
-    // Tick 1：entry（無需 mock position）。
+                              // Tick 1：entry（無需 mock position）。
     s.on_tick(
         &ctx_bb(-0.1, 25.0, 0),
         &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,

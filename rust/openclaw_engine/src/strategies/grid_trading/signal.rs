@@ -28,11 +28,21 @@ use super::{compute_grid_confidence, GridHealth, GridTrading};
 use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
+use crate::strategies::cross_asset::{evaluate_shadow_signal, BtcLeadLagShadowSignal};
 use crate::strategies::{grid_helpers, Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
+use openclaw_core::alpha_surface::AlphaSurface;
 use tracing::debug;
 
 impl GridTrading {
+    fn btc_lead_lag_allows_open(is_long: bool, signal: Option<&BtcLeadLagShadowSignal>) -> bool {
+        let Some(signal) = signal else {
+            return true;
+        };
+        let expected_dir = if is_long { 1 } else { -1 };
+        signal.condition_pass_count >= 4 && signal.expected_dir == expected_dir
+    }
+
     fn resolve_entry_order(
         &self,
         ctx: &TickContext<'_>,
@@ -63,8 +73,15 @@ impl GridTrading {
         ))
     }
 
-    pub(super) fn on_tick_impl(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+    pub(super) fn on_tick_impl(
+        &mut self,
+        ctx: &TickContext<'_>,
+        surface: &AlphaSurface<'_>,
+    ) -> Vec<StrategyAction> {
         let sym = ctx.symbol;
+        let btc_lead_lag_signal = surface
+            .btc_lead_lag
+            .map(|panel| evaluate_shadow_signal(self.name(), ctx, panel));
 
         // Per-symbol price history for OU model
         let history = self.price_history.entry(sym.to_string()).or_default();
@@ -221,6 +238,27 @@ impl GridTrading {
                 strategy = "grid_trading",
                 symbol = sym,
                 "grid new entry skipped: symbol in blocked_symbols / grid 新開倉跳過：symbol 在 blocked_symbols"
+            );
+            return vec![];
+        }
+        if would_open
+            && !Self::btc_lead_lag_allows_open(is_down_cross, btc_lead_lag_signal.as_ref())
+        {
+            let expected_dir = btc_lead_lag_signal
+                .as_ref()
+                .map(|s| s.expected_dir)
+                .unwrap_or(0);
+            let condition_pass_count = btc_lead_lag_signal
+                .as_ref()
+                .map(|s| s.condition_pass_count)
+                .unwrap_or(0);
+            debug!(
+                strategy = "grid_trading",
+                symbol = sym,
+                is_long = is_down_cross,
+                expected_dir = expected_dir,
+                condition_pass_count = condition_pass_count,
+                "grid new entry skipped: btc_lead_lag direction bias not aligned"
             );
             return vec![];
         }

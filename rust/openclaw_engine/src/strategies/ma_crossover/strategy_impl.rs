@@ -15,11 +15,20 @@
 //!   `get_params_json` / `param_ranges_json`）加 `conf_scale` / `set_conf_scale`。
 
 use crate::intent_processor::OrderIntent;
+use crate::strategies::cross_asset::{evaluate_shadow_signal, BtcLeadLagShadowSignal};
 use crate::strategies::{Strategy, StrategyAction, StrategyParams};
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
 
 use super::{confluence, MaCrossover, MaCrossoverParams};
+
+fn btc_lead_lag_confirms_entry(is_long: bool, signal: Option<&BtcLeadLagShadowSignal>) -> bool {
+    let Some(signal) = signal else {
+        return true;
+    };
+    let expected_dir = if is_long { 1 } else { -1 };
+    signal.condition_pass_count >= 4 && signal.expected_dir == expected_dir
+}
 
 impl Strategy for MaCrossover {
     fn name(&self) -> &str {
@@ -35,11 +44,9 @@ impl Strategy for MaCrossover {
     /// W-AUDIT-8a Phase A spec §3 Phase A Deliverable #3：
     /// `ma_crossover`：`[Ta1m]`（純 1m kline TA + ADX + persistence）。
     ///
-    /// Sprint N+1 W2 sub-task 2（per spec v1.2 §5.1.1）：宣告 `CrossAsset` tag
-    /// 表示本策略消費 BtcLeadLagPanel（**paper-only shadow log，不影響 strategy
-    /// decision**；fence Layer 1 由 step_4_5_dispatch 構造 surface 階段控制，
-    /// demo / live_demo / live → surface.btc_lead_lag = None → 本策略 on_tick
-    /// 內 `if let Some(panel) = surface.btc_lead_lag` 即 skip）。
+    /// Sprint N+1 W2：宣告 `CrossAsset` tag 表示本策略在 BtcLeadLagPanel
+    /// 可用時用它作 trend confirmation；surface 無 panel 時保留既有 TA path
+    /// （demo/live fence 仍由 step_4_5_dispatch 控制）。
     fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
         const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m, AlphaSourceTag::CrossAsset];
         TAGS
@@ -101,18 +108,9 @@ impl Strategy for MaCrossover {
         ctx: &TickContext<'_>,
         surface: &AlphaSurface<'_>,
     ) -> Vec<StrategyAction> {
-        // Sprint N+1 W2 sub-task 2：BtcLeadLagPanel paper-only shadow log。
-        // 在任何 strategy logic 之前 evaluate（per spec §5.1.2 + §6 Layer 3）。
-        // - paper-only fence Layer 1：surface.btc_lead_lag 在 demo/live_demo/live
-        //   永遠 None（fence 由 step_4_5_dispatch engine_mode gate 主防線控制）
-        // - 本端 `if let Some(panel) = ...` 為 redundant safety guard
-        // - shadow log emit 後 **不**改 actions / **不**改 strategy state；
-        //   下游 7d 後跑離線 SQL 對齊真實 fill 算 counterfactual edge
-        if let Some(panel) = surface.btc_lead_lag {
-            let _shadow =
-                crate::strategies::cross_asset::evaluate_shadow_signal(self.name(), ctx, panel);
-            // _shadow 純評估快照，丟棄不影響後續 strategy decision。
-        }
+        let btc_lead_lag_signal = surface
+            .btc_lead_lag
+            .map(|panel| evaluate_shadow_signal(self.name(), ctx, panel));
 
         let ind = match ctx.indicators {
             Some(i) => i,
@@ -274,6 +272,26 @@ impl Strategy for MaCrossover {
                 };
 
                 if let Some(is_long) = signal {
+                    if !btc_lead_lag_confirms_entry(is_long, btc_lead_lag_signal.as_ref()) {
+                        self.persistence.clear(ctx.symbol);
+                        let expected_dir = btc_lead_lag_signal
+                            .as_ref()
+                            .map(|s| s.expected_dir)
+                            .unwrap_or(0);
+                        let condition_pass_count = btc_lead_lag_signal
+                            .as_ref()
+                            .map(|s| s.condition_pass_count)
+                            .unwrap_or(0);
+                        tracing::debug!(
+                            target: "ma_crossover",
+                            symbol = %ctx.symbol,
+                            is_long = is_long,
+                            expected_dir = expected_dir,
+                            condition_pass_count = condition_pass_count,
+                            "skip entry: btc_lead_lag trend confirmation not aligned"
+                        );
+                        return vec![];
+                    }
                     if !self.higher_tf_allows_entry(ctx.symbol, is_long) {
                         return vec![];
                     }
