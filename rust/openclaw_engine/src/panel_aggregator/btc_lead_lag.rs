@@ -116,6 +116,16 @@ pub const BTC_ORDERBOOK_SYMBOL: &str = "BTCUSDT";
 ///   改 parse_orderbook_snapshot 改抽 10 檔）。
 pub const BTC_BOOK_IMBALANCE_TOP_N: usize = 5;
 
+/// Layer 2 fence：BtcLeadLagProducer 只在 paper 明確啟用，或 env 未設且無 demo/live
+/// binding 的 paper-only dev/test 配置下 spawn。
+pub fn should_spawn_btc_lead_lag_producer(has_demo: bool, has_live: bool) -> bool {
+    match std::env::var("OPENCLAW_ENABLE_PAPER") {
+        Ok(value) => value.trim() == "1",
+        Err(std::env::VarError::NotPresent) => !has_demo && !has_live,
+        Err(std::env::VarError::NotUnicode(_)) => false,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // W2-IMPL-1 (2026-05-11) — Orderbook book imbalance slot + ingest helpers
 // ─────────────────────────────────────────────────────────────────────────

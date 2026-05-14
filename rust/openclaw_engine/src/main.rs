@@ -1041,17 +1041,8 @@ async fn async_main(
     let btc_lead_lag_paper_enabled_env = std::env::var("OPENCLAW_ENABLE_PAPER")
         .map(|v| v.trim() == "1")
         .unwrap_or(false);
-    let btc_lead_lag_producer_should_spawn = if btc_lead_lag_paper_enabled_env {
-        // (a) 顯式 OPENCLAW_ENABLE_PAPER=1 → spawn
-        true
-    } else if !has_demo && !has_live {
-        // (b) env unset + paper-only 配置（既無 demo 亦無 live binding）→ spawn
-        // 此 case 對應 dev/test 工作流（單跑 paper engine 無 demo/live secret slot）
-        true
-    } else {
-        // (c) env unset + demo|live active → skip（fence Layer 2 fired）
-        false
-    };
+    let btc_lead_lag_producer_should_spawn =
+        openclaw_engine::panel_aggregator::should_spawn_btc_lead_lag_producer(has_demo, has_live);
     if btc_lead_lag_producer_should_spawn {
         let btc_lead_lag_db_pool = Arc::clone(&db_pool);
         let btc_lead_lag_cancel = cancel.clone();
@@ -1108,7 +1099,7 @@ async fn async_main(
             has_demo,
             has_live,
             "BtcLeadLagProducer + BtcOrderbookIngest skipped (Layer 2 fence: \
-             OPENCLAW_ENABLE_PAPER unset + demo|live active) / \
+             OPENCLAW_ENABLE_PAPER not enabled for this runtime binding) / \
              BtcLeadLagProducer + 訂單簿 ingest 跳過 spawn（Layer 2 paper-only fence 觸發）"
         );
     }
