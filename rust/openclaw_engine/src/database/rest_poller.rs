@@ -60,7 +60,7 @@ pub fn spawn_rest_pollers(
                                         ts_ms: ts,
                                         symbol: sym.clone(),
                                         funding_rate: r.funding_rate,
-                                        funding_rate_daily: r.funding_rate * 3.0,
+                                        funding_rate_daily: funding_rate_daily(r.funding_rate),
                                     });
                                 }
                                 Err(e) => debug!(symbol = %sym, error = %e, "funding fetch failed"),
@@ -128,11 +128,7 @@ pub fn spawn_rest_pollers(
                                 Ok(items) if !items.is_empty() => {
                                     let item = &items[0];
                                     let ts = item.timestamp.parse::<u64>().unwrap_or_else(|_| now_ms());
-                                    let ratio = if item.sell_ratio > 0.0 {
-                                        item.buy_ratio / item.sell_ratio
-                                    } else {
-                                        1.0
-                                    };
+                                    let ratio = compute_lsr_ratio(item.buy_ratio, item.sell_ratio);
                                     let _ = tx.try_send(MarketDataMsg::LongShortRatio {
                                         ts_ms: ts,
                                         symbol: sym.clone(),

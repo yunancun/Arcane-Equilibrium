@@ -207,10 +207,6 @@ impl ClaudeTeacher {
     }
 }
 
-// S-04: use shared now_ms() from openclaw_core instead of local copy.
-// S-04：使用 openclaw_core 的共用 now_ms() 取代本地副本。
-use openclaw_core::now_ms;
-
 // ---------------------------------------------------------------------------
 // Tests / 測試
 // ---------------------------------------------------------------------------
@@ -220,6 +216,7 @@ mod tests {
     use super::*;
     use crate::ai_budget::tracker::BudgetConfig;
     use crate::database::DatabaseConfig;
+    use openclaw_core::now_ms;
 
     async fn empty_pool() -> Arc<DbPool> {
         let cfg = DatabaseConfig {

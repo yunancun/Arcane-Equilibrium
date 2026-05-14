@@ -74,6 +74,7 @@ pub(crate) fn is_stale(last_tick_ms: u64, now_ms: u64) -> bool {
 
 /// EN: Return stale threshold in milliseconds (for external callers / tests).
 /// 中文: 返回過期閾值（毫秒），供外部調用/測試用。
+#[cfg(test)]
 pub(crate) const fn stale_threshold_ms() -> u64 {
     STALE_THRESHOLD_MS
 }

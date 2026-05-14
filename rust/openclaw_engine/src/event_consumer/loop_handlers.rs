@@ -87,6 +87,7 @@ pub(super) fn pending_order_accepts_fill(po: &PendingOrder) -> bool {
 // F4-RETURN Issue 1 (2026-04-26): F4-1 emitter moved to sibling
 // `unattributed_emit` (§九 1200-line ceiling); re-export preserves caller paths.
 // F4-RETURN Issue 1（2026-04-26）：F4-1 emitter 抽至 sibling 以守 §九 上限。
+#[cfg(test)]
 pub(super) use super::unattributed_emit::{
     engine_mode_emits_unattributed_audit, try_emit_unattributed_fill,
 };

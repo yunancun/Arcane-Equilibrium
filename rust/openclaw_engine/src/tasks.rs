@@ -839,6 +839,7 @@ pub(crate) fn spawn_outcome_backfiller(db_pool: &Arc<DbPool>, cancel: &Cancellat
 ///     Extracted from spawn_position_reconciler for testability.
 /// 中文: 將 u8 原子值映射到 RiskLevel 枚舉（未知值安全回退至 ManualReview）。
 ///       從 spawn_position_reconciler 提取以便測試。
+#[cfg(test)]
 pub(crate) fn risk_level_from_u8(val: u8) -> openclaw_core::sm::risk_gov::RiskLevel {
     use openclaw_core::sm::risk_gov::RiskLevel;
     match val {
@@ -854,6 +855,7 @@ pub(crate) fn risk_level_from_u8(val: u8) -> openclaw_core::sm::risk_gov::RiskLe
 
 /// EN: Derive reconciler engine label from BybitEnvironment.
 /// 中文: 從 BybitEnvironment 派生對帳器引擎標籤。
+#[cfg(test)]
 pub(crate) fn reconciler_label_for_env(env: BybitEnvironment) -> &'static str {
     match env {
         BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo",

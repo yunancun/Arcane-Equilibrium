@@ -74,9 +74,9 @@ pub use engine_routing::{EngineCommandChannels, LiveCmdSenderSlot, PerEngineRisk
 pub use protocol::{IpcError, JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 pub use server::IpcServer;
 pub use slots::{
-    AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot, EdgeReloadSenderSlot,
-    FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot, StrategistCountersSlot,
-    TeacherLoopHandles, TeacherLoopSlot,
+    AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot,
+    EdgeReloadSenderSlot, FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot,
+    StrategistCountersSlot, TeacherLoopHandles, TeacherLoopSlot,
 };
 
 // Internal re-exports — each `handlers/*.rs` and `handlers_config.rs` file
@@ -106,15 +106,23 @@ pub(crate) use engine_routing::extract_engine_tx;
 // handler 透過 `super::super::*`、test 透過 `use super::*` 使用的標準庫 +
 // crate 型別。在 facade re-export 讓 call site 與測試解析同名項目，
 // 不必逐檔長 use list。
+#[cfg(test)]
 pub(crate) use crate::claude_teacher::ConsumerLoopStatus;
-pub(crate) use crate::config::{
-    BudgetConfig, ConfigManager, ConfigStore, LearningConfig, PatchSource, RiskConfig,
-};
-pub(crate) use crate::tick_pipeline::{PipelineCommand, PipelineSnapshot};
+#[cfg(test)]
+pub(crate) use crate::config::{BudgetConfig, LearningConfig, RiskConfig};
+pub(crate) use crate::config::{ConfigManager, ConfigStore, PatchSource};
+pub(crate) use crate::tick_pipeline::PipelineCommand;
+#[cfg(test)]
+pub(crate) use crate::tick_pipeline::PipelineSnapshot;
+#[cfg(test)]
 pub(crate) use std::path::PathBuf;
-pub(crate) use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+pub(crate) use std::sync::atomic::AtomicBool;
+pub(crate) use std::sync::atomic::Ordering;
 pub(crate) use std::sync::Arc;
+#[cfg(test)]
 pub(crate) use tokio::net::UnixListener;
+#[cfg(test)]
 pub(crate) use tokio::sync::RwLock;
 
 // Internal re-exports.
@@ -136,6 +144,9 @@ pub(crate) use tokio::sync::RwLock;
 // Domain handler 透過 `handlers/mod.rs`（內部 `pub(in crate::ipc_server)
 // use ...`）暴露；facade 把它們拉進 `ipc_server::*`，tests 經
 // `super::super::*` 取得。
+#[cfg(test)]
 pub(crate) use dispatch::dispatch_request;
+#[cfg(test)]
 pub(in crate::ipc_server) use handlers::*;
+#[cfg(test)]
 pub(crate) use protocol::ERR_METHOD_NOT_FOUND;
