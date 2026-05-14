@@ -10,13 +10,12 @@
 //!       live → `surface.btc_lead_lag = None`。本 test 透過 `effective_engine_mode`
 //!       函數推導 4 種 PipelineKind+env 組合的字串，confirm 只有 "paper" 進
 //!       slot.try_read 分支，其餘三 mode 走 None default arm。
-//!     - **Layer 2（深度防禦）**：`main.rs:1005-1018` BtcLeadLagProducer spawn
-//!       前 env-gate 三狀態：
+//!     - **Layer 2（深度防禦）**：`should_spawn_btc_lead_lag_producer()` 統一
+//!       BtcLeadLagProducer spawn 前 env-gate 三狀態：
 //!         (a) `OPENCLAW_ENABLE_PAPER=1` → spawn producer（paper 正路徑）
 //!         (b) env unset + `!has_demo && !has_live`（paper-only 配置）→ spawn
 //!         (c) env unset + `has_demo || has_live` → skip spawn（fence fired）
-//!       本 test 把這個三狀態 Bool 邏輯包進 helper 並 verify 3 state 各對應一
-//!       assert，模擬 std::env::var("OPENCLAW_ENABLE_PAPER") 三狀態 + has_demo/
+//!       本 test 直接調 shared helper，並用 env guard 模擬三狀態 + has_demo/
 //!       has_live 4 種 mode 組合 driving truth table。
 //!     - **Layer 3（消費端深度防禦）**：策略內 `if let Some(panel) = surface
 //!       .btc_lead_lag` 隱含 None → skip；本 test 透過 `evaluate_shadow_signal`
@@ -48,14 +47,16 @@
 //!   - IMPL-3 (Healthcheck [57])：`helper_scripts/db/passive_wait_healthcheck/checks_btc_lead_lag.py`
 //!   - IMPL-4 (D+12 paper edge report)：`helper_scripts/reports/w2_paper_edge_report.py`
 
-use std::sync::Arc;
+use std::ffi::OsString;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use openclaw_core::alpha_surface::{AlphaSurface, BtcLeadLagPanel, EMPTY_ALPHA_SURFACE};
 use openclaw_engine::bybit_rest_client::BybitEnvironment;
 use openclaw_engine::mode_state::effective_engine_mode;
 use openclaw_engine::panel_aggregator::{
-    create_btc_orderbook_slot, spawn_btc_orderbook_ingest_task, BtcOrderbookSlot,
+    create_btc_orderbook_slot, should_spawn_btc_lead_lag_producer,
+    spawn_btc_orderbook_ingest_task, BtcOrderbookSlot,
 };
 use openclaw_engine::strategies::cross_asset::{
     evaluate_shadow_signal, BtcLeadLagShadowSignal, SHADOW_LOG_TARGET,
@@ -129,26 +130,36 @@ fn mock_ctx(symbol: &'static str, ts_ms: u64) -> TickContext<'static> {
     }
 }
 
-/// Layer 2 fence 三狀態 helper：把 main.rs:1005-1018 的 Bool 邏輯抽到純函數
-/// 上 verify，與真實 binary 二進制邏輯保持結構同源。
-///
-/// 邏輯複製自 `main.rs:1005-1018`（W2-IMPL-2 land hunk）：
-///   (a) paper_enabled_env=true                          → spawn=true
-///   (b) paper_enabled_env=false + !has_demo + !has_live → spawn=true
-///   (c) paper_enabled_env=false + (has_demo||has_live)  → spawn=false（fence fired）
-///
-/// 注意：本 helper 是 **test-only mirror**，與 main.rs binary 端非 share code；
-/// 若 main.rs 改邏輯 → 本 helper 同步改才能維持 layer 2 assertion 真實對應。
-fn layer_2_should_spawn(paper_enabled_env: bool, has_demo: bool, has_live: bool) -> bool {
-    if paper_enabled_env {
-        // (a) 顯式 OPENCLAW_ENABLE_PAPER=1 → spawn
-        true
-    } else if !has_demo && !has_live {
-        // (b) env unset + paper-only 配置 → spawn
-        true
-    } else {
-        // (c) env unset + demo|live active → skip（fence Layer 2 fired）
-        false
+static OPENCLAW_ENABLE_PAPER_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+struct OpenclawEnablePaperEnvGuard {
+    _guard: MutexGuard<'static, ()>,
+    previous: Option<OsString>,
+}
+
+impl OpenclawEnablePaperEnvGuard {
+    fn set(value: Option<&str>) -> Self {
+        let guard = OPENCLAW_ENABLE_PAPER_ENV_LOCK
+            .lock()
+            .expect("OPENCLAW_ENABLE_PAPER env lock poisoned");
+        let previous = std::env::var_os("OPENCLAW_ENABLE_PAPER");
+        match value {
+            Some(value) => std::env::set_var("OPENCLAW_ENABLE_PAPER", value),
+            None => std::env::remove_var("OPENCLAW_ENABLE_PAPER"),
+        }
+        Self {
+            _guard: guard,
+            previous,
+        }
+    }
+}
+
+impl Drop for OpenclawEnablePaperEnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("OPENCLAW_ENABLE_PAPER", value),
+            None => std::env::remove_var("OPENCLAW_ENABLE_PAPER"),
+        }
     }
 }
 
@@ -237,7 +248,7 @@ fn layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// Layer 2 fence：main.rs:1005-1018 env-gate 三狀態
+// Layer 2 fence：shared should_spawn_btc_lead_lag_producer env-gate 三狀態
 // ═════════════════════════════════════════════════════════════════════════
 
 /// **Layer 2 fence 主 assert**：BtcLeadLagProducer spawn 前 env-gate 三狀態
@@ -245,54 +256,66 @@ fn layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot() {
 ///   (b) env unset + paper-only                  → spawn
 ///   (c) env unset + demo|live active            → skip spawn（fence fired）
 ///
-/// 注意：本 test 不操作真實 `std::env::var`（避免 cargo test 並行 race；
-/// integration test 不能依賴 env var sandbox）。改用 `layer_2_should_spawn`
-/// helper（test-only mirror，邏輯與 main.rs:1005-1018 同源）。
+/// 注意：本 test 使用 shared helper，並用 process-local mutex + RAII guard
+/// restore `OPENCLAW_ENABLE_PAPER`，避免 env var 污染同一 test binary 後續 case。
 #[test]
 fn layer_2_fence_env_gate_three_states() {
-    // ──── 狀態 (a)：OPENCLAW_ENABLE_PAPER=1 → spawn 永遠 true ────
-    // 即便 has_demo=true / has_live=true，env=1 顯式 override 仍 spawn。
-    // （per dispatch §3.2 E2 重點 2 第 (a) 狀態）
-    assert!(
-        layer_2_should_spawn(true, false, false),
-        "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + paper-only → must spawn"
-    );
-    assert!(
-        layer_2_should_spawn(true, true, false),
-        "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_demo → must spawn（env override）"
-    );
-    assert!(
-        layer_2_should_spawn(true, false, true),
-        "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_live → must spawn（env override）"
-    );
-    assert!(
-        layer_2_should_spawn(true, true, true),
-        "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_demo + has_live → must spawn（env override）"
-    );
+    {
+        let _env = OpenclawEnablePaperEnvGuard::set(Some("1"));
+        // ──── 狀態 (a)：OPENCLAW_ENABLE_PAPER=1 → spawn 永遠 true ────
+        // 即便 has_demo=true / has_live=true，env=1 顯式 override 仍 spawn。
+        assert!(
+            should_spawn_btc_lead_lag_producer(false, false),
+            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + paper-only → must spawn"
+        );
+        assert!(
+            should_spawn_btc_lead_lag_producer(true, false),
+            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_demo → must spawn（env override）"
+        );
+        assert!(
+            should_spawn_btc_lead_lag_producer(false, true),
+            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_live → must spawn（env override）"
+        );
+        assert!(
+            should_spawn_btc_lead_lag_producer(true, true),
+            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_demo + has_live → must spawn（env override）"
+        );
+    }
 
-    // ──── 狀態 (b)：env unset + paper-only（!has_demo && !has_live）→ spawn ────
-    // 對應 dev/test 工作流（單跑 paper engine 無 demo/live secret slot）。
-    assert!(
-        layer_2_should_spawn(false, false, false),
-        "Layer 2 (b): env unset + paper-only (!has_demo && !has_live) → must spawn"
-    );
+    {
+        let _env = OpenclawEnablePaperEnvGuard::set(None);
+        // ──── 狀態 (b)：env unset + paper-only（!has_demo && !has_live）→ spawn ────
+        // 對應 dev/test 工作流（單跑 paper engine 無 demo/live secret slot）。
+        assert!(
+            should_spawn_btc_lead_lag_producer(false, false),
+            "Layer 2 (b): env unset + paper-only (!has_demo && !has_live) → must spawn"
+        );
 
-    // ──── 狀態 (c)：env unset + demo|live active → SKIP spawn（fence fired）────
-    // 主要保護 case：mixed mode（paper-disabled 但 demo/live 跑）下 producer
-    // 不應寫 PG panel.btc_lead_lag_panel（避免 demo/live 期樣本污染 ML pipeline
-    // 與 5 策略 demo edge baseline）。
-    assert!(
-        !layer_2_should_spawn(false, true, false),
-        "Layer 2 (c) FIRED: env unset + has_demo → must SKIP spawn (fence Layer 2)"
-    );
-    assert!(
-        !layer_2_should_spawn(false, false, true),
-        "Layer 2 (c) FIRED: env unset + has_live → must SKIP spawn (fence Layer 2)"
-    );
-    assert!(
-        !layer_2_should_spawn(false, true, true),
-        "Layer 2 (c) FIRED: env unset + has_demo + has_live → must SKIP spawn (fence Layer 2)"
-    );
+        // ──── 狀態 (c)：env unset + demo|live active → SKIP spawn（fence fired）────
+        // 主要保護 case：mixed mode（paper-disabled 但 demo/live 跑）下 producer
+        // 不應寫 PG panel.btc_lead_lag_panel（避免 demo/live 期樣本污染 ML pipeline
+        // 與 5 策略 demo edge baseline）。
+        assert!(
+            !should_spawn_btc_lead_lag_producer(true, false),
+            "Layer 2 (c) FIRED: env unset + has_demo → must SKIP spawn (fence Layer 2)"
+        );
+        assert!(
+            !should_spawn_btc_lead_lag_producer(false, true),
+            "Layer 2 (c) FIRED: env unset + has_live → must SKIP spawn (fence Layer 2)"
+        );
+        assert!(
+            !should_spawn_btc_lead_lag_producer(true, true),
+            "Layer 2 (c) FIRED: env unset + has_demo + has_live → must SKIP spawn (fence Layer 2)"
+        );
+    }
+
+    {
+        let _env = OpenclawEnablePaperEnvGuard::set(Some("0"));
+        assert!(
+            !should_spawn_btc_lead_lag_producer(false, false),
+            "Layer 2 explicit disable: OPENCLAW_ENABLE_PAPER=0 must not use env-unset fallback"
+        );
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
