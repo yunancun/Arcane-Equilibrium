@@ -2214,3 +2214,23 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Reports:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--passive_healthcheck_7108035d_plan_sync.md`
   and `docs/CCAgentWorkSpace/Operator/2026-05-15--passive_healthcheck_7108035d_plan_sync.md`.
+
+## 2026-05-15 P1-WA4B-INSERT-1 Feature Baseline Restore
+
+- Investigated `[67] feature_baseline_readiness` on Linux `trade-core` at
+  repo head `a7900d38`; schema existed and source data was healthy, but
+  `observability.feature_baselines` had 0 rows, no feature-baseline cron entry,
+  and no prior writer log.
+- Dry-run Rust writer read 3,341,214 historical
+  `trading.decision_context_snapshots` samples and projected 646 active
+  34-dim baseline rows.
+- Ran canonical W-AUDIT-4b apply wrapper:
+  `OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/tmp/openclaw bash helper_scripts/cron/feature_baseline_writer_cron.sh`.
+- Apply wrote 646 rows, covering 19 symbols with 34 active feature rows each.
+  Standalone `[67]` PASSed with active_rows=646 / active_symbols=19 /
+  feature_names=34/34 / online_latest vector dim 34.
+- Boundary: DB write only to `observability.feature_baselines`; no DDL, rebuild,
+  restart, live auth mutation, strategy/risk parameter change, or paper enablement.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--feature_baseline_restore.md`
+  and `docs/CCAgentWorkSpace/Operator/2026-05-15--feature_baseline_restore.md`.
