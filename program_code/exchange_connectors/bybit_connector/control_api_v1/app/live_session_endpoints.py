@@ -395,8 +395,13 @@ async def post_live_session_pause(
             "session": {"session_state": "paused", "session_id": "rust_engine_live"},
         })
     except Exception as exc:
-        logger.error("IPC pause_paper failed (live pause): %s", exc)
-        raise HTTPException(status_code=502, detail=f"IPC command failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("IPC pause_paper failed (live pause)")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
+        )
 
 
 @core.live_router.post("/session/resume")
@@ -443,8 +448,13 @@ async def post_live_session_resume(
             "contraction": {"state": "normal", "warn_pct": core.CONTRACTION_WARN_PCT, "halt_pct": core.CONTRACTION_HALT_PCT},
         })
     except Exception as exc:
-        logger.error("IPC resume_paper failed (live resume): %s", exc)
-        raise HTTPException(status_code=502, detail=f"IPC command failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("IPC resume_paper failed (live resume)")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

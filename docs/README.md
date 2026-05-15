@@ -168,6 +168,13 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/E4/workspace/reports/2026-05-16--full-scope-testing-audit.md` | E4 full-scope testing audit |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-16--12-agent-audit-pm-signoff.md` | PM 12-agent audit sign-off report |
 | `CCAgentWorkSpace/Operator/2026-05-16--12-agent-audit-pm-signoff.md` | Operator brief：12-agent audit PM sign-off |
+| `CCAgentWorkSpace/E1a/workspace/reports/2026-05-16--wp01_gui_safety_round1.md` | WP-01 GUI safety Round 1 sign-off（typed-phrase × 4 + LinUCB dead buttons + bilingual + native→modal）|
+| `CCAgentWorkSpace/E1a/workspace/reports/2026-05-16--wp01_gui_real_fix.md` | WP-01 GUI Round 2 補修（A3-MAJOR-2 unify / 雙層 modal 拆 / 第 6 metric / 繁簡 / modal lock）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp02_donchian_deprecate.md` | WP-02 Donchian deprecate sign-off（hygiene-only + audit drift 第 3 次教訓）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp05_security_hardening.md` | WP-05 security Round 1 sign-off（bind 0.0.0.0 + global exception handler）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp05_security_real_fix.md` | WP-05 security Round 2 真修（17 routes 38 callsite + handler 順位 + error_sanitize helper）|
+| `CCAgentWorkSpace/TW/workspace/reports/2026-05-16--wp09_doc_real_fix.md` | WP-09 doc Round 2 補修（README 126 entries / KNOWN_ISSUES reconcile / REF-21 SUPERSEDED / WP-01/02 sign-off）|
+| `CCAgentWorkSpace/A3/workspace/reports/2026-05-16--wp01_round2_re_audit.md` | A3 WP-01 Round 2 對抗審核（8.5/10 GO-conditional）|
 
 ### 2026-05-11 Sprint N+1 dispatch + W-D + LG design
 
@@ -187,6 +194,198 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v1.md` | PA LG-3 spec v1 |
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v2_final.md` | PA LG-3 spec v2 final |
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md` | PA close-maker-first verdict |
+
+#### 2026-05-11 owner reports — E1 (39)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_2_p2_1_bb_breakout_w7_propagation.md` | E1 P1-2 / P2-1 bb_breakout W7 propagation |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_2_btc_lead_lag_producer_v088_writer.md` | E1 W2 IMPL 2: BTC→Alt Lead-Lag producer V088 writer |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w1_impl_alpha_panel_aggregator_v085_writer.md` | E1 W1 IMPL alpha panel_aggregator V085 writer |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w1_impl_beta_oi_delta_aggregator_v087_writer.md` | E1 W1 IMPL beta oi_delta_aggregator V087 writer |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w1_impl_gamma_ws_subscription_main_loop.md` | E1 W1 IMPL gamma WS subscription main loop |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w_c_fix_rust_impl.md` | E1 W-C fix Rust impl |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_3_strategy_paper_shadow_log.md` | E1 W2 IMPL 3: strategy paper shadow log |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w_c_fix_rust_impl_round2.md` | E1 W-C fix Rust impl round 2 |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_5_ipc_slot_main_spawn_step_4_5_wire.md` | E1 W2 IMPL 5: IPC slot main spawn step 4/5 wire |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_1_stable_id_helper.md` | E1 P1-1 stable_id_helper |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_rca1_orphan_er_missed_fill.md` | E1 P1 RCA1 orphan ER missed fill |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_v083_ipc_close_impl_done.md` | E1 P1 V083 IPC close IMPL DONE |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_3_check_57.md` | E1 W2 IMPL 3 check 57 |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_paper_edge_report.md` | E1 W2 IMPL 4: paper edge report |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_1_orderbook_wiring.md` | E1 W2 IMPL 1: orderbook wiring |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_sql_fix.md` | E1 W2 IMPL 4 SQL fix |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_d_grid_trading.md` | E1 option-A-lite grid_trading |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_e_funding_arb.md` | E1 option-A-lite funding_arb |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_b_bb_reversion.md` | E1 option-A-lite bb_reversion |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_c_bb_breakout.md` | E1 option-A-lite bb_breakout |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_a_lite_e1_a_ma_crossover.md` | E1 option-A-lite ma_crossover |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p2_v083_cron_synthetic_id_recognition.md` | E1 P2 V083 cron synthetic ID recognition |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_2_replay_counterfactual_validation.md` | E1 option-2 replay counterfactual validation |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--option_2_replay_engine_validation_v2.md` | E1 option-2 replay engine validation v2 |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_b_manifest_config_echo.md` | E1 replay tier A: manifest config echo |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_a_runner_position_state.md` | E1 replay tier A: runner position state |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_c_per_symbol_price.md` | E1 replay tier A: per-symbol price |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_e1_d_acceptance_pack.md` | E1 replay tier A: acceptance pack |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--replay_tier_a_27h_validation_run.md` | E1 replay tier A 27h validation run |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_stable_id_helper_impl.md` | E1 P1 stable ID helper impl |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_fill_lineage_drop_fix.md` | E1 P1 fill-lineage drop fix |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t4_h0_block_summary_route.md` | E1 LG-1 T4 H0 block summary route |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t3_h0_flip_runbook_ctor.md` | E1 LG-1 T3 H0 flip runbook ctor |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t1_h0_blocking_test.md` | E1 LG-1 T1 H0 blocking test |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t4_riskconfig_pricing.md` | E1 LG-2 T4 RiskConfig pricing binding |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg1_t2_h0_block_acceptance.md` | E1 LG-1 T2 H0 block acceptance |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t1_contract_tests.md` | E1 LG-2 T1 contract tests |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t3_fee_source_enum.md` | E1 LG-2 T3 FeeSource enum + IPC route |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t2_startup_assertion.md` | E1 LG-2 T2 startup assertion |
+
+#### 2026-05-11 owner reports — E2 (10)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w_c_fix_e2_review_round2.md` | E2 W-C fix review round 2 |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--p1_1_stable_id_helper_e2_review.md` | E2 P1-1 stable_id_helper review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--p1_v083_p2_freq_e2_review.md` | E2 P1 V083 P2 frequency review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_chain_e2_adversarial_review.md` | E2 W2 chain adversarial review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_impl_4_sql_fix_e2_review.md` | E2 W2 IMPL 4 SQL fix review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_impl_5_e2_review.md` | E2 W2 IMPL 5 review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--option_a_lite_post_merge_audit.md` | E2 option-A-lite post merge audit |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--replay_tier_a_post_impl_audit.md` | E2 replay tier A post-IMPL audit |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--p1_fill_lineage_drop_e2_review.md` | E2 P1 fill-lineage drop review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-11--wave2_2_lg1_lg2_e2_review.md` | E2 Wave 2.2 LG-1/LG-2 review |
+
+#### 2026-05-11 owner reports — E4 (10)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w_c_fix_e4_regression.md` | E4 W-C fix regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--p1_v083_p2_freq_e4_regression.md` | E4 P1 V083 P2 frequency regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w2_chain_e4_regression.md` | E4 W2 chain regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w2_impl_4_sql_fix_e4_redryrun.md` | E4 W2 IMPL 4 SQL fix re-dry-run |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w2_impl_5_e4_regression.md` | E4 W2 IMPL 5 regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--option_a_lite_post_merge_regression.md` | E4 option-A-lite post merge regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--replay_tier_a_post_impl_regression.md` | E4 replay tier A post-IMPL regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w_audit_3b_runtime_smoke.md` | E4 W-AUDIT-3b runtime smoke |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--p1_fill_lineage_drop_e4_regression.md` | E4 P1 fill-lineage drop regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-11--wave2_2_e4_regression.md` | E4 Wave 2.2 regression |
+
+#### 2026-05-11 owner reports — QC (3)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-11--w_d_mag083_qc_audit.md` | QC W-D MAG-083 audit |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-11--p1_micro_profit_amplification_math_analysis.md` | QC P1 micro profit amplification 數學分析 |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-11--lg3_spec_qc_review.md` | QC LG-3 spec review |
+
+#### 2026-05-11 owner reports — MIT (1) / A3 (1) / PM (1)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-11--lg3_spec_mit_review.md` | MIT LG-3 spec review |
+| `CCAgentWorkSpace/A3/workspace/reports/2026-05-11--wave2_2_a3_ux.md` | A3 Wave 2.2 UX review |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-11--amd_w6_1_pm_consolidate_signoff.md` | PM AMD-W6-1 consolidate sign-off |
+
+#### 2026-05-11 owner reports — Operator briefs (5)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/Operator/2026-05-11--p1_v083_ipc_close_fix_design.md` | Operator brief: P1 V083 IPC close fix design |
+| `CCAgentWorkSpace/Operator/2026-05-11--p0_22h08_deploy_edge_regression_rca.md` | Operator brief: P0 22h08 deploy edge regression RCA |
+| `CCAgentWorkSpace/Operator/2026-05-11--p1_strategist_params_persist_ma_crossover_rca.md` | Operator brief: P1 Strategist params persist MA crossover RCA |
+| `CCAgentWorkSpace/Operator/2026-05-11--lg_3_spec_v1.md` | Operator brief: LG-3 spec v1 |
+| `CCAgentWorkSpace/Operator/2026-05-11--lg_3_spec_v2_final.md` | Operator brief: LG-3 spec v2 final |
+
+#### 2026-05-10 owner reports — E1 (18)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w_audit_8a_phase_a_trait_alpha_surface.md` | E1 W-AUDIT-8a Phase A trait AlphaSurface |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w_audit_4b_m3_part_2_rust_producer_emit_reject.md` | E1 W-AUDIT-4b M3 part 2 Rust producer emit reject |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w7_3_emergency_1tick_defense.md` | E1 W7-3 emergency 1-tick defense |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w2_w7_1_trait_skeleton_prewrite.md` | E1 W2/W7-1 trait skeleton prewrite |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w6_v086_sql_skeleton_prewrite.md` | E1 W6 V086 SQL skeleton prewrite |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w7_2_ma_crossover_bb_reversion_entry_path_query.md` | E1 W7-2 ma_crossover/bb_reversion entry path query |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w7_5_on_fill_bootstrap_import_positions.md` | E1 W7-5 on_fill bootstrap import positions |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w2_v088_btc_lead_lag_panel_sql_skeleton_prewrite.md` | E1 W2 V088 BTC lead-lag panel SQL skeleton prewrite |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w1_v087_sql_skeleton_prewrite.md` | E1 W1 V087 SQL skeleton prewrite |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w6_3c_v086_impl_dry_run_writer_code.md` | E1 W6-3c V086 IMPL dry-run writer code |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w5_e1_c_dynamic_unblock_check_1_impl.md` | E1 W5 dynamic-unblock-check-1 IMPL |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--v085_087_088_dry_run_apply.md` | E1 V085/087/088 dry-run apply |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w5_e1_a_canary_stage_criteria_1_impl.md` | E1 W5 canary-stage-criteria-1 IMPL |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--v089_dry_run_apply.md` | E1 V089 dry-run apply |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--check_65_chain_integrity_post_m3_impl.md` | E1 check 65 chain integrity post-M3 IMPL |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--v091_decision_features_mutex_check_impl.md` | E1 V091 decision_features mutex check IMPL |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--p1_1_bb_reversion_w7_3_propagation.md` | E1 P1-1 bb_reversion W7-3 propagation |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-10--w_c_fix_python_impl.md` | E1 W-C fix Python impl |
+
+#### 2026-05-10 owner reports — E2 (4)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-10--sprint_n0_w2_second_batch_review.md` | E2 Sprint N+0 W2 second batch review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-10--sprint_n0_w2_third_pass_review.md` | E2 Sprint N+0 W2 third pass review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-10--w7_3_review.md` | E2 W7-3 review |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-10--w_c_fix_e2_review.md` | E2 W-C fix review |
+
+#### 2026-05-10 owner reports — E4 (5) / E5 (1)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-10--sprint_n0_w2_regression_baseline.md` | E4 Sprint N+0 W2 regression baseline |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-10--sprint_n0_w2_regression_third_pass.md` | E4 Sprint N+0 W2 regression third pass |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-10--w7_3_regression.md` | E4 W7-3 regression |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-10--w_audit_3b_runtime_smoke_test_design.md` | E4 W-AUDIT-3b runtime smoke test design |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-10--w4_router_lease_guard_drop_test_prewrite.md` | E4 W4 RouterLeaseGuard drop test prewrite |
+| `CCAgentWorkSpace/E5/workspace/reports/2026-05-10--w_c_fix_e5_perf_review.md` | E5 W-C fix perf review |
+
+#### 2026-05-10 owner reports — QC (5)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-10--tonusdt_structural_edge_replay.md` | QC TONUSDT structural edge replay |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w6_rfc_qc_questions_self_answer.md` | QC W6 RFC questions self-answer |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w2_a4c_qc_review_alpha_decay_dsr.md` | QC W2 A4-C alpha decay / DSR review |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-10--w6_1_rfc_qc_signoff_verdict.md` | QC W6-1 RFC sign-off verdict |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-10--amd_w6_1_qc_verify.md` | QC AMD-W6-1 verify |
+
+#### 2026-05-10 owner reports — MIT (9)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--sprint_n0_final_review.md` | MIT Sprint N+0 final review |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--v083_v084_linux_pg_dry_run_verify.md` | MIT V083/V084 Linux PG dry-run verify |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--chain_integrity_historical_replay.md` | MIT chain integrity historical replay |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--governance_reject_baseline_w6_rfc.md` | MIT governance reject baseline W6 RFC |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w6_rfc_mit_questions_self_answer.md` | MIT W6 RFC questions self-answer |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w6_3a_close_tag_distribution_audit.md` | MIT W6-3a close tag distribution audit |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md` | MIT W2-C3 sigma verify BTCUSDT 1m forward return |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w6_1_rfc_mit_signoff_verdict.md` | MIT W6-1 RFC sign-off verdict |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--amd_w6_1_mit_verify.md` | MIT AMD-W6-1 verify |
+
+#### 2026-05-10 owner reports — BB (2) / CC (1) / R4 (1)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-10--sprint_n0_final_bybit_compatibility_review.md` | BB Sprint N+0 final Bybit compatibility review |
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-10--w1_w2_bybit_v5_rate_budget_review.md` | BB W1/W2 Bybit V5 rate budget review |
+| `CCAgentWorkSpace/CC/workspace/reports/2026-05-10--n1_d0_signoff_compliance_pre_check.md` | CC N+1 D+0 sign-off compliance pre-check |
+| `CCAgentWorkSpace/R4/workspace/reports/2026-05-10--n1_d0_docs_audit_pre_signoff.md` | R4 N+1 D+0 docs audit pre-sign-off |
+
+#### 2026-05-10 owner reports — PM (5) / Operator briefs (6)
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-10--n1_d1_second_day_dispatch_sop.md` | PM N+1 D+1 second-day dispatch SOP |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-10--live_today_pnl_gui_fix.md` | PM live today PnL GUI fix |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-10--n0_high5_signoff_draft.md` | PM N+0 HIGH-5 sign-off draft |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-10--live_demo_pnl_series_gui.md` | PM live demo PnL series GUI |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-10--live_demo_pnl_series_refresh_fix.md` | PM live demo PnL series refresh fix |
+| `CCAgentWorkSpace/Operator/2026-05-10--pa_governance_4docs_invariant17_closure.md` | Operator brief: PA governance 4 docs invariant 17 closure |
+| `CCAgentWorkSpace/Operator/2026-05-10--a4c_btc_alt_lead_lag_spec.md` | Operator brief: A4-C BTC→Alt Lead-Lag spec |
+| `CCAgentWorkSpace/Operator/2026-05-10--live_today_pnl_gui_fix.md` | Operator brief: live today PnL GUI fix |
+| `CCAgentWorkSpace/Operator/2026-05-10--live_demo_pnl_series_gui.md` | Operator brief: live demo PnL series GUI |
+| `CCAgentWorkSpace/Operator/2026-05-10--w6_1_rfc_pa_signoff_verdict.md` | Operator brief: W6-1 RFC PA sign-off verdict |
+| `CCAgentWorkSpace/Operator/2026-05-10--live_demo_pnl_series_refresh_fix.md` | Operator brief: live demo PnL series refresh fix |
 
 ### 2026-05-15 PM/PA/FA 5-day audit + current-state sync
 

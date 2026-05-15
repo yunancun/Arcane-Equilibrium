@@ -88,12 +88,12 @@
   <div id="explain-learning"></div>
 
   <div class="oc-metrics" id="learn-overview">
-    <div class="oc-metric"><div class="oc-metric-label">观察记录 / Observations</div><div class="oc-metric-val" id="l-obs">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">教训 / Lessons</div><div class="oc-metric-val" id="l-lessons">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">假设 / Hypotheses</div><div class="oc-metric-val" id="l-hyp">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">活跃实验 / Experiments</div><div class="oc-metric-val" id="l-exp">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">待审核 / Review Queue</div><div class="oc-metric-val" id="l-queue">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">净 PnL 评分</div><div class="oc-metric-val" id="l-score">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">觀察記錄 / Observations</div><div class="oc-metric-val" id="l-obs">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">教訓 / Lessons</div><div class="oc-metric-val" id="l-lessons">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">假設 / Hypotheses</div><div class="oc-metric-val" id="l-hyp">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">活躍實驗 / Experiments</div><div class="oc-metric-val" id="l-exp">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">待審核 / Review Queue</div><div class="oc-metric-val" id="l-queue">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">淨 PnL 評分 / Net PnL Score</div><div class="oc-metric-val" id="l-score">--</div></div>
   </div>
 </div>
 
@@ -122,12 +122,12 @@
 <div class="oc-grid-2">
   <div class="oc-card">
     <h3>&#x1F4CB; 学习动态 / Learning Feed</h3>
-    <div class="subtitle">最近的观察和教训</div>
+    <div class="subtitle">最近的觀察和教訓</div>
     <div id="feed-body" class="oc-loading">Loading...</div>
   </div>
 
   <div class="oc-card">
-    <h3>&#x1F4B5; 净 PnL 仪表盘 / Net PnL Dashboard</h3>
+    <h3>&#x1F4B5; 淨 PnL 儀表盤 / Net PnL Dashboard</h3>
     <div id="explain-netpnl"></div>
     <div id="netpnl-body" class="oc-loading">Loading...</div>
   </div>
@@ -186,7 +186,7 @@ $('explain-review').innerHTML = ocExplain(
 );
 
 $('explain-netpnl').innerHTML = ocExplain(
-  '净 PnL 仪表盘展示扣除所有成本后的真实收益。这是衡量系统表现的最终指标。',
+  '淨 PnL 儀表盤展示扣除所有成本後的真實收益。這是衡量系統表現的最終指標。',
   'Net PnL = Gross PnL - Trading Fees - AI Costs - Infrastructure Costs。系统严格遵循"看 net PnL 不看 gross PnL"的原则，确保对真实盈利能力有清晰认知。'
 );
 

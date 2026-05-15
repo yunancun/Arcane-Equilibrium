@@ -663,8 +663,17 @@ async def get_recent_fills_from_pg(
                 f["ts"] = f["ts"].isoformat()
         return _envelope({"fills": fills, "count": len(fills), "source": "pg_trading_fills"})
     except Exception as e:
-        logger.error("PG fills query failed: %s", e)
-        return JSONResponse(status_code=503, content={"error": "database_unavailable", "detail": str(e), "fills": []})
+        # WP-05 Real Fix
+        logger.exception("PG fills query failed")
+        from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "database_unavailable",
+                "detail": sanitize_exc_str(e, "Database error"),
+                "fills": [],
+            },
+        )
     finally:
         _put_pg_conn(conn)
 
@@ -705,8 +714,17 @@ async def get_recent_signals_from_pg(
                 s["ts"] = s["ts"].isoformat()
         return _envelope({"signals": signals, "count": len(signals), "source": "pg_trading_signals"})
     except Exception as e:
-        logger.error("PG signals query failed: %s", e)
-        return JSONResponse(status_code=503, content={"error": "database_unavailable", "detail": str(e), "signals": []})
+        # WP-05 Real Fix
+        logger.exception("PG signals query failed")
+        from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "database_unavailable",
+                "detail": sanitize_exc_str(e, "Database error"),
+                "signals": [],
+            },
+        )
     finally:
         _put_pg_conn(conn)
 
@@ -742,7 +760,16 @@ async def get_latest_features_from_pg(
         features = [dict(zip(cols, row)) for row in rows]
         return _envelope({"features": features, "count": len(features), "source": "pg_features_online"})
     except Exception as e:
-        logger.error("PG features query failed: %s", e)
-        return JSONResponse(status_code=503, content={"error": "database_unavailable", "detail": str(e), "features": []})
+        # WP-05 Real Fix
+        logger.exception("PG features query failed")
+        from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "database_unavailable",
+                "detail": sanitize_exc_str(e, "Database error"),
+                "features": [],
+            },
+        )
     finally:
         _put_pg_conn(conn)

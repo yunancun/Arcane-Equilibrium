@@ -103,8 +103,15 @@ async def toggle_dynamic_risk(request: Request, actor: base.AuthenticatedActor =
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning("toggle_dynamic_risk IPC error engine=%s enabled=%s: %s", engine, enabled, e)
-        raise HTTPException(status_code=500, detail=f"IPC error: {e}")
+        # WP-05 Real Fix
+        logger.exception(
+            "toggle_dynamic_risk IPC error engine=%s enabled=%s", engine, enabled,
+        )
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=500,
+            detail=sanitize_exc_for_detail(e, "ipc_error"),
+        )
 
 
 # TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移

@@ -204,9 +204,12 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 — preserve legacy envelope
+        # WP-05 Real Fix: 不洩漏 exc 細節給 client；server-side log 留 method + exc。
+        logger.exception("IPC command %r failed", method)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=503,
-            detail=f"IPC command '{method}' failed: {exc}",
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
         ) from exc
 
 

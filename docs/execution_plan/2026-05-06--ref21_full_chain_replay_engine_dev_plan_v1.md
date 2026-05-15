@@ -1,7 +1,9 @@
+> **SUPERSEDED** by [ref21_full_chain_replay_engine_dev_plan_v1_3.md](2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md) -- retained for historical reference.
+
 # REF-21 Full-Chain Replay Engine Dev Plan V1
 
 **Date:** 2026-05-06  
-**Status:** Superseded by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md`
+**Status:** Superseded by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` -> ultimately by V1.3
 **Owner:** PM  
 **Supersedes:** `docs/execution_plan/2026-05-XX--ref21_s1_recorder_spec_placeholder.md` for the active REF-21 scope  
 **Upstream contracts:**

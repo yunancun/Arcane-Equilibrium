@@ -646,12 +646,18 @@ class EdgeEstimatorScheduler:
                 source="edge_estimator_scheduler",
             )
         except Exception as exc:  # noqa: BLE001 - scheduler addon is fail-open.
+            # WP-05 Real Fix
             logger.warning(
                 "EdgeEstimatorScheduler: promotion evidence push failed "
                 "(fail-open): %s",
                 exc,
             )
-            return {"status": "error", "error": str(exc), "engine_mode": mode}
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return {
+                "status": "error",
+                "error": sanitize_exc_str(exc, "Promotion evidence push failed"),
+                "engine_mode": mode,
+            }
 
     def _run_mlde_unblock(self, mode: str) -> dict:
         """Run read-only/shadow MLDE producers after labels are fresh.

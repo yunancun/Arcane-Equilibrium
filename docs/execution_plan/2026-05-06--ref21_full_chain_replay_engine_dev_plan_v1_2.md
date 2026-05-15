@@ -1,3 +1,5 @@
+> **SUPERSEDED** by [ref21_full_chain_replay_engine_dev_plan_v1_3.md](2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md) -- retained for historical reference.
+
 # REF-21 Full-Chain Replay Engine Dev Plan V1.2
 
 **Date:** 2026-05-06  

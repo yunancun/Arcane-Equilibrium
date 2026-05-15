@@ -542,17 +542,21 @@ async def update_config(
                 result = provider_keys_store.save_key(provider, str(key))
                 provider_results.append(result)
             except ValueError as exc:
+                # WP-05 Real Fix
+                from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
                 provider_errors.append({
                     "provider": provider,
                     "reason_code": "validation_failed",
-                    "detail": str(exc),
+                    "detail": sanitize_exc_str(exc, "Validation failed"),
                 })
             except Exception as exc:
+                # WP-05 Real Fix
                 logger.exception("provider_keys save failed: provider=%s", provider)
+                from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
                 provider_errors.append({
                     "provider": provider,
                     "reason_code": "io_error",
-                    "detail": str(exc),
+                    "detail": sanitize_exc_str(exc, "I/O error"),
                 })
 
     # ── 沒有任何寫入動作 ─────────────────────────────────────────────
@@ -633,10 +637,12 @@ async def delete_provider_key(
     try:
         result = provider_keys_store.delete_key(provider)
     except Exception as exc:
+        # WP-05 Real Fix
         logger.exception("provider_keys delete failed: provider=%s", provider)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=500,
-            detail={"reason_codes": ["io_error"], "detail": str(exc)},
+            detail=sanitize_exc_for_detail(exc, "internal_error"),
         )
     return _layer2_response({
         **result,

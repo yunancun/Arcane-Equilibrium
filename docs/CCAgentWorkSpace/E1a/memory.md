@@ -376,3 +376,23 @@ common.js 1919 殘留 `// case-sensitive match; trim trailing whitespace to avoi
 
 ### A3 漏 HIGH-1 vs E2 catch HIGH-1 — multi-reviewer 不同視角互補
 A3 round 2 verdict TRUE_CLOSED 8.4/10（B+）9/9 brief 項全 PASS — A3 從 user-facing UX flow 看（「modal 打開了 / cancel 了 / typed correct phrase 了 / button race fixed 了」），4 個 happy path 角度都 PASS 不疑。E2 senior view 從 promise lifecycle + lexical scope 看 — 看出 caller 端 await 沒 catch + helper reject + finally re-enable 三個 trace 合起來 = silent bug。**規律**：A3 (UX-focused review) 與 E2 (senior code review) 同 round 都跑必要；A3 verdict TRUE_CLOSED 不是 commit 終點，E2 verdict 才是 RETURN/APPROVED 二選一的 gate；多 reviewer 不同視角互補才能 catch lexical-level 矛盾。
+
+## WP-01 Wave 1 GUI Safety follow-up（2026-05-16，5 gap closure）
+
+### 雙層 modal 拆除 = button onclick + handler 整體重構，光改 1 處不夠
+WP-01 主修在 `doLiveStop()` / `doEmergencyStop()` / `doLiveCloseAll()` 內加 typed-phrase modal，但**忘刪舊三個 1-click dialog overlay**（L527-575） + 三個 `open*Dialog` wrapper + button onclick 還是指向 wrapper → 雙層 modal（1-click → typed-phrase）。光看 handler 改了會覺得完成；真的修需 (1) button onclick → 直呼 handler (2) dialog DOM block 刪 (3) wrapper helper 刪 (4) handler 內 closeDialog 呼叫刪 (5) **隱藏盲區 action-guard selector**（L905 `button[onclick="openCloseAllDialog()"]`）也得同步更新，否則 disabled-state 失效。**規律**：UI helper 重構必 grep 全 file 找所有引用，含 onclick string selector + class queries，不只看 main flow。
+
+### Module-level modal lock 共用 = 3 個 SDK 同一 flag
+原 A3-HIGH-3 是 DOM-state guard `overlay.classList.contains('show')`，微 task race window 存在；改 module-level `_OC_MODAL_OPEN_LOCK` 必須**3 個 modal SDK 共用同一 flag**（不是 per-modal lock），否則 typed-confirm 開啟時 prompt-modal 仍能開 → onclick handler 互相覆蓋。close()/cleanup() 必清 lock 否則永久 deadlock（含 reject 路徑！）。**規律**：multi-helper concurrent guard 設計，共享 lock 是 trade-off：(a) 共享 = 嚴格序列化，UX 弱（user 不能 stack modal）但 race-safe (b) per-helper = 寬鬆 UX 但需處理 modal 互相覆蓋。共用較安全，配合 try/catch caller pattern。
+
+### openPromptModal SDK 增強取代 ad-hoc overlay = 共享基礎設施投資
+canary-tab.js manual_promote 自製 `oc-promote-reason` overlay（自製 textarea + counter + Esc handler）是第 5 個 ad-hoc modal pattern；改用 SDK 需先**增強 SDK 支援 placeholder + maxlength + char-counter**（+10 LOC SDK），然後 caller 變 -27 LOC（自製 overlay → SDK 呼叫）。淨節省 -13 LOC + 統一 UX + 取代 5 個 ad-hoc → 3 個 shared SDK + 1 module lock。**規律**：發現 ad-hoc 重複實作時，先升 SDK 再 migrate caller，不要直接複製。SDK 增強 option 必設 default value 不破既有 caller。
+
+### 繁簡 replace_all 安全前提 = grep JS string 比對零命中
+tab-live.html 18 處 `实盘` + tab-demo.html 6 處 `平仓` 全 replace_all，前提是 `grep -nE "=== ['\"]实盘['\"]|== ['\"]实盘['\"]"` 零命中。若有 `if (mode === '实盘')` 之類 logic 比對，replace_all 立刻爆。**規律**：繁簡統一前必跑 JS string equality grep；只動 user-facing text vs class name / data-attribute / JS string literal 是兩層判斷，混 = 邏輯破。
+
+### HTML inline-JS node --check = python regex extract → temp file → node
+HTML 不能直接 node --check；用 `re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)` + `'\n;\n'.join(scripts)` 後寫 tempfile node --check。覆蓋率約 95%（漏 onclick="..." inline expression），但 catch 大多數 syntax 錯。**規律**：HTML inline-JS sign-off 必跑 extract + node --check（per `feedback_gui_node_check_sop.md`）；標準 .js 額外做 brace-balance 仍是盲區（W-AUDIT-7c lexical scope shadow），需 A3+E2 對抗性 review 補。
+
+### LOC delta net=0 ≠ governance free pass
+本次 -50 (tab-live) -13 (canary) +63 (common) = net 0，但 common.js 2135 → 2198 觸發 §九 governance：pre-existing baseline 已超 2000 硬上限，exception clause 允許「baseline + 5 LOC」寬容，**+63 超寬容**。需 PM Sign-off 明文記錄 exception 理由（SDK consolidation > 多 ad-hoc）+ 同時開 P2 ticket 處理 common.js 拆檔。**規律**：governance LOC 不看 net delta 看 per-file；SDK 增強雖然抵消多檔成本，per-file 仍要 PM exception 簽。

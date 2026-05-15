@@ -83,7 +83,7 @@
   <div class="oc-card">
     <h3 style="display:flex;align-items:center;gap:10px">
       &#x1F4CA; 持仓 / Positions
-      <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="openDemoCloseAllDialog()">&#x274C; 全部平仓</button>
+      <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="openDemoCloseAllDialog()">&#x274C; 全部平倉</button>
     </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
@@ -555,7 +555,7 @@ async function loadPositions() {
     // 交易所會拒單，需在 Bybit GUI 手動清除。
     const isDust = (strat === 'orphan_frozen' || strat === 'DUST_FROZEN' ||
                     p.frozen_reason === 'dust_below_min_notional');
-    const btnLabel = isDust ? '清塵 / Clear Dust' : '平仓';
+    const btnLabel = isDust ? '清塵 / Clear Dust' : '平倉';
     const ownerAttr = ocEsc(String(strat || ''));
     const reasonAttr = ocEsc(String(p.frozen_reason || ''));
     html += '<tr>';
@@ -668,7 +668,7 @@ function _demoExtractFills(data) {
 
 function _demoFillHead(tab) {
   if (tab === 'profit') {
-    return '<tr><th>平仓时间</th><th>交易对</th><th>策略</th><th>开仓</th><th>平仓</th><th>数量</th><th>持仓</th><th>收益 / PnL</th></tr>';
+    return '<tr><th>平倉时间</th><th>交易对</th><th>策略</th><th>开仓</th><th>平倉</th><th>数量</th><th>持仓</th><th>收益 / PnL</th></tr>';
   }
   return '<tr><th>时间</th><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr>';
 }
@@ -880,7 +880,7 @@ async function loadComparison() {
 }
 
 // Reconstruct round trips from fills: pair Buy opens with Sell closes (and vice versa)
-// 从成交记录重建完整交易：配对买入开仓与卖出平仓
+// 从成交记录重建完整交易：配对买入开仓与卖出平倉
 function _calcRoundTrips(fills) {
   if (!fills || !Array.isArray(fills) || fills.length === 0) return [];
   // Group by symbol, then pair opens with closes
@@ -1120,10 +1120,10 @@ async function closeDemoPosition(symbol, ownerStrategy, frozenReason) {
   if (!ok) return;
   const d = await ocPost('/api/v1/strategy/demo/positions/' + encodeURIComponent(symbol) + '/close', {});
   if (d && d.data) {
-    ocToast('✓ ' + symbol + ' 平仓指令已发送', 'success');
+    ocToast('✓ ' + symbol + ' 平倉指令已发送', 'success');
     setTimeout(loadAll, 1500);
   } else {
-    ocToast(symbol + ' 平仓失败，请检查 Demo 连接', 'error');
+    ocToast(symbol + ' 平倉失败，請檢查 Demo 连接', 'error');
   }
 }
 </script>

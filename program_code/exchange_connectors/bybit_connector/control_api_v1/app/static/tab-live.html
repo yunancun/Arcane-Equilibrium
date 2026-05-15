@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Live 实盘 / Live Trading</title>
+<title>Live 實盤 / Live Trading</title>
 <script src="/static/common.js?v=20260507.fill-tabs-v1"></script>
 </head>
 <body>
@@ -66,7 +66,7 @@ html, body {
 
 /* Metrics grid / 指標網格 — defined in common.js ocInjectBaseCSS() (§6.1 unified)
    live-metric* classes are now canonical in common.js; this comment marks the migration.
-   实盘 metric 样式已迁移至 common.js，此处仅保留 live-specific 样式覆盖。 */
+   實盤 metric 样式已迁移至 common.js，此处仅保留 live-specific 样式覆盖。 */
 
 /* Positions / orders table / 倉位掛單表格 */
 .live-section-title {
@@ -285,7 +285,7 @@ html, body {
   <div class="live-warn-bar" id="live-mode-banner">
     <span class="warn-icon">&#x1F7E3;</span>
     <div id="live-mode-banner-body">
-      <strong>Live 实盘模式啟用 / LIVE MODE</strong><br>
+      <strong>Live 實盤模式啟用 / LIVE MODE</strong><br>
       <span style="font-size:12px;color:var(--text-dim)">解析 endpoint 中... / Resolving endpoint...</span>
     </div>
   </div>
@@ -308,17 +308,17 @@ html, body {
 
   <!-- Control bar / 控制欄 -->
   <div class="live-control-bar">
-    <span class="bar-title" id="live-engine-bar-title">&#x1F7E3; Live 实盘 Engine</span>
+    <span class="bar-title" id="live-engine-bar-title">&#x1F7E3; Live 實盤 Engine</span>
     <span id="live-engine-status" class="oc-chip oc-chip-neutral">--</span>
     <span id="live-endpoint-badge" style="display:none"></span>
     <span id="live-contraction-badge" style="display:none"></span>
     <span id="live-engine-detail" style="font-size:12px;color:var(--text-dim)"></span>
     <span style="flex:1"></span>
     <button class="oc-btn" onclick="openLiveRisk()" title="跳转到 Live 风控页 / Open Live risk controls" style="font-weight:700;border-color:rgba(168,85,247,0.55);color:#a855f7">&#x1F6E1; 风控</button>
-    <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live 实盘</button>
+    <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live 實盤</button>
     <span class="live-shutdown-zone" data-danger-zone="live-shutdown">
-      <button class="oc-btn oc-btn-danger oc-btn-critical live-stop-action" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live 实盘</button>
-      <button class="btn-emergency live-emergency-action" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
+      <button class="oc-btn oc-btn-danger oc-btn-critical live-stop-action" id="btn-live-stop" onclick="doLiveStop()" disabled style="font-weight:700">&#x23F9; 停止 Live 實盤</button>
+      <button class="btn-emergency live-emergency-action" id="btn-emergency-stop" onclick="doEmergencyStop()">&#x1F6A8; 緊急停止</button>
     </span>
   </div>
 
@@ -404,7 +404,7 @@ html, body {
   <!-- Positions table / 持倉表格 -->
   <div class="live-section-title" style="display:flex;align-items:center;justify-content:space-between">
     <span>&#x1F4CA; 持倉 / Positions</span>
-    <button class="oc-btn oc-btn-destructive oc-toolbar-danger-action live-close-all-action" onclick="openCloseAllDialog()" style="font-size:11px;padding:3px 10px">&#x274C; 全部平倉</button>
+    <button class="oc-btn oc-btn-destructive oc-toolbar-danger-action live-close-all-action" onclick="doLiveCloseAll()" style="font-size:11px;padding:3px 10px">&#x274C; 全部平倉</button>
   </div>
   <div style="overflow-x:auto">
     <table class="live-table" id="live-positions-table">
@@ -523,65 +523,15 @@ html, body {
 </div><!-- /live-wrap -->
 </div><!-- /live-dashboard-view -->
 
-<!-- ── Stop Confirmation Dialog ───────────────────────────────── -->
-<div class="oc-dialog-overlay" id="dlg-live-stop">
-  <div class="oc-dialog">
-    <h3>&#x23F9; 停止 Live 实盘 引擎</h3>
-    <p>停止將執行以下操作：<br>
-      1. 取消所有 Live 实盘 掛單<br>
-      2. 平掉所有 Live 实盘 持倉（市價）<br>
-      3. 引擎進入觀察模式（observing），停止新訂單<br>
-      <span style="color:#f87171;font-size:12px">⚠ 平倉操作使用真實資金，請確認市場流動性充足。</span>
-    </p>
-    <div class="btn-row">
-      <button class="oc-btn" onclick="closeDialog('dlg-live-stop')">取消</button>
-      <button class="oc-btn oc-btn-danger oc-btn-critical" onclick="doLiveStop()">確認停止</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Emergency Stop Dialog ──────────────────────────────────── -->
-<div class="oc-dialog-overlay" id="dlg-live-emergency">
-  <div class="oc-dialog" style="border-color:rgba(239,68,68,0.6)">
-    <h3 style="color:#f87171">&#x1F6A8; 緊急停止 / Emergency Stop</h3>
-    <p>緊急停止將立即：<br>
-      1. 強制取消所有掛單<br>
-      2. 強制市價平倉所有持倉<br>
-      3. 封鎖引擎 — 不接受任何新指令直到手動解除<br>
-      <span style="color:#f87171;font-size:12px">⚠ 高滑點風險。僅在緊急情況下使用。</span>
-    </p>
-    <div class="note">⚠ 此操作無法撤銷，所有平倉單立即市價成交。</div>
-    <div class="btn-row">
-      <button class="oc-btn" onclick="closeDialog('dlg-live-emergency')">取消</button>
-      <button class="btn-emergency live-emergency-action" onclick="doEmergencyStop()">&#x1F6A8; 確認緊急停止</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Close All Positions Dialog (session continues) ─────────── -->
-<!-- 關閉所有倉位對話框（session 繼續運行） -->
-<div class="oc-dialog-overlay" id="dlg-live-close-all">
-  <div class="oc-dialog" style="border-color:rgba(248,81,73,0.5)">
-    <h3 style="color:#ff7b72">&#x274C; 關閉所有 Live 实盘 倉位</h3>
-    <p>此操作將通過 Bybit API 市價平掉所有 Live 实盘 持倉並取消掛單。<br>
-      <strong>Session 不會停止</strong> — 引擎繼續運行，策略可繼續開新倉。<br>
-      <span style="color:#f87171;font-size:12px">⚠ 市價成交，存在滑點風險。真實資金。</span>
-    </p>
-    <div class="btn-row">
-      <button class="oc-btn" onclick="closeDialog('dlg-live-close-all')">取消</button>
-      <button class="oc-btn oc-btn-destructive oc-btn-critical" onclick="doLiveCloseAll()">確認關閉所有倉位</button>
-    </div>
-  </div>
-</div>
+<!-- WP-01 Wave 1 follow-up A3-MAJOR-2 fix：拆除舊雙層 modal（dlg-live-stop / dlg-live-emergency / dlg-live-close-all）
+     原設計 = 1-click 自製 dialog + 內嵌「確認」按鈕呼叫 do*() handler；
+     但 do*() handler 已內含完整 openTypedConfirmModal typed-phrase 邏輯，
+     舊 dialog 形成雙層 modal（先 1-click → typed-phrase）。
+     現直接 button onclick="do*()"，統一走 SDK；UI 行為 = single typed-phrase modal。 -->
 
 <script>
-// ═══════════════════════════════════════════════════════════════
-// Dialog helpers / 對話框輔助函數
-// ═══════════════════════════════════════════════════════════════
-function closeDialog(id) { document.getElementById(id).classList.remove('show'); }
-function openStopDialog() { document.getElementById('dlg-live-stop').classList.add('show'); }
-function openEmergencyDialog() { document.getElementById('dlg-live-emergency').classList.add('show'); }
-function openCloseAllDialog() { document.getElementById('dlg-live-close-all').classList.add('show'); }
+// WP-01 Wave 1 follow-up：舊 open*Dialog / closeDialog helper 已不需要（dialog overlay 已移除）。
+// do*() handler 直接走 openTypedConfirmModal（共用 SDK）。
 
 // ═══════════════════════════════════════════════════════════════
 // Earned-Trust Tier UI / 贏得信任階梯介面
@@ -952,7 +902,9 @@ function _applyLiveActionGuards() {
   // Close-all positions button is the small chip in the Positions header
   // (not held by id). Query by onclick reference instead.
   // 「全部平倉」按鈕在 Positions section header（無 id），用 onclick 字串查找。
-  document.querySelectorAll('button[onclick="openCloseAllDialog()"]').forEach(b => writeActionBtns.push(b));
+  // WP-01 Wave 1 follow-up：button onclick 從 openCloseAllDialog() → doLiveCloseAll()
+  // （拆雙層 modal 後 button 直呼 SDK），selector 同步更新避免 action-guard 失效。
+  document.querySelectorAll('button[onclick="doLiveCloseAll()"]').forEach(b => writeActionBtns.push(b));
 
   // F5-RETURN/Issue-2 (MEDIUM) — Individual-position close buttons in the
   // Positions table are dynamically generated via innerHTML with onclick=
@@ -1496,10 +1448,10 @@ async function checkLiveEngineStatus() {
   if (!badge) return;
 
   // F5/A1: badge text reflects endpoint identity (Mainnet vs LiveDemo)
-  //        instead of always saying "Live 实盘 運行中 🟣" which misled
+  //        instead of always saying "Live 實盤 運行中 🟣" which misled
   //        operators when the slot was actually demo-bound.
   // F5/A1：徽章文字反映 endpoint 身份（Mainnet vs LiveDemo），不再永遠寫
-  // 「Live 实盘 運行中 🟣」誤導 — 槽是 demo 時就明確寫 LiveDemo。
+  // 「Live 實盤 運行中 🟣」誤導 — 槽是 demo 時就明確寫 LiveDemo。
   const isActive = sessionState === 'active';
   const isPausedOrStopped = sessionState === 'paused' || sessionState === 'stopped';
   const epLabel = _liveModeState.actual_endpoint === 'mainnet' ? 'Mainnet'
@@ -1563,8 +1515,8 @@ async function checkLiveEngineStatus() {
 async function liveStart() {
   // A3-MAJOR-1 fix：啟動真金白銀交易必須 typed-phrase 確認
   const ok = await openTypedConfirmModal({
-    title: '⚠ 啟動 Live 实盘交易',
-    body: '即將以真實資金啟動 Live 实盘交易。\n請確認您了解所有風險，且風控參數已正確設定。',
+    title: '⚠ 啟動 Live 實盤交易',
+    body: '即將以真實資金啟動 Live 實盤交易。\n請確認您了解所有風險，且風控參數已正確設定。',
     phrase: 'START LIVE',
     confirmLabel: '確認啟動 / Start Live',
     confirmClass: 'oc-btn-danger',
@@ -1583,7 +1535,7 @@ async function liveStart() {
 
 async function doLiveStop() {
   // A3 HIGH-1 fix：停止 Live 同樣會市價平倉，必須 typed-phrase 確認
-  closeDialog('dlg-live-stop');
+  // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-stop') 已移除（dialog 不再存在）
   const ok = await openTypedConfirmModal({
     title: '⛔ 停止 Live 實盤交易',
     body: '此操作將：\n1. 取消所有掛單\n2. 市價平倉所有持倉\n3. 停止交易授權租約\n\n⚠ 市價成交存在滑點風險。真實資金。',
@@ -1601,7 +1553,7 @@ async function doLiveStop() {
     if (errors && errors.length) {
       ocToast('已停止（部分錯誤: ' + errors.join('; ') + '）', 'warn');
     } else {
-      ocToast('Live 实盘 授权租约 已停止，倉位已平', 'success');
+      ocToast('Live 實盤 授权租约 已停止，倉位已平', 'success');
     }
     await refreshPage();
   }
@@ -1609,7 +1561,7 @@ async function doLiveStop() {
 
 async function doEmergencyStop() {
   // A3-BLOCKER-1 fix：緊急停止必須 typed-phrase 確認，防止誤觸
-  closeDialog('dlg-live-emergency');
+  // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-emergency') 已移除（dialog 不再存在）
   const ok = await openTypedConfirmModal({
     title: '🚨 緊急停止 / Emergency Stop',
     body: '緊急停止將立即：\n1. 強制取消所有掛單\n2. 強制市價平倉所有持倉\n3. 封鎖引擎 — 不接受新指令直到手動解除\n\n⚠ 高滑點風險。此操作無法撤銷。',
@@ -1632,10 +1584,10 @@ async function doEmergencyStop() {
 
 async function doLiveCloseAll() {
   // A3-BLOCKER-2 fix：關閉所有倉位必須 typed-phrase 確認
-  closeDialog('dlg-live-close-all');
+  // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-close-all') 已移除（dialog 不再存在）
   const ok = await openTypedConfirmModal({
-    title: '❌ 關閉所有 Live 实盘倉位',
-    body: '此操作將通過 Bybit API 市價平掉所有 Live 实盘持倉並取消掛單。\nSession 不會停止 — 引擎繼續運行，策略可繼續開新倉。\n\n⚠ 市價成交，存在滑點風險。真實資金。',
+    title: '❌ 關閉所有 Live 實盤倉位',
+    body: '此操作將通過 Bybit API 市價平掉所有 Live 實盤持倉並取消掛單。\nSession 不會停止 — 引擎繼續運行，策略可繼續開新倉。\n\n⚠ 市價成交，存在滑點風險。真實資金。',
     phrase: 'CLOSE ALL',
     confirmLabel: '確認關閉所有倉位',
     confirmClass: 'oc-btn-danger',

@@ -153,7 +153,13 @@ async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current
     try:
         wallet = rc.refresh_balance()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Bybit balance fetch failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("Bybit balance fetch failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "bybit_api_failure"),
+        )
 
     # Pull per-engine session baseline from Rust snapshot (paper_state sub-dict).
     # 從 Rust 快照拉取本 session 的基線（paper_state 子字段）。
@@ -434,7 +440,13 @@ async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.curre
         positions = _attach_owner_strategy(positions, engine="demo")
         return _envelope({"source": "rust_engine", "list": positions, "count": len(positions)})
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Bybit positions fetch failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("Bybit positions fetch failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "bybit_api_failure"),
+        )
 
 
 def _normalize_order(o: dict) -> dict:
@@ -484,7 +496,13 @@ async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_
             "conditional_count": conditional_count,
         })
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Bybit orders fetch failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("Bybit orders fetch failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "bybit_api_failure"),
+        )
 
 
 def _normalize_execution(f: dict) -> dict:
@@ -570,8 +588,13 @@ async def post_demo_close_position(
     try:
         result = await _ipc_command("close_position", ipc_params)
     except Exception as exc:
-        logger.error("IPC close_position failed for %s: %s", sym, exc)
-        raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
+        # WP-05 Real Fix
+        logger.exception("IPC close_position failed for %s", sym)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
+        )
 
     # If no exchange position AND paper IPC also found nothing, return 404.
     # 交易所和紙盤都沒倉，回 404（避免謊報 closed=True）。
@@ -918,7 +941,13 @@ async def post_demo_session_pause(
     try:
         result = await _ipc_command("pause_paper", {"engine": "demo"})
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"IPC pause (demo) failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("IPC pause (demo) failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
+        )
     return _envelope({
         "message": "Demo engine paused / Demo 引擎已暫停",
         "source": "rust_engine",
@@ -941,7 +970,13 @@ async def post_demo_session_resume(
     try:
         result = await _ipc_command("resume_paper", {"engine": "demo"})
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"IPC resume (demo) failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("IPC resume (demo) failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
+        )
     return _envelope({
         "message": "Demo engine resumed / Demo 引擎已恢復",
         "source": "rust_engine",
@@ -1151,7 +1186,13 @@ async def get_demo_fills(
             "next_offset": offset + len(fills) if len(raw) > offset + limit else None,
         })
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Bybit fills fetch failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("Bybit fills fetch failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(exc, "bybit_api_failure"),
+        )
 
 
 @phase2_router.get("/demo/pnl-series")

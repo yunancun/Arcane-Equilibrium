@@ -733,8 +733,10 @@ class ToolExecutor:
             result = await handler(tool_input)
             return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         except Exception as e:
-            logger.error("Tool %s error: %s", tool_name, e)
-            return json.dumps({"error": str(e)})
+            # WP-05 Real Fix: tool error 不洩漏內部 exc str 給 LLM context。
+            logger.exception("Tool %s error", tool_name)
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return json.dumps({"error": sanitize_exc_str(e, "Tool error")})
 
     # ── Data Reads / 数据读取 ──
 
@@ -794,7 +796,9 @@ class ToolExecutor:
                 "is_simulated": True,
             }
         except Exception as e:
-            return {"error": str(e)}
+            # WP-05 Real Fix
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return {"error": sanitize_exc_str(e, "Paper engine error")}
 
     async def _get_recent_decisions(self, args: dict[str, Any]) -> dict[str, Any]:
         """Read recent shadow decisions / 读取近期影子决策"""
@@ -822,7 +826,9 @@ class ToolExecutor:
                     continue
             return {"decisions": decisions, "count": len(decisions)}
         except OSError as e:
-            return {"error": str(e)}
+            # WP-05 Real Fix
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return {"error": sanitize_exc_str(e, "Filesystem error")}
 
     async def _get_experience(self, args: dict[str, Any]) -> dict[str, Any]:
         """Query learning system records / 查询学习系统记录"""
@@ -854,7 +860,9 @@ class ToolExecutor:
 
             return result
         except (json.JSONDecodeError, OSError) as e:
-            return {"error": str(e)}
+            # WP-05 Real Fix
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return {"error": sanitize_exc_str(e, "State read error")}
 
     # ── External Search / 外部搜索 ──
 
@@ -948,7 +956,9 @@ class ToolExecutor:
                 "truncated": len(soup.get_text()) > max_chars,
             }
         except Exception as e:
-            return {"error": f"Failed to fetch URL: {str(e)[:200]}"}
+            # WP-05 Real Fix
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return {"error": sanitize_exc_str(e, "Failed to fetch URL")}
 
     # ── Outputs / 输出 ──
 

@@ -1741,6 +1741,14 @@ window.OpenClawModeBadge = {
   document.head.appendChild(style);
 })();
 
+// A3-HIGH-3 fix (WP-01 Wave 1 follow-up)：module-level modal 鎖
+// 取代 DOM-state guard（`overlay.classList.contains('show')`）— DOM class 變更與
+// microtask 之間存在 race window，第二個並發呼叫可能在 add('show') 前通過 guard。
+// 設計：所有 3 個 modal（openConfirmModal / openTypedConfirmModal / openPromptModal）
+// 共用同一 lock；任一開啟即拒絕其他 modal，避免 onclick handler 互相覆蓋。
+// 釋放點：close()/cleanup() 一定要清 lock，否則永久 deadlock。
+var _OC_MODAL_OPEN_LOCK = false;
+
 /** Per-action metadata for dangerous operations / 危险操作的确认文本元数据 */
 var _OC_CONFIRM_ACTIONS = {
   "reset-cooldown": {
@@ -1798,10 +1806,13 @@ function openConfirmModal(actionName) {
     document.body.appendChild(overlay);
   }
 
-  // A3 HIGH-3 fix：concurrent-open guard（與 openTypedConfirmModal 對稱）
-  if (overlay.classList.contains('show')) {
-    return Promise.reject(new Error('openConfirmModal already open'));
+  // A3-HIGH-3 fix (WP-01 Wave 1 follow-up)：module-level lock 取代 DOM-state guard。
+  // 舊 `overlay.classList.contains('show')` 是 DOM-class 檢查，存在 microtask race；
+  // 改為 _OC_MODAL_OPEN_LOCK module-scope flag，所有 3 個 modal 共用同一鎖。
+  if (_OC_MODAL_OPEN_LOCK) {
+    return Promise.reject(new Error('openConfirmModal: modal_locked'));
   }
+  _OC_MODAL_OPEN_LOCK = true;
 
   document.getElementById('oc-gc-title').textContent = meta.title;
   document.getElementById('oc-gc-body').textContent = meta.body;
@@ -1826,6 +1837,8 @@ function openConfirmModal(actionName) {
       cancelBtn.onclick = null;
       confirmBtn.onclick = null;
       overlay.onkeydown = null;
+      // A3-HIGH-3 fix：釋放 module-level lock，否則永久 deadlock
+      _OC_MODAL_OPEN_LOCK = false;
       if (previousActive && typeof previousActive.focus === 'function') {
         previousActive.focus();
       }
@@ -1873,6 +1886,17 @@ function openPromptModal(options) {
   var confirmLabel = meta.confirmLabel || '確認 / Confirm';
   var multiline = !!meta.multiline;
   var choices = Array.isArray(meta.choices) ? meta.choices : null;
+  // A3-MAJOR-2 fix (WP-01 Wave 1 follow-up)：placeholder / maxlength / char-counter 支援，
+  // 用於取代 canary-tab.js 自製 oc-promote-reason overlay。
+  var placeholder = meta.placeholder == null ? '' : String(meta.placeholder);
+  var maxlength = (typeof meta.maxlength === 'number' && meta.maxlength > 0) ? meta.maxlength : 0;
+
+  // A3-HIGH-3 fix (WP-01 Wave 1 follow-up)：module-level lock 拒絕並發開啟
+  if (_OC_MODAL_OPEN_LOCK) {
+    console.error('[openPromptModal] modal already open; rejecting concurrent open');
+    return Promise.reject(new Error('openPromptModal: modal_locked'));
+  }
+  _OC_MODAL_OPEN_LOCK = true;
 
   var overlay = document.getElementById('oc-generic-prompt-overlay');
   if (!overlay) {
@@ -1887,6 +1911,7 @@ function openPromptModal(options) {
         '<input id="oc-gp-input" class="oc-prompt-input" type="text" autocomplete="off">' +
         '<textarea id="oc-gp-textarea" class="oc-prompt-textarea" style="display:none"></textarea>' +
         '<select id="oc-gp-select" class="oc-prompt-select" style="display:none"></select>' +
+        '<div id="oc-gp-counter" style="text-align:right;font-size:11px;color:var(--text-dim);display:none"><span id="oc-gp-counter-cur">0</span>/<span id="oc-gp-counter-max">0</span></div>' +
         '<div id="oc-gp-error" class="oc-prompt-error" role="alert"></div>' +
         '<div class="btn-row">' +
           '<button id="oc-gp-cancel" class="oc-btn">取消 / Cancel</button>' +
@@ -1929,6 +1954,30 @@ function openPromptModal(options) {
     });
   }
 
+  // A3-MAJOR-2 fix：apply placeholder / maxlength / counter（取代 canary-tab.js 自製 overlay）
+  // text input / textarea 才支援 placeholder + maxlength；select 跳過
+  if (!choices) {
+    if (multiline) {
+      textareaEl.placeholder = placeholder;
+      if (maxlength > 0) textareaEl.setAttribute('maxlength', String(maxlength));
+      else textareaEl.removeAttribute('maxlength');
+    } else {
+      inputEl.placeholder = placeholder;
+      if (maxlength > 0) inputEl.setAttribute('maxlength', String(maxlength));
+      else inputEl.removeAttribute('maxlength');
+    }
+  }
+  var counterEl = document.getElementById('oc-gp-counter');
+  var counterCurEl = document.getElementById('oc-gp-counter-cur');
+  var counterMaxEl = document.getElementById('oc-gp-counter-max');
+  if (maxlength > 0 && !choices) {
+    counterEl.style.display = '';
+    counterMaxEl.textContent = String(maxlength);
+    counterCurEl.textContent = String(defaultValue.length);
+  } else {
+    counterEl.style.display = 'none';
+  }
+
   overlay.classList.add('show');
 
   return new Promise(function(resolve) {
@@ -1941,6 +1990,10 @@ function openPromptModal(options) {
       cancelBtn.onclick = null;
       confirmBtn.onclick = null;
       overlay.onkeydown = null;
+      // A3-MAJOR-2 fix：清 oninput handler 避免下次 modal 殘留
+      if (activeField) activeField.oninput = null;
+      // A3-HIGH-3 fix：釋放 module-level lock
+      _OC_MODAL_OPEN_LOCK = false;
       resolve(result);
     }
     cancelBtn.onclick = function() { cleanup(null); };
@@ -1953,6 +2006,12 @@ function openPromptModal(options) {
       }
       cleanup(raw);
     };
+    // A3-MAJOR-2 fix：char-counter input handler（maxlength > 0 才啟用）
+    if (maxlength > 0 && !choices) {
+      activeField.oninput = function() { counterCurEl.textContent = String(value().length); };
+    } else {
+      activeField.oninput = null;
+    }
     overlay.onkeydown = function(ev) {
       if (ev.key === 'Escape') cleanup(null);
       if (ev.key === 'Enter' && !multiline && !ev.shiftKey) {
@@ -2006,12 +2065,14 @@ function openTypedConfirmModal(options) {
   var rollback = meta.rollback || '';
 
   var overlay = document.getElementById('oc-typed-confirm-overlay');
-  // W-AUDIT-7c round 2 fix [#7]：singleton overlay 已 .show 狀態時拒絕第二次開啟，
-  // 避免併發 Promise 覆蓋第一個 resolver（onclick handler / oninput / onkeydown 都會被新呼叫覆蓋）。
-  if (overlay && overlay.classList.contains('show')) {
+  // W-AUDIT-7c round 2 [#7] + A3-HIGH-3 fix (WP-01 Wave 1 follow-up)：
+  // 升級為 module-level lock，與 openConfirmModal / openPromptModal 共用同一鎖；
+  // 舊 DOM-state guard（classList.contains('show')）有 microtask race window。
+  if (_OC_MODAL_OPEN_LOCK) {
     console.error('[openTypedConfirmModal] modal already open; rejecting concurrent open');
-    return Promise.reject(new Error('modal already open'));
+    return Promise.reject(new Error('openTypedConfirmModal: modal_locked'));
   }
+  _OC_MODAL_OPEN_LOCK = true;
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'oc-typed-confirm-overlay';
@@ -2071,6 +2132,8 @@ function openTypedConfirmModal(options) {
       confirmBtn.onclick = null;
       overlay.onkeydown = null;
       inputEl.oninput = null;
+      // A3-HIGH-3 fix：釋放 module-level lock
+      _OC_MODAL_OPEN_LOCK = false;
       if (previousActive && typeof previousActive.focus === 'function') {
         previousActive.focus();
       }

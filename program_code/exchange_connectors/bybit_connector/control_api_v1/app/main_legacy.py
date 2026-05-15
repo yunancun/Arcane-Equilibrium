@@ -30,6 +30,7 @@ Safety invariant:
 import hmac
 import logging
 import os
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -37,11 +38,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 # ── Wave B re-exports: auth (Settings class + credentials + AuthenticatedActor) ──
@@ -364,7 +368,6 @@ _OPENCLAW_DEBUG = os.getenv("OPENCLAW_DEBUG", "").strip() == "1"
 
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception):
-    from starlette.responses import JSONResponse
     logger.error(
         "Unhandled exception on %s %s: %s",
         request.method,
@@ -377,6 +380,65 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
     else:
         detail = {"reason_codes": ["internal_error"], "detail": "Internal server error"}
     return JSONResponse(status_code=500, content={"detail": detail})
+
+
+# ── WP-05 Real Fix: HTTPException + RequestValidationError handler 順位補完 ─────
+# FastAPI 順位：`@app.exception_handler(Exception)` 不會捕 `HTTPException`/
+# `RequestValidationError`（已由 FastAPI 內建 handler 處理）。下面兩個 handler
+# 攔截這兩類，再做最後一道 leak 偵測 + 消毒。
+# 偵測 pattern：`": <ErrorClass>"` / `: <Number>` / `Traceback` / `<class '...'>`
+# 命中 → 換成 "Internal error"；不命中（如 reason_codes dict / 手寫短訊息）→ 放行。
+
+# Leak 偵測 regex：抓「`: SomeError`」「`: 123`」「Traceback」「<class 'foo'>」等
+# 表示原始 exception/str 注入未經消毒的 pattern。reason_codes-only dict 不會命中。
+_LEAK_PATTERN = re.compile(
+    r":\s+\w*Error|:\s+\d+|Traceback|<class '"
+)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """HTTPException 二次消毒 — 攔截 detail=f"...{exc}" 漏網的 leak pattern。
+
+    - detail 是 dict（structured response）→ 原樣放行（已是受控結構）
+    - detail 是 str 且命中 leak pattern + 非 DEBUG → 改成通用 "Internal error"
+    - 其他 str（短訊息 / 純業務文案）→ 原樣放行（避免破壞既有 GUI 文案）
+    """
+    detail = exc.detail
+    if isinstance(detail, str) and not _OPENCLAW_DEBUG:
+        if _LEAK_PATTERN.search(detail):
+            logger.warning(
+                "Sanitized leaky HTTPException detail on %s %s (status=%s)",
+                request.method,
+                request.url.path,
+                exc.status_code,
+            )
+            detail = "Internal error"
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """422 validation 錯誤 — production 隱藏 pydantic errors 細節（含欄位 + 內部 type）。
+
+    OPENCLAW_DEBUG=1 才回原 errors() 結構供開發排查。
+    """
+    if _OPENCLAW_DEBUG:
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    return JSONResponse(
+        status_code=422,
+        content={"detail": {"reason_codes": ["validation_failed"], "detail": "Validation failed"}},
+    )
+
+
+# ── WP-05 startup warn: OPENCLAW_DEBUG=1 production-leak 提醒 ─────────────────
+# 不 fail-closed（避免破 dev workflow），只 log warning。
+if _OPENCLAW_DEBUG and os.getenv("OPENCLAW_ALLOW_DEV", "").strip() != "1":
+    logger.warning(
+        "OPENCLAW_DEBUG=1 detected: exception messages will leak internal "
+        "details to clients. Set OPENCLAW_ALLOW_DEV=1 to acknowledge or unset "
+        "OPENCLAW_DEBUG for production."
+    )
 
 
 static_dir = Path(__file__).resolve().parent / "static"

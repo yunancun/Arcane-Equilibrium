@@ -483,7 +483,7 @@ active work starts at §10 / §11.2 / §11.3.
 |---|---|---|---|---|---|---|
 | WP-01 | GUI Safety Gates (A3 BLOCKERs) | P0-BLOCKER | 1 | E1a -> A3+E2 review | ✅ DONE `6b8be386` | 1 session |
 | WP-02 | Donchian callers audit + deprecate base fn (rescoped from P0) | P1 | 1 | E1 -> QC+E2+E4 | ✅ DONE `6b8be386` | 0.5 session |
-| WP-03 | OU Sigma Residual Fix | P1 | 2 | E1 -> QC+E2 | PENDING | 0.5 session |
+| WP-03 | OU Sigma Residual Fix | P1 | 2 | E1 -> QC+E2 | ✅ DONE 2026-04-25 `67a82612` (PA audit drift — fix predated audit by 3 weeks) | 0.5 session |
 | WP-04 | AI Observability + Budget | P1 | 2 | E1-py+E1-rs -> AI-E+E2 | PENDING | 1 session |
 | WP-05 | Security Hardening (bind 0.0.0.0 + error leak) | P1 | 1 | E1 -> E3+E2 | ✅ DONE `6b8be386` | 0.5 session |
 | WP-06 | Performance Hot Path (Rust clone + Python deepcopy) | P1 | 3 | E1-rs+E1-py -> E5+E2 | PENDING | 1-2 sessions |
@@ -495,7 +495,13 @@ active work starts at §10 / §11.2 / §11.3.
 | WP-12 | ONNX Model Manager (stub) | P2 | 4 | E1-rs -> E2+FA | DEFERRED | 1 session |
 | WP-13 | Reconciler Stale cmd_tx | P1 | 3 | E1-rs -> E2+E4 | PENDING | 1 session |
 
-**Wave 1 ✅ CLOSED 2026-05-16**: WP-01 + WP-02 + WP-05 + WP-09 all DONE (`43627d1c` + `6b8be386`). A3 review 3H/3M/2L all fixed. E2 review APPROVE with LOC governance exception (tab-live.html +12 pre-existing 2178→2190, P0-BLOCKER safety fix).
+**Wave 1 ✅ CLOSED 2026-05-16 (Round 2 真修後)**: WP-01 + WP-02 + WP-05 + WP-09 全 DONE (`43627d1c` + `6b8be386` + Round 2 patch HEAD).
+  - **Round 1 對抗審核 (A3/R4/E2/E3/QC)**：WP-01 6.5/10 PARTIAL（A3-MAJOR-2 漏修+雙層 modal）/ WP-02 PASS / WP-05 偽修復（17+ HTTPException leak）/ WP-09 cheap-fix（97 missing→32）
+  - **Round 2 真修**：WP-05 17 routes 38 callsite migrate + error_sanitize helper + StarletteHTTPException/RequestValidationError handler 補；WP-01 canary openPromptModal + 雙層 modal 拆 + 5 metric 繁體 + 繁簡統一 + module-level lock；WP-09 README +126 entries + KNOWN_ISSUES reconcile + REF-21 SUPERSEDED + WP-01/02 sign-off
+  - **Round 2 對抗審核 (E2/A3/R4)**：WP-01+WP-05 APPROVE-CONDITIONAL；A3 8.5/10 GO；R4 APPROVE-CONDITIONAL
+  - **P2 follow-up tickets opened**: P2-WP05-FUP-1 (32 殘留 str(exc)) / P2-COMMON-JS-LOC (2198 拆檔) / P2-TAB-LIVE-LOC (2142 拆檔) / P2-CROSSTAB-I18N / P2-STOCHASTIC-LEAK / P2-START-LOCAL-HELPER
+  - **Governance exception**: common.js 2135→2198 (+63 LOC) 超 §九 pre-existing baseline +5 寬容；PM 接受 SDK consolidation 理由（openPromptModal 為 A3-MAJOR-2 spec 必補），P2 拆檔 ticket 已開
+  - **PA audit drift watch**: QC-P0-1 Donchian + QC-P1-1 OU sigma 均為 stale code 被當 active P0/P1 報入 — PA `code-quality-audit` skill 必加 hard rule「P0 leak finding 必附 call-path grep verification」
 **Wave 1 original dispatch**: WP-01 + WP-02 + WP-05 + WP-09 (zero file overlap)
 **Wave 2 parallel dispatch**: WP-03 + WP-04 + WP-10 + WP-07 (independent)
 **Wave 3 sequential/focused**: WP-08 (Linux) + WP-06 (after stability) + WP-13 (focused)
@@ -515,6 +521,14 @@ active work starts at §10 / §11.2 / §11.3.
 | `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → **mounted into `W-AUDIT-8f` (R-3) Hypothesis Pipeline per Decision-3 (P0-DECISION-AUDIT-7)** | Sprint N+5 |
 | `P2-V19-CYCLE` | ✅ DONE 2026-05-15 — TODO cleanup/archive cycle | `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`; TODO under 700-line hygiene target. |
 | `P2-ORDERS-INTENT-ID-WRITER-GAP-1` | **Wave 1.5 NEW**（per Track E3 maker fill baseline 2026-05-15 commit `b98706d5`）：fix `orders.intent_id` 100% NULL writer 漏接；恢復 intent → order linkage 給 Guardian-pass-rate 計算 | est. 1 person-day；不阻 Phase 1b IMPL；E3 finding 1 證實 7d 1394 demo orders / 1021 live_demo orders 全部 `intent_id IS NULL`；無法走 `intents → orders` join 算 Guardian-pass-rate；派發時點：N+2 backlog |
+| `P2-WP05-FUP-1` | **Wave 1 Round 2 follow-up**：32 處 `str(exc)` 殘留（22 處 E1 自承非 SoT 列名 + 9 處 risk_routes.py `_ipc_failure(f"...: {e}")` E2 新發現 + 1 處 strategist_promote_routes:564 enum 字串）— 走全域 handler regex 二次消毒，但仍建議逐處 migrate 為穩定 reason_code | est. 0.5 session；非 blocking；handler regex 為 second-line defense |
+| `P2-COMMON-JS-LOC` | **Wave 1 Round 2 NEW**：`common.js` 2198 LOC 超 §九 2000 hard cap（pre-existing 2135 + Wave 1 +63 SDK consolidation）— 拆檔（建議 modal SDK / API helper / formatter 三檔）| est. 1 session；PM 已 accept governance exception |
+| `P2-TAB-LIVE-LOC` | **Wave 1 NEW**：`tab-live.html` 2142 LOC 超 §九 2000 hard cap（Wave 1 Round 2 已從 2190 拆 -50 LOC）— 進一步拆 form / modal partials | est. 1 session；low priority |
+| `P2-CROSSTAB-I18N` | **Wave 1 Round 2 NEW**：tab-system / tab-paper / console / tab-settings / governance-tab.js / tab-risk / app.js cross-tab 殘留簡體 `实盘/平仓/请检查` — 統一繁體 | est. 0.5 session；A3 follow-up wave |
+| `P2-STOCHASTIC-LEAK` | **Wave 1 Round 2 NEW (QC)**：`momentum.rs:80-86` Stochastic 含 current bar（`high[start..=i]` 含 i=n-1）同類 look-ahead leak — 加 `stochastic_prior()` 變體 + 5 textbook indicator 完整 leak audit | est. 0.5 session；low priority（bb_breakout 不直接用 Stochastic，但其他 indicator 應掃完）|
+| `P2-START-LOCAL-HELPER` | **Wave 1 Round 2 NEW (E2/E3)**：`start_local.sh` + `beta_quickstart.sh` 死綁 `127.0.0.1` — 改用 `helper_scripts/lib/api_bind_host.sh:resolve_openclaw_api_bind_host()` 抽象，保 safe default 但允 `OPENCLAW_BIND_HOST` override | est. 0.25 session |
+| `P2-PA-CALLPATH-GREP-RULE` | **Wave 1 Round 2 NEW (audit drift 反模式)**：PA `code-quality-audit` skill 加 hard rule「P0/P1 leak/bias finding 必附 IndicatorEngine/production caller call-path grep」— QC-P0-1 Donchian 第 3 次復發 + QC-P1-1 OU sigma 第 1 次 stale finding 證實 audit drift 反模式 | est. 0.25 session；治理 skill 改進 |
+| `P2-WP05-CSP-UNSAFE-INLINE` | **Wave 1 Round 2 NEW (E3)**：CSP `unsafe-inline` 推遲在 live 前 30 天窗口不安全（25 處 innerHTML + unpkg CDN 無 SRI）— 至少加 SRI integrity hash；live cohort 前必補 nonce-based CSP | est. 1 session；live-gate prerequisite |
 
 ### §12.1 Sprint N+2 P2 Backlog (PA 2026-05-11)
 

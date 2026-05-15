@@ -968,8 +968,13 @@ def post_live_renew(
         _revoke_existing_live_auths(actor_id)
         auth_id, expires_at_ms = _create_live_auth(actor_id, final_tier)
     except Exception as exc:
-        logger.error("live_trust_routes: failed to create live auth: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Auth creation failed: {exc}")
+        # WP-05 Real Fix: server-side 留 full traceback；client 只看 reason_code。
+        logger.exception("live_trust_routes: failed to create live auth")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=500,
+            detail=sanitize_exc_for_detail(exc, "auth_failure"),
+        )
 
     # Notify trust engine / 通知信任引擎
     engine.on_auth_renewed(new_tier=final_tier, new_expires_ts_ms=expires_at_ms)
@@ -987,12 +992,12 @@ def post_live_renew(
             approved_system_mode=approved_system_mode,
         )
     except Exception as exc:
-        logger.error(
-            "live_trust_routes: failed to write signed authorization: %s", exc
-        )
+        # WP-05 Real Fix
+        logger.exception("live_trust_routes: failed to write signed authorization")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=500,
-            detail=f"Signed authorization write failed: {exc}",
+            detail=sanitize_exc_for_detail(exc, "auth_write_failure"),
         )
 
     # PIPELINE-SLOT-1 Phase 3: wake the Rust watcher for sub-5s respawn
@@ -1057,7 +1062,13 @@ def post_live_renew_review(
         _revoke_existing_live_auths(actor_id)
         auth_id, expires_at_ms = _create_live_auth(actor_id, final_tier)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Auth creation failed: {exc}")
+        # WP-05 Real Fix
+        logger.exception("live_trust_routes (renew-review): failed to create live auth")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=500,
+            detail=sanitize_exc_for_detail(exc, "auth_failure"),
+        )
 
     # Reset T3 counter + update state / 重置 T3 計數器 + 更新狀態
     with engine._lock:
@@ -1081,13 +1092,14 @@ def post_live_renew_review(
             approved_system_mode=approved_system_mode,
         )
     except Exception as exc:
-        logger.error(
-            "live_trust_routes (renew-review): failed to write signed authorization: %s",
-            exc,
+        # WP-05 Real Fix
+        logger.exception(
+            "live_trust_routes (renew-review): failed to write signed authorization"
         )
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=500,
-            detail=f"Signed authorization write failed: {exc}",
+            detail=sanitize_exc_for_detail(exc, "auth_write_failure"),
         )
 
     # PIPELINE-SLOT-1 Phase 3: wake the Rust watcher (same reasoning as

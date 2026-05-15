@@ -1,3 +1,5 @@
+> **SUPERSEDED** by [ref21_gui_ux_spec_v1_1.md](2026-05-06--ref21_gui_ux_spec_v1_1.md) -- retained for historical reference.
+
 # REF-21 Replay GUI / UX Spec V1
 
 **Date:** 2026-05-06  
