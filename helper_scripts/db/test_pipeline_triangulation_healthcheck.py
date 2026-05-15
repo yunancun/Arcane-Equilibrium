@@ -24,13 +24,28 @@ from helper_scripts.db.passive_wait_healthcheck.checks_derived import (  # noqa:
 )
 
 
-def _cursor(labels_24h: int, intent_metrics: tuple[int, int, int, int, int]) -> MagicMock:
+def _cursor(
+    labels_24h: int,
+    intent_metrics: tuple[int, int, int, int, int],
+    *,
+    raw_labels_24h: int | None = None,
+    rejected_governance_labels_24h: int = 0,
+    close_linked_rejected_governance_24h: int = 0,
+) -> MagicMock:
     """Build a psycopg2-like cursor with deterministic fetchone rows."""
     cur = MagicMock()
     cur.connection = MagicMock()
     cur.connection.rollback = MagicMock()
     cur.execute = MagicMock()
-    cur.fetchone.side_effect = [(labels_24h,), intent_metrics]
+    cur.fetchone.side_effect = [
+        (
+            labels_24h,
+            close_linked_rejected_governance_24h,
+            labels_24h if raw_labels_24h is None else raw_labels_24h,
+            rejected_governance_labels_24h,
+        ),
+        intent_metrics,
+    ]
     return cur
 
 
@@ -51,10 +66,33 @@ class TestPipelineTriangulation(unittest.TestCase):
         status, msg = check_pipeline_triangulation(cur, close_fills_24h=24)
 
         self.assertEqual(status, "PASS", msg)
+        self.assertIn("close_linked_labels=23", msg)
         self.assertIn("filled_intent_contexts=23", msg)
         self.assertIn("raw_intents=103628", msg)
         self.assertIn("scanner_opportunity_raw=103613", msg)
         self.assertIn("fills/intents=1.04", msg)
+
+    def test_pass_excludes_rejected_governance_raw_labels(self) -> None:
+        """Reject-path negative labels are diagnostic volume, not close-fill labels."""
+        cur = _cursor(
+            labels_24h=16,
+            raw_labels_24h=111_992,
+            rejected_governance_labels_24h=111_976,
+            intent_metrics=(
+                112_000,
+                111_976,
+                16,
+                16,
+                15,
+            ),
+        )
+
+        status, msg = check_pipeline_triangulation(cur, close_fills_24h=15)
+
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("close_linked_labels=16", msg)
+        self.assertIn("rejected_governance_raw=111976", msg)
+        self.assertIn("fills/labels=0.94", msg)
 
     def test_fail_when_close_fills_have_no_linked_intent_contexts(self) -> None:
         """Filled trades with no matching intent context remain FAIL-grade."""

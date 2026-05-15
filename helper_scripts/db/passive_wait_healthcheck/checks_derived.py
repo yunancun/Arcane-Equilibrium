@@ -336,24 +336,65 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
             "(defer to [1] verdict; ratios unreliable at this sample size)",
         )
 
-    # Query labels_24h (same filter as [2]) and a close-fill-linked intent
-    # anchor. Raw scanner/opportunity intents are shadow observations and can
-    # legitimately outnumber filled trade contexts by several orders of
-    # magnitude; they are kept in the message as a diagnostic, but they are not
-    # the denominator for fills/labels triangulation.
-    # 查 labels_24h（同 [2]）與 close-fill-linked intent 錨。Raw scanner /
-    # opportunity intent 是影子觀察，數量可合理遠大於成交 context；輸出保留作
-    # 診斷，但不當 fills/labels 三角驗證分母。
+    # Query close-fill-linked labels and a close-fill-linked intent anchor.
+    # W-AUDIT-4b-M3 intentionally emits high-volume reject-path negative labels
+    # with label_close_tag='rejected_governance'; those are governance samples,
+    # not close-fill labels, so they are reported as diagnostics but excluded
+    # from the fills/labels ratio.
+    #
+    # 查 close-fill-linked labels 與 close-fill-linked intent 錨。
+    # W-AUDIT-4b-M3 會刻意寫大量 label_close_tag='rejected_governance' 的 reject
+    # path negative labels；它們是 governance sample，不是 close-fill label，
+    # 因此只作診斷輸出，不參與 fills/labels 比率。
     try:
         cur.execute(
-            "SELECT COUNT(*) FROM learning.decision_features "
-            "WHERE label_filled_at > now() - interval '24 hours' "
-            "AND label_net_edge_bps IS NOT NULL "
-            "AND engine_mode = 'demo'"
+            """
+            WITH closed_contexts AS (
+                SELECT DISTINCT NULLIF(entry_context_id, '') AS context_id
+                FROM trading.fills
+                WHERE ts > now() - interval '24 hours'
+                  AND engine_mode = 'demo'
+                  AND realized_pnl != 0
+                  AND NULLIF(entry_context_id, '') IS NOT NULL
+            ),
+            labeled AS (
+                SELECT d.context_id, d.label_close_tag
+                FROM learning.decision_features d
+                JOIN closed_contexts c ON c.context_id = d.context_id
+                WHERE d.label_filled_at > now() - interval '24 hours'
+                  AND d.label_net_edge_bps IS NOT NULL
+                  AND d.engine_mode = 'demo'
+            ),
+            raw_labels AS (
+                SELECT label_close_tag
+                FROM learning.decision_features
+                WHERE label_filled_at > now() - interval '24 hours'
+                  AND label_net_edge_bps IS NOT NULL
+                  AND engine_mode = 'demo'
+            )
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE COALESCE(label_close_tag, '') <> 'rejected_governance'
+                ) AS close_fill_linked_labels,
+                COUNT(*) FILTER (
+                    WHERE label_close_tag = 'rejected_governance'
+                ) AS close_fill_linked_rejected_governance,
+                (SELECT COUNT(*) FROM raw_labels) AS raw_labels_24h,
+                (SELECT COUNT(*) FROM raw_labels
+                 WHERE label_close_tag = 'rejected_governance')
+                    AS rejected_governance_labels_24h
+            FROM labeled
+            """
         )
-        labels_24h = int(cur.fetchone()[0] or 0)
+        label_row = cur.fetchone()
+        labels_24h = int((label_row[0] if label_row else 0) or 0)
+        close_linked_rejected_governance_24h = int(
+            (label_row[1] if label_row else 0) or 0
+        )
+        raw_labels_24h = int((label_row[2] if label_row else 0) or 0)
+        rejected_governance_labels_24h = int((label_row[3] if label_row else 0) or 0)
     except Exception as e:
-        return ("WARN", f"triangulation labels query failed: {e}")
+        return ("WARN", f"triangulation close-fill-linked labels query failed: {e}")
 
     try:
         cur.execute(
@@ -467,9 +508,12 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
         for name, (r, cls) in classes.items()
     )
     base = (
-        f"close_fills={close_fills_24h}, labels={labels_24h}, "
+        f"close_fills={close_fills_24h}, close_linked_labels={labels_24h}, "
         f"filled_intent_contexts={intents_24h}, "
         f"close_fill_contexts={close_fill_contexts_24h}, "
+        f"raw_labels={raw_labels_24h}, "
+        f"rejected_governance_raw={rejected_governance_labels_24h}, "
+        f"close_linked_rejected_governance={close_linked_rejected_governance_24h}, "
         f"raw_intents={raw_intents_24h}, "
         f"scanner_opportunity_raw={scanner_opportunity_raw_24h} | "
         f"{pairs_str}"
