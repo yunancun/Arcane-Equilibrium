@@ -965,6 +965,50 @@ const GOV_TRUST_TIER_COLORS = {
   2: { bg: 'rgba(59,130,246,.15)',  fg: '#60a5fa' },
   3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
 };
+const GOV_LIVE_AUTH_REFRESH_MS = 30000;
+let _govLiveAuthVisible = true;
+let _govLiveAuthTimer = null;
+let _govLiveAuthInFlight = false;
+
+function _govLiveAuthRefreshVisible() {
+  return _govLiveAuthVisible && document.visibilityState !== 'hidden';
+}
+
+function _govSignedAuthDisplayState(signed, liveHalt) {
+  const known = !!(signed && signed.status);
+  if (!known) {
+    return { known: false, bad: false, text: 'Signed auth: --', color: 'var(--text-dim)', title: '' };
+  }
+  if (signed.valid_for_engine === true) {
+    return { known: true, bad: false, text: 'Signed auth: valid', color: 'var(--green)', title: '' };
+  }
+  const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
+  const halted = !!(liveHalt && liveHalt.session_halted);
+  if (String(signed.status || '') === 'missing' && halted) {
+    const dd = Number(liveHalt.session_drawdown_pct);
+    const limit = Number(liveHalt.drawdown_threshold_pct);
+    let detail = '';
+    if (Number.isFinite(dd) && Number.isFinite(limit)) {
+      detail = ' (snapshot DD ' + dd.toFixed(2) + '% / limit ' + limit.toFixed(2) + '%)';
+    } else if (Number.isFinite(dd)) {
+      detail = ' (snapshot DD ' + dd.toFixed(2) + '%)';
+    }
+    return {
+      known: true,
+      bad: true,
+      text: 'Signed auth: MISSING - auto-revoked after Live halt' + detail,
+      color: 'var(--red)',
+      title: 'Renew can be accepted, then Rust deletes authorization.json while the Live session remains halted. Clear/reset the risk halt before renewing again.'
+    };
+  }
+  return {
+    known: true,
+    bad: true,
+    text: 'Signed auth: ' + status + ' - Renew required',
+    color: 'var(--red)',
+    title: ''
+  };
+}
 
 /**
  * Load and render Live Auth status in Governance Hub.
@@ -973,7 +1017,13 @@ const GOV_TRUST_TIER_COLORS = {
  * Calls GET /api/v1/live/auth/trust-status — no dependency on live engine state.
  * 呼叫 GET /api/v1/live/auth/trust-status — 不依賴 live engine 是否在線。
  */
-async function govLoadLiveAuthStatus() {
+async function govLoadLiveAuthStatus(options) {
+  const opts = options || {};
+  const fromTimer = opts.fromTimer === true;
+  const force = opts.force === true || !fromTimer;
+  if (!force && !_govLiveAuthRefreshVisible()) return;
+  if (_govLiveAuthInFlight) return;
+  _govLiveAuthInFlight = true;
   const loadingEl = document.getElementById('gov-live-auth-loading');
   if (loadingEl) loadingEl.style.display = '';
 
@@ -983,10 +1033,14 @@ async function govLoadLiveAuthStatus() {
     d = r && r.data;
   } catch (_) {
     if (loadingEl) loadingEl.style.display = 'none';
+    _govLiveAuthInFlight = false;
     return;
   }
   if (loadingEl) loadingEl.style.display = 'none';
-  if (!d) return;
+  if (!d) {
+    _govLiveAuthInFlight = false;
+    return;
+  }
 
   const tier = d.current_tier ?? 0;
   const colors = GOV_TRUST_TIER_COLORS[tier] || GOV_TRUST_TIER_COLORS[0];
@@ -1024,21 +1078,14 @@ async function govLoadLiveAuthStatus() {
 
   // Signed authorization gate / Rust 實際讀取的 signed authorization.json
   const signed = d.signed_authorization || {};
-  const signedKnown = !!signed.status;
-  const signedBad = signedKnown && signed.valid_for_engine !== true;
+  const liveHalt = d.live_halt || signed.live_halt || {};
+  const signedState = _govSignedAuthDisplayState(signed, liveHalt);
+  const signedBad = signedState.bad;
   const signedEl = document.getElementById('gov-signed-auth-status');
   if (signedEl) {
-    if (!signedKnown) {
-      signedEl.textContent = 'Signed auth: --';
-      signedEl.style.color = 'var(--text-dim)';
-    } else if (signed.valid_for_engine === true) {
-      signedEl.textContent = 'Signed auth: valid';
-      signedEl.style.color = 'var(--green)';
-    } else {
-      const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
-      signedEl.textContent = 'Signed auth: ' + status + ' - Renew required';
-      signedEl.style.color = 'var(--red)';
-    }
+    signedEl.textContent = signedState.text;
+    signedEl.style.color = signedState.color;
+    signedEl.title = signedState.title || '';
   }
 
   // Clean days / 連續乾淨天數
@@ -1074,6 +1121,7 @@ async function govLoadLiveAuthStatus() {
       row.style.borderColor = 'var(--border)';
     }
   }
+  _govLiveAuthInFlight = false;
 }
 
 /**
@@ -1192,13 +1240,34 @@ async function govRenewReview() {
   }
 }
 
-// Poll Live Auth status every 30s — independent of engine state
-// 每 30s 輪詢實盤授權狀態 — 不依賴引擎狀態
-setInterval(govLoadLiveAuthStatus, 30000);
+function startGovLiveAuthLoop() {
+  if (_govLiveAuthTimer || !_govLiveAuthRefreshVisible()) return;
+  _govLiveAuthTimer = setInterval(
+    () => govLoadLiveAuthStatus({ fromTimer: true }),
+    GOV_LIVE_AUTH_REFRESH_MS
+  );
+}
+
+function stopGovLiveAuthLoop() {
+  if (!_govLiveAuthTimer) return;
+  clearInterval(_govLiveAuthTimer);
+  _govLiveAuthTimer = null;
+}
 
 window.addEventListener('message', function(ev) {
   if (ev.origin !== window.location.origin) return;
-  if (!ev.data || ev.data.type !== 'openclaw-governance-scroll') return;
+  if (!ev.data) return;
+  if (ev.data.type === 'openclaw-tab-visibility' && ev.data.tab === 'governance') {
+    _govLiveAuthVisible = ev.data.visible !== false;
+    if (_govLiveAuthRefreshVisible()) {
+      startGovLiveAuthLoop();
+      govLoadLiveAuthStatus({ force: true });
+    } else {
+      stopGovLiveAuthLoop();
+    }
+    return;
+  }
+  if (ev.data.type !== 'openclaw-governance-scroll') return;
   const targetId = ev.data.scrollTo || ev.data.section || 'top';
   if (targetId === 'top') {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1211,8 +1280,18 @@ window.addEventListener('message', function(ev) {
   setTimeout(() => { target.style.boxShadow = ''; }, 1800);
 });
 
+document.addEventListener('visibilitychange', function() {
+  if (_govLiveAuthRefreshVisible()) {
+    startGovLiveAuthLoop();
+    govLoadLiveAuthStatus({ force: true });
+  } else {
+    stopGovLiveAuthLoop();
+  }
+});
+
 // Initial load on tab open / tab 開啟時立即載入
-govLoadLiveAuthStatus();
+govLoadLiveAuthStatus({ force: true });
+startGovLiveAuthLoop();
 </script>
 
 <script src="/static/governance-tab.js"></script>
