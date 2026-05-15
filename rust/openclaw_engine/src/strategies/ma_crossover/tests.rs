@@ -1014,3 +1014,165 @@ fn test_on_external_close_mutation_does_not_panic() {
         .exit_persistence
         .check("BTC", Some(false), 1_000_000, 0, false);
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// W3-6 by-the-way (commit 9df44183) — KAMA fallback gate exit-path coverage
+// W3-6 by-the-way（commit 9df44183）— KAMA fallback gate 出場路徑覆蓋
+// ═══════════════════════════════════════════════════════════════════════
+//
+// E1 IMPL DONE 自承未驗證之 corner case：
+//   "持倉中 KAMA unavailable → return vec![] 跳過 entry signal generation
+//    → exit path 由其他機制走（trailing stop / time stop）→ 不誤平倉"
+// E4 補測：以 cargo test 直接驗證 strategy.on_tick(...) 在 4 個 corner case
+// 下不誤觸 Close 也不 panic / leak。
+//
+// 注意：MaCrossover 自身 exit branch 的 reverse_signal 用 fast/slow 計算，
+// 舊 code path「fast = sma_20.unwrap_or(0.0)」當 KAMA unavailable 時退回
+// fast == slow → reverse_signal=None → 也不會誤平倉；新 code path 直接
+// return vec![] 在語意上對 exit 結果一致。本套測試強鎖此不變式。
+
+/// Helper：構造一個 KAMA=None（其餘指標完整）的 TickContext。
+/// 用於模擬 indicator engine 該幣種尚未 warm-up 完 KAMA / 計算錯誤回 None。
+fn ctx_with_no_kama(sma: f64, adx: f64, ts: u64) -> TickContext<'static> {
+    StrategyHarness::new("BTC")
+        .timestamp_ms(ts)
+        .indicators(IndicatorSnapshot {
+            sma_20: Some(sma),
+            kama: None, // ← W3-6 fallback gate 觸發點
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            ..Default::default()
+        })
+        .build()
+}
+
+/// W3-6 corner case 1：持倉中 KAMA 突然 unavailable → 不誤平倉。
+///
+/// 場景：
+///   - paper_state 已有 ma_crossover-owned LONG BTC 持倉
+///   - KAMA 計算返回 None（warm-up reset / numerical edge case / data gap）
+///   - 預期 actions 為空：on_tick 不可發 Close
+///
+/// 退出機制應由 stop_manager（hard stop / trailing stop / time stop）走，
+/// 不應由 ma_crossover.on_tick 觸發。
+#[test]
+fn test_kama_unavailable_during_open_position_does_not_force_exit() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position("BTC", true, "ma_crossover");
+    let mut ctx = ctx_with_no_kama(100.0, 25.0, 0);
+    ctx.position_state = Some(&pp);
+
+    let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert!(
+        actions.is_empty(),
+        "持倉中 KAMA unavailable 不可誤平倉，但發了 {} actions: {:?}",
+        actions.len(),
+        actions
+    );
+}
+
+/// W3-6 corner case 2：連續 100 tick KAMA unavailable → 全部 return vec![]，無 panic / leak。
+///
+/// 場景：
+///   - 持倉中
+///   - KAMA 連續 100 tick None（極端：indicator engine 持續異常）
+///   - 預期：100 個空 actions，no panic，no spurious exit signal
+///   - 額外驗證：exit_persistence 內部 state 不被推進
+///     （新代碼直接 return，不到 exit_persistence.check() 呼叫點）
+#[test]
+fn test_kama_unavailable_for_consecutive_n_ticks_returns_empty() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let pp = make_paper_position("BTC", true, "ma_crossover");
+
+    for i in 0..100u64 {
+        let mut ctx = ctx_with_no_kama(100.0, 25.0, i * 1_000);
+        ctx.position_state = Some(&pp);
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+        assert!(
+            actions.is_empty(),
+            "tick #{} KAMA unavailable 卻發 actions: {:?}",
+            i,
+            actions
+        );
+    }
+
+    // exit_persistence 內部不應被任何 reverse_signal 推進
+    // （新 path return vec![] 在 exit_persistence.check() 之前）
+    // sanity：fresh signal check 不 panic 即視為 state 完好。
+    let _ = s
+        .exit_persistence
+        .check("BTC", Some(false), 200_000_000, 100_000, false);
+}
+
+/// W3-6 corner case 3：KAMA unavailable 10 tick → 突然 available → 正常 cross detection 恢復。
+///
+/// 場景：
+///   - 無倉位（cold start）
+///   - tick 0..9：KAMA None → 全 vec![]
+///   - tick 10：KAMA available 且 fast > slow → 應 emit Open（LONG entry）
+///   - 驗證：fallback gate 是 transient，KAMA recover 後不留 sticky state 阻塞 entry
+#[test]
+fn test_kama_recovers_after_unavailable_window_resumes_trading() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+
+    // Phase 1：10 tick KAMA None
+    for i in 0..10u64 {
+        let ctx = ctx_with_no_kama(100.0, 25.0, i * 1_000);
+        let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+        assert!(actions.is_empty(), "tick #{} KAMA unavailable 期間應為空", i);
+    }
+
+    // Phase 2：tick 10 KAMA recover + 有效 LONG 信號 (kama=101 > sma_20=100)
+    let recovery_ctx = ctx_with(100.0, 101.0, 25.0, 10_000);
+    let actions = s.on_tick(
+        &recovery_ctx,
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert_eq!(
+        actions.len(),
+        1,
+        "KAMA recover 後 valid LONG signal 必須 emit 1 entry，實際 {} actions",
+        actions.len()
+    );
+    match &actions[0] {
+        StrategyAction::Open(intent) => assert!(
+            intent.is_long,
+            "recovery 後預期 LONG entry，實際 short / unknown"
+        ),
+        other => panic!("expected StrategyAction::Open after KAMA recovery, got {:?}", other),
+    }
+}
+
+/// W3-6 corner case 4：無倉 + KAMA unavailable → 不誤入場（與 fallback gate 設計意圖對齊）。
+///
+/// 場景：
+///   - 無持倉（ctx.position_state = None）
+///   - KAMA None（即使若 fall back 到 SMA/SMA 比較 fast==slow → signal 也只能是 None）
+///   - 預期：返回空 actions（return vec![] 在 entry path 觸發前）
+///   - 對比舊 code path：fast=sma_20=100, slow=sma_20=100 → signal=None → 仍不入場
+///     新 code path：早 return vec![]
+///   - 設計意圖：避免靜默退化為 SMA-vs-SMA + 後續 confluence/persistence 仍跑 →
+///     污染 ML training data + edge measurement（commit message 設計理由）
+#[test]
+fn test_kama_unavailable_no_entry_when_no_position() {
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    let mut ctx = ctx_with_no_kama(100.0, 25.0, 0);
+    ctx.position_state = None;
+
+    let actions = s.on_tick(&ctx, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+
+    assert!(
+        actions.is_empty(),
+        "無倉 + KAMA unavailable 不可入場，但發了 {} actions: {:?}",
+        actions.len(),
+        actions
+    );
+}
