@@ -2379,3 +2379,19 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   `W-AUDIT-8e`/`W-AUDIT-8f`.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--alpha_path_phase_c_dispatch.md`.
+
+## 2026-05-15 P1-INTENT-FREEZE-27 Post-Grace Closure
+
+- SSH from Codex required the full MagicDNS route plus explicit key:
+  `trade-core.tail358794.ts.net` with `~/.ssh/id_ed25519_mac`; short
+  `ssh trade-core` was inconsistent in the sandbox.
+- Linux `trade-core` was clean at docs head `8ab4abd9`.
+- Post-grace narrow probe at `2026-05-15T18:12Z` returned `[27]` PASS:
+  `demo stale=3.4m, 30min_n=4`; `live_demo` had `verdicts_30min=0`,
+  `approved_verdicts_30min=0`, `dcs_30min=0`, so it was inactive rather than
+  frozen. `[66]` and `[67]` also PASSed.
+- Close `P1-INTENT-FREEZE-27`. This does not unblock Stage 1 demo because
+  A4-C Stage 0R and OI-confirmed 5m remain red/non-promotional; true-live also
+  remains blocked by missing signed live auth and P0 LG/OPS/edge gates.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_intent_freeze_27_post_grace_closure.md`.
