@@ -37,6 +37,12 @@ use super::super::on_tick_helpers::{
 use super::super::pipeline_helpers::release_decision_lease_for_governance;
 use super::super::*;
 
+fn exchange_qty_rounded_to_zero_reason(approved_qty: f64, final_qty: f64) -> String {
+    format!(
+        "qty_zero: exchange_precision_rounding_to_zero approved_qty={approved_qty:.8} final_qty={final_qty:.8}"
+    )
+}
+
 fn execution_reference(
     is_buy: bool,
     best_bid: Option<f64>,
@@ -584,22 +590,31 @@ impl TickPipeline {
                                 event.ts_ms,
                             );
 
-                            // S-01: persist verdict via extracted helper
-                            if let Some(ref vi) = gate.verdict_info {
-                                persist_verdict(
-                                    &self.trading_tx,
-                                    em,
-                                    &intent.symbol,
-                                    event.ts_ms,
-                                    vi,
-                                    em,
-                                );
+                            // S-01: persist non-approved verdicts immediately.
+                            // Approved exchange verdicts are persisted only
+                            // after exchange precision rounding still leaves a
+                            // dispatchable quantity. Otherwise the audit shape
+                            // must be "rejected qty=0 intent", not "Approved
+                            // verdict with no intent" ([27] false wedge).
+                            if !gate.approved {
+                                if let Some(ref vi) = gate.verdict_info {
+                                    persist_verdict(
+                                        &self.trading_tx,
+                                        em,
+                                        &intent.symbol,
+                                        event.ts_ms,
+                                        vi,
+                                        em,
+                                    );
+                                }
                             }
 
                             if gate.approved {
                                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                                let order_link_id =
-                                    format!("oc_{}_{}_{}", mode_tag, event.ts_ms, self.exchange_seq);
+                                let order_link_id = format!(
+                                    "oc_{}_{}_{}",
+                                    mode_tag, event.ts_ms, self.exchange_seq
+                                );
 
                                 // Round to exchange precision / 取整至交易所精度
                                 let final_qty = if let Some(ref icache) = self.instrument_cache {
@@ -614,8 +629,50 @@ impl TickPipeline {
 
                                 // P0-2 fix: Skip if qty rounded to zero / 數量取整為零則跳過
                                 if final_qty <= 0.0 {
-                                    warn!(symbol = %intent.symbol, "exchange order skipped: qty=0 after rounding");
+                                    let reason = exchange_qty_rounded_to_zero_reason(
+                                        gate.approved_qty,
+                                        final_qty,
+                                    );
+                                    strategy.on_rejection(intent, &reason);
+                                    record_pre_risk_rejection(
+                                        &self.trading_tx,
+                                        &mut self.recent_intents,
+                                        em,
+                                        event.ts_ms,
+                                        &signal_id,
+                                        &context_id,
+                                        intent,
+                                        event.last_price,
+                                        scanner_ctx.as_ref(),
+                                        Some(&scanner_gate_audit),
+                                        &reason,
+                                    );
+                                    self.intent_processor.emit_decision_feature_intent_rejected(
+                                        intent,
+                                        &features,
+                                        &context_id,
+                                        event.ts_ms,
+                                        &reason,
+                                    );
+                                    warn!(
+                                        symbol = %intent.symbol,
+                                        approved_qty = gate.approved_qty,
+                                        final_qty,
+                                        reason = %reason,
+                                        "exchange order skipped: qty=0 after rounding"
+                                    );
                                     continue;
+                                }
+
+                                if let Some(ref vi) = gate.verdict_info {
+                                    persist_verdict(
+                                        &self.trading_tx,
+                                        em,
+                                        &intent.symbol,
+                                        event.ts_ms,
+                                        vi,
+                                        em,
+                                    );
                                 }
 
                                 // S-01+P-09: use helper to push display intent (M-2 post-cap qty)
