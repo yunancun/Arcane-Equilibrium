@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-05-15 21:50 CEST
+- updated TODO to v30 as a source-only three-side sync checkpoint
+- removed active-doc stale sync wording (`TODO.md v28`, `81bc0862`) and aligned CLAUDE/active-plan/Codex memory/docs indexes
+- pre-v30 Mac/origin/Linux source was clean/synced at `9a72d054`; runtime binary remains `7b33ab2e`
+- no runtime rebuild/restart, DB write, auth change, paper enablement, demo canary, production WS topic revival, risk/sizing/config mutation, or live action
+
 2026-05-15 CEST
 - completed P0-MICRO-PROFIT alpha prework per operator request: C1 liquidation-topic proof packet, W-AUDIT-8b Funding Skew spec v0.1, and A4-C archive verdict
 - added standalone `helper_scripts/bybit/liquidation_topic_probe.py`; it is isolated public WS only and cannot clear C1 without a 24h run

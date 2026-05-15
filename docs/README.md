@@ -179,6 +179,8 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/Operator/2026-05-15--a4c_unblock_engineering_card.md` | Operator brief for A4-C archive/RCA card |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--micro_profit_alpha_prework.md` | PM report for P0-MICRO-PROFIT prework：C1 probe packet, 8b spec, A4-C archive verdict, TODO/active-plan sync |
 | `CCAgentWorkSpace/Operator/2026-05-15--micro_profit_alpha_prework.md` | Operator brief for P0-MICRO-PROFIT alpha prework |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--todo_v30_three_side_sync.md` | TODO v30 source-sync checkpoint：remove stale active docs sync wording and record source-only Mac/origin/Linux sync boundary |
+| `CCAgentWorkSpace/Operator/2026-05-15--todo_v30_three_side_sync.md` | Operator brief for TODO v30 source-only three-side sync |
 | `archive/2026-05-15--todo_v24_stale_rows_archive.md` | TODO v24 中过时 active rows / stale claims 归档，包括 V079 pending、engine 5/8 binary、旧 05-09 demo state、旧 `[55]`/`[67]` 判断 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_healthcheck_55_invariant.md` | `[55]` fully-filled plan invariant source-clear report |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--feature_baseline_restore.md` | W-AUDIT-4b feature baseline restore report，646 active rows / 19 symbols / 34 features |

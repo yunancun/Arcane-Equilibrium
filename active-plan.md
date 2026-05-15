@@ -1,8 +1,8 @@
 # Active Plan
 
-Version: v1.6
+Version: v1.7
 Date: 2026-05-15
-Source: TODO.md v29 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-8a Phase C0/C1 update + A4-C PM/PA/FA archive/RCA card + A4-C RCA start + W-AUDIT-8b spec v0.1
+Source: TODO.md v30 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-8a Phase C0/C1 update + A4-C PM/PA/FA archive/RCA card + A4-C RCA start + W-AUDIT-8b spec v0.1 + v30 source-sync checkpoint
 
 ## Current Sprint
 
@@ -49,7 +49,7 @@ Source: TODO.md v29 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-
 ## Engine Status
 
 - Linux `trade-core` is the active runtime machine.
-- Mac/origin/Linux source are synced to `81bc0862`; runtime binary code line remains rebuilt `7b33ab2e` because Phase C0/replay-first changes did not rebuild/restart.
+- Pre-v30 Mac/origin/Linux source was verified clean/synced at `9a72d054`; this v30 update is source/docs only. Runtime binary code line remains rebuilt `7b33ab2e` because the later docs/helper sync did not rebuild/restart.
 - Signed live authorization is absent and true-live remains blocked.
 - Paper is disabled and remains blocked for promotion evidence.
 
