@@ -3381,3 +3381,52 @@ Python `TestLg2T3DualSourceCompat` 5 test 全 PASS 驗每個組合 + disagree ca
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--wave2_2_e4_regression.md`
+
+
+## 2026-05-15 Wave 1.5 / Track E4 — KAMA fallback gate (commit 9df44183) regression + exit-path corner case 補測 (PASS)
+
+**Trigger**: PA dispatch — 9df44183 W3-6 by-the-way `debug! + fall through` → `warn! + return vec![]` 後 E1 自承不確定 exit path 持倉中 KAMA disappear 是否誤平倉；E4 跑 baseline 對比 + 寫 4 個 corner case 補測
+
+### Verdict
+**REGRESSION-PASS · deploy READY**
+
+### 數字
+| 項 | Value | Baseline | Delta |
+|---|---|---|---|
+| Rust lib full (Linux release) | 2893 / 0 / 1 ignored | 2889 (2026-05-16 audit) | +4 new ✅ |
+| Pre-E4-commit ma_crossover focused | 68 / 0 | E1 自報 68 | byte-equal ✅ |
+| Post-E4-commit ma_crossover focused | 72 / 0 | n/a (new) | +4 new test ✅ |
+| stress_ma_crossover_whipsaw_rapid_reversals | 1 PASS | n/a | <0.01s SLA ok |
+
+非 flaky 雙跑：Pass1=Pass2 ma_crossover 72/0 + lib 2893/0/1。
+
+### 4 new exit-path corner case test（全 PASS）
+1. `test_kama_unavailable_during_open_position_does_not_force_exit` — self-owned LONG + `kama: None` → empty actions（no Close）
+2. `test_kama_unavailable_for_consecutive_n_ticks_returns_empty` — 100 連續 tick KAMA None → 全空、無 panic、exit_persistence state 未受推進
+3. `test_kama_recovers_after_unavailable_window_resumes_trading` — 10 tick None → tick 11 恢復正常 Open(LONG)；驗無 sticky state 阻塞
+4. `test_kama_unavailable_no_entry_when_no_position` — 無倉 + KAMA None → empty（fallback gate 設計意圖驗證）
+
+### Mock audit
+4 new test = 0 mockall / 0 fake / 0 patch；用真 `MaCrossover::new()` + 真 `IndicatorSnapshot { kama: None, ... }` + 真 `on_tick(&ctx, &EMPTY_ALPHA_SURFACE)`。業務邏輯 (KAMA gate / position state filter / cooldown / persistence) 真跑。
+
+### Cross-language consistency 不適用
+Python `KAMACrossoverRule` 在 `signal_generator.py:146-151` 是 `_StubRule`（stub）；ma_crossover entry/exit logic 是 Rust SSoT 無 Python dual implementation。不存在 1e-4 容差比對需求。**KAMA indicator 本身**有 Python 對等（kline_manager），但不在 commit 9df44183 scope（commit 改 strategy fallback 行為，非 KAMA 算法）。
+
+### SLA hot-path
++1 if check + return vec![] 在 KAMA gate 點 → 1-2 ns/tick 級開銷；whipsaw stress test PASS <0.01s。H0 SLA <1ms 不被影響。
+
+### Pre-existing fail accounting
+stress_integration: `stress_bb_breakout_valid_squeeze_with_volume` + `stress_bb_reversion_extreme_oversold_bounce` 2 FAIL — pre-existing，per 2026-05-16 full-scope-testing-audit §1.2。`git diff 9df44183~..9df44183 --stat` 只動 `ma_crossover/strategy_impl.rs` → 與 commit 無因果。記錄不阻 deploy。
+
+### Lesson learned
+- **Exit-path 兩 path 語意等價驗證**：舊 path `fast = sma_20.unwrap_or(0.0)` 等於 `slow` → `reverse_signal=None` → exit 不觸發；新 path 早 return vec![]。**結果一致**但新 path 額外避免下游 confluence/persistence 污染。E4 補測同時驗證「結果一致」（不誤平倉）+「設計意圖達成」（不污染下游）。
+- **HEAD-verify > commit-pinned verify**：本次 verify head `34aa7086` 含 9df44183 + 後續 docs commits + E4 +4 test commit；證明 9df44183 在 forward 仍 alive 不被退化。延續 2026-05-09 W-AUDIT-3b lesson。
+- **E1 self-flag uncertainty 是強信號**：「IMPL DONE 但不確定 X」即時應派 E4 corner case 同 wave 內補測，避免分開 dispatch 額外 round-trip。本次 4 個 test ~30 min E1 inline 即可寫；改為 E4 separate dispatch 是 process suboptimal。FYI 給未來 E1 reflection（不阻 deploy）。
+- **Python stub 不算 cross-lang counterpart**：grep `signal_generator.py:KAMACrossoverRule` 確認 `_StubRule` 屬性 → 無 dual implementation → cross-lang 容差 N/A。E4 必檢查 Python 端是「真實算法 dual」還是「stub class」再判斷 1e-4 比對是否有意義。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-15--kama_fallback_gate_e4_regression.md`
+
+### Test code commit
+`34aa7086` test(ma_crossover): add KAMA unavailable exit path regression tests (Wave 1.5 E4)
++162 LOC tests.rs；不修業務代碼。CLAUDE.md §九 hard cap 1016→1178 LOC，跨 800 警告線但遠低 2000 hard cap（單檔內聚 OK）。
