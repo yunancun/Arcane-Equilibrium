@@ -3,8 +3,8 @@
 
 use super::super::*;
 use super::{
-    empty_budget_slot, empty_cost_edge_advisor_slot, empty_account_manager_slot, empty_h_state_cache_slot, empty_teacher_slot,
-    make_test_config, make_test_data_dir,
+    empty_account_manager_slot, empty_budget_slot, empty_cost_edge_advisor_slot,
+    empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir,
 };
 
 #[tokio::test]
@@ -241,6 +241,43 @@ async fn test_dispatch_reload_config() {
     assert!(resp.error.is_none());
     let result = resp.result.unwrap();
     assert_eq!(result["reloaded"], true);
+}
+
+#[tokio::test]
+async fn test_dispatch_agent_spine_channel_metrics() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc": "2.0", "method": "get_agent_spine_channel_metrics", "params": {}, "id": 55}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("result");
+    assert_eq!(result["status"], "ok");
+    assert!(result["drop_total"].as_u64().is_some());
+    assert_eq!(
+        result["drop_total_semantics"],
+        "initial_try_send_failures_not_final_loss"
+    );
 }
 
 #[test]

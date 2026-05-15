@@ -11,6 +11,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpcSlotRequirement {
     AccountManager,
+    None,
 }
 
 /// Stable method metadata used by dispatch/tests.
@@ -28,7 +29,14 @@ pub const QUERY_FEE_SOURCE: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::AccountManager,
 };
 
-pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[QUERY_FEE_SOURCE];
+pub const GET_AGENT_SPINE_CHANNEL_METRICS: IpcMethodSpec = IpcMethodSpec {
+    name: "get_agent_spine_channel_metrics",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] =
+    &[QUERY_FEE_SOURCE, GET_AGENT_SPINE_CHANNEL_METRICS];
 
 pub fn method_spec(name: &str) -> Option<&'static IpcMethodSpec> {
     IPC_METHOD_REGISTRY.iter().find(|spec| spec.name == name)
@@ -43,6 +51,13 @@ mod tests {
         let spec = method_spec("query_fee_source").expect("registered method");
         assert!(spec.readonly);
         assert_eq!(spec.slot, IpcSlotRequirement::AccountManager);
+    }
+
+    #[test]
+    fn agent_spine_channel_metrics_declares_no_slot() {
+        let spec = method_spec("get_agent_spine_channel_metrics").expect("registered method");
+        assert!(spec.readonly);
+        assert_eq!(spec.slot, IpcSlotRequirement::None);
     }
 
     #[test]

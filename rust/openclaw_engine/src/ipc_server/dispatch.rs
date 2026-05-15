@@ -461,6 +461,17 @@ pub(crate) async fn dispatch_request(
             );
             handle_query_fee_source(id, &req.params, account_manager_slot).await
         }
+        // ── P1-FILL-LINEAGE-MONITOR (2026-05-15) Agent Spine channel counters ──
+        // Read-only observability route for healthcheck [55]. Exposes runtime_shadow
+        // SPINE_CHANNEL_* counters; drop_total is initial try_send failures, not
+        // final lineage loss.
+        "get_agent_spine_channel_metrics" => {
+            debug_assert_eq!(
+                method_spec(method).map(|spec| spec.slot),
+                Some(IpcSlotRequirement::None)
+            );
+            handle_get_agent_spine_channel_metrics(id).await
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,

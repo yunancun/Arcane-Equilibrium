@@ -15,6 +15,7 @@
 //!   可見性、簽名、行為與拆分前完全一致，僅承載檔案改變。Config IPC 輔助
 //!   維持在兄弟模組 `handlers_config` 不變。
 
+mod agent_spine_metrics;
 mod budget;
 mod cost_edge_advisor;
 mod dynamic_risk;
@@ -34,6 +35,7 @@ mod teacher;
 // 重新導出所有 handler 與 enum 於 `handlers::*` 命名空間；dispatcher
 // 的 `use handlers::*;` 不需修改即可解析同名 fn。子模組以
 // `pub(in crate::ipc_server)` 限定可見性，避免拓寬對外暴露面。
+pub(in crate::ipc_server) use agent_spine_metrics::handle_get_agent_spine_channel_metrics;
 pub(in crate::ipc_server) use budget::{
     handle_get_ai_budget_status, handle_record_ai_usage, handle_update_ai_budget_config,
 };

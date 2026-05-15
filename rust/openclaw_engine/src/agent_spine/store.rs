@@ -5,6 +5,13 @@ use super::events::{
 };
 use tokio::sync::mpsc;
 
+/// P1-STARTUP-BURST-MITIGATION (2026-05-15): Agent Spine writer channel cap.
+///
+/// Wave 1.6 moved 1024 -> 8192. Post-deploy evidence still showed restart
+/// startup-burst pressure, so cap is raised to 32768 while preserving bounded
+/// back-pressure and the existing drop/retry metrics.
+pub const AGENT_SPINE_CHANNEL_CAPACITY: usize = 32_768;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentSpineMsg {
     Object(SpineObjectEnvelope),

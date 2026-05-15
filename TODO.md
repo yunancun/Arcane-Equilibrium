@@ -124,9 +124,9 @@ v32 W-AUDIT-8b review + Stage 0R design:
 | 9 | `W-AUDIT-2` Security IMPL (4 HIGH) | alpha-neutral | E1×4 + E2 + E4 + E3 | ✅ **DONE 2026-05-09** | F-24/F-25 mutating routes gated; F-23 tailnet auto bind; F-03 lease writer; AI socket chmod 0600. Runtime deploy `862e79b7`: V078 applied, lease_transitions rows=103. |
 | 10 | `W-AUDIT-3` ExecutorAgent fake-live | alpha-neutral | E1 + E1a + E2 + E4 + PA + PM | ✅ **SOURCE/SMOKE CLOSED** 2026-05-15; `[55]` source-cleared after P1 invariant fix | F-17 ✅ / F-15 ⚠️ / SM-05 Option A / F-01 source/test closed. **`W-AUDIT-3b` Sprint N+1 W4 RouterLeaseGuard Drop test 已 land** (commit `22efd9de`) and runtime smoke passed on `trade-core`: RouterLeaseGuard Drop Rust PASS + fail-closed pytest PASS + `[55] chains_with_lease=89`. P1-HEALTHCHECK-55-INVARIANT later proved 25/25 fully-filled chains have real-fill ER, so this is no longer an independent demo-canary blocker. |
 | 11 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 並行 + MIT + E2 + E4 | 🟡 **PARTIAL** → `W-AUDIT-4b` M1+M2+M3 ✅ DONE Sprint N+0 (commits `4a90966a` + `404174a4` + `e93a6e5c` + `a01d05ed`); `P1-WA4B-INSERT-1` ✅ DONE 2026-05-15; N+1+ scope corrected to 3 retained INSERT tables + 2 views + 1 dropped/no-DDL target | Corrected 4b scope: `feature_baselines` writer/schedule/healthcheck restored active rows (646 rows / 19 symbols / 34 feature names; `[67]` PASS), `cost_edge_advisor_log` row-growth confirmed, `drift_events` waits active baselines + configured burn-in; 2 companion views are read-only projections; `scorer_predictions` dropped/no-DDL。M3 producer chain integrity post-M3 100% ✅ (per 2026-05-10 PG empirical)。Decision-3 採納合併入 `W-AUDIT-8f` (R-3) Hypothesis Pipeline 同 wave 做。 |
-| 12 | `W-AUDIT-5a/5b` 性能/結構/CI/跨平台 | alpha-neutral | E1×6 並行 + E5 + E2 + E4 | 🟡 **PARTIAL** since 2026-05-09; **5a/5b 主體 ✅ DONE N+1 W1** (commit `4a5e26ec` dead-code cleanup + runner split + REST dedup + warnings fix) | F-21 ✅ / F-27 ✅ / F-test-h-state ✅ / F-12 ✅ / F-26 CI matrix ✅ / W-AUDIT-5b event_consumer ✅; 剩 F-20 舊 worktree dump cleanup（`.claude/worktrees/` 3.6GB + `/private/tmp/` prunable worktrees）。 |
+| 12 | `W-AUDIT-5a/5b` 性能/結構/CI/跨平台 | alpha-neutral | E1×6 並行 + E5 + E2 + E4 | ✅ **DONE 2026-05-15** | F-21 ✅ / F-27 ✅ / F-test-h-state ✅ / F-12 ✅ / F-26 CI matrix ✅ / W-AUDIT-5b event_consumer ✅。F-20 damaged Trash dump cleanup completed on `trade-core` (`damaged_20260414_130607` + related entries deleted); dirty `/tmp/tradebot_mag*` repos were preserved because they contain uncommitted work and are not prunable. |
 | 13 | `W-AUDIT-6` 策略 + 量化 promotion gate | alpha-bearing | E1×5 + QC + E2 + E4 + PM | 🟡 **SOURCE/TEST CLOSED 2026-05-09** + `W-AUDIT-6c` runtime apply + `W-AUDIT-6d` mid-ground Sprint N+0 + `W-AUDIT-6-3c` V086 ✅ DONE 2026-05-10 (production applied) | AMD-02 Option ii: grid CONDITIONAL ORDIUSDT, ma_crossover REVISE, bb_breakout 5m, funding_arb RETIRE (per ADR-0018), bb_reversion pair MA. W-AUDIT-6c VaR/CVaR/EVT IMPL `cc6476dd`. **`W-AUDIT-6d` mid-ground 保 6 / 砍 6** (見 §7)。**`W-AUDIT-6-3c` V086 reject_reason_code 12+14 enum** ✅ production deploy + writer code (commit `05e44ede`) — D+1 evening engine restart deploy producer。 |
-| 14 | `W-AUDIT-7` AI 棧 + GUI/UX | alpha-neutral | E1×4 + AI-E + A3 + E2 + E4 + ops | 🔵 **ACTIVE** → `W-AUDIT-7c` Sprint N+2 | F-30 prompt modal / F-system-mode-confirm 5s countdown / F-strategist-cap 30→50 ADR-0022 ✅ land 2026-05-10 / F-28 ContextDistiller IMPL. 剩 F-07 ANTHROPIC_API_KEY + cea-env. Layer2 autonomous loop sunset by ADR-0020. |
+| 14 | `W-AUDIT-7` AI 棧 + GUI/UX | alpha-neutral | E1×4 + AI-E + A3 + E2 + E4 + ops | ✅ **OPS CLOSED 2026-05-15** | F-30 prompt modal / F-system-mode-confirm 5s countdown / F-strategist-cap 30→50 ADR-0022 ✅ land 2026-05-10 / F-28 ContextDistiller IMPL。F-07 verified provider store has Anthropic key and running engine/API env has nonzero `ANTHROPIC_API_KEY`; CEA env verified with `OPENCLAW_COST_EDGE_ADVISOR=1` + `OPENCLAW_H_STATE_GATEWAY=1`. Layer2 autonomous loop remains permanently dormant by ADR-0020. |
 | 15 | `W-AUDIT-8a` Alpha Surface Foundation (R-1 spec) | alpha-bearing | PA → E1 → E2 → E4 + MIT/QC/CC/BB → PM | ✅ **Phase A + Phase B DONE Sprint N+1 W1** (Phase A `c9fb0b8f`; Phase B panel_aggregator `0b76a4db` + `3d0ea347` + `ddf0cebe` + consumer wiring `7a07348b` + `31dba487`) / ✅ **Phase C0 DONE 2026-05-15** / ⏳ C1 24h proof running, revival still blocked / Phase D 待 C1+CC | funding_curve aggregator (B-1) + oi_delta aggregator (B-2) + BB WS subscription (B-3) + bb_breakout real OiDeltaPanel consume fail-closed (B-4) 全 land。Phase C0 added inventory + production poison-topic guard; C1 60s smoke passed but is not proof; 24h isolated `allLiquidation.BTCUSDT` run PID `4100789` must finish and receive BB/MIT sign-off before liquidation writer/pulse revival. Phase B WS-first design: 0 REST cost ongoing。 |
 | 16 | `W-AUDIT-8b` A4-A Funding Skew Directional 新策略 | alpha-bearing | PA spec → Stage 0R query/report + QC + MIT + BB review | 🟡 **SPEC v0.2 REVIEW/DESIGN DONE 2026-05-15** → read-only Stage 0R replay packet next；strategy IMPL still blocked | Spec: `docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`；review/design: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8b_review_stage0r_design.md`。Funding rate directional alpha is framed as cross-sectional crowding, not retired `funding_arb` / cash-and-carry. Positive funding payment cannot count as edge; Stage 0R design requires 30m primary horizon, explicit K/DSR/PBO, raw panel as-of joins, and BB funding interval/source-mode fields. |
 | 17 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction 新策略 | alpha-bearing | PA spec → E1 (Rust hot-path) + QC + BB review WS | ⏳ **DEFER** Sprint N+2 spec → N+3 IMPL (1.5 sprint) | Bybit `allLiquidation.{symbol}` WS topic 真接；event-trigger 模式；消費 AlphaSurface Tier 3 microstructure。 |
@@ -204,13 +204,14 @@ Priority verdict after PM/PA/FA cross-check:
    runs the isolated 24h BB topic proof. `W-AUDIT-8c` Liquidation Cluster
    remains gated until C1 and MIT schema review pass. The business-chain root
    cause is still lack of non-textbook alpha.
-4. **Runtime blocker update**: `P1-INTENT-FREEZE-27` is post-grace closed by
-   direct `[27]` PASS; keep `P1-FILL-LINEAGE-MONITOR`,
-   `P1-STARTUP-BURST-MITIGATION`, current-log V083 follow-up, and
-   `P1-W6-5-ML-METRICS` behind the alpha/live blockers. This does not unblock
-   Stage 1 demo because A4-C remains GATE-RED.
-5. **Maintenance**: P2 hygiene, GUI/AI UX, and old worktree dump cleanup stay
-   below alpha/LG/ops gates.
+4. **Runtime blocker update**: `P1-INTENT-FREEZE-27`,
+   `P1-FILL-LINEAGE-MONITOR`, `P1-STARTUP-BURST-MITIGATION`,
+   `P1-V083-HALT-SESSION-CTX`, and `P1-W6-5-ML-METRICS` are source/test
+   closed as of 2026-05-15. This does not unblock Stage 1 demo because A4-C
+   remains GATE-RED.
+5. **Maintenance**: P2 hygiene remains below alpha/LG/ops gates; W-AUDIT-5
+   damaged dump cleanup and W-AUDIT-7 F-07/CEA env are ops-closed as of
+   2026-05-15.
 
 ### §6.1 A4-C BTC→Alt Lead-Lag PM/PA/FA Engineering Card（2026-05-15）
 
@@ -288,15 +289,15 @@ that inflate DSR trial count.
 | `P1-W-AUDIT-3b-SMOKE` | ✅ DONE 2026-05-15 | W-AUDIT-3b runtime smoke (FA-1) | ssh trade-core RouterLeaseGuard Drop test PASS + `[55] chains_with_lease=89` + `pytest -k fail_closed` PASS；commit `22efd9de` smoke verify |
 | `P1-LG-DESIGN` | ✅ DESIGN DONE 2026-05-11 | PA design LG-2/3/4 tech plan | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md`; implementation tracked by `LG-1/2/3`. |
 | `P1-FILL-LINEAGE-DROP` | ✅ SOURCE/REGRESSION/DEPLOY DONE 2026-05-11 | Spine channel silent-drop fix (Option F4 B-2+B-3 hybrid) | `e17ead2b` + E4 READY/PASS; post-deploy startup burst residual tracked by `P1-STARTUP-BURST-MITIGATION`. |
-| `P1-FILL-LINEAGE-MONITOR` | ⏳ post Wave 1.6 deploy | Drop counter healthcheck wiring | 3 SPINE_CHANNEL_* counter 已暴露 accessor，healthcheck [N] 接 + 5/min WARN 閾 |
+| `P1-FILL-LINEAGE-MONITOR` | ✅ DONE 2026-05-15 | Drop counter healthcheck wiring | Rust IPC `get_agent_spine_channel_metrics` exposes drop/retry counters; `[55]` healthcheck appends fail-soft channel monitor with 5/min WARN threshold and explicit `drop_total=initial_try_send_failures_not_final_loss` semantics. |
 | `P1-HEALTHCHECK-55-INVARIANT` | ✅ SOURCE-CLEARED 2026-05-15 | Redesign / clear [55] WARN gate as invariant test (QC S3) | Code now gates on fully-filled plan chains (`cum_fill_qty >= plan_qty * 0.999`) instead of `chains_with_real_fill_report / complete_chains >= 50%`. Patched `trade-core` DB verification PASS: `25` fully-filled chains / `25` real-fill ER / `0` missing; `13` partial chains surfaced separately. Per-fill partial ER remains future hardening, not current Stage 1 demo blocker. |
 | `P1-INTENT-FREEZE-27` | ✅ CLOSED 2026-05-15 | Full passive healthcheck hard FAIL `[27] intents_counter_freeze` | RCA found BTCUSDT exchange precision rounding (`final_qty <= 0`) after approved risk verdict, not a whole `trading_writer` outage. Source fix records this path as rejected qty=0 audit intent/verdict and defers Approved verdict persistence until a dispatchable `final_qty > 0`. Rebuilt on `trade-core` at `7b33ab2e`; post-grace narrow probe at `2026-05-15T18:12Z` PASSed (`demo stale=3.4m, 30min_n=4`; live_demo inactive 30m with verdicts/DCS=0). `[66]` / `[67]` also PASSed. |
 | `P2-DUAL-RAIL-ORDER-ID` | ✅ DONE 2026-05-15 | demo + live_demo 共享 order_id 衝突解 | `2f1c385b` adds mode prefix to `order_link_id`. |
 | `P2-RUNTIME-SHADOW-SPLIT` | ✅ DONE 2026-05-15 | runtime_shadow.rs 828 LOC > 800 警告 split | `122015b7` split runtime_shadow.rs under warning threshold. |
 | `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5 注：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
 | `P3-SPINE-COUNTER-CACHE-ALIGN` | ⏳ scheduled quiet period | 3 AtomicU64 counter `#[repr(align(64))]` cache line | E5 cosmetic; 10 min fix; ~50-200ns extra latency 降到 0 |
-| `P1-STARTUP-BURST-MITIGATION` | ⏳ scheduled post Wave 2 | Engine restart 後 startup burst 1-min window 仍 silent-drop 23.5% real-fill ER (Wave 1.6 deploy 16:22:52 UTC 實證 4/17 drops) | Cap 8192→32768 OR retry 3×50ms→5×100ms 500ms budget OR staggered engine bring-up；steady-state 0% drop 證 Wave 1.6 fix 有效 |
-| `P1-V083-HALT-SESSION-CTX` | 🟡 SOURCE/TEST CLOSED; CURRENT LOG CLEAN 2026-05-15 | halt_session close fill 曾可繞過 synthetic `entry_context_id` fallback，導致 `chk_fills_close_has_entry_context_id_v083` 每 2s 重試卡 writer | Source fix: `step_6_risk_checks.rs` halt loop 改走 `resolve_close_entry_context_id()`；回歸 test PASS + grep 舊 fallback 0 hit。2026-05-15 current `/tmp/openclaw/engine.log` grep showed no `chk_fills_close_has_entry_context_id_v083` / `halt_session` hits; keep one full-healthcheck follow-up before deleting the row. |
+| `P1-STARTUP-BURST-MITIGATION` | ✅ DONE 2026-05-15 | Engine restart 後 startup burst 1-min window 仍 silent-drop 23.5% real-fill ER (Wave 1.6 deploy 16:22:52 UTC 實證 4/17 drops) | Agent-spine bounded channel capacity raised 8192→32768 via `AGENT_SPINE_CHANNEL_CAPACITY`; burst regression uses configured cap. |
+| `P1-V083-HALT-SESSION-CTX` | ✅ CLOSED 2026-05-15 | halt_session close fill 曾可繞過 synthetic `entry_context_id` fallback，導致 `chk_fills_close_has_entry_context_id_v083` 每 2s 重試卡 writer | Current `/tmp/openclaw/engine.log` grep showed no V083/halt_session hits; full healthcheck with PG statement timeout had unrelated `[42b]`/`[56]` FAILs and no V083 row. |
 | `LG-1` H0 production caller | 🔵 Wave 2.2 dispatched 2026-05-11 | T1+T2+T3+T4 E1×4 parallel IMPL | per PA plan §1.4 |
 | `LG-2` Provider pricing binding | 🔵 Wave 2.2 dispatched 2026-05-11 | T4 RiskConfig 先 → T1+T3 parallel → T2 startup assertion 序列 | per PA plan §2.4 |
 | `LG-3` Supervised live SM | 🔵 Wave 2.1 PA spec phase dispatched 2026-05-11 | PA spec doc 1-1.5d → QC+BB+MIT parallel review → PA spec v2 → Wave 2.4 E1×7 IMPL | per PA plan §3.6 + §6.1 + §6.4 |
@@ -352,11 +353,11 @@ active work starts at §10 / §11.2 / §11.3.
 
 | ID | Priority | Task | Notes |
 |---|---:|---|---|
-| `P1-W6-5-ML-METRICS` | 2 | W6-5 sample_weight ratio sensitivity + 5 ML pipeline metrics acceptance | Preserved from archived §6.6 MIT MUST 3; do not lose this active signal during TODO cleanup. |
+| `P1-W6-5-ML-METRICS` | DONE | W6-5 sample_weight ratio sensitivity + 5 ML pipeline metrics acceptance | Added report-only `sample_weight_sensitivity.py`: 1/15, 1/100, 1/170, 1/300, 1/500 ratio support; 5-fold walk-forward purge+embargo; RMSE CI, IS/OOS gap, cross-fold consistency, PSI+KS, and cost_gate shift metric. No production cron/model mutation. |
 | `P1-CRON-ML-1` | DONE | F-08 5 ML cron 24h fire 驗（cron 已 install at `17 3 * * *`） | invariant 18 says 24h fire verified; V079 runtime concern is closed as of 2026-05-15. |
 | `P1-AUDIT-RUNTIME-3` | DONE | W-AUDIT-3 + W-AUDIT-3b（mounts W-A close-out + W-B regression） | W-AUDIT-3b runtime smoke done 2026-05-15; residual `[55]` gate tracked in §10. |
-| `P1-AUDIT-PERF-5` | 3 | W-AUDIT-5a/5b 性能/結構/CI urgent | 剩 F-20 909MB damaged dump drop ops |
-| `P1-AUDIT-AI-UX-7` | 3 | W-AUDIT-7c GUI/UX 收口 | F-07 ANTHROPIC_API_KEY + cea-env restart |
+| `P1-AUDIT-PERF-5` | DONE | W-AUDIT-5a/5b 性能/結構/CI urgent | F-20 damaged Trash dump cleanup completed; dirty `/tmp/tradebot_mag*` repos left intact because they contain uncommitted work. |
+| `P1-AUDIT-AI-UX-7` | DONE | W-AUDIT-7c GUI/UX 收口 | Provider store + process env verified: Anthropic key configured, engine/API env key length nonzero, CEA/H-State env both `1`; restart not repeated because running processes already carry the env. |
 | `P1-DATA-1..3` | 3 | Runtime-reloaded WARN cluster + low-sample attribution watch + scanner opportunity calibration watch | DONE source-fixed; row rolloff monitor |
 | `P1-EDGE-1..2` | 3 | ma_crossover/grid blocked_symbols 已 frozen + funding_arb 14d audit 2026-05-16 | 維持 freeze + 2026-05-16 audit |
 | `P1-LG-5` | 4 | LG-5 reviewer maturity watch | source active; audit-row health |
@@ -424,7 +425,7 @@ active work starts at §10 / §11.2 / §11.3.
 
 | ID | Task | Status |
 |---|---|---|
-| `P2-N2-1` | btc_lead_lag.rs 4-split (producer/ingest/snapshot/db_writer) | 🔄 IN FLIGHT (Codex) |
+| `P2-N2-1` | btc_lead_lag.rs 4-split (producer/ingest/snapshot/db_writer) | ✅ DONE 2026-05-15 (Codex; root re-export preserved; implementation files ≤500 LOC; `cargo test -p openclaw_engine --lib btc_lead_lag` 45 passed) |
 | `P2-N2-2` | w2_paper_edge_report.py 4-split (metrics/render/smoke/report) | ✅ DONE 2026-05-14 (Codex; commit subject `[ae-pm] P2-N2-2: w2_paper_edge_report.py 4-split`) |
 | `P2-N2-3` | Layer 2 helper should_spawn_btc_lead_lag_producer extraction | ✅ DONE `fca1aec9` |
 | `P2-N2-4` | CI grep rule for stable_id literal duplication guard | ✅ DONE `155bad6d` |
