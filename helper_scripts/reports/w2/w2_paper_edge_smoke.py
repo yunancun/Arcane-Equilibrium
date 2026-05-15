@@ -1,9 +1,9 @@
-"""W2 paper edge report smoke fixture。
+"""W2 Stage 0R diagnostic report smoke fixture。
 
 MODULE_NOTE:
     本模組承接 W2 A4-C BTC→Alt Lead-Lag spec v1.2 §7.1 / §8.1 的
     三組 mock fixture smoke test：plus15、plus5_15、minus5。fixture 不連 PG，
-    只驗 metrics 模組的 PSR/DSR/bootstrap/R² 與 step gate verdict。
+    只驗 metrics 模組的 PSR/DSR/bootstrap/R² 與 Stage 0R diagnostic verdict。
 """
 
 from __future__ import annotations
@@ -131,13 +131,13 @@ def make_smoke_fixture_minus5() -> list[dict]:
 
 
 def run_smoke_test() -> int:
-    print("=== W2 paper edge report smoke test ===")
-    print("(per dispatch §3.4 E4 regression：plus15 / plus5_15 / minus5)")
+    print("=== W2 Stage 0R diagnostic report smoke test ===")
+    print("(AMD-2026-05-15-01 rebase：plus15 / plus5_15 / minus5)")
     print()
 
     failures: list[str] = []
 
-    print("Case 1: plus15 (gross +20 bps, n=150, expected promote N+2)")
+    print("Case 1: plus15 (gross +20 bps, n=150, expected eligible_for_demo_canary=true)")
     rows1 = make_smoke_fixture_plus15()
     per_sym_1 = compute_per_symbol_metrics(rows1, primary_window_secs=120)
     pooled_1 = compute_pooled_metrics(rows1, primary_window_secs=120)
@@ -148,11 +148,13 @@ def run_smoke_test() -> int:
           f"verdict={pooled_1.get('verdict', {}).get('label')}")
     if m1.get("verdict", {}).get("label") != "plus15":
         failures.append(f"Case 1 ETHUSDT verdict expected plus15 got {m1.get('verdict', {}).get('label')}")
-    if not m1.get("verdict", {}).get("promote_n2"):
-        failures.append("Case 1 ETHUSDT promote_n2 expected True")
+    if not m1.get("verdict", {}).get("eligible_for_demo_canary"):
+        failures.append("Case 1 ETHUSDT eligible_for_demo_canary expected True")
+    if m1.get("verdict", {}).get("promote_n2"):
+        failures.append("Case 1 ETHUSDT promote_n2 must remain False after AMD-2026-05-15-01")
     print()
 
-    print("Case 2: plus5_15 (gross +8 bps, n=150, expected extend 14d)")
+    print("Case 2: plus5_15 (gross +8 bps, n=150, expected defer diagnostics)")
     rows2 = make_smoke_fixture_plus5_15()
     per_sym_2 = compute_per_symbol_metrics(rows2, primary_window_secs=120)
     pooled_2 = compute_pooled_metrics(rows2, primary_window_secs=120)
@@ -165,6 +167,8 @@ def run_smoke_test() -> int:
         failures.append(f"Case 2 ETHUSDT verdict expected plus5_15 got {m2.get('verdict', {}).get('label')}")
     if m2.get("verdict", {}).get("promote_n2"):
         failures.append("Case 2 ETHUSDT promote_n2 expected False")
+    if m2.get("verdict", {}).get("eligible_for_demo_canary"):
+        failures.append("Case 2 ETHUSDT eligible_for_demo_canary expected False")
     print()
 
     print("Case 3: minus5 (gross -3 bps, n=150, expected revise/archive)")
@@ -180,6 +184,8 @@ def run_smoke_test() -> int:
         failures.append(f"Case 3 ETHUSDT verdict expected minus5 got {m3.get('verdict', {}).get('label')}")
     if m3.get("verdict", {}).get("promote_n2"):
         failures.append("Case 3 ETHUSDT promote_n2 expected False")
+    if m3.get("verdict", {}).get("eligible_for_demo_canary"):
+        failures.append("Case 3 ETHUSDT eligible_for_demo_canary expected False")
     print()
 
     psr_case1 = m1.get("psr_0")
@@ -218,7 +224,7 @@ def run_smoke_test() -> int:
         for f in failures:
             print(f"  - {f}")
         return 1
-    print("ALL PASS — 3 mock case + PSR(0) + DSR + CI + R²(N) 公式驗證通過")
+    print("ALL PASS — 3 mock case + PSR(0) + DSR + CI + R²(N) + Stage 0R eligibility 驗證通過")
     return 0
 
 

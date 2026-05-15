@@ -1,9 +1,9 @@
-# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.3
+# A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.4
 
 **Author**: PA (project architect)
-**Date**: 2026-05-10（v1.0-v1.2）/ 2026-05-11（v1.3 inline edit）
-**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 σ verify 已交付 → dual-layer σ + PSR(0) skew/kurt formula 強制 land，MIT + QC 直接收 W2 IMPL）；v1.3 W2-IMPL-2 amendment：§6.2 Layer 2 從「Python writer paper-only fence」改為「Producer env-gate fence」（producer 在 PA D+0 階段就改 Rust，Python writer 從不存在），§7.1 + §8.1 0 動
-**Scope**: Sprint N+1 W2 A4-C fast-track；spec v1.2 拍板後直接派 paper IMPL（C-IMPL-1..4），D+5 起 paper engine 累積 7d edge evidence，gate 三檔（+15 promote / +5~+15 extend 14d / <+5 revise）才決定 N+2 demo IMPL 路徑。
+**Date**: 2026-05-10（v1.0-v1.2）/ 2026-05-11（v1.3 inline edit）/ 2026-05-15（v1.4 canary rebase）
+**Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 σ verify 已交付 → dual-layer σ + PSR(0) skew/kurt formula 強制 land，MIT + QC 直接收 W2 IMPL）；v1.3 W2-IMPL-2 amendment：§6.2 Layer 2 從「Python writer paper-only fence」改為「Producer env-gate fence」（producer 在 PA D+0 階段就改 Rust，Python writer 從不存在），§7.1 + §8.1 0 動；v1.4 AMD-2026-05-15-01 amendment：paper edge report 降級為 diagnostic/read-only，不再作 promotion gate。
+**Scope**: Sprint N+1 W2 A4-C fast-track；v1.4 後 promotion path 改為 Stage 0R replay preflight (`eligible_for_demo_canary=true/false`) + Stage 1 Demo micro-canary（1 strategy × 1 symbol × `Environment::Demo` × 7d）。Legacy D+12 paper edge report remains diagnostic only and cannot promote to demo.
 **Reference dispatch**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md` §3.2 W2
 **Reference trait coord**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`
 **Reference alpha surface**: `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` + W-AUDIT-8c §515 (BTC→Alt lead-lag 候選 C, 留給 N+5)
@@ -13,6 +13,15 @@
 ---
 
 ## Change Log
+
+### v1.4 (2026-05-15) — AMD-2026-05-15-01 canary rebase：paper report 降級，改 Stage 0R + Stage 1 demo gate
+
+| # | Section | 改動 essence |
+|---|---|---|
+| 1 | Header / §1 / §7 / §8 / §10 / §11 | D+12 paper edge report 不再是 promotion gate；其輸出只可作 diagnostic/read-only sanity evidence。 |
+| 2 | §7 | Evaluation target 改為 Stage 0R Replay Preflight：leak/bias/DSR/PSR/PBO/bootstrap sanity → output `eligible_for_demo_canary=true/false`，不得稱 Stage 1 PASS。 |
+| 3 | §8 / §10 | Promotion gate 改為 Stage 1 Demo micro-canary：1 strategy × 1 symbol × `Environment::Demo` × 7d；Stage 2 must cite Stage 1 demo empirical evidence。 |
+| 4 | §6.2 / §11 | `OPENCLAW_ENABLE_PAPER=1` blocked for promotion。Producer/paper wording retained only as historical/diagnostic implementation context。 |
 
 ### v1.3 (2026-05-11) — W2-IMPL-2 amendment：Layer 2 fence 從 Python writer 改 Producer env-gate
 
@@ -38,7 +47,7 @@
 | # | Section | 改動 essence |
 |---|---|---|
 | 1 | §8.1 | DSR K 從 6 修正為 95（active strategy×symbol cell 總數，引 Bailey-López de Prado 2014 §4.2「DSR with multiple trial」）；mu_0 從錯誤值改為 √(2 ln 95) = 3.018 |
-| 2 | §8.1 | paper edge gate 從 「≥ +5 bps」單檔改為三檔（+15 promote N+2 demo IMPL / +5~+15 extend paper window 14d 重評 / <+5 revise spec 或 archive） |
+| 2 | §8.1 | historical v1.2 paper edge gate 從 「≥ +5 bps」單檔改為三檔（+15 promote N+2 demo IMPL / +5~+15 extend paper window 14d 重評 / <+5 revise spec 或 archive）；v1.4 起 superseded by Stage 0R diagnostic bands。 |
 | 3 | §3.1 + §7.1 | N 鎖 120s 但 §7.1 evaluate 強制要求 R²(N=60/120/300) 三檔 decay curve；半衰期 < 60s → archive |
 | 4 | §7.1 | Mandatory metric set 補完：(a) per-symbol breakdown + per-symbol n ≥ 100 + per-symbol t > 2.0 (b) block-bootstrap 95% CI block_size=60min 1000 iter (c) DSR with K=95 deflate（non-negotiable）+ PSR(0) ≥ 0.95 用 skew/kurt-aware formula (d) Alpha decay regime test |
 | 5 | §9 | 加 BTC regime extreme guard（\|1h return\| > 200 bps shadow-only，shadow log 標 `regime=extreme` 不計入 7d edge avg） |
@@ -54,7 +63,7 @@
 
 W6 baseline + 4-agent loss audit 雙重確認（2026-05-10）：5 textbook 策略（ma_crossover / grid_trading / bb_breakout / bb_reversion / funding_arb）**結構性 alpha-deficient**。post-V082 demo 7d gross **−26.44 USDT**；live_demo 7d gross **+0.43 USDT**。realized edge `[40]` avg_net 持續 **−6 bps**。P0-EDGE-1 不靠 textbook 策略本身能解。
 
-A4-C BTC→Alt Lead-Lag 是 W-AUDIT-8c 候選 C 的 fast-track 預跑：用 BTC microstructure 的 informational lead 預測 alt cohort 的短期 momentum / mean reversion，抓 textbook 策略看不見的 cross-asset alpha source。Operator 2026-05-10 拍板 B 路徑 = 直接 paper IMPL，7d evidence 拿真實 edge 才決定是否 promote demo。
+A4-C BTC→Alt Lead-Lag 是 W-AUDIT-8c 候選 C 的 fast-track 預跑：用 BTC microstructure 的 informational lead 預測 alt cohort 的短期 momentum / mean reversion，抓 textbook 策略看不見的 cross-asset alpha source。Operator 2026-05-10 拍板 B 路徑原為直接 paper IMPL；**2026-05-15 v1.4 改為 AMD-2026-05-15-01 canary rebase**：paper report 只保留 diagnostic/read-only，promotion 必走 Stage 0R replay preflight + Stage 1 demo micro-canary。
 
 ### 1.2 Alpha source classification
 
@@ -71,7 +80,7 @@ A4-C BTC→Alt Lead-Lag 是 W-AUDIT-8c 候選 C 的 fast-track 預跑：用 BTC 
 - BTC 突破性 return + xcorr 高 → alt 短期 momentum 跟漲（同向）
 - BTC 大量反向 + xcorr 高 → alt mean-reverse 接力（反向 lag-trade）
 
-**驗證方式**：W2 paper IMPL 收 7d 樣本算 paper avg_net_bps + DSR + alpha decay 半衰期；gate ≥ +5 bps 才 promote N+2。
+**驗證方式（v1.4）**：先跑 Stage 0R replay preflight，檢查 leak/bias/DSR/PSR/PBO/bootstrap/alpha-decay sanity，輸出 `eligible_for_demo_canary=true/false`。只有 `true` 才能申請 Stage 1 Demo micro-canary；任何 paper/report 輸出都不得稱 Stage 1 PASS。
 
 ---
 
@@ -119,7 +128,7 @@ btc_lead_return_pct(N) =
 
 **N 鎖定 = 120s**（QC C-2 review v1.1 拍板，per Easley/López de Prado/O'Hara *Microstructure in the Age of Machine Learning* 2021 + Makarov & Schoar JFE 2020 BTC→alt informational lead 半衰期 30-180s estimate；N=120s 對應預期 R²=0.06-0.10，half-life ≈ 90s 折衷 sweet spot）。
 
-**N=60/120/300 三檔 decay curve 強制要求（v1.1 condition #3）**：D+12 paper edge report **必含** 三檔 N 對應的 forward predictive R²(60s alt return) decay curve，per §7.1 mandatory metric (4)。實測判定：
+**N=60/120/300 三檔 decay curve 強制要求（v1.1 condition #3；v1.4 rebase）**：Stage 0R replay preflight evidence packet **必含** 三檔 N 對應的 forward predictive R²(60s alt return) decay curve，per §7.1 mandatory metric (4)。Legacy D+12 paper edge report 若產出，只能作 diagnostic/read-only sanity evidence。實測判定：
 - N=120s R² < 0.04 → revise spec 改 N=60s
 - N=60s R² 也 < 0.04 → archive A4-C 路徑
 - N=300s R² > N=120s → 重評 N 選擇（trend-continuation 未被 arbitrage 完全消化）
@@ -198,7 +207,7 @@ PA spec draft 預設：`threshold_X = 10 bps`、`threshold_Y = 0.40`、`N = 120s
 
 **Hypertable 設計**（per W-AUDIT-8a Phase B 模板）：
 - TimescaleDB hypertable，`chunk_time_interval = 1 day`
-- Retention `INTERVAL '14 days'`（paper-only 期；N+2 promote demo 後升 30d，新開 V###）
+- Retention `INTERVAL '14 days'`（legacy diagnostic window；若 Stage 1 demo micro-canary 實證後進 Stage 2，另開 V### 調整 retention）
 - 索引：`(snapshot_ts_ms DESC, lead_window_secs)` covering
 - Per-snapshot 1 row（不是 per-cohort-symbol N row）— W-AUDIT-8a Phase A `BtcLeadLagPanel` struct 已固定為 vector layout
 
@@ -214,7 +223,7 @@ PA spec draft 預設：`threshold_X = 10 bps`、`threshold_Y = 0.40`、`N = 120s
 4. **v1.1 regime_tag 計算（§9 condition #5）**：每 1m 用 BTCUSDT 1h kline shift(1) 算 1h return；`abs(btc_1h_return_bps) > 200` → `regime_tag = 'extreme'`，否則 `'normal'`；shadow log 標記不影響 main signal 寫入
 5. 1m grain bucketing：每 60 秒 1 個 snapshot 寫入 `panel.btc_lead_lag_panel`
 6. 更新 Rust IPC slot `BtcLeadLagPanelSlot`（per `slots.rs` 新增）；**主 N=120 信號寫主 panel 欄位，60s/300s shadow value 寫 schema column 但不寫 IPC slot**（避免 Rust 端 surface 接 60s/300s 引發 strategy 接觸下游）
-7. **paper-only fence Layer 2**：啟動讀 `OPENCLAW_ENABLE_PAPER` env；若未設 + 偵測 demo/live engine active → writer 不啟動（per PA #1 trait final shape §5）
+7. **legacy diagnostic fence Layer 2**：啟動讀 `OPENCLAW_ENABLE_PAPER` env；v1.4 起 `OPENCLAW_ENABLE_PAPER=1` 不得作 promotion evidence；若未設 + 偵測 demo/live engine active → writer 不啟動（per PA #1 trait final shape §5）
 8. **strict shift(N) lookahead-free（v1.1 condition #4）**：所有 `rolling()` / `[t-N..t]` slice operation 必用 `shift(1)` 後 N 秒前 BTC value，禁含 current bar；MIT C-3 grep verification gate
 
 ### 4.3 Bybit V5 rate budget 整合
@@ -228,13 +237,13 @@ Bybit V5 market endpoint group rate limit = **120 req/s**（per `docs/references
 - Alt cohort kline (7 symbol): 7 req
 - 合計 10 req/min = 0.17 req/s — well under 120 req/s budget
 
-**與其他 wave 同窗整合**：W1 Phase B Tier 2 collector + W3 Stage 1 cohort + W2 同 market endpoint group；BB review 必確認 W1+W2+W3 合計 budget < 50% upper bound（per BB review 慣例）。
+**與其他 wave 同窗整合**：W1 Phase B Tier 2 collector + W3 Stage 0R / Stage 1 demo micro-canary + W2 同 market endpoint group；BB review 必確認 W1+W2+W3 合計 budget < 50% upper bound（per BB review 慣例）。
 
 ---
 
-## §5 Consumer (Strategy Paper-only Shadow Log)
+## §5 Consumer (Strategy Diagnostic Shadow Log)
 
-### 5.1 Strategy 接收：ma_crossover + grid_trading（**paper engine only**）
+### 5.1 Strategy 接收：ma_crossover + grid_trading（legacy paper diagnostic only；not promotion evidence）
 
 **W2 E1-ε C-IMPL-3 IMPL**。改動兩個策略的 `strategy_impl.rs` / `mod.rs`：
 
@@ -259,7 +268,7 @@ grid_trading/mod.rs:320-322 同樣 pattern。
 fn on_tick(&mut self, ctx: &TickContext<'_>, surface: &AlphaSurface<'_>) -> Vec<StrategyAction> {
     // ... existing TA1m logic ...
 
-    // W2 paper-only consume
+    // W2 diagnostic consume
     if let Some(panel) = surface.btc_lead_lag {
         let alt_idx = panel.alt_symbols.iter().position(|s| s == ctx.symbol);
         if let Some(i) = alt_idx {
@@ -272,26 +281,26 @@ fn on_tick(&mut self, ctx: &TickContext<'_>, surface: &AlphaSurface<'_>) -> Vec<
                 panel.lead_window_secs, xcorr, dir
             );
         }
-        // **不**改 actions，純 evidence 收集供 7d paper edge evaluation
+        // **不**改 actions，純 diagnostic evidence；promotion must use Stage 1 demo evidence
     }
 
     actions  // 原 TA1m logic 結果
 }
 ```
 
-**目的**：7d paper engine 跑後，從 `btc_alt_lead_lag_shadow` log 對齊每筆 entry/exit fill 反算「如果 follow lead signal expected_dir 進場，paper engine net edge 是多少」（counterfactual analysis）。
+**目的**：從 `btc_alt_lead_lag_shadow` log 對齊每筆 entry/exit fill 反算「如果 follow lead signal expected_dir 進場，counterfactual net edge 是多少」。v1.4 起此輸出只餵 Stage 0R replay/preflight diagnostics，不能替代 Stage 1 demo evidence。
 
 ### 5.2 不接收：bb_breakout / bb_reversion / funding_arb
 
 | Strategy | 為何不接 |
 |---|---|
 | bb_breakout | 已 declare `OiDeltaPanel` (Tier 2.3)，不重疊 alpha source；避免污染既有 oi_delta panel evidence |
-| bb_reversion | 樣本量不足，paper edge baseline 還在收 |
+| bb_reversion | 樣本量不足，legacy diagnostic baseline 還在收 |
 | funding_arb | ADR-0018 已 retire；不再做策略改動 |
 
 ---
 
-## §6 Paper-only Fence — 三層深度防禦（per PA #1 §5）
+## §6 Legacy Paper-only Fence / Demo Contamination Guard — 三層深度防禦（per PA #1 §5）
 
 ### 6.1 Layer 1（主防線）：`step_4_5_dispatch.rs` engine_mode gate
 
@@ -312,6 +321,8 @@ let alpha_surface = AlphaSurface {
 
 ### 6.2 Layer 2：BtcLeadLagProducer env-gate fence（v1.3 amendment 2026-05-11）
 
+**v1.4 canary rebase note（2026-05-15）**：`OPENCLAW_ENABLE_PAPER=1` is now **BLOCKED for promotion evidence** per AMD-2026-05-15-01. The v1.3 producer fence remains historical implementation context and may support non-promotional diagnostics only. It cannot be used to start a paper promotion lane or to substitute for Stage 1 demo evidence.
+
 **Producer 端 env-gate**（main.rs spawn 前判斷）：
 
 ```rust
@@ -328,10 +339,10 @@ let should_spawn = if paper_enabled {
 };
 ```
 
-**三狀態**：
-- (a) `OPENCLAW_ENABLE_PAPER=1` → spawn producer（paper 正路徑）
-- (b) `OPENCLAW_ENABLE_PAPER` 未設 + `!has_demo && !has_live`（paper-only 配置；dev/test 工作流無 demo/live secret slot）→ spawn producer
-- (c) `OPENCLAW_ENABLE_PAPER` 未設 + `has_demo || has_live` → **skip spawn**（fence Layer 2 觸發）
+**三狀態（v1.4 語義）**：
+- (a) `OPENCLAW_ENABLE_PAPER=1` → **BLOCKED for promotion**；不得作為 A4-C / W-AUDIT-9 promotion workaround。
+- (b) `OPENCLAW_ENABLE_PAPER` 未設 + `!has_demo && !has_live`（paper-only dev/test 配置）→ allowed only for non-promotional diagnostics。
+- (c) `OPENCLAW_ENABLE_PAPER` 未設 + `has_demo || has_live` → **skip spawn**（fence Layer 2 觸發；production/demo runtime expected posture）
 
 **目的**：避免 PG `panel.btc_lead_lag_panel` 累積 demo/live 期樣本污染下游 ML pipeline 與 5 策略 demo edge baseline。Layer 1（step_4_5_dispatch.rs effective_engine_mode() 主防線）已保證 demo/live engine_mode 不會把 panel 注入 surface；本 Layer 2 是**深度防禦**（mixed mode 場景下 paper-disabled 但 demo 跑時 producer 仍不寫 PG）。
 
@@ -344,14 +355,26 @@ let should_spawn = if paper_enabled {
 ### 6.4 為何三層
 
 - 原則 7（學習 ≠ 改寫 Live）+ 原則 4（不繞風控）+ 原則 11（Agent 最大自主僅在 P0/P1 邊界內）三線交叉
-- W2 paper-only fence 失靈 = 5 策略 demo edge baseline 被污染 → 整個 P0-EDGE-1 觀察被破壞
+- W2 legacy diagnostic fence 失靈 = 5 策略 demo edge baseline 被污染 → 整個 P0-EDGE-1 觀察被破壞
 - 三層任一仍守住 → fence 整體 fail-closed
 
 ---
 
-## §7 Backtest Counterfactual Spec
+## §7 Stage 0R Replay Preflight / Legacy Counterfactual Spec
 
-### 7.1 7d paper engine 跑後 evaluate（v1.1 mandatory metric set 6 條 + acceptance prerequisite）
+### 7.1 Stage 0R evaluate（v1.4；legacy D+12 paper edge report downgraded）
+
+**v1.4 authority**：This section no longer defines a promotion gate. It defines Stage 0R replay preflight sanity. Output is only:
+
+```text
+eligible_for_demo_canary = true | false
+```
+
+The report must not write `Stage 1 PASS`, must not auto-promote, and must not enable paper. Passing Stage 0R only allows PM/PA/QC to consider a Stage 1 Demo micro-canary request.
+
+The legacy D+12 paper edge report metric set below remains useful as a diagnostic template for the preflight evidence packet, but any wording that says "paper edge gate promotes to demo" is superseded by AMD-2026-05-15-01.
+
+### 7.1.1 Legacy metric set retained for diagnostic evidence（v1.1 mandatory metric set 6 條 + acceptance prerequisite）
 
 #### Acceptance prerequisite（IMPL phase 啟動前必驗）— v1.2 dual-layer σ reframe
 
@@ -363,17 +386,17 @@ let should_spawn = if paper_enabled {
 | **Net edge σ (L2)** | EDGE-DIAG-1 demo cost-aware fill σ historical empirical baseline | σ_net = 50-80 bps（含 fee + slippage + adverse selection + holding 內 hedge cost） | Paper edge gate threshold power calculation、PSR(0) ≥ 0.95 skew/kurt deflation 計算 |
 
 **Prerequisite condition（強制）**：
-1. spec power calculation **強制用 net edge σ_net = 50-80 bps**；**禁止用 raw market σ 計算 paper edge gate power**（raw σ 視角 t-stat 13-29，過度樂觀，會放 false-PASS 通過）
-2. 任何 paper edge gate threshold 變動（§8.1 三檔調整 / future revision）必對 **σ_net = 50 bps + 80 bps 兩 case** 各重算 power、t-stat、p-value，並列報告
+1. spec power calculation **強制用 net edge σ_net = 50-80 bps**；**禁止用 raw market σ 計算 replay/preflight diagnostic band power**（raw σ 視角 t-stat 13-29，過度樂觀，會放 false-PASS 通過）
+2. 任何 replay/preflight diagnostic band threshold 變動（§8.1 三檔調整 / future revision）必對 **σ_net = 50 bps + 80 bps 兩 case** 各重算 power、t-stat、p-value，並列報告
 3. raw market σ 僅用於 §3.1.1 Return component 半衰期 reference + §7.1 metric (4) Alpha decay R²(N) 計算 baseline
 4. MIT C-3 D+1 verify 已交付（report path: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`），W2 IMPL 直接收，**不需 D+1 MIT C-3 重跑 σ verify**
 
-#### Mandatory metric set 6 條（D+12 paper edge report 必含）
+#### Mandatory metric set 6 條（Stage 0R replay preflight / legacy paper report diagnostic 必含）
 
 | # | Metric | 計算 + 拍板 |
 |---|---|---|
-| 1 | **Pooled + per-symbol breakdown** | per cohort symbol + overall pooled，含 avg_net_bps + std + Sharpe + sample n + per-symbol t-stat。**Gate**：per-symbol n ≥ 100 fills + per-symbol t > 2.0（不只 overall pooled，避免 underpowered 單 symbol promote 決策） |
-| 2 | **DSR PASS test with K=95 deflate**（**non-negotiable**）| mu_0 = √(2 ln K)，K=95（**v1.1 修正**：active strategy×symbol cell 總數，per Bailey-López de Prado 2014 §4.2 DSR with multiple trial）；mu_0 = √(2 ln 95) = **3.018**（舊 K=79 → 2.956；Δmu_0 = +0.062 即 +2.1%）。warning：8 cohort × 2 strat 全 promote → K 升至 ~111；future ADR 必記錄 K 累積對 multiple-testing budget 長期約束 |
+| 1 | **Pooled + per-symbol breakdown** | per cohort symbol + overall pooled，含 avg_net_bps + std + Sharpe + sample n + per-symbol t-stat。**Gate**：per-symbol n ≥ 100 fills + per-symbol t > 2.0（不只 overall pooled，避免 underpowered 單 symbol demo-canary 申請） |
+| 2 | **DSR PASS test with K=95 deflate**（**non-negotiable**）| mu_0 = √(2 ln K)，K=95（**v1.1 修正**：active strategy×symbol cell 總數，per Bailey-López de Prado 2014 §4.2 DSR with multiple trial）；mu_0 = √(2 ln 95) = **3.018**（舊 K=79 → 2.956；Δmu_0 = +0.062 即 +2.1%）。warning：8 cohort × 2 strat 全 advance to demo review → K 升至 ~111；future ADR 必記錄 K 累積對 multiple-testing budget 長期約束 |
 | 3 | **PSR(0) ≥ 0.95 — 強制 skew/kurt-aware formula（v1.2 升級）** | **強制條件（v1.2 per MIT C-3 verify）**：BTCUSDT 1m forward-return excess kurt = 7-12 (MIT report §2 實測 σ_60 ex_kurt=11.76 / σ_120=7.82 / σ_300=10.34) ≫ 0 → crypto JB normality 必拒（5d block resampling 已 verify per MIT report §7），**禁用 normal SR z-test**；**強制用 Bailey-López de Prado 2012 PSR(0) skew/kurt-aware formula**：`PSR(0) = Φ((SR - 0) × √(n-1) / √(1 - skew·SR + (kurt-1)/4·SR²))`（Φ = standard normal CDF；SR = annualized Sharpe；n = sample size；skew + kurt 用 7d empirical estimate）。**Threshold**：PSR(0) ≥ 0.95；**MIT C-3 verify report §4 已預估**：σ_net=80 bps + ex_kurt=10 → PSR(0) ≈ 0.94（接近下界 0.95），σ_net=100 bps → PSR(0) ≈ 0.86（FAIL）→ σ_net 高端 case PSR(0) deflation 顯著，必並列報告 σ_net=50/80 bps 兩 case PSR(0) 值 |
 | 4 | **Alpha decay regime test**：R²(N=60/120/300) 三檔 decay curve | lead signal 對 alt return forward predictive R²(60s alt return) 隨 7d window rolling 30-min bucket 衰減曲線；半衰期 < 60s → spec 失敗（信號太短沒實用價值），> 300s → window 太長不抓 microstructure；N=120s 主信號 R² < 0.04 → revise spec 或 archive |
 | 5 | **Block-bootstrap 95% CI**（pooled + per-symbol）| block_size=60min（對齊 BTC autocorr scale），1000 iter；per-symbol CI 與 pooled CI 並列報告 |
@@ -393,7 +416,9 @@ SELECT
     AVG(net_edge_bps) FILTER (WHERE regime_tag = 'normal') AS avg_net_bps_normal_regime,
     COUNT(*) FILTER (WHERE regime_tag = 'extreme') AS extreme_regime_n
 FROM btc_alt_lead_lag_shadow_with_forward_returns
-WHERE engine_mode = 'paper' AND ts >= NOW() - INTERVAL '7 days'
+-- v1.4: source rows must come from replay/preflight diagnostics, not a
+-- paper-promotion lane. Exact source filter is implementation-specific.
+WHERE ts >= NOW() - INTERVAL '7 days'
 GROUP BY symbol;
 ```
 
@@ -403,34 +428,36 @@ GROUP BY symbol;
 
 ---
 
-## §8 Acceptance Gate（QC + MIT review 必審）
+## §8 Acceptance Gate（QC + MIT review 必審；v1.4 demo canary rebase）
+
+**v1.4 gate rule**：Stage 0R replay preflight can only decide whether A4-C is eligible to request Stage 1 Demo micro-canary. The actual promotion gate is the 7d Stage 1 demo canary evidence packet. Stage 2 must cite Stage 1 demo empirical evidence; replay/paper metrics are supporting diagnostics only.
 
 ### 8.1 QC C-2 review scope（v1.1 sign-off CONDITIONAL APPROVE — 5 conditions revised in spec）
 
-- **Alpha decay 估算（critical, v1.1 condition #3）**：lead window 60s/120s/300s 對應 forward predictive R² 衰減；N 鎖定 = 120s（per §3.1 Easley/De Prado/O'Hara 2021 + Makarov-Schoar JFE 2020 estimate），但 D+12 evaluate 強制報三檔 decay curve；半衰期 < 60s → spec 失敗，> 300s → window 太長不抓 microstructure
-- **DSR penalty K 量化（v1.1 condition #1）**：mu_0 = √(2 ln K)，**K = 95**（active strategy×symbol cell 總數，per Bailey-López de Prado *The Deflated Sharpe Ratio* (2014) §4.2「DSR with multiple trial」；舊草稿錯寫 K=6 = 策略 family 數）→ **mu_0 = √(2 ln 95) = 3.018**。對既有 5 策略 cells DSR PASS shift < 1 σ 空間可忽略；warning：8 cohort × 2 strat 全 promote → K ≈ 111，future ADR 必記錄 K 累積對 multiple-testing budget 長期約束
-- **Paper edge gate threshold 三檔（v1.1 condition #5 — 替代原單檔 ≥ +5 bps）**：
+- **Alpha decay 估算（critical, v1.1 condition #3）**：lead window 60s/120s/300s 對應 forward predictive R² 衰減；N 鎖定 = 120s（per §3.1 Easley/De Prado/O'Hara 2021 + Makarov-Schoar JFE 2020 estimate），但 Stage 0R replay/preflight packet 強制報三檔 decay curve；半衰期 < 60s → spec 失敗，> 300s → window 太長不抓 microstructure
+- **DSR penalty K 量化（v1.1 condition #1）**：mu_0 = √(2 ln K)，**K = 95**（active strategy×symbol cell 總數，per Bailey-López de Prado *The Deflated Sharpe Ratio* (2014) §4.2「DSR with multiple trial」；舊草稿錯寫 K=6 = 策略 family 數）→ **mu_0 = √(2 ln 95) = 3.018**。對既有 5 策略 cells DSR PASS shift < 1 σ 空間可忽略；warning：8 cohort × 2 strat 全 advance to demo review → K ≈ 111，future ADR 必記錄 K 累積對 multiple-testing budget 長期約束
+- **Legacy paper edge threshold 三檔（v1.1 condition #5；v1.4 降級為 Stage 0R diagnostic bands）**：
 
-| paper avg_net_bps | 動作 | 理由 |
+| replay/preflight avg_net_bps diagnostic | v1.4 動作 | 理由 |
 |---|---|---|
-| **≥ +15 bps** | promote N+2 demo IMPL（fast track） | demo cost 15-20 bps round-trip → +15 paper edge → demo 環境 ~0 buffer，promote 後 live cost 8-12 bps 才有正 edge headroom |
-| **+5 ≤ avg_net_bps < +15** | extend paper window 至 14d，重評（marginal） | 樣本不足 + edge 邊緣，再收 7d 確認；不浪費 N+2 demo |
-| **< +5 bps** | revise spec 或 archive | demo cost 下無 net edge survive；單檔 ≥ +5 拍板門檻在 demo 必虧 net −10 ~ −15 bps |
+| **≥ +15 bps** | `eligible_for_demo_canary=true` candidate（still requires leak/bias/DSR/PSR/PBO PASS + PM/PA/QC approval） | Strong enough to justify spending a small 7d demo micro-canary budget; not a Stage 1 PASS |
+| **+5 ≤ avg_net_bps < +15** | `eligible_for_demo_canary=false_or_defer` unless QC/PA explicitly extends replay/preflight diagnostics | Marginal; do not open demo canary on weak replay-only evidence |
+| **< +5 bps** | revise spec 或 archive | demo cost 下無 net edge survive；不得進 Stage 1 demo canary |
 
 **理由源**：CLAUDE.md §三 cost_gate JS-demo `[40] avg_net = -17.82 → +8.75 bps after V083`（3C audit），demo 5 策略當前 cost burden ≈ 15-20 bps round-trip（fee + slippage + adverse selection）；live 環境降至 ≈ 8-12 bps（PostOnly maker rebate）
 
-**v1.2 +15 bps gate power verification（per MIT C-3 verify §5 net edge σ 視角，N_fills=80, μ=15 bps paper avg_net）**：
+**v1.2 +15 bps diagnostic band power verification（per MIT C-3 verify §5 net edge σ 視角，N_fills=80, μ=15 bps replay/paper avg_net）**：
 
 | σ_net case | SE = σ_net/√N | t-stat = μ/SE | p-value (one-sided) | verdict |
 |---|---|---|---|---|
 | **σ_net = 50 bps** | 50/√80 = 5.59 | 15/5.59 = 2.68 | 0.0044 | **comfortable PASS** |
 | **σ_net = 80 bps** | 80/√80 = 8.94 | 15/8.94 = 1.68 | 0.0487 | **marginal PASS**（剛 < 0.05 邊緣） |
 
-**結論（v1.2 拍板）**：+15 bps gate 在 σ_net ∈ [50, 80] bps range 全 PASS（lower bound comfortable，upper bound marginal），**門檻設定有效不過寬不過緊**。σ_net = 100 bps 已 FAIL（t-stat=1.34, p=0.092 per MIT report §5），但 EDGE-DIAG-1 baseline 上限 80 bps 之外為極端 case 不在常規 acceptance scope。如 D+12 paper edge report empirical σ_net 顯示超出 80 bps，必觸發 spec revise 重評 +15 gate 是否上調至 +20 bps。
+**結論（v1.4 rebase 後語義）**：+15 bps band 在 σ_net ∈ [50, 80] bps range 可作 Stage 0R strong diagnostic（lower bound comfortable，upper bound marginal），但不是 Stage 1 PASS。σ_net = 100 bps 已 FAIL（t-stat=1.34, p=0.092 per MIT report §5），但 EDGE-DIAG-1 baseline 上限 80 bps 之外為極端 case 不在常規 acceptance scope。如 Stage 0R replay/preflight empirical σ_net 顯示超出 80 bps，必觸發 spec revise 重評 +15 band 是否上調至 +20 bps。
 
 **+5/+15 中段 gate verification**：σ_net=50 bps + μ=10 bps → t-stat=1.79, p=0.039（marginal PASS）；σ_net=80 bps + μ=10 bps → t-stat=1.12, p=0.13（FAIL）→ 中段 gate「extend 14d」決策合理（樣本擴大降 SE 至 SE = σ_net/√160 才可能 PASS upper bound）。
 
-**+5 bps 下界 verification**：σ_net=50 bps + μ=5 bps → t-stat=0.89, p=0.19（FAIL）→ +5 以下 archive/revise 決策合理（無 statistical significance 即 promote 等於賭機）。
+**+5 bps 下界 verification**：σ_net=50 bps + μ=5 bps → t-stat=0.89, p=0.19（FAIL）→ +5 以下 archive/revise 決策合理（無 statistical significance 即申請 demo canary 等於賭機）。
 
 - Threshold X / Y / N 三參數最佳值：N=120s 已鎖定（v1.1）；threshold_X=10 bps + threshold_Y=0.40 維持 PA 預設，QC + MIT D+1 review 不再可改
 
@@ -438,7 +465,7 @@ GROUP BY symbol;
 
 - Time-series CV 設計：purged k-fold + embargo（per De Prado 2018 §7.4）；embargo ≥ N seconds 防 leak
 - Leak detection（critical）：strict shift(N) 必驗，`rolling(N).max()` 反模式 grep
-- Cohort sample size demand：per cohort symbol n ≥ 100 fills 7d 內可達？BTCUSDT 1m 7d = 10080 bar 足夠 lead signal；alt cohort fills 倚賴 5 策略 paper baseline 活躍度
+- Cohort sample size demand：per cohort symbol n ≥ 100 fills 7d 內可達？BTCUSDT 1m 7d = 10080 bar 足夠 lead signal；Stage 0R 可用 replay/preflight 加速估計，Stage 1 必改用 demo micro-canary empirical fills
 - V088 hypertable PL/pgSQL 語法 + retention drop_chunks policy + idempotency dry-run
 
 ### 8.3 三方 sign-off path（v1.2 — MIT C-3 σ verify 已交付，sign-off 簡化）
@@ -446,14 +473,14 @@ GROUP BY symbol;
 **v1.2 sign-off path（per MIT C-3 verify report 2026-05-10 已交付）**：
 - **QC C-2**：已 sign-off CONDITIONAL APPROVE 5 conditions（v1.1 已落實 spec），**v1.2 dual-layer σ + PSR(0) skew/kurt formula 強制 + +15 bps gate power verification 為 spec 補強**（不增加新 condition），QC 直接收
 - **MIT C-3**：σ verify 已交付（report `2026-05-10--w2_c3_sigma_verify_btcusdt_1m_forward_return.md`），dual-layer σ acceptance + PSR(0) skew/kurt formula 已落 spec v1.2，**MIT 直接收，不需 D+1 重 review**
-- **W2 IMPL phase 直接啟動**：spec v1.2 sign-off 後 D+3 起派 C-IMPL-1..4 paper IMPL，**不需 D+1 PA + MIT 重 sign-off**（v1.2 補強為 spec internal cleanup，不改 IMPL scope）
+- **W2 IMPL phase historical note**：spec v1.2 sign-off 後曾 D+3 起派 C-IMPL-1..4 paper IMPL；v1.4 起 C-IMPL-4 semantics 改為 Stage 0R replay preflight evidence tooling，不再啟動 paper promotion lane。
 
 **MIT C-3 D+1 review focus（保留 IMPL phase 啟動前驗）**：
 - §7.3 strict shift(N) leak-free grep verification（`btc_lead_lag_writer.py` 內 `rolling()` / slice operation 全掃）
 - §4.1 V088 hypertable PL/pgSQL 語法 + retention drop_chunks policy + idempotency dry-run
 - §4.1 60s/300s shadow value column 寫入路徑與主信號 N=120 disjoint 不污染
 
-**Sign-off 後 timeline**：D+3 起派 C-IMPL-1..4 paper IMPL（C-IMPL-1 NO-OP 驗收 + C-IMPL-2 producer + V088 + C-IMPL-3 strategy shadow + C-IMPL-4 paper engine 7d evidence collection 開始），D+5 paper engine deploy，D+12 paper edge report land（含 §7.1 mandatory metric 6 條 + dual-layer σ acceptance + PSR(0) skew/kurt formula 計算 + +15 bps gate power verification σ_net=50/80 bps 兩 case 並列）。
+**Sign-off 後 timeline（v1.4）**：C-IMPL source stays closed, but C-IMPL-4 paper engine 7d evidence collection is replaced by Stage 0R replay preflight. If `eligible_for_demo_canary=true` and W-AUDIT-3b + `[55]` invariant pass, PM may request a Stage 1 Demo micro-canary launch. No paper engine deploy is part of the promotion path.
 
 ---
 
@@ -463,13 +490,13 @@ GROUP BY symbol;
 |---|---|---|
 | **Look-ahead bias**（lead window 含 current bar） | **極高** | strict `shift(N)` 禁含 current bar；MIT C-3 必跑 leak detection（per §7.3 strict shift 並列對比，差異 > 30% 即 spec 失敗）；對照 `feedback_indicator_lookahead_bias` |
 | **σ acceptance 單層假設不對應真實層**（v1.2 MIT C-3 verify 落地） | **已 closed** | §7.1 acceptance prerequisite v1.2 改 dual-layer σ table（L1 raw market σ_60=4.54/σ_120=6.28/σ_300=10.08 bps + L2 net edge σ=50-80 bps EDGE-DIAG-1 baseline）；spec 30 bps 不對應任何真實層已 retire；強制 prerequisite：spec power calculation 用 net edge σ 禁用 raw market σ；§7.1 metric (3) PSR(0) ≥ 0.95 強制用 Bailey-López de Prado 2012 skew/kurt-aware formula（ex_kurt 7-12 ≫ 0 JB normality 必拒，禁用 normal SR z-test）；§8.1 +15 bps gate σ_net=50/80 bps 兩 case power verification 已落地 |
-| **per-symbol n=100 underpowered**（v1.1 condition #4 (1)） | **中** | §7.1 metric (1) per-symbol gate：per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol promote；不只 overall pooled 看 |
+| **per-symbol n=100 underpowered**（v1.1 condition #4 (1)） | **中** | §7.1 metric (1) per-symbol gate：per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol 申請 demo canary；不只 overall pooled 看 |
 | **K=95 deflate 漏算**（v1.1 condition #1） | **中** | §8.1 spec 文字已修正 K=95（不是 6）；§7.1 metric (2) DSR PASS test 強制 K=95 deflate non-negotiable |
-| **+5 bps gate 太鬆無法 survive demo cost**（v1.1 condition #5） | **極高** | §8.1 改三檔 gate（+15 promote / +5~+15 extend 14d / <+5 revise） |
+| **+5 bps gate 太鬆無法 survive demo cost**（v1.1 condition #5） | **極高** | §8.1 改三檔 diagnostic band（+15 may request demo / +5~+15 defer / <+5 revise） |
 | **Alpha decay quick (half-life < N)**（v1.1 condition #3） | **中-高** | §7.1 metric (4) R²(N=60/120/300) decay curve 強制；半衰期 < 60s → archive；§4.1 schema 加 60s/300s shadow value column 收 evidence |
 | **BTC regime extreme**（pump 時 lead signal saturate）（v1.1 condition #5） | **中** | xcorr threshold_Y ≥ 0.40 + return threshold_X clamp ≤ 50 bps（避 outlier 主導）；**v1.1 新加：\|BTCUSDT 1h return\| > 200 bps 視為 regime extreme，shadow log 標 `regime=extreme`（per §4.1 `regime_tag` column）不計入 7d edge avg**（per §7.2 `FILTER (WHERE regime_tag = 'normal')` SQL pattern）；BB regime data 來源：BTCUSDT 1h kline shift(1)，writer 同 1m grain 內每分鐘重算 |
-| Self-fulfilling bias（paper engine 自己 trade BTC alt 推動 BTC lead signal） | 高 | 5 策略 paper engine 流量極小（demo 7d gross −26 USDT），對 BTC global liquidity 無影響；但仍 paper-only fence 三層防禦避免 demo 污染 |
-| ML pipeline 污染（demo/live 期 BtcLeadLag 寫進 ML training table） | 高 | bb_breakout/bb_reversion/funding_arb 不接收 + paper-only fence Layer 2 Python writer 不啟動 → 5 策略 demo edge baseline 不污染 |
+| Self-fulfilling bias（legacy paper engine 自己 trade BTC alt 推動 BTC lead signal） | 高 | v1.4 移除 paper promotion lane；Stage 0R replay preflight is no-order，Stage 1 only uses small demo micro-canary evidence |
+| ML pipeline 污染（demo/live 期 BtcLeadLag 寫進 ML training table） | 高 | Stage 0R replay rows are diagnostic only；demo Stage 1 evidence must keep replay/synthetic rows out of ML training surfaces unless explicitly calibrated/counterfactual |
 | Cohort 樣本不足 7d 內 < 100 fills | 中 | n ≥ 100 是 gate；不達標延長收 evidence 至 14d 或 cohort 縮減；QC C-2 量化 |
 | Bybit rate limit 撞 W1+W3 同窗 | 低 | W2 預估 9 req/min（v1.1 加 BTCUSDT 1h kline 1 req/min = 10 req/min）占 < 1% upper bound（per §4.3）；BB review 確認三 wave 合計 < 50% |
 | W6 ML retrain 4-gate 衝突（Q&A pending） | 低 | A4-C 是新 alpha source，不是 ML feature retrain；走 W6 4-gate 不適用本 wave |
@@ -478,18 +505,22 @@ GROUP BY symbol;
 
 ---
 
-## §10 N+2 Promotion Path（gate ≥ +5 bps）
+## §10 N+2 Promotion Path（v1.4: Stage 0R + Stage 1 demo evidence）
 
-如 D+12 paper edge report 顯示 avg_net_bps ≥ +5：
+如 Stage 0R replay preflight returns `eligible_for_demo_canary=true`：
 
-- N+2 dispatch draft 加 A4-C demo IMPL phase
-- 5 策略 全 demo engine 接 BtcLeadLag panel（含 bb_breakout/bb_reversion）
+- PM/PA/QC request Stage 1 Demo micro-canary approval（1 strategy × 1 symbol × `Environment::Demo` × 7d）
+- Stage 1 demo canary uses small position envelope and strict rollback per AMD-2026-05-15-01
+- W-AUDIT-3b runtime smoke and `[55]` fill-lineage invariant must PASS before launch
+- Demo canary evidence packet becomes the only admissible basis for Stage 2 entry
+- N+2 dispatch draft may add A4-C demo IMPL phase only after Stage 1 demo evidence, not replay/paper alone
+- 5 策略 demo integration remains a later Stage 2/3 question（含 bb_breakout/bb_reversion）
 - 真 trade decision logic（不只 shadow log）— Strategy on_tick 把 expected_dir 整合進 TA1m signal，weighted ensemble
 - N+2 spec 三角 review 重做（PA + QC + MIT）
 - V### migration 升級 retention 14d → 30d
-- 加入 graduated canary state machine Stage 1 cohort（per W-AUDIT-9）
+- graduated canary state machine records Stage 1 demo cohort（per AMD-2026-05-15-01）
 
-如 D+12 paper edge report 顯示 avg_net_bps < +5：
+如 Stage 0R replay preflight returns `eligible_for_demo_canary=false`：
 
 - N+2 dispatch draft 加 A4-C revise spec phase（不浪費 N+2 demo IMPL）
 - QC + MIT 對 alpha decay / threshold X/Y/N / cohort scope 重審
@@ -501,12 +532,14 @@ GROUP BY symbol;
 
 per dispatch v3.3 §3.2 W2 fast-track：
 
+**v1.4 update**：Implementation tasks C-IMPL-1..3 remain historical/source-closed context. C-IMPL-4 is no longer "paper engine 7d evidence collection"; it is now Stage 0R replay preflight tooling/evidence collection. `OPENCLAW_ENABLE_PAPER=1` is blocked for promotion.
+
 | Sub-agent | Scope | 動的 file | est LOC |
 |---|---|---|---|
 | **W2 E1-γ (C-IMPL-1)** | trait extension **NO-OP**（PA D+0 已 land） | **無檔可動** — 範圍縮為 BtcLeadLagPanel typedef 驗收 + 對照 producer schema | 0 LOC |
-| **W2 E1-δ (C-IMPL-2)** | lead-lag producer + V088 + IPC slot（v1.1 含 60s/300s shadow value column + regime_tag column + BTCUSDT 1h kline regime 計算 + strict shift(N) lookahead-free） | `program_code/.../btc_lead_lag_writer.py`（新）+ `sql/migrations/V088__btc_lead_lag_panel.sql`（新）+ `rust/openclaw_engine/src/ipc_server/slots.rs`（加 `BtcLeadLagPanelSlot`） + `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`（一行 surface field assignment + paper-only engine_mode gate） | ~400 LOC（v1.1 +50 LOC for regime_tag + 60s/300s shadow value + 1h kline integration） |
-| **W2 E1-ε (C-IMPL-3)** | strategy paper-only shadow | `ma_crossover/strategy_impl.rs`（declare `CrossAsset` + on_tick shadow log）+ `grid_trading/mod.rs`（同） | ~80 LOC |
-| **W2 E1-ζ (C-IMPL-4)** | paper engine 7d evidence collection 開始 | 操作 only，無代碼；D+5 起 paper engine deploy 後跑 7d；D+12 land paper edge report | 0 LOC |
+| **W2 E1-δ (C-IMPL-2)** | lead-lag producer + V088 + IPC slot（v1.1 含 60s/300s shadow value column + regime_tag column + BTCUSDT 1h kline regime 計算 + strict shift(N) lookahead-free） | `program_code/.../btc_lead_lag_writer.py`（新）+ `sql/migrations/V088__btc_lead_lag_panel.sql`（新）+ `rust/openclaw_engine/src/ipc_server/slots.rs`（加 `BtcLeadLagPanelSlot`） + `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`（一行 surface field assignment + legacy diagnostic engine_mode gate） | ~400 LOC（v1.1 +50 LOC for regime_tag + 60s/300s shadow value + 1h kline integration） |
+| **W2 E1-ε (C-IMPL-3)** | strategy diagnostic shadow | `ma_crossover/strategy_impl.rs`（declare `CrossAsset` + on_tick shadow log）+ `grid_trading/mod.rs`（同） | ~80 LOC |
+| **W2 E1-ζ (C-IMPL-4)** | Stage 0R replay preflight evidence collection | 操作 / tooling only；run replay/preflight diagnostics and emit `eligible_for_demo_canary=true/false` packet；legacy paper edge report is read-only diagnostic | 0 LOC |
 
 **衝突點全部消除**：alpha_surface.rs trait 已 PA D+0 commit；slots.rs / step_4_5_dispatch.rs 用 anchor comment 隔離 W1+W2 sub-agent；V088 編號預留無撞。
 
@@ -516,7 +549,7 @@ per dispatch v3.3 §3.2 W2 fast-track：
 
 per PA 輸出物標準：
 
-1. **Layer 1 paper-only fence default → None**：E2 必 grep `btc_lead_lag = match self.effective_engine_mode()` in step_4_5_dispatch.rs，confirm `_ => None`（**不是** `_ => Some(...)`）。漏 `None` default = demo/live 污染主路徑。
+1. **Layer 1 legacy diagnostic fence default → None**：E2 必 grep `btc_lead_lag = match self.effective_engine_mode()` in step_4_5_dispatch.rs，confirm `_ => None`（**不是** `_ => Some(...)`）。漏 `None` default = demo/live 污染主路徑。
 
 2. **Strict shift(N) lookahead-free 驗證（v1.1 condition #4）**：E2 必 grep `btc_lead_lag_writer.py` 內所有 `rolling()` / `[t-N..t]` slice operation，確認 BTC return（含 N=60s + N=120s + N=300s 三檔 shadow value）/ volume z-score 計算 strict 用 `shift(1)` 後的 N 秒前 value，**禁** include current bar；BTCUSDT 1h kline regime 計算同樣 strict shift(1)。對照 `feedback_indicator_lookahead_bias` Rolling-window breach 反模式。MIT C-3 D+1 review 同步必跑 grep（Q4 strict shift 並列對比 §7.3，差異 > 30% spec 失敗）。
 
@@ -527,8 +560,8 @@ per PA 輸出物標準：
 ## §13 16 根原則合規（CLAUDE.md §二）
 
 - **原則 1 單一寫入口**：BtcLeadLag 不寫 trade order 路徑，consumer 只 shadow log → ✅
-- **原則 4 不繞風控**：paper-only fence Layer 1 + W2 C-IMPL-3 純 shadow log 不 trade → 不觸碰 SM-04 Guardian → ✅
-- **原則 7 學習 ≠ 改寫 Live**：三層 paper-only fence → demo/live engine 完全 None → 5 策略 demo edge baseline 不污染 → ✅
+- **原則 4 不繞風控**：legacy diagnostic fence Layer 1 + W2 C-IMPL-3 純 shadow log 不 trade → 不觸碰 SM-04 Guardian → ✅
+- **原則 7 學習 ≠ 改寫 Live**：三層 legacy diagnostic fence → demo/live engine 完全 None → 5 策略 demo edge baseline 不污染 → ✅
 - **原則 8 交易可解釋**：panel snapshot 寫 PG (`source_tier='cross_asset_btc_lead_lag'`) + Strategy on_tick shadow log 含 `lead_window_secs` + `expected_dir` → 可 reconstruct alpha source 來源 → ✅
 - **原則 13 AI 成本感知**：W2 是 deterministic signal，不調用 AI → 不影響 cost_edge_ratio gate → ✅
 - **原則 14 零外部成本**：BTC kline + orderbook 都用 Bybit V5 free endpoint → ✅
@@ -537,12 +570,12 @@ per PA 輸出物標準：
 
 ---
 
-## §14 一句總結（v1.2）
+## §14 一句總結（v1.4）
 
-**A4-C BTC→Alt Lead-Lag W-AUDIT-8c 候選 C 的 N+1 fast-track 預跑（v1.2 MIT C-3 σ verify 落地 dual-layer σ + PSR(0) strict）：BTCUSDT 1m kline + orderbook 算 lead signal（return / volume z / book imbalance over N=120s **鎖定**，60s/300s shadow value 同 schema 收 decay curve evidence）+ BTCUSDT 1h kline 算 regime_tag（\|1h return\| > 200 bps → extreme，shadow log 不計入 7d edge avg）→ 7-symbol alt cohort xcorr + expected_dir 寫 `panel.btc_lead_lag_panel` (V088 hypertable, retention 14d) → ma_crossover + grid_trading 在 paper engine mode 接 `BtcLeadLag` 為 `CrossAsset` tag, on_tick shadow log only 不 trade（C-IMPL-3）；三層 paper-only fence + strict shift(N) lookahead-free 保證 demo/live engine 永遠 surface.btc_lead_lag = None 不污染 5 策略 demo edge baseline；7d paper engine 收 evidence，**gate 三檔（avg_net ≥ +15 bps promote N+2 / +5~+15 extend 14d / <+5 revise）+15 bps gate 已 verify σ_net=50 bps t-stat=2.68 p=0.0044 / σ_net=80 bps t-stat=1.68 p=0.0487 全 PASS**，DSR PASS 用 K=95 deflate (mu_0 = √(2 ln 95) = 3.018)，**PSR(0) ≥ 0.95 強制用 Bailey-López de Prado 2012 skew/kurt-aware formula（ex_kurt 7-12 ≫ 0 JB normality 必拒，禁用 normal SR z-test），σ_net=80 bps + ex_kurt=10 → PSR(0) ≈ 0.94 必並列 σ_net=50/80 兩 case**，per-symbol n ≥ 100 + per-symbol t > 2.0 才允許單 symbol promote，block-bootstrap 95% CI block_size=60min 1000 iter，alpha decay R²(N=60/120/300) 三檔 curve 強制；**σ acceptance v1.2 改 dual-layer：L1 raw market σ_60=4.54/σ_120=6.28/σ_300=10.08 bps（MIT C-3 verify）用於 alpha decay R² baseline + L2 net edge σ=50-80 bps EDGE-DIAG-1 baseline 用於 power calculation + PSR(0) deflation；spec 30 bps 不對應任何真實層已 retire**；trait skeleton 已 PA D+0 commit (HEAD c9fb0b8f) IMPL phase 全 0 file 重疊 0 git merge 衝突；16 原則 + DOC-08 §12 不變量 + 硬邊界 5 項全 0 觸碰；QC C-2 已 sign-off CONDITIONAL APPROVE 5 conditions 落 spec v1.1，MIT C-3 σ verify 已交付 dual-layer σ + PSR(0) strict 落 spec v1.2 → **QC + MIT 直接收 W2 IMPL，不需 D+1 PA + MIT 重 sign-off**。**
+**A4-C BTC→Alt Lead-Lag W-AUDIT-8c 候選 C 的 N+1 fast-track 預跑已按 AMD-2026-05-15-01 rebase：BTCUSDT 1m kline + orderbook 算 lead signal（return / volume z / book imbalance over N=120s **鎖定**，60s/300s shadow value 同 schema 收 decay curve evidence）+ BTCUSDT 1h kline 算 regime_tag（\|1h return\| > 200 bps → extreme，shadow log 不計入 diagnostic edge avg）→ 7-symbol alt cohort xcorr + expected_dir 寫 `panel.btc_lead_lag_panel` (V088 hypertable, retention 14d) → ma_crossover + grid_trading legacy diagnostic consume `BtcLeadLag` 為 `CrossAsset` tag, on_tick shadow log only 不 trade（C-IMPL-3）；三層 legacy diagnostic fence + strict shift(N) lookahead-free 保證 demo/live engine 永遠 surface.btc_lead_lag = None 不污染 5 策略 demo edge baseline。v1.2 的 +15/+5 bands、DSR K=95 deflate、PSR(0) Bailey-López de Prado 2012 skew/kurt-aware formula、block-bootstrap 95% CI、alpha decay R²(N=60/120/300) 仍保留為 Stage 0R replay/preflight diagnostic requirements；Stage 0R 只能輸出 `eligible_for_demo_canary=true/false`，不得稱 Stage 1 PASS。真正 promotion path 必走 Stage 1 Demo micro-canary（1 strategy × 1 symbol × `Environment::Demo` × 7d，小倉位 + strict rollback），Stage 2 必引用 Stage 1 demo empirical evidence；`OPENCLAW_ENABLE_PAPER=1` 對 promotion 永久 BLOCKED。**
 
 ---
 
-**Spec v1.2 end. PA C-1 spec dual-layer σ + PSR(0) skew/kurt strict + +15 bps gate power verification land。QC C-2 已 sign-off，MIT C-3 σ verify 已交付 → QC + MIT 直接收 W2 IMPL → D+3 起派 C-IMPL-1..4 paper IMPL，D+5 paper engine deploy 後跑 7d，D+12 paper edge report land（含 §7.1 mandatory metric 6 條 + dual-layer σ acceptance + PSR(0) skew/kurt formula 計算 + +15 bps gate power verification σ_net=50/80 bps 兩 case 並列）。**
+**Spec v1.4 end. PA C-1 spec dual-layer σ + PSR(0) skew/kurt strict + +15 bps diagnostic band verification retained as Stage 0R replay/preflight requirements。QC C-2 / MIT C-3 historical sign-off remains as source hygiene；promotion semantics are superseded by AMD-2026-05-15-01。C-IMPL-4 is now Stage 0R replay preflight evidence tooling；legacy D+12 paper edge report is diagnostic/read-only and cannot promote to demo。**
 
-PA DESIGN DONE: report path: srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md（v1.2）
+PA DESIGN REBASED: report path: srv/docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md（v1.4）
