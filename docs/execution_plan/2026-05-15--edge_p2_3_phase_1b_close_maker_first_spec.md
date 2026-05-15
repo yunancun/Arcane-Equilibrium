@@ -1,8 +1,8 @@
 # EDGE-P2-3 Phase 1b — Close-Maker-First Refactor Spec
 
 **Date**: 2026-05-15
-**Author**: PM + PA + FA convergent audit chain (main session)；2026-05-15 PA round-2 patch v1.1（4-agent QC+FA+BB+MIT consolidated）；2026-05-15 PA Wave 1.5 patch v1.2（A3 portfolio_var verify + E3 maker fill empirical baseline + A4 W-C Caveat 2 V094 schema 兩段式 + writer gap）
-**Status**: SPEC v1.2 — Wave 1.5 consolidated patch（fee saving 4.5→0.5-2.0 bps + close fallback-to-taker mandatory + 14d pilot observation + portfolio MAINTAIN + writer gap explicit + 2 new ticket P1+P2）；pending AMD v0.3 short re-review + 3-gate prereq
+**Author**: PM + PA + FA convergent audit chain (main session)；2026-05-15 PA round-2 patch v1.1（4-agent QC+FA+BB+MIT consolidated）；2026-05-15 PA Wave 1.5 patch v1.2（A3 portfolio_var verify + E3 maker fill empirical baseline + A4 W-C Caveat 2 V094 schema 兩段式 + writer gap）；2026-05-15 PA Wave 1.5b patch v1.3（Wave 3a 4-agent re-review consolidation — QC-MF-3 AC-5/AC-11 vs §1.2 fee saving 數學矛盾 + QC-SF-6 AC-18 Wilson-CI + MIT P3 stratification note + A3 §12.2 framing 微調）
+**Status**: SPEC v1.3 — Wave 1.5b consolidated patch（AC-5/AC-11 +1.5 → +0.5 bps for n≥50 / directional only for n<30 + AC-18 Wilson-CI sub-clause + §12.2 line 758 entry-side framing 修正）；pending IMPL prereq 條件 2 (Wave 3a 4-agent re-review) + 3-gate
 **Phase**: EDGE-P2-3 Phase 1b（entry-only Phase 1a 自然延伸到 close path execution-quality 軸；1c 留 microstructure；P2-4 留 alpha source promotion gate）
 **Supersedes**: 無；補完 EDGE-P2-3 Phase 1a entry-only scope-limiting 設計決策
 **對應 spec / TODO**: P0-EDGE-1 / EDGE-P2-3 / W-AUDIT-8b (alpha-source 後續) / DOC-01 §5.6 § §5.9 / DOC-08 §12
@@ -409,6 +409,7 @@ grep -nrE '(linucb|scorer|quantile|mlde|dl3).*close_maker_(attempt|fallback_reas
    - PASS: ≥ 95%
    - WARN: 90-95%
    - FAIL: < 90%（possible silent abandonment regression）
+   - **v1.3 footnote (per QC-SF-6)**：上述 PASS/WARN/FAIL 為 point estimate；Wilson-CI gating per QC-SF-6（IMPL phase healthcheck [62] sub-check SQL 補 Wilson 計算）— per env 7d Wilson 95% CI lower vs 95%；CI lower < 90% → WARN；CI lower < 85% → FAIL（mirror AC-14 mechanism）。對齊 §11.7 AC-18 sub-clause。
 
 5. **Audit row enum invariant**：
    - 任何 close maker attempt 結束時 fill_status `≠ 'maker_fill'` → `close_maker_fallback_reason` 必 NOT NULL（不可 NULL，per §4.4 enum allowlist 已 cover）
@@ -672,7 +673,11 @@ E1 估計：~400 LOC tests + ~150 LOC v1.1 新增 = **~550 LOC tests**。
 
 ---
 
-## §11 Per-stage PASS Criteria（v1.1 — AC-1..AC-13 連續編號 + AC-14/15/16 新增 4-agent must-fix）
+## §11 Per-stage PASS Criteria（v1.1 — AC-1..AC-13 連續編號 + AC-14/15/16 新增 4-agent must-fix；v1.3 patch — AC-5 / AC-11 / AC-18 修正以對齊 §1.2 fee saving range）
+
+> **Footnote v1.3 patch (per QC-MF-3 round 3 review)**：v1.1 留設的 AC-5 / AC-11 「+1.5 bps Δ vs taker baseline」與 v1.2 §1.2 fee saving revision 「0.5-2.0 bps net per close attempt（中性 0.95）」內部矛盾 — +1.5 bps gate > 0.95 bps 中性估計 → Phase 2a 14d empirical 跑出 close fill rate ~20-25% 後 AC-5 deterministically FAIL。v1.3 改 AC-5 「**+0.5 bps for n≥50 cells / directional improvement only (≥ 0) for n<30 cells**」+ AC-11 「**+0.5 bps**」對齊 §1.2 conservative range 下界。
+>
+> **Footnote v1.3 patch (per QC-SF-6 round 3 review)**：v1.1 §11.7 AC-18 + §5.5 line 410-411 是 point estimate「PASS ≥ 95% / WARN 90-95% / FAIL < 90%」，small-n window 容易誤判。v1.3 補 Wilson-CI sub-clause（mirror AC-14 mechanism；IMPL phase healthcheck [62] sub-check SQL 補 Wilson 計算）。
 
 ### 11.1 Phase 2a Demo PASS（最早 2026-05-29+ 7d 觀察）
 
@@ -682,7 +687,7 @@ E1 估計：~400 LOC tests + ~150 LOC v1.1 新增 = **~550 LOC tests**。
 | AC-2 | fallback (maker_timeout → taker market) 比例 ≤ 30% |
 | AC-3 | `close_dispatch_failed` counter 不增 |
 | AC-4 | per-strategy 5 close exit_reason 各自 close fill ≥ 10 條（bw_squeeze/pctb_revert 各 ≥ 1，套 §4.3 carve-out gate；min_samples_gate=30 升 normative AC per MIT-SF-3）|
-| AC-5 | close 平均 net_bps（fee net）改善 ≥ taker baseline 的 **+1.5 bps**（v1.1 修正，per QC-SF-1 推導：3.5 × 0.70 - 0.30 × 6 ≈ +0.65 bps net 保守，+1.5 bps 是穩健 gate 而非樂觀 +3 bps）|
+| AC-5 | close 平均 net_bps 改善 **≥ taker baseline 的 +0.5 bps for n≥50 cells**；directional improvement only **(≥ 0) for n<30 cells**（v1.3 修正 per QC-MF-3 + Wilson-CI gating per Consensus-MF-2 mechanism；對齊 §1.2 conservative range 下界 0.5-2.0 bps net per close attempt 中性 0.95；原 v1.1 +1.5 bps gate 與 §1.2 fee saving revision 數學矛盾，n≥50 + n<30 階梯為 sample-size 配套保護）|
 | AC-6 | `trading.fills` 中 `close_maker_attempt` + `close_maker_fallback_reason` non-null **NULL ladder 階梯（v1.1 Consensus-MF-3）**：PASS NULL rate ≤ 0.1% / WARN 0.1-1.0% / FAIL > 1.0%；`'not_attempted_safety_path' / 'engine_shutdown_safety'` 入 enum allowlist 不算 NULL |
 | AC-7 | 健康檢查 `[62][63][64][65]` PASS 7d 持續 |
 
@@ -699,7 +704,7 @@ E1 估計：~400 LOC tests + ~150 LOC v1.1 新增 = **~550 LOC tests**。
 
 | AC | 內容 |
 |---|---|
-| AC-11 | Phase 2b 14d 內 0 P0 regression + close net_bps Δ vs Phase 1a baseline ≥ **+1.5 bps**（v1.1 QC-SF-1 修正，原 +5 bps 過於樂觀）|
+| AC-11 | Phase 2b 14d 內 0 P0 regression + close net_bps Δ vs Phase 1a baseline **≥ +0.5 bps**（v1.3 修正 per QC-MF-3，對齊 §1.2 conservative range 下界 0.5-2.0 bps net per close attempt；原 v1.1 +1.5 bps 與 §1.2 fee saving revision 數學矛盾）|
 | AC-12 | operator 顯式 sign-off |
 | AC-13 | AMD 補件（live carve-out + 翻 flag posture） |
 
@@ -727,7 +732,7 @@ Phase 2a → 2b → 3 共 3 phase × 8 exit_reason × 2 env = **48 test points**
 
 | AC | 內容 |
 |---|---|
-| **AC-18** | **`close_maker_fallback_to_taker_rate ≥ 95% over 7d`** per env（v1.2 §5.5 race fallback gap 新增，per Wave 1 Track E3 finding：當前 entry path 70% PostOnly timeout 直接放棄，close path 不可繼承此行為；fallback to taker rate < 95% = 可能 silent abandonment regression，違 §二 #5 生存 > 利潤）|
+| **AC-18** | **`close_maker_fallback_to_taker_rate ≥ 95% over 7d`** per env（v1.2 §5.5 race fallback gap 新增，per Wave 1 Track E3 finding：當前 entry path 70% PostOnly timeout 直接放棄，close path 不可繼承此行為；fallback to taker rate < 95% = 可能 silent abandonment regression，違 §二 #5 生存 > 利潤）。**v1.3 sub-clause (per QC-SF-6)**：per env 7d 樣本算 Wilson 95% CI lower vs 95%；CI lower < 90% → WARN；CI lower < 85% → FAIL（mirror AC-14 mechanism；point estimate gating 在 small-n 容易誤判，IMPL phase healthcheck [62] sub-check SQL 補 Wilson 計算 per QC-SF-6） |
 | **AC-19** | **14d extended observation `close_maker_fill_rate ≥ 30%`**（v1.2 §10.1 14d pilot 新增，per Wave 1 Track E3 conservative discount：close fill rate 預估 15-25% vs entry 27%，14d 確認 fill rate stability；< 30% → Phase 2b BLOCKED + spec 修訂或 reject）|
 
 ---
@@ -755,7 +760,7 @@ Phase 2a → 2b → 3 共 3 phase × 8 exit_reason × 2 env = **48 test points**
 | §二 #6 失敗默認收縮 | CONDITIONAL | cold-boot=false / live 預設不啟用 / 三段灰度 |
 | §二 #8 交易可解釋 | CONDITIONAL | 新欄位 V### migration（F-FA-1 P1） |
 | §二 #9 災難保護 pending maker on shutdown | CONDITIONAL | cancel_token 路徑 cancel_resting_maker_order best-effort；authorization 失效 → 清 pending |
-| §二 #16 組合風險 maker pending 期 portfolio under-estimate | CONDITIONAL | request_qty vs filled_qty exposure 計算（F-FA-2 verify） |
+| §二 #16 entry-side resting maker pending 期 portfolio under-estimate（既有 systemic gap，新 P1 ticket option A 平行解；per Wave 1 Track A3 verify finding，close path is_reducing→allow() 不觸 portfolio gate 不引入新 risk vector；v1.3 framing 對齊 QC §7 反問 5）| CONDITIONAL | `P1-PORTFOLIO-RESTING-EXPOSURE-1` 平行 IMPL（A3 verify report §8 + §15 ticket scope）|
 
 ### 12.3 量化 risk - 9 條安全不變量
 
@@ -853,12 +858,14 @@ FA 評估：9/9 PASS or PASS-with-stated-mitigation；**無 BLOCKER**。
 | 2026-05-15 | v1.0 | 初版（PM/PA/FA 3-agent verdict 整合）| Main session |
 | 2026-05-15 | v1.1 | 4-agent (QC+FA+BB+MIT) round-2 consolidated patch — 17 must-fix（4 consensus + 13 unique）+ 14 should-fix 全 integrated；§1.2 fee saving 4.5→3.5 bps + net 推導；§4.3 phys_lock_gate4_giveback timeout 30→15s + buffer 2→1 + spread guard + small-tick；§4.4 V094 hybrid schema explicit + enum allowlist + Linux PG dry-run + non-training invariant；§5.4 dynamic backoff per-symbol → conditional global；§6.1 reject_cooldown 升 P0 prereq；§6.2 classifier reuse entry enum + side flag（不新建 Close*Variant）；§8.1 Wilson CI + sample-size + NULL ladder + reject sample healthcheck；§9.2 +4 新 test；§11 AC-1..AC-13 連續 + AC-14/15/16/17 4-agent must-fix；§14 IMPL prereq 4→6 條件；§15 後續工作項對齊 | PA per main-session 派 Wave 1 Track A1 |
 | 2026-05-15 | v1.2 | A3+E3 finding consolidated（fee saving revision + race fallback gap + 14d pilot + P1+P2 ticket open）— §1.2 fee saving 3.5/+0.65 bps → 0.5-2.0 bps net per close attempt（per E3 empirical 0.66/0.95/3.31 三層解讀，引 E3 report path）+ 全年估 $160-$400 → $50-$200；§1.2 加 E3 三個意外發現（orders.intent_id NULL / orders.status fire-and-forget / 無 fallback to taker）；§5.5 NEW Race E mandatory fallback to taker（IMPL gate + 3 unit test + healthcheck [62] sub-check）；§10.1 Phase 2a 7d → 14d (7d primary + 7d extended observation)；§11.7 NEW AC-18 close_maker_fallback_to_taker_rate ≥ 95% + AC-19 14d close_maker_fill_rate ≥ 30%；§12.1 risk table 新 row HIGH「Close maker fallback 直接放棄 inherit entry-side gap」；§15 NEW `P1-PORTFOLIO-RESTING-EXPOSURE-1`（PA → E1，3 person-day，平行 Phase 1b）+ `P2-ORDERS-INTENT-ID-WRITER-GAP-1`（E1，1 person-day，N+2 backlog）| PA per main-session 派 Wave 1.5 (post-Track A3+E3) |
+| 2026-05-15 | v1.3 | Wave 3a 4-agent re-review consolidation（QC + FA + BB + MIT verdict 4/4 APPROVED；QC 1 NEW MUST-FIX QC-MF-3 + 1 NEW SHOULD-FIX QC-SF-6；MIT 2 P3 advisory；A3 §12.2 framing 微調）— §11 開頭加 v1.3 patch footnote × 2（QC-MF-3 + QC-SF-6 邏輯）；**§11.1 AC-5** +1.5 → **+0.5 bps for n≥50 cells / directional only (≥ 0) for n<30 cells** (per QC-MF-3，對齊 §1.2 conservative range 下界；原 +1.5 與 §1.2 0.95 中性矛盾)；**§11.3 AC-11** +1.5 → **+0.5 bps** (per QC-MF-3，對齊 §1.2 下界)；**§11.7 AC-18** 補 Wilson-CI sub-clause（per QC-SF-6，CI lower < 90% → WARN，CI lower < 85% → FAIL，mirror AC-14 mechanism）；§5.5 line 410-411 加 footnote 引用 IMPL phase healthcheck [62] sub-check SQL Wilson 計算；§12.2 line 758 framing「組合風險 maker pending under-estimate」改「entry-side resting maker pending 期 portfolio under-estimate（既有 systemic gap，新 P1 ticket option A 平行解；close path is_reducing→allow() 不觸 portfolio gate 不引入新 risk vector）」（per QC §7 反問 5 衍生 + Wave 1 Track A3 verify 結論）；MIT-AC-19-Stratification-NOTE per-strategy + per-symbol 建議 OPTIONAL deferred IMPL phase healthcheck（不入 spec text，避免 over-spec）| PA per main-session 派 Wave 1.5b (Wave 3a re-review consolidation) |
 
-**Sign-off Status**（v1.2 更新）：
-- PM: APPROVED-CONDITIONAL（6 條件 + 6 governance gates；v1.2 incremental patch 不改條件數量，僅增 AC + ticket）
-- PA: READY-FOR-SPEC（A3 portfolio_var verify ✅ MAINTAIN + P1 ticket option A 已 PM 預批；A4 W-C Caveat 2 guard tests + V094 兩段式 + writer gap explicit ✅；E3 maker fill empirical baseline ✅）
+**Sign-off Status**（v1.3 更新）：
+- PM: APPROVED-CONDITIONAL（6 條件 + 6 governance gates；v1.3 純 numerical / cosmetic patch 不改條件數量，僅修 AC 數值 + framing）
+- PA: READY-FOR-SPEC（A3 portfolio_var verify ✅ MAINTAIN + P1 ticket option A PM 預批；A4 W-C Caveat 2 guard tests + V094 兩段式 + writer gap explicit ✅；E3 maker fill empirical baseline ✅；Wave 3a 4-agent re-review consolidation ✅）
 - FA round-1: APPROVED-CONDITIONAL（5 conditions）
 - 4-agent round-2 consolidated: 4/4 APPROVED-CONDITIONAL（17 must-fix + 14 should-fix integrated 進 v1.1 + AMD v0.2）
-- Wave 1.5 v1.2 patch: pending Wave 3 4-agent short re-review on AMD v0.3 + spec v1.2
+- Wave 3a 4-agent short re-review on AMD v0.3 + spec v1.2: 4/4 verdict — QC APPROVED-CONDITIONAL (1 NEW MUST + 1 NEW SHOULD) / FA APPROVED (4 cosmetic) / BB APPROVED (per `2026-05-15--amd_v0_3_spec_v1_2_bb_short_re_review.md`) / MIT APPROVED (2 P3 advisory)
+- Wave 1.5b v1.3 + AMD v0.4 patch: ✅ DONE (本次)；IMPL prereq 條件 2 SATISFIED
 
-**下一步**：PM 派 Wave 2 (V094 spec + reject_cooldown split) 並行 Wave 3 (4-agent short re-review on v0.3/v1.2 + BB 字典 6 處更新) → 等三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）+ Prereq 5/6 → IMPL 工作鏈啟動。
+**下一步**：IMPL prereq 條件 2 解 → 等三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）+ 條件 6 reject_cooldown split (Wave 2b E1 in progress) + 條件 5 全 RESOLVED → Wave 3b BB 字典 6 處 + Wave 3.5 Linux V81/V91/V92/V93 backlog migration apply → IMPL kickoff Wave 4 (PA finalize IMPL plan → E1 5-worktree).
