@@ -2395,3 +2395,27 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   remains blocked by missing signed live auth and P0 LG/OPS/edge gates.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_intent_freeze_27_post_grace_closure.md`.
+
+## 2026-05-15 W-AUDIT-8a Phase C0 Liquidation Inventory
+
+- Completed Phase C0 inventory and guard packet. No production WS subscription
+  change, no writer revival, no DB write, no rebuild/restart/auth change.
+- `market.liquidations` exists on `trade-core` with 5 columns (`ts`, `symbol`,
+  `side`, `qty`, `price`), 0 rows, PK `(symbol, ts, side)`, ts desc index,
+  Timescale compression enabled, compress-after 7d, retention 90d.
+- Source inventory: production `full_subscription_list()` emits only kline,
+  tickers, `orderbook.50`, and publicTrade. Legacy parser/dispatch branches
+  remain, but `MarketDataMsg::Liquidation` and writer path are deleted, so
+  liquidation is inactive until C1 deliberately restores a safe producer.
+- Added guard test
+  `multi_interval_topics::tests::test_production_subscription_excludes_dormant_poison_topics`;
+  corrected stale `topics_per_symbol=10` log to `7` and updated the
+  `enable_extended_ws` comment.
+- Verification: `cargo test -q -p openclaw_engine multi_interval_topics`
+  PASSed (11 tests). `rustfmt --check` on the two touched Rust modules passed;
+  checking `config/mod.rs` traverses pre-existing formatting drift in config
+  submodules unrelated to this patch.
+- C1 remains blocked until BB standalone proof validates a safe liquidation
+  topic for 24h with no handler-not-found, poisoning, or rate-limit incident.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md`.
