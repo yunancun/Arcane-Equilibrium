@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-05-15 22:13 CEST
+- completed W-AUDIT-8b Funding Skew QC/MIT/BB review integration
+- updated spec to v0.2 review/design: 30m primary horizon, branch-separated hypotheses, explicit K_total >= K_prior+4050, DSR>=0.95, PBO fail-closed, raw panel as-of joins, funding attribution excluded, and BB funding interval/source-mode fields
+- trade-core panel freshness probe passed: funding=PASS(20929ms), oi=PASS(20969ms)
+- next task is PA/E1 read-only Stage 0R query/report packet only; no strategy implementation, demo launch, runtime/config/risk/auth/DB mutation, or funding payment edge credit
+
 2026-05-15 21:53 CEST
 - closed `P1-A4C-RCA-1` after QC(default) + MIT(default) both rejected a new preregistered A4-C revive hypothesis
 - kept A4-C diagnostic-only; did not open `P1-A4C-REV-1` or authorize a same-feature Stage 0R rerun

@@ -26,6 +26,24 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-05-15 22:13 CEST
+Task:
+- Integrate `W-AUDIT-8b` Funding Skew Directional QC/MIT/BB review and define the Stage 0R replay design boundary.
+
+Chain:
+- PM -> QC(default) + MIT(default) + BB(default) -> PM
+
+Ownership:
+- QC(default): hypothesis/statistical gates, K/DSR/PBO, sample floors
+- MIT(default): raw panel data contract, stale/leakage controls, funding attribution, CV protocol
+- BB(default): Bybit funding/OI semantics, interval/source-mode fields, REST/WS/rate-limit posture
+- PM: integrate verdicts into spec v0.2, TODO/active-plan/memory/report updates
+
+Result:
+- `W-AUDIT-8b` conditionally approved for Stage 0R replay design only.
+- Strategy implementation and demo spend remain blocked.
+- Next task is PA/E1 packet for read-only `funding_skew_directional.v0_2` query/report.
+
 2026-05-15 21:53 CEST
 Task:
 - Finalize `P1-A4C-RCA-1` revise-or-archive verdict and start the `W-AUDIT-8a C1` standalone proof path.

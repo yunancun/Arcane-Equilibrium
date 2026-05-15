@@ -1,8 +1,8 @@
 # Active Plan
 
-Version: v1.8
+Version: v1.9
 Date: 2026-05-15
-Source: TODO.md v31 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-8a Phase C0/C1 update + A4-C PM/PA/FA archive/RCA card + A4-C RCA final + W-AUDIT-8b spec v0.1 + v30/v31 source-sync checkpoints
+Source: TODO.md v32 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-8a Phase C0/C1 update + A4-C PM/PA/FA archive/RCA card + A4-C RCA final + W-AUDIT-8b spec v0.2 review/design + v30-v32 source-sync checkpoints
 
 ## Current Sprint
 
@@ -17,7 +17,7 @@ Source: TODO.md v31 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-
 - `[67]`: fixed by feature-baseline apply; active rows restored to 646 across 19 symbols / 34 feature names.
 - `[27]`: post-grace closed by direct 2026-05-15 18:12 UTC narrow probe PASS; it is no longer the active hard blocker.
 - W-AUDIT-8a Phase C0: SOURCE/DOC closed. `market.liquidations` exists but has 0 rows; production topic builders are guarded against dormant/poison liquidation topics. C1 60s smoke passed as `SMOKE_PASS_NOT_C1_PROOF`; 24h isolated `allLiquidation.BTCUSDT` proof is running on `trade-core` as PID `4100789` since `2026-05-15T19:53:09Z`. C1 still waits for full 24h BB standalone WS proof + MIT sign-off.
-- W-AUDIT-8b: Funding Skew Directional spec v0.1 exists; next step is QC/MIT/BB review and Stage 0R replay design, not implementation.
+- W-AUDIT-8b: Funding Skew Directional spec v0.2 review/design is done. QC/MIT/BB approve only read-only Stage 0R replay design, not implementation. Next step is a PA/E1 packet for the replay query/report with 30m primary horizon, `K_total >= K_prior+4050`, `DSR>=0.95`, PBO fail-closed, raw panel as-of joins, and funding attribution `excluded`.
 - Replay-first validation: before sign-off, first decide whether replay/counterfactual replay can check the claim. Run it when applicable and safe; otherwise state why DB/live-runtime/WS/healthcheck evidence is required.
 - Passive healthcheck source correction: `[4] phys_lock_runtime` and `[Xb] pipeline_triangulation` are fixed/PASS by `7108035d`.
 
@@ -35,6 +35,7 @@ Source: TODO.md v31 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-
 - 🚨 `P0-EDGE-1`: 5 textbook strategies still lack durable positive net edge.
 - 🚨 `P0-LG-1/2/3` and `P0-OPS-1..4`: true-live infrastructure and governance still incomplete.
 - ⏳ W-AUDIT-8a C1: 24h standalone proof is running, but liquidation writer/pulse revival remains blocked until the report passes and BB/MIT sign off.
+- 🟡 W-AUDIT-8b: review/design complete, but strategy implementation and demo spend remain blocked until a future Stage 0R replay packet emits an eligible concrete `strategy × symbol × branch`.
 
 ## Available P1 Tasks
 
@@ -54,4 +55,4 @@ Source: TODO.md v31 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-
 
 ## Next Step
 
-Do not launch Stage 1 demo micro-canary from A4-C or the OI-confirmed 5m spec. `P1-A4C-RCA-1` is closed no-revive, so active alpha engineering moves to the running 24h W-AUDIT-8a C1 BB standalone proof plus W-AUDIT-8b Funding Skew QC/MIT/BB review and replay design. W-AUDIT-8c Liquidation Cluster waits for C1 and MIT schema sign-off. True-live remains blocked by edge/LG/ops gates.
+Do not launch Stage 1 demo micro-canary from A4-C, W-AUDIT-8b review/design, or the OI-confirmed 5m spec. `P1-A4C-RCA-1` is closed no-revive. Active alpha engineering now splits between the running 24h W-AUDIT-8a C1 BB standalone proof and a W-AUDIT-8b read-only Stage 0R replay query/report packet. W-AUDIT-8c Liquidation Cluster waits for C1 and MIT schema sign-off. True-live remains blocked by edge/LG/ops gates.

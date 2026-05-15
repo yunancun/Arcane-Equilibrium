@@ -249,6 +249,7 @@
 | 2026-05-15 | P0-MICRO-PROFIT alpha prework：新增 W-AUDIT-8a C1 standalone `allLiquidation.{symbol}` proof plan/script、W-AUDIT-8b Funding Skew spec v0.1，並按 Stage 0R R² rule 將 A4-C archive from promotion / diagnostic-only | workspace/reports/2026-05-15--micro_profit_alpha_prework.md |
 | 2026-05-15 | TODO v30 three-side source sync：移除 active docs 舊 `TODO.md v28` / `81bc0862` sync wording，記錄 source-only sync boundary；無 runtime/rebuild/auth/DB/demo/live 動作 | workspace/reports/2026-05-15--todo_v30_three_side_sync.md |
 | 2026-05-15 | A4-C RCA final + C1 proof start：QC/MIT close `P1-A4C-RCA-1` no-revive；`P1-A4C-REV-1` not opened；C1 60s smoke passed and 24h isolated `allLiquidation.BTCUSDT` proof started on `trade-core` PID `4100789` | workspace/reports/2026-05-15--a4c_rca_final_and_c1_proof_start.md |
+| 2026-05-15 | W-AUDIT-8b Funding Skew review/design：QC/MIT/BB conditional approve Stage 0R design only；spec v0.2 locks 30m primary, explicit K/DSR/PBO, raw panel as-of joins, funding attribution excluded, and BB funding interval/source-mode fields | workspace/reports/2026-05-15--w_audit_8b_review_stage0r_design.md |
 | 2026-05-10 | Live/Demo GUI 今日 PnL 口徑修正：確認 LiveDemo 今日 DB net 為 +1.578890，舊 GUI 約 -45.45 來自 session/lifetime 手續費 bucket 混入；新增 backend `net_pnl_today` 並讓 Live tab/console 側欄共用，補 Demo/Live endpoint contract tests；無 restart/rebuild | workspace/reports/2026-05-10--live_today_pnl_gui_fix.md |
 | 2026-05-09 | P0-V2-NEW-3 DSR/PBO evidence push: added real-return promotion evidence builder, Demo-only edge scheduler push, V079 strategy_trial_ledger/report columns, and fail-closed selection evidence handling; source/test only, runtime V079 apply/rebuild pending | workspace/reports/2026-05-09--p0_v2_new_3_dsr_pbo_evidence_push.md |
 | 2026-05-09 | P0-V2-NEW-1 Donchian leak-bias source/test closure: locked runtime IndicatorEngine snapshots to prior-bar Donchian and added bb_breakout 5m hard-gate regression so current-bar spikes cannot contaminate 5m demo evidence | workspace/reports/2026-05-09--p0_v2_new_1_donchian_leak_bias.md |
@@ -2489,3 +2490,19 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - C1 remains blocked until the 24h report passes and BB/MIT sign off; no
   production subscription, parser/writer revival, DB write, rebuild/restart,
   auth renewal, paper/demo launch, risk/sizing/config mutation, or live action.
+
+## 2026-05-15 W-AUDIT-8b Review + Stage 0R Design
+
+- QC(default), MIT(default), and BB(default) reviewed Funding Skew v0.1 and
+  conditionally approved Stage 0R replay design only.
+- No strategy implementation, demo launch, runtime config change, risk/sizing
+  edit, production mutation, or funding-payment edge credit is authorized.
+- Spec v0.2 locks: 30m primary horizon, 15m/60m sensitivity counted in K,
+  crowded-long fade and crowded-short squeeze as separate branches,
+  `K_total >= K_prior+4050`, `DSR>=0.95`, PBO fail-closed, raw
+  `panel.funding_rates_panel` / `panel.oi_delta_panel` as-of joins,
+  funding attribution `excluded`, and Bybit funding interval/source-mode fields.
+- Runtime panel freshness probe at 2026-05-15 22:13 CEST passed:
+  `funding=PASS(20929ms)`, `oi=PASS(20969ms)`.
+- Next work is PA/E1 packet for a read-only `funding_skew_directional.v0_2`
+  Stage 0R query/report only.
