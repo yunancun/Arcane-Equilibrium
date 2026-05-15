@@ -22,6 +22,7 @@ MODULE_NOTE (EN/中):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -262,6 +263,7 @@ class AIService:
         except Exception:
             pass  # fail-open / 失敗開放
 
+        t0 = time.monotonic()
         try:
             response = await asyncio.to_thread(
                 ollama.generate,
@@ -273,10 +275,17 @@ class AIService:
                 think=False,
             )
 
+            elapsed_ms = (time.monotonic() - t0) * 1000
             if not response.success:
                 logger.warning(
                     "Strategist Ollama call failed: %s / 策略師 Ollama 調用失敗",
                     getattr(response, "error", "unknown"),
+                )
+                # WP-04 F-04: 記錄失敗的 Ollama 調用
+                self._record_strategist_invocation(
+                    model_tier=model_tier, prompt_text=prompt,
+                    response_text=None, latency_ms=elapsed_ms,
+                    success=False, strategy=strategy, symbol=symbol,
                 )
                 return {
                     "status": "evaluated",
@@ -287,17 +296,30 @@ class AIService:
                     "reasoning": "Ollama call failed — retain current params",
                 }
 
-            # Parse JSON param recommendations from Ollama response
+            # WP-04 F-04: 記錄成功的 Ollama 調用
+            self._record_strategist_invocation(
+                model_tier=model_tier, prompt_text=prompt,
+                response_text=response.text, latency_ms=elapsed_ms,
+                success=True, strategy=strategy, symbol=symbol,
+            )
+
             # 從 Ollama 回應中解析 JSON 參數推薦
             recommended = self._parse_strategist_response(response.text, strategy, symbol)
             return recommended
 
         except Exception as exc:
+            elapsed_ms = (time.monotonic() - t0) * 1000
             logger.error(
                 "Strategist evaluation error (fail-closed → empty): %s / 策略師評估錯誤: %s",
                 str(exc)[:core.ERROR_MSG_MAX_LEN], str(exc)[:core.ERROR_MSG_MAX_LEN],
             )
             self._stats["errors"] += 1
+            # WP-04 F-04: 記錄異常的 Ollama 調用
+            self._record_strategist_invocation(
+                model_tier=model_tier, prompt_text=prompt,
+                response_text=None, latency_ms=elapsed_ms,
+                success=False, strategy=strategy, symbol=symbol,
+            )
             return {
                 "status": "evaluated",
                 "agent": "strategist",
@@ -416,6 +438,53 @@ class AIService:
         if not 0.0 < pct < 1.0:
             return default
         return pct
+
+    @staticmethod
+    def _record_strategist_invocation(
+        *,
+        model_tier: str,
+        prompt_text: str | None,
+        response_text: str | None,
+        latency_ms: float,
+        success: bool,
+        strategy: str,
+        symbol: str,
+    ) -> None:
+        """WP-04 F-04: 記錄 strategist IPC handler 的 AI 調用到 agent.ai_invocations。
+        AIService 不繼承 BaseAgent，故直接呼叫 AgentEventStore singleton。
+        失敗不影響 IPC 回應（fail-soft observability）。"""
+        try:
+            from .agent_event_store import get_agent_event_store
+            store = get_agent_event_store()
+            prompt_hash = (
+                hashlib.sha256(prompt_text.encode()).hexdigest()[:16]
+                if prompt_text else None
+            )
+            store.record_ai_invocation(
+                provider="ollama",
+                model=model_tier,
+                tier="L1",
+                purpose="strategist_evaluate_ipc",
+                prompt_hash=prompt_hash,
+                input_tokens=None,
+                output_tokens=None,
+                cost_usd=0.0,
+                latency_ms=latency_ms,
+                success=success,
+                response_summary=(response_text or "")[:200] if response_text else None,
+                context_id=f"{strategy}:{symbol}",
+                details={
+                    "agent": "strategist",
+                    "handler": "ai_service_dispatch",
+                    "strategy": strategy,
+                    "symbol": symbol,
+                },
+            )
+        except Exception:
+            # 觀測性寫入失敗不阻塞 IPC 回應
+            logger.debug(
+                "WP-04: strategist ai_invocation record failed (non-fatal)"
+            )
 
     @staticmethod
     def _parse_strategist_response(

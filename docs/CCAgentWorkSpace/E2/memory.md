@@ -2227,3 +2227,24 @@ Stalled sub-agent: `a0e1741f` 600s watchdog killed in memory append phase
 - **5 並行 E1 IMPL chain test 數 align 規律**：worktree pre-merge 數字差異 = 該 E1 加 N acceptance test (E1-A 9 / E1-B 6 / E1-C 2 / E1-D 4 / E1-E 5 = 26 new) + 各 worktree baseline drift（前 sibling stash leak / 後 sibling not merged 影響）。Merge 後 main HEAD 為**最終 sibling 數字**而非 sum (5 E1 改動最終整合到 same baseline 上)。看到 worktree 2801 vs main 2794 不要慌，先 focused test 對齊
 - **dead code warning 是否為改造引入**：必 git show baseline commit 抓 fn/method 用法 vs 改造後是否減少；若 baseline 已 visibility 邊界 dead 而 P0 沒新增 caller 也沒移 caller = pre-existing 不算改造引入
 
+---
+
+## 2026-05-16 Wave 2 Full System Audit (WP-03/04/10) 4-WP batch review
+
+Report: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--wave2_full_system_audit_wp03_04_10.md`
+Diff: 9 files, +395/-9 lines (unstaged working tree)
+
+### Verdict: RETURN to E1 (3 findings)
+
+WP-03 math correct (OLS residual sigma n-2 dof); WP-10 Bybit 110017 clean; WP-04 has 3 issues.
+
+### Pattern 學習追加 (item 69-72)
+
+69. **OLS residual sigma n-2 vs n-1 denominator 兩處並存是 deliberate design**：`compute_ou_step` 用 n-2（unbiased OLS with intercept+slope）；`OuResidualSigma::estimate_from_window` 用 n-1（conventional OU estimation per Ait-Sahalia 2002）。兩者 comment 各自解釋 dof 選擇理由。E2 不要求統一 — compute_ou_step 是 grid spacing production path（需 conservative sigma），OuResidualSigma 是 Phase A diagnostic estimator（convention-following）。WP-03 test `test_wp03_residual_vs_phase_a_estimator_directional_consistency` 顯式驗證 n-2 >= n-1*0.99 方向一致性。
+
+70. **@staticmethod 被 self. 呼叫 = Python 合法但 code smell**：Python descriptor protocol 允許 `self.static_method()`，runtime 不傳 self。但 code review 應 flag 為 MEDIUM 要求改 `cls.` 或 `ClassName.` 呼叫 — 讀者會誤解 method 依賴 instance state。
+
+71. **f-string 在非 logger 位置的 observability field 值構成**：`context_id=f"{strategy}:{symbol}"` 不是 logger 格式化問題（str concat 寫入 DB），但一致性建議用 `"%s:%s" % (strategy, symbol)` 或 f-string — 此處 f-string 語義上不涉及 log 注入。E2 判 LOW 不阻。
+
+72. **budget_config.toml root vs settings/ 結構差異不等於數值不一致**：兩檔 caps 區數值完全一致（daily 2.0 / monthly 60.0），但 section ordering 和 attention_tax config 不同 — 這是兩檔各自角色不同（root=schema template, settings/=runtime canonical），不是 WP-04 bug。E2 不要求結構合併。
+

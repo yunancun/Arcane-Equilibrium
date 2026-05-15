@@ -24,8 +24,10 @@ grade_d_threshold = 0.8
 
 [caps]
 alert_threshold_pct = 0.8
-daily_usd_max = 100.0
-monthly_usd_max = 150.0
+# DOC-08 §12 規定 L0+L1 每日預算上限 $2
+daily_usd_max = 2.0
+# 月預算與日預算同比例調整（30d x $2 = $60）
+monthly_usd_max = 60.0
 exhaustion_cooldown_minutes = 60
 
 [caps.per_scope_caps]

@@ -1,7 +1,24 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-16（Wave 1 closed: WP-01/02/05/09）
+> 最後更新：2026-05-16（Wave 2 closed: WP-03/04/07/10）
+
+### Wave 2 CLOSED — WP-03 OU Sigma + WP-04 AI Observability + WP-07 Dead Code + WP-10 Bybit — 2026-05-16
+
+**WP-03 OU Sigma Residual Fix (P1)**：`compute_ou_step()` hot path 的 sigma 估計從 raw second moment `sqrt(Σdx²/n)` 改為 OLS 殘差 `sqrt(Σε²/(n-2))`。舊公式把 mean-reversion drift 混入 noise → sigma 偏高 → grid spacing 過寬。5 新測試全 PASS（residual < raw / regression / dof guard / Phase A 方向一致）。
+
+**WP-04 AI Observability + Budget (P1)**：
+- F-04：strategist Ollama 調用加 `_record_strategist_invocation()` → 寫入 `agent.ai_invocations` table via `AgentEventStore`（fail-soft）；含 latency_ms / prompt_hash / success 追蹤
+- F-01：`budget_config.toml` ×2 daily_usd_max $100→$2 / monthly $150→$60（DOC-08 §12 合規）
+- F-09：`evaluate.rs` hardcoded `model_tier: "l1_9b"` 加 TODO 標記
+
+**WP-07 Dead Code + Schema (P2, FA read-only audit)**：確認 `rl_transitions` + `symbol_clusters` 為 dead tables（V004 remnant，0 rows，0 readers）；7 dead openclaw_core modules 3186 LOC；`PerceptionPlane::validate_for_decision` 0 production callers；Python H0Gate 為 display-only。4 P2 follow-up tickets drafted。
+
+**WP-10 Bybit Integration (P1)**：BB-A-1 `ReduceOnlyReject=110017` enum variant + `from_code` mapping + 5-classifier false assertions；BB-M-1 `backtest_routes.py` mainnet URL → `os.getenv("OPENCLAW_BYBIT_BACKTEST_URL", "https://api-demo.bybit.com")`。
+
+**E2 review**：consolidated adversarial review PASS。BB-MF-3 comment contamination in `is_exchange_backoff` 發現並 revert。LOC warnings：grid_helpers.rs 809 / ai_service_dispatch.py 836 / bybit_rest_client_tests.rs 830（均 <2000）。
+
+---
 
 ### Wave 1 CLOSED — WP-01 GUI Safety + WP-02 Donchian + WP-05 Security + WP-09 Docs — 2026-05-16
 
