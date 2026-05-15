@@ -374,33 +374,43 @@ active work starts at §10 / §11.2 / §11.3.
 | `P1-EDGE-P2-3-PH1B-LINEAGE-GUARD` | 4 | 新 close audit 欄位不走 spine lineage 通道的 guard tests + invariant | F-FA-3（FA verdict）；FA-MF-2 升 must-fix；W-C Caveat 2 不變式 explicit |
 | `P1-EDGE-P2-3-PH1B-ML-INVARIANT` | 4 | E3 grep guard rule：`details->>'close_maker_*'` 禁餵任何 ML training pipeline（LinUCB / scorer / quantile / MLDE / DL3）| MIT-MF-1 non-training surface invariant；E3 PR pre-merge gate |
 | `P1-BYBIT-DICT-PH1B-UPDATE` | 4 | 字典手冊 6 處更新（PostOnly+reduceOnly 合法 / cancel rate limit / demo silent degradation / instrument cache offset guidance / reject classifier reuse / new §1.10 close maker dispatch）| BB-MF-1 + BB §10 字典更新清單；BB 工作 |
+| `P1-PORTFOLIO-RESTING-EXPOSURE-1` | 4 | **Wave 1.5 NEW**（per Track A3 portfolio_var verify finding 2026-05-15 commit `96995b61`）：fix `compute_correlated_exposure_pct` / `compute_exposure_pct` 在 `intent_processor/mod.rs:761-805` 把 `paper_state.resting_orders.qty` 加進 effective exposure 計算 | est. 3 person-day, 250 LOC；獨立平行 Phase 1b IMPL，互不阻塞；解 entry-side resting maker 既有 systemic gap；對 close-maker-first 是「nice-to-have but not blocker」；scope 詳見 spec §15 + A3 verify report §8；派發時點：Wave 4+ |
 
 ### §11.5 EDGE-P2-3 Phase 1b — Final Dispatch Plan (2026-05-15 4-agent review 後拍板)
 
 **Status**：AMD-02 v0.1 + spec v1.0 經 PM/PA/FA 3-agent + QC/FA/BB/MIT 4-agent 兩輪 review，全部 APPROVED-CONDITIONAL。**現在進入 pre-IMPL prep phase**（可並行派工，不阻 3-gate）。3-gate（P0-EDGE-1 / W-AUDIT-8b Stage 0R / W-AUDIT-8a C1）解除後才進真 IMPL。
 
-**Pre-IMPL prep — 7 個工作組可並行派**：
+**Wave 1 Status (2026-05-15)**：
+- ✅ Track A1 (PA AMD v0.2 + spec v1.1 patch, 17 must-fix + 14 should-fix) — `2e7a1b2f`
+- ✅ Track A3 (PA portfolio_var SoT verify) — `96995b61` MAINTAIN + 新 P1 ticket option A PM 預批
+- ✅ Track A4 (PA W-C Caveat 2 guard tests + V094 schema 兩段式 + writer gap) — `a5a7107c`
+- ✅ Track E1 (E1 KAMA fallback gate) — `9df44183`，Wave 1.5 E4 regression test land `34aa7086`
+- ✅ Track E3 (PA maker fill empirical baseline) — `b98706d5` fee 4.5→0.5-2.0 bps + no-fallback-to-taker gap identified
+- ✅ Wave 1.5 (本 patch chain): spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3 — IN PROGRESS
 
-| Track | Owner | Task | 阻塞關係 | ETA |
-|---|---|---|---|---|
-| **Track A1** | PA | **AMD v0.2 + spec v1.1 consolidated patch**（17 must-fix + 14 should-fix；含 §1 framing「execution-quality」/ Wilson-CI gating / hybrid schema / FDR multiple testing / phys_lock timeout 30→15s / dynamic backoff / IMPL prereq 5+6 / W-C Caveat 2 explicit） | None；最高優先 | 1-2 hour |
-| **Track A2** | PA | **V094 hybrid schema migration spec** — `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 為 new column + 兩 price 走 JSONB；Guard A/B/C；NOT VALID enum CHECK；Linux PG dry-run × 2 round；mirror V083 precedent | 等 A1 schema 段落落定 | 半天 |
-| **Track A3** | PA | **F-FA-2 portfolio_var exposure SoT verify** — 確認 portfolio_var/correlation gate 用 request_qty 而非 filled_qty 計 effective exposure；§二 #16 CONDITIONAL 解除 | None；獨立 worktree | 1-2 hour |
-| **Track A4** | PA | **F-FA-3 audit 欄位不走 spine lineage guard tests 設計** — W-C Caveat 2 invariant 保護；E2 必加 grep guard rule | None；獨立 worktree | 1-2 hour |
-| **Track E1** | E1 | **P0 reject_cooldown entry/close 拆分**（修現存 silent degradation bug：entry reject 凍住同 symbol close path）；pre-Phase 2a Demo 必 land | None；獨立修現存 bug | 1d（含 E2 + E4）|
-| **Track E2** | E1 | **MA KAMA fallback gate** — [strategy_impl.rs:146-156](rust/openclaw_engine/src/strategies/ma_crossover/strategy_impl.rs#L146) `debug!` → `warn!` + skip entry when KAMA unavailable；W3-6 by-the-way scope-in | None；30 min 獨立修復 | 30 min |
-| **Track E3** | PA / E1 | **Maker fill rate empirical baseline 查** — 從 order events / paper_state log 計 entry maker submitted vs filled 比例 + 取消率 + max latency；為 savings 估計提供事實基礎 | None；read-only 查詢 | 1 hour |
-| **Track BB1** | BB | **字典手冊 6 處更新**（PostOnly+reduceOnly 合法 / cancel rate limit / demo silent degradation 警告 / instrument cache offset guidance / reject classifier reuse / new §1.10 close maker dispatch） | None；BB 工作 | 1-2 hour |
+**Pre-IMPL prep — 7 個工作組可並行派**（Wave 1 done 後更新）：
 
-**Dispatch order recommendation**（不依賴 3-gate）：
-1. **Wave 1（並行 5 worktree）**：A1（PA） + A3（PA） + A4（PA） + E2（E1, 30min） + E3（PA/E1, 1h）
-2. **Wave 2（A1 framework 定後）**：A2（PA V094 spec，依賴 A1 schema 段）+ E1（E1 P0 reject_cooldown，可同 Wave 1 開始）
-3. **Wave 3**：BB1（BB 字典）
-4. **Wave 1+2+3 done → IMPL Prereq 5+6 解 + AMD prereq 2 解（patch land）→ 等 3-gate**
+| Track | Owner | Task | 阻塞關係 | ETA | 狀態 |
+|---|---|---|---|---|---|
+| **Track A1** | PA | **AMD v0.2 + spec v1.1 consolidated patch**（17 must-fix + 14 should-fix） | None；最高優先 | 1-2 hour | ✅ DONE `2e7a1b2f` |
+| **Track A2** | PA | **V094 hybrid schema migration spec** — `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 為 new column + 兩 price 走 JSONB；Guard A/B/C；NOT VALID enum CHECK；Linux PG dry-run × 2 round | 等 A1 schema 段落落定 | 半天 | 🔄 Wave 2 |
+| **Track A3** | PA | **F-FA-2 portfolio_var exposure SoT verify** — §二 #16 CONDITIONAL 解除 | None；獨立 worktree | 1-2 hour | ✅ DONE `96995b61` MAINTAIN + P1 ticket |
+| **Track A4** | PA | **F-FA-3 audit 欄位不走 spine lineage guard tests 設計** — W-C Caveat 2 invariant 保護 | None；獨立 worktree | 1-2 hour | ✅ DONE `a5a7107c` + V094 兩段式 + writer gap |
+| **Track E1** (engine) | E1 | **P0 reject_cooldown entry/close 拆分** | None；獨立修現存 bug | 1d（含 E2 + E4）| 🔄 Wave 2 |
+| **Track E2** | E1 | **MA KAMA fallback gate** | None；30 min 獨立修復 | 30 min | ✅ DONE `9df44183` + E4 regression `34aa7086` |
+| **Track E3** | PA / E1 | **Maker fill rate empirical baseline 查** | None；read-only 查詢 | 1 hour | ✅ DONE `b98706d5` |
+| **Track BB1** | BB | **字典手冊 6 處更新** | None；BB 工作 | 1-2 hour | 🔄 Wave 3 |
+
+**Dispatch order recommendation**（Wave 1.5 patch 後更新）：
+1. ✅ **Wave 1（並行 5 worktree）**：A1（PA） + A3（PA） + A4（PA） + E2（E1, 30min） + E3（PA/E1, 1h） — DONE
+2. ✅ **Wave 1.5（本 chain）**：spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3 finding（fee revision + race fallback gap + portfolio MAINTAIN + writer gap explicit）
+3. 🔄 **Wave 2（A1 framework 定後 + Wave 1.5 patch 後）**：A2（PA V094 spec，依賴 v1.2 §4.4 schema 段定）+ E1 (E1 P0 reject_cooldown，可同 Wave 1 開始；BB-MF-3)
+4. 🔄 **Wave 3**：4-agent short re-review on AMD v0.3 + spec v1.2 + BB1（BB 字典 6 處更新）
+5. **Wave 1+1.5+2+3 done → IMPL Prereq 5+6 解 + AMD prereq 2 解（patch land）→ 等 3-gate**
 
 **IMPL kickoff（3-gate 解除後）**：
 - PA finalize IMPL plan → E1 並行 5 worktree（A/B/C/D/E per PA verdict v0.2）→ E2 review → E4 regression → QA → PM sign-off
-- Phase 2a Demo 7d → Phase 2b LiveDemo 7d → operator + AMD live carve-out → Phase 3 Mainnet
+- Phase 2a Demo **14d (7d primary + 7d extended observation per E3 conservative discount)** → Phase 2b LiveDemo 7d → operator + AMD live carve-out → Phase 3 Mainnet
 
 **3-Gate Status（2026-05-15）**：
 - ❌ P0-EDGE-1 — `[40]` 仍 WARN negative realized edge
@@ -504,6 +514,7 @@ active work starts at §10 / §11.2 / §11.3.
 | `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset (D-16 dormant，§9) | ADR-0015 + AMD-2026-05-09-02 accept; Sprint N+6+ |
 | `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → **mounted into `W-AUDIT-8f` (R-3) Hypothesis Pipeline per Decision-3 (P0-DECISION-AUDIT-7)** | Sprint N+5 |
 | `P2-V19-CYCLE` | ✅ DONE 2026-05-15 — TODO cleanup/archive cycle | `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`; TODO under 700-line hygiene target. |
+| `P2-ORDERS-INTENT-ID-WRITER-GAP-1` | **Wave 1.5 NEW**（per Track E3 maker fill baseline 2026-05-15 commit `b98706d5`）：fix `orders.intent_id` 100% NULL writer 漏接；恢復 intent → order linkage 給 Guardian-pass-rate 計算 | est. 1 person-day；不阻 Phase 1b IMPL；E3 finding 1 證實 7d 1394 demo orders / 1021 live_demo orders 全部 `intent_id IS NULL`；無法走 `intents → orders` join 算 Guardian-pass-rate；派發時點：N+2 backlog |
 
 ### §12.1 Sprint N+2 P2 Backlog (PA 2026-05-11)
 
