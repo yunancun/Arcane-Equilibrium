@@ -140,7 +140,10 @@ pub struct EngineBootstrap {
     #[serde(default = "default_true")]
     pub server_side_stops: bool,
 
-    /// Enable extended WS subscriptions (adl-notice, price-limit) / 啟用擴展 WS 訂閱
+    /// Enable extended WS subscriptions (kline/tickers/orderbook/publicTrade).
+    /// Broken liquidation/price-limit/adl-notice topics remain disabled.
+    /// 啟用擴展 WS 訂閱（tickers/orderbook/publicTrade）；已知會毒化連線的
+    /// liquidation/price-limit/adl-notice topic 仍禁用。
     #[serde(default = "default_true")]
     pub enable_extended_ws: bool,
 

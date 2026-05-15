@@ -170,6 +170,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--post_rebuild_sync_7b33ab2e.md` | Post-rebuild sync：runtime code line `7b33ab2e` rebuilt；`[27]` immediate PASS under fresh-restart grace，post-grace closure tracked separately |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--alpha_path_phase_c_dispatch.md` | Alpha path dispatch：A4-C remains GATE-RED；W-AUDIT-8a Phase C split into C0 inventory / C1 revival；current TODO 8b/8c naming made canonical |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_intent_freeze_27_post_grace_closure.md` | `[27] intents_counter_freeze` post-grace direct PASS closure；`[66]`/`[67]` remain PASS；Stage 1 demo still blocked by alpha gates |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md` | W-AUDIT-8a Phase C0 liquidation revival inventory：DB/table/retention/source status + production topic guard test + C1 BB probe contract |
 | `archive/2026-05-15--todo_v24_stale_rows_archive.md` | TODO v24 中过时 active rows / stale claims 归档，包括 V079 pending、engine 5/8 binary、旧 05-09 demo state、旧 `[55]`/`[67]` 判断 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_healthcheck_55_invariant.md` | `[55]` fully-filled plan invariant source-clear report |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--feature_baseline_restore.md` | W-AUDIT-4b feature baseline restore report，646 active rows / 19 symbols / 34 features |

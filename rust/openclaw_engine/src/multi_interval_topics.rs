@@ -228,6 +228,35 @@ mod tests {
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
     }
 
+    /// W-AUDIT-8a Phase C0: production subscriptions must not revive dormant
+    /// / connection-poisoning topics before BB standalone proof.
+    /// W-AUDIT-8a Phase C0：BB 隔離連線證明前，production 訂閱不得復活
+    /// dormant / 會毒化連線的 topic。
+    #[test]
+    fn test_production_subscription_excludes_dormant_poison_topics() {
+        let topics = [
+            full_subscription_list("BTCUSDT"),
+            full_subscription_list_with_intervals("ETHUSDT", &[]),
+            multi_symbol_subscriptions(&["SOLUSDT", "XRPUSDT"]),
+        ]
+        .concat();
+        let forbidden_prefixes = [
+            "liquidation.",
+            "price-limit.",
+            "adl-notice.",
+            "allLiquidation",
+        ];
+
+        for topic in topics {
+            for prefix in forbidden_prefixes {
+                assert!(
+                    !topic.starts_with(prefix),
+                    "production WS topic {topic:?} must not include dormant/poison prefix {prefix:?}"
+                );
+            }
+        }
+    }
+
     /// Test multi-symbol subscription list.
     /// 測試多交易對訂閱列表。
     #[test]

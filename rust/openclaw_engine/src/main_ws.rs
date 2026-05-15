@@ -52,7 +52,7 @@ pub(crate) fn spawn_ws_supervisor(
             }
         }
         info!(
-            topics_per_symbol = 10,
+            topics_per_symbol = 7,
             "extended WS subscriptions / 擴展 WS 訂閱"
         );
         topics
