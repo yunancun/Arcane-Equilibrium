@@ -26,6 +26,21 @@ import os
 
 # ---- connection ----
 
+def _healthcheck_timeout_ms() -> int:
+    """Return bounded PG statement timeout for passive checks.
+
+    The passive wrapper is an observability surface: one expensive diagnostic
+    query must not wedge the whole suite. Default to 45s and allow operators to
+    override within a conservative 5s..5min band.
+    """
+    raw = os.environ.get("OPENCLAW_HEALTHCHECK_STATEMENT_TIMEOUT_MS", "45000")
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 45_000
+    return max(5_000, min(300_000, value))
+
+
 def _get_conn():
     """Build a psycopg2 connection from env vars.
 
@@ -47,7 +62,18 @@ def _get_conn():
         f":{os.environ.get('POSTGRES_PORT','5432')}"
         f"/{os.environ.get('POSTGRES_DB','')}"
     )
-    return psycopg2.connect(dsn)
+    conn = psycopg2.connect(
+        dsn,
+        application_name=os.environ.get(
+            "OPENCLAW_HEALTHCHECK_APPLICATION_NAME",
+            "openclaw_passive_wait_healthcheck",
+        ),
+    )
+    with conn.cursor() as cur:
+        cur.execute("SET statement_timeout = %s", (_healthcheck_timeout_ms(),))
+        cur.execute("SET lock_timeout = %s", ("5000",))
+        cur.execute("SET idle_in_transaction_session_timeout = %s", ("60000",))
+    return conn
 
 
 # ---- single-query helpers ----

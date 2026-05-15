@@ -17,11 +17,14 @@ opportunity shadow 的覆蓋率 / 校準性，但不接任何 live trading gate�
 
 from __future__ import annotations
 
+import os
+
 from .checks_execution import _as_float, _as_int
 
 # [41] scanner legacy would-block evidence confirmation.
 # [41] scanner legacy would-block 證據後驗。
 MARKET_GATE_CONFIRM_MIN_LABELS = 3
+MARKET_GATE_MAX_SNAPSHOTS = 720
 
 # [51] scanner opportunity shadow acceptance.
 # [51] scanner opportunity shadow 驗收。
@@ -36,6 +39,17 @@ OPPORTUNITY_SHADOW_MIN_POSITIVE_LCB_AVG_NET_BPS = 0.0
 OPPORTUNITY_SHADOW_MIN_REJECTED_SAMPLE = 5
 OPPORTUNITY_SHADOW_REJECTED_AVG_NET_WARN_BPS = 0.0
 OPPORTUNITY_SHADOW_REJECTED_COST_FALLBACK_BPS = 11.0
+
+
+def _max_scanner_snapshots() -> int:
+    raw = os.environ.get("OPENCLAW_SCANNER_GATE_HEALTH_MAX_SNAPSHOTS")
+    if raw is None:
+        return MARKET_GATE_MAX_SNAPSHOTS
+    try:
+        value = int(raw)
+    except ValueError:
+        return MARKET_GATE_MAX_SNAPSHOTS
+    return max(60, min(10_000, value))
 
 
 def check_scanner_market_gate_confirmation(cur) -> tuple[str, str]:
@@ -77,8 +91,17 @@ def check_scanner_market_gate_confirmation(cur) -> tuple[str, str]:
     if not mlde_exists or not mlde_exists[0]:
         return ("WARN", "learning.mlde_edge_training_rows missing — cannot confirm scanner would-block evidence")
 
+    max_snapshots = _max_scanner_snapshots()
+
     sql = """
-WITH raw_routes AS (
+WITH recent_scans AS (
+    SELECT scan_id, ts, candidates
+    FROM trading.scanner_snapshots
+    WHERE ts > now() - interval '24 hours'
+    ORDER BY ts DESC
+    LIMIT %s
+),
+raw_routes AS (
     SELECT
         s.ts AS route_ts,
         c.candidate->>'symbol' AS symbol,
@@ -95,7 +118,7 @@ WITH raw_routes AS (
           AND lower(coalesce(j.value->>'edge_status', '')) IN ('robust_negative', 'posterior_negative')
             )
         ) AS is_gate
-    FROM trading.scanner_snapshots s
+    FROM recent_scans s
     CROSS JOIN LATERAL jsonb_array_elements(s.candidates) AS c(candidate)
     CROSS JOIN LATERAL jsonb_each(coalesce(c.candidate->'strategy_judgments', '{}'::jsonb)) AS j(key, value)
     WHERE s.ts > now() - interval '24 hours'
@@ -155,7 +178,14 @@ SELECT
 FROM label_segments
 """
     bad_sql = """
-WITH raw_routes AS (
+WITH recent_scans AS (
+    SELECT scan_id, ts, candidates
+    FROM trading.scanner_snapshots
+    WHERE ts > now() - interval '24 hours'
+    ORDER BY ts DESC
+    LIMIT %s
+),
+raw_routes AS (
     SELECT
         s.ts AS route_ts,
         c.candidate->>'symbol' AS symbol,
@@ -172,7 +202,7 @@ WITH raw_routes AS (
           AND lower(coalesce(j.value->>'edge_status', '')) IN ('robust_negative', 'posterior_negative')
             )
         ) AS is_gate
-    FROM trading.scanner_snapshots s
+    FROM recent_scans s
     CROSS JOIN LATERAL jsonb_array_elements(s.candidates) AS c(candidate)
     CROSS JOIN LATERAL jsonb_each(coalesce(c.candidate->'strategy_judgments', '{}'::jsonb)) AS j(key, value)
     WHERE s.ts > now() - interval '24 hours'
@@ -232,6 +262,7 @@ LIMIT 6
         cur.execute(
             sql,
             (
+                max_snapshots,
                 MARKET_GATE_CONFIRM_MIN_LABELS,
                 MARKET_GATE_CONFIRM_MIN_LABELS,
                 MARKET_GATE_CONFIRM_MIN_LABELS,
@@ -239,7 +270,7 @@ LIMIT 6
             ),
         )
         row = cur.fetchone()
-        cur.execute(bad_sql, (MARKET_GATE_CONFIRM_MIN_LABELS,))
+        cur.execute(bad_sql, (max_snapshots, MARKET_GATE_CONFIRM_MIN_LABELS))
         contradicted_rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
         return ("WARN", f"scanner market-gate confirmation query failed: {type(exc).__name__}: {exc}")
@@ -252,7 +283,8 @@ LIMIT 6
     low_sample = _as_int(row[5]) if row else 0
 
     base = (
-        f"24h scanner legacy would-block evidence: events={gate_events}, cells={gate_cells}, "
+        f"24h scanner legacy would-block evidence: snapshots<= {max_snapshots}, "
+        f"events={gate_events}, cells={gate_cells}, "
         f"scoreable_cells={scoreable} (min_labels={MARKET_GATE_CONFIRM_MIN_LABELS}), "
         f"confirmed_negative={confirmed}, contradicted={contradicted}, low_sample={low_sample}"
     )
