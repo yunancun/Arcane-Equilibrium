@@ -2302,3 +2302,21 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   pull over it during three-side sync.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--pm_pa_fa_5day_audit_todo_sync.md`.
+
+## 2026-05-15 P1-INTENT-FREEZE-27 Qty Rounding RCA
+
+- RCA for `[27] intents_counter_freeze` found the FAIL window was not a whole
+  `trading_writer` outage. BTCUSDT approved risk verdicts were persisted before
+  exchange precision rounding, then `final_qty <= 0` skipped order dispatch and
+  intent persistence.
+- Source fix in `step_4_5_dispatch.rs`: approved exchange verdicts are persisted
+  only after `final_qty > 0`; `final_qty <= 0` now writes an explicit rejected
+  qty=0 audit intent/verdict and rejected decision-feature label with reason
+  `qty_zero: exchange_precision_rounding_to_zero ...`.
+- Verification: `test_f7_new_healthchecks.py` 43 passed; touched Rust file
+  rustfmt check passed; `tick_pipeline::tests::dual_rail_dispatch` 15 passed;
+  `tick_pipeline::tests::fast_track_reduce` 19 passed.
+- Runtime remains pending: no deploy/rebuild was performed. Close the TODO item
+  only after deployment and `[27]` PASS outside fresh-restart grace.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_intent_freeze_27_qty_rounding_rca.md`.
