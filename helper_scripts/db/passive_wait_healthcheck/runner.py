@@ -350,6 +350,74 @@ Exit codes:
 """
 
 
+def _normalize_check_id(value: str) -> str:
+    """Normalize CLI check selectors like '[4]', '4', '[Xb]', or 'xb'."""
+    return value.strip().strip("[]").lower()
+
+
+def _emit_results(results: list[tuple[str, str, str]], quiet: bool) -> int:
+    """Print healthcheck rows and return the standard passive-check exit code."""
+    any_fail = False
+    any_warn = False
+    for name, status, msg in results:
+        if quiet and status == "PASS":
+            continue
+        print(f"{status:4s} {name:<36s} {msg}")
+        if status == "FAIL":
+            any_fail = True
+        elif status == "WARN":
+            any_warn = True
+
+    print("=" * 70)
+    if any_fail:
+        print("SUMMARY: FAIL — ≥1 healthcheck failed（silent-dead / drift / regression）；先看上方 FAIL 行定位")
+        return 1
+    if any_warn:
+        print("SUMMARY: WARN — 非致命但需關注")
+        return 0
+    print("SUMMARY: ALL PASS")
+    return 0
+
+
+def _run_selected_cursor_checks(
+    cur,
+    selected: set[str],
+) -> list[tuple[str, str, str]]:
+    """Run the narrow DB-bound subset requested by ``--check``.
+
+    Dependencies may run silently. In particular, [Xb] needs [1]'s
+    ``close_fills`` baseline even when [1] was not selected.
+    """
+    supported = {"1", "4", "xb"}
+    unsupported = sorted(selected - supported)
+    if unsupported:
+        supported_display = ", ".join(f"[{x}]" if x != "xb" else "[Xb]" for x in sorted(supported))
+        raise ValueError(
+            "unsupported --check selector(s): "
+            + ", ".join(unsupported)
+            + f"; supported narrow selectors: {supported_display}"
+        )
+
+    results: list[tuple[str, str, str]] = []
+    close_fills: int | None = None
+    if "1" in selected or "xb" in selected:
+        s, m, close_fills = check_close_fills_24h(cur)
+        if "1" in selected:
+            results.append(("[1] close_fills_24h", s, m))
+
+    if "4" in selected:
+        s, m = check_phys_lock_runtime(cur)
+        results.append(("[4] phys_lock_runtime", s, m))
+
+    if "xb" in selected:
+        if close_fills is None:
+            s, m, close_fills = check_close_fills_24h(cur)
+        s, m = check_pipeline_triangulation(cur, close_fills)
+        results.append(("[Xb] pipeline_triangulation", s, m))
+
+    return results
+
+
 def main() -> int:
     """Entry point — runs all registered checks and prints a structured report.
 
@@ -406,7 +474,18 @@ def main() -> int:
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
+    ap.add_argument(
+        "--check",
+        action="append",
+        default=[],
+        metavar="ID",
+        help=(
+            "Run a narrow check subset by id, e.g. --check [4] --check [Xb]. "
+            "Dependencies may run silently."
+        ),
+    )
     args = ap.parse_args()
+    selected_checks = {_normalize_check_id(v) for v in args.check}
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     print(f"Passive-wait healthcheck @ {now} UTC")
@@ -438,6 +517,23 @@ def main() -> int:
         except Exception as ce:  # noqa: BLE001 — keep DB-fail exit path robust
             print(f"WARN [30] cost_edge_advisor_status (db-down fallback) sentinel raised: {ce}")
         return 2
+
+    if selected_checks:
+        try:
+            with conn.cursor() as cur:
+                selected_results = _run_selected_cursor_checks(cur, selected_checks)
+        except ValueError as e:
+            conn.close()
+            print(f"[FATAL] {e}")
+            print("=" * 70)
+            print("SUMMARY: FAIL — invalid --check selector")
+            return 1
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return _emit_results(selected_results, args.quiet)
 
     results: list[tuple[str, str, str]] = []  # (check_name, status, msg)
     try:
@@ -1128,26 +1224,7 @@ def main() -> int:
     # Inv 3+4 需查 learning.cost_edge_advisor_log，故移入。詳上方 cursor 區塊。
 
     # output
-    any_fail = False
-    any_warn = False
-    for name, status, msg in results:
-        if args.quiet and status == "PASS":
-            continue
-        print(f"{status:4s} {name:<36s} {msg}")
-        if status == "FAIL":
-            any_fail = True
-        elif status == "WARN":
-            any_warn = True
-
-    print("=" * 70)
-    if any_fail:
-        print("SUMMARY: FAIL — ≥1 healthcheck failed（silent-dead / drift / regression）；先看上方 FAIL 行定位")
-        return 1
-    if any_warn:
-        print("SUMMARY: WARN — 非致命但需關注")
-        return 0
-    print("SUMMARY: ALL PASS")
-    return 0
+    return _emit_results(results, args.quiet)
 
 
 if __name__ == "__main__":

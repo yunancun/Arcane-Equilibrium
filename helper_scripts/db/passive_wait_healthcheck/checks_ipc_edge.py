@@ -36,40 +36,110 @@ from .shared import _read_shadow_enabled_from_toml
 def check_phys_lock_runtime(cur) -> tuple[str, str]:
     """[4] TRACK-P v2 phys_lock runtime fire rate — expect ≥1 per 24h if edge populated.
 
-    Pattern note (RUST-DOUBLE-PREFIX-1 2026-04-23 post-fix): the upstream
-    double-prefix bug was rooted out at the single `step_6_risk_checks.rs`
-    emission site (Option B via `build_risk_close_tag`), so rows now land as
-    canonical `strategy_name = "risk_close:phys_lock_gate4_giveback"` (single
-    prefix). The healthcheck pattern is therefore restored to the strict
-    `risk_close:phys_lock_%` form. The temporary-tolerant `risk_close:%phys_lock_%`
-    pattern (commit `21e3d5e`) is intentionally **withdrawn**: keeping it would
-    hide any future recurrence of the double-prefix regression — we want this
-    check to go red again if the invariant breaks.
+    Source-of-truth update (2026-05-15): after the V033 strategy-name cleanup,
+    close-path attribution no longer relies on dumping dynamic risk tags into
+    ``trading.fills.strategy_name``. PHYS-LOCK activity is now labeled on
+    ``learning.exit_features`` as ``exit_source='Physical'`` plus
+    ``exit_trigger_rule LIKE 'phys_lock_%'``. Keep the old fills.strategy_name
+    query as a backward-compatible fallback for pre-cleanup rows only.
 
-    Pattern note（RUST-DOUBLE-PREFIX-1 2026-04-23 修復後）：雙前綴 bug 已在單一
-    `step_6_risk_checks.rs` emission 點（`build_risk_close_tag` Option B）根治，
-    所有 PHYS-LOCK 列現以標準 `strategy_name = "risk_close:phys_lock_gate4_giveback"`
-    （單前綴）寫入。Pattern 恢復為嚴格 `risk_close:phys_lock_%` 形式。
-    原容錯 `risk_close:%phys_lock_%`（commit `21e3d5e`）刻意**收回**：保留會遮蔽
-    未來雙前綴 regression，本檢查必須在 invariant 破壞時再次亮紅。
+    Source-of-truth update（2026-05-15）：V033 strategy_name cleanup 後，close
+    path 不再依賴把動態 risk tag 寫進 ``trading.fills.strategy_name``。
+    PHYS-LOCK 活動現在以 ``learning.exit_features.exit_source='Physical'`` +
+    ``exit_trigger_rule LIKE 'phys_lock_%'`` 標記。舊
+    ``fills.strategy_name`` 查詢只作 backward-compatible fallback。
     """
-    n_24h = _scalar(cur,
-        "SELECT COUNT(*) FROM trading.fills "
-        "WHERE ts > now() - interval '24 hours' "
-        "AND engine_mode = 'demo' "
-        "AND strategy_name LIKE 'risk_close:phys_lock_%'"
+    def _fmt_ts(value) -> str:
+        if value is None:
+            return "none"
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+        return str(value)
+
+    def _query_exit_features() -> tuple[int, int, object | None]:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE ts > now() - interval '24 hours')::bigint,
+                COUNT(*) FILTER (WHERE ts > now() - interval '7 days')::bigint,
+                MAX(ts) FILTER (WHERE ts > now() - interval '7 days')
+            FROM learning.exit_features
+            WHERE engine_mode = 'demo'
+              AND exit_source = 'Physical'
+              AND exit_trigger_rule LIKE 'phys_lock_%'
+            """
+        )
+        row = cur.fetchone()
+        return (
+            int(row[0] or 0) if row else 0,
+            int(row[1] or 0) if row else 0,
+            row[2] if row else None,
+        )
+
+    def _query_legacy_fills_strategy_name() -> tuple[int, int, object | None]:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE ts > now() - interval '24 hours')::bigint,
+                COUNT(*) FILTER (WHERE ts > now() - interval '7 days')::bigint,
+                MAX(ts) FILTER (WHERE ts > now() - interval '7 days')
+            FROM trading.fills
+            WHERE engine_mode = 'demo'
+              AND strategy_name LIKE 'risk_close:phys_lock_%'
+            """
+        )
+        row = cur.fetchone()
+        return (
+            int(row[0] or 0) if row else 0,
+            int(row[1] or 0) if row else 0,
+            row[2] if row else None,
+        )
+
+    ef_probe_error = ""
+    try:
+        n_24h, n_7d, latest = _query_exit_features()
+    except Exception as e:
+        ef_probe_error = f"; exit_features probe failed: {type(e).__name__}"
+        try:
+            cur.connection.rollback()
+        except Exception:
+            pass
+        n_24h, n_7d, latest = 0, 0, None
+
+    if n_7d > 0:
+        base = (
+            f"exit_features phys_lock 24h={n_24h} "
+            f"(7d={n_7d}, latest={_fmt_ts(latest)})"
+        )
+        if n_24h == 0:
+            return ("WARN", base + " — 近期停火，查 edge_estimates / atr coverage")
+        return ("PASS", base)
+
+    try:
+        legacy_24h, legacy_7d, legacy_latest = _query_legacy_fills_strategy_name()
+    except Exception as e:
+        return (
+            "WARN",
+            "phys_lock probes unavailable: exit_features 7d=0"
+            f"{ef_probe_error}; legacy fills.strategy_name failed: {type(e).__name__}: {e}",
+        )
+
+    legacy_base = (
+        f"exit_features phys_lock 7d=0{ef_probe_error}; "
+        f"legacy fills.strategy_name phys_lock 24h={legacy_24h} "
+        f"(7d={legacy_7d}, latest={_fmt_ts(legacy_latest)})"
     )
-    n_7d = _scalar(cur,
-        "SELECT COUNT(*) FROM trading.fills "
-        "WHERE ts > now() - interval '7 days' "
-        "AND engine_mode = 'demo' "
-        "AND strategy_name LIKE 'risk_close:phys_lock_%'"
-    )
-    if n_7d == 0:
-        return ("FAIL", f"phys_lock_* 7d=0 — Priority 6 runtime 完全 dead (P0-13/P0-14)")
-    if n_24h == 0:
-        return ("WARN", f"phys_lock_* 24h=0 (7d={n_7d}) — 近期停火，查 edge_estimates / atr coverage")
-    return ("PASS", f"phys_lock_* 24h={n_24h} (7d={n_7d})")
+    if legacy_7d == 0:
+        return (
+            "FAIL",
+            legacy_base + " — Priority 6 runtime 完全 dead (P0-13/P0-14)",
+        )
+    if legacy_24h == 0:
+        return (
+            "WARN",
+            legacy_base + " — fallback active but 24h quiet; migrate monitor to exit_features",
+        )
+    return ("PASS", legacy_base + " — legacy fallback active")
 
 
 def check_micro_profit_fire(cur) -> tuple[str, str]:
