@@ -380,6 +380,42 @@ grep -nrE '(linucb|scorer|quantile|mlde|dl3).*close_maker_(attempt|fallback_reas
 
 **估算 IMPL 工作量**：~50 LOC backoff state machine + ~80 LOC integration test。
 
+### 5.5 Race E：Fallback to taker mandatory（v1.2 新增，per Wave 1 Track E3 finding）
+
+**問題**：Track E3 7d empirical baseline（per `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--maker_fill_rate_empirical_baseline.md`）證實當前 entry-side 70% PostOnly timeout **直接放棄**（無「Limit cancelled → 同 intent 後續 Market re-dispatch」pattern；engine 當前無 fallback to taker 機制，只有 ipc_close_symbol risk-close 用 Market）。
+
+**對 entry path 的影響可接受**（missed entry 只是錯過開倉機會，無持倉風險）；**對 close path 不可接受**（close = 必須減 exposure；放棄 = 持有不利倉位 = 違 §二 #5 生存 > 利潤）。
+
+**規則（強制 invariant，IMPL 必加）**：
+
+1. **任何 close maker fallback path 必 fallback to taker market**：
+   - **Race B (maker timeout)**：cancel ack（或 grace 2s）後 market re-dispatch with same trigger_tag → 寫 `close_maker_fallback_reason = "timeout_taker"`
+   - **Race C (PostOnly reject)**：直接 market（不重 quote）→ 寫 `close_maker_fallback_reason = "postonly_reject"`
+   - **Race D (TooManyPending backoff)**：per-symbol backoff 期間直接 market → 寫 `close_maker_fallback_reason = "rate_limit_pause"`
+   - **engine cancel_token / authorization 失效**：cancel pending + 後續 close 走 market → 寫 `close_maker_fallback_reason = "engine_shutdown_safety"`
+   - **任何「unknown reject」**：fail-closed 走 market → 寫 `close_maker_fallback_reason = "ack_lost"`（既有 enum）
+
+2. **禁止「放棄」（abandon）路徑** — 任何 close maker pending 結束（成功 / 超時 / reject / cancel ack）後若仍未平倉 → 必 dispatch market；engine 不應讓 close intent silent dropping。
+
+3. **IMPL gate（E1 IMPL prereq）**：
+   - 加 unit test `test_close_maker_timeout_must_fallback_to_market`：close maker pending 30s 未 fill → assert market re-dispatch within 1 tick after cancel ack（per `event_consumer/pending_sweep.rs`）
+   - 加 unit test `test_close_maker_postonly_reject_must_fallback_to_market`：PostOnly reject → assert immediate market re-dispatch
+   - 加 unit test `test_close_maker_engine_shutdown_must_fallback_to_market`：cancel_token fired 後 pending close → assert best-effort cancel + 後續 close intent 走 market（不丟）
+
+4. **healthcheck `[62] close_maker_fill_rate` 補 sub-check（per Wave 1 Track E3 finding）**：
+   - 新 sub-metric `close_maker_fallback_to_taker_rate ≥ 95%`：close maker attempt 中 fallback to taker（任何 reason）的比例 ≥ 95%
+   - 5% race window allowance（real-fill / pending dispatcher 邊界 race / engine restart inflight）
+   - 公式：`fallback_to_taker_rate = COUNT(close_maker_attempt AND close_maker_fallback_reason IN ('timeout_taker','postonly_reject','rate_limit_pause','engine_shutdown_safety','ack_lost','fast_escalate_safety_upgrade')) / COUNT(close_maker_attempt AND fill_status != 'maker_fill')`
+   - PASS: ≥ 95%
+   - WARN: 90-95%
+   - FAIL: < 90%（possible silent abandonment regression）
+
+5. **Audit row enum invariant**：
+   - 任何 close maker attempt 結束時 fill_status `≠ 'maker_fill'` → `close_maker_fallback_reason` 必 NOT NULL（不可 NULL，per §4.4 enum allowlist 已 cover）
+   - 對應 §11 AC-18 補 `close_maker_fallback_to_taker_rate ≥ 95% over 7d`
+
+**估算 IMPL 工作量**：~30 LOC fallback dispatch hook + ~120 LOC unit test（3 case × ~40 LOC）。
+
 ---
 
 ## §6 Reject + Cooldown 處理
@@ -611,13 +647,20 @@ E1 估計：~400 LOC tests + ~150 LOC v1.1 新增 = **~550 LOC tests**。
 
 ## §10 Rollout — demo → live_demo → live
 
-### 10.1 三段灰度（mirror EDGE-P2-3 Phase 1a entry 模式）
+### 10.1 三段灰度（mirror EDGE-P2-3 Phase 1a entry 模式；v1.2 加 14d pilot observation per Track E3 conservative discount）
 
 | 階段 | 期間 | 環境 | 啟用方式 |
 |---|---|---|---|
-| Phase 2a Demo | 7d | demo | TOML `use_maker_close=true` / per-策略獨立 flag |
-| Phase 2b LiveDemo | 7d (Phase 2a PASS 後) | live_demo | TOML override per-策略 |
+| Phase 2a Demo | **7d primary + 7d extended observation = 14d total** | demo | TOML `use_maker_close=true` / per-策略獨立 flag |
+| Phase 2b LiveDemo | 7d (Phase 2a 14d PASS 後) | live_demo | TOML override per-策略 |
 | Phase 3 Live | indefinite | live (Mainnet) | **operator 顯式 sign-off** + AMD 補件 |
+
+**Phase 2a 14d 拉長理由（v1.2，per Track E3 §8 conservative discount）**：
+- E3 預估 close maker fill rate **15-25%**（vs entry 27%），若 7d primary 樣本量不足判斷 close-maker fill rate 穩定性
+- Phase 2b 不適用（real-fill behavior 較難進一步驗證），Phase 2a 必需 14d 確認 fill rate stability
+- Phase 2a PASS gate **新加 AC-19**：14d extended observation `close_maker_fill_rate ≥ 30%`（per E3 推薦「conservative discount」）
+- 7d primary 觀察期：跑 AC-1..AC-17 + AC-18（fallback to taker rate）+ AC-14/15/16 baseline
+- 7d extended observation：純樣本累積 + close-maker fill rate stability check；若 14d total close-maker fill rate < 30% → Phase 2b BLOCKED + spec 修訂或 reject
 
 ### 10.2 Kill-switch
 
@@ -680,6 +723,13 @@ Phase 2a → 2b → 3 共 3 phase × 8 exit_reason × 2 env = **48 test points**
 |---|---|
 | AC-17 | `close_timeout_pre_stopout_rate ≤ 5%` per env 7d — maker timeout 期間真風控 fire 比例必 ≤ 5%（防 #5 生存 > 利潤 expose 風險）|
 
+### 11.7 Wave 1.5 v1.2 新增 AC（per A3 + E3 finding）
+
+| AC | 內容 |
+|---|---|
+| **AC-18** | **`close_maker_fallback_to_taker_rate ≥ 95% over 7d`** per env（v1.2 §5.5 race fallback gap 新增，per Wave 1 Track E3 finding：當前 entry path 70% PostOnly timeout 直接放棄，close path 不可繼承此行為；fallback to taker rate < 95% = 可能 silent abandonment regression，違 §二 #5 生存 > 利潤）|
+| **AC-19** | **14d extended observation `close_maker_fill_rate ≥ 30%`**（v1.2 §10.1 14d pilot 新增，per Wave 1 Track E3 conservative discount：close fill rate 預估 15-25% vs entry 27%，14d 確認 fill rate stability；< 30% → Phase 2b BLOCKED + spec 修訂或 reject）|
+
 ---
 
 ## §12 Risk + Mitigation
@@ -695,6 +745,7 @@ Phase 2a → 2b → 3 共 3 phase × 8 exit_reason × 2 env = **48 test points**
 | State machine fast-escalate IPC | MEDIUM | +2 `PendingOrderEvent` variant + dispatch handler integration test |
 | Tests 影響面 | LOW | 10 reason-string assert 不破 |
 | Phase 1B-4.2 依賴 | LOW | 0 依賴（PA 確認 paper-only orthogonal） |
+| **Close maker fallback「直接放棄」可能 inherit entry-side gap（v1.2 新增，per Track E3 finding）** | **HIGH** | §5.5 mandatory fallback to taker invariant + AC-18 95% rate gate + 3 unit test（timeout/postonly_reject/engine_shutdown） + healthcheck [62] sub-check |
 
 ### 12.2 FA 識別的功能 / 合規 risk
 
@@ -776,6 +827,8 @@ FA 評估：9/9 PASS or PASS-with-stated-mitigation；**無 BLOCKER**。
 | F-FA-5 `bb_mean_revert` 措辭修正（spec 内已修） | (已 done in §4.3) | — |
 | MA KAMA fallback warn! + skip entry | E1 | W3-6 by-the-way scope-in（30 分鐘獨立修復） |
 | phys_lock live 啟用決策 | operator + QC math | DEFER 至 Phase 2b 後另開 |
+| **`P1-PORTFOLIO-RESTING-EXPOSURE-1`（v1.2 新增 per Wave 1 Track A3）** | **PA → E1** | **est. 3 person-day, 250 LOC；獨立平行 Phase 1b IMPL，互不阻塞**；fix `compute_correlated_exposure_pct` / `compute_exposure_pct` 在 `intent_processor/mod.rs:761-805` 把 `paper_state.resting_orders.qty` 加進 effective exposure 計算；解 entry-side resting maker 既有 systemic gap（per A3 verify report `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--f_fa_2_portfolio_var_exposure_sot_verify.md` §8 fix scope）；對 close-maker-first 是「nice-to-have but not blocker」；派發時點：Wave 4+ |
+| **`P2-ORDERS-INTENT-ID-WRITER-GAP-1`（v1.2 新增 per Wave 1 Track E3）** | **E1** | **est. 1 person-day**；fix `orders.intent_id` 100% NULL writer 漏接（per E3 finding 1）；恢復 intent → order linkage 給 Guardian-pass-rate 計算；不阻 Phase 1b IMPL；派發時點：N+2 backlog |
 
 ---
 
@@ -799,11 +852,13 @@ FA 評估：9/9 PASS or PASS-with-stated-mitigation；**無 BLOCKER**。
 |---|---|---|---|
 | 2026-05-15 | v1.0 | 初版（PM/PA/FA 3-agent verdict 整合）| Main session |
 | 2026-05-15 | v1.1 | 4-agent (QC+FA+BB+MIT) round-2 consolidated patch — 17 must-fix（4 consensus + 13 unique）+ 14 should-fix 全 integrated；§1.2 fee saving 4.5→3.5 bps + net 推導；§4.3 phys_lock_gate4_giveback timeout 30→15s + buffer 2→1 + spread guard + small-tick；§4.4 V094 hybrid schema explicit + enum allowlist + Linux PG dry-run + non-training invariant；§5.4 dynamic backoff per-symbol → conditional global；§6.1 reject_cooldown 升 P0 prereq；§6.2 classifier reuse entry enum + side flag（不新建 Close*Variant）；§8.1 Wilson CI + sample-size + NULL ladder + reject sample healthcheck；§9.2 +4 新 test；§11 AC-1..AC-13 連續 + AC-14/15/16/17 4-agent must-fix；§14 IMPL prereq 4→6 條件；§15 後續工作項對齊 | PA per main-session 派 Wave 1 Track A1 |
+| 2026-05-15 | v1.2 | A3+E3 finding consolidated（fee saving revision + race fallback gap + 14d pilot + P1+P2 ticket open）— §1.2 fee saving 3.5/+0.65 bps → 0.5-2.0 bps net per close attempt（per E3 empirical 0.66/0.95/3.31 三層解讀，引 E3 report path）+ 全年估 $160-$400 → $50-$200；§1.2 加 E3 三個意外發現（orders.intent_id NULL / orders.status fire-and-forget / 無 fallback to taker）；§5.5 NEW Race E mandatory fallback to taker（IMPL gate + 3 unit test + healthcheck [62] sub-check）；§10.1 Phase 2a 7d → 14d (7d primary + 7d extended observation)；§11.7 NEW AC-18 close_maker_fallback_to_taker_rate ≥ 95% + AC-19 14d close_maker_fill_rate ≥ 30%；§12.1 risk table 新 row HIGH「Close maker fallback 直接放棄 inherit entry-side gap」；§15 NEW `P1-PORTFOLIO-RESTING-EXPOSURE-1`（PA → E1，3 person-day，平行 Phase 1b）+ `P2-ORDERS-INTENT-ID-WRITER-GAP-1`（E1，1 person-day，N+2 backlog）| PA per main-session 派 Wave 1.5 (post-Track A3+E3) |
 
-**Sign-off Status**（v1.1 更新）：
-- PM: APPROVED-CONDITIONAL（6 條件 + 6 governance gates）
-- PA: READY-FOR-SPEC（1 NEEDS-PROBE on rate-limit；0 BLOCKED-BY-1B-4.2）
+**Sign-off Status**（v1.2 更新）：
+- PM: APPROVED-CONDITIONAL（6 條件 + 6 governance gates；v1.2 incremental patch 不改條件數量，僅增 AC + ticket）
+- PA: READY-FOR-SPEC（A3 portfolio_var verify ✅ MAINTAIN + P1 ticket option A 已 PM 預批；A4 W-C Caveat 2 guard tests + V094 兩段式 + writer gap explicit ✅；E3 maker fill empirical baseline ✅）
 - FA round-1: APPROVED-CONDITIONAL（5 conditions）
 - 4-agent round-2 consolidated: 4/4 APPROVED-CONDITIONAL（17 must-fix + 14 should-fix integrated 進 v1.1 + AMD v0.2）
+- Wave 1.5 v1.2 patch: pending Wave 3 4-agent short re-review on AMD v0.3 + spec v1.2
 
-**下一步**：PM 派 QC+FA+BB+MIT 4-agent short re-review（各 30min）核驗 v1.1 + AMD v0.2 17 must-fix + 14 should-fix 收口完整性 → 等三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）+ Prereq 5/6 → IMPL 工作鏈啟動。
+**下一步**：PM 派 Wave 2 (V094 spec + reject_cooldown split) 並行 Wave 3 (4-agent short re-review on v0.3/v1.2 + BB 字典 6 處更新) → 等三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）+ Prereq 5/6 → IMPL 工作鏈啟動。
