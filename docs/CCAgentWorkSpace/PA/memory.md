@@ -1,5 +1,57 @@
 # PA Memory — 工作記憶
 
+## F-FA-3 W-C Caveat 2 不變式 guard tests + grep guard rule 設計（2026-05-15 Wave 1 Track A4）
+
+**觸發**：PM Wave 1 Track A4 派工；EDGE-P2-3 Phase 1b close-maker-first 4-agent review APPROVED-CONDITIONAL；FA round 2 §4 標明 F-FA-3「audit 欄位不走 spine lineage」為 blocking minor 必補 IMPL prereq。
+
+**核心發現（PA empirical re-check 2026-05-15）**：
+1. **`trading.fills.details JSONB` 已存在（V003 line 284，10 個月前）**：5 audit 欄位走 details JSON-extension **是 zero-schema-migration**，僅需新建 V094 加 `close_maker_attempt` BOOL hot-path column + writer 升級 + healthcheck 新 check
+2. **`trading_writer.rs:430` INSERT INTO trading.fills 列表 不寫 details**（23 columns 無 details）— V094 IMPL 必同步升 writer 寫 details payload，否則 audit 100% NULL → guard tests 全 FAIL
+3. **W-C Caveat 2 不變式雙層 short-circuit 已在 production**：commands.rs:812-815 entry 端寫 None 4 個 spine_*_id；event_consumer/loop_exchange.rs:264-283 fill_completion 端讀 PendingOrder 全 None → emit_fill_completion_lineage runtime_shadow/mod.rs:451-457 短路 return 0
+4. **不變式違反場景**：IMPL agent 無意中把 audit 接 spine writer（看到 spine_order_plan_id 已存在於 OrderDispatchRequest 結構）→ 破 commands.rs:812-815 不變式 → 觸發 [55] WARN → 可能讓 W-D MAG-083/084 sign-off 後不變式回退（迴歸 W-C round 1 CONDITIONAL）
+
+**設計交付（5 段）**：
+- §2 4 integration test specs（IMPL E1 / E4 直接照寫 ~50-200 LOC each）：
+  - test_1: close maker audit 100% 走 fills.details，spine 0 row
+  - test_2: maker timeout fallback 仍 0 spine row
+  - test_3: 8 reasons × 4 races = 32 case parameterized rstest，NULL rate ≤ 0.1%
+  - test_4: 24h workload integration，[55] PASS 不變
+- §3 6 grep guard patterns（覆蓋率 ~96%）：
+  - Pattern 1a/1b: close path is_close=true 不能寫 spine_*_id Some
+  - Pattern 2a/2b: spine writer emit_entry_lineage / emit_fill_completion_lineage callsite ±5 line 不含 close_maker_*
+  - Pattern 3a/3b/3c: ML training 5 pipeline (linucb/scorer/quantile/mlde/dl3) 不餵 close_maker_* (mirror MIT-MF-1 non-training invariant)
+- §4 V094 schema 兩段式：close_maker_attempt BOOL + close_maker_fallback_reason TEXT 為 hot column；3 price/reason 走 details JSON-extension
+- §5 healthcheck [63] dual gate：Gate A (W-C Caveat 2 close path 0 spine row) + Gate B (audit 完整性 ≥ 99.9%)；與 [55] 互補避免「[55] PASS 但 close path 開始寫 spine」盲區
+- §6 IMPL prereq 5 解除條件：F-FA-1/2/3 並行 ~1.5 PA-day total
+
+**影響評估**：
+- ✅ 16 原則 16/16 合規（強化原則 #3 trace 完整性 + #7 ML non-training invariant + #8 audit 完整性）
+- ✅ DOC-08 §12 9 不變量 0/9 觸碰（其中「執行回報必落 fills 表」strengthens by 5 audit 欄位）
+- ✅ §四 5 硬邊界 0/5 觸碰
+- 改動風險評級 = 低（spec/design only，0 代碼改動；下游 IMPL 是純加新 test + 新 grep + 新 V094 column + 新 healthcheck）
+
+**核心教訓**：
+1. **PA empirical re-check 既有 schema + writer 對齊現實 mandate**：spec 假設「F-FA-1 V### migration 補入新欄位」基於 trading.fills.details 不存在；empirical 驗證發現 details JSONB V003 line 284 已存在 + writer 不寫 details 兩個獨立事實，徹底改變 schema 設計從「新增 5 column」變「JSON extension + 1 hot column + writer upgrade」。新 PA mandate：派 sub-agent 前必先 grep schema + writer 對齊現實，不能基於 spec 假設設計
+2. **不變式雙層守護必要性 (positive + negative gate pattern)**：integration test 是「正面驗證」second-line（IMPL 後跑 cargo test），grep guard rule 是「負面攔截」first-line（IMPL 中審查時 grep）；兩者並行才能擋住 IMPL agent「無意識把 audit 接 spine writer」常見 drift。類比 W-D MAG-083 P1-1 抽 stable_id helper（正面導引）+ P2-N2-4 CI grep（負面攔截）雙防線 pattern
+3. **healthcheck 互補性 (orthogonal coverage)**：[55] 看整體 lineage 完整性（分母含全部 chains），[63] 看 close path 特定的「不變式缺席性」（分母只 close path）；獨立 gate 設計避免「[55] PASS 但 [63] FAIL」盲區（如果 close path 開始寫 spine 但其他 lineage 仍完整，[55] 整體分母無感，[63] 專察 close path 異常）
+4. **AMD §8 prereq 完整性對 IMPL drift 控制關鍵**：FA round 2 §6 識別 F-FA-1/2/3 pre-IMPL 未掛 §8 prereq 是 governance gap；本 report §6 細化 5 解除條件 + §8.2 列出 PM 派發 Action 清單，補完 AMD §8 第 5 條 prereq trace；治理紀律應對齊 AMD-01 詳細度
+
+**E2 重點審查 3 點**（給 IMPL phase E2 review）：
+1. trading_writer.rs INSERT INTO trading.fills 列表升級加 details JSONB 寫入 — TradingMsg::Fill enum 加 details 欄位是否破壞既有 23-column INSERT 的 SLA + Cross-language IPC contract
+2. V094 close_maker_attempt BOOL hot column ADD COLUMN IF NOT EXISTS NOT NULL DEFAULT false — Guard B 型別驗證對 hypertable 行為（per V008/V015/V017/V028/V033 既有 pattern 驗證）；Guard C BTREE partial index `WHERE close_maker_attempt = true` 對 hypertable chunk 創建行為
+3. healthcheck [63] dual gate 在 [55] PASS 同期是否會出現 false positive（如果 close maker 採樣 < 5/24h，必須 NEUTRAL 不評估，per §5.2 sample size gate）
+
+**E1 派發建議（IMPL prereq 解後）**：
+- E1-CMA-1: trading_writer.rs INSERT 列表加 details + TradingMsg::Fill enum 加 details 欄位 + apply_confirmed_fill 構造 details payload（~80 LOC）
+- E1-CMA-2: V094 migration（~120 LOC + Guard A/B/C + idempotency 驗證）
+- E1-CMA-3: helper_scripts/db/passive_wait_healthcheck/checks_close_maker_audit.py [63] check_close_maker_audit_lineage_integrity（~60 LOC）+ runner.py 註冊
+- E4 並行：4 integration test specs 寫成 cargo test code（~470 LOC total per §2）
+- 全 4 sub-agent 並行 0 file 重疊；估 ~2 E1-day total
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--f_fa_3_w_c_caveat_2_guard_tests_design.md`（也複製到 `srv/docs/CCAgentWorkSpace/Operator/`）
+
+---
+
 ## 12-Agent Consolidated Audit Fix Plan（2026-05-16）
 
 **觸發**：12 specialized agents (FA/AI-E/E5/E4/E3/CC/QC/MIT/BB/TW/R4/A3) 完成全系統 audit。PA 逐條 verify P0/CRITICAL/BLOCKER findings against actual code。
@@ -3629,3 +3681,90 @@ PG fills 直查證據：
 - psql 需密碼，改用 `db_pool.get_pg_conn()` (ContextManager) 走 secrets 自動 inject
 - Single-quote nesting hell: 寫 helper 到 /tmp 比 inline -c 安全
 
+
+---
+
+## 2026-05-15 Wave 1 Track A1 — AMD v0.2 + spec v1.1 4-agent consolidated patch
+
+**Trigger**: 主會話 PM 派 Wave 1 第 1 並行 worktree — 17 must-fix（4 consensus + 13 unique per QC/FA/BB/MIT）+ 14 should-fix consolidated 收口 patch。
+
+**Deliverable**:
+- AMD v0.2: `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` commit `53245ed0`
+- Spec v1.1: `srv/docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` commit `a5a5d74a`（sibling commit `43627d1c` 已 baked 大部分內容；my Edit-tool incremental commit 補完）
+- PA verdict report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--amd_v0_2_spec_v1_1_consolidated_patch.md`
+
+**Key patches**:
+
+1. **§1 framing 消歧（Consensus-MF-1）**：「alpha-bearing pathway」改 **「alpha-impact-adjacent execution-quality pathway」** — 消除 fee bleed 對 alpha 量測污染，本身不是 alpha source；不適用 W-AUDIT-9 5-stage canary gate，mirror Phase 1a 三段灰度即可。
+
+2. **§4.1 V094 hybrid schema explicit（Consensus-MF-4 + MIT-SF-1/2）**：
+   - `close_maker_attempt: BOOLEAN NOT NULL DEFAULT FALSE` + `close_maker_fallback_reason: TEXT NULL CHECK enum` → **new column on trading.fills**（high-frequency group-by + partial index）
+   - `close_initial_limit_price` + `close_final_fill_price` + `close_maker_eligible_reason` → **trading.fills.details JSONB key**（單筆 audit 讀取）
+   - enum allowlist 8 個 reason + safety path 2 個（不算 NULL）
+   - V094 file naming `V094__fills_close_maker_audit.sql`，next-free slot
+   - Linux PG dry-run × 2 round + sqlx checksum repair SOP（per V055/V083/V084 incident precedent）
+
+3. **§5.1 multiple testing protocol（QC-MF-1）**：FDR 0.10 with Benjamini-Hochberg procedure，覆蓋 48 test points（8 reason × 2 env × 3 phase）累積測試。
+
+4. **§5.4 dynamic backoff（BB-MF-2）**：取代 v1.0「全域 5min pause」（3000x Bybit rate-limit recovery overshoot）：
+   - per-symbol exp backoff 1s → 60s 上限
+   - 連續 ≥10 distinct symbol 1min window 同 backoff → conditional global pause 5min
+   - in-memory state，engine restart 重置（accepted trade-off）
+   - audit 標記 `details.rate_limit_scope = "global"` JSONB 子欄位區別
+
+5. **§6 phys_lock_gate4_giveback timeout 30→15s + buffer 2→1（QC-MF-2）**：
+   - gate4 fire 時 peak ATR 已 surrender，下一秒價格繼續 unfavourable 條件機率高於隨機 walk
+   - maker pending 期 expected fill price 嚴格 worse than 立即 market
+   - footnote 紀錄「fire 條件帶 unfavourable drift bias」
+
+6. **§7 #7 non-training surface invariant（MIT-MF-1）**：close_maker_* 5 欄位是 ops audit metadata，禁餵 ML training pipeline；E3 grep guard rule 永久化（mirror replay.simulated_fills 'synthetic_replay' precedent）。
+
+7. **§7.2 W-C Caveat 2 explicit carve-out（FA-MF-2）**：close path 不寫 spine lineage；新 audit 欄位走 fills.details + new column，不寫 agent_spine.* 任何 table；F-FA-3 對應 grep guard test。
+
+8. **§8 IMPL prereq 4→6 條件（FA-MF-1 + BB-MF-3）**：
+   - 5: F-FA-1（V094 spec finalize）+ F-FA-2（portfolio_var SoT 驗）+ F-FA-3（lineage guard tests）pre-IMPL
+   - 6: reject_cooldown entry/close 拆分升 P0 priority pre-Phase 2a Demo enable 必 land
+
+9. **§10.1 V094 backward-compat append-only clarify（FA-MF-3）**：純 ADD COLUMN + ADD CONSTRAINT，沒 ALTER existing；既有 SELECT/INSERT/UPDATE 0 影響；如果 IMPL 改 separate column → 必重評 + 重派 4-agent review。
+
+10. **Spec §6.2 BB-MF-4 enum reuse**：原 v1.0 提議新建 `Self::CloseTooManyPending` / `Self::ClosePostOnlyCross` variant 是錯的；正確設計 = 復用既有 enum + `OrderSide flag`，避免 Bybit error code → Rust enum 1:1 mapping invariant 破壞。
+
+11. **Spec §11 AC-1..AC-13 連續 + AC-14/15/16/17 新增**：
+   - AC-5 fee 改善 +3 bps → +1.5 bps（per QC-SF-1 推導：3.5×0.70 - 0.30×6 ≈ +0.65 bps net 保守）
+   - AC-11 Phase 3 +5 bps → +1.5 bps（同上修正）
+   - AC-14 Wilson CI gate（Consensus-MF-2）
+   - AC-15 reject sample healthcheck（BB-MF-5）
+   - AC-16 NULL ladder 0.1%/1.0%（Consensus-MF-3）
+   - AC-17 close_timeout_pre_stopout_rate ≤ 5%（FA round-1 #5）
+   - +AC-10b Phase 2b fresh holdout（QC-SF-5）
+   - AC-1 +WARN @ 65% threshold（QC-SF-3）
+
+**Should-fix 14 條全 integrated**：
+- QC-SF-1/2/3/4/5（推導 footnote / counterfactual evidence packet / WARN 65% / spread guard / fresh holdout）
+- FA-SF-1/2/3（9 不變量 mini-table / rollout AC SoT 引用 / Stage 0R 消歧）
+- BB-SF-1/2/3（healthcheck [64] / fee 4.5→3.5 bps 修正 / small-tick alt symbol carve-out）
+- MIT-SF-1/2/3/4（Linux PG dry-run + sqlx repair SOP / V094 slot + idempotency × 2 round / min_samples_gate=30 normative AC / retention 評估注）
+
+**特殊處理**：
+- BB-MF-1 字典手冊更新：**僅 spec 引用 / 標 TODO**，留 Wave 3 BB1 實際更新（per main session 指示）
+- 4 個 should-fix 字典手冊改動（BB-SF）：留 Wave 3 BB1
+
+**Sibling commit race**：
+- 開始 Edit AMD 後 push commit `53245ed0`
+- 開始 Edit spec 期間 sibling commit `43627d1c`（Linux 端或 Mac 隔壁 session 處理 12-agent audit fix plan + WP-01 GUI work）也對 spec 文件做 v1.1 patch（+348 lines）
+- 我的 spec commit `a5a5d74a` 因 file state 已被 sibling 覆蓋大部分；最終 commit 只 10 行 incremental
+- **End state correct**：spec 799 lines，55 v1.1 keyword hits，all 17 must-fix + 14 should-fix 收口完整（grep 驗：spec 69 markers / AMD 50 markers）
+- **教訓**：multi-session race 下，工作未必撞失敗 — sibling 可能恰好做相同工作（因為 PM consolidated review 是公開 SoT）；`git commit --only` 防 index 污染但不防 sibling 同檔同步寫；應接手前查 `git log --oneline -5` + `git fetch` 才動
+
+**架構教訓 16**：**多 agent dispatch 時，consolidated review 是 SSOT 但不是 mutex**。當 PM 同時派 PA + sibling 處理同 patch，可能兩 session 都做相同收口工作。對 deterministic patch（17 must-fix mapping 唯一）→ 結果相同；對非 deterministic（subjective wording）→ 必須 sibling 之間先 fetch 再寫，或 PM 必須 sibling-aware dispatch。本次 race 是「無害撞單」，但暴露 dispatch SOP gap。
+
+**Confidence**:
+- HIGH for AMD v0.2 17 must-fix + 14 should-fix mapping 完整（54 keyword hits 驗證）
+- HIGH for spec v1.1 同上（55 keyword hits 驗證）
+- HIGH for V094 next-free slot（grep V09x 確認 V094 free）
+- HIGH for Linux PG dry-run mandatory（per CLAUDE.md §七 + V055/V083/V084 incident precedent）
+- HIGH for non-training surface invariant 永久化機制（E3 grep guard rule + mirror §五 'synthetic_replay' precedent）
+- HIGH for W-C Caveat 2 carve-out（明文 audit 走 fills.details + new column 不走 agent_spine.*）
+- MEDIUM for sibling commit race 教訓（無害撞單但暴露 SOP gap）
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--amd_v0_2_spec_v1_1_consolidated_patch.md`
