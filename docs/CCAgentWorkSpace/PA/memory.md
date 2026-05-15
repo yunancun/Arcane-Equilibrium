@@ -3581,3 +3581,51 @@ PG fills 直查證據：
 
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--f_fa_2_portfolio_var_exposure_sot_verify.md`
 **Estimate**: 1.5h actual (read-only + grep + 7 source file 抽讀；symbol grep 30+ 次)
+
+
+## 2026-05-15 — Track E3 maker fill rate empirical baseline (read-only PG)
+
+**Task**: PM Wave 1 第 5 並行 1h read-only — 從 Linux PG `trading.*` 算 entry maker fill rate empirical baseline，給 close-maker-first BB-SF-2 修正建議事實基礎。
+
+**Key findings (7d window, demo + live_demo, entry-only PostOnly Limit)**:
+- **Conditional on fill, ~94% maker** (demo 276/292, live_demo 195/209) — spec §1.2 假設 conditional 成立
+- **Per submitted PostOnly, 27% fill rate** (demo grid 936→253; live_demo grid 703→190); 70% PostOnly self-cancel timeout
+- **Cancel timeout = 45s** (p50/p90/p99 高度集中) — engine timer 觸發
+- **Fill latency p50 6.6-8.1s, p90 ~35s, p99 ~45s** — p99 接近 timeout cutoff
+- **Reject categories**: self_cancel 78.6%, PostOnly cross 20%, others <2%（無 TooManyPending）
+
+**Spec §1.2 4.5 bps 修正**:
+- Best case (fill-conditional): **3.31 bps** — overstate 1.2 bps (27%)
+- Per submitted (no fallback): **0.95 bps** — overstate 4.5x
+- Close-path conservative (預測 close 比 entry 更難 fill): **0.66 bps per attempt** — overstate 6.8x
+
+**Schema gotchas (重要)**:
+- `orders.intent_id` 100% NULL — writer 漏接 (P2-level finding，但本任務不修)
+- `orders.status` 100% Working — 終態須從 `order_state_changes.to_status` 拿
+- `orders.details` jsonb null — 沒 client metadata
+- `fills.entry_context_id IS NULL` = entry; NOT NULL = close — 唯一可靠 entry/close 區分
+
+**Per-strategy variance**:
+- grid_trading fill rate 27% (demo + live_demo 一致)
+- ma_crossover 47% (高，但 PO cross 也高 40%+，定價太貼)
+- bb_breakout sample 4 (insufficient)
+- bb_reversion / funding_arb 7d 無 entry
+
+**Close path prediction (對 EDGE-P2-3 close-maker-first)**:
+- 100% close fills 當前 = taker (272 demo / 192 live_demo)
+- demo close avg slippage 2.26 bps, live_demo 4.20 bps
+- close 結構性比 entry 更難 maker fill: trend-side liquidity 偏弱 + 45s timeout 對 exit 致命
+- **強烈推薦 conservative discount 25-40%** + fallback to taker + 短 timeout (5-15s) + 14d pilot
+
+**對 Track A1 PA 的傳球建議**:
+- spec §1.2 patch 用 0.5-2.0 bps net per attempt
+- 加 14d 30%+ close-maker fill rate gate 才 declare positive
+- 加 fallback to taker 機制要求
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--maker_fill_rate_empirical_baseline.md`
+**Estimate**: 1h actual (PG schema 摸清 15min + 5 round query 30min + 報告 15min)
+**SOP wins**:
+- SSH bridge 跑 PG 都需 `PYTHONPATH=. python3` 從 `~/BybitOpenClaw/srv` cwd
+- psql 需密碼，改用 `db_pool.get_pg_conn()` (ContextManager) 走 secrets 自動 inject
+- Single-quote nesting hell: 寫 helper 到 /tmp 比 inline -c 安全
+
