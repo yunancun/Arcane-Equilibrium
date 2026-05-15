@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v24
+Version: v25
 Date: 2026-05-15
-Status: PM freeze + AMD-2026-05-15-01 canary rebase applied. Step 3 runtime smoke + A4-C rebase completed 2026-05-15; Step 4 fill-lineage gate is source-cleared by `P1-HEALTHCHECK-55-INVARIANT` after replacing the `24/138` all-chain ratio heuristic with a fully-filled plan invariant. Patched `[55]` against current `trade-core` PG returns PASS (`chains_with_full_plan_fill=25`, `chains_with_real_fill_report=25`, `full_plan_fills_missing_report=0`, `partial_plan_fill_chains=13`). Step 5b Stage 0R preflight rerun after diagnostic producer restoration is still GATE-RED (`eligible_for_demo_canary=false`), though `[57]` now PASSes and expected_dir distribution improved from the prior ~97% NO_SIGNAL state. `P1-WA4B-INSERT-1` is DONE: W-AUDIT-4b feature baseline apply restored 646 active rows / 19 symbols and standalone `[67]` now PASSes. `[4]` phys lock and `[Xb]` pipeline triangulation are fixed/PASS. v21 completed ledgers were archived to keep this file as the active queue. W3 Stage 1 paper cohort and A4-C D+12 paper-edge promotion remain frozen; replacement path is Stage 0R replay preflight + Stage 1 demo micro-canary only after a future green preflight.
+Status: PM/PA/FA 5-day status audit sync. AMD-2026-05-15-01 canary rebase remains active: paper promotion evidence is frozen, A4-C D+12 paper-edge promotion is frozen, and Stage 1 demo micro-canary is blocked until a future green Stage 0R replay preflight. Step 5b Stage 0R remains GATE-RED (`eligible_for_demo_canary=false`) even after diagnostic producer restoration (`[57]` PASS; expected_dir distribution improved but edge/DSR still insufficient). `P1-HEALTHCHECK-55-INVARIANT` source-cleared `[55]` by replacing the `24/138` all-chain ratio heuristic with a fully-filled plan invariant (`25/25` fully-filled chains have real-fill ER; `0` missing; `13` partial chains surfaced separately). `P1-WA4B-INSERT-1` is DONE: feature baseline apply restored 646 active rows / 19 symbols and standalone `[67]` PASSes. Latest full passive healthcheck at `2026-05-15T15:47:01Z` is still **FAIL** due new `[27] intents_counter_freeze`: demo intent persistence stale 50.1m and live_demo stale 46.2m while approved verdicts/DCS continued; open `P1-INTENT-FREEZE-27`. `V079` is no longer pending on `trade-core`: `_sqlx_migrations` shows version 90 max, versions 79/85/86/87/88/89/90 applied, and `learning.strategy_trial_ledger` contains 16,212 rows. The untracked OI-confirmed 5m packet is now classified as **spec-only** and does not authorize replay eligibility, config changes, paper/demo launch, or canary promotion. Mac/origin are clean at this audit point; Linux `trade-core` source tree has unrelated dirty WIP and must not be force-synced.
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -10,6 +10,8 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
 `docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`.
 v21 cleanup archive:
 `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
+v24 stale-row audit archive:
+`docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
 
 ## §0.0 PM Freeze — 2026-05-15 Canary Rebase Guard
 
@@ -24,8 +26,10 @@ v21 cleanup archive:
 - Step 4 update: ✅ **SOURCE-CLEARED 2026-05-15 14:19 UTC**. `[55]` root cause was a healthcheck/filter bug: the old denominator used all complete decision chains, including no-fill and partial-fill chains, while Rust currently emits fill-completion ER only when `cum_filled_qty >= plan_qty * 0.999`. Patched check on current `trade-core` PG returns PASS with `chains=144`, `chains_with_real_fill_report=25`, `chains_with_plan_order_fill=38`, `chains_with_full_plan_fill=25`, `full_plan_fills_missing_report=0`, `partial_plan_fill_chains=13`, `bad_report_quality=0`, `bad_report_value_quality=0`.
 - Step 5a update: **GATE-RED 2026-05-15**. Stage 0R rerun on `trade-core` at Linux repo head `eb181d70` using `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql` fetched 4,417 rows over 7d. Mandatory metrics failed: pooled normal-signal `n=122`, `avg_net_bps=-3.5570`, `t=-1.5345`, `PSR(0)=0.0542`, `DSR(K=95)=0.0000`, block-bootstrap CI `[-3.9919, -1.2380]`, pooled R²(60/120/300)=`0.0004/0.0000/0.0017`, and no per-symbol `eligible_for_demo_canary=true`. Source-tier sanity: legacy `cross_asset_btc_lead_lag` panel rows=619; diagnostic source rows=12 snapshots / 84 expanded rows / 0 non-zero expected_dir at check time. No Stage 1 demo cohort selected. Evidence report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_verification.md`.
 - Step 5b update: **GATE-RED 2026-05-15 13:53 UTC**. After `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` restoration, `[57] btc_lead_lag_panel_health` PASSes (`age=27.2s`, `cohort=7/7`, `extreme=3.3%`, real book imbalance). Stage 0R fetched 5,740 rows over 7d and still returned `eligible_for_demo_canary=false`: pooled normal-signal `n=231`, `avg_net_bps=+0.3552`, `t=0.2231`, `PSR(0)=0.5877`, `DSR(K=95)=0.0000`, CI `[-1.0329, +2.1833]`, pooled R²(60/120/300)=`0.0009/0.0005/0.0027`. Expected_dir distribution improved but remains sparse: all-source NO_SIGNAL `95.63%` vs prior ~`97%`; diagnostic source `201` snapshots / `1,407` expanded rows / `121` non-zero expected_dir / `91.40%` NO_SIGNAL. No per-symbol `eligible_for_demo_canary=true`; `[55]` has since been source-cleared by P1-HEALTHCHECK-55-INVARIANT; `[58]` PASS as Stage 0 default. Evidence report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_step5b.md`.
+- Step 6 / OI-confirmed 5m packet: **SPEC-ONLY 2026-05-15**. `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_oi_confirmed_5m_preflight.md` defines the `bb_breakout_oi_confirmed_5m` Stage 0R replay contract, row labels, OI freshness constraints, TA-only baseline comparison, and DSR/PBO/CI expectations. It did not run the replay, did not mutate runtime/code/config/DB/auth, and explicitly remains `eligible_for_demo_canary=false` until a future executed report proves otherwise.
 - Passive healthcheck update: **FAIL 2026-05-15 12:45 UTC**. Full unfiltered `trade-core` run at commit `7108035d` returned 67 checks = 55 PASS / 11 WARN / 1 FAIL. `[4] phys_lock_runtime` PASS (`exit_features` phys_lock 24h=1 / 7d=109) and `[Xb] pipeline_triangulation` PASS (close-fill-linked 15/15/15; `rejected_governance_raw` diagnostic-only), confirming the `7108035d` fixes. Only hard FAIL was `[67] feature_baseline_readiness` (`active feature_baselines=0`), which opened `P1-WA4B-INSERT-1`; the follow-up below closed it. Pre-fix WARNs needing attention were `[40]` negative realized edge, `[55]` partial real-fill propagation, `[59]` H0 acceptance quiet/missing live_demo snapshot, `[20]` H-state stub shape regression, `[45]` pricing source/age weakness. `[55]` has since been source-cleared by P1-HEALTHCHECK-55-INVARIANT; remaining WARNs are advisory/sample-maturity watches (`[41]`, `[42b]`, `[42c]`, `[48]`, `[51]`, `[11]`) plus non-[55] runtime warnings.
 - P1-WA4B-INSERT-1 update: **DONE 2026-05-15 13:13 UTC / 15:13 Europe-Madrid**. Ran the canonical W-AUDIT-4b apply wrapper on `trade-core`: `OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/tmp/openclaw bash helper_scripts/cron/feature_baseline_writer_cron.sh`. Root cause was operational absence, not DDL: schema existed, source `trading.decision_context_snapshots` had 3,341,214 dry-run samples, but no cron entry/log and `observability.feature_baselines` had 0 active rows. Apply wrote 646 rows; active baselines now cover 19 symbols × 34 feature names. Standalone `[67] feature_baseline_readiness` PASSes with `active_rows=646 active_symbols=19 feature_names=34/34 online_latest_rows=43 vector_dim_min=34 vector_dim_max=34`. Drift events remain gated by configured burn-in.
+- Latest healthcheck update: **FAIL 2026-05-15 15:47 UTC**. Full passive wait healthcheck no longer fails `[55]` or `[67]`, but hard-fails `[27] intents_counter_freeze`: demo stale=50.1m / live_demo stale=46.2m, 30min intents=0 while approved verdicts and DCS evaluations continued. Treat as runtime pipeline wedge (`trading_writer` intent INSERT / DCS evaluation path) and do not launch any demo canary until cleared.
 
 ---
 
@@ -64,24 +68,13 @@ v21 cleanup archive:
 
 ## §3 Latest State
 
-### 4-agent loss audit landing (2026-05-09)
-- 4 agent (QC alpha / MIT data / PA architecture / FA business chain) 獨立分析虧損根因 + 全面提升路徑；4-視角共識：**5 textbook 策略 = dead-end alpha territory**（Bybit perp + 1m + standard TA + retail flow 數學上無 alpha）。
-- Operator 拍板 5 群 dispatch（A 新策略 / B ML 三斷層 / C Promotion+Dormant / D Architectural Wave / E G3-08+治理）；PM Sign-off `5789a175` (QCTODO) → `fed11435` (operator (a))；merged 進 v19。
-- AMD-2026-05-09-03 graduated canary default supersedes AMD-02 §2 binary fail-closed。
-- W-AUDIT-8a Alpha Surface Foundation SPEC PHASE land (`c13c811e`)；W-AUDIT-9 Graduated Canary IMPL spec via amendment。
-- **A2-followup G3-08 OPENCLAW_H_STATE_GATEWAY=1 enable** ✅ DONE 2026-05-09 17:27 UTC（commit `dddc5dc1` engine + API env wire；env file appended；engine.log: `cost_edge_advisor spawned env=1 phase=B_shadow`）。
+### Current State (2026-05-15 PM/PA/FA audit)
 
-### v18 Latest State 保留摘要（細節在 git history `e7d58774` 之前）
-- W-A/W-B/W-E/W-G backend foundation DONE。W-C MAG-082 Stage 2 **WINDOW_PASS 2026-05-11**（post Caveat 1+2 fix `ccf7a4bc` + empirical SQL missed_n=0 entry / 14.7 state_changes/min；sign-off `docs/governance_dev/2026-05-11--w_c_window_pass_signoff.md`）。**W-D MAG-083 三角 audit + MAG-084 sign-off ✅ DONE 2026-05-11**（sign-off `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`；QA APPROVE WITH RESERVATIONS R-1/R-2/R-3 + PA APPROVE WITH P1 FOLLOW-UP 0 P0/7 P1/3 P2 + QC APPROVE WITH 4 STATISTICAL CAVEATS S1-S4）。W-D wave CLOSED。
-- W-AUDIT-1 docs sync DONE; W-AUDIT-2 security IMPL DONE (V078 applied, lease_transitions rows=103); W-AUDIT-3 PARTIAL (F-01 source/test); W-AUDIT-4 PARTIAL (V068/V070/V071 reclassification COMMENT; 4b scope corrected to 3 retained INSERT tables + 2 views + 1 dropped/no-DDL); W-AUDIT-5 ACTIVE; W-AUDIT-6 SOURCE/TEST CLOSED by AMD-02; W-AUDIT-7 ACTIVE; W-AUDIT-8a SPEC PHASE。
-- 13-agent v3 verification (5/9 commits cover P0-V2-NEW-1/2/3 + selection bias + cron scope; **source/test only**: V079 完全未 apply / cron 未 install / engine 仍跑 5/8 binary)。
-- MIT v3 第一次定位 attribution real root cause = `label_close_tag` NULL 98.9% (24h 76/7000)；**1-day fix vs PA R-3 Hypothesis Pipeline 4-6 sprint，最高 ROI**。
-- v18 Latest State 200+ 行 source/test checkpoint historical 已 archive 到 `docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`，以保 v19 active queue 健康。
-
-### Current Demo State (2026-05-09)
-- 5 策略 7d demo gross **-26.44 USDT** (PA `[40]` realized_edge_acceptance baseline)
-- attribution_chain_ok 24h **0.5041%** (denominator artifact, ok_n only +47% 真改善；MIT root cause `label_close_tag` NULL 98.9%)
-- W-AUDIT-2 V078 lease_transitions BYPASS 24h 7955 → 11133 = +40% growth（v2 唯一真活躍 runtime 進步）
+- W-C MAG-082 Stage 2 **WINDOW_PASS 2026-05-11** and W-D MAG-083/MAG-084 **DONE 2026-05-11** are closed; proposal/mobile/Stage 3+/true-live gates remain separate and still blocked by edge/LG/ops prerequisites.
+- A4-C BTC→Alt Lead-Lag Stage 0R remains **GATE-RED** after Step 5b (`eligible_for_demo_canary=false`). The OI-confirmed 5m packet is only a replay spec and does not change eligibility.
+- `[55]` is source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; `[67]` is restored to PASS after feature baseline apply; `[4]` phys lock and `[Xb]` triangulation are PASS after `7108035d`.
+- V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
+- Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
 
 ---
 
@@ -147,6 +140,9 @@ Current sign-off deltas only:
 - ❌ **Stage 0R GATE-RED 2026-05-15**: A4-C Step 5b returned
   `eligible_for_demo_canary=false` after diagnostic producer restoration; no
   Stage 1 demo cohort selected.
+- 🟡 **OI-confirmed 5m Stage 0R packet is spec-only**: the packet defines
+  `bb_breakout_oi_confirmed_5m` replay acceptance rules but did not execute a
+  replay and cannot be used as promotion evidence.
 - ✅ **`[55]` fill-lineage source-cleared**: patched invariant on `trade-core`
   PG proves `chains_with_real_fill_report=25/25` fully-filled plan chains,
   `full_plan_fills_missing_report=0`; 13 partial chains are diagnostic.
@@ -166,19 +162,21 @@ Completed Sprint N+0 / N+1 D+0 execution ledgers and Post-MAG-084 Wave 1
 planning are archived in
 `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
 
-Priority verdict after PA/FA/PM cross-check:
-1. `W3 Stage 1 demo micro-canary` is **BLOCKED**, not active execution.
-   A4-C is GATE-RED (`eligible_for_demo_canary=false`), so `[55]` source
-   clearance is insufficient to launch without a new green Stage 0R packet.
-2. `[55]` cleanup is source-cleared by P1-HEALTHCHECK-55-INVARIANT; it no
-   longer independently blocks a future demo canary once the patch is repo-synced.
-3. `W-AUDIT-8d` A4-C is implementation-complete but promotion-blocked; next
-   work is revise-or-archive / diagnostic maturity. The diagnostic producer is
-   no longer silent-dead, but signal share and edge remain too weak for Stage 1.
-4. Continue `W-AUDIT-8a` Phase C/D and alternative alpha candidates
-   (`8c` liquidation, `8b` funding skew); the business-chain root cause remains
-   lack of non-textbook alpha.
-5. `P0-LG-1/2/3`, `P0-OPS`, and `P0-EDGE-1` stay true-live prerequisites.
+Priority verdict after PM/PA/FA cross-check:
+1. **True-live remains blocked** by `P0-EDGE-1`, `P0-LG-1/2/3`, and
+   `P0-OPS-1..4`; none of the 2026-05-15 runtime/doc fixes grant live authority.
+2. **Stage 1 demo micro-canary is blocked**, not active execution. A4-C is
+   GATE-RED, and the OI-confirmed 5m packet is spec-only until an executed
+   Stage 0R replay returns green.
+3. **Alpha path priority**: A4-C revise-or-archive / diagnostic maturity,
+   then W-AUDIT-8a Phase C/D, `8c` liquidation, and `8b` funding skew. The
+   business-chain root cause is still lack of non-textbook alpha.
+4. **Runtime hard FAIL**: clear `P1-INTENT-FREEZE-27` before any canary or
+   promotion-sensitive runtime action; then keep `P1-FILL-LINEAGE-MONITOR`,
+   `P1-STARTUP-BURST-MITIGATION`, current-log V083 follow-up, and
+   `P1-W6-5-ML-METRICS` behind the alpha/live blockers.
+5. **Maintenance**: P2 hygiene, GUI/AI UX, and old worktree dump cleanup stay
+   below alpha/LG/ops gates.
 
 ---
 
@@ -237,12 +235,13 @@ that inflate DSR trial count.
 | `P1-FILL-LINEAGE-DROP` | ✅ SOURCE/REGRESSION/DEPLOY DONE 2026-05-11 | Spine channel silent-drop fix (Option F4 B-2+B-3 hybrid) | `e17ead2b` + E4 READY/PASS; post-deploy startup burst residual tracked by `P1-STARTUP-BURST-MITIGATION`. |
 | `P1-FILL-LINEAGE-MONITOR` | ⏳ post Wave 1.6 deploy | Drop counter healthcheck wiring | 3 SPINE_CHANNEL_* counter 已暴露 accessor，healthcheck [N] 接 + 5/min WARN 閾 |
 | `P1-HEALTHCHECK-55-INVARIANT` | ✅ SOURCE-CLEARED 2026-05-15 | Redesign / clear [55] WARN gate as invariant test (QC S3) | Code now gates on fully-filled plan chains (`cum_fill_qty >= plan_qty * 0.999`) instead of `chains_with_real_fill_report / complete_chains >= 50%`. Patched `trade-core` DB verification PASS: `25` fully-filled chains / `25` real-fill ER / `0` missing; `13` partial chains surfaced separately. Per-fill partial ER remains future hardening, not current Stage 1 demo blocker. |
+| `P1-INTENT-FREEZE-27` | 🔴 ACTIVE 2026-05-15 | Full passive healthcheck hard FAIL `[27] intents_counter_freeze` | 2026-05-15 15:47 UTC: demo stale=50.1m, live_demo stale=46.2m, 30min intents=0 while approved verdicts/DCS continued. RCA target: Rust `trading_writer` intent INSERT + DCS evaluation path. Blocks canary/promotion-sensitive runtime action until cleared. |
 | `P2-DUAL-RAIL-ORDER-ID` | ✅ DONE 2026-05-15 | demo + live_demo 共享 order_id 衝突解 | `2f1c385b` adds mode prefix to `order_link_id`. |
 | `P2-RUNTIME-SHADOW-SPLIT` | ✅ DONE 2026-05-15 | runtime_shadow.rs 828 LOC > 800 警告 split | `122015b7` split runtime_shadow.rs under warning threshold. |
 | `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5 注：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
 | `P3-SPINE-COUNTER-CACHE-ALIGN` | ⏳ scheduled quiet period | 3 AtomicU64 counter `#[repr(align(64))]` cache line | E5 cosmetic; 10 min fix; ~50-200ns extra latency 降到 0 |
 | `P1-STARTUP-BURST-MITIGATION` | ⏳ scheduled post Wave 2 | Engine restart 後 startup burst 1-min window 仍 silent-drop 23.5% real-fill ER (Wave 1.6 deploy 16:22:52 UTC 實證 4/17 drops) | Cap 8192→32768 OR retry 3×50ms→5×100ms 500ms budget OR staggered engine bring-up；steady-state 0% drop 證 Wave 1.6 fix 有效 |
-| `P1-V083-HALT-SESSION-CTX` | 🟡 SOURCE/TEST CLOSED 2026-05-12; RUNTIME DEPLOY PENDING | halt_session close fill 仍可繞過 synthetic `entry_context_id` fallback，導致 `chk_fills_close_has_entry_context_id_v083` 每 2s 重試卡 writer | Source fix: `step_6_risk_checks.rs` halt loop 改走 `resolve_close_entry_context_id()`；回歸 test 鎖 close fill entry_context_id 非空；驗證 `cargo test -q -p openclaw_engine test_halt_session_uses_per_symbol_price_not_triggering_tick` PASS + grep 舊 fallback 0 hit。待 rebuild/restart 後確認 engine.log 無 `chk_fills_close_has_entry_context_id_v083`。 |
+| `P1-V083-HALT-SESSION-CTX` | 🟡 SOURCE/TEST CLOSED; CURRENT LOG CLEAN 2026-05-15 | halt_session close fill 曾可繞過 synthetic `entry_context_id` fallback，導致 `chk_fills_close_has_entry_context_id_v083` 每 2s 重試卡 writer | Source fix: `step_6_risk_checks.rs` halt loop 改走 `resolve_close_entry_context_id()`；回歸 test PASS + grep 舊 fallback 0 hit。2026-05-15 current `/tmp/openclaw/engine.log` grep showed no `chk_fills_close_has_entry_context_id_v083` / `halt_session` hits; keep one full-healthcheck follow-up before deleting the row. |
 | `LG-1` H0 production caller | 🔵 Wave 2.2 dispatched 2026-05-11 | T1+T2+T3+T4 E1×4 parallel IMPL | per PA plan §1.4 |
 | `LG-2` Provider pricing binding | 🔵 Wave 2.2 dispatched 2026-05-11 | T4 RiskConfig 先 → T1+T3 parallel → T2 startup assertion 序列 | per PA plan §2.4 |
 | `LG-3` Supervised live SM | 🔵 Wave 2.1 PA spec phase dispatched 2026-05-11 | PA spec doc 1-1.5d → QC+BB+MIT parallel review → PA spec v2 → Wave 2.4 E1×7 IMPL | per PA plan §3.6 + §6.1 + §6.4 |
@@ -259,14 +258,14 @@ that inflate DSR trial count.
 | `P0-NEW-VULN-1..2` | DONE 2026-05-09 | launchd plist HIGH / lease audit runtime emit HIGH | Mac launchd 127.0.0.1 binds; `100.91.109.86:8000` Tailscale; lease_transitions `BYPASS` rows=103. |
 | `P0-AUDIT-NEW-LG-X-05` | DONE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 | LG-X 完整登記。 |
 | `P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` | DONE 2026-05-09（**4-agent fact-check 撤銷 stale belief**） | `IndicatorEngine::compute_all` 自 `75741eff` (2026-04-28) 起呼 `donchian_prior()` leak-free 11 天；`ad14db07` 僅補 regression test；QC v2-NEW-4「runtime contaminated」判定為過期 contaminated belief（commit `6afad6e8`）。 | n/a |
-| `P0-V2-NEW-2-STRATEGIST-CAP-NO-GATE` | DONE 2026-05-09; **ADR-0021 待**（invariant 17） | F-strategist-cap 30→50 是 wide_parameter_adjustment skill；不是 supervised gate；待補 ADR-0021。 | ADR-0021 land + commit |
-| `P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` | SOURCE/TEST CLOSED 2026-05-09; RUNTIME PENDING Sprint N+0 | DSR/PBO promotion gate IMPL ✅；`learning.strategy_trial_ledger` V079 待 apply；evidence push 鏈 `promotion_evidence.py` IMPL；待 cron install + V079 apply + rebuild/restart。 | V079 apply + cron install + 24h fire |
+| `P0-V2-NEW-2-STRATEGIST-CAP-NO-GATE` | ✅ DONE 2026-05-10 | F-strategist-cap 30→50 is a `wide_parameter_adjustment` skill, not a supervised gate. ADR numbering drift is closed by ADR-0022 (ADR-0021 was already alpha-source architecture). | ADR-0022 + ARCH-04 + AMD-2026-05-10-03/04 landed; no active blocker remains. |
+| `P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` | ✅ RUNTIME APPLIED 2026-05-15 | DSR/PBO promotion gate + evidence push chain source/test closed; V079 is applied on `trade-core` and `learning.strategy_trial_ledger` has 16,212 rows. | Runtime V079 concern closed; future Stage 1/2 promotion callers still require green demo evidence and governance gates. |
 | `P0-V3-MIT-ROOT-CAUSE` | ✅ DONE | = `P0-MIT-LABEL-CLOSE-TAG-1`（cross-reference）| Closed by post-M3 chain integrity evidence; residual alpha/edge risk tracked by `P0-EDGE-1`. |
-| `P0-V3-V079-NOT-APPLIED` | ACTIVE Sprint N+0 | 48227607 source 已落但 _sqlx_migrations max=78；V079 待 apply | engine restart with auto-migrate；invariant 18 |
-| `P0-V3-CRON-NOT-INSTALLED` | ✅ DONE 2026-05-09 | F-08 5 ML cron `17 3 * * *` 已 install Linux crontab；待 24h fire 驗 | invariant 18 24h fire |
-| `P0-V3-PA-SPEC-FIX` | ACTIVE Sprint N+0 | BB v3 揭發 PA spec 3 條錯誤：(1) Bybit V5 WS L25→L50 / (2) liquidation_pulse 4 weeks ago deleted 需 revert / (3) basis demo 限 observation 沒分（execution 需 mainnet） | PA spec 修 3 條 + ADR-0021/ARCH-04 同 wave |
-| `P0-V3-ADR-0021-ARCH-04` | ACTIVE Sprint N+0 | 建 ADR-0021 + ARCH-04 + CONTEXT 5 詞條 + AMD-03/04（R4/TW 共識） | ADR/ARCH/CONTEXT 全 land |
-| `P0-V3-ENGINE-RESTART` | ACTIVE Sprint N+0 | engine 仍跑 5/8 binary 待 rebuild 含 Donchian fix + 多 commits 落地（注：Donchian fix 已自 75741eff 04-28 land 11 天，不是 actionable blocker；其他 commits 如 V079/A4-C 等 land 後 rebuild） | engine restart with latest binary |
+| `P0-V3-V079-NOT-APPLIED` | ✅ DONE 2026-05-15 | Superseded stale source-only note. `trade-core` `_sqlx_migrations` max version is 90; V079 is applied; `learning.strategy_trial_ledger` exists with 16,212 rows. | Archived from active queue. |
+| `P0-V3-CRON-NOT-INSTALLED` | ✅ DONE 2026-05-09 | F-08 5 ML cron `17 3 * * *` installed and 24h fire verified. | invariant 18 closed. |
+| `P0-V3-PA-SPEC-FIX` | ✅ DONE 2026-05-10 | BB v3 pushbacks were adopted: Bybit V5 orderbook uses L50 not L25; `liquidation_pulse` is `requires_revival` dormant; basis remains observation-only until mainnet spot capability. | Verified by BB final compatibility review; future Phase C/C+1 implementation still needs BB/MIT review. |
+| `P0-V3-ADR-0021-ARCH-04` | ✅ DONE 2026-05-10 | ADR-0021 alpha-source architecture, ADR-0022 strategist cap, ARCH-04, CONTEXT alpha-source terms, AMD-2026-05-10-03, and AMD-2026-05-10-04 landed/indexed. | Historical row archived; ARCH-04 Stage 1 paper semantics later superseded by AMD-2026-05-15-01. |
+| `P0-V3-ENGINE-RESTART` | ✅ STALE/CLOSED 2026-05-15 | Old "engine still 5/8 binary" note is no longer current. `trade-core` runtime is alive on the current source line for 2026-05-15 checks; paper remains disabled by design. | Do not use as an active blocker; Linux dirty WIP now blocks clean source sync separately. |
 
 ---
 
@@ -299,7 +298,7 @@ active work starts at §10 / §11.2 / §11.3.
 | ID | Priority | Task | Notes |
 |---|---:|---|---|
 | `P1-W6-5-ML-METRICS` | 2 | W6-5 sample_weight ratio sensitivity + 5 ML pipeline metrics acceptance | Preserved from archived §6.6 MIT MUST 3; do not lose this active signal during TODO cleanup. |
-| `P1-CRON-ML-1` | DONE | F-08 5 ML cron 24h fire 驗（cron 已 install at `17 3 * * *`） | invariant 18 says 24h fire verified; V079 runtime concerns stay separate if reopened. |
+| `P1-CRON-ML-1` | DONE | F-08 5 ML cron 24h fire 驗（cron 已 install at `17 3 * * *`） | invariant 18 says 24h fire verified; V079 runtime concern is closed as of 2026-05-15. |
 | `P1-AUDIT-RUNTIME-3` | DONE | W-AUDIT-3 + W-AUDIT-3b（mounts W-A close-out + W-B regression） | W-AUDIT-3b runtime smoke done 2026-05-15; residual `[55]` gate tracked in §10. |
 | `P1-AUDIT-PERF-5` | 3 | W-AUDIT-5a/5b 性能/結構/CI urgent | 剩 F-20 909MB damaged dump drop ops |
 | `P1-AUDIT-AI-UX-7` | 3 | W-AUDIT-7c GUI/UX 收口 | F-07 ANTHROPIC_API_KEY + cea-env restart |

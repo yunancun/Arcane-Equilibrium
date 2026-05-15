@@ -1,7 +1,31 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-15（P1-HEALTHCHECK-55-INVARIANT）
+> 最後更新：2026-05-15（PM/PA/FA 5-day audit sync）
+
+### PM/PA/FA 5-day TODO/MEMORY/README sync — 2026-05-15
+
+**Scope**: Audited the prior 5 days of work quality and reconciled active
+state across `TODO.md`, `README.md`, `CLAUDE.md`, `.codex/MEMORY.md`,
+`active-plan.md`, and docs index.
+
+**主要 land**:
+- `TODO.md` advanced to v25 and removed stale active interpretation for V079,
+  engine 5/8 binary, ADR pending, and old 2026-05-09 demo-state notes.
+- `README.md` now reflects current console tabs, GitHub Issues active posture,
+  and Decision Lease router flag as shadow/evidence rather than true-live auth.
+- `.codex/MEMORY.md` and `active-plan.md` now point at TODO v25 and treat
+  MAG-083/MAG-084 as closed, while preserving edge/LG/ops gates.
+- Latest full passive healthcheck result is recorded as still FAIL because
+  `[27] intents_counter_freeze` is now the current hard runtime blocker.
+- Added stale-row archive and PM audit report; the OI-confirmed 5m packet is
+  indexed as spec-only with `eligible_for_demo_canary=false`.
+
+**Verification**: PM/PA/FA audit agreement. Direct `trade-core` read-only checks
+confirmed V079 applied through migrations max=90 and
+`learning.strategy_trial_ledger` rows=16,212. No business code, strategy config,
+auth, runtime, DB write, rebuild, restart, paper enablement, demo canary, or
+live authority change.
 
 ### P1-HEALTHCHECK-55-INVARIANT — 2026-05-15
 
