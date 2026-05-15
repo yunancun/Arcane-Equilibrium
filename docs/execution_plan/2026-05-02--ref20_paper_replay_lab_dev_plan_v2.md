@@ -1,7 +1,9 @@
+> **SUPERSEDED** by [ref20_paper_replay_lab_dev_plan_v3.md](2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md) -- retained for historical reference.
+
 # REF-20 Paper Replay Lab 開發方案 V2
 
 **日期：** 2026-05-02
-**狀態：** Current development baseline for REF-20 implementation planning
+**狀態：** SUPERSEDED by V3；V2 development baseline 歷史保留
 **Owner：** PM
 **上游契約：** REF-19 / REF-20
 **審查輸入：** V1、v0.1、Round2 audit

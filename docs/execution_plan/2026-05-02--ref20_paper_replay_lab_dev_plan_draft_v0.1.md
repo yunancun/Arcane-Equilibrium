@@ -1,3 +1,5 @@
+> **SUPERSEDED** by [ref20_paper_replay_lab_dev_plan_v3.md](2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md) -- retained for historical reference.
+
 # REF-20 Paper Replay Lab + Learning Surface 開發方案草稿 v0.1
 
 **日期：** 2026-05-02

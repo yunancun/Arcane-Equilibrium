@@ -1582,7 +1582,19 @@ async function liveStart() {
 }
 
 async function doLiveStop() {
+  // A3 HIGH-1 fix：停止 Live 同樣會市價平倉，必須 typed-phrase 確認
   closeDialog('dlg-live-stop');
+  const ok = await openTypedConfirmModal({
+    title: '⛔ 停止 Live 實盤交易',
+    body: '此操作將：\n1. 取消所有掛單\n2. 市價平倉所有持倉\n3. 停止交易授權租約\n\n⚠ 市價成交存在滑點風險。真實資金。',
+    phrase: 'STOP LIVE',
+    confirmLabel: '確認停止 / Stop Live',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '所有倉位市價平倉，授權租約終止',
+    rollback: '需重新啟動 Live 交易才能恢復'
+  }).catch(function() { return false; });
+  if (!ok) return;
   const d = await ocPost('/api/v1/live/session/stop', {});
   if (d) {
     const errors = (d.data && d.data.errors) || d.errors;

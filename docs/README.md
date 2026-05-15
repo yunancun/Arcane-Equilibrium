@@ -166,6 +166,8 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-16--12-agent-consolidated-fix-plan.md` | PA 12-agent consolidated audit fix plan：FA/AI-E/QC/E5/A3/E3/MIT/R4/BB/CC finding 驗證 + 修復優先排序 |
 | `CCAgentWorkSpace/Operator/2026-05-16--12-agent-consolidated-fix-plan.md` | Operator brief：12-agent consolidated fix plan |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-05-16--full-scope-testing-audit.md` | E4 full-scope testing audit |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-16--12-agent-audit-pm-signoff.md` | PM 12-agent audit sign-off report |
+| `CCAgentWorkSpace/Operator/2026-05-16--12-agent-audit-pm-signoff.md` | Operator brief：12-agent audit PM sign-off |
 
 ### 2026-05-11 Sprint N+1 dispatch + W-D + LG design
 
@@ -213,6 +215,13 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/Operator/2026-05-15--a4c_rca_final_and_c1_proof_start.md` | Operator brief for A4-C no-revive RCA closure and running C1 proof |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8b_review_stage0r_design.md` | W-AUDIT-8b Funding Skew review + Stage 0R design：QC/MIT/BB conditional approve design-only with locked K/DSR/PBO, raw panel joins, and funding attribution boundaries |
 | `CCAgentWorkSpace/Operator/2026-05-15--w_audit_8b_review_stage0r_design.md` | Operator brief for W-AUDIT-8b review/design checkpoint |
+| `CCAgentWorkSpace/Operator/2026-05-15--stage0r_preflight_verification.md` | Operator brief for Stage 0R preflight verification |
+| `CCAgentWorkSpace/Operator/2026-05-15--passive_healthcheck_7108035d_plan_sync.md` | Operator brief for passive healthcheck 7108035d plan sync |
+| `CCAgentWorkSpace/Operator/2026-05-15--feature_baseline_restore.md` | Operator brief for W-AUDIT-4b feature baseline restore |
+| `CCAgentWorkSpace/Operator/2026-05-15--stage0r_preflight_step5b.md` | Operator brief for A4-C Stage 0R Step 5b runtime verification |
+| `CCAgentWorkSpace/Operator/2026-05-15--p1_healthcheck_55_invariant.md` | Operator brief for `[55]` fully-filled plan invariant source-clear |
+| `CCAgentWorkSpace/Operator/2026-05-15--p1_intent_freeze_27_qty_rounding_rca.md` | Operator brief for `[27]` intent freeze qty rounding RCA |
+| `CCAgentWorkSpace/Operator/2026-05-15--f_fa_3_w_c_caveat_2_guard_tests_design.md` | Operator brief for F-FA-3 W-C caveat 2 guard tests design |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_consolidated.md` | AMD-2026-05-15-02 4-agent adversarial review consolidated：17 must-fix / 14 should-fix / QC+FA+BB+MIT 全 APPROVED-CONDITIONAL |
 | `CCAgentWorkSpace/QC/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_qc.md` | QC verdict for AMD-2026-05-15-02：4 MF / 5 SF / 3 NTH |
 | `CCAgentWorkSpace/FA/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_fa.md` | FA verdict for AMD-2026-05-15-02：4 MF / 5 SF / 4 NTH |
@@ -261,6 +270,9 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md` | AMD-2026-05-03-01 Wave 7 P5 IMPL accepted / deploy blocked split |
 | `governance_dev/amendments/2026-05-09--SM-05_executor_shadow_mode_polling_design.md` | AMD-2026-05-09-01 accepted SM-05 Executor shadow-mode polling policy; F-01 implementation pending |
 | `governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md` | AMD-2026-05-09-02 operator decision audit closure for P0-DECISION-AUDIT-2/4/5 |
+| `governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` | AMD-2026-05-09-03 Strategist 30%->50% wide_parameter_adjustment skill（freedom-not-gate + RuntimeMaxEnvelope） |
+| `governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` | AMD-2026-05-09-04 Demo->LivePending promotion_evidence producer + V079 schema + QC push back 採納 |
+| `governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md` | AMD-2026-05-09-03 Graduated Canary default-OFF（ARCH-04 配套 default gate） |
 | `governance_dev/amendments/2026-05-10--AMD-2026-05-10-05-canary-stage-criteria-spec.md` | AMD-2026-05-10-05 canary stage criteria spec (Stage 1-4 promotion/demote criteria + sample-size gate) |
 | `governance_dev/amendments/2026-05-11--AMD-2026-05-11-W6-1-rfc-final-verdict-absorb.md` | AMD-2026-05-11-W6-1 RFC final verdict absorb (W6 governance metadata + duplicate_intent bug + imbalance weight) |
 | `governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` | AMD-2026-05-15-02 EDGE-P2-3 Phase 1b Close-Maker-First refactor (fee optimization pathway + 3-phase灰度 + V094 schema) |
@@ -271,6 +283,20 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `governance_dev/2026-05-11--w2_impl_signoff_pack.md` | W2 A4-C IMPL sign-off pack |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_partial_f15_f17_sm05.md` | PM sign-off report for W-AUDIT-3 partial F-15/F-17/SM-05 checkpoint |
 | `CCAgentWorkSpace/Operator/2026-05-09--w_audit_3_partial_f15_f17_sm05.md` | Operator-facing copy of W-AUDIT-3 partial checkpoint report |
+| `adr/0001-rust-as-trading-authority.md` | ADR-0001: Rust 為唯一交易參數權威 |
+| `adr/0002-three-mode-engine-independent-risk-configs.md` | ADR-0002: 三引擎模式獨立風控 config |
+| `adr/0003-paper-pipeline-disabled-by-default.md` | ADR-0003: Paper pipeline 預設關閉 |
+| `adr/0004-livedemo-no-degradation.md` | ADR-0004: LiveDemo 不因 endpoint 降級 |
+| `adr/0005-engine-mode-tag-live-demo.md` | ADR-0005: engine_mode 標籤 live_demo 升級 |
+| `adr/0006-bybit-only-exchange.md` | ADR-0006: Bybit 為唯一交易所 |
+| `adr/0007-mac-dev-linux-runtime-split.md` | ADR-0007: Mac=開發 / Linux=Runtime |
+| `adr/0008-decision-lease-state-machine.md` | ADR-0008: Decision Lease 狀態機 |
+| `adr/0009-hot-config-arcswap-no-restart.md` | ADR-0009: ArcSwap 熱重載無需重啟 |
+| `adr/0010-timescale-hypertable-with-guard-migrations.md` | ADR-0010: TimescaleDB hypertable + Guard migration |
+| `adr/0011-v-migration-linux-pg-dry-run-mandatory.md` | ADR-0011: V### migration Linux PG dry-run 強制 |
+| `adr/0012-chinese-only-comments-default.md` | ADR-0012: 注釋默認只寫中文 |
+| `adr/0013-openclaw-gateway-not-trading-conductor.md` | ADR-0013: OpenClaw Gateway 非交易指揮 |
+| `adr/0014-arcane-equilibrium-soft-rename.md` | ADR-0014: 玄衡 Arcane Equilibrium 軟更名 |
 | `adr/0015-openclaw-control-plane-repositioning.md` | ADR-0015: OpenClaw is Control Plane/Gateway, not trading conductor |
 | `adr/0016-decision-lease-router-evidence-mode.md` | ADR-0016: Decision Lease router flag may run as shadow evidence |
 | `adr/0017-scanner-is-evidence-not-authority.md` | ADR-0017: scanner is always-on evidence infrastructure, not authority |
@@ -684,6 +710,14 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | REF-21 Full-Chain Replay Engine V1.1：已被 V1.2 supersede，保留作第二輪 audit 追溯 |
 | `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | REF-21 Full-Chain Replay Engine V1：已被 V1.1 supersede，保留作方向性 baseline 與 audit 追溯 |
 | `2026-05-XX--ref21_s1_recorder_spec_placeholder.md` | REF-21 S1 recorder placeholder：已被 REF-21 Full-Chain Replay V1 接管，保留作 REF-20 Wave 5 歷史 trace |
+| `2026-05-03--ref20_sprint3_track_i_linux_deploy_runbook.md` | REF-20 Sprint 3 Track I Linux deploy runbook |
+| `2026-05-03--ref20_sprint4_final_closure.md` | REF-20 Sprint 4 final closure |
+| `2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md` | REF-20 Gap Closure Plan V1：Sprint A-D 的 SoT execution plan |
+| `2026-05-07--ref21_replay_remaining_wave_reset_v1.md` | REF-21 Replay Remaining Wave Reset V1：REF-21 V1.3 governance gates 保留前提下剩餘 wave 重排 |
+| `2026-05-09--w_audit_8b_strategist_alpha_orchestrator_spec.md` | W-AUDIT-8b Strategist Alpha-Source Orchestrator spec（R-2 spec phase） |
+| `2026-05-09--w_audit_8c_hypothesis_pipeline_spec.md` | W-AUDIT-8c Hypothesis Pipeline as First-Class Governance Object spec（R-3 spec phase） |
+| `2026-05-09--w_audit_8d_per_alpha_source_promotion_gate_spec.md` | W-AUDIT-8d Per-Alpha-Source Live Promotion Gate spec（R-4 spec phase）|
+| `2026-05-09--w_audit_8e_spec_as_code_spec.md` | W-AUDIT-8e Spec-as-Code + Module Lifecycle SM spec（R-5 spec phase）|
 
 #### REF-20 governance amendments
 
@@ -920,3 +954,4 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-09--qctodo_sprint_n0_n5_archive.md` | QCTODO Sprint N+0..N+5 planning archive |
 | `2026-05-09--w_audit_verified_closed_archive.md` | W-AUDIT-1..7 verified-closed details archive |
 | `2026-05-15--todo_v21_completion_cleanup_archive.md` | TODO v21 completion cleanup archive: completed sprint ledgers, DONE rows, and W-AUDIT priority delta |
+| `2026-05-15--todo_v24_stale_rows_archive.md` | TODO v24 stale rows archive：過時 active rows / stale claims 歸檔（V079 pending / engine 5/8 binary / 舊 demo state / 舊 `[55]`/`[67]` 判斷）|

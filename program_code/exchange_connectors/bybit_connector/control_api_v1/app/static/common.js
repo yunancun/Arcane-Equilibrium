@@ -1798,6 +1798,11 @@ function openConfirmModal(actionName) {
     document.body.appendChild(overlay);
   }
 
+  // A3 HIGH-3 fix：concurrent-open guard（與 openTypedConfirmModal 對稱）
+  if (overlay.classList.contains('show')) {
+    return Promise.reject(new Error('openConfirmModal already open'));
+  }
+
   document.getElementById('oc-gc-title').textContent = meta.title;
   document.getElementById('oc-gc-body').textContent = meta.body;
   var confirmBtn = document.getElementById('oc-gc-confirm');
