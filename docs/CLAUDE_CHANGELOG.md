@@ -1,7 +1,26 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-14（P2-N2-4 stable_id duplication CI guard）
+> 最後更新：2026-05-15（passive healthcheck 7108035d active-plan sync）
+
+### Passive Healthcheck 7108035d Active-Plan Sync — 2026-05-15
+
+**Scope**: Recorded the `trade-core` full unfiltered passive healthcheck result
+after commit `7108035d` fixed `[4] phys_lock_runtime` and `[Xb]
+pipeline_triangulation` semantics.
+
+**主要 land**:
+- `active-plan.md` advanced to v1.1, now sourced to TODO v22 + `7108035d`,
+  and no longer lists completed `P1-STABLE-ID-1` / `P1-RCA-1` as available
+  work.
+- `TODO.md` records the full healthcheck summary: 67 checks = 55 PASS / 11 WARN
+  / 1 FAIL, with `[4]` and `[Xb]` PASS and `[67] feature_baseline_readiness`
+  as the only hard FAIL.
+
+**Verification**: `trade-core` full `passive_wait_healthcheck.py` run via the
+canonical wrapper, no `--check` filter, log
+`/tmp/passive_wait_healthcheck_full_20260515.log`. No rebuild, restart, DB
+mutation, live auth mutation, or strategy/risk change.
 
 ### P2-N2-4 stable_id duplication CI guard — 2026-05-14
 
