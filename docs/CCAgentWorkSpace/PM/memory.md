@@ -247,6 +247,7 @@
 | 2026-05-15 | A4-C PM/PA/FA engineering card：archive from promotion；`P1-A4C-RCA-1` is read-only only；demo budget remains blocked without a future preregistered green Stage 0R packet | workspace/reports/2026-05-15--a4c_unblock_engineering_card.md |
 | 2026-05-15 | A4-C `P1-A4C-RCA-1` read-only RCA start：current 7d dry-run stays red and finite X=5/Y=0.20 threshold probe remains below promotion/revive bands | workspace/reports/2026-05-15--a4c_stage0r_rca_start.md |
 | 2026-05-15 | P0-MICRO-PROFIT alpha prework：新增 W-AUDIT-8a C1 standalone `allLiquidation.{symbol}` proof plan/script、W-AUDIT-8b Funding Skew spec v0.1，並按 Stage 0R R² rule 將 A4-C archive from promotion / diagnostic-only | workspace/reports/2026-05-15--micro_profit_alpha_prework.md |
+| 2026-05-15 | TODO v30 three-side source sync：移除 active docs 舊 `TODO.md v28` / `81bc0862` sync wording，記錄 source-only sync boundary；無 runtime/rebuild/auth/DB/demo/live 動作 | workspace/reports/2026-05-15--todo_v30_three_side_sync.md |
 | 2026-05-10 | Live/Demo GUI 今日 PnL 口徑修正：確認 LiveDemo 今日 DB net 為 +1.578890，舊 GUI 約 -45.45 來自 session/lifetime 手續費 bucket 混入；新增 backend `net_pnl_today` 並讓 Live tab/console 側欄共用，補 Demo/Live endpoint contract tests；無 restart/rebuild | workspace/reports/2026-05-10--live_today_pnl_gui_fix.md |
 | 2026-05-09 | P0-V2-NEW-3 DSR/PBO evidence push: added real-return promotion evidence builder, Demo-only edge scheduler push, V079 strategy_trial_ledger/report columns, and fail-closed selection evidence handling; source/test only, runtime V079 apply/rebuild pending | workspace/reports/2026-05-09--p0_v2_new_3_dsr_pbo_evidence_push.md |
 | 2026-05-09 | P0-V2-NEW-1 Donchian leak-bias source/test closure: locked runtime IndicatorEngine snapshots to prior-bar Donchian and added bb_breakout 5m hard-gate regression so current-bar spikes cannot contaminate 5m demo evidence | workspace/reports/2026-05-09--p0_v2_new_1_donchian_leak_bias.md |
@@ -2455,3 +2456,17 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   R2(120)=0). Finite threshold probe X=5/Y=0.20 improved sample size and
   weakly positive average (`+1.4739 bps`) but remains far below +15 and below
   per-symbol +5 defer band. This strengthens the archive/default-switch read.
+
+## 2026-05-15 TODO v30 Three-Side Source Sync
+
+- Operator asked to update TODO and perform three-side sync.
+- PM verified Mac `HEAD`, local `origin/main`, and Linux `trade-core` were
+  clean/aligned at pre-v30 base `9a72d054` before the v30 docs update.
+- Active docs still had stale sync wording: `CLAUDE.md` referenced
+  `TODO.md v28`, while `CLAUDE.md` / `active-plan.md` referenced source sync
+  `81bc0862`.
+- Updated TODO to v30 and aligned `CLAUDE.md`, `active-plan.md`,
+  `.codex/MEMORY.md`, `.codex/WORKLOG.md`, PM report index, and docs index.
+- Boundary: source/docs sync only. No runtime rebuild/restart, DB write, auth
+  renewal, production WS topic revival, paper enablement, demo canary, risk /
+  sizing / config mutation, or live action.

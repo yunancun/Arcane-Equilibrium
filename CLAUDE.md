@@ -64,11 +64,11 @@
 
 | 項 | 目前事實 |
 |---|---|
-| Current state sources | `TODO.md` v28 + PM reports `2026-05-15--stage0r_preflight_verification.md` / `2026-05-15--stage0r_preflight_step5b.md` / `2026-05-15--stage0r_oi_confirmed_5m_preflight.md` / `2026-05-15--feature_baseline_restore.md` / `2026-05-15--p1_healthcheck_55_invariant.md` / `2026-05-15--p1_intent_freeze_27_post_grace_closure.md` / `2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md` + direct `trade-core` read-only checks below。 |
+| Current state sources | `TODO.md` v30 + PM reports `2026-05-15--stage0r_preflight_verification.md` / `2026-05-15--stage0r_preflight_step5b.md` / `2026-05-15--stage0r_oi_confirmed_5m_preflight.md` / `2026-05-15--feature_baseline_restore.md` / `2026-05-15--p1_healthcheck_55_invariant.md` / `2026-05-15--p1_intent_freeze_27_post_grace_closure.md` / `2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md` / `2026-05-15--micro_profit_alpha_prework.md` / `2026-05-15--todo_v30_three_side_sync.md` + direct `trade-core` read-only checks below。 |
 | Runtime host | Linux `trade-core`；watchdog 2026-05-15 13:24 UTC：`engine_alive=true`，demo alive age=5.1s，live alive age=3.3s，paper alive=false age=10329.4s（disabled）。 |
 | Runtime env | 2026-05-15 13:26 UTC engine env：`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_ENABLE_PAPER=0`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
-| Engine status | Runtime binary code line remains rebuilt `7b33ab2e`; Mac/origin/Linux source later synced to `81bc0862` without rebuild/restart. Signed live authorization is absent; true-live remains blocked. |
+| Engine status | Runtime binary code line remains rebuilt `7b33ab2e`; pre-v30 Mac/origin/Linux source was verified clean/synced at `9a72d054`, and TODO v30 is source/docs only without rebuild/restart. Signed live authorization is absent; true-live remains blocked. |
 | Paper engine | GATE-RED + disabled：`OPENCLAW_ENABLE_PAPER=0`，paper pipeline dead by design；waiting `ncyu` decision before any non-promotion diagnostic reopen。 |
 
 ### W-C / MAG-082
@@ -452,7 +452,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。`P1-INTENT-FREEZE-27` is post-grace closed by direct `[27]` PASS after the `7b33ab2e` rebuild。Step 5b restored A4-C diagnostic producer evidence (`[57]` PASS; all-source NO_SIGNAL improved to 95.63%) but Stage 1 demo micro-canary remains blocked; A4-C is now archived from promotion and diagnostic-only。W-AUDIT-8a Phase C0 is closed as inventory/guard only; C1 waits for BB standalone `allLiquidation.{symbol}` proof。W-AUDIT-8b Funding Skew spec v0.1 exists and needs QC/MIT/BB review + Stage 0R replay design。Replay-first validation is now the default: use replay when it can prove the claim, and state when WS/live evidence is required。仍不是 true-live autonomy。
+**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。`P1-INTENT-FREEZE-27` is post-grace closed by direct `[27]` PASS after the `7b33ab2e` rebuild。Step 5b restored A4-C diagnostic producer evidence (`[57]` PASS; all-source NO_SIGNAL improved to 95.63%) but Stage 1 demo micro-canary remains blocked; A4-C is now archived from promotion and diagnostic-only。W-AUDIT-8a Phase C0 is closed as inventory/guard only; C1 waits for BB standalone `allLiquidation.{symbol}` proof。W-AUDIT-8b Funding Skew spec v0.1 exists and needs QC/MIT/BB review + Stage 0R replay design。TODO v30 is a source/docs sync checkpoint; runtime binary remains `7b33ab2e` and no rebuild/restart/auth action was performed。Replay-first validation is now the default: use replay when it can prove the claim, and state when WS/live evidence is required。仍不是 true-live autonomy。
 
 **關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 三角 audit ✅ + MAG-084 sign-off ✅ 2026-05-11 → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
@@ -465,7 +465,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 **Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease router evidence flag is ON for shadow W-C only。True live 仍缺 positive edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
-- TODO.md v29 active dispatch queue + `active-plan.md` v1.6
+- TODO.md v30 active dispatch queue + `active-plan.md` v1.7
 - `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` for removed historical context
 - **REF-20 Gap Closure Plan V1 (2026-05-04, current SoT for Sprint A-D)**：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
 - REF-20 V3 SoT (legacy schema/route foundation)：`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`
