@@ -380,3 +380,10 @@ YYYY-MM-DD HH:MM TZ
 - updated restart/clean/fresh scripts, deploy docs, Script Index, feedback memory, TODO, and Batch E runtime ownership regressions
 - verification: bash -n PASS; Batch E pytest 15/0 on Mac and Linux; helper smoke resolves Tailscale IP and rejects all-interface bind; `git diff --check` PASS
 - runtime: pushed `c187fd99`, stashed the prior Linux unsafe hot edit as `codex-preserve-unsafe-0.0.0.0-bind-hotedit`, fast-forwarded Linux, and ran API-only restart; Trading API now listens on `100.91.109.86:8000` instead of `0.0.0.0:8000`, with tailnet curl reaching the authenticated API
+
+2026-05-15 CEST
+- PM task: TODO.md cleanup/archive after v21 exceeded the 700-line hygiene cap (754 lines)
+- dispatch chain: PM local synthesis + PA(default) read-only reconciliation + FA(default) priority audit + TW-style docs cleanup in main workspace
+- result: `TODO.md` v22 reduced to 453 lines; completed sprint ledgers and DONE-row evidence archived to `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`; `docs/README.md` archive index refreshed
+- priority verdict: no full W-AUDIT roadmap rewrite; A4-C Stage 1 demo/promotion path stays blocked pending future green Stage 0R plus `[55]` PASS/waiver, while `[55]`, P0-LG/OPS/EDGE, and alternate alpha work stay active
+- verification: `git diff --check` PASS; `python3 -m pytest tests/structure/test_docs_readme_index_static.py -q` = 5 passed; docs-only, no `active-plan.md`, runtime code, live auth, rebuild, restart, or deploy
