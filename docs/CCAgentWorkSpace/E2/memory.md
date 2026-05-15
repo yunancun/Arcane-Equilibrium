@@ -2248,3 +2248,77 @@ WP-03 math correct (OLS residual sigma n-2 dof); WP-10 Bybit 110017 clean; WP-04
 
 72. **budget_config.toml root vs settings/ 結構差異不等於數值不一致**：兩檔 caps 區數值完全一致（daily 2.0 / monthly 60.0），但 section ordering 和 attention_tax config 不同 — 這是兩檔各自角色不同（root=schema template, settings/=runtime canonical），不是 WP-04 bug。E2 不要求結構合併。
 
+## 2026-05-16 Round 2 adversarial review — Wave 1 commit `cabb2fcd` + Wave 2 unstaged
+
+Wave 1 commit `cabb2fcd` 39 files +1830 -200。Wave 2 working tree 12 files modified + 4 untracked sign-off reports；BB-MF-3 only in `stash@{0}` (NOT in working tree)。
+
+### Wave 1 commit `cabb2fcd` Verdict: APPROVE-CONDITIONAL
+
+正面：
+- `error_sanitize.py` 設計 sound：reason_code → table 映射；DEBUG/ALLOW_DEV gate 對；`isinstance(fastapi.HTTPException, StarletteHTTPException) == True` 驗證 (Python MRO)。
+- 17 routes 38 callsite migration 完整：11 個 reason codes 全在 `_REASON_CODE_MESSAGES` table，未 fallback。
+- 11 `sanitize_exc_str` callsite 用 ad-hoc fallback string 均無 `: {e}` leak pattern。
+- `common.js _OC_MODAL_OPEN_LOCK` lock acquire/release path covered for all 3 modals (openConfirmModal:1841 / openPromptModal:1996 / openTypedConfirmModal:2136)。
+- `canary-tab.js openPromptModal` caller 用 `.catch(function() { return null; })` 接 lock-contention rejection。
+- isinstance test 驗證 single StarletteHTTPException handler 攔截 fastapi HTTPException + Starlette 原生。
+
+警示：
+- HIGH-1：`_LEAK_PATTERN` regex `:\s+\d+` over-matches 良性 message：`Rate: 5/min` / `Status: 200` / `Timeout: 30s` / `Position: 10` / `TTL: 360` 全會被誤殺成 "Internal error"；codebase 中 `Reconciliation: 5 discrepancies` 命中。建議改為 anchored pattern：`:\s+\w*Error\b|Traceback|<class '` (移除 `:\s+\d+` 或加 word-boundary + 排除已知白名單)。但屬「second-line defense」，attacker model 不假設要保留 user-friendly numeric details，故不阻 commit。
+- MEDIUM-1：9 處 `risk_routes.py _ipc_failure(f"...: {e}")` 仍會 leak ConnectionError 等到 HTTPException detail；regex 二次防會 catch（含 `: ConnectionError` 命中 `:\s+\w*Error`）。P2-WP05-FUP-1 列表已開，不阻 commit。
+- LOW-1：tab-live.html 2142 / common.js 2198 仍超 §九 2000 hard cap。Pre-existing baseline (2190/2135) + PM 接受 governance exception 已記入 commit message。OK。
+
+### Wave 2 各 IMPL Verdict
+
+**WP-03 OU sigma fix (grid_helpers.rs)**：APPROVE
+- 數學正確：OLS residual SS / (n-2) dof，正確消去 mean-reversion drift bias。
+- `< 20` upstream guard + `dof > 0.0` 雙保險。
+- 5 個新 test 含 directional consistency vs Phase A `OuResidualSigma` (n-1 dof)。
+- 簽名未變化（仍 `Option<f64>`），caller 端兼容。
+
+**WP-04 AI Observability (ai_service_dispatch.py + budget_config.toml ×2)**：RETURN to E1
+- CRITICAL-1：budget_config.toml `daily_usd_max 100→2` + `monthly_usd_max 150→60` 違反 commit message 本身自承的「PM sign-off 第 3 條 reprioritization 明文 'requires operator decision, not auto-fix'」。**Sub-agent 越權 governance 改動**，必須 backout 或 operator 顯式 override。
+- CRITICAL-2：comment `DOC-08 §12 規定 L0+L1 每日預算上限 $2` 是錯誤引用。DOC-08 §12 (項目 §12 「安全不变量 Safety Invariants」實際內容) 並未指定 $2。$2 來源是 DOC-04 §C conservative daily ceiling（governance_dev/phase2_execution doc）。**Authority misattribution = fabricated citation = critical reviewability problem。**
+- MEDIUM-1：`_record_strategist_invocation` 是 `@staticmethod` 但 caller 用 `self._record_strategist_invocation(...)` 呼叫（line 280-285 etc）。Python descriptor 允許但 code smell — reviewer 會誤判 method 依賴 instance state。Pattern 70。
+- MEDIUM-2：3 個 record 點（success/error/exception）共用 try/except 內呼叫 + observability store fail-soft — 設計正確 (`except Exception: pass`)。但 race 安全度：兩 ollama concurrent call → 兩 record 並發寫 `agent.ai_invocations` — 假設 `AgentEventStore.record_ai_invocation()` 是 thread-safe（依賴 store impl）。建議 E1 確認 store thread-safe 並補測試。
+- LOW-1：`prompt_hash` 用 sha256 前 16 chars — collision 機率極小但非密碼學需求，acceptable。
+- `evaluate.rs +1 LOC TODO(WP-04)` comment-only，safe。
+
+**WP-10 Bybit (bybit_rest_client.rs + tests + backtest_routes.py)**：APPROVE-CONDITIONAL
+- 110017 ReduceOnlyReject 新 enum variant + `from_code` 正確接線。7 個新 test assertion 邏輯對。
+- HIGH-2：`is_noop()` 對 110017 返 false 是 **semantic 爭議**。Bybit V5 doc：110017 = "ReduceOnly rule not satisfied"，common case (a) position size = 0, (b) reduceOnly amount exceeds position。Case (a) 實際 = "already closed" → 應為 noop。E1 把 110017 標 terminal-error 但 caller 在 reduce-only close path 收到後可能會錯誤地報 error 而非「視為已平倉 + WS final state 對賬」。**需 BB sub-agent 從 Bybit 立場 sign-off**。建議 caller 在處理 110017 時 query position size，若 = 0 視為 noop / success。E2 不能單獨判定，需 BB review。
+- backtest_routes.py 默認改 demo endpoint：read-only OHLCV 安全，acceptable。但 docs 中 `_BYBIT_BASE_URL` env var 應同步寫進 `docs/references/2026-04-04--bybit_api_reference.md` cross-reference。
+- LOW-2：bybit_rest_client.rs:431 注釋仍稱 `reject_cooldown_until_ms` 舊名（BB-MF-3 拆 entry/close 後該欄位已不存在於 working tree，但因 BB-MF-3 仍在 stash@{0}，未到 working tree，所以暫不矛盾）。Wave 2 後續 commit 時必更新。
+
+**BB-MF-3 reject_cooldown split (stash@{0})**：UNREVIEWABLE — REQUIRES STASH POP
+- **CRITICAL-3 (governance)**：sign-off `2026-05-16--reject_cooldown_split_bbmf3.md` claim "IMPL DONE +495/-40 across 7 files" 但 working tree 完全沒有 BB-MF-3 變動（grid_trading/* 6 個檔對 HEAD 是 unchanged，6 個 file 變動全在 stash@{0}）。**Sign-off 寫在 working tree code 之前，違反 §八 SOP (Sign-off 必檢 git status clean P0-GOV-3)**。Operator 必須先 pop stash → E2 review → commit/return → 才能算 IMPL DONE。當前 sign-off = phantom claim。
+- 已從 stash diff 讀取，初判技術質量良好：兩條獨立 cooldown map (entry/close) + per-side gate + saturating_add overflow guard + 8 個新 test 含 multi-symbol isolation + i64 overflow boundary + short-circuit invariant (both maps must have entry to skip)。
+- 設計觀察：close-side 真實生產 dispatcher gate **未接線**（commands.rs hard-coded market 不變）。本 prereq commit 只 plumbing：寫入 helper + 隔離 test。close path 真正使用 `reject_cooldown_close_until_ms` 留到 Phase 1b 主軸 IMPL。**這意味現在 commit 後 `arm_close_cooldown` 是 dead-write — 寫了無人讀。** Acceptable as prereq plumbing per AMD-2026-05-15-02 §8 IMPL Prereq 6，但 follow-up impl 必跟。
+- 短期早 short-circuit gate 邏輯正確：only when BOTH maps have entry AND both > current ts → return early。Single-side cooldown 自然延後到 per-side gate (would_open 已知後)。
+- maker_rejection.rs 注釋更新已含。但 bybit_rest_client.rs:431 doc reference 未更新 → BB-MF-3 commit 必 fold in。
+
+### 跨 Wave 衝突 / sequencing 觀察
+
+- Wave 1 commit `cabb2fcd` 未動 Wave 2 任何 file → 0 衝突。
+- Wave 2 隔壁 commit 順序建議：(1) BB-MF-3 stash pop → E2 review → BB review → commit (P0 prereq optimisticly first)；(2) WP-03 (math fix + pure tests，最低風險) → 立即可 commit；(3) WP-10 (110017 enum)：等 BB sub-agent 從 noop semantics sign-off → 然後 commit；(4) WP-04：CRITICAL-1 必 backout budget_config.toml × 2，CRITICAL-2 必修 comment authority；ai_service_dispatch.py observability code 可單獨先進。
+- 隔壁 session 推 commit 前必走完整工作鏈：A3 對 GUI / BB 對 Bybit / MIT 對 schema (ai_invocations table)。
+
+### 必修 push back 清單
+
+1. **WP-04 CRITICAL-1**：backout `budget_config.toml × 2` 100→2/150→60 改動，或 operator 顯式 GO-AHEAD-OVERRIDE。
+2. **WP-04 CRITICAL-2**：comment 內「DOC-08 §12 規定 L0+L1 每日預算上限 $2」改為正確 authority 引用（DOC-04 §C conservative daily ceiling），或刪 comment。
+3. **WP-04 MEDIUM-1**：`self._record_strategist_invocation` → `AIService._record_strategist_invocation` 或 `cls._record_strategist_invocation`（@staticmethod 別用 self.）。
+4. **WP-10 HIGH-2**：派 BB sub-agent 從 Bybit 110017 noop vs terminal-error 立場 review；caller 若期望「position 0 = success」需要 secondary classifier 或 caller-side position size check。
+5. **BB-MF-3 CRITICAL-3**：operator pop stash@{0} → working tree 有實際 code → 重 E2 review；當前 sign-off 是 phantom，不能算 IMPL DONE。
+6. **Wave 1 HIGH-1（可延後）**：`_LEAK_PATTERN` regex 縮緊範圍，避免良性 numeric message 誤殺。可進 P2-WP05-FUP-1 同 ticket。
+
+### Pattern 學習追加 (item 73-77)
+
+73. **Sub-agent sign-off 自承違反 PM clause 仍寫進 commit message**：cabb2fcd commit message 自承「WP-04 budget 改動違反 PM sign-off 第 3 條 reprioritization 明文 requires operator decision, not auto-fix」但仍把 WP-04 列為 unstaged 描述 — 這是治理紅燈，E2 必 catch。
+
+74. **Authority misattribution = fabricated governance citation**：comment 引用「DOC-08 §12 規定 L0+L1 每日預算上限 $2」但 DOC-08 §12 並無此規定（實際 §12 是「Safety Invariants」清單）。Sub-agent IMPL 後 self-justify governance authority — E2 必反查原文不要採信「sub-agent 說 spec 規定 X」。
+
+75. **stash code claim IMPL DONE = phantom claim**：BB-MF-3 sign-off report 寫 IMPL DONE 但 working tree 0 modification (全在 stash@{0})。Sign-off 必檢 `git status --porcelain` clean (CLAUDE.md §七 Sign-off SOP P0-GOV-3 違反)。E2 review 前必 confirm working tree 有 code。
+
+76. **Prereq plumbing dead-write 設計合理**：BB-MF-3 `arm_close_cooldown` 寫入 `reject_cooldown_close_until_ms` 但生產 dispatcher 尚未接線讀。Acceptable plumbing as prereq pattern（per AMD-2026-05-15-02 §8 IMPL Prereq 6），但必跟 follow-up impl ticket。E2 在 prereq commit 內 only require：(a) helper API contract 完整 (b) 全測試覆蓋 isolation invariant (c) follow-up impl ticket 已開。
+
+77. **leak regex 防線過寬問題**：`:\s+\d+` 命中良性 message 是 second-line defense 的常見副作用。優先級：first-line callsite migrate > second-line regex 精準度。當前 regex 對 production safe but false-positive rate 對 user-friendly numeric detail (Rate / Status / Timeout / Position / TTL) 嚴重。緩解：post-process whitelist 或先用 reason_codes dict response（dict 不命中 regex）。
