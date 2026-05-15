@@ -843,4 +843,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-06--readme_stale_extract.md` | README stale extract archive |
 | `2026-05-06--todo_completed_extract.md` | TODO completed extract archive |
 | `2026-05-07--todo_v12_agent_openclaw_replan_archive.md` | TODO v12 Agent/OpenClaw replan archive |
+| `2026-05-09--claude_md_section5_pre_alpha_surface.md` | CLAUDE.md §五 pre-AlphaSurface architecture framing archive |
+| `2026-05-09--qctodo_sprint_n0_n5_archive.md` | QCTODO Sprint N+0..N+5 planning archive |
 | `2026-05-09--w_audit_verified_closed_archive.md` | W-AUDIT-1..7 verified-closed details archive |
+| `2026-05-15--todo_v21_completion_cleanup_archive.md` | TODO v21 completion cleanup archive: completed sprint ledgers, DONE rows, and W-AUDIT priority delta |

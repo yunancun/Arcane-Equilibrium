@@ -2186,3 +2186,14 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Source-tier sanity: legacy panel rows=619; diagnostic source rows=12 snapshots / 84 expanded rows / 0 non-zero expected_dir. SQL path is alive, but diagnostic producer maturity and statistical edge are insufficient.
 - Boundary: read-only verification only; no paper enablement, demo canary launch, runtime config change, live auth mutation, rebuild, restart, or deploy.
 - Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_verification.md`.
+
+## 2026-05-15 TODO v22 cleanup
+
+- Cleaned `TODO.md` v21 from 754 lines to v22 at 453 lines by archiving completed sprint ledgers, stale transition sections, and closed DONE-row evidence.
+- Added archive: `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
+- Preserved active blockers: Stage 0R GATE-RED, `[55]` WARN, W-AUDIT-4b retained-scope gaps, P0-LG/OPS/EDGE, and W6-5 sample_weight ratio / 5 ML metrics.
+- Marked completed/superseded rows: `P1-STABLE-ID-1`, `P1-RCA-1`, `P1-FILL-LINEAGE-DROP`, `P2-DUAL-RAIL-ORDER-ID`, `P2-RUNTIME-SHADOW-SPLIT`, and `P0-MIT-LABEL-CLOSE-TAG-1`.
+- PA/FA verdict: no full W-AUDIT roadmap rewrite; A4-C Stage 1 demo/promotion path is blocked pending future green Stage 0R plus `[55]` PASS/waiver, while Alpha Surface Phase C/D and alternate alpha candidates continue.
+- Verification: `git diff --check` PASS; `python3 -m pytest tests/structure/test_docs_readme_index_static.py -q` = 5 passed.
+- Boundary: docs-only; no `active-plan.md`, runtime code, live auth, rebuild, restart, or deploy.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--todo_v22_cleanup.md`.

@@ -1,13 +1,15 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v21
+Version: v22
 Date: 2026-05-15
-Status: PM freeze + AMD-2026-05-15-01 canary rebase applied. Step 3 runtime smoke + A4-C rebase completed 2026-05-15; Step 4 fill-lineage gate remains WARN_REAL_FILL_PROPAGATION_PARTIAL; Step 5a Stage 0R preflight rerun is GATE-RED (`eligible_for_demo_canary=false`). Prior v19/v20 queue remains the historical base, but W3 Stage 1 paper cohort and A4-C D+12 paper-edge promotion are frozen; replacement path is Stage 0R replay preflight + Stage 1 demo micro-canary only after a future green preflight.
+Status: PM freeze + AMD-2026-05-15-01 canary rebase applied. Step 3 runtime smoke + A4-C rebase completed 2026-05-15; Step 4 fill-lineage gate remains WARN_REAL_FILL_PROPAGATION_PARTIAL; Step 5a Stage 0R preflight rerun is GATE-RED (`eligible_for_demo_canary=false`). v21 completed ledgers were archived to keep this file as the active queue. W3 Stage 1 paper cohort and A4-C D+12 paper-edge promotion remain frozen; replacement path is Stage 0R replay preflight + Stage 1 demo micro-canary only after a future green preflight.
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
 `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` and
 `docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`.
+v21 cleanup archive:
+`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
 
 ## §0.0 PM Freeze — 2026-05-15 Canary Rebase Guard
 
@@ -38,27 +40,6 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
 **Stand-by E1 啟用條件**（operator 拍板 2026-05-09 (a)）：W-AUDIT-9 T3 stage-aware exception path 翻車 / W-AUDIT-8a Phase A byte-diff fail / W-AUDIT-6d mid-ground 與 8a Phase A 序列化 deadline 撞牆 / 任一 active E1 health incident → stand-by 即時補位。
 
 **規劃帶 supervised live 概率**（FA）：6/15 樂觀 ~30% / 6/30 中位 ~40% / 7/15 悲觀 ~25% / 8/15 極悲觀 ~5%。
-
----
-
-## §1 Wave Label Reconciliation（PA §1 採 QCTODO labeling）
-
-merged TODO v19 採 QCTODO labeling（PA 後對齊正解）。原 v18 line 552-558 Track A 中段 wave 重命名清單：
-
-| Wave Label v19 (canonical) | 內容 | v18 舊 label（已棄）|
-|---|---|---|
-| **W-AUDIT-8a** | Alpha Surface Foundation (R-1 spec phase) | 8a（一致，保留）|
-| **W-AUDIT-8b** | A4-A Funding Skew Directional 新策略 | 原 8b = R-1 Alpha Surface IMPL → 改至 8a 內 phase B-D |
-| **W-AUDIT-8c** | A4-B Liquidation Cluster Reaction 新策略 | 原 8c = R-2 Strategist scope → 改至 8e |
-| **W-AUDIT-8d** | A4-C BTC→Alt Lead-Lag 新策略 | 原 8d = R-3 Hypothesis Pipeline → 改至 8f |
-| **W-AUDIT-8e** | R-2 Strategist Alpha Source Orchestrator | 原 8e = R-4 per-alpha-source live promotion → 改至 8g |
-| **W-AUDIT-8f** | R-3 Hypothesis Pipeline first-class（含 W-AUDIT-4 ML 6 dead schema 併入）| 原 8f = R-5 Spec-as-Code → 改至 10 |
-| **W-AUDIT-8g** | R-4 Per-alpha-source Live Promotion Gate | n/a（新建）|
-| **W-AUDIT-8h** | Alpha Sources GUI tab + Hypothesis Lab GUI tab | 原 8g（重編號至 8h）|
-| **W-AUDIT-9** | Graduated Canary Foundation (5-stage canary) | 9（一致，保留）|
-| **W-AUDIT-10** | R-5 Spec-as-Code + Module Lifecycle SM | n/a（新建）|
-
-cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/g 的引用（如有）需同步更新到 v19 labeling；docs/CCAgentWorkSpace/PA/* 報告引用以 PA dispatch plan + AMD-2026-05-09-03 為準（已採 v19 labeling）。
 
 ---
 
@@ -123,7 +104,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 10 | `W-AUDIT-3` ExecutorAgent fake-live | alpha-neutral | E1 + E1a + E2 + E4 + PA + PM | 🟡 **SOURCE/SMOKE CLOSED** 2026-05-15; demo launch still waits on `[55]` PASS | F-17 ✅ / F-15 ⚠️ / SM-05 Option A / F-01 source/test closed. **`W-AUDIT-3b` Sprint N+1 W4 RouterLeaseGuard Drop test 已 land** (commit `22efd9de`) and runtime smoke passed on `trade-core`: RouterLeaseGuard Drop Rust PASS + fail-closed pytest PASS + `[55] chains_with_lease=89`. Remaining blocker is Step 4 `[55] WARN_REAL_FILL_PROPAGATION_PARTIAL` (15/89 real-fill reports). |
 | 11 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 並行 + MIT + E2 + E4 | 🟡 **PARTIAL** → `W-AUDIT-4b` M1+M2+M3 ✅ DONE Sprint N+0 (commits `4a90966a` + `404174a4` + `e93a6e5c` + `a01d05ed`); N+1+ scope corrected to 3 retained INSERT tables + 2 views + 1 dropped/no-DDL target | Corrected 4b scope: `feature_baselines` writer/schedule/healthcheck, `cost_edge_advisor_log` row-growth confirmed, `drift_events` waits active baselines + configured burn-in; 2 companion views are read-only projections; `scorer_predictions` dropped/no-DDL。M3 producer chain integrity post-M3 100% ✅ (per 2026-05-10 PG empirical)。Decision-3 採納合併入 `W-AUDIT-8f` (R-3) Hypothesis Pipeline 同 wave 做。 |
 | 12 | `W-AUDIT-5a/5b` 性能/結構/CI/跨平台 | alpha-neutral | E1×6 並行 + E5 + E2 + E4 | 🟡 **PARTIAL** since 2026-05-09; **5a/5b 主體 ✅ DONE N+1 W1** (commit `4a5e26ec` dead-code cleanup + runner split + REST dedup + warnings fix) | F-21 ✅ / F-27 ✅ / F-test-h-state ✅ / F-12 ✅ / F-26 CI matrix ✅ / W-AUDIT-5b event_consumer ✅; 剩 F-20 舊 worktree dump cleanup（`.claude/worktrees/` 3.6GB + `/private/tmp/` prunable worktrees）。 |
-| 13 | `W-AUDIT-6` 策略 + 量化 promotion gate | alpha-bearing | E1×5 + QC + E2 + E4 + PM | 🟡 **SOURCE/TEST CLOSED 2026-05-09** + `W-AUDIT-6c` runtime apply + `W-AUDIT-6d` mid-ground Sprint N+0 + `W-AUDIT-6-3c` V086 ✅ DONE 2026-05-10 (production applied) | AMD-02 Option ii: grid CONDITIONAL ORDIUSDT, ma_crossover REVISE, bb_breakout 5m, funding_arb RETIRE (per ADR-0018), bb_reversion pair MA. W-AUDIT-6c VaR/CVaR/EVT IMPL `cc6476dd`. **`W-AUDIT-6d` mid-ground 保 6 / 砍 6** (見 §8)。**`W-AUDIT-6-3c` V086 reject_reason_code 12+14 enum** ✅ production deploy + writer code (commit `05e44ede`) — D+1 evening engine restart deploy producer。 |
+| 13 | `W-AUDIT-6` 策略 + 量化 promotion gate | alpha-bearing | E1×5 + QC + E2 + E4 + PM | 🟡 **SOURCE/TEST CLOSED 2026-05-09** + `W-AUDIT-6c` runtime apply + `W-AUDIT-6d` mid-ground Sprint N+0 + `W-AUDIT-6-3c` V086 ✅ DONE 2026-05-10 (production applied) | AMD-02 Option ii: grid CONDITIONAL ORDIUSDT, ma_crossover REVISE, bb_breakout 5m, funding_arb RETIRE (per ADR-0018), bb_reversion pair MA. W-AUDIT-6c VaR/CVaR/EVT IMPL `cc6476dd`. **`W-AUDIT-6d` mid-ground 保 6 / 砍 6** (見 §7)。**`W-AUDIT-6-3c` V086 reject_reason_code 12+14 enum** ✅ production deploy + writer code (commit `05e44ede`) — D+1 evening engine restart deploy producer。 |
 | 14 | `W-AUDIT-7` AI 棧 + GUI/UX | alpha-neutral | E1×4 + AI-E + A3 + E2 + E4 + ops | 🔵 **ACTIVE** → `W-AUDIT-7c` Sprint N+2 | F-30 prompt modal / F-system-mode-confirm 5s countdown / F-strategist-cap 30→50 ADR-0022 ✅ land 2026-05-10 / F-28 ContextDistiller IMPL. 剩 F-07 ANTHROPIC_API_KEY + cea-env. Layer2 autonomous loop sunset by ADR-0020. |
 | 15 | `W-AUDIT-8a` Alpha Surface Foundation (R-1 spec) | alpha-bearing | PA → E1 → E2 → E4 + MIT/QC/CC/BB → PM | ✅ **Phase A + Phase B DONE Sprint N+1 W1** (Phase A `c9fb0b8f`; Phase B panel_aggregator `0b76a4db` + `3d0ea347` + `ddf0cebe` + consumer wiring `7a07348b` + `31dba487`) / Phase C+D 待 N+2-N+3 | funding_curve aggregator (B-1) + oi_delta aggregator (B-2) + BB WS subscription (B-3) + bb_breakout real OiDeltaPanel consume fail-closed (B-4) 全 land。cargo check PASS。Phase B WS-first design: 0 REST cost ongoing。 |
 | 16 | `W-AUDIT-8b` A4-A Funding Skew Directional 新策略 | alpha-bearing | PA spec → E1 IMPL + QC + MIT + BB review | ⏳ **DEFER** Sprint N+3 spec → N+4 IMPL (1 sprint) | funding rate 期限結構 directional alpha；demo signal noise（mainnet 才能完整驗證）；25-symbol funding curve 消費 AlphaSurface Tier 2。 |
@@ -136,13 +117,12 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 23 | `W-AUDIT-9` Graduated Canary Foundation IMPL | alpha-bearing | E1 (5 active + 1 stand-by 並行) | ✅ **T1-T7 DONE Sprint N+0 closure 2026-05-10** (HEAD `b6ed4975`)；W5-E1-A CANARY-STAGE-CRITERIA-1 ✅ DONE D+0 (commit `6529e37e` +2441 LOC) + V089 SQL seed deployed；W5-E1-C DYNAMIC-UNBLOCK ✅ DONE D+0 (commit `d17d7863` +1700 LOC) + V090 deployed；**Stage 1 paper cohort FROZEN 2026-05-15** | AMD-2026-05-15-01 rebases stage semantics: paper Stage 1 disabled; Stage 0R replay preflight + Stage 1 demo micro-canary gate replace old paper entry path. |
 | 24 | `W-AUDIT-10` (R-5) Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec → E1 IMPL | ⛔ **DEFER** 中期 (1-2 sprint) | CI gate spec drift > 7d auto-fail + module/table lifecycle header + 自動抽 SCRIPT_INDEX/SPEC_REGISTER。 |
 
-### §4.1.1 Sprint N+0 + D+0 EXECUTION 統計（per §6.6 詳）
+### §4.1.1 Completed Sprint Ledgers Archived
 
-✅ **Sprint N+0 closure** (HEAD `b6ed4975`)：W-AUDIT-9 T1-T7 + W-AUDIT-8a Phase A + W-AUDIT-4b M1/M2/M3 + W-AUDIT-6d mid-ground 全 land
-✅ **Sprint N+1 D+0 EXECUTION** (HEAD `bca4a43d`)：sign-off APPROVED 提前 1h22m + Phase 1+2 全收口（W7-4 / V086 IMPL / W6-1 RFC 三角 / V085-V088 land / W5-E1-A / W5-E1-C）+ Phase 3 5/9 done
-✅ **Phase 3 收口**：AMD-W6-1 FULL CLOSURE `83d5353e` (V091 ALTER VALIDATE executed) / engine restart 2026-05-14 03:02 deploy V086 producer
-✅ **Phase 4 W1+W2 IMPL chain (5-7d)**：W1 panel_aggregator (B-1 funding_curve + B-2 oi_delta + B-4 consumer) + W2 A4-C (C-IMPL-1..4 btc_lead_lag) **全 DONE**。Commits: `0b76a4db` → `3d0ea347` → `ddf0cebe` → `58970d24` → `4b267dff` → `1f0354cf` → `7a07348b` (consumer wire) → `31dba487` (strategy consumers) → `4a5e26ec` (5a/5b cleanup)。**Sprint N+1 W1+W2 提前完成，65→~72% completion。**
-⏳ **剩餘**：CLAUDE.md §七 wording (operator) / P1-RCA-1 orphan ER investigation / F-20 worktree dump cleanup / N+2 Phase C+D spec prep
+Sprint N+0, Sprint N+1 D+0, Phase 3, Phase 4 W1+W2 execution statistics are
+closed and archived in
+`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`. Active
+follow-ups remain in §10 / §11 / §12.
 
 ### §4.2 Cross-Wave Conflict Resolution（4 條，PA §3.3 必繼承）
 
@@ -155,324 +135,56 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 
 ---
 
-## §5 PM Sign-off Pre-flight Checklist（22 invariant，FA §4 + PA §6 deduplicate；任一 FAIL = BLOCKER）
+## §5 Active Sign-off Delta
 
-**Sprint N+0 sign-off status (2026-05-10 closure)**: ✅ **14 PASS / ⏳ 6 DEFER / 🟡 2 PARTIAL / ❌ 0 FAIL** (per `memory/project_2026_05_10_sprint_n0_closure.md` §22 invariant ledger)
+Full Sprint N+0 22-invariant ledger is closed and archived in
+`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
 
-**標識**：✅ PASS / ⏳ DEFER (依賴後續 wave) / 🟡 PARTIAL (部分達成) / ❌ FAIL
-
-### §5.1 結構 invariant（5 條：4 ✅ + 1 ⏳）
-
-| # | Status | Invariant | 驗證 | 來源 |
-|---|---|---|---|---|
-| 1 | ✅ | Sprint N+0 W-AUDIT-9 7 sub-task 全 land + `[58]` PASS + `governance.canary_stage_log` active | `git log --grep=W-AUDIT-9` 7 commit + healthcheck PASS | PA-1 |
-| 2 | ✅ | Sprint N+0 W-AUDIT-8a Phase A trait 升級 land + 5 策略 byte-identical replay PASS + `cargo build --release` 綠 | E2E byte-diff test PASS | PA-2 |
-| 3 | ✅ | W-AUDIT-6d mid-ground 6 保子項 land + 砍 6 子項 grep blacklist 0 命中 | grep audit + 6 commit 存在 | PA-3 |
-| 4 | ❌ | W-AUDIT-9 Stage 0R replay preflight returns `eligible_for_demo_canary=true` + Stage 1 **demo** micro-canary active + 7d wall-clock 觀察期未提前升級（paper Stage 1 frozen） | Stage 0R evidence packet + `governance.canary_stage_log` Stage 1 demo entered_at_ms + auto-promote 條件未提前觸 | PA-4 + FA-Critique-2 + AMD-2026-05-15-01; **GATE-RED 2026-05-15 Step 5a**. Stage 0R evidence packet returned `eligible_for_demo_canary=false`; pooled edge negative, PSR/DSR/bootstrap/R² failed, and no per-symbol cohort qualified. `[55]` also remains WARN partial (`chains_with_real_fill_report=15/89`). Stage 1 demo launch remains blocked pending future green Stage 0R evidence plus fill-lineage PASS/waiver. |
-| 5 | ✅ | W-AUDIT-4b N+0 IMPL chain 已串行 land（M1 decision_features producer 改 intent-only emit + V082 拆 `decision_features_evaluations` 表 → M2 fill writer `entry_context_id` enforcement + V083 NOT VALID CHECK → M3 reject negative label + V084 `mlde_sample_weight` UDF + 6 Rust producer file `emit_decision_feature_intent_rejected` 5 hits） | commit ordering 驗 (`4a90966a` → `404174a4` → `e93a6e5c` → `a01d05ed`) + grep 5 hits + pytest 真 19/19 PASS | FA-2 (N+0 actual IMPL 對齊；N+1 corrected scope = 3 retained INSERT tables + 2 companion views + 1 dropped/no-DDL) |
-
-### §5.2 安全 invariant（5 條：5 ✅ 全 PASS per CC A 93.3% APPROVE）
-
-| # | Status | Invariant | 驗證 | 來源 |
-|---|---|---|---|---|
-| 6 | ✅ | DOC-08 §12 9 條安全不變量未違反 | 逐條 grep + healthcheck pass | PA-5 |
-| 7 | ✅ | live boundary 5-gate 所有 stage active 期間未繞過 | LiveDemo authorization.json 簽名+TTL+env_allowed 全 pass | PA-6 |
-| 8 | ✅ | §二 16 根原則合規（especially 1/4/5/6/9） | 逐條 grep + AMD-2026-05-09-03 §6.3 校核 | PA-7 |
-| 9 | ✅ | `shadow_mode_provider` exception path fail-closed Stage 0（**不是** Stage 1） | E2 review T3 + unit test PASS | PA-8 |
-| 10 | ✅ | W-AUDIT-9 Stage 0 binary fail-closed 不變式保留（Live boundary 5-gate / SM-04 ladder / DOC-08 §12 / §二 16 原則 4 範圍均不被 graduated canary 觸碰） | 4 範圍逐條 invariant test | FA-4 |
-
-### §5.3 治理 invariant（7 條：4 ✅ + 2 ⏳ + 1 🟡）
-
-| # | Status | Invariant | 驗證 | 來源 |
-|---|---|---|---|---|
-| 11 | ✅ | `canary_stage_log.decision_lease_id` for `manual_promote` PG NOT NULL 強制 | V0XX migration 含 `CHECK (transition_kind != 'manual_promote' OR decision_lease_id IS NOT NULL)` | PA-9 |
-| 12 | ✅ | healthcheck `[58]` 對 SM-04 ≥ L3 escalate 必 hard FAIL → 觸 stage = 0 rollback | `[58]` IMPL 對 SM-04 L3 邏輯 explicit + unit test PASS | PA-10 |
-| 13 | ⏳ | A 群 3 新策略 IMPL 後 `declared_alpha_sources()` 與真實邏輯對齊 | grep 3 新策略 ctor + QC review report sign-off; **DEFER A 群 (8b/8c/8d) IMPL 完成後驗** | PA-11 |
-| 14 | ⏳ | W-AUDIT-8b/c/d sequence 必含 **Stage 2 abort gate**（A4-C Stage 1 demo → Stage 2 demo 14d gross < 0 → A 群 8b/8c 重評，**不**連續 IMPL） | Sprint sign-off report 明文記入; **DEFER until Stage 1 demo evidence enters Stage 2** | FA-5 + AMD-2026-05-15-01 |
-| 15 | ✅ | D-02 Layer 2 manual SOP 不違反 ADR-0020（manual probe 不可自動化為 cron / event-trigger） | code grep audit | FA-6 |
-| 16 | 🟡 | W-AUDIT-6d mid-ground 砍 6 polishing 的 **K -12 trial DSR penalty 量化結論記入 sign-off report**（mu_0 從 ~2.54 降至 ~2.27 用 ln，z_DSR 增益 +0.30） | sign-off report 明文; **PARTIAL — 量化記入 N+0 sign-off report ✅，但 mid-ground active phase 仍待 N+1 evaluate** | FA-7 |
-| 17 | ✅ | v2-NEW-1 strategist cap 30%→50% 補 **ADR-0022**（編號衝突自動移位：ADR-0021 已用 = alpha-source-architecture-upgrade；strategist-cap-wide-parameter-adjustment-skill 改 ADR-0022；含 freedom-not-gate rationale + SM-05 張力 + 50% 偏離監測指標） | ADR-0022 land + commit `75b6e5f2` (PA `2026-05-10`) | FA-8 |
-
-### §5.4 監督 / record（5 條：2 ✅ + 2 ⏳ + 1 🟡）
-
-| # | Status | Invariant | 驗證 | 來源 |
-|---|---|---|---|---|
-| 18 | 🟡 | F-08 5 ML cron `crontab -e` install + 24h 真 fire 驗 | `[Xc] ml_training_cron_active` PASS（A1 cron 已 install at `17 3 * * *`，**24h fire 已驗 success per memory `project_2026_05_09_ml_training_cron_weekly.md` hybrid 5 daily + 5 weekly Sunday**） | FA-3 |
-| 19 | 🟡 | W-AUDIT-4b corrected dead-schema gap 必有 owner + ETA（3 retained INSERT tables + 2 views + 1 dropped/no-DDL target） | Corrected scope recorded in §11.2：`cost_edge_advisor_log` row-growth confirmed（2026-05-14 runtime 6091 rows; demo `[cost_edge].enabled=false` → Disabled/ratio=NULL）；`feature_baselines` scheduled apply + [67] healthcheck in progress；`drift_events` depends active baselines + configured 30d burn-in，不移除 burn-in。 | FA-9 + M0 Follow-Up 2026-05-13 + 4b impl dispatch 2026-05-14 |
-| 20 | ✅ | W-AUDIT-3b runtime smoke 已從 Linux 驗（RouterLeaseGuard Drop Rust test + `pytest -k fail_closed` + `[55] chains_with_lease > 0`） | ssh trade-core 2026-05-15: RouterLeaseGuard Drop PASS; fail-closed pytest `3 passed, 44 deselected`; `[55] chains_with_lease=89`。Note: this closes runtime smoke only; `[55]` real-fill propagation remains Step 4 gate (`chains_with_real_fill_report=15/89`, WARN). | FA-1 |
-| 21 | ✅ | **`P0-MIT-LABEL-CLOSE-TAG-1`** 1-day fix 已 IMPL + `attribution_chain_ok` 24h ≥ 5%（從 0.5% → 5%） | `[42b]` healthcheck PASS + writer fix commit; **post-M3 100%（PM era-split empirical 推翻 prior "全表 40%" misleading; per `db17e205` chain integrity HC `[65]`）** | merged FA |
-| 22 | ✅ | Sprint N+0/N+2/N+5 capacity = 5 active + 1 stand-by E1 explicit recorded（不允許「臨時降級為 5/5 HOT」） | Sprint sign-off report 明文 | merged FA |
-
-**git status clean 強制**（CLAUDE.md §七 P0-GOV-3）：merge 後 mandatory，process gate（不算 22 條 invariant 之內）。`git status --porcelain` 對應檔案必 clean，違反 = PM 拒絕 sign-off。
+Current sign-off deltas only:
+- ❌ **Stage 0R GATE-RED 2026-05-15**: A4-C returned
+  `eligible_for_demo_canary=false`; no Stage 1 demo cohort selected.
+- ⚠️ **`[55]` fill-lineage WARN**: `chains_with_real_fill_report=15/89`;
+  demo canary remains blocked until PASS or explicit PM/operator waiver.
+- ⏳ **A-group alpha-source invariant**: `declared_alpha_sources()` vs real
+  logic re-check remains deferred until new alpha candidates land.
+- 🟡 **W-AUDIT-4b corrected scope** remains active via §11.2 retained
+  tables/views/drop scope.
+- ✅ W-AUDIT-3b runtime smoke, F-08 cron fire, and
+  `P0-MIT-LABEL-CLOSE-TAG-1` writer fix are completed; residual edge risk is
+  tracked by `P0-EDGE-1`.
 
 ---
 
-## §6 Sprint N+0 Day-by-Day Dispatch（PM 從 v19 sign-off 後立即派發）
+## §6 Current W-AUDIT Priority Delta
 
-**Status**: ✅ **DONE Sprint N+0 closure 2026-05-10** (HEAD `b6ed4975`)；Day 0-15 全 milestone 執行完成；Day 14-15 PM Sign-off 跑 §5 22 invariant ✅ (14 ✅ / 6 ⏳ / 2 🟡 / 0 ❌)；HIGH-5 12h passive watch 後續 Sprint N+1 D+0 提前 sign-off APPROVED 2026-05-10 20:08 UTC（提前 1h22m, A 路徑）；後續 Sprint N+1 dispatch fire 詳 §6.5 + §6.6。
+Completed Sprint N+0 / N+1 D+0 execution ledgers and Post-MAG-084 Wave 1
+planning are archived in
+`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
 
-詳完整 Sprint N+0 closure runtime impact + 4-agent loss audit 真實 runtime 效果 + V80/82/83/84 auto-migrate + W-AUDIT-9 graduated canary state machine + W-AUDIT-8a Phase A trait skeleton + W-AUDIT-4b M1/M2/M3：見 `memory/project_2026_05_10_sprint_n0_closure.md`。
-
-### ✅ Day 0-3 並行 5 active E1 + 1 stand-by E1 + ops（operator 2026-05-09 拍板 (a)）
-
-**5 active E1 IMPL slot**：
-- `@E1-A` W-AUDIT-9 T1 Rust schema 升級（並行 `@QC` enum review）
-- `@E1-B` W-AUDIT-9 T2 V### migration（並行 `@MIT` review）
-- `@E1-C` W-AUDIT-9 T3 `shadow_mode_provider` stage-aware
-- `@E1-D` W-AUDIT-9 T6 manual promote Decision Lease（後段轉 W-AUDIT-6d mid-ground 6 保子項，並行 `@QC` 數學審計）
-- `@E1-E` W-AUDIT-4b-M1 decision_features intent-only emit（並行 `@MIT` review V###）
-
-**1 stand-by E1 slot**：
-- `@E1-F` (stand-by) 平時跑 W-AUDIT-5b 維護 backlog；任一 active E1-A/B/C/D/E health incident → 立即切換補位
-- 每日 stand-up 25 min 對齊（active E1 status + stand-by 是否需切換）
-
-**ops**：
-- `@ops` A2-followup G3-08 ✅ DONE（2026-05-09 17:27 UTC, daemon spawn confirmed）
-
-### ✅ Day 3-5 E2 first-pass
-
-- ✅ `@E2` review T1+T2+W-AUDIT-6d mid-G+W-AUDIT-4b-M1
-- ✅ `@E4` regression schema test
-
-### ✅ Day 5-7 Dispatch（W-AUDIT-6d mid-G done 後 8a Phase A 序列化開始）
-
-- ✅ `@E1-A` W-AUDIT-8a Phase A trait 升級 + 5 策略 declare
-- ✅ `@E1-B` W-AUDIT-4b-M2 entry_context_id INSERT trigger (V083 + fill writer)
-- ✅ `@E1-C` W-AUDIT-4b-M3 negative label + class weight (V084 + 6 Rust producer file emit)
-- ✅ `@E1-D` W-AUDIT-6c runtime apply (V079 + cron + DSR/PBO evidence pipeline) — VaR/CVaR/EVT IMPL `cc6476dd`
-- ✅ `@E1-E` W-AUDIT-9 T4 healthcheck `[58]`
-- ✅ `@E1-F` 切換補位 W-AUDIT-9 T5 GUI surface（從 stand-by 進 active）
-
-### ✅ Day 12-14 Full review chain
-
-- ✅ `@E2` second-pass review T3+T4+T5+T6+8a Phase A+M2+M3+W-AUDIT-6c
-- ✅ `@E4` regression 5-stage transition + byte-diff E2E + 6 表 INSERT schema + DSR/PBO query
-- ✅ `@QC` 5 策略數學審計 + AlphaSourceTag enum 完整性 (3 push back + 4 caveat APPROVE)
-- ✅ `@MIT` V### migration row-rate 估算 + cron install — RETURN-TO-E4 (8 actions) → MIT V083+V084 dry-run subsequently APPROVE FULL
-- ✅ `@CC` Scout IPC schema preview（為 8a Phase D Sprint N+2）— APPROVE-CONDITIONAL Compliance Score A 93.3%
-- ✅ `@BB` Bybit V5 levels 對齊 review（為 Phase C Sprint N+1）— APPROVE 0 Bybit risk
-
-### ✅ Day 14-15 PM Sign-off Sprint N+0 milestone（跑 §5 22 invariant）
-
-- ✅ Sprint N+0 sign-off 2026-05-10 完成: 14 ✅ / 6 ⏳ DEFER / 2 🟡 PARTIAL / 0 ❌ FAIL
-- ✅ Operator AMD-2026-05-09-03 graduated canary 5-stage default + AMD-2026-05-10-03 invariant 5 wording amend + AMD-2026-05-10-04 TOML drift fix SOP + ADR-0022 strategist-cap-wide-parameter-adjustment-skill + ARCH-04 graduated-canary-5-stage architecture
-- ✅ Sprint N+0 closure HEAD `b6ed4975` (chain: ad59765b→...→b6ed4975)
-- ✅ engine restart 後 attribution chain post-M3 100% (per PM era-split empirical)、`[40]` 24h MLDE avg_net **+8.75 bps**（從 baseline -17.82 bps 翻正）— 真實 runtime 效果驗證
+Priority verdict after PA/FA/PM cross-check:
+1. `W3 Stage 1 demo micro-canary` is **BLOCKED**, not active execution.
+   A4-C is GATE-RED (`eligible_for_demo_canary=false`), so even a future `[55]`
+   waiver is insufficient to launch without a new green Stage 0R packet.
+2. `[55]` cleanup remains P1 because it is the infrastructure gate for any
+   future demo canary, not because it can by itself unblock A4-C.
+3. `W-AUDIT-8d` A4-C is implementation-complete but promotion-blocked; next
+   work is diagnostic maturity / revise-or-archive, especially why diagnostic
+   source produced 12 snapshots / 0 non-zero `expected_dir`.
+4. Continue `W-AUDIT-8a` Phase C/D and alternative alpha candidates
+   (`8c` liquidation, `8b` funding skew); the business-chain root cause remains
+   lack of non-textbook alpha.
+5. `P0-LG-1/2/3`, `P0-OPS`, and `P0-EDGE-1` stay true-live prerequisites.
 
 ---
 
-## §6.5 Sprint N+1 D+0 Pre-dispatch Readiness Snapshot（2026-05-10, HEAD `bf66f1b2`）
+## §7 W-AUDIT-6d Mid-Ground Summary
 
-**Status**: ✅ **DONE** — Sprint N+0 已 closure（HEAD `b6ed4975`）；Sprint N+1 D+0 **提前準備清單 25 項全 land** ✅；HIGH-5 12h passive watch sign-off ✅ **APPROVED 2026-05-10 20:08 UTC**（提前 1h22m）；Phase 1+2+3 EXECUTION 詳 **§6.6**。
+Detailed 保 6 / 砍 6 ledger and DSR K -12 derivation are archived in
+`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
 
-**詳完整 dispatch v3.7 + 25 D+0 提前準備清單**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md`
-
-### Code change PR ready (NOT DEPLOYED)
-- W7-3 Option B 補丁 (`b42731f6`): ma_crossover.on_rejection sync, +48 LOC + 152 LOC tests, E1+E2 APPROVE+E4 PASS
-- W7-1 + W2 trait skeleton (`c9fb0b8f`): TickContext.position_state per-iteration borrow + BtcLeadLagPanel, 16 file +182 LOC, 0 borrow checker, 433+2640+35 PASS
-
-### Specs / RFC drafts land
-- W2 A4-C spec **v1.2** (5 conditions + dual-layer σ + PSR(0) skew/kurt + +15/+5-15/<+5 階梯 gate)
-- W1 Phase B spec **v1.1** (BB WS-first revision, Rust panel_aggregator)
-- W6-1 RFC final verdict draft (8 section, 4 條 verdict, Track A/B 拆分)
-- W6-3a/b 12+14 enum + V086 spec preview
-- W5 三 P1 specs (CANARY-STAGE / COHORT-FREQ-23 + V089 / DYNAMIC-UNBLOCK + V090)
-- N+0 sign-off + N+1 dispatch fire SOP
-
-### v3.8 governance pre-checks
-- CC compliance APPROVE-CONDITIONAL Score **A- 92.0%** (vs N+0 A 93.3%, -1.3pp)
-- E3 security ALL PASS (0 CRITICAL/HIGH/MEDIUM, 3 LOW backlog, 5 hard gate 全綠)
-- R4 docs audit 8 fix CRITICAL+HIGH+MED 已 land
-
-### V### 編號 reserved
-V085 (W1 funding_curve) / V086 (W6 reject_reason_code) / V087 (W1 oi_delta_panel) / V088 (W2 panel.btc_lead_lag) / V089 (W5 cohort_freq_cap_attempts) / V090 (W5 unblock_candidates)
-
-### Sign-off + Dispatch Fire 流程（21:30 UTC 後）
-
-詳 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-10--n0_high5_signoff_draft.md` + `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--n0_signoff_n1_dispatch_fire_sop.md`
-
-**Phase 1**：一次 restart_all --rebuild --keep-auth deploy W7-3 + W7-1 + W2 trait skeleton + 30min observation
-**Phase 2**：派 9 wave 並行 sub-agent dispatch：W7-2 (含 bb_reversion) / W7-4 / W7-5 / W6 RFC verdict 三角 / W6 V086 IMPL / W1 IMPL Rust panel_aggregator WS-first / W2 IMPL v1.2 / W4 RouterLeaseGuard Drop / W5 三 P1 IMPL
-**W3 legacy Stage 1 paper cohort 不派**（FROZEN 2026-05-15）；next canary path = Stage 0R replay preflight + Stage 1 demo micro-canary。W-AUDIT-3b smoke 已 PASS 2026-05-15；demo canary launch 仍需 `[55]` invariant PASS（目前 WARN partial：15/89 real-fill reports）。
-
-### Sprint N+1 estimated duration
-7-10 day（W7 從 4 day 縮到 2-3 day per W7-1+W7-3 提早 land 共省 1.5 day）
-
-### Critical realities (4-agent loss audit consensus 維持)
-1. 5 textbook 策略結構性 alpha-deficient — W6 governance 沒 over-fit 確認；真正解是 alpha source 補充
-2. TONUSDT P1-CONDITIONAL-WATCH 30d evidence（QC verdict C, 不立即 freeze 避 selection-bias 環路）
-3. W6-5 LightGBM imbalance handling 撤回（MIT category error）— 改 sample_weight ratio sensitivity
-4. W6-3 真實 18+ 類兩 column (vs preliminary 3 類)
-5. ML retrain Track A/B 拆分 close PA Q3 vs MIT Q2 V086 timing 分歧
-6. dual-layer σ acceptance（raw market σ vs net edge σ）
-
----
-
-## §6.6 Sprint N+1 D+0 EXECUTION Snapshot（2026-05-10 20:08-21:46 UTC, HEAD `e661144e`）
-
-**Status**: D+0 dispatch fire 大規模執行；Phase 1 + Phase 2 全收口；Phase 3 部分收口（含 V091 + chain integrity HC + V089 fix）；AMD-2026-05-1X-W6-1 absorb in flight；Phase 4 (W1/W2 IMPL chain) 待派。
-
-### ✅ DONE 已完成
-
-#### Sign-off + Deploy
-- ✅ N+0 sign-off FINAL APPROVED 2026-05-10 20:08 UTC（提前 1h22m, A 路徑）+ commit `94d688fb` push
-- ✅ engine restart_all --rebuild --keep-auth deploy（OPENCLAW_AUTO_MIGRATE=0 暫關保 skeleton NOT_RUN）
-- ✅ 新 engine PID 1441249，3 pipelines (paper/demo/live) alive，1h37m+ stable
-- ✅ post-deploy validation: ma_crossover INXUSDT reject 50min = 0（W7-3 持續工作）
-
-#### W7 chain (deployed via sign-off restart)
-- ✅ W7-3 Option B 補丁 (`b42731f6`) deployed
-- ✅ W7-1 trait skeleton (`c9fb0b8f`) deployed
-- ✅ W7-2 + bb_reversion sync (`22efd9de`) deployed
-- ✅ W7-5 on_fill + bootstrap (`bb7cb293`) deployed
-- ✅ W4 RouterLeaseGuard Drop test (`22efd9de`) deployed (test code in regression baseline)
-
-#### Phase 1 dispatch fire
-- ✅ W7-4 5 策略 systemic position sync audit (commit `eb9efab5`, 3 ticket P1-1/P1-2/P2-1, 0 P0 blocker)
-- ✅ W6 V086 IMPL DONE (commit `05e44ede` writer code + `91a7b1c9` report)：production V086 applied (reject_n=17810/close_n=2247/overlap=0)，writer code 304 unit test PASS
-
-#### Phase 2 dispatch fire (5/5 sub-agent SUCCESS)
-- ✅ PA W6-1 RFC verdict APPROVE-CONDITIONAL (3 push back)
-- ✅ QC W6-1 RFC verdict APPROVE-CONDITIONAL (4 push back, inline 由 PM 落 file)
-- ✅ MIT W6-1 RFC verdict APPROVE-CONDITIONAL (5 MUST + 2 SHOULD, 含 chain integrity 40% empirical 推翻)
-- ✅ V085 + V087 + V088 dry-run + apply + register (3 panel.* hypertable + retention + integer_now_func + sha384sum INSERT)
-- ✅ W5-E1-A CANARY-STAGE-CRITERIA-1 IMPL (commit `6529e37e`, +2441 LOC, V089 SQL seed + AMD-2026-05-10-05 draft + [58a] enrich, 2695 cargo test PASS)
-- ✅ W5-E1-C DYNAMIC-UNBLOCK IMPL (commit `d17d7863`, +1700 LOC, V090 dry-run + apply + healthcheck [64], 31 PASS)
-
-#### Phase 3 部分 (5/9 done)
-- ✅ V086 + V089 + V090 _sqlx_migrations register (sha384sum mode, V85/V87/V88 隨 sub-agent)
-- ✅ V089 fix commit `ba5388e2` (7 trailing comma PG INSERT VALUES grammar) + Linux sha384 match registered checksum (`05428bf5...`)
-- ✅ Memory `project_2026_05_10_sprint_n0_closure.md` chain integrity era-split 精細化 (commit `332a2f9c` + `9159362c`)
-- ✅ MIT MUST 7: chain integrity HC `[65]` (commit `db17e205`, +642 LOC, 18 unit test + 307 regression PASS)
-- ✅ MIT MUST 2: V091 schema CHECK NOT VALID 互斥不變式 (commit `50e75bff`, 215 LOC NOT_RUN, 推 D+2 14:30 UTC ALTER VALIDATE)
-- ✅ Sub-agent reports + E1 memory governance trail (commit `e661144e`, 教訓 13-37)
-
-#### V### state (10 land + 1 NOT_RUN)
-| V### | Status | applied |
-|---|---|---|
-| V080 | ✅ success=t | governance_canary_stage |
-| V082 | ✅ success=t | decision_features_evaluations_split |
-| V083 | ✅ success=t | fills_entry_context_id_close_check |
-| V084 | ✅ success=t | decision_features_reject_negative_label |
-| V085 | ✅ success=t | panel_funding_curve |
-| V086 | ✅ success=t | governance_reject_close_reason_code |
-| V087 | ✅ success=t | panel_oi_delta_panel |
-| V088 | ✅ success=t | panel_btc_lead_lag_panel |
-| V089 | ✅ success=t | governance_canary_stage_metric_seed (after fix) |
-| V090 | ✅ success=t | governance_unblock_candidates |
-| V091 | ⏳ NOT_RUN | decision_features_reject_close_mutex_check (D+1 evening + D+2 ALTER VALIDATE) |
-
-### ⏳ PENDING / IN FLIGHT
-
-- 🟢 **AMD-2026-05-1X-W6-1 absorb 14 push back** (sub-agent `aaa66222` in flight, ~21:13 UTC dispatch, ETA 22:30-23:00 UTC) — PA write 200-300 LOC AMD draft + sign-off report
-- ⏳ **MIT MUST 4**: CLAUDE.md §七 idempotency wording 修正 "lossless on repeated apply"（**operator 動 CLAUDE.md**）
-- ⏳ **MIT MUST 3**: W6-5 試行 acceptance 補 5 ML pipeline metrics (W6-5 phase work)
-- ⏳ **D+1 evening engine restart_all --rebuild --keep-auth**：deploy V086 producer code (commit `05e44ede`) + V091 NOT_RUN deploy
-- ⏳ **D+2 14:30 UTC**：ALTER TABLE learning.decision_features VALIDATE CONSTRAINT decision_features_evaluations_reject_close_mutex_chk (V091 enforce; 前提 24h post-V086-producer drift PASS reject_NULL_code = 0)
-
-### ⏳ Phase 4 待派 (long-running)
-
-- ⏳ **W1 IMPL chain** (Rust panel_aggregator WS-first, V085/V087 producer integration, ~5-7d, 3 sub-agent)
-- ⏳ **W2 IMPL v1.2 chain** (lead-lag producer + V088 + ma/grid 接 BtcAltLeadLag shadow/diagnostic path, ~5-7d, 5 sub-agent; paper promotion path frozen)
-- ⏳ **W3 Stage 0R + Stage 1 demo micro-canary** observation start（requires replay preflight + `[55]` invariant PASS; W-AUDIT-3b smoke DONE 2026-05-15; legacy paper cohort frozen）
-- ⏳ **P1-1 / P1-2 / P2-1 W7 propagation**（per W7-4 audit findings, bb_reversion + bb_breakout 缺 W7-3 1-tick defense / bb_breakout 缺 W7-2 entry query, ~95 LOC total, schedule N+1 W5 if capacity 或 N+2）
-
-### Stats 累計 (single session 2026-05-10)
-
-- **40+ commits** (PM + 9 sub-agent successful)
-- **~7000+ LOC delivered** (Rust + Python + SQL + AMD draft + spec + report + memory)
-- **9 sub-agent dispatch 全 successful**: W7-4 / V086 IMPL / 3 RFC verify (PA+QC+MIT) / V085-V088 dry-run / V089 dry-run / W5-E1-A IMPL / W5-E1-C IMPL / chain integrity HC / V091 / AMD draft (in flight)
-- **11 V### managed** (V085-V091)，10 land + 1 NOT_RUN (V091)
-- **Memory + 7+ workspace report governance trail 完整**
-- **Triple sync (Mac / origin / Linux)**: 100% maintained at every commit
-
-### Critical findings discovered + closed in session
-
-- ✅ V087/V088 retention BIGINT bug (V085 sub-agent adversarial catch, fix commit `3ed7047d`)
-- ✅ V086 OR-filter idempotency 缺陷 (E1 finding, MIT confirm 方案 A lossless deterministic)
-- ✅ V089 7 trailing comma PG syntax error (V089 sub-agent catch, PM perl fix)
-- ✅ chain integrity 40% (MIT empirical) → era-split: post-M3 100% / pre-M3 39% historical (PM re-audit 精細化)
-- ✅ W7 chain 是 partial systemic fix (PA W7-4 audit: bb_reversion 缺 W7-3 / bb_breakout 缺 W7-2 + W7-3) → 3 ticket
-- ⏳ V086 producer code commit `05e44ede` 在 main 但 engine 跑舊 code → D+1 evening restart 收口
-
-### 14 Push back items (W6-1 RFC 三角 sign-off, 進 AMD-2026-05-1X-W6-1)
-
-PA (3) / QC (4) / MIT (5 MUST + 2 SHOULD) — 詳 AMD draft（sub-agent in flight）。簡列：
-- **Doc/wording fix (5)**: PA PB#1 / QC PB#1 / MIT MUST 1 / PA PB#3 / MIT MUST 4
-- **Quant/acceptance gate (5)**: QC PB#2 / QC PB#3 / QC PB#4 / PA PB#2 / MIT SHOULD 6
-- **IMPL 已 land (3)**: ✅ MIT MUST 2 (V091) / ✅ MIT MUST 5 (memory) / ✅ MIT SHOULD 7 (HC [65])
-- **IMPL 待 D+1+ (1)**: MIT MUST 3 (W6-5 試行 5 ML pipeline metrics)
-
----
-
-## §6.7 Post-MAG-084 P1 Follow-up Wave Plan（2026-05-11, post HEAD `073b7fba`）
-
-W-D closure 後立即啟動的 P1 收尾 + 下一階段 critical path 推進。並行衝突已分析（PM 2026-05-11 session）。
-
-### Wave 1（4 並行 sub-agent，~1-3h，全 background）
-
-| Task | Agent | 範圍 | Conflict | 估時 |
-|---|---|---|---|---|
-| **A · P1-STABLE-ID-1** | `@E1` | 抽 `compute_spine_ids()` helper（runtime_shadow.rs:72-80 + step_4_5_dispatch.rs:623-645 + paper shadow path 三處字面複製）+ cross-module invariant test | 與後續 D Rust IMPL **必序列** | 30min E1 + 15min E2 |
-| **B · P1-RCA-1** | `@QA` | RCA QA R-1: 6 orphan ER + 1 missed entry 4-min burst (deploy+72-73min)；Bybit multi-exec vs trading_writer race vs fully_filled edge path | **0 conflict** read-only | 1-3h |
-| **C · W-AUDIT-3b runtime smoke** | `@QA` or `@E4` | ✅ DONE 2026-05-15: ssh trade-core 跑 RouterLeaseGuard Drop test (commit `22efd9de` land) + `[55] chains_with_lease=89` + `pytest -k fail_closed` PASS (FA-1) | **0 conflict** runtime verify only; remaining gate is `[55]` real-fill partial WARN | 30min |
-| **D-prep · LG-2/3/4 design** | `@PA` | 設計 P0-LG-1 (H0 production caller) / P0-LG-2 (provider pricing binding) / P0-LG-3 (supervised-live SM) 三個 tech plan + E1 並行任務拆分 | **0 conflict** design only | 1-2h |
-
-### Wave 1.5（A 完成後序列）
-
-- A commit/push → restart_all --rebuild --keep-auth（小規模 deploy）
-- **同次撿** sibling W1/W2/W7 wave **60+ commit + 9 V### migration source-only land** work 進 runtime（per QA R-2 fresh window）
-- Post-rebuild verify: [55] gate 24h auto-clear check; (P1-6) if not auto-clear → 派 E1-Python R3 cutoff filter
-
-### Wave 2（D-prep 收回後）
-
-- D-IMPL-1/2/3 = E1 ×3 parallel based on D-prep PA design
-- E2 review + E4 regression chain
-- D wave 完成後第二次 restart_all --rebuild
-
-### 不在本 wave scope（separate planning）
-
-- W-AUDIT-4..7 active items（per §4.1）
-- 5 textbook 策略 alpha-deficient（P0-EDGE-1，per QC S4 boundary）
-- Stage 3+ promotion / Mainnet（per QC S2 + PA P1-2）
-
-### 派發狀態
-
-- Wave 1: 2026-05-11 ~03:xx UTC dispatched (4 background sub-agent)
-- Wave 1.5: pending A done
-- Wave 2: pending D-prep done
-
----
-
-## §7 W-AUDIT-6d Mid-Ground（保 6 / 砍 6 + DSR K -12 量化）
-
-### 保 6 結構性子項（Sprint N+0, 5 person-day, QC review）
-
-1. DSR/PBO 自動化 evidence push（V079 + `promotion_evidence.py`） — alpha-bearing
-2. Kelly RiskConfig SSOT（`per_trade_risk_pct` + Kelly tier） — alpha-bearing
-3. funding_arb retire（4 TOML clean, ADR-0018, ✅ done）
-4. portfolio VaR/CVaR/EVT promotion gate（W-AUDIT-6c, IMPL ✅, runtime apply 待）
-5. `portfolio_var min_observations=200` review + sampling unit 校正
-6. bb_reversion verdict（pair MA per AMD-2026-05-09-02 §3）
-
-### 砍 6 polishing 子項（**E2 grep blacklist; 命中即 reject merge**）
-
-1. ❌ ma_crossover 5m 反向觀察重做
-2. ❌ bb_breakout Donchian 5m optimization sweep
-3. ❌ grid_trading symbol expansion ORDIUSDT → 5
-4. ❌ funding_arb v3 MA pair retry
-5. ❌ strategy_params 4×5 hardcoded → 動態 Sharpe-by-regime（W-AUDIT-8e 後做更合適）
-6. ❌ 5 策略 cost_gate threshold 個別 tune
-
-### DSR Multiple Testing Penalty 量化
-
-- 保 6: K +3 trial（DSR/PBO + portfolio VaR + min_obs review）
-- 砍 6: K -15 trial（避免 sweep / per-symbol / per-threshold inflation）
-- **Net: K -12 trial**
-
-DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log₁₀）。K 從 ~25 降至 ~13 → `mu_0` 從 ~2.54 降至 ~2.27 → Δ ≈ -0.27 → z_DSR 增益 +0.30 → 對 5 策略 sharpe ~0.5 demo n=200 樣本，DSR PASS percentile 增益 +5-10%（fat-tail 折扣後）。E1-D `2026-05-09--w_audit_6d_dsr_penalty_quantification.md` 詳細推導；早期 QCTODO/PA 引用 ~2.83 是 log₁₀ 錯算，不採。
-
-**FA Push back**：mid-ground 砍 6 polishing **正是 DSR 數學意義的 right move**，不是省工時妥協。invariant 16 必明文記入 sign-off report。
+Active rule that remains: the 6 polishing items are still rejected unless a
+future QC/PM decision reopens them; do not add per-symbol/per-threshold sweeps
+that inflate DSR trial count.
 
 ---
 
@@ -513,15 +225,15 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 | `P0-AGENT-2` | ✅ DONE 2026-05-11 | MAG-082 Stage 2 evidence window | 51h pre-fix + post-deploy adversarial SQL missed_n=0 entry / 14.7 state_changes/min；QA re-audit PASS。 |
 | `P0-AGENT-3` | ✅ DONE 2026-05-11 | MAG-083 final release audit | 三角 audit (QA + PA + QC) 全 APPROVE；reviewer brief 5 章節 per `2026-05-11--w_d_mag084_signoff.md` §4。 |
 | `P0-AGENT-4` | ✅ DONE 2026-05-11 | MAG-084 operator sign-off | Signed `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`；W-D wave CLOSED。 |
-| `P1-STABLE-ID-1` | 🔵 Wave 1 (A) | compute_spine_ids() helper 抽出（從 E5 D-1 P2 升 P1 per PA） | 三處 stable_id 字面複製 → helper + cross-module invariant test + cargo test 2776/0/0 |
-| `P1-RCA-1` | 🔵 Wave 1 (B) | RCA QA R-1: 6 orphan ER + 1 missed entry 4-min burst | Investigate Bybit multi-exec / trading_writer race / fully_filled edge path; output systemic or expected Bybit noise judgment |
+| `P1-STABLE-ID-1` | ✅ DONE 2026-05-11 | compute_spine_ids() helper 抽出（從 E5 D-1 P2 升 P1 per PA） | Done via `b830e3fa` + E2 lint fix `e40b2a76`; Wave 1 A closed in `d069b9e8`. |
+| `P1-RCA-1` | ✅ RCA DONE 2026-05-11 | RCA QA R-1: 6 orphan ER + 1 missed entry 4-min burst | Verdict systemic; follow-up implementation tracked by `P1-FILL-LINEAGE-*`, `P1-HEALTHCHECK-55-INVARIANT`, and `P1-STARTUP-BURST-MITIGATION`. |
 | `P1-W-AUDIT-3b-SMOKE` | ✅ DONE 2026-05-15 | W-AUDIT-3b runtime smoke (FA-1) | ssh trade-core RouterLeaseGuard Drop test PASS + `[55] chains_with_lease=89` + `pytest -k fail_closed` PASS；commit `22efd9de` smoke verify |
-| `P1-LG-DESIGN` | 🔵 Wave 1 (D-prep) | PA design LG-2/3/4 tech plan | Output 3 tech plans + E1 並行任務拆分 ready for Wave 2 |
-| `P1-FILL-LINEAGE-DROP` | 🔵 Wave 1.6 in flight | Spine channel silent-drop fix (Option F4 B-2+B-3 hybrid) | E1 IMPL DONE 2810 PASS / E2 APPROVE WITH MINOR / E5 APPROVE WITH 3 P3 / 待 E4 + deploy |
+| `P1-LG-DESIGN` | ✅ DESIGN DONE 2026-05-11 | PA design LG-2/3/4 tech plan | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md`; implementation tracked by `LG-1/2/3`. |
+| `P1-FILL-LINEAGE-DROP` | ✅ SOURCE/REGRESSION/DEPLOY DONE 2026-05-11 | Spine channel silent-drop fix (Option F4 B-2+B-3 hybrid) | `e17ead2b` + E4 READY/PASS; post-deploy startup burst residual tracked by `P1-STARTUP-BURST-MITIGATION`. |
 | `P1-FILL-LINEAGE-MONITOR` | ⏳ post Wave 1.6 deploy | Drop counter healthcheck wiring | 3 SPINE_CHANNEL_* counter 已暴露 accessor，healthcheck [N] 接 + 5/min WARN 閾 |
 | `P1-HEALTHCHECK-55-INVARIANT` | ⏳ demo-canary blocker | Redesign / clear [55] WARN gate as invariant test (QC S3) | Current 2026-05-15 `[55]`: `chains_with_real_fill_report=15/89` → `WARN_REAL_FILL_PROPAGATION_PARTIAL`; demo canary launch blocked until PASS or explicit PM/operator waiver. Future hardening: 改 ratio threshold → 1:1 mapping invariant (per trading.fills.fill_id → 1 real-fill ER) |
-| `P2-DUAL-RAIL-ORDER-ID` | ⏳ scheduled N+2 | demo + live_demo 共享 order_id 衝突解 | dual-rail order_id namespace 區分 (e.g. order_id_demo / order_id_live_demo) |
-| `P2-RUNTIME-SHADOW-SPLIT` | ⏳ scheduled N+2 (post Wave 1.6) | runtime_shadow.rs 828 LOC > 800 警告 split | E5 + E2 共識 P3 升 P2; 拆 sibling 注釋區 + emit fn 模組分檔 |
+| `P2-DUAL-RAIL-ORDER-ID` | ✅ DONE 2026-05-15 | demo + live_demo 共享 order_id 衝突解 | `2f1c385b` adds mode prefix to `order_link_id`. |
+| `P2-RUNTIME-SHADOW-SPLIT` | ✅ DONE 2026-05-15 | runtime_shadow.rs 828 LOC > 800 警告 split | `122015b7` split runtime_shadow.rs under warning threshold. |
 | `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5 注：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
 | `P3-SPINE-COUNTER-CACHE-ALIGN` | ⏳ scheduled quiet period | 3 AtomicU64 counter `#[repr(align(64))]` cache line | E5 cosmetic; 10 min fix; ~50-200ns extra latency 降到 0 |
 | `P1-STARTUP-BURST-MITIGATION` | ⏳ scheduled post Wave 2 | Engine restart 後 startup burst 1-min window 仍 silent-drop 23.5% real-fill ER (Wave 1.6 deploy 16:22:52 UTC 實證 4/17 drops) | Cap 8192→32768 OR retry 3×50ms→5×100ms 500ms budget OR staggered engine bring-up；steady-state 0% drop 證 Wave 1.6 fix 有效 |
@@ -530,7 +242,7 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 | `LG-2` Provider pricing binding | 🔵 Wave 2.2 dispatched 2026-05-11 | T4 RiskConfig 先 → T1+T3 parallel → T2 startup assertion 序列 | per PA plan §2.4 |
 | `LG-3` Supervised live SM | 🔵 Wave 2.1 PA spec phase dispatched 2026-05-11 | PA spec doc 1-1.5d → QC+BB+MIT parallel review → PA spec v2 → Wave 2.4 E1×7 IMPL | per PA plan §3.6 + §6.1 + §6.4 |
 | `P0-EDGE-1` | ACTIVE | Edge net-positive decision | Strategy edge must be positive or scoped to limited supervised path before true-live. **Root cause linked to `P0-MIT-LABEL-CLOSE-TAG-1` 1-day fix（最高 ROI）**。 |
-| `P0-MIT-LABEL-CLOSE-TAG-1` | **ACTIVE 1-DAY FIX** | `label_close_tag` NULL writer fix（attribution real root cause） | MIT v3 第一次定位：24h 76/7000 = 1.0857% chain_ok；fix `label_close_tag` writer 後預期 attribution_chain_ok 24h ≥ 5%（invariant 21）。**最高 ROI** vs PA R-3 4-6 sprint。 |
+| `P0-MIT-LABEL-CLOSE-TAG-1` | ✅ DONE 2026-05-10 | `label_close_tag` NULL writer fix（attribution real root cause） | Post-M3 chain integrity era-split reached 100% per `[65]` / invariant 21 (`db17e205`); P0 edge remains active separately. |
 | `P0-LG-1` | ACTIVE | H0 blocking production caller | H0 wired into production decision path with metrics + fail-closed. |
 | `P0-LG-2` | ACTIVE | Provider pricing binding | Fee/pricing source bound, freshness checked, asserted at startup. |
 | `P0-LG-3` | ACTIVE | Supervised-live state machine | Live authorization, lease, drawdown, revoke, operator approval explicit + tested. |
@@ -544,7 +256,7 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 | `P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` | DONE 2026-05-09（**4-agent fact-check 撤銷 stale belief**） | `IndicatorEngine::compute_all` 自 `75741eff` (2026-04-28) 起呼 `donchian_prior()` leak-free 11 天；`ad14db07` 僅補 regression test；QC v2-NEW-4「runtime contaminated」判定為過期 contaminated belief（commit `6afad6e8`）。 | n/a |
 | `P0-V2-NEW-2-STRATEGIST-CAP-NO-GATE` | DONE 2026-05-09; **ADR-0021 待**（invariant 17） | F-strategist-cap 30→50 是 wide_parameter_adjustment skill；不是 supervised gate；待補 ADR-0021。 | ADR-0021 land + commit |
 | `P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` | SOURCE/TEST CLOSED 2026-05-09; RUNTIME PENDING Sprint N+0 | DSR/PBO promotion gate IMPL ✅；`learning.strategy_trial_ledger` V079 待 apply；evidence push 鏈 `promotion_evidence.py` IMPL；待 cron install + V079 apply + rebuild/restart。 | V079 apply + cron install + 24h fire |
-| `P0-V3-MIT-ROOT-CAUSE` | **= P0-MIT-LABEL-CLOSE-TAG-1**（cross-reference）| 同上 | 同上 |
+| `P0-V3-MIT-ROOT-CAUSE` | ✅ DONE | = `P0-MIT-LABEL-CLOSE-TAG-1`（cross-reference）| Closed by post-M3 chain integrity evidence; residual alpha/edge risk tracked by `P0-EDGE-1`. |
 | `P0-V3-V079-NOT-APPLIED` | ACTIVE Sprint N+0 | 48227607 source 已落但 _sqlx_migrations max=78；V079 待 apply | engine restart with auto-migrate；invariant 18 |
 | `P0-V3-CRON-NOT-INSTALLED` | ✅ DONE 2026-05-09 | F-08 5 ML cron `17 3 * * *` 已 install Linux crontab；待 24h fire 驗 | invariant 18 24h fire |
 | `P0-V3-PA-SPEC-FIX` | ACTIVE Sprint N+0 | BB v3 揭發 PA spec 3 條錯誤：(1) Bybit V5 WS L25→L50 / (2) liquidation_pulse 4 weeks ago deleted 需 revert / (3) basis demo 限 observation 沒分（execution 需 mainnet） | PA spec 修 3 條 + ADR-0021/ARCH-04 同 wave |
@@ -557,16 +269,9 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 
 ### §11.1 Sprint N+0 Active
 
-| ID | Priority | Task | Notes |
-|---|---:|---|---|
-| `W-AUDIT-9` | 1 | Sprint N+0 IMPL 7 sub-task（T1-T7） | E1-A..E1-D + E1-F catch-up；invariant 1 |
-| `W-AUDIT-8a` Phase A | 1 | Sprint N+0 trait 升級 + 5 策略 declare | E1-A 後段；invariant 2；序列化於 W-AUDIT-6d 後 |
-| `W-AUDIT-6d` mid-G 6 保 | 1 | Sprint N+0 6 保子項 land | E1-D；invariant 3 |
-| `W-AUDIT-4b-M1/M2/M3` | 1 | Sprint N+0 ML 三斷層串行 IMPL | E1-E（M1） / E1-B（M2） / E1-C（M3）；invariant 5 + 19 |
-| `W-AUDIT-6c` runtime apply | 1 | Sprint N+0 V079 apply + DSR/PBO evidence pipeline runtime + cron 24h fire 驗 | E1-D；invariant 18 |
-| `W-AUDIT-3b` runtime smoke | 1 | Sprint N+0 ExecutorAgent runtime smoke + fail-closed metrics 從 Linux 驗 | E1（W-AUDIT-9 T3 前置 mandatory）；invariant 20 |
-| `P0-MIT-LABEL-CLOSE-TAG-1` | 1 | Sprint N+0 1-day fix `label_close_tag` NULL writer | E1；invariant 21 |
-| `ADR-0021` + `ARCH-04` + `AMD-03/04` | 1 | Sprint N+0 governance 補完 | PA + R4 + TW；invariant 17 |
+Archived as completed in
+`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`. Current
+active work starts at §10 / §11.2 / §11.3.
 
 ### §11.2 W-AUDIT-4b corrected retained tables/views/drop scope（invariant 19）
 
@@ -583,8 +288,9 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 
 | ID | Priority | Task | Notes |
 |---|---:|---|---|
-| `P1-CRON-ML-1` | 2 | F-08 5 ML cron 24h fire 驗（cron 已 install at `17 3 * * *`） | invariant 18 |
-| `P1-AUDIT-RUNTIME-3` | 2 | W-AUDIT-3 + W-AUDIT-3b（mounts W-A close-out + W-B regression） | F-01 source/test closed; 待 W-AUDIT-3b runtime smoke + W-AUDIT-9 stage-aware integration |
+| `P1-W6-5-ML-METRICS` | 2 | W6-5 sample_weight ratio sensitivity + 5 ML pipeline metrics acceptance | Preserved from archived §6.6 MIT MUST 3; do not lose this active signal during TODO cleanup. |
+| `P1-CRON-ML-1` | DONE | F-08 5 ML cron 24h fire 驗（cron 已 install at `17 3 * * *`） | invariant 18 says 24h fire verified; V079 runtime concerns stay separate if reopened. |
+| `P1-AUDIT-RUNTIME-3` | DONE | W-AUDIT-3 + W-AUDIT-3b（mounts W-A close-out + W-B regression） | W-AUDIT-3b runtime smoke done 2026-05-15; residual `[55]` gate tracked in §10. |
 | `P1-AUDIT-PERF-5` | 3 | W-AUDIT-5a/5b 性能/結構/CI urgent | 剩 F-20 909MB damaged dump drop ops |
 | `P1-AUDIT-AI-UX-7` | 3 | W-AUDIT-7c GUI/UX 收口 | F-07 ANTHROPIC_API_KEY + cea-env restart |
 | `P1-DATA-1..3` | 3 | Runtime-reloaded WARN cluster + low-sample attribution watch + scanner opportunity calibration watch | DONE source-fixed; row rolloff monitor |
@@ -640,17 +346,10 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 | ID | Task | Trigger |
 |---|---|---|
 | `P2-LEASE-1` | Clean terminal `DecisionLeaseSm.objects` Vec entries | If long soak shows memory growth or before high-volume live |
-| `P2-STRUCT-1` | DONE 2026-05-09 17:27 UTC commit `dddc5dc1` — HStateCache + CostEdgeAdvisor late-inject slot enablement | A2-followup G3-08 enable verified |
 | `P2-STRUCT-2` | Zombie/deprecated code inventory | Next architecture hygiene sweep |
-| `P2-AUDIT-PERF-5b` | DONE — event_consumer + state-machine snapshot + orjson + ai_budget ArcSwap | (see git history) |
-| `P2-AUDIT-VAR-6c` | DONE 2026-05-09 — W-AUDIT-6c portfolio VaR/CVaR/EVT IMPL `cc6476dd` | runtime apply at Sprint N+0 |
-| `P2-AUDIT-LAYER2-7c` | DONE-BY-DECISION — autonomous Layer2 loop sunset by ADR-0020 | manual+supervisor only |
 | `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset (D-16 dormant，§9) | ADR-0015 + AMD-2026-05-09-02 accept; Sprint N+6+ |
-| `P2-AUDIT-VERIFY-1..7` | DONE 2026-05-09 (詳細歷史見 git history) | various |
 | `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → **mounted into `W-AUDIT-8f` (R-3) Hypothesis Pipeline per Decision-3 (P0-DECISION-AUDIT-7)** | Sprint N+5 |
-| `P2-AUDIT-VERIFY-4` | F-08 cron install ✅ DONE 2026-05-09 (P1-CRON-ML-1 24h fire pending) | invariant 18 |
-| `P2-AUDIT-QC-STAND-ALONE` | DONE — QC stand-alone fixes (funding_arb / Kelly / cooldown / DSR-PBO / §三 -26.44) | (see git history) |
-| `P2-V19-CYCLE` | TODO v19 land 後 1-2 sprint 啟動 v20 archive cycle | 防 v19 突破 800 行衛生線 |
+| `P2-V19-CYCLE` | ✅ DONE 2026-05-15 — TODO cleanup/archive cycle | `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`; TODO under 700-line hygiene target. |
 
 ### §12.1 Sprint N+2 P2 Backlog (PA 2026-05-11)
 
@@ -685,9 +384,9 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 
 | Date | Work | Gate |
 |---|---|---|
-| 2026-05-10..16 | Sprint N+0 W1-W2 FOUNDATION HEAVY | §6 Day-by-Day; §5 22 invariant sign-off |
+| 2026-05-10..16 | Sprint N+0 W1-W2 FOUNDATION HEAVY | Closed; detailed ledger archived in `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md` |
 | 2026-05-16 | funding_arb 14d audit | verification/history; retirement decision in AMD-2026-05-09-02 / ADR-0018 |
-| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | 8a Phase B+C 並行 + 8d (BTC→Alt) spec rebase + Stage 0R replay preflight + Stage 1 demo micro-canary prep |
+| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | 8a Phase C/D prep + A4-C diagnostic maturity/revise-or-archive; Stage 1 demo only after future green Stage 0R + `[55]` PASS/waiver |
 | 2026-05-24..30 | Sprint N+2 8d follow-up + 8a Phase D + Stage 2 demo cohort 14d | Stage 2 only from Stage 1 demo empirical evidence |
 | 2026-05-31..06-06 | Sprint N+3 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | |
 | 2026-06-07..13 | Sprint N+4 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | Track W 全 closed |
