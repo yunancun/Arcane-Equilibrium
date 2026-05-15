@@ -1,9 +1,11 @@
-"""W2 paper edge report 展現層。
+"""W2 legacy paper edge / Stage 0R diagnostic report 展現層。
 
 MODULE_NOTE:
     本模組承接 W2 A4-C BTC→Alt Lead-Lag spec v1.2 §7.1 六項 metric 的
-    純渲染邏輯。輸入只接受 metrics 模組已算好的 pooled/per-symbol dict，
-    輸出 markdown / csv / json，不觸碰 DB 與報告寫檔。
+    純渲染邏輯。按 AMD-2026-05-15-01，報告只能表達 Stage 0R
+    `eligible_for_demo_canary=true/false`，不得表達 Stage 1 PASS 或 promotion。
+    輸入只接受 metrics 模組已算好的 pooled/per-symbol dict，輸出 markdown /
+    csv / json，不觸碰 DB 與報告寫檔。
 """
 
 from __future__ import annotations
@@ -72,6 +74,7 @@ def per_symbol_breakdown_table(
                 "ci_95_low": None,
                 "ci_95_high": None,
                 "verdict": "no_signal",
+                "eligible_for_demo_canary": False,
                 "promote_n2": False,
             })
             continue
@@ -85,6 +88,7 @@ def per_symbol_breakdown_table(
             "ci_95_low": m["ci_95_low"],
             "ci_95_high": m["ci_95_high"],
             "verdict": m["verdict"]["label"],
+            "eligible_for_demo_canary": m["verdict"]["eligible_for_demo_canary"],
             "promote_n2": m["verdict"]["promote_n2"],
         })
     return rows
@@ -106,7 +110,7 @@ def render_csv(
         fieldnames=[
             "scope", "symbol", "window_days", "timestamp", "sample_n",
             "avg_net_bps", "t_stat", "psr_0", "dsr_k95", "ci_95_low",
-            "ci_95_high", "verdict", "promote_n2",
+            "ci_95_high", "verdict", "eligible_for_demo_canary", "promote_n2",
         ],
     )
     writer.writeheader()
@@ -123,6 +127,7 @@ def render_csv(
         "ci_95_low": pooled["ci_95_low"],
         "ci_95_high": pooled["ci_95_high"],
         "verdict": pooled["verdict"]["label"],
+        "eligible_for_demo_canary": pooled["verdict"]["eligible_for_demo_canary"],
         "promote_n2": pooled["verdict"]["promote_n2"],
     })
     for row in per_symbol_breakdown_table(per_symbol, cohort):
@@ -165,7 +170,7 @@ def render_markdown(
     timestamp: datetime,
 ) -> str:
     lines: list[str] = []
-    lines.append("# W2 A4-C BTC→Alt Lead-Lag — D+12 Paper Edge Report")
+    lines.append("# W2 A4-C BTC→Alt Lead-Lag — Stage 0R Diagnostic Report")
     lines.append("")
     lines.append(
         f"**生成時間**: {timestamp.isoformat()}  "
@@ -175,11 +180,14 @@ def render_markdown(
     lines.append(f"**Cohort symbols**: {', '.join(cohort)}")
     lines.append("")
     lines.append("**Spec reference**:")
+    lines.append("- AMD-2026-05-15-01：legacy paper report downgraded to diagnostic/read-only; "
+                 "output is only `eligible_for_demo_canary=true/false`")
     lines.append("- v1.2 §7.1 mandatory metric 6 條（pooled + per-symbol / DSR K=95 / "
                  "PSR(0) skew/kurt / R²(N) decay / block-bootstrap 95% CI / counterfactual delta）")
     lines.append("- v1.2 §7.1 dual-layer σ：raw market σ_60=4.54/σ_120=6.28/σ_300=10.08 bps "
                  f"+ net edge σ={NET_EDGE_SIGMA_LOWER_BPS:.0f}-{NET_EDGE_SIGMA_UPPER_BPS:.0f} bps")
-    lines.append("- v1.2 §8.1 三檔 gate：+15 promote N+2 / +5~+15 extend 14d / <+5 revise/archive")
+    lines.append("- v1.4 diagnostic bands：+15 may set eligible_for_demo_canary=true / "
+                 "+5~+15 defer / <+5 revise/archive; never Stage 1 PASS")
     lines.append("- v1.2 §7.1 metric (3) PSR(0)：Bailey-López de Prado 2012 skew/kurt-aware "
                  "formula 強制（禁 normal SR z-test）")
     lines.append("")
@@ -234,30 +242,30 @@ def render_markdown(
         decay_notes.append("- alpha decay regime test：OK（N=120 主信號 R² ≥ 0.04 + decay 單調）")
     lines.extend(decay_notes)
     lines.append("")
-    lines.append(f"### Step gate verdict — pooled: **{pooled['verdict']['label']}**")
+    lines.append(f"### Stage 0R diagnostic verdict — pooled: **{pooled['verdict']['label']}**")
     lines.append("")
     lines.append(f"> {pooled['verdict']['reason']}")
     lines.append("")
-    lines.append("## §2 Per-symbol breakdown（spec §7.1 metric (1)：n ≥ 100 + t > 2.0 gate）")
+    lines.append("## §2 Per-symbol breakdown（spec §7.1 metric (1)：n ≥ 100 + t > 2.0 diagnostic gate）")
     lines.append("")
-    lines.append("| Symbol | n | avg_net (bps) | t-stat | PSR(0) | DSR | CI 95% | Verdict | promote N+2 |")
+    lines.append("| Symbol | n | avg_net (bps) | t-stat | PSR(0) | DSR | CI 95% | Verdict | eligible_for_demo_canary |")
     lines.append("|---|---|---|---|---|---|---|---|---|")
     for sym in cohort:
         m = per_symbol.get(sym)
         if m is None:
-            lines.append(f"| {sym} | 0 | - | - | - | - | - | no_signal | ❌ |")
+            lines.append(f"| {sym} | 0 | - | - | - | - | - | no_signal | false |")
             continue
         ci_str = (
             f"[{_fmt(m['ci_95_low'], '.2f')}, {_fmt(m['ci_95_high'], '.2f')}]"
             if m.get("ci_95_low") is not None and m.get("ci_95_high") is not None
             else "-"
         )
-        promote_icon = "✅" if m["verdict"]["promote_n2"] else "❌"
+        eligible = "true" if m["verdict"]["eligible_for_demo_canary"] else "false"
         lines.append(
             f"| {sym} | {m['sample_n']} | {_fmt(m['avg_net_bps'], '.2f')} | "
             f"{_fmt(m['t_stat'], '.3f')} | {_fmt(m['psr_0'], '.3f')} | "
             f"{_fmt(m['dsr_k95'], '.3f')} | {ci_str} | "
-            f"{m['verdict']['label']} | {promote_icon} |"
+            f"{m['verdict']['label']} | {eligible} |"
         )
     lines.append("")
     lines.append("## §3 Per-cohort counterfactual delta（expected_dir 三方向）")
@@ -298,30 +306,41 @@ def render_markdown(
             f"{_fmt(r300_s, '.4f')} | {verdict_d} |"
         )
     lines.append("")
-    lines.append("## §5 Acceptance summary（spec v1.2 §8.3 sign-off path）")
+    lines.append("## §5 Stage 0R summary（AMD-2026-05-15-01）")
     lines.append("")
     p = pooled
     psr_pass = p.get("psr_0") is not None and p["psr_0"] >= PSR_THRESHOLD
     dsr_pass = p.get("dsr_k95") is not None and p["dsr_k95"] >= DSR_THRESHOLD
-    pooled_promote = p["verdict"].get("promote_n2", False)
-    any_symbol_promote = any(m["verdict"].get("promote_n2", False) for m in per_symbol.values())
+    pooled_eligible = p["verdict"].get("eligible_for_demo_canary", False)
+    any_symbol_eligible = any(
+        m["verdict"].get("eligible_for_demo_canary", False) for m in per_symbol.values()
+    )
     lines.append(f"- Pooled PSR(0) ≥ 0.95（B-LdP 2012）: "
                  f"{'✅ PASS' if psr_pass else '❌ FAIL'} (`{_fmt(p.get('psr_0'), '.4f')}`)")
     lines.append(f"- Pooled DSR ≥ 0.95（K=95, mu_0=3.018）: "
                  f"{'✅ PASS' if dsr_pass else '❌ FAIL'} (`{_fmt(p.get('dsr_k95'), '.4f')}`)")
-    lines.append(f"- Pooled verdict: `{p['verdict']['label']}` → promote N+2: {'✅' if pooled_promote else '❌'}")
-    lines.append(f"- Any per-symbol promote N+2 PASS: {'✅' if any_symbol_promote else '❌'}")
+    lines.append(
+        f"- Pooled verdict: `{p['verdict']['label']}` → "
+        f"eligible_for_demo_canary: {'true' if pooled_eligible else 'false'}"
+    )
+    lines.append(
+        f"- Any per-symbol eligible_for_demo_canary=true: "
+        f"{'true' if any_symbol_eligible else 'false'}"
+    )
     lines.append("")
-    lines.append("**Acceptance verdict**：")
-    final_verdict = "ARCHIVE / REVISE"
-    if pooled_promote and any_symbol_promote and psr_pass and dsr_pass:
-        final_verdict = "PROMOTE N+2 DEMO IMPL"
+    lines.append("**Stage 0R verdict**：")
+    final_verdict = "eligible_for_demo_canary=false; ARCHIVE / REVISE"
+    if pooled_eligible and any_symbol_eligible and psr_pass and dsr_pass:
+        final_verdict = "eligible_for_demo_canary=true; MAY REQUEST STAGE 1 DEMO MICRO-CANARY"
     elif p["verdict"]["label"] == "plus5_15":
-        final_verdict = "EXTEND PAPER WINDOW 14d"
+        final_verdict = "eligible_for_demo_canary=false_or_defer; EXTEND REPLAY/PREFLIGHT DIAGNOSTICS"
     elif p["verdict"]["label"] == "plus15" and (not psr_pass or not dsr_pass):
-        final_verdict = "PROMOTE PENDING (PSR/DSR fail) — EXTEND 14d"
+        final_verdict = "eligible_for_demo_canary=false; PSR/DSR fail"
     lines.append(f"> **{final_verdict}**")
     lines.append("")
-    lines.append("（PA + QC + MIT 三角 sign-off 才正式決定 N+2 dispatch；本報告是 evidence 基礎。）")
+    lines.append(
+        "（本報告不是 Stage 1 PASS。PA + QC + MIT 只能用它決定是否申請 "
+        "Stage 1 Demo micro-canary；Stage 2 必引用 demo empirical evidence。）"
+    )
     lines.append("")
     return "\n".join(lines)

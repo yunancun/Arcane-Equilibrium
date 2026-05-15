@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""W2 paper edge report CLI 整合層。
+"""W2 legacy paper edge / Stage 0R diagnostic report CLI 整合層。
 
 MODULE_NOTE:
-    本模組是 W2 A4-C BTC→Alt Lead-Lag spec v1.2 §7.1 paper edge report
-    的 CLI 入口：只負責 argparse、read-only PG query、metrics→render 編排與
-    報告輸出。統計公式、渲染、smoke fixture 分別在 sibling modules。
+    本模組是 W2 A4-C BTC→Alt Lead-Lag spec v1.2 §7.1 report 的 CLI 入口。
+    AMD-2026-05-15-01 後，輸出降級為 Stage 0R diagnostic/read-only packet，
+    只能表達 `eligible_for_demo_canary=true/false`，不得稱 Stage 1 PASS 或
+    promotion。只負責 argparse、read-only PG query、metrics→render 編排與
+    報告輸出；統計公式、渲染、smoke fixture 分別在 sibling modules。
 """
 
 from __future__ import annotations
@@ -105,11 +107,11 @@ def build_report_markdown(rows: list[dict], window_days: int, cohort: Sequence[s
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="W2 A4-C BTC→Alt Lead-Lag — D+12 paper edge report generator"
+        description="W2 A4-C BTC→Alt Lead-Lag — Stage 0R diagnostic report generator"
     )
     parser.add_argument(
         "--window-days", type=int, default=DEFAULT_WINDOW_DAYS,
-        help=f"paper engine edge collection window (default {DEFAULT_WINDOW_DAYS})",
+        help=f"diagnostic/replay evidence window (default {DEFAULT_WINDOW_DAYS})",
     )
     parser.add_argument(
         "--cohort", type=str, default=None,

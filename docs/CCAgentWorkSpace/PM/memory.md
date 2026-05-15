@@ -2168,3 +2168,11 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Promoted TODO to v20 / 2026-05-14 and added a TODO Sync Checkpoint documenting pre-sync Mac/origin/Linux head `7c9fd444`, unrelated dirty Rust WIP preservation, and no runtime action.
 - Marked `P2-V19-CYCLE` as started via lightweight sync; full archive compaction remains pending before/at the 800-line hygiene threshold.
 - Boundary: docs/TODO governance only; no rebuild, restart, DB migration, live auth mutation, strategy/risk parameter change, or deploy.
+
+## 2026-05-15 Canary Rebase Step 3/4
+
+- PM freeze + AMD-2026-05-15-01 landed first (`8889d9b8`): W3 Stage 1 paper cohort frozen, A4-C paper-edge promotion frozen, `OPENCLAW_ENABLE_PAPER=1` blocked for promotion.
+- Closed W-AUDIT-3b runtime smoke on `trade-core`: RouterLeaseGuard Drop Rust test PASS, ExecutorAgent fail-closed pytest PASS (`3 passed, 44 deselected`), `[55] chains_with_lease=89`.
+- Rebased A4-C spec/tooling to Stage 0R diagnostics: report output is `eligible_for_demo_canary=true/false`; legacy `promote_n2` compatibility field remains false and non-promotional. Smoke test PASS.
+- Step 4 fill-lineage gate is still blocked for demo canary launch: `[55]` shows real-fill evidence exists (`chains_with_real_fill_report=15`, no quality-bad rows) but status is `WARN_REAL_FILL_PROPAGATION_PARTIAL` (15/89 below 50% threshold).
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--canary_rebase_step3_step4.md`.

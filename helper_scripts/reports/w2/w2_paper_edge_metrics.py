@@ -1,10 +1,12 @@
-"""W2 paper edge report 計算層。
+"""W2 legacy paper edge / Stage 0R diagnostic report 計算層。
 
 MODULE_NOTE:
     本模組承接 W2 A4-C BTC→Alt Lead-Lag spec v1.2 §7.1 六項 mandatory
-    metric 的純計算邏輯：per-symbol / pooled edge、DSR K=95、PSR(0)
+    metric 的純計算邏輯，並按 AMD-2026-05-15-01 將輸出降級為
+    Stage 0R diagnostic eligibility；不得輸出 Stage 1 PASS 或 promotion。
+    覆蓋 per-symbol / pooled edge、DSR K=95、PSR(0)
     Bailey-López de Prado skew/kurt 公式、alpha decay R²、block-bootstrap CI、
-    counterfactual delta 與 spec §8.1 三檔 step gate。保持無 DB、無檔案 I/O。
+    counterfactual delta 與 spec §8.1 三檔 diagnostic band。保持無 DB、無檔案 I/O。
 """
 
 from __future__ import annotations
@@ -197,6 +199,7 @@ def step_gate_verdict(
         return {
             "label": "no_signal",
             "reason": "insufficient sample / undefined t-stat",
+            "eligible_for_demo_canary": False,
             "promote_n2": False,
         }
     underpowered = (sample_n < PER_SYMBOL_N_MIN or t_stat <= PER_SYMBOL_T_MIN)
@@ -207,25 +210,29 @@ def step_gate_verdict(
                 "reason": (
                     f"avg_net ≥ +15 bps but underpowered "
                     f"(n={sample_n}<{PER_SYMBOL_N_MIN} or t={t_stat:.3f}≤{PER_SYMBOL_T_MIN})"
-                    " → cannot promote without n + t gate"
+                    " → not eligible for demo canary without n + t gate"
                 ),
+                "eligible_for_demo_canary": False,
                 "promote_n2": False,
             }
         return {
             "label": "plus15",
             "reason": (
                 f"avg_net = {avg_net_bps:.2f} bps ≥ +15 + n={sample_n}≥100 "
-                f"+ t={t_stat:.3f}>2.0 → promote N+2 demo IMPL"
+                f"+ t={t_stat:.3f}>2.0 → eligible_for_demo_canary=true "
+                "(Stage 0R only; not Stage 1 PASS)"
             ),
-            "promote_n2": True,
+            "eligible_for_demo_canary": True,
+            "promote_n2": False,
         }
     if avg_net_bps >= GATE_PLUS_5_BPS:
         return {
             "label": "plus5_15",
             "reason": (
-                f"avg_net = {avg_net_bps:.2f} bps ∈ [+5, +15) → extend paper "
-                f"window 14d 重評 (n={sample_n}, t={t_stat:.3f})"
+                f"avg_net = {avg_net_bps:.2f} bps ∈ [+5, +15) → "
+                f"eligible_for_demo_canary=false_or_defer (n={sample_n}, t={t_stat:.3f})"
             ),
+            "eligible_for_demo_canary": False,
             "promote_n2": False,
         }
     return {
@@ -234,6 +241,7 @@ def step_gate_verdict(
             f"avg_net = {avg_net_bps:.2f} bps < +5 → revise spec 或 archive"
             f" (n={sample_n}, t={t_stat:.3f})"
         ),
+        "eligible_for_demo_canary": False,
         "promote_n2": False,
     }
 
