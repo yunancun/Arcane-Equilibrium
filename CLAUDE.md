@@ -8,7 +8,7 @@
 長期進化型 Agentic Trading Governance System。正式項目名為 **玄衡 · Arcane Equilibrium**；OpenClaw 保留為控制平面 / Gateway / Console / 通信服務族名稱；**Bybit 為唯一交易所**（專攻）。
 
 **詞彙權威 → `srv/CONTEXT.md`** （domain glossary，所有新文檔/ADR/refactor/review 必對齊；2026-05-06 引入）。
-**架構決策記錄 → `srv/docs/adr/0001..0014-*.md`** （14 條 ADR，硬要可逆 / surprising / real-trade-off 三條件；2026-05-06 引入）。
+**架構決策記錄 → `srv/docs/adr/0001..0022-*.md`** （22 條 ADR，硬要可逆 / surprising / real-trade-off 三條件；2026-05-06 引入，截至 2026-05-16）。
 
 > Agent 自主完成交易決策與執行，對成本與收益有清晰感知，能感知自身狀態，能持續學習，在嚴格風控框架下逐步贏得更高自主權。
 
@@ -175,7 +175,7 @@ max_retries             = 0
 [H1-H5 AI 治理層]       thought_gate / budget / model_router / governor / cost_logging
 [I Decision Lease]       (*) GovernanceHub.acquire_lease() / release_lease()
 [Control API v1]         FastAPI 209 /api/v1 + non-api GUI 路由 + `/api/v1/openclaw/*` planned aggregation
-[GUI + Learning]         OpenClaw Control Console（唯一 GUI；13 tabs）+ Learning Cockpit + Paper Trading Dashboard
+[GUI + Learning]         OpenClaw Control Console（唯一 GUI；16 tabs）+ Learning Cockpit + Paper Trading Dashboard
 [OpenClaw Gateway]       外圍通信 / mobile / supervisor / proposal relay；非交易 hot path，非第二 GUI
 [Rust openclaw_engine]   paper / demo / live 三模式唯一引擎（1C-3-F 後）
                          tick pipeline + IntentProcessor + paper_state + governance + stop_manager
@@ -186,10 +186,11 @@ max_retries             = 0
 [止損管理器]             StopManager: Hard/Trailing/Time Stop + ATR 動態倉位
 ```
 
-**OpenClaw Control Console 13-tab dictionary（2026-05-06 current）**：
+**OpenClaw Control Console 16-tab dictionary（2026-05-16 updated）**：
 `system`, `replay`, `paper`, `demo`, `live`, `strategy`, `risk`,
-`governance`, `ai`, `learning`, `agents`, `monitoring`, `settings`。GUI spec
-must reference the current 13-tab console dictionary.
+`governance`, `ai`, `learning`, `agents`, `monitoring`, `settings`,
+`phase4`, `development`, `edge-gates`。GUI spec
+must reference the current 16-tab console dictionary.
 
 **(*) Decision Lease 路徑 A + W-C evidence mode（2026-05-09 current）**：
 Sprint 3 Track H IMPL `dbcf845b` + Track I deploy `0ad79f67` 已落地；

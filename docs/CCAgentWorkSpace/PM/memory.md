@@ -2530,3 +2530,26 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   P0-EDGE-1+W-AUDIT-8b Stage 0R+W-AUDIT-8a C1 BB/MIT sign-off 三閘前不啟 IMPL、
   IMPL 走強制工作鏈不走 P0 快速通道。
 - Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--close_maker_first_pm_verdict.md
+
+## 12-Agent Full System Audit Sign-off (2026-05-16)
+
+- PA consolidated 12 parallel audit agents (FA/AI-E/QC/E5/A3/E3/MIT/R4/BB/CC/E4/TW) into
+  13 WPs across 4 waves. PM APPROVED-CONDITIONAL.
+- 5 PM reprioritizations applied:
+  1. WP-02 Donchian P0->P1: runtime already calls `donchian_prior()` since `75741eff`; the base
+     `donchian()` retaining current-bar is hygiene, not live P0.
+  2. WP-08 MIT-P0-2 "6/12 cron not installed" conflicts with TODO P0-V3-CRON-NOT-INSTALLED DONE;
+     PA must reconcile before dispatch.
+  3. AI-E-F-01 daily_usd_max $100->$2 requires operator decision, not auto-fix.
+  4. R4 "CRITICAL" doc drift (14 ADR -> 22, 13 tab -> 16) downgraded to P2.
+  5. WP-06 recommended split into WP-06a/b/c (Rust/Python/orjson) for parallel dispatch.
+- True P0 items: WP-01 GUI Safety (A3-BLOCKER-1/2 emergency stop one-click) + P0-EDGE-1 (structural).
+- Effort estimate: 12-15 sessions (optimistic 10 / pessimistic 18).
+- Conflict guard: Wave 2 WP-03 (grid_helpers.rs) must land BEFORE EDGE-P2-3 Phase 1b IMPL;
+  WP-06 performance must wait until Phase 1b stabilizes.
+- Key lesson: 4 of 14 original P0/CRITICAL findings were false elevations (by-design pre-live state
+  or deprecated strategies). PA's verification layer correctly caught all 4. Reinforces the principle
+  that audit agents should distinguish "not yet implemented" from "broken/missing".
+- TODO updated to v33 with new section 11.6 (13 WPs + wave assignments).
+- Approved report: `srv/2026-05-16--full-system-audit-fix-plan.md` (PM sign-off appended).
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--12-agent-audit-pm-signoff.md

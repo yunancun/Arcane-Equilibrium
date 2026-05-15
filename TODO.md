@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v32
-Date: 2026-05-15
-Status: PM/PA/FA 5-day status audit sync plus A4-C final RCA closure, W-AUDIT-8a C1 proof start, and W-AUDIT-8b review/design v0.2. AMD-2026-05-15-01 canary rebase remains active: paper promotion evidence is frozen, A4-C D+12 paper-edge promotion is frozen, and Stage 1 demo micro-canary is blocked until a future green Stage 0R replay preflight. Step 5b Stage 0R remains GATE-RED (`eligible_for_demo_canary=false`) even after diagnostic producer restoration (`[57]` PASS; expected_dir distribution improved but edge/DSR still insufficient). `P1-A4C-RCA-1` is **CLOSED 2026-05-15** as no revive hypothesis found after QC/MIT review: the read-only 7d RCA fetched 6,713 rows and stayed red (`avg_net_bps=-1.0013`, `PSR(0)=0.1904`, `DSR=0`, R²(120)=0), and the best finite loosened X=5/Y=0.20 probe was only `+1.4739 bps`, below revive/promotion bands. `P1-A4C-REV-1` is not opened; A4-C remains diagnostic-only. A read-only OI-confirmed 5m feasibility probe also stayed red: runtime-style 5m breakout rows are sparse (`23` TA triple rows, `9` OI-confirmed rows) and OI-confirmed gross 15m was `-33.6345 bps`, so the packet remains non-promotional. `P1-HEALTHCHECK-55-INVARIANT` source-cleared `[55]`; `P1-WA4B-INSERT-1` restored 646 active feature baselines; `P1-INTENT-FREEZE-27` is **CLOSED 2026-05-15** after post-grace `[27]` PASS (`demo stale=3.4m, 30min_n=4`; `live_demo` inactive in 30m with verdicts/DCS=0). `[66]` and `[67]` also PASSed. W-AUDIT-8a Phase C0 is **SOURCE/DOC CLOSED 2026-05-15**: production topic builders are guarded against `liquidation.*`, `price-limit.*`, `adl-notice.*`, and `allLiquidation*`; C1 remains blocked until BB standalone proof validates `allLiquidation.{symbol}` on an isolated connection. A 60s smoke returned `SMOKE_PASS_NOT_C1_PROOF`, and the 24h isolated proof is running on `trade-core` as PID `4100789` since `2026-05-15T19:53:09Z` with log `/tmp/openclaw/audit/liquidation_topic_probe/nohup_20260515T195309Z.log`. `W-AUDIT-8b` Funding Skew Directional is **CONDITIONAL APPROVE for Stage 0R replay design only** after QC/MIT/BB review; spec is now v0.2 with 30m primary horizon, branch-separated crowding hypotheses, `K_total >= K_prior+4050`, `DSR>=0.95`, PBO fail-closed, raw-panel as-of joins, funding attribution `excluded`, and Bybit funding-interval/source-mode requirements. The next 8b task is a read-only Stage 0R query/report packet, not a tradeable strategy. `V079` is applied on `trade-core` and `learning.strategy_trial_ledger` contains 16,212 rows. These reports do not authorize replay eligibility, config changes, paper/demo launch, production topic revival, or canary promotion. Runtime rebuild code line remains `7b33ab2e`; signed live authorization is absent and true-live remains blocked.
+Version: v33
+Date: 2026-05-16
+Status: v33 adds 12-agent full system audit consolidated fix plan (13 WPs in 4 waves). PM APPROVED-CONDITIONAL with 5 reprioritizations. Prior v32: PM/PA/FA 5-day status audit sync plus A4-C final RCA closure, W-AUDIT-8a C1 proof start, and W-AUDIT-8b review/design v0.2. AMD-2026-05-15-01 canary rebase remains active: paper promotion evidence is frozen, A4-C D+12 paper-edge promotion is frozen, and Stage 1 demo micro-canary is blocked until a future green Stage 0R replay preflight. Step 5b Stage 0R remains GATE-RED (`eligible_for_demo_canary=false`) even after diagnostic producer restoration (`[57]` PASS; expected_dir distribution improved but edge/DSR still insufficient). `P1-A4C-RCA-1` is **CLOSED 2026-05-15** as no revive hypothesis found after QC/MIT review: the read-only 7d RCA fetched 6,713 rows and stayed red (`avg_net_bps=-1.0013`, `PSR(0)=0.1904`, `DSR=0`, R²(120)=0), and the best finite loosened X=5/Y=0.20 probe was only `+1.4739 bps`, below revive/promotion bands. `P1-A4C-REV-1` is not opened; A4-C remains diagnostic-only. A read-only OI-confirmed 5m feasibility probe also stayed red: runtime-style 5m breakout rows are sparse (`23` TA triple rows, `9` OI-confirmed rows) and OI-confirmed gross 15m was `-33.6345 bps`, so the packet remains non-promotional. `P1-HEALTHCHECK-55-INVARIANT` source-cleared `[55]`; `P1-WA4B-INSERT-1` restored 646 active feature baselines; `P1-INTENT-FREEZE-27` is **CLOSED 2026-05-15** after post-grace `[27]` PASS (`demo stale=3.4m, 30min_n=4`; `live_demo` inactive in 30m with verdicts/DCS=0). `[66]` and `[67]` also PASSed. W-AUDIT-8a Phase C0 is **SOURCE/DOC CLOSED 2026-05-15**: production topic builders are guarded against `liquidation.*`, `price-limit.*`, `adl-notice.*`, and `allLiquidation*`; C1 remains blocked until BB standalone proof validates `allLiquidation.{symbol}` on an isolated connection. A 60s smoke returned `SMOKE_PASS_NOT_C1_PROOF`, and the 24h isolated proof is running on `trade-core` as PID `4100789` since `2026-05-15T19:53:09Z` with log `/tmp/openclaw/audit/liquidation_topic_probe/nohup_20260515T195309Z.log`. `W-AUDIT-8b` Funding Skew Directional is **CONDITIONAL APPROVE for Stage 0R replay design only** after QC/MIT/BB review; spec is now v0.2 with 30m primary horizon, branch-separated crowding hypotheses, `K_total >= K_prior+4050`, `DSR>=0.95`, PBO fail-closed, raw-panel as-of joins, funding attribution `excluded`, and Bybit funding-interval/source-mode requirements. The next 8b task is a read-only Stage 0R query/report packet, not a tradeable strategy. `V079` is applied on `trade-core` and `learning.strategy_trial_ledger` contains 16,212 rows. These reports do not authorize replay eligibility, config changes, paper/demo launch, production topic revival, or canary promotion. Runtime rebuild code line remains `7b33ab2e`; signed live authorization is absent and true-live remains blocked.
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -454,6 +454,43 @@ active work starts at §10 / §11.2 / §11.3.
 - 信 config，不信 memory（per `math-model-audit` S1）
 
 **Source**：`srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-11--p1_micro_profit_amplification_math_analysis.md`（待 QC commit）
+
+---
+
+## §11.6 12-Agent Full System Audit WPs (2026-05-16)
+
+**Source**: `srv/2026-05-16--full-system-audit-fix-plan.md` (PA consolidated + PM sign-off)
+**PM Sign-off**: APPROVED-CONDITIONAL 2026-05-16
+**Status Legend**: PENDING / ACTIVE / DONE / DEFERRED
+
+**PM reprioritization vs PA original**:
+- WP-02 P0 -> P1 (runtime already uses `donchian_prior()` since `75741eff`)
+- WP-08 MIT-P0-2 cron claim needs reconciliation vs P0-V3-CRON-NOT-INSTALLED DONE
+- AI-E-F-01 budget $100->$2 requires operator decision, not auto-fix
+- R4 "CRITICAL" doc drift downgraded to P2
+
+| WP | Title | Priority | Wave | Owner | Status | Effort |
+|---|---|---|---|---|---|---|
+| WP-01 | GUI Safety Gates (A3 BLOCKERs) | P0-BLOCKER | 1 | E1a -> A3+E2 review | PENDING | 1 session |
+| WP-02 | Donchian callers audit + deprecate base fn (rescoped from P0) | P1 | 1 | E1 -> QC+E2+E4 | PENDING | 0.5 session |
+| WP-03 | OU Sigma Residual Fix | P1 | 2 | E1 -> QC+E2 | PENDING | 0.5 session |
+| WP-04 | AI Observability + Budget | P1 | 2 | E1-py+E1-rs -> AI-E+E2 | PENDING | 1 session |
+| WP-05 | Security Hardening (bind 0.0.0.0 + error leak) | P1 | 1 | E1 -> E3+E2 | PENDING | 0.5 session |
+| WP-06 | Performance Hot Path (Rust clone + Python deepcopy) | P1 | 3 | E1-rs+E1-py -> E5+E2 | PENDING | 1-2 sessions |
+| WP-07 | Dead Code + Schema Cleanup | P2 | 2 | E1 -> FA+E2 | PENDING | 0.5 session |
+| WP-08 | ML Pipeline Maturity (walk-forward purge + training SQL) | P1 | 3 | MIT+E1 -> MIT+E2 | PENDING | 2 sessions |
+| WP-09 | Documentation + Index Sync | P2 | 1 | TW+R4 -> PM | PENDING | 0.5 session |
+| WP-10 | Bybit Integration (retCode enum + mainnet URL) | P1 | 2 | E1 -> BB+E2 | PENDING | 0.5 session |
+| WP-11 | Test Infrastructure (phased) | P2 | 4 | E4+E1 -> E2 | PENDING | 2-3 sessions |
+| WP-12 | ONNX Model Manager (stub) | P2 | 4 | E1-rs -> E2+FA | DEFERRED | 1 session |
+| WP-13 | Reconciler Stale cmd_tx | P1 | 3 | E1-rs -> E2+E4 | PENDING | 1 session |
+
+**Wave 1 parallel dispatch**: WP-01 + WP-02 + WP-05 + WP-09 (zero file overlap)
+**Wave 2 parallel dispatch**: WP-03 + WP-04 + WP-10 + WP-07 (independent)
+**Wave 3 sequential/focused**: WP-08 (Linux) + WP-06 (after stability) + WP-13 (focused)
+**Wave 4 background**: WP-11 (phased) + WP-12 (deferred)
+
+**Conflict guard**: Wave 2 WP-03 touches `grid_helpers.rs` which is in the EDGE-P2-3 Phase 1b orbit. Land WP-03 BEFORE Phase 1b IMPL to avoid merge conflict. WP-06 performance must wait until Phase 1b stabilizes.
 
 ---
 

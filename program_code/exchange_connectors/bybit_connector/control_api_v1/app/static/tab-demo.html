@@ -1093,24 +1093,31 @@ async function closeDemoPosition(symbol, ownerStrategy, frozenReason) {
   const isDust = (frozenReason === 'dust_below_min_notional') ||
                  (ownerStrategy === 'orphan_frozen') ||
                  (ownerStrategy === 'DUST_FROZEN');
+  // A3-MAJOR-5 fix：用 openConfirmModal 取代 native confirm()
   if (isDust) {
-    const warnMsg = '⚠ 此倉位低於交易所最小值，引擎已自動派發平倉但交易所會拒單。' +
-                    '唯一清除路徑：在 Bybit Demo 網頁 GUI 手動平倉。是否仍要嘗試？\n\n' +
-                    'This position is below the exchange minimum. The engine ' +
-                    'has auto-dispatched a close but Bybit will reject it. ' +
-                    'The only real clear path is to close it manually on the ' +
-                    'Bybit Demo GUI. Try anyway?';
-    if (!confirm(warnMsg)) return;
+    const ok = await openConfirmModal({
+      title: '⚠ 清塵倉位 / Dust Position',
+      body: '此倉位低於交易所最小值，引擎已自動派發平倉但交易所會拒單。\n唯一清除路徑：在 Bybit Demo 網頁 GUI 手動平倉。\n是否仍要嘗試？',
+      confirmLabel: '嘗試平倉',
+      confirmClass: 'oc-btn-warn'
+    }).catch(function() { return false; });
+    if (!ok) return;
     const d = await ocPost('/api/v1/strategy/demo/positions/' + encodeURIComponent(symbol) + '/close', {});
     if (d && d.data) {
-      ocToast('⚠ ' + symbol + ' 清塵指令已發送，交易所可能拒單 / dust-clear dispatched, exchange may reject', 'warn');
+      ocToast('⚠ ' + symbol + ' 清塵指令已發送，交易所可能拒單', 'warn');
       setTimeout(loadAll, 1500);
     } else {
       ocToast(symbol + ' 清塵失敗，請在 Bybit GUI 手動清', 'error');
     }
     return;
   }
-  if (!confirm('确认平仓 ' + symbol + '？\nConfirm close Demo position: ' + symbol + '?')) return;
+  const ok = await openConfirmModal({
+    title: '确认平仓 Demo 倉位',
+    body: '确认平仓 ' + symbol + '？',
+    confirmLabel: '确认平仓',
+    confirmClass: 'oc-btn-danger'
+  }).catch(function() { return false; });
+  if (!ok) return;
   const d = await ocPost('/api/v1/strategy/demo/positions/' + encodeURIComponent(symbol) + '/close', {});
   if (d && d.data) {
     ocToast('✓ ' + symbol + ' 平仓指令已发送', 'success');

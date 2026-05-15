@@ -88,12 +88,12 @@
   <div id="explain-learning"></div>
 
   <div class="oc-metrics" id="learn-overview">
-    <div class="oc-metric"><div class="oc-metric-label">Observations</div><div class="oc-metric-val" id="l-obs">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Lessons</div><div class="oc-metric-val" id="l-lessons">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Hypotheses</div><div class="oc-metric-val" id="l-hyp">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Experiments (Active)</div><div class="oc-metric-val" id="l-exp">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Review Queue</div><div class="oc-metric-val" id="l-queue">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Net PnL Score</div><div class="oc-metric-val" id="l-score">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">观察记录 / Observations</div><div class="oc-metric-val" id="l-obs">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">教训 / Lessons</div><div class="oc-metric-val" id="l-lessons">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">假设 / Hypotheses</div><div class="oc-metric-val" id="l-hyp">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">活跃实验 / Experiments</div><div class="oc-metric-val" id="l-exp">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">待审核 / Review Queue</div><div class="oc-metric-val" id="l-queue">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">净 PnL 评分</div><div class="oc-metric-val" id="l-score">--</div></div>
   </div>
 </div>
 
@@ -112,7 +112,7 @@
   <div id="explain-review"></div>
   <div class="oc-table-wrap">
     <table class="oc-table">
-      <thead><tr><th>ID</th><th>Type</th><th>Summary</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
+      <thead><tr><th>ID</th><th>类型 / Type</th><th>摘要 / Summary</th><th>优先级</th><th>创建时间</th><th>操作</th></tr></thead>
       <tbody id="review-tbody"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
     </table>
   </div>
@@ -139,9 +139,9 @@
   <div class="oc-collapse-body">
     <div id="explain-autoscan"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-observations')">Scan Observations</button>
-      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-lessons')">Scan Lessons</button>
-      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-hypotheses')">Scan Hypotheses</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-observations')">扫描观察记录</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-lessons')">扫描教训</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-hypotheses')">扫描假设</button>
     </div>
     <div id="scan-result" style="margin-top:10px"></div>
   </div>
@@ -201,26 +201,26 @@ $('explain-autoscan').innerHTML = ocExplain(
 // ─── Actions ──────────────────────────────────────────────────
 async function reviewAction(id, action) {
   const d = await ocPost('/api/v1/learning/review/' + id + '/decide', { decision: action });
-  if (d) { ocToast('Review ' + action + ' OK', 'success'); loadReviewQueue(); }
-  else ocToast('Review action failed', 'error');
+  if (d) { ocToast('审核 ' + action + ' 完成', 'success'); loadReviewQueue(); }
+  else ocToast('审核操作失败', 'error');
 }
 
 async function aiConsult(id) {
   const d = await ocPost('/api/v1/learning/review/' + id + '/decide', { decision: 'ask_ai' });
-  if (d) { ocToast('AI consultation requested', 'success'); loadReviewQueue(); }
-  else ocToast('AI consult failed', 'error');
+  if (d) { ocToast('AI 咨询已提交', 'success'); loadReviewQueue(); }
+  else ocToast('AI 咨询失败', 'error');
 }
 
 async function autoScan(type) {
   const d = await ocPost('/api/v1/learning/auto/' + type);
   if (d) {
-    ocToast('Scan completed', 'success');
+    ocToast('扫描完成', 'success');
     const count = d.data ? (d.data.count || d.data.discovered || 0) : 0;
-    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-good">Discovered ' + count + ' items</div>');
+    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-good">发现 ' + count + ' 条记录</div>');
     loadAll();
   } else {
-    ocToast('Scan failed', 'error');
-    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-bad">Scan failed</div>');
+    ocToast('扫描失败', 'error');
+    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-bad">扫描失败</div>');
   }
 }
 
@@ -271,9 +271,9 @@ async function loadReviewQueue() {
     html += '<td>' + ocChip(item.priority || 'normal', item.priority === 'high' ? 'warn' : 'neutral') + '</td>';
     html += '<td>' + ocTimeShort(item.created_at) + '</td>';
     html += '<td style="white-space:nowrap">';
-    html += '<button class="oc-btn oc-btn-success" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'approve\')">Approve</button> ';
-    html += '<button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'reject\')">Reject</button> ';
-    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="aiConsult(\'' + item.id + '\')">Ask AI</button>';
+    html += '<button class="oc-btn oc-btn-success" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'approve\')">批准</button> ';
+    html += '<button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'reject\')">驳回</button> ';
+    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="aiConsult(\'' + item.id + '\')">AI 咨询</button>';
     html += '</td>';
     html += '</tr>';
   });

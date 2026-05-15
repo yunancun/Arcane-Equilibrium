@@ -1561,10 +1561,22 @@ async function checkLiveEngineStatus() {
 // Live actions
 // ═══════════════════════════════════════════════════════════════
 async function liveStart() {
+  // A3-MAJOR-1 fix：啟動真金白銀交易必須 typed-phrase 確認
+  const ok = await openTypedConfirmModal({
+    title: '⚠ 啟動 Live 实盘交易',
+    body: '即將以真實資金啟動 Live 实盘交易。\n請確認您了解所有風險，且風控參數已正確設定。',
+    phrase: 'START LIVE',
+    confirmLabel: '確認啟動 / Start Live',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '真實資金交易，引擎將開始接收並執行交易信號',
+    rollback: '可隨時透過「停止 Live」或「緊急停止」中斷'
+  }).catch(function() { return false; });
+  if (!ok) return;
   const d = await ocPost('/api/v1/live/session/start', {});
   if (d) {
     const msg = (d.data && d.data.message) || d.message || '已啟動';
-    ocToast('⚠ ' + msg, 'warn');  // always warn — real money / 始終警示 — 真實資金
+    ocToast('⚠ ' + msg, 'warn');
     await refreshPage();
   }
 }
@@ -1584,8 +1596,19 @@ async function doLiveStop() {
 }
 
 async function doEmergencyStop() {
+  // A3-BLOCKER-1 fix：緊急停止必須 typed-phrase 確認，防止誤觸
   closeDialog('dlg-live-emergency');
-  // Emergency = stop with highest priority / 緊急 = 最高優先級停止
+  const ok = await openTypedConfirmModal({
+    title: '🚨 緊急停止 / Emergency Stop',
+    body: '緊急停止將立即：\n1. 強制取消所有掛單\n2. 強制市價平倉所有持倉\n3. 封鎖引擎 — 不接受新指令直到手動解除\n\n⚠ 高滑點風險。此操作無法撤銷。',
+    phrase: 'EMERGENCY STOP',
+    confirmLabel: '🚨 確認緊急停止',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '所有倉位立即市價平倉，引擎封鎖',
+    rollback: '需手動解除引擎封鎖後才能重新啟動'
+  }).catch(function() { return false; });
+  if (!ok) return;
   const d = await ocPost('/api/v1/live/session/stop', {});
   if (d) {
     ocToast('🚨 緊急停止已執行', 'error');
@@ -1596,8 +1619,19 @@ async function doEmergencyStop() {
 }
 
 async function doLiveCloseAll() {
-  // Close all live positions without stopping session / 平掉所有倉位但不停止 session
+  // A3-BLOCKER-2 fix：關閉所有倉位必須 typed-phrase 確認
   closeDialog('dlg-live-close-all');
+  const ok = await openTypedConfirmModal({
+    title: '❌ 關閉所有 Live 实盘倉位',
+    body: '此操作將通過 Bybit API 市價平掉所有 Live 实盘持倉並取消掛單。\nSession 不會停止 — 引擎繼續運行，策略可繼續開新倉。\n\n⚠ 市價成交，存在滑點風險。真實資金。',
+    phrase: 'CLOSE ALL',
+    confirmLabel: '確認關閉所有倉位',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '所有 Live 持倉市價平倉，掛單全部取消',
+    rollback: '策略可在 session 內重新開倉'
+  }).catch(function() { return false; });
+  if (!ok) return;
   const d = await ocPost('/api/v1/live/close-all-positions', {});
   if (d) {
     const msg = (d.data && d.data.message) || d.message || '已平倉';

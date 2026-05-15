@@ -1,7 +1,30 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-15（Claude/Codex same-page sync）
+> 最後更新：2026-05-16（12-agent consolidated audit + CLAUDE.md doc fix）
+
+### 12-agent consolidated audit fix plan + CLAUDE.md doc drift fix — 2026-05-16
+
+**Scope**: PA 完成 12-agent consolidated audit finding 驗證與修復優先排序；
+TW 執行 WP-09 doc drift 修復（R4-CRITICAL-1/2 + README 索引補缺 + CHANGELOG 補摘要）。
+
+**主要 land**:
+- PA 報告 `2026-05-16--12-agent-consolidated-fix-plan.md`：驗證全部 12 agent
+  audit finding（FA/AI-E/QC/E5/A3/E3/MIT/R4/BB/CC），確認 P0 BLOCKER 3 項
+  （GUI safety gate）、P0 2 項（Donchian look-ahead + ONNX stub）、P1 10 項
+  （OU sigma / AI observability / security / performance / BB retCode /
+  walk-forward / fill lineage / reconciler stale cmd_tx）。產出 11 個 WP
+  工作包排序。
+- R4-CRITICAL-1 修復：CLAUDE.md §一 ADR 數量 14 → 22（實際 `docs/adr/` 22 檔）。
+- R4-CRITICAL-2 修復：CLAUDE.md §五 tab 數量 13 → 16（實際 `static/tab-*.html`
+  16 檔），tab dictionary 補入 `phase4`, `development`, `edge-gates` 三個缺漏。
+- README.md 索引補入 2026-05-16 section（PA/Operator/E4 3 檔）+ 2026-05-11
+  section（PA 13 檔缺漏）。
+- docs/README.md adr/ 目錄描述 ADR range 0001..0019 → 0001..0022。
+- CLAUDE_CHANGELOG.md 補本條目。
+
+**Verification**: 文檔修復 only。無 runtime / config / DB / auth / rebuild /
+restart / strategy / risk 變更。
 
 ### P0-MICRO-PROFIT alpha prework — 2026-05-15
 
