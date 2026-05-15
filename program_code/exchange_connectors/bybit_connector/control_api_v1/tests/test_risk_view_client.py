@@ -184,6 +184,14 @@ def test_unhalt_session_calls_resume_paper(client, fake_ipc):
     assert "get_risk_runtime_status" in methods
 
 
+def test_unhalt_session_sends_engine_param(client, fake_ipc):
+    fake_ipc.responses["resume_paper"] = {"message": "live resumed"}
+    out = _run(client.unhalt_session("live"))
+    assert out == {"message": "live resumed"}
+    resume_calls = [c for c in fake_ipc.calls if c[0] == "resume_paper"]
+    assert resume_calls == [("resume_paper", {"engine": "live"})]
+
+
 def test_unhalt_session_no_ipc():
     c = RiskViewClient(None)
     assert _run(c.unhalt_session()) == {}
