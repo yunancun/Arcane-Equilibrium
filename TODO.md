@@ -369,7 +369,7 @@ active work starts at §10 / §11.2 / §11.3.
 | `P1-EDGE-P2-3-PH1B-AMD-REVIEW` | ✅ DONE | AMD-2026-05-15-02 4-agent adversarial review（QC + FA + BB + MIT 並行）| 4/4 APPROVED-CONDITIONAL 2026-05-15；consolidated report identifies 17 must-fix + 14 should-fix；next = `P1-EDGE-P2-3-PH1B-AMD-V02-PATCH` |
 | `P1-EDGE-P2-3-PH1B-AMD-V02-PATCH` | 3 | AMD v0.2 + spec v1.1 patch — 整合 4-agent 17 must-fix + 14 should-fix consolidated | 包含：§1 framing「execution-quality」/ §3+§11 sample-size + Wilson-CI gating / §4+spec §4.4 hybrid column+JSONB schema / §5 multiple testing FDR / §5.4 dynamic backoff / §6 phys_lock_gate4_giveback timeout 30→15s + buffer 2→1 / §7 W-C Caveat 2 explicit / §8 add prereq 5+6 / §10 V### backward-compat clarify / spec §6.2 enum reuse / new healthcheck [62] Wilson-CI / [63] NULL ladder / [64] rate-limit pause |
 | `P0-EDGE-P2-3-PH1B-REJECT-COOLDOWN-SPLIT` | 1 | `reject_cooldown_until_ms` 拆分 entry/close（修現存 bug：當前 entry reject 凍住同 symbol close path silent degradation）| BB-MF-3 識別；PA verdict 提及但未升級嚴重度；BB 4-agent review 升 P0；pre-Phase 2a 必 land；對應 E1-D worktree |
-| `P1-FILLS-MAKER-CLOSE-AUDIT-MIGRATION` | 3 | V094 migration spec：hybrid schema (`close_maker_attempt:bool` + `close_maker_fallback_reason:text` 為 new column + 兩 price 走 JSONB)；Linux PG dry-run mandatory；NOT VALID enum CHECK；partial index Guard A/B/C | F-FA-1 + MIT-MF-1 + MIT-SF-2；Phase 1b IMPL 前必出；mirror V083 NOT VALID precedent |
+| `P1-FILLS-MAKER-CLOSE-AUDIT-MIGRATION` | ✅ DONE | V094 hybrid schema migration spec finalize (commit `9b1117a0` + PA verdict `14a561ec`) — `srv/docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md` 1176 LOC / 15 sections | F-FA-1 + MIT-MF-1 + MIT-SF-2 全 RESOLVED；Wave 2a Track A2 closure 2026-05-15；含 (a) V094 SQL design + Guard A/B/C + enum allowlist 10 values（補 2: rate_limit_backoff_per_symbol + fallback_to_taker_mandatory）+ (b) trading_writer.rs upgrade spec + TradingMsg::Fill enum 21→24 fields + 13 caller sites enumeration + (c) Linux PG empirical schema verify + dry-run × 2 round protocol + sqlx checksum repair SOP + healthcheck [62][63][64][65] integration spec + Backward-compat append-only + Rollback paths；3 critical empirical findings（trading.fills.details JSONB 已存在 V003 line 284 / 24h 98 fills 0% details rate / Linux runtime applied max V90 not V93 — wording drift caveat）；mirror V083 NOT VALID precedent |
 | `P1-EDGE-P2-3-PH1B-PORTFOLIO-EXPOSURE` | 4 | 確認 portfolio_var/correlation gate 用 request_qty 而非 filled_qty 計 effective exposure | F-FA-2（FA verdict）；§二 #16 CONDITIONAL；Phase 1b IMPL 前 verify |
 | `P1-EDGE-P2-3-PH1B-LINEAGE-GUARD` | 4 | 新 close audit 欄位不走 spine lineage 通道的 guard tests + invariant | F-FA-3（FA verdict）；FA-MF-2 升 must-fix；W-C Caveat 2 不變式 explicit |
 | `P1-EDGE-P2-3-PH1B-ML-INVARIANT` | 4 | E3 grep guard rule：`details->>'close_maker_*'` 禁餵任何 ML training pipeline（LinUCB / scorer / quantile / MLDE / DL3）| MIT-MF-1 non-training surface invariant；E3 PR pre-merge gate |
@@ -386,14 +386,23 @@ active work starts at §10 / §11.2 / §11.3.
 - ✅ Track A4 (PA W-C Caveat 2 guard tests + V094 schema 兩段式 + writer gap) — `a5a7107c`
 - ✅ Track E1 (E1 KAMA fallback gate) — `9df44183`，Wave 1.5 E4 regression test land `34aa7086`
 - ✅ Track E3 (PA maker fill empirical baseline) — `b98706d5` fee 4.5→0.5-2.0 bps + no-fallback-to-taker gap identified
-- ✅ Wave 1.5 (本 patch chain): spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3 — IN PROGRESS
+- ✅ Wave 1.5: spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3
+
+**Wave 2 Status (2026-05-15)**：
+- ✅ Track A2 (PA V094 hybrid schema migration spec finalize) — spec `9b1117a0` + PA verdict `14a561ec` + AMD v0.3 → v0.3.1 patch `c9234ecf`
+- 🔄 Track E1 (E1 P0 reject_cooldown entry/close 拆分) — pending dispatch
+
+**Wave 3 Status (2026-05-15)**：
+- ✅ Wave 3a: BB short re-review on AMD v0.3 + spec v1.2 — `7b0a8e8c`
+- 🔄 Track 3b (4-agent short re-review on AMD v0.3.1 + spec v1.2 + V094 spec) — pending PM dispatch
+- 🔄 Track BB1 (字典手冊 6 處更新) — pending dispatch
 
 **Pre-IMPL prep — 7 個工作組可並行派**（Wave 1 done 後更新）：
 
 | Track | Owner | Task | 阻塞關係 | ETA | 狀態 |
 |---|---|---|---|---|---|
 | **Track A1** | PA | **AMD v0.2 + spec v1.1 consolidated patch**（17 must-fix + 14 should-fix） | None；最高優先 | 1-2 hour | ✅ DONE `2e7a1b2f` |
-| **Track A2** | PA | **V094 hybrid schema migration spec** — `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 為 new column + 兩 price 走 JSONB；Guard A/B/C；NOT VALID enum CHECK；Linux PG dry-run × 2 round | 等 A1 schema 段落落定 | 半天 | 🔄 Wave 2 |
+| **Track A2** | PA | **V094 hybrid schema migration spec** — `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 為 new column + 兩 price 走 JSONB；Guard A/B/C；NOT VALID enum CHECK；Linux PG dry-run × 2 round | 等 A1 schema 段落落定 | 半天 | ✅ DONE Wave 2a `9b1117a0` + PA verdict `14a561ec` + AMD v0.3.1 `c9234ecf` |
 | **Track A3** | PA | **F-FA-2 portfolio_var exposure SoT verify** — §二 #16 CONDITIONAL 解除 | None；獨立 worktree | 1-2 hour | ✅ DONE `96995b61` MAINTAIN + P1 ticket |
 | **Track A4** | PA | **F-FA-3 audit 欄位不走 spine lineage guard tests 設計** — W-C Caveat 2 invariant 保護 | None；獨立 worktree | 1-2 hour | ✅ DONE `a5a7107c` + V094 兩段式 + writer gap |
 | **Track E1** (engine) | E1 | **P0 reject_cooldown entry/close 拆分** | None；獨立修現存 bug | 1d（含 E2 + E4）| 🔄 Wave 2 |
@@ -401,12 +410,16 @@ active work starts at §10 / §11.2 / §11.3.
 | **Track E3** | PA / E1 | **Maker fill rate empirical baseline 查** | None；read-only 查詢 | 1 hour | ✅ DONE `b98706d5` |
 | **Track BB1** | BB | **字典手冊 6 處更新** | None；BB 工作 | 1-2 hour | 🔄 Wave 3 |
 
-**Dispatch order recommendation**（Wave 1.5 patch 後更新）：
+**Dispatch order recommendation**（Wave 2a patch 後更新）：
 1. ✅ **Wave 1（並行 5 worktree）**：A1（PA） + A3（PA） + A4（PA） + E2（E1, 30min） + E3（PA/E1, 1h） — DONE
-2. ✅ **Wave 1.5（本 chain）**：spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3 finding（fee revision + race fallback gap + portfolio MAINTAIN + writer gap explicit）
-3. 🔄 **Wave 2（A1 framework 定後 + Wave 1.5 patch 後）**：A2（PA V094 spec，依賴 v1.2 §4.4 schema 段定）+ E1 (E1 P0 reject_cooldown，可同 Wave 1 開始；BB-MF-3)
-4. 🔄 **Wave 3**：4-agent short re-review on AMD v0.3 + spec v1.2 + BB1（BB 字典 6 處更新）
-5. **Wave 1+1.5+2+3 done → IMPL Prereq 5+6 解 + AMD prereq 2 解（patch land）→ 等 3-gate**
+2. ✅ **Wave 1.5**：spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3 finding（fee revision + race fallback gap + portfolio MAINTAIN + writer gap explicit）
+3. ✅ **Wave 2a**：A2 PA V094 spec finalize (`9b1117a0` + `14a561ec` + AMD v0.3.1 `c9234ecf`) — F-FA-1 ✅ DONE → IMPL Prereq 5 全 RESOLVED
+4. 🔄 **Wave 2b**：E1 (E1 P0 reject_cooldown entry/close 拆分；BB-MF-3) — pending dispatch
+5. ✅ **Wave 3a**：BB short re-review on AMD v0.3 + spec v1.2 (`7b0a8e8c`) — DONE
+6. 🔄 **Wave 3b**：4-agent short re-review on AMD v0.3.1 + spec v1.2 + V094 spec — pending dispatch
+7. 🔄 **Wave 3c**：BB1（BB 字典 6 處更新）— pending dispatch
+8. 🔄 **Wave 3.5（pre-Wave 4）**：PA 補一輪 Linux V81/V91/V92/V93 backlog migration apply 檢查（per V094 spec §4.4 caveat）
+9. **Wave 1+1.5+2a+2b+3a+3b+3c+3.5 done → IMPL Prereq 5+6 解 + AMD prereq 2 解（patch land）→ 等 3-gate → IMPL kickoff Wave 4**
 
 **IMPL kickoff（3-gate 解除後）**：
 - PA finalize IMPL plan → E1 並行 5 worktree（A/B/C/D/E per PA verdict v0.2）→ E2 review → E4 regression → QA → PM sign-off
