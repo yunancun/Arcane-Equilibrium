@@ -54,7 +54,7 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-15 W3 near-completion + Sprint N+2 P2 cleared）
+## 三、真實狀態全景（2026-05-15 W3 ncyu-blocked + Sprint N+2 P2 cleared）
 
 本節只保留當前活躍狀態。歷史長敘述移到 `docs/CLAUDE_CHANGELOG.md`、
 `docs/archive/`、`docs/CCAgentWorkSpace/*/workspace/reports/` 和 `TODO.md`。
@@ -99,12 +99,11 @@
 
 | Blocker | 狀態 |
 |---|---|
-| W3 Sprint | 5/6 done：W3-3 ✅ / W3-4 ✅ / W3-5 ✅ / W3-6 🔄。Stage 1 demo micro-canary is not launchable while A4-C Stage 0R remains GATE-RED and `[55]` remains WARN。 |
+| W3 Sprint | P0 W3-1 / W3-2 remain blocked on `ncyu`（no status change in this maintenance commit）；non-P0 status: W3-3 ✅ / W3-4 ✅ / W3-5 ✅ / W3-6 🔄。Stage 1 demo micro-canary is not launchable while A4-C Stage 0R remains GATE-RED and `[55]` remains WARN。 |
 | Sprint N+2 P2 packet | ✅ 4/4 complete：DUAL-RAIL, SHADOW, F20, V083 P2 follow-up all cleared。 |
 | P0-EDGE-1 | Active；2026-05-15 `[40]` still negative / WARN。 |
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
-| `P1-WA4B-INSERT-1` | ✅ DONE 2026-05-15：feature_baselines restored (646 active rows / 19 symbols / 34 features) and `[67]` PASS；cron install remains operator choice。 |
 | Paper / Stage 0R | GATE-RED and disabled；paper promotion evidence removed by AMD-2026-05-15-01；waiting `ncyu` decision before any non-promotion diagnostic reopen。 |
 | W-AUDIT-8a / alpha candidates | Phase C/D + alternative alpha candidates remain the active path after A4-C GATE-RED。 |
 | P2 backlog | Pending：`N2-AUDIT-7c`, `N2-AUDIT-8c`, `N2-PhaseC`, `N2-PhaseD`。 |
@@ -448,7 +447,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-05-10）**：Sprint N+0 closure 完成（HEAD `b6ed4975`），Sprint N+1 D+0 pre-dispatch readiness 24 項全提前完成（HEAD `9695b59a`）。HIGH-5 12h passive watch metric 2/3 forward observation 進行中（21:30 UTC sign-off 窗口）。sign-off 後 D+0 純執行：一次 restart_all --rebuild --keep-auth 同次 deploy W7-3 + W7-1 + W2 trait skeleton；派 W7-2 (含 bb_reversion) + W7-4 + W7-5 + W6 RFC verdict 三角 sign-off + W6 V086 IMPL + W1 IMPL Rust panel_aggregator WS-first + W2 IMPL v1.2 + W3 等 W6+W7 完成 + W4 RouterLeaseGuard Drop test + W5 三 P1 IMPL 並行。Sprint N+1 dispatch v3.7：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md`。仍不是 true-live autonomy。
+**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed by commit `83afb318` after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。Stage 1 demo micro-canary remains blocked because A4-C Stage 0R is GATE-RED and `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` unless a future PM/operator waiver changes that。Sprint N+2 P2 packet is cleared。仍不是 true-live autonomy。
 
 **關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 三角 audit ✅ + MAG-084 sign-off ✅ 2026-05-11 → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 

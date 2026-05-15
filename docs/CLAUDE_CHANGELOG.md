@@ -1,7 +1,22 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-15（passive healthcheck 7108035d active-plan sync v1.2）
+> 最後更新：2026-05-15（P1-WA4B-INSERT-1 TODO/CLAUDE maintenance sync）
+
+### P1-WA4B-INSERT-1 TODO/CLAUDE Maintenance Sync — 2026-05-15
+
+**Scope**: Moved `P1-WA4B-INSERT-1` out of the active P1 table after the
+feature baseline restore was completed in commit `83afb318`.
+
+**主要 land**:
+- `TODO.md` now lists `P1-WA4B-INSERT-1` under completed W-AUDIT-4b P1 items
+  with timestamp `2026-05-15 13:13 UTC / 15:13 Europe-Madrid`.
+- `CLAUDE.md` §三/§十 sprint status now uses the 2026-05-15 W3 status and
+  explicitly preserves P0 W3-1 / W3-2 as `ncyu`-blocked.
+
+**Verification**: Docs-only maintenance. No P0 item status change, no runtime
+action, no rebuild, no restart, no DB migration, no live auth mutation, and no
+strategy/risk change.
 
 ### Passive Healthcheck 7108035d Active-Plan Sync — 2026-05-15
 
