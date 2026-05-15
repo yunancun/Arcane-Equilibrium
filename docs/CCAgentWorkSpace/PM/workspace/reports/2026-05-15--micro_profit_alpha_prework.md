@@ -24,6 +24,10 @@ Important correction: the current official Bybit topic is `allLiquidation.{symbo
 
 C1 remains blocked until a 24h isolated public WS proof passes. Short probe runs are only smoke evidence.
 
+2026-05-15 addendum: the 60s smoke passed as `SMOKE_PASS_NOT_C1_PROOF`, and
+the 24h isolated `allLiquidation.BTCUSDT` proof is running on `trade-core` as
+PID `4100789` since `2026-05-15T19:53:09Z`.
+
 ## 2. W-AUDIT-8b Funding Skew Spec
 
 Added:
@@ -43,7 +47,10 @@ Added:
 
 - `docs/execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md`
 
-Decision: archive A4-C from the active promotion path, with one bounded exception: `P1-A4C-RCA-1` may run as read-only RCA to decide whether a new preregistered hypothesis exists. It may not request demo canary budget by itself.
+Decision: archive A4-C from the active promotion path. The earlier bounded
+exception has now been exercised: `P1-A4C-RCA-1` is closed no-revive after
+QC/MIT review, so `P1-A4C-REV-1` is not opened and no same-feature Stage 0R
+rerun is authorized.
 
 Basis: Step 5b failed the spec archive rule. R²(60/120/300)=`0.0009/0.0005/0.0027`; N=60 remains far below the `0.04` minimum. Further threshold loosening would be selection pressure, not alpha repair.
 
@@ -76,4 +83,6 @@ Updated:
 
 PM SIGN-OFF: CONDITIONAL
 
-Condition: C1 remains blocked until the 24h isolated proof passes; 8b remains spec-only until QC/MIT/BB review and Stage 0R replay design.
+Condition: C1 remains blocked until the running 24h isolated proof passes and
+BB/MIT sign off; 8b remains spec-only until QC/MIT/BB review and Stage 0R
+replay design.

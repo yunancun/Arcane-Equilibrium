@@ -12,12 +12,17 @@ touching runtime, config, auth, DB, paper, demo, or live execution.
 - Added W-AUDIT-8a C1 standalone liquidation-topic proof plan and helper
   script for `allLiquidation.{symbol}`. C1 remains blocked until a 24h isolated
   BB proof passes and MIT signs the schema mapping.
+- Later addendum: 60s C1 smoke passed as `SMOKE_PASS_NOT_C1_PROOF`; 24h
+  isolated `allLiquidation.BTCUSDT` proof started on `trade-core` as PID
+  `4100789`.
 - Drafted W-AUDIT-8b Funding Skew Directional spec v0.1 as a cross-sectional
   crowding signal, explicitly not a retired `funding_arb` revival.
 - Archived A4-C BTC→Alt Lead-Lag from the active promotion path because Step
   5b failed the spec R² archive rule; the panel/producer remains diagnostic.
 - Indexed the `P1-A4C-RCA-1` read-only RCA start result: current 7d dry-run and
   finite threshold probe both remain below revive/promotion bands.
+- Final RCA addendum: QC/MIT closed `P1-A4C-RCA-1` no-revive; `P1-A4C-REV-1`
+  is not opened and A4-C remains diagnostic-only.
 - Updated TODO/CLAUDE/active-plan/Codex memory/docs indexes to reflect the new
   alpha order.
 

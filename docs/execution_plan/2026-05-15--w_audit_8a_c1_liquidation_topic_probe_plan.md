@@ -11,6 +11,19 @@ The current official Bybit V5 public topic is `allLiquidation.{symbol}` (example
 
 Source checked 2026-05-15: Bybit official V5 docs describe `allLiquidation.{symbol}` as a public stream with 500ms push frequency and response fields `T`, `s`, `S`, `v`, and `p`.
 
+## Current Run
+
+2026-05-15 update:
+
+- 60s smoke returned `SMOKE_PASS_NOT_C1_PROOF`.
+- Smoke report: `/tmp/openclaw/audit/liquidation_topic_probe/liquidation_topic_probe_20260515T195158Z.md`.
+- 24h isolated proof started on `trade-core` at `2026-05-15T19:53:09Z`.
+- PID: `4100789`.
+- Log: `/tmp/openclaw/audit/liquidation_topic_probe/nohup_20260515T195309Z.log`.
+- Expected finish if uninterrupted: `2026-05-16T19:53:09Z`.
+
+This run still does not authorize production revival until the final report is reviewed by BB and MIT.
+
 ## Probe Tool
 
 Added standalone helper:

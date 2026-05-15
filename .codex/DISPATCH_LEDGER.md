@@ -26,6 +26,24 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-05-15 21:53 CEST
+Task:
+- Finalize `P1-A4C-RCA-1` revise-or-archive verdict and start the `W-AUDIT-8a C1` standalone proof path.
+
+Chain:
+- PM -> QC(default) + MIT(default) -> PM
+- PM -> BB proof path (isolated public WS run; BB sign-off still pending)
+
+Ownership:
+- QC(default): alpha/statistical verdict on A4-C RCA and threshold probe
+- MIT(default): data/methodology verdict on A4-C RCA and acceptable future reopen triggers
+- PM: final queue decision, TODO/active-plan/memory sync, and C1 proof start on `trade-core`
+
+Result:
+- `P1-A4C-RCA-1` closed no-revive; `P1-A4C-REV-1` not opened.
+- 24h isolated `allLiquidation.BTCUSDT` proof started on `trade-core` PID `4100789`; C1 remains blocked until final report + BB/MIT sign-off.
+- Active alpha lane shifts to `W-AUDIT-8b` Funding Skew review + Stage 0R replay design while C1 runs.
+
 2026-04-28 22:20 CEST
 Task:
 - Harden Codex startup and dispatch identity rules for this repository

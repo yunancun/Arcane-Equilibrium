@@ -74,3 +74,12 @@ Inference: A4-C likely lacks a tradable lead-lag effect in the current cohort /
 feature shape. Continue `P1-A4C-RCA-1` only to finish the RCA report and decide
 whether QC/MIT see a genuinely new preregistered hypothesis. Otherwise switch
 to `W-AUDIT-8b` / `W-AUDIT-8a C1` as planned.
+
+## Final Addendum
+
+QC(default) and MIT(default) both rejected opening `P1-A4C-REV-1`.
+`P1-A4C-RCA-1` is closed as no revive hypothesis found. A4-C remains
+diagnostic-only; no same-feature Stage 0R rerun is authorized.
+
+Final report:
+`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_rca_final_and_c1_proof_start.md`.
