@@ -1,7 +1,27 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-15（PM/PA/FA 5-day audit sync）
+> 最後更新：2026-05-15（Claude/Codex same-page sync）
+
+### Claude/Codex same-page sync — 2026-05-15
+
+**Scope**: Reconciled Claude-facing active state with the latest Codex/TODO
+state without deleting historical Claude records.
+
+**主要 land**:
+- `CLAUDE.md` now points at `TODO.md` v28 and records `[27]` as post-grace
+  closed by the 2026-05-15 18:12 UTC direct PASS probe.
+- `CLAUDE.md` records W-AUDIT-8a Phase C0 as source/doc closed, with C1
+  blocked on BB standalone liquidation-topic proof.
+- `active-plan.md` advanced to v1.4 and removed the stale `[27]` hard-blocker
+  wording while preserving Stage 0R / edge / LG / ops blockers.
+- Claude/Codex operating memory is aligned on replay-first validation: first
+  decide whether replay/counterfactual replay can check the claim; run it when
+  applicable, and state explicitly when WS/live-runtime/DB evidence is required.
+
+**Verification**: docs/static sync only. No runtime rebuild/restart, DB write,
+auth renewal, paper enablement, demo canary, strategy/risk config change, or
+true-live action.
 
 ### PM/PA/FA 5-day TODO/MEMORY/README sync — 2026-05-15
 
@@ -20,6 +40,10 @@ state across `TODO.md`, `README.md`, `CLAUDE.md`, `.codex/MEMORY.md`,
   `[27] intents_counter_freeze` is now the current hard runtime blocker.
 - Added stale-row archive and PM audit report; the OI-confirmed 5m packet is
   indexed as spec-only with `eligible_for_demo_canary=false`.
+
+**Superseded later 2026-05-15**: `[27]` was subsequently source-fixed,
+rebuilt at runtime code line `7b33ab2e`, and post-grace closed by direct PASS
+probe. Active state is the Claude/Codex same-page sync section above.
 
 **Verification**: PM/PA/FA audit agreement. Direct `trade-core` read-only checks
 confirmed V079 applied through migrations max=90 and
