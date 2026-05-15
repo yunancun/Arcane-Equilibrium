@@ -166,6 +166,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--pm_pa_fa_5day_audit_todo_sync.md` | PM/PA/FA 5 日工作质量、TODO/README/MEMORY stale 核查、排序重整与三端同步结果 |
 | `CCAgentWorkSpace/Operator/2026-05-15--pm_pa_fa_5day_audit_todo_sync.md` | Operator brief：PM/PA/FA audit verdict、当前事实、重排优先级和 Linux sync blocker |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_oi_confirmed_5m_preflight.md` | `bb_breakout_oi_confirmed_5m` Stage 0R replay packet spec；spec-only，未执行 replay，`eligible_for_demo_canary=false` |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_oi_confirmed_5m_feasibility_probe.md` | `bb_breakout_oi_confirmed_5m` read-only feasibility probe；data surface healthy but runtime-style rows underpowered/negative，仍不可作 promotion evidence |
 | `archive/2026-05-15--todo_v24_stale_rows_archive.md` | TODO v24 中过时 active rows / stale claims 归档，包括 V079 pending、engine 5/8 binary、旧 05-09 demo state、旧 `[55]`/`[67]` 判断 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_healthcheck_55_invariant.md` | `[55]` fully-filled plan invariant source-clear report |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--feature_baseline_restore.md` | W-AUDIT-4b feature baseline restore report，646 active rows / 19 symbols / 34 features |
