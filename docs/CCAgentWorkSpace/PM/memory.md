@@ -2234,3 +2234,24 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--feature_baseline_restore.md`
   and `docs/CCAgentWorkSpace/Operator/2026-05-15--feature_baseline_restore.md`.
+
+## 2026-05-15 Stage 0R Step 5b Runtime Verification
+
+- Reran W2 A4-C Stage 0R preflight on `trade-core` after diagnostic producer
+  restoration via `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1`.
+- `[57] btc_lead_lag_panel_health` PASSed by direct function call:
+  age=27.2s, cohort=7/7, extreme=3.3%, book imbalance real.
+- expected_dir distribution improved from Step 5a's prior ~97% NO_SIGNAL:
+  all-source NO_SIGNAL=95.63%, diagnostic-source NO_SIGNAL=91.40% with 121
+  non-zero expected_dir rows across 201 diagnostic snapshots.
+- Stage 0R remains GATE-RED: latest report fetched 5,740 rows and returned
+  `eligible_for_demo_canary=false` with pooled `avg_net_bps=+0.3552`,
+  `t=0.2231`, `PSR(0)=0.5877`, `DSR=0.0000`, R2(120)=0.0005.
+- `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` (`24/138` real-fill
+  reports); `[58]` PASSed as Stage 0 default / no transitions.
+- Boundary: read-only verification only; no paper enablement, demo canary
+  launch, runtime config change, live auth mutation, rebuild, restart, DB
+  mutation, or strategy/risk change.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_step5b.md`
+  and `docs/CCAgentWorkSpace/Operator/2026-05-15--stage0r_preflight_step5b.md`.
