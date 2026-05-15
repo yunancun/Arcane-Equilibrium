@@ -1,8 +1,8 @@
 # Active Plan
 
-Version: v1.1
+Version: v1.2
 Date: 2026-05-15
-Source: TODO.md v22 + PM Stage 0R verification report + passive healthcheck fix `7108035d`
+Source: TODO.md v23 + PM Stage 0R verification report + passive healthcheck fix `7108035d` + full run `2026-05-15T12:25:51Z`
 
 ## Current Sprint
 
@@ -12,7 +12,7 @@ Source: TODO.md v22 + PM Stage 0R verification report + passive healthcheck fix 
 ## This Week Focus
 
 - Stage 0R verification: DONE. Verdict is GATE-RED; A4-C is not eligible for demo canary.
-- Step 4 fill-lineage WARN resolution: resolve `[55]` `WARN_REAL_FILL_PROPAGATION_PARTIAL`, or get explicit operator waiver before any Stage 1 demo micro-canary launch.
+- Step 4 fill-lineage WARN resolution: resolve `[55]` `WARN_REAL_FILL_PROPAGATION_PARTIAL` (`24/138` real-fill reports on the full run), or get explicit operator waiver before any future Stage 1 demo micro-canary launch.
 - Passive healthcheck source correction: `[4] phys_lock_runtime` and `[Xb] pipeline_triangulation` are source-fixed by `7108035d`; 2026-05-15 12:45 UTC full unfiltered runtime run PASSed both checks (`[4]` exit_features phys_lock 24h=1 / 7d=109; `[Xb]` close-fill-linked 15/15/15).
 
 ## Runtime Healthcheck
@@ -24,7 +24,7 @@ Source: TODO.md v22 + PM Stage 0R verification report + passive healthcheck fix 
 ## Blockers
 
 - 🚨 Stage 0R GATE-RED: A4-C `eligible_for_demo_canary=false` (commit `6799e7ef`). No Stage 1 demo cohort selected.
-- ⚠️ `WARN_REAL_FILL_PROPAGATION_PARTIAL`: 15/89 real-fill reports. Demo canary remains blocked unless this reaches PASS or the operator accepts a micro-canary waiver.
+- ⚠️ `WARN_REAL_FILL_PROPAGATION_PARTIAL`: 24/138 real-fill reports. Demo canary remains blocked unless this reaches PASS or the operator accepts a micro-canary waiver.
 - 🚨 `[67] feature_baseline_readiness` FAIL: `observability.feature_baselines` has no active baselines; drift_events remains gated until `P1-WA4B-INSERT-1` is implemented/applied.
 
 ## Available P1 Tasks
