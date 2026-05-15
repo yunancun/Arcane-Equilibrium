@@ -2320,3 +2320,23 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   only after deployment and `[27]` PASS outside fresh-restart grace.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_intent_freeze_27_qty_rounding_rca.md`.
+
+## 2026-05-15 Stage 0R OI-confirmed 5m Feasibility Probe
+
+- Ran read-only `trade-core` SQL probes for the
+  `bb_breakout_oi_confirmed_5m` packet. No rebuild, restart, DB write, runtime
+  config change, auth mutation, paper/demo launch, or source-code change.
+- Data surface was healthy enough for probing: `panel.oi_delta_panel` had
+  166,921 rows / 25 symbols over 7d, latest age 24.9s, and source tier
+  `bybit_v5_ws_open_interest`; `market.klines` 5m had 52,005 rows / 63 symbols.
+- Runtime-strict 5m reconstruction was underpowered: 23 TA triple rows, 16
+  fresh-OI rows, 9 OI-confirmed rows, and only 5 conservative persistence-proxy
+  rows. Pooled OI-confirmed gross 15m was `-33.6345 bps`.
+- Fixed diagnostic loosening did not rescue it: no-squeeze strict n=12
+  OI-confirmed with `-45.2030 bps`; expansion 0.03 + volume 1.2 n=23 with
+  `-18.9629 bps`.
+- Verdict: not worth full eligibility report tooling from current data;
+  `eligible_for_demo_canary=false` remains. Continue A4-C revise/archive and
+  W-AUDIT-8a Phase C/D / 8c / 8b alpha-path work instead of demo canary prep.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_oi_confirmed_5m_feasibility_probe.md`.
