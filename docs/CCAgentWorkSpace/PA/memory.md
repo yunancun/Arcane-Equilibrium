@@ -3768,3 +3768,99 @@ PG fills 直查證據：
 - MEDIUM for sibling commit race 教訓（無害撞單但暴露 SOP gap）
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--amd_v0_2_spec_v1_1_consolidated_patch.md`
+
+---
+
+## 2026-05-15 — Wave 1.5 spec v1.2 + AMD v0.3 consolidated patch (post-Wave 1 increment)
+
+**Trigger**：PM Wave 1.5 dispatch — 把 Wave 1 Track A3（portfolio_var SoT verify）+ Track E3（maker fill empirical baseline）兩個 substantive new finding consolidated 進 spec v1.2 + AMD v0.3，並開新 P1 + P2 ticket。**避免直接派 4-agent re-review v0.2 後又 push back，浪費 capacity**。
+
+**Land 4 commit chain**:
+- `3059129f` — spec v1.2（+62/-7）
+- `9f16c05d` — AMD v0.3（+25/-11）
+- `280ad959` — TODO §11.5 status + 2 new ticket（+30/-19）
+- `a8ec162b` — Wave 1.5 PA workspace report（+211）
+
+**A3 finding 收口 mapping（6 finding）**:
+1. NO `portfolio_var` 模塊；real SoT = `compute_correlated_exposure_pct + compute_exposure_pct`（`intent_processor/mod.rs:761-805`）
+2. SoT = `PaperPosition.qty (filled only)`，完全不讀 `paper_state.resting_orders`
+3. Close intent `is_reducing → return PositionCheck::allow()`（`risk_checks.rs:137`），close 自身根本不觸 portfolio gate
+4. **FA framing 方向反了**：close pending 對「後續 NEW open intent」是 OVER-estimate（不是 under-estimate）；real under-estimate scenario 是 entry pending（Phase 1B-4.2 已存在 systemic gap）
+5. `risk_config.correlation.max_pairwise_r` 是 dead config（schema 存在 + validate test，但 intent_processor 0 callers）
+6. paper / exchange path consistency = YES
+
+**A3 推薦 option A**（PM 預批）→ 已收口：
+- §二 #16 CONDITIONAL → MAINTAIN（spec + AMD §7 同步）
+- 新 P1 ticket `P1-PORTFOLIO-RESTING-EXPOSURE-1`（est. 3 person-day, 250 LOC）平行 close-maker-first IMPL
+- close-maker-first IMPL 不阻 portfolio fix；portfolio fix 不阻 close-maker-first
+
+**E3 finding 收口 mapping（6 finding + 三個意外發現）**:
+1. fill-conditional ~94% maker rate（spec §1.2 假設條件性成立）
+2. **spec §1.2「4.5 bps net per close」overstated** — 實際 0.5-3.3 bps per close attempt（最樂觀 3.31 / 中性 0.95 / 悲觀 0.66）
+3. conservative `0.5-2.0 bps net` + 14d 30%+ close-maker fill rate gate
+4. **`orders.intent_id` 100% NULL in 7d window** — writer 漏接，無法 intent→order link 算 Guardian-pass-rate（**P2 finding**）
+5. **`orders.status` 100% Working** — fire-and-forget；終態須從 `order_state_changes.to_status` 拿
+6. **無 fallback to taker 機制** — 70% PostOnly timeout 後 entry 直接放棄，不重發 Market；意味當前 maker-first 是「省錢但少 fill」trade-off
+
+**E3 對 close path 預測** → 已收口：
+- close 結構性比 entry 更難 maker fill（trend-side liquidity 差 + 45s timeout 對 exit alpha 致命）
+- spec §10.1 Phase 2a 7d → 14d (7d primary + 7d extended observation)
+- spec §11.7 NEW AC-19 14d ≥ 30%
+- spec §5.5 NEW Race E **mandatory fallback to taker invariant**（防 entry path「直接放棄」behavior inherit close path = 違 §二 #5 生存 > 利潤）
+- spec §11.7 NEW AC-18 fallback to taker rate ≥ 95% over 7d
+- spec §12.1 NEW HIGH risk row + healthcheck [62] sub-check + 3 unit test gate
+
+**Spec v1.2 主要改動**:
+- §1.2 fee saving 3.5/+0.65 bps → 0.5-2.0 bps net per close attempt + 全年估 $160-$400 → $50-$200 + E3 三個意外發現
+- §5.5 NEW Race E（規則 1-5 + IMPL gate + healthcheck sub-check + audit row enum invariant）
+- §10.1 14d Phase 2a + 拉長理由 + AC-19 引用
+- §11.7 NEW AC-18 + AC-19
+- §12.1 NEW HIGH row「fallback 直接放棄 inherit entry-side gap」
+- §15 NEW P1-PORTFOLIO-RESTING-EXPOSURE-1 + P2-ORDERS-INTENT-ID-WRITER-GAP-1 兩 row
+- §17 v1.2 row + Sign-off Status updated
+
+**AMD v0.3 主要改動**:
+- §1 Executive Decision footnote「per Wave 1 Track E3 empirical baseline」
+- §3 Phase 2a 7d → 14d + Phase 2b 啟動條件加 AC-18 + AC-19
+- §7 #16 CONDITIONAL → MAINTAIN per A3 verify finding（close path is_reducing 不觸 portfolio gate；新 P1 ticket option A）
+- §8 IMPL Prereq 5 partial-resolved（F-FA-2 ✅ + F-FA-3 ✅ + F-FA-1 留 Wave 2）
+- §11.1 NEW Wave 1 Source Audits 5 commit 引用（A1/A3/A4/E1/E3）
+
+**TODO 改動**:
+- §11.5 Wave 1 Status block (5 track ✅ + Wave 1.5 IN PROGRESS) + dispatch table 加狀態欄 + dispatch order Wave 1+1.5+2+3 + Phase 2a 14d explicit
+- §11 P1 NEW row `P1-PORTFOLIO-RESTING-EXPOSURE-1`（PA → E1，3 person-day，250 LOC，平行 Phase 1b）
+- §12 P2 NEW row `P2-ORDERS-INTENT-ID-WRITER-GAP-1`（E1，1 person-day，N+2 backlog）
+
+**Multi-session race 防範實踐**:
+- 4 commit 全分離（spec / AMD / TODO / 本 report）
+- 每個 commit 用 `git commit --only <file>` 隔絕 index race
+- 0 使用 `git add -A`
+- 全部 commit message 加 `[skip ci]`
+- TODO commit 前 `git diff --stat` 驗證純 Wave 1.5 改動（30 insertions / 19 deletions 全屬本 task）
+
+**Sibling commit detected**:
+- patch 過程中 sibling commit `34aa7086 test(ma_crossover): add KAMA unavailable exit path regression tests (Wave 1.5 E4)` push 進 main；本 task 與 sibling 不同檔案，無 race
+- patch 過程中另有 sibling commit `72692fe4 docs: Wave 1 sign-off — TODO §11.6 4/4 DONE + changelog + agent reports`；亦無檔案重疊
+
+**自我驗證核對（self-verification checklist）**:
+- ✅ 嚴禁事項全 GREEN（不重做 17+14 / 不修 Rust / 不動 V094 SQL / 不修字典）
+- ✅ 來源文件對齊（A3 6 處 / E3 11 處 / A4 2 處 / Wave 1 commits 5 / AMD v0.2 + spec v1.1 各 1）
+- ✅ 16 條根原則合規（§5.5 強化 #4/#5/#6/#8/#9）
+- ✅ 硬邊界檢查（不觸 5 hard boundary + 9 安全不變量 + lease 授權 + H0 Gate）
+- ✅ Multi-session race 防範核對（4 commit 分離 + commit --only + 無 add -A + skip ci + diff verify）
+
+**架構教訓 17**：**incremental finding consolidation 比 4-agent re-review 高效**。post-Wave 1 收到 A3 + E3 兩個 substantive new finding，不應該回頭跑 4-agent re-review on v0.2；正確做法是 PA 純增量 patch 進 v1.2/v0.3，然後派 4-agent short re-review（Wave 3）核驗增量收口。**節省 capacity = 1 round QC+FA+BB+MIT 各 30min**。
+
+**Confidence**:
+- HIGH for A3 finding 收口 mapping 完整（6/6 finding 全處理）
+- HIGH for E3 finding 收口 mapping 完整（6/6 finding + 三個意外發現全處理）
+- HIGH for §5.5 mandatory fallback to taker invariant（規則 1-5 + IMPL gate + healthcheck sub-check + audit row enum invariant 全 cover）
+- HIGH for `P1-PORTFOLIO-RESTING-EXPOSURE-1` ticket scope（A3 verify report §8 + spec §15 + AMD §7 同步）
+- HIGH for `P2-ORDERS-INTENT-ID-WRITER-GAP-1` ticket scope（E3 finding 1 + spec §1.2 + spec §15 + TODO §12 同步）
+- HIGH for fee saving 0.5-2.0 bps + 全年估 $50-$200 修正（per E3 empirical 0.66/0.95/3.31 三層解讀，evidence-based）
+- HIGH for Phase 2a 14d (7d primary + 7d extended observation)（per E3 conservative discount + 樣本量穩定性需求）
+- HIGH for AMD §7 #16 MAINTAIN（A3 verify 證實 close path is_reducing 不觸 portfolio gate）
+- HIGH for AMD §8 IMPL Prereq 5 partial-resolved（F-FA-2 + F-FA-3 ✅ commit hash 引用 + F-FA-1 留 Wave 2）
+- HIGH for next step recommendation（Wave 2 V094 spec + reject_cooldown / Wave 3 4-agent short re-review + BB1 字典 / Wave 4+ IMPL kickoff + P1 portfolio fix 平行 / N+2 P2 intent_id writer fix）
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--wave_1_5_spec_v1_2_amd_v0_3_consolidated.md`
