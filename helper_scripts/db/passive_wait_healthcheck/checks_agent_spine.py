@@ -12,10 +12,17 @@ MODULE_NOTE (中文):
 
 from __future__ import annotations
 
+import json
 import os
+import time
+from pathlib import Path
+from typing import Any
 
 
 AGENT_SPINE_LINEAGE_WINDOW_MINUTES = 24 * 60
+CHANNEL_WARN_THRESHOLD_PER_MIN = 5.0
+CHANNEL_METRICS_STATE_FILE = "agent_spine_channel_metrics_55.json"
+CHANNEL_METRICS_IPC_TIMEOUT_SECONDS = 1.0
 _TABLES = (
     "agent.decision_objects",
     "agent.decision_edges",
@@ -41,6 +48,23 @@ def _enabled(name: str, default: str = "0") -> bool:
 
 def _status(required: bool) -> str:
     return "FAIL" if required else "WARN"
+
+
+def _combine_status(base_status: str, monitor_status: str) -> str:
+    if base_status == "FAIL":
+        return base_status
+    if monitor_status == "WARN":
+        return "WARN"
+    return base_status
+
+
+def _with_channel_metrics(
+    base_status: str,
+    msg: str,
+    monitor_status: str,
+    monitor_msg: str,
+) -> tuple[str, str]:
+    return (_combine_status(base_status, monitor_status), f"{msg} {monitor_msg}")
 
 
 def _window_minutes() -> int:
@@ -87,6 +111,186 @@ def _count(row, index: int = 0) -> int:
     if not row:
         return 0
     return int(row[index] or 0)
+
+
+def _channel_monitor_enabled() -> bool:
+    return os.getenv("OPENCLAW_AGENT_SPINE_CHANNEL_MONITOR", "1").strip() != "0"
+
+
+def _channel_warn_threshold_per_min() -> float:
+    raw = os.getenv(
+        "OPENCLAW_AGENT_SPINE_CHANNEL_WARN_PER_MIN",
+        str(CHANNEL_WARN_THRESHOLD_PER_MIN),
+    )
+    try:
+        threshold = float(raw)
+    except ValueError:
+        return CHANNEL_WARN_THRESHOLD_PER_MIN
+    if threshold <= 0:
+        return CHANNEL_WARN_THRESHOLD_PER_MIN
+    return threshold
+
+
+def _channel_metrics_state_path() -> Path:
+    data_dir = Path(os.getenv("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+    return data_dir / "status" / CHANNEL_METRICS_STATE_FILE
+
+
+def _metric_u64(metrics: dict[str, Any], key: str) -> int | None:
+    raw = metrics.get(key)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 0:
+        return None
+    return value
+
+
+def _query_rust_spine_channel_metrics() -> dict[str, Any] | None:
+    """Best-effort IPC read for runtime_shadow SPINE_CHANNEL_* counters."""
+    try:
+        from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client_sync import (
+            sync_ipc_call,
+        )
+    except Exception:  # noqa: BLE001 - healthcheck must fail-soft on import
+        return None
+
+    try:
+        result = sync_ipc_call(
+            "get_agent_spine_channel_metrics",
+            {},
+            timeout=CHANNEL_METRICS_IPC_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 - IPC is advisory for this check
+        return None
+
+    if not isinstance(result, dict):
+        return None
+    return result
+
+
+def _read_previous_channel_sample(path: Path) -> dict[str, Any] | None:
+    try:
+        with path.open("r") as f:
+            payload = json.load(f)
+    except Exception:  # noqa: BLE001 - corrupt state just becomes new baseline
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _write_channel_sample(path: Path, sample: dict[str, Any]) -> str:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as f:
+            json.dump(sample, f, indent=2, sort_keys=True)
+    except Exception as exc:  # noqa: BLE001 - do not fail healthcheck on persist
+        return f" state_write=fail:{exc.__class__.__name__}"
+    return ""
+
+
+def _agent_spine_channel_metrics_status() -> tuple[str, str]:
+    """Return advisory channel-pressure verdict for P1-FILL-LINEAGE-MONITOR."""
+    if not _channel_monitor_enabled():
+        return ("PASS", "channel_metrics=disabled")
+
+    metrics = _query_rust_spine_channel_metrics()
+    if metrics is None:
+        return ("PASS", "channel_metrics=ipc_unavailable")
+    if str(metrics.get("status", "")) != "ok":
+        return (
+            "PASS",
+            f"channel_metrics=ipc_status_unexpected status={metrics.get('status')}",
+        )
+
+    drop_total = _metric_u64(metrics, "drop_total")
+    retry_success_total = _metric_u64(metrics, "retry_success_total")
+    retry_fail_total = _metric_u64(metrics, "retry_fail_total")
+    final_loss_approx_total = _metric_u64(metrics, "final_loss_approx_total")
+    if None in (
+        drop_total,
+        retry_success_total,
+        retry_fail_total,
+        final_loss_approx_total,
+    ):
+        return ("PASS", "channel_metrics=invalid_payload")
+
+    assert drop_total is not None
+    assert retry_success_total is not None
+    assert retry_fail_total is not None
+    assert final_loss_approx_total is not None
+
+    now_ms = int(time.time() * 1000)
+    sample = {
+        "sampled_at_unix_ms": now_ms,
+        "drop_total": drop_total,
+        "retry_success_total": retry_success_total,
+        "retry_fail_total": retry_fail_total,
+        "final_loss_approx_total": final_loss_approx_total,
+    }
+    path = _channel_metrics_state_path()
+    previous = _read_previous_channel_sample(path)
+    state_note = _write_channel_sample(path, sample)
+
+    base = (
+        f"drop_total={drop_total} retry_success_total={retry_success_total} "
+        f"retry_fail_total={retry_fail_total} "
+        f"final_loss_approx_total={final_loss_approx_total} "
+        "drop_semantics=initial_try_send_failures_not_final_loss"
+    )
+    if previous is None:
+        return ("PASS", f"channel_metrics=baseline {base}{state_note}")
+
+    prev_drop = _metric_u64(previous, "drop_total")
+    prev_retry_success = _metric_u64(previous, "retry_success_total")
+    prev_retry_fail = _metric_u64(previous, "retry_fail_total")
+    prev_sampled_at = _metric_u64(previous, "sampled_at_unix_ms")
+    if None in (prev_drop, prev_retry_success, prev_retry_fail, prev_sampled_at):
+        return ("PASS", f"channel_metrics=baseline_invalid_previous {base}{state_note}")
+
+    assert prev_drop is not None
+    assert prev_retry_success is not None
+    assert prev_retry_fail is not None
+    assert prev_sampled_at is not None
+
+    if (
+        drop_total < prev_drop
+        or retry_success_total < prev_retry_success
+        or retry_fail_total < prev_retry_fail
+    ):
+        return ("PASS", f"channel_metrics=baseline_counter_reset {base}{state_note}")
+
+    elapsed_min = (now_ms - prev_sampled_at) / 60_000.0
+    if elapsed_min <= 0:
+        return ("PASS", f"channel_metrics=sample_interval_zero {base}{state_note}")
+
+    drop_delta = drop_total - prev_drop
+    retry_success_delta = retry_success_total - prev_retry_success
+    retry_fail_delta = retry_fail_total - prev_retry_fail
+    final_loss_approx_delta = max(drop_delta - retry_success_delta, 0)
+    initial_fail_rate = drop_delta / elapsed_min
+    final_loss_approx_rate = final_loss_approx_delta / elapsed_min
+    retry_fail_rate = retry_fail_delta / elapsed_min
+    threshold = _channel_warn_threshold_per_min()
+    detail = (
+        f"{base} elapsed_min={elapsed_min:.3f} drop_delta={drop_delta} "
+        f"retry_success_delta={retry_success_delta} retry_fail_delta={retry_fail_delta} "
+        f"final_loss_approx_delta={final_loss_approx_delta} "
+        f"initial_fail_rate_per_min={initial_fail_rate:.3f} "
+        f"final_loss_approx_rate_per_min={final_loss_approx_rate:.3f} "
+        f"retry_fail_rate_per_min={retry_fail_rate:.3f} "
+        f"warn_threshold_initial_fail_per_min={threshold:.3f}"
+    )
+
+    if retry_fail_delta > 0:
+        return ("WARN", f"channel_metrics=retry_fail_warn {detail}{state_note}")
+    if initial_fail_rate > threshold:
+        return ("WARN", f"channel_metrics=pressure_warn {detail}{state_note}")
+    return ("PASS", f"channel_metrics=ok {detail}{state_note}")
 
 
 def _type_detail(type_counts: dict[str, int]) -> str:
@@ -347,6 +551,7 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             f"MAG-082 readiness=DISABLED window={window_minutes}m "
             f"modes={mode_detail} runtime_mode={runtime_mode}",
         )
+    channel_status, channel_msg = _agent_spine_channel_metrics_status()
 
     try:
         cur.connection.rollback()
@@ -361,13 +566,20 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             if not row or not row[0]:
                 missing.append(table_name)
     except Exception as exc:  # noqa: BLE001 - passive sentinel
-        return (_status(required), f"agent decision spine table check failed: {exc}")
+        return _with_channel_metrics(
+            _status(required),
+            f"agent decision spine table check failed: {exc}",
+            channel_status,
+            channel_msg,
+        )
 
     if missing:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine schema incomplete; "
             f"MAG-082 readiness=BLOCKED_SCHEMA_MISSING missing={','.join(missing)}",
+            channel_status,
+            channel_msg,
         )
 
     try:
@@ -381,7 +593,12 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             cur, "agent.execution_idempotency_keys", "first_seen_at", modes, window_minutes
         )
     except Exception as exc:  # noqa: BLE001 - passive sentinel
-        return (_status(required), f"agent decision spine row check failed: {exc}")
+        return _with_channel_metrics(
+            _status(required),
+            f"agent decision spine row check failed: {exc}",
+            channel_status,
+            channel_msg,
+        )
 
     base_detail = (
         f"window={window_minutes}m modes={mode_detail} "
@@ -389,16 +606,20 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
         f"idempotency={recent_idempotency}/{all_idempotency}"
     )
     if all_objects <= 0 and all_edges <= 0 and all_idempotency <= 0:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine enabled but empty; "
             f"MAG-082 readiness=BLOCKED_ENABLED_EMPTY {base_detail}",
+            channel_status,
+            channel_msg,
         )
     if recent_objects <= 0 or recent_edges <= 0 or recent_idempotency <= 0:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine enabled but no recent complete row proof; "
             f"MAG-082 readiness=BLOCKED_NO_RECENT_LINEAGE {base_detail}",
+            channel_status,
+            channel_msg,
         )
 
     value_quality_cutoff_ts = _value_quality_cutoff_ts()
@@ -432,7 +653,12 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
         ) = _complete_chain_counts(cur, modes, window_minutes, value_quality_cutoff_ts)
         state_changes_24h = _state_changes_count_24h(cur, modes, window_minutes)
     except Exception as exc:  # noqa: BLE001 - passive sentinel
-        return (_status(required), f"agent decision spine lineage query failed: {exc}")
+        return _with_channel_metrics(
+            _status(required),
+            f"agent decision spine lineage query failed: {exc}",
+            channel_status,
+            channel_msg,
+        )
 
     missing_types = [
         object_type
@@ -457,28 +683,36 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
     )
     if missing_types or complete_chains <= 0:
         missing_text = ",".join(missing_types) if missing_types else "complete_chain"
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine lineage incomplete; "
             f"MAG-082 readiness=BLOCKED_INCOMPLETE missing={missing_text} {detail}",
+            channel_status,
+            channel_msg,
         )
     if chains_with_idempotency < complete_chains:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine idempotency incomplete; "
             f"MAG-082 readiness=BLOCKED_IDEMPOTENCY {detail}",
+            channel_status,
+            channel_msg,
         )
     if chains_with_report <= 0:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine execution reports absent; "
             f"MAG-082 readiness=BLOCKED_REPORTS_PENDING {detail}",
+            channel_status,
+            channel_msg,
         )
     if bad_report_quality > 0:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine execution report quality incomplete; "
             f"MAG-082 readiness=BLOCKED_REPORT_QUALITY {detail}",
+            channel_status,
+            channel_msg,
         )
     # Caveat 1+2 fix 後新加語意 gate：
     #   - state_changes_24h<=0: Spine SM producer 未接 caller (Caveat 1)
@@ -492,26 +726,34 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
     # 契約：`loop_exchange.rs` 只在 `cum_filled_qty >= qty * 0.999` 時 emit
     # fill-completion lineage。
     if state_changes_24h <= 0:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine state-changes empty; "
             f"MAG-082 readiness=BLOCKED_STATE_CHANGES_EMPTY {detail}",
+            channel_status,
+            channel_msg,
         )
     if bad_report_value_quality > 0:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine execution report value-realism incomplete; "
             f"MAG-082 readiness=BLOCKED_REPORT_VALUE_QUALITY {detail}",
+            channel_status,
+            channel_msg,
         )
     if full_plan_fills_missing_report > 0:
-        return (
+        return _with_channel_metrics(
             _status(required),
             "agent decision spine full-fill report missing; "
             f"MAG-082 readiness=BLOCKED_REAL_FILL_REPORT_MISSING {detail}",
+            channel_status,
+            channel_msg,
         )
 
-    return (
+    return _with_channel_metrics(
         "PASS",
         "agent decision spine lineage proof healthy; "
         f"MAG-082 readiness=LINEAGE_READY_NOT_WINDOW_PASS {detail}",
+        channel_status,
+        channel_msg,
     )

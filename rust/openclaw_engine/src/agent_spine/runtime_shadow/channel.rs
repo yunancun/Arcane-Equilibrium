@@ -65,7 +65,7 @@ pub fn spine_channel_retry_success_total() -> u64 {
 
 /// 對外暴露 metric：retry helper 用盡 3 次後仍失敗的筆數。
 ///
-/// 用途：若此值非 0，代表即便 8192 cap + retry 3× 仍不足，需 wave 2 級
+/// 用途：若此值非 0，代表即便 configured cap + retry 3× 仍不足，需 wave 2 級
 /// infrastructure 升級（如 cap 32K / unbounded / blocking send 改 sync→async
 /// cascade）。
 pub fn spine_channel_retry_fail_total() -> u64 {

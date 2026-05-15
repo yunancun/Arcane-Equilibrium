@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+from pathlib import Path
 import sys
+import tempfile
+import time
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _HELPER_SCRIPTS_DIR = os.path.dirname(_THIS_DIR)
@@ -15,7 +19,7 @@ _SRV_ROOT = os.path.dirname(_HELPER_SCRIPTS_DIR)
 sys.path.insert(0, _SRV_ROOT)
 
 
-def _load_isolated_check_55():
+def _load_isolated_module():
     # 用 importlib spec 直接 load checks_agent_spine 模塊，繞過 package __init__.py
     # 的 runner import chain（W1 panel_aggregator IMPL 在不同 wave 進行中，
     # 其 import 在 runner.py 被預先寫入但對應 check 函數尚未 land，會觸發
@@ -33,10 +37,13 @@ def _load_isolated_check_55():
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.check_55_agent_decision_spine_lineage
+    return mod
 
 
-check_55_agent_decision_spine_lineage = _load_isolated_check_55()
+checks_agent_spine_mod = _load_isolated_module()
+check_55_agent_decision_spine_lineage = (
+    checks_agent_spine_mod.check_55_agent_decision_spine_lineage
+)
 
 
 def _cur(
@@ -51,9 +58,34 @@ def _cur(
     return cur
 
 
+def _healthy_cur() -> MagicMock:
+    return _cur(
+        [
+            (True,),
+            (True,),
+            (True,),
+            (5, 5),
+            (4, 4),
+            (1, 1),
+            (1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0),
+            (5,),
+        ],
+        [
+            [
+                ("strategy_signal", 1),
+                ("strategist_decision", 1),
+                ("guardian_verdict", 1),
+                ("execution_plan", 1),
+                ("execution_report", 1),
+            ]
+        ],
+    )
+
+
 class TestAgentSpineHealthcheck(unittest.TestCase):
     def setUp(self) -> None:
         self._old_env = dict(os.environ)
+        os.environ["OPENCLAW_AGENT_SPINE_CHANNEL_MONITOR"] = "0"
 
     def tearDown(self) -> None:
         os.environ.clear()
@@ -448,6 +480,117 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
         self.assertIn("BLOCKED_REAL_FILL_REPORT_MISSING", msg)
         self.assertIn("full_plan_fills_missing_report=2", msg)
         self.assertIn("partial_plan_fill_chains=3", msg)
+
+    def test_channel_metrics_first_sample_baselines_without_warning(self) -> None:
+        os.environ["OPENCLAW_AGENT_SPINE_CLIENT_ENABLED"] = "1"
+        os.environ["OPENCLAW_AGENT_SPINE_CHANNEL_MONITOR"] = "1"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["OPENCLAW_DATA_DIR"] = tmpdir
+            cur = _healthy_cur()
+            metrics = {
+                "status": "ok",
+                "drop_total": 10,
+                "retry_success_total": 4,
+                "retry_fail_total": 0,
+                "final_loss_approx_total": 6,
+            }
+
+            with patch.object(
+                checks_agent_spine_mod,
+                "_query_rust_spine_channel_metrics",
+                return_value=metrics,
+            ):
+                status, msg = check_55_agent_decision_spine_lineage(cur)
+
+            self.assertEqual(status, "PASS", msg)
+            self.assertIn("channel_metrics=baseline", msg)
+            self.assertIn("drop_semantics=initial_try_send_failures_not_final_loss", msg)
+            state_path = (
+                Path(tmpdir)
+                / "status"
+                / checks_agent_spine_mod.CHANNEL_METRICS_STATE_FILE
+            )
+            self.assertTrue(state_path.exists())
+
+    def test_channel_metrics_initial_fail_rate_warns_without_calling_final_loss(self) -> None:
+        os.environ["OPENCLAW_AGENT_SPINE_CLIENT_ENABLED"] = "1"
+        os.environ["OPENCLAW_AGENT_SPINE_CHANNEL_MONITOR"] = "1"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["OPENCLAW_DATA_DIR"] = tmpdir
+            state_dir = Path(tmpdir) / "status"
+            state_dir.mkdir(parents=True)
+            state_path = state_dir / checks_agent_spine_mod.CHANNEL_METRICS_STATE_FILE
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "sampled_at_unix_ms": int((time.time() - 60.0) * 1000),
+                        "drop_total": 10,
+                        "retry_success_total": 4,
+                        "retry_fail_total": 0,
+                        "final_loss_approx_total": 6,
+                    }
+                )
+            )
+            cur = _healthy_cur()
+            metrics = {
+                "status": "ok",
+                "drop_total": 16,
+                "retry_success_total": 10,
+                "retry_fail_total": 0,
+                "final_loss_approx_total": 6,
+            }
+
+            with patch.object(
+                checks_agent_spine_mod,
+                "_query_rust_spine_channel_metrics",
+                return_value=metrics,
+            ):
+                status, msg = check_55_agent_decision_spine_lineage(cur)
+
+            self.assertEqual(status, "WARN", msg)
+            self.assertIn("channel_metrics=pressure_warn", msg)
+            self.assertIn("drop_delta=6", msg)
+            self.assertIn("final_loss_approx_delta=0", msg)
+            self.assertIn("drop_semantics=initial_try_send_failures_not_final_loss", msg)
+
+    def test_channel_metrics_retry_fail_delta_warns(self) -> None:
+        os.environ["OPENCLAW_AGENT_SPINE_CLIENT_ENABLED"] = "1"
+        os.environ["OPENCLAW_AGENT_SPINE_CHANNEL_MONITOR"] = "1"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["OPENCLAW_DATA_DIR"] = tmpdir
+            state_dir = Path(tmpdir) / "status"
+            state_dir.mkdir(parents=True)
+            state_path = state_dir / checks_agent_spine_mod.CHANNEL_METRICS_STATE_FILE
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "sampled_at_unix_ms": int((time.time() - 60.0) * 1000),
+                        "drop_total": 10,
+                        "retry_success_total": 4,
+                        "retry_fail_total": 0,
+                        "final_loss_approx_total": 6,
+                    }
+                )
+            )
+            cur = _healthy_cur()
+            metrics = {
+                "status": "ok",
+                "drop_total": 10,
+                "retry_success_total": 4,
+                "retry_fail_total": 1,
+                "final_loss_approx_total": 6,
+            }
+
+            with patch.object(
+                checks_agent_spine_mod,
+                "_query_rust_spine_channel_metrics",
+                return_value=metrics,
+            ):
+                status, msg = check_55_agent_decision_spine_lineage(cur)
+
+            self.assertEqual(status, "WARN", msg)
+            self.assertIn("channel_metrics=retry_fail_warn", msg)
+            self.assertIn("retry_fail_delta=1", msg)
 
 
 if __name__ == "__main__":

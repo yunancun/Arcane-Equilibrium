@@ -12,7 +12,9 @@ use super::events::{
 };
 use super::runtime_shadow::{emit_entry_lineage, RuntimeShadowLineageInput};
 use super::signal_adapter::{strategy_signal_from_open_intent, strategy_signal_to_trading_msg};
-use super::store::{AgentSpineMsg, AgentSpineStore, ChannelAgentSpineStore};
+use super::store::{
+    AgentSpineMsg, AgentSpineStore, ChannelAgentSpineStore, AGENT_SPINE_CHANNEL_CAPACITY,
+};
 use crate::database::TradingMsg;
 use crate::intent_processor::{OrderIntent, VerdictInfo};
 use crate::order_manager::TimeInForce;
@@ -1250,7 +1252,7 @@ fn spine_ids_boundary_inputs_preserve_id_format() {
 //
 // 釘住 3 條 invariant，對應 QA RCA 2026-05-11 Option F4 hybrid 修復語意：
 //   (a) channel full → drop counter 嚴格遞增（hot-path 行為驗）；
-//   (b) 8192 cap 下 burst 100 fill-completion 連續呼叫 0 drop（cap bump 真實生效）；
+//   (b) configured cap 下 burst 100 fill-completion 連續呼叫 0 drop（cap bump 真實生效）；
 //   (c) retry path：channel 從 full 釋放 slot 後，spawn 的 retry task 成功救援
 //       並計 retry_success_total。
 //
@@ -1326,23 +1328,24 @@ async fn fill_completion_channel_full_increments_drop_counter() {
     tokio::time::sleep(Duration::from_millis(10)).await;
 }
 
-/// 不變式 (b)：8192 cap 下連續 100 emit_fill_completion 0 drop（用 channel
+/// 不變式 (b)：configured cap 下連續 100 emit_fill_completion 0 drop（用 channel
 /// queue state 驗，不依賴 process-wide drop counter；後者在並行 test 下會被
 /// 其它 test 污染 delta）。
 ///
 /// cap bump 真實生效的對抗驗證：1024 baseline 下 100 × 4 = 400 try_send 可能
-/// drop（取決於 rx 是否消費）；但 cap=8192 即使 rx 完全不消費，仍可承載
-/// 8192 個 msg without drop。本 test 用 rx 不消費 + 寫 100 fill-completion =
-/// 400 msg 遠低於 8192 cap，預期 accepted == 4 (every iter) + queued == 400。
+/// drop（取決於 rx 是否消費）；但 configured production cap 即使 rx 完全不消費，
+/// 仍可承載 400 msg。本 test 用 rx 不消費 + 寫 100 fill-completion =
+/// 400 msg 遠低於 production cap，預期 accepted == 4 (every iter) + queued == 400。
 #[tokio::test]
-async fn fill_completion_burst_with_8192_cap_no_drop() {
+async fn fill_completion_burst_with_configured_cap_no_drop() {
     use super::runtime_shadow::{emit_fill_completion_lineage, FillCompletionLineageInput};
 
-    // cap=8192 對應 production runtime 設定
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentSpineMsg>(8192);
+    // cap 對應 production runtime 設定
+    let (tx, mut rx) =
+        tokio::sync::mpsc::channel::<AgentSpineMsg>(AGENT_SPINE_CHANNEL_CAPACITY);
 
     // 連續 100 次 emit_fill_completion，每次寫 4 msg = 400 msg
-    // （遠低於 8192 cap）→ 預期每次 accepted=4 (本 channel 私有，無並行干擾)
+    // （遠低於 production cap）→ 預期每次 accepted=4 (本 channel 私有，無並行干擾)
     for i in 0..100 {
         let order_plan_id = format!("plan-burst-{i}");
         let decision_id = format!("decision-burst-{i}");
@@ -1370,7 +1373,7 @@ async fn fill_completion_burst_with_8192_cap_no_drop() {
                 order_link_id: None,
             },
         );
-        // 本 channel cap=8192 完全未滿（私有 channel，不與其它並行 test 共享）
+        // 本 channel production cap 完全未滿（私有 channel，不與其它並行 test 共享）
         assert_eq!(
             accepted, 4,
             "iter {i}: expected 4 messages accepted (no drop) on private 8192-cap channel"
