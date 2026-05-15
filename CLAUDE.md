@@ -64,7 +64,7 @@
 
 | 項 | 目前事實 |
 |---|---|
-| Current state sources | `TODO.md` v24 + PM reports `2026-05-15--stage0r_preflight_verification.md` / `2026-05-15--canary_rebase_step3_step4.md` / `2026-05-15--feature_baseline_restore.md` + direct `trade-core` runtime read-only checks below。 |
+| Current state sources | `TODO.md` v25 + PM reports `2026-05-15--stage0r_preflight_verification.md` / `2026-05-15--stage0r_preflight_step5b.md` / `2026-05-15--stage0r_oi_confirmed_5m_preflight.md` / `2026-05-15--feature_baseline_restore.md` / `2026-05-15--p1_healthcheck_55_invariant.md` + direct `trade-core` runtime read-only checks below。 |
 | Runtime host | Linux `trade-core`；watchdog 2026-05-15 13:24 UTC：`engine_alive=true`，demo alive age=5.1s，live alive age=3.3s，paper alive=false age=10329.4s（disabled）。 |
 | Runtime env | 2026-05-15 13:26 UTC engine env：`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_ENABLE_PAPER=0`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
@@ -83,6 +83,7 @@
 
 - P0-EDGE-1 remains active：2026-05-15 full healthcheck still flags `[40]` negative realized edge；5 textbook strategies remain structurally alpha-deficient until Alpha Surface Phase C/D or new alpha candidates produce positive demo evidence。
 - A4-C BTC→Alt Lead-Lag implementation is complete/rebased, but 2026-05-15 Step 5b Stage 0R rerun after diagnostic producer restoration remains **GATE-RED** (`eligible_for_demo_canary=false`; `avg_net_bps=+0.3552`, `PSR(0)=0.5877`, `DSR=0.0000`, R²(120)=0.0005)；`[57]` PASS + expected_dir distribution improved, but no Stage 1 demo cohort selected。
+- `bb_breakout_oi_confirmed_5m` Stage 0R packet is **spec-only**：it defines the replay row/report contract and baseline requirements, but did not execute replay, mutate config/runtime/DB/auth, or change `eligible_for_demo_canary=false`。
 - Legacy paper promotion paths are frozen by AMD-2026-05-15-01：Stage 0R replay preflight can only emit `eligible_for_demo_canary=true/false`; Stage 1 evidence must be `Environment::Demo` micro-canary after a future green preflight。
 
 ### Current Observation Gates
@@ -90,6 +91,7 @@
 | Gate | 2026-05-15 latest | 結論 |
 |---|---|---|
 | `[40]` realized edge | 2026-05-15 full healthcheck WARN：negative realized edge remains active。 | P0-EDGE-1 not closed。 |
+| `[27]` intents counter freeze | 🔴 FAIL 2026-05-15 15:47 UTC：demo intent persistence stale=50.1m, live_demo stale=46.2m, 30min intents=0 while approved verdicts/DCS evaluations continued。 | Open `P1-INTENT-FREEZE-27`; blocks any canary/promotion-sensitive runtime action until cleared。 |
 | `[55]` fill-lineage | ✅ 2026-05-15 14:19 UTC source-patched direct check PASS on `trade-core` PG：25/25 fully-filled plan chains have real-fill ER；13 partial chains are surfaced separately。 | No longer a micro-canary infrastructure blocker after repo-synced healthcheck patch；Stage 0R edge gate remains GATE-RED。 |
 | `[67]` feature baseline readiness | ✅ FIXED 2026-05-15 13:13 UTC / 15:13 Europe-Madrid：W-AUDIT-4b apply restored `observability.feature_baselines` to `active_rows=646`, `active_symbols=19`, `feature_names=34/34`; standalone `[67]` PASS。 | `P1-WA4B-INSERT-1` done；drift events still wait configured burn-in。 |
 | `[4]` phys lock / `[Xb]` triangulation | 2026-05-15 12:45 UTC full run PASS：`[4]` exit_features phys_lock 24h=1 / 7d=109；`[Xb]` close-fill-linked 15/15/15。 | Prior hard healthcheck fixes confirmed。 |
@@ -100,11 +102,12 @@
 | Blocker | 狀態 |
 |---|---|
 | W3 Sprint | P0 W3-1 / W3-2 remain blocked on `ncyu`（no status change in this maintenance commit）；non-P0 status: W3-3 ✅ / W3-4 ✅ / W3-5 ✅ / W3-6 🔄。Stage 1 demo micro-canary is not launchable while A4-C Stage 0R remains GATE-RED；`[55]` is source-cleared by P1-HEALTHCHECK-55-INVARIANT。 |
+| Runtime healthcheck | Latest full passive healthcheck 2026-05-15 15:47 UTC fails `[27] intents_counter_freeze`；do not launch canary/promotion-sensitive runtime actions before RCA/fix。 |
 | Sprint N+2 P2 packet | ✅ 4/4 complete：DUAL-RAIL, SHADOW, F20, V083 P2 follow-up all cleared。 |
 | P0-EDGE-1 | Active；2026-05-15 `[40]` still negative / WARN。 |
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
-| Paper / Stage 0R | GATE-RED and disabled；paper promotion evidence removed by AMD-2026-05-15-01；waiting `ncyu` decision before any non-promotion diagnostic reopen。 |
+| Paper / Stage 0R | GATE-RED and disabled；paper promotion evidence removed by AMD-2026-05-15-01；OI-confirmed 5m is only a future Stage 0R candidate spec。 |
 | W-AUDIT-8a / alpha candidates | Phase C/D + alternative alpha candidates remain the active path after A4-C GATE-RED。 |
 | P2 backlog | Pending：`N2-AUDIT-7c`, `N2-AUDIT-8c`, `N2-PhaseC`, `N2-PhaseD`。 |
 
@@ -453,14 +456,14 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **REF-20 / REF-21 狀態**：REF-20 Sprint A-D 與 REF-21 replay usability foundation 已收口；剩餘 replay 工作是 empirical calibration maturity、recorder history、baseline library，不替代 runtime lineage 或 live promotion。
 
-**最早 Live 日期**（事件驅動，非 hard date）：以 2026-06-15 悲觀規劃帶為主。PA full audit 偏悲觀：edge 未轉正、LG-2/3/4 尚未 IMPL、W-AUDIT-1..7 未完；**MAG-082/083/084 全 ✅ 2026-05-11 closed**（W-D wave done），其餘 blocker 不變。
+**最早 Live 日期**（事件驅動，非 hard date）：以 2026-06-15 悲觀規劃帶為主。PA full audit 偏悲觀：edge 未轉正、LG-1/2/3 尚未全部 IMPL、W-AUDIT-4..7 residuals 未完；**MAG-082/083/084 全 ✅ 2026-05-11 closed**（W-D wave done），其餘 blocker 不變。
 
-**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor fake-live smoke + runtime Agent Spine shadow lineage + Decision Lease bypass lineage + REF-20/REF-21 replay foundation 均已落地。仍未完成的是 MAG-082 24h PASS、MAG-083/MAG-084、W-AUDIT-3..7、edge / execution-quality 驗收、Live Gate LG-2/3/4、Live infra、以及 true live 前的受監督/受限自主放權。
+**路線圖**：Phase 0-3 + Live GUI + 5-Agent 基礎接線 + Executor fake-live smoke + runtime Agent Spine shadow lineage + Decision Lease bypass lineage + REF-20/REF-21 replay foundation 均已落地。MAG-082 24h PASS、MAG-083/MAG-084 已於 2026-05-11 closed。仍未完成的是 W-AUDIT-4..7 residuals、edge / execution-quality 驗收、Live Gate LG-1/2/3、Live infra/ops、以及 true live 前的受監督/受限自主放權。
 
-**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease router evidence flag is ON for shadow W-C only。True live 仍缺 MAG-082/083/084、edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
+**Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease router evidence flag is ON for shadow W-C only。True live 仍缺 positive edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
-- TODO.md v14 active dispatch queue + `2026-05-08--full_audit_fix_plan.md`
+- TODO.md v25 active dispatch queue + `active-plan.md` v1.3
 - `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` for removed historical context
 - **REF-20 Gap Closure Plan V1 (2026-05-04, current SoT for Sprint A-D)**：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
 - REF-20 V3 SoT (legacy schema/route foundation)：`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`

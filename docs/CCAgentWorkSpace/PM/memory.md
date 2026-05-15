@@ -1865,7 +1865,8 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Pre-audit/docs only. No runtime flag, rebuild, restart, deploy, DB write,
   live auth, cloud call, runtime submit path, canary run, or trading authority
   change was made.
-- MAG-084 operator sign-off is blocked while MAG-083 remains blocked.
+- At the time, MAG-084 operator sign-off was blocked while MAG-083 was blocked.
+- Superseded 2026-05-11: MAG-083/MAG-084 later signed and W-D wave closed.
 
 ## 2026-05-07 AgentTodo MAG-084 Operator Sign-off Blocker
 
@@ -2162,19 +2163,23 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Verification: `cargo test -q -p openclaw_engine test_halt_session_uses_per_symbol_price_not_triggering_tick` PASS；tick_pipeline 舊 `get_entry_context_id(...).unwrap_or("")` grep 0 hit；`git diff --check` PASS。
 - Boundary: source/test only；未 rebuild / restart / renew live auth。Runtime 仍需 operator-approved deploy/restart 後驗 engine.log 無 V083 retry；LiveDemo auth_missing 是獨立 operator renew 事項。
 
-## 2026-05-14 TODO v20 lightweight sync
+## 2026-05-14 TODO v20 lightweight sync（historical; superseded by v25）
 
 - Checked TODO freshness: body had 2026-05-13 runtime / attribution updates, but header still showed v19 / 2026-05-09.
 - Promoted TODO to v20 / 2026-05-14 and added a TODO Sync Checkpoint documenting pre-sync Mac/origin/Linux head `7c9fd444`, unrelated dirty Rust WIP preservation, and no runtime action.
 - Marked `P2-V19-CYCLE` as started via lightweight sync; full archive compaction remains pending before/at the 800-line hygiene threshold.
 - Boundary: docs/TODO governance only; no rebuild, restart, DB migration, live auth mutation, strategy/risk parameter change, or deploy.
+- Superseded 2026-05-15 by TODO v25 PM/PA/FA audit sync.
 
 ## 2026-05-15 Canary Rebase Step 3/4
 
 - PM freeze + AMD-2026-05-15-01 landed first (`8889d9b8`): W3 Stage 1 paper cohort frozen, A4-C paper-edge promotion frozen, `OPENCLAW_ENABLE_PAPER=1` blocked for promotion.
 - Closed W-AUDIT-3b runtime smoke on `trade-core`: RouterLeaseGuard Drop Rust test PASS, ExecutorAgent fail-closed pytest PASS (`3 passed, 44 deselected`), `[55] chains_with_lease=89`.
 - Rebased A4-C spec/tooling to Stage 0R diagnostics: report output is `eligible_for_demo_canary=true/false`; legacy `promote_n2` compatibility field remains false and non-promotional. Smoke test PASS.
-- Step 4 fill-lineage gate is still blocked for demo canary launch: `[55]` shows real-fill evidence exists (`chains_with_real_fill_report=15`, no quality-bad rows) but status is `WARN_REAL_FILL_PROPAGATION_PARTIAL` (15/89 below 50% threshold).
+- Historical Step 4 note: this report still showed `[55]` WARN under the old
+  all-chain ratio. Superseded later on 2026-05-15 by
+  P1-HEALTHCHECK-55-INVARIANT, which source-cleared `[55]` using the
+  fully-filled plan invariant.
 - Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--canary_rebase_step3_step4.md`.
 
 ## 2026-05-15 Stage 0R Preflight Verification
@@ -2205,12 +2210,10 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   11 WARN / 1 FAIL.
 - `[4] phys_lock_runtime` and `[Xb] pipeline_triangulation` PASS after
   `7108035d`; these are no longer active healthcheck blockers.
-- Sole FAIL is `[67] feature_baseline_readiness`: active
-  `observability.feature_baselines=0`; keep `P1-WA4B-INSERT-1` active until
-  the apply path populates active 34-dim baselines.
-- `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` with `24/138` real-fill
-  reports, so Stage 1 demo remains blocked without future green Stage 0R plus
-  `[55]` PASS/waiver.
+- Historical note: this run's sole FAIL was `[67]` and `[55]` was still WARN at
+  the time. Both were superseded later on 2026-05-15 by feature-baseline restore
+  and P1-HEALTHCHECK-55-INVARIANT. Do not use this subsection as the current
+  blocker list.
 - Reports:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--passive_healthcheck_7108035d_plan_sync.md`
   and `docs/CCAgentWorkSpace/Operator/2026-05-15--passive_healthcheck_7108035d_plan_sync.md`.
@@ -2247,8 +2250,9 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Stage 0R remains GATE-RED: latest report fetched 5,740 rows and returned
   `eligible_for_demo_canary=false` with pooled `avg_net_bps=+0.3552`,
   `t=0.2231`, `PSR(0)=0.5877`, `DSR=0.0000`, R2(120)=0.0005.
-- `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` (`24/138` real-fill
-  reports); `[58]` PASSed as Stage 0 default / no transitions.
+- Historical `[55]` note: Step 5b still saw old `24/138` warning. Superseded
+  later on 2026-05-15 by P1-HEALTHCHECK-55-INVARIANT; Stage 1 demo remains
+  blocked by Stage 0R GATE-RED, not `[55]`.
 - Boundary: read-only verification only; no paper enablement, demo canary
   launch, runtime config change, live auth mutation, rebuild, restart, DB
   mutation, or strategy/risk change.
@@ -2275,3 +2279,26 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   `full_plan_fills_missing_report=0`, `partial_plan_fill_chains=13`.
 - Boundary: no runtime config, auth, engine restart, DB write, or strategy/risk
   change. Stage 1 demo remains blocked by Stage 0R GATE-RED, not `[55]`.
+
+## 2026-05-15 PM/PA/FA 5-day Audit Sync
+
+- PM/PA/FA audited 2026-05-10..2026-05-15 work quality and state drift across
+  `TODO.md`, `README.md`, `CLAUDE.md`, `.codex/MEMORY.md`, and `active-plan.md`.
+- Verdict: governance/observability quality improved, but alpha/business state
+  is not promotion-ready. A4-C Stage 0R remains GATE-RED; paper promotion stays
+  frozen; W3 Stage 1 demo micro-canary must not launch.
+- `2026-05-15--stage0r_oi_confirmed_5m_preflight.md` is spec-only. It defines
+  the `bb_breakout_oi_confirmed_5m` Stage 0R replay contract but did not run a
+  replay or authorize any runtime/config/auth/canary action.
+- TODO advanced to v25. Stale active rows for V079 pending, engine 5/8 binary,
+  ADR pending, PA spec pushbacks, and old demo-state snapshots were moved to
+  `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
+- Direct `trade-core` read-only checks confirmed V079 applied through migration
+  max=90 and `learning.strategy_trial_ledger` rows=16,212.
+- Latest full passive healthcheck later returned FAIL on `[27]
+  intents_counter_freeze`; this is the current runtime hard blocker, not `[55]`
+  or `[67]`.
+- Linux `trade-core` worktree is dirty with unrelated WIP; do not force reset or
+  pull over it during three-side sync.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--pm_pa_fa_5day_audit_todo_sync.md`.

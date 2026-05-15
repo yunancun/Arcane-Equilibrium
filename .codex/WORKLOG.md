@@ -17,6 +17,12 @@ YYYY-MM-DD HH:MM TZ
 - operator confirmed target architecture: scanner advisory/evidence, Strategist decision ownership, Guardian non-bypassable veto/modify, Rust execution engine without hidden decision authority
 - next chain: MAG-001 CC, MAG-002 FA, MAG-003 PA contract freeze
 
+2026-05-15 CEST
+- completed PM/PA/FA 5-day state audit sync: TODO.md v25, README/CLAUDE/.codex memory/active-plan/docs index aligned to current runtime facts
+- classified `2026-05-15--stage0r_oi_confirmed_5m_preflight.md` as spec-only; no Stage 0R execution or canary eligibility
+- archived stale TODO v24 rows for V079 pending, old engine 5/8 binary, ADR pending, PA spec pushback rows, old demo-state snapshots, and old `[55]`/`[67]` blockers; latest full passive healthcheck now fails `[27] intents_counter_freeze`
+- direct trade-core checks before sync showed V079 applied through migration max=90 and `learning.strategy_trial_ledger` rows=16,212; Linux worktree dirty WIP remains a three-side sync blocker
+
 2026-05-06 00:35 CEST
 - completed AgentTodo M0 contract-freeze dispatch: MAG-001 CC APPROVED, MAG-002 FA CONDITIONAL, MAG-003 PA CONDITIONAL
 - PM reconciled: M0 direction accepted, but E1 cannot start broadly; first implementation wave is limited to M1 durable agent event store
