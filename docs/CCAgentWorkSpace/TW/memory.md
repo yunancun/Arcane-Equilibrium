@@ -1,12 +1,12 @@
 # TW Memory — 工作記憶
 
-## 項目上下文（2026-04-24 刷新）
+## 項目上下文（2026-05-16 刷新）
 
-- 當前 Wave：Live_Ready ⚠️，EDGE-DIAG-1 Phase 1+2+4 + FUP-IPC live；P1-11 全工待 `--rebuild` 部署 FIX-26-DEADLOCK-1
-- 測試基準：engine lib **1980 / 0 failed**（+39 vs 2026-04-23 baseline 1941）+ pytest 2996
-- 系統模式：demo（P0-2 21d demo 期，~2026-05-07 解鎖）
-- binary mtime：2026-04-24 02:06（engine PID 884467；本 session CC 不動 runtime）
-- Mac dev-only：platform=darwin，engine/pytest real 驗證透過 ssh trade-core 觸發
+- 當前焦點：W3 partially complete；P0-EDGE-1 active（`[40]` 仍 negative）；A4-C archived；W-AUDIT-8a C0 closed / C1 running；W-AUDIT-8b spec v0.2 approved
+- Runtime：engine binary `7b33ab2e`；`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`；`OPENCLAW_ENABLE_PAPER=0`
+- 測試基準：P2 coverage packet 173 tests（2026-05-15）
+- 系統模式：demo / shadow（true-live 未啟動）
+- Mac dev-only：platform=darwin，engine/pytest 驗證透過 ssh trade-core
 
 ## 工作記憶
 
@@ -29,6 +29,8 @@
 | 2026-05-09 | 5/8 audit 30+ findings 24h 修復對抗性核實（W-AUDIT-1 closure 真實度查驗）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification.md` |
 | 2026-05-09 | v2 9 commits（`1bd55689` + `85804fbd` + `8226a67f` + `29f3b8f7` + `e8a29185` + `8dcc1f17` + `48401727` + `862e79b7` + `597e866d`）對抗性核實 — 78%→81% 真升 +3%，但 4 大 NI（NI-3/4/7/8）完全未碰 | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v2.md` |
 | 2026-05-09 | v3 5 commits（`faf2d131`→`da2aba11`，含 P0-V2-NEW-1 Donchian guard + P0-V2-NEW-2 wide_parameter_adjustment skill）+ PA redesign 473 行對抗性核實 — 81%→78% **倒退** -3%；7 NEW-ISSUE NI-15..21；PA redesign verdict = **應升 ADR + Amendment + Spec doc 三層登記**（不只 PA-workspace-only）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v3.md` |
+| 2026-05-16 | AMD-2026-05-15-02 4-agent review 後全量 TW 審計：README 索引漂移修復（+14 缺失條目）/ CLAUDE_CHANGELOG 最新 / SCRIPT_INDEX 最新 / §七 注釋規範抽樣 / CONTEXT.md glossary 一致性 | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-16--tw_audit_amd_2026_05_15_02_doc_quality.md` |
+| 2026-05-16 | WP-09 doc drift fix：R4-CRITICAL-1（ADR 14→22）/ R4-CRITICAL-2（tab 13→16 + dictionary 補 3 缺漏）/ README 索引補 16 缺失條目 / CHANGELOG 補 2026-05-16 條目 / adr/ range 更正 | inline final message |
 | 2026-05-09 | P0-V3-ADR-0021-ARCH-04 部分 — CONTEXT.md 「Alpha source taxonomy」5 詞條 + AMD-2026-05-09-03 Strategist Wide-Adjustment Skill + AMD-2026-05-09-04 Demo→LivePending Promotion Evidence Push（R4 派 ADR-0021 + ARCH-04，TW 負責 CONTEXT + 2 amendment）| `srv/CONTEXT.md` + `srv/docs/governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` + `srv/docs/governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` |
 
 ## 2026-05-09 P0-V3-ADR-0021-ARCH-04 部分（TW + R4 共識落地）

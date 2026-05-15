@@ -2,6 +2,60 @@
 
 ## 工作記憶
 
+### 2026-05-16 Full Program-Scope Testing Audit — AUDIT COMPLETE (not a regression gate)
+
+**對象**：Cold adversarial testing coverage audit across entire codebase. Not a commit-gating E4 regression; this is a P2 gap inventory.
+
+**Baseline snapshot (Mac dev)**：
+| 引擎 | passed | failed | ignored/skipped | notes |
+|---|---|---|---|---|
+| Rust lib (release) 2x | 2889/2889 | 0/0 | 1/1 | non-flaky |
+| Rust integration (--tests) | 3082 total; 3080 pass | 2 | 1 | 2 pre-existing: stress_bb_breakout + stress_bb_reversion |
+| Python srv/tests/ 2x | 413/413 | 1/1 | 2/2 | 1 fail = test_v072 source drift; non-flaky |
+| Python control_api_v1 2x | 4089/4089 | 4/4 | 8/8 | 4 collection errors excluded; 4 fail = pre-existing; non-flaky |
+
+**Critical findings (8 HIGH / 12 MEDIUM / 7 LOW)**：
+
+HIGH-1: 104/342 Rust production files (30%) have ZERO inline `#[test]` or `#[cfg(test)]` -- including tick pipeline hot-path steps (step_0_fast_track 636 LOC, step_4_5_dispatch 1663 LOC, step_6_risk_checks 561 LOC), fill_engine 710 LOC, risk_config_advanced 1261 LOC.
+HIGH-2: 107/196 Python app modules (55%) have no corresponding test file -- including h0_gate 971 LOC, risk_routes 1091 LOC, live_trust_routes 1121 LOC, strategy_ai_routes 1213 LOC.
+HIGH-3: 4 Python test files cannot be collected (ModuleNotFoundError: 'program_code') -- R6/R7 calibration/advisory tests use absolute `from program_code...` imports but pytest runs from control_api_v1 directory.
+HIGH-4: 0 proptest usage in entire Rust codebase -- no property-based testing for serde round-trip, state machine transitions, or IPC schema fuzzing.
+HIGH-5: test_v072_feature_baseline_writer_static fails: assertion string `--apply requires --i-understand-this-modifies-db` does not match actual source `rejected flag {arg}: --apply requires the explicit acknowledgement flag`.
+HIGH-6: 2 Rust integration tests fail persistently: stress_bb_breakout_valid_squeeze_with_volume and stress_bb_reversion_extreme_oversold_bounce -- strategy signal logic not triggering as test expects.
+HIGH-7: 39 Python tests with genuinely NO assertions (AST-verified) -- including 15 in test_layer2.py, 2 in test_paper_live_gate.py.
+HIGH-8: 0 DB connection loss tests exist; no test simulates mid-transaction PG drop/timeout in Python or Rust.
+
+MEDIUM-1: 447 .unwrap() calls in Rust production code (excluding tests) -- any could panic on malformed data.
+MEDIUM-2: 2 tautological `assert True` in test_bybit_rest_client_parity.py:549 and test_v055_evidence_insert_fix.py:1320.
+MEDIUM-3: 3 duplicate `test_pure_utils.py` files across test directories cause pytest collection conflicts.
+MEDIUM-4: No SLA benchmark for H0 Gate <1ms or IPC <5ms -- only tick latency benchmark (<100us) exists.
+MEDIUM-5: Float exact equality `==` used in ~15 places for prices/quantities in test_layer2.py and test_paper_live_gate.py (should use pytest.approx).
+MEDIUM-6: Only 32 async test functions in 24 files for Python -- given heavily async codebase (asyncio), concurrency coverage is thin.
+MEDIUM-7: Cross-language float consistency tests limited to manifest signer (8 tests) and executor decision parity (20 tests) -- ATR/BB/Sharpe/indicator calculations have 0 cross-language tests.
+MEDIUM-8: risk_config_advanced.rs (1261 LOC) has 0 test references anywhere in test code.
+MEDIUM-9: ws_client/ (parsers.rs 368 LOC + connection.rs + run_loop.rs + dispatch.rs 718 LOC) has 0 tests.
+MEDIUM-10: paper_state/fill_engine.rs (710 LOC) has 0 direct test file; only exercised indirectly via paper_state/tests.rs.
+MEDIUM-11: governance_hub_cascades.py (811 LOC) and governance_hub_event_handlers.py have 0 test file.
+MEDIUM-12: learning_auto_pipeline.py (827 LOC) and layer2_engine.py (840 LOC) have 0 test file.
+
+LOW-1: 32 skip/xfail markers -- mostly conditional (env-var gated for Linux PG), acceptable.
+LOW-2: 1 #[ignore] in Rust: LG1-T3 known gap h0_shadow_mode propagation.
+LOW-3: event_consumer/bootstrap.rs (982 LOC) and main_pipelines.rs (981 LOC) untested -- primarily wiring/startup.
+LOW-4: strategies/**/params.rs files (bb_breakout 592, bb_reversion 368, grid_trading 340, ma_crossover config) untested -- config/param structs.
+LOW-5: Pydantic V1 @validator deprecation warnings (423 warnings) in replay routes.
+LOW-6: news/provider.rs and news/types.rs untested -- non-critical feature module.
+LOW-7: replay/profile.rs (322 LOC) and replay/apply_fill.rs (761 LOC) lack inline tests but are covered by integration tests.
+
+**教訓**：
+1. Per-file test coverage gap was never previously inventoried at scale. 107/196 Python app modules untested is a structural debt, not a single-sprint gap.
+2. Collection errors from absolute import (`from program_code...`) indicate these tests were never run from the control_api_v1 directory -- they only work from srv root with PYTHONPATH set. This means 4 test files (R6/R7 calibration + advisory) have NEVER run in the standard pytest workflow.
+3. The absence of proptest in a Rust trading engine is a significant architectural gap -- serde round-trip, state machine fuzzing, and numeric edge case exploration would all benefit.
+4. The stress_integration test failures (bb_breakout + bb_reversion) suggest strategy logic drift since the tests were written, or the tests themselves have incorrect expectations post-refactor.
+
+**Report**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--full-scope-testing-audit.md`
+
+---
+
 ### 2026-05-11 P0 Replay Tier A Post-IMPL Regression (HEAD `d9a52572`, 8 local commits) — **PASS · 0 BLOCKER**
 
 **對象**：4 個 E1 sub-task 合流後完整回歸驗 — E1-A T1+T2+T2.5 (`ffc57d7f`/`452ad7ba`) / E1-B T3+T4 (`7f6182b2`/`effb55ec`) / E1-C T5 (`a17ff37a`/`77046b62`) / E1-D T6 acceptance pack (`01b05e29`/`d9a52572`)。

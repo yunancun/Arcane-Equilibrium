@@ -361,19 +361,28 @@
         return;
       }
 
-      // 收 reason — 用簡單 prompt 即可（promote modal 已收 confirmation
-      // phrase；reason 為審計補充上下文）
-      // 避免 native prompt UX 不友好；用 ocPrompt 若存在；否則用最低線
-      // 「為什麼晉升」textarea modal — 此處沿用 native prompt 與 settings
-      // tab restart modal 的 simple-step pattern 一致（W-AUDIT-7c
-      // governance critical 寫操作必走 typed-confirm 為 phrase；reason
-      // 不是 critical phrase 故 native prompt 可接受）。
-      let reason = window.prompt(
-        '請輸入晉升理由（1-500 字）：\n例如「Stage 1 entry_fills=12 滿足晉升條件，operator 拍板」',
-        'operator manual promote'
-      );
+      // A3-MAJOR-6 fix：用 openConfirmModal + 內嵌 input 取代 native window.prompt
+      let reason = await new Promise(function(resolve) {
+        var ov = document.createElement('div');
+        ov.className = 'oc-confirm-overlay show';
+        ov.innerHTML =
+          '<div class="oc-confirm-dialog" style="max-width:480px">' +
+            '<h3>請輸入晉升理由</h3>' +
+            '<p style="font-size:12px;color:var(--text-dim)">1-500 字，例如「Stage 1 entry_fills=12 滿足晉升條件，operator 拍板」</p>' +
+            '<textarea id="oc-promote-reason" style="width:100%;min-height:80px;font-family:inherit;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical" placeholder="operator manual promote"></textarea>' +
+            '<div class="btn-row" style="margin-top:12px">' +
+              '<button id="oc-reason-cancel" class="oc-btn">取消</button>' +
+              '<button id="oc-reason-ok" class="oc-btn oc-btn-primary">確認</button>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(ov);
+        var ta = document.getElementById('oc-promote-reason');
+        ta.focus();
+        document.getElementById('oc-reason-cancel').onclick = function() { ov.remove(); resolve(null); };
+        document.getElementById('oc-reason-ok').onclick = function() { ov.remove(); resolve(ta.value); };
+        ov.addEventListener('keydown', function(e) { if (e.key === 'Escape') { ov.remove(); resolve(null); } });
+      });
       if (reason === null) {
-        // user 在 reason prompt 取消
         if (typeof ocToast === 'function') {
           ocToast('已取消 manual promote / Cancelled', 'neutral');
         }

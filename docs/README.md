@@ -38,7 +38,7 @@ docs/
 │   └── YYYY-MM-DD_主题名/
 │
 ├── decisions/                         ← 重大架构/设计决策记录 + 治理源文件（DOC/SM/EX .docx）
-├── adr/                               ← 架构决策记录（ADR 0001..0019）
+├── adr/                               ← 架构决策记录（ADR 0001..0022）
 │
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │
@@ -159,6 +159,33 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
+### 2026-05-16 12-agent consolidated audit + doc fix
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-16--12-agent-consolidated-fix-plan.md` | PA 12-agent consolidated audit fix plan：FA/AI-E/QC/E5/A3/E3/MIT/R4/BB/CC finding 驗證 + 修復優先排序 |
+| `CCAgentWorkSpace/Operator/2026-05-16--12-agent-consolidated-fix-plan.md` | Operator brief：12-agent consolidated fix plan |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-16--full-scope-testing-audit.md` | E4 full-scope testing audit |
+
+### 2026-05-11 Sprint N+1 dispatch + W-D + LG design
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w_d_mag083_pa_audit.md` | PA MAG-083 三角 audit |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w2_impl_v12_dispatch_plan.md` | PA W2 A4-C IMPL v1.2 dispatch plan |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_v083_ipc_close_fix_design.md` | PA P1 V083 IPC close fix design |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_rca1_f1_f2_emergency_fix_plan.md` | PA P1 RCA1 F1/F2 emergency fix plan |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_22h08_deploy_edge_regression_rca.md` | PA P0 22h08 deploy edge regression RCA |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_option_a_position_state_ssot_refactor.md` | PA P0 option A position state SSOT refactor |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p1_strategist_params_persist_ma_crossover_rca.md` | PA P1 Strategist params persist MA crossover RCA |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p2_n2_backlog_tickets.md` | PA P2 N+2 backlog tickets |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--f3_f4_writer_defense_n1_dispatch_plan.md` | PA F3/F4 writer defense N+1 dispatch plan |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--p0_replay_engine_counterfactual_fix_design.md` | PA P0 replay engine counterfactual fix design |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md` | PA LG-2/3/4 design plan |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v1.md` | PA LG-3 spec v1 |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v2_final.md` | PA LG-3 spec v2 final |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md` | PA close-maker-first verdict |
+
 ### 2026-05-15 PM/PA/FA 5-day audit + current-state sync
 
 | 文件 | 内容 |
@@ -173,6 +200,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md` | W-AUDIT-8a Phase C0 liquidation revival inventory：DB/table/retention/source status + production topic guard test + C1 BB probe contract |
 | `execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md` | W-AUDIT-8a C1 standalone proof plan：official `allLiquidation.{symbol}` topic, isolated 24h BB probe contract, output files, and production boundary |
 | `execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md` | W-AUDIT-8b Funding Skew Directional spec v0.2：cross-sectional crowding signal using FundingSkew + OIDeltaPanel, with QC/MIT/BB Stage 0R design constraints |
+| `execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` | EDGE-P2-3 Phase 1b Close-Maker-First spec：close path maker-first refactor, 3-phase rollout, V094 migration design |
 | `execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md` | A4-C archive verdict：Stage 0R Step 5b failed the R² archive rule, so BTC→Alt Lead-Lag is diagnostic-only and no longer a promotion candidate |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_unblock_engineering_card.md` | A4-C PM/PA/FA engineering card：archive from promotion, allow only read-only `P1-A4C-RCA-1`, and block demo budget unless a future preregistered Stage 0R packet is green |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_stage0r_rca_start.md` | A4-C `P1-A4C-RCA-1` read-only RCA start：current 7d dry-run and finite threshold probe both remain below promotion/revive bands |
@@ -185,6 +213,12 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/Operator/2026-05-15--a4c_rca_final_and_c1_proof_start.md` | Operator brief for A4-C no-revive RCA closure and running C1 proof |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8b_review_stage0r_design.md` | W-AUDIT-8b Funding Skew review + Stage 0R design：QC/MIT/BB conditional approve design-only with locked K/DSR/PBO, raw panel joins, and funding attribution boundaries |
 | `CCAgentWorkSpace/Operator/2026-05-15--w_audit_8b_review_stage0r_design.md` | Operator brief for W-AUDIT-8b review/design checkpoint |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_consolidated.md` | AMD-2026-05-15-02 4-agent adversarial review consolidated：17 must-fix / 14 should-fix / QC+FA+BB+MIT 全 APPROVED-CONDITIONAL |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_qc.md` | QC verdict for AMD-2026-05-15-02：4 MF / 5 SF / 3 NTH |
+| `CCAgentWorkSpace/FA/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_fa.md` | FA verdict for AMD-2026-05-15-02：4 MF / 5 SF / 4 NTH |
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_bb.md` | BB verdict for AMD-2026-05-15-02：5 MF / 3 SF / 4 NTH |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_mit.md` | MIT verdict for AMD-2026-05-15-02：4 MF / 4 SF / 1 NTH |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_verification.md` | Stage 0R preflight verification report |
 | `archive/2026-05-15--todo_v24_stale_rows_archive.md` | TODO v24 中过时 active rows / stale claims 归档，包括 V079 pending、engine 5/8 binary、旧 05-09 demo state、旧 `[55]`/`[67]` 判断 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_healthcheck_55_invariant.md` | `[55]` fully-filled plan invariant source-clear report |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-15--feature_baseline_restore.md` | W-AUDIT-4b feature baseline restore report，646 active rows / 19 symbols / 34 features |
@@ -227,7 +261,14 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md` | AMD-2026-05-03-01 Wave 7 P5 IMPL accepted / deploy blocked split |
 | `governance_dev/amendments/2026-05-09--SM-05_executor_shadow_mode_polling_design.md` | AMD-2026-05-09-01 accepted SM-05 Executor shadow-mode polling policy; F-01 implementation pending |
 | `governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md` | AMD-2026-05-09-02 operator decision audit closure for P0-DECISION-AUDIT-2/4/5 |
+| `governance_dev/amendments/2026-05-10--AMD-2026-05-10-05-canary-stage-criteria-spec.md` | AMD-2026-05-10-05 canary stage criteria spec (Stage 1-4 promotion/demote criteria + sample-size gate) |
+| `governance_dev/amendments/2026-05-11--AMD-2026-05-11-W6-1-rfc-final-verdict-absorb.md` | AMD-2026-05-11-W6-1 RFC final verdict absorb (W6 governance metadata + duplicate_intent bug + imbalance weight) |
+| `governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` | AMD-2026-05-15-02 EDGE-P2-3 Phase 1b Close-Maker-First refactor (fee optimization pathway + 3-phase灰度 + V094 schema) |
 | `governance_dev/SPECIFICATION_REGISTER.md` | SM/EX/DOC/REF/ARCH/AUDIT/LG-X/OPS-X specification register, updated through W-AUDIT-1 + LG-X-05 catch-up |
+| `governance_dev/2026-05-11--w_c_window_pass_signoff.md` | W-C MAG-082 Stage 2 WINDOW_PASS sign-off (2026-05-11) |
+| `governance_dev/2026-05-11--w_d_mag083_reviewer_brief.md` | W-D MAG-083 reviewer brief |
+| `governance_dev/2026-05-11--w_d_mag084_signoff.md` | W-D MAG-084 operator sign-off |
+| `governance_dev/2026-05-11--w2_impl_signoff_pack.md` | W2 A4-C IMPL sign-off pack |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-09--w_audit_3_partial_f15_f17_sm05.md` | PM sign-off report for W-AUDIT-3 partial F-15/F-17/SM-05 checkpoint |
 | `CCAgentWorkSpace/Operator/2026-05-09--w_audit_3_partial_f15_f17_sm05.md` | Operator-facing copy of W-AUDIT-3 partial checkpoint report |
 | `adr/0015-openclaw-control-plane-repositioning.md` | ADR-0015: OpenClaw is Control Plane/Gateway, not trading conductor |

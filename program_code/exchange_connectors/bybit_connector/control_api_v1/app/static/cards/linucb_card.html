@@ -65,13 +65,9 @@
     <div id="linucb-shadow-bar"></div>
   </div>
 
+  <!-- A3-MAJOR-3 fix：移除無後端接線的 dead button；遷移/回滾須從 CLI 操作 -->
   <div class="phase4-card-footer">
-    <button id="linucb-migrate-btn" style="font-size:12px;">
-      Trigger migration / 觸發遷移
-    </button>
-    <button id="linucb-rollback-btn" style="font-size:12px;">
-      Rollback / 回滾
-    </button>
+    <span style="font-size:11px;color:var(--text-dim)">遷移/回滾須從 CLI 操作</span>
   </div>
 </div>
 
@@ -181,15 +177,6 @@
       showGrey('error');
     }
   }
-
-  document.getElementById('linucb-migrate-btn').addEventListener('click', function() {
-    if (!confirm('Trigger LinUCB arm space migration?\n觸發 LinUCB 臂空間遷移？')) return;
-    alert('Migration must be triggered via CLI (safety). 為安全起見，遷移須從 CLI 觸發。');
-  });
-  document.getElementById('linucb-rollback-btn').addEventListener('click', function() {
-    if (!confirm('Rollback to previous arm space?\n回滾到上一版臂空間？')) return;
-    alert('Rollback must be triggered via CLI (safety). 為安全起見，回滾須從 CLI 觸發。');
-  });
 
   refresh();
   setInterval(refresh, 30000);
