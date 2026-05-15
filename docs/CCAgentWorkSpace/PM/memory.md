@@ -2316,8 +2316,8 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Verification: `test_f7_new_healthchecks.py` 43 passed; touched Rust file
   rustfmt check passed; `tick_pipeline::tests::dual_rail_dispatch` 15 passed;
   `tick_pipeline::tests::fast_track_reduce` 19 passed.
-- Runtime remains pending: no deploy/rebuild was performed. Close the TODO item
-  only after deployment and `[27]` PASS outside fresh-restart grace.
+- Runtime deploy was later performed at `7b33ab2e`; close the TODO item only
+  after `[27]` PASS outside fresh-restart grace.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_intent_freeze_27_qty_rounding_rca.md`.
 
@@ -2340,3 +2340,22 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   W-AUDIT-8a Phase C/D / 8c / 8b alpha-path work instead of demo canary prep.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_oi_confirmed_5m_feasibility_probe.md`.
+
+## 2026-05-15 Post-rebuild Sync 7b33ab2e
+
+- Operator authorized push / three-side sync / rebuild. Mac/origin/Linux are
+  synchronized at `7b33ab2e`; this includes PM docs commit `2657621b`.
+- Rebuild command on `trade-core`:
+  `PATH=$HOME/.cargo/bin:$PATH bash helper_scripts/restart_all.sh --rebuild --keep-auth`.
+- Release build completed in 34.41s with only the pre-existing
+  `ma_crossover::make_intent` dead-code warning. Engine PID `4032406`, API PID
+  `4032675`.
+- `--keep-auth` warned signed live authorization is missing. No renewal was
+  attempted; live remains stale/blocked.
+- Direct post-rebuild probes: `[27]` PASS under fresh-restart grace
+  (`demo 30min_n=16`, live_demo baseline pending), `[66]` PASS, `[67]` PASS.
+  Full passive wrapper hung for >5m and was terminated.
+- `P1-INTENT-FREEZE-27` remains post-grace pending; Stage 1 demo and true-live
+  remain blocked.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--post_rebuild_sync_7b33ab2e.md`.
