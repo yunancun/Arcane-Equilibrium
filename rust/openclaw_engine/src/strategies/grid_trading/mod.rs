@@ -138,6 +138,20 @@ pub(crate) const MAKER_LIMIT_TIMEOUT_MIN_MS: u64 = 15_000;
 /// EDGE-P2-3 Phase 1B-3.1：硬上限，超出後掛單已屬過期庫存而非價格發現。
 pub(crate) const MAKER_LIMIT_TIMEOUT_MAX_MS: u64 = 300_000;
 
+/// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side reject cooldown
+/// 預設時長（取代既有 entry-side `reject_cooldown_ms`），對應 spec v1.2 §6.1
+/// 的 close cooldown 表「其他 reject → 1min」分支。當 close-maker 路徑被
+/// Bybit 以 PostOnly 以外的原因（如 Other / FokCancel）拒絕時，arm 該 symbol
+/// 的 close cooldown 1 分鐘，避免下一 tick 同條件再撞拒絕。
+pub(crate) const CLOSE_REJECT_COOLDOWN_DEFAULT_MS: u64 = 60_000;
+
+/// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side TooManyPending
+/// 帳戶級背壓固定退避時長，對應 spec v1.2 §6.1 表中 close TooManyPending
+/// 5min 分支（PM Wave 2b 任務明文要求 5min 固定值；spec §5.4 BB-MF-2 的
+/// per-symbol dynamic backoff (1s exp → 60s 上限 + global cascade) 屬獨立
+/// 工作項，不在本 prereq IMPL scope 內）。
+pub(crate) const CLOSE_REJECT_COOLDOWN_TOO_MANY_PENDING_MS: u64 = 300_000;
+
 /// Clamp a maker-limit timeout value into the strategy's supported range.
 /// Centralised so TOML binding + factory + tests all agree on the bounds.
 /// 將 maker-limit 超時值 clamp 至策略支援區間。集中處理以保 TOML binding /
@@ -218,12 +232,27 @@ pub struct GridTrading {
     /// FIX-25: One-way taker fee rate for OU spacing floor calculation.
     /// FIX-25：單邊 taker 手續費率，用於 OU 間距地板計算。
     pub(super) fee_rate: f64,
-    /// M-2: Per-symbol rejection backoff deadline (epoch ms). Set in `on_rejection`,
-    /// honored at the top of `on_tick` to prevent tight retry loops on persistent
-    /// guardian/cost_gate rejections.
-    /// M-2：每幣種拒絕退避截止時間（epoch ms）。`on_rejection` 中設定，
-    /// `on_tick` 開頭遵守，避免持續性 guardian/cost_gate 拒絕造成緊湊迴圈。
-    pub(super) reject_cooldown_until_ms: HashMap<String, u64>,
+    /// M-2 + EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — entry-side per-symbol
+    /// rejection backoff deadline (epoch ms)。原 `reject_cooldown_until_ms`
+    /// 拆分為 entry / close 兩條獨立 map 以解決 BB-MF-3「entry reject 凍結
+    /// close path silent degradation」（AMD-2026-05-15-02 §8 IMPL Prereq 6）。
+    /// 由 `on_rejection_impl`（governance 拒絕）+ `on_post_only_rejected_impl`
+    /// （PostOnly entry 拒絕）寫入；`on_tick` entry path 在 would_open 已知
+    /// 後檢查，僅阻擋 `Open` 發送，不影響同 tick 的 `Close` emission。
+    pub(super) reject_cooldown_entry_until_ms: HashMap<String, u64>,
+    /// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side per-symbol
+    /// rejection backoff deadline (epoch ms)。Phase 1b close-maker-first
+    /// 啟用後由 close-side dispatcher 透過 `arm_close_cooldown` 寫入，
+    /// 路由規則對應 spec v1.2 §6.1：
+    ///   - `MakerRejectionCategory::TooManyPending` → 5min（固定，spec §5.4
+    ///     dynamic backoff 屬獨立工作項，本 prereq 不實作）
+    ///   - `MakerRejectionCategory::PostOnlyCross` → no-op（per spec §5.3
+    ///     Race C：直接走 market，不進 close cooldown）
+    ///   - 其他類別（FokCancel / SelfCancel / Other） → 1min default
+    /// 本 prereq commit 僅完成「資料欄位 + 寫入 helper + 隔離測試」，close
+    /// path 真正進 cooldown gate 的接線留給 Phase 1b 主軸 IMPL（預期 close
+    /// emission 處檢查此 map，cooldown 期內走 market fallback）。
+    pub(super) reject_cooldown_close_until_ms: HashMap<String, u64>,
     /// QC-H7: Adaptive range ±% for initial/rebalance grid (default 0.10 = ±10%).
     /// QC-H7：自適應範圍 ±%（默認 0.10 = ±10%）。
     pub(crate) adaptive_range_pct: f64,
@@ -269,11 +298,11 @@ pub struct GridTrading {
     /// in `on_post_only_rejected` after Bybit rejects a PostOnly maker
     /// entry. Bounded `[5_000, 600_000]` by `validate()`. Distinct from
     /// `reject_backoff_ms` which fires on governance pipeline rejection.
-    /// Consumed by `signal.rs` via the existing
-    /// `reject_cooldown_until_ms.get(sym) < ctx.timestamp_ms` guard.
+    /// Consumed by `signal.rs` via the entry-side cooldown guard
+    /// (`reject_cooldown_entry_until_ms`，BB-MF-3 重命名 2026-05-16)。
     /// G7-09c Phase 2：交易所拒絕 PostOnly 後設冷卻時長，由
-    /// `on_post_only_rejected` 寫入既有 `reject_cooldown_until_ms` map；
-    /// `signal.rs` 早已 check 此 map，故接線一條鏈即生效。
+    /// `on_post_only_rejected` 寫入 `reject_cooldown_entry_until_ms` map；
+    /// `signal.rs` entry path check 此 map，僅阻擋 `Open` 發送。
     pub(crate) reject_cooldown_ms: u64,
     /// Minimum grid step in bps of anchor price, applied after OU spacing.
     /// OU spacing 後套用的最小網格步長（錨定價格 bps）。
@@ -393,7 +422,11 @@ impl Strategy for GridTrading {
     }
 
     /// EDGE-P2-3 Phase 1B-3: exchange-side PostOnly maker rejection callback.
-    /// EDGE-P2-3 Phase 1B-3：交易所側 PostOnly maker 拒絕回調。
+    /// 此 callback 預期由「PostOnly maker entry」路徑觸發（spec v1.2 §6.1 + §6.2）；
+    /// BB-MF-3 (2026-05-16) 後僅寫入 entry cooldown map，不影響 close path。
+    /// EDGE-P2-3 Phase 1B-3：交易所側 PostOnly maker entry 拒絕回調；
+    /// 寫入 `reject_cooldown_entry_until_ms`，與 `reject_cooldown_close_until_ms`
+    /// 互不影響。
     fn on_post_only_rejected(
         &mut self,
         symbol: &str,
@@ -427,5 +460,23 @@ impl Strategy for GridTrading {
     }
     fn set_conf_scale(&mut self, scale: f64) {
         self.conf_scale = scale.clamp(0.0, 2.0);
+    }
+}
+
+// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side cooldown public API。
+// 不放在 `Strategy` trait（避免影響 4 個非 grid 策略 default impl 與 Box<dyn>
+// dispatcher）；Phase 1b 主軸如需擴及他策略另議。
+impl GridTrading {
+    /// 對外暴露的 close-side maker rejection cooldown 寫入入口。Phase 1b
+    /// 主軸 IMPL 後由 close dispatcher 觸發；本 prereq commit 提供完整入口
+    /// + 測試覆蓋 + 路由邏輯，但不接線生產 dispatcher（commands.rs 仍
+    /// hard-coded market）。實作細節見 `position_mgmt::arm_close_cooldown_impl`。
+    pub fn arm_close_cooldown(
+        &mut self,
+        symbol: &str,
+        ts_ms: i64,
+        category: &crate::strategies::maker_rejection::MakerRejectionCategory,
+    ) {
+        self.arm_close_cooldown_impl(symbol, ts_ms, category);
     }
 }

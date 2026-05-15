@@ -164,9 +164,12 @@ impl GridTrading {
 
         // M-2: Capture emit timestamp before rollback overwrites it.
         // M-2：在回滾覆蓋之前捕獲發送時間戳。
+        // BB-MF-3 (2026-05-16)：governance pipeline rejection 屬 entry-side
+        // 路徑（per_strategy_new_entry_rejection 只觸發於 entry intent），
+        // 寫入 entry cooldown map，不影響同 symbol 的 close emission。
         if let Some(&emit_ts) = self.last_trade_ms.get(sym) {
             if emit_ts > 0 {
-                self.reject_cooldown_until_ms
+                self.reject_cooldown_entry_until_ms
                     .insert(sym.to_string(), emit_ts + self.reject_backoff_ms);
             }
         }
@@ -194,16 +197,14 @@ impl GridTrading {
     }
 
     /// EDGE-P2-3 Phase 1B-3 (FIX-G7-09C-PHASE2-WIRE-1B3): exchange rejected
-    /// our PostOnly maker entry — arm a per-symbol cooldown so `signal.rs`
-    /// (which already checks `reject_cooldown_until_ms.get(sym) < ts`) skips
-    /// re-emission for `reject_cooldown_ms` (default 60s, validate
-    /// `[5_000, 600_000]`). Saturating add guards against `i64::MAX` overflow
-    /// when `ts_ms` is near the type ceiling. Category is currently logged
-    /// for forensics but not branched on; future tuning may give
-    /// `TooManyPending` a longer multiplier (account-wide back-pressure).
-    /// EDGE-P2-3 Phase 1B-3：交易所拒絕後設冷卻；`signal.rs` 已 check
-    /// `reject_cooldown_until_ms`，接線一條鏈即生效。category 目前僅
-    /// 紀錄供鑑識，未來可對 `TooManyPending` 給更長 multiplier。
+    /// our PostOnly maker **entry** — arm a per-symbol entry cooldown.
+    /// BB-MF-3 (2026-05-16)：寫入 `reject_cooldown_entry_until_ms`，僅阻擋
+    /// `signal.rs` 的 Open emission；同 symbol 的 Close emission 由獨立的
+    /// `reject_cooldown_close_until_ms` 控制（pre-Phase 2a Demo prereq）。
+    /// 預期接線：本 callback 仍由「PostOnly maker entry」路徑觸發；close
+    /// path 啟用 maker-first 後（Phase 1b 主軸）改透過 `arm_close_cooldown`
+    /// 寫入 close map，不重用本路徑。category 目前僅紀錄供鑑識，未來可對
+    /// `TooManyPending` 給更長 multiplier。Saturating add 防 i64 溢出。
     pub(super) fn on_post_only_rejected_impl(
         &mut self,
         symbol: &str,
@@ -214,10 +215,9 @@ impl GridTrading {
         // Saturating add 防 i64 溢出。
         let cooldown_until_i64 = ts_ms.saturating_add(self.reject_cooldown_ms as i64);
         // Cast to u64 for storage; values < 0 (impossible here) fall to 0
-        // — `signal.rs` then immediately skips the cooldown branch (correct).
-        // 存 u64；不可能為負，但 cast as u64 對負值會 wrap，故先 max(0)。
+        // — entry path 後續即略過 cooldown 分支。
         let cooldown_until_ms = cooldown_until_i64.max(0) as u64;
-        self.reject_cooldown_until_ms
+        self.reject_cooldown_entry_until_ms
             .insert(symbol.to_string(), cooldown_until_ms);
         warn!(
             strategy = "grid_trading",
@@ -226,8 +226,74 @@ impl GridTrading {
             cooldown_ms = self.reject_cooldown_ms,
             cooldown_until_ms,
             category = %category.label(),
-            "post-only rejected by exchange — armed reject cooldown \
-             / 交易所拒絕 PostOnly — 已設冷卻"
+            side = "entry",
+            "post-only entry rejected by exchange — armed entry reject cooldown \
+             / 交易所拒絕 PostOnly entry — 已設 entry 冷卻"
+        );
+    }
+
+    /// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side maker rejection
+    /// cooldown 寫入 helper。對應 spec v1.2 §6.1 dispatch table：
+    ///   - `MakerRejectionCategory::PostOnlyCross` → no-op（spec §5.3 Race C：
+    ///     價已過則直接 market，不進 close cooldown）
+    ///   - `MakerRejectionCategory::TooManyPending` → 5min 固定（spec §5.4
+    ///     dynamic backoff per-symbol exp + global cascade 屬獨立工作項，
+    ///     本 prereq 不實作）
+    ///   - 其他類別（FokCancel / SelfCancel / Other） → 1min default
+    /// 寫入 `reject_cooldown_close_until_ms`，下游 close path 的 maker-first
+    /// gate 在 Phase 1b 主軸 IMPL 後生效（cooldown 期內走 market fallback）。
+    /// **本 prereq commit 不接線生產 dispatcher**（commands.rs 仍 hard-coded
+    /// market），由單元測試驗證 helper 行為與 entry/close 隔離不變式。
+    /// Saturating add 防 i64 溢出。
+    pub(super) fn arm_close_cooldown_impl(
+        &mut self,
+        symbol: &str,
+        ts_ms: i64,
+        category: &MakerRejectionCategory,
+    ) {
+        // 路由規則：依 category 決定 cooldown_ms（None = 不進 close cooldown）。
+        let cooldown_ms: Option<u64> = match category {
+            // spec §5.3 Race C：PostOnlyCross close 走 market，不 arm cooldown。
+            MakerRejectionCategory::PostOnlyCross => None,
+            // spec §6.1 + PM Wave 2b 任務：TooManyPending close → 5min 固定。
+            MakerRejectionCategory::TooManyPending => {
+                Some(super::CLOSE_REJECT_COOLDOWN_TOO_MANY_PENDING_MS)
+            }
+            // 其他 reject 類別走 1min default（per spec §6.1 表「其他 reject → 1min」）。
+            MakerRejectionCategory::FokCancel
+            | MakerRejectionCategory::SelfCancel
+            | MakerRejectionCategory::Other(_) => Some(super::CLOSE_REJECT_COOLDOWN_DEFAULT_MS),
+        };
+
+        let Some(cooldown_ms) = cooldown_ms else {
+            // PostOnlyCross close：不 arm cooldown，僅紀錄供 forensics。
+            warn!(
+                strategy = "grid_trading",
+                %symbol,
+                ts_ms,
+                category = %category.label(),
+                side = "close",
+                "close postonly_cross — bypass cooldown, fall back to market \
+                 / close 路徑 PostOnly 拒絕 — 跳過 cooldown，走 market"
+            );
+            return;
+        };
+
+        // Saturating add against i64 overflow / Saturating add 防 i64 溢出。
+        let cooldown_until_i64 = ts_ms.saturating_add(cooldown_ms as i64);
+        let cooldown_until_ms = cooldown_until_i64.max(0) as u64;
+        self.reject_cooldown_close_until_ms
+            .insert(symbol.to_string(), cooldown_until_ms);
+        warn!(
+            strategy = "grid_trading",
+            %symbol,
+            ts_ms,
+            cooldown_ms,
+            cooldown_until_ms,
+            category = %category.label(),
+            side = "close",
+            "close maker rejected by exchange — armed close reject cooldown \
+             / 交易所拒絕 close maker — 已設 close 冷卻"
         );
     }
 }

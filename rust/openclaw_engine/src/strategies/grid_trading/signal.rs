@@ -149,10 +149,19 @@ impl GridTrading {
             }
         }
 
-        // M-2: Honor per-symbol rejection backoff before any cross detection.
-        // M-2：在任何 cross 偵測前遵守該幣種的拒絕退避。
-        if let Some(&until) = self.reject_cooldown_until_ms.get(sym) {
-            if ctx.timestamp_ms < until {
+        // BB-MF-3 (2026-05-16) — 早期 unified cooldown gate 已 deprecated。
+        // 拆 entry / close 兩條獨立 cooldown 後，per-side gate 改在 would_open
+        // 已知後分別檢查（spec v1.2 §6.1 + AMD-2026-05-15-02 §8 IMPL Prereq 6）。
+        // 此處保留 cross 偵測前的「兩 side cooldown 都 active」optimization
+        // short-circuit：若 entry 與 close 同時被冷卻，整個 tick 無動作。
+        // SAFETY 不變量：entry-only / close-only cooldown 不在此處 short-circuit，
+        // 必延後到 would_open 已知後 per-side gate 處理；違反 = 回到 BB-MF-3 silent
+        // degradation 反模式。
+        if let (Some(&entry_until), Some(&close_until)) = (
+            self.reject_cooldown_entry_until_ms.get(sym),
+            self.reject_cooldown_close_until_ms.get(sym),
+        ) {
+            if ctx.timestamp_ms < entry_until && ctx.timestamp_ms < close_until {
                 return vec![];
             }
         }
@@ -277,6 +286,21 @@ impl GridTrading {
                 self.churn_breaker_until_ms.remove(sym);
             }
         }
+        // BB-MF-3 (2026-05-16) — per-side cooldown gate (取代舊 unified gate)：
+        // 僅在 would_open=true 時檢查 entry cooldown，避免 BB-MF-3 silent
+        // degradation（entry reject 凍結同 symbol close emission）。
+        // SAFETY 不變量：M-2 + G7-09c entry-side tight loop 防護維持原語意；
+        // close path 不在此處 gate，由 Phase 1b 主軸 dispatcher 在 close
+        // emission 時觀察 `reject_cooldown_close_until_ms` 後決定 maker
+        // vs market（本 prereq commit 不接線生產 dispatcher）。
+        if would_open {
+            if let Some(&entry_until) = self.reject_cooldown_entry_until_ms.get(sym) {
+                if ctx.timestamp_ms < entry_until {
+                    return vec![];
+                }
+            }
+        }
+
         let entry_order = if would_open {
             let is_long = is_down_cross;
             self.resolve_entry_order(ctx, is_long)
