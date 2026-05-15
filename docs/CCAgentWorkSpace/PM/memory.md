@@ -2176,3 +2176,13 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Rebased A4-C spec/tooling to Stage 0R diagnostics: report output is `eligible_for_demo_canary=true/false`; legacy `promote_n2` compatibility field remains false and non-promotional. Smoke test PASS.
 - Step 4 fill-lineage gate is still blocked for demo canary launch: `[55]` shows real-fill evidence exists (`chains_with_real_fill_report=15`, no quality-bad rows) but status is `WARN_REAL_FILL_PROPAGATION_PARTIAL` (15/89 below 50% threshold).
 - Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--canary_rebase_step3_step4.md`.
+
+## 2026-05-15 Stage 0R Preflight Verification
+
+- Reran W2 A4-C Stage 0R preflight on Linux `trade-core` at HEAD `eb181d70` using `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql` and the existing W2 report CLI.
+- Tooling smoke PASS; real report fetched 4,417 counterfactual rows over 7d.
+- GATE-RED: `eligible_for_demo_canary=false`. Pooled metrics: `n=122`, `avg_net_bps=-3.5570`, `t=-1.5345`, `PSR(0)=0.0542`, `DSR(K=95)=0.0000`, bootstrap CI `[-3.9919, -1.2380]`, R²(60/120/300)=`0.0004/0.0000/0.0017`.
+- No per-symbol cohort qualified; best diagnostic symbol was `DOTUSDT` (`+2.36 bps`, `n=16`, `t=0.671`, `DSR=0.000`), still below the +5 defer band.
+- Source-tier sanity: legacy panel rows=619; diagnostic source rows=12 snapshots / 84 expanded rows / 0 non-zero expected_dir. SQL path is alive, but diagnostic producer maturity and statistical edge are insufficient.
+- Boundary: read-only verification only; no paper enablement, demo canary launch, runtime config change, live auth mutation, rebuild, restart, or deploy.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_verification.md`.
