@@ -180,8 +180,13 @@ pub struct DonchianResult {
     pub width: f64,
 }
 
-/// Donchian Channel over the last `period` bars.
-/// 最近 `period` 根 K 線的唐奇安通道。
+/// 最近 `period` 根 K 線的唐奇安通道（含當前 bar，存在 look-ahead bias）。
+/// 生產路徑請使用 `donchian_prior()`，它排除當前 bar。
+/// 本函數保留給 `donchian_prior()` 內部調用及純數學驗證測試。
+#[deprecated(
+    since = "0.1.0",
+    note = "includes current bar (look-ahead bias); use donchian_prior() for production paths"
+)]
 pub fn donchian(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Option<DonchianResult> {
     let n = high.len().min(low.len()).min(close.len());
     if period == 0 || n < period {
@@ -207,8 +212,9 @@ pub fn donchian(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Opti
     })
 }
 
-/// Donchian Channel over the `period` bars preceding the current bar.
-/// 當前 K 線之前 `period` 根 K 線的唐奇安通道。
+/// 當前 K 線之前 `period` 根 K 線的唐奇安通道（排除當前 bar，無 look-ahead bias）。
+/// 生產路徑唯一正確入口。
+#[allow(deprecated)] // 內部調用 donchian() 是刻意的：先切掉當前 bar 再算
 pub fn donchian_prior(
     high: &[f64],
     low: &[f64],
@@ -227,6 +233,7 @@ pub fn donchian_prior(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]
+#[allow(deprecated)] // 測試模組需要直接調用 donchian() 驗證其數學正確性
 mod tests {
     use super::*;
 
@@ -323,12 +330,32 @@ mod tests {
 
     #[test]
     fn test_donchian_prior_excludes_current_bar() {
+        // 當前 bar 使用極端值（999 / -999），若被包含結果會完全不同
         let high = [10.0, 11.0, 12.0, 999.0];
         let low = [8.0, 7.5, 7.0, -999.0];
         let close = [9.0, 10.0, 11.0, 500.0];
         let r = donchian_prior(&high, &low, &close, 3).unwrap();
+        // 正確結果只看 bar 0..2（排除 bar 3）
         assert!((r.upper - 12.0).abs() < 1e-10);
         assert!((r.lower - 7.0).abs() < 1e-10);
+
+        // 回歸守護：若含當前 bar 則 upper=999 / lower=-999，證明 prior 確實排除
+        let biased = donchian(&high, &low, &close, 3).unwrap();
+        assert!(
+            (biased.upper - 999.0).abs() < 1e-10,
+            "biased variant must include current bar's extreme high"
+        );
+        assert!(
+            (biased.lower - (-999.0)).abs() < 1e-10,
+            "biased variant must include current bar's extreme low"
+        );
+        // 兩者不等 = donchian_prior 確實排除了當前 bar
+        assert!(
+            (r.upper - biased.upper).abs() > 1.0,
+            "donchian_prior must differ from donchian when current bar is extreme"
+        );
+
+        // 數據不足邊界
         assert!(donchian_prior(&high[..3], &low[..3], &close[..3], 3).is_none());
     }
 }

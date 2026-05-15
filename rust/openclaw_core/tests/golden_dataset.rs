@@ -88,6 +88,7 @@ fn generate_synthetic_ohlcv(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[allow(deprecated)] // 數學驗證測試：刻意調用 donchian() 驗證其內部正確性
 fn test_all_indicators_compute_on_synthetic_data() {
     let (_open, high, low, close, volume) = generate_synthetic_ohlcv(200, 42);
 
@@ -321,6 +322,7 @@ fn test_kahan_summation_accuracy_via_sma() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[allow(deprecated)] // 數學驗證測試：刻意調用 donchian() 驗證 None 邊界
 fn test_insufficient_data_returns_none() {
     let short = vec![1.0, 2.0, 3.0];
     let short_h = vec![1.5, 2.5, 3.5];
@@ -583,6 +585,7 @@ fn test_edge_cases_zero_and_empty() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[allow(deprecated)] // 數學驗證測試：刻意調用 donchian() 做 ATR/Donchian 範圍交叉驗證
 fn test_cross_indicator_consistency() {
     let (_open, high, low, close, _volume) = generate_synthetic_ohlcv(200, 42);
 

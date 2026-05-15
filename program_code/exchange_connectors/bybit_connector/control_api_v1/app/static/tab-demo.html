@@ -1112,9 +1112,9 @@ async function closeDemoPosition(symbol, ownerStrategy, frozenReason) {
     return;
   }
   const ok = await openConfirmModal({
-    title: '确认平仓 Demo 倉位',
-    body: '确认平仓 ' + symbol + '？',
-    confirmLabel: '确认平仓',
+    title: '確認平倉 Demo 倉位',
+    body: '確認平倉 ' + symbol + '？',
+    confirmLabel: '確認平倉',
     confirmClass: 'oc-btn-danger'
   }).catch(function() { return false; });
   if (!ok) return;

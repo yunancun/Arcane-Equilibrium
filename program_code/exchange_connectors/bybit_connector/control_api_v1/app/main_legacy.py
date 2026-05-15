@@ -356,6 +356,29 @@ async def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
     )
 
 
+# ── E3-MED-4: 未捕獲例外的全域錯誤消毒中間件 ──────────────────────────────────
+# 防止未處理的 500 錯誤把 str(exc)（含內部路徑/堆疊）洩漏給客戶端。
+# OPENCLAW_DEBUG=1 時保留詳細錯誤訊息供開發使用；生產模式只回傳通用訊息。
+_OPENCLAW_DEBUG = os.getenv("OPENCLAW_DEBUG", "").strip() == "1"
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    from starlette.responses import JSONResponse
+    logger.error(
+        "Unhandled exception on %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+        exc_info=True,
+    )
+    if _OPENCLAW_DEBUG:
+        detail = {"reason_codes": ["internal_error"], "detail": str(exc)}
+    else:
+        detail = {"reason_codes": ["internal_error"], "detail": "Internal server error"}
+    return JSONResponse(status_code=500, content={"detail": detail})
+
+
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
