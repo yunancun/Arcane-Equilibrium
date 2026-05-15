@@ -412,7 +412,12 @@ async def promote(
     try:
         from program_code.ml_training.model_registry import transition_canary_status  # noqa: PLC0415
     except ImportError as e:
-        raise HTTPException(status_code=503, detail=f"model_registry module missing: {e}")
+        # WP-05 Real Fix
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=503,
+            detail=sanitize_exc_for_detail(e, "internal_error"),
+        )
 
     ok = transition_canary_status(
         row_id=body.row_id,

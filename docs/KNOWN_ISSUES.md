@@ -7,8 +7,24 @@
 # 格式：每個問題獨立章節，含 狀態/位置/排查方式/緩解方案。
 # 狀態：OPEN（待驗證）/ CONFIRMED（已確認是問題）/ RESOLVED（已修復，附 commit）
 #
-# 統計：OPEN 9 / CONFIRMED 0 / RESOLVED 15
-# 最後更新：2026-04-12（FIX-48 全程序鏈審計更新）
+# 統計：OPEN 14 / CONFIRMED 0 / RESOLVED 25
+# 最後更新：2026-05-16（Wave 1 12-agent audit closure + 多 healthcheck/governance event reconcile）
+#
+# 2026-05-16 reconcile 範圍：
+# - W-C MAG-082 Stage 2 WINDOW_PASS（2026-05-11）已關
+# - W-D MAG-083 三角 audit + MAG-084 operator sign-off（2026-05-11）已關
+# - W-AUDIT-3b RouterLeaseGuard runtime smoke（2026-05-15）已關
+# - `[55]` fill-lineage source-cleared（2026-05-15）已關
+# - `[27]` intents counter freeze post-grace closure（2026-05-15）已關
+# - `[67]` feature baseline restored（2026-05-15）已關
+# - W-AUDIT-5a/5b ops 對賬（2026-05-15）已關
+# - W-AUDIT-7c GUI lexical scope shadow fix（2026-05-15）已關
+# - W-AUDIT-8a Phase C0 liquidation inventory source/doc 已關（C1 24h proof 跑中）
+# - A4-C BTC→Alt Lead-Lag 從 promotion 路徑歸檔（2026-05-15）
+# - V079 / V083 / V084 schema 已 apply（2026-05-15 之前）
+# - strategy_trial_ledger schema 已 apply（2026-05-15 之前）
+# - 12-agent audit Wave 1 land（2026-05-16）
+# - 新加 OPEN：P0-EDGE-1 / P0-LG-1/2/3 / P0-OPS-1..4 / W-AUDIT-8a C1 / W-AUDIT-8b Stage 0R
 
 ---
 
@@ -326,3 +342,210 @@
 # - Paper 授權重啟丟失 → 已修復（commit d065453）
 # - Inverse PnL 公式 → 已修復（commit e9d0df8）
 # - Paper→Demo 同步問題 → 已修復（commit ab31353）
+
+---
+
+# ━━━ 2026-05-16 Wave 1 12-agent audit reconcile — RESOLVED ━━━
+
+## RESOLVED — WC-MAG-082：W-C MAG-082 Stage 2 24h Canary Validation
+
+**來源**：Sprint N+1 Wave W-C 收口
+**嚴重性**：原 HIGH（live promotion gate） → 已關
+**修復**：2026-05-11 WINDOW_PASS（`docs/governance_dev/2026-05-11--w_c_window_pass_signoff.md`）
+**驗證**：Decision Lease router gate evidence-mode 在 `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` + `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow` 下完成 24h 觀察 + lineage 寫入 Agent Spine ExecutionPlan rows
+**註**：本關閉 = MAG-082 stage 2 evidence collection done，**非** true-live auth、**非** Executor order authority。
+
+---
+
+## RESOLVED — WD-MAG-083：W-D MAG-083 Final Release Audit
+
+**來源**：Sprint N+1 Wave W-D
+**嚴重性**：MEDIUM
+**修復**：2026-05-11 三角 audit done（PA + QC + MIT 並行獨立 review；`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w_d_mag083_pa_audit.md`）
+
+---
+
+## RESOLVED — WD-MAG-084：W-D MAG-084 Operator Sign-Off
+
+**來源**：Sprint N+1 Wave W-D
+**嚴重性**：MEDIUM
+**修復**：2026-05-11 operator sign-off（`docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`）
+
+---
+
+## RESOLVED — WA-3b：W-AUDIT-3b RouterLeaseGuard runtime smoke test
+
+**來源**：12-agent audit Wave W-AUDIT-3b
+**嚴重性**：HIGH（runtime governance gate）
+**修復**：2026-05-15 runtime smoke pass（`docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-11--w_audit_3b_runtime_smoke.md`）
+
+---
+
+## RESOLVED — HC-55：`[55]` fill-lineage healthcheck invariant 漂移
+
+**來源**：Sprint N+1 P1 healthcheck audit
+**嚴重性**：HIGH（healthcheck 誤判導致 micro-canary 假警）
+**修復**：2026-05-15 P1-HEALTHCHECK-55-INVARIANT 將 50%-of-all-chains heuristic 改為 fully-filled plan invariant
+**驗證**：trade-core PG 直查 144 chains / 25 fully-filled / 25 真 fill ER；`partial_plan_fill_chains=13` 另列；bad quality counters 0
+**註**：partial per-fill ER 仍是 future hardening scope，不是 Stage 1 demo blocker。
+
+---
+
+## RESOLVED — HC-27：`[27]` intents counter freeze post-grace closure
+
+**來源**：Sprint N+1 P1 healthcheck audit
+**嚴重性**：HIGH
+**修復**：2026-05-15 18:12 UTC 直接 narrow probe PASS（demo stale=3.4m / 30min_n=4 / live_demo + live 在 30m 內 0 intents 為 demo-shadow expected）
+**註**：Stage 1 demo 仍被 alpha gates blocked，不是 `[27]` blocker。
+
+---
+
+## RESOLVED — HC-67：`[67]` feature baseline readiness 0 active rows
+
+**來源**：W-AUDIT-4b feature baseline writer audit
+**嚴重性**：HIGH（feature drift detector 失效）
+**修復**：2026-05-15 13:13 UTC `feature_baseline_writer_cron.sh` apply 還原 `observability.feature_baselines` 至 `active_rows=646` / `active_symbols=19` / `feature_names=34/34`
+**註**：drift events 仍等 configured burn-in，不是 [67] blocker。
+
+---
+
+## RESOLVED — WA-5a/5b：W-AUDIT-5a/5b ops 對賬 closure
+
+**來源**：12-agent audit Wave W-AUDIT-5
+**嚴重性**：MEDIUM
+**修復**：2026-05-15 ops 對賬 walk-through pass
+
+---
+
+## RESOLVED — WA-7c：W-AUDIT-7c GUI lexical scope shadow
+
+**來源**：12-agent audit Wave W-AUDIT-7c
+**嚴重性**：HIGH（governance-tab.js prod SyntaxError）
+**修復**：2026-05-15 3-pass round + node --check SOP 落地（feedback_gui_node_check_sop）；A3 + E2 + 主邏輯三方獨立 catch 救 prod GUI
+
+---
+
+## RESOLVED — WA-8a-C0：W-AUDIT-8a Phase C0 liquidation revival inventory
+
+**來源**：12-agent audit Wave W-AUDIT-8a Phase C
+**嚴重性**：MEDIUM
+**修復**：2026-05-15 source/doc closed — `market.liquidations` table 存在 / 0 rows / production topic builders guarded against `liquidation.*` 等 / 60s smoke `SMOKE_PASS_NOT_C1_PROOF`
+**註**：C1 24h isolated `allLiquidation.BTCUSDT` proof 仍在 trade-core PID `4100789` 跑中（since 2026-05-15T19:53:09Z），未通過 BB + MIT sign-off 前禁開 production 訂閱。
+
+---
+
+## RESOLVED — A4C-ARCHIVE：A4-C BTC→Alt Lead-Lag from promotion path
+
+**來源**：Sprint N+1 W2 A4-C IMPL + Stage 0R replay
+**嚴重性**：HIGH（promotion candidate）
+**修復**：2026-05-15 PM/FA verdict — A4-C 從 promotion 路徑歸檔；`P1-A4C-RCA-1` no-revive（`avg_net_bps=-1.0013` / `PSR(0)=0.1904` / `DSR=0` / R²(120)=0）；finite X=5/Y=0.20 probe 也僅 +1.4739 bps
+**註**：不開 `P1-A4C-REV-1`；不重跑同樣 BTC-return/xcorr feature shape；panel/producer 留 diagnostic-only。
+
+---
+
+## RESOLVED — V079：strategy_trial_ledger schema apply
+
+**來源**：AMD-2026-05-09-04 Demo→LivePending promotion_evidence producer
+**嚴重性**：MEDIUM
+**修復**：V079 schema applied（migration runner + linux pg verify done）
+
+---
+
+## RESOLVED — V083/V084：post Wave 1 migration apply
+
+**來源**：Sprint N+0 P2 closure packet
+**嚴重性**：MEDIUM
+**修復**：V083 / V084 dry-run apply 2026-05-10；V083 IPC close fix 已 land；fee source dual-source schema applied。
+
+---
+
+# ━━━ 2026-05-16 12-agent audit Wave 1 reconcile — OPEN ━━━
+
+## OPEN — P0-EDGE-1：5 textbook 策略 negative realized edge
+
+**來源**：W-AUDIT P0-EDGE-1 + 2026-05-15 full healthcheck `[40]` 仍 WARN
+**嚴重性**：P0 BLOCKER（live promotion 全鏈封死直到至少 1 個策略 cohort 轉正）
+**位置**：5 textbook strategies (`ma_crossover` / `bb_breakout` / `bb_reversion` / `grid_trading` / `funding_arb`) demo edge 全 negative
+**狀態**：Alpha Surface C1（liquidation revival）/ C1 24h proof / W-AUDIT-8b funding skew Stage 0R replay 待跑；A4-C 已 archive；其他 alpha candidate spec phase
+**緩解**：W-AUDIT-8a/8b/8c 並行 prep；replay-first validation default；無 alpha gates 轉正前 paper/demo promotion 路徑全 freeze
+
+---
+
+## OPEN — P0-LG-1：H0 production caller IMPL pending
+
+**來源**：Live Gate LG-1 prerequisites
+**嚴重性**：P0（true-live blocker）
+**位置**：`rust/openclaw_engine/src/h0_gate/`（H0 本地判斷內核）
+**問題**：H0 Gate 雖然在 shadow mode 運行，但 production caller 在進入 LG-1 supervised-live 前必須 IMPL（fail-closed 路徑 + telemetry binding）
+**狀態**：spec phase；E1 派工待 alpha gates 轉正後啟動
+
+---
+
+## OPEN — P0-LG-2：provider pricing binding IMPL pending
+
+**來源**：Live Gate LG-2 prerequisites
+**嚴重性**：P0（true-live blocker）
+**位置**：FeeSource 雙源（Bybit API / DemoConservativeDefault / ColdDefault）+ RiskConfig pricing binding
+**問題**：LG-2 T1-T4 spec done（contract tests / startup assertion / FeeSource enum / RiskConfig pricing）；T5+ runtime binding pending alpha gates 轉正
+**緩解**：LG-2 IPC slot 已落（`AccountManagerSlot`）；E1/E4 跨 sub-agent 已沒 deploy 卡位
+
+---
+
+## OPEN — P0-LG-3：supervised-live state machine IMPL pending
+
+**來源**：Live Gate LG-3 prerequisites（pricing binding 直接依賴）
+**嚴重性**：P0（true-live blocker）
+**位置**：governance/state machine + Decision Lease ladder
+**狀態**：LG-3 spec v2 final（2026-05-11 PA + QC + MIT 三方 reviewed）；IMPL pending alpha gates
+
+---
+
+## OPEN — P0-OPS-1：HTTPS / secure cookie
+
+**來源**：first-day live ops checklist
+**嚴重性**：P0（true-live blocker）
+**問題**：Tailscale-internal 已 OK；但 first-day live 需 HTTPS + secure cookie + CSRF + CSP（W-AUDIT-7 E3-LOW-1 CSP unsafe-inline 仍 P2）
+
+---
+
+## OPEN — P0-OPS-2：credential rotation runbook
+
+**來源**：Live ops blocker
+**嚴重性**：P0
+**問題**：authorization.json / Bybit api_key/secret rotation 程序化 SOP + RTO 仍未驗
+
+---
+
+## OPEN — P0-OPS-3：legal / ToS / geography
+
+**來源**：Live ops blocker
+**嚴重性**：P0
+**問題**：Bybit ToS / geography restriction / KYC tier / Tax reporting 對齊未完
+
+---
+
+## OPEN — P0-OPS-4：first-day live runbook
+
+**來源**：Live ops blocker
+**嚴重性**：P0
+**問題**：first-day live 24h staffing + RTO/RPO + emergency liquidate + escalation path runbook 仍未 ratify
+
+---
+
+## OPEN — WA-8a-C1：W-AUDIT-8a Phase C1 24h liquidation topic proof
+
+**來源**：W-AUDIT-8a Phase C 拆分
+**嚴重性**：HIGH（alpha candidate prerequisite）
+**位置**：`trade-core` PID `4100789`（since 2026-05-15T19:53:09Z）isolated `allLiquidation.BTCUSDT` 24h 訂閱
+**狀態**：跑中；24h 報告 + BB + MIT sign-off 後才能解 production revival
+**緩解**：production topic 仍 guarded against `liquidation.*` / `price-limit.*` / `adl-notice.*` / `allLiquidation*`；本 probe 不能進 production topic builder
+
+---
+
+## OPEN — WA-8b：W-AUDIT-8b Funding Skew Directional Stage 0R replay packet
+
+**來源**：12-agent audit Wave W-AUDIT-8b
+**嚴重性**：HIGH（alpha candidate）
+**狀態**：spec v0.2 CONDITIONAL DESIGN APPROVED 2026-05-15（QC + MIT + BB 三方）；read-only Stage 0R replay query/report packet 待 PA / E1 派
+**約束**：30m primary horizon / branch-separated（crowded-long fade + crowded-short squeeze）/ `K_total >= K_prior+4050` / `DSR>=0.95` / PBO fail-closed / raw panel as-of joins / funding attribution `excluded`
+

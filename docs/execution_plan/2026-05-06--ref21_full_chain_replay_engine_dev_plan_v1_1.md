@@ -1,7 +1,9 @@
+> **SUPERSEDED** by [ref21_full_chain_replay_engine_dev_plan_v1_3.md](2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md) -- retained for historical reference.
+
 # REF-21 Full-Chain Replay Engine Dev Plan V1.1
 
 **Date:** 2026-05-06  
-**Status:** Superseded by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md`
+**Status:** Superseded by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` -> ultimately by V1.3
 **Owner:** PM  
 **Supersedes:** `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md`  
 **Audit input:** 8-agent A1-A8 consensus review, overall rating `REVISE`  

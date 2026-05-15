@@ -106,20 +106,26 @@ def raise_http_for_ipc_error(
     # Order matters: TimeoutError is more specific than Exception but the two
     # engine types are siblings — use isinstance so custom subclasses flow too.
     # 順序重要：Timeout 比 Exception 具體；用 isinstance 讓子類也能命中。
+    # WP-05 Real Fix: 用 sanitize helper 取代 f"...: {exc}" 洩漏 pattern。
+    from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+
     if isinstance(exc, timeout_cls):
         _log.warning("%s: ipc timeout: %s", context, exc)
-        raise HTTPException(status_code=504, detail="engine timeout") from exc
+        raise HTTPException(
+            status_code=504,
+            detail=sanitize_exc_for_detail(exc, "ipc_timeout"),
+        ) from exc
     if isinstance(exc, disconnected_cls):
         _log.warning("%s: ipc disconnected: %s", context, exc)
         raise HTTPException(
             status_code=503,
-            detail=f"engine unreachable: {exc}",
+            detail=sanitize_exc_for_detail(exc, "ipc_unreachable"),
         ) from exc
 
     _log.error("%s: ipc call failed: %s", context, exc)
     raise HTTPException(
         status_code=503,
-        detail=f"engine error: {type(exc).__name__}: {exc}",
+        detail=sanitize_exc_for_detail(exc, "ipc_error"),
     ) from exc
 
 
@@ -170,24 +176,27 @@ def classify_ipc_exception(exc: BaseException) -> dict[str, Any]:
     """
     disconnected_cls, timeout_cls = _load_engine_exception_types()
     tag = f"ipc_error:{type(exc).__name__}"
+    # WP-05 Real Fix: classify 也走 sanitize_exc_str（不洩漏 exc class / str）。
+    from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+
     if isinstance(exc, timeout_cls):
         return {
             "kind": "timeout",
             "http_status": 504,
-            "detail": "engine timeout",
+            "detail": "Engine timeout",
             "error_tag": tag,
         }
     if isinstance(exc, disconnected_cls):
         return {
             "kind": "disconnected",
             "http_status": 503,
-            "detail": f"engine unreachable: {exc}",
+            "detail": sanitize_exc_str(exc, "Engine unreachable"),
             "error_tag": tag,
         }
     return {
         "kind": "other",
         "http_status": 503,
-        "detail": f"engine error: {type(exc).__name__}: {exc}",
+        "detail": sanitize_exc_str(exc, "Engine error"),
         "error_tag": tag,
     }
 

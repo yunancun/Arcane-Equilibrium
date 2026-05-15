@@ -361,32 +361,19 @@
         return;
       }
 
-      // A3-MAJOR-6 fix：用 openConfirmModal + 內嵌 input 取代 native window.prompt
-      // A3 MEDIUM-3 fix：concurrent-open guard + 字數計數器
-      if (document.getElementById('oc-promote-reason')) { return; }
-      let reason = await new Promise(function(resolve) {
-        var ov = document.createElement('div');
-        ov.className = 'oc-confirm-overlay show';
-        ov.innerHTML =
-          '<div class="oc-confirm-dialog" style="max-width:480px">' +
-            '<h3>請輸入晉升理由</h3>' +
-            '<p style="font-size:12px;color:var(--text-dim)">1-500 字，例如「Stage 1 entry_fills=12 滿足晉升條件，operator 拍板」</p>' +
-            '<textarea id="oc-promote-reason" style="width:100%;min-height:80px;font-family:inherit;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical" maxlength="500" placeholder="operator manual promote"></textarea>' +
-            '<div style="text-align:right;font-size:11px;color:var(--text-dim)"><span id="oc-reason-counter">0</span>/500</div>' +
-            '<div class="btn-row" style="margin-top:8px">' +
-              '<button id="oc-reason-cancel" class="oc-btn">取消</button>' +
-              '<button id="oc-reason-ok" class="oc-btn oc-btn-primary">確認</button>' +
-            '</div>' +
-          '</div>';
-        document.body.appendChild(ov);
-        var ta = document.getElementById('oc-promote-reason');
-        var counter = document.getElementById('oc-reason-counter');
-        ta.addEventListener('input', function() { counter.textContent = ta.value.length; });
-        ta.focus();
-        document.getElementById('oc-reason-cancel').onclick = function() { ov.remove(); resolve(null); };
-        document.getElementById('oc-reason-ok').onclick = function() { ov.remove(); resolve(ta.value); };
-        ov.addEventListener('keydown', function(e) { if (e.key === 'Escape') { ov.remove(); resolve(null); } });
-      });
+      // A3-MAJOR-2 fix (WP-01 Wave 1 follow-up)：unify modal pattern — 改呼共享 openPromptModal SDK
+      // 取代自製 oc-promote-reason overlay（原為第 5 個 ad-hoc modal pattern）。
+      // SDK 已支援 multiline / maxlength / placeholder / char-counter / module-level lock。
+      let reason = await openPromptModal({
+        title: '請輸入晉升理由 / Enter Promotion Reason',
+        body: '1-500 字，例如「Stage 1 entry_fills=12 滿足晉升條件，operator 拍板」',
+        label: '晉升理由 / Reason',
+        placeholder: 'operator manual promote',
+        multiline: true,
+        maxlength: 500,
+        required: false,
+        confirmLabel: '確認 / Confirm'
+      }).catch(function() { return null; });
       if (reason === null) {
         if (typeof ocToast === 'function') {
           ocToast('已取消 manual promote / Cancelled', 'neutral');

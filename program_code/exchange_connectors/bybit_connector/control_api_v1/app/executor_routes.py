@@ -627,9 +627,11 @@ async def post_executor_shadow_toggle(
             gate_failed="ipc_unavailable",
             ipc_response=None,
         )
+        # WP-05 Real Fix
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=500,
-            detail=f"rust_engine_unavailable: patch_risk_config: {exc}",
+            detail=sanitize_exc_for_detail(exc, "rust_engine_unavailable"),
         ) from exc
 
     # ── Step 4: success — record audit + return envelope ──

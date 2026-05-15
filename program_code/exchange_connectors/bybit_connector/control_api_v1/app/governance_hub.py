@@ -353,7 +353,9 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
                 "promotion_history": state.get("promotion_history", []),
             }
         except Exception as e:
-            return {"available": True, "error": str(e)}
+            # WP-05 Real Fix
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return {"available": True, "error": sanitize_exc_str(e, "Trust state unavailable")}
 
     # P2-5: @deprecated — use is_globally_enabled() instead.
     # P2-5：@deprecated，請改用 is_globally_enabled()。
@@ -1213,9 +1215,15 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
                 logger.debug("Reconciliation complete: %s", report_dict.get("overall_result", "unknown"))
             return report_dict
         except Exception as e:
+            # WP-05 Real Fix
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Error in reconciliation: %s", e)
-            return {"ok": False, "reason": "reconciliation_error", "error": str(e)}
+            from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+            return {
+                "ok": False,
+                "reason": "reconciliation_error",
+                "error": sanitize_exc_str(e, "Reconciliation error"),
+            }
 
 
     # get_status, events, cascades, incident handlers: see GovernanceHubStatusCascadeMixin

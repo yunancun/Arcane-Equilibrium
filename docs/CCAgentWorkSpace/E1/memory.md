@@ -9243,3 +9243,88 @@ E3-MED-2（bind 0.0.0.0）+ E3-MED-4（API error leak）。
 
 ### 完整報告路徑
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp02_donchian_deprecation.md`
+
+## WP-10: Bybit Integration Fixes (2026-05-16)
+
+### BB-M-1: backtest_routes.py hardcoded mainnet URL
+- `_BYBIT_BASE_URL` 僅用於公開 `/v5/market/kline`（唯讀無認證）
+- 替換為 `os.getenv("OPENCLAW_BYBIT_BACKTEST_URL", "https://api-demo.bybit.com")`
+- 默認 demo 而非 mainnet，更安全
+
+### BB-A-1: BybitRetCode 缺 110017 ReduceOnlyReject
+- 新增 `ReduceOnlyReject = 110017` 到 enum + from_code
+- 分類：is_retryable=false, is_noop=false（終態錯誤）
+- 所有 5 個 classifier 均正確返回 false（無需修改 classifier 方法）
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp10_bybit_integration.md`
+
+## WP-04 AI Observability + Budget Fixes (2026-05-16)
+
+### 教訓
+- AIService (IPC dispatch layer) 不繼承 BaseAgent，無法用 `self._record_ai_invocation()`
+  — 直接呼叫 `agent_event_store.get_agent_event_store().record_ai_invocation()` singleton
+- budget_config.toml 存在兩個副本（root + settings/risk_control_rules/），改一個漏另一個就會造成不一致
+- Rust `evaluate.rs` 的 `model_tier` 硬編碼雖然已有 `[strategist]` TOML section，但加欄位需 struct + serde 改動 + rebuild，scope creep 風險高，TODO 標記是正確的最小修復
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp04_ai_observability.md`
+
+## WP-05 Security Hardening Real Fix (2026-05-16)
+
+### 偽修復根因（commit `6b8be386` E1 misstep）
+- Global `@app.exception_handler(Exception)` 在 FastAPI 順位中 **不** 攔截
+  `HTTPException` / `RequestValidationError`（已由 FastAPI 內建 handler 處理）。
+  以為加 global handler 就能消毒所有 5xx 是錯的。
+- 25+ route 在 try/except 內 raise `HTTPException(detail=f"...{exc}")`
+  完全繞過 global Exception handler → leak `type(exc).__name__` + `str(exc)`
+  到 client。
+- E2 + E3 對抗審核同時 catch；驗證了「single-handler patch 解 leak」是 anti-pattern。
+
+### Real Fix 三層防線（這次正確架構）
+1. **共用 helper**：`error_sanitize.py`（82 LOC）
+   - `sanitize_exc_for_detail(exc, reason_code) -> dict`（給 HTTPException detail）
+   - `sanitize_exc_str(exc, fallback) -> str`（給 JSONResponse content / internal dict）
+   - reason_code → user-facing message 字典（11 個 code）
+   - `OPENCLAW_DEBUG=1` 保留 truncated exc repr（≤200 chars）給 dev
+2. **handler 順位補完**：main_legacy.py 加 2 新 handler
+   - `@app.exception_handler(StarletteHTTPException)`：攔截 detail leak pattern
+     （regex `:\s+\w*Error|:\s+\d+|Traceback|<class '`），命中 → 換成 "Internal error"
+   - `@app.exception_handler(RequestValidationError)`：production 422 隱藏 pydantic
+     errors 細節（含欄位 + 內部 type）
+3. **per-callsite migrate**：18 檔 / 38 callsite 全部 `f"...{exc}"` → `sanitize_*`
+
+### 教訓
+- **不要試「single global handler 解所有 leak」**：FastAPI exception_handler 註冊
+  順位（HTTPException / RequestValidationError / Exception 三層）必須各自處理。
+- **leak detection regex 要保守 + 多 pattern**：`:\s+\w*Error` 抓常見 exc class
+  name 注入；`:\s+\d+` 抓 status code 注入；`Traceback` / `<class '` 是雙保險。
+- **`logger.exception()` 留 server-side full traceback**：client 看消毒過的 reason_code，
+  server log 看完整 stack trace（兩層分離不矛盾）。
+- **`str(exc)` 不是萬惡之源**：純內部 dict（如 `{"skipped": True, "reason": str(exc)}`
+  返 IPC 子結果）不算 leak；只當它通過 HTTPException detail / JSONResponse content
+  路徑直接給 client 才算。
+- **`reason_codes=[str(exc)]` 也算 leak**：把 exception text 當 enum value 是壞 pattern
+  （結構雖 dict 但 enum 內容是 raw exception 字串）。openclaw_routes.py 4 處已修。
+- **lazy `from .error_sanitize import` per callsite**：避免循環依賴 + 不污染 module level
+  imports；helper 本身輕量 import 成本可接受。
+
+### 殘留分類（這次 scope 不動，但已記）
+22 處 `str(exc)` / `str(e)` 殘留**不在** PA SoT 25+ 列名內，但仍可能 leak（per WP-05
+sign-off 範圍限制留下次 audit）：
+- `paper_trading_routes:193` get_demo_summary（GUI 直讀）→ 中等風險
+- `live_trust_routes:346/436/883` trust state（GUI tab-live）→ 中等
+- `layer2_tools:472/535/581/630` SearchResponse error → 中等（LLM context）
+- `edge_estimator_scheduler:332/699/712/719/726/740` scheduler 子任務 → 中等
+- 其餘 internal logic 路徑風險低
+→ 建議下次 `P2-WP05-FUP-1` 統一掃描清理
+
+### 自我驗證 stack
+- `py_compile` (18 files) PASS
+- error_sanitize round-trip prod + DEBUG PASS
+- main_legacy import + 5 handlers registered（StarletteHTTPException 攔在 Exception 之前）
+- `_LEAK_PATTERN` regex 9/9 test PASS（5 leak detected + 4 safe 放行）
+- `tests/structure/` 36 passed
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp05_security_real_fix.md`

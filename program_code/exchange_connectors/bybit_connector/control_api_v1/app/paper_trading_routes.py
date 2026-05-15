@@ -219,8 +219,13 @@ async def post_session_start(
             "session": {"session_state": "active", "session_id": "rust_engine"},
         })
     except Exception as e:
-        logger.error("IPC resume_paper failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
+        # WP-05 Real Fix
+        logger.exception("IPC resume_paper failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(e, "ipc_error"),
+        )
 
 
 @paper_router.post("/session/reauth")
@@ -277,8 +282,13 @@ async def post_session_pause(
             "session": {"session_state": "paused", "session_id": "rust_engine"},
         })
     except Exception as e:
-        logger.error("IPC pause_paper failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
+        # WP-05 Real Fix
+        logger.exception("IPC pause_paper failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(e, "ipc_error"),
+        )
 
 
 @paper_router.post("/session/resume")
@@ -299,8 +309,13 @@ async def post_session_resume(
             "session": {"session_state": "active", "session_id": "rust_engine"},
         })
     except Exception as e:
-        logger.error("IPC resume_paper failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
+        # WP-05 Real Fix
+        logger.exception("IPC resume_paper failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(e, "ipc_error"),
+        )
 
 
 async def _verify_paper_state_clean(
@@ -704,8 +719,13 @@ async def post_close_all_positions(
             "close_result": result,
         })
     except Exception as e:
-        logger.error("IPC close_all_positions (paper) failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"IPC error: {e}")
+        # WP-05 Real Fix
+        logger.exception("IPC close_all_positions (paper) failed")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(e, "ipc_error"),
+        )
 
 
 @paper_router.post("/positions/{symbol}/close")
@@ -724,8 +744,13 @@ async def post_close_position(
         result = await _ipc_command("close_position", {"symbol": symbol.upper(), "engine": "paper"})
         return _paper_response({"symbol": symbol.upper(), "closed": True, "source": "rust_engine", "ipc": result})
     except Exception as e:
-        logger.error("IPC close_position failed for %s: %s", symbol, e)
-        raise HTTPException(status_code=502, detail=f"IPC error: {e}")
+        # WP-05 Real Fix
+        logger.exception("IPC close_position failed for %s", symbol)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail=sanitize_exc_for_detail(e, "ipc_error"),
+        )
 
 
 @paper_router.get("/fills")

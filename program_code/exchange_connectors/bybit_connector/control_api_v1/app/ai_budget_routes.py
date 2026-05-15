@@ -199,10 +199,12 @@ async def update_ai_budget_config_route(
     try:
         client = await _get_ipc_client()
     except Exception as exc:  # noqa: BLE001
-        logger.error("ai_budget: ipc client unavailable: %s", exc)
+        # WP-05 Real Fix
+        logger.exception("ai_budget: ipc client unavailable")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=503,
-            detail=f"engine unreachable: {type(exc).__name__}",
+            detail=sanitize_exc_for_detail(exc, "ipc_unreachable"),
         ) from exc
 
     # E5-P1-5: centralised IPC exception → HTTPException mapping.

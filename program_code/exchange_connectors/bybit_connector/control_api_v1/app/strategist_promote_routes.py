@@ -712,9 +712,11 @@ async def post_strategist_promote(
             ipc_response=None,
             reason=f"{type(exc).__name__}:{exc}",
         )
+        # WP-05 Real Fix
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=500,
-            detail=f"rust_engine_unavailable: update_strategy_params: {exc}",
+            detail=sanitize_exc_for_detail(exc, "rust_engine_unavailable"),
         ) from exc
 
     # ── Step 7: success — record audit + return envelope ──

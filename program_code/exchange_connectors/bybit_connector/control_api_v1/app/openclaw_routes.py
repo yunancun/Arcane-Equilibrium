@@ -1213,14 +1213,20 @@ async def create_openclaw_proposal(
             payload=payload.get("payload") or {},
         )
     except OpenClawProposalValidationError as exc:
+        # WP-05 Real Fix: reason_codes 用穩定 code，避免把 exception text 當 enum。
+        logger.warning("openclaw proposal validation error: %s", exc)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=400,
-            detail={"reason_codes": [str(exc)]},
+            detail=sanitize_exc_for_detail(exc, "validation_failed"),
         ) from exc
     except OpenClawProposalStoreUnavailable as exc:
+        # WP-05 Real Fix
+        logger.exception("openclaw proposal store unavailable")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=503,
-            detail={"reason_codes": ["openclaw_proposal_store_unavailable"], "detail": str(exc)},
+            detail=sanitize_exc_for_detail(exc, "internal_error"),
         ) from exc
 
     return _write_envelope(
@@ -1287,14 +1293,20 @@ async def _decide_openclaw_proposal(
             reason=body.reason,
         )
     except OpenClawProposalValidationError as exc:
+        # WP-05 Real Fix
+        logger.warning("openclaw proposal decision validation error: %s", exc)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=400,
-            detail={"reason_codes": [str(exc)]},
+            detail=sanitize_exc_for_detail(exc, "validation_failed"),
         ) from exc
     except OpenClawProposalStoreUnavailable as exc:
+        # WP-05 Real Fix
+        logger.exception("openclaw proposal decision store unavailable")
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=503,
-            detail={"reason_codes": ["openclaw_proposal_store_unavailable"], "detail": str(exc)},
+            detail=sanitize_exc_for_detail(exc, "internal_error"),
         ) from exc
     if approval is None:
         raise HTTPException(
