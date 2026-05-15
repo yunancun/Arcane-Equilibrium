@@ -44,6 +44,7 @@ from canary_comparator import (
 from engine_watchdog import (
     check_snapshot_freshness,
     classify_engine_failure,
+    get_watchdog_status,
     on_engine_crash,
     on_engine_recovery,
     WatchdogState,
@@ -371,6 +372,28 @@ class TestWatchdogSnapshot(unittest.TestCase):
         )
         self.assertFalse(is_fresh)
         self.assertEqual(age, float("inf"))
+
+    def test_status_alive_when_per_engine_snapshot_is_fresh(self):
+        """Per-engine fresh snapshot keeps status alive when compat is stale.
+        每引擎快照新鮮時，即使兼容快照過期也不應判 dead。"""
+        compat_path = os.path.join(self._tmpdir.name, "pipeline_snapshot.json")
+        demo_path = os.path.join(self._tmpdir.name, "pipeline_snapshot_demo.json")
+        with open(compat_path, "w", encoding="utf-8") as f:
+            f.write("{}")
+        with open(demo_path, "w", encoding="utf-8") as f:
+            f.write("{}")
+        old_time = time.time() - 30
+        os.utime(compat_path, (old_time, old_time))
+
+        status = get_watchdog_status(self._tmpdir.name, stale_threshold=10.0)
+
+        self.assertTrue(status["engine_alive"])
+        self.assertFalse(status["engines"]["paper"]["alive"])
+        self.assertTrue(status["engines"]["demo"]["alive"])
+        self.assertFalse(status["engines"]["live"]["alive"])
+        self.assertIsNone(status["paper_age_seconds"])
+        self.assertIsNotNone(status["demo_age_seconds"])
+        self.assertIsNone(status["live_age_seconds"])
 
 
 class TestWatchdogCrashRecovery(unittest.TestCase):

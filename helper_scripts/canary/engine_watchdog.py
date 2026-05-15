@@ -603,7 +603,9 @@ def get_watchdog_status(data_dir: str, stale_threshold: float = STALE_THRESHOLD_
     """
     Get a one-shot status check (for API endpoint integration).
     3E-5: checks per-engine snapshots + compat primary.
+    engine_alive is true if any compat or per-engine snapshot is fresh.
     獲取一次性狀態檢查（含每引擎快照）。
+    任一兼容或每引擎快照新鮮即視為 engine_alive。
     """
     data_path = Path(data_dir)
     # Primary (compat) snapshot / 主（兼容）快照
@@ -612,6 +614,8 @@ def get_watchdog_status(data_dir: str, stale_threshold: float = STALE_THRESHOLD_
 
     # Per-engine snapshots (3E-5) / 每引擎快照
     engines: dict[str, dict] = {}
+    per_engine_ages: dict[str, float | None] = {}
+    any_engine_fresh = is_fresh
     for eng in ("paper", "demo", "live"):
         eng_path = data_path / f"pipeline_snapshot_{eng}.json"
         eng_fresh, eng_age = check_snapshot_freshness(eng_path, stale_threshold)
@@ -620,16 +624,21 @@ def get_watchdog_status(data_dir: str, stale_threshold: float = STALE_THRESHOLD_
                 "alive": eng_fresh,
                 "age_seconds": round(eng_age, 1),
             }
+            per_engine_ages[f"{eng}_age_seconds"] = round(eng_age, 1)
+            any_engine_fresh = any_engine_fresh or eng_fresh
         else:
             engines[eng] = {"alive": False, "status": "not_running"}
+            per_engine_ages[f"{eng}_age_seconds"] = None
 
-    return {
-        "engine_alive": is_fresh,
+    result = {
+        "engine_alive": any_engine_fresh,
         "snapshot_age_seconds": round(age, 1) if age != float("inf") else None,
         "snapshot_path": str(primary_path),
         "stale_threshold_seconds": stale_threshold,
         "engines": engines,
     }
+    result.update(per_engine_ages)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
