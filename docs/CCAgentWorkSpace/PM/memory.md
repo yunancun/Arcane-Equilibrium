@@ -2359,3 +2359,23 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   remain blocked.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--post_rebuild_sync_7b33ab2e.md`.
+
+## 2026-05-15 Alpha Path Phase C Dispatch
+
+- After docs sync, Mac/origin/Linux source head is `e8944cf4`; runtime rebuild
+  code line remains `7b33ab2e` because `e8944cf4` is docs-only.
+- Narrow post-rebuild probes at `2026-05-15T17:29:47Z`: `[27]` PASS under
+  fresh-restart grace (`engine restarted 13.0m ago`), `[66]` PASS, `[67]`
+  PASS. Keep `P1-INTENT-FREEZE-27` post-grace pending.
+- A4-C remains GATE-RED and diagnostic-only. Next alpha engineering path is
+  W-AUDIT-8a Phase C0, not demo-canary prep.
+- Phase C corrected: `market.liquidations` already exists from V002 but has
+  0 rows; production subscriptions intentionally exclude old liquidation
+  topics because they poisoned WS connections. Split Phase C into C0
+  inventory/standalone BB proof and C1 revival after proof.
+- Resolved naming collision: current TODO IDs make `W-AUDIT-8b` = A4-A
+  Funding Skew, `W-AUDIT-8c` = A4-B Liquidation Cluster, while the old
+  execution-plan files named 8b/8c are legacy R-2/R-3 aliases now tracked as
+  `W-AUDIT-8e`/`W-AUDIT-8f`.
+- Report:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--alpha_path_phase_c_dispatch.md`.

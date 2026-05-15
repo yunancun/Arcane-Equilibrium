@@ -1,5 +1,11 @@
 # W-AUDIT-8c — Hypothesis Pipeline First-Class Object（R-3 IMPL Spec）
 
+> **2026-05-15 PM note**：This file is a legacy R-3 spec using the old
+> `W-AUDIT-8c` name. Current `TODO.md` uses `W-AUDIT-8c` for A4-B
+> Liquidation Cluster Reaction strategy, while R-3 Hypothesis Pipeline is
+> tracked as `W-AUDIT-8f`. Treat this document as the R-3 / `W-AUDIT-8f`
+> architecture spec unless PM explicitly reassigns IDs.
+
 **Wave 名稱**：W-AUDIT-8c "Hypothesis Pipeline"
 **對應 ARCH-04 amendment**：R-3（ADR-0021 Accepted 2026-05-09）
 **起草者**：PA（Project Architect）

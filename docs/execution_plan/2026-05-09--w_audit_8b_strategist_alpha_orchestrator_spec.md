@@ -1,5 +1,11 @@
 # W-AUDIT-8b — Strategist Scope Reframe + AlphaSourceRegistry（R-2 IMPL Spec）
 
+> **2026-05-15 PM note**：This file is a legacy R-2 spec using the old
+> `W-AUDIT-8b` name. Current `TODO.md` uses `W-AUDIT-8b` for A4-A Funding
+> Skew Directional strategy, while R-2 Strategist Alpha Source Orchestrator is
+> tracked as `W-AUDIT-8e`. Treat this document as the R-2 / `W-AUDIT-8e`
+> architecture spec unless PM explicitly reassigns IDs.
+
 **Wave 名稱**：W-AUDIT-8b "Strategist Alpha Orchestrator"
 **對應 ARCH-04 amendment**：R-2（ADR-0021 Accepted 2026-05-09）
 **起草者**：PA（Project Architect）
