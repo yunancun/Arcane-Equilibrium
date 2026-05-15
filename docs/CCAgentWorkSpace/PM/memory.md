@@ -2255,3 +2255,23 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_step5b.md`
   and `docs/CCAgentWorkSpace/Operator/2026-05-15--stage0r_preflight_step5b.md`.
+
+## 2026-05-15 P1-HEALTHCHECK-55-INVARIANT
+
+- Reproduced `[55] WARN_REAL_FILL_PROPAGATION_PARTIAL` on `trade-core`:
+  old check reported `chains=139`, `chains_with_real_fill_report=25`,
+  `bad_report_quality=0`, `bad_report_value_quality=0`, and
+  `state_changes_24h=745`.
+- RCA: old denominator used all complete decision chains. Current Rust emits
+  fill-completion ER only once a plan reaches `cum_filled_qty >= qty * 0.999`;
+  legitimate no-fill chains and partial/near-full chains were poisoning the
+  ratio.
+- Source fix: `[55]` now reports and gates on
+  `full_plan_fills_missing_report` for fully-filled plan chains, while surfacing
+  partial fills separately as diagnostic `partial_plan_fill_chains`.
+- Verification: local pytest `helper_scripts/db/test_agent_spine_healthcheck.py`
+  PASSed (`15 passed`); patched module on `trade-core` PG returned PASS with
+  `chains_with_full_plan_fill=25`, `chains_with_real_fill_report=25`,
+  `full_plan_fills_missing_report=0`, `partial_plan_fill_chains=13`.
+- Boundary: no runtime config, auth, engine restart, DB write, or strategy/risk
+  change. Stage 1 demo remains blocked by Stage 0R GATE-RED, not `[55]`.
