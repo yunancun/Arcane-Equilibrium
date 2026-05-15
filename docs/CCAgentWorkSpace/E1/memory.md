@@ -9193,3 +9193,53 @@ FeeSource + wait_for_first_refresh_or_timeout(30s)）；fail-closed reject spawn
 
 ### 完整報告路徑
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg2_t2_startup_assertion.md`
+
+---
+
+## WP-05 Security Hardening (2026-05-16)
+
+### 任務範圍
+E3-MED-2（bind 0.0.0.0）+ E3-MED-4（API error leak）。
+
+### 修改清單
+1. `start_local.sh:86` — `--host 0.0.0.0` -> `--host 127.0.0.1`
+2. `beta_quickstart.sh:78` — `--host 0.0.0.0` -> `--host 127.0.0.1`
+3. `main_legacy.py:358-379`（新增） — 全域 `Exception` handler，
+   `OPENCLAW_DEBUG=1` 才回傳 `str(exc)`，生產回 "Internal server error"
+
+### 學到的教訓
+- `restart_all.sh` 已用 `api_bind_host.sh` + Tailscale auto-detect 修好，
+  但 dev/quickstart 腳本被遺漏（E3 audit 抓到）
+- 個別 route handler 內的 `str(exc)` 返回不在此任務範圍（屬各 route 局部）；
+  全域 handler 只攔截「漏網」的未處理 Exception
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp05_security_hardening.md`
+
+---
+
+## WP-02 Donchian callers audit + deprecate base function (2026-05-16)
+
+### 任務
+審計 Rust codebase 所有 `donchian()` 調用者，為含 look-ahead bias 的 base function
+加 `#[deprecated]`，確認生產路徑只用 `donchian_prior()`。
+
+### 關鍵發現
+- 生產路徑唯一調用點 `IndicatorEngine::compute_all` (mod.rs:150) 已正確使用 `donchian_prior`
+- `donchian()` 直接調用者全部是測試代碼（trend.rs 單元測試 + golden_dataset.rs 整合測試）
+- 現有 `test_donchian_prior_excludes_current_bar` 測試已存在且正確
+
+### 修改
+1. `trend.rs`: base `donchian()` 加 `#[deprecated]` + 中文 docstring 說明 bias
+2. `trend.rs`: `donchian_prior()` 加 `#[allow(deprecated)]` 因為它内部合法調用 deprecated fn
+3. `trend.rs`: test module 加 `#[allow(deprecated)]`
+4. `trend.rs`: 加強 `test_donchian_prior_excludes_current_bar` 回歸測試（對比 biased vs prior 結果不同）
+5. `mod.rs`: re-export 行加 `#[allow(deprecated)]`
+6. `golden_dataset.rs`: 3 個調用 `donchian()` 的測試函數加 `#[allow(deprecated)]`
+
+### 學到的教訓
+- Rust `#[deprecated]` 在 `pub use` re-export 行也會觸發 warning，需同步加 `#[allow]`
+- `rustfmt` 會把 `#[attr] // comment` 拆成兩行，注釋應放在 attr 下一行
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp02_donchian_deprecation.md`
