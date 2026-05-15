@@ -11,6 +11,8 @@
 
 ---
 
+> **2026-05-15 supersession note**: AMD-2026-05-15-01 supersedes this document's Stage 1 paper cohort semantics. `Environment::Paper × 7d` is removed as a promotion stage; Stage 0R Replay Preflight now outputs only `eligible_for_demo_canary=true/false`, and Stage 1 is `Environment::Demo` micro-canary evidence. Historical rationale below is retained for audit context only.
+
 ## 1. 修訂背景
 
 ### 1.1 AMD-2026-05-09-02 §2 Option A 原文
