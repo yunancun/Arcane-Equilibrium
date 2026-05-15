@@ -244,6 +244,9 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-05-15 | A4-C PM/PA/FA engineering card：archive from promotion；`P1-A4C-RCA-1` is read-only only；demo budget remains blocked without a future preregistered green Stage 0R packet | workspace/reports/2026-05-15--a4c_unblock_engineering_card.md |
+| 2026-05-15 | A4-C `P1-A4C-RCA-1` read-only RCA start：current 7d dry-run stays red and finite X=5/Y=0.20 threshold probe remains below promotion/revive bands | workspace/reports/2026-05-15--a4c_stage0r_rca_start.md |
+| 2026-05-15 | P0-MICRO-PROFIT alpha prework：新增 W-AUDIT-8a C1 standalone `allLiquidation.{symbol}` proof plan/script、W-AUDIT-8b Funding Skew spec v0.1，並按 Stage 0R R² rule 將 A4-C archive from promotion / diagnostic-only | workspace/reports/2026-05-15--micro_profit_alpha_prework.md |
 | 2026-05-10 | Live/Demo GUI 今日 PnL 口徑修正：確認 LiveDemo 今日 DB net 為 +1.578890，舊 GUI 約 -45.45 來自 session/lifetime 手續費 bucket 混入；新增 backend `net_pnl_today` 並讓 Live tab/console 側欄共用，補 Demo/Live endpoint contract tests；無 restart/rebuild | workspace/reports/2026-05-10--live_today_pnl_gui_fix.md |
 | 2026-05-09 | P0-V2-NEW-3 DSR/PBO evidence push: added real-return promotion evidence builder, Demo-only edge scheduler push, V079 strategy_trial_ledger/report columns, and fail-closed selection evidence handling; source/test only, runtime V079 apply/rebuild pending | workspace/reports/2026-05-09--p0_v2_new_3_dsr_pbo_evidence_push.md |
 | 2026-05-09 | P0-V2-NEW-1 Donchian leak-bias source/test closure: locked runtime IndicatorEngine snapshots to prior-bar Donchian and added bb_breakout 5m hard-gate regression so current-bar spikes cannot contaminate 5m demo evidence | workspace/reports/2026-05-09--p0_v2_new_1_donchian_leak_bias.md |
@@ -2433,3 +2436,22 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   liquidation topic safety because the risk is real WS handler rejection /
   connection poisoning; that remains BB standalone probe territory. Replay can
   still check fail-closed strategy behavior with `EMPTY_ALPHA_SURFACE`.
+
+## 2026-05-15 A4-C PM/PA/FA Unblock Engineering Card
+
+- Operator asked PM/PA/FA to formalize the A4-C unblock path and start in
+  order.
+- PA proposed a bounded diagnostic revive path: read-only Stage 0R RCA,
+  preregistered revision only if evidence supports it, then Stage 0R rerun.
+- FA pushed back: A4-C does not currently justify 7d Demo micro-canary budget;
+  it remains archived from active promotion because Step 5b has weak edge,
+  failed PSR/DSR, CI lower < 0, and near-zero R2.
+- PM decision: add `P1-A4C-RCA-1` as the single allowed read-only RCA path.
+  No paper promotion, no demo launch, no gate relaxation, no runtime/auth/risk
+  mutation. If RCA finds no new preregistered hypothesis, move alpha effort to
+  W-AUDIT-8b / W-AUDIT-8a C1.
+- RCA start result: current 7d dry-run fetched 6,713 rows and remained worse
+  than Step 5b (`avg_net_bps=-1.0013`, `PSR(0)=0.1904`, `DSR=0`,
+  R2(120)=0). Finite threshold probe X=5/Y=0.20 improved sample size and
+  weakly positive average (`+1.4739 bps`) but remains far below +15 and below
+  per-symbol +5 defer band. This strengthens the archive/default-switch read.

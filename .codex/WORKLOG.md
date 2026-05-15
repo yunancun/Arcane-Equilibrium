@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-05-15 CEST
+- completed P0-MICRO-PROFIT alpha prework per operator request: C1 liquidation-topic proof packet, W-AUDIT-8b Funding Skew spec v0.1, and A4-C archive verdict
+- added standalone `helper_scripts/bybit/liquidation_topic_probe.py`; it is isolated public WS only and cannot clear C1 without a 24h run
+- updated TODO/CLAUDE/active-plan/docs indexes so A4-C is diagnostic-only and next alpha work is C1 proof + 8b QC/MIT/BB review/replay design
+- no runtime rebuild/restart, DB write, auth change, production topic revival, paper enablement, demo canary, or risk/sizing change
+
 2026-05-06 00:10 CEST
 - synced active docs before AgentTodo M0: TODO.md v10, CLAUDE.md REF-20 all-closed status, AgentTodo MAG-000 marked DONE
 - verified Mac/Linux/origin source HEAD `67b95808`; Linux watchdog demo/live fresh, paper inactive by design; no rebuild/restart/deploy

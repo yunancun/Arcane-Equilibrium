@@ -82,9 +82,9 @@
 ### Strategy / Edge
 
 - P0-EDGE-1 remains active：2026-05-15 full healthcheck still flags `[40]` negative realized edge；5 textbook strategies remain structurally alpha-deficient until Alpha Surface C1/D or new alpha candidates produce positive demo evidence。
-- A4-C BTC→Alt Lead-Lag implementation is complete/rebased, but 2026-05-15 Step 5b Stage 0R rerun after diagnostic producer restoration remains **GATE-RED** (`eligible_for_demo_canary=false`; `avg_net_bps=+0.3552`, `PSR(0)=0.5877`, `DSR=0.0000`, R²(120)=0.0005)；`[57]` PASS + expected_dir distribution improved, but no Stage 1 demo cohort selected。
+- A4-C BTC→Alt Lead-Lag implementation is complete/rebased, but 2026-05-15 Step 5b Stage 0R rerun after diagnostic producer restoration remains **GATE-RED** (`eligible_for_demo_canary=false`; `avg_net_bps=+0.3552`, `PSR(0)=0.5877`, `DSR=0.0000`, R²(60/120/300)=`0.0009/0.0005/0.0027`)；`[57]` PASS + expected_dir distribution improved, but no Stage 1 demo cohort selected。2026-05-15 PM/FA verdict archives A4-C from active promotion; `P1-A4C-RCA-1` is the only allowed read-only bounded revive path, and its start also stayed below revive/promotion bands (`avg_net_bps=-1.0013`, `PSR(0)=0.1904`, `DSR=0`, R2(120)=0; finite X=5/Y=0.20 probe only +1.4739 bps). Otherwise the panel/producer remain diagnostic-only。
 - `bb_breakout_oi_confirmed_5m` Stage 0R packet is **spec-only**：it defines the replay row/report contract and baseline requirements, but did not execute replay, mutate config/runtime/DB/auth, or change `eligible_for_demo_canary=false`。
-- W-AUDIT-8a Phase C0 is **SOURCE/DOC CLOSED 2026-05-15**：`market.liquidations` exists but has 0 rows；production topic builders are guarded against `liquidation.*` / `price-limit.*` / `adl-notice.*` / `allLiquidation`；C1 remains blocked until BB standalone WS proof validates a safe liquidation topic。Replay can verify local fail-closed `LiquidationCascade` behavior, but cannot prove real Bybit WS topic safety。
+- W-AUDIT-8a Phase C0 is **SOURCE/DOC CLOSED 2026-05-15**：`market.liquidations` exists but has 0 rows；production topic builders are guarded against `liquidation.*` / `price-limit.*` / `adl-notice.*` / `allLiquidation*`；C1 remains blocked until BB standalone WS proof validates `allLiquidation.{symbol}` safe on an isolated WS connection for 24h。Replay can verify local fail-closed `LiquidationCascade` behavior, but cannot prove real Bybit WS topic safety。C1 probe plan/script exists: `docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md` + `helper_scripts/bybit/liquidation_topic_probe.py`。
 - Validation default after 2026-05-15 operator request：before sign-off, first judge whether replay/counterfactual replay can check the claim；run it when applicable and safe, or explicitly state why live-runtime / DB / WS / healthcheck evidence is required instead。
 - Legacy paper promotion paths are frozen by AMD-2026-05-15-01：Stage 0R replay preflight can only emit `eligible_for_demo_canary=true/false`; Stage 1 evidence must be `Environment::Demo` micro-canary after a future green preflight。
 
@@ -110,7 +110,7 @@
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
 | Paper / Stage 0R | GATE-RED and disabled；paper promotion evidence removed by AMD-2026-05-15-01；OI-confirmed 5m is only a future Stage 0R candidate spec。 |
-| W-AUDIT-8a / alpha candidates | Phase C0 closed; C1 liquidation revival is blocked on BB standalone WS proof, then Phase D / `W-AUDIT-8c` Liquidation Cluster / `W-AUDIT-8b` Funding Skew become the alpha path after A4-C GATE-RED。 |
+| W-AUDIT-8a / alpha candidates | Phase C0 closed; C1 liquidation revival is blocked on BB standalone WS proof. A4-C is archived from promotion except `P1-A4C-RCA-1` read-only RCA; `W-AUDIT-8b` Funding Skew spec v0.1 exists and needs QC/MIT/BB review + Stage 0R replay design; `W-AUDIT-8c` Liquidation Cluster waits for C1。 |
 | P2 backlog | Pending：`N2-AUDIT-7c`, `N2-AUDIT-8c`, `N2-PhaseC`, `N2-PhaseD`。 |
 
 ---
@@ -452,7 +452,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。`P1-INTENT-FREEZE-27` is post-grace closed by direct `[27]` PASS after the `7b33ab2e` rebuild。Step 5b restored A4-C diagnostic producer evidence (`[57]` PASS; all-source NO_SIGNAL improved to 95.63%) but Stage 1 demo micro-canary remains blocked because A4-C Stage 0R is still GATE-RED。W-AUDIT-8a Phase C0 is closed as inventory/guard only; C1 waits for BB standalone liquidation-topic proof。Replay-first validation is now the default: use replay when it can prove the claim, and state when WS/live evidence is required。仍不是 true-live autonomy。
+**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。`P1-INTENT-FREEZE-27` is post-grace closed by direct `[27]` PASS after the `7b33ab2e` rebuild。Step 5b restored A4-C diagnostic producer evidence (`[57]` PASS; all-source NO_SIGNAL improved to 95.63%) but Stage 1 demo micro-canary remains blocked; A4-C is now archived from promotion and diagnostic-only。W-AUDIT-8a Phase C0 is closed as inventory/guard only; C1 waits for BB standalone `allLiquidation.{symbol}` proof。W-AUDIT-8b Funding Skew spec v0.1 exists and needs QC/MIT/BB review + Stage 0R replay design。Replay-first validation is now the default: use replay when it can prove the claim, and state when WS/live evidence is required。仍不是 true-live autonomy。
 
 **關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 三角 audit ✅ + MAG-084 sign-off ✅ 2026-05-11 → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
@@ -465,7 +465,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 **Live 前置**：LIVE-GUARD-1 + LIVE-GATE-BINDING-1 代碼已存在；LiveDemo/live runtime currently authorized；Decision Lease router evidence flag is ON for shadow W-C only。True live 仍缺 positive edge decision、H0 production caller、pricing binding、supervised-live state machine、HTTPS/credentials/legal/runbook，以及 operator explicit sign-off。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
-- TODO.md v28 active dispatch queue + `active-plan.md` v1.4
+- TODO.md v29 active dispatch queue + `active-plan.md` v1.6
 - `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` for removed historical context
 - **REF-20 Gap Closure Plan V1 (2026-05-04, current SoT for Sprint A-D)**：`docs/execution_plan/2026-05-04--ref20_gap_closure_reality_backtest_plan_v1.md`
 - REF-20 V3 SoT (legacy schema/route foundation)：`docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`

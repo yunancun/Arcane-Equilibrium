@@ -976,6 +976,8 @@ Client 創建：`LeverageTokenClient::new(client: Arc<BybitRestClient>)`
 | ~~`price-limit.{symbol}`~~ | ~~`price_limit`~~ | ~~價格限制更新~~ | **已移除(2026-04-05)**: 同上 |
 | ~~`adl-notice.{symbol}`~~ | ~~`adl_notice`~~ | ~~ADL 通知~~ | **已移除(2026-04-05)**: 同上 |
 
+**2026-05-15 W-AUDIT-8a C1 note**：Bybit official V5 docs now list the full liquidation stream as `allLiquidation.{symbol}`（example `allLiquidation.BTCUSDT`）。此 topic 在 `docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md` 的隔離 24h BB proof PASS 且 MIT 簽 schema mapping 前，仍必須排除在 production 訂閱列表之外。
+
 **默認訂閱**（`full_subscription_list`）：kline×6 + ticker + orderbook + publicTrade = **9/symbol**
 **擴展訂閱**（`extended_subscription_list`）：= 默認（broken topics 已移除）= **9/symbol**
 

@@ -1,7 +1,7 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-15（AMD-2026-05-15-01：W2 paper edge report 降級為 Stage 0R diagnostic；保留 W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck 與 2026-05-09 W-AUDIT-1 catch-up 索引）
+最後更新：2026-05-15（W-AUDIT-8a C1 liquidation topic standalone probe + AMD-2026-05-15-01：W2 paper edge report 降級為 Stage 0R diagnostic；保留 W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck 與 2026-05-09 W-AUDIT-1 catch-up 索引）
 
 ## 2026-05-09 W-AUDIT-1 補登
 
@@ -25,6 +25,7 @@
 | `operator/edge_p2_flip.sh` | Operator helper for Edge P2 guarded flip |
 | `operator/edge_p2_revert.sh` | Operator helper for Edge P2 revert |
 | `operator/generate_replay_signing_key.sh` | Replay signing key generation helper |
+| `bybit/liquidation_topic_probe.py` | W-AUDIT-8a C1 standalone public WS probe；isolated connection checks `allLiquidation.{symbol}` plus canary market topics and writes latest+dated reports under `$OPENCLAW_DATA_DIR/audit/liquidation_topic_probe/`。Short smoke is not C1 proof；24h PASS + BB/MIT sign-off required before production topic revival。 |
 | `research/bb_breakout_threshold_sweep.py` | bb_breakout threshold research sweep |
 | `research/ma_crossover_counterfactual_replay.py` | ma_crossover counterfactual replay research helper |
 | `research/shadow_disagreement_breakdown.py` | Shadow disagreement breakdown analysis |

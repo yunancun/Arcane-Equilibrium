@@ -1,8 +1,8 @@
 # Active Plan
 
-Version: v1.4
+Version: v1.6
 Date: 2026-05-15
-Source: TODO.md v28 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-8a Phase C0 inventory + replay-first validation update
+Source: TODO.md v29 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-8a Phase C0/C1 update + A4-C PM/PA/FA archive/RCA card + A4-C RCA start + W-AUDIT-8b spec v0.1
 
 ## Current Sprint
 
@@ -11,12 +11,13 @@ Source: TODO.md v28 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-
 
 ## This Week Focus
 
-- Stage 0R: DONE and still GATE-RED. A4-C is not eligible for demo canary.
+- Stage 0R: DONE and still GATE-RED. A4-C is archived from the active promotion path and retained diagnostic-only; `P1-A4C-RCA-1` started read-only and strengthened the archive read (`avg_net_bps=-1.0013`, `PSR(0)=0.1904`, `DSR=0`, R2(120)=0; finite X=5/Y=0.20 probe only +1.4739 bps).
 - OI-confirmed 5m packet: spec-only. It defines `bb_breakout_oi_confirmed_5m` replay acceptance, but did not run replay and cannot authorize canary/promotion.
 - `[55]`: source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; patched `trade-core` DB check proves `25/25` fully-filled plan chains have real-fill ER and `0` are missing.
 - `[67]`: fixed by feature-baseline apply; active rows restored to 646 across 19 symbols / 34 feature names.
 - `[27]`: post-grace closed by direct 2026-05-15 18:12 UTC narrow probe PASS; it is no longer the active hard blocker.
-- W-AUDIT-8a Phase C0: SOURCE/DOC closed. `market.liquidations` exists but has 0 rows; production topic builders are guarded against dormant/poison liquidation topics; C1 waits for BB standalone WS proof.
+- W-AUDIT-8a Phase C0: SOURCE/DOC closed. `market.liquidations` exists but has 0 rows; production topic builders are guarded against dormant/poison liquidation topics. C1 proof plan + standalone probe script exist; C1 still waits for 24h BB standalone WS proof of `allLiquidation.{symbol}`.
+- W-AUDIT-8b: Funding Skew Directional spec v0.1 exists; next step is QC/MIT/BB review and Stage 0R replay design, not implementation.
 - Replay-first validation: before sign-off, first decide whether replay/counterfactual replay can check the claim. Run it when applicable and safe; otherwise state why DB/live-runtime/WS/healthcheck evidence is required.
 - Passive healthcheck source correction: `[4] phys_lock_runtime` and `[Xb] pipeline_triangulation` are fixed/PASS by `7108035d`.
 
@@ -30,13 +31,14 @@ Source: TODO.md v28 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-
 
 ## Blockers
 
-- 🚨 Stage 0R GATE-RED: A4-C `eligible_for_demo_canary=false` (commit `6799e7ef`). No Stage 1 demo cohort selected.
+- 🚨 Stage 0R GATE-RED: A4-C `eligible_for_demo_canary=false` and archived from active promotion. RCA start remains below revive/promotion bands; it may only produce a new preregistered hypothesis, not a demo launch.
 - 🚨 `P0-EDGE-1`: 5 textbook strategies still lack durable positive net edge.
 - 🚨 `P0-LG-1/2/3` and `P0-OPS-1..4`: true-live infrastructure and governance still incomplete.
-- ⛔ W-AUDIT-8a C1: liquidation writer/pulse revival is blocked until BB proves a safe liquidation topic on an isolated WS connection.
+- ⛔ W-AUDIT-8a C1: liquidation writer/pulse revival is blocked until BB proves `allLiquidation.{symbol}` safe on an isolated WS connection for 24h.
 
 ## Available P1 Tasks
 
+- `P1-A4C-RCA-1`
 - `P1-FILL-LINEAGE-MONITOR`
 - `P1-STARTUP-BURST-MITIGATION`
 - `P1-V083-HALT-SESSION-CTX` current-log follow-up
@@ -53,4 +55,4 @@ Source: TODO.md v28 + PM Stage 0R reports + `[27]` post-grace closure + W-AUDIT-
 
 ## Next Step
 
-Do not launch Stage 1 demo micro-canary from the current A4-C packet or the OI-confirmed 5m spec. Next alpha work is W-AUDIT-8a C1 only after BB standalone WS proof, then `W-AUDIT-8c` Liquidation Cluster and `W-AUDIT-8b` Funding Skew, while keeping true-live blocked by edge/LG/ops gates.
+Do not launch Stage 1 demo micro-canary from A4-C or the OI-confirmed 5m spec. Start with `P1-A4C-RCA-1` as a read-only RCA only; if it does not produce a new preregistered hypothesis that QC/MIT accept, keep A4-C diagnostic-only and move alpha engineering to the 24h W-AUDIT-8a C1 BB standalone proof plus W-AUDIT-8b Funding Skew QC/MIT/BB review and replay design. W-AUDIT-8c Liquidation Cluster waits for C1. True-live remains blocked by edge/LG/ops gates.
