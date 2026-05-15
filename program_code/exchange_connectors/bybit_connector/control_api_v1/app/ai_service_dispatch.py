@@ -237,6 +237,13 @@ class AIService:
                 "Ollama 不可用，返回空推薦",
                 strategy, symbol,
             )
+            # WP-04 F-04 E2-MEDIUM-3: Ollama 不可用也需記錄，否則長時間離線在
+            # ai_invocations 中無跡可循（無法區分「無調用」與「基礎設施離線」）
+            AIService._record_strategist_invocation(
+                model_tier=model_tier, prompt_text=None,
+                response_text=None, latency_ms=0.0,
+                success=False, strategy=strategy, symbol=symbol,
+            )
             return {
                 "status": "evaluated",
                 "agent": "strategist",
@@ -282,7 +289,7 @@ class AIService:
                     getattr(response, "error", "unknown"),
                 )
                 # WP-04 F-04: 記錄失敗的 Ollama 調用
-                self._record_strategist_invocation(
+                AIService._record_strategist_invocation(
                     model_tier=model_tier, prompt_text=prompt,
                     response_text=None, latency_ms=elapsed_ms,
                     success=False, strategy=strategy, symbol=symbol,
@@ -297,7 +304,7 @@ class AIService:
                 }
 
             # WP-04 F-04: 記錄成功的 Ollama 調用
-            self._record_strategist_invocation(
+            AIService._record_strategist_invocation(
                 model_tier=model_tier, prompt_text=prompt,
                 response_text=response.text, latency_ms=elapsed_ms,
                 success=True, strategy=strategy, symbol=symbol,
@@ -315,7 +322,7 @@ class AIService:
             )
             self._stats["errors"] += 1
             # WP-04 F-04: 記錄異常的 Ollama 調用
-            self._record_strategist_invocation(
+            AIService._record_strategist_invocation(
                 model_tier=model_tier, prompt_text=prompt,
                 response_text=None, latency_ms=elapsed_ms,
                 success=False, strategy=strategy, symbol=symbol,
@@ -480,10 +487,11 @@ class AIService:
                     "symbol": symbol,
                 },
             )
-        except Exception:
-            # 觀測性寫入失敗不阻塞 IPC 回應
-            logger.debug(
-                "WP-04: strategist ai_invocation record failed (non-fatal)"
+        except Exception as exc:
+            # 觀測性寫入失敗不阻塞 IPC 回應，但需可見以便排查
+            logger.warning(
+                "WP-04: strategist ai_invocation record failed (non-fatal): %s",
+                exc,
             )
 
     @staticmethod
