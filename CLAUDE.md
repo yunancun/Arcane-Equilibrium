@@ -117,6 +117,7 @@
 | W-AUDIT-8a Alpha Surface Foundation | **Phase A 已 land**（Sprint N+0 W-AUDIT-9 同次, HEAD `c9fb0b8f` PR ready trait skeleton）；Phase B Tier 2 panel collector spec v1.1 land 走 Rust panel_aggregator WS-first（per BB push back 採納，rate 100→0 req/s ongoing）；後續 Phase C/D + R-2/R-3/R-4 留 N+2/N+3。 |
 | **Sprint N+0 closure**（2026-05-10）| W-AUDIT-9 graduated canary state machine T1-T7 + W-AUDIT-4b ML pipeline 3-fault fix V082/83/84 + W-AUDIT-8a Phase A trait declare + AMD-2026-05-09-03/05-10-03/04 + ARCH-04 + ADR-0022 全 land；commit chain HEAD `b6ed4975`；engine restart 後 attribution chain 100%、`[40]` 24h MLDE avg_net **+8.75 bps**（從 -17.82 翻正）。 |
 | **Sprint N+1 D+0 pre-dispatch readiness**（2026-05-10, HEAD `9695b59a`）| 24 項提前準備 land：W7-3 Option B 補丁 (`b42731f6`) + W7-1 trait skeleton (`c9fb0b8f`) PR ready NOT DEPLOYED；W6 RFC 3 視角預備立場 + final verdict draft；W2 A4-C spec v1.2 (dual-layer σ + +15/+5-15/<+5 階梯 gate)；W1 spec v1.1 (BB WS-first)；W5 三 P1 specs (V089/V090)；CC pre-check A- 92.0% APPROVE-CONDITIONAL；E3 ALL PASS 5 hard gate 全綠；R4 docs audit 8 fix；N+0 sign-off + N+1 dispatch fire SOP。Sprint N+1 D+0 sign-off 後純執行 deploy + 派 9 wave 並行（W7-2/W7-4/W7-5 + W6 RFC verdict + W6 V086 + W1 IMPL + W2 IMPL + W3 等 W6+W7 + W4 + W5）。 |
+| **Sprint N+1 canary rebase freeze**（2026-05-15）| AMD-2026-05-15-01 accepted planning authority：Stage 1 `Environment::Paper × 7d` removed; Stage 0R Replay Preflight added (`eligible_for_demo_canary=true/false`, not Stage 1 PASS); Stage 1 becomes 1 strategy × 1 symbol × `Environment::Demo` × 7d micro-canary; Stage 2 entry must cite Stage 1 demo empirical evidence. `OPENCLAW_ENABLE_PAPER=1` promotion path BLOCKED. |
 
 ---
 
@@ -149,9 +150,12 @@ decision_lease_emitted  = "shadow_bypass_lineage_only"  # 2026-05-08 operator-au
                                                         # not Executor order authority, and not MAG-083/084.
 max_retries             = 0
 # executor_canary_stage:
-#   Per AMD-2026-05-09-03 (graduated canary default for alpha-bearing pathways)
-#   path: docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md
-#   demo default = Stage 1 (1 strategy x 1 symbol cohort) after W-AUDIT-9 IMPL land;
+#   Per AMD-2026-05-15-01 (canary rebase for alpha-bearing pathways)
+#   path: docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md
+#   Stage 0R Replay Preflight can only emit eligible_for_demo_canary=true/false;
+#   demo Stage 1 = 1 strategy x 1 symbol x Environment::Demo x 7d micro-canary;
+#   Environment::Paper x 7d is removed from promotion evidence, and OPENCLAW_ENABLE_PAPER=1 is BLOCKED for promotion;
+#   Stage 2 must be entered from Stage 1 demo empirical evidence, not replay/paper;
 #   live (LiveDemo + Mainnet) default = Stage 0 (binary fail-closed unchanged);
 #   不適用 DOC-08 §12 / SM-04 ladder / Live boundary 5-gate / §二 16 原則硬不變式（仍強制 fail-closed）。
 

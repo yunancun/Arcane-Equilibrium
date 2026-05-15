@@ -1,13 +1,22 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v19
-Date: 2026-05-09
-Status: PM merge of v18 (13-agent v3 audit verification + DUAL-TRACK) + QCTODO (4-agent loss audit + Sprint N+0..N+5 + 22 invariant) + PA merge analysis (`2026-05-09--todo_qctodo_merge_analysis.md`) + FA business-chain merge advice (`2026-05-09--todo_qctodo_merge_business_chain_advice.md`). QCTODO archived to `docs/archive/2026-05-09--qctodo_sprint_n0_n5_archive.md`; v18 closed historical narrative remains in git history (`5789a175..e7d58774`). Wave Label Reconciliation per PA §1; 22 sign-off invariant per FA §4.
+Version: v21
+Date: 2026-05-15
+Status: PM freeze + AMD-2026-05-15-01 canary rebase applied. Prior v19/v20 queue remains the historical base, but W3 Stage 1 paper cohort and A4-C D+12 paper-edge promotion are frozen; replacement path is Stage 0R replay preflight + Stage 1 demo micro-canary.
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
 `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` and
 `docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`.
+
+## §0.0 PM Freeze — 2026-05-15 Canary Rebase Guard
+
+**Status**: ACTIVE PM freeze; AMD-2026-05-15-01 now carries the rebase authority.
+
+- `W3 Stage 1 paper cohort` → **FROZEN**. Paper is permanently disabled for promotion evidence; `Environment::Paper × 7d` cannot be used as Stage 1 PASS evidence.
+- `A4-C D+12 paper edge report` promotion path → **FROZEN**. A4-C promotion must be rebased to replay preflight + demo Stage 1 gate; legacy paper-edge report remains diagnostic/read-only only.
+- Any plan, command, env file, script, or runtime launch that sets `OPENCLAW_ENABLE_PAPER=1` → **BLOCKED** unless a future operator decision explicitly reopens paper for non-promotion diagnostics.
+- Step 2 update: AMD-2026-05-15-01 now revises W-AUDIT-9 / AMD-2026-05-09-03 to Stage 0R replay preflight + Stage 1 demo micro-canary.
 
 ---
 
@@ -16,8 +25,8 @@ tables, and superseded OpenClaw/Gateway assumptions are archived in
 | Sprint | Week | 主題 | E1 capacity | Business chain milestone |
 |---|---|---|---|---|
 | **N+0** | W1-W2 | FOUNDATION HEAVY: W-AUDIT-9 + 8a Phase A + B 群 + C-A6 + 6 mid-ground | **5 active + 1 stand-by** (operator (a)) | 63→65% |
-| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING: 8a Phase B+C 並行 + 8d (BTC→Alt) spec + Stage 1 cohort 7d 觀察 | 4/6 | 65→70% (W-AUDIT-9 Stage 1 standalone +5-7%) |
-| **N+2** | W5-W6 | 8d IMPL + 8a Phase D + Stage 2 demo cohort 14d | **5 active + 1 stand-by** | 70→76% |
+| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING: 8a Phase B+C 並行 + 8d (BTC→Alt) + Stage 0R replay preflight + **Stage 1 demo micro-canary** prep | 4/6 | 65→70% must be recalculated after demo canary evidence |
+| **N+2** | W5-W6 | 8d follow-up + 8a Phase D + Stage 2 demo cohort 14d（only after Stage 1 demo evidence） | **5 active + 1 stand-by** | 70→76% rebase pending |
 | **N+3** | W7-W8 | 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | 4/6 | 76→80% |
 | **N+4** | W9-W10 | 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | 4/6 | 80-83% |
 | **N+5** | W11-W12 | 8f IMPL + 8g (R-4) spec + **first per-alpha-source supervised live** | **5 active + 1 stand-by** | **85-89%** |
@@ -61,7 +70,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 - Scanner is always-on infrastructure for market context, active-universe attribution, route fitness, opportunity evidence, and legacy would-block audit. It is not a trading authority and cannot hard-gate opens, closes, live auth, or order dispatch.
 - `MessageBus` is legacy/advisory trace. Authoritative agent promotion requires typed lineage: StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport.
 - Replay is advisory and diagnostic. Replay can fast-track preflight; it cannot substitute for runtime lineage or authorize live promotion.
-- **Graduated Canary**（AMD-2026-05-09-03）：alpha-bearing pathway 預設 5-stage（Stage 0 shadow → 1 paper × 7d → 2 demo single × 14d → 3 demo full × 21d → 4 LIVE_PENDING）；DOC-08 §12 9 條安全不變量 / SM-04 ladder / Live boundary 5-gate / §二 16 原則硬不變式 4 範圍**仍強制 binary fail-closed**，不被 graduated canary 觸碰。
+- **Graduated Canary rebase**（AMD-2026-05-15-01 supersedes AMD-2026-05-09-03 Stage 1 paper semantics）：alpha-bearing pathway now uses Stage 0 shadow → **Stage 0R Replay Preflight** (`eligible_for_demo_canary=true/false`, not Stage 1 PASS) → **Stage 1 Demo micro-canary** (1 strategy × 1 symbol × `Environment::Demo` × 7d) → Stage 2 demo extended ×14d → Stage 3 demo full ×21d → Stage 4 LIVE_PENDING。DOC-08 §12 9 條安全不變量 / SM-04 ladder / Live boundary 5-gate / §二 16 原則硬不變式 4 範圍**仍強制 binary fail-closed**，不被 graduated canary 觸碰。
 
 ---
 
@@ -115,12 +124,12 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 15 | `W-AUDIT-8a` Alpha Surface Foundation (R-1 spec) | alpha-bearing | PA → E1 → E2 → E4 + MIT/QC/CC/BB → PM | ✅ **Phase A + Phase B DONE Sprint N+1 W1** (Phase A `c9fb0b8f`; Phase B panel_aggregator `0b76a4db` + `3d0ea347` + `ddf0cebe` + consumer wiring `7a07348b` + `31dba487`) / Phase C+D 待 N+2-N+3 | funding_curve aggregator (B-1) + oi_delta aggregator (B-2) + BB WS subscription (B-3) + bb_breakout real OiDeltaPanel consume fail-closed (B-4) 全 land。cargo check PASS。Phase B WS-first design: 0 REST cost ongoing。 |
 | 16 | `W-AUDIT-8b` A4-A Funding Skew Directional 新策略 | alpha-bearing | PA spec → E1 IMPL + QC + MIT + BB review | ⏳ **DEFER** Sprint N+3 spec → N+4 IMPL (1 sprint) | funding rate 期限結構 directional alpha；demo signal noise（mainnet 才能完整驗證）；25-symbol funding curve 消費 AlphaSurface Tier 2。 |
 | 17 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction 新策略 | alpha-bearing | PA spec → E1 (Rust hot-path) + QC + BB review WS | ⏳ **DEFER** Sprint N+2 spec → N+3 IMPL (1.5 sprint) | Bybit `allLiquidation` WS topic 真接；event-trigger 模式；消費 AlphaSurface Tier 3 microstructure。 |
-| 18 | `W-AUDIT-8d` A4-C BTC→Alt Lead-Lag 新策略 | alpha-bearing | PA spec → E1 IMPL + QC review | ✅ **DONE Sprint N+1 W1** (Spec v1.2+v1.3 D+0; IMPL `3d0ea347` btc_lead_lag producer + `58970d24` IPC slot + `31dba487` strategy consumers + `4b267dff` P0 stale fix + `1f0354cf` E2 review) | BTC 1m ≥1.5σ lead signal; 7-alt cohort; grid_trading/ma_crossover shadow log; bb_reversion CrossAsset filter; paper-only fence 三層防禦。cargo check PASS。7d paper evidence collection 啟動。Spec: `docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md`. |
+| 18 | `W-AUDIT-8d` A4-C BTC→Alt Lead-Lag 新策略 | alpha-bearing | PA spec → E1 IMPL + QC review | ✅ **DONE Sprint N+1 W1** (Spec v1.2+v1.3 D+0; IMPL `3d0ea347` btc_lead_lag producer + `58970d24` IPC slot + `31dba487` strategy consumers + `4b267dff` P0 stale fix + `1f0354cf` E2 review) / **paper promotion FROZEN 2026-05-15** | BTC 1m ≥1.5σ lead signal; 7-alt cohort; grid_trading/ma_crossover shadow log; bb_reversion CrossAsset filter。Legacy D+12 paper-edge promotion path frozen; must rebase to replay preflight + demo Stage 1 gate. Spec: `docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md`. |
 | 19 | `W-AUDIT-8e` (R-2) Strategist Alpha Source Orchestrator | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+4 spec → N+5 IMPL (2-3 sprint) | Strategist 從 4×5 hardcoded regime preferences → AlphaSourceRegistry + 動態 Sharpe-by-regime + Hypothesis sourcing。 |
 | 20 | `W-AUDIT-8f` (R-3) Hypothesis Pipeline + W-AUDIT-4 ML 併入 | alpha-bearing | PA spec → E1 IMPL + MIT spec | ⛔ **DEFER** Sprint N+5 IMPL (2-3 sprint) | learning.hypotheses table state machine + Decision Lease + Hypothesis 關係 + W-AUDIT-4 6 dead schema 併入解 attribution_chain 0.5%→80% root cause（Decision-3 confirmed）。 |
 | 21 | `W-AUDIT-8g` (R-4) Per-alpha-source Live Promotion Gate | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+7+ (2 sprint) | LiveBudget(alpha_source_id, slice) 替代「整 system live_reserved」線性 LG-2/3/4/5；FA defer 至 N+7（W-AUDIT-9 已部分覆蓋）。 |
 | 22 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 review | ⛔ **DEFER** Sprint N+4-N+6 (1 sprint) | A3 建議 13→15 tab。 |
-| 23 | `W-AUDIT-9` Graduated Canary Foundation IMPL | alpha-bearing | E1 (5 active + 1 stand-by 並行) | ✅ **T1-T7 DONE Sprint N+0 closure 2026-05-10** (HEAD `b6ed4975`)；W5-E1-A CANARY-STAGE-CRITERIA-1 ✅ DONE D+0 (commit `6529e37e` +2441 LOC) + V089 SQL seed deployed；W5-E1-C DYNAMIC-UNBLOCK ✅ DONE D+0 (commit `d17d7863` +1700 LOC) + V090 deployed；Stage 1 cohort 待 W6+W7 完成 ~D+3-4 啟動 | AMD-2026-05-09-03 配套：Rust schema executor_canary_stage + V### migration + shadow_mode_provider stage-aware + healthcheck [58] + governance.canary_stage_log + GUI surface + LeaseScope::CanaryStagePromotion + E4 regression。**`W-AUDIT-9` Stage 1 launch 是 standalone milestone**（FA 估 +5-7%）。|
+| 23 | `W-AUDIT-9` Graduated Canary Foundation IMPL | alpha-bearing | E1 (5 active + 1 stand-by 並行) | ✅ **T1-T7 DONE Sprint N+0 closure 2026-05-10** (HEAD `b6ed4975`)；W5-E1-A CANARY-STAGE-CRITERIA-1 ✅ DONE D+0 (commit `6529e37e` +2441 LOC) + V089 SQL seed deployed；W5-E1-C DYNAMIC-UNBLOCK ✅ DONE D+0 (commit `d17d7863` +1700 LOC) + V090 deployed；**Stage 1 paper cohort FROZEN 2026-05-15** | AMD-2026-05-15-01 rebases stage semantics: paper Stage 1 disabled; Stage 0R replay preflight + Stage 1 demo micro-canary gate replace old paper entry path. |
 | 24 | `W-AUDIT-10` (R-5) Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec → E1 IMPL | ⛔ **DEFER** 中期 (1-2 sprint) | CI gate spec drift > 7d auto-fail + module/table lifecycle header + 自動抽 SCRIPT_INDEX/SPEC_REGISTER。 |
 
 ### §4.1.1 Sprint N+0 + D+0 EXECUTION 統計（per §6.6 詳）
@@ -138,7 +147,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 1 | W-AUDIT-8a Phase A migration ↔ W-AUDIT-6d mid-ground 5 策略改動 | `bb_breakout/mod.rs` / `ma_crossover/strategy_impl.rs` / `bb_reversion/mod.rs` | **序列化**：先 6d mid-ground，再 8a Phase A |
 | 2 | W-AUDIT-9 T3 shadow_mode_provider stage-aware ↔ ExecutorAgent shadow_mode 接線 | `executor_config_cache.py` / `executor_agent.py` | **W-AUDIT-3b 必先 land**；T3 結束前 ExecutorAgent shadow=true 不動 |
 | 3 | W-AUDIT-8a Phase B+C ↔ W-AUDIT-5b 性能 wave | `tick_pipeline/mod.rs` | Phase B+C 並行於 N+1，5b 性能 catch-up reserved slot |
-| 4 | A 群 3 新策略（8b/8c/8d）↔ W-AUDIT-9 Stage 1 cohort 選擇 | governance/canary | A4-C (8d) 用 W-AUDIT-9 Stage 1 paper cohort 入場；非 W-AUDIT-9 7 sub-task 完整 land 不啟動 |
+| 4 | A 群 3 新策略（8b/8c/8d）↔ W-AUDIT-9 Stage 1 cohort 選擇 | governance/canary | **FROZEN 2026-05-15**: A4-C 不再用 Stage 1 paper cohort 入場；改走 Stage 0R replay preflight + demo Stage 1 gate（AMD-2026-05-15-01）。 |
 
 ---
 
@@ -155,7 +164,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 1 | ✅ | Sprint N+0 W-AUDIT-9 7 sub-task 全 land + `[58]` PASS + `governance.canary_stage_log` active | `git log --grep=W-AUDIT-9` 7 commit + healthcheck PASS | PA-1 |
 | 2 | ✅ | Sprint N+0 W-AUDIT-8a Phase A trait 升級 land + 5 策略 byte-identical replay PASS + `cargo build --release` 綠 | E2E byte-diff test PASS | PA-2 |
 | 3 | ✅ | W-AUDIT-6d mid-ground 6 保子項 land + 砍 6 子項 grep blacklist 0 命中 | grep audit + 6 commit 存在 | PA-3 |
-| 4 | ⏳ | W-AUDIT-9 Stage 1 cohort active + 7d wall-clock 觀察期未提前升級（**standalone milestone**） | `governance.canary_stage_log` Stage 1 entered_at_ms + auto-promote 條件未提前觸 | PA-4 + FA-Critique-2; **DEFER 等 W6+W7 完成 ~D+3-4 啟動** |
+| 4 | ⏳ | W-AUDIT-9 Stage 0R replay preflight returns `eligible_for_demo_canary=true` + Stage 1 **demo** micro-canary active + 7d wall-clock 觀察期未提前升級（paper Stage 1 frozen） | Stage 0R evidence packet + `governance.canary_stage_log` Stage 1 demo entered_at_ms + auto-promote 條件未提前觸 | PA-4 + FA-Critique-2 + AMD-2026-05-15-01; **DEFER until W-AUDIT-3b + [55] fill-lineage invariant PASS** |
 | 5 | ✅ | W-AUDIT-4b N+0 IMPL chain 已串行 land（M1 decision_features producer 改 intent-only emit + V082 拆 `decision_features_evaluations` 表 → M2 fill writer `entry_context_id` enforcement + V083 NOT VALID CHECK → M3 reject negative label + V084 `mlde_sample_weight` UDF + 6 Rust producer file `emit_decision_feature_intent_rejected` 5 hits） | commit ordering 驗 (`4a90966a` → `404174a4` → `e93a6e5c` → `a01d05ed`) + grep 5 hits + pytest 真 19/19 PASS | FA-2 (N+0 actual IMPL 對齊；N+1 corrected scope = 3 retained INSERT tables + 2 companion views + 1 dropped/no-DDL) |
 
 ### §5.2 安全 invariant（5 條：5 ✅ 全 PASS per CC A 93.3% APPROVE）
@@ -175,7 +184,7 @@ cross-document 引用對齊：CLAUDE.md §三 / §五 中對 W-AUDIT-8b/c/d/e/f/
 | 11 | ✅ | `canary_stage_log.decision_lease_id` for `manual_promote` PG NOT NULL 強制 | V0XX migration 含 `CHECK (transition_kind != 'manual_promote' OR decision_lease_id IS NOT NULL)` | PA-9 |
 | 12 | ✅ | healthcheck `[58]` 對 SM-04 ≥ L3 escalate 必 hard FAIL → 觸 stage = 0 rollback | `[58]` IMPL 對 SM-04 L3 邏輯 explicit + unit test PASS | PA-10 |
 | 13 | ⏳ | A 群 3 新策略 IMPL 後 `declared_alpha_sources()` 與真實邏輯對齊 | grep 3 新策略 ctor + QC review report sign-off; **DEFER A 群 (8b/8c/8d) IMPL 完成後驗** | PA-11 |
-| 14 | ⏳ | W-AUDIT-8b/c/d sequence 必含 **Stage 2 abort gate**（A4-C IMPL 後 Stage 2 demo 14d gross < 0 → A 群 8b/8c 重評，**不**連續 IMPL） | Sprint sign-off report 明文記入; **DEFER W2 A4-C IMPL 後 Stage 2 demo 14d 才有效** | FA-5 |
+| 14 | ⏳ | W-AUDIT-8b/c/d sequence 必含 **Stage 2 abort gate**（A4-C Stage 1 demo → Stage 2 demo 14d gross < 0 → A 群 8b/8c 重評，**不**連續 IMPL） | Sprint sign-off report 明文記入; **DEFER until Stage 1 demo evidence enters Stage 2** | FA-5 + AMD-2026-05-15-01 |
 | 15 | ✅ | D-02 Layer 2 manual SOP 不違反 ADR-0020（manual probe 不可自動化為 cron / event-trigger） | code grep audit | FA-6 |
 | 16 | 🟡 | W-AUDIT-6d mid-ground 砍 6 polishing 的 **K -12 trial DSR penalty 量化結論記入 sign-off report**（mu_0 從 ~2.54 降至 ~2.27 用 ln，z_DSR 增益 +0.30） | sign-off report 明文; **PARTIAL — 量化記入 N+0 sign-off report ✅，但 mid-ground active phase 仍待 N+1 evaluate** | FA-7 |
 | 17 | ✅ | v2-NEW-1 strategist cap 30%→50% 補 **ADR-0022**（編號衝突自動移位：ADR-0021 已用 = alpha-source-architecture-upgrade；strategist-cap-wide-parameter-adjustment-skill 改 ADR-0022；含 freedom-not-gate rationale + SM-05 張力 + 50% 偏離監測指標） | ADR-0022 land + commit `75b6e5f2` (PA `2026-05-10`) | FA-8 |
@@ -280,7 +289,7 @@ V085 (W1 funding_curve) / V086 (W6 reject_reason_code) / V087 (W1 oi_delta_panel
 
 **Phase 1**：一次 restart_all --rebuild --keep-auth deploy W7-3 + W7-1 + W2 trait skeleton + 30min observation
 **Phase 2**：派 9 wave 並行 sub-agent dispatch：W7-2 (含 bb_reversion) / W7-4 / W7-5 / W6 RFC verdict 三角 / W6 V086 IMPL / W1 IMPL Rust panel_aggregator WS-first / W2 IMPL v1.2 / W4 RouterLeaseGuard Drop / W5 三 P1 IMPL
-**W3 Stage 1 cohort 暫不派**（等 W6 + W7 完成 ~D+3-4 啟動）
+**W3 legacy Stage 1 paper cohort 不派**（FROZEN 2026-05-15）；next canary path = Stage 0R replay preflight + Stage 1 demo micro-canary，且需 W-AUDIT-3b + `[55]` invariant 先 PASS。
 
 ### Sprint N+1 estimated duration
 7-10 day（W7 從 4 day 縮到 2-3 day per W7-1+W7-3 提早 land 共省 1.5 day）
@@ -360,8 +369,8 @@ V085 (W1 funding_curve) / V086 (W6 reject_reason_code) / V087 (W1 oi_delta_panel
 ### ⏳ Phase 4 待派 (long-running)
 
 - ⏳ **W1 IMPL chain** (Rust panel_aggregator WS-first, V085/V087 producer integration, ~5-7d, 3 sub-agent)
-- ⏳ **W2 IMPL v1.2 chain** (lead-lag producer + V088 + ma/grid 接 BtcAltLeadLag paper-only shadow, ~5-7d, 5 sub-agent)
-- ⏳ **W3 Stage 1 cohort** observation start（等 W6 + W7 完成 ~D+3-4 啟動）
+- ⏳ **W2 IMPL v1.2 chain** (lead-lag producer + V088 + ma/grid 接 BtcAltLeadLag shadow/diagnostic path, ~5-7d, 5 sub-agent; paper promotion path frozen)
+- ⏳ **W3 Stage 0R + Stage 1 demo micro-canary** observation start（requires replay preflight + W-AUDIT-3b + `[55]` invariant; legacy paper cohort frozen）
 - ⏳ **P1-1 / P1-2 / P2-1 W7 propagation**（per W7-4 audit findings, bb_reversion + bb_breakout 缺 W7-3 1-tick defense / bb_breakout 缺 W7-2 entry query, ~95 LOC total, schedule N+1 W5 if capacity 或 N+2）
 
 ### Stats 累計 (single session 2026-05-10)
@@ -674,8 +683,8 @@ DSR 公式 `mu_0 = sqrt(2 × ln(K))` 修正項（**ln 自然對數**，非 log�
 |---|---|---|
 | 2026-05-10..16 | Sprint N+0 W1-W2 FOUNDATION HEAVY | §6 Day-by-Day; §5 22 invariant sign-off |
 | 2026-05-16 | funding_arb 14d audit | verification/history; retirement decision in AMD-2026-05-09-02 / ADR-0018 |
-| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | 8a Phase B+C 並行 + 8d (BTC→Alt) spec + W-AUDIT-9 Stage 1 cohort |
-| 2026-05-24..30 | Sprint N+2 8d IMPL + 8a Phase D + Stage 2 demo cohort 14d | 8a wave acceptance |
+| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | 8a Phase B+C 並行 + 8d (BTC→Alt) spec rebase + Stage 0R replay preflight + Stage 1 demo micro-canary prep |
+| 2026-05-24..30 | Sprint N+2 8d follow-up + 8a Phase D + Stage 2 demo cohort 14d | Stage 2 only from Stage 1 demo empirical evidence |
 | 2026-05-31..06-06 | Sprint N+3 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | |
 | 2026-06-07..13 | Sprint N+4 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | Track W 全 closed |
 | 2026-06-14..20 | Sprint N+5 8f IMPL + 8g (R-4) spec + first per-alpha-source supervised live | 業務鏈 85-89% |
