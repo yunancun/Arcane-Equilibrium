@@ -26,7 +26,7 @@
 - 5 既存策略 explicit declare alpha sources（migration only，不改邏輯）
 - Orchestrator dispatch tracking metric `alpha_source_dispatched_total{tag=...}`
 - Tier 2 panel collector（funding curve / OI delta panel）+ V### migration retention policy
-- Tier 3 collector（orderflow stub + liquidation pulse 真接 Bybit `allLiquidation` WS topic）
+- Tier 3 collector（orderflow stub + liquidation pulse 真接 Bybit `allLiquidation.{symbol}` WS topic）
 - Tier 4 wire（EventAlert from Scout `intel_objects`、RegimeTag from existing ATR/Hurst/EwmaVol、SentimentPanel stub）
 
 **本 wave 不含**（明確邊界）：
@@ -63,7 +63,7 @@ pub enum AlphaSourceTag {
     OIDeltaPanel,       // cross-symbol open interest delta panel
     // Tier 3 — Microstructure
     OrderflowImbalance, // microprice / queue imbalance / large-trade tape
-    LiquidationCascade, // Bybit allLiquidation pulse cluster
+    LiquidationCascade, // Bybit allLiquidation.{symbol} pulse cluster
     // Tier 4 — Information flow
     EventDriven,        // Scout intel_objects → EventAlert
     CrossAsset,         // BTC→Alt lead-lag / cross-pair correlation
@@ -160,11 +160,11 @@ pub struct AlphaSurface<'a> {
 - 用途：liquidation cascade detection（cross-symbol）
 - 字段：`recent_events: Vec<LiquidationEvent>`（rolling 60s 窗口）、`cluster_score: f64`、`dominant_side: LiquidationSide`、`snapshot_ts_ms`
 - **狀態 dormant — 復活前置條件**：
-  - OpenClaw 於 **2026-04-06 已刪除** `allLiquidation` WS handler（字典手冊 `docs/references/2026-04-04--bybit_api_reference.md` line 990 證明）
+  - OpenClaw 於 **2026-04-06 已刪除** legacy liquidation WS handler（字典手冊 `docs/references/2026-04-04--bybit_api_reference.md` line 990 證明）；2026-05-15 C1 候選改以官方 `allLiquidation.{symbol}` 做隔離 proof
   - `market.liquidations` 表 reserved 保留，但 R-1 IMPL 必須**先付 +1 sprint 重接 WS handler + 重啟 writer**
   - 復活前 surface field 永遠 `None`，**禁止 stub mock 數據**（避免「假 alpha source dispatched」污染 dispatch tracking metric）
   - 策略 ctor declare `LiquidationCascade` 的，在 handler 復活前 strategy `on_tick` 必須觀測到 `surface.liquidation_pulse.is_none()` → fail-closed 跳過自身 alpha source
-- 來源（復活後）：Bybit `allLiquidation` WS topic + Python `liquidation_writer.py` 寫 `market.liquidations` PG 表（V### migration 新增）
+- 來源（復活後）：Bybit `allLiquidation.{symbol}` WS topic + Python `liquidation_writer.py` 寫 `market.liquidations` PG 表（V### migration 新增）
 - Refresh / Staleness（復活後）：tick-level，WARN > 10s，FAIL > 60s
 - Retention：30 天（liquidation cascade 樣本稀疏 + 高價值，可獨立保留更久）
 - **Sprint 排程影響**：W-AUDIT-8a Phase C 原規劃內含 liquidation 真接，現需拆兩段 — Phase C 先 dormant + schema reserved；Phase C+1 sprint（單獨 sub-phase）做 WS handler revert + writer 重啟 + 真接
@@ -287,7 +287,7 @@ alpha_source_unavailable_total{tag="<lowercase>", strategy="<strategy_name>"}: u
 1. DB inventory：確認 V002 `market.liquidations` reserved table、目前欄位、實際 row count、現有 retention policy；只有 MIT 拍板後才新增 V### 修 retention/schema。
 2. WS inventory：確認 `full_subscription_list*()` 仍不包含 `liquidation.*`、`price-limit.*`、`adl-notice.*`；C0 不得改 production subscription list。
 3. Parser inventory：盤點現存 legacy `parse_liquidation_item()` / dispatch branch 是否仍可測，但不得把它視為 active producer。
-4. C1 probe spec：由 BB 寫 standalone topic probe，候選包含 Bybit documented `allLiquidation` 或 per-symbol liquidation 替代；必須在隔離連線證明 24h 不毒化主行情、不 rate-limit。
+4. C1 probe spec：由 BB 寫 standalone topic probe，候選以 Bybit official current `allLiquidation.{symbol}` 為主；legacy `liquidation.{symbol}` 僅作 deprecated 對照，不得進 production。探針必須在隔離連線證明 24h 不毒化主行情、不 rate-limit。執行計劃見 `docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md`。
 5. Contract sketch：定義 `LiquidationPulseProvider` rolling 60s buffer、writer schema mapping、`AlphaSurface.liquidation_pulse` fail-closed 規則；C0 結束時 surface 仍應為 `None`。
 6. Orderflow stub 可獨立做，但必須標明 stub/source tier；不可讓 `LiquidationCascade` dispatch counter 看起來像 real alpha source。
 
@@ -391,7 +391,7 @@ Phase A ──┬─→ Phase B ──┐
 
 ### Risk-5：Bybit liquidation topic poisoning / rate-limit
 
-**症狀**：subscribe 舊 `liquidation.*` 或未驗證 `allLiquidation` 後，Bybit 返回 `"handler not found"` / rate-limit，主 WS 連線雖心跳正常但行情歸零。
+**症狀**：subscribe 舊 `liquidation.*` 或未驗證 `allLiquidation.{symbol}` 後，Bybit 返回 `"handler not found"` / rate-limit，主 WS 連線雖心跳正常但行情歸零。
 **Mitigation**：Phase C 先做 C0 inventory；production subscription list 不變；BB 用 standalone connection 驗證 topic 24h 不毒化、不 rate-limit 後才允許 C1。
 **Fallback**：若無安全 topic，`LiquidationCascade` 維持 dormant，`AlphaSurface.liquidation_pulse = None`，A4-B liquidation strategy 不進 IMPL。
 
@@ -457,7 +457,7 @@ Phase A ──┬─→ Phase B ──┐
 
 **C0 acceptance（revival inventory）**：
 - DB inventory report proves `market.liquidations` reserved table status, row count, columns, and retention policy; V### only if MIT approves a required delta.
-- Production subscription list remains unchanged and does not include `liquidation.*`, `price-limit.*`, `adl-notice.*`, or unverified `allLiquidation`.
+- Production subscription list remains unchanged and does not include `liquidation.*`, `price-limit.*`, `adl-notice.*`, or unverified `allLiquidation.{symbol}`.
 - Legacy parser/dispatch code is documented as inactive until a safe topic is proven.
 - `AlphaSurface.liquidation_pulse` remains `None`; strategies declaring `LiquidationCascade` must fail-closed.
 - BB standalone probe spec exists for the candidate topic.

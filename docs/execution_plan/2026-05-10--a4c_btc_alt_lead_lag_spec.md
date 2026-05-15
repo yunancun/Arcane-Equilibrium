@@ -1,9 +1,9 @@
 # A4-C BTC→Alt Lead-Lag Spec — Sprint N+1 W2 PA C-1 Spec Phase v1.4
 
 **Author**: PA (project architect)
-**Date**: 2026-05-10（v1.0-v1.2）/ 2026-05-11（v1.3 inline edit）/ 2026-05-15（v1.4 canary rebase）
+**Date**: 2026-05-10（v1.0-v1.2）/ 2026-05-11（v1.3 inline edit）/ 2026-05-15（v1.4 canary rebase；v1.5 archive verdict）
 **Phase**: W2 Spec phase Day 1-2 — PA C-1 deliverable（QC C-2 sign-off CONDITIONAL APPROVE 5 conditions revised；MIT C-3 σ verify 已交付 → dual-layer σ + PSR(0) skew/kurt formula 強制 land，MIT + QC 直接收 W2 IMPL）；v1.3 W2-IMPL-2 amendment：§6.2 Layer 2 從「Python writer paper-only fence」改為「Producer env-gate fence」（producer 在 PA D+0 階段就改 Rust，Python writer 從不存在），§7.1 + §8.1 0 動；v1.4 AMD-2026-05-15-01 amendment：paper edge report 降級為 diagnostic/read-only，不再作 promotion gate。
-**Scope**: Sprint N+1 W2 A4-C fast-track；v1.4 後 promotion path 改為 Stage 0R replay preflight (`eligible_for_demo_canary=true/false`) + Stage 1 Demo micro-canary（1 strategy × 1 symbol × `Environment::Demo` × 7d）。Legacy D+12 paper edge report remains diagnostic only and cannot promote to demo.
+**Scope**: Sprint N+1 W2 A4-C fast-track；v1.4 後 promotion path 改為 Stage 0R replay preflight (`eligible_for_demo_canary=true/false`) + Stage 1 Demo micro-canary（1 strategy × 1 symbol × `Environment::Demo` × 7d）。Legacy D+12 paper edge report remains diagnostic only and cannot promote to demo。v1.5 PM verdict archives A4-C from the active promotion path after Step 5b failed the spec R² rule; keep the producer/panel as diagnostic infrastructure only.
 **Reference dispatch**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--sprint_n1_dispatch_draft.md` §3.2 W2
 **Reference trait coord**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md`
 **Reference alpha surface**: `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` + W-AUDIT-8c §515 (BTC→Alt lead-lag 候選 C, 留給 N+5)
@@ -13,6 +13,10 @@
 ---
 
 ## Change Log
+
+### v1.5 (2026-05-15) — Step 5b archive verdict：promotion candidate 降級為 diagnostic-only
+
+Step 5b restored diagnostic producer health but failed Stage 0R: pooled R²(60/120/300)=`0.0009/0.0005/0.0027`, PSR(0)=`0.5877`, DSR=`0.0000`, and no per-symbol `eligible_for_demo_canary=true`。Per §3.1 archive rule, N=60 R² 仍 < 0.04 → archive A4-C promotion path。Decision record: `docs/execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md`。
 
 ### v1.4 (2026-05-15) — AMD-2026-05-15-01 canary rebase：paper report 降級，改 Stage 0R + Stage 1 demo gate
 

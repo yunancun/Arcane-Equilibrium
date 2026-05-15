@@ -3,6 +3,28 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-05-15（Claude/Codex same-page sync）
 
+### P0-MICRO-PROFIT alpha prework — 2026-05-15
+
+**Scope**: Converted the micro-profit question into alpha-path prework without
+touching runtime, config, auth, DB, paper, demo, or live execution.
+
+**主要 land**:
+- Added W-AUDIT-8a C1 standalone liquidation-topic proof plan and helper
+  script for `allLiquidation.{symbol}`. C1 remains blocked until a 24h isolated
+  BB proof passes and MIT signs the schema mapping.
+- Drafted W-AUDIT-8b Funding Skew Directional spec v0.1 as a cross-sectional
+  crowding signal, explicitly not a retired `funding_arb` revival.
+- Archived A4-C BTC→Alt Lead-Lag from the active promotion path because Step
+  5b failed the spec R² archive rule; the panel/producer remains diagnostic.
+- Indexed the `P1-A4C-RCA-1` read-only RCA start result: current 7d dry-run and
+  finite threshold probe both remain below revive/promotion bands.
+- Updated TODO/CLAUDE/active-plan/Codex memory/docs indexes to reflect the new
+  alpha order.
+
+**Verification**: docs/static + probe dry-run/compile only. No production WS
+topic change, no `OPENCLAW_ENABLE_PAPER=1`, no Stage 1 demo canary, no sizing
+or risk edit, no live auth, no DB write, no rebuild/restart.
+
 ### Claude/Codex same-page sync — 2026-05-15
 
 **Scope**: Reconciled Claude-facing active state with the latest Codex/TODO
