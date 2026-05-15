@@ -783,7 +783,7 @@ impl TickPipeline {
                 strategy: trigger_tag.to_string(),
                 paper_fill_ts: event.ts_ms,
                 is_close: true,
-                order_link_id: format!("{}_{}_{}", prefix, event.ts_ms, self.exchange_seq),
+                order_link_id: format!("{}_{}_{}_{}", prefix, self.order_link_mode_tag(), event.ts_ms, self.exchange_seq),
                 decision_lease_id: None,
                 is_primary,
                 stop_loss: None,
@@ -932,7 +932,7 @@ impl TickPipeline {
             for (symbol, is_long, qty, price) in positions {
                 if let Some(ref tx) = self.order_dispatch_tx {
                     self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                    let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
+                    let order_link_id = format!("oc_ipc_close_{}_{}_{}", self.order_link_mode_tag(), ts_ms, self.exchange_seq);
                     // V083-FIX-1（2026-05-11）：close 路徑帶 entry_context_id；
                     // paper_state 缺則 helper 回 synthetic（W-D MAG-083 P1-RCA-1）。
                     let entry_ctx = self.resolve_close_entry_context_id(&symbol, ts_ms);
@@ -1113,7 +1113,7 @@ impl TickPipeline {
             };
             if let Some(ref tx) = self.order_dispatch_tx {
                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
+                let order_link_id = format!("oc_ipc_close_{}_{}_{}", self.order_link_mode_tag(), ts_ms, self.exchange_seq);
                 // V083-FIX-1（2026-05-11）：close 路徑帶 entry_context_id 滿足
                 // V083 NOT NULL CHECK；paper_state 有倉用真 id，否則 helper 回
                 // synthetic `orphan_recovery_ctx:{symbol}:{ts_ms}`，避免 batch

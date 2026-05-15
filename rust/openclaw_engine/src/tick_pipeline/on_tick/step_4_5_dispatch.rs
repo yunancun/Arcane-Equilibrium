@@ -120,6 +120,9 @@ impl TickPipeline {
     ) -> ControlFlow<Option<CanaryRecord>, Vec<crate::intent_processor::OrderIntent>> {
         let sym = &event.symbol;
         let em = self.effective_engine_mode();
+        // P2-DUAL-RAIL-ORDER-ID: cached before split_borrow_for_dispatch()
+        // which holds &mut self.orchestrator for the rest of the function.
+        let mode_tag = self.order_link_mode_tag();
 
         // Step 4+5: Per-strategy dispatch + intent processing with rejection/fill callbacks (RC-04/RC-05).
         // 步驟 4+5：逐策略分派 + 意圖處理，含拒絕/成交回調。
@@ -596,7 +599,7 @@ impl TickPipeline {
                             if gate.approved {
                                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
                                 let order_link_id =
-                                    format!("oc_{}_{}", event.ts_ms, self.exchange_seq);
+                                    format!("oc_{}_{}_{}", mode_tag, event.ts_ms, self.exchange_seq);
 
                                 // Round to exchange precision / 取整至交易所精度
                                 let final_qty = if let Some(ref icache) = self.instrument_cache {
@@ -1230,8 +1233,8 @@ impl TickPipeline {
                                             paper_fill_ts: event.ts_ms,
                                             is_close: false,
                                             order_link_id: format!(
-                                                "sh_{}_{}",
-                                                event.ts_ms, self.exchange_seq
+                                                "sh_{}_{}_{}",
+                                                mode_tag, event.ts_ms, self.exchange_seq
                                             ),
                                             decision_lease_id: None,
                                             is_primary: false,

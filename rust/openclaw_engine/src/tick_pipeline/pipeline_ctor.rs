@@ -243,6 +243,30 @@ impl TickPipeline {
         crate::mode_state::effective_engine_mode(self.pipeline_kind, self.endpoint_env)
     }
 
+    /// P2-DUAL-RAIL-ORDER-ID (2026-05-15): 2-char mode tag for order_link_id
+    /// prefixing. Keeps exchange order_link_ids globally unique across
+    /// demo / live_demo / live pipelines while staying within Bybit's 36-char
+    /// orderLinkId limit.
+    ///
+    /// Mapping:
+    ///   "demo"      → "dm"
+    ///   "live_demo" → "ld"
+    ///   "live"      → "lv"
+    ///   _           → "xx" (defensive — paper never reaches exchange path)
+    ///
+    /// P2-DUAL-RAIL-ORDER-ID：2 字元 order_link_id 模式標籤，保證 demo /
+    /// live_demo / live 管線間的 order_link_id 全系統唯一，同時遵守 Bybit
+    /// orderLinkId 36 字元上限。
+    #[inline]
+    pub fn order_link_mode_tag(&self) -> &'static str {
+        match self.effective_engine_mode() {
+            "demo" => "dm",
+            "live_demo" => "ld",
+            "live" => "lv",
+            _ => "xx",
+        }
+    }
+
     /// W-AUDIT-8a Phase B: inject the shared FundingCurvePanelSlot for
     /// dispatch-time AlphaSurface fill.
     pub fn set_funding_curve_panel_slot(&mut self, slot: crate::ipc_server::FundingCurvePanelSlot) {
