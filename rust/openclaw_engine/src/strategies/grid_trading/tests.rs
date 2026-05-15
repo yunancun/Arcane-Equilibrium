@@ -1018,10 +1018,15 @@ fn test_g7_09c_post_only_reject_callback_arms_cooldown() {
         &crate::strategies::maker_rejection::MakerRejectionCategory::PostOnlyCross,
     );
 
+    // BB-MF-3 (2026-05-16) — entry-side cooldown 寫入 entry map（rename）。
     assert_eq!(
-        g.reject_cooldown_until_ms.get("BTC").copied(),
+        g.reject_cooldown_entry_until_ms.get("BTC").copied(),
         Some(61_000),
-        "PostOnly reject callback must route to grid cooldown wiring"
+        "PostOnly entry reject callback must route to grid entry cooldown wiring"
+    );
+    assert!(
+        g.reject_cooldown_close_until_ms.get("BTC").is_none(),
+        "PostOnly entry reject must NOT pollute close cooldown (BB-MF-3 isolation)"
     );
 }
 
@@ -1380,5 +1385,301 @@ fn test_grid_proceeds_entry_when_symbol_pinned() {
     assert!(
         !intents.is_empty(),
         "is_pinned=true 且 would_open=true 時 gate 必不阻擋"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — reject_cooldown entry/close split
+// 對應 spec v1.2 §6.1 + AMD-2026-05-15-02 §8 IMPL Prereq 6。
+// 設計目標：
+//   1. entry-side reject 寫 reject_cooldown_entry_until_ms，僅阻擋 Open emission
+//   2. close-side reject 寫 reject_cooldown_close_until_ms，獨立 map
+//   3. Race C (PostOnlyCross close) → 不 arm cooldown，走 market（spec §5.3）
+//   4. TooManyPending close → 5min 固定（spec §6.1，本 prereq 不實作 §5.4 dynamic backoff）
+//   5. 其他 close reject → 1min default（spec §6.1）
+//   6. entry reject 不凍結同 symbol 的 close emission（BB-MF-3 silent degradation 修復）
+// 注意：Phase 1b 主軸 IMPL 後 close path 真正進 cooldown gate，本 prereq commit
+//       僅完成 helper + 隔離測試，不接線 commands.rs / dispatch.rs production dispatcher。
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::strategies::maker_rejection::MakerRejectionCategory;
+
+/// BB-MF-3 #1：entry-side PostOnly reject 不凍結同 symbol 的 close emission。
+/// 設定：grid 持 LONG 倉位（cur_inventory > 0），entry cooldown active；
+/// 觸發 up-cross → close-long emission；驗 close intent 仍正常發送。
+/// 對應 PM 任務 Step 4 test_entry_reject_does_not_freeze_close_path。
+#[test]
+fn test_entry_reject_does_not_freeze_close_path() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.reject_cooldown_ms = 60_000;
+
+    // 首 tick 初始化網格 + 設 last_cross_idx + 種入持倉。
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    g.net_inventory.insert("BTC".to_string(), 1.0); // LONG 1 unit
+
+    // entry-side PostOnly reject 寫入 entry cooldown（ts=1_000 + 60s = 61_000）。
+    g.on_post_only_rejected("BTC", 1_000, &MakerRejectionCategory::PostOnlyCross);
+    assert_eq!(
+        g.reject_cooldown_entry_until_ms.get("BTC").copied(),
+        Some(61_000),
+        "entry reject 必寫入 entry cooldown map"
+    );
+    assert!(
+        g.reject_cooldown_close_until_ms.get("BTC").is_none(),
+        "entry reject 不可污染 close cooldown map（BB-MF-3 隔離不變式）"
+    );
+
+    // ts=30_000（entry cooldown 仍 active：30_000 < 61_000）+ up-cross
+    // （價 50_500 → 50_900 跨越下一 grid level）→ cur_inventory > 0 → close-long emission。
+    let intents = g.on_tick(
+        &ctx(50_900.0, 30_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(
+        !intents.is_empty(),
+        "entry cooldown active 不可凍結 close emission（BB-MF-3 silent degradation 修復）"
+    );
+    let close_emitted = intents.iter().any(|a| {
+        matches!(
+            a,
+            StrategyAction::Close { reason, .. } if reason == "grid_close_long"
+        )
+    });
+    assert!(
+        close_emitted,
+        "up-cross with LONG inventory + entry cooldown active 必發 grid_close_long"
+    );
+}
+
+/// BB-MF-3 #2：close-side reject 不凍結同 symbol 的 entry emission。
+/// 設定：close cooldown active（透過 arm_close_cooldown(TooManyPending) 寫入），
+/// 觸發 down-cross + cur_inventory=0 → would_open=true → entry emission；驗 entry 正常。
+/// 對應 PM 任務 Step 4 test_close_reject_does_not_freeze_entry_path。
+#[test]
+fn test_close_reject_does_not_freeze_entry_path() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+
+    // 首 tick 初始化網格。
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    // close-side TooManyPending reject 寫入 close cooldown（ts=1_000 + 5min = 301_000）。
+    g.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::TooManyPending);
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("BTC").copied(),
+        Some(301_000),
+        "TooManyPending close reject 必寫入 close cooldown map（5min 固定）"
+    );
+    assert!(
+        g.reject_cooldown_entry_until_ms.get("BTC").is_none(),
+        "close reject 不可污染 entry cooldown map（BB-MF-3 隔離不變式）"
+    );
+
+    // ts=100_000（close cooldown 仍 active：100_000 < 301_000）+ down-cross + inv=0
+    // → would_open=true → Open emission。
+    let intents = g.on_tick(
+        &ctx(49_500.0, 100_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(
+        !intents.is_empty(),
+        "close cooldown active 不可凍結 entry emission（BB-MF-3 隔離反向驗證）"
+    );
+    let open_emitted = intents.iter().any(|a| matches!(a, StrategyAction::Open(_)));
+    assert!(
+        open_emitted,
+        "down-cross with inv=0 + close cooldown active 必發 Open intent"
+    );
+}
+
+/// BB-MF-3 #3：close-side TooManyPending → 5min 固定 cooldown。
+/// 對應 PM 任務 Step 4 test_close_too_many_pending_5min_cooldown + spec §6.1 表
+/// 「TooManyPending → 5min」+ AMD §6 + 本 prereq scope（不實作 §5.4 dynamic backoff）。
+#[test]
+fn test_close_too_many_pending_5min_cooldown() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+
+    // ts = 1_000，arm close cooldown for TooManyPending。
+    g.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::TooManyPending);
+
+    // 5min = 300_000 ms → cooldown_until = 1_000 + 300_000 = 301_000。
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("BTC").copied(),
+        Some(301_000),
+        "TooManyPending close cooldown 必為 ts + 5min（300_000 ms）"
+    );
+    // 不可污染 entry map。
+    assert!(
+        g.reject_cooldown_entry_until_ms.get("BTC").is_none(),
+        "TooManyPending close reject 不可寫入 entry cooldown"
+    );
+}
+
+/// BB-MF-3 #4：close-side PostOnlyCross → 不 arm cooldown（spec §5.3 Race C）。
+/// PostOnlyCross close 表示掛價瞬間被吃，立即 fallback to market；
+/// 不進 close cooldown 是 spec §5.3 + §2.3 negative whitelist 明文設計。
+/// 對應 PM 任務 Step 4 test_close_postonly_cross_no_cooldown_immediate_market。
+#[test]
+fn test_close_postonly_cross_no_cooldown_immediate_market() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+
+    g.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::PostOnlyCross);
+
+    // close cooldown 必不被 arm（spec §5.3 Race C：直接走 market）。
+    assert!(
+        g.reject_cooldown_close_until_ms.get("BTC").is_none(),
+        "PostOnlyCross close 不可進 close cooldown（spec §5.3 Race C）"
+    );
+    // entry map 也不可被影響。
+    assert!(
+        g.reject_cooldown_entry_until_ms.get("BTC").is_none(),
+        "PostOnlyCross close 不可污染 entry cooldown map"
+    );
+}
+
+/// BB-MF-3 #5：close-side 其他 reject 類別（FokCancel/SelfCancel/Other）→ 1min default。
+/// 對應 spec §6.1 表「其他 reject → 1min」。
+#[test]
+fn test_close_default_reject_categories_1min_cooldown() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+
+    // FokCancel → 1min（60_000 ms）。
+    g.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::FokCancel);
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("BTC").copied(),
+        Some(61_000),
+        "FokCancel close 必為 ts + 1min default"
+    );
+
+    // SelfCancel → 1min。
+    g.arm_close_cooldown("ETH", 2_000, &MakerRejectionCategory::SelfCancel);
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("ETH").copied(),
+        Some(62_000),
+        "SelfCancel close 必為 ts + 1min default"
+    );
+
+    // Other(raw) → 1min（保留 raw 鑑識，cooldown 行為一致）。
+    g.arm_close_cooldown(
+        "SOL",
+        3_000,
+        &MakerRejectionCategory::Other("EC_SomeFutureBybitCode".to_string()),
+    );
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("SOL").copied(),
+        Some(63_000),
+        "Other(raw) close 必為 ts + 1min default"
+    );
+}
+
+/// BB-MF-3 #6：兩 side cooldown 同時 active 時 short-circuit return（efficiency 優化保留）。
+/// 設定：entry + close cooldown 同時 active；驗 on_tick 立即返回 vec![]，
+/// 不進入 cross 偵測 / would_open 計算（spec v1.2 §6.1 + signal.rs short-circuit
+/// SAFETY 不變量）。
+#[test]
+fn test_grid_short_circuits_when_both_cooldowns_active() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+
+    // 首 tick 初始化網格 + 種入 LONG 持倉（讓 up-cross 會發 close）。
+    g.on_tick(
+        &ctx(50_500.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    g.net_inventory.insert("BTC".to_string(), 1.0);
+
+    // entry cooldown 寫到 100_000；close cooldown 寫到 200_000。
+    g.reject_cooldown_entry_until_ms
+        .insert("BTC".to_string(), 100_000);
+    g.reject_cooldown_close_until_ms
+        .insert("BTC".to_string(), 200_000);
+
+    // ts = 50_000 → 50_000 < 100_000 (entry) AND 50_000 < 200_000 (close)
+    // → 兩 side cooldown 都 active → short-circuit（price 動到 50_900 觸 up-cross 也應被擋）。
+    let intents = g.on_tick(
+        &ctx(50_900.0, 50_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(
+        intents.is_empty(),
+        "兩 side cooldown 都 active 時必 short-circuit；發了 {} intents",
+        intents.len()
+    );
+
+    // ts = 150_000 → entry expired (150_000 ≥ 100_000), close still active
+    //  → 不再 short-circuit；up-cross + LONG inv → close emission 應發
+    //   （本 prereq commit 不接線生產 close cooldown gate；close emission 依舊發送）。
+    let intents2 = g.on_tick(
+        &ctx(50_900.0, 150_000),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let close_emitted = intents2.iter().any(|a| {
+        matches!(
+            a,
+            StrategyAction::Close { reason, .. } if reason == "grid_close_long"
+        )
+    });
+    assert!(
+        close_emitted,
+        "entry cooldown expired 後 close path 必恢復 emission（即使 close cooldown 仍 active）"
+    );
+}
+
+/// BB-MF-3 #7：cooldown isolation regression — 多 symbol 場景下 entry/close
+/// cooldown 不交叉污染。
+/// 對應 PM 任務 Step 4 cross-symbol regression coverage。
+#[test]
+fn test_cooldown_isolation_multi_symbol() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    g.reject_cooldown_ms = 60_000;
+
+    // BTC entry reject、ETH close reject、SOL 都不 arm。
+    g.on_post_only_rejected("BTC", 1_000, &MakerRejectionCategory::PostOnlyCross);
+    g.arm_close_cooldown("ETH", 2_000, &MakerRejectionCategory::TooManyPending);
+
+    // BTC entry 寫入 + close 不寫入。
+    assert_eq!(
+        g.reject_cooldown_entry_until_ms.get("BTC").copied(),
+        Some(61_000)
+    );
+    assert!(g.reject_cooldown_close_until_ms.get("BTC").is_none());
+
+    // ETH close 寫入 + entry 不寫入。
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("ETH").copied(),
+        Some(302_000)
+    );
+    assert!(g.reject_cooldown_entry_until_ms.get("ETH").is_none());
+
+    // SOL 兩 map 都空。
+    assert!(g.reject_cooldown_entry_until_ms.get("SOL").is_none());
+    assert!(g.reject_cooldown_close_until_ms.get("SOL").is_none());
+}
+
+/// BB-MF-3 #8：i64 overflow 防護（saturating_add）— 邊界 ts_ms 不可 wrap to 0。
+/// SAFETY 不變量：arm_close_cooldown 用 saturating_add 防 i64::MAX 溢出。
+#[test]
+fn test_arm_close_cooldown_saturating_add_overflow_safe() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+
+    // 接近 i64::MAX 的 ts_ms + TooManyPending 5min → cooldown_until 必 saturate
+    // 而非 wrap 為 0（u64 cast 後仍非 0 大數）。
+    let near_max = i64::MAX - 100;
+    g.arm_close_cooldown("BTC", near_max, &MakerRejectionCategory::TooManyPending);
+
+    let stored = g
+        .reject_cooldown_close_until_ms
+        .get("BTC")
+        .copied()
+        .expect("TooManyPending 必 arm cooldown");
+    // 必 saturate 至 i64::MAX（u64 cast 即 i64::MAX as u64）。
+    assert_eq!(
+        stored,
+        i64::MAX as u64,
+        "saturating_add 必防溢出，不可 wrap 為小值（會破 cooldown 語意）"
     );
 }

@@ -56,7 +56,9 @@ impl GridTrading {
             conf_scale: 1.0,
             grid_count: DEFAULT_GRID_COUNT,
             fee_rate: DEFAULT_FEE_PCT,
-            reject_cooldown_until_ms: HashMap::new(),
+            // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
+            reject_cooldown_entry_until_ms: HashMap::new(),
+            reject_cooldown_close_until_ms: HashMap::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
@@ -113,7 +115,9 @@ impl GridTrading {
             conf_scale: 1.0,
             grid_count: DEFAULT_GRID_COUNT,
             fee_rate: DEFAULT_FEE_PCT,
-            reject_cooldown_until_ms: HashMap::new(),
+            // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
+            reject_cooldown_entry_until_ms: HashMap::new(),
+            reject_cooldown_close_until_ms: HashMap::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
@@ -184,7 +188,9 @@ impl GridTrading {
             conf_scale: 1.0,
             grid_count: DEFAULT_GRID_COUNT,
             fee_rate: DEFAULT_FEE_PCT,
-            reject_cooldown_until_ms: HashMap::new(),
+            // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
+            reject_cooldown_entry_until_ms: HashMap::new(),
+            reject_cooldown_close_until_ms: HashMap::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
