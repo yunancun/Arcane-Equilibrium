@@ -31,6 +31,7 @@
 | 2026-05-09 | v3 5 commits（`faf2d131`→`da2aba11`，含 P0-V2-NEW-1 Donchian guard + P0-V2-NEW-2 wide_parameter_adjustment skill）+ PA redesign 473 行對抗性核實 — 81%→78% **倒退** -3%；7 NEW-ISSUE NI-15..21；PA redesign verdict = **應升 ADR + Amendment + Spec doc 三層登記**（不只 PA-workspace-only）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-09--doc_verification_v3.md` |
 | 2026-05-16 | AMD-2026-05-15-02 4-agent review 後全量 TW 審計：README 索引漂移修復（+14 缺失條目）/ CLAUDE_CHANGELOG 最新 / SCRIPT_INDEX 最新 / §七 注釋規範抽樣 / CONTEXT.md glossary 一致性 | `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-16--tw_audit_amd_2026_05_15_02_doc_quality.md` |
 | 2026-05-16 | WP-09 doc drift fix：R4-CRITICAL-1（ADR 14→22）/ R4-CRITICAL-2（tab 13→16 + dictionary 補 3 缺漏）/ README 索引補 16 缺失條目 / CHANGELOG 補 2026-05-16 條目 / adr/ range 更正 | inline final message |
+| 2026-05-16 | WP-09 round 2：README 索引再補 +32 缺失條目（ADR 0001-0014 / execution_plan 9 / amendments 3 / archive 1 / Operator 8 / PM 1）+ REF-20 v0.1/V1/V2/V2.1 四檔加 SUPERSEDED header + KNOWN_ISSUES.md 確認存在但 stale（2026-04-12 停更）| inline final message |
 | 2026-05-09 | P0-V3-ADR-0021-ARCH-04 部分 — CONTEXT.md 「Alpha source taxonomy」5 詞條 + AMD-2026-05-09-03 Strategist Wide-Adjustment Skill + AMD-2026-05-09-04 Demo→LivePending Promotion Evidence Push（R4 派 ADR-0021 + ARCH-04，TW 負責 CONTEXT + 2 amendment）| `srv/CONTEXT.md` + `srv/docs/governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` + `srv/docs/governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` |
 
 ## 2026-05-09 P0-V3-ADR-0021-ARCH-04 部分（TW + R4 共識落地）

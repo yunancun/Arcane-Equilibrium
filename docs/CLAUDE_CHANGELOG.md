@@ -1,7 +1,32 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-16（12-agent consolidated audit + CLAUDE.md doc fix）
+> 最後更新：2026-05-16（Wave 1 closed: WP-01/02/05/09）
+
+### Wave 1 CLOSED — WP-01 GUI Safety + WP-02 Donchian + WP-05 Security + WP-09 Docs — 2026-05-16
+
+**Commits**: `43627d1c` (audit plan + WP-01 initial) + `6b8be386` (Wave 1 full)
+
+**WP-01 GUI Safety Gates (P0-BLOCKER)**:
+- A3-BLOCKER-1/2: Emergency Stop + Close All typed-phrase confirmation
+- A3-MAJOR-1: Start Live typed-phrase ("START LIVE")
+- A3 HIGH-1 fix: doLiveStop() typed-phrase ("STOP LIVE") — 唯一缺失的真金白銀操作
+- A3 HIGH-3 fix: openConfirmModal concurrent-open guard
+- A3 MEDIUM-1/2/3: 繁簡統一 + Learning 表頭雙語 + canary 字數計數器
+- LOC governance exception: tab-live.html 2178→2190 (+12) accepted for P0-BLOCKER
+
+**WP-02 Donchian deprecation (P1)**: `#[deprecated]` on `donchian()` + regression test 加強；
+production path 已使用 `donchian_prior()` since `75741eff`，zero behavior change。
+
+**WP-05 Security (P1)**: bind `0.0.0.0`→`127.0.0.1` in dev scripts +
+`@app.exception_handler(Exception)` sanitizer（production 回 generic msg，`OPENCLAW_DEBUG=1` 保留詳情）。
+
+**WP-09 Docs (P2)**: README.md +32 index entries + 4 SUPERSEDED headers。
+KNOWN_ISSUES.md 34d stale（TW 建議 PM 後續 reconcile）。
+
+**Review chain**: A3 8 PASS / 3 HIGH / 3 MEDIUM / 2 LOW → all fixed → E2 APPROVE (1 MEDIUM LOC exception signed off, 2 LOW fixed/non-issue)。JS node --check ALL PASS。Rust cargo test 3476+ PASS。
+
+---
 
 ### 12-agent consolidated audit fix plan + CLAUDE.md doc drift fix — 2026-05-16
 

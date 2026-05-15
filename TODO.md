@@ -471,21 +471,22 @@ active work starts at §10 / §11.2 / §11.3.
 
 | WP | Title | Priority | Wave | Owner | Status | Effort |
 |---|---|---|---|---|---|---|
-| WP-01 | GUI Safety Gates (A3 BLOCKERs) | P0-BLOCKER | 1 | E1a -> A3+E2 review | PENDING | 1 session |
-| WP-02 | Donchian callers audit + deprecate base fn (rescoped from P0) | P1 | 1 | E1 -> QC+E2+E4 | PENDING | 0.5 session |
+| WP-01 | GUI Safety Gates (A3 BLOCKERs) | P0-BLOCKER | 1 | E1a -> A3+E2 review | ✅ DONE `6b8be386` | 1 session |
+| WP-02 | Donchian callers audit + deprecate base fn (rescoped from P0) | P1 | 1 | E1 -> QC+E2+E4 | ✅ DONE `6b8be386` | 0.5 session |
 | WP-03 | OU Sigma Residual Fix | P1 | 2 | E1 -> QC+E2 | PENDING | 0.5 session |
 | WP-04 | AI Observability + Budget | P1 | 2 | E1-py+E1-rs -> AI-E+E2 | PENDING | 1 session |
-| WP-05 | Security Hardening (bind 0.0.0.0 + error leak) | P1 | 1 | E1 -> E3+E2 | PENDING | 0.5 session |
+| WP-05 | Security Hardening (bind 0.0.0.0 + error leak) | P1 | 1 | E1 -> E3+E2 | ✅ DONE `6b8be386` | 0.5 session |
 | WP-06 | Performance Hot Path (Rust clone + Python deepcopy) | P1 | 3 | E1-rs+E1-py -> E5+E2 | PENDING | 1-2 sessions |
 | WP-07 | Dead Code + Schema Cleanup | P2 | 2 | E1 -> FA+E2 | PENDING | 0.5 session |
 | WP-08 | ML Pipeline Maturity (walk-forward purge + training SQL) | P1 | 3 | MIT+E1 -> MIT+E2 | PENDING | 2 sessions |
-| WP-09 | Documentation + Index Sync | P2 | 1 | TW+R4 -> PM | PENDING | 0.5 session |
+| WP-09 | Documentation + Index Sync | P2 | 1 | TW+R4 -> PM | ✅ DONE `6b8be386` | 0.5 session |
 | WP-10 | Bybit Integration (retCode enum + mainnet URL) | P1 | 2 | E1 -> BB+E2 | PENDING | 0.5 session |
 | WP-11 | Test Infrastructure (phased) | P2 | 4 | E4+E1 -> E2 | PENDING | 2-3 sessions |
 | WP-12 | ONNX Model Manager (stub) | P2 | 4 | E1-rs -> E2+FA | DEFERRED | 1 session |
 | WP-13 | Reconciler Stale cmd_tx | P1 | 3 | E1-rs -> E2+E4 | PENDING | 1 session |
 
-**Wave 1 parallel dispatch**: WP-01 + WP-02 + WP-05 + WP-09 (zero file overlap)
+**Wave 1 ✅ CLOSED 2026-05-16**: WP-01 + WP-02 + WP-05 + WP-09 all DONE (`43627d1c` + `6b8be386`). A3 review 3H/3M/2L all fixed. E2 review APPROVE with LOC governance exception (tab-live.html +12 pre-existing 2178→2190, P0-BLOCKER safety fix).
+**Wave 1 original dispatch**: WP-01 + WP-02 + WP-05 + WP-09 (zero file overlap)
 **Wave 2 parallel dispatch**: WP-03 + WP-04 + WP-10 + WP-07 (independent)
 **Wave 3 sequential/focused**: WP-08 (Linux) + WP-06 (after stability) + WP-13 (focused)
 **Wave 4 background**: WP-11 (phased) + WP-12 (deferred)

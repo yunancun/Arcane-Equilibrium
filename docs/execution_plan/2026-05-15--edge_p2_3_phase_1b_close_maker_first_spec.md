@@ -1,8 +1,8 @@
 # EDGE-P2-3 Phase 1b — Close-Maker-First Refactor Spec
 
 **Date**: 2026-05-15
-**Author**: PM + PA + FA convergent audit chain (main session)；2026-05-15 PA round-2 patch v1.1（4-agent QC+FA+BB+MIT consolidated）
-**Status**: SPEC v1.1 — 4-agent review consolidated patch（17 must-fix + 14 should-fix）integrated；pending AMD v0.2 short re-review + 3-gate prereq
+**Author**: PM + PA + FA convergent audit chain (main session)；2026-05-15 PA round-2 patch v1.1（4-agent QC+FA+BB+MIT consolidated）；2026-05-15 PA Wave 1.5 patch v1.2（A3 portfolio_var verify + E3 maker fill empirical baseline + A4 W-C Caveat 2 V094 schema 兩段式 + writer gap）
+**Status**: SPEC v1.2 — Wave 1.5 consolidated patch（fee saving 4.5→0.5-2.0 bps + close fallback-to-taker mandatory + 14d pilot observation + portfolio MAINTAIN + writer gap explicit + 2 new ticket P1+P2）；pending AMD v0.3 short re-review + 3-gate prereq
 **Phase**: EDGE-P2-3 Phase 1b（entry-only Phase 1a 自然延伸到 close path execution-quality 軸；1c 留 microstructure；P2-4 留 alpha source promotion gate）
 **Supersedes**: 無；補完 EDGE-P2-3 Phase 1a entry-only scope-limiting 設計決策
 **對應 spec / TODO**: P0-EDGE-1 / EDGE-P2-3 / W-AUDIT-8b (alpha-source 後續) / DOC-01 §5.6 § §5.9 / DOC-08 §12
@@ -33,22 +33,32 @@
 
 ### 1.2 預期經濟影響
 
-**保守估算（v1.1 修正）**：每筆 close 從 taker (5.5 bps) → maker (2.0 bps) 節省 **3.5 bps fee（不是 4.5 bps）**。
-- 修正理由（BB-SF-2）：Bybit fee tier 0 真實 maker = 2.0 bps / taker = 5.5 bps，原 v1.0 寫 1 bps maker 過於樂觀
-- live_demo grid 7d 155 active closes × 平均倉位 $300 × 3.5 bps × 70% maker fill rate ≈ **$1.1 / week / grid**
-- 跨 5 策略 + 21 symbols 全年估 `~$160-$400 fee saving`
+**保守估算（v1.2 修正，per Wave 1 Track E3 empirical baseline）**：每筆 close attempt **`~0.5-2.0 bps net per close attempt`**（而非 v1.1 的 4.5 bps assumption / +0.65 bps net 推導）。
+- **修正理由（E3 empirical 7d demo + live_demo entry maker baseline，per `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--maker_fill_rate_empirical_baseline.md`）**：
+  - Best case (fill-conditional, Bybit fee saving): **~3.31 bps**（94% of fills are maker × 3.5 bps fee saving cap）
+  - 中性 (per submitted with assumed fallback): **~0.95 bps**（27% PostOnly fill rate × 3.5 bps）
+  - 悲觀 (close-path conservative discount 25-40%): **~0.66 bps per close attempt**（assumes close fill rate ≈ 20%，15-25% range）
+  - **採用 0.5-2.0 bps net 保守 range**（而非單一 +0.65 bps 點估），cover empirical 不確定性 + close vs entry behavior 結構性差異
+- **Bybit fee tier 0 baseline（per BB-SF-2 + E3 §6 confirmed）**：maker = 2.0 bps / taker = 5.5 bps；fee saving cap = 3.5 bps per side
+- **live_demo grid 7d 155 active closes**（per §1.1）× $300 avg position × 0.5-2.0 bps × 1.2/h system rate ≈ **$50-$200 全年保守估**
+- 跨 5 策略 + 25 symbols 全年估 **`~$50-$200 fee saving`**（v1.1 寫 $160-$400 太樂觀）
 - **不能救 -110 USDT structural alpha deficit**（PM 判 P1，非 P0）
 - 真正價值：消除執行成本掩蓋 alpha 信號，讓 P0-EDGE-1 edge measurement 更乾淨
 
-**Net fee saving 推導（QC-SF-1）**：
+**E3 empirical 三個意外發現（影響 spec 設計）**：
+1. **`orders.intent_id` 100% NULL in 7d window**（writer 漏接 intent → order link）— 開新 P2 ticket `P2-ORDERS-INTENT-ID-WRITER-GAP-1` 修（不阻 Phase 1b IMPL，但影響 Guardian-pass-rate 計算）
+2. **`orders.status` 100% Working**（fire-and-forget 初始狀態）— 終態 SOT 是 `order_state_changes.to_status`；healthcheck 必查 state_changes 不查 orders.status
+3. **無 fallback to taker 機制**（70% PostOnly timeout 後 entry 直接放棄）— **此行為對 close path 不可繼承**（持倉繼續暴露 = 違 §二 #5 生存 > 利潤）；close 必加 mandatory fallback to taker（詳 §5.5）
+
+**Net fee saving 推導（QC-SF-1，v1.1 推導保留作參考但 v1.2 採 E3 empirical range）**：
 - 單筆 close fee delta = 5.5 - 2.0 = **3.5 bps**
 - 假設 maker fill rate 70%（mirror entry side production-tested）→ avg fee saving per close = 3.5 × 0.70 = **2.45 bps**
 - 扣 30% fallback overhead（timeout 期 adverse drift 估 ~6 bps）= 0.30 × 6 = -1.8 bps
-- **保守淨估 = 2.45 - 1.8 ≈ +0.65 bps net per close**
-- **高估範圍 = 3.5 × 0.85 - 0.15 × 4 = +2.4 bps net**（85% maker fill + 4 bps adverse drift）
+- **保守淨估 = 2.45 - 1.8 ≈ +0.65 bps net per close**（v1.1 推導，**per E3 修正應視為「fill-conditional best case」非「per attempt」**）
+- **E3 empirical per attempt 中性 = 0.95 bps，悲觀 = 0.66 bps**
 - 對應 §11 AC-5 改 «改善 ≥ taker baseline 的 +1.5 bps» 保守 gate（不再是 +3 bps）
 
-**Counterfactual cost simulation pre-IMPL evidence packet（QC-SF-2）**：IMPL 期間派 PA / E1 跑 historical 7d demo grid_close_short 數據 × estimated maker fill prob × bootstrap CI，產出 «预计 fee saving range + 95% CI» 報告（per AMD v0.2 §5.1 對應條目）。
+**Counterfactual cost simulation pre-IMPL evidence packet（QC-SF-2）**：IMPL 期間派 PA / E1 跑 historical 7d demo grid_close_short 數據 × estimated maker fill prob × bootstrap CI，產出 «预计 fee saving range + 95% CI» 報告（per AMD v0.3 §5.1 對應條目）。
 
 ### 1.3 不在本 spec 範圍
 
