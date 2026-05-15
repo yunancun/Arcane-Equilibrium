@@ -1,5 +1,24 @@
 # PA Memory — 工作記憶
 
+## 12-Agent Consolidated Audit Fix Plan（2026-05-16）
+
+**觸發**：12 specialized agents (FA/AI-E/E5/E4/E3/CC/QC/MIT/BB/TW/R4/A3) 完成全系統 audit。PA 逐條 verify P0/CRITICAL/BLOCKER findings against actual code。
+
+**核心結論**：
+- 14 findings classified P0/CRITICAL/BLOCKER by agents；PA 確認 9 真實、2 moot（funding_arb deprecated / PG unverifiable from Mac）、3 by-design（shadow_mode / L2 manual / lease shadow-bypass）
+- **真正 P0 3 項**：(1) A3-BLOCKER GUI Emergency Stop / Close All 一鍵無安全短語 (2) QC-P0 Donchian look-ahead bias `trend.rs:190` include current bar (3) P0-EDGE-1 negative edge（結構性，非代碼修復）
+- **假 P0 4 項降級**：FA-P0-1 ONNX stub→P2（by-design graceful degradation）、FA-P0-2 shadow_mode→KNOWN-STATE、FA-P0-4 L2 no scheduler→KNOWN-STATE per ADR-0020、QC-P0-2 funding_arb→MOOT（deprecated strategy）
+- 13 WP 拆分 4 wave 並行；Wave 1 = WP-01(GUI)+WP-02(Donchian)+WP-05(Security)+WP-09(Docs) 4 路並行無交叉
+- 5 cross-audit dedup clusters（Cluster A negative edge 3 agents / Cluster C shadow-mode 3 agents / etc）
+
+**關鍵副作用識別**：
+- WP-02 Donchian fix changes indicator output → all bb_breakout tests need update + replay results differ + engine rebuild
+- WP-03 OU sigma fix changes grid spacing → grid_trading strategy behavior change
+- WP-06 Arc<str> migration → serde/IPC serialization compatibility
+- WP-13 Reconciler channel renewal → deadlock risk at live pipeline respawn
+
+**報告路徑**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--12-agent-consolidated-fix-plan.md`
+
 ## P0 Replay engine counterfactual fix design — Tier A v1（2026-05-11）
 
 **觸發**：operator「修 replay engine 讓它能對策略修改做真實 counterfactual validation」；E1 a9729bbc4d61a 報告 6 hardcoded blockers。
@@ -3540,3 +3559,25 @@ PG fills 直查證據：
 **Confidence**: HIGH for §1 已驗代碼事實 + §3 whitelist + §4 compute_close_limit_price 設計 + §6 1B-4.2 無依賴 + §7 spec outline；MEDIUM for rate-limit NEEDS-PROBE + state machine fast-escalate + bb_breakout trailing_stop 裁決；LOW for 0 unverified hypothesis（皆有 grep / 直讀代碼支撐）
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md`
+
+## 2026-05-15 F-FA-2 portfolio_var exposure SoT verify (Track A3 Wave 1)
+
+**Context**: PM dispatched PA Wave 1 (Track A3) read-only verify of FA's #16 CONDITIONAL — close-maker-first PostOnly maker pending 期間 portfolio risk gate qty source。
+
+**Key finding**: 
+- NO `portfolio_var` 模塊；SoT = `intent_processor/mod.rs:761-805` `compute_exposure_pct` + `compute_correlated_exposure_pct`，兩者都只迭代 `paper_state.positions()` (PaperPosition.qty=filled)
+- `paper_state.resting_orders` 完全沒被 portfolio gate 讀（entry-side resting maker Phase 1B-4.2 已 land，但同樣繼承此 gap）
+- `risk_config.correlation.max_pairwise_r` 是 dead config (validated in schema, 0 callers)
+- `is_reducing → check_order_allowed line 137 直接 allow` — close intent 自身根本不觸 portfolio gate
+- FA framing 「under-estimate」方向部分反了：close pending 對 NEW open 是 OVER-estimate（仍 over-cap entry）
+- Phase 1B-4 paper-only scope 無 partial cancel race；exchange path future scope 才需
+
+**Verdict**: §二 #16 維持 CONDITIONAL，但 carve out scope — 推薦選項 A（CONDITIONAL → ACCEPTED-WITH-CARVE-OUT + 新開 P1-PORTFOLIO-RESTING-EXPOSURE-1 與 close-maker-first IMPL 平行）。
+
+**架構 lesson**: 
+- entry-side resting maker landing 時就應同步修 portfolio gate；當時的 systemic gap 沒被識別，是 Phase 1B-4.2 review 漏接
+- close-maker-first IMPL 不是 regression source，是「系統性 gap 暴露面擴大」case
+- bilateral CONDITIONAL（fix scope ≠ 觸發 ticket scope）建議用 carve-out 而非延後 IMPL
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--f_fa_2_portfolio_var_exposure_sot_verify.md`
+**Estimate**: 1.5h actual (read-only + grep + 7 source file 抽讀；symbol grep 30+ 次)
