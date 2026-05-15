@@ -53,6 +53,16 @@ The test fails if production topic builders emit any of:
 
 This locks the C0 rule in code: topic revival must be a deliberate C1 change after BB standalone proof, not an accidental list edit.
 
+## Replay Applicability
+
+Replay cannot validate the main C1 safety question: whether a candidate Bybit liquidation topic causes `"handler not found"`, rate-limit pressure, or connection poisoning on a real WS connection. That remains a BB standalone live-public WS probe requirement.
+
+Replay can validate the local fail-closed contract. Added targeted replay adapter coverage:
+
+`replay::strategy_adapter::tests::replay_empty_surface_keeps_liquidation_cascade_fail_closed`
+
+This proves the isolated replay path still supplies `EMPTY_ALPHA_SURFACE`; a strategy declaring `LiquidationCascade` sees `liquidation_pulse=None`, observes `LiquidationCascade` as unavailable, emits no actions, and writes no replay decision trace.
+
 ## BB Standalone Probe Contract For C1
 
 C1 may start only after BB provides a standalone probe result with:
@@ -70,5 +80,7 @@ Until then, `AlphaSurface.liquidation_pulse` remains `None`, and any strategy de
 ## Verification
 
 - `cargo test -q -p openclaw_engine multi_interval_topics`: PASS, 11 tests.
+- `cargo test -q -p openclaw_engine replay_empty_surface_keeps_liquidation_cascade_fail_closed`: PASS, 1 test.
+- `cargo test -q -p openclaw_engine strategy_adapter`: PASS, 4 tests.
 - `rustfmt --edition 2021 --check rust/openclaw_engine/src/multi_interval_topics.rs rust/openclaw_engine/src/main_ws.rs`: PASS.
 - `rustfmt --check` including `config/mod.rs` traverses existing config submodules and reports pre-existing formatting drift in `config/canary_promotion.rs`, `config/risk_config_advanced.rs`, and `config/risk_config_tests.rs`; no formatting issue was shown for the touched comment itself.

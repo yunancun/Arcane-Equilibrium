@@ -393,3 +393,9 @@ YYYY-MM-DD HH:MM TZ
 - result: `TODO.md` v22 reduced to 453 lines; completed sprint ledgers and DONE-row evidence archived to `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`; `docs/README.md` archive index refreshed
 - priority verdict: no full W-AUDIT roadmap rewrite; A4-C Stage 1 demo/promotion path stays blocked pending future green Stage 0R plus `[55]` PASS/waiver, while `[55]`, P0-LG/OPS/EDGE, and alternate alpha work stay active
 - verification: `git diff --check` PASS; `python3 -m pytest tests/structure/test_docs_readme_index_static.py -q` = 5 passed; docs-only, no `active-plan.md`, runtime code, live auth, rebuild, restart, or deploy
+
+2026-05-15 CEST
+- PM task: operator requested replay-first validation default and asked whether W-AUDIT-8a Phase C0 could be checked by replay
+- dispatch chain: PM local triage; E2/E4 skipped because this was a narrow validation-policy + targeted unit-test packet
+- result: `.codex/MEMORY.md` and PM memory now record replay-first validation as the default; Phase C0 report distinguishes replay-applicable fail-closed checks from BB-only real WS topic safety
+- verification intent: added `replay_empty_surface_keeps_liquidation_cascade_fail_closed` to prove isolated replay still gives strategies `EMPTY_ALPHA_SURFACE`, so `LiquidationCascade` remains unavailable and actionless before C1
