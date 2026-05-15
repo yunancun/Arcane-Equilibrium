@@ -480,7 +480,7 @@
 
   <!-- Action buttons / 操作按鈕 -->
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <button class="oc-btn oc-btn-primary" onclick="govRenewLiveAuth()"
+    <button class="oc-btn oc-btn-primary" id="gov-btn-renew-live-auth" onclick="govRenewLiveAuth()"
       style="background:rgba(168,85,247,.2);border-color:rgba(168,85,247,.6);color:#a855f7">
       &#x1F511; Renew Live Auth / 續期
     </button>
@@ -492,6 +492,7 @@
       &#x1F504;
     </button>
     <span id="gov-live-auth-loading" style="display:none;font-size:11px;color:var(--text-dim)">載入中...</span>
+    <span id="gov-live-auth-renew-hint" style="display:none;font-size:11px;color:var(--yellow);font-weight:600"></span>
   </div>
 </div>
 
@@ -969,6 +970,9 @@ const GOV_LIVE_AUTH_REFRESH_MS = 30000;
 let _govLiveAuthVisible = true;
 let _govLiveAuthTimer = null;
 let _govLiveAuthInFlight = false;
+let _govLiveAuthRefreshPending = false;
+let _govLastLiveAuthStatus = null;
+let _govLastLiveAuthHalt = null;
 
 function _govLiveAuthRefreshVisible() {
   return _govLiveAuthVisible && document.visibilityState !== 'hidden';
@@ -1010,6 +1014,38 @@ function _govSignedAuthDisplayState(signed, liveHalt) {
   };
 }
 
+function _govLiveAuthHaltText(liveHalt) {
+  if (!liveHalt || !liveHalt.session_halted) return '';
+  const dd = Number(liveHalt.session_drawdown_pct);
+  const limit = Number(liveHalt.drawdown_threshold_pct);
+  if (Number.isFinite(dd) && Number.isFinite(limit)) {
+    return 'Live halt active: renew will be auto-revoked until risk reset (snapshot DD ' +
+      dd.toFixed(2) + '% / limit ' + limit.toFixed(2) + '%)';
+  }
+  if (Number.isFinite(dd)) {
+    return 'Live halt active: renew will be auto-revoked until risk reset (snapshot DD ' +
+      dd.toFixed(2) + '%)';
+  }
+  return 'Live halt active: renew will be auto-revoked until risk reset';
+}
+
+function _govApplyRenewHint(liveHalt) {
+  const btn = document.getElementById('gov-btn-renew-live-auth');
+  const hint = document.getElementById('gov-live-auth-renew-hint');
+  const msg = _govLiveAuthHaltText(liveHalt);
+  if (btn) {
+    btn.title = msg || 'Renew signed Live authorization / 續期 signed Live 授權';
+  }
+  if (!hint) return;
+  if (msg) {
+    hint.style.display = '';
+    hint.textContent = msg;
+  } else {
+    hint.style.display = 'none';
+    hint.textContent = '';
+  }
+}
+
 /**
  * Load and render Live Auth status in Governance Hub.
  * 在 Governance Hub 載入並渲染實盤授權狀態。
@@ -1022,7 +1058,10 @@ async function govLoadLiveAuthStatus(options) {
   const fromTimer = opts.fromTimer === true;
   const force = opts.force === true || !fromTimer;
   if (!force && !_govLiveAuthRefreshVisible()) return;
-  if (_govLiveAuthInFlight) return;
+  if (_govLiveAuthInFlight) {
+    _govLiveAuthRefreshPending = true;
+    return;
+  }
   _govLiveAuthInFlight = true;
   const loadingEl = document.getElementById('gov-live-auth-loading');
   if (loadingEl) loadingEl.style.display = '';
@@ -1031,16 +1070,9 @@ async function govLoadLiveAuthStatus(options) {
   try {
     const r = await ocApi('/api/v1/live/auth/trust-status');
     d = r && r.data;
-  } catch (_) {
     if (loadingEl) loadingEl.style.display = 'none';
-    _govLiveAuthInFlight = false;
-    return;
-  }
-  if (loadingEl) loadingEl.style.display = 'none';
-  if (!d) {
-    _govLiveAuthInFlight = false;
-    return;
-  }
+    if (!d) return;
+    _govLastLiveAuthStatus = d;
 
   const tier = d.current_tier ?? 0;
   const colors = GOV_TRUST_TIER_COLORS[tier] || GOV_TRUST_TIER_COLORS[0];
@@ -1079,8 +1111,10 @@ async function govLoadLiveAuthStatus(options) {
   // Signed authorization gate / Rust 實際讀取的 signed authorization.json
   const signed = d.signed_authorization || {};
   const liveHalt = d.live_halt || signed.live_halt || {};
+  _govLastLiveAuthHalt = liveHalt;
   const signedState = _govSignedAuthDisplayState(signed, liveHalt);
   const signedBad = signedState.bad;
+  _govApplyRenewHint(liveHalt);
   const signedEl = document.getElementById('gov-signed-auth-status');
   if (signedEl) {
     signedEl.textContent = signedState.text;
@@ -1121,7 +1155,16 @@ async function govLoadLiveAuthStatus(options) {
       row.style.borderColor = 'var(--border)';
     }
   }
-  _govLiveAuthInFlight = false;
+  } catch (err) {
+    console.warn('[govLoadLiveAuthStatus] failed', err);
+  } finally {
+    if (loadingEl) loadingEl.style.display = 'none';
+    _govLiveAuthInFlight = false;
+    if (_govLiveAuthRefreshPending) {
+      _govLiveAuthRefreshPending = false;
+      setTimeout(() => govLoadLiveAuthStatus({ force: true }), 0);
+    }
+  }
 }
 
 /**
@@ -1132,6 +1175,20 @@ async function govLoadLiveAuthStatus(options) {
  * 不依賴 live engine 是否在線；可從 Governance Hub 隨時執行。
  */
 async function govRenewLiveAuth() {
+  if (!_govLastLiveAuthStatus) {
+    await govLoadLiveAuthStatus({ force: true });
+  }
+  const haltMsg = _govLiveAuthHaltText(_govLastLiveAuthHalt);
+  if (haltMsg) {
+    const proceed = await openConfirmModal({
+      title: 'Live halt active / Live 風控暫停中',
+      body: haltMsg + '\n\nRenew remains available, but Rust will delete authorization.json again until the risk halt is cleared.',
+      confirmLabel: '仍要續期 / Renew Anyway',
+      cancelLabel: '取消 / Cancel'
+    });
+    if (!proceed) return;
+  }
+
   // Prompt for reason (optional) / 提示輸入原因（可選）
   const reasonInput = await openPromptModal({
     title: '續期原因 / Renewal Reason',
@@ -1172,7 +1229,7 @@ async function govRenewLiveAuth() {
   if (d && (d.ok || d.status === 'ok' || d.data)) {
     const tierLabel = GOV_TRUST_TIER_LABELS[tier] || ('T' + tier);
     ocToast('✓ Auth renewed — ' + tierLabel, 'success');
-    govLoadLiveAuthStatus();
+    setTimeout(() => govLoadLiveAuthStatus({ force: true }), 1000);
   } else {
     const msg = (d && d.message) || (d && d.data && d.data.message) || 'Renewal failed / 續期失敗';
     // ocToast uses textContent internally — no need for ocEsc / ocToast 內部使用 textContent，無需 ocEsc
@@ -1232,7 +1289,7 @@ async function govRenewReview() {
   if (d && (d.ok || d.status === 'ok' || d.data)) {
     const tierLabel = GOV_TRUST_TIER_LABELS[tier] || ('T' + tier);
     ocToast('✓ Full review accepted — restarting at ' + tierLabel, 'success');
-    govLoadLiveAuthStatus();
+    setTimeout(() => govLoadLiveAuthStatus({ force: true }), 1000);
   } else {
     const msg = (d && d.message) || (d && d.data && d.data.message) || 'Review submission failed / 提交失敗';
     // ocToast uses textContent internally — no need for ocEsc / ocToast 內部使用 textContent，無需 ocEsc
