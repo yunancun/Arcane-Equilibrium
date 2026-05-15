@@ -21,9 +21,9 @@
 //!   current bar 之後 sample；本 module 採 `last_n` slice + tail anchor 模型，
 //!   buffer push 在 metric 算完後才執行（避免 current bar leak）。
 //!
-//!   **paper-only fence 不在本 module**：producer 純計算，不知 fence；
-//!   step_4_5_dispatch.rs 構造 surface 階段 gate engine_mode（Layer 1）+
-//!   IPC slot late-inject 由 main.rs gate（Layer 2）。
+//!   **consumer fence 不在本 module**：producer 純計算；main.rs 控制 producer
+//!   spawn（paper or Stage 0R diagnostic opt-in），step_4_5_dispatch.rs 構造
+//!   surface 階段 gate engine_mode（demo/live 永遠 None）。
 //!
 //!   W2-IMPL-1 (2026-05-11) — `btc_book_imbalance` 從原 0.0 placeholder 升級為
 //!   真實 WS `orderbook.50.BTCUSDT` push 計算：
@@ -93,6 +93,13 @@ pub const ONE_HOUR_SECS: u64 = 3600;
 /// Source tier 字串常量（V088 column default 對齊）。spec §4.1。
 pub const SOURCE_TIER: &str = "cross_asset_btc_lead_lag";
 
+/// Diagnostic source tier for Stage 0R replay preflight rows.
+///
+/// AMD-2026-05-15-01 allows narrow legacy diagnostic use only when it is
+/// explicitly non-promotional. The V088 table already stores `source_tier` as
+/// TEXT, so diagnostic producer runs can mark rows without a schema migration.
+pub const DIAGNOSTIC_SOURCE_TIER: &str = "cross_asset_btc_lead_lag_diagnostic";
+
 /// 1m grain（秒）— bucket size。
 pub const ONE_MIN_SECS: u64 = 60;
 
@@ -116,10 +123,35 @@ pub const BTC_ORDERBOOK_SYMBOL: &str = "BTCUSDT";
 ///   改 parse_orderbook_snapshot 改抽 10 檔）。
 pub const BTC_BOOK_IMBALANCE_TOP_N: usize = 5;
 
-/// Layer 2 fence：BtcLeadLagProducer 只在 paper 明確啟用，或 env 未設且無 demo/live
-/// binding 的 paper-only dev/test 配置下 spawn。
+pub const OPENCLAW_ENABLE_PAPER_ENV: &str = "OPENCLAW_ENABLE_PAPER";
+pub const OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV: &str =
+    "OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC";
+
+fn env_flag_enabled(name: &str) -> bool {
+    matches!(std::env::var(name), Ok(value) if value.trim() == "1")
+}
+
+/// Stage 0R diagnostic producer opt-in.
+pub fn btc_lead_lag_diagnostic_mode_enabled() -> bool {
+    env_flag_enabled(OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV)
+}
+
+pub fn btc_lead_lag_source_tier_for_mode(diagnostic_mode: bool) -> &'static str {
+    if diagnostic_mode {
+        DIAGNOSTIC_SOURCE_TIER
+    } else {
+        SOURCE_TIER
+    }
+}
+
+/// Layer 2 fence：BtcLeadLagProducer 只在 paper 明確啟用、diagnostic 明確啟用，
+/// 或 env 未設且無 demo/live binding 的 paper-only dev/test 配置下 spawn。
 pub fn should_spawn_btc_lead_lag_producer(has_demo: bool, has_live: bool) -> bool {
-    match std::env::var("OPENCLAW_ENABLE_PAPER") {
+    if btc_lead_lag_diagnostic_mode_enabled() {
+        return true;
+    }
+
+    match std::env::var(OPENCLAW_ENABLE_PAPER_ENV) {
         Ok(value) => value.trim() == "1",
         Err(std::env::VarError::NotPresent) => !has_demo && !has_live,
         Err(std::env::VarError::NotUnicode(_)) => false,
@@ -324,7 +356,7 @@ pub async fn spawn_btc_orderbook_ingest_task(
 ///   （writer 端 assert，違反 = drop snapshot 不 INSERT）
 /// - `lead_window_secs == LEAD_WINDOW_SECS_MAIN`（120）— 主信號鎖定
 /// - `regime_tag` ∈ {"normal", "extreme"}
-/// - `source_tier == SOURCE_TIER`
+/// - `source_tier == SOURCE_TIER` or `DIAGNOSTIC_SOURCE_TIER`
 #[derive(Debug, Clone, PartialEq)]
 pub struct BtcLeadLagPanelSnapshot {
     /// 1m grain epoch ms（對齊 1m bucket）。
@@ -359,7 +391,7 @@ pub struct BtcLeadLagPanelSnapshot {
     pub alt_expected_dir: Vec<i8>,
     /// Regime tag："normal" / "extreme"（|BTCUSDT 1h return| > 200 bps → "extreme"）。
     pub regime_tag: String,
-    /// Source tier（固定 "cross_asset_btc_lead_lag"，writer 端強制）。
+    /// Source tier（normal or diagnostic marker; diagnostic rows are non-promotional）。
     pub source_tier: String,
 }
 
@@ -420,6 +452,8 @@ pub struct BtcLeadLagProducer {
     latest_snapshot: Option<BtcLeadLagPanelSnapshot>,
     /// Buffer 容量上限（tick 數，預設 = XCORR_BASELINE_SECS / ONE_MIN_SECS = 60）。
     buffer_capacity: usize,
+    /// V088 source_tier marker. Diagnostic mode uses a distinct non-promotional tier.
+    source_tier: &'static str,
 }
 
 impl BtcLeadLagProducer {
@@ -430,6 +464,10 @@ impl BtcLeadLagProducer {
     /// **Caller 責任**：cohort 排除 BUSDT / INXUSDT / frozen symbols（spec §2.3），
     /// producer 端不重複 enforce（信任 caller 已過濾）。
     pub fn new(cohort_symbols: Vec<String>) -> Self {
+        Self::new_with_source_tier(cohort_symbols, SOURCE_TIER)
+    }
+
+    pub fn new_with_source_tier(cohort_symbols: Vec<String>, source_tier: &'static str) -> Self {
         let buffer_capacity = (XCORR_BASELINE_SECS / ONE_MIN_SECS) as usize;
         let mut alt_buffers = HashMap::with_capacity(cohort_symbols.len());
         for sym in &cohort_symbols {
@@ -441,6 +479,7 @@ impl BtcLeadLagProducer {
             alt_buffers,
             latest_snapshot: None,
             buffer_capacity,
+            source_tier,
         }
     }
 
@@ -520,7 +559,7 @@ impl BtcLeadLagProducer {
             alt_xcorr,
             alt_expected_dir,
             regime_tag,
-            source_tier: SOURCE_TIER.to_string(),
+            source_tier: self.source_tier.to_string(),
         };
 
         // 6. push current tick 進 buffer（lookahead-free 邊界：metric 已算完）
@@ -576,10 +615,14 @@ impl BtcLeadLagProducer {
         let take_n = self.btc_buffer.len().min(n_min);
         // 取最近 take_n 個 tick（不含 current — current 還沒 push）
         let start = self.btc_buffer.len() - take_n;
-        let vols: Vec<f64> = self.btc_buffer.iter().skip(start).map(|t| t.volume).collect();
+        let vols: Vec<f64> = self
+            .btc_buffer
+            .iter()
+            .skip(start)
+            .map(|t| t.volume)
+            .collect();
         let mean = vols.iter().sum::<f64>() / vols.len() as f64;
-        let variance =
-            vols.iter().map(|v| (*v - mean).powi(2)).sum::<f64>() / vols.len() as f64;
+        let variance = vols.iter().map(|v| (*v - mean).powi(2)).sum::<f64>() / vols.len() as f64;
         let std_dev = variance.sqrt();
         if std_dev <= f64::EPSILON {
             return f64::NAN;
@@ -880,10 +923,7 @@ pub fn snapshot_to_trait_panel(snapshot: &BtcLeadLagPanelSnapshot) -> BtcLeadLag
 /// 找不到 → None（caller fail-soft skip tick）。
 ///
 /// SQL 對齊 outcome_backfiller.rs `WHERE k.timeframe = '1m'` 命名語義。
-async fn fetch_latest_kline_close_volume(
-    pool: &Arc<DbPool>,
-    symbol: &str,
-) -> Option<(f64, f64)> {
+async fn fetch_latest_kline_close_volume(pool: &Arc<DbPool>, symbol: &str) -> Option<(f64, f64)> {
     let pg = pool.get()?;
     let row: Option<(f32, Option<f32>)> = sqlx::query_as::<Postgres, (f32, Option<f32>)>(
         "SELECT close, volume FROM market.klines \
@@ -913,7 +953,7 @@ async fn fetch_latest_kline_close_volume(
 /// - alt_xcorr REAL[]
 /// - alt_expected_dir SMALLINT[]
 /// - regime_tag TEXT ('normal' / 'extreme')
-/// - source_tier TEXT ('cross_asset_btc_lead_lag')
+/// - source_tier TEXT ('cross_asset_btc_lead_lag' or diagnostic variant)
 ///
 /// `arrays_aligned()` invariant 違反 → return Failed 不 INSERT 半 schema row
 /// （per spec §4.1 invariant + sub-task 1 deliverable line 583）。
@@ -943,8 +983,11 @@ pub(crate) async fn insert_btc_lead_lag_snapshot(
     // Vec<f64> → Vec<f32> for REAL[] column；NaN 對齊保留
     let alt_xcorr_f32: Vec<f32> = snapshot.alt_xcorr.iter().map(|v| *v as f32).collect();
     // Vec<i8> → Vec<i16> for SMALLINT[] column（PG SMALLINT 對應 i16；i8 cast 安全 −128..127）
-    let alt_expected_dir_i16: Vec<i16> =
-        snapshot.alt_expected_dir.iter().map(|v| *v as i16).collect();
+    let alt_expected_dir_i16: Vec<i16> = snapshot
+        .alt_expected_dir
+        .iter()
+        .map(|v| *v as i16)
+        .collect();
 
     let query = sqlx::query::<Postgres>(
         "INSERT INTO panel.btc_lead_lag_panel \
@@ -1115,6 +1158,7 @@ fn standard_normal_cdf(z: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
 
     fn make_cohort() -> Vec<String> {
         vec![
@@ -1126,6 +1170,58 @@ mod tests {
             "AVAXUSDT".to_string(),
             "DOTUSDT".to_string(),
         ]
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn clear_gate_env() {
+        std::env::remove_var(OPENCLAW_ENABLE_PAPER_ENV);
+        std::env::remove_var(OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV);
+    }
+
+    #[test]
+    fn should_spawn_btc_lead_lag_diagnostic_overrides_paper_disabled_runtime() {
+        let _guard = env_lock().lock().expect("env mutex poisoned");
+        clear_gate_env();
+        std::env::set_var(OPENCLAW_ENABLE_PAPER_ENV, "0");
+        std::env::set_var(OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV, "1");
+
+        assert!(
+            should_spawn_btc_lead_lag_producer(true, false),
+            "Stage 0R diagnostic opt-in must spawn even when paper is disabled"
+        );
+        assert_eq!(
+            btc_lead_lag_source_tier_for_mode(btc_lead_lag_diagnostic_mode_enabled()),
+            DIAGNOSTIC_SOURCE_TIER
+        );
+
+        clear_gate_env();
+    }
+
+    #[test]
+    fn should_not_spawn_btc_lead_lag_when_paper_disabled_without_diagnostic() {
+        let _guard = env_lock().lock().expect("env mutex poisoned");
+        clear_gate_env();
+        std::env::set_var(OPENCLAW_ENABLE_PAPER_ENV, "0");
+
+        assert!(
+            !should_spawn_btc_lead_lag_producer(true, false),
+            "paper-disabled demo/live runtime must remain gated unless diagnostic is explicit"
+        );
+
+        clear_gate_env();
+    }
+
+    #[test]
+    fn diagnostic_producer_marks_snapshot_source_tier() {
+        let mut p = BtcLeadLagProducer::new_with_source_tier(make_cohort(), DIAGNOSTIC_SOURCE_TIER);
+        let alt_closes = HashMap::new();
+        let snap = p.on_tick(60_000, 50_000.0, 100.0, &alt_closes, None);
+
+        assert_eq!(snap.source_tier, DIAGNOSTIC_SOURCE_TIER);
     }
 
     /// 三 array length invariant — spec §4.1 不變式 + sub-task 1 deliverable
@@ -1218,7 +1314,13 @@ mod tests {
         let alt_closes = HashMap::new();
         // 餵 60 個 1m tick 形成 1h baseline（50000 開始，後緩升 1bps/tick）
         for i in 0..60 {
-            p.on_tick(60_000 + i * 60_000, 50_000.0 + i as f64, 100.0, &alt_closes, None);
+            p.on_tick(
+                60_000 + i * 60_000,
+                50_000.0 + i as f64,
+                100.0,
+                &alt_closes,
+                None,
+            );
         }
         // t=61 餵一個 +250 bps spike: close = 50000 * 1.025 = 51250
         let snap = p.on_tick(60_000 + 60 * 60_000, 51_250.0, 100.0, &alt_closes, None);
@@ -1232,7 +1334,13 @@ mod tests {
         let mut p = BtcLeadLagProducer::new(make_cohort());
         let alt_closes = HashMap::new();
         for i in 0..60 {
-            p.on_tick(60_000 + i * 60_000, 50_000.0 + i as f64, 100.0, &alt_closes, None);
+            p.on_tick(
+                60_000 + i * 60_000,
+                50_000.0 + i as f64,
+                100.0,
+                &alt_closes,
+                None,
+            );
         }
         // t=61 +50 bps mild move: close = 50000 * 1.005 = 50250
         let snap = p.on_tick(60_000 + 60 * 60_000, 50_250.0, 100.0, &alt_closes, None);
@@ -1328,7 +1436,13 @@ mod tests {
         let cap = p.buffer_capacity;
         let alt_closes = HashMap::new();
         for i in 0..(cap + 5) {
-            p.on_tick(60_000 + i as i64 * 60_000, 50_000.0, 100.0, &alt_closes, None);
+            p.on_tick(
+                60_000 + i as i64 * 60_000,
+                50_000.0,
+                100.0,
+                &alt_closes,
+                None,
+            );
         }
         assert_eq!(p.btc_buffer.len(), cap);
         // 第 0 個 tick 已 pop（最早 ts = 60_000 + 5 * 60_000 = 360_000）
@@ -1379,7 +1493,10 @@ mod tests {
         assert_eq!(panel.snapshot_ts_ms, 1_700_000_060_000);
         assert_eq!(panel.lead_window_secs, LEAD_WINDOW_SECS_MAIN);
         assert_eq!(panel.btc_lead_return_pct, 25.5);
-        assert_eq!(panel.alt_symbols, vec!["ETHUSDT".to_string(), "SOLUSDT".to_string()]);
+        assert_eq!(
+            panel.alt_symbols,
+            vec!["ETHUSDT".to_string(), "SOLUSDT".to_string()]
+        );
         assert_eq!(panel.alt_xcorr, vec![0.6, -0.4]);
         assert_eq!(panel.alt_expected_dir, vec![1, -1]);
         assert_eq!(panel.source_tier, SOURCE_TIER);
@@ -1560,7 +1677,11 @@ mod tests {
         let asks: Vec<(f64, f64)> = (0..5).map(|i| (101.0 + i as f64, 1.0)).collect();
         let imb = compute_btc_book_imbalance(&bids, &asks, BTC_BOOK_IMBALANCE_TOP_N)
             .expect("平衡 case must return Some(0.0)");
-        assert!(imb.abs() < 1e-12, "balanced book imbalance = {} expected 0", imb);
+        assert!(
+            imb.abs() < 1e-12,
+            "balanced book imbalance = {} expected 0",
+            imb
+        );
     }
 
     /// W2-IMPL-1 unit test 4：NaN edge case + 空 levels → None（fail-soft，不寫 0.0 假值）。
@@ -1608,10 +1729,13 @@ mod tests {
         let mut bids: Vec<(f64, f64)> = (0..5).map(|i| (100.0 - i as f64, 1.0)).collect();
         bids.push((94.0, 100.0)); // 第 6 檔，不應被計入
         let asks: Vec<(f64, f64)> = (0..5).map(|i| (101.0 + i as f64, 1.0)).collect();
-        let imb = compute_btc_book_imbalance(&bids, &asks, 5)
-            .expect("top-5 must succeed");
+        let imb = compute_btc_book_imbalance(&bids, &asks, 5).expect("top-5 must succeed");
         // 5/10 = 0.5? no — top-5 only：5.0 vs 5.0 → 0.0
-        assert!(imb.abs() < 1e-12, "top-5 truncated balanced imb = {} expected 0", imb);
+        assert!(
+            imb.abs() < 1e-12,
+            "top-5 truncated balanced imb = {} expected 0",
+            imb
+        );
     }
 
     /// W2-IMPL-1 unit test 6：on_tick 收 Some(imbalance) → snapshot 寫真實值；
@@ -1724,15 +1848,27 @@ mod tests {
         //   tick 4: (15-2.5)/(17.5) = +0.714 (bid 3.0 × 5 vs ask 0.5 × 5)
         //   tick 5: (1-10)/(11) = -0.818 (bid 0.2 × 5 vs ask 2.0 × 5)
         assert_eq!(observed_imbalances.len(), 5);
-        assert!(observed_imbalances[0] > 0.2 && observed_imbalances[0] < 0.5,
-            "tick 1 mid-positive expected ~0.333, got {}", observed_imbalances[0]);
-        assert!(observed_imbalances[1] < -0.4,
-            "tick 2 strong negative < -0.4 expected ~-0.500, got {}", observed_imbalances[1]);
+        assert!(
+            observed_imbalances[0] > 0.2 && observed_imbalances[0] < 0.5,
+            "tick 1 mid-positive expected ~0.333, got {}",
+            observed_imbalances[0]
+        );
+        assert!(
+            observed_imbalances[1] < -0.4,
+            "tick 2 strong negative < -0.4 expected ~-0.500, got {}",
+            observed_imbalances[1]
+        );
         assert!(observed_imbalances[2].abs() < 1e-9, "tick 3 balanced ≈ 0");
-        assert!(observed_imbalances[3] > 0.6,
-            "tick 4 strong positive > 0.6 expected ~0.714, got {}", observed_imbalances[3]);
-        assert!(observed_imbalances[4] < -0.7,
-            "tick 5 strong negative < -0.7 expected ~-0.818, got {}", observed_imbalances[4]);
+        assert!(
+            observed_imbalances[3] > 0.6,
+            "tick 4 strong positive > 0.6 expected ~0.714, got {}",
+            observed_imbalances[3]
+        );
+        assert!(
+            observed_imbalances[4] < -0.7,
+            "tick 5 strong negative < -0.7 expected ~-0.818, got {}",
+            observed_imbalances[4]
+        );
 
         // shutdown ingest task
         cancel.cancel();

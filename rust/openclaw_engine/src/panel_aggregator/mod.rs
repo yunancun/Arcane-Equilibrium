@@ -44,7 +44,10 @@ pub mod btc_lead_lag;
 pub mod funding_curve;
 pub mod oi_delta;
 
-pub use btc_lead_lag::{should_spawn_btc_lead_lag_producer, BtcLeadLagProducer};
+pub use btc_lead_lag::{
+    btc_lead_lag_diagnostic_mode_enabled, btc_lead_lag_source_tier_for_mode,
+    should_spawn_btc_lead_lag_producer, BtcLeadLagProducer, OPENCLAW_ENABLE_PAPER_ENV,
+};
 // W2-IMPL-1 (2026-05-11) — orderbook 接線完整 re-export：BtcOrderbookSlot typedef +
 // create_btc_orderbook_slot 工廠 + spawn_btc_orderbook_ingest_task async task。
 // （sibling W2-IMPL-2 sub-agent 早先預先 re-export create_btc_orderbook_slot 工廠

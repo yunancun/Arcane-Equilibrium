@@ -9,11 +9,15 @@
 //!   **paper-only fence Layer 3（深度防禦）**：
 //!     Layer 1（主防線）：step_4_5_dispatch.rs 構造 surface 階段 engine_mode
 //!         gate，demo / live_demo / live → surface.btc_lead_lag = None
-//!     Layer 2：BtcLeadLagProducer env-gate（W2-IMPL-2, 2026-05-11 amendment）
+//!     Layer 2：BtcLeadLagProducer env-gate（W2-IMPL-2, 2026-05-11 amendment;
+//!         Stage 0R diagnostic override added 2026-05-15）
 //!         — main.rs spawn 前 三狀態邏輯：
 //!             (a) OPENCLAW_ENABLE_PAPER=1 → spawn producer（paper 正路徑）
-//!             (b) env unset + paper-only（!has_demo && !has_live）→ spawn
-//!             (c) env unset + demo|live active → skip spawn（fence fired）
+//!             (b) OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1 → spawn producer
+//!                 with source_tier='cross_asset_btc_lead_lag_diagnostic'
+//!                 (Stage 0R diagnostic/read-only, non-promotional)
+//!             (c) env unset + paper-only（!has_demo && !has_live）→ spawn
+//!             (d) env unset + demo|live active → skip spawn（fence fired）
 //!         producer skip 時 PG `panel.btc_lead_lag_panel` 永不寫入 → 下游
 //!         ML pipeline / 5 策略 demo edge baseline 不污染。原 spec v1.2 §6.2
 //!         「Python writer paper-only fence」已 obsolete — producer 從 PA D+0
@@ -190,7 +194,11 @@ pub fn evaluate_shadow_signal(
     };
 
     // condition 5：regime_tag == "normal"
-    let cond_5: u8 = if panel.source_tier_regime_normal() { 1 } else { 0 };
+    let cond_5: u8 = if panel.source_tier_regime_normal() {
+        1
+    } else {
+        0
+    };
 
     let condition_pass_count = cond_1 + cond_2 + cond_3 + cond_4 + cond_5;
 
@@ -380,7 +388,10 @@ mod tests {
         let ctx = ctx_for("XRPUSDT", 1_715_000_000_000); // 非 cohort
         let panel = panel_5_pass();
         let sig = evaluate_shadow_signal("grid_trading", &ctx, &panel);
-        assert_eq!(sig.condition_pass_count, 3, "cond 2 fail → cond 3+4 也 NaN/0");
+        assert_eq!(
+            sig.condition_pass_count, 3,
+            "cond 2 fail → cond 3+4 也 NaN/0"
+        );
         assert_eq!(sig.step_gate, "minus5", "≤3/5 → minus5");
         assert_eq!(sig.alt_index, None);
         assert!(sig.xcorr.is_nan());
@@ -445,6 +456,9 @@ mod tests {
         let ctx = ctx_for("ETHUSDT", 1_715_000_000_000);
         let panel = panel_5_pass();
         let sig = evaluate_shadow_signal("ma_crossover", &ctx, &panel);
-        assert_eq!(sig.dual_layer_sigma_pct, 65.0, "spec §7.1 σ_net 50-80 bps mid");
+        assert_eq!(
+            sig.dual_layer_sigma_pct, 65.0,
+            "spec §7.1 σ_net 50-80 bps mid"
+        );
     }
 }

@@ -48,7 +48,7 @@
 --
 -- 預期回傳 row 結構：
 --   symbol TEXT            -- alt symbol
---   snapshot_ts_ms BIGINT  -- panel snapshot 對應的 1m bucket epoch ms
+--   snapshot_ts_ms BIGINT  -- raw panel snapshot epoch ms; joins align internally to 1m bucket
 --   lead_window_secs INT   -- 主信號固定 120
 --   btc_lead_return_pct REAL          -- BTC lead return N=120
 --   btc_lead_return_pct_60s REAL      -- N=60 shadow（R²(N) decay curve）
@@ -78,7 +78,7 @@
 --   4. CTE `paper_fills_bucketed` 把 trading.fills 對齊 1m bucket（按
 --      symbol + snapshot_ts_ms）；is_paper=TRUE
 --   5. 最終 SELECT 把以上三方 JOIN：panel_expanded LEFT JOIN alt_klines
---      ON (symbol, snapshot_ts_ms) LEFT JOIN paper_fills_bucketed
+--      ON (symbol, snapshot_bucket_ts_ms) LEFT JOIN paper_fills_bucketed
 --   6. Python 端用此查詢結果跑 6 mandatory metric 計算（pooled / per-symbol /
 --      DSR / PSR(0) / R²(N) decay / block-bootstrap CI / counterfactual delta）
 --
@@ -142,6 +142,10 @@ panel_window AS (
 panel_expanded AS (
     SELECT
         pw.snapshot_ts_ms,
+        -- Runtime producer snapshots may carry sub-minute wall-clock offsets
+        -- (e.g. 12:22:48.919). market.klines and fill buckets are minute-aligned,
+        -- so all downstream joins use this 1m bucket key instead of exact equality.
+        ((pw.snapshot_ts_ms / 60000) * 60000)::BIGINT AS snapshot_bucket_ts_ms,
         pw.lead_window_secs,
         pw.btc_lead_return_pct,
         pw.btc_lead_return_pct_60s,
@@ -281,7 +285,7 @@ SELECT
 
 FROM panel_expanded pe
 LEFT JOIN alt_klines ak
-    ON ak.symbol = pe.symbol AND ak.bucket_ts_ms = pe.snapshot_ts_ms
+    ON ak.symbol = pe.symbol AND ak.bucket_ts_ms = pe.snapshot_bucket_ts_ms
 LEFT JOIN paper_fills_bucketed pf
-    ON pf.symbol = pe.symbol AND pf.bucket_ts_ms = pe.snapshot_ts_ms
+    ON pf.symbol = pe.symbol AND pf.bucket_ts_ms = pe.snapshot_bucket_ts_ms
 ORDER BY pe.symbol, pe.snapshot_ts_ms;

@@ -21,12 +21,15 @@
 //! - V088 SQL：`srv/sql/migrations/V088__panel_btc_lead_lag_panel.sql`
 //!   - PRIMARY KEY = (snapshot_ts_ms, lead_window_secs)
 //!   - alt_symbols TEXT[] / alt_xcorr REAL[] / alt_expected_dir SMALLINT[]
-//!   - source_tier 預設 'cross_asset_btc_lead_lag'，writer 端強制不寫他值
+//!   - source_tier 預設 'cross_asset_btc_lead_lag'；Stage 0R diagnostic opt-in
+//!     rows use 'cross_asset_btc_lead_lag_diagnostic' to stay non-promotional.
 //! - Producer：`srv/rust/openclaw_engine/src/panel_aggregator/btc_lead_lag.rs`
 //! - Pattern reference：`srv/rust/openclaw_engine/src/database/feature_writer.rs`
 
 use super::pool::DbPool;
-use crate::panel_aggregator::btc_lead_lag::{BtcLeadLagPanelSnapshot, SOURCE_TIER};
+use crate::panel_aggregator::btc_lead_lag::{
+    BtcLeadLagPanelSnapshot, DIAGNOSTIC_SOURCE_TIER, SOURCE_TIER,
+};
 use tracing::{debug, warn};
 
 /// 單發 INSERT 一個 snapshot 進 V088 schema。
@@ -63,12 +66,13 @@ pub async fn write_snapshot(
         return Ok(());
     }
 
-    // Fail-soft #3: source_tier 必為 SOURCE_TIER 常量（writer 強制）
-    if snapshot.source_tier != SOURCE_TIER {
+    // Fail-soft #3: source_tier 必為 normal 或 diagnostic 常量（writer 強制）
+    if snapshot.source_tier != SOURCE_TIER && snapshot.source_tier != DIAGNOSTIC_SOURCE_TIER {
         warn!(
             ts_ms = snapshot.snapshot_ts_ms,
             actual = %snapshot.source_tier,
-            expected = SOURCE_TIER,
+            expected_normal = SOURCE_TIER,
+            expected_diagnostic = DIAGNOSTIC_SOURCE_TIER,
             "btc_lead_lag_writer: source_tier mismatch, snapshot dropped"
         );
         return Ok(());
@@ -231,7 +235,10 @@ mod tests {
         let placeholder_count = (1..=12)
             .filter(|i| sql_text.contains(&format!("${}", i)))
             .count();
-        assert_eq!(placeholder_count, 12, "V088 12-column INSERT 必對應 12 個 placeholder");
+        assert_eq!(
+            placeholder_count, 12,
+            "V088 12-column INSERT 必對應 12 個 placeholder"
+        );
         // ON CONFLICT 子句必含 PK 兩 column
         assert!(sql_text.contains("ON CONFLICT (snapshot_ts_ms, lead_window_secs)"));
     }

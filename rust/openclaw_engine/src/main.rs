@@ -1024,23 +1024,31 @@ async fn async_main(
     // pool 不可用 → producer 內 fail-soft skip tick（不 panic，不阻 slot writer）。
     // alt cohort 7-sym hardcoded snapshot（per W2 spec v1.2 §2.2）；BUSDT 排除。
     //
-    // W2-IMPL-2 (2026-05-11): paper-only fence Layer 2 — Producer env-gate。
+    // W2-IMPL-2 (2026-05-11): producer env-gate。
     // 原 spec v1.2 §6.2 Layer 2 是「Python writer paper-only fence」；但 producer
     // 在 PA D+0 階段已從 Python writer 改為 Rust producer（panel_aggregator/btc_lead_lag.rs），
     // Python writer 從不存在。Layer 2 改為 **Producer 端 env-gate**：
-    //   (a) OPENCLAW_ENABLE_PAPER=1                → spawn producer（paper 正路徑）
-    //   (b) OPENCLAW_ENABLE_PAPER 未設 + paper-only（!has_demo && !has_live）→ spawn producer
-    //   (c) OPENCLAW_ENABLE_PAPER 未設 + has_demo|has_live = true            → **skip spawn**
-    // 三狀態邏輯：env=1 / (env unset + 純 paper 配置) 都 spawn；只有 env unset
-    // 且 demo/live 已 active 才 skip（避免 panel.btc_lead_lag_panel 累積 demo/live
-    // 期樣本污染下游 ML pipeline 與 5 策略 demo edge baseline）。
+    //   (a) OPENCLAW_ENABLE_PAPER=1                     → spawn producer（paper 正路徑）
+    //   (b) OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1   → spawn producer（Stage 0R diagnostic only）
+    //   (c) OPENCLAW_ENABLE_PAPER 未設 + paper-only（!has_demo && !has_live）→ spawn producer
+    //   (d) OPENCLAW_ENABLE_PAPER 未設 + has_demo|has_live = true            → **skip spawn**
+    // Diagnostic mode is non-promotional per AMD-2026-05-15-01: rows are marked
+    // with source_tier='cross_asset_btc_lead_lag_diagnostic', while downstream
+    // Layer 1 still keeps demo/live surfaces at None.
     // 注意：Layer 1（step_4_5_dispatch.rs effective_engine_mode() 主防線）已保證
     // demo/live engine_mode 不會把 panel 注入 surface；本 Layer 2 是深度防禦，
     // 避免在 mixed mode（paper + demo 同 host）時 paper-disabled 但 demo 跑的
     // 場景下 producer 還在寫 PG。
-    let btc_lead_lag_paper_enabled_env = std::env::var("OPENCLAW_ENABLE_PAPER")
-        .map(|v| v.trim() == "1")
-        .unwrap_or(false);
+    let btc_lead_lag_paper_enabled_env =
+        std::env::var(openclaw_engine::panel_aggregator::OPENCLAW_ENABLE_PAPER_ENV)
+            .map(|v| v.trim() == "1")
+            .unwrap_or(false);
+    let btc_lead_lag_diagnostic_enabled_env =
+        openclaw_engine::panel_aggregator::btc_lead_lag_diagnostic_mode_enabled();
+    let btc_lead_lag_source_tier =
+        openclaw_engine::panel_aggregator::btc_lead_lag_source_tier_for_mode(
+            btc_lead_lag_diagnostic_enabled_env,
+        );
     let btc_lead_lag_producer_should_spawn =
         openclaw_engine::panel_aggregator::should_spawn_btc_lead_lag_producer(has_demo, has_live);
     if btc_lead_lag_producer_should_spawn {
@@ -1048,9 +1056,11 @@ async fn async_main(
         let btc_lead_lag_cancel = cancel.clone();
         let btc_lead_lag_alt_cohort_vec = btc_lead_lag_alt_cohort();
         let btc_lead_lag_slot_for_producer = Arc::clone(&btc_lead_lag_panel_slot);
-        let btc_lead_lag_producer = openclaw_engine::panel_aggregator::BtcLeadLagProducer::new(
-            btc_lead_lag_alt_cohort_vec.clone(),
-        );
+        let btc_lead_lag_producer =
+            openclaw_engine::panel_aggregator::BtcLeadLagProducer::new_with_source_tier(
+                btc_lead_lag_alt_cohort_vec.clone(),
+                btc_lead_lag_source_tier,
+            );
         // W2-IMPL-1 (2026-05-11): orderbook 接線完成。
         // - 建立 BtcOrderbookSlot（producer & ingest task 共享）
         // - 從 fan-out 接 book_event_rx（line ~922 alloc），spawn ingest task
@@ -1065,6 +1075,8 @@ async fn async_main(
             alt_cohort_size = btc_lead_lag_alt_cohort_vec.len(),
             tick_secs = 60,
             paper_enabled_env = btc_lead_lag_paper_enabled_env,
+            diagnostic_enabled_env = btc_lead_lag_diagnostic_enabled_env,
+            source_tier = btc_lead_lag_source_tier,
             has_demo,
             has_live,
             "BtcLeadLagProducer + BtcOrderbookIngest spawning \
@@ -1096,11 +1108,12 @@ async fn async_main(
         drop(book_event_rx);
         info!(
             paper_enabled_env = btc_lead_lag_paper_enabled_env,
+            diagnostic_enabled_env = btc_lead_lag_diagnostic_enabled_env,
             has_demo,
             has_live,
             "BtcLeadLagProducer + BtcOrderbookIngest skipped (Layer 2 fence: \
-             OPENCLAW_ENABLE_PAPER not enabled for this runtime binding) / \
-             BtcLeadLagProducer + 訂單簿 ingest 跳過 spawn（Layer 2 paper-only fence 觸發）"
+             neither paper nor diagnostic mode enabled for this runtime binding) / \
+             BtcLeadLagProducer + 訂單簿 ingest 跳過 spawn（Layer 2 diagnostic/paper fence 觸發）"
         );
     }
 
