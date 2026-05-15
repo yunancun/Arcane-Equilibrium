@@ -86,6 +86,10 @@ Current known paths and remote:
 - operator needs pushback and judgment, not blind obedience
 - agent autonomy within boundaries is preferred over over-constraining decision logic
 - edge analysis should rely on demo data, not paper
+- before validation/sign-off, first classify whether a replay or
+  counterfactual replay can check the claim; run the replay by default when it
+  is applicable and safe, or state explicitly why replay cannot prove the
+  claim and use the appropriate live-runtime/DB/WS/healthcheck evidence
 - `live_demo` is still live-grade control flow; demo endpoint does not relax auth, TTL, or risk rigor
 - risk parameter edits must stay scoped to the requested parameters
 - operator-paste shell commands should be robust one-liners rather than heredoc-heavy multi-line snippets

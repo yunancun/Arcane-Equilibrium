@@ -257,6 +257,15 @@ mod tests {
         next_qty: f64,
     }
 
+    /// Stub strategy that models a future liquidation-cascade consumer.
+    ///
+    /// C0 contract: replay currently supplies `EMPTY_ALPHA_SURFACE`, so a
+    /// strategy declaring `LiquidationCascade` must observe the source as
+    /// unavailable and emit no actions.
+    struct LiquidationCascadeProbeStrategy {
+        active: bool,
+    }
+
     impl Strategy for StubStrategy {
         fn name(&self) -> &str {
             self.name_str
@@ -290,6 +299,40 @@ mod tests {
                 time_in_force: None,
                 maker_timeout_ms: None,
             })]
+        }
+    }
+
+    impl Strategy for LiquidationCascadeProbeStrategy {
+        fn name(&self) -> &str {
+            "liquidation_cascade_probe"
+        }
+        fn is_active(&self) -> bool {
+            self.active
+        }
+        fn set_active(&mut self, a: bool) {
+            self.active = a;
+        }
+        fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+            const TAGS: &[openclaw_core::alpha_surface::AlphaSourceTag] =
+                &[openclaw_core::alpha_surface::AlphaSourceTag::LiquidationCascade];
+            TAGS
+        }
+        fn on_tick(
+            &mut self,
+            _ctx: &TickContext<'_>,
+            surface: &AlphaSurface<'_>,
+        ) -> Vec<StrategyAction> {
+            assert!(
+                !surface.is_source_available(
+                    openclaw_core::alpha_surface::AlphaSourceTag::LiquidationCascade
+                ),
+                "replay must not make liquidation cascade available before C1"
+            );
+            assert!(
+                surface.liquidation_pulse.is_none(),
+                "replay must keep liquidation_pulse None before C1"
+            );
+            Vec::new()
         }
     }
 
@@ -379,6 +422,28 @@ mod tests {
         let sig_b = compute_intent_signature(&mk_intent(2.0));
         assert_ne!(sig_a, sig_b, "qty delta must flip signature");
         assert_eq!(sig_a, compute_intent_signature(&mk_intent(1.0)));
+    }
+
+    #[test]
+    fn replay_empty_surface_keeps_liquidation_cascade_fail_closed() {
+        // W-AUDIT-8a Phase C0 replay applicability check: replay cannot prove
+        // Bybit WS topic safety, but it can prove the isolated replay path does
+        // not accidentally present LiquidationCascade as an available source.
+        let probe = Box::new(LiquidationCascadeProbeStrategy { active: true });
+        let mut adapter =
+            ReplayStrategyAdapter::new(probe, ReplayProfile::Isolated).expect("Isolated accepts");
+
+        let actions = adapter.on_tick(&ctx("BTCUSDT", 2_000));
+
+        assert!(
+            actions.is_empty(),
+            "LiquidationCascade consumer must fail closed while pulse is absent"
+        );
+        assert_eq!(
+            adapter.trace_len(),
+            0,
+            "empty fail-closed ticks should not enter replay decision trace"
+        );
     }
 
     #[test]

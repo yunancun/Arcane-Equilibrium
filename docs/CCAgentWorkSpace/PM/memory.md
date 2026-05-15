@@ -2419,3 +2419,17 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
   topic for 24h with no handler-not-found, poisoning, or rate-limit incident.
 - Report:
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md`.
+
+## 2026-05-15 Replay-First Validation Default
+
+- Operator preference: before future validation/sign-off work, PM should first
+  judge whether replay or counterfactual replay can check the claim, without
+  waiting for the operator to ask.
+- If replay is applicable and safe, run it or include it in the verification
+  packet by default. If replay cannot prove the claim, state the reason and use
+  the correct evidence type instead (live-runtime probe, DB inventory,
+  exchange-facing WS probe, healthcheck, or static guard).
+- Current W-AUDIT-8a Phase C0 classification: replay cannot prove Bybit
+  liquidation topic safety because the risk is real WS handler rejection /
+  connection poisoning; that remains BB standalone probe territory. Replay can
+  still check fail-closed strategy behavior with `EMPTY_ALPHA_SURFACE`.
