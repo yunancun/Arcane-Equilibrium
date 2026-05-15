@@ -788,10 +788,12 @@ FA 評估：9/9 PASS or PASS-with-stated-mitigation；**無 BLOCKER**。
 | 日期 | 版本 | 變更 | 作者 |
 |---|---|---|---|
 | 2026-05-15 | v1.0 | 初版（PM/PA/FA 3-agent verdict 整合）| Main session |
+| 2026-05-15 | v1.1 | 4-agent (QC+FA+BB+MIT) round-2 consolidated patch — 17 must-fix（4 consensus + 13 unique）+ 14 should-fix 全 integrated；§1.2 fee saving 4.5→3.5 bps + net 推導；§4.3 phys_lock_gate4_giveback timeout 30→15s + buffer 2→1 + spread guard + small-tick；§4.4 V094 hybrid schema explicit + enum allowlist + Linux PG dry-run + non-training invariant；§5.4 dynamic backoff per-symbol → conditional global；§6.1 reject_cooldown 升 P0 prereq；§6.2 classifier reuse entry enum + side flag（不新建 Close*Variant）；§8.1 Wilson CI + sample-size + NULL ladder + reject sample healthcheck；§9.2 +4 新 test；§11 AC-1..AC-13 連續 + AC-14/15/16/17 4-agent must-fix；§14 IMPL prereq 4→6 條件；§15 後續工作項對齊 | PA per main-session 派 Wave 1 Track A1 |
 
-**Sign-off Status**：
-- PM: APPROVED-CONDITIONAL（4 條件 + 6 governance gates）
+**Sign-off Status**（v1.1 更新）：
+- PM: APPROVED-CONDITIONAL（6 條件 + 6 governance gates）
 - PA: READY-FOR-SPEC（1 NEEDS-PROBE on rate-limit；0 BLOCKED-BY-1B-4.2）
-- FA: APPROVED-CONDITIONAL（5 conditions）
+- FA round-1: APPROVED-CONDITIONAL（5 conditions）
+- 4-agent round-2 consolidated: 4/4 APPROVED-CONDITIONAL（17 must-fix + 14 should-fix integrated 進 v1.1 + AMD v0.2）
 
-**下一步**：寫 AMD-2026-05-15-02 → 派 QC+FA+BB+MIT 4-agent 並行 adversarial review → 等三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）→ IMPL 工作鏈啟動。
+**下一步**：PM 派 QC+FA+BB+MIT 4-agent short re-review（各 30min）核驗 v1.1 + AMD v0.2 17 must-fix + 14 should-fix 收口完整性 → 等三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）+ Prereq 5/6 → IMPL 工作鏈啟動。
