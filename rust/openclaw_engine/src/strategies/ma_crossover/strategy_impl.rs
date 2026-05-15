@@ -146,13 +146,20 @@ impl Strategy for MaCrossover {
         let fast = match ind.kama.as_ref() {
             Some(k) => k.kama,
             None => {
-                // QC-#2: Log KAMA fallback — strategy silently degrades to SMA vs SMA (never crosses).
-                // QC-#2：記錄 KAMA 退化 — 策略靜默退化為 SMA vs SMA（永不交叉）。
-                tracing::debug!(
+                // W3-6 by-the-way fix (2026-05-16)：KAMA 不可用時 fail-closed skip 此 tick，
+                // 避免靜默退化為 SMA vs SMA 後仍 fall through 至下游 confluence/persistence
+                // 邏輯，污染 ML training data + edge measurement。原本 debug! + fall through
+                // 屬 silent degradation，現升級為 warn! + return vec![]（trend confirmation
+                // 必須有 KAMA，無則整個 tick 跳過 entry+exit）。
+                // 注意：fast 變量同時被 exit 路徑（line ~324）使用，但 KAMA 不可用時
+                // exit 路徑的 reverse_signal 也會退化為 None（fast==slow），不會誤平倉，
+                // 故整 tick return vec![] 對 exit 路徑無語意損失。
+                tracing::warn!(
+                    target: "ma_crossover",
                     symbol = %ctx.symbol,
-                    "KAMA unavailable, falling back to SMA(20) / KAMA 不可用，退化為 SMA(20)"
+                    "skip tick: KAMA unavailable, fail-closed to avoid silent SMA-vs-SMA degradation"
                 );
-                ind.sma_20.unwrap_or(0.0)
+                return vec![];
             }
         };
         let slow = ind.sma_20.unwrap_or(0.0);
