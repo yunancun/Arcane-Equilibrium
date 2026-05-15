@@ -54,7 +54,7 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-10 Sprint N+0 closure + Sprint N+1 D+0 pre-dispatch readiness）
+## 三、真實狀態全景（2026-05-15 W3 near-completion + Sprint N+2 P2 cleared）
 
 本節只保留當前活躍狀態。歷史長敘述移到 `docs/CLAUDE_CHANGELOG.md`、
 `docs/archive/`、`docs/CCAgentWorkSpace/*/workspace/reports/` 和 `TODO.md`。
@@ -64,60 +64,50 @@
 
 | 項 | 目前事實 |
 |---|---|
-| W-AUDIT-1 evidence source | `b91487f2`（`healthcheck: make scanner would-block evidence advisory`）；後續 docs/governance commit 只改文檔索引，當前 repo head 以 `git log -1` 為準。 |
-| Runtime host | Linux `trade-core`；watchdog 2026-05-09 09:41 UTC：`engine_alive=true`，demo/live snapshots fresh；paper snapshot is disabled by runtime env (`OPENCLAW_ENABLE_PAPER != 1`) rather than stale active trading flow。 |
-| Runtime env | `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
+| Current state sources | `TODO.md` v24 + PM reports `2026-05-15--stage0r_preflight_verification.md` / `2026-05-15--canary_rebase_step3_step4.md` / `2026-05-15--feature_baseline_restore.md` + direct `trade-core` runtime read-only checks below。 |
+| Runtime host | Linux `trade-core`；watchdog 2026-05-15 13:24 UTC：`engine_alive=true`，demo alive age=5.1s，live alive age=3.3s，paper alive=false age=10329.4s（disabled）。 |
+| Runtime env | 2026-05-15 13:26 UTC engine env：`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_ENABLE_PAPER=0`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
-| Live boundary | 2026-05-09 09:12 UTC operator route `/api/v1/live/auth/renew` restored signed LiveDemo authorization (`tier=T0_ENTRY`, `approved_system_mode=live_reserved`, `valid_for_engine=true`, expires_at_ms=1778405563954). 2026-05-09 09:33 UTC rebuild/restart `--keep-auth` deployed `862e79b7`; watchdog shows live pipeline fresh. RCA: 01:11 UTC boot consumed a `manual` restart sentinel and cleared auth before the later keep-auth restart; `restart_all.sh --keep-auth` now warns if it would only preserve missing auth. Mainnet 真 live 流量仍為 0 by design；未提供真 mainnet API。 |
+| Engine status | Demo alive；live alive with snapshot `system_mode=live_reserved`（2026-05-15 13:24 UTC）；LIVE-AUTH resolved. Operator 2026-05-15 status packet records fresh live restart with 0 PnL. Mainnet 真 live 流量仍為 0 by design；未提供真 mainnet API。 |
+| Paper engine | GATE-RED + disabled：`OPENCLAW_ENABLE_PAPER=0`，paper pipeline dead by design；waiting `ncyu` decision before any non-promotion diagnostic reopen。 |
 
 ### W-C / MAG-082
 
 | Gate | 最新實測 | 結論 |
 |---|---|---|
-| W-C MAG-082 Stage 2 | **WINDOW_PASS 2026-05-11**（sign-off `docs/governance_dev/2026-05-11--w_c_window_pass_signoff.md`）| Caveat 1+2 fix `ccf7a4bc` empirical 證實；W-D MAG-083 audit unblocked。 |
-| Caveat 1 (state_changes wiring) | CLOSED post-fix：deploy_ts `2026-05-11T00:01:55+00:00` UTC，14.7 rows/min（PA target ≥5/min ✓） | Producer wiring 真實生效。 |
-| Caveat 2 (real-fill ExecutionReport) | CLOSED post-fix：PA §4.3 對抗 SQL **4/4 entry fills 100% real-fill ER, 0 orphan**（risk_exit by-design 不走 spine entry-lineage） | Real-fill propagation working。 |
-| Caveat 3 (lease_id='bypass') | DEFERRED by-design：真實 Decision Lease 9-state lifecycle SoT 在 `learning.lease_transitions` (V054) 表，Stage 3+ promotion 不可繼承 bypass lineage 當真實 lease 證據。 | W-D MAG-083 reviewer brief 必含此章節。 |
-| `[55] agent_decision_spine_lineage` | 2026-05-11 00:08 UTC direct check：`WARN_REAL_FILL_PROPAGATION_PARTIAL`（chains=204 / chains_with_real_fill=4 = 2% << 50% gate；分母含 196 pre-deploy stub-only chains 攤薄）。bad_report_quality=0 / bad_report_value_quality=0 / state_changes_24h=58 / value_quality_cutoff=2026-05-11T00:01:55+00:00。 | Transition-window WARN by design；24h steady-state 自動 PASS；不阻 W-D（empirical SQL 是 ground truth）。 |
+| W-C / MAG-082 Stage 2 | ✅ WINDOW_PASS 2026-05-11（`docs/governance_dev/2026-05-11--w_c_window_pass_signoff.md`） | Closed；old Caveat 1/2 detail is historical, not current blocker。 |
+| MAG-083 / MAG-084 | ✅ signed 2026-05-11（`docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`） | W-D wave closed；proposal/mobile/Stage 3+/true-live gates remain separate。 |
+| `[55] agent_decision_spine_lineage` | 2026-05-15 full healthcheck：`WARN_REAL_FILL_PROPAGATION_PARTIAL`，`chains_with_real_fill_report=24/138`，bad quality counters 0。 | Still blocks any future Stage 1 demo micro-canary unless PASS or explicit PM/operator waiver。 |
 
 ### Strategy / Edge
 
-- 2026-05-08 12-agent audit PA PG 直查（source report:
-  `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md`
-  C-2；healthcheck id `[40]` realized_edge_acceptance 同源 edge/MLDE 口徑）：
-  5 策略 7d demo gross 約 `-26.44 USDT`，live_demo gross 約 `+0.43 USDT`；
-  舊 §三 的 `-6.98 USDT` 已過期。
-- 2026-05-09 3C 7d audit：Overall `WARN`；`[40]` avg_net 比 baseline 下滑 `-1.12bps`（within tolerance），grid p50 lifetime shortened `47.6%`，demo gross PnL delta improved `+20.87 USD` vs baseline。
-- `funding_arb` 已由 AMD-2026-05-09-02 / ADR-0018 從 active strategy set 退休；四個 `risk_config*.toml` 已完成 W-AUDIT-6 RiskConfig cleanup，不再承載 `funding_arb` per-strategy 覆蓋；策略退休 authority 保留在 `strategy_params_{paper,demo,live}.toml active=false`；2026-05-16 14d audit 保留作驗證/歷史工件。
+- P0-EDGE-1 remains active：2026-05-15 full healthcheck still flags `[40]` negative realized edge；5 textbook strategies remain structurally alpha-deficient until Alpha Surface Phase C/D or new alpha candidates produce positive demo evidence。
+- A4-C BTC→Alt Lead-Lag implementation is complete/rebased, but 2026-05-15 Stage 0R rerun is **GATE-RED** (`eligible_for_demo_canary=false`; `avg_net_bps=-3.5570`, `PSR(0)=0.0542`, `DSR=0.0000`)；no Stage 1 demo cohort selected。
+- Legacy paper promotion paths are frozen by AMD-2026-05-15-01：Stage 0R replay preflight can only emit `eligible_for_demo_canary=true/false`; Stage 1 evidence must be `Environment::Demo` micro-canary after a future green preflight。
 
 ### Current Observation Gates
 
-| Gate | 2026-05-08/09 latest | 結論 |
+| Gate | 2026-05-15 latest | 結論 |
 |---|---|---|
-| `[33]` maker fill rate | 7d demo/live_demo entry_fills=298，maker_like=89.6%，fee_drop=59.5%（target >=60%）。 | WARN：接近 fee-drop target，但未過。 |
-| `[38]` grid lifecycle drift | passive 24h live_demo re_entry_rate=0.52；3C 7d audit post window p50 3.79min vs baseline 7.23min（-47.6%）。 | WARN：grid lifecycle 需 review，但不阻 passive observation。 |
-| `[40]` realized edge | **2026-05-10 09:23 UTC engine restart 後（V80/82/83/84 land + W-AUDIT-9 graduated canary state machine）**: 24h MLDE avg_net **+8.75 bps**（從 baseline -17.82 bps 翻正，per Sprint N+0 closure memory）；single cell `live_demo/grid_trading/TONUSDT` n=10 avg=-31.23 bps 拖累整體（QC verdict C small-sample，TONUSDT P1-CONDITIONAL-WATCH 30d evidence 收集中）。 | PARTIAL：avg_net 翻正但 5 textbook 策略結構性 alpha-deficient 結論不變（4-agent loss audit consensus）；P0-EDGE-1 root closure pending W-AUDIT-8a Phase B/C/D + A 群 alpha 候選 8b/8c/8d IMPL（Sprint N+1 W2 A4-C BTC→Alt Lead-Lag fast-track 為首）。 |
-| `[41]` scanner would-block evidence | `b91487f2` 後 WARN-only：legacy scanner would-block evidence later non-negative，scanner remains evidence-only。 | 源碼已修正：scanner contradiction 不再 hard FAIL。 |
-| `[42b]/[42c]` attribution drift | settled eligible strategies ratio=1.000；低樣本策略標 `LOW_SAMPLE(n, need)`。 | WARN sample-maturity watch，不是 attribution drift。 |
-| `[45]` pricing binding | demo/live_demo source=`bybit_v5`，age >1h but <24h。 | WARN：仍需 P0-LG-2 provider pricing binding foundation。 |
-| `[51]` scanner opportunity shadow | routes/intents 100%；24h labels=39，positive_lcb_n=16，avg_net=-4.29bps，`opportunity_positive_n=0 LOW_SAMPLE`。 | WARN：shadow-only，calibrated positive sample 未成熟。 |
-| `[56]` live pipeline active | 2026-05-09 09:41 UTC direct check PASS：`live pipeline active endpoint=live_demo auth=present snapshot_age=2.6s threshold=180s`。 | LiveDemo pipeline restored through signed route; check remains read-only and does not write auth. |
+| `[40]` realized edge | 2026-05-15 full healthcheck WARN：negative realized edge remains active。 | P0-EDGE-1 not closed。 |
+| `[55]` fill-lineage | 2026-05-15 full healthcheck WARN：`24/138` real-fill reports。 | Micro-canary infrastructure blocker until PASS/waiver。 |
+| `[67]` feature baseline readiness | ✅ FIXED 2026-05-15 13:13 UTC / 15:13 Europe-Madrid：W-AUDIT-4b apply restored `observability.feature_baselines` to `active_rows=646`, `active_symbols=19`, `feature_names=34/34`; standalone `[67]` PASS。 | `P1-WA4B-INSERT-1` done；drift events still wait configured burn-in。 |
+| `[4]` phys lock / `[Xb]` triangulation | 2026-05-15 12:45 UTC full run PASS：`[4]` exit_features phys_lock 24h=1 / 7d=109；`[Xb]` close-fill-linked 15/15/15。 | Prior hard healthcheck fixes confirmed。 |
+| P2 test coverage | 2026-05-15 packet：all 5 target directories covered, 173 tests total。 | P2 coverage packet complete。 |
 
 ### Active Blockers
 
 | Blocker | 狀態 |
 |---|---|
-| W-C / MAG-082 | ✅ WINDOW_PASS 2026-05-11（post Caveat 1+2 fix `ccf7a4bc`；sign-off `2026-05-11--w_c_window_pass_signoff.md`）。 |
-| MAG-083 / MAG-084 | ✅ MAG-083 PASS + MAG-084 signed 2026-05-11（QA/PA/QC 三角 APPROVE WITH N caveats；sign-off `2026-05-11--w_d_mag084_signoff.md`）。**W-D wave CLOSED**。 |
-| P0-EDGE-1 | Active；realized edge 未轉正。 |
+| W3 Sprint | 5/6 done：W3-3 ✅ / W3-4 ✅ / W3-5 ✅ / W3-6 🔄。Stage 1 demo micro-canary is not launchable while A4-C Stage 0R remains GATE-RED and `[55]` remains WARN。 |
+| Sprint N+2 P2 packet | ✅ 4/4 complete：DUAL-RAIL, SHADOW, F20, V083 P2 follow-up all cleared。 |
+| P0-EDGE-1 | Active；2026-05-15 `[40]` still negative / WARN。 |
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
 | P0-OPS-1..4 | HTTPS/secure cookie、credential rotation、legal/ToS/geography、first-day live runbook 仍需收口。 |
-| P0-DECISION-AUDIT-2/4/5 | 已由 AMD-2026-05-09-02 收口：SM-05 Option A、W-AUDIT-6 strategy verdict、openclaw_core sunset candidates、Layer2 manual supervisor-only。剩餘是 F-01/W-AUDIT-6/W-AUDIT-5/W-AUDIT-7 implementation，非 operator decision blocker。 |
-| W-AUDIT-1..7 | W-AUDIT-1/W-AUDIT-2 已 source-closed；W-AUDIT-3..7 進入 Sprint N+1 W4 (W-AUDIT-3b runtime smoke 提早設計, RouterLeaseGuard Drop ~40 LOC)。 |
-| W-AUDIT-8a Alpha Surface Foundation | **Phase A 已 land**（Sprint N+0 W-AUDIT-9 同次, HEAD `c9fb0b8f` PR ready trait skeleton）；Phase B Tier 2 panel collector spec v1.1 land 走 Rust panel_aggregator WS-first（per BB push back 採納，rate 100→0 req/s ongoing）；後續 Phase C/D + R-2/R-3/R-4 留 N+2/N+3。 |
-| **Sprint N+0 closure**（2026-05-10）| W-AUDIT-9 graduated canary state machine T1-T7 + W-AUDIT-4b ML pipeline 3-fault fix V082/83/84 + W-AUDIT-8a Phase A trait declare + AMD-2026-05-09-03/05-10-03/04 + ARCH-04 + ADR-0022 全 land；commit chain HEAD `b6ed4975`；engine restart 後 attribution chain 100%、`[40]` 24h MLDE avg_net **+8.75 bps**（從 -17.82 翻正）。 |
-| **Sprint N+1 D+0 pre-dispatch readiness**（2026-05-10, HEAD `9695b59a`）| 24 項提前準備 land：W7-3 Option B 補丁 (`b42731f6`) + W7-1 trait skeleton (`c9fb0b8f`) PR ready NOT DEPLOYED；W6 RFC 3 視角預備立場 + final verdict draft；W2 A4-C spec v1.2 (dual-layer σ + +15/+5-15/<+5 階梯 gate)；W1 spec v1.1 (BB WS-first)；W5 三 P1 specs (V089/V090)；CC pre-check A- 92.0% APPROVE-CONDITIONAL；E3 ALL PASS 5 hard gate 全綠；R4 docs audit 8 fix；N+0 sign-off + N+1 dispatch fire SOP。Sprint N+1 D+0 sign-off 後純執行 deploy + 派 9 wave 並行（W7-2/W7-4/W7-5 + W6 RFC verdict + W6 V086 + W1 IMPL + W2 IMPL + W3 等 W6+W7 + W4 + W5）。 |
-| **Sprint N+1 canary rebase freeze**（2026-05-15）| AMD-2026-05-15-01 accepted planning authority：Stage 1 `Environment::Paper × 7d` removed; Stage 0R Replay Preflight added (`eligible_for_demo_canary=true/false`, not Stage 1 PASS); Stage 1 becomes 1 strategy × 1 symbol × `Environment::Demo` × 7d micro-canary; Stage 2 entry must cite Stage 1 demo empirical evidence. `OPENCLAW_ENABLE_PAPER=1` promotion path BLOCKED. |
+| `P1-WA4B-INSERT-1` | ✅ DONE 2026-05-15：feature_baselines restored (646 active rows / 19 symbols / 34 features) and `[67]` PASS；cron install remains operator choice。 |
+| Paper / Stage 0R | GATE-RED and disabled；paper promotion evidence removed by AMD-2026-05-15-01；waiting `ncyu` decision before any non-promotion diagnostic reopen。 |
+| W-AUDIT-8a / alpha candidates | Phase C/D + alternative alpha candidates remain the active path after A4-C GATE-RED。 |
+| P2 backlog | Pending：`N2-AUDIT-7c`, `N2-AUDIT-8c`, `N2-PhaseC`, `N2-PhaseD`。 |
 
 ---
 
