@@ -441,3 +441,67 @@ LG-3 觸發 endpoint inventory (5 endpoint + Private WS):
 ### Report path
 
 `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-11--lg3_spec_bb_review.md`
+
+
+---
+
+## 2026-05-15 Wave 3a BB short re-review on AMD v0.3 + spec v1.2 (HEAD `47b8cd23` → `6713bcdc`)
+
+### Trigger
+
+PM 派 Wave 3a (4-agent QC+FA+BB+MIT 各 30 min 並行 short re-review) on AMD v0.3 + spec v1.2 at HEAD `47b8cd23`，verify round 2 BB 5 must-fix + 3 should-fix + 4 補錄 collection 完整 + v1.1→v1.2 + v0.2→v0.3 增量 Bybit-side risk。
+
+### Verdict: **APPROVED**
+
+5/5 must-fix all landed + 3/3 should-fix all landed + 4 補錄字典手冊 deferred Wave 3b correctly + v1.2/v0.3 增量無新 Bybit-side risk。
+
+Confidence HIGH (cross-check spec/AMD 22 處 BB-MF/BB-SF 引用 + Bybit V5 fee/rate/reject doc consistency).
+
+### Round 2 BB-MF/BB-SF 收口 verification
+
+| BB-MF/SF | Verification status |
+|---|---|
+| BB-MF-1 (字典 PostOnly+reduceOnly) | ✅ DEFERRED Wave 3b correctly (spec §6.2 line 474-477 標 TODO; AMD §10 表保留 6 項清單) |
+| BB-MF-2 (dynamic backoff per-symbol) | ✅ FULLY ADOPTED (AMD §5.4 line 181-218 + spec §5.4 line 352-381 完整 mirror per-symbol 1s→60s exp + conditional global 10-symbol cascade) |
+| BB-MF-3 (reject_cooldown split P0) | ✅ FULLY ADOPTED (AMD §8 prereq 6 + spec §6.1 + §14 升 P0 IMPL prereq) |
+| BB-MF-4 (classifier 復用 entry enum) | ✅ FULLY ADOPTED (spec §6.2 line 434-472 不新建 Close*Variant + dispatch handler `side: OrderSide` flag) |
+| BB-MF-5 (reject sample healthcheck) | ✅ FULLY ADOPTED (spec §8.3 [65] + AC-15) |
+| BB-SF-1 ([64] healthcheck) | ✅ FULLY ADOPTED (spec §8.1 line 562-580 per-symbol + global thresholds) |
+| BB-SF-2 (fee 4.5→3.5→0.5-2.0 bps) | ✅ FULLY ADOPTED + ENHANCED (v1.2 進一步 conservative range per Track E3 三層解讀; 全年 $50-$200; tier 0 maker 2.0/taker 5.5 一致) |
+| BB-SF-3 (small-tick alt symbol) | ✅ FULLY ADOPTED (spec §4.2 footnote line 205 + AMD §6 + spec §9.2 test 表) |
+
+### v1.2/v0.3 增量 Bybit-side risk verdict
+
+1. **E3 fee revision (4.5→0.5-2.0 bps + $50-$200/year)**: ✅ Bybit fee tier 0 結構一致；保守 range cover empirical uncertainty；BTC/ETH alt 無區分需求 (per-account 維度)；維持 tier 0 (30d volume ≪ VIP 1 $1M)
+2. **§5.5 NEW Race E mandatory fallback to taker**: ✅ Bybit Order group rate budget worst case 0.017 req/s (vs 20 req/s cap = 0.085% 利用率)；burst 5s 50% 餘裕；無新 conservative cooldown 需求；fallback enum 完整 cover Bybit reject 場景
+3. **AC-18 fallback ≥ 95%**: ✅ COMPATIBLE 與 Order group rate limit (worst case 0.006 req/s = 0.03% 利用率)；race window 5% allowance 設計合理
+4. **AC-19 14d ≥ 30%**: ✅ APPROVED + Demo→Mainnet drift 通過 AC-15 reject sample probe + Phase 3 mandatory operator sign-off + 7 條 BB Mainnet prereq (round 2 §9 outstanding) 覆蓋鏈完整
+5. **3 E3 意外發現 (orders.intent_id NULL / orders.status fire-and-forget / 無 fallback to taker)**: ✅ 0 ToS / 0 broker rebate / 0 market maker eligibility 風險；P2 ticket 開立合理；observability note: BB future audit 跟蹤 close-maker fallback path 對 Order group rate limit 30d trend (baseline 0.7 → close-maker 部署後 ≤ 1.5 req/s sustained)
+
+### AMD prereq condition 2 status
+
+**BB-side PASS**：等待 QC + FA + MIT 並行 Wave 3a 視角 verdict 收齊後 PM 統一 sign-off；BB 不阻其他 agent 並行 review；本 BB short re-review 不需 follow-up patch。
+
+### Wave 3b BB1 字典手冊 6 處更新清單 (本 task record SoT)
+
+1. §1.2 PostOnly + reduceOnly 並用合法 (HIGH)
+2. §4.1 Order group 20 r/s shared quota (MEDIUM)
+3. §4.3 demo PostOnly silent degradation 警告 (HIGH)
+4. §1.9 per-symbol PostOnly minimum effective offset (MEDIUM)
+5. §4.2.1 close side 與 entry side 同 classifier (MEDIUM)
+6. §1.10 NEW close maker dispatch 小節 (LOW, IMPL DONE 後)
+
+估算 BB1 工作量 ~2-3h docs update + commit + push。
+
+### Report path
+
+`srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-15--amd_v0_3_spec_v1_2_bb_short_re_review.md` (commit `6713bcdc`)
+
+### 下次啟動需查驗項
+
+1. Wave 3a QC + FA + MIT 並行 verdict 是否完成 + PM consolidated sign-off
+2. Wave 3b BB1 字典手冊 6 處更新是否啟動
+3. AMD prereq 條件 2 (4-agent re-review) 是否 marked DONE
+4. AMD prereq 條件 6 (reject_cooldown split) Wave 2 IMPL 是否 land
+5. 3-gate (P0-EDGE-1 / W-AUDIT-8b Stage 0R / W-AUDIT-8a C1) 是否 closed
+6. close-maker-first IMPL kickoff 期 BB 必跟蹤 close-maker fallback path 對 Order group rate limit 30d trend
