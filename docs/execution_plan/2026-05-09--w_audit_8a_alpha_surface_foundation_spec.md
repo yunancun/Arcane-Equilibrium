@@ -277,22 +277,29 @@ alpha_source_unavailable_total{tag="<lowercase>", strategy="<strategy_name>"}: u
 **Risk**：collector 寫 PG 過大 → V### migration retention policy 必過 MIT review；30s refresh 對 PG 負荷低（≤ 50 rows/cycle × 25 symbols × 2 panels = 2500 rows/h）
 **Sprint estimate**：~10 person-day
 
-### Phase C — Tier 3 Microstructure + Liquidation（Sprint N+2）
+### Phase C — Tier 3 Microstructure + Liquidation Revival（Sprint N+2）
 
-**Goal**：liquidation_pulse 真接 Bybit `allLiquidation` WS；orderflow stub 接 mock。
+**2026-05-15 PM amendment**：Phase C 不再直接等同「把 liquidation 真接打回主 WS」。現有事實是：`market.liquidations` 已由 V002 保留，production subscription list 已明確移除 `liquidation.*` / price-limit / adl-notice，原因是舊 topic 會回 `"handler not found"` 並毒化整條 WS 連線。Phase C 必須先拆成 C0/C1，避免把已知有毒 topic 重新接進 runtime。
 
-**Deliverable**：
-1. V### migration：`market.liquidations` + retention 30d + Guard A/B/C
-2. Rust `ws_client/parsers.rs` 加 `allLiquidation` topic parser（既有 file 已含 liquidation 註釋，確認 parser 完整）
-3. Rust IPC slot `LiquidationPulseProvider`（rolling 60s 窗口 buffer）
-4. Python `liquidation_writer.py`（將 `allLiquidation` event 落 PG）
-5. `AlphaSurface.liquidation_pulse` populate（from in-memory rolling buffer，不從 PG read 避免延遲）
-6. `OrderflowFeatures` IPC slot stub：mock implementation（microprice = (bid+ask)/2，queue_imbalance = 0.5，large_trade_count = 0），**明確標 stub** — 真接留給 W-AUDIT-8d
-7. healthcheck `[新-liquidation_pulse_freshness]`：24h ≥ 100 events 證 WS topic 真接
+**Goal**：C0 先完成 liquidation revival inventory + fail-closed contract；C1 才在 BB standalone proof 後恢復 writer / pulse。
 
-**Owner chain**：`@PA spec → @MIT review V### migration → @BB review Bybit WS topic 對齊（強制） → @E1 IMPL → @E2 review → @E4 regression`
-**Risk**：`allLiquidation` topic Bybit 可能對 IP rate-limit；BB must-review topic spec
-**Sprint estimate**：~10 person-day
+**Deliverable C0 — inventory / no runtime mutation**：
+1. DB inventory：確認 V002 `market.liquidations` reserved table、目前欄位、實際 row count、現有 retention policy；只有 MIT 拍板後才新增 V### 修 retention/schema。
+2. WS inventory：確認 `full_subscription_list*()` 仍不包含 `liquidation.*`、`price-limit.*`、`adl-notice.*`；C0 不得改 production subscription list。
+3. Parser inventory：盤點現存 legacy `parse_liquidation_item()` / dispatch branch 是否仍可測，但不得把它視為 active producer。
+4. C1 probe spec：由 BB 寫 standalone topic probe，候選包含 Bybit documented `allLiquidation` 或 per-symbol liquidation 替代；必須在隔離連線證明 24h 不毒化主行情、不 rate-limit。
+5. Contract sketch：定義 `LiquidationPulseProvider` rolling 60s buffer、writer schema mapping、`AlphaSurface.liquidation_pulse` fail-closed 規則；C0 結束時 surface 仍應為 `None`。
+6. Orderflow stub 可獨立做，但必須標明 stub/source tier；不可讓 `LiquidationCascade` dispatch counter 看起來像 real alpha source。
+
+**Deliverable C1 — revival after BB PASS**：
+1. Rust WS topic/parser update for the BB-approved liquidation topic only。
+2. Rust/Python writer path 恢復：把 liquidation event 落 `market.liquidations`，並保留 idempotency。
+3. `LiquidationPulseProvider` in-memory rolling 60s populate，不從 PG hot path read。
+4. healthcheck `[新-liquidation_pulse_freshness]`：C1 才啟用，證 writer + pulse 真有資料。
+
+**Owner chain**：`@PA C0 dispatch → @BB standalone topic proof（強制） → @MIT retention/schema review（如需 V###） → @E1 IMPL → @E2 review → @E4 regression`
+**Risk**：舊 liquidation topic 不是單純 rate-limit 風險，而是會毒化整條 WS 連線；任何 production subscribe change 都必須等 BB standalone proof。
+**Sprint estimate**：C0 ~2-3 person-day；C1 ~7-10 person-day（取決於 BB topic proof）
 
 ### Phase D — Tier 4 + Integration（Sprint N+3）
 
@@ -382,11 +389,11 @@ Phase A ──┬─→ Phase B ──┐
 **Mitigation**：CC must-review IPC schema；Phase D 開頭先 spec EventAlert 字段 → 對齊 Python `intel_objects` → 再 IMPL
 **Fallback**：Phase D `EventAlert` 改為 `&[]` empty slice 直到 Scout schema 對齊
 
-### Risk-5：Bybit `allLiquidation` WS topic rate-limit
+### Risk-5：Bybit liquidation topic poisoning / rate-limit
 
-**症狀**：subscribe `allLiquidation` 觸 Bybit IP rate-limit
-**Mitigation**：BB must-review topic spec；如 rate-limit，降為 per-symbol liquidation 訂閱
-**Fallback**：Phase C liquidation_pulse 從 PG 讀 historical（非 real-time），先驗 schema 後再實時
+**症狀**：subscribe 舊 `liquidation.*` 或未驗證 `allLiquidation` 後，Bybit 返回 `"handler not found"` / rate-limit，主 WS 連線雖心跳正常但行情歸零。
+**Mitigation**：Phase C 先做 C0 inventory；production subscription list 不變；BB 用 standalone connection 驗證 topic 24h 不毒化、不 rate-limit 後才允許 C1。
+**Fallback**：若無安全 topic，`LiquidationCascade` 維持 dormant，`AlphaSurface.liquidation_pulse = None`，A4-B liquidation strategy 不進 IMPL。
 
 ### Risk-6：Phase A 完成後 hold 過久
 
@@ -402,7 +409,8 @@ Phase A ──┬─→ Phase B ──┐
 |---|---:|---|
 | A — Foundation Schema | ~10 | E1 主 IMPL |
 | B — Tier 2 panel | ~10 | E1（collector）+ MIT（V###） |
-| C — Tier 3 micro + liquidation | ~10 | E1 + BB（Bybit topic）+ MIT（V###） |
+| C0 — Tier 3 liquidation inventory | ~2-3 | PA + BB（standalone topic proof）+ MIT（schema/retention inventory） |
+| C1 — Tier 3 liquidation revival | ~7-10 | E1 + BB（approved topic）+ MIT（V### if needed） |
 | D — Tier 4 + integration | ~10 | E1 + CC（Scout IPC schema） |
 | **Total** | **~40** | 4 sprint × 1 active dev |
 
@@ -412,7 +420,7 @@ Phase A ──┬─→ Phase B ──┐
 |---|---|
 | A | `@QC` enum 完整性 + AlphaSurface struct；`@E2` Strategy trait 升級；`@E4` E2E baseline regression |
 | B | `@MIT` V### migration（funding_rates_panel + oi_delta_panel schema/retention）；`@E2` collector code；`@E4` |
-| C | `@BB` Bybit WS topic spec；`@MIT` V### migration（liquidations）；`@E2`；`@E4` |
+| C0/C1 | `@BB` standalone topic proof before production subscribe；`@MIT` schema/retention review；`@E2`；`@E4` |
 | D | `@CC` Scout IntelObject IPC schema；`@E2`；`@E4` 7d replay E2E |
 | 全 wave | `@QC` AlphaSourceTag enum SoT；`@PA` 接口 SoT；`@PM` Sign-off |
 
@@ -447,12 +455,19 @@ Phase A ──┬─→ Phase B ──┐
 
 ### 7.3 Phase C acceptance
 
-- V### migration `market.liquidations` 落地，retention 30d 已驗
-- Bybit `allLiquidation` WS topic 訂閱穩定（24h 0 rate-limit error）
-- `liquidation_writer.py` 24h ≥ 100 events 落 PG
-- `TickContext.alpha_surface.liquidation_pulse.is_some()` ratio ≥ 70%（liquidation 本就稀疏）
-- `OrderflowFeatures` stub `is_some() = true`（永遠 mock，不 None）
-- healthcheck `[新-liquidation_pulse_freshness]` PASS
+**C0 acceptance（revival inventory）**：
+- DB inventory report proves `market.liquidations` reserved table status, row count, columns, and retention policy; V### only if MIT approves a required delta.
+- Production subscription list remains unchanged and does not include `liquidation.*`, `price-limit.*`, `adl-notice.*`, or unverified `allLiquidation`.
+- Legacy parser/dispatch code is documented as inactive until a safe topic is proven.
+- `AlphaSurface.liquidation_pulse` remains `None`; strategies declaring `LiquidationCascade` must fail-closed.
+- BB standalone probe spec exists for the candidate topic.
+
+**C1 acceptance（revival after BB PASS）**：
+- BB-approved liquidation topic subscription stable for 24h on an isolated probe with 0 connection poisoning and 0 rate-limit incident.
+- Writer path writes real events to `market.liquidations` with idempotency and retention verified.
+- `TickContext.alpha_surface.liquidation_pulse.is_some()` ratio target is defined after real event-rate observation; initial gate is freshness/producer liveness, not a synthetic 70% floor.
+- `OrderflowFeatures` stub, if enabled, is explicitly marked stub/source-tier and cannot be mistaken for real liquidation alpha.
+- healthcheck `[新-liquidation_pulse_freshness]` PASS only after C1.
 
 ### 7.4 Phase D acceptance
 
