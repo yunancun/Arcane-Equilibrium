@@ -293,6 +293,100 @@ def _delete_live_authorization_file() -> bool:
         return False
 
 
+def _openclaw_data_dir() -> Path:
+    """
+    Runtime data directory used by the engine snapshots.
+    引擎 snapshot 使用的 runtime data 目錄。
+    """
+    return Path(os.environ.get("OPENCLAW_DATA_DIR") or "/tmp/openclaw")
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        n = float(value)
+        if n == n:
+            return n
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _read_live_halt_status() -> dict[str, Any]:
+    """
+    Best-effort explanation for a missing signed authorization. The Rust engine
+    can delete ``authorization.json`` after accepting it when a session-level
+    guard (notably drawdown halt) trips. Trust status callers need this side
+    channel so the GUI does not reduce every missing file to "renew required".
+
+    讀取 Live snapshot 以解釋 signed authorization 缺失。Rust 可能在授權有效後
+    因 session-level guard（特別是 drawdown halt）刪除 authorization.json；GUI
+    需要此資訊避免把所有 missing 都顯示成「只需續期」。
+    """
+    path = _openclaw_data_dir() / "pipeline_snapshot_live.json"
+    base: dict[str, Any] = {
+        "source": "pipeline_snapshot_live",
+        "present": False,
+        "session_halted": False,
+        "paper_paused": None,
+        "session_drawdown_pct": None,
+        "drawdown_threshold_pct": None,
+        "recent_halt_fill": False,
+        "reason": None,
+    }
+    if not path.exists():
+        return base
+
+    try:
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            **base,
+            "present": True,
+            "reason": "live_snapshot_unreadable",
+            "error": str(exc),
+        }
+
+    risk_cfg = snapshot.get("risk_manager_config") or {}
+    risk_limits = risk_cfg.get("limits") or {}
+    guardian_cfg = snapshot.get("guardian_config") or {}
+    threshold = _float_or_none(risk_limits.get("session_drawdown_max_pct"))
+    if threshold is None:
+        threshold = _float_or_none(guardian_cfg.get("max_drawdown_pct"))
+
+    recent_halt_fill = False
+    for fill in snapshot.get("recent_fills") or []:
+        if not isinstance(fill, dict):
+            continue
+        marker = " ".join(
+            str(fill.get(k) or "")
+            for k in ("strategy", "strategy_name", "reason", "note")
+        ).lower()
+        if "halt_session" in marker or "risk_close" in marker:
+            recent_halt_fill = True
+            break
+
+    session_halted = bool(snapshot.get("session_halted"))
+    reason = None
+    if session_halted:
+        reason = (
+            "live_session_halted_drawdown_guard"
+            if threshold is not None
+            else "live_session_halted"
+        )
+
+    return {
+        **base,
+        "present": True,
+        "written_at_ms": snapshot.get("written_at_ms"),
+        "session_halted": session_halted,
+        "paper_paused": snapshot.get("paper_paused"),
+        "session_drawdown_pct": _float_or_none(snapshot.get("session_drawdown_pct")),
+        "drawdown_threshold_pct": threshold,
+        "recent_halt_fill": recent_halt_fill,
+        "reason": reason,
+    }
+
+
 def _read_signed_live_authorization_status(now_ms: int | None = None) -> dict[str, Any]:
     """
     Return the Rust live-gate view of ``authorization.json`` without exposing the
@@ -789,11 +883,18 @@ def get_trust_status(
         recommendation = {"action": "unknown", "reasons": [str(exc)]}
         metrics_dict = {}
 
+    live_halt = _read_live_halt_status()
+    signed_authorization = _read_signed_live_authorization_status()
+
     return {
         "ok": True,
         "data": {
             **snapshot,
-            "signed_authorization": _read_signed_live_authorization_status(),
+            "signed_authorization": {
+                **signed_authorization,
+                "live_halt": live_halt,
+            },
+            "live_halt": live_halt,
             "recommendation": recommendation,
             "metrics": metrics_dict,
             "tier_ladder": [
@@ -908,9 +1009,10 @@ def post_live_renew(
 
     logger.warning(
         "Live auth RENEWED tier=%s ttl=%dh actor=%s auth_id=%s / "
-        "實盤授權已續期 tier=%s ttl=%dh actor=%s",
+        "實盤授權已續期 tier=%s ttl=%dh actor=%s auth_id=%s",
         TIER_NAMES.get(final_tier), TIER_TTL_HOURS.get(final_tier, 24),
         actor_id, auth_id, TIER_NAMES.get(final_tier), TIER_TTL_HOURS.get(final_tier, 24),
+        actor_id, auth_id,
     )
 
     return {

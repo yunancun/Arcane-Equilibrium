@@ -602,6 +602,59 @@ const TRUST_TIER_COLORS = {
 let _livePnlRange = '24h';
 let _liveMetricsLoadedOnce = false;
 let _liveFillsLoadedOnce = false;
+const LIVE_REFRESH_MS = 15000;
+const LIVE_DASHBOARD_REFRESH_MS = 30000;
+const LIVE_PNL_REFRESH_MS = 60000;
+const LIVE_EDGE_REFRESH_MS = 120000;
+let _liveRefreshTimer = null;
+let _liveRefreshInFlight = false;
+let _liveTabVisible = true;
+let _lastDashboardRefreshMs = 0;
+let _lastMetricsRefreshMs = 0;
+let _lastPnlRefreshMs = 0;
+let _lastEdgeRefreshMs = 0;
+
+function _isLiveTabRefreshVisible() {
+  return _liveTabVisible && document.visibilityState !== 'hidden';
+}
+
+function _signedAuthDisplayState(signed, liveHalt) {
+  const known = !!(signed && signed.status);
+  if (!known) {
+    return { known: false, bad: false, text: 'Signed auth: --', color: 'var(--text-dim)', title: '' };
+  }
+  if (signed.valid_for_engine === true) {
+    return { known: true, bad: false, text: 'Signed auth: valid', color: 'var(--green)', title: '' };
+  }
+
+  const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
+  const halted = !!(liveHalt && liveHalt.session_halted);
+  if (String(signed.status || '') === 'missing' && halted) {
+    const dd = Number(liveHalt.session_drawdown_pct);
+    const limit = Number(liveHalt.drawdown_threshold_pct);
+    let detail = '';
+    if (Number.isFinite(dd) && Number.isFinite(limit)) {
+      detail = ' (snapshot DD ' + dd.toFixed(2) + '% / limit ' + limit.toFixed(2) + '%)';
+    } else if (Number.isFinite(dd)) {
+      detail = ' (snapshot DD ' + dd.toFixed(2) + '%)';
+    }
+    return {
+      known: true,
+      bad: true,
+      text: 'Signed auth: MISSING - auto-revoked after Live halt' + detail,
+      color: 'var(--red)',
+      title: 'Renew can be accepted, then Rust deletes authorization.json while the Live session remains halted. Clear/reset the risk halt before renewing again.'
+    };
+  }
+
+  return {
+    known: true,
+    bad: true,
+    text: 'Signed auth: ' + status + ' - Renew required',
+    color: 'var(--red)',
+    title: ''
+  };
+}
 
 /**
  * Load and render Earned-Trust tier status bars (read-only, no renew controls).
@@ -649,18 +702,11 @@ async function loadTrustStatus() {
   // Signed authorization is the Rust engine gate. It can be missing even while
   // the earned-trust TTL above is still in the future after a manual restart.
   const signed = d.signed_authorization || {};
-  const signedKnown = !!signed.status;
-  const signedBad = signedKnown && signed.valid_for_engine !== true;
-  let signedText = 'Signed auth: --';
-  let signedColor = 'var(--text-dim)';
-  if (signedKnown && signed.valid_for_engine === true) {
-    signedText = 'Signed auth: valid';
-    signedColor = 'var(--green)';
-  } else if (signedKnown) {
-    const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
-    signedText = 'Signed auth: ' + status + ' - Renew required';
-    signedColor = 'var(--red)';
-  }
+  const liveHalt = d.live_halt || signed.live_halt || {};
+  const signedState = _signedAuthDisplayState(signed, liveHalt);
+  const signedBad = signedState.bad;
+  const signedText = signedState.text;
+  const signedColor = signedState.color;
 
   // Compute bar state class / 計算狀態欄 class
   const barClass = signedBad ? 'crit'
@@ -705,6 +751,7 @@ async function loadTrustStatus() {
     if (signedEl) {
       signedEl.textContent = signedText;
       signedEl.style.color = signedColor;
+      signedEl.title = signedState.title || '';
     }
 
     // Pending downgrade inline notice / 待降級內聯提示
@@ -945,28 +992,54 @@ function _applyLiveActionGuards() {
 // Refresh page — reload dashboard + engine status
 // 刷新頁面 — 重新加載儀表板 + 引擎狀態
 // ═══════════════════════════════════════════════════════════════
-async function refreshPage() {
+async function refreshPage(options) {
+  const opts = options || {};
+  const fromTimer = opts.fromTimer === true;
+  const force = opts.force === true || !fromTimer;
+  if (!force && !_isLiveTabRefreshVisible()) return;
+  if (_liveRefreshInFlight) return;
+
+  _liveRefreshInFlight = true;
+  try {
   // F5/A1: read engine_kind / endpoint FIRST so dashboard never renders
   //        demo data under a Live label (phantom view).
   // F5/A1：先讀 engine_kind / endpoint，避免 demo data 套 Live 皮渲染（幽靈視圖）。
-  await checkLiveEngineStatus();
+    await checkLiveEngineStatus();
 
   // Always load trust status regardless of engine state so the TTL bar in the
   // integrity-fail view stays current — operator must be able to see expiry time
   // even when engine is locked, to know when to go to Governance Hub for renew.
   // 無論引擎狀態都載入 trust status，讓完整性失效視圖的 TTL bar 保持即時 —
   // 即使 tab 鎖定，operator 也能看到到期時間，知道何時需去 Governance Hub 續期。
-  loadTrustStatus();
+    await loadTrustStatus();
 
   // If engine is not live, _applyLiveModeUI() already swapped to fail view —
   // skip the data-loaders below to avoid redundant fetches.
   // 若引擎非 live，_applyLiveModeUI() 已切到失敗視圖 — 跳過資料載入避免冗餘 fetch。
-  if (_liveModeState.actual_engine_kind !== 'live') return;
+    if (_liveModeState.actual_engine_kind !== 'live') return;
 
-  loadDashboardData();
-  loadLiveMetrics();
-  loadPreLiveEdgeGates();
-  loadLivePnlSeries();
+    const now = Date.now();
+    const tasks = [];
+    if (force || now - _lastDashboardRefreshMs >= LIVE_DASHBOARD_REFRESH_MS) {
+      _lastDashboardRefreshMs = now;
+      tasks.push(loadDashboardData());
+    }
+    if (force || now - _lastMetricsRefreshMs >= LIVE_DASHBOARD_REFRESH_MS) {
+      _lastMetricsRefreshMs = now;
+      tasks.push(loadLiveMetrics());
+    }
+    if (force || now - _lastEdgeRefreshMs >= LIVE_EDGE_REFRESH_MS) {
+      _lastEdgeRefreshMs = now;
+      tasks.push(loadPreLiveEdgeGates());
+    }
+    if (force || now - _lastPnlRefreshMs >= LIVE_PNL_REFRESH_MS) {
+      _lastPnlRefreshMs = now;
+      tasks.push(loadLivePnlSeries());
+    }
+    if (tasks.length) await Promise.allSettled(tasks);
+  } finally {
+    _liveRefreshInFlight = false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1168,20 +1241,17 @@ async function loadDashboardData() {
   // 此處再加一層防衛（loadDashboardData 可能被其他路徑呼叫）。
   if (_liveModeState.actual_engine_kind !== 'live') return;
 
-  // Load balance, positions, orders, fills, and DB metrics in parallel. Fills
-  // are needed for the symbol→strategy map used by Positions/Orders tables;
-  // DB metrics are the authority for today's realized/net PnL.
-  // 並行加載餘額、倉位、掛單、成交與 DB 指標。fills 端點提供 symbol→策略 映射（Bybit 持倉/掛單
-  // 回應不含 strategy_name，僅引擎 fills 帶）。下方 fills 區段仍懶渲染，但快取/映射在此
-  // 就緒，上方表格得以顯示策略歸屬；今日 PnL 則只吃後端 canonical metric。
-  const [balRes, posRes, ordRes, fillsRes, metricsRes] = await Promise.allSettled([
+  // Load balance, positions, orders, and fills in parallel. Fills are needed
+  // for the symbol→strategy map used by Positions/Orders tables; DB metrics
+  // are fetched once by loadLiveMetrics() so this path does not duplicate it.
+  // 並行加載餘額、倉位、掛單與成交。fills 端點提供 symbol→策略 映射；DB
+  // 指標統一由 loadLiveMetrics() 拉取，避免同一 refresh 重複打 /live/metrics。
+  const [balRes, posRes, ordRes, fillsRes] = await Promise.allSettled([
     ocApi('/api/v1/live/balance'),
     ocApi('/api/v1/live/positions'),
     ocApi('/api/v1/live/orders'),
-    ocApi('/api/v1/live/fills'),
-    ocApi('/api/v1/live/metrics'),
+    ocApi('/api/v1/live/fills?limit=50&offset=0'),
   ]);
-  const metricsData = metricsRes.status === 'fulfilled' && metricsRes.value && metricsRes.value.data;
   try {
     const fd = fillsRes.status === 'fulfilled' && fillsRes.value && fillsRes.value.data;
     if (_isPhantomViewError(fd)) {
@@ -1191,7 +1261,6 @@ async function loadDashboardData() {
       _liveStratMap = _buildLiveStratMap(fArr);
     }
   } catch (_) { _liveStratMap = {}; }
-  if (metricsData) _applyLiveTodayPnl(metricsData);
 
   // Balance — from /api/v1/live/balance (httpx BybitClient → real exchange data)
   // 餘額 — 來自實盤端點（httpx BybitClient → 真實交易所帳戶資料）
@@ -1613,6 +1682,7 @@ async function loadLiveMetrics() {
     return;
   }
   const m = d.data;
+  _applyLiveTodayPnl(m);
   const metrics = ocPerformanceMetricsFromPayload(m);
   if (Array.isArray(metrics) && metrics.length) {
     ocSetHtml('live-perf-metrics', ocRenderPerformanceMetrics(metrics));
@@ -2035,8 +2105,40 @@ async function loadFills() {
 // ═══════════════════════════════════════════════════════════════
 // Init / 初始化
 // ═══════════════════════════════════════════════════════════════
-refreshPage();
-setInterval(refreshPage, 15000);  // 15s for real-time monitoring / 15 秒刷新供即時監控
+function startLiveRefreshLoop() {
+  if (_liveRefreshTimer || !_isLiveTabRefreshVisible()) return;
+  _liveRefreshTimer = setInterval(() => refreshPage({ fromTimer: true }), LIVE_REFRESH_MS);
+}
+
+function stopLiveRefreshLoop() {
+  if (!_liveRefreshTimer) return;
+  clearInterval(_liveRefreshTimer);
+  _liveRefreshTimer = null;
+}
+
+window.addEventListener('message', function(ev) {
+  if (ev.origin !== window.location.origin) return;
+  if (!ev.data || ev.data.type !== 'openclaw-tab-visibility' || ev.data.tab !== 'live') return;
+  _liveTabVisible = ev.data.visible !== false;
+  if (_isLiveTabRefreshVisible()) {
+    startLiveRefreshLoop();
+    refreshPage({ force: true });
+  } else {
+    stopLiveRefreshLoop();
+  }
+});
+
+document.addEventListener('visibilitychange', function() {
+  if (_isLiveTabRefreshVisible()) {
+    startLiveRefreshLoop();
+    refreshPage({ force: true });
+  } else {
+    stopLiveRefreshLoop();
+  }
+});
+
+refreshPage({ force: true });
+startLiveRefreshLoop();
 </script>
 </body>
 </html>

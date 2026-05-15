@@ -510,6 +510,7 @@ function buildTabs() {
     frame.addEventListener('load', () => {
       frame.dataset.loaded = 'true';
       flushPendingFrameMessages(t.id);
+      notifyTabVisibility(currentTab);
     });
     if (t.requiresPaperEngine) frame.dataset.requiresPaperEngine = 'true';
     if (t.requiresDevelopmentSupport) frame.dataset.requiresDevelopmentSupport = 'true';
@@ -548,10 +549,30 @@ function switchTo(tabId) {
       frame.style.display = 'none';
     }
   });
+  notifyTabVisibility(tabId);
 }
 
 buildTabs();
 window.addEventListener('keydown', handleTabGroupShortcut);
+
+function notifyTabVisibility(activeTabId) {
+  const browserVisible = document.visibilityState !== 'hidden';
+  TABS.forEach(t => {
+    const frame = document.getElementById('f-' + t.id);
+    if (!frame || frame.dataset.loaded !== 'true' || !frame.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage({
+        type: 'openclaw-tab-visibility',
+        tab: t.id,
+        visible: browserVisible && t.id === activeTabId,
+      }, window.location.origin);
+    } catch (_) {}
+  });
+}
+
+document.addEventListener('visibilitychange', function() {
+  notifyTabVisibility(currentTab);
+});
 
 function flushPendingFrameMessages(tabId) {
   const frame = document.getElementById('f-' + tabId);
@@ -764,9 +785,14 @@ async function api(path) {
 }
 
 const OC = window.location.origin + '/openclaw';
+const SIDEBAR_REFRESH_MS = 30000;
+let _sidebarRefreshInFlight = false;
 
 // ─── Sidebar Refresh ─────────────────────────────────────────
 async function refreshSidebar() {
+  if (_sidebarRefreshInFlight) return;
+  _sidebarRefreshInFlight = true;
+  try {
   // ── Live Section — always shown, reads real Bybit account via /api/v1/live/balance
   // 實盤板塊 — 始終顯示，從 /api/v1/live/balance 讀取真實帳戶
   document.getElementById('live-section').style.opacity = '1';
@@ -943,6 +969,9 @@ async function refreshSidebar() {
     document.getElementById('s-oc').textContent = 'Offline';
     document.getElementById('s-oc').className = 'mc-val red';
   }
+  } finally {
+    _sidebarRefreshInFlight = false;
+  }
 }
 
 // Wait for server to be up before first sidebar refresh (replaces fixed 2s blind wait).
@@ -950,7 +979,7 @@ async function refreshSidebar() {
 // waitForServerUp() is defined in common.js; polls /api/v1/system/startup-status.
 waitForServerUp(function() {
   refreshSidebar();
-  setInterval(refreshSidebar, 15000);
+  setInterval(refreshSidebar, SIDEBAR_REFRESH_MS);
 });
 ocInitFx();
 window.addEventListener('occurrencychange', refreshSidebar);
