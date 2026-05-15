@@ -77,7 +77,7 @@
 |---|---|---|
 | W-C / MAG-082 Stage 2 | ✅ WINDOW_PASS 2026-05-11（`docs/governance_dev/2026-05-11--w_c_window_pass_signoff.md`） | Closed；old Caveat 1/2 detail is historical, not current blocker。 |
 | MAG-083 / MAG-084 | ✅ signed 2026-05-11（`docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`） | W-D wave closed；proposal/mobile/Stage 3+/true-live gates remain separate。 |
-| `[55] agent_decision_spine_lineage` | 2026-05-15 full healthcheck：`WARN_REAL_FILL_PROPAGATION_PARTIAL`，`chains_with_real_fill_report=24/138`，bad quality counters 0。 | Still blocks any future Stage 1 demo micro-canary unless PASS or explicit PM/operator waiver。 |
+| `[55] agent_decision_spine_lineage` | ✅ SOURCE-FIX VERIFIED 2026-05-15 14:19 UTC：P1-HEALTHCHECK-55-INVARIANT 將 50%-of-all-chains heuristic 改為 fully-filled plan invariant；patched check against `trade-core` PG returns PASS：`chains=144`，`chains_with_real_fill_report=25`，`chains_with_plan_order_fill=38`，`chains_with_full_plan_fill=25`，`full_plan_fills_missing_report=0`，`partial_plan_fill_chains=13`，bad quality counters 0。 | Cleared as healthcheck/filter bug for current Rust full-fill contract；partial per-fill ER remains a future hardening scope, not a Stage 1 demo blocker。 |
 
 ### Strategy / Edge
 
@@ -90,7 +90,7 @@
 | Gate | 2026-05-15 latest | 結論 |
 |---|---|---|
 | `[40]` realized edge | 2026-05-15 full healthcheck WARN：negative realized edge remains active。 | P0-EDGE-1 not closed。 |
-| `[55]` fill-lineage | 2026-05-15 full healthcheck WARN：`24/138` real-fill reports。 | Micro-canary infrastructure blocker until PASS/waiver。 |
+| `[55]` fill-lineage | ✅ 2026-05-15 14:19 UTC source-patched direct check PASS on `trade-core` PG：25/25 fully-filled plan chains have real-fill ER；13 partial chains are surfaced separately。 | No longer a micro-canary infrastructure blocker after repo-synced healthcheck patch；Stage 0R edge gate remains GATE-RED。 |
 | `[67]` feature baseline readiness | ✅ FIXED 2026-05-15 13:13 UTC / 15:13 Europe-Madrid：W-AUDIT-4b apply restored `observability.feature_baselines` to `active_rows=646`, `active_symbols=19`, `feature_names=34/34`; standalone `[67]` PASS。 | `P1-WA4B-INSERT-1` done；drift events still wait configured burn-in。 |
 | `[4]` phys lock / `[Xb]` triangulation | 2026-05-15 12:45 UTC full run PASS：`[4]` exit_features phys_lock 24h=1 / 7d=109；`[Xb]` close-fill-linked 15/15/15。 | Prior hard healthcheck fixes confirmed。 |
 | P2 test coverage | 2026-05-15 packet：all 5 target directories covered, 173 tests total。 | P2 coverage packet complete。 |
@@ -99,7 +99,7 @@
 
 | Blocker | 狀態 |
 |---|---|
-| W3 Sprint | P0 W3-1 / W3-2 remain blocked on `ncyu`（no status change in this maintenance commit）；non-P0 status: W3-3 ✅ / W3-4 ✅ / W3-5 ✅ / W3-6 🔄。Stage 1 demo micro-canary is not launchable while A4-C Stage 0R remains GATE-RED and `[55]` remains WARN。 |
+| W3 Sprint | P0 W3-1 / W3-2 remain blocked on `ncyu`（no status change in this maintenance commit）；non-P0 status: W3-3 ✅ / W3-4 ✅ / W3-5 ✅ / W3-6 🔄。Stage 1 demo micro-canary is not launchable while A4-C Stage 0R remains GATE-RED；`[55]` is source-cleared by P1-HEALTHCHECK-55-INVARIANT。 |
 | Sprint N+2 P2 packet | ✅ 4/4 complete：DUAL-RAIL, SHADOW, F20, V083 P2 follow-up all cleared。 |
 | P0-EDGE-1 | Active；2026-05-15 `[40]` still negative / WARN。 |
 | P0-LG-1 / P0-LG-2 / P0-LG-3 | H0 production caller、provider pricing binding、supervised-live state machine 仍需 IMPL。 |
@@ -447,7 +447,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed by commit `83afb318` after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。Step 5b restored A4-C diagnostic producer evidence (`[57]` PASS; all-source NO_SIGNAL improved to 95.63%) but Stage 1 demo micro-canary remains blocked because A4-C Stage 0R is still GATE-RED and `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` unless a future PM/operator waiver changes that。Sprint N+2 P2 packet is cleared。仍不是 true-live autonomy。
+**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed by commit `83afb318` after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。Step 5b restored A4-C diagnostic producer evidence (`[57]` PASS; all-source NO_SIGNAL improved to 95.63%) but Stage 1 demo micro-canary remains blocked because A4-C Stage 0R is still GATE-RED。`[55]` was source-cleared by P1-HEALTHCHECK-55-INVARIANT after the check stopped using all complete chains as the real-fill denominator。Sprint N+2 P2 packet is cleared。仍不是 true-live autonomy。
 
 **關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 三角 audit ✅ + MAG-084 sign-off ✅ 2026-05-11 → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 

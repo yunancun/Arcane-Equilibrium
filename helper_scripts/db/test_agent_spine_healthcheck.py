@@ -178,7 +178,7 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
                 (3, 3),
                 (2, 2),
                 (1, 1),
-                (0, 0, 0, 0, 0, 0, 0),
+                (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 (0,),
             ],
             [
@@ -206,7 +206,7 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
                 (4, 4),
                 (3, 3),
                 (1, 1),
-                (1, 1, 0, 0, 0, 0, 0),
+                (1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 (0,),
             ],
             [
@@ -235,9 +235,11 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
                 (5, 5),
                 (4, 4),
                 (1, 1),
-                # 7-tuple: complete=1, idem=1, lease=1, report=1, bad_quality=0,
-                #          bad_value_quality=0, chains_with_real_fill_report=1
-                (1, 1, 1, 1, 0, 0, 1),
+                # 11-tuple: complete=1, idem=1, lease=1, report=1,
+                # bad_quality=0, bad_value_quality=0,
+                # chains_with_real_fill_report=1, plan_order_fill=1,
+                # full_plan_fill=1, full_missing=0, partial=0
+                (1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0),
                 # state_changes_24h>0
                 (5,),
             ],
@@ -259,6 +261,8 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
         self.assertIn("chains_with_report=1", msg)
         self.assertIn("bad_report_value_quality=0", msg)
         self.assertIn("chains_with_real_fill_report=1", msg)
+        self.assertIn("chains_with_full_plan_fill=1", msg)
+        self.assertIn("full_plan_fills_missing_report=0", msg)
         self.assertIn("state_changes_24h=5", msg)
 
     def test_sql_contract_is_read_only(self) -> None:
@@ -271,7 +275,7 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
                 (5, 5),
                 (4, 4),
                 (1, 1),
-                (1, 1, 1, 1, 0, 0, 1),
+                (1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0),
                 (5,),
             ],
             [
@@ -298,7 +302,7 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
         self.assertNotIn("UPDATE ", sql_text.upper())
         self.assertNotIn("DELETE ", sql_text.upper())
 
-    # ── Caveat 1+2 fix 後新加 3 case：value-realism + state_changes gate ──
+    # ── Caveat 1+2 fix 後 case：value-realism + state_changes + full-fill gate ──
 
     def test_state_changes_empty_blocks_after_pass_path(self) -> None:
         # 場景：complete chain + idempotency + lease + report 全 OK，
@@ -313,7 +317,7 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
                 (5, 5),
                 (4, 4),
                 (1, 1),
-                (1, 1, 1, 1, 0, 0, 1),
+                (1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0),
                 # state_changes_24h = 0 觸發新 gate
                 (0,),
             ],
@@ -351,7 +355,7 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
                 (1, 1),
                 # complete=1 idem=1 lease=1 report=1 bad_quality=0
                 # bad_value_quality=5 chains_with_real_fill_report=0
-                (1, 1, 1, 1, 0, 5, 0),
+                (1, 1, 1, 1, 0, 5, 0, 1, 1, 0, 0),
                 (10,),
             ],
             [
@@ -372,10 +376,10 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
         self.assertIn("bad_report_value_quality=5", msg)
         self.assertIn("value_quality_cutoff=2026-05-11T00:00:00+02", msg)
 
-    def test_real_fill_propagation_partial_warns(self) -> None:
-        # 場景：100 chains，但 chains_with_real_fill_report=10（< 50% 門檻=50）
-        # → WARN_REAL_FILL_PROPAGATION_PARTIAL
-        # 對應 PA §3.3 階段性 partial gate（real-fill propagation 還在累積）。
+    def test_no_full_fills_does_not_warn_on_low_real_fill_ratio(self) -> None:
+        # 場景：100 chains 都有 stub ExecutionReport，但沒有任何交易所 fill。
+        # 舊版 50% heuristic 會因 chains_with_real_fill_report=0 誤報；新版
+        # 只對 Rust fully_filled 契約已達成的 plan_order_fill 要求真實 ER。
         os.environ["OPENCLAW_AGENT_SPINE_CLIENT_ENABLED"] = "1"
         cur = _cur(
             [
@@ -386,8 +390,45 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
                 (400, 400),
                 (100, 100),
                 # complete=100 idem=100 lease=100 report=100 bad_quality=0
-                # bad_value_quality=0 chains_with_real_fill_report=10 (10% < 50%)
-                (100, 100, 100, 100, 0, 0, 10),
+                # bad_value_quality=0 chains_with_real_fill_report=0
+                # plan_order_fill=0 full_plan_fill=0 full_missing=0 partial=0
+                (100, 100, 100, 100, 0, 0, 0, 0, 0, 0, 0),
+                (500,),
+            ],
+            [
+                [
+                    ("strategy_signal", 100),
+                    ("strategist_decision", 100),
+                    ("guardian_verdict", 100),
+                    ("execution_plan", 100),
+                    ("execution_report", 100),
+                ]
+            ],
+        )
+
+        status, msg = check_55_agent_decision_spine_lineage(cur)
+
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("LINEAGE_READY_NOT_WINDOW_PASS", msg)
+        self.assertIn("chains_with_real_fill_report=0", msg)
+        self.assertIn("chains_with_full_plan_fill=0", msg)
+
+    def test_full_plan_fill_missing_report_warns(self) -> None:
+        # 場景：92 條 plan order 已達 fully_filled 門檻，但只有 90 條真實 ER。
+        # 這才是 [55] 現在應該攔的 fill-lineage invariant。
+        os.environ["OPENCLAW_AGENT_SPINE_CLIENT_ENABLED"] = "1"
+        cur = _cur(
+            [
+                (True,),
+                (True,),
+                (True,),
+                (500, 500),
+                (400, 400),
+                (100, 100),
+                # complete=100 idem=100 lease=100 report=100 bad_quality=0
+                # bad_value_quality=0 real_fill_report=90 plan_order_fill=95
+                # full_plan_fill=92 full_missing=2 partial=3
+                (100, 100, 100, 100, 0, 0, 90, 95, 92, 2, 3),
                 (500,),
             ],
             [
@@ -404,8 +445,9 @@ class TestAgentSpineHealthcheck(unittest.TestCase):
         status, msg = check_55_agent_decision_spine_lineage(cur)
 
         self.assertEqual(status, "WARN")
-        self.assertIn("WARN_REAL_FILL_PROPAGATION_PARTIAL", msg)
-        self.assertIn("chains_with_real_fill_report=10", msg)
+        self.assertIn("BLOCKED_REAL_FILL_REPORT_MISSING", msg)
+        self.assertIn("full_plan_fills_missing_report=2", msg)
+        self.assertIn("partial_plan_fill_chains=3", msg)
 
 
 if __name__ == "__main__":

@@ -35,11 +35,6 @@ _RUNTIME_ENABLED_MODES = {"shadow", "canary", "primary"}
 # <deploy_ts ISO8601 with tz> 排除歷史 stub row。
 _VALUE_QUALITY_CUTOFF_DEFAULT = "1970-01-01T00:00:00+00"
 
-# chains_with_real_fill_report 階段性 partial 門檻;
-# 取 50% 作為 PA §3.3 push back-ready 推導門檻（24h trading.fills 86 vs 174 chains ≈ 49.4%）。
-_REAL_FILL_PARTIAL_RATIO = 0.5
-
-
 def _enabled(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip() == "1"
 
@@ -129,11 +124,13 @@ def _complete_chain_counts(
     modes: list[str],
     window_minutes: int,
     value_quality_cutoff_ts: str,
-) -> tuple[int, int, int, int, int, int, int]:
-    # 回傳 7-tuple:
+) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
+    # 回傳 11-tuple:
     #   (complete_chains, chains_with_idempotency, chains_with_lease,
     #    chains_with_report, bad_report_quality,
-    #    bad_report_value_quality, chains_with_real_fill_report)
+    #    bad_report_value_quality, chains_with_real_fill_report,
+    #    chains_with_plan_order_fill, chains_with_full_plan_fill,
+    #    full_plan_fills_missing_report, partial_plan_fill_chains)
     #
     # 新增兩個 value-realism 指標（PA `2026-05-10--w_c_caveat_fix_plan.md` §3）:
     #   - bad_report_value_quality: cutoff 後但 filled_qty<=0 或 liquidity_role 非 maker/taker 的 real-fill row 數
@@ -151,7 +148,12 @@ def _complete_chain_counts(
                 plan.order_plan_id,
                 plan.decision_id,
                 plan.engine_mode,
-                plan.lease_id
+                plan.lease_id,
+                (plan.payload->>'qty')::numeric AS plan_qty,
+                COALESCE(
+                    plan.payload->>'exchange_order_id',
+                    plan.payload#>>'{metadata,dispatch_order_link_id}'
+                ) AS exchange_order_id
             FROM agent.decision_objects sig
             JOIN agent.decision_edges sig_edge
               ON sig_edge.from_object_id = sig.object_id
@@ -180,6 +182,21 @@ def _complete_chain_counts(
               AND dec.created_at > now() - (%s::text || ' minutes')::interval
               AND verdict.created_at > now() - (%s::text || ' minutes')::interval
               AND plan.created_at > now() - (%s::text || ' minutes')::interval
+        ),
+        plan_fill_status AS (
+            SELECT
+                c.plan_object_id,
+                COALESCE(sum(f.qty::numeric), 0)::numeric AS real_filled_qty,
+                count(f.fill_id)::int AS real_fill_rows
+            FROM chains c
+            LEFT JOIN trading.fills f
+              ON f.engine_mode = c.engine_mode
+             AND f.order_id = c.exchange_order_id
+             AND f.ts > now() - (%s::text || ' minutes')::interval
+             AND f.ts > %s::timestamptz
+             AND f.qty > 0
+             AND f.liquidity_role IN ('maker','taker')
+            GROUP BY c.plan_object_id
         )
         SELECT
             count(DISTINCT c.plan_object_id)::int AS complete_chains,
@@ -214,8 +231,30 @@ def _complete_chain_counts(
                   AND filled_report.created_at > %s::timestamptz
                   AND (filled_report.payload->>'filled_qty')::numeric > 0
                   AND filled_report.payload->>'liquidity_role' IN ('maker','taker')
-            )::int AS chains_with_real_fill_report
+            )::int AS chains_with_real_fill_report,
+            count(DISTINCT c.plan_object_id) FILTER (
+                WHERE pfs.real_fill_rows > 0
+            )::int AS chains_with_plan_order_fill,
+            count(DISTINCT c.plan_object_id) FILTER (
+                WHERE c.plan_qty > 0
+                  AND pfs.real_filled_qty >= c.plan_qty * 0.999
+            )::int AS chains_with_full_plan_fill,
+            count(DISTINCT c.plan_object_id) FILTER (
+                WHERE c.plan_qty > 0
+                  AND pfs.real_filled_qty >= c.plan_qty * 0.999
+                  AND filled_report.object_id IS NULL
+            )::int AS full_plan_fills_missing_report,
+            count(DISTINCT c.plan_object_id) FILTER (
+                WHERE pfs.real_fill_rows > 0
+                  AND (
+                    c.plan_qty IS NULL
+                    OR c.plan_qty <= 0
+                    OR pfs.real_filled_qty < c.plan_qty * 0.999
+                  )
+            )::int AS partial_plan_fill_chains
         FROM chains c
+        LEFT JOIN plan_fill_status pfs
+          ON pfs.plan_object_id = c.plan_object_id
         LEFT JOIN agent.execution_idempotency_keys idem
           ON idem.order_plan_id = c.order_plan_id
          AND idem.decision_id = c.decision_id
@@ -247,13 +286,15 @@ def _complete_chain_counts(
             window_minutes,
             window_minutes,
             window_minutes,
+            window_minutes,
+            value_quality_cutoff_ts,
             value_quality_cutoff_ts,
             value_quality_cutoff_ts,
             window_minutes,
             window_minutes,
         ),
     )
-    row = cur.fetchone() or (0, 0, 0, 0, 0, 0, 0)
+    row = cur.fetchone() or (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     return (
         _count(row, 0),
         _count(row, 1),
@@ -262,6 +303,10 @@ def _complete_chain_counts(
         _count(row, 4),
         _count(row, 5),
         _count(row, 6),
+        _count(row, 7),
+        _count(row, 8),
+        _count(row, 9),
+        _count(row, 10),
     )
 
 
@@ -380,6 +425,10 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             bad_report_quality,
             bad_report_value_quality,
             chains_with_real_fill_report,
+            chains_with_plan_order_fill,
+            chains_with_full_plan_fill,
+            full_plan_fills_missing_report,
+            partial_plan_fill_chains,
         ) = _complete_chain_counts(cur, modes, window_minutes, value_quality_cutoff_ts)
         state_changes_24h = _state_changes_count_24h(cur, modes, window_minutes)
     except Exception as exc:  # noqa: BLE001 - passive sentinel
@@ -399,6 +448,10 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
         f"bad_report_quality={bad_report_quality} "
         f"bad_report_value_quality={bad_report_value_quality} "
         f"chains_with_real_fill_report={chains_with_real_fill_report} "
+        f"chains_with_plan_order_fill={chains_with_plan_order_fill} "
+        f"chains_with_full_plan_fill={chains_with_full_plan_fill} "
+        f"full_plan_fills_missing_report={full_plan_fills_missing_report} "
+        f"partial_plan_fill_chains={partial_plan_fill_chains} "
         f"state_changes_24h={state_changes_24h} "
         f"value_quality_cutoff={value_quality_cutoff_ts}"
     )
@@ -427,10 +480,17 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             "agent decision spine execution report quality incomplete; "
             f"MAG-082 readiness=BLOCKED_REPORT_QUALITY {detail}",
         )
-    # Caveat 1+2 fix 後新加 3 個語意 gate（PA §3.3）：
+    # Caveat 1+2 fix 後新加語意 gate：
     #   - state_changes_24h<=0: Spine SM producer 未接 caller (Caveat 1)
     #   - bad_report_value_quality>0: cutoff 後 ExecutionReport 仍是 stub (Caveat 2)
-    #   - chains_with_real_fill_report < complete_chains * 50%: real-fill propagation 仍 partial
+    #   - full_plan_fills_missing_report>0: Rust fully_filled 門檻已達成但缺少
+    #     fill-completion ExecutionReport。
+    #
+    # 舊版用 chains_with_real_fill_report / complete_chains >= 50% 的啟發式。
+    # 這會把合法無成交 chain 與未達 fully_filled 的 partial chain 放進分母，
+    # 在低成交率 / PostOnly partial 期間誤報 WARN。這裡改成對齊 Rust 目前
+    # 契約：`loop_exchange.rs` 只在 `cum_filled_qty >= qty * 0.999` 時 emit
+    # fill-completion lineage。
     if state_changes_24h <= 0:
         return (
             _status(required),
@@ -443,12 +503,11 @@ def check_55_agent_decision_spine_lineage(cur) -> tuple[str, str]:
             "agent decision spine execution report value-realism incomplete; "
             f"MAG-082 readiness=BLOCKED_REPORT_VALUE_QUALITY {detail}",
         )
-    real_fill_threshold = int(complete_chains * _REAL_FILL_PARTIAL_RATIO)
-    if chains_with_real_fill_report < real_fill_threshold:
+    if full_plan_fills_missing_report > 0:
         return (
             _status(required),
-            "agent decision spine real-fill propagation partial; "
-            f"MAG-082 readiness=WARN_REAL_FILL_PROPAGATION_PARTIAL {detail}",
+            "agent decision spine full-fill report missing; "
+            f"MAG-082 readiness=BLOCKED_REAL_FILL_REPORT_MISSING {detail}",
         )
 
     return (

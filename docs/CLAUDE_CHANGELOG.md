@@ -1,7 +1,30 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-15（Stage 0R Step 5b runtime verification）
+> 最後更新：2026-05-15（P1-HEALTHCHECK-55-INVARIANT）
+
+### P1-HEALTHCHECK-55-INVARIANT — 2026-05-15
+
+**Scope**: Cleared `[55] agent_decision_spine_lineage` WARN by replacing the
+50%-of-all-complete-chains heuristic with a fully-filled plan invariant aligned
+to the current Rust contract (`cum_filled_qty >= plan_qty * 0.999`).
+
+**主要 land**:
+- `[55]` now reports `chains_with_plan_order_fill`,
+  `chains_with_full_plan_fill`, `full_plan_fills_missing_report`, and
+  `partial_plan_fill_chains`.
+- The gate blocks only when a fully-filled plan lacks a fill-completion
+  ExecutionReport; no-fill and partial-fill chains no longer poison the
+  denominator.
+- `TODO.md` and `CLAUDE.md` record `[55]` as source-cleared; A4-C Stage 0R
+  remains GATE-RED independently.
+
+**Verification**: `python3 -m pytest helper_scripts/db/test_agent_spine_healthcheck.py -q`
+PASS (`15 passed`). Patched module executed on `trade-core` against live PG
+returned PASS with `chains_with_full_plan_fill=25`,
+`chains_with_real_fill_report=25`, `full_plan_fills_missing_report=0`, and
+`partial_plan_fill_chains=13`. No runtime config change, engine restart,
+auth mutation, DB write, or strategy/risk change.
 
 ### Stage 0R Step 5b runtime verification — 2026-05-15
 
