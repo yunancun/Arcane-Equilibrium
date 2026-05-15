@@ -3864,3 +3864,110 @@ PG fills 直查證據：
 - HIGH for next step recommendation（Wave 2 V094 spec + reject_cooldown / Wave 3 4-agent short re-review + BB1 字典 / Wave 4+ IMPL kickoff + P1 portfolio fix 平行 / N+2 P2 intent_id writer fix）
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--wave_1_5_spec_v1_2_amd_v0_3_consolidated.md`
+
+---
+
+## 2026-05-15 — Wave 2a Track A2: V094 hybrid schema migration spec finalize (F-FA-1 解)
+
+**Trigger**：PM Wave 2 dispatch — Track A2 finalize V094 hybrid schema migration spec + 配套 trading_writer.rs writer upgrade spec + Linux PG dry-run protocol；解 IMPL Prereq 5 第 3 子條件（F-FA-1）。
+
+**Land 4 commit chain**:
+- `9b1117a0` — V094 spec (1176 LOC / 15 sections)
+- `14a561ec` — PA verdict report (306 LOC)
+- `c9234ecf` — AMD v0.3 → v0.3.1 patch (§8 + §12 changelog)
+- `a9b3a792` — TODO §11 P1 row + §11.5 Wave 2/3 status block + dispatch order
+
+**3 critical Linux PG empirical findings**:
+1. **trading.fills.details JSONB 已存在 V003 line 284**：empirical `psql \d+ trading.fills` 確認 details column 已 ready；3 audit JSON keys 走 details extension = zero schema migration
+2. **24h 98 fills 0% details present rate**：`SELECT COUNT(*), COUNT(details) FROM trading.fills WHERE ts > NOW() - INTERVAL '24h'` 返 98/0 (0.00%)；證實 trading_writer.rs:430 INSERT 23-column 漏 details writer gap
+3. **Linux runtime applied max = V90**（不是 spec/AMD 寫的 V93）：`SELECT version FROM _sqlx_migrations ORDER BY version DESC` 返 80/82/83/84/85/86/87/88/89/90；V81/V91/V92/V93 source 在 git 但 PG 未 apply；spec/AMD wording drift caveat noted
+
+**Hybrid schema 設計**（spec §1.2 + §2）:
+- 2 new columns on trading.fills: `close_maker_attempt:bool NOT NULL DEFAULT FALSE` + `close_maker_fallback_reason:text NULL CHECK enum`
+- 3 JSONB keys in trading.fills.details: `close_initial_limit_price:numeric` + `close_final_fill_price:numeric` + `close_maker_eligible_reason:text`
+- 設計理由: MIT F-MIT-1 verified GIN index 100x slower than partial BTREE → hot-path filter 必走 column；low-cardinality audit-only → JSON-extension append-only Pareto 平衡
+
+**enum allowlist 10 values（spec/AMD 8 + 本 spec 補 2 superset）**:
+- spec/AMD 8 既有: timeout_taker / postonly_reject / cancel_grace_expired / ack_lost / rate_limit_pause / fast_escalate_safety_upgrade / not_attempted_safety_path / engine_shutdown_safety
+- 本 spec 補 2 對應 spec §5.5 Race E + AMD §5.4 BB-MF-2 per-symbol: `rate_limit_backoff_per_symbol` + `fallback_to_taker_mandatory`
+- safety path 3 enum (`fast_escalate_safety_upgrade` / `not_attempted_safety_path` / `engine_shutdown_safety`): healthcheck [63] NULL ladder 必 exclude（per Consensus-MF-3 + AC-6 + AC-16）
+
+**trading_writer.rs upgrade spec**（spec §6）:
+- INSERT 23-column → 26-column（+ details + close_maker_attempt + close_maker_fallback_reason）
+- TradingMsg::Fill enum 21 fields → 24 fields
+- 13 caller sites enumeration（6 production: unattributed_emit.rs:168 + pipeline_helpers.rs:232 + step_4_5_dispatch.rs:1179, 1462 + commands.rs:301, 618；7 test: trading_writer.rs:979/1113/1241/1274 + pending_registration_order_type_tests.rs:397 + unattributed_fill_tests.rs:106）
+- E2 grep verify: `TradingMsg::Fill { ... }` 全 codebase 必出現 39 hit count（13 × 3 fields）；少於 39 即 PR reject
+- SLA 影響: tick 主路徑 0 影響；DB INSERT +50 μs per fill（acceptable）；cross-language IPC 0 對等需求（PYO3-ELIMINATE-1 後 Python 無 TradingMsg::Fill 結構）
+
+**Linux PG dry-run × 2 round protocol mandatory**（spec §4 per CLAUDE.md §七 + V055/V083/V084 incident precedent）:
+- Round 1: empirical 驗 真實 schema runtime semantic（6 SELECT verify queries）+ 真 reject 非 enum 值 INSERT test + 真 accept enum 值 INSERT test
+- Round 2: idempotency 驗（重跑 V094.sql 不 RAISE / 不 double-add column / 不 double-create index）
+- Mac mock pytest 絕對不夠（V055 5-round loop + V028-V034 sqlx hash drift incident chain）
+
+**sqlx checksum repair SOP**（spec §5 per project_2026_05_02_p0_sqlx_hash_drift incident）:
+- V094 file 落地後又被 edit → DB checksum drift → engine restart 觸 sqlx migrate runtime panic
+- 必跑 `cargo run --release --bin repair_migration_checksum -- --version 94`
+- E2 / E4 review 必含「engine restart 實測 + sqlx migrate runtime 不 panic」driver evidence；cargo test PASS ≠ runtime sqlx migrate 驗證
+
+**healthcheck [62][63][64][65] integration spec**（spec §7 per AMD §4.1 + AC-1/AC-15/Consensus-MF-2/-3）:
+- [62] close_maker_fill_rate (Wilson 95% CI gate): PASS lower_bound >= 0.65 / WARN 0.60-0.65 / FAIL < 0.60 / NEUTRAL n<30
+- [63] close_maker_audit_lineage_integrity (dual gate): Gate A W-C Caveat 2 close path 0 spine row + Gate B audit completeness ratio NULL ladder
+- [64] close_maker_rate_limit_pause_duration: per-symbol backoff <= 100/24h + global pause = 0
+- [65] close_maker_reject_sample_completeness: per env 7d 各 reject category sample >= 1（per AC-15 BB-MF-5）
+- 新檔 helper_scripts/db/passive_wait_healthcheck/checks_close_maker_audit.py
+- runner.py CHECKS list 註冊 + CLAUDE.md §七 healthcheck 計數同步 51 → 55
+
+**IMPL plan + 估工時**（spec §8）:
+- Total ~480 LOC / ~3.1 E1-day（含 Linux PG dry-run × 2 round 0.5d）
+- E1 並行 2 worktree（A: V094 SQL ~80 LOC + B: writer + 13 callers ~235 LOC）+ 1 串行（C: 4 healthcheck ~220 LOC）
+- IMPL kickoff 派工順序: PA spec → E1 worktree A+B 並行 → C 串行 → E2 review → E4 regression → ssh trade-core Linux PG dry-run × 2 → restart_all --rebuild → engine restart verify sqlx migrate + healthcheck PASS → QA Phase 2a 14d → PM sign-off
+
+**Backward-compat append-only**（spec §9 per AMD §10.1）:
+- V094 純粹 ADD COLUMN + ADD CONSTRAINT，沒 ALTER existing column type / DROP column / RENAME column
+- 既有 SELECT/INSERT/UPDATE 0 影響；既有 healthcheck 0 影響
+- mirror V083 NOT VALID precedent；既有 fills row close_maker_attempt = FALSE default
+- IMPL 階段不可改設計（hybrid → separate column 必重評 + 重派 4-agent review per AMD §10.1）
+
+**Rollback paths**（spec §10）:
+- Phase 2a/2b/3 FAIL: TOML hot-reload `use_maker_close=false` → 1 tick 內回 market；V094 schema 不需 rollback
+- IMPL 階段未 deploy: V094 schema rollback 通過 manual DROP COLUMN + DROP INDEX + DELETE _sqlx_migrations row
+- Post-deploy emergency: operator-triggered kill-switch（cancel_token shutdown + force market）
+
+**F-FA-1 解除條件 (a)(b)(c) 全完成**:
+- (a) PA spec finalize V094 SQL ✅ — spec §2 schema + §3 Guard A/B/C + §10 rollback
+- (b) trading_writer.rs INSERT 升級 details writer spec ✅ — spec §6 writer upgrade + 13 caller sites + TradingMsg::Fill enum
+- (c) Linux PG empirical query 驗 schema ✅ — spec §1.2 + §4 dry-run × 2 round + §4.4 V93 vs V90 drift caveat
+
+**IMPL Prereq 5 全 RESOLVED**:
+- F-FA-1 ✅ Wave 2a Track A2 commit `9b1117a0`
+- F-FA-2 ✅ Wave 1 Track A3 commit `96995b61`
+- F-FA-3 ✅ Wave 1 Track A4 commit `a5a7107c`
+
+**Multi-session race 防範實踐**:
+- 4 commit 全分離（spec / PA verdict / AMD / TODO）
+- 每個 commit 用 `git commit --only <file>` 隔絕 index race
+- 0 使用 `git add -A`
+- 全部 commit message 加 `[skip ci]`
+- 接手前 fetch 確認 no sibling commits 衝突 V094 scope
+- Sibling commits 7b0a8e8c (BB Wave 3a short re-review) + cabb2fcd (Wave 1 Round 2 真修) 期間 land；與 V094 scope 互不重疊
+
+**架構教訓 18**：**多階段 PA spec 串行設計的 cascade 價值**。Wave 1 Track A4 (F-FA-3 PA report) §4 + §4.4 已給 V094 schema 雛形 + writer gap discovery + Linux PG mandatory；本 spec 主要是 finalize + enrich（補 enum 2 值 + 13 caller sites enumeration + healthcheck 4 個 spec + V93 vs V90 drift caveat）。**Wave 1 Track A4 design quality 直接決定 Wave 2 spec finalize 速度** — 早期 PA report 的「設計建議 + 雛形」段落是後續 spec finalize 的 force multiplier。
+
+**架構教訓 19**：**spec/AMD wording drift 必須由 empirical Linux PG verify 揭露**。spec v1.2 §4.4 + AMD v0.3 §4.1 寫「current max applied V093」是 incorrect；事實 V90。Mac source files V091/V092/V093 在 git 但 PG 未 apply。**PA 派 sub-agent 前必先 ssh trade-core empirical query 驗 schema 真實狀態**，不能基於 spec 假設。本 spec §4.4 caveat 段是 source-of-truth 修正；spec/AMD 文字無需 patch（V094 仍 next-free numeric slot；deploy semantic 不變）。Pre-Wave 4 PA 補一輪 Linux V81/V91/V92/V93 backlog migration apply 檢查（per spec §4.4 caveat + TODO §11.5 Wave 3.5 row）。
+
+**架構教訓 20**：**TradingMsg::Fill enum 升級 = caller sites enumeration 是 critical 防護**。Rust strong-type 保證 compile-time 不漏接（13 sites 必有一漏接即編譯錯），但 PR review 仍需 grep verify 39 hit count（13 × 3 fields）；遺漏一個 caller 會編譯錯，遺漏一個 default value 會語意錯（close_maker_attempt: None vs false）。E2 review 必跑此 grep 的具體命令在 spec §12.2 提供。
+
+**Confidence**:
+- HIGH for V094 hybrid schema design correctness（mirror V083 NOT VALID precedent + Linux PG empirical schema verify）
+- HIGH for trading_writer.rs writer gap empirical（24h 98 fills 0% details rate confirmed）
+- HIGH for 13 caller sites enumeration completeness（grep verified 全 codebase）
+- HIGH for enum allowlist 10 values superset（spec/AMD 8 + 本 spec 補 2 對應 spec §5.5 Race E + AMD §5.4 per-symbol）
+- HIGH for Linux PG dry-run × 2 round protocol（mirror V055/V083/V084 incident precedent）
+- HIGH for sqlx checksum repair SOP（mirror project_2026_05_02_p0_sqlx_hash_drift incident chain）
+- HIGH for healthcheck [62][63][64][65] integration spec（per spec §8.1 + AMD §4.1）
+- HIGH for backward-compat append-only（V083 mirror + 0 ALTER existing column + 0 DROP + 0 RENAME）
+- MEDIUM for V81/V91/V92/V93 backlog drift mitigation（caveat identified, Pre-Wave 4 backlog apply 工作未 land；TODO §11.5 Wave 3.5 row tracked）
+- MEDIUM for spec/AMD wording drift（V93 → V90）— 本 spec 顯式修正，但 spec v1.2 + AMD v0.3 文字無修
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--v094_schema_migration_spec_pa_verdict.md`
+
