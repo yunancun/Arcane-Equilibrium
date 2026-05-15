@@ -409,6 +409,7 @@ fn build_strategist_eval_payload(
             "avg_pnl": pair.avg_pnl,
             "fill_count": pair.fill_count,
         },
+        // TODO(WP-04): 提取到 [strategist] TOML config — 目前硬編碼 l1_9b
         "model_tier": "l1_9b",
         "current_params": current_json,
         "param_ranges": ranges_value,

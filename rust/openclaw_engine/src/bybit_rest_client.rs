@@ -335,6 +335,8 @@ pub enum BybitRetCode {
     OrderAlreadyCancelled = 110010,
     /// Insufficient balance / 餘額不足
     InsufficientBalance = 110012,
+    /// Reduce-only 訂單被拒（倉位不存在或方向不匹配）— 終態錯誤，重試無意義。
+    ReduceOnlyReject = 110017,
     /// Leverage not modified (already set) / 槓桿未修改
     LeverageNotModified = 110043,
     /// Price tick invalid — round via InstrumentInfoCache and retry once.
@@ -389,6 +391,7 @@ impl BybitRetCode {
             110009 => Some(Self::PositionNotFound),
             110010 => Some(Self::OrderAlreadyCancelled),
             110012 => Some(Self::InsufficientBalance),
+            110017 => Some(Self::ReduceOnlyReject),
             110043 => Some(Self::LeverageNotModified),
             110049 => Some(Self::PriceTickInvalid),
             110074 => Some(Self::ContractNotLive),

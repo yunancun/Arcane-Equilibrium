@@ -285,10 +285,18 @@ fn test_bybit_ret_code() {
         BybitRetCode::from_code(110043),
         Some(BybitRetCode::LeverageNotModified)
     );
+    // WP-10 BB-A-1：ReduceOnlyReject 110017
+    assert_eq!(
+        BybitRetCode::from_code(110017),
+        Some(BybitRetCode::ReduceOnlyReject)
+    );
     assert_eq!(BybitRetCode::from_code(99999), None);
 
     assert!(BybitRetCode::IpRateLimit.is_retryable());
     assert!(!BybitRetCode::InsufficientBalance.is_retryable());
+    // ReduceOnlyReject：不可重試、不是 noop（真實拒絕）
+    assert!(!BybitRetCode::ReduceOnlyReject.is_retryable());
+    assert!(!BybitRetCode::ReduceOnlyReject.is_noop());
     assert!(BybitRetCode::LeverageNotModified.is_noop());
     assert!(!BybitRetCode::InsufficientBalance.is_noop());
 }
@@ -358,6 +366,17 @@ fn test_bybit_ret_code_phase1b_extensions() {
     assert!(BybitRetCode::InsufficientBalance.is_balance_block());
     assert!(!BybitRetCode::PriceOutOfRange.is_balance_block());
     assert!(!BybitRetCode::PostOnlyOnlyStage.is_balance_block());
+
+    // BB-A-1: ReduceOnlyReject (110017) — 終態錯誤，不可重試、不是 noop
+    assert_eq!(
+        BybitRetCode::from_code(110017),
+        Some(BybitRetCode::ReduceOnlyReject)
+    );
+    assert!(!BybitRetCode::ReduceOnlyReject.is_retryable());
+    assert!(!BybitRetCode::ReduceOnlyReject.is_noop());
+    assert!(!BybitRetCode::ReduceOnlyReject.is_exchange_backoff());
+    assert!(!BybitRetCode::ReduceOnlyReject.is_instrument_filter());
+    assert!(!BybitRetCode::ReduceOnlyReject.is_balance_block());
 }
 
 /// Test BybitApiError Display formatting.

@@ -9328,3 +9328,120 @@ sign-off 範圍限制留下次 audit）：
 
 ### 完整報告路徑
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp05_security_real_fix.md`
+
+---
+
+## 2026-05-16 — Wave 2 Track E1 reject_cooldown entry/close split (BB-MF-3 P0 prereq)
+
+**PM 派發**：拆 `reject_cooldown_until_ms` 單一 HashMap 為 entry/close 兩條獨立 map，
+解 EDGE-P2-3 Phase 1b BB-MF-3 silent degradation（entry reject 凍結同 symbol close path）；
+AMD-2026-05-15-02 §8 IMPL Prereq 6 升 P0，pre-Phase 2a Demo 必 land。
+
+### 真實位置盤點（PA spec drift 再現）
+
+- spec §6.1 寫 `grid_trading/signal.rs:152-158` per-symbol cooldown — **正確**
+- AMD §8 寫的「`reject_cooldown_until_ms` 不分 entry/close」是 grid_trading 內部
+  field（不是獨立模組）；pure grep 揭露：13 個 callsite 全在 `grid_trading/{mod,
+  constructors,signal,position_mgmt,tests}.rs`，maker_rejection.rs / bybit_rest_client.rs
+  只有 doc reference，0 actual write/read。
+- `on_post_only_rejected` Strategy trait method 是 **dead code**（compiler warn
+  `method 'on_post_only_rejected_impl' is never used`） — 沒有 event_consumer
+  / dispatcher 在 production 觸發。意涵：BB-MF-3 silent degradation 真實發生在
+  `on_rejection`（governance pipeline 拒絕）路徑，不在 PostOnly entry/close 路徑。
+- 當前 `signal.rs:154` 早期 unified gate 是真正的 silent degradation 點。
+
+### 設計決策（minimal scope）
+
+- 拆 `reject_cooldown_until_ms` → `reject_cooldown_entry_until_ms` 重命名
+  + 新增 `reject_cooldown_close_until_ms` 兩條獨立 HashMap
+- 既有 `on_rejection_impl` + `on_post_only_rejected_impl` 寫入 entry map
+  （保持 entry-side 既有語意 byte-identical）
+- 新增 `arm_close_cooldown(sym, ts_ms, category)` public API on `GridTrading`
+  inherent impl（不放 `Strategy` trait — 避免影響 4 個非 grid 策略 default impl
+  與 `Box<dyn Strategy>` dispatcher signature）
+- 路由規則 per spec v1.2 §6.1：
+  - PostOnlyCross close → no-op（spec §5.3 Race C 走 market）
+  - TooManyPending close → 5min 固定（PM Wave 2b 任務明文；spec §5.4 dynamic
+    backoff 屬獨立工作項，本 prereq 不實作）
+  - 其他類別 → 1min default
+- `signal.rs` gate 拆分：
+  - 早期 short-circuit 改為「兩 side 都 active」optimization（保留性能）
+  - per-side gate 在 `would_open` 已知後檢查；`would_open=true` → check entry
+    cooldown；close emission 不在此處 gate（待 Phase 1b 主軸 IMPL 在 close
+    dispatcher 接 close cooldown）
+- 本 prereq commit **不接線生產 close dispatcher**（commands.rs 仍 hard-coded
+  market），純 helper + 隔離測試 scope
+
+### 修改清單
+
+| File | LOC delta | 內容 |
+|---|---|---|
+| `strategies/grid_trading/mod.rs` | +73 / -10 | 2 新常量 + 拆 field + 新增 inherent impl `arm_close_cooldown` |
+| `strategies/grid_trading/constructors.rs` | +12 / -3 | 3 ctor sites init 兩條 map |
+| `strategies/grid_trading/position_mgmt.rs` | +98 / -16 | 寫入路由（on_rejection / on_post_only_rejected → entry，新 `arm_close_cooldown_impl` → close）|
+| `strategies/grid_trading/signal.rs` | +32 / -7 | 拆 gate（unified short-circuit + per-side entry gate）|
+| `strategies/grid_trading/tests.rs` | +305 / -3 | 8 新 BB-MF-3 unit test + 1 既有 test 加 BB-MF-3 隔離斷言 |
+| `strategies/maker_rejection.rs` | +7 / -4 | doc reference 更新 |
+| `bybit_rest_client.rs` | +8 / -3 | doc reference 更新 |
+
+**Total**: +495 / -40 across 7 files
+
+### Test 結果
+
+- `cargo build --release` ✅ 0 errors（2 pre-existing warnings 無關）
+- `cargo test --lib --release strategies::grid_trading::tests` **60 passed / 0 failed**
+  （baseline 52 + 8 new BB-MF-3 cases）
+- `cargo test --lib --release` 整體 **2903 passed / 1 failed (pre-existing OU
+  stochastic) / 1 ignored** = baseline 2895 + 8 new = 2903，**0 regression**
+- `cargo build --release --bin openclaw-engine` ✅ + binary tests **59 passed / 0 failed**
+- `rustfmt --check` 改的 7 個檔 ✅
+
+### 8 新 BB-MF-3 test
+1. `test_entry_reject_does_not_freeze_close_path` — PM Step 4 #1
+2. `test_close_reject_does_not_freeze_entry_path` — PM Step 4 #2
+3. `test_close_too_many_pending_5min_cooldown` — PM Step 4 #3 + spec §6.1
+4. `test_close_postonly_cross_no_cooldown_immediate_market` — PM Step 4 #4 + spec §5.3
+5. `test_close_default_reject_categories_1min_cooldown` — spec §6.1 「其他 → 1min」
+6. `test_grid_short_circuits_when_both_cooldowns_active` — signal.rs short-circuit safety
+7. `test_cooldown_isolation_multi_symbol` — multi-symbol regression coverage
+8. `test_arm_close_cooldown_saturating_add_overflow_safe` — i64 overflow safety
+9. （updated）`test_g7_09c_post_only_reject_callback_arms_cooldown` — 加 BB-MF-3 隔離斷言
+
+### 教訓
+
+1. **AMD vs codebase 真實 wiring drift**：AMD §8 用「entry side 觸 rate-limit-adjacent
+   條件」措辭暗示真實生產的 BB-MF-3 觸發點，但 grep 揭露 `on_post_only_rejected`
+   是 dead code；真實生產 silent degradation 點是 `on_rejection`（governance pipeline
+   拒絕）+ `signal.rs:154` 早期 unified gate。修法相同（拆 + per-side gate），但
+   E2 review 必須讀 compiler warning 不 trust spec wording。
+2. **Strategy trait method 不對稱擴展**：`arm_close_cooldown` 只 grid 需要，加
+   trait method 會逼 4 策略寫 default impl + 影響 `Box<dyn Strategy>` dispatcher。
+   解：放 `impl GridTrading` inherent block，不污染 trait surface。Phase 1b 主軸
+   如需擴及他策略另議。
+3. **PA spec 5min vs spec §5.4 dynamic backoff drift**：PM Wave 2b 任務明文要求
+   TooManyPending close 5min 固定，但 spec v1.2 §5.4 BB-MF-2 規定 per-symbol
+   dynamic backoff (1s exp → 60s 上限 + global cascade)。兩者衝突；E1 push back
+   = 取 PM 任務明文（5min 固定，scope creep 避免）+ memory log 標 dynamic backoff
+   屬獨立工作項，留 Phase 1b 後續 IMPL。
+4. **同 commit grid signal.rs entry-cooldown gate 拆分**：原 unified gate
+   line 152-158 是真正凍結 close emission 的點，必須拆。設計：保留「兩 side 都
+   active」short-circuit optimization；per-side gate 在 `would_open` 已知後 check。
+   close emission 不在此處 gate（待 Phase 1b 主軸 IMPL 在 close dispatcher 接）。
+5. **既有 test 必同步更新 BB-MF-3 隔離斷言**：`test_g7_09c_post_only_reject_callback_arms_cooldown`
+   原斷言 `g.reject_cooldown_until_ms.get("BTC")`，rename 後必同步且加
+   `g.reject_cooldown_close_until_ms.get("BTC").is_none()` 防 entry reject
+   污染 close map（regression guard）。
+
+### Acceptance criteria self-check
+1. ✅ cargo build --release green
+2. ✅ 8 新 BB-MF-3 test 全 PASS
+3. ✅ cargo test --lib --release 2903/0 no regression（baseline 2895 + 8 new）
+4. ✅ binary tests 59/0
+5. ✅ rustfmt clean on changed files
+6. ✅ 注釋全中文（CLAUDE.md §七 2026-05-05 規）
+7. ✅ 0 hardcoded `/Users/ncyu` / `/home/ncyu` 路徑
+8. ✅ 不動 stop_manager / reconciliation / paper_state/resting_orders / commands.rs:778-816 close dispatcher
+9. ✅ 不新建 `Self::CloseTooManyPending` / `Self::ClosePostOnlyCross` enum variant（per BB-MF-4 enum reuse）
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--reject_cooldown_split_bbmf3.md`

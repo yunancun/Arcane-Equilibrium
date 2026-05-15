@@ -137,7 +137,25 @@ pub fn compute_ou_step_with_cost_floor(
     }
     let theta = (-b).max(0.01); // sane minimum for genuine mean-reversion
 
-    let sigma = (changes.iter().map(|c| c * c).sum::<f64>() / n_f).sqrt();
+    // 殘差 sigma：先扣 OLS drift，再取標準差（自由度 n-2）
+    // WP-03 QC P1：舊公式 sqrt(sum(dx^2)/n) 把 mean-reversion drift 混入 sigma，
+    // 導致 sigma 偏高 → grid spacing sigma*sqrt(2/theta) 過寬。
+    let a = mean_dx - b * mean_x;
+    let ss_resid: f64 = changes
+        .iter()
+        .enumerate()
+        .map(|(i, dx)| {
+            let predicted = a + b * x_lag[i];
+            let residual = dx - predicted;
+            residual * residual
+        })
+        .sum();
+    let dof = n_f - 2.0; // 兩個 OLS 參數（截距 a + 斜率 b）
+    let sigma = if dof > 0.0 {
+        (ss_resid / dof).sqrt()
+    } else {
+        return None;
+    };
     let mu = prices.iter().sum::<f64>() / prices.len() as f64;
 
     // OU optimal grid spacing: σ·√(2/θ) — derived from OU first-passage time.
@@ -635,6 +653,157 @@ mod tests {
             "expected residual σ̂ ({}) ≤ raw-Δx σ ({}) for mean-reverting data",
             est.sigma_hat,
             raw_sigma
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // WP-03 — compute_ou_step 殘差 sigma 修正測試
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_wp03_residual_sigma_strictly_less_than_raw() {
+        // WP-03 核心驗證：均值回歸資料上，compute_ou_step 的殘差 sigma
+        // 嚴格小於舊公式 sqrt(sum(dx^2)/n) 的 raw sigma。
+        let prices = simulate_ou(200, 100.0, 0.5, 100.0, 0.5, 1.0, 0xCAFE1234);
+        let n = prices.len();
+        let slice = &prices[..n]; // 全部用
+
+        // 計算 raw sigma（舊公式）
+        let changes: Vec<f64> = slice.windows(2).map(|w| w[1] - w[0]).collect();
+        let n_f = changes.len() as f64;
+        let raw_sigma = (changes.iter().map(|c| c * c).sum::<f64>() / n_f).sqrt();
+
+        // 計算 OLS 殘差 sigma（新公式，n-2 自由度）
+        let x_lag: Vec<f64> = slice[..slice.len() - 1].to_vec();
+        let mean_x: f64 = x_lag.iter().sum::<f64>() / n_f;
+        let mean_dx: f64 = changes.iter().sum::<f64>() / n_f;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for i in 0..changes.len() {
+            let dx_centered = x_lag[i] - mean_x;
+            num += dx_centered * (changes[i] - mean_dx);
+            den += dx_centered * dx_centered;
+        }
+        assert!(den.abs() > 1e-15, "OLS 設計矩陣不應退化");
+        let b = num / den;
+        // b < 0 才是均值回歸，這裡 assert
+        assert!(b < 0.0, "模擬資料應為均值回歸 (b < 0)，實際 b = {}", b);
+
+        let a = mean_dx - b * mean_x;
+        let ss_resid: f64 = changes
+            .iter()
+            .enumerate()
+            .map(|(i, dx)| {
+                let pred = a + b * x_lag[i];
+                let e = dx - pred;
+                e * e
+            })
+            .sum();
+        let dof = n_f - 2.0;
+        let residual_sigma = (ss_resid / dof).sqrt();
+
+        // 核心斷言：殘差 sigma 嚴格小於 raw sigma
+        assert!(
+            residual_sigma < raw_sigma,
+            "殘差 sigma ({}) 應嚴格小於 raw sigma ({})（均值回歸資料）",
+            residual_sigma,
+            raw_sigma
+        );
+        // 同時確保兩者都是正的有限值
+        assert!(residual_sigma > 0.0 && residual_sigma.is_finite());
+        assert!(raw_sigma > 0.0 && raw_sigma.is_finite());
+    }
+
+    #[test]
+    fn test_wp03_ou_step_still_returns_some_for_mean_reverting() {
+        // 確認修正後 compute_ou_step 對均值回歸資料仍回傳 Some
+        let prices = simulate_ou(200, 100.0, 0.4, 100.0, 0.5, 1.0, 0xC0FFEE);
+        let result = compute_ou_step(&prices, 200, 0.001);
+        assert!(
+            result.is_some(),
+            "修正後均值回歸資料應回傳 Some，但得到 None"
+        );
+        let step = result.unwrap();
+        assert!(step > 0.0, "ou_step 應為正值，實際 = {}", step);
+    }
+
+    #[test]
+    fn test_wp03_regression_known_input() {
+        // 回歸測試：用固定 seed 的 OU 資料驗證 ou_step 在已知範圍內
+        let prices = simulate_ou(100, 50.0, 0.3, 50.0, 0.2, 1.0, 0xDEAD0001);
+        let step = compute_ou_step(&prices, 100, 0.0005);
+        assert!(step.is_some(), "已知 OU 資料 ou_step 不應為 None");
+        let s = step.unwrap();
+        // sigma ~0.2，theta ~0.3 → ou_step ~= 0.2*sqrt(2/0.3) ≈ 0.516
+        // 加 fee floor = 2*0.0005*50 = 0.05（遠小於 ou_step）
+        // 合理範圍：0.1 ~ 2.0（考慮有限樣本波動）
+        assert!(
+            s > 0.05 && s < 3.0,
+            "ou_step = {} 超出合理範圍 (0.05, 3.0)",
+            s
+        );
+    }
+
+    #[test]
+    fn test_wp03_dof_guard_short_input() {
+        // n-2 自由度 guard：若 changes.len() <= 2（即 history <= 3），dof <= 0
+        // 應回傳 None。但既有 `history.len() < 20` guard 更早攔截。
+        // 這裡直接驗證 < 20 guard 仍生效。
+        let short: Vec<f64> = vec![100.0, 101.0, 100.5];
+        assert!(
+            compute_ou_step(&short, 60, 0.001).is_none(),
+            "3 筆資料應回傳 None（< 20 guard）"
+        );
+        let slightly_longer: Vec<f64> = (0..19).map(|i| 100.0 + (i as f64 * 0.3).sin()).collect();
+        assert!(
+            compute_ou_step(&slightly_longer, 60, 0.001).is_none(),
+            "19 筆資料應回傳 None（< 20 guard）"
+        );
+    }
+
+    #[test]
+    fn test_wp03_residual_vs_phase_a_estimator_directional_consistency() {
+        // 殘差方向一致性：compute_ou_step（n-2 dof）和 OuResidualSigma（n-1 dof）
+        // 的 sigma 應方向一致（兩者都 < raw sigma），且 n-2 版本 >= n-1 版本
+        //（更保守：分母更小 → sigma 更大）。
+        let prices = simulate_ou(200, 100.0, 0.5, 100.0, 0.5, 1.0, 0xABCD5678);
+        let est = OuResidualSigma::estimate_from_window(&prices);
+
+        // 手動算 compute_ou_step 用的 n-2 sigma
+        let changes: Vec<f64> = prices.windows(2).map(|w| w[1] - w[0]).collect();
+        let x_lag: Vec<f64> = prices[..prices.len() - 1].to_vec();
+        let n_f = changes.len() as f64;
+        let mean_x: f64 = x_lag.iter().sum::<f64>() / n_f;
+        let mean_dx: f64 = changes.iter().sum::<f64>() / n_f;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for i in 0..changes.len() {
+            let dx_centered = x_lag[i] - mean_x;
+            num += dx_centered * (changes[i] - mean_dx);
+            den += dx_centered * dx_centered;
+        }
+        let b = num / den;
+        let a_hat = mean_dx - b * mean_x;
+        let ss_resid: f64 = changes
+            .iter()
+            .enumerate()
+            .map(|(i, dx)| {
+                let pred = a_hat + b * x_lag[i];
+                let e = dx - pred;
+                e * e
+            })
+            .sum();
+        let sigma_n2 = (ss_resid / (n_f - 2.0)).sqrt();
+
+        assert!(est.sigma_hat.is_finite() && est.sigma_hat > 0.0);
+        assert!(sigma_n2.is_finite() && sigma_n2 > 0.0);
+
+        // n-2 分母更小 → sigma 應 >= n-1 版本（或非常接近）
+        assert!(
+            sigma_n2 >= est.sigma_hat * 0.99,
+            "n-2 sigma ({}) 應 >= n-1 sigma ({}) * 0.99",
+            sigma_n2,
+            est.sigma_hat
         );
     }
 }

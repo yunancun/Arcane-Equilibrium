@@ -41,6 +41,7 @@ MODULE_NOTE (English):
 import asyncio
 import json as _json
 import logging
+import os
 import threading
 import urllib.parse
 import urllib.request
@@ -104,7 +105,9 @@ _BYBIT_TF_MAP: dict[str, str] = {
     "1h": "60", "4h": "240", "1d": "D",
 }
 
-_BYBIT_BASE_URL = "https://api.bybit.com"
+# 歷史 K 線為公開 API，mainnet 和 demo 返回相同數據；
+# 默認 demo 避免回測模組意外指向 mainnet。
+_BYBIT_BASE_URL = os.getenv("OPENCLAW_BYBIT_BACKTEST_URL", "https://api-demo.bybit.com")
 
 
 def _fetch_ohlcv_from_bybit(
