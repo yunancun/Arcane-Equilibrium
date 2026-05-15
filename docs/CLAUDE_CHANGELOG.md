@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-15（P1-WA4B-INSERT-1 TODO/CLAUDE maintenance sync）
+> 最後更新：2026-05-15（Stage 0R Step 5b runtime verification）
+
+### Stage 0R Step 5b runtime verification — 2026-05-15
+
+**Scope**: Reran W2 A4-C BTC→Alt Lead-Lag Stage 0R preflight on `trade-core`
+after restoring the diagnostic producer with
+`OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1`.
+
+**主要 land**:
+- Added PM and Operator reports for Step 5b.
+- Updated `TODO.md` to record `[57]` PASS, improved expected_dir distribution,
+  and continued `eligible_for_demo_canary=false`.
+
+**Verification**: Stage 0R smoke PASS; latest report fetched 5,740 rows and
+returned pooled `avg_net_bps=+0.3552`, `PSR(0)=0.5877`, `DSR=0.0000`,
+`eligible_for_demo_canary=false`. Direct `[57]` check PASS; `[55]` remains
+`WARN_REAL_FILL_PROPAGATION_PARTIAL`. No paper enablement, canary launch,
+runtime config change, rebuild, restart, DB mutation, live auth mutation, or
+strategy/risk change.
 
 ### P1-WA4B-INSERT-1 TODO/CLAUDE Maintenance Sync — 2026-05-15
 

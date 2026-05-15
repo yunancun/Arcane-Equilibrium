@@ -82,7 +82,7 @@
 ### Strategy / Edge
 
 - P0-EDGE-1 remains active：2026-05-15 full healthcheck still flags `[40]` negative realized edge；5 textbook strategies remain structurally alpha-deficient until Alpha Surface Phase C/D or new alpha candidates produce positive demo evidence。
-- A4-C BTC→Alt Lead-Lag implementation is complete/rebased, but 2026-05-15 Stage 0R rerun is **GATE-RED** (`eligible_for_demo_canary=false`; `avg_net_bps=-3.5570`, `PSR(0)=0.0542`, `DSR=0.0000`)；no Stage 1 demo cohort selected。
+- A4-C BTC→Alt Lead-Lag implementation is complete/rebased, but 2026-05-15 Step 5b Stage 0R rerun after diagnostic producer restoration remains **GATE-RED** (`eligible_for_demo_canary=false`; `avg_net_bps=+0.3552`, `PSR(0)=0.5877`, `DSR=0.0000`, R²(120)=0.0005)；`[57]` PASS + expected_dir distribution improved, but no Stage 1 demo cohort selected。
 - Legacy paper promotion paths are frozen by AMD-2026-05-15-01：Stage 0R replay preflight can only emit `eligible_for_demo_canary=true/false`; Stage 1 evidence must be `Environment::Demo` micro-canary after a future green preflight。
 
 ### Current Observation Gates
@@ -447,7 +447,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed by commit `83afb318` after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。Stage 1 demo micro-canary remains blocked because A4-C Stage 0R is GATE-RED and `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` unless a future PM/operator waiver changes that。Sprint N+2 P2 packet is cleared。仍不是 true-live autonomy。
+**當前焦點（2026-05-15）**：W3 is partially complete but not sign-offable：P0 W3-1 / W3-2 remain blocked on `ncyu`，W3-3 / W3-4 / W3-5 are done，W3-6 remains in progress。`P1-WA4B-INSERT-1` is closed by commit `83afb318` after `feature_baseline_writer_cron.sh` restored 646 active feature baseline rows across 19 symbols and standalone `[67]` PASSed。Step 5b restored A4-C diagnostic producer evidence (`[57]` PASS; all-source NO_SIGNAL improved to 95.63%) but Stage 1 demo micro-canary remains blocked because A4-C Stage 0R is still GATE-RED and `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` unless a future PM/operator waiver changes that。Sprint N+2 P2 packet is cleared。仍不是 true-live autonomy。
 
 **關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 三角 audit ✅ + MAG-084 sign-off ✅ 2026-05-11 → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
