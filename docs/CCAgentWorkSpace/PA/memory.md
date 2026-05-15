@@ -3487,3 +3487,56 @@ PG fills 直查證據：
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v2_final.md`
 **Mirror path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/Operator/2026-05-11--lg_3_spec_v2_final.md`
+
+---
+
+## 2026-05-15 Close-Maker-First Refactor — PA 技術驗證 + spec outline
+
+**Trigger**: 主會話派工 — 3 輪第三方對抗審核 + DB / 代碼核驗收斂後，要 PA 對 close-maker-first refactor 做完整技術驗證 + 起草 spec outline。
+
+**Deliverable**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md` (~1000 行內，已含 13 章節 spec outline + state machine + whitelist + LOC 估算)
+
+**核心 finding**:
+
+1. **close 路徑寫 `None` 是治理決策，不是技術限制**：
+   - `commands.rs:792-797` 註釋「Close path stays Market (EDGE-P2-3 Phase 1a entry-only scope)」白紙黑字標明是 Phase 1a scope-limiting
+   - `OrderDispatchRequest` 結構已含 `order_type/limit_price/time_in_force/maker_timeout_ms` 4 個字段
+   - 下游 `dispatch.rs:508-538` 已 typed `OrderType::Limit if eq_ignore_ascii_case("limit")`、tif/limit_price forward 完整、reduce_only=true 已加
+   - `PendingOrder` 結構 mirror 4 字段（dispatch.rs:475-497）
+   - `pending_sweep::classify_pending_sweep` 不分 is_close 只看 `time_in_force == PostOnly` + `maker_timeout_ms`（pending_sweep.rs:53-76）
+
+2. **1B-4.2 完全無依賴**：`resting_orders.rs` MODULE_NOTE 行 4-23 明示是 paper-only infrastructure。Exchange close maker 走 dispatch.rs → Bybit REST → WS event，與 paper resting queue 正交。NOT BLOCKED-BY-1B-4.2。
+
+3. **Whitelist 8 + keep market 7+**：
+   - ✅ maker: grid_close_{short,long} / bb_mean_revert / ma_reverse_cross / pctb_revert / bw_squeeze / phys_lock_gate4_giveback / phys_lock_gate4_stale_roc_neg
+   - ❌ keep market: risk_close:HARD STOP / TRAILING STOP / TIME STOP / fast_track* / halt_session* / cost_edge_ratio / DRAWDOWN + bb_breakout 內部 `trailing_stop`（與 risk envelope TRAILING STOP 同 keyword 但屬策略決策；建議仍 keep market — chandelier fire 時價已破線）
+
+4. **compute_close_limit_price() 設計推薦 Option C**：反向 delegate `compute_post_only_price(!is_close_long, ...)` 重用 production-tested code（G7-09c Phase 1 已驗 rejection 100% → 0%）；per-reason buffer_ticks 容納變體（grid=1, phys_lock_g4=2, bw_squeeze=1）
+
+5. **State machine 4 race 設計**：
+   - pending close + 新 trigger → **fast-escalate**（cancel pending maker → market re-dispatch）
+   - maker timeout → MakerTimeoutCancel 既有 + 新 PendingOrderEvent::CloseMakerTimeoutFallback → market re-dispatch
+   - reject (PostOnlyCross) → 直接 market（不重 quote）
+   - reject (TooManyPending) → 直接 market + 5min global maker pause
+
+6. **reject_cooldown 跨 entry/close 污染**（**真實 bug**）：grid_trading/signal.rs:152-158 per-symbol cooldown 不分 entry/close side，entry reject 會凍住同 symbol close maker。spec 必拆 reject_cooldown_entry / reject_cooldown_close。
+
+**Risk 評級**:
+- HIGH ×2: dispatch 點白名單分類器、bb_breakout trailing_stop 歧義
+- MEDIUM ×2: reject_cooldown cross-side 污染、rate-limit 競爭 (NEEDS-PROBE)
+- MEDIUM ×1: state machine pending close fast-escalate
+- LOW ×2: test assert 影響、1B-4.2 依賴（無）
+
+**代碼影響 ~985 LOC**: Rust ~575 / TOML ~20 / Tests ~400 / Healthcheck ~120。3-5 E1 並行 7-9 E1-day。
+
+**Verdict**: **READY-FOR-SPEC**（with 1 NEEDS-PROBE on rate-limit cancel; 0 BLOCKED-BY-1B-4.2）
+
+**架構教訓 13**: **「entry-only scope」comment 是 governance signal，不是技術 ceiling**。Phase 1a 故意只開 entry 是 phased rollout 風險控制（先驗 maker plumbing 在開倉路徑 OK 再擴 close），不是 close path 缺技術能力。判讀類似 `// X-only scope` / `// stays Market` 一律先 grep 下游 plumbing 是否真斷，**事實上 dispatch.rs 與 pending_sweep 早就完整支援 maker close**，僅缺接電線。教訓：PA 必查上下游 IPC chain 而非只看頂層 hard-code。
+
+**架構教訓 14**: **resting_orders.rs vs exchange path 是正交設計**，不是 layered。Paper-only 文件命名（`paper_state/resting_orders.rs`）+ MODULE_NOTE 明示「Paper-only infrastructure for PostOnly limit orders that must wait for a future tick」清楚 — exchange close maker 不經此模組，完全走 Bybit REST API + WS。判讀「Phase 1B-4.2 是否阻塞」一律先讀模組 MODULE_NOTE 邊界，不要先預設「同 Phase 編號 → 必同 dependency」。
+
+**架構教訓 15**: **reason string 同 keyword 跨 source 歧義是真實設計陷阱**。bb_breakout 內 chandelier `trailing_stop`（mod.rs:910）vs risk envelope `risk_close:TRAILING STOP: ...`（risk_checks）共用同 word；前者策略決策、後者風控強平。白名單必須在 trigger_tag 完整 prefix 上 match，不能 substring 搜尋 keyword。E2 必加 grep guard：`trigger_tag.contains("trailing_stop") && !trigger_tag.starts_with("risk_close:")` 判定為策略 trailing_stop。
+
+**Confidence**: HIGH for §1 已驗代碼事實 + §3 whitelist + §4 compute_close_limit_price 設計 + §6 1B-4.2 無依賴 + §7 spec outline；MEDIUM for rate-limit NEEDS-PROBE + state machine fast-escalate + bb_breakout trailing_stop 裁決；LOW for 0 unverified hypothesis（皆有 grep / 直讀代碼支撐）
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md`

@@ -100,6 +100,7 @@ v32 W-AUDIT-8b review + Stage 0R design:
 - `[55]` is source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; `[67]` is restored to PASS after feature baseline apply; `[4]` phys lock and `[Xb]` triangulation are PASS after `7108035d`.
 - V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
 - Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
+- **EDGE-P2-3 Phase 1b close-maker-first refactor SPEC DRAFT 2026-05-15**: PM/PA/FA 3-agent verdict 收齊（APPROVED-CONDITIONAL × 2 + READY-FOR-SPEC × 1）。Spec `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` + AMD draft `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`。**Queue Sprint N+2 P1 backlog**（非 W3 scope-in）。8 maker-first whitelist（grid_close_short/long + bb_mean_revert + phys_lock_gate4_giveback/stale_roc_neg + ma_reverse_cross + bw_squeeze + pctb_revert）/ N keep-market（HARD/TRAILING/TIME/DYNAMIC STOP + TAKE PROFIT + COST EDGE + bybit_sync + operator override + shutdown + bb_breakout 內部 trailing_stop 等）。**IMPL 4 prereqs**: ✅ PA spec / ⏳ AMD 經 QC+FA+BB+MIT 4-agent adversarial review / ⏳ P0-EDGE-1 closed + W-AUDIT-8b Stage 0R pass + W-AUDIT-8a C1 BB/MIT sign-off / ⏳ 強制工作鏈 PA→E1→E2→E4→QA→PM。phys_lock live 啟用 DEFER 至 Phase 2b 後另開 PR。
 
 ---
 
@@ -137,6 +138,7 @@ v32 W-AUDIT-8b review + Stage 0R design:
 | 22 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 review | ⛔ **DEFER** Sprint N+4-N+6 (1 sprint) | A3 建議 13→15 tab。 |
 | 23 | `W-AUDIT-9` Graduated Canary Foundation IMPL | alpha-bearing | E1 (5 active + 1 stand-by 並行) | ✅ **T1-T7 DONE Sprint N+0 closure 2026-05-10** (HEAD `b6ed4975`)；W5-E1-A CANARY-STAGE-CRITERIA-1 ✅ DONE D+0 (commit `6529e37e` +2441 LOC) + V089 SQL seed deployed；W5-E1-C DYNAMIC-UNBLOCK ✅ DONE D+0 (commit `d17d7863` +1700 LOC) + V090 deployed；**Stage 1 paper cohort FROZEN 2026-05-15** | AMD-2026-05-15-01 rebases stage semantics: paper Stage 1 disabled; Stage 0R replay preflight + Stage 1 demo micro-canary gate replace old paper entry path. |
 | 24 | `W-AUDIT-10` (R-5) Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec → E1 IMPL | ⛔ **DEFER** 中期 (1-2 sprint) | CI gate spec drift > 7d auto-fail + module/table lifecycle header + 自動抽 SCRIPT_INDEX/SPEC_REGISTER。 |
+| 25 | `EDGE-P2-3 Phase 1b` Close-Maker-First Refactor | alpha-neutral (fee 優化) | PA spec ✅ → AMD-2026-05-15-02 draft ✅ → QC+FA+BB+MIT 4-agent review → 三閘 → 工作鏈 IMPL | 🟡 **SPEC + AMD DRAFT DONE 2026-05-15**, queued Sprint N+2 P1 | Close path 按 exit_reason 白名單分流：8 maker-first + N keep-market（含真風控/帳戶風控/operator override/shutdown）。Spec: `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`；AMD: `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`；PM/PA/FA verdict reports at `docs/CCAgentWorkSpace/{PM,PA,FA}/workspace/reports/2026-05-15--close_maker_first_*verdict.md`。預計 985 LOC / 3-5 worktree 並行 / 7-9 E1-day。 |
 
 ### §4.1.1 Completed Sprint Ledgers Archived
 
@@ -362,6 +364,12 @@ active work starts at §10 / §11.2 / §11.3.
 | `P1-EDGE-1..2` | 3 | ma_crossover/grid blocked_symbols 已 frozen + funding_arb 14d audit 2026-05-16 | 維持 freeze + 2026-05-16 audit |
 | `P1-LG-5` | 4 | LG-5 reviewer maturity watch | source active; audit-row health |
 | `P1-FAKE-1` / `P1-OPENCLAW-3/6/7` / `P1-AGENT-OBS-1` / `P1-AGENT-RUNTIME-1` / `P1-DATA-4` / `P1-REPLAY-1/2` | DONE | （詳細歷史見 git history `e7d58774`）| |
+| `P1-MA-KAMA-FALLBACK-GATE` | 2 | MA KAMA fallback：`debug!` → `warn!` + skip entry when KAMA unavailable | PM 2026-05-15 scope-in W3-6 by-the-way（30 分鐘獨立修復）；當前 [strategy_impl.rs:146-156](rust/openclaw_engine/src/strategies/ma_crossover/strategy_impl.rs#L146) KAMA 缺值時靜默退化為 SMA(20) vs SMA(20) 永不交叉，無外部信號；不依賴 EDGE-P2-3 Phase 1b spec |
+| `P1-MAKER-FILL-RATE-BASELINE` | 2 | Empirical maker fill rate baseline 查（submitted vs filled）| 不依賴 spec；從 order events / paper_state log 計 entry maker submitted vs filled 比例 + 取消率 + max latency；為 close-maker-first savings 估計提供事實基礎 |
+| `P1-EDGE-P2-3-PH1B-AMD-REVIEW` | 3 | AMD-2026-05-15-02 4-agent adversarial review（QC + FA + BB + MIT 並行）| Phase 1b IMPL 啟動條件 #2；review 完才能解 IMPL gate |
+| `P1-FILLS-MAKER-CLOSE-AUDIT-MIGRATION` | 4 | V### migration：`trading.fills.details` 新增 4 audit 欄位（close_maker_attempt / close_maker_fallback_reason / close_initial_limit_price / close_final_fill_price）+ healthcheck `check_close_maker_fill_rate` + `check_close_maker_fallback_audit` | F-FA-1（FA verdict）；Phase 1b IMPL 前必出 |
+| `P1-EDGE-P2-3-PH1B-PORTFOLIO-EXPOSURE` | 4 | 確認 portfolio_var/correlation gate 用 request_qty 而非 filled_qty 計 effective exposure | F-FA-2（FA verdict）；§二 #16 CONDITIONAL；Phase 1b IMPL 前 verify |
+| `P1-EDGE-P2-3-PH1B-LINEAGE-GUARD` | 4 | 新 close audit 欄位不走 spine lineage 通道的 guard | F-FA-3（FA verdict）；保持 W-C Caveat 2 不變式 |
 
 ### §11.4 P0-MICRO-PROFIT — 微利根因治本路徑（2026-05-11 QC audit 拍板）
 
@@ -506,7 +514,16 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **W-AUDIT-8a spec**: `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` (commit `c13c811e`)
 - **AMD-2026-05-09-02** (5 P0-DECISION-AUDIT closure): `srv/docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md`
 - **AMD-2026-05-09-03** (Graduated Canary Default): `srv/docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md` (commit `b1891023`)
-- **ADR-0015** openclaw_core sunset / **ADR-0017** scanner authority retirement / **ADR-0018** funding_arb retire / **ADR-0020** Layer 2 manual+supervisor-only
+- **AMD-2026-05-15-01** (Canary Rebase Replay Preflight + Demo Micro-Canary): `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`
+- **AMD-2026-05-15-02 DRAFT** (EDGE-P2-3 Phase 1b Close-Maker-First): `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
+- **EDGE-P2-3 Phase 1b spec**: `srv/docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- **W-AUDIT-8b Funding Skew Directional spec v0.2**: `srv/docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`
+- **ADR-0015** openclaw_core sunset / **ADR-0017** scanner authority retirement / **ADR-0018** funding_arb retire / **ADR-0020** Layer 2 manual+supervisor-only / **ADR-0022** strategist cap
+
+### Close-Maker-First 3-agent Verdicts (2026-05-15)
+- **PM verdict**: `srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--close_maker_first_pm_verdict.md` (APPROVED-CONDITIONAL，scope-in Sprint N+2 P1)
+- **PA verdict + spec outline**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md` (READY-FOR-SPEC，0 BLOCKED-BY-1B-4.2，~985 LOC)
+- **FA verdict + AC**: `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-15--close_maker_first_fa_verdict.md` (APPROVED-CONDITIONAL，5 conditions + 5 missing keep-market reasons)
 
 ### Adversarial Verification
 - **v3 PM Sign-off summary**: `srv/2026-05-09--audit_fix_verification_v3_summary.md`
