@@ -325,7 +325,7 @@ class RiskViewClient:
             )
         return resp if isinstance(resp, dict) else {}
 
-    async def unhalt_session(self) -> dict[str, Any]:
+    async def unhalt_session(self, engine: str | None = None) -> dict[str, Any]:
         """
         Clear Rust-side session_halted + paper_paused via `resume_paper` IPC.
         Replaces the Python-era PAPER_STORE.mutate() path. After 1C-3-D the
@@ -337,7 +337,8 @@ class RiskViewClient:
         if self._ipc is None:
             logger.warning("unhalt_session skipped — no IPC client")
             return {}
-        resp = await self._ipc.call("resume_paper")
+        params = {"engine": engine} if engine else None
+        resp = await self._ipc.call("resume_paper", params)
         await self.refresh_runtime_status()
         return resp if isinstance(resp, dict) else {}
 
@@ -432,4 +433,3 @@ class RiskViewClient:
         )
         await self.refresh_runtime_status()
         return resp if isinstance(resp, dict) else {}
-

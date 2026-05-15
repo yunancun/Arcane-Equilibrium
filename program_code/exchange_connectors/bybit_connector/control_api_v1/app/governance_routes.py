@@ -49,6 +49,13 @@ from pydantic import BaseModel, Field
 import hmac
 import html
 
+from .live_halt_recovery import (
+    LIVE_HALT_REQUEST_ID,
+    approve_live_halt_recovery,
+    build_live_halt_recovery_request,
+    is_live_halt_recovery_request,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -222,6 +229,48 @@ def _require_operator_role(actor: Any) -> None:
             _sanitize_log(actor.actor_id),
         )
         raise HTTPException(status_code=403, detail="Operator role required")
+
+
+def _record_live_halt_recovery_audit(hub: Any, who: str, result: dict[str, Any]) -> None:
+    """Fail-soft audit for operator-approved Live halt recovery."""
+    if hub is None or getattr(hub, "_change_audit_log", None) is None:
+        logger.warning(
+            "live_halt_recovery: change_audit_log unavailable — operator=%s",
+            _sanitize_log(who),
+        )
+        return
+
+    try:
+        from .change_audit_log import ChangeType
+
+        hub._change_audit_log.record_change(
+            change_type=ChangeType.STATE_CHANGE,
+            who=who,
+            what="Live halt recovery approved (engine=live)",
+            reason="operator approved live risk reset before signed auth renewal",
+            old_value={
+                "request_id": result.get("request_id"),
+                "status": "live_halted",
+                "snapshot": (result.get("request") or {}).get("evidence", {}),
+            },
+            new_value={
+                "status": result.get("status"),
+                "reset": result.get("reset"),
+                "offline_reset": result.get("offline_reset"),
+                "unhalt": result.get("unhalt"),
+                "next_step": result.get("next_step"),
+            },
+            affected_components=[
+                "live_halt",
+                "paper_state:live",
+                "paper_state:live_demo",
+                "trading.paper_state_checkpoint",
+                "live_authorization",
+            ],
+            auto_approve=True,
+        )
+    except Exception as exc:
+        logger.warning("live_halt_recovery: change_audit_log write failed: %s", exc)
 
 
 def _sanitize_string(s: str, max_len: int = 500) -> str:
@@ -1093,10 +1142,16 @@ def get_pending_recovery_requests(
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
     try:
-        if hub._recovery_gate is None:
-            return GovernanceResponse.success(data=[], message="recovery_pending_empty")
+        pending = []
+        if hub._recovery_gate is not None:
+            pending = hub._recovery_gate.get_pending_requests()
 
-        pending = hub._recovery_gate.get_pending_requests()
+        live_halt_request = build_live_halt_recovery_request()
+        if live_halt_request is not None:
+            existing_ids = {req.get("request_id") or req.get("id") for req in pending}
+            if LIVE_HALT_REQUEST_ID not in existing_ids:
+                pending = [live_halt_request, *pending]
+
         return GovernanceResponse.success(data=pending, message="recovery_pending_list")
     except Exception as e:
         logger.error("Error getting pending recovery requests: %s", e)
@@ -1104,7 +1159,7 @@ def get_pending_recovery_requests(
 
 
 @governance_router.post("/recovery/{request_id}/approve")
-def approve_recovery_request(
+async def approve_recovery_request(
     request_id: str,
     actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
@@ -1124,6 +1179,19 @@ def approve_recovery_request(
     try:
         # SECURITY FIX #1: Require Operator role
         _require_operator_role(actor)
+
+        if is_live_halt_recovery_request(request_id):
+            result = await approve_live_halt_recovery(str(actor.actor_id))
+            _record_live_halt_recovery_audit(hub, str(actor.actor_id), result)
+            logger.info(
+                "Live halt recovery approved by %s: %s",
+                _sanitize_log(actor.actor_id),
+                request_id,
+            )
+            return GovernanceResponse.success(
+                data=result,
+                message="live_halt_recovery_approved",
+            )
 
         if hub._recovery_gate is None:
             return GovernanceResponse.error(
