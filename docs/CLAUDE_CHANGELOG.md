@@ -1,7 +1,7 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-15（passive healthcheck 7108035d active-plan sync）
+> 最後更新：2026-05-15（passive healthcheck 7108035d active-plan sync v1.2）
 
 ### Passive Healthcheck 7108035d Active-Plan Sync — 2026-05-15
 
@@ -16,6 +16,8 @@ pipeline_triangulation` semantics.
 - `TODO.md` records the full healthcheck summary: 67 checks = 55 PASS / 11 WARN
   / 1 FAIL, with `[4]` and `[Xb]` PASS and `[67] feature_baseline_readiness`
   as the only hard FAIL.
+- The same full run keeps `[55]` as `WARN_REAL_FILL_PROPAGATION_PARTIAL`
+  (`24/138` real-fill reports), so the Stage 1 demo canary block remains.
 
 **Verification**: `trade-core` full `passive_wait_healthcheck.py` run via the
 canonical wrapper, no `--check` filter, log

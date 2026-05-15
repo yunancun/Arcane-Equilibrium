@@ -17,7 +17,8 @@ Only hard FAIL:
 - `[67] feature_baseline_readiness`: active `observability.feature_baselines`
   rows are 0. Keep `P1-WA4B-INSERT-1` active.
 
-Warnings needing attention: `[40]`, `[55]`, `[59]`, `[20]`, `[45]`.
+Warnings needing attention: `[40]`, `[55]` (`24/138` real-fill reports),
+`[59]`, `[20]`, `[45]`.
 Other WARNs are advisory/sample-maturity watches.
 
 No rebuild, restart, DB mutation, live auth mutation, or strategy/risk change.

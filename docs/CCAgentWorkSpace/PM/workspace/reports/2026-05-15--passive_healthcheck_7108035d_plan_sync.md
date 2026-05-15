@@ -36,7 +36,7 @@ Only hard FAIL:
 Attention WARNs:
 
 - `[40]` realized edge is still negative.
-- `[55]` real-fill propagation remains partial.
+- `[55]` real-fill propagation remains partial (`24/138` real-fill reports).
 - `[59]` H0 acceptance is quiet for demo and missing the live_demo snapshot.
 - `[20]` H-state gateway stub shape regressed.
 - `[45]` pricing binding still uses weak source/age evidence.

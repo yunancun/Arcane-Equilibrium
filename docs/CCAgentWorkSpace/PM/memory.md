@@ -2197,3 +2197,20 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - Verification: `git diff --check` PASS; `python3 -m pytest tests/structure/test_docs_readme_index_static.py -q` = 5 passed.
 - Boundary: docs-only; no `active-plan.md`, runtime code, live auth, rebuild, restart, or deploy.
 - Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--todo_v22_cleanup.md`.
+
+## 2026-05-15 Passive Healthcheck 7108035d Plan Sync
+
+- Full `trade-core` passive healthcheck wrapper run with no `--check` filter
+  completed from `2026-05-15T12:25:51Z`; result was 67 checks = 55 PASS /
+  11 WARN / 1 FAIL.
+- `[4] phys_lock_runtime` and `[Xb] pipeline_triangulation` PASS after
+  `7108035d`; these are no longer active healthcheck blockers.
+- Sole FAIL is `[67] feature_baseline_readiness`: active
+  `observability.feature_baselines=0`; keep `P1-WA4B-INSERT-1` active until
+  the apply path populates active 34-dim baselines.
+- `[55]` remains `WARN_REAL_FILL_PROPAGATION_PARTIAL` with `24/138` real-fill
+  reports, so Stage 1 demo remains blocked without future green Stage 0R plus
+  `[55]` PASS/waiver.
+- Reports:
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--passive_healthcheck_7108035d_plan_sync.md`
+  and `docs/CCAgentWorkSpace/Operator/2026-05-15--passive_healthcheck_7108035d_plan_sync.md`.
