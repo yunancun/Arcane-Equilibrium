@@ -10,6 +10,8 @@ A4-C should be archived from the active promotion path now.
 
 It may remain as a diagnostic cross-asset panel / feature source, but it should not consume the next alpha implementation slot and must not request Stage 1 Demo micro-canary.
 
+2026-05-15 RCA final addendum: `P1-A4C-RCA-1` is closed as **no revive hypothesis found** after QC/MIT review. Do not open `P1-A4C-REV-1` or rerun the same BTC 1m return + xcorr feature shape. Future reopen requires a materially new predictive variable, not threshold loosening.
+
 ## Basis
 
 Stage 0R Step 5b after diagnostic producer restoration still returned `eligible_for_demo_canary=false`.
@@ -32,6 +34,15 @@ The A4-C spec already defined the archive rule:
 - if N=60 R² also < 0.04, archive the A4-C path
 
 Step 5b has N=60 R² `0.0009`, which is not close to the minimum predictive threshold. Threshold loosening would be selection pressure without evidence of predictive power.
+
+The final read-only RCA strengthened this verdict:
+
+- 7d RCA rows: `6,713`
+- pooled `avg_net_bps=-1.0013`
+- `PSR(0)=0.1904`
+- `DSR(K=95)=0.0000`
+- R²(60/120/300)=`0.0004/0.0000/0.0042`
+- best finite threshold probe X=5/Y=0.20: `+1.4739 bps`, below revive/promotion bands
 
 ## What Remains Useful
 

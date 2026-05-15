@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-05-15 21:53 CEST
+- closed `P1-A4C-RCA-1` after QC(default) + MIT(default) both rejected a new preregistered A4-C revive hypothesis
+- kept A4-C diagnostic-only; did not open `P1-A4C-REV-1` or authorize a same-feature Stage 0R rerun
+- W-AUDIT-8a C1 60s smoke passed as `SMOKE_PASS_NOT_C1_PROOF`; started 24h isolated `allLiquidation.BTCUSDT` proof on `trade-core`, PID `4100789`, log `/tmp/openclaw/audit/liquidation_topic_probe/nohup_20260515T195309Z.log`
+- next alpha lane is W-AUDIT-8b Funding Skew QC/MIT/BB review + Stage 0R replay design while C1 runs
+- no production WS topic revival, parser/writer restoration, DB write, rebuild/restart, auth renewal, paper/demo launch, risk/sizing/config mutation, or live action
+
 2026-05-15 21:50 CEST
 - updated TODO to v30 as a source-only three-side sync checkpoint
 - removed active-doc stale sync wording (`TODO.md v28`, `81bc0862`) and aligned CLAUDE/active-plan/Codex memory/docs indexes
