@@ -23,7 +23,7 @@ v21 cleanup archive:
 - Step 3 A4-C update: **DONE 2026-05-15**. Spec v1.4 + W2 report CLI/tooling rebased to Stage 0R diagnostic output (`eligible_for_demo_canary=true/false`); legacy `promote_n2` compatibility field remains non-promotional and false after AMD-2026-05-15-01.
 - Step 4 update: **GATED 2026-05-15**. `[55]` fill evidence is visible (`chains_with_real_fill_report=24`, `bad_report_quality=0`, `bad_report_value_quality=0`) but status is `WARN_REAL_FILL_PROPAGATION_PARTIAL` because 24/138 is below the 50% partial threshold. Demo canary launch remains blocked until `[55]` reaches PASS or PM/operator explicitly accepts this WARN as a micro-canary waiver.
 - Step 5a update: **GATE-RED 2026-05-15**. Stage 0R rerun on `trade-core` at Linux repo head `eb181d70` using `sql/queries/w2_btc_alt_lead_lag_counterfactual.sql` fetched 4,417 rows over 7d. Mandatory metrics failed: pooled normal-signal `n=122`, `avg_net_bps=-3.5570`, `t=-1.5345`, `PSR(0)=0.0542`, `DSR(K=95)=0.0000`, block-bootstrap CI `[-3.9919, -1.2380]`, pooled R²(60/120/300)=`0.0004/0.0000/0.0017`, and no per-symbol `eligible_for_demo_canary=true`. Source-tier sanity: legacy `cross_asset_btc_lead_lag` panel rows=619; diagnostic source rows=12 snapshots / 84 expanded rows / 0 non-zero expected_dir at check time. No Stage 1 demo cohort selected. Evidence report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--stage0r_preflight_verification.md`.
-- Passive healthcheck update: **FAIL 2026-05-15 12:45 UTC**. Full unfiltered `trade-core` run at commit `7108035d` returned 67 checks = 55 PASS / 11 WARN / 1 FAIL. `[4] phys_lock_runtime` PASS (`exit_features` phys_lock 24h=1 / 7d=109) and `[Xb] pipeline_triangulation` PASS (close-fill-linked 15/15/15; `rejected_governance_raw` diagnostic-only), confirming the `7108035d` fixes. Only hard FAIL is `[67] feature_baseline_readiness` (`active feature_baselines=0`), so `P1-WA4B-INSERT-1` remains active. WARNs needing attention: `[40]` negative realized edge, `[55]` partial real-fill propagation, `[59]` H0 acceptance quiet/missing live_demo snapshot, `[20]` H-state stub shape regression, `[45]` pricing source/age weakness. Remaining WARNs are advisory/sample-maturity watches (`[41]`, `[42b]`, `[42c]`, `[48]`, `[51]`, `[11]`).
+- Passive healthcheck update: **FAIL 2026-05-15 12:45 UTC**. Full unfiltered `trade-core` run at commit `7108035d` returned 67 checks = 55 PASS / 11 WARN / 1 FAIL. `[4] phys_lock_runtime` PASS (`exit_features` phys_lock 24h=1 / 7d=109) and `[Xb] pipeline_triangulation` PASS (close-fill-linked 15/15/15; `rejected_governance_raw` diagnostic-only), confirming the `7108035d` fixes. Only hard FAIL was `[67] feature_baseline_readiness` (`active feature_baselines=0`), which opened `P1-WA4B-INSERT-1`; the follow-up below closed it. WARNs needing attention: `[40]` negative realized edge, `[55]` partial real-fill propagation, `[59]` H0 acceptance quiet/missing live_demo snapshot, `[20]` H-state stub shape regression, `[45]` pricing source/age weakness. Remaining WARNs are advisory/sample-maturity watches (`[41]`, `[42b]`, `[42c]`, `[48]`, `[51]`, `[11]`).
 - P1-WA4B-INSERT-1 update: **DONE 2026-05-15 13:13 UTC / 15:13 Europe-Madrid**. Ran the canonical W-AUDIT-4b apply wrapper on `trade-core`: `OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/tmp/openclaw bash helper_scripts/cron/feature_baseline_writer_cron.sh`. Root cause was operational absence, not DDL: schema existed, source `trading.decision_context_snapshots` had 3,341,214 dry-run samples, but no cron entry/log and `observability.feature_baselines` had 0 active rows. Apply wrote 646 rows; active baselines now cover 19 symbols × 34 feature names. Standalone `[67] feature_baseline_readiness` PASSes with `active_rows=646 active_symbols=19 feature_names=34/34 online_latest_rows=43 vector_dim_min=34 vector_dim_max=34`. Drift events remain gated by configured burn-in.
 
 ---
@@ -149,8 +149,8 @@ Current sign-off deltas only:
   demo canary remains blocked until PASS or explicit PM/operator waiver.
 - ⏳ **A-group alpha-source invariant**: `declared_alpha_sources()` vs real
   logic re-check remains deferred until new alpha candidates land.
-- 🟡 **W-AUDIT-4b corrected scope** remains active via §11.2 retained
-  tables/views/drop scope.
+- 🟡 **W-AUDIT-4b corrected scope** remains active via §11.2 remaining
+  retained tables/views/drop scope; `P1-WA4B-INSERT-1` is completed.
 - ✅ W-AUDIT-3b runtime smoke, F-08 cron fire, and
   `P0-MIT-LABEL-CLOSE-TAG-1` writer fix are completed; residual edge risk is
   tracked by `P0-EDGE-1`.
@@ -279,12 +279,17 @@ active work starts at §10 / §11.2 / §11.3.
 
 | ID | Object | Corrected class | Owner | Notes |
 |---|---|---|---|---|
-| `P1-WA4B-INSERT-1` | `observability.feature_baselines` | retained INSERT table | ✅ DONE 2026-05-15 | W-AUDIT-4b env-gated apply path ran on `trade-core` via `helper_scripts/cron/feature_baseline_writer_cron.sh`; restored 646 active rows = 19 symbols × 34 features from `trading.decision_context_snapshots` 34-dim feature vectors. Standalone `[67]` PASSes; no DDL change was needed. Cron schedule is still not installed unless operator chooses to add the documented crontab entry. |
 | `P1-WA4B-INSERT-2` | `learning.cost_edge_advisor_log` | retained INSERT table / row-growth confirmed | E1 | Writer live at `cost_edge_advisor/mod.rs`; 2026-05-14 runtime row-growth confirmed: 6091 rows. Current demo `[cost_edge].enabled=false`, so rows are `Disabled` / `ratio=NULL`; ratio-present rows require a separate config decision. |
 | `P1-WA4B-INSERT-3` | `observability.drift_events` | retained INSERT table / readiness gated | E1 | Writer exists in `drift_detector.rs` and is spawned in `tasks.rs`; it depends on active `feature_baselines` and the configured ADWIN burn-in (default 30d). Do not remove burn-in without operator approval. |
 | `P1-WA4B-VIEW-1` | `learning.mlde_edge_training_rows` | companion VIEW | E1/MIT | Read-only projection, not an INSERT path. Keep contract under ML training-data healthchecks. |
 | `P1-WA4B-VIEW-2` | `learning.scorer_training_features` | companion VIEW | E1/MIT | Read-only projection, not an INSERT path. Full unbounded counts are expensive; use bounded/metadata probes. |
 | `P1-WA4B-DROP-1` | `learning.scorer_predictions` | dropped / no-DDL target | E1/MIT | Dropped by V069; no producer wiring target unless a future spec recreates it. |
+
+### §11.2.1 Completed W-AUDIT-4b P1 Items
+
+| ID | Completed at | Evidence |
+|---|---|---|
+| `P1-WA4B-INSERT-1` | ✅ DONE 2026-05-15 13:13 UTC / 15:13 Europe-Madrid | Fixed by commit `83afb318` via `helper_scripts/cron/feature_baseline_writer_cron.sh` on `trade-core`; restored 646 active `observability.feature_baselines` rows covering 19 symbols × 34 feature names. Standalone `[67] feature_baseline_readiness` now PASSes with `active_rows=646`, `active_symbols=19`, `feature_names=34/34`, and 34-dim online vectors. |
 
 ### §11.3 P1 — Other Active
 
