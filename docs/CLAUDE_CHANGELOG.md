@@ -23,6 +23,10 @@ touching runtime, config, auth, DB, paper, demo, or live execution.
   finite threshold probe both remain below revive/promotion bands.
 - Final RCA addendum: QC/MIT closed `P1-A4C-RCA-1` no-revive; `P1-A4C-REV-1`
   is not opened and A4-C remains diagnostic-only.
+- W-AUDIT-8b review/design addendum: QC/MIT/BB conditionally approved Funding
+  Skew for Stage 0R replay design only; spec advanced to v0.2 with explicit
+  K/DSR/PBO, 30m primary horizon, raw panel joins, and funding attribution
+  excluded.
 - Updated TODO/CLAUDE/active-plan/Codex memory/docs indexes to reflect the new
   alpha order.
 

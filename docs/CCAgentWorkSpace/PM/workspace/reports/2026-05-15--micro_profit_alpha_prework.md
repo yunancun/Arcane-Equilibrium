@@ -39,7 +39,7 @@ Boundary:
 - This is not retired `funding_arb`.
 - It uses funding as a cross-sectional crowding signal.
 - Positive funding payment cannot count as edge until funding settlement attribution is first-class and MIT signs the ledger join.
-- Next step is QC/MIT/BB review plus Stage 0R replay design, not implementation.
+- QC/MIT/BB review has since conditionally approved Stage 0R replay design only. Next step is a read-only replay query/report packet, not strategy implementation.
 
 ## 3. A4-C Revise-Or-Archive
 
@@ -84,5 +84,5 @@ Updated:
 PM SIGN-OFF: CONDITIONAL
 
 Condition: C1 remains blocked until the running 24h isolated proof passes and
-BB/MIT sign off; 8b remains spec-only until QC/MIT/BB review and Stage 0R
-replay design.
+BB/MIT sign off; 8b remains design-only until a read-only Stage 0R replay
+query/report packet is implemented and reviewed.
