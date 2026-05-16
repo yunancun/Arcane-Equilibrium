@@ -54,7 +54,7 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-16 Wave 1-4 + WP-13 leftover closed; deploy pending）
+## 三、真實狀態全景（2026-05-16 Wave 1-4 + WP-13 leftover deployed）
 
 本節只保留當前活躍狀態。歷史長敘述移到 `docs/CLAUDE_CHANGELOG.md`、
 `docs/archive/`、`docs/CCAgentWorkSpace/*/workspace/reports/` 和 `TODO.md`。
@@ -65,10 +65,10 @@
 | 項 | 目前事實 |
 |---|---|
 | Current state sources | `TODO.md` v35 + PM reports `2026-05-15--stage0r_preflight_verification.md` / `2026-05-15--stage0r_preflight_step5b.md` / `2026-05-15--stage0r_oi_confirmed_5m_preflight.md` / `2026-05-15--feature_baseline_restore.md` / `2026-05-15--p1_healthcheck_55_invariant.md` / `2026-05-15--p1_intent_freeze_27_post_grace_closure.md` / `2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md` / `2026-05-15--micro_profit_alpha_prework.md` / `2026-05-15--todo_v30_three_side_sync.md` / `2026-05-15--a4c_rca_final_and_c1_proof_start.md` / `2026-05-15--w_audit_8b_review_stage0r_design.md` / `2026-05-16--v35_three_side_sync_rebuild.md` + direct `trade-core` read-only checks below。 |
-| Runtime host | Linux `trade-core`；watchdog 2026-05-15 13:24 UTC：`engine_alive=true`，demo alive age=5.1s，live alive age=3.3s，paper alive=false age=10329.4s（disabled）。 |
-| Runtime env | 2026-05-15 13:26 UTC engine env：`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_ENABLE_PAPER=0`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
+| Runtime host | Linux `trade-core`；post-v35 rebuild watchdog 2026-05-16 01:00 UTC：`engine_alive=true`，demo fresh (`age=5.7s`)，live inactive (`age=28916.4s`) due signed auth absence，paper pipeline disabled by env; fresh paper marker is `paper_state.disabled=true`, not active Paper trading。 |
+| Runtime env | 2026-05-16 01:00 UTC engine env：`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_ENABLE_PAPER=0`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
-| Engine status | Runtime binary code line remains rebuilt `7b33ab2e` before v35 deploy; Mac source has closed Round 4 WP-13 leftover at `a7cb517f`, while Linux `trade-core` fetched origin and was behind before v35 sync. Signed live authorization is absent; true-live remains blocked. **⚠️ DEPLOY GAP**: Wave 2-4 plus WP-13 leftover include Rust source changes (`grid_helpers.rs` WP-03 OU sigma + `bybit_rest_client.rs` WP-10 110017 + `grid_trading/*` BB-MF-3 + `main.rs` / `main_boot_tasks.rs` / `strategist_scheduler/*` WP-13 + `evaluate.rs` WP-04 TODO + Python WP-04/06/08 + WP-11 test fix), but runtime binary is not yet rebuilt; source/test is closed and `--rebuild --keep-auth` is required after three-side source sync. |
+| Engine status | Mac/origin/Linux are synced at `5f6f3edf`. `trade-core` rebuilt and restarted v35 via `PATH=$HOME/.cargo/bin:$PATH bash helper_scripts/restart_all.sh --rebuild --keep-auth` on 2026-05-16; engine PID `69581`, API PID `69674`. Signed live authorization is absent and `--keep-auth` preserved that absence; no auth renewal was performed and true-live remains blocked. Wave 2-4 plus WP-13 leftover Rust runtime changes are now deployed. |
 | Paper engine | GATE-RED + disabled：`OPENCLAW_ENABLE_PAPER=0`，paper pipeline dead by design；waiting `ncyu` decision before any non-promotion diagnostic reopen。 |
 
 ### W-C / MAG-082
@@ -455,7 +455,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-05-16）**：12-agent audit Wave 1-4 source/test work is closed, and Round 4 WP-13 leftover P1 is source/test closed at `a7cb517f`（demo reconciler + strategist scheduler + edge reload all read current `DemoCmdSenderSlot` snapshots）。Mac verification passed `cargo check --release -p openclaw_engine`, `tune_cmd_snapshot` 2/2, `edge_reload_tests` 16/16, `--lib` 2908/0/1 after socket-permission escalated rerun, and `--bin openclaw-engine` 62/0。`P1-WA4B-INSERT-1` / `[67]` and `P1-INTENT-FREEZE-27` remain closed from 2026-05-15。A4-C remains archived/no-revive; Stage 1 demo micro-canary remains blocked by alpha gates。W-AUDIT-8a C1 is **blocked again**: the isolated `allLiquidation.BTCUSDT` 24h proof ended `FAIL_CONNECTION` after `17055.2s/86400s`, so production revival remains blocked until a new full-duration BB/MIT-signed proof。W-AUDIT-8b Funding Skew spec v0.2 review/design remains read-only Stage 0R query/report next。Pre-v35 runtime binary remains `7b33ab2e`; v35 contains Rust runtime changes and therefore needs three-side sync + `--rebuild --keep-auth`。Replay-first validation remains default; still not true-live autonomy。
+**當前焦點（2026-05-16）**：12-agent audit Wave 1-4 source/test work is closed, and Round 4 WP-13 leftover P1 is source/test closed + deployed at `a7cb517f` / sync head `5f6f3edf`（demo reconciler + strategist scheduler + edge reload all read current `DemoCmdSenderSlot` snapshots）。Mac verification passed `cargo check --release -p openclaw_engine`, `tune_cmd_snapshot` 2/2, `edge_reload_tests` 16/16, `--lib` 2908/0/1 after socket-permission escalated rerun, and `--bin openclaw-engine` 62/0。`trade-core` rebuild/restart succeeded with engine PID `69581`, API PID `69674`, demo fresh, paper disabled, and live inactive because signed auth is absent。`P1-WA4B-INSERT-1` / `[67]` and `P1-INTENT-FREEZE-27` remain closed from 2026-05-15。A4-C remains archived/no-revive; Stage 1 demo micro-canary remains blocked by alpha gates。W-AUDIT-8a C1 is **blocked again**: the isolated `allLiquidation.BTCUSDT` 24h proof ended `FAIL_CONNECTION` after `17055.2s/86400s`, so production revival remains blocked until a new full-duration BB/MIT-signed proof。W-AUDIT-8b Funding Skew spec v0.2 review/design remains read-only Stage 0R query/report next。Replay-first validation remains default; still not true-live autonomy。
 
 **關鍵路徑**：`W-C WINDOW_PASS ✅ 2026-05-11 → MAG-083 三角 audit ✅ + MAG-084 sign-off ✅ 2026-05-11 → W-AUDIT-1 docs/governance DONE → W-AUDIT-2 security IMPL DONE → W-AUDIT-3 runtime/fake-live alignment → W-AUDIT-4..7 + edge/data + LG-2/3/4 + ops gates → proposal/mobile relay only after explicit approval → true live`
 
