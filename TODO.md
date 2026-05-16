@@ -412,16 +412,18 @@ active work starts at §10 / §11.2 / §11.3.
 | **Track E3** | PA / E1 | **Maker fill rate empirical baseline 查** | None；read-only 查詢 | 1 hour | ✅ DONE `b98706d5` |
 | **Track BB1** | BB | **字典手冊 6 處更新** | None；BB 工作 | 1-2 hour | ✅ DONE Wave 3b `28c571c7` |
 
-**Dispatch order recommendation**（Wave 2a patch 後更新）：
+**Dispatch order recommendation**（Wave 1.5b patch 後更新 2026-05-15）：
 1. ✅ **Wave 1（並行 5 worktree）**：A1（PA） + A3（PA） + A4（PA） + E2（E1, 30min） + E3（PA/E1, 1h） — DONE
 2. ✅ **Wave 1.5**：spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3 finding（fee revision + race fallback gap + portfolio MAINTAIN + writer gap explicit）
 3. ✅ **Wave 2a**：A2 PA V094 spec finalize (`9b1117a0` + `14a561ec` + AMD v0.3.1 `c9234ecf`) — F-FA-1 ✅ DONE → IMPL Prereq 5 全 RESOLVED
-4. 🔄 **Wave 2b**：E1 (E1 P0 reject_cooldown entry/close 拆分；BB-MF-3) — pending dispatch
-5. ✅ **Wave 3a**：BB short re-review on AMD v0.3 + spec v1.2 (`7b0a8e8c`) — DONE
-6. 🔄 **Wave 3b**：4-agent short re-review on AMD v0.3.1 + spec v1.2 + V094 spec — pending dispatch
-7. 🔄 **Wave 3c**：BB1（BB 字典 6 處更新）— pending dispatch
-8. 🔄 **Wave 3.5（pre-Wave 4）**：PA 補一輪 Linux V81/V91/V92/V93 backlog migration apply 檢查（per V094 spec §4.4 caveat）
-9. **Wave 1+1.5+2a+2b+3a+3b+3c+3.5 done → IMPL Prereq 5+6 解 + AMD prereq 2 解（patch land）→ 等 3-gate → IMPL kickoff Wave 4**
+4. ✅ **Wave 2b**：E1 P0 reject_cooldown entry/close 拆分（BB-MF-3） — `27f02a07`（sibling）
+5. ✅ **Wave 2c-2**：E4 reject_cooldown split regression — `8321b4b7`（sibling）
+6. 🔄 **Wave 2c-1**：E2 reject_cooldown review — pending verify
+7. ✅ **Wave 3a**：4-agent short re-review on AMD v0.3 + spec v1.2 — **4/4 verdict APPROVED**（QC 1 NEW MUST + 1 NEW SHOULD / FA 4 cosmetic / BB 全 land 無新 risk / MIT 2 P3 advisory）
+8. ✅ **Wave 1.5b**：spec v1.3 (`c0d34fcb`) + AMD v0.4 (`2f55d053`) — Wave 3a re-review consolidation patch（QC-MF-3 AC-5/AC-11 數學矛盾修 + QC-SF-6 AC-18 Wilson-CI + §12.2 framing + 4 cosmetic）— **IMPL Prereq 條件 2 SATISFIED**
+9. ✅ **Wave 3b**：BB1 字典手冊 6 處更新 — `28c571c7`（sibling）
+10. 🔄 **Wave 3.5（pre-Wave 4）**：PA 補一輪 Linux V81/V91/V92/V93 backlog migration apply 檢查（per V094 spec §4.4 caveat）
+11. **Wave 1+1.5+1.5b+2a+2b+2c+3a+3b+3.5 done → IMPL Prereq 5+6 解 + 條件 2 ✅ → 等 3-gate → IMPL kickoff Wave 4**
 
 **IMPL kickoff（3-gate 解除後）**：
 - PA finalize IMPL plan → E1 並行 5 worktree（A/B/C/D/E per PA verdict v0.2）→ E2 review → E4 regression → QA → PM sign-off
