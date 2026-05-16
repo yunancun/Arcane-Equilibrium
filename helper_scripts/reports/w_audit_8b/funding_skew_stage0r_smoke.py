@@ -4,13 +4,28 @@
 from __future__ import annotations
 
 import sys
+import json
 from typing import Any
 
 try:
-    from .funding_skew_stage0r_metrics import CandidateKey, _signal_rows, compute_stage0r, grid_cell_count
+    from .funding_skew_stage0r_metrics import (
+        CandidateKey,
+        _signal_rows,
+        compute_stage0r,
+        compute_stage0r_sweep,
+        grid_cell_count,
+        wilson_ci_95,
+    )
     from .funding_skew_stage0r_report import fetch_k_prior
 except ImportError:
-    from funding_skew_stage0r_metrics import CandidateKey, _signal_rows, compute_stage0r, grid_cell_count  # type: ignore
+    from funding_skew_stage0r_metrics import (  # type: ignore
+        CandidateKey,
+        _signal_rows,
+        compute_stage0r,
+        compute_stage0r_sweep,
+        grid_cell_count,
+        wilson_ci_95,
+    )
     from funding_skew_stage0r_report import fetch_k_prior  # type: ignore
 
 
@@ -167,6 +182,173 @@ def _check_mixed_source_fail_closed(failures: list[str]) -> None:
         failures.append("mixed source mode did not fail closed")
 
 
+def _check_single_z_backward_compat(failures: list[str]) -> None:
+    rows = build_fixture()
+    default_packet = compute_stage0r(rows, k_prior=69, cost_bps=12.0)
+    explicit_none_packet = compute_stage0r(rows, k_prior=69, cost_bps=12.0, z_grid=None)
+    if default_packet != explicit_none_packet:
+        failures.append("compute_stage0r(z_grid=None) changed default v0.2 packet")
+    if default_packet.get("strategy_variant") != "funding_skew_directional.v0_2":
+        failures.append(f"non-sweep strategy variant changed: {default_packet.get('strategy_variant')}")
+    if default_packet.get("k_new_min") != 4050:
+        failures.append(f"non-sweep K_NEW_MIN changed: {default_packet.get('k_new_min')}")
+    for key in (
+        "sweep_per_z_cell",
+        "sweep_per_symbol",
+        "best_primary_cell_per_z_branch",
+        "sweep_cross_z_comparison",
+    ):
+        if key in default_packet:
+            failures.append(f"non-sweep packet unexpectedly contains sweep key: {key}")
+
+
+def _check_wilson_ci_bench(failures: list[str]) -> None:
+    cases = (
+        (20, 4, 0.082, 0.422, 0.010),
+        (100, 50, 0.404, 0.596, 0.005),
+        (10, 2, 0.057, 0.510, 0.010),
+    )
+    for n, n_eff, exp_lower, exp_upper, tol in cases:
+        ci = wilson_ci_95(n, n_eff)
+        if ci is None:
+            failures.append(f"wilson_ci_95({n}, {n_eff}) returned None")
+            continue
+        lower, upper = ci
+        if abs(lower - exp_lower) > tol or abs(upper - exp_upper) > tol:
+            failures.append(
+                f"wilson_ci_95({n}, {n_eff})=({lower:.4f}, {upper:.4f}) "
+                f"expected ({exp_lower}, {exp_upper}) tol={tol}"
+            )
+    if wilson_ci_95(0, 0) is not None:
+        failures.append("wilson_ci_95(0, 0) should be None")
+    zero_eff = wilson_ci_95(10, 0)
+    if zero_eff is None:
+        failures.append("wilson_ci_95(10, 0) should not be None")
+    elif zero_eff[0] != 0.0:
+        failures.append(f"wilson_ci_95(10, 0) lower should clamp to 0.0, got {zero_eff[0]}")
+
+
+def _check_sweep_mode(failures: list[str]) -> None:
+    rows = build_fixture()
+    packet = compute_stage0r_sweep(rows, k_prior=0, cost_bps=12.0, z_cells=(1.0, 1.2, 1.5, 2.0))
+    meta = packet.get("sweep_meta") or {}
+    if meta.get("z_cells") != [1.0, 1.2, 1.5, 2.0]:
+        failures.append(f"sweep z_cells mismatch: {meta}")
+    if meta.get("k_new_min_v0_3") != 5400 or packet.get("k_new_min") != 5400:
+        failures.append(f"sweep K_NEW_MIN mismatch: packet={packet.get('k_new_min')} meta={meta}")
+    if packet.get("k_total") != 5400:
+        failures.append(f"sweep k_total mismatch: {packet.get('k_total')}")
+    if packet.get("strategy_variant") != "funding_skew_directional.v0_3":
+        failures.append(f"sweep strategy_variant mismatch: {packet.get('strategy_variant')}")
+    if len(packet.get("sweep_per_z_cell", {})) != 4:
+        failures.append(f"sweep_per_z_cell len mismatch: {len(packet.get('sweep_per_z_cell', {}))}")
+    if len(packet.get("sweep_per_symbol", [])) != 4 * 2 * 3:
+        failures.append(f"sweep_per_symbol len mismatch: {len(packet.get('sweep_per_symbol', []))}")
+    if len(packet.get("best_primary_cell_per_z_branch", [])) != 4 * 2:
+        failures.append(
+            "best_primary_cell_per_z_branch len mismatch: "
+            f"{len(packet.get('best_primary_cell_per_z_branch', []))}"
+        )
+    if len(packet.get("sweep_cross_z_comparison", [])) != 2 * 3:
+        failures.append(
+            f"sweep_cross_z_comparison len mismatch: {len(packet.get('sweep_cross_z_comparison', []))}"
+        )
+    for key in ("alpha_source_id", "pooled_primary", "best_primary_cell", "panel_metadata"):
+        if key not in packet:
+            failures.append(f"missing v0.2 compatibility key in sweep packet: {key}")
+    try:
+        decoded = json.loads(json.dumps(packet, sort_keys=True))
+    except TypeError as exc:
+        failures.append(f"sweep packet JSON round-trip failed: {exc}")
+        return
+    for key in (
+        "sweep_per_z_cell",
+        "sweep_per_symbol",
+        "best_primary_cell_per_z_branch",
+        "sweep_cross_z_comparison",
+    ):
+        if key not in decoded:
+            failures.append(f"JSON round-trip missing sweep key: {key}")
+    try:
+        relaxed_long = packet["sweep_per_z_cell"]["z_relaxed_z_eq_1_0"]["by_branch"]["crowded_long_fade"]
+    except (KeyError, TypeError):
+        failures.append("missing relaxed crowded_long_fade branch sweep summary")
+        return
+    if relaxed_long.get("funding_cycles_distinct") is None:
+        failures.append("sweep_per_z_cell missing real funding_cycles_distinct")
+    if relaxed_long.get("max_day_share") is None:
+        failures.append("sweep_per_z_cell missing real max_day_share")
+    if relaxed_long.get("max_funding_cycle_share") is None:
+        failures.append("sweep_per_z_cell missing real max_funding_cycle_share")
+    reasons = relaxed_long.get("eligibility_fail_reasons") or []
+    expected_reasons = {
+        "per-symbol n_eff floor failed",
+        "funding cycles < 14",
+        "single-day share > 25%",
+        "single funding-cycle share > 25%",
+    }
+    missing_reasons = expected_reasons.difference(set(reasons))
+    if missing_reasons:
+        failures.append(f"sweep branch missing expected fail reasons: {sorted(missing_reasons)}")
+    symbol_gate = relaxed_long.get("symbol_gate") or {}
+    if int(symbol_gate.get("symbol_n_eff_floor_fail_count") or 0) <= 0:
+        failures.append(f"per-symbol n_eff floor did not feed sweep branch gate: {symbol_gate}")
+    if relaxed_long.get("promotion_ready"):
+        failures.append("promotion_ready stayed true despite per-symbol/cycle/day floor failures")
+    per_symbol_rows = packet.get("sweep_per_symbol", [])
+    if not per_symbol_rows or not all("symbol_n_eff_floor_pass" in row for row in per_symbol_rows):
+        failures.append("sweep_per_symbol missing symbol_n_eff_floor_pass fields")
+    if not any(not row.get("symbol_n_eff_floor_pass") for row in per_symbol_rows):
+        failures.append("sweep_per_symbol did not expose any symbol floor failure in smoke fixture")
+    equal_n_eff_row = next(
+        (
+            row
+            for row in packet.get("sweep_cross_z_comparison", [])
+            if row.get("branch") == "crowded_long_fade" and row.get("symbol") == "BTCUSDT"
+        ),
+        None,
+    )
+    if not isinstance(equal_n_eff_row, dict):
+        failures.append("missing cross-z row for BTCUSDT crowded_long_fade")
+    elif equal_n_eff_row.get("monotonic_drop_in_n_eff") is not False:
+        failures.append("strict monotonic check did not return false for equal adjacent n_eff")
+    best_rows = packet.get("best_primary_cell_per_z_branch", [])
+    if not best_rows or not all("branch_funding_cycles_distinct" in row for row in best_rows):
+        failures.append("best_primary_cell_per_z_branch missing branch-specific cycle fields")
+
+
+def _check_4z_fixture(failures: list[str]) -> None:
+    rows = build_fixture()
+    for row in rows:
+        if row["symbol"] == "SOLUSDT":
+            row["funding_zscore_25sym"] = 1.1
+            row["funding_percentile_25sym"] = 0.95
+            row["oi_delta_15m_pct"] = 2.5
+            row["prior_5m_return_bps"] = -1.0
+            row["fwd_return_30m_bps"] = -25.0
+    packet = compute_stage0r_sweep(rows, k_prior=0, cost_bps=12.0, z_cells=(1.0, 1.2, 1.5, 2.0))
+    per_z = packet.get("sweep_per_z_cell", {})
+    required = (
+        "z_relaxed_z_eq_1_0",
+        "z_moderate_z_eq_1_2",
+        "z_baseline_z_eq_1_5",
+        "z_strict_z_eq_2_0",
+    )
+    for z_cell_id in required:
+        if z_cell_id not in per_z:
+            failures.append(f"missing z cell in 4-z fixture: {z_cell_id}")
+    try:
+        relaxed_long = per_z["z_relaxed_z_eq_1_0"]["by_branch"]["crowded_long_fade"]["n_total"]
+        moderate_long = per_z["z_moderate_z_eq_1_2"]["by_branch"]["crowded_long_fade"]["n_total"]
+    except (KeyError, TypeError):
+        failures.append("4-z fixture missing branch n_total")
+        return
+    if not int(relaxed_long) > int(moderate_long):
+        failures.append(
+            f"expected z=1.0 relaxed long triggers > z=1.2, got {relaxed_long} <= {moderate_long}"
+        )
+
+
 def main() -> int:
     packet = compute_stage0r(build_fixture(), k_prior=69, cost_bps=12.0)
     failures: list[str] = []
@@ -214,6 +396,10 @@ def main() -> int:
     _check_k_prior_modes(failures)
     _check_settlement_previous_boundary(failures)
     _check_mixed_source_fail_closed(failures)
+    _check_single_z_backward_compat(failures)
+    _check_wilson_ci_bench(failures)
+    _check_sweep_mode(failures)
+    _check_4z_fixture(failures)
     if failures:
         print("FAIL")
         for item in failures:
