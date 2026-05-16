@@ -176,7 +176,10 @@ def render_summary(packet: dict) -> str:
         f"funding_attribution_mode: {packet.get('funding_attribution_mode')}",
         f"source_mode: {packet.get('source_mode')}",
         f"symbols: {packet.get('symbol_count')} rows: {packet.get('row_count')}",
-        f"K_prior: {packet.get('k_prior')} K_new: {packet.get('k_new')} K_total: {packet.get('k_total')}",
+        (
+            f"K_prior: {packet.get('k_prior')} K_new: {packet.get('k_new')} "
+            f"K_new_actual: {packet.get('k_new_actual')} K_total: {packet.get('k_total')}"
+        ),
         f"K_prior_semantic: {json.dumps(packet.get('k_prior_semantic'), sort_keys=True)}",
         "",
         "## Verdict",
@@ -223,7 +226,7 @@ def main() -> int:
     parser.add_argument(
         "--k-prior-mode",
         choices=K_PRIOR_MODES,
-        default="funding-related",
+        default="strict-funding-skew",
         help="how to estimate comparable prior trials when --k-prior is not set",
     )
     parser.add_argument("--out", type=str, default=None, help="optional output path")

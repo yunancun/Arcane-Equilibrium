@@ -37,8 +37,11 @@ joined AS (
         oi.oi_delta_15m_pct::float8 AS oi_delta_15m_pct,
         oi.oi_delta_1h_pct::float8 AS oi_delta_1h_pct,
         oi.source_tier AS oi_source_tier,
+        f15.close_ts_ms AS close_15m_ts_ms,
         f15.close::float8 AS close_15m,
+        f30.close_ts_ms AS close_30m_ts_ms,
         f30.close::float8 AS close_30m,
+        f60.close_ts_ms AS close_60m_ts_ms,
         f60.close::float8 AS close_60m
     FROM bars b
     LEFT JOIN LATERAL (
@@ -57,33 +60,18 @@ joined AS (
         ORDER BY p.snapshot_ts_ms DESC
         LIMIT 1
     ) oi ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT close
-        FROM market.klines k
-        WHERE k.symbol = b.symbol
-          AND k.timeframe = '5m'
-          AND k.close_ts_ms >= b.signal_ts_ms + 900000
-        ORDER BY k.close_ts_ms ASC
-        LIMIT 1
-    ) f15 ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT close
-        FROM market.klines k
-        WHERE k.symbol = b.symbol
-          AND k.timeframe = '5m'
-          AND k.close_ts_ms >= b.signal_ts_ms + 1800000
-        ORDER BY k.close_ts_ms ASC
-        LIMIT 1
-    ) f30 ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT close
-        FROM market.klines k
-        WHERE k.symbol = b.symbol
-          AND k.timeframe = '5m'
-          AND k.close_ts_ms >= b.signal_ts_ms + 3600000
-        ORDER BY k.close_ts_ms ASC
-        LIMIT 1
-    ) f60 ON TRUE
+    LEFT JOIN market.klines f15
+        ON f15.symbol = b.symbol
+       AND f15.timeframe = '5m'
+       AND f15.close_ts_ms = b.signal_ts_ms + 900000
+    LEFT JOIN market.klines f30
+        ON f30.symbol = b.symbol
+       AND f30.timeframe = '5m'
+       AND f30.close_ts_ms = b.signal_ts_ms + 1800000
+    LEFT JOIN market.klines f60
+        ON f60.symbol = b.symbol
+       AND f60.timeframe = '5m'
+       AND f60.close_ts_ms = b.signal_ts_ms + 3600000
 ),
 stats AS (
     SELECT
@@ -133,8 +121,11 @@ SELECT
     oi_delta_15m_pct,
     oi_delta_1h_pct,
     oi_source_tier,
+    close_15m_ts_ms,
     CASE WHEN close_px > 0 AND close_15m IS NOT NULL THEN ((close_15m - close_px) / close_px) * 10000.0 ELSE NULL END AS fwd_return_15m_bps,
+    close_30m_ts_ms,
     CASE WHEN close_px > 0 AND close_30m IS NOT NULL THEN ((close_30m - close_px) / close_px) * 10000.0 ELSE NULL END AS fwd_return_30m_bps,
+    close_60m_ts_ms,
     CASE WHEN close_px > 0 AND close_60m IS NOT NULL THEN ((close_60m - close_px) / close_px) * 10000.0 ELSE NULL END AS fwd_return_60m_bps
 FROM ranked
 ORDER BY signal_ts_ms, symbol;

@@ -3,7 +3,8 @@
 ## 項目狀態快照（2026-05-16 W-AUDIT-8b Stage 0R）
 
 - Funding Skew Stage 0R tooling gap closure source/test done: report packet now emits panel metadata, per-symbol breakdown, settlement-window sensitivity, baseline lift, flat cost model/cost-edge ratio, 60m + 8h bootstrap, PBO metadata, and plateau check.
-- `--k-prior-mode` exposes `funding-related` / `strict-funding-skew` / `all`; this is tooling support, not MIT governance sign-off. Round 2 verdict still waits for panel >= 7d and QC/MIT/BB review.
+- Adversarial hardening after QC/E2/MIT/BB review: `K_new` is floored at 4050 with actual/min metadata, final default `--k-prior-mode` is `strict-funding-skew`, selected pooled/branch/symbol metrics use one fixed parameter family, settlement-window rows are excluded from eligibility but reported as sensitivity, mixed funding source modes fail closed, PBO uses day-block CSCV instead of unusable 7d embargo, and SQL forward returns require exact 15/30/60m horizons.
+- `--k-prior-mode` still exposes `funding-related` / `strict-funding-skew` / `all` for sensitivity; Round 2 verdict still waits for panel >= 7d and QC/MIT/BB review.
 - No demo/live/paper/config/auth/runtime mutation occurred.
 
 ## 項目狀態快照（2026-03-31）
@@ -256,6 +257,7 @@
 | 2026-05-15 | TODO v30 three-side source sync：移除 active docs 舊 `TODO.md v28` / `81bc0862` sync wording，記錄 source-only sync boundary；無 runtime/rebuild/auth/DB/demo/live 動作 | workspace/reports/2026-05-15--todo_v30_three_side_sync.md |
 | 2026-05-15 | A4-C RCA final + C1 proof start：QC/MIT close `P1-A4C-RCA-1` no-revive；`P1-A4C-REV-1` not opened；C1 60s smoke passed and 24h isolated `allLiquidation.BTCUSDT` proof started on `trade-core` PID `4100789` | workspace/reports/2026-05-15--a4c_rca_final_and_c1_proof_start.md |
 | 2026-05-15 | W-AUDIT-8b Funding Skew review/design：QC/MIT/BB conditional approve Stage 0R design only；spec v0.2 locks 30m primary, explicit K/DSR/PBO, raw panel as-of joins, funding attribution excluded, and BB funding interval/source-mode fields | workspace/reports/2026-05-15--w_audit_8b_review_stage0r_design.md |
+| 2026-05-16 | W-AUDIT-8b Stage 0R adversarial hardening：K_new floor 4050、strict K_prior default、fixed-parameter pooled stats、settlement exclusion、mixed-source fail-closed、day-block CSCV PBO、exact horizon SQL；tooling only, still waits panel >=7d + QC/MIT/BB Round 2 | workspace/reports/2026-05-16--w_audit_8b_adversarial_hardening.md |
 | 2026-05-10 | Live/Demo GUI 今日 PnL 口徑修正：確認 LiveDemo 今日 DB net 為 +1.578890，舊 GUI 約 -45.45 來自 session/lifetime 手續費 bucket 混入；新增 backend `net_pnl_today` 並讓 Live tab/console 側欄共用，補 Demo/Live endpoint contract tests；無 restart/rebuild | workspace/reports/2026-05-10--live_today_pnl_gui_fix.md |
 | 2026-05-09 | P0-V2-NEW-3 DSR/PBO evidence push: added real-return promotion evidence builder, Demo-only edge scheduler push, V079 strategy_trial_ledger/report columns, and fail-closed selection evidence handling; source/test only, runtime V079 apply/rebuild pending | workspace/reports/2026-05-09--p0_v2_new_3_dsr_pbo_evidence_push.md |
 | 2026-05-09 | P0-V2-NEW-1 Donchian leak-bias source/test closure: locked runtime IndicatorEngine snapshots to prior-bar Donchian and added bb_breakout 5m hard-gate regression so current-bar spikes cannot contaminate 5m demo evidence | workspace/reports/2026-05-09--p0_v2_new_1_donchian_leak_bias.md |

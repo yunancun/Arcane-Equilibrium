@@ -12,6 +12,7 @@ import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import combinations
 from statistics import NormalDist
 from typing import Iterable, Mapping, Sequence
 
@@ -24,6 +25,15 @@ PRIMARY_HORIZON = 30
 BRANCHES = ("crowded_long_fade", "crowded_short_squeeze")
 STRATEGY_VARIANT = "funding_skew_directional.v0_2"
 ALPHA_SOURCE_ID = "funding_skew_directional"
+MIN_STAGE0R_SYMBOLS = 25
+K_NEW_MIN = (
+    MIN_STAGE0R_SYMBOLS
+    * len(BRANCHES)
+    * len(Z_GRID)
+    * len(P_GRID)
+    * len(OI_GRID)
+    * len(HORIZONS)
+)
 
 WARN_AGE_MS = 60_000
 EXCLUDE_AGE_MS = 300_000
@@ -34,6 +44,8 @@ PSR_THRESHOLD = 0.95
 DSR_THRESHOLD = 0.95
 PBO_THRESHOLD = 0.20
 AVG_NET_FLOOR_BPS = 15.0
+BASELINE_LIFT_FLOOR_BPS = 0.0
+COST_EDGE_RATIO_MAX = 0.80
 POOLED_N_EFF_FLOOR = 300
 SYMBOL_N_EFF_FLOOR = 100
 BRANCH_N_EFF_FLOOR = 50
@@ -233,9 +245,7 @@ def _source_mode(rows: Sequence[Mapping[str, object]]) -> str:
         return "unknown"
     if len(modes) == 1:
         return next(iter(modes))
-    if modes.get("rest_settled", 0) > modes.get("ws_current", 0):
-        return "rest_settled"
-    return "ws_current"
+    return "mixed"
 
 
 def _panel_metadata(rows: Sequence[Mapping[str, object]], symbols: Sequence[str]) -> dict[str, object]:
@@ -312,6 +322,7 @@ def _signal_rows(
     *,
     key: CandidateKey,
     cost_bps: float,
+    funding_interval_min: int | None = None,
 ) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
     fwd_col = f"fwd_return_{key.horizon_min}m_bps"
@@ -353,9 +364,14 @@ def _signal_rows(
             continue
         gross = direction * fwd
         next_funding = _safe_int(row.get("next_funding_ms"))
+        interval_ms = funding_interval_min * 60_000 if funding_interval_min else None
+        previous_funding = next_funding - interval_ms if next_funding and interval_ms else None
         is_settlement_window = (
             next_funding is not None
             and abs(next_funding - signal_ts) <= SETTLEMENT_WINDOW_MS
+        ) or (
+            previous_funding is not None
+            and abs(signal_ts - previous_funding) <= SETTLEMENT_WINDOW_MS
         )
         out.append(
             {
@@ -363,6 +379,7 @@ def _signal_rows(
                 "net_bps": gross - cost_bps,
                 "gross_bps": gross,
                 "next_funding_ms": next_funding,
+                "previous_funding_ms": previous_funding,
                 "settlement_window": is_settlement_window,
             }
         )
@@ -375,6 +392,7 @@ def _baseline_signal_rows(
     branch: str,
     cost_bps: float,
     horizon_min: int = PRIMARY_HORIZON,
+    funding_interval_min: int | None = None,
 ) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
     fwd_col = f"fwd_return_{horizon_min}m_bps"
@@ -398,11 +416,24 @@ def _baseline_signal_rows(
         if direction == 0:
             continue
         gross = direction * fwd
+        next_funding = _safe_int(row.get("next_funding_ms"))
+        interval_ms = funding_interval_min * 60_000 if funding_interval_min else None
+        previous_funding = next_funding - interval_ms if next_funding and interval_ms else None
+        is_settlement_window = (
+            next_funding is not None
+            and abs(next_funding - signal_ts) <= SETTLEMENT_WINDOW_MS
+        ) or (
+            previous_funding is not None
+            and abs(signal_ts - previous_funding) <= SETTLEMENT_WINDOW_MS
+        )
         out.append(
             {
                 "signal_ts_ms": signal_ts,
                 "net_bps": gross - cost_bps,
                 "gross_bps": gross,
+                "next_funding_ms": next_funding,
+                "previous_funding_ms": previous_funding,
+                "settlement_window": is_settlement_window,
             }
         )
     return out
@@ -481,26 +512,34 @@ def _plateau_check(
     }
 
 
-def _pbo(candidates: Mapping[str, Mapping[str, float]], *, embargo_days: int = 7) -> dict[str, object]:
+def _pbo(candidates: Mapping[str, Mapping[str, float]], *, max_splits: int = 240) -> dict[str, object]:
     days = sorted({day for daily in candidates.values() for day in daily})
     candidate_keys = list(candidates)
     if len(days) < 4 or len(candidate_keys) < 10:
         return {
             "value": None,
-            "method": "purged_day_walk_forward",
-            "embargo_days": embargo_days,
+            "method": "day_block_cscv",
             "usable_splits": 0,
             "reason": "insufficient_days_or_candidates",
+            "day_count": len(days),
+            "candidate_count": len(candidate_keys),
         }
-    splits: list[tuple[set[str], set[str]]] = []
-    for split_idx in range(1, len(days) - 1):
-        left_end = max(0, split_idx - embargo_days)
-        right_start = min(len(days), split_idx + embargo_days)
-        left = set(days[:left_end])
-        right = set(days[right_start:])
-        if left and right:
-            splits.append((left, right))
-            splits.append((right, left))
+    train_size = len(days) // 2
+    combo_count = math.comb(len(days), train_size)
+    if combo_count <= max_splits:
+        combos = list(combinations(days, train_size))
+    else:
+        rng = random.Random(20260516)
+        seen: set[tuple[str, ...]] = set()
+        combos = []
+        attempts = 0
+        while len(combos) < max_splits and attempts < max_splits * 20:
+            train = tuple(sorted(rng.sample(days, train_size)))
+            if train not in seen:
+                seen.add(train)
+                combos.append(train)
+            attempts += 1
+    splits = [(set(train), set(days) - set(train)) for train in combos]
     bad = 0
     usable = 0
     for train_days, test_days in splits:
@@ -525,16 +564,22 @@ def _pbo(candidates: Mapping[str, Mapping[str, float]], *, embargo_days: int = 7
     if usable == 0:
         return {
             "value": None,
-            "method": "purged_day_walk_forward",
-            "embargo_days": embargo_days,
+            "method": "day_block_cscv",
             "usable_splits": 0,
-            "reason": "embargo_removed_all_usable_splits",
+            "reason": "no_usable_cscv_splits",
+            "day_count": len(days),
+            "candidate_count": len(candidate_keys),
+            "requested_splits": len(splits),
         }
     return {
         "value": bad / usable,
-        "method": "purged_day_walk_forward",
-        "embargo_days": embargo_days,
+        "method": "day_block_cscv",
         "usable_splits": usable,
+        "day_count": len(days),
+        "candidate_count": len(candidate_keys),
+        "requested_splits": len(splits),
+        "train_day_count": train_size,
+        "test_day_count": len(days) - train_size,
         "reason": None,
     }
 
@@ -551,7 +596,8 @@ def compute_stage0r(
         symbol = str(row.get("symbol") or "")
         if symbol:
             rows_by_symbol[symbol].append(row)
-    k_new = len(symbols) * len(BRANCHES) * len(Z_GRID) * len(P_GRID) * len(OI_GRID) * len(HORIZONS)
+    k_new_actual = len(symbols) * len(BRANCHES) * len(Z_GRID) * len(P_GRID) * len(OI_GRID) * len(HORIZONS)
+    k_new = max(K_NEW_MIN, k_new_actual)
     k_total = int(k_prior) + k_new
     intervals = _funding_interval_by_symbol(rows)
 
@@ -572,16 +618,13 @@ def compute_stage0r(
 
     cells: list[dict[str, object]] = []
     daily_for_pbo: dict[str, dict[str, float]] = {}
-    pooled_primary: list[float] = []
-    pooled_primary_gross: list[float] = []
-    pooled_primary_non_settlement: list[float] = []
-    branch_primary: dict[str, list[float]] = defaultdict(list)
-    per_symbol_primary: dict[str, dict[str, list[float]]] = {
-        symbol: {branch: [] for branch in BRANCHES} for symbol in symbols
-    }
-    per_symbol_primary_sigs: dict[str, list[dict[str, object]]] = defaultdict(list)
-    settlement_window_counts = Counter()
-    best_primary: dict[str, object] | None = None
+    pooled_by_param: dict[tuple[float, float, float, float, int], list[float]] = defaultdict(list)
+    pooled_all_by_param: dict[tuple[float, float, float, float, int], list[float]] = defaultdict(list)
+    pooled_gross_by_param: dict[tuple[float, float, float, float, int], list[float]] = defaultdict(list)
+    branch_by_param: dict[tuple[str, float, float, float, float, int], list[float]] = defaultdict(list)
+    per_symbol_by_param: dict[tuple[str, str, float, float, float, float, int], list[float]] = defaultdict(list)
+    per_symbol_sigs_by_param: dict[tuple[str, str, float, float, float, float, int], list[dict[str, object]]] = defaultdict(list)
+    settlement_counts_by_param: dict[tuple[float, float, float, float, int], Counter] = defaultdict(Counter)
 
     for symbol in symbols:
         for branch in BRANCHES:
@@ -590,7 +633,13 @@ def compute_stage0r(
                     for oi_min in OI_GRID:
                         for horizon in HORIZONS:
                             key = CandidateKey(symbol, branch, z_hi, p_hi, p_lo, oi_min, horizon)
-                            sigs = _signal_rows(rows_by_symbol[symbol], key=key, cost_bps=cost_bps)
+                            sigs_all = _signal_rows(
+                                rows_by_symbol[symbol],
+                                key=key,
+                                cost_bps=cost_bps,
+                                funding_interval_min=intervals.get(symbol),
+                            )
+                            sigs = [s for s in sigs_all if not bool(s.get("settlement_window"))]
                             values = [float(s["net_bps"]) for s in sigs]
                             gross_values = [float(s["gross_bps"]) for s in sigs]
                             n = len(values)
@@ -634,238 +683,430 @@ def compute_stage0r(
                                     day: statistics.mean(vals) for day, vals in by_day.items()
                                 }
                             if horizon == PRIMARY_HORIZON:
-                                pooled_primary.extend(values)
-                                pooled_primary_gross.extend(gross_values)
-                                non_settlement = [
-                                    float(s["net_bps"])
-                                    for s in sigs
-                                    if not bool(s.get("settlement_window"))
-                                ]
-                                pooled_primary_non_settlement.extend(non_settlement)
-                                settlement_window_counts["primary_signals"] += len(sigs)
-                                settlement_window_counts["primary_settlement_window_signals"] += sum(
-                                    1 for s in sigs if bool(s.get("settlement_window"))
+                                param_key = (z_hi, p_hi, p_lo, oi_min, horizon)
+                                branch_param_key = (branch, z_hi, p_hi, p_lo, oi_min, horizon)
+                                symbol_param_key = (symbol, branch, z_hi, p_hi, p_lo, oi_min, horizon)
+                                pooled_all_by_param[param_key].extend(
+                                    float(s["net_bps"]) for s in sigs_all
                                 )
-                                branch_primary[branch].extend(values)
-                                per_symbol_primary[symbol][branch].extend(values)
-                                per_symbol_primary_sigs[symbol].extend(sigs)
-                                if avg_net is not None and (
-                                    best_primary is None
-                                    or float(best_primary.get("avg_net_bps") or -1e18) < avg_net
-                                ):
-                                    best_primary = cell
+                                pooled_by_param[param_key].extend(values)
+                                pooled_gross_by_param[param_key].extend(gross_values)
+                                branch_by_param[branch_param_key].extend(values)
+                                per_symbol_by_param[symbol_param_key].extend(values)
+                                per_symbol_sigs_by_param[symbol_param_key].extend(sigs)
+                                settlement_counts_by_param[param_key]["primary_signals"] += len(sigs_all)
+                                settlement_counts_by_param[param_key][
+                                    "primary_settlement_window_signals"
+                                ] += sum(
+                                    1 for s in sigs_all if bool(s.get("settlement_window"))
+                                )
 
     pbo_meta = _pbo(daily_for_pbo)
     pbo = pbo_meta.get("value")
-    pooled = _summary_stats(
-        pooled_primary,
-        horizon_min=PRIMARY_HORIZON,
-        k_total=k_total,
-        include_bootstrap=True,
-    )
-    branch_summary = {
-        branch: {
-            "n": len(vals),
-            "n_eff": _n_eff(len(vals), PRIMARY_HORIZON),
-            "avg_net_bps": statistics.mean(vals) if vals else None,
-        }
-        for branch, vals in ((branch, branch_primary.get(branch, [])) for branch in BRANCHES)
-    }
-    per_symbol_breakdown = []
-    for symbol in symbols:
-        sigs = per_symbol_primary_sigs.get(symbol, [])
-        days = Counter(_day_bucket(int(s["signal_ts_ms"])) for s in sigs)
-        cycles = Counter(str(s.get("next_funding_ms")) for s in sigs if s.get("next_funding_ms"))
-        total_values = [
-            value
-            for branch in BRANCHES
-            for value in per_symbol_primary[symbol].get(branch, [])
-        ]
-        per_symbol_breakdown.append(
-            {
-                "symbol": symbol,
-                "n": len(total_values),
-                "n_eff": _n_eff(len(total_values), PRIMARY_HORIZON),
-                "avg_net_bps": statistics.mean(total_values) if total_values else None,
-                "funding_cycles": len(cycles),
-                "max_day_share": max(days.values()) / len(sigs) if sigs and days else 0.0,
-                "max_funding_cycle_share": max(cycles.values()) / len(sigs) if sigs and cycles else 0.0,
-                "branches": {
-                    branch: {
-                        "n": len(per_symbol_primary[symbol].get(branch, [])),
-                        "n_eff": _n_eff(
-                            len(per_symbol_primary[symbol].get(branch, [])),
-                            PRIMARY_HORIZON,
-                        ),
-                        "avg_net_bps": (
-                            statistics.mean(per_symbol_primary[symbol][branch])
-                            if per_symbol_primary[symbol].get(branch)
-                            else None
-                        ),
-                    }
-                    for branch in BRANCHES
-                },
-            }
-        )
-    non_settlement_summary = _summary_stats(
-        pooled_primary_non_settlement,
-        horizon_min=PRIMARY_HORIZON,
-        k_total=k_total,
-        include_bootstrap=False,
-    )
-    settlement_summary = {
-        "window_minutes": SETTLEMENT_WINDOW_MS // 60_000,
-        "primary_signals": settlement_window_counts.get("primary_signals", 0),
-        "primary_settlement_window_signals": settlement_window_counts.get(
-            "primary_settlement_window_signals",
-            0,
-        ),
-        "primary_settlement_window_share": (
-            settlement_window_counts.get("primary_settlement_window_signals", 0)
-            / settlement_window_counts.get("primary_signals", 1)
-            if settlement_window_counts.get("primary_signals", 0)
-            else 0.0
-        ),
-        "primary_excluding_settlement_window": non_settlement_summary,
-        "adverse_drag_sensitivity_bps": (
-            (
-                float(non_settlement_summary["avg_net_bps"])
-                - float(pooled["avg_net_bps"])
-            )
-            if non_settlement_summary.get("avg_net_bps") is not None
-            and pooled.get("avg_net_bps") is not None
-            else None
-        ),
-    }
+    source_mode = _source_mode(rows)
+    panel_metadata = _panel_metadata(rows, symbols)
 
-    baseline_by_branch: dict[str, dict[str, object]] = {}
-    baseline_values_all: list[float] = []
+    baseline_values_by_branch: dict[str, list[float]] = {}
+    baseline_all_values: list[float] = []
     for branch in BRANCHES:
-        baseline_sigs = [
-            sig
-            for symbol in symbols
-            for sig in _baseline_signal_rows(
+        branch_values: list[float] = []
+        for symbol in symbols:
+            baseline_sigs = _baseline_signal_rows(
                 rows_by_symbol[symbol],
                 branch=branch,
                 cost_bps=cost_bps,
+                funding_interval_min=intervals.get(symbol),
             )
-        ]
-        baseline_values = [float(sig["net_bps"]) for sig in baseline_sigs]
-        baseline_values_all.extend(baseline_values)
-        baseline_summary = _summary_stats(
-            baseline_values,
+            branch_values.extend(
+                float(sig["net_bps"])
+                for sig in baseline_sigs
+                if not bool(sig.get("settlement_window"))
+            )
+        baseline_values_by_branch[branch] = branch_values
+        baseline_all_values.extend(branch_values)
+    baseline_summary_by_branch = {
+        branch: _summary_stats(
+            values,
             horizon_min=PRIMARY_HORIZON,
             k_total=k_total,
             include_bootstrap=False,
         )
-        branch_avg = branch_summary.get(branch, {}).get("avg_net_bps")
-        baseline_avg = baseline_summary.get("avg_net_bps")
-        baseline_summary["lift_vs_stage0r_branch_bps"] = (
-            float(branch_avg) - float(baseline_avg)
-            if branch_avg is not None and baseline_avg is not None
-            else None
-        )
-        baseline_by_branch[branch] = baseline_summary
+        for branch, values in baseline_values_by_branch.items()
+    }
     baseline_all = _summary_stats(
-        baseline_values_all,
+        baseline_all_values,
         horizon_min=PRIMARY_HORIZON,
         k_total=k_total,
         include_bootstrap=False,
     )
-    baseline_lift = {
-        "baseline": "prior_5m_direction_without_funding_or_oi_confirmation",
-        "pooled_baseline": baseline_all,
-        "stage0r_minus_baseline_avg_net_bps": (
-            float(pooled["avg_net_bps"]) - float(baseline_all["avg_net_bps"])
-            if pooled.get("avg_net_bps") is not None
-            and baseline_all.get("avg_net_bps") is not None
-            else None
-        ),
-        "branches": baseline_by_branch,
-    }
 
-    cost_edge_ratio = (
-        abs(cost_bps) / abs(statistics.mean(pooled_primary_gross))
-        if pooled_primary_gross and statistics.mean(pooled_primary_gross) != 0
-        else None
+    def _param_key_from_cell(cell: Mapping[str, object]) -> tuple[float, float, float, float, int]:
+        return (
+            float(cell["z_hi"]),
+            float(cell["p_hi"]),
+            float(cell["p_lo"]),
+            float(cell["oi_min_pct"]),
+            PRIMARY_HORIZON,
+        )
+
+    def _ci_lower(value: object) -> float | None:
+        if isinstance(value, (list, tuple)) and value:
+            return _safe_float(value[0])
+        return None
+
+    def _build_artifacts(
+        cell: Mapping[str, object] | None,
+        *,
+        include_bootstrap: bool,
+    ) -> dict[str, object]:
+        if cell is None:
+            pooled_empty = _summary_stats(
+                [],
+                horizon_min=PRIMARY_HORIZON,
+                k_total=k_total,
+                include_bootstrap=include_bootstrap,
+            )
+            return {
+                "param_key": None,
+                "pooled_primary": pooled_empty,
+                "branch_summary": {
+                    branch: _summary_stats(
+                        [],
+                        horizon_min=PRIMARY_HORIZON,
+                        k_total=k_total,
+                        include_bootstrap=False,
+                    )
+                    for branch in BRANCHES
+                },
+                "per_symbol_breakdown": [],
+                "settlement_window": {
+                    "window_minutes": SETTLEMENT_WINDOW_MS // 60_000,
+                    "primary_signals": 0,
+                    "primary_settlement_window_signals": 0,
+                    "primary_settlement_window_share": 0.0,
+                    "eligibility_uses": "primary_excluding_settlement_window",
+                },
+                "baseline_lift": {
+                    "baseline": "prior_5m_direction_without_funding_or_oi_confirmation",
+                    "pooled_baseline": baseline_all,
+                    "stage0r_minus_baseline_avg_net_bps": None,
+                    "branches": baseline_summary_by_branch,
+                },
+                "execution_cost_model": {
+                    "mode": "flat_conservative_cost_bps",
+                    "cost_bps": cost_bps,
+                    "maker_share": None,
+                    "taker_share": None,
+                    "maker_taker_source": "not_available_in_stage0r_replay_rows",
+                    "cost_edge_ratio": None,
+                },
+                "plateau_check": _plateau_check(cells, None),
+            }
+
+        param_key = _param_key_from_cell(cell)
+        pooled_values = list(pooled_by_param.get(param_key, []))
+        pooled_all_values = list(pooled_all_by_param.get(param_key, []))
+        pooled_gross_values = list(pooled_gross_by_param.get(param_key, []))
+        pooled_summary = _summary_stats(
+            pooled_values,
+            horizon_min=PRIMARY_HORIZON,
+            k_total=k_total,
+            include_bootstrap=include_bootstrap,
+        )
+
+        branch_summary: dict[str, dict[str, object]] = {}
+        for branch in BRANCHES:
+            values = list(branch_by_param.get((branch, *param_key), []))
+            branch_summary[branch] = _summary_stats(
+                values,
+                horizon_min=PRIMARY_HORIZON,
+                k_total=k_total,
+                include_bootstrap=False,
+            )
+
+        per_symbol_breakdown = []
+        for symbol in symbols:
+            total_values: list[float] = []
+            total_sigs: list[dict[str, object]] = []
+            branch_details: dict[str, dict[str, object]] = {}
+            for branch in BRANCHES:
+                symbol_param_key = (symbol, branch, *param_key)
+                values = list(per_symbol_by_param.get(symbol_param_key, []))
+                sigs = list(per_symbol_sigs_by_param.get(symbol_param_key, []))
+                total_values.extend(values)
+                total_sigs.extend(sigs)
+                branch_details[branch] = _summary_stats(
+                    values,
+                    horizon_min=PRIMARY_HORIZON,
+                    include_bootstrap=False,
+                )
+            days = Counter(_day_bucket(int(s["signal_ts_ms"])) for s in total_sigs)
+            cycles = Counter(str(s.get("next_funding_ms")) for s in total_sigs if s.get("next_funding_ms"))
+            per_symbol_breakdown.append(
+                {
+                    "symbol": symbol,
+                    "n": len(total_values),
+                    "n_eff": _n_eff(len(total_values), PRIMARY_HORIZON),
+                    "avg_net_bps": statistics.mean(total_values) if total_values else None,
+                    "funding_cycles": len(cycles),
+                    "max_day_share": (
+                        max(days.values()) / len(total_sigs) if total_sigs and days else 0.0
+                    ),
+                    "max_funding_cycle_share": (
+                        max(cycles.values()) / len(total_sigs) if total_sigs and cycles else 0.0
+                    ),
+                    "funding_interval_min": intervals.get(symbol),
+                    "branches": branch_details,
+                }
+            )
+
+        settlement_counts = settlement_counts_by_param.get(param_key, Counter())
+        primary_signals = int(settlement_counts.get("primary_signals", 0))
+        primary_settlement = int(settlement_counts.get("primary_settlement_window_signals", 0))
+        including_settlement = _summary_stats(
+            pooled_all_values,
+            horizon_min=PRIMARY_HORIZON,
+            k_total=k_total,
+            include_bootstrap=False,
+        )
+        excluding_settlement = _summary_stats(
+            pooled_values,
+            horizon_min=PRIMARY_HORIZON,
+            k_total=k_total,
+            include_bootstrap=False,
+        )
+        settlement_summary = {
+            "window_minutes": SETTLEMENT_WINDOW_MS // 60_000,
+            "primary_signals": primary_signals,
+            "primary_settlement_window_signals": primary_settlement,
+            "primary_settlement_window_share": (
+                primary_settlement / primary_signals if primary_signals else 0.0
+            ),
+            "eligibility_uses": "primary_excluding_settlement_window",
+            "primary_including_settlement_window": including_settlement,
+            "primary_excluding_settlement_window": excluding_settlement,
+            "adverse_drag_sensitivity_bps": (
+                float(excluding_settlement["avg_net_bps"])
+                - float(including_settlement["avg_net_bps"])
+                if excluding_settlement.get("avg_net_bps") is not None
+                and including_settlement.get("avg_net_bps") is not None
+                else None
+            ),
+            "funding_interval_min_by_symbol": dict(intervals),
+            "funding_interval_source": "inferred_from_next_funding_ms",
+        }
+
+        baseline_by_branch: dict[str, dict[str, object]] = {}
+        for branch in BRANCHES:
+            baseline_summary = dict(baseline_summary_by_branch.get(branch, {}))
+            branch_avg = branch_summary.get(branch, {}).get("avg_net_bps")
+            baseline_avg = baseline_summary.get("avg_net_bps")
+            baseline_summary["lift_vs_stage0r_branch_bps"] = (
+                float(branch_avg) - float(baseline_avg)
+                if branch_avg is not None and baseline_avg is not None
+                else None
+            )
+            baseline_by_branch[branch] = baseline_summary
+        baseline_lift = {
+            "baseline": "prior_5m_direction_without_funding_or_oi_confirmation",
+            "pooled_baseline": baseline_all,
+            "stage0r_minus_baseline_avg_net_bps": (
+                float(pooled_summary["avg_net_bps"]) - float(baseline_all["avg_net_bps"])
+                if pooled_summary.get("avg_net_bps") is not None
+                and baseline_all.get("avg_net_bps") is not None
+                else None
+            ),
+            "branches": baseline_by_branch,
+        }
+
+        gross_mean = statistics.mean(pooled_gross_values) if pooled_gross_values else None
+        cost_edge_ratio = (
+            abs(cost_bps) / abs(gross_mean)
+            if gross_mean is not None and gross_mean != 0
+            else None
+        )
+        execution_cost_model = {
+            "mode": "flat_conservative_cost_bps",
+            "cost_bps": cost_bps,
+            "maker_share": None,
+            "taker_share": None,
+            "maker_taker_source": "not_available_in_stage0r_replay_rows",
+            "cost_edge_ratio": cost_edge_ratio,
+            "gross_edge_mean_bps": gross_mean,
+        }
+
+        return {
+            "param_key": param_key,
+            "pooled_primary": pooled_summary,
+            "branch_summary": branch_summary,
+            "per_symbol_breakdown": per_symbol_breakdown,
+            "settlement_window": settlement_summary,
+            "baseline_lift": baseline_lift,
+            "execution_cost_model": execution_cost_model,
+            "plateau_check": _plateau_check(cells, cell),
+        }
+
+    def _candidate_fail_reasons(
+        cell: Mapping[str, object] | None,
+        artifacts: Mapping[str, object],
+        *,
+        include_bootstrap: bool,
+    ) -> list[str]:
+        if cell is None:
+            return ["no primary-horizon signals"]
+
+        reasons: list[str] = []
+        pooled_summary = artifacts["pooled_primary"]  # type: ignore[index]
+        branch_summary = artifacts["branch_summary"]  # type: ignore[index]
+        baseline_lift = artifacts["baseline_lift"]  # type: ignore[index]
+        cost_model = artifacts["execution_cost_model"]  # type: ignore[index]
+        plateau = artifacts["plateau_check"]  # type: ignore[index]
+        selected_branch = str(cell["branch"])
+
+        if len(symbols) < MIN_STAGE0R_SYMBOLS:
+            reasons.append("symbol_count < 25")
+        if source_mode == "mixed":
+            reasons.append("mixed funding source modes")
+        elif source_mode == "unknown":
+            reasons.append("source_mode unknown")
+        if int(cell.get("n_eff") or 0) < SYMBOL_N_EFF_FLOOR:
+            reasons.append("symbol n_eff < 100")
+        if int(branch_summary.get(selected_branch, {}).get("n_eff", 0)) < BRANCH_N_EFF_FLOOR:
+            reasons.append("branch n_eff < 50")
+        if int(pooled_summary.get("n_eff", 0)) < POOLED_N_EFF_FLOOR:
+            reasons.append("pooled n_eff < 300")
+        if int(cell.get("funding_cycles") or 0) < MIN_FUNDING_CYCLES:
+            reasons.append("funding cycles < 14")
+        if cell.get("funding_interval_min") is None:
+            reasons.append("funding interval unavailable")
+        if float(cell.get("max_day_share") or 0.0) > MAX_DAY_OR_CYCLE_SHARE:
+            reasons.append("single-day share > 25%")
+        if float(cell.get("max_funding_cycle_share") or 0.0) > MAX_DAY_OR_CYCLE_SHARE:
+            reasons.append("single funding-cycle share > 25%")
+        avg_net = _safe_float(cell.get("avg_net_bps"))
+        if avg_net is None or avg_net < AVG_NET_FLOOR_BPS:
+            reasons.append("avg_net_bps < +15")
+        psr = _safe_float(cell.get("psr_0"))
+        if psr is None or psr < PSR_THRESHOLD:
+            reasons.append("PSR(0) < 0.95")
+        dsr = _safe_float(cell.get("dsr"))
+        if dsr is None or dsr < DSR_THRESHOLD:
+            reasons.append("DSR < 0.95")
+        pbo_value = _safe_float(pbo)
+        if pbo_value is None or pbo_value > PBO_THRESHOLD:
+            reasons.append("PBO missing or > 0.20")
+        if include_bootstrap:
+            lower_60m = _ci_lower(pooled_summary.get("bootstrap_ci_95_60m"))
+            lower_8h = _ci_lower(pooled_summary.get("bootstrap_ci_95_8h"))
+            if lower_60m is None or lower_60m <= 0:
+                reasons.append("pooled 60m bootstrap lower bound <= 0")
+            if lower_8h is None or lower_8h <= 0:
+                reasons.append("pooled 8h bootstrap lower bound <= 0")
+        if not bool(plateau.get("plateau_passed")):
+            reasons.append("plateau check failed")
+        baseline_delta = _safe_float(baseline_lift.get("stage0r_minus_baseline_avg_net_bps"))
+        if baseline_delta is None or baseline_delta <= BASELINE_LIFT_FLOOR_BPS:
+            reasons.append("baseline lift <= 0")
+        cost_edge_ratio = _safe_float(cost_model.get("cost_edge_ratio"))
+        if cost_edge_ratio is None or cost_edge_ratio >= COST_EDGE_RATIO_MAX:
+            reasons.append("cost_edge_ratio >= 0.80")
+        if int(pooled_summary.get("n") or 0) <= 0 or int(cell.get("n") or 0) <= 0:
+            reasons.append("no net values")
+        return reasons
+
+    primary_cells = [
+        c for c in cells if c["horizon_min"] == PRIMARY_HORIZON and c["avg_net_bps"] is not None
+    ]
+    ranked_candidates: list[dict[str, object]] = []
+    for cell in primary_cells:
+        cheap_artifacts = _build_artifacts(cell, include_bootstrap=False)
+        cheap_reasons = _candidate_fail_reasons(
+            cell,
+            cheap_artifacts,
+            include_bootstrap=False,
+        )
+        pooled_summary = cheap_artifacts["pooled_primary"]  # type: ignore[index]
+        branch_summary = cheap_artifacts["branch_summary"]  # type: ignore[index]
+        ranked_candidates.append(
+            {
+                "cell": cell,
+                "cheap_fail_reasons": cheap_reasons,
+                "cheap_fail_count": len(cheap_reasons),
+                "pooled_n_eff": int(pooled_summary.get("n_eff") or 0),
+                "pooled_avg_net_bps": pooled_summary.get("avg_net_bps"),
+                "branch_n_eff": int(
+                    branch_summary.get(str(cell["branch"]), {}).get("n_eff", 0)
+                ),
+            }
+        )
+    ranked_candidates.sort(
+        key=lambda item: (
+            int(item["cheap_fail_count"]),
+            -int(item["pooled_n_eff"]),
+            -int(item["branch_n_eff"]),
+            -float(item["cell"].get("avg_net_bps") or -1e18),  # type: ignore[union-attr]
+        )
     )
-    execution_cost_model = {
-        "mode": "flat_conservative_cost_bps",
-        "cost_bps": cost_bps,
-        "maker_share": None,
-        "taker_share": None,
-        "maker_taker_source": "not_available_in_stage0r_replay_rows",
-        "cost_edge_ratio": cost_edge_ratio,
-    }
-    plateau = _plateau_check(cells, best_primary)
 
-    eligible = False
-    reasons: list[str] = []
-    if best_primary is None:
-        reasons.append("no primary-horizon signals")
-    else:
-        best_values = _signal_rows(
-            rows_by_symbol[str(best_primary["symbol"])],
-            key=CandidateKey(
-                str(best_primary["symbol"]),
-                str(best_primary["branch"]),
-                float(best_primary["z_hi"]),
-                float(best_primary["p_hi"]),
-                float(best_primary["p_lo"]),
-                float(best_primary["oi_min_pct"]),
-                PRIMARY_HORIZON,
-            ),
-            cost_bps=cost_bps,
+    selected_cell: dict[str, object] | None = None
+    selected_artifacts = _build_artifacts(None, include_bootstrap=True)
+    reasons: list[str] = ["no primary-horizon signals"]
+    selection_basis = "no_primary_horizon_signals"
+
+    for item in ranked_candidates:
+        if item["cheap_fail_reasons"]:
+            break
+        cell = item["cell"]  # type: ignore[assignment]
+        final_artifacts = _build_artifacts(cell, include_bootstrap=True)  # type: ignore[arg-type]
+        final_reasons = _candidate_fail_reasons(
+            cell,  # type: ignore[arg-type]
+            final_artifacts,
+            include_bootstrap=True,
         )
-        net_values = [float(v["net_bps"]) for v in best_values]
-        pooled_ci = pooled.get("bootstrap_ci_95_60m")
-        lower_ci = (
-            pooled_ci[0]
-            if isinstance(pooled_ci, tuple)
-            else pooled_ci[0]
-            if isinstance(pooled_ci, list) and pooled_ci
-            else None
+        if not final_reasons:
+            selected_cell = dict(cell)  # type: ignore[arg-type]
+            selected_artifacts = final_artifacts
+            reasons = final_reasons
+            selection_basis = "eligible_candidate"
+            break
+
+    if selected_cell is None and ranked_candidates:
+        item = ranked_candidates[0]
+        cell = item["cell"]  # type: ignore[assignment]
+        selected_cell = dict(cell)  # type: ignore[arg-type]
+        selected_artifacts = _build_artifacts(cell, include_bootstrap=True)  # type: ignore[arg-type]
+        reasons = _candidate_fail_reasons(
+            cell,  # type: ignore[arg-type]
+            selected_artifacts,
+            include_bootstrap=True,
         )
-        checks = [
-            (int(best_primary["n_eff"]) >= SYMBOL_N_EFF_FLOOR, "symbol n_eff < 100"),
-            (
-                branch_summary.get(str(best_primary["branch"]), {}).get("n_eff", 0) >= BRANCH_N_EFF_FLOOR,
-                "branch n_eff < 50",
-            ),
-            (int(pooled["n_eff"]) >= POOLED_N_EFF_FLOOR, "pooled n_eff < 300"),
-            (int(best_primary["funding_cycles"]) >= MIN_FUNDING_CYCLES, "funding cycles < 14"),
-            (float(best_primary["max_day_share"]) <= MAX_DAY_OR_CYCLE_SHARE, "single-day share > 25%"),
-            (
-                float(best_primary["max_funding_cycle_share"]) <= MAX_DAY_OR_CYCLE_SHARE,
-                "single funding-cycle share > 25%",
-            ),
-            (
-                best_primary["avg_net_bps"] is not None
-                and float(best_primary["avg_net_bps"]) >= AVG_NET_FLOOR_BPS,
-                "avg_net_bps < +15",
-            ),
-            (
-                best_primary["psr_0"] is not None
-                and float(best_primary["psr_0"]) >= PSR_THRESHOLD,
-                "PSR(0) < 0.95",
-            ),
-            (
-                best_primary["dsr"] is not None
-                and float(best_primary["dsr"]) >= DSR_THRESHOLD,
-                "DSR < 0.95",
-            ),
-            (
-                pbo is not None
-                and float(pbo) <= PBO_THRESHOLD,
-                "PBO missing or > 0.20",
-            ),
-            (lower_ci is not None and float(lower_ci) > 0, "pooled bootstrap lower bound <= 0"),
-            (bool(plateau.get("plateau_passed")), "plateau check failed"),
-            (len(net_values) > 0, "no net values"),
-        ]
-        failed = [reason for ok, reason in checks if not ok]
-        eligible = not failed
-        reasons.extend(failed)
+        selection_basis = "least_failed_candidate"
+
+    eligible = not reasons
+    best_primary = selected_cell
+    if best_primary is not None:
+        best_primary["selection_basis"] = selection_basis
+        best_primary["selection_fail_reasons"] = list(reasons)
+        pooled_for_best = selected_artifacts["pooled_primary"]  # type: ignore[index]
+        best_primary["pooled_n_eff_for_param"] = pooled_for_best.get("n_eff")
+        best_primary["pooled_avg_net_bps_for_param"] = pooled_for_best.get("avg_net_bps")
+
+    pooled = selected_artifacts["pooled_primary"]  # type: ignore[index]
+    branch_summary = selected_artifacts["branch_summary"]  # type: ignore[index]
+    per_symbol_breakdown = selected_artifacts["per_symbol_breakdown"]  # type: ignore[index]
+    settlement_summary = selected_artifacts["settlement_window"]  # type: ignore[index]
+    baseline_lift = selected_artifacts["baseline_lift"]  # type: ignore[index]
+    execution_cost_model = selected_artifacts["execution_cost_model"]  # type: ignore[index]
+    plateau = selected_artifacts["plateau_check"]  # type: ignore[index]
+    top_primary_cells = []
+    for item in ranked_candidates[:20]:
+        cell = dict(item["cell"])  # type: ignore[arg-type]
+        cell["selection_fail_reasons_without_bootstrap"] = list(item["cheap_fail_reasons"])  # type: ignore[arg-type]
+        cell["cheap_fail_count"] = item["cheap_fail_count"]
+        cell["pooled_n_eff_for_param"] = item["pooled_n_eff"]
+        cell["pooled_avg_net_bps_for_param"] = item["pooled_avg_net_bps"]
+        cell["branch_n_eff_for_param"] = item["branch_n_eff"]
+        top_primary_cells.append(cell)
 
     exclusions = {
         "funding_missing": missing.get("funding_missing", 0),
@@ -880,14 +1121,18 @@ def compute_stage0r(
         "strategy_variant": STRATEGY_VARIANT,
         "alpha_source_id": ALPHA_SOURCE_ID,
         "funding_attribution_mode": "excluded",
-        "source_mode": _source_mode(rows),
+        "source_mode": source_mode,
         "cost_bps": cost_bps,
         "k_prior": int(k_prior),
         "k_new": k_new,
+        "k_new_actual": k_new_actual,
+        "k_new_min": K_NEW_MIN,
+        "k_new_floor_applied": k_new > k_new_actual,
         "k_total": k_total,
         "row_count": len(rows),
         "symbol_count": len(symbols),
-        "panel_metadata": _panel_metadata(rows, symbols),
+        "min_stage0r_symbols": MIN_STAGE0R_SYMBOLS,
+        "panel_metadata": panel_metadata,
         "exclusions": exclusions,
         "pooled_primary": pooled,
         "branch_summary": branch_summary,
@@ -899,11 +1144,11 @@ def compute_stage0r(
         "pbo_metadata": pbo_meta,
         "plateau_check": plateau,
         "best_primary_cell": best_primary,
-        "top_primary_cells": sorted(
-            [c for c in cells if c["horizon_min"] == PRIMARY_HORIZON and c["avg_net_bps"] is not None],
-            key=lambda c: (float(c["avg_net_bps"]), int(c["n_eff"])),
-            reverse=True,
-        )[:20],
+        "top_primary_cells": top_primary_cells,
+        "selection_policy": (
+            "prefer zero-fail primary candidate after fixed-parameter pooled/branch/symbol "
+            "checks; otherwise report the least-failed diagnostic candidate"
+        ),
         "eligible_for_demo_canary": eligible,
         "eligibility_fail_reasons": reasons,
     }
