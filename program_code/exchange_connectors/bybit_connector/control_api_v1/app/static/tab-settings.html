@@ -38,25 +38,25 @@
   #settings-subtab-nav .oc-subtab-btn { min-height: 44px; padding: 12px 14px; font-size: 13px; }
 }
 </style>
-<nav class="oc-subtab-nav" id="settings-subtab-nav" role="tablist" aria-label="Settings sub-tabs / 設定子標簽导航">
+<nav class="oc-subtab-nav" id="settings-subtab-nav" role="tablist" aria-label="Settings sub-tabs / 設定子標簽導航">
   <button type="button" class="oc-subtab-btn active" role="tab" aria-selected="true"
     aria-controls="subtab-engines" data-subtab="engines" id="subtab-btn-engines"
-    title="引擎控制：Demo 切换 / 全局模式 / 產品族 / 成本錄入">
+    title="引擎控制：Demo 切換 / 全局模式 / 產品族 / 成本錄入">
     &#x1F3AE; 引擎 / Engines
   </button>
   <button type="button" class="oc-subtab-btn" role="tab" aria-selected="false"
     aria-controls="subtab-system" data-subtab="system" id="subtab-btn-system"
-    title="系統運維：計劃重啟 / Paper 引擎開關 / 開发支持页">
+    title="系統運維：計劃重啟 / Paper 引擎開關 / 開發支持頁">
     &#x1F527; 運維 / System
   </button>
   <button type="button" class="oc-subtab-btn" role="tab" aria-selected="false"
     aria-controls="subtab-connection" data-subtab="connection" id="subtab-btn-connection"
-    title="连線与凭證：Bybit API Key 管理（每個引擎槽位独立）">
-    &#x1F511; 连線 / Connection
+    title="連線與凭證：Bybit API Key 管理（每個引擎槽位獨立）">
+    &#x1F511; 連線 / Connection
   </button>
   <button type="button" class="oc-subtab-btn" role="tab" aria-selected="false"
     aria-controls="subtab-debug" data-subtab="debug" id="subtab-btn-debug"
-    title="調試与系統資訊：Debug JSON / System Info">
+    title="調試與系統資訊：Debug JSON / System Info">
     &#x1F41B; 調試 / Debug
   </button>
 </nav>
@@ -111,12 +111,12 @@
 
 <!-- ═══ Config Change ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F527; 系統配置变更 / System Config Change</summary>
+  <summary>&#x1F527; 系統配置變更 / System Config Change</summary>
   <div class="oc-collapse-body">
     <div id="explain-config-change"></div>
     <div class="oc-grid-2">
       <div>
-        <h4 style="font-size:13px;margin-bottom:8px">Cost Entry / 成本录入</h4>
+        <h4 style="font-size:13px;margin-bottom:8px">Cost Entry / 成本錄入</h4>
         <div style="display:grid;gap:8px">
           <div><label style="font-size:11px;color:var(--text-dim)">Category</label>
           <select class="oc-select" id="cost-cat" style="width:100%"><option value="ai_api">AI API</option><option value="infrastructure">Infrastructure</option><option value="data_feed">Data Feed</option><option value="other">Other</option></select></div>
@@ -128,7 +128,7 @@
         </div>
       </div>
       <div>
-        <h4 style="font-size:13px;margin-bottom:8px">PnL Entry / 盈亏录入</h4>
+        <h4 style="font-size:13px;margin-bottom:8px">PnL Entry / 盈虧錄入</h4>
         <div style="display:grid;gap:8px">
           <div><label style="font-size:11px;color:var(--text-dim)">Category</label>
           <select class="oc-select" id="pnl-cat" style="width:100%"><option value="trading">Trading</option><option value="funding">Funding</option><option value="other">Other</option></select></div>
@@ -262,9 +262,9 @@
 
 <!-- ═══ Legacy Paper Engine Toggle ═══ -->
 <div class="oc-card" style="border-color:rgba(52,211,153,0.28)">
-  <h3>&#x1F9EA; Legacy Paper Engine / 旧 Paper 引擎</h3>
+  <h3>&#x1F9EA; Legacy Paper Engine / 舊 Paper 引擎</h3>
   <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
-    Paper 引擎默認關閉；Replay 回測已独立为主入口。啟用后主控制台才会顯示 Paper Tab。<br>
+    Paper 引擎默認關閉；Replay 回測已獨立為主入口。啟用後主控制台才會顯示 Paper Tab。<br>
     Paper is disabled by default. Replay backtesting is now a standalone tab. Enable this only when you explicitly need the legacy Paper surface.
   </div>
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -280,15 +280,15 @@
 
 <!-- ═══ Development Support Toggle ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.28)">
-  <h3>&#x1F6E0; 開发状态支持页 / Development Support</h3>
+  <h3>&#x1F6E0; 開發狀態支持頁 / Development Support</h3>
   <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
-    關閉時隐藏主仪表盤和 Live 页面的 Global Mode Control 支持入口。開啟后顯示 Support Tab，用 V001-V063 圖標仪表盤查看全局開发過程状态。<br>
+    關閉時隱藏主儀表盤和 Live 頁面的 Global Mode Control 支持入口。開啟後顯示 Support Tab，用 V001-V063 圖標儀表盤查看全局開發過程狀態。<br>
     This is a browser-local support surface. It does not change trading mode, risk config, live authorization, or engine runtime.
   </div>
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)">
       <input type="checkbox" id="development-support-enabled" class="settings-checkbox">
-      Enable Development Support / 顯示開发状态 Tab
+      Enable Development Support / 顯示開發狀態 Tab
     </label>
     <button class="oc-btn oc-btn-primary" onclick="saveDevelopmentSupportStatus()">保存 / Save</button>
     <span id="development-support-badge" class="oc-chip oc-chip-neutral">Loading...</span>
@@ -360,7 +360,7 @@
       <div class="oc-metric"><div class="oc-metric-label">Max Retries</div><div class="oc-metric-val" style="font-size:14px">0</div></div>
     </div>
     <div style="margin-top:10px;font-size:11px;color:var(--text-dim)">
-      這些是系統的硬编码安全边界，不可通過 GUI 修改。只有通過代码变更和正式審批流程才能改变這些值。
+      這些是系統的硬编碼安全邊界，不可通過 GUI 修改。只有通過代碼變更和正式審批流程才能改變這些值。
     </div>
   </div>
 </details>
@@ -551,23 +551,23 @@ function ocSettingsSubtabRestore() {
 
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-demo-control').innerHTML = ocExplain(
-  'Demo 控制面板管理系統从"只读觀察"到"Demo 交易"的切换流程。需要按照 Validate → Arm → Enable 的顺序逐步啟用。每一步都有安全檢查。',
-  '切换流程：1) Validate — 檢查所有前置條件（API 连接、賬户状态、健康檢查）。2) Arm — 準備切换，锁定配置防止意外修改。3) Enable — 正式啟用 Demo 交易模式。4) Relock — 如需回退，重新锁定到觀察模式。每一步都会記錄審計日志。'
+  'Demo 控制面板管理系統從"只讀觀察"到"Demo 交易"的切換流程。需要按照 Validate → Arm → Enable 的顺序逐步啟用。每一步都有安全檢查。',
+  '切換流程：1) Validate — 檢查所有前置條件（API 連接、賬戶狀態、健康檢查）。2) Arm — 準備切換，鎖定配置防止意外修改。3) Enable — 正式啟用 Demo 交易模式。4) Relock — 如需回退，重新鎖定到觀察模式。每一步都會記錄審計日志。'
 );
 
 $('explain-actions').innerHTML = ocExplain(
-  '快捷操作用于執行常用的系統配置变更。所有操作都在安全保護下運行，不會直接開放真實交易權限。',
-  '"Set Demo Reserved" 将全局模式設为 demo_reserved（预留 Demo 但未啟用）。"Enable Spot Shadow" 啟用現货產品族的影子模式（可以觀察現货數據但不實際交易）。'
+  '快捷操作用於執行常用的系統配置變更。所有操作都在安全保護下運行，不會直接開放真實交易權限。',
+  '"Set Demo Reserved" 將全局模式設為 demo_reserved（預留 Demo 但未啟用）。"Enable Spot Shadow" 啟用現貨產品族的影子模式（可以觀察現貨數據但不實際交易）。'
 );
 
 $('explain-pf-config').innerHTML = ocExplain(
-  '這裡可以管理每個產品族（交易類別）的開關。啟用某個產品族意味着系統可以觀察和分析該類別的市场數據。',
-  '每個產品族有三個独立開關：enabled（是否啟用該品類的數據處理）、visible（是否在 GUI 中顯示）、mode（該品類的運行模式：observe / shadow / demo）。修改這些設置需要通過 Control Plane 的正式配置变更流程。'
+  '這裡可以管理每個產品族（交易類別）的開關。啟用某個產品族意味著系統可以觀察和分析該類別的市場數據。',
+  '每個產品族有三個獨立開關：enabled（是否啟用該品類的數據處理）、visible（是否在 GUI 中顯示）、mode（該品類的運行模式：observe / shadow / demo）。修改這些設置需要通過 Control Plane 的正式配置變更流程。'
 );
 
 $('explain-config-change').innerHTML = ocExplain(
-  '手動录入系統成本和盈亏記錄。這些數據用于計算 Net PnL（扣除所有成本后的真實收益）。',
-  '成本類別包括：AI API 調用費、服務器基礎設施費、數據馈送費等。所有录入会進入審計日志，并反映在 Learning System 的 Net PnL 仪表盤中。'
+  '手動錄入系統成本和盈虧記錄。這些數據用於計算 Net PnL（扣除所有成本後的真實收益）。',
+  '成本類別包括：AI API 調用費、服務器基礎設施費、數據饋送費等。所有錄入會進入審計日志，並反映在 Learning System 的 Net PnL 儀表盤中。'
 );
 
 // ─── Restart Modal State ──────────────────────────────────────
@@ -796,20 +796,20 @@ function renderDecisionLeaseStatus(lease) {
 
 // 產品族中英名稱對照 / Product family bilingual name mapping
 // Bybit V5 API categories: spot, linear, inverse, option
-// margin 在 Bybit 中歸屬 spot（保證金模式），此處作为系統內部分類保留
+// margin 在 Bybit 中歸屬 spot（保證金模式），此處作為系統內部分類保留
 const PF_LABELS = {
-  spot:         '現货 / Spot',
-  margin:       '杠杆 / Margin',
+  spot:         '現貨 / Spot',
+  margin:       '槓桿 / Margin',
   perp_linear:  'U本位合約 / Linear Perp',
-  perp_inverse: '币本位合約 / Inverse Perp',
+  perp_inverse: '幣本位合約 / Inverse Perp',
   options:      '期權 / Options',
 };
-// Bybit 支持 + Agent 策略就緒情况 / Bybit support + Agent strategy readiness
+// Bybit 支持 + Agent 策略就緒情況 / Bybit support + Agent strategy readiness
 const PF_BYBIT_SUPPORT = {
   spot:         { demo: true,  agentReady: true,  note: '掃描器+策略已就緒 · 634 交易對 · 可設 Demo' },
-  margin:       { demo: false, agentReady: false, note: '歸屬 Spot 品類（保證金模式）· 非独立品類' },
+  margin:       { demo: false, agentReady: false, note: '歸屬 Spot 品類（保證金模式）· 非獨立品類' },
   perp_linear:  { demo: true,  agentReady: true,  note: '主要交易品類 · 掃描器+策略已就緒 · 可設 Demo' },
-  perp_inverse: { demo: true,  agentReady: false, note: 'Bybit 支持 · PnL 公式待修正 · 掃描器待覆盖' },
+  perp_inverse: { demo: true,  agentReady: false, note: 'Bybit 支持 · PnL 公式待修正 · 掃描器待覆蓋' },
   options:      { demo: false, agentReady: false, note: 'Live 實盤支持 · Demo 不可用 · 策略未就緒' },
 };
 
@@ -851,14 +851,14 @@ async function loadProductFamilyConfig() {
     html += '<label class="pf-toggle"><input type="checkbox"' + (enabled ? ' checked' : '') + ' onchange="pfToggle(\'' + name + '\',\'enabled_switch\',this.checked)">';
     html += '<span class="slider"></span></label></div>';
 
-    // 可见開關 / Visibility switch
-    html += '<div class="pf-row"><span>可见 / Visible</span>';
+    // 可見開關 / Visibility switch
+    html += '<div class="pf-row"><span>可見 / Visible</span>';
     html += '<label class="pf-toggle"><input type="checkbox"' + (visible ? ' checked' : '') + ' onchange="pfToggle(\'' + name + '\',\'visibility_switch\',this.checked)">';
     html += '<span class="slider"></span></label></div>';
 
     // 模式選擇 / Mode switch
-    // 后端 ALLOWED_MODE_SWITCHES 當前只允許 disabled/observe_only/shadow_only
-    // demo_reserved 和 live_reserved 预留展示但標記 locked，后端開放后自動生效
+    // 後端 ALLOWED_MODE_SWITCHES 當前只允許 disabled/observe_only/shadow_only
+    // demo_reserved 和 live_reserved 預留展示但標記 locked，後端開放後自動生效
     html += '<div class="pf-row"><span>模式 / Mode</span>';
     html += '<select class="pf-mode-select" onchange="pfToggle(\'' + name + '\',\'mode_switch\',this.value)">';
     var modeOpts = [
@@ -876,7 +876,7 @@ async function loadProductFamilyConfig() {
     });
     html += '</select></div>';
 
-    // 交易所權限 / Exchange permission (只读)
+    // 交易所權限 / Exchange permission (只讀)
     const exPerm = facts.exchange_permission_fact;
     html += '<div class="pf-row"><span>交易所權限</span><span style="color:' + (exPerm ? 'var(--green)' : '#f87171') + '">' + (exPerm ? '已授權' : '未授權') + '</span></div>';
 
@@ -887,7 +887,7 @@ async function loadProductFamilyConfig() {
 }
 
 async function pfToggle(family, field, value) {
-  // 必须先获取最新 stateRevision，避免 409 revision mismatch
+  // 必須先獲取最新 stateRevision，避免 409 revision mismatch
   try {
     const fresh = await ocApi('/api/v1/system/overview');
     if (fresh && fresh.state_revision) stateRevision = fresh.state_revision;
@@ -899,7 +899,7 @@ async function pfToggle(family, field, value) {
   const d = await ocPost('/api/v1/control/product-family/' + encodeURIComponent(family) + '/config', body);
   if (d) {
     if (d.state_revision) stateRevision = d.state_revision;
-    // 檢查后端是否真正應用了变更 / Check if backend actually applied the change
+    // 檢查後端是否真正應用了變更 / Check if backend actually applied the change
     const respData = d.data || {};
     const rejected = respData.rejected_fields || [];
     const applied = respData.applied_changes || {};
@@ -912,7 +912,7 @@ async function pfToggle(family, field, value) {
     }
     await loadProductFamilyConfig();
   } else {
-    ocToast('更新失败', 'error');
+    ocToast('更新失敗', 'error');
     await loadProductFamilyConfig();
   }
 }
@@ -946,7 +946,7 @@ async function loadPaperEngineStatus() {
   if (!data) {
     badge.textContent = 'Unavailable';
     badge.className = 'oc-chip oc-chip-warn';
-    status.textContent = '無法读取 Paper Engine 設置 / Unable to load Paper Engine setting';
+    status.textContent = '無法讀取 Paper Engine 設置 / Unable to load Paper Engine setting';
     return;
   }
 
@@ -957,7 +957,7 @@ async function loadPaperEngineStatus() {
     'configured=' + String(!!data.enabled) +
     ' · runtime=' + String(!!data.runtime_enabled) +
     ' · source=' + (data.source || 'unknown') +
-    (data.restart_required ? ' · restart required / 需要重啟后后端生效' : '');
+    (data.restart_required ? ' · restart required / 需要重啟後後端生效' : '');
 }
 
 async function savePaperEngineStatus() {
@@ -970,7 +970,7 @@ async function savePaperEngineStatus() {
   const d = await ocPost('/api/v1/settings/paper-engine', { enabled: enabled });
   const data = (d && d.data) ? d.data : d;
   if (!data) {
-    ocToast('Paper Engine 設置保存失败', 'error');
+    ocToast('Paper Engine 設置保存失敗', 'error');
     await loadPaperEngineStatus();
     return;
   }

@@ -573,6 +573,9 @@ def get_h0_gate_status(
             "ok": True,
             "message": "h0_gate_status",
             "data": state,
+            # P2-H0-DISPLAY-LABEL-1: this Python/GUI surface is display-only.
+            # P2-H0-DISPLAY-LABEL-1：此 Python/GUI 端點只作展示，不是執行權威。
+            "display_only": True,
             # Freshness diagnostic fields (1B-2 / H0Gate API extension)
             "freshness_age_ms": freshness_age_ms,
             "freshness_score": freshness_score,

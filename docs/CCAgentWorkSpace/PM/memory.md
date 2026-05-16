@@ -1,5 +1,15 @@
 # PM Memory — 工作記憶
 
+## 項目狀態快照（2026-05-16 P2 maintenance hygiene）
+
+- `P2-H0-DISPLAY-LABEL-1` closed: `/api/v1/governance/h0-gate/status` now returns `display_only=true`, making the Python/FastAPI GUI surface explicitly read/display-only and not the Rust H0 execution authority.
+- `P2-START-LOCAL-HELPER` closed: `control_api_v1/start_local.sh` and `scripts/beta_quickstart.sh` now source `helper_scripts/lib/api_bind_host.sh` and bind via `resolve_openclaw_api_bind_host()`, preserving safe auto/Tailscale/loopback behavior and rejecting all-interface binds.
+- `P2-PA-CALLPATH-GREP-RULE` closed: PA / E2 adversarial review now requires production caller call-path grep for P0/P1 leak, look-ahead, selection-bias, or stale findings; missing grep downgrades the finding to unproven, not a blocker.
+- `P2-CROSSTAB-I18N` closed for the named cross-tab strings: listed static GUI files have `实盘/平仓/请检查` grep=0 after a string-only Traditional Chinese cleanup.
+- `P2-PORTFOLIO-RESTING-58-HEALTHCHECK` stale TODO row corrected: the healthcheck is already done as `[68] portfolio_resting_exposure_lineage` because `[58]` was occupied.
+- Verification: H0 pytest 3 passed; bind-host pytest 2 passed; `bash -n` start scripts passed; `node --check` for `app.js`, `risk-tab.js`, `governance-tab.js` passed; targeted i18n grep passed.
+- Report: `workspace/reports/2026-05-16--p2_maintenance_hygiene_closure.md`.
+
 ## 項目狀態快照（2026-05-16 Wave 3.5 Linux PG backlog）
 
 - `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` closed on `trade-core` without engine/API restart, auth mutation, strategy/risk config change, or mode change.

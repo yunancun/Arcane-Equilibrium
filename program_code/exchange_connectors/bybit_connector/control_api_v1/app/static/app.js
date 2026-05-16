@@ -1,83 +1,83 @@
 /**
  * 玄衡 · Arcane Equilibrium Control Center — GUI JavaScript
- * 玄衡控制台前端脚本
+ * 玄衡控制台前端腳本
  *
  * 功能概述 / Feature overview:
- * - 通過 HttpOnly Cookie 認證調用 Control API（已从 Bearer Token 迁移）
+ * - 通過 HttpOnly Cookie 認證調用 Control API（已從 Bearer Token 遷移）
  *   Authenticates via HttpOnly cookie to call the Control API (migrated from Bearer Token)
- * - 展示系統運行态、健康、審計、產品族状态
+ * - 展示系統運行態、健康、審計、產品族狀態
  *   Displays system runtime state, health, audit trail, product family status
  * - 產品族配置設置台：可交互修改 enabled/visible/mode/action_permissions
  *   Product family config console: interactive controls for enabled/visible/mode/action_permissions
- * - 經营摘要面板：展示每日 PnL + 歷史條目，支持手動录入成本和 PnL
+ * - 經營摘要面板：展示每日 PnL + 歷史條目，支持手動錄入成本和 PnL
  *   Business summary panel: daily PnL + history entries, supports manual cost/PnL entry
  * - 系統設置台：風險策略、Demo Ack、學習審批等開關
  *   Settings console: risk policy, demo ack, learning approval toggles
- * - 所有關键動作需要二次确認弹窗
+ * - 所有關鍵動作需要二次確認彈窗
  *   All critical actions require a second-confirmation modal
  *
  * 安全原則 / Safety principle:
- * 看得见 ≠ 被允許；被允許繼續判斷 ≠ 能執行；demo ≠ live。
+ * 看得見 ≠ 被允許；被允許繼續判斷 ≠ 能執行；demo ≠ live。
  * Visible ≠ allowed; allowed to continue ≠ executable; demo ≠ live.
  */
 
 "use strict";
 
-// ── 全局状态 / Global state ──────────────────────────────────────────────────
+// ── 全局狀態 / Global state ──────────────────────────────────────────────────
 
 let inMemoryToken = "";
 
-// 當前状态修订版本號，用于構建 envelope / Current state revision for envelope construction
+// 當前狀態修訂版本號，用於構建 envelope / Current state revision for envelope construction
 let currentStateRevision = 0;
 
-// ── 常量：關键動作元數據 / Constants: critical action metadata ────────────────
+// ── 常量：關鍵動作元數據 / Constants: critical action metadata ────────────────
 
 /**
- * 需要二次确認的關键動作及其風險說明。
+ * 需要二次確認的關鍵動作及其風險說明。
  * Critical actions requiring second confirmation, with risk descriptions.
  */
 const CRITICAL_ACTIONS = {
   "set-demo-mode": {
-    title: "切换到 Demo Reserved",
+    title: "切換到 Demo Reserved",
     subtitle: "Set global execution mode to demo_reserved",
-    risk: "這一步只是把系統从「完全不走 demo 流程」改成「允許繼續做 demo 相關判斷」。它不是下單，不是開啟 live，也不是马上获得執行權。",
-    consequence: "点完后，系統只会進入「可以繼續做 demo 檢查」的状态。你之后仍然還要 validate、arm，甚至 future enable；所以這一步只是打開下一道门，不是直接放權。"
+    risk: "這一步只是把系統從「完全不走 demo 流程」改成「允許繼續做 demo 相關判斷」。它不是下單，不是開啟 live，也不是馬上獲得執行權。",
+    consequence: "點完後，系統只會進入「可以繼續做 demo 檢查」的狀態。你之後仍然還要 validate、arm，甚至 future enable；所以這一步只是打開下一道門，不是直接放權。"
   },
   "enable-spot": {
-    title: "開啟 Spot / 現货產品配置",
+    title: "開啟 Spot / 現貨產品配置",
     subtitle: "Enable spot family in shadow mode",
-    risk: "這一步只影响現货產品族。它会讓 spot/現货从「關閉/仅展示」進入 shadow 控制状态。shadow 的意思是：用于觀察、驗證、看控制結果，不是實際成交。",
-    consequence: "点完后，只会改变現货這一類產品的控制展示和 gate 結果，不會影响其它產品族，也不會直接讓賬户获得真實現货下單權限。"
+    risk: "這一步只影響現貨產品族。它會讓 spot/現貨從「關閉/僅展示」進入 shadow 控制狀態。shadow 的意思是：用於觀察、驗證、看控制結果，不是實際成交。",
+    consequence: "點完後，只會改變現貨這一類產品的控制展示和 gate 結果，不會影響其它產品族，也不會直接讓賬戶獲得真實現貨下單權限。"
   },
   validate: {
     title: "驗證 Demo 前提",
     subtitle: "Validate demo prerequisites and gates",
-    risk: "這一步只是做檢查。它会重新判斷系統現在是否滿足 demo 的前置條件。它不會切模式，也不會推進 demo 主状态。",
-    consequence: "点完后，你主要会看到 gate 結果变了，比如「可以繼續」還是「還不滿足條件」。它不會直接提高執行權限。"
+    risk: "這一步只是做檢查。它會重新判斷系統現在是否滿足 demo 的前置條件。它不會切模式，也不會推進 demo 主狀態。",
+    consequence: "點完後，你主要會看到 gate 結果變了，比如「可以繼續」還是「還不滿足條件」。它不會直接提高執行權限。"
   },
   "arm-demo": {
     title: "執行 Demo Arm",
     subtitle: "Move demo state to armed_but_closed",
-    risk: "這是 demo 流程里更關键的一步。它表示系統已經通過前置檢查，進入「已準備好下一步，但仍然封閉」的状态。",
-    consequence: "点完后，demo 会更接近后續 enable，但仍然不能直接執行。你可以把它理解成「已經準備好了，但保險還没真正打開」。"
+    risk: "這是 demo 流程裡更關鍵的一步。它表示系統已經通過前置檢查，進入「已準備好下一步，但仍然封閉」的狀態。",
+    consequence: "點完後，demo 會更接近後續 enable，但仍然不能直接執行。你可以把它理解成「已經準備好了，但保險還沒真正打開」。"
   },
   bundle: {
     title: "執行安全復核打包",
     subtitle: "Run safe recheck bundle",
-    risk: "這一步会把多项檢查和刷新一起跑一遍。它適合在你想讓整页判斷一起更新時使用。",
-    consequence: "点完后，readiness、gate、audit 等多個區域可能一起刷新。它本身不是切模式，也不是直接放權。"
+    risk: "這一步會把多項檢查和刷新一起跑一遍。它適合在你想讓整頁判斷一起更新時使用。",
+    consequence: "點完後，readiness、gate、audit 等多個區域可能一起刷新。它本身不是切模式，也不是直接放權。"
   },
   "pf-config": {
     title: "修改產品族配置",
     subtitle: "Update product family control switches",
-    risk: "這一步会修改指定產品族的 enabled/visible/mode 等控制開關。它不等于获得執行權，但会改变系統控制判斷的輸入。",
-    consequence: "点完后，相應產品族的 capability 和 execution authority 会重新計算。這一步本身不直接開放 live 權限。"
+    risk: "這一步會修改指定產品族的 enabled/visible/mode 等控制開關。它不等於獲得執行權，但會改變系統控制判斷的輸入。",
+    consequence: "點完後，相應產品族的 capability 和 execution authority 會重新計算。這一步本身不直接開放 live 權限。"
   },
   "settings-change": {
     title: "修改系統設置",
     subtitle: "Apply system-level configuration change",
-    risk: "這一步会修改全局系統設置，如風險策略或 Demo Ack 開關。這些設置影响整個控制判斷链路。",
-    consequence: "設置变更后立即生效。請确認你理解修改后的效果，特别是風險策略相關的变更。"
+    risk: "這一步會修改全局系統設置，如風險策略或 Demo Ack 開關。這些設置影響整個控制判斷鏈路。",
+    consequence: "設置變更後立即生效。請確認你理解修改後的效果，特別是風險策略相關的變更。"
   },
   // FIX-39/40: Danger Zone operations + strategy deletion — replaced native confirm()
   "delete-strategy": {
@@ -103,12 +103,12 @@ const CRITICAL_ACTIONS = {
 // ── 常量：產品族標簽 / Constants: product family labels ──────────────────────
 
 const PRODUCT_FAMILY_LABELS = {
-  spot: "spot / 現货",
+  spot: "spot / 現貨",
   margin: "margin / 保證金",
   perp_linear: "perp_linear / 線性永續",
   perp_inverse: "perp_inverse / 反向永續",
   options: "options / 期權",
-  other_derivatives_reserved: "other_derivatives_reserved / 其他衍生品（预留）"
+  other_derivatives_reserved: "other_derivatives_reserved / 其他衍生品（預留）"
 };
 
 const PRODUCT_FAMILY_CONFIG_IDS = {
@@ -125,23 +125,23 @@ const ACTION_NAME_LABELS = {
   new_order: "新建訂單 / new_order",
   cancel: "撤銷 / cancel",
   amend: "改單 / amend",
-  reduce_only: "只减倉 / reduce_only",
+  reduce_only: "只減倉 / reduce_only",
   increase_position: "加倉 / increase_position",
   close_position: "平倉 / close_position"
 };
 
 const ACTION_NAMES = Object.keys(ACTION_NAME_LABELS);
 
-// 長期開關预留區 / Long-term switch preset area
+// 長期開關預留區 / Long-term switch preset area
 const LONG_TERM_SWITCHES = [
-  ["仅觀察", "Observe Only", "當前只做展示位", "locked"],
+  ["僅觀察", "Observe Only", "當前只做展示位", "locked"],
   ["Demo Reserved", "Demo Reserved", "允許繼續做 demo 判斷", "preset"],
-  ["Demo Enabled", "Demo Enabled", "后續階段预留，當前不開放", "locked"],
-  ["Live Locked", "Live Locked", "真實執行長期锁定", "locked"],
-  ["紧急回锁", "Emergency Relock", "高優先级安全開關，當前只预留", "locked"],
-  ["自動化锁定", "Automation Locked", "自動化真實執行暂不開放", "locked"],
-  ["只读維護", "Readonly Maintenance", "維護模式后續接入", "locked"],
-  ["審計增强", "Audit Enhanced", "長期審計擴展位", "planned"]
+  ["Demo Enabled", "Demo Enabled", "後續階段預留，當前不開放", "locked"],
+  ["Live Locked", "Live Locked", "真實執行長期鎖定", "locked"],
+  ["緊急回鎖", "Emergency Relock", "高優先級安全開關，當前只預留", "locked"],
+  ["自動化鎖定", "Automation Locked", "自動化真實執行暫不開放", "locked"],
+  ["只讀維護", "Readonly Maintenance", "維護模式後續接入", "locked"],
+  ["審計增強", "Audit Enhanced", "長期審計擴展位", "planned"]
 ];
 
 // ── 基礎工具函數 / Basic utility functions ───────────────────────────────────
@@ -150,7 +150,7 @@ function headers() {
   // APR01-MEDIUM-13: Token is in HttpOnly cookie, sent automatically.
   // Authorization header kept only if inMemoryToken was manually set (legacy/API mode).
   // APR01-MEDIUM-13：Token 在 HttpOnly cookie 中，自動發送。
-  // 仅在手動設置 inMemoryToken 時保留 Authorization header（旧版/API 模式）。
+  // 僅在手動設置 inMemoryToken 時保留 Authorization header（舊版/API 模式）。
   const h = { "Content-Type": "application/json" };
   if (inMemoryToken) {
     h.Authorization = `Bearer ${inMemoryToken}`;
@@ -164,7 +164,7 @@ function pretty(value) { return JSON.stringify(value, null, 2); }
 function safeText(value) { return value === undefined || value === null ? "-" : ocEsc(String(value)); }
 
 /**
- * 根據状态值返回 CSS variant 名。
+ * 根據狀態值返回 CSS variant 名。
  * Returns CSS variant name based on state value.
  */
 function variantForState(value) {
@@ -181,7 +181,7 @@ function variantForState(value) {
 function booleanZh(value, trueText, falseText) { return value ? trueText : falseText; }
 
 function fmtPnl(value) {
-  // 格式化 PnL 數字为带正負號的字符串 / Format PnL number with sign
+  // 格式化 PnL 數字為帶正負號的字符串 / Format PnL number with sign
   const n = parseFloat(value);
   if (isNaN(n)) return "-";
   const sign = n >= 0 ? "+" : "";
@@ -189,12 +189,12 @@ function fmtPnl(value) {
 }
 
 function fmtTs(tsMs) {
-  // 将時間戳转为本地時間字符串 / Convert timestamp to local time string
+  // 將時間戳轉為本地時間字符串 / Convert timestamp to local time string
   if (!tsMs) return "-";
   return new Date(tsMs).toLocaleString();
 }
 
-// ── UI 状态更新辅助 / UI state update helpers ─────────────────────────────────
+// ── UI 狀態更新輔助 / UI state update helpers ─────────────────────────────────
 
 /**
  * 安全設置元素文本 / Safely set element text by ID.
@@ -231,16 +231,16 @@ function setActionSummary(name, result, revision, auditRef, hint, raw) {
 
 function summarizeActionResult(actionName, result) {
   const actionMap = {
-    refresh: "刷新概览",
+    refresh: "刷新概覽",
     validate: "驗證 Demo",
     bundle: "安全復核打包",
     "set-demo-mode": "切到 Demo Reserved",
-    "enable-spot": "開啟 Spot / 現货產品配置",
+    "enable-spot": "開啟 Spot / 現貨產品配置",
     "arm-demo": "執行 Demo Arm",
-    "pf-config": "產品族配置变更",
-    "settings-change": "系統設置变更",
-    "cost-entry": "費用录入",
-    "pnl-entry": "PnL 录入"
+    "pf-config": "產品族配置變更",
+    "settings-change": "系統設置變更",
+    "cost-entry": "費用錄入",
+    "pnl-entry": "PnL 錄入"
   };
   const actionEnMap = {
     refresh: "refresh overview",
@@ -260,34 +260,34 @@ function summarizeActionResult(actionName, result) {
   let helper = "Action completed.";
 
   if (actionName === "validate") {
-    hint = `系統刚完成一次檢查：前提 gate = ${safeText(data.demo_prerequisites_gate_state)}；Arm gate = ${safeText(data.demo_arm_gate_state)}。`;
+    hint = `系統剛完成一次檢查：前提 gate = ${safeText(data.demo_prerequisites_gate_state)}；Arm gate = ${safeText(data.demo_arm_gate_state)}。`;
     helper = `This checked whether demo can continue, not whether execution is already open.`;
   } else if (actionName === "arm-demo") {
-    hint = `Demo 状态現在是：${safeText(data.demo_state_switch)}。系統已更接近下一步，但仍未放開執行。`;
+    hint = `Demo 狀態現在是：${safeText(data.demo_state_switch)}。系統已更接近下一步，但仍未放開執行。`;
     helper = `The system moved closer to the next step, but execution is still not open.`;
   } else if (actionName === "set-demo-mode") {
-    hint = `已接受"進入 Demo Reserved"配置。后續仍需 validate → arm → enable 才能获得執行權。`;
+    hint = `已接受"進入 Demo Reserved"配置。後續仍需 validate → arm → enable 才能獲得執行權。`;
     helper = `Demo evaluation path is now allowed to continue, but no execution authority was opened.`;
   } else if (actionName === "enable-spot") {
-    hint = `現货產品配置已修改。現货進入 shadow 控制展示，但不等于賬户已能真實現货下單。`;
+    hint = `現貨產品配置已修改。現貨進入 shadow 控制展示，但不等於賬戶已能真實現貨下單。`;
     helper = `Spot moved into shadow control display, but real spot trading authority is still separate.`;
   } else if (actionName === "bundle") {
-    hint = `系統刚完成一轮統一復核刷新。多個判斷結果可能已更新，但本步驟不直接放權。`;
+    hint = `系統剛完成一輪統一復核刷新。多個判斷結果可能已更新，但本步驟不直接放權。`;
     helper = `Multiple checks were refreshed together, but no authority was directly opened.`;
   } else if (actionName === "refresh") {
     hint = "界面已刷新。"; helper = "Dashboard refreshed.";
   } else if (actionName === "pf-config") {
     const applied = Object.keys(data.applied_changes || {});
-    hint = `產品族 ${safeText(data.family)} 配置已更新，变更字段：${applied.join(", ") || "無"}。`;
+    hint = `產品族 ${safeText(data.family)} 配置已更新，變更字段：${applied.join(", ") || "無"}。`;
     helper = `Product family ${safeText(data.family)} config updated.`;
   } else if (actionName === "settings-change") {
     hint = `系統設置已更新：${safeText((data.accepted_paths || []).join(", "))}。`;
     helper = `System settings updated.`;
   } else if (actionName === "cost-entry") {
-    hint = `費用條目已录入，金额：${safeText(result?.data?.record_count_delta)} 條。`;
+    hint = `費用條目已錄入，金額：${safeText(result?.data?.record_count_delta)} 條。`;
     helper = `Cost entry recorded.`;
   } else if (actionName === "pnl-entry") {
-    hint = `PnL 條目已录入，類型：${safeText(data.entry_type)}。`;
+    hint = `PnL 條目已錄入，類型：${safeText(data.entry_type)}。`;
     helper = `PnL entry recorded.`;
   }
 
@@ -301,7 +301,7 @@ function summarizeActionResult(actionName, result) {
   );
 }
 
-// ── 双語標簽辅助 / Bilingual label helpers ────────────────────────────────────
+// ── 双語標簽輔助 / Bilingual label helpers ────────────────────────────────────
 
 function zhEnPrimary(zh, en) {
   return `<span class="label-zh">${zh}</span><span class="label-en">${en}</span>`;
@@ -328,7 +328,7 @@ function renderKvGrid(nodeId, items) {
   ).join("");
 }
 
-// ── 确認弹窗 / Confirm modal ──────────────────────────────────────────────────
+// ── 確認彈窗 / Confirm modal ──────────────────────────────────────────────────
 
 function openConfirmModal(actionName) {
   const meta = CRITICAL_ACTIONS[actionName];
@@ -417,7 +417,7 @@ async function apiPost(path, payload) {
 }
 
 function baseEnvelope(extra = {}) {
-  // 構建標准請求 envelope / Build standard request envelope
+  // 構建標準請求 envelope / Build standard request envelope
   return {
     request_id: _ocUUID(),
     idempotency_key: _ocUUID(),
@@ -462,7 +462,7 @@ function renderModeControl(overview) {
 }
 
 function renderBusinessSummary(businessData) {
-  // businessData 可能来自 overview.data.daily_business_summary 或 summary endpoint
+  // businessData 可能來自 overview.data.daily_business_summary 或 summary endpoint
   // businessData may come from overview.data.daily_business_summary or the summary endpoint
   const daily = businessData.daily || businessData;
   const el = (id) => document.getElementById(id);
@@ -492,7 +492,7 @@ function renderCostEntries(entries) {
   const node = document.getElementById("costEntriesList");
   if (!node) return;
   if (!entries || entries.length === 0) {
-    node.innerHTML = '<div class="entry-row muted-row">暂無費用記錄 / No cost entries yet.</div>';
+    node.innerHTML = '<div class="entry-row muted-row">暫無費用記錄 / No cost entries yet.</div>';
     return;
   }
   node.innerHTML = entries.map((e) =>
@@ -509,7 +509,7 @@ function renderPnlEntries(entries) {
   const node = document.getElementById("pnlEntriesList");
   if (!node) return;
   if (!entries || entries.length === 0) {
-    node.innerHTML = '<div class="entry-row muted-row">暂無 PnL 記錄 / No PnL entries yet.</div>';
+    node.innerHTML = '<div class="entry-row muted-row">暫無 PnL 記錄 / No PnL entries yet.</div>';
     return;
   }
   node.innerHTML = entries.map((e) =>
@@ -527,7 +527,7 @@ function renderCostBreakdown(breakdown) {
   if (!node) return;
   const keys = Object.keys(breakdown);
   if (keys.length === 0) {
-    node.innerHTML = '<span class="muted">暂無分類 / No categories yet.</span>';
+    node.innerHTML = '<span class="muted">暫無分類 / No categories yet.</span>';
     return;
   }
   node.innerHTML = keys.map((k) =>
@@ -547,15 +547,15 @@ function renderProductFamilyConfig(productFamilies) {
     if (!summaryNode || !metaNode) return;
     if (!data) {
       summaryNode.textContent = "-";
-      metaNode.textContent = "暂無數據 / No data.";
+      metaNode.textContent = "暫無數據 / No data.";
       return;
     }
     const enabledText = booleanZh(data.controls.enabled_switch, "已啟用 ✓", "未啟用 ✗");
-    const visibleText = booleanZh(data.controls.visibility_switch, "可见", "隐藏");
+    const visibleText = booleanZh(data.controls.visibility_switch, "可見", "隱藏");
     summaryNode.textContent = `${enabledText} · ${visibleText} · ${safeText(data.controls.mode_switch)}`;
     metaNode.textContent =
       `交易所事實: ${safeText(data.facts.exchange_permission_fact)} | ` +
-      `賬户事實: ${safeText(data.facts.account_permission_fact)} | ` +
+      `賬戶事實: ${safeText(data.facts.account_permission_fact)} | ` +
       `能力: ${safeText(data.derived.capability_state)}`;
   });
 }
@@ -590,7 +590,7 @@ function renderProductFamilyEditor(productFamilies, controlPlane) {
       </label>`;
     }).join("");
 
-    // 能力/執行状态徽章 / Capability/execution status badges
+    // 能力/執行狀態徽章 / Capability/execution status badges
     const capBadge = `<span class="status-chip ${variantForState(derived.capability_state)}">${derived.capability_state}</span>`;
     const execBadge = `<span class="status-chip ${variantForState(derived.execution_authority_state)}">${derived.execution_authority_state}</span>`;
 
@@ -606,7 +606,7 @@ function renderProductFamilyEditor(productFamilies, controlPlane) {
           <input type="checkbox" class="pf-toggle" id="pf-enabled-${family}" data-family="${family}" data-field="enabled_switch" ${ctrl.enabled_switch ? "checked" : ""}>
         </label>
         <label class="switch-row">
-          <span class="switch-label">可见 / Visible</span>
+          <span class="switch-label">可見 / Visible</span>
           <input type="checkbox" class="pf-toggle" id="pf-visible-${family}" data-family="${family}" data-field="visibility_switch" ${ctrl.visibility_switch ? "checked" : ""}>
         </label>
         <div class="switch-row">
@@ -626,7 +626,7 @@ function renderProductFamilyEditor(productFamilies, controlPlane) {
         <summary class="perm-summary">動作權限 / Action Permissions</summary>
         <div class="perm-grid">${permRows}</div>
         <button class="pf-perm-apply-btn" data-family="${family}">
-          應用權限变更 / Apply Permission Changes
+          應用權限變更 / Apply Permission Changes
           <span class="button-sub">updates action permission switches</span>
         </button>
       </details>
@@ -643,7 +643,7 @@ function renderLongTermSwitches() {
        <strong><span class="status-chip ${variantForState(state)}">${safeText(state)}</span></strong>
        <div class="family-card-meta">${desc}</div>
        <div class="family-actions">
-         <button class="button-muted" disabled>長期预留（未開放）<span class="button-sub">preset only</span></button>
+         <button class="button-muted" disabled>長期預留（未開放）<span class="button-sub">preset only</span></button>
        </div>
      </div>`
   ).join("");
@@ -651,14 +651,14 @@ function renderLongTermSwitches() {
 
 function renderSourceContext(sourceContext) {
   renderKvGrid("sourceContextGrid", [
-    [zhEnPrimary("只读连接器", "Readonly Connector"), sourceContext.readonly_connector_name],
-    [zhEnPrimary("執行连接器", "Execution Connector"), sourceContext.execution_connector_name || "not_attached"],
+    [zhEnPrimary("只讀連接器", "Readonly Connector"), sourceContext.readonly_connector_name],
+    [zhEnPrimary("執行連接器", "Execution Connector"), sourceContext.execution_connector_name || "not_attached"],
     [zhEnPrimary("私有 REST", "REST Private"), sourceContext.rest_private_connection_state],
     [zhEnPrimary("私有 WS", "WS Private"), sourceContext.ws_private_connection_state],
-    [zhEnPrimary("Runtime 连接", "Runtime Connection"), sourceContext.runtime_connection_state],
-    [zhEnPrimary("賬户完整性", "Account Completeness"), sourceContext.account_fact_completeness_state],
+    [zhEnPrimary("Runtime 連接", "Runtime Connection"), sourceContext.runtime_connection_state],
+    [zhEnPrimary("賬戶完整性", "Account Completeness"), sourceContext.account_fact_completeness_state],
     [zhEnPrimary("快照完整性", "Snapshot Completeness"), sourceContext.source_snapshot_completeness_state],
-    [zhEnPrimary("角色分离", "Role Separation"), sourceContext.connector_role_separation_ok],
+    [zhEnPrimary("角色分離", "Role Separation"), sourceContext.connector_role_separation_ok],
     [zhEnPrimary("Runtime 快照", "Runtime Snapshot"), sourceContext.pinned_runtime_snapshot_id]
   ]);
 }
@@ -669,12 +669,12 @@ function renderHealth(overview) {
     [zhEnPrimary("總健康分", "Overall Health Score"), health.scores.overall_health_score],
     [zhEnPrimary("AI 健康分", "AI Health Score"), health.scores.ai_health_score],
     [zhEnPrimary("交易所健康分", "Exchange Health Score"), health.scores.exchange_health_score],
-    [zhEnPrimary("新鲜度分", "Data Freshness Score"), health.scores.data_freshness_score],
+    [zhEnPrimary("新鮮度分", "Data Freshness Score"), health.scores.data_freshness_score],
     [zhEnPrimary("總 Gate", "Health Gates Overall"), health.gates.health_gates_overall_state],
     [zhEnPrimary("Timeout Gate", "Exchange Timeout Gate"), health.gates.exchange_timeout_gate_state],
-    [zhEnPrimary("WS 斷连 Gate", "WS Disconnect Gate"), health.gates.ws_disconnect_gate_state],
+    [zhEnPrimary("WS 斷連 Gate", "WS Disconnect Gate"), health.gates.ws_disconnect_gate_state],
     [zhEnPrimary("延遲 Gate", "Latency Gate"), health.gates.latency_gate_state],
-    [zhEnPrimary("新鲜度 Gate", "Freshness Gate"), health.gates.freshness_gate_state]
+    [zhEnPrimary("新鮮度 Gate", "Freshness Gate"), health.gates.freshness_gate_state]
   ]);
 }
 
@@ -707,7 +707,7 @@ function renderSettingsConsole(snapshot) {
   const demoAckSwitch = document.getElementById("settingsDemoAck");
   const learningApproval = document.getElementById("settingsLearningApproval");
 
-  // 从 API 返回數據中無法直接获得這些字段的當前值——它们嵌在 control_plane 內層
+  // 從 API 返回數據中無法直接獲得這些字段的當前值——它们嵌在 control_plane 內層
   // These fields are not directly in overview; we display placeholder state from what we know.
   // Full value will be populated after /system/control-plane fetch in loadDashboard.
   if (riskSwitch) riskSwitch.value = "default_guarded"; // default; will be updated
@@ -729,7 +729,7 @@ function updateSettingsConsoleFromControlPlane(controlPlane) {
   if (riskSwitch) riskSwitch.value = riskEnvelope.risk_policy_switch || "default_guarded";
   if (demoAckSwitch) demoAckSwitch.checked = demoCtrl.demo_operator_ack_required !== false;
 
-  // 顯示當前風險状态 / Show current risk envelope state
+  // 顯示當前風險狀態 / Show current risk envelope state
   const riskStateEl = document.getElementById("settingsRiskEnvelopeState");
   if (riskStateEl) {
     const effectiveState = riskEnvelope.effective_risk_envelope_state || "-";

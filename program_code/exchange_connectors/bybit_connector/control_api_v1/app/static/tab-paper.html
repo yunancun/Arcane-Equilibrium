@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Legacy Paper Engine / 旧 Paper 引擎</title>
+<title>Legacy Paper Engine / 舊 Paper 引擎</title>
 <script src="/static/common.js"></script>
 <!-- REF-20 R20-P1-U9: Legacy Paper i18n (Chinese-dominant, 9 對照表)
      REF-20 R20-P1-U9: load before app-paper.js so sub-tab logic can resolve t_zh()
@@ -80,7 +80,7 @@
 </style>
 
 <!-- Legacy Paper sub-tab navigation. Replay is now a standalone top-level tab.
-     旧 Paper 子標籤導航。Replay 已獨立為主控制台一級 Tab。 -->
+     舊 Paper 子標籤導航。Replay 已獨立為主控制台一級 Tab。 -->
 <nav class="oc-subtab-nav" id="paper-subtab-nav" role="tablist" aria-label="Legacy Paper sub-tabs">
   <!-- REF-20 R20-P1-U9: 4 sub-tab button + tooltip + disabled gate 使用 i18n_zh 對照表
        REF-20 R20-P1-U9: 4 sub-tab buttons + tooltip + disabled gate hook into i18n_zh
@@ -120,7 +120,7 @@
      migrated into this div per UX subdoc §3 Session sub-tab spec + workplan §4 R20-P1-U2. -->
 <div id="subtab-session" class="oc-subtab-content active" role="tabpanel" aria-labelledby="subtab-btn-session">
 
-  <!-- Paper Session Control Bar / Paper 會話控制栏 -->
+  <!-- Paper Session Control Bar / Paper 會話控制欄 -->
   <div class="oc-control-bar">
     <span style="font-weight:600">&#x1F4B0; Paper 模擬</span>
     <span id="session-badge" class="oc-chip oc-chip-neutral">--</span>
@@ -134,7 +134,7 @@
         <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 繼續</button>
       </span>
       <span class="oc-action-cluster oc-action-cluster-pause" data-danger-zone="paper-session-pause">
-        <button class="oc-btn oc-btn-warning" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
+        <button class="oc-btn oc-btn-warning" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暫停</button>
       </span>
       <span class="oc-action-cluster oc-action-cluster-stop" data-danger-zone="paper-session-stop">
         <button class="oc-btn oc-btn-danger oc-btn-critical" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止 Paper</button>
@@ -143,12 +143,12 @@
         <button class="oc-btn oc-btn-destructive" id="btn-stop-all" onclick="sessionStopAll()" disabled title="停止 Paper + Demo 雙引擎 / Stop both Paper and Demo engines">&#x23F9;&#x23F9; 雙停</button>
       </span>
     </span>
-    <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">余额: <strong id="balance-val">--</strong></span>
+    <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">餘額: <strong id="balance-val">--</strong></span>
   </div>
 
   <div id="explain-paper"></div>
 
-  <!-- Market Feed / 實時行情（默認折叠，只读状态，啟停由主仪表盤控制） -->
+  <!-- Market Feed / 實時行情（默認折叠，只讀狀態，啟停由主儀表盤控制） -->
   <details class="oc-collapse">
     <summary>&#x1F4E1; 實時行情 / Market Feed <span id="feed-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px;font-size:10px">--</span></summary>
     <div class="oc-collapse-body">
@@ -157,32 +157,32 @@
     </div>
   </details>
 
-  <!-- Account Balance / 賬户余额 -->
+  <!-- Account Balance / 賬戶餘額 -->
   <div class="oc-card">
-    <h3>&#x1F4B0; 賬户余额 / Account Balance</h3>
+    <h3>&#x1F4B0; 賬戶餘額 / Account Balance</h3>
     <div class="oc-metrics">
-      <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val" id="p-bal-initial">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val" id="p-bal-available">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">初始餘額 / Initial Balance</div><div class="oc-metric-val" id="p-bal-initial">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">可用餘額 / Available Balance</div><div class="oc-metric-val" id="p-bal-available">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">已用保證金 / Margin Used</div><div class="oc-metric-val" id="p-bal-margin">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val" id="p-bal-peak">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">峰值餘額 / Peak Balance</div><div class="oc-metric-val" id="p-bal-peak">--</div></div>
     </div>
   </div>
 
-  <!-- PnL Overview / 盈亏概览 -->
+  <!-- PnL Overview / 盈虧概覽 -->
   <div class="oc-card">
-    <h3>&#x1F4B5; 盈亏概览 / PnL Overview</h3>
+    <h3>&#x1F4B5; 盈虧概覽 / PnL Overview</h3>
     <div class="oc-metrics" id="pnl-metrics">
-      <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="p-net">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">已實現盈亏 / Realized PnL</div><div class="oc-metric-val" id="p-realized">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">未實現盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="p-unrealized">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占總交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades out of total. Above 50% is generally considered good.">勝率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的資金回撤。越小越好。/ Largest peak-to-trough decline in equity. Measures worst-case capital loss. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">淨盈虧 / Net PnL</div><div class="oc-metric-val" id="p-net">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">已實現盈虧 / Realized PnL</div><div class="oc-metric-val" id="p-realized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">未實現盈虧 / Unrealized PnL</div><div class="oc-metric-val" id="p-unrealized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占總交易的百分比。50%以上通常被视為良好。/ Percentage of profitable trades out of total. Above 50% is generally considered good.">勝率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="從峰值到最低點的最大跌幅百分比，衡量最壞情況下的資金回撤。越小越好。/ Largest peak-to-trough decline in equity. Measures worst-case capital loss. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
     </div>
-    <!-- PnL Trend Sparkline / 盈亏趋势迷你圖（SUGGESTION §4.4） -->
+    <!-- PnL Trend Sparkline / 盈虧趨勢迷你圖（SUGGESTION §4.4） -->
     <div style="margin-top:10px">
       <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
-        <span>累計收益趋势 / Cumulative PnL Trend</span>
-        <span style="color:var(--text-dim);font-size:9px">（最近 50 笔成交 / last 50 fills）</span>
+        <span>累計收益趨勢 / Cumulative PnL Trend</span>
+        <span style="color:var(--text-dim);font-size:9px">（最近 50 筆成交 / last 50 fills）</span>
       </div>
       <svg id="pnl-sparkline" width="100%" height="120"
         style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
@@ -202,21 +202,21 @@
     </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>數量</th><th>開倉價</th><th>開倉金额</th><th>標記價</th><th>未實現盈亏</th><th>杠杆</th><th>操作</th></tr></thead>
-        <tbody id="positions-tbody"><tr class="empty-row"><td colspan="11">暂無持倉</td></tr></tbody>
+        <thead><tr><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>數量</th><th>開倉價</th><th>開倉金額</th><th>標記價</th><th>未實現盈虧</th><th>槓桿</th><th>操作</th></tr></thead>
+        <tbody id="positions-tbody"><tr class="empty-row"><td colspan="11">暫無持倉</td></tr></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Active Orders / 活跃訂單
+  <!-- Active Orders / 活躍訂單
        REF-20 R20-P1-U3: 操作欄已移除（cancel button 下架），thead/colspan 同步 9→8。
        REF-20 R20-P1-U3: 操作 column removed (cancel button retired); thead/colspan 9→8 synced. -->
   <div class="oc-card">
-    <h3>&#x1F4DD; 活跃訂單 / Active Orders</h3>
+    <h3>&#x1F4DD; 活躍訂單 / Active Orders</h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>類型</th><th>數量</th><th>價格</th><th>状态</th></tr></thead>
-        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="8">暂無訂單</td></tr></tbody>
+        <thead><tr><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>類型</th><th>數量</th><th>價格</th><th>狀態</th></tr></thead>
+        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="8">暫無訂單</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -229,17 +229,17 @@
 
   <!-- Fill History / 成交歷史 -->
   <details class="oc-collapse">
-    <summary>&#x1F4C4; 成交歷史 / Fill History（最近 50 笔）</summary>
+    <summary>&#x1F4C4; 成交歷史 / Fill History（最近 50 筆）</summary>
     <div class="oc-collapse-body">
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>時間</th><th>交易對</th><th>品類</th><th>方向</th><th>數量</th><th>價格</th><th>成交金额</th><th>手續費</th><th>盈亏 / PnL</th></tr></thead>
+          <thead><tr><th>時間</th><th>交易對</th><th>品類</th><th>方向</th><th>數量</th><th>價格</th><th>成交金額</th><th>手續費</th><th>盈虧 / PnL</th></tr></thead>
           <tbody id="fills-tbody"><tr class="empty-row"><td colspan="9">載入中...</td></tr></tbody>
         </table>
       </div>
       <div class="oc-metrics" style="margin-top:8px">
         <div class="oc-metric"><div class="oc-metric-label" title="本次會話的初始投入資金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="p-fills-capital">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label" title="已實現 + 未實現盈亏 = 當前净收益。正值盈利，負值亏損。/ Realized + Unrealized PnL = current net return.">累計收益 / Net Return</div><div class="oc-metric-val" id="p-fills-return">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label" title="已實現 + 未實現盈虧 = 當前淨收益。正值盈利，負值虧損。/ Realized + Unrealized PnL = current net return.">累計收益 / Net Return</div><div class="oc-metric-val" id="p-fills-return">--</div></div>
       </div>
     </div>
   </details>
@@ -250,7 +250,7 @@
     <div class="oc-collapse-body">
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>時間</th><th>交易對</th><th>方向</th><th>来源</th><th>置信度</th><th>結果</th></tr></thead>
+          <thead><tr><th>時間</th><th>交易對</th><th>方向</th><th>來源</th><th>置信度</th><th>結果</th></tr></thead>
           <tbody id="shadow-tbody"><tr class="empty-row"><td colspan="6">載入中...</td></tr></tbody>
         </table>
       </div>
@@ -321,8 +321,8 @@
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-paper').innerHTML = ocExplain(
-  'Paper 模擬使用真實市场價格但不涉及真實資金。你可以測試策略、練習下單，所有操作都是安全的。綠色數字表示盈利，红色表示亏損。「净盈亏」是扣除手續費和 AI 成本后的净收益。',
-  'Paper 模擬使用 Bybit 公共 WebSocket 的實時價格數據。市價單以當前 ticker 價格加上 0.01% 模擬滑点成交。限價單在市场價格穿越指定價格時成交。引擎跟踪三種盈亏：已實現（已平倉）、未實現（持倉按市值計算）、净值（已實現减去手續費和 AI 諮詢成本）。'
+  'Paper 模擬使用真實市場價格但不涉及真實資金。你可以測試策略、練習下單，所有操作都是安全的。綠色數字表示盈利，红色表示虧損。「淨盈虧」是扣除手續費和 AI 成本後的淨收益。',
+  'Paper 模擬使用 Bybit 公共 WebSocket 的實時價格數據。市價單以當前 ticker 價格加上 0.01% 模擬滑點成交。限價單在市場價格穿越指定價格時成交。引擎跟蹤三種盈虧：已實現（已平倉）、未實現（持倉按市值計算）、淨值（已實現減去手續費和 AI 諮詢成本）。'
 );
 
 // REF-20 R20-P1-U3: explain-order ocExplain 已移除（manual submit form 下架）
@@ -362,7 +362,7 @@ async function sessionAction(action) {
     // 等待引擎狀態穩定後再重新加載
     setTimeout(loadAll, action === 'start' ? 3000 : 1000);
   } else {
-    ocToast('操作失败', 'error');
+    ocToast('操作失敗', 'error');
   }
 }
 
@@ -391,16 +391,16 @@ async function loadSession() {
   const d = await ocApi('/api/v1/paper/session/status');
   if (!d || !d.data) {
     // Show error in session badge so user knows engine is unreachable
-    // 在 session badge 顯示錯誤，讓用户知道引擎不可达
+    // 在 session badge 顯示錯誤，讓用戶知道引擎不可達
     const badge = $('session-badge');
-    if (badge) { badge.textContent = '连接失败 / Connection failed'; badge.className = 'oc-chip oc-chip-bad'; }
+    if (badge) { badge.textContent = '連接失敗 / Connection failed'; badge.className = 'oc-chip oc-chip-bad'; }
     return;
   }
   const s = d.data.session;
   const state = s.session_state;
 
   const badge = $('session-badge');
-  const stateLabels = { active: '運行中 (Rust)', starting: '啟動中...', observing: '觀察中', stopped: '已停止', paused: '已暂停', offline: '离線', idle: '未啟動' };
+  const stateLabels = { active: '運行中 (Rust)', starting: '啟動中...', observing: '觀察中', stopped: '已停止', paused: '已暫停', offline: '離線', idle: '未啟動' };
   badge.textContent = stateLabels[state] || state;
   if (state === 'active') badge.className = 'oc-chip oc-chip-good';
   else if (state === 'observing') badge.className = 'oc-chip oc-chip-good';  // engine alive
@@ -471,7 +471,7 @@ async function loadSession() {
 
 async function loadPositions() {
   const d = await ocApi('/api/v1/paper/positions');
-  if (!d || !d.data) { ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadPositions()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11" style="color:var(--text-dim)">⚠ 連接失敗 / Connection failed <button class="oc-btn" onclick="loadPositions()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
   const raw = d.data.positions || d.data || {};
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
   _cachedPositions = positions;
@@ -487,7 +487,7 @@ async function loadPositions() {
   ocSetText('p-bal-margin', totalMargin > 0 ? ocBalance(totalMargin, 2) : '$0.00');
 
   if (!positions.length) {
-    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11">暂無持倉</td></tr>');
+    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11">暫無持倉</td></tr>');
     return;
   }
   let html = '';
@@ -522,7 +522,7 @@ async function loadPositions() {
   ocSetHtml('positions-tbody', html);
 }
 
-// ── Paper close confirm modal / 模擬平倉确認對話框 ─────────────────────────
+// ── Paper close confirm modal / 模擬平倉確認對話框 ─────────────────────────
 let _paperCloseCallback = null;
 function openPaperCloseModal(title, body, onConfirm) {
   document.getElementById('paper-confirm-title').textContent = title;
@@ -543,15 +543,15 @@ async function closePosition(symbol) {
   // Close a single paper position via IPC close_position command.
   // 通過 IPC close_position 指令平掉單一持倉。
   openPaperCloseModal(
-    '确認平倉 / Confirm Close',
-    '确認平倉 ' + symbol + '？此操作会立即關閉該持倉。\nConfirm close ' + symbol + '?',
+    '確認平倉 / Confirm Close',
+    '確認平倉 ' + symbol + '？此操作會立即關閉該持倉。\nConfirm close ' + symbol + '?',
     async function() {
       const d = await ocPost('/api/v1/paper/positions/' + encodeURIComponent(symbol) + '/close', {});
       if (d) {
         ocToast(symbol + ' 平倉指令已發送 / close sent', 'success');
         setTimeout(loadPositions, 1000);
       } else {
-        ocToast(symbol + ' 平倉失败 / close failed', 'error');
+        ocToast(symbol + ' 平倉失敗 / close failed', 'error');
       }
     }
   );
@@ -561,15 +561,15 @@ async function closeAllPositions() {
   // Close all paper positions without stopping the session.
   // 平掉所有 Paper 持倉，不停止 session（引擎繼續運行）。
   openPaperCloseModal(
-    '确認全部平倉 / Confirm Close ALL',
-    '确認平掉所有 Paper 持倉？此操作会立即關閉所有持倉，策略繼續運行。\nConfirm close ALL Paper positions? Strategies continue running.',
+    '確認全部平倉 / Confirm Close ALL',
+    '確認平掉所有 Paper 持倉？此操作會立即關閉所有持倉，策略繼續運行。\nConfirm close ALL Paper positions? Strategies continue running.',
     async function() {
       const d = await ocPost('/api/v1/paper/close-all-positions', {});
       if (d) {
         ocToast('全部平倉指令已發送 / close all sent', 'success');
         setTimeout(loadAll, 1500);
       } else {
-        ocToast('平倉失败 / close failed', 'error');
+        ocToast('平倉失敗 / close failed', 'error');
       }
     }
   );
@@ -579,11 +579,11 @@ async function loadOrders() {
   // REF-20 R20-P1-U3: 操作欄 cancel button 已下架，render 改為 8 列（原 9 列）
   // REF-20 R20-P1-U3: 操作 column cancel button retired; render 8 cols (was 9)
   const d = await ocApi('/api/v1/paper/orders');
-  if (!d || !d.data) { ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadOrders()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">⚠ 連接失敗 / Connection failed <button class="oc-btn" onclick="loadOrders()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
   const orders = d.data.orders || d.data || [];
   const active = orders.filter(o => o.state === 'paper_order_working' || o.state === 'paper_order_partially_filled');
   if (!active.length) {
-    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8">暂無活跃訂單</td></tr>');
+    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8">暫無活躍訂單</td></tr>');
     return;
   }
   let html = '';
@@ -609,11 +609,11 @@ async function loadOrders() {
 
 async function loadFeed() {
   const d = await ocApi('/api/v1/paper/market-feed/status');
-  if (!d || !d.data) { const fb = $('feed-badge'); if (fb) { fb.textContent = '连接失败 / Failed'; fb.className = 'oc-chip oc-chip-bad'; } return; }
+  if (!d || !d.data) { const fb = $('feed-badge'); if (fb) { fb.textContent = '連接失敗 / Failed'; fb.className = 'oc-chip oc-chip-bad'; } return; }
   const f = d.data;
   const running = f.dispatcher_running || f.running || f.is_running || false;
   const badge = $('feed-badge');
-  badge.textContent = running ? '已连接' : '未连接';
+  badge.textContent = running ? '已連接' : '未連接';
   badge.className = 'oc-chip ' + (running ? 'oc-chip-good' : 'oc-chip-neutral');
 
   const prices = f.prices || f.latest_prices || {};
@@ -637,10 +637,10 @@ async function loadFeed() {
 
 async function loadFills() {
   const d = await ocApi('/api/v1/paper/fills');
-  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">⚠ 連接失敗 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
   const fills = d.data.fills || d.data || [];
   if (!fills.length) {
-    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9">暂無成交</td></tr>');
+    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9">暫無成交</td></tr>');
     return;
   }
   let html = '';
@@ -664,13 +664,13 @@ async function loadFills() {
   });
   ocSetHtml('fills-tbody', html);
 
-  // Update PnL trend chart from fill PnL data / 从成交盈亏數據更新趋势圖
+  // Update PnL trend chart from fill PnL data / 從成交盈虧數據更新趨勢圖
   ocPnlTrend('pnl-sparkline-line', 'pnl-sparkline-label', fills, 'pnl-sparkline-zero');
 }
 
 async function loadMetrics() {
   const d = await ocApi('/api/v1/paper/metrics');
-  if (!d || !d.data) { ocSetHtml('perf-metrics', '<div class="oc-loading">暂無指標數據</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('perf-metrics', '<div class="oc-loading">暫無指標數據</div>'); return; }
   const m = d.data;
   const metrics = ocPerformanceMetricsFromPayload(m);
   const dm = m.drawdown_metrics || {};
@@ -701,10 +701,10 @@ async function loadMetrics() {
 
 async function loadShadow() {
   const d = await ocApi('/api/v1/paper/shadow/decisions');
-  if (!d || !d.data) { ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">⚠ 连接失败 / Load failed</td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">⚠ 連接失敗 / Load failed</td></tr>'); return; }
   const decisions = d.data.decisions || d.data || [];
   if (!decisions.length) {
-    ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6">暂無影子決策</td></tr>');
+    ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6">暫無影子決策</td></tr>');
     return;
   }
   let html = '';
@@ -869,11 +869,11 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperHandoff() {
 });
 </script>
 
-<!-- Paper Close Confirm Modal / 模擬平倉确認弹窗 -->
+<!-- Paper Close Confirm Modal / 模擬平倉確認彈窗 -->
 <div id="paper-confirm-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.6);align-items:center;justify-content:center">
   <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;width:min(420px,90vw);box-shadow:0 20px 50px rgba(0,0,0,0.5)">
     <div style="padding:16px 20px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center">
-      <h3 id="paper-confirm-title" style="margin:0;font-size:14px;font-weight:600">确認操作</h3>
+      <h3 id="paper-confirm-title" style="margin:0;font-size:14px;font-weight:600">確認操作</h3>
       <button onclick="closePaperCloseModal()" style="background:none;border:none;color:#8b949e;font-size:18px;cursor:pointer">&#x2715;</button>
     </div>
     <div style="padding:16px 20px">
@@ -881,7 +881,7 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperHandoff() {
     </div>
     <div style="padding:12px 20px;border-top:1px solid #21262d;display:flex;gap:8px;justify-content:flex-end">
       <button class="oc-btn" onclick="closePaperCloseModal()">取消 / Cancel</button>
-      <button class="oc-btn oc-btn-danger oc-btn-critical" onclick="confirmPaperClose()">确認平倉 / Confirm Close</button>
+      <button class="oc-btn oc-btn-danger oc-btn-critical" onclick="confirmPaperClose()">確認平倉 / Confirm Close</button>
     </div>
   </div>
 </div>
