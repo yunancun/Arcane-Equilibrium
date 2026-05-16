@@ -3,7 +3,7 @@
 ## 項目狀態快照（2026-05-16 W-AUDIT-8b Stage 0R）
 
 - Funding Skew Stage 0R tooling gap closure source/test done: report packet now emits panel metadata, per-symbol breakdown, settlement-window sensitivity, baseline lift, flat cost model/cost-edge ratio, 60m + 8h bootstrap, PBO metadata, and plateau check.
-- Adversarial hardening after QC/E2/MIT/BB review: `K_new` is floored at 4050 with actual/min metadata, final default `--k-prior-mode` is `strict-funding-skew`, selected pooled/branch/symbol metrics use one fixed parameter family, settlement-window rows are excluded from eligibility but reported as sensitivity, mixed funding source modes fail closed, PBO uses day-block CSCV instead of unusable 7d embargo, and SQL forward returns require exact 15/30/60m horizons.
+- Adversarial hardening after QC/E2/MIT/BB review landed at commit `1499778b`: `K_new` is floored at 4050 with actual/min metadata, final default `--k-prior-mode` is `strict-funding-skew`, selected pooled/branch/symbol metrics use one fixed parameter family, settlement-window rows are excluded from eligibility but reported as sensitivity, mixed funding source modes fail closed, PBO uses day-block CSCV instead of unusable 7d embargo, and SQL forward returns require exact 15/30/60m horizons.
 - `--k-prior-mode` still exposes `funding-related` / `strict-funding-skew` / `all` for sensitivity; Round 2 verdict still waits for panel >= 7d and QC/MIT/BB review.
 - No demo/live/paper/config/auth/runtime mutation occurred.
 
