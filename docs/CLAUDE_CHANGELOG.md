@@ -1,7 +1,23 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-16（Wave 2 closed: WP-03/04/07/10）
+> 最後更新：2026-05-16（Wave 3 closed: WP-06/08/13）
+
+### Wave 3 CLOSED — WP-06 Performance + WP-08 ML Pipeline + WP-13 Reconciler — 2026-05-16
+
+**Commit**: `f31b6e8f`
+
+**WP-06 Performance Hot Path (P1)**：E5 clone audit 完成（57 clones in `step_4_5_dispatch.rs`，34 avoidable=60%，Arc<str> migration on `OrderIntent.symbol/strategy` 為最高槓桿 quick-win -104 LOC / 6 clones）。state_compiler `compile_state()` deepcopy 3→2：cache-miss path 不再對 result 做第三次 deepcopy，改為 cache 存 `deepcopy(result)` + caller 直接拿 compiled（已是 input deepcopy）。
+
+**WP-08 ML Pipeline Maturity (P1)**：
+- MIT-DB-6：`realized_edge_stats.py` SQL 從 `= %(engine_mode)s` 改為 `= ANY(%(engine_modes)s)` + `_engine_mode_scope()` helper（'live'→['live','live_demo']），對齊 43k 歷史 live_demo rows
+- MIT-P1-2：`edge_estimate_validation.py` 新增 `purge_days: int = 0` 參數，walk-forward OOS 在 train_end 和 test_start 間插入 purge gap 消除自相關 look-ahead bias
+
+**WP-13 Reconciler Stale cmd_tx (P1)**：Demo position reconciler 從 by-value `cmd_tx` clone 改為 `DemoCmdSenderSlot` + `ReconcilerCommandTxProvider` closure（slot-indirect-read），對齊 live reconciler 已有的 pattern。Pipeline restart 後不再向 stale channel 發送。4 Rust files changed。
+
+**E2 review**: 0 CRITICAL / 0 HIGH / 1 MEDIUM pre-existing（main_boot_tasks.rs 858 LOC）/ 2 LOW cosmetic → PASS。
+
+---
 
 ### Wave 2 CLOSED — WP-03 OU Sigma + WP-04 AI Observability + WP-07 Dead Code + WP-10 Bybit — 2026-05-16
 
