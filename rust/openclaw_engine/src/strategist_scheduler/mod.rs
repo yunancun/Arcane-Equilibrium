@@ -57,6 +57,15 @@ use tracing::{debug, info, warn};
 /// `RiskConfig.strategist.max_param_delta_pct`，本常量僅作為缺 store 時的備援。
 pub const DEFAULT_MAX_PARAM_DELTA_PCT: f64 = 0.50;
 
+/// F-09 MODEL-TIER-EXTRACTION (2026-05-16, WP-04 follow-up)：缺 RiskConfig store
+/// 時 `model_tier` 的後備值。與 `StrategistConfig::default()` / 三份
+/// `risk_config_{paper,demo,live}.toml` 的 `[strategist] model_tier` source
+/// default 對齊（"l1_9b"）。同時與 Python `ai_service_dispatch.py`
+/// `_handle_strategist` 的 `params.get("model_tier", "l1_9b")` default 對齊，
+/// 保留 backward compat。
+/// F-09：缺 store 時 model_tier 後備，與 source default / Python default 對齊。
+pub const DEFAULT_STRATEGIST_MODEL_TIER: &str = "l1_9b";
+
 /// Weight sum target for confluence weights (65-point scale).
 /// 匯合權重目標總和（65 分制）。
 const WEIGHT_SUM_TARGET: f64 = 65.0;
@@ -245,6 +254,20 @@ impl StrategistScheduler {
             .as_ref()
             .map(|store| store.load().strategist.max_param_delta_pct)
             .unwrap_or(DEFAULT_MAX_PARAM_DELTA_PCT)
+    }
+
+    /// F-09 MODEL-TIER-EXTRACTION (2026-05-16, WP-04 follow-up)：從 risk_store
+    /// 取當前 `strategist.model_tier` 快照；缺 store 時走 [`DEFAULT_STRATEGIST_MODEL_TIER`]
+    /// 後備（測試 / 啟動瞬間 / 直接 IPC 呼叫保留現行語意）。pattern 同
+    /// `current_max_param_delta_pct`。ArcSwap 無鎖讀取，hot-path 安全。
+    /// 本 helper 只負責 **static tier 提取**；future dynamic routing（依 decision
+    /// complexity 切換 27B / L1.5 / L2）留 P2-F-09b ticket，會在 caller 層再加
+    /// routing logic 包這個 snapshot。
+    fn current_model_tier(&self) -> String {
+        self.risk_store
+            .as_ref()
+            .map(|store| store.load().strategist.model_tier.clone())
+            .unwrap_or_else(|| DEFAULT_STRATEGIST_MODEL_TIER.to_string())
     }
 
     /// Tune target introspection (mainly for tests + status logging).

@@ -2535,3 +2535,30 @@ Wave 1 commit `cabb2fcd` 39 files +1830 -200。Wave 2 working tree 12 files modi
 - Report: srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_e2_review.md
 2026-05-16 W-AUDIT-8a C1 v2 harness review (5983f955) → RETURN to E1: HIGH-1 connection_errors grab-bag misclassify keepalive_warning as FAIL_RECONNECT_EXHAUSTED + MEDIUM-1 missing reconnect_failures<3 PASS gate (BB §5.3 c violation); 36/36 test PASS 但 corner case 漏; v1 untouched / 0 prod imports / cross-platform clean / file size 942>800 warn; report: /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_e2_review.md
 2026-05-16 W-AUDIT-8a C1 v2 harness E2 RE-REVIEW (dbd0277c on worktree-agent-a58d99ef4ea1a440b) → PASS to PM merge: 4 fix 全 verified (UTC 5min buffer + atomic write + keepalive_warnings split + reconnect_failures<3 gate); 49/49 test PASS; v1 untouched / cross-platform 0 hit / chinese-only OK / LOC 1045 < 2000 hard cap; 1 LOW: SMOKE_PASS_NOT_C1_PROOF blocker text 在 24h+ low uptime edge 印錯 "Duration X < required Y" (不影響 PASS/FAIL); 不退 E1 / 標 P2 follow-up; report: /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_e2_re_review.md
+
+---
+
+## 2026-05-16 — P1 #5 F-09 + P1 #7 [68] dual review
+
+**F-09 model_tier TOML extraction (APPROVE 0 必修)**：
+- ArcSwap snapshot `current_model_tier()` 與既有 `current_max_param_delta_pct()` 100% 對稱 — pattern verified safe；無 race；無 lexical shadow。
+- 三層 fallback 全綠（缺 store / 缺 section / 缺 field）；validate() 拒空字串 + 純空白；test `_rejects_empty_or_whitespace_model_tier` + `_honors_custom_model_tier` 覆蓋 caller honor / mismatch 路徑。
+- `validate()` 不綁 enum：E1 sign-off §6.3 明示 trade-off 保留 P2-F-09b dynamic routing 空間；寬鬆 validate 接受。
+- cargo check Mac aarch64 PASS (0 new warning)。
+- Bilingual comment 規範：F-09 新區段全中文（2026-05-05 governance default），舊 STRATEGIST 區段保留對照未動 — 對齊「移除英文只在修改既有對照塊時觸發」規則。
+
+**[68] portfolio_resting_exposure healthcheck (APPROVE-CONDITIONAL 3 LOW)**：
+- SQL injection check ✅ — `%s` placeholder 全程，無 f-string concat。
+- Per-engine race ✅ — runner 主 conn 單一 cursor serial，4 engine loop 同 cur。
+- ID 衝突確認：[58]=W-AUDIT-9 T4 + [58a]=W5-E1-A 都已占用 → E1 取 [68] 正確；建議 PM 採納，不退回。
+- LOW-1: FALLBACK_CORRELATED_CAP_PCT 不分 engine（live 真實 40% / paper 80% / demo 65%）— 當前三 TOML 都有 cap 不觸發；建議改 dict mapping。
+- LOW-2: live + live_demo 共讀 `pipeline_snapshot_live.json` — future Mainnet 啟動可能 double-count filled positions。當前 LiveDemo only 不傷 verdict。
+- LOW-3: runner.py docstring 把 [68] 列正確 cursor 區。
+- E4 必跑 Linux PG dry-run（per feedback_v_migration_pg_dry_run）— Mac mock 不 cover 真實 trading.orders schema / engine_mode enum / DISTINCT ON index。
+
+**對抗 lesson learnt**：
+- 「`live_demo` snapshot 路徑你怎麼處理？」— 必驗 `event_consumer/bootstrap.rs:901` `pipeline_kind.db_mode()` 只回 paper/demo/live，LiveDemo runtime 寫 `pipeline_snapshot_live.json`。E1 IMPL ENGINE_TO_SNAPSHOT 正確 map 兩個 engine 到同檔。
+- 「fallback cap 是否環境感知？」— LOW 風險但驗 fallback 路徑在當前 0 觸發；建議改 dict mapping 預防 TOML drift。
+- W-AUDIT-7c lexical scope shadow 教訓不適用：F-09 是 Rust + add new field，無 JS-style scope shadow 風險；Python healthcheck import 純 top-level re-export 也無 shadow。
+
+**Verdict**：PM 可 commit + push 兩個 IMPL（建議 batch 加 LOW-1 dict 修）。

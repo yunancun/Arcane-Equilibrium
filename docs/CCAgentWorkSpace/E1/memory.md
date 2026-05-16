@@ -9579,3 +9579,122 @@ PA dispatch（Wave 1.5 NEW，per Track A3 portfolio_var verify finding）：fix 
 ## 2026-05-16 W-AUDIT-8a C1 v2 harness consolidated 6-fix (A3 + E2 return)
 
 Worktree `agent-a58d99ef4ea1a440b` commit `dbd0277c`（origin pushed）。基於 v2 IMPL `5983f955` 上加 6 fix：(1) UTC midnight 5min buffer (2) atomic checkpoint + latest report write (3) keepalive_warnings 拆獨立 field + fatal prefix whitelist (4) assess() PASS path reconnect_failures<3 gate + new FAIL_RECONNECT_INSTABILITY verdict (5) wrapper script `run_c1_v2_proof.sh` 含 `--smoke-60s` flag (6) `--max-restart` help text 清楚化。Test 36→49 (+13)，非 flaky 兩遍 PASS (0.007s/0.006s)。v1 0 改動。教訓：A3 CRITICAL boundary case test 用 MagicMock 對 datetime <= 比較會撞 TypeError；改用真實 datetime 物件雙次 side_effect 就 clean；不要 over-mock。Self-report 寫 main repo path，不入 worktree commit。
+
+---
+
+## 2026-05-16 — P1 #5 F-09 model_tier TOML extraction（E1）
+
+### 任務
+WP-04 follow-up：`evaluate.rs:412` 硬碼 `"model_tier": "l1_9b"` 抽到 `[strategist]` TOML config + `RiskConfig.strategist.model_tier` ArcSwap 熱重載；27B / L1.5 / L2 切換不再需要 Rust rebuild。
+
+### IMPL
+- `risk_config_advanced.rs:+30` — `StrategistConfig` 加 `model_tier: String` field + `#[serde(default = "default_strategist_model_tier")]` + `default = "l1_9b"`；`Default` impl 補同步；`validate()` 加 `trim().is_empty()` 拒絕（非 enum 限定，保留 future P2-F-09b dynamic routing 餘地）。
+- `strategist_scheduler/mod.rs:+18` — 加 `DEFAULT_STRATEGIST_MODEL_TIER: &str = "l1_9b"` 常量 + `current_model_tier()` snapshot helper（mirror `current_max_param_delta_pct` 的 ArcSwap pattern）。
+- `strategist_scheduler/evaluate.rs:+22 / -3` — `evaluate_cycle()` L153 後 snapshot model_tier 傳給 `build_strategist_eval_payload`；後者 signature 加 `model_tier: &str` 參數，舊 `"model_tier": "l1_9b"` 硬碼改讀；新增 P2-F-09b dynamic routing TODO 標識。
+- `risk_config_tests.rs:+60 / -10` — 既有 5 個 strategist test 改 `..Default::default()` spread（直 struct literal 漏新欄位 = compile error，是 F-09 設計目的之一）；新增 `test_strategist_config_validate_rejects_empty_or_whitespace_model_tier` 6 個 bad / 6 個 ok case；`test_strategist_config_defaults` / `_toml_roundtrip` / `_partial_fallback` 加 model_tier 斷言（含 partial fill：只填 delta 補 tier default、只填 tier 補 delta default）。
+- `evaluate.rs::tests:+22` — 加 `test_build_strategist_eval_payload_honors_custom_model_tier`（傳 `"l1_27b"` 必鏡像穿透 payload）+ 既有 `test_build_strategist_eval_payload_includes_wide_adjustment_skill` 加 model_tier default 斷言。
+- `risk_config_paper.toml` / `risk_config_demo.toml` / `risk_config_live.toml` — `[strategist]` section 各加一行 `model_tier = "l1_9b"` + F-09 雙語 doc comment 區塊。
+
+### 驗證
+- `cargo check --target aarch64-apple-darwin --lib`：PASS（2 個 pre-existing warning 與 F-09 無關）。
+- `cargo check --target aarch64-apple-darwin --release --lib`：PASS。
+- `cargo test --lib --release strategist_scheduler::`：36/0/0（含 2 個新加 + 既有 34）。
+- `cargo test --lib --release config::risk_config`：150/0/0（含 6 個 strategist tests + `test_lg2_t4_real_toml_files_parse_and_validate` 真實 3 個 TOML 載入驗證）。
+- `cargo test --lib --release`：**2917/0/1**（baseline 2915 + 2 new）；0 regression。
+- `cargo test --release --bin openclaw-engine`：62/0/0。
+- `cargo fmt --check`：F-09 改的 4 region 0 diff（pre-existing 別人寫的 fmt drift 不在 F-09 scope）。
+- `grep -E '(/home/ncyu|/Users/[^/]+)' <F-09 files>`：0 命中。
+- `grep '"l1_9b"' evaluate.rs`：剩 (1) 注釋指引 (2) test caller 傳值 — 0 production hardcoded payload write。
+
+### 教訓
+- **完整 mirror existing pattern 是 P1 extraction 工作的最低風險路徑**：`max_param_delta_pct` 已實裝完整 store→snapshot→caller→payload→hot-reload→validate 鏈，F-09 完全鏡像不發明新模式，全套 review/test 邊界明確。
+- **`..Default::default()` spread 不是純風格選擇，是設計強制**：5 個既有 struct literal test 改 spread 後，未來加任一新欄位編譯即時失敗、不會 silent drop；E2 review 時可信「沒有 callsite 漏新欄位」。
+- **`validate()` 不綁 enum 保留 future 設計空間**：本 IMPL 只擋 `trim().is_empty()`，不限定 `"l1_9b"|"l1_27b"|"l1_5"|"l2"`。P2-F-09b dynamic routing 可能加新 tier 名（如 `"haiku_3.5"`）或讓 operator 自訂 routing key，硬綁 enum 會逼 rebuild。validate 邊界放在 caller 端（Python `_handle_strategist` 字串等值比對 / Ollama config 解析錯誤）。
+- **TOML default 與 Python default 對齊是 backward compat 關鍵**：Python `params.get("model_tier", "l1_9b")` 在缺欄位時回 `"l1_9b"`，Rust source default 同值才能保證「升級不破 runtime」。新增 `[strategist] model_tier` TOML 行其實只是「顯式化既有默認值」，runtime 行為對 untouched config 不變。
+- **rustfmt false alarm 來自 standalone 模式不讀 Cargo.toml edition**：`rustfmt --check` 直跑會把 `async fn` 當 Rust 2015 噴 E0670；正確命令是 `cargo fmt --check` 走 Cargo 統一上下文。Pre-existing fmt drift 在 `account_manager.rs` / `canary_promotion.rs` 等大量別人寫的舊行屬「最小影響」原則 scope 外，不順手修。
+
+### Acceptance criteria self-check
+1. ✅ `evaluate.rs` 原 L412 硬碼 `"l1_9b"` 完全移除，改讀 `RiskConfig.strategist.model_tier` 快照
+2. ✅ TOML `[strategist]` 加 `model_tier = "l1_9b"` 預設值（backward compat 保證）
+3. ✅ `model_tier` field 含中文 doc comment（CLAUDE.md §七 2026-05-05 規）
+4. ✅ `cargo check --release` PASS
+5. ✅ F-09 改動範圍 `cargo fmt --check` clean
+6. ✅ 不做 dynamic model routing（留 P2-F-09b ticket，TODO 標識已落地）
+7. ✅ 不做 27B canary / sweep 設計
+8. ✅ 0 hardcoded user-home 路徑
+9. ✅ 不動其他 file（純 F-09 scope）；只 6 files：3 TOML + 3 Rust source + 1 test
+
+### Report path
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--f09_model_tier_toml_extraction.md`
+
+---
+
+## 2026-05-16 — P2-PORTFOLIO-RESTING-58-HEALTHCHECK IMPL（E1，升 P1 per FA）
+
+### 任務
+PM 派 P1 #7。P1-PORTFOLIO-RESTING-EXPOSURE-1 (commit `9980448a`) IMPL
+`compute_effective_long_short_notional` SoT helper 後，6 P2 follow-up 之一升 P1
+（FA verdict Stage 1 demo 啟前 mandatory）。IMPL `[58]` healthcheck 監測
+paper_state resting maker orders effective notional exposure（A3 WARN-1 + E2 LOW-1 + PA §8）。
+
+### Push back（重要 — ID 衝突）
+PM dispatch + PA spec + TODO + A3 + E2 全寫 `[58]` 但 runner 真實 `[58]` 已被
+**W-AUDIT-9 T4 `graduated_canary_stage_invariant`** 占用（2026-05-09 land）。
+取下一自由 slot **`[68]`**；name `portfolio_resting_exposure_lineage` 保留。
+若 PM 要求改 sub-suffix（`[58b]` etc.）只需改 ID 字串不需動 logic。
+
+### IMPL
+1. **新檔 `checks_portfolio_resting_exposure.py` (+562 LOC)**：
+   - `check_68_portfolio_resting_exposure(cur) -> tuple[str, str]` main check
+   - 6 helper：`_enabled` / `_status_for` / `_lookback_hours` / `_data_dir` /
+     `_base_dir` / `_read_correlated_cap_pct` / `_read_snapshot` /
+     `_filled_notional_from_snapshot` / `_resting_notional_from_pg`
+   - 每 engine (paper/demo/live/live_demo) 各跑一次：snapshot JSON 抽 filled +
+     PG `trading.orders+order_state_changes` 抽 Working orders → resting notional
+2. **新檔 `test_portfolio_resting_exposure_healthcheck.py` (+408 LOC)**：10 unit test
+   PASS / WARN / FAIL fixture + 7 edge case
+3. **`runner.py` (+43 LOC)**：import + cursor block wire + 兩 docstring list 補 `[68]`
+4. **`__init__.py` (+14 LOC)**：re-export
+
+### 驗證
+- 新 10 test PASS（`-v` mode）
+- 全 healthcheck regression：236 test PASS, 0 fail
+- `python3 -m py_compile <4 files>` ALL OK
+- `python3 -m helper_scripts.db.passive_wait_healthcheck --help` 顯示 `[68]`
+- `grep -E '/home/ncyu|/Users/[^/]+/' <new files>` 0 命中
+- 注釋全中文（per 2026-05-05 governance）
+- 0 動 paper_state IMPL / intent_processor / risk_config TOML / live auth / lease
+
+### 教訓
+1. **ID collision 必先 grep**：dispatch spec 寫的 healthcheck ID 不要無條件採用。
+   先 `grep -oE '\[\s*[0-9]+[a-z]?\s*\]' runner.py | sort -u` 確認真實已占用。
+   PA / A3 / E2 reports 都可能因平行作業引用過時 ID 號碼。本 IMPL 取下一自由
+   slot + memory log 標明，由 PM 終裁。
+2. **PaperStateSnapshot 不含 resting_limit_orders**：filesystem snapshot path 只能
+   拿 filled。resting 必走 PG `trading.orders`。snapshot 設計選擇影響 healthcheck
+   能力邊界——未來若 paper engine 加 resting export 是 mainstream IPC + DB 雙寫，
+   不光是 healthcheck。
+3. **per-engine loop + 跳過 snapshot 缺**：對齊 sibling `[59]` h0_block_acceptance
+   pattern；snapshot 缺單 engine 跳過不影響其他 engine evidence，全 engine 缺才
+   PASS-skipped。`[57]` opt-in env / `[58]` opt-in + cohort 與此互補。
+4. **live + live_demo 共用 live snapshot**：兩者 pipeline 共用 `pipeline_snapshot_live.json`
+   但 `engine_mode` 不同。本 check loop 4 engine 等於用同 snapshot 雙重計算
+   filled notional，但 PG resting query 用 engine_mode 過濾各自獨立。**E4
+   Linux 驗時須確認此設計合理**——可能需要把 live + live_demo 合併計算或
+   skip 其中一個。
+5. **cap reference 用 `correlated_exposure_max_pct` 而非 `total_exposure_max_pct`**：
+   A3 WARN-1 「leverage chain semantic drift」對應單向 cap。雙向加總對應 total cap。
+   本 IMPL 每方向獨立查（PM dispatch `long_exposure_max + short_exposure_max`）
+   故取 correlated cap。
+6. **`DISTINCT ON (order_id) ORDER BY order_id, ts DESC` 取每 order 最新 state**：
+   PG event-sourced design pattern；走 V003 PK `(order_id, ts)` index。lookback
+   視窗（default 24h）避免拉整個 hypertable。
+7. **TOML cap parse 兩 layout fallback**：頂層 key + `[exposure]`/`[risk]` section
+   都試一次，避未來 risk_config TOML 結構偏移時 hardcode 寫死位置。fail-soft
+   不 raise，回 default 65% + diagnostic msg。
+8. **Mock test 不等於 Linux PG dry-run**（per `feedback_v_migration_pg_dry_run`）：
+   mock 假設 trading.orders schema 對齊 V003 + V015。E4 必跑 Linux runtime 驗
+   真實 PG schema / engine_mode enum / Working orders 真實分佈。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--healthcheck_58_portfolio_resting_exposure.md`

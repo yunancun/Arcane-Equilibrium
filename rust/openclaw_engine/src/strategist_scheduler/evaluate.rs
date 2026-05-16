@@ -151,8 +151,18 @@ impl StrategistScheduler {
                 serde_json::to_value(&ranges_json).unwrap_or_else(|_| Value::Array(vec![]));
 
             let max_delta_pct = self.current_max_param_delta_pct();
-            let params =
-                build_strategist_eval_payload(pair, &current_json, ranges_value, max_delta_pct);
+            // F-09 MODEL-TIER-EXTRACTION (2026-05-16)：從 RiskConfig.strategist
+            // 快照 model_tier，取代 build_payload 內舊的 "l1_9b" 硬碼。
+            // 缺 store 時 current_model_tier() 回 DEFAULT_STRATEGIST_MODEL_TIER
+            // 後備，保 backward compat。
+            let model_tier = self.current_model_tier();
+            let params = build_strategist_eval_payload(
+                pair,
+                &current_json,
+                ranges_value,
+                max_delta_pct,
+                &model_tier,
+            );
 
             let response = match self.ai_client.request("strategist_evaluate", params).await {
                 Some(r) => r,
@@ -401,11 +411,21 @@ impl StrategistScheduler {
     }
 }
 
+/// 構建 strategist_evaluate IPC payload。
+///
+/// F-09 MODEL-TIER-EXTRACTION (2026-05-16, WP-04 follow-up)：原先把
+/// `model_tier` 硬寫 `"l1_9b"`，無法切 27B / L1.5 / L2 而不 rebuild。
+/// 升級為 caller 傳入（caller 已從 `RiskConfig.strategist.model_tier`
+/// ArcSwap 快照讀），TOML 或 IPC `patch_risk_config` `<60s` 熱重載即可換 tier。
+/// 本函數只負責 **static tier 注入**；future dynamic routing（依
+/// decision complexity 動態選 tier）留 P2-F-09b ticket — caller 層加包裝
+/// 即可，不必動本函數 signature。
 fn build_strategist_eval_payload(
     pair: &PairMetrics,
     current_json: &Value,
     ranges_value: Value,
     max_delta_pct: f64,
+    model_tier: &str,
 ) -> Value {
     serde_json::json!({
         "intel": {
@@ -415,8 +435,13 @@ fn build_strategist_eval_payload(
             "avg_pnl": pair.avg_pnl,
             "fill_count": pair.fill_count,
         },
-        // TODO(WP-04): 提取到 [strategist] TOML config — 目前硬編碼 l1_9b
-        "model_tier": "l1_9b",
+        // F-09 MODEL-TIER-EXTRACTION (2026-05-16)：原硬碼 "l1_9b" 已抽
+        // 至 RiskConfig.strategist.model_tier；caller 從 ArcSwap snapshot 傳入。
+        // 缺 store 時 caller 自帶 DEFAULT_STRATEGIST_MODEL_TIER 後備保 backward compat。
+        // TODO(P2-F-09b): dynamic model routing — caller 包裝層按 decision
+        // complexity (簡單 9B / 中等 27B / 複雜 L1.5 / 戰略 L2) 動態選 tier；
+        // 不必動本函數 signature。
+        "model_tier": model_tier,
         "current_params": current_json,
         "param_ranges": ranges_value,
         "strategist_skill": {
@@ -474,7 +499,8 @@ mod tests {
             }
         ]);
 
-        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.50);
+        // F-09：傳 default tier 對齊 backward compat baseline。
+        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.50, "l1_9b");
 
         assert_eq!(
             payload["strategist_skill"]["name"],
@@ -484,5 +510,28 @@ mod tests {
         assert_eq!(payload["strategist_skill"]["max_delta_pct"], 0.50);
         assert_eq!(payload["intel"]["fill_count"], 42);
         assert_eq!(payload["current_params"]["cooldown_ms"], 100_000);
+        // F-09 MODEL-TIER-EXTRACTION：default backward-compat tier。
+        assert_eq!(payload["model_tier"], "l1_9b");
+    }
+
+    /// F-09 MODEL-TIER-EXTRACTION (2026-05-16)：caller 傳非預設 tier 時，
+    /// payload `model_tier` 必鏡像 caller 字串 — 確認 hardcoded fallback
+    /// 真的被移除（不會再被「無聲」覆寫 `"l1_9b"`）。
+    #[test]
+    fn test_build_strategist_eval_payload_honors_custom_model_tier() {
+        let pair = PairMetrics {
+            strategy_name: "grid_trading".to_string(),
+            symbol: "SOLUSDT".to_string(),
+            fill_count: 88,
+            avg_pnl: 0.42,
+            win_rate: 0.55,
+        };
+        let current = serde_json::json!({"grid_spacing_bps": 18});
+        let ranges = serde_json::json!([]);
+
+        // 27B（複雜場景）— caller 自帶 tier 必須穿透到 payload，無默認覆寫。
+        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.30, "l1_27b");
+        assert_eq!(payload["model_tier"], "l1_27b");
+        assert_eq!(payload["intel"]["strategy"], "grid_trading");
     }
 }
