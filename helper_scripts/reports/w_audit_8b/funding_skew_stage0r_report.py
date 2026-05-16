@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Sequence
 
 try:
-    from .funding_skew_stage0r_metrics import compute_stage0r
+    from .funding_skew_stage0r_metrics import compute_stage0r, compute_stage0r_sweep
 except ImportError:
-    from funding_skew_stage0r_metrics import compute_stage0r  # type: ignore
+    from funding_skew_stage0r_metrics import compute_stage0r, compute_stage0r_sweep  # type: ignore
 
 
 DEFAULT_WINDOW_DAYS = 7
 DEFAULT_COST_BPS = 12.0
+DEFAULT_Z_CELLS = "1.0,1.2,1.5,2.0"
 K_PRIOR_MODES = ("funding-related", "strict-funding-skew", "all")
 
 
@@ -58,6 +59,13 @@ def _parse_symbols(raw: str | None) -> tuple[str, ...]:
     if not raw:
         return ()
     return tuple(s.strip().upper() for s in raw.split(",") if s.strip())
+
+
+def _parse_z_cells(raw: str) -> tuple[float, ...]:
+    values = tuple(float(item.strip()) for item in raw.split(",") if item.strip())
+    if not values:
+        raise ValueError("--z-cells must contain at least one numeric threshold")
+    return values
 
 
 def fetch_panel_symbols(conn, *, window_days: int) -> tuple[str, ...]:
@@ -212,6 +220,24 @@ def render_summary(packet: dict) -> str:
             json.dumps(_clean_json(best), indent=2, sort_keys=True),
         ]
     )
+    sweep_meta = packet.get("sweep_meta")
+    if isinstance(sweep_meta, dict):
+        sweep_per_z = packet.get("sweep_per_z_cell") or {}
+        lines.extend(
+            [
+                "",
+                "## Sweep v0.3",
+                "",
+                f"sweep_meta: {json.dumps(_clean_json(sweep_meta), sort_keys=True)}",
+                f"sweep_per_z_cell_keys: {list(sweep_per_z.keys()) if isinstance(sweep_per_z, dict) else []}",
+                f"sweep_per_symbol_rows: {len(packet.get('sweep_per_symbol') or [])}",
+                (
+                    "best_primary_cell_per_z_branch_rows: "
+                    f"{len(packet.get('best_primary_cell_per_z_branch') or [])}"
+                ),
+                f"sweep_cross_z_comparison_rows: {len(packet.get('sweep_cross_z_comparison') or [])}",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -231,6 +257,17 @@ def main() -> int:
     )
     parser.add_argument("--out", type=str, default=None, help="optional output path")
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="enable v0.3 z-cell sensitivity sweep mode",
+    )
+    parser.add_argument(
+        "--z-cells",
+        type=str,
+        default=DEFAULT_Z_CELLS,
+        help=f"comma-separated z thresholds for --sweep (default: {DEFAULT_Z_CELLS})",
+    )
     args = parser.parse_args()
 
     try:
@@ -261,7 +298,19 @@ def main() -> int:
     finally:
         conn.close()
 
-    packet = compute_stage0r(rows, k_prior=k_prior, cost_bps=args.cost_bps)
+    try:
+        if args.sweep:
+            packet = compute_stage0r_sweep(
+                rows,
+                k_prior=k_prior,
+                cost_bps=args.cost_bps,
+                z_cells=_parse_z_cells(args.z_cells),
+            )
+        else:
+            packet = compute_stage0r(rows, k_prior=k_prior, cost_bps=args.cost_bps)
+    except ValueError as exc:
+        print(f"[FATAL] invalid Stage 0R parameters: {exc}", file=sys.stderr)
+        return 2
     packet["symbols"] = list(symbols)
     packet["window_days"] = args.window_days
     packet["k_prior_semantic"] = k_prior_meta
