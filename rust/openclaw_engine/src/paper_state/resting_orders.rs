@@ -369,6 +369,17 @@ impl PaperState {
         self.resting_limit_orders.values().map(|q| q.len()).sum()
     }
 
+    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：跨 symbol 唯讀迭代所有掛單。
+    /// intent_processor 的 portfolio gate（`compute_exposure_pct` /
+    /// `compute_correlated_exposure_pct`）需要在計算 effective notional 時把
+    /// resting maker（含尚未有 PaperPosition 的純 entry-side）一併納入；保留
+    /// `pub(crate)` 限縮在 engine crate 內，避免外部 module 越界擴張使用範圍。
+    pub(crate) fn resting_limit_orders_iter(
+        &self,
+    ) -> impl Iterator<Item = &RestingLimitOrder> + '_ {
+        self.resting_limit_orders.values().flat_map(|q| q.iter())
+    }
+
     /// Number of resting orders for a specific symbol.
     /// 單一 symbol 的掛單數量。
     pub fn resting_limit_order_count_for(&self, symbol: &str) -> usize {
