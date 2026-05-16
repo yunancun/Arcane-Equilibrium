@@ -4296,3 +4296,72 @@ PG fills 直查證據：
 **架構教訓 30**：放寬 fail-safe（i.e. 改 missing_edge_fallback_bps 從負值到正值）必走 counterfactual evidence path，**不接受推理性論證**。即使 demo 觀察到 86 fires 是「pre-existing positive evidence」，counterfactual A-B 對比才能確認鎖利 net 改善 vs 反向（鎖 noise 反而劣化）。pre-enable Gate 不是 yes/no 設計，是 evidence-driven binary。
 
 **Report path**: 本 PA 工作的 AMD draft 即 deliverable，位於 `/Users/ncyu/Projects/TradeBot/srv/docs/governance_dev/amendments/2026-05-XX-XX-phys-lock-live-enable-draft.md`；不寫額外 summary report（per system instruction「Do NOT Write report/summary/findings/analysis .md files. Return findings directly as your final assistant message」）。
+
+## 2026-05-16 — W-AUDIT-8b spec v0.2 → v0.3 patch (sensitivity sweep) + Round 2 run plan
+
+**Trigger**：main session 派 W-AUDIT-8b Option A — round 1 RED 後 spec v0.2 → v0.3 patch（加 trigger gate sensitivity sweep z=1.0/1.2/1.5/2.0 並排 4 cells）+ 規劃 round 2 Stage 0R rerun（panel grow naturally to ≥ 7d, calendar +1.02d defer）。
+
+**Mode**：Phase 1 純 spec patch（land at write time）+ Phase 2 deferred run plan（panel 不夠不立即跑）。**不修** runtime / TOML / RiskConfig / engine env / authorization / AMD §8 wording。
+
+**核心關鍵事實**：
+1. Round 1 RED RCA 判 65% signal failure 主導 + 35% sample 邊際次要：5.72d 內 411,840 candidate 5m bar 只 7 個過 gate（trigger rate 0.0017%）；baseline pooled n_eff=6,530 揭示 -16.91 bps 負 edge
+2. Panel current 5.98d span (2026-05-10 23:30Z → 2026-05-16 18:56:53Z)；funding 205,051 rows, OI 205,821 rows；25 sym uniform；grow rate ~34,300 rows/day
+3. K_prior empirical：strict `funding_skew%` filter = 0; relaxed `funding%` filter = 9 (`funding_arb` retired ledger residue)
+4. spec v0.3 patch：+306 行；K_new_min 4050 → 5400 (+33%)；z gate 從 v0.2 fixed 3 cells (1.5/2.0/2.5) 擴 v0.3 4 cells (1.0/1.2/1.5/2.0)
+5. z_strict (2.0) cell-level n_eff floor stratified 30/15/75 作 diagnostic only；其餘 z cell 維持 v0.2 100/50/300
+6. Wilson CI 95% per (z_cell, branch, symbol) cell；不強制進 eligibility floor，留 PA verdict round 3 zoom-in 評估
+
+**Spec v0.3 structure（7 子節）**：
+- 起源與動機（RED RCA 結論 cite）
+- Sweep Methodology（4 z cells + 4-cell × 2-branch × per-symbol output matrix + pre-empirical assertion magnitude）
+- K_total per-cell minimum（K_new_min 5400 + z-stratified n_eff floor）
+- Output Format Spec（4 JSON blocks: sweep_per_z_cell / sweep_per_symbol / best_primary_cell_per_z_branch / sweep_cross_z_comparison）
+- Wilson CI Computation（公式 + 用途 3 維）
+- Pre-rerun Linux PG Empirical Query Template（5 SQL + 4 assertion gates）
+- Output Storage Audit + 接受 / Reject 條件（ACCEPT / OPEN / REJECT 3 paths）
+
+**Round 2 Wave 4-B Run Plan（8 steps, ~2-2.5 worker-days）**：
+- Step 0 PA spec patch land ✅ DONE
+- Step 1 PA Linux PG empirical assertion gate（panel ≥ 7d + sym=25 + K_prior strict=0 + cycles ≥ 21）
+- Step 2 PA Mac/Linux source sync verify
+- Step 3 E1 IMPL sweep logic patch（metrics.py + report.py + smoke.py + entry wrapper `--sweep` `--z-cells`）
+- Step 3a E2 + A3 對抗審（Wilson CI 公式 + sweep loop + z stratification）
+- Step 3b E4 regression
+- Step 4 E1 跑 round 2 sweep
+- Step 5 PA + QC + MIT + BB 並行 review
+- Step 6 PA verdict report
+- Step 7 PM sign-off
+
+**Calendar ETA**：panel ≥ 7d 達成 2026-05-17 23:30Z（calendar +1.02d）；Phase 2 dispatch 觸發點 2026-05-18 00:30Z（+1.06d）。
+
+**Predicted round 2 verdict**：HIGH probability RED（即使 z=1.0 ~10x trigger 升 70-100 signals 預期 pooled n_eff 仍 << 300 floor）；z_relaxed closest to marginal but pooled n_eff ~15-25 not enough。
+
+**Decision tree**：
+- ACCEPT → Stage 1 Demo micro-canary design Wave；AMD wording 不修
+- OPEN → round 3 zoom-in vs archive tombstone；AMD 暫不動
+- REJECT → PA 補 RCA + 建議 AMD §8 condition 3 wording 修訂為「W-AUDIT-8b Stage 0R passed OR a formal tombstone amendment archives W-AUDIT-8b after exhaustive sensitivity sweep」
+
+**Side-effects 分析（Phase 1 純 spec patch）**：
+- 對 RustEngine / IPC / GovernanceHub / 5-Agent / 風控 = 0
+- 對 close-maker-first AMD-2026-05-15-02 Phase 1b IMPL = 0（並行 lane）
+- 對 Mac/Linux runtime / paper / demo / live = 0
+- 對 healthcheck = 0
+- 對 panel.funding_rates_panel / panel.oi_delta_panel / learning.strategy_trial_ledger = read-only
+- 對 sibling Wave 2-4 + WP-13 leftover IMPL = 完全與本 spec patch 無重疊
+
+**16 根原則合規**：A 級（16/16 + 硬邊界 0 觸碰 + DOC-08 N/A + AMD §8 wording 不破）
+
+**Confidence**:
+- HIGH for §1 起源與動機（直接 cite round 1 empirical RCA）
+- HIGH for §2 Sweep Methodology + §3 K_total（K_new_min 5400 公式直接 derive；z stratification 預留 z_strict 30/15/75 floor 是 PA 提案待 QC sign-off）
+- HIGH for §4 Output Format（4 blocks JSON schema 完整定義）
+- MEDIUM-HIGH for §5 Wilson CI（公式 / 用途 / promotion gate optional addition 是 PA 提案）
+- HIGH for §6 Pre-rerun Linux PG empirical query template（已 PA solo 跑 verify）
+- HIGH for §7 接受 Reject 條件（ACCEPT / OPEN / REJECT 3 paths 對齊 RCA §8 conditional amendment 觸發點）
+- HIGH for Round 2 Run Plan 8 steps + decision tree（mirror round 1 run plan 結構）
+
+**架構教訓 31**：spec patch 不接受「v0.2 失敗就 tombstone」結論，必先盤點失敗類型（signal failure / sample insufficient / parameter family unexplored）才決定下一步。8b round 1 RED 是 signal failure 主導 + parameter family unexplored → v0.3 sensitivity sweep 是合理升級而非 wasted effort；對比 A4-C tombstone（feature shape 被 RCA 證偽）的 root cause 不同。
+
+**架構教訓 32**：Trigger gate sensitivity sweep 的 K_total 增加量必預先公式化（v0.3 K_new_min 5400 vs v0.2 4050）並 cite 對 DSR sr_benchmark = √(2 ln K) 變動極小（4.07 → 4.14）— 否則 sweep 看似擴大 multiple testing 風險，實質 sr_benchmark 不變因 ln 對 K 敏感度低。Adversarial review 必驗此 sanity check 不被 over-conservative interpretation 卡掉。
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_spec_v03_sensitivity_sweep_patch.md`
