@@ -233,3 +233,40 @@ WS-RETIRE-1 / INFRA-PREBUILD-1 A+B / EDGE-DIAG-1-FUP-IPC / P0-13 ATR scale / Pri
 - **grep 無命中 → 不列為發現**：避免推測誤判（例：先前 memory 曾誤標 H1-H5 全 stub，被 2026-04-23 實證更正）
 - **cross-session race**：本輪與前輪 2026-04-24 session（FA-13~17）獨立進行；前輪專注 TOML/邊界資料，本輪專注 full chain wiring；兩輪互補非衝突
 
+
+---
+
+## 2026-05-16 WP-04 substance post-hoc ratification brief land
+
+### Background
+WP-04 F-01 `budget_config.toml × 2` daily 100→2 / monthly 150→60 已 deploy in v35 rebuild（engine PID 69581）+ citation §12→§4.1 已 fix by `864f4e81`。PM 2026-05-16 sign-off 第 3 條 reprioritization 明寫「AI-E-F-01 budget $100->$2 requires operator decision on target value」。**substance** 仍待 operator explicit ratification。
+
+### 三角 cross-validation 共識
+- **AI-E**: $2 是修 5+ 週 governance drift（`layer2_types.py:60 DEFAULT_DAILY_HARD_CAP_USD=2.0` 自 2026-03-31）
+- **PA**: DOC-08 §4.1 line 108 verbatim「每日硬上限 = $2.00」+ §12 line 333 invariant 確認
+- **FA**: substance 對 + 業務鏈無 break risk（4/4 環節 in $2 cap 完整可用：L0 cost=0 / L1 Ollama=0 / L1.5 Haiku<$0.1/d / L2 manual-only Sonnet ≈$1/d；alert@$1.60 永不觸）
+- **CC**: implicit ratification via deployment = governance debt
+
+### 4 選項決策框架（FA 推薦 A）
+- **(A) Explicit RATIFY $2**：一句話 ack；1 min 決定；governance trail 完整；無 runtime/code 改動 — **FA 推薦**
+- **(B) Revise to justified higher value**：runtime + DOC-08 §4.1 修訂 + 全 chain 重走 1-2 sessions；歷史資料不支持
+- **(C) Revert to $100**：DOC-08 §4.1 + §12 兩處修訂 + 矛盾於根原則 #5（生存 > 利潤）；FA ❌
+- **(D) Tabling 7d**：implicit consent；違反 §二 原則 #8（可解釋）；FA ❌
+
+### Brief 文件位置
+- `docs/CCAgentWorkSpace/Operator/2026-05-16--wp04_post_hoc_ratification_request.md`
+
+### Operator action 7 條清單（按優先序）
+1. WP-04 substance ratify（本 brief）— P0 / 1 min
+2. WP-03 walk-forward backtest 或 deploy-gate（QC 要求）— P0
+3. W-AUDIT-8a C1 v2 重派授權（PA spec land）— P1
+4. Race protocol SOP 批准（PA spec land）— P1
+5. F-09 model_tier TOML extraction P1 跟進（next session）— P1
+6. BB-MF-3 production wiring P1（Phase 1b 主軸 IMPL）— P1
+7. 7d budget cap empirical monitoring（deploy 後驗 $2 cap 不破）— P2
+
+### FA 審計原則記住（防未來 drift）
+1. **substance ≠ procedure**：未來任何「PM sign-off 標 operator decision required」的條目，sub-agent IMPL + push 不等於 operator ratify；procedure 必補
+2. **5+ 週 SoT drift pattern**：常量在代碼層（layer2_types.py:60）正確，TOML 配置層 stale → 任何「對齊代碼 SoT」的改動 procedure 上仍是 governance event，不是 silent hygiene
+3. **業務鏈完整度 ≠ substance 拍板**：$2 cap 業務鏈 4/4 環節通，但 operator 仍須拍板，因為 cap 數值本身是 governance 邊界
+4. **Implicit ratification via deployment = debt**：v35 rebuild 含改動不等於 ratify；未來 audit 不能用 "deployed" 充當 "approved"

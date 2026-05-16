@@ -84,3 +84,51 @@
   - V023 postmortem 衍生 §七 SQL migration guard 4 條（同源規範，敘述-vs-runtime drift 是更廣的同類）
   - Verify pattern：`python3 helper_scripts/db/passive_wait_healthcheck.py --all`
 - **來源 commit / session**：2026-04-24 G6-04（10-Agent audit Wave 1 子任務）；觸發案例 = G1-01「edge_estimator_scheduler 4 天停滯，§三 宣稱 162 cells 實測 1 cell」+ 2026-04-23 「main_legacy.py 1630 行宣稱未拆實測 468 行已拆」
+
+---
+
+## Multi-session race incident
+
+> 本區記錄同機 multi-CC session 並行造成 race 事件的事實鏈，配合 `docs/governance_dev/2026-05-16--P0-GOV-MULTI-SESSION-RACE-SOP-1.md` SOP 8 條規則。每 entry 含 root cause + remediation + 本 SOP 是否完整 cover 的判斷。新增 entry 必同時觸發 SOP §1.2 taxonomy review。
+
+## 2026-05-15 23:35-23:48 UTC · BB-MF-3 phantom sign-off + comment contamination
+
+- **觸發場景**：12-agent full system audit Wave 2 並行（WP-03 / WP-04 / WP-07 / WP-10 by sibling session）+ Wave 2b BB-MF-3 grid_trading IMPL（by 本 session sub-agent）；兩 session 都動 `rust/openclaw_engine/src/strategies/grid_trading/` package
+- **檢測**：commit `27f02a07` body 自承「sibling 12-agent audit session repeatedly stashed + silently dropped this work (3 race events 2026-05-16 01:35-01:48)」+ sibling `ef6ea79f` body 自承「BB-MF-3 comment contamination in is_exchange_backoff reverted」
+- **損失量**：5 grid_trading IMPL files (mod.rs / constructors.rs / position_mgmt.rs / signal.rs / tests.rs) + 8 new BB-MF-3 unit tests + 2906 lib tests verify 浪費（必重跑）
+- **Root cause**：規則 1 (Stash drop without provenance check) + 規則 2 (不認識 WIP 誤 revert)
+- **Remediation**：從 dropped stash refs `0a9d86d2` (mod/constructors/position_mgmt) + `8460bd3f` (signal/tests) selective restore via `git show extract`；commit `27f02a07` land Wave 2b recovery；comment contamination 保留 sibling preserve revert（單向認輸 dual-write 損失 minimal）
+- **本 SOP 涵蓋等級**：FULL — Rule 2 + Rule 3 直接針對此事件；Rule 8 (Wave 並行同 crate fence rule) 防同 crate 並行 race
+- **Commits**：`27f02a07` (recovery) / `ef6ea79f` (sibling silent revert) / `15e67220` (E1 self-report) / `5682994c` (WP-04 E2 review) / `88f9254f` (Wave 1 Round 3 補修)
+
+## 2026-05-15 23:48-23:55 UTC · 主會話 stash 誤殺 BB-MF-3 + Wave 2 IMPL（之後 selective restore）
+
+- **觸發場景**：本 session 接 sibling 推送的 `ef6ea79f` commit 後做 stash cleanup；sibling 此前已 silently drop 多個 stash
+- **檢測**：本 session 嘗試 verify BB-MF-3 IMPL 仍在時發現 working tree 已被 sibling commit overwrite + stash 列表異常
+- **損失量**：與 event 1 同範圍（5 IMPL 檔），所幸從 dropped stash refs 找回
+- **Root cause**：規則 1 (Stash drop without provenance check) + 規則 3 (Stash forensics 強制) — 本 session 與 sibling 都未做 `git stash show -p stash@{N}` 內容 grep 確認 BB-MF / WP-N / sign-off 等他 session 關鍵字
+- **Remediation**：與 event 1 同 (selective restore)；本 SOP Rule 3 強制化 stash forensics 模式以防再犯
+- **本 SOP 涵蓋等級**：FULL — Rule 3 stash forensics SOP 直接針對；Rule 6 (Race incident log) 強制留證據
+- **Commits**：與 event 1 重疊（同一物理 race window）
+
+## 2026-05-16 00:53 UTC · E1 leftover P1 background sub-agent 與 v35 rebuild 競賽（safely land）
+
+- **觸發場景**：Round 4 三角 cross-validation (`864f4e81`) 識別 WP-13 真實只 partial fix（FA-P1-11 leftover），立即派 background E1 sub-agent 補；同時主 session 進入 v35 rebuild 規劃流程
+- **檢測**：git log timestamp 對比：`a7cb517f` (02:53:33+0200, leftover land) → `5f6f3edf` (02:58:25+0200, v35 sync record) → `1517135a` (03:04:28+0200, post-rebuild sync) = leftover land 領先 rebuild 啟動 5 min margin
+- **損失量**：0 — safely 在 v35 rebuild 前 land；若晚 5 min，stale `cmd_tx` 仍在 v35 binary 必須二次 rebuild
+- **Root cause**：規則 7 (Sub-agent dispatch SOP) 部分覆蓋 — 派發前若先 fetch 可發現 rebuild planning 進行；本事件無實質損失但 margin 緊
+- **Remediation**：本 SOP Rule 7 + Rule 8 強制 dispatch 前 fetch + sibling time-window check；Rule 5 (Org-limit awareness) 防 background sub-agent 失敗 race
+- **本 SOP 涵蓋等級**：PARTIAL — Rule 7 cover dispatch fetch；對「主 session 已開始 rebuild planning 但 background sub-agent 仍 in-flight」型 race 未明文 SOP；後續可補 Rule 9（rebuild 前必 wait background sub-agent settle）
+- **Commits**：`864f4e81` (Round 4 三角 cross-validation) / `a7cb517f` (leftover land) / `5f6f3edf` (v35 sync record) / `1517135a` (post-rebuild sync)
+
+## 2026-05-16 01:00 UTC · E1 WP-13 leftover P1 retry background sub-agent fail (org monthly limit)
+
+- **觸發場景**：event 3 leftover land 後 follow-up sub-agent retry（PM 派 second pass verification）觸 Anthropic org monthly quota
+- **檢測**：sub-agent dispatch silent fail；operator 注意異常後通報
+- **損失量**：unbounded — 後續若有 leftover 需修則 backlog 排隊；本次因 event 3 已 fully land，無實質工作損失
+- **Root cause**：規則 5 (Org-limit awareness) — dispatch 前 0 quota check；fail 後 0 graceful degrade
+- **Remediation**：本 SOP Rule 5 強制化 quota check + 不 auto-retry + 改 sequential single-session 路徑；未來高峰期前 operator 手動 quota dashboard 預估
+- **本 SOP 涵蓋等級**：FULL — Rule 5 直接針對；Rule 6 強制 incident log 累積 quota pattern 證據
+- **Commits**：N/A（fail 無 commit；event 3 `a7cb517f` 已包覆所有真正必要工作）
+
+---
