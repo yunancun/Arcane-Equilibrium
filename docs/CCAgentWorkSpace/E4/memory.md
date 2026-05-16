@@ -3430,3 +3430,34 @@ stress_integration: `stress_bb_breakout_valid_squeeze_with_volume` + `stress_bb_
 ### Test code commit
 `34aa7086` test(ma_crossover): add KAMA unavailable exit path regression tests (Wave 1.5 E4)
 +162 LOC tests.rs；不修業務代碼。CLAUDE.md §九 hard cap 1016→1178 LOC，跨 800 警告線但遠低 2000 hard cap（單檔內聚 OK）。
+
+---
+
+## 2026-05-16 — Wave 2c-2 reject_cooldown split (BB-MF-3) regression PASS
+
+**Commit verified**: `27f02a07` (sibling `88f9254f` doc/HTML only)
+
+**Result summary**:
+- Lib release 2906 passed / 0 failed / 1 ignored (run twice, identical → non-flaky)
+- grid_trading focused 62 passed / 0 failed
+- 8/8 BB-MF-3 new tests ok:
+  - test_entry_reject_does_not_freeze_close_path
+  - test_close_reject_does_not_freeze_entry_path
+  - test_close_too_many_pending_5min_cooldown
+  - test_close_postonly_cross_no_cooldown_immediate_market
+  - test_close_default_reject_categories_1min_cooldown
+  - test_grid_short_circuits_when_both_cooldowns_active
+  - test_cooldown_isolation_multi_symbol
+  - test_arm_close_cooldown_saturating_add_overflow_safe
+- Cross-language: N/A (cooldown is Rust-only HashMap state, 0 Python references)
+- SLA stress ok (≪1us overhead expected from extra HashMap lookup + if check)
+
+**Multi-session race recovery clean**: Wave 2b sub-agent verified work was dropped by sibling commit `ef6ea79f`; Wave 2c-2 IMPL recovered via stash extracts. E1 self-claim of 2906/0/1 verified empirically on Linux trade-core release toolchain — exact match.
+
+**No supplemental tests added**: 8 existing tests cover all design invariants (entry/close isolation, multi-symbol, both-cooldowns gate, 5min/1min/no-cooldown reject categories, u64 overflow safety, public API). E1 self-flagged Phase 1b production close-path dispatcher gap is correctly scoped as future work; pre-IMPL stub tests would mock business logic that does not yet exist (anti-pattern per regression-testing-protocol §5.2).
+
+**Lesson — multi-session memory.md write race**: file is 289KB+, cannot Read full via tool. Use grep + cat >> to append safely. `git commit --only` per file mandatory.
+
+**Report**: `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--reject_cooldown_split_e4_regression.md`
+
+E4 verdict: REGRESSION-PASS, 0 push-back to E1.
