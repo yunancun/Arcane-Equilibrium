@@ -85,14 +85,14 @@ v36 completion cleanup archive:
 
 ## §3 Latest State
 
-### Current State (2026-05-15 PM/PA/FA audit)
+### Current State (2026-05-16 PM cleanup)
 
 - W-C MAG-082 Stage 2 **WINDOW_PASS 2026-05-11** and W-D MAG-083/MAG-084 **DONE 2026-05-11** are closed; proposal/mobile/Stage 3+/true-live gates remain separate and still blocked by edge/LG/ops prerequisites.
 - A4-C BTC→Alt Lead-Lag Stage 0R remains **GATE-RED** after Step 5b (`eligible_for_demo_canary=false`). The OI-confirmed 5m packet is only a replay spec and does not change eligibility.
 - `[55]` is source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; `[67]` is restored to PASS after feature baseline apply; `[4]` phys lock and `[Xb]` triangulation are PASS after `7108035d`.
 - V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
 - Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
-- **EDGE-P2-3 Phase 1b close-maker-first refactor SPEC + AMD DRAFT 2026-05-15**: PM/PA/FA 3-agent + QC/FA/BB/MIT 4-agent 兩輪驗證收齊（全部 **APPROVED-CONDITIONAL**）。Spec `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` v1.0 + AMD draft `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` v0.1。**Queue Sprint N+2 P1 backlog**。8 maker-first whitelist / N keep-market 邊界明文。**4-agent review 識別 17 must-fix（4 consensus + 13 unique）+ 14 should-fix**，consolidated 在 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_consolidated.md`。**IMPL prereq 升至 6 條**：✅ PA spec / 🟡 AMD 4-agent review APPROVED-CONDITIONAL (待 AMD v0.2 + spec v1.1 patch 收口) / ⏳ 三閘（P0-EDGE-1 / W-AUDIT-8b Stage 0R / W-AUDIT-8a C1）/ ⏳ 強制工作鏈 PA→E1→E2→E4→QA→PM / ⏳ F-FA-1/2/3 P1 finding pre-IMPL（新增）/ ⏳ reject_cooldown entry/close 拆分 P0 priority（BB-MF-3 新識別 bug，pre-Phase 2a 必 land）。phys_lock live 啟用 DEFER 至 Phase 2b 後另開 PR。
+- **EDGE-P2-3 Phase 1b close-maker-first refactor**: spec / AMD / 4-agent review / Wave 1..3b prep details are archived. Current blockers are the same 3 gates (`P0-EDGE-1`, `W-AUDIT-8b Stage 0R`, `W-AUDIT-8a C1`), Wave 3.5 Linux migration backlog, and `P1-BBMF3-WIRE-1` production callback wiring. phys_lock live enablement remains deferred to Phase 2b.
 
 ---
 
@@ -153,16 +153,13 @@ Current sign-off deltas only:
   follow-up read-only feasibility probe found runtime-style OI-confirmed rows
   far below the Stage 0R sample floor (`n=9` pooled; every symbol `<100`) with
   negative rough gross 15m. It cannot be used as promotion evidence.
-- ✅ **`[55]` fill-lineage source-cleared**: patched invariant on `trade-core`
-  PG proves `chains_with_real_fill_report=25/25` fully-filled plan chains,
-  `full_plan_fills_missing_report=0`; 13 partial chains are diagnostic.
 - ⏳ **A-group alpha-source invariant**: `declared_alpha_sources()` vs real
   logic re-check remains deferred until new alpha candidates land.
 - 🟡 **W-AUDIT-4b corrected scope** remains active via §11.2 remaining
   retained tables/views/drop scope; `P1-WA4B-INSERT-1` is completed.
-- ✅ W-AUDIT-3b runtime smoke, F-08 cron fire, and
-  `P0-MIT-LABEL-CLOSE-TAG-1` writer fix are completed; residual edge risk is
-  tracked by `P0-EDGE-1`.
+- Completed `[55]`, W-AUDIT-3b, F-08 cron, and `P0-MIT-LABEL-CLOSE-TAG-1`
+  details are archived in `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`;
+  residual edge risk is tracked by `P0-EDGE-1`.
 
 ---
 
@@ -182,15 +179,13 @@ Priority verdict after PM/PA/FA cross-check:
    diagnostic-only. `P1-A4C-RCA-1` is closed as no revive hypothesis found
    after QC/MIT review, so `P1-A4C-REV-1` is not opened and no A4-C Stage 0R
    rerun is authorized for the same feature shape. Shift active effort to
-   `W-AUDIT-8b` Funding Skew review + Stage 0R design while `W-AUDIT-8a C1`
-   runs the isolated 24h BB topic proof. `W-AUDIT-8c` Liquidation Cluster
-   remains gated until C1 and MIT schema review pass. The business-chain root
-   cause is still lack of non-textbook alpha.
-4. **Runtime blocker update**: `P1-INTENT-FREEZE-27`,
-   `P1-FILL-LINEAGE-MONITOR`, `P1-STARTUP-BURST-MITIGATION`,
-   `P1-V083-HALT-SESSION-CTX`, and `P1-W6-5-ML-METRICS` are source/test
-   closed as of 2026-05-15. This does not unblock Stage 1 demo because A4-C
-   remains GATE-RED.
+   `W-AUDIT-8b` Funding Skew read-only Stage 0R query/report packet while
+   `W-AUDIT-8a C1` waits for a new full-duration proof after the 2026-05-16
+   `FAIL_CONNECTION`. `W-AUDIT-8c` Liquidation Cluster remains gated until C1
+   and MIT schema review pass. The business-chain root cause is still lack of
+   non-textbook alpha.
+4. **Runtime blocker update**: `[27]`, `[55]`, and `[67]` are closed and
+   archived; this does not unblock Stage 1 demo because A4-C remains GATE-RED.
 5. **Maintenance**: P2 hygiene remains below alpha/LG/ops gates; W-AUDIT-5
    damaged dump cleanup and W-AUDIT-7 F-07/CEA env are ops-closed as of
    2026-05-15.
@@ -207,10 +202,12 @@ R²(60/120/300)=`0.0009/0.0005/0.0027`.
 |---|---|---|---|---|
 | `P0-A4C-FA-GATE-1` | ⛔ ARCHIVE FROM PROMOTION | PM → QC/MIT → FA → PA → PM | Keep A4-C out of active promotion budget | A4-C remains diagnostic-only unless a future, preregistered strategy×symbol Stage 0R packet emits `eligible_for_demo_canary=true`. Pooled-only evidence is insufficient. |
 | `P0-A4C-DEMO-BUDGET-GATE` | BLOCKED | PM → QC → MIT → FA → PA → PM | Demo micro-canary spend gate | Demo budget requires one concrete `strategy × symbol` with `n>=100`, `avg_net_bps>=+15`, `t>2.0`, `PSR>=0.95`, `DSR>=0.95` with explicit K, bootstrap lower bound > 0, PBO <= 0.20, no leak/cherry-pick, and operator-approved cohort. |
-| `P1-A4C-RCA-1` | ✅ CLOSED 2026-05-15 | PM → QC → MIT → PM | Read-only Stage 0R RCA | Closed as no revive hypothesis found. Current 7d report fetched 6,713 rows and stayed red (`avg_net_bps=-1.0013`, `PSR(0)=0.1904`, `DSR=0`, R²(120)=0); best finite X=5/Y=0.20 probe was only `+1.4739 bps`. No DB writes, no paper/demo/auth/config mutation. |
 | `P1-A4C-REV-1` | ❌ NOT OPENED | PA → QC → MIT → FA → PM | Bounded preregistered revise-or-archive decision | QC/MIT found no new preregistered hypothesis. Threshold loosening, post-hoc symbol picking, or rerunning the same BTC-return/xcorr feature shape are non-triggers. |
 | `P1-A4C-RERUN-1` | ⛔ BLOCKED | PM → QC → MIT → PM | Stage 0R replay rerun | No rerun for A4-C unless a materially new predictive variable is preregistered in the future. Output may only be `eligible_for_demo_canary=true/false`; paper promotion remains blocked by AMD-2026-05-15-01. |
-| `P0-ALPHA-SWITCH-8B-8C` | 🔵 ACTIVE | PM → QC/MIT/BB → PA → FA → PM | Switch alpha focus after A4-C RCA closure | `W-AUDIT-8b` review/design v0.2 is done and proceeds only to a read-only Stage 0R query/report packet; `W-AUDIT-8a C1` 24h isolated proof is running; `W-AUDIT-8c` waits for C1 proof + MIT schema sign-off. |
+| `P0-ALPHA-SWITCH-8B-8C` | 🔵 ACTIVE | PM → QC/MIT/BB → PA → FA → PM | Switch alpha focus after A4-C RCA closure | `W-AUDIT-8b` proceeds only to a read-only Stage 0R query/report packet; `W-AUDIT-8a C1` waits for a new full-duration proof after `FAIL_CONNECTION`; `W-AUDIT-8c` waits for C1 proof + MIT schema sign-off. |
+
+`P1-A4C-RCA-1` closure details are archived in
+`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
 
 Hard boundaries: no `OPENCLAW_ENABLE_PAPER=1` promotion use, no Stage 1 demo
 launch from RCA, no live/LiveDemo relaxation, no auth/risk/lease/runtime
