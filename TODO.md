@@ -503,14 +503,14 @@ active work starts at §10 / §11.2 / §11.3.
 | WP-03 | OU Sigma Residual Fix | P1 | 2 | E1 -> QC+E2 | ✅ DONE（Phase A `67a82612` + hot-path `compute_ou_step` 殘差 sigma 本 wave） | 0.5 session |
 | WP-04 | AI Observability + Budget | P1 | 2 | E1-py+E1-rs -> AI-E+E2 | ✅ DONE（F-04 Ollama observability + F-01 budget $2/day + F-09 TODO） | 1 session |
 | WP-05 | Security Hardening (bind 0.0.0.0 + error leak) | P1 | 1 | E1 -> E3+E2 | ✅ DONE `6b8be386` | 0.5 session |
-| WP-06 | Performance Hot Path (Rust clone + Python deepcopy) | P1 | 3 | E1-rs+E1-py -> E5+E2 | PENDING | 1-2 sessions |
+| WP-06 | Performance Hot Path (Rust clone + Python deepcopy) | P1 | 3 | E1-rs+E1-py -> E5+E2 | ✅ DONE（E5 clone audit 57→34 avoidable + state_compiler deepcopy 3→2） | 1-2 sessions |
 | WP-07 | Dead Code + Schema Cleanup | P2 | 2 | E1 -> FA+E2 | ✅ DONE（FA 分析完成：7 dead modules 3186 LOC + 2 dead tables；4 P2 tickets drafted） | 0.5 session |
-| WP-08 | ML Pipeline Maturity (walk-forward purge + training SQL) | P1 | 3 | MIT+E1 -> MIT+E2 | PENDING | 2 sessions |
+| WP-08 | ML Pipeline Maturity (walk-forward purge + training SQL) | P1 | 3 | MIT+E1 -> MIT+E2 | ✅ DONE（MIT-DB-6 engine_mode scope + MIT-P1-2 purge_days param） | 2 sessions |
 | WP-09 | Documentation + Index Sync | P2 | 1 | TW+R4 -> PM | ✅ DONE `6b8be386` | 0.5 session |
 | WP-10 | Bybit Integration (retCode enum + mainnet URL) | P1 | 2 | E1 -> BB+E2 | ✅ DONE（BB-A-1 110017 ReduceOnlyReject + BB-M-1 backtest demo default） | 0.5 session |
 | WP-11 | Test Infrastructure (phased) | P2 | 4 | E4+E1 -> E2 | PENDING | 2-3 sessions |
 | WP-12 | ONNX Model Manager (stub) | P2 | 4 | E1-rs -> E2+FA | DEFERRED | 1 session |
-| WP-13 | Reconciler Stale cmd_tx | P1 | 3 | E1-rs -> E2+E4 | PENDING | 1 session |
+| WP-13 | Reconciler Stale cmd_tx | P1 | 3 | E1-rs -> E2+E4 | ✅ DONE（DemoCmdSenderSlot + provider pattern 對齊 live） | 1 session |
 
 **Wave 1 ✅ CLOSED 2026-05-16 (Round 2 真修後)**: WP-01 + WP-02 + WP-05 + WP-09 全 DONE (`43627d1c` + `6b8be386` + Round 2 patch HEAD).
   - **Round 1 對抗審核 (A3/R4/E2/E3/QC)**：WP-01 6.5/10 PARTIAL（A3-MAJOR-2 漏修+雙層 modal）/ WP-02 PASS / WP-05 偽修復（17+ HTTPException leak）/ WP-09 cheap-fix（97 missing→32）
@@ -529,7 +529,13 @@ active work starts at §10 / §11.2 / §11.3.
   - **BB-MF-3 comment contamination**: 發現 `is_exchange_backoff` doc 被隔壁 session 改寫→已 revert
   - **LOC warnings**: grid_helpers.rs 809 / ai_service_dispatch.py 836 / bybit_rest_client_tests.rs 830（均 <2000 hard cap）
 **Wave 2 original dispatch**: WP-03 + WP-04 + WP-10 + WP-07 (independent)
-**Wave 3 sequential/focused**: WP-08 (Linux) + WP-06 (after stability) + WP-13 (focused)
+**Wave 3 ✅ CLOSED 2026-05-16**: WP-06 + WP-08 + WP-13 全 DONE（`f31b6e8f`）。
+  - **WP-06**: E5 clone audit（57 clones, 34 avoidable, Arc<str> OrderIntent 為最高槓桿優化）+ state_compiler deepcopy 3→2（cache-miss path）
+  - **WP-08**: MIT-DB-6 realized_edge_stats engine_mode `= %(engine_mode)s` → `ANY(%(engine_modes)s)`（live→[live, live_demo]）；MIT-P1-2 edge_estimate_validation `purge_days` walk-forward gap
+  - **WP-13**: DemoCmdSenderSlot + ReconcilerCommandTxProvider closure（demo reconciler 對齊 live slot-indirect-read pattern），消除 pipeline restart 後 stale cmd_tx
+  - **E2 review**: 0 CRITICAL / 0 HIGH / 1 MEDIUM pre-existing（main_boot_tasks.rs 858 LOC）/ 2 LOW cosmetic → PASS
+  - **Remaining debt**: spawn_position_reconciler dead_code warning（P2）；spawn_edge_estimates_reloader + spawn_strategist_scheduler 仍 by-value demo_cmd_tx（P2）
+**Wave 3 original dispatch**: WP-06 + WP-08 + WP-13 (parallel E1+E5)
 **Wave 4 background**: WP-11 (phased) + WP-12 (deferred)
 
 **Conflict guard**: Wave 2 WP-03 touches `grid_helpers.rs` which is in the EDGE-P2-3 Phase 1b orbit. Land WP-03 BEFORE Phase 1b IMPL to avoid merge conflict. WP-06 performance must wait until Phase 1b stabilizes.
