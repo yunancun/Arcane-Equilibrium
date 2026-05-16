@@ -55,6 +55,12 @@ use std::sync::Arc;
 pub type LiveCmdSenderSlot =
     Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>>>;
 
+/// Demo 管線命令 sender 的 slot 類型（結構同 `LiveCmdSenderSlot`）。
+/// Demo 管線目前 boot-time 固定不 respawn，但透過 slot 間接取 sender
+/// 可避免 reconciler 持有 stale by-value clone（WP-13 FA-P1-11 修正）。
+pub type DemoCmdSenderSlot =
+    Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>>>;
+
 // ---------------------------------------------------------------------------
 // LIVE-P2-1: Per-engine RiskConfig stores
 // LIVE-P2-1：每個引擎模式的 RiskConfig stores

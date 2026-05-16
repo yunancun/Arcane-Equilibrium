@@ -9445,3 +9445,40 @@ AMD-2026-05-15-02 §8 IMPL Prereq 6 升 P0，pre-Phase 2a Demo 必 land。
 
 ### 完整報告路徑
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--reject_cooldown_split_bbmf3.md`
+
+---
+
+## WP-13 Demo Reconciler Stale cmd_tx Fix (FA-P1-11)（2026-05-16）
+
+### 任務
+Demo position reconciler 持有 `cmd_tx` by-value clone，pipeline restart 後向舊 channel 發送。
+對齊 live reconciler 已有的 `ReconcilerCommandTxProvider` + slot pattern。
+
+### 改動
+1. `ipc_server/engine_routing.rs`：新增 `DemoCmdSenderSlot` type alias
+2. `ipc_server/mod.rs`：re-export `DemoCmdSenderSlot`
+3. `main.rs`：建立 `demo_cmd_slot` + mirror `demo_cmd_tx` 進 slot + 傳遞至 reconciler + 更新 TODO 注釋
+4. `main_boot_tasks.rs`：函數簽名改收 `&DemoCmdSenderSlot`；demo reconciler 改用 `spawn_position_reconciler_with_cmd_provider`
+
+### 教訓
+- `spawn_position_reconciler`（by-value wrapper）失去最後 call site 產生 dead_code warning；Paper 預設關不影響 runtime，但 P2 清理待做。
+- `spawn_edge_estimates_reloader_if_enabled` / `spawn_strategist_scheduler` 也 by-value 接 demo_cmd_tx，同樣有 stale 風險但不在本次 scope。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp13_reconciler_cmd_tx.md`
+
+---
+
+## 2026-05-16 WP-06 E5-P-2 + WP-08 MIT-DB-6 + MIT-P1-2
+
+### 改動摘要
+1. **state_compiler.py deepcopy 精簡**（WP-06）：3 次 deepcopy 減為 2 次。反轉 cache 存儲邏輯：caller 直接拿 compiled（已是 input 的 deepcopy），cache 存 deepcopy(result)。
+2. **realized_edge_stats.py engine_mode SQL 修正**（MIT-DB-6）：`= %(engine_mode)s` 改為 `ANY(%(engine_modes)s)` + 本地 `_engine_mode_scope()` 函數。'live' 展開為 ['live', 'live_demo']。
+3. **edge_estimate_validation.py purge gap**（MIT-P1-2）：`ValidationConfig` 新增 `purge_days: int = 0`，`_walk_forward_oos_values()` 在 train_end 和 test_start 之間插入 purge 天數間隔。
+
+### 教訓
+- `realized_edge_stats.py` 是唯一一個 ML training 下用單值等號而非 `ANY(...)` 查 engine_mode 的模組。其他模組（linucb_trainer, parquet_etl, mlde_shadow_advisor）早已用 `engine_mode_scope()` + `ANY`。
+- deepcopy 優化核心是認清 `_do_compile_core` 返回的就是 input deepcopy 本身（同一物件），不需要再對 result 做第三次 deepcopy。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp06_wp08_python_fixes.md`

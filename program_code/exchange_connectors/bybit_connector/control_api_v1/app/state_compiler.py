@@ -606,30 +606,37 @@ def _compile_learning_derived(state: dict[str, Any]) -> None:
 
 def compile_state(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Full state compilation with identity refresh and learning derived fields.
     完整状态编译，刷新 snapshot 身份并计算学习派生字段。
 
-    Uses dirty-flag memoization (B6): if the state has not been mutated since
-    the last call AND the input state_revision matches, returns the cached
-    result immediately without O(n) list scans.
     使用脏标志缓存（B6）：若自上次调用以来状态未被修改且 state_revision 匹配，
     直接返回缓存结果，避免每次 O(n) 列表扫描。
+
+    WP-06 E5-P-2 deepcopy 精簡：原有 3 次 deepcopy 精簡為 2 次。
+    - INPUT deepcopy（必要）：_do_compile_core 會 in-place 修改 dict，
+      必須保護 caller 原始 state 不被破壞。
+    - CACHE deepcopy（必要）：返回給 caller 的結果必須是獨立副本，
+      避免 caller 修改後污染內部 _compile_cache。
+    - 原先 OUTPUT deepcopy（已移除）：改為直接返回已是新鮮副本的 compiled，
+      在鎖內存入 compiled 的 deepcopy 作為 cache 留存。
     """
     global _compile_dirty, _compile_cache
-    # Double-check: dirty flag AND state_revision must match to use cache.
-    # This prevents cross-contamination when different state dicts are compiled.
     # 双重检查：脏标志 AND state_revision 必须匹配才能使用缓存，
     # 防止不同 state dict 之间的交叉污染。
     incoming_rev = state.get("meta", {}).get("state_revision")
     with _compile_cache_lock:
         cached_rev = _compile_cache.get("meta", {}).get("state_revision") if _compile_cache else None
         if not _compile_dirty and _compile_cache and incoming_rev == cached_rev:
+            # CACHE deepcopy（必要）：caller 可能修改返回值，
+            # 必须保護 _compile_cache 不被外部突變。
             return copy.deepcopy(_compile_cache)
-    # Compile outside the lock to avoid holding it during O(n) computation.
     # 在鎖外編譯，避免在 O(n) 計算期間持有鎖。
+    # INPUT deepcopy（必要）：_do_compile_core 會 in-place 修改 state，
+    # 必须深拷貝保護 caller 原始 dict。
     compiled = copy.deepcopy(state)
     result = _do_compile_core(compiled, refresh_identity=True, include_learning=True)
+    # result 就是 compiled（同一物件），caller 將直接持有。
+    # 存入 cache 的必须是独立副本，避免 caller 後續修改污染 cache。
     with _compile_cache_lock:
-        _compile_cache = result
+        _compile_cache = copy.deepcopy(result)
         _compile_dirty = False
-    return copy.deepcopy(result)
+    return result

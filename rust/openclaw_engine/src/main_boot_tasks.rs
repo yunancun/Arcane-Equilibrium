@@ -21,7 +21,9 @@ use openclaw_engine::h_state_cache::poller::{
     DEFAULT_POLL_INTERVAL,
 };
 use openclaw_engine::h_state_cache::{is_gateway_enabled, HStateCache};
-use openclaw_engine::ipc_server::{HStateCacheSlot, LiveCmdSenderSlot, PerEngineRiskStores};
+use openclaw_engine::ipc_server::{
+    DemoCmdSenderSlot, HStateCacheSlot, LiveCmdSenderSlot, PerEngineRiskStores,
+};
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
@@ -78,14 +80,10 @@ pub(crate) fn spawn_position_reconcilers(
     live_bindings: &Option<ExchangePipelineBindings>,
     demo_bindings: &Option<ExchangePipelineBindings>,
     live_cmd_slot: &LiveCmdSenderSlot,
-    demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_slot: &DemoCmdSenderSlot,
     mirrors: &PositionsMirrors,
 ) {
     let (paper_mirror, demo_mirror, live_mirror) = mirrors;
-    // ORPHAN-ADOPT-1 Phase 1: build per-engine OrphanHandlerConfig. Each
-    // engine's reconciler gets its own closure reading max_order_notional_usdt
-    // from the matching per-engine RiskConfig store; scanner universe and
-    // edge estimates are shared (production pool).
     // ORPHAN-ADOPT-1 Phase 1：為每引擎構建 OrphanHandlerConfig。
     let build_orphan_cfg = |engine_key: &str| {
         let store = Arc::clone(risk_stores.select(engine_key));
@@ -102,6 +100,7 @@ pub(crate) fn spawn_position_reconcilers(
         }
     };
 
+    // Live reconciler：透過 slot 間接讀取 cmd_tx（已有 pattern）。
     if let Some(ref live_b) = live_bindings {
         let slot = Arc::clone(live_cmd_slot);
         let cmd_tx_provider: openclaw_engine::position_reconciler::ReconcilerCommandTxProvider =
@@ -118,20 +117,23 @@ pub(crate) fn spawn_position_reconcilers(
         );
         info!("position_reconciler spawned for Live / Live 持倉對帳器已啟動");
     }
+    // Demo reconciler（WP-13 FA-P1-11）：改用 slot 間接讀取，對齊 live pattern，
+    // 避免 by-value 值捕獲在 pipeline restart 後過時。
     if let Some(ref demo_b) = demo_bindings {
-        if let Some(ref tx) = demo_cmd_tx {
-            tasks::spawn_position_reconciler(
-                &demo_b.rest_client,
-                db_pool,
-                cancel,
-                tx.clone(),
-                shared_instruments,
-                &demo_b.risk_level,
-                demo_b.env,
-                Some(build_orphan_cfg("demo")),
-            );
-            info!("position_reconciler spawned for Demo / Demo 持倉對帳器已啟動");
-        }
+        let slot = Arc::clone(demo_cmd_slot);
+        let cmd_tx_provider: openclaw_engine::position_reconciler::ReconcilerCommandTxProvider =
+            Arc::new(move || slot.read().as_ref().cloned());
+        tasks::spawn_position_reconciler_with_cmd_provider(
+            &demo_b.rest_client,
+            db_pool,
+            cancel,
+            cmd_tx_provider,
+            shared_instruments,
+            &demo_b.risk_level,
+            demo_b.env,
+            Some(build_orphan_cfg("demo")),
+        );
+        info!("position_reconciler spawned for Demo / Demo 持倉對帳器已啟動");
     }
     if live_bindings.is_none() && demo_bindings.is_none() {
         info!(

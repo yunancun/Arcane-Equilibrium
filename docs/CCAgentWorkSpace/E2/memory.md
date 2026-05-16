@@ -2322,3 +2322,97 @@ Wave 1 commit `cabb2fcd` 39 files +1830 -200。Wave 2 working tree 12 files modi
 76. **Prereq plumbing dead-write 設計合理**：BB-MF-3 `arm_close_cooldown` 寫入 `reject_cooldown_close_until_ms` 但生產 dispatcher 尚未接線讀。Acceptable plumbing as prereq pattern（per AMD-2026-05-15-02 §8 IMPL Prereq 6），但必跟 follow-up impl ticket。E2 在 prereq commit 內 only require：(a) helper API contract 完整 (b) 全測試覆蓋 isolation invariant (c) follow-up impl ticket 已開。
 
 77. **leak regex 防線過寬問題**：`:\s+\d+` 命中良性 message 是 second-line defense 的常見副作用。優先級：first-line callsite migrate > second-line regex 精準度。當前 regex 對 production safe but false-positive rate 對 user-friendly numeric detail (Rate / Status / Timeout / Position / TTL) 嚴重。緩解：post-process whitelist 或先用 reason_codes dict response（dict 不命中 regex）。
+
+---
+
+## 2026-05-16 Wave 3 (WP-06 + WP-08 + WP-13) E2 Review
+
+### Verdict: PASS to E4
+
+0 BLOCKER / 0 HIGH / 1 MEDIUM / 2 LOW / 0 CRITICAL
+
+### Findings Summary
+
+- MEDIUM-1 (main_boot_tasks.rs:858)：main_boot_tasks.rs 858 行超 800 行警告線。Pre-existing violation（Wave 3 前已超），本 diff +3/-17 net 淨減 14 行。P2 governance ticket 可延。
+- LOW-1：state_compiler.py docstring 注釋混用簡中+繁中（「必须」vs「必須」、「双重」vs「雙重」）。不影響功能，cosmetic。
+- LOW-2：realized_edge_stats.py:228 f-string in ValueError raise。不是 log f-string 違反。PASS（ValueError raise 允許 f-string）。
+- SCOPE：diff 含 bybit_api_reference.md (+152) 和 AMD v0.4 patch (+17/-6)。兩者皆 docs-only、非業務代碼、不影響 WP-06/08/13 scope。Acknowledged but not blocking。
+
+### Pattern 學習追加 (item 78-80)
+
+78. **deepcopy 精簡安全判斷**：`_do_compile_core(state)` 修改 state in-place 並 `return state`（同一物件），所以 `compiled = deepcopy(state); result = _do_compile_core(compiled)` 之後 `result is compiled` 成立。caller 直接持有 compiled（已是 input deepcopy），cache 用 `deepcopy(result)` 保護。3→2 deepcopy 安全。
+
+79. **`_engine_mode_scope` 與 `ANY(%(engine_modes)s)` 是 psycopg2 安全 parameterized pattern**：psycopg2 把 Python list 自動轉成 PG ARRAY，`= ANY(array)` 是標準 PG 寫法。SQL injection 風險 = 0。
+
+80. **DemoCmdSenderSlot 與 LiveCmdSenderSlot 結構相同（Arc<RwLock<Option<UnboundedSender<PipelineCommand>>>>）但 type alias 分開**：語義安全（不可互混），兩者 Send+Sync（Arc + parking_lot::RwLock 保證）。Demo slot 在 boot 寫入一次不需要 watcher rotate，但未來 demo pipeline restart 可直接 slot.write() 替換。
+
+---
+
+## 2026-05-16 — Wave 2c-1 BB-MF-3 reject_cooldown split commit `27f02a07` 對抗 review (APPROVE-CONDITIONAL · PASS to E4)
+
+**對象**：commit `27f02a07 fix(reject_cooldown): split entry/close cooldown maps (BB-MF-3 P0, Wave 2b recovery)` 5 files +484/-36 LOC
+- `mod.rs`：struct field 拆 + 2 新常量 + arm_close_cooldown public API（inherent impl）
+- `constructors.rs`：3 ctor sites init 兩條 map
+- `position_mgmt.rs`：on_rejection_impl + on_post_only_rejected_impl 寫入 entry map；新 arm_close_cooldown_impl 路由 4 category
+- `signal.rs`：兩 side 都 active short-circuit + would_open 後 per-side entry gate
+- `tests.rs`：8 新 BB-MF-3 unit test + 1 既有 test 加 isolation 斷言
+
+**Verdict**：**APPROVE-CONDITIONAL · PASS to E4** · 0 BLOCKER / 0 HIGH / 1 MEDIUM (governance LOC clause misapplication) / 3 LOW (3 stale doc references + dead code BB-MF-2 ticket recommendation + integration test placement deviation)
+
+**5 push-back item E2 verdict**：
+1. **BB-MF-2 dynamic backoff scope avoidance — ACCEPT**：spec §5.4 指定 dynamic backoff，PM 任務 literal 5min fixed；E1 取 PM 任務明文（避 scope creep ~50 LOC state machine + ~80 LOC integration test）。**E2 verdict**：合理 trade-off，必開 `P1-BBMF-2-DYNAMIC-BACKOFF-1` ticket；不阻 Phase 2a Demo（5min fixed 是 conservative degradation，alpha-deficient 風險小於 starvation 風險）
+2. **on_post_only_rejected dead code — ACCEPT**：grep 確認 production 0 caller；trait 在 mod.rs:182 + grid_trading impl 在 mod.rs:430 + tests 引用。E1 留 Phase 1b 主軸 wiring 是合理 scope-limiting（commands.rs:792 still hard-coded market）
+3. **integration test inline 而非 event_consumer/tests/ — ACCEPT**：event_consumer/tests/ folder 存在，但 production 0 wiring（dispatcher 不接 helper），inline 進 grid_trading/tests.rs 與 60 個既有 grid 測試對齊更合理；建議 Phase 1b 主軸 IMPL 後再加 integration test
+4. **arm_close_cooldown inherent impl 而非 Strategy trait — ACCEPT**：grep 證實 4 non-grid 策略全用 trait default no-op；現 Phase 1b 只 grid 啟用 maker-first close，inherent 設計合理；Phase 2/3 若 4 策略全擴 maker-first close 再 promote 到 trait（評估約 ~30 LOC change）
+5. **reject_cooldown_close_until_ms 無 production read — ACCEPT**：spec §2.1 明文 close path commands.rs:778-816/940/1123 屬 Phase 1b 主軸；本 commit 是 prereq plumbing；無 dead_code warning（8 unit test exercise）；無需 #[allow(dead_code)]
+
+**驗證手段**：
+1. Mac cargo test --lib --release：**2906 PASS / 0 fail / 1 ignored**（baseline +8 BB-MF-3 new；E1 self-report 寫 2903+1 fail，現在 0 fail 是 sibling commit ef6ea79f WP-03 OU sigma residual 把 pre-existing OU stochastic test removed/refactored 後的乾淨狀態）
+2. cargo test grid_trading::tests：**60 PASS / 0 fail**；8 BB-MF-3 test 全 PASS by name
+3. cargo build --release lib + bin：PASS（2 lib warnings + 1 bin warning 全 pre-existing 與 BB-MF-3 無關：LEAD_WINDOW_SECS_MAIN unused / MaCrossover::make_intent dead）
+4. rustfmt --check 5 files：clean（0 output = pass）
+5. 跨平台 grep `/home/ncyu|/Users/[^/]+ncyu`：5 files 0 hit
+6. unsafe / production unwrap()：0 hit；2 pre-existing `.expect()` in signal.rs 均 entry_order precomputed invariant（line 344/376），與本 commit 無關
+7. grep production callsites of legacy `reject_cooldown_until_ms` field：0 production code 引用，3 stale doc references in `bybit_rest_client.rs:431` + `maker_rejection.rs:47/49` + `mod.rs:236`（commit message 自承 "maker_rejection.rs doc comment skipped due to sibling preserved revert"）
+8. grep `on_post_only_rejected` production callsite：0 hit；trait dead code by design（per push-back item 2）
+9. 8 new BB-MF-3 test 名對齊 PM Step 4 #1-#4：**100% covered** + 4 個 E1 加上的 (multi-symbol regression / short-circuit / overflow / default categories)
+10. 同 commit 對抗 grep `signal.rs` gate 邊界：would_open=true 的 entry block 與 Close emission 互斥（is_down_cross && cur_inv >=0 → Close short 需 cur_inv <0；is_up_cross && cur_inv <=0 → Close long 需 cur_inv >0）→ 不會誤封 close
+11. signal.rs short-circuit 「兩 side cooldown 都 active」邏輯正確（test #6 驗 entry expired 後 close 路徑恢復）
+12. multi-session race recovery 內容驗：git stash list 確認 stash@{0} `BB-MF-3 reject cooldown re-stash` + 15e67220 self-report 均 land；commit content 與 Wave 2b dispatch spec 對齊
+13. Bilingual comment style：per 2026-05-05 governance 新代碼默認中文 only；BB-MF-3 注釋全中文 + 技術詞英文（spec §6.1 / §5.3 / §5.4 / AMD §8 references 完整）
+
+**核心對抗發現**：
+1. **MEDIUM governance — §九 baseline exception clause misapplication（同 W2-IMPL-1 + Wave 1.6 同型）**：E1 self-report §4.4 引用 §九 「Pre-existing baseline exception clause」為 tests.rs 1389→1685（+296 LOC）辯護，但 §九 clause 原文「**僅適用 baseline > 2000 行**」；tests.rs 1685 < 2000 不適用 exception。屬「新 wave 推 ≤2000 到 ≤2000」常規 path 應走警告線 watch + P2 split ticket。同型重犯 3 次（W2-IMPL-1 1771 / Wave 1.6 P1-FILL 828 / 本次 1685），**強化 E1 governance training 必要性升 HIGH**。建議 P2 split ticket 拆 tests.rs（grid_pre_BB_MF_3 + grid_BB_MF_3 + grid_helpers）
+2. **5 push-back item 全 ACCEPT**：每項都有 grep 證據 + spec/AMD 對應段落 + scope 邊界明確；不阻 merge，但必 P1-BBMF-2-DYNAMIC-BACKOFF-1 follow-up（spec §5.4 vs PM 任務 literal 5min 衝突）
+3. **3 stale doc references in legacy field name**（LOW）：`bybit_rest_client.rs:431` + `maker_rejection.rs:47/49` 仍引用 `reject_cooldown_until_ms` 而非新 split name；commit message 自承 "sibling preserved their revert"（multi-session race interference）；建議 Phase 1b 主軸 IMPL 一道 sweep；不阻 merge
+4. **on_post_only_rejected dead code by design ACCEPT**：spec §6.2 + Phase 1b 主軸 IMPL scope 明確；不需立即 wiring；**但** 需在 P1-BBMF-2-DYNAMIC-BACKOFF-1 + Phase 1b 主軸 IMPL 同時接 production dispatcher（commands.rs / dispatch.rs / event_consumer/loop_exchange.rs WS reject 路徑）；建議 ticket 標 `prerequisite-of: bb_mf_3_close_dispatcher_wiring`
+5. **arm_close_cooldown inherent impl 設計不變式**：4 non-grid 策略 trait default no-op + 0 production read；如 Phase 2/3 promote 到 Strategy trait 必 verify Box<dyn Strategy> dispatcher signature 兼容性 + 4 策略全 default impl 加 4-line no-op；不阻當前 commit
+6. **multi-session race recovery 內容驗 PASS**：commit 5 files 含 Wave 2b dispatch spec 全部要素（mod.rs 拆 field + 2 常量 + arm_close_cooldown / constructors.rs 3 ctor / position_mgmt.rs 兩 helper / signal.rs 兩 gate / tests.rs 8 new + 1 isolated assertion）；中文注釋齊全；BB-MF-3 + spec v1.2 §6.1 reference 完整
+7. **8 new test 真實驗 invariant 不是 mock-pass**：test #1 + #2 用實際 on_tick + cur_inventory 設置真實觸 Close/Open 路徑；test #3 + #4 + #5 直驗 cooldown_until_ms 數值；test #6 用兩 ts 跑兩次 on_tick 驗 short-circuit + post-expire 恢復；test #7 multi-symbol cross-isolation；test #8 i64::MAX 邊界
+
+**Trade-off accepted**：
+- BB-MF-2 dynamic backoff 5min fixed scope avoidance（合理 push back，必 ticket follow-up）
+- on_post_only_rejected dead code by design（Phase 1b 主軸 wiring scope）
+- arm_close_cooldown inherent impl（4 non-grid 策略尚未需要，未來 promote）
+- integration test inline（無 production wiring，inline 與既有對齊）
+- reject_cooldown_close_until_ms 無 read site（prereq plumbing，無 dead_code warning）
+- tests.rs 1685 LOC > 800 警告 < 2000 cap（per §九 clause 不適用 exception，開 P2 split ticket）
+- 3 stale doc references（multi-session race 殘留，Phase 1b 主軸 sweep）
+
+**經驗教訓 / Lesson learned**：
+1. **§九 baseline exception clause 第 3 次同型 misapplication（升 HIGH 重犯模式）**：E2 memory 2026-05-11 W2 lesson #1 + 2026-05-11 Wave 1.6 lesson #1 已立兩同型，本次第 3 次。E1 共三次混淆「已 ≥800 警告」≠「已 >2000 baseline」。SOP：所有 E1 報告引用此 clause 必 E2 grep `pre-existing baseline 2000` 比對是否 baseline > 2000；< 2000 一律走警告線 watch + P2 ticket。建議 PM 強化 E1 governance reading SOP / E1 profile.md 加 §九 clause 邊界 quote
+2. **scope avoidance vs spec mandate 衝突 SOP**：當 PM 任務 literal 與 spec mandate 衝突（本次 PM 任務 5min vs spec §5.4 dynamic backoff），E1 取 PM 任務 literal 是合理 default（避 scope creep），但必 self-flag + 開 follow-up ticket；E2 review 必檢查 ticket 是否真開（建議 P0 → P1 ticket promote SOP）
+3. **multi-session race protocol 強化必要**：commit message 自承 "sibling 12-agent audit session repeatedly stashed + silently dropped this work (3 race events)"；雖 PM 從 dropped stash refs 恢復成功，但 3 stale doc references 殘留證明 race 仍有 pollution 風險。建議 operator approve 強制「BB-MF-3 Wave 2b 期間其他 12-agent audit session 改成 isolation: worktree」或「meta-dispatch 同步協議」
+4. **dead code by design 與 dead_code warning 區分**：當 helper 由 8 unit test exercise，cargo build 不報 dead_code warning（即使 production 0 caller）；無需 `#[allow(dead_code)]` annotation。E2 grep `dead_code` 警告應視為「test 未覆蓋」signal 而非「helper 無用」；本次 0 dead_code warning 是 well-tested prereq plumbing 證據
+5. **strategy trait promotion 時機評估**：當 1 策略需要新 method 時用 inherent impl + arm_NAME public API；當 ≥2 策略需要時 promote 到 Strategy trait + 4 策略寫 default no-op + Box<dyn> dispatcher signature 兼容；建議 Phase 1b 主軸 IMPL 結尾評估是否要 promote `arm_close_cooldown` 到 trait
+6. **rejected_cooldown gate 拆分後 entry-vs-close 互斥不變式 verify SOP**：對任何「per-side gate」改動，必逐行 trace `would_open` 與 Close emission path 是否真互斥；本次 grid 因 cross detection geometry 自然互斥（is_down_cross && cur_inv >= 0 排除 close short），但其他策略（ma_crossover / bb_breakout）的 entry/close 觸發條件可能不互斥，未來 promote 到 trait 時必重新驗證
+7. **stash refs recovery 後內容完整性驗 SOP**：multi-session race 後從 dropped stash refs 恢復必 grep cross-check 5 files 全部要素是否齊（field rename / 2 ctor / 兩 helper / 兩 gate / 8 test）；本次 stash recovery 內容完整 PASS，但 3 stale doc references 漏掉 = 應在 PM commit 前最後 grep `git diff` 確認 reject_cooldown legacy name 全清除
+
+**Cross-References**：
+- E1 self-report: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--reject_cooldown_split_bbmf3.md`
+- spec v1.2 §6.1: `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- AMD v0.3.1 §8 IMPL Prereq 6: `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
+- commit: `27f02a07a6acadc765f7a86a8e11e244b24d22da` (HEAD `c0d34fcb` after `88f9254f`)
+- Sibling: `15e67220 docs(e1): wave 2b reject_cooldown_split bb-mf-3 self-report` + `ef6ea79f feat(wave2): WP-03 OU sigma residual + WP-04 + WP-07 + WP-10`
+- 與 W2-IMPL-1 lesson #1 對齊（btc_lead_lag.rs 1771 LOC pre-existing clause misapplication 同型）+ Wave 1.6 P1-FILL-LINEAGE-DROP lesson #1 同型（runtime_shadow.rs 828 LOC）= 第 3 次 §九 重犯
+- E2 W2 IMPL chain lesson #1 (pre-existing baseline exception clause 範圍嚴格 baseline > 2000)

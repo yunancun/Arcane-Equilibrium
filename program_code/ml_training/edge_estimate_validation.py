@@ -24,6 +24,9 @@ class ValidationConfig:
     wf_train_days: int = 90
     wf_test_days: int = 30
     wf_step_days: int = 30
+    # MIT-P1-2：train 結尾到 test 開頭之間的 purge gap（天數），
+    # 用於消除自相關造成的 look-ahead bias。默認 0 保持向後兼容。
+    purge_days: int = 0
     min_trust_n: int = 30
     min_oos_n: int = 30
     min_wf_windows: int = 2
@@ -115,6 +118,13 @@ def _walk_forward_oos_values(
     config: ValidationConfig,
     now: Optional[datetime],
 ) -> tuple[list[float], int]:
+    """Walk-forward OOS 值收集。
+
+    MIT-P1-2：在 train 結尾與 test 開頭之間插入 purge gap
+    （config.purge_days 天），防止自相關導致的 look-ahead bias。
+    purge 區間內的 round-trip 既不計入 train 也不計入 test。
+    默認 purge_days=0 保持向後兼容。
+    """
     dated = [r for r in records if r.exit_ts is not None]
     if not dated:
         return [], 0
@@ -129,17 +139,20 @@ def _walk_forward_oos_values(
         last_ts = last_ts.replace(tzinfo=timezone.utc)
 
     train = timedelta(days=config.wf_train_days)
+    purge = timedelta(days=config.purge_days)
     test = timedelta(days=config.wf_test_days)
     step = timedelta(days=config.wf_step_days)
 
     values: list[float] = []
     windows = 0
     window_start = first_ts
-    while window_start + train + test <= last_ts:
+    # 每個窗口佈局：[train_start ... train_end] [purge gap] [test_start ... test_end]
+    while window_start + train + purge + test <= last_ts:
         train_end = window_start + train
-        test_end = train_end + test
+        test_start = train_end + purge
+        test_end = test_start + test
         train_recs = _records_in_window(dated, window_start, train_end)
-        test_recs = _records_in_window(dated, train_end, test_end)
+        test_recs = _records_in_window(dated, test_start, test_end)
         if train_recs and test_recs:
             windows += 1
             values.extend(r.net_pnl_bps for r in test_recs)

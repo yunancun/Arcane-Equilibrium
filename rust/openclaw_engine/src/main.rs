@@ -26,7 +26,7 @@ mod tasks;
 use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment};
 use openclaw_engine::config::{ConfigManager, ConfigStore};
 use openclaw_engine::ipc_server::{
-    EngineCommandChannels, IpcServer, LiveCmdSenderSlot, PerEngineRiskStores,
+    DemoCmdSenderSlot, EngineCommandChannels, IpcServer, LiveCmdSenderSlot, PerEngineRiskStores,
 };
 use openclaw_engine::market_data_client::MarketDataClient;
 use openclaw_engine::scanner::runner::ScannerRunner;
@@ -413,9 +413,10 @@ async fn async_main(
     let ipc_data_dir =
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
 
-    // 3E-ARCH: Independent command channels per pipeline.
-    // paper/demo: boot-time fixed. live: slot rotated by LiveAuthWatcher.
-    // 3E-ARCH：paper/demo boot 固定；live 改 slot 由 LiveAuthWatcher 輪替。
+    // 3E-ARCH: 各管線獨立 command channel。
+    // paper: boot-time 固定（OPENCLAW_ENABLE_PAPER=0 預設關）。
+    // demo: boot-time 固定，透過 slot 間接讀取避免 reconciler 值捕獲過時。
+    // live: slot 由 LiveAuthWatcher 輪替。
     let (paper_cmd_tx, paper_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
     let (demo_cmd_tx, demo_cmd_rx) = if demo_bindings.is_some() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -423,20 +424,20 @@ async fn async_main(
     } else {
         (None, None)
     };
-    // Live command sender slot — populated by the watcher / boot closure
-    // path (see `live_pipeline_spawner` later). IPC + scanner / phase4
-    // reads via `EngineCommandChannels::live_snapshot()`.
-    // Live 命令 sender slot — watcher / boot closure 填入；IPC + scanner /
+    // Demo command sender slot（WP-13 FA-P1-11）：對齊 live slot pattern，
+    // 讓 demo reconciler 透過閉包間接讀取，避免 by-value 值捕獲過時。
+    let demo_cmd_slot: DemoCmdSenderSlot = Arc::new(ParkingRwLock::new(None));
+    if let Some(ref tx) = demo_cmd_tx {
+        *demo_cmd_slot.write() = Some(tx.clone());
+    }
+
+    // Live command sender slot — watcher / boot closure 填入；IPC + scanner /
     // phase4 經 `EngineCommandChannels::live_snapshot()` 讀取。
     let live_cmd_slot: LiveCmdSenderSlot = Arc::new(ParkingRwLock::new(None));
 
-    // Boot-time live command channel: Some if boot authorized, None otherwise.
-    // When Some, mirror into live_cmd_slot so IPC/scanner see boot sender.
-    // LIVE-RECONCILER-STALE-CMD-TX P1 TODO: reconcilers hold this by-value.
     // Boot-time live 命令通道：授權 → Some（同時寫 slot）；否則 None。
     let (live_cmd_tx, live_cmd_rx) = if live_bindings.is_some() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        // Mirror into slot so IPC / scanner / phase4 see the same sender.
         // 寫入 slot，IPC / scanner / phase4 即見。
         *live_cmd_slot.write() = Some(tx.clone());
         (Some(tx), Some(rx))
@@ -797,7 +798,7 @@ async fn async_main(
         &live_bindings,
         &demo_bindings,
         &live_cmd_slot,
-        &demo_cmd_tx,
+        &demo_cmd_slot,
         &positions_mirrors,
     );
 
@@ -1283,17 +1284,10 @@ async fn async_main(
             btc_lead_lag_panel_slot: Some(Arc::clone(&btc_lead_lag_panel_slot)),
         });
 
-    // Boot Some: direct spawn using pre-built channels. Reuses the `spawn_ctx`
-    // + `writers` constructed above (BLOCKER-1 duplication eliminated per E2
-    // round-2). The pre-built channels are essential for reconcilers / scheduler
-    // that capture cmd_tx by-value at boot — they cannot be rotated through the
-    // spawner closure (LIVE-RECONCILER-STALE-CMD-TX P1 TODO).
-    //
-    // Boot None: watcher decides_once and spawns when authorization becomes valid.
-    //
     // Boot Some：使用預建通道直接 spawn，重用上方 spawn_ctx + writers（BLOCKER-1
-    // 去重複，per E2 round-2）。預建通道供 reconciler / scheduler boot-time 值捕獲
-    // — 不能走 spawner closure 輪換（LIVE-RECONCILER-STALE-CMD-TX P1 TODO）。
+    // 去重複，per E2 round-2）。Live / Demo reconciler 已透過 slot 間接讀取
+    // cmd_tx（WP-13 FA-P1-11 修正）；paper reconciler 仍 by-value（paper 預設
+    // 關閉，OPENCLAW_ENABLE_PAPER=0，屬 P2）。
     // Boot None：watcher 在授權生效後決策並 spawn。
     if let (Some(live_b), Some(live_slot_cancel_token)) = (live_bindings, live_slot_cancel) {
         let (boot_live_event_tx, boot_live_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
