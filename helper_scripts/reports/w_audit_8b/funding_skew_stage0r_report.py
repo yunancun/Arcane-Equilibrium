@@ -19,6 +19,7 @@ except ImportError:
 
 DEFAULT_WINDOW_DAYS = 7
 DEFAULT_COST_BPS = 12.0
+K_PRIOR_MODES = ("funding-related", "strict-funding-skew", "all")
 
 
 def _repo_root() -> Path:
@@ -85,21 +86,54 @@ def fetch_panel_symbols(conn, *, window_days: int) -> tuple[str, ...]:
         return tuple(str(row[0]) for row in cur.fetchall())
 
 
-def fetch_k_prior(conn) -> int:
+def fetch_k_prior(conn, *, mode: str) -> tuple[int, dict[str, object]]:
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass('learning.strategy_trial_ledger') IS NOT NULL")
         row = cur.fetchone()
         if not row or not row[0]:
-            return 0
-        cur.execute(
+            return 0, {
+                "mode": mode,
+                "source": "learning.strategy_trial_ledger",
+                "available": False,
+                "where": None,
+            }
+        if mode == "strict-funding-skew":
+            where_sql = """
+            candidate_key IS NOT NULL
+            AND (
+                strategy_name = 'funding_skew_directional'
+                OR trial_family = 'funding_skew_directional'
+                OR candidate_key ILIKE 'funding_skew_directional%%'
+            )
             """
+        elif mode == "funding-related":
+            where_sql = """
+            candidate_key IS NOT NULL
+            AND (
+                strategy_name ILIKE 'funding%%'
+                OR trial_family ILIKE 'funding%%'
+                OR candidate_key ILIKE '%%funding%%'
+            )
+            """
+        elif mode == "all":
+            where_sql = "candidate_key IS NOT NULL"
+        else:
+            raise ValueError(f"unsupported K_prior mode: {mode}")
+        cur.execute(
+            f"""
             SELECT count(DISTINCT candidate_key)::int
             FROM learning.strategy_trial_ledger
-            WHERE candidate_key IS NOT NULL
+            WHERE {where_sql}
             """
         )
         prior = cur.fetchone()
-        return int(prior[0] or 0)
+        return int(prior[0] or 0), {
+            "mode": mode,
+            "source": "learning.strategy_trial_ledger",
+            "available": True,
+            "where": " ".join(where_sql.split()),
+            "count_distinct": "candidate_key",
+        }
 
 
 def fetch_feature_rows(conn, *, window_days: int, symbols: Sequence[str]) -> list[dict]:
@@ -127,6 +161,11 @@ def _clean_json(value):
 def render_summary(packet: dict) -> str:
     pooled = packet.get("pooled_primary") or {}
     best = packet.get("best_primary_cell") or {}
+    panel = packet.get("panel_metadata") or {}
+    settlement = packet.get("settlement_window") or {}
+    plateau = packet.get("plateau_check") or {}
+    baseline = packet.get("baseline_lift") or {}
+    cost_model = packet.get("execution_cost_model") or {}
     reasons = packet.get("eligibility_fail_reasons") or []
     lines = [
         "# W-AUDIT-8b Funding Skew Stage 0R Packet",
@@ -138,6 +177,7 @@ def render_summary(packet: dict) -> str:
         f"source_mode: {packet.get('source_mode')}",
         f"symbols: {packet.get('symbol_count')} rows: {packet.get('row_count')}",
         f"K_prior: {packet.get('k_prior')} K_new: {packet.get('k_new')} K_total: {packet.get('k_total')}",
+        f"K_prior_semantic: {json.dumps(packet.get('k_prior_semantic'), sort_keys=True)}",
         "",
         "## Verdict",
         "",
@@ -153,7 +193,16 @@ def render_summary(packet: dict) -> str:
             f"n: {pooled.get('n')} n_eff: {pooled.get('n_eff')}",
             f"avg_net_bps: {pooled.get('avg_net_bps')}",
             f"PSR(0): {pooled.get('psr_0')} DSR: {pooled.get('dsr')} PBO: {packet.get('pbo')}",
-            f"bootstrap_ci_95: {pooled.get('bootstrap_ci_95')}",
+            f"bootstrap_ci_95_60m: {pooled.get('bootstrap_ci_95_60m')}",
+            f"bootstrap_ci_95_8h: {pooled.get('bootstrap_ci_95_8h')}",
+            "",
+            "## Contract Fields",
+            "",
+            f"panel_metadata: {json.dumps(_clean_json(panel), sort_keys=True)}",
+            f"settlement_window: {json.dumps(_clean_json(settlement), sort_keys=True)}",
+            f"plateau_check: {json.dumps(_clean_json(plateau), sort_keys=True)}",
+            f"baseline_lift: {json.dumps(_clean_json(baseline), sort_keys=True)}",
+            f"execution_cost_model: {json.dumps(_clean_json(cost_model), sort_keys=True)}",
             "",
             "## Best Primary Cell",
             "",
@@ -171,6 +220,12 @@ def main() -> int:
     parser.add_argument("--symbols", type=str, default=None)
     parser.add_argument("--cost-bps", type=float, default=DEFAULT_COST_BPS)
     parser.add_argument("--k-prior", type=int, default=None)
+    parser.add_argument(
+        "--k-prior-mode",
+        choices=K_PRIOR_MODES,
+        default="funding-related",
+        help="how to estimate comparable prior trials when --k-prior is not set",
+    )
     parser.add_argument("--out", type=str, default=None, help="optional output path")
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
     args = parser.parse_args()
@@ -186,7 +241,16 @@ def main() -> int:
         if not symbols:
             print("[FATAL] no overlapping funding/OI panel symbols", file=sys.stderr)
             return 1
-        k_prior = args.k_prior if args.k_prior is not None else fetch_k_prior(conn)
+        if args.k_prior is not None:
+            k_prior = args.k_prior
+            k_prior_meta = {
+                "mode": "manual",
+                "source": "--k-prior",
+                "available": True,
+                "where": None,
+            }
+        else:
+            k_prior, k_prior_meta = fetch_k_prior(conn, mode=args.k_prior_mode)
         rows = fetch_feature_rows(conn, window_days=args.window_days, symbols=symbols)
     except Exception as exc:  # noqa: BLE001
         print(f"[FATAL] Stage 0R query failed: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -197,6 +261,7 @@ def main() -> int:
     packet = compute_stage0r(rows, k_prior=k_prior, cost_bps=args.cost_bps)
     packet["symbols"] = list(symbols)
     packet["window_days"] = args.window_days
+    packet["k_prior_semantic"] = k_prior_meta
 
     rendered = (
         render_summary(packet)

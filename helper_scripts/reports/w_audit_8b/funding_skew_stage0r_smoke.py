@@ -8,8 +8,10 @@ from typing import Any
 
 try:
     from .funding_skew_stage0r_metrics import compute_stage0r, grid_cell_count
+    from .funding_skew_stage0r_report import fetch_k_prior
 except ImportError:
     from funding_skew_stage0r_metrics import compute_stage0r, grid_cell_count  # type: ignore
+    from funding_skew_stage0r_report import fetch_k_prior  # type: ignore
 
 
 def _row(
@@ -27,13 +29,16 @@ def _row(
         "symbol": symbol,
         "signal_ts_ms": ts,
         "prior_5m_return_bps": prior,
+        "funding_snapshot_ts_ms": ts - 10_000,
         "funding_age_ms": 10_000,
         "funding_rate_bps": funding_z,
         "funding_zscore_25sym": funding_z,
         "funding_percentile_25sym": pct,
         "funding_spread_to_median_bps": funding_z,
+        "funding_cohort_n": 3,
         "next_funding_ms": next_funding_ms,
         "funding_source_tier": "bybit_v5_ws_ticker",
+        "oi_snapshot_ts_ms": ts - 10_000,
         "oi_age_ms": 10_000,
         "oi_delta_15m_pct": oi,
         "oi_delta_1h_pct": oi,
@@ -90,6 +95,46 @@ def build_fixture() -> list[dict[str, Any]]:
     return rows
 
 
+class _FakeCursor:
+    def __init__(self) -> None:
+        self.query = ""
+
+    def __enter__(self) -> "_FakeCursor":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def execute(self, query: str) -> None:
+        self.query = " ".join(query.split())
+
+    def fetchone(self) -> tuple[int | bool]:
+        if "to_regclass" in self.query:
+            return (True,)
+        if "strategy_name = 'funding_skew_directional'" in self.query:
+            return (0,)
+        if "strategy_name ILIKE 'funding%%'" in self.query:
+            return (9,)
+        return (69,)
+
+
+class _FakeConn:
+    def cursor(self) -> _FakeCursor:
+        return _FakeCursor()
+
+
+def _check_k_prior_modes(failures: list[str]) -> None:
+    strict_value, strict_meta = fetch_k_prior(_FakeConn(), mode="strict-funding-skew")
+    funding_value, funding_meta = fetch_k_prior(_FakeConn(), mode="funding-related")
+    all_value, all_meta = fetch_k_prior(_FakeConn(), mode="all")
+    if strict_value != 0 or strict_meta.get("mode") != "strict-funding-skew":
+        failures.append(f"strict K_prior mode mismatch: {strict_value} {strict_meta}")
+    if funding_value != 9 or funding_meta.get("mode") != "funding-related":
+        failures.append(f"funding-related K_prior mode mismatch: {funding_value} {funding_meta}")
+    if all_value != 69 or all_meta.get("mode") != "all":
+        failures.append(f"all K_prior mode mismatch: {all_value} {all_meta}")
+
+
 def main() -> int:
     packet = compute_stage0r(build_fixture(), k_prior=69, cost_bps=12.0)
     failures: list[str] = []
@@ -104,6 +149,33 @@ def main() -> int:
         failures.append("pooled primary has no signals")
     if packet["funding_attribution_mode"] != "excluded":
         failures.append("funding attribution mode is not excluded")
+    if packet["source_mode"] != "ws_current":
+        failures.append(f"source_mode mismatch: {packet['source_mode']}")
+    required_top_fields = (
+        "panel_metadata",
+        "per_symbol_breakdown",
+        "settlement_window",
+        "baseline_lift",
+        "execution_cost_model",
+        "pbo_metadata",
+        "plateau_check",
+    )
+    for field in required_top_fields:
+        if field not in packet:
+            failures.append(f"missing top-level field: {field}")
+    pooled = packet["pooled_primary"]
+    for field in ("bootstrap_ci_95_60m", "bootstrap_ci_95_8h", "bootstrap_block_minutes"):
+        if field not in pooled:
+            failures.append(f"missing pooled field: {field}")
+    exclusions = packet["exclusions"]
+    for field in ("funding_missing", "funding_stale_excluded", "oi_missing", "oi_stale_excluded"):
+        if field not in exclusions:
+            failures.append(f"missing exclusion field: {field}")
+    if packet["execution_cost_model"].get("cost_edge_ratio") is None:
+        failures.append("cost_edge_ratio missing")
+    if not packet["per_symbol_breakdown"]:
+        failures.append("per_symbol_breakdown empty")
+    _check_k_prior_modes(failures)
     if failures:
         print("FAIL")
         for item in failures:

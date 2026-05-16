@@ -1,5 +1,11 @@
 # PM Memory — 工作記憶
 
+## 項目狀態快照（2026-05-16 W-AUDIT-8b Stage 0R）
+
+- Funding Skew Stage 0R tooling gap closure source/test done: report packet now emits panel metadata, per-symbol breakdown, settlement-window sensitivity, baseline lift, flat cost model/cost-edge ratio, 60m + 8h bootstrap, PBO metadata, and plateau check.
+- `--k-prior-mode` exposes `funding-related` / `strict-funding-skew` / `all`; this is tooling support, not MIT governance sign-off. Round 2 verdict still waits for panel >= 7d and QC/MIT/BB review.
+- No demo/live/paper/config/auth/runtime mutation occurred.
+
 ## 項目狀態快照（2026-03-31）
 
 - 測試基準：2610 passed / 18 pre-existing failed（Wave 5 全部完成後）
