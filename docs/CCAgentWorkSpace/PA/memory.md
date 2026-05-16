@@ -3971,3 +3971,77 @@ PG fills 直查證據：
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--v094_schema_migration_spec_pa_verdict.md`
 
+---
+
+## 2026-05-15 — Wave 1.5b: spec v1.3 + AMD v0.4 consolidated patch (Wave 3a 4-agent re-review consolidation)
+
+**Trigger**：PM Wave 1.5b dispatch — Wave 3a 4-agent short re-review on AMD v0.3 + spec v1.2 verdict 4/4 APPROVED；QC 1 NEW MUST-FIX QC-MF-3 + 1 NEW SHOULD-FIX QC-SF-6 + FA 4 cosmetic + MIT 2 P3 advisory；本 patch 純 numerical / cosmetic 增量無新風險 → IMPL Prereq 條件 2 SATISFIED.
+
+**Land 4 commit chain**：
+- `c0d34fcb` — spec v1.2 → v1.3（19/-12 LOC）
+- `2f55d053` — AMD v0.3.1 → v0.4（15/-5 LOC）
+- `a436553f` — TODO §11.5 update（Wave 1.5b status + dispatch order Wave 1-11 final）
+- 本 PA report
+
+**5 patch items 全 land**：
+1. **QC-MF-3 (CRITICAL)** — spec §11.1 AC-5「+1.5 bps」→「+0.5 bps for n≥50 cells / directional only (≥ 0) for n<30 cells」（per Wilson-CI mechanism per Consensus-MF-2）+ §11.3 AC-11「+1.5 bps」→「+0.5 bps」（對齊 §1.2 fee saving 0.5-2.0 bps net per close attempt 中性 0.95；原 +1.5 deterministic FAIL 修為對齊 conservative 下界）+ §11 開頭 v1.3 patch footnote
+2. **QC-SF-6 (SHOULD)** — spec §11.7 AC-18 補 Wilson-CI sub-clause（per env 7d 樣本算 Wilson 95% CI lower vs 95%；CI lower < 90% → WARN；CI lower < 85% → FAIL；mirror AC-14 mechanism）+ §5.5 line 410-411 加 footnote 引用 IMPL phase healthcheck [62] sub-check SQL Wilson 計算
+3. **FA #1 cosmetic** — AMD §3 rollout table footnote「AC-1..AC-16」→「AC-1..AC-19」（per FA-SF-2 SoT 引用避免 spec/AMD drift）
+4. **FA #2 cosmetic** — AMD §10.1 V094 backward-compat 加 v0.4 IMPL kickoff 必含項：trading_writer.rs:430 details payload writer 升級 + TradingMsg::Fill enum 21→24 fields + 13 caller sites + 兩段式 schema invariant（per Wave 1 Track A4 §4.4 + Wave 2a Track A2 V094 spec §6 + empirical 24h 98 fills 0% details rate）
+5. **FA #3 cosmetic** — AMD §2.3 negative whitelist 真風控行補 PA 識別變體 `risk_close:fast_track*` / `halt_session*`（spec §4.3 已列；AMD 同步以對齊 §三/§四 fail-closed semantic）
+6. **FA #4 cosmetic** — AMD §7 16 原則表補 #3 / #11 / #13 / #15 4 行明列 PASS（治理 trace 完整度 7/12 → 11/12）：#3 close maker dispatch 仍走 OrderDispatchRequest 單通道 / #11 Whitelist + carve-out 不影響 Agent 自主決定 timing/symbol / #13 close-maker-first 純 execution-quality 不增 AI 調用 / #15 不變動 5-Agent 架構
+
+**MIT 2 P3 advisory 處理**：
+- MIT-AC-18-CI-NOTE — 與 QC-SF-6 重疊，已被 QC-SF-6 cover；無獨立 patch
+- MIT-AC-19-Stratification-NOTE — per-strategy + per-symbol stratification 建議 OPTIONAL deferred IMPL phase healthcheck（不入 spec text，避免 over-spec；IMPL phase healthcheck [62]/[65] 加 stratification logic 由 PA Wave 4+ IMPL plan 涵蓋）
+
+**A3 §12.2 framing 更新（QC §7 反問 5 衍生）**：
+- spec §12.2 line 758「#16 組合風險 maker pending 期 portfolio under-estimate」（v1.1 留設）改「entry-side resting maker pending 期 portfolio under-estimate（既有 systemic gap，新 P1 ticket option A 平行解；per Wave 1 Track A3 verify finding，close path is_reducing→allow() 不觸 portfolio gate 不引入新 risk vector）」+ Mitigation 改 `P1-PORTFOLIO-RESTING-EXPOSURE-1` 平行 IMPL（A3 verify report §8 + §15 ticket scope）
+
+**spec/AMD 內部一致性 cross-check（pass）**：
+- Fee saving range：spec §1.2 0.5-2.0 bps net ↔ AMD §1 footnote `^v03_fee` 0.5-2.0 bps ✅
+- AC-5 / AC-11 數值：spec +0.5 bps for n≥50 ↔ AMD §3 引用 AC-1..AC-19 不重述 ✅（per FA-SF-2 SoT 不重述）
+- AC-18 Wilson-CI：spec §11.7 + §5.5 footnote ↔ AMD §3 列 AC-18 不重述機制 ✅
+- Negative whitelist：spec §4.3 fast_track* / halt_session* 已列 ↔ AMD §2.3 v0.4 補對應 ✅
+- 16 原則 #3/#11/#13/#15：spec §13.1 標「不觸」（execution-quality 不觸 governance core）↔ AMD §7 v0.4 補明列 PASS（治理 trace 視角必明列）✅
+- §12.2 framing：spec line 758 entry-side framing ↔ AMD §7 #16 v0.3 MAINTAIN + ticket 引用 ✅
+- trading_writer.rs:430 升級：spec §15 ticket P2-ORDERS-INTENT-ID-WRITER-GAP-1 + V094 spec §6 ↔ AMD §10.1 v0.4 IMPL kickoff 必含 ✅
+
+**IMPL Prereq 條件 2 SATISFIED**：
+- 4-agent re-review 4/4 APPROVED（QC + FA + BB + MIT）+ Wave 1.5b spec v1.3 + AMD v0.4 patch land 收口完整
+- 17 must-fix + 14 should-fix + Wave 1.5 A3+E3 finding + Wave 1.5b QC-MF-3/QC-SF-6/FA 4 cosmetic 全 integrated
+- 條件 1 ✅ + 條件 2 ✅ + 條件 5 ✅ + 條件 6 ✅ partial（E1+E4 land, E2 review pending）+ 條件 3 ⏳ 三閘 + 條件 4 ⏳ IMPL kickoff
+- 6 條件中 4 條 ✅ / 1 條 ✅ partial / 2 條 ⏳
+
+**Side-effects 分析**：
+- Rust commands.rs / Python / TOML / V094 SQL：0 影響（本 patch 不動代碼）
+- Healthcheck [62] sub-check SQL：future IMPL（per QC-SF-6 加 Wilson-CI 計算，PA Wave 4+ IMPL plan 涵蓋）
+- Healthcheck [62]/[65] stratification：OPTIONAL future IMPL（per MIT-AC-19，IMPL phase 加 per-strategy + per-symbol logic）
+- AC evaluation logic：future IMPL（AC-5 n≥50 vs n<30 階梯 + AC-18 Wilson-CI gate）
+- Phase 2a 14d Demo PASS gate：v1.3 修 AC-5 / AC-11「deterministic FAIL」修為「對齊 conservative 下界可達成」；不放鬆 Phase 2a 嚴謹度
+- 治理層：MAG-082 W-C lineage / Decision Lease / 9 安全不變量 = 0；16 原則合規強化（trace 7/12 → 11/12）
+
+**Multi-session race 防範實踐**：
+- 4 commit 全分離（spec / AMD / TODO / PA report）
+- 每個 commit 用 `git commit --only <file>` 隔絕 index race
+- 0 使用 `git add -A`
+- 全部 commit message 加 `[skip ci]`
+- Push 模式：`git push origin HEAD:main`（worktree branch HEAD → origin/main fast-forward）
+- Sibling commits land 期間（28c571c7 BB1 字典 + 8321b4b7 E4 reject_cooldown regression + f31b6e8f WP-06/08/13）→ 全部 fast-forward push 成功，無 rebase / merge 操作
+- 改動 file 範圍與 sibling 互不重疊：本 patch 動 spec / AMD / TODO / PA report；sibling 動 BB 字典 / E4 test / Python deepcopy 等
+
+**架構教訓 21（Wave 1.5b 衍生）**：**incremental cosmetic patch 不需重派 4-agent re-review**。Wave 3a 4-agent re-review 識別 1 NEW MUST + 1 NEW SHOULD + 4 cosmetic + 2 P3 advisory，全部是 numerical / cosmetic / framing 增量無新風險 → PA 直接整合 spec v1.3 + AMD v0.4 patch land 即關閉條件 2，不需要再派 Wave 3c 4-agent re-review on v1.3/v0.4。**節省 capacity = 1 round QC+FA+BB+MIT 各 30min（同 Wave 1.5 教訓 17 一致）**。判斷準則：本次 patch 是否引入「新 risk vector / 新 schema / 新 IMPL scope / 新 governance gate」？四答都 NO → 純 patch land。
+
+**架構教訓 22**：**spec/AMD 雙文一致性檢查 SOP**。本 Wave 1.5b 修 AC-5 / AC-11 / AC-18 數值 + framing 必須同時 cross-check spec §11 + AMD §3（FA-SF-2 SoT 不重述原則：AMD 引用 spec AC SoT，避免雙文 drift）。本次發現 AMD §3 footnote 「AC-1..AC-16」需更新為「AC-1..AC-19」就是雙文 drift 證據（FA-#1 cosmetic）。**未來：每 spec 改 AC 範圍/數值，必檢 AMD 對應引用是否同步**；patch 提交流程加「spec/AMD cross-ref 檢查」步驟。
+
+**Confidence**:
+- HIGH for QC-MF-3 fix（AC-5/AC-11 數值對齊 §1.2 0.5-2.0 bps 中性 0.95）
+- HIGH for QC-SF-6 fix（Wilson-CI sub-clause mirror AC-14 mechanism）
+- HIGH for FA 4 cosmetic（AC SoT 引用、trading_writer.rs:430 升級、negative whitelist 變體、16 原則 #3/#11/#13/#15 全 land）
+- HIGH for §12.2 framing（line 758 entry-side framing 對齊 A3 verify report + AMD §7 #16 v0.3 MAINTAIN）
+- HIGH for MIT P3 advisory 處理（重疊 → cover；stratification → OPTIONAL deferred）
+- HIGH for race 防範（4 commit 分離 + commit --only + 0 add -A + skip ci + sibling 3 commit 期間全 fast-forward）
+- HIGH for IMPL Prereq 條件 2 SATISFIED 結論
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--wave_1_5b_spec_v1_3_amd_v0_4_consolidated.md`
+
