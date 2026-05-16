@@ -3,7 +3,9 @@ version = 1
 saved_ts_ms = 0
 
 [caps]
-# DOC-08 §12 規定 L0+L1 每日預算上限 $2
+# DOC-08 §4.1「三層預算控制」規定 AI 每日硬上限 $2.00（保守模式絕對上限）
+# DOC-08 §12 第 4 條安全不變量確認此為「不可突破」邊界
+# 與 layer2_types.py:60 DEFAULT_DAILY_HARD_CAP_USD 一致（自 2026-03-31）
 daily_usd_max = 2.0
 # 月預算與日預算同比例調整（30d x $2 = $60）
 monthly_usd_max = 60.0

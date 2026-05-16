@@ -159,7 +159,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
-### 2026-05-16 12-agent consolidated audit + doc fix
+### 2026-05-16 12-agent consolidated audit + Wave 1-4 (WP-01..13)
 
 | 文件 | 内容 |
 |------|------|
@@ -175,6 +175,27 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp05_security_real_fix.md` | WP-05 security Round 2 真修（17 routes 38 callsite + handler 順位 + error_sanitize helper）|
 | `CCAgentWorkSpace/TW/workspace/reports/2026-05-16--wp09_doc_real_fix.md` | WP-09 doc Round 2 補修（README 126 entries / KNOWN_ISSUES reconcile / REF-21 SUPERSEDED / WP-01/02 sign-off）|
 | `CCAgentWorkSpace/A3/workspace/reports/2026-05-16--wp01_round2_re_audit.md` | A3 WP-01 Round 2 對抗審核（8.5/10 GO-conditional）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp03_ou_sigma_fix.md` | WP-03 OU sigma residual (OLS n-2 dof) sign-off（grid_helpers.rs +170 LOC + 5 new test） |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp04_ai_observability.md` | WP-04 AI obs+budget sign-off（F-04 record_strategist_invocation + F-01 budget drift fix + F-09 TODO）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp10_bybit_integration.md` | WP-10 Bybit sign-off（BB-A-1 ReduceOnlyReject=110017 + BB-M-1 backtest URL env var）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--reject_cooldown_split_bbmf3.md` | BB-MF-3 reject_cooldown entry/close split sign-off（grid_trading 5 files + 8 new test）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp06_wp08_python_fixes.md` | Wave 3 WP-06 deepcopy 3→2 + WP-08 engine_mode + purge_days sign-off |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp13_reconciler_cmd_tx.md` | Wave 3 WP-13 demo reconciler DemoCmdSenderSlot sign-off |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-16--wave2_3_full_regression.md` | E4 Wave 2-3 full regression (7366 cases Mac-side PASS) |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-16--wave2_wp{03,04,06,08,10,13}_retroactive_review.md` | E2 retroactive review × 6 WP（補 chain breach） |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-16--bbmf3_retroactive_review.md` | E2 retroactive review BB-MF-3（APPROVE-CONDITIONAL） |
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-16--wave2_wp10_bbmf3_round3_bb_review.md` | BB Wave 2 WP-10 + BB-MF-3 Round 3 review（APPROVE-COND）|
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-16--bb_dict_110017_patch.md` | BB 字典 §4.2 110017 ReduceOnlyReject row 補完 |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-16--mit_cron_reconcile.md` | PA reconcile MIT-P0-2「6/12 cron 未裝」= **FALSE FINDING**（廣口徑漂移）|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-15--v094_schema_migration_spec_pa_verdict.md` | PA Wave 2a Track A2 V094 spec finalize verdict |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-15--wave_1_5b_spec_v1_3_amd_v0_4_consolidated.md` | PA Wave 1.5b spec v1.3 + AMD v0.4 consolidated |
+| `docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md` | V094 hybrid schema migration spec（Wave 2a Track A2，commit 9b1117a0）|
+| `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` | AMD-2026-05-15-02 v0.4（EDGE-P2-3 Phase 1b 4-agent re-review consolidated）|
+| Wave 2 IMPL commit `ef6ea79f` | WP-03 OU sigma + WP-04 AI obs + WP-07 dead code + WP-10 Bybit retCode |
+| Wave 2b BB-MF-3 IMPL commit `27f02a07` | reject_cooldown entry/close split (Wave 2b recovery) |
+| Wave 3 IMPL commit `f31b6e8f` | WP-06 deepcopy 3→2 + WP-08 engine_mode + purge_days + WP-13 demo reconciler |
+| Wave 4 WP-11 commit `564c9db6` | 15 failing Python tests fix (16→1 flaky) |
+| Wave 4 closure commit `fca27914` | WP-11 DONE + WP-12 DEFERRED |
 
 ### 2026-05-11 Sprint N+1 dispatch + W-D + LG design
 

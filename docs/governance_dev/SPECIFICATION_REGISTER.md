@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-05-15
+**Last Updated:** 2026-05-16
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -18,6 +18,8 @@
 | AMD-2026-05-09-02 | SM-05 · ADR-0015 · ADR-0018 · ADR-0020 | `docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md` | 2026-05-09 | Accepted operator decision audit closure for `P0-DECISION-AUDIT-2/4/5`: SM-05 Option A, W-AUDIT-6 strategy verdict, openclaw_core sunset candidates, Layer2 manual supervisor-only |
 | AMD-2026-05-09-03 | SM-05 · DOC-01 §5.5/§5.6/§5.11 · ADR-0017 · ADR-0018 · ADR-0020 | `docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md` | 2026-05-09 | Historical 5-stage graduated canary default; Stage 1 paper semantics superseded by AMD-2026-05-15-01. Retained for W-AUDIT-9 original rationale, `[58]`, and `governance.canary_stage_log` context. |
 | AMD-2026-05-15-01 | W-AUDIT-9 · SM-05 · DOC-01 §5.5/§5.6/§5.11 · DOC-08 §12 · ARCH-04 | `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md` | 2026-05-15 | Removes Stage 1 `Environment::Paper × 7d`; adds Stage 0R Replay Preflight (`eligible_for_demo_canary=true/false`, no Stage 1 PASS); redefines Stage 1 as 1 strategy × 1 symbol × Demo × 7d micro-canary; Stage 2 must enter from Stage 1 demo evidence. |
+| AMD-2026-05-15-02 | EDGE-P2-3 Phase 1b · DOC-08 §12 · CLAUDE.md §二 #16 · §四 reject_cooldown | `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` | 2026-05-15 (v0.4 Wave 3a re-review 2026-05-16) | EDGE-P2-3 Phase 1b close-maker-first refactor — 8 maker-first / N keep-market 邊界明文；hybrid V094 schema；FDR multiple testing；phys_lock_gate4 timeout 30→15s；dynamic backoff per-symbol；reject_cooldown entry/close split P0 prereq；W-C Caveat 2 lineage carve-out；4-agent re-review (QC+FA+BB+MIT) APPROVED-CONDITIONAL → v0.4 consolidated patch |
+| V094 hybrid schema spec | trading.fills.details JSONB extension · `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 新欄位 · MakerRejectionCategory enum allowlist | `docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md` | 2026-05-15 (commit `9b1117a0`) | Wave 2a Track A2 — V094 hybrid schema migration spec finalize（F-FA-1 IMPL Prereq 5 第 3 子條件）；Linux PG empirical 證實 trading.fills.details JSONB 已存於 V003 line 284，24h 98 fills 0% details；includes Guard A/B/C templates + Linux PG dry-run × 2 round + sqlx checksum repair SOP + writer upgrade spec (13 caller sites + TradingMsg::Fill enum +24 fields) + healthcheck [62][63][64][65] integration + Backward-compat append-only + Rollback paths；IMPL pending Phase 1b 主軸 |
 
 ---
 

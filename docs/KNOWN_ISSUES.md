@@ -23,8 +23,20 @@
 # - A4-C BTC→Alt Lead-Lag 從 promotion 路徑歸檔（2026-05-15）
 # - V079 / V083 / V084 schema 已 apply（2026-05-15 之前）
 # - strategy_trial_ledger schema 已 apply（2026-05-15 之前）
-# - 12-agent audit Wave 1 land（2026-05-16）
+# - 12-agent audit Wave 1 land（2026-05-16，commit cabb2fcd + 88f9254f）
+# - 12-agent audit Wave 2 land（2026-05-16，commit ef6ea79f + 5682994c + 27f02a07）— WP-03 OU sigma + WP-04 AI obs + WP-07 dead code audit + WP-10 Bybit 110017 + BB-MF-3 cooldown split
+# - 12-agent audit Wave 3 land（2026-05-16，commit f31b6e8f + 05756ae3）— WP-06 deepcopy 3→2 + WP-08 engine_mode + purge_days + WP-13 demo reconciler slot
+# - 12-agent audit Wave 4 Phase 1 land（2026-05-16，commit 564c9db6 + fca27914）— WP-11 15 failing Python tests fix (16→1 flaky) + WP-12 DEFERRED
+# - Wave 3a re-review consolidation: spec v1.3 + AMD-2026-05-15-02 v0.4（commit c0d34fcb + 2f55d053）
+# - Wave 2a Track A2 V094 schema migration spec finalize（commit 9b1117a0）
+# - Wave 3b BB1 6 dictionary updates land（commit 28c571c7）
+# - BB 字典 §4.2 110017 ReduceOnlyReject row 補（commit 564c9db6 順手 land）
+# - tab-learning.html ocExplain 區段繁化（commit 564c9db6 順手 land）
+# - PA reconcile: MIT-P0-2 「6/12 ML cron 未裝」= FALSE FINDING（廣口徑定義漂移；真實 10 active cron 已裝）
 # - 新加 OPEN：P0-EDGE-1 / P0-LG-1/2/3 / P0-OPS-1..4 / W-AUDIT-8a C1 / W-AUDIT-8b Stage 0R
+# - 新加 OPEN（Wave 2-4 deploy gap）：Rust binary 仍 `7b33ab2e` 未 rebuild，Wave 2-4 source IMPL DONE / NOT DEPLOYED
+# - 新加 OPEN（Wave 2-4 P1/P2 follow-up）：P1-BBMF-WIRING-1（commands.rs / dispatch.rs production wiring）/ P1-WP13-LEFTOVER-1（main.rs:822 + 1372 by-value cmd_tx）/ P2-WP05-FUP-1（32 處 str(exc) 殘留）/ P2-COMMON-JS-LOC / P2-CROSSTAB-I18N / P2-STOCHASTIC-LEAK / P2-PA-CALLPATH-GREP-RULE / P2-CRON-DELIBERATE-NOT-INSTALLED-LIST（6 個 deliberate 未裝 cron list）
+# - 新加 OPEN（Wave 2-4 待 operator 拍板）：WP-04 budget 100→2 post-hoc ratification / WP-03 walk-forward backtest 或 deploy-gate / engine --rebuild 部署窗口 / Race protocol SOP
 
 ---
 
