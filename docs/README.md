@@ -1175,3 +1175,4 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-09--w_audit_verified_closed_archive.md` | W-AUDIT-1..7 verified-closed details archive |
 | `2026-05-15--todo_v21_completion_cleanup_archive.md` | TODO v21 completion cleanup archive: completed sprint ledgers, DONE rows, and W-AUDIT priority delta |
 | `2026-05-15--todo_v24_stale_rows_archive.md` | TODO v24 stale rows archive：過時 active rows / stale claims 歸檔（V079 pending / engine 5/8 binary / 舊 demo state / 舊 `[55]`/`[67]` 判斷）|
+| `2026-05-16--todo_v36_completion_cleanup_archive.md` | TODO v36 completion cleanup archive：v35 / 2026-05-15..16 completed detail, closed wave rows, DONE P0/P1/P2 rows, and stale C1 running wording moved out of active TODO |
