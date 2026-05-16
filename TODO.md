@@ -1,8 +1,21 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v37
+Version: v38
 Date: 2026-05-16
-Status: v37 active-marker cleanup. v36 completion cleanup moved completed v35 / 2026-05-15..16 detail to `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`; this update removes misleading active `W3` paper-cohort and A4-C promotion wording while preserving tombstone guards. Stage 1 promotion evidence is Demo-only per AMD-2026-05-15-01. A4-C remains diagnostic-only/no-revive unless a future materially new predictive variable is preregistered and passes a fresh Stage 0R gate. This is documentation-only: no runtime, DB, auth, risk, strategy, paper, demo, LiveDemo, or live mutation.
+Status: v38 operator P0 ratification cycle 完成 + Wave 1-4 deploy + P1 follow-up land.
+- **Wave 1-4 全 closed**: WP-01/02/05/09 (Wave 1) + WP-03/04/07/10/BB-MF-3 (Wave 2) + WP-06/08/13/WP-13-leftover (Wave 3) + WP-11 Phase 1 (Wave 4); WP-12 DEFERRED by design.
+- **v35 rebuild + restart**: trade-core engine PID 69581 / API PID 69674 (2026-05-16); Wave 2-4 Rust source IMPL all deployed.
+- **Round 4 三角 cross-validation (PA + FA + CC)**: 一致 verdict A/C/A for 3 P0 → operator 確認同意。
+- **P0-1 WP-04 $2 RATIFY**: ✅ DONE 2026-05-16 commit `e24c1d8f`；operator ack at `docs/CCAgentWorkSpace/Operator/2026-05-16--wp04_budget_ratification.md`；governance debt cleared。
+- **P0-2 WP-03 OU sigma deploy-gate**: ✅ Option C selected；PA spec `docs/execution_plan/2026-05-16--wp03_ou_sigma_deploy_gate_spec.md` (~600 LOC) + `[69]` healthcheck design land；revert flag 三層 trigger logic (12h/24h/7d)；Operator notification ADR-0020 manual-only；P1-WP03-DEPLOY-GATE-IMPL @E1 follow-up。
+- **P0-3 Race protocol SOP Phase 2 rollout**: ✅ APPROVE + enforce 立即生效 2026-05-16 18:00+；`.claude/agents/E2.md` §5 race check 5 條 + `docs/CCAgentWorkSpace/PM/race_dispatch_template.md` PM §6 模板 + `docs/lessons.md` Phase 2 entry；2026-05-30 PM 2-week review。
+- **P1 #5 F-09 model_tier TOML extraction**: ✅ DONE commit `3b055c98`；ArcSwap snapshot path；3 TOML 加 `model_tier="l1_9b"`；E2 APPROVE / E4 PASS 2917/0/1。
+- **P1 #7 [68] portfolio_resting_exposure healthcheck**: ✅ DONE commit `3b055c98`；ID conflict [58]→[68] resolved；562+408 LOC new；E2 APPROVE-CONDITIONAL / E4 PASS 368/0。
+- **P1 #4 C1 v2 24h proof**: ⏳ IN_FLIGHT PID 377531 launched 2026-05-16T14:56:16Z; 24h window → 2026-05-17T14:56:16Z 完成。
+- **P1 #6 BB-MF-3 production wiring**: ⏳ wait Phase 1b 主軸 3 閘解凍 (最早 2026-05-21)。
+- **P1 #7 7d budget cap monitoring**: ⏳ passive deploy 後 1 週 (2026-05-23+)。
+- Stage 1 promotion evidence is Demo-only per AMD-2026-05-15-01. A4-C remains diagnostic-only/no-revive unless a future materially new predictive variable is preregistered and passes a fresh Stage 0R gate.
+- Operator 7 條 action 進度: 5/7 DONE + 2/7 passive wait. Wave 1-4 真實完成度 = TRULY DONE for source/test/deploy + governance A 99.0%.
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
