@@ -3671,3 +3671,44 @@ E4 verdict: REGRESSION-PASS, 0 push-back to E1.
 - Verdict: REGRESSION PASS, 0 push-back to E1, two IMPL ([69] + [68]) 可進 PM commit。
 - Lesson — passive healthcheck Mac mock 充分準則: PG IO + datetime patch 兩 surface 邊界內 mock，業務邏輯（cache invalidation、trigger eval、severity ordering、flag write 條件、approach threshold escalation）真跑 → Mac mock pytest 可信。Linux PG dry-run 只驗 schema/cast 邊界，不替代 Mac unit test 邏輯覆蓋。本 IMPL 17 fixture 含全 4 trigger + 3 approach + 2 edge skip + 2 enum sequence 已覆蓋 spec §4.1 verdict matrix 全 14 行。
 - Report: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--wp03_deploy_gate_healthcheck_e4_mac_regression.md`
+
+## 2026-05-16 · P1-PORTFOLIO-RESTING-EXPOSURE-1 supplement (ad5e609e) Linux Regression PASS
+
+**Trigger**: E2 APPROVE 後 supplement +82 LOC `test_resting_entry_qty_correlated_pair_blocks_oversize` Linux verify
+**Verdict**: REGRESSION-PASS · PM commit/push READY（actually 已 land 在 origin/main HEAD）
+
+### 數字
+| 項 | Value | Baseline | Delta |
+|---|---|---|---|
+| Linux full `--lib --release` (run 1) | 2918 / 0 / 1 ignored | 9980448a = 2915 | +3 全 attribute |
+| Linux full `--lib --release` (run 2) | 2918 / 0 / 1 ignored | 同上 | non-flaky |
+| Linux intent_processor focused | 135 / 0 / 0 | n/a | +1 新 test |
+| Mac aarch64 cargo check release | 0 error, 2 pre-existing warning | clean | OK |
+
+### Delta 全 attribution
+- 9980448a→ad5e609e 區間 2 commit：
+  - `3b055c98` F-09 model_tier + [68] healthcheck → `risk_config_tests.rs +102 LOC` → +2 test
+  - `ad5e609e` B-4 supplement → `intent_processor/tests.rs +82 LOC` → +1 test
+- 2915 + 2 + 1 = 2918 ✅
+
+### Race protocol 5 條全 PASS
+- sibling Phase 1b 14 dirty file 全在 `tick_pipeline / event_consumer / strategies / database / passive_wait_healthcheck` → 0 命中 `intent_processor/`
+- Linux main worktree clean = 不必 scratch worktree 隔離（per memory 2026-05-16 P1-PORTFOLIO 主 IMPL pattern）
+- Mac vs Linux delta 12 = `dev_disabled_*` secret slot fail-closed + platform-specific tier diff（CLAUDE.md §七 預期）
+
+### Mock 審查 PASS
+- 新 test 0 mockall / 0 fake / 0 patch；純 real `PaperState::new(10_000.0)` + `IntentProcessor::compute_effective_long_short_notional` + `compute_correlated_exposure_pct` + `compute_exposure_pct` + `compute_leverage` + `risk_checks::check_order_allowed` + `RiskConfig::default`
+- 業務邏輯 100% 真跑（per regression-testing-protocol §5 OK pattern）
+- 0 anti-pattern hit
+
+### Cross-language consistency / SLA
+- N/A — intent_processor 是 Rust SSoT 無 Python dual implementation
+- 新 test 是端對端 gate chain 整合 test（非 tick hot path），SLA 不適用
+
+### Lesson learned
+- **Stale dispatch test coverage top-up pattern**：PA dispatch 已對 land commit 仍派工，E1 自降級為 test coverage top-up 補唯一未覆蓋 gap（end-to-end gate chain），E2 APPROVE + E4 PASS，PM 同 ticket 標「test coverage hardened」即可，不必開新 P2 ticket（per E1 §7 選項 A + E2 A-1 + 本 report §6 advisory 1）。
+- **Linux main worktree clean → 直接驗證**：與 2026-05-16 主 IMPL Round 1 scratch worktree pattern 不同——主 round 因為 Mac branch 未推 push 到 origin/main 需要 scratch；本 supplement 已 land 進 origin/main HEAD，Linux 直接 fetch + `git status` 0 dirty 即可直接 cargo test，無需 scratch isolation。判斷準則 = `git status --porcelain | wc -l` + `git log -1 origin/main` 對齊。
+- **Delta attribution 三 source rule**：當期間 ≥ 2 commit 落地時，計算 baseline → delta → predicted 必 attribute 每個 source commit；本 case 漏看 3b055c98 F-09 +2 test 會誤判 +3 為 0 attribution surprise（real = full attribute 0 unexplained）。E4 必跑 `git log baseline..HEAD -- rust/openclaw_engine/src/` 列出 source-touching commit 並驗 `git show --stat` test_file delta。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_1_supplement_e4_regression.md`
