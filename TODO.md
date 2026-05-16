@@ -373,7 +373,9 @@ active work starts at §10 / §11.2 / §11.3.
 | `P1-EDGE-P2-3-PH1B-PORTFOLIO-EXPOSURE` | 4 | 確認 portfolio_var/correlation gate 用 request_qty 而非 filled_qty 計 effective exposure | F-FA-2（FA verdict）；§二 #16 CONDITIONAL；Phase 1b IMPL 前 verify |
 | `P1-EDGE-P2-3-PH1B-LINEAGE-GUARD` | 4 | 新 close audit 欄位不走 spine lineage 通道的 guard tests + invariant | F-FA-3（FA verdict）；FA-MF-2 升 must-fix；W-C Caveat 2 不變式 explicit |
 | `P1-EDGE-P2-3-PH1B-ML-INVARIANT` | 4 | E3 grep guard rule：`details->>'close_maker_*'` 禁餵任何 ML training pipeline（LinUCB / scorer / quantile / MLDE / DL3）| MIT-MF-1 non-training surface invariant；E3 PR pre-merge gate |
-| `P1-BYBIT-DICT-PH1B-UPDATE` | 4 | 字典手冊 6 處更新（PostOnly+reduceOnly 合法 / cancel rate limit / demo silent degradation / instrument cache offset guidance / reject classifier reuse / new §1.10 close maker dispatch）| BB-MF-1 + BB §10 字典更新清單；BB 工作 |
+| `P1-BYBIT-DICT-PH1B-UPDATE` | ✅ DONE | 字典手冊 6 處更新 | Wave 3b 完成 commit `28c571c7` + BB verdict `55f35adb` + memory `859a6b60`；6 處全 land |
+| `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | spec §5.4 完整 dynamic backoff state machine IMPL（per-symbol 1s exp → 60s + ≥10 symbol cascade → 5min global pause + audit row `rate_limit_scope = "global"`）| Phase 1b initial IMPL（commit `27f02a07`）取 per-symbol 5min 固定（避 scope creep）；Phase 2a Demo PASS 後另開 PR；PA 估 ~50 LOC state machine + ~80 LOC integration test；對應 spec §5.4 v1.4 footnote + AMD v0.4 §11.2 |
+| `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` | 1 | Wave 3.5 V091/V092/V093 Linux PG backlog apply + sqlx checksum repair（V094 deploy 前必跑）| PA verdict `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--wave_3_5_linux_pg_backlog_migration_audit.md` NEEDS-ACTION；V092 真 IMPL（matview 0 row）+ V091/V093 metadata 補登（schema partial applied）；V081 = dead slot；est. 2h；V094 IMPL kickoff NOT BLOCKED，但 deploy 階段 BLOCKED 直到本 ticket done |
 | `P1-PORTFOLIO-RESTING-EXPOSURE-1` | 4 | **Wave 1.5 NEW**（per Track A3 portfolio_var verify finding 2026-05-15 commit `96995b61`）：fix `compute_correlated_exposure_pct` / `compute_exposure_pct` 在 `intent_processor/mod.rs:761-805` 把 `paper_state.resting_orders.qty` 加進 effective exposure 計算 | est. 3 person-day, 250 LOC；獨立平行 Phase 1b IMPL，互不阻塞；解 entry-side resting maker 既有 systemic gap；對 close-maker-first 是「nice-to-have but not blocker」；scope 詳見 spec §15 + A3 verify report §8；派發時點：Wave 4+ |
 
 ### §11.5 EDGE-P2-3 Phase 1b — Final Dispatch Plan (2026-05-15 4-agent review 後拍板)
@@ -492,8 +494,8 @@ active work starts at §10 / §11.2 / §11.3.
 
 **PM reprioritization vs PA original**:
 - WP-02 P0 -> P1 (runtime already uses `donchian_prior()` since `75741eff`)
-- WP-08 MIT-P0-2 cron claim needs reconciliation vs P0-V3-CRON-NOT-INSTALLED DONE
-- AI-E-F-01 budget $100->$2 requires operator decision, not auto-fix
+- WP-08 MIT-P0-2 cron claim ✅ **RECONCILED 2026-05-16 = FALSE FINDING**（PA: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--mit_cron_reconcile.md`；MIT 12 個 = 廣口徑 helper_scripts/cron/ files；6 deliberately not installed 各有 reason；spawn P2-CRON-DELIBERATE-NOT-INSTALLED-LIST）
+- AI-E-F-01 budget $100->$2 ⚠️ **越權 IMPL `ef6ea79f`，operator post-hoc ratification pending**（PA+FA+CC 三角共識：substance 對 $2（layer2_types.py:60 自 2026-03-31 + DOC-08 §4.1 真實出處）+ procedure 違反 PM §3 reprioritization；citation §12 → §4.1 已 fix in budget_config.toml ×2 by main session 2026-05-16）
 - R4 "CRITICAL" doc drift downgraded to P2
 
 | WP | Title | Priority | Wave | Owner | Status | Effort |

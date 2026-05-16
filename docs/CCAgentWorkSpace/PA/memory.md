@@ -4045,3 +4045,111 @@ PG fills 直查證據：
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--wave_1_5b_spec_v1_3_amd_v0_4_consolidated.md`
 
+
+## 2026-05-16 — MIT-P0-2 cron reconcile (false finding verdict)
+
+**Trigger**：PM 12-agent audit sign-off 第 2 條 reprioritization 強制 PA reconcile MIT-P0-2 「6/12 ML cron 未裝」vs TODO `P0-V3-CRON-NOT-INSTALLED` DONE 2026-05-09 before WP-08 dispatch。
+
+**Verdict**：**MIT-P0-2 是 FALSE FINDING（definition drift）**。F-08 invariant 18 真實已 closed (2026-05-15 03:36:32 status=ok empirical verified)。MIT 用「helper_scripts/cron/*_cron.sh script files in directory vs in crontab」廣口徑誤判為「未裝 oversight」，但 6 個 deliberately-not-in-crontab cron 各有獨立 deliberate 不裝理由：
+
+| Script | Deliberate 不裝理由 |
+|---|---|
+| `blocked_symbols_30d_unblock_check_cron.sh` | 30d unblock retry deliberate manual until LG-3 supervised-live |
+| `edge_estimate_snapshots_cycle_cron.sh` | P0-EDGE-1 active 期 deliberately 不污染 stats |
+| `outcome_backfiller_live_cron.sh` | live 未啟動 → 空轉浪費資源 |
+| `panel_aggregator_health_cron.sh` | W1-1 BB WS-first refactor 後可能 redundant |
+| `mlde_shadow_recommendations_retention_cron.sh` | V075 prune_old_plain_tables() 路徑 alternative |
+| `replay_artifact_prune.py` / `replay_key_archive_cleanup.py` | REF-20 Sprint A-D 收口期 replay 體積不痛 |
+
+**真實 inventory 對照表**（read-only Linux empirical 2026-05-16）：
+- `helper_scripts/cron/` 14 個 distinct executable cron script
+- Linux crontab 真實 10 active entries；其中 `helper_scripts/cron/` 命中 4：edge_label_backfill */30 / ref21_universe :20 hourly / ref21_microstructure 每分 / **ml_training_maintenance_cron.sh @ 17 3 * * *** (F-08 載體)
+- `ml_training_maintenance.py` DEFAULT_JOBS 10 個 ML job（linucb/mlde_shadow_advisor/mlde_demo_applier/scorer_trainer/quantile_trainer + thompson/optuna/cpcv/dl3_foundation/weekly_report）跑在 1 個 cron entry → F-08「5 ML cron」TODO 文字稍有誤導（實際 5 F-08 + 5 legacy = 10 jobs in 1 wrapper）但 invariant 18 真實已 closed
+- `/tmp/openclaw/logs/ml_training_maintenance_cron.log` 649KB + status_json `status: ok` 是 24h+ 真實 fire 證據
+
+**MIT「12」數字推斷**：MIT 沒寫 raw audit md 列舉 12 個；PA 反推三種口徑（cron script files / ML-pipeline-related / job 數）最可能用「ML/learning 相關 12 script」口徑，去掉 4 已裝 + 1 手動 fire + 1 by-design = 6 deliberate 未裝。**6 不是 oversight**。
+
+**PM dispatch recommendation**：
+- WP-08 內移除 MIT-P0-2 行（false finding）
+- Spawn `P2-CRON-DELIBERATE-NOT-INSTALLED-LIST` umbrella ticket 登記 6 個 deliberate 未裝（或 6 個獨立 P2 ticket）
+- WP-08 P0 BLOCKER 可考慮降為 P1（MIT-P1-1 已 closed 2026-05-15 + MIT-P1-2/P1-3/DB-6 是 P1 + MIT-P0-1 PG tuning 是 operator manual action）
+- TODO line 323 文字 hygiene patch optional（建議 wording：「F-08 `ml_training_maintenance_cron.sh @ 17 3 * * *` (含 5 F-08 + 5 legacy jobs) installed」）
+
+**Side-effects 分析**：
+- 對 RustEngine / IPC / API schema / asyncio / GovernanceHub / risk envelope / 5-Agent / 16 原則 / DOC-08 9 不變量 = 0
+- 對 Sprint 1b / EDGE-P2-3 / W3 / W-AUDIT-8a/8b / true live promotion = 不阻塞
+- F-08 invariant 18 / [55] lineage / [67] feature baseline / [27] intents freeze 都 ✅
+
+**16 根原則合規評級**：A 級（16/16 + 硬邊界 0 觸碰）
+
+**架構教訓 23**：**audit cross-finding reconciliation 必先做「definition 對齊」再做「verdict 對齊」**。MIT-P0-2 用「cron script in directory but not in crontab」口徑，TODO 用「F-08 specific 5 ML cron + invariant 18」精確口徑；同一物理事實在不同 framing 下出現「DONE vs not installed」表面矛盾。PA reconcile 第一步是把雙方口徑對齊 — 不是直接挑判勝負。本次發現 MIT 廣口徑下「6 個 deliberately not installed」是 P2 觀察決策池，TODO 精確口徑下「F-08 5 ML cron」已 closed；兩者並存無真實矛盾。
+
+**架構教訓 24**：**Linux empirical query 是 reconcile 必跑步驟**。本次 ssh trade-core query 三證據（`crontab -l`、`tail -3 ml_training_maintenance_cron.log`、`ls /tmp/openclaw/status/ml_training_maintenance_status.json`）30 秒給出明確「invariant 18 真實 closed」結論。若只在 Mac source 層找 MIT raw audit md（不存在）會 stale 在「PA 該信誰」的死循環。CLAUDE.md §三 「§三 數據 vs runtime drift 防線」7-day 重驗 + healthcheck id 規則本次體現。
+
+**Confidence**:
+- HIGH for F-08 invariant 18 真實 closed empirical 結論（log + status_json + crontab 三證據）
+- HIGH for 「MIT-P0-2 false finding」judgement（definition drift 而非 missing fix）
+- HIGH for 6 個 deliberately-not-installed cron 各自 deliberate 理由分析（PA 反推；若 MIT 不同意請出 raw audit md）
+- HIGH for WP-08 reframe recommendation（移除 MIT-P0-2 + spawn P2 umbrella ticket + P0 → P1 考慮）
+- MEDIUM for 「MIT 12 數字真實口徑」inference（PA 反推三口徑，B 口徑最可能；若 MIT 後續 push back，PA 接受訂正）
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--mit_cron_reconcile.md`
+
+
+## 2026-05-16 — Wave 3.5: Linux PG backlog migration apply audit (V081-V093)
+
+**Trigger**：V094 spec §4.4 caveat + TODO §11.5 Wave 3.5 row；F-FA-1 PA verdict 2026-05-15 commit `9b1117a0` 接續工作。Pre-Wave 4 IMPL kickoff 必檢的 backlog migration apply 狀態 audit。
+
+**Mode**：Read-only Linux PG empirical + source tree compare（不修改 migration / runtime / config）。
+
+**Verdict**：**NEEDS-ACTION**（V094 IMPL kickoff NOT blocked / V094 deploy BLOCKED 直到 V091/V092/V093 backlog 處理乾淨）
+
+**3 critical empirical findings**：
+1. **V081 = dead slot**（合法跳號）— source tree 無 V081*.sql + `_sqlx_migrations` row 80→82 連跳；不是 backlog
+2. **V091 / V093 = schema partial-applied + sqlx metadata 缺 row**（silent drift）—
+   - V091 `chk_reason_code_mutually_exclusive` constraint DB convalidated=t 已存在；def 對齊 file spec
+   - V093 三 enum constraint (outcome/evidence_tier/side) 都已 partial-apply 並對齊 file spec
+   - 但 `_sqlx_migrations` 無 row → engine restart sqlx migrate run 將重 apply（idempotent design 應 PASS）
+3. **V092 = real not-applied gap**（W1 sub-task 3 D+1+ deploy 漏執行）—
+   - 0 matview / 0 continuous_aggregate
+   - prereq tables (`panel.funding_rates_panel` + `panel.oi_delta_panel`) + timescaledb 2.26.1 全在 → ready to apply
+   - file idempotent design OK（WITH NO DATA + IF NOT EXISTS / 8 guards）
+
+**Runtime context**：
+- engine 不在跑（systemctl + flag + pid 三證據）
+- `OPENCLAW_AUTO_MIGRATE` env 未設 → engine restart 不會自動 sqlx migrate run
+- 必走 `helper_scripts/linux_bootstrap_db.sh --apply` 或顯式設 flag
+
+**Apply protocol（§5）**：
+- §5.1 PA pre-apply：Mac file content + git log mtime verify
+- §5.2 Step 1 V091 metadata 補登 (LOW risk 0.2h)
+- §5.2 Step 2 V092 真 IMPL × 2 round dry-run (LOW-MED 1.0h)
+- §5.2 Step 3 V093 metadata 補登 (LOW risk 0.2h)
+- §5.2 Step 4 全 verify (LOW risk 0.3h)
+- Total ~2h / operator + PM 合執
+
+**sqlx checksum repair SOP**：若任 step 觸發 `migration X was previously applied but has been modified` → `cargo run --release --bin repair_migration_checksum -- --version <N>`（mirror project_2026_05_02_p0_sqlx_hash_drift incident）
+
+**16 根原則合規**：A 級（16/16 + 硬邊界 0 觸碰；純 read-only audit + governance/SOP 補強）
+
+**派發 Action 清單**：
+- 本 PA report sign-off → PM
+- §5 protocol 寫成 Wave 3.5 RUN PLAN (短 spec) → PA 或 PM
+- TODO §11.5 Wave 3.5 row → IN_PROGRESS
+- 執行 §5.2 Step 1-4 → operator + PM
+- Wave 4 IMPL kickoff 不阻塞（V094 spec / writer / healthcheck design 已 Wave 2a closed）
+- V094 deploy gate 必驗 V091/V092/V093/V094 全 `_sqlx_migrations`
+
+**架構教訓 25**：sqlx_migrations metadata 與 DB physical schema 可能 silent drift。Discovery 靠 PA cross-section empirical query（constraint def + convalidated + matview existence vs `_sqlx_migrations` 表）。SOP 強化：嚴禁 sub-agent 直接 psql -f 跑 migration file；必走統一入口 `helper_scripts/linux_bootstrap_db.sh`；如必須 manual apply 必同 commit `INSERT INTO _sqlx_migrations` 維持 metadata 一致。E2 grep rule 加查 `psql.*-f.*sql/migrations/V[0-9]+` callsite。
+
+**架構教訓 26**：dead slot (V081) 是合法 numbering 設計，不要 backfill「補洞」。判斷準則：missing version → 先查 source tree → 無 file = dead slot 0 gap；有 file 但 sqlx 缺 = real backlog gap。
+
+**Confidence**:
+- HIGH for V091/V093 schema drift identification（empirical convalidated=t / pg_get_constraintdef 對齊 file spec）
+- HIGH for V092 not applied confirmation（0 matview + 0 continuous_aggregate）
+- HIGH for V081 dead slot confirmation（source tree + sqlx 雙缺）
+- HIGH for engine not running + AUTO_MIGRATE not set（runtime three-evidence）
+- MEDIUM for V091/V093 file mtime 後 mutate possibility（必 git log verify §5.1 Step 2；目前推斷未 mutate）
+- MEDIUM for V092 真 IMPL apply 期 matview build 工時（視 panel.* row 量；WITH NO DATA 0 boot 阻塞已 mitigate）
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--wave_3_5_linux_pg_backlog_migration_audit.md`
