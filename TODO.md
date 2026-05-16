@@ -313,61 +313,20 @@ Archived completed P1 rows: `docs/archive/2026-05-16--todo_v36_completion_cleanu
 
 ### §11.5 EDGE-P2-3 Phase 1b — Final Dispatch Plan (2026-05-15 4-agent review 後拍板)
 
-**Status**：AMD-02 v0.1 + spec v1.0 經 PM/PA/FA 3-agent + QC/FA/BB/MIT 4-agent 兩輪 review，全部 APPROVED-CONDITIONAL。**現在進入 pre-IMPL prep phase**（可並行派工，不阻 3-gate）。3-gate（P0-EDGE-1 / W-AUDIT-8b Stage 0R / W-AUDIT-8a C1）解除後才進真 IMPL。
+**Status**：Pre-IMPL prep details through Wave 3b are closed and archived in
+`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`. Phase 1b
+main implementation remains blocked by gates below.
 
-**Wave 1 Status (2026-05-15)**：
-- ✅ Track A1 (PA AMD v0.2 + spec v1.1 patch, 17 must-fix + 14 should-fix) — `2e7a1b2f`
-- ✅ Track A3 (PA portfolio_var SoT verify) — `96995b61` MAINTAIN + 新 P1 ticket option A PM 預批
-- ✅ Track A4 (PA W-C Caveat 2 guard tests + V094 schema 兩段式 + writer gap) — `a5a7107c`
-- ✅ Track E1 (E1 KAMA fallback gate) — `9df44183`，Wave 1.5 E4 regression test land `34aa7086`
-- ✅ Track E3 (PA maker fill empirical baseline) — `b98706d5` fee 4.5→0.5-2.0 bps + no-fallback-to-taker gap identified
-- ✅ Wave 1.5: spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3
+**Still Active**
+1. ❌ `P0-EDGE-1` — `[40]` negative realized edge remains active.
+2. ❌ `W-AUDIT-8b Stage 0R` — read-only Stage 0R query/report packet still pending.
+3. ❌ `W-AUDIT-8a C1` — prior 24h proof ended `FAIL_CONNECTION`; needs a new full-duration BB/MIT-approved proof.
+4. 🔵 `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` — V091/V092/V093 Linux PG backlog apply / sqlx checksum repair before V094 deploy.
+5. 🔵 `P1-BBMF3-WIRE-1` — production rejectReason/callback wiring must be included in Phase 1b main implementation.
 
-**Wave 2 Status (2026-05-15)**：
-- ✅ Track A2 (PA V094 hybrid schema migration spec finalize) — spec `9b1117a0` + PA verdict `14a561ec` + AMD v0.3 → v0.3.1 patch `c9234ecf`
-- ✅ Wave 2b (E1 P0 reject_cooldown entry/close 拆分；BB-MF-3) — `27f02a07`（sibling session land）
-- ✅ Wave 2c-2 (E4 reject_cooldown split regression PASS) — `8321b4b7`（sibling session land）
-- 🔄 Wave 2c-1 (E2 reject_cooldown review) — pending verify
-
-**Wave 3 Status (2026-05-15)**：
-- ✅ Wave 3a: 4-agent short re-review on AMD v0.3 + spec v1.2 — **4/4 verdict APPROVED**（QC APPROVED-CONDITIONAL 1 NEW MUST QC-MF-3 + 1 NEW SHOULD QC-SF-6 / FA APPROVED 4 cosmetic / BB APPROVED `7b0a8e8c` 5 must + 3 should 全 land + v1.2/v0.3 增量無新 Bybit-side risk / MIT APPROVED 2 P3 advisory）
-- ✅ Wave 1.5b: spec v1.2 → v1.3 + AMD v0.3.1 → v0.4 consolidated patch（QC-MF-3 AC-5/AC-11 數學矛盾修 + QC-SF-6 AC-18 Wilson-CI sub-clause + §12.2 line 758 framing 對齊 + §3 AC-1..AC-19 + §10.1 trading_writer.rs:430 details writer 升級 IMPL kickoff 必含 + §2.3 negative whitelist 補變體 + §7 16 原則表補 #3/#11/#13/#15）— **本次 Wave 1.5b** spec `c0d34fcb` + AMD `2f55d053`；純 numerical / cosmetic 增量無新風險 → **IMPL Prereq 條件 2 SATISFIED**
-- ✅ Wave 3b BB1 (字典手冊 6 處更新) — `28c571c7`（sibling BB session land）
-
-**Pre-IMPL prep — 7 個工作組可並行派**（Wave 1 done 後更新）：
-
-| Track | Owner | Task | 阻塞關係 | ETA | 狀態 |
-|---|---|---|---|---|---|
-| **Track A1** | PA | **AMD v0.2 + spec v1.1 consolidated patch**（17 must-fix + 14 should-fix） | None；最高優先 | 1-2 hour | ✅ DONE `2e7a1b2f` |
-| **Track A2** | PA | **V094 hybrid schema migration spec** — `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 為 new column + 兩 price 走 JSONB；Guard A/B/C；NOT VALID enum CHECK；Linux PG dry-run × 2 round | 等 A1 schema 段落落定 | 半天 | ✅ DONE Wave 2a `9b1117a0` + PA verdict `14a561ec` + AMD v0.3.1 `c9234ecf` |
-| **Track A3** | PA | **F-FA-2 portfolio_var exposure SoT verify** — §二 #16 CONDITIONAL 解除 | None；獨立 worktree | 1-2 hour | ✅ DONE `96995b61` MAINTAIN + P1 ticket |
-| **Track A4** | PA | **F-FA-3 audit 欄位不走 spine lineage guard tests 設計** — W-C Caveat 2 invariant 保護 | None；獨立 worktree | 1-2 hour | ✅ DONE `a5a7107c` + V094 兩段式 + writer gap |
-| **Track E1** (engine) | E1 | **P0 reject_cooldown entry/close 拆分** | None；獨立修現存 bug | 1d（含 E2 + E4）| ✅ DONE Wave 2b `27f02a07` + Wave 2c-2 E4 regression `8321b4b7` |
-| **Track E2** | E1 | **MA KAMA fallback gate** | None；30 min 獨立修復 | 30 min | ✅ DONE `9df44183` + E4 regression `34aa7086` |
-| **Track E3** | PA / E1 | **Maker fill rate empirical baseline 查** | None；read-only 查詢 | 1 hour | ✅ DONE `b98706d5` |
-| **Track BB1** | BB | **字典手冊 6 處更新** | None；BB 工作 | 1-2 hour | ✅ DONE Wave 3b `28c571c7` |
-
-**Dispatch order recommendation**（Wave 1.5b patch 後更新 2026-05-15）：
-1. ✅ **Wave 1（並行 5 worktree）**：A1（PA） + A3（PA） + A4（PA） + E2（E1, 30min） + E3（PA/E1, 1h） — DONE
-2. ✅ **Wave 1.5**：spec v1.2 (`3059129f`) + AMD v0.3 (`9f16c05d`) consolidated A3+E3 finding（fee revision + race fallback gap + portfolio MAINTAIN + writer gap explicit）
-3. ✅ **Wave 2a**：A2 PA V094 spec finalize (`9b1117a0` + `14a561ec` + AMD v0.3.1 `c9234ecf`) — F-FA-1 ✅ DONE → IMPL Prereq 5 全 RESOLVED
-4. ✅ **Wave 2b**：E1 P0 reject_cooldown entry/close 拆分（BB-MF-3） — `27f02a07`（sibling）
-5. ✅ **Wave 2c-2**：E4 reject_cooldown split regression — `8321b4b7`（sibling）
-6. 🔄 **Wave 2c-1**：E2 reject_cooldown review — pending verify
-7. ✅ **Wave 3a**：4-agent short re-review on AMD v0.3 + spec v1.2 — **4/4 verdict APPROVED**（QC 1 NEW MUST + 1 NEW SHOULD / FA 4 cosmetic / BB 全 land 無新 risk / MIT 2 P3 advisory）
-8. ✅ **Wave 1.5b**：spec v1.3 (`c0d34fcb`) + AMD v0.4 (`2f55d053`) — Wave 3a re-review consolidation patch（QC-MF-3 AC-5/AC-11 數學矛盾修 + QC-SF-6 AC-18 Wilson-CI + §12.2 framing + 4 cosmetic）— **IMPL Prereq 條件 2 SATISFIED**
-9. ✅ **Wave 3b**：BB1 字典手冊 6 處更新 — `28c571c7`（sibling）
-10. 🔄 **Wave 3.5（pre-Wave 4）**：PA 補一輪 Linux V81/V91/V92/V93 backlog migration apply 檢查（per V094 spec §4.4 caveat）
-11. **Wave 1+1.5+1.5b+2a+2b+2c+3a+3b+3.5 done → IMPL Prereq 5+6 解 + 條件 2 ✅ → 等 3-gate → IMPL kickoff Wave 4**
-
-**IMPL kickoff（3-gate 解除後）**：
-- PA finalize IMPL plan → E1 並行 5 worktree（A/B/C/D/E per PA verdict v0.2）→ E2 review → E4 regression → QA → PM sign-off
-- Phase 2a Demo **14d (7d primary + 7d extended observation per E3 conservative discount)** → Phase 2b LiveDemo 7d → operator + AMD live carve-out → Phase 3 Mainnet
-
-**3-Gate Status（2026-05-15）**：
-- ❌ P0-EDGE-1 — `[40]` 仍 WARN negative realized edge
-- ❌ W-AUDIT-8b Stage 0R — spec v0.2 review/design done；next read-only Stage 0R replay packet 待跑
-- 🟡 W-AUDIT-8a C1 — 24h `allLiquidation.BTCUSDT` proof running PID `4100789` since `2026-05-15T19:53:09Z`，預計 `2026-05-16T19:53:09Z` 完成；後續 BB/MIT sign-off
+**IMPL kickoff（only after gates clear）**：
+- PA finalize IMPL plan → E1 parallel worktrees → E2 review → E4 regression → QA → PM sign-off.
+- Phase 2a Demo 14d → Phase 2b LiveDemo 7d → operator + AMD live carve-out → Phase 3 Mainnet.
 
 ---
 
@@ -397,7 +356,7 @@ Archived completed P1 rows: `docs/archive/2026-05-16--todo_v36_completion_cleanu
 **Total ETA = 12-17 sprint（3-4 個月）** — 真實 gross 轉正最早窗口。
 
 **2026-05-15 PM prework / RCA final update**:
-- `W-AUDIT-8a C1` proof packet exists and 24h proof is running: `docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md` + `helper_scripts/bybit/liquidation_topic_probe.py`。Official candidate topic is `allLiquidation.{symbol}`; PID `4100789` started on `trade-core` at `2026-05-15T19:53:09Z`; C1 still requires full 24h isolated BB proof + MIT sign-off before production revival.
+- `W-AUDIT-8a C1` proof packet exists: `docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md` + `helper_scripts/bybit/liquidation_topic_probe.py`。The prior PID `4100789` run started at `2026-05-15T19:53:09Z` and ended `FAIL_CONNECTION` at `2026-05-16T00:37:25Z`; C1 still requires a new full-duration isolated BB proof + MIT sign-off before production revival.
 - `W-AUDIT-8b` Funding Skew spec v0.2 exists: `docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`。It is a cross-sectional crowding signal, not retired `funding_arb`; QC/MIT/BB conditionally approve Stage 0R replay design only, so next gate is a read-only query/report packet.
 - `W-AUDIT-8d` A4-C is archived from promotion and `P1-A4C-RCA-1` is closed no-revive: `docs/execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md` + `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_rca_final_and_c1_proof_start.md`。Keep `panel.btc_lead_lag_panel` diagnostic-only.
 
