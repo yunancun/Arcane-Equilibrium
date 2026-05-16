@@ -6,12 +6,12 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Regression Testing Protocol（回歸測試手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
 
-- E4 收到 E2 通過的 PR → commit 前必跑（強制工作鏈，CLAUDE.md §八）
+- E4 收到 E2 通過的 PR → commit 前必跑（強制工作鏈）
 - 「跑測試」「驗證 fix 沒破壞其他」「測試數有沒有回退」
 - 新功能落地前的 baseline 確認
 - Rust `cargo test` + Python pytest 雙引擎同步
@@ -32,12 +32,12 @@ allowed-tools: Read, Grep, Glob, Bash
 | Rust engine lib | `cd /Users/ncyu/Projects/TradeBot/srv/rust && cargo test --release -p openclaw_engine --lib 2>&1 \| tail -5` | passed / failed 數 |
 | Rust integration | `cd /Users/ncyu/Projects/TradeBot/srv/rust && OPENCLAW_TEST_PG="..." cargo test --release -p openclaw_engine 2>&1 \| tail -5` | 需 PG |
 
-**baseline 規則**（CLAUDE.md §九）：
+**baseline 規則**：
 - 任何 commit 不可降低 passed 數
 - 任何 commit 不可增加 pre-existing failed 數
 - 數字以**改動前最後一次 baseline run** 為準（不信本 skill 內任何寫死數字）
 
-⚠️ Mac 端：整合測試打真實 Bybit 會 fail by design（`*.dev_disabled_*` secret slot；CLAUDE.md §七 Mac dev-only 模式）。Rust release 基準 → `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"` 取真實值。
+⚠️ Mac 端：整合測試打真實 Bybit 會 fail by design（`*.dev_disabled_*` secret slot；Mac dev-only 模式）。Rust release 基準 → `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"` 取真實值。
 
 ## 2. Python pytest 標準命令
 
@@ -51,7 +51,7 @@ cd program_code/exchange_connectors/bybit_connector/control_api_v1/
 python3 -m pytest tests/ -q --tb=short
 ```
 
-**Mac dev-only 注意（CLAUDE.md §七）**：
+**Mac dev-only 注意**：
 - 部分整合測試打真實 Bybit → 3 secret slot rename 為 `*.dev_disabled_*` → 預期 fail-closed by design
 - mock-based unit test 不受影響
 - Reproduce release 基準 `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"`
@@ -176,14 +176,14 @@ async def test_governance_concurrent_lease_request():
 
 ## OpenClaw 特定核心
 
-- **強制工作鏈**：E2 → E4 不可跳，包括 P0 緊急（CLAUDE.md §八）
+- **強制工作鏈**：E2 → E4 不可跳，包括 P0 緊急
 - **Mac dev_disabled secret slots**：整合測試打真實 Bybit fail-closed by design
 - **絕對 import**：從 srv root 跑或加 PYTHONPATH，避免 `from program_code.…` ImportError
 - **engine PID 變動**：`cargo test` 不影響 runtime engine（Mac 端 engine_alive=false 是預期）
 - **passive_wait_healthcheck.py**：cron 6h 跑，被動等待 TODO 必有對應 check
 - **跨語言浮點 1e-4 容差**：indicator 計算（ATR / BB / Sharpe）必驗
 - **SLA 硬限**：H0 Gate < 1ms / Tick path < 0.3ms / IPC < 5ms
-- **commit 即 push**（CLAUDE.md §七 git 自動化）
+- **commit 即 push**（由 PM 在通過 E4 / QA 後執行）
 - **failed 不可增**：pre-existing 數為上限（不在本表寫死，跑命令拿），新增 = BLOCKER
 
 ## Cross-Skill 互引（避免重述）

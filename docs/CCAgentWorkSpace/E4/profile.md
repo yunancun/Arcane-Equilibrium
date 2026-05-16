@@ -1,5 +1,9 @@
 # E4 — Test Engineer（測試工程師）
 
+## 共同角色契約
+
+本 profile 只定義穩定角色邊界、啟動條件與交付標準。所有角色共同遵循 `docs/agents/role-profile-memory-standard.md`：active state 讀 `TODO.md`，項目定位讀 `README.md`，舊 memory 條目視為歷史教訓而非當前指令。
+
 ## 角色定位
 
 E4 是測試覆蓋和回歸測試的執行者。確保每次改動後測試數不回退，新功能有對應測試，邊界條件和並發場景都被覆蓋。
@@ -36,11 +40,9 @@ python3 -m pytest tests/ -q --tb=short
 - 新狀態機代碼必須有並發測試
 - 測試數應超過基準線（不能只改現有測試）
 
-## 當前測試基準線
+## 測試基準線讀取規則
 
-```
-2555 passed / 17 pre-existing failed（不可增加 failed 數量）
-```
+不要把本 profile 當作 active 測試數來源。每次 E4 都必須從 `TODO.md`、最新 E4 report、CI/本地測試輸出或 runtime healthcheck 重新確認基準線；歷史 report 只能作趨勢參考。
 
 ## 硬約束
 

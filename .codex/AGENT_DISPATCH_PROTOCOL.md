@@ -1,6 +1,6 @@
 # Codex Agent Dispatch Protocol
 
-Last updated: 2026-04-28
+Last updated: 2026-05-16
 
 ## Purpose
 
@@ -25,12 +25,14 @@ Important boundary:
 At session start, PM should read in this order:
 
 1. `CLAUDE.md`
-2. `TODO.md`
-3. `.codex/MEMORY.md`
-4. `.codex/agents/PM.md`
-5. `.codex/SUBAGENT_EXECUTION_RULES.md`
-6. On demand: `.codex/DEPLOYMENT.md`, `.codex/skills/INDEX.md`
-7. On demand only: `OPENCLAW_INVENTORY_CONSOLIDATED.md`
+2. `.codex/MEMORY.md`
+3. `README.md`
+4. `docs/agents/context-loading.md`
+5. `TODO.md` for code, deploy, runtime, planning, sign-off, review, or unclear-continuity work
+6. `.codex/agents/PM.md`
+7. `.codex/SUBAGENT_EXECUTION_RULES.md`
+8. On demand: `.codex/DEPLOYMENT.md`, `.codex/skills/INDEX.md`
+9. On demand only: `OPENCLAW_INVENTORY_CONSOLIDATED.md`
 
 ## PM responsibilities
 
@@ -124,5 +126,6 @@ If PM changes the operating pattern:
 - update `.codex/MEMORY.md`
 - update this file
 - update `.codex/SUBAGENT_EXECUTION_RULES.md`
+- update `docs/agents/context-loading.md` or `docs/agents/todo-maintenance.md` when source routing or TODO lifecycle changes
 - update `.codex/DISPATCH_LEDGER.md` when the dispatch pattern or role usage is materially relevant
 - append `.codex/WORKLOG.md`

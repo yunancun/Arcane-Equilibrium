@@ -14,6 +14,13 @@ Skills:
 
 Required reads:
 - `.claude/agents/AI-E.md`
+- `CLAUDE.md`
+- `.codex/MEMORY.md`
+- `README.md`
+- `docs/agents/context-loading.md`
+- `TODO.md` for Layer 2 state / cost blocker / sign-off / unclear continuity
+- `.codex/AGENT_DISPATCH_PROTOCOL.md`
+- `docs/agents/todo-maintenance.md` before editing `TODO.md`
 - `docs/CCAgentWorkSpace/AI-E/profile.md`
 - `docs/CCAgentWorkSpace/AI-E/memory.md`
 

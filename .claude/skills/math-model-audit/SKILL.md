@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Math Model Audit（量化數學審計）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 > **S1 風控數字 SSOT**：position size / VaR / drawdown threshold 等所有風控數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
@@ -68,7 +68,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 ### 5. Live 適用性
 - [ ] Demo / Paper 結果不等同 Live（slippage / fee / queue position 真實後降級多少）
-- [ ] cost_edge_ratio < 0.5（CLAUDE.md §二 原則 13）
+- [ ] cost_edge_ratio < 0.5（`CLAUDE.md` Root Principles）
 - [ ] PostOnly / TWAP / VWAP 等執行細節 與 sizing 對齊
 - [ ] fee model 真實（maker rebate vs taker；funding rate；borrow cost）
 
@@ -85,7 +85,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 OpenClaw 特定 snapshot（cost_gate 當前閾值 / Phase 狀態 / specific bug 教訓如 bb_breakout F1 / EDGE-P2-3 部署細節 / TODO id）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三 > TODO.md > `git log` > 治理 .md > memory（operator 明示未必可信）。
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `git log` > governance docs > memory（operator 明示未必可信）。
 
 **穩定不變的數學原則**（不會 drift）：edge_estimator shrinkage prior 必合理（James-Stein 或 Bayesian shrinkage 而非 ad-hoc）；cost_gate 設計需 strategy::symbol cell-level 統計顯著；新策略 audit 必含 demo OOS gross > 0 證據（不是 in-sample）。
 

@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # DB Schema Design for Financial Time Series（金融時序 DB schema 手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
@@ -19,7 +19,7 @@ allowed-tools: Read, Grep, Glob, Bash
 ## ★ 黃金法則
 
 **金融時序資料 ≠ generic OLTP**：必用 hypertable + time-based partition。
-**Migration 必含 Guard A/B/C**（CLAUDE.md §七 規範）：silent-noop 失敗 → 下游 writer 假性成功 = 最難 debug 的 bug。
+**Migration 必含 Guard A/B/C**：silent-noop 失敗 → 下游 writer 假性成功 = 最難 debug 的 bug。
 **schema 設計時就要預留 OpenClaw 5 strat × 25 symbol × 1m row 量級**。
 
 ## 1. TimescaleDB Hypertable
@@ -61,7 +61,7 @@ SELECT add_compression_policy('learning.exit_features', INTERVAL '30 days');
 
 PG 4-8GB memory 下 compression 必開 — 30d+ 老資料壓縮可省 80-90%。
 
-## 2. Migration Guard 規範（CLAUDE.md §七）
+## 2. Migration Guard 規範
 
 ### Guard A — 表已存在但 schema 不符
 ```sql
@@ -223,9 +223,9 @@ SELECT add_retention_policy('learning.tick_data', INTERVAL '90 days');
 
 OpenClaw 特定 snapshot（具體 V### migration 編號 / commit hash / RAM 配比 / 當前 healthcheck check 數）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三/§四/§七 > `audit_migrations.py` 實測 > git log > memory（operator 明示未必可信）。
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `audit_migrations.py` 實測 > git log > memory（operator 明示未必可信）。
 
-**穩定不變的 schema rule**（架構級不變）：silent-noop postmortem 教訓 → 新 migration 必含 Guard A/B/C（CLAUDE.md §七）；engine_mode 4 值 paper/demo/live_demo/live；training filter `IN ('live','live_demo')`（不單 'live'）；schema 變動必同步加 healthcheck `check_X()` function。
+**穩定不變的 schema rule**（架構級不變）：silent-noop postmortem 教訓 → 新 migration 必含 Guard A/B/C；engine_mode 4 值 paper/demo/live_demo/live；training filter `IN ('live','live_demo')`（不單 'live'）；schema 變動必同步加 healthcheck `check_X()` function。
 
 ## Cross-Skill 互引（避免重述）
 

@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Time Series CV Protocol（時序 CV 設計手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
@@ -197,7 +197,7 @@ pkf = PurgedKFold(n_splits=5, samples_info_sets=label_end_ts, pct_embargo=0.01)
 
 OpenClaw 特定 snapshot（commit hash / 當前 P0-13 ATR fix / 當前 label count / TODO id 引用）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿：runtime TOML > CLAUDE.md §三 > `audit_migrations.py` > `git log` > memory（最後）。Label count / row 量必跑 SQL（`SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`）。
+實際 context 必從 SSOT 拿：runtime TOML > `TODO.md` active state / runtime evidence > `audit_migrations.py` > `git log` > memory（最後）。Label count / row 量必跑 SQL（`SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`）。
 
 **穩定不變的 CV rule**（不會 drift）：時序資料禁用 `KFold`（會 shuffle）；training filter 必含 'live' + 'live_demo'（不混 paper）；TimescaleDB hypertable 支援快速 time-range query for split；embargo size 由 label horizon + autocorrelation 動態決定（不寫死數字）。
 

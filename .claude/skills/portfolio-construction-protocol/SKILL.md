@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Portfolio Construction Protocol（組合構建手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 > **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
@@ -49,7 +49,7 @@ f_safe = f_frac × (1 − std(p)·z) / mean(p)
 ### 1.4 OpenClaw 應用
 - Operator 偏好：3% risk / trade · 25 symbols（memory `feedback_position_sizing`）
 - 對應約 quarter Kelly + portfolio-level cap
-- 動態 qty 從 ATR 推（CLAUDE.md §三 P0-13 ATR scale）
+- 動態 qty 從 ATR 推（歷史 P0-13 ATR scale；當前狀態查 `TODO.md` / reports）
 
 ## 2. Risk Parity & Risk Budgeting
 
@@ -70,7 +70,7 @@ f_safe = f_frac × (1 − std(p)·z) / mean(p)
 
 OpenClaw 當前 5 策略名單 + 每策略 budget 隨 Phase / dormancy / R-02 重評變動。**本 skill 不寫死表格**避免 sub-agent 引過期數字當分配依據。
 
-實際分配 SSOT：`settings/risk_control_rules/risk_config_<env>.toml` `[per_strategy]` 段；策略激活狀態查 CLAUDE.md §三 + TODO.md。
+實際分配 SSOT：`settings/risk_control_rules/risk_config_<env>.toml` `[per_strategy]` 段；策略激活狀態查 `TODO.md` + runtime config。
 
 **修改流程**（對齊 DOC-01 §4.3 + §5.11，原文為準）：
 - **P2 範圍內**（不觸 P0/P1 硬上限）→ Agent 自主調整（DOC-01 §5.11）
@@ -158,7 +158,7 @@ CVaR(α) = E[L | L > VaR(α)]
 
 每個場景算組合 PnL + drawdown + liquidation 風險。
 
-> ⚠️ **執行需求**：5 場景 stress test 需歷史 OHLCV（25 symbol × ≥ 1m × 對應日期窗口）+ funding rate snapshot；sub-agent 工具（Read / Grep / WebSearch）不直接生 backtest，須走 `helper_scripts/research/` 或協調 E1 跑 Python backtest。盲跑就 cite「stress test pass」= 違反 CLAUDE.md §八 對抗性驗證原則。
+> ⚠️ **執行需求**：5 場景 stress test 需歷史 OHLCV（25 symbol × ≥ 1m × 對應日期窗口）+ funding rate snapshot；sub-agent 工具（Read / Grep / WebSearch）不直接生 backtest，須走 `helper_scripts/research/` 或協調 E1 跑 Python backtest。盲跑就 cite「stress test pass」= 違反對抗性驗證原則。
 
 ### 4.6 Risk Decomposition
 ```
@@ -263,7 +263,7 @@ OpenClaw 教訓：edge_estimator JSON 結構 + engine_mode 隔離（live vs live
 
 OpenClaw 特定 snapshot（5 策略 gross edge 狀態 / Phase 5 reframed 細節 / funding_arb 結案 / EDGE-P2-3 部署 / G1-05 todo / healthcheck check 數）會 drift。本 skill 不重述以避免 sub-agent 引過期事實。
 
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三/§四 > TODO.md > `git log` > 治理 .md > memory（operator 明示未必可信）。
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `git log` > governance docs > memory（operator 明示未必可信）。
 
 **穩定不變的 schema rule**：edge_estimator JSON = `strategy::symbol` top-level key；`engine_mode IN ('live','live_demo')` filter 必含兩者；CognitiveModulator confidence_floor 是 OpenClaw 內建 drawdown 動態降倉機制（架構級不變）。
 

@@ -14,6 +14,13 @@ Skills:
 
 Required reads:
 - `.claude/agents/FA.md`
+- `CLAUDE.md`
+- `.codex/MEMORY.md`
+- `README.md`
+- `docs/agents/context-loading.md`
+- `TODO.md` for current gap / active blocker / acceptance target
+- `.codex/AGENT_DISPATCH_PROTOCOL.md`
+- `docs/agents/todo-maintenance.md` before editing `TODO.md`
 - `docs/CCAgentWorkSpace/FA/profile.md`
 - `docs/CCAgentWorkSpace/FA/memory.md`
 

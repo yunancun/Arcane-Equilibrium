@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # ML Pipeline Maturity Audit（ML 管線成熟度審計）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
@@ -31,10 +31,10 @@ allowed-tools: Read, Grep, Glob, Bash
 | 階段 | 定義 | 例子 | 驗證 SQL / shell |
 |---|---|---|---|
 | **Foundation** | 表 + 索引 + writer 代碼到位，runtime 暫時全空 | V021 `learning.decision_shadow_exits` 接線後 0 row | `SELECT count(*) FROM learning.X` = 0 但 schema check pass |
-| **Skeleton** | writer spawn 且接線但 shadow_enabled=false / `None` send / flag 關（仍 0 row）| Combine Layer Part A `shadow_enabled=false`（CLAUDE.md §三） | flag 在 RiskConfig 開即 row 開始累 |
+| **Skeleton** | writer spawn 且接線但 shadow_enabled=false / `None` send / flag 關（仍 0 row）| Combine Layer Part A `shadow_enabled=false`（實際值查 RiskConfig / TODO） | flag 在 RiskConfig 開即 row 開始累 |
 | **Shadow** | writer 實際寫 row，但消費端不回影響真實決策（pure observation）| `decision_shadow_exits` rows 有累但 ExecutorAgent shadow_mode=true | row > 0 且 SubmitOrder IPC 仍未發 |
 | **Canary** | 有 model/signal 走 gate 但僅 gating shadow inference（非 live 倉位）| `model_registry` canary status 但 production_id null | promotion 路由 `/api/v1/ml/model_promote` 已可呼 |
-| **Production** | 消費端實質改變倉位/風控決策、灰度放量中 | Strategist live=true 走實際 IPC SubmitOrder（CLAUDE.md §十） | engine PID active + SubmitOrder count > 0 in last 24h |
+| **Production** | 消費端實質改變倉位/風控決策、灰度放量中 | Strategist live=true 走實際 IPC SubmitOrder（當前狀態查 TODO / runtime） | engine PID active + SubmitOrder count > 0 in last 24h |
 
 ## 4 維度評級表（空白模板，sub-agent 必跑 SQL/grep 自行填）
 
@@ -78,7 +78,7 @@ OpenClaw 各 ML component 的階段 + 阻塞原因（LinUCB / Combine Layer / Mo
 
 ## 與 V023 / V019 / V021 silent-noop postmortem 的關聯
 
-CLAUDE.md §七「新 SQL migration 規範」要求 Guard A/B/C，但 audit 時要二次確認：
+新 SQL migration 規範要求 Guard A/B/C，但 audit 時要二次確認：
 - Guard A 是否有 RAISE EXCEPTION 觸發過（測試環境）
 - 既有 legacy stub 有沒有 retrofit
 - `audit_migrations.py` 是否定期跑
@@ -89,9 +89,9 @@ MIT 審計時若發現 V### 沒 Guard A → 列為 BLOCKER，回 E2 改。
 
 OpenClaw 特定 snapshot（commit hash / 5 策略名單 / 25 symbol 數量 / healthcheck check 數）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三/§四 > TODO.md > `git log` > 治理 .md > memory（operator 明示未必可信）。
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `git log` > governance docs > memory（operator 明示未必可信）。
 
-**穩定不變的 schema rule**：`engine_mode IN ('live','live_demo')` filter 必含兩者；edge_estimator JSON = `strategy::symbol` top-level key；`OPENCLAW_AUTO_MIGRATE=1` opt-in 路徑 refuse-to-start on ambiguous（CLAUDE.md §七，架構級）。
+**穩定不變的 schema rule**：`engine_mode IN ('live','live_demo')` filter 必含兩者；edge_estimator JSON = `strategy::symbol` top-level key；`OPENCLAW_AUTO_MIGRATE=1` opt-in 路徑 refuse-to-start on ambiguous（架構級）。
 
 ## Cross-Skill 互引（避免重述）
 

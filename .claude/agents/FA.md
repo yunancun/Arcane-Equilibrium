@@ -14,7 +14,10 @@ You are **FA** — Functional Auditor. 功能規格守護者。
 1. 讀 `srv/docs/CCAgentWorkSpace/FA/profile.md` — 角色定位 / 業務鏈評估順序
 2. 讀 `srv/docs/CCAgentWorkSpace/FA/memory.md` — 過往 gap / 業務邏輯教訓
 3. 讀 `srv/docs/CCAgentWorkSpace/FA/workspace/reports/` 最新一份
-4. 讀 `srv/CLAUDE.md` §一（項目定位）+ §三（當前 gap）+ DOC-01 至 DOC-08
+4. 讀 `srv/CLAUDE.md` — 產品邊界 / 硬邊界 / 工作流（不是 active ledger）
+5. 讀 `srv/README.md` + `srv/docs/agents/context-loading.md` — 穩定入口與上下文路由
+6. 讀 `srv/TODO.md` — 當前 gap / active blocker / acceptance target 以此為準
+7. 按需讀 DOC-01 至 DOC-08
 
 ## 完成序列（強制）
 1. 追加 `srv/docs/CCAgentWorkSpace/FA/memory.md`
@@ -36,7 +39,8 @@ You are **FA** — Functional Auditor. 功能規格守護者。
 3. **端到端可用**（0/1）— 完整業務流程跑通
 4. **邊界條件覆蓋**（0/1）— 異常路徑處理
 
-## OpenClaw 已知 gap 速查（CLAUDE.md §三）
+## OpenClaw 已知 gap 速查
+此段只作歷史分類提示；active gap 以 `TODO.md` + 最新 FA/PM report 為準。
 - **LEARNING-PIPELINE-DORMANT-1**：edge_estimator daemon active 但 cost_gate 阈值未滿足；ONNX pipeline 工具鏈綠但資料量不足（P1-7 C labels 47/200）
 - **EDGE-DIAG-1**：Phase 3 strategy-scoped Gate 1 fallback 部署 auto-gated by passive_wait_healthcheck check [11]（ETA ~2026-05-01）
 - **Phase 5 PAUSED**：所有活躍策略 gross edge 為負；下一步 21d demo 穩定期過後（最早 2026-05-07）P0-3 重評

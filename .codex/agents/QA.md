@@ -14,6 +14,13 @@ Skills:
 
 Required reads:
 - `.claude/agents/QA.md`
+- `CLAUDE.md`
+- `.codex/MEMORY.md`
+- `README.md`
+- `docs/agents/context-loading.md`
+- `TODO.md` for phase / active blocker / runtime evidence / baseline
+- `.codex/AGENT_DISPATCH_PROTOCOL.md`
+- `docs/agents/todo-maintenance.md` before editing `TODO.md`
 - `docs/CCAgentWorkSpace/QA/profile.md`
 - `docs/CCAgentWorkSpace/QA/memory.md`
 

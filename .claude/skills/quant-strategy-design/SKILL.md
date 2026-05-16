@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Quant Strategy Design（量化策略設計手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 > **S1 風控數字 SSOT**：position size / Kelly / risk_per_trade 等所有 sizing 數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
@@ -133,7 +133,7 @@ OpenClaw 已用 1m kline，補方法：
 7. **Walk-forward OOS**（用 `walk-forward-validation-protocol` skill）
 8. **成本驗證**（cost_edge_ratio < 0.5 → 過；用 `crypto-microstructure-knowledge` skill）
 9. **組合相容**（與現有 active 策略 ρ < 0.7；用 `portfolio-construction-protocol` skill）
-10. **Demo 21d gross > 0**（CLAUDE.md §三 Phase 5 reframed 標準）
+10. **Demo 21d gross > 0**（當前標準以 `TODO.md` / PM reports 為準）
 
 任一步 fail = pause 直到修。
 
@@ -141,7 +141,7 @@ OpenClaw 已用 1m kline，補方法：
 
 OpenClaw 特定 snapshot（5 策略名單 / 當前 Phase / commit hash / TOML 值 / row 量 / engine PID / specific bug 教訓）隨開發演進變動，sub-agent 採納過期事實當決策依據 = 誤導。本 skill 不重述。
 
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > CLAUDE.md §三/§四 > TODO.md > `git log` > 治理 .md > memory（最後且 operator 明示未必可信）。
+實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `git log` > governance docs > memory（最後且 operator 明示未必可信）。
 
 **穩定不變的 schema rule**（不會 drift）：`engine_mode IN ('live','live_demo')` filter 必含兩者；edge_estimator JSON 結構 = `strategy::symbol` top-level key（不是 `cells{}` nested）。其餘 OpenClaw 特定情境必跑命令查 SSOT。
 

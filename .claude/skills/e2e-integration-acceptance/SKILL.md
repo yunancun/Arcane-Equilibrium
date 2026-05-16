@@ -6,10 +6,13 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # E2E Integration Acceptance（端到端集成驗收手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active
+> state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md`
+> operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
-> **S3 上層 drift 防線**：本 skill 引用上層（CLAUDE.md / DOC-XX / SM-XX / EX-XX）為 extract；原文修改後可能漂移，發現不一致以原文為準。
+> **S3 上層 drift 防線**：本 skill 引用上層文件為 extract；runtime
+> 數字、phase、baseline 以 `TODO.md` 和當次實測為準。
 
 ## 何時觸發
 
@@ -26,9 +29,10 @@ allowed-tools: Read, Grep, Glob, Bash
 
 **QA 失敗 = block 進入下一 Phase**，包括但不限於 Live 啟動。
 
-## 1. CLAUDE.md §九 既有 E2E 驗收清單
+## 1. 既有 E2E 驗收清單
 
-> ⚠️ **數字為 2026-04-25 snapshot**（治理端點 28/28、SLA <1ms 等可能演進）；以 CLAUDE.md §九 + §四 hard gates 原文為準，本表為 extract。
+> 數字會變；測試 baseline、healthcheck 數量、phase 狀態以 `TODO.md`
+> header / runtime evidence 和當次實測為準。
 
 ```
 [ ] 測試數超過基準線（無新增 failed）— 數字以最近 baseline run 為準
@@ -37,7 +41,7 @@ allowed-tools: Read, Grep, Glob, Bash
 [ ] paper_trading 完整流程：掃描 → 信號 → 審批 → 下單 → 止損
 [ ] GovernanceHub fail-closed 在 FREEZE 模式真實拒絕訂單
 [ ] 審計日誌完整（每筆訂單有 trace）
-[ ] CLAUDE.md 狀態描述與代碼現狀一致
+[ ] TODO.md active state 與代碼 / runtime 現狀一致
 [ ] live_execution_allowed = false 確認
 ```
 
@@ -71,7 +75,7 @@ allowed-tools: Read, Grep, Glob, Bash
 3. Rust 重啟 → Python 偵測 IPC fail → graceful retry
 ```
 
-### 3.3 灰度驗收（CLAUDE.md memory `project_track_p_runtime_live`）
+### 3.3 灰度驗收
 - 連續 7 天 CRITICAL=0 且 WARNING<10
 - Python 影子進程 vs Rust Engine tick 輸出差異 < 1e-4
 - DB row count 持續累積（無 silent dead）
@@ -111,7 +115,7 @@ ssh trade-core "python3 helper_scripts/db/passive_wait_healthcheck.py"
 
 ## 5. Live 前置（Phase 6 / Mainnet 啟動）
 
-CLAUDE.md §四 hard gates 5 項：
+`CLAUDE.md` Hard Boundaries hard gates 5 項：
 1. Python `live_reserved` global mode（Python 側 RAM）
 2. Python Operator role auth
 3. `OPENCLAW_ALLOW_MAINNET=1` env（Rust 側）
@@ -158,21 +162,27 @@ ssh trade-core "python3 helper_scripts/live/verify_authorization.py"
 3. **雙進程 E2E**（啟動 / 降級 / 重連）
 4. **冒煙 5 條**（§4）
 5. **跨模塊一致性 3 維**（§6）
-6. **CLAUDE.md §九 8 條 checklist**（§1）
+6. **E2E 8 條 checklist**（§1）
 7. **Live 前置 5 hard gate**（如 Phase 6）
 8. **灰度 7 天驗證**（CRITICAL=0 / WARNING<10）
 9. **healthcheck cron 24h 全 PASS**（17 check）
 10. **GovernanceHub FREEZE 模式真實拒單測試**
-11. **CLAUDE.md §三 狀態描述對照**（drift 檢查）
+11. **TODO.md active state 對照**（drift 檢查）
 12. **report + sign-off**
 
 ## OpenClaw context — 不在本 skill 重述
 
 OpenClaw 特定 snapshot（Phase 5 reframed 細節 / Demo 21d 時鐘起點 / 預測 Live 日期 / 當前 healthcheck check 數 / G6-04 規則編號）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三/§四/§十 > TODO.md > `git log` > 治理 .md > memory（最後）。
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > `TODO.md`
+active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md`
+operating rules > `git log` > governance docs > memory（最後）。
 
-**穩定不變的 governance / 平台 rule**（不會 drift）：強制工作鏈 E1→E2→E4→QA→PM 不可跳（CLAUDE.md §八）；engine_mode 4 值 paper/demo/live_demo/live；Mac 端 `engine_alive=false` 是預期（必走 `ssh trade-core` 取真值）；commit 即 push（CLAUDE.md §七）；§三 任何 runtime 數值採納前必 source-of-truth 實測。
+**穩定不變的 governance / 平台 rule**（不會 drift）：強制工作鏈
+E1→E2→E4→QA→PM 不可跳；engine_mode 4 值 paper/demo/live_demo/live；
+Mac 端 `engine_alive=false` 是預期（必走 `ssh trade-core` 取真值）；
+commit 即 push由 PM 執行；TODO / report 任何 runtime 數值採納前必
+source-of-truth 實測。
 
 ## Cross-Skill 互引（避免重述）
 
@@ -187,7 +197,7 @@ OpenClaw 特定 snapshot（Phase 5 reframed 細節 / Demo 21d 時鐘起點 / 預
 - Live 前置只驗 1-3 gate
 - 7d 灰度沒看 CRITICAL 趨勢
 - healthcheck cron 沒跑就宣稱「stable」
-- §三 數值沒對照 runtime 實測
+- TODO / report 數值沒對照 runtime 實測
 - 跨模塊一致性沒驗 API ↔ GUI ↔ DB
 - TOML 改了但 IPC 沒 patch（RAM 不同步）
 
@@ -222,7 +232,7 @@ OpenClaw 特定 snapshot（Phase 5 reframed 細節 / Demo 21d 時鐘起點 / 預
 - Python ↔ Rust 1e-4: ...
 - RAM ↔ DB ↔ TOML: ...
 
-## §九 8 checklist
+## E2E 8 checklist
 | Item | 狀態 |
 
 ## Live 前置 5 gate（如適用）
@@ -233,7 +243,7 @@ OpenClaw 特定 snapshot（Phase 5 reframed 細節 / Demo 21d 時鐘起點 / 預
 - WARNING: Y (target < 10)
 - Healthcheck pass rate: Z%
 
-## §三 drift check
+## TODO drift check
 | 數值 | source-of-truth 實測 | drift? |
 
 ## 結論

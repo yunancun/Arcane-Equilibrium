@@ -1,15 +1,20 @@
 ---
 name: gui-style-guide
-description: Control API GUI（11-Tab + Learning Cockpit + Paper Dashboard）TypeScript/React 程式風格與互動準則；E1a agent 主用。
+description: OpenClaw Control Console GUI style and interaction guide; E1a agent primary skill. Uses README-listed tabs and the existing vanilla HTML/JS/CSS stack.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
-# GUI Style Guide（Control API GUI 風格）
+# GUI Style Guide（OpenClaw Control Console）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active
+> state > `README.md` GUI surface > `CLAUDE.md` operating rules > governance
+> docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
-> ⚠️ **GUI 結構快照 disclaimer**：本 skill 引用「11-Tab + Learning Cockpit + Paper Dashboard」+ `ocEsc` / `ocSanitizeClass` / `ocExplain` 等具體結構/函數為 2026-04-25 snapshot；GUI 重構 / rename 後本 skill 可能漂移，**新元件加入前先 grep `program_code/.../static/` 確認真實結構**。
+> ⚠️ **GUI 結構 disclaimer**：Control Console tab 清單以 `README.md`
+> 「OpenClaw Control Console 核心 Tab」為準（當前 16 個）。`ocEsc` /
+> `ocSanitizeClass` / `ocExplain` 等 helper 仍需在
+> `program_code/.../static/` 內 grep 實測，不從記憶猜測。
 
 ## 何時觸發
 
@@ -19,13 +24,14 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 ## 既有結構（事實，不要重發明）
 
-11-Tab 控制台（CLAUDE.md §五）：
-- Live GUI（Phase 4/5/6 ✅，含平倉按鈕）
-- Learning Cockpit
-- Paper Trading Dashboard
-- 其餘 8 tab 詳查 `static/index.html` + `static/js/`
+OpenClaw Control Console：
+- Canonical GUI: `http://trade-core:8000/console`（README 為入口）
+- Tab 清單以 `README.md` 現列 16 tabs 為準，不硬編碼歷史 N-Tab 數字
+- Learning / Paper / Demo / Live 相關視圖需跟 README + 實際 static files 對齊
+- 新元件加入前先 grep `static/index.html`、`static/js/`、`static/tabs/`
 
-技術棧：FastAPI 後端 + 原生 JS / 輕量 React / TypeScript（依檔）。**不引入新框架**，不投奔 Next.js / Vite / Vue。
+技術棧：FastAPI 後端 + 既有 HTML / Vanilla JS / CSS。**不引入新框架**，
+不投奔 Next.js / Vite / React / Vue，除非 PM+PA 另開架構決策。
 
 ## 風格三原則
 
@@ -44,29 +50,28 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 - Modal 確認對話框內列出：操作、參數、actor、預期影響、回滾路徑
 - 「Live」「Demo」「Paper」標籤永遠在頁面右上角醒目區（避免混淆）
 
-### 原則 3：簡單優於華麗（CLAUDE.md §八 簡單優先）
+### 原則 3：簡單優於華麗
 
 - 不引入動畫除非有功能性目的（loading / state transition）
 - 不依賴 Tailwind / CSS-in-JS 大型框架；用既有 CSS class
 - 圖表用既有 lib（如 Chart.js / lightweight chart）；不換
-- 1 tab = 1 file（≤800 行警戒，≤1200 硬上限，§九）
+- 文件 >800 行需要 review attention；2000 行是 hard cap
 
-## TypeScript / JS 規範
+## JS 規範
 
-```typescript
-// ✅ 函數命名雙語注釋（§七 強制）
+```javascript
 /**
- * 提交平倉請求 / Submit close-position request
+ * 提交平倉請求。
  *
- * 確認 modal 已通過後才會呼叫。
- * Caller 必須帶 actor + lease_id；後端會 fail-closed 拒絕。
+ * 為什麼：確認 modal 已通過後才會呼叫；caller 必須帶 actor + lease_id，
+ * 後端會 fail-closed 拒絕未授權請求。
  */
 async function submitClosePosition(
-  symbol: string,
-  qty: number,
-  actor: string,
-  leaseId: string
-): Promise<CloseResult> { ... }
+  symbol,
+  qty,
+  actor,
+  leaseId
+) { ... }
 
 // ❌ 禁
 function close(s, q) { ... }      // 無類型 / 無注釋 / 縮寫
@@ -76,7 +81,7 @@ const k = "AbCdEf123";              // 像 secret 的字面值
 try {
   return await fetch(...);
 } catch (e) {
-  showErrorBanner("操作失敗，請重試 / Operation failed, please retry");
+  showErrorBanner("操作失敗，請重試");
   logToAuditTrail({ action: "close", error: e });
   return { ok: false };
 }
@@ -102,7 +107,7 @@ try {
 - 任何 Live 寫入操作沒有「最近 5 次操作」audit log inline 顯示
 - 重金屬色組合（極黑 + 鮮紅）— 長時段 op 視覺疲勞
 
-## 跨平台（§七 ★★）
+## 跨平台
 
 - 不假設視窗 ≥ 1920×1080；測 1366×768 + 13" 筆電
 - 鍵盤：所有按鈕 `tab` reachable + `enter` 觸發；`esc` 關 modal

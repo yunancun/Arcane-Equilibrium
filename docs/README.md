@@ -57,7 +57,7 @@ docs/
 ├── archive/                           ← 已归档/过期文档（DEPRECATED 文件、旧版摘要）
 │
 ├── CCAgentWorkSpace/                  ← Agent 工作空间（profile/memory/workspace per agent）
-├── agents/                            ← Agent issue tracker / domain / triage-label 指南
+├── agents/                            ← Agent context loading / TODO maintenance / issue tracker / domain / triage-label 指南
 │
 ├── execution_plan/                    ← 执行计划（Sprint/Wave 排期、里程碑规划）
 │
@@ -573,6 +573,9 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 | 文件 | 内容 |
 |------|------|
+| `agents/context-loading.md` | Agent context source-of-truth map and loading route |
+| `agents/role-profile-memory-standard.md` | Agent role profile / memory split and hygiene standard |
+| `agents/todo-maintenance.md` | TODO.md active-queue maintenance standard |
 | `agents/domain.md` | Agent domain ownership and routing rules for issue triage |
 | `agents/issue-tracker.md` | GitHub Issues operating model after the 2026-05-08 tracker decision |
 | `agents/triage-labels.md` | Triage labels and severity/status conventions for Agent work |

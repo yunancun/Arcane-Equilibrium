@@ -1,6 +1,6 @@
 # Codex Dispatch Ledger
 
-Last updated: 2026-04-29
+Last updated: 2026-05-16
 
 Purpose:
 - keep a durable record of meaningful PM-first dispatch decisions
@@ -25,6 +25,21 @@ Ownership:
 Result:
 - outcome, blocker, or next action
 ```
+
+2026-05-16 22:19 CEST
+Task:
+- Normalize all CCAgent role profiles and memories after the memory slimming / TODO-first decision.
+
+Chain:
+- PM -> PM
+
+Ownership:
+- PM: inspect all role profile/memory files, define shared standard, update role docs, preserve historical memory, and verify stale active-state wording is removed.
+
+Result:
+- Added `docs/agents/role-profile-memory-standard.md`.
+- All role profiles now point to the shared contract; all role memories now declare historical-memory interpretation.
+- Active state remains routed to `TODO.md`; no historical memory body was deleted.
 
 2026-05-15 22:13 CEST
 Task:
@@ -157,3 +172,46 @@ Result:
 - E2 returned two P1 findings on status coverage and historical-window timestamp visibility; fixes added `--asof` / `--freeze-asof` split and explicit Trading/PreLaunch/Delivering/Closed status fetch. E2 follow-up verdict closed both.
 - E4 follow-up verified Python targeted tests 9/0, project-venv Bybit dry-run 1459 raw rows, and `git diff --check`; Linux apply then exposed dated-futures symbols outside V058 schema, so a follow-up fix filters symbols to the V058 contract and local targeted tests now pass 10/0 with 905 compatible dry-run rows.
 - Runtime follow-through completed after source sync: Linux V060/V061 apply, V058/V059 backfill, release `replay_runner` rebuild, API reload, and current-config V058 full-chain smoke all passed. Remaining work is recurring V058 snapshots plus order-book/ticker fidelity, not this checkpoint's deploy path.
+
+2026-05-16 CEST
+Task:
+- Standardize memory slimming and context loading for Claude/Codex sessions.
+
+Chain:
+- PM local docs/governance update; no sub-agent dispatch because this was a
+  narrow operating-rule refactor requested by the operator.
+
+Ownership:
+- PM: source routing, TODO maintenance standard, startup sequence updates, and
+  memory compaction.
+
+Result:
+- New source routing docs: `docs/agents/context-loading.md` and
+  `docs/agents/todo-maintenance.md`.
+- `CLAUDE.md` and `.codex/MEMORY.md` now hold operating memory instead of
+  current-state ledgers.
+- Startup routing updated in `AGENTS.md`, `.claude/agents/PM.md`,
+  `.codex/agents/PM.md`, `.codex/AGENT_DISPATCH_PROTOCOL.md`, and
+  `.codex/SUBAGENT_EXECUTION_RULES.md`.
+
+2026-05-16 CEST
+Task:
+- Refresh all agent settings after operator asked to improve every agent rather
+  than preserve old `CLAUDE.md` chapter compatibility.
+
+Chain:
+- PM local docs/settings update; no sub-agent dispatch because the task was a
+  tightly scoped operating-rule edit and the user asked to inspect then update.
+
+Ownership:
+- PM: Claude role files, Codex role files, agent-facing skill settings, role
+  profiles, and verification.
+
+Result:
+- `.claude/agents/*.md` and `.codex/agents/*.md` now use the same preload
+  route: operating memory, `README.md`, `docs/agents/context-loading.md`, and
+  conditional `TODO.md`.
+- `.codex/agents/INDEX.md` now documents universal Codex preload.
+- Agent-facing skills/profiles no longer route active state through stale
+  numbered-memory sections, enforce old bilingual comments, depend on 11-tab wording, or
+  use the obsolete 1200-line hard cap.

@@ -20,7 +20,9 @@ Recommended layout:
 - `archive/` - retired notes that should stay searchable
 
 Ground rules:
-- `CLAUDE.md` and `TODO.md` remain the primary project control documents
+- `CLAUDE.md` / `.codex/MEMORY.md` hold operating rules; `README.md` is the stable project entry; `TODO.md` is the active dispatch queue
+- `docs/agents/context-loading.md` defines where each class of context belongs
+- `docs/agents/todo-maintenance.md` defines how agents must update `TODO.md`
 - Codex should treat this folder as additive context, not a replacement for the main project docs
 - Do not store credentials, tokens, raw secrets, or volatile runtime state here
 - Keep entries short, factual, and easy to diff

@@ -1,5 +1,11 @@
 # MIT Memory
 
+## Memory Usage Contract (2026-05-16)
+
+- 本文件保存歷史教訓與角色偏好，不是 active state、TODO 或 runtime ledger。
+- 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
+- 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
+
 _Last updated: 2026-04-24_
 
 ## 關鍵事實

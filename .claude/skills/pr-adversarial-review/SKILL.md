@@ -6,14 +6,18 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # PR Adversarial Review（對抗審核手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active
+> state > `README.md` stable surfaces > `CLAUDE.md` operating rules >
+> governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
-> **S3 上層 drift 防線**：本 skill 引用上層（CLAUDE.md / DOC-XX / SM-XX / EX-XX）為 extract；原文修改後可能漂移，發現不一致以原文為準。
+> **S3 上層 drift 防線**：本 skill 引用上層文件為 extract；若與
+> `TODO.md` active state、`README.md` stable surfaces 或 `CLAUDE.md`
+> operating rules 不一致，按更權威來源執行並通報 R4。
 
 ## 何時觸發
 
-- E2 收到任何 E1 / E1a 改動 → 在 E4 回歸前必跑（強制工作鏈，CLAUDE.md §八）
+- E2 收到任何 E1 / E1a 改動 → 在 E4 回歸前必跑（強制工作鏈）
 - PR diff、commit hash、未推 staged / unstaged 變更
 - 「review my recent changes」「is this safe to merge」
 
@@ -47,7 +51,7 @@ allowed-tools: Read, Grep, Glob, Bash
 ### 1.4 Leakage / 安全
 - SQL injection（f-string format vs 參數化）
 - log 含 secret / API key / authorization HMAC（用 secret-leak-detection skill）
-- detail=str(e) 洩漏堆棧（CLAUDE.md §九 SEC-04）
+- detail=str(e) 洩漏堆棧（安全反模式：外部 response 不暴露內部 exception）
 - XSS（GUI 改動 + ocEsc / ocSanitizeClass 漏用）
 - 跨進程 IPC payload validation 漏
 
@@ -63,9 +67,10 @@ allowed-tools: Read, Grep, Glob, Bash
 - 改 function 但 import 它的其他模塊？
 - 測試中 mock 它的場景？
 
-## 2. CLAUDE.md §九 E2 既有 checklist（必跑）
+## 2. E2 既有 checklist（必跑）
 
-> ⚠️ **以 CLAUDE.md §九 原文為準**：本表為 2026-04-25 snapshot，§九 修改後本 skill 可能漂移；E2 audit 時若兩者不一致 = 信 §九 原文 + 通報 R4 sync skill。
+> 本表是穩定 review checklist；測試 baseline、active blocker、runtime 數字
+> 以 `TODO.md` 和當次實測為準。
 
 ```
 [ ] 改動範圍與 PA 方案一致
@@ -80,15 +85,17 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## 3. OpenClaw 特殊 review 條目
 
-### 3.1 跨平台合規（CLAUDE.md §七 ★★）
+### 3.1 跨平台合規
 ```bash
 # 新代碼禁硬編碼 user home
 grep -E '(/home/ncyu|/Users/[^/]+)' <diff>
 ```
 新代碼命中 → 打回。歷史 worklog / dated snapshot / 政策反例引用不在此限。
 
-### 3.2 雙語注釋（CLAUDE.md §七）
-- 每個新建 / 修改的 function / class / module 必須中英對照
+### 3.2 注釋規範
+- 新建或修改的 function / class / module 注釋默認中文
+- 英文技術詞、API 名、schema 名、symbol 名保留
+- 觸及舊中英對照塊時移除英文只保留中文
 - MODULE_NOTE 格式：模塊用途 / 主要類函數 / 依賴 / 硬邊界
 
 ### 3.3 Rust 代碼專條
@@ -103,23 +110,24 @@ grep -E '(/home/ncyu|/Users/[^/]+)' <diff>
 - Python ↔ Rust 浮點精度（1e-4 容差）
 
 ### 3.5 Migration Guard（V023 / V019 / V021 教訓）
-- 新 SQL migration 必含 Guard A/B/C（CLAUDE.md §七）
+- 新 SQL migration 必含 Guard A/B/C
 - `CREATE TABLE IF NOT EXISTS` 前 Guard A
 - `ALTER TABLE ADD COLUMN IF NOT EXISTS col TYPE` 前 Guard B
 - 跑兩次必須不 RAISE（idempotency）
 
-### 3.6 healthcheck 配對（CLAUDE.md §七）
-新增「被動等待 Nd / Nw」TODO 必同時加 `passive_wait_healthcheck.py` check_X()，否則 silent-dead 偵測不出。
+### 3.6 healthcheck 配對
+新增「被動等待 Nd / Nw」TODO 必同時加 healthcheck，並符合
+`docs/agents/todo-maintenance.md`，否則 silent-dead 偵測不出。
 
-### 3.7 Sigleton / monkey-patch（CLAUDE.md §九）
-- 新 singleton 必登記 §九 表
+### 3.7 Singleton / monkey-patch
+- 新 singleton 必在 PA/E2 report + TODO follow-up 或穩定登記表明確落地
 - 子模塊用 `base.xxx()` 經 main_legacy 命名空間，不可直接 import 原始版本
 
-### 3.8 文件大小（CLAUDE.md §九）
+### 3.8 文件大小
 - 800 行 → ⚠️ 警告
-- 1200 行 → 🛑 拒絕 merge
+- 2000 行 → 🛑 拒絕 merge
 
-### 3.9 Bybit API（CLAUDE.md §八）
+### 3.9 Bybit API
 - 改動觸 `/v5/*` REST / WS 必先查 `docs/references/2026-04-04--bybit_api_reference.md`
 - 新增 endpoint 同步更新手冊
 - BB agent 跨 agent review
@@ -155,7 +163,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 |---|---|---|
 | **CRITICAL** | 硬邊界繞過（live_execution_allowed） / SQL injection / panic 在交易路徑 | 立即 BLOCKER，回 E1 |
 | **HIGH** | 副作用未識別 / race / 跨平台路徑硬編碼 | 退回 E1 修，不過 E2 |
-| **MEDIUM** | except:pass / log f-string / 800-1200 行 | 退回 E1 改 |
+| **MEDIUM** | except:pass / log f-string / 800+ 行需要拆分評估 | 退回 E1 改 |
 | **LOW** | typo / lint / dead import | E2 直接修（小範圍）或退回 |
 
 ## 6. 工作流（10 步）
@@ -163,7 +171,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 1. **讀 PA 方案 / 任務描述**
 2. **`git diff` 看完整改動**
 3. **改動範圍 vs 方案 cross-check**
-4. **CLAUDE.md §九 8 條 checklist 逐項**
+4. **E2 8 條 checklist 逐項**
 5. **OpenClaw 特殊 9 條（§3）逐項**
 6. **對抗反問**（§4 範本）
 7. **跑單元測試**（不只 mock，看是否真的覆蓋邏輯）
@@ -173,18 +181,18 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 
 ## OpenClaw 特定核心
 
-- **強制工作鏈**：E2 失敗 → E1 修 → 重 E2 → E4，**不可跳**（CLAUDE.md §八）
+- **強制工作鏈**：E2 失敗 → E1 修 → 重 E2 → E4，**不可跳**
 - **任何情況不跳過 E2**，包括 P0 緊急修復
 - **E2 不寫業務代碼**：發現 issue 退回 E1，例外只接受 typo/lint
 - **engine_mode IN ('live', 'live_demo')**：filter 必含兩者
 - **跨平台 grep**：`/home/ncyu` / `/Users/[^/]+` 必篩
 - **Migration Guard A/B/C**：V023 silent-noop 教訓
 - **healthcheck 配對**：被動等待 TODO 必附 check
-- **commit 即 push**（CLAUDE.md §七 git 自動化）：E2 通過後 push 不滯留
+- **commit 即 push**：由 PM 在通過 E4 / QA 後執行，不留滯
 
 ## Cross-Skill 互引（避免重述）
 
-- **§九 原文 + Bilingual comment 規範**：本 skill 8 條 §九 checklist 為 extract，原文以 CLAUDE.md §九 為準；雙語注釋細節走 `bilingual-comment-style`
+- **Comment 規範**：注釋細節走 `bilingual-comment-style`（兼容名稱；現為中文優先）
 - **secret leak 偵測**：本 skill §1.4 leakage 列出 SQL/log/XSS 警報，但具體 grep pattern + Pattern A-G 走 `secret-leak-detection`
 - **OWASP 安全細節**：本 skill 看代碼層次的 race / shortcut / leakage；**完整 OWASP Top 10 attack surface audit**（A01-A10）走 `owasp-checklist`
 - **Migration Guard 細節**：V### Guard A/B/C 寫法 + idempotency 走 `db-schema-design-financial-time-series`
@@ -197,7 +205,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 - 沒跑跨平台 grep
 - Bybit API 改動沒查字典手冊
 - Migration 沒 Guard A
-- 文件 > 1200 行 still merge
+- 文件 > 2000 行 still merge
 - 「下次再修」延誤
 - E1 答 "should work" 沒驗證就放行
 
@@ -209,7 +217,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 ## 改動範圍
 （diff stats + files touched）
 
-## 8 條 §九 checklist
+## 8 條 reviewer checklist
 | Item | 狀態 |
 
 ## OpenClaw 9 條 §3 checklist

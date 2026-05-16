@@ -1,15 +1,15 @@
 ---
 name: 16-root-principles-checklist
-description: CLAUDE.md §二 16 條根原則逐條 + 9 條安全不變量 + 硬邊界守護；CC agent 對代碼/設計/計劃做合規審查時使用。
+description: 16 條根原則逐條 + 9 條安全不變量 + 硬邊界守護；CC agent 對代碼/設計/計劃做合規審查時使用。
 allowed-tools: Read, Grep, Glob
 ---
 
-# 16 根原則 Checklist（CLAUDE.md §二 + DOC-01 項目憲法）
+# 16 根原則 Checklist（CLAUDE.md Root Principles + DOC-01 項目憲法）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
-> **S3 上層 drift 防線**：本 skill 16 條根原則為 DOC-01 V2 §5.1-§5.16 的 extract（**真 SSOT 是 `srv/docs/decisions/DOC-01_..._V2.md`，不是 CLAUDE.md §二**），原文修改後可能漂移，發現不一致以 DOC-01 原文為準。
+> **S3 上層 drift 防線**：本 skill 16 條根原則為 DOC-01 V2 §5.1-§5.16 的 extract（**真 SSOT 是 `srv/docs/decisions/DOC-01_..._V2.md`，不是 memory**），原文修改後可能漂移，發現不一致以 DOC-01 原文為準。
 
 > **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
 
@@ -43,7 +43,7 @@ allowed-tools: Read, Grep, Glob
 
 ## 硬邊界（觸碰 = BLOCKER）
 
-CLAUDE.md §四 列舉。grep 必查：
+`CLAUDE.md` Hard Boundaries 列舉。grep 必查：
 ```
 grep -nE '(execution_state|execution_authority|live_execution_allowed|decision_lease_emitted|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json)' <diff>
 ```
