@@ -238,7 +238,10 @@ def test_post_config_returns_503_on_ipc_error(
         json={"scope": "local_total", "monthly_usd": 100.0},
     )
     assert resp.status_code == 503
-    assert "engine" in resp.json()["detail"].lower()
+    # WP-05 Real Fix 後 detail 為 dict: {"reason_codes": [...], "detail": "..."}
+    detail = resp.json()["detail"]
+    assert isinstance(detail, dict)
+    assert "ipc_error" in detail["reason_codes"]
 
 
 def test_post_config_returns_504_on_timeout(

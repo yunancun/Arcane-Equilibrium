@@ -1,5 +1,30 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-16 — WP-11 Test Infrastructure (6 test files, 15 test fixes) 對抗 review (PASS to E4)
+
+**對象**：6 test files + E4 memory.md, +130/-79 LOC, 0 production code changes
+
+**Verdict**：**PASS to E4** -- 0 BLOCKER, 0 HIGH, 0 MEDIUM, 1 LOW (existence-only envelope assertion)
+
+**驗證手段**：
+1. `git diff HEAD --name-only | grep -v tests/ | grep -v CCAgentWorkSpace` = empty (zero production code changed)
+2. Cross-platform grep `/home/ncyu|/Users/[^/]+` on all diff = 0 hit
+3. Production code cross-check: `error_sanitize.py:62` returns `{"reason_codes": [reason_code], "detail": safe_msg}` -- all 3 IPC tests aligned
+4. `ipc_error_handler.py:125-128` generic Exception -> `sanitize_exc_for_detail(exc, "ipc_error")` -- ai_budget test's `"ipc_error"` reason code correct
+5. `executor_routes.py:634` + `strategist_promote_routes.py:719` both `sanitize_exc_for_detail(exc, "rust_engine_unavailable")` -- 2 tests aligned
+6. `route_helpers.py:861-868` `build_default_manifest_payload(cur=None)` returns exactly 3 keys -- test 6->3 aligned
+7. `route_helpers.py:1006-1015` defense-in-depth rejects envelope keys -- fixture payload stripping aligned
+8. `dispatch.rs:49` CLOSE_ATTEMPT_TIMEOUT_MS still present; `dispatch_tests.rs:455` test function confirmed moved
+9. `tab-live.html:1683` `_applyLiveTodayPnl(m)` confirmed (not old `metricsData` pattern)
+10. `resolve_artifact_allowlist_root()` returns platform-aware path -- spawn tests correctly use it
+11. `_signing_key_env` fixture: deterministic `"ab"*32` test key via `tmp_path` + `monkeypatch.setenv` -- no hardcoded paths, auto-cleaned
+12. New comments all Chinese-only (2026-05-05 governance compliant)
+13. No `except:pass`, no `._xxx` private access, no f-string logging, no blocking Lock in diff
+
+**LOW finding**：`test_write_manifest_fixture_embeds_run_id` 的 envelope assertion 從 `assert written["signature"] == "ph_sig"` 改為 `assert "signature" in written`（existence-only）。因為 Round 6 後 signature 是真實 HMAC（非 deterministic placeholder），existence check 合理；canonical byte-equal test 另覆蓋 integrity。接受不退回。
+
+**教訓**：test-only diff 仍必須逐條 cross-check production code path -- `ipc_error` vs `ipc_unreachable` reason code 取決於 which `except` clause catches（`_get_ipc_client()` failure vs IPC call failure），mock 注入點決定走哪條路。
+
 ## 2026-05-11 — Wave 2.2 LG-1 + LG-2 batch (8 task) 對抗 review (APPROVE WITH MINOR · PASS to E4)
 
 **對象**：commit `a11a4df6 LG live gate checkpoint` 已 land main (16882+/121- LOC across 67 files)，working tree clean (only 1 stale report)

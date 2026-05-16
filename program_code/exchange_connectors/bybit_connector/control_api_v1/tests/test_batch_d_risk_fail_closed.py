@@ -123,4 +123,6 @@ def test_oe_006_close_retry_budget_has_real_timeout_guard() -> None:
     assert "pub(super) const CLOSE_ATTEMPT_TIMEOUT_MS: u64 = 500;" in dispatch
     assert "tokio::time::timeout" in dispatch
     assert "close dispatch timed out" in dispatch
-    assert "test_close_attempt_timeout_constant_is_500ms" in dispatch
+    # 測試函數從 dispatch.rs 移至 dispatch_tests.rs
+    dispatch_tests = _read("rust/openclaw_engine/src/event_consumer/dispatch_tests.rs")
+    assert "test_close_attempt_timeout_constant_is_500ms" in dispatch_tests
