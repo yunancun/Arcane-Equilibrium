@@ -351,6 +351,8 @@ grep -nrE '(linucb|scorer|quantile|mlde|dl3).*close_maker_(attempt|fallback_reas
 
 ### 5.4 Race D：reject `TooManyPending`（v1.1 BB-MF-2 dynamic backoff 取代 5min global pause）
 
+> **Footnote v1.4 patch (Phase 1b initial IMPL deferral)**：Phase 1b initial IMPL（commit `27f02a07`，E1 Wave 2b BB-MF-3 split）取 **per-symbol 5min 固定**（`CLOSE_REJECT_COOLDOWN_TOO_MANY_PENDING_MS = 300_000`）作為 §6.1 cooldown timeout；完整 dynamic backoff state machine（per-symbol 1s exp → 60s 上限 + ≥10 symbol cascade → 5min global pause + audit row `rate_limit_scope = "global"`）**deferred to** `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` ticket（PA 估 ~50 LOC backoff state machine + ~80 LOC integration test，Phase 2a Demo PASS 後另開 PR）。**E1 push back 接受**：避 scope creep；per-symbol 5min 仍比 v1.0「5min global」優（其他 symbol 不受影響），不破 §5.6 fail-safe。
+
 **情境**：Bybit `EC_ReachMaxPendingOrders` (MakerRejectionCategory::TooManyPending) reject 觸發；當前 v1.0 設計「全域 5min pause」過度保守（Bybit V5 Order group 20 req/s per UID，rate-limit recovery 是 sub-second 級；5min 是 3000x overshoot，會 starve close path）。
 
 **新規則（v1.1）**：
@@ -428,7 +430,7 @@ grep -nrE '(linucb|scorer|quantile|mlde|dl3).*close_maker_(attempt|fallback_reas
 | 欄位 | 用途 | 值（v1.1 修正：dynamic backoff 取代固定 5min）|
 |---|---|---|
 | `reject_cooldown_entry_until_ms` | entry maker reject cooldown | 沿用既有邏輯 |
-| `reject_cooldown_close_until_ms` | close maker reject cooldown | **per-symbol dynamic backoff（per §5.4）**：TooManyPending → 1s exp → 60s 上限；其他 reject → 1min |
+| `reject_cooldown_close_until_ms` | close maker reject cooldown | **Phase 1b initial IMPL（commit `27f02a07`）**：TooManyPending → **5min 固定 per-symbol**（`CLOSE_REJECT_COOLDOWN_TOO_MANY_PENDING_MS = 300_000`）；其他 reject → 1min（`CLOSE_REJECT_COOLDOWN_DEFAULT_MS = 60_000`）。完整 dynamic backoff（§5.4）→ `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` 後續 ticket |
 
 **驗證**：`event_consumer/cooldown_isolation_tests.rs` 新增 entry reject 不影響 close path regression test。
 

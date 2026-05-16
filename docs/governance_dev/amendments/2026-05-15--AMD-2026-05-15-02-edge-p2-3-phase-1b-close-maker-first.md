@@ -305,8 +305,13 @@ per `srv/CLAUDE.md §四` SoT 對齊：
 
 **所有條件必滿足才能進 IMPL**：
 
-1. ✅ PA spec finalize（`docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` v1.1）
-2. ⏳ 本 AMD v0.2 經 **QC + FA + BB + MIT 4-agent 並行 short re-review** 確認 17 must-fix + 14 should-fix 收口完整
+1. ✅ PA spec finalize（`docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` **v1.3 per Wave 1.5b consolidation**）
+2. ✅ **本 AMD v0.4 + spec v1.3 經 QC + FA + BB + MIT 4-agent 並行 short re-review SATISFIED**（Wave 3a，per §12 v0.4 changelog）：
+   - BB ✅ file `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-15--amd_v0_3_spec_v1_2_bb_short_re_review.md`（commit `6713bcdc`）— 5/5 must + 3/3 should land + v1.2/v0.3 增量無新 Bybit-side risk
+   - QC verdict ✅ APPROVED-CONDITIONAL（1 NEW MUST QC-MF-3 + 1 NEW SHOULD QC-SF-6）— consolidated 進 PA Wave 1.5b 報告 + spec v1.3 §11 patch（AC-5/AC-11 +1.5→+0.5 bps + AC-18 Wilson-CI）
+   - FA verdict ✅ APPROVED（4 cosmetic — AC range / V094 writer / negative whitelist / 16 原則表）— integrated 進 spec v1.3 + AMD v0.4
+   - MIT verdict ✅ APPROVED（2 P3 advisory — AC-18 CI note 重疊 QC-SF-6 cover / AC-19 stratification note OPTIONAL deferred IMPL）— integrated 進 spec v1.3 footnote
+   - **Sub-condition pending（governance trail hygiene）**：QC + FA + MIT agent-attributed verdict file 待補寫至 workspace（內容已 integrated，audit trail completeness 追補）
 3. ⏳ 三閘全過：
    - P0-EDGE-1 closed（[40] negative realized edge resolved）
    - W-AUDIT-8b Stage 0R passed（funding skew empirical evidence）
@@ -389,7 +394,15 @@ post-AMD v0.2 land 後 Wave 1 並行派 5 track（A1/A3/A4/E1/E3），結果：
 - **PA Track E3 maker fill baseline**：commit `b98706d5` — fee saving 4.5 → 0.5-2.0 bps net per close attempt（per empirical 0.66/0.95/3.31 三層解讀）+ no-fallback-to-taker gap identified（entry 70% PostOnly timeout 直接放棄，close 不可繼承）
 - **E1 KAMA fallback gate**：commit `9df44183` — W3-6 by-the-way 完成（debug → warn + skip entry when KAMA unavailable）
 
-**Consolidated verdict（Wave 1 → AMD v0.3）**：5/5 land；2 substantive new findings（A3 + E3）trigger Wave 1.5 spec v1.2 + AMD v0.3 patch；patch 純增量無 reverse decision → 待 Wave 3 4-agent short re-review on AMD v0.3 + spec v1.2 確認收口。
+**Consolidated verdict（Wave 1 → AMD v0.3）**：5/5 land；2 substantive new findings（A3 + E3）trigger Wave 1.5 spec v1.2 + AMD v0.3 patch；patch 純增量無 reverse decision → ✅ **Wave 3a 4-agent short re-review on AMD v0.3 + spec v1.2 4/4 verdict APPROVED consolidated 進 v0.4 + spec v1.3**（per §12 v0.4 changelog；QC-MF-3 + QC-SF-6 + FA 4 cosmetic + MIT 2 P3 advisory 全 integrated）。
+
+### 11.2 Wave 2 Source Audits（v0.4 補錄）
+
+- **PA Track A2 V094 hybrid schema spec finalize**：commit `9b1117a0` + PA verdict `14a561ec`（F-FA-1 ✅，IMPL Prereq 5 第 1 子條件解）
+- **E1 Track reject_cooldown entry/close split**：commit `27f02a07`（BB-MF-3 P0 真 merge）+ E1 self-report `15e67220` + E4 regression `8321b4b7`（2906 passed / 0 failed / 8 new BB-MF-3 tests PASS）→ IMPL Prereq 條件 6 ✅ SATISFIED
+- **BB Wave 3b 字典手冊 6 處更新**：commit `28c571c7` + BB verdict `55f35adb` + memory `859a6b60` → BB-MF-1 字典 SoT 補錄 ✅
+
+**Consolidated verdict（Wave 2 + Wave 3b → AMD v0.4）**：A2 + E1 + BB1 全 land；IMPL Prereq 條件 5 全 RESOLVED + 條件 6 SATISFIED；spec §5.4 dynamic backoff vs §6.1 5min fixed 的 IMPL 階段選擇開 `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` ticket 處理。
 
 ---
 
