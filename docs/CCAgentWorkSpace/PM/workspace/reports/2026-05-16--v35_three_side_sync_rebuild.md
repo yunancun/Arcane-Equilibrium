@@ -11,9 +11,9 @@ DONE: source/test was green enough to sync, three-side source sync completed, an
 
 - Mac source before docs sync: `a7cb517f` after WP-13 leftover P1 fix.
 - Origin before push: `864f4e81`.
-- Linux `trade-core` after fetch: clean but behind origin by 1 before this v35 sync; later fast-forwarded to `5f6f3edf`.
+- Linux `trade-core` after fetch: clean but behind origin by 1 before this v35 sync; later fast-forwarded to runtime/code-bearing head `5f6f3edf`.
 - Runtime before rebuild: engine PID `4153823`, API PID `4153920`; prior runtime binary line remained `7b33ab2e`.
-- Three-side sync after docs/source commits: Mac/origin/Linux clean at `5f6f3edf`.
+- Runtime/code-bearing three-side sync before rebuild: Mac/origin/Linux clean at `5f6f3edf`.
 - Rebuild command on Linux: `PATH=$HOME/.cargo/bin:$PATH bash helper_scripts/restart_all.sh --rebuild --keep-auth`.
 - Runtime after rebuild: engine PID `69581`, API PID `69674`; watchdog `engine_alive=true`, demo fresh.
 - Live status after rebuild: inactive/stale because signed live authorization is absent. `--keep-auth` preserved the missing-auth state and did not renew auth.
@@ -52,7 +52,7 @@ Boundary:
 ## Post-Deploy Section
 
 Post-deploy verification:
-- Mac HEAD/origin/main/Linux HEAD are aligned at `5f6f3edf`.
+- Mac/origin/Linux were aligned at runtime/code-bearing head `5f6f3edf` before rebuild; post-rebuild docs-only commits may advance repository HEAD without another rebuild.
 - Linux runtime processes are running: engine PID `69581`, API PID `69674`.
 - Watchdog confirms engine alive and demo fresh.
 - Paper remains disabled by `OPENCLAW_ENABLE_PAPER=0`; do not treat fresh `paper_state.disabled=true` as active paper execution.
