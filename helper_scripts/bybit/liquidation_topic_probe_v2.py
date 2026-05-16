@@ -162,6 +162,12 @@ class ProbeV2Stats:
     # ── 錯誤 / poison ──
     poison_events: list[str] = field(default_factory=list)
     connection_errors: list[str] = field(default_factory=list)
+    # 非致命 TCP keepalive sockopt 警告（per E2 HIGH-1 + A3 ADV-4 fix）
+    # 拆出獨立 list，assess() 不採納為 FAIL 信號；只是 operator-facing 透明度。
+    # 動機：原本所有非致命 warning（keepalive_warning / non_json_message）都被
+    # 塞進 connection_errors，使 assess() 將任何非空 list 當 FAIL 信號 →
+    # Mac dev 受限 sockopt 環境的 60s smoke 系統性誤判 FAIL_RECONNECT_EXHAUSTED。
+    keepalive_warnings: list[str] = field(default_factory=list)
 
     # ── 結論 ──
     verdict: str = "UNKNOWN"
@@ -243,7 +249,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--max-restart",
         type=int,
         default=3,
-        help="連續 reconnect 用盡時的 session restart 上限（design §3.4 = 3）",
+        help=(
+            "Maximum number of session restarts after the initial session "
+            "(initial + N restarts allowed). max-restart=3 means up to 4 total "
+            "sessions (1 initial + 3 restarts). Design §3.4."
+        ),
     )
     parser.add_argument(
         "--checkpoint-interval-sec",
@@ -387,15 +397,35 @@ def _backoff_for_attempt(attempt: int) -> float:
 
 # ── Checkpoint 寫入 ─────────────────────────────────────────────────────
 
+def _atomic_write_text(target_path: Path, payload: str, *, encoding: str = "utf-8") -> None:
+    """以 atomic rename pattern 寫入文字檔（per A3 CRITICAL-2 fix）。
+
+    動機：24h proof 期間 operator 透過 `jq . progress.json` 隨時查狀態，原 `Path.write_text()`
+    在 disk flush 過程中 `jq` 可能讀到 truncated JSON → `jq: parse error`。
+    每 hour overwrite × 24 hour + 1 final flush = 25 次寫入，每次 ~1-10ms race window，
+    operator 監控頻率高（5-15min 一次）24h 內中 race 機率不低；2 次 parse error 就會
+    讓 operator 失去信心 → 提前 abort。
+
+    POSIX atomic rename pattern：先寫 `<path>.tmp` 完整 flush 後 `os.replace(<tmp>, <path>)`
+    一次性切換 inode，reader 永遠看到 old 或 new 完整檔案，不會看到 partial。
+
+    僅用於需 reader concurrent access 的 latest / progress 檔；一次性 final dated 檔不需要。
+    """
+    tmp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+    tmp_path.write_text(payload, encoding=encoding)
+    tmp_path.replace(target_path)
+
+
 def _write_checkpoint(stats: ProbeV2Stats, output_dir: Path) -> Path:
     """寫入 checkpoint JSON 至 OPENCLAW_DATA_DIR/audit/.../c1_proof_progress.json。
 
     每 60min 與 final report 階段呼叫；overwrite 同檔。
+    Atomic rename：jq 讀取期間絕不看到 partial JSON（per A3 CRITICAL-2 fix）。
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / CHECKPOINT_FILE_NAME
     payload = json.dumps(asdict(stats), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    checkpoint_path.write_text(payload, encoding="utf-8")
+    _atomic_write_text(checkpoint_path, payload)
     return checkpoint_path
 
 
@@ -435,8 +465,9 @@ def _run_session(
         return "RECONNECT_EXHAUSTED"
 
     if keepalive_warn is not None:
-        # 非致命：keepalive 部分套用失敗仍可運行（紀錄到 connection_errors 不算 fatal）
-        stats.connection_errors.append(f"keepalive_warning: {keepalive_warn}")
+        # 非致命：keepalive 部分套用失敗仍可運行
+        # 寫進獨立 keepalive_warnings 不污染 connection_errors（per E2 HIGH-1 fix）
+        stats.keepalive_warnings.append(f"initial: {keepalive_warn}")
 
     # Connection-on 時段起點（uptime 累計）
     conn_on_mono = time.monotonic()
@@ -585,7 +616,8 @@ def _try_reconnect(
         stats.reconnect_successes += 1
         stats.last_reconnect_reason = reason
         if keepalive_warn is not None:
-            stats.connection_errors.append(f"keepalive_warning_on_reconnect: {keepalive_warn}")
+            # 非致命；寫獨立 keepalive_warnings 不污染 connection_errors（per E2 HIGH-1 fix）
+            stats.keepalive_warnings.append(f"on_reconnect: {keepalive_warn}")
         now = time.monotonic()
         return new_ws, now, now + args.ping_interval_sec, 0
 
@@ -708,12 +740,21 @@ def run_probe(args: argparse.Namespace) -> ProbeV2Stats:
 
 
 def _wait_until_next_utc_midnight() -> None:
-    """阻塞直到下一個 UTC 00:00:00 + 30s buffer（design §3.6）。"""
+    """阻塞直到下一個 UTC 00:00:00 + 5min buffer（design §3.6 + A3 CRITICAL-1 fix）。
+
+    5min buffer 動機：A3 review 揭露原 30s buffer 對 operator 不友好——
+    若 operator 在 00:00:30 後 paste 啟動 script，原邏輯走進 `next_midnight <= now`
+    分支 → 加 1 天 → 等近 24h script 才開始 → operator 看 progress.json 24h 不更新
+    大概率以為 hang → kill 整套 → 浪費一次重派。
+    改 5min（300s）buffer：00:00:00 ~ 00:05:00 都直接開始；用 wall-clock seconds_since_midnight
+    精準比較不受 hour/minute boundary 影響。
+    """
     while True:
         now = datetime.now(timezone.utc)
-        # 已過午夜且在 30s buffer 內 → 直接開始
-        if now.hour == 0 and now.minute == 0 and now.second <= 30:
-            time.sleep(max(0, 30 - now.second))
+        # 用秒數做 buffer 比較，避免 hour/minute 邊界邏輯歧義
+        seconds_since_midnight = now.hour * 3600 + now.minute * 60 + now.second
+        if seconds_since_midnight < 300:
+            # 已在 00:00:00 ~ 00:05:00 buffer 內 → 直接開始
             return
         # 距下次 midnight 還多久
         next_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -728,12 +769,40 @@ def _wait_until_next_utc_midnight() -> None:
 
 # ── 最終 verdict assessment ──────────────────────────────────────────────
 
+# 致命 connection_errors prefix 白名單（per E2 HIGH-1 fix）
+# 只有以下 prefix 才視為「真致命 connect/recv/subscribe 失敗」可觸 FAIL；
+# 其他 warning 性質的 connection_errors entry 不應影響 assess() verdict。
+# keepalive_warning 已搬到獨立 stats.keepalive_warnings，不再進此白名單範圍。
+_FATAL_CONNECTION_ERROR_PREFIXES = (
+    "initial_connect_failed:",
+    "recv_failed:",
+    "ping_send_failed:",
+    "subscribe_failed:",                 # 預留：未來若 subscribe-level fatal 加進這
+    "websocket-client unavailable:",
+    "restart_budget_exhausted:",
+)
+
+
+def _has_fatal_connection_error(connection_errors: list[str]) -> bool:
+    """白名單匹配：connection_errors 中是否有至少一條 fatal prefix entry。
+
+    動機：原 assess() 把任何非空 connection_errors 當 FAIL 信號，但 list 中
+    可能混入 `non_json_message: ...` 等 data-quality warning（與連線健康無關）。
+    白名單致命 prefix 避免 false-positive FAIL。
+    """
+    return any(
+        any(err.startswith(prefix) for prefix in _FATAL_CONNECTION_ERROR_PREFIXES)
+        for err in connection_errors
+    )
+
+
 def assess(stats: ProbeV2Stats, args: argparse.Namespace) -> None:
     """設置 stats.verdict + c1_proof_eligible + c1_blocker。
 
-    v2 PASS gate（design §3.5）：
+    v2 PASS gate（design §3.5 + §5.3 invariant (c)）：
         - observed_sec ≥ args.proof_min_duration_sec（預設 23h）
         - uptime_ratio ≥ args.proof_min_uptime_ratio（預設 0.95）
+        - reconnect_failures < 3（BB sign-off invariant (c) explicit gate，per E2 MEDIUM-1 fix）
         - 0 poison_events
         - ≥ 3 control topics seen
         - restart_count ≤ args.max_restart
@@ -741,9 +810,10 @@ def assess(stats: ProbeV2Stats, args: argparse.Namespace) -> None:
     stats.c1_proof_eligible = (
         stats.elapsed_sec >= args.proof_min_duration_sec
         and stats.uptime_ratio >= args.proof_min_uptime_ratio
+        and stats.reconnect_failures < 3
     )
 
-    # 優先序：poison > restart budget > reconnect exhausted > canary silent > smoke
+    # 優先序：poison > restart budget > reconnect_instability > reconnect_exhausted > canary silent > smoke
     if stats.poison_events:
         stats.verdict = "FAIL_TOPIC_POISON"
         stats.c1_blocker = "Bybit returned a poison/rejection/rate-limit message."
@@ -756,9 +826,26 @@ def assess(stats: ProbeV2Stats, args: argparse.Namespace) -> None:
         )
         return
 
-    # reconnect exhausted 但未達 restart budget = 中斷 + 未跑滿
+    # 24h+ 跑滿但 reconnect_failures ≥ 3 → 違反 BB invariant (c)（per E2 MEDIUM-1 fix）
+    # 條件先於 PASS gate 因為 c1_proof_eligible 已含 reconnect_failures<3，
+    # 此處顯式 surface 為 distinct verdict 提示 operator 「跑滿但 instability 高」。
     if (
-        stats.connection_errors
+        stats.elapsed_sec >= args.proof_min_duration_sec
+        and stats.uptime_ratio >= args.proof_min_uptime_ratio
+        and stats.reconnect_failures >= 3
+    ):
+        stats.verdict = "FAIL_RECONNECT_INSTABILITY"
+        stats.c1_blocker = (
+            f"Reconnect failures ({stats.reconnect_failures}) reach threshold; "
+            f"instability undermines BB sign-off invariant (c) reconnect_failures<3."
+        )
+        return
+
+    # reconnect exhausted 但未達 proof window = 真致命 connect/recv 錯誤 + 短跑
+    # 用白名單 fatal prefix（per E2 HIGH-1 fix），不再用「非空 connection_errors」
+    # 當 FAIL 信號；keepalive_warnings 已拆獨立 field 不在此處比較。
+    if (
+        _has_fatal_connection_error(stats.connection_errors)
         and stats.elapsed_sec < args.proof_min_duration_sec
         and not stats.c1_proof_eligible
     ):
@@ -865,6 +952,13 @@ def render_markdown(stats: ProbeV2Stats) -> str:
         for err in stats.connection_errors[-20:]:
             lines.append(f"- `{err}`")
 
+    # 非致命 TCP keepalive warning 獨立 section（per E2 HIGH-1 + A3 ADV-4 fix）
+    # operator 看到此 section 不需誤判 FAIL；只是 sockopt 跨平台兼容透明度資訊。
+    if stats.keepalive_warnings:
+        lines.extend(["", "## Keepalive Warnings (non-fatal, last 20)", ""])
+        for warn in stats.keepalive_warnings[-20:]:
+            lines.append(f"- `{warn}`")
+
     if stats.candidate_samples:
         lines.extend(["", f"## Candidate Samples (count={len(stats.candidate_samples)})", "", "```json"])
         lines.append(json.dumps(stats.candidate_samples, ensure_ascii=False, indent=2, sort_keys=True))
@@ -877,7 +971,14 @@ def render_markdown(stats: ProbeV2Stats) -> str:
 
 
 def write_reports(stats: ProbeV2Stats, output_dir: Path) -> tuple[Path, Path]:
-    """寫入 latest + dated JSON + MD 報告；回傳 (latest_md_path, dated_md_path)。"""
+    """寫入 latest + dated JSON + MD 報告；回傳 (latest_md_path, dated_md_path)。
+
+    Atomic rename 策略（per A3 CRITICAL-2 fix scope）：
+      - latest_*.json / latest_*.md：concurrent reader 可能在跑中 `jq` / `cat` 監控
+        → 用 atomic rename pattern
+      - dated_*.json / dated_*.md：每次 dated stamp 唯一，僅 final-write-once，
+        無 concurrent overwrite → 直接 write_text 即可
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     latest_json = output_dir / "liquidation_topic_probe_v2_latest.json"
@@ -887,10 +988,12 @@ def write_reports(stats: ProbeV2Stats, output_dir: Path) -> tuple[Path, Path]:
 
     payload = json.dumps(asdict(stats), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     markdown = render_markdown(stats)
-    for path in (latest_json, dated_json):
-        path.write_text(payload, encoding="utf-8")
-    for path in (latest_md, dated_md):
-        path.write_text(markdown, encoding="utf-8")
+    # latest 用 atomic rename（reader 可能 concurrent 監控）
+    _atomic_write_text(latest_json, payload)
+    _atomic_write_text(latest_md, markdown)
+    # dated 一次性 final 寫，路徑唯一不會 race，直接寫即可
+    dated_json.write_text(payload, encoding="utf-8")
+    dated_md.write_text(markdown, encoding="utf-8")
     return latest_md, dated_md
 
 
