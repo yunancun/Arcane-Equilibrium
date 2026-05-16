@@ -214,6 +214,23 @@ class EdgeStats:
 # Core query: fetch fills and reconstruct round-trips
 # ---------------------------------------------------------------------------
 
+# MIT-DB-6：engine_mode 有效值 + scope 映射。
+# LiveDemo 寫入 engine_mode='live_demo'，查 'live' 時需同時包含兩者。
+_VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
+
+
+def _engine_mode_scope(engine_mode: str) -> list[str]:
+    """將單一 engine_mode 參數展開為 SQL ANY(...) 所需的值列表。
+    'live' 展開為 ['live', 'live_demo']（歷史 43k 條 'live' 實為 LiveDemo）。
+    其餘模式保持精確匹配。
+    """
+    if engine_mode not in _VALID_ENGINE_MODES:
+        raise ValueError(f"Invalid engine_mode: {engine_mode!r} (must be {'/'.join(_VALID_ENGINE_MODES)})")
+    if engine_mode == "live":
+        return ["live", "live_demo"]
+    return [engine_mode]
+
+
 _FILLS_QUERY = """
 SELECT
     f.ts,
@@ -230,11 +247,7 @@ SELECT
     f.engine_mode
 FROM trading.fills f
 WHERE f.ts >= %(since)s
-  AND f.engine_mode = %(engine_mode)s
-  -- F4-2 (2026-04-26): exclude `unattributed:bybit_auto` audit rows so
-  -- Bybit auto-action fills (funding payment / dust scrub / auto-补单)
-  -- do not pollute realized-edge stats. Audit rows have realized_pnl=0
-  -- and unknown TIF → fee_rate=0 which would skew bps aggregates.
+  AND f.engine_mode = ANY(%(engine_modes)s)
   -- F4-2（2026-04-26）：排除 `unattributed:bybit_auto` audit row，避免
   -- Bybit 自主動作（funding / dust scrub / auto-補單）污染已實現邊際統計。
   -- Audit row realized_pnl=0、TIF 未知 fee_rate=0 會扭曲 bps 聚合。
@@ -251,7 +264,7 @@ SELECT
     fs.engine_mode
 FROM trading.funding_settlements fs
 WHERE fs.ts >= %(since)s
-  AND fs.engine_mode = %(engine_mode)s
+  AND fs.engine_mode = ANY(%(engine_modes)s)
   AND fs.strategy_name IS NOT NULL
   AND fs.strategy_name NOT LIKE 'unattributed:%%'
 ORDER BY fs.symbol, fs.strategy_name, fs.ts ASC
@@ -529,13 +542,12 @@ def compute_edge_stats(
     Returns:
         Dict mapping (strategy_name, symbol) → EdgeStats.
     """
-    if engine_mode not in ("paper", "demo", "live", "live_demo"):
-        raise ValueError(f"Invalid engine_mode: {engine_mode!r} (must be paper/demo/live/live_demo)")
+    # MIT-DB-6：透過 _engine_mode_scope 展開，讓 'live' 同時查 'live_demo'。
+    engine_modes = _engine_mode_scope(engine_mode)
 
     conn = _get_db_conn()
     try:
         rolling_since = datetime.now(tz=timezone.utc) - timedelta(days=days_back)
-        # EDGE-DIAG-2: apply hard cutoff if supplied; effective since = max(rolling, hard).
         # EDGE-DIAG-2：若提供硬下限則取兩者較晚者為實際 since。
         if min_observation_ts is not None:
             if min_observation_ts.tzinfo is None:
@@ -544,10 +556,10 @@ def compute_edge_stats(
         else:
             since = rolling_since
         with conn.cursor() as cur:
-            cur.execute(_FILLS_QUERY, {"since": since, "engine_mode": engine_mode})
+            cur.execute(_FILLS_QUERY, {"since": since, "engine_modes": engine_modes})
             cols = [d[0] for d in cur.description]
             fills = [dict(zip(cols, row)) for row in cur.fetchall()]
-            cur.execute(_FUNDING_QUERY, {"since": since, "engine_mode": engine_mode})
+            cur.execute(_FUNDING_QUERY, {"since": since, "engine_modes": engine_modes})
             funding_cols = [d[0] for d in cur.description]
             funding_rows = [dict(zip(funding_cols, row)) for row in cur.fetchall()]
     finally:

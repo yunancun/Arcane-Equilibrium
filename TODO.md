@@ -390,12 +390,14 @@ active work starts at §10 / §11.2 / §11.3.
 
 **Wave 2 Status (2026-05-15)**：
 - ✅ Track A2 (PA V094 hybrid schema migration spec finalize) — spec `9b1117a0` + PA verdict `14a561ec` + AMD v0.3 → v0.3.1 patch `c9234ecf`
-- 🔄 Track E1 (E1 P0 reject_cooldown entry/close 拆分) — pending dispatch
+- ✅ Wave 2b (E1 P0 reject_cooldown entry/close 拆分；BB-MF-3) — `27f02a07`（sibling session land）
+- ✅ Wave 2c-2 (E4 reject_cooldown split regression PASS) — `8321b4b7`（sibling session land）
+- 🔄 Wave 2c-1 (E2 reject_cooldown review) — pending verify
 
 **Wave 3 Status (2026-05-15)**：
-- ✅ Wave 3a: BB short re-review on AMD v0.3 + spec v1.2 — `7b0a8e8c`
-- 🔄 Track 3b (4-agent short re-review on AMD v0.3.1 + spec v1.2 + V094 spec) — pending PM dispatch
-- 🔄 Track BB1 (字典手冊 6 處更新) — pending dispatch
+- ✅ Wave 3a: 4-agent short re-review on AMD v0.3 + spec v1.2 — **4/4 verdict APPROVED**（QC APPROVED-CONDITIONAL 1 NEW MUST QC-MF-3 + 1 NEW SHOULD QC-SF-6 / FA APPROVED 4 cosmetic / BB APPROVED `7b0a8e8c` 5 must + 3 should 全 land + v1.2/v0.3 增量無新 Bybit-side risk / MIT APPROVED 2 P3 advisory）
+- ✅ Wave 1.5b: spec v1.2 → v1.3 + AMD v0.3.1 → v0.4 consolidated patch（QC-MF-3 AC-5/AC-11 數學矛盾修 + QC-SF-6 AC-18 Wilson-CI sub-clause + §12.2 line 758 framing 對齊 + §3 AC-1..AC-19 + §10.1 trading_writer.rs:430 details writer 升級 IMPL kickoff 必含 + §2.3 negative whitelist 補變體 + §7 16 原則表補 #3/#11/#13/#15）— **本次 Wave 1.5b** spec `c0d34fcb` + AMD `2f55d053`；純 numerical / cosmetic 增量無新風險 → **IMPL Prereq 條件 2 SATISFIED**
+- ✅ Wave 3b BB1 (字典手冊 6 處更新) — `28c571c7`（sibling BB session land）
 
 **Pre-IMPL prep — 7 個工作組可並行派**（Wave 1 done 後更新）：
 
@@ -405,10 +407,10 @@ active work starts at §10 / §11.2 / §11.3.
 | **Track A2** | PA | **V094 hybrid schema migration spec** — `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 為 new column + 兩 price 走 JSONB；Guard A/B/C；NOT VALID enum CHECK；Linux PG dry-run × 2 round | 等 A1 schema 段落落定 | 半天 | ✅ DONE Wave 2a `9b1117a0` + PA verdict `14a561ec` + AMD v0.3.1 `c9234ecf` |
 | **Track A3** | PA | **F-FA-2 portfolio_var exposure SoT verify** — §二 #16 CONDITIONAL 解除 | None；獨立 worktree | 1-2 hour | ✅ DONE `96995b61` MAINTAIN + P1 ticket |
 | **Track A4** | PA | **F-FA-3 audit 欄位不走 spine lineage guard tests 設計** — W-C Caveat 2 invariant 保護 | None；獨立 worktree | 1-2 hour | ✅ DONE `a5a7107c` + V094 兩段式 + writer gap |
-| **Track E1** (engine) | E1 | **P0 reject_cooldown entry/close 拆分** | None；獨立修現存 bug | 1d（含 E2 + E4）| 🔄 Wave 2 |
+| **Track E1** (engine) | E1 | **P0 reject_cooldown entry/close 拆分** | None；獨立修現存 bug | 1d（含 E2 + E4）| ✅ DONE Wave 2b `27f02a07` + Wave 2c-2 E4 regression `8321b4b7` |
 | **Track E2** | E1 | **MA KAMA fallback gate** | None；30 min 獨立修復 | 30 min | ✅ DONE `9df44183` + E4 regression `34aa7086` |
 | **Track E3** | PA / E1 | **Maker fill rate empirical baseline 查** | None；read-only 查詢 | 1 hour | ✅ DONE `b98706d5` |
-| **Track BB1** | BB | **字典手冊 6 處更新** | None；BB 工作 | 1-2 hour | 🔄 Wave 3 |
+| **Track BB1** | BB | **字典手冊 6 處更新** | None；BB 工作 | 1-2 hour | ✅ DONE Wave 3b `28c571c7` |
 
 **Dispatch order recommendation**（Wave 2a patch 後更新）：
 1. ✅ **Wave 1（並行 5 worktree）**：A1（PA） + A3（PA） + A4（PA） + E2（E1, 30min） + E3（PA/E1, 1h） — DONE

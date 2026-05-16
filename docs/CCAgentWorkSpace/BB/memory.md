@@ -505,3 +505,73 @@ Confidence HIGH (cross-check spec/AMD 22 處 BB-MF/BB-SF 引用 + Bybit V5 fee/r
 4. AMD prereq 條件 6 (reject_cooldown split) Wave 2 IMPL 是否 land
 5. 3-gate (P0-EDGE-1 / W-AUDIT-8b Stage 0R / W-AUDIT-8a C1) 是否 closed
 6. close-maker-first IMPL kickoff 期 BB 必跟蹤 close-maker fallback path 對 Order group rate limit 30d trend
+
+---
+
+## 2026-05-16 Round 3 — Wave 2 WP-10 + BB-MF-3 push 後核驗 (HEAD `c0d34fcb`)
+
+### Verdict: **APPROVE-CONDITIONAL Round 3** (1 P2 dict + 1 P1 wiring + 2 P2 follow-up)
+
+### Round 2 → Round 3 closure (2/3)
+
+✅ **closed**：
+- WP-10 BybitRetCode::ReduceOnlyReject=110017 enum + from_code + 5 classifier false × 7 assertion (`bybit_rest_client.rs:339+394` + `bybit_rest_client_tests.rs:362-377`)
+- BB-MF-3 grid_trading entry/close cooldown split 8/8 unit test (`tests.rs:1392-1686` 完整覆蓋 entry-freeze-close / close-freeze-entry / TooManyPending-5min / PostOnlyCross-no-cooldown / 1min-default × 3-category / both-active short-circuit / multi-symbol isolation / i64-saturating-add)
+- backtest_routes.py:110 `_BYBIT_BASE_URL = os.getenv("OPENCLAW_BYBIT_BACKTEST_URL", "https://api-demo.bybit.com")` 確認 demo default
+
+⚠️ **Round 2 conditional 仍 open**：
+- **字典 §4.2 110017 row ABSENT**（Wave 3b BB1 從 6 升 7；`P2-BB-DICT-110017` ticket est 15 min）
+- 3 檔殘餘 mainnet hardcode reframe：1 已 fix (backtest_routes) / 1 acceptable env-fallback (`bybit_public_microstructure_builder.py`，line 396 `os.getenv` pattern) / 2 STUB 模組 (`market_scanner.py` + `kline_manager.py`，file header `STUB:` 全 `return None`/`return {}` 0 hot path) → 真實 risk 0；`P2-MAINNET-HARDCODE-CLEANUP` cleanup-only ticket
+- `on_post_only_rejected` Strategy trait + `arm_close_cooldown` 公共 API → 仍 0 production caller (grep `bybit_private_ws_status_writer.rs / order_manager.rs / strategy_runner.rs / dispatch.rs / commands.rs` 0 hit)；Wave 2b 自承「不接線 production dispatcher」屬實；**P1-BBMF-WIRING-1** ticket 強烈推薦（est 4-6h，Phase 1b 主軸 IMPL 範圍）
+
+### 關鍵 Round 3 發現
+
+1. ★ **`is_exchange_backoff` comment CLEAN**：`bybit_rest_client.rs:427-435` 完整 EDGE-P2-3 Phase 1B-1 reference + 中英對照 + matches enum，0 BB-MF-3 cooldown / arm_close 字串侵入；`ef6ea79f` 自承 revert 邏輯成立。Race incident root cause：Wave 2 並行兩分支共享 strategy crate diff context，BB-MF-3 doc 跨檔誤滲到 retCode classifier doc。
+2. ★ **maker_rejection.rs sibling revert 完整**：216 行 source 0 出現 `BB-MF-3 / reject_cooldown_entry / arm_close_cooldown / split`；Wave 2b E1 sign-off 描述「+7 LOC doc reference 指向 close_reject_cooldown_ms_for_category()」**未 land**。建議 `P2-BBMF3-DOC-XREF` follow-up（est 10 min，補 7 LOC pointer），non-blocking。
+3. ★ **110017 五 classifier 全 false 正確**：Bybit V5 `ReduceOnly Order Failed` = 終態錯誤（倉位不存在/方向不匹配，重試無意義） + non-noop（caller 邏輯錯誤非 lifecycle race） + non-balance / non-exchange-backoff / non-instrument-filter；VIP/tier 對 110017 行為 0 差異（pos-state-driven）。
+4. ★ **BB-MF-3 8 test 質量 EXCEPTIONAL**：cross-symbol regression + i64-overflow safety + double-active short-circuit + cross-category default cover 全 land；`signal.rs:294-297` 從 entry map 讀 cooldown gate；`constructors.rs:60+119+192` 3 構造路徑全初始化。
+
+### EDGE-P2-3 Phase 1b prereq 解除進度
+
+✅ Prereq 6 BB-MF-3 reject_cooldown split = ASSESSED-DONE (helper + 8 test land；production wiring 屬主軸 IMPL 範圍非 prereq)
+✅ Prereq 5 第 3 子條件 F-FA-1 V094 spec = DONE (commit a9b3a792)
+⏳ Prereq 1-4 + 5(第 1/2 子條件) 仍 open
+⏳ 3-gate (P0-EDGE-1 / W-AUDIT-8b Stage 0R / W-AUDIT-8a C1) RED × 3
+
+Phase 1b 主軸 IMPL kickoff 仍 BLOCKED（4 prereq + 3-gate）但 BB-side 不阻。
+
+### PostOnly close → market + TooManyPending 5min 固定 Bybit 視角
+
+- PostOnlyCross close fallback to taker：spec §5.3 Race C 容忍率 5-15% → +0.275~+0.825 bps cost shift，遠 << +5bps maker rebate saving，APPROVE
+- TooManyPending close 5min 固定：Order group 利用率 0.083 r/s = 0.4% cap (25 sym × 0.0033 r/s/sym)，絕對保守；dynamic backoff (§5.4 1s→60s exp + 10-sym cascade) 留 P1-BBMF-2-DYNAMIC-BACKOFF-1
+
+### Wave 3b BB1 字典手冊更新清單（從 6 升 7）
+
+1. §1.2 PostOnly + reduceOnly 並用合法 (HIGH)
+2. §4.1 Order group 20 r/s shared quota (MEDIUM)
+3. §4.2 110017 ReduceOnlyReject row 補 (MEDIUM)  ← 本輪新增
+4. §4.3 demo PostOnly silent degradation 警告 (HIGH)
+5. §1.9 per-symbol PostOnly minimum effective offset (MEDIUM)
+6. §4.2.1 close side 與 entry side 同 classifier (MEDIUM)
+7. §1.10 NEW close maker dispatch 小節 (LOW，IMPL DONE 後)
+
+估算工作量 ~2.5-3h docs update + commit + push。
+
+### Bybit-side overall
+
+- 技術合規度：97% (110017 + BB-MF-3 split + dual-map cooldown gate + signal.rs read path land)
+- 政策合規度：70% (M5-1 / M5-2 12+ day 0 進展)
+- 0 ship-stop blocker；剩 ALL non-blocking docs / follow-up wiring
+
+### 下次啟動需查驗項
+
+1. `P2-BB-DICT-110017` 字典 §4.2 row 補 (Wave 3b BB1 啟動)
+2. `P1-BBMF-WIRING-1` production dispatcher → strategy callback wiring (Phase 1b 主軸)
+3. `P2-BBMF3-DOC-XREF` maker_rejection.rs 7 LOC pointer (non-blocking)
+4. `P2-MAINNET-HARDCODE-CLEANUP` 2 stub URL default (non-blocking)
+5. P1-BBMF-2-DYNAMIC-BACKOFF-1 (spec §5.4，acceptable defer)
+6. close-maker fallback path Order group 30d trend (baseline 0.7 → 部署後預估 ≤ 1.5 req/s sustained)
+
+### Report path
+
+`srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-16--wave2_wp10_bbmf3_round3_bb_review.md`
