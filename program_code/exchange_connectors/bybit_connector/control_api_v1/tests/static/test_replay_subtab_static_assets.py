@@ -481,7 +481,8 @@ def test_demo_and_live_refresh_preserve_existing_dom_on_transient_loading(
     assert "_demoFillsLoadedOnce" in tab_demo_html
     assert "_liveMetricsLoadedOnce" in tab_live_html
     assert "_liveFillsLoadedOnce" in tab_live_html
-    assert "if (metricsData) _applyLiveTodayPnl(metricsData)" in tab_live_html
+    # 重構後 metricsData 改由 d.data 傳入，呼叫方式為 _applyLiveTodayPnl(m)
+    assert "_applyLiveTodayPnl(m)" in tab_live_html
 
 
 def test_soft_rename_removes_claw_logo_from_entry_surfaces(

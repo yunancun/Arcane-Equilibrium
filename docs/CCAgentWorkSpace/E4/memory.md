@@ -2,6 +2,18 @@
 
 ## 工作記憶
 
+### 2026-05-16 test_track_a_spawn_argv.py 10 test fix — PASS
+
+**對象**：`replay/tests/test_track_a_spawn_argv.py` 21 tests 中 10 個因 Round 6 HMAC sign 整合而失敗。
+
+**三個 root causes + bonus**：
+1. Envelope key rejection（5 tests）：`write_manifest_fixture()` defense-in-depth 拒 envelope keys。修法：剝除。
+2. Signing key unavailable：Round 6 真 HMAC sign 需 key。修法：`_signing_key_env` fixture + `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env。
+3. Field count（1 test）：`build_default_manifest_payload(cur=None)` 回 3 body keys，非 6。修法：assertion 改 3。
+4. Mac artifact allowlist guard（3 spawn tests）：output_dir 必落 `/tmp/replay_artifacts_test_only` 下。
+
+**結果**：21/21 passed x2（non-flaky）。
+
 ### 2026-05-16 Full Program-Scope Testing Audit — AUDIT COMPLETE (not a regression gate)
 
 **對象**：Cold adversarial testing coverage audit across entire codebase. Not a commit-gating E4 regression; this is a P2 gap inventory.
@@ -3461,3 +3473,25 @@ stress_integration: `stress_bb_breakout_valid_squeeze_with_volume` + `stress_bb_
 **Report**: `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--reject_cooldown_split_e4_regression.md`
 
 E4 verdict: REGRESSION-PASS, 0 push-back to E1.
+
+---
+
+### 2026-05-16 WP-05 assertion drift fix (5 tests, 4 files)
+
+**Context**: WP-05 Real Fix 將 IPC error response 從 plain string detail 改為 structured dict `{"reason_codes": [...], "detail": "..."}` (via `sanitize_exc_for_detail`)。5 個測試的 assertion 還在比對舊 string format，導致 AttributeError/AssertionError。
+
+**Fixes applied (test-only, 0 production code changes)**:
+1. `test_ai_budget_routes.py:241` — `resp.json()["detail"].lower()` → `detail["reason_codes"]` 含 `"ipc_error"`（通用 RuntimeError 走 ipc_error_handler fallback path）
+2. `test_executor_shadow_toggle_api.py:621` — `assertIn("rust_engine_unavailable", detail)` → `assertIn("rust_engine_unavailable", detail["reason_codes"])`
+3. `test_strategist_promote_api.py:622` — 同上 pattern
+4. `test_batch_d_risk_fail_closed.py:126` — `test_close_attempt_timeout_constant_is_500ms` 從 `dispatch.rs` 移至 `dispatch_tests.rs`，assert 改讀後者
+5. `test_replay_subtab_static_assets.py:484` — `if (metricsData) _applyLiveTodayPnl(metricsData)` 重構為 `_applyLiveTodayPnl(m)` (m=d.data)，assert 更新
+
+**Regression**: 108 tests across all 4+1 affected files = 108 passed / 0 failed (2x run)
+
+**Lesson — WP-05 sanitize_exc_for_detail reason_code mapping**:
+- `_get_ipc_client()` 失敗 → ai_budget_routes 用 `"ipc_unreachable"`
+- IPC call 失敗（generic exception）→ ipc_error_handler 用 `"ipc_error"`
+- IPC call 失敗（EngineDisconnectedError）→ `"ipc_unreachable"`
+- IPC call 失敗（EngineTimeoutError）→ `"ipc_timeout"`
+- executor/strategist promote routes RuntimeError → `"rust_engine_unavailable"`

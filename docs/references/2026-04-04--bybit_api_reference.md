@@ -1278,6 +1278,7 @@ pub struct ShadowOrderRequest {
 | 110009 | PositionNotFound | 持倉不存在 | No | No | - |
 | 110010 | OrderAlreadyCancelled | 訂單已取消 | No | **Yes** | - |
 | 110012 | InsufficientBalance | 餘額不足 | No | No | balance_block |
+| 110017 | ReduceOnlyReject | Reduce-only 訂單被拒（倉位不存在或方向不匹配） | No | No | - |
 | 110043 | LeverageNotModified | 槓桿已是目標值 | No | **Yes** | - |
 | 110049 | PriceTickInvalid | 價格刻度非法（透過 InstrumentInfoCache 四捨五入後重試一次） | No | No | instrument_filter |
 | 110074 | ContractNotLive | 合約未上線（下架/暫停）→ 從掃描器宇宙移除 | No | No | - |
@@ -1288,6 +1289,8 @@ pub struct ShadowOrderRequest {
 使用：`BybitRetCode::from_code(ret_code)` → `is_retryable()` / `is_noop()` / `is_exchange_backoff()` / `is_instrument_filter()` / `is_balance_block()`
 
 **⚠️ PostOnly 越過 book 不是 REST retCode**：PostOnly 限價單觸及 book 時 Bybit 仍回傳 `retCode=0`（訂單建立成功），拒絕訊息透過 Private WS `order` 事件的 `rejectReason=EC_PostOnlyWillTakeLiquidity` 傳遞。**切勿**將 `110003`（PriceOutOfRange）誤認為 PostOnly-cross — 前者屬於合約過濾器（`is_instrument_filter`，需重算 tick_size/price_limit），後者屬於 book 狀態（`is_exchange_backoff`，策略 cooldown）。詳見 `docs/audits/2026-04-20--edge_p2_3_phase1b_bybit_postonly_audit.md`。
+
+**⚠️ 110017 ReduceOnlyReject 非 idempotent silent success**：reduce-only 訂單失敗常見 trigger：(a) 無倉位 / (b) 方向反 / (c) qty > position size。終態（不可重試）、非 noop、非餘額不足、非 exchange backoff、非 instrument filter。client 必先檢查 position state 再下，重試前 state 沒變的話必再撞 — **切勿視為 idempotent silent success**。源自 Bybit V5 官方錯誤代碼表；Rust 端對應 `BybitRetCode::ReduceOnlyReject = 110017`（commit `ef6ea79f`，2026-05-16 WP-10 Wave 2-3 BB-A-1 IMPL）。實證背景：funding_arb BUSDT 110017 reject loop RCA — 見 memory `project_funding_arb_v2_deprecation_path`（2026-05-02 / 2026-05-08）。
 
 ### 4.2.1 WS `order` 事件 `rejectReason` 正式字串
 

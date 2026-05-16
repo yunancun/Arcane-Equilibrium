@@ -619,7 +619,10 @@ class TestIpcFailure(unittest.TestCase):
                 },
             )
         self.assertEqual(resp.status_code, 500)
-        self.assertIn("rust_engine_unavailable", resp.json()["detail"])
+        # WP-05 Real Fix 後 detail 為 dict: {"reason_codes": [...], "detail": "..."}
+        detail = resp.json()["detail"]
+        self.assertIsInstance(detail, dict)
+        self.assertIn("rust_engine_unavailable", detail["reason_codes"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

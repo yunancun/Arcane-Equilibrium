@@ -58,21 +58,45 @@ from replay import route_helpers as _rh  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 共用 fixture：測試用 HMAC 簽名 key（write_manifest_fixture 需要真實簽名）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture()
+def _signing_key_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """建立臨時 signing key 檔並設 env，供 write_manifest_fixture 使用。
+
+    key 檔為 64 hex 字元（32 bytes）+ trailing newline，對齊
+    generate_replay_signing_key.sh 與 Rust 端 compute_key_fingerprint。
+    """
+    key_hex = "ab" * 32  # 64 hex chars = 32 bytes
+    key_file = tmp_path / "_test_signing_key" / "replay_signing_key"
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text(key_hex + "\n", encoding="utf-8")
+    monkeypatch.setenv("OPENCLAW_REPLAY_SIGNING_KEY_FILE", str(key_file))
+    # 確保非 live profile（測試 env 預設即非 live，此處顯式清除防萬一）。
+    monkeypatch.delenv("OPENCLAW_RELEASE_PROFILE", raising=False)
+    return key_file
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # write_manifest_fixture — embedded run_id + JSON serialisation
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def test_write_manifest_fixture_embeds_run_id(tmp_path: Path) -> None:
+def test_write_manifest_fixture_embeds_run_id(
+    tmp_path: Path, _signing_key_env,
+) -> None:
     """``write_manifest_fixture`` writes JSON with ``run_id`` field embedded.
     ``write_manifest_fixture`` 寫 JSON 含 embedded ``run_id`` 欄位。
+
+    Round 6 後 manifest_data 不可含 envelope keys（signature / manifest_hash /
+    signature_key_ref），由 write_manifest_fixture 內部簽名產生。
     """
     payload = {
         "experiment_id": "exp_track_a_001",
         "data_tier": "S3",
         "fixture_uri": "/tmp/fixture.json",
-        "signature": "ph_sig",
-        "manifest_hash": "ph_hash",
-        "signature_key_ref": "ph_ref",
     }
     out_path = _rh.write_manifest_fixture(
         run_id="run_track_a_42",
@@ -86,10 +110,15 @@ def test_write_manifest_fixture_embeds_run_id(tmp_path: Path) -> None:
     assert written["run_id"] == "run_track_a_42"
     assert written["experiment_id"] == "exp_track_a_001"
     assert written["data_tier"] == "S3"
-    assert written["signature"] == "ph_sig"
+    # envelope keys 由 write_manifest_fixture 內部簽名產生，驗證存在即可。
+    assert "signature" in written
+    assert "manifest_hash" in written
+    assert "signature_key_ref" in written
 
 
-def test_write_manifest_fixture_does_not_mutate_caller_dict(tmp_path: Path) -> None:
+def test_write_manifest_fixture_does_not_mutate_caller_dict(
+    tmp_path: Path, _signing_key_env,
+) -> None:
     """Caller's dict must not be mutated (Python deep-copy invariant).
     Caller 的 dict 不可被改（Python deep-copy 不變量）。
     """
@@ -99,7 +128,7 @@ def test_write_manifest_fixture_does_not_mutate_caller_dict(tmp_path: Path) -> N
         manifest_data=payload,
         output_dir=tmp_path,
     )
-    assert "run_id" not in payload  # caller's dict untouched
+    assert "run_id" not in payload  # caller 的 dict 不受影響
     assert list(payload.keys()) == ["experiment_id", "data_tier"]
 
 
@@ -127,7 +156,9 @@ def test_write_manifest_fixture_rejects_non_dict(tmp_path: Path) -> None:
         )
 
 
-def test_write_manifest_fixture_creates_output_dir(tmp_path: Path) -> None:
+def test_write_manifest_fixture_creates_output_dir(
+    tmp_path: Path, _signing_key_env,
+) -> None:
     """output_dir is mkdir-ed if missing (parents=True).
     output_dir 不存在時 mkdir（parents=True）。
     """
@@ -191,7 +222,7 @@ def _python_canonical_body_for_signing(disk_bytes: bytes) -> bytes:
 
 
 def test_write_manifest_fixture_byte_equal_canonical_with_non_ascii(
-    tmp_path: Path,
+    tmp_path: Path, _signing_key_env,
 ) -> None:
     """Disk-fixture parse + envelope strip + Python canonical re-serialise
     yields byte-identical output to the canonical-form expected bytes for
@@ -200,28 +231,20 @@ def test_write_manifest_fixture_byte_equal_canonical_with_non_ascii(
     含 non-ASCII 字串的 manifest，磁碟 bytes 經 envelope strip + Python
     canonical 重序列化結果與「直接 canonical 化 stripped dict」byte-equal。
 
-    This is the E2 finding F1 invariant: ``ensure_ascii=False`` is the
-    critical kwarg — Python default ``ensure_ascii=True`` would emit
-    ``\\u6d4b\\u8bd5`` (escaped) on disk while a future Python sign
-    helper computing canonical bytes from the in-memory dict (using
-    ``ensure_ascii=False``) would produce raw UTF-8 — byte mismatch =
-    HMAC verify永遠 fail。
-
-    本測試是 E2 finding F1 不變量：``ensure_ascii=False`` 為關鍵 kwarg。
-    Python 預設 True 會把 测试 escape 成 ``\\u6d4b\\u8bd5``，但未來
+    E2 finding F1 不變量：``ensure_ascii=False`` 為關鍵 kwarg。
+    Python 預設 True 會把 测试 escape 成 ``\\u6d4b\\u8bd5``，但
     Python sign helper 從 in-memory dict 計算 canonical bytes（用
     ensure_ascii=False）會產出 raw UTF-8 — byte 不等 = HMAC verify 永遠 fail。
+
+    Round 6 後 manifest_data 不可含 envelope keys，由 write_manifest_fixture
+    內部簽名產生。
     """
     # 含 U+6D4B U+8BD5 (测试) 的 strategy_name；分號全形 (U+FF1B) 提高難度。
-    # Manifest with non-ASCII strategy_name (測試 + fullwidth semicolon).
     payload = {
         "experiment_id": "exp_byte_equal_001",
         "data_tier": "S3",
         "fixture_uri": str(tmp_path / "fixture.json"),
         "strategy_name": "测试_grid；非ASCII",
-        "signature": "ph_sig_to_strip",
-        "manifest_hash": "ph_hash_to_strip",
-        "signature_key_ref": "ph_ref_to_strip",
     }
     out_path = _rh.write_manifest_fixture(
         run_id="run_byte_equal_001",
@@ -275,38 +298,25 @@ def test_write_manifest_fixture_byte_equal_canonical_with_non_ascii(
 
 
 def test_write_manifest_fixture_sort_keys_independent_of_input_order(
-    tmp_path: Path,
+    tmp_path: Path, _signing_key_env,
 ) -> None:
-    """Two callers passing the SAME logical manifest in DIFFERENT key
-    insertion orders produce byte-equal disk bytes (sort_keys=True
-    invariant — locks alphabetical canonical form).
-
-    兩個 caller 傳遞「邏輯相同但 key 順序不同」的 manifest，磁碟 bytes
+    """兩個 caller 傳遞「邏輯相同但 key 順序不同」的 manifest，磁碟 bytes
     必 byte-equal（sort_keys=True 不變量 — 鎖定 alphabetical canonical form）。
-
-    Without sort_keys=True, Python 3.7+ preserves dict insertion order —
-    different caller order = different disk bytes = different canonical
-    form = HMAC verify drift.
 
     無 sort_keys=True 時 Python 3.7+ 保留 dict insertion order — caller 順序
     不同 = 磁碟 bytes 不同 = canonical form 不同 = HMAC verify 漂移。
+
+    Round 6 後 manifest_data 不可含 envelope keys，由 write_manifest_fixture
+    內部簽名產生。
     """
-    # Caller A: alphabetical insertion order.
     # Caller A：alphabetical insertion order。
     payload_a = {
         "data_tier": "S3",
         "experiment_id": "exp_sort_keys",
         "fixture_uri": "/tmp/fixture.json",
-        "manifest_hash": "ph_hash",
-        "signature": "ph_sig",
-        "signature_key_ref": "ph_ref",
     }
-    # Caller B: deliberate reverse-alphabetical / chaotic order.
     # Caller B：刻意反 alphabetical / 混亂順序。
     payload_b = {
-        "signature_key_ref": "ph_ref",
-        "signature": "ph_sig",
-        "manifest_hash": "ph_hash",
         "fixture_uri": "/tmp/fixture.json",
         "experiment_id": "exp_sort_keys",
         "data_tier": "S3",
@@ -317,7 +327,7 @@ def test_write_manifest_fixture_sort_keys_independent_of_input_order(
         output_dir=tmp_path / "a",
     )
     out_b = _rh.write_manifest_fixture(
-        run_id="run_sort_keys_a",  # SAME run_id so disk bytes should be identical
+        run_id="run_sort_keys_a",  # 同 run_id，disk bytes 應 byte-equal
         manifest_data=payload_b,
         output_dir=tmp_path / "b",
     )
@@ -340,9 +350,9 @@ def test_write_manifest_fixture_sort_keys_independent_of_input_order(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def test_build_default_manifest_payload_has_6_minimum_fields(tmp_path: Path) -> None:
-    """Default payload must have 6 fields the Rust ReplayManifest struct reads.
-    預設 payload 必含 Rust ReplayManifest struct 讀的 6 個欄位。
+def test_build_default_manifest_payload_has_3_body_fields(tmp_path: Path) -> None:
+    """無 cur 時預設 payload 含 3 個 body 欄位（Round 6 後 envelope keys 由
+    write_manifest_fixture 內部簽名產生，不再由 build_default_manifest_payload 注入）。
     """
     payload = _rh.build_default_manifest_payload(
         experiment_id="exp_minimum",
@@ -352,13 +362,12 @@ def test_build_default_manifest_payload_has_6_minimum_fields(tmp_path: Path) -> 
         "experiment_id",
         "data_tier",
         "fixture_uri",
-        "signature",
-        "manifest_hash",
-        "signature_key_ref",
     }
     assert set(payload.keys()) >= expected_keys
-    # NOT yet embed run_id (write_manifest_fixture's job).
-    # 此處尚未 embed run_id（由 write_manifest_fixture 加）。
+    # envelope keys 不應出現（由 write_manifest_fixture 簽名時注入）。
+    for env_key in ("signature", "manifest_hash", "signature_key_ref"):
+        assert env_key not in payload
+    # run_id 尚未 embed（由 write_manifest_fixture 加）。
     assert "run_id" not in payload
 
 
@@ -382,24 +391,21 @@ def test_build_default_manifest_payload_respects_env_override(
 
 
 def test_spawn_replay_runner_argv_uses_manifest_path_not_uuid(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _signing_key_env,
 ) -> None:
-    """argv must contain --manifest <PATH> --output-dir <PATH>, NOT
-    --manifest-id <UUID> --run-id <UUID> (REF-20 Sprint 1 Track A root cause).
-
-    argv 必含 --manifest <PATH> --output-dir <PATH>，**不**得有
+    """argv 必含 --manifest <PATH> --output-dir <PATH>，**不**得有
     --manifest-id <UUID> --run-id <UUID>（REF-20 Sprint 1 Track A 根因）。
     """
-    # Mock binary exists.
-    # mock binary 存在。
     fake_bin = tmp_path / "replay_runner"
     fake_bin.write_text("#!/bin/sh\nexit 0\n")
     fake_bin.chmod(0o755)
     monkeypatch.setenv("OPENCLAW_REPLAY_RUNNER_BIN", str(fake_bin))
 
-    # Pre-write manifest fixture so spawn passes the existence check.
-    # 預寫 manifest fixture 讓 spawn 通過 existence check。
-    output_dir = tmp_path / "out"
+    # 使 output_dir 落在 Mac artifact allowlist root 下，避免
+    # stderr_path_outside_allowlist（Track C P0-5b path-traversal guard）。
+    allowlist_root = _rh.resolve_artifact_allowlist_root()
+    output_dir = allowlist_root / "test_argv"
+    output_dir.mkdir(parents=True, exist_ok=True)
     fixture_path = _rh.write_manifest_fixture(
         run_id="run_argv_test",
         manifest_data={"experiment_id": "exp_argv"},
@@ -445,17 +451,18 @@ def test_spawn_replay_runner_argv_uses_manifest_path_not_uuid(
 
 
 def test_spawn_replay_runner_alive_after_poll_returns_pid(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _signing_key_env,
 ) -> None:
-    """Happy path: spawn → poll alive → return (pid, None).
-    Happy path：spawn → poll alive → 回 (pid, None)。
-    """
+    """Happy path：spawn → poll alive → 回 (pid, None)。"""
     fake_bin = tmp_path / "replay_runner"
     fake_bin.write_text("#!/bin/sh\nsleep 5\n")
     fake_bin.chmod(0o755)
     monkeypatch.setenv("OPENCLAW_REPLAY_RUNNER_BIN", str(fake_bin))
 
-    output_dir = tmp_path / "out"
+    # output_dir 落在 Mac artifact allowlist root 下。
+    allowlist_root = _rh.resolve_artifact_allowlist_root()
+    output_dir = allowlist_root / "test_alive"
+    output_dir.mkdir(parents=True, exist_ok=True)
     fixture_path = _rh.write_manifest_fixture(
         run_id="run_alive",
         manifest_data={"experiment_id": "exp_alive"},
@@ -484,16 +491,11 @@ def test_spawn_replay_runner_alive_after_poll_returns_pid(
 
 
 def test_spawn_replay_runner_dead_after_poll_returns_failed_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _signing_key_env,
 ) -> None:
-    """Dead-runner path: spawn → poll exits non-zero → (None, spawn_died_early:exit=N).
-    Dead-runner 路徑：spawn → poll 非 0 → (None, spawn_died_early:exit=N)。
+    """Dead-runner 路徑：spawn → poll 非 0 → (None, spawn_died_early:exit=N)。
 
-    This is the exact REF-20 Sprint 1 Track A root cause: Rust binary
-    rejected --manifest-id flag as CliError::UnknownArg, exited non-zero,
-    Python never polled and trusted Popen → V045 stuck at 'running'.
-
-    這正是 REF-20 Sprint 1 Track A 根因：Rust binary 拒 --manifest-id flag
+    REF-20 Sprint 1 Track A 根因：Rust binary 拒 --manifest-id flag
     為 CliError::UnknownArg，非 0 結束，Python 不 poll 信任 Popen → V045
     卡 'running'。
     """
@@ -502,7 +504,10 @@ def test_spawn_replay_runner_dead_after_poll_returns_failed_path(
     fake_bin.chmod(0o755)
     monkeypatch.setenv("OPENCLAW_REPLAY_RUNNER_BIN", str(fake_bin))
 
-    output_dir = tmp_path / "out"
+    # output_dir 落在 Mac artifact allowlist root 下。
+    allowlist_root = _rh.resolve_artifact_allowlist_root()
+    output_dir = allowlist_root / "test_dead"
+    output_dir.mkdir(parents=True, exist_ok=True)
     fixture_path = _rh.write_manifest_fixture(
         run_id="run_dead",
         manifest_data={"experiment_id": "exp_dead"},
@@ -555,7 +560,7 @@ def test_spawn_replay_runner_returns_manifest_fixture_not_found_when_missing(
 
 
 def test_spawn_replay_runner_returns_binary_not_found_when_bin_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _signing_key_env,
 ) -> None:
     """Binary missing → fail-closed before any other check.
     Binary 缺 → 其他 check 前 fail-closed。
