@@ -377,12 +377,12 @@ function _renderDemoDustPanel(positions) {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadDemoStatus() {
-  // 並行加速：原本 5 段 serial network round-trip（balance → fills → metrics →
-  // pnl-series → comparison-balance）合計約 700-1500ms；改為先確認 balance 連線後
-  // 把其餘 6 個 endpoint 一口氣並行派發，wall-clock 收斂到 max(...) ≈ 300-400ms。
-  // positions/orders 對 fills-derived strategy map 的依賴是 best-effort fallback
-  // — 後端 owner_strategy 已是權威（Rust paper_state 注入），首幀 fills 未到時
-  // 出現的 '--' 在 15s 次輪 refresh 自然補齊。
+  // 加速策略：原本 5 段 serial network round-trip（balance → fills → metrics →
+  // pnl-series → comparison-balance）合計約 700-1500ms。重排為 balance → fills →
+  // 5-way parallel batch，wall-clock 收斂到 ~250-500ms（fills 50-100ms + max(5) ~200-400ms）。
+  // fills 不放並行：loadDemoOrders 從 _demoFillsCache 建立的 _demoStratMap 取策略名，
+  // 而 /demo/orders 後端沒有 owner_strategy 注入（不像 /demo/positions 走 _attach_owner_strategy），
+  // 全並行會在首幀產生策略欄 `--`。詳見下方 MEDIUM-1 註記。
   const balD = await ocApi('/api/v1/strategy/demo/balance');
   // Accept both Rust-first (source=rust_engine, no retCode) and raw Bybit (retCode=0) responses
   // 同時接受 Rust 優先路徑（無 retCode）和原始 Bybit（retCode=0）的回應格式
@@ -394,9 +394,12 @@ async function loadDemoStatus() {
     $('demo-content').style.display = '';
     $('demo-offline').style.display = 'none';
     renderBalance(balD.data);
-    // 並行：loadComparison 接收已抓的 balance，避免重複打 /demo/balance。
+    // E2 MEDIUM-1 / A3 Q1: fills 必須 serial-first 否則 loadDemoOrders 缺後端
+    // owner_strategy fallback（/demo/orders 不像 /demo/positions 走 _attach_owner_strategy），
+    // 首幀策略欄會顯 `--`。額外 1 round-trip ≈ 50-100ms，仍遠快於原本 5 段 serial。
+    // loadComparison 接收已抓的 balance，避免重複打 /demo/balance。
+    await loadDemoFills();
     await Promise.allSettled([
-      loadDemoFills(),
       loadPositions(),
       loadDemoOrders(),
       loadDemoMetrics(balD.data),
