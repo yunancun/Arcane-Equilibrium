@@ -48,8 +48,10 @@ from liquidation_topic_probe_v2 import (  # noqa: E402
     ProbeV2Stats,
     ReconnectEvent,
     RestartEvent,
+    _atomic_write_text,
     _backoff_for_attempt,
     _interim_verdict,
+    _wait_until_next_utc_midnight,
     _write_checkpoint,
     assess,
     build_topics,
@@ -648,6 +650,261 @@ class TestRestartCap(unittest.TestCase):
         assess(stats, args)
         # restart_count = max_restart = 3 (not >)，且其餘條件滿足
         self.assertEqual(stats.verdict, "PASS_C1_PROOF_CANDIDATE")
+
+
+# ── Consolidated 6-fix 補測（A3 + E2 對抗審）─────────────────────────────
+
+
+class TestUtcMidnightBuffer(unittest.TestCase):
+    """UTC midnight buffer 改 5min（A3 CRITICAL-1 fix）。
+
+    驗 `_wait_until_next_utc_midnight()` 在 00:00:45 之後啟動會立即 return，
+    不會走進「下一個 midnight」分支等近 24h。
+    """
+
+    def test_00_00_45_within_buffer_returns_immediately(self):
+        """now = 2026-05-17T00:00:45Z → 在 5min buffer 內 → 立即 return。"""
+        fake_now = MagicMock()
+        fake_now.hour = 0
+        fake_now.minute = 0
+        fake_now.second = 45
+        with patch(
+            "liquidation_topic_probe_v2.datetime"
+        ) as mock_dt:
+            mock_dt.now.return_value = fake_now
+            start = time.monotonic()
+            _wait_until_next_utc_midnight()
+            elapsed = time.monotonic() - start
+        # 應立即 return；time.sleep 沒被觸（且 datetime.now 在 buffer 內判定 OK）
+        self.assertLess(elapsed, 1.0, "should return immediately within 5min buffer")
+
+    def test_00_04_59_within_buffer_returns_immediately(self):
+        """now = 00:04:59 → 仍在 5min buffer 邊界內 → 立即 return。"""
+        fake_now = MagicMock()
+        fake_now.hour = 0
+        fake_now.minute = 4
+        fake_now.second = 59
+        with patch(
+            "liquidation_topic_probe_v2.datetime"
+        ) as mock_dt:
+            mock_dt.now.return_value = fake_now
+            start = time.monotonic()
+            _wait_until_next_utc_midnight()
+            elapsed = time.monotonic() - start
+        self.assertLess(elapsed, 1.0, "00:04:59 should still be within 5min buffer")
+
+    def test_00_05_00_exact_outside_buffer(self):
+        """now = 00:05:00 整 → seconds_since_midnight=300 不 < 300。
+
+        驗 buffer 邊界 strictly less-than 語意：first call 不應立即 return；
+        透過真實 datetime 第二次切到 00:00:01 後 return — 確認 loop 至少跑 ≥2 次。
+        """
+        from datetime import datetime as real_dt, timezone as real_tz, timedelta as real_td
+        # 構造兩個真實 datetime：first=00:05:00 outside buffer，second=00:00:01 inside buffer
+        first_now = real_dt(2026, 5, 17, 0, 5, 0, tzinfo=real_tz.utc)
+        second_now = real_dt(2026, 5, 18, 0, 0, 1, tzinfo=real_tz.utc)
+        calls = {"n": 0}
+
+        with patch("liquidation_topic_probe_v2.datetime") as mock_dt:
+            def side_effect_now(*args, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return first_now
+                return second_now
+            mock_dt.now.side_effect = side_effect_now
+            # 保留 timedelta 真實實作（source 內部會 import timedelta）
+            mock_dt.side_effect = real_dt
+            with patch("time.sleep", return_value=None):
+                _wait_until_next_utc_midnight()
+
+        # 至少跑了 2 次 datetime.now（first 不 buffer，second buffer 內 return）
+        self.assertGreaterEqual(calls["n"], 2, "should iterate at least twice")
+
+
+class TestAtomicWrite(unittest.TestCase):
+    """`_atomic_write_text()` atomic rename pattern（A3 CRITICAL-2 + E2 MEDIUM-2 fix）。"""
+
+    def test_atomic_write_creates_final_file(self):
+        """tmp 寫完 rename 到 target；最終只看到 target，不留 .tmp。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "out.json"
+            _atomic_write_text(target, '{"k":"v"}\n')
+            self.assertTrue(target.exists())
+            # 應沒有 .tmp residue
+            tmp_residue = list(Path(tmp).glob("*.tmp"))
+            self.assertEqual(tmp_residue, [], "no .tmp residue after atomic rename")
+            self.assertEqual(target.read_text(encoding="utf-8"), '{"k":"v"}\n')
+
+    def test_atomic_write_overwrites_existing(self):
+        """既有 target 被新內容覆寫；atomic rename 完成後 reader 看到新內容。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "out.json"
+            target.write_text("OLD", encoding="utf-8")
+            _atomic_write_text(target, "NEW")
+            self.assertEqual(target.read_text(encoding="utf-8"), "NEW")
+
+    def test_checkpoint_uses_atomic_no_tmp_residue(self):
+        """_write_checkpoint 走 _atomic_write_text → 寫完無 .tmp 殘留。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            stats = ProbeV2Stats(
+                session_id="x",
+                started_at_utc="2026-05-16T00:00:00+00:00",
+            )
+            _write_checkpoint(stats, output_dir)
+            tmp_residue = list(output_dir.glob("*.tmp"))
+            self.assertEqual(tmp_residue, [], "no .tmp residue after checkpoint")
+            # 真正的 progress.json 存在
+            self.assertTrue((output_dir / CHECKPOINT_FILE_NAME).exists())
+
+
+class TestKeepaliveWarningsSeparation(unittest.TestCase):
+    """keepalive_warnings 拆獨立 field（E2 HIGH-1 + A3 ADV-4 fix）。
+
+    非致命 sockopt warning 不污染 assess() FAIL 判定。
+    """
+
+    def _args(self, **overrides):
+        defaults = dict(
+            proof_min_duration_sec=PASS_MIN_OBSERVED_SEC,
+            proof_min_uptime_ratio=PASS_MIN_UPTIME_RATIO,
+            max_restart=3,
+            enable_reconnect=True,
+        )
+        defaults.update(overrides)
+        ns = MagicMock()
+        for k, v in defaults.items():
+            setattr(ns, k, v)
+        return ns
+
+    def test_keepalive_warning_alone_does_not_fail_reconnect(self):
+        """只有 keepalive_warnings 非空、connection_errors 空 → 60s smoke 應 SMOKE_PASS。"""
+        stats = ProbeV2Stats(
+            session_id="x",
+            started_at_utc="2026-05-16T00:00:00+00:00",
+            elapsed_sec=60,
+            uptime_sec=60,
+            uptime_ratio=1.0,
+            keepalive_warnings=["initial: TCP_KEEPCNT_failed: [Errno 22] Invalid argument"],
+            control_topics=["tickers.BTCUSDT"],
+            topic_message_counts={"tickers.BTCUSDT": 50},
+        )
+        assess(stats, self._args())
+        # Fix 前會誤 FAIL_RECONNECT_EXHAUSTED；fix 後應 SMOKE_PASS_NOT_C1_PROOF
+        self.assertEqual(stats.verdict, "SMOKE_PASS_NOT_C1_PROOF")
+
+    def test_non_fatal_connection_error_does_not_trigger_fail(self):
+        """connection_errors 內僅 data-quality warning（non_json_message）→ 不觸 FAIL。"""
+        stats = ProbeV2Stats(
+            session_id="x",
+            started_at_utc="2026-05-16T00:00:00+00:00",
+            elapsed_sec=60,
+            uptime_sec=60,
+            uptime_ratio=1.0,
+            connection_errors=["non_json_message: garbage payload"],
+            control_topics=["tickers.BTCUSDT"],
+            topic_message_counts={"tickers.BTCUSDT": 50},
+        )
+        assess(stats, self._args())
+        # 'non_json_message:' 不在 _FATAL_CONNECTION_ERROR_PREFIXES → 不觸 FAIL
+        self.assertEqual(stats.verdict, "SMOKE_PASS_NOT_C1_PROOF")
+
+    def test_fatal_recv_failed_still_triggers_fail(self):
+        """`recv_failed:` 在 fatal whitelist → 仍會 FAIL_RECONNECT_EXHAUSTED。"""
+        stats = ProbeV2Stats(
+            session_id="x",
+            started_at_utc="2026-05-16T00:00:00+00:00",
+            elapsed_sec=3600,
+            uptime_sec=3000,
+            uptime_ratio=0.83,
+            connection_errors=["recv_failed: ConnectionError"],
+            control_topics=["tickers.BTCUSDT"],
+            topic_message_counts={"tickers.BTCUSDT": 100},
+        )
+        assess(stats, self._args(enable_reconnect=True))
+        # 行為與舊版相容：fatal prefix 仍會 FAIL
+        self.assertEqual(stats.verdict, "FAIL_RECONNECT_EXHAUSTED")
+
+    def test_keepalive_warnings_field_exists_in_dataclass(self):
+        """schema 驗：ProbeV2Stats.keepalive_warnings field 與 connection_errors 平級。"""
+        stats = ProbeV2Stats(
+            session_id="x",
+            started_at_utc="2026-05-16T00:00:00+00:00",
+        )
+        # default empty list；assert 為 list 型別
+        self.assertEqual(stats.keepalive_warnings, [])
+        # append 後不影響 connection_errors
+        stats.keepalive_warnings.append("test_warning")
+        self.assertEqual(stats.connection_errors, [])
+        self.assertEqual(len(stats.keepalive_warnings), 1)
+
+
+class TestReconnectFailuresInstabilityGate(unittest.TestCase):
+    """`assess()` PASS path 加 `reconnect_failures < 3` 顯式 gate（E2 MEDIUM-1 fix）。
+
+    BB sign-off invariant (c) 對齊（design §5.3）。
+    """
+
+    def _args(self, **overrides):
+        defaults = dict(
+            proof_min_duration_sec=PASS_MIN_OBSERVED_SEC,
+            proof_min_uptime_ratio=PASS_MIN_UPTIME_RATIO,
+            max_restart=3,
+            enable_reconnect=True,
+        )
+        defaults.update(overrides)
+        ns = MagicMock()
+        for k, v in defaults.items():
+            setattr(ns, k, v)
+        return ns
+
+    def _full_window_stats(self, reconnect_failures: int) -> ProbeV2Stats:
+        return ProbeV2Stats(
+            session_id="x",
+            started_at_utc="2026-05-16T00:00:00+00:00",
+            target_sec=86400,
+            elapsed_sec=85_000,
+            uptime_sec=84_900,
+            uptime_ratio=0.999,
+            reconnect_failures=reconnect_failures,
+            control_topics=[
+                "tickers.BTCUSDT", "orderbook.50.BTCUSDT",
+                "publicTrade.BTCUSDT", "kline.1.BTCUSDT",
+            ],
+            topic_message_counts={
+                "allLiquidation.BTCUSDT": 50,
+                "tickers.BTCUSDT": 8640,
+                "orderbook.50.BTCUSDT": 86400,
+                "publicTrade.BTCUSDT": 17280,
+                "kline.1.BTCUSDT": 1440,
+            },
+        )
+
+    def test_reconnect_failures_2_full_window_still_pass(self):
+        """reconnect_failures=2 + 24h+ + uptime≥0.95 → PASS（< 3 threshold）。"""
+        stats = self._full_window_stats(reconnect_failures=2)
+        assess(stats, self._args())
+        self.assertEqual(stats.verdict, "PASS_C1_PROOF_CANDIDATE")
+        self.assertTrue(stats.c1_proof_eligible)
+
+    def test_reconnect_failures_3_boundary_blocks_pass(self):
+        """reconnect_failures=3 + 24h+ + uptime≥0.95 → FAIL_RECONNECT_INSTABILITY。
+
+        BB invariant (c) `reconnect_failures < 3` strict less-than，3 已超標。
+        """
+        stats = self._full_window_stats(reconnect_failures=3)
+        assess(stats, self._args())
+        self.assertEqual(stats.verdict, "FAIL_RECONNECT_INSTABILITY")
+        self.assertFalse(stats.c1_proof_eligible)
+        self.assertIn("reconnect_failures", (stats.c1_blocker or "").lower())
+        self.assertIn("3", (stats.c1_blocker or ""))
+
+    def test_reconnect_failures_5_blocks_pass(self):
+        """reconnect_failures=5 + 24h+ + uptime≥0.95 → FAIL_RECONNECT_INSTABILITY。"""
+        stats = self._full_window_stats(reconnect_failures=5)
+        assess(stats, self._args())
+        self.assertEqual(stats.verdict, "FAIL_RECONNECT_INSTABILITY")
+        self.assertFalse(stats.c1_proof_eligible)
 
 
 # ── 主入口：python3 -m unittest 直跑 ────────────────────────────────────
