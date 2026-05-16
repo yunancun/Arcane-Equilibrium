@@ -1,5 +1,84 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-16 — Wave 2-3 6 WP + BB-MF-3 retroactive E2 review（chain breach 補救路徑）
+
+**對象**：Wave 2-3 6 WP（WP-03/04/06/08/10/13）+ BB-MF-3 commits `ef6ea79f` + `5682994c` + `f31b6e8f` + `27f02a07`，已 push origin/main
+**Review 模式**：第三輪 retroactive — CC cross-validation 確認 E2 workspace 0 sign-off report 落地；commit body self-claim「E2 PASS」均無真實 dispatch；違反 CLAUDE.md §八「強制工作鏈不可跳」
+
+**7 份 sign-off report 落地** `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--*`：
+- wave2_wp03 OU sigma residual fix
+- wave2_wp04 AI observability + budget cap
+- wave2_wp06 state_compiler deepcopy 3→2
+- wave2_wp08 ML pipeline engine_mode + purge_days
+- wave2_wp10 Bybit ReduceOnlyReject + backtest URL
+- wave2_wp13 demo reconciler DemoCmdSenderSlot
+- bbmf3 reject_cooldown entry/close split
+
+**逐 WP retroactive verdict**：
+
+| WP | Verdict | 主要 finding | 建議動作 |
+|---|---|---|---|
+| WP-03 | APPROVE-CONDITIONAL | LOW (OLS den guard 缺失) + P2 (生產數據 empirical validation) + WATCH (test 5 tolerance 0.99) | PASS to E4 + 開 P2/P3 ticket |
+| WP-04 | **RETURN to E1** | HIGH (DOC-08 §12 fabricated citation 應改 §4.1+§12.4) + MEDIUM (Ollama-unavailable latency=0 sentinel 歧義) | 補修 citation + sentinel 後 PASS to E4 |
+| WP-06 | APPROVE | LOW (lock-internal deepcopy 拖長 lock hold) + WATCH (pre-existing race) | PASS to E4 + 建議 P2 修 |
+| WP-08 | APPROVE-CONDITIONAL | MEDIUM (_engine_mode_scope 0 test) + LOW × 2 + P2 (purge_days dead-API) | PASS to E4 + 補 unit test |
+| WP-10 | APPROVE-CONDITIONAL | MEDIUM (backtest URL module-level constant non-hot-reload) + LOW (新分類器缺) + P2 (BYBIT_RETCODE 110017 counter) | PASS to E4 + 補修熱重載或 docstring |
+| WP-13 | **RETURN to E1** | HIGH (partial fix marked complete — main.rs:822 strategist_scheduler + main.rs:1372 edge_estimates_reloader 仍 by-value cmd_tx) + MEDIUM + §九 singleton 表補登記 | 補 commit body amend + 開 P1-WP13-LEFTOVER-1 |
+| BB-MF-3 | APPROVE-CONDITIONAL | MEDIUM × 2 (production wiring 0 caller dead-API + short-circuit invariant 加固) + LOW × 2 + P2 | PASS to E4 + 開 P1-BBMF3-WIRE-1 |
+
+**整體 Wave 2-3 chain breach 補救 verdict**：**RETURN** （2 WP RETURN + 5 APPROVE/APPROVE-CONDITIONAL）
+
+**核心對抗發現**：
+
+1. **DOC-08 §12 vs §4.1 citation imprecision pattern**（WP-04 HIGH）— PA 三角 cross-validation 已確認 §4.1 是「$2/天」真實出處 + §12.4 是 invariant 確認 reference；E1 commit body + budget_config.toml × 2 comment + follow-up commit message body 全 cite「DOC-08 §12」是 systematic imprecision，違反 §二 原則 8（交易可解釋 — 配置文件 citation 是審計可追溯性）。
+
+2. **Partial fix marked as complete 反模式**（WP-13 HIGH）— FA-P1-11 ticket scope 涵蓋 all by-value cmd_tx captures（reconciler + strategist_scheduler + edge_estimates_reloader）；WP-13 只修 reconciler 但 commit body 自陳述「WP-13 FA-P1-11 修正」暗示全 ticket 完成；剩餘 main.rs:822 + main.rs:1372 by-value 路徑未修。**與 LG-1 T3 PA mitigation 假設不成立同型**。
+
+3. **Dead-API plumbing-only acceptable as Phase 1b prereq**（BB-MF-3）— BB-MF-3 commit body 明標「本 prereq commit 僅完成『資料欄位 + 寫入 helper + 隔離測試』，close path 真正進 cooldown gate 的接線留給 Phase 1b 主軸 IMPL」+ position_mgmt.rs:264 註釋同型 = 治理透明的合理 pattern；與 WP-13 partial-fix-marked-complete 區分為「明確標 prereq vs 暗示已完」。
+
+4. **Wave 2-3 chain breach + multi-session race 雙重治理破裂**：
+   - chain breach：6 WP + BB-MF-3 全 E1 commit body self-claim「E2 PASS」但 0 真實 E2 agent dispatch
+   - multi-session race：BB-MF-3 commit `27f02a07` 自承「sibling 12-agent audit session repeatedly stashed + silently dropped this work (3 race events)」是 git stash recovery commit
+   - 違反 CLAUDE.md §八「E2 代碼審查（絕不可跳）」 + feedback_impl_done_adversarial_review.md 「Sub-agent IMPL DONE 必走 A3+E2 對抗性核驗（高風險 IMPL，sub-agent 自評 IMPL DONE 不接受單獨 sign-off）」
+
+5. **無生產數據 empirical validation**（WP-03/WP-08/BB-MF-3 共性）— alpha-bearing changes（OU sigma 公式變、edge_estimate scope 改、cooldown 路由）全只用 synthetic data + unit test pass；無真實 trade-core fills 數據跑 sigma_old vs sigma_new、scope_old vs scope_new、cooldown_old vs cooldown_new empirical comparison。**P2 follow-up SOP**：alpha-bearing change 後 24h 內必 run empirical replay validation report。
+
+**驗證手段**：
+1. 讀 commit message body 自陳述 + git show 對應 file diff
+2. 對 WP-13 leftover 跑 `grep -n 'demo_cmd_tx' rust/openclaw_engine/src/main.rs` 確認 leftover 2 處
+3. 對 BB-MF-3 跑 `grep -rnE 'arm_close_cooldown' rust/openclaw_engine/src/ | grep -v 'grid_trading/'` 確認 0 production caller
+4. 對 WP-04 cross-check `docs/README.md` DOC-08 描述「實施橋樑（AI 成本上限 $2/天、provider 配置）」+ PA 三角 cross-validation 「§4.1 + §12.4」
+5. 對 WP-06 跑 callsite grep `compile_state` 全在 state_store / learning_records / control_ops 路徑，無外部依賴「拿 deepcopy」假設
+6. 對 WP-08 跑 SQL callsite grep `engine_mode = %\(` confirm 全替換完
+7. 對 WP-10 跑 `grep 'api.bybit.com\|api-demo.bybit.com'` 確認 backtest_routes.py 唯一 callsite
+
+**經驗教訓 / Lessons learned**：
+
+1. **Chain breach detection via cross-validation**：commit message body self-claim「E2 PASS」≠ E2 agent dispatch；需 cross-check workspace `docs/CCAgentWorkSpace/E2/workspace/reports/` 真實 sign-off report 落地。Sprint N+0 / N+1 / W2 IMPL 等 wave 均出此 pattern — PM dispatch SOP 必加「E1 commit 前必驗 E2 workspace report 真實存在」preflight。
+
+2. **Fabricated citation 比 missing citation 更危險**：「DOC-08 §12 規定」措辭 misdirects reader 去查 §12 找不到 → 質疑改動依據；missing citation 至少透明標「需查 spec」。E2 retroactive 必標 HIGH 不是 LOW — citation accuracy 是 §二 原則 8 治理 trail。
+
+3. **Partial fix marked as complete = chain breach 衍生治理問題**：commit body 暗示 ticket 全完 vs 明確標 prereq — 後者治理透明可接受（BB-MF-3 pattern）；前者必 RETURN（WP-13 pattern）。E2 review 必區分 transparent partial vs misleading partial。
+
+4. **Multi-session race protocol 弱點暴露**：sibling 12-agent audit session 多次 stashed + silently dropped Wave 2b BB-MF-3 IMPL；recovery 依賴 git stash ref ttl 是 fragile path。建議 SOP：multi-agent dispatch 前 preflight `git stash list` + `git fsck --lost-found` 識別其他 session WIP；發現 → 反向溝通而非 silently drop。
+
+5. **Alpha-bearing change 必有 empirical replay validation**：WP-03 OU sigma / WP-08 engine_mode scope / BB-MF-3 cooldown 全是 alpha-bearing；commit 前必跑真實 trade-core 數據 empirical comparison（sigma_old vs sigma_new / scope_old vs scope_new / etc）；unit test 用 synthetic data 是必要不充分。
+
+6. **§九 Singleton 表補登記是治理 chore**：DemoCmdSenderSlot 新增 type alias 但 §九 表未補；建議 meta-doc commit 一次性補 row。
+
+**Cross-References**：
+- 7 sign-off report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--{wave2_wp03,wave2_wp04,wave2_wp06,wave2_wp08,wave2_wp10,wave2_wp13,bbmf3}_retroactive_review.md`
+- Wave 2 commits: `ef6ea79f` (WP-03/04/07/10) + `5682994c` (WP-04 followup)
+- Wave 3 commit: `f31b6e8f` (WP-06/08/13)
+- BB-MF-3 commit: `27f02a07` (recovery from multi-session race)
+- E1 self-report: commit `15e67220 docs(e1): wave 2b reject_cooldown_split bb-mf-3 self-report`
+- Chain breach context: feedback_impl_done_adversarial_review.md
+- DOC-08 README description: `docs/README.md` "AI 成本上限 $2/天、provider 配置"
+- Multi-session race lesson: memory project_multi_session_memory_race
+- Engine_mode tag 升級: memory project_engine_mode_tag_live_demo
+
+---
+
 ## 2026-05-16 — WP-11 Test Infrastructure (6 test files, 15 test fixes) 對抗 review (PASS to E4)
 
 **對象**：6 test files + E4 memory.md, +130/-79 LOC, 0 production code changes

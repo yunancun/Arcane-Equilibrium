@@ -2,6 +2,53 @@
 
 ## 工作記憶
 
+### 2026-05-16 Wave 2+3 6-WP Mac-side full regression — PASS
+
+**對象**：Wave 2 (WP-03/04/10 commit `ef6ea79f` + E2 follow-up `5682994c`) + Wave 3 (WP-06/08/13 commit `f31b6e8f`) 跨 11 source files。CC cross-validation 確認 sibling `8321b4b7` 只覆蓋 BB-MF-3，這 6 WP chain breach 需 fresh E4。
+
+**Mac-side baseline 結果 (2x runs)**：
+| Engine | passed | failed | ignored | non-flaky |
+|---|---|---|---|---|
+| Rust openclaw_engine --lib --release | 2906 | 0 | 1 | ✅ identical 2 runs (= prior `8321b4b7`) |
+| srv/tests pytest (with 1 dup-basename --ignore) | 368 | 1 (pre-existing test_v072 source drift) | 2 | ✅ |
+| control_api_v1 pytest (with 4 collection-error --ignore) | 4092 | 1 (pre-existing test_case2_pg_kill intermittent) | 8 | ✅ |
+
+**WP-by-WP Mac verdict**：
+- **WP-03 (OU σ residual)**：grid_helpers 21/0/0; 5 new tests verified by name; rustfmt CLEAN; cargo check no error; integrity confirmed `compute_ou_step` rewritten with `residual = dx - predicted` (L149) + `ou_residual_sigma` module L185-264. **PASS**.
+- **WP-04 (Strategist Ollama observability + budget + evaluate.rs TODO)**：py_compile EXIT 0; `AIService._record_strategist_invocation` 確認 4 callsites (3 main + 1 ollama-unavailable per E2 MEDIUM-3 fix); `budget_config.toml` $2/$60 confirmed; evaluate.rs TODO marker L412 + `model_tier="l1_9b"` L413; 27 pytest passed. **PASS**, Mac caveat: agent.ai_invocations INSERT path empirical write-back FLAGGED-FOR-LINUX (PG IO is correctly an IO boundary, not mockable per §5.2).
+- **WP-06 (state_compiler deepcopy 3→2)**：py_compile EXIT 0; documentation block "WP-06 E5-P-2 deepcopy 精簡：原有 3 次 deepcopy 精簡為 2 次" 確認; CACHE deepcopy L631 + INPUT deepcopy L635 (OUTPUT 3rd 已移除); 27 pytest passed. **PASS**.
+- **WP-08 (engine_mode + purge_days)**：py_compile EXIT 0; `_VALID_ENGINE_MODES = ("paper","demo","live","live_demo")` + `_engine_mode_scope('live') → ["live","live_demo"]` (43k LiveDemo row recovery); MIT-DB-6 comment L545; `purge_days: int = 0` default backward-compatible; 16 pytest passed. **PASS**, Mac caveat: 43k empirical PG query FLAGGED-FOR-LINUX.
+- **WP-10 (ReduceOnlyReject 110017 + backtest URL env)**：rustfmt CLEAN; bybit_rest 29/0; retcode 2/0 (`test_bybit_ret_code_phase1b_extensions`); ReduceOnlyReject = 110017 enum + 5 classifier asserts (`is_retryable / is_noop / is_exchange_backoff / is_instrument_filter / is_balance_block` 全 `!`-asserted); `OPENCLAW_BYBIT_BACKTEST_URL` env var default demo per BB-M-1. **PASS**.
+- **WP-13 (DemoCmdSenderSlot + provider pattern)**：4/4 rustfmt CLEAN; cargo check no error; `pub type DemoCmdSenderSlot = Arc<RwLock<...>>` mirrors `LiveCmdSenderSlot` structurally; slot init L429 + write L431 + boot_tasks pass-through L801. **PASS-COMPILE**, Linux caveat: real respawn cycle FLAGGED-FOR-LINUX (Mac engine=`engine_alive: false` by design).
+
+**Linux-only flagged scope (5 items)** — correctly partitioned per CLAUDE.md §六/§七:
+1. Full Rust integration `cargo test -p openclaw_engine` (~2900 tests; Mac dev_disabled_* secret slots fail-closed)
+2. WP-08 43k LiveDemo row empirical PG query
+3. WP-13 demo cmd_tx survival across rebuild cycle
+4. WP-04 agent.ai_invocations INSERT write-back verification
+5. V091-V094 SQL migrations (NOT landed; WP-08 SQL source-only this wave)
+
+**核心驗證點**：
+- 6 WP 全部 source integrity grep PASS (compute_ou_step, _record_strategist_invocation × 4, deepcopy 3→2 doc-comment, _VALID_ENGINE_MODES expansion + purge_days, ReduceOnlyReject + 5 asserts, DemoCmdSenderSlot 8 grep sites)
+- Mock 審查 0 anti-pattern (real math / IO boundary mock only)
+- §四 5 hard boundaries 全 intact
+- §九 file-size 0 hard-cap breach
+- 跑兩遍 3/3 suites identical (non-flaky)
+- 0 new failures (pre-existing 2: test_v072 source drift + test_case2_pg_kill intermittent)
+- SLA hot path 0 risk (WP-03 residual sigma 是 per-spacing-update O(n) ≪ 1µs; WP-13 RwLock try_read 微秒級)
+
+**教訓**：
+1. **rustfmt walks `mod` declarations** — 對 `main.rs` 跑 rustfmt 會檢查所有透過 `mod`/`pub mod` 達到的子檔；發現 `startup/mod.rs` + `ipc_server/handlers/fee_source.rs` pre-existing drift 不在 Wave 2+3 diff，必須 per-file 跑才能精準歸因。
+2. **`test_pure_utils.py` 3 dup basenames** — `tests/local_model_tools/` + `tests/ml_training/` + `tests/misc_tools/` 三個目錄都有同名檔；pytest collection error 是「在不同 cwd 跑會發現不同子集」(per 2026-05-16 audit MEDIUM-3)。E4 protocol：dup-basename 視為 pre-existing env noise，用 `--ignore` 而非試圖修；真要修是 P2。
+3. **WP-13 沒有 inline test 不代表測不夠** — `DemoCmdSenderSlot` 是 type alias + slot init，與 `LiveCmdSenderSlot` 結構等同（LiveCmdSenderSlot 也 0 inline test）；compile-time 由 Rust borrow checker 驗證，runtime 真假驗證 by design 屬 Linux runtime（engine 只跑 Linux）。E4 sniff test：grep `LiveCmdSenderSlot.*test\|DemoCmdSenderSlot.*test` 都是 0，代表這層 contract 由「engine 啟動+IPC 命令真實往返」驗，不是 unit test。
+4. **per-WP integrity grep > 抽象「passed >= baseline」** — Wave 2+3 6 WP 每個 grep 確認具體 line + 具體 const/enum/字串值 landed；比單純 baseline 數字更能 catch ghost commit。例如 `AIService._record_strategist_invocation` 4 callsites (不是 3) 直接驗證 E2 follow-up `5682994c` 也 landed。
+
+**Verdict**：**PASS** — Mac-side 可跑的最大範圍 0 regression、0 integrity gap、5 Linux-only items 全 documented in Appendix B Linux-deferred verification scope。
+
+**Report path**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--wave2_3_full_regression.md`
+
+---
+
 ### 2026-05-16 test_track_a_spawn_argv.py 10 test fix — PASS
 
 **對象**：`replay/tests/test_track_a_spawn_argv.py` 21 tests 中 10 個因 Round 6 HMAC sign 整合而失敗。

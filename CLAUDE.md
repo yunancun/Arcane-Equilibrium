@@ -54,7 +54,7 @@
 
 ---
 
-## 三、真實狀態全景（2026-05-15 W3 ncyu-blocked + Phase C0 closed）
+## 三、真實狀態全景（2026-05-16 Wave 1-4 closed + deploy gap pending）
 
 本節只保留當前活躍狀態。歷史長敘述移到 `docs/CLAUDE_CHANGELOG.md`、
 `docs/archive/`、`docs/CCAgentWorkSpace/*/workspace/reports/` 和 `TODO.md`。
@@ -68,7 +68,7 @@
 | Runtime host | Linux `trade-core`；watchdog 2026-05-15 13:24 UTC：`engine_alive=true`，demo alive age=5.1s，live alive age=3.3s，paper alive=false age=10329.4s（disabled）。 |
 | Runtime env | 2026-05-15 13:26 UTC engine env：`OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`，`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`，`OPENCLAW_ENABLE_PAPER=0`，`OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`。 |
 | Scanner config | `settings/risk_control_rules/scanner_config.toml` 無 `[authority]`；scanner 永遠作為 market context / evidence infrastructure 啟動，不再有 hard authority mode。 |
-| Engine status | Runtime binary code line remains rebuilt `7b33ab2e`; pre-v32 Mac/origin/Linux source was verified clean/synced at `86a5d707`, and TODO v32 is source/docs/probe-only without rebuild/restart. Signed live authorization is absent; true-live remains blocked. |
+| Engine status | Runtime binary code line remains rebuilt `7b33ab2e`; pre-v32 Mac/origin/Linux source was verified clean/synced at `86a5d707`, and TODO v32 is source/docs/probe-only without rebuild/restart. Signed live authorization is absent; true-live remains blocked. **⚠️ DEPLOY GAP**: Wave 2-4 已 push 含 Rust source 改動（`grid_helpers.rs` WP-03 OU sigma + `bybit_rest_client.rs` WP-10 110017 + `grid_trading/*` BB-MF-3 + `main.rs` WP-13 + `evaluate.rs` WP-04 TODO + Python WP-04/06/08 + WP-11 test fix），**binary 仍 `7b33ab2e` 未 rebuild**；source IMPL DONE / NOT DEPLOYED，待 operator `--rebuild` 才生效 runtime。 |
 | Paper engine | GATE-RED + disabled：`OPENCLAW_ENABLE_PAPER=0`，paper pipeline dead by design；waiting `ncyu` decision before any non-promotion diagnostic reopen。 |
 
 ### W-C / MAG-082
