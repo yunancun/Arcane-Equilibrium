@@ -113,8 +113,99 @@ async def get_demo_status(actor: base.AuthenticatedActor = Depends(base.current_
     })
 
 
+def _paper_state_balance_payload(
+    state: dict[str, Any],
+    *,
+    source: str = "rust_engine",
+    pipeline_status: str = "connected",
+) -> dict[str, Any]:
+    """Build a GUI-compatible balance payload from Rust paper_state only."""
+    positions = state.get("positions") or []
+    unrealized = 0.0
+    if isinstance(positions, list):
+        for p in positions:
+            if not isinstance(p, dict):
+                continue
+            try:
+                unrealized += float(p.get("unrealized_pnl") or 0.0)
+            except Exception:
+                continue
+    balance = state.get("bybit_sync_balance")
+    if balance is None:
+        balance = state.get("balance")
+    try:
+        equity = float(balance or 0.0)
+    except Exception:
+        equity = 0.0
+    return {
+        "source": source,
+        "read_model": "rust_snapshot_fast",
+        "pipeline_status": pipeline_status,
+        "totalEquity": equity,
+        "total_equity": equity,
+        "equity": equity,
+        "balance": equity,
+        "totalAvailableBalance": equity,
+        "total_available_balance": equity,
+        "availableBalance": equity,
+        "available_balance": equity,
+        "totalWalletBalance": equity,
+        "total_wallet_balance": equity,
+        "walletBalance": equity,
+        "wallet_balance": equity,
+        "totalPerpUPL": unrealized,
+        "total_unrealized_pnl": unrealized,
+        "unrealized_pnl": unrealized,
+        "engine_initial_balance": state.get("initial_balance"),
+        "engine_peak_balance": state.get("peak_balance"),
+        "engine_current_balance": state.get("balance"),
+        "engine_realized_pnl": state.get("total_realized_pnl"),
+        "engine_total_fees": state.get("total_fees"),
+    }
+
+
+def _paper_state_positions_for_gui(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize Rust paper_state positions into the Bybit-like shape used by the GUI."""
+    out: list[dict[str, Any]] = []
+    raw_positions = state.get("positions") or []
+    if not isinstance(raw_positions, list):
+        return out
+    for p in raw_positions:
+        if not isinstance(p, dict):
+            continue
+        sym = str(p.get("symbol") or "")
+        qty = p.get("qty") or p.get("size") or 0
+        entry = p.get("entry_price") or p.get("avgPrice") or p.get("avg_price") or 0
+        mark = p.get("mark_price") or p.get("best_price") or entry
+        side = p.get("side")
+        if not side:
+            side = "Buy" if bool(p.get("is_long")) else "Sell"
+        cat = p.get("category") or ("inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear")
+        out.append({
+            **p,
+            "symbol": sym,
+            "category": cat,
+            "side": side,
+            "size": qty,
+            "qty": qty,
+            "avgPrice": entry,
+            "avg_price": entry,
+            "entry_price": entry,
+            "markPrice": mark,
+            "mark_price": mark,
+            "unrealisedPnl": p.get("unrealized_pnl", p.get("unrealisedPnl", 0)),
+            "unrealized_pnl": p.get("unrealized_pnl", p.get("unrealisedPnl", 0)),
+            "leverage": p.get("leverage") or "1",
+            "owner_strategy": p.get("owner_strategy") or "",
+        })
+    return out
+
+
 @phase2_router.get("/demo/balance")
-async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+async def get_demo_balance(
+    fast: bool = Query(False),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Get Bybit Demo account balance via httpx BybitClient.
     Also exposes engine-side session baseline (initial_balance, peak_balance) so the
@@ -146,6 +237,14 @@ async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current
             "engine_peak_balance": None,
             "engine_current_balance": None,
         })
+
+    if fast:
+        try:
+            demo_state = reader.get_paper_state(engine="demo") or {}
+            if demo_state:
+                return _envelope(_paper_state_balance_payload(demo_state))
+        except Exception:
+            logger.debug("Demo fast balance snapshot unavailable", exc_info=True)
 
     rc = _get_rust_client()
     if rc is None:
@@ -430,8 +529,26 @@ def _attach_owner_strategy(positions: list, engine: str) -> list:
 
 
 @phase2_router.get("/demo/positions")
-async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+async def get_demo_positions(
+    fast: bool = Query(False),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """Get Bybit Demo open positions via httpx BybitClient / 通過 httpx BybitClient 獲取 Demo 持倉"""
+    if fast:
+        try:
+            from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+            reader = get_rust_reader()
+            if reader.is_engine_available("demo"):
+                state = reader.get_paper_state(engine="demo") or {}
+                positions = _paper_state_positions_for_gui(state)
+                return _envelope({
+                    "source": "rust_snapshot_fast",
+                    "list": positions,
+                    "count": len(positions),
+                })
+        except Exception:
+            logger.debug("Demo fast positions snapshot unavailable", exc_info=True)
+
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
