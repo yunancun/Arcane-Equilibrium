@@ -1,5 +1,66 @@
 # E2 Memory — 工作記憶
 
+## 2026-05-16 — P1-WP03-DEPLOY-GATE-IMPL Round 2 quick re-review
+
+**對象**：E1 round 2 fix `2026-05-16--wp03_deploy_gate_round2_fix.md`（+76/-3，只動 checks 593→594 + test 525→592；無 scope creep）
+**Verdict**：**APPROVE → pass to E4 for Linux trade-core regression**
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--p1_wp03_deploy_gate_round2_re_review.md`
+
+**round 2 三 fix 全 PASS**：
+1. MEDIUM-1：`checks_wp03_deploy_gate.py:517` 真改 `if age_h >= T2_WINDOW_HOURS_DEFAULT and t1["n"] == 0 and t2["n"] == 0:` + trigger msg 揭露雙窗 evidence — false-positive 場景修妥 + 真實 dormancy 仍 trigger
+2. LOW-1：L578-583 REQUIRED escalation FAIL msg 加 `revert_recommended=false (approach_escalation, no flag written)` hint，與 Step 4 hard FAIL `revert_recommended=true` 對稱
+3. New test `test_zero_fills_env_override_age_mismatch` adversarial 反向驗證：local revert source 至 round-1 邏輯後此 test FAIL（msg 含 ZERO_FILLS trigger），restore 後 18/18 PASS → 真實打中 fix semantic 非 trivial
+
+**3 個既有 regression sample 仍 PASS**：`test_fail_zero_fills_dormancy`（真 dormancy 仍 trigger）/ `test_required_env_escalates_warn_to_fail`（msg substring 兼容）/ `test_t2_window_env_override`（env override 不破）
+
+**Scope creep PASS**：LOC delta 在容差內；git status 僅 2 檔 unstaged；0 unrelated change
+
+**Lexical scope shadow PASS**：AST `check_69_wp03_ou_sigma_deploy_gate` 0 nested function / 0 closure / 14 unique local names；W-AUDIT-7c 純 Python no-JS N/A
+
+**LOW-2 LOW-3 P2 ticket**：`P2-WP03-MSG-STRUCT` + `P2-WP03-ALERT-FLAG-INDEPENDENCE` 列入 sign-off §6 清楚
+
+**E2 round 2 reflection**：
+- Adversarial 反向 source revert + 跑單 test 是驗證 fix 真實性 strongest pattern — local 改 source 跑 pytest 比 grep + 推理可靠
+- MEDIUM-1 雙窗 secondary guard (T1+T2 都 0) > 單 condition 改 (`age_h >= t2_window_hours`) — 雙窗 confirm 對 env override / age 各排列組合都嚴謹
+- LOW-1 msg 對稱（hard FAIL vs approach FAIL）是 GUI/alert downstream regex parse 友善的關鍵 — operator 看 FAIL line 即知 flag 存否
+
+---
+
+## 2026-05-16 — P1-WP03-DEPLOY-GATE-IMPL E2 對抗審核
+
+**對象**：E1 `2026-05-16--wp03_deploy_gate_healthcheck_impl.md`（新檔 587 LOC `checks_wp03_deploy_gate.py` + 528 LOC 17-test suite + 51 LOC runner.py wire + 13 LOC __init__.py re-export）
+**Verdict**：**RETURN to E1**（1 MEDIUM 強制修 + 3 LOW 建議修）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--p1_wp03_deploy_gate_e2_review.md`
+
+**核心 MEDIUM finding（必修）**：
+- ZERO_FILLS 邊界 bug — `checks_wp03_deploy_gate.py:514`：`if age_h >= T2_WINDOW_HOURS_DEFAULT (24) and t2["n"] == 0:` 用 hardcoded 24h 但 t2 query 用 `t2_window_hours = env_override or 24`。實測重現：`OPENCLAW_WP03_DEPLOY_GATE_LOOKBACK_HOURS=48` + age=30h + T1 12h 有 50 fills + T2 48h n=0（因 age<48 query window 大於實際 engine age）→ false-positive ZERO_FILLS dormancy → 寫 revert flag → operator 看到 `48h grid_trading n=0` 但其實策略 active
+- 修法：`age_h >= t2_window_hours and t2["n"] == 0`（與 query window 對齊）或 secondary guard `t1["n"] == 0`
+
+**3 LOW（建議修）**：
+- LOW-1：REQUIRED escalation FAIL msg 無 `revert_recommended=false (approach_escalation)` hint — operator 看 FAIL line 但找不到 flag file 困惑
+- LOW-2：FAIL msg `revert_recommended=true` 是 substring 無結構化 marker — GUI / alert downstream regex parse 脆
+- LOW-3：flag write 失敗 fail-soft 但 verdict 仍 FAIL — operator 雙訊息混淆，P2 alert 邏輯改不依賴 flag exists
+
+**對抗反問 10 條全跑**：
+- SQL injection：✅ 3 execute 全參數化 `(%s::text)::interval` + `%s::timestamptz × 2` + 純常量 `to_regclass`
+- Threshold logic：✅ T1/T2/T3 嚴格 `<` 不含邊界，WARN approach floor 對負閾值方向正確（更接近 0），無 off-by-one
+- Baseline + cache：✅ window module 常量 spec §12 R1 mitigation；first-run query + persist；樣本不足不寫 cache fail-soft 正確
+- Revert flag design：APPROVE — PA spec §4.3 任一 trigger → flag set；E1 hard trigger 寫 flag + approach FAIL escalation 不寫 flag 是合理 advisory semantic 分層（但 msg 應更 explicit）
+- Lexical scope shadow：✅ 0 import shadow；test `_FakeDT` patch 路徑 explicit
+- Env vars naming：✅ `OPENCLAW_WP03_DEPLOY_GATE_REQUIRED/LOOKBACK_HOURS` 對齊 [68] `OPENCLAW_PORTFOLIO_RESTING_*` pattern
+- Mock review：✅ 3-tuple `(n, avg, std)` 與 [40] L1168 同 PG return shape；None-safe `int(n or 0)` 處理 PG AVG(NULL)=NULL
+- 17 test 強度：✅ PASS / WARN×3 / FAIL×4 (T1/T2/T3/ZERO_FILLS) + 6 edge + cache reuse；fixture 各自 assert severity / commit SHA / msg；非 trivial pass
+- ADR-0020 honored：✅ 純 filesystem write；無 IPC / subprocess / git / engine 呼叫
+- runner.py wire：✅ 與 [40]/[68] 同 pattern；0 import shadow / 0 circular
+
+**E1 5 verification points**：4/5 ✅（schema/cast/mtime/cache）；#5 (approach + REQUIRED → no flag) APPROVE 設計但 msg 強化建議
+
+**SOP 教訓**：
+- ZERO_FILLS-like derived trigger 用環境變數覆寫窗口時，**triggering condition 必與 query window 對齊**，否則 query window > 實際 age 產生 0-row 不是 dormancy 是 sampling artifact
+- E1 17 test 雖完整，但無 LOOKBACK_HOURS=48 + age<48 + ZERO_FILLS 邊界 — 補 1 test 防 regression
+
+**回 PM**：E2 RETURN to E1（必修 MEDIUM-1 + 建議 3 LOW + 補 1 test）→ E1 修 → 重 E2 → 才 E4。
+
 ## 2026-05-16 — Wave 2-3 6 WP + BB-MF-3 retroactive E2 review（chain breach 補救路徑）
 
 **對象**：Wave 2-3 6 WP（WP-03/04/06/08/10/13）+ BB-MF-3 commits `ef6ea79f` + `5682994c` + `f31b6e8f` + `27f02a07`，已 push origin/main

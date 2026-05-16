@@ -283,6 +283,27 @@ from .checks_portfolio_resting_exposure import (
     # （default 24h）。
     check_68_portfolio_resting_exposure,
 )
+from .checks_wp03_deploy_gate import (
+    # P1-WP03-DEPLOY-GATE-IMPL (2026-05-16) — WP-03 OU sigma residual fix
+    # post-deploy 24h+ monitoring + revert flag。配對 PA spec
+    # ``docs/execution_plan/2026-05-16--wp03_ou_sigma_deploy_gate_spec.md``
+    # 與 WP-03 commit ``ef6ea79f`` / v35 rebuild ``2026-05-16T01:00:00Z``。
+    # 監測 grid_trading 在 demo + live_demo 的 ``avg_net_bps`` 三窗
+    # (12h/24h/7d) trigger：
+    #   T1 (12h fast-fail)    : avg < -10 bps + n>=30  → CRITICAL revert flag
+    #   T2 (24h primary)      : avg < -5 bps  + n>=50  → HIGH revert flag
+    #   T3 (7d cumulative)    : avg < baseline-3 bps + n>=200 → MEDIUM revert flag
+    #   ZERO_FILLS (24h n=0)  : age>=24h → HIGH dormancy revert flag
+    # 任一觸發即寫 ``$OPENCLAW_DATA_DIR/wp03_revert_flag`` advisory（per
+    # ADR-0020 manual-only，operator 顯式 decide path A TOML flip 或 path B
+    # git revert，不 auto trigger revert action）。
+    # Pre-deploy / age<1h / table absent / baseline insufficient → PASS-skip
+    # or WARN 不阻塞。
+    # OPENCLAW_WP03_DEPLOY_GATE_REQUIRED=1：approach WARN 升 FAIL (strict
+    # mode，不寫 revert flag — 與 hard trigger FAIL 區分)。
+    # OPENCLAW_WP03_DEPLOY_GATE_LOOKBACK_HOURS=N：覆寫 T2 primary 24h 窗。
+    check_69_wp03_ou_sigma_deploy_gate,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -304,7 +325,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [22][23][24][25][26][27][28]                          7 F7 MIT+E5
     [30][31][32][33][34][35][36][37][38][39][40][41]      cost/execution/MLDE/lifecycle/cardinality/acceptance/scanner evidence
     [42][42b][42c][43][44][45]                             LG-5 governance contract + per-strategy attribution drift (7d + 3d gate-aligned) + label-backfill cron liveness + REF-20 replay manifest key.hex presence + LG-3 provider pricing binding
-    [46][48][49][50][51][52][53][54][55][57][58][59][64][65][66][67][68]    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions + W-AUDIT-9 T4 graduated canary stage invariant + LG1-T2 H0 block acceptance + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity + W1 panel freshness + W-AUDIT-4b feature baseline readiness + P2-PORTFOLIO-RESTING-58-HEALTHCHECK portfolio resting exposure lineage
+    [46][48][49][50][51][52][53][54][55][57][58][59][64][65][66][67][68][69]    REF-20 Sprint D R8 maintenance suite + scanner opportunity shadow acceptance + agent event-store row proof + REF-21 V058 universe recorder + OpenClaw proposal relay + Agent Decision Spine lineage + W2-IMPL-3 BTC→Alt Lead-Lag panel 4 conditions + W-AUDIT-9 T4 graduated canary stage invariant + LG1-T2 H0 block acceptance + W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 unblock_candidates_drift + MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity + W1 panel freshness + W-AUDIT-4b feature baseline readiness + P2-PORTFOLIO-RESTING-58-HEALTHCHECK portfolio resting exposure lineage + P1-WP03-DEPLOY-GATE-IMPL WP-03 OU sigma residual deploy gate
   Post-cursor (filesystem / pure-Python):
     [7][13][11][Xa][16][18][19][20]                       8 baseline
     [29]                                                  1 F7 (no-IPC stub)
@@ -359,6 +380,7 @@ Execution / cost sentinels added after F7:
   [66] panel_freshness                     (W1 sub-task 3 — panel.funding_rates_panel + panel.oi_delta_panel freshness)
   [67] feature_baseline_readiness          (W-AUDIT-4b retained INSERT table readiness — active feature_baselines >0 + 34-dim vector contract; drift_events burn-in remains intact)
   [68] portfolio_resting_exposure_lineage  (P2-PORTFOLIO-RESTING-58-HEALTHCHECK 2026-05-16 P1-PORTFOLIO-RESTING-EXPOSURE-1 follow-up; 升 P1 per FA Stage 1 demo 啟前 mandatory; 監測 effective(filled+resting) vs filled-only leverage chain semantic drift; per engine 4 sub-check: long/short notional vs cap × {80%,100%} + divergence vs {50%,100%} + per-symbol resting/filled vs {80%,150%}; OPENCLAW_PORTFOLIO_RESTING_HEALTH_REQUIRED=1 escalates WARN→FAIL; ID note: PA spec/TODO 標 [58] 但 [58]=W-AUDIT-9 T4 已占用，取 [68] free slot, name preserved)
+  [69] wp03_ou_sigma_deploy_gate            (P1-WP03-DEPLOY-GATE-IMPL 2026-05-16 — WP-03 OU sigma residual fix `ef6ea79f` / v35 rebuild `2026-05-16T01:00:00Z` post-deploy 24h+ monitoring + revert flag; 監測 grid_trading 在 demo+live_demo 的 avg_net_bps 三窗 12h/24h/7d trigger (T1=-10bps fast-fail / T2=-5bps primary / T3=baseline-3bps cumulative drift / ZERO_FILLS 24h n=0 dormancy); 任一觸發寫 `$OPENCLAW_DATA_DIR/wp03_revert_flag` advisory per ADR-0020 manual-only; pre-deploy/age<1h/table-absent/baseline-insufficient → PASS-skip 或 WARN 不阻塞; OPENCLAW_WP03_DEPLOY_GATE_REQUIRED=1 → approach WARN→FAIL 升級; OPENCLAW_WP03_DEPLOY_GATE_LOOKBACK_HOURS=N → 覆寫 T2 24h 窗)
 
 Exit codes:
   0 = all checks PASS / only WARN
@@ -447,7 +469,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45]
-              [46][48][49][50][51][52][53][54][55][57][58][59][64][65][66][67][68]
+              [46][48][49][50][51][52][53][54][55][57][58][59][64][65][66][67][68][69]
               (F7 [22]-[28] are MIT/E5; [30]-[37] are post-F7/MLDE;
                [38] is MIT 2026-04-29 grid lifecycle drift;
                [39] is PA W1-T4 2026-04-29 strategy_name cardinality drift;
@@ -476,7 +498,10 @@ def main() -> int:
                [65] MIT W6-1 RFC SHOULD 7 W-AUDIT-4b M3 chain integrity — era filter post 2026-05-09 09:22 UTC;
                [66] W1 panel_freshness; [67] W-AUDIT-4b feature_baseline_readiness;
                [68] P2-PORTFOLIO-RESTING-58-HEALTHCHECK portfolio_resting_exposure_lineage —
-                    P1-PORTFOLIO-RESTING-EXPOSURE-1 follow-up; 升 P1 Stage 1 demo 啟前 mandatory)
+                    P1-PORTFOLIO-RESTING-EXPOSURE-1 follow-up; 升 P1 Stage 1 demo 啟前 mandatory;
+               [69] P1-WP03-DEPLOY-GATE-IMPL wp03_ou_sigma_deploy_gate —
+                    WP-03 OU sigma residual fix `ef6ea79f` / v35 rebuild `2026-05-16T01:00:00Z`
+                    post-deploy 24h+ monitoring + revert flag advisory (ADR-0020 manual-only))
       post-cursor: [7][13][11][Xa][16][18][19][20]
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
@@ -488,7 +513,7 @@ def main() -> int:
     清單依 ID 記錄，避免總數 drift：
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
-              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][57][58][58a][59][64][65][66][67][68]
+              [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][57][58][58a][59][64][65][66][67][68][69]
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -1151,6 +1176,33 @@ def main() -> int:
             # 自由 slot [68]，name `portfolio_resting_exposure_lineage` 保留。
             s, m = check_68_portfolio_resting_exposure(cur)
             results.append(("[68] portfolio_resting_exposure_lineage", s, m))
+
+            # [69] P1-WP03-DEPLOY-GATE-IMPL (2026-05-16): WP-03 OU sigma
+            # residual fix post-deploy 24h+ monitoring + revert flag。
+            # 配對 PA spec
+            # ``docs/execution_plan/2026-05-16--wp03_ou_sigma_deploy_gate_spec.md``
+            # 與 WP-03 commit ``ef6ea79f`` / v35 rebuild
+            # ``2026-05-16T01:00:00Z`` (engine PID 69581)。
+            # 監測 grid_trading 在 demo + live_demo 的 ``avg_net_bps``
+            # 三窗 trigger：
+            #   T1 (12h fast-fail)    : avg < -10 bps + n>=30  → CRITICAL flag
+            #   T2 (24h primary)      : avg < -5 bps  + n>=50  → HIGH flag
+            #   T3 (7d cumulative)    : avg < baseline_14d - 3 bps + n>=200
+            #                           → MEDIUM flag
+            #   ZERO_FILLS (24h n=0)  : age>=24h → HIGH dormancy flag
+            # 任一觸發即寫 ``$OPENCLAW_DATA_DIR/wp03_revert_flag`` advisory
+            # （per ADR-0020 manual-only，operator 顯式 decide path A TOML
+            # flip 或 path B git revert，不 auto trigger revert action）。
+            # Pre-deploy / age<1h / table absent / baseline insufficient →
+            # PASS-skip 或 WARN 不阻塞。Baseline 14d cache 持久化於
+            # ``$OPENCLAW_DATA_DIR/wp03_baseline_cache.json`` (window =
+            # 2026-05-11 ~ 2026-05-16T01:44:00Z，post-V083 stable per spec
+            # §12 R1 mitigation)。
+            # [69] WP-03 OU sigma deploy-gate；三窗 trigger + revert flag
+            # advisory；pre-deploy / pre-evaluable / table absent fail-soft
+            # 不阻塞 cron。
+            s, m = check_69_wp03_ou_sigma_deploy_gate(cur)
+            results.append(("[69] wp03_ou_sigma_deploy_gate", s, m))
     finally:
         conn.close()
 
