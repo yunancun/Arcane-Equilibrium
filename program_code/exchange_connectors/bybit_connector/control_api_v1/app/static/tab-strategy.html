@@ -23,14 +23,14 @@
 <div id="explain-strategy"></div>
 
 <!-- ═══ Strategy Health Summary Bar ═══ -->
-<!-- 策略健康度汇总栏 — active/paused/stopped 分布（SUGGESTION §4.4） -->
+<!-- 策略健康度彙總栏 — active/paused/stopped 分布（SUGGESTION §4.4） -->
 <div class="oc-card" style="padding:10px 16px;margin-bottom:10px">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span style="font-size:12px;color:var(--text-dim);font-weight:600">策略分布 / Health:</span>
     <span class="oc-chip oc-chip-good" id="sh-active-chip">Active 0</span>
     <span class="oc-chip oc-chip-warn" id="sh-paused-chip">Paused 0</span>
     <span class="oc-chip oc-chip-neutral" id="sh-stopped-chip">Stopped 0</span>
-    <!-- Mini distribution bar / 迷你分布条 -->
+    <!-- Mini distribution bar / 迷你分布條 -->
     <div id="sh-bar" style="flex:1;min-width:80px;height:6px;border-radius:3px;background:#21262d;overflow:hidden;position:relative">
       <div id="sh-bar-active" style="position:absolute;left:0;top:0;height:100%;background:var(--green);transition:width 0.3s"></div>
       <div id="sh-bar-paused" style="position:absolute;top:0;height:100%;background:var(--yellow);transition:width 0.3s"></div>
@@ -43,16 +43,16 @@
 <div class="oc-card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <h3 style="margin:0">&#x1F4CB; 策略列表 / Registered Strategies</h3>
-    <button class="oc-btn oc-btn-primary" onclick="toggleCreateForm()">&#x2795; 创建策略 / Create Strategy</button>
+    <button class="oc-btn oc-btn-primary" onclick="toggleCreateForm()">&#x2795; 建立策略 / Create Strategy</button>
   </div>
 
   <!-- Create Strategy Form (hidden by default) -->
   <div id="create-form" style="display:none;margin-bottom:14px;padding:14px;background:var(--bg);border:1px solid #21262d;border-radius:8px">
     <div style="font-size:13px;font-weight:600;margin-bottom:8px">新建策略 / Create New Strategy</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-      <div><label style="font-size:10px;color:var(--text-dim)">Type / 类型</label>
-      <select class="oc-select" id="new-type"><option value="ma_crossover">MA Crossover / 均线交叉</option><option value="bb_reversion">BB Reversion / 布林回归</option><option value="funding_arb">Funding Arb / 资金费率套利</option><option value="grid">Grid / 网格交易</option><option value="bb_breakout">BB Breakout / 布林突破</option></select></div>
-      <div><label style="font-size:10px;color:var(--text-dim)">Symbol / 币种</label>
+      <div><label style="font-size:10px;color:var(--text-dim)">Type / 類型</label>
+      <select class="oc-select" id="new-type"><option value="ma_crossover">MA Crossover / 均線交叉</option><option value="bb_reversion">BB Reversion / 布林回歸</option><option value="funding_arb">Funding Arb / 資金費率套利</option><option value="grid">Grid / 網格交易</option><option value="bb_breakout">BB Breakout / 布林突破</option></select></div>
+      <div><label style="font-size:10px;color:var(--text-dim)">Symbol / 币種</label>
       <input class="oc-input" id="new-symbol" value="BTCUSDT" style="width:120px" /></div>
       <div><label style="font-size:10px;color:var(--text-dim)">Qty/Trade</label>
       <input class="oc-input" id="new-qty" type="number" value="0.001" step="0.001" style="width:90px" /></div>
@@ -69,24 +69,24 @@
 <!-- ═══ Scanner Opportunities ═══ -->
 <div class="oc-grid-2">
   <div class="oc-card">
-    <h3>&#x1F50D; 市场扫描 / Scanner Opportunities</h3>
-    <div class="subtitle">自动发现的交易机会</div>
+    <h3>&#x1F50D; 市场掃描 / Scanner Opportunities</h3>
+    <div class="subtitle">自動發現的交易機會</div>
     <div id="explain-scanner"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Symbol / 币种</th><th>Type / 类型</th><th>Score / 分数</th><th>Reason / 原因</th></tr></thead>
+        <thead><tr><th>Symbol / 币種</th><th>Type / 類型</th><th>Score / 分數</th><th>Reason / 原因</th></tr></thead>
         <tbody id="scanner-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
       </table>
     </div>
   </div>
 
   <div class="oc-card">
-    <h3>&#x1F680; 活跃交易对 / Active Symbols</h3>
-    <div class="subtitle">Rust ScannerRunner 管理的活跃交易对（固定 + 动态扫描）</div>
+    <h3>&#x1F680; 活跃交易對 / Active Symbols</h3>
+    <div class="subtitle">Rust ScannerRunner 管理的活跃交易對（固定 + 動態掃描）</div>
     <div id="deployed-meta" style="font-size:11px;color:var(--text-dim);margin-bottom:6px"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Symbol / 币种</th><th>Type / 类型</th><th>Strategies / 策略数</th><th>State / 状态</th></tr></thead>
+        <thead><tr><th>Symbol / 币種</th><th>Type / 類型</th><th>Strategies / 策略數</th><th>State / 状态</th></tr></thead>
         <tbody id="deployed-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -95,12 +95,12 @@
 
 <!-- ═══ Recent Intents ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F4AC; 近期交易意图 / Recent Order Intents（最近 30 条）</summary>
+  <summary>&#x1F4AC; 近期交易意圖 / Recent Order Intents（最近 30 條）</summary>
   <div class="oc-collapse-body">
     <div id="explain-intents"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Time / 时间</th><th>Symbol / 币种</th><th>Side / 方向</th><th>Type / 类型</th><th>Qty / 数量</th><th>Conf / 置信</th><th>Source / 来源</th><th>Status / 状态</th></tr></thead>
+        <thead><tr><th>Time / 時間</th><th>Symbol / 币種</th><th>Side / 方向</th><th>Type / 類型</th><th>Qty / 數量</th><th>Conf / 置信</th><th>Source / 来源</th><th>Status / 状态</th></tr></thead>
         <tbody id="intents-tbody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -117,7 +117,7 @@
 
 <!-- ═══ Indicator & Signal Engine ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F4CA; 指标 &amp; 信号引擎 / Indicator &amp; Signal Engine</summary>
+  <summary>&#x1F4CA; 指標 &amp; 信號引擎 / Indicator &amp; Signal Engine</summary>
   <div class="oc-collapse-body">
     <div id="engine-details"><div class="oc-loading">Loading...</div></div>
   </div>
@@ -126,10 +126,10 @@
 <!-- ═══ Strategist Apply History ═══ -->
 <!-- STRATEGIST-HISTORY-OBSERVABILITY-1 GUI tab (backend: strategist_history_routes.py) -->
 <details class="oc-collapse">
-  <summary>&#x1F553; 策略师变更历史 / Strategist Apply History</summary>
+  <summary>&#x1F553; 策略师变更歷史 / Strategist Apply History</summary>
   <div class="oc-collapse-body">
     <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
-      Strategist 5-min 自动 tune 与 Operator 手动 promote 审计轨迹（learning.strategist_applied_params，V019+V020）。
+      Strategist 5-min 自動 tune 与 Operator 手動 promote 審計轨跡（learning.strategist_applied_params，V019+V020）。
       All rows are successful applies (V019 persists post-apply).
     </div>
     <div class="oc-metrics" style="margin-bottom:10px">
@@ -170,13 +170,13 @@
           <option value="operator_override">operator_override</option>
         </select>
       </div>
-      <button class="oc-btn oc-btn-primary" onclick="loadStrategistHistory()">Apply / 应用</button>
+      <button class="oc-btn oc-btn-primary" onclick="loadStrategistHistory()">Apply / 應用</button>
     </div>
     <div class="oc-table-wrap">
       <table class="oc-table">
         <thead>
           <tr>
-            <th>Time / 时间</th>
+            <th>Time / 時間</th>
             <th>Engine</th>
             <th>Strategy / 策略</th>
             <th>Source / 来源</th>
@@ -202,14 +202,14 @@
 <script>
 // ─── Strategy Chinese Name Map ────────────────────────────────
 const STRAT_CN = {
-  'MA_Crossover':     '均线交叉',
-  'BB_Reversion':     '布林回归',
-  'FundingRate_Arb':  '资金费率套利',
-  'Grid_Trading':     '网格交易',
+  'MA_Crossover':     '均線交叉',
+  'BB_Reversion':     '布林回歸',
+  'FundingRate_Arb':  '資金費率套利',
+  'Grid_Trading':     '網格交易',
   'BB_Breakout':      '布林突破',
   'RSI_Divergence':   'RSI 背离',
   'MACD_Trend':       'MACD 趋势',
-  'Volume_Spike':     '量价突破',
+  'Volume_Spike':     '量價突破',
 };
 function stratLabel(name) {
   if (typeof ocStrategyLabel === 'function') {
@@ -217,14 +217,14 @@ function stratLabel(name) {
     if (shared) return shared;
   }
   // Strip symbol suffix (e.g. MA_Crossover_BTCUSDT → MA_Crossover)
-  // 去掉 symbol 后缀，只保留策略类型名
+  // 去掉 symbol 后缀，只保留策略類型名
   const base = Object.keys(STRAT_CN).find(k => name === k || name.startsWith(k + '_'));
   const cn = base ? STRAT_CN[base] : null;
   return cn ? name + ' / ' + cn : name;
 }
 
 // ─── Strategy V2 params renderer ─────────────────────────────
-// 按策略类型渲染 V2 新参数，返回 HTML 片段
+// 按策略類型渲染 V2 新参數，返回 HTML 片段
 // Render V2 parameters per strategy type, returns HTML fragment.
 function stratV2Params(s) {
   const strat = s.strategy || s.name || '';
@@ -267,18 +267,18 @@ function stratV2Params(s) {
 
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-strategy').innerHTML = ocExplain(
-  '策略中心管理所有交易策略。AI Agent 自主决定启动哪些策略（上限 100 个），人类只通过手动开关进行硬关闭。每个策略会分析市场数据并生成交易信号。编排器根据市场状态协调所有策略的运行。',
-  '系统支持 5 种 V2 策略：MA Crossover V2（KAMA+ADX>20+多时间框架确认）、BB Reversion V2（RSI<30确认+Hurst市场状态感知）、BB Breakout V2（成交量比>1.5+Donchian确认+ATR追踪止损）、FundingRate Arb V2（PairedState+真实费用追踪）、Grid V2（OU动态间距 σ/√θ）。策略由 AI Agent 根据市场扫描结果自动部署，上限 100 个实例。'
+  '策略中心管理所有交易策略。AI Agent 自主決定啟動哪些策略（上限 100 個），人類只通過手動開關進行硬關閉。每個策略会分析市场數據并生成交易信號。编排器根據市场状态协調所有策略的運行。',
+  '系統支持 5 種 V2 策略：MA Crossover V2（KAMA+ADX>20+多時間框架确認）、BB Reversion V2（RSI<30确認+Hurst市场状态感知）、BB Breakout V2（成交量比>1.5+Donchian确認+ATR追踪止損）、FundingRate Arb V2（PairedState+真實費用追踪）、Grid V2（OU動態間距 σ/√θ）。策略由 AI Agent 根據市场掃描結果自動部署，上限 100 個實例。'
 );
 
 $('explain-scanner').innerHTML = ocExplain(
-  '市场扫描器每 5 分钟分析 650+ 个交易对，找出最有交易潜力的品种并自动部署策略。',
-  '扫描器对每个交易对计算 5 个维度的得分：funding_arb（资金费率偏离度）、grid（波动率适合网格交易程度）、trend（趋势强度）、reversion（超买超卖程度）、breakout（突破信号强度）。排名最高的品种会被自动部署对应的策略类型。'
+  '市场掃描器每 5 分鐘分析 650+ 個交易對，找出最有交易潜力的品種并自動部署策略。',
+  '掃描器對每個交易對計算 5 個維度的得分：funding_arb（資金費率偏离度）、grid（波動率適合網格交易程度）、trend（趋势强度）、reversion（超买超卖程度）、breakout（突破信號强度）。排名最高的品種會被自動部署對應的策略類型。'
 );
 
 $('explain-intents').innerHTML = ocExplain(
-  '交易意图是策略产生的下单指令。它们在被执行前会经过风控检查，确保不违反任何限制。',
-  'OrderIntent 是策略层到执行层的桥梁。每个 intent 包含：symbol、side、qty、confidence、strategy_source。intent 会经过 cost_gate（ATR% < cost/winrate×1.3 则拒绝）和 StopManager 风控检查后，转换为实际订单提交给 Paper 模拟引擎或 Bybit Demo 演示。'
+  '交易意圖是策略產生的下單指令。它们在被執行前会經過風控檢查，确保不违反任何限制。',
+  'OrderIntent 是策略層到執行層的桥梁。每個 intent 包含：symbol、side、qty、confidence、strategy_source。intent 会經過 cost_gate（ATR% < cost/winrate×1.3 則拒絕）和 StopManager 風控檢查后，转换为實際訂單提交給 Paper 模擬引擎或 Bybit Demo 演示。'
 );
 
 // ─── Create / Delete Strategy ─────────────────────────────────
@@ -288,7 +288,7 @@ function toggleCreateForm() {
 }
 
 // isSubmitting flag prevents double-submit on rapid clicks
-// isSubmitting 标志防止快速点击造成重复提交
+// isSubmitting 標志防止快速點擊造成重復提交
 let _createSubmitting = false;
 
 async function createStrategy() {
@@ -296,7 +296,7 @@ async function createStrategy() {
   _createSubmitting = true;
   const btn = document.querySelector('#create-form button.oc-btn-success');
   const origText = btn ? btn.textContent : null;
-  if (btn) { btn.disabled = true; btn.textContent = '创建中...'; }
+  if (btn) { btn.disabled = true; btn.textContent = '建立中...'; }
   try {
     const body = {
       strategy_type: $('new-type').value,
@@ -343,7 +343,7 @@ async function strategyAction(name, action) {
 async function loadStrategies() {
   let d;
   try { d = await ocApi('/api/v1/strategy/list'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('strategy-grid', '<div class="oc-loading" style="color:var(--text-dim)">无法加载策略 / Failed to load strategies</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('strategy-grid', '<div class="oc-loading" style="color:var(--text-dim)">無法載入策略 / Failed to load strategies</div>'); return; }
   const strategies = d.data.strategies || [];
 
   // Update counters
@@ -351,7 +351,7 @@ async function loadStrategies() {
   ocSetText('orch-active', active);
   ocSetText('orch-total', strategies.length);
 
-  // Update health summary bar / 更新策略健康度汇总栏
+  // Update health summary bar / 更新策略健康度彙總栏
   const paused = strategies.filter(s => s.state === 'paused').length;
   const stopped = strategies.filter(s => s.state === 'stopped' || s.state === 'error').length;
   const total = strategies.length || 1;
@@ -401,17 +401,17 @@ async function loadStrategies() {
     if (s.current_position) html += ' | Pos: ' + ocEsc(s.current_position);
     if (s.cooldown_ms != null) html += ' | CD: ' + (s.cooldown_ms / 1000) + 's';
     html += '</div>';
-    // V2 strategy parameters row / V2 策略参数行
+    // V2 strategy parameters row / V2 策略参數行
     html += stratV2Params(s);
     html += '<div class="strat-actions oc-action-row oc-action-row-strategy" style="margin-top:8px">';
     html += '<span class="oc-action-cluster oc-action-cluster-pause" data-danger-zone="strategy-pause">';
     html += '<button class="oc-btn oc-btn-warning oc-action-pause" title="暂停 / Pause" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
     html += '</span>';
     html += '<span class="oc-action-cluster oc-action-cluster-stop" data-danger-zone="strategy-stop">';
-    html += '<button class="oc-btn oc-btn-danger oc-btn-critical oc-action-stop" title="手动硬关闭 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
+    html += '<button class="oc-btn oc-btn-danger oc-btn-critical oc-action-stop" title="手動硬關閉 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
     html += '</span>';
     html += '<span class="oc-action-cluster oc-action-cluster-destructive" data-danger-zone="strategy-delete">';
-    html += '<button class="oc-btn oc-btn-destructive oc-action-delete" title="永久删除策略（不可撤销） / Delete permanently — irreversible" style="font-size:10px;padding:2px 8px" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
+    html += '<button class="oc-btn oc-btn-destructive oc-action-delete" title="永久删除策略（不可撤銷） / Delete permanently — irreversible" style="font-size:10px;padding:2px 8px" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
     html += '</span>';
     html += '</div>';
     html += '</div>';
@@ -422,11 +422,11 @@ async function loadStrategies() {
 async function loadOrchestrator() {
   let d;
   try { d = await ocApi('/api/v1/strategy/status'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('orch-details', '<div class="oc-loading" style="color:var(--text-dim)">无法加载 / Load failed</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('orch-details', '<div class="oc-loading" style="color:var(--text-dim)">無法載入 / Load failed</div>'); return; }
   const orch = d.data;
 
   // Regime badge — comes from signal_engine signal history (Regime_Detector rule)
-  // 市场状态 badge — 来自信号引擎的 Regime_Detector 规则输出
+  // 市场状态 badge — 来自信號引擎的 Regime_Detector 規則輸出
   const sigStats = (orch.signal_engine_status || {}).stats || {};
   const sigBySrc = sigStats.signals_by_source || {};
   const hasRegime = (sigBySrc['Regime_Detector'] || 0) > 0;
@@ -440,12 +440,12 @@ async function loadOrchestrator() {
   }
 
   // Update active/total from orchestrator (more authoritative than list filter)
-  // 从编排器状态更新 active/total（比 list 过滤更权威）
+  // 从编排器状态更新 active/total（比 list 過滤更權威）
   if (orch.active_count != null) ocSetText('orch-active', orch.active_count);
   if (orch.total_registered != null) ocSetText('orch-total', orch.total_registered);
 
   // Details — correct field paths from actual API response
-  // 详情 — 使用实际 API 响应的正确字段路径
+  // 详情 — 使用實際 API 響應的正确字段路徑
   const stats = orch.stats || {};
   const klMgr = orch.kline_manager_status || {};
   const klStats = klMgr.stats || {};
@@ -474,12 +474,12 @@ async function loadOrchestrator() {
   ocSetHtml('orch-details', '<div class="oc-metrics">' + html + '</div>');
 
   // Also render engine details panel
-  // 同时渲染指标/信号引擎详情面板
+  // 同時渲染指標/信號引擎详情面板
   renderEngineDetails(orch);
 }
 
 // ─── Indicator & Signal Engine Panel ─────────────────────────
-// 渲染指标引擎和信号引擎的详情
+// 渲染指標引擎和信號引擎的详情
 // Renders indicator engine and signal engine details.
 function renderEngineDetails(orch) {
   const indEng = orch.indicator_engine_status || {};
@@ -492,8 +492,8 @@ function renderEngineDetails(orch) {
 
   // Indicator engine
   html += '<div>';
-  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x1F9EE; 指标引擎 / Indicator Engine</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (indEng.indicator_count || 0) + ' 个指标 / ' + (indEng.indicator_count || 0) + ' indicators</div>';
+  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x1F9EE; 指標引擎 / Indicator Engine</div>';
+  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (indEng.indicator_count || 0) + ' 個指標 / ' + (indEng.indicator_count || 0) + ' indicators</div>';
   const indStats = indEng.stats || {};
   html += '<div style="font-size:11px;margin-bottom:6px">';
   html += 'Computations: ' + (indStats.total_computations || 0) + ' · Errors: ' + (indStats.computation_errors || 0) + ' · Cache Hits: ' + (indStats.cache_hits || 0);
@@ -510,8 +510,8 @@ function renderEngineDetails(orch) {
 
   // Signal engine
   html += '<div>';
-  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x26A1; 信号引擎 / Signal Engine</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (sigEng.rule_count || 0) + ' 条规则 · ' + (sigEng.history_size || 0) + ' 条历史</div>';
+  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x26A1; 信號引擎 / Signal Engine</div>';
+  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (sigEng.rule_count || 0) + ' 條規則 · ' + (sigEng.history_size || 0) + ' 條歷史</div>';
   html += '<div style="font-size:11px;margin-bottom:4px">Evals: ' + (sigStats.total_evaluations || 0) + ' · Generated: ' + (sigStats.signals_generated || 0) + ' · Errors: ' + (sigStats.rule_errors || 0) + '</div>';
 
   // Signal direction breakdown
@@ -543,12 +543,12 @@ function renderEngineDetails(orch) {
 async function loadScanner() {
   const d = await ocApi('/api/v1/strategy/scanner/opportunities');
   if (!d || !d.data) {
-    ocSetHtml('scanner-tbody', '<tr class="empty-row"><td colspan="4">扫描器未运行 / Scanner not running</td></tr>');
+    ocSetHtml('scanner-tbody', '<tr class="empty-row"><td colspan="4">掃描器未運行 / Scanner not running</td></tr>');
     return;
   }
   const opps = d.data.opportunities || d.data || [];
   if (!opps.length) {
-    ocSetHtml('scanner-tbody', '<tr class="empty-row"><td colspan="4">暂无机会 / No opportunities</td></tr>');
+    ocSetHtml('scanner-tbody', '<tr class="empty-row"><td colspan="4">暂無機會 / No opportunities</td></tr>');
     return;
   }
   let html = '';
@@ -604,10 +604,10 @@ async function loadDeployed() {
 async function loadIntents() {
   let d;
   try { d = await ocApi('/api/v1/strategy/intents'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">无法加载 / Load failed</td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">無法載入 / Load failed</td></tr>'); return; }
   const intents = d.data.intents || d.data || [];
   if (!intents.length) {
-    ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8">暂无交易意图 / No intents</td></tr>');
+    ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8">暂無交易意圖 / No intents</td></tr>');
     return;
   }
   let html = '';
@@ -667,7 +667,7 @@ async function loadStrategistHistory() {
   let d;
   try { d = await ocApi('/api/v1/strategist/history' + (qs ? '?' + qs : '')); } catch(e) { d = null; }
   if (!d || !d.data) {
-    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">无法加载 / Failed to load</td></tr>');
+    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">無法載入 / Failed to load</td></tr>');
     _shRows = [];
     return;
   }
@@ -679,7 +679,7 @@ async function loadStrategistHistory() {
   const rows = d.data.rows || [];
   _shRows = rows;
   if (!rows.length) {
-    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6">暂无记录 / No history yet</td></tr>');
+    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6">暂無記錄 / No history yet</td></tr>');
     return;
   }
   let html = '';

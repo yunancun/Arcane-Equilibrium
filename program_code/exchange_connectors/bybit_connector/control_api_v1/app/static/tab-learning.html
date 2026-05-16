@@ -10,13 +10,13 @@
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <!-- ═══ REF-20 Wave 7 P5 R20-P5-A2: Agents Monitor 抽出 redirect banner ═══
-     5-Agent 工作台已從 Learning Tab 遷出至獨立 12th tab「AI 团队 Agents」。
+     5-Agent 工作台已從 Learning Tab 遷出至獨立 12th tab「AI 團隊 Agents」。
      本 banner 通知 operator 點此前往；90d 自動 dismiss 後不再顯示。
      localStorage `oc_banner_dismissed_lg-agents-redirect` = 1 → 永久 dismiss；
      localStorage `oc_banner_dismissed_lg-agents-redirect_ts` = ISO ts；
      超 90d 自動清掉 dismiss flag → 再次顯示（防 operator 完全忘記遷移事實）。
 
-     5-Agent dashboard moved from Learning Tab to its own 12th tab "AI 团队 Agents".
+     5-Agent dashboard moved from Learning Tab to its own 12th tab "AI Team Agents".
      This banner notifies operator with link; 90d auto-dismiss reset (so the
      redirect notice eventually re-shows after the migration period). -->
 <style>
@@ -57,7 +57,7 @@
   }
 </style>
 
-<!-- Redirect banner / 遷移通知 — 顯示 operator「AI 团队工作台」已搬遷至獨立 Tab。
+<!-- Redirect banner / 遷移通知 — 顯示 operator「AI 團隊工作台」已搬遷至獨立 Tab。
      dismissable + 90d auto-reset；雙語 i18n hook (data-i18n) 維護 operator 中文 dominant。
      Banner notifies operator that "AI Crew Dashboard" moved to its own tab;
      dismissable + 90d auto-reset; bilingual i18n hook for ops zh-dominant preference. -->
@@ -66,7 +66,7 @@
      data-banner-id="lg-agents-redirect"
      data-auto-dismiss-days="90"
      data-i18n="agents_redirect_banner">
-  &#x1F4E2; <strong>「AI 团队工作台」已搬遷至獨立 Tab</strong>：
+  &#x1F4E2; <strong>「AI 團隊工作台」已搬遷至獨立 Tab</strong>：
   <a href="#tab-agents" class="oc-banner-link" data-target-tab="agents">點此前往</a>
   &nbsp;·&nbsp;
   <em>Agent Tracker moved to its own tab —
@@ -79,8 +79,8 @@
 <div class="oc-card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div>
-      <h2>&#x1F4D6; 学习系统 / Learning System</h2>
-      <div class="subtitle">观察 → 教训 → 假设 → 实验 → 改进</div>
+      <h2>&#x1F4D6; 學習系統 / Learning System</h2>
+      <div class="subtitle">觀察 → 教訓 → 假設 → 實驗 → 改進</div>
     </div>
     <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
   </div>
@@ -97,9 +97,9 @@
   </div>
 </div>
 
-<!-- REF-20 Wave 7 P5 R20-P5-A2/A3: AI 团队工作台 section 已抽出至獨立 tab-agents.html
+<!-- REF-20 Wave 7 P5 R20-P5-A2/A3: AI 團隊工作台 section 已抽出至獨立 tab-agents.html
      原 section id="agent-tracker"（5 卡 + feed + budget + governance + recent rejects）
-     遷至 12th top-level tab「AI 团队 Agents」（per workplan §4 Wave 7 + V3 §11 P5）。
+     遷至 12th top-level tab「AI 團隊 Agents」（per workplan §4 Wave 7 + V3 §11 P5）。
      本檔保留 redirect banner（上方 #lg-redirect-notice）+ 移除整段 section 內容。
      既有 agent-tracker.js 行為 0 mutation；只是 mount target swap。
      Agents Monitor section extracted to its own tab-agents.html (12th top-level
@@ -108,11 +108,11 @@
 
 <!-- ═══ Review Queue ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4E5; 待审核队列 / Review Queue</h3>
+  <h3>&#x1F4E5; 待審核佇列 / Review Queue</h3>
   <div id="explain-review"></div>
   <div class="oc-table-wrap">
     <table class="oc-table">
-      <thead><tr><th>ID</th><th>类型 / Type</th><th>摘要 / Summary</th><th>优先级</th><th>创建时间</th><th>操作</th></tr></thead>
+      <thead><tr><th>ID</th><th>類型 / Type</th><th>摘要 / Summary</th><th>優先級</th><th>建立時間</th><th>操作</th></tr></thead>
       <tbody id="review-tbody"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
     </table>
   </div>
@@ -121,7 +121,7 @@
 <!-- ═══ Two Column: Feed + Net PnL ═══ -->
 <div class="oc-grid-2">
   <div class="oc-card">
-    <h3>&#x1F4CB; 学习动态 / Learning Feed</h3>
+    <h3>&#x1F4CB; 學習動態 / Learning Feed</h3>
     <div class="subtitle">最近的觀察和教訓</div>
     <div id="feed-body" class="oc-loading">Loading...</div>
   </div>
@@ -135,13 +135,13 @@
 
 <!-- ═══ Auto-Scan Controls ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F50D; 自动扫描 / Auto-Scan Controls</summary>
+  <summary>&#x1F50D; 自動掃描 / Auto-Scan Controls</summary>
   <div class="oc-collapse-body">
     <div id="explain-autoscan"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-observations')">扫描观察记录</button>
-      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-lessons')">扫描教训</button>
-      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-hypotheses')">扫描假设</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-observations')">掃描觀察記錄</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-lessons')">掃描教訓</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-hypotheses')">掃描假設</button>
     </div>
     <div id="scan-result" style="margin-top:10px"></div>
   </div>
@@ -149,7 +149,7 @@
 
 <!-- ═══ Experiments ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F9EA; 实验列表 / Experiments</summary>
+  <summary>&#x1F9EA; 實驗列表 / Experiments</summary>
   <div class="oc-collapse-body">
     <div class="oc-table-wrap">
       <table class="oc-table">
@@ -162,7 +162,7 @@
 
 <!-- ═══ Hypotheses ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F4A1; 假设列表 / Hypotheses</summary>
+  <summary>&#x1F4A1; 假設列表 / Hypotheses</summary>
   <div class="oc-collapse-body">
     <div class="oc-table-wrap">
       <table class="oc-table">
@@ -201,26 +201,26 @@ $('explain-autoscan').innerHTML = ocExplain(
 // ─── Actions ──────────────────────────────────────────────────
 async function reviewAction(id, action) {
   const d = await ocPost('/api/v1/learning/review/' + id + '/decide', { decision: action });
-  if (d) { ocToast('审核 ' + action + ' 完成', 'success'); loadReviewQueue(); }
-  else ocToast('审核操作失败', 'error');
+  if (d) { ocToast('審核 ' + action + ' 完成', 'success'); loadReviewQueue(); }
+  else ocToast('審核操作失敗', 'error');
 }
 
 async function aiConsult(id) {
   const d = await ocPost('/api/v1/learning/review/' + id + '/decide', { decision: 'ask_ai' });
-  if (d) { ocToast('AI 咨询已提交', 'success'); loadReviewQueue(); }
-  else ocToast('AI 咨询失败', 'error');
+  if (d) { ocToast('AI 諮詢已提交', 'success'); loadReviewQueue(); }
+  else ocToast('AI 諮詢失敗', 'error');
 }
 
 async function autoScan(type) {
   const d = await ocPost('/api/v1/learning/auto/' + type);
   if (d) {
-    ocToast('扫描完成', 'success');
+    ocToast('掃描完成', 'success');
     const count = d.data ? (d.data.count || d.data.discovered || 0) : 0;
-    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-good">发现 ' + count + ' 条记录</div>');
+    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-good">發現 ' + count + ' 條記錄</div>');
     loadAll();
   } else {
-    ocToast('扫描失败', 'error');
-    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-bad">扫描失败</div>');
+    ocToast('掃描失敗', 'error');
+    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-bad">掃描失敗</div>');
   }
 }
 
@@ -252,14 +252,14 @@ async function loadReviewQueue() {
   try { d = await ocApi('/api/v1/learning/review-queue'); } catch(e) { d = null; }
   if (!d || !d.data) {
     ocSetText('l-queue', '--');
-    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">无法加载 / Failed to load review queue</td></tr>');
+    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">無法載入 / Failed to load review queue</td></tr>');
     return;
   }
   const items = d.data.items || d.data.queue || d.data || [];
   ocSetText('l-queue', items.length);
 
   if (!items.length) {
-    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6">审核队列为空 / Queue is empty</td></tr>');
+    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6">審核佇列為空 / Queue is empty</td></tr>');
     return;
   }
   let html = '';
@@ -272,8 +272,8 @@ async function loadReviewQueue() {
     html += '<td>' + ocTimeShort(item.created_at) + '</td>';
     html += '<td style="white-space:nowrap">';
     html += '<button class="oc-btn oc-btn-success" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'approve\')">批准</button> ';
-    html += '<button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'reject\')">驳回</button> ';
-    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="aiConsult(\'' + item.id + '\')">AI 咨询</button>';
+    html += '<button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'reject\')">駁回</button> ';
+    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="aiConsult(\'' + item.id + '\')">AI 諮詢</button>';
     html += '</td>';
     html += '</tr>';
   });
@@ -283,7 +283,7 @@ async function loadReviewQueue() {
 async function loadFeed() {
   let d;
   try { d = await ocApi('/api/v1/learning/feed'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('feed-body', '<div class="oc-loading" style="color:var(--text-dim)">无法加载 / Failed to load feed</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('feed-body', '<div class="oc-loading" style="color:var(--text-dim)">無法載入 / Failed to load feed</div>'); return; }
 
   // API returns observations_recent and lessons_recent arrays
   const observations = (d.data.observations_recent || []).map(o => ({ ...o, _feedType: 'observation' }));
@@ -297,7 +297,7 @@ async function loadFeed() {
   if (!feed.length) {
     ocSetHtml('feed-body',
       '<div style="color:var(--text-dim);font-size:12px;padding:8px 0">' +
-      '暂无学习动态 / No feed items yet<br>' +
+      '暫無學習動態 / No feed items yet<br>' +
       '<span style="font-size:11px">Total observations: ' + totalObs + ' | Total lessons: ' + totalLessons + '</span>' +
       '</div>');
     return;
@@ -323,7 +323,7 @@ async function loadFeed() {
 async function loadNetPnl() {
   let d;
   try { d = await ocApi('/api/v1/learning/net-pnl'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('netpnl-body', '<div class="oc-loading" style="color:var(--text-dim)">无法加载 / Failed to load PnL</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('netpnl-body', '<div class="oc-loading" style="color:var(--text-dim)">無法載入 / Failed to load PnL</div>'); return; }
   const pnl = d.data;
   let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
   const fields = [
@@ -352,10 +352,10 @@ async function loadNetPnl() {
 async function loadExperiments() {
   let d;
   try { d = await ocApi('/api/v1/learning/experiments'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('experiments-tbody', '<tr class="empty-row"><td colspan="5" style="color:var(--text-dim)">无法加载 / Load failed</td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('experiments-tbody', '<tr class="empty-row"><td colspan="5" style="color:var(--text-dim)">無法載入 / Load failed</td></tr>'); return; }
   const exps = d.data.experiments || d.data || [];
   if (!exps.length) {
-    ocSetHtml('experiments-tbody', '<tr class="empty-row"><td colspan="5">暂无实验 / No experiments</td></tr>');
+    ocSetHtml('experiments-tbody', '<tr class="empty-row"><td colspan="5">暫無實驗 / No experiments</td></tr>');
     return;
   }
   let html = '';
@@ -374,10 +374,10 @@ async function loadExperiments() {
 async function loadHypotheses() {
   let d;
   try { d = await ocApi('/api/v1/learning/hypotheses'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('hypotheses-tbody', '<tr class="empty-row"><td colspan="5" style="color:var(--text-dim)">无法加载 / Load failed</td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('hypotheses-tbody', '<tr class="empty-row"><td colspan="5" style="color:var(--text-dim)">無法載入 / Load failed</td></tr>'); return; }
   const hyps = d.data.hypotheses || d.data || [];
   if (!hyps.length) {
-    ocSetHtml('hypotheses-tbody', '<tr class="empty-row"><td colspan="5">暂无假设 / No hypotheses</td></tr>');
+    ocSetHtml('hypotheses-tbody', '<tr class="empty-row"><td colspan="5">暫無假設 / No hypotheses</td></tr>');
     return;
   }
   let html = '';
@@ -416,7 +416,7 @@ window.addEventListener('occurrencychange', loadAll);
 // Dual-key design: dismiss flag + dismiss timestamp, auto-reset after 90d so the
 // redirect notice eventually re-shows after the migration period.
 //
-// 切換到 12th tab「AI 团队 Agents」/ Switch to 12th tab "AI Agents":
+// 切換到 12th tab「AI 團隊 Agents」/ Switch to 12th tab "AI Agents":
 //   tab-learning.html 是 console.html 的 iframe；switchTo() 由 parent window
 //   的 console.html 提供。透過 window.parent.switchTo('agents') 跨 iframe 觸發。
 //   tab-learning.html runs as iframe inside console.html; switchTo() is in parent.

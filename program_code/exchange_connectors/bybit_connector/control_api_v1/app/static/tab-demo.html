@@ -9,33 +9,33 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
-<!-- Connector Status + Demo Session Control / 连接状态 + Demo 会话控制 -->
+<!-- Connector Status + Demo Session Control / 连接状态 + Demo 會話控制 -->
 <div class="oc-control-bar">
   <span style="font-weight:600">&#x1F3E6; Demo 演示</span>
-  <span id="demo-badge" class="oc-chip oc-chip-neutral">检测中...</span>
+  <span id="demo-badge" class="oc-chip oc-chip-neutral">檢測中...</span>
   <span id="demo-session-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px">--</span>
   <span style="flex:1"></span>
-  <button class="oc-btn" onclick="openDemoRisk()" title="跳转到 Demo 风控页 / Open Demo risk controls" style="font-size:12px;padding:4px 10px;border-color:rgba(56,139,253,0.45);color:var(--blue)">&#x1F6E1; 风控</button>
-  <button class="oc-btn oc-btn-success" id="btn-demo-start" onclick="demoSessionAction('start')" style="font-size:12px;padding:4px 10px">&#x25B6; 启动</button>
+  <button class="oc-btn" onclick="openDemoRisk()" title="跳转到 Demo 風控页 / Open Demo risk controls" style="font-size:12px;padding:4px 10px;border-color:rgba(56,139,253,0.45);color:var(--blue)">&#x1F6E1; 風控</button>
+  <button class="oc-btn oc-btn-success" id="btn-demo-start" onclick="demoSessionAction('start')" style="font-size:12px;padding:4px 10px">&#x25B6; 啟動</button>
   <button class="oc-btn" id="btn-demo-pause" onclick="demoSessionAction('pause')" disabled style="font-size:12px;padding:4px 10px">&#x23F8; 暂停</button>
-  <button class="oc-btn" id="btn-demo-resume" onclick="demoSessionAction('resume')" disabled style="font-size:12px;padding:4px 10px">&#x25B6; 继续</button>
+  <button class="oc-btn" id="btn-demo-resume" onclick="demoSessionAction('resume')" disabled style="font-size:12px;padding:4px 10px">&#x25B6; 繼續</button>
   <button class="oc-btn oc-btn-danger" id="btn-demo-stop" onclick="demoSessionAction('stop')" disabled style="font-size:12px;padding:4px 10px">&#x23F9; 停止</button>
   <span style="font-size:12px;color:var(--text-dim);margin-left:8px" id="demo-api-info"></span>
 </div>
 
 <div id="explain-demo"></div>
 
-<!-- Content (shown when connected) / 已连接时显示 -->
+<!-- Content (shown when connected) / 已连接時顯示 -->
 <div id="demo-content" style="display:none">
 
-  <!-- Account Balance / 账户余额 -->
+  <!-- Account Balance / 賬户余额 -->
   <div class="oc-card">
-    <h3>&#x1F4B0; 账户余额 / Account Balance</h3>
+    <h3>&#x1F4B0; 賬户余额 / Account Balance</h3>
     <div class="oc-metrics" id="balance-grid">
       <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val" id="d-initial">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="钱包余额 + 未实现盈亏，当前账户的真实总价值。/ Wallet balance + unrealized PnL, the current real-time total value of the account.">总净值 / Total Equity</div><div class="oc-metric-val" id="d-equity">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="钱包余额 + 未實現盈亏，當前賬户的真實總價值。/ Wallet balance + unrealized PnL, the current real-time total value of the account.">總净值 / Total Equity</div><div class="oc-metric-val" id="d-equity">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val" id="d-available">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">已用保证金 / Margin Used</div><div class="oc-metric-val" id="d-margin">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">已用保證金 / Margin Used</div><div class="oc-metric-val" id="d-margin">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val" id="d-peak">--</div></div>
     </div>
   </div>
@@ -45,16 +45,16 @@
     <h3>&#x1F4B5; 盈亏概览 / PnL Overview</h3>
     <div class="oc-metrics">
       <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="d-net">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">已实现盈亏 / Realized PnL</div><div class="oc-metric-val" id="d-realized">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">未实现盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="d-unrealized">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。注意：高胜率不等于盈利，需结合盈亏比。/ Win percentage. High win rate does not guarantee profit — check win/loss ratio.">胜率 / Win Rate</div><div class="oc-metric-val" id="d-winrate">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="平均盈利 / 平均亏损。>1 表示赢的比输的多。与胜率结合看：胜率高但盈亏比<1 仍可能总体亏损。/ Avg win ÷ avg loss. >1 means wins are larger than losses.">盈亏比 / W/L Ratio</div><div class="oc-metric-val" id="d-wlratio">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的资金回撤。越小越好。/ Largest peak-to-trough decline in equity. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="d-maxdd">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">已實現盈亏 / Realized PnL</div><div class="oc-metric-val" id="d-realized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">未實現盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="d-unrealized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占總交易的百分比。注意：高勝率不等于盈利，需結合盈亏比。/ Win percentage. High win rate does not guarantee profit — check win/loss ratio.">勝率 / Win Rate</div><div class="oc-metric-val" id="d-winrate">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="平均盈利 / 平均亏損。>1 表示贏的比輸的多。与勝率結合看：勝率高但盈亏比<1 仍可能總體亏損。/ Avg win ÷ avg loss. >1 means wins are larger than losses.">盈亏比 / W/L Ratio</div><div class="oc-metric-val" id="d-wlratio">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的資金回撤。越小越好。/ Largest peak-to-trough decline in equity. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="d-maxdd">--</div></div>
     </div>
-    <!-- PnL Trend Sparkline / 盈亏趋势图 -->
+    <!-- PnL Trend Sparkline / 盈亏趋势圖 -->
     <div style="margin-top:10px">
       <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-        <span>累计收益时间序列 / Cumulative PnL Timeline <span id="demo-pnl-range-label" style="font-size:9px;color:var(--text-dim)"></span></span>
+        <span>累計收益時間序列 / Cumulative PnL Timeline <span id="demo-pnl-range-label" style="font-size:9px;color:var(--text-dim)"></span></span>
         <div id="demo-pnl-range-controls" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
           <button class="oc-btn" data-pnl-range="1h" onclick="setDemoPnlRange('1h')" style="font-size:10px;padding:2px 8px">1H</button>
           <button class="oc-btn" data-pnl-range="6h" onclick="setDemoPnlRange('6h')" style="font-size:10px;padding:2px 8px">6H</button>
@@ -72,23 +72,23 @@
       </svg>
       <div class="oc-table-wrap" style="margin-top:8px;max-height:190px;overflow:auto">
         <table class="oc-table">
-          <thead><tr><th>时间 / Time</th><th>成交</th><th>区间净 PnL</th><th>累计净 PnL</th><th>手续费</th></tr></thead>
+          <thead><tr><th>時間 / Time</th><th>成交</th><th>區間净 PnL</th><th>累計净 PnL</th><th>手續費</th></tr></thead>
           <tbody id="demo-pnl-series-rows"><tr class="empty-row"><td colspan="5">loading...</td></tr></tbody>
         </table>
       </div>
     </div>
   </div>
 
-  <!-- Positions / 持仓 -->
+  <!-- Positions / 持倉 -->
   <div class="oc-card">
     <h3 style="display:flex;align-items:center;gap:10px">
-      &#x1F4CA; 持仓 / Positions
+      &#x1F4CA; 持倉 / Positions
       <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="openDemoCloseAllDialog()">&#x274C; 全部平倉</button>
     </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>开仓金额</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th><th>操作</th></tr></thead>
-        <tbody id="demo-positions"><tr class="empty-row"><td colspan="12">加载中...</td></tr></tbody>
+        <thead><tr><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>數量</th><th>開倉價</th><th>開倉金额</th><th>標記價</th><th>未實現盈亏</th><th>杠杆</th><th>强平價</th><th>操作</th></tr></thead>
+        <tbody id="demo-positions"><tr class="empty-row"><td colspan="12">載入中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -125,26 +125,26 @@
     </details>
   </div>
 
-  <!-- Active Orders / 活跃订单 -->
+  <!-- Active Orders / 活跃訂單 -->
   <div class="oc-card">
-    <h3>&#x1F4DD; 活跃订单 / Active Orders <span id="demo-order-counts" style="font-size:11px;color:var(--text-dim);font-weight:400"></span></h3>
+    <h3>&#x1F4DD; 活跃訂單 / Active Orders <span id="demo-order-counts" style="font-size:11px;color:var(--text-dim);font-weight:400"></span></h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>触发价</th><th>状态</th></tr></thead>
-        <tbody id="demo-orders"><tr class="empty-row"><td colspan="9">暂无订单</td></tr></tbody>
+        <thead><tr><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>類型</th><th>數量</th><th>價格</th><th>触发價</th><th>状态</th></tr></thead>
+        <tbody id="demo-orders"><tr class="empty-row"><td colspan="9">暂無訂單</td></tr></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Performance Metrics / 性能指标 -->
+  <!-- Performance Metrics / 性能指標 -->
   <div class="oc-card">
-    <h3>&#x1F4CB; 性能指标 / Performance Metrics</h3>
-    <div class="oc-metrics oc-performance-metrics" id="demo-perf-metrics"><div class="oc-loading">加载中...</div></div>
+    <h3>&#x1F4CB; 性能指標 / Performance Metrics</h3>
+    <div class="oc-metrics oc-performance-metrics" id="demo-perf-metrics"><div class="oc-loading">載入中...</div></div>
   </div>
 
-  <!-- Fill History / 成交历史 -->
+  <!-- Fill History / 成交歷史 -->
   <details class="oc-collapse">
-    <summary>&#x1F4C4; 成交历史 / Fill History（分页，每页 50 笔）</summary>
+    <summary>&#x1F4C4; 成交歷史 / Fill History（分页，每页 50 笔）</summary>
     <div class="oc-collapse-body">
       <div class="oc-fill-toolbar">
         <div class="oc-fill-tabs" id="demo-fill-tabs">
@@ -159,29 +159,29 @@
           <button class="oc-btn" id="demo-fills-next" onclick="demoFillNext()" disabled>下一页</button>
         </div>
       </div>
-      <div class="oc-fill-summary" id="demo-fills-summary">当前只加载本页数据，切页时再拉取下一页。</div>
+      <div class="oc-fill-summary" id="demo-fills-summary">當前只載入本页數據，切页時再拉取下一页。</div>
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead id="demo-fills-head"><tr><th>时间</th><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr></thead>
-          <tbody id="demo-fills"><tr class="empty-row"><td colspan="10">加载中...</td></tr></tbody>
+          <thead id="demo-fills-head"><tr><th>時間</th><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>數量</th><th>價格</th><th>成交金额</th><th>手續費</th><th>盈亏 / PnL</th></tr></thead>
+          <tbody id="demo-fills"><tr class="empty-row"><td colspan="10">載入中...</td></tr></tbody>
         </table>
       </div>
     <div class="oc-metrics" style="margin-top:8px">
-      <div class="oc-metric"><div class="oc-metric-label" title="本次会话的初始投入资金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="d-fills-capital">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="已实现 + 未实现盈亏 = 当前净收益。正值盈利，负值亏损。/ Realized + Unrealized PnL = current net return.">累计收益 / Net Return</div><div class="oc-metric-val" id="d-fills-return">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="本次會話的初始投入資金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="d-fills-capital">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="已實現 + 未實現盈亏 = 當前净收益。正值盈利，負值亏損。/ Realized + Unrealized PnL = current net return.">累計收益 / Net Return</div><div class="oc-metric-val" id="d-fills-return">--</div></div>
     </div>
     </div>
   </details>
 
-  <!-- Comparison / 对比 -->
+  <!-- Comparison / 對比 -->
   <details class="oc-collapse">
-    <summary>&#x1F504; Paper vs Demo 数据对比 / Comparison</summary>
+    <summary>&#x1F504; Paper vs Demo 數據對比 / Comparison</summary>
     <div class="oc-collapse-body">
       <div id="explain-comparison"></div>
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>指标</th><th>Paper 模拟</th><th>Demo 演示</th><th>匹配</th></tr></thead>
-          <tbody id="comparison-tbody"><tr class="empty-row"><td colspan="4">加载中...</td></tr></tbody>
+          <thead><tr><th>指標</th><th>Paper 模擬</th><th>Demo 演示</th><th>匹配</th></tr></thead>
+          <tbody id="comparison-tbody"><tr class="empty-row"><td colspan="4">載入中...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -194,16 +194,16 @@
     <div class="oc-not-configured">
       <div class="icon">&#x1F3E6;</div>
       <h3>Demo 演示 未连接 / Not Connected</h3>
-      <p>Demo 演示 需要配置 API 密钥才能使用。请在环境配置中设置 Bybit Demo API 密钥。</p>
+      <p>Demo 演示 需要配置 API 密钥才能使用。請在環境配置中設置 Bybit Demo API 密钥。</p>
       <details class="oc-explain-deep" style="margin-top:16px;text-align:left">
         <summary style="color:var(--accent);cursor:pointer">如何配置</summary>
         <div class="oc-explain-content">
           <p>1. 在 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 注册并获取 API 密钥</p>
-          <p>2. 将密钥添加到环境配置文件 <code>.env</code>：</p>
+          <p>2. 将密钥添加到環境配置文件 <code>.env</code>：</p>
           <pre class="oc-pre" style="margin:8px 0">BYBIT_DEMO_API_KEY=your_key_here
 BYBIT_DEMO_API_SECRET=your_secret_here</pre>
-          <p>3. 重启交易系统以加载新配置</p>
-          <p style="margin-top:8px;color:var(--text-dim)">Demo 演示 使用真实市场数据但虚拟资金，订单在 Bybit 的沙盒服务器上执行。与本地 Paper 模拟的区别是：Demo 订单会经过 Bybit 的撮合引擎，更接近真实环境。</p>
+          <p>3. 重啟交易系統以載入新配置</p>
+          <p style="margin-top:8px;color:var(--text-dim)">Demo 演示 使用真實市场數據但虚擬資金，訂單在 Bybit 的沙盒服務器上執行。与本地 Paper 模擬的區别是：Demo 訂單会經過 Bybit 的撮合引擎，更接近真實環境。</p>
         </div>
       </details>
     </div>
@@ -213,13 +213,13 @@ BYBIT_DEMO_API_SECRET=your_secret_here</pre>
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-demo').innerHTML = ocExplain(
-  'Demo 演示 是 Bybit 交易所提供的沙盒环境，使用真实市场数据但虚拟资金。订单在 Bybit 的测试服务器上执行，更接近真实交易环境。',
-  '系统采用「双重执行」模式：每笔交易同时在本地 Paper 模拟 和 Demo 演示 上执行。这样可以对比两个引擎的结果差异，验证本地模拟的准确性。如果两边出现较大偏差，可能意味着本地模拟的假设需要调整。'
+  'Demo 演示 是 Bybit 交易所提供的沙盒環境，使用真實市场數據但虚擬資金。訂單在 Bybit 的測試服務器上執行，更接近真實交易環境。',
+  '系統采用「双重執行」模式：每笔交易同時在本地 Paper 模擬 和 Demo 演示 上執行。這樣可以對比兩個引擎的結果差異，驗證本地模擬的准确性。如果兩边出現较大偏差，可能意味着本地模擬的假設需要調整。'
 );
 
 $('explain-comparison').innerHTML = ocExplain(
-  '对比本地 Paper 模拟 和 Demo 演示 的数据，帮助发现差异。两边一致说明本地模拟准确。',
-  '常见偏差来源：滑点模型差异（本地固定 0.01%，Demo 受真实订单簿影响）、成交时间差（本地即时，Demo 需要网络往返）、费率差异（本地使用配置费率，Demo 使用 Bybit 实际费率）。'
+  '對比本地 Paper 模擬 和 Demo 演示 的數據，帮助發現差異。兩边一致說明本地模擬准确。',
+  '常见偏差来源：滑点模型差異（本地固定 0.01%，Demo 受真實訂單簿影响）、成交時間差（本地即時，Demo 需要網絡往返）、費率差異（本地使用配置費率，Demo 使用 Bybit 實際費率）。'
 );
 
 // Session baseline — server-authoritative, NO browser caching.
@@ -244,6 +244,13 @@ let _demoPnlRange = '24h';
 let _demoConnectedOnce = false;
 let _demoMetricsLoadedOnce = false;
 let _demoFillsLoadedOnce = false;
+// 並行加載防重入 + tab 可見性節流：避免 15s timer + visibilitychange + console 切 tab 三路同時觸發 loadAll
+// 造成同一時刻 8 個 Bybit Demo REST 重複打，加大 GUI 卡頓。
+let _demoRefreshInFlight = false;
+let _demoTabVisible = true;
+function _isDemoTabRefreshVisible() {
+  return _demoTabVisible && document.visibilityState !== 'hidden';
+}
 const DEMO_FILL_PAGE_SIZE = 50;
 const DEMO_FILL_TABS = {
   aggregate: { label: '聚合 / Aggregate', side: '' },
@@ -370,6 +377,12 @@ function _renderDemoDustPanel(positions) {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadDemoStatus() {
+  // 並行加速：原本 5 段 serial network round-trip（balance → fills → metrics →
+  // pnl-series → comparison-balance）合計約 700-1500ms；改為先確認 balance 連線後
+  // 把其餘 6 個 endpoint 一口氣並行派發，wall-clock 收斂到 max(...) ≈ 300-400ms。
+  // positions/orders 對 fills-derived strategy map 的依賴是 best-effort fallback
+  // — 後端 owner_strategy 已是權威（Rust paper_state 注入），首幀 fills 未到時
+  // 出現的 '--' 在 15s 次輪 refresh 自然補齊。
   const balD = await ocApi('/api/v1/strategy/demo/balance');
   // Accept both Rust-first (source=rust_engine, no retCode) and raw Bybit (retCode=0) responses
   // 同時接受 Rust 優先路徑（無 retCode）和原始 Bybit（retCode=0）的回應格式
@@ -381,17 +394,15 @@ async function loadDemoStatus() {
     $('demo-content').style.display = '';
     $('demo-offline').style.display = 'none';
     renderBalance(balD.data);
-    // Fills must load first: positions/orders tables derive the symbol→strategy
-    // map from _demoFillsCache (paper pipeline can be disabled, so paper
-    // positions are an unreliable source for strategy attribution).
-    // fills 必須先載入：持倉/訂單表的 symbol→策略名 依賴 _demoFillsCache（paper 管線可關，
-    // 不能作為策略歸屬的可靠來源）。
-    await loadDemoFills();
-    loadPositions();
-    loadDemoOrders();
-    await loadDemoMetrics(balD.data);
-    await loadDemoPnlSeries();
-    loadComparison();
+    // 並行：loadComparison 接收已抓的 balance，避免重複打 /demo/balance。
+    await Promise.allSettled([
+      loadDemoFills(),
+      loadPositions(),
+      loadDemoOrders(),
+      loadDemoMetrics(balD.data),
+      loadDemoPnlSeries(),
+      loadComparison(balD.data),
+    ]);
     return;
   }
   if (!_demoConnectedOnce) showOffline();
@@ -523,7 +534,7 @@ async function loadPositions() {
   }
   positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
-    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="12">暂无持仓</td></tr>');
+    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="12">暂無持倉</td></tr>');
     // Empty positions → empty dust panel (footer shows "no dust").
     // 空持倉 → 空塵埃面板（footer 顯示「無塵埃倉位」）。
     _renderDemoDustPanel([]);
@@ -607,25 +618,25 @@ async function loadDemoOrders() {
     return st === 'new' || st === 'partiallyfilled' || st === 'untriggered';
   });
 
-  // 显示计数 / Show counts
+  // 顯示計數 / Show counts
   const regCount = d.data.regular_count || 0;
   const condCount = d.data.conditional_count || 0;
   const countsEl = document.getElementById('demo-order-counts');
-  if (countsEl) countsEl.textContent = '（普通 ' + regCount + ' / 条件止损 ' + condCount + '）';
+  if (countsEl) countsEl.textContent = '（普通 ' + regCount + ' / 條件止損 ' + condCount + '）';
 
   if (!orders.length) {
-    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="9">暂无订单</td></tr>');
+    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="9">暂無訂單</td></tr>');
     return;
   }
   let html = '';
-  const typeMap = { Market: '市价', Limit: '限价' };
-  const statusMap = { New: '挂单中', PartiallyFilled: '部分成交', Untriggered: '待触发' };
+  const typeMap = { Market: '市價', Limit: '限價' };
+  const statusMap = { New: '掛單中', PartiallyFilled: '部分成交', Untriggered: '待触发' };
   orders.forEach(o => {
     const sideLabel = o.side === 'Buy' ? '买入' : '卖出';
     const orderType = o.orderType || o.order_type || '';
     const status = o.orderStatus || o.status || '';
     const isConditional = o._orderFilter === 'StopOrder' || status === 'Untriggered';
-    const typeLabel = isConditional ? '条件止损' : (typeMap[orderType] || ocEsc(orderType));
+    const typeLabel = isConditional ? '條件止損' : (typeMap[orderType] || ocEsc(orderType));
     const triggerPrice = parseFloat(o.triggerPrice || 0);
     const sym = o.symbol || '';
     const cat = o.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
@@ -637,7 +648,7 @@ async function loadDemoOrders() {
     html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + typeLabel + '</td>';
     html += '<td>' + ocNum(parseFloat(o.qty || o.origQty || 0), 4) + '</td>';
-    html += '<td>' + (parseFloat(o.price || 0) > 0 ? ocNum(parseFloat(o.price), 2) : '市价') + '</td>';
+    html += '<td>' + (parseFloat(o.price || 0) > 0 ? ocNum(parseFloat(o.price), 2) : '市價') + '</td>';
     html += '<td>' + (triggerPrice > 0 ? ocNum(triggerPrice, 2) : '--') + '</td>';
     html += '<td>' + (statusMap[status] || ocEsc(status)) + '</td>';
     html += '</tr>';
@@ -668,9 +679,9 @@ function _demoExtractFills(data) {
 
 function _demoFillHead(tab) {
   if (tab === 'profit') {
-    return '<tr><th>平倉时间</th><th>交易对</th><th>策略</th><th>开仓</th><th>平倉</th><th>数量</th><th>持仓</th><th>收益 / PnL</th></tr>';
+    return '<tr><th>平倉時間</th><th>交易對</th><th>策略</th><th>開倉</th><th>平倉</th><th>數量</th><th>持倉</th><th>收益 / PnL</th></tr>';
   }
-  return '<tr><th>时间</th><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>成交金额</th><th>手续费</th><th>盈亏 / PnL</th></tr>';
+  return '<tr><th>時間</th><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>數量</th><th>價格</th><th>成交金额</th><th>手續費</th><th>盈亏 / PnL</th></tr>';
 }
 
 function _demoFillRow(f) {
@@ -799,7 +810,7 @@ async function loadDemoFills() {
   _demoUpdateFillControls(null, []);
   ocSetHtml('demo-fills-head', _demoFillHead(_demoFillState.tab));
   if (!_demoFillsLoadedOnce) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">加载中...</td></tr>');
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">載入中...</td></tr>');
   }
   try {
     const d = await ocApi('/api/v1/strategy/demo/fills' + qs);
@@ -810,33 +821,41 @@ async function loadDemoFills() {
     _demoFillState.loading = false;
     _demoUpdateFillControls(payload, fills);
     if (!fills.length) {
-      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">暂无成交</td></tr>');
+      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">暂無成交</td></tr>');
       return;
     }
     const html = _demoFillState.tab === 'profit'
-      ? (_demoBuildProfitRows(fills).map(_demoProfitRow).join('') || '<tr class="empty-row"><td colspan="8">本页没有可关联收益</td></tr>')
+      ? (_demoBuildProfitRows(fills).map(_demoProfitRow).join('') || '<tr class="empty-row"><td colspan="8">本页没有可關联收益</td></tr>')
       : fills.map(_demoFillRow).join('');
     ocSetHtml('demo-fills', html);
   } catch (e) {
     _demoFillState.loading = false;
     _demoUpdateFillControls(null, []);
     if (!_demoFillsLoadedOnce) {
-      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">无法加载成交</td></tr>');
+      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">無法載入成交</td></tr>');
     }
   }
 }
 
-async function loadComparison() {
-  const [paperD, demoD] = await Promise.allSettled([
-    ocApi('/api/v1/paper/session/status'),
-    ocApi('/api/v1/strategy/demo/balance'),
-  ]);
-
-  const paper = paperD.status === 'fulfilled' && paperD.value ? paperD.value.data : null;
-  const demo = demoD.status === 'fulfilled' && demoD.value ? demoD.value.data : null;
+async function loadComparison(passedDemoBal) {
+  // 接受已抓的 demo balance 避免重複 round-trip（loadDemoStatus 已抓過）；
+  // 未傳入時退回原行為，兼容其它呼叫路徑。
+  let paper, demo;
+  if (passedDemoBal) {
+    const paperD = await ocApi('/api/v1/paper/session/status');
+    paper = paperD && paperD.data ? paperD.data : null;
+    demo = passedDemoBal;
+  } else {
+    const [paperD, demoD] = await Promise.allSettled([
+      ocApi('/api/v1/paper/session/status'),
+      ocApi('/api/v1/strategy/demo/balance'),
+    ]);
+    paper = paperD.status === 'fulfilled' && paperD.value ? paperD.value.data : null;
+    demo = demoD.status === 'fulfilled' && demoD.value ? demoD.value.data : null;
+  }
 
   if (!paper || !demo) {
-    ocSetHtml('comparison-tbody', '<tr class="empty-row"><td colspan="4">数据不足</td></tr>');
+    ocSetHtml('comparison-tbody', '<tr class="empty-row"><td colspan="4">數據不足</td></tr>');
     return;
   }
 
@@ -859,10 +878,10 @@ async function loadComparison() {
   const demoInitial = Number.isFinite(demoEngineInitial) && demoEngineInitial > 0 ? demoEngineInitial : 0;
   const demoUnrealized = parseFloat(demoB.totalPerpUPL || 0);
   const rows = [
-    ['已实现盈亏', ocMoney(paperPnl.realized_pnl || 0), ocMoney(demoRealized)],
-    ['未实现盈亏', ocMoney(paperPnl.unrealized_pnl || 0), ocMoney(demoUnrealized)],
+    ['已實現盈亏', ocMoney(paperPnl.realized_pnl || 0), ocMoney(demoRealized)],
+    ['未實現盈亏', ocMoney(paperPnl.unrealized_pnl || 0), ocMoney(demoUnrealized)],
     ['净盈亏', ocMoney(paperPnl.net_paper_pnl || 0), ocMoney(demoRealized + demoUnrealized)],
-    ['当前余额', ocBalance(demoInitial + demoRealized + demoUnrealized, 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
+    ['當前余额', ocBalance(demoInitial + demoRealized + demoUnrealized, 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
     ['可用余额', '--', ocBalance(parseFloat(demoB.totalAvailableBalance || demoB.availableBalance || 0), 2)],
   ];
 
@@ -880,7 +899,7 @@ async function loadComparison() {
 }
 
 // Reconstruct round trips from fills: pair Buy opens with Sell closes (and vice versa)
-// 从成交记录重建完整交易：配对买入开仓与卖出平倉
+// 从成交記錄重建完整交易：配對买入開倉与卖出平倉
 function _calcRoundTrips(fills) {
   if (!fills || !Array.isArray(fills) || fills.length === 0) return [];
   // Group by symbol, then pair opens with closes
@@ -948,7 +967,7 @@ async function loadDemoMetrics(raw) {
     b = raw.result.list[0];
   }
   if (!b) {
-    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无数据</div>');
+    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂無數據</div>');
     return;
   }
 
@@ -974,7 +993,7 @@ async function loadDemoMetrics(raw) {
   ocSetText('d-maxdd', maxDdMetric ? ocFormatPerformanceMetric(maxDdMetric) : '--');
 
   if (!m || !Array.isArray(metrics) || metrics.length === 0) {
-    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无指标数据</div>');
+    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂無指標數據</div>');
     return;
   }
   ocSetHtml('demo-perf-metrics', ocRenderPerformanceMetrics(metrics));
@@ -1009,15 +1028,15 @@ async function loadDemoPnlSeries() {
     ocSetHtml('demo-pnl-series-rows', ocPnlSeriesTableRows(points));
   } else {
     ocPnlSeriesTrend('demo-pnl-line', 'demo-pnl-label', [], 'demo-pnl-zero', null);
-    ocSetHtml('demo-pnl-series-rows', '<tr class="empty-row"><td colspan="5">暂无 PnL bucket；后端序列待加载或当前区间无成交</td></tr>');
+    ocSetHtml('demo-pnl-series-rows', '<tr class="empty-row"><td colspan="5">暂無 PnL bucket；后端序列待載入或當前區間無成交</td></tr>');
   }
 }
 
-// ─── Demo Session Controls / Demo 会话控制 ──────────────────────
+// ─── Demo Session Controls / Demo 會話控制 ──────────────────────
 // All actions target Demo engine only — Paper engine is unaffected.
 // 所有操作僅影響 Demo 引擎，Paper 引擎不受影響。
 async function demoSessionAction(action) {
-  const labels = { start: '已启动', pause: '已暂停', resume: '已继续', stop: '已停止' };
+  const labels = { start: '已啟動', pause: '已暂停', resume: '已繼續', stop: '已停止' };
   const d = await ocPost('/api/v1/strategy/demo/session/' + action, {});
   if (d) {
     ocToast('Demo 演示' + (labels[action] || action), 'success');
@@ -1031,7 +1050,7 @@ function updateDemoSessionButtons(demoState) {
   const running = (demoState === 'active');
   const paused = (demoState === 'paused');
   const badge = $('demo-session-badge');
-  const stateLabels = { active: '运行中', paused: '已暂停', stopped: '已停止', offline: '离线' };
+  const stateLabels = { active: '運行中', paused: '已暂停', stopped: '已停止', offline: '离線' };
   badge.textContent = stateLabels[demoState] || demoState || '--';
   badge.className = 'oc-chip ' + (running ? 'oc-chip-good' : paused ? 'oc-chip-warn' : 'oc-chip-neutral');
 
@@ -1041,22 +1060,47 @@ function updateDemoSessionButtons(demoState) {
   $('btn-demo-stop').disabled = (!running && !paused);
 }
 
-async function loadAll() {
-  await loadDemoStatus();
-  // Update session buttons from Demo engine state (independent of Paper).
-  // 從 Demo 引擎自己的狀態更新按鈕，與 Paper 引擎獨立。
+async function loadAll(opts) {
+  const force = opts && opts.force === true;
+  // 不可見時跳過 timer 觸發的 refresh（手動觸發/force 仍允許）；防 background tab 每 15s 燒 API。
+  if (!force && !_isDemoTabRefreshVisible()) return;
+  if (_demoRefreshInFlight) return;
+  _demoRefreshInFlight = true;
   try {
-    const sd = await ocApi('/api/v1/strategy/demo/session/status');
-    if (sd && sd.data && sd.data.session) {
-      updateDemoSessionButtons(sd.data.session.session_state);
-    }
-  } catch (e) {}
+    // 主資料 + session status 並行；status 不依賴 balance/positions/orders 任何
+    // 結果，沒有理由排在最後 serial 等。
+    const sessionP = ocApi('/api/v1/strategy/demo/session/status');
+    await loadDemoStatus();
+    try {
+      const sd = await sessionP;
+      if (sd && sd.data && sd.data.session) {
+        updateDemoSessionButtons(sd.data.session.session_state);
+      }
+    } catch (e) {}
+  } finally {
+    _demoRefreshInFlight = false;
+  }
 }
 
-loadAll();
+// tab 可見性訊息：與 tab-live 行為對齊。父視窗（console.html）切到 demo tab 時
+// postMessage 通知 visible=true，立即 force refresh；其他 tab 顯示時暫停 timer。
+window.addEventListener('message', function(ev) {
+  if (ev.origin !== window.location.origin) return;
+  if (!ev.data || ev.data.type !== 'openclaw-tab-visibility' || ev.data.tab !== 'demo') return;
+  _demoTabVisible = ev.data.visible !== false;
+  if (_isDemoTabRefreshVisible()) {
+    loadAll({ force: true });
+  }
+});
+
+document.addEventListener('visibilitychange', function() {
+  if (_isDemoTabRefreshVisible()) loadAll({ force: true });
+});
+
+loadAll({ force: true });
 ocStartRefresh(loadAll, 15000);
 ocInitFx();
-window.addEventListener('occurrencychange', loadAll);
+window.addEventListener('occurrencychange', function() { loadAll({ force: true }); });
 
 // ─── Close All Demo Positions ─────────────────────────────────
 // 關閉所有 Demo 倉位
@@ -1120,7 +1164,7 @@ async function closeDemoPosition(symbol, ownerStrategy, frozenReason) {
   if (!ok) return;
   const d = await ocPost('/api/v1/strategy/demo/positions/' + encodeURIComponent(symbol) + '/close', {});
   if (d && d.data) {
-    ocToast('✓ ' + symbol + ' 平倉指令已发送', 'success');
+    ocToast('✓ ' + symbol + ' 平倉指令已發送', 'success');
     setTimeout(loadAll, 1500);
   } else {
     ocToast(symbol + ' 平倉失败，請檢查 Demo 连接', 'error');

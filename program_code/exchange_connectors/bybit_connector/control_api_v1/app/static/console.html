@@ -178,7 +178,7 @@
   <span class="tag tag-green" id="mode-tag">shadow_only</span>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
-  <span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle USDT → USD → EUR / 点击切换计价货币">USDT</span>
+  <span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle USDT → USD → EUR / 點擊切换計價货币">USDT</span>
   <span style="font-size:11px;color:var(--text-dim);margin:0 4px" id="user-label"></span>
   <button class="header-btn" onclick="ocLogout()">Logout</button>
 </div>
@@ -189,7 +189,7 @@
   <!-- ─── Sidebar ─── -->
   <div class="sidebar">
 
-    <!-- Live / Demo panel switcher buttons / 实盘/Demo 面板切换按钮 -->
+    <!-- Live / Demo panel switcher buttons / 實盤/Demo 面板切换按钮 -->
     <div style="display:flex;gap:4px;margin-bottom:8px">
       <button id="spbtn-live" onclick="toggleSidePanel('live')"
         style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.15);color:#ef4444;cursor:pointer">
@@ -203,7 +203,7 @@
 
     <!-- Switchable Live / Demo panel -->
     <div id="side-panel-live" class="side-panel active">
-      <h2 style="margin:0 0 5px">&#x1F534; Live / 实盘</h2>
+      <h2 style="margin:0 0 5px">&#x1F534; Live / 實盤</h2>
       <div class="mc" id="live-section" style="opacity:0.5">
         <div class="mc-label">System Mode</div>
         <div class="mc-val" id="s-live-mode" style="font-size:13px">--</div>
@@ -249,7 +249,7 @@
       <div class="mc-sub" id="s-cost-detail"></div>
     </div>
 
-    <h2>System / 系统</h2>
+    <h2>System / 系統</h2>
     <div class="mc">
       <div class="mc-label">Control API</div>
       <div class="mc-val" id="s-api" style="font-size:14px">--</div>
@@ -282,7 +282,7 @@ const USER_KEY = 'oc_username';
 localStorage.removeItem('oc_trading_token');
 
 (function() {
-  // Synchronous auth check via cookie / 通过 cookie 同步验证认证
+  // Synchronous auth check via cookie / 通過 cookie 同步驗證認證
   try {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/v1/auth/check', false);
@@ -298,10 +298,10 @@ localStorage.removeItem('oc_trading_token');
 })();
 
 // ocLogout is defined in common.js (calls /api/v1/auth/logout + clears cookie)
-// ocLogout 已在 common.js 中定义（调用登出端点 + 清除 cookie）
+// ocLogout 已在 common.js 中定义（調用登出端点 + 清除 cookie）
 
 // getToken() removed — auth handled by HttpOnly cookie (common.js ocGetToken() if needed)
-// getToken() 已移除 — 认证由 HttpOnly cookie 处理（如需可用 common.js 的 ocGetToken()）
+// getToken() 已移除 — 認證由 HttpOnly cookie 處理（如需可用 common.js 的 ocGetToken()）
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
@@ -317,7 +317,7 @@ const TAB_GROUP_LABELS = {
   edge: '策略/Edge',
   governance: '治理',
   intelligence: '智能',
-  ops: '运维',
+  ops: '運維',
 };
 const TAB_GROUP_SHORTCUTS = {
   '1': 'core',
@@ -345,31 +345,31 @@ const TAB_GROUP_DEFAULT_OPEN = {
   ops: false,
 };
 const TABS = [
-  { id: 'system',     group: 'core', label: '总览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
+  { id: 'system',     group: 'core', label: '總览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
   { id: 'edge-gates', group: 'core', label: 'Pre-Live Gates',   labelEn: 'Edge Gates',icon: '&#x1F4C8;', src: `/static/tab-edge-gates.html?v=${_v}` },
-  // ── 交易环境：低风险到高风险 / Trading environments: low-risk to high-risk ──
+  // ── 交易環境：低風險到高風險 / Trading environments: low-risk to high-risk ──
   // FIX-43: split into direct Demo + Paper tabs (eliminate double-iframe nesting)
   // FIX-43：拆為直接 Demo + Paper 標籤（消除雙層 iframe 嵌套）
   { id: 'paper',      group: 'trading', label: 'Legacy Paper',  labelEn: 'Paper',     icon: '&#x1F9EA;', src: `/static/tab-paper.html?v=${_v}`, requiresPaperEngine: true },
   { id: 'demo',       group: 'trading', label: '演示 Demo',     labelEn: 'Demo',      icon: '&#x1F3E6;', src: `/static/tab-demo.html?v=${_v}` },
-  { id: 'live',       group: 'trading', label: '实盘 Live',     labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
-  { id: 'replay',     group: 'edge', label: '回测 Replay',      labelEn: 'Replay',    icon: '&#x23F1;',  src: `/static/tab-replay.html?v=${_v}` },
+  { id: 'live',       group: 'trading', label: '實盤 Live',     labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
+  { id: 'replay',     group: 'edge', label: '回測 Replay',      labelEn: 'Replay',    icon: '&#x23F1;',  src: `/static/tab-replay.html?v=${_v}` },
   { id: 'strategy',   group: 'edge', label: '策略 Strategy',    labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
-  { id: 'charts',     group: 'edge', label: '图表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
-  { id: 'risk',       group: 'governance', label: '风控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
+  { id: 'charts',     group: 'edge', label: '圖表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
+  { id: 'risk',       group: 'governance', label: '風控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
   { id: 'governance', group: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
   { id: 'ai',         group: 'intelligence', label: 'AI 状态',          labelEn: 'AI Status', icon: '&#x1F9E0;', src: `/static/tab-ai.html?v=${_v}` },
-  { id: 'learning',   group: 'intelligence', label: '学习 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
+  { id: 'learning',   group: 'intelligence', label: '學習 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
   // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor 抽出（位置在 Learning 之後）
   // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor extracted (position: after Learning)
   // 既有 agent-tracker.js 行為 0 mutation；mount target 從 tab-learning.html → tab-agents.html
   // icon=🤖 robot（對齊既有 emoji icon set）；read-only never-emit surface（V3 §11 P5）
   // agent-tracker.js logic 0 mutation; mount target swapped from tab-learning.html → tab-agents.html
   // icon=🤖 robot (consistent with existing emoji icon set); read-only never-emit surface (V3 §11 P5)
-  { id: 'agents',     group: 'intelligence', label: 'Agent 团队',       labelEn: 'Agents',    icon: '&#x1F465;', src: `/static/tab-agents.html?v=${_v}` },
-  { id: 'monitoring', group: 'ops', label: '监控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
-  { id: 'development',group: 'ops', label: '开发状态 Support', labelEn: 'Support',   icon: '&#x1F6E0;', src: `/static/tab-development.html?v=${_v}`, requiresDevelopmentSupport: true },
-  { id: 'settings',   group: 'ops', label: '设置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
+  { id: 'agents',     group: 'intelligence', label: 'Agent 團隊',       labelEn: 'Agents',    icon: '&#x1F465;', src: `/static/tab-agents.html?v=${_v}` },
+  { id: 'monitoring', group: 'ops', label: '監控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
+  { id: 'development',group: 'ops', label: '開发状态 Support', labelEn: 'Support',   icon: '&#x1F6E0;', src: `/static/tab-development.html?v=${_v}`, requiresDevelopmentSupport: true },
+  { id: 'settings',   group: 'ops', label: '設置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
 ];
 
 let currentTab = 'system';
@@ -409,7 +409,7 @@ function setTabGroupExpanded(groupId, expanded, persist) {
     const toggle = group.querySelector('.tab-group-label');
     if (toggle) toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     const state = group.querySelector('.tab-group-state');
-    if (state) state.textContent = expanded ? '收起' : '展开';
+    if (state) state.textContent = expanded ? '收起' : '展開';
   }
   if (persist !== false) persistTabGroupExpandedState();
 }
@@ -465,7 +465,7 @@ function buildTabs() {
     const label = document.createElement('button');
     label.type = 'button';
     label.className = 'tab-group-label';
-    label.title = '展开/折叠 ' + (TAB_GROUP_LABELS[id] || id) + ' · 快捷键 ' + (TAB_GROUP_SHORTCUT_LABELS[id] || '');
+    label.title = '展開/折叠 ' + (TAB_GROUP_LABELS[id] || id) + ' · 快捷键 ' + (TAB_GROUP_SHORTCUT_LABELS[id] || '');
     label.setAttribute('aria-expanded', tabGroupExpanded[id] ? 'true' : 'false');
     const tabCount = TABS.filter(tab => (tab.group || 'core') === id).length;
     label.innerHTML =
@@ -742,7 +742,7 @@ setInterval(() => {
 const user = localStorage.getItem(USER_KEY);
 if (user) document.getElementById('user-label').textContent = user;
 // Auth status is determined by HttpOnly cookie, not a JS-accessible token.
-// 认证状态由 HttpOnly cookie 决定，非 JS 可访问的 token。
+// 認證状态由 HttpOnly cookie 決定，非 JS 可訪问的 token。
 document.getElementById('s-token-status').textContent = 'cookie-auth';
 
 // ─── Side Panel Toggle (Live ↔ Demo) ─────────────────────────
@@ -771,9 +771,9 @@ function toggleSidePanel(clicked) {
 
 // ─── Sidebar API helper (APR01-MEDIUM-13: cookie-based auth) ─
 async function api(path) {
-  // HttpOnly cookie sent automatically / HttpOnly cookie 自动发送
+  // HttpOnly cookie sent automatically / HttpOnly cookie 自動發送
   // 5s timeout prevents sidebar from blocking when API is slow after restart
-  // 5 秒超时防止重启后 API 慢导致侧边栏卡死
+  // 5 秒超時防止重啟后 API 慢导致侧边栏卡死
   try {
     const r = await fetch(path, { credentials: 'same-origin', signal: AbortSignal.timeout(5000) });
     if (!r.ok) {
@@ -926,7 +926,7 @@ async function refreshSidebar() {
       document.getElementById('s-paper-balance').textContent = equity > 0 ? ocBalance(equity, 2) : '--';
       const s = sd && sd.session ? sd.session : {};
       const state = s.session_state || 'offline';
-      const stateLabel = {active:'运行中',paused:'已暂停',stopped:'已停止',idle:'未启动'}[state] || state;
+      const stateLabel = {active:'運行中',paused:'已暂停',stopped:'已停止',idle:'未啟動'}[state] || state;
       document.getElementById('s-paper-balance-detail').textContent =
         stateLabel + (available > 0 ? ' | Available: ' + ocBalance(available, 2) : '');
 
@@ -960,7 +960,7 @@ async function refreshSidebar() {
   // OpenClaw
   try {
     const r = await fetch(OC + '/health', {
-      credentials: 'same-origin'  // HttpOnly cookie sent automatically / 自动发送 HttpOnly cookie
+      credentials: 'same-origin'  // HttpOnly cookie sent automatically / 自動發送 HttpOnly cookie
     });
     const h = await r.json();
     document.getElementById('s-oc').textContent = h.ok ? 'Online' : 'Down';

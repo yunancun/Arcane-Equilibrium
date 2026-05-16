@@ -185,7 +185,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
 .settings-label { font-size: 13px; color: #e5e7eb; flex: 1; }
 .settings-apply-btn { width: 100%; margin-top: 12px; font-size: 13px; padding: 10px 12px; }
 
-/* ── 响应式 / Responsive ─────────────────────────────────────────────────── */
+/* ── 響應式 / Responsive ─────────────────────────────────────────────────── */
 
 @media (max-width: 980px) {
   .topbar { flex-direction: column; align-items: stretch; }
@@ -201,11 +201,11 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
- * L 章样式：学习驾驶舱 + 净 PnL 仪表盘
+ * L 章樣式：學習駕駛艙 + 淨 PnL 儀表盤
  * L-Chapter Styles: Learning Cockpit + Net PnL Dashboard
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── 学习标签页 / Learning Tabs ──────────────────────────────────────────────── */
+/* ── 學習標籤頁 / Learning Tabs ──────────────────────────────────────────────── */
 .learning-tabs {
   display: flex;
   gap: 4px;
@@ -233,17 +233,17 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
   font-weight: 600;
 }
 
-/* ── 标签页内容 / Tab Content ────────────────────────────────────────────────── */
+/* ── 標籤頁內容 / Tab Content ────────────────────────────────────────────────── */
 .learning-tab-content { display: none; }
 .learning-tab-content.active { display: block; }
 
-/* ── 学习表单 / Learning Form ────────────────────────────────────────────────── */
+/* ── 學習表單 / Learning Form ────────────────────────────────────────────────── */
 .learning-form { margin-bottom: 16px; }
 .form-textarea { resize: vertical; min-height: 48px; font-family: inherit; }
 .form-row-inline { display: flex; gap: 12px; }
 .form-row-inline > div { flex: 1; }
 
-/* ── 学习记录列表 / Learning Records List ─────────────────────────────────────── */
+/* ── 學習記錄列表 / Learning Records List ─────────────────────────────────────── */
 .learning-records-list { display: flex; flex-direction: column; gap: 8px; }
 .learning-record-item {
   background: rgba(255,255,255,0.03);
@@ -266,7 +266,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
 .learning-record-ts { color: var(--muted); font-size: 0.75rem; margin-left: auto; }
 .learning-record-verdict { color: var(--muted); font-size: 0.85rem; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
 
-/* ── 学习记录操作按钮 / Learning Record Action Buttons ─────────────────────────── */
+/* ── 學習記錄操作按鈕 / Learning Record Action Buttons ─────────────────────────── */
 .learning-record-actions {
   display: flex;
   gap: 6px;
@@ -300,7 +300,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
   letter-spacing: 0.02em;
 }
 
-/* ── 学习统计栏 / Learning Stats Bar ──────────────────────────────────────────── */
+/* ── 學習統計欄 / Learning Stats Bar ──────────────────────────────────────────── */
 .learning-stats {
   display: flex;
   gap: 16px;
@@ -314,7 +314,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
   flex-wrap: wrap;
 }
 
-/* ── 净 PnL 仪表盘 / Net PnL Dashboard ──────────────────────────────────────── */
+/* ── 淨 PnL 儀表盤 / Net PnL Dashboard ──────────────────────────────────────── */
 .pnl-highlight { color: #2ecc71; font-size: 1.1em; }
 .net-pnl-actions {
   padding: 12px 0;
@@ -328,7 +328,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
 }
 .net-pnl-actions .entry-submit-btn { margin-top: 0; white-space: nowrap; }
 
-/* ── 审核队列 / Review Queue ──────────────────────────────────────────────────── */
+/* ── 審核佇列 / Review Queue ──────────────────────────────────────────────────── */
 .review-scan-bar {
   display: flex;
   gap: 10px;

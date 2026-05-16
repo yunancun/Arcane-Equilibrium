@@ -131,17 +131,17 @@
 <body>
 
 <!-- header hidden in ?embed=1 mode (when loaded inside console.html iframe) -->
-<!-- 在 ?embed=1 模式下隐藏 header（嵌入 console.html iframe 时） -->
+<!-- 在 ?embed=1 模式下隐藏 header（嵌入 console.html iframe 時） -->
 <div class="header" id="trading-header">
   <div class="status-dot" id="api-dot"></div>
-  <h1>玄衡 K线图表</h1>
+  <h1>玄衡 K線圖表</h1>
   <span class="tag tag-blue">Paper Trading</span>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
 </div>
 <script>
 // Hide header when embedded in iframe via ?embed=1
-// 嵌入 iframe 时通过 ?embed=1 隐藏 header
+// 嵌入 iframe 時通過 ?embed=1 隐藏 header
 if (new URLSearchParams(window.location.search).get('embed') === '1') {
   var h = document.getElementById('trading-header');
   if (h) h.style.display = 'none';
@@ -156,7 +156,7 @@ if (new URLSearchParams(window.location.search).get('embed') === '1') {
       <option value="BTCUSDT">BTCUSDT</option>
       <option value="ETHUSDT">ETHUSDT</option>
     </select>
-    <div style="font-size:9px;color:var(--text-dim);margin-top:3px" id="sym-hint">Agent 交易的币种会自动加入</div>
+    <div style="font-size:9px;color:var(--text-dim);margin-top:3px" id="sym-hint">Agent 交易的币種會自動加入</div>
 
     <h2>Timeframe</h2>
     <div class="btn-group" id="tf-buttons">
@@ -211,7 +211,7 @@ if (new URLSearchParams(window.location.search).get('embed') === '1') {
 
     <div class="bottom-panels">
       <div class="bottom-panel">
-        <h3>Paper PnL &nbsp;<span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle currency / 点击切换计价货币">USDT</span></h3>
+        <h3>Paper PnL &nbsp;<span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle currency / 點擊切换計價货币">USDT</span></h3>
         <div class="pnl-grid" id="pnl-grid">
           <div class="pnl-item"><div class="label">Balance</div><div class="value" id="pnl-balance">--</div></div>
           <div class="pnl-item"><div class="label">Net PnL</div><div class="value" id="pnl-net">--</div></div>
@@ -236,7 +236,7 @@ if (new URLSearchParams(window.location.search).get('embed') === '1') {
 
 <script>
 // Auth check: verify HttpOnly cookie via /api/v1/auth/check
-// 认证检查：通过 /api/v1/auth/check 验证 HttpOnly cookie
+// 認證檢查：通過 /api/v1/auth/check 驗證 HttpOnly cookie
 (function() {
   // Clean up legacy localStorage token / 清理旧的 localStorage token
   localStorage.removeItem('oc_trading_token');
@@ -269,12 +269,12 @@ let refreshTimer = null;
 
 // ============================================================
 // API helper — delegates to ocApi() from common.js
-// API 辅助函数 — 委托给 common.js 中的 ocApi()
+// API 辅助函數 — 委托給 common.js 中的 ocApi()
 // ============================================================
 async function api(path) {
   // Thin wrapper around ocApi() that updates the status dot on success/failure.
   // ocApi() handles auth counting, HttpOnly cookie, timeouts, and error toasts.
-  // 简单包装 ocApi()，在成功/失败时更新状态点。
+  // 簡單包装 ocApi()，在成功/失败時更新状态点。
   const result = await ocApi(path);
   if (result) {
     document.getElementById('api-dot').className = 'status-dot live';
@@ -655,7 +655,7 @@ function stopAutoRefresh() {
 
 // ============================================================
 // Init — auth is handled by HttpOnly cookie (no token check needed)
-// 初始化 — 认证由 HttpOnly cookie 处理（无需检查 token）
+// 初始化 — 認證由 HttpOnly cookie 處理（無需檢查 token）
 // ============================================================
 loadAll();
 startAutoRefresh();

@@ -9,37 +9,37 @@
 "use strict";
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// L 章自动学习：审核队列渲染 + 动作处理 / Auto Learning: Review Queue Render + Actions
+// L 章自動學習：審核佇列渲染 + 動作處理 / Auto Learning: Review Queue Render + Actions
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * 审核包状态标签 / Review packet status badge.
+ * 審核包状态標簽 / Review packet status badge.
  */
 function reviewStatusBadge(status) {
   const map = {
-    pending_review: '<span class="badge badge-warning">待审核 / Pending</span>',
+    pending_review: '<span class="badge badge-warning">待審核 / Pending</span>',
     approved: '<span class="badge badge-success">已批准 / Approved</span>',
-    rejected: '<span class="badge badge-danger">已拒绝 / Rejected</span>',
+    rejected: '<span class="badge badge-danger">已拒絕 / Rejected</span>',
     deferred: '<span class="badge badge-muted">已搁置 / Deferred</span>',
-    ai_consulted: '<span class="badge badge-info">已咨询AI / AI Consulted</span>'
+    ai_consulted: '<span class="badge badge-info">已諮詢AI / AI Consulted</span>'
   };
   return map[status] || `<span class="badge">${ocEsc(status)}</span>`;
 }
 
 /**
- * 审核包类型标签 / Review packet type label.
+ * 審核包類型標簽 / Review packet type label.
  */
 function reviewTypeLabel(packetType) {
   const map = {
-    auto_observation: "自动观察 / Auto Observation",
-    auto_lesson: "自动经验 / Auto Lesson",
-    auto_hypothesis: "自动假设 / Auto Hypothesis"
+    auto_observation: "自動觀察 / Auto Observation",
+    auto_lesson: "自動經驗 / Auto Lesson",
+    auto_hypothesis: "自動假設 / Auto Hypothesis"
   };
   return map[packetType] || ocEsc(packetType);
 }
 
 /**
- * 渲染单个审核包卡片 / Render a single review packet card.
+ * 渲染單個審核包卡片 / Render a single review packet card.
  */
 function renderReviewPacketCard(p) {
   const isPending = p.status === "pending_review" || p.status === "ai_consulted";
@@ -54,13 +54,13 @@ function renderReviewPacketCard(p) {
           <button class="review-decide-btn review-btn-approve" data-packet-id="${p.packet_id}" data-decision="approve">
             批准 / Approve
           </button>
-          <div class="review-consequence">${escHtml((opts.approve || {}).consequence || "记录为正式条目")}</div>
+          <div class="review-consequence">${escHtml((opts.approve || {}).consequence || "記錄为正式條目")}</div>
         </div>
         <div class="review-action-group">
           <button class="review-decide-btn review-btn-reject" data-packet-id="${p.packet_id}" data-decision="reject">
-            拒绝 / Reject
+            拒絕 / Reject
           </button>
-          <div class="review-consequence">${escHtml((opts.reject || {}).consequence || "丢弃，不记录")}</div>
+          <div class="review-consequence">${escHtml((opts.reject || {}).consequence || "丢弃，不記錄")}</div>
         </div>
         <div class="review-action-group">
           <button class="review-decide-btn review-btn-defer" data-packet-id="${p.packet_id}" data-decision="defer">
@@ -70,9 +70,9 @@ function renderReviewPacketCard(p) {
         </div>
         <div class="review-action-group">
           <button class="review-ai-consult-btn" data-packet-id="${p.packet_id}">
-            询问 AI / Ask AI (${aiSec.recommended_tier || "light"}, ~$${(aiSec.estimated_cost_usd || 0.02).toFixed(2)})
+            詢問 AI / Ask AI (${aiSec.recommended_tier || "light"}, ~$${(aiSec.estimated_cost_usd || 0.02).toFixed(2)})
           </button>
-          <div class="review-consequence">${escHtml(aiSec.pre_built_question ? "让AI评估这个发现" : "暂无AI建议")}</div>
+          <div class="review-consequence">${escHtml(aiSec.pre_built_question ? "讓AI評估這個發現" : "暂無AI建議")}</div>
         </div>
       </div>`;
   }
@@ -82,10 +82,10 @@ function renderReviewPacketCard(p) {
     const r = p.ai_consultation_result;
     aiResultHtml = `
       <div class="review-ai-result">
-        <div class="review-ai-result-header">AI 咨询结果 / AI Consultation Result</div>
-        <div class="review-ai-question"><strong>问题 / Question:</strong> ${escHtml(r.question_sent || "")}</div>
-        <div class="review-ai-response"><strong>回复 / Response:</strong> ${escHtml(r.ai_response || "")}</div>
-        <div class="review-ai-cost">费用 / Cost: $${(r.cost_usd || 0).toFixed(4)}</div>
+        <div class="review-ai-result-header">AI 諮詢結果 / AI Consultation Result</div>
+        <div class="review-ai-question"><strong>问題 / Question:</strong> ${escHtml(r.question_sent || "")}</div>
+        <div class="review-ai-response"><strong>回復 / Response:</strong> ${escHtml(r.ai_response || "")}</div>
+        <div class="review-ai-cost">費用 / Cost: $${(r.cost_usd || 0).toFixed(4)}</div>
       </div>`;
   }
 
@@ -98,7 +98,7 @@ function renderReviewPacketCard(p) {
         <span class="learning-record-ts">${fmtTs(p.created_ts_ms)}</span>
       </div>
       <div class="review-packet-section">
-        <div class="review-section-label">简要说明 / What Happened</div>
+        <div class="review-section-label">簡要說明 / What Happened</div>
         <div class="review-section-content">${escHtml(p.what_happened || "")}</div>
       </div>
       <div class="review-packet-section">
@@ -112,7 +112,7 @@ function renderReviewPacketCard(p) {
 }
 
 /**
- * 渲染审核队列 / Render the review queue tab.
+ * 渲染審核佇列 / Render the review queue tab.
  */
 function renderReviewQueue(queueData) {
   if (!queueData) return;
@@ -121,7 +121,7 @@ function renderReviewQueue(queueData) {
   if (listEl) {
     const pending = queueData.pending_packets || [];
     listEl.innerHTML = pending.length === 0
-      ? '<div class="muted-row">暂无待审核项 / No pending review packets</div>'
+      ? '<div class="muted-row">暂無待審核项 / No pending review packets</div>'
       : pending.map(p => renderReviewPacketCard(p)).join("");
   }
 
@@ -130,19 +130,19 @@ function renderReviewQueue(queueData) {
     const decided = queueData.recent_decided || [];
     if (decided.length > 0) {
       decidedEl.innerHTML = `
-        <div class="review-decided-header">最近已处理 / Recently Decided (${decided.length})</div>
+        <div class="review-decided-header">最近已處理 / Recently Decided (${decided.length})</div>
         ${decided.map(p => renderReviewPacketCard(p)).join("")}`;
     } else {
       decidedEl.innerHTML = "";
     }
   }
 
-  // 更新待审核计数 / Update pending review count
+  // 更新待審核計數 / Update pending review count
   setText("lrnPendingCount", queueData.pending_count ?? 0);
 }
 
 /**
- * 触发自动扫描 / Trigger auto scan.
+ * 触发自動掃描 / Trigger auto scan.
  */
 async function triggerAutoScan(scanType) {
   const routeMap = {
@@ -157,19 +157,19 @@ async function triggerAutoScan(scanType) {
     const result = await apiPost(route, baseEnvelope());
     const d = result.data || {};
     setActionSummary(
-      `扫描${scanType} / Scan ${scanType}`, "success",
+      `掃描${scanType} / Scan ${scanType}`, "success",
       result.state_revision || "-", "-",
-      `生成 ${d.packets_generated || 0} 个审核包，跳过 ${d.skipped_duplicates || 0} 个重复。`,
+      `生成 ${d.packets_generated || 0} 個審核包，跳過 ${d.skipped_duplicates || 0} 個重復。`,
       d
     );
     await loadDashboard();
   } catch (error) {
-    setActionSummary(`扫描失败 / Scan Failed (${scanType})`, "failed", "-", "-", String(error), String(error));
+    setActionSummary(`掃描失败 / Scan Failed (${scanType})`, "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 对审核包做决定 / Apply a review decision.
+ * 對審核包做決定 / Apply a review decision.
  */
 async function applyReviewDecision(packetId, decision) {
   try {
@@ -177,39 +177,39 @@ async function applyReviewDecision(packetId, decision) {
       payload: { decision, reason: "" }
     }));
     const d = result.data || {};
-    const labels = { approve: "批准", reject: "拒绝", defer: "搁置" };
+    const labels = { approve: "批准", reject: "拒絕", defer: "搁置" };
     setActionSummary(
       `${labels[decision] || decision} / ${decision}`, "success",
       result.state_revision || "-", "-",
-      `审核包 ${packetId} 已${labels[decision] || decision}。${d.record_created ? " 已创建记录 " + (d.created_record_id || "") : ""}`,
+      `審核包 ${packetId} 已${labels[decision] || decision}。${d.record_created ? " 已建立記錄 " + (d.created_record_id || "") : ""}`,
       d
     );
     await loadDashboard();
   } catch (error) {
-    setActionSummary("审核失败 / Review Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("審核失败 / Review Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 请求 AI 咨询 / Request AI consultation for a review packet.
+ * 請求 AI 諮詢 / Request AI consultation for a review packet.
  */
 async function requestAIConsult(packetId) {
   try {
     const result = await apiPost(`/api/v1/learning/review/${encodeURIComponent(packetId)}/decide`, { ...baseEnvelope(), decision: 'ask_ai' });
     const d = result.data || {};
     setActionSummary(
-      "AI 咨询 / AI Consult", "success",
+      "AI 諮詢 / AI Consult", "success",
       result.state_revision || "-", "-",
-      `已咨询 AI (${d.ai_tier || "light"})，费用 $${(d.cost_usd || 0).toFixed(4)}`,
+      `已諮詢 AI (${d.ai_tier || "light"})，費用 $${(d.cost_usd || 0).toFixed(4)}`,
       d
     );
     await loadDashboard();
   } catch (error) {
-    setActionSummary("AI 咨询失败 / AI Consult Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("AI 諮詢失败 / AI Consult Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
-// ── 事件绑定 / Event binding ──────────────────────────────────────────────────
+// ── 事件綁定 / Event binding ──────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureGuiEnhancements();
@@ -217,7 +217,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // APR01-MEDIUM-13: Token is now in HttpOnly cookie. Clean up legacy localStorage.
   // Auto-connect using cookie auth (no manual token input needed).
   // APR01-MEDIUM-13：Token 已移至 HttpOnly cookie。清理旧 localStorage。
-  // 使用 cookie 认证自动连接（无需手动输入 token）。
+  // 使用 cookie 認證自動连接（無需手動輸入 token）。
   localStorage.removeItem('oc_trading_token');
   // Auto-connect: cookie is sent automatically, just load dashboard.
   // 自動連接：cookie 自動發送，直接載入儀表板。
@@ -230,7 +230,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, 200);
 
-  // 使用事件委托处理所有动态按钮 / Use event delegation for all dynamic buttons
+  // 使用事件委托處理所有動態按钮 / Use event delegation for all dynamic buttons
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
     if (target) {
@@ -239,7 +239,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 产品族配置应用 / Product family config apply
+    // 產品族配置應用 / Product family config apply
     const pfApply = event.target.closest(".pf-apply-btn");
     if (pfApply) {
       event.preventDefault();
@@ -247,7 +247,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 产品族权限应用 / Product family permissions apply
+    // 產品族權限應用 / Product family permissions apply
     const pfPermApply = event.target.closest(".pf-perm-apply-btn");
     if (pfPermApply) {
       event.preventDefault();
@@ -255,7 +255,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 费用录入 / Cost entry submit
+    // 費用录入 / Cost entry submit
     if (event.target.closest("#submitCostEntry")) {
       event.preventDefault();
       submitCostEntry();
@@ -269,14 +269,14 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 系统设置：风险策略 / Settings: risk policy
+    // 系統設置：風險策略 / Settings: risk policy
     if (event.target.closest("#applyRiskSwitch")) {
       event.preventDefault();
       applyRiskPolicySetting();
       return;
     }
 
-    // 系统设置：Demo/Learning / Settings: demo/learning
+    // 系統設置：Demo/Learning / Settings: demo/learning
     if (event.target.closest("#applyDemoLearningSettings")) {
       event.preventDefault();
       applyDemoLearningSettings();
@@ -285,35 +285,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ── L 章事件 / L-chapter events ─────────────────────────────────────────
 
-    // 观察录入 / Observation submit
+    // 觀察录入 / Observation submit
     if (event.target.closest("#submitObservation")) {
       event.preventDefault();
       submitObservation();
       return;
     }
 
-    // 经验录入 / Lesson submit
+    // 經驗录入 / Lesson submit
     if (event.target.closest("#submitLesson")) {
       event.preventDefault();
       submitLesson();
       return;
     }
 
-    // 假设录入 / Hypothesis submit
+    // 假設录入 / Hypothesis submit
     if (event.target.closest("#submitHypothesis")) {
       event.preventDefault();
       submitHypothesis();
       return;
     }
 
-    // 实验录入 / Experiment submit
+    // 實驗录入 / Experiment submit
     if (event.target.closest("#submitExperiment")) {
       event.preventDefault();
       submitExperiment();
       return;
     }
 
-    // 假设审批按钮 / Hypothesis verdict buttons
+    // 假設審批按钮 / Hypothesis verdict buttons
     const hypVerdictBtn = event.target.closest(".hyp-verdict-btn");
     if (hypVerdictBtn) {
       event.preventDefault();
@@ -321,7 +321,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 实验审批按钮 / Experiment approval buttons
+    // 實驗審批按钮 / Experiment approval buttons
     const expApproveBtn = event.target.closest(".exp-approve-btn");
     if (expApproveBtn) {
       event.preventDefault();
@@ -329,7 +329,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 实验完成按钮 / Experiment completion button
+    // 實驗完成按钮 / Experiment completion button
     const expCompleteBtn = event.target.closest(".exp-complete-btn");
     if (expCompleteBtn) {
       event.preventDefault();
@@ -344,7 +344,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 自动扫描按钮 / Auto scan buttons
+    // 自動掃描按钮 / Auto scan buttons
     const scanBtn = event.target.closest(".auto-scan-btn");
     if (scanBtn) {
       event.preventDefault();
@@ -352,7 +352,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 审核决策按钮 / Review decision buttons
+    // 審核決策按钮 / Review decision buttons
     const reviewDecideBtn = event.target.closest(".review-decide-btn");
     if (reviewDecideBtn) {
       event.preventDefault();
@@ -360,7 +360,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // AI 咨询按钮 / AI consultation button
+    // AI 諮詢按钮 / AI consultation button
     const aiConsultBtn = event.target.closest(".review-ai-consult-btn");
     if (aiConsultBtn) {
       event.preventDefault();
@@ -368,15 +368,15 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // 学习标签页切换 / Learning tab switching
+    // 學習標簽页切换 / Learning tab switching
     const tabBtn = event.target.closest(".learning-tab");
     if (tabBtn) {
       event.preventDefault();
       const tabName = tabBtn.dataset.tab;
-      // 切换标签页激活状态 / Toggle active tab
+      // 切换標簽页激活状态 / Toggle active tab
       document.querySelectorAll(".learning-tab").forEach(t => t.classList.remove("active"));
       tabBtn.classList.add("active");
-      // 切换内容面板 / Toggle content panel
+      // 切换內容面板 / Toggle content panel
       document.querySelectorAll(".learning-tab-content").forEach(c => c.classList.remove("active"));
       const panelMap = {
         observations: "tabObservations",
@@ -389,7 +389,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // ── Paper Trading 按钮处理 / Paper Trading button handlers ──
+    // ── Paper Trading 按钮處理 / Paper Trading button handlers ──
     const paperActionBtn = event.target.closest("[data-paper-action]");
     if (paperActionBtn) {
       event.preventDefault();
@@ -403,7 +403,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // ── Market Feed 按钮处理 / Market Feed button handlers ──
+    // ── Market Feed 按钮處理 / Market Feed button handlers ──
     const feedActionBtn = event.target.closest("[data-feed-action]");
     if (feedActionBtn) {
       event.preventDefault();

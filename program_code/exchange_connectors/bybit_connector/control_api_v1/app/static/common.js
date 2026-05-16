@@ -1,6 +1,6 @@
 /**
  * 玄衡 · Arcane Equilibrium — Shared Utilities
- * 共享工具库：认证、API 调用、格式化、解释模式
+ * 共享工具库：認證、API 調用、格式化、解釋模式
  */
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
@@ -8,14 +8,14 @@
 // Cookie is set by /api/v1/auth/login, cleared by /api/v1/auth/logout.
 // JS never touches the token — browser sends the cookie automatically.
 // APR01-MEDIUM-13：Token 从 localStorage 移至 HttpOnly cookie。
-// Cookie 由登录端点设置，由登出端点清除。JS 永远不碰 token，浏览器自动发送 cookie。
+// Cookie 由登录端点設置，由登出端点清除。JS 永遠不碰 token，浏览器自動發送 cookie。
 const OC_TOKEN_KEY = 'oc_trading_token';   // Legacy key — used only for migration cleanup
 const OC_USER_KEY = 'oc_username';
 const OC_DEVELOPMENT_SUPPORT_MODE_KEY = 'oc_development_support_enabled';
 const OC_GUI_DEVELOPMENT_MODE_KEY = 'oc_gui_development_mode_enabled';  // Legacy key
 
 // On load, clean up any legacy localStorage tokens (one-time migration).
-// 页面加载时清理旧的 localStorage token（一次性迁移）。
+// 页面載入時清理旧的 localStorage token（一次性迁移）。
 (function _ocMigrateLegacyToken() {
   if (localStorage.getItem(OC_TOKEN_KEY)) {
     localStorage.removeItem(OC_TOKEN_KEY);
@@ -136,14 +136,14 @@ function ocGetToken() {
   // Returns empty string. Kept for backward compatibility — callers should
   // not rely on this value. fetch() with credentials:'same-origin' sends
   // the cookie automatically.
-  // 已弃用：Token 现在在 HttpOnly cookie 中，JS 无法访问。
+  // 已弃用：Token 現在在 HttpOnly cookie 中，JS 無法訪问。
   // 返回空字符串。保留仅为向后兼容。
   return '';
 }
 
 async function ocLogout() {
   // Call server to clear the HttpOnly cookie, then redirect to login.
-  // 调用服务端清除 HttpOnly cookie，然后跳转登录页。
+  // 調用服務端清除 HttpOnly cookie，然后跳转登录页。
   try {
     await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
   } catch (e) { /* best-effort / 尽力而为 */ }
@@ -169,7 +169,7 @@ const _OC_AUTH_MAX = 5;
 
 async function ocApi(path, opts) {
   // Auth is handled by HttpOnly cookie — no token in JS needed.
-  // 认证由 HttpOnly cookie 处理，JS 中无需 token。
+  // 認證由 HttpOnly cookie 處理，JS 中無需 token。
   if (_ocAuthFails >= _OC_AUTH_MAX) {
     console.warn('[ocApi] Auth lockout active (' + _ocAuthFails + ' failures). Probing...');
   }
@@ -182,9 +182,9 @@ async function ocApi(path, opts) {
     const r = await fetch(path, {
       method: method,
       headers: headers,
-      credentials: 'same-origin',  // Send HttpOnly cookie automatically / 自动发送 HttpOnly cookie
+      credentials: 'same-origin',  // Send HttpOnly cookie automatically / 自動發送 HttpOnly cookie
       body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
-      signal: AbortSignal.timeout(8000),  // 8s timeout prevents GUI freeze on slow API / 8 秒超时防止 API 慢时 GUI 卡死
+      signal: AbortSignal.timeout(8000),  // 8s timeout prevents GUI freeze on slow API / 8 秒超時防止 API 慢時 GUI 卡死
     });
     if (!r.ok) {
       if (await ocHandleUnauthenticatedResponse(r)) return null;
@@ -302,25 +302,25 @@ function ocEnvelope(payload, stateRevision) {
 // Three-way toggle: USDT → USD → EUR, persisted in localStorage.
 // All monetary formatters (ocMoney, ocBalance) automatically apply the active
 // currency. Toggling dispatches 'occurrencychange' so tabs can re-render.
-// 三选计价货币：USDT → USD → EUR，状态持久化到 localStorage。
-// 所有货币格式化函数自动适配当前货币；切换时发出 'occurrencychange' 事件触发页面刷新。
+// 三選計價货币：USDT → USD → EUR，状态持久化到 localStorage。
+// 所有货币格式化函數自動適配當前货币；切换時发出 'occurrencychange' 事件触发页面刷新。
 
 const _OC_CURRENCIES = ['USDT', 'USD', 'EUR'];
 let _ocCurrIdx = parseInt(localStorage.getItem('oc_curr_idx') || '0');
 
 // Fallback rates (USDT base). Updated by ocInitFx() from live API.
-// 回退汇率（USDT 基准）。由 ocInitFx() 从在线 API 实时更新。
+// 回退汇率（USDT 基准）。由 ocInitFx() 从在線 API 實時更新。
 let _ocFxRates = { USDT: 1.0, USD: 1.0, EUR: 0.92 };
 
 function ocCurrCode() {
   // Current currency code: 'USDT', 'USD', or 'EUR'
-  // 当前计价货币代码
+  // 當前計價货币代码
   return _OC_CURRENCIES[_ocCurrIdx] || 'USDT';
 }
 
 function ocCurrSymbol() {
   // Display symbol for current currency: '₮', '$', or '€'
-  // 当前货币显示符号（₮ = USDT/Tether）
+  // 當前货币顯示符號（₮ = USDT/Tether）
   const c = ocCurrCode();
   if (c === 'EUR')  return '€';
   if (c === 'USDT') return '₮';
@@ -329,14 +329,14 @@ function ocCurrSymbol() {
 
 function ocFxConvert(v) {
   // Convert a USDT value to the current display currency.
-  // 将 USDT 数值转换为当前显示货币。
+  // 将 USDT 數值转换为當前顯示货币。
   if (v == null || isNaN(v)) return v;
   return Number(v) * (_ocFxRates[ocCurrCode()] || 1.0);
 }
 
 function ocToggleCurrency() {
   // Cycle to the next currency and notify all tabs.
-  // 切换到下一个计价货币，并通知所有 Tab 刷新。
+  // 切换到下一個計價货币，并通知所有 Tab 刷新。
   _ocCurrIdx = (_ocCurrIdx + 1) % _OC_CURRENCIES.length;
   localStorage.setItem('oc_curr_idx', String(_ocCurrIdx));
   _ocSyncCurrencyBadges();
@@ -345,7 +345,7 @@ function ocToggleCurrency() {
 
 function _ocSyncCurrencyBadges() {
   // Update all .oc-curr-badge elements to show the active currency.
-  // 更新所有 .oc-curr-badge 元素以显示当前计价货币。
+  // 更新所有 .oc-curr-badge 元素以顯示當前計價货币。
   document.querySelectorAll('.oc-curr-badge').forEach(b => {
     b.textContent = ocCurrCode();
   });
@@ -353,8 +353,8 @@ function _ocSyncCurrencyBadges() {
 
 // Cross-iframe currency sync: when parent toggles currency, localStorage changes
 // fire a 'storage' event in all same-origin iframes. Re-read index and re-dispatch.
-// 跨 iframe 货币同步：父页面切换货币时 localStorage 变化会触发 storage 事件，
-// iframe 重新读取索引并派发 occurrencychange 以刷新显示。
+// 跨 iframe 货币同步：父页面切换货币時 localStorage 变化会触发 storage 事件，
+// iframe 重新读取索引并派发 occurrencychange 以刷新顯示。
 window.addEventListener('storage', function(e) {
   if (e.key === 'oc_curr_idx' && e.newValue != null) {
     const newIdx = parseInt(e.newValue);
@@ -366,7 +366,7 @@ window.addEventListener('storage', function(e) {
   }
 });
 
-let _ocFxTimer = null;  // handle for the 60-second refresh loop / 60秒刷新定时器句柄
+let _ocFxTimer = null;  // handle for the 60-second refresh loop / 60秒刷新定時器句柄
 
 async function ocInitFx() {
   // Fetch real-time USDT/USD and USDT/EUR rates from CoinGecko (free, no key).
@@ -375,9 +375,9 @@ async function ocInitFx() {
   // Only dispatches 'occurrencychange' when a rate actually moves by ≥ 0.0001,
   // so tabs don't re-render every minute when rates are stable.
   //
-  // 从 CoinGecko 获取实时 USDT/USD 和 USDT/EUR 汇率（免费，无需 API Key）。
-  // 首次立即执行，之后每 60 秒通过 setTimeout 递归调度（避免 fetch 延迟导致重叠）。
-  // 仅在汇率变化 ≥ 0.0001 时才派发 'occurrencychange' 事件，避免无效重渲染。
+  // 从 CoinGecko 获取實時 USDT/USD 和 USDT/EUR 汇率（免費，無需 API Key）。
+  // 首次立即執行，之后每 60 秒通過 setTimeout 遞歸調度（避免 fetch 延遲导致重叠）。
+  // 仅在汇率变化 ≥ 0.0001 時才派发 'occurrencychange' 事件，避免無效重渲染。
   const prev = { USD: _ocFxRates.USD, EUR: _ocFxRates.EUR };
   try {
     const ctrl = new AbortController();
@@ -395,12 +395,12 @@ async function ocInitFx() {
         if (t.eur) _ocFxRates.EUR = Number(t.eur);
       }
     }
-  } catch (_) { /* silent fallback / 静默回退 */ }
+  } catch (_) { /* silent fallback / 靜默回退 */ }
 
   _ocSyncCurrencyBadges();
 
   // Notify tabs only if rates actually changed (threshold 0.0001)
-  // 仅汇率实际变化时通知各 Tab 刷新，避免无意义的重渲染
+  // 仅汇率實際变化時通知各 Tab 刷新，避免無意义的重渲染
   const changed = Math.abs(_ocFxRates.USD - prev.USD) > 0.0001 ||
                   Math.abs(_ocFxRates.EUR - prev.EUR) > 0.0001;
   if (changed) {
@@ -408,7 +408,7 @@ async function ocInitFx() {
   }
 
   // Schedule next refresh in 60 s (clear any existing timer first)
-  // 60 秒后调度下次刷新（先清除已有定时器）
+  // 60 秒后調度下次刷新（先清除已有定時器）
   if (_ocFxTimer) clearTimeout(_ocFxTimer);
   _ocFxTimer = setTimeout(ocInitFx, 60_000);
 }
@@ -417,7 +417,7 @@ async function ocInitFx() {
 function ocMoney(v, decimals) {
   // PnL display: converts to active currency, adds +/- prefix.
   // Example: ocMoney(100) → "+USDT 100.00" / "+$100.00" / "+€92.00"
-  // PnL 显示：转换为当前货币，添加 +/- 前缀。
+  // PnL 顯示：转换为當前货币，添加 +/- 前缀。
   if (v == null || isNaN(v)) return '--';
   const d = decimals != null ? decimals : 2;
   const converted = ocFxConvert(Number(v));
@@ -428,7 +428,7 @@ function ocMoney(v, decimals) {
 function ocBalance(v, decimals) {
   // Balance display: converts to active currency, no +/- prefix.
   // Example: ocBalance(9994) → "USDT 9994.00" / "$9994.00" / "€9194.48"
-  // 余额显示：转换为当前货币，无 +/- 前缀。
+  // 余额顯示：转换为當前货币，無 +/- 前缀。
   if (v == null || isNaN(v)) return '--';
   const d = decimals != null ? decimals : 2;
   const converted = ocFxConvert(Number(v));
@@ -582,7 +582,7 @@ function ocPerformanceMetricClass(metric) {
 // 渲染 canonical performance metric grid。
 function ocRenderPerformanceMetrics(metrics) {
   if (!Array.isArray(metrics) || metrics.length === 0) {
-    return '<div class="oc-loading">暂无指标数据</div>';
+    return '<div class="oc-loading">暂無指標數據</div>';
   }
   return metrics.map(metric => {
     const key = ocEsc(metric.key || '');
@@ -667,11 +667,11 @@ function ocSanitizeClass(s) {
 // ─── Strategy Identity Color / 策略身份顏色 ─────────────────────────────────
 // Shared by Strategy, Demo, and Live so one strategy keeps the same color everywhere.
 const OC_STRATEGY_COLOR_META = {
-  grid_trading: { label: 'grid_trading', zh: '网格', color: '#58a6ff' },
-  ma_crossover: { label: 'ma_crossover', zh: '均线', color: '#3fb950' },
-  bb_reversion: { label: 'bb_reversion', zh: '回归', color: '#a855f7' },
+  grid_trading: { label: 'grid_trading', zh: '網格', color: '#58a6ff' },
+  ma_crossover: { label: 'ma_crossover', zh: '均線', color: '#3fb950' },
+  bb_reversion: { label: 'bb_reversion', zh: '回歸', color: '#a855f7' },
   bb_breakout: { label: 'bb_breakout', zh: '突破', color: '#f78166' },
-  funding_arb: { label: 'funding_arb', zh: '费率', color: '#d29922' },
+  funding_arb: { label: 'funding_arb', zh: '費率', color: '#d29922' },
 };
 
 function ocStrategyKey(strategy) {
@@ -731,9 +731,9 @@ function ocStrategyChip(strategy, options) {
 // 在持倉/訂單/成交旁顯示帶顏色的品類標籤，便於區分不同產品類型。
 const _OC_CAT_CONFIG = {
   linear:  { label: 'U本位',   color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
-  spot:    { label: '现货',     color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
+  spot:    { label: '現货',     color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
   inverse: { label: '币本位',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
-  option:  { label: '期权',     color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
+  option:  { label: '期權',     color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
 };
 function ocCategoryTag(category) {
   const cat = (category || 'linear').toLowerCase();
@@ -949,7 +949,7 @@ function ocSetPnlRangeButtons(containerId, activeRange) {
 // Render a colored PnL <td> cell. Opening fills (PnL≈0) show as dim dash;
 // closing fills show signed value tinted green (profit) or red (loss).
 // Accepts multiple field names: realized_pnl (Rust engine) / closedPnl (Bybit API).
-// 渲染盈亏单元格。开仓单 PnL≈0 显示灰色破折号；平仓单显示带符号的绿/红金额。
+// 渲染盈亏單元格。開倉單 PnL≈0 顯示灰色破折號；平倉單顯示带符號的綠/红金额。
 function ocPnlCell(raw) {
   const pnl = parseFloat(raw);
   if (!isFinite(pnl) || Math.abs(pnl) < 0.0001) {
@@ -1263,7 +1263,7 @@ function ocInjectBaseCSS() {
     .oc-not-configured p { color: var(--text-dim); font-size: 13px; max-width: 400px; margin: 0 auto; }
 
     /* Currency Toggle Badge — clickable pill showing active currency */
-    /* 计价货币切换徽章 — 点击循环切换 USDT / USD / EUR */
+    /* 計價货币切换徽章 — 點擊循環切换 USDT / USD / EUR */
     .oc-curr-badge { display: inline-block; padding: 2px 9px; border-radius: 999px;
       font-size: 11px; font-weight: 600; letter-spacing: 0.3px; cursor: pointer;
       background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
@@ -1275,7 +1275,7 @@ function ocInjectBaseCSS() {
     .oc-performance-metrics .oc-metric-label[title] { display: block; width: fit-content; max-width: 100%; }
 
     /* live-metric: unified alias for tab-live.html metric cells (§6.1 CSS unification)
-       live-metric 是 oc-metric 的别名，用于实盘 tab。保持视觉一致，特殊修饰词在各 tab 自定义。
+       live-metric 是 oc-metric 的别名，用于實盤 tab。保持视觉一致，特殊修飾词在各 tab 自定义。
        Note: mc/mc-val (console.html sidebar) is a separate narrower context — not unified. */
     .live-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
     .live-metric { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
@@ -1289,17 +1289,17 @@ function ocInjectBaseCSS() {
     .live-metric-val.purple { color: #a855f7; }
     .live-metric-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 
-    /* Load-error state / 加载失败状态 — used by ocLoadError() */
+    /* Load-error state / 載入失败状态 — used by ocLoadError() */
     .oc-load-error { color: var(--red); font-size: 12px; padding: 10px 0;
       display: flex; align-items: center; gap: 8px; }
     .oc-load-error button { padding: 2px 8px; font-size: 10px; }
 
-    /* Diff-highlight on risk form cells / 风控表单原值对比高亮 — used by §4.1 diff mode */
+    /* Diff-highlight on risk form cells / 風控表單原值對比高亮 — used by §4.1 diff mode */
     .oc-diff-changed { background: rgba(210,153,34,0.12) !important;
       border-color: rgba(210,153,34,0.4) !important; }
     .oc-diff-label { font-size: 9px; color: var(--yellow); margin-top: 3px; font-style: italic; }
 
-    /* Generic confirm modal (shared across tab iframes) / 通用确认弹窗（各 tab iframe 共用） */
+    /* Generic confirm modal (shared across tab iframes) / 通用确認弹窗（各 tab iframe 共用） */
     .oc-confirm-overlay { display:none; position:fixed; inset:0; z-index:5000;
       background:rgba(0,0,0,0.7); align-items:center; justify-content:center; }
     .oc-confirm-overlay.show { display:flex; }
@@ -1322,14 +1322,14 @@ function ocInjectBaseCSS() {
 
 // ─── Generic Confirm Modal ────────────────────────────────────────────────────
 // openConfirmModal: shared confirm dialog for tab iframes where app.js isn't loaded.
-// openConfirmModal: 在 app.js 未加载的 tab iframe 中提供通用确认弹窗。
+// openConfirmModal: 在 app.js 未載入的 tab iframe 中提供通用确認弹窗。
 // When app.js loads in the parent context, its version overrides this one there.
-// 当 app.js 在父上下文加载时，会在该上下文覆盖此版本。
+// 当 app.js 在父上下文載入時，会在該上下文覆盖此版本。
 
 // ─── Load Error Display Helper ────────────────────────────────────────────────
 /**
  * Show a user-friendly load-failure state inside an element.
- * 在元素内显示用户友好的加载失败状态（区别于无声 -- 占位）。
+ * 在元素內顯示用户友好的載入失败状态（區别于無聲 -- 占位）。
  * @param {string} elementId - container element id to replace content
  * @param {string} [retryFnName] - JS function name (string) to call on retry click, e.g. 'loadAll'
  * @param {string} [msg] - optional custom message
@@ -1338,10 +1338,10 @@ function ocLoadError(elementId, retryFnName, msg) {
   var el = document.getElementById(elementId);
   if (!el) return;
   var retryBtn = retryFnName
-    ? ' <button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="' + retryFnName + '()">↺ 重试 / Retry</button>'
+    ? ' <button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="' + retryFnName + '()">↺ 重試 / Retry</button>'
     : '';
   el.innerHTML = '<div class="oc-load-error">⚠ ' +
-    (msg || '连接失败，请检查引擎状态 / Connection failed — check engine') +
+    (msg || '连接失败，請檢查引擎状态 / Connection failed — check engine') +
     retryBtn + '</div>';
 }
 
@@ -1749,7 +1749,7 @@ window.OpenClawModeBadge = {
 // 釋放點：close()/cleanup() 一定要清 lock，否則永久 deadlock。
 var _OC_MODAL_OPEN_LOCK = false;
 
-/** Per-action metadata for dangerous operations / 危险操作的确认文本元数据 */
+/** Per-action metadata for dangerous operations / 危險操作的确認文本元數據 */
 var _OC_CONFIRM_ACTIONS = {
   "reset-cooldown": {
     title: "重置冷卻期 / Reset Loss Cooldown",
@@ -1775,7 +1775,7 @@ var _OC_CONFIRM_ACTIONS = {
 
 /**
  * Show a custom confirmation dialog and return Promise<boolean>.
- * 显示自定义确认弹窗，返回 Promise<boolean>。
+ * 顯示自定义确認弹窗，返回 Promise<boolean>。
  * @param {string|Object} actionName - action key, plain title text, or per-call modal metadata
  * @returns {Promise<boolean>}
  */
@@ -1833,7 +1833,7 @@ function openConfirmModal(actionName) {
     }
     function close(val) {
       overlay.classList.remove('show');
-      // Remove handlers to prevent duplicate firing / 移除监听防止重复触发
+      // Remove handlers to prevent duplicate firing / 移除監听防止重復触发
       cancelBtn.onclick = null;
       confirmBtn.onclick = null;
       overlay.onkeydown = null;

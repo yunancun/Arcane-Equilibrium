@@ -1,6 +1,6 @@
 /**
  * Governance Tab — Inline script extracted from tab-governance.html.
- * 治理頁面 — 從 tab-governance.html 提取的内嵌腳本。
+ * 治理頁面 — 從 tab-governance.html 提取的內嵌腳本。
  *
  * MODULE_NOTE (EN): Extracted from tab-governance.html (FIX-08 file size).
  * MODULE_NOTE (中): 從 tab-governance.html 提取（FIX-08 文件大小）。
@@ -8,8 +8,8 @@
 
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-governance').innerHTML = ocExplain(
-  '治理系统是玄衡的安全核心，通过 SM-01 授权、SM-02 租约、SM-03 执行和 SM-04 风控管理交易边界。',
-  '授权 SM (SM-01) 控制操作权限和有效期。租约 SM (SM-02) 管理决策生命周期。执行 SM (SM-03) 管理订单从创建到成交、取消或失败的生命周期。风控 SM (SM-04) 动态调整风险等级。对账引擎 (EX-04) 作为扩展检查系统记录与交易所实际状态是否一致。'
+  '治理系統是玄衡的安全核心，通過 SM-01 授權、SM-02 租約、SM-03 執行和 SM-04 風控管理交易边界。',
+  '授權 SM (SM-01) 控制操作權限和有效期。租約 SM (SM-02) 管理決策生命周期。執行 SM (SM-03) 管理訂單从建立到成交、取消或失败的生命周期。風控 SM (SM-04) 動態調整風險等级。對賬引擎 (EX-04) 作为擴展檢查系統記錄与交易所實際状态是否一致。'
 );
 
 // ─── State Storage ─────────────────────────────────────────────
@@ -42,28 +42,28 @@ function updateOmsCard() {
 
   let label = 'UNKNOWN';
   let chipType = 'neutral';
-  let blocker = '等待治理状态加载 / Waiting for governance status';
+  let blocker = '等待治理状态載入 / Waiting for governance status';
 
   if (authState !== 'ACTIVE') {
     label = 'CLOSED';
     chipType = 'neutral';
-    blocker = 'SM-01 未处于 ACTIVE，订单不得进入执行状态。';
+    blocker = 'SM-01 未處於 ACTIVE，訂單不得進入執行状态。';
   } else if (riskLevel != null && riskLevel >= 4) {
     label = 'RISK LOCKED';
     chipType = 'bad';
-    blocker = 'SM-04 处于高风险等级，执行状态应停止推进。';
+    blocker = 'SM-04 處於高風險等级，執行状态應停止推進。';
   } else if (activeLeases != null && activeLeases > 0) {
     label = 'LEASE READY';
     chipType = 'good';
-    blocker = '存在 SM-02 活跃租约；符合范围的意图可进入 SM-03 校验。';
+    blocker = '存在 SM-02 活跃租約；符合範圍的意圖可進入 SM-03 校驗。';
   } else if (activeLeases === 0) {
     label = 'IDLE';
     chipType = 'neutral';
-    blocker = '暂无活跃租约；没有意图应进入订单执行状态。';
+    blocker = '暂無活跃租約；没有意圖應進入訂單執行状态。';
   } else {
     label = 'WAITING';
     chipType = 'neutral';
-    blocker = '等待租约状态加载 / Waiting for lease state';
+    blocker = '等待租約状态載入 / Waiting for lease state';
   }
 
   ocSetHtml('oms-readiness', ocChip(label, chipType));
@@ -122,7 +122,7 @@ function togglePendingApprovals() {
   }
 }
 
-// 切换租约详情列表 / Toggle lease detail list
+// 切换租約详情列表 / Toggle lease detail list
 function toggleLeaseList() {
   const body = document.getElementById('lease-list-body');
   const toggle = document.getElementById('lease-list-toggle');
@@ -272,25 +272,25 @@ function renderAuditTrail() {
   tbody.innerHTML = html;
 }
 
-// loadAuditTrail: 从服务端加载持久化审计日志
+// loadAuditTrail: 从服務端載入持久化審計日志
 // Load persistent audit trail from server; fall back to client-side log on error/empty
 async function loadAuditTrail() {
   const tbody = document.getElementById('audit-trail-tbody');
   try {
-    // 调用 govGetAuditChanges(limit) 获取服务端审计记录
+    // 調用 govGetAuditChanges(limit) 获取服務端審計記錄
     // Call govGetAuditChanges to retrieve server-persisted change records
     const d = await govGetAuditChanges(100);
     const records = (d && d.ok && Array.isArray(d.data)) ? d.data : [];
 
     if (records.length === 0) {
-      // 服务端无数据，降级为客户端日志 / No server data — fall back to client-side log
+      // 服務端無數據，降级为客户端日志 / No server data — fall back to client-side log
       renderAuditTrail();
       return;
     }
 
     let html = '';
     for (const r of records) {
-      // 服务端字段: timestamp, who, what, reason, change_type, old_value, new_value, auto_approved, affected_components
+      // 服務端字段: timestamp, who, what, reason, change_type, old_value, new_value, auto_approved, affected_components
       // Server fields: timestamp, who, what, reason, change_type, old_value, new_value, auto_approved, affected_components
       const timeStr = r.when_ms ? ocTime(r.when_ms) : (r.when ? ocTime(r.when * 1000) : '--');
       const who = r.who || '--';
@@ -304,29 +304,29 @@ async function loadAuditTrail() {
       html += '<td style="font-size:11px;white-space:nowrap">' + ocEsc(timeStr) + '</td>';
       html += '<td>' + ocChip(ocEsc(_translateWho(who)), 'neutral') + '</td>';
 
-      // What 列：翻译名 + 风险标签 + 可展开说明
+      // What 列：翻译名 + 風險標簽 + 可展開說明
       // What column: translated name + risk badge + expandable explanation
       html += '<td style="max-width:360px">';
       html += '<div style="font-weight:600;font-size:12px">' + ocEsc(whatCn) + '</div>';
       if (guidance) {
-        // 风险标签 / Risk badge
+        // 風險標簽 / Risk badge
         if (guidance.risk) {
           let riskColor = 'var(--text-dim)';
           if (guidance.risk === '高') riskColor = 'var(--red)';
           else if (guidance.risk === '中' || guidance.risk === '中-高') riskColor = 'var(--yellow, #d29922)';
           else if (guidance.risk === '低' || guidance.risk === '低-中') riskColor = 'var(--green)';
-          else if (guidance.risk === '无') riskColor = 'var(--text-dim)';
+          else if (guidance.risk === '無') riskColor = 'var(--text-dim)';
           html += '<span style="display:inline-block;margin:2px 0;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;'
-            + 'background:' + riskColor + '22;color:' + riskColor + '">风险：' + ocEsc(guidance.risk) + '</span> ';
+            + 'background:' + riskColor + '22;color:' + riskColor + '">風險：' + ocEsc(guidance.risk) + '</span> ';
         }
-        // 正式说明（始终可见）/ Formal detail (always visible)
+        // 正式說明（始終可见）/ Formal detail (always visible)
         if (guidance.detail) {
           html += '<div style="font-size:10px;color:var(--text-dim);margin-top:2px;line-height:1.5">' + ocEsc(guidance.detail) + '</div>';
         }
-        // 通俗解释（折叠）/ Plain-language explanation (collapsed)
+        // 通俗解釋（折叠）/ Plain-language explanation (collapsed)
         if (guidance.explain) {
           html += '<details style="margin-top:3px;font-size:10px"><summary style="cursor:pointer;color:var(--accent);user-select:none">'
-            + '详细说明</summary>'
+            + '详細說明</summary>'
             + '<div style="margin-top:4px;padding:6px 8px;background:var(--card-bg);border:1px solid var(--border);border-radius:4px;color:var(--text);line-height:1.7;white-space:pre-line">'
             + ocEsc(guidance.explain) + '</div></details>';
         }
@@ -339,7 +339,7 @@ async function loadAuditTrail() {
     }
     tbody.innerHTML = html;
   } catch (e) {
-    // 请求失败，降级为客户端日志 / Request failed — fall back to client-side log
+    // 請求失败，降级为客户端日志 / Request failed — fall back to client-side log
     console.warn('Audit trail server load failed, using client-side fallback:', e);
     renderAuditTrail();
   }
@@ -347,37 +347,37 @@ async function loadAuditTrail() {
 
 // ─── Modal Functions ──────────────────────────────────────────
 
-// showRequestAuthModal: 显示授权申请弹窗（DRAFT → PENDING_APPROVAL 流程）
+// showRequestAuthModal: 顯示授權申請弹窗（DRAFT → PENDING_APPROVAL 流程）
 // Show the Request Authorization modal to initiate SM-01 DRAFT → PENDING_APPROVAL flow
 function showRequestAuthModal() {
-  // 重置表单并显示授权申请弹窗 / Reset form and show modal
+  // 重置表單并顯示授權申請弹窗 / Reset form and show modal
   $('request-auth-ttl').value = '24';
   $('request-auth-reason').value = '';
   $('modal-request-auth').style.display = 'flex';
 }
 
-// hideRequestAuthModal: 关闭授权申请弹窗
+// hideRequestAuthModal: 關閉授權申請弹窗
 // Hide the Request Authorization modal
 function hideRequestAuthModal() {
   $('modal-request-auth').style.display = 'none';
 }
 
-// submitRequestAuth: 提交授权申请（POST /api/v1/governance/auth/request）
+// submitRequestAuth: 提交授權申請（POST /api/v1/governance/auth/request）
 // Submit the authorization request; on success reload data and close modal
 async function submitRequestAuth() {
   const ttl = parseInt($('request-auth-ttl').value) || 24;
   const reason = $('request-auth-reason').value.trim();
   if (!reason) {
-    ocToast('请输入申请原因 / Please enter a reason', 'error');
+    ocToast('請輸入申請原因 / Please enter a reason', 'error');
     return;
   }
   const d = await govRequestAuthorization(ttl, reason);
   if (d && d.ok) {
-    ocToast('授权申请已提交，等待审批 / Authorization request submitted', 'success');
+    ocToast('授權申請已提交，等待審批 / Authorization request submitted', 'success');
     hideRequestAuthModal();
     loadAll();
   } else {
-    ocToast((d && d.message) ? d.message : '申请失败 / Request failed', 'error');
+    ocToast((d && d.message) ? d.message : '申請失败 / Request failed', 'error');
   }
 }
 
@@ -413,13 +413,13 @@ function hideReconcileModal() {
 async function submitApproval() {
   const note = $('approve-note').value.trim();
   if (!note) {
-    ocToast('Please enter an approval note / 请输入批准备注', 'error');
+    ocToast('Please enter an approval note / 請輸入批準備注', 'error');
     return;
   }
 
   const d = await govPostApprove(note);
   if (d && d.ok) {
-    ocToast('Authorization approved / 授权已批准', 'success');
+    ocToast('Authorization approved / 授權已批准', 'success');
     hideApprovalModal();
     loadAll();
   } else {
@@ -432,17 +432,17 @@ async function submitOverride() {
   const reason = $('override-reason').value.trim();
 
   if (!level) {
-    ocToast('Please select target level / 请选择目标等级', 'error');
+    ocToast('Please select target level / 請選擇目標等级', 'error');
     return;
   }
   if (!reason) {
-    ocToast('Please enter a reason / 请输入原因', 'error');
+    ocToast('Please enter a reason / 請輸入原因', 'error');
     return;
   }
 
   const d = await govPostOverride(level, reason);
   if (d && d.ok) {
-    ocToast('Risk level de-escalated / 风险等级已降级', 'success');
+    ocToast('Risk level de-escalated / 風險等级已降级', 'success');
     hideOverrideModal();
     loadAll();
   } else {
@@ -453,17 +453,17 @@ async function submitOverride() {
 async function submitReconcile() {
   const reason = $('reconcile-reason').value.trim();
   if (!reason) {
-    ocToast('Please enter a reason / 请输入原因', 'error');
+    ocToast('Please enter a reason / 請輸入原因', 'error');
     return;
   }
 
   const d = await govPostReconcile(reason);
   if (d && d.ok) {
-    ocToast('Reconciliation triggered / 对账已触发', 'success');
+    ocToast('Reconciliation triggered / 對賬已触发', 'success');
     hideReconcileModal();
     loadAll();
   } else {
-    ocToast(d ? d.message : 'Reconciliation failed / 对账失败', 'error');
+    ocToast(d ? d.message : 'Reconciliation failed / 對賬失败', 'error');
   }
 }
 
@@ -534,20 +534,20 @@ function renderAuthCard(authData) {
 
   const expiresMs = authData.expires_at_ms;
   // ACTIVE → show expiry countdown; other states → hide expiry
-  // ACTIVE 显示过期倒计时；其他状态不显示
+  // ACTIVE 顯示過期倒計時；其他状态不顯示
   ocSetText('auth-expiry', (state === 'ACTIVE' && expiresMs) ? govExpiryCountdown(expiresMs) : '--');
 
-  // State description text / 各状态说明文字
+  // State description text / 各状态說明文字
   const AUTH_DESC = {
-    NONE:             '无授权对象 No authorization object',
+    NONE:             '無授權對象 No authorization object',
     DRAFT:            '草稿待提交 Draft pending submission',
-    PENDING_APPROVAL: '等待操作员审批 Awaiting Operator approval',
-    ACTIVE:           '',   // expiry countdown is shown instead / 显示过期倒计时，无需额外说明
-    RESTRICTED:       '受限运行 Restricted operation',
-    FROZEN:           '已冻结 Frozen — no trading allowed',
-    EXPIRED:          '已过期，需重新申请 Re-authorization required',
-    REVOKED:          '已吊销，需重新申请 Re-authorization required',
-    REJECTED:         '已拒绝，需重新申请 Re-authorization required',
+    PENDING_APPROVAL: '等待操作員審批 Awaiting Operator approval',
+    ACTIVE:           '',   // expiry countdown is shown instead / 顯示過期倒計時，無需额外說明
+    RESTRICTED:       '受限運行 Restricted operation',
+    FROZEN:           '已冻結 Frozen — no trading allowed',
+    EXPIRED:          '已過期，需重新申請 Re-authorization required',
+    REVOKED:          '已吊銷，需重新申請 Re-authorization required',
+    REJECTED:         '已拒絕，需重新申請 Re-authorization required',
   };
   ocSetText('auth-state-desc', AUTH_DESC[state] || '');
   // Quick status banner update / 更新快速状态栏
@@ -563,7 +563,7 @@ function renderAuthCard(authData) {
   $('btn-approve').style.display = isPending ? '' : 'none';
 
   // Show "Request Authorization" button for states that need a fresh auth object
-  // 无授权、草稿、已过期/吊销/拒绝 时显示申请授权按钮
+  // 無授權、草稿、已過期/吊銷/拒絕 時顯示申請授權按钮
   const needsRequest = ['NONE', 'DRAFT', 'EXPIRED', 'REVOKED', 'REJECTED'].includes(state);
   $('btn-request-auth').style.display = needsRequest ? '' : 'none';
 }
@@ -588,7 +588,7 @@ function renderRiskCard(riskData) {
 
   const reason = riskData.escalation_reason || '--';
   ocSetText('risk-reason', ocEsc(reason));
-  // Quick status banner update / 更新快速状态栏风险等级
+  // Quick status banner update / 更新快速状态栏風險等级
   const riskName = GOV_RISK_LEVELS[level] || ('L' + level);
   if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(undefined, riskName, undefined, undefined);
   updateOmsCard();
@@ -605,7 +605,7 @@ function renderRiskCard(riskData) {
   $('btn-override').disabled = (level === 0);
 }
 
-// renderLeaseList: 渲染活跃租约详情列表
+// renderLeaseList: 渲染活跃租約详情列表
 // Render the collapsible active lease detail list
 function renderLeaseList(leases) {
   const el = document.getElementById('lease-list-content');
@@ -617,20 +617,20 @@ function renderLeaseList(leases) {
   const now = Date.now();
   let html = '<div style="display:flex;flex-direction:column;gap:6px">';
   for (const lease of leases) {
-    // lease_id 缩短为最后 8 位 / Truncate lease_id to last 8 chars
+    // lease_id 縮短为最后 8 位 / Truncate lease_id to last 8 chars
     const shortId = (lease.lease_id || lease.id || '--').slice(-8);
     const symbol = lease.symbol || '--';
     const direction = lease.direction || '--';
     const strategy = lease.strategy || '--';
 
-    // 计算过期倒计时 / Calculate expiry countdown
+    // 計算過期倒計時 / Calculate expiry countdown
     let expiryStr = '--';
     const expiresAt = lease.expires_at_ms || lease.expires_at;
     if (expiresAt) {
       const expiresMs = typeof expiresAt === 'number' ? expiresAt : new Date(expiresAt).getTime();
       const diffSec = Math.round((expiresMs - now) / 1000);
       if (diffSec <= 0) {
-        expiryStr = ocChip('Expired / 已过期', 'bad');
+        expiryStr = ocChip('Expired / 已過期', 'bad');
       } else if (diffSec < 60) {
         expiryStr = ocChip(diffSec + 's', 'warn');
       } else {
@@ -686,7 +686,7 @@ function renderReconCard(reconData) {
 
   const result = reconData.last_result || '--';
   ocSetText('recon-result', ocEsc(result));
-  // Quick status banner update / 更新快速状态栏对账状态
+  // Quick status banner update / 更新快速状态栏對賬状态
   const reconLabel = isConsistent === true ? 'OK' : isConsistent === false ? 'DRIFT' : '--';
   if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(undefined, undefined, reconLabel, undefined);
 }
@@ -717,7 +717,7 @@ function _plgStatusColor(status) {
   return 'neutral'; // CLOSED or unknown
 }
 
-// loadPaperLiveGate: 加载 Paper→Live 门禁状态
+// loadPaperLiveGate: 載入 Paper→Live 门禁状态
 // Load Paper→Live gate status from server
 async function loadPaperLiveGate() {
   try {
@@ -727,7 +727,7 @@ async function loadPaperLiveGate() {
       ocSetHtml('plg-status-badge', ocChip('Unavailable / 不可用', 'neutral'));
       ocSetText('plg-score', '--');
       document.getElementById('plg-criteria-list').innerHTML =
-        '<p style="color:var(--text-dim);font-size:12px">Data unavailable / 数据不可用</p>'; // SAFE: static HTML only
+        '<p style="color:var(--text-dim);font-size:12px">Data unavailable / 數據不可用</p>'; // SAFE: static HTML only
       return;
     }
 
@@ -737,14 +737,14 @@ async function loadPaperLiveGate() {
     const totalCount = data.total_count != null ? data.total_count : '--';
     const criteria = Array.isArray(data.criteria) ? data.criteria : [];
 
-    // 渲染状态徽章和评分 / Render status badge and score
+    // 渲染状态徽章和評分 / Render status badge and score
     ocSetHtml('plg-status-badge', ocChip(ocEsc(status), _plgStatusColor(status)));
-    ocSetText('plg-score', passedCount + '/' + totalCount + ' 通过');
+    ocSetText('plg-score', passedCount + '/' + totalCount + ' 通過');
 
     // 渲染准入项目列表 / Render criteria list
     if (criteria.length === 0) {
       document.getElementById('plg-criteria-list').innerHTML =
-        '<p style="color:var(--text-dim);font-size:12px">No criteria data / 无准入项目数据</p>'; // SAFE: static HTML only
+        '<p style="color:var(--text-dim);font-size:12px">No criteria data / 無准入项目數據</p>'; // SAFE: static HTML only
     } else {
       let html = '<div style="display:flex;flex-direction:column;gap:6px">';
       for (const c of criteria) {
@@ -766,14 +766,14 @@ async function loadPaperLiveGate() {
     }
   } catch (e) {
     console.warn('PaperLiveGate load failed:', e);
-    ocSetHtml('plg-status-badge', ocChip('Error / 错误', 'bad'));
+    ocSetHtml('plg-status-badge', ocChip('Error / 錯誤', 'bad'));
   }
 }
 
-// evaluatePaperLiveGate: 触发准入评估，自动从 Paper Engine 读取当前指标作为评估参数
+// evaluatePaperLiveGate: 触发准入評估，自動从 Paper Engine 读取當前指標作为評估参數
 // Trigger PaperLiveGate evaluation — auto-fills required metrics from Paper Engine status
 async function evaluatePaperLiveGate() {
-  ocToast('读取指标中... / Fetching metrics...', 'info');
+  ocToast('读取指標中... / Fetching metrics...', 'info');
   try {
     // Step 1: Fetch current paper engine metrics from real backend endpoints.
     // Do not synthesize 1-day/zero-trade defaults: those can incorrectly turn
@@ -832,30 +832,30 @@ async function evaluatePaperLiveGate() {
     }
 
     // Step 2: POST evaluation request with populated metrics
-    // 第二步：发送携带真实指标的评估请求
-    ocToast('评估中... / Evaluating...', 'info');
+    // 第二步：發送攜带真實指標的評估請求
+    ocToast('評估中... / Evaluating...', 'info');
     const d = await ocPost('/api/v1/governance/paper-live-gate/evaluate', metrics);
     if (d && d.ok) {
-      ocToast('Evaluation complete / 评估完成', 'success');
+      ocToast('Evaluation complete / 評估完成', 'success');
       await loadPaperLiveGate();
       // A3: Auto-expand criteria list after evaluation so operator can see results immediately
-      // A3: 评估完成后自动展开准入项目列表，让操作员立即看到结果
+      // A3: 評估完成后自動展開准入项目列表，讓操作員立即看到結果
       const criteriaBody = document.getElementById('plg-criteria-body');
       const criteriaToggle = document.getElementById('plg-criteria-toggle');
       if (criteriaBody) { criteriaBody.style.display = ''; }
       if (criteriaToggle) { criteriaToggle.textContent = '▼'; }
     } else {
-      ocToast((d && d.message) ? d.message : 'Evaluation failed / 评估失败', 'error');
+      ocToast((d && d.message) ? d.message : 'Evaluation failed / 評估失败', 'error');
     }
   } catch (e) {
     console.warn('PLG evaluate failed:', e);
-    ocToast('Evaluation request failed / 评估请求失败', 'error');
+    ocToast('Evaluation request failed / 評估請求失败', 'error');
   }
 }
 
 // ─── Learning Tier Functions ──────────────────────────────────────
 
-// 层级徽章颜色映射 / Badge color for learning tier
+// 層级徽章颜色映射 / Badge color for learning tier
 function _ltTierColor(tier) {
   if (!tier) return 'neutral';
   const t = String(tier).toUpperCase();
@@ -866,11 +866,11 @@ function _ltTierColor(tier) {
   return 'warn'; // L4+
 }
 
-// loadLearningTier: 加载学习层级状态
+// loadLearningTier: 載入學習層级状态
 // Load learning tier status from server
 async function loadLearningTier() {
   try {
-    // 调用 governance.js 中的 govGetLearningTier()
+    // 調用 governance.js 中的 govGetLearningTier()
     // Call govGetLearningTier() from governance.js
     const d = await govGetLearningTier();
     if (!d || !d.ok) {
@@ -883,35 +883,35 @@ async function loadLearningTier() {
 
     const data = d.data || d;
     const tier = data.current_tier || 'L0';
-    // Quick status banner update / 更新快速状态栏学习层级
+    // Quick status banner update / 更新快速状态栏學習層级
     if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(undefined, undefined, undefined, tier);
     const obsCount = data.observation_count != null ? data.observation_count : 0;
     const winRate = data.win_rate != null ? data.win_rate : null;
     const eligible = data.eligible_for_promotion === true;
     const nextReqs = data.next_tier_requirements || {};
 
-    // 渲染层级、观测数、胜率 / Render tier, observation count, win rate
+    // 渲染層级、观測數、勝率 / Render tier, observation count, win rate
     ocSetHtml('lt-tier', ocChip(ocEsc(tier), _ltTierColor(tier)));
     ocSetText('lt-obs', String(obsCount));
     ocSetText('lt-winrate', winRate != null ? (winRate * 100).toFixed(1) + '%' : '--');
 
-    // 进度条：基于下一层级所需观测数 / Progress bar based on next tier observation requirement
+    // 進度條：基于下一層级所需观測數 / Progress bar based on next tier observation requirement
     const obsRequired = nextReqs.observations || nextReqs.min_observations || 0;
     const pct = obsRequired > 0 ? Math.min(100, Math.round((obsCount / obsRequired) * 100)) : (eligible ? 100 : 0);
     document.getElementById('lt-progress').style.width = pct + '%';
 
-    // 资格徽章 / Eligibility badge
+    // 資格徽章 / Eligibility badge
     ocSetHtml('lt-eligible', ocChip(
-      eligible ? '可晋升 Eligible' : '未达标 Not yet',
+      eligible ? '可晋升 Eligible' : '未达標 Not yet',
       eligible ? 'good' : 'neutral'
     ));
 
-    // 晋升按钮仅在可晋升时显示 / Show promote button only when eligible
+    // 晋升按钮仅在可晋升時顯示 / Show promote button only when eligible
     const btn = document.getElementById('btn-promote');
     if (btn) btn.style.display = eligible ? '' : 'none';
 
     // A3: Dynamically filter promote dropdown to only show tiers ABOVE current
-    // A3: 动态过滤晋升下拉，只显示高于当前层级的选项（防止误操作降级）
+    // A3: 動態過滤晋升下拉，只顯示高于當前層级的選项（防止誤操作降级）
     const tierSelect = document.getElementById('promote-tier');
     if (tierSelect) {
       const tierOrder = { L0: 0, L1: 1, L2: 2, L3: 3, L4: 4, L5: 5 };
@@ -934,11 +934,11 @@ async function loadLearningTier() {
 
   } catch (e) {
     console.warn('Learning tier load failed:', e);
-    ocSetHtml('lt-tier', ocChip('Error / 错误', 'bad'));
+    ocSetHtml('lt-tier', ocChip('Error / 錯誤', 'bad'));
   }
 }
 
-// showPromoteModal / hidePromoteModal: 晋升确认弹窗
+// showPromoteModal / hidePromoteModal: 晋升确認弹窗
 // Show/hide the manual tier promotion modal
 function showPromoteModal() {
   const el = document.getElementById('promote-tier');
@@ -952,26 +952,26 @@ function hidePromoteModal() {
   document.getElementById('modal-promote').style.display = 'none';
 }
 
-// submitPromotion: 提交手动晋升请求
+// submitPromotion: 提交手動晋升請求
 // Submit a manual learning tier promotion
 async function submitPromotion() {
   const targetTier = document.getElementById('promote-tier').value;
   const reason = document.getElementById('promote-reason').value.trim();
 
   if (!targetTier) {
-    ocToast('Please select a target tier / 请选择目标层级', 'error');
+    ocToast('Please select a target tier / 請選擇目標層级', 'error');
     return;
   }
   if (!reason) {
-    ocToast('Please enter a reason / 请输入原因', 'error');
+    ocToast('Please enter a reason / 請輸入原因', 'error');
     return;
   }
 
-  // 调用 governance.js 中的 govPromoteLearningTier()
+  // 調用 governance.js 中的 govPromoteLearningTier()
   // Call govPromoteLearningTier() from governance.js
   const d = await govPromoteLearningTier(targetTier, reason);
   if (d && d.ok) {
-    ocToast('Promotion submitted / 晋升请求已提交', 'success');
+    ocToast('Promotion submitted / 晋升請求已提交', 'success');
     hidePromoteModal();
     await loadLearningTier();
   } else {
@@ -981,34 +981,34 @@ async function submitPromotion() {
 
 // ─── Events Feed Functions ────────────────────────────────────────
 
-// loadEventsFeed: 加载服务端治理事件流
+// loadEventsFeed: 載入服務端治理事件流
 // Load governance event history from server
 async function loadEventsFeed(limit) {
   const lim = limit || 50;
   const el = document.getElementById('events-feed-content');
   try {
-    // 调用 governance.js 中的 govGetEvents(limit)
+    // 調用 governance.js 中的 govGetEvents(limit)
     // Call govGetEvents(limit) from governance.js
     const d = await govGetEvents(lim);
     // Backend: {data: {events: [...], count, limit}} — extract nested array
-    // 后端返回 {data: {events: [...], count, limit}}，提取内层数组
+    // 后端返回 {data: {events: [...], count, limit}}，提取內層數組
     const events = (d && d.ok && d.data && Array.isArray(d.data.events)) ? d.data.events : [];
 
     if (events.length === 0) {
-      el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">No events yet / 暂无事件</p>'; // SAFE: static HTML only
+      el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">No events yet / 暂無事件</p>'; // SAFE: static HTML only
       return;
     }
 
     let html = '';
     for (const ev of events) {
-      // 服务端事件字段: timestamp/time, event_type/type, description/message
+      // 服務端事件字段: timestamp/time, event_type/type, description/message
       // Server event fields: timestamp/time, event_type/type, description/message
       const ts = ev.timestamp || ev.time || ev.ts;
       const timeStr = ts ? ocTime(ts) : '--';
       const evType = ev.event_type || ev.type || 'EVENT';
       const desc = ev.description || ev.message || ev.msg || '';
 
-      // 根据事件类型选择颜色 / Choose color by event type
+      // 根據事件類型選擇颜色 / Choose color by event type
       let chipColor = 'neutral';
       const evUpper = evType.toUpperCase();
       if (evUpper.includes('ERROR') || evUpper.includes('FAIL') || evUpper.includes('CIRCUIT')) chipColor = 'bad';
@@ -1028,12 +1028,12 @@ async function loadEventsFeed(limit) {
     el.innerHTML = html;
   } catch (e) {
     console.warn('Events feed load failed:', e);
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">Failed to load events / 事件加载失败</p>'; // SAFE: static HTML only
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">Failed to load events / 事件載入失败</p>'; // SAFE: static HTML only
   }
 }
 
 function showUnavailable() {
-  const unavailMsg = ocChip('Governance Hub Not Available / 治理中枢未启用', 'warn');
+  const unavailMsg = ocChip('Governance Hub Not Available / 治理中枢未啟用', 'warn');
 
   // Clear all cards
   $('auth-state-badge').innerHTML = unavailMsg;
@@ -1053,24 +1053,24 @@ function showUnavailable() {
 function renderPendingRecovery(requests) {
   const el = document.getElementById('pending-recovery-content');
   if (!requests || requests.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">目前没有待审批的恢复请求</p>'; // SAFE: static HTML only
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">目前没有待審批的恢復請求</p>'; // SAFE: static HTML only
     return;
   }
 
-  const _RECOVERY_STATUS_CN = { PENDING: '待批准', APPROVED: '已批准', REJECTED: '已拒绝', EXPIRED: '已过期' };
+  const _RECOVERY_STATUS_CN = { PENDING: '待批准', APPROVED: '已批准', REJECTED: '已拒絕', EXPIRED: '已過期' };
 
   let html = '<div style="display:flex;flex-direction:column;gap:8px">';
   for (const req of requests) {
     const statusCn = _RECOVERY_STATUS_CN[req.status] || req.status || '待批准';
     html += '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px">';
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' + ocChip(statusCn, 'warn') + '</div>';
-    html += '<div style="font-weight:600;margin-bottom:4px">' + ocEsc(req.description || '系统请求恢复到安全状态') + '</div>';
+    html += '<div style="font-weight:600;margin-bottom:4px">' + ocEsc(req.description || '系統請求恢復到安全状态') + '</div>';
     html += '<div style="margin-top:8px;padding:8px;background:rgba(56,139,253,0.06);border-radius:6px;font-size:11px;color:var(--text-dim);line-height:1.6">'
-      + '批准 = 允许系统从异常状态恢复；拒绝 = 保持当前状态不变。'
+      + '批准 = 允許系統从異常状态恢復；拒絕 = 保持當前状态不变。'
       + '</div>';
     html += '<div style="display:flex;gap:8px;margin-top:8px">';
     var _reqIdJs = (req.request_id || req.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"); /* APR01-MEDIUM-4 XSS fix: JS string escape */
-    html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" onclick="confirmApproveRecovery(\'' + ocEsc(_reqIdJs) + '\')">✔ 批准恢复</button>';
+    html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" onclick="confirmApproveRecovery(\'' + ocEsc(_reqIdJs) + '\')">✔ 批准恢復</button>';
     html += '</div>';
     html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;opacity:0.6">ID: ' + ocEsc(req.request_id || req.id || '--') + '</div>';
     html += '</div>';
@@ -1080,29 +1080,29 @@ function renderPendingRecovery(requests) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 审计变更 完整翻译系统 / Audit Change Complete Translation System
-// 覆盖所有 record_change() 调用来源，确保 Operator 能看懂每一条记录
+// 審計变更 完整翻译系統 / Audit Change Complete Translation System
+// 覆盖所有 record_change() 調用来源，确保 Operator 能看懂每一條記錄
 // ═══════════════════════════════════════════════════════════════════════
 
-// ── 变更类型 Change Type ──
+// ── 变更類型 Change Type ──
 const _CHANGE_TYPE_LABELS = {
   STATE_CHANGE:      '状态变更',
   CONFIG_CHANGE:     '配置变更',
-  PARAMETER_CHANGE:  '参数变更',
-  RISK_OVERRIDE:     '风控覆盖',
-  PERMISSION_CHANGE: '权限变更',
+  PARAMETER_CHANGE:  '参數变更',
+  RISK_OVERRIDE:     '風控覆盖',
+  PERMISSION_CHANGE: '權限变更',
   CODE_DEPLOYMENT:   '代码部署',
   ROLLBACK:          '回滚',
   EMERGENCY_CHANGE:  '紧急变更',
 };
 
-// ── 审批状态 Approval Status ──
+// ── 審批状态 Approval Status ──
 const _APPROVAL_STATUS_CN = {
   PENDING:            '待批准',
-  AUTO_APPROVED:      '系统自动批准',
+  AUTO_APPROVED:      '系統自動批准',
   APPROVED:           '已批准',
-  REJECTED:           '已拒绝',
-  EMERGENCY_BYPASSED: '紧急跳过（需事后补批）',
+  REJECTED:           '已拒絕',
+  EMERGENCY_BYPASSED: '紧急跳過（需事后补批）',
 };
 
 function _changeTypeBadge(ct) {
@@ -1111,254 +1111,254 @@ function _changeTypeBadge(ct) {
   return ocChip(label, isRisk ? 'bad' : 'info');
 }
 
-// ── 授权状态值 Authorization State Values ──
+// ── 授權状态值 Authorization State Values ──
 const _AUTH_STATE_CN = {
   DRAFT: '草稿', PENDING_APPROVAL: '待批准', ACTIVE: '生效中', SUSPENDED: '已暂停',
-  FROZEN: '已冻结', EXPIRED: '已过期', REVOKED: '已撤销',
-  NOT_REQUESTED: '未申请', REQUESTED: '已申请', APPROVED: '已批准', DENIED: '已拒绝',
+  FROZEN: '已冻結', EXPIRED: '已過期', REVOKED: '已撤銷',
+  NOT_REQUESTED: '未申請', REQUESTED: '已申請', APPROVED: '已批准', DENIED: '已拒絕',
 };
 
-// ── 风控等级 Risk Level ──
+// ── 風控等级 Risk Level ──
 const _RISK_LEVEL_CN = {
-  NORMAL: '正常（无限制）', CAUTIOUS: '谨慎（降低仓位）', REDUCED: '缩减（限制开仓）',
-  DEFENSIVE: '防御（只许平仓）', CIRCUIT_BREAKER: '熔断（全部冻结）', MANUAL_REVIEW: '人工审核（全停）',
+  NORMAL: '正常（無限制）', CAUTIOUS: '謹慎（降低倉位）', REDUCED: '縮减（限制開倉）',
+  DEFENSIVE: '防御（只許平倉）', CIRCUIT_BREAKER: '熔斷（全部冻結）', MANUAL_REVIEW: '人工審核（全停）',
 };
 
-// ── 订单状态 OMS Order State ──
+// ── 訂單状态 OMS Order State ──
 const _OMS_STATE_CN = {
-  PENDING_NEW: '等待提交', ACCEPTED: '已接受', REJECTED: '被拒绝', PARTIALLY_FILLED: '部分成交',
+  PENDING_NEW: '等待提交', ACCEPTED: '已接受', REJECTED: '被拒絕', PARTIALLY_FILLED: '部分成交',
   FILLED: '完全成交', PENDING_CANCEL: '等待取消', CANCELLED: '已取消',
-  EXPIRED: '已过期', FAILED: '失败', PENDING_AMEND: '等待修改', AMENDED: '已修改',
+  EXPIRED: '已過期', FAILED: '失败', PENDING_AMEND: '等待修改', AMENDED: '已修改',
 };
 
-// ── 决策租约状态 Decision Lease State ──
+// ── 決策租約状态 Decision Lease State ──
 const _LEASE_STATE_CN = {
-  IDLE: '空闲', REQUESTED: '已请求', ACTIVE: '生效中', EXECUTING: '执行中',
-  COMPLETED: '已完成', EXPIRED: '已过期', REVOKED: '已撤销', FAILED: '失败',
+  IDLE: '空閒', REQUESTED: '已請求', ACTIVE: '生效中', EXECUTING: '執行中',
+  COMPLETED: '已完成', EXPIRED: '已過期', REVOKED: '已撤銷', FAILED: '失败',
 };
 
-// ── 组件名 Component Names ──
+// ── 組件名 Component Names ──
 const _COMP_CN = {
-  risk_manager: '风控管理器', RiskManager: '风控管理器', RiskGovernor: '风控治理器',
-  PaperTradingEngine: 'Paper 模拟', paper_engine: 'Paper 模拟',
+  risk_manager: '風控管理器', RiskManager: '風控管理器', RiskGovernor: '風控治理器',
+  PaperTradingEngine: 'Paper 模擬', paper_engine: 'Paper 模擬',
   governance_hub: '治理中枢', GovernanceHub: '治理中枢',
-  linear: '合约(USDT)', spot: '现货', inverse: '反向合约', option: '期权',
-  Authorization: '授权系统', DecisionLease: '决策租约', OMS: '订单管理',
+  linear: '合約(USDT)', spot: '現货', inverse: '反向合約', option: '期權',
+  Authorization: '授權系統', DecisionLease: '決策租約', OMS: '訂單管理',
 };
 function _translateComp(c) { return _COMP_CN[c] || c; }
 
 // ── 发起人 Who ──
 function _translateWho(who) {
   if (!who) return '--';
-  if (who === 'demo-operator' || who === 'operator') return '操作员 Operator';
-  if (who === 'system' || who === 'SYSTEM') return '系统自动 System';
+  if (who === 'demo-operator' || who === 'operator') return '操作員 Operator';
+  if (who === 'system' || who === 'SYSTEM') return '系統自動 System';
   if (who === 'GovernanceHub') return '治理中枢 GovernanceHub';
-  if (who === 'RiskManager') return '风控管理器 RiskManager';
+  if (who === 'RiskManager') return '風控管理器 RiskManager';
   if (who === 'PaperLiveGate') return 'Paper→Live 准入门控';
   if (who.toLowerCase().includes('agent')) return 'AI Agent 代理';
   return who;
 }
 
-// 翻译一个状态值（尝试所有状态字典）
+// 翻译一個状态值（嘗試所有状态字典）
 function _translateStateVal(val) {
   if (!val || typeof val !== 'string') return val;
   return _AUTH_STATE_CN[val] || _RISK_LEVEL_CN[val] || _OMS_STATE_CN[val] || _LEASE_STATE_CN[val] || val;
 }
 
-// ── 核心：what 描述翻译 + 审批后果说明 ──
-// 每条规则：{ pattern, cn: 中文描述, approve: 批准后果, reject: 拒绝后果 }
-// 覆盖所有 record_change() 调用产生的 what 文本
+// ── 核心：what 描述翻译 + 審批后果說明 ──
+// 每條規則：{ pattern, cn: 中文描述, approve: 批准后果, reject: 拒絕后果 }
+// 覆盖所有 record_change() 調用產生的 what 文本
 const _WHAT_RULES = [
 
-  // ═══ 1. 对账不一致 ═══
+  // ═══ 1. 對賬不一致 ═══
   { pattern: /^Reconciliation mismatch detected: (.+)$/,
-    cn: (m) => '账目核对发现差异 — 严重性：' + m[1],
+    cn: (m) => '賬目核對發現差異 — 严重性：' + m[1],
     risk: '中-高',
-    detail: '系统核对本地持仓/订单记录与交易所实际状态时发现不一致。差异可能影响风险敞口计算的准确性。CRITICAL 级别将自动提升风控等级。',
-    explain: '系统会定期把"我们自己记录的持仓和订单"与"交易所那边实际的数据"做对比。如果两边对不上，就说明某处出了偏差。\n\n'
-      + '常见原因：网络延迟导致同步滞后、交易所端订单被手动修改、系统重启后部分状态未恢复。\n\n'
-      + '如果差异涉及持仓数量，意味着我们以为的风险和实际风险可能不同——这种情况需要尽快排查。',
-    approve: '确认差异已知晓，系统继续运行。CRITICAL 级别将自动触发风控升级。',
-    reject: '标记为需进一步调查。系统不停止，但记录保持待处理状态。',
+    detail: '系統核對本地持倉/訂單記錄与交易所實際状态時發現不一致。差異可能影响風險敞口計算的准确性。CRITICAL 级别将自動提升風控等级。',
+    explain: '系統会定期把"我们自己記錄的持倉和訂單"与"交易所那边實際的數據"做對比。如果兩边對不上，就說明某處出了偏差。\n\n'
+      + '常见原因：網絡延遲导致同步滞后、交易所端訂單被手動修改、系統重啟后部分状态未恢復。\n\n'
+      + '如果差異涉及持倉數量，意味着我们以为的風險和實際風險可能不同——這種情况需要尽快排查。',
+    approve: '确認差異已知晓，系統繼續運行。CRITICAL 级别将自動触发風控升级。',
+    reject: '標記为需進一步調查。系統不停止，但記錄保持待處理状态。',
   },
 
-  // ═══ 2. 授权冻结 ═══
+  // ═══ 2. 授權冻結 ═══
   { pattern: /^Authorization frozen: (\d+) active leases revoked$/,
-    cn: (m) => '授权已冻结 — ' + m[1] + ' 个交易许可已撤销',
+    cn: (m) => '授權已冻結 — ' + m[1] + ' 個交易許可已撤銷',
     risk: '高',
-    detail: '系统检测到严重异常，已执行紧急冻结。所有进行中的交易许可被强制撤销，系统停止接受新交易指令。需在「授权管理」区域手动恢复。',
-    explain: '这相当于按下了"紧急暂停键"。当系统发现严重问题（比如风控连续告警、对账严重不一致）时，会自动冻结一切交易活动来保护账户。\n\n'
-      + '冻结后，AI 无法再执行任何新的买卖操作，直到你手动排查问题并在上方「授权管理」区域恢复授权。\n\n'
-      + '注意：拒绝此记录不会解除冻结——冻结只能通过手动操作恢复。',
-    approve: '确认冻结必要，系统保持冻结状态。',
-    reject: '记录异议，但系统仍保持冻结。解冻需在「授权管理」中手动操作。',
+    detail: '系統檢測到严重異常，已執行紧急冻結。所有進行中的交易許可被强制撤銷，系統停止接受新交易指令。需在「授權管理」區域手動恢復。',
+    explain: '這相當于按下了"紧急暂停键"。当系統發現严重问題（比如風控連續告警、對賬严重不一致）時，會自動冻結一切交易活動来保護賬户。\n\n'
+      + '冻結后，AI 無法再執行任何新的买卖操作，直到你手動排查问題并在上方「授權管理」區域恢復授權。\n\n'
+      + '注意：拒絕此記錄不會解除冻結——冻結只能通過手動操作恢復。',
+    approve: '确認冻結必要，系統保持冻結状态。',
+    reject: '記錄異議，但系統仍保持冻結。解冻需在「授權管理」中手動操作。',
   },
 
-  // ═══ 3. 授权缓存刷新 ═══
+  // ═══ 3. 授權缓存刷新 ═══
   { pattern: /^Authorization cache invalidated$/,
-    cn: () => '授权缓存已刷新',
-    risk: '无',
-    detail: '授权状态变更后，内部缓存已自动清理并重新加载。属于正常系统维护操作，无需人工干预。',
-    explain: '这是系统内部的"自动刷新"。每次授权状态发生变化（比如从"待审批"变成"已激活"），系统需要清理旧的缓存数据，确保所有模块读到的都是最新状态。\n\n'
-      + '你通常不需要对这条记录做任何操作——除非你最近没有做过任何授权变更却频繁看到此记录，那可能意味着有程序异常。',
-    approve: '确认知晓，无需后续操作。',
-    reject: '标记异常。仅在未预期出现此记录时使用。',
+    cn: () => '授權缓存已刷新',
+    risk: '無',
+    detail: '授權状态变更后，內部缓存已自動清理并重新載入。屬於正常系統維護操作，無需人工干预。',
+    explain: '這是系統內部的"自動刷新"。每次授權状态發生变化（比如从"待審批"变成"已激活"），系統需要清理旧的缓存數據，确保所有模块读到的都是最新状态。\n\n'
+      + '你通常不需要對這條記錄做任何操作——除非你最近没有做過任何授權变更却频繁看到此記錄，那可能意味着有程序異常。',
+    approve: '确認知晓，無需后續操作。',
+    reject: '標記異常。仅在未预期出現此記錄時使用。',
   },
 
-  // ═══ 4. 风控等级变更 ═══
+  // ═══ 4. 風控等级变更 ═══
   { pattern: /^Risk level changed: (.+) → (.+)$/,
-    cn: (m) => '风控保护等级调整：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
+    cn: (m) => '風控保護等级調整：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
     risk: '中',
-    detail: '系统根据市场状况或账户表现自动调整了风控等级。等级越高，仓位限制越严格、止损越紧。调整不可通过拒绝回退，如需修改请在「风控管理」中操作。',
-    explain: '风控等级决定了系统允许承受多大的风险。当市场剧烈波动或账户出现亏损时，系统会自动提高等级（更严格的保护）；市场平稳时会降低等级（恢复正常交易空间）。\n\n'
-      + '等级提高 = 更安全但交易空间受限（仓位更小、止损更紧）\n'
-      + '等级降低 = 交易空间更大但风险增加',
-    approve: '同意风控调整，系统按新等级执行。',
-    reject: '记录异议。风控等级不会回退，如需调整请在「风控管理」中操作。',
+    detail: '系統根據市场状况或賬户表現自動調整了風控等级。等级越高，倉位限制越严格、止損越紧。調整不可通過拒絕回退，如需修改請在「風控管理」中操作。',
+    explain: '風控等级決定了系統允許承受多大的風險。当市场剧烈波動或賬户出現亏損時，系統會自動提高等级（更严格的保護）；市场平稳時会降低等级（恢復正常交易空間）。\n\n'
+      + '等级提高 = 更安全但交易空間受限（倉位更小、止損更紧）\n'
+      + '等级降低 = 交易空間更大但風險增加',
+    approve: '同意風控調整，系統按新等级執行。',
+    reject: '記錄異議。風控等级不會回退，如需調整請在「風控管理」中操作。',
   },
 
-  // ═══ 5. 风控降级已执行 ═══
+  // ═══ 5. 風控降级已執行 ═══
   { pattern: /^RiskGovernor de-escalation approved: (.+) → (.+)$/,
-    cn: (m) => '风控降级已执行：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
+    cn: (m) => '風控降级已執行：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
     risk: '低',
-    detail: '此前提交的风控等级降低请求已获批并执行。系统已恢复至更宽松的保护等级，允许更大仓位和更多交易操作。此记录为已完成操作的确认。',
-    explain: '有人（通常是你自己）认为之前的高风控等级不再必要，提交了降级请求并已获批。现在系统回到了更宽松的状态，AI 可以使用更大的仓位进行交易。\n\n'
-      + '这条记录只是告知你操作已完成，批准或拒绝都不会改变已经执行的结果。',
-    approve: '确认知晓操作已完成。',
-    reject: '无实际效果，操作已执行。',
+    detail: '此前提交的風控等级降低請求已获批并執行。系統已恢復至更宽松的保護等级，允許更大倉位和更多交易操作。此記錄为已完成操作的确認。',
+    explain: '有人（通常是你自己）認为之前的高風控等级不再必要，提交了降级請求并已获批。現在系統回到了更宽松的状态，AI 可以使用更大的倉位進行交易。\n\n'
+      + '這條記錄只是告知你操作已完成，批准或拒絕都不會改变已經執行的結果。',
+    approve: '确認知晓操作已完成。',
+    reject: '無實際效果，操作已執行。',
   },
 
-  // ═══ 6. 交易授权状态变更 ═══
+  // ═══ 6. 交易授權状态变更 ═══
   { pattern: /^Authorization: (.+) → (.+)$/,
-    cn: (m) => '交易授权状态变更：' + (_AUTH_STATE_CN[m[1]] || m[1]) + ' → ' + (_AUTH_STATE_CN[m[2]] || m[2]),
+    cn: (m) => '交易授權状态变更：' + (_AUTH_STATE_CN[m[1]] || m[1]) + ' → ' + (_AUTH_STATE_CN[m[2]] || m[2]),
     risk: '低-中',
-    detail: '交易授权控制系统是否有权执行交易。状态包括：草稿(DRAFT)、待审批(PENDING)、已激活(ACTIVE)、已限制(RESTRICTED)、已冻结(FROZEN)、已过期(EXPIRED)。Paper 模拟授权自动批准，Live 实盘需人工审批。',
-    explain: '交易授权相当于系统的"营业执照"——有效时可以交易，失效时一切停止。\n\n'
-      + '状态流转：草稿 → 待审批 → 已激活 → （正常运行） → 过期/冻结/撤销\n\n'
-      + 'Paper 模拟（无真实资金）的授权会自动批准。如果未来启用 Live 实盘交易，每次授权都需要你亲自审批。\n\n'
-      + '拒绝不会回退状态变更，要修改请在「授权管理」区域操作。',
-    approve: '同意此授权变更。',
-    reject: '记录异议。状态不会回退，如需修改请在「授权管理」中操作。',
+    detail: '交易授權控制系統是否有權執行交易。状态包括：草稿(DRAFT)、待審批(PENDING)、已激活(ACTIVE)、已限制(RESTRICTED)、已冻結(FROZEN)、已過期(EXPIRED)。Paper 模擬授權自動批准，Live 實盤需人工審批。',
+    explain: '交易授權相當于系統的"营業執照"——有效時可以交易，失效時一切停止。\n\n'
+      + '状态流转：草稿 → 待審批 → 已激活 → （正常運行） → 過期/冻結/撤銷\n\n'
+      + 'Paper 模擬（無真實資金）的授權會自動批准。如果未來啟用 Live 實盤交易，每次授權都需要你亲自審批。\n\n'
+      + '拒絕不會回退状态变更，要修改請在「授權管理」區域操作。',
+    approve: '同意此授權变更。',
+    reject: '記錄異議。状态不會回退，如需修改請在「授權管理」中操作。',
   },
 
-  // ═══ 7. 风控引擎状态转换 ═══
+  // ═══ 7. 風控引擎状态转换 ═══
   { pattern: /^RiskGovernor: (.+) → (.+)$/,
-    cn: (m) => '风控引擎状态转换：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
+    cn: (m) => '風控引擎状态转换：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
     risk: '中',
-    detail: '风控引擎保护等级发生变化。等级从低到高：正常→注意→警告→危险→紧急。升级为保护措施，降级需确认市场已恢复稳定。',
-    explain: '风控引擎是系统中负责"盯风险"的核心模块。它有 5 个保护等级，类似天气预警的蓝色/黄色/橙色/红色信号。\n\n'
-      + '等级提高通常是因为：市场波动加剧、账户亏损增加、或对账发现异常。\n'
-      + '等级降低通常是因为：异常已消除、市场恢复平稳。',
-    approve: '确认风控引擎判断正确。',
-    reject: '标记需审查。等级不会自动回退。',
+    detail: '風控引擎保護等级發生变化。等级从低到高：正常→注意→警告→危險→紧急。升级为保護措施，降级需确認市场已恢復稳定。',
+    explain: '風控引擎是系統中負責"盯風險"的核心模块。它有 5 個保護等级，類似天气预警的蓝色/黃色/橙色/红色信號。\n\n'
+      + '等级提高通常是因为：市场波動加剧、賬户亏損增加、或對賬發現異常。\n'
+      + '等级降低通常是因为：異常已消除、市场恢復平稳。',
+    approve: '确認風控引擎判斷正确。',
+    reject: '標記需審查。等级不會自動回退。',
   },
 
-  // ═══ 8. 订单状态变更 ═══
+  // ═══ 8. 訂單状态变更 ═══
   { pattern: /^OmsOrder (.+): (.+) → (.+)$/,
-    cn: (m) => '订单 ' + m[1].substring(0,12) + '… 状态变更：' + (_OMS_STATE_CN[m[2]] || m[2]) + ' → ' + (_OMS_STATE_CN[m[3]] || m[3]),
+    cn: (m) => '訂單 ' + m[1].substring(0,12) + '… 状态变更：' + (_OMS_STATE_CN[m[2]] || m[2]) + ' → ' + (_OMS_STATE_CN[m[3]] || m[3]),
     risk: '低',
-    detail: '交易订单执行状态发生转换。正常流程：创建→提交→成交。出现"已拒绝"可能因价格滑点过大或余额不足。单笔订单状态变更通常无需人工干预。',
-    explain: '每一笔交易订单都有一个生命周期：创建 → 提交给交易所 → 交易所确认成交（或拒绝）。\n\n'
-      + '如果看到"已拒绝(REJECTED)"，可能的原因：\n'
-      + '• 账户余额不足以下这笔单\n'
-      + '• 市场价格变化太快，超出了可接受的范围\n'
-      + '• 订单数量不符合交易所的最小/最大限制\n\n'
-      + '偶尔的拒绝是正常的。如果大量订单被拒绝，则可能需要检查账户状态或参数配置。',
-    approve: '确认订单执行流程正常。',
-    reject: '标记订单可能存在异常，需人工检查。',
+    detail: '交易訂單執行状态發生转换。正常流程：建立→提交→成交。出現"已拒絕"可能因價格滑点過大或余额不足。單笔訂單状态变更通常無需人工干预。',
+    explain: '每一笔交易訂單都有一個生命周期：建立 → 提交給交易所 → 交易所确認成交（或拒絕）。\n\n'
+      + '如果看到"已拒絕(REJECTED)"，可能的原因：\n'
+      + '• 賬户余额不足以下這笔單\n'
+      + '• 市场價格变化太快，超出了可接受的範圍\n'
+      + '• 訂單數量不符合交易所的最小/最大限制\n\n'
+      + '偶尔的拒絕是正常的。如果大量訂單被拒絕，則可能需要檢查賬户状态或参數配置。',
+    approve: '确認訂單執行流程正常。',
+    reject: '標記訂單可能存在異常，需人工檢查。',
   },
 
-  // ═══ 9. AI 交易许可变更 ═══
+  // ═══ 9. AI 交易許可变更 ═══
   { pattern: /^DecisionLease: (.+) → (.+)$/,
-    cn: (m) => 'AI 交易许可变更：' + (_LEASE_STATE_CN[m[1]] || m[1]) + ' → ' + (_LEASE_STATE_CN[m[2]] || m[2]),
+    cn: (m) => 'AI 交易許可变更：' + (_LEASE_STATE_CN[m[1]] || m[1]) + ' → ' + (_LEASE_STATE_CN[m[2]] || m[2]),
     risk: '低',
-    detail: 'AI 的临时交易执行许可发生状态变更。许可有时效性，到期后 AI 需重新申请方可继续交易。这是防止 AI 异常时无限制下单的安全机制。',
-    explain: 'AI 每次要执行交易前，必须先获取一个有时间限制的"通行证"（交易许可）。通行证到期后 AI 就不能再下单，必须重新申请。\n\n'
-      + '这个机制的目的是防止 AI 在出现故障时疯狂下单——即使 AI 认为应该交易，没有有效通行证就无法执行。\n\n'
-      + '许可的获取和释放是自动完成的，正常情况下不需要你做任何操作。',
-    approve: '确认许可变更正常。',
-    reject: '标记异常。仅在 AI 不应获得许可时使用。',
+    detail: 'AI 的临時交易執行許可發生状态变更。許可有時效性，到期后 AI 需重新申請方可繼續交易。這是防止 AI 異常時無限制下單的安全機制。',
+    explain: 'AI 每次要執行交易前，必须先获取一個有時間限制的"通行證"（交易許可）。通行證到期后 AI 就不能再下單，必须重新申請。\n\n'
+      + '這個機制的目的是防止 AI 在出現故障時疯狂下單——即使 AI 認为應該交易，没有有效通行證就無法執行。\n\n'
+      + '許可的获取和釋放是自動完成的，正常情况下不需要你做任何操作。',
+    approve: '确認許可变更正常。',
+    reject: '標記異常。仅在 AI 不應获得許可時使用。',
   },
 
-  // ═══ 10. 紧急熔断 — 回撤 ═══
+  // ═══ 10. 紧急熔斷 — 回撤 ═══
   { pattern: /^Session halted due to drawdown/,
-    cn: () => '交易暂停 Trading Halted — 回撤超过安全阈值',
+    cn: () => '交易暂停 Trading Halted — 回撤超過安全阈值',
     risk: '高',
-    detail: '账户净值从最高点回撤幅度超过预设阈值，系统已自动暂停所有新交易。需检查持仓和市场状况，确认安全后在「授权租约 Lease」区域重新启动。熔断不可通过拒绝取消。',
-    explain: '你的账户净值从历史最高点下跌的比例，超过了你设定的安全线。这就像汽车的安全气囊——检测到"碰撞"后自动弹出保护。\n\n'
-      + '熔断后系统不会再开任何新仓，但已有的持仓不会被自动平掉。你需要：\n'
-      + '1. 查看当前持仓和市场走势\n'
-      + '2. 决定是否手动平掉部分或全部持仓\n'
-      + '3. 等市场恢复后，在「授权租约 Lease」区域手动重新启动交易',
-    approve: '确认知晓熔断，系统保护措施已生效。',
-    reject: '无实际效果。熔断为自动保护机制，恢复交易需手动操作。',
+    detail: '賬户净值从最高点回撤幅度超過预設阈值，系統已自動暂停所有新交易。需檢查持倉和市场状况，确認安全后在「授權租約 Lease」區域重新啟動。熔斷不可通過拒絕取消。',
+    explain: '你的賬户净值从歷史最高点下跌的比例，超過了你設定的安全線。這就像汽车的安全气囊——檢測到"碰撞"后自動弹出保護。\n\n'
+      + '熔斷后系統不會再開任何新倉，但已有的持倉不會被自動平掉。你需要：\n'
+      + '1. 查看當前持倉和市场走势\n'
+      + '2. 決定是否手動平掉部分或全部持倉\n'
+      + '3. 等市场恢復后，在「授權租約 Lease」區域手動重新啟動交易',
+    approve: '确認知晓熔斷，系統保護措施已生效。',
+    reject: '無實際效果。熔斷为自動保護機制，恢復交易需手動操作。',
   },
 
-  // ═══ 11. 紧急熔断 — 单日亏损 ═══
+  // ═══ 11. 紧急熔斷 — 單日亏損 ═══
   { pattern: /^Session halted due to daily loss/,
-    cn: () => '交易暂停 Trading Halted — 单日亏损超过限额',
+    cn: () => '交易暂停 Trading Halted — 單日亏損超過限额',
     risk: '高',
-    detail: '今日累计亏损超过预设的单日最大限额，系统已自动暂停所有新交易。次日将自动重置，或可在「授权租约 Lease」中调整限额后手动恢复。熔断不可通过拒绝取消。',
-    explain: '今天的总亏损金额超过了你设定的"每天最多亏多少"的上限。这就像信用卡的每日消费限额——到达上限后自动锁定。\n\n'
-      + '恢复方式：\n'
-      + '1. 等到次日（限额会自动重置）\n'
-      + '2. 如果你确认当前市场状况安全，可以手动调高限额后重启交易',
-    approve: '确认知晓熔断，保护措施已生效。',
-    reject: '无实际效果。恢复交易需手动操作或等待次日重置。',
+    detail: '今日累計亏損超過预設的單日最大限额，系統已自動暂停所有新交易。次日将自動重置，或可在「授權租約 Lease」中調整限额后手動恢復。熔斷不可通過拒絕取消。',
+    explain: '今天的總亏損金额超過了你設定的"每天最多亏多少"的上限。這就像信用卡的每日消費限额——到达上限后自動锁定。\n\n'
+      + '恢復方式：\n'
+      + '1. 等到次日（限额會自動重置）\n'
+      + '2. 如果你确認當前市场状况安全，可以手動調高限额后重啟交易',
+    approve: '确認知晓熔斷，保護措施已生效。',
+    reject: '無實際效果。恢復交易需手動操作或等待次日重置。',
   },
 
-  // ═══ 12. 风控参数修改 ═══
+  // ═══ 12. 風控参數修改 ═══
   { pattern: /^Updated risk config parameter: (.+)$/,
-    cn: (m) => '风控参数已修改：' + m[1],
+    cn: (m) => '風控参數已修改：' + m[1],
     risk: '中',
-    detail: '风控配置参数已被修改（可能由 AI 自主优化或系统自动调整）。参数直接影响仓位大小、止损比例等交易行为。拒绝仅标记记录，不回退参数。如需改回请在「风控设置」中操作。',
-    explain: '风控参数控制着交易的安全边界，例如：\n'
-      + '• 最大仓位大小 = 每笔交易最多投入多少资金\n'
-      + '• 止损比例 = 亏损到什么程度自动止损\n'
-      + '• 最大持仓数量 = 同时最多持有几个品种\n'
-      + '• 每日最大亏损限额 = 一天最多允许亏多少\n\n'
-      + '参数放宽意味着交易更激进（潜在收益和风险都增大），收紧意味着更保守（风险降低但机会也减少）。',
-    approve: '确认参数调整合理，系统按新参数执行。',
-    reject: '记录异议。参数不会自动回退，如需改回请在「风控设置」中操作。',
+    detail: '風控配置参數已被修改（可能由 AI 自主優化或系統自動調整）。参數直接影响倉位大小、止損比例等交易行为。拒絕仅標記記錄，不回退参數。如需改回請在「風控設置」中操作。',
+    explain: '風控参數控制着交易的安全边界，例如：\n'
+      + '• 最大倉位大小 = 每笔交易最多投入多少資金\n'
+      + '• 止損比例 = 亏損到什么程度自動止損\n'
+      + '• 最大持倉數量 = 同時最多持有几個品種\n'
+      + '• 每日最大亏損限额 = 一天最多允許亏多少\n\n'
+      + '参數放宽意味着交易更激進（潜在收益和風險都增大），收紧意味着更保守（風險降低但機會也减少）。',
+    approve: '确認参數調整合理，系統按新参數執行。',
+    reject: '記錄異議。参數不會自動回退，如需改回請在「風控設置」中操作。',
   },
 
-  // ═══ 13. Paper 模拟→Live 实盘 评估 ═══
+  // ═══ 13. Paper 模擬→Live 實盤 評估 ═══
   { pattern: /^PaperLiveGate evaluation: (.+)$/,
-    cn: (m) => 'Paper 模拟 → Live 实盘 升级评估：' + m[1],
-    risk: '无',
-    detail: '系统完成了从 Paper 模拟 升级至 Live 实盘 的准备度评估（含胜率、盈亏比、运行天数、回撤、稳定性等 11 项指标）。评估结果不会自动改变系统模式，升级需在「授权管理」中手动授权。',
-    explain: '这是系统自动做的一个"体检报告"——评估目前的 Paper 模拟 表现是否达到了可以用真金白银做 Live 实盘 的标准。\n\n'
-      + '评估指标包括：Paper 模拟 至少运行 21 天、胜率达标、盈亏比合理、最大回撤可控、系统运行稳定等。\n\n'
-      + 'PASS = 各项达标，可以考虑升级到 Live 实盘\n'
-      + 'FAIL = 还有指标未达标，建议继续 Paper 模拟\n\n'
-      + '无论评估结果如何，系统不会自动切换到 Live 实盘——必须你手动授权。',
-    approve: '确认已阅读评估报告。',
-    reject: '记录对评估结果的疑问。不影响系统运行。',
+    cn: (m) => 'Paper 模擬 → Live 實盤 升级評估：' + m[1],
+    risk: '無',
+    detail: '系統完成了从 Paper 模擬 升级至 Live 實盤 的準備度評估（含勝率、盈亏比、運行天數、回撤、稳定性等 11 项指標）。評估結果不會自動改变系統模式，升级需在「授權管理」中手動授權。',
+    explain: '這是系統自動做的一個"體檢報告"——評估目前的 Paper 模擬 表現是否达到了可以用真金白银做 Live 實盤 的標准。\n\n'
+      + '評估指標包括：Paper 模擬 至少運行 21 天、勝率达標、盈亏比合理、最大回撤可控、系統運行稳定等。\n\n'
+      + 'PASS = 各项达標，可以考虑升级到 Live 實盤\n'
+      + 'FAIL = 還有指標未达標，建議繼續 Paper 模擬\n\n'
+      + '無論評估結果如何，系統不會自動切换到 Live 實盤——必须你手動授權。',
+    approve: '确認已阅读評估報告。',
+    reject: '記錄對評估結果的疑问。不影响系統運行。',
   },
 
   // ═══ 16. 门控事件 ═══
   { pattern: /^Gate event: (.+)$/,
-    cn: (m) => 'Paper 模拟 → Live 实盘 门控事件：' + m[1],
-    risk: '无',
-    detail: 'Paper 模拟 → Live 实盘 门控系统产生了事件记录（如评估启动、指标达标/不达标等）。仅为信息记录，不影响当前交易。',
-    explain: '门控系统会持续跟踪各项指标，并在指标发生变化时生成事件记录。例如"某项指标刚刚达标"或"新一轮评估开始"。\n\n'
-      + '这些事件不会改变任何交易行为，只是帮你了解系统向 Live 实盘 迈进的进度。',
-    approve: '确认已阅读。',
-    reject: '标记需进一步了解。',
+    cn: (m) => 'Paper 模擬 → Live 實盤 门控事件：' + m[1],
+    risk: '無',
+    detail: 'Paper 模擬 → Live 實盤 门控系統產生了事件記錄（如評估啟動、指標达標/不达標等）。仅为信息記錄，不影响當前交易。',
+    explain: '门控系統会持續跟踪各项指標，并在指標發生变化時生成事件記錄。例如"某项指標刚刚达標"或"新一轮評估開始"。\n\n'
+      + '這些事件不會改变任何交易行为，只是帮你了解系統向 Live 實盤 邁進的進度。',
+    approve: '确認已阅读。',
+    reject: '標記需進一步了解。',
   },
 ];
 
 // ── 翻译 what 描述 ──
 function _translateWhat(what) {
-  if (!what) return '（无描述）';
+  if (!what) return '（無描述）';
   for (const rule of _WHAT_RULES) {
     const m = what.match(rule.pattern);
     if (m) return typeof rule.cn === 'function' ? rule.cn(m) : rule.cn;
   }
-  return what; // 无匹配规则时返回原文
+  return what; // 無匹配規則時返回原文
 }
 
-// ── 获取审批后果说明 ──
+// ── 获取審批后果說明 ──
 function _getApprovalGuidance(what) {
   if (!what) return null;
   for (const rule of _WHAT_RULES) {
@@ -1370,7 +1370,7 @@ function _getApprovalGuidance(what) {
 // ── 格式化 old/new value ──
 function _formatValue(val) {
   if (val == null || val === '--') return '--';
-  // 先尝试翻译单个状态值
+  // 先嘗試翻译單個状态值
   const translated = _translateStateVal(val);
   if (translated !== val) return translated + '（' + val + '）';
   try {
@@ -1381,16 +1381,16 @@ function _formatValue(val) {
       return parsed.slice(0, 5).join(', ') + '… 共 ' + parsed.length + ' 项';
     }
     if (typeof parsed === 'object' && parsed !== null) {
-      // 特殊处理常见对象结构
+      // 特殊處理常见對象結構
       if ('session_halted' in parsed) {
-        return parsed.session_halted ? '交易已暂停 Trading Halted' + (parsed.halt_reason ? '（' + parsed.halt_reason + '）' : '') : '交易正常运行';
+        return parsed.session_halted ? '交易已暂停 Trading Halted' + (parsed.halt_reason ? '（' + parsed.halt_reason + '）' : '') : '交易正常運行';
       }
-      // 通用对象：转为 key=value 对
+      // 通用對象：转为 key=value 對
       return Object.entries(parsed).map(([k,v]) => k + '=' + v).join(', ');
     }
     return String(parsed);
   } catch (_) {
-    // 非 JSON，尝试翻译为已知状态
+    // 非 JSON，嘗試翻译为已知状态
     const t = _translateStateVal(String(val));
     return t !== String(val) ? t + '（' + val + '）' : String(val);
   }
@@ -1431,7 +1431,7 @@ function renderPendingAudit(changes) {
     // Affected components (translated)
     let comps = '';
     if (c.affected_components && c.affected_components.length > 0) {
-      comps = '<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">影响范围：'
+      comps = '<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">影响範圍：'
         + c.affected_components.map(x => ocEsc(_translateComp(x))).join('、') /* APR01-MEDIUM-4 XSS fix */
         + '</div>';
     }
@@ -1447,7 +1447,7 @@ function renderPendingAudit(changes) {
     html += '<div style="font-weight:600;margin-bottom:6px;font-size:13px">' + ocEsc(whatCn) + '</div>';
 
     // Risk badge + formal explanation (always visible)
-    // 风险标签 + 正式说明（始终可见）
+    // 風險標簽 + 正式說明（始終可见）
     if (guidance) {
       let riskColor = 'var(--text-dim)';
       if (guidance.risk === '高') riskColor = 'var(--red)';
@@ -1457,18 +1457,18 @@ function renderPendingAudit(changes) {
       if (guidance.risk) {
         html += '<span style="display:inline-block;margin-bottom:6px;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;'
           + 'background:' + riskColor + '22;color:' + riskColor + ';border:1px solid ' + riskColor + '44'
-          + '">风险等级：' + ocEsc(guidance.risk) + '</span>';
+          + '">風險等级：' + ocEsc(guidance.risk) + '</span>';
       }
       if (guidance.detail) {
         html += '<div style="margin-bottom:8px;padding:8px 10px;background:rgba(88,166,255,0.06);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;font-size:11px;color:var(--text);line-height:1.7">'
           + ocEsc(guidance.detail) + '</div>';
       }
       // Collapsible plain-language explanation (hidden by default)
-      // 可折叠的通俗说明（默认隐藏）
+      // 可折叠的通俗說明（默認隐藏）
       if (guidance.explain) {
         const eid = 'explain-' + cid.replace(/[^a-zA-Z0-9]/g, '');
         html += '<details style="margin-bottom:8px;font-size:11px"><summary style="cursor:pointer;color:var(--accent);user-select:none;padding:4px 0">'
-          + '详细说明 / Learn more</summary>'
+          + '详細說明 / Learn more</summary>'
           + '<div style="margin-top:6px;padding:8px 10px;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);line-height:1.8;white-space:pre-line">'
           + ocEsc(guidance.explain) + '</div></details>';
       }
@@ -1492,11 +1492,11 @@ function renderPendingAudit(changes) {
       html += '<div style="display:flex">';
       html += '<div style="flex:1;padding:8px 10px;background:rgba(63,185,80,0.06);border-right:1px solid var(--border)">';
       html += '<div style="font-weight:600;color:var(--green);margin-bottom:4px">✔ 批准后果</div>';
-      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.approve : '确认此变更有效。') + '</div>';
+      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.approve : '确認此变更有效。') + '</div>';
       html += '</div>';
       html += '<div style="flex:1;padding:8px 10px;background:rgba(248,81,73,0.06)">';
-      html += '<div style="font-weight:600;color:var(--red);margin-bottom:4px">✖ 拒绝后果</div>';
-      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.reject : '标记此变更为不合规，需要进一步处理。') + '</div>';
+      html += '<div style="font-weight:600;color:var(--red);margin-bottom:4px">✖ 拒絕后果</div>';
+      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.reject : '標記此变更为不合規，需要進一步處理。') + '</div>';
       html += '</div>';
       html += '</div></div>';
 
@@ -1504,7 +1504,7 @@ function renderPendingAudit(changes) {
       html += '<button class="oc-btn oc-btn-success" style="font-size:12px;padding:6px 20px" '
         + 'onclick="auditApprove(\'' + cidJs + '\')">✔ 批准</button>';
       html += '<button class="oc-btn oc-btn-danger" style="font-size:12px;padding:6px 20px" '
-        + 'onclick="auditReject(\'' + cidJs + '\')">✖ 拒绝</button>';
+        + 'onclick="auditReject(\'' + cidJs + '\')">✖ 拒絕</button>';
       html += '</div>';
     }
     html += '<div style="font-size:10px;color:var(--text-dim);margin-top:8px;opacity:0.5">ID: ' + cid
@@ -1518,7 +1518,7 @@ function renderPendingAudit(changes) {
 async function auditApprove(changeId) {
   const reason = await openPromptModal({
     title: '批准原因 / Approval Reason',
-    body: '可选。留空将按无备注批准。',
+    body: '可選。留空将按無備注批准。',
     label: '原因 / Reason',
     confirmLabel: '批准 / Approve'
   });
@@ -1534,19 +1534,19 @@ async function auditApprove(changeId) {
 
 async function auditReject(changeId) {
   const reason = await openPromptModal({
-    title: '拒绝原因 / Rejection Reason',
+    title: '拒絕原因 / Rejection Reason',
     label: '原因 / Reason',
     required: true,
     multiline: true,
-    confirmLabel: '拒绝 / Reject'
+    confirmLabel: '拒絕 / Reject'
   });
-  if (!reason || !reason.trim()) { ocToast('Please enter a rejection reason / 请输入拒绝原因', 'error'); return; }
+  if (!reason || !reason.trim()) { ocToast('Please enter a rejection reason / 請輸入拒絕原因', 'error'); return; }
   const d = await govRejectAuditChange(changeId, reason.trim());
   if (d && d.ok) {
-    ocToast('Change rejected / 变更已拒绝', 'success');
+    ocToast('Change rejected / 变更已拒絕', 'success');
     loadPendingApprovals();
   } else {
-    ocToast((d && d.message) || 'Reject failed / 拒绝失败', 'error');
+    ocToast((d && d.message) || 'Reject failed / 拒絕失败', 'error');
   }
 }
 
@@ -1565,7 +1565,7 @@ async function bulkAudit(action) {
     // 此處 fetch 失敗 = 後端不可用，直接 abort，不開 modal。
     const pending = await govGetPendingAudit();
     if (!pending || !pending.ok || !Array.isArray(pending.data)) {
-      ocToast('获取待审批列表失败 / Failed to load pending list', 'error');
+      ocToast('获取待審批列表失败 / Failed to load pending list', 'error');
       return;
     }
     const items = pending.data;
@@ -1580,7 +1580,7 @@ async function bulkAudit(action) {
     const overflow = items.length > 5 ? ('\n... 及其他 ' + (items.length - 5) + ' 筆') : '';
     const sampleLines = sample.map(function(id, i) { return '  ' + (i + 1) + '. ' + id; }).join('\n');
 
-    const titleZh = isApprove ? '批量批准全部待审 / Bulk Approve All Pending' : '批量拒绝全部待审 / Bulk Reject All Pending';
+    const titleZh = isApprove ? '批量批准全部待審 / Bulk Approve All Pending' : '批量拒絕全部待審 / Bulk Reject All Pending';
     const bodyZh = (isApprove
       ? '即將批准 ' + items.length + ' 筆 PENDING 變更，立即生效。\n受影響範圍可能包含 SM-01 授權、SM-04 風險等級、Decision Lease 規則。\n建議先逐項複核後再批量通過。'
       : '即將拒絕 ' + items.length + ' 筆 PENDING 變更，理由將寫入 audit trail。\n拒絕後待審項回復為已關閉狀態，需重新申請。'
@@ -1619,11 +1619,11 @@ async function bulkAudit(action) {
       reason = 'Operator bulk approved';
     } else {
       const promptResult = await openPromptModal({
-        title: '批量拒绝原因 / Bulk Rejection Reason',
+        title: '批量拒絕原因 / Bulk Rejection Reason',
         label: '原因 / Reason',
         required: true,
         multiline: true,
-        confirmLabel: '拒绝全部 / Reject All'
+        confirmLabel: '拒絕全部 / Reject All'
       });
       reason = (promptResult || '').trim();
       if (!reason) {
@@ -1648,7 +1648,7 @@ async function bulkAudit(action) {
       }
     }
 
-    const label = isApprove ? '同意 approved' : '拒绝 rejected';
+    const label = isApprove ? '同意 approved' : '拒絕 rejected';
     let toastMsg = okCount + ' 项已' + label + (failCount ? '，' + failCount + ' 项失败' : '');
     if (failedChangeIds.length) {
       // 失敗詳情 toast 後再開一個常駐 banner 顯示完整 id list（≤ 10 個直顯，超過截斷）
@@ -1673,7 +1673,7 @@ async function loadPendingApprovals() {
   } else {
     _lastPendingRecovery = [];
     const el = document.getElementById('pending-recovery-content');
-    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load recovery requests / 載入恢復請求失敗（治理中枢可能未启用）</p>'; // SAFE: static HTML only
+    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load recovery requests / 載入恢復請求失敗（治理中枢可能未啟用）</p>'; // SAFE: static HTML only
   }
 
   const audit = await govGetPendingAudit();
@@ -1683,7 +1683,7 @@ async function loadPendingApprovals() {
   } else {
     _lastPendingAudit = [];
     const el = document.getElementById('pending-audit-content');
-    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load pending approvals / 載入待批准項目失敗（治理中枢可能未启用）</p>'; // SAFE: static HTML only
+    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load pending approvals / 載入待批准項目失敗（治理中枢可能未啟用）</p>'; // SAFE: static HTML only
   }
 }
 
@@ -1805,16 +1805,16 @@ async function loadAll() {
     loadAuthScope();
 
     // Detect changes and render incident log (client-side session data)
-    // 检测状态变更并渲染事件时间线（客户端会话数据）
+    // 檢測状态变更并渲染事件時間線（客户端會話數據）
     detectChanges(_currentStatus);
     renderIncidentLog();
 
     // Load audit trail from server (with client-side fallback)
-    // 从服务端加载持久化审计日志（客户端回退）
+    // 从服務端載入持久化審計日志（客户端回退）
     loadAuditTrail().catch(e => console.warn('Audit trail load failed:', e));
 
     // Load lease detail list from server
-    // 从服务端加载租约详情列表
+    // 从服務端載入租約详情列表
     // Backend returns {data: {active_count, total_tracked, leases: [...], all_leases: [...]}}
     // 后端返回 {data: {active_count, total_tracked, leases: [...], all_leases: [...]}}
     govGetLeases().then(ld => {
@@ -1823,15 +1823,15 @@ async function loadAll() {
     }).catch(e => console.warn('Lease list load failed:', e));
 
     // Load Paper→Live Gate status
-    // 加载 Paper→Live 门禁状态
+    // 載入 Paper→Live 门禁状态
     loadPaperLiveGate().catch(e => console.warn('PLG load failed:', e));
 
     // Load learning tier status
-    // 加载学习层级状态
+    // 載入學習層级状态
     loadLearningTier().catch(e => console.warn('Learning tier load failed:', e));
 
     // Load governance events feed
-    // 加载治理事件流
+    // 載入治理事件流
     loadEventsFeed().catch(e => console.warn('Events feed load failed:', e));
 
     // Load pending approvals (async, non-blocking)

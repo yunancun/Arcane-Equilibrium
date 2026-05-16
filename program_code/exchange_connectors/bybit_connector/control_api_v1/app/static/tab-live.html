@@ -66,7 +66,7 @@ html, body {
 
 /* Metrics grid / 指標網格 — defined in common.js ocInjectBaseCSS() (§6.1 unified)
    live-metric* classes are now canonical in common.js; this comment marks the migration.
-   實盤 metric 样式已迁移至 common.js，此处仅保留 live-specific 样式覆盖。 */
+   實盤 metric 樣式已迁移至 common.js，此處仅保留 live-specific 樣式覆盖。 */
 
 /* Positions / orders table / 倉位掛單表格 */
 .live-section-title {
@@ -314,7 +314,7 @@ html, body {
     <span id="live-contraction-badge" style="display:none"></span>
     <span id="live-engine-detail" style="font-size:12px;color:var(--text-dim)"></span>
     <span style="flex:1"></span>
-    <button class="oc-btn" onclick="openLiveRisk()" title="跳转到 Live 风控页 / Open Live risk controls" style="font-weight:700;border-color:rgba(168,85,247,0.55);color:#a855f7">&#x1F6E1; 风控</button>
+    <button class="oc-btn" onclick="openLiveRisk()" title="跳转到 Live 風控页 / Open Live risk controls" style="font-weight:700;border-color:rgba(168,85,247,0.55);color:#a855f7">&#x1F6E1; 風控</button>
     <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live 實盤</button>
     <span class="live-shutdown-zone" data-danger-zone="live-shutdown">
       <button class="oc-btn oc-btn-danger oc-btn-critical live-stop-action" id="btn-live-stop" onclick="doLiveStop()" disabled style="font-weight:700">&#x23F9; 停止 Live 實盤</button>
@@ -506,7 +506,7 @@ html, body {
         <button class="oc-btn" id="live-fills-next" onclick="liveFillNext()" disabled>下一页</button>
       </div>
     </div>
-    <div class="oc-fill-summary" id="live-fills-summary">当前只加载本页数据，切页时再拉取下一页。</div>
+    <div class="oc-fill-summary" id="live-fills-summary">當前只載入本页數據，切页時再拉取下一页。</div>
     <div style="overflow-x:auto">
     <table class="live-table" id="live-fills-table">
       <thead id="live-fills-head"><tr>
@@ -956,14 +956,16 @@ async function refreshPage(options) {
   // F5/A1: read engine_kind / endpoint FIRST so dashboard never renders
   //        demo data under a Live label (phantom view).
   // F5/A1：先讀 engine_kind / endpoint，避免 demo data 套 Live 皮渲染（幽靈視圖）。
-    await checkLiveEngineStatus();
-
-  // Always load trust status regardless of engine state so the TTL bar in the
-  // integrity-fail view stays current — operator must be able to see expiry time
-  // even when engine is locked, to know when to go to Governance Hub for renew.
-  // 無論引擎狀態都載入 trust status，讓完整性失效視圖的 TTL bar 保持即時 —
-  // 即使 tab 鎖定，operator 也能看到到期時間，知道何時需去 Governance Hub 續期。
-    await loadTrustStatus();
+  //
+  // 並行加速：engine status 與 trust status 是 GUI 首屏兩個獨立 endpoint
+  //   /api/v1/live/session/status  vs  /api/v1/live/auth/trust-status
+  // 後者不依賴前者結果（trust TTL bar 任何引擎狀態都要顯示），原本串行兩個
+  // round-trip ≈ 150-400ms，現用 Promise.allSettled 收斂到 max(...) ≈ 100-200ms。
+  // 必須沿用 allSettled：trust-status 失敗時仍要進入後續 engine_kind 判斷，不能 throw 中斷。
+    await Promise.allSettled([
+      checkLiveEngineStatus(),
+      loadTrustStatus(),
+    ]);
 
   // If engine is not live, _applyLiveModeUI() already swapped to fail view —
   // skip the data-loaders below to avoid redundant fetches.
@@ -1553,7 +1555,7 @@ async function doLiveStop() {
     if (errors && errors.length) {
       ocToast('已停止（部分錯誤: ' + errors.join('; ') + '）', 'warn');
     } else {
-      ocToast('Live 實盤 授权租约 已停止，倉位已平', 'success');
+      ocToast('Live 實盤 授權租約 已停止，倉位已平', 'success');
     }
     await refreshPage();
   }
@@ -2089,7 +2091,7 @@ async function loadFills() {
       return;
     }
     body.innerHTML = _liveFillState.tab === 'profit'
-      ? (_liveBuildProfitRows(arr).map(_liveProfitRow).join('') || '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">本页没有可关联收益</td></tr>')
+      ? (_liveBuildProfitRows(arr).map(_liveProfitRow).join('') || '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">本页没有可關联收益</td></tr>')
       : arr.map(_liveFillRow).join('');
   } catch(e) {
     _liveFillState.loading = false;

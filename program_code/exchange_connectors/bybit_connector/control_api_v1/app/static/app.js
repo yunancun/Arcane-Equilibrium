@@ -3,21 +3,21 @@
  * 玄衡控制台前端脚本
  *
  * 功能概述 / Feature overview:
- * - 通过 HttpOnly Cookie 认证调用 Control API（已从 Bearer Token 迁移）
+ * - 通過 HttpOnly Cookie 認證調用 Control API（已从 Bearer Token 迁移）
  *   Authenticates via HttpOnly cookie to call the Control API (migrated from Bearer Token)
- * - 展示系统运行态、健康、审计、产品族状态
+ * - 展示系統運行态、健康、審計、產品族状态
  *   Displays system runtime state, health, audit trail, product family status
- * - 产品族配置设置台：可交互修改 enabled/visible/mode/action_permissions
+ * - 產品族配置設置台：可交互修改 enabled/visible/mode/action_permissions
  *   Product family config console: interactive controls for enabled/visible/mode/action_permissions
- * - 经营摘要面板：展示每日 PnL + 历史条目，支持手动录入成本和 PnL
+ * - 經营摘要面板：展示每日 PnL + 歷史條目，支持手動录入成本和 PnL
  *   Business summary panel: daily PnL + history entries, supports manual cost/PnL entry
- * - 系统设置台：风险策略、Demo Ack、学习审批等开关
+ * - 系統設置台：風險策略、Demo Ack、學習審批等開關
  *   Settings console: risk policy, demo ack, learning approval toggles
- * - 所有关键动作需要二次确认弹窗
+ * - 所有關键動作需要二次确認弹窗
  *   All critical actions require a second-confirmation modal
  *
- * 安全原则 / Safety principle:
- * 看得见 ≠ 被允许；被允许继续判断 ≠ 能执行；demo ≠ live。
+ * 安全原則 / Safety principle:
+ * 看得见 ≠ 被允許；被允許繼續判斷 ≠ 能執行；demo ≠ live。
  * Visible ≠ allowed; allowed to continue ≠ executable; demo ≠ live.
  */
 
@@ -27,57 +27,57 @@
 
 let inMemoryToken = "";
 
-// 当前状态修订版本号，用于构建 envelope / Current state revision for envelope construction
+// 當前状态修订版本號，用于構建 envelope / Current state revision for envelope construction
 let currentStateRevision = 0;
 
-// ── 常量：关键动作元数据 / Constants: critical action metadata ────────────────
+// ── 常量：關键動作元數據 / Constants: critical action metadata ────────────────
 
 /**
- * 需要二次确认的关键动作及其风险说明。
+ * 需要二次确認的關键動作及其風險說明。
  * Critical actions requiring second confirmation, with risk descriptions.
  */
 const CRITICAL_ACTIONS = {
   "set-demo-mode": {
     title: "切换到 Demo Reserved",
     subtitle: "Set global execution mode to demo_reserved",
-    risk: "这一步只是把系统从「完全不走 demo 流程」改成「允许继续做 demo 相关判断」。它不是下单，不是开启 live，也不是马上获得执行权。",
-    consequence: "点完后，系统只会进入「可以继续做 demo 检查」的状态。你之后仍然还要 validate、arm，甚至 future enable；所以这一步只是打开下一道门，不是直接放权。"
+    risk: "這一步只是把系統从「完全不走 demo 流程」改成「允許繼續做 demo 相關判斷」。它不是下單，不是開啟 live，也不是马上获得執行權。",
+    consequence: "点完后，系統只会進入「可以繼續做 demo 檢查」的状态。你之后仍然還要 validate、arm，甚至 future enable；所以這一步只是打開下一道门，不是直接放權。"
   },
   "enable-spot": {
-    title: "开启 Spot / 现货产品配置",
+    title: "開啟 Spot / 現货產品配置",
     subtitle: "Enable spot family in shadow mode",
-    risk: "这一步只影响现货产品族。它会让 spot/现货从「关闭/仅展示」进入 shadow 控制状态。shadow 的意思是：用于观察、验证、看控制结果，不是实际成交。",
-    consequence: "点完后，只会改变现货这一类产品的控制展示和 gate 结果，不会影响其它产品族，也不会直接让账户获得真实现货下单权限。"
+    risk: "這一步只影响現货產品族。它会讓 spot/現货从「關閉/仅展示」進入 shadow 控制状态。shadow 的意思是：用于觀察、驗證、看控制結果，不是實際成交。",
+    consequence: "点完后，只会改变現货這一類產品的控制展示和 gate 結果，不會影响其它產品族，也不會直接讓賬户获得真實現货下單權限。"
   },
   validate: {
-    title: "验证 Demo 前提",
+    title: "驗證 Demo 前提",
     subtitle: "Validate demo prerequisites and gates",
-    risk: "这一步只是做检查。它会重新判断系统现在是否满足 demo 的前置条件。它不会切模式，也不会推进 demo 主状态。",
-    consequence: "点完后，你主要会看到 gate 结果变了，比如「可以继续」还是「还不满足条件」。它不会直接提高执行权限。"
+    risk: "這一步只是做檢查。它会重新判斷系統現在是否滿足 demo 的前置條件。它不會切模式，也不會推進 demo 主状态。",
+    consequence: "点完后，你主要会看到 gate 結果变了，比如「可以繼續」還是「還不滿足條件」。它不會直接提高執行權限。"
   },
   "arm-demo": {
-    title: "执行 Demo Arm",
+    title: "執行 Demo Arm",
     subtitle: "Move demo state to armed_but_closed",
-    risk: "这是 demo 流程里更关键的一步。它表示系统已经通过前置检查，进入「已准备好下一步，但仍然封闭」的状态。",
-    consequence: "点完后，demo 会更接近后续 enable，但仍然不能直接执行。你可以把它理解成「已经准备好了，但保险还没真正打开」。"
+    risk: "這是 demo 流程里更關键的一步。它表示系統已經通過前置檢查，進入「已準備好下一步，但仍然封閉」的状态。",
+    consequence: "点完后，demo 会更接近后續 enable，但仍然不能直接執行。你可以把它理解成「已經準備好了，但保險還没真正打開」。"
   },
   bundle: {
-    title: "执行安全复核打包",
+    title: "執行安全復核打包",
     subtitle: "Run safe recheck bundle",
-    risk: "这一步会把多项检查和刷新一起跑一遍。它适合在你想让整页判断一起更新时使用。",
-    consequence: "点完后，readiness、gate、audit 等多个区域可能一起刷新。它本身不是切模式，也不是直接放权。"
+    risk: "這一步会把多项檢查和刷新一起跑一遍。它適合在你想讓整页判斷一起更新時使用。",
+    consequence: "点完后，readiness、gate、audit 等多個區域可能一起刷新。它本身不是切模式，也不是直接放權。"
   },
   "pf-config": {
-    title: "修改产品族配置",
+    title: "修改產品族配置",
     subtitle: "Update product family control switches",
-    risk: "这一步会修改指定产品族的 enabled/visible/mode 等控制开关。它不等于获得执行权，但会改变系统控制判断的输入。",
-    consequence: "点完后，相应产品族的 capability 和 execution authority 会重新计算。这一步本身不直接开放 live 权限。"
+    risk: "這一步会修改指定產品族的 enabled/visible/mode 等控制開關。它不等于获得執行權，但会改变系統控制判斷的輸入。",
+    consequence: "点完后，相應產品族的 capability 和 execution authority 会重新計算。這一步本身不直接開放 live 權限。"
   },
   "settings-change": {
-    title: "修改系统设置",
+    title: "修改系統設置",
     subtitle: "Apply system-level configuration change",
-    risk: "这一步会修改全局系统设置，如风险策略或 Demo Ack 开关。这些设置影响整个控制判断链路。",
-    consequence: "设置变更后立即生效。请确认你理解修改后的效果，特别是风险策略相关的变更。"
+    risk: "這一步会修改全局系統設置，如風險策略或 Demo Ack 開關。這些設置影响整個控制判斷链路。",
+    consequence: "設置变更后立即生效。請确認你理解修改后的效果，特别是風險策略相關的变更。"
   },
   // FIX-39/40: Danger Zone operations + strategy deletion — replaced native confirm()
   "delete-strategy": {
@@ -100,14 +100,14 @@ const CRITICAL_ACTIONS = {
   }
 };
 
-// ── 常量：产品族标签 / Constants: product family labels ──────────────────────
+// ── 常量：產品族標簽 / Constants: product family labels ──────────────────────
 
 const PRODUCT_FAMILY_LABELS = {
-  spot: "spot / 现货",
-  margin: "margin / 保证金",
-  perp_linear: "perp_linear / 线性永续",
-  perp_inverse: "perp_inverse / 反向永续",
-  options: "options / 期权",
+  spot: "spot / 現货",
+  margin: "margin / 保證金",
+  perp_linear: "perp_linear / 線性永續",
+  perp_inverse: "perp_inverse / 反向永續",
+  options: "options / 期權",
   other_derivatives_reserved: "other_derivatives_reserved / 其他衍生品（预留）"
 };
 
@@ -120,37 +120,37 @@ const PRODUCT_FAMILY_CONFIG_IDS = {
   other_derivatives_reserved: { summary: "cfgOtherDerivativesSummary", meta: "cfgOtherDerivativesMeta" }
 };
 
-// 动作权限名称映射 / Action permission name mappings
+// 動作權限名稱映射 / Action permission name mappings
 const ACTION_NAME_LABELS = {
-  new_order: "新建订单 / new_order",
-  cancel: "撤销 / cancel",
-  amend: "改单 / amend",
-  reduce_only: "只减仓 / reduce_only",
-  increase_position: "加仓 / increase_position",
-  close_position: "平仓 / close_position"
+  new_order: "新建訂單 / new_order",
+  cancel: "撤銷 / cancel",
+  amend: "改單 / amend",
+  reduce_only: "只减倉 / reduce_only",
+  increase_position: "加倉 / increase_position",
+  close_position: "平倉 / close_position"
 };
 
 const ACTION_NAMES = Object.keys(ACTION_NAME_LABELS);
 
-// 长期开关预留区 / Long-term switch preset area
+// 長期開關预留區 / Long-term switch preset area
 const LONG_TERM_SWITCHES = [
-  ["仅观察", "Observe Only", "当前只做展示位", "locked"],
-  ["Demo Reserved", "Demo Reserved", "允许继续做 demo 判断", "preset"],
-  ["Demo Enabled", "Demo Enabled", "后续阶段预留，当前不开放", "locked"],
-  ["Live Locked", "Live Locked", "真实执行长期锁定", "locked"],
-  ["紧急回锁", "Emergency Relock", "高优先级安全开关，当前只预留", "locked"],
-  ["自动化锁定", "Automation Locked", "自动化真实执行暂不开放", "locked"],
-  ["只读维护", "Readonly Maintenance", "维护模式后续接入", "locked"],
-  ["审计增强", "Audit Enhanced", "长期审计扩展位", "planned"]
+  ["仅觀察", "Observe Only", "當前只做展示位", "locked"],
+  ["Demo Reserved", "Demo Reserved", "允許繼續做 demo 判斷", "preset"],
+  ["Demo Enabled", "Demo Enabled", "后續階段预留，當前不開放", "locked"],
+  ["Live Locked", "Live Locked", "真實執行長期锁定", "locked"],
+  ["紧急回锁", "Emergency Relock", "高優先级安全開關，當前只预留", "locked"],
+  ["自動化锁定", "Automation Locked", "自動化真實執行暂不開放", "locked"],
+  ["只读維護", "Readonly Maintenance", "維護模式后續接入", "locked"],
+  ["審計增强", "Audit Enhanced", "長期審計擴展位", "planned"]
 ];
 
-// ── 基础工具函数 / Basic utility functions ───────────────────────────────────
+// ── 基礎工具函數 / Basic utility functions ───────────────────────────────────
 
 function headers() {
   // APR01-MEDIUM-13: Token is in HttpOnly cookie, sent automatically.
   // Authorization header kept only if inMemoryToken was manually set (legacy/API mode).
-  // APR01-MEDIUM-13：Token 在 HttpOnly cookie 中，自动发送。
-  // 仅在手动设置 inMemoryToken 时保留 Authorization header（旧版/API 模式）。
+  // APR01-MEDIUM-13：Token 在 HttpOnly cookie 中，自動發送。
+  // 仅在手動設置 inMemoryToken 時保留 Authorization header（旧版/API 模式）。
   const h = { "Content-Type": "application/json" };
   if (inMemoryToken) {
     h.Authorization = `Bearer ${inMemoryToken}`;
@@ -164,7 +164,7 @@ function pretty(value) { return JSON.stringify(value, null, 2); }
 function safeText(value) { return value === undefined || value === null ? "-" : ocEsc(String(value)); }
 
 /**
- * 根据状态值返回 CSS variant 名。
+ * 根據状态值返回 CSS variant 名。
  * Returns CSS variant name based on state value.
  */
 function variantForState(value) {
@@ -181,7 +181,7 @@ function variantForState(value) {
 function booleanZh(value, trueText, falseText) { return value ? trueText : falseText; }
 
 function fmtPnl(value) {
-  // 格式化 PnL 数字为带正负号的字符串 / Format PnL number with sign
+  // 格式化 PnL 數字为带正負號的字符串 / Format PnL number with sign
   const n = parseFloat(value);
   if (isNaN(n)) return "-";
   const sign = n >= 0 ? "+" : "";
@@ -189,7 +189,7 @@ function fmtPnl(value) {
 }
 
 function fmtTs(tsMs) {
-  // 将时间戳转为本地时间字符串 / Convert timestamp to local time string
+  // 将時間戳转为本地時間字符串 / Convert timestamp to local time string
   if (!tsMs) return "-";
   return new Date(tsMs).toLocaleString();
 }
@@ -197,8 +197,8 @@ function fmtTs(tsMs) {
 // ── UI 状态更新辅助 / UI state update helpers ─────────────────────────────────
 
 /**
- * 安全设置元素文本 / Safely set element text by ID.
- * 如果元素不存在则静默忽略。
+ * 安全設置元素文本 / Safely set element text by ID.
+ * 如果元素不存在則靜默忽略。
  * Silently ignored if element does not exist.
  */
 function setText(id, text) {
@@ -232,14 +232,14 @@ function setActionSummary(name, result, revision, auditRef, hint, raw) {
 function summarizeActionResult(actionName, result) {
   const actionMap = {
     refresh: "刷新概览",
-    validate: "验证 Demo",
-    bundle: "安全复核打包",
+    validate: "驗證 Demo",
+    bundle: "安全復核打包",
     "set-demo-mode": "切到 Demo Reserved",
-    "enable-spot": "开启 Spot / 现货产品配置",
-    "arm-demo": "执行 Demo Arm",
-    "pf-config": "产品族配置变更",
-    "settings-change": "系统设置变更",
-    "cost-entry": "费用录入",
+    "enable-spot": "開啟 Spot / 現货產品配置",
+    "arm-demo": "執行 Demo Arm",
+    "pf-config": "產品族配置变更",
+    "settings-change": "系統設置变更",
+    "cost-entry": "費用录入",
     "pnl-entry": "PnL 录入"
   };
   const actionEnMap = {
@@ -256,38 +256,38 @@ function summarizeActionResult(actionName, result) {
   };
 
   const data = result?.data || {};
-  let hint = "动作执行完成。";
+  let hint = "動作執行完成。";
   let helper = "Action completed.";
 
   if (actionName === "validate") {
-    hint = `系统刚完成一次检查：前提 gate = ${safeText(data.demo_prerequisites_gate_state)}；Arm gate = ${safeText(data.demo_arm_gate_state)}。`;
+    hint = `系統刚完成一次檢查：前提 gate = ${safeText(data.demo_prerequisites_gate_state)}；Arm gate = ${safeText(data.demo_arm_gate_state)}。`;
     helper = `This checked whether demo can continue, not whether execution is already open.`;
   } else if (actionName === "arm-demo") {
-    hint = `Demo 状态现在是：${safeText(data.demo_state_switch)}。系统已更接近下一步，但仍未放开执行。`;
+    hint = `Demo 状态現在是：${safeText(data.demo_state_switch)}。系統已更接近下一步，但仍未放開執行。`;
     helper = `The system moved closer to the next step, but execution is still not open.`;
   } else if (actionName === "set-demo-mode") {
-    hint = `已接受"进入 Demo Reserved"配置。后续仍需 validate → arm → enable 才能获得执行权。`;
+    hint = `已接受"進入 Demo Reserved"配置。后續仍需 validate → arm → enable 才能获得執行權。`;
     helper = `Demo evaluation path is now allowed to continue, but no execution authority was opened.`;
   } else if (actionName === "enable-spot") {
-    hint = `现货产品配置已修改。现货进入 shadow 控制展示，但不等于账户已能真实现货下单。`;
+    hint = `現货產品配置已修改。現货進入 shadow 控制展示，但不等于賬户已能真實現货下單。`;
     helper = `Spot moved into shadow control display, but real spot trading authority is still separate.`;
   } else if (actionName === "bundle") {
-    hint = `系统刚完成一轮统一复核刷新。多个判断结果可能已更新，但本步骤不直接放权。`;
+    hint = `系統刚完成一轮統一復核刷新。多個判斷結果可能已更新，但本步驟不直接放權。`;
     helper = `Multiple checks were refreshed together, but no authority was directly opened.`;
   } else if (actionName === "refresh") {
     hint = "界面已刷新。"; helper = "Dashboard refreshed.";
   } else if (actionName === "pf-config") {
     const applied = Object.keys(data.applied_changes || {});
-    hint = `产品族 ${safeText(data.family)} 配置已更新，变更字段：${applied.join(", ") || "无"}。`;
+    hint = `產品族 ${safeText(data.family)} 配置已更新，变更字段：${applied.join(", ") || "無"}。`;
     helper = `Product family ${safeText(data.family)} config updated.`;
   } else if (actionName === "settings-change") {
-    hint = `系统设置已更新：${safeText((data.accepted_paths || []).join(", "))}。`;
+    hint = `系統設置已更新：${safeText((data.accepted_paths || []).join(", "))}。`;
     helper = `System settings updated.`;
   } else if (actionName === "cost-entry") {
-    hint = `费用条目已录入，金额：${safeText(result?.data?.record_count_delta)} 条。`;
+    hint = `費用條目已录入，金额：${safeText(result?.data?.record_count_delta)} 條。`;
     helper = `Cost entry recorded.`;
   } else if (actionName === "pnl-entry") {
-    hint = `PnL 条目已录入，类型：${safeText(data.entry_type)}。`;
+    hint = `PnL 條目已录入，類型：${safeText(data.entry_type)}。`;
     helper = `PnL entry recorded.`;
   }
 
@@ -301,7 +301,7 @@ function summarizeActionResult(actionName, result) {
   );
 }
 
-// ── 双语标签辅助 / Bilingual label helpers ────────────────────────────────────
+// ── 双語標簽辅助 / Bilingual label helpers ────────────────────────────────────
 
 function zhEnPrimary(zh, en) {
   return `<span class="label-zh">${zh}</span><span class="label-en">${en}</span>`;
@@ -315,7 +315,7 @@ function annotateGlossary(termZh, termEn, noteZh, noteEn) {
   </div>`;
 }
 
-// ── KV 网格渲染 / KV grid rendering ──────────────────────────────────────────
+// ── KV 網格渲染 / KV grid rendering ──────────────────────────────────────────
 
 function renderKvGrid(nodeId, items) {
   const node = document.getElementById(nodeId);
@@ -328,7 +328,7 @@ function renderKvGrid(nodeId, items) {
   ).join("");
 }
 
-// ── 确认弹窗 / Confirm modal ──────────────────────────────────────────────────
+// ── 确認弹窗 / Confirm modal ──────────────────────────────────────────────────
 
 function openConfirmModal(actionName) {
   const meta = CRITICAL_ACTIONS[actionName];
@@ -395,7 +395,7 @@ function openConfirmModal(actionName) {
   });
 }
 
-// ── API 调用 / API calls ──────────────────────────────────────────────────────
+// ── API 調用 / API calls ──────────────────────────────────────────────────────
 
 async function apiGet(path) {
   const response = await fetch(path, { headers: headers(), credentials: 'same-origin' });
@@ -417,7 +417,7 @@ async function apiPost(path, payload) {
 }
 
 function baseEnvelope(extra = {}) {
-  // 构建标准请求 envelope / Build standard request envelope
+  // 構建標准請求 envelope / Build standard request envelope
   return {
     request_id: _ocUUID(),
     idempotency_key: _ocUUID(),
@@ -431,7 +431,7 @@ function baseEnvelope(extra = {}) {
   };
 }
 
-// ── 渲染函数 / Render functions ───────────────────────────────────────────────
+// ── 渲染函數 / Render functions ───────────────────────────────────────────────
 
 function renderSummary(overview) {
   const runtime = overview.data.global_runtime;
@@ -474,14 +474,14 @@ function renderBusinessSummary(businessData) {
   if (el("bizNetOperatingPnl")) el("bizNetOperatingPnl").textContent = fmtPnl(daily.net_operating_pnl);
   if (el("bizEventCount")) el("bizEventCount").textContent = safeText(daily.business_event_count);
 
-  // 更新历史条目列表 / Update recent entry lists
+  // 更新歷史條目列表 / Update recent entry lists
   renderCostEntries(businessData.cost_entries_recent || []);
   renderPnlEntries(businessData.pnl_entries_recent || []);
 
   // 更新成本分解 / Update cost breakdown
   renderCostBreakdown(businessData.cost_breakdown || {});
 
-  // 更新条目总数 / Update entry totals
+  // 更新條目總數 / Update entry totals
   const totals = businessData.entry_totals || {};
   if (el("bizCostCount")) el("bizCostCount").textContent = safeText(totals.total_cost_entries);
   if (el("bizPnlCount")) el("bizPnlCount").textContent = safeText(totals.total_pnl_entries);
@@ -492,7 +492,7 @@ function renderCostEntries(entries) {
   const node = document.getElementById("costEntriesList");
   if (!node) return;
   if (!entries || entries.length === 0) {
-    node.innerHTML = '<div class="entry-row muted-row">暂无费用记录 / No cost entries yet.</div>';
+    node.innerHTML = '<div class="entry-row muted-row">暂無費用記錄 / No cost entries yet.</div>';
     return;
   }
   node.innerHTML = entries.map((e) =>
@@ -509,15 +509,15 @@ function renderPnlEntries(entries) {
   const node = document.getElementById("pnlEntriesList");
   if (!node) return;
   if (!entries || entries.length === 0) {
-    node.innerHTML = '<div class="entry-row muted-row">暂无 PnL 记录 / No PnL entries yet.</div>';
+    node.innerHTML = '<div class="entry-row muted-row">暂無 PnL 記錄 / No PnL entries yet.</div>';
     return;
   }
   node.innerHTML = entries.map((e) =>
     `<div class="entry-row">
        <span class="entry-ts">${fmtTs(e.recorded_ts_ms)}</span>
        <span class="entry-cat">${safeText(e.entry_type)}</span>
-       <span class="entry-amt ${parseFloat(e.realized_pnl || 0) >= 0 ? "good" : "bad"}">已实现:${fmtPnl(e.realized_pnl)}</span>
-       <span class="entry-note muted">未实现:${fmtPnl(e.unrealized_pnl)} ${safeText(e.note || "")}</span>
+       <span class="entry-amt ${parseFloat(e.realized_pnl || 0) >= 0 ? "good" : "bad"}">已實現:${fmtPnl(e.realized_pnl)}</span>
+       <span class="entry-note muted">未實現:${fmtPnl(e.unrealized_pnl)} ${safeText(e.note || "")}</span>
      </div>`
   ).join("");
 }
@@ -527,7 +527,7 @@ function renderCostBreakdown(breakdown) {
   if (!node) return;
   const keys = Object.keys(breakdown);
   if (keys.length === 0) {
-    node.innerHTML = '<span class="muted">暂无分类 / No categories yet.</span>';
+    node.innerHTML = '<span class="muted">暂無分類 / No categories yet.</span>';
     return;
   }
   node.innerHTML = keys.map((k) =>
@@ -539,7 +539,7 @@ function renderCostBreakdown(breakdown) {
 }
 
 function renderProductFamilyConfig(productFamilies) {
-  // 渲染每个产品族的配置卡片摘要 / Render config summary for each product family card
+  // 渲染每個產品族的配置卡片摘要 / Render config summary for each product family card
   Object.entries(PRODUCT_FAMILY_CONFIG_IDS).forEach(([family, ids]) => {
     const data = productFamilies[family];
     const summaryNode = document.getElementById(ids.summary);
@@ -547,21 +547,21 @@ function renderProductFamilyConfig(productFamilies) {
     if (!summaryNode || !metaNode) return;
     if (!data) {
       summaryNode.textContent = "-";
-      metaNode.textContent = "暂无数据 / No data.";
+      metaNode.textContent = "暂無數據 / No data.";
       return;
     }
-    const enabledText = booleanZh(data.controls.enabled_switch, "已启用 ✓", "未启用 ✗");
+    const enabledText = booleanZh(data.controls.enabled_switch, "已啟用 ✓", "未啟用 ✗");
     const visibleText = booleanZh(data.controls.visibility_switch, "可见", "隐藏");
     summaryNode.textContent = `${enabledText} · ${visibleText} · ${safeText(data.controls.mode_switch)}`;
     metaNode.textContent =
-      `交易所事实: ${safeText(data.facts.exchange_permission_fact)} | ` +
-      `账户事实: ${safeText(data.facts.account_permission_fact)} | ` +
+      `交易所事實: ${safeText(data.facts.exchange_permission_fact)} | ` +
+      `賬户事實: ${safeText(data.facts.account_permission_fact)} | ` +
       `能力: ${safeText(data.derived.capability_state)}`;
   });
 }
 
 /**
- * 渲染产品族配置设置台的交互控件。
+ * 渲染產品族配置設置台的交互控件。
  * Render interactive controls in the product family config settings console.
  *
  * @param {Object} productFamilies - product_family_status from API
@@ -577,7 +577,7 @@ function renderProductFamilyEditor(productFamilies, controlPlane) {
     const perms = (controlPlane?.action_permissions?.by_product_family?.[family]) || {};
     const label = PRODUCT_FAMILY_LABELS[family] || family;
 
-    // 动作权限格子 / Action permissions grid
+    // 動作權限格子 / Action permissions grid
     const permRows = ACTION_NAMES.map((action) => {
       const switchKey = `configured_${action}_allowed_switch`;
       const checked = perms[switchKey] === true ? "checked" : "";
@@ -590,7 +590,7 @@ function renderProductFamilyEditor(productFamilies, controlPlane) {
       </label>`;
     }).join("");
 
-    // 能力/执行状态徽章 / Capability/execution status badges
+    // 能力/執行状态徽章 / Capability/execution status badges
     const capBadge = `<span class="status-chip ${variantForState(derived.capability_state)}">${derived.capability_state}</span>`;
     const execBadge = `<span class="status-chip ${variantForState(derived.execution_authority_state)}">${derived.execution_authority_state}</span>`;
 
@@ -602,7 +602,7 @@ function renderProductFamilyEditor(productFamilies, controlPlane) {
       </div>
       <div class="pf-editor-controls">
         <label class="switch-row">
-          <span class="switch-label">启用 / Enabled</span>
+          <span class="switch-label">啟用 / Enabled</span>
           <input type="checkbox" class="pf-toggle" id="pf-enabled-${family}" data-family="${family}" data-field="enabled_switch" ${ctrl.enabled_switch ? "checked" : ""}>
         </label>
         <label class="switch-row">
@@ -618,15 +618,15 @@ function renderProductFamilyEditor(productFamilies, controlPlane) {
           </select>
         </div>
         <button class="pf-apply-btn" data-family="${family}">
-          应用配置 / Apply Config
+          應用配置 / Apply Config
           <span class="button-sub">sends to /control/product-family/{family}/config</span>
         </button>
       </div>
       <details class="perm-details">
-        <summary class="perm-summary">动作权限 / Action Permissions</summary>
+        <summary class="perm-summary">動作權限 / Action Permissions</summary>
         <div class="perm-grid">${permRows}</div>
         <button class="pf-perm-apply-btn" data-family="${family}">
-          应用权限变更 / Apply Permission Changes
+          應用權限变更 / Apply Permission Changes
           <span class="button-sub">updates action permission switches</span>
         </button>
       </details>
@@ -643,7 +643,7 @@ function renderLongTermSwitches() {
        <strong><span class="status-chip ${variantForState(state)}">${safeText(state)}</span></strong>
        <div class="family-card-meta">${desc}</div>
        <div class="family-actions">
-         <button class="button-muted" disabled>长期预留（未开放）<span class="button-sub">preset only</span></button>
+         <button class="button-muted" disabled>長期预留（未開放）<span class="button-sub">preset only</span></button>
        </div>
      </div>`
   ).join("");
@@ -652,11 +652,11 @@ function renderLongTermSwitches() {
 function renderSourceContext(sourceContext) {
   renderKvGrid("sourceContextGrid", [
     [zhEnPrimary("只读连接器", "Readonly Connector"), sourceContext.readonly_connector_name],
-    [zhEnPrimary("执行连接器", "Execution Connector"), sourceContext.execution_connector_name || "not_attached"],
+    [zhEnPrimary("執行连接器", "Execution Connector"), sourceContext.execution_connector_name || "not_attached"],
     [zhEnPrimary("私有 REST", "REST Private"), sourceContext.rest_private_connection_state],
     [zhEnPrimary("私有 WS", "WS Private"), sourceContext.ws_private_connection_state],
     [zhEnPrimary("Runtime 连接", "Runtime Connection"), sourceContext.runtime_connection_state],
-    [zhEnPrimary("账户完整性", "Account Completeness"), sourceContext.account_fact_completeness_state],
+    [zhEnPrimary("賬户完整性", "Account Completeness"), sourceContext.account_fact_completeness_state],
     [zhEnPrimary("快照完整性", "Snapshot Completeness"), sourceContext.source_snapshot_completeness_state],
     [zhEnPrimary("角色分离", "Role Separation"), sourceContext.connector_role_separation_ok],
     [zhEnPrimary("Runtime 快照", "Runtime Snapshot"), sourceContext.pinned_runtime_snapshot_id]
@@ -666,14 +666,14 @@ function renderSourceContext(sourceContext) {
 function renderHealth(overview) {
   const health = overview.data.health_summary;
   renderKvGrid("healthGrid", [
-    [zhEnPrimary("总健康分", "Overall Health Score"), health.scores.overall_health_score],
+    [zhEnPrimary("總健康分", "Overall Health Score"), health.scores.overall_health_score],
     [zhEnPrimary("AI 健康分", "AI Health Score"), health.scores.ai_health_score],
     [zhEnPrimary("交易所健康分", "Exchange Health Score"), health.scores.exchange_health_score],
     [zhEnPrimary("新鲜度分", "Data Freshness Score"), health.scores.data_freshness_score],
-    [zhEnPrimary("总 Gate", "Health Gates Overall"), health.gates.health_gates_overall_state],
+    [zhEnPrimary("總 Gate", "Health Gates Overall"), health.gates.health_gates_overall_state],
     [zhEnPrimary("Timeout Gate", "Exchange Timeout Gate"), health.gates.exchange_timeout_gate_state],
-    [zhEnPrimary("WS 断连 Gate", "WS Disconnect Gate"), health.gates.ws_disconnect_gate_state],
-    [zhEnPrimary("延迟 Gate", "Latency Gate"), health.gates.latency_gate_state],
+    [zhEnPrimary("WS 斷连 Gate", "WS Disconnect Gate"), health.gates.ws_disconnect_gate_state],
+    [zhEnPrimary("延遲 Gate", "Latency Gate"), health.gates.latency_gate_state],
     [zhEnPrimary("新鲜度 Gate", "Freshness Gate"), health.gates.freshness_gate_state]
   ]);
 }
@@ -692,11 +692,11 @@ function renderProductFamilies(productFamilies) {
        <td><span class="status-chip ${variantForState(data.derived.execution_authority_state)}">${data.derived.execution_authority_state}</span></td>
      </tr>`
   ).join("");
-  body.innerHTML = rows || '<tr><td colspan="8" class="muted-cell">无数据 / No data</td></tr>';
+  body.innerHTML = rows || '<tr><td colspan="8" class="muted-cell">無數據 / No data</td></tr>';
 }
 
 /**
- * 渲染系统设置台 / Render the system settings console.
+ * 渲染系統設置台 / Render the system settings console.
  * @param {Object} snapshot - the full state snapshot from overview or control-plane
  */
 function renderSettingsConsole(snapshot) {
@@ -707,7 +707,7 @@ function renderSettingsConsole(snapshot) {
   const demoAckSwitch = document.getElementById("settingsDemoAck");
   const learningApproval = document.getElementById("settingsLearningApproval");
 
-  // 从 API 返回数据中无法直接获得这些字段的当前值——它们嵌在 control_plane 内层
+  // 从 API 返回數據中無法直接获得這些字段的當前值——它们嵌在 control_plane 內層
   // These fields are not directly in overview; we display placeholder state from what we know.
   // Full value will be populated after /system/control-plane fetch in loadDashboard.
   if (riskSwitch) riskSwitch.value = "default_guarded"; // default; will be updated
@@ -716,7 +716,7 @@ function renderSettingsConsole(snapshot) {
 }
 
 /**
- * 用 /system/control-plane 的真实数据更新设置台 / Update settings console with real control-plane data.
+ * 用 /system/control-plane 的真實數據更新設置台 / Update settings console with real control-plane data.
  */
 function updateSettingsConsoleFromControlPlane(controlPlane) {
   const cpData = controlPlane?.data || {};
@@ -729,7 +729,7 @@ function updateSettingsConsoleFromControlPlane(controlPlane) {
   if (riskSwitch) riskSwitch.value = riskEnvelope.risk_policy_switch || "default_guarded";
   if (demoAckSwitch) demoAckSwitch.checked = demoCtrl.demo_operator_ack_required !== false;
 
-  // 显示当前风险状态 / Show current risk envelope state
+  // 顯示當前風險状态 / Show current risk envelope state
   const riskStateEl = document.getElementById("settingsRiskEnvelopeState");
   if (riskStateEl) {
     const effectiveState = riskEnvelope.effective_risk_envelope_state || "-";

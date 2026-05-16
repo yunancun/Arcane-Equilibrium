@@ -54,13 +54,13 @@
 
 <!-- ═══ Cost Dashboard ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4B0; 全供应商 AI 成本 / All-Provider Cost Dashboard</h3>
-  <div class="subtitle">汇总所有 AI 供应商的成本（不仅限于 Claude）</div>
+  <h3>&#x1F4B0; 全供應商 AI 成本 / All-Provider Cost Dashboard</h3>
+  <div class="subtitle">彙總所有 AI 供應商的成本（不仅限于 Claude）</div>
   <div class="oc-metrics" id="cost-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">今日总成本</div><div class="oc-metric-val blue" id="a-today">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">30 天累计</div><div class="oc-metric-val" id="a-total">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">今日總成本</div><div class="oc-metric-val blue" id="a-today">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">30 天累計</div><div class="oc-metric-val" id="a-total">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">日预算上限</div><div class="oc-metric-val" id="a-budget">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">今日推理次数</div><div class="oc-metric-val" id="a-sessions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">今日推理次數</div><div class="oc-metric-val" id="a-sessions">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">平均成本/推理</div><div class="oc-metric-val" id="a-avg">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">预算剩余</div><div class="oc-metric-val" id="a-remaining">--</div></div>
   </div>
@@ -68,13 +68,13 @@
 
 <!-- ═══ Adaptive Budget ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4C8; 自适应预算 / Adaptive Budget</h3>
+  <h3>&#x1F4C8; 自適應预算 / Adaptive Budget</h3>
   <div id="explain-adaptive"></div>
   <div class="oc-metrics" id="adaptive-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">预算倍数</div><div class="oc-metric-val" id="ab-mult">--</div><div class="oc-metric-sub">1.0 = 标准</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">AI 投资回报率</div><div class="oc-metric-val" id="ab-roi">--</div><div class="oc-metric-sub">AI 建议产生的收益/AI成本</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">预算倍數</div><div class="oc-metric-val" id="ab-mult">--</div><div class="oc-metric-sub">1.0 = 標准</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">AI 投資回報率</div><div class="oc-metric-val" id="ab-roi">--</div><div class="oc-metric-sub">AI 建議產生的收益/AI成本</div></div>
     <div class="oc-metric"><div class="oc-metric-label">有效预算</div><div class="oc-metric-val" id="ab-effective">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">调整原因</div><div class="oc-metric-val" id="ab-reason" style="font-size:12px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">調整原因</div><div class="oc-metric-val" id="ab-reason" style="font-size:12px">--</div></div>
   </div>
 </div>
 
@@ -102,77 +102,77 @@
 
 <!-- ═══ AI Provider Management ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
-  <h3>&#x1F310; AI 供应商管理 / AI Provider Management</h3>
+  <h3>&#x1F310; AI 供應商管理 / AI Provider Management</h3>
   <div id="explain-providers"></div>
   <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
-    标记 <span class="oc-chip oc-chip-good" style="font-size:9px">已配置 · Active</span> 表示密钥已存且 L2 客户端就绪；
-    <span class="oc-chip oc-chip-warn" style="font-size:9px">已存储 · 客户端未接</span> 表示密钥已写入但 L2 路径暂无对应 client；
-    Perplexity 已移到下方 Scout 搜索专用区域。
+    標記 <span class="oc-chip oc-chip-good" style="font-size:9px">已配置 · Active</span> 表示密钥已存且 L2 客户端就緒；
+    <span class="oc-chip oc-chip-warn" style="font-size:9px">已存储 · 客户端未接</span> 表示密钥已写入但 L2 路徑暂無對應 client；
+    Perplexity 已移到下方 Scout 搜索专用區域。
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px" id="provider-grid">
     <!-- Anthropic / Claude -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-neutral" id="prov-anthropic-badge">检测中...</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-neutral" id="prov-anthropic-badge">檢測中...</span></div>
       <div class="prov-models">模型：Claude Opus 4.7 / Sonnet 4.6 / Haiku 4.5</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-anthropic" type="password" placeholder="sk-ant-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('anthropic',this)">保存</button>
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('anthropic',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
-      <div id="prov-anthropic-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
+      <div id="prov-anthropic-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
     </div>
 
     <!-- OpenAI -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F4A1; OpenAI (GPT)</span><span class="oc-chip oc-chip-neutral" id="prov-openai-badge">检测中...</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F4A1; OpenAI (GPT)</span><span class="oc-chip oc-chip-neutral" id="prov-openai-badge">檢測中...</span></div>
       <div class="prov-models">模型：GPT-4o / GPT-4o-mini / o1 / o3</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-openai" type="password" placeholder="sk-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('openai',this)">保存</button>
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('openai',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
-      <div id="prov-openai-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
+      <div id="prov-openai-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
     </div>
 
     <!-- DeepSeek -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">检测中...</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">檢測中...</span></div>
       <div class="prov-models">模型：DeepSeek V4 Flash / V4 Pro</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-deepseek" type="password" placeholder="sk-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('deepseek',this)">保存</button>
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('deepseek',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：V4 Flash $0.14/$0.28 per 1M input/output tokens</div>
-      <div id="prov-deepseek-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：V4 Flash $0.14/$0.28 per 1M input/output tokens</div>
+      <div id="prov-deepseek-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
     </div>
 
     <!-- Local LLM (Ollama) -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F4BB; 本地 LLM / Ollama</span><span class="oc-chip oc-chip-neutral" id="prov-local-badge">检测中...</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F4BB; 本地 LLM / Ollama</span><span class="oc-chip oc-chip-neutral" id="prov-local-badge">檢測中...</span></div>
       <div class="prov-models" id="ollama-models-line">Qwen 3.5 27B / 9B — 零 API 成本</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-local" type="text" placeholder="http://127.0.0.1:11434" value="http://127.0.0.1:11434" />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('local_llm',this)">保存</button>
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="checkOllamaStatus()">检测</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="checkOllamaStatus()">檢測</button>
       </div>
-      <div id="ollama-status-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">零成本，需要本地 GPU。正在检测 Ollama 连通性...</div>
+      <div id="ollama-status-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">零成本，需要本地 GPU。正在檢測 Ollama 连通性...</div>
     </div>
 
     <!-- Google -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F3AF; Google (Gemini)</span><span class="oc-chip oc-chip-neutral" id="prov-google-badge">检测中...</span></div>
+      <div class="prov-header"><span class="prov-name">&#x1F3AF; Google (Gemini)</span><span class="oc-chip oc-chip-neutral" id="prov-google-badge">檢測中...</span></div>
       <div class="prov-models">模型：Gemini 2.5 Pro / Flash</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-google" type="password" placeholder="AI..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('google',this)">保存</button>
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('google',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Flash $0.075/Pro $1.25 per 1M tokens</div>
-      <div id="prov-google-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：Flash $0.075/Pro $1.25 per 1M tokens</div>
+      <div id="prov-google-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
     </div>
   </div>
 </div>
@@ -181,22 +181,22 @@
 <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
   <h3>&#x1F50D; Scout 搜索专用 / Scout Search-Only Providers</h3>
   <div style="font-size:11px;color:var(--text-dim);margin:6px 0">
-    此区域 provider 仅供 Scout 工具搜索实时市场信息使用，<strong>不参与 L2 推理</strong>，
-    不可设为「默认供应商」或 Tier 2/3 fallback。<br>
+    此區域 provider 仅供 Scout 工具搜索實時市场信息使用，<strong>不参与 L2 推理</strong>，
+    不可設为「默認供應商」或 Tier 2/3 fallback。<br>
     Used by Scout web-search tooling only — these never run L2 reasoning agent loop.
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px">
     <!-- Perplexity (search-only) -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">检测中...</span></div>
-      <div class="prov-models">搜索增强型 AI — 实时市场信息（不接 L2 推理）</div>
+      <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">檢測中...</span></div>
+      <div class="prov-models">搜索增强型 AI — 實時市场信息（不接 L2 推理）</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-perplexity" type="password" placeholder="pplx-..." />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('perplexity',this)">保存</button>
         <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('perplexity',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：$5/1000 requests（含实时搜索）</div>
-      <div id="prov-perplexity-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：检测中...</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：$5/1000 requests（含實時搜索）</div>
+      <div id="prov-perplexity-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
     </div>
   </div>
 </div>
@@ -204,21 +204,21 @@
 <!-- ═══ Engine Settings ═══ -->
 <div class="oc-card">
   <h3>
-    &#x1F527; 引擎设置 / Engine Settings
+    &#x1F527; 引擎設置 / Engine Settings
     <button class="oc-btn" onclick="refreshProviderModels(this)" title="刷新 provider 模型目录" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB; Models</button>
   </h3>
   <div id="explain-settings"></div>
-  <div id="ai-model-catalog-status" style="font-size:11px;color:var(--text-dim);margin-top:8px">模型目录：载入中</div>
-  <div id="ai-local-model-options-status" style="font-size:11px;color:var(--text-dim);margin-top:4px">本地模型：载入中</div>
+  <div id="ai-model-catalog-status" style="font-size:11px;color:var(--text-dim);margin-top:8px">模型目录：載入中</div>
+  <div id="ai-local-model-options-status" style="font-size:11px;color:var(--text-dim);margin-top:4px">本地模型：載入中</div>
 
   <div class="oc-grid-2" style="margin-top:10px">
     <div style="display:grid;gap:10px">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">启用 AI 引擎 / Enable</div><div style="font-size:10px;color:var(--text-dim)">关闭后所有 AI 查询将停止</div></div>
-        <select class="oc-select" id="ai-enabled" style="width:100px"><option value="true">启用</option><option value="false">禁用</option></select>
+        <div><div style="font-size:12px;font-weight:600">啟用 AI 引擎 / Enable</div><div style="font-size:10px;color:var(--text-dim)">關閉后所有 AI 查詢将停止</div></div>
+        <select class="oc-select" id="ai-enabled" style="width:100px"><option value="true">啟用</option><option value="false">禁用</option></select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">默认供应商 / Default Provider</div><div style="font-size:10px;color:var(--text-dim)">L2 推理首选；仅显示已实装客户端的 provider</div></div>
+        <div><div style="font-size:12px;font-weight:600">默認供應商 / Default Provider</div><div style="font-size:10px;color:var(--text-dim)">L2 推理首選；仅顯示已實装客户端的 provider</div></div>
         <select class="oc-select" id="ai-provider" style="width:140px">
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
@@ -227,7 +227,7 @@
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">默认模型 / Default Model</div><div style="font-size:10px;color:var(--text-dim)">tier_key — provider adapter 自动映射到具体 model_id</div></div>
+        <div><div style="font-size:12px;font-weight:600">默認模型 / Default Model</div><div style="font-size:10px;color:var(--text-dim)">tier_key — provider adapter 自動映射到具體 model_id</div></div>
         <select class="oc-select" id="ai-model" style="width:160px">
           <optgroup label="Anthropic">
             <option value="haiku">haiku — Claude Haiku 4.5</option>
@@ -251,45 +251,45 @@
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600;color:var(--red)">日硬上限 / Daily Hard Cap</div><div style="font-size:10px;color:var(--text-dim)">所有供应商合计的每日成本硬上限</div></div>
+        <div><div style="font-size:12px;font-weight:600;color:var(--red)">日硬上限 / Daily Hard Cap</div><div style="font-size:10px;color:var(--text-dim)">所有供應商合計的每日成本硬上限</div></div>
         <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-hard-cap" type="number" step="0.5" min="0" max="100" style="width:80px" /></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">弹性基准 / Adaptive Base</div><div style="font-size:10px;color:var(--text-dim)">自适应预算基准值</div></div>
+        <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">弹性基准 / Adaptive Base</div><div style="font-size:10px;color:var(--text-dim)">自適應预算基准值</div></div>
         <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-base-daily" type="number" step="0.5" min="0" max="50" style="width:80px" /></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">弹性上限 / Max Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最多扩大到基准的几倍</div></div>
+        <div><div style="font-size:12px;font-weight:600">弹性上限 / Max Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最多擴大到基准的几倍</div></div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-max-mult" type="number" step="0.1" min="1" max="5" style="width:80px" /><span>x</span></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">弹性下限 / Min Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最少缩减到基准的几倍</div></div>
+        <div><div style="font-size:12px;font-weight:600">弹性下限 / Min Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最少縮减到基准的几倍</div></div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-min-mult" type="number" step="0.1" min="0" max="1" style="width:80px" /><span>x</span></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">允许自动升级模型 / Auto Upgrade</div><div style="font-size:10px;color:var(--text-dim)">允许系统自动选择更贵但更准确的模型</div></div>
-        <select class="oc-select" id="ai-allow-opus" style="width:100px"><option value="true">允许</option><option value="false">不允许</option></select>
+        <div><div style="font-size:12px;font-weight:600">允許自動升级模型 / Auto Upgrade</div><div style="font-size:10px;color:var(--text-dim)">允許系統自動選擇更貴但更准确的模型</div></div>
+        <select class="oc-select" id="ai-allow-opus" style="width:100px"><option value="true">允許</option><option value="false">不允許</option></select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">自动提交到 Paper 模拟 / Auto Submit</div><div style="font-size:10px;color:var(--text-dim)">AI 建议是否自动提交为 Paper 模拟订单</div></div>
-        <select class="oc-select" id="ai-auto-submit" style="width:100px"><option value="true">自动</option><option value="false">手动</option></select>
+        <div><div style="font-size:12px;font-weight:600">自動提交到 Paper 模擬 / Auto Submit</div><div style="font-size:10px;color:var(--text-dim)">AI 建議是否自動提交为 Paper 模擬訂單</div></div>
+        <select class="oc-select" id="ai-auto-submit" style="width:100px"><option value="true">自動</option><option value="false">手動</option></select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">最大迭代次数 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">单次 AI 推理的最大思考轮数</div></div>
+        <div><div style="font-size:12px;font-weight:600">最大迭代次數 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">單次 AI 推理的最大思考轮數</div></div>
         <input class="oc-input" id="ai-max-iter" type="number" step="1" min="1" max="50" style="width:80px" />
       </div>
 
       <!-- ── 预算降级 Tier 2 / Budget Fallback Tier 2 ── -->
       <div style="border-top:1px dashed #21262d;margin-top:6px;padding-top:8px">
-        <div style="font-size:11px;font-weight:600;color:var(--yellow);margin-bottom:4px">&#x1F539; Tier 2 降级 — 中度成本压缩</div>
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花费 ≥ 阈值 × 日硬上限时，切到此 provider+model 继续推理</div>
+        <div style="font-size:11px;font-weight:600;color:var(--yellow);margin-bottom:4px">&#x1F539; Tier 2 降级 — 中度成本壓縮</div>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花費 ≥ 阈值 × 日硬上限時，切到此 provider+model 繼續推理</div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="font-size:11px">触发阈值 / Trigger %</div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-tier2-threshold" type="number" step="0.05" min="0" max="1" style="width:80px" /><span>×cap</span></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">Tier 2 供应商 / Provider</div>
+        <div style="font-size:11px">Tier 2 供應商 / Provider</div>
         <select class="oc-select" id="ai-tier2-provider" style="width:140px">
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
@@ -309,14 +309,14 @@
       <!-- ── 预算降级 Tier 3 / Budget Fallback Tier 3 ── -->
       <div style="border-top:1px dashed #21262d;margin-top:6px;padding-top:8px">
         <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:4px">&#x1F538; Tier 3 降级 — 极限省钱</div>
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花费 ≥ 阈值 × 日硬上限时，切到此 provider+model（仍受 hard_cap 拦截）</div>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花費 ≥ 阈值 × 日硬上限時，切到此 provider+model（仍受 hard_cap 拦截）</div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="font-size:11px">触发阈值 / Trigger %</div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-tier3-threshold" type="number" step="0.05" min="0" max="1" style="width:80px" /><span>×cap</span></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">Tier 3 供应商 / Provider</div>
+        <div style="font-size:11px">Tier 3 供應商 / Provider</div>
         <select class="oc-select" id="ai-tier3-provider" style="width:140px">
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
@@ -333,11 +333,11 @@
         </select>
       </div>
 
-      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig(this)" style="margin-top:4px">&#x1F4BE; 保存设置 / Save Settings</button>
+      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig(this)" style="margin-top:4px">&#x1F4BE; 保存設置 / Save Settings</button>
     </div>
 
     <div>
-      <h4 style="font-size:13px;margin-bottom:8px">当前配置 / Current Config</h4>
+      <h4 style="font-size:13px;margin-bottom:8px">當前配置 / Current Config</h4>
       <div id="ai-config" class="oc-loading">Loading...</div>
     </div>
   </div>
@@ -345,18 +345,18 @@
 
 <!-- ═══ Consultation Status ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4AC; 咨询状态 / Consultation Status</h3>
+  <h3>&#x1F4AC; 諮詢状态 / Consultation Status</h3>
   <div class="oc-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">已启用</div><div class="oc-metric-val" id="c-enabled">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">运行中</div><div class="oc-metric-val" id="c-running">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">总查询次数</div><div class="oc-metric-val" id="c-queries">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">最后查询</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">已啟用</div><div class="oc-metric-val" id="c-enabled">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">運行中</div><div class="oc-metric-val" id="c-running">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">總查詢次數</div><div class="oc-metric-val" id="c-queries">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">最后查詢</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
   </div>
 </div>
 
 <!-- ═══ AI Inference History ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4DC; AI 推理历史 / AI Inference History</h3>
+  <h3>&#x1F4DC; AI 推理歷史 / AI Inference History</h3>
   <div class="oc-table-wrap">
     <table class="oc-table">
       <thead><tr><th>ID</th><th>Time</th><th>Trigger</th><th>Symbol</th><th>Status</th><th>Cost</th><th>Result</th></tr></thead>
@@ -367,10 +367,10 @@
 
 <!-- ═══ Pricing Table ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F4B2; 定价表 / Pricing Table <button class="oc-btn" onclick="refreshPricing(this);event.preventDefault();" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB; Pricing</button></summary>
+  <summary>&#x1F4B2; 定價表 / Pricing Table <button class="oc-btn" onclick="refreshPricing(this);event.preventDefault();" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB; Pricing</button></summary>
   <div class="oc-collapse-body">
     <div id="explain-pricing"></div>
-    <div id="pricing-refresh-status" style="font-size:11px;color:var(--text-dim);margin:8px 0">定价刷新：载入中</div>
+    <div id="pricing-refresh-status" style="font-size:11px;color:var(--text-dim);margin:8px 0">定價刷新：載入中</div>
     <div id="pricing-body" class="oc-loading">Loading...</div>
   </div>
 </details>
@@ -482,21 +482,21 @@
     <div class="confirm-header">&#x26A1; 触发 AI 推理 / Trigger L2 Inference</div>
     <div class="confirm-body">
       <strong>即将触发一次 AI 深度分析。</strong>
-      <p>AI 会分析当前市场状况、持仓情况和历史表现，然后给出交易建议。</p>
+      <p>AI 会分析當前市场状况、持倉情况和歷史表現，然后給出交易建議。</p>
       <div class="cost-est">
         <div style="font-weight:600;margin-bottom:4px">&#x1F4B0; 预估成本：</div>
         <div id="trigger-cost-est">
-          <div>默认模型 (Sonnet): <strong>~$0.02 - $0.08</strong></div>
+          <div>默認模型 (Sonnet): <strong>~$0.02 - $0.08</strong></div>
           <div>如升级到 Opus: <strong>~$0.10 - $0.50</strong></div>
           <div>如使用 Haiku: <strong>~$0.002 - $0.01</strong></div>
           <div>如使用 DeepSeek: <strong>~$0.001 - $0.005</strong></div>
-          <div style="margin-top:4px;font-size:11px;color:var(--text-dim)">实际成本取决于分析复杂度和 token 用量</div>
+          <div style="margin-top:4px;font-size:11px;color:var(--text-dim)">實際成本取決于分析復杂度和 token 用量</div>
         </div>
       </div>
     </div>
     <div class="confirm-footer">
       <button class="oc-btn" onclick="closeTriggerConfirm()">取消 / Cancel</button>
-      <button class="oc-btn oc-btn-primary" onclick="doTriggerSession()">确认触发 / Confirm</button>
+      <button class="oc-btn oc-btn-primary" onclick="doTriggerSession()">确認触发 / Confirm</button>
     </div>
   </div>
 </div>
@@ -504,28 +504,28 @@
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-ai').innerHTML = ocExplain(
-  'AI 推理引擎使用多种大型语言模型来深入分析交易机会。系统支持多个 AI 供应商（Claude、GPT、DeepSeek、Gemini 等），会自动选择性价比最高的模型。每次查询都会产生 API 费用。',
-  'Layer 2 采用三层架构：L0（确定性规则，零成本）→ L1（轻量模型快速筛选）→ L2（高级模型深度分析）。系统会根据配置的供应商和预算，自动在不同模型间选择最合适的方案。'
+  'AI 推理引擎使用多種大型語言模型来深入分析交易機會。系統支持多個 AI 供應商（Claude、GPT、DeepSeek、Gemini 等），會自動選擇性價比最高的模型。每次查詢都会產生 API 費用。',
+  'Layer 2 采用三層架構：L0（确定性規則，零成本）→ L1（轻量模型快速筛選）→ L2（高级模型深度分析）。系統会根據配置的供應商和预算，自動在不同模型間選擇最合適的方案。'
 );
 
 $('explain-adaptive').innerHTML = ocExplain(
-  '自适应预算根据 AI 的投资回报率自动调整。赚钱时预算增加，亏损时缩减。',
-  'Budget Multiplier 表示当前预算是标准值的多少倍。AI ROI = AI 建议产生的净利润 / AI 成本。ROI > 1 说明 AI 建议的价值超过其成本。'
+  '自適應预算根據 AI 的投資回報率自動調整。赚钱時预算增加，亏損時縮减。',
+  'Budget Multiplier 表示當前预算是標准值的多少倍。AI ROI = AI 建議產生的净利润 / AI 成本。ROI > 1 說明 AI 建議的價值超過其成本。'
 );
 
 $('explain-providers').innerHTML = ocExplain(
-  '在这里管理 AI 供应商。输入 API Key 后点击保存，系统会自动将密钥安全存储到本地 secrets 文件夹。你可以同时配置多个供应商，系统会根据任务类型和成本自动选择最合适的。',
-  'API Key 保存在本地 ~/BybitOpenClaw/secrets/providers/ 目录下，每个供应商一个 .env 文件。密钥不会上传到任何远程服务器，也不会进入 Git。系统启动时自动扫描可用的供应商并加载对应的定价表。'
+  '在這裡管理 AI 供應商。輸入 API Key 后點擊保存，系統會自動将密钥安全存储到本地 secrets 文件夹。你可以同時配置多個供應商，系統会根據任務類型和成本自動選擇最合適的。',
+  'API Key 保存在本地 ~/BybitOpenClaw/secrets/providers/ 目录下，每個供應商一個 .env 文件。密钥不會上傳到任何遠程服務器，也不會進入 Git。系統啟動時自動掃描可用的供應商并載入對應的定價表。'
 );
 
 $('explain-settings').innerHTML = ocExplain(
-  '设置 AI 引擎的全局参数。日硬上限是所有供应商合计的每日成本上限。弹性预算允许 AI 根据表现自动调整使用量。',
-  '日硬上限是绝对不可超越的。弹性基准是正常情况下的日预算，乘以弹性倍数得到实际上下限。例如基准 $8、上限 2x、下限 0.3x → 实际预算在 $2.4-$16 之间浮动。Auto Submit 控制 AI 建议是否自动变成 Paper 模拟订单。'
+  '設置 AI 引擎的全局参數。日硬上限是所有供應商合計的每日成本上限。弹性预算允許 AI 根據表現自動調整使用量。',
+  '日硬上限是絕對不可超越的。弹性基准是正常情况下的日预算，乘以弹性倍數得到實際上下限。例如基准 $8、上限 2x、下限 0.3x → 實際预算在 $2.4-$16 之間浮動。Auto Submit 控制 AI 建議是否自動变成 Paper 模擬訂單。'
 );
 
 $('explain-pricing').innerHTML = ocExplain(
-  '各 AI 模型的详细定价。系统根据此表计算每次 AI 调用的费用。',
-  '定价分为 input tokens（发送给模型的文本）和 output tokens（模型生成的回复）。不同模型的价格差异巨大：DeepSeek V4 Flash 明显低于 Claude Opus。'
+  '各 AI 模型的详細定價。系統根據此表計算每次 AI 調用的費用。',
+  '定價分为 input tokens（發送給模型的文本）和 output tokens（模型生成的回復）。不同模型的價格差異巨大：DeepSeek V4 Flash 明顯低于 Claude Opus。'
 );
 
 // ─── Trigger Session ─────────────────────────────────────────
@@ -540,13 +540,13 @@ async function doTriggerSession() {
 }
 
 // ─── Provider Key Management ─────────────────────────────────
-// Key format validation rules / API Key 格式校验规则
+// Key format validation rules / API Key 格式校驗規則
 const KEY_FORMATS = {
-  anthropic:  { prefix: 'sk-ant-',  minLen: 20, hint: '必须以 sk-ant- 开头 / Must start with sk-ant-' },
-  openai:     { prefix: 'sk-',      minLen: 20, hint: '必须以 sk- 开头 / Must start with sk-' },
-  deepseek:   { prefix: 'sk-',      minLen: 20, hint: '必须以 sk- 开头 / Must start with sk-' },
-  perplexity: { prefix: 'pplx-',    minLen: 20, hint: '必须以 pplx- 开头 / Must start with pplx-' },
-  google:     { prefix: null,       minLen: 20, hint: '至少 20 个字符 / At least 20 characters' },
+  anthropic:  { prefix: 'sk-ant-',  minLen: 20, hint: '必须以 sk-ant- 開头 / Must start with sk-ant-' },
+  openai:     { prefix: 'sk-',      minLen: 20, hint: '必须以 sk- 開头 / Must start with sk-' },
+  deepseek:   { prefix: 'sk-',      minLen: 20, hint: '必须以 sk- 開头 / Must start with sk-' },
+  perplexity: { prefix: 'pplx-',    minLen: 20, hint: '必须以 pplx- 開头 / Must start with pplx-' },
+  google:     { prefix: null,       minLen: 20, hint: '至少 20 個字符 / At least 20 characters' },
   local_llm:  { prefix: 'http',     minLen: 8,  hint: '必须是 http:// 或 https:// URL' },
 };
 
@@ -625,7 +625,7 @@ function applyLocalModelsFromStatus(status) {
   } else {
     L2_PROVIDER_MODELS.local_llm = [{
       value: 'local:',
-      label: 'Local LLM — 当前不可用',
+      label: 'Local LLM — 當前不可用',
       providerAvailable: false,
     }];
     ocSetText(
@@ -677,7 +677,7 @@ async function loadProviderModelCatalog(forceRefresh) {
   const qs = forceRefresh ? '?force_refresh=true' : '';
   const d = await ocApi('/api/v1/paper/layer2/providers/models' + qs);
   if (!d || !d.data) {
-    ocSetText('ai-model-catalog-status', '模型目录：加载失败');
+    ocSetText('ai-model-catalog-status', '模型目录：載入失败');
     await loadLocalModelsForEngineSettings();
     return;
   }
@@ -705,7 +705,7 @@ function setModelOptions(selectId, provider, selectedValue) {
   if (!select) return;
   const models = L2_PROVIDER_MODELS[provider] || L2_PROVIDER_MODELS.anthropic;
   if (!models.length) {
-    select.innerHTML = '<option value="" disabled>无可用模型</option>';
+    select.innerHTML = '<option value="" disabled>無可用模型</option>';
     return;
   }
   select.innerHTML = models.map(m => {
@@ -744,10 +744,10 @@ function _renderProviderBadge(provider, info) {
   if (info.configured) {
     if (info.client_implemented) {
       if (info.validated) {
-        badge.textContent = '已验证 / Active';
+        badge.textContent = '已驗證 / Active';
         badge.className = 'oc-chip oc-chip-good';
       } else {
-        badge.textContent = '已存储 · 未验证';
+        badge.textContent = '已存储 · 未驗證';
         badge.className = 'oc-chip oc-chip-warn';
       }
     } else {
@@ -774,8 +774,8 @@ function _renderProviderBadge(provider, info) {
   const input = $(PROVIDER_INPUT_ID[provider]);
   if (input) {
     if (info.configured && info.masked) {
-      const v = info.validated ? '已验证' : '已存储未验证';
-      input.placeholder = v + '：' + info.masked + '（输入新值替换）';
+      const v = info.validated ? '已驗證' : '已存储未驗證';
+      input.placeholder = v + '：' + info.masked + '（輸入新值替换）';
     } else if (provider === 'anthropic') {
       input.placeholder = 'sk-ant-...';
     } else if (provider === 'perplexity') {
@@ -796,18 +796,18 @@ async function loadProviderStatus() {
 
 async function saveProviderKey(provider, btn) {
   const inputId = PROVIDER_INPUT_ID[provider];
-  if (!inputId) { ocToast('未知供应商 / Unknown provider', 'error'); return; }
+  if (!inputId) { ocToast('未知供應商 / Unknown provider', 'error'); return; }
   const key = $(inputId).value.trim();
-  if (!key) { ocToast('请输入 API Key / Please enter an API key', 'error'); return; }
+  if (!key) { ocToast('請輸入 API Key / Please enter an API key', 'error'); return; }
 
-  // 前端格式校验（與後端 validate_key 規則一致；提早攔截）
+  // 前端格式校驗（與後端 validate_key 規則一致；提早攔截）
   const fmt = KEY_FORMATS[provider];
   if (fmt) {
     if (fmt.prefix && !key.startsWith(fmt.prefix)) {
-      ocToast('格式错误：' + fmt.hint, 'error'); return;
+      ocToast('格式錯誤：' + fmt.hint, 'error'); return;
     }
     if (key.length < fmt.minLen) {
-      ocToast('Key 太短（至少 ' + fmt.minLen + ' 个字符）', 'error'); return;
+      ocToast('Key 太短（至少 ' + fmt.minLen + ' 個字符）', 'error'); return;
     }
   }
 
@@ -818,7 +818,7 @@ async function saveProviderKey(provider, btn) {
     const d = await ocPost('/api/v1/paper/layer2/config', {
       provider_keys: { [provider]: key },
     });
-    if (!d) { ocToast('保存失败（后端无响应）/ Backend not responding', 'error'); return; }
+    if (!d) { ocToast('保存失败（后端無響應）/ Backend not responding', 'error'); return; }
 
     // 後端回 envelope：data.provider_results / provider_errors / provider_status。
     const errs = (d.data && d.data.provider_errors) || [];
@@ -831,15 +831,15 @@ async function saveProviderKey(provider, btn) {
     } else if (myResult) {
       $(inputId).value = '';
       if (myResult.client_implemented) {
-        const hot = myResult.hot_reloaded ? '（已热重载客户端）' : '';
+        const hot = myResult.hot_reloaded ? '（已热重載客户端）' : '';
         if (myResult.validated) {
-          ocToast(provider + ' API Key 已验证并保存 ' + hot, 'success');
+          ocToast(provider + ' API Key 已驗證并保存 ' + hot, 'success');
         } else {
-          ocToast(provider + ' API Key 已保存，但未完成可用性验证', 'warn');
+          ocToast(provider + ' API Key 已保存，但未完成可用性驗證', 'warn');
         }
       } else {
         // 誠實提示：key 落地了但推理路徑還沒接，避免使用者以為立即生效。
-        ocToast(provider + ' Key 已存储；客户端尚未实装（仅存盘待用）', 'warn');
+        ocToast(provider + ' Key 已存储；客户端尚未實装（仅存盤待用）', 'warn');
       }
       // 用後端最新 status 重繪所有 badge（單一信源，不再前端臆測）
       if (d.data && d.data.provider_status && d.data.provider_status.providers) {
@@ -853,7 +853,7 @@ async function saveProviderKey(provider, btn) {
       }
     } else {
       // envelope 沒帶結果（理論上不會），保守降級
-      ocToast(provider + ' 已提交，但后端未返回结果 — 请检查 / 重试', 'warn');
+      ocToast(provider + ' 已提交，但后端未返回結果 — 請檢查 / 重試', 'warn');
       loadProviderStatus();
     }
   } finally {
@@ -862,7 +862,7 @@ async function saveProviderKey(provider, btn) {
 }
 
 async function clearProviderKey(provider, btn) {
-  if (!PROVIDER_INPUT_ID[provider]) { ocToast('未知供应商', 'error'); return; }
+  if (!PROVIDER_INPUT_ID[provider]) { ocToast('未知供應商', 'error'); return; }
   // W-AUDIT-7c (2026-05-09): API Key clear 屬 governance critical 寫操作，
   // 直接刪除 secrets 文件 + 移除進程 env。使用 typed-confirm 取代 native confirm() 防誤觸。
   // round 2 fix [#7]：trigger button 在 await modal **前** disabled，try/finally 復位，
@@ -897,11 +897,11 @@ async function clearProviderKey(provider, btn) {
       return;
     }
     const d = await ocApi('/api/v1/paper/layer2/providers/' + encodeURIComponent(provider), { method: 'DELETE' });
-    if (!d) { ocToast('清除失败（后端无响应）', 'error'); return; }
+    if (!d) { ocToast('清除失败（后端無響應）', 'error'); return; }
     if (d.data && d.data.deleted) {
       ocToast(provider + ' API Key 已清除', 'success');
     } else {
-      ocToast(provider + ' 无密钥可清除（已是空状态）', 'neutral');
+      ocToast(provider + ' 無密钥可清除（已是空状态）', 'neutral');
     }
     if (d.data && d.data.provider_status && d.data.provider_status.providers) {
       Object.entries(d.data.provider_status.providers).forEach(
@@ -947,13 +947,13 @@ async function saveAIConfig(btn) {
     const d = await ocPost('/api/v1/paper/layer2/config', body);
     if (d && d.action_result === 'success') {
       AI_CONFIG_DIRTY = false;
-      ocToast('AI 设置已保存', 'success');
+      ocToast('AI 設置已保存', 'success');
       loadAll();
     } else if (d && d.action_result) {
       const codes = (d.reason_codes || []).join(', ') || d.action_result;
       ocToast('保存失败：' + codes, 'error');
     } else {
-      ocToast('保存失败：后端拒绝或无响应，当前选择不会自动覆盖', 'error');
+      ocToast('保存失败：后端拒絕或無響應，當前選擇不會自動覆盖', 'error');
     }
   } finally {
     AI_CONFIG_SAVING = false;
@@ -966,7 +966,7 @@ async function loadCost() {
   let d = await ocApi('/api/v1/paper/layer2/cost');
   if (!d || !d.data) d = await ocApi('/api/v1/paper/ai-cost');
   // Show connection error in Today Cost cell so user sees the failure
-  // 在今日花费栏显示连接失败，让用户可见错误而非静默显示 '--'
+  // 在今日花費栏顯示连接失败，讓用户可见錯誤而非靜默顯示 '--'
   if (!d || !d.data) { ocSetText('a-today', '⚠ 失败 / Failed'); return; }
   const c = d.data;
   const todayCost = c.today?.total_usd ?? c.today_cost ?? c.cost_today ?? 0;
@@ -989,13 +989,13 @@ async function loadAdaptive() {
   if (!d || !d.data) { ocSetText('ab-mult', '⚠'); ocSetText('ab-reason', '连接失败 / Failed'); return; }
   const a = d.data;
   ocSetText('ab-mult', ocNum(a.multiplier || a.budget_multiplier, 2) + 'x');
-  // FA-8: 使用 ?? 空值合并（而非 || 短路），确保 cost_edge_ratio=0 不被跳过
-  // 优先读 cost_edge_ratio（根原则 13 字段），再降级到 roi / ai_roi
+  // FA-8: 使用 ?? 空值合并（而非 || 短路），确保 cost_edge_ratio=0 不被跳過
+  // 優先读 cost_edge_ratio（根原則 13 字段），再降级到 roi / ai_roi
   // FA-8: Use nullish coalescing (??) instead of || to handle 0 correctly
   const roi = a.cost_edge_ratio ?? a.roi_7d ?? a.roi ?? a.ai_roi;
   if (roi !== null && roi !== undefined) {
     $('ab-roi').textContent = ocNum(roi, 2) + 'x';
-    // 根原则 13：cost_edge_ratio >= 0.8 才建议持仓 / Principle 13: ratio >= 0.8 = hold recommended
+    // 根原則 13：cost_edge_ratio >= 0.8 才建議持倉 / Principle 13: ratio >= 0.8 = hold recommended
     $('ab-roi').className = 'oc-metric-val ' + (roi >= 0.8 ? 'green' : 'red');
   } else {
     $('ab-roi').textContent = 'N/A（數據不足）';
@@ -1096,7 +1096,7 @@ async function loadCostRoiMonitor() {
 async function loadConsult() {
   const d = await ocApi('/api/v1/strategy/ai/status');
   // On failure, update the AI status badge so user sees the error
-  // 失败时更新 AI 状态 chip，让用户可见而非静默
+  // 失败時更新 AI 状态 chip，讓用户可见而非靜默
   if (!d || !d.data) { const b = $('ai-badge'); if (b) { b.textContent = 'API 失败 / Failed'; b.className = 'oc-chip oc-chip-bad'; } return; }
   const s = d.data;
   ocSetText('c-enabled', s.enabled ? '是' : '否');
@@ -1105,7 +1105,7 @@ async function loadConsult() {
   ocSetText('c-queries', s.total_queries || s.query_count || 0);
   ocSetText('c-last', ocTimeShort(s.last_query_at));
   const badge = $('ai-badge');
-  if (s.enabled) { badge.textContent = '已启用'; badge.className = 'oc-chip oc-chip-good'; }
+  if (s.enabled) { badge.textContent = '已啟用'; badge.className = 'oc-chip oc-chip-good'; }
   else { badge.textContent = '已禁用'; badge.className = 'oc-chip oc-chip-neutral'; }
 }
 
@@ -1113,7 +1113,7 @@ async function loadSessions() {
   const d = await ocApi('/api/v1/paper/layer2/sessions?limit=20');
   if (!d || !d.data) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed</td></tr>'); return; }
   const sessions = d.data.sessions || d.data || [];
-  if (!sessions.length) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂无 AI 推理记录</td></tr>'); return; }
+  if (!sessions.length) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂無 AI 推理記錄</td></tr>'); return; }
   let html = '';
   sessions.slice(0, 20).forEach(s => {
     html += '<tr>';
@@ -1139,14 +1139,14 @@ async function loadConfig() {
   const t3 = (cfg.fallback_tier3_provider || '?') + ' / ' + (cfg.fallback_tier3_model || '?')
     + ' @ ' + ((cfg.fallback_tier3_threshold_pct ?? 0.85) * 100).toFixed(0) + '%';
   const fields = [
-    ['默认供应商', cfg.default_provider || 'anthropic'],
-    ['默认模型(tier)', cfg.default_model || 'sonnet'],
+    ['默認供應商', cfg.default_provider || 'anthropic'],
+    ['默認模型(tier)', cfg.default_model || 'sonnet'],
     ['日硬上限', '$' + (cfg.daily_hard_cap_usd || 2)],
     ['弹性基准', '$' + (cfg.adaptive_base_daily_usd || 8)],
-    ['弹性范围', (cfg.adaptive_min_multiplier || 0.3) + 'x - ' + (cfg.adaptive_max_multiplier || 2) + 'x'],
-    ['自适应', cfg.adaptive_enabled !== false ? '启用' : '禁用'],
+    ['弹性範圍', (cfg.adaptive_min_multiplier || 0.3) + 'x - ' + (cfg.adaptive_max_multiplier || 2) + 'x'],
+    ['自適應', cfg.adaptive_enabled !== false ? '啟用' : '禁用'],
     ['最大迭代', cfg.max_iterations || 15],
-    ['自动提交', cfg.auto_submit_to_paper ? '是' : '否'],
+    ['自動提交', cfg.auto_submit_to_paper ? '是' : '否'],
     ['搜索引擎', (cfg.search_providers_enabled || []).join(', ') || '--'],
     ['Tier 2 降级', t2],
     ['Tier 3 降级', t3],
@@ -1183,9 +1183,9 @@ function renderPricingRefreshStatus(data) {
   const meta = data && data.source_meta || {};
   const status = data && data.refresh_status || 'unknown';
   const last = meta.last_refresh_date || '--';
-  const changed = meta.source_changed ? ' · 官方页面有变化，需复核' : '';
+  const changed = meta.source_changed ? ' · 官方页面有变化，需復核' : '';
   const reasons = (data && data.refresh_reasons || meta.refresh_reasons || []).join(',');
-  ocSetText('pricing-refresh-status', '定价刷新：' + status + ' · last=' + last + (reasons ? ' · ' + reasons : '') + changed);
+  ocSetText('pricing-refresh-status', '定價刷新：' + status + ' · last=' + last + (reasons ? ' · ' + reasons : '') + changed);
 }
 
 async function refreshPricing(btn) {
@@ -1193,7 +1193,7 @@ async function refreshPricing(btn) {
   if (btn) { origText = btn.textContent; btn.disabled = true; btn.textContent = '刷新中...'; }
   try {
     await loadPricing(true);
-    ocToast('定价表已刷新 / Pricing refreshed', 'success');
+    ocToast('定價表已刷新 / Pricing refreshed', 'success');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
@@ -1215,7 +1215,7 @@ async function loadPricing(forceRefresh) {
     if (row[side] != null) return Number(row[side]) || 0;
     return 0;
   };
-  let html = '<div class="oc-table-wrap"><table class="oc-table"><thead><tr><th>模型</th><th>供应商</th><th>Input $/1M</th><th>Output $/1M</th></tr></thead><tbody>';
+  let html = '<div class="oc-table-wrap"><table class="oc-table"><thead><tr><th>模型</th><th>供應商</th><th>Input $/1M</th><th>Output $/1M</th></tr></thead><tbody>';
   if (Array.isArray(pricing)) {
     pricing.forEach(p => {
       html += '<tr><td>' + ocEsc(p.model || p.name || p.model_id || '--') + '</td><td>' + ocEsc(p.provider || '--') + '</td><td>$' + ocNum(mtokPrice(p, 'input'), 3) + '</td><td>$' + ocNum(mtokPrice(p, 'output'), 3) + '</td></tr>';
@@ -1231,26 +1231,26 @@ async function loadPricing(forceRefresh) {
 
 // ─── Ollama Status ───────────────────────────────────────────
 // Polls GET /api/v1/paper/layer2/ollama/status and updates the Local LLM card UI.
-// 轮询后端 Ollama 状态接口，实时更新本地 LLM 供应商卡片的显示状态。
-// Called automatically on page load and when the user clicks 检测 / 自动在页面加载和用户点击检测时触发。
+// 轮詢后端 Ollama 状态接口，實時更新本地 LLM 供應商卡片的顯示状态。
+// Called automatically on page load and when the user clicks 檢測 / 自動在页面載入和用户點擊檢測時触发。
 async function checkOllamaStatus() {
   const badge = $('prov-local-badge');       // status badge chip / 状态徽章
   const detail = $('ollama-status-detail');  // detail text below the card / 卡片下方详情文本
-  const modelsLine = $('ollama-models-line');// subtitle showing available models / 显示可用模型的副标题
+  const modelsLine = $('ollama-models-line');// subtitle showing available models / 顯示可用模型的副標題
 
   // Show "checking" state while the request is in-flight
-  // 请求进行中时显示"检测中"状态
-  badge.textContent = '检测中...';
+  // 請求進行中時顯示"檢測中"状态
+  badge.textContent = '檢測中...';
   badge.className = 'oc-chip oc-chip-neutral';
   detail.textContent = '正在连接 Ollama...';
 
   const d = await ocApi('/api/v1/paper/layer2/ollama/status');
   if (!d || !d.data) {
     // Backend itself unreachable (server down, network issue)
-    // 后端不可达（服务未启动或网络问题）
-    badge.textContent = '离线';
+    // 后端不可达（服務未啟動或網絡问題）
+    badge.textContent = '离線';
     badge.className = 'oc-chip oc-chip-bad';
-    detail.textContent = '无法连接后端，请确认服务正在运行。';
+    detail.textContent = '無法连接后端，請确認服務正在運行。';
     return;
   }
 
@@ -1258,18 +1258,18 @@ async function checkOllamaStatus() {
   applyLocalModelsFromStatus(s);
   if (s.available) {
     // Ollama is up and responded — show model list
-    // Ollama 正常运行并已响应 — 显示模型列表
+    // Ollama 正常運行并已響應 — 顯示模型列表
     badge.textContent = '已连接';
     badge.className = 'oc-chip oc-chip-good';
     const modelList = (s.models || []).join(', ') || s.default_model;
     modelsLine.textContent = 'Ollama — 可用模型：' + modelList;
-    detail.textContent = `已连接 ${s.base_url} · 默认模型：${s.default_model} · 共 ${s.model_count ?? '?'} 个模型`;
+    detail.textContent = `已连接 ${s.base_url} · 默認模型：${s.default_model} · 共 ${s.model_count ?? '?'} 個模型`;
   } else {
     // Backend reachable but Ollama process not responding (e.g. not started)
-    // 后端可达但 Ollama 进程未响应（例如未执行 ollama serve）
+    // 后端可达但 Ollama 進程未響應（例如未執行 ollama serve）
     badge.textContent = '不可用';
     badge.className = 'oc-chip oc-chip-bad';
-    detail.textContent = `Ollama 未响应（${s.base_url}）。请确认 Ollama 服务已启动（ollama serve）。`;
+    detail.textContent = `Ollama 未響應（${s.base_url}）。請确認 Ollama 服務已啟動（ollama serve）。`;
   }
 }
 
@@ -1283,7 +1283,7 @@ async function loadAll() {
     loadSessions(),
     loadConfig(),
     loadPricing(),
-    loadProviderStatus(),  // GUI Tab-AI 供应商 badge 真實狀態（取代靜態「未检测」）
+    loadProviderStatus(),  // GUI Tab-AI 供應商 badge 真實狀態（取代靜態「未檢測」）
   ]);
   checkOllamaStatus();
 }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>总览 Overview</title>
+<title>總览 Overview</title>
 <script src="/static/common.js?v=20260506.dev-support-v2"></script>
 <script src="/static/governance.js"></script>
 </head>
@@ -35,7 +35,7 @@
     color: var(--text); position: relative; }
   .mode-btn:hover { border-color: var(--accent); background: rgba(88,166,255,0.05); }
   .mode-btn.active { border-color: var(--accent); background: rgba(88,166,255,0.1); }
-  .mode-btn.active::after { content: '✓ 当前'; position: absolute; top: 8px; right: 10px;
+  .mode-btn.active::after { content: '✓ 當前'; position: absolute; top: 8px; right: 10px;
     font-size: 10px; color: var(--accent); }
   .mode-btn-icon { font-size: 22px; margin-bottom: 6px; }
   .mode-btn-name { font-size: 14px; font-weight: 600; }
@@ -66,8 +66,8 @@
 <div class="oc-card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div>
-      <h2>&#x1F4CA; 运行态摘要 / Runtime Summary</h2>
-      <div class="subtitle">系统核心状态一览 — 鼠标悬停查看详细说明</div>
+      <h2>&#x1F4CA; 運行态摘要 / Runtime Summary</h2>
+      <div class="subtitle">系統核心状态一览 — 鼠標悬停查看详細說明</div>
     </div>
     <span id="mode-badge" class="oc-chip oc-chip-neutral">loading...</span>
   </div>
@@ -76,34 +76,34 @@
 
   <div class="oc-metrics" id="runtime-grid">
     <div class="oc-metric tip-metric" id="m-mode-wrap"><div class="oc-metric-label">全局模式</div><div class="oc-metric-val" id="m-mode">--</div><div class="tip-box" id="m-mode-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-auth-wrap"><div class="oc-metric-label">执行权限</div><div class="oc-metric-val" id="m-auth">--</div><div class="tip-box" id="m-auth-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-demo-wrap"><div class="oc-metric-label">系统能力</div><div class="oc-metric-val" id="m-demo">--</div><div class="tip-box" id="m-demo-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-prot-wrap"><div class="oc-metric-label">误操作保护</div><div class="oc-metric-val" id="m-prot">--</div><div class="tip-box" id="m-prot-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-stage-wrap"><div class="oc-metric-label">阶段标签</div><div class="oc-metric-val" id="m-stage" style="font-size:12px">--</div><div class="tip-box" id="m-stage-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-auth-wrap"><div class="oc-metric-label">執行權限</div><div class="oc-metric-val" id="m-auth">--</div><div class="tip-box" id="m-auth-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-demo-wrap"><div class="oc-metric-label">系統能力</div><div class="oc-metric-val" id="m-demo">--</div><div class="tip-box" id="m-demo-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-prot-wrap"><div class="oc-metric-label">誤操作保護</div><div class="oc-metric-val" id="m-prot">--</div><div class="tip-box" id="m-prot-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-stage-wrap"><div class="oc-metric-label">階段標簽</div><div class="oc-metric-val" id="m-stage" style="font-size:12px">--</div><div class="tip-box" id="m-stage-tip"></div></div>
   </div>
 
   <!-- Quick Actions / 快捷操作 -->
   <div class="quick-actions">
-    <!-- Paper: interactive toggle — session-state-aware / Paper 模拟：可交互，感知会话状态 -->
-    <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')" title="启动/停止 Paper 会话">
+    <!-- Paper: interactive toggle — session-state-aware / Paper 模擬：可交互，感知會話状态 -->
+    <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')" title="啟動/停止 Paper 會話">
       <span class="qa-dot qa-dot-off" id="qa-paper-dot"></span>
-      <span id="qa-paper-label">模拟 Paper</span>
+      <span id="qa-paper-label">模擬 Paper</span>
     </button>
     <!-- Demo / Feed / Scanner: status indicators only, not interactive buttons -->
-    <!-- Demo/Feed/Scanner：仅状态指示器，非可点击按钮 -->
-    <span class="qa-status-row" title="Bybit Demo 演示连接状态由 Rust 引擎管理，无法从 GUI 直接开关">
+    <!-- Demo/Feed/Scanner：仅状态指示器，非可點擊按钮 -->
+    <span class="qa-status-row" title="Bybit Demo 演示连接状态由 Rust 引擎管理，無法从 GUI 直接開關">
       <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span>
       <span style="font-size:12px">Bybit Demo 演示</span>
       <span class="oc-chip oc-chip-neutral" id="qa-demo-chip" style="font-size:10px;padding:1px 7px">Rust管理</span>
     </span>
-    <span class="qa-status-row" title="行情流由 Rust 引擎自动管理，无法从 GUI 开关">
+    <span class="qa-status-row" title="行情流由 Rust 引擎自動管理，無法从 GUI 開關">
       <span class="qa-dot qa-dot-off" id="qa-feed-dot"></span>
       <span style="font-size:12px">行情流 Feed</span>
-      <span class="oc-chip oc-chip-neutral" id="qa-feed-chip" style="font-size:10px;padding:1px 7px">自动</span>
+      <span class="oc-chip oc-chip-neutral" id="qa-feed-chip" style="font-size:10px;padding:1px 7px">自動</span>
     </span>
-    <span class="qa-status-row" title="扫描器在「策略中心」Tab 管理，此处仅显示运行状态">
+    <span class="qa-status-row" title="掃描器在「策略中心」Tab 管理，此處仅顯示運行状态">
       <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span>
-      <span style="font-size:12px">扫描器 Scanner</span>
+      <span style="font-size:12px">掃描器 Scanner</span>
       <span class="oc-chip oc-chip-neutral" id="qa-scanner-chip" style="font-size:10px;padding:1px 7px">策略中心</span>
     </span>
   </div>
@@ -114,62 +114,62 @@
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
     <div>
       <h3 style="margin:0">🎛️ 全局模式控制 / Global Mode Control</h3>
-      <div class="subtitle" style="margin-top:4px">切换系统运行阶段 — 每次切换需二次确认</div>
+      <div class="subtitle" style="margin-top:4px">切换系統運行階段 — 每次切换需二次确認</div>
     </div>
     <span id="cur-mode-chip" class="oc-chip oc-chip-neutral">loading...</span>
   </div>
 
-  <!-- Mode progression flow / 模式升级路径流程图 -->
+  <!-- Mode progression flow / 模式升级路徑流程圖 -->
   <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);margin-bottom:10px;padding:6px 10px;background:var(--bg);border-radius:6px;border:1px solid #21262d">
-    <span title="完全静默 / Silent">&#x1F512; 设计</span>
+    <span title="完全靜默 / Silent">&#x1F512; 設計</span>
     <span style="color:var(--border)">&#x2192;</span>
-    <span title="观察市场，无交易 / Observe, no trading">&#x1F441;&#xFE0F; 观察</span>
+    <span title="觀察市场，無交易 / Observe, no trading">&#x1F441;&#xFE0F; 觀察</span>
     <span style="color:var(--border)">&#x2192;</span>
-    <span title="Paper 模拟引擎激活 / Paper engine active">&#x1F311; 影子</span>
+    <span title="Paper 模擬引擎激活 / Paper engine active">&#x1F311; 影子</span>
     <span style="color:var(--border)">&#x2192;</span>
-    <span title="Paper 模拟 + Bybit Demo 演示沙盒 / Paper + Bybit Demo sandbox">&#x1F9EA; Demo</span>
+    <span title="Paper 模擬 + Bybit Demo 演示沙盒 / Paper + Bybit Demo sandbox">&#x1F9EA; Demo</span>
     <span style="color:var(--border)">&#x2192;</span>
-    <span title="实盘交易（真实资金）/ Live trading — real money" style="color:#a855f7">&#x1F7E3; 实盘</span>
-    <span style="margin-left:8px;font-size:10px">— 点击按钮切换模式，每次切换需二次确认 / Click a button below to switch modes</span>
+    <span title="實盤交易（真實資金）/ Live trading — real money" style="color:#a855f7">&#x1F7E3; 實盤</span>
+    <span style="margin-left:8px;font-size:10px">— 點擊按钮切换模式，每次切换需二次确認 / Click a button below to switch modes</span>
   </div>
 
   <div class="mode-btn-grid" id="mode-btn-grid">
     <button class="mode-btn" id="mbtn-design_only"    onclick="confirmMode('design_only')">
       <div class="mode-btn-icon">🔒</div>
-      <div class="mode-btn-name">仅设计</div>
+      <div class="mode-btn-name">仅設計</div>
       <div class="mode-btn-sub">design_only</div>
-      <div class="mode-btn-desc">完全静默，不执行任何自动操作</div>
+      <div class="mode-btn-desc">完全靜默，不執行任何自動操作</div>
     </button>
     <button class="mode-btn" id="mbtn-observe_only"   onclick="confirmMode('observe_only')">
       <div class="mode-btn-icon">👁️</div>
-      <div class="mode-btn-name">仅观察</div>
+      <div class="mode-btn-name">仅觀察</div>
       <div class="mode-btn-sub">observe_only</div>
-      <div class="mode-btn-desc">后台行情流 + 数据积累，无任何交易</div>
+      <div class="mode-btn-desc">后台行情流 + 數據積累，無任何交易</div>
     </button>
     <button class="mode-btn" id="mbtn-shadow_only"    onclick="confirmMode('shadow_only')">
       <div class="mode-btn-icon">🌑</div>
       <div class="mode-btn-name">影子模式</div>
       <div class="mode-btn-sub">shadow_only</div>
-      <div class="mode-btn-desc">Paper 模拟引擎激活，影子决策运行</div>
+      <div class="mode-btn-desc">Paper 模擬引擎激活，影子決策運行</div>
     </button>
     <button class="mode-btn" id="mbtn-demo_reserved"  onclick="confirmMode('demo_reserved')">
       <div class="mode-btn-icon">🧪</div>
       <div class="mode-btn-name">Demo 预留</div>
       <div class="mode-btn-sub">demo_reserved</div>
-      <div class="mode-btn-desc">Paper 模拟 + Bybit Demo 演示沙盒双重执行</div>
+      <div class="mode-btn-desc">Paper 模擬 + Bybit Demo 演示沙盒双重執行</div>
     </button>
     <button class="mode-btn" id="mbtn-live_reserved"  onclick="confirmMode('live_reserved')" style="border-color:rgba(168,85,247,0.4)">
       <div class="mode-btn-icon">🟣</div>
-      <div class="mode-btn-name">实盘</div>
+      <div class="mode-btn-name">實盤</div>
       <div class="mode-btn-sub">live_reserved</div>
-      <div class="mode-btn-desc">Live 引擎开放 — 真实资金交易</div>
+      <div class="mode-btn-desc">Live 引擎開放 — 真實資金交易</div>
     </button>
   </div>
 
   <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.7">
-    <strong style="color:var(--text)">模式升级路径：</strong>
-    设计 → 观察（行情流启动）→ 影子（Paper 模拟引擎启动）→ Demo 预留（Bybit Demo 演示双执行）→ <strong style="color:#a855f7">实盘（真实资金）</strong><br>
-    <strong style="color:var(--text)">注意：</strong>各模式独立控制 — 切换模式不会停止已运行的 Paper / Demo / Live 会话，需在对应 Tab 手动控制。
+    <strong style="color:var(--text)">模式升级路徑：</strong>
+    設計 → 觀察（行情流啟動）→ 影子（Paper 模擬引擎啟動）→ Demo 预留（Bybit Demo 演示双執行）→ <strong style="color:#a855f7">實盤（真實資金）</strong><br>
+    <strong style="color:var(--text)">注意：</strong>各模式独立控制 — 切换模式不會停止已運行的 Paper / Demo / Live 會話，需在對應 Tab 手動控制。
   </div>
 </div>
 
@@ -206,15 +206,15 @@
 
 <!-- ═══ Business Summary ═══ -->
 <div class="oc-card">
-  <h2>&#x1F4B5; 业务概览 / Business Summary</h2>
-  <div class="subtitle">今日 PnL、AI 成本、整体 ROI</div>
+  <h2>&#x1F4B5; 業務概览 / Business Summary</h2>
+  <div class="subtitle">今日 PnL、AI 成本、整體 ROI</div>
   <div class="oc-metrics" id="biz-grid">
-    <div class="oc-metric"><div class="oc-metric-label">模拟净盈亏</div><div class="oc-metric-val" id="b-pnl">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">模擬净盈亏</div><div class="oc-metric-val" id="b-pnl">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">今日 AI 成本</div><div class="oc-metric-val blue" id="b-cost">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">30 天 AI 成本</div><div class="oc-metric-val" id="b-cost30" style="font-size:14px">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">累计订单数</div><div class="oc-metric-val" id="b-orders">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">当前持仓数</div><div class="oc-metric-val" id="b-positions">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">注册策略数</div><div class="oc-metric-val" id="b-strategies">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">累計訂單數</div><div class="oc-metric-val" id="b-orders">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">當前持倉數</div><div class="oc-metric-val" id="b-positions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">注册策略數</div><div class="oc-metric-val" id="b-strategies">--</div></div>
   </div>
 </div>
 
@@ -222,24 +222,24 @@
 <div class="oc-grid-2">
   <div class="oc-card">
     <h2>&#x1F50C; 来源上下文 / Source Context</h2>
-    <div class="subtitle">数据连接状态与完整性</div>
+    <div class="subtitle">數據连接状态与完整性</div>
     <div id="source-context-body" class="oc-loading">Loading...</div>
   </div>
   <div class="oc-card">
     <h2>&#x1F3E5; 健康摘要 / Health Summary</h2>
-    <div class="subtitle">系统健康评分与关键门禁</div>
+    <div class="subtitle">系統健康評分与關键门禁</div>
     <div id="health-body" class="oc-loading">Loading...</div>
   </div>
 </div>
 
 <!-- ═══ Product Families ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F4E6; 产品族事实 / Product Family Facts（6 个产品类别）</summary>
+  <summary>&#x1F4E6; 產品族事實 / Product Family Facts（6 個產品類別）</summary>
   <div class="oc-collapse-body">
     <div id="explain-pf"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>产品族</th><th>交易所</th><th>账户</th><th>启用</th><th>可见</th><th>模式</th><th>能力</th><th>执行</th></tr></thead>
+        <thead><tr><th>產品族</th><th>交易所</th><th>賬户</th><th>啟用</th><th>可见</th><th>模式</th><th>能力</th><th>執行</th></tr></thead>
         <tbody id="pf-tbody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -249,15 +249,15 @@
 <!-- ═══ Confirm Modal ═══ -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-dialog">
-    <div class="confirm-header" id="confirm-title">确认操作</div>
+    <div class="confirm-header" id="confirm-title">确認操作</div>
     <div class="confirm-body" id="confirm-body"></div>
     <div class="confirm-live-guard" id="live-confirm-guard" hidden aria-live="polite">
-      <div id="live-confirm-status">等待实盘确认保护...</div>
+      <div id="live-confirm-status">等待實盤确認保護...</div>
       <div class="live-hold-progress" aria-hidden="true"><div class="live-hold-bar" id="live-confirm-hold-bar"></div></div>
     </div>
     <div class="confirm-footer">
       <button class="oc-btn" onclick="closeConfirm()">取消 / Cancel</button>
-      <button class="oc-btn oc-btn-primary" id="confirm-ok" onclick="handleConfirmOkClick(event)">确认执行 / Confirm</button>
+      <button class="oc-btn oc-btn-primary" id="confirm-ok" onclick="handleConfirmOkClick(event)">确認執行 / Confirm</button>
     </div>
   </div>
 </div>
@@ -265,26 +265,26 @@
 <script>
 // ─── Chinese Status Translations ──────────────────────────────
 const MODE_CN = {
-  'design_only': '仅设计模式',
-  'observe_only': '仅观察模式',
+  'design_only': '仅設計模式',
+  'observe_only': '仅觀察模式',
   'demo_reserved': 'Demo 预留',
-  'demo_enabled': 'Demo 已启用',
+  'demo_enabled': 'Demo 已啟用',
   'live_reserved': 'Live 预留',
-  'live_enabled': 'Live 已启用',
+  'live_enabled': 'Live 已啟用',
 };
 const AUTH_CN = {
   'demo_blocked': 'Demo 受限',
-  'not_granted': '未授权',
+  'not_granted': '未授權',
   'demo_only': '仅 Demo',
-  'demo_enabled': 'Demo 可执行',
-  'live_enabled': 'Live 可执行',
+  'demo_enabled': 'Demo 可執行',
+  'live_enabled': 'Live 可執行',
   'blocked': '已阻止',
 };
 const CAP_CN = {
-  'shadow_control_ready': '影子控制就绪',
-  'demo_ready': 'Demo 就绪',
-  'live_ready': 'Live 就绪',
-  'not_ready': '未就绪',
+  'shadow_control_ready': '影子控制就緒',
+  'demo_ready': 'Demo 就緒',
+  'live_ready': 'Live 就緒',
+  'not_ready': '未就緒',
 };
 const LIVE_RESERVED_CONFIRM_DELAY_MS = 5000;
 const LIVE_RESERVED_HOLD_MS = 1200;
@@ -309,13 +309,13 @@ function setTip(id, raw, desc) {
 
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-runtime').innerHTML = ocExplain(
-  '这里显示系统的核心运行状态。鼠标悬停在每个指标上可以看到原始状态值和详细说明。下方的快速按钮可以直接开关关键功能。',
-  '系统使用多层保护机制：全局模式控制整体运行阶段（仅设计 → 仅观察 → Demo → Live）；执行权限控制是否允许下单；系统能力表示当前可用的功能级别；误操作保护确保关键状态不会被意外修改。'
+  '這裡顯示系統的核心運行状态。鼠標悬停在每個指標上可以看到原始状态值和详細說明。下方的快速按钮可以直接開關關键功能。',
+  '系統使用多層保護機制：全局模式控制整體運行階段（仅設計 → 仅觀察 → Demo → Live）；執行權限控制是否允許下單；系統能力表示當前可用的功能级别；誤操作保護确保關键状态不會被意外修改。'
 );
 
 $('explain-pf').innerHTML = ocExplain(
-  '产品族是 Bybit 交易所支持的 6 种交易类别。每种类别有独立的开关和权限设置。',
-  '6 种产品族：spot（现货）、margin（杠杆）、perp_linear（USDT 永续）、perp_inverse（币本位永续）、options（期权）、other_derivatives（其他衍生品）。'
+  '產品族是 Bybit 交易所支持的 6 種交易類別。每種類别有独立的開關和權限設置。',
+  '6 種產品族：spot（現货）、margin（杠杆）、perp_linear（USDT 永續）、perp_inverse（币本位永續）、options（期權）、other_derivatives（其他衍生品）。'
 );
 
 // ─── Quick Action State ──────────────────────────────────────
@@ -345,71 +345,71 @@ if (typeof ocFetchDevelopmentSupportMode === 'function') {
 // ─── Mode Confirm Descriptions ───────────────────────────────
 const MODE_CONFIRM = {
   design_only: {
-    icon: '🔒', label: '仅设计模式',
-    title: '🔒 切换到仅设计模式 / design_only',
-    body: `<strong>系统将进入完全静默状态。</strong>
+    icon: '🔒', label: '仅設計模式',
+    title: '🔒 切换到仅設計模式 / design_only',
+    body: `<strong>系統将進入完全靜默状态。</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
-  <li>后台行情流：<strong>不会自动启动</strong>（重启服务后）</li>
-  <li>Paper 模拟：不受影响（已启动的不会自动停止）</li>
+  <li>后台行情流：<strong>不會自動啟動</strong>（重啟服務后）</li>
+  <li>Paper 模擬：不受影响（已啟動的不會自動停止）</li>
   <li>Bybit Demo 演示：不受影响</li>
-  <li>扫描器：继续运行</li>
+  <li>掃描器：繼續運行</li>
 </ul>
-<div class="warn-box">⚠ 降级模式不会自动停止已运行的服务，需手动在「Demo 演示」Tab 关闭。</div>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：完全暂停系统，准备维护或配置修改。</p>`
+<div class="warn-box">⚠ 降级模式不會自動停止已運行的服務，需手動在「Demo 演示」Tab 關閉。</div>
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用场景：完全暂停系統，準備維護或配置修改。</p>`
   },
   observe_only: {
-    icon: '👁️', label: '仅观察模式',
-    title: '👁️ 切换到仅观察模式 / observe_only',
-    body: `<strong>系统将进入纯数据收集状态。</strong>
+    icon: '👁️', label: '仅觀察模式',
+    title: '👁️ 切换到仅觀察模式 / observe_only',
+    body: `<strong>系統将進入純數據收集状态。</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
-  <li>后台行情流：<strong>服务重启后自动启动</strong>（BTCUSDT + ETHUSDT）</li>
-  <li>K线 / 指标 / 观察值：持续积累，为 AI 分析建立数据基础</li>
-  <li>Paper 模拟：<strong>不会自动开启</strong>（需在快捷按钮手动启动）</li>
-  <li>Bybit Demo 演示：不激活，不发送任何订单</li>
-  <li>执行路径：完全关闭，只读</li>
+  <li>后台行情流：<strong>服務重啟后自動啟動</strong>（BTCUSDT + ETHUSDT）</li>
+  <li>K線 / 指標 / 觀察值：持續積累，为 AI 分析建立數據基礎</li>
+  <li>Paper 模擬：<strong>不會自動開啟</strong>（需在快捷按钮手動啟動）</li>
+  <li>Bybit Demo 演示：不激活，不發送任何訂單</li>
+  <li>執行路徑：完全關閉，只读</li>
 </ul>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：系统冷启动、数据预热、暂停交易但继续积累市场数据。</p>`
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用场景：系統冷啟動、數據预热、暂停交易但繼續積累市场數據。</p>`
   },
   shadow_only: {
     icon: '🌑', label: '影子模式',
     title: '🌑 切换到影子模式 / shadow_only',
-    body: `<strong>系统将激活 Paper 模拟执行引擎。</strong>
+    body: `<strong>系統将激活 Paper 模擬執行引擎。</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
-  <li>后台行情流：<strong>自动启动</strong></li>
-  <li>Paper 模拟：<strong>需手动在快捷按钮启动会话</strong></li>
-  <li>影子决策管线：激活（策略信号 → 风控 → 模拟执行）</li>
-  <li>Bybit Demo 演示：<strong>不激活</strong>，只在本地模拟</li>
-  <li>学习系统：积累数据，自动晋升判断</li>
+  <li>后台行情流：<strong>自動啟動</strong></li>
+  <li>Paper 模擬：<strong>需手動在快捷按钮啟動會話</strong></li>
+  <li>影子決策管線：激活（策略信號 → 風控 → 模擬執行）</li>
+  <li>Bybit Demo 演示：<strong>不激活</strong>，只在本地模擬</li>
+  <li>學習系統：積累數據，自動晋升判斷</li>
 </ul>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：在完全隔离环境中测试策略，无任何外部订单。</p>`
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用场景：在完全隔离環境中測試策略，無任何外部訂單。</p>`
   },
   demo_reserved: {
     icon: '🧪', label: 'Demo 预留',
     title: '🧪 切换到 Demo 预留模式 / demo_reserved',
-    body: `<strong>系统将允许 Bybit Demo 演示沙盒执行。</strong>
+    body: `<strong>系統将允許 Bybit Demo 演示沙盒執行。</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
-  <li>后台行情流：<strong>自动启动</strong></li>
-  <li>Paper 模拟：可启动（本地虚拟资金模拟）</li>
-  <li>Bybit Demo 演示：<strong>双重执行</strong> — 订单同时在本地 Paper 模拟引擎和 Bybit 官方 Demo 演示沙盒执行</li>
-  <li>Demo 演示激活：仍需通过 Arm → Enable 流程（在治理控制 Tab）</li>
-  <li>真实资金：<strong>无任何风险</strong>，Demo 演示账户使用虚拟资金</li>
+  <li>后台行情流：<strong>自動啟動</strong></li>
+  <li>Paper 模擬：可啟動（本地虚擬資金模擬）</li>
+  <li>Bybit Demo 演示：<strong>双重執行</strong> — 訂單同時在本地 Paper 模擬引擎和 Bybit 官方 Demo 演示沙盒執行</li>
+  <li>Demo 演示激活：仍需通過 Arm → Enable 流程（在治理控制 Tab）</li>
+  <li>真實資金：<strong>無任何風險</strong>，Demo 演示賬户使用虚擬資金</li>
 </ul>
-<div class="warn-box">⚠ Bybit Demo 演示账户余额不足时需在 Bybit 官网手动补充（无 API 接口）。</div>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：完整测试交易链路（含 Bybit 订单撮合），验证策略在真实订单流中的表现。</p>`
+<div class="warn-box">⚠ Bybit Demo 演示賬户余额不足時需在 Bybit 官網手動补充（無 API 接口）。</div>
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用场景：完整測試交易链路（含 Bybit 訂單撮合），驗證策略在真實訂單流中的表現。</p>`
   },
   live_reserved: {
-    icon: '🟣', label: '实盘',
-    title: '🟣 切换到实盘模式 / live_reserved',
-    body: `<strong style="color:#a855f7">⚠ 实盘模式 — 真实资金风险</strong>
+    icon: '🟣', label: '實盤',
+    title: '🟣 切换到實盤模式 / live_reserved',
+    body: `<strong style="color:#a855f7">⚠ 實盤模式 — 真實資金風險</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
-  <li>引擎模式：<strong>live_reserved</strong> — 允许实盘引擎启动</li>
-  <li>Paper / Demo session：<strong>独立运行，不受影响</strong></li>
-  <li>实盘启动：需在「实盘交易」Tab 点击「启动 Live」</li>
-  <li>真实资金：<strong>所有订单使用真实 Bybit 账户资金</strong></li>
-  <li>前置条件：OPENCLAW_ALLOW_MAINNET=1 + Live API Key 配置</li>
+  <li>引擎模式：<strong>live_reserved</strong> — 允許實盤引擎啟動</li>
+  <li>Paper / Demo session：<strong>独立運行，不受影响</strong></li>
+  <li>實盤啟動：需在「實盤交易」Tab 點擊「啟動 Live」</li>
+  <li>真實資金：<strong>所有訂單使用真實 Bybit 賬户資金</strong></li>
+  <li>前置條件：OPENCLAW_ALLOW_MAINNET=1 + Live API Key 配置</li>
 </ul>
-<div class="warn-box" style="border-color:rgba(168,85,247,0.5);color:#a855f7">🟣 此模式开放实盘交易权限。确认前请检查风控参数和 API Key 配置。</div>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">切换后 Paper/Demo session 继续独立运行，live session 需单独在实盘 Tab 启动/停止。</p>`
+<div class="warn-box" style="border-color:rgba(168,85,247,0.5);color:#a855f7">🟣 此模式開放實盤交易權限。确認前請檢查風控参數和 API Key 配置。</div>
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">切换后 Paper/Demo session 繼續独立運行，live session 需單獨在實盤 Tab 啟動/停止。</p>`
   },
 };
 
@@ -418,28 +418,28 @@ const CONFIRM_MSGS = {
   // SEC-E02: Titles use plain text (textContent) — Unicode chars instead of HTML entities.
   // SEC-E02：標題使用純文本（textContent）— Unicode 字符取代 HTML 實體。
   paper: {
-    on: { title: '\u25B6 启动 Paper 模拟 / Start Paper',
-      body: '<strong>即将启动 Paper 模拟系统。</strong><p>Paper 模拟使用虚拟资金（$100,000），不涉及任何真实资金。所有订单在本地引擎中模拟执行。</p><p>启动后，策略可以通过 Paper 模拟引擎提交订单、管理持仓、追踪盈亏。</p>' },
-    off: { title: '\u23F9 停止 Paper 模拟 / Stop Paper',
-      body: '<strong>即将停止 Paper 模拟系统。</strong><div class="warn-box">\u26A0 停止后，所有未平仓的模拟持仓将被冻结，不再更新市值。活跃的订单将被取消。当前会话的盈亏数据会被保留。</div>' },
+    on: { title: '\u25B6 啟動 Paper 模擬 / Start Paper',
+      body: '<strong>即将啟動 Paper 模擬系統。</strong><p>Paper 模擬使用虚擬資金（$100,000），不涉及任何真實資金。所有訂單在本地引擎中模擬執行。</p><p>啟動后，策略可以通過 Paper 模擬引擎提交訂單、管理持倉、追踪盈亏。</p>' },
+    off: { title: '\u23F9 停止 Paper 模擬 / Stop Paper',
+      body: '<strong>即将停止 Paper 模擬系統。</strong><div class="warn-box">\u26A0 停止后，所有未平倉的模擬持倉将被冻結，不再更新市值。活跃的訂單将被取消。當前會話的盈亏數據會被保留。</div>' },
   },
   feed: {
-    on: { title: '\uD83D\uDCE1 启动行情流 / Start Market Feed',
-      body: '<strong>即将启动实时行情数据流。</strong><p>系统将通过 WebSocket 接收 Bybit 的实时价格数据，用于策略分析和 K 线图表。</p><p>启动后会产生少量网络流量（约 1-5 KB/s），不涉及任何交易操作。</p>' },
+    on: { title: '\uD83D\uDCE1 啟動行情流 / Start Market Feed',
+      body: '<strong>即将啟動實時行情數據流。</strong><p>系統将通過 WebSocket 接收 Bybit 的實時價格數據，用于策略分析和 K 線圖表。</p><p>啟動后会產生少量網絡流量（約 1-5 KB/s），不涉及任何交易操作。</p>' },
     off: { title: '\u23F9 停止行情流 / Stop Market Feed',
-      body: '<strong>即将停止行情数据流。</strong><div class="warn-box">\u26A0 停止后，K 线图表将不再更新，策略将无法接收到新的价格数据。已有的策略分析将使用最后已知价格。</div>' },
+      body: '<strong>即将停止行情數據流。</strong><div class="warn-box">\u26A0 停止后，K 線圖表将不再更新，策略将無法接收到新的價格數據。已有的策略分析将使用最后已知價格。</div>' },
   },
   demo: {
-    on: { title: '\uD83C\uDFE6 启用 Bybit Demo 演示 / Enable Bybit Demo',
-      body: '<strong>即将启用 Bybit Demo 演示。</strong><p>Bybit Demo 演示是 Bybit 官方提供的沙盒环境，使用真实市场数据但虚拟资金。订单会发送到 Bybit 的演示服务器执行。</p><p>启用后，系统将以"双重执行"模式运行：每笔交易同时在本地 Paper 模拟和 Bybit Demo 演示上执行。</p>' },
-    off: { title: '\u23F9 关闭 Bybit Demo 演示 / Disable Bybit Demo',
-      body: '<strong>即将关闭 Bybit Demo 演示。</strong><div class="warn-box">\u26A0 关闭后，不再向 Bybit Demo 演示发送订单。Bybit Demo 演示上的持仓不会自动平仓——你需要在 Bybit 网站手动处理。本地 Paper 模拟不受影响。</div>' },
+    on: { title: '\uD83C\uDFE6 啟用 Bybit Demo 演示 / Enable Bybit Demo',
+      body: '<strong>即将啟用 Bybit Demo 演示。</strong><p>Bybit Demo 演示是 Bybit 官方提供的沙盒環境，使用真實市场數據但虚擬資金。訂單会發送到 Bybit 的演示服務器執行。</p><p>啟用后，系統将以"双重執行"模式運行：每笔交易同時在本地 Paper 模擬和 Bybit Demo 演示上執行。</p>' },
+    off: { title: '\u23F9 關閉 Bybit Demo 演示 / Disable Bybit Demo',
+      body: '<strong>即将關閉 Bybit Demo 演示。</strong><div class="warn-box">\u26A0 關閉后，不再向 Bybit Demo 演示發送訂單。Bybit Demo 演示上的持倉不會自動平倉——你需要在 Bybit 網站手動處理。本地 Paper 模擬不受影响。</div>' },
   },
   scanner: {
-    on: { title: '\uD83D\uDD0D 启动自动扫描 / Start Auto Scanner',
-      body: '<strong>即将启动市场扫描器。</strong><p>扫描器每 5 分钟分析 650+ 个 Bybit 交易对，自动发现交易机会并部署对应策略。</p><p>AI Agent 将根据评分结果自主决定启动哪些策略（上限 100 个），你可以通过策略中心的"Hard Stop"按钮手动关闭任何策略。</p>' },
-    off: { title: '\u23F9 停止自动扫描 / Stop Auto Scanner',
-      body: '<strong>即将停止市场扫描器。</strong><div class="warn-box">\u26A0 停止后，不再自动发现新的交易机会。已部署的策略将继续运行，但不会有新策略被自动创建。</div>' },
+    on: { title: '\uD83D\uDD0D 啟動自動掃描 / Start Auto Scanner',
+      body: '<strong>即将啟動市场掃描器。</strong><p>掃描器每 5 分鐘分析 650+ 個 Bybit 交易對，自動發現交易機會并部署對應策略。</p><p>AI Agent 将根據評分結果自主決定啟動哪些策略（上限 100 個），你可以通過策略中心的"Hard Stop"按钮手動關閉任何策略。</p>' },
+    off: { title: '\u23F9 停止自動掃描 / Stop Auto Scanner',
+      body: '<strong>即将停止市场掃描器。</strong><div class="warn-box">\u26A0 停止后，不再自動發現新的交易機會。已部署的策略将繼續運行，但不會有新策略被自動建立。</div>' },
   },
 };
 
@@ -483,11 +483,11 @@ function resetLiveReservedConfirmGuard() {
   const bar = $('live-confirm-hold-bar');
   const button = $('confirm-ok');
   if (guard) guard.hidden = true;
-  if (status) status.textContent = '等待实盘确认保护...';
+  if (status) status.textContent = '等待實盤确認保護...';
   if (bar) bar.style.width = '0%';
   if (button) {
     button.disabled = false;
-    button.textContent = '确认执行 / Confirm';
+    button.textContent = '确認執行 / Confirm';
     button.classList.remove('confirm-ok-live-ready', 'confirm-ok-holding');
   }
 }
@@ -503,11 +503,11 @@ function setLiveConfirmReady() {
   const status = $('live-confirm-status');
   const button = $('confirm-ok');
   const bar = $('live-confirm-hold-bar');
-  if (status) status.textContent = '倒计时完成。按住确认按钮 1.2 秒以切换到 live_reserved。';
+  if (status) status.textContent = '倒計時完成。按住确認按钮 1.2 秒以切换到 live_reserved。';
   if (bar) bar.style.width = '0%';
   if (button) {
     button.disabled = false;
-    button.textContent = '按住确认 / Hold';
+    button.textContent = '按住确認 / Hold';
     button.classList.add('confirm-ok-live-ready');
   }
 }
@@ -520,15 +520,15 @@ function startLiveReservedConfirmGuard() {
   if (guard) guard.hidden = false;
   if (button) {
     button.disabled = true;
-    button.textContent = '确认可用 5s / Wait';
+    button.textContent = '确認可用 5s / Wait';
   }
 
   const startedAt = Date.now();
   const updateCountdown = () => {
     const remainingMs = Math.max(0, LIVE_RESERVED_CONFIRM_DELAY_MS - (Date.now() - startedAt));
     const seconds = Math.ceil(remainingMs / 1000);
-    if (status) status.textContent = '实盘切换保护倒计时：' + seconds + ' 秒后才能确认。';
-    if (button) button.textContent = '确认可用 ' + seconds + 's / Wait';
+    if (status) status.textContent = '實盤切换保護倒計時：' + seconds + ' 秒后才能确認。';
+    if (button) button.textContent = '确認可用 ' + seconds + 's / Wait';
     if (remainingMs <= 0) setLiveConfirmReady();
   };
 
@@ -550,9 +550,9 @@ function cancelLiveReservedConfirmHold() {
   const button = $('confirm-ok');
   const bar = $('live-confirm-hold-bar');
   if (bar) bar.style.width = '0%';
-  if (status && _pendingMode === 'live_reserved') status.textContent = '按住已取消。需要重新按住 1.2 秒确认。';
+  if (status && _pendingMode === 'live_reserved') status.textContent = '按住已取消。需要重新按住 1.2 秒确認。';
   if (button && _pendingMode === 'live_reserved' && _liveConfirmReady) {
-    button.textContent = '按住确认 / Hold';
+    button.textContent = '按住确認 / Hold';
     button.classList.remove('confirm-ok-holding');
     button.classList.add('confirm-ok-live-ready');
   }
@@ -568,7 +568,7 @@ function beginLiveReservedConfirmHold(event) {
   const status = $('live-confirm-status');
   const button = $('confirm-ok');
   const bar = $('live-confirm-hold-bar');
-  if (status) status.textContent = '继续按住，直到进度条满格。';
+  if (status) status.textContent = '繼續按住，直到進度條滿格。';
   if (button) {
     button.textContent = '保持按住... / Holding';
     button.classList.remove('confirm-ok-live-ready');
@@ -596,10 +596,10 @@ function handleConfirmOkClick(event) {
     if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
     if (!_liveConfirmReady) {
       const status = $('live-confirm-status');
-      if (status) status.textContent = '倒计时未完成，暂不能确认实盘模式。';
+      if (status) status.textContent = '倒計時未完成，暂不能确認實盤模式。';
     } else if (!_liveConfirmHolding) {
       const status = $('live-confirm-status');
-      if (status) status.textContent = '需要按住确认按钮 1.2 秒，单击不会切换实盘模式。';
+      if (status) status.textContent = '需要按住确認按钮 1.2 秒，單擊不會切换實盤模式。';
     }
     return false;
   }
@@ -649,14 +649,14 @@ async function executeConfirmed() {
     _paperActive = !_paperActive;
     $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
     // Update Paper button label to reflect current state / 更新按钮文字
-    if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟 Paper';
-    ocToast('Paper 模拟 ' + (_paperActive ? '已启动' : '已停止'), 'success');
+    if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模擬 Paper';
+    ocToast('Paper 模擬 ' + (_paperActive ? '已啟動' : '已停止'), 'success');
   } else if (action === 'feed') {
-    ocToast('行情流由 Rust 引擎管理（自动运行）', 'info');
+    ocToast('行情流由 Rust 引擎管理（自動運行）', 'info');
   } else if (action === 'demo') {
-    ocToast('请前往 Bybit Demo 演示页面查看连接状态', 'info');
+    ocToast('請前往 Bybit Demo 演示页面查看连接状态', 'info');
   } else if (action === 'scanner') {
-    ocToast('请前往策略中心查看扫描器状态', 'info');
+    ocToast('請前往策略中心查看掃描器状态', 'info');
   }
 
   setTimeout(loadAll, 1000);
@@ -665,7 +665,7 @@ async function executeConfirmed() {
 // ─── Global Mode Control ─────────────────────────────────────
 function confirmMode(mode) {
   if (mode === _currentGlobalMode) {
-    ocToast('当前已处于 ' + mode + ' 模式', 'info');
+    ocToast('當前已處於 ' + mode + ' 模式', 'info');
     return;
   }
   const info = MODE_CONFIRM[mode];
@@ -701,7 +701,7 @@ async function executeModeChange() {
   }
 
   // Map derived mode names to actual switch values
-  // 将派生模式名映射为控制开关的实际值（design_only 是派生态，开关值为 disabled）
+  // 将派生模式名映射为控制開關的實際值（design_only 是派生态，開關值为 disabled）
   const MODE_TO_SWITCH = {
     'design_only': 'disabled',
     'observe_only': 'observe_only',
@@ -725,11 +725,11 @@ async function executeModeChange() {
       ocToast('✅ 全局模式已切换为 ' + (MODE_CONFIRM[mode] ? MODE_CONFIRM[mode].label : mode), 'success');
       // Market feed is auto-managed by Rust engine; no manual start needed
     } else {
-      const codes = result && result.reason_codes ? result.reason_codes.join(', ') : '未知错误';
+      const codes = result && result.reason_codes ? result.reason_codes.join(', ') : '未知錯誤';
       ocToast('❌ 模式切换失败：' + codes, 'error');
     }
   } catch(e) {
-    ocToast('❌ 请求失败：' + e.message, 'error');
+    ocToast('❌ 請求失败：' + e.message, 'error');
   }
   setTimeout(loadAll, 800);
 }
@@ -771,31 +771,31 @@ async function loadOverview() {
   const modeRaw = gr.global_mode_state || '';
   ocSetText('m-mode', cnLabel(modeRaw, MODE_CN));
   $('m-mode').className = 'oc-metric-val ' + (modeRaw.includes('live') ? 'purple' : modeRaw.includes('demo') ? 'yellow' : 'green');
-  setTip('m-mode-tip', modeRaw, '全局运行模式。design_only = 仅设计阶段，不执行任何操作；observe_only = 可观察市场但不交易；demo_enabled = 允许 Demo 交易；live_enabled = 允许真实交易。');
+  setTip('m-mode-tip', modeRaw, '全局運行模式。design_only = 仅設計階段，不執行任何操作；observe_only = 可觀察市场但不交易；demo_enabled = 允許 Demo 交易；live_enabled = 允許真實交易。');
 
   // Execution Authority
   const authRaw = gr.global_execution_authority_state || '';
   ocSetText('m-auth', cnLabel(authRaw, AUTH_CN));
   $('m-auth').className = 'oc-metric-val ' + (authRaw.includes('live') ? 'purple' : authRaw.includes('demo_enabled') ? 'yellow' : 'green');
-  setTip('m-auth-tip', authRaw, '执行权限状态。blocked/not_granted = 不允许任何下单；demo_blocked = Demo 模式受限；demo_only = 仅允许 Demo 下单；live_enabled = 允许真实下单（需要多重审批）。');
+  setTip('m-auth-tip', authRaw, '執行權限状态。blocked/not_granted = 不允許任何下單；demo_blocked = Demo 模式受限；demo_only = 仅允許 Demo 下單；live_enabled = 允許真實下單（需要多重審批）。');
 
   // Capability
   const capRaw = gr.global_capability_state || '';
   ocSetText('m-demo', cnLabel(capRaw, CAP_CN));
-  setTip('m-demo-tip', capRaw, '系统能力状态。shadow_control_ready = 影子控制面板就绪（可以模拟决策流程但不执行）；demo_ready = Demo 模式就绪；live_ready = 生产模式就绪。');
+  setTip('m-demo-tip', capRaw, '系統能力状态。shadow_control_ready = 影子控制面板就緒（可以模擬決策流程但不執行）；demo_ready = Demo 模式就緒；live_ready = 生產模式就緒。');
 
-  // Runtime Protection (merged from 快照绑定 + 运行保护)
-  // 误操作保护：execution_authority 未授予时为 True，防止意外执行
+  // Runtime Protection (merged from 快照綁定 + 運行保護)
+  // 誤操作保護：execution_authority 未授予時为 True，防止意外執行
   const runtimeProtected = gr.runtime_still_protected;
-  ocSetText('m-prot', runtimeProtected ? '已启用' : '未启用');
+  ocSetText('m-prot', runtimeProtected ? '已啟用' : '未啟用');
   $('m-prot').className = 'oc-metric-val ' + (runtimeProtected ? 'green' : 'yellow');
   setTip('m-prot-tip', 'runtime_still_protected = ' + runtimeProtected,
-    '误操作保护。已启用 = 执行权限未授予，关键状态不会被意外修改。未启用 = 执行权限已开放（当前为 Demo 模式），变更需通过 Control Plane 流程。');
+    '誤操作保護。已啟用 = 執行權限未授予，關键状态不會被意外修改。未啟用 = 執行權限已開放（當前为 Demo 模式），变更需通過 Control Plane 流程。');
 
   // Stage Label
   const stageRaw = gr.global_stage_label || '';
   ocSetText('m-stage', stageRaw.replace(/_/g, ' '));
-  setTip('m-stage-tip', stageRaw, '当前系统阶段标签。design_only_gate_closed = K 章设计门已关闭，系统处于仅设计阶段。需要完成 M 章（Supervised Live Gate）才能进入下一阶段。');
+  setTip('m-stage-tip', stageRaw, '當前系統階段標簽。design_only_gate_closed = K 章設計门已關閉，系統處於仅設計階段。需要完成 M 章（Supervised Live Gate）才能進入下一階段。');
 
   // Mode badge
   const badge = $('mode-badge');
@@ -819,12 +819,12 @@ async function loadOverview() {
 
 async function loadSourceContext() {
   const d = await ocApi('/api/v1/system/source-context');
-  if (!d || !d.data) { ocSetHtml('source-context-body', '<div class="oc-loading">无法加载</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('source-context-body', '<div class="oc-loading">無法載入</div>'); return; }
   const ctx = d.data;
 
   const SC_CN = {
-    'ready': '就绪', 'healthy': '健康', 'complete': '完整', 'not_attached': '未连接',
-    'fact_source': '数据源', 'execution_source_reserved': '执行源（预留）',
+    'ready': '就緒', 'healthy': '健康', 'complete': '完整', 'not_attached': '未连接',
+    'fact_source': '數據源', 'execution_source_reserved': '執行源（预留）',
     'private_readonly': '只读私有',
   };
   function scCn(v) { return SC_CN[v] || v; }
@@ -833,13 +833,13 @@ async function loadSourceContext() {
   const fields = [
     ['REST 连接', ctx.rest_private_connection_state, ctx.rest_private_connection_state === 'ready'],
     ['WebSocket 连接', ctx.ws_private_connection_state, ctx.ws_private_connection_state === 'ready'],
-    ['运行连接状态', ctx.runtime_connection_state, ctx.runtime_connection_state === 'healthy'],
-    ['账户数据完整性', ctx.account_fact_completeness_state, ctx.account_fact_completeness_state === 'complete'],
+    ['運行连接状态', ctx.runtime_connection_state, ctx.runtime_connection_state === 'healthy'],
+    ['賬户數據完整性', ctx.account_fact_completeness_state, ctx.account_fact_completeness_state === 'complete'],
     ['快照完整性', ctx.source_snapshot_completeness_state, ctx.source_snapshot_completeness_state === 'complete'],
     ['角色分离', ctx.connector_role_separation_ok, ctx.connector_role_separation_ok === true],
   ];
   fields.forEach(([label, val, ok]) => {
-    const display = typeof val === 'boolean' ? (val ? '正常' : '异常') : scCn(String(val || '--'));
+    const display = typeof val === 'boolean' ? (val ? '正常' : '異常') : scCn(String(val || '--'));
     html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + (ok ? 'green' : '') + '" style="font-size:14px">' + ocEsc(display) + '</div></div>';
   });
   html += '</div>';
@@ -848,14 +848,14 @@ async function loadSourceContext() {
 
 async function loadHealth() {
   const d = await ocApi('/api/v1/system/health');
-  if (!d || !d.data) { ocSetHtml('health-body', '<div class="oc-loading">无法加载</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('health-body', '<div class="oc-loading">無法載入</div>'); return; }
   const h = d.data;
 
   let html = '';
   // Scores
   if (h.scores) {
-    const SCORE_CN = { 'overall_health_score': '综合健康', 'ai_health_score': 'AI 健康', 'exchange_health_score': '交易所健康',
-      'infra_health_score': '基础设施', 'data_freshness_score': '数据新鲜度' };
+    const SCORE_CN = { 'overall_health_score': '綜合健康', 'ai_health_score': 'AI 健康', 'exchange_health_score': '交易所健康',
+      'infra_health_score': '基礎設施', 'data_freshness_score': '數據新鲜度' };
     html += '<div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr))">';
     Object.entries(h.scores).forEach(([k, v]) => {
       const label = SCORE_CN[k] || k.replace(/_/g, ' ');
@@ -866,8 +866,8 @@ async function loadHealth() {
   }
   // Gates
   if (h.gates) {
-    const GATE_CN = { 'health_gates_overall_state': '总门禁', 'exchange_timeout_gate_state': '交易所超时',
-      'ws_disconnect_gate_state': 'WS 断连', 'latency_gate_state': '延迟', 'freshness_gate_state': '新鲜度' };
+    const GATE_CN = { 'health_gates_overall_state': '總门禁', 'exchange_timeout_gate_state': '交易所超時',
+      'ws_disconnect_gate_state': 'WS 斷连', 'latency_gate_state': '延遲', 'freshness_gate_state': '新鲜度' };
     html += '<div style="margin-top:10px;font-size:12px;color:var(--text-dim)">门禁状态：</div>';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">';
     Object.entries(h.gates).forEach(([k, v]) => {
@@ -887,7 +887,7 @@ async function loadQuickStatus() {
     if (d && d.data) {
       _paperActive = d.data.session.session_state === 'active';
       $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
-      if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟 Paper';
+      if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模擬 Paper';
       if (d.data.state_revision) _stateRevision = d.data.state_revision;
     }
   } catch(e) {}
@@ -897,7 +897,7 @@ async function loadQuickStatus() {
     if (d && d.data) {
       _feedRunning = d.data.dispatcher_running || d.data.running || false;
       $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
-      if ($('qa-feed-chip')) { $('qa-feed-chip').textContent = _feedRunning ? '运行中' : '待机'; $('qa-feed-chip').className = 'oc-chip ' + (_feedRunning ? 'oc-chip-good' : 'oc-chip-neutral') + ' ' + 'qa-chip-sm'; }
+      if ($('qa-feed-chip')) { $('qa-feed-chip').textContent = _feedRunning ? '運行中' : '待机'; $('qa-feed-chip').className = 'oc-chip ' + (_feedRunning ? 'oc-chip-good' : 'oc-chip-neutral') + ' ' + 'qa-chip-sm'; }
     }
   } catch(e) {}
   // Demo
@@ -949,7 +949,7 @@ async function loadProductFamilies() {
   const d = await ocApi('/api/v1/system/product-families');
   if (!d || !d.data) return;
   const families = d.data.families || d.data;
-  const PF_CN = { 'spot': '现货', 'margin': '杠杆', 'perp_linear': 'USDT 永续', 'perp_inverse': '币本位永续', 'options': '期权', 'other_derivatives_reserved': '其他衍生品' };
+  const PF_CN = { 'spot': '現货', 'margin': '杠杆', 'perp_linear': 'USDT 永續', 'perp_inverse': '币本位永續', 'options': '期權', 'other_derivatives_reserved': '其他衍生品' };
   if (typeof families === 'object' && !Array.isArray(families)) {
     let html = '';
     Object.entries(families).forEach(([name, f]) => {

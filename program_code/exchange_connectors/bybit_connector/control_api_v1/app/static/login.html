@@ -57,16 +57,16 @@
   </form>
   <div class="error" id="error"></div>
   <div class="links">
-    <!-- Use dynamic origin to avoid hardcoded Tailscale URL / 使用动态 origin 避免硬编码 Tailscale URL -->
+    <!-- Use dynamic origin to avoid hardcoded Tailscale URL / 使用動態 origin 避免硬编码 Tailscale URL -->
     <a id="gw-link" href="#" target="_blank">OpenClaw Gateway</a>
   </div>
 </div>
 <script>
 // Set gateway link dynamically using current origin to avoid hardcoded Tailscale URL
-// 使用当前 origin 动态设置网关链接，避免硬编码 Tailscale URL
+// 使用當前 origin 動態設置網關链接，避免硬编码 Tailscale URL
 document.getElementById('gw-link').href = window.location.origin + '/openclaw';
 
-// Password visibility toggle / 密码显示切换
+// Password visibility toggle / 密码顯示切换
 document.getElementById('pwToggle').addEventListener('click', function() {
   const pw = document.getElementById('password');
   const isHidden = pw.type === 'password';
@@ -111,7 +111,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
   try {
     // Login endpoint sets HttpOnly cookie — no need to store token in JS.
-    // 登录端点设置 HttpOnly cookie，无需在 JS 中存储 token。
+    // 登录端点設置 HttpOnly cookie，無需在 JS 中存储 token。
     const resp = await fetch('/api/v1/auth/login', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -133,7 +133,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
     const data = await resp.json();
     // Only store username for display; token is in HttpOnly cookie.
-    // 只存用户名用于显示；token 在 HttpOnly cookie 中。
+    // 只存用户名用于顯示；token 在 HttpOnly cookie 中。
     localStorage.setItem(USER_KEY, data.username);
     // Clean up legacy token if present / 清理旧的 localStorage token
     localStorage.removeItem('oc_trading_token');
