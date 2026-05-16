@@ -4365,3 +4365,88 @@ PG fills 直查證據：
 **架構教訓 32**：Trigger gate sensitivity sweep 的 K_total 增加量必預先公式化（v0.3 K_new_min 5400 vs v0.2 4050）並 cite 對 DSR sr_benchmark = √(2 ln K) 變動極小（4.07 → 4.14）— 否則 sweep 看似擴大 multiple testing 風險，實質 sr_benchmark 不變因 ln 對 K 敏感度低。Adversarial review 必驗此 sanity check 不被 over-conservative interpretation 卡掉。
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_spec_v03_sensitivity_sweep_patch.md`
+
+---
+
+## 2026-05-16 phys_lock Live Enable AMD v0.2 Consolidated Patch
+
+**任務**: AMD DRAFT v0.1 → v0.2 consolidation integrating 4-agent (QC+FA+MIT+BB) short re-review 2026-05-16 verdicts。23 items (11 must + 12 should + 3 NTH/cosmetic)。
+
+**整合結果**:
+- 11 must-fix 全收口 (QC-MF-1/2 / FA-MF-1 / MIT-MUST-A/B/C/D/E/F/G / BB-PL-1)
+- 12 should-fix 全收口 (QC-SF-1..4 / FA-SF-1..4 / MIT-SH-H/I / BB-PL-2/3)
+- 3 NTH/cosmetic 全收口 (QC-NTH-1/2 / FA-Cosmetic)
+- 0 BLOCKER, 0 unresolved item
+
+**最關鍵修正 (MIT-MUST-E)**: AMD 全篇 schema 命名 bug — `exit_features.physical_decision_logs` (此表不存在) → `learning.exit_features WHERE exit_trigger_rule LIKE 'phys_lock_%' OR exit_source='Physical'`。Linux PG empirical verify: V029 hypertable + V086 close_reason_code enum + Rust writer `database/exit_feature_writer.rs:123` INSERT INTO `learning.exit_features` 全證實 schema 命名正確；v0.1 文檔錯字若不修 = E1 IMPL 撈不到資料 + counterfactual evidence 不能跑。
+
+**新增 §5.3 Phase 2c LiveDemo Counterfactual Verification (QC-SF-3 BLOCKER-level)**: enable 後 7d post-enable continuous observation；per-fire 即時 counterfactual replay against same-instant **live order book snapshot** (不是 demo replay)；累積 ≥30 fires after live enable 再判定 net positive；< 30 fires 延長至 14d 上限；PASS = 重跑 §5.2 6-criterion；FAIL = rollback + AMD 永久 REJECT。這是 QC round-2 §6 數學論證 + alpha-deficient regime risk 最後一道防線。
+
+**結構升級**:
+- §3 gate stack 6→7 (Gate 3.7 = Linux empirical + Mainnet 7 prereq cross-ref 合併新 gate + 子表)
+- §5 evidence packet 5→7 條 (5.1.6 regime stability + 5.1.7 MDE/power)
+- §5.2 PASS criteria 4→6 條 (Wilson CI lower bound + MDE/power + BH-FDR + per-symbol conditional)
+- §6 加 §6.4 close-maker-first 互動 + §6.5 forensics row retention
+- §1 framing 補 Sharpe 數學條件 σ_reduction × Sharpe_baseline > μ_reduction
+- §4.4 split (BB-PL-2): 觸發層 LOW + close dispatch 層 MEDIUM (already covered)
+- §4.6 future funding alpha hook (QC-NTH-1) future advisory
+- §6.2 rolling 7d 偏離取代 2σ daily (QC-NTH-2)
+
+**Sibling concurrent work**: Phase 1b E1 round 2 補 Worktree B (dirty Rust files 14 files modified)；本 v0.2 AMD patch 純文檔，0 Rust touch；commit isolation clean。
+
+**架構教訓 33 (CRITICAL schema bug)**: AMD draft 引用 DB schema 必先 Linux PG empirical verify table name + column 存在；v0.1 4-agent review 通過 QC + FA + BB 三 agent，**唯有 MIT 因 DB schema audit 職能 catch 命名 bug**。多 agent adversarial review 確實能補單 agent 盲點 — MIT 不在 review chain = bug ship 至 IMPL。
+
+**架構教訓 34 (Phase 2c BLOCKER-level)**: 放寬 live fail-safe 的 AMD 設計 = 對抗性 review 必問「demo PASS 是否充分代表 live regime」；QC-SF-3 (BLOCKER-level) Phase 2c 是 first-time-in-AMD live-side counterfactual gate；不是 pre-commit gate，是 post-enable observation gate；但結構上 BLOCKER-level 等同 pre-commit gate (FAIL → rollback + AMD 永久 REJECT)。Demo-loose-live-strict policy 履行的標準範式。
+
+**Confidence**: HIGH for v0.2 結構 (4-agent 100% reflected, schema verified, gate stack mathematical consistency)；MEDIUM for Phase 2c 7d observation window 是否足夠 (sample size ≥30 fires 是統計 power 平衡 sample collection 速度的 PA judgment call)。
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--phys_lock_amd_v02_consolidated_patch.md`
+
+---
+
+## 2026-05-16 — W-AUDIT-8b Round 2 Tooling Prep (Phase A Design Packet)
+
+**Task**：Phase A tooling prep for v0.3 sweep + Phase B scheduled rerun plan（panel ≥ 7d 啟動）
+**Outcome**：PA DESIGN DONE — Phase A E1 派發 packet 設計完成 + 對抗審核 cover spec 完整 + Phase B 7-gate trigger ETA 2026-05-18 00:30 UTC
+
+### 關鍵決策
+
+1. **Push back operator instruction**：拒絕「PA 親自 IMPL」 reading of task prompt（PA 角色定位「不寫功能代碼」+ `feedback_impl_done_adversarial_review.md` 高風險 IMPL 必走 E1 IMPL + A3+E2 對抗審核）。建議走 PA design → E1 IMPL → A3+E2 並行對抗 → E4 regression → PA verdict 鏈
+2. **架構抉擇 Option B**：將 `compute_stage0r(z_grid=)` 加 kwarg + 新加 `compute_stage0r_sweep()` wrapper（vs Option A 4× independent call 或 Option C deep refactor）；wrapper 隔離既有 round 1 行為（v0.2 reproducibility 保），sweep 在外層增量
+3. **SQL 不動**：z 過濾在 Python 層做（funding_zscore_25sym SQL 已給 raw value）；3 Python 檔改動 +420~580 LOC，0 SQL / 0 schema / 0 config
+4. **Pre-rerun assertion gate 不放 Python tooling 內**：由 PA Phase B Step 6 solo 跑 Linux PG empirical 5 queries 驗（per `feedback_workflow_audit_chain.md` PA 親驗 CRITICAL 條件）；tooling 純 read-only audit packet emitter
+5. **Backward-compat critical**：sweep mode K_NEW_MIN_V03 = 5400 + STRATEGY_VARIANT v0.3 升級；non-sweep mode K_NEW_MIN = 4050 + STRATEGY_VARIANT v0.2 保留（round 1 reproducibility bit-identical regression test）
+
+### Linux PG empirical 2026-05-16 19:18Z
+
+- panel funding 205,526 rows / 25 sym / **5.823d span** (尚 <7d)
+- panel OI 205,XXX rows / 25 sym (parity 已 met)
+- K_prior strict funding_skew = 0 ✅
+- distinct cycles = 31 ✅ (> 21 floor)
+- Phase B trigger ETA = 2026-05-17 23:30 UTC + 1h margin = **2026-05-18 00:30 UTC**（+1.18d from now）
+
+### 對抗審核 cover spec
+
+- E2 7 軸（backward-compat / K_NEW_MIN / sweep schema / Wilson CI / leak-free / variant / CLI repro）
+- A3 5 軸（Wilson CI formula / z-stratified n_eff / eligibility tree / pre-empirical magnitude / monotonic_drop）
+- E4 5 regression（single-z PASS / sweep 4-z PASS / Wilson bench / JSON round-trip / z_grid backward-compat）
+
+### 高風險警告 3 點
+
+1. Wilson CI 公式 small-n numerical stability（n<5 + n_eff/n close to 0/1 → inner < 0 guard + clamp [0,1]）
+2. K_NEW_MIN dynamic vs backward-compat（sweep=5400 / non-sweep=4050 不能誤合）
+3. strategy_variant 升 v0_3 一致性（sweep packet override only / module-level constant 保 v0_2 / non-sweep packet 不誤升）
+
+### 16-root + 硬邊界 compliance
+
+A 級 — 16/16 完全合規 + 0 硬邊界觸碰 + DOC-08 N/A + AMD-2026-05-15-01/02 wording 不觸
+
+### 架構教訓 33
+
+PA 任務 prompt 字面 reading 可能誘導 PA 越界 IMPL；遵循 PA profile.md §"硬約束" + `feedback_impl_done_adversarial_review.md` 高風險 IMPL 必走 sub-agent 對抗審核鏈，是 PA 主動 push back 的正當理由。不採「task prompt 寫了就做」單方面 reading；採「task prompt 寫 + PA 角色定位約束 + governance feedback rules」三方對齊判定。
+
+### 架構教訓 34
+
+Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_stage0r`) 重構時是低風險選擇：既有 fn 加 1 kwarg + 新 wrapper 在外層 aggregate，避免 deep refactor 引入 regression risk。Trade-off：4× baseline 重算 (浪費 ~10% runtime) vs zero regression risk。Audit packet emitter 場景下 runtime cost 可接受。
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_round2_tooling_prep.md`
