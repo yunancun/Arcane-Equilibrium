@@ -2520,3 +2520,16 @@ Wave 1 commit `cabb2fcd` 39 files +1830 -200。Wave 2 working tree 12 files modi
 - Sibling: `15e67220 docs(e1): wave 2b reject_cooldown_split bb-mf-3 self-report` + `ef6ea79f feat(wave2): WP-03 OU sigma residual + WP-04 + WP-07 + WP-10`
 - 與 W2-IMPL-1 lesson #1 對齊（btc_lead_lag.rs 1771 LOC pre-existing clause misapplication 同型）+ Wave 1.6 P1-FILL-LINEAGE-DROP lesson #1 同型（runtime_shadow.rs 828 LOC）= 第 3 次 §九 重犯
 - E2 W2 IMPL chain lesson #1 (pre-existing baseline exception clause 範圍嚴格 baseline > 2000)
+
+## 2026-05-16 — P1-PORTFOLIO-RESTING-EXPOSURE-1 E2 review (worktree-agent-ac285607fa3c51402)
+- E1 IMPL +337 LOC: mod.rs+118 (new helper compute_effective_long_short_notional + symbol-level netting) + tests.rs+208 (7 new tests) + resting_orders.rs+11 (pub(crate) iter accessor)
+- Verdict: PASS to E4 (0 CRITICAL / 0 HIGH / 1 MEDIUM / 4 LOW)
+- MEDIUM-1: hot path 3x redundant compute per intent (router.rs:438/445/446 連呼三 helper 各跑 4xHashMap+1xHashSet alloc) — pre-existing pattern carrying，不是 E1 引入；建議 follow-up TODO caller 端 cache tuple
+- LOW-1: PA §8 healthcheck [58] portfolio_resting_exposure_lineage 未 IMPL（E1 §6 自承 scope 未要求）；§七「被動等待 TODO 必附 healthcheck」不適用此 ticket
+- LOW-2: 三處既有 docstring 塊（RRC-1-B3 / FIX-05 / RG-2）修改時未清舊英文行 per 2026-05-05 規範 — MINOR（E2 不擅自動，因為歷史標籤）
+- LOW-3 + 3a: tests.rs 1793/2000（接近 cap）+ test_finite_guards 沒 explicit cover notional=inf
+- E2 重跑 cargo check PASS + 7/7 test PASS + grep 跨平台 0 命中
+- 跨平台合規 OK / unsafe 零容忍 OK / 注釋中文 only OK（新代碼）
+- E1 §6 三未驗場景 E2 重 verify 全 PASS（leverage cascade 仍正確 / 多 reducing capped / replay 不平行改）
+- 直接修數 = 0（小範圍中文注釋小修可允許，但既有 docstring 涉歷史標籤，退 E1 自行決定更穩）
+- Report: srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_e2_review.md

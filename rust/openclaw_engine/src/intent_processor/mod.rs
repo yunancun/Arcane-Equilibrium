@@ -756,27 +756,152 @@ impl IntentProcessor {
         self.daily_loss_pct(current_balance)
     }
 
+    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：計算「有效 long / short notional」
+    /// （= filled positions ± resting maker pending 的 netting 結果）。本 helper
+    /// 是 `compute_exposure_pct` 與 `compute_correlated_exposure_pct` 的單一 SoT，
+    /// 避免兩個 caller 各自累加導致行為漂移。
+    ///
+    /// 設計動機（A3 verify report `2026-05-15--f_fa_2_portfolio_var_exposure_sot_verify.md` §2/§7/§8）：
+    /// 修前 portfolio gate 只看 `paper_state.positions()`（filled qty），對
+    /// `paper_state.resting_limit_orders` 完全 invisible。entry-side maker
+    /// pending 還沒 fill 時 filled 邊 = 0 → portfolio under-estimate；close-side
+    /// maker pending 還沒 fill 時 filled 邊保留 full → portfolio over-estimate。
+    /// 兩種方向的盲區都隨 EDGE-P2-3 Phase 1B-4.2 entry-side resting 落地後逐步
+    /// 暴露面擴大，close-maker-first 進場後會再放大；本 helper 把 resting 納入
+    /// 計算後行為更保守（生存 > 利潤 原則 5/6 + 組合級風險意識 原則 16）。
+    ///
+    /// Netting 規則（per symbol）：
+    /// 1. filled position：`PaperPosition.qty × price` 直接歸入對應方向。
+    /// 2. resting order，視「相對於該 symbol 已有 filled position」的方向：
+    ///    - **同向 / 該 symbol 無倉**：視為 entry-side resting，預期成交後會
+    ///      增加同方向 notional → `resting.qty × limit_price` 加進對應方向。
+    ///    - **反向（is_reducing）**：視為 close-side resting，預期成交後會
+    ///      減少對立方向 filled notional → 從對立 filled 邊扣減 resting 量。
+    ///      扣減封頂 = 對立 filled 邊未抵銷的餘額，避免出現負值（保守版本，
+    ///      A3 §8 設計要點 1「symbol-level netting」）。
+    /// 3. 整體仍 `≥ 0`（負值會被 clamp 為 0），避免下游 `.min(999.0)` 之外的
+    ///    異常輸入流向 caller。
+    fn compute_effective_long_short_notional(paper_state: &PaperState) -> (f64, f64) {
+        use std::collections::HashMap;
+
+        // 先按 symbol 收 filled 邊（同 symbol 同向才會出現重複，這層 grouping
+        // 主要是給後續 resting netting 用：必須知道對立 filled 邊還剩多少可扣）。
+        // 注意 PaperPosition 每 symbol 至多 1 筆，但保留 HashMap 結構是給未來
+        // 多 leg / hedge mode 留 headroom，不額外引入假設。
+        let mut filled_long_by_sym: HashMap<&str, f64> = HashMap::new();
+        let mut filled_short_by_sym: HashMap<&str, f64> = HashMap::new();
+        for p in paper_state.positions() {
+            let price = paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price);
+            let notional = p.qty * price;
+            if !notional.is_finite() || notional <= 0.0 {
+                continue;
+            }
+            if p.is_long {
+                *filled_long_by_sym.entry(p.symbol.as_str()).or_insert(0.0) += notional;
+            } else {
+                *filled_short_by_sym.entry(p.symbol.as_str()).or_insert(0.0) += notional;
+            }
+        }
+
+        // resting 邊：先累 entry-side（加），再累 close-side（從對立 filled 邊扣）。
+        // 兩階段分開掃 iterator 兩次，邏輯清晰且避免單次掃描內 partial 結果
+        // 互相干擾（同 symbol 多筆 resting 時各自累加才不會因順序差異產生 drift）。
+        let mut entry_long_by_sym: HashMap<&str, f64> = HashMap::new();
+        let mut entry_short_by_sym: HashMap<&str, f64> = HashMap::new();
+        let mut close_reduces_long_by_sym: HashMap<&str, f64> = HashMap::new();
+        let mut close_reduces_short_by_sym: HashMap<&str, f64> = HashMap::new();
+
+        for r in paper_state.resting_limit_orders_iter() {
+            if !r.qty.is_finite() || r.qty <= 0.0 {
+                continue;
+            }
+            if !r.limit_price.is_finite() || r.limit_price <= 0.0 {
+                continue;
+            }
+            let notional = r.qty * r.limit_price;
+            if !notional.is_finite() || notional <= 0.0 {
+                continue;
+            }
+
+            let sym = r.symbol.as_str();
+            // 判定 is_reducing 與 router.rs:261-265 / 752-756 完全對齊：
+            // 該 symbol 已有 filled position 且 resting.is_long ≠ position.is_long → close-side。
+            let opposite_filled_present = if r.is_long {
+                filled_short_by_sym.contains_key(sym)
+            } else {
+                filled_long_by_sym.contains_key(sym)
+            };
+
+            if opposite_filled_present {
+                // close-side resting：從對立 filled 邊扣（封頂於對立 filled 餘額）。
+                if r.is_long {
+                    *close_reduces_short_by_sym.entry(sym).or_insert(0.0) += notional;
+                } else {
+                    *close_reduces_long_by_sym.entry(sym).or_insert(0.0) += notional;
+                }
+            } else {
+                // entry-side resting（含 symbol 無倉 / 同向加倉）：加到對應方向。
+                if r.is_long {
+                    *entry_long_by_sym.entry(sym).or_insert(0.0) += notional;
+                } else {
+                    *entry_short_by_sym.entry(sym).or_insert(0.0) += notional;
+                }
+            }
+        }
+
+        // 收口 per-symbol effective：close 扣減封頂於對立 filled 餘額（保守）。
+        let mut total_effective_long = 0.0_f64;
+        let mut total_effective_short = 0.0_f64;
+
+        // 同時遍歷所有出現過的 symbol（filled long/short + entry long/short + close reduces）。
+        let mut all_syms: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        all_syms.extend(filled_long_by_sym.keys().copied());
+        all_syms.extend(filled_short_by_sym.keys().copied());
+        all_syms.extend(entry_long_by_sym.keys().copied());
+        all_syms.extend(entry_short_by_sym.keys().copied());
+        all_syms.extend(close_reduces_long_by_sym.keys().copied());
+        all_syms.extend(close_reduces_short_by_sym.keys().copied());
+
+        for sym in all_syms {
+            let f_long = filled_long_by_sym.get(sym).copied().unwrap_or(0.0);
+            let f_short = filled_short_by_sym.get(sym).copied().unwrap_or(0.0);
+            let e_long = entry_long_by_sym.get(sym).copied().unwrap_or(0.0);
+            let e_short = entry_short_by_sym.get(sym).copied().unwrap_or(0.0);
+            let red_long = close_reduces_long_by_sym.get(sym).copied().unwrap_or(0.0);
+            let red_short = close_reduces_short_by_sym.get(sym).copied().unwrap_or(0.0);
+
+            // 扣減封頂於該方向 filled 餘額（保守，避免出現負值）。
+            let red_long_capped = red_long.min(f_long).max(0.0);
+            let red_short_capped = red_short.min(f_short).max(0.0);
+
+            let eff_long = (f_long + e_long - red_long_capped).max(0.0);
+            let eff_short = (f_short + e_short - red_short_capped).max(0.0);
+
+            total_effective_long += eff_long;
+            total_effective_short += eff_short;
+        }
+
+        (total_effective_long, total_effective_short)
+    }
+
     /// RRC-1-B3: Compute total exposure percentage from positions.
-    /// RRC-1-B3：從持倉計算總曝險百分比。
+    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：總曝險改用「effective long + short」
+    /// （filled + resting netting），與 `compute_correlated_exposure_pct` 共用同
+    /// 一 SoT（`compute_effective_long_short_notional`）避免兩個 helper 漂移。
     fn compute_exposure_pct(paper_state: &PaperState) -> f64 {
         let balance = paper_state.balance();
         if balance <= 0.0 {
             return 0.0;
         }
-        let total_notional: f64 = paper_state
-            .positions()
-            .iter()
-            .map(|p| {
-                let price = paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price);
-                p.qty * price
-            })
-            .sum();
-        (total_notional / balance * 100.0).min(999.0)
+        let (eff_long, eff_short) = Self::compute_effective_long_short_notional(paper_state);
+        ((eff_long + eff_short) / balance * 100.0).min(999.0)
     }
 
     /// RG-2: Compute actual account leverage from positions (total_notional / balance).
     /// Replaces hardcoded 1.0 — leverage check now triggers correctly.
     /// RG-2：從持倉計算實際帳戶槓桿（總名義值 / 餘額），替代硬編碼 1.0。
+    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：間接吃 effective notional，所以 leverage
+    /// 也會反映 resting maker pending 的預期影響。
     fn compute_leverage(paper_state: &PaperState) -> f64 {
         Self::compute_exposure_pct(paper_state) / 100.0
     }
@@ -785,23 +910,16 @@ impl IntentProcessor {
     /// All crypto is highly correlated, so same-direction positions compound risk.
     /// FIX-05：計算相關曝險 — max(多頭名義值, 空頭名義值) / 餘額。
     /// 加密貨幣高度相關，同方向持倉風險疊加。
+    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：long/short 兩邊都改吃 effective notional
+    /// （filled + resting netting）。close-side resting 仍只扣減 same-symbol 對立
+    /// filled 邊（不跨 symbol 假設對沖），保留「同方向風險疊加」的核心語意。
     fn compute_correlated_exposure_pct(paper_state: &PaperState) -> f64 {
         let balance = paper_state.balance();
         if balance <= 0.0 {
             return 0.0;
         }
-        let mut long_notional = 0.0_f64;
-        let mut short_notional = 0.0_f64;
-        for p in paper_state.positions() {
-            let price = paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price);
-            let notional = p.qty * price;
-            if p.is_long {
-                long_notional += notional;
-            } else {
-                short_notional += notional;
-            }
-        }
-        (long_notional.max(short_notional) / balance * 100.0).min(999.0)
+        let (eff_long, eff_short) = Self::compute_effective_long_short_notional(paper_state);
+        (eff_long.max(eff_short) / balance * 100.0).min(999.0)
     }
 
     /// Phase 2b: Record a closed trade for Kelly stats.

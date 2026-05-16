@@ -3542,3 +3542,10 @@ E4 verdict: REGRESSION-PASS, 0 push-back to E1.
 - IPC call 失敗（EngineDisconnectedError）→ `"ipc_unreachable"`
 - IPC call 失敗（EngineTimeoutError）→ `"ipc_timeout"`
 - executor/strategist promote routes RuntimeError → `"rust_engine_unavailable"`
+
+## 2026-05-16 · P1-PORTFOLIO-RESTING-EXPOSURE-1 Linux Regression PASS
+- Branch `worktree-agent-ac285607fa3c51402` HEAD `efe14965` push → Linux fetch；scratch worktree `/tmp/e4-regression-1778919049` 跑兩遍 `cargo test --release --lib -p openclaw_engine`，兩遍 **2915 passed / 0 failed / 1 ignored** 與 Mac 1:1（baseline 2908 + new 7 = 2915，0 regression，1 ignored = 預期 socket-permission）。intent_processor::tests focused 108/0 全 PASS，含 7 個 P1 new test 全 ok。
+- 7 個 P1 new test 容差全 1e-4（exposure / corr）或 1e-6（leverage）→ 符合 cross-language consistency 規定。
+- hot_path_baseline bench：p99 42.279μs < 300μs SLA；P2 follow-up = E5 加 `intent_processor::compute_exposure_pct` micro-bench harness（current `hot_path_baseline` 沒 resting orders coverage）。
+- Linux runtime engine PID 69581 未觸動（elapsed 7h14m / demo fresh 13.7s / live age 3.0s）；scratch worktree cleanup 完成；branch 保留給 A3 / E2 / PM。
+- Report：`docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_e4_regression.md`。
