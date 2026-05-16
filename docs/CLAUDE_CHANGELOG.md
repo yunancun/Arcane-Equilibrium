@@ -1,7 +1,29 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-16（Wave 3 closed: WP-06/08/13）
+> 最後更新：2026-05-16（Wave 4 Phase 1 closed: WP-11 test fixes）
+
+### Wave 4 Phase 1 CLOSED — WP-11 Test Infrastructure (15 test fixes) — 2026-05-16
+
+**Commit**: `564c9db6`
+
+**Baseline improvement**: 4825/16/43 → **4840/1/43** (passed/failed/skipped)。15 failing tests 修復，唯一剩餘 failure 是已確認的 flaky `test_case2_pg_kill_simulation`（import 順序 race，P2）。
+
+**Category A (3 tests)**: IPC error format drift — `detail` 從 plain string 變 structured dict `{reason_codes: [...], detail: "..."}` 後 assertions 未跟進（budget / executor / strategist test files）。
+
+**Category B (10 tests)**: Manifest envelope validation — `write_manifest_fixture()` 新增 envelope key 拒絕 + signing key infra。Test fixtures 移除 envelope keys + 新增 `_signing_key_env` pytest fixture + field count 6→3 + Mac artifact allowlist root。
+
+**Category C (1 test)**: Rust source split — `test_close_attempt_timeout_constant_is_500ms` 從 `dispatch.rs` 移至 `dispatch_tests.rs`。
+
+**Category D (1 test)**: HTML refactor — `_applyLiveTodayPnl(m)` 取代 `_applyLiveTodayPnl(metricsData)`。
+
+**Also resolved** (not needing fixes): E4-HIGH-3 import errors（0 存在）；E4-HIGH-5 test_v072（已不存在）；E4-HIGH-6 Rust failures（0 failures）。
+
+**Phase 2 residuals**: 49 assertion-less tests / coverage triage / DB resilience / proptest — 留作未來 Sprint。WP-12 ONNX DEFERRED。
+
+**E2 review**: 0H/0M/1L(accepted) → PASS。
+
+---
 
 ### Wave 3 CLOSED — WP-06 Performance + WP-08 ML Pipeline + WP-13 Reconciler — 2026-05-16
 
