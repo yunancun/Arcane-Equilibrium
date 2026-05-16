@@ -2623,3 +2623,35 @@ Wave 1 commit `cabb2fcd` 39 files +1830 -200。Wave 2 working tree 12 files modi
 - W-AUDIT-7c lexical scope shadow 教訓不適用：F-09 是 Rust + add new field，無 JS-style scope shadow 風險；Python healthcheck import 純 top-level re-export 也無 shadow。
 
 **Verdict**：PM 可 commit + push 兩個 IMPL（建議 batch 加 LOW-1 dict 修）。
+
+---
+
+## 2026-05-16 — Phase 1b sibling IMPL B-2 + B-3 review (RETURN E1 round 2)
+
+**Sibling 範圍**：dispatch packet A/B/C/D/E 5 worktree，sibling 跑 A(B-2A V094 schema+writer) + C(B-3A dynamic backoff + maker_rejection state machine + grid_trading wiring) + D(B-3B healthcheck [70]-[73])，**B(close-maker dispatch + maker_price.compute_close_limit_price) 完全沒做** + E 沒做。
+
+**CRITICAL 教訓**：
+- 派 sibling 5 worktree 並行 IMPL 時，PM dispatch packet 必須驗證 sibling 是否「dispatch packet declared scope 與 actual deliverable」全 match。sibling B-3A 自承「Did not edit `tick_pipeline/commands.rs`」應觸發 PA + PM 立刻 spawn 第 4 sibling 跑 Worktree B，**否則 A+C+D 接好線後 real close path 仍 100% market = audit cold default = Phase 2a 0 樣本 = AC-1..AC-19 全 NEUTRAL_LOW_SAMPLE = 全部前置工作白做**。
+- E2 review pre-commit dirty state 時，git diff stat 是早期判斷工具：`commands.rs +14` 行（vs spec 350-450 預估）即時揭露 Worktree B 缺失。
+- Worktree dispatch 與 sibling self-report 必含 cross-check「我做了 dispatch packet §N 多少 deliverable」逐項打鉤。
+
+**HIGH 教訓**：
+- spec § threshold 必 verbatim 引用：sibling [70] Wilson CI PASS 65% / FAIL lower < 60% **嚴於** spec §8.1 60%/40%，理由可能是 AC-1 「demo 比例 ≥ 60% WARN @ 65% threshold」整體 AC 誤套到 per-cell Wilson gate。**spec §8.1 healthcheck PASS criteria 與 §11.1 deployment AC 是兩件事**，不可混用。
+- [65] BB-MF-5 reject samples healthcheck（spec §8.3 + AC-15 必要）被 sibling D 完全跳過；PA dispatch packet §4 deliverables 也只列 [70][71][72][73]，**dispatch packet 與 spec 對齊性也需 PM cross-verify**。
+- AC-18 fallback_to_taker_rate ≥ 95% Wilson CI sub-clause 缺；spec §5.5「mandatory fallback」+ §二 #5 生存 > 利潤 invariant 必須有 healthcheck 守護，否則 silent abandonment regression 偵測不到。
+
+**MEDIUM 教訓**：
+- test name 與 assertion 行為 drift：`test_close_too_many_pending_5min_cooldown` 保留名以通過 E4 baseline grep，但 assertion 改為 `Some(2_000)` 對應 1s dynamic backoff。中文 docstring 標明 deferred upgrade，**符合 PA dispatch packet 「note that Phase 1b dynamic backoff supersedes」要求**；但下次建議改名為 `test_close_too_many_pending_initial_dynamic_backoff_per_symbol_baseline` 或加 wrapper baseline test，避免「函數名語意誤導」。
+
+**對抗反問範本應用**：
+- 「sibling self-report 說『test 都 PASS』— 跑了哪些 test？」→ 重 grep production caller chain 發現 commands.rs:806 close path 仍 hard-coded market = test 證明 primitive 邏輯正確但**沒 production caller** wire 進去。
+- 「sibling 說『compile-relevant Fill emitters 全 migrate』— `grep -r TradingMsg::Fill` 結果？」→ 4 個 production caller 全 migrate ✅，但這只證 enum signature compile complete，**不證 dispatch behavior 已實作**。
+- 「healthcheck thresholds 對齊 spec 嗎？」→ grep spec §8.1 vs IMPL constants，發現 65%/60% vs 60%/40% drift。
+
+**Cross-References**：
+- Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--phase_1b_b2_b3_sibling_e2_review.md`
+- Sibling self-reports: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--phase_1b_{b2a_v094_schema_writer,b3a_dynamic_backoff_state_machine,b3b_close_maker_healthchecks}.md`
+- Spec v1.3: `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- V094 spec: `docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md`
+- AMD v0.4: `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
+- PA dispatch packet: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--phase_1b_e1_dispatch_packet.md`
