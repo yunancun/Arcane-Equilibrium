@@ -1395,7 +1395,7 @@ fn test_grid_proceeds_entry_when_symbol_pinned() {
 //   1. entry-side reject 寫 reject_cooldown_entry_until_ms，僅阻擋 Open emission
 //   2. close-side reject 寫 reject_cooldown_close_until_ms，獨立 map
 //   3. Race C (PostOnlyCross close) → 不 arm cooldown，走 market（spec §5.3）
-//   4. TooManyPending close → 5min 固定（spec §6.1，本 prereq 不實作 §5.4 dynamic backoff）
+//   4. TooManyPending close → dynamic 1s→60s per-symbol backoff + 5min global cascade
 //   5. 其他 close reject → 1min default（spec §6.1）
 //   6. entry reject 不凍結同 symbol 的 close emission（BB-MF-3 silent degradation 修復）
 // 注意：Phase 1b 主軸 IMPL 後 close path 真正進 cooldown gate，本 prereq commit
@@ -1468,12 +1468,12 @@ fn test_close_reject_does_not_freeze_entry_path() {
         &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
     );
 
-    // close-side TooManyPending reject 寫入 close cooldown（ts=1_000 + 5min = 301_000）。
+    // close-side TooManyPending reject 寫入 dynamic close cooldown（ts=1_000 + 1s = 2_000）。
     g.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::TooManyPending);
     assert_eq!(
         g.reject_cooldown_close_until_ms.get("BTC").copied(),
-        Some(301_000),
-        "TooManyPending close reject 必寫入 close cooldown map（5min 固定）"
+        Some(2_000),
+        "TooManyPending close reject 必寫入 close cooldown map（dynamic 1s initial）"
     );
     assert!(
         g.reject_cooldown_entry_until_ms.get("BTC").is_none(),
@@ -1497,26 +1497,102 @@ fn test_close_reject_does_not_freeze_entry_path() {
     );
 }
 
-/// BB-MF-3 #3：close-side TooManyPending → 5min 固定 cooldown。
+/// BB-MF-3 #3：close-side TooManyPending → dynamic per-symbol cooldown。
 /// 對應 PM 任務 Step 4 test_close_too_many_pending_5min_cooldown + spec §6.1 表
-/// 「TooManyPending → 5min」+ AMD §6 + 本 prereq scope（不實作 §5.4 dynamic backoff）。
+/// 舊「TooManyPending → 5min」baseline。函式名保留給 E4 baseline grep；
+/// Phase 1b B-3A 語意已按 operator prompt 升級為 §5.4 dynamic backoff。
 #[test]
 fn test_close_too_many_pending_5min_cooldown() {
     let mut g = GridTrading::new(49_000.0, 51_000.0);
 
-    // ts = 1_000，arm close cooldown for TooManyPending。
+    // ts = 1_000，首次 TooManyPending → 1s dynamic backoff。
     g.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::TooManyPending);
 
-    // 5min = 300_000 ms → cooldown_until = 1_000 + 300_000 = 301_000。
     assert_eq!(
         g.reject_cooldown_close_until_ms.get("BTC").copied(),
-        Some(301_000),
-        "TooManyPending close cooldown 必為 ts + 5min（300_000 ms）"
+        Some(2_000),
+        "TooManyPending close cooldown 首次必為 ts + 1s（Phase 1b dynamic backoff）"
     );
     // 不可污染 entry map。
     assert!(
         g.reject_cooldown_entry_until_ms.get("BTC").is_none(),
         "TooManyPending close reject 不可寫入 entry cooldown"
+    );
+}
+
+/// Phase 1b B-3A：同 symbol TooManyPending 連續觸發時 1s→2s→4s 指數退避，
+/// 其他 symbol 不受影響。這是 §5.4 dynamic backoff 對舊 5min 固定 close
+/// cooldown 的相容性更新。
+#[test]
+fn test_close_too_many_pending_dynamic_backoff_per_symbol() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+
+    g.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::TooManyPending);
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("BTC").copied(),
+        Some(2_000)
+    );
+    assert_eq!(
+        g.close_maker_rate_limit_scope("BTC", 1_500),
+        Some(crate::strategies::maker_rejection::CloseMakerRateLimitScope::PerSymbol)
+    );
+    assert_eq!(g.close_maker_rate_limit_scope("ETH", 1_500), None);
+
+    g.arm_close_cooldown("BTC", 2_000, &MakerRejectionCategory::TooManyPending);
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("BTC").copied(),
+        Some(4_000),
+        "second consecutive TooManyPending doubles to 2s"
+    );
+
+    g.arm_close_cooldown("ETH", 2_000, &MakerRejectionCategory::TooManyPending);
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("ETH").copied(),
+        Some(3_000),
+        "other symbol starts at independent 1s backoff"
+    );
+}
+
+/// Phase 1b B-3A：1 分鐘內 >=10 distinct symbols 觸發 TooManyPending 時，
+/// close-maker 全域 pause 5min；pause 到期後 symbol backoff reset 1s。
+#[test]
+fn test_close_too_many_pending_global_pause_cascade_resets() {
+    let mut g = GridTrading::new(49_000.0, 51_000.0);
+    let now = 100_000u64;
+
+    for i in 0..10 {
+        g.arm_close_cooldown(
+            &format!("SYM{i}"),
+            (now + i) as i64,
+            &MakerRejectionCategory::TooManyPending,
+        );
+    }
+
+    let expected_until = now + 9 + 300_000;
+    assert_eq!(
+        g.close_maker_global_pause_until_ms(now + 10),
+        Some(expected_until),
+        "10-symbol cascade must arm 5min global pause"
+    );
+    assert_eq!(
+        g.close_maker_rate_limit_scope("UNSEEN", now + 10),
+        Some(crate::strategies::maker_rejection::CloseMakerRateLimitScope::Global),
+        "global pause must apply to symbols that did not trigger the cascade"
+    );
+
+    assert_eq!(
+        g.close_maker_rate_limit_scope("UNSEEN", expected_until),
+        None
+    );
+    g.arm_close_cooldown(
+        "SYM0",
+        expected_until as i64,
+        &MakerRejectionCategory::TooManyPending,
+    );
+    assert_eq!(
+        g.reject_cooldown_close_until_ms.get("SYM0").copied(),
+        Some(expected_until + 1_000),
+        "after global pause expiry, per-symbol backoff resets to initial 1s"
     );
 }
 
@@ -1648,10 +1724,10 @@ fn test_cooldown_isolation_multi_symbol() {
     );
     assert!(g.reject_cooldown_close_until_ms.get("BTC").is_none());
 
-    // ETH close 寫入 + entry 不寫入。
+    // ETH close 寫入 + entry 不寫入（first dynamic backoff = 1s）。
     assert_eq!(
         g.reject_cooldown_close_until_ms.get("ETH").copied(),
-        Some(302_000)
+        Some(3_000)
     );
     assert!(g.reject_cooldown_entry_until_ms.get("ETH").is_none());
 
@@ -1666,16 +1742,16 @@ fn test_cooldown_isolation_multi_symbol() {
 fn test_arm_close_cooldown_saturating_add_overflow_safe() {
     let mut g = GridTrading::new(49_000.0, 51_000.0);
 
-    // 接近 i64::MAX 的 ts_ms + TooManyPending 5min → cooldown_until 必 saturate
+    // 接近 i64::MAX 的 ts_ms + default close cooldown → cooldown_until 必 saturate
     // 而非 wrap 為 0（u64 cast 後仍非 0 大數）。
     let near_max = i64::MAX - 100;
-    g.arm_close_cooldown("BTC", near_max, &MakerRejectionCategory::TooManyPending);
+    g.arm_close_cooldown("BTC", near_max, &MakerRejectionCategory::FokCancel);
 
     let stored = g
         .reject_cooldown_close_until_ms
         .get("BTC")
         .copied()
-        .expect("TooManyPending 必 arm cooldown");
+        .expect("FokCancel 必 arm default cooldown");
     // 必 saturate 至 i64::MAX（u64 cast 即 i64::MAX as u64）。
     assert_eq!(
         stored,

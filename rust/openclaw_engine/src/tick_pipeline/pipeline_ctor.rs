@@ -59,6 +59,7 @@ impl TickPipeline {
             adl_alerts: VecDeque::new(),
             canary_mode: false,
             instrument_cache: None,
+            use_maker_close: false,
             order_dispatch_tx: None,
             market_data_tx: None,
             feature_tx: None,

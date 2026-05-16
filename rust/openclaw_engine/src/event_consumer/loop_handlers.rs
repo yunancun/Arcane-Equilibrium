@@ -17,7 +17,7 @@
 //!   Step 2a（2026-04-24）出貨 LoopState + 3 個小 arm（A cross_engine /
 //!   B kline_seed / D pending_reg）；C/E/F 三個大 arm 留待 2b/2c。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,7 +25,9 @@ use std::time::{Duration, Instant};
 use super::handlers;
 use super::pending_sweep::{self, classify_pending_sweep, PendingSweepAction};
 use super::types::{PendingOrder, PendingOrderEvent};
+use crate::order_manager::TimeInForce;
 use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
+use crate::strategies::maker_rejection::{CloseMakerFallbackReason, CloseMakerRateLimitScope};
 use crate::tick_pipeline::{EngineEvent, PipelineCommand, PipelineKind, TickPipeline};
 
 /// Loop-internal mutable state owned by `run_event_consumer` between bootstrap
@@ -51,6 +53,10 @@ pub(super) struct LoopState {
     pub last_status: Instant,
     /// Pending sweep cadence clock / pending 清理節奏時鐘
     pub last_pending_check: Instant,
+    /// Original close-maker order_link_id values that already emitted a
+    /// mandatory taker fallback. Prevents double close dispatch when reject,
+    /// cancel ack, and sweep grace events race.
+    pub close_maker_fallback_dispatched: HashSet<String>,
 }
 
 impl LoopState {
@@ -73,6 +79,7 @@ impl LoopState {
             known_symbols,
             last_status: now,
             last_pending_check: now,
+            close_maker_fallback_dispatched: HashSet::new(),
         }
     }
 }
@@ -82,6 +89,100 @@ pub(super) fn pending_order_accepts_fill(po: &PendingOrder) -> bool {
         return true;
     }
     po.cum_filled_qty < po.qty
+}
+
+pub(super) fn dispatch_close_maker_fallback_from_pending(
+    state: &mut LoopState,
+    pipeline: &mut TickPipeline,
+    po: &PendingOrder,
+    fallback_reason: CloseMakerFallbackReason,
+    rate_limit_scope: Option<CloseMakerRateLimitScope>,
+    source: &str,
+) -> bool {
+    if !fallback_reason.requires_market_fallback()
+        || !po.is_close
+        || po.time_in_force != Some(TimeInForce::PostOnly)
+    {
+        return false;
+    }
+    let Some(audit) = po.close_maker_audit.clone() else {
+        return false;
+    };
+    if audit.fallback_reason.is_some() {
+        return false;
+    }
+    let Some(position) = pipeline.paper_state.get_position(&po.symbol) else {
+        tracing::info!(
+            order_link_id = %po.order_link_id,
+            symbol = %po.symbol,
+            source,
+            fallback_reason = fallback_reason.as_str(),
+            "close-maker fallback skipped because local position is already flat \
+             / local position 已平，略過 close-maker fallback"
+        );
+        return false;
+    };
+    if po.qty > 0.0 && po.cum_filled_qty >= po.qty * 0.999 {
+        tracing::info!(
+            order_link_id = %po.order_link_id,
+            symbol = %po.symbol,
+            source,
+            filled = po.cum_filled_qty,
+            requested = po.qty,
+            "close-maker fallback skipped because maker fill already satisfied intent \
+             / maker 成交已滿足平倉 intent，略過 fallback"
+        );
+        return false;
+    }
+    if !state
+        .close_maker_fallback_dispatched
+        .insert(po.order_link_id.clone())
+    {
+        tracing::warn!(
+            order_link_id = %po.order_link_id,
+            symbol = %po.symbol,
+            source,
+            fallback_reason = fallback_reason.as_str(),
+            "duplicate close-maker terminal fallback suppressed \
+             / 重複 close-maker 終態 fallback 已抑制"
+        );
+        return false;
+    }
+
+    let fallback_qty = if po.qty > 0.0 {
+        (po.qty - po.cum_filled_qty).max(0.0)
+    } else {
+        position.qty
+    };
+    pipeline.dispatch_close_maker_market_fallback(
+        &po.order_link_id,
+        &po.symbol,
+        po.is_long,
+        fallback_qty,
+        &po.strategy,
+        &po.context_id,
+        audit,
+        fallback_reason,
+        rate_limit_scope,
+    )
+}
+
+fn dispatch_failed_close_maker_fallback_decision(
+    reason: &str,
+) -> (CloseMakerFallbackReason, Option<CloseMakerRateLimitScope>) {
+    if reason.contains("rate_limit_pause_global") {
+        (
+            CloseMakerFallbackReason::RateLimitPauseGlobal,
+            Some(CloseMakerRateLimitScope::Global),
+        )
+    } else if reason.contains("EC_ReachMaxPendingOrders") || reason.contains("too_many_pending") {
+        (
+            CloseMakerFallbackReason::RateLimitBackoffPerSymbol,
+            Some(CloseMakerRateLimitScope::PerSymbol),
+        )
+    } else {
+        (CloseMakerFallbackReason::FallbackToTakerMandatory, None)
+    }
 }
 
 // F4-RETURN Issue 1 (2026-04-26): F4-1 emitter moved to sibling
@@ -284,15 +385,73 @@ pub(super) fn handle_pending_registration(
     } else if let Some(PendingOrderEvent::DispatchFailed {
         order_link_id,
         symbol,
+        is_long,
+        qty,
+        strategy,
+        context_id,
         is_close,
+        order_type,
+        time_in_force,
+        maker_timeout_ms,
+        close_maker_audit,
         terminal_status,
         reason,
         ts_ms,
     }) = reg
     {
-        let removed = state.pending_orders.remove(&order_link_id).is_some();
         if is_close {
             pipeline.clear_pending_close(&symbol);
+        }
+        let removed_po = state.pending_orders.remove(&order_link_id);
+        let removed = removed_po.is_some();
+        let (fallback_reason, rate_limit_scope) =
+            dispatch_failed_close_maker_fallback_decision(&reason);
+        if let Some(po) = removed_po.as_ref() {
+            dispatch_close_maker_fallback_from_pending(
+                state,
+                pipeline,
+                po,
+                fallback_reason,
+                rate_limit_scope,
+                "dispatch_failed",
+            );
+        } else if is_close
+            && time_in_force == Some(TimeInForce::PostOnly)
+            && close_maker_audit
+                .as_ref()
+                .is_some_and(|audit| audit.fallback_reason.is_none())
+        {
+            let po = PendingOrder {
+                order_link_id: order_link_id.clone(),
+                symbol: symbol.clone(),
+                is_long,
+                qty,
+                strategy: strategy.clone(),
+                sent_ts_ms: ts_ms,
+                cum_filled_qty: 0.0,
+                is_close,
+                context_id: context_id.clone(),
+                order_type: order_type.clone(),
+                time_in_force,
+                maker_timeout_ms,
+                close_maker_audit: close_maker_audit.clone(),
+                reference_price: None,
+                reference_ts_ms: None,
+                reference_source: None,
+                cancel_requested_ts_ms: None,
+                spine_order_plan_id: None,
+                spine_decision_id: None,
+                spine_verdict_id: None,
+                spine_stub_report_id: None,
+            };
+            dispatch_close_maker_fallback_from_pending(
+                state,
+                pipeline,
+                &po,
+                fallback_reason,
+                rate_limit_scope,
+                "dispatch_failed_unregistered",
+            );
         }
         tracing::warn!(
             order_link_id = %order_link_id,
@@ -587,6 +746,7 @@ pub(super) fn handle_tick_event(
     if !state.pending_orders.is_empty() && state.last_pending_check.elapsed() >= pending_timeout {
         let now_ms = openclaw_core::now_ms();
         let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
+        let mut maker_grace_fallback: Vec<String> = Vec::new();
         let mut legacy_to_remove: Vec<String> = Vec::new();
         for (key, po) in state.pending_orders.iter() {
             let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
@@ -596,14 +756,20 @@ pub(super) fn handle_tick_event(
                     maker_to_cancel.push((key.clone(), po.symbol.clone(), elapsed, deadline_ms));
                 }
                 PendingSweepAction::MakerCancelGraceExpired => {
+                    let grace_ms = if po.is_close {
+                        pending_sweep::CLOSE_MAKER_CANCEL_ACK_GRACE_MS
+                    } else {
+                        pending_sweep::MAKER_CANCEL_ACK_GRACE_MS
+                    };
                     tracing::error!(
                         order_link_id = %key,
                         symbol = %po.symbol,
                         elapsed_ms = elapsed,
                         cancel_requested_ts_ms = po.cancel_requested_ts_ms.unwrap_or_default(),
-                        grace_ms = pending_sweep::MAKER_CANCEL_ACK_GRACE_MS,
+                        grace_ms = grace_ms,
                         "PostOnly maker cancel ack grace expired — removing stale tracker / PostOnly 取消回報 grace 到期，移除過期追蹤"
                     );
+                    maker_grace_fallback.push(key.clone());
                     legacy_to_remove.push(key.clone());
                 }
                 PendingSweepAction::LegacyHardRemove => {
@@ -626,6 +792,23 @@ pub(super) fn handle_tick_event(
                     );
                 }
                 PendingSweepAction::Keep => {}
+            }
+        }
+        for link_id in &maker_grace_fallback {
+            if let Some(po) = state.pending_orders.get(link_id).cloned() {
+                if po.is_close {
+                    pipeline.clear_pending_close(&po.symbol);
+                }
+                let reason = pending_sweep::close_maker_sweep_fallback_reason(&po, now_ms)
+                    .unwrap_or(CloseMakerFallbackReason::CancelGraceExpired);
+                dispatch_close_maker_fallback_from_pending(
+                    state,
+                    pipeline,
+                    &po,
+                    reason,
+                    None,
+                    "maker_cancel_grace_expired",
+                );
             }
         }
         // Dispatch non-blocking cancels for timed-out PostOnly makers.
@@ -654,6 +837,21 @@ pub(super) fn handle_tick_event(
                     symbol = %symbol,
                     "PostOnly maker timed out but no REST client is available — removing tracker / PostOnly 超時但無 REST client，移除追蹤"
                 );
+                if let Some(po) = state.pending_orders.get(link_id).cloned() {
+                    if po.is_close {
+                        pipeline.clear_pending_close(&po.symbol);
+                    }
+                    let reason = pending_sweep::close_maker_sweep_fallback_reason(&po, now_ms)
+                        .unwrap_or(CloseMakerFallbackReason::TimeoutTaker);
+                    dispatch_close_maker_fallback_from_pending(
+                        state,
+                        pipeline,
+                        &po,
+                        reason,
+                        None,
+                        "maker_timeout_no_rest_client",
+                    );
+                }
                 legacy_to_remove.push(link_id.clone());
             }
         }
@@ -718,6 +916,7 @@ mod tests {
         assert!(state.order_id_to_link.is_empty());
         assert!(state.seen_exec_set.is_empty());
         assert!(state.seen_exec_order.is_empty());
+        assert!(state.close_maker_fallback_dispatched.is_empty());
         assert_eq!(state.known_symbols.len(), 1);
         assert!(state.known_symbols.contains("BTCUSDT"));
         // Clocks seeded to same Instant → Duration between them should be near 0.
@@ -734,5 +933,165 @@ mod tests {
         // accidental downward edit is caught here rather than in prod.
         // 哨兵測試 — 守住 dedup window 尺寸，意外改小不會溜進生產。
         assert_eq!(LoopState::MAX_SEEN_EXEC_IDS, 500);
+    }
+
+    fn close_maker_pending_for_test() -> PendingOrder {
+        PendingOrder {
+            order_link_id: "oc_close_maker_original".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            is_long: false,
+            qty: 0.1,
+            strategy: "strategy_close:grid_close_long".to_string(),
+            sent_ts_ms: 1_700_000_000_000,
+            cum_filled_qty: 0.0,
+            is_close: true,
+            context_id: "ctx-close-maker".to_string(),
+            order_type: "limit".to_string(),
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(30_000),
+            close_maker_audit: Some(crate::tick_pipeline::CloseMakerFillAudit {
+                initial_limit_price: Some(50_000.2),
+                eligible_reason: "grid_close_long".to_string(),
+                fallback_reason: None,
+                rate_limit_scope: None,
+            }),
+            reference_price: Some(50_000.0),
+            reference_ts_ms: Some(1_700_000_000_000),
+            reference_source: Some("dispatch_last_fallback".to_string()),
+            cancel_requested_ts_ms: None,
+            spine_order_plan_id: None,
+            spine_decision_id: None,
+            spine_verdict_id: None,
+            spine_stub_report_id: None,
+        }
+    }
+
+    #[test]
+    fn close_maker_fallback_helper_dispatches_market_once_with_spine_none() {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let (tx, mut rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::OrderDispatchRequest>();
+        pipeline.set_shadow_channel(tx);
+        pipeline.paper_state.apply_fill(
+            "BTCUSDT",
+            true,
+            0.1,
+            50_000.0,
+            0.0,
+            1_700_000_000_000,
+            "grid_trading",
+        );
+        let mut state = LoopState::new(std::collections::HashSet::new());
+        let po = close_maker_pending_for_test();
+
+        assert!(dispatch_close_maker_fallback_from_pending(
+            &mut state,
+            &mut pipeline,
+            &po,
+            CloseMakerFallbackReason::PostOnlyReject,
+            None,
+            "unit_test",
+        ));
+        let req = rx.try_recv().expect("market fallback request");
+        assert_eq!(req.order_type, "market");
+        assert_eq!(req.time_in_force, None);
+        assert_eq!(req.limit_price, None);
+        assert!(req.is_close);
+        assert!(req.is_primary);
+        assert!(!req.is_long);
+        assert_eq!(req.qty, 0.1);
+        assert!(req.spine_order_plan_id.is_none());
+        assert!(req.spine_decision_id.is_none());
+        assert!(req.spine_verdict_id.is_none());
+        assert!(req.spine_stub_report_id.is_none());
+        let audit = req.close_maker_audit.expect("fallback audit payload");
+        assert_eq!(audit.initial_limit_price, Some(50_000.2));
+        assert_eq!(audit.eligible_reason, "grid_close_long");
+        assert_eq!(audit.fallback_reason.as_deref(), Some("postonly_reject"));
+
+        assert!(!dispatch_close_maker_fallback_from_pending(
+            &mut state,
+            &mut pipeline,
+            &po,
+            CloseMakerFallbackReason::CancelGraceExpired,
+            None,
+            "unit_test_duplicate",
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "idempotence guard must suppress duplicate close fallback"
+        );
+    }
+
+    #[test]
+    fn close_maker_cancel_grace_fallback_uses_v094_reason() {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let (tx, mut rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::OrderDispatchRequest>();
+        pipeline.set_shadow_channel(tx);
+        pipeline.paper_state.apply_fill(
+            "BTCUSDT",
+            true,
+            0.1,
+            50_000.0,
+            0.0,
+            1_700_000_000_000,
+            "grid_trading",
+        );
+        let mut state = LoopState::new(std::collections::HashSet::new());
+        let mut po = close_maker_pending_for_test();
+        po.order_link_id = "oc_close_maker_grace".to_string();
+        po.cancel_requested_ts_ms = Some(1_700_000_030_000);
+
+        assert!(dispatch_close_maker_fallback_from_pending(
+            &mut state,
+            &mut pipeline,
+            &po,
+            CloseMakerFallbackReason::CancelGraceExpired,
+            None,
+            "unit_test_cancel_grace",
+        ));
+        let req = rx.try_recv().expect("cancel-grace fallback request");
+        let audit = req.close_maker_audit.expect("fallback audit payload");
+        assert_eq!(
+            audit.fallback_reason.as_deref(),
+            Some("cancel_grace_expired")
+        );
+    }
+
+    #[test]
+    fn close_maker_rate_limit_fallback_carries_scope_in_audit() {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let (tx, mut rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::OrderDispatchRequest>();
+        pipeline.set_shadow_channel(tx);
+        pipeline.paper_state.apply_fill(
+            "BTCUSDT",
+            true,
+            0.1,
+            50_000.0,
+            0.0,
+            1_700_000_000_000,
+            "grid_trading",
+        );
+        let mut state = LoopState::new(std::collections::HashSet::new());
+        let mut po = close_maker_pending_for_test();
+        po.order_link_id = "oc_close_maker_rate_limit".to_string();
+
+        assert!(dispatch_close_maker_fallback_from_pending(
+            &mut state,
+            &mut pipeline,
+            &po,
+            CloseMakerFallbackReason::RateLimitBackoffPerSymbol,
+            Some(CloseMakerRateLimitScope::PerSymbol),
+            "unit_test_rate_limit",
+        ));
+        let req = rx.try_recv().expect("rate-limit fallback request");
+        let audit = req.close_maker_audit.expect("fallback audit payload");
+        assert_eq!(
+            audit.fallback_reason.as_deref(),
+            Some("rate_limit_backoff_per_symbol")
+        );
+        assert_eq!(audit.rate_limit_scope.as_deref(), Some("per_symbol"));
     }
 }

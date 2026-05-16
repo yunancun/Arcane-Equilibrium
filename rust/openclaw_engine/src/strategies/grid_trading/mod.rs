@@ -39,6 +39,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::intent_processor::OrderIntent;
+use crate::strategies::maker_rejection::{CloseMakerBackoffState, CloseMakerRateLimitScope};
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -145,11 +146,14 @@ pub(crate) const MAKER_LIMIT_TIMEOUT_MAX_MS: u64 = 300_000;
 /// 的 close cooldown 1 分鐘，避免下一 tick 同條件再撞拒絕。
 pub(crate) const CLOSE_REJECT_COOLDOWN_DEFAULT_MS: u64 = 60_000;
 
-/// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side TooManyPending
-/// 帳戶級背壓固定退避時長，對應 spec v1.2 §6.1 表中 close TooManyPending
-/// 5min 分支（PM Wave 2b 任務明文要求 5min 固定值；spec §5.4 BB-MF-2 的
-/// per-symbol dynamic backoff (1s exp → 60s 上限 + global cascade) 屬獨立
-/// 工作項，不在本 prereq IMPL scope 內）。
+/// EDGE-P2-3 Phase 1b legacy compatibility constant. The close-maker
+/// TooManyPending path now uses `CloseMakerBackoffState` for 1s→60s per-symbol
+/// backoff plus 5min global cascade; this 5min value remains as the global
+/// pause duration reference for older BB-MF-3 tests/docs.
+/// EDGE-P2-3 Phase 1b 舊相容常數。close-maker TooManyPending 現改由
+/// `CloseMakerBackoffState` 執行 1s→60s per-symbol 動態退避與 5min global
+/// cascade；此 5min 值僅保留作為舊 BB-MF-3 測試 / 文檔的全域暫停參考。
+#[allow(dead_code)]
 pub(crate) const CLOSE_REJECT_COOLDOWN_TOO_MANY_PENDING_MS: u64 = 300_000;
 
 /// Clamp a maker-limit timeout value into the strategy's supported range.
@@ -243,9 +247,9 @@ pub struct GridTrading {
     /// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side per-symbol
     /// rejection backoff deadline (epoch ms)。Phase 1b close-maker-first
     /// 啟用後由 close-side dispatcher 透過 `arm_close_cooldown` 寫入，
-    /// 路由規則對應 spec v1.2 §6.1：
-    ///   - `MakerRejectionCategory::TooManyPending` → 5min（固定，spec §5.4
-    ///     dynamic backoff 屬獨立工作項，本 prereq 不實作）
+    /// 路由規則對應 spec §5 / §6.1：
+    ///   - `MakerRejectionCategory::TooManyPending` → dynamic 1s→60s
+    ///     per-symbol backoff + 10-symbol/1min global 5min pause
     ///   - `MakerRejectionCategory::PostOnlyCross` → no-op（per spec §5.3
     ///     Race C：直接走 market，不進 close cooldown）
     ///   - 其他類別（FokCancel / SelfCancel / Other） → 1min default
@@ -253,6 +257,13 @@ pub struct GridTrading {
     /// path 真正進 cooldown gate 的接線留給 Phase 1b 主軸 IMPL（預期 close
     /// emission 處檢查此 map，cooldown 期內走 market fallback）。
     pub(super) reject_cooldown_close_until_ms: HashMap<String, u64>,
+    /// EDGE-P2-3 Phase 1b B-3A — close-maker TooManyPending dynamic backoff
+    /// state. This is separate from the entry cooldown map and the legacy
+    /// close map so rate-limit state cannot recreate BB-MF-3 entry/close
+    /// cross-contamination.
+    /// close-maker TooManyPending 動態退避 state。它與 entry cooldown map 及
+    /// legacy close map 分離，避免限流狀態重新造成 BB-MF-3 entry/close 交叉污染。
+    pub(super) close_maker_backoff: CloseMakerBackoffState,
     /// QC-H7: Adaptive range ±% for initial/rebalance grid (default 0.10 = ±10%).
     /// QC-H7：自適應範圍 ±%（默認 0.10 = ±10%）。
     pub(crate) adaptive_range_pct: f64,
@@ -478,5 +489,26 @@ impl GridTrading {
         category: &crate::strategies::maker_rejection::MakerRejectionCategory,
     ) {
         self.arm_close_cooldown_impl(symbol, ts_ms, category);
+    }
+
+    /// Return the active close-maker rate-limit scope for future close
+    /// dispatch wiring. Global scope applies to every symbol; per-symbol scope
+    /// applies only to the requested symbol. Expired global pause lazily resets
+    /// the in-memory backoff state.
+    /// 回傳 future close dispatch 接線可用的 close-maker 限流範圍。global 適用
+    /// 所有 symbol；per-symbol 只適用指定 symbol。全域暫停過期時會 lazy reset
+    /// 記憶體退避 state。
+    pub fn close_maker_rate_limit_scope(
+        &mut self,
+        symbol: &str,
+        now_ms: u64,
+    ) -> Option<CloseMakerRateLimitScope> {
+        self.close_maker_backoff.pause_scope(symbol, now_ms)
+    }
+
+    /// Return the global close-maker pause deadline, if still active.
+    /// 回傳仍生效的 close-maker 全域暫停截止時間。
+    pub fn close_maker_global_pause_until_ms(&mut self, now_ms: u64) -> Option<u64> {
+        self.close_maker_backoff.global_pause_until_ms(now_ms)
     }
 }

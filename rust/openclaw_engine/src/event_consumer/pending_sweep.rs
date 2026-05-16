@@ -10,6 +10,7 @@
 //!   為主迴圈每 5s 派發的 fail-soft REST 取消，用於超時 PostOnly 掛單。
 
 use super::PendingOrder;
+use crate::strategies::maker_rejection::CloseMakerFallbackReason;
 use tracing::{info, warn};
 
 /// After a PostOnly entry partially fills, do not let the remaining stale quote
@@ -25,6 +26,12 @@ pub(crate) const PARTIAL_FILL_REMAINDER_GRACE_MS: u64 = 5_000;
 /// 派發 maker cancel 後保留 pending row，讓 cancel ack 前 race 到的成交仍能匹配；
 /// 若 grace 內無成交/取消回報，才丟棄 tracker，避免狀態無界累積。
 pub(crate) const MAKER_CANCEL_ACK_GRACE_MS: u64 = 60_000;
+/// Close maker orders carry exposure-reduction intent, so after a cancel
+/// request we wait only a short grace before the future dispatcher must market
+/// fallback. Entry makers keep the longer audit-matching grace above.
+/// close maker 單代表降低曝險；發出 cancel 後只等短 grace，之後 future dispatcher
+/// 必須 market fallback。entry maker 保留上方較長 grace 以便匹配 race fill。
+pub(crate) const CLOSE_MAKER_CANCEL_ACK_GRACE_MS: u64 = 2_000;
 
 /// EDGE-P2-3 Phase 1B-3.2: Sweep classification for a pending order at `elapsed_ms`.
 /// Pure function so the Market vs PostOnly branching is unit-testable.
@@ -54,7 +61,12 @@ pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingS
     let elapsed_ms = pending_elapsed_ms(po, now_ms);
     if po.time_in_force == Some(crate::order_manager::TimeInForce::PostOnly) {
         if let Some(cancel_ts) = po.cancel_requested_ts_ms {
-            return if now_ms.saturating_sub(cancel_ts) >= MAKER_CANCEL_ACK_GRACE_MS {
+            let grace_ms = if po.is_close {
+                CLOSE_MAKER_CANCEL_ACK_GRACE_MS
+            } else {
+                MAKER_CANCEL_ACK_GRACE_MS
+            };
+            return if now_ms.saturating_sub(cancel_ts) >= grace_ms {
                 PendingSweepAction::MakerCancelGraceExpired
             } else {
                 PendingSweepAction::Keep
@@ -72,6 +84,35 @@ pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingS
         PendingSweepAction::LegacySoftWarn
     } else {
         PendingSweepAction::Keep
+    }
+}
+
+/// Classify only close-maker sweep states into required market fallback reasons.
+///
+/// The event loop can continue using `classify_pending_sweep()` for generic
+/// tracking. Future close dispatch can call this helper to attach the V094
+/// reason when a close maker timeout/cancel-grace branch must re-submit as
+/// taker market.
+///
+/// 只把 close-maker sweep 狀態分類成必須 market fallback 的原因。event loop 可
+/// 繼續使用 `classify_pending_sweep()` 做通用追蹤；future close dispatch 可用此
+/// helper 在 close maker timeout / cancel-grace 分支補 V094 原因並改走 taker market。
+#[allow(dead_code)]
+pub(crate) fn close_maker_sweep_fallback_reason(
+    po: &PendingOrder,
+    now_ms: u64,
+) -> Option<CloseMakerFallbackReason> {
+    if !po.is_close || po.time_in_force != Some(crate::order_manager::TimeInForce::PostOnly) {
+        return None;
+    }
+    match classify_pending_sweep(po, now_ms) {
+        PendingSweepAction::MakerTimeoutCancel => Some(CloseMakerFallbackReason::TimeoutTaker),
+        PendingSweepAction::MakerCancelGraceExpired => {
+            Some(CloseMakerFallbackReason::CancelGraceExpired)
+        }
+        PendingSweepAction::Keep
+        | PendingSweepAction::LegacySoftWarn
+        | PendingSweepAction::LegacyHardRemove => None,
     }
 }
 
@@ -176,6 +217,7 @@ mod tests {
             order_type: "market".into(),
             time_in_force: None,
             maker_timeout_ms: None,
+            close_maker_audit: None,
             reference_price: None,
             reference_ts_ms: None,
             reference_source: None,
@@ -202,6 +244,7 @@ mod tests {
             order_type: "limit".into(),
             time_in_force: Some(crate::order_manager::TimeInForce::PostOnly),
             maker_timeout_ms,
+            close_maker_audit: None,
             reference_price: None,
             reference_ts_ms: None,
             reference_source: None,
@@ -332,6 +375,26 @@ mod tests {
     }
 
     #[test]
+    fn test_classify_close_postonly_uses_short_cancel_grace() {
+        let mut po = make_postonly_pending(Some(30_000));
+        po.is_close = true;
+        po.cancel_requested_ts_ms = Some(30_000);
+
+        assert_eq!(
+            classify_pending_sweep(&po, 30_000 + CLOSE_MAKER_CANCEL_ACK_GRACE_MS - 1),
+            PendingSweepAction::Keep
+        );
+        assert_eq!(
+            classify_pending_sweep(&po, 30_000 + CLOSE_MAKER_CANCEL_ACK_GRACE_MS),
+            PendingSweepAction::MakerCancelGraceExpired
+        );
+        assert_eq!(
+            close_maker_sweep_fallback_reason(&po, 30_000 + CLOSE_MAKER_CANCEL_ACK_GRACE_MS),
+            Some(CloseMakerFallbackReason::CancelGraceExpired)
+        );
+    }
+
+    #[test]
     fn test_classify_postonly_cancel_inflight_expires_after_ack_grace() {
         let mut po = make_postonly_pending(Some(45_000));
         po.cancel_requested_ts_ms = Some(45_000);
@@ -355,6 +418,38 @@ mod tests {
         assert_eq!(
             classify_pending_sweep(&po_zero, 1),
             PendingSweepAction::MakerTimeoutCancel
+        );
+    }
+
+    #[test]
+    fn test_close_maker_timeout_maps_to_taker_fallback_reason() {
+        let mut po = make_postonly_pending(Some(30_000));
+        po.is_close = true;
+
+        assert_eq!(
+            close_maker_sweep_fallback_reason(&po, 29_999),
+            None,
+            "under maker timeout should keep waiting"
+        );
+        assert_eq!(
+            close_maker_sweep_fallback_reason(&po, 30_000),
+            Some(CloseMakerFallbackReason::TimeoutTaker),
+            "close maker timeout must require taker market fallback"
+        );
+    }
+
+    #[test]
+    fn test_entry_maker_timeout_has_no_close_fallback_reason() {
+        let po = make_postonly_pending(Some(30_000));
+
+        assert_eq!(
+            classify_pending_sweep(&po, 30_000),
+            PendingSweepAction::MakerTimeoutCancel
+        );
+        assert_eq!(
+            close_maker_sweep_fallback_reason(&po, 30_000),
+            None,
+            "entry maker timeout may miss an entry, but must not be labeled as close fallback"
         );
     }
 

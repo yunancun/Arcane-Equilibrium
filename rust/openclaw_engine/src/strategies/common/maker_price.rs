@@ -50,6 +50,181 @@ pub struct MakerPriceInputs {
     pub tick_size: Option<f64>,
 }
 
+/// Phase 1b close-maker spread guard. Wider books skip maker and go taker.
+/// Phase 1b close-maker spread guard。超過此 spread 時跳過 maker，走 taker。
+pub const CLOSE_MAKER_SPREAD_GUARD_BPS: f64 = 50.0;
+
+/// Close-maker quote parameters selected by exit reason.
+/// 依 exit reason 選出的 close-maker 掛價參數。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CloseMakerPricePolicy {
+    pub buffer_ticks: u32,
+    pub offset_bps: f64,
+    pub timeout_ms: u64,
+}
+
+/// Normalize strategy/risk close tags into their free-text exit reason.
+/// 將 strategy/risk close tag 正規化為自由文字 exit reason。
+pub fn canonical_close_maker_reason(reason: &str) -> &str {
+    let mut current = reason.trim();
+    loop {
+        if let Some(rest) = current.strip_prefix("strategy_close:") {
+            current = rest.trim();
+            continue;
+        }
+        if let Some(rest) = current.strip_prefix("risk_close:") {
+            current = rest.trim();
+            continue;
+        }
+        return current;
+    }
+}
+
+/// Positive close-maker whitelist from Phase 1b spec §4.3.
+/// Phase 1b spec §4.3 的 close-maker 正白名單。
+pub fn close_maker_price_policy(exit_reason: &str) -> Option<CloseMakerPricePolicy> {
+    let reason = canonical_close_maker_reason(exit_reason);
+    match reason {
+        "grid_close_short" | "grid_close_long" | "bb_mean_revert" | "ma_reverse_cross"
+        | "bw_squeeze" | "pctb_revert" => Some(CloseMakerPricePolicy {
+            buffer_ticks: 1,
+            offset_bps: 0.5,
+            timeout_ms: 30_000,
+        }),
+        "phys_lock_gate4_giveback" => Some(CloseMakerPricePolicy {
+            buffer_ticks: 1,
+            offset_bps: 0.5,
+            timeout_ms: 15_000,
+        }),
+        "phys_lock_gate4_stale_roc_neg" => Some(CloseMakerPricePolicy {
+            buffer_ticks: 1,
+            offset_bps: 0.5,
+            timeout_ms: 10_000,
+        }),
+        _ => None,
+    }
+}
+
+/// Explicit market-only close reasons from the Phase 1b negative whitelist.
+/// Phase 1b 負白名單中明確保留 market 的 close reason。
+pub fn is_close_maker_market_only_reason(exit_reason: &str) -> bool {
+    if close_maker_price_policy(exit_reason).is_some() {
+        return false;
+    }
+
+    let reason = canonical_close_maker_reason(exit_reason);
+    let lower = reason.to_ascii_lowercase();
+    let raw_lower = exit_reason.trim().to_ascii_lowercase();
+
+    lower.starts_with("hard stop")
+        || lower.starts_with("trailing stop")
+        || lower.starts_with("time stop")
+        || lower.starts_with("dynamic stop")
+        || lower.starts_with("fast_track")
+        || lower.starts_with("halt_session")
+        || lower.starts_with("take profit")
+        || lower.starts_with("cost edge")
+        || lower.starts_with("daily loss")
+        || lower.starts_with("drawdown")
+        || lower.starts_with("consecutive loss")
+        || lower.starts_with("bybit_sync")
+        || lower.starts_with("orphan_")
+        || lower.starts_with("dust_frozen")
+        || lower == "trailing_stop"
+        || lower == "ipc_close_all"
+        || lower == "ipc_close_symbol"
+        || raw_lower.contains("/operator/close_position")
+        || raw_lower.contains("operator override")
+        || raw_lower.contains("shutdown")
+        || raw_lower.contains("cancel_token")
+        || raw_lower.contains("circuit breaker")
+        || raw_lower.contains("authorization")
+        || raw_lower.contains("auth expiry")
+}
+
+/// Whether a close reason is in the positive maker-first whitelist.
+/// close reason 是否在 maker-first 正白名單。
+pub fn is_close_maker_positive_reason(exit_reason: &str) -> bool {
+    close_maker_price_policy(exit_reason).is_some()
+}
+
+/// Compute a strictly passive close-maker limit price.
+///
+/// `position_is_long=true` means the close order is a SELL, so this helper
+/// reuses `compute_post_only_price(is_long=false, ...)`. `position_is_long=false`
+/// means the close order is a BUY.
+///
+/// 計算嚴格被動的 close-maker 限價。多倉平倉是 SELL，因此反向呼叫
+/// `compute_post_only_price(is_long=false, ...)`；空倉平倉則反向為 BUY。
+pub fn compute_close_limit_price(
+    position_is_long: bool,
+    inputs: MakerPriceInputs,
+    policy: CloseMakerPricePolicy,
+    strategy_name: &str,
+    symbol: &str,
+) -> Option<f64> {
+    let bid = inputs.best_bid.filter(|v| v.is_finite() && *v > 0.0);
+    let ask = inputs.best_ask.filter(|v| v.is_finite() && *v > 0.0);
+
+    let mut buffer_ticks = policy.buffer_ticks.max(1);
+    if let (Some(bid), Some(ask)) = (bid, ask) {
+        if ask <= bid {
+            warn!(
+                strategy = strategy_name,
+                symbol = symbol,
+                position_is_long = position_is_long,
+                best_bid = bid,
+                best_ask = ask,
+                "close_maker strict skip: locked/crossed book \
+                 / close_maker 嚴格跳過：locked/crossed book"
+            );
+            return None;
+        }
+        let mid = (bid + ask) * 0.5;
+        let spread_bps = ((ask - bid) / mid) * 10_000.0;
+        if spread_bps.is_finite() && spread_bps > CLOSE_MAKER_SPREAD_GUARD_BPS {
+            warn!(
+                strategy = strategy_name,
+                symbol = symbol,
+                position_is_long = position_is_long,
+                spread_bps = spread_bps,
+                guard_bps = CLOSE_MAKER_SPREAD_GUARD_BPS,
+                "close_maker strict skip: spread exceeds guard \
+                 / close_maker 嚴格跳過：spread 超過 guard"
+            );
+            return None;
+        }
+
+        if let Some(tick) = inputs.tick_size.filter(|v| v.is_finite() && *v > 0.0) {
+            let half_spread = (ask - bid) * 0.5;
+            let required_ticks = (half_spread / tick).ceil();
+            if required_ticks.is_finite() && required_ticks > f64::from(buffer_ticks) {
+                if required_ticks > f64::from(u32::MAX) {
+                    warn!(
+                        strategy = strategy_name,
+                        symbol = symbol,
+                        tick_size = tick,
+                        half_spread = half_spread,
+                        "close_maker strict skip: small-tick widening overflow \
+                         / close_maker 嚴格跳過：small-tick buffer 擴張溢出"
+                    );
+                    return None;
+                }
+                buffer_ticks = required_ticks as u32;
+            }
+        }
+    }
+
+    compute_post_only_price(
+        !position_is_long,
+        inputs,
+        policy.offset_bps,
+        buffer_ticks,
+        strategy_name,
+        symbol,
+    )
+}
+
 /// Compute a strictly passive PostOnly limit price.
 ///
 /// `is_long = true` → buy side (place at-or-below best_bid).
@@ -355,5 +530,132 @@ mod tests {
             assert!(sell >= 30_001.0 - 1e-9, "buffer={buffer} sell={sell}");
             assert!(buy < sell, "buffer={buffer} buy {buy} >= sell {sell}");
         }
+    }
+
+    #[test]
+    fn close_policy_accepts_positive_whitelist_with_prefixes() {
+        let positives = [
+            "grid_close_short",
+            "strategy_close:grid_close_long",
+            "bb_mean_revert",
+            "risk_close:phys_lock_gate4_giveback",
+            "risk_close:phys_lock_gate4_stale_roc_neg",
+            "strategy_close:ma_reverse_cross",
+            "bw_squeeze",
+            "pctb_revert",
+        ];
+
+        for reason in positives {
+            assert!(
+                is_close_maker_positive_reason(reason),
+                "{reason} must be close-maker eligible"
+            );
+            assert!(
+                !is_close_maker_market_only_reason(reason),
+                "{reason} must not be classified market-only"
+            );
+        }
+    }
+
+    #[test]
+    fn close_policy_rejects_negative_whitelist_and_unknown() {
+        let market_only = [
+            "risk_close:HARD STOP: loss",
+            "risk_close:TRAILING STOP: peak",
+            "risk_close:TIME STOP: age",
+            "risk_close:DYNAMIC STOP: atr",
+            "risk_close:fast_track_reduce_half",
+            "risk_close:halt_session:daily_loss",
+            "TAKE PROFIT: pnl 2% >= 1%",
+            "COST EDGE: ratio 0.90 >= 0.80",
+            "DAILY LOSS",
+            "DRAWDOWN",
+            "CONSECUTIVE LOSS",
+            "bybit_sync",
+            "orphan_recovery",
+            "dust_frozen",
+            "trailing_stop",
+            "ipc_close_all",
+            "risk_close:ipc_close_symbol",
+            "engine shutdown",
+            "authorization expired",
+            "circuit breaker",
+        ];
+
+        for reason in market_only {
+            assert!(
+                is_close_maker_market_only_reason(reason),
+                "{reason} must remain market-only"
+            );
+            assert!(
+                !is_close_maker_positive_reason(reason),
+                "{reason} must not be close-maker eligible"
+            );
+        }
+        assert!(
+            close_maker_price_policy("future_unknown_exit").is_none(),
+            "unknown exits fail closed by absence from the positive whitelist"
+        );
+    }
+
+    #[test]
+    fn close_limit_price_inverts_direction_and_uses_timeout_policy() {
+        let inputs = inputs_with_bbo(30_000.0, 29_999.0, 30_001.0, 0.1);
+        let policy = close_maker_price_policy("grid_close_long").expect("grid close policy");
+        assert_eq!(policy.timeout_ms, 30_000);
+
+        let long_close_sell =
+            compute_close_limit_price(true, inputs, policy, "grid_trading", "BTCUSDT")
+                .expect("long close should price as passive sell");
+        assert!((long_close_sell - 30_002.0).abs() < 1e-9);
+
+        let short_close_buy =
+            compute_close_limit_price(false, inputs, policy, "grid_trading", "BTCUSDT")
+                .expect("short close should price as passive buy");
+        assert!((short_close_buy - 29_998.0).abs() < 1e-9);
+
+        assert_eq!(
+            close_maker_price_policy("phys_lock_gate4_giveback")
+                .expect("giveback policy")
+                .timeout_ms,
+            15_000
+        );
+        assert_eq!(
+            close_maker_price_policy("phys_lock_gate4_stale_roc_neg")
+                .expect("stale ROC policy")
+                .timeout_ms,
+            10_000
+        );
+    }
+
+    #[test]
+    fn close_limit_price_spread_guard_strict_skips() {
+        let inputs = inputs_with_bbo(100.0, 99.0, 100.0, 0.1);
+        let policy = close_maker_price_policy("grid_close_long").expect("policy");
+
+        let price = compute_close_limit_price(true, inputs, policy, "grid_trading", "WIDEUSDT");
+
+        assert!(
+            price.is_none(),
+            "spread above 50 bps must strict-skip to market fallback"
+        );
+    }
+
+    #[test]
+    fn close_limit_price_small_tick_widens_without_crossing() {
+        let inputs = inputs_with_bbo(0.010010, 0.010000, 0.010020, 0.000001);
+        let policy = close_maker_price_policy("pctb_revert").expect("policy");
+
+        let sell = compute_close_limit_price(true, inputs, policy, "bb_breakout", "1000BONKUSDT")
+            .expect("small-tick close should widen instead of crossing");
+
+        assert!(
+            (sell - 0.010030).abs() < 1e-12,
+            "half-spread 10 ticks should widen sell close to ask + 10 ticks, got {sell}"
+        );
+        assert!(
+            sell > inputs.best_ask.unwrap(),
+            "widened sell must remain strictly passive"
+        );
     }
 }

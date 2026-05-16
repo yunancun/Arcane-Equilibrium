@@ -109,6 +109,7 @@ fn test_pending_order_clone_preserves_state() {
         order_type: "market".into(),
         time_in_force: None,
         maker_timeout_ms: None,
+        close_maker_audit: None,
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,

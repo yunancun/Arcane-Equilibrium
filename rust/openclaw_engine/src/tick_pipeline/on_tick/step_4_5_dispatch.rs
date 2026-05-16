@@ -851,6 +851,7 @@ impl TickPipeline {
                                         // for the PostOnly resting-order sweep.
                                         // EDGE-P2-3 Phase 1B-3.2：轉發 PostOnly sweep 逾時。
                                         maker_timeout_ms: intent.maker_timeout_ms,
+                                        close_maker_audit: None,
                                         reference_price,
                                         reference_ts_ms: reference_price.map(|_| event.ts_ms),
                                         reference_source,
@@ -1234,6 +1235,11 @@ impl TickPipeline {
                                                 // V033 (2026-04-29): entry path → exit_reason None.
                                                 // V033（2026-04-29）：entry path → exit_reason None。
                                                 exit_reason: None,
+                                                // V094: strategy-open fills are not close-maker audit rows.
+                                                // V094：策略開倉 fill 不是 close-maker audit row。
+                                                details: None,
+                                                close_maker_attempt: false,
+                                                close_maker_fallback_reason: None,
                                             },
                                             "strategy_open_fill",
                                         );
@@ -1314,6 +1320,7 @@ impl TickPipeline {
                                             // Shadow 為 fire-and-forget；is_primary=false 不註冊
                                             // PendingOrder，sweep 永不觸及。仍帶值保持結構一致。
                                             maker_timeout_ms: intent.maker_timeout_ms,
+                                            close_maker_audit: None,
                                             reference_price,
                                             reference_ts_ms: reference_price.map(|_| event.ts_ms),
                                             reference_source,
@@ -1499,6 +1506,11 @@ impl TickPipeline {
                                     // V033 (2026-04-29): entry path (PostOnly maker open) → None.
                                     // V033（2026-04-29）：entry path（PostOnly maker 開倉）→ None。
                                     exit_reason: None,
+                                    // V094: entry-side maker fills stay outside close-maker audit.
+                                    // V094：entry-side maker fill 不納入 close-maker audit。
+                                    details: None,
+                                    close_maker_attempt: false,
+                                    close_maker_fallback_reason: None,
                                 },
                                 "resting_maker_fill",
                             );

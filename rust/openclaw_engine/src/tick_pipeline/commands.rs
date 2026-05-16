@@ -7,6 +7,52 @@ use super::on_tick_helpers::{
     make_context_id, make_fill_id, make_intent_id, make_verdict_id, push_capped, risk_score_level,
 };
 use super::*;
+use crate::order_manager::TimeInForce;
+use crate::strategies::common::{
+    canonical_close_maker_reason, close_maker_price_policy, compute_close_limit_price,
+    CloseMakerPricePolicy, MakerPriceInputs,
+};
+use crate::strategies::maker_rejection::{CloseMakerFallbackReason, CloseMakerRateLimitScope};
+
+#[derive(Debug, Clone)]
+struct CloseOrderDispatchShape {
+    order_type: String,
+    limit_price: Option<f64>,
+    time_in_force: Option<TimeInForce>,
+    maker_timeout_ms: Option<u64>,
+}
+
+impl CloseOrderDispatchShape {
+    fn market() -> Self {
+        Self {
+            order_type: "market".to_string(),
+            limit_price: None,
+            time_in_force: None,
+            maker_timeout_ms: None,
+        }
+    }
+
+    fn maker(limit_price: f64, policy: CloseMakerPricePolicy) -> Self {
+        Self {
+            order_type: "limit".to_string(),
+            limit_price: Some(limit_price),
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(policy.timeout_ms),
+        }
+    }
+}
+
+fn close_maker_audit_for_shape(
+    trigger_tag: &str,
+    shape: &CloseOrderDispatchShape,
+) -> Option<CloseMakerFillAudit> {
+    (shape.time_in_force == Some(TimeInForce::PostOnly)).then(|| CloseMakerFillAudit {
+        initial_limit_price: shape.limit_price,
+        eligible_reason: canonical_close_maker_reason(trigger_tag).to_string(),
+        fallback_reason: None,
+        rate_limit_scope: None,
+    })
+}
 
 impl TickPipeline {
     /// ARCH-RC1 1C-3-B: Build Rust-native risk runtime status snapshot.
@@ -31,6 +77,80 @@ impl TickPipeline {
     #[cfg(test)]
     pub fn set_latest_indicators_for_test(&mut self, symbol: &str, snap: IndicatorSnapshot) {
         self.latest_indicators.insert(symbol.to_string(), snap);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_use_maker_close_for_test(&mut self, enabled: bool) {
+        let _ = self.set_use_maker_close_runtime(enabled);
+    }
+
+    /// Conservative runtime binding for Phase 1b close-maker dispatch.
+    ///
+    /// Cold default remains false. Enabling is restricted to the Demo pipeline
+    /// so this API cannot accidentally activate Live or Paper behavior.
+    pub fn set_use_maker_close_runtime(&mut self, enabled: bool) -> bool {
+        if enabled && self.pipeline_kind != PipelineKind::Demo {
+            tracing::warn!(
+                kind = %self.pipeline_kind,
+                "close-maker runtime enable rejected outside Demo pipeline \
+                 / close-maker runtime 啟用僅允許 Demo pipeline"
+            );
+            self.use_maker_close = false;
+            return false;
+        }
+        self.use_maker_close = enabled;
+        true
+    }
+
+    pub fn use_maker_close(&self) -> bool {
+        self.use_maker_close
+    }
+
+    fn close_order_dispatch_shape(
+        &self,
+        symbol: &str,
+        position_is_long: bool,
+        dispatch_price: f64,
+        event: Option<&PriceEvent>,
+        trigger_tag: &str,
+    ) -> CloseOrderDispatchShape {
+        if !self.use_maker_close {
+            return CloseOrderDispatchShape::market();
+        }
+
+        let Some(policy) = close_maker_price_policy(trigger_tag) else {
+            return CloseOrderDispatchShape::market();
+        };
+
+        let (best_bid, best_ask) = event
+            .filter(|ev| ev.symbol == symbol)
+            .map(|ev| {
+                (
+                    Some(ev.bid_price).filter(|v| v.is_finite() && *v > 0.0),
+                    Some(ev.ask_price).filter(|v| v.is_finite() && *v > 0.0),
+                )
+            })
+            .unwrap_or((None, None));
+        let tick_size = self
+            .instrument_cache
+            .as_ref()
+            .and_then(|cache| cache.get_tick_size(symbol));
+        let inputs = MakerPriceInputs {
+            last_price: dispatch_price,
+            best_bid,
+            best_ask,
+            tick_size,
+        };
+
+        compute_close_limit_price(
+            position_is_long,
+            inputs,
+            policy,
+            "close_maker_dispatch",
+            symbol,
+        )
+        .map(|limit_price| CloseOrderDispatchShape::maker(limit_price, policy))
+        .unwrap_or_else(CloseOrderDispatchShape::market)
     }
 
     /// ARCH-RC1 1C-3-F: External (non-strategy) paper-side order submission.
@@ -329,6 +449,13 @@ impl TickPipeline {
                     // V033 W1-T2：外部 close fill 與 canonical close helper
                     // 共用 legacy-tag 正規化。
                     exit_reason: fill_exit_reason,
+                    // V094: caller migration only; external fills do not yet
+                    // implement close-maker dispatch behavior in this track.
+                    // V094：僅做簽名遷移；本 track 不在 commands.rs 實作
+                    // close-maker dispatch 行為。
+                    details: None,
+                    close_maker_attempt: false,
+                    close_maker_fallback_reason: None,
                 },
                 "external_fill",
             );
@@ -503,6 +630,49 @@ impl TickPipeline {
         fill_latency_ms: Option<u64>,
         exchange_exec_id: Option<&str>,
     ) {
+        self.apply_confirmed_fill_with_close_maker_audit(
+            symbol,
+            is_long,
+            qty,
+            fill_price,
+            fee,
+            ts_ms,
+            strategy,
+            signal_context_id,
+            order_link_id,
+            fee_rate_override,
+            reference_price,
+            reference_ts_ms,
+            reference_source,
+            slippage_bps,
+            liquidity_role,
+            fill_latency_ms,
+            exchange_exec_id,
+            None,
+        );
+    }
+
+    pub fn apply_confirmed_fill_with_close_maker_audit(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        fill_price: f64,
+        fee: f64,
+        ts_ms: u64,
+        strategy: &str,
+        signal_context_id: &str,
+        order_link_id: &str,
+        fee_rate_override: Option<f64>,
+        reference_price: Option<f64>,
+        reference_ts_ms: Option<u64>,
+        reference_source: Option<&str>,
+        slippage_bps: Option<f64>,
+        liquidity_role: Option<&str>,
+        fill_latency_ms: Option<u64>,
+        exchange_exec_id: Option<&str>,
+        close_maker_audit: Option<CloseMakerFillAudit>,
+    ) {
         // EDGE-P3-1 R2 + V083-FIX-1（2026-05-11）：apply_fill 前先捕獲 was_open
         // 與 existing entry_context_id；close fill 走 helper 拿 well-formed id
         // （真 id 或 synthetic `orphan_recovery_ctx:{symbol}:{ts_ms}`），避免
@@ -613,6 +783,19 @@ impl TickPipeline {
             } else {
                 (strategy.to_string(), None)
             };
+            let close_maker_details = close_maker_audit.as_ref().map(|audit| {
+                serde_json::json!({
+                    "close_initial_limit_price": audit.initial_limit_price,
+                    "close_final_fill_price": fill_price,
+                    "close_maker_eligible_reason": audit.eligible_reason,
+                    "close_maker_fallback_reason": audit.fallback_reason,
+                    "rate_limit_scope": audit.rate_limit_scope,
+                })
+            });
+            let close_maker_attempt = close_maker_audit.is_some();
+            let close_maker_fallback_reason = close_maker_audit
+                .as_ref()
+                .and_then(|audit| audit.fallback_reason.clone());
             let _ = crate::database::try_send_trading_msg(
                 tx,
                 crate::database::TradingMsg::Fill {
@@ -644,6 +827,12 @@ impl TickPipeline {
                     // V033 W1-T2：交易所確認 close fill 寫 normalized
                     // strategy_name 與 free-text exit_reason。
                     exit_reason: fill_exit_reason,
+                    // V094: close-maker audit is present only for actual
+                    // maker-first close attempts; market closes keep cold defaults.
+                    // V094：僅實際 maker-first close 嘗試帶審計；market close 保持冷預設。
+                    details: close_maker_details,
+                    close_maker_attempt,
+                    close_maker_fallback_reason,
                 },
                 "confirmed_fill",
             );
@@ -770,7 +959,16 @@ impl TickPipeline {
                     .get_position(symbol)
                     .map(|p| qty >= p.qty - 1e-12)
                     .unwrap_or(false);
-            let dispatch_qty = if full_close {
+            let close_shape = self.close_order_dispatch_shape(
+                symbol,
+                is_long,
+                dispatch_price,
+                Some(event),
+                trigger_tag,
+            );
+            let close_maker_audit = close_maker_audit_for_shape(trigger_tag, &close_shape);
+            let is_close_maker_limit = close_shape.time_in_force == Some(TimeInForce::PostOnly);
+            let dispatch_qty = if full_close && !is_close_maker_limit {
                 self.close_dispatch_qty_for_full_close(qty, is_primary)
             } else {
                 qty
@@ -783,18 +981,23 @@ impl TickPipeline {
                 strategy: trigger_tag.to_string(),
                 paper_fill_ts: event.ts_ms,
                 is_close: true,
-                order_link_id: format!("{}_{}_{}_{}", prefix, self.order_link_mode_tag(), event.ts_ms, self.exchange_seq),
+                order_link_id: format!(
+                    "{}_{}_{}_{}",
+                    prefix,
+                    self.order_link_mode_tag(),
+                    event.ts_ms,
+                    self.exchange_seq
+                ),
                 decision_lease_id: None,
                 is_primary,
                 stop_loss: None,
                 take_profit: None,
                 context_id: entry_ctx,
-                order_type: "market".to_string(),
-                limit_price: None,
-                time_in_force: None,
-                // Close path stays Market (EDGE-P2-3 Phase 1a entry-only scope).
-                // 平倉維持 Market（EDGE-P2-3 Phase 1a 僅入場走 maker 路徑）。
-                maker_timeout_ms: None,
+                order_type: close_shape.order_type,
+                limit_price: close_shape.limit_price,
+                time_in_force: close_shape.time_in_force,
+                maker_timeout_ms: close_shape.maker_timeout_ms,
+                close_maker_audit,
                 reference_price: Some(dispatch_price).filter(|p| p.is_finite() && *p > 0.0),
                 reference_ts_ms: if dispatch_price.is_finite() && dispatch_price > 0.0 {
                     Some(event.ts_ms)
@@ -867,6 +1070,133 @@ impl TickPipeline {
         self.close_position_at_symbol_market(symbol, event.ts_ms)
     }
 
+    /// Mandatory taker fallback for a terminal close-maker PostOnly attempt.
+    ///
+    /// The caller is responsible for idempotence by original maker
+    /// `order_link_id`. This method only builds the reduce-only market request
+    /// and preserves the close path's no-spine lineage contract.
+    pub(crate) fn dispatch_close_maker_market_fallback(
+        &mut self,
+        original_order_link_id: &str,
+        symbol: &str,
+        close_order_is_long: bool,
+        qty: f64,
+        strategy: &str,
+        context_id: &str,
+        mut audit: CloseMakerFillAudit,
+        fallback_reason: CloseMakerFallbackReason,
+        rate_limit_scope: Option<CloseMakerRateLimitScope>,
+    ) -> bool {
+        let Some(tx) = self.order_dispatch_tx.clone() else {
+            tracing::error!(
+                original_order_link_id,
+                symbol,
+                fallback_reason = fallback_reason.as_str(),
+                "close-maker fallback required but order dispatch channel is unbound \
+                 / close-maker fallback 必須執行但 order dispatch channel 未綁定"
+            );
+            return false;
+        };
+
+        let ts_ms = openclaw_core::now_ms();
+        self.exchange_seq = self.exchange_seq.wrapping_add(1);
+        let order_link_id = format!(
+            "oc_close_mf_fb_{}_{}_{}",
+            self.order_link_mode_tag(),
+            ts_ms,
+            self.exchange_seq
+        );
+        let price = self
+            .paper_state
+            .latest_price(symbol)
+            .filter(|p| p.is_finite() && *p > 0.0)
+            .or_else(|| {
+                self.paper_state
+                    .get_position(symbol)
+                    .map(|p| p.entry_price)
+                    .filter(|p| p.is_finite() && *p > 0.0)
+            })
+            .or(audit
+                .initial_limit_price
+                .filter(|p| p.is_finite() && *p > 0.0))
+            .unwrap_or(0.0);
+
+        audit.fallback_reason = Some(fallback_reason.as_str().to_string());
+        let resolved_rate_limit_scope = rate_limit_scope.or(match fallback_reason {
+            CloseMakerFallbackReason::RateLimitPauseGlobal => {
+                Some(CloseMakerRateLimitScope::Global)
+            }
+            CloseMakerFallbackReason::RateLimitBackoffPerSymbol => {
+                Some(CloseMakerRateLimitScope::PerSymbol)
+            }
+            _ => None,
+        });
+        audit.rate_limit_scope = resolved_rate_limit_scope.map(|scope| scope.as_str().to_string());
+        let request = OrderDispatchRequest {
+            symbol: symbol.to_string(),
+            is_long: close_order_is_long,
+            qty,
+            price,
+            strategy: strategy.to_string(),
+            paper_fill_ts: ts_ms,
+            is_close: true,
+            order_link_id: order_link_id.clone(),
+            decision_lease_id: None,
+            is_primary: true,
+            stop_loss: None,
+            take_profit: None,
+            context_id: context_id.to_string(),
+            order_type: "market".to_string(),
+            limit_price: None,
+            time_in_force: None,
+            maker_timeout_ms: None,
+            close_maker_audit: Some(audit),
+            reference_price: Some(price).filter(|p| p.is_finite() && *p > 0.0),
+            reference_ts_ms: if price.is_finite() && price > 0.0 {
+                Some(ts_ms)
+            } else {
+                None
+            },
+            reference_source: if price.is_finite() && price > 0.0 {
+                Some("close_maker_fallback".to_string())
+            } else {
+                None
+            },
+            spine_order_plan_id: None,
+            spine_decision_id: None,
+            spine_verdict_id: None,
+            spine_stub_report_id: None,
+        };
+
+        match tx.send(request) {
+            Ok(()) => {
+                self.pending_close_symbols.insert(symbol.to_string());
+                tracing::warn!(
+                    original_order_link_id,
+                    fallback_order_link_id = %order_link_id,
+                    symbol,
+                    qty,
+                    fallback_reason = fallback_reason.as_str(),
+                    "close-maker terminal fallback dispatched as reduce-only market \
+                     / close-maker 終態 fallback 已派發 reduce-only market"
+                );
+                true
+            }
+            Err(e) => {
+                tracing::error!(
+                    original_order_link_id,
+                    symbol,
+                    qty,
+                    fallback_reason = fallback_reason.as_str(),
+                    error = %e,
+                    "close-maker market fallback enqueue failed \
+                     / close-maker market fallback 入隊失敗"
+                );
+                false
+            }
+        }
+    }
+
     /// R-02: Reconcile pending_close_symbols against actual open positions.
     /// Removes entries for symbols that no longer have an open position (fill was processed
     /// but the flag was not cleared, or the exchange order was silently dropped).
@@ -932,11 +1262,25 @@ impl TickPipeline {
             for (symbol, is_long, qty, price) in positions {
                 if let Some(ref tx) = self.order_dispatch_tx {
                     self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                    let order_link_id = format!("oc_ipc_close_{}_{}_{}", self.order_link_mode_tag(), ts_ms, self.exchange_seq);
+                    let order_link_id = format!(
+                        "oc_ipc_close_{}_{}_{}",
+                        self.order_link_mode_tag(),
+                        ts_ms,
+                        self.exchange_seq
+                    );
                     // V083-FIX-1（2026-05-11）：close 路徑帶 entry_context_id；
                     // paper_state 缺則 helper 回 synthetic（W-D MAG-083 P1-RCA-1）。
                     let entry_ctx = self.resolve_close_entry_context_id(&symbol, ts_ms);
                     let dispatch_qty = self.close_dispatch_qty_for_full_close(qty, true);
+                    let close_shape = self.close_order_dispatch_shape(
+                        &symbol,
+                        is_long,
+                        price,
+                        None,
+                        "ipc_close_all",
+                    );
+                    let close_maker_audit =
+                        close_maker_audit_for_shape("ipc_close_all", &close_shape);
                     let request = OrderDispatchRequest {
                         symbol: symbol.clone(),
                         is_long: !is_long, // opposite side to close / 相反方向平倉
@@ -951,12 +1295,11 @@ impl TickPipeline {
                         stop_loss: None,
                         take_profit: None,
                         context_id: entry_ctx,
-                        order_type: "market".to_string(),
-                        limit_price: None,
-                        time_in_force: None,
-                        // ipc_close_all goes Market (no maker sweep needed).
-                        // ipc_close_all 走 Market，不需 maker sweep。
-                        maker_timeout_ms: None,
+                        order_type: close_shape.order_type,
+                        limit_price: close_shape.limit_price,
+                        time_in_force: close_shape.time_in_force,
+                        maker_timeout_ms: close_shape.maker_timeout_ms,
+                        close_maker_audit,
                         reference_price: Some(price).filter(|p| p.is_finite() && *p > 0.0),
                         reference_ts_ms: if price.is_finite() && price > 0.0 {
                             Some(ts_ms)
@@ -1113,13 +1456,27 @@ impl TickPipeline {
             };
             if let Some(ref tx) = self.order_dispatch_tx {
                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                let order_link_id = format!("oc_ipc_close_{}_{}_{}", self.order_link_mode_tag(), ts_ms, self.exchange_seq);
+                let order_link_id = format!(
+                    "oc_ipc_close_{}_{}_{}",
+                    self.order_link_mode_tag(),
+                    ts_ms,
+                    self.exchange_seq
+                );
                 // V083-FIX-1（2026-05-11）：close 路徑帶 entry_context_id 滿足
                 // V083 NOT NULL CHECK；paper_state 有倉用真 id，否則 helper 回
                 // synthetic `orphan_recovery_ctx:{symbol}:{ts_ms}`，避免 batch
                 // INSERT 整 chunk 卡死（W-D MAG-083 P1-RCA-1）。
                 let entry_ctx = self.resolve_close_entry_context_id(symbol, ts_ms);
                 let dispatch_qty = self.close_dispatch_qty_for_full_close(qty, true);
+                let close_shape = self.close_order_dispatch_shape(
+                    symbol,
+                    is_long,
+                    price,
+                    None,
+                    "risk_close:ipc_close_symbol",
+                );
+                let close_maker_audit =
+                    close_maker_audit_for_shape("risk_close:ipc_close_symbol", &close_shape);
                 let request = OrderDispatchRequest {
                     symbol: symbol.to_string(),
                     is_long: !is_long, // opposite side to close / 相反方向平倉
@@ -1134,12 +1491,11 @@ impl TickPipeline {
                     stop_loss: None,
                     take_profit: None,
                     context_id: entry_ctx,
-                    order_type: "market".to_string(),
-                    limit_price: None,
-                    time_in_force: None,
-                    // Per-symbol IPC close goes Market.
-                    // 單幣種 IPC 平倉走 Market。
-                    maker_timeout_ms: None,
+                    order_type: close_shape.order_type,
+                    limit_price: close_shape.limit_price,
+                    time_in_force: close_shape.time_in_force,
+                    maker_timeout_ms: close_shape.maker_timeout_ms,
+                    close_maker_audit,
                     reference_price: Some(price).filter(|p| p.is_finite() && *p > 0.0),
                     reference_ts_ms: if price.is_finite() && price > 0.0 {
                         Some(ts_ms)

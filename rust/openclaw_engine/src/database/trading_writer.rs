@@ -182,7 +182,7 @@ async fn flush_all(
 // 每表欄位數 — `batch_insert` 以此集中推算 chunk_rows，取代先前各表硬編碼常數。
 const SIGNAL_COLS: usize = 8;
 const INTENT_COLS: usize = 12; // includes details JSONB
-const FILL_COLS: usize = 23; // V033 adds exit_reason (was 22 with V028 reference/slippage)
+const FILL_COLS: usize = 26; // V094 adds details + close-maker audit columns
 const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
@@ -421,13 +421,12 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         buf.as_slice(),
         FILL_COLS,
         |chunk| {
-            // V033 (2026-04-29): exit_reason added as column 23. strategy_name
-            // is now an enum-like aggregation key; exit_reason carries the
-            // free-text close trace previously dumped into strategy_name.
-            // V033（2026-04-29）：exit_reason 為第 23 欄；strategy_name 收斂為
-            // enum-like 聚合鍵，自由文字退場原因改寫入 exit_reason。
+            // V094 (2026-05-15): details JSONB plus close-maker audit columns
+            // preserve cold defaults while making close-maker attempts queryable.
+            // V094（2026-05-15）：新增 details JSONB 與 close-maker audit 欄位；
+            // 既有 cold default 不變，同時讓 close-maker 嘗試可查。
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, reference_price, reference_ts_ms, reference_source, slippage_bps, liquidity_role, fill_latency_ms, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source, exit_reason) "
+                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, reference_price, reference_ts_ms, reference_source, slippage_bps, liquidity_role, fill_latency_ms, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source, exit_reason, details, close_maker_attempt, close_maker_fallback_reason) "
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let TradingMsg::Fill {
@@ -453,6 +452,9 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     engine_mode,
                     exit_source,
                     exit_reason,
+                    details,
+                    close_maker_attempt,
+                    close_maker_fallback_reason,
                 } = msg
                 {
                     b.push_bind(
@@ -502,6 +504,16 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     // → NULL；close fill 由 W1-T2 close-tag normalizer 產出
                     // Some(reason)。
                     b.push_bind(exit_reason.as_deref());
+                    // V094: optional close-maker audit JSONB. None keeps old
+                    // entry / market-close rows NULL; Some persists audit keys
+                    // such as close_initial_limit_price and rate_limit_scope.
+                    // V094：可選 close-maker audit JSONB。None 讓既有 entry /
+                    // market close row 維持 NULL；Some 寫入 audit key。
+                    b.push_bind(details.clone());
+                    // V094 hot columns: false/None is the cold path default.
+                    // V094 hot 欄位：false/None 為 cold path default。
+                    b.push_bind(*close_maker_attempt);
+                    b.push_bind(close_maker_fallback_reason.as_deref());
                 }
             });
             qb.push(" ON CONFLICT (fill_id, ts) DO NOTHING");
@@ -1001,6 +1013,9 @@ mod tests {
             // V033 (2026-04-29): entry path → None (no exit semantics).
             // V033（2026-04-29）：entry path → None（無退場語意）。
             exit_reason: None,
+            details: None,
+            close_maker_attempt: false,
+            close_maker_fallback_reason: None,
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
 
@@ -1135,6 +1150,9 @@ mod tests {
                 // V033 (2026-04-29): entry path → None.
                 // V033（2026-04-29）：entry path → None。
                 exit_reason: None,
+                details: None,
+                close_maker_attempt: false,
+                close_maker_fallback_reason: None,
             },
             TradingMsg::FundingSettlement {
                 settlement_id: "funding-f1".into(),
@@ -1261,6 +1279,9 @@ mod tests {
             engine_mode: engine_mode.into(),
             exit_source: None,
             exit_reason: Some("ma_reverse_cross".into()),
+            details: None,
+            close_maker_attempt: false,
+            close_maker_fallback_reason: None,
         }
     }
 
@@ -1294,12 +1315,96 @@ mod tests {
             engine_mode: engine_mode.into(),
             exit_source: None,
             exit_reason: None,
+            details: None,
+            close_maker_attempt: false,
+            close_maker_fallback_reason: None,
+        }
+    }
+
+    #[test]
+    fn test_v094_cold_fill_defaults_are_false_and_none() {
+        let fill = make_entry_fill("f1", "BTCUSDT", "ma_crossover", "demo");
+        if let TradingMsg::Fill {
+            details,
+            close_maker_attempt,
+            close_maker_fallback_reason,
+            ..
+        } = fill
+        {
+            assert!(
+                details.is_none(),
+                "entry fills keep details NULL by default"
+            );
+            assert!(
+                !close_maker_attempt,
+                "entry fills are not close-maker attempts by default"
+            );
+            assert!(
+                close_maker_fallback_reason.is_none(),
+                "entry fills have no close-maker fallback reason"
+            );
+        } else {
+            panic!("expected Fill");
+        }
+    }
+
+    #[test]
+    fn test_v094_close_maker_payload_shape_accepts_rate_limit_scope() {
+        let mut fill = make_close_fill("f1", "BTCUSDT", "grid_trading", "demo", "ctx-entry-1");
+        if let TradingMsg::Fill {
+            details,
+            close_maker_attempt,
+            close_maker_fallback_reason,
+            ..
+        } = &mut fill
+        {
+            *details = Some(serde_json::json!({
+                "close_initial_limit_price": 50_010.0,
+                "close_final_fill_price": 50_000.5,
+                "close_maker_eligible_reason": "grid_close_short",
+                "rate_limit_scope": "global",
+            }));
+            *close_maker_attempt = true;
+            *close_maker_fallback_reason = Some("rate_limit_pause_global".into());
+        }
+
+        if let TradingMsg::Fill {
+            details,
+            close_maker_attempt,
+            close_maker_fallback_reason,
+            ..
+        } = fill
+        {
+            let payload = details.expect("close-maker fill should carry JSONB details");
+            assert!(close_maker_attempt);
+            assert_eq!(
+                close_maker_fallback_reason.as_deref(),
+                Some("rate_limit_pause_global")
+            );
+            assert_eq!(
+                payload["close_initial_limit_price"].as_f64(),
+                Some(50_010.0)
+            );
+            assert_eq!(payload["close_final_fill_price"].as_f64(), Some(50_000.5));
+            assert_eq!(
+                payload["close_maker_eligible_reason"].as_str(),
+                Some("grid_close_short")
+            );
+            assert_eq!(payload["rate_limit_scope"].as_str(), Some("global"));
+        } else {
+            panic!("expected Fill");
         }
     }
 
     #[test]
     fn test_close_fill_with_entry_ctx_not_counted_as_violation() {
-        let buf = vec![make_close_fill("f1", "BTCUSDT", "ma_crossover", "demo", "ctx-entry-abc")];
+        let buf = vec![make_close_fill(
+            "f1",
+            "BTCUSDT",
+            "ma_crossover",
+            "demo",
+            "ctx-entry-abc",
+        )];
         assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
     }
 
@@ -1317,7 +1422,13 @@ mod tests {
 
     #[test]
     fn test_unattributed_audit_fill_skipped() {
-        let buf = vec![make_close_fill("f1", "BTCUSDT", "unattributed:bybit_auto", "live_demo", "")];
+        let buf = vec![make_close_fill(
+            "f1",
+            "BTCUSDT",
+            "unattributed:bybit_auto",
+            "live_demo",
+            "",
+        )];
         assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
     }
 

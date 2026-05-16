@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::bybit_rest_client::BybitApiError;
+use crate::order_manager::TimeInForce;
+use crate::tick_pipeline::{CloseMakerFillAudit, OrderDispatchRequest};
 use serde_json::json;
 
 /// Build a Business error helper for tests.
@@ -11,6 +13,104 @@ fn biz(ret_code: i64, ret_msg: &str) -> BybitApiError {
         ret_code,
         ret_msg: ret_msg.to_string(),
         response: json!({"retCode": ret_code, "retMsg": ret_msg}),
+    }
+}
+
+fn close_maker_dispatch_req(
+    order_type: &str,
+    time_in_force: Option<TimeInForce>,
+    close_maker_audit: Option<CloseMakerFillAudit>,
+) -> OrderDispatchRequest {
+    OrderDispatchRequest {
+        symbol: "BTCUSDT".into(),
+        is_long: false,
+        qty: 0.1,
+        price: 50_000.0,
+        strategy: "strategy_close:grid_close_long".into(),
+        paper_fill_ts: 1_700_000_000_000,
+        is_close: true,
+        order_link_id: "oc_close_maker_preflight".into(),
+        decision_lease_id: None,
+        is_primary: true,
+        stop_loss: None,
+        take_profit: None,
+        context_id: "ctx-close-maker".into(),
+        order_type: order_type.to_string(),
+        limit_price: Some(50_000.2).filter(|_| order_type == "limit"),
+        time_in_force,
+        maker_timeout_ms: time_in_force.and(Some(30_000)),
+        close_maker_audit,
+        reference_price: Some(50_000.0),
+        reference_ts_ms: Some(1_700_000_000_000),
+        reference_source: Some("dispatch_last_fallback".into()),
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
+    }
+}
+
+#[test]
+fn test_close_maker_preflight_failure_emits_dispatch_failed_event() {
+    let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    let req = close_maker_dispatch_req("limit", Some(TimeInForce::PostOnly), None);
+
+    send_close_maker_dispatch_failed(&tx, &req, "Rejected", "dispatch_preflight_qty_zero");
+
+    match rx.try_recv().expect("dispatch failed event") {
+        PendingOrderEvent::DispatchFailed {
+            order_link_id,
+            symbol,
+            order_type,
+            time_in_force,
+            close_maker_audit,
+            reason,
+            ..
+        } => {
+            assert_eq!(order_link_id, "oc_close_maker_preflight");
+            assert_eq!(symbol, "BTCUSDT");
+            assert_eq!(order_type, "limit");
+            assert_eq!(time_in_force, Some(TimeInForce::PostOnly));
+            assert_eq!(reason, "dispatch_preflight_qty_zero");
+            let audit = close_maker_audit.expect("derived close-maker audit");
+            assert_eq!(audit.eligible_reason, "grid_close_long");
+            assert_eq!(audit.fallback_reason, None);
+        }
+        other => panic!("expected DispatchFailed, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_close_maker_fallback_market_preflight_failure_emits_terminal_event() {
+    let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    let req = close_maker_dispatch_req(
+        "market",
+        None,
+        Some(CloseMakerFillAudit {
+            initial_limit_price: Some(50_000.2),
+            eligible_reason: "grid_close_long".into(),
+            fallback_reason: Some("postonly_reject".into()),
+            rate_limit_scope: None,
+        }),
+    );
+
+    send_close_maker_dispatch_failed(&tx, &req, "Rejected", "dispatch_preflight_min_notional");
+
+    match rx.try_recv().expect("dispatch failed event") {
+        PendingOrderEvent::DispatchFailed {
+            order_type,
+            time_in_force,
+            close_maker_audit,
+            reason,
+            ..
+        } => {
+            assert_eq!(order_type, "market");
+            assert_eq!(time_in_force, None);
+            assert_eq!(reason, "dispatch_preflight_min_notional");
+            let audit = close_maker_audit.expect("fallback market audit");
+            assert_eq!(audit.fallback_reason.as_deref(), Some("postonly_reject"));
+        }
+        other => panic!("expected DispatchFailed, got {other:?}"),
     }
 }
 

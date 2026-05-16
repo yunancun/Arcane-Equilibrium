@@ -390,6 +390,27 @@ pub enum TradingMsg {
         /// `build_close_tags_from_legacy` 等 close emitter 產出；entry fill
         /// 仍寫 None。
         exit_reason: Option<String>,
+        /// V094 (2026-05-15): close-maker audit JSON payload. Expected keys
+        /// include close_initial_limit_price, close_final_fill_price,
+        /// close_maker_eligible_reason, and rate_limit_scope when available.
+        /// None preserves existing entry / non-maker close semantics.
+        /// V094：close-maker audit JSON payload；預期 key 包含
+        /// close_initial_limit_price / close_final_fill_price /
+        /// close_maker_eligible_reason，以及可用時的 rate_limit_scope。
+        /// None 保持既有 entry / non-maker close 語意。
+        details: Option<serde_json::Value>,
+        /// V094: TRUE when a close fill attempted maker-first; FALSE is the
+        /// cold default for entry fills and market closes.
+        /// V094：close fill 曾嘗試 maker-first 時為 TRUE；entry fill 與 market
+        /// close 的 cold default 為 FALSE。
+        close_maker_attempt: bool,
+        /// V094: maker fallback or safety-path reason constrained by
+        /// chk_fills_close_maker_fallback_reason_v094. None means entry fill,
+        /// market close without a maker attempt, or maker success.
+        /// V094：maker fallback 或 safety-path 真因，受
+        /// chk_fills_close_maker_fallback_reason_v094 約束。None 代表 entry、
+        /// 未嘗試 maker 的 market close，或 maker 成功。
+        close_maker_fallback_reason: Option<String>,
     },
     /// Funding settlement from exchange execution stream.
     /// 交易所 execution stream 推送的資金費結算。
