@@ -259,48 +259,19 @@ that inflate DSR trial count.
 
 | ID | Status | Task | Acceptance |
 |---|---|---|---|
-| `P0-AGENT-1` | ✅ DONE 2026-05-11 | Runtime Agent Decision Spine lineage | WINDOW_PASS 簽於 `2026-05-11--w_c_window_pass_signoff.md`；post Caveat 1+2 fix `ccf7a4bc` empirical 證實。 |
-| `P0-AGENT-2` | ✅ DONE 2026-05-11 | MAG-082 Stage 2 evidence window | 51h pre-fix + post-deploy adversarial SQL missed_n=0 entry / 14.7 state_changes/min；QA re-audit PASS。 |
-| `P0-AGENT-3` | ✅ DONE 2026-05-11 | MAG-083 final release audit | 三角 audit (QA + PA + QC) 全 APPROVE；reviewer brief 5 章節 per `2026-05-11--w_d_mag084_signoff.md` §4。 |
-| `P0-AGENT-4` | ✅ DONE 2026-05-11 | MAG-084 operator sign-off | Signed `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`；W-D wave CLOSED。 |
-| `P1-STABLE-ID-1` | ✅ DONE 2026-05-11 | compute_spine_ids() helper 抽出（從 E5 D-1 P2 升 P1 per PA） | Done via `b830e3fa` + E2 lint fix `e40b2a76`; Wave 1 A closed in `d069b9e8`. |
-| `P1-RCA-1` | ✅ RCA DONE 2026-05-11 | RCA QA R-1: 6 orphan ER + 1 missed entry 4-min burst | Verdict systemic; follow-up implementation tracked by `P1-FILL-LINEAGE-*`, `P1-HEALTHCHECK-55-INVARIANT`, and `P1-STARTUP-BURST-MITIGATION`. |
-| `P1-W-AUDIT-3b-SMOKE` | ✅ DONE 2026-05-15 | W-AUDIT-3b runtime smoke (FA-1) | ssh trade-core RouterLeaseGuard Drop test PASS + `[55] chains_with_lease=89` + `pytest -k fail_closed` PASS；commit `22efd9de` smoke verify |
-| `P1-LG-DESIGN` | ✅ DESIGN DONE 2026-05-11 | PA design LG-2/3/4 tech plan | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md`; implementation tracked by `LG-1/2/3`. |
-| `P1-FILL-LINEAGE-DROP` | ✅ SOURCE/REGRESSION/DEPLOY DONE 2026-05-11 | Spine channel silent-drop fix (Option F4 B-2+B-3 hybrid) | `e17ead2b` + E4 READY/PASS; post-deploy startup burst residual tracked by `P1-STARTUP-BURST-MITIGATION`. |
-| `P1-FILL-LINEAGE-MONITOR` | ✅ DONE 2026-05-15 | Drop counter healthcheck wiring | Rust IPC `get_agent_spine_channel_metrics` exposes drop/retry counters; `[55]` healthcheck appends fail-soft channel monitor with 5/min WARN threshold and explicit `drop_total=initial_try_send_failures_not_final_loss` semantics. |
-| `P1-HEALTHCHECK-55-INVARIANT` | ✅ SOURCE-CLEARED 2026-05-15 | Redesign / clear [55] WARN gate as invariant test (QC S3) | Code now gates on fully-filled plan chains (`cum_fill_qty >= plan_qty * 0.999`) instead of `chains_with_real_fill_report / complete_chains >= 50%`. Patched `trade-core` DB verification PASS: `25` fully-filled chains / `25` real-fill ER / `0` missing; `13` partial chains surfaced separately. Per-fill partial ER remains future hardening, not current Stage 1 demo blocker. |
-| `P1-INTENT-FREEZE-27` | ✅ CLOSED 2026-05-15 | Full passive healthcheck hard FAIL `[27] intents_counter_freeze` | RCA found BTCUSDT exchange precision rounding (`final_qty <= 0`) after approved risk verdict, not a whole `trading_writer` outage. Source fix records this path as rejected qty=0 audit intent/verdict and defers Approved verdict persistence until a dispatchable `final_qty > 0`. Rebuilt on `trade-core` at `7b33ab2e`; post-grace narrow probe at `2026-05-15T18:12Z` PASSed (`demo stale=3.4m, 30min_n=4`; live_demo inactive 30m with verdicts/DCS=0). `[66]` / `[67]` also PASSed. |
-| `P2-DUAL-RAIL-ORDER-ID` | ✅ DONE 2026-05-15 | demo + live_demo 共享 order_id 衝突解 | `2f1c385b` adds mode prefix to `order_link_id`. |
-| `P2-RUNTIME-SHADOW-SPLIT` | ✅ DONE 2026-05-15 | runtime_shadow.rs 828 LOC > 800 警告 split | `122015b7` split runtime_shadow.rs under warning threshold. |
 | `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5 注：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
 | `P3-SPINE-COUNTER-CACHE-ALIGN` | ⏳ scheduled quiet period | 3 AtomicU64 counter `#[repr(align(64))]` cache line | E5 cosmetic; 10 min fix; ~50-200ns extra latency 降到 0 |
-| `P1-STARTUP-BURST-MITIGATION` | ✅ DONE 2026-05-15 | Engine restart 後 startup burst 1-min window 仍 silent-drop 23.5% real-fill ER (Wave 1.6 deploy 16:22:52 UTC 實證 4/17 drops) | Agent-spine bounded channel capacity raised 8192→32768 via `AGENT_SPINE_CHANNEL_CAPACITY`; burst regression uses configured cap. |
-| `P1-V083-HALT-SESSION-CTX` | ✅ CLOSED 2026-05-15 | halt_session close fill 曾可繞過 synthetic `entry_context_id` fallback，導致 `chk_fills_close_has_entry_context_id_v083` 每 2s 重試卡 writer | Current `/tmp/openclaw/engine.log` grep showed no V083/halt_session hits; full healthcheck with PG statement timeout had unrelated `[42b]`/`[56]` FAILs and no V083 row. |
 | `LG-1` H0 production caller | 🔵 Wave 2.2 dispatched 2026-05-11 | T1+T2+T3+T4 E1×4 parallel IMPL | per PA plan §1.4 |
 | `LG-2` Provider pricing binding | 🔵 Wave 2.2 dispatched 2026-05-11 | T4 RiskConfig 先 → T1+T3 parallel → T2 startup assertion 序列 | per PA plan §2.4 |
 | `LG-3` Supervised live SM | 🔵 Wave 2.1 PA spec phase dispatched 2026-05-11 | PA spec doc 1-1.5d → QC+BB+MIT parallel review → PA spec v2 → Wave 2.4 E1×7 IMPL | per PA plan §3.6 + §6.1 + §6.4 |
 | `P0-EDGE-1` | ACTIVE | Edge net-positive decision | Strategy edge must be positive or scoped to limited supervised path before true-live. **Root cause linked to `P0-MIT-LABEL-CLOSE-TAG-1` 1-day fix（最高 ROI）**。 |
-| `P0-MIT-LABEL-CLOSE-TAG-1` | ✅ DONE 2026-05-10 | `label_close_tag` NULL writer fix（attribution real root cause） | Post-M3 chain integrity era-split reached 100% per `[65]` / invariant 21 (`db17e205`); P0 edge remains active separately. |
 | `P0-LG-1` | ACTIVE | H0 blocking production caller | H0 wired into production decision path with metrics + fail-closed. |
 | `P0-LG-2` | ACTIVE | Provider pricing binding | Fee/pricing source bound, freshness checked, asserted at startup. |
 | `P0-LG-3` | ACTIVE | Supervised-live state machine | Live authorization, lease, drawdown, revoke, operator approval explicit + tested. |
 | `P0-OPS-1..4` | ACTIVE | HTTPS / credential rotation / legal+ToS / first-day runbook | Required before true-live. |
-| `P0-DECISION-AUDIT-1..5` | DONE 2026-05-09 | AMD §5.4.1 / shadow_mode TOML / §三 stale 防線 / 5 策略 verdict / openclaw_core+Layer2 sunset | AMD-2026-05-09-02 + ADR-0015/0017/0020 + W-C operator auth file。 |
-| `P0-DECISION-AUDIT-6` | DONE 2026-05-09 | **W-AUDIT-6d mid-ground verdict**（保 6 / 砍 6） | Operator confirmed 2026-05-09 mid-ground (PM session)；保 6 結構性 + 砍 6 polishing；DSR K -12 量化（§7）。 |
-| `P0-DECISION-AUDIT-7` | DONE 2026-05-09 | **W-AUDIT-4 ML 基座併入 W-AUDIT-8f (R-3) Hypothesis Pipeline** | Operator confirmed 2026-05-09 (PM session)；W-AUDIT-4b corrected scope = 3 retained INSERT tables + 2 views + 1 dropped/no-DDL；Decision-3 longer-wave Hypothesis Pipeline remains W-AUDIT-8f。 |
-| `P0-NEW-ISSUE-1` | DONE 2026-05-09 | LiveDemo pipeline auth_missing → restored | `[56]` PASS via signed `/api/v1/live/auth/renew`；RCA: `manual` sentinel；`--keep-auth` warns when auth absent. |
-| `P0-NEW-VULN-1..2` | DONE 2026-05-09 | launchd plist HIGH / lease audit runtime emit HIGH | Mac launchd 127.0.0.1 binds; `100.91.109.86:8000` Tailscale; lease_transitions `BYPASS` rows=103. |
-| `P0-AUDIT-NEW-LG-X-05` | DONE 2026-05-09 | SPECIFICATION_REGISTER LG-X-05 缺 + LG-X-04 編號錯位 | LG-X 完整登記。 |
-| `P0-V2-NEW-1-DONCHIAN-LEAK-BIAS` | DONE 2026-05-09（**4-agent fact-check 撤銷 stale belief**） | `IndicatorEngine::compute_all` 自 `75741eff` (2026-04-28) 起呼 `donchian_prior()` leak-free 11 天；`ad14db07` 僅補 regression test；QC v2-NEW-4「runtime contaminated」判定為過期 contaminated belief（commit `6afad6e8`）。 | n/a |
-| `P0-V2-NEW-2-STRATEGIST-CAP-NO-GATE` | ✅ DONE 2026-05-10 | F-strategist-cap 30→50 is a `wide_parameter_adjustment` skill, not a supervised gate. ADR numbering drift is closed by ADR-0022 (ADR-0021 was already alpha-source architecture). | ADR-0022 + ARCH-04 + AMD-2026-05-10-03/04 landed; no active blocker remains. |
-| `P0-V2-NEW-3-DSR-PBO-EVIDENCE-CRON` | ✅ RUNTIME APPLIED 2026-05-15 | DSR/PBO promotion gate + evidence push chain source/test closed; V079 is applied on `trade-core` and `learning.strategy_trial_ledger` has 16,212 rows. | Runtime V079 concern closed; future Stage 1/2 promotion callers still require green demo evidence and governance gates. |
-| `P0-V3-MIT-ROOT-CAUSE` | ✅ DONE | = `P0-MIT-LABEL-CLOSE-TAG-1`（cross-reference）| Closed by post-M3 chain integrity evidence; residual alpha/edge risk tracked by `P0-EDGE-1`. |
-| `P0-V3-V079-NOT-APPLIED` | ✅ DONE 2026-05-15 | Superseded stale source-only note. `trade-core` `_sqlx_migrations` max version is 90; V079 is applied; `learning.strategy_trial_ledger` exists with 16,212 rows. | Archived from active queue. |
-| `P0-V3-CRON-NOT-INSTALLED` | ✅ DONE 2026-05-09 | F-08 5 ML cron `17 3 * * *` installed and 24h fire verified. | invariant 18 closed. |
-| `P0-V3-PA-SPEC-FIX` | ✅ DONE 2026-05-10 | BB v3 pushbacks were adopted: Bybit V5 orderbook uses L50 not L25; `liquidation_pulse` is `requires_revival` dormant; basis remains observation-only until mainnet spot capability. | Verified by BB final compatibility review; future Phase C/C+1 implementation still needs BB/MIT review. |
-| `P0-V3-ADR-0021-ARCH-04` | ✅ DONE 2026-05-10 | ADR-0021 alpha-source architecture, ADR-0022 strategist cap, ARCH-04, CONTEXT alpha-source terms, AMD-2026-05-10-03, and AMD-2026-05-10-04 landed/indexed. | Historical row archived; ARCH-04 Stage 1 paper semantics later superseded by AMD-2026-05-15-01. |
-| `P0-V3-ENGINE-RESTART` | ✅ STALE/CLOSED 2026-05-15 | Old "engine still 5/8 binary" note is no longer current. `trade-core` runtime is alive on the current source line for 2026-05-15 checks; paper remains disabled by design. | Do not use as an active blocker; Linux dirty WIP now blocks clean source sync separately. |
+
+Completed §10 rows are archived in
+`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
 
 ---
 
@@ -322,11 +293,8 @@ active work starts at §10 / §11.2 / §11.3.
 | `P1-WA4B-VIEW-2` | `learning.scorer_training_features` | companion VIEW | E1/MIT | Read-only projection, not an INSERT path. Full unbounded counts are expensive; use bounded/metadata probes. |
 | `P1-WA4B-DROP-1` | `learning.scorer_predictions` | dropped / no-DDL target | E1/MIT | Dropped by V069; no producer wiring target unless a future spec recreates it. |
 
-### §11.2.1 Completed W-AUDIT-4b P1 Items
-
-| ID | Completed at | Evidence |
-|---|---|---|
-| `P1-WA4B-INSERT-1` | ✅ DONE 2026-05-15 13:13 UTC / 15:13 Europe-Madrid | Fixed by commit `83afb318` via `helper_scripts/cron/feature_baseline_writer_cron.sh` on `trade-core`; restored 646 active `observability.feature_baselines` rows covering 19 symbols × 34 feature names. Standalone `[67] feature_baseline_readiness` now PASSes with `active_rows=646`, `active_symbols=19`, `feature_names=34/34`, and 34-dim online vectors. |
+`P1-WA4B-INSERT-1` completion detail is archived in
+`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
 
 ### §11.3 P1 — Other Active
 
