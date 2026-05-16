@@ -30,18 +30,23 @@
 set -euo pipefail
 
 # ── 解析 flag ───────────────────────────────────────────────────────────
-MODE="proof"   # proof (24h) | smoke (60s)
+MODE="proof"          # proof (24h) | smoke (60s)
+MIDNIGHT_ALIGN="yes"  # yes (預設等 UTC midnight) | no (立即開始 24h proof)
 
 usage() {
     cat <<'USAGE'
 W-AUDIT-8a C1 v2 resilient harness wrapper
 
 Usage:
-  bash run_c1_v2_proof.sh                # 24h proof (default)
+  bash run_c1_v2_proof.sh                # 24h proof (default, UTC midnight alignment)
+  bash run_c1_v2_proof.sh --no-midnight  # 24h proof, 立即開始（不等 midnight）
   bash run_c1_v2_proof.sh --smoke-60s    # 60s smoke (verify tooling reachable)
   bash run_c1_v2_proof.sh --help
 
 Flags:
+  --no-midnight  Skip UTC midnight alignment; 立即啟 24h proof（24h window 不對齊
+                 funding cycle，但 wall-clock 提前 ~9h）。預設啟用 alignment
+                 是為 BB sign-off 24h window 覆蓋 3 個完整 8h funding cycle。
   --smoke-60s    Run 60s smoke mode (non-blocking; immediate result)
   --help, -h     Show this help
 
@@ -61,6 +66,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --smoke-60s)
             MODE="smoke"
+            shift
+            ;;
+        --no-midnight)
+            MIDNIGHT_ALIGN="no"
             shift
             ;;
         --help|-h)
@@ -112,8 +121,17 @@ SESSION_ID="c1_v2_${SESSION_STAMP}"
 NOHUP_LOG="${AUDIT_DIR}/nohup_c1_v2_${SESSION_STAMP}.log"
 CHECKPOINT_PATH="${AUDIT_DIR}/c1_proof_progress.json"
 
+# 組合 probe 額外 flag：midnight alignment 條件啟用
+EXTRA_FLAGS=()
+if [[ "${MIDNIGHT_ALIGN}" == "yes" ]]; then
+    EXTRA_FLAGS+=(--start-utc-midnight)
+    ALIGNMENT_DESC="UTC midnight alignment (等下次 UTC 00:00 才啟 24h proof)"
+else
+    ALIGNMENT_DESC="immediate start (no midnight alignment; 立即 24h proof)"
+fi
+
 echo "[run_c1_v2_proof.sh] mode=proof session_id=${SESSION_ID}"
-echo "[run_c1_v2_proof.sh] target_duration=86400s (24h) + UTC midnight alignment"
+echo "[run_c1_v2_proof.sh] target_duration=86400s (24h) + ${ALIGNMENT_DESC}"
 echo "[run_c1_v2_proof.sh] nohup_log=${NOHUP_LOG}"
 echo "[run_c1_v2_proof.sh] checkpoint=${CHECKPOINT_PATH}"
 
@@ -125,7 +143,7 @@ nohup python3 "${PROBE_PY}" \
     --max-restart 3 \
     --checkpoint-interval-sec 3600 \
     --ping-interval-sec 10 \
-    --start-utc-midnight \
+    "${EXTRA_FLAGS[@]}" \
     --session-id "${SESSION_ID}" \
     --output-dir "${AUDIT_DIR}" \
     > "${NOHUP_LOG}" 2>&1 &
