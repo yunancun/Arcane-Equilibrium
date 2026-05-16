@@ -2,12 +2,64 @@
 
 use super::execution_fill_helpers::{adverse_slippage_bps, fill_liquidity_role};
 use super::funding_settlement::{apply_and_emit_funding_settlement, is_funding_execution};
-use super::loop_handlers::{pending_order_accepts_fill, LoopState};
+use super::loop_handlers::{
+    dispatch_close_maker_fallback_from_pending, pending_order_accepts_fill, LoopState,
+};
 use super::pending_sweep;
 use super::types::ExchangeEvent;
 use super::unattributed_emit::try_emit_unattributed_fill;
 use crate::persistence::DualStateWriter;
+use crate::strategies::maker_rejection::{
+    close_rejection_fallback_decision, CloseMakerFallbackReason, CloseMakerRateLimitScope,
+    MakerRejectionCategory,
+};
 use crate::tick_pipeline::TickPipeline;
+
+fn close_maker_terminal_fallback_reason(
+    status: &str,
+    reject_category: &MakerRejectionCategory,
+    cancel_requested: bool,
+) -> (CloseMakerFallbackReason, Option<CloseMakerRateLimitScope>) {
+    if cancel_requested && status == "Cancelled" {
+        return (CloseMakerFallbackReason::TimeoutTaker, None);
+    }
+    match reject_category {
+        MakerRejectionCategory::PostOnlyCross | MakerRejectionCategory::TooManyPending => {
+            let decision = close_rejection_fallback_decision(reject_category);
+            (decision.reason, decision.rate_limit_scope)
+        }
+        MakerRejectionCategory::SelfCancel
+        | MakerRejectionCategory::FokCancel
+        | MakerRejectionCategory::Other(_) => (CloseMakerFallbackReason::AckLost, None),
+    }
+}
+
+fn emit_terminal_order_state_change(
+    order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+    pipeline: &TickPipeline,
+    po: &super::types::PendingOrder,
+    to_status: &str,
+    reason: String,
+    label: &'static str,
+) {
+    if let Some(tx) = order_tx {
+        let em = pipeline.effective_engine_mode().to_string();
+        let _ = crate::database::try_send_trading_msg(
+            tx,
+            crate::database::TradingMsg::OrderStateChange {
+                order_id: po.order_link_id.clone(),
+                ts_ms: openclaw_core::now_ms(),
+                from_status: Some("Working".into()),
+                to_status: to_status.to_string(),
+                filled_qty: None,
+                avg_price: None,
+                reason: Some(reason),
+                engine_mode: em,
+            },
+            label,
+        );
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Arm C: exchange events (fills / order updates / position / DCP / disconnect).
@@ -28,8 +80,9 @@ use crate::tick_pipeline::TickPipeline;
 ///     OrderStateChange with reject category label, remove tracker row.
 ///   - `PositionUpdate`: mirror exchange position state into paper_state
 ///     (B-1 Phase 2); `side="None"` / empty → flat (size=0).
-///   - `DcpTriggered`: exchange auto-cancelled all orders → clear tracker rows +
-///     `clear_all_pending_close`.
+///   - `DcpTriggered`: exchange auto-cancelled all orders → terminalize rows,
+///     clear trackers, and dispatch reduce-only market fallback for close-maker
+///     orders when a local position still exists.
 ///   - `Disconnected`: private WS down → warn with pending-order count.
 ///
 /// Note: original `continue` semantics (line 124 pre-refactor) become early
@@ -210,7 +263,7 @@ pub(super) async fn handle_exchange_event(
                     // 訊號時刻 context_id 傳入 apply_confirmed_fill，
                     // 使 trading.fills.entry_context_id 與
                     // learning.decision_features.context_id 對齊。
-                    pipeline.apply_confirmed_fill(
+                    pipeline.apply_confirmed_fill_with_close_maker_audit(
                         &exec.symbol,
                         po.is_long,
                         exec_qty,
@@ -228,6 +281,7 @@ pub(super) async fn handle_exchange_event(
                         Some(liquidity_role),
                         fill_latency_ms,
                         Some(&exec.exec_id),
+                        po.close_maker_audit.clone(),
                     );
                     snapshot_writer.force_write(&pipeline.snapshot());
 
@@ -404,7 +458,8 @@ pub(super) async fn handle_exchange_event(
                         }
                         // P0-4: If this was a close order, clear pending_close flag
                         // P0-4：如果是平倉訂單，清除待處理平倉標記
-                        if let Some(po) = state.pending_orders.get(&order.order_link_id) {
+                        let terminal_po = state.pending_orders.get(&order.order_link_id).cloned();
+                        if let Some(po) = terminal_po.as_ref() {
                             if po.is_close {
                                 pipeline.clear_pending_close(&po.symbol);
                                 tracing::warn!(
@@ -412,6 +467,20 @@ pub(super) async fn handle_exchange_event(
                                     symbol = %po.symbol,
                                     "close order {} — clearing pending_close / 平倉訂單{} — 清除待處理平倉",
                                     status, status,
+                                );
+                                let (fallback_reason, rate_limit_scope) =
+                                    close_maker_terminal_fallback_reason(
+                                        status,
+                                        &reject_category,
+                                        po.cancel_requested_ts_ms.is_some(),
+                                    );
+                                dispatch_close_maker_fallback_from_pending(
+                                    state,
+                                    pipeline,
+                                    po,
+                                    fallback_reason,
+                                    rate_limit_scope,
+                                    "order_update_terminal",
                                 );
                             }
                             // Emit order state change: Working → Cancelled/Rejected.
@@ -499,21 +568,52 @@ pub(super) async fn handle_exchange_event(
             }
         }
         Some(ExchangeEvent::DcpTriggered) => {
-            // DCP: Exchange auto-cancelled all orders
-            let count = state.pending_orders.len();
+            // DCP is a global exchange-side cancel. Close-maker orders reduce
+            // exposure, so survival-first handling tries one reduce-only market
+            // fallback when a local open position still exists; every original
+            // order also gets an explicit terminal state before trackers clear.
+            let pending: Vec<_> = state.pending_orders.values().cloned().collect();
+            let count = pending.len();
+            pipeline.clear_all_pending_close();
+            for po in &pending {
+                let mut reason = "dcp_triggered".to_string();
+                if po.is_close
+                    && po.time_in_force == Some(crate::order_manager::TimeInForce::PostOnly)
+                {
+                    let fallback_dispatched = dispatch_close_maker_fallback_from_pending(
+                        state,
+                        pipeline,
+                        po,
+                        CloseMakerFallbackReason::FallbackToTakerMandatory,
+                        None,
+                        "dcp_triggered",
+                    );
+                    reason = if fallback_dispatched {
+                        "dcp_triggered|close_maker_fallback=fallback_to_taker_mandatory".to_string()
+                    } else {
+                        "dcp_triggered|close_maker_fallback=not_dispatched".to_string()
+                    };
+                }
+                emit_terminal_order_state_change(
+                    order_tx,
+                    pipeline,
+                    po,
+                    "Cancelled",
+                    reason,
+                    "order_state_dcp_cancelled",
+                );
+            }
             if count > 0 {
                 tracing::warn!(
                     count = count,
-                    "DCP triggered — clearing {} pending orders / DCP 觸發，清除 {} 個待處理訂單",
+                    "DCP triggered — terminalized and cleared {} pending orders / DCP 觸發，終態化並清除 {} 個待處理訂單",
                     count,
                     count,
                 );
                 state.pending_orders.clear();
             }
-            // Also clear pending_close flags since DCP cancelled close orders too
-            pipeline.clear_all_pending_close();
             tracing::warn!(
-                "DCP triggered — exchange cancelled active orders, pending_close cleared"
+                "DCP triggered — exchange cancelled active orders, close-maker fallbacks attempted where safe"
             );
         }
         Some(ExchangeEvent::Disconnected) => {

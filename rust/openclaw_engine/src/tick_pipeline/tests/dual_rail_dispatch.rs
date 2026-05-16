@@ -5,6 +5,7 @@
 
 use super::super::*;
 use crate::instrument_info::{InstrumentInfoCache, SymbolSpec};
+use crate::order_manager::TimeInForce;
 use std::sync::Arc;
 
 fn ape_instrument_cache() -> Arc<InstrumentInfoCache> {
@@ -28,6 +29,36 @@ fn ape_instrument_cache() -> Arc<InstrumentInfoCache> {
         },
     );
     Arc::new(cache)
+}
+
+fn instrument_cache_for(symbol: &str, tick_size: f64) -> Arc<InstrumentInfoCache> {
+    let cache = InstrumentInfoCache::new();
+    cache.cache.write().insert(
+        symbol.to_string(),
+        SymbolSpec {
+            symbol: symbol.to_string(),
+            base_currency: symbol.trim_end_matches("USDT").to_string(),
+            quote_currency: "USDT".to_string(),
+            contract_type: "LinearPerpetual".to_string(),
+            qty_step: 0.001,
+            min_qty: 0.001,
+            max_qty: 1_000_000.0,
+            tick_size,
+            min_price: tick_size,
+            max_price: 1_000_000.0,
+            min_notional: 5.0,
+            qty_decimals: 3,
+            price_decimals: 8,
+        },
+    );
+    Arc::new(cache)
+}
+
+fn make_bbo_event(symbol: &str, last: f64, bid: f64, ask: f64, ts: u64) -> PriceEvent {
+    let mut event = super::make_event(symbol, last, ts);
+    event.bid_price = bid;
+    event.ask_price = ask;
+    event
 }
 
 // ─── I-08 Dual-Rail Stop tests (Principle #9) ───
@@ -57,6 +88,7 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         limit_price: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        close_maker_audit: None,
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,
@@ -113,6 +145,7 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         limit_price: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        close_maker_audit: None,
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,
@@ -149,6 +182,7 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         limit_price: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        close_maker_audit: None,
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,
@@ -243,6 +277,221 @@ fn test_primary_exchange_full_close_dispatches_qty_zero() {
     );
     assert!(req.is_close);
     assert!(req.is_primary);
+}
+
+#[test]
+fn test_close_maker_cold_default_keeps_positive_close_market() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.set_instrument_cache(instrument_cache_for("BTCUSDT", 0.1));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+
+    let event = make_bbo_event("BTCUSDT", 50_000.0, 49_999.9, 50_000.1, 1_700_000_060_000);
+    assert!(pipeline.execute_position_close(
+        "BTCUSDT",
+        true,
+        0.1,
+        &event,
+        true,
+        "strategy_close:grid_close_long",
+    ));
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert_eq!(req.order_type, "market");
+    assert_eq!(req.limit_price, None);
+    assert_eq!(req.time_in_force, None);
+    assert_eq!(req.maker_timeout_ms, None);
+    assert!(req.close_maker_audit.is_none());
+    assert_eq!(
+        req.qty, 0.0,
+        "cold-default market full-close keeps Bybit qty=0 close-all form"
+    );
+}
+
+#[test]
+fn test_close_maker_runtime_enable_surface_is_demo_only_and_default_false() {
+    let mut demo = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    assert!(!demo.use_maker_close());
+    assert!(demo.set_use_maker_close_runtime(true));
+    assert!(demo.use_maker_close());
+    assert!(demo.set_use_maker_close_runtime(false));
+    assert!(!demo.use_maker_close());
+
+    let mut live = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Live);
+    assert!(!live.set_use_maker_close_runtime(true));
+    assert!(!live.use_maker_close());
+
+    let mut paper = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+    assert!(!paper.set_use_maker_close_runtime(true));
+    assert!(!paper.use_maker_close());
+}
+
+#[test]
+fn test_close_maker_dispatch_postonly_spine_none() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.set_use_maker_close_for_test(true);
+    pipeline.set_instrument_cache(instrument_cache_for("BTCUSDT", 0.1));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+
+    let event = make_bbo_event("BTCUSDT", 50_000.0, 49_999.9, 50_000.1, 1_700_000_060_000);
+    assert!(pipeline.execute_position_close(
+        "BTCUSDT",
+        true,
+        0.1,
+        &event,
+        true,
+        "strategy_close:grid_close_long",
+    ));
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert_eq!(req.order_type, "limit");
+    assert_eq!(req.time_in_force, Some(TimeInForce::PostOnly));
+    assert_eq!(req.maker_timeout_ms, Some(30_000));
+    assert!(
+        (req.limit_price.expect("limit price") - 50_000.2).abs() < 1e-9,
+        "long close should price as passive sell at ask + one tick"
+    );
+    assert_eq!(req.qty, 0.1, "PostOnly limit close must carry explicit qty");
+    assert!(!req.is_long, "long position close dispatches Sell side");
+    assert!(req.spine_order_plan_id.is_none());
+    assert!(req.spine_decision_id.is_none());
+    assert!(req.spine_verdict_id.is_none());
+    assert!(req.spine_stub_report_id.is_none());
+    let audit = req.close_maker_audit.expect("close-maker audit");
+    assert_eq!(audit.initial_limit_price, Some(50_000.2));
+    assert_eq!(audit.eligible_reason, "grid_close_long");
+    assert_eq!(audit.fallback_reason, None);
+}
+
+#[test]
+fn test_close_maker_phys_lock_giveback_timeout_policy() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.set_use_maker_close_for_test(true);
+    pipeline.set_instrument_cache(instrument_cache_for("BTCUSDT", 0.1));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+
+    let event = make_bbo_event("BTCUSDT", 50_000.0, 49_999.9, 50_000.1, 1_700_000_060_000);
+    assert!(pipeline.execute_position_close(
+        "BTCUSDT",
+        true,
+        0.1,
+        &event,
+        true,
+        "risk_close:phys_lock_gate4_giveback",
+    ));
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert_eq!(req.order_type, "limit");
+    assert_eq!(req.time_in_force, Some(TimeInForce::PostOnly));
+    assert_eq!(req.maker_timeout_ms, Some(15_000));
+}
+
+#[test]
+fn test_close_maker_spread_guard_falls_back_market() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.set_use_maker_close_for_test(true);
+    pipeline.set_instrument_cache(instrument_cache_for("BTCUSDT", 0.1));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        100.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+
+    let event = make_bbo_event("BTCUSDT", 100.0, 99.0, 100.0, 1_700_000_060_000);
+    assert!(pipeline.execute_position_close(
+        "BTCUSDT",
+        true,
+        0.1,
+        &event,
+        true,
+        "strategy_close:grid_close_long",
+    ));
+
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert_eq!(req.order_type, "market");
+    assert_eq!(req.limit_price, None);
+    assert_eq!(req.time_in_force, None);
+    assert_eq!(req.maker_timeout_ms, None);
+    assert!(req.close_maker_audit.is_none());
+    assert_eq!(
+        req.qty, 0.0,
+        "strict maker skip returns to existing market full-close quantity"
+    );
+}
+
+#[test]
+fn test_ipc_close_dispatchers_remain_market_safety_paths() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.set_use_maker_close_for_test(true);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+
+    assert_eq!(pipeline.ipc_close_all(), 1);
+    let close_all = rx.try_recv().expect("ipc_close_all request");
+    assert_eq!(close_all.strategy, "ipc_close_all");
+    assert_eq!(close_all.order_type, "market");
+    assert_eq!(close_all.time_in_force, None);
+    assert!(close_all.close_maker_audit.is_none());
+
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        0.0,
+        1_700_000_070_000,
+        "grid_trading",
+    );
+    assert!(pipeline.ipc_close_symbol("BTCUSDT", None, None));
+    let close_symbol = rx.try_recv().expect("ipc_close_symbol request");
+    assert_eq!(close_symbol.strategy, "risk_close:ipc_close_symbol");
+    assert_eq!(close_symbol.order_type, "market");
+    assert_eq!(close_symbol.time_in_force, None);
+    assert!(close_symbol.close_maker_audit.is_none());
 }
 
 #[test]

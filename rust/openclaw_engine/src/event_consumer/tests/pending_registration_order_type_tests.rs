@@ -19,11 +19,11 @@
 //! (2) intent.market → row "Market"
 //! (3) 邊界（TIF=None / GTC / 未知 raw）。
 
-use crate::bybit_private_ws::ExecutionUpdate;
+use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
 use crate::database::TradingMsg;
 use crate::event_consumer::types::{ExchangeEvent, PendingOrder, PendingOrderEvent};
 use crate::order_manager::TimeInForce;
-use crate::tick_pipeline::{PipelineKind, TickPipeline};
+use crate::tick_pipeline::{CloseMakerFillAudit, OrderDispatchRequest, PipelineKind, TickPipeline};
 use openclaw_core::governance_core::{GovernanceProfile, LeaseId, LeaseOutcome};
 use tokio::sync::mpsc;
 
@@ -99,6 +99,7 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         order_type: order_type.to_string(),
         time_in_force: tif,
         maker_timeout_ms: tif.and(Some(45_000)),
+        close_maker_audit: None,
         reference_price: None,
         reference_ts_ms: None,
         reference_source: None,
@@ -109,6 +110,74 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         spine_verdict_id: None,
         spine_stub_report_id: None,
     }
+}
+
+fn close_maker_pending_order(link_id: &str) -> PendingOrder {
+    let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+    po.order_link_id = link_id.to_string();
+    po.is_long = false;
+    po.qty = 0.1;
+    po.strategy = "strategy_close:grid_close_long".to_string();
+    po.is_close = true;
+    po.context_id = "ctx-close-maker".to_string();
+    po.close_maker_audit = Some(CloseMakerFillAudit {
+        initial_limit_price: Some(50_000.2),
+        eligible_reason: "grid_close_long".to_string(),
+        fallback_reason: None,
+        rate_limit_scope: None,
+    });
+    po
+}
+
+fn terminal_order_update(link_id: &str, status: &str, reject_reason: &str) -> OrderUpdate {
+    OrderUpdate {
+        order_id: format!("bybit-{link_id}"),
+        order_link_id: link_id.to_string(),
+        symbol: "BTCUSDT".to_string(),
+        side: "Sell".to_string(),
+        order_type: "Limit".to_string(),
+        price: "50000.2".to_string(),
+        qty: "0.1".to_string(),
+        cum_exec_qty: "0".to_string(),
+        order_status: status.to_string(),
+        created_time: "1700000000000".to_string(),
+        updated_time: "1700000000123".to_string(),
+        reject_reason: reject_reason.to_string(),
+    }
+}
+
+fn seed_long_position(pipeline: &mut TickPipeline) {
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+}
+
+fn assert_close_maker_market_fallback(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<OrderDispatchRequest>,
+    expected_reason: &str,
+) {
+    let req = rx.try_recv().expect("close-maker market fallback");
+    assert_eq!(req.order_type, "market");
+    assert_eq!(req.time_in_force, None);
+    assert_eq!(req.limit_price, None);
+    assert!(req.is_close);
+    assert!(req.is_primary);
+    assert!(!req.is_long);
+    assert_eq!(req.qty, 0.1);
+    assert!(req.spine_order_plan_id.is_none());
+    assert!(req.spine_decision_id.is_none());
+    assert!(req.spine_verdict_id.is_none());
+    assert!(req.spine_stub_report_id.is_none());
+    let audit = req.close_maker_audit.expect("fallback audit");
+    assert_eq!(audit.initial_limit_price, Some(50_000.2));
+    assert_eq!(audit.eligible_reason, "grid_close_long");
+    assert_eq!(audit.fallback_reason.as_deref(), Some(expected_reason));
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -286,7 +355,15 @@ fn test_dispatch_failed_removes_pending_order_and_emits_terminal_state() {
         Some(PendingOrderEvent::DispatchFailed {
             order_link_id: link_id.clone(),
             symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.01,
+            strategy: "ma_crossover".into(),
+            context_id: "ctx-test".into(),
             is_close: true,
+            order_type: "market".into(),
+            time_in_force: None,
+            maker_timeout_ms: None,
+            close_maker_audit: None,
             terminal_status: "Rejected".into(),
             reason: "dispatch_structural: test".into(),
             ts_ms: 1_700_000_000_123,
@@ -304,6 +381,282 @@ fn test_dispatch_failed_removes_pending_order_and_emits_terminal_state() {
     assert_eq!(order_id, link_id);
     assert_eq!(to_status, "Rejected");
     assert_eq!(reason.as_deref(), Some("dispatch_structural: test"));
+}
+
+#[test]
+fn test_close_maker_dispatch_failed_dispatches_market_fallback() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (fallback_tx, mut fallback_rx) =
+        tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(fallback_tx);
+    seed_long_position(&mut pipeline);
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let po = close_maker_pending_order("oc_close_maker_dispatch_failed");
+    let link_id = po.order_link_id.clone();
+    state.pending_orders.insert(link_id.clone(), po);
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::DispatchFailed {
+            order_link_id: link_id.clone(),
+            symbol: "BTCUSDT".into(),
+            is_long: false,
+            qty: 0.1,
+            strategy: "strategy_close:grid_close_long".into(),
+            context_id: "ctx-close-maker".into(),
+            is_close: true,
+            order_type: "limit".into(),
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(30_000),
+            close_maker_audit: Some(CloseMakerFillAudit {
+                initial_limit_price: Some(50_000.2),
+                eligible_reason: "grid_close_long".into(),
+                fallback_reason: None,
+                rate_limit_scope: None,
+            }),
+            terminal_status: "Rejected".into(),
+            reason: "dispatch_structural: test".into(),
+            ts_ms: 1_700_000_000_123,
+        }),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    assert!(!state.pending_orders.contains_key(&link_id));
+    assert_close_maker_market_fallback(&mut fallback_rx, "fallback_to_taker_mandatory");
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, link_id);
+    assert_eq!(to_status, "Rejected");
+    assert_eq!(reason.as_deref(), Some("dispatch_structural: test"));
+}
+
+#[test]
+fn test_close_maker_preflight_dispatch_failed_without_pending_dispatches_market_fallback() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (fallback_tx, mut fallback_rx) =
+        tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(fallback_tx);
+    seed_long_position(&mut pipeline);
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::DispatchFailed {
+            order_link_id: "oc_close_maker_preflight".into(),
+            symbol: "BTCUSDT".into(),
+            is_long: false,
+            qty: 0.1,
+            strategy: "strategy_close:grid_close_long".into(),
+            context_id: "ctx-close-maker".into(),
+            is_close: true,
+            order_type: "limit".into(),
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(30_000),
+            close_maker_audit: Some(CloseMakerFillAudit {
+                initial_limit_price: Some(50_000.2),
+                eligible_reason: "grid_close_long".into(),
+                fallback_reason: None,
+                rate_limit_scope: None,
+            }),
+            terminal_status: "Rejected".into(),
+            reason: "dispatch_preflight_qty_zero".into(),
+            ts_ms: 1_700_000_000_123,
+        }),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    assert_close_maker_market_fallback(&mut fallback_rx, "fallback_to_taker_mandatory");
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, "oc_close_maker_preflight");
+    assert_eq!(to_status, "Rejected");
+    assert_eq!(reason.as_deref(), Some("dispatch_preflight_qty_zero"));
+}
+
+#[test]
+fn test_close_maker_fallback_market_preflight_failure_is_terminal_without_looping() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (fallback_tx, mut fallback_rx) =
+        tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(fallback_tx);
+    seed_long_position(&mut pipeline);
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::DispatchFailed {
+            order_link_id: "oc_close_maker_fallback_preflight".into(),
+            symbol: "BTCUSDT".into(),
+            is_long: false,
+            qty: 0.1,
+            strategy: "strategy_close:grid_close_long".into(),
+            context_id: "ctx-close-maker".into(),
+            is_close: true,
+            order_type: "market".into(),
+            time_in_force: None,
+            maker_timeout_ms: None,
+            close_maker_audit: Some(CloseMakerFillAudit {
+                initial_limit_price: Some(50_000.2),
+                eligible_reason: "grid_close_long".into(),
+                fallback_reason: Some("postonly_reject".into()),
+                rate_limit_scope: None,
+            }),
+            terminal_status: "Rejected".into(),
+            reason: "dispatch_preflight_min_notional".into(),
+            ts_ms: 1_700_000_000_123,
+        }),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    assert!(
+        fallback_rx.try_recv().is_err(),
+        "a failed fallback-market request must terminalize, not recursively fallback"
+    );
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, "oc_close_maker_fallback_preflight");
+    assert_eq!(to_status, "Rejected");
+    assert_eq!(reason.as_deref(), Some("dispatch_preflight_min_notional"));
+}
+
+async fn assert_close_maker_order_update_fallback(
+    status: &str,
+    reject_reason: &str,
+    cancel_requested: bool,
+    expected_reason: &str,
+) {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (fallback_tx, mut fallback_rx) =
+        tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(fallback_tx);
+    seed_long_position(&mut pipeline);
+    let mut writer = super::make_test_writer();
+    let mut state = make_loop_state();
+    let link_id = format!("oc_close_maker_{}", status.to_ascii_lowercase());
+    let mut po = close_maker_pending_order(&link_id);
+    if cancel_requested {
+        po.cancel_requested_ts_ms = Some(1_700_000_030_000);
+    }
+    state.pending_orders.insert(link_id.clone(), po);
+
+    handle_exchange_event(
+        Some(ExchangeEvent::OrderUpdate(terminal_order_update(
+            &link_id,
+            status,
+            reject_reason,
+        ))),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        None,
+    )
+    .await;
+
+    assert!(!state.pending_orders.contains_key(&link_id));
+    assert_close_maker_market_fallback(&mut fallback_rx, expected_reason);
+}
+
+#[tokio::test]
+async fn test_close_maker_postonly_reject_order_update_dispatches_market_fallback() {
+    assert_close_maker_order_update_fallback(
+        "Rejected",
+        "EC_PostOnlyWillTakeLiquidity",
+        false,
+        "postonly_reject",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_close_maker_cancelled_after_timeout_dispatches_market_fallback() {
+    assert_close_maker_order_update_fallback(
+        "Cancelled",
+        "EC_PerCancelRequest",
+        true,
+        "timeout_taker",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_close_maker_deactivated_dispatches_ack_lost_market_fallback() {
+    assert_close_maker_order_update_fallback("Deactivated", "", false, "ack_lost").await;
+}
+
+#[tokio::test]
+async fn test_close_maker_dcp_dispatches_survival_market_fallback_and_terminal_state() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (fallback_tx, mut fallback_rx) =
+        tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(fallback_tx);
+    seed_long_position(&mut pipeline);
+    let mut writer = super::make_test_writer();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+    let link_id = "oc_close_maker_dcp";
+    state
+        .pending_orders
+        .insert(link_id.into(), close_maker_pending_order(link_id));
+
+    handle_exchange_event(
+        Some(ExchangeEvent::DcpTriggered),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+
+    assert!(state.pending_orders.is_empty());
+    assert_close_maker_market_fallback(&mut fallback_rx, "fallback_to_taker_mandatory");
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, link_id);
+    assert_eq!(to_status, "Cancelled");
+    assert_eq!(
+        reason.as_deref(),
+        Some("dcp_triggered|close_maker_fallback=fallback_to_taker_mandatory")
+    );
+}
+
+#[tokio::test]
+async fn test_close_maker_dcp_without_position_emits_visible_terminal_no_fallback() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (fallback_tx, mut fallback_rx) =
+        tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(fallback_tx);
+    let mut writer = super::make_test_writer();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+    let link_id = "oc_close_maker_dcp_flat";
+    state
+        .pending_orders
+        .insert(link_id.into(), close_maker_pending_order(link_id));
+
+    handle_exchange_event(
+        Some(ExchangeEvent::DcpTriggered),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+
+    assert!(state.pending_orders.is_empty());
+    assert!(
+        fallback_rx.try_recv().is_err(),
+        "DCP must not pretend fallback was sent when local position is already flat"
+    );
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, link_id);
+    assert_eq!(to_status, "Cancelled");
+    assert_eq!(
+        reason.as_deref(),
+        Some("dcp_triggered|close_maker_fallback=not_dispatched")
+    );
 }
 
 #[test]

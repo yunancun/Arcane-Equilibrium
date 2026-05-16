@@ -10,7 +10,7 @@ use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate, PositionUpdate};
 use crate::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use crate::config::ConfigManager;
 use crate::instrument_info::InstrumentInfoCache;
-use crate::tick_pipeline::{PipelineCommand, PipelineKind};
+use crate::tick_pipeline::{CloseMakerFillAudit, PipelineCommand, PipelineKind};
 use openclaw_core::governance_core::{LeaseOutcome, LeaseTransitionSender};
 use openclaw_types::PriceEvent;
 use std::collections::HashMap;
@@ -92,6 +92,9 @@ pub struct PendingOrder {
     /// EDGE-P2-3 Phase 1B-3.2：每單 maker 掛單逾時（毫秒）。僅 PostOnly 帶值；
     /// 逾時後 sweep 以 orderLinkId 取消。Market 為 None（沿用 60s 硬移除）。
     pub maker_timeout_ms: Option<u64>,
+    /// V094: close-maker audit payload for attempted maker-first close orders.
+    /// V094：close-maker-first 平倉嘗試的審計 payload。
+    pub close_maker_audit: Option<CloseMakerFillAudit>,
     /// Dispatch-time reference used for execution slippage attribution.
     /// execution slippage 歸因用的送單時刻參考。
     pub reference_price: Option<f64>,
@@ -154,7 +157,15 @@ pub enum PendingOrderEvent {
     DispatchFailed {
         order_link_id: String,
         symbol: String,
+        is_long: bool,
+        qty: f64,
+        strategy: String,
+        context_id: String,
         is_close: bool,
+        order_type: String,
+        time_in_force: Option<crate::order_manager::TimeInForce>,
+        maker_timeout_ms: Option<u64>,
+        close_maker_audit: Option<CloseMakerFillAudit>,
         terminal_status: String,
         reason: String,
         ts_ms: u64,

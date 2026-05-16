@@ -199,6 +199,18 @@ from .checks_wp03_deploy_gate import (  # noqa: F401
     # ADR-0020 manual-only，不 auto trigger revert action）。
     check_69_wp03_ou_sigma_deploy_gate,
 )
+from .checks_close_maker_audit import (  # noqa: F401
+    # [70]-[74] Phase 1b close-maker V094 audit observability; literal
+    # [62]-[65] from frozen V094 text are rebased because [64]/[65] are
+    # already active in runner.py.
+    # [70]-[74] Phase 1b close-maker V094 audit 哨兵；V094 凍結文本的
+    # [62]-[65] 因 [64]/[65] 已占用，於 runner.py 內重排到自由 slot。
+    check_close_maker_fill_rate,
+    check_close_maker_zero_spine_lineage,
+    check_close_maker_fallback_null_ladder,
+    check_close_maker_rate_limit_backoff_coverage,
+    check_close_maker_reject_samples,
+)
 
 __all__ = [
     "main",
@@ -292,4 +304,10 @@ __all__ = [
     # deploy gate；三窗 (12h/24h/7d) trigger + revert flag advisory (ADR-0020
     # manual-only)。
     "check_69_wp03_ou_sigma_deploy_gate",
+    # [70]-[74] Phase 1b close-maker V094 audit observability.
+    "check_close_maker_fill_rate",
+    "check_close_maker_zero_spine_lineage",
+    "check_close_maker_fallback_null_ladder",
+    "check_close_maker_rate_limit_backoff_coverage",
+    "check_close_maker_reject_samples",
 ]

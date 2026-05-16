@@ -659,6 +659,12 @@ pub struct OrderDispatchRequest {
     /// EDGE-P2-3 Phase 1B-3.2：鏡射 OrderIntent.maker_timeout_ms。僅 PostOnly
     /// 帶值。event_consumer sweep 依此判斷何時以 orderLinkId 取消掛單。
     pub maker_timeout_ms: Option<u64>,
+    /// V094: close-maker audit payload. Initial PostOnly close attempts carry
+    /// `fallback_reason=None`; mandatory taker fallbacks carry the same payload
+    /// with the terminal fallback reason populated.
+    /// V094：close-maker 審計 payload。初始 PostOnly 平倉嘗試 fallback_reason=None；
+    /// 強制 taker fallback 帶原 payload 並填入終態 fallback reason。
+    pub close_maker_audit: Option<CloseMakerFillAudit>,
     /// Dispatch-time execution reference for slippage attribution. For taker
     /// orders this should be same-side BBO; fallback sources are tagged.
     /// slippage 歸因用的送單時刻參考價；taker 優先同側 BBO。
@@ -682,6 +688,16 @@ pub struct OrderDispatchRequest {
     /// ExecutionReport id；供 fill_completion 在 quality_metrics 寫
     /// stub_report_id cross-ref。
     pub spine_stub_report_id: Option<String>,
+}
+
+/// V094 close-maker audit payload carried from dispatch registration to fill.
+/// V094 close-maker 審計 payload，從派發註冊攜帶到成交寫入。
+#[derive(Debug, Clone)]
+pub struct CloseMakerFillAudit {
+    pub initial_limit_price: Option<f64>,
+    pub eligible_reason: String,
+    pub fallback_reason: Option<String>,
+    pub rate_limit_scope: Option<String>,
 }
 
 /// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.
@@ -799,6 +815,9 @@ pub struct TickPipeline {
     /// Instrument info cache for exchange precision rounding (R-05).
     /// 合約信息緩存，用於交易所精度取整。
     instrument_cache: Option<Arc<InstrumentInfoCache>>,
+    /// Phase 1b close-maker-first gate. Cold default is false until config/plumbing enables it.
+    /// Phase 1b close-maker-first 開關。冷啟動預設 false，等待後續 config/plumbing 啟用。
+    use_maker_close: bool,
     /// Channel to dispatch shadow orders to Bybit Demo API.
     /// 派發影子訂單到 Bybit Demo API 的通道。
     order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,

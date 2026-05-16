@@ -213,6 +213,11 @@ pub(super) async fn try_emit_unattributed_fill(
         // V033（2026-04-29）：unattributed audit row 無退場原因 —
         // strategy_name="unattributed:bybit_auto" 已標 audit path，無底層 close 決策可追溯。
         exit_reason: None,
+        // V094: unattributed exchange fills are not close-maker attempts.
+        // V094：未歸因交易所 fill 不是 close-maker attempt。
+        details: None,
+        close_maker_attempt: false,
+        close_maker_fallback_reason: None,
     };
     // F4-RETURN Issue 2 (2026-04-26): use send().await for back-pressure.
     // Production channel capacity is 4096 (tasks.rs:404) so this only blocks

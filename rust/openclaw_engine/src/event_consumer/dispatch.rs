@@ -12,7 +12,9 @@
 use super::types::{PendingOrder, PendingOrderEvent};
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient};
 use crate::instrument_info::InstrumentInfoCache;
-use crate::tick_pipeline::{OrderDispatchRequest, TickPipeline};
+use crate::order_manager::TimeInForce;
+use crate::strategies::common::canonical_close_maker_reason;
+use crate::tick_pipeline::{CloseMakerFillAudit, OrderDispatchRequest, TickPipeline};
 use openclaw_core::governance_core::LeaseOutcome;
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,6 +72,61 @@ fn send_decision_lease_release(
             error = %e,
             "decision lease release event dropped — ExpiryGuardian may need to sweep \
              / 決策租約釋放事件丟失，可能需由 ExpiryGuardian 清理"
+        );
+    }
+}
+
+fn close_maker_audit_for_dispatch_req(req: &OrderDispatchRequest) -> Option<CloseMakerFillAudit> {
+    req.close_maker_audit.clone().or_else(|| {
+        if req.is_close
+            && req.order_type.eq_ignore_ascii_case("limit")
+            && req.time_in_force == Some(TimeInForce::PostOnly)
+        {
+            Some(CloseMakerFillAudit {
+                initial_limit_price: req.limit_price,
+                eligible_reason: canonical_close_maker_reason(&req.strategy).to_string(),
+                fallback_reason: None,
+                rate_limit_scope: None,
+            })
+        } else {
+            None
+        }
+    })
+}
+
+fn send_close_maker_dispatch_failed(
+    pending_reg_tx: &mpsc::UnboundedSender<PendingOrderEvent>,
+    req: &OrderDispatchRequest,
+    terminal_status: &str,
+    reason: impl Into<String>,
+) {
+    if !req.is_primary || !req.is_close {
+        return;
+    }
+    let Some(close_maker_audit) = close_maker_audit_for_dispatch_req(req) else {
+        return;
+    };
+    if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
+        order_link_id: req.order_link_id.clone(),
+        symbol: req.symbol.clone(),
+        is_long: req.is_long,
+        qty: req.qty,
+        strategy: req.strategy.clone(),
+        context_id: req.context_id.clone(),
+        is_close: req.is_close,
+        order_type: req.order_type.clone(),
+        time_in_force: req.time_in_force,
+        maker_timeout_ms: req.maker_timeout_ms,
+        close_maker_audit: Some(close_maker_audit),
+        terminal_status: terminal_status.to_string(),
+        reason: reason.into(),
+        ts_ms: openclaw_core::now_ms(),
+    }) {
+        warn!(
+            order_link_id = %req.order_link_id,
+            error = %e,
+            "close-maker dispatch failure terminal event dropped \
+             / close-maker 派發失敗終態事件丟失"
         );
     }
 }
@@ -413,6 +470,12 @@ pub(super) fn spawn_order_dispatch(
             let is_qty_zero_full_close = req.is_close && req.qty == 0.0;
             if req.qty < 0.0 || (req.qty == 0.0 && !is_qty_zero_full_close) {
                 warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
+                send_close_maker_dispatch_failed(
+                    &pending_reg_tx,
+                    &req,
+                    "Rejected",
+                    "dispatch_preflight_qty_zero",
+                );
                 send_decision_lease_release(
                     &pending_reg_tx,
                     &req,
@@ -444,6 +507,15 @@ pub(super) fn spawn_order_dispatch(
                                 min_notional = spec.min_notional,
                                 "order dispatch skipped: notional below exchange minimum / 訂單跳過：名義值低於交易所最小值"
                             );
+                            send_close_maker_dispatch_failed(
+                                &pending_reg_tx,
+                                &req,
+                                "Rejected",
+                                format!(
+                                    "dispatch_preflight_min_notional: est_notional={est_notional}; min_notional={}",
+                                    spec.min_notional
+                                ),
+                            );
                             send_decision_lease_release(
                                 &pending_reg_tx,
                                 &req,
@@ -458,6 +530,7 @@ pub(super) fn spawn_order_dispatch(
             // EXT-1: Register pending order BEFORE placing (for exchange mode)
             if req.is_primary {
                 let now_ms = openclaw_core::now_ms();
+                let close_maker_audit = close_maker_audit_for_dispatch_req(&req);
                 let _ = pending_reg_tx.send(PendingOrderEvent::Register(PendingOrder {
                     order_link_id: req.order_link_id.clone(),
                     symbol: req.symbol.clone(),
@@ -481,6 +554,7 @@ pub(super) fn spawn_order_dispatch(
                     // EDGE-P2-3 Phase 1B-3.2: per-order maker sweep timeout.
                     // EDGE-P2-3 Phase 1B-3.2：每單 maker sweep 逾時。
                     maker_timeout_ms: req.maker_timeout_ms,
+                    close_maker_audit,
                     reference_price: req.reference_price,
                     reference_ts_ms: req.reference_ts_ms,
                     reference_source: req.reference_source.clone(),
@@ -669,7 +743,15 @@ pub(super) fn spawn_order_dispatch(
                         if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
                             order_link_id: req.order_link_id.clone(),
                             symbol: req.symbol.clone(),
+                            is_long: req.is_long,
+                            qty: req.qty,
+                            strategy: req.strategy.clone(),
+                            context_id: req.context_id.clone(),
                             is_close: req.is_close,
+                            order_type: req.order_type.clone(),
+                            time_in_force: req.time_in_force,
+                            maker_timeout_ms: req.maker_timeout_ms,
+                            close_maker_audit: req.close_maker_audit.clone(),
                             terminal_status: "Rejected".to_string(),
                             reason,
                             ts_ms: openclaw_core::now_ms(),
@@ -719,7 +801,15 @@ pub(super) fn spawn_order_dispatch(
                         if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
                             order_link_id: req.order_link_id.clone(),
                             symbol: req.symbol.clone(),
+                            is_long: req.is_long,
+                            qty: req.qty,
+                            strategy: req.strategy.clone(),
+                            context_id: req.context_id.clone(),
                             is_close: req.is_close,
+                            order_type: req.order_type.clone(),
+                            time_in_force: req.time_in_force,
+                            maker_timeout_ms: req.maker_timeout_ms,
+                            close_maker_audit: req.close_maker_audit.clone(),
                             terminal_status: "Failed".to_string(),
                             reason,
                             ts_ms: openclaw_core::now_ms(),

@@ -24,6 +24,7 @@ use super::{
     DEFAULT_QTY_PER_GRID, DEFAULT_USE_MAKER_ENTRY, REJECT_BACKOFF_MS,
 };
 use crate::strategies::grid_helpers::GridSpacingMode;
+use crate::strategies::maker_rejection::CloseMakerBackoffState;
 use crate::strategies::StrategyParams;
 
 impl GridTrading {
@@ -59,6 +60,7 @@ impl GridTrading {
             // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
             reject_cooldown_entry_until_ms: HashMap::new(),
             reject_cooldown_close_until_ms: HashMap::new(),
+            close_maker_backoff: CloseMakerBackoffState::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
@@ -118,6 +120,7 @@ impl GridTrading {
             // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
             reject_cooldown_entry_until_ms: HashMap::new(),
             reject_cooldown_close_until_ms: HashMap::new(),
+            close_maker_backoff: CloseMakerBackoffState::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
@@ -191,6 +194,7 @@ impl GridTrading {
             // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
             reject_cooldown_entry_until_ms: HashMap::new(),
             reject_cooldown_close_until_ms: HashMap::new(),
+            close_maker_backoff: CloseMakerBackoffState::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,

@@ -19,6 +19,10 @@ pub mod per_symbol_state;
 pub mod trend_cooldown;
 
 pub use confidence_builder::ConfidenceBuilder;
-pub use maker_price::{compute_post_only_price, MakerPriceInputs};
+pub use maker_price::{
+    canonical_close_maker_reason, close_maker_price_policy, compute_close_limit_price,
+    compute_post_only_price, is_close_maker_market_only_reason, is_close_maker_positive_reason,
+    CloseMakerPricePolicy, MakerPriceInputs,
+};
 pub use per_symbol_state::PerSymbolState;
 pub use trend_cooldown::TrendCooldown;

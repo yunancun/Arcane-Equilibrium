@@ -259,6 +259,13 @@ impl TickPipeline {
                     // (入場策略 enum, exit_reason)。pre-close snapshot 提供
                     // owner_strategy；close_tag 仍供下方 exit_features 分類。
                     exit_reason: db_exit_reason,
+                    // V094: no close-maker behavior is implemented here yet;
+                    // preserve market-close cold defaults for audit columns.
+                    // V094：此處尚未實作 close-maker 行為；audit 欄位保持
+                    // market-close cold default。
+                    details: None,
+                    close_maker_attempt: false,
+                    close_maker_fallback_reason: None,
                 },
                 "close_fill",
             );

@@ -24,7 +24,10 @@ use tracing::{info, warn};
 
 use super::GridTrading;
 use crate::intent_processor::OrderIntent;
-use crate::strategies::maker_rejection::MakerRejectionCategory;
+use crate::strategies::maker_rejection::{
+    close_rejection_fallback_decision, CloseMakerFallbackReason, CloseMakerRateLimitScope,
+    MakerRejectionCategory,
+};
 
 impl GridTrading {
     /// G-SR-1 A3: Compute trend-adjusted cooldown for a symbol.
@@ -232,33 +235,60 @@ impl GridTrading {
         );
     }
 
-    /// EDGE-P2-3 Phase 1b BB-MF-3 (2026-05-16) — close-side maker rejection
-    /// cooldown 寫入 helper。對應 spec v1.2 §6.1 dispatch table：
+    /// EDGE-P2-3 Phase 1b B-3A (2026-05-16) — close-side maker rejection
+    /// cooldown/backoff helper。對應 spec §5 state machine + §6.1 dispatch table：
     ///   - `MakerRejectionCategory::PostOnlyCross` → no-op（spec §5.3 Race C：
     ///     價已過則直接 market，不進 close cooldown）
-    ///   - `MakerRejectionCategory::TooManyPending` → 5min 固定（spec §5.4
-    ///     dynamic backoff per-symbol exp + global cascade 屬獨立工作項，
-    ///     本 prereq 不實作）
+    ///   - `MakerRejectionCategory::TooManyPending` → dynamic per-symbol
+    ///     backoff 1s→60s + 10-symbol/1min global 5min pause（spec §5.4）
     ///   - 其他類別（FokCancel / SelfCancel / Other） → 1min default
-    /// 寫入 `reject_cooldown_close_until_ms`，下游 close path 的 maker-first
-    /// gate 在 Phase 1b 主軸 IMPL 後生效（cooldown 期內走 market fallback）。
-    /// **本 prereq commit 不接線生產 dispatcher**（commands.rs 仍 hard-coded
-    /// market），由單元測試驗證 helper 行為與 entry/close 隔離不變式。
-    /// Saturating add 防 i64 溢出。
+    /// 寫入 `reject_cooldown_close_until_ms` 並保留 `close_maker_backoff` state，
+    /// 下游 close dispatch 可用 `close_maker_rate_limit_scope()` 判斷 direct
+    /// market fallback 與 `details.rate_limit_scope`。本 helper 不接線
+    /// commands.rs / dispatch.rs；它只提供 future close dispatch 的 source/test
+    /// primitive。Saturating add 防 i64 溢出。
     pub(super) fn arm_close_cooldown_impl(
         &mut self,
         symbol: &str,
         ts_ms: i64,
         category: &MakerRejectionCategory,
     ) {
+        let fallback = close_rejection_fallback_decision(category);
+        debug_assert!(
+            fallback.market_fallback_required,
+            "close-maker rejection paths must never abandon close execution"
+        );
+
+        if matches!(category, MakerRejectionCategory::TooManyPending) {
+            let now_ms = ts_ms.max(0) as u64;
+            let decision = self
+                .close_maker_backoff
+                .record_too_many_pending(symbol.to_string(), now_ms);
+            self.reject_cooldown_close_until_ms
+                .insert(symbol.to_string(), decision.next_eligible_ms);
+            warn!(
+                strategy = "grid_trading",
+                %symbol,
+                ts_ms,
+                cooldown_ms = decision.backoff_ms,
+                cooldown_until_ms = decision.next_eligible_ms,
+                category = %category.label(),
+                side = "close",
+                fallback_reason = %decision.fallback_reason.as_str(),
+                rate_limit_scope = %decision.rate_limit_scope.as_str(),
+                global_pause_until_ms = ?decision.global_pause_until_ms,
+                "close maker TooManyPending — armed dynamic close backoff \
+                 / close maker TooManyPending — 已設動態 close 退避"
+            );
+            return;
+        }
+
         // 路由規則：依 category 決定 cooldown_ms（None = 不進 close cooldown）。
         let cooldown_ms: Option<u64> = match category {
             // spec §5.3 Race C：PostOnlyCross close 走 market，不 arm cooldown。
             MakerRejectionCategory::PostOnlyCross => None,
-            // spec §6.1 + PM Wave 2b 任務：TooManyPending close → 5min 固定。
-            MakerRejectionCategory::TooManyPending => {
-                Some(super::CLOSE_REJECT_COOLDOWN_TOO_MANY_PENDING_MS)
-            }
+            // TooManyPending handled above by dynamic backoff state.
+            MakerRejectionCategory::TooManyPending => unreachable!("handled above"),
             // 其他 reject 類別走 1min default（per spec §6.1 表「其他 reject → 1min」）。
             MakerRejectionCategory::FokCancel
             | MakerRejectionCategory::SelfCancel
@@ -273,6 +303,7 @@ impl GridTrading {
                 ts_ms,
                 category = %category.label(),
                 side = "close",
+                fallback_reason = %CloseMakerFallbackReason::PostOnlyReject.as_str(),
                 "close postonly_cross — bypass cooldown, fall back to market \
                  / close 路徑 PostOnly 拒絕 — 跳過 cooldown，走 market"
             );
@@ -292,6 +323,8 @@ impl GridTrading {
             cooldown_until_ms,
             category = %category.label(),
             side = "close",
+            fallback_reason = %CloseMakerFallbackReason::AckLost.as_str(),
+            rate_limit_scope = ?Option::<CloseMakerRateLimitScope>::None,
             "close maker rejected by exchange — armed close reject cooldown \
              / 交易所拒絕 close maker — 已設 close 冷卻"
         );

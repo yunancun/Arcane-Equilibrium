@@ -482,6 +482,235 @@ fn apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing() {
 }
 
 #[test]
+fn apply_confirmed_fill_persists_close_maker_audit_payload() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+    pipeline.set_trading_channel(tx);
+
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        1.0,
+        1_000,
+        "grid_trading",
+        "ctx-open",
+        "oc_open",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    pipeline.apply_confirmed_fill_with_close_maker_audit(
+        "BTCUSDT",
+        false,
+        0.1,
+        51_000.0,
+        1.0,
+        2_000,
+        "strategy_close:grid_close_long",
+        "ctx-close",
+        "oc_close_maker",
+        None,
+        Some(51_000.1),
+        Some(1_990),
+        Some("dispatch_last_fallback"),
+        None,
+        Some("maker"),
+        Some(10),
+        Some("exec-close-maker"),
+        Some(CloseMakerFillAudit {
+            initial_limit_price: Some(51_000.1),
+            eligible_reason: "grid_close_long".into(),
+            fallback_reason: None,
+            rate_limit_scope: None,
+        }),
+    );
+
+    let _open = rx.try_recv().expect("open fill");
+    let close = rx.try_recv().expect("close fill");
+    match close {
+        crate::database::TradingMsg::Fill {
+            details,
+            close_maker_attempt,
+            close_maker_fallback_reason,
+            liquidity_role,
+            ..
+        } => {
+            assert!(close_maker_attempt);
+            assert_eq!(close_maker_fallback_reason, None);
+            assert_eq!(liquidity_role.as_deref(), Some("maker"));
+            let details = details.expect("close-maker details");
+            assert_eq!(
+                details["close_initial_limit_price"],
+                serde_json::json!(51_000.1)
+            );
+            assert_eq!(
+                details["close_final_fill_price"],
+                serde_json::json!(51_000.0)
+            );
+            assert_eq!(
+                details["close_maker_eligible_reason"],
+                serde_json::json!("grid_close_long")
+            );
+        }
+        other => panic!("expected Fill, got {other:?}"),
+    }
+}
+
+#[test]
+fn apply_confirmed_fill_persists_close_maker_fallback_reason() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+    pipeline.set_trading_channel(tx);
+
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        1.0,
+        1_000,
+        "grid_trading",
+        "ctx-open",
+        "oc_open",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    pipeline.apply_confirmed_fill_with_close_maker_audit(
+        "BTCUSDT",
+        false,
+        0.1,
+        51_000.0,
+        1.0,
+        2_000,
+        "strategy_close:grid_close_long",
+        "ctx-close",
+        "oc_close_maker_fallback",
+        None,
+        Some(51_000.1),
+        Some(1_990),
+        Some("close_maker_fallback"),
+        Some(0.1),
+        Some("taker"),
+        Some(10),
+        Some("exec-close-maker-fallback"),
+        Some(CloseMakerFillAudit {
+            initial_limit_price: Some(51_000.1),
+            eligible_reason: "grid_close_long".into(),
+            fallback_reason: Some("postonly_reject".into()),
+            rate_limit_scope: None,
+        }),
+    );
+
+    let _open = rx.try_recv().expect("open fill");
+    let close = rx.try_recv().expect("close fill");
+    match close {
+        crate::database::TradingMsg::Fill {
+            details,
+            close_maker_attempt,
+            close_maker_fallback_reason,
+            liquidity_role,
+            ..
+        } => {
+            assert!(close_maker_attempt);
+            assert_eq!(
+                close_maker_fallback_reason.as_deref(),
+                Some("postonly_reject")
+            );
+            assert_eq!(liquidity_role.as_deref(), Some("taker"));
+            let details = details.expect("close-maker details");
+            assert_eq!(
+                details["close_maker_fallback_reason"],
+                serde_json::json!("postonly_reject")
+            );
+        }
+        other => panic!("expected Fill, got {other:?}"),
+    }
+}
+
+#[test]
+fn apply_confirmed_fill_persists_close_maker_rate_limit_scope_detail() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+    pipeline.set_trading_channel(tx);
+
+    pipeline.apply_confirmed_fill(
+        "BTCUSDT",
+        true,
+        0.1,
+        50_000.0,
+        1.0,
+        1_000,
+        "grid_trading",
+        "ctx-open",
+        "oc_open",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    pipeline.apply_confirmed_fill_with_close_maker_audit(
+        "BTCUSDT",
+        false,
+        0.1,
+        51_000.0,
+        1.0,
+        2_000,
+        "strategy_close:grid_close_long",
+        "ctx-close",
+        "oc_close_maker_rate_limit",
+        None,
+        Some(51_000.1),
+        Some(1_990),
+        Some("close_maker_fallback"),
+        None,
+        Some("taker"),
+        Some(10),
+        Some("exec-close-maker-rate-limit"),
+        Some(CloseMakerFillAudit {
+            initial_limit_price: Some(51_000.1),
+            eligible_reason: "grid_close_long".into(),
+            fallback_reason: Some("rate_limit_backoff_per_symbol".into()),
+            rate_limit_scope: Some("per_symbol".into()),
+        }),
+    );
+
+    let _open = rx.try_recv().expect("open fill");
+    let close = rx.try_recv().expect("close fill");
+    match close {
+        crate::database::TradingMsg::Fill {
+            details,
+            close_maker_fallback_reason,
+            ..
+        } => {
+            assert_eq!(
+                close_maker_fallback_reason.as_deref(),
+                Some("rate_limit_backoff_per_symbol")
+            );
+            let details = details.expect("close-maker details");
+            assert_eq!(details["rate_limit_scope"], serde_json::json!("per_symbol"));
+        }
+        other => panic!("expected Fill, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_dbrun3_close_position_returns_pnl() {
     let mut p = TickPipeline::new(&["BTCUSDT"]);
     // Open long at 50k, close at 51k → +0.1 * 1000 = +$100 realized
