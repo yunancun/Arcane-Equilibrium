@@ -2578,3 +2578,17 @@ Operator 接續 Tier 8 sign-off 後說「繼續派」。PM 按 Tier 8 §8 推薦
 - TODO updated to v33 with new section 11.6 (13 WPs + wave assignments).
 - Approved report: `srv/2026-05-16--full-system-audit-fix-plan.md` (PM sign-off appended).
 - Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--12-agent-audit-pm-signoff.md
+
+## 2026-05-16 Stage 1 Demo + A4-C Tombstone Cleanup
+
+- Operator confirmed paper should not be promotion evidence; promotion must rely
+  on Demo. PM cleaned active docs accordingly.
+- Active docs now keep Stage 1 as Demo-only after future green Stage 0R. There
+  is no active W3 paper cohort marker.
+- A4-C is tombstoned in active docs: keep `panel.btc_lead_lag_panel` and `[57]`
+  for diagnostics only; do not use A4-C as Stage 0R promotion candidate or
+  Stage 1 Demo cohort source.
+- Detailed A4-C Step 5b/RCA evidence remains archived; active TODO keeps only
+  the guard to prevent accidental revival from old specs.
+- No runtime, DB, auth, risk, strategy, paper, demo, LiveDemo, or live mutation.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md
