@@ -5,14 +5,19 @@ Role: PM
 
 ## Verdict
 
-CONDITIONAL before deploy: source/test is green enough to sync, and rebuild is required because v35 contains Rust runtime changes.
+DONE: source/test was green enough to sync, three-side source sync completed, and the required v35 rebuild/restart completed on `trade-core`.
 
 ## Facts Verified
 
 - Mac source before docs sync: `a7cb517f` after WP-13 leftover P1 fix.
 - Origin before push: `864f4e81`.
-- Linux `trade-core` after fetch: clean but behind origin by 1 before this v35 sync.
+- Linux `trade-core` after fetch: clean but behind origin by 1 before this v35 sync; later fast-forwarded to `5f6f3edf`.
 - Runtime before rebuild: engine PID `4153823`, API PID `4153920`; prior runtime binary line remained `7b33ab2e`.
+- Three-side sync after docs/source commits: Mac/origin/Linux clean at `5f6f3edf`.
+- Rebuild command on Linux: `PATH=$HOME/.cargo/bin:$PATH bash helper_scripts/restart_all.sh --rebuild --keep-auth`.
+- Runtime after rebuild: engine PID `69581`, API PID `69674`; watchdog `engine_alive=true`, demo fresh.
+- Live status after rebuild: inactive/stale because signed live authorization is absent. `--keep-auth` preserved the missing-auth state and did not renew auth.
+- Paper status after rebuild: engine env has `OPENCLAW_ENABLE_PAPER=0`; engine log says paper pipeline disabled and `paper_state.disabled=true`. A fresh paper marker is a disabled-state write, not active Paper trading.
 - C1 liquidation proof is no longer running. Latest report: `FAIL_CONNECTION`, finished `2026-05-16T00:37:25Z`, observed `17055.2s/86400s`, `allLiquidation.BTCUSDT` messages = 15, subscribe failures = 0, blocker = connection lost.
 
 ## WP-13 Leftover Closure
@@ -32,10 +37,10 @@ Verification:
 
 ## Rebuild Decision
 
-Rebuild is required after source sync:
+Rebuild was required after source sync and has been completed:
 - Rust runtime files changed in WP-03/WP-10/WP-13 and v35 leftover close
-- Linux runtime still runs the prior rebuilt binary line before deployment
 - `restart_all.sh --rebuild --keep-auth` is the repo-default rebuild path
+- Linux runtime had been on the prior rebuilt binary line before deployment; it now runs the post-v35 rebuilt binary
 
 Boundary:
 - no live auth renewal
@@ -46,4 +51,10 @@ Boundary:
 
 ## Post-Deploy Section
 
-Pending at report creation time. Fill after Linux source sync and rebuild.
+Post-deploy verification:
+- Mac HEAD/origin/main/Linux HEAD are aligned at `5f6f3edf`.
+- Linux runtime processes are running: engine PID `69581`, API PID `69674`.
+- Watchdog confirms engine alive and demo fresh.
+- Paper remains disabled by `OPENCLAW_ENABLE_PAPER=0`; do not treat fresh `paper_state.disabled=true` as active paper execution.
+- Live remains inactive because signed live authorization is absent; true-live remains blocked.
+- The next code-bearing change will require a fresh rebuild decision. The post-deploy documentation-only sync does not require another rebuild.
