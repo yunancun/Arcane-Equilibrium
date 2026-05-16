@@ -1789,5 +1789,87 @@ fn test_p1_portfolio_resting_finite_guards_filter_bad_inputs() {
     assert!((corr - 0.5).abs() < 1e-4, "corr={}", corr);
 }
 
+#[test]
+fn test_resting_entry_qty_correlated_pair_blocks_oversize() {
+    // P1-PORTFOLIO-RESTING-EXPOSURE-1 end-to-end gate integration test
+    // （per dispatch §「Task 3」第三個 test，補既有 7 個 helper-level unit
+    // test 沒有覆蓋的「compute_correlated_exposure_pct → check_order_allowed
+    // → Reject」全 chain 行為）：
+    //
+    // 場景：兩 symbol 同方向 entry-side resting maker pending（all crypto
+    // highly correlated），「correlated_pair」portfolio 暴露面剛好觸碰
+    // correlated_exposure_max_pct（default 60%）→ 任何 oversize new entry
+    // 都應被 risk_checks::check_order_allowed 拒絕。
+    //
+    //   balance = 10_000 USDT
+    //   filled long BTC 0.04 × 50_000 = 2_000 USDT（long bucket = 2_000）
+    //   entry-side long ETH resting 1.0 × 4_000 = 4_000 USDT
+    //     → effective_long = 2_000 + 4_000 = 6_000
+    //     → correlated_exposure_pct = 6_000 / 10_000 × 100 = 60.0
+    //
+    // 修前回歸 baseline（A3 verify report §2）：portfolio gate 對
+    // resting 完全 invisible → long bucket 只有 BTC filled 2_000 →
+    // correlated = 20% → check_order_allowed 永遠 allow → systemic
+    // under-estimate，新 entry 漏網風險超標。
+    //
+    // 修後不變式（per CLAUDE.md §二 原則 5/6/16）：portfolio gate 把
+    // entry-side resting 計入 effective notional → correlated ≥ 60%
+    // → 任何 oversize new entry 被 Reject「correlated exposure ≥
+    // limit」reason 字串，避免新單把多 symbol pair 推到超 limit 的
+    // 同方向集中暴露面。
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    state.set_latest_price("ETH", 4_000.0);
+    state.import_positions(vec![("BTC".into(), true, 0.04, 50_000.0, 0)]);
+    seed_resting(
+        &mut state,
+        vec![make_resting_order("ETH", true, 1.0, 4_000.0)],
+    );
+
+    // 先用 helper 確認 effective notional + correlated_exposure_pct 落在預期值，
+    // 避免 check_order_allowed 因 limit 邏輯內部別的 gate（leverage / position size）
+    // 提前拒絕而誤判 root cause。
+    let (eff_long, eff_short) = IntentProcessor::compute_effective_long_short_notional(&state);
+    assert!(
+        (eff_long - 6_000.0).abs() < 1e-4 && eff_short.abs() < 1e-4,
+        "effective notional should be (6000, 0), got ({}, {})",
+        eff_long,
+        eff_short,
+    );
+    let corr = IntentProcessor::compute_correlated_exposure_pct(&state);
+    assert!(
+        (corr - 60.0).abs() < 1e-4,
+        "correlated_exposure_pct should sit at the 60% cap, got {}",
+        corr,
+    );
+
+    // 模擬一筆 small new long entry intent（ETH 0.001 × 4_000 = 4 USDT）。
+    // 量很小所以 position_size / leverage / daily_loss 全 PASS，必然落在
+    // correlated_exposure_pct ≥ 60 這條 reject 規則上。
+    let cfg = RiskConfig::default();
+    let check = crate::risk_checks::check_order_allowed(
+        0.001,
+        4_000.0,
+        state.balance(),
+        IntentProcessor::compute_exposure_pct(&state),
+        corr,
+        IntentProcessor::compute_leverage(&state),
+        0.0,
+        false, // is_reducing=false：新開倉走完整 gate
+        &cfg,
+    );
+    assert!(
+        !check.allowed,
+        "oversize new entry should be blocked by correlated exposure cap; \
+         reason={}",
+        check.reason,
+    );
+    assert!(
+        check.reason.contains("correlated exposure"),
+        "reject reason should pinpoint correlated_exposure_pct gate, got '{}'",
+        check.reason,
+    );
+}
+
 // Larger nested modules are split out to keep this file under the LOC cap.
 include!("tests_predictor_router.rs");
