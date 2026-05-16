@@ -1,7 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-16（Wave 4 Phase 1 closed: WP-11 test fixes）
+> 最後更新：2026-05-16（TODO v36 completion cleanup）
+
+### TODO v36 Completion Cleanup — 2026-05-16
+
+**Archive**: `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`
+
+Completed v35 / 2026-05-15..16 TODO detail was cross-checked against referenced commits and PM/E2/E4/BB reports, then moved out of the active queue. `TODO.md` v36 keeps active blockers, dependency gates, deferred work, and runnable backlog only.
+
+Retained active blockers include W-AUDIT-8a C1 after `FAIL_CONNECTION`, W-AUDIT-8b read-only Stage 0R, true-live `P0-EDGE-1` / LG / OPS gates, Wave 3.5 Linux migration backlog, and `P1-BBMF3-WIRE-1` production callback wiring.
+
+---
 
 ### Wave 4 Phase 1 CLOSED — WP-11 Test Infrastructure (15 test fixes) — 2026-05-16
 
