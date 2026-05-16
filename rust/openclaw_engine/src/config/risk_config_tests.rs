@@ -1071,11 +1071,18 @@ fn test_g7_04_cusum_partial_toml_falls_back_to_defaults() {
 fn test_strategist_config_defaults() {
     // Default `max_param_delta_pct = 0.50` must match the W-AUDIT-7
     // source-of-truth cap. Default RiskConfig must also pass validate().
+    // F-09 MODEL-TIER-EXTRACTION (2026-05-16): 同時驗證 default `model_tier`
+    // == "l1_9b"（source default 與 Python `_handle_strategist` default 對齊）。
     // 預設 max_param_delta_pct=0.50 必須與 W-AUDIT-7 source 值一致；validate() 必須通過。
+    // F-09：default model_tier="l1_9b" 與 Python default 對齊。
     let cfg = StrategistConfig::default();
     assert!(
         (cfg.max_param_delta_pct - 0.50).abs() < 1e-12,
         "default max_param_delta_pct must be 0.50 (W-AUDIT-7 source cap)"
+    );
+    assert_eq!(
+        cfg.model_tier, "l1_9b",
+        "default model_tier must be \"l1_9b\" (F-09 backward compat with Python default)"
     );
     assert!(
         cfg.validate().is_ok(),
@@ -1087,6 +1094,10 @@ fn test_strategist_config_defaults() {
         (rc.strategist.max_param_delta_pct - 0.50).abs() < 1e-12,
         "RiskConfig::default().strategist.max_param_delta_pct must be 0.50"
     );
+    assert_eq!(
+        rc.strategist.model_tier, "l1_9b",
+        "RiskConfig::default().strategist.model_tier must be \"l1_9b\""
+    );
     assert!(rc.validate().is_ok(), "default RiskConfig must validate");
 }
 
@@ -1095,10 +1106,13 @@ fn test_strategist_config_validate_ok() {
     // Mid-interval values cover the design envelope: tight 0.05 (operator
     // wants very small per-cycle moves) through default 0.50 to relaxed 0.99
     // (just below the 1.0 ceiling). All three must validate.
+    // F-09：用 ..Default::default() spread 才會帶入 default model_tier；
+    // 直接 struct literal 漏新欄位會 compile error，這也是 F-09 設計目的之一。
     // 驗證 0.50 / 0.05 / 0.99 — 設計信封內的緊/中/鬆三個代表值，皆需通過。
     for v in [0.50_f64, 0.05_f64, 0.99_f64] {
         let cfg = StrategistConfig {
             max_param_delta_pct: v,
+            ..Default::default()
         };
         assert!(
             cfg.validate().is_ok(),
@@ -1117,6 +1131,7 @@ fn test_strategist_config_validate_rejects_zero_or_negative() {
     for bad in [0.0_f64, -0.1_f64, -1.0_f64] {
         let cfg = StrategistConfig {
             max_param_delta_pct: bad,
+            ..Default::default()
         };
         assert!(
             cfg.validate().is_err(),
@@ -1135,6 +1150,7 @@ fn test_strategist_config_validate_rejects_ge_one() {
     for bad in [1.0_f64, 1.5_f64, 2.0_f64, 100.0_f64] {
         let cfg = StrategistConfig {
             max_param_delta_pct: bad,
+            ..Default::default()
         };
         assert!(
             cfg.validate().is_err(),
@@ -1153,6 +1169,7 @@ fn test_strategist_config_validate_rejects_nan_inf() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let cfg = StrategistConfig {
             max_param_delta_pct: bad,
+            ..Default::default()
         };
         assert!(
             cfg.validate().is_err(),
@@ -1162,11 +1179,46 @@ fn test_strategist_config_validate_rejects_nan_inf() {
     }
 }
 
+/// F-09 MODEL-TIER-EXTRACTION (2026-05-16)：`validate()` 必須拒空字串 / 純空白
+/// `model_tier`。不綁 enum 保留 future tier 名變動空間，但空 / 純空白完全失去
+/// 「指明 Ollama 模型」語義，必須早期失敗讓 misconfigured TOML 不進 hot path。
+#[test]
+fn test_strategist_config_validate_rejects_empty_or_whitespace_model_tier() {
+    for bad in ["", " ", "\t", "\n", "   \t\n  "] {
+        let cfg = StrategistConfig {
+            model_tier: bad.to_string(),
+            ..Default::default()
+        };
+        assert!(
+            cfg.validate().is_err(),
+            "model_tier={:?} must reject (empty/whitespace not a valid Ollama tier)",
+            bad
+        );
+    }
+
+    // 合理 tier 字串必須通過（不綁 enum，operator 可填任意 routing key）。
+    for ok in ["l1_9b", "l1_27b", "l1_5", "l2", "haiku", "  l1_9b  "] {
+        // 注意：尾隨空白技術上 trim 後非空 → 通過；caller 不應依賴 trim，
+        // 但 validate() 不該 reject 這種 case。Python 端用字串完全等值比對，
+        // operator 自己 maintain 不帶 padding。
+        let cfg = StrategistConfig {
+            model_tier: ok.to_string(),
+            ..Default::default()
+        };
+        assert!(
+            cfg.validate().is_ok(),
+            "model_tier={:?} must validate (non-empty after trim)",
+            ok
+        );
+    }
+}
+
 #[test]
 fn test_strategist_config_toml_roundtrip() {
     // Operator-edited [strategist] section in risk_config_{demo,live,paper}.toml
     // must survive Rust ConfigStore reload bit-for-bit, otherwise an IPC
     // hot-reload would silently revert to defaults.
+    // F-09：同時驗 model_tier 字串 round-trip 保形。
     // 自訂 [strategist] 經 TOML round-trip 必須無損保留。
     let toml_str = r#"
         [meta]
@@ -1175,22 +1227,30 @@ fn test_strategist_config_toml_roundtrip() {
 
         [strategist]
         max_param_delta_pct = 0.50
+        model_tier = "l1_27b"
     "#;
     let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
     assert!(
         (cfg.strategist.max_param_delta_pct - 0.50).abs() < 1e-12,
         "TOML [strategist] section must parse max_param_delta_pct=0.50"
     );
+    assert_eq!(
+        cfg.strategist.model_tier, "l1_27b",
+        "TOML [strategist] section must parse model_tier=\"l1_27b\""
+    );
     assert!(cfg.validate().is_ok());
 
     // Round-trip via to_string + from_str preserves the value across the
     // serde boundary (catches any Serialize/Deserialize asymmetry).
+    // F-09：model_tier 也走同 round-trip。
     // Round-trip 也驗證 Serialize/Deserialize 對稱。
     let mut custom = RiskConfig::default();
     custom.strategist.max_param_delta_pct = 0.45;
+    custom.strategist.model_tier = "l1_5".to_string();
     let s = toml::to_string(&custom).unwrap();
     let de: RiskConfig = toml::from_str(&s).unwrap();
     assert!((de.strategist.max_param_delta_pct - 0.45).abs() < 1e-12);
+    assert_eq!(de.strategist.model_tier, "l1_5");
     assert!(de.validate().is_ok());
 }
 
@@ -1199,6 +1259,7 @@ fn test_strategist_config_partial_fallback() {
     // TOML missing [strategist] section entirely → #[serde(default)] returns
     // the canonical default (0.50). This covers legacy/minimal TOML that has
     // not materialized the [strategist] section yet.
+    // F-09：缺欄位時 model_tier 也回 default "l1_9b"。
     // TOML 缺 [strategist] 區段 → #[serde(default)] 補 source 預設 0.50。
     let toml_str = r#"
         [meta]
@@ -1210,11 +1271,15 @@ fn test_strategist_config_partial_fallback() {
         (cfg.strategist.max_param_delta_pct - 0.50).abs() < 1e-12,
         "absent [strategist] section must default to 0.50"
     );
+    assert_eq!(
+        cfg.strategist.model_tier, "l1_9b",
+        "absent [strategist] section must default model_tier=\"l1_9b\""
+    );
     assert!(cfg.validate().is_ok());
 
     // Empty `[strategist]` section (operator left it blank intentionally) ->
     // same default fallback applies (#[serde(default = "...")]) on the field.
-    // 空白 [strategist] 區段同樣回 0.50。
+    // 空白 [strategist] 區段同樣回 0.50 + "l1_9b"。
     let toml_empty = r#"
         [meta]
         version = 1
@@ -1227,7 +1292,42 @@ fn test_strategist_config_partial_fallback() {
         (cfg2.strategist.max_param_delta_pct - 0.50).abs() < 1e-12,
         "empty [strategist] section must default to 0.50"
     );
+    assert_eq!(
+        cfg2.strategist.model_tier, "l1_9b",
+        "empty [strategist] section must default model_tier=\"l1_9b\""
+    );
     assert!(cfg2.validate().is_ok());
+
+    // F-09 partial fill：只填 max_param_delta_pct 不填 model_tier，後者必補 default。
+    let toml_only_delta = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+
+        [strategist]
+        max_param_delta_pct = 0.25
+    "#;
+    let cfg3: RiskConfig = toml::from_str(toml_only_delta).unwrap();
+    assert!((cfg3.strategist.max_param_delta_pct - 0.25).abs() < 1e-12);
+    assert_eq!(
+        cfg3.strategist.model_tier, "l1_9b",
+        "partial [strategist] missing model_tier must default to \"l1_9b\""
+    );
+    assert!(cfg3.validate().is_ok());
+
+    // F-09 partial fill：只填 model_tier 不填 max_param_delta_pct，後者補 0.50。
+    let toml_only_tier = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+
+        [strategist]
+        model_tier = "l1_27b"
+    "#;
+    let cfg4: RiskConfig = toml::from_str(toml_only_tier).unwrap();
+    assert!((cfg4.strategist.max_param_delta_pct - 0.50).abs() < 1e-12);
+    assert_eq!(cfg4.strategist.model_tier, "l1_27b");
+    assert!(cfg4.validate().is_ok());
 }
 
 // G2-03 (2026-04-26) per-strategy override tests live in a dedicated sibling

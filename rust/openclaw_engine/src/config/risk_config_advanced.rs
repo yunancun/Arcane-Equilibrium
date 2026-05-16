@@ -1198,6 +1198,13 @@ impl GridOuConfig {
 /// W-AUDIT-7 source 預設 0.50（±50%），operator 可透過 IPC `patch_risk_config`
 /// `<60s` 熱重載；per-param 覆蓋（v2）延後。
 /// validate() 拒 ≤0.0 / ≥1.0 / NaN / Inf 以早期失敗。
+///
+/// F-09 MODEL-TIER-EXTRACTION (2026-05-16, WP-04 follow-up)：原先 Rust
+/// `evaluate.rs` 把 IPC payload 的 `model_tier` 硬寫 `"l1_9b"`，27B/L1.5 等
+/// tier 都得改 Rust + rebuild 才能切。本欄位把 tier 提至 `RiskConfig.strategist`，
+/// operator 透過 TOML 或 IPC `patch_risk_config` `<60s` 熱重載即可切換 Ollama
+/// 模型 tier；validate() 只擋空字串 / 純空白，**不**綁 enum 以保留 future
+/// dynamic model_router（依 decision complexity 動態 routing）的 P2-F-09b 設計空間。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategistConfig {
     /// Maximum allowed delta for per-cycle parameter updates, expressed as a
@@ -1212,6 +1219,17 @@ pub struct StrategistConfig {
     /// weight 系參數另循 weight_sum=65 約束，不受此限。
     #[serde(default = "default_strategist_max_param_delta_pct")]
     pub max_param_delta_pct: f64,
+
+    /// F-09 MODEL-TIER-EXTRACTION (2026-05-16)：IPC `strategist_evaluate`
+    /// payload 的 `model_tier` 字串；Python `_handle_strategist` 端轉 Ollama
+    /// 模型 routing key（既有 default `"l1_9b"` 保 backward compat）。
+    ///
+    /// 本欄位只負責 **static tier 提取**（取代 `evaluate.rs:412` 硬碼字串），
+    /// 不做 dynamic routing — P2-F-09b 之後再依 decision complexity 動態決定。
+    /// validate() 只擋空 / 純空白；不綁 enum 以保留 future tier 名變動空間。
+    /// 預設 `"l1_9b"` 與 Python `params.get("model_tier", "l1_9b")` 對齊。
+    #[serde(default = "default_strategist_model_tier")]
+    pub model_tier: String,
 }
 
 fn default_strategist_max_param_delta_pct() -> f64 {
@@ -1221,10 +1239,19 @@ fn default_strategist_max_param_delta_pct() -> f64 {
     0.50
 }
 
+fn default_strategist_model_tier() -> String {
+    // F-09 MODEL-TIER-EXTRACTION (2026-05-16)：與 Python ai_service_dispatch.py
+    // `_handle_strategist` 的 `params.get("model_tier", "l1_9b")` default 對齊；
+    // backward compat — 既有 9B 模型在多數 strategist evaluate 場景已足夠。
+    // F-09：與 Python 端 default 對齊，保 backward compat。
+    "l1_9b".to_string()
+}
+
 impl Default for StrategistConfig {
     fn default() -> Self {
         Self {
             max_param_delta_pct: default_strategist_max_param_delta_pct(),
+            model_tier: default_strategist_model_tier(),
         }
     }
 }
@@ -1233,7 +1260,11 @@ impl StrategistConfig {
     /// STRATEGIST-TUNE-TARGET-CONFIG-1: Validate `max_param_delta_pct ∈ (0.0, 1.0)`
     /// and finite. Fails fast at config-load time so a degenerate clamp can
     /// never reach the hot path.
+    /// F-09 MODEL-TIER-EXTRACTION (2026-05-16): 同時驗證 `model_tier` 非空 /
+    /// 非純空白；不綁 enum（保留 future tier 名變動空間 + P2-F-09b dynamic
+    /// routing 設計餘地）。
     /// STRATEGIST-TUNE-TARGET-CONFIG-1：驗證 max_param_delta_pct ∈ (0.0, 1.0) 且有限。
+    /// F-09：同時擋 model_tier 空字串 / 純空白。
     pub fn validate(&self) -> Result<(), String> {
         let v = self.max_param_delta_pct;
         if !v.is_finite() {
@@ -1255,6 +1286,14 @@ impl StrategistConfig {
                  (>= 100% is wholesale replacement; defeats the sanity gate)",
                 v
             ));
+        }
+        // F-09：model_tier 非空 / 非純空白校驗。
+        if self.model_tier.trim().is_empty() {
+            return Err(
+                "risk.strategist.model_tier must be a non-empty, non-whitespace string \
+                 (e.g. \"l1_9b\" / \"l1_27b\" / \"l1_5\"). Hardcoded fallback removed by F-09."
+                    .to_string(),
+            );
         }
         Ok(())
     }

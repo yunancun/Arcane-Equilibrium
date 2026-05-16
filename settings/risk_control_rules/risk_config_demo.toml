@@ -358,8 +358,18 @@ antipersistent_threshold = 0.45 # H < 0.45 → mean-reverting side
 # `(0.0, 1.0)` and rejects NaN/Inf.
 # STRATEGIST-TUNE-TARGET-CONFIG-1：策略師調參 delta 上限；source 預設升至 0.50，
 # operator 可 IPC `<60s` 熱重載；validate() 強制 (0.0, 1.0) + 拒 NaN/Inf。
+#
+# F-09 MODEL-TIER-EXTRACTION (2026-05-16, WP-04 follow-up) — 把 IPC payload
+# `model_tier` 從 Rust 硬碼（evaluate.rs 舊 "l1_9b"）提取到此 TOML 欄位。
+# 切 27B / L1.5 / L2 不需 Rust rebuild；TOML 改值或 IPC `patch_risk_config`
+# `<60s` 熱重載即生效。validate() 只擋空字串 / 純空白（不綁 enum，保留
+# future P2-F-09b dynamic routing 設計空間）。
+# Python `_handle_strategist` 端讀 `params.get("model_tier", "l1_9b")`，與
+# 本檔 source default 對齊保 backward compat。
+# F-09：model_tier 抽至 TOML，operator 熱切 9B / 27B / L1.5 不需 rebuild。
 [strategist]
 max_param_delta_pct = 0.50      # ±50% cap on per-cycle non-weight param delta
+model_tier = "l1_9b"            # F-09 IPC strategist_evaluate Ollama tier；non-empty string
 
 # G3-09 Phase A (2026-04-27) — cost_edge_advisor schema (advisory only).
 # Lifts CLAUDE.md §二 原則 #13 「AI 資源成本感知 — 每次 AI 調用計費，

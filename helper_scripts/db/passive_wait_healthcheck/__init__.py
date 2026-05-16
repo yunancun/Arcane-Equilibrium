@@ -180,6 +180,15 @@ from .checks_btc_lead_lag import (  # noqa: F401
     # opt-in)；V088 未 deploy → PASS-skip pre-deploy 不阻塞。
     check_57_btc_lead_lag_panel_health,
 )
+from .checks_portfolio_resting_exposure import (  # noqa: F401
+    # [68] P2-PORTFOLIO-RESTING-58-HEALTHCHECK (2026-05-16) — P1-PORTFOLIO-
+    # RESTING-EXPOSURE-1 follow-up 升 P1 per FA Stage 1 demo 啟前 mandatory；
+    # 監測 effective(filled+resting) vs filled-only leverage chain semantic
+    # drift magnitude (A3 WARN-1 + E2 LOW-1 + PA §8)。
+    # ID 註：PA spec / TODO 標 [58] 但 [58] 已被 W-AUDIT-9 T4 占用,取 [68]
+    # 自由 slot；name `portfolio_resting_exposure_lineage` 保留。
+    check_68_portfolio_resting_exposure,
+)
 
 __all__ = [
     "main",
@@ -265,4 +274,8 @@ __all__ = [
     "check_57_btc_lead_lag_panel_health",
     # [65] MIT W6-1 RFC SHOULD 7 (2026-05-10) W-AUDIT-4b M3 chain integrity
     "check_chain_integrity_post_audit_4b_m3",
+    # [68] P2-PORTFOLIO-RESTING-58-HEALTHCHECK (2026-05-16) — P1-PORTFOLIO-
+    # RESTING-EXPOSURE-1 follow-up; ID 註：原 PA spec/TODO 標 [58]，[58] 已被
+    # W-AUDIT-9 T4 占用，取下一自由 [68] free slot；name preserved。
+    "check_68_portfolio_resting_exposure",
 ]
