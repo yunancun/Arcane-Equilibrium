@@ -424,3 +424,10 @@ YYYY-MM-DD HH:MM TZ
 - dispatch chain: PM local triage; E2/E4 skipped because this was a narrow validation-policy + targeted unit-test packet
 - result: `.codex/MEMORY.md` and PM memory now record replay-first validation as the default; Phase C0 report distinguishes replay-applicable fail-closed checks from BB-only real WS topic safety
 - verification intent: added `replay_empty_surface_keeps_liquidation_cascade_fail_closed` to prove isolated replay still gives strategies `EMPTY_ALPHA_SURFACE`, so `LiquidationCascade` remains unavailable and actionless before C1
+
+2026-05-16 CEST
+- PM task: close `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` on Linux `trade-core`.
+- dispatch chain: PM local runtime/deploy execution; PA audit report was the input; E2/E4 equivalents were read-only schema/checksum verification and V092 idempotency rerun.
+- result: V092 continuous aggregates applied online; V091/V092/V093 `_sqlx_migrations` rows inserted with source checksums; `_sqlx_migrations` now has `max_applied=93`, `rows=90`.
+- verification: V092 second apply idempotency PASS, six cagg views + six refresh jobs exist, aggregate view read smoke returns rows, `repair_migration_checksum --verify` reports `drift_count=0`, engine PID `69581` remained alive.
+- boundary: no restart, rebuild, auth write/renewal, strategy/risk config mutation, trading mode change, or order-authority change.
