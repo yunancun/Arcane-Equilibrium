@@ -22,11 +22,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # 端口：命令行参数 > 环境变量 > 默认 8710
 # Port: CLI arg > env var > default 8710
 PORT="${1:-${PORT:-8710}}"
+
+# API 綁定地址：預設 auto（Tailscale IPv4 可用時使用，否則 loopback），允許
+# OPENCLAW_BIND_HOST override；拒絕 0.0.0.0 / ::。
+# API bind host: default auto (Tailscale IPv4 when available, otherwise
+# loopback), with OPENCLAW_BIND_HOST override and all-interface rejection.
+source "$REPO_ROOT/helper_scripts/lib/api_bind_host.sh"
+API_BIND_HOST="$(resolve_openclaw_api_bind_host)"
 
 echo "═══════════════════════════════════════════════════"
 echo " OpenClaw / Bybit Control API v1 — 本地启动"
@@ -71,11 +79,12 @@ mkdir -p "$(dirname "$OPENCLAW_STATE_FILE")"
 echo "[3/3] 启动服务 / Starting service..."
 echo ""
 echo "  Auth:   token configured (value hidden)"
+echo "  Bind:   ${API_BIND_HOST}"
 echo "  State:  ${OPENCLAW_STATE_FILE}"
 echo "  Port:   ${PORT}"
 echo ""
-echo "  GUI:    http://127.0.0.1:${PORT}/"
-echo "  API:    http://127.0.0.1:${PORT}/docs"
+echo "  GUI:    http://${API_BIND_HOST}:${PORT}/"
+echo "  API:    http://${API_BIND_HOST}:${PORT}/docs"
 echo ""
 echo "  Token 值不打印；如需 API bearer，读取 0600 token 文件。"
 echo "  Token value is hidden; read the 0600 token file only when API bearer access is needed."
@@ -83,6 +92,6 @@ echo ""
 echo "═══════════════════════════════════════════════════"
 
 exec .venv/bin/uvicorn app.main:app \
-    --host 127.0.0.1 \
+    --host "$API_BIND_HOST" \
     --port "$PORT" \
     --reload

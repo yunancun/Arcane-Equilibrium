@@ -124,6 +124,22 @@ grep -E '(/home/ncyu|/Users/[^/]+)' <diff>
 - 新增 endpoint 同步更新手冊
 - BB agent 跨 agent review
 
+### 3.10 P0/P1 leak/bias caller proof（P2-PA-CALLPATH-GREP-RULE）
+
+P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須附 production caller call-path grep**。未附 grep 的 finding 只能標為「待證實」，不得作為 P0/P1 結論或阻塞依據。
+
+最低驗證要求：
+- 指出被控函數 / 指標 / validator 的 production caller chain，例如 `KlineManager → IndicatorEngine → SignalEngine → Strategy → Orchestrator`，或證明 `0 production caller`。
+- 對 indicator / strategy finding，必查 Rust runtime caller：`rg -n "<fn_or_type>|IndicatorEngine|compute_all_with_lambda|compute_all\\(" rust/openclaw_engine/src -S`。
+- 對 Python replay / ML / API finding，必查實際 reader/writer/caller：`rg -n "<fn_or_type>|<table_or_field>|<endpoint>" program_code helper_scripts rust/openclaw_engine/src -S`。
+- 如果 finding 只命中 test/doc/deprecated code，結論必須降級、撤回，或明確寫成 non-production hygiene。
+
+輸出 finding 時必附：
+1. grep command
+2. grep hit 摘要（檔案:行號）
+3. caller path 判斷（production / non-production / no caller）
+4. P0/P1 嚴重性是否仍成立
+
 ## 4. 對抗反問範本
 
 對 E1 任何回答多問一層：

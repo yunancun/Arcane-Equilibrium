@@ -214,11 +214,14 @@ def test_w_audit_2_api_launches_default_to_tailnet_or_loopback_bind() -> None:
         "helper_scripts/restart_all.sh",
         "helper_scripts/clean_restart.sh",
         "helper_scripts/fresh_start.sh",
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/start_local.sh",
+        "program_code/exchange_connectors/bybit_connector/control_api_v1/scripts/beta_quickstart.sh",
     ]
     for script in scripts:
         body = _read(script)
         assert "resolve_openclaw_api_bind_host" in body, script
         assert "--host 0.0.0.0" not in body, script
+        assert "--host 127.0.0.1" not in body, script
 
     deploy_readme = _read("helper_scripts/deploy/README.md")
     assert "OPENCLAW_BIND_HOST=tailscale" in deploy_readme

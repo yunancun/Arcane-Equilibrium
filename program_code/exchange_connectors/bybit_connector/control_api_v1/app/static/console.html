@@ -178,7 +178,7 @@
   <span class="tag tag-green" id="mode-tag">shadow_only</span>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
-  <span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle USDT → USD → EUR / 點擊切换計價货币">USDT</span>
+  <span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle USDT → USD → EUR / 點擊切換計價貨幣">USDT</span>
   <span style="font-size:11px;color:var(--text-dim);margin:0 4px" id="user-label"></span>
   <button class="header-btn" onclick="ocLogout()">Logout</button>
 </div>
@@ -189,7 +189,7 @@
   <!-- ─── Sidebar ─── -->
   <div class="sidebar">
 
-    <!-- Live / Demo panel switcher buttons / 實盤/Demo 面板切换按钮 -->
+    <!-- Live / Demo panel switcher buttons / 實盤/Demo 面板切換按鈕 -->
     <div style="display:flex;gap:4px;margin-bottom:8px">
       <button id="spbtn-live" onclick="toggleSidePanel('live')"
         style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.15);color:#ef4444;cursor:pointer">
@@ -278,7 +278,7 @@
 <script>
 // ─── Auth (APR01-MEDIUM-13: HttpOnly cookie, no localStorage token) ─────────
 const USER_KEY = 'oc_username';
-// Clean up legacy localStorage token if present / 清理旧的 localStorage token
+// Clean up legacy localStorage token if present / 清理舊的 localStorage token
 localStorage.removeItem('oc_trading_token');
 
 (function() {
@@ -298,7 +298,7 @@ localStorage.removeItem('oc_trading_token');
 })();
 
 // ocLogout is defined in common.js (calls /api/v1/auth/logout + clears cookie)
-// ocLogout 已在 common.js 中定义（調用登出端点 + 清除 cookie）
+// ocLogout 已在 common.js 中定義（調用登出端點 + 清除 cookie）
 
 // getToken() removed — auth handled by HttpOnly cookie (common.js ocGetToken() if needed)
 // getToken() 已移除 — 認證由 HttpOnly cookie 處理（如需可用 common.js 的 ocGetToken()）
@@ -345,7 +345,7 @@ const TAB_GROUP_DEFAULT_OPEN = {
   ops: false,
 };
 const TABS = [
-  { id: 'system',     group: 'core', label: '總览 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
+  { id: 'system',     group: 'core', label: '總覽 Overview',    labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
   { id: 'edge-gates', group: 'core', label: 'Pre-Live Gates',   labelEn: 'Edge Gates',icon: '&#x1F4C8;', src: `/static/tab-edge-gates.html?v=${_v}` },
   // ── 交易環境：低風險到高風險 / Trading environments: low-risk to high-risk ──
   // FIX-43: split into direct Demo + Paper tabs (eliminate double-iframe nesting)
@@ -358,7 +358,7 @@ const TABS = [
   { id: 'charts',     group: 'edge', label: '圖表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
   { id: 'risk',       group: 'governance', label: '風控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
   { id: 'governance', group: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
-  { id: 'ai',         group: 'intelligence', label: 'AI 状态',          labelEn: 'AI Status', icon: '&#x1F9E0;', src: `/static/tab-ai.html?v=${_v}` },
+  { id: 'ai',         group: 'intelligence', label: 'AI 狀態',          labelEn: 'AI Status', icon: '&#x1F9E0;', src: `/static/tab-ai.html?v=${_v}` },
   { id: 'learning',   group: 'intelligence', label: '學習 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },
   // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor 抽出（位置在 Learning 之後）
   // REF-20 Wave 7 P5 R20-P5-A1+A4: 12-Tab Agents Monitor extracted (position: after Learning)
@@ -368,7 +368,7 @@ const TABS = [
   // icon=🤖 robot (consistent with existing emoji icon set); read-only never-emit surface (V3 §11 P5)
   { id: 'agents',     group: 'intelligence', label: 'Agent 團隊',       labelEn: 'Agents',    icon: '&#x1F465;', src: `/static/tab-agents.html?v=${_v}` },
   { id: 'monitoring', group: 'ops', label: '監控 Monitor',     labelEn: 'Monitor',   icon: '&#x1F50D;', src: `/static/tab-monitoring.html?v=${_v}` },
-  { id: 'development',group: 'ops', label: '開发状态 Support', labelEn: 'Support',   icon: '&#x1F6E0;', src: `/static/tab-development.html?v=${_v}`, requiresDevelopmentSupport: true },
+  { id: 'development',group: 'ops', label: '開發狀態 Support', labelEn: 'Support',   icon: '&#x1F6E0;', src: `/static/tab-development.html?v=${_v}`, requiresDevelopmentSupport: true },
   { id: 'settings',   group: 'ops', label: '設置 Settings',    labelEn: 'Settings',  icon: '&#x2699;',  src: `/static/tab-settings.html?v=${_v}` },
 ];
 
@@ -742,7 +742,7 @@ setInterval(() => {
 const user = localStorage.getItem(USER_KEY);
 if (user) document.getElementById('user-label').textContent = user;
 // Auth status is determined by HttpOnly cookie, not a JS-accessible token.
-// 認證状态由 HttpOnly cookie 決定，非 JS 可訪问的 token。
+// 認證狀態由 HttpOnly cookie 決定，非 JS 可訪問的 token。
 document.getElementById('s-token-status').textContent = 'cookie-auth';
 
 // ─── Side Panel Toggle (Live ↔ Demo) ─────────────────────────
@@ -773,7 +773,7 @@ function toggleSidePanel(clicked) {
 async function api(path) {
   // HttpOnly cookie sent automatically / HttpOnly cookie 自動發送
   // 5s timeout prevents sidebar from blocking when API is slow after restart
-  // 5 秒超時防止重啟后 API 慢导致侧边栏卡死
+  // 5 秒超時防止重啟後 API 慢導致側邊欄卡死
   try {
     const r = await fetch(path, { credentials: 'same-origin', signal: AbortSignal.timeout(5000) });
     if (!r.ok) {
@@ -926,7 +926,7 @@ async function refreshSidebar() {
       document.getElementById('s-paper-balance').textContent = equity > 0 ? ocBalance(equity, 2) : '--';
       const s = sd && sd.session ? sd.session : {};
       const state = s.session_state || 'offline';
-      const stateLabel = {active:'運行中',paused:'已暂停',stopped:'已停止',idle:'未啟動'}[state] || state;
+      const stateLabel = {active:'運行中',paused:'已暫停',stopped:'已停止',idle:'未啟動'}[state] || state;
       document.getElementById('s-paper-balance-detail').textContent =
         stateLabel + (available > 0 ? ' | Available: ' + ocBalance(available, 2) : '');
 

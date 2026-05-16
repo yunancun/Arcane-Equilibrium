@@ -1364,6 +1364,7 @@ class TestGetH0GateStatusFreshnessFields:
             result = get_h0_gate_status(actor=actor)
 
         assert result["ok"] is True
+        assert result["display_only"] is True
         assert "freshness_age_ms" in result, "freshness_age_ms must be present"
         assert "freshness_score" in result, "freshness_score must be present"
         assert "data_quality_warn_only" in result, "data_quality_warn_only must be present"
@@ -1396,6 +1397,7 @@ class TestGetH0GateStatusFreshnessFields:
             result = get_h0_gate_status(actor=actor)
 
         assert result["ok"] is True
+        assert result["display_only"] is True
         assert result["freshness_age_ms"] is None
         assert result["freshness_score"] is None
         # Sprint 5a: H0Gate is fail-closed (not advisory) — value changed True→False
