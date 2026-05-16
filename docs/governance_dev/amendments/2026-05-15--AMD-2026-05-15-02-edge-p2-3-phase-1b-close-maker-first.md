@@ -7,8 +7,8 @@
 - 過去任何「close path 永遠 market」字面語義（仍對真風控止損成立，對策略級 close 解除）
 
 **日期**: 2026-05-15
-**作者**: PM applying main-session PM+PA+FA convergent verdict + 4-agent (QC+FA+BB+MIT) adversarial review consolidated patch；2026-05-15 PA Wave 1.5 patch v0.3（A3 portfolio_var verify + E3 maker fill empirical baseline + A4 W-C Caveat 2 V094 schema 兩段式 + writer gap + E1 KAMA fallback gate by-the-way）
-**狀態**: **DRAFT v0.3** — Wave 1.5 consolidated patch（fee saving revision + race fallback gap + portfolio MAINTAIN + IMPL Prereq 5 partial-resolved）；pending PM 派 Wave 3 4-agent short re-review on AMD v0.3 + spec v1.2 確認 patch 收口完整
+**作者**: PM applying main-session PM+PA+FA convergent verdict + 4-agent (QC+FA+BB+MIT) adversarial review consolidated patch；2026-05-15 PA Wave 1.5 patch v0.3（A3 portfolio_var verify + E3 maker fill empirical baseline + A4 W-C Caveat 2 V094 schema 兩段式 + writer gap + E1 KAMA fallback gate by-the-way）；2026-05-15 PA Wave 2a Track A2 patch v0.3.1（V094 hybrid schema migration spec finalize, F-FA-1 ✅ DONE）；2026-05-15 PA Wave 1.5b patch v0.4（Wave 3a 4-agent re-review consolidation — AC-1..AC-19 + V094 trading_writer.rs:430 details writer upgrade explicit + negative whitelist 補 risk_close:fast_track* / halt_session* + 16 原則 #3/#11/#13/#15 明列 PASS）
+**狀態**: **DRAFT v0.4** — Wave 1.5b consolidated patch（AC range 對齊 AC-19 / 字面修正 + Wave 3a 4-agent re-review 純 numerical / cosmetic 增量無新風險）；IMPL Prereq 條件 2 SATISFIED；pending Wave 2b reject_cooldown split + 3-gate
 **索引**: `docs/governance_dev/SPECIFICATION_REGISTER.md` Amendments section
 **TODO 連結**: P0-EDGE-1（fee bleed 影響 edge measurement）/ EDGE-P2-3 Phase 1b / W-AUDIT-8b（後續 funding alpha 不被執行成本掩蓋）
 
@@ -55,7 +55,7 @@ EDGE-P2-3 Phase 1a 的「entry-only PostOnly」scope 在 close path 延伸為按
 
 | 類別 | 顯式 reason |
 |---|---|
-| 真風控 | `risk_close:HARD STOP` / `risk_close:TRAILING STOP` / `risk_close:TIME STOP` / `risk_close:DYNAMIC STOP` |
+| 真風控 | `risk_close:HARD STOP` / `risk_close:TRAILING STOP` / `risk_close:TIME STOP` / `risk_close:DYNAMIC STOP` / `risk_close:fast_track*` / `halt_session*`（**v0.4 patch per Wave 3a FA-#3 cosmetic finding，PA 識別變體**；spec §4.3 已列；本 AMD 同步以對齊 §三/§四 fail-closed semantic）|
 | 帳戶級風控 | `DAILY LOSS` / `DRAWDOWN` / `CONSECUTIVE LOSS` |
 | 利潤達標 | `TAKE PROFIT: pnl X% >= Y%` |
 | AI cost gate | `COST EDGE: ratio X >= 0.80` |
@@ -77,7 +77,7 @@ EDGE-P2-3 Phase 1a 的「entry-only PostOnly」scope 在 close path 延伸為按
 | **Phase 2b LiveDemo** | 7d | live_demo | `use_maker_close = true` per-策略 | Phase 2a 14d PASS（AC-1..AC-7 + AC-14 Wilson + AC-15 reject sample + AC-16 NULL ladder + **AC-18 fallback-to-taker rate ≥ 95%** + **AC-19 14d close_maker_fill_rate ≥ 30%** v0.3 新增） |
 | **Phase 3 Live (Mainnet)** | indefinite | live | `use_maker_close = true` per-策略 per-exit_reason | Phase 2b PASS + operator 顯式 sign-off + 本 AMD 補件（live carve-out section） |
 
-> **AC SoT 引用（FA-SF-2）**：本 rollout table 的 PASS criteria 全文 = `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` §11 AC-1..AC-16；本 AMD 不重複 AC 文字，避免雙文 drift。
+> **AC SoT 引用（FA-SF-2 + v0.4 patch per Wave 3a FA-#1 cosmetic finding）**：本 rollout table 的 PASS criteria 全文 = `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` §11 **AC-1..AC-19**（v0.2 寫 AC-1..AC-16；v1.2 加 AC-17/18/19；v1.3 修 AC-5/AC-11/AC-18 字面值）；本 AMD 不重複 AC 文字，避免雙文 drift。
 
 **Rust struct cold-boot default**: `use_maker_close = false`（§5.6 fail-safe）。
 
@@ -266,6 +266,10 @@ Phase 2a → 2b → 3 共 3 phase × 8 exit_reason × 2 env = **48 test points**
 | #8 交易可解釋 | CONDITIONAL | `trading.fills` 新 column `close_maker_attempt` + `close_maker_fallback_reason` + `details` JSONB key 4 欄位（per §4.1 hybrid schema）；NULL ladder 0.1% / 1.0% threshold（per Consensus-MF-3） |
 | #9 災難保護 | CONDITIONAL | cancel_token 觸發 cancel_resting_maker_order best-effort；authorization 失效 → 清 pending |
 | #16 組合風險 | **MAINTAIN（v0.3 修正 per Wave 1 Track A3 verify finding）** | **per `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--f_fa_2_portfolio_var_exposure_sot_verify.md` empirical**：close path `is_reducing → return PositionCheck::allow()`（`risk_checks.rs:137-138`）**根本不觸 portfolio gate**；real systemic gap 在 entry-side resting maker 不入 `compute_correlated_exposure_pct` / `compute_exposure_pct`（`intent_processor/mod.rs:761-805` 只讀 PaperPosition.qty filled，不讀 paper_state.resting_orders）。close-maker-first IMPL **不引入新 portfolio risk vector**，僅繼承 entry-side resting maker Phase 1B-4.2 既有 systemic gap。**新 P1 ticket `P1-PORTFOLIO-RESTING-EXPOSURE-1` 平行 IMPL，不阻 Phase 1b**（per A3 推薦選項 A，PM 已預批；ticket scope 見 spec §15）。原 v0.2 「maker pending 期 portfolio_var 用 request_qty」framing 由 A3 verify 證實方向反了：close pending 對「後續 NEW open intent」是 OVER-estimate（不是 under-estimate）；entry pending 才是 under-estimate scenarios |
+| #3 AI 輸出 ≠ 即時命令 | **PASS（v0.4 明列 per Wave 3a FA-#4 cosmetic finding）** | close maker dispatch 仍走 `OrderDispatchRequest` 單通道（與 entry maker 對偶）；不繞 GovernanceHub / Lease 鏈；PostOnly Limit + maker_timeout_ms 是 execution-quality optimization，不引入 AI 直接下單路徑 |
+| #11 Agent 最大自主權 | **PASS（v0.4 明列 per Wave 3a FA-#4 cosmetic finding）** | exit_reason whitelist + carve-out 不影響 Agent 自主決定 timing / symbol / 策略；`use_maker_close` per-strategy TOML flag 是 execution-quality 配置，不限制 Agent 自主邊界（P0/P1 風控不變）|
+| #13 AI 資源成本感知 | **PASS（v0.4 明列 per Wave 3a FA-#4 cosmetic finding）** | close-maker-first 純 execution-quality optimization 不增 AI 調用；`COST EDGE: ratio X >= 0.80` reason 在 §2.3 Negative Whitelist 強制 market（觸發即收倉，maker 未成交違反 cost gate semantic）|
+| #15 多 Agent 協作 | **PASS（v0.4 明列 per Wave 3a FA-#4 cosmetic finding）** | 不變動 5-Agent 架構（Scout / Strategist / Guardian / Analyst / Executor）；不變動 Conductor 編排；不引入新 agent 通信 topic；新 audit 欄位純 ops metadata（per #7 invariant）|
 | 其他 | PASS / 不觸 | — |
 
 ### 7.1 9 條安全不變量 mini-table（FA-SF-1）
@@ -357,6 +361,11 @@ per `srv/CLAUDE.md §四` SoT 對齊：
 - 若必須 rollback V094 schema（極端場景）→ DROP COLUMN + DROP CONSTRAINT 是純物理操作，不影響歷史 row 邏輯一致性
 - **如果 IMPL 階段 PA 改設計從 hybrid 變成 separate column（即 `close_initial_limit_price` 等也走 new column）→ 必重評 backward-compat 影響 + 重派 4-agent review**
 
+**v0.4 IMPL kickoff 必含項（per Wave 1 Track A4 finding §4.4 + Wave 3a FA-#2 cosmetic finding）**：
+- IMPL kickoff 必含 `trading_writer.rs:430` details payload writer 升級（per Wave 2a Track A2 V094 spec §6 trading_writer.rs upgrade）—  避免 5 audit 欄位中 3 個 JSONB key 100% NULL fail 風險（24h 98 fills 0% details rate empirical confirmed）
+- TradingMsg::Fill enum 21 → 24 fields；13 caller sites enumeration；E2 grep verify 39 hit count
+- 兩段式 schema invariant（hot column 2 + JSON extension 3）IMPL phase 不可變更
+
 ---
 
 ## 11. Verdict from Source Audits
@@ -392,5 +401,6 @@ post-AMD v0.2 land 後 Wave 1 並行派 5 track（A1/A3/A4/E1/E3），結果：
 | 2026-05-15 | v0.2 | 4-agent review consolidated patch — 17 must-fix（4 consensus + 13 unique）+ 14 should-fix 全 integrated；§1 framing 改 alpha-impact-adjacent execution-quality；§4.1 V094 hybrid schema explicit；§5.1 multiple testing FDR 0.10 BH；§5.4 dynamic backoff per-symbol → conditional global；§6 phys_lock_gate4_giveback timeout 30→15s + buffer 2→1；§7 #7 non-training invariant + §7.2 W-C Caveat 2 explicit；§8 IMPL prereq 4→6（含 F-FA-1/2/3 + reject_cooldown split P0）；§10.1 V094 backward-compat clarify | PA per main-session 派 Wave 1 Track A1 |
 | 2026-05-15 | v0.3 | A3+E3+A4+E1 finding consolidated post-Wave 1（fee revision + race fallback gap + portfolio MAINTAIN + IMPL Prereq 5 partial-resolved）— §1 footnote per E3 fee saving revised 4.5 → 0.5-2.0 bps + 全年估 $50-$200；§3 Phase 2a 7d → 14d (7d primary + 7d extended observation) + Phase 2b 啟動條件加 AC-18 + AC-19；§7 #16 組合風險 CONDITIONAL → MAINTAIN per A3 verify finding（close path is_reducing 不觸 portfolio gate；新 P1 ticket option A PM 預批）；§8 IMPL Prereq 5 partial-resolved（F-FA-2 ✅ Wave 1 Track A3 commit `96995b61` + F-FA-3 ✅ Wave 1 Track A4 commit `a5a7107c`；F-FA-1 V094 spec 留 Wave 2 dispatch）；§11.1 NEW Wave 1 Source Audits 5 commit 引用（A1/A3/A4/E1/E3）| PA per main-session 派 Wave 1.5 (post-Track A3+E3) |
 | 2026-05-15 | v0.3.1 | F-FA-1 ✅ DONE Wave 2a Track A2 patch（V094 hybrid schema migration spec finalize land commit `9b1117a0` + PA verdict report `14a561ec`）— §8 IMPL Prereq 5 第 1 子條件 marker 從 ⏳ → ✅；spec 1176 LOC / 15 sections 含 schema design + Guard A/B/C + Linux PG dry-run × 2 round + sqlx checksum repair SOP + trading_writer.rs upgrade + TradingMsg::Fill enum 21→24 fields + 13 caller sites enumeration + healthcheck [62][63][64][65] integration + Backward-compat append-only + Rollback paths；3 critical empirical findings（trading.fills.details JSONB 已存在 V003 line 284 / 24h 98 fills 0% details rate / Linux runtime applied max V90 not V93 — spec/AMD wording drift caveat noted）；enum allowlist 補 2 值（rate_limit_backoff_per_symbol + fallback_to_taker_mandatory）upgrade spec/AMD 8 → 10 superset；F-FA-1/2/3 全 ✅ → IMPL Prereq 5 全 RESOLVED | PA per main-session 派 Wave 2 (Track A2) |
+| 2026-05-15 | v0.4 | Wave 3a 4-agent short re-review consolidation — QC + FA + BB + MIT 4/4 verdict（QC APPROVED-CONDITIONAL 1 NEW MUST QC-MF-3 + 1 NEW SHOULD QC-SF-6；FA APPROVED 4 cosmetic；BB APPROVED `2026-05-15--amd_v0_3_spec_v1_2_bb_short_re_review.md` 5/5 must + 3/3 should 全 land + v1.2/v0.3 增量無新 Bybit-side risk；MIT APPROVED 2 P3 advisory）。本 patch 純 numerical / cosmetic 增量無新風險 → IMPL Prereq 條件 2 SATISFIED：(a) §3 rollout table AC SoT 引用「AC-1..AC-16」→ **「AC-1..AC-19」** (per FA-#1 cosmetic) + (b) §10.1 V094 backward-compat 加 IMPL kickoff 必含項「`trading_writer.rs:430` details payload writer 升級」+ TradingMsg::Fill enum 21→24 + 兩段式 schema invariant (per FA-#2 + Wave 1 Track A4 §4.4) + (c) §2.3 negative whitelist 真風控行補 PA 識別變體 `risk_close:fast_track*` / `halt_session*` (per FA-#3，spec §4.3 已列；AMD 同步) + (d) §7 16 原則表補 #3/#11/#13/#15 明列 PASS（治理 trace 完整度 7/12 → 11/12, per FA-#4） | PA per main-session 派 Wave 1.5b (Wave 3a re-review consolidation) |
 
-**下一步**：Wave 2a Track A2 closure；PM 派 Wave 3（4-agent short re-review on AMD v0.3.1 + spec v1.2 + V094 spec + BB 字典 6 處更新）；IMPL Prereq 條件 2 解、條件 5 全 RESOLVED（F-FA-1 + F-FA-2 + F-FA-3 全 ✅），進三閘 + 條件 6 reject_cooldown 等待 → IMPL kickoff Wave 4（3-gate 解後派 E1 5-worktree）。Pre-Wave 4 PA 補一輪 Linux V81/V91/V92/V93 backlog migration apply 檢查（per V094 spec §4.4 caveat）。
+**下一步**：IMPL Prereq 條件 2 SATISFIED（4-agent re-review 4/4 verdict + Wave 1.5b spec v1.3 + AMD v0.4 patch 收口）；條件 5 全 RESOLVED（F-FA-1 + F-FA-2 + F-FA-3 全 ✅）；條件 6 reject_cooldown split 在 Wave 2b E1 progress；條件 3 三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）等待 → Wave 3b BB 字典 6 處更新（並行）→ Wave 3.5 PA 補 Linux V81/V91/V92/V93 backlog migration apply 檢查（per V094 spec §4.4 caveat）→ IMPL kickoff Wave 4（3-gate + 條件 6 解後派 E1 5-worktree）。
