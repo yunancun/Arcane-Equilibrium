@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v36
+Version: v37
 Date: 2026-05-16
-Status: v36 completion cleanup. Completed v35 / 2026-05-15..16 detail has been cross-checked against commits and PM/E2/E4/BB reports, then moved to `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`. Active TODO now keeps blockers, dependent gates, deferred work, and runnable backlog only. Runtime/code-bearing v35 head `5f6f3edf` was synced across Mac/origin/Linux before rebuild; post-rebuild docs-only sync may advance repository HEAD without another rebuild. `trade-core` rebuilt/restarted via `restart_all.sh --rebuild --keep-auth` on 2026-05-16. Runtime after rebuild: engine PID `69581`, API PID `69674`, watchdog `engine_alive=true`, demo fresh, live inactive due signed auth absence, and paper pipeline disabled by `OPENCLAW_ENABLE_PAPER=0` (`paper_state.disabled=true`; fresh paper marker is disabled-state write, not active Paper trading). W-AUDIT-8a C1 is blocked again because the isolated `allLiquidation.BTCUSDT` proof ended `FAIL_CONNECTION` at `2026-05-16T00:37:25Z` after `17055.2s/86400s`; it is not proof-eligible. True-live remains blocked by `P0-EDGE-1`, `P0-LG-1/2/3`, and `P0-OPS-1..4`.
+Status: v37 active-marker cleanup. v36 completion cleanup moved completed v35 / 2026-05-15..16 detail to `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`; this update removes misleading active `W3` paper-cohort and A4-C promotion wording while preserving tombstone guards. Stage 1 promotion evidence is Demo-only per AMD-2026-05-15-01. A4-C remains diagnostic-only/no-revive unless a future materially new predictive variable is preregistered and passes a fresh Stage 0R gate. This is documentation-only: no runtime, DB, auth, risk, strategy, paper, demo, LiveDemo, or live mutation.
 
 This file is the active work queue only. Historical closures, stale observation
 tables, and superseded OpenClaw/Gateway assumptions are archived in
@@ -34,19 +34,18 @@ v35 current-progress sync + rebuild decision:
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--v35_three_side_sync_rebuild.md`.
 v36 completion cleanup archive:
 `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
+v37 Stage 1 / A4-C active-marker cleanup:
+`docs/archive/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`.
 
-## §0.0 PM Freeze — 2026-05-15 Canary Rebase Guard
+## §0.0 PM Freeze — Demo-Only Stage 1 + A4-C Tombstone Guard
 
 **Status**: ACTIVE PM freeze; AMD-2026-05-15-01 now carries the rebase authority.
 
-- `W3 Stage 1 paper cohort` → **FROZEN**. Paper is permanently disabled for promotion evidence; `Environment::Paper × 7d` cannot be used as Stage 1 PASS evidence.
-- `A4-C D+12 paper edge report` promotion path → **FROZEN**. A4-C promotion must be rebased to replay preflight + demo Stage 1 gate; legacy paper-edge report remains diagnostic/read-only only.
-- Any plan, command, env file, script, or runtime launch that sets `OPENCLAW_ENABLE_PAPER=1` → **BLOCKED** unless a future operator decision explicitly reopens paper for non-promotion diagnostics.
-- AMD-2026-05-15-01 revises W-AUDIT-9 / AMD-2026-05-09-03 to Stage 0R replay preflight + Stage 1 demo micro-canary.
-- Completed 2026-05-15 Stage 0R / OI packet / `[55]` detail is archived in `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`; active fact remains: A4-C and OI-confirmed 5m are both non-promotional.
-- Completed 2026-05-15 `[27]` / `[67]` infrastructure-closure details are archived in `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`; active fact remains: `[27]`, `[55]`, and `[67]` are closed, while Stage 1 demo is still blocked by alpha evidence.
-- Completed alpha-path / Phase C0 / W-AUDIT-8b design / v35 deploy details are archived in `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
-- Current active alpha gates: A4-C remains diagnostic-only/no-revive; W-AUDIT-8b waits for a read-only Stage 0R query/report packet; W-AUDIT-8a C1 waits for a new full-duration BB/MIT-approved proof after the 2026-05-16 `FAIL_CONNECTION`.
+- Stage 1 promotion evidence is **Demo-only**: Stage 0 shadow → Stage 0R replay preflight (`eligible_for_demo_canary=true/false`) → Stage 1 Demo micro-canary (1 strategy × 1 symbol × 7d). Stage 0R is not Stage 1 PASS.
+- Paper is not an active promotion lane. Any plan, command, env file, script, or runtime launch that sets `OPENCLAW_ENABLE_PAPER=1` for promotion evidence remains **BLOCKED** unless a future operator decision explicitly reopens paper for non-promotion diagnostics.
+- A4-C tombstone: `W-AUDIT-8d` BTC→Alt Lead-Lag is archived from active promotion and closed no-revive for the BTC 1m return + xcorr feature shape. Keep `panel.btc_lead_lag_panel` / `[57]` diagnostic-only; do not use A4-C as a Stage 0R promotion candidate or Stage 1 Demo cohort source.
+- Future A4-C reopen requires a materially new predictive variable, preregistered validation, and a fresh strategy×symbol Stage 0R packet with `eligible_for_demo_canary=true`. Threshold loosening, post-hoc symbol picking, or reusing paper evidence are non-triggers.
+- Current active alpha gates: W-AUDIT-8b waits for a read-only Stage 0R query/report packet; W-AUDIT-8a C1 waits for a full-duration BB/MIT-approved proof; W-AUDIT-8c waits for C1 + MIT schema review.
 
 ---
 
@@ -55,8 +54,8 @@ v36 completion cleanup archive:
 | Sprint | Week | 主題 | E1 capacity | Business chain milestone |
 |---|---|---|---|---|
 | **N+0** | W1-W2 | FOUNDATION HEAVY: W-AUDIT-9 + 8a Phase A + B 群 + C-A6 + 6 mid-ground | **5 active + 1 stand-by** (operator (a)) | 63→65% |
-| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING: 8a Phase B+C 並行 + 8d (BTC→Alt) + Stage 0R replay preflight + **Stage 1 demo micro-canary** prep | 4/6 | 65→70% must be recalculated after demo canary evidence |
-| **N+2** | W5-W6 | 8d follow-up + 8a Phase D + Stage 2 demo cohort 14d（only after Stage 1 demo evidence） | **5 active + 1 stand-by** | 70→76% rebase pending |
+| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING: 8a Phase B+C + 8b Stage 0R packet + **Stage 1 Demo micro-canary** prep after a future green Stage 0R | 4/6 | 65→70% must be recalculated after demo canary evidence |
+| **N+2** | W5-W6 | 8a Phase D + Stage 2 demo cohort 14d（only after Stage 1 demo evidence） | **5 active + 1 stand-by** | 70→76% rebase pending |
 | **N+3** | W7-W8 | 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | 4/6 | 76→80% |
 | **N+4** | W9-W10 | 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | 4/6 | 80-83% |
 | **N+5** | W11-W12 | 8f IMPL + 8g (R-4) spec + **first per-alpha-source supervised live** | **5 active + 1 stand-by** | **85-89%** |
@@ -88,7 +87,7 @@ v36 completion cleanup archive:
 ### Current State (2026-05-16 PM cleanup)
 
 - W-C MAG-082 Stage 2 **WINDOW_PASS 2026-05-11** and W-D MAG-083/MAG-084 **DONE 2026-05-11** are closed; proposal/mobile/Stage 3+/true-live gates remain separate and still blocked by edge/LG/ops prerequisites.
-- A4-C BTC→Alt Lead-Lag Stage 0R remains **GATE-RED** after Step 5b (`eligible_for_demo_canary=false`). The OI-confirmed 5m packet is only a replay spec and does not change eligibility.
+- A4-C BTC→Alt Lead-Lag active-promotion marker is removed: Step 5b and RCA are archived as **GATE-RED / no-revive** for the BTC 1m return + xcorr feature shape; `panel.btc_lead_lag_panel` remains diagnostic-only. The OI-confirmed 5m packet is only a replay spec and does not change eligibility.
 - `[55]` is source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; `[67]` is restored to PASS after feature baseline apply; `[4]` phys lock and `[Xb]` triangulation are PASS after `7108035d`.
 - V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
 - Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
@@ -135,7 +134,7 @@ follow-ups remain in §10 / §11 / §12.
 | 1 | W-AUDIT-8a Phase A migration ↔ W-AUDIT-6d mid-ground 5 策略改動 | `bb_breakout/mod.rs` / `ma_crossover/strategy_impl.rs` / `bb_reversion/mod.rs` | **序列化**：先 6d mid-ground，再 8a Phase A |
 | 2 | W-AUDIT-9 T3 shadow_mode_provider stage-aware ↔ ExecutorAgent shadow_mode 接線 | `executor_config_cache.py` / `executor_agent.py` | **W-AUDIT-3b 必先 land**；T3 結束前 ExecutorAgent shadow=true 不動 |
 | 3 | W-AUDIT-8a Phase B+C ↔ W-AUDIT-5b 性能 wave | `tick_pipeline/mod.rs` | Phase B+C 並行於 N+1，5b 性能 catch-up reserved slot |
-| 4 | A 群 3 新策略（8b/8c/8d）↔ W-AUDIT-9 Stage 1 cohort 選擇 | governance/canary | **FROZEN 2026-05-15**: A4-C 不再用 Stage 1 paper cohort 入場；改走 Stage 0R replay preflight + demo Stage 1 gate（AMD-2026-05-15-01）。 |
+| 4 | A 群策略候選 ↔ W-AUDIT-9 Stage 1 Demo cohort 選擇 | governance/canary | **RESOLVED 2026-05-16**: Stage 1 is Demo-only after a future green Stage 0R. A4-C is tombstoned diagnostic-only and must not be selected as the Stage 1 cohort source. |
 | 5 | TODO `W-AUDIT-8b/8c` ↔ legacy execution_plan `8b/8c` 檔名 | docs/execution_plan | **TODO IDs 為 SoT 2026-05-15**: `8b`=A4-A Funding Skew，`8c`=A4-B Liquidation Cluster；舊 `w_audit_8b_strategist...` / `w_audit_8c_hypothesis...` 是 R-2/R-3 alias（現 tracked as `8e/8f`），不得拿來當策略 spec。 |
 
 ---
@@ -146,9 +145,9 @@ Full Sprint N+0 22-invariant ledger is closed and archived in
 `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
 
 Current sign-off deltas only:
-- ❌ **Stage 0R GATE-RED 2026-05-15**: A4-C Step 5b returned
-  `eligible_for_demo_canary=false` after diagnostic producer restoration; no
-  Stage 1 demo cohort selected.
+- ⛔ **A4-C active-promotion marker removed 2026-05-16**: Step 5b / RCA details
+  are archived as no-revive; retain only the tombstone guard and diagnostic
+  panel reference in active docs.
 - 🟡 **OI-confirmed 5m Stage 0R packet remains non-promotional**: the packet
   defines `bb_breakout_oi_confirmed_5m` replay acceptance rules, and a
   follow-up read-only feasibility probe found runtime-style OI-confirmed rows
@@ -173,46 +172,40 @@ planning are archived in
 Priority verdict after PM/PA/FA cross-check:
 1. **True-live remains blocked** by `P0-EDGE-1`, `P0-LG-1/2/3`, and
    `P0-OPS-1..4`; none of the 2026-05-15 runtime/doc fixes grant live authority.
-2. **Stage 1 demo micro-canary is blocked**, not active execution. A4-C is
-   GATE-RED, and the OI-confirmed 5m packet is underpowered/negative until a
-   future full Stage 0R replay returns green.
-3. **Alpha path priority**: A4-C is archived from promotion and remains
-   diagnostic-only. `P1-A4C-RCA-1` is closed as no revive hypothesis found
-   after QC/MIT review, so `P1-A4C-REV-1` is not opened and no A4-C Stage 0R
-   rerun is authorized for the same feature shape. Shift active effort to
-   `W-AUDIT-8b` Funding Skew read-only Stage 0R query/report packet while
-   `W-AUDIT-8a C1` waits for a new full-duration proof after the 2026-05-16
-   `FAIL_CONNECTION`. `W-AUDIT-8c` Liquidation Cluster remains gated until C1
-   and MIT schema review pass. The business-chain root cause is still lack of
-   non-textbook alpha.
+2. **Stage 1 Demo micro-canary is blocked**, not active execution. There is no
+   active paper cohort and no A4-C cohort candidate; launch requires a future
+   strategy×symbol Stage 0R packet with `eligible_for_demo_canary=true` plus the
+   runtime/lineage/operator gates in AMD-2026-05-15-01.
+3. **Alpha path priority**: active effort is `W-AUDIT-8b` Funding Skew
+   read-only Stage 0R query/report packet while `W-AUDIT-8a C1` waits for a
+   full-duration proof after the 2026-05-16 `FAIL_CONNECTION`. `W-AUDIT-8c`
+   Liquidation Cluster remains gated until C1 and MIT schema review pass. The
+   business-chain root cause is still lack of non-textbook alpha.
 4. **Runtime blocker update**: `[27]`, `[55]`, and `[67]` are closed and
-   archived; this does not unblock Stage 1 demo because A4-C remains GATE-RED.
+   archived; this does not unblock Stage 1 Demo because no green alpha
+   Stage 0R cohort exists.
 5. **Maintenance**: P2 hygiene remains below alpha/LG/ops gates; W-AUDIT-5
    damaged dump cleanup and W-AUDIT-7 F-07/CEA env are ops-closed as of
    2026-05-15.
 
-### §6.1 A4-C BTC→Alt Lead-Lag PM/PA/FA Engineering Card（2026-05-15）
+### §6.1 A4-C BTC→Alt Lead-Lag Tombstone（2026-05-16）
 
-FA verdict: A4-C does **not** currently justify spending 7d Demo
-micro-canary budget. Producer silence was fixed, but Step 5b still failed
-edge/statistical gates: `avg_net_bps=+0.3552`, `t=0.2231`,
-`PSR(0)=0.5877`, `DSR=0.0000`, CI lower tail < 0, and
-R²(60/120/300)=`0.0009/0.0005/0.0027`.
+`W-AUDIT-8d` A4-C is not an active promotion task. Keep only this guard in
+active docs:
 
-| ID | Status | Owner Chain | Task | Acceptance / Stop Rule |
-|---|---|---|---|---|
-| `P0-A4C-FA-GATE-1` | ⛔ ARCHIVE FROM PROMOTION | PM → QC/MIT → FA → PA → PM | Keep A4-C out of active promotion budget | A4-C remains diagnostic-only unless a future, preregistered strategy×symbol Stage 0R packet emits `eligible_for_demo_canary=true`. Pooled-only evidence is insufficient. |
-| `P0-A4C-DEMO-BUDGET-GATE` | BLOCKED | PM → QC → MIT → FA → PA → PM | Demo micro-canary spend gate | Demo budget requires one concrete `strategy × symbol` with `n>=100`, `avg_net_bps>=+15`, `t>2.0`, `PSR>=0.95`, `DSR>=0.95` with explicit K, bootstrap lower bound > 0, PBO <= 0.20, no leak/cherry-pick, and operator-approved cohort. |
-| `P1-A4C-REV-1` | ❌ NOT OPENED | PA → QC → MIT → FA → PM | Bounded preregistered revise-or-archive decision | QC/MIT found no new preregistered hypothesis. Threshold loosening, post-hoc symbol picking, or rerunning the same BTC-return/xcorr feature shape are non-triggers. |
-| `P1-A4C-RERUN-1` | ⛔ BLOCKED | PM → QC → MIT → PM | Stage 0R replay rerun | No rerun for A4-C unless a materially new predictive variable is preregistered in the future. Output may only be `eligible_for_demo_canary=true/false`; paper promotion remains blocked by AMD-2026-05-15-01. |
-| `P0-ALPHA-SWITCH-8B-8C` | 🔵 ACTIVE | PM → QC/MIT/BB → PA → FA → PM | Switch alpha focus after A4-C RCA closure | `W-AUDIT-8b` proceeds only to a read-only Stage 0R query/report packet; `W-AUDIT-8a C1` waits for a new full-duration proof after `FAIL_CONNECTION`; `W-AUDIT-8c` waits for C1 proof + MIT schema sign-off. |
+- status: archived from promotion; diagnostic-only/no-revive for the BTC 1m
+  return + xcorr feature shape
+- keep: `panel.btc_lead_lag_panel`, `[57] btc_lead_lag_panel_health`, and
+  historical rows for future Hypothesis Pipeline exploration
+- do not keep: Stage 0R promotion candidate status, Stage 1 Demo cohort source
+  status, paper-based promotion language, or threshold-only revive tasks
+- future reopen: materially new predictive variable + preregistered validation
+  + fresh strategy×symbol Stage 0R packet with `eligible_for_demo_canary=true`
 
-`P1-A4C-RCA-1` closure details are archived in
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
-
-Hard boundaries: no `OPENCLAW_ENABLE_PAPER=1` promotion use, no Stage 1 demo
-launch from RCA, no live/LiveDemo relaxation, no auth/risk/lease/runtime
-mutation, and no gate relaxation to make A4-C pass.
+Detailed Step 5b / RCA / PM+QC+MIT verdicts are archived in
+`docs/execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md`,
+`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`, and
+`docs/archive/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`.
 
 ---
 
@@ -361,7 +354,7 @@ Phase 1b main implementation remains blocked by gates below.
 | `W-AUDIT-8a` Phase B/C/D | Tier 2 panel collector + Tier 3 microstructure + Tier 4 information flow | Sprint N+1 W2 起逐步 IMPL | 4-6 sprint |
 | `W-AUDIT-8b` (A4-A) | Funding Skew Directional 新策略（R-1 IMPL）| W-AUDIT-8a Phase B 後 | Spec v0.1 done 2026-05-15；review/replay next |
 | `W-AUDIT-8c` (A4-B) | Liquidation Cluster Reaction 新策略 | W-AUDIT-8a Phase C 後 | N+3 |
-| `W-AUDIT-8d` (A4-C) | BTC→Alt Lead-Lag 新策略 | W-AUDIT-8a Phase B 平行 | ⛔ Archived from promotion 2026-05-15；diagnostic-only |
+| `W-AUDIT-8d` (A4-C tombstone) | BTC→Alt Lead-Lag diagnostic panel | Archived guard only | ⛔ Not an active alpha path; diagnostic-only/no-revive for BTC 1m return + xcorr |
 | `W-AUDIT-8e` (R-2) | Strategist Alpha Source Orchestrator | W-AUDIT-8b/8c/8d land 後 | N+3-N+4 |
 | `W-AUDIT-8f` (R-3) | Hypothesis Pipeline first-class（含 W-AUDIT-4 ML 6 dead schema 併入）| 序列化於 R-2 後 | N+4 |
 
@@ -370,7 +363,7 @@ Phase 1b main implementation remains blocked by gates below.
 **2026-05-15 PM prework / RCA final update**:
 - `W-AUDIT-8a C1` proof packet exists: `docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md` + `helper_scripts/bybit/liquidation_topic_probe.py`。The prior PID `4100789` run started at `2026-05-15T19:53:09Z` and ended `FAIL_CONNECTION` at `2026-05-16T00:37:25Z`; C1 still requires a new full-duration isolated BB proof + MIT sign-off before production revival.
 - `W-AUDIT-8b` Funding Skew spec v0.2 exists: `docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`。It is a cross-sectional crowding signal, not retired `funding_arb`; QC/MIT/BB conditionally approve Stage 0R replay design only, so next gate is a read-only query/report packet.
-- `W-AUDIT-8d` A4-C is archived from promotion and `P1-A4C-RCA-1` is closed no-revive: `docs/execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md` + `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_rca_final_and_c1_proof_start.md`。Keep `panel.btc_lead_lag_panel` diagnostic-only.
+- `W-AUDIT-8d` A4-C has only a tombstone in active docs: archive/no-revive for the BTC 1m return + xcorr shape, keep `panel.btc_lead_lag_panel` diagnostic-only, and do not select it for Stage 1 Demo.
 
 **Operator 5 zero/small cost actionable（2026-05-11 拍板）**：
 1. ✅ **DONE**：修 `feedback_position_sizing` memory drift（3% → 註明 SSOT 0.1%/0.05%）
@@ -457,8 +450,8 @@ Completed Sprint N+2 P2 rows (`P2-N2-1..4`) are archived in
 |---|---|---|
 | 2026-05-10..16 | Sprint N+0 W1-W2 FOUNDATION HEAVY | Closed; detailed ledger archived in `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md` |
 | 2026-05-16 | funding_arb 14d audit | verification/history; retirement decision in AMD-2026-05-09-02 / ADR-0018 |
-| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | rerun/repair 8a C1 full-duration proof path after `FAIL_CONNECTION` + 8b read-only Stage 0R query/report packet; A4-C diagnostic-only after no-revive RCA closure; Stage 1 demo only after future green Stage 0R (`[55]` source-cleared) |
-| 2026-05-24..30 | Sprint N+2 8d follow-up + 8a Phase D + Stage 2 demo cohort 14d | Stage 2 only from Stage 1 demo empirical evidence |
+| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | rerun/repair 8a C1 full-duration proof path after `FAIL_CONNECTION` + 8b read-only Stage 0R query/report packet; Stage 1 Demo only after a future green Stage 0R (`[55]` source-cleared) |
+| 2026-05-24..30 | Sprint N+2 8a Phase D + Stage 2 demo cohort 14d | Stage 2 only from Stage 1 Demo empirical evidence |
 | 2026-05-31..06-06 | Sprint N+3 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | |
 | 2026-06-07..13 | Sprint N+4 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | Track W 全 closed |
 | 2026-06-14..20 | Sprint N+5 8f IMPL + 8g (R-4) spec + first per-alpha-source supervised live | 業務鏈 85-89% |

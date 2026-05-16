@@ -168,6 +168,8 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/E4/workspace/reports/2026-05-16--full-scope-testing-audit.md` | E4 full-scope testing audit |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-16--12-agent-audit-pm-signoff.md` | PM 12-agent audit sign-off report |
 | `CCAgentWorkSpace/Operator/2026-05-16--12-agent-audit-pm-signoff.md` | Operator brief：12-agent audit PM sign-off |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md` | PM cleanup：Stage 1 promotion is Demo-only; A4-C active marker reduced to diagnostic-only tombstone |
+| `CCAgentWorkSpace/Operator/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md` | Operator brief：Stage 1 Demo + A4-C tombstone cleanup |
 | `CCAgentWorkSpace/E1a/workspace/reports/2026-05-16--wp01_gui_safety_round1.md` | WP-01 GUI safety Round 1 sign-off（typed-phrase × 4 + LinUCB dead buttons + bilingual + native→modal）|
 | `CCAgentWorkSpace/E1a/workspace/reports/2026-05-16--wp01_gui_real_fix.md` | WP-01 GUI Round 2 補修（A3-MAJOR-2 unify / 雙層 modal 拆 / 第 6 metric / 繁簡 / modal lock）|
 | `CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp02_donchian_deprecate.md` | WP-02 Donchian deprecate sign-off（hygiene-only + audit drift 第 3 次教訓）|
@@ -1176,3 +1178,5 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-15--todo_v21_completion_cleanup_archive.md` | TODO v21 completion cleanup archive: completed sprint ledgers, DONE rows, and W-AUDIT priority delta |
 | `2026-05-15--todo_v24_stale_rows_archive.md` | TODO v24 stale rows archive：過時 active rows / stale claims 歸檔（V079 pending / engine 5/8 binary / 舊 demo state / 舊 `[55]`/`[67]` 判斷）|
 | `2026-05-16--todo_v36_completion_cleanup_archive.md` | TODO v36 completion cleanup archive：v35 / 2026-05-15..16 completed detail, closed wave rows, DONE P0/P1/P2 rows, and stale C1 running wording moved out of active TODO |
+| `2026-05-16--close_maker_first_phase_1b_round1_archive.md` | Close-Maker-First Phase 1b Round 1 archive：design/governance/review history and active gates moved out of active TODO |
+| `2026-05-16--stage1_demo_a4c_tombstone_cleanup.md` | Stage 1 Demo + A4-C tombstone cleanup archive：old W3 paper cohort / A4-C promotion markers removed from active docs while diagnostic tombstone remains |
