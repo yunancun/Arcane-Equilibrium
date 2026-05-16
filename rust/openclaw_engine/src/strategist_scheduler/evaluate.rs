@@ -350,25 +350,31 @@ impl StrategistScheduler {
 
     /// Fetch current params + ranges for a strategy via PipelineCommand.
     /// 通過 PipelineCommand 獲取策略的當前參數和範圍。
+    ///
+    /// WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修)：3 處 `self.tune_cmd_tx`
+    /// 直接呼叫改為 `self.tune_cmd_snapshot()`，每呼叫從 slot 讀最新 sender
+    /// （生產路徑）或退回 owned（測試 / 直接呼叫）。詳 mod.rs 文檔。
     async fn fetch_current_params(
         &self,
         strategy_name: &str,
     ) -> Result<(Value, Vec<ParamRange>), Box<dyn std::error::Error + Send + Sync>> {
         // Get current params / 獲取當前參數
         let (params_tx, params_rx) = tokio::sync::oneshot::channel();
-        self.tune_cmd_tx.send(PipelineCommand::GetStrategyParams {
-            strategy_name: strategy_name.to_string(),
-            response_tx: params_tx,
-        })?;
+        self.tune_cmd_snapshot()
+            .send(PipelineCommand::GetStrategyParams {
+                strategy_name: strategy_name.to_string(),
+                response_tx: params_tx,
+            })?;
         let params_str = params_rx.await??;
         let current: Value = serde_json::from_str(&params_str)?;
 
         // Get param ranges / 獲取參數範圍
         let (ranges_tx, ranges_rx) = tokio::sync::oneshot::channel();
-        self.tune_cmd_tx.send(PipelineCommand::GetParamRanges {
-            strategy_name: strategy_name.to_string(),
-            response_tx: ranges_tx,
-        })?;
+        self.tune_cmd_snapshot()
+            .send(PipelineCommand::GetParamRanges {
+                strategy_name: strategy_name.to_string(),
+                response_tx: ranges_tx,
+            })?;
         let ranges_str = ranges_rx.await??;
         let ranges: Vec<ParamRange> = serde_json::from_str(&ranges_str)?;
 
@@ -384,7 +390,7 @@ impl StrategistScheduler {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let params_json = serde_json::to_string(recommendation)?;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.tune_cmd_tx
+        self.tune_cmd_snapshot()
             .send(PipelineCommand::UpdateStrategyParams {
                 strategy_name: strategy_name.to_string(),
                 params_json,

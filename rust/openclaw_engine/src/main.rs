@@ -816,10 +816,15 @@ async fn async_main(
     // B0/R3-1 StrategistScheduler — 抽至 `main_boot_tasks.rs`。
     // 從 DB 恢復 last-applied tuned params 後 spawn scheduler。
     // ------------------------------------------------------------------
+    // WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修)：把既有 `demo_cmd_slot`
+    // 注入 scheduler，scheduler 內部 `tune_cmd_snapshot()` 改從 slot 讀最新
+    // demo sender，避免 boot-time 值捕獲在 demo pipeline restart 後過時。
+    // owned `demo_cmd_tx` 仍傳入作 fallback（slot 爭用 / 啟動瞬間 None）。
     let strategist_counters = main_boot_tasks::spawn_strategist_scheduler(
         &db_pool,
         &cancel,
         &demo_cmd_tx,
+        &demo_cmd_slot,
         &live_cmd_slot,
         &risk_stores,
     )
@@ -1367,9 +1372,13 @@ async fn async_main(
     // when env=1; late-injects into IPC slot for manual reload trigger.
     // F6：邊際估計重載 daemon，受 OPENCLAW_EDGE_RELOAD=1 控管。
     // ------------------------------------------------------------------
+    // WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修)：demo 改傳 `demo_cmd_slot`
+    // （與 reconciler / strategist scheduler 共用），edge reload daemon 每次
+    // dispatch 從 slot 讀最新 sender，pipeline restart 後自動拿到新 channel。
+    // Paper 保留 by-value（paper 預設關 + 無 paper slot 基礎設施，不擴 scope）。
     let edge_reload_signal_tx = main_boot_tasks::spawn_edge_estimates_reloader_if_enabled(
         Some(paper_cmd_tx.clone()),
-        demo_cmd_tx.clone(),
+        Some(Arc::clone(&demo_cmd_slot)),
         Some(Arc::clone(&live_cmd_slot)),
         &cancel,
     );
