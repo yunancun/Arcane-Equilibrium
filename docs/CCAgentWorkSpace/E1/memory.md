@@ -9819,3 +9819,55 @@ P2 ticket（per PA 指示）。最終 LOC delta +76/-3，test 17→18 PASS，386
 
 ### 完整報告路徑
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--wp03_deploy_gate_round2_fix.md`
+
+---
+
+## 2026-05-16 P1-PORTFOLIO-RESTING-EXPOSURE-1 Round 2 — Test Coverage Top-up（dispatch stale 處置）
+
+PA dispatch 派 `P1-PORTFOLIO-RESTING-EXPOSURE-1` 要 IMPL Task 1+2 source + Task 3 三個 test。
+接手三連 git log + grep main 確認：commit `9980448a` (2026-05-16 10:26) 已落地完整 IMPL +
+A3+E2+E4 全綠 sign-off + TODO.md L323 標 ✅ DONE + 6 個 P2 follow-up ticket 已開。**dispatch 是 stale**。
+
+### Reasonable call 決策
+
+不重做 IMPL（違 §八「最小影響」+ profile.md「不擴大範圍」+ 會破 ML/healthcheck 下游 8 ticket
++ 與既有 commit chain 衝突），改補 dispatch §3 第三個 test 名 unique gap：
+
+| Dispatch 要的 test 名 | 既有 test | 覆蓋情況 | 動作 |
+|---|---|---|---|
+| `test_resting_maker_qty_counts_toward_exposure` | `test_p1_portfolio_resting_entry_only_added_to_long` | 100% 等價 | 不加 alias |
+| `test_resting_close_qty_does_NOT_double_count` | `test_p1_portfolio_resting_close_only_reduces_filled` + `..._close_reduces_capped_at_filled` | 100% 等價 + 加強 | 不加 alias |
+| `test_resting_entry_qty_correlated_pair_blocks_oversize` | 缺（既有 7 個全是 helper-level，沒走 end-to-end gate chain）| **未覆蓋** | 補 1 integration test +82 LOC |
+
+新 test 設計：balance=10_000 + filled long BTC 0.04×50_000=2_000 + entry-side long ETH resting
+1.0×4_000=4_000 → effective_long=6_000 → correlated=60.0% → check_order_allowed 觸 cap
+reject reason 含 "correlated exposure"。釘 dispatch §3 第三個語義「two-symbol same-direction
+crypto pair」端對端 gate chain 行為。
+
+### 教訓
+
+1. **接手三連必跑**（per `feedback_fetch_before_dispatch.md` + `project_multi_session_memory_race.md`）：
+   `git log --all --oneline --grep="<ticket>"` + `grep "<TICKET>" <key_source_file>` + TODO.md
+   line scan。dispatch 可能 stale（PA 並行派發但 main 已 land sign-off）。盲跑會
+   (a) 雙重 IMPL 破 commit chain、(b) 與 sibling merge conflict、(c) 退化既有 sign-off。
+
+2. **「unique gap top-up」優於「整 round 重做」**：dispatch 派的 3 個 test 名中 2 個已被覆蓋，
+   1 個 unique。最小影響做法 = 只補 unique 那個 + 列 mapping 表給 PM；不加 alias test 製造
+   noisy duplicate；不重做已 sign-off 的 source IMPL。
+
+3. **End-to-end gate integration test vs helper-level unit test 不同性質**：既有 7 個
+   `compute_*_exposure_pct` 純函式 test 釘數學計算正確性；本 round 加的
+   `check_order_allowed` integration test 釘「→ Reject reason 字串 contract」，是
+   ML feature pipeline 下游的 implicit contract。兩者互補不重複。
+
+4. **dispatch 命名 vs codebase 命名衝突的處置**：dispatch 給的 test 名是 external review
+   audit 用，codebase 既有命名是 PA 早輪 design 拍板。我沒加 alias（會 noise），改寫
+   mapping 表 + 補 unique gap，PM 拍板 final naming。
+
+5. **Sibling Phase 1b 並行 dirty file check**：dispatch 警告 9 個檔 dirty，本 ticket 與
+   sibling **0 重疊**（本動 `intent_processor/tests.rs`，sibling 動 `tick_pipeline/` +
+   `event_consumer/` + `strategies/grid_trading/` + `strategies/maker_rejection.rs`）。
+   E4 Linux regression 可單獨先跑或等 sibling commit 後 batch。
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_1_impl.md`

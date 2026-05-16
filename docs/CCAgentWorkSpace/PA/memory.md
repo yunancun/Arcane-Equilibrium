@@ -4194,3 +4194,105 @@ PG fills 直查證據：
 - MEDIUM for round 2 grid 是否 zoom-in 還是 calendar 延後（需 round 1 cycle share 分布實證）
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_stage0r_run_plan.md`
+
+## 2026-05-16 — W-AUDIT-8b Stage 0R RED RCA + Next Step（PA recommend Option A）
+
+**Trigger**：W-AUDIT-8b Stage 0R replay packet 跑出 RED verdict (`eligible_for_demo_canary=false`)，5.72d 數據 vs 7d spec window。判定「sample insufficient vs signal failure」+ pivot 評估 + 3-gate 影響。
+
+**Verdict**：RED **是 signal failure 主導 + sample 邊際次要**（65/35 混合，signal 占主導）。
+
+**Critical empirical findings**（read-only Linux artifact `/tmp/openclaw/w_audit_8b_stage0r_20260516_pa.json`）：
+1. Strategy primary `n=7, n_eff=1`（INJUSDT crowded_short_squeeze only）；`crowded_long_fade` 全 branch `n=0`
+2. Baseline pooled `n=39,181, n_eff=6,530`（同 5.72d 同 25 sym）→ **baseline 採樣比 strategy 多 5,597 倍**
+3. Strategy trigger rate = 7 / 411,840 candidate bars = **0.0017%** = self-imposed scarcity
+4. Baseline avg_net_bps = **-16.91 bps**（負 edge 顯著）
+5. K_prior=0（strict-funding-skew，funding_arb retired 不繼承）；K_total=4050；sr_benchmark=√(2 ln 4050)=4.07
+
+**Sample 邊際 vs Signal 主導**：5.72d → 7d / 14d / 30d 都不會解 spec floor（`pooled n_eff >= 300`），因為 trigger gate 0.0017% rate × extra days = sub-linear grow。30d 預測 n_eff ≈ 6，遠不到 floor。
+
+**3 Option 評估**：
+- **Option A (PA 推薦)**: defer 1d 拿 7d window + spec v0.3 patch 加 trigger gate sensitivity sweep (z >= 1.0/1.2/1.5/2.0) + round 2 expanded grid + final verdict @ round 2；不破 AMD-02 §8 condition 3 wording
+- **Option B**: tombstone 8b + pivot 8c/8a-D；但 8c 卡 C1 in-flight，8a Phase D 21-30 days，net 不加速 + 浪費 sibling land 1034 LOC + 4-agent hardening
+- **Option C**: decouple Phase 1b from 3-gate（AMD §8 wording 修訂為 OR / 縮減）；違反原 priority discipline，需 PM + 4-agent 重 sign-off
+
+**PA 推薦 Option A**：
+1. Spec v0.2 還沒 sweep trigger gate sensitivity，不應 premature tombstone
+2. Sibling 已 land tooling 1034 LOC + 4-agent hardening (sibling commits 已 incorporate)
+3. 7-14 calendar days 延長可被 P0-EDGE-1 closure (亦 in-flight) absorb，不是 critical path 延長
+4. 維持原 governance (三閘 strict AND) priority discipline 不破
+5. Option C 觸 AMD §8 修訂連帶 4-agent 重 sign-off 成本不對等
+
+**Sibling work check**：`git status` confirmed dirty files 來自並行 Wave 2-4 + Phase 1b + V094 + maker_rejection，無重疊。Sibling 兩個直接相關報告：
+- `PM/.../2026-05-16--w_audit_8b_stage0r_gap_closure.md` (tooling gap closure smoke PASS k_total=555)
+- `PM/.../2026-05-16--w_audit_8b_adversarial_hardening.md` (4-agent QC/E2/MIT/BB consolidated hardening smoke PASS k_total=4119)
+
+兩件 sibling work 已 land 並完全 incorporate；本 PA 報告不要求 tooling 修補，純基於 PA 自己 run artifact 做 RED 性質判定。
+
+**AMD-2026-05-15-02 §8 wording 結論**：暫不需修訂；Option A 不破 condition 3 wording；conditional amendment 觸發點 = Option A 走完 spec v0.3 + round 2 sensitivity sweep 後仍 RED → 屆時 PA 補新 RCA + 建議 wording 修訂。
+
+**A4-C tombstone precedent 比較**：A4-C = feature shape root cause（BTC 1m + xcorr）被 RCA 證偽；8b RED = 信號 trigger gate 過嚴 + panel 短暫，gate parameter 還沒 sweep → **不能立即 tombstone**。
+
+**Phase 1b deploy 阻塞性**：governance argument 是 systemic alpha-first priority discipline；不耦合 8b/8c 直接 alpha 進度。維持原 AMD §8 三閘 strict AND，Phase 1b 等三閘解時程被 P0-EDGE-1 closure 主導（不是 8b 主導）。
+
+**架構教訓 29**：Stage 0R RED 判定要區分「sample insufficient」vs「signal failure」— 看 baseline 採樣是否同樣稀少。本次 baseline pooled n=39,181 vs strategy primary n=7 = 5,597 倍差，即可確認**strategy gate self-imposed scarcity 是主因**，panel grow 1-2d 不會解。
+
+**架構教訓 30**：trigger gate 0.0017% rate 是 **alpha hypothesis design choice**，不是 panel data limitation；spec v0.3 patch 應允許 gate sensitivity sweep 探索 trade-off frontier（trigger rate vs power），不是 dogmatic stick to v0.2 fixed params。preregister sensitivity sweep K_new 累加 (K_total 增加 ~3-4 倍, sr_benchmark 仍 ≈ 4.1, 影響可忽略)。
+
+**16 根原則合規 A 級**：read-only RCA + governance recommendation；不跑 strategy / 不改 spec/AMD / 不接 runtime / 不訂 WS topic / 不寫任何 production code。
+
+**Confidence**:
+- HIGH for RED 性質判定 (baseline n=39,181 vs primary n=7 對照硬數據)
+- HIGH for trigger rate 0.0017% 計算 (411,840 candidate bars math)
+- HIGH for panel grow 1-2d 不解 spec floor 推斷 (linear extrapolation)
+- HIGH for sibling work incorporation (確認 dirty file 無重疊 + 2 sibling 報告引用)
+- MEDIUM-HIGH for Option A 推薦 (governance discipline + cost-benefit)
+- MEDIUM for trigger gate sweep 是否能找 n_eff>50 cell (取決於 funding skew alpha 真實 power，spec v0.3 round 2 才能 empirical 確認)
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_stage0r_red_rca_and_next_step.md`
+
+## 2026-05-16 — Wave C-3: phys_lock Live Enable AMD DRAFT prep
+
+**Trigger**：main session 派 Wave C-3 — 寫 phys_lock live enable AMD draft（risk_config_live.toml 加 `missing_edge_fallback_bps = 10.0` override 啟 phys_lock Gate 1 解除 fail-safe Hold）；對應 AMD-2026-05-15-02 v0.4 §4 DEFER 立場的後續 follow-up。
+
+**Mode**：純 DRAFT，**不自動 land**；不修改任何 runtime / config / TOML；不入 SPECIFICATION_REGISTER；pending operator sign-off + Phase 2b LiveDemo PASS + QC counterfactual gate 三條件。
+
+**核心關鍵事實**：
+1. `risk_config_demo.toml:199` 已 override `missing_edge_fallback_bps = 10.0`（EDGE-DIAG-1 對照實驗）→ demo Gate 1 pass → 7d 86 fires
+2. `risk_config_live.toml` 無 override → Rust default `-10.0` (`exit_features/v2.rs:174`) → `effective_edge=-10 < min_net_floor_bps=5.0` → live Gate 1 永久 Hold → 7d 0 fires（by design fail-safe）
+3. 設計初衷：`feedback_demo_loose_live_strict_policy.md` demo 放寬不要連帶放寬 live；本 AMD 是 carve-out exception 路徑
+4. AMD slot 編號：placeholder `2026-05-XX-XX` 留 operator 確認時補實；slot 邏輯 per `SPECIFICATION_REGISTER.md`（當前 max slot 2026-05-15-02）
+
+**AMD draft 結構（10 sections）**：
+- §1 Executive Decision：phys_lock = profit-protection（α_holding truncation policy，per QC §6 transaction cost economics framing），**非 risk-bypass 也非新 alpha source**
+- §2 Scope：唯一改動 = `risk_config_live.toml [exit].missing_edge_fallback_bps = 10.0`；§2.2 enumerate 不改清單（13 項：min_net_floor / min_hold_secs / giveback_* / shadow_enabled / paper / close-maker-first whitelist / 8-gate 邏輯 / H1-H5 / Decision Lease / Guardian / StopManager / demo config / 不改 audit pathway）
+- §3 Pre-enable Conditions 6-gate：(3.1) Phase 2b LiveDemo PASS / (3.2) QC counterfactual analysis demo 86 fires PASS / (3.3) operator 顯式 sign-off / (3.4) P0-EDGE-1 status PA+QC+FA 三方聲明 / (3.5) AMD-2026-05-15-02 v0.5 §4 patch / (3.6) AMD slot 編號實裝
+- §4 Risk Assessment 5 items：one-flag-per-phase 違反 (MEDIUM) / P0-EDGE-1 alpha-deficient regime 鎖 noise (HIGH) / demo-loose-live-strict 政策履行 (LOW) / demo/live regime 行為對稱性假設 (MEDIUM) / ArcSwap 熱重載 (LOW)
+- §5 Counterfactual Analysis（QC §6 mandate 核心）：5.1.1-5.1.5 evidence packet 條目；5.2 PASS/FAIL criteria（median(A-B) < -2bps + 95% one-sided CI 上限 < 0 + sensitivity sweep 穩健 + per-symbol 70%+ directional positive）；FAIL → 永久 REJECT
+- §6 Rollback Path：6.1 hot rollback ArcSwap 1 tick / 6.2 5 triggering conditions / 6.3 無 schema migration
+- §7 16 原則合規：16/16 PASS or PASS-with-mitigation；3 CONDITIONAL (#5 生存 / #6 失敗收縮 / #13 AI cost 感知) 由 §3 + §5 + §6 mitigate；0 BLOCKER
+- §8 9 不變量：9/9 PASS；0 BLOCKER；本 AMD 不削弱任何 fail-closed 邊界
+- §9 Approval chain：PA DRAFT ✅ / QC FA MIT BB ⏳ / PM ⏳ / Operator ⏳；不接受快速通道
+- §10 變更歷史 v0.1 DRAFT 2026-05-16
+
+**估算影響**：demo 86 fires / 7d / 25 symbols ≈ 0.49 fire/symbol/day → live 25 sym × 30d ≈ ~370 fires/月（注意：依賴 demo/live regime 行為對稱性假設，未必成立 per §4.4）
+
+**Side-effects 分析（純 DRAFT，0 runtime/code change）**：
+- 對 RustEngine / IPC / GovernanceHub / 5-Agent / 風控 = 0
+- 對 close-maker-first AMD-2026-05-15-02 Phase 1b IMPL = 0（並行 follow-up lane；本 AMD 啟用後 phys_lock fires 自動進 close-maker-first 白名單 maker-first 路徑）
+- 對 Mac/Linux runtime / paper / demo / live = 0
+- 對 healthcheck = 0
+
+**16 根原則合規（本 PA 工作）**：A 級（16/16 + 硬邊界 0 觸碰；純 draft governance 文件，0 runtime / config / TOML mutation）
+
+**Confidence**:
+- HIGH for §1-§3 governance framing（mirror AMD-2026-05-15-01 / AMD-2026-05-15-02 template + QC §6 + FA §6 立場合成）
+- HIGH for §4 5 risk items（QC + FA round 識別後 PA 補風險評級）
+- HIGH for §7-§8 16 原則 / 9 不變量逐條 mapping（標準 audit table 結構）
+- MEDIUM-HIGH for §5 counterfactual analysis criteria（median < -2bps + 95% CI + sensitivity + per-symbol 70%+ 是 PA 提案值，待 QC review 確定終值）
+- HIGH for §6 rollback path（純 TOML hot-reload + ArcSwap snapshot，已驗於 close-maker-first Phase 1a entry-side）
+
+**架構教訓 29**：「one-flag-per-phase」principle 在 live surface 改變上特別嚴；本 AMD §3 Gate 3.1 強制 Phase 2b PASS 為前置 = 保證兩個 live surface 變更（close-maker-first + phys_lock）不重疊觀察窗，防止歸因混淆。新 surface change 設計時必先盤點當前 live in-flight 變更，必要時序列化 enable timing。
+
+**架構教訓 30**：放寬 fail-safe（i.e. 改 missing_edge_fallback_bps 從負值到正值）必走 counterfactual evidence path，**不接受推理性論證**。即使 demo 觀察到 86 fires 是「pre-existing positive evidence」，counterfactual A-B 對比才能確認鎖利 net 改善 vs 反向（鎖 noise 反而劣化）。pre-enable Gate 不是 yes/no 設計，是 evidence-driven binary。
+
+**Report path**: 本 PA 工作的 AMD draft 即 deliverable，位於 `/Users/ncyu/Projects/TradeBot/srv/docs/governance_dev/amendments/2026-05-XX-XX-phys-lock-live-enable-draft.md`；不寫額外 summary report（per system instruction「Do NOT Write report/summary/findings/analysis .md files. Return findings directly as your final assistant message」）。
