@@ -189,6 +189,16 @@ from .checks_portfolio_resting_exposure import (  # noqa: F401
     # 自由 slot；name `portfolio_resting_exposure_lineage` 保留。
     check_68_portfolio_resting_exposure,
 )
+from .checks_wp03_deploy_gate import (  # noqa: F401
+    # [69] P1-WP03-DEPLOY-GATE-IMPL (2026-05-16) — WP-03 OU sigma residual
+    # fix post-deploy 24h+ monitoring + revert flag。配對 PA spec
+    # `docs/execution_plan/2026-05-16--wp03_ou_sigma_deploy_gate_spec.md`。
+    # 監測 grid_trading 在 demo + live_demo 的 avg_net_bps 三窗 (12h/24h/7d)
+    # trigger (T1=-10bps fast-fail / T2=-5bps primary / T3=baseline-3bps
+    # cumulative / ZERO_FILLS)，任一觸發即寫 revert flag advisory（per
+    # ADR-0020 manual-only，不 auto trigger revert action）。
+    check_69_wp03_ou_sigma_deploy_gate,
+)
 
 __all__ = [
     "main",
@@ -278,4 +288,8 @@ __all__ = [
     # RESTING-EXPOSURE-1 follow-up; ID 註：原 PA spec/TODO 標 [58]，[58] 已被
     # W-AUDIT-9 T4 占用，取下一自由 [68] free slot；name preserved。
     "check_68_portfolio_resting_exposure",
+    # [69] P1-WP03-DEPLOY-GATE-IMPL (2026-05-16) — WP-03 OU sigma residual
+    # deploy gate；三窗 (12h/24h/7d) trigger + revert flag advisory (ADR-0020
+    # manual-only)。
+    "check_69_wp03_ou_sigma_deploy_gate",
 ]

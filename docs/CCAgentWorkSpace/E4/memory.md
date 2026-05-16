@@ -3658,3 +3658,16 @@ E4 verdict: REGRESSION-PASS, 0 push-back to E1.
 - Linux runtime engine PID 不變（engine_alive=true, demo age=25.8s, live age=15.2s）；branch `worktree-agent-a58d99ef4ea1a440b` 保留 origin 等 PM merge；scratch `/tmp/e4-v2-recheck-1778922043` cleanup。
 - **Lesson — consolidated fix quick regression pattern**：parent commit 已 E4-PASS 時，子 commit 加 6 fix 不全跑全量；用「new test full run + key fix runtime verify + atomic write inspect + key new field existence verify」4 維覆蓋 ≈ 20 min wall time 即可給 PM merge 綠燈。比全量重跑省 80% 時間但 confidence 同。
 - Report：`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_consolidated_fix_e4_quick_smoke.md`
+
+## 2026-05-16 · P1-WP03-DEPLOY-GATE-IMPL Mac regression PASS
+- 17 [69] test PASS x2 (0.04s + 0.04s) non-flaky；10 [68] sibling PASS 0 regression；helper_scripts/db full 385/0 (baseline 368 + 17 new = 385 預期值)。
+- py_compile 4 files PASS；import [69] + [68] 0 circular；runner --help 顯示 `[46][48][49][50][51][52][53][54][55][57][58][59][64][65][66][67][68][69]`。
+- Wire: `__init__.py` 192-200/290/294，`runner.py` 289-305 (import) / 1176-1178 ([68] reg) / 1183-1205 ([69] reg) / 382-383+500-502 description。
+- Cross-IMPL [69] vs [68]：0 shared state / 0 path conflict / 0 env namespace overlap / 0 singleton race。可同時 register 進 runner。
+- Mock review：限於 `cur.fetchone.side_effect` (5 tuple seq) + `cur.connection.rollback` no-op + `cur.execute` no-op + 1 個 `datetime` patch (test_fail_zero_fills_dormancy)。業務邏輯（baseline cache load/compute、trigger evaluation T1/T2/T3/ZERO_FILLS、approach 80% threshold、verdict 階梯、revert flag write 條件、severity ordering）100% 真跑。符合 §5 OK pattern，0 anti-pattern hit。
+- LOC: checks 587 / test 528 / __init__ 295 全 < 800；runner 1326 pre-existing > 800 warn / < 2000 cap acceptable。
+- Cross-lang / SLA N/A：純 Python passive healthcheck，無 Rust dual + 不在 hot path。
+- Linux-flagged 6 follow-up (不阻 commit, deploy 後 cron fire 觀察): mlde_edge_training_rows 真 schema / `(%s::text)::interval` cast / `ts >= start AND ts < end` timestamptz 邊界 / engine_pid mtime ≥ `2026-05-16T01:00:00Z` 真實值 / baseline_cache.json 第一次 persist / engine_mode enum 真命中。
+- Verdict: REGRESSION PASS, 0 push-back to E1, two IMPL ([69] + [68]) 可進 PM commit。
+- Lesson — passive healthcheck Mac mock 充分準則: PG IO + datetime patch 兩 surface 邊界內 mock，業務邏輯（cache invalidation、trigger eval、severity ordering、flag write 條件、approach threshold escalation）真跑 → Mac mock pytest 可信。Linux PG dry-run 只驗 schema/cast 邊界，不替代 Mac unit test 邏輯覆蓋。本 IMPL 17 fixture 含全 4 trigger + 3 approach + 2 edge skip + 2 enum sequence 已覆蓋 spec §4.1 verdict matrix 全 14 行。
+- Report: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--wp03_deploy_gate_healthcheck_e4_mac_regression.md`
