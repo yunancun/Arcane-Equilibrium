@@ -38,7 +38,7 @@ pub use persist::load_latest_applied_params;
 use crate::ai_service_client::AiServiceClient;
 use crate::config::risk_config::RiskConfig;
 use crate::config::store::ConfigStore;
-use crate::ipc_server::LiveCmdSenderSlot;
+use crate::ipc_server::{DemoCmdSenderSlot, LiveCmdSenderSlot};
 use crate::strategies::ParamRange;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use serde_json::Value;
@@ -102,6 +102,13 @@ pub struct StrategistScheduler {
     ai_client: Arc<AiServiceClient>,
     /// Tuning-target pipeline command sender (Demo in the current design).
     /// 調諧目標引擎的管線命令發送器（當前設計恆為 Demo）。
+    ///
+    /// WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修)：原為 boot-time 值捕獲，
+    /// 若 demo pipeline 之後 restart（目前無 watcher 但保留可能性），scheduler
+    /// 將持續對舊 channel 發送、handler 跟著 drop oneshot response → 每 5 分
+    /// 鐘噴「channel closed」假警，且學習迴圈失效。對齊 `promote_cmd_*` slot
+    /// pattern：`tune_cmd_slot` 提供 watcher 輪替路徑，`tune_cmd_tx` 保留為
+    /// fallback（測試 / 直接呼叫 / 啟動瞬間 slot 為 None）。
     tune_cmd_tx: UnboundedSender<PipelineCommand>,
     /// Which engine this scheduler tunes. Must be Demo or Live — never Paper.
     /// 排程器調諧的引擎類型。只能是 Demo 或 Live，不接受 Paper。
@@ -117,6 +124,11 @@ pub struct StrategistScheduler {
     /// follows LiveAuthWatcher respawn/teardown instead of a boot-time sender.
     /// 動態 Live 促升 sender slot；生產路徑用它跟隨 LiveAuthWatcher 輪替。
     promote_cmd_slot: Option<LiveCmdSenderSlot>,
+    /// WP-13-LEFTOVER-1 (2026-05-16)：tune-target 管線（Demo）的 sender slot。
+    /// 生產路徑由 `main.rs` 注入既有 `demo_cmd_slot`（WP-13 已建）；scheduler
+    /// 每 5 min 從 slot 讀快照，避免 pipeline restart 後對舊 channel 發送。
+    /// 缺則退回 owned `tune_cmd_tx`（測試 / 直接呼叫保留原語意）。
+    tune_cmd_slot: Option<DemoCmdSenderSlot>,
     /// Database pool for fills query / 用於 fills 查詢的資料庫連接池
     db_pool: Arc<crate::database::pool::DbPool>,
     /// STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): Optional RiskConfig store
@@ -172,6 +184,7 @@ impl StrategistScheduler {
             tune_target,
             promote_cmd_tx,
             promote_cmd_slot: None,
+            tune_cmd_slot: None,
             db_pool,
             risk_store: None,
             consecutive_failures: AtomicU32::new(0),
@@ -209,6 +222,16 @@ impl StrategistScheduler {
     /// 發送到啟動時舊 sender。
     pub fn with_promote_cmd_slot(mut self, promote_cmd_slot: LiveCmdSenderSlot) -> Self {
         self.promote_cmd_slot = Some(promote_cmd_slot);
+        self
+    }
+
+    /// WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修)：接入 tune-target（Demo）
+    /// 的命令 sender slot。生產路徑接 main.rs 既有 `demo_cmd_slot`（WP-13
+    /// reconciler 同源），scheduler 每輪 fetch_current_params / apply_params
+    /// 透過 [`tune_cmd_snapshot`] 取最新 sender，避免 boot-time 值捕獲過時。
+    /// 對齊 `with_promote_cmd_slot` builder pattern。
+    pub fn with_tune_cmd_slot(mut self, tune_cmd_slot: DemoCmdSenderSlot) -> Self {
+        self.tune_cmd_slot = Some(tune_cmd_slot);
         self
     }
 
@@ -251,6 +274,29 @@ impl StrategistScheduler {
             }
         }
         self.promote_cmd_tx.clone()
+    }
+
+    /// WP-13-LEFTOVER-1 (2026-05-16)：讀 tune-target（Demo）sender 快照。
+    /// 優先讀 `tune_cmd_slot`（main.rs 注入的 `demo_cmd_slot`），slot try_read
+    /// 爭用或 slot 未接時退回 owned `tune_cmd_tx`。回 `Some(UnboundedSender)`
+    /// （`Arc`-backed，clone 廉價）。pattern 同 `promote_cmd_snapshot`。
+    pub(crate) fn tune_cmd_snapshot(&self) -> UnboundedSender<PipelineCommand> {
+        if let Some(slot) = &self.tune_cmd_slot {
+            if let Some(guard) = slot.try_read() {
+                if let Some(tx) = guard.as_ref() {
+                    return tx.clone();
+                }
+            } else {
+                debug!(
+                    "StrategistScheduler::tune_cmd_snapshot: demo slot read contention \
+                     / demo slot 讀取爭用，退回 owned tune_cmd_tx"
+                );
+            }
+        }
+        // Fallback：slot 未接（測試 / 啟動瞬間）或 try_read 爭用，沿用 owned
+        // boot-time sender。owned `tune_cmd_tx` 永遠存在（new() 必填），故無
+        // Option 包裝。
+        self.tune_cmd_tx.clone()
     }
 
     /// Promote validated params from the tune target (Demo) to Live.

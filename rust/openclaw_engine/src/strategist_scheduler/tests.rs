@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ai_service_client::AiServiceClient;
-use crate::ipc_server::LiveCmdSenderSlot;
+use crate::ipc_server::{DemoCmdSenderSlot, LiveCmdSenderSlot};
 use crate::strategies::ParamRange;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use std::sync::atomic::Ordering;
@@ -375,6 +375,63 @@ fn test_new_accepts_demo_with_live_promote_channel() {
         StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, Some(live_tx), pool, cancel);
     assert_eq!(sched.tune_target(), PipelineKind::Demo);
     assert!(sched.has_promote_channel());
+}
+
+/// WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修) 回歸防禦：
+/// scheduler 接 `tune_cmd_slot` 後 `tune_cmd_snapshot()` 必讀 slot 最新值，
+/// 而非 ctor 時 owned `tune_cmd_tx`。模擬 pipeline restart：boot 時 slot 與
+/// owned 指向 channel A；之後改 slot 指向 channel B；snapshot 必回 B。
+#[tokio::test]
+async fn test_tune_cmd_snapshot_reads_latest_demo_slot() {
+    let (ai, pool, cancel) = mk_deps();
+    let (boot_tune_tx, mut boot_rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+    let (restart_tune_tx, mut restart_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+
+    let slot: DemoCmdSenderSlot = Arc::new(parking_lot::RwLock::new(Some(boot_tune_tx.clone())));
+    let sched = StrategistScheduler::new(ai, boot_tune_tx, PipelineKind::Demo, None, pool, cancel)
+        .with_tune_cmd_slot(Arc::clone(&slot));
+
+    // 模擬 demo pipeline restart：slot 改指向新 channel。
+    *slot.write() = Some(restart_tune_tx);
+
+    // snapshot 必回最新 slot 值；發送到該 sender 後新 channel 收到，舊 channel 不收。
+    let snapshot = sched.tune_cmd_snapshot();
+    let (oneshot_tx, _oneshot_rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    snapshot
+        .send(PipelineCommand::GetStrategyParams {
+            strategy_name: "probe".to_string(),
+            response_tx: oneshot_tx,
+        })
+        .expect("send to latest slot sender succeeds");
+
+    let msg = restart_rx.try_recv().expect("restart channel must receive");
+    assert!(matches!(msg, PipelineCommand::GetStrategyParams { .. }));
+    assert!(
+        boot_rx.try_recv().is_err(),
+        "stale boot-time sender must not receive command after slot rotation"
+    );
+}
+
+/// WP-13-LEFTOVER-1 (2026-05-16) 回歸防禦：缺 `with_tune_cmd_slot` 時
+/// `tune_cmd_snapshot()` 退回 owned `tune_cmd_tx`（測試 / 直接呼叫保留語意）。
+#[tokio::test]
+async fn test_tune_cmd_snapshot_fallbacks_to_owned_when_slot_absent() {
+    let (ai, pool, cancel) = mk_deps();
+    let (tune_tx, mut tune_rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+    let sched = StrategistScheduler::new(ai, tune_tx, PipelineKind::Demo, None, pool, cancel);
+
+    let snapshot = sched.tune_cmd_snapshot();
+    let (oneshot_tx, _oneshot_rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    snapshot
+        .send(PipelineCommand::GetStrategyParams {
+            strategy_name: "fallback_probe".to_string(),
+            response_tx: oneshot_tx,
+        })
+        .expect("owned tune_cmd_tx fallback must succeed");
+
+    let msg = tune_rx.try_recv().expect("owned channel must receive");
+    assert!(matches!(msg, PipelineCommand::GetStrategyParams { .. }));
 }
 
 #[tokio::test]

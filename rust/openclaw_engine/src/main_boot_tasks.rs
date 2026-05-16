@@ -174,6 +174,7 @@ pub(crate) async fn spawn_strategist_scheduler(
     db_pool: &Arc<DbPool>,
     cancel: &CancellationToken,
     demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_slot: &DemoCmdSenderSlot,
     live_cmd_slot: &LiveCmdSenderSlot,
     risk_stores: &PerEngineRiskStores,
 ) -> Option<Arc<openclaw_engine::strategist_scheduler::CycleCounters>> {
@@ -304,6 +305,12 @@ pub(crate) async fn spawn_strategist_scheduler(
     // The scheduler tunes Demo, so the Demo store is the authoritative source.
     // STRATEGIST-TUNE-TARGET-CONFIG-1：把 demo RiskConfig store 接給 scheduler，
     // 每輪從 live snapshot 讀 max_param_delta_pct（IPC 熱重載）。
+    // WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修)：注入 demo_cmd_slot 為
+    // tune-target sender 來源。scheduler 內部 `tune_cmd_snapshot()` 每輪
+    // fetch_current_params / apply_params 從 slot 讀最新 sender，pipeline
+    // restart 後自動拿到新 channel（不需重 spawn scheduler）。owned
+    // `tune_cmd_tx`（即 `demo_tx.clone()`）保留作為 slot try_read 爭用 / 啟動
+    // 瞬間 None 的 fallback，與既有 promote slot pattern 對稱。
     let scheduler = Arc::new(
         openclaw_engine::strategist_scheduler::StrategistScheduler::new(
             ai_client,
@@ -314,6 +321,7 @@ pub(crate) async fn spawn_strategist_scheduler(
             cancel.clone(),
         )
         .with_promote_cmd_slot(Arc::clone(live_cmd_slot))
+        .with_tune_cmd_slot(Arc::clone(demo_cmd_slot))
         .with_risk_store(Arc::clone(&risk_stores.demo)),
     );
     // G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25): grab the shared
@@ -448,9 +456,15 @@ const EDGE_RELOAD_SIGNAL_BUFFER: usize = 1;
 ///   per-pipeline `cmd_tx` clone（paper/demo/live），對每個可用管線 fan-out
 ///   `PipelineCommand::ReloadEdgeEstimates`。每個引擎在
 ///   `handle_reload_edge_estimates` 內讀自己模式對應 JSON — 結構性模式隔離。
+///
+/// WP-13-LEFTOVER-1 (2026-05-16, FA-P1-11 補修)：`demo_cmd_tx` 由 by-value
+/// `Option<UnboundedSender<_>>` 改為 `Option<DemoCmdSenderSlot>`，對齊 live
+/// slot pattern。Reloader loop 每次 dispatch 從 slot 讀最新 sender，避免
+/// boot-time 值捕獲在 demo pipeline restart 後過時。Paper 路徑保留 by-value
+/// （paper 預設關 + 無 paper slot 基礎設施，本 PA 不擴 scope）。
 pub(crate) fn spawn_edge_estimates_reloader_if_enabled(
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    demo_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_slot: Option<DemoCmdSenderSlot>,
     live_cmd_slot: Option<LiveCmdSenderSlot>,
     cancel: &CancellationToken,
 ) -> Option<tokio::sync::mpsc::Sender<()>> {
@@ -461,7 +475,7 @@ pub(crate) fn spawn_edge_estimates_reloader_if_enabled(
         );
         return None;
     }
-    if paper_cmd_tx.is_none() && demo_cmd_tx.is_none() && live_cmd_slot.is_none() {
+    if paper_cmd_tx.is_none() && demo_cmd_slot.is_none() && live_cmd_slot.is_none() {
         warn!(
             "edge_estimates_reloader env=1 but no pipeline cmd_tx bound — \
              daemon not spawned / env=1 但無管線 cmd_tx 綁定，daemon 未啟動"
@@ -475,7 +489,7 @@ pub(crate) fn spawn_edge_estimates_reloader_if_enabled(
 
     tokio::spawn(run_edge_estimates_reloader_loop(
         paper_cmd_tx,
-        demo_cmd_tx,
+        demo_cmd_slot,
         live_cmd_slot,
         interval_dur,
         signal_rx,
@@ -516,7 +530,7 @@ fn resolve_reload_interval() -> Duration {
 ///   send 失敗 warn 後續跑、絕不 panic。
 async fn run_edge_estimates_reloader_loop(
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    demo_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_slot: Option<DemoCmdSenderSlot>,
     live_cmd_slot: Option<LiveCmdSenderSlot>,
     interval_dur: Duration,
     mut signal_rx: tokio::sync::mpsc::Receiver<()>,
@@ -549,20 +563,23 @@ async fn run_edge_estimates_reloader_loop(
                 "manual"
             }
         };
-        dispatch_reload_command(&paper_cmd_tx, &demo_cmd_tx, &live_cmd_slot, trigger_label);
+        dispatch_reload_command(&paper_cmd_tx, &demo_cmd_slot, &live_cmd_slot, trigger_label);
     }
 }
 
 /// EN: Fan-out helper — sends `ReloadEdgeEstimates` to each bound `cmd_tx`.
 /// 中: Fan-out 工具函式 — 對每個綁定 `cmd_tx` 發送 `ReloadEdgeEstimates`。
+///
+/// WP-13-LEFTOVER-1 (2026-05-16)：demo 與 live 皆採 slot 路徑（每次讀快照），
+/// paper 沿用 by-value（paper 預設關 + 無 paper slot 基礎設施，不擴 scope）。
 fn dispatch_reload_command(
     paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    demo_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    demo_cmd_slot: &Option<DemoCmdSenderSlot>,
     live_cmd_slot: &Option<LiveCmdSenderSlot>,
     trigger: &'static str,
 ) {
     let paper_ok = try_send_reload(paper_cmd_tx, "paper");
-    let demo_ok = try_send_reload(demo_cmd_tx, "demo");
+    let demo_ok = try_send_reload_from_demo_slot(demo_cmd_slot);
     let live_ok = try_send_reload_from_slot(live_cmd_slot);
     info!(
         trigger,
@@ -571,6 +588,17 @@ fn dispatch_reload_command(
         live_ok,
         "F6 PH5-WIRE-1 RELOAD: dispatch fan-out / 重載 fan-out 派發完成"
     );
+}
+
+/// WP-13-LEFTOVER-1 (2026-05-16)：從 demo slot 讀最新 sender 後嘗試發送
+/// `ReloadEdgeEstimates`。Slot 未接 / 為 None / channel 關閉皆回 false（不 panic）。
+/// 結構對齊 `try_send_reload_from_slot`（live）以保持 fan-out 三引擎對稱。
+fn try_send_reload_from_demo_slot(demo_cmd_slot: &Option<DemoCmdSenderSlot>) -> bool {
+    let Some(slot) = demo_cmd_slot.as_ref() else {
+        return false;
+    };
+    let tx = slot.read().clone();
+    try_send_reload(&tx, "demo")
 }
 
 fn try_send_reload_from_slot(live_cmd_slot: &Option<LiveCmdSenderSlot>) -> bool {
@@ -620,6 +648,14 @@ mod edge_reload_tests {
         tokio::sync::mpsc::UnboundedReceiver<PipelineCommand>,
     ) {
         tokio::sync::mpsc::unbounded_channel()
+    }
+
+    /// WP-13-LEFTOVER-1 (2026-05-16)：用既有 sender 構造預填的 demo slot；
+    /// 取代測試中先前直接傳 `Some(UnboundedSender<_>)` 的舊路徑。
+    fn make_filled_demo_slot(
+        tx: tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
+    ) -> DemoCmdSenderSlot {
+        Arc::new(parking_lot::RwLock::new(Some(tx)))
     }
 
     #[tokio::test]
@@ -673,7 +709,8 @@ mod edge_reload_tests {
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "60");
         let cancel = CancellationToken::new();
         let (demo_tx, _demo_rx) = make_cmd_channel();
-        let result = spawn_edge_estimates_reloader_if_enabled(None, Some(demo_tx), None, &cancel);
+        let demo_slot = make_filled_demo_slot(demo_tx);
+        let result = spawn_edge_estimates_reloader_if_enabled(None, Some(demo_slot), None, &cancel);
         assert!(result.is_some(), "spawner must return Some when enabled");
         cancel.cancel();
         tokio::task::yield_now().await;
@@ -689,10 +726,15 @@ mod edge_reload_tests {
         let cancel = CancellationToken::new();
         let (demo_tx, mut demo_rx) = make_cmd_channel();
         let (live_tx, mut live_rx) = make_cmd_channel();
+        let demo_slot = make_filled_demo_slot(demo_tx);
         let live_slot: LiveCmdSenderSlot = Arc::new(parking_lot::RwLock::new(Some(live_tx)));
-        let signal_tx =
-            spawn_edge_estimates_reloader_if_enabled(None, Some(demo_tx), Some(live_slot), &cancel)
-                .expect("daemon spawned");
+        let signal_tx = spawn_edge_estimates_reloader_if_enabled(
+            None,
+            Some(demo_slot),
+            Some(live_slot),
+            &cancel,
+        )
+        .expect("daemon spawned");
 
         signal_tx.try_send(()).expect("trigger fits buffer-1");
 
@@ -711,6 +753,67 @@ mod edge_reload_tests {
         tokio::task::yield_now().await;
         std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
         std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    /// WP-13-LEFTOVER-1 (2026-05-16) 回歸防禦：證明 demo slot 改 by-value
+    /// → slot 後，pipeline restart 後新 sender 被 reloader 即時讀到。場景：
+    /// 1. spawn daemon 時 demo slot 為 None，paper 為唯一綁定
+    /// 2. 後續寫入 demo slot（模擬 pipeline 之後 attach / 或 restart 重綁）
+    /// 3. trigger 後 demo 收到 ReloadEdgeEstimates（並非 boot-time 值捕獲）
+    #[tokio::test]
+    async fn manual_trigger_reads_demo_slot_dynamically() {
+        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
+        std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
+        let cancel = CancellationToken::new();
+        let (paper_tx, mut paper_rx) = make_cmd_channel();
+        // demo slot 啟動時為空；後續注入新 sender 模擬 pipeline restart。
+        let demo_slot: DemoCmdSenderSlot = Arc::new(parking_lot::RwLock::new(None));
+        let signal_tx = spawn_edge_estimates_reloader_if_enabled(
+            Some(paper_tx),
+            Some(Arc::clone(&demo_slot)),
+            None,
+            &cancel,
+        )
+        .expect("daemon spawned");
+
+        let (demo_tx, mut demo_rx) = make_cmd_channel();
+        *demo_slot.write() = Some(demo_tx);
+
+        signal_tx.try_send(()).expect("trigger fits buffer-1");
+
+        let paper_msg = tokio::time::timeout(Duration::from_secs(2), paper_rx.recv())
+            .await
+            .expect("paper recv didn't time out")
+            .expect("paper recv yielded a message");
+        let demo_msg = tokio::time::timeout(Duration::from_secs(2), demo_rx.recv())
+            .await
+            .expect("demo recv didn't time out")
+            .expect("demo recv yielded a message");
+        assert!(matches!(paper_msg, PipelineCommand::ReloadEdgeEstimates));
+        assert!(matches!(demo_msg, PipelineCommand::ReloadEdgeEstimates));
+
+        cancel.cancel();
+        tokio::task::yield_now().await;
+        std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
+        std::env::remove_var(ENV_EDGE_RELOAD_INTERVAL_SECS);
+    }
+
+    /// WP-13-LEFTOVER-1 (2026-05-16) 回歸防禦：demo slot 未接時
+    /// `try_send_reload_from_demo_slot` 必回 false（fail-safe）。
+    #[test]
+    fn try_send_reload_from_demo_slot_returns_false_when_unbound() {
+        let result = try_send_reload_from_demo_slot(&None);
+        assert!(!result, "demo slot 未接時必回 false");
+    }
+
+    /// WP-13-LEFTOVER-1 (2026-05-16) 回歸防禦：demo slot 為 Some 但內層 None
+    /// （pipeline 尚未綁 / teardown 中）時必回 false。
+    #[test]
+    fn try_send_reload_from_demo_slot_returns_false_when_inner_none() {
+        let demo_slot: DemoCmdSenderSlot = Arc::new(parking_lot::RwLock::new(None));
+        let result = try_send_reload_from_demo_slot(&Some(demo_slot));
+        assert!(!result, "demo slot 內層 None 時必回 false");
     }
 
     #[tokio::test]
@@ -758,8 +861,9 @@ mod edge_reload_tests {
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
         let cancel = CancellationToken::new();
         let (demo_tx, mut demo_rx) = make_cmd_channel();
+        let demo_slot = make_filled_demo_slot(demo_tx);
         let signal_tx =
-            spawn_edge_estimates_reloader_if_enabled(None, Some(demo_tx), None, &cancel)
+            spawn_edge_estimates_reloader_if_enabled(None, Some(demo_slot), None, &cancel)
                 .expect("daemon spawned");
 
         let first = signal_tx.try_send(());
