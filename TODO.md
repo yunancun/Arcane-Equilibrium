@@ -36,6 +36,8 @@ v36 completion cleanup archive:
 `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
 v37 Stage 1 / A4-C active-marker cleanup:
 `docs/archive/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`.
+W-AUDIT-8b adversarial hardening:
+`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--w_audit_8b_adversarial_hardening.md`.
 
 ## §0.0 PM Freeze — Demo-Only Stage 1 + A4-C Tombstone Guard
 
@@ -45,7 +47,7 @@ v37 Stage 1 / A4-C active-marker cleanup:
 - Paper is not an active promotion lane. Any plan, command, env file, script, or runtime launch that sets `OPENCLAW_ENABLE_PAPER=1` for promotion evidence remains **BLOCKED** unless a future operator decision explicitly reopens paper for non-promotion diagnostics.
 - A4-C tombstone: `W-AUDIT-8d` BTC→Alt Lead-Lag is archived from active promotion and closed no-revive for the BTC 1m return + xcorr feature shape. Keep `panel.btc_lead_lag_panel` / `[57]` diagnostic-only; do not use A4-C as a Stage 0R promotion candidate or Stage 1 Demo cohort source.
 - Future A4-C reopen requires a materially new predictive variable, preregistered validation, and a fresh strategy×symbol Stage 0R packet with `eligible_for_demo_canary=true`. Threshold loosening, post-hoc symbol picking, or reusing paper evidence are non-triggers.
-- Current active alpha gates: W-AUDIT-8b waits for a read-only Stage 0R query/report packet; W-AUDIT-8a C1 waits for a full-duration BB/MIT-approved proof; W-AUDIT-8c waits for C1 + MIT schema review.
+- Current active alpha gates: W-AUDIT-8b Stage 0R tooling is source/test hardened and waits for panel ≥7d plus QC/MIT/BB Round 2 verdict; W-AUDIT-8a C1 waits for a full-duration BB/MIT-approved proof; W-AUDIT-8c waits for C1 + MIT schema review.
 
 ---
 
@@ -92,7 +94,7 @@ v37 Stage 1 / A4-C active-marker cleanup:
 - V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
 - Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
 - **EDGE-P2-3 Phase 1b close-maker-first refactor — Round 1（Design + Governance）✅ CLOSED 2026-05-16**: 完整 round 1 歷史 + 30+ commit + spec v1.3 / AMD v0.4 / V094 spec + 4-agent 兩輪 + Wave 3a short re-review 4/4 APPROVED + Round 2 audit fix pack 6 gaps → `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`（complementary TODO cleanup → `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`）。Current blockers are the same 3 gates (`P0-EDGE-1`, `W-AUDIT-8b Stage 0R`, `W-AUDIT-8a C1`), Wave 3.5 Linux migration backlog, and `P1-BBMF3-WIRE-1` production callback wiring. phys_lock live enablement remains deferred to Phase 2b. Honest 認知：本 refactor 是 execution-quality optimization（fee saving ~$50-$200/year per E3 empirical），不解 trading losses root cause（5 textbook 策略 structural alpha deficit）；真實治癒走 W-AUDIT-8a/8b/8c alpha source 軸。下一輪 audit = Phase 1b IMPL execution + Demo/Live 觀察期。
-- **Trading losses Round 2 — Alpha Source Push DISPATCHED 2026-05-16**: operator trigger 後同步派發 3 路：(P0a) PA + E1 並行跑 W-AUDIT-8b Funding Skew Stage 0R replay packet（read-only，1-2 週，既有 tooling 1034 LOC commit `d9adf46b` 為基底）；(P1) E1 IMPL `P1-PORTFOLIO-RESTING-EXPOSURE-1`（isolation worktree，3 person-day，平行）。Operator 動作 in-flight：(P0b) W-AUDIT-8a C1 24h liquidation proof rerun（前次 FAIL_CONNECTION 2026-05-16T00:37Z @ 17055s/86400s）；(P0c) operator + PM 跑 Wave 3.5 Linux PG backlog（V091/V092/V093 + sqlx record，per PA report §5 protocol，est 2h）。**Phase 1b commands.rs IMPL 暫緩** — 等 W-AUDIT-8b Stage 0R green 證據 + 3-gate clear 才解凍。
+- **Trading losses Round 2 — Alpha Source Push DISPATCHED 2026-05-16**: operator trigger 後同步派發 3 路：(P0a) W-AUDIT-8b Funding Skew Stage 0R replay packet（read-only，1-2 週）已完成 source/test hardening：K_new floor 4050、fixed-parameter pooled stats、settlement-window exclusion、mixed-source fail-closed、day-block CSCV PBO、strict K_prior default、exact horizon SQL；Round 2 verdict 仍等 panel ≥7d + QC/MIT/BB review；(P1) E1 IMPL `P1-PORTFOLIO-RESTING-EXPOSURE-1` 已 DONE。Operator 動作 in-flight：(P0b) W-AUDIT-8a C1 24h liquidation proof rerun；(P0c) operator + PM 跑 Wave 3.5 Linux PG backlog（V091/V092/V093 + sqlx record，per PA report §5 protocol，est 2h）。**Phase 1b commands.rs IMPL 暫緩** — 等 W-AUDIT-8b Stage 0R green 證據 + 3-gate clear 才解凍。
 
 ---
 
@@ -110,7 +112,7 @@ v37 Stage 1 / A4-C active-marker cleanup:
 | 2 | `W-G` Proposal/approval/mobile relay | alpha-neutral | PM → CC/FA/PA → E1/E2/E4 → PM | 🟡 **BACKEND FOUNDATION DONE**（待 mobile relay）| Gateway/console proposal/approval relay; no direct order/config/live-auth. |
 | 3 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 + MIT + E2 + E4 | 🟡 **PARTIAL** | Corrected retained scope still active in §11.2: `cost_edge_advisor_log`, `drift_events`, two companion views, and dropped/no-DDL `scorer_predictions`; long-wave fix remains mounted into `W-AUDIT-8f`. |
 | 4 | `W-AUDIT-8a` Alpha Surface Foundation | alpha-bearing | PA → E1 → E2 → E4 + MIT/QC/CC/BB → PM | 🟡 **PARTIAL / C1 v2 READY FOR DEPLOY 2026-05-16** | Phase A/B/C0 complete; v1 C1 proof FAIL_CONNECTION 5h/24h → v2 resilient harness IMPL `25396b0b` + consolidated 6-fix `8d2eef58` 全鏈 GREEN (A3 7.5/10 + E2 PASS + E4 PASS + BB COND + MIT FULL)；wrapper `helper_scripts/bybit/run_c1_v2_proof.sh`；operator 24h proof launch oneliner: `ssh trade-core 'bash ~/BybitOpenClaw/srv/helper_scripts/bybit/run_c1_v2_proof.sh'`；production liquidation revival remains blocked until 24h proof PASS_C1_PROOF_CANDIDATE + BB+MIT 終審。 |
-| 5 | `W-AUDIT-8b` A4-A Funding Skew Directional | alpha-bearing | PA spec → Stage 0R query/report + QC + MIT + BB review | 🔵 **STAGE 0R PACKET ROUND 1 SMOKE DONE + TOOL GAP CLOSURE SOURCE/TEST DONE 2026-05-16**；waiting panel ≥ 7d + MIT sign K_prior mode | Spec v0.2 done；PA Wave 4-A Run Plan commit `0d6b7430`；E1 round 1 smoke commit `d5fe19e1` STRUCTURAL PASS (alpha-deficient expected)；Stage 0R tooling now emits panel metadata / per-symbol breakdown / settlement-window sensitivity / baseline lift / flat cost model+cost-edge ratio / 60m+8h bootstrap / PBO metadata / plateau check and exposes `--k-prior-mode {funding-related,strict-funding-skew,all}`；round 2 預計 2026-05-18~19 (panel 從 5.09d 累到 ≥ 7d 後)；Gap B final `K_prior` semantic still needs MIT sign-off before verdict review；strategy IMPL and demo spend remain blocked until replay packet is green. |
+| 5 | `W-AUDIT-8b` A4-A Funding Skew Directional | alpha-bearing | PA spec → Stage 0R query/report + QC + MIT + BB review | 🔵 **STAGE 0R TOOLING ADVERSARIAL HARDENING SOURCE/TEST DONE 2026-05-16**；waiting panel ≥ 7d + QC/MIT/BB Round 2 verdict | Spec v0.2 done；PA Wave 4-A Run Plan commit `0d6b7430`；E1 round 1 smoke commit `d5fe19e1` STRUCTURAL PASS (alpha-deficient expected)；Stage 0R tooling now fail-closes undersized panels with `K_new >= 4050`, defaults `--k-prior-mode strict-funding-skew`, reports `k_new_actual/min/floor`, evaluates pooled/branch/symbol stats on one selected parameter family, excludes settlement-window rows from eligibility while reporting sensitivity, marks mixed funding source modes, uses day-block CSCV PBO, requires baseline lift and cost-edge ratio, and SQL forward returns use exact 15/30/60m horizons；round 2 預計 2026-05-18~19 (panel 從 5.09d 累到 ≥ 7d 後)；strategy IMPL and demo spend remain blocked until replay packet is green. |
 | 6 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction | alpha-bearing | PA spec → E1 + QC + BB review WS | ⏳ **DEFER** Sprint N+2 spec → N+3 IMPL | Gated on C1 proof + MIT schema review. |
 | 7 | `W-AUDIT-8e` (R-2) Strategist Alpha Source Orchestrator | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+4 spec → N+5 IMPL | AlphaSourceRegistry + dynamic Sharpe-by-regime + Hypothesis sourcing. |
 | 8 | `W-AUDIT-8f` (R-3) Hypothesis Pipeline + W-AUDIT-4 ML | alpha-bearing | PA spec → E1 IMPL + MIT spec | ⛔ **DEFER** Sprint N+5 IMPL | learning.hypotheses state machine + W-AUDIT-4 dead schema root-cause closure. |
@@ -323,7 +325,7 @@ Phase 1b main implementation remains blocked by gates below.
 
 **Still Active**
 1. ❌ `P0-EDGE-1` — `[40]` negative realized edge remains active.
-2. 🔵 `W-AUDIT-8b Stage 0R` — **DISPATCHED 2026-05-16**：PA Wave 4-A Run Plan + E1 round 1 smoke 並行；read-only replay packet 1-2 週 cycle 開工。
+2. 🔵 `W-AUDIT-8b Stage 0R` — **SOURCE/TEST HARDENED 2026-05-16**：read-only tooling 已補 K/DSR/PBO/source/settlement/horizon/selection fail-closed gaps；仍需 panel ≥7d 後跑 Round 2 packet + QC/MIT/BB verdict。
 3. 🟡 `W-AUDIT-8a C1` — **v2 24h proof IN_FLIGHT 2026-05-16**（operator 選立即模式 `--no-midnight`）：PID `377531` launched `2026-05-16T14:56:16Z`（session `c1_v2_20260516T145616Z`）；24h window: now → `2026-05-17T14:56:16Z`；prior PID `373272` killed (midnight align 不採用)；commits `25396b0b` + `8d2eef58` + wrapper `b47a7150` (+--no-midnight flag)；checkpoint JSON `/tmp/openclaw/audit/liquidation_topic_probe/c1_proof_progress.json` per-hour atomic write；nohup log `nohup_c1_v2_20260516T145616Z.log`。
 4. 🔵 `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` — **P0c IN_PROGRESS 2026-05-16**：operator + PM 跑 V091/V092/V093 Linux PG backlog apply + sqlx record (~2h)。
 5. 🔵 `P1-BBMF3-WIRE-1` — production rejectReason/callback wiring must be included in Phase 1b main implementation.
@@ -352,7 +354,7 @@ Phase 1b main implementation remains blocked by gates below.
 | ID | Task | Spec source | ETA |
 |---|---|---|---|
 | `W-AUDIT-8a` Phase B/C/D | Tier 2 panel collector + Tier 3 microstructure + Tier 4 information flow | Sprint N+1 W2 起逐步 IMPL | 4-6 sprint |
-| `W-AUDIT-8b` (A4-A) | Funding Skew Directional 新策略（R-1 IMPL）| W-AUDIT-8a Phase B 後 | Spec v0.1 done 2026-05-15；review/replay next |
+| `W-AUDIT-8b` (A4-A) | Funding Skew Directional 新策略（R-1 IMPL）| W-AUDIT-8a Phase B 後 | Spec v0.2 + Stage 0R tooling hardening done 2026-05-16；Round 2 replay waits panel ≥7d |
 | `W-AUDIT-8c` (A4-B) | Liquidation Cluster Reaction 新策略 | W-AUDIT-8a Phase C 後 | N+3 |
 | `W-AUDIT-8d` (A4-C tombstone) | BTC→Alt Lead-Lag diagnostic panel | Archived guard only | ⛔ Not an active alpha path; diagnostic-only/no-revive for BTC 1m return + xcorr |
 | `W-AUDIT-8e` (R-2) | Strategist Alpha Source Orchestrator | W-AUDIT-8b/8c/8d land 後 | N+3-N+4 |

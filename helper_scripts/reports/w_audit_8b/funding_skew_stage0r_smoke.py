@@ -7,10 +7,10 @@ import sys
 from typing import Any
 
 try:
-    from .funding_skew_stage0r_metrics import compute_stage0r, grid_cell_count
+    from .funding_skew_stage0r_metrics import CandidateKey, _signal_rows, compute_stage0r, grid_cell_count
     from .funding_skew_stage0r_report import fetch_k_prior
 except ImportError:
-    from funding_skew_stage0r_metrics import compute_stage0r, grid_cell_count  # type: ignore
+    from funding_skew_stage0r_metrics import CandidateKey, _signal_rows, compute_stage0r, grid_cell_count  # type: ignore
     from funding_skew_stage0r_report import fetch_k_prior  # type: ignore
 
 
@@ -135,11 +135,47 @@ def _check_k_prior_modes(failures: list[str]) -> None:
         failures.append(f"all K_prior mode mismatch: {all_value} {all_meta}")
 
 
+def _check_settlement_previous_boundary(failures: list[str]) -> None:
+    funding_ts = 1_765_000_000_000
+    row = _row(
+        "BTCUSDT",
+        funding_ts + 5 * 60_000,
+        funding_z=2.2,
+        pct=0.95,
+        oi=2.5,
+        prior=-1.0,
+        fwd30=-35.0,
+        next_funding_ms=funding_ts + 480 * 60_000,
+    )
+    sigs = _signal_rows(
+        [row],
+        key=CandidateKey("BTCUSDT", "crowded_long_fade", 2.0, 0.90, 0.10, 2.0, 30),
+        cost_bps=12.0,
+        funding_interval_min=480,
+    )
+    if not sigs or not sigs[0].get("settlement_window"):
+        failures.append("previous funding settlement boundary was not marked")
+
+
+def _check_mixed_source_fail_closed(failures: list[str]) -> None:
+    rows = build_fixture()
+    rows[0]["funding_source_tier"] = "bybit_v5_rest_settled_history"
+    packet = compute_stage0r(rows, k_prior=69, cost_bps=12.0)
+    if packet["source_mode"] != "mixed":
+        failures.append(f"mixed source_mode mismatch: {packet['source_mode']}")
+    if "mixed funding source modes" not in packet["eligibility_fail_reasons"]:
+        failures.append("mixed source mode did not fail closed")
+
+
 def main() -> int:
     packet = compute_stage0r(build_fixture(), k_prior=69, cost_bps=12.0)
     failures: list[str] = []
-    if packet["k_new"] != grid_cell_count(3):
-        failures.append(f"k_new mismatch: {packet['k_new']}")
+    if packet["k_new_actual"] != grid_cell_count(3):
+        failures.append(f"k_new_actual mismatch: {packet['k_new_actual']}")
+    if packet["k_new"] != packet["k_new_min"]:
+        failures.append(f"k_new floor mismatch: {packet['k_new']} min={packet['k_new_min']}")
+    if not packet["k_new_floor_applied"]:
+        failures.append("k_new floor was not applied for undersized smoke panel")
     if packet["k_total"] != packet["k_new"] + 69:
         failures.append(f"k_total mismatch: {packet['k_total']}")
     best = packet.get("best_primary_cell") or {}
@@ -176,6 +212,8 @@ def main() -> int:
     if not packet["per_symbol_breakdown"]:
         failures.append("per_symbol_breakdown empty")
     _check_k_prior_modes(failures)
+    _check_settlement_previous_boundary(failures)
+    _check_mixed_source_fail_closed(failures)
     if failures:
         print("FAIL")
         for item in failures:
