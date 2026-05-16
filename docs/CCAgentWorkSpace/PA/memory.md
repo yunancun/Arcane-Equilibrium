@@ -4153,3 +4153,44 @@ PG fills 直查證據：
 - MEDIUM for V092 真 IMPL apply 期 matview build 工時（視 panel.* row 量；WITH NO DATA 0 boot 阻塞已 mitigate）
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--wave_3_5_linux_pg_backlog_migration_audit.md`
+
+## 2026-05-16 — Wave 4-A: W-AUDIT-8b Funding Skew Stage 0R Run Plan（read-only design）
+
+**Verdict**：tooling 1034 LOC commit `d9adf46b` 完成 ~70% spec v0.2 contract；**8 MUST-FIX + 8 SHOULD-FIX gaps** 識別給 E1（est ~16h / 1.5-2 E1-day）。Linux PG empirical（read-only ssh trade-core）：`panel.funding_rates_panel` 179126 rows × 25 sym × 5.3d span × `bybit_v5_ws_tickers` uniform；`panel.oi_delta_panel` 179871 rows × 25 sym × 5.3d × `bybit_v5_ws_open_interest`；overlap 25 sym；`learning.strategy_trial_ledger` 17335 rows / K_prior funding-related=9 / 全平台=69（MIT 必簽 SQL semantic）；28 distinct funding cycles 5.3d window；5m klines 4015 rows for 14d 完整。
+
+**8 MUST-FIX**：(1) K_prior funding-comparable filter SQL；(2) bootstrap CI 8h funding-cycle 第二 block；(3) CSCV PBO purge + embargo；(4) source_mode `ws_current` vs `rest_settled` 區分；(5) adjacent-cell plateau check；(6) baseline lift vs no-funding/OI baseline；(7) settlement-window adverse-drag sensitivity；(8) bootstrap_lower 用 pooled CI 不是 cell-level。
+
+**8 SHOULD-FIX**：passive_wait_healthcheck `[68]` 新增 / cohort_coverage field / maker_taker_split / per_symbol_summary / block_size unit clarify / `--seed` argument / smoke 加 K_prior 邏輯測試 / smoke 加 leak-free 反例測試。
+
+**Wave 4-A 6 steps**：PA spec v0.3 patch (0.5d) → E1 MUST-FIX IMPL (1.5d) → E2+A3 對抗審 (0.5d 並行) → E4 regression (0.5d) → round 1 smoke (0.5d) → 4-agent review (0.5d 並行) → round 2 full grid (0.5d) → PA verdict (0.5d) → PM sign-off (0.5d) = total 5.5-6 worker-day / calendar 1-2 weeks。
+
+**Expected verdict**：`eligible_for_demo_canary=false` 大概率（panel 5.3d 不夠以 hit n_eff 300 + 14 cycles + DSR 0.95 同時；K_total=4059 對應 sr_benchmark √(2 ln K) ≈ 4.07，DSR 0.95 對應 sr_hat ~5-6 大概不能達到）。Verdict=false 是 **design-pass 不是 strategy-fail**；packet 設計即包含「強濾網 + 顯式 K_total」。
+
+**stop rules 10 個 + 11 個 runtime promotion floor checks 在 §4 列舉**；強制工作鏈 §5 PA→E1→E2+A3+E4→QA(QC+MIT+BB)→PM；JSON contract §6 21 fields skeleton 給 E1。
+
+**Critical leak-free finding**：SQL 中 `signal_ts_ms = k.close_ts_ms` AND `prior_5m_return_bps = same bar return`，**契約是「signal fired at bar close, using closed bar's return」**。E2 + MIT 必簽 boundary semantics。fwd window 15m/30m/60m 都 `close_ts_ms >= signal_ts_ms + horizon`，leak-free。
+
+**16 根原則合規 A 級**：16/16 + 硬邊界 0 觸碰 + DOC-08 9 不變量 N/A（不交易）；100% read-only design + tool patch；不觸 risk/sizing/config/auth/demo/live/paper enable。
+
+**5 BLOCKING risks**：(B1 HIGH) panel 5.3d 可能不夠 single-cycle share > 25% gate；(B2 MED) K_prior SQL MIT 未簽；(B3 MED) K_total=4059 DSR 0.95 mathematical 強濾網；(B4 LOW) settlement-window adverse-drag 定義 spec 未明寫；(B5 LOW) `funding_arb` retired ledger 9 row 是否算 K_prior。
+
+**架構教訓 27**：**1034 LOC 既有 tooling 看起來「已完成」但對照 spec v0.2 + PM Stop Rules 仍有 70% completion gap**。PA reconcile 必逐條 spec contract → tooling field 對應，**不能基於「tooling exists 數字」推斷 readiness**。本次 8 MUST-FIX 全部都需要 E1 額外 IMPL；E1 sign-off 前必先 PA spec patch + MIT K_prior SQL signed，否則 round 1 smoke 跑出來會被 QC/MIT push back 重跑。
+
+**架構教訓 28**：**panel 數據窗 vs spec floor 必先 empirical 確認再設計**。本次 ssh trade-core query 30s 給出「panel 5.3d 不是 14d」結論，**才能正確估「round 1 預期 verdict false / round 2 是否需要 calendar 延後 3-5 天累積 panel」**。Mac source-only 設計會誤判 panel availability。
+
+**Side-effects 分析（純設計，0 runtime/code change）**：
+- 對 RustEngine / IPC / GovernanceHub / 5-Agent / 風控 = 0
+- 對 Sprint 1b close-maker-first IMPL = 0（並行 lane，per archive §6 next-round scope）
+- 對 W3-1/W3-2 / P0-EDGE-1 / W-AUDIT-8a C1 = 0（並行 alpha lane）
+- 對 Mac/Linux runtime / paper / demo / live = 0
+- 對 [55]/[27]/[67]/[40]/[66] healthcheck = 0
+
+**Confidence**:
+- HIGH for tooling 8 MUST-FIX gap identification（逐 spec field 對應）
+- HIGH for Linux PG empirical 數字（read-only ssh trade-core query 30s）
+- HIGH for `signal_ts_ms = k.close_ts_ms` leak-free boundary
+- HIGH for Wave 4-A 6 step structure
+- MEDIUM-HIGH for expected verdict false 推斷（DSR sr_benchmark math + n_eff 300 + 14 cycles 多 gate 同時）
+- MEDIUM for round 2 grid 是否 zoom-in 還是 calendar 延後（需 round 1 cycle share 分布實證）
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_stage0r_run_plan.md`
