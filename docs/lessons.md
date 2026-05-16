@@ -132,3 +132,67 @@
 - **Commits**：N/A（fail 無 commit；event 3 `a7cb517f` 已包覆所有真正必要工作）
 
 ---
+
+## Phase 2 rollout（2026-05-16 PA + PM enforce）
+
+> 本 Phase 2 entry 對應 SOP §9 Rollout Phase 3 「PM dispatch prompt 加 §6 模板」+ Phase 4「E2 review checklist 5 條入 `.claude/agents/E2.md`」+ Phase 6 30d observation window。Phase 1（SOP land + 4 incident root cause + remediation）by Round 4 PA 已 land 2026-05-16。Phase 2 為「enforce + 觀察」階段。
+
+### Phase 2 land 內容（2026-05-16）
+
+| 交付 | 路徑 | 性質 |
+|---|---|---|
+| SOP 8 條（Phase 1）| `srv/docs/governance_dev/2026-05-16--P0-GOV-MULTI-SESSION-RACE-SOP-1.md` | Spec + rollout plan |
+| E2 review §5 race check（5 條）| `srv/.claude/agents/E2.md` § §5 | Enforced — E2 PR review 5a-5e 必跑 |
+| PM dispatch §6 模板（4 條）| `srv/docs/CCAgentWorkSpace/PM/race_dispatch_template.md` | Enforced — PM 主會話派發前必跑 |
+| PM profile.md sub-agent dispatch SOP 連結 | `srv/docs/CCAgentWorkSpace/PM/profile.md` § Sub-agent dispatch SOP | 連結到 race_dispatch_template.md |
+| Operator approval doc | `srv/docs/CCAgentWorkSpace/Operator/2026-05-16--race_protocol_sop_approved.md` | Operator ACK |
+| Phase 2 lessons append（本 entry）| `srv/docs/lessons.md` § Phase 2 rollout | Evergreen evidence |
+
+### Phase 2 SOP 8 條 honored 證據
+
+| Rule | Phase 2 land 證據 | 觸發何時觀察 |
+|---|---|---|
+| Rule 1 Commit-first | E2 §5d + 模板 §6c footer「禁 commit/push by sub-agent」| Sub-agent commit 行為觀察 |
+| Rule 2 不認識禁 revert | E2 §5c + 模板 §6c footer | Sub-agent revert / stash drop 行為觀察 |
+| Rule 3 Stash forensics | 模板 §6c footer 含 grep 關鍵字 9 條 | Sub-agent stash drop / pop 行為觀察 |
+| Rule 4 Sign-off git status clean | E2 §5d + 模板 §6a sibling 2h window check | Sub-agent / PM sign-off commit 觀察 |
+| Rule 5 Org-limit awareness | （未直接 enforce 入 doc；future tooling）| 觀察 background sub-agent fail 頻次 |
+| Rule 6 Race incident log | 本 Phase 2 entry + Phase 1 4 events | 觀察新事件是否補 entry |
+| Rule 7 Sub-agent dispatch SOP | 模板 §6a + §6b | PM 派發前 fetch + branch check 行為觀察 |
+| Rule 8 Wave 並行同 crate fence | 模板 §6d isolation 判斷 | Wave-level multi-sub-agent dispatch 行為觀察 |
+
+### Phase 2 自 land 後 empirical observation 起點
+
+| 時間點 | 觀察 |
+|---|---|
+| **2026-05-16 18:00+** | Phase 2 enforce 起點；起始 incident count = 0（自此 2026-05-16 race event 4 + Phase 1 land 後不再新增 event 即 Phase 2 baseline） |
+| **2026-05-23** | 7 day mark — review Phase 2 期間是否有新 race event；若 0 → enforce 有效；若 1+ → 評估 SOP 規則覆蓋是否還有 GAP |
+| **2026-05-30** | 2 week mark — PM operator 共議 fine-tune（per task brief P0-3 timeline）— 是否 revise SOP threshold（2h sibling window / 4h branch window 是否合理）/ template footer / E2 §5 5 條 |
+| **2026-06-15** | 30 day mark — PM 寫 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-15--race_sop_phase2_30d_review.md` 統計 race incident 頻次 + false positive + false negative |
+
+### Sub-agent dispatch SOP enforced 教訓（4 events root cause 反查 → Phase 2 enforce path）
+
+| Phase 1 event | Root cause class | Phase 2 enforce path |
+|---|---|---|
+| Event 1 BB-MF-3 phantom sign-off + comment contamination | Stash drop without provenance check + 不認識 WIP 誤 revert | 模板 §6c footer 第 2-3 條 + E2 §5c |
+| Event 2 主會話 stash 誤殺 BB-MF-3 | Stash drop without provenance | E2 §5c + 模板 §6c footer 第 3 條（stash drop 前 grep）|
+| Event 3 E1 leftover background sub-agent vs v35 rebuild race | Sub-agent dispatch 與 main thread 改動 race | 模板 §6a + §6b（PM 派發前 fetch + branch check）|
+| Event 4 E1 leftover retry background quota fail | Background sub-agent quota awareness 缺 | SOP Rule 5 enforce 但 Phase 2 未入 template（tooling future P2 ticket）|
+
+### Phase 2 期間「Org-limit awareness」未直接 enforce 入 dispatch template 的決策理由
+
+PA 評估 Rule 5 入 template footer 不可行：
+- Anthropic API 無 public CLI / dashboard 自動 quota query
+- 估算 token spend 需 sub-agent dispatch 前 estimate IMPL 邊際工作量，PM 主會話手動評估即可
+- 若直接 enforce「dispatch 前必 quota check」會無有效 verify path → 變 dead rule
+
+**決策**：Rule 5 留 SOP §3 條規則但 Phase 2 不入 template；PM 主會話 manual awareness；Future P2 ticket `P2-RACE-SOP-RULE5-TOOLING`（若 dispatch fail rate > 5% / 30d 則 IMPL token estimate / quota dashboard wrapper）。
+
+### Phase 2 期間（2026-05-16 ~ 2026-05-30 first 2-week window）reviewer / approver
+
+- **PM 主會話**：每 7d 跑 `git log --since="7 days ago" --oneline | grep -iE 'race|stash|revert|silent'` 看 sibling event 痕跡
+- **E2 reviewer**：每 PR review 跑 §5 5 條
+- **Operator**：被動觀察 + 任何疑似 race 經 daily watchdog 反饋 PM
+- **PA**：30d review 時統計分析（per Phase 2 §6.y）
+
+---
