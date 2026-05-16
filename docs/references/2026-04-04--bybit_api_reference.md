@@ -18,7 +18,7 @@
 > **SSOT 規則 / SSOT Rule**：本檔為 Bybit endpoint 唯一字典；新增/修改端點時 **同 commit** 更新本檔。
 > This file is the single source of truth for Bybit endpoints; add/modify endpoints in same commit as dictionary update.
 
-**版本**: v1.2 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正
+**版本**: v1.3 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09；EDGE-P2-3 Phase 1b close-maker-first 6 處更新：2026-05-16 Wave 3b BB1）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正 + BB Wave 3b 6 處更新
 
 ---
 
@@ -288,7 +288,7 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 
 ### 1.2 Orders — `order_manager.rs`
 
-Rate Group: **Order** (10 req/s)。
+Rate Group: **Order**（V5 預設 20 req/s per UID；Order group 與 cancel/amend/execution.* 共用 quota，詳 §4.1）。
 Client 創建：`OrderManager::new(client: Arc<BybitRestClient>, instruments: Arc<InstrumentInfoCache>)`
 
 核心枚舉：
@@ -297,6 +297,34 @@ Client 創建：`OrderManager::new(client: Arc<BybitRestClient>, instruments: Ar
 - `TimeInForce { GTC, IOC, FOK, PostOnly }`
 - `TriggerDirection { Rise = 1, Fall = 2 }`
 - `OrderCategory { Linear, Spot, Inverse }`
+
+---
+
+#### PostOnly + reduceOnly 並用合法（2026-05-16 EDGE-P2-3 Phase 1b BB-MF-1 補錄）
+
+Bybit V5 `POST /v5/order/create` request body 中 `time_in_force=PostOnly` 與 `reduce_only=true` 是 **orthogonal flag**（互不互斥），可同時使用，**close path 可用 PostOnly Limit + reduceOnly 構造平倉 maker 單**。
+
+- **REST 行為**：兩個 flag 同送不會回 `retCode != 0`；訂單建立成功後若限價已過市仍 reject 為 `EC_PostOnlyWillTakeLiquidity`（與 entry 同；非 reduceOnly 衍生 reject）。
+- **WS reject 推送**：reject 透過 Private WS `order` 事件 `rejectReason=EC_PostOnlyWillTakeLiquidity`（詳 §4.2.1），**對 entry/close 路徑機制相同**。
+- **OpenClaw 用法**：EDGE-P2-3 Phase 1b close-maker-first IMPL 用此組合做 8 condition exit_reason 的策略級 close maker dispatch（spec §4.3 positive whitelist）。
+- **官方 API doc**：[Bybit V5 Place Order](https://bybit-exchange.github.io/docs/v5/order/create-order)（`reduceOnly` 與 `timeInForce=PostOnly` 為獨立欄位定義，無互斥條件約束）。
+- **sample request body**（spec §4.1 close dispatcher 對應）:
+  ```json
+  {
+    "category": "linear",
+    "symbol": "BTCUSDT",
+    "side": "Sell",
+    "orderType": "Limit",
+    "qty": "0.01",
+    "price": "65010.0",
+    "timeInForce": "PostOnly",
+    "reduceOnly": true,
+    "orderLinkId": "close_maker_..."
+  }
+  ```
+- **demo endpoint silent degradation 警告**：見 §4.3 第 14 條。
+- **配套**：reject classifier 復用 entry enum，由 `is_close: bool` flag 區分 — 詳 §4.2.1 footnote。
+- **關聯 spec**：`docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` §4.1 / §6.2
 
 ---
 
@@ -956,6 +984,91 @@ Client 創建：`LeverageTokenClient::new(client: Arc<BybitRestClient>)`
 
 ---
 
+#### Per-symbol PostOnly min offset guidance（2026-05-16 EDGE-P2-3 Phase 1b BB-SF-3 補錄）
+
+PostOnly Limit 下單時若 limit price 偏離 mid 不足 → 觸 BBO spread 內 → Bybit 仍可能因 cross book reject `EC_PostOnlyWillTakeLiquidity`。各 symbol 因 `tick_size` 不同有 minimum effective offset 要求；**1000-prefix 小 tick alt symbol 風險最大**。
+
+**規則**：`offset_bps / 10000 * mid_price < tick_size` → 自動 widen `buffer_ticks` 至滿足 strict-skip 邊界 / 否則 strict-skip 走 market（per spec §4.2 footnote `compute_close_limit_price()` 邏輯）。
+
+| Symbol category | tick_size 範例 | 風險 / 處理 |
+|---|---|---|
+| 大 cap（BTCUSDT / ETHUSDT） | 0.10 / 0.01 | 1 tick = 0.0015-0.015 bps@$66k；1 tick buffer 通常足夠，無需 widen |
+| 中 cap alt（SOLUSDT / DOGEUSDT 等） | 0.001 / 0.00001 | 1 tick 接近 BBO spread；Phase 1b IMPL 需 dynamic widen check |
+| 小 cap alt（**1000PEPEUSDT / 1000BONKUSDT** / 同類 1000-prefix）| 0.000001 | **必驗** corner case；1 tick = 0.0001 USDT 偏移可能 < BBO spread → 自動 widen 或 strict-skip |
+| 其他 25 active symbols | 動態查 `cache.get(symbol).tick_size` | 全 25 symbol 全走 same dispatch helper，IMPL 必跑 1000PEPEUSDT regression |
+
+**E1 IMPL 必驗 corner case**：1000PEPEUSDT / 1000BONKUSDT (tick_size=0.000001)；spec §9.2 unit test 表明文。
+
+**配套**：symbol `status != "Trading"`（如 `Closed` / `Settling`）→ strict-skip 走 market（既有 instrument filter cache 路徑覆蓋；Bybit `/v5/market/instruments-info` 的 `status` 欄位 + retCode 110074 ContractNotLive）。
+
+**關聯程式**: `instrument_info.rs` + `commands.rs` close dispatcher (spec §4.2 / §6.1)
+**關聯 spec**: `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` §4.2 footnote
+
+---
+
+### 1.10 Close maker dispatch — `commands.rs` close path（2026-05-16 NEW，EDGE-P2-3 Phase 1b 規格）
+
+> **狀態**：本 §1.10 為 spec-level 規格映射；Phase 1b IMPL 在 Wave 4 dispatch 後生效。SoT 為 `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`（v1.2）+ `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`（v0.3.1）；本字典僅作 Bybit-side reference 摘要，不重述策略邏輯。
+
+#### 1.10.1 範圍與 dispatcher
+
+修改 `commands.rs:778-816`（策略級 close）+ `commands.rs:940`（ipc_close_all）+ `commands.rs:1123`（ipc_close_symbol）三個 close dispatcher，按 `trigger_tag` / `exit_reason` 白名單分流：
+
+- 策略級 close：PostOnly Limit + maker_timeout_ms（fallback to market）
+- 風控/手動 close：保留 Market（既有行為，§二 #5 生存 > 利潤）
+
+#### 1.10.2 8-condition positive whitelist (maker-first)
+
+| exit_reason | 來源（策略） |
+|---|---|
+| `grid_close_short` | grid_trading |
+| `grid_close_long` | grid_trading |
+| `bb_mean_revert` | bb_reversion |
+| `phys_lock_gate4_giveback` | exit_features Lock |
+| `phys_lock_gate4_stale_roc_neg` | exit_features Lock |
+| `ma_reverse_cross` | ma_crossover |
+| `bw_squeeze` | bb_breakout（CONDITIONAL：min_samples_gate=30）|
+| `pctb_revert` | bb_breakout（CONDITIONAL：min_samples_gate=30）|
+
+#### 1.10.3 Negative whitelist (keep market)
+
+`risk_close:HARD STOP / TRAILING STOP / TIME STOP / DYNAMIC STOP` / `TAKE PROFIT` / `COST EDGE` / `DAILY LOSS / DRAWDOWN / CONSECUTIVE LOSS` / `bybit_sync` / `orphan_*` / `dust_frozen` / IPC `/operator/close_position` / engine shutdown / cancel_token / circuit breaker / bb_breakout 內部 `trailing_stop` — **強制走 Market**（spec §4.3）。
+
+#### 1.10.4 reject classifier 復用（BB-MF-4）
+
+`MakerRejectionCategory::PostOnlyCross` / `TooManyPending` enum **不新建** `Self::Close*Variant`（破壞 enum 1:1 mapping invariant）。dispatch handler 加 `side: OrderSide` flag（`Entry` / `CloseLong` / `CloseShort`）區分 entry/close 處理路徑。詳 §4.2.1 footnote + spec §6.2。
+
+#### 1.10.5 Cooldown split（BB-MF-3，pre-Phase 2a IMPL prereq）
+
+`reject_cooldown_until_ms` 拆 `reject_cooldown_entry_until_ms` + `reject_cooldown_close_until_ms` 兩 map（修現存 bug：entry reject 凍住同 symbol close path）。close cooldown：`TooManyPending` → 1s exp → 60s 上限（per-symbol dynamic backoff）；其他 reject → 1min。詳 spec §6.1。
+
+#### 1.10.6 Race D：TooManyPending dynamic backoff（BB-MF-2）
+
+替代 v1.0「全域 5min pause」（過度保守，3000x overshoot；Bybit V5 Order group recovery 是 sub-second 級）：
+- **per-symbol**：起始 1s，binary exp `*= 2`，上限 60s；該 symbol 5min 內無 trigger → 重置 1s
+- **conditional global**：1min window 內 ≥10 distinct symbol 同時 trigger TooManyPending → 升全域 5min pause
+- audit row 標 `details.rate_limit_scope = "global"` 區分 global vs per-symbol
+
+#### 1.10.7 Race E：mandatory fallback to taker（v1.2 新增）
+
+任何 close maker pending 結束（成功 / 超時 / reject / cancel ack）後若仍未平倉 → 必 dispatch market；engine **禁止** silent dropping close intent（違 §二 #5 生存 > 利潤）。5 fallback path 對應 enum：`timeout_taker` / `postonly_reject` / `rate_limit_pause` / `engine_shutdown_safety` / `ack_lost`。詳 spec §5.5。
+
+#### 1.10.8 Reject sample healthcheck（BB-MF-5）
+
+`[65] close_maker_reject_samples`：per env 7d ≥ 1 sample per `EC_PostOnlyWillTakeLiquidity` / `EC_ReachMaxPendingOrders`。0 sample → upgrade Phase 2b LiveDemo 前必跑 mainnet 隔離 probe（防 demo silent degradation）。詳 §4.3 第 14 條 + spec §8.3。
+
+#### 1.10.9 Demo silent abandonment 警告
+
+詳 §4.3 第 14 條（per Wave 1 Track E3 7d empirical baseline + Bybit demo doc 「not a complete function」明文）。
+
+#### 1.10.10 V094 audit schema
+
+新 column on `trading.fills`：`close_maker_attempt BOOLEAN NOT NULL DEFAULT FALSE` + `close_maker_fallback_reason TEXT NULL CHECK (...)`（10-value enum allowlist）。`details` JSONB key：`close_initial_limit_price` / `close_final_fill_price` / `close_maker_eligible_reason`。詳 `docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md`。
+
+**Non-training surface invariant**：5 個 close_maker 欄位是 ops audit metadata，**禁餵任何 ML training pipeline**（LinUCB / scorer / quantile / MLDE / DL3）。E3 grep guard rule 永久化。詳 spec §4.4 + §三 §五 `replay.simulated_fills 'synthetic_replay'` precedent。
+
+---
+
 ## 2. WebSocket
 
 ### 2.1 Public WS — `ws_client.rs` + `multi_interval_topics.rs`
@@ -1124,15 +1237,23 @@ pub struct ShadowOrderRequest {
 ### 4.1 Rate Limit 分組
 
 > **2026-04-20 EDGE-P2-3 Phase 1B-1 更新**：Bybit V5 當前 Order/Position/Account 分組預設上限為 **20 req/s**（非 10 req/s）；本表同步。實際上限按 UID/VIP 層級另有調整，以帳戶 `/v5/account/info` 為準。
+>
+> **2026-05-16 EDGE-P2-3 Phase 1b BB-SF-1 補錄**：**Order group 20 req/s per UID 是 shared quota** — `POST /v5/order/create` / `POST /v5/order/cancel` / `POST /v5/order/cancel-all` / `POST /v5/order/amend` / `POST /v5/order/create-batch` 全在同一 quota 內計入，**非** per-symbol cap、**非** per-endpoint cap。Cancel API 沒有獨立 rate limit budget，緊急 kill-switch（cancel-all + close-position 序列）必算入 Order group 餘額。
+>
+> **close-maker-first kill-switch budget 估算**（per BB Wave 3a re-review §4.2 + memory 2026-05-10 W1+W2 baseline）：
+> - close-maker-first 增量：worst case 全 fallback to taker = 1 cancel + 1 market re-dispatch per close ≈ 0.017 req/s
+> - burst 5s window：25 sym 同時 timeout = 25 cancel + 25 market re-dispatch = 50 req / 5s = 10 req/s（vs Order group 20 r/s 50% 餘裕）
+> - vs Order group 20 r/s = 0.085% 利用率（無 throttle 風險）
+> - LG-3 `/kill` IMPL（per BB 2026-05-11 caveat 2/4）必走「per-symbol 序列化 cancel-all → close-position → revoke」順序，每 step 0.3s safety margin 防 burst 觸 cap
 
-| Group | 上限（V5 基礎） | 適用路徑 |
-|-------|------|---------|
-| Order | 20 req/s | `/v5/order/*`, `/v5/execution/*` |
-| Position | 20 req/s | `/v5/position/*` |
-| Account | 20 req/s | `/v5/account/*` |
-| Market | 120 req/s | `/v5/market/*`, `/v5/spot-lever-token/*` |
-| Asset | 5 req/s | `/v5/asset/*`, `/v5/spot-margin*` |
-| Other | 10 req/s | 其餘 |
+| Group | 上限（V5 基礎） | 適用路徑 | 備註 |
+|-------|------|---------|------|
+| Order | 20 req/s | `/v5/order/*`, `/v5/execution/*` | **shared quota**：create / cancel / cancel-all / amend / batch / execution.* 共用 |
+| Position | 20 req/s | `/v5/position/*` | confirm-pending-mmr / set-leverage / set-trading-stop 等共用 |
+| Account | 20 req/s | `/v5/account/*` | wallet-balance / fee-rate / info 共用 |
+| Market | 120 req/s | `/v5/market/*`, `/v5/spot-lever-token/*` | per IP 端 600/5s |
+| Asset | 5 req/s | `/v5/asset/*`, `/v5/spot-margin*` | 含 transfer / coin-info / borrow |
+| Other | 10 req/s | 其餘 | UTA 升級 / dcp 等 |
 
 分組追蹤：`RateLimitGroup::from_path(path)` 自動分類。
 查詢剩餘：`client.is_group_near_limit(group, threshold)` / `client.rate_limit_remaining()`
@@ -1182,6 +1303,14 @@ pub struct ShadowOrderRequest {
 
 > **無排序保證**：Bybit 不保證 REST `cancel_order` 回應與 WS `order` 最終狀態事件的先後順序。cancel 回傳僅視為 advisory，部位/餘額一律由 WS 最終狀態對賬。
 
+> **2026-05-16 EDGE-P2-3 Phase 1b BB-MF-4 補錄 — Classifier 復用 entry/close 同 enum**：`MakerRejectionCategory` enum（`PostOnlyCross` / `TooManyPending` / 其他既有 variant）**復用於 entry + close 兩 side**；**不新建** `Self::CloseTooManyPending` / `Self::ClosePostOnlyCross` variant。理由：`EC_PostOnlyWillTakeLiquidity` 的 mechanical condition 對 entry/close 是相同的，與訂單 side 無關；新建 close-side variant 等於把同一個 Bybit error code 拆成兩個 Rust enum case，**破壞 enum 1:1 mapping invariant**。dispatch handler 加 `side: OrderSide` flag（`Entry` / `CloseLong` / `CloseShort`）區分處理路徑：
+> - `(PostOnlyCross, Entry)` → 既有 entry 處理（cooldown 1min）
+> - `(PostOnlyCross, CloseLong | CloseShort)` → 直接 market（不進 close cooldown，spec §5.3 Race C）
+> - `(TooManyPending, Entry)` → 既有 entry 處理
+> - `(TooManyPending, CloseLong | CloseShort)` → per-symbol dynamic backoff（spec §5.4 Race D）
+>
+> 詳 spec §6.2 + §1.10.4。
+
 ### 4.3 已知陷阱
 
 1. **所有數字都是字串** — Bybit 返回 `"65000.50"` 不是 `65000.50`。所有解析器用 `parse_f64()` 處理。
@@ -1198,3 +1327,4 @@ pub struct ShadowOrderRequest {
 11. **PostOnly 越過 book 無 REST retCode** — PostOnly 觸發 taker 路徑時 REST 仍回 `retCode=0`，拒絕透過 Private WS `order.rejectReason=EC_PostOnlyWillTakeLiquidity` 傳遞。**切勿**將 `110003`（PriceOutOfRange，合約過濾器）誤認為 PostOnly-cross。詳見 §4.2 與 §4.2.1（2026-04-20 EDGE-P2-3 Phase 1B-1）。
 12. **cancel/fill 無排序保證** — REST `cancel_order` 回應與 WS `order` 最終狀態無先後保證。cancel 僅 advisory，部位一律以 WS 最終狀態為準（不得用 cancel 回傳減倉）。
 13. **orderLinkId 冪等優先** — 對 PostOnly 掛單用 `cancel_order_by_link_id` 取消（客戶端鑄造 id 跨重啟/WS 延遲存活）；`cancel_order` 依賴 REST 回傳的 `orderId`，在重啟/競爭下可能拿不到。
+14. **⚠️ Demo endpoint PostOnly + reduceOnly 行為一致性需 reject sample 驗（2026-05-16 EDGE-P2-3 Phase 1b BB-MF-5 + Wave 1 Track E3 補錄）** — Bybit demo doc（`https://bybit-exchange.github.io/docs/v5/demo`）明文「not a complete function」，**未顯式聲明** demo endpoint（`api-demo.bybit.com` / `stream-demo.bybit.com`）對 PostOnly close 的 reject 推送行為。Wave 1 Track E3 entry-side empirical baseline 證實 demo 70% PostOnly timeout 直接放棄（無 fallback to taker）+ 27% maker fill rate；**對 close path 風險**：demo 0 reject sample 可能是 demo silent degradation（Bybit 不推送 reject 而非真的零 reject）→ 不能 promote Phase 2b LiveDemo / Phase 3 Mainnet。**強制 gate**：`[65] close_maker_reject_samples` healthcheck（spec §8.3）— per env 7d 必 ≥ 1 sample per `EC_PostOnlyWillTakeLiquidity` / `EC_ReachMaxPendingOrders`；7d 0 sample → upgrade 前必跑 mainnet 隔離 probe 驗 demo silent degradation 不存在。Demo PostOnly fallback to taker 機制當前不存在，OpenClaw close path 必自帶 mandatory fallback to taker（spec §5.5 Race E）。
