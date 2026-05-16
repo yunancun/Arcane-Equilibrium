@@ -92,7 +92,7 @@ v36 completion cleanup archive:
 - `[55]` is source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; `[67]` is restored to PASS after feature baseline apply; `[4]` phys lock and `[Xb]` triangulation are PASS after `7108035d`.
 - V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
 - Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
-- **EDGE-P2-3 Phase 1b close-maker-first refactor**: spec / AMD / 4-agent review / Wave 1..3b prep details are archived. Current blockers are the same 3 gates (`P0-EDGE-1`, `W-AUDIT-8b Stage 0R`, `W-AUDIT-8a C1`), Wave 3.5 Linux migration backlog, and `P1-BBMF3-WIRE-1` production callback wiring. phys_lock live enablement remains deferred to Phase 2b.
+- **EDGE-P2-3 Phase 1b close-maker-first refactor — Round 1（Design + Governance）✅ CLOSED 2026-05-16**: 完整 round 1 歷史 + 30+ commit + spec v1.3 / AMD v0.4 / V094 spec + 4-agent 兩輪 + Wave 3a short re-review 4/4 APPROVED + Round 2 audit fix pack 6 gaps → `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`（complementary TODO cleanup → `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`）。Current blockers are the same 3 gates (`P0-EDGE-1`, `W-AUDIT-8b Stage 0R`, `W-AUDIT-8a C1`), Wave 3.5 Linux migration backlog, and `P1-BBMF3-WIRE-1` production callback wiring. phys_lock live enablement remains deferred to Phase 2b. Honest 認知：本 refactor 是 execution-quality optimization（fee saving ~$50-$200/year per E3 empirical），不解 trading losses root cause（5 textbook 策略 structural alpha deficit）；真實治癒走 W-AUDIT-8a/8b/8c alpha source 軸。下一輪 audit = Phase 1b IMPL execution + Demo/Live 觀察期。
 
 ---
 
@@ -313,9 +313,11 @@ Archived completed P1 rows: `docs/archive/2026-05-16--todo_v36_completion_cleanu
 
 ### §11.5 EDGE-P2-3 Phase 1b — Final Dispatch Plan (2026-05-15 4-agent review 後拍板)
 
-**Status**：Pre-IMPL prep details through Wave 3b are closed and archived in
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`. Phase 1b
-main implementation remains blocked by gates below.
+**Status**：Pre-IMPL prep details through Wave 3b are closed and archived. Full
+close-maker-first Round 1（Design + Governance）closure narrative + 30+ commit timeline
++ 4-agent verdict + IMPL Prereq status + next-round scope → `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`.
+Sibling TODO cleanup（broader v36 scope）→ `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
+Phase 1b main implementation remains blocked by gates below.
 
 **Still Active**
 1. ❌ `P0-EDGE-1` — `[40]` negative realized edge remains active.
@@ -495,8 +497,10 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **AMD-2026-05-09-02** (5 P0-DECISION-AUDIT closure): `srv/docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md`
 - **AMD-2026-05-09-03** (Graduated Canary Default): `srv/docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md` (commit `b1891023`)
 - **AMD-2026-05-15-01** (Canary Rebase Replay Preflight + Demo Micro-Canary): `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`
-- **AMD-2026-05-15-02 DRAFT** (EDGE-P2-3 Phase 1b Close-Maker-First): `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
-- **EDGE-P2-3 Phase 1b spec**: `srv/docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- **AMD-2026-05-15-02 v0.4** (EDGE-P2-3 Phase 1b Close-Maker-First): `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
+- **EDGE-P2-3 Phase 1b spec v1.3**: `srv/docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- **V094 hybrid schema migration spec**: `srv/docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md`
+- **Round 1 Closure Archive**: `srv/docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`（完整 round 1 closure + 30+ commit timeline + IMPL prereq status + next-round scope）
 - **W-AUDIT-8b Funding Skew Directional spec v0.2**: `srv/docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`
 - **ADR-0015** openclaw_core sunset / **ADR-0017** scanner authority retirement / **ADR-0018** funding_arb retire / **ADR-0020** Layer 2 manual+supervisor-only / **ADR-0022** strategist cap
 
