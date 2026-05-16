@@ -508,7 +508,7 @@ active work starts at §10 / §11.2 / §11.3.
 | WP-08 | ML Pipeline Maturity (walk-forward purge + training SQL) | P1 | 3 | MIT+E1 -> MIT+E2 | ✅ DONE（MIT-DB-6 engine_mode scope + MIT-P1-2 purge_days param） | 2 sessions |
 | WP-09 | Documentation + Index Sync | P2 | 1 | TW+R4 -> PM | ✅ DONE `6b8be386` | 0.5 session |
 | WP-10 | Bybit Integration (retCode enum + mainnet URL) | P1 | 2 | E1 -> BB+E2 | ✅ DONE（BB-A-1 110017 ReduceOnlyReject + BB-M-1 backtest demo default） | 0.5 session |
-| WP-11 | Test Infrastructure (phased) | P2 | 4 | E4+E1 -> E2 | PENDING | 2-3 sessions |
+| WP-11 | Test Infrastructure (phased) | P2 | 4 | E4+E1 -> E2 | ✅ Phase 1 DONE（15 test fixes, 16→1 flaky）；Phase 2 pending（49 assertion-less tests, coverage triage） | 2-3 sessions |
 | WP-12 | ONNX Model Manager (stub) | P2 | 4 | E1-rs -> E2+FA | DEFERRED | 1 session |
 | WP-13 | Reconciler Stale cmd_tx | P1 | 3 | E1-rs -> E2+E4 | ✅ DONE（DemoCmdSenderSlot + provider pattern 對齊 live） | 1 session |
 
@@ -536,7 +536,17 @@ active work starts at §10 / §11.2 / §11.3.
   - **E2 review**: 0 CRITICAL / 0 HIGH / 1 MEDIUM pre-existing（main_boot_tasks.rs 858 LOC）/ 2 LOW cosmetic → PASS
   - **Remaining debt**: spawn_position_reconciler dead_code warning（P2）；spawn_edge_estimates_reloader + spawn_strategist_scheduler 仍 by-value demo_cmd_tx（P2）
 **Wave 3 original dispatch**: WP-06 + WP-08 + WP-13 (parallel E1+E5)
-**Wave 4 background**: WP-11 (phased) + WP-12 (deferred)
+**Wave 4 ✅ Phase 1 CLOSED 2026-05-16**: WP-11 Phase 1 DONE（`564c9db6`）+ WP-12 DEFERRED。
+  - **WP-11 Phase 1**: 15 failing Python tests fixed across 6 test files（4 categories: IPC error format drift / manifest envelope validation / Rust source split / HTML refactor）
+  - **Baseline**: 4840 passed / 1 flaky / 43 skipped（was 4825 / 16 / 43 → +15 passed, -15 failed）
+  - **Rust**: 0 failures（E4-HIGH-6 已自行解決）
+  - **E4-HIGH-3 import errors**: 不存在（4882 tests 全收集成功）
+  - **E4-HIGH-5 test_v072**: 測試已不存在
+  - **E2 review**: 0H/0M/1L(accepted) → PASS
+  - **Category E flaky**: `test_case2_pg_kill_simulation` 單跑 PASS / 全跑偶爾 FAIL — import 順序 race，P2
+  - **Phase 2 residuals**: 49 truly assertion-less tests（E4-HIGH-7）；coverage triage E4-HIGH-1/2；DB resilience E4-HIGH-8；proptest E4-HIGH-4
+  - **WP-12 ONNX**: DEFERRED — stub returns None → rule-based fallback by design
+**Wave 4 original dispatch**: WP-11 (test fixes) + WP-12 (deferred)
 
 **Conflict guard**: Wave 2 WP-03 touches `grid_helpers.rs` which is in the EDGE-P2-3 Phase 1b orbit. Land WP-03 BEFORE Phase 1b IMPL to avoid merge conflict. WP-06 performance must wait until Phase 1b stabilizes.
 
