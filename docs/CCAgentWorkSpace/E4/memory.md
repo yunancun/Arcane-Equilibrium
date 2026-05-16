@@ -3549,3 +3549,20 @@ E4 verdict: REGRESSION-PASS, 0 push-back to E1.
 - hot_path_baseline bench：p99 42.279μs < 300μs SLA；P2 follow-up = E5 加 `intent_processor::compute_exposure_pct` micro-bench harness（current `hot_path_baseline` 沒 resting orders coverage）。
 - Linux runtime engine PID 69581 未觸動（elapsed 7h14m / demo fresh 13.7s / live age 3.0s）；scratch worktree cleanup 完成；branch 保留給 A3 / E2 / PM。
 - Report：`docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_e4_regression.md`。
+
+## 2026-05-16 W-AUDIT-8a C1 v2 resilient harness — Linux smoke PASS
+- Branch `worktree-agent-a58d99ef4ea1a440b` HEAD `5983f955` fetch 到 Linux scratch `/tmp/e4-v2-test-1778920370`；`git clone local + remote set-url GitHub + fetch worktree + checkout FETCH_HEAD` pattern（local repo 無本地 branch ref，必須走 GitHub）。
+- pytest 兩遍 Linux 36/36 PASS in 0.03s / 0.02s（Mac baseline 36/36 in 0.004s）→ Linux = Mac 1:1，non-flaky 確認。
+- py_compile PASS + `import helper_scripts.bybit.liquidation_topic_probe_v2` clean。
+- 60s smoke real WS：verdict=`SMOKE_PASS_NOT_C1_PROOF` (60s 預期值；只有 24h 才能達 `PASS_C1_PROOF_CANDIDATE`)；subscribe_success=6 / subscribe_failure=0 → topic 不 reject ✅；4 control topics 全收 (kline=48 / orderbook=1370 / publicTrade=252 / tickers=327)；reconnect/restart=0（60s 不足 trigger）；uptime_ratio=0.987；raw_message_count=2003。
+- Checkpoint JSON `c1_proof_progress.json` 30+ fields 全 present，atomic same-path overwrite + dated snapshot 各一份，無 dated file proliferation 風險。
+- 0 crash / 0 exception / connection_errors=[]；Linux runtime engine PID 不變；branch 保留不 merge main，等 BB+MIT 24h full-duration proof。
+- Report：`docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_e4_smoke.md`。
+
+## 2026-05-16 W-AUDIT-8a C1 v2 consolidated fix (dbd0277c) — Linux quick smoke PASS
+- HEAD `dbd0277c` (parent `5983f955` already E4-PASSED). pytest **49/49** PASS Linux non-flaky 雙跑（0.05s + 0.04s）= Mac 49/49 baseline。新 13 test 全 PASS：TestUtcMidnightBuffer×3 / TestAtomicWrite×3 / TestKeepaliveWarningsSeparation×4 / TestReconnectFailuresInstabilityGate×3。
+- Wrapper `run_c1_v2_proof.sh --help` 工作 (exit 0)；`--smoke-60s` real WS 60s smoke：verdict=`SMOKE_PASS_NOT_C1_PROOF`（60s 預期值）/ exit 0 / 0 stack trace / 0 connection_errors / subscribe_success=6 + subscribe_failure=0（topic 不 reject）/ 4 control topics 全收 data (kline=37 / orderbook=1495 / publicTrade=142 / tickers=335) / uptime_ratio=0.9876。
+- **Fix runtime verify 4 highlights**：(2) atomic write `c1_proof_progress.json.tmp` NOT present → POSIX rename cleanup OK；(3) `keepalive_warnings` field 出現於 60s smoke checkpoint JSON → schema patch verified；(4) `reconnect_failures=0` field 存在於 JSON；schema 完整。
+- Linux runtime engine PID 不變（engine_alive=true, demo age=25.8s, live age=15.2s）；branch `worktree-agent-a58d99ef4ea1a440b` 保留 origin 等 PM merge；scratch `/tmp/e4-v2-recheck-1778922043` cleanup。
+- **Lesson — consolidated fix quick regression pattern**：parent commit 已 E4-PASS 時，子 commit 加 6 fix 不全跑全量；用「new test full run + key fix runtime verify + atomic write inspect + key new field existence verify」4 維覆蓋 ≈ 20 min wall time 即可給 PM merge 綠燈。比全量重跑省 80% 時間但 confidence 同。
+- Report：`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_consolidated_fix_e4_quick_smoke.md`

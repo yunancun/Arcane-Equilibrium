@@ -57,3 +57,4 @@ tab-settings / tab-phase4（11 tabs）
 | 2026-03-31 | 首次 GUI 可用性評估（42 項） | `reports/2026-03-31--a3_gui_usability_report.md` |
 | 2026-04-24 | 完整 GUI 審查（62 項 + Top 10） | `reports/2026-04-24--gui_comprehensive_audit.md` |
 | 2026-05-16 | P1-PORTFOLIO-RESTING-EXPOSURE-1 對抗審 APPROVE 9/10（2 WARN advisory，leverage chain semantic drift + test coverage gap） | `reports/2026-05-16--p1_portfolio_resting_exposure_a3_adversarial_review.md` |
+| 2026-05-16 | W-AUDIT-8a C1 v2 harness 對抗審 APPROVE-CONDITIONAL 7.5/10 — 2 CRITICAL (UTC midnight 00:00:30+ 延遲 24h bug + checkpoint write 非 atomic jq race) + 3 WARN (oneliner paste-safety + max-restart 語意歧義 + checkpoint JSON 膨脹) + 4 ADV，24h proof 前必修兩 CRITICAL | `reports/2026-05-16--w_audit_8a_c1_v2_harness_a3_adversarial_review.md` |
