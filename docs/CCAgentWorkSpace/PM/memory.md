@@ -1,5 +1,14 @@
 # PM Memory — 工作記憶
 
+## 項目狀態快照（2026-05-16 Wave 3.5 Linux PG backlog）
+
+- `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` closed on `trade-core` without engine/API restart, auth mutation, strategy/risk config change, or mode change.
+- Runtime drift found before apply: engine was running (PID `69581`) despite the PA audit's older no-engine snapshot; runtime DB DSN came from `/tmp/openclaw/runtime_secrets/openclaw_database_url`; secrets env still has `OPENCLAW_AUTO_MIGRATE=0`.
+- V092 continuous aggregates were physically applied online with bounded `lock_timeout=5s` / `statement_timeout=120s`; six continuous aggregate views and six refresh policies now exist.
+- V091/V092/V093 `_sqlx_migrations` metadata was repaired with source SHA-384 checksums; verify result: `max_applied=93`, `db_rows=90`, `drift_count=0`.
+- V081 remains a legal dead slot. V094 deploy is no longer blocked by this backlog; remaining Phase 1b blockers are the 3-gate set plus `P1-BBMF3-WIRE-1`.
+- Report: `workspace/reports/2026-05-16--wave_3_5_linux_migration_backlog_closure.md`.
+
 ## 項目狀態快照（2026-05-16 W-AUDIT-8b Stage 0R）
 
 - Funding Skew Stage 0R tooling gap closure source/test done: report packet now emits panel metadata, per-symbol breakdown, settlement-window sensitivity, baseline lift, flat cost model/cost-edge ratio, 60m + 8h bootstrap, PBO metadata, and plateau check.

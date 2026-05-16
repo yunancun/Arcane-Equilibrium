@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-Version: v38
+Version: v39
 Date: 2026-05-16
-Status: v38 operator P0 ratification cycle 完成 + Wave 1-4 deploy + P1 follow-up land.
+Status: v39 Wave 3.5 Linux PG migration backlog closed after v38 operator P0 ratification cycle + Wave 1-4 deploy + P1 follow-up land.
 - **Wave 1-4 全 closed**: WP-01/02/05/09 (Wave 1) + WP-03/04/07/10/BB-MF-3 (Wave 2) + WP-06/08/13/WP-13-leftover (Wave 3) + WP-11 Phase 1 (Wave 4); WP-12 DEFERRED by design.
 - **v35 rebuild + restart**: trade-core engine PID 69581 / API PID 69674 (2026-05-16); Wave 2-4 Rust source IMPL all deployed.
 - **Round 4 三角 cross-validation (PA + FA + CC)**: 一致 verdict A/C/A for 3 P0 → operator 確認同意。
@@ -11,6 +11,7 @@ Status: v38 operator P0 ratification cycle 完成 + Wave 1-4 deploy + P1 follow-
 - **P0-3 Race protocol SOP Phase 2 rollout**: ✅ APPROVE + enforce 立即生效 2026-05-16 18:00+；`.claude/agents/E2.md` §5 race check 5 條 + `docs/CCAgentWorkSpace/PM/race_dispatch_template.md` PM §6 模板 + `docs/lessons.md` Phase 2 entry；2026-05-30 PM 2-week review。
 - **P1 #5 F-09 model_tier TOML extraction**: ✅ DONE commit `3b055c98`；ArcSwap snapshot path；3 TOML 加 `model_tier="l1_9b"`；E2 APPROVE / E4 PASS 2917/0/1。
 - **P1 #7 [68] portfolio_resting_exposure healthcheck**: ✅ DONE commit `3b055c98`；ID conflict [58]→[68] resolved；562+408 LOC new；E2 APPROVE-CONDITIONAL / E4 PASS 368/0。
+- **P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG**: ✅ DONE 2026-05-16 on `trade-core`；V092 physical continuous aggregates applied online; V091/V092/V093 `_sqlx_migrations` metadata repaired to max_applied=93 / rows=90; checksum verify drift_count=0. PM closure report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--wave_3_5_linux_migration_backlog_closure.md`。
 - **P1 #4 C1 v2 24h proof**: ⏳ IN_FLIGHT PID 377531 launched 2026-05-16T14:56:16Z; 24h window → 2026-05-17T14:56:16Z 完成。
 - **P1 #6 BB-MF-3 production wiring**: ⏳ wait Phase 1b 主軸 3 閘解凍 (最早 2026-05-21)。
 - **P1 #7 7d budget cap monitoring**: ⏳ passive deploy 後 1 週 (2026-05-23+)。
@@ -51,6 +52,8 @@ v37 Stage 1 / A4-C active-marker cleanup:
 `docs/archive/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`.
 W-AUDIT-8b adversarial hardening commit `1499778b`:
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--w_audit_8b_adversarial_hardening.md`.
+v39 Wave 3.5 Linux PG migration backlog closure:
+`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--wave_3_5_linux_migration_backlog_closure.md`.
 
 ## §0.0 PM Freeze — Demo-Only Stage 1 + A4-C Tombstone Guard
 
@@ -106,8 +109,8 @@ W-AUDIT-8b adversarial hardening commit `1499778b`:
 - `[55]` is source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; `[67]` is restored to PASS after feature baseline apply; `[4]` phys lock and `[Xb]` triangulation are PASS after `7108035d`.
 - V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
 - Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
-- **EDGE-P2-3 Phase 1b close-maker-first refactor — Round 1（Design + Governance）✅ CLOSED 2026-05-16**: 完整 round 1 歷史 + 30+ commit + spec v1.3 / AMD v0.4 / V094 spec + 4-agent 兩輪 + Wave 3a short re-review 4/4 APPROVED + Round 2 audit fix pack 6 gaps → `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`（complementary TODO cleanup → `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`）。Current blockers are the same 3 gates (`P0-EDGE-1`, `W-AUDIT-8b Stage 0R`, `W-AUDIT-8a C1`), Wave 3.5 Linux migration backlog, and `P1-BBMF3-WIRE-1` production callback wiring. phys_lock live enablement remains deferred to Phase 2b. Honest 認知：本 refactor 是 execution-quality optimization（fee saving ~$50-$200/year per E3 empirical），不解 trading losses root cause（5 textbook 策略 structural alpha deficit）；真實治癒走 W-AUDIT-8a/8b/8c alpha source 軸。下一輪 audit = Phase 1b IMPL execution + Demo/Live 觀察期。
-- **Trading losses Round 2 — Alpha Source Push DISPATCHED 2026-05-16**: operator trigger 後同步派發 3 路：(P0a) W-AUDIT-8b Funding Skew Stage 0R replay packet（read-only，1-2 週）已完成 source/test hardening：K_new floor 4050、fixed-parameter pooled stats、settlement-window exclusion、mixed-source fail-closed、day-block CSCV PBO、strict K_prior default、exact horizon SQL；Round 2 verdict 仍等 panel ≥7d + QC/MIT/BB review；(P1) E1 IMPL `P1-PORTFOLIO-RESTING-EXPOSURE-1` 已 DONE。Operator 動作 in-flight：(P0b) W-AUDIT-8a C1 24h liquidation proof rerun；(P0c) operator + PM 跑 Wave 3.5 Linux PG backlog（V091/V092/V093 + sqlx record，per PA report §5 protocol，est 2h）。**Phase 1b commands.rs IMPL 暫緩** — 等 W-AUDIT-8b Stage 0R green 證據 + 3-gate clear 才解凍。
+- **EDGE-P2-3 Phase 1b close-maker-first refactor — Round 1（Design + Governance）✅ CLOSED 2026-05-16**: 完整 round 1 歷史 + 30+ commit + spec v1.3 / AMD v0.4 / V094 spec + 4-agent 兩輪 + Wave 3a short re-review 4/4 APPROVED + Round 2 audit fix pack 6 gaps → `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`（complementary TODO cleanup → `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`）。Current blockers are the same 3 gates (`P0-EDGE-1`, `W-AUDIT-8b Stage 0R`, `W-AUDIT-8a C1`) and `P1-BBMF3-WIRE-1` production callback wiring; Wave 3.5 Linux migration backlog is closed. phys_lock live enablement remains deferred to Phase 2b. Honest 認知：本 refactor 是 execution-quality optimization（fee saving ~$50-$200/year per E3 empirical），不解 trading losses root cause（5 textbook 策略 structural alpha deficit）；真實治癒走 W-AUDIT-8a/8b/8c alpha source 軸。下一輪 audit = Phase 1b IMPL execution + Demo/Live 觀察期。
+- **Trading losses Round 2 — Alpha Source Push DISPATCHED 2026-05-16**: operator trigger 後同步派發 3 路：(P0a) W-AUDIT-8b Funding Skew Stage 0R replay packet（read-only，1-2 週）已完成 source/test hardening：K_new floor 4050、fixed-parameter pooled stats、settlement-window exclusion、mixed-source fail-closed、day-block CSCV PBO、strict K_prior default、exact horizon SQL；Round 2 verdict 仍等 panel ≥7d + QC/MIT/BB review；(P1) E1 IMPL `P1-PORTFOLIO-RESTING-EXPOSURE-1` 已 DONE；(P0c) Wave 3.5 Linux PG backlog ✅ closed with V091/V092/V093 sqlx metadata aligned. Operator 動作 in-flight：(P0b) W-AUDIT-8a C1 24h liquidation proof rerun。**Phase 1b commands.rs IMPL 暫緩** — 等 W-AUDIT-8b Stage 0R green 證據 + 3-gate clear 才解凍。
 
 ---
 
@@ -132,7 +135,7 @@ W-AUDIT-8b adversarial hardening commit `1499778b`:
 | 9 | `W-AUDIT-8g` (R-4) Per-alpha-source Live Promotion Gate | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+7+ | LiveBudget(alpha_source_id, slice) replacement for system-wide live_reserved model. |
 | 10 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 review | ⛔ **DEFER** Sprint N+4-N+6 | A3 tab expansion follow-up. |
 | 11 | `W-AUDIT-10` (R-5) Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec → E1 IMPL | ⛔ **DEFER** 中期 | CI gate spec drift > 7d auto-fail + module/table lifecycle header. |
-| 12 | `EDGE-P2-3 Phase 1b` Close-Maker-First Refactor | alpha-impact-adjacent execution-quality | PA → E1 → E2 → E4 → QA → PM | 🔵 **PRE-IMPL GATED** | Spec/AMD/reviews/prep are mostly closed and archived; active blockers are §11.5 3-gate, Wave 3.5 migration backlog, and `P1-BBMF3-WIRE-1`. |
+| 12 | `EDGE-P2-3 Phase 1b` Close-Maker-First Refactor | alpha-impact-adjacent execution-quality | PA → E1 → E2 → E4 → QA → PM | 🔵 **PRE-IMPL GATED** | Spec/AMD/reviews/prep are mostly closed and archived; active blockers are §11.5 3-gate and `P1-BBMF3-WIRE-1`. Wave 3.5 migration backlog is closed. |
 
 ### §4.1.1 Completed Sprint Ledgers Archived
 
@@ -315,7 +318,7 @@ active work starts at §10 / §11.2 / §11.3.
 | `P1-EDGE-P2-3-PH1B-ML-INVARIANT` | 4 | E3 grep guard rule：`details->>'close_maker_*'` 禁餵任何 ML training pipeline（LinUCB / scorer / quantile / MLDE / DL3）| MIT-MF-1 non-training surface invariant；E3 PR pre-merge gate |
 | `P1-BBMF3-WIRE-1` | 2 | Wire production maker rejection callbacks into close cooldown plumbing | E2/BB found `arm_close_cooldown` helper + 8 tests landed, but production caller is still Phase 1b main-scope. Wire WS/order rejectReason classifier → strategy callback → close cooldown write/read; add integration regression. |
 | `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | spec §5.4 完整 dynamic backoff state machine IMPL（per-symbol 1s exp → 60s + ≥10 symbol cascade → 5min global pause + audit row `rate_limit_scope = "global"`）| Phase 1b initial IMPL（commit `27f02a07`）取 per-symbol 5min 固定（避 scope creep）；Phase 2a Demo PASS 後另開 PR；PA 估 ~50 LOC state machine + ~80 LOC integration test；對應 spec §5.4 v1.4 footnote + AMD v0.4 §11.2 |
-| `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` | 1 | 🔵 **IN_PROGRESS 2026-05-16**：Round 2 alpha push P0c；operator + PM 跑 Wave 3.5 V091/V092/V093 Linux PG backlog apply + sqlx record（per PA report §5 protocol，est 2h）。PA audit `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--wave_3_5_linux_pg_backlog_migration_audit.md` NEEDS-ACTION；V092 真 IMPL（matview 0 row）+ V091/V093 metadata 補登（schema partial applied）；V081 = dead slot；V094 IMPL kickoff NOT BLOCKED，但 deploy 階段 BLOCKED 直到本 ticket done |
+| `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` | 1 | ✅ **DONE 2026-05-16**：`trade-core` online PG closure complete. V092 physical continuous aggregates created (6 views + 6 refresh policies); V091/V092/V093 `_sqlx_migrations` metadata inserted with source SHA-384 checksums; max_applied=93 / rows=90 / checksum drift_count=0. V081 remains legal dead slot. V094 deploy is no longer blocked by this backlog. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--wave_3_5_linux_migration_backlog_closure.md`. |
 | `P1-PORTFOLIO-RESTING-EXPOSURE-1` | 4 | ✅ **DONE 2026-05-16 commit `9980448a`**（Round 2 alpha push P1）：337 LOC source (intent_processor/mod.rs +118 / tests.rs +208 / paper_state/resting_orders.rs +11) + 7 unit test；Mac+Linux cargo test --release 2915/0/1 (= baseline 2908 + new 7)；hot_path bench p99=42μs << 300μs SLA；aarch64-apple-darwin PASS。A3 對抗審 APPROVE 9/10 (2 WARN advisory 不阻 commit)；E2 PASS to E4 (0 CRITICAL / 1 MEDIUM / 4 LOW)；E4 regression PASS。16-root + 9 invariant + 硬邊界全 GREEN；live/auth/lease 全未動；注釋全中文。Follow-ups → P2-PORTFOLIO-RESTING-{58-HEALTHCHECK / TEST-COVERAGE / ROUTER-CACHE / DOCSTRING-CLEANUP / E5-BENCH / REPLAY-PARALLEL}。 |
 | `P2-PORTFOLIO-RESTING-58-HEALTHCHECK` | 4 | **P1-PORTFOLIO-RESTING-EXPOSURE-1 follow-up**：IMPL healthcheck `[58] portfolio_resting_exposure_lineage` per PA F-FA-2 verify report §8（A3 WARN-1 + E2 LOW-1 + PA §8 預留）。Stage 1 demo 啟動前必落地；監控 effective vs filled-only leverage chain semantic drift magnitude。 |
 | `P2-PORTFOLIO-RESTING-TEST-COVERAGE` | 4 | **P1-PORTFOLIO-RESTING-EXPOSURE-1 follow-up**：補 unit test 涵蓋「同 symbol 多筆 close-side resting 累積 > filled qty」場景（A3 WARN-2）。數學等價於現有 cap 邏輯但缺 test 釘 invariant；< 30 LOC，`intent_processor/tests.rs` 餘 207 LOC。 |
@@ -340,7 +343,7 @@ Phase 1b main implementation remains blocked by gates below.
 1. ❌ `P0-EDGE-1` — `[40]` negative realized edge remains active.
 2. 🔵 `W-AUDIT-8b Stage 0R` — **SOURCE/TEST HARDENED 2026-05-16**：read-only tooling 已補 K/DSR/PBO/source/settlement/horizon/selection fail-closed gaps；仍需 panel ≥7d 後跑 Round 2 packet + QC/MIT/BB verdict。
 3. 🟡 `W-AUDIT-8a C1` — **v2 24h proof IN_FLIGHT 2026-05-16**（operator 選立即模式 `--no-midnight`）：PID `377531` launched `2026-05-16T14:56:16Z`（session `c1_v2_20260516T145616Z`）；24h window: now → `2026-05-17T14:56:16Z`；prior PID `373272` killed (midnight align 不採用)；commits `25396b0b` + `8d2eef58` + wrapper `b47a7150` (+--no-midnight flag)；checkpoint JSON `/tmp/openclaw/audit/liquidation_topic_probe/c1_proof_progress.json` per-hour atomic write；nohup log `nohup_c1_v2_20260516T145616Z.log`。
-4. 🔵 `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` — **P0c IN_PROGRESS 2026-05-16**：operator + PM 跑 V091/V092/V093 Linux PG backlog apply + sqlx record (~2h)。
+4. ✅ `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` — **P0c DONE 2026-05-16**：V091/V092/V093 Linux PG backlog apply + sqlx record closed; V094 deploy no longer blocked by this ticket.
 5. 🔵 `P1-BBMF3-WIRE-1` — production rejectReason/callback wiring must be included in Phase 1b main implementation.
 
 **Phase 1b commands.rs IMPL 暫緩**（2026-05-16 operator decision）：等 W-AUDIT-8b Stage 0R green + 3-gate clear（含 P0-EDGE-1 + W-AUDIT-8a C1）才解凍。`P1-PORTFOLIO-RESTING-EXPOSURE-1` 平行 IMPL 不受影響（Round 2 P1 dispatched）。
