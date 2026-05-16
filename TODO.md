@@ -345,7 +345,6 @@ main implementation remains blocked by gates below.
 
 | ID | Task | Spec source | ETA |
 |---|---|---|---|
-| `W-AUDIT-8a` Phase A | trait skeleton + 5 strategies declare alpha sources | DONE 2026-05-10 Sprint N+0 closure | ✅ |
 | `W-AUDIT-8a` Phase B/C/D | Tier 2 panel collector + Tier 3 microstructure + Tier 4 information flow | Sprint N+1 W2 起逐步 IMPL | 4-6 sprint |
 | `W-AUDIT-8b` (A4-A) | Funding Skew Directional 新策略（R-1 IMPL）| W-AUDIT-8a Phase B 後 | Spec v0.1 done 2026-05-15；review/replay next |
 | `W-AUDIT-8c` (A4-B) | Liquidation Cluster Reaction 新策略 | W-AUDIT-8a Phase C 後 | N+3 |
@@ -382,67 +381,15 @@ main implementation remains blocked by gates below.
 
 **Source**: `srv/2026-05-16--full-system-audit-fix-plan.md` (PA consolidated + PM sign-off)
 **PM Sign-off**: APPROVED-CONDITIONAL 2026-05-16
-**Status Legend**: PENDING / ACTIVE / DONE / DEFERRED
+**Status**: Wave 1-4 source/test work is closed and archived in
+`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
 
-**PM reprioritization vs PA original**:
-- WP-02 P0 -> P1 (runtime already uses `donchian_prior()` since `75741eff`)
-- WP-08 MIT-P0-2 cron claim ✅ **RECONCILED 2026-05-16 = FALSE FINDING**（PA: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--mit_cron_reconcile.md`；MIT 12 個 = 廣口徑 helper_scripts/cron/ files；6 deliberately not installed 各有 reason；spawn P2-CRON-DELIBERATE-NOT-INSTALLED-LIST）
-- AI-E-F-01 budget $100->$2 ⚠️ **越權 IMPL `ef6ea79f`，operator post-hoc ratification pending**（PA+FA+CC 三角共識：substance 對 $2（layer2_types.py:60 自 2026-03-31 + DOC-08 §4.1 真實出處）+ procedure 違反 PM §3 reprioritization；citation §12 → §4.1 已 fix in budget_config.toml ×2 by main session 2026-05-16）
-- R4 "CRITICAL" doc drift downgraded to P2
-
-| WP | Title | Priority | Wave | Owner | Status | Effort |
-|---|---|---|---|---|---|---|
-| WP-01 | GUI Safety Gates (A3 BLOCKERs) | P0-BLOCKER | 1 | E1a -> A3+E2 review | ✅ DONE `6b8be386` | 1 session |
-| WP-02 | Donchian callers audit + deprecate base fn (rescoped from P0) | P1 | 1 | E1 -> QC+E2+E4 | ✅ DONE `6b8be386` | 0.5 session |
-| WP-03 | OU Sigma Residual Fix | P1 | 2 | E1 -> QC+E2 | ✅ DONE（Phase A `67a82612` + hot-path `compute_ou_step` 殘差 sigma 本 wave） | 0.5 session |
-| WP-04 | AI Observability + Budget | P1 | 2 | E1-py+E1-rs -> AI-E+E2 | ✅ DONE（F-04 Ollama observability + F-01 budget $2/day + F-09 TODO） | 1 session |
-| WP-05 | Security Hardening (bind 0.0.0.0 + error leak) | P1 | 1 | E1 -> E3+E2 | ✅ DONE `6b8be386` | 0.5 session |
-| WP-06 | Performance Hot Path (Rust clone + Python deepcopy) | P1 | 3 | E1-rs+E1-py -> E5+E2 | ✅ DONE（E5 clone audit 57→34 avoidable + state_compiler deepcopy 3→2） | 1-2 sessions |
-| WP-07 | Dead Code + Schema Cleanup | P2 | 2 | E1 -> FA+E2 | ✅ DONE（FA 分析完成：7 dead modules 3186 LOC + 2 dead tables；4 P2 tickets drafted） | 0.5 session |
-| WP-08 | ML Pipeline Maturity (walk-forward purge + training SQL) | P1 | 3 | MIT+E1 -> MIT+E2 | ✅ DONE（MIT-DB-6 engine_mode scope + MIT-P1-2 purge_days param） | 2 sessions |
-| WP-09 | Documentation + Index Sync | P2 | 1 | TW+R4 -> PM | ✅ DONE `6b8be386` | 0.5 session |
-| WP-10 | Bybit Integration (retCode enum + mainnet URL) | P1 | 2 | E1 -> BB+E2 | ✅ DONE（BB-A-1 110017 ReduceOnlyReject + BB-M-1 backtest demo default） | 0.5 session |
-| WP-11 | Test Infrastructure (phased) | P2 | 4 | E4+E1 -> E2 | ✅ Phase 1 DONE（15 test fixes, 16→1 flaky）；Phase 2 pending（49 assertion-less tests, coverage triage） | 2-3 sessions |
-| WP-12 | ONNX Model Manager (stub) | P2 | 4 | E1-rs -> E2+FA | DEFERRED | 1 session |
-| WP-13 | Reconciler Stale cmd_tx | P1 | 3 | E1-rs -> E2+E4 | ✅ DONE `a7cb517f`（demo reconciler + strategist scheduler + edge reloader 全部改 slot/snapshot；Round 4 leftover P1 closed） | 1 session |
-
-**Wave 1 ✅ CLOSED 2026-05-16 (Round 2 真修後)**: WP-01 + WP-02 + WP-05 + WP-09 全 DONE (`43627d1c` + `6b8be386` + Round 2 patch HEAD).
-  - **Round 1 對抗審核 (A3/R4/E2/E3/QC)**：WP-01 6.5/10 PARTIAL（A3-MAJOR-2 漏修+雙層 modal）/ WP-02 PASS / WP-05 偽修復（17+ HTTPException leak）/ WP-09 cheap-fix（97 missing→32）
-  - **Round 2 真修**：WP-05 17 routes 38 callsite migrate + error_sanitize helper + StarletteHTTPException/RequestValidationError handler 補；WP-01 canary openPromptModal + 雙層 modal 拆 + 5 metric 繁體 + 繁簡統一 + module-level lock；WP-09 README +126 entries + KNOWN_ISSUES reconcile + REF-21 SUPERSEDED + WP-01/02 sign-off
-  - **Round 2 對抗審核 (E2/A3/R4)**：WP-01+WP-05 APPROVE-CONDITIONAL；A3 8.5/10 GO；R4 APPROVE-CONDITIONAL
-  - **P2 follow-up tickets opened**: P2-WP05-FUP-1 (32 殘留 str(exc)) / P2-COMMON-JS-LOC (2198 拆檔) / P2-TAB-LIVE-LOC (2142 拆檔) / P2-CROSSTAB-I18N / P2-STOCHASTIC-LEAK / P2-START-LOCAL-HELPER
-  - **Governance exception**: common.js 2135→2198 (+63 LOC) 超 §九 pre-existing baseline +5 寬容；PM 接受 SDK consolidation 理由（openPromptModal 為 A3-MAJOR-2 spec 必補），P2 拆檔 ticket 已開
-  - **PA audit drift watch**: QC-P0-1 Donchian + QC-P1-1 OU sigma 均為 stale code 被當 active P0/P1 報入 — PA `code-quality-audit` skill 必加 hard rule「P0 leak finding 必附 call-path grep verification」
-**Wave 1 original dispatch**: WP-01 + WP-02 + WP-05 + WP-09 (zero file overlap)
-**Wave 2 ✅ CLOSED 2026-05-16**: WP-03 + WP-04 + WP-10 + WP-07 全 DONE。
-  - **WP-03**: `compute_ou_step()` 殘差 sigma 取代 raw second moment；OLS 殘差 n-2 dof；5 新測試全 PASS
-  - **WP-04**: F-04 Ollama observability via `_record_strategist_invocation()` → `agent.ai_invocations`；F-01 budget $100→$2/day（兩份 TOML 同步）；F-09 evaluate.rs TODO 標記
-  - **WP-07**: FA read-only audit 完成；7 dead openclaw_core modules（3186 LOC）+ 2 dead tables + PerceptionPlane.validate 0 caller；4 P2 tickets: DEAD-SCHEMA-DROP-1, DEAD-RUST-CLEANUP-1, PERCEPTION-DEPRECATE-1, H0-DISPLAY-LABEL-1
-  - **WP-10**: BB-A-1 ReduceOnlyReject=110017 enum + 5-classifier false assertions；BB-M-1 backtest URL demo default via env var
-  - **E2 review**: consolidated adversarial review PASS
-  - **BB-MF-3 comment contamination**: 發現 `is_exchange_backoff` doc 被隔壁 session 改寫→已 revert
-  - **LOC warnings**: grid_helpers.rs 809 / ai_service_dispatch.py 836 / bybit_rest_client_tests.rs 830（均 <2000 hard cap）
-**Wave 2 original dispatch**: WP-03 + WP-04 + WP-10 + WP-07 (independent)
-**Wave 3 ✅ CLOSED 2026-05-16**: WP-06 + WP-08 + WP-13 全 DONE（base `f31b6e8f` + WP-13 leftover close `a7cb517f`）。
-  - **WP-06**: E5 clone audit（57 clones, 34 avoidable, Arc<str> OrderIntent 為最高槓桿優化）+ state_compiler deepcopy 3→2（cache-miss path）
-  - **WP-08**: MIT-DB-6 realized_edge_stats engine_mode `= %(engine_mode)s` → `ANY(%(engine_modes)s)`（live→[live, live_demo]）；MIT-P1-2 edge_estimate_validation `purge_days` walk-forward gap
-  - **WP-13**: DemoCmdSenderSlot + ReconcilerCommandTxProvider closure + strategist scheduler `tune_cmd_snapshot()` + edge-estimate reload demo slot fan-out，消除 demo pipeline restart 後 stale cmd_tx
-  - **E2 review**: 0 CRITICAL / 0 HIGH / 1 MEDIUM pre-existing（main_boot_tasks.rs 858 LOC）/ 2 LOW cosmetic → PASS
-  - **Remaining debt**: `spawn_position_reconciler` dead_code warning（P2）；paper edge reload still by-value by design because paper is disabled and has no sender slot infra
-**Wave 3 original dispatch**: WP-06 + WP-08 + WP-13 (parallel E1+E5)
-**Wave 4 ✅ Phase 1 CLOSED 2026-05-16**: WP-11 Phase 1 DONE（`564c9db6`）+ WP-12 DEFERRED。
-  - **WP-11 Phase 1**: 15 failing Python tests fixed across 6 test files（4 categories: IPC error format drift / manifest envelope validation / Rust source split / HTML refactor）
-  - **Baseline**: 4840 passed / 1 flaky / 43 skipped（was 4825 / 16 / 43 → +15 passed, -15 failed）
-  - **Rust**: 0 failures（E4-HIGH-6 已自行解決）
-  - **E4-HIGH-3 import errors**: 不存在（4882 tests 全收集成功）
-  - **E4-HIGH-5 test_v072**: 測試已不存在
-  - **E2 review**: 0H/0M/1L(accepted) → PASS
-  - **Category E flaky**: `test_case2_pg_kill_simulation` 單跑 PASS / 全跑偶爾 FAIL — import 順序 race，P2
-  - **Phase 2 residuals**: 49 truly assertion-less tests（E4-HIGH-7）；coverage triage E4-HIGH-1/2；DB resilience E4-HIGH-8；proptest E4-HIGH-4
-  - **WP-12 ONNX**: DEFERRED — stub returns None → rule-based fallback by design
-**Wave 4 original dispatch**: WP-11 (test fixes) + WP-12 (deferred)
-
-**Conflict guard**: Wave 2 WP-03 touches `grid_helpers.rs` which is in the EDGE-P2-3 Phase 1b orbit. Land WP-03 BEFORE Phase 1b IMPL to avoid merge conflict. WP-06 performance must wait until Phase 1b stabilizes.
+**Retained follow-ups**:
+- WP-11 Phase 2 residuals are tracked in §12 P2 backlog.
+- WP-12 ONNX remains deferred; rule-based fallback is current behavior.
+- PA audit drift hardening is tracked by `P2-PA-CALLPATH-GREP-RULE`.
+- LOC follow-ups from Wave 1 are tracked by `P2-COMMON-JS-LOC` and
+  `P2-TAB-LIVE-LOC`.
 
 ---
 
@@ -458,7 +405,6 @@ main implementation remains blocked by gates below.
 | `P2-PERCEPTION-DEPRECATE-1` | **WP-07 NEW**：`PerceptionPlane::validate_for_decision` 0 production callers → `#[deprecated]` + 14 test callers migrate | est. 0.5 session |
 | `P2-H0-DISPLAY-LABEL-1` | **WP-07 NEW**：Python H0Gate GUI endpoint 加 `display_only=true` 標記，避免誤認為執行權威 | est. trivial |
 | `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → **mounted into `W-AUDIT-8f` (R-3) Hypothesis Pipeline per Decision-3 (P0-DECISION-AUDIT-7)** | Sprint N+5 |
-| `P2-V19-CYCLE` | ✅ DONE 2026-05-15 — TODO cleanup/archive cycle | `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`; TODO under 700-line hygiene target. |
 | `P2-ORDERS-INTENT-ID-WRITER-GAP-1` | **Wave 1.5 NEW**（per Track E3 maker fill baseline 2026-05-15 commit `b98706d5`）：fix `orders.intent_id` 100% NULL writer 漏接；恢復 intent → order linkage 給 Guardian-pass-rate 計算 | est. 1 person-day；不阻 Phase 1b IMPL；E3 finding 1 證實 7d 1394 demo orders / 1021 live_demo orders 全部 `intent_id IS NULL`；無法走 `intents → orders` join 算 Guardian-pass-rate；派發時點：N+2 backlog |
 | `P2-WP05-FUP-1` | **Wave 1 Round 2 follow-up**：32 處 `str(exc)` 殘留（22 處 E1 自承非 SoT 列名 + 9 處 risk_routes.py `_ipc_failure(f"...: {e}")` E2 新發現 + 1 處 strategist_promote_routes:564 enum 字串）— 走全域 handler regex 二次消毒，但仍建議逐處 migrate 為穩定 reason_code | est. 0.5 session；非 blocking；handler regex 為 second-line defense |
 | `P2-COMMON-JS-LOC` | **Wave 1 Round 2 NEW**：`common.js` 2198 LOC 超 §九 2000 hard cap（pre-existing 2135 + Wave 1 +63 SDK consolidation）— 拆檔（建議 modal SDK / API helper / formatter 三檔）| est. 1 session；PM 已 accept governance exception |
@@ -469,14 +415,8 @@ main implementation remains blocked by gates below.
 | `P2-PA-CALLPATH-GREP-RULE` | **Wave 1 Round 2 NEW (audit drift 反模式)**：PA `code-quality-audit` skill 加 hard rule「P0/P1 leak/bias finding 必附 IndicatorEngine/production caller call-path grep」— QC-P0-1 Donchian 第 3 次復發 + QC-P1-1 OU sigma 第 1 次 stale finding 證實 audit drift 反模式 | est. 0.25 session；治理 skill 改進 |
 | `P2-WP05-CSP-UNSAFE-INLINE` | **Wave 1 Round 2 NEW (E3)**：CSP `unsafe-inline` 推遲在 live 前 30 天窗口不安全（25 處 innerHTML + unpkg CDN 無 SRI）— 至少加 SRI integrity hash；live cohort 前必補 nonce-based CSP | est. 1 session；live-gate prerequisite |
 
-### §12.1 Sprint N+2 P2 Backlog (PA 2026-05-11)
-
-| ID | Task | Status |
-|---|---|---|
-| `P2-N2-1` | btc_lead_lag.rs 4-split (producer/ingest/snapshot/db_writer) | ✅ DONE 2026-05-15 (Codex; root re-export preserved; implementation files ≤500 LOC; `cargo test -p openclaw_engine --lib btc_lead_lag` 45 passed) |
-| `P2-N2-2` | w2_paper_edge_report.py 4-split (metrics/render/smoke/report) | ✅ DONE 2026-05-14 (Codex; commit subject `[ae-pm] P2-N2-2: w2_paper_edge_report.py 4-split`) |
-| `P2-N2-3` | Layer 2 helper should_spawn_btc_lead_lag_producer extraction | ✅ DONE `fca1aec9` |
-| `P2-N2-4` | CI grep rule for stable_id literal duplication guard | ✅ DONE `155bad6d` |
+Completed Sprint N+2 P2 rows (`P2-N2-1..4`) are archived in
+`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
 
 ---
 
@@ -504,7 +444,7 @@ main implementation remains blocked by gates below.
 |---|---|---|
 | 2026-05-10..16 | Sprint N+0 W1-W2 FOUNDATION HEAVY | Closed; detailed ledger archived in `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md` |
 | 2026-05-16 | funding_arb 14d audit | verification/history; retirement decision in AMD-2026-05-09-02 / ADR-0018 |
-| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | finish 8a C1 24h proof review + 8b read-only Stage 0R query/report packet; A4-C diagnostic-only after no-revive RCA closure; Stage 1 demo only after future green Stage 0R (`[55]` source-cleared) |
+| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | rerun/repair 8a C1 full-duration proof path after `FAIL_CONNECTION` + 8b read-only Stage 0R query/report packet; A4-C diagnostic-only after no-revive RCA closure; Stage 1 demo only after future green Stage 0R (`[55]` source-cleared) |
 | 2026-05-24..30 | Sprint N+2 8d follow-up + 8a Phase D + Stage 2 demo cohort 14d | Stage 2 only from Stage 1 demo empirical evidence |
 | 2026-05-31..06-06 | Sprint N+3 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | |
 | 2026-06-07..13 | Sprint N+4 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | Track W 全 closed |
