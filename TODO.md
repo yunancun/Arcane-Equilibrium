@@ -331,7 +331,7 @@ Phase 1b main implementation remains blocked by gates below.
 **Still Active**
 1. ❌ `P0-EDGE-1` — `[40]` negative realized edge remains active.
 2. 🔵 `W-AUDIT-8b Stage 0R` — **DISPATCHED 2026-05-16**：PA Wave 4-A Run Plan + E1 round 1 smoke 並行；read-only replay packet 1-2 週 cycle 開工。
-3. 🟡 `W-AUDIT-8a C1` — **v2 24h proof IN_FLIGHT 2026-05-16**：PID `373272` launched `2026-05-16T14:45:08Z`（session `c1_v2_20260516T144508Z`）；--start-utc-midnight 等到 `2026-05-17T00:00:00Z` (~9h15m wait) 才啟 24h proof，完成預計 `2026-05-18T00:00:00Z`；commits `25396b0b` + `8d2eef58`；checkpoint JSON `/tmp/openclaw/audit/liquidation_topic_probe/c1_proof_progress.json` per-hour atomic write；nohup log `nohup_c1_v2_20260516T144508Z.log`。
+3. 🟡 `W-AUDIT-8a C1` — **v2 24h proof IN_FLIGHT 2026-05-16**（operator 選立即模式 `--no-midnight`）：PID `377531` launched `2026-05-16T14:56:16Z`（session `c1_v2_20260516T145616Z`）；24h window: now → `2026-05-17T14:56:16Z`；prior PID `373272` killed (midnight align 不採用)；commits `25396b0b` + `8d2eef58` + wrapper `b47a7150` (+--no-midnight flag)；checkpoint JSON `/tmp/openclaw/audit/liquidation_topic_probe/c1_proof_progress.json` per-hour atomic write；nohup log `nohup_c1_v2_20260516T145616Z.log`。
 4. 🔵 `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` — **P0c IN_PROGRESS 2026-05-16**：operator + PM 跑 V091/V092/V093 Linux PG backlog apply + sqlx record (~2h)。
 5. 🔵 `P1-BBMF3-WIRE-1` — production rejectReason/callback wiring must be included in Phase 1b main implementation.
 
