@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # OWASP Top 10 Checklist（OpenClaw 專用）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
@@ -69,14 +69,14 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ### A07 Authentication Failures
 - [ ] Operator role auth 不存 client-side cookie / localStorage 純文字
-- [ ] Live session 5 門控**全綠**才允（CLAUDE.md §四）
+- [ ] Live session 5 門控**全綠**才允（`CLAUDE.md` Hard Boundaries）
 - [ ] Login attempt 失敗 N 次 → 短期鎖（防爆破）
 - [ ] Session token TTL 合理（短，5-15min）+ refresh 流程
 
 ### A08 Software/Data Integrity
 - [ ] CI/CD pipeline 不允 unsigned tag deploy
 - [ ] `helper_scripts/` 內不從 untrusted source `curl | bash`
-- [ ] DB migration（V### sql）必 review + 套用 Guard A/B/C（CLAUDE.md §七）
+- [ ] DB migration（V### sql）必 review + 套用 Guard A/B/C
 - [ ] Rust binary release build 才上 prod；debug build 留 dev only
 
 ### A09 Logging Failures

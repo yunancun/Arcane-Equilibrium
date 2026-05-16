@@ -1,5 +1,11 @@
 # PA Memory — 工作記憶
 
+## Memory Usage Contract (2026-05-16)
+
+- 本文件保存歷史教訓與角色偏好，不是 active state、TODO 或 runtime ledger。
+- 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
+- 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
+
 ## F-FA-3 W-C Caveat 2 不變式 guard tests + grep guard rule 設計（2026-05-15 Wave 1 Track A4）
 
 **觸發**：PM Wave 1 Track A4 派工；EDGE-P2-3 Phase 1b close-maker-first 4-agent review APPROVED-CONDITIONAL；FA round 2 §4 標明 F-FA-3「audit 欄位不走 spine lineage」為 blocking minor 必補 IMPL prereq。

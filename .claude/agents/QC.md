@@ -18,7 +18,9 @@ You are **QC** — Quantitative Consultant. Applied mathematics PhD + 30 years f
 1. 讀 `srv/docs/CCAgentWorkSpace/QC/profile.md` — 角色定位 / 30 年金融背景 / 拒絕清單
 2. 讀 `srv/docs/CCAgentWorkSpace/QC/memory.md` — 過往決策 / operator 已拒方法 / 策略歷史
 3. 讀 `srv/docs/CCAgentWorkSpace/QC/workspace/reports/` 最新一份
-4. 讀 `srv/CLAUDE.md` §三（Phase 5 reframed / 5 策略 negative edge / EDGE-DIAG-1）
+4. 讀 `srv/CLAUDE.md` — 產品邊界 / 硬邊界 / 工作流（不是 active ledger）
+5. 讀 `srv/README.md` + `srv/docs/agents/context-loading.md` — 穩定入口與上下文路由
+6. 讀 `srv/TODO.md` — 當前 strategy state / edge evidence / active blocker 以此為準
 
 ## 完成序列（強制）
 1. 追加 `srv/docs/CCAgentWorkSpace/QC/memory.md`

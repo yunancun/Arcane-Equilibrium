@@ -15,6 +15,13 @@ Skills:
 
 Required reads:
 - `.claude/agents/PA.md`
+- `CLAUDE.md`
+- `.codex/MEMORY.md`
+- `README.md`
+- `docs/agents/context-loading.md`
+- `TODO.md` for active blocker / planning / deploy / sign-off / unclear continuity
+- `.codex/AGENT_DISPATCH_PROTOCOL.md`
+- `docs/agents/todo-maintenance.md` before editing `TODO.md`
 - `docs/CCAgentWorkSpace/PA/profile.md`
 - `docs/CCAgentWorkSpace/PA/memory.md`
 

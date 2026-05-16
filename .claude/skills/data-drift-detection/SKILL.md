@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Data Drift Detection（資料漂移偵測手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
@@ -152,7 +152,7 @@ def psi(reference, current, bins=10):
 
 OpenClaw 特定 snapshot（當前 Phase / 當前 model 階段 / TODO id）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三 > TODO.md > `git log` > memory（最後）。
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `git log` > memory（最後）。
 
 **穩定不變的 drift rule**（不會 drift）：reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` filter；drift check 必加 `passive_wait_healthcheck.py:check_data_drift_X()`（cron 6h）；CognitiveModulator confidence_floor 是動態降倉機制（架構級不變）。
 

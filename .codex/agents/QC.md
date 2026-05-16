@@ -19,6 +19,13 @@ Skills:
 
 Required reads:
 - `.claude/agents/QC.md`
+- `CLAUDE.md`
+- `.codex/MEMORY.md`
+- `README.md`
+- `docs/agents/context-loading.md`
+- `TODO.md` for strategy state / edge evidence / active blocker / unclear continuity
+- `.codex/AGENT_DISPATCH_PROTOCOL.md`
+- `docs/agents/todo-maintenance.md` before editing `TODO.md`
 - `docs/CCAgentWorkSpace/QC/profile.md`
 - `docs/CCAgentWorkSpace/QC/memory.md`
 

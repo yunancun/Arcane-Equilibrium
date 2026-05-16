@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-05-16 22:19 CEST
+- completed role profile/memory hygiene across `docs/CCAgentWorkSpace/*`
+- added `docs/agents/role-profile-memory-standard.md`, linked it from context loading/docs index, and made every role profile point at the shared contract
+- added memory usage contracts to all role memories without deleting historical entries; active state remains `TODO.md`
+- cleaned stale profile wording where old March 31 baselines could be misread as current truth
+
 2026-05-15 22:13 CEST
 - completed W-AUDIT-8b Funding Skew QC/MIT/BB review integration
 - updated spec to v0.2 review/design: 30m primary horizon, branch-separated hypotheses, explicit K_total >= K_prior+4050, DSR>=0.95, PBO fail-closed, raw panel as-of joins, funding attribution excluded, and BB funding interval/source-mode fields
@@ -431,3 +437,15 @@ YYYY-MM-DD HH:MM TZ
 - result: V092 continuous aggregates applied online; V091/V092/V093 `_sqlx_migrations` rows inserted with source checksums; `_sqlx_migrations` now has `max_applied=93`, `rows=90`.
 - verification: V092 second apply idempotency PASS, six cagg views + six refresh jobs exist, aggregate view read smoke returns rows, `repair_migration_checksum --verify` reports `drift_count=0`, engine PID `69581` remained alive.
 - boundary: no restart, rebuild, auth write/renewal, strategy/risk config mutation, trading mode change, or order-authority change.
+
+2026-05-16 CEST
+- PM task: memory slimming and context-routing standardization for Claude/Codex operating files.
+- result: added `docs/agents/context-loading.md` and `docs/agents/todo-maintenance.md`; moved active-state authority to `TODO.md`, stable project entry to `README.md`, and kept `CLAUDE.md` / `.codex/MEMORY.md` as operating memory.
+- startup routing updated in `AGENTS.md`, `.claude/agents/PM.md`, `.codex/agents/PM.md`, `.codex/AGENT_DISPATCH_PROTOCOL.md`, and `.codex/SUBAGENT_EXECUTION_RULES.md`.
+- boundary: docs-only; no runtime code, deploy, rebuild, restart, DB, auth, strategy/risk, or trading-mode changes.
+
+2026-05-16 CEST
+- PM task: refresh all Claude/Codex agent settings after operator rejected reliance on old `CLAUDE.md` section compatibility.
+- result: all `.claude/agents/*.md` and `.codex/agents/*.md` now preload operating memory + `README.md` + `docs/agents/context-loading.md`, and route active state to `TODO.md`; Codex role index now records universal preload.
+- aligned agent-facing skills and profiles away from stale numbered-memory sections, 11-tab, bilingual-comment, and 1200-line assumptions; current rules use TODO active state, README stable surfaces, Chinese-first comments, and 2000-line hard cap.
+- boundary: docs/agent-settings only; no runtime code, deploy, rebuild, restart, DB, auth, strategy/risk, or trading-mode changes.

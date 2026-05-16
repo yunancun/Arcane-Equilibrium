@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-04-28
+Last updated: 2026-05-16
 
 ## Purpose
 
@@ -76,3 +76,12 @@ Significant dispatches should be summarized in `.codex/WORKLOG.md` with:
 - key result or blocker
 
 When the dispatch itself is operationally important or defines a reusable pattern, also add an entry to `.codex/DISPATCH_LEDGER.md`.
+
+## Context and TODO rule
+
+Delegated roles should receive only the context needed for their scope, but PM
+must preserve source routing:
+- active state and blockers come from `TODO.md`
+- stable project context comes from `README.md`
+- context routing comes from `docs/agents/context-loading.md`
+- TODO edits must follow `docs/agents/todo-maintenance.md`

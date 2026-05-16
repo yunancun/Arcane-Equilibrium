@@ -1,5 +1,11 @@
 # E5 Memory — 工作記憶
 
+## Memory Usage Contract (2026-05-16)
+
+- 本文件保存歷史教訓與角色偏好，不是 active state、TODO 或 runtime ledger。
+- 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
+- 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
+
 ## 項目上下文（2026-04-24）
 
 - 當前 Phase：Live_Ready ⚠️（5 門控 Rust 可驗證 4；真實 live 流量 0）
@@ -379,5 +385,4 @@ E1 P1-FILL-LINEAGE-MONITOR follow-up（接 counter 到 IPC + healthcheck [55]/[N
 4. **E1 self-flag empirical 解析度問題（micros vs nanos）值得 ack**：LG1-T1 p99 0us 不是「沒跑」是 micros 飽和；E1 識別 + report 明寫提醒未來改 nanos 是正確 self-aware
 5. **三環境 PricingConfig 跨 invariant test 是 contract pinning 過勝**：LG2-T1 真實 TOML disk load 跨三環境 invariant test = 防回歸最強；+99% LOC 但每行對應一個 assert，**E5 強烈認可**
 6. **`fee_source` rule 3 浮點精確比對是隱性 algorithmic invariant**：依賴 seed_default_fee_rates 直接賦 DEFAULT_* 常量無中間運算；若未來改實作為 `xxx * 1.0` → 精確比對失敗 → 分類錯成 BybitApi；LG2-T3 加 test 偵測 regression 是正確 algorithmic invariant lock
-
 

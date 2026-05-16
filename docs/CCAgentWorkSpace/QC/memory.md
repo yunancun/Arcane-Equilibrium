@@ -1,5 +1,11 @@
 # QC — Quantitative Consultant 工作記憶
 
+## Memory Usage Contract (2026-05-16)
+
+- 本文件保存歷史教訓與角色偏好，不是 active state、TODO 或 runtime ledger。
+- 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
+- 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
+
 > 初始化日期：2026-04-02
 > 本文件隨每次任務完成後更新，記錄關鍵發現、決策依據、需記住的教訓。
 
@@ -133,4 +139,3 @@
 **下一審查點**：
 - ≥ 5 月 1 日 （EDGE-DIAG-1 Phase 3 passive-wait 至 clean n≥200）
 - 或 ≥ 5 月 7 日 (21d demo 時鐘解鎖，P0-3 Phase 5 edge 重評)
-

@@ -27,6 +27,19 @@ Codex role files mirror the Claude agent roster while adapting it to Codex sub-a
 
 ## Usage
 
-- Read the role file here first
-- Then read the linked Claude source file for full role detail
-- Then load the referenced skill files from `.claude/skills/`
+- Read the role file here first.
+- Then read the linked Claude source file for full role detail.
+- Then load the referenced skill files from `.claude/skills/`.
+- Every Codex role also follows the universal preload below before acting.
+
+## Universal Preload
+
+Required for every Codex role:
+
+- `CLAUDE.md` — shared operating memory, boundaries, workflow.
+- `.codex/MEMORY.md` — Codex-specific operating memory and dispatch rules.
+- `README.md` — stable project entry and current canonical surfaces.
+- `docs/agents/context-loading.md` — decides when to load `TODO.md` and extra docs.
+- `TODO.md` for code / deploy / runtime / planning / sign-off / review / unclear continuity.
+- `.codex/AGENT_DISPATCH_PROTOCOL.md` before dispatching or receiving delegated work.
+- `docs/agents/todo-maintenance.md` before editing `TODO.md`.

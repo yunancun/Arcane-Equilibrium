@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Bybit Policy Compliance（Bybit 政策合規手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
@@ -199,9 +199,9 @@ OpenClaw 當前的 policy compliance 狀態（KYC 地區 / API permission / IP w
 
 OpenClaw 特定 snapshot（EDGE-P2-3 部署 / funding_arb G-2 結案 / TODO id 引用）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三/§四 > TODO.md > `git log` > 治理 .md > memory（最後）。
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `git log` > governance docs > memory（最後）。
 
-**穩定不變的平台 + governance rule**（不會 drift）：Bybit 為唯一交易所（CLAUDE.md §一；跨所策略 out of scope）；demo/paper/live_demo/live 4 環境合規規則微異（demo no-KYC、live KYC required）；authorization.json HMAC 是 Live gate 5（CLAUDE.md §四）；`OPENCLAW_ALLOW_MAINNET=1` 是內部 gate 不替代 KYC；withdraw permission 永遠 false（架構級）；PostOnly 是合規行為（不違 ToS）。
+**穩定不變的平台 + governance rule**（不會 drift）：Bybit 為唯一交易所（`CLAUDE.md` Product Boundary；跨所策略 out of scope）；demo/paper/live_demo/live 4 環境合規規則微異（demo no-KYC、live KYC required）；authorization.json HMAC 是 Live gate 5（`CLAUDE.md` Hard Boundaries）；`OPENCLAW_ALLOW_MAINNET=1` 是內部 gate 不替代 KYC；withdraw permission 永遠 false（架構級）；PostOnly 是合規行為（不違 ToS）。
 
 ## 反模式（見即升級）
 

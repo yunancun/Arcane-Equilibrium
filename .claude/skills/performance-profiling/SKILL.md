@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Performance Profiling（效能分析）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 > ⚠️ **SLA 數字 disclaimer**：「H0 Gate < 1ms / Tick path < 0.3ms / IPC < 5ms / 128GB / 4-8GB PG」等硬體 + 性能數字治理依據需 verify（SM-* 治理是否定義 SLA 不確定）；本 skill 引用值為 **CLAUDE.md memory + 工程實測 baseline**，若與真實 runtime 衝突以實測為準。
@@ -14,7 +14,7 @@ allowed-tools: Read, Grep, Glob, Bash
 ## 何時觸發
 
 - E5 收到「效能優化」「P95 latency 偏高」「記憶體 / CPU spike」「DB 慢查詢」
-- 每個 Phase / Wave 完成或 ≥3 E1 任務後強制（CLAUDE.md §八）
+- 每個 Phase / Wave 完成或 ≥3 E1 任務後強制
 - Tick pipeline / IPC / Bybit REST 延遲 > SLA
 - Rust 遷移期 binary size 監控
 

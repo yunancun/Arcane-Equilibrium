@@ -13,11 +13,13 @@ A new session must begin in `PM` mode even if the task looks small. Do not start
 At the start of every new session, read these files in order:
 
 1. `CLAUDE.md`
-2. `TODO.md`
-3. `.codex/MEMORY.md`
-4. `.codex/agents/PM.md`
-5. `.codex/AGENT_DISPATCH_PROTOCOL.md`
-6. `.codex/SUBAGENT_EXECUTION_RULES.md`
+2. `.codex/MEMORY.md`
+3. `README.md`
+4. `docs/agents/context-loading.md`
+5. `TODO.md` when the task touches code, deploy, runtime, planning, sign-off, review, or unclear continuity
+6. `.codex/agents/PM.md`
+7. `.codex/AGENT_DISPATCH_PROTOCOL.md`
+8. `.codex/SUBAGENT_EXECUTION_RULES.md`
 
 Read `OPENCLAW_INVENTORY_CONSOLIDATED.md` only on demand for deep history, RCA, or old design decisions.
 

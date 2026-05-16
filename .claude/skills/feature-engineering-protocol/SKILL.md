@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Feature Engineering Protocol（特徵工程嚴謹性手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 ## 何時觸發
@@ -161,7 +161,7 @@ WHERE c.symbol IS NULL;
 
 OpenClaw 特定 snapshot（commit hash / specific bug 教訓如 bb_breakout F3 / 當前 P0-13 ATR fix 細節 / EDGE-P2-3 部署 / 當前 label count）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿：runtime TOML > Rust schema > CLAUDE.md §三 > `audit_migrations.py` 實測 > `git log` > 治理 .md > memory（最後）。table 名 / column / row 量必跑 SQL 取真值（`SELECT count(*) FROM learning.X WHERE engine_mode IN ('live','live_demo')`）。
+實際 context 必從 SSOT 拿：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `audit_migrations.py` 實測 > `git log` > governance docs > memory（最後）。table 名 / column / row 量必跑 SQL 取真值（`SELECT count(*) FROM learning.X WHERE engine_mode IN ('live','live_demo')`）。
 
 **穩定不變的 ML feature rule**（不會 drift）：training filter 必含 'live' + 'live_demo'（不混 paper）；任何 rolling stat 必加 `.shift(1)` leak-free（rolling.max() 含 current bar 是已知 measurement bias）；resample 後只用 closed bar（`isClosed=true`）；feature ts 必早於 target window start（不重疊）。
 

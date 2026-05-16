@@ -6,19 +6,19 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Token / Cost Analysis（AI 成本分析）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > CLAUDE.md > 治理 .md > memory > 本 skill
+> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
 > **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
 
 > **S3 上層 drift 防線**：本 skill 引用上層（CLAUDE.md / DOC-XX / SM-XX / EX-XX）為 extract；原文修改後可能漂移，發現不一致以原文為準。
 
-> ⚠️ **Cost limit / SLA 數字 disclaimer**：「每日 $2 硬上限」「L1 < 3s」「cost_edge_ratio ≥ 0.8」等具體數字以 **DOC-08 V1 + CLAUDE.md §二 原則 13** 原文為準；本 skill 為 extract，數字若有出入 → 以治理為準。
+> ⚠️ **Cost limit / SLA 數字 disclaimer**：「每日 $2 硬上限」「L1 < 3s」「cost_edge_ratio ≥ 0.8」等具體數字以 **DOC-08 V1 + `CLAUDE.md` Root Principles** 原文為準；本 skill 為 extract，數字若有出入 → 以治理為準。
 
 ## 何時觸發
 
 - AI-E 收到「token 成本審計」「cost_edge_ratio 評估」「Layer 2 預算超標」
 - 月度 AI 成本回顧
 - 新 Layer 2 工具 / agent 上線前 cost projection
-- CLAUDE.md §二 原則 13（AI 成本感知）相關決策
+- `CLAUDE.md` Root Principles（AI 成本感知）相關決策
 
 ## OpenClaw AI 三層成本結構
 
@@ -28,7 +28,7 @@ allowed-tools: Read, Grep, Glob, Bash
 | L1 本地 LLM | Ollama / LM Studio（Mac dev） | 0 邊際（電費忽略） | thought_gate 通過 |
 | L2 雲端 | Claude API（Anthropic） | $$$ per 1M tokens | budget gate + model_router |
 
-CLAUDE.md §二 原則 14：**L0+L1 必須夠跑基礎運營**，L2 為加值不為必需。
+`CLAUDE.md` Root Principles：**L0+L1 必須夠跑基礎運營**，L2 為加值不為必需。
 
 ## 觀察點（log / DB / API）
 
@@ -48,7 +48,7 @@ journalctl -u ollama -f --since "1 hour ago"
 
 ### 內部記錄
 ```sql
--- 預期 schema（依 CLAUDE.md §五）
+-- 預期 schema（依 README / architecture docs）
 SELECT
   provider,                            -- ollama / claude / lm_studio
   model,                               -- claude-opus-4-7 / qwen3.6-35b
@@ -65,7 +65,7 @@ ORDER BY SUM(cost_usd) DESC LIMIT 20;
 
 ## 三大分析
 
-### 1. cost_edge_ratio（CLAUDE.md §二 原則 13）
+### 1. cost_edge_ratio（Root Principles）
 
 ```
 cost_edge_ratio = AI_cost_per_trade / expected_edge_per_trade
@@ -87,7 +87,7 @@ cost_edge_ratio = AI_cost_per_trade / expected_edge_per_trade
 
 ### 3. 模型路由效益
 
-`model_router.py`（CLAUDE.md §五 H1-H5）應該按任務分流：
+`model_router.py`（H1-H5 governance path）應該按任務分流：
 - 簡單分類 / yes-no → L1（Ollama / LM Studio）
 - 複雜推理 / 工具調用 → Claude Sonnet / Opus
 - audit：`SELECT request_type, model, AVG(cost_usd) FROM ... GROUP BY 1,2`
@@ -95,7 +95,7 @@ cost_edge_ratio = AI_cost_per_trade / expected_edge_per_trade
 
 ## 預算 Gate（H2 budget）
 
-CLAUDE.md §五 H1-H5 治理層含 budget。AI-E 必驗：
+H1-H5 治理層含 budget。AI-E 必驗：
 - [ ] daily budget cap 設置（避免月底意外賬單）
 - [ ] gate 計算 = (本日累計 + 預估本筆) ≤ cap
 - [ ] 超 80% 警告 + 超 100% fail-closed
@@ -105,7 +105,7 @@ CLAUDE.md §五 H1-H5 治理層含 budget。AI-E 必驗：
 
 OpenClaw 特定 snapshot（Layer 2 推理當前狀態 / 當前 LM Studio 模型版本 / TODO id 引用 / 月度賬單實值）會 drift。本 skill 不重述。
 
-實際 context 必從 SSOT 拿：runtime TOML / env > Anthropic console 月度賬單 > CLAUDE.md §三 > TODO.md > memory（最後）。
+實際 context 必從 SSOT 拿：runtime TOML / env > Anthropic console 月度賬單 > `TODO.md` active state / runtime evidence > memory（最後）。
 
 **穩定不變的 cost 衛生 rule**：context cache TTL 5min（Anthropic 官方）→ session 內 `cache_read_tokens / total_input_tokens` 比例應 ≥ 50% 為健康；總成本 ÷ 月內 commit 數 = AI 對開發效率的單位成本（trend 分析）。
 
