@@ -210,6 +210,7 @@ def _phantom_view_guard_write() -> None:
 
 @core.live_router.get("/balance")
 async def get_live_balance(
+    fast: bool = Query(False),
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
@@ -226,6 +227,15 @@ async def get_live_balance(
     guard = _phantom_view_guard()
     if guard is not None:
         return guard
+
+    if fast and core._get_live_engine_kind() == "live":
+        try:
+            live_state = get_rust_reader().get_paper_state(engine="live") or {}
+            if live_state:
+                from .strategy_ai_routes import _paper_state_balance_payload  # noqa: PLC0415
+                return core._live_response(_paper_state_balance_payload(live_state))
+        except Exception:
+            logger.debug("Live fast balance snapshot unavailable", exc_info=True)
 
     # Attach per-engine session baseline (initial/peak/realized/fees) from
     # Rust paper_state so the GUI can display net-of-fees PnL identity
@@ -273,6 +283,7 @@ async def get_live_balance(
 
 @core.live_router.get("/positions")
 async def get_live_positions(
+    fast: bool = Query(False),
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
@@ -287,6 +298,21 @@ async def get_live_positions(
     guard = _phantom_view_guard()
     if guard is not None:
         return guard
+
+    if fast and core._get_live_engine_kind() == "live":
+        try:
+            live_state = get_rust_reader().get_paper_state(engine="live") or {}
+            if live_state:
+                from .strategy_ai_routes import _paper_state_positions_for_gui  # noqa: PLC0415
+                positions = _paper_state_positions_for_gui(live_state)
+                return core._live_response({
+                    "source": "rust_snapshot_fast",
+                    "positions": positions,
+                    "list": positions,
+                    "count": len(positions),
+                })
+        except Exception:
+            logger.debug("Live fast positions snapshot unavailable", exc_info=True)
 
     rc = core._get_rust_client_safe()
     if rc is not None:

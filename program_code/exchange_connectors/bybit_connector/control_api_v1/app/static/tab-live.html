@@ -239,7 +239,7 @@ html, body {
      （paper/demo 數字以「Live」名義呈現）。寧可空白，不要假 live。
 ═══════════════════════════════════════════════════════════════ -->
 <div id="live-integrity-fail-view" class="integrity-fail-view" style="display:none">
-  <h2>&#x26A0;&#xFE0F; Live engine 未啟動 — 此 Tab 不顯示任何數據以避免誤導</h2>
+  <h2 id="live-integrity-title">&#x26A0;&#xFE0F; Live engine 未啟動 — 資料暫停顯示，控制仍可用</h2>
   <div class="ifv-detail">
     Live engine is not running.<br>
     This tab is intentionally blank to prevent misleading display of paper/demo
@@ -256,6 +256,12 @@ html, body {
       To authorize, go to <strong>Governance Hub → Live Auth</strong>.
     </div>
     <div style="margin-top:12px">
+      <button class="oc-btn oc-btn-success" id="btn-live-start-locked" onclick="liveStart()" style="font-weight:700;margin-right:8px">
+        &#x25B6; 啟動 Live 實盤 / Start Live
+      </button>
+      <button class="oc-btn" onclick="refreshPage({ force: true })" style="margin-right:8px">
+        &#x21BB; 重新檢查 / Recheck
+      </button>
       <button class="oc-btn" onclick="openLiveAuth()" style="border-color:rgba(168,85,247,0.55);color:#a855f7">
         &#x1F511; 跳转 Live Auth / Open Live Auth
       </button>
@@ -750,7 +756,9 @@ const _liveModeState = {
   actual_endpoint: 'unconfigured', // 'mainnet' | 'live_demo' | 'unconfigured'
   execution_authority: 'not_granted',
   session_state: 'offline',
+  status_error: '',
 };
+let _liveStatusLoadedOnce = false;
 
 function openLiveRisk() {
   try {
@@ -809,17 +817,24 @@ function _applyLiveModeUI() {
   const dash = document.getElementById('live-dashboard-view');
   const fail = document.getElementById('live-integrity-fail-view');
   const ifvDebug = document.getElementById('ifv-debug');
+  const ifvTitle = document.getElementById('live-integrity-title');
 
   // Integrity-fail: engine_kind != 'live' → hide dashboard, show fail view
   // 完整性失效：engine_kind != 'live' → 隱藏儀表板，顯示警示視圖
   if (_liveModeState.actual_engine_kind !== 'live') {
     if (dash) dash.style.display = 'none';
     if (fail) fail.style.display = 'block';
+    if (ifvTitle) {
+      ifvTitle.textContent = _liveModeState.status_error === 'status_unavailable'
+        ? '⚠️ Live 狀態暫時不可用 — 保留控制入口，請重新檢查'
+        : '⚠️ Live engine 未啟動 — 資料暫停顯示，控制仍可用';
+    }
     if (ifvDebug) {
       ifvDebug.textContent =
         'actual_engine_kind: ' + _liveModeState.actual_engine_kind +
         ' · actual_endpoint: ' + _liveModeState.actual_endpoint +
-        ' · session: ' + _liveModeState.session_state;
+        ' · session: ' + _liveModeState.session_state +
+        (_liveModeState.status_error ? ' · status_error: ' + _liveModeState.status_error : '');
     }
     return;
   }
@@ -1195,26 +1210,14 @@ async function loadDashboardData() {
   // 此處再加一層防衛（loadDashboardData 可能被其他路徑呼叫）。
   if (_liveModeState.actual_engine_kind !== 'live') return;
 
-  // Load balance, positions, orders, and fills in parallel. Fills are needed
-  // for the symbol→strategy map used by Positions/Orders tables; DB metrics
-  // are fetched once by loadLiveMetrics() so this path does not duplicate it.
-  // 並行加載餘額、倉位、掛單與成交。fills 端點提供 symbol→策略 映射；DB
-  // 指標統一由 loadLiveMetrics() 拉取，避免同一 refresh 重複打 /live/metrics。
-  const [balRes, posRes, ordRes, fillsRes] = await Promise.allSettled([
-    ocApi('/api/v1/live/balance'),
-    ocApi('/api/v1/live/positions'),
+  // 首屏只讀 Rust snapshot fast path；成交歷史是折疊區，不參與 dashboard 首幀。
+  // Orders 仍查交易所，但不再讓 fills 查詢阻塞 balance/positions。
+  const [balRes, posRes, ordRes] = await Promise.allSettled([
+    ocApi('/api/v1/live/balance?fast=1'),
+    ocApi('/api/v1/live/positions?fast=1'),
     ocApi('/api/v1/live/orders'),
-    ocApi('/api/v1/live/fills?limit=50&offset=0'),
   ]);
-  try {
-    const fd = fillsRes.status === 'fulfilled' && fillsRes.value && fillsRes.value.data;
-    if (_isPhantomViewError(fd)) {
-      _liveStratMap = {};
-    } else {
-      const fArr = (fd && Array.isArray(fd.list)) ? fd.list : [];
-      _liveStratMap = _buildLiveStratMap(fArr);
-    }
-  } catch (_) { _liveStratMap = {}; }
+  _liveStratMap = {};
 
   // Balance — from /api/v1/live/balance (httpx BybitClient → real exchange data)
   // 餘額 — 來自實盤端點（httpx BybitClient → 真實交易所帳戶資料）
@@ -1412,10 +1415,26 @@ async function checkLiveEngineStatus() {
   const badge = document.getElementById('live-engine-status');
   const detail = document.getElementById('live-engine-detail');
   const btnStart = document.getElementById('btn-live-start');
+  const btnStartLocked = document.getElementById('btn-live-start-locked');
   const btnStop = document.getElementById('btn-live-stop');
   const btnEmg = document.getElementById('btn-emergency-stop');
 
   const d = await ocApi('/api/v1/live/session/status');
+  if (!d || !d.data) {
+    _liveModeState.status_error = 'status_unavailable';
+    // A transient status timeout should not demote an already-rendered Live view
+    // to "engine not started"; keep the last good state and let the next poll recover.
+    if (_liveStatusLoadedOnce && _liveModeState.actual_engine_kind === 'live') {
+      if (detail) detail.textContent = 'status refresh timeout; keeping last known Live state';
+      return;
+    }
+    _applyLiveModeUI();
+    _applyLiveActionGuards();
+    if (btnStartLocked) btnStartLocked.disabled = false;
+    return;
+  }
+  _liveStatusLoadedOnce = true;
+  _liveModeState.status_error = '';
   const data = (d && d.data) ? d.data : {};
   const sessionState = (data.session && data.session.session_state) || 'offline';
   const authority = data.execution_authority || 'not_granted';
@@ -1444,6 +1463,10 @@ async function checkLiveEngineStatus() {
   // 引擎非 live 時 dashboard 被隱藏，badge 不必再更新
   if (_liveModeState.actual_engine_kind !== 'live') {
     _applyLiveActionGuards();
+    if (btnStartLocked) {
+      btnStartLocked.disabled = false;
+      btnStartLocked.title = 'Live engine 未啟動；點擊後仍需通過後端 Operator + live_reserved + Rust 授權門控';
+    }
     return;
   }
 
@@ -1501,6 +1524,7 @@ async function checkLiveEngineStatus() {
       : `mode: ${systemMode.replace(/_/g, ' ')}`;
   }
   if (btnStart) btnStart.disabled = isActive || contractionState === 'halted';
+  if (btnStartLocked) btnStartLocked.disabled = isActive || contractionState === 'halted';
   if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
   if (btnEmg) btnEmg.disabled = !data.engine_available;
 

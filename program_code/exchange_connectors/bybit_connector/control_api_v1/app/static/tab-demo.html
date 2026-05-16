@@ -377,13 +377,9 @@ function _renderDemoDustPanel(positions) {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadDemoStatus() {
-  // 加速策略：原本 5 段 serial network round-trip（balance → fills → metrics →
-  // pnl-series → comparison-balance）合計約 700-1500ms。重排為 balance → fills →
-  // 5-way parallel batch，wall-clock 收斂到 ~250-500ms（fills 50-100ms + max(5) ~200-400ms）。
-  // fills 不放並行：loadDemoOrders 從 _demoFillsCache 建立的 _demoStratMap 取策略名，
-  // 而 /demo/orders 後端沒有 owner_strategy 注入（不像 /demo/positions 走 _attach_owner_strategy），
-  // 全並行會在首幀產生策略欄 `--`。詳見下方 MEDIUM-1 註記。
-  const balD = await ocApi('/api/v1/strategy/demo/balance');
+  // 首屏用 Rust snapshot fast path，避免每次打開 tab 都先卡在 Bybit wallet REST。
+  // 交易所 REST 仍保留在後端 default path；GUI 首屏先顯示 engine 已同步快照。
+  const balD = await ocApi('/api/v1/strategy/demo/balance?fast=1');
   // Accept both Rust-first (source=rust_engine, no retCode) and raw Bybit (retCode=0) responses
   // 同時接受 Rust 優先路徑（無 retCode）和原始 Bybit（retCode=0）的回應格式
   if (balD && balD.data && (balD.data.source === 'rust_engine' || balD.data.retCode === 0)) {
@@ -394,11 +390,8 @@ async function loadDemoStatus() {
     $('demo-content').style.display = '';
     $('demo-offline').style.display = 'none';
     renderBalance(balD.data);
-    // E2 MEDIUM-1 / A3 Q1: fills 必須 serial-first 否則 loadDemoOrders 缺後端
-    // owner_strategy fallback（/demo/orders 不像 /demo/positions 走 _attach_owner_strategy），
-    // 首幀策略欄會顯 `--`。額外 1 round-trip ≈ 50-100ms，仍遠快於原本 5 段 serial。
-    // loadComparison 接收已抓的 balance，避免重複打 /demo/balance。
-    await loadDemoFills();
+    // 成交歷史表是折疊區，不應阻塞首屏。Positions 從後端 owner_strategy 快照拿歸屬；
+    // Orders 若缺 fills fallback，首幀允許顯示 `--`，後續展開 fills / refresh 會補齊。
     await Promise.allSettled([
       loadPositions(),
       loadDemoOrders(),
@@ -524,7 +517,7 @@ function _buildDemoStratMap(fills) {
 }
 
 async function loadPositions() {
-  const d = await ocApi('/api/v1/strategy/demo/positions');
+  const d = await ocApi('/api/v1/strategy/demo/positions?fast=1');
   if (!d || !d.data) return;
   let positions = [];
   if (d.data.result && d.data.result.list) {
