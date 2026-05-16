@@ -9537,3 +9537,9 @@ PA dispatch（Wave 1.5 NEW，per Track A3 portfolio_var verify finding）：fix 
 
 ### Report path
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_impl_self_report.md`
+
+---
+
+## 2026-05-16 W-AUDIT-8a C1 v2 harness consolidated 6-fix (A3 + E2 return)
+
+Worktree `agent-a58d99ef4ea1a440b` commit `dbd0277c`（origin pushed）。基於 v2 IMPL `5983f955` 上加 6 fix：(1) UTC midnight 5min buffer (2) atomic checkpoint + latest report write (3) keepalive_warnings 拆獨立 field + fatal prefix whitelist (4) assess() PASS path reconnect_failures<3 gate + new FAIL_RECONNECT_INSTABILITY verdict (5) wrapper script `run_c1_v2_proof.sh` 含 `--smoke-60s` flag (6) `--max-restart` help text 清楚化。Test 36→49 (+13)，非 flaky 兩遍 PASS (0.007s/0.006s)。v1 0 改動。教訓：A3 CRITICAL boundary case test 用 MagicMock 對 datetime <= 比較會撞 TypeError；改用真實 datetime 物件雙次 side_effect 就 clean；不要 over-mock。Self-report 寫 main repo path，不入 worktree commit。

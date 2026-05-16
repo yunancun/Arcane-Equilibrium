@@ -509,3 +509,26 @@ _Last updated: 2026-04-24_
 
 **邊界遵守**: read-only spec review；不寫 V094 SQL；不修 PA spec v1；不啟 E1；不發 commit；不改 TODO/CLAUDE.md (硬約束 100% 遵守)
 
+
+## 2026-05-16 W-AUDIT-8a C1 v2 schema delta pre-review
+
+**Report**: `workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_mit_schema_pre_review.md` (445 行)
+
+**Verdict**: **APPROVE FULLY — V09X NOT NEEDED** for v2 24h proof; current `market.liquidations` 5-column schema (ts/symbol/side/qty/price) 1:1 align Bybit V5 `allLiquidation.{symbol}.data[]` (T/s/S/v/p)
+
+**核心 empirical findings** (ssh trade-core PG `2026-05-16T08:50Z` + v1 final JSON):
+1. `market.liquidations` = 5 col, PK (symbol, ts, side), hypertable 1d chunk / 7d compress / 90d retention, **0 row** (handler removed 2026-04-06)
+2. v1 5h window: topic_message_counts=15 frames, candidate_samples=5 (cap; not 15), 100% snapshot type, 100% Buy side, BTC realistic 78600 price range
+3. Bybit `S` "Buy"/"Sell" semantic = short-liq/long-liq direction (Buy = short got forced-bought)
+4. Rust `LiquidationSide` enum (LongLiquidated/ShortLiquidated/Mixed) translation 在 **parser 層**，schema 不需動
+5. PK collision under sub-ms burst = Phase C writer **方案 A** `ON CONFLICT DO NOTHING` (no schema change)
+6. ML maturity stage: **Foundation only** (Skeleton 因 2026-04-06 writer removal 倒退); Phase C revival path Foundation→Skeleton→Shadow→Canary→Production
+
+**5 push back (none block v2 proof start)**:
+- HIGH-1: V002 chunk_interval source `INTERVAL '7 days'` vs runtime `1 day` drift (commit lag)
+- MED-1: `side TEXT` 無 CHECK constraint; Phase C V09X 可選加 `IN ('Buy','Sell') NOT VALID`
+- MED-2: PK collision under burst → Phase C writer `ON CONFLICT DO NOTHING` 方案 A
+- LOW-1: REAL precision for long-tail meme coin（BTC OK at 2dp price）
+- LOW-2: V002 comment `1 year retention` vs V006 actual `90 days` doc drift
+
+**Sign-off boundary**: MIT signs schema layer only; NOT ToS (BB scope), NOT production builder revival (PA + operator post-v2-PASS), NOT V09X (none needed)
