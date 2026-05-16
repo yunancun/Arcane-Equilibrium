@@ -27,6 +27,9 @@ ALPHA_SOURCE_ID = "funding_skew_directional"
 
 WARN_AGE_MS = 60_000
 EXCLUDE_AGE_MS = 300_000
+SETTLEMENT_WINDOW_MS = 30 * 60_000
+PRIMARY_BOOTSTRAP_BLOCK_SIZE = 12   # 12 根 5m bar = 60m 主檢定 block。
+FUNDING_BOOTSTRAP_BLOCK_SIZE = 96   # 96 根 5m bar = 8h funding-cycle 敏感度。
 PSR_THRESHOLD = 0.95
 DSR_THRESHOLD = 0.95
 PBO_THRESHOLD = 0.20
@@ -125,7 +128,7 @@ def dsr_with_k(values: Sequence[float], k_total: int) -> float | None:
 def block_bootstrap_ci(
     values: Sequence[float],
     *,
-    block_size: int = 12,
+    block_size: int = PRIMARY_BOOTSTRAP_BLOCK_SIZE,
     iterations: int = 400,
     seed: int = 20260515,
 ) -> tuple[float, float] | None:
@@ -145,6 +148,40 @@ def block_bootstrap_ci(
     lo = max(0, int(0.025 * iterations))
     hi = min(iterations - 1, int(0.975 * iterations))
     return means[lo], means[hi]
+
+
+def _summary_stats(
+    values: Sequence[float],
+    *,
+    horizon_min: int = PRIMARY_HORIZON,
+    k_total: int | None = None,
+    include_bootstrap: bool = True,
+) -> dict[str, object]:
+    clean = [v for v in values if math.isfinite(v)]
+    summary: dict[str, object] = {
+        "n": len(clean),
+        "n_eff": _n_eff(len(clean), horizon_min),
+        "avg_net_bps": statistics.mean(clean) if clean else None,
+        "psr_0": psr_bailey_ldp(clean),
+    }
+    if k_total is not None:
+        summary["dsr"] = dsr_with_k(clean, k_total)
+    if include_bootstrap:
+        summary["bootstrap_ci_95_60m"] = block_bootstrap_ci(
+            clean,
+            block_size=PRIMARY_BOOTSTRAP_BLOCK_SIZE,
+        )
+        summary["bootstrap_ci_95_8h"] = block_bootstrap_ci(
+            clean,
+            block_size=FUNDING_BOOTSTRAP_BLOCK_SIZE,
+        )
+        summary["bootstrap_block_minutes"] = {
+            "primary": PRIMARY_BOOTSTRAP_BLOCK_SIZE * 5,
+            "funding_cycle_sensitivity": FUNDING_BOOTSTRAP_BLOCK_SIZE * 5,
+        }
+        # 保留舊讀者仍會看的欄位名。
+        summary["bootstrap_ci_95"] = summary["bootstrap_ci_95_60m"]
+    return summary
 
 
 def _day_bucket(signal_ts_ms: int) -> str:
@@ -172,6 +209,102 @@ def _funding_interval_by_symbol(rows: Sequence[Mapping[str, object]]) -> dict[st
         ]
         intervals[symbol] = int(statistics.median(deltas)) if deltas else None
     return intervals
+
+
+def _source_mode_from_tier(tier: str | None) -> str | None:
+    if not tier:
+        return None
+    lowered = tier.lower()
+    if "ws" in lowered or "ticker" in lowered or "current" in lowered:
+        return "ws_current"
+    if "rest" in lowered or "settled" in lowered or "history" in lowered:
+        return "rest_settled"
+    return "unknown"
+
+
+def _source_mode(rows: Sequence[Mapping[str, object]]) -> str:
+    modes = Counter(
+        mode
+        for row in rows
+        for mode in (_source_mode_from_tier(str(row.get("funding_source_tier") or "")),)
+        if mode
+    )
+    if not modes:
+        return "unknown"
+    if len(modes) == 1:
+        return next(iter(modes))
+    if modes.get("rest_settled", 0) > modes.get("ws_current", 0):
+        return "rest_settled"
+    return "ws_current"
+
+
+def _panel_metadata(rows: Sequence[Mapping[str, object]], symbols: Sequence[str]) -> dict[str, object]:
+    funding_snapshots = [
+        value
+        for row in rows
+        for value in (_safe_int(row.get("funding_snapshot_ts_ms")),)
+        if value is not None
+    ]
+    oi_snapshots = [
+        value
+        for row in rows
+        for value in (_safe_int(row.get("oi_snapshot_ts_ms")),)
+        if value is not None
+    ]
+    funding_ages = [
+        value
+        for row in rows
+        for value in (_safe_int(row.get("funding_age_ms")),)
+        if value is not None
+    ]
+    oi_ages = [
+        value
+        for row in rows
+        for value in (_safe_int(row.get("oi_age_ms")),)
+        if value is not None
+    ]
+    funding_tiers = Counter(str(row.get("funding_source_tier") or "missing") for row in rows)
+    oi_tiers = Counter(str(row.get("oi_source_tier") or "missing") for row in rows)
+    mode_counts = Counter()
+    for tier, count in funding_tiers.items():
+        mode = _source_mode_from_tier(tier)
+        if mode:
+            mode_counts[mode] += count
+    cohort_ns = [
+        value
+        for row in rows
+        for value in (_safe_int(row.get("funding_cohort_n")),)
+        if value is not None
+    ]
+    funding_symbols = {
+        str(row.get("symbol"))
+        for row in rows
+        if row.get("symbol") and _safe_int(row.get("funding_age_ms")) is not None
+    }
+    oi_symbols = {
+        str(row.get("symbol"))
+        for row in rows
+        if row.get("symbol") and _safe_int(row.get("oi_age_ms")) is not None
+    }
+    symbol_count = len(symbols)
+    return {
+        "funding_latest_snapshot_ts_ms": max(funding_snapshots) if funding_snapshots else None,
+        "funding_oldest_snapshot_ts_ms": min(funding_snapshots) if funding_snapshots else None,
+        "oi_latest_snapshot_ts_ms": max(oi_snapshots) if oi_snapshots else None,
+        "oi_oldest_snapshot_ts_ms": min(oi_snapshots) if oi_snapshots else None,
+        "funding_max_age_ms": max(funding_ages) if funding_ages else None,
+        "oi_max_age_ms": max(oi_ages) if oi_ages else None,
+        "funding_source_tier_counts": dict(funding_tiers),
+        "oi_source_tier_counts": dict(oi_tiers),
+        "source_mode_counts": dict(mode_counts),
+        "funding_symbol_coverage_pct": (len(funding_symbols) / symbol_count) if symbol_count else 0.0,
+        "oi_symbol_coverage_pct": (len(oi_symbols) / symbol_count) if symbol_count else 0.0,
+        "cohort_coverage": {
+            "funding_cohort_n_min": min(cohort_ns) if cohort_ns else None,
+            "funding_cohort_n_max": max(cohort_ns) if cohort_ns else None,
+            "funding_cohort_n_avg": statistics.mean(cohort_ns) if cohort_ns else None,
+        },
+    }
 
 
 def _signal_rows(
@@ -219,29 +352,155 @@ def _signal_rows(
         if signal_ts is None:
             continue
         gross = direction * fwd
+        next_funding = _safe_int(row.get("next_funding_ms"))
+        is_settlement_window = (
+            next_funding is not None
+            and abs(next_funding - signal_ts) <= SETTLEMENT_WINDOW_MS
+        )
         out.append(
             {
                 "signal_ts_ms": signal_ts,
                 "net_bps": gross - cost_bps,
                 "gross_bps": gross,
-                "next_funding_ms": _safe_int(row.get("next_funding_ms")),
+                "next_funding_ms": next_funding,
+                "settlement_window": is_settlement_window,
             }
         )
     return out
 
 
-def _pbo(candidates: Mapping[str, Mapping[str, float]]) -> float | None:
+def _baseline_signal_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    branch: str,
+    cost_bps: float,
+    horizon_min: int = PRIMARY_HORIZON,
+) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    fwd_col = f"fwd_return_{horizon_min}m_bps"
+    for row in rows:
+        funding_age = _safe_int(row.get("funding_age_ms"))
+        oi_age = _safe_int(row.get("oi_age_ms"))
+        if funding_age is None or oi_age is None:
+            continue
+        if funding_age > EXCLUDE_AGE_MS or oi_age > EXCLUDE_AGE_MS:
+            continue
+        prior = _safe_float(row.get("prior_5m_return_bps"))
+        fwd = _safe_float(row.get(fwd_col))
+        signal_ts = _safe_int(row.get("signal_ts_ms"))
+        if prior is None or fwd is None or signal_ts is None:
+            continue
+        direction = 0
+        if branch == "crowded_long_fade" and prior <= 0:
+            direction = -1
+        elif branch == "crowded_short_squeeze" and prior >= 0:
+            direction = 1
+        if direction == 0:
+            continue
+        gross = direction * fwd
+        out.append(
+            {
+                "signal_ts_ms": signal_ts,
+                "net_bps": gross - cost_bps,
+                "gross_bps": gross,
+            }
+        )
+    return out
+
+
+def _plateau_check(
+    cells: Sequence[Mapping[str, object]],
+    best_primary: Mapping[str, object] | None,
+) -> dict[str, object]:
+    if best_primary is None:
+        return {
+            "plateau_passed": False,
+            "reason": "no_best_primary_cell",
+            "neighbor_cells": [],
+        }
+    try:
+        best_z_idx = Z_GRID.index(float(best_primary["z_hi"]))
+        best_p_idx = P_GRID.index((float(best_primary["p_hi"]), float(best_primary["p_lo"])))
+        best_oi_idx = OI_GRID.index(float(best_primary["oi_min_pct"]))
+    except (KeyError, ValueError, TypeError):
+        return {
+            "plateau_passed": False,
+            "reason": "best_cell_grid_coordinates_unavailable",
+            "neighbor_cells": [],
+        }
+    neighbors: list[Mapping[str, object]] = []
+    for cell in cells:
+        if cell.get("horizon_min") != PRIMARY_HORIZON:
+            continue
+        if cell.get("symbol") != best_primary.get("symbol"):
+            continue
+        if cell.get("branch") != best_primary.get("branch"):
+            continue
+        try:
+            z_idx = Z_GRID.index(float(cell["z_hi"]))
+            p_idx = P_GRID.index((float(cell["p_hi"]), float(cell["p_lo"])))
+            oi_idx = OI_GRID.index(float(cell["oi_min_pct"]))
+        except (KeyError, ValueError, TypeError):
+            continue
+        distance = abs(z_idx - best_z_idx) + abs(p_idx - best_p_idx) + abs(oi_idx - best_oi_idx)
+        if distance == 1:
+            neighbors.append(cell)
+    best_avg = _safe_float(best_primary.get("avg_net_bps"))
+    tolerance = max(10.0, abs(best_avg or 0.0) * 0.50)
+    passing_neighbors = []
+    for cell in neighbors:
+        avg = _safe_float(cell.get("avg_net_bps"))
+        if avg is None or best_avg is None:
+            continue
+        if (
+            int(cell.get("n_eff") or 0) >= BRANCH_N_EFF_FLOOR
+            and avg >= AVG_NET_FLOOR_BPS
+            and avg >= best_avg - tolerance
+        ):
+            passing_neighbors.append(cell)
+    return {
+        "plateau_passed": len(passing_neighbors) >= 2
+        and int(best_primary.get("n_eff") or 0) >= SYMBOL_N_EFF_FLOOR,
+        "reason": None if len(passing_neighbors) >= 2 else "insufficient_adjacent_support",
+        "neighbor_count": len(neighbors),
+        "passing_neighbor_count": len(passing_neighbors),
+        "neighbor_cells": [
+            {
+                "candidate_key": cell.get("candidate_key"),
+                "n_eff": cell.get("n_eff"),
+                "avg_net_bps": cell.get("avg_net_bps"),
+                "psr_0": cell.get("psr_0"),
+                "dsr": cell.get("dsr"),
+            }
+            for cell in sorted(
+                neighbors,
+                key=lambda c: float(c.get("avg_net_bps") or -1e18),
+                reverse=True,
+            )[:8]
+        ],
+    }
+
+
+def _pbo(candidates: Mapping[str, Mapping[str, float]], *, embargo_days: int = 7) -> dict[str, object]:
     days = sorted({day for daily in candidates.values() for day in daily})
     candidate_keys = list(candidates)
     if len(days) < 4 or len(candidate_keys) < 10:
-        return None
+        return {
+            "value": None,
+            "method": "purged_day_walk_forward",
+            "embargo_days": embargo_days,
+            "usable_splits": 0,
+            "reason": "insufficient_days_or_candidates",
+        }
     splits: list[tuple[set[str], set[str]]] = []
-    mid = len(days) // 2
-    splits.append((set(days[:mid]), set(days[mid:])))
-    splits.append((set(days[mid:]), set(days[:mid])))
-    if len(days) >= 6:
-        splits.append((set(days[::2]), set(days[1::2])))
-        splits.append((set(days[1::2]), set(days[::2])))
+    for split_idx in range(1, len(days) - 1):
+        left_end = max(0, split_idx - embargo_days)
+        right_start = min(len(days), split_idx + embargo_days)
+        left = set(days[:left_end])
+        right = set(days[right_start:])
+        if left and right:
+            splits.append((left, right))
+            splits.append((right, left))
     bad = 0
     usable = 0
     for train_days, test_days in splits:
@@ -264,8 +523,20 @@ def _pbo(candidates: Mapping[str, Mapping[str, float]]) -> float | None:
         bad += int(best_test < median_rank)
         usable += 1
     if usable == 0:
-        return None
-    return bad / usable
+        return {
+            "value": None,
+            "method": "purged_day_walk_forward",
+            "embargo_days": embargo_days,
+            "usable_splits": 0,
+            "reason": "embargo_removed_all_usable_splits",
+        }
+    return {
+        "value": bad / usable,
+        "method": "purged_day_walk_forward",
+        "embargo_days": embargo_days,
+        "usable_splits": usable,
+        "reason": None,
+    }
 
 
 def compute_stage0r(
@@ -302,7 +573,14 @@ def compute_stage0r(
     cells: list[dict[str, object]] = []
     daily_for_pbo: dict[str, dict[str, float]] = {}
     pooled_primary: list[float] = []
+    pooled_primary_gross: list[float] = []
+    pooled_primary_non_settlement: list[float] = []
     branch_primary: dict[str, list[float]] = defaultdict(list)
+    per_symbol_primary: dict[str, dict[str, list[float]]] = {
+        symbol: {branch: [] for branch in BRANCHES} for symbol in symbols
+    }
+    per_symbol_primary_sigs: dict[str, list[dict[str, object]]] = defaultdict(list)
+    settlement_window_counts = Counter()
     best_primary: dict[str, object] | None = None
 
     for symbol in symbols:
@@ -357,31 +635,169 @@ def compute_stage0r(
                                 }
                             if horizon == PRIMARY_HORIZON:
                                 pooled_primary.extend(values)
+                                pooled_primary_gross.extend(gross_values)
+                                non_settlement = [
+                                    float(s["net_bps"])
+                                    for s in sigs
+                                    if not bool(s.get("settlement_window"))
+                                ]
+                                pooled_primary_non_settlement.extend(non_settlement)
+                                settlement_window_counts["primary_signals"] += len(sigs)
+                                settlement_window_counts["primary_settlement_window_signals"] += sum(
+                                    1 for s in sigs if bool(s.get("settlement_window"))
+                                )
                                 branch_primary[branch].extend(values)
+                                per_symbol_primary[symbol][branch].extend(values)
+                                per_symbol_primary_sigs[symbol].extend(sigs)
                                 if avg_net is not None and (
                                     best_primary is None
                                     or float(best_primary.get("avg_net_bps") or -1e18) < avg_net
                                 ):
                                     best_primary = cell
 
-    pbo = _pbo(daily_for_pbo)
-    pooled_ci = block_bootstrap_ci(pooled_primary)
-    pooled = {
-        "n": len(pooled_primary),
-        "n_eff": _n_eff(len(pooled_primary), PRIMARY_HORIZON),
-        "avg_net_bps": statistics.mean(pooled_primary) if pooled_primary else None,
-        "psr_0": psr_bailey_ldp(pooled_primary),
-        "dsr": dsr_with_k(pooled_primary, k_total),
-        "bootstrap_ci_95": pooled_ci,
-    }
+    pbo_meta = _pbo(daily_for_pbo)
+    pbo = pbo_meta.get("value")
+    pooled = _summary_stats(
+        pooled_primary,
+        horizon_min=PRIMARY_HORIZON,
+        k_total=k_total,
+        include_bootstrap=True,
+    )
     branch_summary = {
         branch: {
             "n": len(vals),
             "n_eff": _n_eff(len(vals), PRIMARY_HORIZON),
             "avg_net_bps": statistics.mean(vals) if vals else None,
         }
-        for branch, vals in branch_primary.items()
+        for branch, vals in ((branch, branch_primary.get(branch, [])) for branch in BRANCHES)
     }
+    per_symbol_breakdown = []
+    for symbol in symbols:
+        sigs = per_symbol_primary_sigs.get(symbol, [])
+        days = Counter(_day_bucket(int(s["signal_ts_ms"])) for s in sigs)
+        cycles = Counter(str(s.get("next_funding_ms")) for s in sigs if s.get("next_funding_ms"))
+        total_values = [
+            value
+            for branch in BRANCHES
+            for value in per_symbol_primary[symbol].get(branch, [])
+        ]
+        per_symbol_breakdown.append(
+            {
+                "symbol": symbol,
+                "n": len(total_values),
+                "n_eff": _n_eff(len(total_values), PRIMARY_HORIZON),
+                "avg_net_bps": statistics.mean(total_values) if total_values else None,
+                "funding_cycles": len(cycles),
+                "max_day_share": max(days.values()) / len(sigs) if sigs and days else 0.0,
+                "max_funding_cycle_share": max(cycles.values()) / len(sigs) if sigs and cycles else 0.0,
+                "branches": {
+                    branch: {
+                        "n": len(per_symbol_primary[symbol].get(branch, [])),
+                        "n_eff": _n_eff(
+                            len(per_symbol_primary[symbol].get(branch, [])),
+                            PRIMARY_HORIZON,
+                        ),
+                        "avg_net_bps": (
+                            statistics.mean(per_symbol_primary[symbol][branch])
+                            if per_symbol_primary[symbol].get(branch)
+                            else None
+                        ),
+                    }
+                    for branch in BRANCHES
+                },
+            }
+        )
+    non_settlement_summary = _summary_stats(
+        pooled_primary_non_settlement,
+        horizon_min=PRIMARY_HORIZON,
+        k_total=k_total,
+        include_bootstrap=False,
+    )
+    settlement_summary = {
+        "window_minutes": SETTLEMENT_WINDOW_MS // 60_000,
+        "primary_signals": settlement_window_counts.get("primary_signals", 0),
+        "primary_settlement_window_signals": settlement_window_counts.get(
+            "primary_settlement_window_signals",
+            0,
+        ),
+        "primary_settlement_window_share": (
+            settlement_window_counts.get("primary_settlement_window_signals", 0)
+            / settlement_window_counts.get("primary_signals", 1)
+            if settlement_window_counts.get("primary_signals", 0)
+            else 0.0
+        ),
+        "primary_excluding_settlement_window": non_settlement_summary,
+        "adverse_drag_sensitivity_bps": (
+            (
+                float(non_settlement_summary["avg_net_bps"])
+                - float(pooled["avg_net_bps"])
+            )
+            if non_settlement_summary.get("avg_net_bps") is not None
+            and pooled.get("avg_net_bps") is not None
+            else None
+        ),
+    }
+
+    baseline_by_branch: dict[str, dict[str, object]] = {}
+    baseline_values_all: list[float] = []
+    for branch in BRANCHES:
+        baseline_sigs = [
+            sig
+            for symbol in symbols
+            for sig in _baseline_signal_rows(
+                rows_by_symbol[symbol],
+                branch=branch,
+                cost_bps=cost_bps,
+            )
+        ]
+        baseline_values = [float(sig["net_bps"]) for sig in baseline_sigs]
+        baseline_values_all.extend(baseline_values)
+        baseline_summary = _summary_stats(
+            baseline_values,
+            horizon_min=PRIMARY_HORIZON,
+            k_total=k_total,
+            include_bootstrap=False,
+        )
+        branch_avg = branch_summary.get(branch, {}).get("avg_net_bps")
+        baseline_avg = baseline_summary.get("avg_net_bps")
+        baseline_summary["lift_vs_stage0r_branch_bps"] = (
+            float(branch_avg) - float(baseline_avg)
+            if branch_avg is not None and baseline_avg is not None
+            else None
+        )
+        baseline_by_branch[branch] = baseline_summary
+    baseline_all = _summary_stats(
+        baseline_values_all,
+        horizon_min=PRIMARY_HORIZON,
+        k_total=k_total,
+        include_bootstrap=False,
+    )
+    baseline_lift = {
+        "baseline": "prior_5m_direction_without_funding_or_oi_confirmation",
+        "pooled_baseline": baseline_all,
+        "stage0r_minus_baseline_avg_net_bps": (
+            float(pooled["avg_net_bps"]) - float(baseline_all["avg_net_bps"])
+            if pooled.get("avg_net_bps") is not None
+            and baseline_all.get("avg_net_bps") is not None
+            else None
+        ),
+        "branches": baseline_by_branch,
+    }
+
+    cost_edge_ratio = (
+        abs(cost_bps) / abs(statistics.mean(pooled_primary_gross))
+        if pooled_primary_gross and statistics.mean(pooled_primary_gross) != 0
+        else None
+    )
+    execution_cost_model = {
+        "mode": "flat_conservative_cost_bps",
+        "cost_bps": cost_bps,
+        "maker_share": None,
+        "taker_share": None,
+        "maker_taker_source": "not_available_in_stage0r_replay_rows",
+        "cost_edge_ratio": cost_edge_ratio,
+    }
+    plateau = _plateau_check(cells, best_primary)
 
     eligible = False
     reasons: list[str] = []
@@ -402,8 +818,14 @@ def compute_stage0r(
             cost_bps=cost_bps,
         )
         net_values = [float(v["net_bps"]) for v in best_values]
-        ci = best_primary.get("bootstrap_ci_95")
-        lower_ci = ci[0] if isinstance(ci, tuple) else None
+        pooled_ci = pooled.get("bootstrap_ci_95_60m")
+        lower_ci = (
+            pooled_ci[0]
+            if isinstance(pooled_ci, tuple)
+            else pooled_ci[0]
+            if isinstance(pooled_ci, list) and pooled_ci
+            else None
+        )
         checks = [
             (int(best_primary["n_eff"]) >= SYMBOL_N_EFF_FLOOR, "symbol n_eff < 100"),
             (
@@ -432,29 +854,50 @@ def compute_stage0r(
                 and float(best_primary["dsr"]) >= DSR_THRESHOLD,
                 "DSR < 0.95",
             ),
-            (pbo is not None and pbo <= PBO_THRESHOLD, "PBO missing or > 0.20"),
-            (lower_ci is not None and lower_ci > 0, "bootstrap lower bound <= 0"),
+            (
+                pbo is not None
+                and float(pbo) <= PBO_THRESHOLD,
+                "PBO missing or > 0.20",
+            ),
+            (lower_ci is not None and float(lower_ci) > 0, "pooled bootstrap lower bound <= 0"),
+            (bool(plateau.get("plateau_passed")), "plateau check failed"),
             (len(net_values) > 0, "no net values"),
         ]
         failed = [reason for ok, reason in checks if not ok]
         eligible = not failed
         reasons.extend(failed)
 
+    exclusions = {
+        "funding_missing": missing.get("funding_missing", 0),
+        "funding_stale_excluded": missing.get("funding_stale_excluded", 0),
+        "funding_warn_age": missing.get("funding_warn_age", 0),
+        "oi_missing": missing.get("oi_missing", 0),
+        "oi_stale_excluded": missing.get("oi_stale_excluded", 0),
+        "oi_warn_age": missing.get("oi_warn_age", 0),
+    }
+
     return {
         "strategy_variant": STRATEGY_VARIANT,
         "alpha_source_id": ALPHA_SOURCE_ID,
         "funding_attribution_mode": "excluded",
-        "source_mode": "ws_current",
+        "source_mode": _source_mode(rows),
         "cost_bps": cost_bps,
         "k_prior": int(k_prior),
         "k_new": k_new,
         "k_total": k_total,
         "row_count": len(rows),
         "symbol_count": len(symbols),
-        "exclusions": dict(missing),
+        "panel_metadata": _panel_metadata(rows, symbols),
+        "exclusions": exclusions,
         "pooled_primary": pooled,
         "branch_summary": branch_summary,
+        "per_symbol_breakdown": per_symbol_breakdown,
+        "settlement_window": settlement_summary,
+        "baseline_lift": baseline_lift,
+        "execution_cost_model": execution_cost_model,
         "pbo": pbo,
+        "pbo_metadata": pbo_meta,
+        "plateau_check": plateau,
         "best_primary_cell": best_primary,
         "top_primary_cells": sorted(
             [c for c in cells if c["horizon_min"] == PRIMARY_HORIZON and c["avg_net_bps"] is not None],
