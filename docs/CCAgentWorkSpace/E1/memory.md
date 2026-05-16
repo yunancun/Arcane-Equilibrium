@@ -9540,6 +9540,42 @@ PA dispatch（Wave 1.5 NEW，per Track A3 portfolio_var verify finding）：fix 
 
 ---
 
+## 2026-05-16 W-AUDIT-8a C1 v2 Resilient Harness IMPL
+
+### 改動摘要
+1. **NEW `helper_scripts/bybit/liquidation_topic_probe_v2.py` (942 LOC)**：v2 韌性探針，含指數退避 reconnect (1→60s cap)、3 次 session restart 上限、per-hour checkpoint JSON、TCP keepalive 跨平台（Linux TCP_KEEPIDLE / Darwin TCP_KEEPALIVE）、ping interval 10s、UTC midnight cutoff、24h tolerance gate（uptime_ratio≥0.95 + ≥3 control alive）
+2. **NEW `helper_scripts/bybit/test_liquidation_topic_probe_v2.py` (470 LOC)**：36 unit tests 涵 6 suite（BuildTopics / ParseArgs / BackoffSequence / ClassifyPayload / InterimVerdict / Assess / CheckpointWrite / ReconnectPath / RestartCap）；跑兩遍 non-flaky 36/36 PASS in 0.004s
+3. **UNCHANGED `helper_scripts/bybit/liquidation_topic_probe.py`**：v1 untouched，dry-run 行為一字不差，保留 control comparison
+
+### 教訓
+- **v1 untouched + v2 new file 取捨**：v2 自帶 100 LOC duplicate const（POISON_PATTERNS / classify_payload / build_topics）；換 v1 永遠是 frozen baseline 的 maintainability 提升。比 v2-via-flag 模糊兩種設計意圖好。
+- **跨平台 socket 名稱差異**：Linux `TCP_KEEPIDLE` 在 Mac (Darwin) 改名 `TCP_KEEPALIVE`。用 `hasattr(socket, "TCP_KEEPIDLE")` 守衛 + fallback `TCP_KEEPALIVE`，全部 setsockopt 用 try/OSError，失敗回 warning string 不 raise。
+- **Checkpoint 與 disconnect 並發處理**：checkpoint 時 temp+current_segment 寫入後立即還原 `stats.uptime_sec`，disconnect path 才加當前段；兩條路徑用同公式 `now - conn_on_mono`，邏輯一致不重複累計。
+- **連續 attempt 6 觸 RECONNECT_EXHAUSTED**：`_try_reconnect` 回 None = session 需 restart；主 loop 增 `restart_count`，超 `max_restart` 即終 `FAIL_RESTART_BUDGET_EXHAUSTED`。`restart_count == max_restart` 不算超（design §3.4 「累計 restart > 3」對齊）；test `test_three_restart_within_budget_can_still_pass` 驗。
+- **Reconnect 成功歸零 consecutive_attempt**：穩定收訊 = 重置 counter，避免歷史失敗污染後續中斷判定。
+- **enable_reconnect 旗標兩用**：unset = v1 兼容（disconnect 即 FAIL_CONNECTION）；set = v2 韌性。同 source 同時支撐 smoke 與 24h proof。
+
+### 設計輸出
+- **Final verdict 8 條映射**：PASS_C1_PROOF_CANDIDATE / FAIL_TOPIC_POISON / FAIL_RESTART_BUDGET_EXHAUSTED / FAIL_RECONNECT_EXHAUSTED / FAIL_CONNECTION / FAIL_CANARY_SILENT / SMOKE_PASS_NOT_C1_PROOF / FAIL_SMOKE_CANARY_SILENT
+- **Interim verdict 4 條**：INIT / IN_PROGRESS_HEALTHY / DEGRADED_UPTIME_LOW / DEGRADED_RECONNECT_UNSTABLE / FAIL_TOPIC_POISON_DETECTED
+- **Restart reasons 3 條**：RECONNECT_EXHAUSTED / CONTROL_SILENT（design 預留，本 IMPL 未觸） / WATCHDOG_REVIVE（外層 cron 觸發）
+- **Checkpoint schema 14 mandatory fields** 與 design §3.3 完全對齊（test_writes_progress_json_with_required_fields 驗）
+
+### Acceptance criteria self-check
+1. ✅ AST parse OK
+2. ✅ 36/36 unit tests PASS（兩遍 non-flaky）
+3. ✅ Dry-run v2 + v1 兩個 smoke 都正常
+4. ✅ 0 hardcoded `/Users/ncyu` / `/home/ncyu` 路徑
+5. ✅ 注釋全中文（CLAUDE.md §七 2026-05-05 規）
+6. ✅ 不動 production builder / risk_config / authorization
+7. ✅ 不 spawn 第二層 sub-agent
+8. ✅ v1 文件 0 改動
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_impl_self_report.md`
+
+---
+
 ## 2026-05-16 W-AUDIT-8a C1 v2 harness consolidated 6-fix (A3 + E2 return)
 
 Worktree `agent-a58d99ef4ea1a440b` commit `dbd0277c`（origin pushed）。基於 v2 IMPL `5983f955` 上加 6 fix：(1) UTC midnight 5min buffer (2) atomic checkpoint + latest report write (3) keepalive_warnings 拆獨立 field + fatal prefix whitelist (4) assess() PASS path reconnect_failures<3 gate + new FAIL_RECONNECT_INSTABILITY verdict (5) wrapper script `run_c1_v2_proof.sh` 含 `--smoke-60s` flag (6) `--max-restart` help text 清楚化。Test 36→49 (+13)，非 flaky 兩遍 PASS (0.007s/0.006s)。v1 0 改動。教訓：A3 CRITICAL boundary case test 用 MagicMock 對 datetime <= 比較會撞 TypeError；改用真實 datetime 物件雙次 side_effect 就 clean；不要 over-mock。Self-report 寫 main repo path，不入 worktree commit。
