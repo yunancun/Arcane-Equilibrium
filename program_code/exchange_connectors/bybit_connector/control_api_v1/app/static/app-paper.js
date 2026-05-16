@@ -32,7 +32,7 @@
 "use strict";
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Paper Trading GUI Functions / 纸上交易 GUI 函数
+// Paper Trading GUI Functions / 紙上交易 GUI 函數
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function handlePaperAction(action) {
@@ -103,10 +103,10 @@ function renderPaperSession(d) {
   const state = d.session?.session_state || "inactive";
   const badge = document.getElementById("paperSessionBadge");
   const labels = {
-    inactive: "未启动 / Inactive",
-    active: "运行中 / Active",
+    inactive: "未啟動 / Inactive",
+    active: "運行中 / Active",
     paused: "已暂停 / Paused",
-    completed: "已结束 / Completed",
+    completed: "已結束 / Completed",
   };
   badge.textContent = labels[state] || state;
   badge.className = "status-chip " + (state === "active" ? "good" : state === "paused" ? "neutral" : state === "completed" ? "neutral" : "neutral");
@@ -123,12 +123,12 @@ function renderPaperSession(d) {
 
 function renderPaperPnl(d) {
   const el = document.getElementById("paperPnlItems");
-  if (!d) { el.textContent = "无数据 / No data"; return; }
+  if (!d) { el.textContent = "無數據 / No data"; return; }
   const pnlColor = (v) => v > 0 ? "paper-positive" : v < 0 ? "paper-negative" : "";
   el.innerHTML = `
-    <div class="paper-pnl-row"><span>已实现 / Realized</span><span class="${pnlColor(d.realized_pnl)}">${(d.realized_pnl || 0).toFixed(4)} USDT</span></div>
-    <div class="paper-pnl-row"><span>未实现 / Unrealized</span><span class="${pnlColor(d.unrealized_pnl)}">${(d.unrealized_pnl || 0).toFixed(4)} USDT</span></div>
-    <div class="paper-pnl-row"><span>手续费 / Fees</span><span>-${(d.total_fees_paid || 0).toFixed(4)} USDT</span></div>
+    <div class="paper-pnl-row"><span>已實現 / Realized</span><span class="${pnlColor(d.realized_pnl)}">${(d.realized_pnl || 0).toFixed(4)} USDT</span></div>
+    <div class="paper-pnl-row"><span>未實現 / Unrealized</span><span class="${pnlColor(d.unrealized_pnl)}">${(d.unrealized_pnl || 0).toFixed(4)} USDT</span></div>
+    <div class="paper-pnl-row"><span>手續費 / Fees</span><span>-${(d.total_fees_paid || 0).toFixed(4)} USDT</span></div>
     <div class="paper-pnl-row paper-pnl-net"><span>净值 / Net PnL</span><span class="${pnlColor(d.net_paper_pnl)}">${(d.net_paper_pnl || 0).toFixed(4)} USDT</span></div>
   `;
 }
@@ -138,7 +138,7 @@ function renderPaperPositions(d) {
   // Rust returns positions as array, not dict
   const raw = d.positions || {};
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
-  if (positions.length === 0) { el.textContent = "无持仓 / No positions"; return; }
+  if (positions.length === 0) { el.textContent = "無持倉 / No positions"; return; }
   el.innerHTML = positions.map(p => {
     const sym = ocEsc(p.symbol || '??');
     const pnlColor = p.unrealized_pnl > 0 ? "paper-positive" : p.unrealized_pnl < 0 ? "paper-negative" : "";
@@ -156,7 +156,7 @@ function renderPaperPositions(d) {
 function renderPaperOrders(d) {
   const el = document.getElementById("paperOrdersList");
   const orders = d.orders || [];
-  if (orders.length === 0) { el.textContent = "无订单 / No orders"; return; }
+  if (orders.length === 0) { el.textContent = "無訂單 / No orders"; return; }
   el.innerHTML = orders.slice(-20).reverse().map(o => {
     const stateLabel = o.state.replace("paper_order_", "");
     const stateClass = o.state.includes("filled") ? "paper-filled" : o.state.includes("canceled") || o.state.includes("rejected") ? "paper-canceled" : "paper-working";
@@ -173,7 +173,7 @@ function renderPaperOrders(d) {
 function renderPaperFills(d) {
   const el = document.getElementById("paperFillsList");
   const fills = d.fills || [];
-  if (fills.length === 0) { el.textContent = "无成交 / No fills"; return; }
+  if (fills.length === 0) { el.textContent = "無成交 / No fills"; return; }
   el.innerHTML = fills.slice(-20).reverse().map(f => {
     return `<div class="paper-fill-row">
       <span>${ocEsc(f.symbol)}</span>
@@ -186,7 +186,7 @@ function renderPaperFills(d) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Market Feed GUI Functions / 实时行情流 GUI 函数
+// Market Feed GUI Functions / 實時行情流 GUI 函數
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let _marketFeedRefreshInterval = null;
@@ -245,7 +245,7 @@ function renderMarketFeedStatus(d) {
   startBtn.disabled = isRunning;
   stopBtn.disabled = !isRunning;
 
-  // Render latest prices / 渲染最新价格
+  // Render latest prices / 渲染最新價格
   const prices = d.latest_prices || {};
   const symbols = Object.keys(prices);
   if (symbols.length > 0) {
@@ -258,10 +258,10 @@ function renderMarketFeedStatus(d) {
   } else if (isRunning) {
     pricesEl.textContent = "等待首次行情推送 / Waiting for first price push...";
   } else {
-    pricesEl.textContent = "行情流未启动 / Market feed not started";
+    pricesEl.textContent = "行情流未啟動 / Market feed not started";
   }
 
-  // Render stats / 渲染统计
+  // Render stats / 渲染統計
   const stats = d.stats || {};
   const attentionLabels = {
     dormant: "休眠 / Dormant",
@@ -276,7 +276,7 @@ function renderMarketFeedStatus(d) {
     <span class="paper-attention-badge ${attentionClass}">${attentionLabels[attention] || ocEsc(attention)}</span>
     ${stats.ticks_triggered != null ? ` Ticks: ${stats.ticks_triggered}` : ""}
     ${d.ws_listener?.ticker_update_count != null ? ` | 行情更新: ${d.ws_listener.ticker_update_count}` : ""}
-    ${stats.volatility_spikes ? ` | 波动飙升: ${stats.volatility_spikes}` : ""}
+    ${stats.volatility_spikes ? ` | 波動飙升: ${stats.volatility_spikes}` : ""}
   `;
 }
 

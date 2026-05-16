@@ -8,12 +8,12 @@
 
 "use strict";
 
-// ── 主数据加载 / Main data loading ───────────────────────────────────────────
+// ── 主數據載入 / Main data loading ───────────────────────────────────────────
 
 async function loadDashboard() {
   ensureGuiEnhancements();
 
-  // 并发加载所有数据（含 L 章学习 + 净 PnL 端点）
+  // 并发載入所有數據（含 L 章學習 + 净 PnL 端点）
   // Load all data concurrently (including L-chapter learning + net PnL endpoints)
   const [overview, controlPlane, sourceContext, audit, productFamilies, businessSummary,
          learningFeed, learningExperiments, netPnlDashboard, reviewQueue] = await Promise.all([
@@ -29,7 +29,7 @@ async function loadDashboard() {
     apiGet("/api/v1/learning/review-queue")
   ]);
 
-  // 渲染各区块 / Render each section
+  // 渲染各區块 / Render each section
   renderSummary(overview);
   renderModeControl(overview);
   renderBusinessSummary(businessSummary.data);
@@ -47,16 +47,16 @@ async function loadDashboard() {
   renderNetPnlDashboard(netPnlDashboard.data);
   renderReviewQueue(reviewQueue.data);
 
-  // 调试原文 / Debug raw JSON
+  // 調試原文 / Debug raw JSON
   document.getElementById("overviewBox").textContent = pretty(overview);
   document.getElementById("controlPlaneBox").textContent = pretty(controlPlane);
   document.getElementById("auditBox").textContent = pretty(audit);
 
-  // Paper Trading 加载 / Load paper trading data
+  // Paper Trading 載入 / Load paper trading data
   refreshPaperTrading().catch(() => {});
 }
 
-// ── 动作处理：快捷动作 / Action handler: quick actions ───────────────────────
+// ── 動作處理：快捷動作 / Action handler: quick actions ───────────────────────
 
 async function runQuickAction(actionName) {
   try {
@@ -65,7 +65,7 @@ async function runQuickAction(actionName) {
       if (!confirmed) {
         setActionSummary(
           "已取消 / Cancelled", "blocked", "-", "-",
-          "用户取消了关键动作确认。 / User cancelled.", { cancelled: true, action: actionName }
+          "用户取消了關键動作确認。 / User cancelled.", { cancelled: true, action: actionName }
         );
         return;
       }
@@ -109,11 +109,11 @@ async function runQuickAction(actionName) {
     summarizeActionResult(actionName, result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary("动作失败 / Action Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("動作失败 / Action Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
-// ── 动作处理：产品族配置应用 / Action handler: product family config apply ──────
+// ── 動作處理：產品族配置應用 / Action handler: product family config apply ──────
 
 async function applyProductFamilyConfig(family) {
   const enabledEl = document.getElementById(`pf-enabled-${family}`);
@@ -138,11 +138,11 @@ async function applyProductFamilyConfig(family) {
     summarizeActionResult("pf-config", result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary(`产品族配置失败 / PF Config Failed (${family})`, "failed", "-", "-", String(error), String(error));
+    setActionSummary(`產品族配置失败 / PF Config Failed (${family})`, "failed", "-", "-", String(error), String(error));
   }
 }
 
-// ── 动作处理：产品族动作权限变更 / Action handler: product family action permissions ──
+// ── 動作處理：產品族動作權限变更 / Action handler: product family action permissions ──
 
 async function applyProductFamilyPermissions(family) {
   const permChecks = document.querySelectorAll(`.perm-check[data-family="${family}"]`);
@@ -162,11 +162,11 @@ async function applyProductFamilyPermissions(family) {
     summarizeActionResult("pf-config", result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary(`权限变更失败 / Perm Change Failed (${family})`, "failed", "-", "-", String(error), String(error));
+    setActionSummary(`權限变更失败 / Perm Change Failed (${family})`, "failed", "-", "-", String(error), String(error));
   }
 }
 
-// ── 动作处理：费用录入 / Action handler: cost entry ──────────────────────────
+// ── 動作處理：費用录入 / Action handler: cost entry ──────────────────────────
 
 async function submitCostEntry() {
   const amount = parseFloat(document.getElementById("costAmount")?.value || "0");
@@ -174,7 +174,7 @@ async function submitCostEntry() {
   const note = document.getElementById("costNote")?.value || "";
 
   if (isNaN(amount) || amount <= 0) {
-    setActionSummary("录入失败", "failed", "-", "-", "请输入有效的正数金额 / Please enter a valid positive amount.", {});
+    setActionSummary("录入失败", "failed", "-", "-", "請輸入有效的正數金额 / Please enter a valid positive amount.", {});
     return;
   }
 
@@ -183,16 +183,16 @@ async function submitCostEntry() {
       payload: { amount, category, note }
     }));
     summarizeActionResult("cost-entry", result);
-    // 清空表单 / Clear form
+    // 清空表單 / Clear form
     document.getElementById("costAmount").value = "";
     document.getElementById("costNote").value = "";
     await loadDashboard();
   } catch (error) {
-    setActionSummary("费用录入失败 / Cost Entry Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("費用录入失败 / Cost Entry Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
-// ── 动作处理：PnL 录入 / Action handler: PnL entry ───────────────────────────
+// ── 動作處理：PnL 录入 / Action handler: PnL entry ───────────────────────────
 
 async function submitPnlEntry() {
   const entryType = document.getElementById("pnlType")?.value || "manual_adjustment";
@@ -208,7 +208,7 @@ async function submitPnlEntry() {
   try {
     const result = await apiPost("/api/v1/input/pnl-entry", baseEnvelope({ payload }));
     summarizeActionResult("pnl-entry", result);
-    // 清空表单 / Clear form
+    // 清空表單 / Clear form
     document.getElementById("pnlRealized").value = "";
     document.getElementById("pnlUnrealized").value = "";
     document.getElementById("pnlSymbol").value = "";
@@ -218,7 +218,7 @@ async function submitPnlEntry() {
   }
 }
 
-// ── 动作处理：系统设置应用 / Action handler: system settings apply ─────────────
+// ── 動作處理：系統設置應用 / Action handler: system settings apply ─────────────
 
 async function applyRiskPolicySetting() {
   const riskSwitchEl = document.getElementById("settingsRiskSwitch");
@@ -235,7 +235,7 @@ async function applyRiskPolicySetting() {
     summarizeActionResult("settings-change", result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary("设置失败 / Settings Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("設置失败 / Settings Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
@@ -258,7 +258,7 @@ async function applyDemoLearningSettings() {
     summarizeActionResult("settings-change", result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary("设置失败 / Settings Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("設置失败 / Settings Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 

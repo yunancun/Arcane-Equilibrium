@@ -21,7 +21,7 @@
 <!-- ═══ Grafana Embed ═══ -->
 <div class="oc-card" style="padding:0;overflow:hidden">
   <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
-    <h3 style="margin:0">&#x1F4CA; Grafana 监控面板 / Monitoring Dashboard</h3>
+    <h3 style="margin:0">&#x1F4CA; Grafana 監控面板 / Monitoring Dashboard</h3>
     <div style="display:flex;gap:8px;align-items:center">
       <span id="grafana-badge" class="oc-chip oc-chip-neutral">checking...</span>
       <button class="oc-btn" onclick="window.open('http://trade-core:3000','_blank')">Open Grafana &#x2197;</button>
@@ -31,7 +31,7 @@
     <div class="grafana-fallback" id="grafana-fallback">
       <div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#x1F4CA;</div>
       <h3>Grafana 连接中...</h3>
-      <p>正在检查 Grafana 服务是否可用</p>
+      <p>正在檢查 Grafana 服務是否可用</p>
     </div>
   </div>
 </div>
@@ -81,7 +81,7 @@
 
 <!-- ═══ System Health Detail ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F3E5; 系统健康详情 / System Health Detail</summary>
+  <summary>&#x1F3E5; 系統健康详情 / System Health Detail</summary>
   <div class="oc-collapse-body">
     <div id="health-detail" class="oc-loading">Loading...</div>
   </div>
@@ -90,30 +90,30 @@
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-grafana').innerHTML = ocExplain(
-  'Grafana 是一个专业的监控仪表盘工具，用来展示系统运行的实时图表和历史趋势。如果 Grafana 显示"未连接"，说明监控服务尚未启动或配置。',
-  'Grafana 连接到 Prometheus 时间序列数据库，收集交易系统的各项指标：API 响应时间、订单处理延迟、WebSocket 连接状态、内存/CPU 使用率等。Dashboard 预配置了玄衡 Trading PnL 看板，显示盈亏趋势和交易活动。'
+  'Grafana 是一個专業的監控仪表盤工具，用来展示系統運行的實時圖表和歷史趋势。如果 Grafana 顯示"未连接"，說明監控服務尚未啟動或配置。',
+  'Grafana 连接到 Prometheus 時間序列數據库，收集交易系統的各项指標：API 響應時間、訂單處理延遲、WebSocket 连接状态、內存/CPU 使用率等。Dashboard 预配置了玄衡 Trading PnL 看板，顯示盈亏趋势和交易活動。'
 );
 
 $('explain-pipeline').innerHTML = ocExplain(
-  'Pipeline Bridge 是数据管线的核心组件，负责将实时市场数据分发给各个策略，并将策略的交易意图转换为实际订单。',
-  'Pipeline Bridge 接收 WebSocket tick 数据，执行 fan-out 分发给所有注册的策略。策略产生的 OrderIntent 经过风控检查后，通过 Bridge 转换为 Paper 模拟 或 Demo 演示 的订单。Bridge 还负责 K 线聚合和成交量追踪。'
+  'Pipeline Bridge 是數據管線的核心組件，負責将實時市场數據分发給各個策略，并将策略的交易意圖转换为實際訂單。',
+  'Pipeline Bridge 接收 WebSocket tick 數據，執行 fan-out 分发給所有注册的策略。策略產生的 OrderIntent 經過風控檢查后，通過 Bridge 转换为 Paper 模擬 或 Demo 演示 的訂單。Bridge 還負責 K 線聚合和成交量追踪。'
 );
 
 $('explain-telegram').innerHTML = ocExplain(
-  'Telegram 告警在重要事件发生时发送通知到你的手机。例如：新的交易信号、订单成交、止损触发、系统异常等。',
-  '告警通过 Telegram Bot API 发送。需要配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 环境变量。告警分为多个级别：INFO（信号和成交）、WARNING（异常和风控触发）、CRITICAL（系统错误和熔断）。可以按级别过滤。'
+  'Telegram 告警在重要事件發生時發送通知到你的手机。例如：新的交易信號、訂單成交、止損触发、系統異常等。',
+  '告警通過 Telegram Bot API 發送。需要配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 環境变量。告警分为多個级别：INFO（信號和成交）、WARNING（異常和風控触发）、CRITICAL（系統錯誤和熔斷）。可以按级别過滤。'
 );
 
 $('explain-openclaw').innerHTML = ocExplain(
-  'OpenClaw Gateway 是 AI 通信层，负责与外部 AI 服务（如 Claude、GPT）的连接。它处理模型调用、token 计数和成本追踪。',
-  'Gateway 通过反向代理 /openclaw/ 路径访问。它管理 AI agent 实例和通信 channel，支持多模型路由和故障降级。Gateway 独立于交易逻辑运行，确保 AI 服务的不可用不会影响核心交易功能。'
+  'OpenClaw Gateway 是 AI 通信層，負責与外部 AI 服務（如 Claude、GPT）的连接。它處理模型調用、token 計數和成本追踪。',
+  'Gateway 通過反向代理 /openclaw/ 路徑訪问。它管理 AI agent 實例和通信 channel，支持多模型路由和故障降级。Gateway 独立于交易逻辑運行，确保 AI 服務的不可用不會影响核心交易功能。'
 );
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function checkGrafana() {
   // Proxy health check through Trading API to avoid browser CORS block.
   // Grafana runs on :3000 but browser fetch from :8000 origin is blocked by CORS.
-  // 通过 Trading API 代理健康检查，避免浏览器 CORS 拦截。
+  // 通過 Trading API 代理健康檢查，避免浏览器 CORS 拦截。
   try {
     const r = await ocApi('/api/v1/system/grafana-health');
     if (r && r.data && r.data.ok) {
@@ -135,16 +135,16 @@ function showGrafanaOffline() {
   $('grafana-fallback').innerHTML = `
     <div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#x1F4CA;</div>
     <h3>Grafana 未连接 / Not Connected</h3>
-    <p style="color:var(--text-dim);margin-bottom:16px">Grafana 监控服务未启动或不可访问</p>
+    <p style="color:var(--text-dim);margin-bottom:16px">Grafana 監控服務未啟動或不可訪问</p>
     <details style="text-align:left;max-width:400px">
       <summary style="color:var(--accent);cursor:pointer;font-size:12px">如何配置 Grafana / Setup Guide</summary>
       <div style="margin-top:8px;font-size:12px;color:var(--text-dim);line-height:1.6">
         <p>1. 安装 Grafana: <code>sudo apt install grafana</code></p>
         <p>2. 安装 Prometheus: <code>sudo apt install prometheus</code></p>
         <p>3. 配置 Prometheus 抓取 Trading API 的 /metrics 端点</p>
-        <p>4. 在 Grafana 添加 Prometheus 数据源</p>
+        <p>4. 在 Grafana 添加 Prometheus 數據源</p>
         <p>5. 导入玄衡 Trading PnL 看板</p>
-        <p>6. 确保 Grafana 运行在 trade-core:3000</p>
+        <p>6. 确保 Grafana 運行在 trade-core:3000</p>
       </div>
     </details>
   `;
@@ -152,7 +152,7 @@ function showGrafanaOffline() {
 
 async function loadPipeline() {
   // Pipeline stats from paper session (pipeline_bridge stats live there)
-  // 管线统计从 paper session 获取（pipeline_bridge 的统计在那里）
+  // 管線統計从 paper session 获取（pipeline_bridge 的統計在那里）
   let d;
   try { d = await ocApi('/api/v1/paper/session/status'); } catch(e) { d = null; }
   if (!d || !d.data) { $('pipe-status').textContent = 'Load Failed'; $('pipe-status').className = 'oc-metric-val'; return; }
@@ -199,7 +199,7 @@ async function loadTelegram() {
 async function loadOpenClaw() {
   try {
     const r = await fetch(window.location.origin + '/openclaw/health', {
-      credentials: 'same-origin'  // HttpOnly cookie sent automatically / 自动发送 HttpOnly cookie
+      credentials: 'same-origin'  // HttpOnly cookie sent automatically / 自動發送 HttpOnly cookie
     });
     const h = await r.json();
     const el = $('oc-status');
@@ -219,7 +219,7 @@ async function loadHealthDetail() {
   const h = d.data || d;
 
   // Flatten nested dicts into displayable key-value pairs
-  // 将嵌套 dict 展平为可显示的键值对
+  // 将嵌套 dict 展平为可顯示的键值對
   function flatEntries(obj, prefix) {
     let entries = [];
     Object.entries(obj).forEach(([key, val]) => {

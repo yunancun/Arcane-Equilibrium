@@ -1,22 +1,22 @@
 /**
- * agent-tracker.js — AI 团队工作台前端 / AI Crew Dashboard frontend
+ * agent-tracker.js — AI 團隊工作台前端 / AI Crew Dashboard frontend
  *
  * MODULE_NOTE (中):
- *   把 5-Agent (Scout / Strategist / Guardian / Analyst / Executor) 当前状态、
- *   今日成本、影子 vs 真仓视觉强隔离、最近活动 feed、思考预算进度条、
- *   决策租约 (lease) 与 H1-H5 治理 reject 摘要全部聚合在 Learning 标签内。
- *   纯只读：本档案不发任何 POST / PUT / DELETE，无危险按钮。
+ *   把 5-Agent (Scout / Strategist / Guardian / Analyst / Executor) 當前状态、
+ *   今日成本、影子 vs 真倉视觉强隔离、最近活動 feed、思考预算進度條、
+ *   決策租約 (lease) 与 H1-H5 治理 reject 摘要全部聚合在 Learning 標簽內。
+ *   純只读：本档案不发任何 POST / PUT / DELETE，無危險按钮。
  *
- *   Round 2 修复（按 E2 retro review）：
- *     - C-1 (b): loadAgentFeed 改用 /strategist/history rows + 真实 schema
+ *   Round 2 修復（按 E2 retro review）：
+ *     - C-1 (b): loadAgentFeed 改用 /strategist/history rows + 真實 schema
  *               (engine_mode/strategy_name/applied_at/source/reason)
  *     - C-1 (a): loadShadowLiveDiff 改呼 /api/v1/agents/shadow_vs_live_summary
  *               (新 endpoint，由 E1-A round 2 后端同步交付)
  *     - C-1 (a): loadAgentGovernance rejects 改呼 /api/v1/agents/recent_rejects
- *               (新 endpoint，取代不被识别的 ?outcome=reject query param)
+ *               (新 endpoint，取代不被識別的 ?outcome=reject query param)
  *     - C-2: loadAgentBudget 改用 nested schema (today.total_usd / budget.daily_hard_cap_usd)
  *     - 信任 backend 字段：renderAgentCard 不再 fallback shadow_mode=true，
- *       null/undefined → unknown state 红警语 (fail-loud)
+ *       null/undefined → unknown state 红警語 (fail-loud)
  *     - M-2: 各 loader 用 module-level _pollSeq[key]++ ID stale-bail 防 race
  *
  * MODULE_NOTE (EN):
@@ -38,7 +38,7 @@
  *     - M-2: per-key `_pollSeq[key]++` ID stale-bail in each loader to prevent
  *       race conditions between fast successive refreshes.
  *
- * 关联文件 / Related:
+ * 關联文件 / Related:
  *   - tab-learning.html (loads this file; injects HTML scaffold)
  *   - common.js (ocApi / ocEsc / ocChip / ocSetHtml / ocStartRefresh helpers)
  *   - GET /api/v1/agents/roster                 (existing, agents_routes.py:712)
@@ -49,8 +49,8 @@
  *   - GET /api/v1/paper/layer2/cost             (existing, nested schema)
  *
  * Refresh strategy:
- *   每个区块各自独立 setInterval；页面隐藏 (visibilitychange / pagehide) 时
- *   全部 clearInterval 以防 iframe 切走还在背景烧 API。
+ *   每個區块各自独立 setInterval；页面隐藏 (visibilitychange / pagehide) 時
+ *   全部 clearInterval 以防 iframe 切走還在背景烧 API。
  *
  * Plan reference: aa-nifty-walrus.md (Operator-local plan; T3 + T4 + T5 frontend scope)
  */
@@ -58,7 +58,7 @@
 "use strict";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// State / Refresh timer registry / 全局刷新定时器注册表
+// State / Refresh timer registry / 全局刷新定時器注册表
 // ─────────────────────────────────────────────────────────────────────────────
 const _AGENT_TIMERS = {
   roster: null,
@@ -69,9 +69,9 @@ const _AGENT_TIMERS = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Per-loader poll sequence counters / 每个 loader 的请求序号 (M-2 stale-bail)
+// Per-loader poll sequence counters / 每個 loader 的請求序號 (M-2 stale-bail)
 // ─────────────────────────────────────────────────────────────────────────────
-// `ocApi` 不接受 AbortSignal；改用单调递增 ID 在 .then 开头比对，过期就 bail。
+// `ocApi` 不接受 AbortSignal；改用單調遞增 ID 在 .then 開头比對，過期就 bail。
 // `ocApi` doesn't accept AbortSignal; use monotonically increasing IDs and
 // compare in .then handler — if stale (newer call already started) abort render.
 const _pollSeq = {
@@ -84,11 +84,11 @@ const _pollSeq = {
 
 /**
  * Register a setInterval timer keyed by id (auto-clears previous timer with same id).
- * 用 id 注册 setInterval；同 id 重复注册先清旧 timer。
+ * 用 id 注册 setInterval；同 id 重復注册先清旧 timer。
  *
  * @param {string} key - timer slot key in _AGENT_TIMERS
  * @param {Function} fn - interval callback
- * @param {number} intervalMs - >= 30000 enforced for plan §约束 3
+ * @param {number} intervalMs - >= 30000 enforced for plan §約束 3
  */
 function _agentRegisterTimer(key, fn, intervalMs) {
   if (intervalMs < 30000) {
@@ -101,7 +101,7 @@ function _agentRegisterTimer(key, fn, intervalMs) {
 
 /**
  * Clear all agent-tracker intervals when iframe is hidden / unloaded.
- * iframe 切走 / 卸载时清掉所有 agent-tracker 的 setInterval，避免背景烧 API。
+ * iframe 切走 / 卸載時清掉所有 agent-tracker 的 setInterval，避免背景烧 API。
  */
 function _agentClearAllTimers() {
   Object.keys(_AGENT_TIMERS).forEach((k) => {
@@ -113,16 +113,16 @@ function _agentClearAllTimers() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Three-state container helper / 载入/空/失败三态切换
+// Three-state container helper / 載入/空/失败三态切换
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Toggle 3-state container visibility (loading / empty / error / data).
- * 切换三态容器：所有 *-loading / *-empty / *-error 隐藏，仅显示选中态；
- * 'data' 表示真实数据态 — 所有 placeholder 都隐藏，调用端自行 ocSetHtml 主区块。
+ * 切换三态容器：所有 *-loading / *-empty / *-error 隐藏，仅顯示選中态；
+ * 'data' 表示真實數據态 — 所有 placeholder 都隐藏，調用端自行 ocSetHtml 主區块。
  *
  * @param {string} prefix - element id prefix, e.g. 'agent-roster'
- * @param {'loading'|'empty'|'error'|'data'} type - 当前要展示哪一态
+ * @param {'loading'|'empty'|'error'|'data'} type - 當前要展示哪一态
  */
 function setLoadingState(prefix, type) {
   const types = ["loading", "empty", "error"];
@@ -140,39 +140,39 @@ function setLoadingState(prefix, type) {
 
 /**
  * Map (role, state) to badge { emoji, label_zh, chipType }.
- * 5 角色 × 14 state 的语义化映射；未知 state 一律红色 + ⚠️ 不留灰。
+ * 5 角色 × 14 state 的語义化映射；未知 state 一律红色 + ⚠️ 不留灰。
  *
- * chipType 对应 common.js ocChip 的 type: good / warn / bad / neutral / info / live。
+ * chipType 對應 common.js ocChip 的 type: good / warn / bad / neutral / info / live。
  *
- * 设计意图：普通人看一眼就知道「这位 AI 现在在干嘛、健康不健康」，不靠英文。
+ * 設計意圖：普通人看一眼就知道「這位 AI 現在在干嘛、健康不健康」，不靠英文。
  */
 const _AGENT_STATE_MAP = {
   // 跨 role 通用
   active:      { emoji: "🟢", label_zh: "活跃中",       chip: "good"    },
   idle:        { emoji: "💤", label_zh: "待命",         chip: "neutral" },
-  slow:        { emoji: "🐢", label_zh: "反应慢",       chip: "warn"    },
-  offline:     { emoji: "🔌", label_zh: "已离线",       chip: "bad"     },
+  slow:        { emoji: "🐢", label_zh: "反應慢",       chip: "warn"    },
+  offline:     { emoji: "🔌", label_zh: "已离線",       chip: "bad"     },
   thinking:    { emoji: "🤔", label_zh: "思考中",       chip: "info"    },
-  watching:    { emoji: "👀", label_zh: "盯盘中",       chip: "info"    },
+  watching:    { emoji: "👀", label_zh: "盯盤中",       chip: "info"    },
   budget_low:  { emoji: "🪫", label_zh: "预算告急",     chip: "warn"    },
-  rejecting:   { emoji: "🛑", label_zh: "拒单中",       chip: "warn"    },
+  rejecting:   { emoji: "🛑", label_zh: "拒單中",       chip: "warn"    },
   guarding:    { emoji: "🛡️", label_zh: "守门中",       chip: "good"    },
   tightening:  { emoji: "🔒", label_zh: "收紧门槛",     chip: "warn"    },
-  frozen:      { emoji: "🥶", label_zh: "冻结",         chip: "bad"     },
+  frozen:      { emoji: "🥶", label_zh: "冻結",         chip: "bad"     },
   shadow:      { emoji: "🌙", label_zh: "影子模式",     chip: "info"    },
-  live:        { emoji: "🔴", label_zh: "真仓执行",     chip: "live"    },
-  reviewing:   { emoji: "🔍", label_zh: "审核中",       chip: "info"    },
-  waiting:     { emoji: "⏳", label_zh: "等待数据",     chip: "neutral" },
-  unknown:     { emoji: "⚠️", label_zh: "状态未确认",   chip: "bad"     },
+  live:        { emoji: "🔴", label_zh: "真倉執行",     chip: "live"    },
+  reviewing:   { emoji: "🔍", label_zh: "審核中",       chip: "info"    },
+  waiting:     { emoji: "⏳", label_zh: "等待數據",     chip: "neutral" },
+  unknown:     { emoji: "⚠️", label_zh: "状态未确認",   chip: "bad"     },
 };
 
 /**
  * Render a state badge HTML for a (role, state) pair.
- * 输出 inline-flex 的 emoji + label chip，未知 state 强制 bad chip + 警语。
+ * 輸出 inline-flex 的 emoji + label chip，未知 state 强制 bad chip + 警語。
  *
  * @param {string} role - agent role (scout/strategist/guardian/analyst/executor)
  * @param {string} state - state token from backend
- * @param {string} stateLabelZh - 后端给的中文标签 (优先用)
+ * @param {string} stateLabelZh - 后端給的中文標簽 (優先用)
  * @returns {string} sanitized HTML
  */
 function agentStateBadge(role, state, stateLabelZh) {
@@ -182,30 +182,30 @@ function agentStateBadge(role, state, stateLabelZh) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tooltip helper / 8 条术语提示
+// Tooltip helper / 8 條術語提示
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Bilingual tooltip glossary — 8 terms required by plan T4.
- * 术语 hover 双语提示；HTML title 属性已天然安全，但术语 key 仍走 ocEsc 防注入。
+ * 術語 hover 双語提示；HTML title 屬性已天然安全，但術語 key 仍走 ocEsc 防注入。
  */
 const _AGENT_TOOLTIPS = {
-  shadow:        "Agent 的所有决策只记录不送单 / Shadow mode: decisions logged, no real orders",
-  edge:          "这笔交易预期能赚多少（扣掉手续费滑价之后）/ Expected net profit per trade",
-  budget:        "每天给 AI 的思考费用上限，用完就停想 / Daily AI thinking budget",
-  lease:         "Agent 的「这次允许下单」许可证 / Time-bound trading permission",
-  governance:    "5 道关卡审 AI 提案 / 5-stage AI governance",
-  heartbeat:     "最近活动心跳；程序是否已启动看「程序」字段 / Last activity heartbeat",
-  reasoning:     "Agent 这次决策的完整思考过程 / Full reasoning trace",
-  cost_edge:     "花的钱 ÷ 赚的钱，越低越好；超过 0.8 系统会建议减仓 / Cost-to-edge ratio",
+  shadow:        "Agent 的所有決策只記錄不送單 / Shadow mode: decisions logged, no real orders",
+  edge:          "這笔交易预期能赚多少（扣掉手續費滑價之后）/ Expected net profit per trade",
+  budget:        "每天給 AI 的思考費用上限，用完就停想 / Daily AI thinking budget",
+  lease:         "Agent 的「這次允許下單」許可證 / Time-bound trading permission",
+  governance:    "5 道關卡審 AI 提案 / 5-stage AI governance",
+  heartbeat:     "最近活動心跳；程序是否已啟動看「程序」字段 / Last activity heartbeat",
+  reasoning:     "Agent 這次決策的完整思考過程 / Full reasoning trace",
+  cost_edge:     "花的钱 ÷ 赚的钱，越低越好；超過 0.8 系統会建議减倉 / Cost-to-edge ratio",
 };
 
 /**
  * Wrap a label with a tooltip span.
- * 包一个 hover 双语提示的 span；自动 escape 文字 + tooltip。
+ * 包一個 hover 双語提示的 span；自動 escape 文字 + tooltip。
  *
  * @param {string} key - _AGENT_TOOLTIPS key
- * @param {string} label - 显示文字
+ * @param {string} label - 顯示文字
  * @returns {string} sanitized HTML
  */
 function withTip(key, label) {
@@ -216,12 +216,12 @@ function withTip(key, label) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Time helpers / 时间格式化
+// Time helpers / 時間格式化
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Compute "N 分钟前" string from ISO timestamp.
- * 从 ISO 时间戳算「几分钟前」；> 60 min 显示小时；> 24h 显示天数；空 → '--'。
+ * Compute "N 分鐘前" string from ISO timestamp.
+ * 从 ISO 時間戳算「几分鐘前」；> 60 min 顯示小時；> 24h 顯示天數；空 → '--'。
  */
 function _agentRelTime(isoTs) {
   if (!isoTs) return "--";
@@ -232,16 +232,16 @@ function _agentRelTime(isoTs) {
   const sec = Math.floor(dMs / 1000);
   if (sec < 60) return sec + " 秒前";
   const min = Math.floor(sec / 60);
-  if (min < 60) return min + " 分钟前";
+  if (min < 60) return min + " 分鐘前";
   const hr = Math.floor(min / 60);
-  if (hr < 24) return hr + " 小时前";
+  if (hr < 24) return hr + " 小時前";
   const day = Math.floor(hr / 24);
   return day + " 天前";
 }
 
 /**
  * Format an ISO timestamp to local hh:mm:ss for compact reject list rows.
- * 把 ISO 时间戳格式化成本地 hh:mm:ss（拒单条目紧凑显示用）。
+ * 把 ISO 時間戳格式化成本地 hh:mm:ss（拒單條目紧凑顯示用）。
  */
 function _agentTimeShort(isoTs) {
   if (!isoTs) return "--";
@@ -255,10 +255,10 @@ function _agentTimeShort(isoTs) {
 
 /**
  * Heartbeat freshness chip: <2min good, 2-5min warn, >5min bad.
- * 心跳 chip 颜色：<2 分钟绿、2-5 分钟黄、>5 分钟红。
+ * 心跳 chip 颜色：<2 分鐘綠、2-5 分鐘黃、>5 分鐘红。
  */
 function _heartbeatChip(isoTs) {
-  if (!isoTs) return ocChip("无心跳", "bad");
+  if (!isoTs) return ocChip("無心跳", "bad");
   const dMs = Date.now() - new Date(isoTs).getTime();
   const min = dMs / 60000;
   let chip = "good";
@@ -273,11 +273,11 @@ function _heartbeatChip(isoTs) {
 
 /**
  * Render one agent card (4-column layout: identity / now-doing / state / cost).
- * 渲染单张 Agent 卡片；Executor 收到 shadow_mode 强制三层视觉隔离。
+ * 渲染單张 Agent 卡片；Executor 收到 shadow_mode 强制三層视觉隔离。
  *
- * Round 2 改动：信任后端 `shadow_mode` 字段 — null/undefined 不再 fallback 为 true，
- * 而是强制 unknown state + 红警语 (fail-loud)；后端 ExecutorAgent.get_stats() 已在
- * round 2 backend 接线 shadow_mode + orders_submitted 真实字段。
+ * Round 2 改動：信任后端 `shadow_mode` 字段 — null/undefined 不再 fallback 为 true，
+ * 而是强制 unknown state + 红警語 (fail-loud)；后端 ExecutorAgent.get_stats() 已在
+ * round 2 backend 接線 shadow_mode + orders_submitted 真實字段。
  *
  * Round 2 change: trust backend `shadow_mode` field — null/undefined no longer
  * silently fallback to true; instead force unknown state + red banner (fail-loud).
@@ -291,7 +291,7 @@ function renderAgentCard(agent) {
   let state = agent.state || "unknown";
   const isExecutor = role === "executor";
 
-  // Trust backend shadow_mode — 严格 boolean 检查，null/undefined → unknown
+  // Trust backend shadow_mode — 严格 boolean 檢查，null/undefined → unknown
   // strict boolean check; null/undefined → force state=unknown to fail-loud
   let isLive = false;
   let executorUnclear = false;
@@ -316,35 +316,35 @@ function renderAgentCard(agent) {
       bgStyle = "background:linear-gradient(135deg, #3d0d0d, #5c1a1a);"
               + "animation:agent-breathing 4s ease-in-out infinite;";
       bannerHtml = '<div class="exec-banner exec-banner-live">'
-        + '🔴 真仓执行中 — 这位 Agent 正在用真钱下单'
+        + '🔴 真倉執行中 — 這位 Agent 正在用真钱下單'
         + '</div>';
     } else {
       bgStyle = "background:linear-gradient(135deg, #0d1f3d, #1a2f5c);";
       bannerHtml = '<div class="exec-banner exec-banner-shadow">'
         + '🌙 ' + withTip("shadow", "影子模式")
-        + ' — 所有动作仅模拟，不会送真单到交易所'
+        + ' — 所有動作仅模擬，不會送真單到交易所'
         + '</div>';
     }
   }
 
-  // unknown 状态强制红 + 暂停接单警语，永远不留灰色
-  // Executor shadow_mode null → 额外标注「契约缺失，暂停接单」(fail-loud)
+  // unknown 状态强制红 + 暂停接單警語，永遠不留灰色
+  // Executor shadow_mode null → 额外標注「契約缺失，暂停接單」(fail-loud)
   let unknownBanner = "";
   if (isUnknown) {
     const txt = executorUnclear
-      ? '⚠️ 后端未回报 shadow_mode 字段，已暂停接单 / Backend missing shadow_mode field, intake paused'
-      : '⚠️ 状态未确认，已暂停接单 / State unknown, intake paused';
+      ? '⚠️ 后端未回報 shadow_mode 字段，已暂停接單 / Backend missing shadow_mode field, intake paused'
+      : '⚠️ 状态未确認，已暂停接單 / State unknown, intake paused';
     unknownBanner = '<div style="background:rgba(248,81,73,0.15);border:1px solid var(--red);'
       + 'border-radius:6px;padding:6px 10px;margin-bottom:8px;color:var(--red);font-size:11px">'
       + ocEsc(txt)
       + '</div>';
   }
 
-  // 4 列内容 / 4-column content
+  // 4 列內容 / 4-column content
   const emoji = agent.emoji || "🤖";
   const labelZh = ocEsc(agent.label_zh || role);
   const labelEn = ocEsc(agent.label_en || role);
-  const summary = ocEsc(agent.summary_zh || "（暂无概述）");
+  const summary = ocEsc(agent.summary_zh || "（暂無概述）");
   const stateReason = ocEsc(agent.state_reason_zh || "");
   const runtimeState = String(agent.runtime_state || "--");
   const runtimeChip = ocChip("程序 " + runtimeState, runtimeState === "running" ? "good" : "bad");
@@ -362,11 +362,11 @@ function renderAgentCard(agent) {
   }
   const cost = (agent.today_cost_usd != null) ? agent.today_cost_usd : 0;
 
-  // Executor live 模式数字单位强化
-  let decisionLabel = "今日决策";
+  // Executor live 模式數字單位强化
+  let decisionLabel = "今日決策";
   if (isExecutor) {
-    if (executorUnclear) decisionLabel = "今日下单";
-    else                 decisionLabel = isLive ? "真实成单" : "模拟成单";
+    if (executorUnclear) decisionLabel = "今日下單";
+    else                 decisionLabel = isLive ? "真實成單" : "模擬成單";
   }
 
   let html = '<div class="agent-card" style="' + bgStyle
@@ -389,13 +389,13 @@ function renderAgentCard(agent) {
   html += '<div style="font-size:12px;line-height:1.6;color:var(--text);'
     + 'background:rgba(13,17,23,0.4);border-left:2px solid var(--accent);'
     + 'padding:6px 10px;border-radius:0 6px 6px 0">'
-    + '<span style="color:var(--text-dim)">现在在做：</span>' + summary
+    + '<span style="color:var(--text-dim)">現在在做：</span>' + summary
     + '</div>';
   if (stateReason) {
     html += '<div style="font-size:11px;line-height:1.5;color:var(--text-dim);'
       + 'background:rgba(210,153,34,0.08);border-left:2px solid var(--yellow);'
       + 'padding:6px 10px;border-radius:0 6px 6px 0">'
-      + '<span style="color:var(--yellow)">状态依据：</span>' + stateReason
+      + '<span style="color:var(--yellow)">状态依據：</span>' + stateReason
       + '</div>';
   }
 
@@ -416,9 +416,9 @@ function renderAgentCard(agent) {
 
 /**
  * Load + render the 5-Agent roster grid (Block A).
- * 拉 /api/v1/agents/roster 渲染 5 张卡片；30s 自动刷新。
+ * 拉 /api/v1/agents/roster 渲染 5 张卡片；30s 自動刷新。
  *
- * Stale-bail: 启动前 ++_pollSeq.roster；await 后比对，过期就放弃 render。
+ * Stale-bail: 啟動前 ++_pollSeq.roster；await 后比對，過期就放弃 render。
  * Stale-bail: increment _pollSeq.roster pre-call; bail render if stale post-await.
  */
 async function loadAgentRoster() {
@@ -436,7 +436,7 @@ async function loadAgentRoster() {
     return;
   }
   // Backend contract returns `{data: {ts, agents}}` envelope (agents_routes.py:765).
-  // 后端契约：{ok, data:{ts, agents, ...}, ...}。
+  // 后端契約：{ok, data:{ts, agents, ...}, ...}。
   const payload = d.data || d;
   const agents = payload.agents || [];
   if (!agents.length) {
@@ -453,7 +453,7 @@ async function loadAgentRoster() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Block C — Recent activity feed / 最近活动 feed
+// Block C — Recent activity feed / 最近活動 feed
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -461,13 +461,13 @@ async function loadAgentRoster() {
  * 把 strategist_applied_params.source 映射成中文短句，普通人看得懂。
  */
 function _strategistSourceZh(source) {
-  if (!source) return "应用参数";
+  if (!source) return "應用参數";
   const map = {
-    "manual_promote":      "手动晋升",
-    "shadow_to_live":      "影子→真仓晋升",
-    "auto_apply":          "自动套用",
+    "manual_promote":      "手動晋升",
+    "shadow_to_live":      "影子→真倉晋升",
+    "auto_apply":          "自動套用",
     "rust_apply":          "Rust 引擎套用",
-    "hot_reload":          "热重载",
+    "hot_reload":          "热重載",
     "rollback":            "回滚",
   };
   return map[source] || source;
@@ -475,17 +475,17 @@ function _strategistSourceZh(source) {
 
 /**
  * Load + render Strategist applied-params history + recent shadow fills as a
- * unified activity feed. 60s 自动刷新。
+ * unified activity feed. 60s 自動刷新。
  *
- * Round 2 修复（C-1 b）：
+ * Round 2 修復（C-1 b）：
  *   - strategist part 改读 `data.rows` (真 schema)，欄位映射如下：
- *     * 时间 = h.applied_at (ISO)
+ *     * 時間 = h.applied_at (ISO)
  *     * 角色 = '策略师' (固定)
- *     * 动作 = '套用参数: ' + h.strategy_name + ' (' + h.source + ')'
- *     * symbol slot 显示 h.strategy_name (后端无 symbol，系统按 strategy 套用)
+ *     * 動作 = '套用参數: ' + h.strategy_name + ' (' + h.source + ')'
+ *     * symbol slot 顯示 h.strategy_name (后端無 symbol，系統按 strategy 套用)
  *     * 详情 = h.reason (短句)
  *   - shadow_fills 改读 `data.rows` (真 schema)
- *   - 两个 ocApi 都加 ?engine=demo 限定 (plan §C「demo intent + live_demo realized」)
+ *   - 兩個 ocApi 都加 ?engine=demo 限定 (plan §C「demo intent + live_demo realized」)
  *
  * Round 2 fix (C-1 b):
  *   - strategist part reads `data.rows` per real schema (engine_mode/strategy_name/
@@ -508,7 +508,7 @@ async function loadAgentFeed() {
     return;
   }
   // Merge entries with type tag, sort by ts desc
-  // 把两路 entry 加 type 标签合一条时间线，按时间倒序排列。
+  // 把兩路 entry 加 type 標簽合一條時間線，按時間倒序排列。
   const entries = [];
   if (histOk) {
     // strategist_history_routes.py returns {data: {rows: [...], ...}}
@@ -524,7 +524,7 @@ async function loadAgentFeed() {
         ts: h.applied_at,
         outcome: sourceZh,
         symbol: strat,                     // strategy_name as symbol slot
-        summary: "套用参数: " + strat + (h.reason ? " · " + h.reason : ""),
+        summary: "套用参數: " + strat + (h.reason ? " · " + h.reason : ""),
       });
     });
   }
@@ -570,7 +570,7 @@ async function loadAgentFeed() {
   let html = '<div style="display:flex;flex-direction:column;gap:6px">';
   entries.slice(0, 15).forEach((e) => {
     let chipType = "info";
-    let typeLabel = "动态";
+    let typeLabel = "動態";
     if (e.type === "strategist") {
       typeLabel = "策略师";
       chipType = "info";
@@ -598,21 +598,21 @@ async function loadAgentFeed() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Block E — Demo engine vs LiveDemo engine fills diff / Demo 引擎 vs LiveDemo 引擎成交对比
+// Block E — Demo engine vs LiveDemo engine fills diff / Demo 引擎 vs LiveDemo 引擎成交對比
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Load + render Demo engine vs LiveDemo engine fills summary.
- * 拉 /api/v1/agents/shadow_vs_live_summary 渲染对比数字；60s 刷新。
+ * 拉 /api/v1/agents/shadow_vs_live_summary 渲染對比數字；60s 刷新。
  *
- * 语义说明 / Semantic note:
+ * 語义說明 / Semantic note:
  *   后端 SQL 抓 trading.fills WHERE engine_mode IN ('demo','live','live_demo') —
- *   两边都是真实送单到 Bybit demo endpoint 的成交，差别在于 risk_config 引擎：
+ *   兩边都是真實送單到 Bybit demo endpoint 的成交，差别在于 risk_config 引擎：
  *     - demo column: engine_mode='demo'，使用 risk_config_demo.toml
- *     - live_demo column: engine_mode='live_demo'，Live 管线走 demo endpoint，
+ *     - live_demo column: engine_mode='live_demo'，Live 管線走 demo endpoint，
  *       使用 risk_config_live.toml（CLAUDE.md §三 engine_mode_tag_live_demo）
- *   不要把这卡当成 ExecutorAgent shadow_mode（_shadow_mode=True 写到
- *   learning.decision_shadow_* 是另一回事，与本卡无关）。
+ *   不要把這卡当成 ExecutorAgent shadow_mode（_shadow_mode=True 写到
+ *   learning.decision_shadow_* 是另一回事，与本卡無關）。
  *
  *   Backend SQL filters trading.fills by engine_mode tag. Both sides are real fills
  *   submitted to Bybit demo endpoint. Difference is which risk_config TOML the engine
@@ -620,10 +620,10 @@ async function loadAgentFeed() {
  *   learning.decision_shadow_* without dispatching to Rust).
  *
  * 后端 endpoint URL 保留为 /api/v1/agents/shadow_vs_live_summary（backward compat）—
- * 后端将新增 alias，前端这里不动 URL。
+ * 后端将新增 alias，前端這裡不動 URL。
  * Endpoint URL retained for backward compat; backend will add alias.
  *
- * Round 2 修复（C-1 a）：
+ * Round 2 修復（C-1 a）：
  *   - schema：{demo:{count, total_pnl_usd, avg_slippage_bps},
  *             live_demo:{count, total_pnl_usd, avg_slippage_bps},
  *             diff:{fill_rate_delta_pct, slippage_delta_bps}}
@@ -648,7 +648,7 @@ async function loadShadowLiveDiff() {
     setLoadingState("agent-shadow-live", "error");
     return;
   }
-  // 后端契约：{ok, data:{demo, live_demo, diff}, ...} 或直接 {demo, live_demo, diff}
+  // 后端契約：{ok, data:{demo, live_demo, diff}, ...} 或直接 {demo, live_demo, diff}
   const r = d.data || d;
   const demo = r.demo || {};
   const liveDemo = r.live_demo || {};
@@ -671,7 +671,7 @@ async function loadShadowLiveDiff() {
 
   // Demo engine column (engine_mode='demo' fills) / Demo 引擎成交栏
   // Real fills to Bybit demo endpoint; uses risk_config_demo.toml.
-  // 真实成交到 Bybit demo endpoint；使用 risk_config_demo.toml。
+  // 真實成交到 Bybit demo endpoint；使用 risk_config_demo.toml。
   html += '<div style="background:linear-gradient(135deg, #0d1f3d, #1a2f5c);'
     + 'border:1px solid #1a2f5c;border-radius:8px;padding:12px">';
   html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🟦 '
@@ -693,14 +693,14 @@ async function loadShadowLiveDiff() {
 
   // LiveDemo engine column (engine_mode='live_demo' fills) / LiveDemo 引擎成交栏
   // Live pipeline routed to Bybit demo endpoint; uses risk_config_live.toml.
-  // Live 管线走 demo endpoint；使用 risk_config_live.toml（CLAUDE.md §三 engine_mode_tag_live_demo）。
+  // Live 管線走 demo endpoint；使用 risk_config_live.toml（CLAUDE.md §三 engine_mode_tag_live_demo）。
   const liveBg = liveCount > 0
     ? "background:linear-gradient(135deg, #3d0d0d, #5c1a1a);border:1px solid var(--red);"
     : "background:rgba(13,17,23,0.4);border:1px dashed var(--border);";
   html += '<div style="' + liveBg + 'border-radius:8px;padding:12px">';
   html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🔴 LiveDemo 引擎成交</div>';
   html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">'
-    + 'Live 管线走 demo endpoint（使用 risk_config_live.toml）</div>';
+    + 'Live 管線走 demo endpoint（使用 risk_config_live.toml）</div>';
   if (liveCount > 0) {
     html += '<div style="font-size:18px;font-weight:700">LiveDemo 成交 '
       + liveCount + ' 笔</div>';
@@ -714,9 +714,9 @@ async function loadShadowLiveDiff() {
         + '平均滑点 ' + Number(liveSlip).toFixed(2) + ' bps</div>';
     }
   } else {
-    html += '<div style="font-size:14px;color:var(--text-dim)">— 此时段无 LiveDemo 成交 —</div>';
+    html += '<div style="font-size:14px;color:var(--text-dim)">— 此時段無 LiveDemo 成交 —</div>';
     html += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">'
-      + '流量稀疏 / 引擎运行中（pipeline 状态请看 System tab）</div>';
+      + '流量稀疏 / 引擎運行中（pipeline 状态請看 System tab）</div>';
   }
   html += '</div>';
   html += '</div>';  // end 2-column grid
@@ -733,14 +733,14 @@ async function loadShadowLiveDiff() {
       + 'gap:8px;flex-wrap:wrap;font-size:12px">';
     if (fillDelta != null) {
       const sign = Number(fillDelta) >= 0 ? "+" : "";
-      html += '<div>成交率差异（Demo vs LiveDemo）：<strong style="color:' + fillColor + '">'
+      html += '<div>成交率差異（Demo vs LiveDemo）：<strong style="color:' + fillColor + '">'
         + sign + Number(fillDelta).toFixed(1) + '%</strong>'
         + (fillRed ? ' <span style="color:var(--red);font-size:11px">⚠ 偏离 ≥10%</span>' : '')
         + '</div>';
     }
     if (slipDelta != null) {
       const sign = Number(slipDelta) >= 0 ? "+" : "";
-      html += '<div>滑点差异（Demo vs LiveDemo）：<strong style="color:var(--text)">'
+      html += '<div>滑点差異（Demo vs LiveDemo）：<strong style="color:var(--text)">'
         + sign + Number(slipDelta).toFixed(2) + ' bps</strong></div>';
     }
     html += '</div>';
@@ -752,12 +752,12 @@ async function loadShadowLiveDiff() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Block F — Lease + Reject summary / 决策租约 + 治理拒单
+// Block F — Lease + Reject summary / 決策租約 + 治理拒單
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Risk-level chip color per round 2 schema (P0=bad, P1=warn, P2=info, default=neutral).
- * 风控等级映射 chip 颜色：P0 红 / P1 黄 / P2 蓝 / 其他灰。
+ * 風控等级映射 chip 颜色：P0 红 / P1 黃 / P2 蓝 / 其他灰。
  */
 function _riskLevelChip(level) {
   if (!level) return ocChip("?", "neutral");
@@ -773,16 +773,16 @@ function _riskLevelChip(level) {
  * Load + render active leases + recent rejects.
  * 拉 /api/v1/governance/leases + /api/v1/agents/recent_rejects；30s 刷新。
  *
- * Round 2 修复（C-1 a）：
+ * Round 2 修復（C-1 a）：
  *   - rejects 改呼新 endpoint /api/v1/agents/recent_rejects?limit=5
  *   - schema：{rows:[{ts, symbol, reason, risk_level}, ...]}
- *   - 移除旧的 ?outcome=reject query (后端不识别 silent ignore)
- *   - 显示格式：「{ts hh:mm:ss}｜{symbol}｜被守门员擋下：{reason}（{P0/P1/P2}）」
+ *   - 移除旧的 ?outcome=reject query (后端不識別 silent ignore)
+ *   - 顯示格式：「{ts hh:mm:ss}｜{symbol}｜被守门員擋下：{reason}（{P0/P1/P2}）」
  *
  * Round 2 fix (C-1 a):
  *   - rejects hits new endpoint /api/v1/agents/recent_rejects?limit=5
  *   - Remove unrecognized `?outcome=reject` legacy query
- *   - Format: "{hh:mm:ss}｜{symbol}｜被守门员擋下：{reason}（{P0/P1/P2}）"
+ *   - Format: "{hh:mm:ss}｜{symbol}｜被守门員擋下：{reason}（{P0/P1/P2}）"
  */
 async function loadAgentGovernance() {
   const mySeq = ++_pollSeq.governance;
@@ -820,7 +820,7 @@ async function loadAgentGovernance() {
   // Leases column
   html += '<div>';
   html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">📜 '
-    + withTip("lease", "活跃决策租约") + '</div>';
+    + withTip("lease", "活跃決策租約") + '</div>';
   if (leases && leases.length) {
     html += '<div style="display:flex;flex-direction:column;gap:4px">';
     leases.slice(0, 6).forEach((l) => {
@@ -836,14 +836,14 @@ async function loadAgentGovernance() {
     html += '</div>';
   } else {
     html += '<div style="font-size:11px;color:var(--text-dim);padding:8px 0">'
-      + '当前没有活跃租约</div>';
+      + '當前没有活跃租約</div>';
   }
   html += '</div>';
 
   // Rejects column (round 2: real risk_verdicts.reject rows)
   html += '<div>';
   html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">🛑 '
-    + withTip("governance", "守门员拒单") + '（最近 5 条）</div>';
+    + withTip("governance", "守门員拒單") + '（最近 5 條）</div>';
   if (rejects && rejects.length) {
     html += '<div style="display:flex;flex-direction:column;gap:4px">';
     rejects.slice(0, 5).forEach((r) => {
@@ -859,13 +859,13 @@ async function loadAgentGovernance() {
       html += _riskLevelChip(lvl);
       html += '</div>';
       html += '<div style="color:var(--text-dim);margin-top:2px">'
-        + '被守门员擋下：' + ocEsc(reason) + '</div>';
+        + '被守门員擋下：' + ocEsc(reason) + '</div>';
       html += '</div>';
     });
     html += '</div>';
   } else {
     html += '<div style="font-size:11px;color:var(--text-dim);padding:8px 0">'
-      + '近期无拒单</div>';
+      + '近期無拒單</div>';
   }
   html += '</div>';
 
@@ -875,14 +875,14 @@ async function loadAgentGovernance() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Block D (MVP) — Thinking budget progress / 思考预算进度条 (简化版)
+// Block D (MVP) — Thinking budget progress / 思考预算進度條 (简化版)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Load + render today's AI thinking budget as a simple progress bar (MVP, plan §scope).
- * 拉 /api/v1/paper/layer2/cost 渲染「今日 AI 花费 $X / $Y」进度条；120s 刷新。
+ * 拉 /api/v1/paper/layer2/cost 渲染「今日 AI 花費 $X / $Y」進度條；120s 刷新。
  *
- * Round 2 修复（C-2）：改用真后端 nested schema：
+ * Round 2 修復（C-2）：改用真后端 nested schema：
  *   - spent     = c.today.total_usd
  *   - cap       = c.budget.daily_hard_cap_usd
  *   - remaining = c.budget.remaining_usd (展示用)
@@ -938,11 +938,11 @@ async function loadAgentBudget() {
   html += '</div>';
   html += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">';
   if (capVal === 0) {
-    html += '尚未设定每日预算上限';
+    html += '尚未設定每日预算上限';
   } else if (pct >= 90) {
-    html += '⚠️ 预算告急 — Agent 即将停止主动思考（仅 fallback 决策）';
+    html += '⚠️ 预算告急 — Agent 即将停止主動思考（仅 fallback 決策）';
   } else if (pct >= 70) {
-    html += '已用 ' + pct.toFixed(0) + '%，注意节流';
+    html += '已用 ' + pct.toFixed(0) + '%，注意節流';
   } else {
     // Prefer backend-provided remaining; fallback to derived
     const rem = (remaining != null) ? remaining : (capVal - spentVal);
@@ -961,17 +961,17 @@ async function loadAgentBudget() {
 
 /**
  * Boot all agent-tracker blocks + register intervals.
- * 启动全部 5 个区块的首次加载 + 注册 setInterval；外部 init() 流程调用。
+ * 啟動全部 5 個區块的首次載入 + 注册 setInterval；外部 init() 流程調用。
  */
 function startAgentTracker() {
-  // 立即加载一次 / fire once immediately
+  // 立即載入一次 / fire once immediately
   loadAgentRoster();
   loadAgentFeed();
   loadShadowLiveDiff();
   loadAgentGovernance();
   loadAgentBudget();
 
-  // 注册周期刷新（min 30s per plan §约束 3）
+  // 注册周期刷新（min 30s per plan §約束 3）
   _agentRegisterTimer("roster", loadAgentRoster, 30000);
   _agentRegisterTimer("feed", loadAgentFeed, 60000);
   _agentRegisterTimer("shadowLive", loadShadowLiveDiff, 60000);
@@ -979,18 +979,18 @@ function startAgentTracker() {
   _agentRegisterTimer("budget", loadAgentBudget, 120000);
 }
 
-// iframe 切走 / unload 时清干净所有定时器
+// iframe 切走 / unload 時清干净所有定時器
 window.addEventListener("pagehide", _agentClearAllTimers);
 document.addEventListener("visibilitychange", function () {
   if (document.hidden) {
     _agentClearAllTimers();
   } else {
-    // 切回来时重启刷新 / re-arm on visibility regain
+    // 切回来時重啟刷新 / re-arm on visibility regain
     startAgentTracker();
   }
 });
 
-// 货币切换时刷新展示金额相关区块
+// 货币切换時刷新展示金额相關區块
 window.addEventListener("occurrencychange", function () {
   loadShadowLiveDiff();
   loadAgentBudget();

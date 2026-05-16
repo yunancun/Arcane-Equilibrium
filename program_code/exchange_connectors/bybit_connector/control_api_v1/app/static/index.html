@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/styles.css" />
   <script>
   // Auth check: verify HttpOnly cookie via /api/v1/auth/check (APR01-MEDIUM-13)
-  // 认证检查：通过 /api/v1/auth/check 验证 HttpOnly cookie
+  // 認證檢查：通過 /api/v1/auth/check 驗證 HttpOnly cookie
   (function() {
     // Clean up legacy localStorage token / 清理旧的 localStorage token
     localStorage.removeItem('oc_trading_token');
@@ -38,13 +38,13 @@
   </header>
 
   <!-- Legacy notice: index.html is the old entry point, main console is /console -->
-  <!-- 遗留提示：index.html 是旧入口，主控制台已迁移到 /console -->
+  <!-- 遺留提示：index.html 是旧入口，主控制台已迁移到 /console -->
   <div style="background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.3);border-radius:8px;padding:10px 16px;margin:12px;display:flex;align-items:center;gap:10px;font-size:13px">
     <span style="font-size:16px">⚠️</span>
     <span style="color:#d29922;flex:1">
-      <strong>Legacy UI / 遗留界面</strong> — 主控制台已迁移到
+      <strong>Legacy UI / 遺留界面</strong> — 主控制台已迁移到
       <a href="/console" style="color:#388bfd;font-weight:600">/console</a>。
-      此页面保留供内部工具调用（data-action API）。
+      此页面保留供內部工具調用（data-action API）。
     </span>
     <a href="/console" style="background:rgba(56,139,253,0.15);border:1px solid rgba(56,139,253,0.3);border-radius:6px;padding:5px 14px;color:#388bfd;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap">
       前往主控制台 →
@@ -55,10 +55,10 @@
     <section class="card hero-card">
       <div class="card-header-row">
         <div>
-          <h2>运行态摘要 / Runtime Summary</h2>
-          <p class="subtle">高层状态、保护边界、runtime snapshot 绑定情况</p>
+          <h2>運行态摘要 / Runtime Summary</h2>
+          <p class="subtle">高層状态、保護边界、runtime snapshot 綁定情况</p>
         </div>
-        <div id="runtimeModeBadge" class="status-chip neutral">未加载 / Not loaded</div>
+        <div id="runtimeModeBadge" class="status-chip neutral">未載入 / Not loaded</div>
       </div>
       <div class="summary-grid" id="summaryGrid">
         <div class="summary-item">
@@ -103,7 +103,7 @@
         <div class="card-header-row">
           <div>
             <h2>健康摘要 / Health Summary</h2>
-            <p class="subtle">health scores、关键 gate 与 freshness</p>
+            <p class="subtle">health scores、關键 gate 与 freshness</p>
           </div>
         </div>
         <dl class="kv-grid" id="healthGrid"></dl>
@@ -113,8 +113,8 @@
     <section class="card">
       <div class="card-header-row">
         <div>
-          <h2>产品族事实 / Product Family Facts</h2>
-          <p class="subtle">当前 visibility / capability / permission facts 概览</p>
+          <h2>產品族事實 / Product Family Facts</h2>
+          <p class="subtle">當前 visibility / capability / permission facts 概览</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -132,7 +132,7 @@
             </tr>
           </thead>
           <tbody id="productFamilyTableBody">
-            <tr><td colspan="8" class="muted-cell">等待加载 / Waiting...</td></tr>
+            <tr><td colspan="8" class="muted-cell">等待載入 / Waiting...</td></tr>
           </tbody>
         </table>
       </div>
@@ -141,8 +141,8 @@
     <section class="card wide">
       <div class="card-header-row">
         <div>
-          <h2>快捷动作 / Quick Actions</h2>
-          <p class="subtle">仅调用受保护控制面动作，不直接开放真实执行权限</p>
+          <h2>快捷動作 / Quick Actions</h2>
+          <p class="subtle">仅調用受保護控制面動作，不直接開放真實執行權限</p>
         </div>
       </div>
       <div class="actions">
@@ -171,53 +171,53 @@
           <strong id="actionSummaryAudit">-</strong>
         </div>
       </div>
-      <div id="actionSummaryHint" class="action-hint">尚未执行动作 / No action yet.</div>
+      <div id="actionSummaryHint" class="action-hint">尚未執行動作 / No action yet.</div>
       <details class="raw-toggle" id="actionRawToggle">
-        <summary>查看原始动作响应 / View raw action response</summary>
-        <pre id="actionResultBox">尚未执行动作 / No action yet.</pre>
+        <summary>查看原始動作響應 / View raw action response</summary>
+        <pre id="actionResultBox">尚未執行動作 / No action yet.</pre>
       </details>
     </section>
 
-    <!-- ── Paper 模拟 / Paper Trading ──────────────────────────────────────── -->
+    <!-- ── Paper 模擬 / Paper Trading ──────────────────────────────────────── -->
     <section class="card paper-trading-section">
       <div class="card-header-row">
         <div>
-          <h2>Paper 模拟 / Paper Trading</h2>
-          <p class="subtle">本地仿真引擎 — 不会发送真实订单 / Local simulation engine — no real orders are placed</p>
+          <h2>Paper 模擬 / Paper Trading</h2>
+          <p class="subtle">本地仿真引擎 — 不會發送真實訂單 / Local simulation engine — no real orders are placed</p>
         </div>
-        <div id="paperSessionBadge" class="status-chip neutral">未启动 / Inactive</div>
+        <div id="paperSessionBadge" class="status-chip neutral">未啟動 / Inactive</div>
       </div>
-      <div class="paper-warning-banner">⚠ 所有数据均为模拟，不影响真实账户 / All data is simulated, no impact on real account</div>
+      <div class="paper-warning-banner">⚠ 所有數據均为模擬，不影响真實賬户 / All data is simulated, no impact on real account</div>
       <div class="paper-session-controls" id="paperSessionControls">
-        <button class="paper-btn paper-start-btn" data-paper-action="start">开始交易 / Start</button>
+        <button class="paper-btn paper-start-btn" data-paper-action="start">開始交易 / Start</button>
         <button class="paper-btn paper-pause-btn" data-paper-action="pause" disabled>暂停 / Pause</button>
-        <button class="paper-btn paper-resume-btn" data-paper-action="resume" disabled>恢复 / Resume</button>
-        <button class="paper-btn paper-stop-btn" data-paper-action="stop" disabled>结束 / Stop</button>
+        <button class="paper-btn paper-resume-btn" data-paper-action="resume" disabled>恢復 / Resume</button>
+        <button class="paper-btn paper-stop-btn" data-paper-action="stop" disabled>結束 / Stop</button>
       </div>
       <div class="paper-market-feed-section" id="paperMarketFeedSection">
-        <h3>实时行情 / Market Feed</h3>
+        <h3>實時行情 / Market Feed</h3>
         <div class="paper-market-feed-controls">
-          <button class="paper-btn paper-feed-start-btn" id="paperFeedStartBtn" data-feed-action="start">启动行情流 / Start Feed</button>
+          <button class="paper-btn paper-feed-start-btn" id="paperFeedStartBtn" data-feed-action="start">啟動行情流 / Start Feed</button>
           <button class="paper-btn paper-feed-stop-btn" id="paperFeedStopBtn" data-feed-action="stop" disabled>停止行情流 / Stop Feed</button>
           <div id="paperFeedStatusBadge" class="status-chip neutral">未连接 / Disconnected</div>
         </div>
         <div class="paper-market-feed-info" id="paperMarketFeedInfo">
-          <div class="paper-feed-prices" id="paperFeedPrices">等待行情数据 / Waiting for market data...</div>
+          <div class="paper-feed-prices" id="paperFeedPrices">等待行情數據 / Waiting for market data...</div>
           <div class="paper-feed-stats" id="paperFeedStats"></div>
         </div>
       </div>
       <div class="paper-content-grid" id="paperContentGrid">
         <div class="paper-pnl-card" id="paperPnlCard">
           <h3>Paper PnL</h3>
-          <div class="paper-pnl-items" id="paperPnlItems">等待数据 / Waiting...</div>
+          <div class="paper-pnl-items" id="paperPnlItems">等待數據 / Waiting...</div>
         </div>
         <div class="paper-positions-card" id="paperPositionsCard">
-          <h3>持仓 / Positions</h3>
-          <div id="paperPositionsList">无持仓 / No positions</div>
+          <h3>持倉 / Positions</h3>
+          <div id="paperPositionsList">無持倉 / No positions</div>
         </div>
       </div>
       <div class="paper-orders-section">
-        <h3>订单 / Orders</h3>
+        <h3>訂單 / Orders</h3>
         <div class="paper-order-form" id="paperOrderForm">
           <input id="paperSymbol" type="text" placeholder="Symbol (e.g. BTCUSDT)" value="BTCUSDT" />
           <select id="paperSide"><option value="Buy">Buy</option><option value="Sell">Sell</option></select>
@@ -226,39 +226,39 @@
           <input id="paperPrice" type="number" placeholder="Price (limit)" step="0.01" />
           <button class="paper-btn" id="paperSubmitOrder">提交 / Submit</button>
         </div>
-        <div id="paperOrdersList">无订单 / No orders</div>
+        <div id="paperOrdersList">無訂單 / No orders</div>
       </div>
       <details class="raw-toggle">
-        <summary>成交历史 / Fill History</summary>
-        <div id="paperFillsList">无成交 / No fills</div>
+        <summary>成交歷史 / Fill History</summary>
+        <div id="paperFillsList">無成交 / No fills</div>
       </details>
       <details class="raw-toggle">
-        <summary>审计记录 / Audit Trail</summary>
-        <pre id="paperAuditTrail">无记录 / No records</pre>
+        <summary>審計記錄 / Audit Trail</summary>
+        <pre id="paperAuditTrail">無記錄 / No records</pre>
       </details>
     </section>
 
     <section class="card">
       <div class="card-header-row">
         <div>
-          <h2>调试原文 / Debug Raw JSON</h2>
-          <p class="subtle">默认折叠，仅在需要审计或排错时展开</p>
+          <h2>調試原文 / Debug Raw JSON</h2>
+          <p class="subtle">默認折叠，仅在需要審計或排錯時展開</p>
         </div>
       </div>
 
       <details class="raw-toggle">
         <summary>控制平面原文 / Control Plane Raw</summary>
-        <pre id="controlPlaneBox">等待加载 / Waiting...</pre>
+        <pre id="controlPlaneBox">等待載入 / Waiting...</pre>
       </details>
 
       <details class="raw-toggle">
-        <summary>审计摘要原文 / Audit Raw</summary>
-        <pre id="auditBox">等待加载 / Waiting...</pre>
+        <summary>審計摘要原文 / Audit Raw</summary>
+        <pre id="auditBox">等待載入 / Waiting...</pre>
       </details>
 
       <details class="raw-toggle">
-        <summary>系统总览原文 / Overview Raw</summary>
-        <pre id="overviewBox">等待加载 / Waiting...</pre>
+        <summary>系統總览原文 / Overview Raw</summary>
+        <pre id="overviewBox">等待載入 / Waiting...</pre>
       </details>
     </section>
   </main>

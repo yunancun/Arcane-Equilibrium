@@ -1,6 +1,6 @@
 /**
  * Risk Tab — Inline script extracted from tab-risk.html.
- * 風控頁面 — 從 tab-risk.html 提取的内嵌腳本。
+ * 風控頁面 — 從 tab-risk.html 提取的內嵌腳本。
  *
  * MODULE_NOTE (EN): Extracted from tab-risk.html (FIX-08 file size).
  * MODULE_NOTE (中): 從 tab-risk.html 提取（FIX-08 文件大小）。
@@ -102,43 +102,43 @@ $('rg-explainer').innerHTML = ocExplain(
 );
 
 $('explain-risk').innerHTML = ocExplain(
-  '风控系统保护你的资金安全。它使用三层保护：品类限制（最严格）、全局限制（中等）、AI 可调参数（最灵活）。当风险过高时，系统会自动降低仓位或暂停交易。',
-  '风控框架采用 P0/P1/P2 三层架构。P0 是按品类的硬上限（如单品种最大持仓、资金费率上限），由人工设定且不可被 AI 覆盖。P1 是全局限制（最大杠杆、最大回撤、最大敞口百分比）。P2 是 AI 可自主调整的参数（止损百分比、跟踪止损、仓位大小），Agent 会根据市场 regime 和历史表现动态调整这些参数。'
+  '風控系統保護你的資金安全。它使用三層保護：品類限制（最严格）、全局限制（中等）、AI 可調参數（最灵活）。当風險過高時，系統會自動降低倉位或暂停交易。',
+  '風控框架采用 P0/P1/P2 三層架構。P0 是按品類的硬上限（如單品種最大持倉、資金費率上限），由人工設定且不可被 AI 覆盖。P1 是全局限制（最大杠杆、最大回撤、最大敞口百分比）。P2 是 AI 可自主調整的参數（止損百分比、跟踪止損、倉位大小），Agent 会根據市场 regime 和歷史表現動態調整這些参數。'
 );
 
 $('explain-p0').innerHTML = ocExplain(
-  '按交易品类设定的硬性限制，是最严格的一层保护。',
-  'P0 限制包括：单品种最大持仓量、资金费率阈值（超过此值不开新仓）、最大持仓数量。这些参数由人工设定，AI 不能修改。'
+  '按交易品類設定的硬性限制，是最严格的一層保護。',
+  'P0 限制包括：單品種最大持倉量、資金費率阈值（超過此值不開新倉）、最大持倉數量。這些参數由人工設定，AI 不能修改。'
 );
 
 $('explain-p1').innerHTML = ocExplain(
-  '全局风控参数，适用于所有交易。',
-  'P1 参数包括：最大杠杆倍数、最大总回撤百分比（触发后暂停交易）、最大总敞口百分比（所有持仓市值占账户比例上限）、单笔最大风险百分比。'
+  '全局風控参數，適用于所有交易。',
+  'P1 参數包括：最大杠杆倍數、最大總回撤百分比（触发后暂停交易）、最大總敞口百分比（所有持倉市值占賬户比例上限）、單笔最大風險百分比。'
 );
 
 $('explain-p2').innerHTML = ocExplain(
-  'AI Agent 可以根据市场状态自动调整的参数。',
-  'P2 参数包括：止损百分比、跟踪止损距离、仓位大小系数。AI 根据市场波动率、趋势强度、近期盈亏来动态调整这些参数。例如在高波动市场中，AI 会自动缩小仓位、收紧止损。'
+  'AI Agent 可以根據市场状态自動調整的参數。',
+  'P2 参數包括：止損百分比、跟踪止損距离、倉位大小系數。AI 根據市场波動率、趋势强度、近期盈亏来動態調整這些参數。例如在高波動市场中，AI 會自動縮小倉位、收紧止損。'
 );
 
 $('explain-stops').innerHTML = ocExplain(
-  '在这里设置止损硬限制。修改左侧数值后点击"保存设置"即可生效。这些是人工设定的硬边界，AI Agent 不能超越这些限制。',
-  'Hard Stop 是单笔最大亏损百分比，触发后立即平仓不可撤销。Trailing Stop 会跟随最高价格移动，从最高点回撤超过设定百分比时触发。Time Stop 防止长时间持仓占用资金。Max Session Drawdown 是账户级别的回撤保护，触发后暂停所有交易。Max Leverage 限制单笔最大杠杆。Daily Loss 是当日亏损上限。'
+  '在這裡設置止損硬限制。修改左侧數值后點擊"保存設置"即可生效。這些是人工設定的硬边界，AI Agent 不能超越這些限制。',
+  'Hard Stop 是單笔最大亏損百分比，触发后立即平倉不可撤銷。Trailing Stop 会跟随最高價格移動，从最高点回撤超過設定百分比時触发。Time Stop 防止长時間持倉占用資金。Max Session Drawdown 是賬户级别的回撤保護，触发后暂停所有交易。Max Leverage 限制單笔最大杠杆。Daily Loss 是当日亏損上限。'
 );
 
 $('explain-ai-consult').innerHTML = ocExplain(
-  '让 AI 分析你当前的交易状况并给出止损建议。选择模型和风格，点击"询问"按钮，AI 会根据你的持仓、市场状态和历史表现给出具体建议。你可以选择是否采纳。',
-  'AI 会获取以下信息来生成建议：当前所有持仓的详情、最近交易的胜率和回撤数据、当前市场 regime（趋势/震荡）、波动率水平。基于这些信息，AI 会推荐具体的止损百分比、跟踪止损距离和时间止损设置。不同模型的深度和成本不同：Haiku 最快最便宜但分析较浅，Opus 最深入但成本较高。'
+  '讓 AI 分析你當前的交易状况并給出止損建議。選擇模型和風格，點擊"詢問"按钮，AI 会根據你的持倉、市场状态和歷史表現給出具體建議。你可以選擇是否采納。',
+  'AI 会获取以下信息来生成建議：當前所有持倉的详情、最近交易的勝率和回撤數據、當前市场 regime（趋势/震荡）、波動率水平。基于這些信息，AI 会推荐具體的止損百分比、跟踪止損距离和時間止損設置。不同模型的深度和成本不同：Haiku 最快最便宜但分析较浅，Opus 最深入但成本较高。'
 );
 
 $('explain-ai-risk').innerHTML = ocExplain(
-  'AI 基于当前市场状况给出的风控建议和压力评估。',
-  'AI 风控上下文包含：当前风险压力水平（综合回撤、波动率、连续亏损等因素）、建议的仓位调整、影响因素清单。这些信息供 P2 层的自动调整参考。'
+  'AI 基于當前市场状况給出的風控建議和壓力評估。',
+  'AI 風控上下文包含：當前風險壓力水平（綜合回撤、波動率、連續亏損等因素）、建議的倉位調整、影响因素清單。這些信息供 P2 層的自動調整参考。'
 );
 
 $('explain-danger').innerHTML = ocExplain(
-  '这些是紧急操作按钮。只有在你确定系统误判时才使用。"Reset Cooldown" 清除连续亏损后的冷却期，允许继续交易。"Unhalt Session" 解除熔断保护，恢复被暂停的交易会话。',
-  '冷却期是连续亏损达到阈值后自动触发的保护机制，防止情绪化追单。熔断是回撤达到 P1 设定阈值后的强制暂停。手动解除这些保护意味着你承认当前的触发条件是合理的但你选择继续——这需要格外谨慎。'
+  '這些是紧急操作按钮。只有在你确定系統誤判時才使用。"Reset Cooldown" 清除連續亏損后的冷却期，允許繼續交易。"Unhalt Session" 解除熔斷保護，恢復被暂停的交易會話。',
+  '冷却期是連續亏損达到阈值后自動触发的保護機制，防止情緒化追單。熔斷是回撤达到 P1 設定阈值后的强制暂停。手動解除這些保護意味着你承認當前的触发條件是合理的但你選擇繼續——這需要格外謹慎。'
 );
 
 // ─── Save Risk Config ─────────────────────────────────────────
@@ -340,7 +340,7 @@ function _resetDiffHighlights() {
 }
 
 // _btnSaving — helper: disable btn and show loading text during async save
-// _btnSaving — 辅助函数：保存期间禁用按钮并显示"储存中..."
+// _btnSaving — 辅助函數：保存期間禁用按钮并顯示"储存中..."
 function _btnSaving(btn, saving) {
   if (!btn) return;
   if (saving) {
@@ -355,7 +355,7 @@ function _btnSaving(btn, saving) {
   }
 }
 
-// saveStopSettings — 止损管理器专用（Stop Manager 区块）
+// saveStopSettings — 止損管理器专用（Stop Manager 區块）
 // Routes to the currently selected engine (paper/demo/live). Live engine triggers confirm dialog.
 // 路由到當前選擇的引擎（paper/demo/live）。Live 引擎觸發確認對話框。
 async function saveStopSettings(btn) {
@@ -381,7 +381,7 @@ async function _doSaveStopSettings(btn) {
     const d = await ocPost(_engineSaveUrl(), body);
     if (d) {
       const engLabel = _selectedRiskEngine.toUpperCase();
-      ocToast('[' + engLabel + '] 止损设置已保存 / Stop settings saved', 'success');
+      ocToast('[' + engLabel + '] 止損設置已保存 / Stop settings saved', 'success');
       _riskFormDirty = false; _resetDiffHighlights(); loadAll();
     } else ocToast('Save failed / 保存失败', 'error');
   } finally {
@@ -389,7 +389,7 @@ async function _doSaveStopSettings(btn) {
   }
 }
 
-// savePositionSettings — 仓位控制专用（Position Sizing & Exposure 区块）
+// savePositionSettings — 倉位控制专用（Position Sizing & Exposure 區块）
 // Routes to the currently selected engine. Live engine triggers confirm dialog.
 // 路由到當前選擇的引擎。Live 引擎觸發確認對話框。
 async function savePositionSettings(btn) {
@@ -420,7 +420,7 @@ async function _doSavePositionSettings(btn) {
     const d = await ocPost(_engineSaveUrl(), body);
     if (d) {
       const engLabel = _selectedRiskEngine.toUpperCase();
-      ocToast('[' + engLabel + '] 仓位设置已保存 / Position settings saved', 'success');
+      ocToast('[' + engLabel + '] 倉位設置已保存 / Position settings saved', 'success');
       _riskFormDirty = false; _resetDiffHighlights(); loadAll();
     } else ocToast('Save failed / 保存失败', 'error');
   } finally {
@@ -428,7 +428,7 @@ async function _doSavePositionSettings(btn) {
   }
 }
 
-// saveCooldownSettings — 冷却保护专用（Loss Cooldown 区块）
+// saveCooldownSettings — 冷却保護专用（Loss Cooldown 區块）
 // Routes to the currently selected engine. Live engine triggers confirm dialog.
 // 路由到當前選擇的引擎。Live 引擎觸發確認對話框。
 async function saveCooldownSettings(btn) {
@@ -444,7 +444,7 @@ async function _doSaveCooldownSettings(btn) {
     const d = await ocPost(_engineSaveUrl(), body);
     if (d) {
       const engLabel = _selectedRiskEngine.toUpperCase();
-      ocToast('[' + engLabel + '] 冷却设置已保存 / Cooldown settings saved', 'success');
+      ocToast('[' + engLabel + '] 冷却設置已保存 / Cooldown settings saved', 'success');
       _riskFormDirty = false; _resetDiffHighlights(); loadAll();
     } else ocToast('Save failed / 保存失败', 'error');
   } finally {
@@ -457,7 +457,7 @@ async function saveH0ShadowMode() {
   const doSave = async () => {
     const d = await ocPost(_engineSaveUrl(), { h0_shadow_mode: enabled });
     const engLabel = _selectedRiskEngine.toUpperCase();
-    if (d) { ocToast('[' + engLabel + '] ' + (enabled ? 'H0 Shadow Mode ON — 仅观察不阻断' : 'H0 Shadow Mode OFF — 正式门控'), 'success'); }
+    if (d) { ocToast('[' + engLabel + '] ' + (enabled ? 'H0 Shadow Mode ON — 仅觀察不阻斷' : 'H0 Shadow Mode OFF — 正式门控'), 'success'); }
     else ocToast('Save failed', 'error');
   };
   _wrapLiveSave(doSave, 'H0 Shadow Mode');
@@ -471,7 +471,7 @@ async function askAIStopLoss() {
   const focus = $('ai-focus').value;
   $('btn-ask-ai').disabled = true;
   $('btn-ask-ai').textContent = '⏳ Asking AI...';
-  $('ai-advice-body').textContent = '正在查询 AI，请稍候...\nQuerying AI, please wait...';
+  $('ai-advice-body').textContent = '正在查詢 AI，請稍候...\nQuerying AI, please wait...';
 
   // Gather context data
   const [riskD, sessD, stratD] = await Promise.allSettled([
@@ -490,10 +490,10 @@ async function askAIStopLoss() {
   if (!orchestrator || Object.keys(orchestrator).length === 0) missingContext.push('strategy status endpoint unavailable');
   if (missingContext.length === 3) {
     $('ai-advice-body').textContent =
-      '无法取得后端风控上下文，已停止 AI 咨询，避免使用伪造的 0 值。\n' +
+      '無法取得后端風控上下文，已停止 AI 諮詢，避免使用伪造的 0 值。\n' +
       'Backend risk context is unavailable. AI consultation was not sent to avoid fabricated zero values.';
     $('btn-ask-ai').disabled = false;
-    $('btn-ask-ai').textContent = '🤖 向 AI 询问止损建议 / Ask AI';
+    $('btn-ask-ai').textContent = '🤖 向 AI 詢問止損建議 / Ask AI';
     return;
   }
 
@@ -557,14 +557,14 @@ Explain your reasoning briefly. Answer in both Chinese and English.`;
       $('ai-advice-body').textContent = result;
       $('btn-apply-ai').style.display = '';
     } else {
-      $('ai-advice-body').textContent = 'AI 查询失败。请检查 AI 引擎是否已配置。\nAI query failed. Check if AI engine is configured.';
+      $('ai-advice-body').textContent = 'AI 查詢失败。請檢查 AI 引擎是否已配置。\nAI query failed. Check if AI engine is configured.';
     }
   } catch(e) {
     $('ai-advice-body').textContent = 'Error: ' + e.message;
   }
 
   $('btn-ask-ai').disabled = false;
-  $('btn-ask-ai').textContent = '🤖 向 AI 询问止损建议 / Ask AI';
+  $('btn-ask-ai').textContent = '🤖 向 AI 詢問止損建議 / Ask AI';
 }
 
 // D-01 fix: Copy AI advice to clipboard for reference while adjusting values.
@@ -573,12 +573,12 @@ function applyAIAdvice() {
   const body = $('ai-advice-body');
   const text = body ? body.textContent : '';
   if (!text || !navigator.clipboard) {
-    ocToast('No advice to copy / 无建议可复制', 'info');
+    ocToast('No advice to copy / 無建議可復制', 'info');
     return;
   }
   navigator.clipboard.writeText(text).then(
-    () => ocToast('AI advice copied to clipboard / 建议已复制到剪贴板', 'success'),
-    () => ocToast('Copy failed — select text manually / 复制失败，请手动选取', 'info')
+    () => ocToast('AI advice copied to clipboard / 建議已復制到剪貼板', 'success'),
+    () => ocToast('Copy failed — select text manually / 復制失败，請手動選取', 'info')
   );
 }
 
@@ -626,8 +626,8 @@ async function loadRiskStatus() {
         sessState = (pd2.data.session && pd2.data.session.session_state) || 'unknown';
       }
     }
-    const stateLabels = { active: '运行中', observing: '观察中', paused: '已暂停', offline: '离线', idle: '未启动', stopped: '已停止' };
-    engineEl.textContent = engineAvail ? '✓ 运行中' : '✗ 未连接';
+    const stateLabels = { active: '運行中', observing: '觀察中', paused: '已暂停', offline: '离線', idle: '未啟動', stopped: '已停止' };
+    engineEl.textContent = engineAvail ? '✓ 運行中' : '✗ 未连接';
     engineEl.className = 'oc-chip ' + (engineAvail ? 'oc-chip-good' : 'oc-chip-bad');
     modeEl.textContent = engineAvail
       ? '| ' + probeSource.toUpperCase() + ': ' + (stateLabels[sessState] || sessState)
@@ -787,14 +787,14 @@ async function loadRiskConfig() {
   ocSetText('s-hard', hardStop + '%');
   const tpOn = gc.tp_enabled === true || (gc.tp_enabled == null && rStop.take_profit_pct != null);
   const tpVal = gc.max_take_profit_pct ?? rStop.take_profit_pct ?? 20;
-  ocSetText('s-tp', tpOn ? (tpVal + '%') : '关闭 / OFF');
+  ocSetText('s-tp', tpOn ? (tpVal + '%') : '關閉 / OFF');
   $('s-tp').style.color = tpOn ? 'var(--green)' : 'var(--text-dim)';
   const trailingVal = gc.trailing_stop_pct ?? rStop.trailing_stop_pct ?? ap.trailing_stop_distance_pct ?? null;
-  ocSetText('s-trailing', trailingVal != null && trailingVal !== '' ? trailingVal + '%' : '关闭 / OFF');
+  ocSetText('s-trailing', trailingVal != null && trailingVal !== '' ? trailingVal + '%' : '關閉 / OFF');
   const atrMult = gc.atr_multiplier ?? rStop.atr_multiplier ?? null;
-  ocSetText('s-atr', atrMult != null && atrMult !== '' ? atrMult + 'x' : '关闭 / OFF');
+  ocSetText('s-atr', atrMult != null && atrMult !== '' ? atrMult + 'x' : '關閉 / OFF');
   const timeStop = gc.max_holding_hours ?? rStop.time_stop_hours ?? null;
-  ocSetText('s-time', timeStop != null ? timeStop + 'h' : '关闭 / OFF');
+  ocSetText('s-time', timeStop != null ? timeStop + 'h' : '關閉 / OFF');
   const maxDD = gc.max_session_drawdown_pct ?? rGuard.max_drawdown_pct ?? 15;
   ocSetText('s-drawdown', maxDD + '%');
   const maxLev = gc.max_leverage ?? rGuard.max_leverage ?? 20;
@@ -835,7 +835,7 @@ async function loadRiskConfig() {
   const h0Shadow = gc.h0_shadow_mode ?? true;
   $('in-h0-shadow').checked = h0Shadow;
   const h0El = $('h0-status');
-  h0El.textContent = h0Shadow ? 'Shadow (观察)' : 'Active (门控)';
+  h0El.textContent = h0Shadow ? 'Shadow (觀察)' : 'Active (门控)';
   h0El.className = 'oc-chip ' + (h0Shadow ? 'oc-chip-warn' : 'oc-chip-good');
 
   // Populate input fields — `gc` is the fresh Rust ConfigStore snapshot (post 1C-3 single source
@@ -937,18 +937,18 @@ async function loadDynamicRisk() {
   const minTrades      = dr.min_trades || 50;
   const available      = dr.available !== false; // undefined ⇒ true (happy path)
   if (!available) {
-    statusEl.textContent = '引擎离线 / Engine offline';
+    statusEl.textContent = '引擎离線 / Engine offline';
     statusEl.className = 'oc-chip oc-chip-bad';
   } else if (!dr.enabled) {
     statusEl.textContent = '已禁用';
     statusEl.className = 'oc-chip oc-chip-neutral';
   } else if (tradesInWindow < minTrades) {
-    statusEl.textContent = '等待数据(' + tradesInWindow + '/' + minTrades + '笔)';
+    statusEl.textContent = '等待數據(' + tradesInWindow + '/' + minTrades + '笔)';
     statusEl.className = 'oc-chip oc-chip-warn';
   } else {
     const sharpe = (dr.last_sharpe !== undefined && dr.last_sharpe !== null)
       ? 'Sharpe=' + dr.last_sharpe.toFixed(2)
-      : '运行中';
+      : '運行中';
     statusEl.textContent = sharpe + ' · ' + tradesInWindow + '笔';
     statusEl.className = 'oc-chip oc-chip-good';
   }
@@ -960,36 +960,36 @@ async function toggleDynamicRisk() {
   const d = await ocPost('/api/v1/strategy/dynamic-risk/toggle', { enabled: enabled, engine: engine });
   if (d) {
     if (enabled) {
-      ocToast('动态风控已启用 (' + engine + ') — 数据充足后自动生效', 'success');
+      ocToast('動態風控已啟用 (' + engine + ') — 數據充足后自動生效', 'success');
     } else {
-      ocToast('动态风控已禁用 (' + engine + ') — 已恢复基准值', 'success');
+      ocToast('動態風控已禁用 (' + engine + ') — 已恢復基准值', 'success');
     }
     loadDynamicRisk();
   } else {
     // Revert toggle on failure
     document.getElementById('dr-toggle').checked = !enabled;
-    ocToast('设置失败', 'error');
+    ocToast('設置失败', 'error');
   }
 }
 
 $('explain-position-sizing').innerHTML = ocExplain(
-  '控制每笔交易的仓位大小和总体曝险。P1 Risk 决定每笔交易最大投入比例，过低会导致高价资产（如 BTC）无法下单。',
-  'P1 Per-Trade Risk 是 Intent Processor 中的硬上限（p1_risk_pct），所有交易的仓位 = min(Kelly 计算量, 余额 × P1% / 价格)。BTC @$67K 时，P1=2% 对 $1000 余额只能下 0.0003 BTC（低于最小手数 0.001），需 7% 以上才能下单。Max Single Position 限制单仓占比。Total Exposure 限制所有仓位市值总和。Same-Direction 由 Guardian 检查，防止全做多或全做空的方向集中风险。'
+  '控制每笔交易的倉位大小和總體曝險。P1 Risk 決定每笔交易最大投入比例，過低会导致高價資產（如 BTC）無法下單。',
+  'P1 Per-Trade Risk 是 Intent Processor 中的硬上限（p1_risk_pct），所有交易的倉位 = min(Kelly 計算量, 余额 × P1% / 價格)。BTC @$67K 時，P1=2% 對 $1000 余额只能下 0.0003 BTC（低于最小手數 0.001），需 7% 以上才能下單。Max Single Position 限制單倉占比。Total Exposure 限制所有倉位市值總和。Same-Direction 由 Guardian 檢查，防止全做多或全做空的方向集中風險。'
 );
 
 $('explain-cooldown').innerHTML = ocExplain(
-  '连续亏损后自动进入冷却期，暂时禁止开新仓。防止情绪化追单造成更大亏损。冷却期到期自动恢复。',
-  '当连续亏损次数达到 Trigger Count 时，系统进入冷却状态，持续 Duration 分钟。冷却期间：不允许开新仓，但已有仓位的止损/止盈照常执行。冷却到期后自动恢复交易。也可在 Danger Zone 手动重置。建议保守设置：3 次 / 30 分钟。'
+  '連續亏損后自動進入冷却期，暂時禁止開新倉。防止情緒化追單造成更大亏損。冷却期到期自動恢復。',
+  '当連續亏損次數达到 Trigger Count 時，系統進入冷却状态，持續 Duration 分鐘。冷却期間：不允許開新倉，但已有倉位的止損/止盈照常執行。冷却到期后自動恢復交易。也可在 Danger Zone 手動重置。建議保守設置：3 次 / 30 分鐘。'
 );
 
 $('explain-h0').innerHTML = ocExplain(
-  'H0 是引擎的第一道交易准入检查，在任何 AI 治理层之前运行。检查数据新鲜度、系统健康、风险包络等。',
-  'H0 Gate 由 5 个子检查组成：(1) Freshness — tick 数据是否过期，(2) Health — CPU/内存/DB 延迟，(3) Eligibility — 币种/品类白名单，(4) Risk Envelope — 持仓数和曝险上限，(5) Cooldown — 冷却期。Shadow Mode 下，所有检查照常运行并记录日志，但不会真正阻止交易。适合初期调优阶段使用，确认规则合理后关闭 Shadow 进入正式门控。'
+  'H0 是引擎的第一道交易准入檢查，在任何 AI 治理層之前運行。檢查數據新鲜度、系統健康、風險包絡等。',
+  'H0 Gate 由 5 個子檢查組成：(1) Freshness — tick 數據是否過期，(2) Health — CPU/內存/DB 延遲，(3) Eligibility — 币種/品類白名單，(4) Risk Envelope — 持倉數和曝險上限，(5) Cooldown — 冷却期。Shadow Mode 下，所有檢查照常運行并記錄日志，但不會真正阻止交易。適合初期調優階段使用，确認規則合理后關閉 Shadow 進入正式门控。'
 );
 
 $('explain-auto-adjust').innerHTML = ocExplain(
-  'Agent 根据交易表现自动调整参数。Sharpe 动态风控在累积足够数据后自动启用，表现好时增加风险，表现差时自动缩减。',
-  'Sharpe 动态风控调整 risk_per_trade_pct（每笔风险比例），与 ATR 止损互补：Sharpe 管「投多少」，ATR 管「止损放多远」。Sharpe>1 时逐步加仓（最高 5%），Sharpe<0 时逐步减仓（最低 1%），每次最多 ±0.5%，每 5 分钟调一次。需要 50 笔以上交易数据才会启用。'
+  'Agent 根據交易表現自動調整参數。Sharpe 動態風控在累積足夠數據后自動啟用，表現好時增加風險，表現差時自動縮减。',
+  'Sharpe 動態風控調整 risk_per_trade_pct（每笔風險比例），与 ATR 止損互补：Sharpe 管「投多少」，ATR 管「止損放多遠」。Sharpe>1 時逐步加倉（最高 5%），Sharpe<0 時逐步减倉（最低 1%），每次最多 ±0.5%，每 5 分鐘調一次。需要 50 笔以上交易數據才会啟用。'
 );
 
 async function loadAll() {

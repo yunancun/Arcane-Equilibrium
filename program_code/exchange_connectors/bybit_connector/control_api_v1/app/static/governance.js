@@ -1,6 +1,6 @@
 /**
  * 玄衡 · Arcane Equilibrium — Governance API Module
- * 治理系统 API 模块：授权、风控、租约、对账
+ * 治理系統 API 模块：授權、風控、租約、對賬
  */
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ async function govPostApprove(note) {
 
 async function govRequestAuthorization(ttlHours, reason) {
   // POST /api/v1/governance/auth/request — create DRAFT → PENDING_APPROVAL
-  // 创建草稿授权并提交待审批（DRAFT → PENDING_APPROVAL）
+  // 建立草稿授權并提交待審批（DRAFT → PENDING_APPROVAL）
   return ocPost('/api/v1/governance/auth/request', {
     scope: {},
     ttl_hours: ttlHours || 24,
@@ -83,12 +83,12 @@ async function govPostOverride(targetLevel, reason) {
 
 async function govPostReconcile(reason) {
   // POST /api/v1/governance/reconcile
-  // 对账前先拉取 paper engine 当前状态填充 paper_state
+  // 對賬前先拉取 paper engine 當前状态填充 paper_state
   // Before reconciling, fetch current paper engine metrics to populate paper_state
 
   let paperState = {};
   try {
-    // 从 /api/v1/paper/status 获取仓位、余额和订单数量
+    // 从 /api/v1/paper/status 获取倉位、余额和訂單數量
     // Fetch positions, balance, total_orders from paper engine status
     const ps = await ocApi('/api/v1/paper/status');
     if (ps && ps.data) {
@@ -100,7 +100,7 @@ async function govPostReconcile(reason) {
       };
     }
   } catch (_e) {
-    // paper status 获取失败时回退到空对象，不阻断对账
+    // paper status 获取失败時回退到空對象，不阻斷對賬
     // If paper status fetch fails, fall back to empty dict — do not block reconcile
     paperState = {};
   }
@@ -124,25 +124,25 @@ async function govPostHealthCheck() {
 
 async function govGetAuditChanges(limit) {
   // GET /api/v1/governance/audit/changes — real persistent audit log
-  // 获取真实持久化审计变更日志（ChangeAuditLog 写盘记录）
+  // 获取真實持久化審計变更日志（ChangeAuditLog 写盤記錄）
   return ocApi('/api/v1/governance/audit/changes?limit=' + (limit || 100));
 }
 
 async function govGetEvents(limit) {
   // GET /api/v1/governance/events — server-side governance event history
-  // 获取服务端治理事件历史（跨重启持久化）
+  // 获取服務端治理事件歷史（跨重啟持久化）
   return ocApi('/api/v1/governance/events?limit=' + (limit || 50));
 }
 
 async function govGetLearningTier() {
   // GET /api/v1/governance/learning-tier/status — tier level, metrics, promotion eligibility
-  // 获取学习层级状态：当前层级、观察数、胜率、晋升资格
+  // 获取學習層级状态：當前層级、觀察數、勝率、晋升資格
   return ocApi('/api/v1/governance/learning-tier/status');
 }
 
 async function govPromoteLearningTier(targetTier, reason) {
   // POST /api/v1/governance/learning-tier/promote — operator manual promotion
-  // 操作员手动晋升学习层级（需 Operator 角色）
+  // 操作員手動晋升學習層级（需 Operator 角色）
   return ocPost('/api/v1/governance/learning-tier/promote', {
     target_tier: targetTier,
     reason: reason || 'manual_operator_promotion',

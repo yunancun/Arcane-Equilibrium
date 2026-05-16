@@ -11,29 +11,29 @@
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <!-- ═══ Quick-nav bar: Risk Overview / Risk Settings + Danger Zone shortcut ═══ -->
-<!-- 子分页导航 — 风险总览(只读状态) / 参数设置(可编辑配置) + Danger Zone 快捷入口 -->
+<!-- 子分页导航 — 風險總览(只读状态) / 参數設置(可编辑配置) + Danger Zone 快捷入口 -->
 <div style="display:flex;align-items:center;gap:8px;padding:4px 0 2px;flex-wrap:wrap">
-  <button id="rtab-monitor" class="oc-btn" style="background:rgba(56,139,253,0.15);border-color:var(--blue);color:var(--blue)" onclick="switchRiskTab('monitor')" title="只读风险总览：风险状态、治理等级、P0/P1/P2 配置查看 / Read-only: risk status, governor, P0/P1/P2 view">
-    &#x1F4CA; 风险总览 / Risk Overview
+  <button id="rtab-monitor" class="oc-btn" style="background:rgba(56,139,253,0.15);border-color:var(--blue);color:var(--blue)" onclick="switchRiskTab('monitor')" title="只读風險總览：風險状态、治理等级、P0/P1/P2 配置查看 / Read-only: risk status, governor, P0/P1/P2 view">
+    &#x1F4CA; 風險總览 / Risk Overview
   </button>
-  <button id="rtab-config" class="oc-btn" style="opacity:0.55" onclick="switchRiskTab('config')" title="参数设置：止损、仓位、冷却、H0、AI 建议 / Editable: stop, sizing, cooldown, H0, AI">
-    &#x2699;&#xFE0F; 参数设置 / Risk Settings
+  <button id="rtab-config" class="oc-btn" style="opacity:0.55" onclick="switchRiskTab('config')" title="参數設置：止損、倉位、冷却、H0、AI 建議 / Editable: stop, sizing, cooldown, H0, AI">
+    &#x2699;&#xFE0F; 参數設置 / Risk Settings
   </button>
   <span style="flex:1"></span>
-  <a href="#danger-zone" onclick="switchRiskTab('config');setTimeout(function(){var z=document.getElementById('danger-zone');if(z)z.scrollIntoView({behavior:'smooth',block:'start'});},0);return false" style="font-size:12px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid rgba(248,81,73,0.4);border-radius:6px;background:rgba(248,81,73,0.08)" title="跳转到危险操作区 / Jump to Danger Zone">
-    &#x26A0;&#xFE0F; 危险操作 / Danger Zone &#x2193;
+  <a href="#danger-zone" onclick="switchRiskTab('config');setTimeout(function(){var z=document.getElementById('danger-zone');if(z)z.scrollIntoView({behavior:'smooth',block:'start'});},0);return false" style="font-size:12px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid rgba(248,81,73,0.4);border-radius:6px;background:rgba(248,81,73,0.08)" title="跳转到危險操作區 / Jump to Danger Zone">
+    &#x26A0;&#xFE0F; 危險操作 / Danger Zone &#x2193;
   </a>
 </div>
 
-<!-- Monitor Group: read-only status view / 只读监控分组 -->
+<!-- Monitor Group: read-only status view / 只读監控分組 -->
 <div id="risk-monitor-group">
 
 <!-- ═══ Risk Status Hero ═══ -->
 <div class="oc-card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div>
-      <h2>&#x1F6E1; 风控状态 / Risk Status</h2>
-      <div class="subtitle">风险压力、回撤、熔断状态</div>
+      <h2>&#x1F6E1; 風控状态 / Risk Status</h2>
+      <div class="subtitle">風險壓力、回撤、熔斷状态</div>
     </div>
     <span id="risk-badge" class="oc-chip oc-chip-good">checking...</span>
   </div>
@@ -130,7 +130,7 @@
       &#x1F3E6; Demo
     </button>
     <button class="oc-btn" id="etab-live" onclick="selectRiskEngine('live')"
-      title="Live engine — Real Money / 实盘引擎 — 真实资金"
+      title="Live engine — Real Money / 實盤引擎 — 真實資金"
       style="opacity:0.55;border-color:rgba(168,85,247,0.5);color:#a855f7">
       &#x1F7E3; Live (Real Money)
     </button>
@@ -166,7 +166,7 @@
   <!-- P0: Category (Highest) -->
   <div class="oc-card" style="border-color:rgba(248,81,73,0.3)">
     <h3 style="color:var(--red)">&#x1F6D1; P0: Category Limits</h3>
-    <div class="subtitle">最高优先级 — 按品类的硬限制，不可被 AI 覆盖</div>
+    <div class="subtitle">最高優先级 — 按品類的硬限制，不可被 AI 覆盖</div>
     <div id="explain-p0"></div>
     <div id="p0-config" class="oc-loading">Loading...</div>
   </div>
@@ -174,7 +174,7 @@
   <!-- P1: Global (Medium) -->
   <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
     <h3 style="color:var(--yellow)">&#x26A0; P1: Global Limits</h3>
-    <div class="subtitle">中等优先级 — 全局风控参数</div>
+    <div class="subtitle">中等優先级 — 全局風控参數</div>
     <div id="explain-p1"></div>
     <div id="p1-config" class="oc-loading">Loading...</div>
   </div>
@@ -182,7 +182,7 @@
   <!-- P2: Agent (Adjustable) -->
   <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
     <h3 style="color:var(--blue)">&#x1F916; P2: Agent Parameters</h3>
-    <div class="subtitle">AI 可调整 — 根据市场状态自适应</div>
+    <div class="subtitle">AI 可調整 — 根據市场状态自適應</div>
     <div id="explain-p2"></div>
     <div id="p2-config" class="oc-loading">Loading...</div>
   </div>
@@ -190,19 +190,19 @@
 
 </div><!-- end risk-monitor-group -->
 
-<!-- Config Group: editable settings / 可编辑配置分组 (hidden by default) -->
+<!-- Config Group: editable settings / 可编辑配置分組 (hidden by default) -->
 <div id="risk-config-group" style="display:none">
 
 <!-- ═══ Stop Manager (Editable) ═══ -->
 <div class="oc-card">
-  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6D1; 止损设置 / Stop Manager Settings <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6D1; 止損設置 / Stop Manager Settings <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div id="explain-stops"></div>
 
   <div class="oc-grid-2" style="margin-top:10px">
     <div>
       <div style="display:grid;gap:10px">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600;color:var(--red)">Hard Stop Loss / 硬止损</div><div style="font-size:10px;color:var(--text-dim)">单笔最大亏损百分比，触发后立即平仓</div></div>
+          <div><div style="font-size:12px;font-weight:600;color:var(--red)">Hard Stop Loss / 硬止損</div><div style="font-size:10px;color:var(--text-dim)">單笔最大亏損百分比，触发后立即平倉</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-hard-stop" type="number" step="0.5" min="0.5" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
@@ -210,35 +210,35 @@
             <div style="font-size:12px;font-weight:600;color:var(--green)">Take Profit / 强制止盈
               <label class="pf-toggle" style="margin-left:8px;vertical-align:middle"><input type="checkbox" id="in-tp-enabled" onchange="toggleTPInputs()"><span class="slider"></span></label>
             </div>
-            <div style="font-size:10px;color:var(--text-dim)">默认关闭，由策略信号决定退出。开启后按 ATR 动态止盈</div>
+            <div style="font-size:10px;color:var(--text-dim)">默認關閉，由策略信號決定退出。開啟后按 ATR 動態止盈</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-take-profit" type="number" step="1" min="1" max="50" style="width:80px" disabled /><span style="font-size:12px">%</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">Trailing Stop / 跟踪止损</div><div style="font-size:10px;color:var(--text-dim)">从最高盈利回撤此百分比后平仓</div></div>
+          <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">Trailing Stop / 跟踪止損</div><div style="font-size:10px;color:var(--text-dim)">从最高盈利回撤此百分比后平倉</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-trailing" type="number" step="0.5" min="0" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600">Time Stop / 超时止损</div><div style="font-size:10px;color:var(--text-dim)">持仓超过此时间后自动平仓</div></div>
-          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-time-stop" type="number" step="1" min="1" max="720" style="width:80px" /><span style="font-size:12px">小时</span></div>
+          <div><div style="font-size:12px;font-weight:600">Time Stop / 超時止損</div><div style="font-size:10px;color:var(--text-dim)">持倉超過此時間后自動平倉</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-time-stop" type="number" step="1" min="1" max="720" style="width:80px" /><span style="font-size:12px">小時</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600;color:var(--blue)">ATR Multiplier / ATR 止损乘数 <abbr title="Average True Range 平均真实波幅" style="font-weight:400;font-size:10px;color:var(--text-dim)">(?)</abbr></div><div style="font-size:10px;color:var(--text-dim)">基于 ATR 的动态止损距离。设为 0 则禁用 ATR 止损，使用固定百分比。值越大止损越远。<br>例：BTCUSDT ATR=800 USDT 时，2.0x = 距开仓价 1600 USDT 止损；3.0x = 2400 USDT</div></div>
+          <div><div style="font-size:12px;font-weight:600;color:var(--blue)">ATR Multiplier / ATR 止損乘數 <abbr title="Average True Range 平均真實波幅" style="font-weight:400;font-size:10px;color:var(--text-dim)">(?)</abbr></div><div style="font-size:10px;color:var(--text-dim)">基于 ATR 的動態止損距离。設为 0 則禁用 ATR 止損，使用固定百分比。值越大止損越遠。<br>例：BTCUSDT ATR=800 USDT 時，2.0x = 距開倉價 1600 USDT 止損；3.0x = 2400 USDT</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-atr-mult" type="number" step="0.5" min="0" max="10" style="width:80px" /><span style="font-size:12px">x</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600">Max Session Drawdown / 最大回撤</div><div style="font-size:10px;color:var(--text-dim)">账户回撤超过此值则暂停交易。触发后需手动 Unhalt</div></div>
+          <div><div style="font-size:12px;font-weight:600">Max Session Drawdown / 最大回撤</div><div style="font-size:10px;color:var(--text-dim)">賬户回撤超過此值則暂停交易。触发后需手動 Unhalt</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-drawdown" type="number" step="1" min="1" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600">Max Leverage / 最大杠杆</div><div style="font-size:10px;color:var(--text-dim)">单笔交易最大杠杆。超 2 倍则 Guardian 拒绝，1-2 倍则自动降低</div></div>
+          <div><div style="font-size:12px;font-weight:600">Max Leverage / 最大杠杆</div><div style="font-size:10px;color:var(--text-dim)">單笔交易最大杠杆。超 2 倍則 Guardian 拒絕，1-2 倍則自動降低</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-leverage" type="number" step="1" min="1" max="100" style="width:80px" /><span style="font-size:12px">x</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600">Max Daily Loss / 日亏损上限</div><div style="font-size:10px;color:var(--text-dim)">单日亏损超过此值后停止当日交易。UTC 零点重置</div></div>
+          <div><div style="font-size:12px;font-weight:600">Max Daily Loss / 日亏損上限</div><div style="font-size:10px;color:var(--text-dim)">單日亏損超過此值后停止当日交易。UTC 零点重置</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-daily-loss" type="number" step="0.5" min="0.5" max="30" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
-        <button class="oc-btn oc-btn-primary" onclick="saveStopSettings(this)" style="margin-top:6px">&#x1F4BE; 保存止损设置 / Save Stop Settings</button>
+        <button class="oc-btn oc-btn-primary" onclick="saveStopSettings(this)" style="margin-top:6px">&#x1F4BE; 保存止損設置 / Save Stop Settings</button>
       </div>
     </div>
 
@@ -258,81 +258,81 @@
   </div>
 </div>
 
-<!-- ═══ Position Sizing & Exposure / 仓位控制与曝险 ═══ -->
+<!-- ═══ Position Sizing & Exposure / 倉位控制与曝險 ═══ -->
 <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
-  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F4CA; 仓位控制与曝险 / Position Sizing & Exposure <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F4CA; 倉位控制与曝險 / Position Sizing & Exposure <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div id="explain-position-sizing"></div>
   <div class="oc-grid-2" style="margin-top:10px">
     <div style="display:grid;gap:10px">
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600;color:var(--yellow)">Per-Trade Risk Budget / 单笔风险预算</div>
-          <div style="font-size:10px;color:var(--text-dim)">每笔交易投入的最大余额比例（可调软参数，非 P1 硬限制）。越大允许单笔越重，越小则单笔更轻。</div>
-          <div style="font-size:10px;color:var(--text-dim)">关键影响：BTC/ETH 等高价资产需要至少 5-10% 才能产生最小手数</div>
+          <div style="font-size:12px;font-weight:600;color:var(--yellow)">Per-Trade Risk Budget / 單笔風險预算</div>
+          <div style="font-size:10px;color:var(--text-dim)">每笔交易投入的最大余额比例（可調软参數，非 P1 硬限制）。越大允許單笔越重，越小則單笔更轻。</div>
+          <div style="font-size:10px;color:var(--text-dim)">關键影响：BTC/ETH 等高價資產需要至少 5-10% 才能產生最小手數</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-p1-risk" type="number" step="0.5" min="0.5" max="100" style="width:80px" /><span style="font-size:12px">%</span></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600">Max Single Position / 单笔最大持仓</div>
-          <div style="font-size:10px;color:var(--text-dim)">单个仓位占账户余额的最大比例。防止单一仓位过于集中</div>
-          <div style="font-size:10px;color:var(--text-dim)">过高 → 单笔亏损可能致命 | 过低 → 高价资产无法开仓</div>
+          <div style="font-size:12px;font-weight:600">Max Single Position / 單笔最大持倉</div>
+          <div style="font-size:10px;color:var(--text-dim)">單個倉位占賬户余额的最大比例。防止單一倉位過于集中</div>
+          <div style="font-size:10px;color:var(--text-dim)">過高 → 單笔亏損可能致命 | 過低 → 高價資產無法開倉</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-single-pos" type="number" step="5" min="5" max="100" style="width:80px" /><span style="font-size:12px">%</span></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600">Max Total Exposure / 总曝险上限</div>
-          <div style="font-size:10px;color:var(--text-dim)">所有持仓市值总和占账户余额的最大比例。超过则拒绝新开仓</div>
-          <div style="font-size:10px;color:var(--text-dim)">100% = 满仓上限 | 200% = 允许 2x 杠杆曝险</div>
+          <div style="font-size:12px;font-weight:600">Max Total Exposure / 總曝險上限</div>
+          <div style="font-size:10px;color:var(--text-dim)">所有持倉市值總和占賬户余额的最大比例。超過則拒絕新開倉</div>
+          <div style="font-size:10px;color:var(--text-dim)">100% = 滿倉上限 | 200% = 允許 2x 杠杆曝險</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-total-exp" type="number" step="10" min="10" max="500" style="width:80px" /><span style="font-size:12px">%</span></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600">Max Correlated Exposure / 关联曝险上限</div>
-          <div style="font-size:10px;color:var(--text-dim)">高度相关持仓的总曝险上限（空 = 不限制）。用于控制关联品种集中风险</div>
-          <div style="font-size:10px;color:var(--text-dim)">过低 → 限制对冲策略 | 过高 → 关联风险失控</div>
+          <div style="font-size:12px;font-weight:600">Max Correlated Exposure / 關联曝險上限</div>
+          <div style="font-size:10px;color:var(--text-dim)">高度相關持倉的總曝險上限（空 = 不限制）。用于控制關联品種集中風險</div>
+          <div style="font-size:10px;color:var(--text-dim)">過低 → 限制對冲策略 | 過高 → 關联風險失控</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-corr-exp" type="number" step="5" min="0" max="200" style="width:80px" placeholder="--" /><span style="font-size:12px">%</span></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600">Allowed Categories / 允许品类</div>
-          <div style="font-size:10px;color:var(--text-dim)">允许交易的品类，逗号分隔（例：linear,spot）。Rust 引擎直接过滤</div>
-          <div style="font-size:10px;color:var(--text-dim)">留空 = 不过滤 | linear = 仅永续合约</div>
+          <div style="font-size:12px;font-weight:600">Allowed Categories / 允許品類</div>
+          <div style="font-size:10px;color:var(--text-dim)">允許交易的品類，逗號分隔（例：linear,spot）。Rust 引擎直接過滤</div>
+          <div style="font-size:10px;color:var(--text-dim)">留空 = 不過滤 | linear = 仅永續合約</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-allowed-cats" type="text" style="width:130px" placeholder="linear,spot" /></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600">Max Same-Direction / 同向最大持仓数</div>
-          <div style="font-size:10px;color:var(--text-dim)">同一方向（全做多/全做空）的最大持仓数量。Guardian 超限则拒绝</div>
-          <div style="font-size:10px;color:var(--text-dim)">过高 → 方向性集中风险 | 过低 → 限制策略多样性</div>
+          <div style="font-size:12px;font-weight:600">Max Same-Direction / 同向最大持倉數</div>
+          <div style="font-size:10px;color:var(--text-dim)">同一方向（全做多/全做空）的最大持倉數量。Guardian 超限則拒絕</div>
+          <div style="font-size:10px;color:var(--text-dim)">過高 → 方向性集中風險 | 過低 → 限制策略多樣性</div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-same-dir" type="number" step="1" min="1" max="25" style="width:80px" /><span style="font-size:12px">个</span></div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-same-dir" type="number" step="1" min="1" max="25" style="width:80px" /><span style="font-size:12px">個</span></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600">Preferred Margin Mode / 保证金模式</div>
-          <div style="font-size:10px;color:var(--text-dim)">Rust RiskConfig.limits.margin_mode。isolated = 单仓独立保证金 | cross = 全仓共享保证金</div>
-          <div style="font-size:10px;color:var(--text-dim)">isolated 爆仓只损单仓 | cross 资本效率高但爆仓牵连全帐户</div>
+          <div style="font-size:12px;font-weight:600">Preferred Margin Mode / 保證金模式</div>
+          <div style="font-size:10px;color:var(--text-dim)">Rust RiskConfig.limits.margin_mode。isolated = 單倉独立保證金 | cross = 全倉共享保證金</div>
+          <div style="font-size:10px;color:var(--text-dim)">isolated 爆倉只損單倉 | cross 資本效率高但爆倉牵连全帐户</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><select class="oc-input" id="in-margin-mode" style="width:130px"><option value="isolated">isolated</option><option value="cross">cross</option></select></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600">Preferred Position Mode / 持仓模式</div>
-          <div style="font-size:10px;color:var(--text-dim)">Rust RiskConfig.limits.position_mode。one_way = 单向持仓 | hedge = 对冲双向持仓</div>
-          <div style="font-size:10px;color:var(--text-dim)">one_way 同币种仅单方向 | hedge 可同时做多做空（需对应策略）</div>
+          <div style="font-size:12px;font-weight:600">Preferred Position Mode / 持倉模式</div>
+          <div style="font-size:10px;color:var(--text-dim)">Rust RiskConfig.limits.position_mode。one_way = 單向持倉 | hedge = 對冲双向持倉</div>
+          <div style="font-size:10px;color:var(--text-dim)">one_way 同币種仅單方向 | hedge 可同時做多做空（需對應策略）</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><select class="oc-input" id="in-position-mode" style="width:130px"><option value="one_way">one_way</option><option value="hedge">hedge</option></select></div>
       </div>
@@ -351,37 +351,37 @@
         <div class="oc-metric"><div class="oc-metric-label">Margin Mode</div><div class="oc-metric-val" id="s-margin-mode" style="font-size:13px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Position Mode</div><div class="oc-metric-val" id="s-position-mode" style="font-size:13px">--</div></div>
       </div>
-      <button class="oc-btn oc-btn-primary" onclick="savePositionSettings(this)" style="margin-top:8px">&#x1F4BE; 保存仓位设置 / Save Position Settings</button>
+      <button class="oc-btn oc-btn-primary" onclick="savePositionSettings(this)" style="margin-top:8px">&#x1F4BE; 保存倉位設置 / Save Position Settings</button>
     </div>
   </div>
 </div>
 
-<!-- ═══ Session Protection / 连续亏损保护 ═══ -->
+<!-- ═══ Session Protection / 連續亏損保護 ═══ -->
 <div class="oc-card">
-  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6A8; 连续亏损保护 / Loss Cooldown Settings <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6A8; 連續亏損保護 / Loss Cooldown Settings <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div id="explain-cooldown"></div>
   <div class="oc-grid-2" style="margin-top:10px">
     <div style="display:grid;gap:10px">
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600;color:var(--red)">Cooldown Trigger / 冷却触发次数</div>
-          <div style="font-size:10px;color:var(--text-dim)">连续亏损达到此次数后进入冷却期，期间不允许新开仓</div>
-          <div style="font-size:10px;color:var(--text-dim)">过低 → 频繁冷却影响正常交易 | 过高 → 失去保护意义</div>
+          <div style="font-size:12px;font-weight:600;color:var(--red)">Cooldown Trigger / 冷却触发次數</div>
+          <div style="font-size:10px;color:var(--text-dim)">連續亏損达到此次數后進入冷却期，期間不允許新開倉</div>
+          <div style="font-size:10px;color:var(--text-dim)">過低 → 频繁冷却影响正常交易 | 過高 → 失去保護意义</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-cooldown-count" type="number" step="1" min="1" max="20" style="width:80px" /><span style="font-size:12px">次</span></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:12px;font-weight:600;color:var(--yellow)">Cooldown Duration / 冷却时长</div>
-          <div style="font-size:10px;color:var(--text-dim)">冷却期持续时间。到期后自动恢复交易，或可手动在 Danger Zone 重置</div>
-          <div style="font-size:10px;color:var(--text-dim)">过短 → 冷却效果不足 | 过长 → 可能错过行情</div>
+          <div style="font-size:12px;font-weight:600;color:var(--yellow)">Cooldown Duration / 冷却時长</div>
+          <div style="font-size:10px;color:var(--text-dim)">冷却期持續時間。到期后自動恢復交易，或可手動在 Danger Zone 重置</div>
+          <div style="font-size:10px;color:var(--text-dim)">過短 → 冷却效果不足 | 過长 → 可能錯過行情</div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-cooldown-min" type="number" step="5" min="5" max="1440" style="width:80px" /><span style="font-size:12px">分钟</span></div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-cooldown-min" type="number" step="5" min="5" max="1440" style="width:80px" /><span style="font-size:12px">分鐘</span></div>
       </div>
 
-      <button class="oc-btn oc-btn-primary" onclick="saveCooldownSettings(this)" style="margin-top:6px">&#x1F4BE; 保存冷却设置 / Save Cooldown Settings</button>
+      <button class="oc-btn oc-btn-primary" onclick="saveCooldownSettings(this)" style="margin-top:6px">&#x1F4BE; 保存冷却設置 / Save Cooldown Settings</button>
     </div>
 
     <div>
@@ -402,11 +402,11 @@
     <div>
       <div style="font-size:13px;font-weight:600">Shadow Mode / 影子模式</div>
       <div style="font-size:10px;color:var(--text-dim)">
-        <strong>开启 (Shadow)：</strong>H0 检查所有交易意图，记录哪些会被阻断，但<strong>不实际阻止</strong>任何交易。用于观察和调优门控规则<br>
-        <strong>关闭 (Active)：</strong>H0 正式生效，不通过检查的交易意图会被真正拒绝。适用于正式运行阶段
+        <strong>開啟 (Shadow)：</strong>H0 檢查所有交易意圖，記錄哪些會被阻斷，但<strong>不實際阻止</strong>任何交易。用于觀察和調優门控規則<br>
+        <strong>關閉 (Active)：</strong>H0 正式生效，不通過檢查的交易意圖會被真正拒絕。適用于正式運行階段
       </div>
       <div style="font-size:10px;margin-top:2px">
-        当前状态: <span id="h0-status" class="oc-chip oc-chip-neutral" style="font-size:10px">--</span>
+        當前状态: <span id="h0-status" class="oc-chip oc-chip-neutral" style="font-size:10px">--</span>
       </div>
     </div>
     <label class="pf-toggle"><input type="checkbox" id="in-h0-shadow" onchange="saveH0ShadowMode()"><span class="slider"></span></label>
@@ -415,17 +415,17 @@
 
 <!-- ═══ Dynamic Auto-Adjustment Toggles / 自動動態調整開關 ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
-  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x2699; 自动动态调整 / Auto Dynamic Adjustment <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
-  <div class="subtitle">Agent 自主调节的功能开关 — 关闭后恢复为手动设定值</div>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x2699; 自動動態調整 / Auto Dynamic Adjustment <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
+  <div class="subtitle">Agent 自主調節的功能開關 — 關閉后恢復为手動設定值</div>
   <div id="explain-auto-adjust"></div>
   <div style="display:grid;gap:12px;margin-top:10px">
     <!-- Dynamic Risk (Sharpe-based) -->
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid #21262d">
       <div>
-        <div style="font-size:13px;font-weight:600">Sharpe 动态风控 / Dynamic Risk Sizing</div>
-        <div style="font-size:10px;color:var(--text-dim)">根据 Sharpe 比率自动调整每笔风险比例（需 50+ 笔交易数据）</div>
+        <div style="font-size:13px;font-weight:600">Sharpe 動態風控 / Dynamic Risk Sizing</div>
+        <div style="font-size:10px;color:var(--text-dim)">根據 Sharpe 比率自動調整每笔風險比例（需 50+ 笔交易數據）</div>
         <div style="font-size:10px;margin-top:2px">
-          当前: <strong id="dr-current-risk">--</strong>% (基准 <span id="dr-base-risk">--</span>%)
+          當前: <strong id="dr-current-risk">--</strong>% (基准 <span id="dr-base-risk">--</span>%)
           | 状态: <span id="dr-status" class="oc-chip oc-chip-neutral" style="font-size:10px">--</span>
         </div>
       </div>
@@ -434,18 +434,18 @@
     <!-- Dynamic Leverage (Volatility-based) -->
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid #21262d">
       <div>
-        <div style="font-size:13px;font-weight:600">波动率自动杠杆 / Auto Leverage (Volatility)</div>
-        <div style="font-size:10px;color:var(--text-dim)">部署策略时根据品类和波动率自动设定杠杆（始终在硬上限内）</div>
-        <div style="font-size:10px;margin-top:2px">规则: spot=1x, linear 基准5x, inverse 基准3x; 高波动自动降低</div>
+        <div style="font-size:13px;font-weight:600">波動率自動杠杆 / Auto Leverage (Volatility)</div>
+        <div style="font-size:10px;color:var(--text-dim)">部署策略時根據品類和波動率自動設定杠杆（始終在硬上限內）</div>
+        <div style="font-size:10px;margin-top:2px">規則: spot=1x, linear 基准5x, inverse 基准3x; 高波動自動降低</div>
       </div>
-      <span class="oc-chip oc-chip-good" style="font-size:10px">始终启用</span>
+      <span class="oc-chip oc-chip-good" style="font-size:10px">始終啟用</span>
     </div>
   </div>
 </div>
 
 <!-- ═══ AI Stop-Loss Consultation ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
-  <h3>&#x1F916; AI 止损建议 / AI Stop-Loss Consultation</h3>
+  <h3>&#x1F916; AI 止損建議 / AI Stop-Loss Consultation</h3>
   <div id="explain-ai-consult"></div>
 
   <div class="oc-grid-2" style="margin-top:10px">
@@ -457,24 +457,24 @@
           <option value="opus">Claude Opus（深度分析，高成本）</option>
           <option value="haiku">Claude Haiku（极速，最低成本）</option>
         </select></div>
-        <div><label style="font-size:11px;color:var(--text-dim)">关注重点 / Focus</label>
+        <div><label style="font-size:11px;color:var(--text-dim)">關注重点 / Focus</label>
         <select class="oc-select" id="ai-focus" style="width:100%">
-          <option value="conservative">保守型：优先保本，减少回撤</option>
-          <option value="balanced">均衡型：平衡风险和收益</option>
-          <option value="aggressive">激进型：允许更大波动追求收益</option>
+          <option value="conservative">保守型：優先保本，减少回撤</option>
+          <option value="balanced">均衡型：平衡風險和收益</option>
+          <option value="aggressive">激進型：允許更大波動追求收益</option>
         </select></div>
-        <button class="oc-btn oc-btn-primary" onclick="askAIStopLoss()" id="btn-ask-ai">&#x1F916; 向 AI 询问止损建议 / Ask AI</button>
+        <button class="oc-btn oc-btn-primary" onclick="askAIStopLoss()" id="btn-ask-ai">&#x1F916; 向 AI 詢問止損建議 / Ask AI</button>
         <div style="font-size:10px;color:var(--text-dim)" id="ai-cost-hint">预估成本：Sonnet ~$0.02 | Opus ~$0.15 | Haiku ~$0.002</div>
       </div>
     </div>
     <div>
-      <div style="font-size:12px;font-weight:600;margin-bottom:6px">AI 建议 / AI Recommendation</div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px">AI 建議 / AI Recommendation</div>
       <div id="ai-advice-body" class="oc-pre" style="min-height:120px;font-size:12px;white-space:pre-wrap">
-        点击左侧按钮向 AI 询问。AI 会根据当前持仓、市场状态、历史表现给出具体的止损建议。
+        點擊左侧按钮向 AI 詢問。AI 会根據當前持倉、市场状态、歷史表現給出具體的止損建議。
       </div>
       <div style="margin-top:6px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim)" id="ai-advice-actions">
-        <button class="oc-btn" style="display:none;padding:2px 8px;font-size:10px" id="btn-apply-ai" onclick="applyAIAdvice()">&#x1F4CB; Copy Advice / 复制建议</button>
-        <span>&#x2139;&#xFE0F; AI 建议仅供参考，请手动调整后保存。/ Advisory only — adjust values manually.</span>
+        <button class="oc-btn" style="display:none;padding:2px 8px;font-size:10px" id="btn-apply-ai" onclick="applyAIAdvice()">&#x1F4CB; Copy Advice / 復制建議</button>
+        <span>&#x2139;&#xFE0F; AI 建議仅供参考，請手動調整后保存。/ Advisory only — adjust values manually.</span>
       </div>
     </div>
   </div>
@@ -482,7 +482,7 @@
 
 <!-- ═══ AI Risk Context ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F916; AI 风控上下文 / AI Risk Context</summary>
+  <summary>&#x1F916; AI 風控上下文 / AI Risk Context</summary>
   <div class="oc-collapse-body">
     <div id="explain-ai-risk"></div>
     <div id="ai-risk-body" class="oc-loading">Loading...</div>
@@ -532,22 +532,22 @@
 
 <!-- ═══ Danger Zone ═══ -->
 <div class="oc-danger-zone" id="danger-zone">
-  <h3>&#x26A0; Danger Zone / 危险操作区</h3>
+  <h3>&#x26A0; Danger Zone / 危險操作區</h3>
   <div id="explain-danger"></div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
     <button class="oc-btn oc-btn-danger" onclick="resetCooldown()">Reset Loss Cooldown</button>
-    <button class="oc-btn oc-btn-danger" onclick="unhaltSession()">恢复交易 Resume Trading</button>
+    <button class="oc-btn oc-btn-danger" onclick="unhaltSession()">恢復交易 Resume Trading</button>
   </div>
 </div>
 
 
 </div><!-- end risk-config-group -->
 
-<!-- Floating dirty-state bar — appears when any config input is modified / 有未保存修改时浮动提示 -->
+<!-- Floating dirty-state bar — appears when any config input is modified / 有未保存修改時浮動提示 -->
 <div id="risk-dirty-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:500;
   background:rgba(210,153,34,0.96);color:#1a1a1a;padding:8px 16px;
   align-items:center;gap:12px;font-size:13px;box-shadow:0 -2px 12px rgba(0,0,0,0.4)">
-  <span>&#x26A0;&#xFE0F; 有未保存的修改 / Unsaved changes — 找对应区域的「保存」按钮 / Find the Save button in each section</span>
+  <span>&#x26A0;&#xFE0F; 有未保存的修改 / Unsaved changes — 找對應區域的「保存」按钮 / Find the Save button in each section</span>
   <button onclick="document.getElementById('risk-dirty-bar').style.display='none'"
     style="margin-left:auto;padding:3px 10px;background:rgba(0,0,0,0.2);border:none;border-radius:4px;cursor:pointer;color:inherit;font-size:12px">&#x2715;</button>
 </div>
@@ -580,7 +580,7 @@ function switchRiskTab(tab) {
   }
 })();
 
-// ── Floating dirty-state bar — track input changes / 追踪输入修改 ──────────
+// ── Floating dirty-state bar — track input changes / 追踪輸入修改 ──────────
 (function() {
   const bar = document.getElementById('risk-dirty-bar');
   function showBar() { bar.style.display = 'flex'; }

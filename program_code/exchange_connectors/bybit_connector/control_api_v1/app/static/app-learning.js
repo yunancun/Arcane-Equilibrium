@@ -9,19 +9,19 @@
 "use strict";
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// L 章渲染函数 / L-Chapter Render Functions
+// L 章渲染函數 / L-Chapter Render Functions
 //
-// 渲染学习驾驶舱各标签页内容和净 PnL 仪表盘。
+// 渲染學習駕駛舱各標簽页內容和净 PnL 仪表盤。
 // Render learning cockpit tab contents and Net PnL dashboard.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * 置信度级别徽章 / Confidence level badge.
- * 根据置信度级别返回对应颜色的标记 / Returns colored badge based on confidence level.
+ * 根據置信度级别返回對應颜色的標記 / Returns colored badge based on confidence level.
  */
 function confidenceBadge(level) {
   const colors = { fact: "#27ae60", inference: "#f39c12", hypothesis: "#3498db" };
-  const labels = { fact: "事实/fact", inference: "推断/inference", hypothesis: "假设/hypothesis" };
+  const labels = { fact: "事實/fact", inference: "推斷/inference", hypothesis: "假設/hypothesis" };
   const color = colors[level] || "#999";
   return `<span class="confidence-badge" style="background:${color}">${labels[level] || ocEsc(level)}</span>`;
 }
@@ -41,17 +41,17 @@ function statusBadge(status) {
 }
 
 /**
- * 渲染学习观察流和经验记忆 / Render learning feed (observations + lessons).
+ * 渲染學習觀察流和經驗記憶 / Render learning feed (observations + lessons).
  */
 function renderLearningFeed(feedData) {
   if (!feedData) return;
 
-  // 渲染观察列表 / Render observations list
+  // 渲染觀察列表 / Render observations list
   const obsList = document.getElementById("observationsList");
   if (obsList) {
     const obs = feedData.observations_recent || [];
     obsList.innerHTML = obs.length === 0
-      ? '<div class="muted-row">暂无观察记录 / No observations yet</div>'
+      ? '<div class="muted-row">暂無觀察記錄 / No observations yet</div>'
       : obs.map(o => `
         <div class="learning-record-item">
           <div class="learning-record-header">
@@ -65,12 +65,12 @@ function renderLearningFeed(feedData) {
         </div>`).join("");
   }
 
-  // 渲染经验列表 / Render lessons list
+  // 渲染經驗列表 / Render lessons list
   const lesList = document.getElementById("lessonsList");
   if (lesList) {
     const les = feedData.lessons_recent || [];
     lesList.innerHTML = les.length === 0
-      ? '<div class="muted-row">暂无经验记录 / No lessons yet</div>'
+      ? '<div class="muted-row">暂無經驗記錄 / No lessons yet</div>'
       : les.map(l => `
         <div class="learning-record-item">
           <div class="learning-record-header">
@@ -84,7 +84,7 @@ function renderLearningFeed(feedData) {
         </div>`).join("");
   }
 
-  // 更新统计 / Update stats
+  // 更新統計 / Update stats
   const totals = feedData.totals || {};
   setText("lrnObsCount", totals.total_observations ?? 0);
   setText("lrnLesCount", totals.total_lessons ?? 0);
@@ -93,17 +93,17 @@ function renderLearningFeed(feedData) {
 }
 
 /**
- * 渲染假设和实验队列 / Render hypotheses and experiments queue.
+ * 渲染假設和實驗佇列 / Render hypotheses and experiments queue.
  */
 function renderLearningExperiments(expData) {
   if (!expData) return;
 
-  // 渲染假设列表 / Render hypotheses list
+  // 渲染假設列表 / Render hypotheses list
   const hypList = document.getElementById("hypothesesList");
   if (hypList) {
     const hyps = expData.hypotheses || [];
     hypList.innerHTML = hyps.length === 0
-      ? '<div class="muted-row">暂无假设 / No hypotheses yet</div>'
+      ? '<div class="muted-row">暂無假設 / No hypotheses yet</div>'
       : hyps.map(h => `
         <div class="learning-record-item">
           <div class="learning-record-header">
@@ -113,24 +113,24 @@ function renderLearningExperiments(expData) {
           </div>
           <div class="learning-record-title">${escHtml(h.title)}</div>
           <div class="learning-record-detail">${escHtml(h.description || "")}</div>
-          <div class="learning-record-prediction"><strong>预测 / Prediction:</strong> ${escHtml(h.testable_prediction || "")}</div>
+          <div class="learning-record-prediction"><strong>预測 / Prediction:</strong> ${escHtml(h.testable_prediction || "")}</div>
           <div class="learning-record-id">${ocEsc(h.hypothesis_id)}</div>
           ${h.status === "proposed" || h.status === "under_review" ? `
             <div class="learning-record-actions">
               <button class="hyp-verdict-btn" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="approved">批准 / Approve</button>
-              <button class="hyp-verdict-btn btn-danger" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="rejected">拒绝 / Reject</button>
-              <button class="hyp-verdict-btn btn-muted" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="archived">归档 / Archive</button>
+              <button class="hyp-verdict-btn btn-danger" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="rejected">拒絕 / Reject</button>
+              <button class="hyp-verdict-btn btn-muted" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="archived">歸檔 / Archive</button>
             </div>` : ""}
           ${h.operator_verdict ? `<div class="learning-record-verdict">判定 / Verdict: ${ocEsc(h.operator_verdict)} (${ocEsc(h.operator_verdict_reason || "-")})</div>` : ""}
         </div>`).join("");
   }
 
-  // 渲染实验列表 / Render experiments list
+  // 渲染實驗列表 / Render experiments list
   const expList = document.getElementById("experimentsList");
   if (expList) {
     const exps = expData.experiments || [];
     expList.innerHTML = exps.length === 0
-      ? '<div class="muted-row">暂无实验 / No experiments yet</div>'
+      ? '<div class="muted-row">暂無實驗 / No experiments yet</div>'
       : exps.map(e => `
         <div class="learning-record-item">
           <div class="learning-record-header">
@@ -144,22 +144,22 @@ function renderLearningExperiments(expData) {
           ${e.status === "pending_approval" ? `
             <div class="learning-record-actions">
               <button class="exp-approve-btn" data-exp-id="${ocEsc(e.experiment_id)}" data-action="approved">批准 / Approve</button>
-              <button class="exp-approve-btn btn-danger" data-exp-id="${ocEsc(e.experiment_id)}" data-action="rejected">拒绝 / Reject</button>
+              <button class="exp-approve-btn btn-danger" data-exp-id="${ocEsc(e.experiment_id)}" data-action="rejected">拒絕 / Reject</button>
             </div>` : ""}
           ${e.status === "approved" ? `
             <div class="learning-record-actions">
-              <button class="exp-complete-btn" data-exp-id="${ocEsc(e.experiment_id)}">标记完成 / Mark Complete</button>
+              <button class="exp-complete-btn" data-exp-id="${ocEsc(e.experiment_id)}">標記完成 / Mark Complete</button>
             </div>` : ""}
-          ${e.result_summary ? `<div class="learning-record-verdict">结论 / Result: ${escHtml(e.result_summary)} ${confidenceBadge(e.result_confidence_level || "inference")}</div>` : ""}
+          ${e.result_summary ? `<div class="learning-record-verdict">結論 / Result: ${escHtml(e.result_summary)} ${confidenceBadge(e.result_confidence_level || "inference")}</div>` : ""}
         </div>`).join("");
   }
 
-  // 更新待审批计数 / Update pending count
+  // 更新待審批計數 / Update pending count
   setText("lrnPendingCount", expData.pending_approval_count ?? 0);
 }
 
 /**
- * 渲染净 PnL 仪表盘 / Render Net PnL Dashboard.
+ * 渲染净 PnL 仪表盤 / Render Net PnL Dashboard.
  */
 function renderNetPnlDashboard(dashData) {
   if (!dashData) return;
@@ -178,7 +178,7 @@ function renderNetPnlDashboard(dashData) {
     const brk = dashData.cost_breakdown || {};
     const keys = Object.keys(brk);
     brkEl.innerHTML = keys.length === 0
-      ? '<div class="muted-row">暂无成本 / No costs yet</div>'
+      ? '<div class="muted-row">暂無成本 / No costs yet</div>'
       : keys.map(k => `<div class="breakdown-item"><span>${ocEsc(k)}</span><strong>${fmtPnl(brk[k])}</strong></div>`).join("");
   }
 
@@ -187,7 +187,7 @@ function renderNetPnlDashboard(dashData) {
   if (trendEl) {
     const trend = dashData.net_pnl_trend || [];
     trendEl.innerHTML = trend.length === 0
-      ? '<div class="muted-row">暂无周期快照 / No period snapshots</div>'
+      ? '<div class="muted-row">暂無周期快照 / No period snapshots</div>'
       : trend.map(t => `
         <div class="entry-item">
           <span class="entry-item-label">${escHtml(t.period_label)}</span>
@@ -208,11 +208,11 @@ function escHtml(str) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// L 章动作处理器 / L-Chapter Action Handlers
+// L 章動作處理器 / L-Chapter Action Handlers
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * 提交观察记录 / Submit an observation record.
+ * 提交觀察記錄 / Submit an observation record.
  */
 async function submitObservation() {
   const title = document.getElementById("obsTitle")?.value?.trim();
@@ -221,7 +221,7 @@ async function submitObservation() {
   const confidence = document.getElementById("obsConfidence")?.value;
 
   if (!title || !detail) {
-    setActionSummary("录入失败", "failed", "-", "-", "请填写标题和详情 / Title and detail are required.", {});
+    setActionSummary("录入失败", "failed", "-", "-", "請填写標題和详情 / Title and detail are required.", {});
     return;
   }
 
@@ -234,12 +234,12 @@ async function submitObservation() {
     document.getElementById("obsDetail").value = "";
     await loadDashboard();
   } catch (error) {
-    setActionSummary("观察录入失败 / Observation Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("觀察录入失败 / Observation Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 提交经验教训 / Submit a lesson.
+ * 提交經驗教訓 / Submit a lesson.
  */
 async function submitLesson() {
   const title = document.getElementById("lessonTitle")?.value?.trim();
@@ -248,7 +248,7 @@ async function submitLesson() {
   const confidence = document.getElementById("lessonConfidence")?.value;
 
   if (!title || !detail) {
-    setActionSummary("录入失败", "failed", "-", "-", "请填写标题和详情 / Title and detail are required.", {});
+    setActionSummary("录入失败", "failed", "-", "-", "請填写標題和详情 / Title and detail are required.", {});
     return;
   }
 
@@ -261,12 +261,12 @@ async function submitLesson() {
     document.getElementById("lessonDetail").value = "";
     await loadDashboard();
   } catch (error) {
-    setActionSummary("经验录入失败 / Lesson Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("經驗录入失败 / Lesson Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 提交假设 / Submit a hypothesis.
+ * 提交假設 / Submit a hypothesis.
  */
 async function submitHypothesis() {
   const title = document.getElementById("hypTitle")?.value?.trim();
@@ -274,7 +274,7 @@ async function submitHypothesis() {
   const prediction = document.getElementById("hypPrediction")?.value?.trim();
 
   if (!title || !description || !prediction) {
-    setActionSummary("录入失败", "failed", "-", "-", "请填写标题、描述和可检验预测 / Title, description and prediction required.", {});
+    setActionSummary("录入失败", "failed", "-", "-", "請填写標題、描述和可檢驗预測 / Title, description and prediction required.", {});
     return;
   }
 
@@ -288,12 +288,12 @@ async function submitHypothesis() {
     document.getElementById("hypPrediction").value = "";
     await loadDashboard();
   } catch (error) {
-    setActionSummary("假设录入失败 / Hypothesis Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("假設录入失败 / Hypothesis Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 提交实验 / Submit an experiment.
+ * 提交實驗 / Submit an experiment.
  */
 async function submitExperiment() {
   const hypothesisId = document.getElementById("expHypothesisId")?.value?.trim();
@@ -303,7 +303,7 @@ async function submitExperiment() {
   const criteria = document.getElementById("expSuccessCriteria")?.value?.trim();
 
   if (!hypothesisId || !title || !description || !method || !criteria) {
-    setActionSummary("录入失败", "failed", "-", "-", "请填写所有必填字段 / All required fields must be filled.", {});
+    setActionSummary("录入失败", "failed", "-", "-", "請填写所有必填字段 / All required fields must be filled.", {});
     return;
   }
 
@@ -318,12 +318,12 @@ async function submitExperiment() {
     document.getElementById("expSuccessCriteria").value = "";
     await loadDashboard();
   } catch (error) {
-    setActionSummary("实验录入失败 / Experiment Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("實驗录入失败 / Experiment Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 假设审批 / Hypothesis verdict.
+ * 假設審批 / Hypothesis verdict.
  */
 async function applyHypothesisVerdict(hypothesisId, verdict) {
   try {
@@ -333,12 +333,12 @@ async function applyHypothesisVerdict(hypothesisId, verdict) {
     summarizeActionResult("hypothesis-verdict", result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary("假设审批失败 / Verdict Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("假設審批失败 / Verdict Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 实验审批 / Experiment approval.
+ * 實驗審批 / Experiment approval.
  */
 async function applyExperimentApproval(experimentId, action) {
   try {
@@ -348,17 +348,17 @@ async function applyExperimentApproval(experimentId, action) {
     summarizeActionResult("experiment-approval", result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary("实验审批失败 / Approval Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("實驗審批失败 / Approval Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 /**
- * 实验完成 / Experiment completion.
+ * 實驗完成 / Experiment completion.
  */
 async function applyExperimentCompletion(experimentId) {
   const summary = await openPromptModal({
-    title: "实验结论摘要 / Experiment Result",
-    body: "记录实验完成后的 operator 结论。",
+    title: "實驗結論摘要 / Experiment Result",
+    body: "記錄實驗完成后的 operator 結論。",
     label: "摘要 / Summary",
     required: true,
     multiline: true,
@@ -371,9 +371,9 @@ async function applyExperimentCompletion(experimentId) {
     defaultValue: "inference",
     required: true,
     choices: [
-      { value: "fact", label: "fact — 事实" },
-      { value: "inference", label: "inference — 推断" },
-      { value: "hypothesis", label: "hypothesis — 假设" }
+      { value: "fact", label: "fact — 事實" },
+      { value: "inference", label: "inference — 推斷" },
+      { value: "hypothesis", label: "hypothesis — 假設" }
     ],
     confirmLabel: "提交 / Submit"
   });
@@ -386,7 +386,7 @@ async function applyExperimentCompletion(experimentId) {
     summarizeActionResult("experiment-completion", result);
     await loadDashboard();
   } catch (error) {
-    setActionSummary("实验完成失败 / Completion Failed", "failed", "-", "-", String(error), String(error));
+    setActionSummary("實驗完成失败 / Completion Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
@@ -396,7 +396,7 @@ async function applyExperimentCompletion(experimentId) {
 async function savePeriodSnapshot() {
   const label = document.getElementById("periodLabel")?.value?.trim();
   if (!label) {
-    setActionSummary("失败", "failed", "-", "-", "请输入周期标签 / Period label is required.", {});
+    setActionSummary("失败", "failed", "-", "-", "請輸入周期標簽 / Period label is required.", {});
     return;
   }
 
