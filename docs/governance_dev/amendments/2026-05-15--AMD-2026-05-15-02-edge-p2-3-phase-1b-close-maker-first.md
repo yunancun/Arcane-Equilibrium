@@ -75,7 +75,7 @@ EDGE-P2-3 Phase 1a 的「entry-only PostOnly」scope 在 close path 延伸為按
 |---|---|---|---|---|
 | **Phase 2a Demo** | **7d primary + 7d extended observation = 14d total**（v0.3 per Track E3 conservative discount） | demo | `use_maker_close = true` per-策略 | IMPL 完成 + 三閘全過 + AMD 4-agent review PASS |
 | **Phase 2b LiveDemo** | 7d | live_demo | `use_maker_close = true` per-策略 | Phase 2a 14d PASS（AC-1..AC-7 + AC-14 Wilson + AC-15 reject sample + AC-16 NULL ladder + **AC-18 fallback-to-taker rate ≥ 95%** + **AC-19 14d close_maker_fill_rate ≥ 30%** v0.3 新增） |
-| **Phase 3 Live (Mainnet)** | indefinite | live | `use_maker_close = true` per-策略 per-exit_reason | Phase 2b PASS + operator 顯式 sign-off + 本 AMD 補件（live carve-out section） |
+| **Phase 3 Live (Mainnet)** | indefinite | live | `use_maker_close = true` per-策略 per-exit_reason | Phase 2b PASS + **Phase 2c-CM counterfactual verification PASS per §5.3** + operator 顯式 sign-off + 本 AMD 補件（live carve-out section） |
 
 > **AC SoT 引用（FA-SF-2 + v0.4 patch per Wave 3a FA-#1 cosmetic finding）**：本 rollout table 的 PASS criteria 全文 = `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md` §11 **AC-1..AC-19**（v0.2 寫 AC-1..AC-16；v1.2 加 AC-17/18/19；v1.3 修 AC-5/AC-11/AC-18 字面值）；本 AMD 不重複 AC 文字，避免雙文 drift。
 
@@ -187,6 +187,32 @@ Phase 2a → 2b → 3 共 3 phase × 8 exit_reason × 2 env = **48 test points**
 **Phase 2b holdout 顯著性（QC-SF-5）**：Phase 2a → 2b 不能直接 cross-validate；Phase 2b 必加 7d **fresh holdout** 評估（in-sample overfit 防護）。
 
 **Retention / compression（MIT-SF-4）**：`trading.fills` 365d retention + 14d after compress 對 close_maker audit 跨 Phase 觀察足夠（columnar scan 不影響 audit query）；retention 不需要為本 AMD 改。
+
+---
+
+## 5.3 Phase 2c-CM LiveDemo Counterfactual Verification（v0.6 補件 — 2026-05-18 per PA Phase 2c spec push back）
+
+**前置**: Phase 2b LiveDemo 7d empirical PASS（per §3 Rollout Posture line 77 AC-1..AC-19）。
+
+**範圍 + 必要性**: Phase 2b 7d empirical evidence 只證 Phase 1b close-maker-first **真實運行** 達 AC-18 fallback rate + AC-19 fill rate threshold；不直接證 fee saving 對應的 counterfactual edge alpha-positive。Phase 2c-CM 驗 **counterfactual delta（actual maker-first edge vs hypothetical taker-only baseline）統計顯著為正**，是 Phase 3 Mainnet promotion 前必通的 BLOCKER。
+
+**統計方法**: **paired t-test 95% CI**（**不採 binomial Wilson** — continuous PnL delta 不適 binomial 統計 per PA Phase 2c spec §4 push back QC-SF-6 措辭）。BH-FDR q=0.10 across **208 cells**（擴 §5.1 48-cell baseline；3-class fill × n symbols × 2 env × n exit_reasons 細分 per spec §4）。
+
+**Acceptance**（AC-20..AC-25 per `docs/execution_plan/2026-05-18--phase_2c_livedemo_counterfactual_harness_spec.md` §5）:
+- **AC-20** global mean δ > 0 bps + paired t-test 95% CI lower > 0
+- **AC-21** BH-FDR q=0.10 ≥50% cell discovery
+- **AC-22** 0 顯著負 cell（mean<-1.5 bps AND q<0.10）
+- **AC-23** regime stability split-half
+- **AC-24** Class A maker success rate ≥20%
+- **AC-25** n_eff ≥250
+
+**BLOCKER 行為**: AC-20..AC-25 任一 FAIL → Phase 3 Mainnet promotion BLOCKED until Phase 2c-CM RE-RUN passes or Phase 2b 延 14d 補測 sample。
+
+**Naming convention（FA-SF-3 對齊延伸）**: 採 **Phase 2c-CM**（close-maker）名稱 — phys_lock AMD draft 的 **Phase 2c-PL**（phys_lock）是另一 spec，兩者**不衝突且不共享 BLOCKER 集**。命名 collision 避免：本 AMD scope 內 §5.3 只指 Phase 2c-CM，不影射 Phase 2c-PL。
+
+**Harness IMPL**: Python script `helper_scripts/reports/phase_2c_cm_livedemo_counterfactual_verification.py` per PA spec §6；CLI `--mode {preflight|run|verify}`；JSON artifact + Markdown verdict report；effort 6 person-day (E1 2.5d + E4 0.5d + E2 0.5d + QA 0.5d + PM 0.5d + AMD compliance 0.5d + run 1d)。
+
+**Cross-spec source**: `docs/execution_plan/2026-05-18--phase_2c_livedemo_counterfactual_harness_spec.md` v1.0（PA Phase 2c LiveDemo Counterfactual Harness Spec, 580 LOC / 12 sections）。
 
 ---
 
@@ -428,6 +454,7 @@ post-AMD v0.2 land 後 Wave 1 並行派 5 track（A1/A3/A4/E1/E3），結果：
 | 2026-05-15 | v0.3.1 | F-FA-1 ✅ DONE Wave 2a Track A2 patch（V094 hybrid schema migration spec finalize land commit `9b1117a0` + PA verdict report `14a561ec`）— §8 IMPL Prereq 5 第 1 子條件 marker 從 ⏳ → ✅；spec 1176 LOC / 15 sections 含 schema design + Guard A/B/C + Linux PG dry-run × 2 round + sqlx checksum repair SOP + trading_writer.rs upgrade + TradingMsg::Fill enum 21→24 fields + 13 caller sites enumeration + healthcheck [62][63][64][65] integration + Backward-compat append-only + Rollback paths；3 critical empirical findings（trading.fills.details JSONB 已存在 V003 line 284 / 24h 98 fills 0% details rate / Linux runtime applied max V90 not V93 — spec/AMD wording drift caveat noted）；enum allowlist 補 2 值（rate_limit_backoff_per_symbol + fallback_to_taker_mandatory）upgrade spec/AMD 8 → 10 superset；F-FA-1/2/3 全 ✅ → IMPL Prereq 5 全 RESOLVED | PA per main-session 派 Wave 2 (Track A2) |
 | 2026-05-15 | v0.4 | Wave 3a 4-agent short re-review consolidation — QC + FA + BB + MIT 4/4 verdict（QC APPROVED-CONDITIONAL 1 NEW MUST QC-MF-3 + 1 NEW SHOULD QC-SF-6；FA APPROVED 4 cosmetic；BB APPROVED `2026-05-15--amd_v0_3_spec_v1_2_bb_short_re_review.md` 5/5 must + 3/3 should 全 land + v1.2/v0.3 增量無新 Bybit-side risk；MIT APPROVED 2 P3 advisory）。本 patch 純 numerical / cosmetic 增量無新風險 → IMPL Prereq 條件 2 SATISFIED：(a) §3 rollout table AC SoT 引用「AC-1..AC-16」→ **「AC-1..AC-19」** (per FA-#1 cosmetic) + (b) §10.1 V094 backward-compat 加 IMPL kickoff 必含項「`trading_writer.rs:430` details payload writer 升級」+ TradingMsg::Fill enum 21→24 + 兩段式 schema invariant (per FA-#2 + Wave 1 Track A4 §4.4) + (c) §2.3 negative whitelist 真風控行補 PA 識別變體 `risk_close:fast_track*` / `halt_session*` (per FA-#3，spec §4.3 已列；AMD 同步) + (d) §7 16 原則表補 #3/#11/#13/#15 明列 PASS（治理 trace 完整度 7/12 → 11/12, per FA-#4） | PA per main-session 派 Wave 1.5b (Wave 3a re-review consolidation) |
 | 2026-05-18 | v0.5 | Post-E2 BLOCKER RCA wording patch — §3 Rollout Posture line 82 補「Runtime activation layer」明文 closing AMD spec/IMPL gap E2 caught 2026-05-18（Phase 1b post-deploy 0% maker_attempt 根因 = cold-default `use_maker_close=false` + 0 production callers for `set_use_maker_close_runtime`）。新增三環境 TOML 配置表（demo `use_maker_close=true` per Phase 2a / live/paper `false` per `feedback_demo_loose_live_strict_policy` + Demo-only writer guard semantics）+ serde default false 對齊 cold-boot + activation 路徑（`set_risk_store → apply_risk_snapshot → set_use_maker_close_runtime` + ConfigStore hot-reload tick-top）+ Phase 2b live_demo `commands.rs:92` Demo-only guard conflict 顯式 defer 至另開 IMPL ticket。本 patch 純 wording 補白 / 無 AC 改 / 無 rollout-phase 改 / 無 schema 改。對齊 PA design report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_use_maker_close_runtime_activator_design.md` Option A confirmed。 | PA design per main-session 派 Wave 4 (post-E2 BLOCKER patch) |
+| 2026-05-18 | v0.6 | Phase 2c-CM LiveDemo Counterfactual Verification BLOCKER mirror to close-maker per PA Phase 2c spec push back — §5.3 NEW section（AC-20..AC-25 acceptance + paired t-test 95% CI 非 Wilson + BH-FDR q=0.10 208-cell 擴 §5.1 48-cell baseline + Phase 3 Mainnet promotion BLOCKER 對齊）+ §3 Rollout Posture Phase 3 row 補「+ Phase 2c-CM counterfactual verification PASS per §5.3」+ Naming convention「Phase 2c-CM (close-maker) / Phase 2c-PL (phys_lock)」區分 phys_lock AMD draft 同名節（避命名 collision）。本 patch 純 governance wording 補白；AC-1..AC-19 本 AMD scope 不動（AC-20..AC-25 在 Phase 2c spec own scope）；rollout phase 不改（Phase 2c-CM 在 Phase 2b PASS 後、Phase 3 promotion 前的新 gate）。對齊 PA spec `docs/execution_plan/2026-05-18--phase_2c_livedemo_counterfactual_harness_spec.md` v1.0。 | PM main session per PA Phase 2c spec push back |
 
 **下一步**：IMPL Prereq 條件 2 SATISFIED（4-agent re-review 4/4 verdict + Wave 1.5b spec v1.3 + AMD v0.4 patch 收口）；條件 5 全 RESOLVED（F-FA-1 + F-FA-2 + F-FA-3 全 ✅）；條件 6 reject_cooldown split 在 Wave 2b E1 progress；條件 3 三閘（P0-EDGE-1 / W-AUDIT-8b / W-AUDIT-8a C1）等待 → Wave 3b BB 字典 6 處更新（並行）→ Wave 3.5 PA 補 Linux V81/V91/V92/V93 backlog migration apply 檢查（per V094 spec §4.4 caveat）→ IMPL kickoff Wave 4（3-gate + 條件 6 解後派 E1 5-worktree）。
 
