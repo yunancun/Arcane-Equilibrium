@@ -39,6 +39,22 @@ def test_static_gui_uses_non_empty_performance_metric_payload_fallback() -> None
     assert "if (dbMetrics && dbMetrics.length > 0) return dbMetrics" in common
 
 
+def test_demo_performance_metrics_do_not_depend_on_balance_payload() -> None:
+    source = (STATIC_DIR / "tab-demo.html").read_text(encoding="utf-8")
+    function_body = source.split("async function loadDemoMetrics()", 1)[1].split(
+        "\n}\n\nfunction setDemoPnlRange",
+        1,
+    )[0]
+
+    assert "loadDemoMetrics()" in source
+    assert "loadDemoMetrics(balD.data)" not in source
+    assert "async function loadDemoMetrics()" in source
+    assert "async function loadDemoMetrics(raw)" not in source
+    assert "let b = raw" not in function_body
+    assert "raw.result" not in function_body
+    assert "if (!b)" not in function_body
+
+
 @pytest.mark.parametrize("filename", ["console.html", "tab-demo.html", "tab-live.html", "tab-paper.html"])
 def test_static_gui_performance_metric_callers_use_canonical_payload_helper(filename: str) -> None:
     source = (STATIC_DIR / filename).read_text(encoding="utf-8")

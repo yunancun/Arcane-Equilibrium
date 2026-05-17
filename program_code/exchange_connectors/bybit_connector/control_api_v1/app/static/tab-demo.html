@@ -395,7 +395,7 @@ async function loadDemoStatus() {
     await Promise.allSettled([
       loadPositions(),
       loadDemoOrders(),
-      loadDemoMetrics(balD.data),
+      loadDemoMetrics(),
       loadDemoPnlSeries(),
       loadComparison(balD.data),
     ]);
@@ -957,16 +957,7 @@ function _ocMetricBps(value) {
   return Number.isFinite(v) ? v.toFixed(2) + ' bps' : 'N/A';
 }
 
-async function loadDemoMetrics(raw) {
-  let b = raw;
-  if (raw && raw.result && raw.result.list && raw.result.list[0]) {
-    b = raw.result.list[0];
-  }
-  if (!b) {
-    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂無數據</div>');
-    return;
-  }
-
+async function loadDemoMetrics() {
   let m = null;
   try {
     const d = await ocApi('/api/v1/strategy/demo/metrics');
@@ -988,8 +979,12 @@ async function loadDemoMetrics(raw) {
   wlEl.className = 'oc-metric-val ' + (Number.isFinite(wlValue) ? (wlValue >= 1 ? 'green' : 'red') : '');
   ocSetText('d-maxdd', maxDdMetric ? ocFormatPerformanceMetric(maxDdMetric) : '--');
 
-  if (!m || !Array.isArray(metrics) || metrics.length === 0) {
-    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂無指標數據</div>');
+  if (!m) {
+    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">指標 API 暫不可用</div>');
+    return;
+  }
+  if (!Array.isArray(metrics) || metrics.length === 0) {
+    if (!_demoMetricsLoadedOnce) ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暫無後端性能指標</div>');
     return;
   }
   ocSetHtml('demo-perf-metrics', ocRenderPerformanceMetrics(metrics));

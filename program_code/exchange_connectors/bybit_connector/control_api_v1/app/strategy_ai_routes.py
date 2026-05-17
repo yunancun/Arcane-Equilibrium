@@ -1327,12 +1327,13 @@ async def get_demo_pnl_series(
 @phase2_router.get("/demo/metrics")
 async def get_demo_metrics(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get DB-truth Demo performance metrics. / 獲取 DB 真實 Demo 績效指標。"""
-    from .paper_trading_metrics import compute_full_metrics  # noqa: PLC0415
-    from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
     from .trading_true_metrics import build_performance_metrics, fetch_db_true_metrics  # noqa: PLC0415
 
     full: dict[str, Any] = {}
     try:
+        from .paper_trading_metrics import compute_full_metrics  # noqa: PLC0415
+        from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+
         reader = get_rust_reader()
         if reader.is_engine_available("demo"):
             rust_state = reader.get_paper_state(engine="demo") or {}
