@@ -2,116 +2,152 @@
 
 **Reusable prompt for picking up unfinished work across Claude Code sessions.**
 
-Copy below into new session 起手 message。Content references dynamic SoT files (auto-stays-fresh via git commits)；不需手動更新。
+Copy the fenced block below into a new session start message. This is a
+dynamic-reference handoff: it points the next session at SoT files and live
+checks instead of freezing every runtime fact in this file.
 
 ---
 
 ```markdown
-# 接手 — Trading Losses Audit Round 2（Phase 1b IMPL + Alpha Source Push）
+# 接手 — Trading Losses Audit Round 2（Source/Test Done → Runtime Gates + Alpha Rerun）
 
 # 起手三連（必跑）
 
-cd /Users/ncyu/Projects/TradeBot/srv && git fetch --prune origin && git log --oneline -5
-ssh trade-core "cd ~/BybitOpenClaw/srv && git log --oneline -5 && python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --status"
-git status --porcelain | head -30 && git stash list
+cd /Users/ncyu/Projects/TradeBot/srv && git fetch --prune origin && git log --oneline -8
+ssh trade-core "cd ~/BybitOpenClaw/srv && git log --oneline -8 && python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --status"
+git status --porcelain | head -40 && git stash list
 
-# 必讀（按順序）
+# 必讀（按順序：active SoT 先，歷史方案後）
 
-# (1) 本輪 audit 完整修復方案 single SoT
+# (1) Active state authority。若與舊 fix plan/precompact 衝突，信 TODO + latest reports。
+head -160 TODO.md
+
+# (2) C1 / W-AUDIT-8c latest closure chain
+cat docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--c1_final_signoff_result.md
+cat docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--w_audit_8c_correction_source_test_closure.md
+test -f docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--v095_linux_pg_dry_run_result.md && cat docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--v095_linux_pg_dry_run_result.md || true
+test -f docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-17--w_audit_8c_v095_mit_resign.md && cat docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-17--w_audit_8c_v095_mit_resign.md || true
+
+# (3) Phase 1b / W-AUDIT-8b source-test checkpoint reports
+cat docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--option_a_phase1b_w_audit8b_impl_closure.md
+cat docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md | head -120
+
+# (4) Historical fix plan。注意：§3/§4 的 Worktree B/C1 狀態已被 2026-05-17 reports 超越。
 cat docs/execution_plan/2026-05-16--trading_losses_root_cause_and_fix_plan_v1.md
 
-# (2) 最近 precompact snapshot（找最新的）
+# (5) 最近 precompact snapshot（僅作歷史上下文，不作 current state）
 ls -t docs/CCAgentWorkSpace/PM/workspace/reports/*precompact*.md | head -1 | xargs cat
-
-# (3) Round 1 closure archive
-cat docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md | head -100
-
-# (4) TODO §0.0 PM Freeze + §3 state + §11.5 dispatch plan
-head -100 TODO.md
 
 # 立即狀態驗證
 
-| 項 | 命令 | 預期 |
+| 項 | 驗證命令 | 預期 / 解讀 |
 |---|---|---|
-| C1 v2 24h proof（預計 2026-05-17T14:56:16Z 完）| ssh trade-core "ps -p 377531 && tail -20 /tmp/openclaw/audit/liquidation_topic_probe/nohup_*.log" | 過時即完成；BB+MIT sign-off pending |
-| W-AUDIT-8b panel ≥7d（Round 2 rerun gate）| ssh trade-core "PGPASSWORD='<REDACTED>' psql -h localhost -U trading_admin -d trading_ai -c \"SELECT EXTRACT(EPOCH FROM (MAX(asof_ts)-MIN(asof_ts)))/86400 AS days FROM panel.funding_rates_panel;\"" | days ≥ 7.0 → 可派 Phase B rerun |
-| Phase 1b Worktree B 是否 land | grep "order_type:" rust/openclaw_engine/src/tick_pipeline/commands.rs \| head -5 | 若仍見 hard-coded "market" 在 close path → B 未做 |
-| Sibling Phase 1b A/C/D commit | git log --oneline --grep="phase_1b\|V094\|close_maker" --since="3 days ago" | sibling 進度 |
+| 三端 HEAD sync | `git rev-parse --short HEAD && git rev-parse --short @{u} && ssh trade-core "cd ~/BybitOpenClaw/srv && git rev-parse --short HEAD"` | Mac / origin / trade-core 應一致；若不一致先報告，不 pull/merge/rebase。 |
+| dirty / untracked race | `git status --porcelain=v1` | 只處理自己文件；禁 `git add -A`。特別留意 sibling/user dirty files 與 untracked reports。 |
+| C1 v2 artifact | `ssh trade-core "cat /tmp/openclaw/audit/liquidation_topic_probe/liquidation_topic_probe_v2_latest.md | head -40"` | 已應為 `PASS_C1_PROOF_CANDIDATE`；C1 technical PASS，不等於 production writer revival 授權。 |
+| W-AUDIT-8b panel days | `ssh trade-core 'DB_URL=$(cat /tmp/openclaw/runtime_secrets/openclaw_database_url); psql "$DB_URL" -At -c "SELECT EXTRACT(EPOCH FROM (to_timestamp(MAX(snapshot_ts_ms)/1000.0)-to_timestamp(MIN(snapshot_ts_ms)/1000.0)))/86400 AS days FROM panel.funding_rates_panel;"'` | `days >= 7.0` 才可跑 Round 2 Phase B rerun；舊 `asof_ts` 欄位查詢已 stale。 |
+| Phase 1b Worktree B land | `git log --oneline --grep="phase1b\\|close maker" --since="3 days ago" && rg -n "compute_close_limit_price|close_order_dispatch_shape|PostOnly" rust/openclaw_engine/src/tick_pipeline/commands.rs rust/openclaw_engine/src/strategies/common/maker_price.rs` | `ea4ceca6 feat(phase1b): wire close maker first dispatch` 已 land；若 missing 才是重大 drift。 |
+| V095 production apply state | `ssh trade-core 'DB_URL=$(cat /tmp/openclaw/runtime_secrets/openclaw_database_url); psql "$DB_URL" -At -c "SELECT count(*) FROM _sqlx_migrations WHERE version=95;"'` | `0` = 尚未 production apply；apply 需要 operator/PM explicit auth。 |
+| Liquidation PK state | `ssh trade-core 'DB_URL=$(cat /tmp/openclaw/runtime_secrets/openclaw_database_url); psql "$DB_URL" -At -c "SELECT array_to_string(array_agg(a.attname ORDER BY array_position(i.indkey,a.attnum)), chr(44)) FROM pg_index i JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=ANY(i.indkey) WHERE i.indrelid='\''market.liquidations'\''::regclass AND i.indisprimary;"'` | pre-apply 應仍是 `symbol,ts,side`；V095 apply 後才是 `symbol,ts,side,qty,price`。 |
 
-# 未完成工作清單（per fix plan §3）
+# Current state summary（2026-05-17 SoT）
 
-## 🔴 P0 — Phase 1b IMPL Worktree B（CRITICAL，必先派）
+## ✅ DONE — Source/test checkpoints
 
-**Why**: commands.rs:806 hard-coded "market" 不改 = Phase 1b 核心未實現 = audit data 永遠空。
+- Phase 1b close-maker-first Worktree B 已 land：`ea4ceca6`。
+  - `maker_price.rs::compute_close_limit_price()`
+  - close dispatcher 分流、PostOnly close maker attempt、fallback audit、healthchecks/tests
+  - 仍未等於 runtime deploy / V094 Linux migration / Phase 2a observation start
+- W-AUDIT-8b Round 2 Phase A sweep tooling 已 land：`a6e17d5d`。
+  - v0.3 4-cell z sweep、Wilson CI、per-symbol floors、strict monotonic comparison
+  - Phase B rerun 仍等 `panel.funding_rates_panel >= 7d`
+- W-AUDIT-8a C1 transport proof 已 technical PASS。
+  - BB corrected side mapping approved：`S=Buy` long liquidation / `S=Sell` short liquidation
+  - C1 PASS 不授權 production `allLiquidation*`
+- W-AUDIT-8c correction source/test 已 land：`b5b6ce6a`。
+  - V095 source migration preserves `(symbol, ts, side, qty, price)`
+  - parser/writer fail closed for invalid liquidation rows
+  - production subscription builders still exclude `allLiquidation*`
 
-**派**: E1 worktree IMPL ~3-4h + A3+E2+E4 對抗審。
+## 🔴 P0 — Runtime/governance gate：V095 + production liquidation revival
 
-**Files**:
-- 新 rust/openclaw_engine/src/strategies/common/maker_price.rs::compute_close_limit_price()
-- 改 commands.rs:778-816 / 940 / 1123 3 close dispatcher 加 8-positive whitelist + N-negative whitelist 分流
-- 修 E2 RETURN finding: [70] Wilson threshold drift + [65] reject_samples 缺 + AC-18 fallback Wilson 缺
-- 補 8 close-maker dispatch test
+**Do not execute without explicit operator/PM authorization.**
 
-**Detail**: spec v1.3 + AMD v0.4 + E2 RETURN report docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--phase_1b_b2_b3_sibling_e2_review.md
+Current intended sequence:
+1. Confirm V095 dry-run + MIT re-sign reports are committed/pushed/synced, or re-run evidence if absent.
+2. If operator authorizes: apply V095 on `trade-core` real PG under bounded migration procedure.
+3. Register/repair `_sqlx_migrations` metadata/checksum if needed.
+4. Only after V095 apply + MIT/BB/PM green: consider runtime rebuild/restart and production `allLiquidation*` writer/topic revival.
 
-## 🟡 P1 — W-AUDIT-8b Round 2 Phase A IMPL（並行派）
+Chain: `PM -> E3 -> MIT + BB -> PM/operator auth -> E4/QA verification`。
 
-**派**: E1 worktree IMPL ~3-4h + A3+E2+E4。Phase B rerun panel ≥7d 後（2026-05-18 00:30 UTC 後）。
+## 🟡 P1 — W-AUDIT-8b Round 2 Phase B rerun
 
-**Files**:
-- 改 helper_scripts/reports/w_audit_8b_funding_skew_stage0r.py：加 --sweep --z-cells "1.0,1.2,1.5,2.0" + compute_stage0r_sweep() wrapper + wilson_ci_95() helper
+Run only after panel days `>= 7.0` using the corrected `snapshot_ts_ms` query.
 
-**Detail**: PA design packet docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_round2_tooling_prep.md
+Scope is read-only/reporting first:
+- run v0.3 sweep tooling
+- produce Round 2 report
+- send QC + MIT + BB review
+- no strategy IMPL, demo spend, paper enablement, live/demo-live mutation, or config mutation unless the Stage 0R packet is green and separately approved
 
-## 🟢 P2 — phys_lock Live AMD v0.2 operator review
+## 🟡 P2 — Phase 1b deploy / V094 chain
 
-docs/governance_dev/amendments/2026-05-XX-XX-phys-lock-live-enable-draft.md v0.2 DRAFT；operator 30 min review；pending Phase 2b PASS（多週後）才能 land。
+Phase 1b source/test is done, but runtime proof is still gated:
+- V094 Linux migration/deploy chain
+- 3-gate policy in AMD / TODO
+- no Phase 2a observation start until deploy is explicitly authorized and healthchecks are green
 
-## 🔵 P3 — 被動監控
+## 🟢 P3 — phys_lock Live AMD v0.2 operator review
 
-- C1 v2 24h proof → BB+MIT sign-off → W-AUDIT-8c 解凍
-- W-AUDIT-8b Round 2 rerun trigger panel ≥7d
+`docs/governance_dev/amendments/2026-05-XX-XX-phys-lock-live-enable-draft.md`
+is still DRAFT. No live `risk_config` change before Phase 2b PASS + QC
+counterfactual + operator sign-off.
 
-# Multi-Session Race
+# Multi-Session Race Rules
 
-當前 working tree 有 sibling Phase 1b Rust dirty files（A+C+D worktree IMPL 未 commit）。不要 override，不要一起 commit：
-- 只 add 自己改的（禁 git add -A）
-- Meta-doc 用 git commit --only <file>
-- Sibling 完 commit 後 git pull --ff-only
-
-Sibling 進度 grep：
-git log --oneline --since="1 day ago" | head -20
+- Working tree may contain sibling/user dirty files. Do not revert or include them.
+- Never use `git add -A`.
+- For this meta-doc only: `git commit --only docs/CCAgentWorkSpace/Operator/session_continuation_prompt_round2.md` if committing.
+- Before committing, re-run `git status --porcelain=v1` and list exactly which files are in scope.
+- If unrelated untracked reports are present, decide separately; do not silently bundle them with this prompt.
+- No pull/merge/rebase/reset unless operator explicitly asks.
 
 # 工作鏈強制
 
-主會話 = PM + Conductor 派工，**不自己寫業務代碼**。高風險 IMPL 必走 A3+E2 對抗審；E2+E4 永不跳。
+主會話 = PM + Conductor。高風險 IMPL / runtime / DB / exchange-facing work
+must use bound repo roles and adversarial review. E2/E4 are not skipped for
+implementation; E3/BB/MIT are not skipped for deploy/runtime/exchange/data gates.
 
 # 硬邊界（永不違背）
 
-- Mainnet / live enable 任何動作（3-gate 未解）
-- phys_lock live risk_config 修改（pending Phase 2b PASS）
-- OPENCLAW_ENABLE_PAPER=1（per AMD-2026-05-15-01 BLOCKED）
-- 訂閱 production WS allLiquidation.*（C1 PASS 前禁）
-- A4-C BTC→Alt 重啟同 feature shape（tombstone no-revive）
-- 5 textbook 策略參數 / sizing 調整
-- 自己寫 high-risk Rust 代碼（必派 E1）
-- git add -A / pull/merge/rebase/reset（留給 operator）
+- Mainnet / true live enablement without all five gates.
+- `OPENCLAW_ENABLE_PAPER=1` for promotion evidence.
+- phys_lock live `risk_config` mutation before Phase 2b PASS + explicit sign-off.
+- V095 production apply without explicit operator/PM authorization.
+- runtime rebuild/restart or production `allLiquidation*` subscription revival without explicit authorization.
+- A4-C BTC→Alt same feature-shape revive.
+- 5 textbook strategy parameter / sizing tweak as a shortcut to trading-loss fix.
+- unreviewed high-risk Rust / IPC / writer / DB work in main session.
+- `git add -A`, destructive git, or bundling sibling dirty files.
 
 # Honest 認知
 
-Trading losses 80%+ 來自 alpha 不足（root cause #1 ~60%）；Phase 1b 是 execution-quality optimization（fee saving ~$50-$200/year，~5-15% of total loss）。真實治癒走 W-AUDIT-8b/8c/8a alpha source 軸，需多月。
-
-本輪 audit Tier 1（Design + Governance）已 CLOSED；Tier 2（loss root resolution）仍 OPEN。
+Trading losses 80%+ 來自 alpha 不足（root cause #1 ~60%）。Phase 1b is an
+execution-quality fee optimization（~$50-$200/year, ~5-15% of total loss）and
+does not cure structural alpha deficit. Real path remains W-AUDIT-8b/8c/8a
+alpha-source evidence over weeks/months.
 
 # 起手回報格式
 
-讀完必讀 (1)(2)(3)(4) + 立即狀態驗證後，回報：
-1. HEAD commit hash + 三端 sync
-2. C1 v2 proof 狀態
-3. W-AUDIT-8b panel days
-4. Phase 1b Worktree B 是否 land
-5. Sibling 最近 commit / dirty files 評估
-6. 推薦立即動作 — 等 operator 拍板才派
+讀完必讀 + 驗證後回報：
+1. HEAD commit hash + Mac/origin/trade-core sync
+2. dirty / untracked files and whether they are yours
+3. C1 proof + BB/MIT/V095 status
+4. W-AUDIT-8b panel days and whether rerun gate is open
+5. Phase 1b source/test vs deploy/runtime state
+6. V095 production apply state (`_sqlx_migrations` + PK)
+7. 推薦立即動作，並明確標出哪些需要 operator 授權
 
 # Operator preference
 
@@ -126,15 +162,18 @@ Trading losses 80%+ 來自 alpha 不足（root cause #1 ~60%）；Phase 1b 是 e
 
 ## 維護說明
 
-本 prompt 設計為**動態 dynamic-reference 而非 static**：
-- 引用 SoT 文件（fix plan v1 / precompact snapshot / TODO §11.5 / Round 1 archive）
-- 用 `ls -t ... | head -1` 找最新 precompact，自動 stay-fresh
-- 不 hard-code commit hash / 具體日期/數字
+本 prompt 設計為**dynamic-reference**：
+- Active state 以 `TODO.md` + 最新 PM/MIT/BB/QC reports 為準。
+- Historical context 才讀 fix plan v1 / precompact / Round 1 archive。
+- Runtime facts 用命令重查，不把瞬時 PID、days、dirty file 狀態當永久真相。
 
 **何時要更新本檔**：
-1. P0/P1/P2 內容根本性改變（e.g. Phase 1b Worktree B done 後重新分類）
-2. 加新 SoT 文件（如 fix plan v2）
-3. 硬邊界擴展
-4. 工作鏈規則改
+1. V095 production apply / liquidation revival 狀態改變。
+2. W-AUDIT-8b Round 2 rerun verdict 出爐。
+3. Phase 1b deploy / V094 / Phase 2a observation gate 改變。
+4. 新 SoT 文件取代 fix plan v1 或 TODO active routing。
+5. 硬邊界或 dispatch chain 有新規則。
 
-**更新流程**：直接 edit + commit `--only` + push + Linux sync。
+**更新流程**：edit only this file, verify diff, then if committing use
+`git commit --only docs/CCAgentWorkSpace/Operator/session_continuation_prompt_round2.md`
+and push/sync separately. Do not bundle unrelated dirty files.
