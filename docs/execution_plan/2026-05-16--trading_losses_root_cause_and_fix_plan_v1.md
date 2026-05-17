@@ -217,3 +217,128 @@ per Wave 1 Track E3 empirical baseline（commit `b98706d5`）+ AMD v0.4 §1 foot
 | 日期 | 版本 | 變更 | 作者 |
 |---|---|---|---|
 | 2026-05-16 | v1.0 | 補存第三方 3-round audit + 主會話對抗收斂後的完整修復方案 single SoT；之前散在 chat + verdict reports 未整合 | Main session post-precompact |
+| 2026-05-18 | v1.1 | 加 §9 delta：(a) Phase 1b RUNTIME ACTIVATOR BLOCKER discovered post-deploy（E2 RCA + PA Option A design + AMD §3.1 v0.5 wording patch + Phase 2a 14d reset semantics）；(b) W-AUDIT-8b Round 2 Phase B preliminary sweep 8/8 cells RED HIGH conf（operator-auth override on 6.92d panel）；(c) W-AUDIT-8a Phase B/C/D 11-worktree decomposition done（36.1 pd / 8.5 wallclock weeks @ 4 E1）；(d) 4-agent review packet template land；(e) AMD §3.1 patch wording proposal | Main session round 2 audit |
+
+---
+
+## §9 v1.1 Delta（2026-05-18 Round 2 Audit Findings）
+
+### 9.1 Phase 1b RUNTIME ACTIVATOR BLOCKER（新識別，最嚴重）
+
+**事實**: post-deploy 4h `trading.fills` sample = 0% maker_attempt rate（18 grid_close_short + 2 ma_reverse_cross 全 `close_maker_attempt=FALSE` + `fallback_reason=NULL`）。
+
+**根因**（per E2 adversarial RCA + PA design report）:
+- Binary 含 Phase 1b code（commit `ea4ceca6` post-build，mtime `2026-05-17 23:13`）
+- `pipeline_ctor.rs:62` cold-default `use_maker_close: false`
+- `commands.rs:117` 早 return `CloseOrderDispatchShape::market()` 當 `!self.use_maker_close` — bypass 整個 whitelist + maker price compute + audit chain
+- `set_use_maker_close_runtime` production callers = 0（只 4 test-only hits in `dual_rail_dispatch.rs`）
+- **AMD-2026-05-15-02 §3.1 wording 期待 activator 但 IMPL 沒接** — spec/IMPL gap
+
+**Severity**: BLOCKER — **Phase 2a 14d observation period 完全廢**，引擎從未嘗試 maker close，Phase 1b 任何 fee saving = 0% realized。
+
+**Fix path**（per PA design `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_use_maker_close_runtime_activator_design.md`）:
+- **Option A confirmed**: TOML `[runtime] use_maker_close` 三環境（demo/live/paper）TOML 表
+- E1 IMPL ~135 LOC（核心 75 + 測試 60）/ 2-3 person-hours / 觸 7 檔
+- **PA adversarial catch on E2 sibling claim**: H0Gate shadow_mode RMW 並不從 TOML 讀（`apply_risk_snapshot` pipeline_config.rs:97-109 註釋 "preserves shadow_mode" 是「保留不覆寫」不是「同步」）— 本 ticket IMPL 必顯式 `set_use_maker_close_runtime(snap.runtime.use_maker_close)`
+- Chain: PA design → E1 IMPL → E2 review → E4 regression → QA deploy readiness → operator restart + 4h verify (target `attempt_pct ≥25%` per spec §4.3 conservative)
+- **Total ETA**: ~8-12h post-PA approval（不含 operator restart authorization 等待）
+
+**Phase 2a 14d reset trigger**: per PA design，trigger 是 **QA 步驟 8（restart 後 2h 內 verification SQL pass + `attempt_pct ≥25%` on demo whitelist）**，不是 restart binary timestamp。
+
+**AMD revision needed**: AMD-2026-05-15-02 v0.4 → **v0.5**（§3.1 line 82 從單句 "Rust struct cold-boot default = false" 擴為「cold-boot default + Runtime activation layer 三環境 TOML 表 + Phase 2b live_demo conflict 顯式 defer」）。non-numerical / 純補白 / PM authority 可動。
+
+**Critical risk R6**（per PA）: Phase 2b live_demo blocker — AMD §3 承諾 live_demo 啟用，但 `commands.rs:92` Demo-only guard hard-block（live_demo = `PipelineKind::Live` 綁定 demo endpoint，不是 `PipelineKind::Demo`）。本 ticket 不擴 guard（保 demo-loose-live-strict policy），Phase 2b 另開 ticket + AMD 補件。
+
+### 9.2 W-AUDIT-8b Round 2 Phase B Preliminary Sweep — 8/8 cells RED
+
+**Operator-authorized override on panel 6.92d**（pending 7.0d natural confirm ≈2026-05-18 01:30 CEST），跑 4-cell z sweep（z=1.0/1.2/1.5/2.0）。
+
+| z_cell | best branch | n / n_eff | avg_net_bps | DSR | PBO | verdict |
+|---|---|---|---|---|---|---|
+| 1.0 | short_squeeze | 8 / 1 | +112.42 | 0 | 0.677 | RED |
+| 1.2 | **short_squeeze** | **74 / 12** | **-0.77 (INJUSDT -9.64)** | 0 | 0.643 | RED |
+| 1.5 | short_squeeze | 7 / 1 | +116.78 | None/0 | 0.750 | RED |
+| 2.0 | short_squeeze | 7 / 1 | +116.78 | None/0 | 0.750 | RED |
+
+- z=1.5 ≡ z=2.0 identical signal set（bimodal funding tail）
+- crowded_long_fade 全 z × 全 25 sym n=0（信號不觸發）
+- DSR=0 / PBO 0.64-0.75 — 統計上無促進 cell
+- z=1.2 把 trigger ×6（n=74）後揭露 short_squeeze 實質 -9.64 bps（之前 z=1.5 看到 +116 是 7-signal pure outlier）
+
+**Preliminary verdict**: `RED_PENDING_7D_CONFIRM` (HIGH confidence)；power delta 6.92→7.0d 估 +1%，confirm RED 概率 ≥0.95。
+
+**Next**: 7.0d 達標 →PA 重跑對齊 → 4-agent QC/MIT/BB/FA independent review packet（template `docs/CCAgentWorkSpace/PM/workspace/templates/2026-05-18--w_audit_8b_round2_red_4agent_review_packet_template.md` 已 land）→ AMD-2026-05-15-02 §8 condition 3 wording 修訂 → archive W-AUDIT-8b Round 2 → redirect to W-AUDIT-8c/8a Phase B/C/D alpha source 軸。
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-17--w_audit_8b_round2_phase_b_preliminary_sweep.md`
+**Artifact**: Linux `/tmp/openclaw/w_audit_8b_stage0r_v0_3_sweep_20260517_0030_pa.json` + Mac mirror `docs/audits/2026-05-17--w_audit_8b_round2_sweep_artifact.json`
+
+### 9.3 W-AUDIT-8a Phase B/C/D Worktree Decomposition
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8a_phase_b_c_d_worktree_decomposition.md`
+
+**結構**: 11 worktree × 3 Wave / 32.5 pd 基線 + 30% HIGH-risk buffer = **36.1 pd / 8.5 wallclock weeks @ 4 active E1**（之前 §3 P2 「4-6 sprint」/「12-16 週」估，PA 細化為 8.5 週）。
+
+| Wave | Worktrees | Effort | Wallclock |
+|---|---|---|---|
+| **Wave 1**（N+3 W7-W8）| B-REM-1, B-REM-5, **C1-LIQ-WRITER**, B-REM-2, B-REM-3 | 8.5 pd | ~2 週 |
+| Wave 2（N+4 W9-W10）| Phase C 剩 + Phase D 部分 | 11 pd | ~3 週 |
+| Wave 3（N+5 W11-W12）| D1-EVENT + 完成 | 13 pd | ~3.5 週 |
+
+**HIGH-risk top-3**（必走完整 PA→E1→E2→E4→QA chain）:
+1. C1-LIQ-WRITER — alpha revival，引 C1 proof + V095 + BB cor-side
+2. C2-ORDERFLOW — 新 V### + IPC + WS fanout + healthcheck（4 cross-cutting）
+3. D1-EVENT — 第一次 Python→Rust Tier 4 bridge
+
+**Critical bottleneck**: **B-REM-5**（LOW-MED, 2pd, Wave 1）— SourceAvailability enum + ADR。**6 個下游 worktree 全引用**（B-REM-2/3 + C2/C3 + D1/D2/D3）。postpone → Wave 2 rework cost 8-10pd。
+
+**Wave 1 立即可派的 3 個**（並行）:
+1. B-REM-1 (LOW, 1.5pd) — 立刻
+2. B-REM-5 (LOW-MED, 2pd) — **必先**鎖 enum + ADR（blocking 6 downstream）
+3. C1-LIQ-WRITER (HIGH, 2pd) — full chain，2026-05-17 三 prereq（C1 proof + V095 + WS revival）全 DONE
+
+### 9.4 Tier 2 Roadmap Closure Sequence（Updated）
+
+**Critical path = calendar-locked Phase 2a/2b/2c observation + alpha source land**：
+
+```
+Phase 1b RUNTIME ACTIVATOR fix (8-12h)
+  └─> Phase 2a Demo 14d observation (reset)
+        └─> Phase 2b LiveDemo 7d observation
+              └─> Phase 2c LiveDemo Counterfactual verification
+                    └─> Phase 1b closure report
+
+W-AUDIT-8b Round 2 7.0d confirm
+  └─> 4-agent review (RED final)
+        └─> AMD §8 wording revision
+              └─> W-AUDIT-8b archive (signal retire)
+
+W-AUDIT-8a Phase B/C/D Wave 1 dispatch (operator OK)
+  └─> Wave 1 ~2 wks
+        └─> Wave 2 ~3 wks (Phase C 剩 + Phase D 部分)
+              └─> Wave 3 ~3.5 wks (D1-EVENT + 完成)
+                    └─> Alpha surface infrastructure complete (~8.5 wks total)
+
+W-AUDIT-8a C1 production revival 24-48h monitor
+  └─> BB + MIT post-revival sign-off (~1 wk)
+        └─> W-AUDIT-8c IMPL trigger (~4-6 wks)
+              └─> Liquidation Cluster Reaction strategy land
+
+Any alpha source PASS → P0-EDGE-1 lift → trading losses audit Tier 2 closure
+```
+
+**最 optimistic**: Phase 1b ~2 wks（fix+observation 2a/2b/2c）+ Wave 1 W-AUDIT-8a ~2 wks（並行）→ alpha source candidate land ~4-6 wks → P0-EDGE-1 lift evaluation ~6 wks。
+
+**Realistic**: 12-16 wks 才有真實 alpha source PASS evidence（per fix plan §6 quantitative footnote）。
+
+### 9.5 待 operator 拍板的關鍵動作（2026-05-18）
+
+1. **派 E1 IMPL chain for Phase 1b runtime activator**（PA design 完整 prompt-ready）
+2. **AMD-2026-05-15-02 v0.4 → v0.5 wording patch**（§3.1 + Phase 2b live_demo conflict explicit defer）
+3. **W-AUDIT-8b Round 2 7.0d confirm rerun**（~80min after 2026-05-17 23:42 CEST baseline）+ dispatch 4-agent review packet
+4. **W-AUDIT-8a Wave 1 dispatch**（B-REM-1/5 + C1-LIQ-WRITER）— 不阻塞 Phase 1b BLOCKER fix
+5. **Phase 2c LiveDemo Counterfactual harness spec**（不等 Phase 2b PASS，可 advance）
+
+不需 operator 拍板（已 in-flight）:
+- W-AUDIT-8a C1 production revival 24-48h monitoring（calendar in-flight）
+- 4-agent review packet template land（done）
+- Memory graft backup（done）
