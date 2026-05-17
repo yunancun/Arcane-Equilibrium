@@ -3,9 +3,9 @@
 Date: 2026-05-17
 Role: PM
 Scope: five-commit deploy readiness audit, Linux runtime empirical state, deploy order, operator authorization checklist, and post-authorization V094 result.
-Constraint: initial audit was read-only. After explicit operator authorization, Step 1 V094 manual apply/register was executed only. No V095 apply, no production `allLiquidation*` subscription, no `risk_config`/runtime mutation, no engine restart, no W-AUDIT-8b tombstone, no sub-agent dispatch.
+Constraint: initial audit was read-only. After explicit operator authorization, Step 1 V094 manual apply/register and Step 2 Phase 1b engine deploy/restart were executed only. No V095 apply, no production `allLiquidation*` subscription, no `risk_config`/runtime mutation, no W-AUDIT-8b tombstone, no sub-agent dispatch.
 
-Verdict summary: **V094 APPLIED; READY-TO-AUTHORIZE Step 2 engine deploy/restart only**. The initial audit found a Linux cargo regression in the `risk_close:phys_lock_*` literal guard; remediation landed in `b867e452` and Linux `openclaw_engine --lib` is now green at `2969 passed / 0 failed / 1 ignored`. V094 was then manually applied/registered after explicit operator authorization. This verdict does not authorize V095, production `allLiquidation*` revival, or any runtime/config mutation beyond a separately authorized Phase 1b engine deploy/restart.
+Verdict summary: **STEP 2 ENGINE DEPLOY/RESTART COMPLETED; READY-TO-AUTHORIZE Step 3 V095 only**. The initial audit found a Linux cargo regression in the `risk_close:phys_lock_*` literal guard; remediation landed in `b867e452` and Linux `openclaw_engine --lib` is now green at `2969 passed / 0 failed / 1 ignored`. V094 was manually applied/registered after explicit operator authorization, then Phase 1b engine-only rebuild/restart was executed after separate authorization. This verdict does not authorize production `allLiquidation*` revival or any risk/runtime config mutation.
 
 ## §1 5-Commit Workchain Coverage Matrix（per commit × per role）
 
@@ -17,6 +17,7 @@ Authoritative inputs checked:
 - `git log --name-only --oneline -1 <commit>` for each subject commit.
 - Local/origin/Linux sync pre-remediation: local `HEAD=38a9bedd`, `origin/main=38a9bedd`, Linux `HEAD=38a9bedd`, Linux `origin/main=38a9bedd`.
 - Post-remediation sync: local/origin/Linux `HEAD=b867e452` after `fix(engine): route phys-lock test tags through helper`; Linux worktree clean.
+- Pre-Step-2 sync: local/origin/Linux `HEAD=5f42771a`; Linux worktree clean.
 
 | Commit | Source/test land evidence | E1 self-report | E2 verdict | E4 regression | A3 / MIT / BB | PM sign-off | Missing / caveat |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -31,11 +32,11 @@ Coverage conclusion:
 - Source commits are landed across local/origin/Linux.
 - Historical workspace closure claims are internally consistent with the current-state SoT.
 - Artifact hygiene is imperfect: several final role approvals are present through PM/Operator closure reports rather than standalone role-owned latest reports.
-- Initial cargo regression was remediated by `b867e452`; current Linux cargo baseline is green. V094 is applied; the next gate is explicit Step 2 engine deploy/restart authorization.
+- Initial cargo regression was remediated by `b867e452`; current Linux cargo baseline is green. V094 is applied and Step 2 engine deploy/restart completed; the next gate is explicit Step 3 V095 manual apply/register authorization.
 
 ## §2 Linux Runtime Empirical State
 
-Checks executed over `ssh trade-core`; only Step 1 V094 manual apply/register mutated DB state after explicit operator authorization.
+Checks executed over `ssh trade-core`. Step 1 V094 manual apply/register mutated DB state after explicit operator authorization; Step 2 rebuilt/restarted the engine after separate explicit authorization.
 
 Migration status after Step 1 V094:
 
@@ -86,20 +87,22 @@ market.liquidations primary key = symbol,ts,side
 
 Interpretation: Linux DB is still pre-V095. Expected post-V095 identity is `symbol,ts,side,qty,price`.
 
-Engine watchdog:
+Engine watchdog after Step 2 restart:
 
 ```json
 {
   "engine_alive": true,
-  "snapshot_age_seconds": 16.8,
+  "snapshot_age_seconds": 8.1,
   "stale_threshold_seconds": 45.0,
   "engines": {
-    "paper": {"alive": false, "age_seconds": 93493.7},
-    "demo": {"alive": true, "age_seconds": 29.5},
-    "live": {"alive": true, "age_seconds": 16.8}
+    "paper": {"alive": true, "age_seconds": 11.6},
+    "demo": {"alive": true, "age_seconds": 9.2},
+    "live": {"alive": true, "age_seconds": 8.1}
   }
 }
 ```
+
+Paper note: `paper` is fresh because the engine writes a disabled paper snapshot on restart. `/tmp/openclaw/pipeline_snapshot_paper.json` and `/tmp/openclaw/paper_state.json` both show `disabled=true` and `disabled_reason="OPENCLAW_ENABLE_PAPER != 1"`; paper trading was not enabled.
 
 Runtime environment read-only sample:
 
@@ -161,27 +164,27 @@ Baseline comparison:
 - Initial audit Linux baseline: `2968 passed / 1 failed / 1 ignored`
 - Current Linux baseline after `b867e452`: `2969 passed / 0 failed / 1 ignored`
 
-PM assessment: source/test deploy blocker cleared and V094-only migration step completed. Remaining gate is explicit operator authorization for Step 2 Phase 1b engine deploy/restart.
+PM assessment: source/test deploy blocker cleared, V094-only migration step completed, and Step 2 Phase 1b engine deploy/restart completed. Remaining gate is explicit operator authorization for Step 3 V095 manual apply/register.
 
 ## §4 Cross-Commit Interaction Risk
 
-1. V094 is now applied, so the Phase 1b runtime can persist close-maker audit fields after a separately authorized engine deploy/restart. The currently running engine was not restarted by this step.
+1. V094 is now applied and the Phase 1b engine was rebuilt/restarted, so runtime can persist close-maker audit fields on subsequent fills.
 2. V095 is the liquidation identity prerequisite. It fixes idempotency for parser/writer revival, but current production subscription builders still exclude `allLiquidation*`, so V095 apply is not equivalent to liquidation revival.
 3. W-AUDIT-8b Phase B rerun is data-coverage gated by `panel.funding_rates_panel >=7d`; it does not depend on V094/V095 deploy and can be scheduled independently once the gate opens.
-4. Engine restart plus `OPENCLAW_AUTO_MIGRATE=1` could apply pending migrations in the engine-start path. Current Linux env has `OPENCLAW_AUTO_MIGRATE=0`; keep it disabled before any Step 2 restart and before later V095 sequencing.
+4. Engine restart completed with `OPENCLAW_AUTO_MIGRATE=0`; V095 was not auto-applied. Keep auto-migrate disabled before later V095 sequencing.
 5. The initial cargo failure was a cross-commit readiness break because it invalidated the empirical regression baseline for the Phase 1b commit even though historical E4 closure was green. It is now remediated by `b867e452`, with Linux cargo green.
 6. The C1 result is technical only. It validates corrected mapping and V095 idempotency evidence, but it does not authorize production topic revival.
 
 ## §5 Deploy Order Recommendation + Rationale
 
-Current recommendation: **authorize Step 2 Phase 1b engine deploy/restart only, if the operator explicitly approves it**. V094 is applied and the Linux cargo baseline is restored to `0 failed`; V095 and production liquidation revival remain separate authorization steps.
+Current recommendation: **authorize Step 3 V095 manual apply/register only, if the operator explicitly approves it**. V094 is applied, the Phase 1b engine deploy/restart completed, and the Linux cargo baseline is restored to `0 failed`; production liquidation revival remains a separate later authorization step.
 
 Conditional order:
 
 1. **Preflight freeze**: confirm clean Linux worktree, expected commit, `OPENCLAW_AUTO_MIGRATE=0`, `OPENCLAW_ENABLE_PAPER=0`, and full Linux cargo baseline green.
 2. **V094 first**: completed. Rationale: V094 enables close-maker audit fields required for Phase 1b observation and was isolated from V095.
-3. **Phase 1b runtime deploy/restart**: pending explicit engine restart authorization. Rationale: runtime writes become meaningful only after the schema exists.
-4. **V095 second**: manually apply/register V095 in a separate authorization step. Rationale: identity correction is safe to prepare but should not be coupled with V094 or engine restart.
+3. **Phase 1b runtime deploy/restart**: completed after explicit engine restart authorization. Rationale: runtime writes become meaningful only after the schema exists.
+4. **V095 second**: pending separate authorization to manually apply/register V095. Rationale: identity correction is safe to prepare but should not be coupled with V094 or engine restart.
 5. **W-AUDIT-8b Phase B rerun in parallel once eligible**: wait for panel `>=7d`, then run the read-only Phase B report. Rationale: independent data-analysis gate, not a runtime deploy gate.
 6. **Liquidation revival last**: separate AMD/dispatch/authorization for production `allLiquidation*` subscriptions and writer path. Rationale: current source deliberately keeps production builders excluding those topics.
 
@@ -234,7 +237,7 @@ ssh trade-core 'cd ~/BybitOpenClaw/srv && DB_URL=$(cat /tmp/openclaw/runtime_sec
 
 ### Step 2 — Phase 1b engine deploy/restart
 
-Status: **pending explicit operator authorization**.
+Status: **completed on Linux** after explicit operator authorization.
 
 Operation: rebuild/restart engine on the approved source after V094 is present.
 
@@ -259,9 +262,18 @@ ssh trade-core 'cd ~/BybitOpenClaw/srv && python3 helper_scripts/canary/engine_w
 Additional expected health:
 
 - Engine alive and fresh snapshots under threshold.
-- No unexpected paper enablement.
+- No unexpected paper enablement. Disabled paper snapshot is fresh, but `disabled=true` and `OPENCLAW_ENABLE_PAPER=0`.
 - Close-maker audit fields begin populating only after fills occur.
 - Check `[40]` may remain WARN until strategy edge recovers; it is not expected to flip solely from deploy.
+
+Observed result:
+
+- Rebuild completed with non-fatal warnings only.
+- Engine stopped gracefully and restarted as PID `1035839`.
+- Previous engine log archived at `/tmp/openclaw/engine_logs/engine-1779049036.log`.
+- Watchdog post-check: engine alive; live/demo snapshots fresh; disabled paper snapshot fresh.
+- V094 remained registered; V095 was not applied.
+- `OPENCLAW_AUTO_MIGRATE=0` and `OPENCLAW_ENABLE_PAPER=0` remained unchanged.
 
 ### Step 3 — V095 manual apply/register
 
@@ -336,25 +348,25 @@ Expected verify:
 
 - **W-AUDIT-8b Phase B**: pending panel `>=7d`; currently `6.8566833564814815d`. This remains an active P1/P2 analytical gate and can proceed independently once eligible.
 - **phys_lock AMD / literal guard remediation**: completed by `b867e452`; Linux full lib baseline is `2969 passed / 0 failed / 1 ignored`.
-- **Phase 1b deploy**: source landed, current source/test baseline is green, and V094 schema is applied. Phase 1b engine restart remains pending separate explicit authorization.
+- **Phase 1b deploy**: completed after V094 apply; close-maker audit fields can populate on subsequent fills.
 - **V095 / liquidation correction**: dry-run evidence and MIT re-sign exist; Linux DB still pre-V095. Apply only after separate explicit authorization. V095 does not revive production liquidation subscriptions.
 - **Production liquidation revival**: still blocked and intentionally excluded from immediate deploy plan. Requires separate AMD/PM dispatch and operator authorization.
 
 ## §9 PM Verdict（READY-TO-AUTHORIZE / NEEDS-WORK / BLOCKED）
 
-**V094 APPLIED; READY-TO-AUTHORIZE Step 2 engine deploy/restart only**.
+**STEP 2 ENGINE DEPLOY/RESTART COMPLETED; READY-TO-AUTHORIZE Step 3 V095 only**.
 
 Reason:
 
 1. Source commits are landed and workspace reports broadly cover the expected role chain, with noted artifact-hygiene gaps.
-2. Linux runtime is stable enough for observation. V094 is applied; V095 is not applied; check `[40]` remains WARN.
+2. Linux runtime is stable after restart. V094 is applied; V095 is not applied; check `[40]` remains WARN.
 3. The current Linux cargo regression baseline is green after `b867e452`: `2969 passed / 0 failed / 1 ignored`.
 4. V095 remains unapplied and check `[40]` remains WARN, so authorization must remain narrow and sequential.
 
 PM authorization condition:
 
-- Operator explicitly authorizes Step 2 Phase 1b engine deploy/restart.
-- Reconfirm `OPENCLAW_AUTO_MIGRATE=0` immediately before restart.
-- Do not bundle V095, production subscription revival, or risk/runtime config changes into the Step 2 authorization.
+- Operator explicitly authorizes Step 3 V095 manual apply/register.
+- Reconfirm `OPENCLAW_AUTO_MIGRATE=0` immediately before applying V095.
+- Do not bundle production subscription revival or risk/runtime config changes into the Step 3 authorization.
 
-No V095 apply, runtime/config mutation, engine restart, or production liquidation revival was executed as part of this V094 step.
+No V095 apply, risk/runtime config mutation, or production liquidation revival was executed as part of Step 2.
