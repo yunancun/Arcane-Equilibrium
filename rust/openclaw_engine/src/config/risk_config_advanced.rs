@@ -364,6 +364,14 @@ pub struct RuntimeKnobs {
     pub signals_heartbeat_ms: u64,
     #[serde(default = "default_true")]
     pub h0_shadow_mode: bool,
+    // AMD-2026-05-15-02 §3 Phase 1b 收盤掛 maker 的 runtime 啟動層；cold-default
+    // false 與 AMD §3 「Rust struct cold-boot default = false」對齊。TOML 缺欄位
+    // → serde 回 false（fail-closed 與 ctor 一致）。Demo-only enforcement 由
+    // `set_use_maker_close_runtime` 兜底 — 即使 risk_config_live.toml /
+    // risk_config_paper.toml 誤填 true，hot-reload 路徑 (pipeline_config.rs
+    // `apply_risk_snapshot`) 仍會被 commands.rs:91-103 的 PipelineKind 守衛拒絕。
+    #[serde(default)]
+    pub use_maker_close: bool,
 }
 
 fn default_boot_cooldown_ms() -> u64 {
@@ -379,6 +387,9 @@ impl Default for RuntimeKnobs {
             boot_cooldown_ms: default_boot_cooldown_ms(),
             signals_heartbeat_ms: default_signals_heartbeat_ms(),
             h0_shadow_mode: default_true(),
+            // AMD-2026-05-15-02 §3 cold-boot default = false（fail-safe），
+            // 與 tick_pipeline::pipeline_ctor.rs ctor 預設值對齊。
+            use_maker_close: false,
         }
     }
 }

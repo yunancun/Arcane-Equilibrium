@@ -140,6 +140,9 @@ window_minutes = 60
 boot_cooldown_ms = 60000
 signals_heartbeat_ms = 60000
 h0_shadow_mode = true
+# AMD-2026-05-15-02 §3 Phase 1b master/template：保 paper-equivalent
+# (cold-default false)。實際 runtime TOML 由 risk_config_<env>.toml 提供。
+use_maker_close = false
 
 [experimental.flags]
 
