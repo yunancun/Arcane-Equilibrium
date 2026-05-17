@@ -108,6 +108,30 @@ impl TickPipeline {
         h0.allowed_categories = snap.limits.allowed_categories.clone();
         self.h0_gate.update_config(h0);
 
+        // AMD-2026-05-15-02 §3 Phase 1b runtime 啟動層：把 TOML
+        // `runtime.use_maker_close` 透過 `set_use_maker_close_runtime` 路由
+        // （**NOT** 直接寫 self.use_maker_close 欄位），保留 commands.rs:91-103
+        // 的 Demo-only 守衛 — Live / Paper TOML 即使誤填 true 也會被守衛拒絕並
+        // 留 false。
+        //
+        // 為什麼用 setter 而非直接寫欄位：
+        //   - 三環境 TOML 故意分開（per feedback_env_config_independence），但
+        //     human/agent 仍可能誤把 Live/Paper 的 use_maker_close 設成 true。
+        //   - commands.rs:92 的 `pipeline_kind != PipelineKind::Demo` reject
+        //     是這條 flag 的最後一道安全網，不能被 hot-reload 路徑繞過。
+        //
+        // 為什麼 ignore 回傳值（`let _ =`）：
+        //   - 守衛拒絕時 setter 回 false 並把欄位設為 false，但 hot-reload
+        //     場景下這是**期望行為**（不是錯誤），不需要在 telemetry 重複記。
+        //   - Setter 內部已用 tracing::warn! 記錄 Live/Paper drift 嘗試。
+        //
+        // 為什麼放在 H0 之後 / paper_state 之前：
+        //   - 與 set_risk_store (line 46) 順序綁定 — boot-time TOML → setter
+        //     → use_maker_close 欄位在第一次 on_tick 前已就緒。
+        //   - hot-reload：sync_risk_config_if_changed 在 on_tick 頂部觸發，
+        //     ConfigStore 版本號上升 → 下個 tick 立即生效（≤1 tick latency）。
+        let _ = self.set_use_maker_close_runtime(snap.runtime.use_maker_close);
+
         // 4. ARCH-RC1 1C-2-F E-Merge-1 (downgraded): hot-reload the legacy
         //    paper_state.stop_config so the H0-blocked / paused protective
         //    fallback stops at tick_pipeline.rs:910 + :1017 use the operator-

@@ -169,6 +169,11 @@ window_minutes = 45
 boot_cooldown_ms = 60000
 signals_heartbeat_ms = 60000
 h0_shadow_mode = false
+# AMD-2026-05-15-02 §3 Phase 2a 啟用：Demo 為唯一 alpha-bearing 樣本源
+# (project_edge_data_isolation.md / feedback_demo_loose_live_strict_policy)。
+# 收盤路徑透過 PostOnly maker 嘗試，失敗 fallback 回 market 由
+# commands.rs 路徑兜底。Demo-only enforcement 由 commands.rs:91-103 守衛保證。
+use_maker_close = true
 
 # DYNAMIC-RISK-1: Sharpe-aware dynamic per-trade risk. Demo is the primary
 # learning/edge-accumulation channel (project_edge_data_isolation.md), so
