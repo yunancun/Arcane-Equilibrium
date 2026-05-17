@@ -377,6 +377,8 @@ fn warn_skip_no_quote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tick_pipeline::build_risk_close_tag;
+    use std::borrow::Cow;
 
     /// Helper to build inputs with BBO present.
     /// 建構帶 BBO 的 inputs 輔助函式。
@@ -535,23 +537,23 @@ mod tests {
     #[test]
     fn close_policy_accepts_positive_whitelist_with_prefixes() {
         let positives = [
-            "grid_close_short",
-            "strategy_close:grid_close_long",
-            "bb_mean_revert",
-            "risk_close:phys_lock_gate4_giveback",
-            "risk_close:phys_lock_gate4_stale_roc_neg",
-            "strategy_close:ma_reverse_cross",
-            "bw_squeeze",
-            "pctb_revert",
+            Cow::Borrowed("grid_close_short"),
+            Cow::Borrowed("strategy_close:grid_close_long"),
+            Cow::Borrowed("bb_mean_revert"),
+            Cow::Owned(build_risk_close_tag("phys_lock_gate4_giveback")),
+            Cow::Owned(build_risk_close_tag("phys_lock_gate4_stale_roc_neg")),
+            Cow::Borrowed("strategy_close:ma_reverse_cross"),
+            Cow::Borrowed("bw_squeeze"),
+            Cow::Borrowed("pctb_revert"),
         ];
 
         for reason in positives {
             assert!(
-                is_close_maker_positive_reason(reason),
+                is_close_maker_positive_reason(reason.as_ref()),
                 "{reason} must be close-maker eligible"
             );
             assert!(
-                !is_close_maker_market_only_reason(reason),
+                !is_close_maker_market_only_reason(reason.as_ref()),
                 "{reason} must not be classified market-only"
             );
         }

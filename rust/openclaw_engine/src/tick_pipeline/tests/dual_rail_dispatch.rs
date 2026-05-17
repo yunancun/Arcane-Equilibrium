@@ -389,6 +389,7 @@ fn test_close_maker_phys_lock_giveback_timeout_policy() {
     pipeline.set_instrument_cache(instrument_cache_for("BTCUSDT", 0.1));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
     pipeline.set_shadow_channel(tx);
+    let close_tag = crate::tick_pipeline::build_risk_close_tag("phys_lock_gate4_giveback");
     pipeline.paper_state.apply_fill(
         "BTCUSDT",
         true,
@@ -400,14 +401,7 @@ fn test_close_maker_phys_lock_giveback_timeout_policy() {
     );
 
     let event = make_bbo_event("BTCUSDT", 50_000.0, 49_999.9, 50_000.1, 1_700_000_060_000);
-    assert!(pipeline.execute_position_close(
-        "BTCUSDT",
-        true,
-        0.1,
-        &event,
-        true,
-        "risk_close:phys_lock_gate4_giveback",
-    ));
+    assert!(pipeline.execute_position_close("BTCUSDT", true, 0.1, &event, true, &close_tag,));
 
     let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
     assert_eq!(req.order_type, "limit");
