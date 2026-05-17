@@ -46,17 +46,21 @@ use tracing::{info, warn};
 /// Includes `tickers.{sym}` so scanner-added symbols receive fundingRate /
 /// indexPrice updates required by FundingArb (OC-5 / G-2), and
 /// `orderbook.50.{sym}` so PostOnly maker strategies can compute passive BBO
-/// prices on dynamic symbols instead of strict-skipping new entries.
+/// prices on dynamic symbols instead of strict-skipping new entries. C1-approved
+/// `allLiquidation.{sym}` is included so dynamic symbols use the same
+/// liquidation writer path as startup symbols.
 /// 生成單個交易對的 WebSocket 主題列表。包含 `tickers.{sym}` 讓 scanner 新增
 /// 交易對接收 FundingArb 所需的資金費率/指數價格，也包含
 /// `orderbook.50.{sym}`，讓 PostOnly maker 策略在動態交易對上取得 BBO
-/// 被動掛價，避免因缺 best_bid/best_ask 而跳過新開倉。
+/// 被動掛價，避免因缺 best_bid/best_ask 而跳過新開倉。另包含 C1 已批准的
+/// `allLiquidation.{sym}`，讓動態交易對走同一套 liquidation writer path。
 fn topics_for_symbol(symbol: &str) -> Vec<String> {
     vec![
         format!("kline.1.{symbol}"),
         format!("publicTrade.{symbol}"),
         format!("tickers.{symbol}"),
         format!("orderbook.50.{symbol}"),
+        format!("allLiquidation.{symbol}"),
     ]
 }
 
@@ -457,16 +461,17 @@ mod tests {
         }
     }
 
-    /// EN: topics_for_symbol generates market, ticker, and BBO topics for each symbol.
-    /// 中文: topics_for_symbol 為每個交易對生成行情、ticker 與 BBO 主題。
+    /// EN: topics_for_symbol generates market, ticker, BBO, and liquidation topics for each symbol.
+    /// 中文: topics_for_symbol 為每個交易對生成行情、ticker、BBO 與 liquidation 主題。
     #[test]
     fn test_topics_for_symbol_standard() {
         let topics = topics_for_symbol("BTCUSDT");
-        assert_eq!(topics.len(), 4);
+        assert_eq!(topics.len(), 5);
         assert_eq!(topics[0], "kline.1.BTCUSDT");
         assert_eq!(topics[1], "publicTrade.BTCUSDT");
         assert_eq!(topics[2], "tickers.BTCUSDT");
         assert_eq!(topics[3], "orderbook.50.BTCUSDT");
+        assert_eq!(topics[4], "allLiquidation.BTCUSDT");
     }
 
     /// EN: topics_for_symbol with different symbols produces unique topics.
