@@ -2,10 +2,10 @@
 
 Date: 2026-05-17
 Role: PM
-Scope: five-commit deploy readiness audit, Linux runtime empirical state, deploy order, operator authorization checklist, and post-authorization V094/V095 results.
-Constraint: initial audit was read-only. After explicit operator authorization, Step 1 V094 manual apply/register, Step 2 Phase 1b engine deploy/restart, and Step 3 V095 manual apply/register were executed only. No production `allLiquidation*` subscription, no `risk_config`/runtime mutation, no W-AUDIT-8b tombstone, no sub-agent dispatch.
+Scope: five-commit deploy readiness audit, Linux runtime empirical state, deploy order, operator authorization checklist, post-authorization V094/V095 results, and later explicitly authorized production `allLiquidation*` revival.
+Constraint: initial audit was read-only. After explicit operator authorization, Step 1 V094 manual apply/register, Step 2 Phase 1b engine deploy/restart, Step 3 V095 manual apply/register, and Step 5 production `allLiquidation.{symbol}` subscription/writer revival were executed. No `risk_config`/runtime config mutation, no W-AUDIT-8b tombstone, no paper enablement, no liquidation strategy launch, no mainnet/live-mode expansion, no sub-agent dispatch.
 
-Verdict summary: **STEP 3 V095 APPLIED; PRODUCTION LIQUIDATION REVIVAL STILL BLOCKED**. The initial audit found a Linux cargo regression in the `risk_close:phys_lock_*` literal guard; remediation landed in `b867e452` and Linux `openclaw_engine --lib` is now green at `2969 passed / 0 failed / 1 ignored`. V094 was manually applied/registered, Phase 1b engine-only rebuild/restart completed, and V095 was manually applied/registered after separate authorization. This verdict does not authorize production `allLiquidation*` revival or any risk/runtime config mutation.
+Verdict summary: **PRODUCTION LIQUIDATION WRITER REVIVAL DEPLOYED; HEALTHCHECK PASS**. The initial audit found a Linux cargo regression in the `risk_close:phys_lock_*` literal guard; remediation landed in `b867e452` and Linux `openclaw_engine --lib` is now green at `2969 passed / 0 failed / 1 ignored`. V094 and V095 were manually applied/registered, Phase 1b engine-only rebuild/restart completed, and the later authorized `allLiquidation.{symbol}` production builder revival landed in `0e8a8ae8` with runtime observability fix `bedc40c3`. `trade-core` post-restart healthcheck shows `topics_per_symbol=8`, `all_liquidation_enabled=true`, public WS subscribed `200` topics / `20` batches, no topic poison errors, and 3 real liquidation rows written under the V095 PK.
 
 ## §1 5-Commit Workchain Coverage Matrix（per commit × per role）
 
@@ -23,16 +23,16 @@ Authoritative inputs checked:
 |---|---|---:|---:|---:|---:|---:|---|
 | `ea4ceca6` Phase 1b close-maker-first Worktree B IMPL | `git log --name-only` shows Phase 1b Rust source/tests plus V094 migration/test surfaces, including close maker dispatch, pricing, fill audit, and healthcheck changes. | ✓ via E1 worktree reports referenced by PM closure | ✓ APPROVE via PM/Operator closure | ✓ historical PASS via PM/Operator closure; current Linux PASS after `b867e452` remediation | ✓ A3 via PM/Operator closure; MIT/BB N/A for this surface | ✓ `2026-05-16--option_a_phase1b_w_audit8b_impl_closure.md` | Final standalone A3/E2/E4 role reports were not found as separate latest artifacts; closure report is the direct SoT. Initial audit found a test-only bare-literal regression in this commit, remediated by `b867e452`. |
 | `a6e17d5d` W-AUDIT-8b Round 2 Phase A v0.3 sweep tooling | `git log --name-only` shows `helper_scripts/reports/w_audit_8b/funding_skew_stage0r_*` tooling. | ✓ via implementation/closure packet | ✓ APPROVE via PM/Operator closure | ✓ historical PASS via PM/Operator closure | ✓ A3 via PM/Operator closure; MIT/BB N/A until Phase B result review | ✓ `2026-05-16--option_a_phase1b_w_audit8b_impl_closure.md` | Direct final E1/A3/E2/E4 standalone reports were not found as separate latest artifacts; closure report is the SoT. Phase B rerun remains pending because panel coverage is still `<7d`. |
-| `b5b6ce6a` W-AUDIT-8c liquidation correction packet | `git log --name-only` shows V095 migration/tests, parser/writer source, tick helper tests, spec/report updates. | ✓ via correction source/test closure | ✓ initial RETURN fixed, then closure accepted | ✓ PASS per PM closure | ✓ MIT approve-conduit and later re-sign; ✓ BB corrected side-mapping approval | ✓ `2026-05-17--w_audit_8c_correction_source_test_closure.md` | Direct final standalone E1/E2/E4/BB artifacts were not found as separate files; PM closure plus MIT re-sign and C1 final report are the SoTs. Production builders still exclude `allLiquidation*`; V095 schema apply is not production revival. |
+| `b5b6ce6a` W-AUDIT-8c liquidation correction packet | `git log --name-only` shows V095 migration/tests, parser/writer source, tick helper tests, spec/report updates. | ✓ via correction source/test closure | ✓ initial RETURN fixed, then closure accepted | ✓ PASS per PM closure | ✓ MIT approve-conduit and later re-sign; ✓ BB corrected side-mapping approval | ✓ `2026-05-17--w_audit_8c_correction_source_test_closure.md` | Direct final standalone E1/E2/E4/BB artifacts were not found as separate files; PM closure plus MIT re-sign and C1 final report are the SoTs. Production builder revival happened later in `0e8a8ae8`/`bedc40c3` after explicit authorization. |
 | `bfffceeb` V095 dry-run resign | `git log --name-only` shows PM V095 dry-run report, MIT re-sign report, TODO update. | N/A docs/dry-run evidence packet | N/A | N/A | ✓ MIT re-sign in `MIT/workspace/reports/2026-05-17--w_audit_8c_v095_mit_resign.md`; operator copy expected | ✓ PM dry-run report exists | Strict per-commit operator-copy file was not present in this commit. The latest operator continuation SoT carries the V095 dry-run/re-sign state. |
-| `82ab71eb` C1 conditional sign-off | `git log --name-only` shows PM C1 final signoff report and TODO update. | N/A docs/sign-off packet | N/A | N/A | ✓ BB + MIT summarized in C1 final report | ✓ `2026-05-17--c1_final_signoff_result.md` | Direct BB/MIT standalone files were not included in this commit; C1 is technical PASS only. Production liquidation revival remains blocked pending explicit later authorization and source/config dispatch. |
+| `82ab71eb` C1 conditional sign-off | `git log --name-only` shows PM C1 final signoff report and TODO update. | N/A docs/sign-off packet | N/A | N/A | ✓ BB + MIT summarized in C1 final report | ✓ `2026-05-17--c1_final_signoff_result.md` | Direct BB/MIT standalone files were not included in this commit; C1 was technical PASS only. Production writer revival was executed later after explicit authorization. |
 
 Coverage conclusion:
 
 - Source commits are landed across local/origin/Linux.
 - Historical workspace closure claims are internally consistent with the current-state SoT.
 - Artifact hygiene is imperfect: several final role approvals are present through PM/Operator closure reports rather than standalone role-owned latest reports.
-- Initial cargo regression was remediated by `b867e452`; current Linux cargo baseline is green. V094 is applied, Step 2 engine deploy/restart completed, and V095 is applied. Production liquidation revival remains blocked pending separate AMD/source/config dispatch and explicit operator authorization.
+- Initial cargo regression was remediated by `b867e452`; current Linux cargo baseline is green. V094 is applied, Step 2 engine deploy/restart completed, V095 is applied, and later-authorized production liquidation writer revival is deployed.
 
 ## §2 Linux Runtime Empirical State
 
@@ -186,20 +186,20 @@ Baseline comparison:
 - Initial audit Linux baseline: `2968 passed / 1 failed / 1 ignored`
 - Current Linux baseline after `b867e452`: `2969 passed / 0 failed / 1 ignored`
 
-PM assessment: source/test deploy blocker cleared; V094-only migration, Step 2 Phase 1b engine deploy/restart, and V095-only migration completed. Remaining gate is separate production liquidation revival authorization, which still requires AMD/source/config dispatch.
+PM assessment: source/test deploy blocker cleared; V094-only migration, Step 2 Phase 1b engine deploy/restart, V095-only migration, and later-authorized production liquidation writer revival completed.
 
 ## §4 Cross-Commit Interaction Risk
 
 1. V094 is now applied and the Phase 1b engine was rebuilt/restarted, so runtime can persist close-maker audit fields on subsequent fills.
-2. V095 is now applied and fixes the liquidation table identity prerequisite. Current production subscription builders still exclude `allLiquidation*`, so V095 apply is not equivalent to liquidation revival.
+2. V095 is now applied and fixes the liquidation table identity prerequisite. Later commit `0e8a8ae8` revives only C1-approved `allLiquidation.{symbol}`; legacy `liquidation.` / `price-limit.` / `adl-notice.` remain excluded.
 3. W-AUDIT-8b Phase B rerun is data-coverage gated by `panel.funding_rates_panel >=7d`; it does not depend on V094/V095 deploy and can be scheduled independently once the gate opens.
 4. Engine restart completed with `OPENCLAW_AUTO_MIGRATE=0`; V095 was applied manually later. Keep auto-migrate disabled for any future migration sequencing.
 5. The initial cargo failure was a cross-commit readiness break because it invalidated the empirical regression baseline for the Phase 1b commit even though historical E4 closure was green. It is now remediated by `b867e452`, with Linux cargo green.
-6. The C1 result is technical only. It validates corrected mapping and V095 idempotency evidence, but it does not authorize production topic revival.
+6. The C1 result was technical only. Production topic revival was executed only after later explicit authorization and source/test dispatch.
 
 ## §5 Deploy Order Recommendation + Rationale
 
-Current recommendation: **do not revive production liquidation yet**. V094, Phase 1b engine deploy/restart, and V095 are complete; production liquidation revival remains a separate later authorization step requiring AMD/source/config dispatch.
+Current recommendation: **keep current writer revival deployed; do not expand scope to strategy launch or unrelated config changes**. V094, Phase 1b engine deploy/restart, V095, and production `allLiquidation.{symbol}` writer revival are complete.
 
 Conditional order:
 
@@ -208,7 +208,7 @@ Conditional order:
 3. **Phase 1b runtime deploy/restart**: completed after explicit engine restart authorization. Rationale: runtime writes become meaningful only after the schema exists.
 4. **V095 second**: completed after separate authorization. Rationale: identity correction is prepared but still does not revive production liquidation subscriptions.
 5. **W-AUDIT-8b Phase B rerun in parallel once eligible**: wait for panel `>=7d`, then run the read-only Phase B report. Rationale: independent data-analysis gate, not a runtime deploy gate.
-6. **Liquidation revival last**: separate AMD/dispatch/authorization for production `allLiquidation*` subscriptions and writer path. Rationale: current source deliberately keeps production builders excluding those topics.
+6. **Liquidation revival last**: completed after separate authorization. Rationale: source now deliberately includes only C1-approved `allLiquidation.{symbol}` and keeps legacy poison topics excluded.
 
 ## §6 Operator Authorization Checklist（per step）
 
@@ -354,7 +354,18 @@ Expected verify:
 
 Operation: enable production `allLiquidation*` subscription/writer path.
 
-Linux command: **not provided for immediate use**. This requires a separate AMD/source/config dispatch and explicit operator authorization after V095 is applied and verified.
+Executed after separate explicit operator authorization.
+
+Source commits:
+
+- `0e8a8ae8 fix(engine): revive allLiquidation production topics`
+- `bedc40c3 chore(engine): log actual extended topic count`
+
+Linux command executed:
+
+```bash
+ssh trade-core 'bash -lc '\''cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --engine-only --rebuild --keep-auth'\'''
+```
 
 Rollback path:
 
@@ -368,37 +379,51 @@ Expected verify:
 - No duplicate/overwrite collapse under corrected PK.
 - C1 side mapping remains `Buy = long liquidation`, `Sell = short liquidation`.
 
+Observed result:
+
+- Local release lib PASS: `2969 passed / 0 failed / 1 ignored`.
+- Linux release lib PASS: `2969 passed / 0 failed / 1 ignored`.
+- Final engine PID: `1066422`.
+- Runtime env remained `OPENCLAW_AUTO_MIGRATE=0`, `OPENCLAW_ENABLE_PAPER=0`, `OPENCLAW_DATA_DIR=/tmp/openclaw`.
+- Runtime log: `topics_per_symbol=8`, `all_liquidation_enabled=true`.
+- Public WS subscribe log: `topics=200`, `batches=20`.
+- Error scan found no `handler not found`, rate-limit, topic-poison, unknown-topic, or liquidation error lines.
+- `_sqlx_migrations`: `94|t`, `95|t`.
+- `market.liquidations` PK: `symbol,ts,side,qty,price`.
+- `market.liquidations` row count increased from `0` to `3`; latest rows were `SOLUSDT Buy`, `DOGEUSDT Sell`, and `ETHUSDT Buy`.
+- Paper remained disabled: `pipeline_snapshot_paper.json disabled=true`, `disabled_reason='OPENCLAW_ENABLE_PAPER != 1'`. The watchdog's paper freshness flag reflects the disabled snapshot file being refreshed, not paper trading enablement.
+
 ## §7 3-Gate Status Update
 
 | Gate | Current status | Evidence | PM state |
 |---|---|---|---|
 | `P0-EDGE-1` / `[40]` | WARN active | Direct healthcheck module query: `avg_net=-0.00bps <= target`, rows `53830`, maker-like `96.5%`, fee-drop `95.7%` | Not cleared. Deploying Phase 1b may improve execution-quality observability, but does not itself prove alpha recovery. |
 | W-AUDIT-8b Stage 0R | Round 1 RED; Phase B pending | Panel coverage `6.8566833564814815d` | Do not tombstone. Rerun only after `>=7d` panel gate. |
-| W-AUDIT-8a C1 | Technical PASS | `82ab71eb` PM C1 final signoff; MIT/BB conditions summarized; V095 now applied | Production revival remains blocked pending separate AMD/source/config dispatch and explicit operator authorization. |
+| W-AUDIT-8a C1 | Technical PASS; writer revival deployed | `82ab71eb` PM C1 final signoff; MIT/BB conditions summarized; V095 applied; `0e8a8ae8`/`bedc40c3` deployed; `market.liquidations` row count now `3` | Transport/writer gate closed. Strategy launch/promotion remains separate and is not authorized by this writer revival. |
 
 ## §8 P1/P2 Backlog Status（W-AUDIT-8b Phase B / phys_lock AMD / Phase 1b deploy）
 
 - **W-AUDIT-8b Phase B**: pending panel `>=7d`; currently `6.8566833564814815d`. This remains an active P1/P2 analytical gate and can proceed independently once eligible.
 - **phys_lock AMD / literal guard remediation**: completed by `b867e452`; Linux full lib baseline is `2969 passed / 0 failed / 1 ignored`.
 - **Phase 1b deploy**: completed after V094 apply; close-maker audit fields can populate on subsequent fills.
-- **V095 / liquidation correction**: completed after separate explicit authorization. V095 does not revive production liquidation subscriptions.
-- **Production liquidation revival**: still blocked and intentionally excluded from immediate deploy plan. Requires separate AMD/PM dispatch and operator authorization.
+- **V095 / liquidation correction**: completed after separate explicit authorization.
+- **Production liquidation revival**: completed after later explicit authorization. Startup and scanner dynamic builders include only C1-approved `allLiquidation.{symbol}`; legacy `liquidation.` / `price-limit.` / `adl-notice.` remain excluded. No strategy launch/promotion occurred.
 
 ## §9 PM Verdict（READY-TO-AUTHORIZE / NEEDS-WORK / BLOCKED）
 
-**STEP 3 V095 APPLIED; PRODUCTION LIQUIDATION REVIVAL STILL BLOCKED**.
+**READY / DEPLOYED FOR AUTHORIZED PRODUCTION LIQUIDATION WRITER REVIVAL**.
 
 Reason:
 
 1. Source commits are landed and workspace reports broadly cover the expected role chain, with noted artifact-hygiene gaps.
 2. Linux runtime is stable after restart. V094 and V095 are applied; check `[40]` remains WARN.
-3. The current Linux cargo regression baseline is green after `b867e452`: `2969 passed / 0 failed / 1 ignored`.
-4. Production liquidation revival remains blocked; V095 schema readiness is not topic revival.
+3. The current Linux cargo regression baseline is green: `2969 passed / 0 failed / 1 ignored`.
+4. Production `allLiquidation.{symbol}` writer revival is deployed and empirically writing rows under the corrected V095 PK.
 
-PM authorization condition:
+Remaining PM conditions:
 
-- Any production `allLiquidation*` revival must be separately authorized and must include AMD/source/config dispatch.
-- Do not bundle production subscription revival with unrelated risk/runtime config changes.
+- Do not treat writer revival as liquidation strategy launch, Stage 1 promotion, or risk/runtime config approval.
+- Do not bundle future liquidation strategy work with unrelated risk/runtime config changes.
 - Keep W-AUDIT-8b Phase B pending until panel coverage reaches `>=7d`.
 
-No production liquidation revival or risk/runtime config mutation was executed as part of Step 3.
+No risk/runtime config mutation, paper enablement, W-AUDIT-8b tombstone, or liquidation strategy launch was executed as part of Step 5.
