@@ -45,15 +45,24 @@ pub(crate) fn spawn_ws_supervisor(
 ) -> tokio::task::JoinHandle<()> {
     let cfg_snapshot = config.get();
     let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
+        let symbols = symbol_registry.snapshot();
         let mut topics = Vec::new();
-        for sym in symbol_registry.snapshot() {
-            for topic in openclaw_engine::multi_interval_topics::full_subscription_list(&sym) {
+        for sym in &symbols {
+            for topic in openclaw_engine::multi_interval_topics::full_subscription_list(sym) {
                 topics.push(topic);
             }
         }
+        let topics_per_symbol = if symbols.is_empty() {
+            0
+        } else {
+            topics.len() / symbols.len()
+        };
+        let all_liquidation_enabled = topics
+            .iter()
+            .any(|topic| topic.starts_with("allLiquidation."));
         info!(
-            topics_per_symbol = 7,
-            "extended WS subscriptions / 擴展 WS 訂閱"
+            topics_per_symbol,
+            all_liquidation_enabled, "extended WS subscriptions / 擴展 WS 訂閱"
         );
         topics
     } else {
