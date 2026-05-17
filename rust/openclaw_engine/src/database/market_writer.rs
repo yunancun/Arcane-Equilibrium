@@ -34,11 +34,55 @@ const KLINE_COLS: usize = 12;
 const TICKER_COLS: usize = 13;
 const OB_COLS: usize = 8;
 const TRADE_AGG_COLS: usize = 10;
+const LIQUIDATION_COLS: usize = 5;
+pub(crate) const LIQUIDATION_CONFLICT_TARGET: &str = "(symbol, ts, side, qty, price)";
+const MIN_LIQUIDATION_TS_MS: u64 = 946_684_800_000; // 2000-01-01T00:00:00Z
+const MAX_LIQUIDATION_TS_MS: u64 = 4_102_444_800_000; // 2100-01-01T00:00:00Z
 const FUNDING_COLS: usize = 4;
 const OI_COLS: usize = 4;
 const LSR_COLS: usize = 5;
 const REGIME_SNAP_COLS: usize = 5;
 const REGIME_TRANS_COLS: usize = 6;
+
+#[derive(Debug, Clone, Copy)]
+struct LiquidationRow<'a> {
+    ts: chrono::DateTime<chrono::Utc>,
+    symbol: &'a str,
+    side: &'a str,
+    qty: f32,
+    price: f32,
+}
+
+fn valid_liquidation_real(value: f64) -> Option<f32> {
+    (value.is_finite() && value > 0.0 && value <= f32::MAX as f64).then_some(value as f32)
+}
+
+fn validated_liquidation_row(msg: &MarketDataMsg) -> Option<LiquidationRow<'_>> {
+    let MarketDataMsg::Liquidation {
+        ts_ms,
+        symbol,
+        side,
+        qty,
+        price,
+    } = msg
+    else {
+        return None;
+    };
+    if !matches!(side.as_str(), "Buy" | "Sell") {
+        return None;
+    }
+    if !(MIN_LIQUIDATION_TS_MS..=MAX_LIQUIDATION_TS_MS).contains(ts_ms) {
+        return None;
+    }
+    let ts = chrono::DateTime::from_timestamp_millis(*ts_ms as i64)?;
+    Some(LiquidationRow {
+        ts,
+        symbol: symbol.as_str(),
+        side: side.as_str(),
+        qty: valid_liquidation_real(*qty)?,
+        price: valid_liquidation_real(*price)?,
+    })
+}
 
 /// Run the market data writer task: receive from channel, batch flush to PG.
 /// 運行市場數據寫入器任務：從通道接收，批量刷新到 PG。
@@ -286,6 +330,7 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     // Group by type for batch efficiency / 按類型分組以提高批量效率
     let mut ob = Vec::new();
     let mut trades = Vec::new();
+    let mut liquidations = Vec::new();
     let mut funding = Vec::new();
     let mut oi = Vec::new();
     let mut lsr = Vec::new();
@@ -296,6 +341,7 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
         match msg {
             m @ MarketDataMsg::ObSnapshot { .. } => ob.push(m),
             m @ MarketDataMsg::TradeAgg1m { .. } => trades.push(m),
+            m @ MarketDataMsg::Liquidation { .. } => liquidations.push(m),
             m @ MarketDataMsg::FundingRate { .. } => funding.push(m),
             m @ MarketDataMsg::OpenInterest { .. } => oi.push(m),
             m @ MarketDataMsg::LongShortRatio { .. } => lsr.push(m),
@@ -310,6 +356,9 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     }
     if !trades.is_empty() {
         flush_trade_agg(pg, pool, &trades).await;
+    }
+    if !liquidations.is_empty() {
+        flush_liquidations(pg, pool, &liquidations).await;
     }
     if !funding.is_empty() {
         flush_funding(pg, pool, &funding).await;
@@ -408,8 +457,38 @@ async fn flush_trade_agg(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]
     .await;
 }
 
-// ── 1-08: funding + OI + LSR ──
-// (liquidations writer deleted 2026-04-06: no producer, no consumer, table reserved)
+// ── 1-08: liquidation + funding + OI + LSR ──
+
+async fn flush_liquidations(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let rows: Vec<_> = buf.iter().filter_map(validated_liquidation_row).collect();
+    if rows.is_empty() {
+        return;
+    }
+    batch_insert_chunked(
+        pg,
+        pool,
+        "market.liquidations",
+        rows.as_slice(),
+        LIQUIDATION_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO market.liquidations (ts, symbol, side, qty, price) ",
+            );
+            qb.push_values(chunk, |mut b, row| {
+                b.push_bind(row.ts);
+                b.push_bind(row.symbol);
+                b.push_bind(row.side);
+                b.push_bind(row.qty);
+                b.push_bind(row.price);
+            });
+            qb.push(" ON CONFLICT ");
+            qb.push(LIQUIDATION_CONFLICT_TARGET);
+            qb.push(" DO NOTHING");
+            qb
+        },
+    )
+    .await;
+}
 
 async fn flush_funding(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
     batch_insert_chunked(
@@ -626,6 +705,16 @@ mod tests {
         }
     }
 
+    fn make_liquidation_msg() -> MarketDataMsg {
+        MarketDataMsg::Liquidation {
+            ts_ms: 1_700_000_000_000,
+            symbol: "BTCUSDT".into(),
+            side: "Buy".into(),
+            qty: 0.5,
+            price: 64_000.0,
+        }
+    }
+
     #[test]
     fn test_msg_routing() {
         let kline = make_kline_msg("BTCUSDT", "1m");
@@ -640,6 +729,63 @@ mod tests {
         assert!(matches!(ticker, MarketDataMsg::TickerSnapshot { .. }));
         assert!(!matches!(funding, MarketDataMsg::KlineClose { .. }));
         assert!(!matches!(funding, MarketDataMsg::TickerSnapshot { .. }));
+    }
+
+    #[test]
+    fn test_liquidation_msg_and_conflict_target_contract() {
+        let msg = make_liquidation_msg();
+        assert!(matches!(msg, MarketDataMsg::Liquidation { .. }));
+        assert_eq!(
+            LIQUIDATION_CONFLICT_TARGET,
+            "(symbol, ts, side, qty, price)"
+        );
+    }
+
+    #[test]
+    fn test_validated_liquidation_row_accepts_clean_payload() {
+        let msg = make_liquidation_msg();
+        let row = validated_liquidation_row(&msg).unwrap();
+        assert_eq!(row.symbol, "BTCUSDT");
+        assert_eq!(row.side, "Buy");
+        assert!((row.qty - 0.5).abs() < f32::EPSILON);
+        assert!((row.price - 64_000.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_validated_liquidation_row_rejects_invalid_ts_side_qty_price() {
+        let mut msg = make_liquidation_msg();
+        if let MarketDataMsg::Liquidation { ts_ms, .. } = &mut msg {
+            *ts_ms = 0;
+        }
+        assert!(validated_liquidation_row(&msg).is_none());
+
+        let mut msg = make_liquidation_msg();
+        if let MarketDataMsg::Liquidation { ts_ms, .. } = &mut msg {
+            *ts_ms = 99_999_999_999_999;
+        }
+        assert!(validated_liquidation_row(&msg).is_none());
+
+        let mut msg = make_liquidation_msg();
+        if let MarketDataMsg::Liquidation { side, .. } = &mut msg {
+            *side = "Unknown".into();
+        }
+        assert!(validated_liquidation_row(&msg).is_none());
+
+        for bad_qty in [0.0, f64::NAN] {
+            let mut msg = make_liquidation_msg();
+            if let MarketDataMsg::Liquidation { qty, .. } = &mut msg {
+                *qty = bad_qty;
+            }
+            assert!(validated_liquidation_row(&msg).is_none());
+        }
+
+        for bad_price in [0.0, f64::NAN] {
+            let mut msg = make_liquidation_msg();
+            if let MarketDataMsg::Liquidation { price, .. } = &mut msg {
+                *price = bad_price;
+            }
+            assert!(validated_liquidation_row(&msg).is_none());
+        }
     }
 
     #[test]

@@ -1,22 +1,22 @@
 # W-AUDIT-8c -- A4-B Liquidation Cluster Reaction Strategy Spec
 
 Date: 2026-05-16
-Status: Spec v0.1 / design only / no implementation authority
-Scope: New alpha candidate consuming AlphaSurface Tier 3 `LiquidationCascade`. No production WebSocket subscription change, no parser/writer revival, no runtime config change, no risk/sizing change, no demo/live launch.
+Status: Spec v0.2 / correction-scoped source-test prerequisites / no production runtime authority
+Scope: New alpha candidate consuming AlphaSurface Tier 3 `LiquidationCascade`. This revision allows only source/test correction for `allLiquidation.{symbol}` parser/storage identity prerequisites. No production WebSocket subscription change, no runtime config change, no risk/sizing change, no demo/live launch.
 
 ## PM / PA Verdict
 
-`liquidation_cluster_reaction` may proceed as a strategy design, but implementation remains blocked until W-AUDIT-8a C1 passes on a real isolated Bybit public WebSocket proof for `allLiquidation.{symbol}` and MIT signs the payload-to-storage schema.
+`liquidation_cluster_reaction` remains blocked from production/runtime revival. W-AUDIT-8a C1 has a 2026-05-17 technical PASS (`PASS_C1_PROOF_CANDIDATE`), and BB approved the corrected Bybit side mapping, but MIT approval is conditional on fixing lossy `market.liquidations` idempotency before any production writer revival.
 
-The current C1 v2 proof is in flight and is not yet a PASS. Until final BB + MIT sign-off, production topic builders must continue to exclude `liquidation.*`, `price-limit.*`, `adl-notice.*`, and `allLiquidation*`; `AlphaSurface.liquidation_pulse` must remain `None`; any strategy declaring `LiquidationCascade` must fail closed.
+Until MIT re-signs the schema/writer identity and PM authorizes a separate revival task, production topic builders must continue to exclude `liquidation.*`, `price-limit.*`, `adl-notice.*`, and `allLiquidation*`; `AlphaSurface.liquidation_pulse` must remain `None`; any strategy declaring `LiquidationCascade` must fail closed.
 
 ## Relationship To W-AUDIT-8a C1
 
-Hard prerequisites before any E1 implementation:
+Hard prerequisites before any production writer/runtime revival:
 
-1. C1 final report returns `PASS_C1_PROOF_CANDIDATE` for `allLiquidation.{symbol}` over the required real-connection window.
-2. BB signs zero topic rejection, zero `handler not found`, no candidate-topic poisoning of control streams, and acceptable reconnect behavior.
-3. MIT signs the mapping from Bybit payload fields `T/s/S/v/p` to `market.liquidations` or signs an explicit schema delta.
+1. C1 final report returns `PASS_C1_PROOF_CANDIDATE` for `allLiquidation.{symbol}` over the required real-connection window. Status: technical PASS on 2026-05-17.
+2. BB signs zero topic rejection, zero `handler not found`, no candidate-topic poisoning of control streams, acceptable reconnect behavior, and corrected `S=Buy/Sell` semantics. Status: APPROVE on corrected mapping.
+3. MIT signs the mapping from Bybit payload fields `T/s/S/v/p` to `market.liquidations` after the storage identity preserves one `data[]` item per row. Status: APPROVE-CONDITIONAL; old PK `(symbol, ts, side)` is lossy for same-ms same-side items.
 4. PM authorizes the production revival task. This spec alone does not authorize it.
 
 Replay can validate local fail-closed behavior before C1, and C0 already added that coverage. Replay cannot prove Bybit topic safety, connection health, or production subscription compatibility.
@@ -31,13 +31,13 @@ Rationale:
 - The survival-first posture prefers reacting after a burst has become stale or decelerating, rather than adding leverage into the middle of an active cascade.
 - The strategy can express this with explicit event-trigger guards: fresh pulse required, side dominance required, quiet window preregistered, and no fallback to TA-only signals.
 
-Directional mapping, subject to BB/MIT side semantics sign-off:
+Directional mapping, per BB corrected side-semantics sign-off:
 
-- Dominant `Sell` liquidation order flow, interpreted as long liquidations, proposes `expected_dir = +1` after the quiet-window guard.
-- Dominant `Buy` liquidation order flow, interpreted as short liquidations, proposes `expected_dir = -1` after the quiet-window guard.
+- Dominant `Buy` liquidation payloads (`S=Buy`), interpreted as long liquidations, propose `expected_dir = +1` after the quiet-window guard.
+- Dominant `Sell` liquidation payloads (`S=Sell`), interpreted as short liquidations, propose `expected_dir = -1` after the quiet-window guard.
 - Ambiguous side, mixed dominance, or unknown Bybit side semantics emits no action.
 
-Secondary sensitivity: **momentum continuation** is preregistered only as a sensitivity branch. It reverses the direction mapping above, but it cannot make v0.1 eligible for Stage 1 Demo. If the sensitivity branch wins, PA must write a separate v0.2 hypothesis update and its inspected cells must remain counted in `K_total`.
+Secondary sensitivity: **momentum continuation** is preregistered only as a sensitivity branch. It reverses the direction mapping above, but it cannot make this mean-reversion spec eligible for Stage 1 Demo. If the sensitivity branch wins, PA must write a separate hypothesis update and its inspected cells must remain counted in `K_total`.
 
 ## AlphaSurface Tier 3 Consumer Contract
 
@@ -67,7 +67,7 @@ fn on_tick(
 
 `LiquidationCascade` is the primary alpha source. Tier 1 TA is allowed only for volatility/cost and closed-bar confirmation; it cannot substitute for a missing or stale `liquidation_pulse`.
 
-`OrderflowImbalance` is intentionally not declared in v0.1. Adding it later would be a separate variant because it changes both availability and `K_total`.
+`OrderflowImbalance` is intentionally not declared in this spec. Adding it later would be a separate variant because it changes both availability and `K_total`.
 
 Required consumer fields:
 
@@ -142,7 +142,7 @@ These are replay parameters only. They must not become TOML defaults before Stag
 
 ## Stage 0R Replay-First Validation
 
-Stage 0R may start only after C1 PASS + BB/MIT sign-off + real `market.liquidations` rows exist. Empty liquidation history, synthetic events, or C1-blocked status must emit `eligible_for_demo_canary=false`.
+Stage 0R may start only after C1 PASS + BB/MIT sign-off + real `market.liquidations` rows exist from the corrected item-level identity. Empty liquidation history, synthetic events, or MIT-idempotency-blocked status must emit `eligible_for_demo_canary=false`.
 
 Replay construction:
 
@@ -215,7 +215,7 @@ Promotion floor:
 - PBO <= 0.20
 - 95% block-bootstrap lower bound > 0
 - adjacent grid cells must form a plateau rather than a single lucky threshold
-- primary mean-reversion branch must pass independently; a passing secondary sensitivity does not authorize v0.1 demo
+- primary mean-reversion branch must pass independently; a passing secondary sensitivity does not authorize demo
 
 Output is only `eligible_for_demo_canary=true/false`. It is not Stage 1 PASS.
 
@@ -223,7 +223,7 @@ Output is only `eligible_for_demo_canary=true/false`. It is not Stage 1 PASS.
 
 Allowed after C1 PASS and PM dispatch:
 
-1. Parser/writer revival for `allLiquidation.{symbol}` after BB/MIT sign-off.
+1. Source/test parser and dormant writer correction for `allLiquidation.{symbol}` after C1 technical PASS, while keeping production subscriptions disabled.
 2. In-memory `LiquidationPulseProvider` feeding `AlphaSurface.liquidation_pulse`.
 3. New read-only Stage 0R query/report tooling for `liquidation_cluster_reaction`.
 4. Strategy skeleton that declares `LiquidationCascade` and fails closed when missing/stale.
@@ -231,12 +231,13 @@ Allowed after C1 PASS and PM dispatch:
 Forbidden in this spec phase:
 
 - subscribing production WS to `allLiquidation*`
+- enabling the dormant production liquidation writer/runtime path before MIT idempotency re-sign
 - changing risk sizing or leverage
 - enabling demo/live trading
 - using synthetic liquidation pulses as alpha evidence
 - PG hot-path polling from strategy logic
-- treating the in-flight C1 v2 run as already passed
-- counting the momentum sensitivity branch as v0.1 eligibility
+- applying V095 to Linux production DB as part of this source/test packet
+- counting the momentum sensitivity branch as mean-reversion eligibility
 
 ## Side Effects And Review Focus
 
@@ -257,19 +258,18 @@ BB must review:
 
 MIT must review:
 
-- schema mapping to `market.liquidations`
+- schema mapping to `market.liquidations`, including item-level identity `(symbol, ts, side, qty, price)`
 - as-of joins and cluster dedupe
 - `K_prior`, DSR, PBO, bootstrap, and sample floors
 
-## Acceptance For Spec v1
+## Acceptance For Spec v0.2 Correction Packet
 
-Spec v1 may be accepted only when:
+This v0.2 correction packet may be accepted as source/test only when:
 
-- C1 final proof has passed and is referenced by path
-- BB signs topic safety and side semantics
-- MIT signs storage schema and Stage 0R replay math
-- PA updates this document from v0.1 to v1 with any schema deltas
-- PM explicitly authorizes the next E1 source task
+- parser tests cover `allLiquidation.{symbol}` `T/s/S/v/p` for both `Buy` and `Sell`, including fail-closed missing `s` and invalid timestamp cases
+- dormant writer code uses `ON CONFLICT (symbol, ts, side, qty, price) DO NOTHING`
+- V095 statically proves Guard A/B/C, exact old-PK replacement, side CHECK, and no table/data rewrite
+- production `full_subscription_list` still excludes `allLiquidation*`
+- no runtime config, deploy, Linux migration apply, strategy action path, risk sizing, leverage, demo, live, or mainnet behavior changes are made
 
-Until then, W-AUDIT-8c remains design-only and blocked for implementation.
-
+After this packet, W-AUDIT-8c remains blocked for production revival until MIT re-signs the corrected storage/writer identity and PM dispatches a separate runtime task.

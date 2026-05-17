@@ -310,6 +310,115 @@ fn test_parse_liquidation_item() {
     assert_eq!(event.metadata.get("type").unwrap(), "liquidation");
     assert_eq!(event.metadata.get("side").unwrap(), "Sell");
     assert_eq!(event.metadata.get("qty").unwrap(), "2.5");
+    assert_eq!(
+        event.metadata.get("liquidation_position").unwrap(),
+        "short_liquidation"
+    );
+    assert_eq!(
+        event.metadata.get("mean_reversion_direction").unwrap(),
+        "-1"
+    );
+}
+
+#[test]
+fn test_parse_all_liquidation_buy_mapping() {
+    let item = serde_json::json!({
+        "T": 1700000000123_u64,
+        "s": "BTCUSDT",
+        "S": "Buy",
+        "v": "0.125",
+        "p": "64000.5"
+    });
+    let event = parse_liquidation_item(&item, "allLiquidation.BTCUSDT").unwrap();
+    assert_eq!(event.symbol, "BTCUSDT");
+    assert_eq!(event.ts_ms, 1_700_000_000_123);
+    assert!((event.last_price - 64000.5).abs() < f64::EPSILON);
+    assert_eq!(event.metadata.get("side").unwrap(), "Buy");
+    assert_eq!(event.metadata.get("qty").unwrap(), "0.125");
+    assert_eq!(
+        event.metadata.get("liquidation_position").unwrap(),
+        "long_liquidation"
+    );
+    assert_eq!(event.metadata.get("mean_reversion_direction").unwrap(), "1");
+}
+
+#[test]
+fn test_parse_all_liquidation_sell_mapping() {
+    let item = serde_json::json!({
+        "T": "1700000000124",
+        "s": "ETHUSDT",
+        "S": "Sell",
+        "v": "1.5",
+        "p": "2500"
+    });
+    let event = parse_liquidation_item(&item, "allLiquidation.ETHUSDT").unwrap();
+    assert_eq!(event.symbol, "ETHUSDT");
+    assert_eq!(event.ts_ms, 1_700_000_000_124);
+    assert_eq!(event.metadata.get("side").unwrap(), "Sell");
+    assert_eq!(
+        event.metadata.get("liquidation_position").unwrap(),
+        "short_liquidation"
+    );
+    assert_eq!(
+        event.metadata.get("mean_reversion_direction").unwrap(),
+        "-1"
+    );
+}
+
+#[test]
+fn test_parse_all_liquidation_rejects_invalid_side_qty_price() {
+    for item in [
+        serde_json::json!({"T": 1_700_000_000_000_u64, "s": "BTCUSDT", "S": "Unknown", "v": "0.1", "p": "1"}),
+        serde_json::json!({"T": 1_700_000_000_000_u64, "s": "BTCUSDT", "S": "Buy", "v": "0", "p": "1"}),
+        serde_json::json!({"T": 1_700_000_000_000_u64, "s": "BTCUSDT", "S": "Buy", "v": "0.1", "p": "-1"}),
+        serde_json::json!({"T": 1_700_000_000_000_u64, "s": "BTCUSDT", "S": "Buy", "v": "NaN", "p": "1"}),
+    ] {
+        assert!(parse_liquidation_item(&item, "allLiquidation.BTCUSDT").is_none());
+    }
+}
+
+#[test]
+fn test_parse_all_liquidation_missing_symbol_rejects() {
+    let missing_symbol = serde_json::json!({
+        "T": 1_700_000_000_000_u64,
+        "S": "Buy",
+        "v": "0.1",
+        "p": "64000"
+    });
+    assert!(parse_liquidation_item(&missing_symbol, "allLiquidation.BTCUSDT").is_none());
+
+    let empty_symbol = serde_json::json!({
+        "T": 1_700_000_000_000_u64,
+        "s": "",
+        "S": "Buy",
+        "v": "0.1",
+        "p": "64000"
+    });
+    assert!(parse_liquidation_item(&empty_symbol, "allLiquidation.BTCUSDT").is_none());
+}
+
+#[test]
+fn test_parse_all_liquidation_zero_timestamp_rejects() {
+    let item = serde_json::json!({
+        "T": 0_u64,
+        "s": "BTCUSDT",
+        "S": "Buy",
+        "v": "0.1",
+        "p": "64000"
+    });
+    assert!(parse_liquidation_item(&item, "allLiquidation.BTCUSDT").is_none());
+}
+
+#[test]
+fn test_parse_all_liquidation_absurd_timestamp_rejects() {
+    let item = serde_json::json!({
+        "T": 99_999_999_999_999_u64,
+        "s": "BTCUSDT",
+        "S": "Buy",
+        "v": "0.1",
+        "p": "64000"
+    });
+    assert!(parse_liquidation_item(&item, "allLiquidation.BTCUSDT").is_none());
 }
 
 #[test]

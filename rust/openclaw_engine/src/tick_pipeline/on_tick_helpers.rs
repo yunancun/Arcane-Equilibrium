@@ -5,6 +5,33 @@ use super::*;
 use crate::scanner::types::ScannerAuthorityMode;
 use std::collections::{HashMap, VecDeque};
 
+pub(crate) fn liquidation_msg_from_event(
+    event: &PriceEvent,
+) -> Option<crate::database::MarketDataMsg> {
+    if event.event_kind.as_ref() != Some(&PriceEventKind::Liquidation) {
+        return None;
+    }
+    let side = event
+        .metadata
+        .get("side")
+        .filter(|s| matches!(s.as_str(), "Buy" | "Sell"))?;
+    let qty = event
+        .metadata
+        .get("qty")
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)?;
+    if !event.last_price.is_finite() || event.last_price <= 0.0 {
+        return None;
+    }
+    Some(crate::database::MarketDataMsg::Liquidation {
+        ts_ms: event.ts_ms,
+        symbol: event.symbol.clone(),
+        side: side.clone(),
+        qty,
+        price: event.last_price,
+    })
+}
+
 // ── P0-5: ReduceToHalf one-shot cooldown — decouples the guard from governance state ──
 // P0-5: ReduceToHalf 一次性保護的冷卻窗 — 將 guard 與 governance 狀態解耦。
 //
@@ -574,6 +601,13 @@ impl TickPipeline {
         // FIX-31: Use typed event_kind, fall back to legacy metadata["type"].
         let kind = event.event_kind.as_ref();
         match kind {
+            Some(PriceEventKind::Liquidation) => {
+                if let Some(msg) = liquidation_msg_from_event(event) {
+                    if let Some(ref tx) = self.market_data_tx {
+                        let _ = tx.try_send(msg);
+                    }
+                }
+            }
             Some(PriceEventKind::Trade) => {
                 // P-02: Read from structured fields first, fall back to legacy metadata.
                 // P-02：優先讀結構化欄位，回退到舊版 metadata。
@@ -675,5 +709,67 @@ impl TickPipeline {
                 let _ = tx.try_send(msg);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod liquidation_tests {
+    use super::*;
+
+    fn liquidation_event(side: &str) -> PriceEvent {
+        let mut event = PriceEvent::new("BTCUSDT".into(), 64_000.0, 1_700_000_000_123);
+        event.event_kind = Some(PriceEventKind::Liquidation);
+        event.metadata.insert("side".into(), side.into());
+        event.metadata.insert("qty".into(), "0.25".into());
+        event
+    }
+
+    #[test]
+    fn liquidation_msg_preserves_buy_side_qty_price() {
+        let msg = liquidation_msg_from_event(&liquidation_event("Buy")).unwrap();
+        match msg {
+            crate::database::MarketDataMsg::Liquidation {
+                ts_ms,
+                symbol,
+                side,
+                qty,
+                price,
+            } => {
+                assert_eq!(ts_ms, 1_700_000_000_123);
+                assert_eq!(symbol, "BTCUSDT");
+                assert_eq!(side, "Buy");
+                assert!((qty - 0.25).abs() < f64::EPSILON);
+                assert!((price - 64_000.0).abs() < f64::EPSILON);
+            }
+            _ => panic!("expected liquidation msg"),
+        }
+    }
+
+    #[test]
+    fn liquidation_msg_preserves_sell_side_qty_price() {
+        let msg = liquidation_msg_from_event(&liquidation_event("Sell")).unwrap();
+        match msg {
+            crate::database::MarketDataMsg::Liquidation {
+                side, qty, price, ..
+            } => {
+                assert_eq!(side, "Sell");
+                assert!((qty - 0.25).abs() < f64::EPSILON);
+                assert!((price - 64_000.0).abs() < f64::EPSILON);
+            }
+            _ => panic!("expected liquidation msg"),
+        }
+    }
+
+    #[test]
+    fn liquidation_msg_rejects_invalid_payload_metadata() {
+        assert!(liquidation_msg_from_event(&liquidation_event("Unknown")).is_none());
+
+        let mut event = liquidation_event("Buy");
+        event.metadata.insert("qty".into(), "0".into());
+        assert!(liquidation_msg_from_event(&event).is_none());
+
+        let mut event = liquidation_event("Buy");
+        event.last_price = f64::NAN;
+        assert!(liquidation_msg_from_event(&event).is_none());
     }
 }
