@@ -335,6 +335,114 @@ fn test_close_maker_runtime_enable_surface_is_demo_only_and_default_false() {
     assert!(!paper.use_maker_close());
 }
 
+/// AMD-2026-05-15-02 §3 Phase 1b runtime 啟動層驗證（test 1/3）：
+/// Demo 管線在 set_risk_store(`runtime.use_maker_close = true`) 後，
+/// apply_risk_snapshot 必須 boot-time 同步把欄位推到 true。沒這條路徑
+/// Phase 2a 就是 silent dead — E2 RCA 2026-05-18 catch 的真因。
+#[test]
+fn test_use_maker_close_toml_activates_on_demo() {
+    use crate::config::{ConfigStore, RiskConfig};
+    use std::sync::Arc;
+
+    let mut demo = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    // cold-default：ctor 預設 false，未注入 store 前不可能 true。
+    assert!(
+        !demo.use_maker_close(),
+        "cold-default：ctor 未注入 store 前必為 false"
+    );
+
+    let mut cfg = RiskConfig::default();
+    cfg.runtime.use_maker_close = true;
+    let store = Arc::new(ConfigStore::new(cfg));
+    demo.set_risk_store(store);
+
+    // set_risk_store 內部 sync 呼叫 apply_risk_snapshot — boot-time TOML
+    // 必須立刻可見，否則 Phase 2a 觀察窗的第一個 tick 就會 silent dead。
+    assert!(
+        demo.use_maker_close(),
+        "Demo set_risk_store 後 runtime.use_maker_close = true 必須立即生效"
+    );
+}
+
+/// AMD-2026-05-15-02 §3 Phase 1b runtime 啟動層驗證（test 2/3）：
+/// 即使 Live / Paper 的 TOML 誤填 `runtime.use_maker_close = true`，
+/// apply_risk_snapshot 透過 set_use_maker_close_runtime 路由，
+/// commands.rs:91-103 的 Demo-only 守衛必須拒絕並把欄位留 false。
+/// 這是 feedback_demo_loose_live_strict_policy 的 hot-reload 兜底測試。
+#[test]
+fn test_use_maker_close_toml_rejected_on_live_and_paper() {
+    use crate::config::{ConfigStore, RiskConfig};
+    use std::sync::Arc;
+
+    for kind in [PipelineKind::Live, PipelineKind::Paper] {
+        let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, kind);
+        let mut cfg = RiskConfig::default();
+        // 模擬 operator 誤把 Live / Paper TOML 也設 true：
+        cfg.runtime.use_maker_close = true;
+        let store = Arc::new(ConfigStore::new(cfg));
+        p.set_risk_store(store);
+
+        assert!(
+            !p.use_maker_close(),
+            "{kind:?}: Demo-only 守衛必須拒絕 TOML drift，保留 use_maker_close=false"
+        );
+    }
+}
+
+/// AMD-2026-05-15-02 §3 Phase 1b runtime 啟動層驗證（test 3/3）：
+/// hot-reload 路徑 — Demo 先以 use_maker_close=false 啟動，
+/// 之後 ConfigStore.replace() 把 runtime.use_maker_close 改 true，
+/// 下個 on_tick 觸發 sync_risk_config_if_changed → apply_risk_snapshot
+/// 必須在 1 個 tick 內把欄位推到 true。
+/// 對應 AMD §3 kill-switch「TOML hot-reload → 1 tick」契約。
+#[test]
+fn test_use_maker_close_hot_reload_within_one_tick() {
+    use crate::config::{ConfigStore, PatchSource, RiskConfig};
+    use std::sync::Arc;
+
+    let mut demo = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+
+    // Phase 0：cold-default = false TOML 載入，set_risk_store 後仍為 false。
+    let initial = RiskConfig::default();
+    let store = Arc::new(ConfigStore::new(initial.clone()));
+    demo.set_risk_store(Arc::clone(&store));
+    assert!(
+        !demo.use_maker_close(),
+        "初始 RiskConfig::default().runtime.use_maker_close = false 必須保持 false"
+    );
+    let v0 = store.version();
+
+    // Phase 1：operator 補丁 — 把 use_maker_close flip 為 true。
+    // 模擬 IPC patch_risk_config 後 store.replace 的行為。
+    let mut next = initial.clone();
+    next.runtime.use_maker_close = true;
+    next.validate().expect("mutated config must be valid");
+    store
+        .replace(next, PatchSource::Operator)
+        .expect("replace must succeed");
+    assert_eq!(store.version(), v0 + 1, "replace 後版本號必須上升");
+
+    // 此時尚未 tick — pipeline 還未看到新版本，欄位應該仍為 false。
+    assert!(
+        !demo.use_maker_close(),
+        "tick 之前 sync_risk_config_if_changed 未觸發，欄位應仍為 false"
+    );
+
+    // Phase 2：1 個 on_tick → sync_risk_config_if_changed → apply_risk_snapshot
+    // → set_use_maker_close_runtime(true) → 欄位 flip true。
+    demo.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+
+    assert!(
+        demo.use_maker_close(),
+        "AMD §3 kill-switch 契約：TOML hot-reload 必須在 1 個 tick 內生效"
+    );
+    assert_eq!(
+        demo.risk_config_version_seen,
+        store.version(),
+        "pipeline 必須記住新版本號避免下個 tick 重複套用"
+    );
+}
+
 #[test]
 fn test_close_maker_dispatch_postonly_spine_none() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);

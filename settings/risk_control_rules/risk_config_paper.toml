@@ -185,6 +185,11 @@ window_minutes = 30
 boot_cooldown_ms = 30000
 signals_heartbeat_ms = 60000
 h0_shadow_mode = true
+# AMD-2026-05-15-02 §3 Phase 1b：Paper 不啟用 maker close path。Paper 已於
+# PAPER-DISABLE-1 (2026-04-16) 預設停用 spawn (project_paper_pipeline_disabled_by_default)；
+# 仍補欄位避免 cold-default drift。即使本行誤填 true，commands.rs:91-103 守衛
+# 仍會拒絕。
+use_maker_close = false
 
 # DYNAMIC-RISK-1: disabled on paper — paper pipeline drains by default
 # (PAPER-DISABLE-1, 2026-04-16); enabling would accumulate no real trades anyway.

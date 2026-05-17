@@ -186,6 +186,11 @@ window_minutes = 90
 boot_cooldown_ms = 90000
 signals_heartbeat_ms = 30000
 h0_shadow_mode = false
+# AMD-2026-05-15-02 §3 Phase 1b：Live 永遠 fail-closed
+# (feedback_demo_loose_live_strict_policy)。即使本行誤填 true，
+# commands.rs:91-103 的 Demo-only 守衛仍會在 apply_risk_snapshot 拒絕。
+# Phase 2b LiveDemo 啟用為獨立 IMPL ticket，本 AMD 不在此回放寬。
+use_maker_close = false
 
 # DYNAMIC-RISK-1: Sharpe-aware dynamic per-trade risk. Live uses tighter
 # defaults than demo: ±0.25% step, 0.5%..3% clamp, Sharpe band [0.5, 1.5],
