@@ -3,14 +3,15 @@
 //!
 //! MODULE_NOTE (EN): Pure topic-string construction for Bybit V5 public WS
 //!   subscriptions across multiple kline intervals (1m, 5m, 15m, 60m), ticker,
-//!   L2 orderbook and public trades. Deliberately has NO dependency on
+//!   L2 orderbook, public trades, and C1-approved all-liquidation events.
+//!   Deliberately has NO dependency on
 //!   `WsClient` or any side-effectful type — the caller applies the returned
 //!   topic strings to whatever WS client they hold. Behaviour contract is
 //!   covered by the unit tests below; any deviation in the produced strings
 //!   is a breaking change to the live subscription set.
 //! MODULE_NOTE (中): 為 Bybit V5 公開 WS 訂閱純粹地構建主題字串 —
-//!   涵蓋多個 K 線間隔（1m、5m、15m、60m）、ticker、L2 訂單簿與公開交易。
-//!   刻意不依賴 `WsClient` 或任何帶副作用的型別，呼叫端自行把字串套用到
+//!   涵蓋多個 K 線間隔（1m、5m、15m、60m）、ticker、L2 訂單簿、公開交易
+//!   與 C1 已批准的 all-liquidation 事件。刻意不依賴 `WsClient` 或任何帶副作用的型別，呼叫端自行把字串套用到
 //!   其持有的 WS 客戶端。行為契約由下方單元測試守護；任何產生字串上的
 //!   偏差都等同於 live 訂閱集合的破壞性變更。
 //!
@@ -76,9 +77,11 @@ pub enum TopicType {
     Orderbook50,
     /// Public trades / 公開交易
     PublicTrade,
-    // GAP: Liquidation / PriceLimit / AdlNotice variants removed 2026-04-06.
+    /// C1-approved all-liquidation events / C1 已批准的全市場清算事件
+    AllLiquidation,
+    // GAP: Legacy liquidation / PriceLimit / AdlNotice variants removed 2026-04-06.
     // Bybit V5 returned "handler not found" for these topics, poisoning the
-    // entire WS connection (commit 29fc1ef). No consumer exists.
+    // entire WS connection (commit 29fc1ef). They remain excluded.
 }
 
 // ---------------------------------------------------------------------------
@@ -120,11 +123,19 @@ pub fn public_trade_topic(symbol: &str) -> String {
     format!("publicTrade.{}", symbol)
 }
 
+/// Build the C1-approved all-liquidation topic for a symbol.
+/// 為一個交易對構建 C1 已批准的 all-liquidation 主題。
+///
+/// Example: `all_liquidation_topic("BTCUSDT")` -> `"allLiquidation.BTCUSDT"`
+pub fn all_liquidation_topic(symbol: &str) -> String {
+    format!("allLiquidation.{}", symbol)
+}
+
 /// Generate the full subscription list for a symbol with all topic types.
 /// 為一個交易對生成包含所有主題類型的完整訂閱列表。
 ///
-/// Includes: klines (all default intervals) + ticker + orderbook + publicTrade
-/// 包含：K 線（所有默認間隔）+ 行情 + 訂單簿 + 公開交易
+/// Includes: klines (all default intervals) + ticker + orderbook + publicTrade + allLiquidation
+/// 包含：K 線（所有默認間隔）+ 行情 + 訂單簿 + 公開交易 + allLiquidation
 pub fn full_subscription_list(symbol: &str) -> Vec<String> {
     full_subscription_list_with_intervals(symbol, DEFAULT_INTERVALS)
 }
@@ -139,10 +150,11 @@ pub fn full_subscription_list_with_intervals(
     topics.push(ticker_topic(symbol));
     topics.push(orderbook_topic(symbol));
     topics.push(public_trade_topic(symbol));
-    // GAP: liquidation/price-limit/adl-notice topics permanently removed
+    topics.push(all_liquidation_topic(symbol));
+    // GAP: legacy liquidation/price-limit/adl-notice topics remain removed
     // (commit 29fc1ef) — Bybit returns "handler not found" which silently
-    // poisons the entire WS connection. Re-add only after confirming a
-    // working topic name on a stand-alone test connection.
+    // poisons the entire WS connection. Only C1-proved `allLiquidation.{symbol}`
+    // is revived here.
     topics
 }
 
@@ -210,6 +222,7 @@ mod tests {
         assert_eq!(ticker_topic("BTCUSDT"), "tickers.BTCUSDT");
         assert_eq!(orderbook_topic("BTCUSDT"), "orderbook.50.BTCUSDT");
         assert_eq!(public_trade_topic("BTCUSDT"), "publicTrade.BTCUSDT");
+        assert_eq!(all_liquidation_topic("BTCUSDT"), "allLiquidation.BTCUSDT");
     }
 
     /// Test full subscription list for a single symbol.
@@ -217,8 +230,8 @@ mod tests {
     #[test]
     fn test_full_subscription_list() {
         let topics = full_subscription_list("BTCUSDT");
-        // 4 klines + ticker + orderbook + publicTrade = 7 (liquidation removed: Bybit handler not found)
-        assert_eq!(topics.len(), 7);
+        // 4 klines + ticker + orderbook + publicTrade + allLiquidation = 8.
+        assert_eq!(topics.len(), 8);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.5.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.15.BTCUSDT".to_string()));
@@ -226,32 +239,31 @@ mod tests {
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
+        assert!(topics.contains(&"allLiquidation.BTCUSDT".to_string()));
     }
 
-    /// W-AUDIT-8a Phase C0: production subscriptions must not revive dormant
-    /// / connection-poisoning topics before BB standalone proof.
-    /// W-AUDIT-8a Phase C0：BB 隔離連線證明前，production 訂閱不得復活
-    /// dormant / 會毒化連線的 topic。
+    /// W-AUDIT-8a C1/V095: production subscriptions may revive only the
+    /// C1-approved `allLiquidation.{symbol}` topic. Legacy poison topics stay
+    /// excluded.
+    /// W-AUDIT-8a C1/V095：production 訂閱只能復活 C1 已批准的
+    /// `allLiquidation.{symbol}`；legacy 毒化 topic 仍禁用。
     #[test]
-    fn test_production_subscription_excludes_dormant_poison_topics() {
+    fn test_production_subscription_revives_only_c1_all_liquidation_topic() {
         let topics = [
             full_subscription_list("BTCUSDT"),
             full_subscription_list_with_intervals("ETHUSDT", &[]),
             multi_symbol_subscriptions(&["SOLUSDT", "XRPUSDT"]),
         ]
         .concat();
-        let forbidden_prefixes = [
-            "liquidation.",
-            "price-limit.",
-            "adl-notice.",
-            "allLiquidation",
-        ];
+        assert!(topics.iter().any(|topic| topic == "allLiquidation.BTCUSDT"));
+        assert!(topics.iter().any(|topic| topic == "allLiquidation.ETHUSDT"));
+        let forbidden_prefixes = ["liquidation.", "price-limit.", "adl-notice."];
 
         for topic in topics {
             for prefix in forbidden_prefixes {
                 assert!(
                     !topic.starts_with(prefix),
-                    "production WS topic {topic:?} must not include dormant/poison prefix {prefix:?}"
+                    "production WS topic {topic:?} must not include legacy poison prefix {prefix:?}"
                 );
             }
         }
@@ -262,12 +274,13 @@ mod tests {
     #[test]
     fn test_multi_symbol_subscriptions() {
         let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
-        // 7 topics per symbol * 2 symbols = 14
-        assert_eq!(topics.len(), 14);
+        // 8 topics per symbol * 2 symbols = 16
+        assert_eq!(topics.len(), 16);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.1.ETHUSDT".to_string()));
         assert!(topics.contains(&"tickers.ETHUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
+        assert!(topics.contains(&"allLiquidation.ETHUSDT".to_string()));
     }
 
     /// Test KlineInterval as_str values.
@@ -293,11 +306,12 @@ mod tests {
     #[test]
     fn test_empty_intervals() {
         let topics = full_subscription_list_with_intervals("BTCUSDT", &[]);
-        // 0 klines + ticker + orderbook + publicTrade = 3 (liquidation removed)
-        assert_eq!(topics.len(), 3);
+        // 0 klines + ticker + orderbook + publicTrade + allLiquidation = 4.
+        assert_eq!(topics.len(), 4);
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
+        assert!(topics.contains(&"allLiquidation.BTCUSDT".to_string()));
     }
 
     /// E5-P2-3 added: topic ordering is kline-intervals-first then
@@ -305,7 +319,7 @@ mod tests {
     /// the WS subscribe frame sends them in order, which affects first-ack
     /// latency in live monitoring. Do not reorder without updating docs.
     /// E5-P2-3 新增：主題順序為先 kline（依 intervals 輸入順序）、再
-    /// ticker / orderbook / publicTrade。此順序為行為契約，WS 訂閱幀會
+    /// ticker / orderbook / publicTrade / allLiquidation。此順序為行為契約，WS 訂閱幀會
     /// 依序送出，影響 live 監控首個 ack 的延遲觀測；改動必須同步文檔。
     #[test]
     fn test_full_subscription_list_ordering_contract() {
@@ -321,6 +335,7 @@ mod tests {
                 "tickers.BTCUSDT".to_string(),
                 "orderbook.50.BTCUSDT".to_string(),
                 "publicTrade.BTCUSDT".to_string(),
+                "allLiquidation.BTCUSDT".to_string(),
             ]
         );
     }
@@ -333,14 +348,14 @@ mod tests {
     #[test]
     fn test_multi_symbol_subscriptions_grouping_contract() {
         let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
-        // First 7 entries must all be BTCUSDT topics, next 7 must all be ETHUSDT.
-        for t in &topics[0..7] {
+        // First 8 entries must all be BTCUSDT topics, next 8 must all be ETHUSDT.
+        for t in &topics[0..8] {
             assert!(
                 t.ends_with("BTCUSDT"),
                 "expected BTCUSDT prefix group, got {t}"
             );
         }
-        for t in &topics[7..14] {
+        for t in &topics[8..16] {
             assert!(
                 t.ends_with("ETHUSDT"),
                 "expected ETHUSDT prefix group, got {t}"

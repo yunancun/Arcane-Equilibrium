@@ -1122,6 +1122,7 @@ mod close_sizing;
 mod commands;
 mod on_tick;
 pub(crate) mod on_tick_helpers;
+#[cfg(test)]
 pub(crate) use on_tick::build_risk_close_tag;
 #[cfg(test)]
 mod tests;
