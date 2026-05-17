@@ -449,3 +449,10 @@ YYYY-MM-DD HH:MM TZ
 - result: all `.claude/agents/*.md` and `.codex/agents/*.md` now preload operating memory + `README.md` + `docs/agents/context-loading.md`, and route active state to `TODO.md`; Codex role index now records universal preload.
 - aligned agent-facing skills and profiles away from stale numbered-memory sections, 11-tab, bilingual-comment, and 1200-line assumptions; current rules use TODO active state, README stable surfaces, Chinese-first comments, and 2000-line hard cap.
 - boundary: docs/agent-settings only; no runtime code, deploy, rebuild, restart, DB, auth, strategy/risk, or trading-mode changes.
+
+2026-05-17 CEST
+- PM task: W-AUDIT-8c correction-scoped source/test packet after C1 technical PASS and MIT idempotency condition.
+- dispatch chain: PM(default) -> E1(worker) -> E2(explorer) -> E4(worker) -> MIT(default) + BB(default) -> PM(default).
+- result: V095 source migration preserves liquidation item identity with `(symbol, ts, side, qty, price)`; `allLiquidation` parser/writer fail closed; corrected Bybit side mapping (`Buy` long liquidation / `Sell` short liquidation) is tested; production subscription builders remain disabled for `allLiquidation*`.
+- verification: migration pytest 6/0, Rust tests from `rust/` passed for `all_liquidation` 6/0, `liquidation` 14/0, `ws_client::tests` 29/0, forbidden-topic regression 1/0, rustfmt check PASS, scoped `git diff --check` PASS.
+- boundary: source/test/docs only; no runtime deploy, Linux DB apply, rebuild, restart, auth mutation, paper/live/mainnet enablement, strategy/risk mutation, or production `allLiquidation*` subscription.

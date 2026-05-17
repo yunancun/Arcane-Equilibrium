@@ -112,7 +112,7 @@ impl WsClient {
             data.iter()
                 .filter_map(|item| parse_ticker_item(item, topic))
                 .collect()
-        } else if topic.starts_with("liquidation.") {
+        } else if topic.starts_with("allLiquidation.") || topic.starts_with("liquidation.") {
             data.iter()
                 .filter_map(|item| parse_liquidation_item(item, topic))
                 .collect()

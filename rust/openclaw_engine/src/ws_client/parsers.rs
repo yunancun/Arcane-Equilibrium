@@ -14,6 +14,15 @@
 pub(super) use openclaw_core::now_ms;
 use openclaw_types::{PriceEvent, PriceEventKind};
 
+const MIN_LIQUIDATION_TS_MS: u64 = 946_684_800_000; // 2000-01-01T00:00:00Z
+const MAX_LIQUIDATION_TS_MS: u64 = 4_102_444_800_000; // 2100-01-01T00:00:00Z
+
+fn sane_liquidation_ts_ms(ts: u64) -> Option<u64> {
+    (MIN_LIQUIDATION_TS_MS..=MAX_LIQUIDATION_TS_MS)
+        .contains(&ts)
+        .then_some(ts)
+}
+
 /// Parse a Bybit public trade item into PriceEvent.
 /// 將 Bybit 公開交易項目解析為 PriceEvent。
 pub(super) fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
@@ -282,28 +291,67 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
 /// Parse liquidation event — forced liquidation on the market.
 /// 解析清算事件 — 市場上的強制清算。
 ///
-/// Bybit liquidation: {"topic":"liquidation.BTCUSDT","data":{"symbol":"BTCUSDT","side":"Buy","price":"65000","qty":"0.5","updatedTime":...}}
+/// Supports dormant legacy `liquidation.{symbol}` and the C1-proved
+/// `allLiquidation.{symbol}` shape. The parser is strict: `allLiquidation`
+/// requires item `s`; side must be `Buy`/`Sell`; qty/price must be positive
+/// finite numbers; timestamp must be a sane positive ms epoch.
+/// 支援 dormant legacy `liquidation.{symbol}` 與 C1 已證明的
+/// `allLiquidation.{symbol}` payload；symbol / side / qty / price / timestamp
+/// 皆 fail-closed。
 pub(super) fn parse_liquidation_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
-    let symbol = extract_symbol_from_topic(topic)?;
+    let item_symbol = item
+        .get("s")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let symbol = if topic.starts_with("allLiquidation.") {
+        item_symbol?
+    } else {
+        item_symbol.or_else(|| extract_symbol_from_topic(topic))?
+    };
     let price = item
-        .get("price")
+        .get("p")
+        .or_else(|| item.get("price"))
         .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok())?;
-    let qty = item.get("size").and_then(|v| v.as_str()).unwrap_or("0");
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)?;
+    let qty = item
+        .get("v")
+        .or_else(|| item.get("size"))
+        .or_else(|| item.get("qty"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)?;
     let side = item
-        .get("side")
+        .get("S")
+        .or_else(|| item.get("side"))
         .and_then(|v| v.as_str())
-        .unwrap_or("Unknown");
+        .filter(|s| matches!(*s, "Buy" | "Sell"))?;
     let ts = item
-        .get("updatedTime")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+        .get("T")
+        .or_else(|| item.get("updatedTime"))
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
+        .and_then(sane_liquidation_ts_ms)?;
 
     let mut event = PriceEvent::new(symbol, price, ts);
     event.event_kind = Some(PriceEventKind::Liquidation);
     event.metadata.insert("type".into(), "liquidation".into());
     event.metadata.insert("side".into(), side.into());
-    event.metadata.insert("qty".into(), qty.into());
+    event.metadata.insert("qty".into(), qty.to_string());
+    let (position, direction) = match side {
+        "Buy" => ("long_liquidation", "1"),
+        "Sell" => ("short_liquidation", "-1"),
+        _ => unreachable!("side filter only allows Buy/Sell"),
+    };
+    event
+        .metadata
+        .insert("liquidation_position".into(), position.into());
+    event
+        .metadata
+        .insert("mean_reversion_direction".into(), direction.into());
     Some(event)
 }
 
