@@ -1,5 +1,5 @@
 -- ============================================================
--- W-AUDIT-8c Liquidation Cluster Strategy Stage 0R 特徵列查詢
+-- W-AUDIT-8c Liquidation Cluster Strategy Stage 0R 特徵列查詢（主檔）
 --
 -- 用途：
 --   針對每個 5m 桶在 BB cor-side 映射（Buy=long liquidation,
@@ -12,7 +12,8 @@
 --   - 只讀；無 DDL；無 side effect。
 --   - 不寫 market.liquidations 也不寫 market.klines；不觸發任何 telemetry。
 --   - 嚴格 as-of join：forward 收益用 bucket_end_ts + quiet_window + horizon
---     之後第一根 kline；無未來資訊洩漏。
+--     之後第一根 kline；無未來資訊洩漏（entry/exit 都取該 bar 的 open，
+--     避免 1m bar 內 (open+close)/2 把 event 後 60s 的 close 混入進場價）。
 --   - 跨時段去重以 bucket_5m_epoch 為唯一鍵；max(ts) 取桶內最後事件，作為
 --     quiet_window 起算點，避免桶剛開瞬間就進場。
 --
@@ -27,8 +28,11 @@
 --                                       （0.70/0.80/0.90；provider 自身為 0.60）
 --   %(cluster_notional_floor_usd)s DOUBLE PRECISION — magnitude 第二層下限
 --                                       （10K/25K/100K）
+--   %(notional_pct_floor)s     DOUBLE PRECISION — magnitude 第三層 24h 百分位
+--                                       下限（0.90/0.95/0.98，spec v0.3 line 191
+--                                       magnitude_ok 必含；round 2 補回）
 --   %(quiet_window_sec)s       INT  — 桶最後事件後沉默秒數（0/30/60）
---   %(horizon_min)s            INT  — 前向 1m kline 平均中價計算 horizon 分鐘
+--   %(horizon_min)s            INT  — 前向 1m kline open 計算 horizon 分鐘
 --                                       （1/5/15）
 --   %(cost_bps)s               DOUBLE PRECISION — 雙向 fee+slippage 成本估計
 --                                       （default 12 bps，與 8b 對齊；live
@@ -53,9 +57,12 @@
 --   notional_pct_24h             DOUBLE PRECISION — 24h rolling percentile
 --                                       rank（per symbol）
 --   entry_ts                     TIMESTAMPTZ — 進場 kline 開盤時間
---   entry_mid                    DOUBLE PRECISION — (open+close)/2 mid
+--   entry_mid                    DOUBLE PRECISION — 該 bar 的 open price
+--                                       （欄位名沿用 entry_mid 保留下游 Python
+--                                       contract；semantic 為 open-only，見
+--                                       MODULE_NOTE §「HIGH-2 verdict D」）
 --   exit_ts                      TIMESTAMPTZ — 出場 kline 開盤時間
---   exit_mid                     DOUBLE PRECISION
+--   exit_mid                     DOUBLE PRECISION — 該 bar 的 open price
 --   gross_bps                    DOUBLE PRECISION
 --                                 = 10000 × expected_dir × (exit-entry)/entry
 --   net_bps                      DOUBLE PRECISION = gross_bps - %(cost_bps)s
@@ -63,16 +70,34 @@
 --                                       per-tier max_day_share）
 --
 -- 5 CTE 順序：
---   raw_buckets → density_gated → trigger_candidates → forward_returns
---   → final_signals
+--   raw_buckets → density_gated → trigger_with_pct → trigger_candidates
+--   → forward_returns → final_signals
+--   （round 2：trigger_candidates 拆兩層因 percent_rank() 在 WHERE 不能直接用，
+--   notional_pct_floor gate 需先計算 percentile 再過濾）
 --
 -- 依賴：
 --   - market.liquidations（V002 + V095 PK 升級到 (symbol, ts, side, qty,
 --     price)，side CHECK ∈ {'Buy','Sell'}）
 --   - market.klines WHERE timeframe='1m'（V002 OHLCV；ts TIMESTAMPTZ +
---     open/close REAL；本查詢用 (open+close)/2 mid）
+--     open/close REAL；本查詢用該 bar 的 open price 做 entry/exit）
 --
--- 已知與 PA 設計 §2.3 偏離（self-report 詳述原因）：
+-- HIGH-2 verdict D（PA 仲裁 2026-05-18）：
+--   entry_mid / exit_mid 改為 open-only（非 (open+close)/2 mid）。
+--   理由：market.klines.ts = bar open time（V002 line 122），一根 1m bar 涵蓋
+--   [ts, ts+60s)。若 bucket_end_ts 落在 bar 邊界（如 12:34:00）+ quiet=0，
+--   取 ts >= 12:34:00 命中該 bar；該 bar 的 close ≈ 12:34:59 包含 event 後
+--   59s 的 mean-reversion → (open+close)/2 把 60s 後價格混入進場價 →
+--   gross_bps 系統性低估 alpha。改 open-only 後：
+--     - bar 邊界 case：entry_open ≈ event 時刻 price proxy（bar 開瞬間第一筆
+--       trade），無 leak。
+--     - non-boundary case：entry_open = 「event 後第一根新 bar 開瞬間」，與
+--       exit_open 對稱。
+--   欄位名沿用 entry_mid/exit_mid 是下游 Python `_compute_gross_bps()` 已 lock
+--   的 contract，避免 cascade rename；semantic 改 open-only 屬於合理 trade-off。
+--   ts >= 維持（非 strict gt）：spec line 231 「next available tradable mark」
+--   語意，事件已知、價格未知，不是 lookahead bias。
+--
+-- 已知與 PA 設計 §2.3 偏離（round 1 documented；round 2 新增 #6/#7）：
 --   1. 24h percentile rolling window = 288 PRECEDING（24h × 12 5m桶/h），
 --      非 PA 寫的 17280 PRECEDING（17280/12 = 1440h = 60d，明顯與
 --      欄位語義 notional_pct_24h 不符；修正為 288 行）。
@@ -82,13 +107,23 @@
 --      sparsity 高時不連續，PRECEDING 是「行數」而非「時間」。為與
 --      LiquidationPulseAggregator 5m 切片語義對齊，添加註釋說明此限制
 --      （下游 Python 若需嚴格 24h 時間窗，可在 metrics 層另做後處理）。
+--      MIT SHOULD-2：per-symbol sparsity 高時（如 POLUSDT 1 trigger/day），
+--      實際 288-row 跨度可能 > 24h；下游 Python 用此欄位做 cluster 稀有度
+--      估計，semantic 為「相對自身過去 288 個曾觸發桶的 magnitude rank」。
 --   4. PA §2.3 forward_returns 用 4 個 correlated subquery（entry_ts /
 --      entry_mid / exit_ts / exit_mid 各一）；本 IMPL 合併為 2 個 LEFT JOIN
---      LATERAL（一次取 (ts, open, close) tuple），避免 market.klines 索引
---      被掃 4 次，符合 acceptance #1 「<30s on 7d × 32-sym panel」目標。
+--      LATERAL（一次取 (ts, open) tuple），避免 market.klines 索引被掃 4 次。
 --   5. 參數綁定 PA 用 `$name` 語法（PG 原生 prepare）；本 IMPL 改用
---      `%(name)s` psycopg2 named-param 語法，與 8b precedent 對齊（同檔
---      載入路徑、同 Python loader 模式、同 cursor.execute({...}) 簽名）。
+--      `%(name)s` psycopg2 named-param 語法，與 8b precedent 對齊。
+--   6. （round 2）新增 notional_pct_floor 參數 + magnitude_ok 第三層 gate，
+--      補回 spec v0.3 line 191 mandate；trigger_candidates 拆兩層因
+--      percent_rank() 在 WHERE 不能直接用。
+--   7. （round 2）entry_mid/exit_mid 從 (open+close)/2 改為 open-only，
+--      per PA HIGH-2 verdict D（避免 1m bar partial leak）。
+--
+-- 對應 sibling 查詢已拆獨立檔（round 2 HIGH-1）：
+--   - sql/queries/w_audit_8c_liquidation_cluster_stage0r_panel_coverage.sql
+--   - sql/queries/w_audit_8c_liquidation_cluster_stage0r_cluster_n_eff.sql
 -- ============================================================
 
 WITH raw_buckets AS (
@@ -98,6 +133,9 @@ WITH raw_buckets AS (
     -- 在 count(*) 與 sum(qty*price) 自然累加。
     -- dominant_side 判定遵循 provider DOMINANT_SIDE_RATIO=0.6 寫死；本層只判
     -- long/short/mixed，後續 CTE 再用 %(side_dominance_floor)s 收緊。
+    -- E2 MED-4 / MIT 可讀性：把 long_notional / short_notional / total 拉成
+    -- 中間欄位（_long_notional / _short_notional / _total_notional）讓 dominant_*
+    -- CASE 直接引用 alias，PG planner 不重算 sum aggregation。
     SELECT
         symbol,
         (floor(extract(epoch FROM ts) / 300.0))::bigint * 300 AS bucket_5m_epoch,
@@ -149,20 +187,13 @@ density_gated AS (
       AND dominant_side IN ('long_liquidated', 'short_liquidated')
 ),
 
-trigger_candidates AS (
-    -- CTE 3：magnitude / dominance 第二層 gate + 24h percentile rank
-    -- side_dominance_ratio 收緊：provider 為 0.6 寬鬆，本層用 spec 提供的
-    -- 0.70/0.80/0.90 sweep 軸。
-    -- cluster_notional_floor_usd：絕對量級下限（10K/25K/100K），與 N_usd 不同
-    -- 用途：N_usd 用於密度判定 inclusion，cluster_notional_floor_usd 是
-    -- magnitude pre-filter（spec §"magnitude / dominance sweep"）。
-    -- expected_dir：BB cor-side 鎖定 — long_liquidated 桶預期 mean-revert UP
-    -- → +1；short_liquidated 桶預期 mean-revert DOWN → -1。
-    -- notional_pct_24h：per-symbol 24h rolling percentile，下游 Python 用此
-    -- 計算 cluster 相對自身歷史的稀有度。
+trigger_with_pct AS (
+    -- CTE 3a：先計算 side_dominance_ratio + expected_dir + 24h notional percentile
+    -- 為什麼拆兩層：percent_rank() 是 window function，在 WHERE clause 不能直接
+    -- 引用（PG WHERE 在 window evaluation 之前）；先在這層計算 percentile，
+    -- 下層再用此欄位做 magnitude_ok 第三層 gate。
     -- ROWS BETWEEN 288 PRECEDING：24h × 12 5m桶/h = 288 行；非時間窗，是
-    -- 行數窗（sparsity 高時實際時間跨度可能 > 24h，但與 cluster 稀有度語義
-    -- 一致 — 比較對象是「過去 288 個曾觸發桶」而非「過去固定 24h 任意時點」）。
+    -- 行數窗（sparsity 高時實際時間跨度可能 > 24h；MIT SHOULD-2 註明此語意）。
     -- 注意：PA 設計 §2.3 寫 17280 PRECEDING 是筆誤（17280/12 = 1440h = 60d
     -- 與 notional_pct_24h 語義不符）。
     SELECT
@@ -172,6 +203,8 @@ trigger_candidates AS (
         CASE dg.dominant_side
             WHEN 'long_liquidated'  THEN  1
             WHEN 'short_liquidated' THEN -1
+            ELSE NULL  -- LOW-2 defensive：density_gated 已 filter mixed，
+                       -- 此處不應達；ELSE NULL 是防未來 refactor 繞開 mixed filter
         END AS expected_dir,
         percent_rank() OVER (
             PARTITION BY dg.symbol
@@ -179,29 +212,52 @@ trigger_candidates AS (
             ROWS BETWEEN 288 PRECEDING AND CURRENT ROW
         ) AS notional_pct_24h
     FROM density_gated dg
-    WHERE GREATEST(long_notional_5m, short_notional_5m) / NULLIF(cluster_notional_5m, 0)
-              >= %(side_dominance_floor)s::float8
-      AND cluster_notional_5m >= %(cluster_notional_floor_usd)s::float8
+),
+
+trigger_candidates AS (
+    -- CTE 3b：magnitude / dominance 第二+第三層 gate
+    -- side_dominance_ratio 收緊：provider 為 0.6 寬鬆，本層用 spec 提供的
+    -- 0.70/0.80/0.90 sweep 軸（side_dominance_floor）。
+    -- cluster_notional_floor_usd：絕對量級下限（10K/25K/100K），與 N_usd 不同
+    -- 用途：N_usd 用於密度判定 inclusion，cluster_notional_floor_usd 是
+    -- magnitude pre-filter（spec §"magnitude / dominance sweep"）。
+    -- notional_pct_floor：spec v0.3 line 191 magnitude_ok 第三層；要求
+    -- cluster_notional_5m 相對自身 24h 歷史處於 percentile 0.90/0.95/0.98
+    -- 之上，避免 absolute USD 通過但相對歷史平庸的桶觸發。
+    -- 為什麼三層 magnitude gate 都必須：cluster_notional_floor_usd 絕對量級
+    -- 排「太小」，notional_pct_floor 相對量級排「對自己而言不稀有」，
+    -- side_dominance_floor 排「方向不夠主導」；三層交集才是 spec K_total
+    -- 11_664 grid 的真實 cell 定義。
+    SELECT *
+    FROM trigger_with_pct twp
+    WHERE twp.side_dominance_ratio >= %(side_dominance_floor)s::float8
+      AND twp.cluster_notional_5m  >= %(cluster_notional_floor_usd)s::float8
+      AND twp.notional_pct_24h     >= %(notional_pct_floor)s::float8
 ),
 
 forward_returns AS (
-    -- CTE 4：嚴格 as-of join 前向 kline 中價
+    -- CTE 4：嚴格 as-of join 前向 kline open price
     -- entry_kline：bucket_end_ts + quiet_window 之後第一根 1m kline；
     --   ts >= 目標時間 保證進場 bar 不洩漏觸發訊號（觸發 ts <= entry_ts）。
     -- exit_kline：bucket_end_ts + quiet_window + horizon 之後第一根 1m kline；
     --   horizon 為 mean-reversion 觀察窗（1/5/15 分鐘）。
     -- LIMIT 1：取最近一根；若 kline sparse（某 symbol 1m bar 缺失）回傳 NULL，
     --   最終 net_bps 也為 NULL，下游 Python 在 compute_stage0r 時統計排除率。
-    -- 採用 (open+close)/2 mid：close 含成交集中，open 含開盤跳空風險，mid
-    --   是兩者平均；與 8b funding skew SQL 的 close 點價策略略不同，因 8b
-    --   focus 在較長 15m/30m/60m horizon 而 8c 主視窗 1-15m 對 open gap
-    --   更敏感。
+    -- 採用該 bar 的 open price（非 (open+close)/2 mid）：per HIGH-2 verdict D，
+    --   避免 1m bar 內 close 含 event 後 60s 的 partial leak；open 是 bar
+    --   開瞬間第一筆 trade price，物理上最接近進場決策時刻。
+    -- 欄位名 entry_mid / exit_mid 保留：下游 Python `_compute_gross_bps()`
+    --   已 lock 此 contract，避免 cascade rename；semantic 為 open-only。
     -- 為什麼用 LEFT JOIN LATERAL 而非 4 個 correlated subquery：
-    --   單一 LATERAL 一次取出 (ts, open, close) tuple 比 4 個 subquery 各
-    --   掃 market.klines 索引 4 次效率高 ~2x；7d × 32-sym panel 預計
+    --   單一 LATERAL 一次取出 (ts, open) tuple 比 4 個 subquery 各掃
+    --   market.klines 索引 4 次效率高 ~2x；7d × 32-sym panel 預計
     --   ~1k-10k trigger rows，LATERAL 是 <30s 目標的必要優化。
     --   LEFT 保證 kline sparse 時 trigger row 仍輸出（NULL entry/exit
     --   填入），下游 Python 計算排除率。
+    -- MIT SHOULD-3 保護：ORDER BY ts ASC LIMIT 1 依賴 TimescaleDB ChunkAppend
+    --   chunk-order-aware planner 早期終止（empirical Linux PG dry-run 已驗
+    --   Custom Scan Order: klines.ts）；future planner regression 若失此 order
+    --   可能掃全 chunk，請勿移除 ORDER BY。
     SELECT
         tc.symbol,
         tc.bucket_5m_epoch,
@@ -217,15 +273,13 @@ forward_returns AS (
         tc.dominant_event_count,
         tc.side_dominance_ratio,
         tc.notional_pct_24h,
-        k_entry.ts                                         AS entry_ts,
-        ((k_entry.open::float8) + (k_entry.close::float8)) / 2.0
-                                                           AS entry_mid,
-        k_exit.ts                                          AS exit_ts,
-        ((k_exit.open::float8)  + (k_exit.close::float8))  / 2.0
-                                                           AS exit_mid
+        k_entry.ts                  AS entry_ts,
+        k_entry.open::float8        AS entry_mid,
+        k_exit.ts                   AS exit_ts,
+        k_exit.open::float8         AS exit_mid
     FROM trigger_candidates tc
     LEFT JOIN LATERAL (
-        SELECT ts, open, close
+        SELECT ts, open
         FROM market.klines
         WHERE symbol    = tc.symbol
           AND timeframe = '1m'
@@ -235,7 +289,7 @@ forward_returns AS (
         LIMIT 1
     ) k_entry ON TRUE
     LEFT JOIN LATERAL (
-        SELECT ts, open, close
+        SELECT ts, open
         FROM market.klines
         WHERE symbol    = tc.symbol
           AND timeframe = '1m'
@@ -296,133 +350,3 @@ final_signals AS (
 SELECT *
 FROM final_signals
 ORDER BY symbol, bucket_5m_epoch;
-
--- ============================================================
--- Sibling query #1: panel coverage check（一次性前置檢查）
--- 用途：Stage 0R replay 前確認 market.liquidations 跨 cohort symbol 已累積
---      ≥ 7d 樣本；若 span_days < 7 則 metrics 模塊應 fail-fast 而非
---      silently 出 thin sample 結果。
--- 呼叫位置：helper_scripts/reports/w_audit_8c/liquidation_cluster_stage0r_report.py
---      在主查詢前單獨 cur.execute() 此塊。下游 Python loader 以
---      "-- @SIBLING:PANEL_COVERAGE_CHECK" 為 sentinel split 本檔。
---
--- 輸出欄位：
---   total_rows           BIGINT
---   distinct_symbols     BIGINT
---   earliest_ts          TIMESTAMPTZ
---   latest_ts            TIMESTAMPTZ
---   span_days            DOUBLE PRECISION
---   latest_age_min       DOUBLE PRECISION
---   cohort_observed      BIGINT — cohort ∩ observed（非 raw distinct）
---   cohort_coverage_pct  DOUBLE PRECISION
--- ============================================================
--- @SIBLING:PANEL_COVERAGE_CHECK
-SELECT
-    count(*)::bigint AS total_rows,
-    count(DISTINCT symbol)::bigint AS distinct_symbols,
-    min(ts) AS earliest_ts,
-    max(ts) AS latest_ts,
-    extract(epoch FROM (max(ts) - min(ts))) / 86400.0 AS span_days,
-    extract(epoch FROM (now() - max(ts))) / 60.0 AS latest_age_min,
-    count(DISTINCT symbol) FILTER (WHERE symbol = ANY(%(symbols)s::text[]))::bigint
-        AS cohort_observed,
-    (count(DISTINCT symbol) FILTER (WHERE symbol = ANY(%(symbols)s::text[]))::float8
-        / NULLIF(array_length(%(symbols)s::text[], 1), 0)::float8) * 100.0
-        AS cohort_coverage_pct
-FROM market.liquidations
-WHERE ts >= now() - (%(window_days)s::int * INTERVAL '1 day');
-
--- ============================================================
--- Sibling query #2: cluster-aware n_eff helper
--- 用途：metrics 模塊計算 _n_eff_cluster_aware(n_clusters_60m,
---      autocorr_factor=0.3) 之前取得 per (symbol, dominant_side) 的
---      n_clusters_60m。
--- 為什麼 60 分鐘：cascade 在 funding 時段或大行情後常見「連環觸發」，
---      60min 視窗吸收典型 cascade 尾部後，剩餘 cluster 之間可視為近似
---      獨立樣本（PA §2.4 defended default；MIT 可基於 lag-1 autocorr
---      empirical 後調整）。
--- 呼叫方式：本 sibling 查詢與主查詢共享參數綁定 — 下游 Python loader 應
---      在同一 cur.execute() session 之前先把主查詢結果物化（CREATE TEMP
---      TABLE）或在 Python 端 in-memory join；本檔提供 standalone 版，
---      直接重跑 raw_buckets → density_gated → trigger_candidates 路徑
---      抽 dominant_side / bucket_end_ts。
--- 輸出欄位：
---   symbol             TEXT
---   dominant_side      TEXT
---   n_clusters_60m     BIGINT
--- ============================================================
--- @SIBLING:CLUSTER_N_EFF_HELPER
-WITH raw_buckets AS (
-    SELECT
-        symbol,
-        (floor(extract(epoch FROM ts) / 300.0))::bigint * 300 AS bucket_5m_epoch,
-        count(*)::bigint AS event_count_5m,
-        sum(qty::float8 * price::float8) AS cluster_notional_5m,
-        CASE
-            WHEN sum(CASE WHEN side = 'Buy'  THEN qty::float8 * price::float8 ELSE 0 END)
-                 >= 0.6 * sum(qty::float8 * price::float8)
-              THEN count(*) FILTER (WHERE side = 'Buy')::bigint
-            WHEN sum(CASE WHEN side = 'Sell' THEN qty::float8 * price::float8 ELSE 0 END)
-                 >= 0.6 * sum(qty::float8 * price::float8)
-              THEN count(*) FILTER (WHERE side = 'Sell')::bigint
-            ELSE 0::bigint
-        END AS dominant_event_count,
-        CASE
-            WHEN sum(CASE WHEN side = 'Buy'  THEN qty::float8 * price::float8 ELSE 0 END)
-                 >= 0.6 * sum(qty::float8 * price::float8)
-              THEN 'long_liquidated'
-            WHEN sum(CASE WHEN side = 'Sell' THEN qty::float8 * price::float8 ELSE 0 END)
-                 >= 0.6 * sum(qty::float8 * price::float8)
-              THEN 'short_liquidated'
-            ELSE 'mixed'
-        END AS dominant_side,
-        max(ts) AS bucket_end_ts,
-        GREATEST(
-            sum(CASE WHEN side = 'Buy'  THEN qty::float8 * price::float8 ELSE 0 END),
-            sum(CASE WHEN side = 'Sell' THEN qty::float8 * price::float8 ELSE 0 END)
-        ) / NULLIF(sum(qty::float8 * price::float8), 0) AS side_dominance_ratio
-    FROM market.liquidations
-    WHERE ts >= now() - (%(window_days)s::int * INTERVAL '1 day')
-      AND symbol = ANY(%(symbols)s::text[])
-    GROUP BY symbol, bucket_5m_epoch
-),
-trigger_candidates AS (
-    SELECT symbol, dominant_side, bucket_end_ts
-    FROM raw_buckets
-    WHERE event_count_5m         >= %(k_event_floor)s::int
-      AND cluster_notional_5m    >= %(n_usd_floor)s::float8
-      AND dominant_event_count   >= %(m_dominant_floor)s::int
-      AND dominant_side IN ('long_liquidated', 'short_liquidated')
-      AND side_dominance_ratio   >= %(side_dominance_floor)s::float8
-      AND cluster_notional_5m    >= %(cluster_notional_floor_usd)s::float8
-),
-ordered AS (
-    SELECT
-        symbol,
-        dominant_side,
-        bucket_end_ts,
-        lag(bucket_end_ts) OVER (
-            PARTITION BY symbol, dominant_side
-            ORDER BY bucket_end_ts
-        ) AS prev_ts
-    FROM trigger_candidates
-),
-new_cluster_flag AS (
-    SELECT
-        symbol,
-        dominant_side,
-        bucket_end_ts,
-        CASE
-            WHEN prev_ts IS NULL
-                 OR (bucket_end_ts - prev_ts) > INTERVAL '60 minutes'
-            THEN 1 ELSE 0
-        END AS is_new_cluster
-    FROM ordered
-)
-SELECT
-    symbol,
-    dominant_side,
-    sum(is_new_cluster)::bigint AS n_clusters_60m
-FROM new_cluster_flag
-GROUP BY symbol, dominant_side
-ORDER BY symbol, dominant_side;
