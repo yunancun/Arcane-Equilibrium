@@ -34,7 +34,7 @@ mod volume;
 
 // Re-export all indicator functions and result types.
 // 重新導出所有指標函數和結果類型。
-pub use momentum::{adx, rsi, stochastic, AdxResult, StochResult};
+pub use momentum::{adx, rsi, stochastic, stochastic_prior, AdxResult, StochResult};
 #[allow(deprecated)]
 // donchian 已 deprecated，但仍需 re-export 供測試和 donchian_prior 內部使用
 pub use trend::{

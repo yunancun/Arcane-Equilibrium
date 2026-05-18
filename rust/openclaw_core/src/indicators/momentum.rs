@@ -61,8 +61,16 @@ pub struct StochResult {
     pub d: f64,
 }
 
-/// Stochastic oscillator with %K and %D (SMA of %K).
-/// 隨機指標，含 %K 和 %D（%K 的 SMA）。
+/// 隨機指標 %K 和 %D（%K 的 SMA），**含當前 bar**，存在 look-ahead bias。
+///
+/// 為什麼保留：本函數有既存呼叫端（`indicators/mod.rs` 預設 IndicatorSnapshot、
+/// `tests/golden_dataset.rs` 數值回歸黃金集），刪除或改語義會破壞回歸基準。
+/// 新 alpha 研究 / 策略 gate / 任何 forecast-vs-current 判斷請改用 `stochastic_prior()`，
+/// 它排除當前 bar，與 `donchian_prior()` 是同一個 leak-free 設計模式。
+///
+/// 不變量：呼叫端不得用 `stochastic()` 判斷「當前 bar 是否突破近 N 根 high/low」，
+/// 這正是 `rolling(N).max()` 同類 look-ahead leak（見 memory
+/// `feedback_indicator_lookahead_bias`）。
 pub fn stochastic(
     high: &[f64],
     low: &[f64],
@@ -75,7 +83,7 @@ pub fn stochastic(
         return None;
     }
 
-    // Compute %K values for the last d_period points
+    // 計算最近 d_period 個 %K 值
     let mut k_values = Vec::with_capacity(d_period);
     for i in (n - d_period)..n {
         let start = i + 1 - k_period;
@@ -97,6 +105,35 @@ pub fn stochastic(
     let d = kahan_sum(&k_values) / d_period as f64;
 
     Some(StochResult { k, d })
+}
+
+/// 隨機指標 %K 和 %D 的 leak-free 變體：排除當前 bar，僅用 close[..n-1] / high[..n-1] / low[..n-1]。
+///
+/// 為什麼：`stochastic()` 用 `high[start..=i]` 含當前 bar，當當前 bar 創新高/低時
+/// %K 必然落在 0 或 100 附近 — 對「當前 bar 是否突破近 N 根 high/low」這類判斷
+/// 構成 look-ahead bias。研究路徑與 forecast-vs-current 判斷必須用本函數。
+///
+/// 不變量：與 `donchian_prior()` 同一設計 — 先切掉當前 bar 再算原始指標。
+/// 若資料量不足 `k_period + d_period`（含一根當前 bar 預留），返回 None。
+pub fn stochastic_prior(
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    k_period: usize,
+    d_period: usize,
+) -> Option<StochResult> {
+    let n = high.len().min(low.len()).min(close.len());
+    // 至少需要 k_period + d_period 根（其中 1 根作為當前 bar 被排除）
+    if k_period == 0 || d_period == 0 || n < k_period + d_period {
+        return None;
+    }
+    stochastic(
+        &high[..n - 1],
+        &low[..n - 1],
+        &close[..n - 1],
+        k_period,
+        d_period,
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -254,6 +291,48 @@ mod tests {
     #[test]
     fn test_stochastic_edge() {
         assert!(stochastic(&[1.0], &[0.5], &[0.8], 5, 3).is_none());
+    }
+
+    #[test]
+    fn test_stochastic_prior_excludes_current_bar() {
+        // 設計與 donchian_prior 同模式：當前 bar 放極端值，驗證 leak-free 變體確實排除。
+        // stochastic(14, 3) 需要 n >= 14+3-1 = 16；stochastic_prior 需要 n >= 14+3 = 17。
+        // 用 17 根 ascending series，當前 bar (idx 16) 放 9999 / -9999 / 5000 極端值。
+        let mut high: Vec<f64> = (0..17).map(|i| 100.0 + i as f64).collect();
+        let mut low: Vec<f64> = (0..17).map(|i| 95.0 + i as f64).collect();
+        let mut close: Vec<f64> = (0..17).map(|i| 97.5 + i as f64).collect();
+        high[16] = 9999.0;
+        low[16] = -9999.0;
+        close[16] = 5000.0;
+
+        let leaky = stochastic(&high, &low, &close, 14, 3).expect("含當前 bar 應有結果");
+        let prior = stochastic_prior(&high, &low, &close, 14, 3).expect("prior 應有結果");
+
+        // leaky 最後一個 %K：i=16，window high[3..=16] 含 9999，low[3..=16] 含 -9999，
+        //   close[16]=5000 → (5000-(-9999))/(9999-(-9999))*100 ≈ 75.00。
+        // prior：完全不看 bar 16，僅看 ascending 0..=15，最後一根 close=112.5
+        //   是 N-bar max，%K 必近 100。兩者必須顯著分歧，證明 prior 排除了當前 bar 污染。
+        assert!(
+            (leaky.k - prior.k).abs() > 10.0,
+            "leaky.k={:.4} vs prior.k={:.4}：當前 bar 極端值必須讓兩者分歧 >10",
+            leaky.k,
+            prior.k
+        );
+        // %D 是 3 個 %K 的 SMA，當前 bar 只直接影響最後一個 %K，故 %D 分歧約為 %K 的 1/3；
+        // 觀測值 leaky.d≈82 vs prior.d≈86，閾值取 >3 確保非零差但允許 SMA 抑制。
+        assert!(
+            (leaky.d - prior.d).abs() > 3.0,
+            "leaky.d={:.4} vs prior.d={:.4}：當前 bar 極端值必須讓 %D 分歧 >3",
+            leaky.d,
+            prior.d
+        );
+
+        // 邊界：恰夠 stochastic(16 根)、不足 stochastic_prior(需 17 根)。
+        let short_h = vec![100.0; 16];
+        let short_l = vec![95.0; 16];
+        let short_c = vec![97.5; 16];
+        assert!(stochastic(&short_h, &short_l, &short_c, 14, 3).is_some());
+        assert!(stochastic_prior(&short_h, &short_l, &short_c, 14, 3).is_none());
     }
 
     // --- ADX ---
