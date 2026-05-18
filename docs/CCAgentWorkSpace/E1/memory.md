@@ -9877,3 +9877,47 @@ crypto pair」端對端 gate chain 行為。
 
 ### 完整報告路徑
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_1_impl.md`
+
+---
+
+## 2026-05-18 — W-AUDIT-8c 8C-S0R-3 CLI round 2 rework
+
+### 任務範圍
+- Worktree `worktree-agent-a61b44be0fbab2bf9` (round 1 HEAD `b3e68870`)
+- E2 round 1 RETURN 6 CRIT + 4 HIGH + 3 MED + 1 LOW
+- Round 1 CLI 完全跑不動：5 個 runtime crash + 1 個 silent-RED killer
+
+### 6 CRIT 修法 + 4 HIGH 修法
+1. **CRIT-1**：缺 `symbols` SQL param → 加 `fetch_panel_symbols()` mirror 8b L71-95 + `--symbols` argparse
+2. **CRIT-2**：sweep 返 dict 6 keys（非 list[dict]）→ 改 `sweep_result.get("sweep_cells")` + 直接 surface `eligible_for_demo_canary_per_tier` 進 packet
+3. **CRIT-3**：sweep kwargs `horizon_min` 名衝突 `horizon_grid` → 拆 `single_kwargs` vs `sweep_kwargs` + 加 `--floor-grid` / `--quiet-grid` / `--horizon-grid` / `--pct-grid` argparse
+4. **CRIT-4**：`_fetch_panel_df` 返 pandas.DataFrame，S0R-2 簽名 `Sequence[Mapping]` → rename `_fetch_panel_rows` 返 `list[dict]` via `dict(zip(columns, row))` + 移 pandas/numpy 依賴
+5. **CRIT-5 (silent-RED killer)**：SQL 出 `bucket_end_ts` (timestamptz) 但 sibling 讀 `bucket_end_ts_ms` (ms int) → `_fetch_panel_rows` 後 normalize `row["bucket_end_ts_ms"] = int(bet.timestamp() * 1000)`
+6. **CRIT-6**：BB report path hardcoded 無存在性檢查 → `Path(BB_REPORT_PATH).exists()` fail-fast + exit 3
+7. **HIGH-1**：spec v0.3 14 mandatory fields 缺 6 個 → `_build_packet` 加 `per_tier_breakdown` / `density_filter_efficacy_chain` / `false_positive_rates` / `exclusion_counts` (5 categories) / `baseline_lift` / `pbo_with_purge_embargo`
+8. **HIGH-2**：48× under-sweep → 加完整 7+1 軸 grid argparse
+9. **HIGH-3**：缺 fetch_k_prior → `fetch_k_prior(conn, mode='strict-liquidation')` mirror 8b L97-145 + `--k-prior` / `--k-prior-mode` argparse + pass `k_prior=` 進 sibling
+10. **HIGH-4**：自製 `_verdict_from_cells` 與 S0R-2 衝突 → `_verdict_from_sweep_result` 直 surface `eligible_for_demo_canary_per_tier`
+
+### Sign-off invariant：integration smoke `liquidation_cluster_stage0r_smoke_cli.py`
+- 432 LOC，10 test 覆蓋全部 CRIT + HIGH
+- 不連 PG（mock 4 sym × 8 day × 5 cluster/day panel rows）
+- 透過 `dict(zip(columns, raw))` 模擬 `_fetch_panel_rows` normalize 路徑
+- 結果：**10/10 PASS** (extract_trigger_rows 從 round 1 silent 0 → round 2 160 triggers)
+- 本 worktree 不含 S0R-2 metrics（sibling worktree owner），smoke 透過 `/tmp` 暫拷 S0R-2 metrics 跑通；正式 merge 後直接 `python3 smoke_cli.py` 即可
+
+### 教訓
+1. **「contract question for E2 to verify at merge」是 anti-pattern**（E2 round 1 §反思 §1 引用）：round 1 4 個假設 3/4 假錯；本 round 2 必先 sibling 暫拷 + smoke 驗證才能 IMPL DONE。
+
+2. **CRIT-5 silent-RED killer 比 traceback crash 更危險**：CRIT-1/2/3/4 在第一行有效執行即 TypeError/KeyError/AttributeError；CRIT-5 是 SQL column 名 vs Python 期待 key mismatch → row.get 返 None → 靜默 skip → n_per_cell=0 → cell auto-RED with fake reason。Operator 信任這個 verdict 就 tomb 真 alpha。**未來涉及多 worktree sibling-isolation 任務必檢查 column 名→consumer key 對齊**。
+
+3. **PA 預設 grid 144 vs spec 11_664 差 48×**：round 1 漏 4 個 axis（floor / quiet / horizon / pct），spec v0.3 §K_total `4×4×3×3×3×3×3×3×2 = 11_664`。Round 2 加完整 7+1 軸 argparse，但 11_664 × 25 sym × 10k bootstrap = ~3000 億次計算 → operator 必先 `--bootstrap-iters 100` 或 `--no-sweep` smoke 再 production run。CLI 完整暴露 grid 是 contract 正確；性能優化是 spec/metrics owner 後續責任。
+
+4. **1213 LOC 超 800 attention threshold（< 2000 hard cap）**：round 2 IMPL 比 round 1 +464 LOC（spec v0.3 14 mandatory fields + 7+1 軸 argparse + fetch_k_prior + 5 exclusion categories + BB exists check 全是真實 spec 需求，非 bloat）。E2 round 2 若要求拆 module 是 round 3 structural follow-up（自然 split 是 `_render_markdown` → separate `liquidation_cluster_stage0r_render.py`，mirror W2 pattern）。
+
+### Sibling worktree 並行驗證紀錄
+- S0R-1 SQL：`origin/feature/w-audit-8c-s0r-1-sql-query-template` HEAD `bd1b2443`（428 LOC）— 確認 SQL 用 `%(name)s` named placeholder + 9 param + 輸出 `bucket_end_ts (timestamptz)` 非 ms epoch
+- S0R-2 metrics：`origin/worktree-agent-af73a5d4575815f26` HEAD `c041097c`（1550 LOC）— 確認 `compute_stage0r_sweep` 返 dict 6 keys + `_extract_trigger_rows` 讀 `bucket_end_ts_ms` (ms int) + sweep 8 keyword (horizon_grid 非 horizon_min)
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--w_audit_8c_s0r_3_cli_self_report.md`
