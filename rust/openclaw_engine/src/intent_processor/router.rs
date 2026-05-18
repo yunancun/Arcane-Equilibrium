@@ -434,16 +434,35 @@ impl IntentProcessor {
         // 訂單准入風控檢查：日損/槓桿/持倉大小/曝險/相關曝險
         // Runs after P1 sizing so single-position-pct check uses final_qty.
         // 在 P1 調整後運行，以便單一持倉百分比檢查使用最終數量。
+        //
+        // P2-PORTFOLIO-RESTING-ROUTER-CACHE（2026-05-18）：原本 exposure_pct /
+        // correlated / leverage 各自呼一次 `compute_*_pct(&PaperState)`，三次
+        // 內部都重建一份 HashMap netting；現改為先呼一次
+        // `compute_effective_long_short_notional` 拿到 `(eff_long, eff_short)`
+        // tuple + `paper_state.balance()` 也只取一次，再透過 `_from_netting`
+        // 三個變體做純算術。3 HashMap allocs → 1。語意完全不變（既有 wrapper
+        // 也已委派至同一 `_from_netting` 數學）。
         {
-            let exposure_pct = Self::compute_exposure_pct(paper_state);
+            let (eff_long, eff_short) =
+                Self::compute_effective_long_short_notional(paper_state);
+            let balance_snapshot = paper_state.balance();
+            let exposure_pct =
+                Self::compute_exposure_pct_from_netting(eff_long, eff_short, balance_snapshot);
+            let correlated_pct = Self::compute_correlated_exposure_pct_from_netting(
+                eff_long,
+                eff_short,
+                balance_snapshot,
+            );
+            let leverage =
+                Self::compute_leverage_from_netting(eff_long, eff_short, balance_snapshot);
             let daily_loss = self.daily_loss_pct(balance);
             let check_result = check_order_allowed(
                 final_qty,
                 price,
                 balance,
                 exposure_pct,
-                Self::compute_correlated_exposure_pct(paper_state), // FIX-05: real correlated exposure
-                Self::compute_leverage(paper_state), // RG-2: real leverage from positions
+                correlated_pct, // FIX-05: real correlated exposure（cached netting）
+                leverage,       // RG-2: real leverage from positions（cached netting）
                 daily_loss,
                 is_reducing,
                 &self.risk_config,
