@@ -224,20 +224,87 @@ pub struct LiquidationEvent {
     pub ts_ms: i64,
 }
 
-/// LiquidationPulse — Bybit `allLiquidation` cascade detection（**dormant**）。
+/// LiquidationPulse — per-symbol Bybit `allLiquidation` cluster detection。
 ///
-/// **狀態 dormant** — `allLiquidation` WS handler 於 2026-04-06 已移除（字典
-/// 手冊 line 990 證明）。復活前 `AlphaSurface.liquidation_pulse` 永遠 `None`，
-/// **禁止 stub mock 數據**（避免「假 alpha source dispatched」污染 dispatch
-/// tracking metric）。
+/// 為什麼是 per-symbol：清算是局部現象（單一 perp symbol 的 long/short 倉位被強平），
+/// 策略需要按 symbol 取訊號（如 BTC 強平 cluster 不該影響 ETH 策略決策）。
+/// 本結構是「單個 symbol 的當前 pulse 視窗摘要」，由
+/// [`LiquidationPulsePanel`] 收納所有 cohort symbol。
+///
+/// **狀態 revived（2026-05-17）** — C1 24h proof PASS_C1_PROOF_CANDIDATE
+/// (commit 82ab71eb) 通過後，2026-05-17 commit 0e8a8ae8 revive
+/// `allLiquidation.{symbol}` production 訂閱；market.liquidations 已在
+/// V095 (commit ef7ea6c2) 把 PK 升為 `(symbol, ts, side, qty, price)` 不再
+/// lossy。本 wave (W-AUDIT-8a C1-LIQ-WRITER) 加 panel provider，alpha source
+/// 仍 governance-gated（producer 寫 IPC slot，但 W-AUDIT-8c strategy 才會吃）。
+///
+/// **BB cor-side 映射不變式**（per C1 v2 proof + ws_client/parsers.rs:344-348）：
+///   - Bybit `side = "Buy"`  ⇒ `LiquidationSide::LongLiquidated`（多頭被強平，
+///     即 long 倉位被強制買回對手單；通常價格下跌）
+///   - Bybit `side = "Sell"` ⇒ `LiquidationSide::ShortLiquidated`（空頭被強平，
+///     即 short 倉位被強制賣回對手單；通常價格上漲）
+///   寫反 = alpha 訊號反向 = 直接 trade loss。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LiquidationPulse {
-    /// Rolling 60s 窗口的強平事件。
+    /// Rolling 視窗內的單一 symbol 強平事件（5m 視窗，per spec §6.1）。
     pub recent_events: Vec<LiquidationEvent>,
-    /// Cluster score（0.0 – 1.0；Phase C IMPL 算法）。
-    pub cluster_score: f64,
+    /// Cluster magnitude — long_liquidation notional + short_liquidation notional
+    /// 兩側合計的 5m rolling sum（USD-equivalent = qty × price）；下游策略可
+    /// 對其取 z-score / percentile rank 作訊號強度。
+    pub cluster_notional_5m: f64,
+    /// Long-side 5m rolling notional（Bybit side="Buy" 強平 long 倉位）。
+    pub long_notional_5m: f64,
+    /// Short-side 5m rolling notional（Bybit side="Sell" 強平 short 倉位）。
+    pub short_notional_5m: f64,
+    /// Cluster event count — 5m 視窗內事件總筆數（避免 single-large-event 假訊號）。
+    pub event_count_5m: u32,
+    /// Dominant side — 5m notional 中佔比 ≥ 60% 的方向；否則 `Mixed`。
     pub dominant_side: LiquidationSide,
+    /// 本 pulse 快照時間戳（ms epoch）；對齊 panel 整體 snapshot_ts_ms。
     pub snapshot_ts_ms: i64,
+}
+
+/// LiquidationPulsePanel — per-symbol 強平 pulse 集合 panel。
+///
+/// MODULE_NOTE：
+///   - 收納 cohort 各 symbol 的當前 `LiquidationPulse` 摘要；以 HashMap 對齊
+///     既有 funding_curve / oi_delta_panel 的 cross-symbol panel 命名語義；
+///   - 由 `panel_aggregator::liquidation_pulse::LiquidationPulseAggregator`
+///     從 `PriceEventKind::Liquidation` 事件流彙整產生，60s 視窗 flush；
+///   - **沒有 PG hypertable 寫入** — market.liquidations 已存原始 row-level data
+///     (V095)，本 panel 僅為 in-memory IPC slot snapshot；
+///   - 為下游 W-AUDIT-8c liquidation cluster reaction strategy 提供 hot path
+///     讀取，不主動 trigger 任何 trade（governance gate 仍由 IntentRouter 強制）。
+///
+/// 設計約束：
+///   - panel 內 HashMap 鍵為 symbol（與 cohort 對齊；non-cohort silent ignored）；
+///   - snapshot_ts_ms 為 panel 級時間戳，個別 pulse.snapshot_ts_ms 應一致；
+///   - source_tier 為 `"bybit_v5_ws_all_liquidation"`（與既有 panel 命名風格對齊）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LiquidationPulsePanel {
+    /// 各 symbol 的當前 5m pulse 摘要；HashMap 確保策略端按 symbol O(1) lookup。
+    pub pulses: std::collections::HashMap<String, LiquidationPulse>,
+    /// Panel 級快照時間戳（ms epoch）；aggregator flush 時統一覆蓋各 pulse。
+    pub snapshot_ts_ms: i64,
+    /// Source tier 字串（producer endpoint provenance；對齊 PG / Prometheus
+    /// label 風格）。固定 `"bybit_v5_ws_all_liquidation"`，B-REM-5
+    /// AvailabilitySource 接線後語義升級為 `WsLive`。
+    pub source_tier: String,
+}
+
+impl LiquidationPulsePanel {
+    /// 取單一 symbol 的當前 pulse（不存在或無事件時回 None）。
+    ///
+    /// 為什麼 borrowing 介面：避免每次 lookup clone HashMap entry；策略 hot path
+    /// 直接讀引用，lifetime 與 panel snapshot scope 同源。
+    pub fn pulse_for(&self, symbol: &str) -> Option<&LiquidationPulse> {
+        self.pulses.get(symbol)
+    }
+
+    /// Panel 覆蓋的 symbol 數（test + observability 用）。
+    pub fn symbol_count(&self) -> usize {
+        self.pulses.len()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -369,7 +436,11 @@ pub struct AlphaSurface<'a> {
 
     // ── Tier 3 — Microstructure ──
     pub orderflow: Option<&'a OrderflowFeatures>,
-    pub liquidation_pulse: Option<&'a LiquidationPulse>,
+    /// W-AUDIT-8a C1-LIQ-WRITER (2026-05-18) — per-symbol liquidation pulse panel
+    /// 引用；C1 revival 後由 LiquidationPulseAggregator IPC slot 注入。
+    /// `None` = aggregator 未 spawn / 視窗內無事件 / slot try_read 失敗，
+    /// 策略端必 fail-closed（per AlphaSurface 契約 §設計約束）。
+    pub liquidation_pulse: Option<&'a LiquidationPulsePanel>,
 
     // ── Tier 4 — 信息流 ──
     /// Active EventAlert slice（empty = 無 active 事件）。
@@ -646,5 +717,89 @@ mod tests {
     #[test]
     fn liquidation_side_default_is_mixed() {
         assert_eq!(LiquidationSide::default(), LiquidationSide::Mixed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // W-AUDIT-8a C1-LIQ-WRITER (2026-05-18) — LiquidationPulsePanel
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// 為什麼測 default：panel 空字典是「aggregator 尚未產生 / 視窗無事件」
+    /// 的合法狀態，consumer 必能透過 `pulses.is_empty()` / `pulse_for(sym)`
+    /// 取到 None 不 panic。
+    #[test]
+    fn liquidation_pulse_panel_default_is_empty() {
+        let panel = LiquidationPulsePanel::default();
+        assert!(panel.pulses.is_empty());
+        assert_eq!(panel.symbol_count(), 0);
+        assert_eq!(panel.snapshot_ts_ms, 0);
+        assert!(panel.source_tier.is_empty());
+        assert!(panel.pulse_for("BTCUSDT").is_none());
+    }
+
+    /// 為什麼測 pulse_for：策略 hot path 按 symbol O(1) lookup；
+    /// 不存在 symbol 必回 None 而非 panic。
+    #[test]
+    fn liquidation_pulse_panel_lookup_per_symbol() {
+        let mut pulses = std::collections::HashMap::new();
+        pulses.insert(
+            "BTCUSDT".to_string(),
+            LiquidationPulse {
+                recent_events: vec![],
+                cluster_notional_5m: 100_000.0,
+                long_notional_5m: 80_000.0,
+                short_notional_5m: 20_000.0,
+                event_count_5m: 3,
+                dominant_side: LiquidationSide::LongLiquidated,
+                snapshot_ts_ms: 1_700_000_060_000,
+            },
+        );
+        let panel = LiquidationPulsePanel {
+            pulses,
+            snapshot_ts_ms: 1_700_000_060_000,
+            source_tier: "bybit_v5_ws_all_liquidation".to_string(),
+        };
+
+        assert_eq!(panel.symbol_count(), 1);
+        let btc = panel.pulse_for("BTCUSDT").expect("BTCUSDT present");
+        assert_eq!(btc.dominant_side, LiquidationSide::LongLiquidated);
+        assert!((btc.cluster_notional_5m - 100_000.0).abs() < f64::EPSILON);
+
+        // 不存在 symbol 必 None — fail-closed 契約
+        assert!(panel.pulse_for("ETHUSDT").is_none());
+    }
+
+    /// 為什麼測 surface availability：surface 端 `is_source_available` 是
+    /// dispatch tracking metric 唯一映射；panel 注入後 `LiquidationCascade`
+    /// tag 必 true，否則策略無法被 promotion gate 計入。
+    #[test]
+    fn alpha_surface_liquidation_pulse_panel_availability() {
+        let panel = LiquidationPulsePanel::default();
+        let surface = AlphaSurface {
+            liquidation_pulse: Some(&panel),
+            ..AlphaSurface::empty()
+        };
+        assert!(surface.liquidation_pulse.is_some());
+        assert!(surface.is_source_available(AlphaSourceTag::LiquidationCascade));
+
+        // empty surface 必拒 LiquidationCascade（既有 dormant 不變式）
+        assert!(!AlphaSurface::empty().is_source_available(AlphaSourceTag::LiquidationCascade));
+    }
+
+    /// 為什麼測 BB cor-side 不變式：side 映射寫反 = alpha 反向 = trade loss。
+    /// 本 test 在 alpha_surface struct 層直接 assert LiquidationSide 語義契約，
+    /// 與 ws_client/tests.rs 的 parser-level test 形成雙重防線。
+    #[test]
+    fn liquidation_side_bb_corside_mapping_invariant() {
+        // Buy 強平 = LongLiquidated（多頭被強制買回）；
+        // Sell 強平 = ShortLiquidated（空頭被強制賣回）。
+        // 此處只測 enum 語義不變，parser 層映射 test 見 ws_client/tests.rs。
+        let long_liq = LiquidationSide::LongLiquidated;
+        let short_liq = LiquidationSide::ShortLiquidated;
+        assert_ne!(long_liq, short_liq);
+        // serde 必輸出 snake_case，對齊 Prometheus / PG label 風格
+        let long_json = serde_json::to_string(&long_liq).unwrap();
+        let short_json = serde_json::to_string(&short_liq).unwrap();
+        assert_eq!(long_json, "\"long_liquidated\"");
+        assert_eq!(short_json, "\"short_liquidated\"");
     }
 }

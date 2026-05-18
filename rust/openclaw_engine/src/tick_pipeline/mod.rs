@@ -1105,6 +1105,14 @@ pub struct TickPipeline {
     /// `set_btc_lead_lag_panel_slot()` setter 由 main.rs 在 BtcLeadLagProducer
     /// spawn 同時注入既有 Arc。
     pub(crate) btc_lead_lag_panel_slot: Option<crate::ipc_server::BtcLeadLagPanelSlot>,
+    /// W-AUDIT-8a C1-LIQ-WRITER (2026-05-18): late-injected slot for
+    /// LiquidationPulsePanel。step_4_5_dispatch 用 try_read + clone 取
+    /// `Option<LiquidationPulsePanel>` 賽進 surface.liquidation_pulse；
+    /// `None` = aggregator 未 spawn 或 5m 視窗無事件，declared LiquidationCascade
+    /// tag 的策略（W-AUDIT-8c）必 fail-closed 跳過自身 alpha source。
+    /// 本 wave provider only — setter 由下游 wave（main.rs 接線）late-inject。
+    pub(crate) liquidation_pulse_panel_slot:
+        Option<crate::ipc_server::LiquidationPulsePanelSlot>,
 }
 
 // ---------------------------------------------------------------------------

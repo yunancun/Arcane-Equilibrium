@@ -256,3 +256,32 @@ pub type OIDeltaPanelSlot =
 ///   surface.btc_lead_lag = None，不讀 slot）。
 pub type BtcLeadLagPanelSlot =
     Arc<RwLock<Option<openclaw_core::alpha_surface::BtcLeadLagPanel>>>;
+
+// === W-AUDIT-8a C1-LIQ-WRITER LiquidationPulsePanelSlot insertion point ===
+// C1-LIQ-WRITER (2026-05-18) per PA decomposition §6.3。
+// 對應 panel_aggregator::liquidation_pulse aggregator + market.liquidations (V095)
+
+/// W-AUDIT-8a C1-LIQ-WRITER (2026-05-18): late-injected slot for
+/// LiquidationPulsePanel。
+///
+/// MODULE_NOTE：
+///   LiquidationPulseAggregator 在 PriceEventKind::Liquidation 事件流上彙整
+///   per-symbol 5m rolling cluster，60s flush boundary 把 snapshot 寫入此 slot。
+///   下游 step_4_5_dispatch 在 try_read 取 Option<LiquidationPulsePanel> 賽進
+///   surface.liquidation_pulse。
+///
+///   slot 寫入是 latest snapshot replace 語意（不 append）；
+///   step_4_5_dispatch 直接 `try_read().ok().and_then(|g| g.clone())` 取值，
+///   async-free 對 sync on_tick path 友好。
+///
+///   `None` = aggregator 未 spawn / 5m 視窗內無事件 / pool 不可用而沒寫入 →
+///   step_4_5_dispatch 寫 surface.liquidation_pulse = None，
+///   declared LiquidationCascade tag 的策略（W-AUDIT-8c liquidation cluster
+///   reaction）必 fail-closed 跳過自身 alpha source（per AlphaSurface 契約）。
+///
+///   **本 wave Provider only** — strategy consumer 在 W-AUDIT-8c land；
+///   slot 雖 spawn 但無策略 declare 此 tag → surface 仍可能 None（沒影響）。
+///
+///   設計對齊 BtcLeadLagPanelSlot pattern（trait struct 而非 producer 中間值）。
+pub type LiquidationPulsePanelSlot =
+    Arc<RwLock<Option<openclaw_core::alpha_surface::LiquidationPulsePanel>>>;
