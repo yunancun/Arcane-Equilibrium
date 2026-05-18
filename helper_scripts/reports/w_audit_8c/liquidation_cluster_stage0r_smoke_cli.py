@@ -159,7 +159,10 @@ def _build_mock_panel(n_symbols: int = 4, days: int = 8) -> list[dict[str, objec
                         event_count=5 + cluster_idx,
                         dominant_event_count=4 + cluster_idx,
                         side_dominance=0.85,
-                        notional_pct=0.92,
+                        # MED-R2-1：sibling round 2 升 notional_pct_floor default 0.95；
+                        # mock 給 0.97 才能通過第三層 magnitude gate 進 triggers，
+                        # 否則 _extract_trigger_rows 全 filter → n_per_cell=0 silent-RED。
+                        notional_pct=0.97,
                         entry_mid=entry_mid,
                         exit_mid=exit_mid,
                         day_bucket=day_bucket,
@@ -187,7 +190,12 @@ def test_normalize_bucket_end_ts() -> tuple[bool, str]:
 
 
 def test_extract_trigger_rows() -> tuple[bool, str]:
-    """驗 _extract_trigger_rows 在 normalize 後 n > 0（CRIT-5 silent-RED killer fix）。"""
+    """驗 _extract_trigger_rows 在 normalize 後 n > 0（CRIT-5 silent-RED killer fix）。
+
+    MED-R2-1：sibling round 2 升 `_extract_trigger_rows` 第 8 軸
+    `notional_pct_floor` required-kw-only；smoke 必須同步傳；
+    mock data 給 notional_pct=0.97 配合 floor=0.95 才能通過第三層 gate。
+    """
     rows = _build_mock_panel(n_symbols=4, days=8)
     normalized = _normalize_bucket_end_ts(rows)
     triggers = _extract_trigger_rows(
@@ -196,6 +204,7 @@ def test_extract_trigger_rows() -> tuple[bool, str]:
         n_usd=10_000,
         m_dominant=2,
         floor_usd=10_000,
+        notional_pct_floor=0.95,  # MED-R2-1：8th axis 對齊 sibling round 2 簽名
         side_dom=0.80,
         quiet_sec=30,
         horizon_min=5,
@@ -208,13 +217,19 @@ def test_extract_trigger_rows() -> tuple[bool, str]:
 
 
 def test_compute_stage0r() -> tuple[bool, str]:
-    """驗 compute_stage0r 在 normalized rows 上返 dict with n_per_cell > 0。"""
+    """驗 compute_stage0r 在 normalized rows 上返 dict with n_per_cell > 0。
+
+    MED-R2-1：sibling round 2 default notional_pct_floor=0.95；smoke 顯式
+    pass 0.95 配合 mock data notional_pct=0.97（_build_mock_panel 已升）。
+    HIGH-R2-2 同理：production CLI single_kwargs 也應傳 notional_pct_floor。
+    """
     rows = _build_mock_panel(n_symbols=4, days=8)
     normalized = _normalize_bucket_end_ts(rows)
     result = compute_stage0r(
         normalized,
         cost_bps=12.0,
         horizon_min=5,
+        notional_pct_floor=0.95,  # MED-R2-1：顯式 8th axis 配 mock 0.97
         bootstrap_iters=50,  # 小量加速 smoke
     )
     if not isinstance(result, dict):
@@ -230,7 +245,11 @@ def test_compute_stage0r() -> tuple[bool, str]:
 
 
 def test_compute_stage0r_sweep() -> tuple[bool, str]:
-    """驗 compute_stage0r_sweep 返 dict 而非 list（CRIT-2 fix 確認）。"""
+    """驗 compute_stage0r_sweep 返 dict 而非 list（CRIT-2 fix 確認）。
+
+    HIGH-R2-1：smoke 顯式 pass `pct_grid=(0.95,)` 驗證 sibling round 2 第 8 軸
+    接受 keyword；caller 若漏接，cell 計算結果不會反映 operator-given pct_grid。
+    """
     rows = _build_mock_panel(n_symbols=4, days=8)
     normalized = _normalize_bucket_end_ts(rows)
     # 用小 grid 避 11_664 cell 跑爆 smoke 時間
@@ -244,6 +263,7 @@ def test_compute_stage0r_sweep() -> tuple[bool, str]:
         floor_grid=(10_000,),
         quiet_grid=(30,),
         horizon_grid=(5,),
+        pct_grid=(0.95,),  # HIGH-R2-1：8th axis 顯式接到 sweep
         bootstrap_iters=50,
     )
     if not isinstance(result, dict):
@@ -262,7 +282,7 @@ def test_compute_stage0r_sweep() -> tuple[bool, str]:
         return False, f"sweep_result 缺 keys: {missing}"
     cells = result.get("sweep_cells") or []
     if not cells:
-        return False, "sweep_cells 為空 — 即便小 grid 也該有 2*2*1*1*1*1*1=4 cells"
+        return False, "sweep_cells 為空 — 即便小 grid 也該有 2*2*1*1*1*1*1*1=4 cells"
     return True, (
         f"sweep OK: {len(cells)} cells, eligible={result.get('eligible_for_demo_canary')}"
     )
@@ -314,6 +334,7 @@ def test_packet_builder() -> tuple[bool, str]:
         floor_grid=(10_000,),
         quiet_grid=(30,),
         horizon_grid=(5,),
+        pct_grid=(0.95,),  # HIGH-R2-1：packet 流也走 8th axis
         bootstrap_iters=50,
     )
     cells = sweep.get("sweep_cells") or []
@@ -323,7 +344,7 @@ def test_packet_builder() -> tuple[bool, str]:
         sweep_result=sweep,
         cells=cells,
         primary_cell=primary,
-        sweep_params={"window_days": 7, "cost_bps": 12.0},
+        sweep_params={"window_days": 7, "cost_bps": 12.0, "pct_grid": [0.95]},
         bb_preflight={
             "demo_bias_confirmed": True,
             "skew_data": {"verdict": "STRUCTURAL"},
@@ -384,6 +405,7 @@ def test_render_markdown() -> tuple[bool, str]:
         floor_grid=(10_000,),
         quiet_grid=(30,),
         horizon_grid=(5,),
+        pct_grid=(0.95,),  # HIGH-R2-1
         bootstrap_iters=20,
     )
     cells = sweep.get("sweep_cells") or []
@@ -476,6 +498,68 @@ def test_sweep_summary_aggregation() -> tuple[bool, str]:
     return True, "sweep_summary aggregation OK"
 
 
+def test_sql_params_completeness() -> tuple[bool, str]:
+    """驗 sql_params keys + symbols 注入 = SQL features.sql 全 placeholder 集合
+    （CRIT-R2-1 governance：避免「修一條 placeholder 沒查全表」反模式）。
+
+    為什麼這個 smoke：round 1 CRIT-1 修 `symbols` 卻漏 `notional_pct_floor`；
+    round 2 E2 review 顯示「不 enumerate 全 SQL placeholder」是反覆出現的盲點。
+    此 test 直接讀 sibling S0R-1 SQL 文件，regex 抽 placeholder set，
+    對齊 CLI sql_params 構造邏輯 — 任何 axis 升不接住即立刻 fail。
+    """
+    import re
+
+    # 嘗試讀 SQL 文件（兩個可能路徑：worktree 本地 vs /tmp mirror）
+    candidates = [
+        HERE.parent.parent.parent / "sql" / "queries" / "w_audit_8c_liquidation_cluster_stage0r_features.sql",
+        Path("/tmp/e1r3_smoke/w_audit_8c_liquidation_cluster_stage0r_features.sql"),
+    ]
+    sql_path = None
+    for cand in candidates:
+        if cand.exists():
+            sql_path = cand
+            break
+    if sql_path is None:
+        # SQL 在 sibling S0R-1 worktree；本 worktree 沒檔。Skip 但顯式說明，不假 PASS。
+        # 這是「sibling-isolation 預期 gap」非 test failure。
+        return True, (
+            "SKIP (本 worktree 無 SQL 文件，sibling S0R-1 owner)；"
+            "完整 sign-off 必由 PM 在 main 分支 merge 後重跑"
+        )
+    sql_text = sql_path.read_text(encoding="utf-8")
+    # 抽 SQL 全 %(name)s placeholder，排除 comment 中的 `%(name)s` 字面（line 117 documentation）
+    placeholders = set(re.findall(r"%\((\w+)\)s", sql_text))
+    placeholders.discard("name")  # comment 內例子，非 runtime placeholder
+    # CLI sql_params keys（hard-coded 對應 report.py L1060-1072 + symbols 由 _fetch_panel_rows 注入）
+    cli_keys = {
+        "window_days",
+        "k_event_floor",
+        "n_usd_floor",
+        "m_dominant_floor",
+        "side_dominance_floor",
+        "cluster_notional_floor_usd",
+        "notional_pct_floor",  # CRIT-R2-1 補
+        "quiet_window_sec",
+        "horizon_min",
+        "cost_bps",
+        "symbols",  # 由 _fetch_panel_rows 注入
+    }
+    missing_in_cli = placeholders - cli_keys
+    extra_in_cli = cli_keys - placeholders
+    if missing_in_cli:
+        return False, (
+            f"sql_params 缺 SQL placeholder：{sorted(missing_in_cli)}；"
+            f"第一次 cur.execute(sql) 會 psycopg2 KeyError"
+        )
+    if extra_in_cli:
+        return False, (
+            f"sql_params 多餘 keys：{sorted(extra_in_cli)}；可能 SQL 已移除 placeholder"
+        )
+    return True, (
+        f"sql_params 完整：{len(placeholders)} placeholders 全綁 + {len(cli_keys)} CLI keys 等價"
+    )
+
+
 def test_exclusion_counts() -> tuple[bool, str]:
     """驗 _compute_exclusion_counts 5 categories（HIGH-1 (d)）。"""
     rows: list[dict[str, object]] = [
@@ -516,6 +600,7 @@ TESTS = [
     ("JSON clean + write round-trip (LOW-1 fix)", test_json_write_and_clean),
     ("sweep_summary aggregation 4-value verdict", test_sweep_summary_aggregation),
     ("exclusion_counts 5 categories (HIGH-1 (d))", test_exclusion_counts),
+    ("sql_params completeness (CRIT-R2-1 全 placeholder enumerate)", test_sql_params_completeness),
 ]
 
 

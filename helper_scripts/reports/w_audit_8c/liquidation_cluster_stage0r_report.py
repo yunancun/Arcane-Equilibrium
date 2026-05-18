@@ -920,7 +920,17 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_PCT_GRID,
         help=(
             f"CSV of notional_pct_floor sweep cells (default: {DEFAULT_PCT_GRID}); "
-            "spec v0.3 K_total 第 8 軸；S0R-2 metrics 若未實作此 axis 將忽略（資訊性）"
+            "spec v0.3 K_total 第 8 軸；S0R-2 metrics 已升 8-D 接受此 axis"
+        ),
+    )
+    parser.add_argument(
+        "--notional-pct-floor",
+        type=float,
+        default=None,
+        help=(
+            "--no-sweep 單值 override（spec v0.3 §K_total 第 8 軸的 single-cell "
+            "對應值）；若 None 則 fallback 用 min(pct_grid)，與 SQL pre-filter "
+            "同源；HIGH-R2-2：避免 single_kwargs 漏接 8th axis"
         ),
     )
     parser.add_argument(
@@ -1057,6 +1067,11 @@ def main(argv: list[str] | None = None) -> int:
             k_prior, k_prior_meta = fetch_k_prior(conn, mode=args.k_prior_mode)
         # SQL 參數綁定（CRIT-1：sql_params 補 symbols 由 _fetch_panel_rows 包進）
         # SQL pre-filter 用 min(grid) 取最寬鬆，Python sweep 再 tighten
+        # CRIT-R2-1：補 notional_pct_floor 第 11 個 SQL named param；round 2 漏
+        # → 第一次 cur.execute(sql) 即 psycopg2 KeyError on %(notional_pct_floor)s。
+        # SQL features.sql L235 用 %(notional_pct_floor)s::float8 做 magnitude
+        # 第三層 gate；min(pct_grid) 是最寬鬆 pre-filter，Python sweep cell 再
+        # tighten 到實際 pct 值（monotone：SQL ≤ Python tighten 保證不漏）。
         sql_params = {
             "window_days": args.window_days,
             "k_event_floor": int(min(k_grid)),
@@ -1064,6 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
             "m_dominant_floor": int(min(m_grid)),
             "side_dominance_floor": float(min(side_dom_grid)),
             "cluster_notional_floor_usd": float(min(floor_grid)),  # HIGH-2：用 min(floor_grid) 而非單 arg
+            "notional_pct_floor": float(min(pct_grid)),  # CRIT-R2-1：SQL 11/11 named param 全綁
             "quiet_window_sec": int(min(quiet_grid)),
             "horizon_min": int(min(horizon_grid)),
             "cost_bps": float(args.cost_bps),
@@ -1090,10 +1106,18 @@ def main(argv: list[str] | None = None) -> int:
     primary_cell: dict[str, Any] | None = None
     cells: list[dict[str, Any]] = []
     try:
+        # HIGH-R2-2：single-cell 8th axis 值 = --notional-pct-floor override 或 min(pct_grid)。
+        # 維持 SQL pre-filter 與 Python tighten 同源（CRIT-R2-1 同邏輯）。
+        single_pct_floor = (
+            float(args.notional_pct_floor)
+            if args.notional_pct_floor is not None
+            else float(min(pct_grid))
+        )
         single_kwargs = dict(
             cost_bps=args.cost_bps,
             horizon_min=args.horizon_min,
             quiet_sec=args.quiet_window_sec,
+            notional_pct_floor=single_pct_floor,  # HIGH-R2-2：8th axis 同源；CRIT 配套
             k_prior=k_prior,
             rng_seed=args.rng_seed,
             bootstrap_iters=args.bootstrap_iters,
@@ -1107,6 +1131,7 @@ def main(argv: list[str] | None = None) -> int:
             floor_grid=list(floor_grid),
             quiet_grid=list(quiet_grid),
             horizon_grid=list(horizon_grid),
+            pct_grid=list(pct_grid),  # HIGH-R2-1：spec v0.3 §K_total 第 8 軸接到 sweep
             k_prior=k_prior,
             rng_seed=args.rng_seed,
             bootstrap_iters=args.bootstrap_iters,
