@@ -42,6 +42,7 @@
 
 pub mod btc_lead_lag;
 pub mod funding_curve;
+pub mod liquidation_pulse;
 pub mod oi_delta;
 
 pub use btc_lead_lag::{
@@ -56,6 +57,7 @@ pub use btc_lead_lag::{
     create_btc_orderbook_slot, spawn_btc_orderbook_ingest_task, BtcOrderbookSlot,
 };
 pub use funding_curve::FundingCurveAggregator;
+pub use liquidation_pulse::LiquidationPulseAggregator;
 pub use oi_delta::OIDeltaAggregator;
 
 use std::collections::HashMap;
@@ -69,7 +71,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::database::pool::DbPool;
-use crate::ipc_server::{BtcLeadLagPanelSlot, FundingCurvePanelSlot, OIDeltaPanelSlot};
+use crate::ipc_server::{
+    BtcLeadLagPanelSlot, FundingCurvePanelSlot, LiquidationPulsePanelSlot, OIDeltaPanelSlot,
+};
 use crate::market_data_client::MarketDataClient;
 
 /// W1 sub-task 3 (E1-γ, 2026-05-11) — flush 視窗 60 秒，per spec §2.3 + §3.3。
@@ -487,6 +491,20 @@ pub fn create_panel_slots() -> (FundingCurvePanelSlot, OIDeltaPanelSlot) {
 /// step_4_5_dispatch 讀取。typedef 已在 `ipc_server::slots::BtcLeadLagPanelSlot`
 /// 定義。對齊 `create_panel_slots` 命名 + 行為 pattern。
 pub fn create_btc_lead_lag_slot() -> BtcLeadLagPanelSlot {
+    Arc::new(RwLock::new(None))
+}
+
+/// W-AUDIT-8a C1-LIQ-WRITER (2026-05-18) — LiquidationPulsePanel IPC slot 工廠。
+///
+/// 為什麼獨立工廠：與 funding/oi 雙 panel 不同來源（funding/oi 自 Ticker stream，
+/// liquidation 自 Liquidation stream），生命週期由 LiquidationPulseAggregator
+/// 自己管理；slot 對齊 BtcLeadLagPanelSlot 單 panel 工廠 pattern，main.rs 在
+/// aggregator spawn 同時 clone Arc 給 IpcServer / step_4_5_dispatch 共享。
+///
+/// **本 wave provider only**：slot 工廠雖存在，主流程接線（main.rs spawn
+/// aggregator + IpcServer 持有 slot）非 C1-LIQ-WRITER worktree 範圍；
+/// 留下游 wave（C1-IMPL 主接線或 W-AUDIT-8c IMPL 開頭）land。
+pub fn create_liquidation_pulse_slot() -> LiquidationPulsePanelSlot {
     Arc::new(RwLock::new(None))
 }
 

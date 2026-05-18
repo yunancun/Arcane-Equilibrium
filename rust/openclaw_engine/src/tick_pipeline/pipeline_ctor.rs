@@ -161,6 +161,11 @@ impl TickPipeline {
             // 注入。test / dev 不注入 → step_4_5_dispatch surface.btc_lead_lag = None
             // 不影響既有行為（trait 端 None 即 fail-soft）。
             btc_lead_lag_panel_slot: None,
+            // W-AUDIT-8a C1-LIQ-WRITER (2026-05-18): default None；main.rs 接線
+            // wave 透過 set_liquidation_pulse_panel_slot() late-inject。本 wave
+            // provider only，consumer 留 W-AUDIT-8c；slot=None 時 surface
+            // liquidation_pulse=None 不影響既有 (Phase A dormant) 行為。
+            liquidation_pulse_panel_slot: None,
         }
     }
 
@@ -290,6 +295,22 @@ impl TickPipeline {
     /// boot-time 一致性，runtime gate 是 dispatch-time 主防線。
     pub fn set_btc_lead_lag_panel_slot(&mut self, slot: crate::ipc_server::BtcLeadLagPanelSlot) {
         self.btc_lead_lag_panel_slot = Some(slot);
+    }
+
+    /// W-AUDIT-8a C1-LIQ-WRITER (2026-05-18): 注入 LiquidationPulsePanel
+    /// IPC slot Arc clone。下游 main.rs 接線 wave 在
+    /// LiquidationPulseAggregator spawn 後呼叫此 setter，把 aggregator 寫入端
+    /// 的同一 Arc<RwLock<Option<LiquidationPulsePanel>>> clone 進來。
+    /// step_4_5_dispatch try_read 拿 panel snapshot 賽進 surface.liquidation_pulse。
+    ///
+    /// **本 wave provider only** — setter 雖存在，主流程 wire-up 留下游
+    /// （C1-IMPL wire-up wave 或 W-AUDIT-8c IMPL 開頭）。test / dev 不注入 →
+    /// surface.liquidation_pulse = None，等同於 aggregator 尚未 emit。
+    pub fn set_liquidation_pulse_panel_slot(
+        &mut self,
+        slot: crate::ipc_server::LiquidationPulsePanelSlot,
+    ) {
+        self.liquidation_pulse_panel_slot = Some(slot);
     }
 
     /// Endpoint-aware GovernanceProfile for per-intent cost-gate selection
