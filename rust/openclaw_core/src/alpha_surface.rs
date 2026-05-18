@@ -114,6 +114,159 @@ impl std::fmt::Display for AlphaSourceTag {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// W-AUDIT-8a B-REM-5 — Source Availability 共享 schema
+// ─────────────────────────────────────────────────────────────────────────
+//
+// 為什麼需要本 enum：
+// - 既存 `source_tier` 字段（funding_curve / oi_delta / btc_lead_lag 等
+//   snapshot 中）= 自由文本 provenance（如 "bybit_v5_ws_tickers"），用於
+//   PG 寫入 lineage 對齊，無分類語意；
+// - V050 `evidence_source_tier` = replay lineage enum
+//   (`calibrated_replay` / `synthetic_replay` / `counterfactual_replay`)，
+//   是 fill-level 不是 surface-level；
+// - 下游 6 個 worktree（B-REM-2 funding consumer report / B-REM-3 OI consumer
+//   report / C2 orderflow / C3 spread / D1 event / D2 regime / D3 sentiment）
+//   的 candidate report `unavailable_reason` 字段需要分類語意，把「為什麼
+//   AlphaSurface 對應 field = None」的真正成因標準化，方便 Stage 0R promotion
+//   gate 與 healthcheck 做精確分類聚合（不能只看「None vs Some」黑盒）。
+//
+// 設計約束：
+// - `Available { tier: AvailabilitySource }` carries the positive case so
+//   downstream report writers do not need a 雙 enum（availability + tier）；
+// - Unavailable variants 是 exhaustive 的「為什麼 None」原因清單；
+// - **enum 添加 / 刪除 / 重命名觸發 ADR**（per PA spec §6.2 + 配套
+//   `docs/adr/0023-source-availability-schema.md`）；
+// - Serde 與 metric label snake_case 一致，符合既有 PG / Prometheus 命名。
+
+/// AvailabilitySource — 當 alpha source 可用時，標記「資料來自哪一層 producer」。
+///
+/// 用於 `SourceAvailability::Available { tier }`。本 enum 描述「可用時的 producer
+/// tier」，與既存 `source_tier` 字段（自由文本 provenance string）正交：
+/// - 既存 `source_tier` = "bybit_v5_ws_tickers" 描述具體 endpoint；
+/// - 本 enum 描述「實時 WS 還是 REST 冷啟動 seed」這一語意層次。
+///
+/// 下游 candidate report 可同時帶兩者：本 enum 給 promotion gate 做語意分類，
+/// 既存字串給 audit trail 對齊 PG row。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AvailabilitySource {
+    /// WS-first 實時源（Bybit V5 WS / orderbook.50 / allLiquidation / tickers）。
+    WsLive,
+    /// REST 冷啟動 seed（pipeline 啟動前 N 分鐘的 REST one-shot 補齊；後續 WS 接管）。
+    RestSeed,
+}
+
+impl AvailabilitySource {
+    /// Snake_case 字串（對齊 Prometheus label / PG enum）。
+    pub const fn as_metric_label(self) -> &'static str {
+        match self {
+            Self::WsLive => "ws_live",
+            Self::RestSeed => "rest_seed",
+        }
+    }
+}
+
+impl std::fmt::Display for AvailabilitySource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_metric_label())
+    }
+}
+
+/// SourceAvailability — alpha source 可用性 + 不可用原因的標準化分類。
+///
+/// 共享 schema，6 個下游 worktree（B-REM-2 / B-REM-3 / C2 / C3 / D1 / D2 / D3）
+/// 在 candidate report 的 `availability` 或 `unavailable_reason` 欄位引用本 enum：
+///
+/// | 下游 worktree | 引用點 |
+/// |---|---|
+/// | B-REM-2 (funding consumer report) | `surface.funding_curve` 可用性 |
+/// | B-REM-3 (OI consumer report) | `surface.oi_delta_panel` 可用性 + 5 變體（absent / stale / missing-symbol / non-finite-absolute / non-finite-delta） |
+/// | C2 (orderflow) | `surface.orderflow` 可用性 |
+/// | C3 (spread) | C2 panel spread 欄位可用性 |
+/// | D1 (event) | `surface.event_alerts` 可用性 |
+/// | D2 (regime) | `surface.regime != Unknown` 可用性 |
+/// | D3 (sentiment) | `surface.sentiment_panel` 可用性 |
+///
+/// 治理：
+/// - **添加 variant 必經 ADR**（per ADR-0023 §Decision）；
+/// - serde / `as_metric_label` 必同時更新；
+/// - 既存字串字段（panel snapshot 的 `source_tier`）**不被本 enum 取代**，兩者並存。
+///
+/// fail-closed 契約：B-REM-3 unit test 須能合成每條 unavailable variant，
+/// 證明 strategy consumer 對每條都 fail-closed（不退化到 TA1m fallback）。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SourceAvailability {
+    /// Alpha source 在當前 tick 可用；`tier` 標記資料來自哪一層 producer。
+    Available { tier: AvailabilitySource },
+    /// 該 symbol 不在當前 cohort（如 BUSDT 在 BTCUSDT cohort 外、新上市 symbol
+    /// 未進 25-symbol panel）；非錯誤，是定義域排除。
+    CohortExcluded,
+    /// Panel 存在但 freshness 超 threshold（如 funding 1h-cycle panel 過 75min
+    /// 仍未更新；OI 5m panel 過 15min 未更新）。
+    StalePanel,
+    /// Panel 存在但對應 symbol 缺失（panel 涵蓋部分 cohort 而非全部；新上市未補）。
+    MissingSymbol,
+    /// 數值非有限（NaN / Inf）— 標記 absolute 值錯誤（如 oi_abs = NaN）。
+    NonFiniteAbsolute,
+    /// 數值非有限（NaN / Inf）— 標記 delta 值錯誤（如 oi_delta_5m_pct = Inf）。
+    NonFiniteDelta,
+    /// Panel slot 完全不存在（IPC slot 未 publish / collector 未啟動 / try_read
+    /// soft-fail）。Phase A 全 None 的預設原因。
+    Absent,
+}
+
+impl SourceAvailability {
+    /// 為 Prometheus / PG 對齊提供 short label（不含 tier 細節）。
+    ///
+    /// Available 變體統一回 `"available"`（tier 細節由
+    /// `availability_tier_label()` 提供，避免 cardinality 爆炸）。
+    pub const fn as_metric_label(&self) -> &'static str {
+        match self {
+            Self::Available { .. } => "available",
+            Self::CohortExcluded => "cohort_excluded",
+            Self::StalePanel => "stale_panel",
+            Self::MissingSymbol => "missing_symbol",
+            Self::NonFiniteAbsolute => "non_finite_absolute",
+            Self::NonFiniteDelta => "non_finite_delta",
+            Self::Absent => "absent",
+        }
+    }
+
+    /// Tier 子標籤（Available 時回 ws_live / rest_seed；否則回 None）。
+    pub const fn availability_tier_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Available { tier } => Some(tier.as_metric_label()),
+            _ => None,
+        }
+    }
+
+    /// `is_available()` — Surface field 可被策略安全消費的快速判斷。
+    pub const fn is_available(&self) -> bool {
+        matches!(self, Self::Available { .. })
+    }
+
+    /// `unavailable_reason()` — 不可用時的成因 label（不含 tier 細節）；
+    /// Available 時回 None。下游 report unavailable_reason 欄位直接寫入此值。
+    pub fn unavailable_reason(&self) -> Option<&'static str> {
+        if self.is_available() {
+            None
+        } else {
+            Some(self.as_metric_label())
+        }
+    }
+}
+
+impl std::fmt::Display for SourceAvailability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Available { tier } => write!(f, "available({})", tier),
+            other => write!(f, "{}", other.as_metric_label()),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Tier 2 — 跨資產 / 截面 panel stub（Phase B IMPL）
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -646,5 +799,221 @@ mod tests {
     #[test]
     fn liquidation_side_default_is_mixed() {
         assert_eq!(LiquidationSide::default(), LiquidationSide::Mixed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // W-AUDIT-8a B-REM-5 — SourceAvailability schema 測試
+    // 為什麼：6 個下游 worktree（B-REM-2/3、C2/3、D1/2/3）都會引用本 enum。
+    // 命名 / variant 順序 / serde 序列化都不能事後改 → 必先寫 fixture-style
+    // 鎖死 test。
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn availability_source_metric_labels_snake_case() {
+        // ws_live / rest_seed 是 6 個下游 worktree 共用契約字串。
+        assert_eq!(AvailabilitySource::WsLive.as_metric_label(), "ws_live");
+        assert_eq!(AvailabilitySource::RestSeed.as_metric_label(), "rest_seed");
+        assert_eq!(format!("{}", AvailabilitySource::WsLive), "ws_live");
+        assert_eq!(format!("{}", AvailabilitySource::RestSeed), "rest_seed");
+    }
+
+    #[test]
+    fn availability_source_serde_matches_snake_case() {
+        // 為什麼：Python writer 與 Rust consumer 透過 serde JSON 對齊，
+        // serde 字串必與 metric label 一致，否則跨語言 round-trip 會 silent drift。
+        for s in [AvailabilitySource::WsLive, AvailabilitySource::RestSeed] {
+            let json = serde_json::to_string(&s).unwrap();
+            let expected = format!("\"{}\"", s.as_metric_label());
+            assert_eq!(json, expected);
+            // round-trip
+            let back: AvailabilitySource = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, s);
+        }
+    }
+
+    #[test]
+    fn source_availability_metric_labels_exhaustive() {
+        // 鎖死 6 個下游 worktree 引用的 label 字串。改動任一字串需動 ADR-0023。
+        let cases: &[(SourceAvailability, &str)] = &[
+            (
+                SourceAvailability::Available {
+                    tier: AvailabilitySource::WsLive,
+                },
+                "available",
+            ),
+            (
+                SourceAvailability::Available {
+                    tier: AvailabilitySource::RestSeed,
+                },
+                "available",
+            ),
+            (SourceAvailability::CohortExcluded, "cohort_excluded"),
+            (SourceAvailability::StalePanel, "stale_panel"),
+            (SourceAvailability::MissingSymbol, "missing_symbol"),
+            (SourceAvailability::NonFiniteAbsolute, "non_finite_absolute"),
+            (SourceAvailability::NonFiniteDelta, "non_finite_delta"),
+            (SourceAvailability::Absent, "absent"),
+        ];
+        for (avail, expected) in cases {
+            assert_eq!(avail.as_metric_label(), *expected);
+        }
+    }
+
+    #[test]
+    fn source_availability_tier_label_only_for_available() {
+        // tier label 只在 Available 出現；其他 variant 必 None，否則 Prometheus
+        // cardinality 會爆炸（unavailable 不該帶 tier 子分類）。
+        assert_eq!(
+            SourceAvailability::Available {
+                tier: AvailabilitySource::WsLive,
+            }
+            .availability_tier_label(),
+            Some("ws_live")
+        );
+        assert_eq!(
+            SourceAvailability::Available {
+                tier: AvailabilitySource::RestSeed,
+            }
+            .availability_tier_label(),
+            Some("rest_seed")
+        );
+        for unavailable in [
+            SourceAvailability::CohortExcluded,
+            SourceAvailability::StalePanel,
+            SourceAvailability::MissingSymbol,
+            SourceAvailability::NonFiniteAbsolute,
+            SourceAvailability::NonFiniteDelta,
+            SourceAvailability::Absent,
+        ] {
+            assert!(
+                unavailable.availability_tier_label().is_none(),
+                "unavailable variant must not carry tier label: {:?}",
+                unavailable
+            );
+        }
+    }
+
+    #[test]
+    fn source_availability_is_available_and_unavailable_reason_inverse() {
+        // is_available() == true 時 unavailable_reason() 必 None；
+        // false 時 unavailable_reason() 必 Some。下游 report 字段直接用。
+        let available = SourceAvailability::Available {
+            tier: AvailabilitySource::WsLive,
+        };
+        assert!(available.is_available());
+        assert!(available.unavailable_reason().is_none());
+
+        for unavailable in [
+            SourceAvailability::CohortExcluded,
+            SourceAvailability::StalePanel,
+            SourceAvailability::MissingSymbol,
+            SourceAvailability::NonFiniteAbsolute,
+            SourceAvailability::NonFiniteDelta,
+            SourceAvailability::Absent,
+        ] {
+            assert!(!unavailable.is_available());
+            assert_eq!(
+                unavailable.unavailable_reason(),
+                Some(unavailable.as_metric_label())
+            );
+        }
+    }
+
+    #[test]
+    fn source_availability_display_format() {
+        // Display 字串契約：
+        // - Available -> "available(<tier>)" 帶 tier 細節（給日誌人讀）；
+        // - 其他 -> 純 snake_case label。
+        assert_eq!(
+            format!(
+                "{}",
+                SourceAvailability::Available {
+                    tier: AvailabilitySource::WsLive,
+                }
+            ),
+            "available(ws_live)"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                SourceAvailability::Available {
+                    tier: AvailabilitySource::RestSeed,
+                }
+            ),
+            "available(rest_seed)"
+        );
+        assert_eq!(format!("{}", SourceAvailability::StalePanel), "stale_panel");
+        assert_eq!(format!("{}", SourceAvailability::Absent), "absent");
+    }
+
+    #[test]
+    fn source_availability_serde_round_trip_internally_tagged() {
+        // Internally-tagged enum (serde tag = "kind") 是 6 個下游 worktree
+        // 共用 JSON schema：
+        // {"kind":"available","tier":"ws_live"} | {"kind":"absent"} ...
+        //
+        // 任一變動會破跨語言契約（Python writer / Rust consumer）。
+        let cases: &[(SourceAvailability, &str)] = &[
+            (
+                SourceAvailability::Available {
+                    tier: AvailabilitySource::WsLive,
+                },
+                r#"{"kind":"available","tier":"ws_live"}"#,
+            ),
+            (
+                SourceAvailability::Available {
+                    tier: AvailabilitySource::RestSeed,
+                },
+                r#"{"kind":"available","tier":"rest_seed"}"#,
+            ),
+            (
+                SourceAvailability::CohortExcluded,
+                r#"{"kind":"cohort_excluded"}"#,
+            ),
+            (
+                SourceAvailability::StalePanel,
+                r#"{"kind":"stale_panel"}"#,
+            ),
+            (
+                SourceAvailability::MissingSymbol,
+                r#"{"kind":"missing_symbol"}"#,
+            ),
+            (
+                SourceAvailability::NonFiniteAbsolute,
+                r#"{"kind":"non_finite_absolute"}"#,
+            ),
+            (
+                SourceAvailability::NonFiniteDelta,
+                r#"{"kind":"non_finite_delta"}"#,
+            ),
+            (SourceAvailability::Absent, r#"{"kind":"absent"}"#),
+        ];
+
+        for (value, expected_json) in cases {
+            let json = serde_json::to_string(value).unwrap();
+            assert_eq!(json, *expected_json, "serialize mismatch for {:?}", value);
+            // round-trip
+            let back: SourceAvailability = serde_json::from_str(&json).unwrap();
+            assert_eq!(&back, value, "round-trip mismatch for {:?}", value);
+        }
+    }
+
+    /// 下游 worktree 引用 contract 鎖死測試：列舉 6+1 個下游 worktree 與其
+    /// 預期使用點。若未來 enum 變動，本 test 不會 fail（純 documentation）
+    /// 但提供 ADR-0023 §Decision 的 cross-reference 落地證據。
+    #[test]
+    fn source_availability_downstream_worktrees_documented() {
+        // 6 個下游 worktree 名稱 fixture（per PA report §6.2 + §1 dependency
+        // graph）。維護 ADR-0023 必同步更新本列表。
+        let downstream = [
+            ("B-REM-2", "funding consumer report"),
+            ("B-REM-3", "bb_breakout OI consumer report"),
+            ("C2-ORDERFLOW", "Tier 3 orderflow panel provider"),
+            ("C3-SPREAD", "Tier 3 spread dynamics extension"),
+            ("D1-EVENT", "Scout→Rust EventAlert provider"),
+            ("D2-REGIME", "RegimeTag provider"),
+            ("D3-SENTIMENT", "SentimentPanel provider"),
+        ];
+        assert_eq!(downstream.len(), 7, "downstream worktree count fixture");
     }
 }
