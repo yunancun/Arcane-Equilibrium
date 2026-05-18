@@ -473,7 +473,8 @@ fn test_close_maker_dispatch_postonly_spine_none() {
     let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
     assert_eq!(req.order_type, "limit");
     assert_eq!(req.time_in_force, Some(TimeInForce::PostOnly));
-    assert_eq!(req.maker_timeout_ms, Some(30_000));
+    // CALIBRATION-2026-05-18: grid family maker_timeout_ms 30_000 → 90_000
+    assert_eq!(req.maker_timeout_ms, Some(90_000));
     assert!(
         (req.limit_price.expect("limit price") - 50_000.2).abs() < 1e-9,
         "long close should price as passive sell at ask + one tick"
