@@ -77,8 +77,9 @@ pub use protocol::{IpcError, JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 pub use server::IpcServer;
 pub use slots::{
     AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot,
-    EdgeReloadSenderSlot, FundingCurvePanelSlot, HStateCacheSlot, OIDeltaPanelSlot,
-    StrategistCountersSlot, TeacherLoopHandles, TeacherLoopSlot,
+    EdgeReloadSenderSlot, FundingCurvePanelSlot, HStateCacheSlot,
+    LiquidationPulsePanelSlot, OIDeltaPanelSlot, StrategistCountersSlot,
+    TeacherLoopHandles, TeacherLoopSlot,
 };
 
 // Internal re-exports — each `handlers/*.rs` and `handlers_config.rs` file

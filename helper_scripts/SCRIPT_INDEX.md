@@ -120,7 +120,8 @@
 | `canary/healthchecks/63_close_maker_fallback_audit.py` | `[63]` close_maker_fallback_audit（spec §8.1 Consensus-MF-3）：enum allowlist 完整性 + NULL ladder ratio (PASS ≤0.1% / WARN ≤1% / FAIL >1%)；safety path 三 enum 排除於 NULL ladder 之外。 |
 | `canary/healthchecks/64_close_maker_rate_limit_pause_duration.py` | `[64]` rate-limit backoff scope（AMD §5.4 BB-MF-2 + spec §8.1 BB-SF-1）：per-symbol exp backoff + global pause sample/day ladder (5/30)；details.rate_limit_scope 完整性子檢查。 |
 | `canary/healthchecks/65_reject_sample_healthcheck.py` | `[65]` PostOnly + MaxPending reject sample coverage（spec §8.3 BB-MF-5 / AC-15）：防 demo silent degradation，per env 7d 兩 category 各須 ≥1 樣本，否則 Phase 2b 無法 promote。 |
-| `canary/healthchecks/tests/` | pytest 單元測試集（44 tests / 5 files）— Wilson CI 數值對 reference 表 / verdict ladder / SQL filter / multi-cell severity。Linux + Mac 同跑 44/44 PASS。 |
+| `canary/healthchecks/67_liquidation_pulse_freshness.py` | `[67]` W-AUDIT-8a C1-LIQ-WRITER acceptance #3：market.liquidations 4-維健康度（topic freshness / row volume per-hour / cohort 25-sym coverage / parse guard side+finite），24h default window。CLI standalone for QA post-deploy verification。Linux empirical 2026-05-18 24h baseline 6134 row / 25/25 cohort / latest_age 15s = PASS。 |
+| `canary/healthchecks/tests/` | pytest 單元測試集（60 tests / 6 files）— Wilson CI 數值對 reference 表 / verdict ladder / SQL filter / multi-cell severity / liquidation pulse 4-維 freshness。Linux + Mac 同跑 60/60 PASS。 |
 
 ## phase4/ — Phase 4 學習/晉升工具 (Learning & Promotion)
 
