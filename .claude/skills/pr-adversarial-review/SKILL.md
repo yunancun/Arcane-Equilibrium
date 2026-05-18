@@ -148,6 +148,47 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 3. caller path 判斷（production / non-production / no caller）
 4. P0/P1 嚴重性是否仍成立
 
+### 3.11 ML training pipeline 非輸入不變量（P1-EDGE-P2-3-PH1B-ML-INVARIANT）
+
+EDGE-P2-3 Phase 1b 引入的 `trading.fills.details->>'close_maker_*'` audit 欄位
+（`close_maker_attempt` / `close_maker_fallback_reason` / `close_maker_offset_bps` /
+`close_maker_buffer_ticks` / `close_maker_timeout_ms` / `close_maker_rate_limit_scope`
+等）**僅供 execution-quality observability + post-mortem**，**禁止餵任何 ML training
+pipeline** — 包含但不限：
+
+- LinUCB（`learning.linucb_*` 表 + `rust/openclaw_engine/src/strategist/linucb*`）
+- Scorer（`learning.scorer_training_features` view + `rust/openclaw_engine/src/strategist/scorer*`）
+- Quantile（`learning.quantile_*` + 任何 quantile-regression feature builder）
+- MLDE（`learning.mlde_*` 表 + `rust/openclaw_engine/src/strategist/mlde*`）
+- DL3（任何 DL3 training data builder / labeler）
+
+理由（MIT-MF-1 invariant）：close-maker 欄位是 **post-decision execution outcome**，
+若進入 training feature 會造成：(a) target leakage（用未來執行結果預測決策）；
+(b) policy-degradation feedback loop（model 學到「攻擊性 maker close 失敗 →
+保守化」，反過來壓制 alpha）；(c) cross-policy contamination
+（grid vs phys_lock 完全不同 timeout policy，混訓不可解釋）。
+
+E3 PR pre-merge gate grep（任一命中 = BLOCKER）：
+
+```bash
+rg -nF "close_maker_" rust/openclaw_engine/src/strategist \
+    rust/openclaw_engine/src/learning \
+    rust/openclaw_engine/src/ml_training \
+    program_code/.../ml_training \
+    --type rust --type py
+rg -nE "details\s*->>?\s*'close_maker" rust program_code helper_scripts --type rust --type py --type sql
+rg -nE "(linucb|scorer|quantile|mlde|dl3).*close_maker|close_maker.*(linucb|scorer|quantile|mlde|dl3)" rust program_code --type rust --type py
+```
+
+允許白名單（hit 但非違規）：
+- audit / replay-only 路徑（`replay/`、`audit/`、`reports/`、`observability/`）
+- healthcheck `[##]` (`passive_wait_healthcheck/`)
+- governance docs / spec / AMD / TODO
+- 顯式 unit/integration test fixture（檔名含 `tests/` 或 `_test.rs`/`_test.py`/`test_*.py`）
+
+違反 finding 輸出格式（沿用 §3.10）：附 grep command + 命中檔案:行號 + caller chain +
+建議分離 (feature/label/audit 三者隔離)。
+
 ## 4. 對抗反問範本
 
 對 E1 任何回答多問一層：

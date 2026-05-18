@@ -781,7 +781,14 @@ impl IntentProcessor {
     ///      A3 §8 設計要點 1「symbol-level netting」）。
     /// 3. 整體仍 `≥ 0`（負值會被 clamp 為 0），避免下游 `.min(999.0)` 之外的
     ///    異常輸入流向 caller。
-    fn compute_effective_long_short_notional(paper_state: &PaperState) -> (f64, f64) {
+    ///
+    /// P2-PORTFOLIO-RESTING-ROUTER-CACHE（2026-05-18）：visibility 升 `pub(crate)`
+    /// 配合 router 端 caller 一次 netting → 三百分比共用 tuple 的快取重構。
+    /// P2-PORTFOLIO-RESTING-E5-BENCH（2026-05-18）：bench harness 為 external crate
+    /// target，無法看見 `pub(crate)`；故再升為 `#[doc(hidden)] pub`，但 doc-hidden
+    /// 明示「僅供 bench / 內部使用，非業務 API surface」，IPC / GUI / Python 不暴露。
+    #[doc(hidden)]
+    pub fn compute_effective_long_short_notional(paper_state: &PaperState) -> (f64, f64) {
         use std::collections::HashMap;
 
         // 先按 symbol 收 filled 邊（同 symbol 同向才會出現重複，這層 grouping
@@ -884,42 +891,82 @@ impl IntentProcessor {
         (total_effective_long, total_effective_short)
     }
 
-    /// RRC-1-B3: Compute total exposure percentage from positions.
-    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：總曝險改用「effective long + short」
-    /// （filled + resting netting），與 `compute_correlated_exposure_pct` 共用同
-    /// 一 SoT（`compute_effective_long_short_notional`）避免兩個 helper 漂移。
-    fn compute_exposure_pct(paper_state: &PaperState) -> f64 {
-        let balance = paper_state.balance();
+    /// P2-PORTFOLIO-RESTING-ROUTER-CACHE（2026-05-18）：曝險百分比的「已快取
+    /// netting」版本。caller 在熱路徑（router Gate 2.7）先呼一次
+    /// `compute_effective_long_short_notional` + `paper_state.balance()`，把
+    /// `(eff_long, eff_short, balance)` 同時餵給三個 `_from_netting` 變體，
+    /// 從而把原本「三次重建 HashMap netting」削成「一次重建 + 三次純算術」。
+    /// 算術結果與 `compute_exposure_pct(&PaperState)` 完全等價（保留既有 wrapper
+    /// 供 replay/risk_adapter 與測試 fixture 使用）。
+    ///
+    /// 為什麼三個變體都收 `balance` 而非自取：避免 caller 與 helper 對
+    /// `paper_state.balance()` 各取一次造成 race（FA/PA 對 RRC-1 評審要求所有
+    /// portfolio 百分比同 SoT 同 snapshot）。
+    #[doc(hidden)]
+    pub fn compute_exposure_pct_from_netting(eff_long: f64, eff_short: f64, balance: f64) -> f64 {
         if balance <= 0.0 {
             return 0.0;
         }
-        let (eff_long, eff_short) = Self::compute_effective_long_short_notional(paper_state);
         ((eff_long + eff_short) / balance * 100.0).min(999.0)
     }
 
-    /// RG-2: Compute actual account leverage from positions (total_notional / balance).
-    /// Replaces hardcoded 1.0 — leverage check now triggers correctly.
-    /// RG-2：從持倉計算實際帳戶槓桿（總名義值 / 餘額），替代硬編碼 1.0。
-    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：間接吃 effective notional，所以 leverage
-    /// 也會反映 resting maker pending 的預期影響。
-    fn compute_leverage(paper_state: &PaperState) -> f64 {
-        Self::compute_exposure_pct(paper_state) / 100.0
+    /// P2-PORTFOLIO-RESTING-ROUTER-CACHE：相關曝險的快取版本，數學等價
+    /// `compute_correlated_exposure_pct(&PaperState)`。
+    #[doc(hidden)]
+    pub fn compute_correlated_exposure_pct_from_netting(
+        eff_long: f64,
+        eff_short: f64,
+        balance: f64,
+    ) -> f64 {
+        if balance <= 0.0 {
+            return 0.0;
+        }
+        (eff_long.max(eff_short) / balance * 100.0).min(999.0)
     }
 
-    /// FIX-05: Compute correlated exposure — max(long_notional, short_notional) / balance.
-    /// All crypto is highly correlated, so same-direction positions compound risk.
-    /// FIX-05：計算相關曝險 — max(多頭名義值, 空頭名義值) / 餘額。
+    /// P2-PORTFOLIO-RESTING-ROUTER-CACHE：槓桿的快取版本，數學等價
+    /// `compute_leverage(&PaperState)`（exposure_pct / 100）。
+    #[doc(hidden)]
+    pub fn compute_leverage_from_netting(eff_long: f64, eff_short: f64, balance: f64) -> f64 {
+        Self::compute_exposure_pct_from_netting(eff_long, eff_short, balance) / 100.0
+    }
+
+    /// RRC-1-B3：總曝險改用「effective long + short」（filled + resting netting），
+    /// 與 `compute_correlated_exposure_pct` 共用同一 SoT
+    /// （`compute_effective_long_short_notional`）避免兩個 helper 漂移。
+    /// P1-PORTFOLIO-RESTING-EXPOSURE-1 引入 effective notional 路徑。
+    /// P2-PORTFOLIO-RESTING-ROUTER-CACHE：本 wrapper 現在委派給
+    /// `compute_exposure_pct_from_netting`，保留簽名供 replay/risk_adapter
+    /// （`replay/risk_adapter.rs` doc 鏡射）與既有測試 fixture（tests.rs ×8）使用。
+    fn compute_exposure_pct(paper_state: &PaperState) -> f64 {
+        let (eff_long, eff_short) = Self::compute_effective_long_short_notional(paper_state);
+        Self::compute_exposure_pct_from_netting(eff_long, eff_short, paper_state.balance())
+    }
+
+    /// RG-2：從持倉計算實際帳戶槓桿（總名義值 / 餘額），替代硬編碼 1.0；
+    /// 替換後 leverage check 才會真正觸發。
+    /// P1-PORTFOLIO-RESTING-EXPOSURE-1：間接吃 effective notional，所以 leverage
+    /// 也會反映 resting maker pending 的預期影響。
+    /// P2-PORTFOLIO-RESTING-ROUTER-CACHE：保留 wrapper 給 router.rs 296/784 兩處
+    /// guardian-leverage 用（非 Gate 2.7 cluster，掃描重構之外）。
+    fn compute_leverage(paper_state: &PaperState) -> f64 {
+        let (eff_long, eff_short) = Self::compute_effective_long_short_notional(paper_state);
+        Self::compute_leverage_from_netting(eff_long, eff_short, paper_state.balance())
+    }
+
+    /// FIX-05：計算相關曝險 — max(多頭名義值, 空頭名義值) / 餘額；
     /// 加密貨幣高度相關，同方向持倉風險疊加。
     /// P1-PORTFOLIO-RESTING-EXPOSURE-1：long/short 兩邊都改吃 effective notional
     /// （filled + resting netting）。close-side resting 仍只扣減 same-symbol 對立
     /// filled 邊（不跨 symbol 假設對沖），保留「同方向風險疊加」的核心語意。
+    /// P2-PORTFOLIO-RESTING-ROUTER-CACHE：委派至 `_from_netting` 變體。
     fn compute_correlated_exposure_pct(paper_state: &PaperState) -> f64 {
-        let balance = paper_state.balance();
-        if balance <= 0.0 {
-            return 0.0;
-        }
         let (eff_long, eff_short) = Self::compute_effective_long_short_notional(paper_state);
-        (eff_long.max(eff_short) / balance * 100.0).min(999.0)
+        Self::compute_correlated_exposure_pct_from_netting(
+            eff_long,
+            eff_short,
+            paper_state.balance(),
+        )
     }
 
     /// Phase 2b: Record a closed trade for Kelly stats.

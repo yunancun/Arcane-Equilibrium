@@ -1871,5 +1871,50 @@ fn test_resting_entry_qty_correlated_pair_blocks_oversize() {
     );
 }
 
+#[test]
+fn test_p2_portfolio_resting_multi_close_summed_capped_at_filled() {
+    // P2-PORTFOLIO-RESTING-TEST-COVERAGE（2026-05-18）：A3 WARN-2「多個 close-side
+    // resting 累加後 > filled qty 時，扣減仍應封頂於 filled」的不變式 explicit
+    // regression。既有 `test_p1_portfolio_resting_close_reduces_capped_at_filled`
+    // 只覆蓋「單筆 close 超過 filled」，本測試補「同 symbol 多筆 close-side
+    // resting 累加超過 filled」場景。
+    //
+    //   balance = 10_000 USDT
+    //   filled long BTC 0.001 × 50_000 = 50 USDT
+    //   反向 close-side resting 兩筆：
+    //     - short 0.002 × 50_000 = 100 USDT
+    //     - short 0.001 × 50_000 =  50 USDT
+    //   summed close = 150 USDT >> filled long = 50 USDT
+    //   → red_short_capped = min(150, 50).max(0) = 50（封頂於 filled）
+    //   → effective_long = 50 - 50 = 0、effective_short = 0
+    //   → exposure_pct = 0%、correlated_exposure_pct = 0%
+    //
+    // 修前 A3 風險：若 cap 邏輯誤把 summed close 視為「翻面 short」，會出現
+    // effective_short > 0；本測試 explicit 鎖住「不翻面」不變式。
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    state.import_positions(vec![("BTC".into(), true, 0.001, 50_000.0, 0)]);
+    seed_resting(
+        &mut state,
+        vec![
+            make_resting_order("BTC", false, 0.002, 50_000.0),
+            make_resting_order("BTC", false, 0.001, 50_000.0),
+        ],
+    );
+
+    let (eff_long, eff_short) = IntentProcessor::compute_effective_long_short_notional(&state);
+    assert!(
+        eff_long.abs() < 1e-4 && eff_short.abs() < 1e-4,
+        "summed close-side resting (150) should cap at filled (50); \
+         expected (0, 0), got ({}, {})",
+        eff_long,
+        eff_short,
+    );
+    let exp = IntentProcessor::compute_exposure_pct(&state);
+    let corr = IntentProcessor::compute_correlated_exposure_pct(&state);
+    assert!(exp >= 0.0 && exp < 1e-4, "exp={} should be ~0", exp);
+    assert!(corr >= 0.0 && corr < 1e-4, "corr={} should be ~0", corr);
+}
+
 // Larger nested modules are split out to keep this file under the LOC cap.
 include!("tests_predictor_router.rs");

@@ -106,6 +106,13 @@ path = "src/main.rs"
 name = "hot_path_baseline"
 harness = false
 
+# P2-PORTFOLIO-RESTING-E5-BENCH（2026-05-18）：portfolio gate hot-path
+# latency bench（25 symbols × 3 resting）。harness=false 對齊
+# hot_path_baseline，無 criterion 依賴。
+[[bench]]
+name = "intent_processor_exposure"
+harness = false
+
 # repair_migration_checksum — standalone tool to detect/repair _sqlx_migrations.checksum drift.
 # Borrows engine `database::migrations::load_migrations_from_dir` so checksum
 # computation is identical to engine startup verification (sqlx 0.8.6 SHA-384,
