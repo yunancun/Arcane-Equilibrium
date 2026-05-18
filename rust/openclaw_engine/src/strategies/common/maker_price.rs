@@ -89,7 +89,12 @@ pub fn close_maker_price_policy(exit_reason: &str) -> Option<CloseMakerPricePoli
         | "bw_squeeze" | "pctb_revert" => Some(CloseMakerPricePolicy {
             buffer_ticks: 1,
             offset_bps: 0.5,
-            timeout_ms: 30_000,
+            // CALIBRATION-2026-05-18: 30_000 → 90_000 per phase_1b_calibration_cell_selection
+            // _report.md G-AB-01-C90 (fill 70.8% / saving +3.37 bps simulated, vs 30s baseline
+            // 58.3% / 3.34 bps). Sweep dominant axis = timeout_ms. phys_lock family timeout
+            // 不變 (15s/10s), 因 sweep top-2 都 grid family. Real fill verification via 24h
+            // demo observation post-deploy (E2 caveat: BBO-cross-proxy systematically optimistic).
+            timeout_ms: 90_000,
         }),
         "phys_lock_gate4_giveback" => Some(CloseMakerPricePolicy {
             buffer_ticks: 1,
@@ -604,7 +609,9 @@ mod tests {
     fn close_limit_price_inverts_direction_and_uses_timeout_policy() {
         let inputs = inputs_with_bbo(30_000.0, 29_999.0, 30_001.0, 0.1);
         let policy = close_maker_price_policy("grid_close_long").expect("grid close policy");
-        assert_eq!(policy.timeout_ms, 30_000);
+        // CALIBRATION-2026-05-18: grid family timeout_ms updated 30_000 → 90_000
+        // per phase_1b_calibration_cell_selection_report.md G-AB-01-C90.
+        assert_eq!(policy.timeout_ms, 90_000);
 
         let long_close_sell =
             compute_close_limit_price(true, inputs, policy, "grid_trading", "BTCUSDT")
