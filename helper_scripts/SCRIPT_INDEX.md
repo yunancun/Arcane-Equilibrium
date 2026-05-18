@@ -115,6 +115,12 @@
 | `canary/canary_schema.py` | Canary JSONL schema 定義（Pydantic model） |
 | `canary/rollback_drill.sh` | 回滾演練腳本 |
 | `canary/test_canary.py` | Canary 系統單元測試 |
+| `canary/healthchecks/_common.py` | Phase 1b close-maker-first healthcheck 共享層（PG conn + Wilson 95% CI + JSON formatter + CLI argparse），對齊 AMD-2026-05-15-02 v0.6 §4.1 + spec §8.1。 |
+| `canary/healthchecks/62_close_maker_fill_rate.py` | `[62]` close_maker_fill_rate Wilson-CI gate（spec §8.1 Consensus-MF-2）：7d demo+live_demo maker fill rate + Wilson 95% CI，PASS lower≥0.60 / FAIL upper<0.40 / WARN 中段。CLI standalone for QA T+24h post-deploy verification。 |
+| `canary/healthchecks/63_close_maker_fallback_audit.py` | `[63]` close_maker_fallback_audit（spec §8.1 Consensus-MF-3）：enum allowlist 完整性 + NULL ladder ratio (PASS ≤0.1% / WARN ≤1% / FAIL >1%)；safety path 三 enum 排除於 NULL ladder 之外。 |
+| `canary/healthchecks/64_close_maker_rate_limit_pause_duration.py` | `[64]` rate-limit backoff scope（AMD §5.4 BB-MF-2 + spec §8.1 BB-SF-1）：per-symbol exp backoff + global pause sample/day ladder (5/30)；details.rate_limit_scope 完整性子檢查。 |
+| `canary/healthchecks/65_reject_sample_healthcheck.py` | `[65]` PostOnly + MaxPending reject sample coverage（spec §8.3 BB-MF-5 / AC-15）：防 demo silent degradation，per env 7d 兩 category 各須 ≥1 樣本，否則 Phase 2b 無法 promote。 |
+| `canary/healthchecks/tests/` | pytest 單元測試集（44 tests / 5 files）— Wilson CI 數值對 reference 表 / verdict ladder / SQL filter / multi-cell severity。Linux + Mac 同跑 44/44 PASS。 |
 
 ## phase4/ — Phase 4 學習/晉升工具 (Learning & Promotion)
 
