@@ -31,6 +31,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -513,10 +514,21 @@ class PerceptionPlane:
     def validate_for_decision(
         self, data_id: str
     ) -> Tuple[bool, str]:
-        """Validate that data can enter the decision chain.
+        """驗證資料是否可進入決策鏈（已棄用）。
+
+        P2-PERCEPTION-DEPRECATE-1 (2026-05-18)：此 API 在 production code 0 caller，
+        僅 test 仍使用；保留語意以供 test 與 governance audit，新 production 路徑
+        請走 Agent Spine typed lineage（StrategySignal → StrategistDecision →
+        GuardianVerdict），不再依賴此 helper。
 
         Returns (eligible, reason).
         """
+        warnings.warn(
+            "PerceptionPlane.validate_for_decision is deprecated and has 0 production "
+            "callers (P2-PERCEPTION-DEPRECATE-1). Use Agent Spine typed lineage instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         with self._lock:
             pdo = self._data_store.get(data_id)
 

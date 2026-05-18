@@ -2,11 +2,18 @@
 Tests for T2.11 — Perception Data Plane: Fact/Inference Marking (GAP-M2)
 =========================================================================
 Governance refs: EX-07 §1-§8, DOC-01 §5.10
+
+P2-PERCEPTION-DEPRECATE-1 (2026-05-18)：`validate_for_decision` 已 deprecated；
+本檔保留為 governance regression baseline，整檔過濾 DeprecationWarning 噪音。
 """
 
 import time
 import threading
 import pytest
+
+pytestmark = pytest.mark.filterwarnings(
+    "ignore::DeprecationWarning:app.perception_data_plane"
+)
 
 from app.perception_data_plane import (
     AccessLevel,

@@ -328,8 +328,10 @@ class EdgeEstimatorScheduler:
                     reason, mode, summary.get("n_cells", 0), summary.get("grand_mean_bps", 0.0), reason,
                 )
             except Exception as exc:
+                # P2-WP05-FUP-1：GUI 看 stable code，例外明細只進 log（下方
+                # `logger.warning` 已紀錄完整 exc）。
                 js_error = exc
-                results[mode] = {"error": str(exc)}
+                results[mode] = {"error": "js_refresh_failed"}
                 with self._lock:
                     self._failures += 1
                 logger.warning(
@@ -696,7 +698,9 @@ class EdgeEstimatorScheduler:
                     "converged_arms": sum(1 for r in train_results if r.converged),
                 }
             except Exception as exc:  # noqa: BLE001
-                out["linucb"] = {"error": str(exc)}
+                # P2-WP05-FUP-1：client/GUI 看 stable code，例外明細只進 log。
+                logger.warning("linucb training failed: %s", exc)
+                out["linucb"] = {"error": "linucb_training_failed"}
 
         try:
             from ml_training.mlde_shadow_advisor import (  # noqa: PLC0415
@@ -709,21 +713,27 @@ class EdgeEstimatorScheduler:
                 shadow_config_from_env(engine_mode=mode),
             )
         except Exception as exc:  # noqa: BLE001
-            out["ml_shadow"] = {"error": str(exc)}
+            # P2-WP05-FUP-1：client/GUI 看 stable code，例外明細只進 log。
+            logger.warning("mlde shadow advisor failed: %s", exc)
+            out["ml_shadow"] = {"error": "mlde_shadow_failed"}
 
         try:
             from local_model_tools.dream_engine import persist_dream_insights  # noqa: PLC0415
 
             out["dream_engine"] = persist_dream_insights(dsn, engine_mode=mode)
         except Exception as exc:  # noqa: BLE001
-            out["dream_engine"] = {"error": str(exc)}
+            # P2-WP05-FUP-1：client/GUI 看 stable code，例外明細只進 log。
+            logger.warning("dream_engine insight persist failed: %s", exc)
+            out["dream_engine"] = {"error": "dream_engine_failed"}
 
         try:
             from local_model_tools.opportunity_tracker import persist_regret_summary  # noqa: PLC0415
 
             out["opportunity_tracker"] = persist_regret_summary(dsn, engine_mode=mode)
         except Exception as exc:  # noqa: BLE001
-            out["opportunity_tracker"] = {"error": str(exc)}
+            # P2-WP05-FUP-1：client/GUI 看 stable code，例外明細只進 log。
+            logger.warning("opportunity_tracker regret persist failed: %s", exc)
+            out["opportunity_tracker"] = {"error": "opportunity_tracker_failed"}
 
         if mode == "demo":
             try:
@@ -737,7 +747,9 @@ class EdgeEstimatorScheduler:
                     demo_applier_config_from_env(),
                 )
             except Exception as exc:  # noqa: BLE001
-                out["demo_applier"] = {"error": str(exc)}
+                # P2-WP05-FUP-1：client/GUI 看 stable code，例外明細只進 log。
+                logger.warning("mlde demo_applier failed: %s", exc)
+                out["demo_applier"] = {"error": "mlde_demo_applier_failed"}
 
         return out
 

@@ -15,9 +15,15 @@ Phase 2 集成测试 — 风控强化验证
   IT-P2-10: Scan interval < 5min blocked (ScannerRateLimiter)
 """
 
+import pytest
 import sys
 import time
 from pathlib import Path
+
+# P2-PERCEPTION-DEPRECATE-1 (2026-05-18)：忽略 validate_for_decision DeprecationWarning。
+pytestmark = pytest.mark.filterwarnings(
+    "ignore::DeprecationWarning:app.perception_data_plane"
+)
 
 import pytest
 

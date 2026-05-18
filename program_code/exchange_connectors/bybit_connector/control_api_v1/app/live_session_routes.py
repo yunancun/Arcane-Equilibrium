@@ -629,9 +629,11 @@ async def _sweep_live_orphan_positions(errors: list[str]) -> dict:
     try:
         positions = rc.get_positions("linear") or []
     except Exception as exc:
+        # P2-WP05-FUP-1：client 看到 stable reason_code，
+        # 詳細例外字串只進 log（不外洩）。
         logger.warning("Live orphan sweep: get_positions failed: %s", exc)
         errors.append(f"orphan_sweep_query: {exc}")
-        return {"skipped": True, "reason": str(exc)}
+        return {"skipped": True, "reason": "orphan_sweep_query_failed"}
 
     open_positions = [p for p in positions if float(p.get("size") or p.get("qty") or 0) > 0]
     if not open_positions:

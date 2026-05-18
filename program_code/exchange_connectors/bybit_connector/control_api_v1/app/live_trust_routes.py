@@ -339,11 +339,12 @@ def _read_live_halt_status() -> dict[str, Any]:
     try:
         snapshot = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
+        # P2-WP05-FUP-1：reason 已是 stable code；client 不再讀 raw 例外。
+        logger.warning("live snapshot unreadable: %s", exc)
         return {
             **base,
             "present": True,
             "reason": "live_snapshot_unreadable",
-            "error": str(exc),
         }
 
     risk_cfg = snapshot.get("risk_manager_config") or {}
@@ -429,11 +430,13 @@ def _read_signed_live_authorization_status(now_ms: int | None = None) -> dict[st
         sig_recorded = str(record["sig"])
         approved_system_mode = str(record.get("approved_system_mode", ""))
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        # P2-WP05-FUP-1：client-facing reason 已是 stable code；
+        # 例外明細只進 log。
+        logger.warning("authorization.json malformed: %s", exc)
         return {
             **base_status,
             "status": "malformed",
             "reason": "authorization_json_malformed",
-            "error": str(exc),
         }
 
     parsed_status = {
@@ -879,8 +882,12 @@ def get_trust_status(
         }
         metrics_dict = rec.metrics_snapshot or {}
     except Exception as exc:
+        # P2-WP05-FUP-1：client 看 stable reason_code，例外明細只進 log。
         logger.warning("trust-status: evaluation error: %s", exc)
-        recommendation = {"action": "unknown", "reasons": [str(exc)]}
+        recommendation = {
+            "action": "unknown",
+            "reasons": ["trust_evaluation_failed"],
+        }
         metrics_dict = {}
 
     live_halt = _read_live_halt_status()

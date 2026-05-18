@@ -25,7 +25,18 @@ import os
 import time
 import json
 import unittest
+import warnings
 from unittest.mock import MagicMock, patch, call
+
+
+# P2-PERCEPTION-DEPRECATE-1 (2026-05-18)：unittest runner-agnostic 過濾。
+def setUpModule() -> None:  # noqa: N802 — unittest hook 命名規範。
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        module=r"app\.perception_data_plane",
+    )
+
 
 _test_dir = os.path.dirname(os.path.abspath(__file__))
 _control_api_dir = os.path.dirname(_test_dir)

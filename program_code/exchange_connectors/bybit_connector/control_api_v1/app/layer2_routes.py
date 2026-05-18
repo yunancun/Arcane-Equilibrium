@@ -501,9 +501,11 @@ async def get_ollama_status() -> dict[str, Any]:
             result["model_count"] = len(models)
         except Exception as exc:
             # Non-fatal: connectivity confirmed but model list unavailable
-            # 非致命错误：连通性已确认，但模型列表无法获取
+            # 非致命：連通性 OK 但模型清單不可取
+            # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
+            logger.warning("ollama model list fetch failed: %s", exc)
             result["models"] = []
-            result["model_list_error"] = str(exc)
+            result["model_list_error"] = "ollama_model_list_unavailable"
     return _layer2_response(result)
 
 
