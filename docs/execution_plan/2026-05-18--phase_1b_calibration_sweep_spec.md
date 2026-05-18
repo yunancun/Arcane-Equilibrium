@@ -2,7 +2,11 @@
 
 **Date**: 2026-05-18
 **Author**: PA (Project Architect) — pre-prep design during 12H post-deploy test window observation-only block；spec design ≠ parameter change，符合 read-only constraint
-**Status**: SPEC v0.1 DRAFT — pending PM sign-off + main session commit；NOT YET dispatched to E1
+**Status**: SPEC v0.2 (E1 IMPL `93069c29` + E2 review `907ab778` APPROVE-CONDITIONAL + E4 regression `30f5b64b` PASS + merge `8d8a0123` closed; PA SHOULD-FIX decision memo `5df39d13` applied)
+
+**Changelog**:
+- v0.2 (2026-05-18, post-E2): §2.4 `maker_fill_rate` denom 從 `n_attempts - n_skipped_spread_guard` 改為 expanded `n_attempts - sum(all n_skipped_*)`（含 BBO / tick / family / crossed_book skip）；§4.1 補 v0.2 note 解釋 0.25 threshold 對應 expanded denom。來源：E2 review `907ab778` §3 SHOULD-FIX #2，PA decision memo `2026-05-18--phase_1b_calibration_should_fix_decisions.md` §2。SHOULD-FIX #1 Block 4 dedupe + #3 adverse_proxy fail-closed 採 accept-with-PA-cleanup 路徑，無 spec 改動。
+- v0.1 (2026-05-18 pre-prep): initial release commit `75e29265`。
 **Phase**: EDGE-P2-3 Phase 1b post-deploy parameter calibration（spec v1.3 IMPL 已 live；activator commit `18081551`；T+12H QA observation 顯示 4/4 close_maker_attempt 全 `fallback_reason=timeout_taker` = 0% maker fill = $0 fee saving）
 
 **Supersedes / extends**:
@@ -273,7 +277,16 @@ class CalibrationCellResult:
     n_attempts: int              # 4 + 50 = 54 typical
     n_simulated_fills: int       # of fills within timeout
     n_skipped_spread_guard: int  # spread guard 跳過
-    maker_fill_rate: float       # n_simulated_fills / (n_attempts - n_skipped_spread_guard)
+    n_skipped_no_bbo: int        # 無 BBO snapshot 在 ±60s window
+    n_skipped_tick_missing: int  # tick_size lookup 失敗
+    n_skipped_family_mismatch: int  # close-maker-first 不對應該 family
+    n_skipped_crossed_book: int  # best_ask <= best_bid (degenerate book)
+    n_eligible: int              # n_attempts - sum(all n_skipped_*)
+    maker_fill_rate: float       # n_simulated_fills / n_eligible
+                                 # (v0.2: expanded denom 扣除全部 data-quality skip，
+                                 #  反映真實 fillable population；v0.1 只扣 spread_guard
+                                 #  屬 oversight。E2 review 907ab778 §3 SHOULD-FIX #2
+                                 #  PA decision 2026-05-18 採 expanded denom)
     fill_rate_wilson_ci_low: float    # 95% Wilson CI lower bound (per AC-14)
     fill_rate_wilson_ci_high: float
     expected_fee_saving_bps: float    # mean over fills
@@ -356,6 +369,12 @@ cell.pass_gate = "PASS" IF (
   AND cell.fee_saving_wilson_ci_low >= 0.0  # directional positive 95% CI
   AND cell.adverse_selection_proxy_bps <= cell.pre_phase_1b_taker_baseline_bps
 )
+
+# v0.2 note: maker_fill_rate denom 是 expanded n_eligible（扣全部 data-quality
+# skip，含 BBO / tick / family / crossed_book），不是 v0.1 原版只扣 spread_guard。
+# 0.25 threshold 對應真實 fillable population 的 fill 機率。若回原版 denom
+# （含 BBO/tick/family/crossed skip），threshold 需相應降至 ~0.18。
+# 來源：PA decision memo 2026-05-18 §2 + E2 review 907ab778 §3 SHOULD-FIX #2
 ```
 
 **Aggregate PASS**: ≥1 cell 滿足以上 → PASS → 進 §5 operator pilot dispatch（top-2 cells by `expected_fee_saving_bps × maker_fill_rate`）
