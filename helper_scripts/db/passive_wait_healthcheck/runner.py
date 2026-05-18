@@ -311,6 +311,21 @@ from .checks_close_maker_audit import (
     check_close_maker_rate_limit_backoff_coverage,
     check_close_maker_reject_samples,
 )
+from .checks_cron_heartbeat import (
+    # P1-CRON-INSTALL-WAVE-1（2026-05-18）— 5 個 cron wrapper 已 source/test
+    # closed 但 crontab 尚未 install；每 wrapper start-time touch sentinel
+    # 於 ``${OPENCLAW_DATA_DIR:-/tmp/openclaw}/cron_heartbeat/<name>.last_fire``。
+    # 哨兵以 mtime < threshold 推斷 cron 是否按時 fire；WARN-by-default
+    # （cron infra 不是 promotion-blocking）；OPENCLAW_CRON_HEARTBEAT_REQUIRED=1
+    # 升 FAIL。為純 filesystem check（無 DB / IPC），跑於 conn.close() 後。
+    # Install recipe（operator-only）：
+    #   docs/execution_plan/2026-05-18--p1_cron_install_wave_1_install_recipe.md
+    check_75_panel_aggregator_health_cron_fires,
+    check_76_wave9_replay_no_live_mutation_watch_cron_fires,
+    check_77_replay_key_rotation_check_cron_fires,
+    check_78_feature_baseline_writer_cron_fires,
+    check_79_blocked_symbols_30d_unblock_check_cron_fires,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -1344,6 +1359,36 @@ def main() -> int:
     # Rust live snapshot 新鮮。純 filesystem/read-only，不寫或續簽 auth。
     s, m = check_56_live_pipeline_active()
     results.append(("[56] live_pipeline_active", s, m))
+
+    # [75]-[79] P1-CRON-INSTALL-WAVE-1（2026-05-18）— cron heartbeat
+    # sentinels for the 5 cron wrappers that have source/test land but
+    # crontab is not yet installed. Each wrapper start-time touches
+    # ``${OPENCLAW_DATA_DIR:-/tmp/openclaw}/cron_heartbeat/<name>.last_fire``
+    # and the matching check verifies mtime < threshold; missing or stale
+    # → WARN（OPENCLAW_CRON_HEARTBEAT_REQUIRED=1 升 FAIL）。Pure filesystem,
+    # post-conn.close(). Install recipe (operator-only):
+    # docs/execution_plan/2026-05-18--p1_cron_install_wave_1_install_recipe.md。
+    # [75]-[79] P1-CRON-INSTALL-WAVE-1（2026-05-18）— 5 個 cron wrapper
+    # 已 source/test closed 但 crontab 尚未 install；各 wrapper 啟動時 touch
+    # sentinel，本套哨兵驗 mtime < threshold。缺失或過時 → WARN。
+    s, m = check_75_panel_aggregator_health_cron_fires()
+    results.append(("[75] panel_aggregator_health_cron_fires", s, m))
+
+    s, m = check_76_wave9_replay_no_live_mutation_watch_cron_fires()
+    results.append(
+        ("[76] wave9_replay_no_live_mutation_watch_cron_fires", s, m)
+    )
+
+    s, m = check_77_replay_key_rotation_check_cron_fires()
+    results.append(("[77] replay_key_rotation_check_cron_fires", s, m))
+
+    s, m = check_78_feature_baseline_writer_cron_fires()
+    results.append(("[78] feature_baseline_writer_cron_fires", s, m))
+
+    s, m = check_79_blocked_symbols_30d_unblock_check_cron_fires()
+    results.append(
+        ("[79] blocked_symbols_30d_unblock_check_cron_fires", s, m)
+    )
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only

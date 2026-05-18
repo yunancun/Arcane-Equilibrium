@@ -20,6 +20,12 @@ LOCK_DIR="${LOCK_ROOT}/feature_baseline_writer_cron.lock.d"
 
 mkdir -p "$LOG_DIR" "$LOCK_ROOT"
 
+# Cron heartbeat sentinel — P1-CRON-INSTALL-WAVE-1（2026-05-18）。
+# touch-at-start：「cron 被排程觸發」的證據，由 healthcheck [78] 監測 mtime。
+HEARTBEAT_DIR="${DATA}/cron_heartbeat"
+mkdir -p "$HEARTBEAT_DIR" 2>/dev/null || true
+touch "$HEARTBEAT_DIR/feature_baseline_writer.last_fire" 2>/dev/null || true
+
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"

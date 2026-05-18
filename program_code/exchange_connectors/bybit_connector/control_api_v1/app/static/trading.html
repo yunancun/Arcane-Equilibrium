@@ -5,7 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>玄衡 Trading Chart</title>
 <script src="/static/common.js"></script>
-<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<!-- P2-WP05-CSP-UNSAFE-INLINE（2026-05-18）— CDN SRI 防止供應鏈竄改。
+     URL pinned to lightweight-charts@4.1.0；integrity hash 由
+     `helper_scripts/security/compute_sri_hashes.sh` 計算（SHA-384 base64）。
+     若 unpkg 將該版本檔案內容變更，瀏覽器會拒絕載入並 console error，
+     而非靜默載入被竄改的 JS（CSP unsafe-inline 大幅減小攻擊面之前的中介防線）。 -->
+<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"
+        integrity="sha384-rcCMiCptH4kTlEbg0euOTUKWe72TESbrjElatnG+9BfbmUIV268UK/Pro5biJdGm"
+        crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/static/styles.css" />
 <style>
   /* :root variables are in styles.css (canonical location) */

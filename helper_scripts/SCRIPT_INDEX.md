@@ -38,6 +38,9 @@
 | `reports/w_audit_8c/liquidation_cluster_stage0r_report.py` | W-AUDIT-8c Stage 0R 報告編排層（round 2 rework）：read-only PG 取數（fetch_panel_symbols + fetch_k_prior + _fetch_panel_rows with bucket_end_ts → bucket_end_ts_ms normalize）→ sibling 8C-S0R-2 `liquidation_cluster_stage0r_metrics` (compute_stage0r / compute_stage0r_sweep 真實 contract — dict 6 keys 含 sweep_cells/eligible_for_demo_canary_per_tier) → spec v0.3 14 mandatory fields JSON + 4-agent review-ready Markdown；落地至 `docs/CCAgentWorkSpace/{role}/workspace/reports/<date>--w_audit_8c_stage0r_<verdict>.{json,md}`。BB pre-flight gate fail-fast 不存在 BB STRUCTURAL report 即 exit 3。 |
 | `reports/w_audit_8c/liquidation_cluster_stage0r_smoke_cli.py` | W-AUDIT-8c Stage 0R CLI 整合 smoke（round 2 sign-off invariant）：10 test 覆蓋 6 CRIT (1-6) + 4 HIGH (1,2,3,4) 修法，mock SQL panel → verify _extract_trigger_rows n>0 + sweep returns dict + Markdown 15 sections + 5 exclusion categories；不連 PG，可獨立執行。 |
 | `deploy/launchd_preflight.sh` | macOS launchd deployment preflight |
+| `db/passive_wait_healthcheck/checks_cron_heartbeat.py` | `[75]`-`[79]` P1-CRON-INSTALL-WAVE-1（2026-05-18）— 5 個 cron wrapper 已 source/test closed 但 crontab 尚未 install；以 sentinel mtime 推斷 cron 是否按時 fire。WARN-by-default；`OPENCLAW_CRON_HEARTBEAT_REQUIRED=1` 升 FAIL。配對 install recipe `docs/execution_plan/2026-05-18--p1_cron_install_wave_1_install_recipe.md`。 |
+| `db/test_cron_heartbeat_healthchecks.py` | `[75]`-`[79]` 單元測試（42 PASS）：fresh/missing/stale + threshold 邊界 + REQUIRED=1 升 FAIL + path 解析（HEARTBEAT_DIR > DATA_DIR）。 |
+| `security/compute_sri_hashes.sh` | P2-WP05-CSP-UNSAFE-INLINE（2026-05-18）— 為 GUI pinned CDN 計算 SHA-384 SRI integrity attribute；操作者跑一次將輸出 paste 進對應 `app/static/*.html` <script> / <link>。default URL = `lightweight-charts@4.1.0`；版本未 pin → WARNING + exit 1。 |
 
 ## REF-20 Sprint 1+2 新增 cron 與 helper
 

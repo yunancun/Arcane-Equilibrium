@@ -33,6 +33,13 @@ LOG="${LOG_DIR}/panel_aggregator_health_cron.log"
 
 mkdir -p "$LOG_DIR"
 
+# Cron heartbeat sentinel — P1-CRON-INSTALL-WAVE-1（2026-05-18）。
+# touch-at-start：「cron 被排程觸發」的證據，由 healthcheck [75] 監測 mtime。
+# 任何失敗以 `|| true` 吞掉，不阻塞 cron 主任務。
+HEARTBEAT_DIR="${DATA}/cron_heartbeat"
+mkdir -p "$HEARTBEAT_DIR" 2>/dev/null || true
+touch "$HEARTBEAT_DIR/panel_aggregator_health.last_fire" 2>/dev/null || true
+
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 # 1. PG creds — read from environment_files (same pattern as edge_estimate_snapshots_cycle_cron.sh)

@@ -90,6 +90,12 @@ ENVS=(paper demo live)
 # 在任何寫 LOG 前先確保 LOG_DIR 存在；對齊 edge_label_backfill_cron.sh 模式。
 mkdir -p "$LOG_DIR"
 
+# Cron heartbeat sentinel — P1-CRON-INSTALL-WAVE-1（2026-05-18）。
+# touch-at-start：「cron 被排程觸發」的證據，由 healthcheck [77] 監測 mtime。
+HEARTBEAT_DIR="${DATA}/cron_heartbeat"
+mkdir -p "$HEARTBEAT_DIR" 2>/dev/null || true
+touch "$HEARTBEAT_DIR/replay_key_rotation_check.last_fire" 2>/dev/null || true
+
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 # ─── Sanity / 基本健全 ───────────────────────────────────────────────
