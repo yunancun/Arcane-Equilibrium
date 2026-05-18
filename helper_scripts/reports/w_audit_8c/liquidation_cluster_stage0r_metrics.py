@@ -124,16 +124,24 @@ BOTH_DIRECTION_FLOOR_RATE = 0.001  # 0.1%；per PA design §2.5。
 
 # 集中度 cap：per 8b INJUSDT 87% 集中教訓。
 MAX_DAY_SHARE = 0.25         # spec v0.3 + PA design §2.1。
-MAX_SYMBOL_SHARE = 0.40      # NEW for 8c per 8b INJUSDT lesson；PA design §2.5。
+# MIT round-1 dual review push-back：0.40 → 0.30。PA 原值 0.30 mirror，
+# 防 INJUSDT 87% pooled n_eff collapse 教訓的 effective n 失真。
+MAX_SYMBOL_SHARE = 0.30      # NEW for 8c per 8b INJUSDT lesson；MIT 2026-05-18 tightened from 0.40。
 
 # 經濟層 floor。
 AVG_NET_FLOOR_BPS = 15.0
-COST_EDGE_RATIO_MAX = 0.80
+# MIT round-1 dual review push-back：0.80 → 0.60。PA 原值 0.50；MIT compromise 0.60。
+# 為什麼 0.60：cost/gross 0.80 表 after-cost margin 僅 20% gross → fragile to
+# cost mis-estimation。0.60 留 40% margin 抗 cost 模型偏差。
+COST_EDGE_RATIO_MAX = 0.60
 BASELINE_LIFT_FLOOR_BPS = 0.0
 
 # Density-floor efficacy + false-positive rate（per spec v0.3）。
 DENSITY_FILTER_EFFICACY_FLOOR = 0.60  # 60% 單/雙事件 bucket 拒絕。
-FALSE_POSITIVE_RATE_MAX = 0.40         # ±5 bps band 內 trigger ≤ 40%。
+# MIT round-1 dual review push-back：0.40 → 0.30 post first PASS。
+# 為什麼 0.30：40% 表 60% trigger 必有 directional move；過寬。
+# 0.30 表 70% trigger 必有 meaningful move，更高 quality。
+FALSE_POSITIVE_RATE_MAX = 0.30         # ±5 bps band 內 trigger ≤ 30%；MIT 2026-05-18 tightened from 0.40。
 FP_BAND_BPS = 5.0
 
 # Cluster-aware n_eff 之 60min window（per MIT SHOULD-3 + PA design §2.4）。
@@ -356,13 +364,19 @@ def wilson_ci_95(n: int, n_eff: int) -> tuple[float, float] | None:
 
 
 def _n_eff_horizon_overlap(n: int, horizon_min: int) -> int:
-    """8b 鏡像：horizon-overlap-only n_eff。
+    """8b 鏡像：horizon-overlap-only n_eff（MIT round-1 MUST-FIX：math.ceil 取代 //）。
 
     為什麼保留：作為 cluster-aware 公式的 input 之一（min 之三）；
     亦保留 8b 同公式的 backward compatibility。
+
+    為什麼 math.ceil 而非整數除：MIT 2026-05-18 dual review §2.1.4 dormant bug：
+    `horizon_min // 5` 在 horizon=6/10/14 時 floor 至 1/2/2 → 漏算 sub-5m bar
+    overlap penalty。math.ceil 對 canonical grid (1/5/15) 結果不變（dormant
+    fix），但抗 grid expansion（10/14/30 sensitivity sweep）regression。
     """
-    # max(1, horizon_min // 5)：horizon=5 → 1（no overlap），horizon=30 → 6（6:1）
-    return int(n / max(1, horizon_min // 5))
+    # math.ceil(horizon_min / 5)：horizon=5 → 1（no overlap），horizon=30 → 6（6:1），
+    # horizon=6 → 2（正確扣 20% sub-bar overlap），horizon=14 → 3（正確）
+    return int(n / max(1, math.ceil(horizon_min / 5)))
 
 
 def _n_eff_cluster_aware(
@@ -422,7 +436,8 @@ def _n_eff_cluster_aware(
     distinct_days = len(days)
 
     # Distinct 60min clusters：按 (symbol, direction) 排序 triggers，
-    # 連續 60min 內視為同一 cluster。
+    # 連續 60min 內視為同一 cluster（mirror SQL `lag()` semantic：delta vs
+    # PREVIOUS event，不是 vs cluster anchor）。
     sorted_triggers = sorted(
         (t for t in triggers if _safe_int(t.get("signal_ts_ms")) is not None),
         key=lambda x: (
@@ -435,15 +450,19 @@ def _n_eff_cluster_aware(
     distinct_clusters = 0
     last_key: tuple[str, str] | None = None
     last_ts_ms: int | None = None
+    # E2 round-1 CRIT-3 fix：每 event 都推進 last_ts_ms，不論新舊 cluster。
+    # 為什麼：SQL helper（PA design §2.3）用 lag(bucket_end_ts) > 60min
+    # 計 delta vs PREVIOUS event。Round 1 anchor pattern（last_ts_ms 只在
+    # new cluster 推進）會在長 cascade（events 30min 間隔 × 10 events）
+    # over-count 4 clusters；SQL 認 1 cluster。fix 讓 Python 與 SQL byte-equiv。
     for t in sorted_triggers:
         key = (str(t.get("symbol") or ""), str(t.get("direction") or ""))
         ts_ms = int(t.get("signal_ts_ms") or 0)
         if last_key != key or last_ts_ms is None or (ts_ms - last_ts_ms) > window_ms:
             distinct_clusters += 1
-            last_key = key
-            last_ts_ms = ts_ms
-        # 同 cluster 內保持 last_ts_ms 不變；新事件並不啟 new cluster
-        # 直到超過 60min 才算 cluster 結束。
+        # 每 event 推進 last_ts_ms（包含新 cluster 開時）；SQL lag 等價。
+        last_key = key
+        last_ts_ms = ts_ms
 
     n_eff_cluster = min(n_eff_horizon, distinct_days, distinct_clusters)
     penalty_rate = 1.0 - (n_eff_cluster / n) if n > 0 else 0.0
@@ -573,7 +592,7 @@ def _single_symbol_concentration_check(
 
 def _both_direction_floor_check(
     triggers: Sequence[Mapping[str, object]],
-    total_bucket_count: int,
+    total_bucket_count: int | None,
     *,
     floor_rate: float = BOTH_DIRECTION_FLOOR_RATE,
 ) -> dict[str, object]:
@@ -587,7 +606,25 @@ def _both_direction_floor_check(
     為什麼分母用 total_bucket_count（不是 trigger 總 n）：trigger rate 是
     "fraction of all 5m buckets that triggered"，不是 "fraction of triggers
     that were long"；後者天生 = 1 因 trigger 必有方向。
+
+    E2 round-1 CRIT-2 fix：total_bucket_count=None → 三態 passed=None +
+    explicit fail_reason "missing_bucket_count_denominator"，下游 verdict
+    強迫 RED。為什麼 fail-closed：caller 不傳 → 過往 fallback len(rows) 低估
+    分母 64×、anti-conservative；fail-closed 比 silent risk 安全。
     """
+    if total_bucket_count is None:
+        return {
+            "long_trigger_rate": None,
+            "short_trigger_rate": None,
+            "long_passed": None,
+            "short_passed": None,
+            "both_passed": None,
+            "long_count": sum(1 for t in triggers if str(t.get("direction")) == "long_liquidated"),
+            "short_count": sum(1 for t in triggers if str(t.get("direction")) == "short_liquidated"),
+            "total_bucket_count": None,
+            "fail_reason": "missing_bucket_count_denominator: caller must pass total_bucket_count "
+                           "from SQL CTE 1 raw_buckets count(*) to avoid 64× anti-conservative bias",
+        }
     if total_bucket_count <= 0:
         return {
             "long_trigger_rate": 0.0,
@@ -849,6 +886,7 @@ def _extract_trigger_rows(
     n_usd: int,
     m_dominant: int,
     floor_usd: int,
+    notional_pct_floor: float,
     side_dom: float,
     quiet_sec: int,
     horizon_min: int,
@@ -879,6 +917,12 @@ def _extract_trigger_rows(
             continue
         # 過 magnitude floor。
         if cn < floor_usd:
+            continue
+        # E2 round-1 CRIT-1 fix：過 notional_pct_floor（24h percentile rank）。
+        # spec v0.3 line 191 把 notional_percentile_24h >= notional_pct_floor
+        # 列為 magnitude_ok 硬 gate；round 1 漏實作 → 67% sweep grid silent skip。
+        notional_pct = _safe_float(row.get("notional_pct_24h"))
+        if notional_pct is None or notional_pct < notional_pct_floor:
             continue
         # 過 side dominance floor。
         sdr = _safe_float(row.get("side_dominance_ratio"))
@@ -922,6 +966,126 @@ def _extract_trigger_rows(
             "quiet_sec": quiet_sec,
         })
     return out
+
+
+def _build_exclusion_counts(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    k_event_count: int,
+    n_usd: int,
+    m_dominant: int,
+    floor_usd: int,
+    notional_pct_floor: float,
+    side_dom: float,
+) -> dict[str, int]:
+    """5-category exclusion counts per spec v0.3 line 250。
+
+    E2 round-1 HIGH-4 fix：spec v0.3 mandates 5 exclusion categories
+    (stale / missing / mixed / quiet_window / density_floor_fail)；round 1
+    metric module 漏實作。本 helper 從 raw row 推 5 個 disjoint counters，
+    讓 S0R-3 wrapper 把資料直接寫入 packet 之 exclusion_counts 欄位。
+
+    為什麼 disjoint：first-match exit pattern；同一 row 只計入第一個 fail
+    category，避免雙重計算 inflate exclusion total。
+    """
+    counts = {
+        "stale": 0,              # missing essential fields (ec / cn / dec / entry_mid / exit_mid)
+        "missing_dominance": 0,  # dominant_side ∈ Mixed / None / 不認識
+        "mixed": 0,              # mixed-dominance per provider
+        "quiet_window_fail": 0,  # entry_mid 與 exit_mid 之 timestamp 順序 violation
+        "density_floor_fail": 0, # ec/cn/dec/floor_usd/notional_pct/side_dom 任一不過
+    }
+    for row in rows:
+        ec = _safe_int(row.get("event_count_5m"))
+        cn = _safe_float(row.get("cluster_notional_5m"))
+        dec = _safe_int(row.get("dominant_event_count"))
+        entry_mid = _safe_float(row.get("entry_mid"))
+        exit_mid = _safe_float(row.get("exit_mid"))
+        if ec is None or cn is None or dec is None or entry_mid is None or exit_mid is None:
+            counts["stale"] += 1
+            continue
+        dominant_side = str(row.get("dominant_side") or "")
+        if dominant_side == "mixed":
+            counts["mixed"] += 1
+            continue
+        if dominant_side not in ("long_liquidated", "short_liquidated"):
+            counts["missing_dominance"] += 1
+            continue
+        if entry_mid <= 0 or exit_mid <= 0:
+            counts["quiet_window_fail"] += 1
+            continue
+        sdr = _safe_float(row.get("side_dominance_ratio"))
+        notional_pct = _safe_float(row.get("notional_pct_24h"))
+        if (
+            ec < k_event_count
+            or cn < n_usd
+            or dec < m_dominant
+            or cn < floor_usd
+            or (notional_pct is None or notional_pct < notional_pct_floor)
+            or (sdr is None or sdr < side_dom)
+        ):
+            counts["density_floor_fail"] += 1
+            continue
+    return counts
+
+
+def _compute_baseline_lift(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    cost_bps: float,
+    horizon_min: int,
+    quiet_sec: int,
+    notional_pct_floor: float,
+    side_dom: float,
+) -> dict[str, object]:
+    """Baseline lift vs single-event-bucket noise baseline，per spec v0.3 line 253。
+
+    E2 round-1 HIGH-4 fix：spec v0.3 mandates baseline_lift 為 mandatory
+    report field。比較 default-tight density (K=3/N=10k/M=2) trigger 集
+    avg_net_bps vs default-loose (K=1/N=1/M=1) baseline 集 avg_net_bps；
+    差為 density-floor 帶來之 lift。
+
+    為什麼用 K=1 / N=1 / M=1 為 baseline：spec v0.3 line 253 寫
+    "single-event-bucket noise baseline" — 即不過 density floor 之 raw
+    bucket return；用 K=1/N=1/M=1 等價於「任意 bucket with at least 1 event」。
+
+    返回 dict 含：
+      avg_net_tight: tight floor trigger avg net bps
+      avg_net_loose: loose baseline trigger avg net bps
+      baseline_lift_bps: tight - loose（正值表 density-floor 有助）
+      n_tight, n_loose: 樣本數。
+    """
+    tight = _extract_trigger_rows(
+        rows,
+        k_event_count=3, n_usd=10_000, m_dominant=2,
+        floor_usd=10_000, notional_pct_floor=notional_pct_floor,
+        side_dom=side_dom, quiet_sec=quiet_sec,
+        horizon_min=horizon_min, cost_bps=cost_bps,
+    )
+    loose = _extract_trigger_rows(
+        rows,
+        k_event_count=1, n_usd=1, m_dominant=1,
+        floor_usd=0, notional_pct_floor=0.0,
+        side_dom=0.0, quiet_sec=quiet_sec,
+        horizon_min=horizon_min, cost_bps=cost_bps,
+    )
+    tight_nets = [float(t["net_bps"]) for t in tight if _safe_float(t.get("net_bps")) is not None]
+    loose_nets = [float(t["net_bps"]) for t in loose if _safe_float(t.get("net_bps")) is not None]
+    avg_tight = statistics.mean(tight_nets) if tight_nets else None
+    avg_loose = statistics.mean(loose_nets) if loose_nets else None
+    lift = (
+        avg_tight - avg_loose
+        if avg_tight is not None and avg_loose is not None
+        else None
+    )
+    return {
+        "avg_net_tight": avg_tight,
+        "avg_net_loose": avg_loose,
+        "baseline_lift_bps": lift,
+        "n_tight": len(tight),
+        "n_loose": len(loose),
+        "passed": (lift is not None and lift > BASELINE_LIFT_FLOOR_BPS),
+    }
 
 
 # ============================================================================
@@ -985,6 +1149,7 @@ def compute_stage0r(
     n_usd: int = 10_000,
     m_dominant: int = 2,
     floor_usd: int = 10_000,
+    notional_pct_floor: float = 0.95,  # E2 round-1 CRIT-1 fix：8th sweep axis spec v0.3 line 191/264
     side_dom: float = 0.80,
     quiet_sec: int = 30,
     k_prior: int = 0,
@@ -1013,7 +1178,11 @@ def compute_stage0r(
 
     total_bucket_count：所有 5m bucket 數（不論是否 trigger）；用於計算
     long/short trigger rate 分母。Caller 從 SQL CTE 1 raw_buckets 取 count(*)
-    傳入。若 None，fallback 用 len(rows)（偏保守但仍有意義）。
+    傳入。若 None → 三態（passed=None + 0R RED 強迫 caller 顯式傳）。
+    E2 round-1 CRIT-2 fix：原 fallback len(rows)（trigger 候選 ~1000）vs
+    真實 raw_buckets count (~64500) 低估分母 64×、trigger rate 高估 64×、
+    BOTH-direction floor 0.1% 永遠 trivially pass — 8b crowded_long_fade
+    dead-direction 教訓失效。fail-closed 比 silent anti-conservative 安全。
 
     raw_5m_bucket_count / after_k/n/m_count：density-floor efficacy 用；
     若 None，fallback skip 該 check。
@@ -1039,6 +1208,7 @@ def compute_stage0r(
                 "cluster_n_eff_penalty": "skipped",
                 "cost_realism_gate": "skipped",
             },
+            "regime_annotation": _build_regime_annotation(),  # MIT round-1 MUST-FIX
             "n_per_cell": 0,
             "pooled_n": 0,
             "pooled_n_eff": 0,
@@ -1051,6 +1221,7 @@ def compute_stage0r(
         n_usd=n_usd,
         m_dominant=m_dominant,
         floor_usd=floor_usd,
+        notional_pct_floor=notional_pct_floor,
         side_dom=side_dom,
         quiet_sec=quiet_sec,
         horizon_min=horizon_min,
@@ -1058,8 +1229,10 @@ def compute_stage0r(
     )
 
     n_per_cell = len(triggers)
-    if total_bucket_count is None:
-        total_bucket_count = len(rows)
+    # E2 round-1 CRIT-2 fix：fail-closed when caller omits total_bucket_count。
+    # 用 sentinel None 標 missing；direction_check 收到 None 會回 passed=None +
+    # explicit fail_reason，下游 verdict 收到此 reason 必加 RED。
+    total_bucket_count_missing = total_bucket_count is None
 
     # === Cluster-aware n_eff ===
     cluster_neff = _n_eff_cluster_aware(
@@ -1120,6 +1293,9 @@ def compute_stage0r(
     )
 
     # === Density-floor efficacy（optional：caller 傳 raw/after_k/n/m count）===
+    # E2 round-1 HIGH-1 fix：三態 passed（True/False/None）；None = caller 未傳
+    # raw_5m_bucket_count → 不靜默 PASS，packet 顯示 skipped=True 並標 reason，
+    # 下游 verdict 邏輯只在明確 False 時 RED（None 不阻塞但要 surface 給 reviewer）。
     if all(v is not None for v in (raw_5m_bucket_count, after_k_count, after_n_count, after_m_count)):
         density_efficacy = _density_floor_efficacy(
             int(raw_5m_bucket_count or 0),
@@ -1127,15 +1303,37 @@ def compute_stage0r(
             int(after_n_count or 0),
             int(after_m_count or 0),
         )
+        density_efficacy["skipped"] = False
     else:
         density_efficacy = {
-            "passed": True,  # 不可判定 → 不阻塞；標 SKIPPED
+            "passed": None,            # 三態：明確不可判定，不靜默 PASS
             "fail_reason": None,
-            "reason_for_skip": "raw/after_k/n/m count not provided by caller",
+            "skipped": True,
+            "reason_for_skip": "raw/after_k/n/m count not provided by caller; "
+                               "S0R-3 wrapper必須明確 surface 給 reviewer",
         }
 
     # === False positive rate ===
     fp_check = _false_positive_rate(triggers, bps_band=FP_BAND_BPS, cost_bps=cost_bps)
+
+    # === E2 round-1 HIGH-4 fix：baseline lift + exclusion counts ===
+    baseline_lift = _compute_baseline_lift(
+        rows,
+        cost_bps=cost_bps,
+        horizon_min=horizon_min,
+        quiet_sec=quiet_sec,
+        notional_pct_floor=notional_pct_floor,
+        side_dom=side_dom,
+    )
+    exclusion_counts = _build_exclusion_counts(
+        rows,
+        k_event_count=k_event_count,
+        n_usd=n_usd,
+        m_dominant=m_dominant,
+        floor_usd=floor_usd,
+        notional_pct_floor=notional_pct_floor,
+        side_dom=side_dom,
+    )
 
     # === Cost edge ratio ===
     cost_edge_ratio = (
@@ -1150,6 +1348,14 @@ def compute_stage0r(
 
     # === 收集 RED reasons（hard failures，非 direction-side）===
     other_red_reasons: list[str] = []
+
+    # E2 round-1 CRIT-2 fix：caller 未傳 total_bucket_count → hard RED。
+    if total_bucket_count_missing:
+        other_red_reasons.append(
+            "missing_bucket_count_denominator: caller must pass total_bucket_count "
+            "from SQL CTE 1 raw_buckets count(*) to avoid 64× anti-conservative bias "
+            "in both-direction trigger rate floor check"
+        )
 
     if n_per_cell < n_min_per_cell:
         other_red_reasons.append(f"n_per_cell {n_per_cell} < {n_min_per_cell}")
@@ -1190,7 +1396,9 @@ def compute_stage0r(
             f"cost_edge_ratio {cost_edge_ratio} >= {COST_EDGE_RATIO_MAX}"
         )
 
-    if not density_efficacy.get("passed"):
+    # E2 round-1 HIGH-1 fix：density_efficacy.passed 是三態（True/False/None）。
+    # 只在明確 False 時 RED；None 表 skipped（S0R-3 wrapper 必獨立 surface）。
+    if density_efficacy.get("passed") is False:
         fr = density_efficacy.get("fail_reason")
         if fr:
             other_red_reasons.append(str(fr))
@@ -1243,8 +1451,11 @@ def compute_stage0r(
     short_branch = _branch_eval(short_triggers)
 
     # Both-direction floor failure（trigger rate）合併入 branch verdict。
-    long_passed = bool(long_branch["passed"]) and bool(direction_check["long_passed"])
-    short_passed = bool(short_branch["passed"]) and bool(direction_check["short_passed"])
+    # E2 round-1 CRIT-2 fix：direction_check.long_passed/short_passed 三態（True/False/None）；
+    # None 表 caller 未傳 total_bucket_count，已在 other_red_reasons 補 hard RED，
+    # 此處 fail-closed 將 None 視為 False 不通過 branch promotion。
+    long_passed = bool(long_branch["passed"]) and direction_check.get("long_passed") is True
+    short_passed = bool(short_branch["passed"]) and direction_check.get("short_passed") is True
 
     # === Verdict ===
     verdict, verdict_reasons = _derive_pass_verdict(
@@ -1309,16 +1520,49 @@ def compute_stage0r(
         "distinct_days": distinct_days,
         "sample_window_passed": sample_window_passed,
         "tombstone_risk": tombstone_risk,
+        # E2 round-1 HIGH-4 fix：baseline_lift + exclusion_counts mandatory per spec v0.3。
+        "baseline_lift": baseline_lift,
+        "exclusion_counts": exclusion_counts,
+        # MIT round-1 governance MUST-FIX：bear-regime annotation。
+        "regime_annotation": _build_regime_annotation(),
         "cell_params": {
             "k_event_count": k_event_count,
             "n_usd": n_usd,
             "m_dominant": m_dominant,
             "floor_usd": floor_usd,
+            "notional_pct_floor": notional_pct_floor,  # E2 round-1 CRIT-1 fix
             "side_dom": side_dom,
             "quiet_sec": quiet_sec,
             "horizon_min": horizon_min,
             "cluster_window_min": cluster_window_min,
         },
+    }
+
+
+# ============================================================================
+# 規制標註：MIT round-1 MUST-FIX bear-regime annotation
+# ============================================================================
+
+
+def _build_regime_annotation() -> dict[str, object]:
+    """Stage 0R verdict JSON 必含 regime annotation（per MIT round-1 governance MUST-FIX）。
+
+    為什麼必加：MIT 2026-05-18 dual review §3.3 + 8b RED_FINAL §3.5：
+    2026-05-11 ~ 2026-05-18 為 crypto bear regime（funding distribution
+    left-skewed、INJUSDT 5/13 -60bps 單 hour 崩盤）。8c long_liq triggers
+    在 bear regime 集中爆量，short_liq 罕見；statistical generalization 至
+    bull / sideways regime UNVERIFIED。
+
+    Stage 0R 7d 樣本是 lower-bound sanity gate，**不是** generalization gate。
+    AlphaSurface Tier-2 production wire 必 require 30d cross-regime sample。
+    """
+    return {
+        "sample_period_start": "2026-05-11",
+        "sample_period_end": "2026-05-18",
+        "regime_label": "bear",
+        "cross_regime_validation_required": True,
+        "live_promotion_requires": "30d cross-regime sample with bull + ranging coverage",
+        "rationale_source": "MIT 2026-05-18 dual review §3.3 + 8b RED_FINAL §3.5",
     }
 
 
@@ -1355,6 +1599,7 @@ def compute_stage0r_sweep(
     m_grid: Sequence[int] | None = None,
     side_dom_grid: Sequence[float] | None = None,
     floor_grid: Sequence[int] | None = None,
+    pct_grid: Sequence[float] | None = None,  # E2 round-1 CRIT-1 fix：8th axis
     quiet_grid: Sequence[int] | None = None,
     k_prior: int = 0,
     bb_demo_bias_confirmed: bool = True,
@@ -1368,6 +1613,9 @@ def compute_stage0r_sweep(
     為什麼 sweep 而非單 cell：spec v0.3 §"adjacent grid cells must form a
     plateau" — 必須驗多 cell 環繞 best cell；single lucky cell 不可信。
 
+    E2 round-1 CRIT-1 fix：sweep 升 8 維（加 notional_pct_floor 軸）— 原 7-D
+    3888 cells 只覆蓋 33% search space；現 8-D 11664 cells 對齊 spec K_total。
+
     返回 dict 含：
       sweep_cells: list[dict]，每 cell 完整 compute_stage0r 結果。
       best_per_tier_per_direction: 4 cells（high × {long, short}, medium × {long, short}）
@@ -1379,6 +1627,7 @@ def compute_stage0r_sweep(
     m_grid = tuple(m_grid) if m_grid is not None else DEFAULT_M_GRID
     side_dom_grid = tuple(side_dom_grid) if side_dom_grid is not None else DEFAULT_SIDE_DOM_GRID
     floor_grid = tuple(floor_grid) if floor_grid is not None else DEFAULT_FLOOR_GRID
+    pct_grid = tuple(pct_grid) if pct_grid is not None else DEFAULT_PCT_GRID
     quiet_grid = tuple(quiet_grid) if quiet_grid is not None else DEFAULT_QUIET_GRID
     horizon_grid = tuple(horizon_grid) if horizon_grid is not None else DEFAULT_HORIZON_GRID
 
@@ -1391,6 +1640,13 @@ def compute_stage0r_sweep(
             "eligible_for_demo_canary_per_tier": {
                 tier: {"long": False, "short": False} for tier in DENSITY_TIERS
             },
+            # E2 round-1 HIGH-2 fix：refusal packet 補對稱 keys（與 success path 同 schema）。
+            "best_per_tier_per_direction": {
+                tier: {"long_liquidated": None, "short_liquidated": None}
+                for tier in DENSITY_TIERS
+            },
+            "symbol_tiers": {},
+            "regime_annotation": _build_regime_annotation(),  # MIT round-1 MUST-FIX
             "sweep_cells": [],
             "sweep_meta": {
                 "bb_demo_bias_confirmed": False,
@@ -1400,37 +1656,40 @@ def compute_stage0r_sweep(
         }
 
     sweep_cells: list[dict[str, object]] = []
+    # E2 round-1 CRIT-1 + HIGH-3 fix：8-D loop（加 pct 軸）。
     for k in k_grid:
         for n in n_usd_grid:
             for m in m_grid:
                 for fl in floor_grid:
-                    for sd in side_dom_grid:
-                        for q in quiet_grid:
-                            for h in horizon_grid:
-                                cell_result = compute_stage0r(
-                                    rows,
-                                    cost_bps=cost_bps,
-                                    horizon_min=h,
-                                    k_event_count=k,
-                                    n_usd=n,
-                                    m_dominant=m,
-                                    floor_usd=fl,
-                                    side_dom=sd,
-                                    quiet_sec=q,
-                                    k_prior=k_prior,
-                                    bootstrap_iters=bootstrap_iters,
-                                    cluster_window_min=cluster_window_min,
-                                    rng_seed=rng_seed,
-                                    bb_demo_bias_confirmed=True,
-                                    total_bucket_count=total_bucket_count,
-                                )
-                                # 為 sweep_cells 加 explicit grid coords。
-                                cell_result["grid_coords"] = {
-                                    "k": k, "n_usd": n, "m": m,
-                                    "floor_usd": fl, "side_dom": sd,
-                                    "quiet_sec": q, "horizon_min": h,
-                                }
-                                sweep_cells.append(cell_result)
+                    for pct in pct_grid:
+                        for sd in side_dom_grid:
+                            for q in quiet_grid:
+                                for h in horizon_grid:
+                                    cell_result = compute_stage0r(
+                                        rows,
+                                        cost_bps=cost_bps,
+                                        horizon_min=h,
+                                        k_event_count=k,
+                                        n_usd=n,
+                                        m_dominant=m,
+                                        floor_usd=fl,
+                                        notional_pct_floor=pct,
+                                        side_dom=sd,
+                                        quiet_sec=q,
+                                        k_prior=k_prior,
+                                        bootstrap_iters=bootstrap_iters,
+                                        cluster_window_min=cluster_window_min,
+                                        rng_seed=rng_seed,
+                                        bb_demo_bias_confirmed=True,
+                                        total_bucket_count=total_bucket_count,
+                                    )
+                                    # 為 sweep_cells 加 explicit grid coords。
+                                    cell_result["grid_coords"] = {
+                                        "k": k, "n_usd": n, "m": m,
+                                        "floor_usd": fl, "pct": pct, "side_dom": sd,
+                                        "quiet_sec": q, "horizon_min": h,
+                                    }
+                                    sweep_cells.append(cell_result)
 
     # === Per-tier × per-direction best cell + verdict ===
     # 從 rows 推 symbol → tier 分類；用 default density floors (K=3, N=10k, M=2)
@@ -1438,7 +1697,8 @@ def compute_stage0r_sweep(
     default_triggers = _extract_trigger_rows(
         rows,
         k_event_count=3, n_usd=10_000, m_dominant=2,
-        floor_usd=10_000, side_dom=0.80, quiet_sec=30,
+        floor_usd=10_000, notional_pct_floor=0.95,  # E2 round-1 CRIT-1 fix
+        side_dom=0.80, quiet_sec=30,
         horizon_min=PRIMARY_HORIZON_MIN, cost_bps=cost_bps,
     )
     symbol_tiers = _classify_symbols_by_tier(default_triggers)
@@ -1504,6 +1764,8 @@ def compute_stage0r_sweep(
         "eligible_for_demo_canary_per_tier": per_tier_per_direction_passed,
         "best_per_tier_per_direction": per_tier_per_direction_best,
         "symbol_tiers": symbol_tiers,
+        # MIT round-1 governance MUST-FIX：bear-regime annotation。
+        "regime_annotation": _build_regime_annotation(),
         "sweep_cells": sweep_cells,
         "sweep_meta": {
             "bb_demo_bias_confirmed": True,
@@ -1512,6 +1774,7 @@ def compute_stage0r_sweep(
             "m_grid": list(m_grid),
             "side_dom_grid": list(side_dom_grid),
             "floor_grid": list(floor_grid),
+            "pct_grid": list(pct_grid),  # E2 round-1 CRIT-1 fix：8th axis
             "quiet_grid": list(quiet_grid),
             "horizon_grid": list(horizon_grid),
             "total_cells": len(sweep_cells),
@@ -1538,13 +1801,14 @@ def grid_cell_count(
     n_usd_grid: Sequence[int] = DEFAULT_N_USD_GRID,
     m_grid: Sequence[int] = DEFAULT_M_GRID,
     floor_grid: Sequence[int] = DEFAULT_FLOOR_GRID,
+    pct_grid: Sequence[float] = DEFAULT_PCT_GRID,  # E2 round-1 CRIT-1 fix
     side_dom_grid: Sequence[float] = DEFAULT_SIDE_DOM_GRID,
     quiet_grid: Sequence[int] = DEFAULT_QUIET_GRID,
     horizon_grid: Sequence[int] = DEFAULT_HORIZON_GRID,
 ) -> int:
-    """Return total cell count of the 7-D sweep grid。"""
+    """Return total cell count of the 8-D sweep grid（含 pct_grid）。"""
     return (
         len(k_grid) * len(n_usd_grid) * len(m_grid)
-        * len(floor_grid) * len(side_dom_grid) * len(quiet_grid)
-        * len(horizon_grid)
+        * len(floor_grid) * len(pct_grid) * len(side_dom_grid)
+        * len(quiet_grid) * len(horizon_grid)
     )
