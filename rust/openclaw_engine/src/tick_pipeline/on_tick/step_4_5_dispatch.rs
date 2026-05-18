@@ -22,7 +22,7 @@ use std::ops::ControlFlow;
 use std::time::Instant;
 
 use openclaw_core::alpha_surface::{
-    AlphaSurface, BtcLeadLagPanel, FundingCurveSnapshot, OIDeltaPanel,
+    AlphaSurface, BtcLeadLagPanel, FundingCurveSnapshot, LiquidationPulsePanel, OIDeltaPanel,
 };
 use openclaw_core::governance_core::LeaseOutcome;
 use openclaw_core::signals::Signal;
@@ -226,10 +226,21 @@ impl TickPipeline {
                 .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone())),
             _ => None, // demo / live_demo / live → fence 主防線
         };
+        // W-AUDIT-8a C1-LIQ-WRITER (2026-05-18) — LiquidationPulsePanel try_read
+        // wire-up：slot 未注入（本 wave provider only / consumer 待 W-AUDIT-8c）
+        // → None，與 aggregator 未 emit / 5m 視窗無事件等同語意。
+        // lifetime 約束同 btc_lead_lag：先 clone 到 local var 再 borrow 進 surface，
+        // panel.pulses HashMap 內 LiquidationEvent vec clone 成本接受（5m 視窗
+        // 內事件數有限 + 60s flush 一次）。
+        let liquidation_pulse_panel_owned: Option<LiquidationPulsePanel> = self
+            .liquidation_pulse_panel_slot
+            .as_ref()
+            .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone()));
         let alpha_surface = AlphaSurface {
             funding_curve: funding_curve_owned.as_ref(),
             oi_delta_panel: oi_delta_panel_owned.as_ref(),
             btc_lead_lag: btc_lead_lag_panel_owned.as_ref(),
+            liquidation_pulse: liquidation_pulse_panel_owned.as_ref(),
             ..AlphaSurface::tier1_only(indicators, indicators_5m.as_ref())
         };
 
