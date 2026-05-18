@@ -9877,3 +9877,323 @@ crypto pair」端對端 gate chain 行為。
 
 ### 完整報告路徑
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_1_impl.md`
+
+## 2026-05-18 — W-AUDIT-8a B-REM-1 rebase: multi-session race + isolated worktree 拯救
+
+**任務**：把 `feature/w-audit-8a-b-rem-1-dispatch-snapshot-contract` (HEAD 441599a7) rebase 到
+`main`（PM spec 寫 59d9338b，實 rebase 完成時已是 1b614daf）。Single-conflict
+on `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs` EOF。
+
+### 教訓 1：在 srv/ 主 worktree rebase 被 sibling sessions 反覆污染
+
+第一次 attempt：在 `srv/` 內 stash sibling unstaged → 解 conflict → git add → continue。
+但 `git rebase --continue` 寫出的 commit 是 `0278d2a3 "docs(adr): ADR-0023
+SourceAvailability schema"`（B-REM-5 sibling 的工作）而不是 B-REM-1 commit message。
+
+**Root cause**：rebase --continue 用 `.git/rebase-merge/message` + 當前 index 寫 commit。
+Sibling session 在我 stash 與 --continue 之間：
+1. 寫了 untracked `docs/adr/0023-source-availability-schema.md`
+2. `git add` 把它 stage 到 index
+3. （可能也改了 rebase-merge/message，或它有 commit hook 介入）
+
+我 --continue 觸發後 git 把整個 index（含 sibling 偷加的 ADR file）+ 一個被
+修改過的 commit message 包成 commit。我那時看到 reflog 才發現 commit message
+不對，但**主 worktree 已被污染**，被迫 `git reset --hard 441599a7` 重來。
+
+第二次 attempt：再次 stash → resolve → add → continue，遇到 sibling 直接從外部
+跑 `git rebase --abort + git checkout main` 把我整個 rebase 滅掉。
+
+### 教訓 2：應該第一時間用獨立 worktree
+
+正確做法：`git worktree add /tmp/e1-rebase-wt <branch>`，在 /tmp 內所有 sibling
+session 影響不到 `.git/rebase-merge`、stash、reflog。第三次 attempt：
+
+```bash
+git worktree add /tmp/e1-rebase-wt feature/w-audit-8a-b-rem-1-dispatch-snapshot-contract
+cd /tmp/e1-rebase-wt
+git rebase main              # 觸發 conflict
+# Edit step_4_5_dispatch.rs 移除 <<<<< / ===== / >>>>> 標記
+git add rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs
+GIT_EDITOR=true git rebase --continue
+# → commit message 正確：feat(w-audit-8a-b-rem-1)...
+cargo test -p openclaw_engine --lib   # 2978 passed / 0 failed / 1 ignored
+git push --force-with-lease origin <branch>
+cd <main worktree>
+git worktree remove /tmp/e1-rebase-wt --force
+```
+
+一次過。沒污染 srv/。Sibling sessions 沒被打擾。
+
+### 教訓 3：Rebase 衝突 EOF 處理規則
+
+`step_4_5_dispatch.rs` HEAD 側（main）只有空白行；branch 側有 245-line test mod
++ 結尾 `}` + trailing newline。Resolution：完全採納 branch 側（test mod 是
+B-REM-1 IMPL 的目的），確保檔尾單一 `\n`。1946 lines，tail bytes `};\n  }\n}\n`。
+
+### 教訓 4：Stash pop 在 multi-session 環境會留遺留
+
+我 stash 了 sibling 的 `memory/MEMORY.md` + `docs/governance_dev/amendments/*.md` +
+5 個 agent memory.md + 2 個未追蹤 report。Rebase 完 pop stash：memory/MEMORY.md
+那 hunk「無法 apply」（sibling 已改過 disk），stash 自動保留，其他 hunk 都
+apply 成功。我沒 force pop，留 stash@{0} 給 sibling 自處理。
+
+### 教訓 5：PM 給的 main HEAD 可能在你執行時已 stale
+
+PM spec 寫 main = 59d9338b，但我 fetch 之後 main 是 1b614daf（sibling 已往
+main 補了一個 ADR commit）。Rebase target 永遠是 fetch 完的最新 origin/main，
+不是 spec 文字。Rebase 結果一樣正確（branch 在 main 之上 1 commit），但
+verify「branch behind main」要用 runtime 值不是 spec 值。
+
+### Pre-rebase / post-rebase 驗證指令
+
+```bash
+# Pre
+git fetch origin
+git merge-base main <branch>          # 應 = 拆分點（5cfe1f68）
+git rev-parse origin/main             # 當前 main（可能已超 spec）
+
+# Post-rebase
+git log <branch>..main --oneline      # 應 empty
+git log main..<branch> --oneline      # 應只有 1 commit（B-REM-1）
+cargo test -p openclaw_engine --lib   # 2978 / 0 / 1
+cargo test -p openclaw_engine --lib b_rem_1   # 6 / 0 / 0
+```
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--w_audit_8a_b_rem_1_rebase.md`
+
+---
+
+## 2026-05-18 — Phase 1b healthcheck [62-65] standalone scripts IMPL
+
+**任務**：PM dispatch (single-agent background) — AMD-2026-05-15-02 v0.6 §4.1 規範的 healthcheck [62][63][64][65] 在 `helper_scripts/canary/healthchecks/` 不存在；QA 2026-05-18 post-deploy verify 因此 blocked。需 IMPL 4 個 standalone Python CLI 腳本 + 共享 helper + pytest + Linux PG empirical run。
+
+**交付**（9 個新檔，total ~1100 LOC）：
+
+| 檔 | LOC | 用途 |
+|---|---|---|
+| `helper_scripts/canary/healthchecks/__init__.py` | 26 | package 入口 + MODULE_NOTE |
+| `helper_scripts/canary/healthchecks/_common.py` | 209 | PG conn / Wilson 95% CI / verdict ladder / argparse |
+| `helper_scripts/canary/healthchecks/62_close_maker_fill_rate.py` | 175 | [62] Wilson-CI gate |
+| `helper_scripts/canary/healthchecks/63_close_maker_fallback_audit.py` | 213 | [63] enum allowlist + NULL ladder |
+| `helper_scripts/canary/healthchecks/64_close_maker_rate_limit_pause_duration.py` | 226 | [64] per-symbol + global backoff |
+| `helper_scripts/canary/healthchecks/65_reject_sample_healthcheck.py` | 198 | [65] PostOnly + MaxPending coverage |
+| `helper_scripts/canary/healthchecks/tests/conftest.py` | 73 | 動態 importlib loader（digit-prefix 檔名繞過） |
+| `helper_scripts/canary/healthchecks/tests/test_common.py` | 121 | Wilson CI 對 reference 表 / verdict ladder |
+| `helper_scripts/canary/healthchecks/tests/test_62_fill_rate.py` | 85 | [62] run() unit tests |
+| `helper_scripts/canary/healthchecks/tests/test_63_fallback_audit.py` | 89 | [63] run() unit tests |
+| `helper_scripts/canary/healthchecks/tests/test_64_rate_limit.py` | 91 | [64] run() unit tests |
+| `helper_scripts/canary/healthchecks/tests/test_65_reject_sample.py` | 93 | [65] run() unit tests |
+
+**驗證結果**：
+- Mac pytest: 44/44 PASS
+- Linux pytest (trade-core ssh): 44/44 PASS
+- Linux PG empirical: 4 scripts 全跑成功；4/4 verdict=INSUFFICIENT_SAMPLE（與 QA 2026-05-18 報告 0 close_maker_attempt=TRUE in 7d 一致）
+- V094 schema 確認已 land（V94+V95 applied / close_maker_attempt boolean + close_maker_fallback_reason text）
+
+**關鍵設計決策**：
+1. **Standalone CLI 不複用 passive_wait_healthcheck**：passive_wait 是 cron orchestrator-driven（吃 cur 參數、聚合多 check），耦合 runner state；QA 24h verify 需單獨 ssh ad-hoc 跑某一 check，所以本 package 是 self-contained PG conn + emit JSON 模式。SQL 語意與 passive_wait_healthcheck [70][71][72][73][74] 對齊但物理層獨立。
+2. **檔名以 digit prefix**：spec §4.1 與 AMD 用 `[62][63][64][65]` 編號；檔名 `62_*.py` 不符 Python module 文法但符合 spec 要求。tests 用 `importlib.util.spec_from_file_location` 動態載入繞過。
+3. **Wilson CI 對 reference 表驗證**：n=100 k=50 → (0.404, 0.596) ±0.005；n=10 k=7 → (0.397, 0.892) ±0.01；n=30 k=0 → (0, 0.115) ±0.01；對齊 binomial proportion CI 教科書數值。
+4. **--pass-lower / --warn-lower 可注入**：spec §8.1 預設 60/40；AC-19 14d extended observation 用 50/25 conservative ladder — 透過 CLI 切換不寫死。
+
+**注釋遵循 bilingual-comment-style**：新代碼默認中文；技術詞 (Wilson CI / PostOnly / EC_PostOnlyWillTakeLiquidity) 保留英文；MODULE_NOTE 每檔頭。
+
+**未動範圍**：
+- Rust 代碼 0 改動
+- TOML 0 改動
+- migrations 0 改動
+- writer / dispatch.rs 0 改動
+
+**Operator 下一步**：
+- QA T+6h 可重派 24h post-deploy verification，引用 `[62][63][64][65]` 4 個 standalone scripts
+- 4 scripts 當前 INSUFFICIENT_SAMPLE = 預期（Phase 2a Demo Sunday low-volume window）；首批 close_maker_attempt=TRUE samples 進 trading.fills 後自動跑出 PASS/WARN/FAIL verdict
+- E2 review 對齊 dispatch chain：E1→E2→E4→QA→PM；本 IMPL 等 E2 review 後 operator 決定 commit
+
+### 完整報告路徑
+（本任務不寫 report .md，按 prompt 規範直接返回 assistant text；下方資訊作 memory log 用）
+
+
+---
+
+## 2026-05-18 — W-AUDIT-8a C1-LIQ-WRITER LiquidationPulse Provider IMPL
+
+### 任務摘要
+W-AUDIT-8a Wave 1 C1-LIQ-WRITER per PA decomposition §6.3。LiquidationPulse 從 dormant single-symbol struct 升為 per-symbol panel；新建 LiquidationPulseAggregator 從 PriceEventKind::Liquidation 事件流 + BB cor-side 映射產生 5m rolling cluster pulse。Provider only，consumer 留 W-AUDIT-8c。
+
+### Branch + commit
+- Branch: `feature/w-audit-8a-c1-liq-writer-impl`
+- Commit: `7ab6c22d` (推 origin)
+- 7 files modified + 1 new file = 8 files / +871 / -13 LOC
+
+### 修改清單
+| 檔 | 性質 | LOC |
+|---|---|---|
+| `rust/openclaw_core/src/alpha_surface.rs` | 新增 `LiquidationPulsePanel` struct + 改 `LiquidationPulse` 加 5m notional/event_count 欄位 + 改 `AlphaSurface.liquidation_pulse` 型別 `Option<&LiquidationPulsePanel>` + 4 new tests | +160/-13 |
+| `rust/openclaw_engine/src/panel_aggregator/liquidation_pulse.rs` (新) | LiquidationPulseAggregator core + 14 tests (BB cor-side both directions / per-symbol isolation / 5m window / retain margin / non-cohort skip / non-Liquidation skip / invalid metadata defensive / max events cap / source_tier stability / mixed dominant threshold / empty/outside window None) | +615/-0 |
+| `rust/openclaw_engine/src/panel_aggregator/mod.rs` | register `liquidation_pulse` module + `LiquidationPulseAggregator` re-export + `create_liquidation_pulse_slot()` 工廠 + `LiquidationPulsePanelSlot` import | +20/-1 |
+| `rust/openclaw_engine/src/ipc_server/slots.rs` | 新增 `LiquidationPulsePanelSlot` typedef | +29/-0 |
+| `rust/openclaw_engine/src/ipc_server/mod.rs` | re-export `LiquidationPulsePanelSlot` | +3/-2 |
+| `rust/openclaw_engine/src/tick_pipeline/mod.rs` | 新增 `liquidation_pulse_panel_slot` field | +8/-0 |
+| `rust/openclaw_engine/src/tick_pipeline/pipeline_ctor.rs` | init field None + `set_liquidation_pulse_panel_slot()` setter | +21/-0 |
+| `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs` | try_read + clone + wire `LiquidationPulsePanel` 進 surface | +13/-1 |
+
+### 關鍵設計決策
+1. **per-symbol panel vs 單一 panel field**：PA spec §6.3 明示 per-symbol HashMap；strategy 端 O(1) lookup。複用 `LiquidationPulse` 為「單 symbol pulse 摘要」+ 新建 `LiquidationPulsePanel` 為「panel 集合」。
+2. **型別 breaking change 安全性**：`AlphaSurface.liquidation_pulse` 從 `Option<&LiquidationPulse>` 改 `Option<&LiquidationPulsePanel>` — 全代碼搜索唯一 consumer 是 replay/strategy_adapter.rs 的 `is_none()` 斷言（仍兼容） + alpha_surface.rs constructors（None 對任何 Option<&T> 有效），無 strategy 真實消費。
+3. **BB cor-side 雙重 lock**：aggregator on_liquidation 內 Buy→LongLiquidated / Sell→ShortLiquidated；alpha_surface test `liquidation_side_bb_corside_mapping_invariant` 鎖 serde snake_case；parsers.rs:344-348 + ws_client/tests.rs:324-366 是第三層 lock。
+4. **無 PG 寫入**：market.liquidations 已存原始 row（V095 PK 升級 + market_writer 既有路徑），本 aggregator 純 in-memory IPC provider，無重複 PG 寫入；snapshot_panel 是 borrow-only 計算。
+5. **5m sliding window + 60s retain margin**：trim cutoff = `current_ts - WINDOW_5M_MS - 60s`；確保 60s flush boundary 不誤刪 5m 視窗邊緣。
+6. **MAX_EVENTS_PER_SYMBOL = 1024**：高頻 burst LRU 防護；理論 5m × 高頻不應超出。
+7. **DOMINANT_SIDE_RATIO = 0.6**：long/short 任一 ≥ 60% 視為 dominant，否則 Mixed；避免 50/50 邊界毛刺被誤標為單向 alpha。
+8. **slot 注入但不接線**：本 wave provider only — `create_liquidation_pulse_slot()` 工廠 + setter 存在；main.rs 接線（aggregator spawn + slot late-inject）留下游 wave（C1-IMPL wire-up 或 W-AUDIT-8c IMPL 開頭）。slot=None 時 surface.liquidation_pulse=None，與 Phase A dormant 同等語意。
+9. **SourceAvailability dep stub**：source_tier 字串 `"bybit_v5_ws_all_liquidation"` free-text 與 funding_curve / oi_delta 命名對齊；B-REM-5 merge 後可在 candidate report 層 wire `AvailabilitySource::WsLive`。本 IMPL 不直接 import B-REM-5 enum，避免 cross-branch 依賴。
+
+### 治理對照
+- **不可改硬邊界**：max_retries / live_execution_allowed / OPENCLAW_ALLOW_MAINNET / authorization.json — 0 觸碰
+- **不可改 V095 schema / market.liquidations writer**：0 觸碰
+- **不可繞 C1 24h proof**：commit 82ab71eb 已 PASS_C1_PROOF_CANDIDATE，BB cor-side 認定鎖入
+- **PA decomposition §6.3**：✓ scope 完全對齊
+- **bilingual-comment-style**：✓ 新代碼默認中文；技術詞 (LiquidationPulsePanel / try_read / HashMap / VecDeque / BB cor-side) 保留英文；MODULE_NOTE 中文 + 新 test 全中文 rationale 解釋「為什麼測 X」
+- **CLAUDE.md §九 1200/2000 行硬上限**：新檔 615 行 well under 800-line 警告線
+
+### 不確定之處 / 待 review 點
+- **MIT review schema**：本 IMPL 無 V### 新增 — V095 (commit ef7ea6c2) 已 land market.liquidations PK 升級；aggregator 純 read-only consumer。MIT 確認語義無新 schema 假設。
+- **BB review on cor-side mapping**：parser-level 鎖定 commit 82ab71eb；本 IMPL aggregator 層 + alpha_surface enum 層雙重 lock。請 BB re-affirm Buy=LongLiquidated 契約。
+- **E2 adversarial review focus**：
+  1. step_4_5 hot path 的 `LiquidationPulsePanel.clone()` 成本（HashMap + Vec<LiquidationEvent>）— 60s flush 一次，cohort 25 sym × ≤ 1024 events × ~80 bytes/event 最壞 ≤ 2MB clone；通常實際 5m 視窗事件 ≤ 100/sym
+  2. `try_read().ok().and_then(|g| g.clone())` 與 oi_delta / funding_curve / btc_lead_lag pattern 對齊
+  3. BB cor-side mapping double-lock 驗證
+- **E4 regression Linux cross-arch**：Mac aarch64-apple-darwin 已驗 3459 passed / 0 failed / 1 ignored；Linux x86-64 cargo test 待 E4 run
+
+### Honest test count
+- **openclaw_core**: 438 passed / 0 failed (4 new for LiquidationPulsePanel)
+- **openclaw_engine**: 2986 passed / 0 failed / 1 ignored (14 new liquidation_pulse aggregator tests)
+- **openclaw_types**: 35 passed / 0 failed
+- **Total**: 3459 passed / 0 failed / 1 ignored, Mac aarch64-apple-darwin
+
+### Operator 下一步
+1. **E2 adversarial review**：dispatch chain `E1 → E2`；focus = lock-free try_read semantic + cor-side mapping double-lock + HashMap clone cost
+2. **E4 regression Linux**：cargo test --workspace --lib on x86-64 trade-core
+3. **BB cor-side re-affirm**：Buy=LongLiquidated / Sell=ShortLiquidated 不變式 lock-in
+4. **MIT schema NO-OP confirm**：本 IMPL 無 V### 新增；V095 already land
+5. **QA deploy readiness**：本 IMPL provider only，main.rs 接線（aggregator spawn + slot late-inject）非本 worktree 範圍 — 後續 wave land
+6. **本 IMPL 不主動 commit main**：等審查鏈走完後 PM 統一 commit + push（強制鏈 E1→E2→E4→QA→PM）
+
+### Memory log on multi-session safety
+- 開工前 git fetch + 查 origin branch（`feature/w-audit-8a-b-rem-1-dispatch-snapshot-contract` + `feature/w-audit-8a-b-rem-5-source-availability` 兩 branch 已知存在，本 IMPL 不衝突 — 純加新文件 + 既有檔內 surgical edit）
+- Branch 新建 `feature/w-audit-8a-c1-liq-writer-impl` 不與任何 origin branch 撞名
+- 本 session 接收 system reminder「pipeline_ctor.rs / slots.rs / alpha_surface.rs / ipc_server/mod.rs / panel_aggregator/mod.rs modified intentional」— 確認均為本次 IMPL E1 自身寫入，非隔壁 session 改動，繼續使用
+
+## 2026-05-18 — W-AUDIT-8a C1-LIQ-WRITER amend [67] healthcheck（PA §6.3 #3 closure）
+
+### 任務脈絡
+C1-LIQ-WRITER provider IMPL（branch `feature/w-audit-8a-c1-liq-writer-impl@7ab6c22d`）3-agent review APPROVE 後 E2 + MIT cross-finding：PA §6.3 acceptance #3 mandate「new healthcheck [67]+ covers topic freshness + row volume + parse errors + symbol coverage」**未交付**。PM 決定 same-PR amend on c1-liq-writer branch（cleaner closure），派 E1 background 補健康檢查。
+
+### 關鍵設計選擇
+- **單一 [67] script vs 拆 [67]+[68]**：PA 寫「1-2 個 script」，我選單一 [67] 整合 4 維。理由：V095 `chk_..._side_v095` CHECK constraint 已 fail-closed bad parse 在 INSERT 階段，DB 內 row = 全部 parse PASS；parse_errors 真正 proxy = side enum coverage + qty/price finite ratio，與 row context 不可分離；強拆 [68] 會變只查 V095 自身（meaningless tautology）。
+- **Cohort hardcoded 25-sym**：與 `rust/openclaw_engine/src/main.rs` DEFAULT_COHORT 對齊（POLUSDT 取代 MATICUSDT，per Bybit V5 status=Closed）；W1 IMPL 階段 dynamic cohort deferred to W-AUDIT-8c。
+- **Per-hour rate ladder**：window-secs 可變（CLI 給 --window-secs），volume ladder normalize 成 per-hour rate（default 30 row/hr PASS）；24h vs 8h 共用閾值。
+- **WARN 折半 logic**：volume WARN = pass_lower × 0.5；保留「顯著低於 baseline 但非零」的中段。
+- **Cohort coverage 用 SQL 過濾後 distinct**：non-cohort symbol（BSBUSDT/HYPEUSDT 等）也會被 Bybit 推到 market.liquidations 但 aggregator silent ignored；coverage 分子用 cohort ∩ observed 不用 raw distinct。
+
+### Linux PG empirical（2026-05-18 24h window）
+```
+n_rows=6134, latest_age_secs=14.52
+buy_count=5711, sell_count=423, non_finite_count=0
+cohort_observed=25/25 (100%)
+verdict=PASS (all 4 dims green)
+```
+1h window 自驗：coverage=28% (7/25) → FAIL — 正確 semantic（短窗 under-cover cohort；24h 是 C1 v2 proof doctrine 的標準 sample unit）。
+
+### 修改清單
+- 新檔：`helper_scripts/canary/healthchecks/67_liquidation_pulse_freshness.py` 354 LOC（中文 MODULE_NOTE + bilingual-comment-style 新規 chinese-first）
+- 新檔：`helper_scripts/canary/healthchecks/tests/test_67_pulse_freshness.py` 320 LOC，16 tests
+- 更新：`helper_scripts/SCRIPT_INDEX.md` [67] 條目 + tests count 44→60
+- Commit：`d8938a78` on `feature/w-audit-8a-c1-liq-writer-impl`（pushed origin）
+
+### Test
+- Mac 16/16 new PASS + 44/44 existing PASS = **60/60 PASS** 0.02s
+- Linux PG empirical verdict=PASS
+
+### Memory 教訓 — 共享 helper 重用 vs 新 module
+- 既有 `_common.py` connect_pg + emit_result + severity_max + VERDICT_* + EXIT_* 全部可重用；新檔僅 ~70 LOC 是 verdict ladder logic + 25-sym COHORT_SYMBOLS 常量，其餘是文件 + argparse boilerplate。
+- 為什麼不重用 `build_argparser` template：[67] 不需要 engine-mode filter（liquidation 不分 engine_mode；本表是 cross-mode raw market data），且 freshness/coverage 閾值與 fill-rate ladder 差異大，自寫 _parse_args 比改 template 乾淨。
+
+### 邊界尊重
+- 不動 Rust / TOML / migrations（純 Python healthcheck）
+- 不 commit to main — only c1-liq-writer branch
+- 不擴大 PA 範圍（acceptance #3 完整覆蓋四維度）
+- 沒清 ADR-0023 / sibling branch 殘留（不是本 worktree 範圍）
+
+### Operator 下一步
+1. E4 Linux regression（run cargo workspace test on Linux）
+2. QA 驗 acceptance #3 closure（4 維度都覆蓋）
+3. PM merge to main
+
+
+---
+
+## 2026-05-18 — W-AUDIT-8c 8C-S0R-1 SQL Query Template IMPL
+
+### 任務脈絡
+W-AUDIT-8b Round 2 RED_FINAL 2026-05-18 tombstoned；redirect 至
+W-AUDIT-8c Liquidation Cluster Strategy。Phase 1b transport infra ready
+(C1 PASS + V095 apply + writer revival)；BB pre-flight 確認 market.liquidations
+數據為 mainnet。本 worktree 是 Stage 0R replay tooling 的基礎層（SQL extraction），
+S0R-2 (Python metrics) 與 S0R-3 (CLI) 將 build on 此 schema。
+
+### Branch + commit
+- Branch: `feature/w-audit-8c-s0r-1-sql-query-template`
+- 1 new file = 428 LOC = `sql/queries/w_audit_8c_liquidation_cluster_stage0r_features.sql`
+
+### 設計決策 — 5 處 PA §2.3 偏離
+
+| # | 偏離 | 原因 |
+|---|---|---|
+| 1 | 24h percentile window = 288 PRECEDING（非 PA 寫的 17280） | 17280/12 = 1440h = 60d，明顯與 `notional_pct_24h` 語義不符；PA 筆誤 |
+| 2 | `market.klines WHERE timeframe='1m'`（非 PA 寫的 `market.klines_1m`） | V002 schema 單一 klines 表 + timeframe 區分；無 klines_1m 表 |
+| 3 | 288 PRECEDING 明寫為「行數窗」非「時間窗」 | sparsity 高時 288 行可能跨 >24h，但與「cluster 相對自身歷史稀有度」語義一致 |
+| 4 | `forward_returns` 用 2× LEFT JOIN LATERAL（非 PA 寫的 4× correlated subquery） | 效能優化以達 acceptance #1「<30s on 7d × 32-sym」目標；LATERAL 一次取 (ts, open, close) tuple，避免 klines 索引被掃 4 次 |
+| 5 | psycopg2 `%(name)s` named-param（非 PA 寫的 `$name`） | 與 8b precedent 對齊，acceptance #4 mandate「match W-AUDIT-8b precedent for downstream Python contract」 |
+
+### Sentinel-split 設計
+主查詢 + 2 sibling 寫在同一檔以保證 S0R-2 「一檔一 import」乾淨契約。
+Sentinel = `-- @SIBLING:NAME\n`，下游 Python re.split() 分離 3 個可獨立 cur.execute() 的 SQL block。
+sqlparse + 結構化 smoke 確認 3 statements / parens 167-167 / 10 named params / 5 CTE 全在。
+
+### 共享 schema 確認
+- V002 `market.liquidations`: `ts TIMESTAMPTZ`, `symbol TEXT`, `side TEXT IN ('Buy','Sell')`, `qty REAL`, `price REAL`
+- V095 PK = `(symbol, ts, side, qty, price)`（row-level idempotency），CHECK side ∈ {'Buy','Sell'}
+- V002 `market.klines`: timeframe='1m' filter（NOT `klines_1m`）；`ts TIMESTAMPTZ`, `open REAL`, `close REAL`
+- 採用 `(open+close)/2` mid（非 close 點價）— 8b 用 close 因 horizon 較長對 open gap 不敏感；8c 1-15m horizon 對 open gap 敏感
+
+### 治理對照
+- 不動 Rust / TOML / Python / migrations / 其他 .sql 檔 — 嚴格 ONE file scope
+- 不跑 Linux PG dry-run — MIT chain mandate（self-report §6 列 prep checklist）
+- 不創 helper_scripts/ 下測試（避與 S0R-2 規劃的 `helper_scripts/reports/w_audit_8c/tests/` 撞位）
+- chinese-first 注釋（2026-05-05 廢除 bilingual mandate 後）
+- 428 LOC 在 800 警告線以下
+- branch hygiene = 新建獨立 branch，無 main commit
+
+### Memory 教訓 — PA 設計筆誤檢視
+PA §2.3 設計犯了 17280 vs 288 的算術筆誤（24h × 12 5m/h ≠ 17280）。E1 IMPL 必須
+獨立驗算所有 SQL 視窗 / 行數參數，不能盲信 design report 字面值。同樣的審慎也
+應用於 `market.klines_1m` vs `market.klines + timeframe filter` — 改 SQL 前必 read
+real schema（V002 file）。本次同時 catch 兩處設計層筆誤並在 self-report 明確 log。
+
+### Memory 教訓 — Sentinel split vs commented templates
+首版我把 sibling 查詢寫成 commented-out template（給 Python inline 嵌入）。
+評估後改為「executable SQL + `-- @SIBLING:NAME` sentinel」，理由：
+1. commented SQL 不會被 sqlparse / pglint / 任何 reviewer 工具檢出語法錯
+2. sentinel-split 是 E2 可驗的契約，重派 S0R-2 時不需重新 review SQL 邏輯
+3. 三 statement 各自獨立完備，MIT Linux dry-run 可一塊一塊執行驗證
+
+### Operator 下一步
+1. E2 adversarial review 對 `feature/w-audit-8c-s0r-1-sql-query-template`
+   - 焦點：LATERAL leak、288 vs 17280 修正、sentinel-split 脆性、param naming
+2. MIT Linux PG empirical dry-run（self-report §6 列 5 步驟）
+3. PM merge to main 後 dispatch S0R-2（Python metrics module sentinel-split consume）
+
+### 完整報告路徑
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--w_audit_8c_s0r_1_sql_query_self_report.md`
