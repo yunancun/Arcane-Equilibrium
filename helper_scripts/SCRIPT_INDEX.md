@@ -1,7 +1,7 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-15（W-AUDIT-8a C1 liquidation topic standalone probe + AMD-2026-05-15-01：W2 paper edge report 降級為 Stage 0R diagnostic；保留 W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck 與 2026-05-09 W-AUDIT-1 catch-up 索引）
+最後更新：2026-05-18（W-AUDIT-8c Liquidation Cluster Stage 0R replay CLI 三件套：頂層 wrapper + 報告編排層；BB pre-flight gate 默認 True；保留 W-AUDIT-8a C1 liquidation topic standalone probe + AMD-2026-05-15-01：W2 paper edge report 降級為 Stage 0R diagnostic；W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck 與 2026-05-09 W-AUDIT-1 catch-up 索引）
 
 ## 2026-05-09 W-AUDIT-1 補登
 
@@ -34,6 +34,8 @@
 | `reports/w2/w2_paper_edge_metrics.py` | W2 spec v1.2 §7.1 6 mandatory metric 計算層：PSR(0) Bailey-LdP 2012、DSR K=95、block-bootstrap CI、R²(N)、counterfactual delta、Stage 0R diagnostic verdict。 |
 | `reports/w2/w2_paper_edge_render.py` | W2 Stage 0R diagnostic report 展現層：`render_markdown` / `render_csv` / `render_json` / `per_symbol_breakdown_table`。 |
 | `reports/w2/w2_paper_edge_smoke.py` | W2 Stage 0R diagnostic smoke：3 mock case (plus15/plus5_15/minus5) 不連 PG，可獨立執行。 |
+| `reports/w_audit_8c_liquidation_cluster_stage0r.py` | W-AUDIT-8c Liquidation Cluster Reaction — Stage 0R replay 頂層 CLI wrapper（mirror sibling 8b shim 模式），委派至 `reports/w_audit_8c/liquidation_cluster_stage0r_report.py`。配 `sql/queries/w_audit_8c_liquidation_cluster_stage0r_features.sql`。BB pre-flight gate 預設 True（2026-05-18 BB STRUCTURAL verdict 後）；spec v0.3 mandatory report fields + 4-agent (QC/MIT/FA/BB) review-ready Markdown + JSON。 |
+| `reports/w_audit_8c/liquidation_cluster_stage0r_report.py` | W-AUDIT-8c Stage 0R 報告編排層：read-only PG 取數 → sibling worktree 8C-S0R-2 `liquidation_cluster_stage0r_metrics` 計算 → JSON + 4-agent review-ready Markdown；落地至 `docs/CCAgentWorkSpace/{role}/workspace/reports/<date>--w_audit_8c_stage0r_<verdict>.{json,md}`。 |
 | `deploy/launchd_preflight.sh` | macOS launchd deployment preflight |
 
 ## REF-20 Sprint 1+2 新增 cron 與 helper
