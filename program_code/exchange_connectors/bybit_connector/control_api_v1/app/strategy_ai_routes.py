@@ -747,9 +747,11 @@ async def post_demo_close_all_positions(
     try:
         result = await _ipc_command("close_all_positions", {"engine": "demo"})
     except Exception as exc:
+        # P2-WP05-FUP-1：client-facing error 用 stable reason_code，
+        # 例外明細只進 log。
         logger.error("IPC close_all_positions failed: %s", exc)
         errors.append(f"ipc_close_all: {exc}")
-        result = {"error": str(exc)}
+        result = {"error": "ipc_close_all_failed"}
     # Orphan sweep: close exchange positions not tracked in paper_state.
     # IPC close_all only iterates paper_state — orphan positions (e.g. opened
     # externally or after paper_state reset) are silently skipped.
@@ -823,9 +825,10 @@ async def _sweep_demo_orphan_positions(errors: list[str]) -> dict:
     try:
         positions = rc.get_positions("linear") or []
     except Exception as exc:
+        # P2-WP05-FUP-1：client 返 stable reason_code，例外只進 log。
         logger.warning("Orphan sweep: get_positions failed: %s", exc)
         errors.append(f"orphan_sweep_query: {exc}")
-        return {"skipped": True, "reason": str(exc)}
+        return {"skipped": True, "reason": "orphan_sweep_query_failed"}
 
     open_positions = [p for p in positions if float(p.get("size") or p.get("qty") or 0) > 0]
     if not open_positions:
@@ -897,9 +900,14 @@ def _sweep_orphan_orders(rc: Any, env_label: str, errors: list[str]) -> dict:
     try:
         cancelled = rc.cancel_all_orders("linear", settle_coin="USDT")
     except Exception as exc:
+        # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
         logger.warning("%s order sweep: cancel-all failed: %s", env_label, exc)
         errors.append(f"order_sweep_{env_label}: {exc}")
-        return {"skipped": True, "reason": str(exc), "found": len(pre_orders)}
+        return {
+            "skipped": True,
+            "reason": "order_sweep_cancel_all_failed",
+            "found": len(pre_orders),
+        }
     cancelled_n = len(cancelled) if isinstance(cancelled, list) else 0
     found_n = len(pre_orders)
     sample_symbols = sorted({

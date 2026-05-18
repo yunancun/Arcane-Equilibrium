@@ -559,9 +559,15 @@ async def post_strategist_promote(
     if fetch_reason == "pg_unavailable" or fetch_reason and fetch_reason.startswith("pg_error"):
         # PG down → cannot establish source params → cannot proceed.
         # PG 不可用 → 沒參數可晉升。
+        # P2-WP05-FUP-1：client 看 stable code；具體 fetch_reason（含 PG
+        # exception class name）只進 log，避免把 PG 內部錯誤類型外洩給呼叫者。
+        logger.warning(
+            "strategist_promote: PG unavailable / query failed (fetch_reason=%s)",
+            fetch_reason,
+        )
         raise HTTPException(
             status_code=503,
-            detail=f"PG unavailable / query failed: {fetch_reason}",
+            detail="pg_unavailable",
         )
     if source_row is None:
         _record_promote_audit(

@@ -465,11 +465,14 @@ class PerplexitySearchProvider(SearchProvider):
                 latency_ms=round(latency, 1),
             )
         except Exception as e:
+            # P2-WP05-FUP-1：LLM context 看 stable code，例外明細只進 log。
+            logger.warning("perplexity search failed: %s", e)
             latency = (time.time() - start) * 1000
             return SearchResponse(
                 query=query, provider_used=self.name,
                 providers_tried=[self.name],
-                error=str(e), latency_ms=round(latency, 1),
+                error="perplexity_search_failed",
+                latency_ms=round(latency, 1),
             )
 
 
@@ -528,11 +531,14 @@ class LocalLLMWebSearchProvider(SearchProvider):
                 cost_usd=0.0, latency_ms=round(latency, 1),
             )
         except Exception as e:
+            # P2-WP05-FUP-1：LLM context 看 stable code，例外明細只進 log。
+            logger.warning("local_llm_web search failed: %s", e)
             latency = (time.time() - start) * 1000
             return SearchResponse(
                 query=query, provider_used=self.name,
                 providers_tried=[self.name],
-                error=str(e), latency_ms=round(latency, 1),
+                error="local_llm_web_search_failed",
+                latency_ms=round(latency, 1),
             )
 
 
@@ -574,11 +580,14 @@ class LocalLLMSearchProvider(SearchProvider):
                 cost_usd=0.0, latency_ms=round(latency, 1),
             )
         except Exception as e:
+            # P2-WP05-FUP-1：LLM context 看 stable code，例外明細只進 log。
+            logger.warning("local_llm search failed: %s", e)
             latency = (time.time() - start) * 1000
             return SearchResponse(
                 query=query, provider_used=self.name,
                 providers_tried=[self.name],
-                error=str(e), latency_ms=round(latency, 1),
+                error="local_llm_search_failed",
+                latency_ms=round(latency, 1),
             )
 
 
@@ -623,11 +632,14 @@ class WebPilotSearchProvider(SearchProvider):
                 cost_usd=0.0, latency_ms=round(latency, 1),
             )
         except Exception as e:
+            # P2-WP05-FUP-1：LLM context 看 stable code，例外明細只進 log。
+            logger.warning("webpilot search failed: %s", e)
             latency = (time.time() - start) * 1000
             return SearchResponse(
                 query=query, provider_used=self.name,
                 providers_tried=[self.name],
-                error=str(e), latency_ms=round(latency, 1),
+                error="webpilot_search_failed",
+                latency_ms=round(latency, 1),
             )
 
 

@@ -189,8 +189,9 @@ def _get_demo_summary() -> dict:
             "position_count": len(open_positions),
         }
     except Exception as e:
+        # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
         logger.debug("Demo summary failed: %s", e)
-        return {"available": False, "error": str(e)}
+        return {"available": False, "error": "demo_summary_failed"}
 
 
 
@@ -477,8 +478,12 @@ async def post_session_stop_all(
             from .strategy_ai_routes import _sweep_demo_orphan_orders  # noqa: PLC0415
             demo_cancel_orders = await _sweep_demo_orphan_orders(errors)
         except Exception as e:
+            # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
             logger.info("Demo cancel-all skipped (non-fatal): %s", e)
-            demo_cancel_orders = {"skipped": True, "reason": str(e)}
+            demo_cancel_orders = {
+                "skipped": True,
+                "reason": "demo_cancel_all_failed",
+            }
         # ── Phase 2: Close positions for both engines.
         # 第二步：雙引擎平倉。
         try:
@@ -516,8 +521,9 @@ async def post_session_stop_all(
                     f"orders={demo_verify.get('residual_orders')}"
                 )
         except Exception as e:
+            # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
             logger.info("Demo verify skipped (non-fatal): %s", e)
-            demo_verify = {"skipped": True, "reason": str(e)}
+            demo_verify = {"skipped": True, "reason": "demo_verify_failed"}
     else:
         close_result = demo_close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
         demo_cancel_orders = paper_verify = demo_verify = {"skipped": True, "reason": "engine_offline"}
