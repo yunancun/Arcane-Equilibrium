@@ -234,7 +234,7 @@ Exit codes（沿用 round 2）：
 E1 IMPLEMENTATION DONE (round 3)：CRIT-R2-1 RESOLVED + HIGH-R2-1 RESOLVED + HIGH-R2-2 RESOLVED + MED-R2-1 RESOLVED + 新 `test_sql_params_completeness` regression guard；smoke 真實 11/11 PASS（exit 0）；待 E2 round 3 審查（report path: `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--w_audit_8c_s0r_3_cli_self_report.md`）
 
 Branch: `worktree-agent-a61b44be0fbab2bf9`
-HEAD (round 3 fix commit): 待 `git commit` 後填回
+HEAD (round 3 fix commit): `a2dc1be8`
 
 Files modified (2 — 同 round 2 範圍):
 - `helper_scripts/reports/w_audit_8c/liquidation_cluster_stage0r_report.py` (1213 → 1238 LOC, +25)
