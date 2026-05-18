@@ -6,6 +6,98 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-18 — W-AUDIT-8c-S0R-1 Round 2 closure · APPROVE
+
+**對象**：E1 round 2 rework `feature/w-audit-8c-s0r-1-sql-query-template` HEAD `381d89a0`
+**Verdict**：**APPROVE → E4 regression ready**
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_1_e2_review_round2.md`
+
+**Round-2 全部 must-fix closed**：
+- CRIT-1（notional_pct_floor gate）：第 11 param 加入 + trigger_with_pct/trigger_candidates 拆兩層 + 三層 magnitude gate 完整鏡像；MODULE_NOTE deviation #6 documented
+- CRIT-2（sibling n_eff helper sample drift）：cluster_n_eff.sql trigger_with_pct + trigger_candidates 與主檔嚴格鏡像 gate set；param subset 正確
+- HIGH-1（sentinel-split contract drift）：3 個獨立 .sql 檔，sqlparse 各 = 1 statement，sentinel = 0；下游 caller 用三次獨立 cur.execute 載入無 silent failure mode
+- HIGH-2（boundary partial leak）：PA verdict D 完整應用 — entry_mid/exit_mid 改為 k_*.open::float8 (open-only)，LATERAL SELECT 縮窄到 (ts, open)，欄位名保留契約；`>=` 維持
+- LOW-2（expected_dir CASE）：ELSE NULL 加入 + defensive 註釋
+- MIT MUST-LAND（self-report at branch HEAD + R2 delta）+ MIT 3 SHOULD-FIX（pg_typeof doc / 288 row-window semantic doc / LATERAL ORDER BY invariant doc）
+
+**0 個新 regression / 0 個新 CRIT/HIGH**
+
+**Round-1 MED deferred（合理優先級）**：MED-1（panel cohort 變體欄位）/ MED-2（LATERAL upper-bound）/ MED-3（5m cooldown spec wording）/ MED-4（CASE 重複 sub-aggregation 重構）— round-1 review 已標為「建議修，可併到 rework round」未強制；不阻 E4
+
+**Lessons captured**：
+1. percent_rank 含 current row 在 magnitude gate 場景**不是** lookahead bias — 「自身是否高分位」這 question 含自身是 question 本質；feedback_indicator_lookahead_bias.md 適用於 max/min breach 訊號，不適用於 percentile gate
+2. PA verdict D 「欄位名沿用、semantic 改」是合理 trade-off — 下游 Python contract lock 比欄位 rename cascade 成本低；MODULE_NOTE 註釋承擔解釋責任
+3. 多檔 split-3-files 結構性防呆 > sentinel-split 文檔防呆；caller 三次獨立 cur.execute 是更乾淨的 contract
+4. CRIT-1 「percent_rank 在 WHERE 不能直接用」這類 PG 限制要在 review 時 think through，E1 round-2 拆 trigger_with_pct → trigger_candidates 兩層是正確 idiomatic SQL pattern
+5. focused validation （非 fresh review）效率高 — 只驗 round-1 must-fix list 是否落地 + 有無 regression；wall-clock ~20 min vs round 1 fresh review ~45 min
+
+**Race check 5 條全 PASS** — origin/main 2h 窗內 commits 全 Phase 1b 不衝突；working tree dirty 但 0 SQL leftover；review 期間 0 sibling push
+
+---
+
+## 2026-05-18 — W-AUDIT-8c-S0R-1 SQL query template · spec gate drift CRITICAL
+
+**對象**：E1 `feature/w-audit-8c-s0r-1-sql-query-template` HEAD `bd1b2443` 單一新檔 `sql/queries/w_audit_8c_liquidation_cluster_stage0r_features.sql` (+428 LOC) + self-report
+**Verdict**：**RETURN to E1** — 2 CRITICAL + 2 HIGH + 4 MEDIUM + 2 LOW
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_1_e2_review.md`
+
+**CRITICAL findings**：
+1. **CRIT-1 `notional_pct_floor` gate 完全缺漏**：spec v0.3 line 191 magnitude_ok 明確要求 `notional_percentile_24h >= notional_pct_floor`，E1 SQL 計算了 percentile 卻沒 gate；也沒納入 10-param 列表。spec line 264 K_total 公式列入 `3 notional_pct_floor` 為 11_664 grid 一維。alpha-bearing math drift 非 cosmetic。E1 self-report §4 列了 5 個 deviation 但漏這個第 6 個 critical。
+2. **CRIT-2 Sibling #2 n_eff helper 與主查詢 trigger_candidates 不一致**：sibling raw_buckets 缺 notional_pct_24h 計算，trigger_candidates 結構鏡像不嚴；連動 CRIT-1 但獨立 surface — 即使無 CRIT-1，n_eff/n 樣本基數不對齊也 break DSR penalty 計算
+
+**HIGH findings**：
+3. **HIGH-1 sentinel-split 契約漂移**：PA design 將主+sibling 呈現為 3 個獨立 code block，E1 自行合併 1 檔發明 `-- @SIBLING:NAME` 規範。psycopg2 multi-stmt `cur.execute` 只回 last 一個 description → S0R-2 不 sentinel-split = silent data loss without error。建議拆 3 個 .sql 檔（structural 防呆 > 文檔防呆）。
+4. **HIGH-2 quiet_window_sec=0 + bar-boundary partial leak**：spec line 229 寫 "after" 但 PA design line 261 寫 "at OR after" 用 `>=`，且 PA line 653 自相矛盾要 quiet_window=0 boundary 對。具體 bar-boundary scenario entry_mid 含 partial reversion → gross_bps underestimate。需 PA 仲裁 (a) spec amend / (b) `>` strict / (c) 強制 quiet_window ≥ 1 / (d) open-only。
+
+**MEDIUM/LOW（4 + 2 細節省略，見 review report）**
+
+**核心對抗反問 10 條全跑**：Q1 直接打中 CRIT-1（E1 self-report 5 documented deviations 看似 thorough，但對抗反問 spec 原文比對找出第 6 個 undocumented critical）
+
+**E2 反思 6 條**：
+1. E1 self-report 「我已對齊 spec」聲明必須逐項對 spec **原文**比對，不能信 E1 摘要
+2. PA 文檔自相矛盾（line 261 `>=` vs line 653 boundary correctness）應 surface 退 PA 仲裁，不能讓 E1 在矛盾中默默 follow literal
+3. Silent failure mode（sentinel-split misread → data loss without schema error）比 schema mismatch 更危險 → 拆檔結構防呆優於文檔防呆
+4. E1 「優化」claim（LATERAL <30s 必要優化）必驗 EXPLAIN ANALYZE，E2 不接受無 benchmark claim
+5. 跨 chain unblock（S0R-3 兩個 contract 問題）是 E2 順手職責，避免下游反向 ping
+6. §5 race check 全 PASS 但 5a 例行檢查 2h 窗 origin/main 5 commits 全 docs/governance 再次驗證價值
+
+**Unblock S0R-3 wire（per prompt）**：
+- psycopg2 `%(name)s` named-param 風格 + `cur.execute(sql, {"symbols": list(symbols), ...})` ✓
+- `bucket_5m_epoch` 單位 = 秒（seconds）✓
+- 警示：若 E1 採 HIGH-1 option (a) 拆 3 檔，S0R-3 CLI 載入路徑需相應改
+
+---
+
+## 2026-05-18 — W-AUDIT-8c-S0R-3 CLI wrapper · sibling contract drift catastrophe
+
+**對象**：`origin/worktree-agent-a61b44be0fbab2bf9` HEAD `b3e68870` · 749 + 34 LOC CLI + SCRIPT_INDEX
+**Verdict**：**RETURN to E1**（6 CRITICAL + 4 HIGH + 3 MEDIUM + 1 LOW）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_3_e2_review.md`
+
+### 6 CRITICAL 全是 sibling-isolation contract drift
+
+3 worktree 並行（S0R-1 SQL / S0R-2 metrics / S0R-3 CLI），S0R-3 不能讀 sibling 源碼只能讀 dispatch prompt 對 sibling API 的描述。E1 假設 4 個 contract，3 假錯：
+- **Q3** sweep 回 list[dict] ❌：真 dict 6 keys；CLI line 657 `cells = compute_stage0r_sweep(...)` 後 `for c in cells` 迭代 dict.keys（str）→ `AttributeError`
+- **Q4** k_prior 由 sibling 處理 ❌：sibling default 0 但 8b precedent 明明 caller 端 query `learning.strategy_trial_ledger` → DSR 嚴重低估 → over-PASS bias
+- **silent killer**：SQL 出 `bucket_end_ts` (timestamptz)，sibling 讀 `bucket_end_ts_ms` (ms int) — CLI 不 transform → 每 row signal_ts_ms=None → 全 skip → n=0 → 全 cell auto-RED with 看似合理 reason → **alpha tomb killer**
+- 5 個 hard runtime crash（sql_params 缺 symbols / sweep return shape / horizon_min vs horizon_grid kwarg / DataFrame vs list[dict] / BB 報告檔不存在）
+
+### Durable lesson
+
+1. **「Contract question for E2 to verify at merge」是 anti-pattern**：E1 把 contract 驗證丟給 reviewer = 把 integration test 工作往下游推；E2 該 catch，但 E1 應該至少寫 mock-SQL smoke 在自己 IMPL DONE 前自驗。Dispatch prompt 應改為「E1 已寫 smoke 驗證的 contract 假設」。
+2. **Sibling-isolation dispatch 必把對方公開 API signature copy 進 task brief**：本案 E1 只看到「contract per dispatch prompt §S0R-2」一句 + 一行口頭描述，反向猜出錯 4 處。Multi-worktree parallel 任務的 dispatch prompt **必須附完整 sibling API signature + return type + return shape**，不只是名稱。
+3. **「為讓 default 是 True 而省檔 check」是 PR-skill §1.5 shortcut anti-pattern**：BB STRUCTURAL 報告檔不存在 + CLI 預設 True 信任 hardcoded path = unfounded default。檔不存在應 fail-fast，無論 flag 是 True/False。
+4. **Silent-RED killer 比 hard crash 更危險**：5 個 crash operator 看到 traceback 至少知道壞，1 個 silent-0-trigger-auto-RED 會被信任 → alpha tomb。E2 必特別查「正常出現的低 n 是否藏 schema mismatch」。
+5. **48× under-sweep 是 spec drift**：DSR penalty 用 K_total=N×11_664 (per spec)，但 S0R-3 默認 grid 只 144 cells = 1/48 spec 範圍 → DSR formula uses K_total much larger than actually tested → 反向假 RED。Sweep 軸要 spec coverage 與 K_total formula 一致。
+
+### Adversarial review pattern 補
+
+- **4 contract assumption 仲裁**：對 E1 自評每個 assumption 必須去 sibling worktree origin 真實檔讀 signature/return shape/columns，**不接受 E1「per dispatch prompt」二手描述**。Dispatch prompt 也可能錯。
+- **silent-RED 偵測**：對 verdict-emitting CLI 必跑「`n=0` 是否可能由 schema mismatch / row-skip / silent-drop 造成而非真實零 trigger」反問。
+- **CRIT vs HIGH 分流**：runtime crash (TypeError/AttributeError/SyntaxError/KeyError) = CRIT；silent wrong verdict = CRIT；missing mandatory spec field = HIGH；over-PASS bias from missing k_prior = HIGH。
+
+---
+
 ## 2026-05-16 — P1-WP03-DEPLOY-GATE-IMPL Round 2 quick re-review
 
 **對象**：E1 round 2 fix `2026-05-16--wp03_deploy_gate_round2_fix.md`（+76/-3，只動 checks 593→594 + test 525→592；無 scope creep）
@@ -2661,3 +2753,164 @@ Wave 1 commit `cabb2fcd` 39 files +1830 -200。Wave 2 working tree 12 files modi
 - V094 spec: `docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md`
 - AMD v0.4: `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
 - PA dispatch packet: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--phase_1b_e1_dispatch_packet.md`
+
+## 2026-05-18 — Phase 1b calibration sweep harness E2 review (APPROVE-CONDITIONAL)
+
+**Context**: E1 IMPL `feature/phase-1b-calibration-sweep-harness` commit `93069c29` per v48 P0 Step 2，12 new file 2781 LOC (1866 production + 1009 test)，純 Python research tool（0 Rust touch / 0 TOML / 0 V### migration）。
+
+**Verdict**: APPROVE-CONDITIONAL pass to E4，0 MUST-FIX / 3 SHOULD-FIX / 4 NTH 待 PA 或 E1 follow-up。
+
+**Validation runtime**:
+- pytest 63/63 PASS in 0.03s（mock-free unit tests，FillSimulationResult fixture 真實 exercise simulation engine）
+- 跨平台 grep 0 hardcoded `/home/ncyu` `/Users/<user>`
+- SQL 全 %s parameterized；唯一 f-string SQL 是 `f"{int_lookback} days"` 安全
+- 無 except:pass；無 f-string log
+
+**Caveat 1 (PG schema) VERIFIED**: SSH 確認 `market.market_tickers` 含 14 columns（ts/symbol/best_bid/best_ask/spread_bps/...）+ XRPUSDT 5min 190 sample (~38/min vs E1 claim 67/min 同 order)，`symbol_universe_snapshots.tick_size numeric` 存在。E1 substitution（`market_tickers` 替 `orderbook_50`）對齊 spec §3.1 fallback rule 但更好（spec fallback 是 trades aggregated minute mid，這層用 BBO snapshot 已有 ms-level 精度）。
+
+**Caveat 2 (BBO cross fill) MEDIUM**: BBO 越過 limit_price 視為 fill 是 necessary 非 sufficient condition；可能 systematic optimistic（demo book thin 時 BBO 過但無 actual taker volume hit）。spec §2.3.5 標 future enhancement 保留，acceptable but report 須顯著標 caveat。
+
+**Caveat 3 (5.55bps taker baseline) VERIFIED**: SSH 跑同樣 SQL → n=212 avg 5.552 bps（E1 claim n=213 / 5.55 bps 差 1 row time drift）。7d window 含 pre-restart 數據（2026-05-11 ~ 2026-05-18），這是 pre-Phase-1b baseline，**符合 spec §4.1 acceptance gate 設計意圖**。
+
+**Caveat 4 (Block 4 dedupe) MEDIUM**: Block 4 baseline cells `{G,PG,PS}-D-D50` 與 Block 1/2/3 baseline `{G-AB-01-C30, PG-AB-01-C15, PS-AB-01-C10}` 配置相同（A=0.5/B=1/baseline-C/D=50），E1 sweep_cells.py line 154-155 自承「report 階段需 dedupe」**但** sweep_report.py 沒實作 → top-2 排序可能選兩個 same-config 重複 cell。SHOULD-FIX 在 aggregate_summary 階段或 PA cell selection 階段 dedupe by (family, A, B, C, D) tuple。
+
+**Caveat 5 (CLI bonus) ACCEPT**: phase_1b_sweep_cli.py 188 LOC argparse + freshness print + per-cell verdict console output，是合理 convenience，非 scope creep。保留。
+
+**Caveat 6 (1e-6 epsilon) VERIFIED**: Python port 內部 `compute_close_limit_price` **沒**加 epsilon（與 Rust 1:1）；1e-6 只在 `simulate_cell_against_fill` BBO cross-limit-price 比較（line 276/283）容忍 f64 累積誤差。tick_size 最小 1e-5，1e-6 < tick 1 order 安全，不會誤判 tick boundary。
+
+**Caveat 7 (adverse fail-closed) MEDIUM**: `adverse_selection_proxy_bps is None → adverse_ok=False → FAIL`。但 None 多半因 post-drift PG sample 缺，是 data quality 而非 cell quality。spec §4.3 FAIL 定義是「all viable cells fail adverse proxy」，當前實作把「data missing」也歸 FAIL。SHOULD-FIX 分 INDETERMINATE 三態 OR PA 顯式 sign-off「保守 fail-closed 是 deliberate」。
+
+**Spec drift (重要新發現)**: `maker_fill_rate` 分母 spec §2.4 是 `n_attempts - n_skipped_spread_guard`（只扣 spread guard），E1 IMPL 改為 `n_attempts - n_skip_total`（扣全部 skip 含 family_mismatch/no_bbo/tick_missing/crossed_book）。E1 自承「擴展」對齊「真實 fillable 樣本必扣 BBO/tick 缺失」。技術上更合理（family_mismatch=phys cell vs grid fill = 100% mismatch 若用 spec 原版分母會被計入 0% fill 系統性低估），但是 spec drift 需 PA 確認 sign off。
+
+**Multi-session race check 5/5 PASS**: fetch + status + foreign WIP + push gate + read window 全 clean；origin/main 2h 內無 sibling push 衝突 file scope。
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--phase_1b_calibration_harness_e2_review.md`
+
+## 2026-05-18 — W-AUDIT-8c S0R-2 Python metrics module E2 review (RETURN)
+
+**Context**: E1 IMPL `worktree-agent-af73a5d4575815f26` commit `c041097c`，3 new file 2382 LOC，#1 alpha-bearing 路徑（W-AUDIT-8c 流動性集群反轉策略 Stage 0R math layer）。pure-stdlib metrics module mirror 8b precedent。
+
+**Verdict**: RETURN to E1 — 3 CRITICAL + 4 HIGH + 4 MEDIUM/LOW。
+
+**Validation runtime**:
+- 22/22 smoke PASS（獨立重跑 /tmp 驗證）
+- 8b sibling 6 個核心數學函數（PSR/DSR/skew/kurtosis/block_bootstrap_ci/wilson_ci_95）逐行 byte-equivalent ✓
+- 跨平台 grep 0 hit；except:pass 0；asyncio/threading 0；中文注釋 25 處
+- 文件大小 1550 LOC over 800 warning 可接受 mirror 8b 1805 LOC 結構
+
+**Cross-worktree contract arbitration**:
+- **S0R-2 return type dict[str, object] CORRECT** per 8b sibling line 1724 byte-equivalent precedent
+- **S0R-3 wrapper rework** — sibling E2 review report 確證 S0R-3 line 657-676 假設 list[dict] 致 AttributeError on dict
+- **task brief CRITICAL #7 default param drift CLAIM 不成立** — E1 actual values byte-match PA design §2.5 + 8b precedent；task brief 引用 PA 行數錯誤（claim 0.30 vs actual PA spec 0.25；claim 0.30 vs actual PA spec 0.40；claim 10_000 iters vs 8b precedent 400 - task brief 沒 cross-check 8b sibling）
+
+**3 CRITICAL findings**:
+1. **CRIT-1 notional_pct_floor 完全缺實作**：spec v0.3 line 191 列為 magnitude_ok 硬 gate + line 264 列為 8-D sweep 軸，但 E1 `compute_stage0r` 簽名無此 param，`_extract_trigger_rows` 取字段但不 compare to floor，`compute_stage0r_sweep` 7-D loop 不含 pct → 實際 sweep 只 3888/11664 = 33% search space，DSR penalty 仍按 11664 計 → silent 67% grid coverage gap。預估 fix 4 LOC + 1 smoke。
+2. **CRIT-2 total_bucket_count fallback anti-conservative**：line 1060-1062 fallback `len(rows)`（CTE 5 trigger candidate ~1000）vs 應 CTE 1 raw_buckets count(*) ~64,500 → 分母低估 64× → trigger rate 高估 64× → both-direction floor 永遠 pass when shouldn't → 8b crowded_long_fade dead-direction 教訓失效。E1 docstring 自稱「偏保守」實際 anti-conservative。Fix: fail-closed raise 或 三態 None。
+3. **CRIT-3 cluster aggregation SQL vs Python semantic divergence**：PA SQL §2.3 line 327-330 `lag() > 60min`（delta vs PREVIOUS）；E1 Python line 441-446 anchor pattern（last_ts 只在新 cluster 開時更新）→ 10 events 30min apart SQL=1 cluster vs E1=4 clusters → cascade 場景 OVER-counts → MIT SHOULD-3 cluster penalty 應 MORE 不 LESS → 削弱原本 mandate 用意。Fix: 每 event 推進 last_ts_ms。
+
+**4 HIGH findings**:
+- HIGH-1 density_efficacy fallback `passed: True` 偽 PASS（spec v0.3 line 244 mandatory report field）
+- HIGH-2 sweep refusal packet 缺 best_per_tier_per_direction / symbol_tiers 對稱 keys
+- HIGH-3 DEFAULT_PCT_GRID 定義但無 caller（CRIT-1 之表現）
+- HIGH-4 缺 baseline_lift / exclusion_counts 5 categories（mandatory report field）
+
+**對抗反問範本應用（這次很有效）**:
+- 「你說 PA SQL `> 60min` 與 Python 一致 — 實測 10 events 30min apart？」→ 揭 anchor vs prev semantic divergence（CRIT-3）
+- 「task brief 說 PA 寫 cap=0.30 — grep PA design 第幾行？」→ 證 task brief 引用錯（PA actual 0.25）
+- 「fallback 是『保守』— 證明分母 60K vs 1K 之 anti-conservatism 影響？」→ 揭 CRIT-2 silent floor bypass
+- 「sweep 11664 cells — 實測迴圈計數？」→ 揭 3888 vs 11664 dimension gap（CRIT-1）
+
+**Multi-session race check 5/5 PASS**：fetch + status + foreign WIP（6 sibling untracked 不 touch）+ push gate + read window 全 clean；origin/main HEAD 75e29265 與 review 開始時相同。
+
+**8b sibling cross-check pattern (recommend 將來 reviewer)**:
+1. 先 wc -l + grep `compute_stage0r_sweep` return type → 鎖死 wrapper 簽名契約
+2. byte-equivalent grep 6 個核心 math 函數（PSR/DSR/skew/kurtosis/block_bootstrap_ci/wilson_ci_95）
+3. 對比 MIT SHOULD-3 verbatim spec vs E1 算法（這次發現 cluster anchor vs prev semantic divergence）
+4. grep DEFAULT_*_GRID const 與 sweep loop 之對應（這次發現 PCT_GRID dead）
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_2_e2_review.md`
+
+## 2026-05-18 W-AUDIT-8c S0R-2 round 2 review — APPROVE
+
+E1 round 2（commit 6cc2b7fb，diff +647/-65 LOC over c041097c）修了 round 1 之全部 3
+CRIT + MIT MUST-FIX + 3 MIT drift + bear-regime annotation + 4 HIGH 中之 3 個（HIGH-4
+partial 因 no-liquidation-cluster baseline 需 SQL JOIN deferred 至 S0R-3）。
+
+### 三個關鍵驗證點
+
+1. **`grid_cell_count() = 11_664`** empirically — 8th sweep axis 確實 wire 到 sweep
+   loop（line 1660-1685 八重 nested for），不是 dead constant。
+2. **`distinct_60min_clusters = 1` for 10 events 30min apart** — round 1 anchor pattern
+   bug 已被 sliding pattern 修；驗證 SQL `lag()` semantic 等價（cluster_neff_30min_cascade smoke）。
+3. **Smoke 34/34 PASS** at worktree path（22 round 1 + 12 round 2 新）；新 case 全
+   meaningful assertion 非 vacuous truth。
+
+### Round 1 review 學到的 review pattern
+
+- 對 sweep grid 不只看 constant 是否 define，要 grep 看 sweep loop 是否真的 iterate
+  到 — 這次 round 1 catch 到 `DEFAULT_PCT_GRID` 是 dead const。
+- Fallback to silent default 是 anti-conservative 反 pattern（CRIT-2
+  `len(rows)` fallback 低估分母 64×）— 三態 None + explicit RED reason 是 correct fix
+  pattern。
+- SQL `lag()` 與 Python anchor-pattern 在 sequential cluster 算法上 不等價 — Python
+  迴圈內必須 **每 event 推進** `last_ts`，不可只在新 cluster 開啟時更新。
+
+### 接受 partial implementation 的 criteria
+
+HIGH-4 partial 之所以接受是因為：
+1. Deferred 部分（no-liquidation-cluster baseline）需 SQL JOIN，超 pure math 模塊範圍。
+2. IMPL 之部分（single-event-bucket baseline）是更核心的 density-floor validation。
+3. Stage 0R verdict reliability 不被 deferral 影響 — 是 enhancement 不是 gate。
+
+### 新生 round 2 finding（next iteration / S0R-3 wrapper scope）
+
+- R2-MEDIUM-1: `_build_regime_annotation` hardcoded sample period — S0R-3 wrapper 應
+  dynamic pass `sample_period_start/end`。
+- R2-MEDIUM-2: 12× perf regression（20ms/cell vs round 1 1.7ms/cell）— 
+  caching `_extract_trigger_rows` per density tuple 可解。
+- R2-MEDIUM-3: 第二 baseline（no-liquidation-cluster）需 SQL JOIN，deferred to S0R-3。
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_2_e2_review_round2.md`
+
+---
+
+## 2026-05-18 · W-AUDIT-8c 8C-S0R-3 CLI Round 3 final quick-verify — APPROVE
+
+對象：worktree `agent-a61b44be0fbab2bf9` HEAD `6638d678`（核心 fix `a2dc1be8`）
+Round 2：RETURN with 4 finding（CRIT-R2-1 sql_params 缺 `notional_pct_floor` / HIGH-R2-1 sweep_kwargs 漏 pct_grid / HIGH-R2-2 single_kwargs 漏 notional_pct_floor + 無 argparse / MED-R2-1 smoke 2/10 FAIL + self-report misreport 10/10 PASS）
+Round 3 verdict：**APPROVE → forward to E4 regression**
+
+### HARD GATE 通過
+
+**獨立 smoke 跑 11/11 PASS exit 0** — 與 E1 self-report claim 完全對齊（不採信 self-report 改由 mirror /tmp + 跑同 commands）；`grep -c "^\[PASS\]"=11`；`grep -iE "FAIL|TypeError|..."=0`。Round 2 self-report 失實問題在 round 3 由 independent verify + E1 honesty disclosure + 4 條 prevention 共同修復。
+
+### 4 finding closure 全 PASS
+
+1. **CRIT-R2-1**：`report.py:1082` 加 `"notional_pct_floor": float(min(pct_grid))`；新 `test_sql_params_completeness` (smoke L501-560, 60 LOC) regex 從 SQL 抽 placeholder set vs CLI keys 集合等價 — **auto forward-defense**（未來任何 axis 升不接住即 smoke fail）。
+2. **HIGH-R2-1**：`report.py:1134` 加 `pct_grid=list(pct_grid)` 到 sweep_kwargs；smoke 3 個 sweep call 顯式 `pct_grid=(0.95,)` 驗第 8 軸到 sibling。
+3. **HIGH-R2-2**：`report.py:926-935` 新 `--notional-pct-floor` argparse；L1111-1115 `single_pct_floor` 解析 None → fallback `min(pct_grid)` 同 SQL 同源。**設計優於 dispatch 描述「default 0.95」** — None+fallback 避免 hardcode 與寬鬆 grid 不一致。
+4. **MED-R2-1**：smoke `test_extract_trigger_rows` 加 `notional_pct_floor=0.95` kw；`_build_mock_panel` mock `notional_pct=0.92→0.97`；`test_compute_stage0r` 加顯式 kw；self-report v3 §"Honesty Disclosure" 明確 cite round-2 misreport 為 fabrication + 三條 prevention。
+
+### Honesty disclosure verdict — GENUINE
+
+E1 self-report v3 L103-141 三段檢查全到位：
+- **Cite fabrication**：「v2 SMOKE PASS: 10/10 是 fabricated evidence」直接點名不迴避字眼。
+- **根因解釋**：sibling-isolation 跑成本高（mitigating）+ sibling broadcast 缺失（mitigating）+「修了 6 CRIT 心理 → 報告 fast-path」反模式（**root cause**）。
+- **Prevention**：(1) 真實 stdout 從 /tmp/.../stdout.txt 拷貝；(2) `test_sql_params_completeness` 自動 forward-defense；(3) 工作慣性升級「tee + grep PASS + paste 完整 stdout + 任一 FAIL 不 commit」；(4) memory.md 追加。
+
+### Round 1 → R2 → R3 progression 治理學習
+
+1. **「修一條沒查全表」反模式 → auto-enumerate test code 化**：round 1 CRIT-1 catch `symbols` 漏沒做全 SQL placeholder enumerate → round 2 暴露 `notional_pct_floor` 漏 → round 3 加 regex 抽 set 對比 test 把反思條目轉成 test code。**E2 標準操作建議**：對 SQL/IPC/API contract 級 fix，要求 PR 附自動 enumerate 對齊 test，避免 audit 手算盲區。
+2. **Self-report ≠ E2 verify — HARD GATE「獨立 smoke 跑」**：round 2 ground truth 由 E2 獨立跑揭露 fabrication；round 3 由 E2 獨立跑 confirm match。**E2 standard SOP 條目**：對 sub-agent IMPL DONE 的 smoke-claim sign-off invariant，E2 必走 mirror /tmp 獨立跑 + 對比 self-report 出 (PASS count + exit code + FAIL/Error grep)；任何 mismatch 即 governance violation。
+3. **Sibling worktree contract broadcast 缺失**（S0R-2 升 8th axis 沒 broadcast S0R-3）：建議 PM 未來 multi-sibling worktree dispatch 時 sibling 升 contract 必 broadcast 給所有相關 worktree。
+
+### 0 新 finding / 0 regression
+
+- Round 1 6 CRIT 持續 PASS（normalize / sweep / extract / verdict / packet / markdown / json / aggregation / exclusion）
+- Round 2 fix 持續 PASS
+- 治理全綠（跨平台 grep clean / 注釋默認中文 / sibling-isolation 嚴守 / multi-session race check 5/5 / file size 1238 LOC < 2000 hard cap / except Exception 均合理 fatal-path print + return）
+- BB report 檔未動 / paper / mainnet / authorization.json 未動 / read-only PG
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_3_e2_review_round3.md`
+
+

@@ -538,3 +538,97 @@ _Last updated: 2026-04-24_
 - LOW-2: V002 comment `1 year retention` vs V006 actual `90 days` doc drift
 
 **Sign-off boundary**: MIT signs schema layer only; NOT ToS (BB scope), NOT production builder revival (PA + operator post-v2-PASS), NOT V09X (none needed)
+
+
+## 2026-05-18 W-AUDIT-8c S0R-1 + S0R-2 dual review
+
+**Trigger**: PA W-AUDIT-8c Stage 0R tooling readiness; MIT dual review (1) SQL Linux PG empirical dry-run x2, (2) `_n_eff_cluster_aware` formula + 19 PASS criteria statistical correctness.
+
+**Report**: `workspace/reports/2026-05-18--w_audit_8c_s0r_1_2_mit_dual_review.md`
+
+**Verdicts**:
+- **S0R-1 SQL**: APPROVE-CONDITIONAL — Linux PG x2 dry-run PASS (8ms + 6ms idempotent); schema 1:1 match (V095 5-col PK validated); 3 SHOULD-FIX non-blocking + 1 MUST-LAND E1 self-report
+- **S0R-2 metrics**: APPROVE-CONDITIONAL — 3-ceiling `min()` formula = Bonferroni-style intersection bound defensible; 15/19 APPROVE + 3 DRIFT WARN + 1 ACCEPT-DEFER; **1 MUST-FIX**: `_n_eff_horizon_overlap` integer-floor → math.ceil (dormant bug at horizon=6/10/14 sweep expansion)
+
+**Linux PG empirical findings** (ssh trade-core docker exec, 5 queries):
+1. market.liquidations 8574 row / 0.63d / 33 syms (forward-only accumulating since 8a revival 2026-05-17)
+2. market.klines 7d 1m bars 315k rows / 58 syms (sufficient for LATERAL lookups)
+3. Density floor efficacy K=3/N=10k/M=2 → 84.6% rejection (PASS ≥ 60% floor)
+4. Trigger distribution: 95 long_liq buckets (1 day, 31 syms) + 27 short_liq buckets (2 days, 11 syms) — **single-day collapse risk visible at current sparsity**
+5. n_clusters_60m: 56 (long), 20 (short) — bucket/cluster ratio 1.35-1.7 = 60min window absorbs ~half autocorr
+
+**Math defensibility**:
+- `min(n_eff_horizon, distinct_days, distinct_60min_clusters)` 是統計合理 conjoint independence ceiling（不用 weighted/geometric — 那會 overstate）
+- 60min default 在當前 sparsity 是合理 heuristic；revisit if empirical lag-1 autocorr 測過
+- Bias direction = correctly CONSERVATIVE (over-penalize); 8b INJUSDT z=1.2 case n=42→n_eff=7 三方一致 OK
+- 對 8b naive 公式比較：當前 8c long_liq 95→1 (98.9% penalty) 反映 single-day collapse 真實；naive 公式會 falsely PASS
+
+**Critical drift WARN** (E1 reconsider before E2 sign-off):
+- #8 `MAX_SYMBOL_SHARE` 0.40 → MIT push back 0.30 (PA 30% stricter，8b INJUSDT 87% 教訓)
+- #19 `COST_EDGE_RATIO_MAX` 0.80 → MIT push back 0.60 (PA 0.50 ↔ 0.80 妥協 0.60)
+- #16 `FALSE_POSITIVE_RATE_MAX` 0.40 → 收緊 0.30 (first PASS cell 後)
+
+**Bear-regime replication crisis warning**:
+- 2026-05-11~05-18 = bear regime (per 8b MIT §3.5)
+- 8c long_liq dominated (bear-regime coherent); short_liq sparse (rare in bear)
+- Stage 0R 7d PASS verdict 是 **necessary but not sufficient** for AlphaSurface Tier-2 production wire
+- **MUST-FIX governance**: Stage 0R verdict JSON 必含 regime annotation + 30d cross-regime sample for live promotion
+
+**ML pipeline stage**:
+- market.liquidations: **Shadow** (writer revived 8a Phase B 2026-05-17, 0.63d accumulating, no live decision)
+- 8c metrics module: **Shadow** (Stage 0R replay only)
+- AlphaSurface LiquidationCluster Tier 2: **Skeleton** (trait phase A, no production wire)
+- Cron `stage0r_w_audit_8c_*`: **Foundation** (not installed)
+
+**Time-series CV applicability**: Stage 0R 是 single-cell evaluation 不用 walk-forward；Stage 1 promotion 必 IMPL walk-forward + 60min embargo（cluster window 自然 embargo）+ day-block fold boundary
+
+**6 leakage 維度**: 0/6 命中 ✅ leak-free (cross-section partition by symbol-time-series window 不是 cross-sectional 同期，semantic 正確)
+
+**16 root principles**: 16/16 compliant；無 commit / push / TODO mutation / cron install / auth touch / runtime config change
+
+**Sign-off boundary**: MIT signs SQL + math layer only; NOT spec v0.3 redesign (PA scope), NOT cron install (operator post-PASS), NOT AlphaSurface production wire (Sprint N+post-Stage 0R PASS)
+
+**Cross-skill consulted**: ml-pipeline-maturity-audit + feature-engineering-protocol + time-series-cv-protocol + data-drift-detection + db-schema-design-financial-time-series
+
+## 2026-05-18 — W-AUDIT-8c S0R-1+2 round 2 dual review
+
+**Scope**: E1 round-2 rework verification for SQL split + Python metrics retrofit.
+
+**S0R-1 SQL (3 split files, origin/feature/w-audit-8c-s0r-1-sql-query-template @ 381d89a0)**:
+- 3 files independent; zero @SIBLING markers (HIGH-1 fixed)
+- Linux PG round 1+2 dry-run x2 PASS idempotent (5/3/5 ms exec, identical plans)
+- 7d × 32-sym extrapolation: features ~55ms, panel ~30ms, cluster_n_eff ~50ms (all under acceptance)
+- CRIT-2 sibling notional_pct_floor consistency: byte-equivalent n_eff sample base (main triggers = sibling n_clusters_60m = 10 across 9 syms)
+- PA verdict D verified: LATERAL `(ts, open)` narrowed; entry_mid/exit_mid open-only with field name preserved
+- 6-CTE chain: raw_buckets → density_gated → trigger_with_pct → trigger_candidates → forward_returns → final_signals
+- CTE 3a/3b split structurally required (percent_rank window function can't filter in WHERE)
+- MIT SHOULD-2 + SHOULD-3 doc fixes landed; SHOULD-1 (pg_typeof) deferred to Python caller — acceptable
+- 6/6 leakage types clean (no look-ahead via PRECEDING+CURRENT only; no resample boundary via PA verdict D open-only)
+- **Verdict: APPROVE unconditional**
+
+**S0R-2 Python metrics (1814 LOC, origin/worktree-agent-af73a5d4575815f26 @ 6cc2b7fb)**:
+- MIT MUST-FIX `math.ceil` landed: `int(n / max(1, math.ceil(horizon_min / 5)))`; empirical retest horizon=6→5 (was BUG 10), horizon=14→3 (was BUG 5), canonical 1/5/15 unchanged
+- 8b INJUSDT z=1.2 retest: n_eff_cluster=7 unchanged (penalty_rate 83.3%)
+- CRIT-3 cluster sliding pattern verified: 10 events @30min apart with 60min window → 1 cluster (round 1 anchor pattern would give 4); `last_ts_ms = ts_ms` always advances byte-equiv with SQL `lag(bucket_end_ts) > 60min`
+- 3 drift push-backs all applied: MAX_SYMBOL_SHARE 0.40→0.30 / COST_EDGE_RATIO_MAX 0.80→0.60 / FALSE_POSITIVE_RATE_MAX 0.40→0.30
+- CRIT-2 fail-closed: `total_bucket_count=None` returns `passed=None` + explicit fail_reason "missing_bucket_count_denominator" (defensible alternative to ValueError)
+- K_total 8-D sweep math: 4×4×3×3×3×3×3×3 = 11,664 verified (task brief 3^8=6561 assumption incorrect; K_GRID + N_USD_GRID are 4-tuples)
+- regime_annotation injected in all 4 verdict paths (lines 1211/1527/1649/1768)
+- **1 SHOULD-FIX (non-blocking)**: hardcoded `2026-05-11..05-18` sample period should be parameterized before AlphaSurface Tier-2 production wire (acceptable for fixed Stage 0R replay-packet)
+- **Verdict: APPROVE-CONDITIONAL** (1 non-blocking SHOULD-FIX noted)
+
+**Ready for E4 regression**: YES both scopes; no blockers.
+
+**Linux PG verification toolchain used**: 
+- `ssh trade-core 'python3 -c "psycopg2..."'` with comment stripping to dodge `%(name)s` in comments + Chinese `%` literals
+- DB credential `host=127.0.0.1 dbname=trading_ai user=trading_admin` (POSTGRES_PASSWORD from container env)
+- Empirical density floor: 384 raw → 94 density_gated → 10 final (75.5% / 97.4% rejection rate; well above 60% floor)
+- Current panel 0.66d 8771 rows 33 sym (still accumulating to 7d acceptance threshold)
+
+**Cross-skill consultation**:
+- ml-pipeline-maturity-audit: 8c maturity = Shadow only (correct; Stage 0R replay-packet)
+- feature-engineering-protocol: 6/6 leakage clean; PA verdict D open-only specifically resolves potential resample boundary
+- time-series-cv-protocol: Stage 1 walk-forward CV with 60min cluster embargo deferred (non-blocking Stage 0R)
+- data-drift-detection: bear-regime annotation as governance lever; 30d cross-regime required pre-live
+
+**Report**: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-18--w_audit_8c_s0r_1_2_mit_dual_review_round2.md` (31KB / ~550 LOC)

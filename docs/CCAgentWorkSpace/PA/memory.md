@@ -1,5 +1,53 @@
 # PA Memory — 工作記憶
 
+## Phase 1b Calibration Cell Selection Report（2026-05-18）
+
+**觸發**：sweep run `sweep_20260518_125510` 完成（81 cells / 1.4 sec / `bybit_demo_ws`）；PA decision memo `5df39d13` §5 C1-C5 cleanup steps 應用 + top-2 pilot 推薦。
+
+**核心發現**：
+1. **N=78 post-dedupe**（81 raw − 3 Block 4 baseline overlap：G-D-D50/PG-D-D50/PS-D-D50）
+2. **0 PASS / 0 CONDITIONAL / 35 INDETERMINATE / 43 TRUE FAIL** post-classification
+3. **Top-2 INDETERMINATE candidates**（mechanical tiebreaker per memo §5 C3）：
+   - #1 `G-AB-01-C90` (grid, A=0.5, B=1, C=90s, D=50, score 2.386, fill 70.8%, save 3.37 bps)
+   - #2 `G-AB-02-C90` (差 B=0)
+4. **5 cells tied at score 2.386**（all G C=90s, A∈{0.5,1.0,2.0,3.0} × B∈{0,1}）→ operator override 建議：替換 #2 為 G-AB-07-C90 (A=3.0) 最大化 information value
+
+**3 個 NEW finding（非 SHOULD-FIX，未在 E2 report 內，sweep 後浮現）**：
+1. **A axis (offset_bps) 對 G/PG family fill_rate 完全無感**：A 從 0.5→3.0 bps fill identical to 6 位小數。Hypothesis: (a) 60% spec design intent (BBO-cross 由 spread 主導, A 只進 fee saving 公式) (b) 25% IMPL bug (`_did_fill_within_window` 未傳 offset) (c) 15% sample artifact。**建議 SD-1 verify**.
+2. **PS family (phys_lock_stale_roc_neg) 100% family_mismatch skip** (26 cells all n_eligible=0)：strategy router 不發 close events，pilot 完全無 PS 候選。**建議 SD-2 verify**.
+3. **Spec v0.2 expanded denom 驗證**：sample G-AB-01-C30 `54 - (0+2+0+4+0) = 48 = n_eligible` ✓ 確定 v0.2 IMPL 對齊 spec。
+
+**設計交付（9 段）**：
+- §0 Exec summary（PnL-led, 35/0/0/43 tier）
+- §1 Methodology（5 C cleanup steps + tier classification rule）
+- §2 Raw sweep overview（per-family / parameter sensitivity / skip-reason distribution）
+- §3 Post-dedupe + tier breakdown（35 INDETERMINATE 完整 list + 43 TRUE FAIL 摘要）
+- §4 Top-2 pilot candidates + tied 5 cells + override 建議 + 24h pilot 5 ACs + rollback trigger
+- §5 5 Risk + Caveats（E2 carry-over BBO-cross-proxy bias + NEW A axis anomaly + NEW PS family bug + v0.2 denom check + 24h ground truth list）
+- §6 next dispatch（operator decision + SD-1 / SD-2 side dispatches + PnL-priority assessment + boundary 列表）
+- §7 16 原則合規（A 16/16 全合規 + 5 硬邊界 0 觸碰 + DOC-08 §12 0 觸碰）
+- §8 Race check 5/5 PASS
+
+**影響評估**：
+- ✅ 16 原則 16/16 全合規（read-only analysis + recommend only）
+- ✅ §四 5 硬邊界 0/5 觸碰
+- ✅ DOC-08 §12 9 不變量 0/9 觸碰
+- 改動風險評級 = 低（無代碼改動，僅 selection report + pilot dispatch recommendation）
+
+**核心教訓（3 個）**：
+1. **BBO-cross-proxy 設計局限導致 A axis dead-variable 警報**：sweep harness 用 BBO-cross 是 spec §3 設計選擇，但這個選擇可能讓 A (offset) 在 fill detection 中無感（depends on IMPL 是否把 offset 餵 cross check）。**新 PA mandate**：sweep harness 設計時 必須 explicit 區分「fill detection」與「fee saving 計算」兩個用途的參數依賴，並在 spec 寫清。E2 review 漏 catch 此點是因為僅 verify denom 計算 + Wilson CI 數值，未做 sensitivity check。E2 SOP 應加「per-parameter axis sensitivity sanity check」step.
+2. **Sweep 1.4-sec 過快是 adverse=NULL artifact 直接原因**：fill_ts + 60s look-ahead window 在 1.4 sec sweep 內全部來不及採；PA decision §3 已預期但 35 cells 全 INDETERMINATE 強化結論：1.4-sec sweep 是 fill calibration 的 viable approach 但 adverse 必須 24h pilot 補。下次類似 calibration 設計：spec 明確「sweep 只 fill+saving / adverse 走 pilot」divide。
+3. **Tiebreaker SOP 與 information value 衝突需 PA push back**：mechanical tiebreaker (cell_id ASC) 推 top-2 為 G-AB-01-C90 + G-AB-02-C90（只差 B=0 vs B=1），但 5 個 tied cells 在 A axis 跨度大；override 推 G-AB-07-C90 為 #2 才能在 pilot 上同時驗證 §5.2 A axis anomaly。PA 守 SOP 出 official top-2 + surface information value override 建議，operator 自決。
+
+**E2/E4 重點審查 3 點**（給後續 sweep harness IMPL revisit）：
+1. `phase_1b_sweep_replay.py:200-300` `_did_fill_within_window` cross-check logic 是否 incorporate `offset_bps` — verify A axis dead variable hypothesis
+2. close-maker family routing logic — verify PS family 為何 100% family_mismatch（spec design vs router bug）
+3. spec v0.3 應新增「per-parameter axis sensitivity sanity check」step in spec §4.2 acceptance（防止下次 A-axis-dead 漏 catch）
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_calibration_cell_selection_report.md`（已複製到 `srv/docs/CCAgentWorkSpace/Operator/`）
+
+---
+
 ## Memory Usage Contract (2026-05-16)
 
 - 本文件保存歷史教訓與角色偏好，不是 active state、TODO 或 runtime ledger。
@@ -4456,3 +4504,85 @@ PA 任務 prompt 字面 reading 可能誘導 PA 越界 IMPL；遵循 PA profile.
 Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_stage0r`) 重構時是低風險選擇：既有 fn 加 1 kwarg + 新 wrapper 在外層 aggregate，避免 deep refactor 引入 regression risk。Trade-off：4× baseline 重算 (浪費 ~10% runtime) vs zero regression risk。Audit packet emitter 場景下 runtime cost 可接受。
 
 **Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_round2_tooling_prep.md`
+
+---
+
+## 2026-05-18 — W-AUDIT-8c S0R-1 HIGH-2 boundary leak arbitration
+
+**Trigger**: E2 round 1 review HIGH-2 指 PA design §2.3 line 261 (`>=`) 與 §8.1 line 653 (`quiet_window=0 special case`) 自相矛盾 + 具體 leak scenario：bucket_end_ts=12:34:00 整分鐘 + quiet=0 → entry_mid=(open+close)/2 含 60s post-event reversion → gross_bps systematic 低估。
+
+**事實核查**:
+- `market.klines.ts` = **bar open time** (V002:122)，no `market.klines_1m`（PA design 寫 phantom table，E1 已 catch deviation #2）
+- 8b precedent 用 exact equality (`close_ts_ms = signal_ts_ms + 900000`) + close-to-close，不能直接 mirror 給 8c
+- E1 follow PA 字面寫 `>=` + `(open+close)/2`，**E1 SQL 沒錯，PA design 有 leak 設計**
+
+**裁決 = D** (而非 E2 列的 A/B/C/d-variant)：
+- entry_mid + exit_mid 從 `(open+close)/2` 改 `open` only
+- `>=` 維持（boundary case 用 bar.open ≈ event time price，無 leak）
+- `quiet_window_sec=0` 維持合法 sweep cell（K_total 11_664 不變）
+- 欄位名 `entry_mid`/`exit_mid` 保留（下游 Python contract 鎖定）
+
+**為什麼 D 不是 B (改 `>`)**: B 在 boundary case 強制延後 1 根 bar → entry 漂到 event+60s，反而更糟；non-boundary case B 與 A 完全相同（兩者都選下一根）。
+
+**為什麼 D 不是 C (強制 +1m)**: C 把 quiet=0 cell hard-fold 成 quiet>=60，sweep 失去信息。
+
+**為什麼 D 不是 8b close-only**: 8b horizon 15-60m close-to-close gap 影響小；8c horizon 1-15m close-to-close 等同自動加 60s implicit quiet，破壞 sweep 設計。
+
+**Lesson — PA design SOP**: 涉及 sub-bar event timing + bar price aggregation 時，design 階段必須走「event 假設落在 bar 開瞬間」boundary thought experiment。`(open+close)/2` 是 generic mid-price 慣例但在 1m bar + sub-minute event 邊界**會洩漏 60s post-event 價格進進場價** — 不是 lookahead bias 而是 entry-fill underestimation（systematic 保守誤差），對 cost_edge_ratio 接近 cost_bps 的 marginal cell 影響顯著。
+
+**Lesson — PA design wording**: §8.1 line 653 「`MUST be ≥ ... quiet_window=0 special case test for boundary correctness`」過於精簡導致 E2 解讀為自相矛盾；設計意圖實為「`>=` 但要 review 邊界情況」。Future PA design 涉及 boundary semantic 必須完整句子描述意圖，不能依賴 reviewer 上下文推斷。
+
+**正交 confirmation**: 此裁決與 CRIT-1 (notional_pct_floor gate 缺漏) / CRIT-2 (sibling consistency) / HIGH-1 (sentinel-split contract drift) 完全正交，E1 rework round 可一併處理。
+
+**Report path**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8c_s0r_1_high_2_boundary_leak_arbitration.md`
+
+---
+
+## 2026-05-18 — Phase 1b Calibration Harness 3 SHOULD-FIX Decisions
+
+**Context**: E2 review 907ab778 `APPROVE-CONDITIONAL` + E4 regression PASS 7/7 + merge `8d8a0123`，3 SHOULD-FIX 不阻 merge 但阻 sweep run 解讀。
+
+**3 Decisions**:
+- #1 Block 4 dedupe → **(b) Accept with PA-side dedupe SQL in cell selection report** (Block 1-3 baseline = Block 4 D=50 cells 3 對 duplicate)
+- #2 maker_fill_rate denom drift → **(a) Spec amend v0.1 → v0.2** (expanded denom `n_attempts - sum(all n_skipped_*)`，反映真實 fillable population；spec drift 是審計鏈污染源必須補)
+- #3 adverse_proxy=None fail-closed → **(c) Pure accept + selection-guide note** (PA 在 FAIL pool 用 SQL `WHERE adverse IS NULL` 分流 data_missing_FAIL vs cell_quality_FAIL)
+
+**ETA**: 0 IMPL；~35 min total (spec patch 10 min + PA selection 報告額外 25 min)；sweep production run 可立即啟動。
+
+**對比 fix-in-IMPL all 3**: ~0.75 pd turnaround (E1 ~120 LOC + re-E2 + re-E4 + re-merge)，sweep run 被阻 ~6 hr。**accept-with-caveat 救 6 hr window**。
+
+**General lesson — Spec drift handling**:
+- IMPL 比 spec 更語意正確（如 expanded denom 更反映 fillable population）→ **spec 反向 amend，不 IMPL revert**。spec is documentation authority，IMPL 升級 spec 比 spec 凍 IMPL 更乾淨。
+- IMPL 過保守導致誤判（如 None adverse → FAIL）→ **PA review SOP 補 SQL，不 IMPL relax**。fail-closed 對齊 root principle §二 #6，下游 PA 手動 carve-out 比 IMPL 加 INDETERMINATE state 成本低。
+- duplicate cells 是 spec design oversight → **下游 PA dedupe SQL，不 IMPL aggregate_summary 內加 dedupe**。raw output 保 baseline 完整 traceability，top-2 排序前 PA 套 DISTINCT ON 即可。
+
+**Report path**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_calibration_should_fix_decisions.md`
+
+## 2026-05-18 Phase 1b Calibration Sweep — SD-1/SD-2 Anomaly RCA
+
+**Trigger**: PA cell selection report `2026-05-18--phase_1b_calibration_cell_selection_report.md` §5.2 / §5.3 留 2 anomaly 待 verify。
+
+**SD-1 (A axis offset_bps dead variable) — VERIFIED dead, spec design intent**:
+- 81 cells × 4 A axis values (0.5/1.0/2.0/3.0) 在所有 (B, C, D) combinations 下 identical 至 7 位小數 fill rate / fee_saving
+- Python port `phase_1b_maker_price.py:104-152` `compute_post_only_price` line 117 注釋明文 `fallback_offset_bps` 不參與 price 計算
+- Rust source `rust/openclaw_engine/src/strategies/common/maker_price.rs:155-356` 同樣 — `fallback_offset_bps` 只在 warn log 出現 (line 276/297/315/332/350)，0 個在 price formula (line 305-336)
+- 真實 limit_price = BBO ± buffer_ticks × tick，strict-passive 設計，從不偏移 bps
+- 將原 cell selection report §5.2 probability 60/25/15 修正為 100/0/0
+
+**SD-2 (PS family 100% skip) — VERIFIED no-sample, data shortage**:
+- 7 天 + post-restart seed pool 共 54 fills：grid_close_short 49 / phys_lock_gate4_giveback 4 / ma_reverse_cross 1 / **phys_lock_gate4_stale_roc_neg 0**
+- `phase_1b_sweep_cells.py:49-60` FAMILY_EXIT_REASONS["phys_lock_stale_roc_neg"] = ["phys_lock_gate4_stale_roc_neg"] 唯一 element，whitelist routing 邏輯正確
+- 26 cells × 54 attempts × 0 match = 100% family_mismatch skip 是 data shortage 自然結果，非 router bug
+- phys_lock_gate4_stale_roc_neg 觸發條件嚴格（stale + roc_neg 雙 sub-gate），自然 distribution 罕
+
+**Action**:
+- 兩 anomaly 都 **不需 E1 IMPL fix**（0 個 IMPL bug）
+- 只需 spec v0.3 amend note 記錄設計約束 + SD-2-future re-sweep trigger monitoring
+- 24h pilot 不阻塞 — Cell A G-AB-01-C90 仍 valid
+
+**Cognitive lessons**:
+- **PA cell selection report 對 hypothesis probability 估計過鬆**（60/25/15 → 100/0/0）：未來 PA review SOP 應在 surface anomaly 時即補 call-path grep proof，避免下游 SD report 重做 evidence work；本次 ~5 min grep 就 confirm 真實 root cause
+- **SQL evidence 必 ssh trade-core 用對的 .pgpass credentials**（trading_admin/trading_ai，password 在 `~/.pgpass`，DSN 用 `OPENCLAW_DATABASE_URL` env var 路徑 Mac 上不存在；Linux runtime 用 `~/.pgpass` peer auth）
+- **strict-passive maker design 的 dead parameter**：Rust signature 對齊舊 spec but IMPL strict-skip 後 fallback_offset_bps 變 vestigial；calibration sweep 沒注意到這 IMPL detail → 設計 4-axis cartesian product 有 1 dead axis × 75% redundancy；spec 與 IMPL 之間需有 dead parameter audit pass
+
+**Report path**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_calibration_sweep_anomalies_sd_report.md`
