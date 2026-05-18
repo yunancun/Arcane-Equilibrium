@@ -150,7 +150,7 @@ def load_replay_seed(
         # Post-restart anchor seed（Phase 1b runtime real data）
         cur.execute(
             """
-            SELECT order_id, link_id, symbol, side, exit_reason, qty, price, ts,
+            SELECT order_id, fill_id AS link_id, symbol, side, exit_reason, qty, price, ts,
                    close_maker_attempt, close_maker_fallback_reason
               FROM trading.fills
              WHERE engine_mode = 'demo'
@@ -179,7 +179,7 @@ def load_replay_seed(
             # Pre-restart 7d demo whitelist closes（baseline reference seed）
             cur.execute(
                 """
-                SELECT order_id, link_id, symbol, side, exit_reason, qty, price, ts,
+                SELECT order_id, fill_id AS link_id, symbol, side, exit_reason, qty, price, ts,
                        close_maker_attempt, close_maker_fallback_reason
                   FROM trading.fills
                  WHERE engine_mode = 'demo'
