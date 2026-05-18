@@ -3718,3 +3718,157 @@ E4 verdict: REGRESSION-PASS, 0 push-back to E1.
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_1_supplement_e4_regression.md`
+
+## 2026-05-18 · Phase 1b Calibration Sweep Harness E4 Mac Regression PASS
+
+**Trigger**: E2 APPROVE-CONDITIONAL (`907ab778`) 派 E4 regression on `feature/phase-1b-calibration-sweep-harness` HEAD `907ab778` (code commit `93069c29`)
+**Verdict**: REGRESSION-PASS · pass to QA / no deploy needed (Mac local research tool)
+
+### 數字
+| 引擎 | 結果 | Baseline | Delta |
+|---|---|---|---|
+| calibration pytest (Mac) run 1 | 63/63 in 0.03s | new | +63 (本 PR) |
+| calibration pytest (Mac) run 2 | 63/63 in 0.03s | non-flaky | 0 |
+| calibration pytest (Mac) `-W error` strict | 63/63 in 0.03s | 0 warning | OK |
+| sibling canary healthchecks | 60/60 in 0.04s | unchanged | 0 import pollution |
+| sibling helper_scripts/db/test_maker_fill_rate | 11/11 in 0.04s | unchanged | 0 conflict |
+| Combined 3-suite run | 134/134 in 0.07s | sum 63+11+60 | 0 cross-test |
+| Rust release lib (Mac) | 2992/0/1 ignored in 0.69s | 2972 (5d ago `18081551`) + 20 sibling drift | 0 calibration attribute |
+| Cross-language 8 fixtures (Rust port) | delta=0.00 all 8 | 1e-9 tolerance | exact match (9 量級 stricter) |
+| Determinism sha256 80 sample × 2 round | identical `5160fffe…` | byte-id | OK |
+
+### Race protocol 5 條全 PASS
+- HEAD `907ab778` ≡ origin/feature/phase-1b-calibration-sweep-harness（unchanged during review）
+- Worktree 4 modified + 7 untracked 全在 `docs/CCAgentWorkSpace/{E2,MIT,PA,QA}/` 或 `memory/`，**0 命中 helper_scripts/calibration/**
+- 不動 sibling dirty file
+- Report path unique
+- `git log --since=30m ago origin/main` 0 source drift
+
+### Mock 審查 PASS
+- E1 unit test (63 個) 0 mockall / 0 fake / 0 patch（per E2 §4 抽查 5 個確認）
+- 純函數 simulation 真實 invoke `compute_close_limit_price` / `compute_post_only_price` / `simulate_cell_against_fill` / `classify_cell` / `wilson_score_interval` / `write_outputs`
+- 業務邏輯 100% 真跑（spread guard / small-tick widening / BBO cross fill / family mismatch / strategy_close prefix / Wilson CI / fail-closed adverse=None / 3-tier PASS/CONDITIONAL/FAIL）
+- 0 anti-pattern hit (per regression-testing-protocol §5 OK pattern)
+
+### Cross-language consistency / SLA
+- **Cross-language**: Rust `maker_price.rs:408-497` 8 個 `#[test]` fixture 對齊 Python `compute_post_only_price` port — 8/8 delta=0.00 exact match (比 1e-9 spec tolerance 嚴格 9 個量級)。Python 純 arithmetic + no epsilon (per E2 §Caveat 6 verified) → f64 binary identical 在此 fixture range
+- **SLA**: N/A — calibration 是 Mac local research tool / 非 tick hot path / 非 H0 Gate
+
+### Lessons learned
+
+- **Pure research tool harness regression 模板**：0 Rust touch / 0 TOML / 0 V### / 0 live auth / 0 runtime mutation 的純 Python research tool 不需 Linux SSH 驗證 + 不需 `restart_all.sh`；E4 重點 = (1) Mac pytest non-flaky × 2 + `-W error` 三跑 (2) sibling no-pollution combined run (3) cross-platform path 0 hardcoded (4) determinism via direct module invoke (CLI stdout 因 timestamp suffix 不可 byte-id；簡單繞 = module-level pure function 跑兩遍 hash 比對) (5) Rust baseline sanity 確認 0 calibration attribute (6) cross-language fixture 直接比 Rust mod tests numeric expected value (7) governance LOC + comment lang 1-pass。約 30 min wall time 比 full Rust + Python E4 矩陣省 70%
+- **Determinism check 設計陷阱**：CLI 含 `datetime.now(timezone.utc).strftime("...")` 在 output_dir suffix → CLI 整體 stdout 永遠不 byte-identical。E4 不能直接 `subprocess.run` × 2 比 sha256。正確做法 = 認識 simulation 業務邏輯本體（純函數）必 deterministic，跳過 CLI wrapper 直接 import module + 跑 80 個 primitive output × 2 round 比 hash。教訓：determinism check 設計前先讀 CLI source 判斷 wrapper 層是否引入非 deterministic side effect
+- **Cross-language fixture 對齊 ≠ 全 path coverage**：本 step 8 fixture 只覆蓋 `compute_post_only_price` 主 path (buy/sell × 全 BBO/單側 + skip + buffer_zero)。`compute_close_limit_price` 的 spread guard / small-tick widening / required_ticks > buffer_ticks 路徑由 calibration unit test `test_phase_1b_maker_price.py` 5 個 `close_limit_price_*` test cover（且 E2 §4 已 verified port 1:1）。E4 不重複 cover；但需在 report 明標「fixture cover scope = post_only_price subset; close_limit_price audited via E1 unit test」
+- **Rust 2972 → 2992 delta attribution**：origin/main 5 day drift + 20 test sibling commit（W7-3 / W-AUDIT-8x / dispatcher fix）；calibration 0 Rust touch by `git diff main..HEAD --name-only | grep \.rs$` empty → Rust passed 0 calibration attribution。**未來「Rust + Python 純 Python PR」E4 模板**：跑 cargo test 純為 sanity 不算 PR 貢獻 delta；delta 全 attribute sibling commits
+- **Combined 3-suite run is faster than 3 separate run 同 confidence**：63 calib + 11 maker_fill + 60 canary = 134 in 0.07s vs 3 跑加總 0.03 + 0.04 + 0.04 = 0.11s。pytest collection 一次 + import 緩存共享 → combined 是更快更 conclusive 的 pollution test。教訓：sibling check 用 combined run 取代 separate run，省時且更嚴格
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-18--phase_1b_calibration_harness_e4_regression.md`
+
+## 2026-05-18 · Phase 1b Calibration grid timeout 30s → 90s E4 Mac+Linux Regression PASS
+
+**Branch**: `feature/phase-1b-calibration-grid-timeout-90s` HEAD `820f0532` (PA cell selection `2b65d3f1` → E1 IMPL → E2 APPROVE-CONDITIONAL → E4)
+**Verdict**: REGRESSION-PASS · PM merge READY
+
+### 數字
+| 引擎 | Result | Baseline | Delta |
+|---|---|---|---|
+| Mac openclaw_engine release (run 1) | 2992/0/1 in 0.68s | 2992 (phase_1b_calibration_harness) | 0 |
+| Mac openclaw_engine release (run 2) | 2992/0/1 in 0.70s | 同 | non-flaky |
+| Mac openclaw_core release | 446/0/0 in 0.01s | n/a (task brief 寫 35 錯 — 35 是 openclaw_types) | OK |
+| Mac openclaw_types release | 35/0/0 in 0.00s | unchanged | 0 |
+| Mac maker_price 3-run determinism | 15/0/0 × 3 identical | n/a | non-flaky |
+| Mac tick_pipeline::tests focused | 163/0/1 (1 pre-existing ignored) | n/a | 0 |
+| Mac strategies::common focused | 33/0/0 | n/a | 0 |
+| Linux release scratch (run 1+2) | 2992/0/1 × 2 in 0.64s | Mac 2992 | 1:1 + non-flaky |
+| Python calibration pytest | 63/63 in 0.03s | Wave 1 baseline 63 | 0 coupling |
+| Race check 5/5 | ALL PASS | n/a | OK |
+
+### 5 sibling fixture audit (E2 SHOULD-FIX)
+13 處 `30_000.0` 全是 BTCUSDT BBO mock 中位價 ($30K USD)，0 個是 `timeout_ms` 數值。`fn inputs_with_bbo(last: f64, bid, ask, tick)` signature 確認 first-arg = last_price 非 timeout。E2 functional non-blocking 結論成立 — 不阻 deploy。NTH (P2): 若後續 PR touch sibling test 可順手提取為 `const BTC_BBO_MOCK_MID: f64 = 30_000.0;` 提升可讀性
+
+### Spec §7.1 compliance
+spec line 488-493 列 default 30s / phys_lock 10s，**未明定 hard upper bound**。Task brief 寫 E2 verified ≤120s 推測是從 entry maker max 50s 推算的合理上限。90s 屬 post-spec evidence-driven evolution (calibration G-AB-01-C90 fill 70.8% vs 30s 58.3% 12.5 ppt 改善)，不違反 spec 任何明示約束。NTH advisory: Phase 2a 24h 觀察後 spec §7.1 同步加 row 反映 calibration evidence
+
+### Task brief 數字以實測為準
+- task brief 寫 "openclaw_core 35/0/0" — 實測 446/0/0 (35 是 `openclaw_types`)
+- task brief 寫 "11 LOC" — `git diff --stat` = 14 LOC (11 insertions maker_price + 3 dual_rail_dispatch)
+- E4 必跑命令拿 baseline，task brief 寫死數字也屬「不信寫死數字」廣義適用範圍 (per regression-testing-protocol §1 baseline 規則)
+
+### Lessons learned
+
+- **11/14 LOC 純常量 PR regression 模板**: 無 Python dual / 無 hot path / 無 new test → 不需 cross-lang 驗 / 不需 SLA / 不需 mock audit。E4 重點 = (1) baseline 0 regression (2) assertion 對齊 source (3) determinism 雙跑 (4) cross-platform Mac↔Linux 1:1 (5) sibling fixture audit verify E2 finding scope。約 20 min wall time，比 full Rust + Python E4 矩陣省 70%
+
+- **Same-number-different-domain audit 陷阱**：`30_000` 在不同 context 是 timeout (30s ms) 或 BTC price ($30K USD)。E4 必跑 fn signature lookup (`fn inputs_with_bbo(last: f64, ...)`) 確認 first-arg semantic 再判 functional coupling。否則容易誤判 BBO mock 為 timeout drift。本次 13 處 `30_000.0` 全是 USD price domain（first-arg `last`）、`30_000.9` 是 passive 賣價計算結果（ask - tick），0 個 timeout — E2 SHOULD-FIX scope verify 成立
+
+- **Spec doc 與 calibration evidence-driven 時序**: spec §7.1 通常列當時設計值；calibration sweep evidence-driven 微調可能在 spec 未明定 hard upper bound 下落地。E4 compliance check = 「不違反 spec 明示約束」非「spec 必列此具體值」；spec doc sync 是 NTH (P2) 而非 blocker
+
+- **Linux scratch worktree isolation 不影響 runtime engine PID**: `git clone --shared /home/ncyu/BybitOpenClaw/srv /tmp/e4-p1b-90s-*` + `cargo test` 完全與主 repo + runtime engine 隔離。但需 cleanup 防 `/tmp/` 累積（本次 cleanup 0 殘留）。比 2026-05-16 P1-PORTFOLIO 主 round 用 ssh + scratch 的同 pattern 更輕量（無需 GitHub remote 跳板）
+
+- **`memory.md` 322KB 超 Read 上限**：必須 `tail -200` 或 `cat >> file << 'EOF'` append。**不能** Read 全文後 Write overwrite（per 2026-05-16 multi-session memory race lesson 同 reminder）
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-18--phase_1b_calibration_timeout_90s_e4_regression.md`
+
+---
+
+## 2026-05-18 — 13-task cleanup sprint full regression (4 E1 batches + 4 PM inline edits)
+
+### Scope
+- 4 E1 batches: P1-PORTFOLIO-RESTING follow-ups (router-cache + test-coverage + E5-bench) / P2-DEAD-SCHEMA-DROP-V096 / P2-WP05-FUP-1 reason_code cleanup (23×`str(exc)`→`reason_code` across 8 Python files) / P1-CRON-INSTALL-WAVE-1 + WP05 CSP/SRI / P2-STOCHASTIC-LEAK-AUDIT
+- 4 PM inline: perception_data_plane DeprecationWarning + 3 test filterwarnings + 7 dead module retirement (-3616 LOC core)
+- New files: V096 migration + bench `intent_processor_exposure.rs` + healthcheck `checks_cron_heartbeat.py` [75..79] + `compute_sri_hashes.sh` + 22+42 test files
+
+### Result matrix
+| Engine | passed | failed | pre-PR baseline | delta | verdict |
+|---|---|---|---|---|---|
+| cargo openclaw_engine --lib (Mac release) | **2993** | 0 (1 ignored) | 2992 (last E4 report) | **+1** (Batch A's test_p2_portfolio_resting_multi_close_summed) | ✅ matches task brief |
+| cargo openclaw_core --lib (Mac release) | **357** | 0 (0 ignored) | 446 (pre-PR stash probe) | **-89** (= -90 retired + 1 stochastic_prior) | ✅ EXPECTED retirement, not silent deletion |
+| cargo openclaw_engine --tests (integration) | 33 | 2 | 33/2 (pre-PR stash probe) | **0 delta** | ✅ pre-existing fails identical signature |
+| V096 + cron heartbeat new tests | **64/64** | 0 | n/a (new) | **+64** | ✅ all pass × 2 runs |
+| 3 perception tests | **107/107** | 0 | n/a | 0 | ✅ DeprecationWarning emitted but tests pass (filterwarnings handles app.perception_data_plane source) |
+| Wider risk/strategist/etc batch | 421 | 3 | 421/3 (pre-PR stash probe) | **0 delta** | ✅ same 3 pre-existing fails (test pollution in wider batch — pass in isolation) |
+| bash -n × 6 shell | 6/6 PASS | 0 | n/a | 0 | ✅ |
+| HTML parse trading.html | OK | 0 | n/a | 0 | ✅ |
+
+### Pre-existing fail signature verification (critical)
+- `stress_bb_breakout_valid_squeeze_with_volume` line 536 `left:0 right:1` — IDENTICAL pre-PR ↔ post-PR (stash probe)
+- `stress_bb_reversion_extreme_oversold_bounce` line 483 `left:0 right:1` — IDENTICAL pre-PR ↔ post-PR (stash probe)
+- 3 Python fails (`test_demo_and_live_tabs_have_risk_shortcuts`, `TestDynamicRiskRoutes::test_status_no_deployer/test_status_happy`) — IDENTICAL pre-PR ↔ post-PR (stash probe). Last two PASS when run isolated but FAIL in wider batch = pre-existing test pollution unrelated to this sprint.
+
+### Retired module test attribution audit
+| Deleted module | Tests removed (git show HEAD) |
+|---|---|
+| attention | 11 |
+| attribution | 10 |
+| cognitive | 13 |
+| dream | 20 |
+| message_bus | 7 |
+| opportunity | 18 |
+| order_match | 11 |
+| **Sum** | **90** |
+| +1 stochastic_prior | +1 |
+| **Net** | **-89** |
+446 - 89 = 357 ✅ exact match. No silent test deletion — every retired test belongs to an explicitly retired dead module documented in `rust/openclaw_core/src/lib.rs` retirement marker.
+
+### Mock anti-pattern audit (E5 §5)
+`test_p2_portfolio_resting_multi_close_summed_capped_at_filled` (lines 1875-1917) uses real `PaperState::new(10_000.0)` + `set_latest_price` + `import_positions` + `seed_resting` + calls **real** `IntentProcessor::compute_effective_long_short_notional(&state)` + `compute_exposure_pct` + `compute_correlated_exposure_pct`. 0 mock. Asserts with 1e-4 float tolerance. PASS.
+
+### Cross-language float consistency
+N/A this sprint — no Python ↔ Rust shared computation introduced. `compute_effective_long_short_notional` is Rust-only (caller side: Python only passes intent payload via IPC). 1e-4 tolerance applied internally to Rust test assertion (eff_long, eff_short = 0 ± 1e-4) ✅.
+
+### Cross-PR boundary (deferred to QA/E5)
+- bench `intent_processor_exposure.rs` not run (bench is for E5 micro-bench, not E4 regression scope). Compile-check via `cargo build --release --bench intent_processor_exposure` = PASS.
+- V096 migration not applied to real Linux PG (per task brief: source/test landed via this sprint; apply is operator-gated downstream).
+- 5 cron wrappers `touch sentinel` line added but not yet installed in Linux crontab (P1-CRON-INSTALL-WAVE-1 next step).
+
+### Non-flaky verification
+- cargo engine + core both runs: 2993/0/1 + 357/0/0 identical × 2 ✅
+- V096 + cron heartbeat 64/64 × 2 ✅
+- 3 perception 107/107 × 2 ✅
+- Wider Python batch 421/3 × 2 with same signatures ✅
+
+### Lessons learned
+- **Task brief 數字以實測為準（再次驗證）**: brief 寫 "openclaw_core previously 399/0/1 after Batch B +1" — 實測 357（446 - 90 retired + 1）。Brief 漏算 7 dead modules retirement (-90 tests)。E4 必跑命令拿真實 baseline + stash 法驗 pre-PR base = 唯一可靠判 delta attribution。**規則**: 寫 "previously X/Y/Z" 的數字常常忽略同次 PR 的 retirement scope，stash probe 是必檢手段
+- **Wider-batch fail vs isolation-pass = test pollution, not regression**: 2 個 `TestDynamicRiskRoutes` test 單獨跑通、wider batch 跑掛。stash 後 wider batch 同樣掛 → pre-existing pollution，非 PR-introduced。**規則**: 任何「PR-introduced fail？」claim 必跑 pre-PR baseline 同 batch 作對照（stash --keep-index 法即可），單測通過 ≠ 證明 batch 通過
+- **`memory.md` append-only 持續鞏固**: 本次再次 `tail -30` + `cat >> EOF` append 模式工作，無 Read 全檔嘗試
