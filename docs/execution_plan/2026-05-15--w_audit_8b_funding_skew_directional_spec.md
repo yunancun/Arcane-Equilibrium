@@ -1,7 +1,7 @@
 # W-AUDIT-8b — A4-A Funding Skew Directional Spec
 
 Date: 2026-05-15（v0.2 base）/ 2026-05-16（v0.3 sensitivity sweep patch）
-Status: Spec v0.3 review/design / no strategy implementation authority
+Status: **Tombstoned post Round 2 RED_FINAL 2026-05-18** (v0.4 tombstone amendment) / no-revive on funding_skew_directional family per A4-C precedent / redirect resources to W-AUDIT-8c (Liquidation Cluster Reaction) + W-AUDIT-8a Phase B/C/D (Alpha Surface infrastructure) per fix-plan v1.1 §9.4 critical path
 Scope: New alpha candidate using AlphaSurface Tier 2 `FundingSkew` + `OIDeltaPanel`. No live/demo launch, no risk/sizing change, no runtime config mutation.
 
 > v0.3 patch 加入 `## Stage 0R v0.3 Trigger Gate Sensitivity Sweep`（位於 `## Replay-First Validation` 之後 / `## Implementation Boundary` 之前），對應 2026-05-16 Round 1 RED RCA 結論「signal failure 主導 + sample 邊際次要」決策的 sweep 範圍擴展。Round 2 sensitivity sweep 是 PA 推薦 Option A 路徑，AMD-2026-05-15-02 §8 condition 3 wording **不改**，3-gate 仍 strict AND。
@@ -476,7 +476,94 @@ Explicitly forbidden in this spec phase:
 - BB signs Bybit funding interval/source-mode compatibility and REST/WS rate-limit posture.
 - PM updates TODO with this spec as the current `W-AUDIT-8b` source.
 
+> **v0.4 supersedes Acceptance For Spec v1**: spec moves to tombstone state per Round 2 RED_FINAL 4-agent consensus. v1 acceptance is no longer applicable. See `## Round 2 Tombstone Closure` + `## Branch-Level Dormancy Retire Path` below.
+
+---
+
+## Round 2 Tombstone Closure（v0.4 — 2026-05-18）
+
+**Status**: TOMBSTONED post Round 2 RED_FINAL · no-revive on funding_skew_directional same-feature-shape per A4-C precedent
+
+### Evidence Chain
+
+| Evidence | Reference |
+|---|---|
+| Round 1 RED RCA | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--w_audit_8b_stage0r_red_rca_and_next_step.md` |
+| Round 2 Phase B preliminary sweep (6.92d operator-auth override) | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-17--w_audit_8b_round2_phase_b_preliminary_sweep.md` |
+| Round 2 Phase B final sweep (7.0049d natural gate) | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8b_round2_phase_b_final_sweep.md` |
+| Sweep artifact JSON | `docs/audits/2026-05-18--w_audit_8b_round2_final_sweep_artifact.json` (md5 `bf9ae8c6`) |
+| 4-agent consolidated verdict | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-18--w_audit_8b_round2_red_final_4agent_consolidated.md` |
+| MIT empirical PG report | `docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-18--w_audit_8b_round2_red_final_mit_review.md` |
+
+### Verdict
+
+`VERDICT_RED_FINAL` — 8/8 cells RED HIGH conf, 4/4 agents APPROVE, 0 MUST-FIX blocker, 100% alignment between preliminary 6.92d and final 7.0049d (per-cell primary metrics frozen).
+
+### Root Causes Identified (cross-agent consensus)
+
+1. **z 39x asymmetry** (MIT + BB empirical convergence): z≥+1.5: 0.27% vs z≤-1.5: 10.5% on Bybit USDT-perp linear 25-sym 7d panel → crowded_long_fade structurally dead by data, not strategy design bug, not demo silent degradation artifact
+2. **INJUSDT extreme funding 集中 single-day event** (MIT): 87% / 846/968 lt_neg10 concentration on 2026-05-13 → effective independent observations ≈ 2-3 day single-event, not 14 funding cycles
+3. **z-score on bimodal funding distribution 意義有限** (QC + BB consensus): Bybit funding 結構性偏正方向（long-bias market per skill `crypto-microstructure-knowledge`）; z=1.5 ≡ z=2.0 identical signal set; percentile gate would be more robust
+4. **`_n_eff` formula limitation** (QC + MIT consensus): deterministic horizon-overlap correction (`int(n / (horizon_min // 5))`) systematically high-bias for cross-sectional clustering — Round 2 verdict robust (formula over-counts but cell still fails floor), but Round 3 / W-AUDIT-8c+ must retrofit cluster-aware n_eff before activation
+
+### Rejected Alternatives
+
+- **Round 3 zoom-in**: REJECTED (MIT explicit ROI≈0 + QC + FA archive path)
+- **28d/56d panel expansion** (for W-AUDIT-8b reverse purpose): REJECTED (forward-only collect since 2026-05-11 + 49d calendar wait for likely-still-RED)
+- **dual-AMD strategy** (separate retire + redirect amendments): REJECTED (single AMD v0.7 wording + independent spec v0.4 tombstone is clean)
+- **Demo silent degradation explanation**: REJECTED (per BB + MIT: silent degradation 範圍 = execution path, 不適用 market data 層; funding rate is mainnet-mirror broadcast on demo endpoint)
+
+### No-Revive Caveat (per A4-C precedent)
+
+Tombstone reversal requires: (a) operator-explicit override + (b) full spec replacement under different feature shape (not same funding_skew_directional + same z-gate sensitivity sweep). Same-feature-shape re-activation is prohibited per memory `feedback_external_tool_authority` and per A4-C BTC→Alt diagnostic-only tombstone precedent.
+
+### Redirect Path
+
+Per fix-plan v1.1 §9.4 critical path: redirect to W-AUDIT-8c (Liquidation Cluster Reaction strategy) + W-AUDIT-8a Phase B/C/D (Alpha Surface infrastructure, 11-worktree decomposition per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8a_phase_b_c_d_worktree_decomposition.md` Wave 1 ready). No new AMD needed — fix plan is PM-level orchestration doc.
+
+### Governance Sync
+
+- AMD-2026-05-15-02 v0.6 → v0.7 wording patch (commit `71f2283b`) §8 condition 3 second gate
+- TODO.md sync (post-tombstone)
+- 4-agent reports persisted: MIT (file) + BB / QC / FA (inline per profile rule, captured in consolidated verdict)
+
+---
+
+## Branch-Level Dormancy Retire Path（v0.4 governance hardening — FA-MUST-FIX-2）
+
+**Trigger condition**: 在 sweep round N 中一 branch 在 **all (z_cell × all symbols) cells n=0 OR n_eff=0**
+
+**Action protocol**:
+
+1. **Flag branch dormant** in spec changelog with cross-agent root-cause attribution (data structural / strategy design bug / endpoint asymmetry / signal formula leak)
+2. **PA + 4-agent review** confirms dormancy attribution + verifies not due to:
+   - Data engineering bug (look-ahead leak / source tier mismatch / cohort misconfiguration)
+   - Look-ahead bias in signal formula (per memory `feedback_indicator_lookahead_bias`)
+   - Demo silent degradation in execution path (per memory `feedback_demo_loose_live_strict_policy`)
+3. **If structurally dead** (data driven, not strategy design bug): demote branch from spec (or tombstone full spec if all branches dormant)
+4. **Refusing to demote = spec inconsistency violation** triggering CC compliance review
+
+### W-AUDIT-8b application (precedent)
+
+- crowded_long_fade branch 全 z × all 25 sym n=0 across Round 2 sensitivity sweep
+- Cross-agent attribution (MIT empirical + BB structural + QC bimodal analysis): **data structural asymmetry**, not strategy design bug
+- Demote action: branch tombstoned with rest of spec in v0.4 (no partial demotion)
+
+### Forward Application
+
+This `Branch-Level Dormancy Retire Path` is **governance hardening** that applies to future W-AUDIT-8c / W-AUDIT-8a / W-AUDIT-8e / W-AUDIT-8f / future alpha source specs. Each spec with sensitivity sweep design MUST include branch-level dormancy retire path or explicit waiver in spec frontmatter.
+
+---
+
 ## Changelog
+
+### v0.4 — 2026-05-18 (Tombstone post Round 2 RED_FINAL)
+
+- **Status change**: `Spec v0.3 review/design` → `Tombstoned post Round 2 RED_FINAL 2026-05-18` per A4-C precedent no-revive on funding_skew_directional same-feature-shape
+- NEW `## Round 2 Tombstone Closure` section: evidence chain + verdict + root causes (cross-agent consensus) + rejected alternatives + no-revive caveat + redirect path + governance sync
+- NEW `## Branch-Level Dormancy Retire Path` section (FA-MUST-FIX-2 governance hardening): trigger condition + action protocol + W-AUDIT-8b precedent + forward application to W-AUDIT-8c/8a/8e/8f future specs
+- v0.4 supersedes `## Acceptance For Spec v1` (added note)
+- Backward-compatible: v0.2/v0.3 sections unchanged for historical audit traceability
 
 ### v0.3 — 2026-05-16
 
