@@ -1,13 +1,17 @@
-# Amendment AMD-2026-05-XX-XX — phys_lock Live Enable (DRAFT v0.2)
+# Amendment AMD-2026-05-XX-XX — phys_lock Live Enable (DRAFT v0.3)
 
-**對應 spec**: EDGE-P2-3 Phase 1b 後續 · DOC-01 §5.4/§5.5/§5.6/§5.8/§5.16 · DOC-08 §12 · `risk_config_live.toml [exit]` carve-out · `exit_features/v2.rs:125-203` ExitConfig schema · `learning.exit_features` (V029 hypertable) audit SoT
+**對應 spec**: EDGE-P2-3 Phase 2c-PL 後續 · DOC-01 §5.4/§5.5/§5.6/§5.8/§5.16 · DOC-08 §12 · `risk_config_live.toml [exit]` carve-out · `exit_features/v2.rs:125-203` ExitConfig schema · `learning.exit_features` (V029 hypertable per `migrations/V029__create_exit_features.sql` — `exit_trigger_rule` + `exit_source` columns) audit SoT
 **修訂對象**: AMD-2026-05-15-02 v0.4 §4「phys_lock Live 分軌（不在本 AMD scope 內，DEFER）」立場
-**Supersedes**: (none — 本 AMD 是 follow-up，**不直接 supersede** AMD-2026-05-15-02 §4 DEFER 立場；待本 AMD 完整 sign-off + Phase 2b LiveDemo PASS + QC counterfactual gate + Phase 2c LiveDemo Counterfactual Verification 四條件齊備後才生效)
-**日期**: 2026-05-16
-**作者**: PA per main session 派 Wave C-3 dispatch（pre-Phase 2b future enable AMD draft prep）+ v0.2 consolidation per 4-agent (QC+FA+MIT+BB) short re-review 2026-05-16 verdicts
-**狀態**: **DRAFT v0.2 — NOT LANDED** — pending (a) Phase 2b LiveDemo 7d PASS empirical evidence; (b) QC counterfactual analysis demo 86 fires PASS; (c) Phase 2c LiveDemo Counterfactual Verification 7d ≥30 fires PASS; (d) operator 顯式 sign-off; (e) AMD slot 編號補實（per `SPECIFICATION_REGISTER.md` 下一 free slot）
+**Supersedes**: (none — 本 AMD 是 follow-up，**不直接 supersede** AMD-2026-05-15-02 §4 DEFER 立場；待本 AMD 完整 sign-off + Phase 2b LiveDemo PASS + QC counterfactual gate + Phase 2c-PL LiveDemo Counterfactual Verification 四條件齊備後才生效)
+**日期**: 2026-05-18 (v0.3 consolidation)
+**作者**: PA per main session 派 Wave C-3 dispatch（pre-Phase 2b future enable AMD draft prep）+ v0.2 consolidation per 4-agent (QC+FA+MIT+BB) short re-review 2026-05-16 verdicts + v0.3 consolidation per 2026-05-17 4-agent re-review (MIT RETURN 3 NEW BLOCKER + QC MUST + FA MUST + 7 SHOULD + 3 NTH)
+**狀態**: **DRAFT v0.3 — NOT LANDED** — pending (a) Phase 2b LiveDemo 7d PASS empirical evidence; (b) QC counterfactual analysis demo canonical-window fires PASS (subject to MIT MUST-2 sample-bias caveat); (c) Phase 2c-PL LiveDemo Counterfactual Verification cumulative ≥60-86 fires PASS + escalation rule（7d<15 → 14d / 14d<30 → permanent REJECT）; (d) operator 顯式 sign-off; (e) AMD slot 編號補實（per `SPECIFICATION_REGISTER.md` 下一 free slot）
 **索引**: 暫不入 `SPECIFICATION_REGISTER.md`（draft only；slot 補實後再 register）
 **TODO 連結**: P0-EDGE-1（alpha-deficient regime 下 phys_lock 啟用 trade-off 評估）/ EDGE-P2-3 Phase 1b（close-maker-first Phase 2b 是前置 gate）
+
+**Scope clarification（per FA SH-5）**: **本 AMD scope = LiveDemo enable only** per Gate 3.7 carve-out — Mainnet enable 進一步加 Gate 3.8 prereq（see §3），不在本 v0.3 land 範圍內。
+
+**Plain-language summary（per FA NTH-3）**: 本 AMD 提案在 LiveDemo 環境打開「physical lock」（profit-protection 鎖利機制）。當前 25 天 demo 累積 719 次觸發，平均每次虧 1.97 bps、中位數 -5.55 bps，⅔ 樣本集中在 2 個爆量日（2026-04-25=145 / 04-27=198）。MIT re-review 揭露 (1) baseline「86 fires」實是 canonical 窗口外推、真實 719 + burst-day-heavy；(2) 25 天 realized 為負挑戰「保護獲利」說法；(3) live_demo 完全未跑過 phys_lock，「行為對稱」是假設不是觀察。v0.3 把「370 fires/月」改保守「~150-200」、明文 sample-bias、Phase 2c-PL 加 escalation rule、推進 stratified per-strategy enable（grid+ma only，其餘 3 策略 DEFER）。
 
 **v0.2 變更摘要**：整合 2026-05-16 4-agent (QC+FA+MIT+BB) short re-review 23 items —
 - 11 must-fix（QC-MF-1/2 / FA-MF-1 / MIT-MUST-A/B/C/D/E/F/G / BB-PL-1）：全收口
@@ -19,6 +23,24 @@
 - §5 evidence packet 5→7 條（新 5.1.6 regime stability + 5.1.7 per-strategy minimum fire count）
 - §6 加 §6.4 close-maker-first AMD 互動 + §6.5 forensics row retention
 
+**v0.3 變更摘要**：整合 2026-05-17 4-agent re-review 15 items + 2026-05-18 PA empirical SoT recompute —
+- **5 MUST-FIX**（MIT-MUST-1/2/3 + QC MUST-4 + FA MUST-5）：全收口
+- 7 SHOULD-FIX（QC SH-1/SH-2 + FA SH-3/4/5 + MIT SH-6/7）：全收口
+- 3 NTH（QC NTH-1 + FA NTH-2/3）：全收口
+- **Empirical SoT recompute**（PA Linux PG verify 2026-05-18）：canonical SQL window 2026-05-04..05-11 = **84 fires** demo（不是 86）；25d 全窗 = **719 fires demo / 0 live_demo** / avg realized_net_bps = **-1.97 bps** / median **-5.55 bps** / 255 positive vs 464 negative / burst days 2026-04-25=145 + 04-27=198 ≈ 48% 樣本集中於 2 天；76 unique symbols
+- **MIT-MUST-1**：baseline「86 fires」改 canonical SQL window + burst-day sensitivity + 月度估從「370 fires/月」改保守「~150-200/月」
+- **MIT-MUST-2**：25d realized_net_bps 負值挑戰 profit-protection claim → §4.2 risk HIGH→VERY HIGH + §1 framing 明文 sample-bias explanation + §5 pre-counterfactual evidence section
+- **MIT-MUST-3**：25d live_demo phys_lock fires = 0 → §2.3「behavioral parity = hypothesis」+ §5.3 escalate rule（7d<15 → 14d / 14d<30 → permanent REJECT）
+- **QC MUST-4**：§5.2 Wilson CI (proportion) vs median(A-B) (continuous) estimator 不對齊 → split bootstrap CI for median + Wilson CI for per-symbol proportion (criterion #5)
+- **FA MUST-5**：13 處 `Phase 2c` → `Phase 2c-PL`（cross-AMD naming convention per W-AUDIT-8b lesson reapplication）
+- §5.1.4 補 sensitivity sweep IMPL spec（per QC SH-1）+ 7th sweep NULL-edge fallback vs non-NULL stratification（per MIT SH-7）
+- §5.3 Phase 2c-PL MDE 邏輯衝突修（per QC SH-2）：n=30 power<0.5 → 累積 ≥60-86 fires（14-21d）保持 demo/live framework 一致
+- §5.1.1 補 V029 migration cite（per FA SH-3）
+- §6.2 healthcheck path templated（per FA SH-4）
+- §3 Gate 3.7 split → Gate 3.7（Linux empirical）+ Gate 3.8（Mainnet 7-prereq）（per FA NTH-2）
+- **Per-strategy carve-out**（per MIT SH-6）：enable 僅限 grid_trading + ma_crossover（7d empirical fires 43 + 14 ≥ 8 gate）；bb_reversion（7）+ bb_breakout（0）+ pctb_revert（0）+ funding_arb（0）DEFER 至累積 ≥ 8 fires
+- §3 加 sub-gate 3.9 track MIT-MUST-G IMPL accepted（per QC NTH-1）
+
 ---
 
 ## 1. Executive Decision
@@ -27,9 +49,16 @@
 
 **範圍嚴格限定**：本 AMD 僅啟一個 surface 行為改變 — 在 `risk_config_live.toml [exit]` 段加 `missing_edge_fallback_bps = 10.0` override，使 live + LiveDemo 環境的 `exit_features/v2.rs::PhysicalDecision` Gate 1 從「missing edge → effective_edge = -10 < min_net_floor=5 → 永久 Hold」改為「missing edge → effective_edge = +10 ≥ floor → 進 Gate 2+」。其餘 phys_lock 8-gate 鏈條（min_hold_secs / min_peak_atr_norm / stale_peak_ms / giveback_*）參數保持 Rust default 與 demo 一致，**不引入新調參面**。
 
-**啟用語義**：把 demo 7d 觀察到的 86 fires 對應 profit-protection 行為（gate4_giveback / gate4_stale_roc_neg）擴展到 live + LiveDemo，使 phys_lock 從 demo-only 對照實驗轉為三環境一致的 profit-protection 機制。
+**啟用語義**：把 demo 7d canonical 窗口（2026-05-04..05-11）empirical 觀察到的 **84 fires**（per v0.3 PA Linux PG recompute；舊文「86 fires」是 estimate，已修正）對應 profit-protection 行為（gate4_giveback / gate4_stale_roc_neg）擴展到 live + LiveDemo，使 phys_lock 從 demo-only 對照實驗轉為三環境一致的 profit-protection 機制。
 
-**Framing 嚴謹性 (per QC §1 transaction cost economics)**：phys_lock = profit-protection（peak ATR giveback / stale ROC neg lock-in），**不是 risk-bypass 也不是新 alpha source**；分類為 `α_holding truncation policy`（per QC round-2 §6 + short re-review §1 transaction cost decomposition）：
+**Pre-counterfactual sample-bias evidence (per MIT MUST-2 mandatory new section)**：在 §5 QC counterfactual analysis 跑前，AMD 必明文以下 25d 全窗 empirical baseline 與其 sample-bias caveat：
+- **25d 全窗（2026-04-23..05-18）累積 719 fires** demo（live_demo = 0；live = 0）
+- **平均 `realized_net_bps` = -1.97 bps**；median **-5.55 bps**；255 positive vs 464 negative；35% 樣本 positive
+- **Burst-day-heavy sampling**：2026-04-25 = 145 fires + 2026-04-27 = 198 fires = 343 ≈ **48% 樣本集中於 2 天**；典型日 fires <20，中位日 <15
+- **解讀**：表面數值挑戰「phys_lock 是 profit-protection」說法；但 `realized_net_bps` 是 fire 後實際 close 結果，**不是** paired counterfactual diff。phys_lock 是 lock-out 機制，鎖的是 fire 時刻 unrealized P&L；若 entry 信號是 noise（per P0-EDGE-1 alpha-deficient regime），peak ATR 後 giveback 的 realized 可能是「鎖在 noise high 後 retracement loss」（鎖一個本來會回沖更深的 loss）也可能是「鎖在 noise high 後 retracement gain」（不鎖會 break out 更高）—— **單看 realized 不能判定**
+- **Counterfactual 必要性**：§5.2 paired bootstrap A−B median 才是 net-positive 的判據；負 realized 不直接等於 FAIL，但**提高 PASS 門檻**——只有 A 場景比 B 更負才能維持 net-positive
+
+**Framing 嚴謹性 (per QC §1 transaction cost economics + MIT MUST-2 sample-bias caveat)**：phys_lock = profit-protection（peak ATR giveback / stale ROC neg lock-in），**不是 risk-bypass 也不是新 alpha source**；分類為 `α_holding truncation policy`（per QC round-2 §6 + short re-review §1 transaction cost decomposition）：
 ```
 NetPnL = α_entry + α_holding + α_exit − (fee + slippage + impact + funding)
 α_holding = ∫[t_entry, t_exit] dP_favourable(s) ds
@@ -43,7 +72,7 @@ phys_lock **不**改變 informational alpha（α_entry/α_exit）；只在 holdi
 ```
 ΔSharpe > 0  ⇔  σ_reduction × Sharpe_baseline > μ_reduction
 ```
-即 phys_lock 對 NetPnL 分布的影響 = E[NetPnL] 略降 + Var(NetPnL) 顯著降 + tail-loss truncation。Sharpe 上升 = variance reduction term 必須大於 mean shift term；此為本 AMD 經濟假設 hot path 的明文條件，counterfactual analysis（§5）所驗即為此條件在 demo 86 fires + Phase 2c LiveDemo ≥30 fires 上是否成立。
+即 phys_lock 對 NetPnL 分布的影響 = E[NetPnL] 略降 + Var(NetPnL) 顯著降 + tail-loss truncation。Sharpe 上升 = variance reduction term 必須大於 mean shift term；此為本 AMD 經濟假設 hot path 的明文條件，counterfactual analysis（§5）所驗即為此條件在 demo canonical-window 84 fires + Phase 2c-PL LiveDemo cumulative ≥60-86 fires（per QC SH-2 修；舊 ≥30 fires 在 n=30 對 effect size 5 bps 約 power<0.5，與 §5.2 MDE-power gate 邏輯衝突）上是否成立。
 
 ---
 
@@ -72,44 +101,75 @@ missing_edge_fallback_bps = 10.0
 | 8-gate 鏈條任何邏輯 | `exit_features/v2.rs::compute_physical_decision()` 0 代碼改動 |
 | H1-H5 / Decision Lease / Guardian / StopManager | 0 觸碰 |
 
-### 2.3 影響範圍估算
+### 2.3 影響範圍估算（per MIT MUST-1 canonical SQL recompute + MIT MUST-3 behavioral parity caveat）
 
-By analogy to demo 7d 86 fires / 25 symbols ≈ **0.49 fire / symbol / day**：
-- live 25 symbols × 30d ≈ **~370 fires/月** profit-protection lock-in 預期觸發頻率
+**Canonical SQL window baseline**（per MIT MUST-1）：
+```sql
+SELECT engine_mode, COALESCE(exit_trigger_rule, exit_source), COUNT(*)
+FROM learning.exit_features
+WHERE (exit_trigger_rule LIKE 'phys_lock_%' OR exit_source='Physical')
+  AND ts BETWEEN '2026-05-04' AND '2026-05-11'
+GROUP BY 1, 2;
+```
+→ **84 fires demo / 0 live_demo / 0 live**（PA Linux PG verify 2026-05-18）；舊文「86 fires」為 estimate，已修為 canonical empirical。
+
+**25d 全窗（2026-04-23..05-18）對比**：
+- **719 fires 全部 demo**（live_demo = 0；live = 0）→ 25 symbols × 25d ≈ 1.15 fires/symbol/day 表面；但**樣本非穩態**
+- Burst-day-heavy：04-25=145 + 04-27=198 ≈ 48% 樣本集中於 2 天；扣 burst → 376 fires / 23 days ≈ 16 fires/day → 16/25 ≈ **0.65 fires/symbol/day** 穩態估計
+- **修正月度估**：from **`~370 fires/月`** (舊估) → **`~150-200 fires/月`** (保守估)；計算：(0.45-0.65 fires/symbol/day) × 25 symbols × 30 days ≈ 338-488 fires/月，但 burst-day inclusive；扣除尾部 burst regime contribution → ~150-200 穩態 lock-in 預期觸發頻率
 - LiveDemo 累積樣本同等量級（demo + live_demo IPC 共用 risk_config_live 後）
-- 對應 close-maker-first 白名單：370 月度新 maker-first close opportunity（per AMD-2026-05-15-02 §2.2 `phys_lock_gate4_giveback` + `phys_lock_gate4_stale_roc_neg`）
+- 對應 close-maker-first 白名單：~150-200 月度新 maker-first close opportunity（per AMD-2026-05-15-02 §2.2 `phys_lock_gate4_giveback` + `phys_lock_gate4_stale_roc_neg`）
 
-**注意**：此估算建立在「live regime 與 demo regime 行為對稱」假設上 — per §4.4 split 評估：phys_lock 觸發層 LOW（per BB-PL-2，Gate 1-4 全 internal state 不依 endpoint）+ close dispatch 層 drift 已由 close-maker-first AMD AC-15/19 + [65] healthcheck 覆蓋。
+**Behavioral parity = hypothesis (per MIT MUST-3)**：25d demo 719 fires，**live_demo = 0**。此估算建立在「live + LiveDemo regime 與 demo regime 行為對稱」**假設**上，**不是觀察結果**。live_demo 是 live 管線走 demo endpoint（per `feedback_live_no_degradation_by_endpoint.md`）— phys_lock 觸發機制在 Rust deterministic L0 路徑，理論上對 endpoint 不敏感（per §4.4.1 BB-PL-2 split：Gate 1-4 全 internal state），但**0 empirical evidence**驗證此理論在 live_demo runtime 實際成立。
+
+**緩解 (per MIT MUST-3)**：§5.3 Phase 2c-PL LiveDemo Counterfactual Verification 必加 escalation rule：
+- 7d observation 累積 < 15 fires → **延長至 14d**
+- 14d 累積 < 30 fires → **permanent REJECT 本 AMD**（重啟需新 AMD）
+- 30d 累積仍 < 60 fires → **permanent REJECT 本 AMD**
+
+理由：若 live_demo 7-30d 內無法累積足夠 sample 重跑 §5.2 paired bootstrap，behavioral parity assumption 永無 empirical evidence，AMD 失立論基礎。
+
+**Per-strategy carve-out (per MIT SH-6, advisory v0.3)**：7d canonical window per-strategy empirical fires：
+- grid_trading = 43 ✅ enable
+- ma_crossover = 14 ✅ enable
+- bb_reversion = 7 ❌ DEFER（< 8 fires gate）
+- bb_breakout = 0 ❌ DEFER
+- pctb_revert = 0 ❌ DEFER
+- funding_arb = 0 ❌ DEFER（dormant per FA EDGE-DIAG-2 closure 2026-05-02）
+
+→ **v0.3 enable approval scope = grid_trading + ma_crossover only**；其餘 3 active 策略 + funding_arb 累積 ≥ 8 fires 後 reopen AMD evaluate。技術上 TOML override 是 global（不能 per-strategy gate）；緩解：Gate 3.4 (c) PA + QC + FA 三方聲明必加「per-strategy fire rate ≥ 8 / 7d」sub-criterion；若 enable 後 bb_breakout/pctb_revert/funding_arb 累積 ≥ 8 fires 但 §5.2 paired diff 為負 → rollback。
 
 ---
 
-## 3. Pre-enable Conditions（gate stack v0.2 = 7 條 hard + 1 條 Mainnet 子表）
+## 3. Pre-enable Conditions（gate stack v0.3 = 9 條 hard + 1 條 Mainnet 子表）
 
 **所有條件必滿足才能將本 DRAFT 轉 Accepted + land 至 active amendments folder + 補 slot 編號**：
 
 | Gate | 證據要求 | 狀態 |
 |---|---|---|
 | **3.1 Phase 2b LiveDemo PASS** | AMD-2026-05-15-02 §3 Phase 2b 7d 完整觀察 + AC-1..AC-19 (Wilson CI + reject sample + NULL ladder + fallback rate ≥ 95% + 14d close_maker_fill_rate ≥ 30%) + FDR 0.10 BH adjustment 全 PASS | ⏳ Pending（Phase 2b 尚未啟動，等 Phase 2a Demo 14d PASS + IMPL Prereq 6 全解） |
-| **3.2 QC Counterfactual Analysis (demo 86 fires)** | QC 跑 demo 86 fires 對應倉位「**不啟用 phys_lock 反事實 PnL**」對比「**啟用 phys_lock 實際 PnL**」 — must show net positive：`counterfactual_PnL_no_lock < actual_PnL_with_lock`。樣本量 n=86 需做 block-bootstrap CI + Wilson CI lower bound + MDE/power calculation；q-value < 0.10 顯著 | ⏳ Pending（§5 evidence packet 強制要求；power+MDE+FDR 三必修 per MIT-MUST-A/B/D） |
+| **3.2 QC Counterfactual Analysis (demo canonical 84 fires per MIT-MUST-1)** | QC 跑 demo canonical-window 84 fires + 25d 全窗 719 fires 對應倉位「**不啟用 phys_lock 反事實 PnL**」對比「**啟用 phys_lock 實際 PnL**」 — must show net positive：`counterfactual_PnL_no_lock < actual_PnL_with_lock`。樣本量 n=84 (canonical) + n=719 (25d 全窗，含 burst-day sensitivity 拆 burst-only / non-burst) 需做 block-bootstrap CI + Wilson CI per-symbol proportion + MDE/power calculation；q-value < 0.10 顯著 | ⏳ Pending（§5 evidence packet 強制要求；power+MDE+FDR 三必修 per MIT-MUST-A/B/D + canonical/burst sensitivity per MIT-MUST-1） |
 | **3.3 Operator 顯式 Sign-off** | Operator 在 commit message + governance trail 明文 approve；不接受 implicit 推導 | ⏳ Pending |
-| **3.4 P0-EDGE-1 狀態評估 + 三方聲明（hard sub-criterion per QC-MF-2 + FA-MF-1）** | (a) **demo 14d rolling [40] 不再惡化**（[40] avg_net_bps 不再變更負 vs 14d ago baseline）；(b) **AlphaSurface C1 或 W-AUDIT-8b funding skew 至少 1 候選 Stage 0R `eligible_for_demo_canary=true`**；(c) **若 P0-EDGE-1 在 enable 時點仍 active，PA + QC + FA 三方明文聲明必須引 §5 counterfactual evidence 證 net-positive 在 alpha-deficient regime 下仍成立**（mandatory wording） | ⏳ Pending |
+| **3.4 P0-EDGE-1 狀態評估 + 三方聲明（hard sub-criterion per QC-MF-2 + FA-MF-1 + per-strategy sub-criterion per MIT SH-6）** | (a) **demo 14d rolling [40] 不再惡化**（[40] avg_net_bps 不再變更負 vs 14d ago baseline）；(b) **AlphaSurface C1 或 W-AUDIT-8b funding skew 至少 1 候選 Stage 0R `eligible_for_demo_canary=true`**；(c) **若 P0-EDGE-1 在 enable 時點仍 active，PA + QC + FA 三方明文聲明必須引 §5 counterfactual evidence 證 net-positive 在 alpha-deficient regime 下仍成立**（mandatory wording）；(d) **per-strategy fire rate ≥ 8 / 7d sub-criterion**（per MIT SH-6 v0.3 stratified carve-out）— enable approval scope = grid_trading + ma_crossover only；bb_reversion/bb_breakout/pctb_revert/funding_arb 累積 ≥ 8 fires 後 reopen AMD evaluate；TOML override 是 global，per-strategy 通過聲明 + 監測 rollback 機制達成 | ⏳ Pending |
 | **3.5 AMD-2026-05-15-02 v0.4 §4 立場修訂** | 本 AMD Accepted 同時提交 AMD-2026-05-15-02 v0.5 補丁，把 §4「DEFER」改為「DEFER until AMD-2026-05-XX-XX SATISFIED → SUPERSEDED on land date」 | ⏳ Pending（提交 v0.5 patch 工作量 ~0.2h cosmetic） |
-| **3.6 AMD slot 編號實裝** | per `SPECIFICATION_REGISTER.md` 下一 free slot（land 時 2026-05-XX 對應日）；目前 placeholder `XX-XX`。實裝順序（per FA-Cosmetic）：**先 Phase 2b PASS → QC counterfactual PASS → Phase 2c PASS → operator sign-off → 同 commit 補 slot + register + AMD-2026-05-15-02 v0.5 patch** | ⏳ Pending |
-| **3.7 Linux Empirical Verification + Mainnet 7 prereq cross-ref（per QC-SF-2 + BB-PL-1）** | （a-1）ExitConfig ArcSwap hot-reload + RuntimeRiskConfig 路徑必跑 Linux runtime live empirical 驗 1 tick visibility（Mac unit test PASS 不足）；（a-2）Mainnet 7 prereq cross-ref：真實 fee rate verify / rate_limit_remaining baseline / IP whitelist / EarnedTrust T0→T1 / MAG-083/084 ✅ closed / 24h mainnet smoke / kill-switch 物理測試 — 若 LiveDemo-only enable 可保留「pending Phase 3 carve-out AMD」標註；若 Mainnet enable 必 inline 補完 | ⏳ Pending |
+| **3.6 AMD slot 編號實裝** | per `SPECIFICATION_REGISTER.md` 下一 free slot（land 時 2026-05-XX 對應日）；目前 placeholder `XX-XX`。實裝順序（per FA-Cosmetic）：**先 Phase 2b PASS → QC counterfactual PASS → Phase 2c-PL PASS → operator sign-off → 同 commit 補 slot + register + AMD-2026-05-15-02 v0.5 patch** | ⏳ Pending |
+| **3.7 Linux Empirical Verification（per QC-SF-2 + FA NTH-2 split）** | ExitConfig ArcSwap hot-reload + RuntimeRiskConfig 路徑必跑 Linux runtime live empirical 驗 1 tick visibility（Mac unit test PASS 不足）；next `compute_physical_decision()` invocation 必取 new snapshot；**本 AMD v0.3 scope = LiveDemo enable only**，Gate 3.7 為必滿足 | ⏳ Pending |
+| **3.8 Mainnet 啟用 prereq cross-ref（per FA NTH-2 split + BB-PL-1）** | Mainnet enable 是 separate next-phase gate，**不在本 AMD v0.3 land 範圍**；本 AMD LiveDemo enable land 時，Gate 3.8 標記「pending future Mainnet AMD carve-out」；若未來 Mainnet enable，需另寫 AMD 補完 7 prereq 子表（見下） | 🚫 OUT OF SCOPE v0.3（pending future Mainnet AMD） |
+| **3.9 Replay framework MIT-MUST-G IMPL accepted（per QC NTH-1 sub-gate visibility）** | replay framework 需先支援 ExitConfig override at replay session level（counterfactual A 場景 pass `missing_edge_fallback_bps=-10.0` 強制 Gate 1 fail-safe Hold）；replay engine 當前 0 native support。**本 sub-gate track MIT-MUST-G IMPL：MIT 派 worker → IMPL → E2 review → accept**；無此 IMPL，QC counterfactual analysis 無法跑（silent blocker per QC NTH-1） | ⏳ Pending |
 
-**Gate 3.7 子表 — Mainnet 啟用 7 prereq（per BB-PL-1）**：
+**Gate 3.8 子表 — Mainnet 啟用 7 prereq（per BB-PL-1，OUT OF SCOPE v0.3，僅 cross-ref）**：
 
 | # | 條件 | 必檢時點 | 狀態 |
 |---|---|---|---|
-| 3.7.1 | 真實 fee rate verify（不依賴 demo 推導） | Mainnet enable 前 | ⏳ |
-| 3.7.2 | rate_limit_remaining baseline 採集 30d | Mainnet enable 前 | ⏳ |
-| 3.7.3 | IP whitelist | Mainnet enable 前 | ⏳ |
-| 3.7.4 | EarnedTrust T0→T1 promote | Mainnet enable 前 | ⏳ |
-| 3.7.5 | MAG-083 / MAG-084 evidence chain | ✅ Closed 2026-05-11 | ✅ |
-| 3.7.6 | 24h mainnet smoke | Mainnet enable 前 | ⏳ |
-| 3.7.7 | kill-switch 物理測試（mainnet endpoint 驗 rollback ArcSwap 1 tick 內生效） | Mainnet enable 前 | ⏳ |
+| 3.8.1 | 真實 fee rate verify（不依賴 demo 推導） | 未來 Mainnet enable AMD | 🚫 OUT OF SCOPE v0.3 |
+| 3.8.2 | rate_limit_remaining baseline 採集 30d | 未來 Mainnet enable AMD | 🚫 OUT OF SCOPE v0.3 |
+| 3.8.3 | IP whitelist | 未來 Mainnet enable AMD | 🚫 OUT OF SCOPE v0.3 |
+| 3.8.4 | EarnedTrust T0→T1 promote | 未來 Mainnet enable AMD | 🚫 OUT OF SCOPE v0.3 |
+| 3.8.5 | MAG-083 / MAG-084 evidence chain | ✅ Closed 2026-05-11 | ✅ |
+| 3.8.6 | 24h mainnet smoke | 未來 Mainnet enable AMD | 🚫 OUT OF SCOPE v0.3 |
+| 3.8.7 | kill-switch 物理測試（mainnet endpoint 驗 rollback ArcSwap 1 tick 內生效） | 未來 Mainnet enable AMD | 🚫 OUT OF SCOPE v0.3 |
 
-**3.7.5 已 closed** per CLAUDE.md §三 + `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`；其餘 6 條須 inline 補完或標記 "pending Phase 3 carve-out AMD" 接續。若本 AMD 範圍限 LiveDemo enable，3.7.2-3.7.7 可推遲；若延伸 Mainnet enable，必 inline 補完。
+**3.8.5 已 closed** per CLAUDE.md §三 + `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`；其餘 6 條為 future Mainnet enable AMD prereq，**本 AMD v0.3 scope = LiveDemo enable only，不在 v0.3 land 範圍內**（per FA NTH-2 split + Scope clarification）。
 
 **不要求**：W-AUDIT-8a C1 BB/MIT sign-off / W-AUDIT-8b Stage 0R PASS / 任何 alpha-bearing 三閘（本 AMD 是 profit-protection execution-quality optimization 性質，per §1 framing，與 alpha promotion 三閘正交）。但 Gate 3.4 (b) AlphaSurface C1 或 W-AUDIT-8b funding skew Stage 0R `eligible_for_demo_canary=true` 是 P0-EDGE-1 alpha pipeline empty 防禦條件，非 alpha promotion gate。
 
@@ -123,7 +183,7 @@ By analogy to demo 7d 86 fires / 25 symbols ≈ **0.49 fire / symbol / day**：
 
 **緩解 1**：強制 Gate 3.1 — 本 AMD enable timing 必須在 Phase 2b PASS 之後（即 AMD-2026-05-15-02 §3 Phase 2b 14d 觀察窗結束 + AC 全 PASS + close-maker-first 已 production-stable），保證兩個 live surface 改變不重疊。
 
-**緩解 2**：本 AMD 啟用後立即進入 phys_lock-only 14d observation 窗（Phase 2c LiveDemo Counterfactual Verification，per §5.3），期間禁止其他 live surface flag 翻轉。
+**緩解 2**：本 AMD 啟用後立即進入 phys_lock-only 7-21d observation 窗（Phase 2c-PL LiveDemo Counterfactual Verification，per §5.3 escalation rule），期間禁止其他 live surface flag 翻轉。
 
 **殘留風險**：MEDIUM — 若 Phase 2b 仍在 production 早期（< 4w post-stabilize），observability 干擾依然存在；診斷新事件時可能誤把 close-maker-first 副作用歸因 phys_lock 或反之。
 
@@ -137,19 +197,25 @@ By analogy to demo 7d 86 fires / 25 symbols ≈ **0.49 fire / symbol / day**：
 - **counterfactual_PnL_no_lock** 可能 ≥ actual_PnL_with_lock（即不鎖更好）。
 
 **緩解**：強制 Gate 3.2 + Gate 3.4 — Counterfactual analysis pre-enable + P0-EDGE-1 三方明文聲明引 §5 evidence。具體計算（per §5 evidence packet）：
-- 取 demo 86 fires 對應倉位 entry timestamp + qty + side（per MIT-MUST-E schema 命名修正：`learning.exit_features WHERE exit_trigger_rule LIKE 'phys_lock_%' OR exit_source='Physical'`）
+- 取 demo canonical 84 fires + 25d 全窗 719 fires 對應倉位 entry timestamp + qty + side（per MIT-MUST-E schema 命名修正：`learning.exit_features WHERE exit_trigger_rule LIKE 'phys_lock_%' OR exit_source='Physical'`）
 - 計算反事實場景 A：fire 時刻不 lock，後續 `min_hold_secs + giveback_window` 結束時 market close → 收 actual close fill price
 - 對比實際場景 B：fire 時刻 phys_lock lock → 收 actual lock close fill price
-- 計算 86 paired diff（A - B）→ paired block-bootstrap CI 95%（n_bootstrap=1000，block size ≈ √n ≈ 9）
-- PASS 條件（per MIT-MUST-A/B/C/D + QC-MF-1 修正）：見 §5.2
+- 計算 84 / 719 paired diff（A - B）→ paired block-bootstrap CI 95%（n_bootstrap=1000，block size ≈ √n ≈ 9 for canonical / ≈ 27 for 25d 全窗）
+- **Burst-day sensitivity (per MIT MUST-1)**：25d 全窗拆 burst-only (04-25 + 04-27 = 343 fires) vs non-burst (376 fires) 分別跑 paired bootstrap；兩個 sub-sample 一致 directional 才 PASS
+- PASS 條件（per MIT-MUST-A/B/C/D + QC-MF-1 修正 + QC MUST-4 estimator alignment）：見 §5.2
 
-**殘留風險**：HIGH — 即使 counterfactual PASS demo regime，live regime 可能行為不對稱（per BB-PL-2 split：phys_lock 觸發層 LOW + close dispatch 層 drift 已由 close-maker-first AMD AC-15/19 覆蓋）。本殘留 HIGH 由 Phase 2c LiveDemo Counterfactual Verification（per §5.3）緩解 — enable 後 7d observation 累積 ≥30 fires after live enable 再判定。
+**殘留風險**：**VERY HIGH** (v0.3 escalated from HIGH per MIT MUST-2) — 即使 counterfactual PASS demo regime，live + LiveDemo regime 可能行為不對稱（per BB-PL-2 split：phys_lock 觸發層 LOW + close dispatch 層 drift 已由 close-maker-first AMD AC-15/19 覆蓋）；**新增風險**：
+- (a) **25d realized_net_bps = -1.97 bps**（per MIT MUST-2 empirical recompute）→ 表面樣本「負獲利」與 profit-protection framing 表面矛盾；雖然 §5.2 paired diff 才是 net-positive 判據，但 prior probability QC counterfactual PASS 下降
+- (b) **Burst-day-heavy sampling**：48% 樣本集中於 2 天；regime stability check（§5.1.6）若 burst-only vs non-burst 不一致 → 永久 REJECT
+- (c) **live_demo 0 fires baseline**（per MIT MUST-3）→ behavioral parity 從觀察降為假設
+
+本 VERY HIGH 殘留由 (1) Phase 2c-PL LiveDemo Counterfactual Verification（per §5.3）+ escalation rule（7d<15 → 14d / 14d<30 → permanent REJECT）緩解；(2) per-strategy carve-out（grid+ma only per MIT SH-6）降低 blast radius；(3) §5.1 burst-day sensitivity 拆解防 sample 集中 bias。即便如此，由於 P0-EDGE-1 alpha-deficient regime active，本 AMD 仍 carry VERY HIGH 殘留 — Gate 3.4 (c) 三方聲明強制此認識。
 
 ### 4.3 Demo-loose-live-strict 政策違反風險
 
 **事實**：`feedback_demo_loose_live_strict_policy.md` 明示「demo 是學習資料源可放寬；Live 永遠 fail-closed；核心是平衡虧損與盈利，非一味保守」。
 
-**判定**：本 AMD 啟用 = 放寬 live fail-safe → **政策上是 negotiable**（不是禁止），但需 operator carve-out + counterfactual evidence 雙重門控。本 AMD §3 Gate 3.3 operator sign-off + Gate 3.2 counterfactual + Gate 3.4 三方聲明 + §5.3 Phase 2c LiveDemo Counterfactual Verification 即為政策履行。
+**判定**：本 AMD 啟用 = 放寬 live fail-safe → **政策上是 negotiable**（不是禁止），但需 operator carve-out + counterfactual evidence 雙重門控。本 AMD §3 Gate 3.3 operator sign-off + Gate 3.2 counterfactual + Gate 3.4 三方聲明 + §5.3 Phase 2c-PL LiveDemo Counterfactual Verification 即為政策履行。
 
 **殘留風險**：LOW — 政策本身允許 net-positive trade-off；本 AMD 結構正確。
 
@@ -170,7 +236,7 @@ By analogy to demo 7d 86 fires / 25 symbols ≈ **0.49 fire / symbol / day**：
 - 啟用 live phys_lock 後 live_demo (走 api-demo.bybit.com) 觀察的 close maker fill rate ≠ live mainnet
 - **已由 close-maker-first AMD-2026-05-15-02 AC-15/AC-19 + healthcheck [65] 覆蓋**（不重複歸入本 AMD scope）
 
-**緩解**：本 AMD enable 後強制 Phase 2c LiveDemo Counterfactual Verification 14d observation 窗（per §5.3），per-fire 比對 demo baseline；偏差 > rolling 7d 偏離 vs demo baseline 7d（per QC-NTH-2 修正，避日級 noise）觸發 review。
+**緩解**：本 AMD enable 後強制 Phase 2c-PL LiveDemo Counterfactual Verification 7-21d observation 窗（per §5.3 escalation rule），per-fire 比對 demo baseline；偏差 > rolling 7d 偏離 vs demo baseline 7d（per QC-NTH-2 修正，避日級 noise）觸發 review。
 
 **殘留風險**：LOW（觸發層）+ MEDIUM (close dispatch，但 already covered by AMD-2026-05-15-02 AC-15/19；不在本 AMD scope)。
 
@@ -200,56 +266,61 @@ By analogy to demo 7d 86 fires / 25 symbols ≈ **0.49 fire / symbol / day**：
 
 ## 5. Counterfactual Analysis 要求（QC §6 mandate + MIT MUST-A..G + 7 條 evidence packet）
 
-### 5.1 Evidence Packet 強制條目（7 條 per v0.2 patch）
+### 5.1 Evidence Packet 強制條目（v0.3 = 8 條 per v0.2 patch + MIT SH-7 7th sweep）
 
 Pre-enable Gate 3.2 必交付 PA → QC → PM sign-off 路徑的 evidence packet：
 
 | 項 | 內容 | Owner |
 |---|---|---|
-| 5.1.1 | Demo 86 fires 完整列表 (fire_ts / strategy / symbol / qty / entry_price / actual_lock_price / actual_lock_pnl_bps) — **schema source** = `learning.exit_features WHERE exit_trigger_rule LIKE 'phys_lock_%' OR exit_source='Physical'`（per MIT-MUST-E；V029 hypertable 7d chunk，PK=(context_id,ts)）；**demo endpoint vs mainnet endpoint mapping 註腳**（per BB-PL-3）：demo 樣本走 api-demo.bybit.com，mainnet 對應 api.bybit.com — fee tier/slippage/order book depth 差異視 §4.4.2 close dispatch 層由 AMD-2026-05-15-02 AC-15/19 覆蓋 | PA 派 E1 dump from `trading.fills` + `learning.exit_features` JOIN on `context_id` |
+| 5.1.1 | Demo canonical 84 fires + 25d 全窗 719 fires 完整列表 (fire_ts / strategy / symbol / qty / entry_price / actual_lock_price / actual_lock_pnl_bps / realized_net_bps) — **schema source** = `learning.exit_features WHERE exit_trigger_rule LIKE 'phys_lock_%' OR exit_source='Physical'`（per MIT-MUST-E + FA SH-3 V029 cite：`migrations/V029__create_exit_features.sql` — `exit_trigger_rule` text + `exit_source` text columns；V029 hypertable 7d chunk_time_interval，PK=(context_id, ts)）；**demo endpoint vs mainnet endpoint mapping 註腳**（per BB-PL-3）：demo 樣本走 api-demo.bybit.com，mainnet 對應 api.bybit.com — fee tier/slippage/order book depth 差異視 §4.4.2 close dispatch 層由 AMD-2026-05-15-02 AC-15/19 覆蓋 | PA 派 E1 dump from `trading.fills` + `learning.exit_features` JOIN on `context_id` |
 | 5.1.2 | 每 fire 反事實場景 A 模擬：不 lock 後 `min_hold_secs + giveback_window` 結束 market close 對應 PnL — **prerequisite**：replay framework 必先支援 **ExitConfig override at replay session level**（counterfactual A 場景 pass `missing_edge_fallback_bps=-10.0` 強制 Gate 1 fail-safe Hold；replay engine 當前 0 native support，須前置 IMPL per MIT-MUST-G）；**evidence_source_tier writer mandate**（per MIT-SH-H）：tag 必為 `'counterfactual_replay'`（V050 enum allowed value），禁誤 tag `'synthetic_replay'`；E3 grep guard rule: `grep -nE "evidence_source_tier='synthetic_replay'" <counterfactual_writer>` 必 0 hit | QC 跑 historical replay；**Linux PG dry-run mandate**（per MIT-SH-I）：dump from Linux PG empirical + sqlx checksum verify + replay session evidence_id tracked + INSERT 走 Linux PG path |
 | 5.1.3 | Paired block-bootstrap CI 95% (n=86, n_bootstrap=1000, block size ≈ √n ≈ 9, AR(1) coefficient 1/(1−ρ) 自適應估) + **Wilson 95% CI lower bound 計算**（per MIT-MUST-D；PASS/FAIL 用 Wilson lower bound 比 threshold，不用 point estimate） | QC 跑 + 出報告 `docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-XX--phys_lock_counterfactual_analysis.md` |
-| 5.1.4 | **Sensitivity sweep — one-at-a-time（per QC-MF-1 修正）**：3 個 param 各自獨立 sweep，不做 full Cartesian 27 cells。`min_hold_secs ± 50%` / `giveback_floor ± 0.1` / `peak_atr_norm ± 0.2` 各兩端 2 點 → 6 sub-test，每個 n=86 維持 power。**+ BH-FDR q=0.10 family-wise correction**（per MIT-MUST-B；即使 one-at-a-time 6 比較仍須 family-wise control） | QC + PA review |
+| 5.1.4 | **Sensitivity sweep — one-at-a-time（per QC-MF-1 修正 + QC SH-1 IMPL spec）**：3 個 param 各自獨立 sweep，不做 full Cartesian 27 cells。`min_hold_secs ± 50%` / `giveback_floor ± 0.1` / `peak_atr_norm ± 0.2` 各兩端 2 點 → 6 sub-test，每個 n=84 (canonical) 或 n=719 (25d 全窗) 維持 power。**IMPL spec (per QC SH-1)**：每個 sub-test 獨立 rerun counterfactual replay with parameter override — i.e. (i) `replay_engine.set_exit_config_override(min_hold_secs=15)` (e.g. -50%) → 整 84/719 sample rerun A+B 反事實 paired diff → 收 sub-test #1 結果；(ii) `replay_engine.set_exit_config_override(min_hold_secs=45)` (+50%) → rerun → sub-test #2；(iii)..(vi) 同理 6 個 sub-test 各獨立 fresh replay session（**不共用 A/B cache**，避免 param-state leakage）。**+ BH-FDR q=0.10 family-wise correction**（per MIT-MUST-B；即使 one-at-a-time 6 比較仍須 family-wise control） | QC + PA review |
+| 5.1.4b | **NULL-edge sweep (per MIT SH-7)**：第 7 個 sweep — sample stratify by `est_net_bps IS NULL`。Per `exit_features/v2.rs:L107` 統計，est_net_bps NULL 約佔 30% (不是 99%)；NULL-edge 樣本走 `missing_edge_fallback_bps` fallback，non-NULL 樣本走 real edge_estimates。Sweep verify: (i) NULL-edge stratum paired diff median；(ii) non-NULL stratum paired diff median；(iii) Mann-Whitney U test for distribution difference between strata；(iv) PASS condition: 兩 stratum directional 一致 (median(A-B)<0) AND BH-FDR adjusted q<0.10 | QC + PA review |
 | 5.1.5 | **Per-symbol breakdown**（per MIT-MUST-C + QC-MF-1 修正）：(i) 只對 fires ≥ 10 symbols 做 per-symbol t-test；(ii) directional threshold = **Wilson-CI lower bound ≥ 50%** as directional positive（不用 70% point estimate）；(iii) ≥10 fires symbols 數量 < 5 時 **跳過此 criterion，僅依賴 (a)(b)(c)(d)**；+ per-strategy breakdown — **minimum-fire-count gate**（per FA-SF-2）：≥ 8 fires/strategy 才納入聲明 | QC |
 | 5.1.6 | **Regime stability check（per QC-SF-4）**：取 demo 86 fires 按時序 split 前 43 / 後 43，分別計算 median(A−B)，directional consistency；若兩個 sub-period directional 不一致 → 樣本期 regime mix 不穩，counterfactual 結論 fragile → REJECT 反事實結論 | QC |
 | 5.1.7 | **MDE + Power Calculation（per MIT-MUST-A）**：寫死「PASS 要求 with-lock 平均優勢至少 X bps，n=86 power ≥ 0.8」MDE 計算 — for effect size 5 bps 典型 phys_lock 鎖利幅度 n=86 paired bootstrap 約 80% power；effect size 2-5 bps power 降至 30-50% → 明文 MDE = 5 bps 為 PASS 門檻底線 | MIT + QC review |
 
-### 5.2 PASS / FAIL Criteria（per MIT-MUST-A/B/C/D + QC-MF-1）
+### 5.2 PASS / FAIL Criteria（per MIT-MUST-A/B/C/D + QC-MF-1 + QC MUST-4 estimator alignment 修）
 
-**PASS** (all 5 必滿足):
+**PASS** (all 7 必滿足):
 
-1. **median(A − B) < -2 bps**（with-lock 顯著優於 without-lock，至少 2 bps net advantage）+ **Wilson 95% CI lower bound** 在 `median(A-B) < 0` 一致（per MIT-MUST-D）
-2. **95% one-sided CI 上限 < 0**（per QC §2 (b)，one-sided directional H1: with-lock better）
-3. **MDE-power gate**: n=86 對 effect size ≥ MDE_threshold = 5 bps 的 power ≥ 0.8（per MIT-MUST-A + 5.1.7）
-4. **Sensitivity sweep（one-at-a-time 6 sub-test）+ BH-FDR q=0.10**：6 比較全部 q-value < 0.10 + 各偏移下 median(A-B) 仍 < 0（per QC-MF-1 + MIT-MUST-B）
-5. **Per-symbol（conditional on ≥10-fires symbols ≥ 5）**：Wilson-CI lower bound ≥ 50% directional positive；≥10 fires symbols 數量 < 5 時跳過此 criterion，僅依賴 1-4
-6. **Regime stability check（5.1.6）**：前 43 / 後 43 sub-period directional consistency
+1. **median(A − B) < -2 bps**（with-lock 顯著優於 without-lock，至少 2 bps net advantage）+ **paired-diff block-bootstrap 95% CI lower bound < 0**（per QC MUST-4 修：median 是 continuous estimator，CI 用 bootstrap 而非 Wilson；Wilson 是 binomial proportion estimator，與 median 不對齊）
+2. **95% one-sided block-bootstrap CI 上限 < 0**（per QC §2 (b)，one-sided directional H1: with-lock better）
+3. **MDE-power gate**: n=84 (canonical) / n=719 (25d 全窗) 對 effect size ≥ MDE_threshold = 5 bps 的 power ≥ 0.8（per MIT-MUST-A + 5.1.7）
+4. **Sensitivity sweep（one-at-a-time 6 sub-test + NULL-edge 7th sweep）+ BH-FDR q=0.10**：7 比較全部 q-value < 0.10 + 各偏移下 median(A-B) 仍 < 0（per QC-MF-1 + MIT-MUST-B + MIT SH-7）
+5. **Per-symbol Wilson CI（per MIT-MUST-C + QC MUST-4 修；conditional on ≥10-fires symbols ≥ 5）**：對每個 ≥10 fires symbol 計算「with-lock better」proportion（binary outcome：A>B 為 1，A<B 為 0），用 **Wilson 95% CI for proportion** lower bound ≥ 50% directional positive；≥10 fires symbols 數量 < 5 時跳過此 criterion，僅依賴 1-4, 6, 7。**Estimator 對齊澄清**：criterion #5 用 Wilson CI（per-symbol binary success rate proportion）；criterion #1-4 用 paired bootstrap CI（continuous median diff）；兩 estimator 各匹配自己的 distribution shape，**不混用**
+6. **Regime stability check（5.1.6）**：前 43 / 後 43 sub-period directional consistency（canonical 84 fires split）+ burst-only vs non-burst sub-sample directional consistency（25d 全窗 split per MIT MUST-1）
+7. **Per-strategy fire rate ≥ 8 / 7d gate（per MIT SH-6）**：enable approval 僅對通過此 gate 的策略生效（v0.3 = grid_trading + ma_crossover）；其他策略 DEFER
 
 **FAIL**（任一觸發 → 本 AMD 永久 REJECT，重啟需新 AMD）:
-- median(A - B) ≥ 0 OR Wilson 95% CI lower bound 不顯著
-- 95% CI 跨 0
-- MDE-power gate FAIL（effect size 太小無法 detect）
+- median(A - B) ≥ 0 OR paired-diff bootstrap 95% CI lower bound ≥ 0
+- 95% one-sided CI 跨 0
+- MDE-power gate FAIL（effect size 太小無法 detect at n=84 or n=719）
 - Sensitivity sweep BH-FDR adjusted q-value 任一 ≥ 0.10 OR 任一偏移翻為 median(A-B) ≥ 0
-- Per-symbol（適用時）Wilson-CI lower bound < 50%
-- Regime stability split sub-period directional 不一致
+- Per-symbol（適用時）Wilson CI lower bound < 50%
+- Regime stability split sub-period directional 不一致（含 burst vs non-burst per MIT MUST-1）
+- 全部 6 active 策略無一通過 per-strategy fire rate ≥ 8 / 7d gate
 
-### 5.3 Phase 2c LiveDemo Counterfactual Verification（BLOCKER-level，per QC-SF-3）
+### 5.3 Phase 2c-PL LiveDemo Counterfactual Verification（BLOCKER-level，per QC-SF-3 + FA MUST-5 naming + MIT MUST-3 escalation + QC SH-2 MDE alignment）
 
-**Pre-enable Gate 3.2 demo 86 fires counterfactual PASS 後**，enable live + LiveDemo phys_lock，**進入 7d observation period**：
+**Phase 2c-PL naming convention (per FA MUST-5)**：W-AUDIT-8b lesson reapplication — cross-AMD phase naming 需 distinct suffix 避免 cross-reference 歧義。`Phase 2c-PL` = phys_lock-specific Phase 2c verification，與 AMD-2026-05-15-02 close-maker-first 的 `Phase 2c-MF` (maker-first variant，若未來新增) 區分。
+
+**Pre-enable Gate 3.2 demo canonical 84 fires + 25d 719 fires counterfactual PASS 後**，enable live + LiveDemo phys_lock，**進入 7-21d observation period**（per escalation rule）：
 
 | 項 | 內容 |
 |---|---|
-| 5.3.1 觀察窗 | 7d post-enable continuous observation |
+| 5.3.1 觀察窗 (escalation per MIT MUST-3) | 7d post-enable continuous observation default；escalation rule：(a) 7d 累積 < 15 fires → **延長至 14d**；(b) 14d 累積 < 30 fires → **permanent REJECT 本 AMD**；(c) 30d 累積仍 < 60 fires → **permanent REJECT 本 AMD**（baseline parity assumption 失立論基礎） |
 | 5.3.2 Per-fire 即時 counterfactual | 每筆 phys_lock fire（live + live_demo）即時跑 counterfactual replay against same-instant **live order book snapshot**（不是 demo replay）— 即時 dump fire ts 的 best-bid/best-ask + depth + funding rate snapshot，計算 A 場景 PnL；Linux PG empirical path，evidence_source_tier='counterfactual_replay' |
-| 5.3.3 累積樣本 gate | **累積 ≥ 30 fires after live enable 再判定 net positive**；< 30 fires → CONDITIONAL (繼續 observation 延長 7d 上限至 14d) |
-| 5.3.4 PASS 條件 | live + live_demo 累積 ≥ 30 fires 後重跑 §5.2 全 PASS criteria（含 MDE/Wilson/sensitivity/regime）— PASS → Phase 2c 認定 net-positive；FAIL → rollback per §6.1 |
-| 5.3.5 Rollback gate | 觀察窗內 (a) cost_edge_ratio > 0.85 持續 1h+ OR (b) rolling 7d fire rate 偏離 demo baseline 7d > 2σ (per QC-NTH-2 修正，避日級 noise) OR (c) operator override → 立即 rollback |
+| 5.3.3 累積樣本 gate (per QC SH-2 MDE alignment + MIT MUST-3 escalation) | **累積 ≥ 60-86 fires after live enable 再判定 net positive**（不是舊 30 fires）；理由：§5.2 MDE-power gate 要求 n 對 effect size 5 bps 達 power ≥ 0.8，n=30 paired bootstrap 約 power<0.5（n=86 ≈ 0.80，n=60 ≈ 0.65 borderline）。Escalation rule (5.3.1) 配合：7d<15 fires → 延 14d；14d<30 → permanent REJECT；14-21d 累積 60-86 fires 達 §5.2 PASS 樣本量底線；累積 ≥86 才滿 full power |
+| 5.3.4 PASS 條件 | live + live_demo 累積 ≥60 fires (borderline) 或 ≥86 fires (full power) 後重跑 §5.2 全 7 PASS criteria（含 MDE-aligned bootstrap CI / sensitivity sweep / regime stability / per-strategy gate）— PASS → Phase 2c-PL 認定 net-positive；FAIL → rollback per §6.1 |
+| 5.3.5 Rollback gate | 觀察窗內 (a) cost_edge_ratio > 0.85 持續 1h+ OR (b) rolling 7d fire rate 偏離 demo baseline 7d > 2σ (per QC-NTH-2 修正，避日級 noise) OR (c) operator override OR (d) per-strategy fire rate ≥ 8 / 7d 在 DEFER 策略 (bb_breakout/pctb_revert/funding_arb) 觸發但 §5.2 paired diff 為負 → 立即 rollback |
 
-**Phase 2c 不是 pre-commit gate，但是 BLOCKER-level live observation period**；rollback 雖然 1 tick 內可回，但 14d observation 期間累積虧損可能已物質。Gate 3.2 demo counterfactual PASS = 進 Phase 2c 通行證；Phase 2c PASS = AMD enable 認定為 net-positive 並 land；Phase 2c FAIL = rollback + 本 AMD 永久 REJECT，重啟需新 AMD。
+**Phase 2c-PL 不是 pre-commit gate，但是 BLOCKER-level live observation period**；rollback 雖然 1 tick 內可回，但 14-21d observation 期間累積虧損可能已物質。Gate 3.2 demo counterfactual PASS = 進 Phase 2c-PL 通行證；Phase 2c-PL PASS = AMD enable 認定為 net-positive 並 land；Phase 2c-PL FAIL 或 escalation 規則任一觸發 (7d<15 / 14d<30 / 30d<60) → rollback + 本 AMD 永久 REJECT，重啟需新 AMD。
 
 ### 5.4 Audit Trail
 
-Evidence packet land 至 git tracked 路徑；QC report + PA verdict + Operator sign-off commit 訊息明文引用 evidence ref + Phase 2c LiveDemo Counterfactual Verification 結束報告 ref。
+Evidence packet land 至 git tracked 路徑；QC report + PA verdict + Operator sign-off commit 訊息明文引用 evidence ref + Phase 2c-PL LiveDemo Counterfactual Verification 結束報告 ref。
 
 ### 5.5 Advisory（per MIT advisory）
 
@@ -272,7 +343,7 @@ Evidence packet land 至 git tracked 路徑；QC report + PA verdict + Operator 
 | Trigger | 動作 |
 |---|---|
 | `phys_lock_live_fire_rate` 與 demo baseline **rolling 7d 偏離 vs demo baseline 7d > 2σ**（per QC-NTH-2 修正，避日級 noise） | 自動 ArcSwap rollback + alert |
-| **觀察窗內每日 cost_edge_ratio empirical vs demo baseline diff 表**（per FA-SF-1）：14d observation 窗每日生成 `cost_edge_ratio_live_demo - cost_edge_ratio_demo_baseline_7d` diff；連續 3d 為正且絕對值 > 0.1 → review trigger | PA monitor + 14d empirical diff 表寫至 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-XX--phys_lock_cost_edge_diff_table.md` |
+| **觀察窗內每日 cost_edge_ratio empirical vs demo baseline diff 表**（per FA-SF-1 + FA SH-4 templated path）：14d observation 窗每日生成 `cost_edge_ratio_live_demo - cost_edge_ratio_demo_baseline_7d` diff；連續 3d 為正且絕對值 > 0.1 → review trigger | PA monitor + 14d empirical diff 表寫至 `docs/CCAgentWorkSpace/PA/workspace/reports/{enable_date_YYYY-MM-DD}--phys_lock_cost_edge_diff_table.md`（path placeholder `{enable_date_YYYY-MM-DD}` 在 operator sign-off + AMD land 時補 actual enable date YYYY-MM-DD） |
 | Phase 2b LiveDemo close-maker-first regression | 同上（先 rollback phys_lock 隔離變因，再判 close-maker-first 是否獨立 regression） |
 | `cost_edge_ratio > 0.85` 持續 1h | rollback（per CLAUDE.md §二 #13 AI cost gate；phys_lock 啟用增加 hold time 可能拉高 cost_edge_ratio） |
 | Operator override IPC | rollback |
@@ -310,8 +381,8 @@ Rollback 後 `learning.exit_features` 中 rollback 前已 fire 的 row 全保留
 | #2 讀寫分離 | PASS | TOML 寫入仍走 `risk_config_live.toml` SoT；GUI/learning 只讀 |
 | #3 AI 輸出 ≠ 即時命令 | PASS | phys_lock 是 Rust 確定性決策（L0 路徑），非 AI 輸出；不繞 Decision Lease（close path 已不寫 lease lineage per W-C Caveat 2） |
 | **#4 策略不能繞過風控** | **PASS** | phys_lock = profit-protection（per §1 framing），**非 risk-bypass**；HARD/TRAILING/TIME STOP 等真風控不在 phys_lock 控制路徑（per AMD-2026-05-15-02 §2.3 negative whitelist 強制保 market）；Guardian / SM-04 邊界不受 phys_lock 啟用影響 |
-| **#5 生存 > 利潤** | **CONDITIONAL** | profit-protection 鎖利 trade-off：**鎖利減少 max-profit per trade（subordinate to 生存）但同步降低 opportunity cost + max-DD per trade（contribute to 生存）**。Net 評估必走 Gate 3.2 counterfactual + Gate 3.4 P0-EDGE-1 三方聲明 + §5.3 Phase 2c LiveDemo Counterfactual Verification。緩解：§5 evidence packet 7 條 + §5.2 6-criterion FAIL 則拒啟 |
-| **#6 失敗默認收縮** | **CONDITIONAL** | 本啟用 = **放寬 live fail-safe**（從 missing_edge=-10 fail-safe Hold → +10 進 Gate 2+ 允許 lock）。需 operator carve-out（per Gate 3.3）+ counterfactual evidence（per Gate 3.2）+ Phase 2c live observation（per §5.3）。緩解：Gate 3.1 Phase 2b PASS 為前置 + Gate 3.4 P0-EDGE-1 status 三方聲明（mandatory wording） + Gate 3.7 Linux empirical + Mainnet 7 prereq cross-ref |
+| **#5 生存 > 利潤** | **CONDITIONAL** | profit-protection 鎖利 trade-off：**鎖利減少 max-profit per trade（subordinate to 生存）但同步降低 opportunity cost + max-DD per trade（contribute to 生存）**。Net 評估必走 Gate 3.2 counterfactual + Gate 3.4 P0-EDGE-1 三方聲明 + §5.3 Phase 2c-PL LiveDemo Counterfactual Verification + Per-strategy carve-out (grid+ma only per MIT SH-6)。緩解：§5 evidence packet 8 條 + §5.2 7-criterion FAIL 則拒啟 |
+| **#6 失敗默認收縮** | **CONDITIONAL** | 本啟用 = **放寬 live fail-safe**（從 missing_edge=-10 fail-safe Hold → +10 進 Gate 2+ 允許 lock）。需 operator carve-out（per Gate 3.3）+ counterfactual evidence（per Gate 3.2）+ Phase 2c-PL live observation（per §5.3）。緩解：Gate 3.1 Phase 2b PASS 為前置 + Gate 3.4 P0-EDGE-1 status 三方聲明（mandatory wording） + Gate 3.7 Linux empirical + Gate 3.8 Mainnet OUT OF SCOPE v0.3 |
 | #7 學習 ≠ 改寫 Live | PASS | TOML override 是 operator 手動配置，**非** ML / DreamEngine / ExecutorAgent 自動寫；走 git tracked governance 路徑；**phys_lock fire metadata 禁餵 ML training feature**（per MIT-MUST-F；non-training surface invariant） |
 | **#8 交易可解釋** | **PASS** | phys_lock fire 在 `learning.exit_features` 有完整 audit row（per MIT-MUST-E schema 命名修正；V029 hypertable + `exit_source='Physical'` + `exit_trigger_rule` 帶 `phys_lock_*` prefix）；本 AMD 啟用後 audit 行為不變，只是 row 量從 demo-only 擴展至 live + LiveDemo |
 | #9 災難保護 | PASS | engine shutdown / cancel_token / authorization 失效 → reconciler 接手 pending close；phys_lock 不在 disaster-recovery 路徑 critical chain |
@@ -323,7 +394,7 @@ Rollback 後 `learning.exit_features` 中 rollback 前已 fire 的 row 全保留
 | #15 多 Agent 協作 | PASS | 不變動 5-Agent 架構 / Conductor 編排 / agent topic |
 | #16 組合級風險意識 | PASS | phys_lock 影響 per-trade hold time + max-DD，不影響 portfolio_var / correlation gate 計算 SoT；不引入新 portfolio risk vector |
 
-**結論**：16/16 PASS or PASS-with-stated-mitigation；**3 條 CONDITIONAL** (#5 / #6 / #13) 全部由 §3 pre-enable conditions（7 條 hard + Mainnet 7 prereq 子表）+ §5 counterfactual evidence packet (7 條) + §5.3 Phase 2c LiveDemo Counterfactual Verification + §6 rollback path mitigate；**0 BLOCKER**。
+**結論**：16/16 PASS or PASS-with-stated-mitigation；**3 條 CONDITIONAL** (#5 / #6 / #13) 全部由 §3 pre-enable conditions（9 條 hard + Mainnet 7 prereq 子表 OUT OF SCOPE v0.3）+ §5 counterfactual evidence packet (8 條) + §5.3 Phase 2c-PL LiveDemo Counterfactual Verification（含 MIT MUST-3 escalation rule）+ §6 rollback path + per-strategy carve-out (per MIT SH-6) mitigate；**0 BLOCKER**（但**3 MUST + 7 SHOULD + 3 NTH consolidation per v0.3** 與 §4.2 殘留風險 escalated HIGH→VERY HIGH 共同抬升 enable bar）。
 
 ---
 
@@ -350,14 +421,14 @@ Rollback 後 `learning.exit_features` 中 rollback 前已 fire 的 row 全保留
 | Role | Required Action | Status |
 |---|---|---|
 | **PA** | (a) 本 DRAFT 撰寫 + Gate 3.1-3.7 設計 + §4 風險評估 + §5 counterfactual analysis 要求；(b) v0.2 consolidation per 4-agent (QC+FA+MIT+BB) 23 items | ✅ DRAFT v0.1 完成 2026-05-16；✅ v0.2 consolidation 完成 2026-05-16 |
-| **QC** | (a) §5 counterfactual analysis 跑 demo 86 fires; (b) sensitivity sweep one-at-a-time + BH-FDR; (c) Wilson CI lower bound; (d) regime stability check; (e) Phase 2c LiveDemo Counterfactual Verification 7d observation 結束報告; (f) verdict APPROVE or REJECT with bootstrap CI 證據 | ⏳ Pending（Phase 2b PASS 後啟動） |
+| **QC** | (a) §5 counterfactual analysis 跑 demo canonical 84 fires + 25d 全窗 719 fires + burst-day sensitivity 拆解; (b) sensitivity sweep one-at-a-time + BH-FDR (含 NULL-edge 7th sweep per MIT SH-7); (c) **paired-diff block-bootstrap CI for median (per QC MUST-4)** + Wilson CI for per-symbol proportion (criterion #5); (d) regime stability check (含 burst vs non-burst); (e) Phase 2c-PL LiveDemo Counterfactual Verification 7-21d observation 結束報告 (含 escalation rule per MIT MUST-3); (f) verdict APPROVE or REJECT with bootstrap CI 證據 | ⏳ Pending（Phase 2b PASS 後啟動） |
 | **FA** | 16 原則合規 + business chain impact 評估 + DEFER 立場修訂同意 + Gate 3.4 三方聲明 mandatory wording confirm + cost_edge_ratio empirical diff 表 review | ⏳ Pending（QC counterfactual 後同步） |
 | **MIT** | counterfactual replay tier verify（'counterfactual_replay' tier 非 ML training surface，per CLAUDE.md §九 non-training surfaces invariant）+ non-training surface invariant E3 grep guard rule verify + Linux PG dry-run snapshot + sqlx checksum verify + replay session evidence_id tracked + replay framework ExitConfig override IMPL accept | ⏳ Pending |
 | **BB** | Bybit-side 行為對稱性（demo vs live mainnet fee/slippage/funding regime）evaluate + Mainnet 7 prereq 子表 status verify | ⏳ Pending |
 | **PM** | 4-agent verdict 收口 + AMD-2026-05-15-02 v0.5 patch 提交（§4 DEFER → SUPERSEDED on land date）+ slot 編號實裝順序執行 | ⏳ Pending |
 | **Operator** | 顯式 sign-off in commit message + governance trail | ⏳ Pending（Gate 3.3） |
 
-**強制工作鏈**：PA DRAFT v0.1（本檔 v0.1）→ 4-agent (QC+FA+MIT+BB) short re-review（2026-05-16 完成）→ PA v0.2 consolidation（本檔 v0.2，2026-05-16 完成）→ Phase 2b LiveDemo PASS 等待 → QC counterfactual analysis (demo 86 fires) → FA + MIT + BB 並行 review → PM 收口 → operator sign-off → Phase 2c LiveDemo Counterfactual Verification 7d observation → 最終 land at active amendments folder + 補 slot 編號 + `SPECIFICATION_REGISTER.md` register + AMD-2026-05-15-02 v0.5 patch。
+**強制工作鏈**：PA DRAFT v0.1（v0.1）→ 4-agent (QC+FA+MIT+BB) short re-review（2026-05-16 完成）→ PA v0.2 consolidation（v0.2，2026-05-16 完成）→ 4-agent re-review v0.2 (MIT RETURN 3 NEW BLOCKER + QC MUST + FA MUST + 7 SHOULD + 3 NTH, 2026-05-17) → **PA v0.3 consolidation（本檔 v0.3，2026-05-18 完成，含 PA Linux PG empirical SoT recompute）** → Phase 2b LiveDemo PASS 等待 → QC counterfactual analysis (demo canonical 84 + 25d 719 fires) → FA + MIT + BB 並行 review → PM 收口 → operator sign-off → Phase 2c-PL LiveDemo Counterfactual Verification 7-21d observation + escalation rule → 最終 land at active amendments folder + 補 slot 編號 + `SPECIFICATION_REGISTER.md` register + AMD-2026-05-15-02 v0.5 patch。
 
 **不接受快速通道**：本 AMD 是 live fail-safe 解除性質，FA / QC / MIT / BB 任一不可省。
 
@@ -369,8 +440,9 @@ Rollback 後 `learning.exit_features` 中 rollback 前已 fire 的 row 全保留
 |---|---|---|---|
 | 2026-05-16 | v0.1 DRAFT | 初版 — PA per main session 派 Wave C-3 dispatch；放於 `2026-05-XX-XX-phys-lock-live-enable-draft.md` placeholder filename；**未** land 至 active amendments folder（draft only）；**未** register `SPECIFICATION_REGISTER.md`；pending Phase 2b LiveDemo PASS + QC counterfactual + operator sign-off | PA |
 | 2026-05-16 | v0.2 DRAFT | **v0.2 consolidation** per 4-agent (QC+FA+MIT+BB) short re-review 23 items 整合 — 11 must-fix（QC-MF-1/2 / FA-MF-1 / MIT-MUST-A/B/C/D/E/F/G / BB-PL-1）全收口；12 should-fix（QC-SF-1..4 / FA-SF-1..4 / MIT-SH-H/I / BB-PL-2/3）全收口；3 NTH/cosmetic（QC-NTH-1/2 / FA-Cosmetic）全收口；**關鍵 schema 修正**：AMD 全篇 `exit_features.physical_decision_logs` → `learning.exit_features WHERE exit_trigger_rule LIKE 'phys_lock_%' OR exit_source='Physical'`（MIT-MUST-E；schema 命名 bug，IMPL 撈不到資料）；**新增 §5.3 Phase 2c LiveDemo Counterfactual Verification**（QC-SF-3，BLOCKER-level，enable 後 7d observation 累積 ≥ 30 fires 再判定）；§3 gate stack 6→7 + Gate 3.7 Mainnet 7 prereq 子表；§5 evidence packet 5→7 條（新 5.1.6 regime stability + 5.1.7 MDE/power calculation）；§6 加 §6.4 close-maker-first AMD 互動 + §6.5 forensics row retention；§1 補 Sharpe 改善數學條件（QC-SF-1）；§4.4 split per BB-PL-2 phys_lock 觸發層 LOW + close dispatch 層 MEDIUM (already covered)；§4.6 future funding alpha 交互 hook（QC-NTH-1）；§6.2 rolling 7d 偏離（QC-NTH-2 取代 2σ daily） | PA |
+| 2026-05-18 | v0.3 DRAFT | **v0.3 consolidation** per 4-agent re-review 15 items (2026-05-17) + PA Linux PG empirical SoT recompute (2026-05-18) — **5 MUST-FIX 全收口**：(MIT-MUST-1) baseline「86 fires」改 canonical SQL window + burst-day sensitivity 拆解 + 月度估「370/月」→ 保守「~150-200/月」；(MIT-MUST-2) 25d realized_net_bps=-1.97 bps 挑戰 profit-protection claim → §1 加 pre-counterfactual sample-bias evidence section + §4.2 risk HIGH→**VERY HIGH** + framing 明文 sample-bias caveat；(MIT-MUST-3) 25d live_demo phys_lock fires=0 → §2.3「behavioral parity=hypothesis」+ §5.3.1 escalation rule (7d<15→14d / 14d<30→permanent REJECT / 30d<60→permanent REJECT)；(QC MUST-4) §5.2 Wilson CI vs median(A-B) estimator 不對齊 → split: paired-diff block-bootstrap CI for median (criterion #1-4) + Wilson CI for per-symbol proportion (criterion #5)；(FA MUST-5) 13 處 `Phase 2c` → `Phase 2c-PL` (cross-AMD naming convention per W-AUDIT-8b lesson)；**7 SHOULD-FIX 全收口**：(QC SH-1) §5.1.4 sensitivity sweep IMPL spec 明文「每 sub-test 獨立 rerun counterfactual replay with parameter override，不共用 A/B cache」；(QC SH-2) §5.3 Phase 2c-PL MDE 邏輯衝突修 — n=30 power<0.5 → 累積 ≥60-86 fires (14-21d) 保持 demo/live framework 一致；(FA SH-3) §5.1.1 補 V029 migration cite (`migrations/V029__create_exit_features.sql` — `exit_trigger_rule` + `exit_source` columns)；(FA SH-4) §6.2 healthcheck path templated `{enable_date_YYYY-MM-DD}`；(FA SH-5) AMD 開頭加 Scope clarification「LiveDemo enable only per Gate 3.7 carve-out」；(MIT SH-6) Per-strategy carve-out — enable 僅限 grid_trading + ma_crossover (7d empirical fires 43+14 ≥ 8 gate)；bb_reversion (7) + bb_breakout (0) + pctb_revert (0) + funding_arb (0) DEFER；(MIT SH-7) §5.1.4b 第 7 個 sweep — NULL-edge fallback vs non-NULL stratification (est_net_bps IS NULL ≈ 30%)；**3 NTH 全收口**：(QC NTH-1) §3 加 sub-gate 3.9 track MIT-MUST-G replay framework IMPL accepted；(FA NTH-2) §3 Gate 3.7 split → Gate 3.7 (Linux empirical) + Gate 3.8 (Mainnet 7-prereq OUT OF SCOPE v0.3)；(FA NTH-3) §1 開頭加 plain-language summary for non-QC roles；**Empirical SoT recompute** PA Linux PG verify 2026-05-18：canonical SQL window 2026-05-04..05-11 = 84 fires demo (舊文 86)；25d 全窗 = 719 fires demo / 0 live_demo / avg realized_net_bps = -1.97 bps / median -5.55 bps / 255 positive vs 464 negative / burst days 04-25=145 + 04-27=198 ≈ 48% 集中；76 unique symbols；7d 最近 per-strategy fires (2026-05-11..05-18): grid=43 / ma=14 / bb_reversion=7 / bb_breakout=0 / pctb_revert=0 / funding_arb=0 | PA |
 
-**下一步**：本 DRAFT v0.2 commit 後等待 (a) Phase 2b LiveDemo PASS empirical evidence (預估 earliest ~2026-06-05 mirror AMD-2026-05-15-02 §3 timeline)；(b) QC 派 counterfactual analysis worker（pre-Phase 2b 可先準備 evidence packet skeleton；7 條 5.1.1-5.1.7 全條目）；(c) MIT 派 replay framework ExitConfig override IMPL（MIT-MUST-G 前置）；(d) AMD-2026-05-15-02 v0.5 §4 DEFER 立場修訂 patch ready（cosmetic ~0.2h）。**禁止**自動 land；必走 operator 顯式 sign-off + Phase 2c LiveDemo Counterfactual Verification 7d observation PASS。
+**下一步**：本 DRAFT v0.3 commit 後等待 (a) Phase 2b LiveDemo PASS empirical evidence (預估 earliest ~2026-06-05 mirror AMD-2026-05-15-02 §3 timeline)；(b) QC 派 counterfactual analysis worker（pre-Phase 2b 可先準備 evidence packet skeleton；8 條 5.1.1-5.1.8 全條目，含 v0.3 NULL-edge 7th sweep + canonical/burst sensitivity 拆解）；(c) MIT 派 replay framework ExitConfig override IMPL（MIT-MUST-G + Gate 3.9 sub-gate 前置）；(d) AMD-2026-05-15-02 v0.5 §4 DEFER 立場修訂 patch ready（cosmetic ~0.2h）。**禁止**自動 land；必走 operator 顯式 sign-off + Phase 2c-PL LiveDemo Counterfactual Verification 7-21d observation PASS + escalation rule 通過。
 
 ---
 
