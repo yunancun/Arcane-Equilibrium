@@ -19,6 +19,7 @@
 //! 佈局，任一方案都會改動語意或效能，與 ON-TICK-SPLIT-1 零變更契約牴觸。
 
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::time::Instant;
 
 use openclaw_core::alpha_surface::{
@@ -26,6 +27,7 @@ use openclaw_core::alpha_surface::{
 };
 use openclaw_core::governance_core::LeaseOutcome;
 use openclaw_core::signals::Signal;
+use tokio::sync::RwLock as TokioRwLock;
 use tracing::{info, warn};
 
 use super::super::on_tick_helpers::{
@@ -41,6 +43,30 @@ fn exchange_qty_rounded_to_zero_reason(approved_qty: f64, final_qty: f64) -> Str
     format!(
         "qty_zero: exchange_precision_rounding_to_zero approved_qty={approved_qty:.8} final_qty={final_qty:.8}"
     )
+}
+
+// W-AUDIT-8a B-REM-1：late-injected panel slot 讀取 helper。
+//
+// 為什麼抽出成 free function：原 inline 寫法
+//   `slot.as_ref().and_then(|s| s.try_read().ok().and_then(|g| g.clone()))`
+// 重複出現在 funding / oi / btc_lead_lag 三條 panel 路徑（後者再加 paper-only
+// fence）。抽成 helper 後可寫 contract test 同時覆蓋 4 條 invariant：
+//   (1) slot 存在 + 內含 Some(snapshot) → 回 Some(clone)
+//   (2) slot 存在 + 內含 None           → 回 None（uninitialized）
+//   (3) slot 存在 + writer 持鎖         → try_read Err → 回 None（fail-soft，無 panic）
+//   (4) slot 為 None（未注入）          → 回 None（無合成 neutral）
+//
+// 不變量：本 helper 永不 panic、永不 block、永不合成數據；任何讀失敗一律
+// 退回 None，由策略端 fail-closed 跳過自身 alpha source。對應 PA report
+// §6.1 acceptance + AlphaSurface "未接 panel 永遠 None"（alpha_surface.rs
+// §AlphaSurface doc）的雙重契約。
+//
+// 與 dispatch hot path 語意 1:1 對齊：try_read 而非 read（避免 await/block），
+// `and_then(|g| g.clone())` 把 `Option<T>` flatten 成 `Option<T>`。
+pub(crate) fn try_clone_panel_snapshot<T: Clone>(
+    slot: Option<&Arc<TokioRwLock<Option<T>>>>,
+) -> Option<T> {
+    slot.and_then(|s| s.try_read().ok().and_then(|guard| guard.clone()))
 }
 
 fn execution_reference(
@@ -196,14 +222,14 @@ impl TickPipeline {
         // from late-injected slots before AlphaSurface construction. try_read
         // keeps the on_tick hot path fail-soft; no lock is held across strategy
         // dispatch.
-        let funding_curve_owned: Option<FundingCurveSnapshot> = self
-            .funding_curve_panel_slot
-            .as_ref()
-            .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone()));
-        let oi_delta_panel_owned: Option<OIDeltaPanel> = self
-            .oi_delta_panel_slot
-            .as_ref()
-            .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone()));
+        //
+        // W-AUDIT-8a B-REM-1（2026-05-18）：抽出共用 helper `try_clone_panel_snapshot`
+        // 統一 4 條 invariant（slot 存在/未注入/讀失敗/內為 None），語意與原 inline
+        // 1:1 等價（contract test 證明見模塊底部 `#[cfg(test)] mod tests`）。
+        let funding_curve_owned: Option<FundingCurveSnapshot> =
+            try_clone_panel_snapshot(self.funding_curve_panel_slot.as_ref());
+        let oi_delta_panel_owned: Option<OIDeltaPanel> =
+            try_clone_panel_snapshot(self.oi_delta_panel_slot.as_ref());
         //
         // === W2 sub-task 4 (E1-δ, 2026-05-11) btc_lead_lag wire-up ===
         // paper-only fence Layer 1（主防線，per spec §6.1）：
@@ -1673,4 +1699,248 @@ impl TickPipeline {
         ControlFlow::Continue(intents)
     }
 }
+// =============================================================================
+// W-AUDIT-8a B-REM-1: Dispatch Snapshot Contract Tests
+// =============================================================================
+//
+// MODULE_NOTE：覆蓋 step_4_5_dispatch 在 AlphaSurface 構造前讀取 late-injected
+// panel slot 的 4 條 invariant（PA report §6.1 acceptance）：
+//   (1) slot 注入且內含 Some(snapshot) → 回 Some(clone)；snapshot_ts_ms 可讀
+//   (2) slot 注入且內含 None           → 回 None（producer 尚未首次 emit）
+//   (3) slot 注入但 writer 持寫鎖      → try_read Err → 回 None（fail-soft）
+//   (4) slot 未注入（None）            → 回 None（無合成 neutral）
+//
+// 為什麼 contract-level 測試 helper 而非全 dispatch：構造完整 TickPipeline
+// + Orchestrator + governance + paper_state 為 dispatch 端到端測試需要重複
+// 既有 ON-TICK-SPLIT-1 helpers.rs 端到端覆蓋，且會跨越本 worktree LOW-risk
+// scope。helper 抽出後語意 1:1（diff 證明 inline → call 等價），測試直接打
+// 在 helper + AlphaSurface 構造邊界，足以保證 4 條 invariant。
+//
+// 額外驗收：lock-free across strategy dispatch。dispatch hot path 用 owned
+// `Option<T>` local variable（funding_curve_owned / oi_delta_panel_owned）持
+// 有 snapshot，**guard 已在 helper return 前 drop**，strategy.on_tick 不持任
+// 何 RwLockReadGuard。本性質由 helper signature（return `Option<T>`，無 guard
+// 借用）+ 編譯器借用檢查共同保證；測試以 runtime probe 加碼驗證 writer
+// 在 strategy 模擬期間能持續取得寫鎖。
+#[cfg(test)]
+mod tests {
+    use super::try_clone_panel_snapshot;
+    use openclaw_core::alpha_surface::{AlphaSurface, FundingCurveSnapshot, OIDeltaPanel};
+    use std::sync::Arc;
+    use tokio::sync::RwLock as TokioRwLock;
 
+    /// 構造帶實際數據的 FundingCurveSnapshot stub（snapshot_ts_ms 可讀驗證）。
+    fn make_funding_snapshot() -> FundingCurveSnapshot {
+        FundingCurveSnapshot {
+            symbols: vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()],
+            funding_rates_bps: vec![0.5, -0.3],
+            next_funding_ms: vec![1_715_000_000_000, 1_715_000_000_000],
+            snapshot_ts_ms: 1_715_000_000_000,
+            source_tier: "ws_live".to_string(),
+        }
+    }
+
+    /// 構造帶實際數據的 OIDeltaPanel stub。
+    fn make_oi_panel() -> OIDeltaPanel {
+        OIDeltaPanel {
+            symbols: vec!["BTCUSDT".to_string()],
+            oi_delta_5m_pct: vec![1.2],
+            oi_delta_15m_pct: vec![2.4],
+            oi_delta_1h_pct: vec![-0.8],
+            oi_abs: vec![1_000_000.0],
+            snapshot_ts_ms: 1_715_000_000_500,
+            source_tier: "ws_live".to_string(),
+        }
+    }
+
+    // =========================================================================
+    // Invariant 1: funding_curve slot 存在 + 含 Some → AlphaSurface = Some(&snap)
+    //              且 snapshot_ts_ms 可讀
+    // =========================================================================
+    #[tokio::test]
+    async fn b_rem_1_invariant_1_funding_slot_present_surface_some_age_readable() {
+        let snap = make_funding_snapshot();
+        let snap_ts = snap.snapshot_ts_ms;
+        let slot: Arc<TokioRwLock<Option<FundingCurveSnapshot>>> =
+            Arc::new(TokioRwLock::new(Some(snap)));
+        let slot_opt = Some(slot);
+
+        let cloned = try_clone_panel_snapshot(slot_opt.as_ref());
+        assert!(cloned.is_some(), "slot 注入且 inner Some → helper 應回 Some");
+        let unwrapped = cloned.unwrap();
+        assert_eq!(
+            unwrapped.snapshot_ts_ms, snap_ts,
+            "snapshot_ts_ms（candidate report age 欄位源）必須可讀"
+        );
+
+        // 把 owned snapshot 借進 AlphaSurface，與 dispatch 構造路徑 1:1。
+        let surface = AlphaSurface {
+            funding_curve: Some(&unwrapped),
+            ..AlphaSurface::empty()
+        };
+        assert!(
+            surface.funding_curve.is_some(),
+            "AlphaSurface.funding_curve 應反映 slot 內 snapshot"
+        );
+        assert_eq!(
+            surface.funding_curve.unwrap().snapshot_ts_ms,
+            snap_ts,
+            "surface 端 snapshot_ts_ms 必須與 slot 內容一致"
+        );
+    }
+
+    // =========================================================================
+    // Invariant 2: oi_delta_panel slot 存在 + 含 Some → AlphaSurface = Some(&panel)
+    //              且 snapshot_ts_ms 可讀
+    // =========================================================================
+    #[tokio::test]
+    async fn b_rem_1_invariant_2_oi_slot_present_surface_some_age_readable() {
+        let panel = make_oi_panel();
+        let panel_ts = panel.snapshot_ts_ms;
+        let slot: Arc<TokioRwLock<Option<OIDeltaPanel>>> =
+            Arc::new(TokioRwLock::new(Some(panel)));
+        let slot_opt = Some(slot);
+
+        let cloned = try_clone_panel_snapshot(slot_opt.as_ref());
+        assert!(cloned.is_some(), "oi slot 注入且 inner Some → helper 應回 Some");
+        let unwrapped = cloned.unwrap();
+        assert_eq!(unwrapped.snapshot_ts_ms, panel_ts, "OI age 必須可讀");
+
+        let surface = AlphaSurface {
+            oi_delta_panel: Some(&unwrapped),
+            ..AlphaSurface::empty()
+        };
+        assert!(surface.oi_delta_panel.is_some());
+        assert_eq!(
+            surface.oi_delta_panel.unwrap().snapshot_ts_ms,
+            panel_ts,
+            "surface 端 oi_delta_panel.snapshot_ts_ms 必須等於 slot 內容"
+        );
+    }
+
+    // =========================================================================
+    // Invariant 3: writer 持寫鎖 → try_read 失敗 → helper 回 None（fail-soft, 無 panic）
+    // =========================================================================
+    //
+    // 為什麼這條 invariant 關鍵：dispatch 走 sync `try_read()` 而非 async `read()`，
+    // 期望在 producer/aggregator 寫入瞬間自動 fail-soft；any panic 會炸 on_tick
+    // hot path（CLAUDE.md §四 hard boundary）。本測試以 `write()` await 取得寫鎖
+    // 模擬 contention，確認 helper 不 panic 且回 None。
+    #[tokio::test]
+    async fn b_rem_1_invariant_3_writer_holds_lock_soft_fail_no_panic() {
+        let snap = make_funding_snapshot();
+        let slot: Arc<TokioRwLock<Option<FundingCurveSnapshot>>> =
+            Arc::new(TokioRwLock::new(Some(snap)));
+        let slot_opt = Some(Arc::clone(&slot));
+
+        // 主測 task 直接持寫鎖（write guard 直到 scope 末才 drop）；
+        // 不需要 spawn 另一 task — try_read 看到 writer pending 即 Err。
+        let _write_guard = slot.write().await;
+
+        let cloned = try_clone_panel_snapshot(slot_opt.as_ref());
+        assert!(
+            cloned.is_none(),
+            "writer 持鎖時 try_read 應 Err → helper 必 fail-soft 回 None"
+        );
+
+        // 同時驗證另一條 invariant：在 writer 持鎖期間 surface 端反映 None
+        // —— 不允許暴露任何「writer 寫到一半」的 partial snapshot。
+        let surface = AlphaSurface {
+            funding_curve: cloned.as_ref(),
+            ..AlphaSurface::empty()
+        };
+        assert!(
+            surface.funding_curve.is_none(),
+            "writer contention 下 AlphaSurface.funding_curve 必須是 None"
+        );
+
+        drop(_write_guard);
+    }
+
+    // =========================================================================
+    // Invariant 4: slot 未注入（None）→ helper 回 None（無合成 neutral）
+    // =========================================================================
+    //
+    // 治理對照（PA spec §6.1 line 260）：「缺 panel slot → 不創造合成 neutral
+    // 數據; AlphaSurface 對應 field = None」。此為「未接 panel 永遠 None」契約
+    // （alpha_surface.rs `AlphaSurface` doc + §四 fail-closed default）的 wire-up
+    // 端保證；違反會 silently 把 placeholder 餵給策略，污染 dispatch metric
+    // 與 candidate report unavailable_reason 統計。
+    #[tokio::test]
+    async fn b_rem_1_invariant_4_slot_missing_no_synthetic_neutral() {
+        // funding 路徑
+        let funding_slot_opt: Option<&Arc<TokioRwLock<Option<FundingCurveSnapshot>>>> = None;
+        let funding_cloned = try_clone_panel_snapshot(funding_slot_opt);
+        assert!(
+            funding_cloned.is_none(),
+            "funding slot 未注入 → helper 必回 None；禁合成 FundingCurveSnapshot::default()"
+        );
+
+        // oi 路徑
+        let oi_slot_opt: Option<&Arc<TokioRwLock<Option<OIDeltaPanel>>>> = None;
+        let oi_cloned = try_clone_panel_snapshot(oi_slot_opt);
+        assert!(
+            oi_cloned.is_none(),
+            "oi slot 未注入 → helper 必回 None；禁合成 OIDeltaPanel::default()"
+        );
+
+        // AlphaSurface 端反映：兩條 field 全 None。
+        let surface = AlphaSurface {
+            funding_curve: funding_cloned.as_ref(),
+            oi_delta_panel: oi_cloned.as_ref(),
+            ..AlphaSurface::empty()
+        };
+        assert!(surface.funding_curve.is_none());
+        assert!(surface.oi_delta_panel.is_none());
+    }
+
+    // =========================================================================
+    // 補充：slot 注入但 inner 為 None（producer 尚未首次 emit）→ helper 回 None
+    // =========================================================================
+    //
+    // 這是 invariant 4 的 sibling case：slot 已 late-inject 但 producer 還沒
+    // 寫第一筆 snapshot。dispatch 必須與「slot 未注入」相同處理（皆 None），
+    // 否則會發出「slot 已 wire 但永遠 None」的 false-positive availability 信號。
+    #[tokio::test]
+    async fn b_rem_1_slot_present_inner_none_returns_none() {
+        let slot: Arc<TokioRwLock<Option<FundingCurveSnapshot>>> =
+            Arc::new(TokioRwLock::new(None));
+        let slot_opt = Some(slot);
+
+        let cloned = try_clone_panel_snapshot(slot_opt.as_ref());
+        assert!(
+            cloned.is_none(),
+            "slot 注入但 inner None → helper 必回 None（與 slot 未注入語意一致）"
+        );
+    }
+
+    // =========================================================================
+    // 補充：helper 不持有 RwLockReadGuard 跨 strategy dispatch
+    //
+    // dispatch hot path 設計：try_clone_panel_snapshot 返回 `Option<T>` owned
+    // 值，**guard 於 helper 函式內部 drop**；strategy.on_tick 期間不持任何
+    // panel slot 讀鎖。本測試以 runtime 驗證：取得 owned snapshot 後另一 task
+    // 必能成功 write，證明 read guard 已釋放。
+    //
+    // 對齊 acceptance: PA §6.1 "E2 sub-agent 確認 0 lock held across strategy
+    // dispatch (現有設計)"。
+    // =========================================================================
+    #[tokio::test]
+    async fn b_rem_1_helper_releases_read_guard_before_return() {
+        let snap = make_funding_snapshot();
+        let slot: Arc<TokioRwLock<Option<FundingCurveSnapshot>>> =
+            Arc::new(TokioRwLock::new(Some(snap)));
+        let slot_opt = Some(Arc::clone(&slot));
+
+        // helper return 後 read guard 必須已 drop，否則 try_write 會 Err。
+        let _cloned = try_clone_panel_snapshot(slot_opt.as_ref());
+
+        let write_attempt = slot.try_write();
+        assert!(
+            write_attempt.is_ok(),
+            "helper 返回後 read guard 應已 drop；try_write 必須成功，\
+             否則 dispatch hot path 會跨 strategy.on_tick 持鎖"
+        );
+        drop(write_attempt);
+    }
+}
