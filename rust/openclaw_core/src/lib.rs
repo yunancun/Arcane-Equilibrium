@@ -10,12 +10,13 @@ pub use openclaw_types;
 
 // W-AUDIT-8a Phase A：Alpha Surface 一等公民接口契約。
 pub mod alpha_surface;
-pub mod attention;
-pub mod attribution;
+// P2-DEAD-RUST-CLEANUP-1 (2026-05-18, ADR-0015)：
+// attention/attribution/cognitive/dream/message_bus/order_match/opportunity
+// 七個 legacy 模塊原為平行 cognition/trading 大腦設計，現確認無任何 production
+// caller（grep "openclaw_core::(attention|...)" 為空，scanner::opportunity 是另一
+// 個獨立模塊），依 ADR-0015 結構性退役。如需重啟某能力，請於新模塊重做。
 pub mod backtest;
-pub mod cognitive;
 pub mod cost_gate;
-pub mod dream;
 pub mod execution;
 pub mod governance_core;
 // AMD-2026-05-02-01 Track H E-4 retrofit (E2 round 1 verdict HIGH-1 fix):
@@ -33,9 +34,6 @@ pub mod klines;
 // canary stage promotion 提供專用 LeaseScope::CanaryStagePromotion variant 與
 // CanaryStageTransition row payload。
 pub mod lease_scope;
-pub mod message_bus;
-pub mod opportunity;
-pub mod order_match;
 pub mod portfolio;
 pub mod risk;
 pub mod signals;
