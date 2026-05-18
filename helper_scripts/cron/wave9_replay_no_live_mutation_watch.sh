@@ -82,6 +82,14 @@ SRV_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # 允許 operator 用 OPENCLAW_BASE_DIR 覆蓋（CLAUDE.md §六 跨平台）。
 OPENCLAW_BASE_DIR="${OPENCLAW_BASE_DIR:-$SRV_ROOT}"
 
+# ─── Cron heartbeat sentinel — P1-CRON-INSTALL-WAVE-1（2026-05-18）─────
+# touch-at-start：「cron 被排程觸發」的證據，由 healthcheck [76] 監測 mtime。
+# 必須在最後的 `exec python3 - <<PYEOF` 之前；exec 會替換 shell 進程。
+# 任何失敗以 `|| true` 吞掉，不阻塞 cron 主任務。
+HEARTBEAT_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}/cron_heartbeat"
+mkdir -p "$HEARTBEAT_DIR" 2>/dev/null || true
+touch "$HEARTBEAT_DIR/wave9_replay_no_live_mutation_watch.last_fire" 2>/dev/null || true
+
 
 # ─── Window config / 窗口配置 ────────────────────────────────────────
 # Default 14d per V3 §11 P6 KPI. Operator may shorten for faster smoke

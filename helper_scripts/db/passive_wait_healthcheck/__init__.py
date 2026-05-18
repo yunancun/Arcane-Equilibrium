@@ -211,6 +211,18 @@ from .checks_close_maker_audit import (  # noqa: F401
     check_close_maker_rate_limit_backoff_coverage,
     check_close_maker_reject_samples,
 )
+from .checks_cron_heartbeat import (  # noqa: F401
+    # [75]-[79] P1-CRON-INSTALL-WAVE-1（2026-05-18）— 5 個 cron wrapper
+    # 已 source/test closed 但 crontab 尚未 install；每個 wrapper start-time
+    # touch sentinel，本套哨兵以 sentinel mtime 推斷「cron 是否按時 fire」。
+    # WARN-by-default（cron infra 不是 promotion-blocking）；
+    # OPENCLAW_CRON_HEARTBEAT_REQUIRED=1 升 WARN → FAIL。
+    check_75_panel_aggregator_health_cron_fires,
+    check_76_wave9_replay_no_live_mutation_watch_cron_fires,
+    check_77_replay_key_rotation_check_cron_fires,
+    check_78_feature_baseline_writer_cron_fires,
+    check_79_blocked_symbols_30d_unblock_check_cron_fires,
+)
 
 __all__ = [
     "main",
@@ -310,4 +322,10 @@ __all__ = [
     "check_close_maker_fallback_null_ladder",
     "check_close_maker_rate_limit_backoff_coverage",
     "check_close_maker_reject_samples",
+    # [75]-[79] P1-CRON-INSTALL-WAVE-1（2026-05-18）cron heartbeat sentinels.
+    "check_75_panel_aggregator_health_cron_fires",
+    "check_76_wave9_replay_no_live_mutation_watch_cron_fires",
+    "check_77_replay_key_rotation_check_cron_fires",
+    "check_78_feature_baseline_writer_cron_fires",
+    "check_79_blocked_symbols_30d_unblock_check_cron_fires",
 ]
