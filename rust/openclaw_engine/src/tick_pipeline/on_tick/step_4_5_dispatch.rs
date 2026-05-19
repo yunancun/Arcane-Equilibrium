@@ -900,6 +900,19 @@ impl TickPipeline {
                                         spine_decision_id: Some(spine_decision_id),
                                         spine_verdict_id: Some(verdict_id_for_dispatch),
                                         spine_stub_report_id: Some(spine_stub_report_id),
+                                        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：
+                                        // entry path 帶 intent_id，與同 tick 上游
+                                        // emit 至 trading.intents 的 intent_id
+                                        // byte-equal（同 em + intent.symbol +
+                                        // event.ts_ms 進 make_intent_id），下游
+                                        // PendingOrder → TradingMsg::Order →
+                                        // trading.orders.intent_id 重建 intents
+                                        // → orders JOIN，恢復 Guardian-pass-rate。
+                                        intent_id: Some(make_intent_id(
+                                            em,
+                                            &intent.symbol,
+                                            event.ts_ms,
+                                        )),
                                     });
                                     match send_result {
                                         Ok(()) => {
@@ -1370,6 +1383,17 @@ impl TickPipeline {
                                             spine_decision_id: None,
                                             spine_verdict_id: None,
                                             spine_stub_report_id: None,
+                                            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：
+                                            // paper shadow path 帶 paper-tagged intent_id 保
+                                            // 結構一致性。is_primary=false 不註冊 PendingOrder，
+                                            // 故不會直接寫到 trading.orders；但若未來 shadow
+                                            // 路徑升級為追蹤，此 id 與同 tick paper intent emit
+                                            // byte-equal 可立即可用。
+                                            intent_id: Some(make_intent_id(
+                                                em,
+                                                &intent.symbol,
+                                                event.ts_ms,
+                                            )),
                                         });
                                     }
                                 }

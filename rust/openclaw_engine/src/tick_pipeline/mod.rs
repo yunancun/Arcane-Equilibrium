@@ -688,6 +688,14 @@ pub struct OrderDispatchRequest {
     /// ExecutionReport id；供 fill_completion 在 quality_metrics 寫
     /// stub_report_id cross-ref。
     pub spine_stub_report_id: Option<String>,
+    /// P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：上游 strategy intent
+    /// 的 intent_id（make_intent_id(em, intent.symbol, event.ts_ms)），讓
+    /// PendingOrder / trading.orders.intent_id 與 trading.intents.intent_id
+    /// 對齊，恢復 `intents → orders` JOIN 與 Guardian-pass-rate 計算。
+    ///
+    /// Some = entry order（step_4_5_dispatch 主路徑）；None = close / IPC
+    /// flatten / orphan close（無上游 strategy intent，保 NULL 為誠實表述）。
+    pub intent_id: Option<String>,
 }
 
 /// V094 close-maker audit payload carried from dispatch registration to fill.

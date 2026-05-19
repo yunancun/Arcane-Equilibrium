@@ -99,6 +99,9 @@ fn test_reset_clears_all_state() {
             spine_decision_id: None,
             spine_verdict_id: None,
             spine_stub_report_id: None,
+            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：Reset 測試僅驗
+            // pending 清空語意，不讀 intent_id。
+            intent_id: None,
         },
     );
     handle_paper_command(

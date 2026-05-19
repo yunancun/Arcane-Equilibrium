@@ -465,6 +465,21 @@ pub enum TradingMsg {
         is_close: bool,
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
+        /// P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：策略入場意圖 id。
+        /// 邏輯 FK → trading.intents.intent_id（trading.orders.intent_id 欄
+        /// V003 起即存在但寫入器漏接，導致 Guardian-pass-rate 無法以
+        /// `intents → orders` 計算，E3 2026-05-15 baseline 揭露 7d 1394
+        /// demo / 1021 live_demo orders 全 NULL）。
+        ///
+        /// 賦值原則（嚴格 fail-loud，不在 writer 端合成以免遮蓋上游 bug）：
+        /// - 入場 entry order（strategy → Guardian → exchange）：Some(intent_id)
+        ///   由 step_4_5_dispatch.rs 以 make_intent_id(em, intent.symbol,
+        ///   event.ts_ms) 計算，與同一 dispatch tick 寫入 trading.intents
+        ///   的 intent_id byte-equal。
+        /// - 平倉 close order（exit logic / IPC close / orphan close）：None。
+        ///   退場不走 strategy intent path，無對應 intents row，保 NULL 是誠實
+        ///   表述而非「合成假 id」。
+        intent_id: Option<String>,
     },
     /// Order status transition — emitted on fill, cancel, or rejection.
     /// 訂單狀態轉換事件，成交 / 撤銷 / 拒絕時發出，寫入 trading.order_state_changes。

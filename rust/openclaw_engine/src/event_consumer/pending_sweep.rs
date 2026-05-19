@@ -227,6 +227,9 @@ mod tests {
             spine_decision_id: None,
             spine_verdict_id: None,
             spine_stub_report_id: None,
+            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：sweep classifier
+            // 不讀 intent_id，預設 None 保持 fixture 最小化。
+            intent_id: None,
         }
     }
 
@@ -254,6 +257,9 @@ mod tests {
             spine_decision_id: None,
             spine_verdict_id: None,
             spine_stub_report_id: None,
+            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：sweep classifier
+            // 不讀 intent_id，預設 None 保持 fixture 最小化。
+            intent_id: None,
         }
     }
 

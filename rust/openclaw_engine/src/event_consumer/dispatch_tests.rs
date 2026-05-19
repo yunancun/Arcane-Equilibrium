@@ -47,6 +47,9 @@ fn close_maker_dispatch_req(
         spine_decision_id: None,
         spine_verdict_id: None,
         spine_stub_report_id: None,
+        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：close-maker dispatch
+        // 為 close path，無上游 strategy intent，保 None。
+        intent_id: None,
     }
 }
 

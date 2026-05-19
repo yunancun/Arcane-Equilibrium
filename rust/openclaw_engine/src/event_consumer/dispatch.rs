@@ -568,6 +568,11 @@ pub(super) fn spawn_order_dispatch(
                     spine_decision_id: req.spine_decision_id.clone(),
                     spine_verdict_id: req.spine_verdict_id.clone(),
                     spine_stub_report_id: req.spine_stub_report_id.clone(),
+                    // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：鏡射
+                    // OrderDispatchRequest.intent_id 到 PendingOrder，下游
+                    // handle_pending_registration 從 PendingOrder.intent_id 讀
+                    // 寫入 TradingMsg::Order，再進 trading.orders.intent_id。
+                    intent_id: req.intent_id.clone(),
                 }));
             }
             let side = if req.is_long {

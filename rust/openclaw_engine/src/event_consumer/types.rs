@@ -133,6 +133,11 @@ pub struct PendingOrder {
     /// `executed_by` edge details.fill_completion=true 篩出真實 fill row
     /// 並對應到 stub 對端。
     pub spine_stub_report_id: Option<String>,
+    /// P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：鏡射
+    /// OrderDispatchRequest.intent_id，供 handle_pending_registration 構造
+    /// TradingMsg::Order 時寫入 trading.orders.intent_id。entry order
+    /// = Some(make_intent_id(em, symbol, ts_ms))；close / orphan = None。
+    pub intent_id: Option<String>,
 }
 
 /// Pending-order lifecycle messages sent from the dispatch task to the event
