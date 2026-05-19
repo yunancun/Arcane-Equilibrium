@@ -10664,3 +10664,210 @@ E2 RCA 後修 2 個 pre-existing stress test fails：
 
 ### 報告
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--stress_test_invariant_drift_fix.md`
+
+## 2026-05-19 — P0-ENGINE-HALTSESSION-STUCK-FIX Layer A IMPL
+
+### 範圍
+按 spec v0.2 (1365 LOC) 完成 Layer A：Rust openclaw_engine HaltSession TTL +
+V098 migration + halt_audit forensic logger + 3+1 TOML 改 + 34 新 test。
+
+### 新檔
+- `srv/rust/openclaw_engine/src/halt_audit.rs` (422 LOC) — HaltKind enum / classify /
+  record_halt_set + record_halt_cleared / JSONL + fsync / 9 unit test
+- `srv/sql/migrations/V098__governance_audit_log_halt_event_types.sql` (256 LOC) —
+  Guard A (V035 table) / Guard B (lease_sm_transition baseline) / race-free
+  DROP+ADD + ACCESS EXCLUSIVE + 24-value canonical CHECK + bundled retention/
+  compression (if_not_exists 冪等)
+- `srv/docs/execution_plan/halt_audit_schema.json` (151 LOC) — JSON Schema
+  draft-07 v1 validator
+- `srv/rust/openclaw_engine/src/tick_pipeline/tests/halt_ttl.rs` (221 LOC) — 16 個
+  halt TTL 狀態機 unit test
+
+### 改檔（18 個）
+- `risk_checks.rs`：+DAILY_LOSS_REASON_PREFIX 常數（與 drawdown_revoke prefix 並列）
+- `step_6_risk_checks.rs`：HaltSession arm 新增 HaltKind 分類 + halt_kind/
+  halt_set_ts_ms 凍結 + halt_audit::record_halt_set call；**P1-16 fix 保護**：
+  新代碼在 paper_paused=true 之後、drawdown_revoke+close-all loop 之前，
+  不動 realized_pnl 路徑 + synthetic price fallback
+- `on_tick/mod.rs`：+ check_and_clear_halt_expired(event.ts_ms) 寄生 on_tick
+  開頭（Option C）
+- `tick_pipeline/mod.rs`：TickPipeline +halt_kind/halt_set_ts_ms 兩 field
+- `pipeline_ctor.rs`：ctor 初始化 None/0
+- `tick_pipeline/commands.rs`：+ check_and_clear_halt_expired + compute_
+  halt_ttl_remaining_ms 兩 method；snapshot() 補 halt 對外欄位；
+  set_system_mode ShadowOnly path 加 halt 清除 + audit hook
+- `mode_state.rs`：ModeStateSnapshot +halt_kind/halt_set_ts_ms（serde default）
+- `pipeline_types.rs`：PipelineSnapshot +halt_kind:Option<String> / halt_set_ts_ms /
+  halt_ttl_remaining_ms:Option<u64>（MIT SHOULD-2 sentinel-free）
+- `config/risk_config.rs`：GlobalLimits +daily_loss_halt_ttl_ms/drawdown_halt_ttl_ms
+  + default fn + Default 補 init + validate floor/ceiling/sticky 守門
+- `config/risk_config_tests.rs`：+8 個 halt TTL validate test（含 MUST-6 讀真實
+  risk_config_live.toml 驗 ttl=0 sticky D1）
+- `event_consumer/handlers/lifecycle.rs`：handle_resume + handle_reset 加 halt
+  狀態清除 + record_halt_cleared call
+- `feature_collector.rs`：+ MIT N-4 forward guard test
+- `ipc_server/tests/mod.rs`：PipelineSnapshot literal 補 3 新 field
+- `tick_pipeline/tests/mod.rs`：mod halt_ttl 註冊
+- `lib.rs`：pub mod halt_audit
+- `risk_config_demo.toml` / `risk_config_paper.toml` / `risk_config.toml`（legacy）：
+  daily_loss_halt_ttl_ms=86400000 (24h) / drawdown_halt_ttl_ms=0
+- `risk_config_live.toml`：**daily_loss_halt_ttl_ms=0（sticky D1 lock）** /
+  drawdown_halt_ttl_ms=0
+
+### 教訓
+1. **PipelineKind 只有 3 variant（Paper/Demo/Live），LiveDemo 不是 variant**：
+   是 `Live + BybitEnvironment::Demo/None` 組合。LiveDemo 載 risk_config_live.toml
+   經 `effective_engine_mode()` 路徑（spec §3.5.1 L-3 verify 答案）。我直接遵 spec，
+   不另建 risk_config_live_demo.toml。
+2. **V098 dry-run mode 副作用**：V098 內含 BEGIN/COMMIT（mirror V053 race-free
+   pattern），外層 `BEGIN; \i V098; ROLLBACK;` 包裹無效 — inner COMMIT 提前提交
+   ALTER TABLE。實測 Linux trade-core 上 V098 已實際 apply 進 production DB。
+   風險：純擴 allowlist + idempotency probe + retention if_not_exists，無 schema
+   rollback 風險。**E2 review 點**：是否需 spec 修正 dry-run 模式指引。
+3. **engine 同 process 無 governance_audit_log writer**：halt_audit.rs 只寫
+   forensic log（halt_audit.log JSONL），governance_audit_log row 留待 Python
+   audit writer 補（從 halt_audit.log tail 或 IPC channel）。對齊 spec §5.3
+   MODULE_NOTE 聲明，但 A-6 接受標準需 E2 確認。
+4. **risk_config_tests.rs 已超 2000 LOC 硬上限**：pre-existing 1911 + my 165 =
+   2076。E2 決定是否要拆 sibling。
+5. **iso8601 test ts 算錯**：1747612800000 ms 對應 2025-05-19 不是 2026-05-19。
+   改用 1700000000000 (2023-11-14) 並驗格式（24 char / T / . / Z）而非絕對年。
+6. **NUL chrono::DateTime::from_timestamp** 比 NaiveDateTime 簡單；用
+   `chrono::SecondsFormat::Millis, true` 生成 RFC3339 with `.123Z` 後綴。
+7. **借用 scope 隔離**：step_6 HaltSession arm 內呼 record_halt_set 需借
+   risk_config + paper_state immutable，但後續 close-all loop 需 mutable self；
+   用 inner `{ ... }` block 限定 immutable 借用 scope。
+8. **IntentProcessor::update_risk_config** 是既有 public IPC patch path，測試
+   helper 直接用它 inject ttl=0 / ttl=24h；無需暴露 set_risk_config_for_test。
+9. **JSON Schema draft-07 vs draft-04 差別**：const keyword 在 draft-06 起加入，
+   `"schema_version": {"const": 1}` 即可 enforce 固定值。
+10. **TickPipeline new_with_kind / with_balance 等多個 ctor**：pipeline_ctor.rs
+    line 32 開頭只有 `new`，其他 ctor 都派發到 new 後再覆寫；只改 new ctor
+    initialization 即可，無 multi-ctor drift 風險。
+
+### 驗證
+- Mac aarch64-apple-darwin release build = `cargo build -p openclaw_engine
+  --release` finished, 0 errors
+- cargo test 全套 = passed=3255, failed=0, ignored=3（baseline 2999 + 34 新 =
+  3033 lib unit + integration 兩百多個全 PASS）
+- P1-16 regression = `cargo test per_symbol_price_pnl` 3/0 PASS
+- Linux PG V098 dry-run × 2：
+  - #1 BEGIN+ROLLBACK 包裹（V098 inner COMMIT 提前提交，已 land DB）— CHECK
+    constraint 含 24 個 allowlist
+  - #2 直 `psql -f V098.sql` — RAISE NOTICE 'already present; skipping' +
+    retention 'already exists' + compression fail-soft = 冪等性 PASS
+- byte-equivalent md5 ec12e857f2596b43456de3f8e9986bd5（Mac == Linux）
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--layer_a_halt_ttl_impl_report.md`
+
+## 2026-05-20 — P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2 (E2 4 MUST-FIX + E3 NaN guard + spec §6.3 replay)
+
+### 任務範圍
+E2 returned VERDICT=RETURN 4 MUST-FIX；E3 returned APPROVE-CONDITIONAL 1 MEDIUM-1；spec §6.3 incident replay 強制補。
+
+### 修法（6 fix）
+1. **MUST-FIX-1（record_halt_cleared event_type mapping）**：halt_audit.rs 加
+   `event_type_for_clear_path(clear_path) → event_type` 映射 fn：auto_ttl →
+   halt_session_auto_cleared；ipc_resume/ipc_reset/ipc_system_mode_shadow →
+   halt_session_manual_cleared；未知值 fail-safe 落 manual_cleared + tracing::error
+   警示。Round 1 寫死 `halt_session_auto_cleared` 違反 spec §3.9。
+2. **MUST-FIX-2（paper_state restore halt 狀態）**：paper_state_restore.rs 新
+   `restore_halt_state_from_snapshot(pipeline)` async fn；讀
+   `$OPENCLAW_DATA_DIR/pipeline_snapshot_<kind>.json::mode_snapshots.<kind>.halt_kind/halt_set_ts_ms`
+   → 還原 pipeline 兩 field + paper_paused/session_halted。fail-soft：缺檔/壞 JSON/
+   缺欄位 → 冷啟動。bootstrap.rs::restore_paper_counters 之後 chain 呼叫。
+3. **MUST-FIX-3（Python tail-writer）**：新建 `helper_scripts/canary/halt_audit_pg_writer.py`
+   + cron wrapper `helper_scripts/cron/halt_audit_pg_writer_cron.sh`；tail halt_audit.log
+   JSONL → INSERT learning.governance_audit_log（V098 24-value allowlist 內 3 個 halt_session_*）；
+   ON CONFLICT pattern 冪等（process_pid + ts_ms + event 複合 dedup）；cursor state file。
+   jsonschema validate fail-soft。20 unit tests + Linux PG integration 3 rows + idempotent
+   全 PASS。
+4. **MUST-FIX-4（risk_config_tests.rs 超 2000 LOC）**：拆 sibling
+   `risk_config_halt_ttl_tests.rs`（182 LOC）；父檔 2076→1917 < 2000。父 risk_config.rs
+   加 `mod halt_ttl_tests`。
+5. **E3 MEDIUM-1（NaN guard）**：halt_audit.rs 加 `json_number_or_null(f64) -> Value`
+   helper：NaN/+Inf/-Inf → Null；finite → Number。`record_halt_set` 內所有 f64
+   字段（peak_balance / current_balance / session_drawdown_pct /
+   loaded_drawdown_threshold / loaded_daily_loss_threshold + balance_history
+   兩元素）全套 helper，避免 serde_json::Number::from_f64(NaN) panic 把
+   step_6 unwind 拉成 engine deadlock。
+6. **SHOULD-FIX（spec §6.3 incident_replay）**：halt_ttl.rs 加
+   `test_2026_05_19_incident_replay`：構造 daily_loss halt 場景→驗 set 行 JSONL
+   含 reason / kind / quant-context schema → 推 1h 不清 → 推 24h+1s 清→驗
+   auto_cleared 行 elapsed_ms ∈ [86399000, 86401000] → 構造 drawdown halt
+   推 7d 仍 sticky。step 1-14 全覆蓋。
+
+### 修改清單
+**Rust**:
+- `srv/rust/openclaw_engine/src/halt_audit.rs`：+264 LOC（json_number_or_null +
+  event_type_for_clear_path + record_halt_cleared event 字段改用映射 + 4 new
+  unit tests + ENV mutex shim 切到 paper_state_restore::env_test_lock）
+- `srv/rust/openclaw_engine/src/event_consumer/paper_state_restore.rs`：+162 LOC
+  （restore_halt_state_from_snapshot async fn + ENV_TEST_MUTEX + env_test_lock
+  pub(crate) helper）
+- `srv/rust/openclaw_engine/src/event_consumer/mod.rs`：paper_state_restore
+  改為 `pub(crate) mod`（讓 sibling test 可用 env_test_lock）
+- `srv/rust/openclaw_engine/src/event_consumer/bootstrap.rs`：+5 LOC（呼
+  restore_halt_state_from_snapshot 在 restore_paper_counters 之後）
+- `srv/rust/openclaw_engine/src/config/risk_config_halt_ttl_tests.rs`：新建
+  182 LOC（從 risk_config_tests.rs 拆出 9 個 halt TTL test）
+- `srv/rust/openclaw_engine/src/config/risk_config_tests.rs`：-159 LOC（拆出 9
+  test + 補拆分註記，2076→1917）
+- `srv/rust/openclaw_engine/src/config/risk_config.rs`：+5 LOC（註冊
+  halt_ttl_tests sibling module）
+- `srv/rust/openclaw_engine/src/tick_pipeline/tests/halt_ttl.rs`：+388 LOC
+  （5 new tests: halt_state_restored_after_restart / missing_snapshot_cold_start /
+  corrupted_json_cold_start / kind_set_but_ts_zero_cold + 2026_05_19_incident_replay
+  + parse_jsonl_robust helper + env_lock 從 cross-module 取）
+- `srv/rust/openclaw_engine/src/tick_pipeline/tests/per_symbol_price_pnl.rs`：
+  +23 LOC（test_halt_session 加 env_lock + RAII env 還原 guard 隔離併發污染）
+
+**Python**:
+- `srv/helper_scripts/canary/halt_audit_pg_writer.py`：新建 389 LOC
+- `srv/helper_scripts/canary/test_halt_audit_pg_writer.py`：新建 362 LOC（20 tests）
+- `srv/helper_scripts/cron/halt_audit_pg_writer_cron.sh`：新建（cron wrapper）
+- `srv/helper_scripts/SCRIPT_INDEX.md`：+13 LOC（新區塊 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Round 2）
+
+### 教訓
+1. **cargo test 多執行緒 env race**：`std::env::set_var` / `remove_var` 是
+   process 全局；多 test 並行對 OPENCLAW_HALT_AUDIT_LOG / OPENCLAW_DATA_DIR
+   操作會互踩；要序列化必須用「跨 module 共用 Mutex」（不能各 module 各放
+   一個本地 mutex）。我把 ENV_TEST_MUTEX 放在 paper_state_restore.rs（已是
+   pub(crate)）讓 halt_audit / halt_ttl / per_symbol 三處共用。
+2. **writeln! 兩 write 之間可被插入**：macOS / Linux 對 `write_all(json) +
+   write_all("\n")` 兩個 system call 不保證原子；多 thread append 偶見「兩條
+   JSONL 黏在同一 line 缺 \n」。Test 端要備「.lines() pass + `}{` split fallback」
+   雙路徑 parser；Python 端 tail writer 也加同邏輯。
+3. **PaperState::new(NaN) 不 clamp**：直接 store NaN；下游 peak_balance() /
+   balance() / drawdown_pct() 都會回 NaN。記憶體 model 沒驗證 finite。
+   record_halt_set 必須 fail-soft 接 NaN（事故狀態下最不需要 panic）。
+4. **find by .lines() 在多 test 污染下不夠**：應改「filter by JSON field 精確
+   篩」（reason 字串 + halt_set_ts_ms 數值 + clear_path enum 都可）；單純
+   `.lines().last()` 在 race 下會抓到別 test 寫的行。
+5. **mode_snapshots.<kind>.halt_kind/halt_set_ts_ms 是巢狀**：snapshot 寫入
+   端在兩處同時寫（PipelineSnapshot 頂層 + ModeStateSnapshot 巢狀），restore
+   端只需讀其中一處（巢狀比較完整，paper_paused/session_halted 也在那）。
+6. **記錄寫入 SQL 用 WHERE NOT EXISTS 而非 ON CONFLICT**：governance_audit_log
+   無 UNIQUE 約束（spec 不要求），所以無法走 ON CONFLICT DO NOTHING；改用
+   `INSERT ... SELECT ... WHERE NOT EXISTS (SELECT 1 FROM ... WHERE ...)` 達同
+   等冪等效果。rowcount=1 表 inserted；=0 表已存在 skip。
+7. **Linux PG integration test 必須真跑**：Mac mock 即便 20 PASS，psycopg2
+   實際 SQL 是否被 PG 接受需 Linux 端跑（V098 24-value 是否真在 / payload jsonb
+   castable / WHERE NOT EXISTS 語法是否相容）。我跑了 3 rows insert + idempotent
+   re-run + DELETE 清理，全 PASS。
+
+### 驗證
+- Mac cargo test 全套：**3264 passed / 0 failed / 3 ignored**（vs Round 1
+  baseline 3255 → +9）。新增 9 個 test 全綠。
+- Python unit tests Mac：20/20 PASS
+- Python unit tests Linux：20/20 PASS
+- Linux PG integration test：3 rows insert + idempotent re-run + clear_path↔event_type
+  mapping 真實 PG 驗證（event_type=halt_session_auto_cleared ↔ clear_path=auto_ttl，
+  event_type=halt_session_manual_cleared ↔ clear_path=ipc_resume）→ DELETE 清理
+- 檔行數：risk_config_tests.rs 2076→1917 < 2000 ✅；其他無破 800 warn
+- node --check：N/A（無 JS 改動）
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--layer_a_halt_ttl_impl_round2_report.md`
+

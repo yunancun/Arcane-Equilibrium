@@ -98,6 +98,11 @@ impl TickPipeline {
             price_tracker: PriceHistoryTracker::new(),
             consecutive_losses: HashMap::new(),
             session_halted: false,
+            // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): halt 預設 None / 0；
+            //   restart 從 snapshot restore 時會覆寫（mode_state 路徑）。
+            // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt 預設 None / 0。
+            halt_kind: None,
+            halt_set_ts_ms: 0,
             trade_aggregator: crate::database::aggregators::TradeAggregator::new(),
             ob_aggregator: crate::database::aggregators::ObAggregator::new(),
             boot_ts_ms: None,

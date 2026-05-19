@@ -36,6 +36,17 @@ ft_min_notional_ratio_of_entry = 0.25
 # EXIT-FEATURES-WRITER-BUG-1-FIX：絕對 USD dust 門檻，封住 entry_notional 缺
 # 失時 ratio gate fail-open 的漏洞（STRKUSDT 37 次半倉 spiral 修補）。
 ft_dust_qty_floor_usd = 1.0
+# P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — Live D1 policy LOCK
+# daily_loss_halt_ttl_ms = 0 (sticky, NEVER auto-clear)
+#   Live 環境真實 PnL 達 daily_loss_max_pct（7%）= 根原則 #5「生存 > 利潤」紅線。
+#   觸發後必須 operator 人工 RCA 確認後手動 IPC Resume，不可 TTL auto-clear。
+#   FA Push-back-2 + Operator D1 lock 2026-05-19 ~21:00 UTC。
+#   demo / paper / live_demo（共享本 TOML）也採 0 — LiveDemo 是 Live 控制面對
+#   demo endpoint，per memory feedback_live_no_degradation_by_endpoint 不得降級。
+# drawdown_halt_ttl_ms = 0：三環境硬性 sticky；validate() reject > 0。
+# P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：Live D1 sticky LOCK。
+daily_loss_halt_ttl_ms = 0
+drawdown_halt_ttl_ms = 0
 
 [overrides]
 

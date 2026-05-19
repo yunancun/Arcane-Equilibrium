@@ -21,6 +21,19 @@ use crate::config::RiskConfig;
 use crate::exit_features::{physical_micro_profit_lock_v2, ExitFeatures, PhysicalDecision};
 use openclaw_core::risk::{compute_dynamic_stop_pct, regime_multipliers};
 
+/// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): priority-9 `RiskAction::HaltSession`
+/// reason 字首；用於 `HaltKind::classify` 分類 + V098 governance audit。
+///
+/// 與 `drawdown_revoke::DRAWDOWN_REASON_PREFIX` 並列；exact-prefix match。
+/// 來源：本檔 priority 9 `format!("DAILY LOSS: {:.2}% >= {:.2}%", ...)` 是唯一
+/// constructor —— 任何字串對齊改動必同步更新此常數，否則 TTL 與 forensic log
+/// 分類會 drift。
+///
+/// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：priority 9 daily-loss halt
+/// 的 reason 字首；exact-prefix match 與 drawdown 並列。同步契約：priority 9
+/// format! 改字串時此常數必同步更新，否則 HaltKind 分類與 V098 audit drift。
+pub const DAILY_LOSS_REASON_PREFIX: &str = "DAILY LOSS";
+
 // ---------------------------------------------------------------------------
 // G2-03 (2026-04-26) — per-strategy SL/TP effective-value helpers
 // G2-03（2026-04-26）—— 每策略 SL/TP 有效值輔助函式

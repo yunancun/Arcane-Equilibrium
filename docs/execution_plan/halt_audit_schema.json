@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ncyu/openclaw/halt_audit_schema.json",
+  "title": "halt_audit.log JSONL line schema",
+  "description": "P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — Forensic halt_audit.log JSONL record schema. Every line written by `crate::halt_audit::record_halt_set` and `record_halt_cleared` must validate against this schema. Schema version v1 carries the spec §5.1 quant-context fields (6 fields + schema_version).",
+  "type": "object",
+  "required": ["schema_version", "ts_ms", "ts_iso", "event", "kind", "engine_mode", "pipeline_kind", "process_pid", "halt_set_ts_ms"],
+  "properties": {
+    "schema_version": {
+      "description": "JSON Schema version of this record. Bump on any breaking change to fields.",
+      "type": "integer",
+      "const": 1
+    },
+    "ts_ms": {
+      "description": "Wall-clock ms (UNIX epoch) when the audit row was emitted.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_iso": {
+      "description": "ISO-8601 UTC string with millisecond precision (RFC 3339).",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "event": {
+      "description": "Event type — matches V098 governance_audit_log CHECK allowlist subset.",
+      "type": "string",
+      "enum": ["halt_session_set", "halt_session_auto_cleared", "halt_session_manual_cleared"]
+    },
+    "kind": {
+      "description": "Halt classification (HaltKind serialized lowercase). Stable ABI: do not reorder or rename.",
+      "type": "string",
+      "enum": ["daily_loss", "session_drawdown", "other"]
+    },
+    "reason": {
+      "description": "Original HaltSession reason string (only set on halt_session_set).",
+      "type": ["string", "null"]
+    },
+    "engine_mode": {
+      "description": "Effective engine_mode tag (paper / demo / live / live_demo / live_testnet).",
+      "type": "string",
+      "enum": ["paper", "demo", "live", "live_demo", "live_testnet"]
+    },
+    "pipeline_kind": {
+      "description": "PipelineKind db_mode (paper / demo / live).",
+      "type": "string",
+      "enum": ["paper", "demo", "live"]
+    },
+    "process_pid": {
+      "description": "Engine OS process PID at time of emission.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "peak_balance": {
+      "description": "PaperState peak_balance at halt set (set events only).",
+      "type": ["number", "null"]
+    },
+    "current_balance": {
+      "description": "PaperState balance at halt set (set events only).",
+      "type": ["number", "null"]
+    },
+    "session_drawdown_pct": {
+      "description": "PaperState drawdown_pct() at halt set.",
+      "type": ["number", "null"]
+    },
+    "daily_loss_pct": {
+      "description": "IntentProcessor daily_loss_pct at halt set. May be null if engine accessor unavailable.",
+      "type": ["number", "null"]
+    },
+    "loaded_drawdown_threshold": {
+      "description": "RUNTIME-loaded risk_config.limits.session_drawdown_max_pct (catches IPC patch_risk_config tampering).",
+      "type": ["number", "null"]
+    },
+    "loaded_daily_loss_threshold": {
+      "description": "RUNTIME-loaded risk_config.limits.daily_loss_max_pct.",
+      "type": ["number", "null"]
+    },
+    "risk_config_source": {
+      "description": "Reserved for future: TOML path that produced the loaded RiskConfig. Null in v1.",
+      "type": ["string", "null"]
+    },
+    "risk_config_version_seen": {
+      "description": "ModeState.risk_config_version_seen at halt set. May be 0 placeholder pending accessor wire-up.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "halt_set_ts_ms": {
+      "description": "TickPipeline.halt_set_ts_ms — TTL clock anchor.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "cleared_ts_ms": {
+      "description": "When the halt was cleared (clear events only).",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "elapsed_ms": {
+      "description": "now_ms - halt_set_ts_ms at clear (clear events only).",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "clear_path": {
+      "description": "How the halt was cleared (clear events only).",
+      "type": ["string", "null"],
+      "enum": ["auto_ttl", "ipc_resume", "ipc_reset", "ipc_system_mode_shadow", null]
+    },
+    "per_symbol_drawdown_max_pct": {
+      "description": "MUST-2 quant-context: maximum per-symbol drawdown pct contributing to halt.",
+      "type": ["number", "null"]
+    },
+    "per_symbol_drawdown_max_symbol": {
+      "description": "MUST-2 quant-context: which symbol owns per_symbol_drawdown_max_pct.",
+      "type": ["string", "null"]
+    },
+    "consecutive_loss_max_count": {
+      "description": "MUST-2 quant-context: max consecutive loss count across active strategies.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "correlated_exposure_pct": {
+      "description": "MUST-2 quant-context: aggregate correlated exposure pct at halt.",
+      "type": ["number", "null"]
+    },
+    "paper_state_recompute_ok": {
+      "description": "MUST-2 quant-context: peak_balance monotonically non-decreasing sanity check.",
+      "type": "boolean"
+    },
+    "paper_state_balance_history": {
+      "description": "MUST-2 quant-context: last 10 (ts, balance) tuples reconstructing daily_loss_pct path. v1 may emit shorter (peak+current) until PaperState API exposes full history.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ts_ms": {"type": "integer", "minimum": 0},
+          "balance": {"type": "number"},
+          "label": {"type": "string"}
+        }
+      }
+    },
+    "per_strategy_drawdown_contribution_pct": {
+      "description": "MUST-2 quant-context: strategy_name → contribution pct map.",
+      "type": ["object", "null"],
+      "additionalProperties": {"type": "number"}
+    },
+    "per_symbol_atr_pct": {
+      "description": "MUST-2 quant-context: last 5 active symbols → ATR pct map.",
+      "type": ["object", "null"],
+      "additionalProperties": {"type": "number"}
+    }
+  },
+  "additionalProperties": true
+}

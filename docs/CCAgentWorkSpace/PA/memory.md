@@ -4586,3 +4586,73 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 - **strict-passive maker design 的 dead parameter**：Rust signature 對齊舊 spec but IMPL strict-skip 後 fallback_offset_bps 變 vestigial；calibration sweep 沒注意到這 IMPL detail → 設計 4-axis cartesian product 有 1 dead axis × 75% redundancy；spec 與 IMPL 之間需有 dead parameter audit pass
 
 **Report path**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_calibration_sweep_anomalies_sd_report.md`
+
+## 2026-05-19 — HaltSession TTL spec v0.1 → v0.2 (3-agent review consolidated)
+
+- 3-agent review (QC 2M/6S/6N + MIT 4M/5S/4N + FA 2M/5S/3N) all APPROVE-CONDITIONAL；7 dedup'd MUST-FIX folded + operator 2 decisions (D1 Live sticky / D2 Layer A first deploy) locked
+- **MIT empirical PG catch saved the spec**：v0.1 §3.8 寫 `learning.lifecycle_events` 和 `learning.governance_audit`（都不存在），真實表名 `learning.governance_audit_log` (hypertable, 22985 rows baseline, max ts 2026-05-19 17:22 UTC, CHECK 21-value allowlist exclude `halt_session_*`)；無 V098 migration → 第一個 halt INSERT 在生產直接 fail
+- **V098 mandatory** — mirror V053 precedent (REF-20 Sprint 1 Track C race-free DROP+ADD with ACCESS EXCLUSIVE lock + Guard A + idempotency probe)；Linux PG dry-run × 2 mandatory per `feedback_v_migration_pg_dry_run`；retention/compression bundle 入 V098 (PA 決定，1-line × 2 + if_not_exists)
+- **Live daily_loss sticky D1 lock** (FA Push-back-2)：root principle #5 紅線 — Live 真實資金 15% 虧損 = operator personal review，禁 auto-clear；demo/live_demo/paper 24h；validate() 接受 0（與 drawdown reject>0 語意不同）
+- **Layer A first deploy D2 lock** (QC NTH-5)：避免 Layer B alarm fatigue 在 operator 無 auto-clear 安全網時觸發；§11.3 deploy gate 5-step + 24h passive + 7d observation
+- **Spec v0.2 size**：1365 LOC（target 1100-1200 微超，dense V098 SQL + per-env tables + AC-EV queries 不能再裁）
+- **3 spawned tickets**：P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1 (PM 加 TODO §11.3) + P2-WATCHDOG-INERT-PER-STRATEGY-CLASS-THRESHOLD (FA SHOULD-3) + P2-FORENSIC-LOG-PATH-DEFAULT (MIT S-1) + P2-WATCHDOG-OPERATOR-PAUSE-FILTER (MIT S-2)
+- **Quant-context forensic log enrichment**：QC M-2 fold-in 6 fields (per_symbol_drawdown_max + consecutive_loss_max + correlated_exposure + paper_state_recompute_ok + balance_history + per_strategy_drawdown_contribution + per_symbol_atr) + schema_version=1 + halt_audit_schema.json validator file → AC X-5 upgraded jsonschema.validate
+- **教訓**：spec design 階段 PA 必須對 sink 表名做 Linux PG empirical query；v0.1 賴 v0.1 同期 memory 認知盲信「learning.lifecycle_events 應該存在」是錯的；以後類似 audit sink spec 必走 PG 經驗驗證後再 sign-off
+
+**Report path**: `srv/docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md`（spec v0.2 同檔覆寫 v0.1）
+
+---
+
+## 2026-05-19 LG-3 Wave 2.4 Dispatch Plan Refresh (post 8d silent stall)
+
+**Trigger**: 2026-05-19 PM audit catch LG-3 spec v2 final ship 2026-05-11 但 PM 從未派 Wave 2.4，8 天 silent stall。Operator 要 PA refresh dispatch plan 3 大塊：V### 號 / race-aware dispatch / 與 v56 P0 時序化。
+
+**Deliverable**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md` + Operator mirror
+
+**核心決議**:
+
+1. **V094 → V099 replacement**: V094 已被 W-AUDIT-8c 佔（`c9234ecf` 2026-05-15）；當前 main 最高 V098（v56 P0 governance_audit_log_halt_event_types, 2026-05-19）；V099-V101 全空；LG-3 audit migration 取 V099。spec v2 文字不改（保 3-review APPROVE baseline），IMPL 時 1:1 patch + sub-agent 必 grep V094 確認 0 match。REF-20_RESERVATION.md 不影響（V099 不在 V036-V056 範圍）。
+
+2. **Race-aware dispatch (Option B 推薦)**: 唯一真 race-safe 並行對 = **T1 (Rust SM core 新 module) + T4 (V099 SQL + writer + healthcheck 新檔)** 文件零 overlap、surface 不同、無 import dependency。其他全 sequential：
+   - Wave 2.4.A: T1 + T4 並行對
+   - Wave 2.4.B: T2 (依 T1)
+   - Wave 2.4.C: T3 (依 T2)
+   - Wave 2.4.D: T5 (依 T1+T2+T3，動 live_session_routes.py 與 intent_processor)
+   - Wave 2.4.E: T7 (依 T5，動 live_session_routes.py SSE)
+   - Wave 2.4.F: T6 (E2E，依 T1..T5+T7)
+   - **critical file overlap**: `live_session_routes.py` 被 T3+T5+T7 同時 EXTEND → 嚴格 sequential 強制
+   - Wall time ~12-13d wallclock vs spec v2 原估 7-8d（多 ~5d 是 race lesson margin）
+
+3. **與 v56 P0 時序化 (Candidate (b) 推薦)**: v56 P0 完整 cycle ETA ~15-18d（2026-05-19 起，closure ~2026-06-03~06）；三選項：
+   - (a) v56 Layer A 24h watch 並行啟 LG-3 T1 → **棄用**（容差 24h 過小）
+   - (b) **v56 Layer B 7d observation 啟動後派 LG-3 Wave 2.4 全程** → **推薦**（~2026-05-29，capacity 大量釋出，alarm-only 不撞 hotfix）
+   - (c) v56 closed 後啟 LG-3 → fallback（若 Layer B alarm 退回）
+   - Supervised live earliest activation ~2026-06-22~30 命中 FA 6/30 中位（~40% prob band）
+
+**架構教訓 14**: **「並行 capacity」與 race lesson 並不互斥的識別方法**：
+- race lesson「不再多 E1 同時並行」精神 = 同一 file / 同一 IPC handler / 同一 SM 並行
+- 真 race-safe 對的辨識 = (1) 0 file overlap (2) surface 不同 (3) 無 import dependency
+- LG-3 Wave 2.4 中 T1 + T4 是唯一通過全 3 條的對 — T1 純 Rust 新 module + T4 SQL+writer+healthcheck+grep script 全新檔
+- 其他「名義獨立」task (T2/T7) 實際有隱性 dependency (T2 import T1; T7 EXTEND live_session_routes.py 與 T3/T5 衝突)
+- 教訓：race-aware dispatch 不是「全 sequential」也不是「按 spec 4 並行」，是逐文件逐 import 識別真零 overlap 對
+
+**架構教訓 15**: **spec v2 §8 Parallel Group 分類過樂觀**：
+- spec v2 Phase 1 列 4 並行 (T1/T2/T4/T7) — 實際只有 T1+T4 真獨立；T2 import T1, T7 EXTEND live_session_routes.py 與後續衝突
+- 教訓：spec 「parallel group」標記必驗 (1) file overlap (2) IPC contract / state import (3) lexical scope；只看「新 module 名稱不同」不夠
+- 對未來 spec：parallel constraint 行必 explicit 列 dependency map 而非「依 LG3-TX」單行
+
+**架構教訓 16**: **8d stall 的 root cause = sprint banner 沒給 LG-3 顯式 owner**：
+- spec v2 ship 後 next-action 寫 PA memory 但 TODO §1 sprint banner / §10 task ledger 沒對應行 owner=PM
+- 結果 PM 走 W-AUDIT-8a / Phase 1b / W-AUDIT-8c / cleanup / v56 P0 / multi-agent race 等 6 件事都覆蓋當時 — LG-3 變成 silent dependency
+- 教訓：每 spec ship 後 PA 自己 push back PM 在 TODO 加 explicit task ledger row（不只 memory.md），否則「下步 PM 派」是空話
+
+**Risk 評級**: 
+- HIGH for V099 號決議落定（main tree confirm V098 最新，V099 空，REF-20 不影響）
+- HIGH for race-safe T1+T4 對識別（file ls 確認 5 new file + 4 new file 0 overlap）
+- MEDIUM-HIGH for Candidate (b) ETA precision（取決於 v56 Phase 6-9 false-positive 率）
+- MEDIUM for Wave 2.4 ~12-13d wallclock（取決於 IMPL 翻車率 + review 並行度）
+
+**Confidence**: HIGH for §1-§5 verdicts；HIGH for §6 dispatch prompt 模板可直接給 PM 用；HIGH for V094 → V099 1:1 mapping。
+
+**Report path**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md`
+**Mirror path**: `srv/docs/CCAgentWorkSpace/Operator/2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md`

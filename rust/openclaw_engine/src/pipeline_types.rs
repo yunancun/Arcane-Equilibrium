@@ -167,6 +167,27 @@ pub struct PipelineSnapshot {
     /// 全局系統模式字符串 — 從 Python GUI 同步，在 tick 級別封鎖交易。
     #[serde(default)]
     pub system_mode: String,
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — Halt 分類；
+    /// `None` = 無 active halt（含 operator IPC Pause）；`Some("daily_loss" |
+    /// "session_drawdown" | "other")` = HaltSession 觸發類別。
+    /// 暴露給 watchdog Layer B 直接讀，不必解析 reason 字串。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt 分類；watchdog 直讀。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halt_kind: Option<String>,
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — Halt 設置 wall-clock 毫秒。
+    /// 0 = 無 active halt；非 0 = TTL 起點。Python IPC consumer 用 ts 差檢測
+    /// stuck 時間。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt set ts；watchdog 計算 stuck。
+    #[serde(default)]
+    pub halt_set_ts_ms: u64,
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — TTL 剩餘毫秒。
+    /// MIT SHOULD-2 fold-in：`Option<u64>` 取代 sentinel u64::MAX；
+    ///   - `None` = sticky（永不 auto-clear，含 Live daily_loss D1 + session_drawdown）
+    ///   - `Some(0)` = 過期，下次 tick 立即清
+    ///   - `Some(N>0)` = 剩 N ms
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：TTL 剩餘；None=sticky。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halt_ttl_remaining_ms: Option<u64>,
 }
 
 fn default_snapshot_schema_version() -> String {

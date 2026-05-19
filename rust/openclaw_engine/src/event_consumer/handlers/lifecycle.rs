@@ -31,11 +31,37 @@ pub(super) fn handle_pause(pipeline: &mut TickPipeline, snapshot_writer: &mut Du
 /// EN: Resume the paper pipeline. Clears both `paper_paused` and the F2
 ///     `session_halted` flag so a fresh session starts cleanly.
 /// 中文: 恢復紙盤管線 — 同時清除 paper_paused 與 F2 session_halted 旗標。
+///
+/// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：同步清除 halt_kind /
+/// halt_set_ts_ms，並寫 forensic audit 行（clear_path="ipc_resume"）。否則 ledger
+/// 漏 manual clear，operator 7d 查詢會缺數據點。
+/// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：清 halt 狀態 + forensic audit。
 pub(super) fn handle_resume(pipeline: &mut TickPipeline, snapshot_writer: &mut DualStateWriter) {
+    // 先抓 halt 狀態（清除前），audit 後落值
+    let prev_halt_kind = pipeline.halt_kind;
+    let prev_halt_set_ts_ms = pipeline.halt_set_ts_ms;
+    let pipeline_kind = pipeline.pipeline_kind;
+    let engine_mode = pipeline.effective_engine_mode().to_string();
     pipeline.paper_paused = false;
     // F2 fix: clear session_halted on Resume / 恢復時清除會話暫停標誌
     pipeline.session_halted = false;
+    // P0-ENGINE-HALTSESSION-STUCK-FIX：清除 halt_kind / halt_set_ts_ms。
+    pipeline.halt_kind = None;
+    pipeline.halt_set_ts_ms = 0;
     info!("paper trading RESUMED via IPC / 紙盤交易已通過 IPC 恢復");
+    // 寫 audit（只在實際有 active halt 才寫；operator pause 走此 path 不會
+    // 有 halt_kind，避免 spurious audit row）。
+    if let Some(kind) = prev_halt_kind {
+        let now_ms = openclaw_core::now_ms();
+        crate::halt_audit::record_halt_cleared(
+            kind,
+            prev_halt_set_ts_ms,
+            now_ms,
+            pipeline_kind,
+            &engine_mode,
+            "ipc_resume",
+        );
+    }
     snapshot_writer.force_write(&pipeline.snapshot());
 }
 
@@ -88,6 +114,12 @@ pub(super) fn handle_reset(
     snapshot_writer: &mut DualStateWriter,
     pending_orders: &mut HashMap<String, PendingOrder>,
 ) {
+    // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：先抓 halt 狀態做 audit。
+    // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：清 halt + audit forensic。
+    let prev_halt_kind = pipeline.halt_kind;
+    let prev_halt_set_ts_ms = pipeline.halt_set_ts_ms;
+    let pipeline_kind = pipeline.pipeline_kind;
+    let engine_mode = pipeline.effective_engine_mode().to_string();
     // ORPHAN-ADOPT-1 FUP: preserve the shared positions_mirror handle
     // across reset so the reconciler keeps observing the same Arc.
     // set_positions_mirror clears + rehydrates the shared map from the
@@ -102,6 +134,9 @@ pub(super) fn handle_reset(
     // F2+F3 fix: clear halt + loss counters on reset / 重置時清除暫停+虧損計數
     pipeline.session_halted = false;
     pipeline.consecutive_losses.clear();
+    // P0-ENGINE-HALTSESSION-STUCK-FIX：清 halt 狀態。
+    pipeline.halt_kind = None;
+    pipeline.halt_set_ts_ms = 0;
     // P2-4 fix: Clear pending_close_symbols on reset
     pipeline.clear_all_pending_close();
     pending_orders.clear();
@@ -109,6 +144,18 @@ pub(super) fn handle_reset(
         balance = format!("{:.2}", new_balance),
         "IPC reset paper state / IPC 重置紙盤狀態"
     );
+    // P0-ENGINE-HALTSESSION-STUCK-FIX：實際 active halt 才寫 audit。
+    if let Some(kind) = prev_halt_kind {
+        let now_ms = openclaw_core::now_ms();
+        crate::halt_audit::record_halt_cleared(
+            kind,
+            prev_halt_set_ts_ms,
+            now_ms,
+            pipeline_kind,
+            &engine_mode,
+            "ipc_reset",
+        );
+    }
     snapshot_writer.force_write(&pipeline.snapshot());
 }
 

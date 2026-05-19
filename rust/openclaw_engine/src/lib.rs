@@ -33,6 +33,9 @@ pub mod exit_features;
 pub mod fast_track;
 pub mod feature_collector;
 pub mod h_state_cache;
+// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): halt forensic logger.
+// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt 取證記錄器。
+pub mod halt_audit;
 pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;

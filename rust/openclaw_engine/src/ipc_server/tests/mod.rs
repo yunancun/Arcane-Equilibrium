@@ -162,6 +162,11 @@ pub(super) fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
         session_drawdown_pct: 0.0,
         mode_snapshots: HashMap::new(),
         system_mode: "live_reserved".into(),
+        // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：halt 對外欄位（test 預設無 active halt）。
+        // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt fields。
+        halt_kind: None,
+        halt_set_ts_ms: 0,
+        halt_ttl_remaining_ms: None,
     };
     let json = serde_json::to_string_pretty(&snapshot).unwrap();
     std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();

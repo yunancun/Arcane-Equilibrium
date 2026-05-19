@@ -1,7 +1,15 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-18（W-AUDIT-8c Liquidation Cluster Stage 0R replay CLI round 2：6 CRIT runtime + silent-RED fix + 4 HIGH 補齊 spec v0.3 14 mandatory fields + integration smoke 10/10 PASS；保留 W-AUDIT-8a C1 liquidation topic standalone probe + AMD-2026-05-15-01：W2 paper edge report 降級為 Stage 0R diagnostic；W-AUDIT-4b feature baseline scheduled apply + [67] healthcheck 與 2026-05-09 W-AUDIT-1 catch-up 索引）
+最後更新：2026-05-20（P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2 — MUST-FIX-3 加 `canary/halt_audit_pg_writer.py` + `cron/halt_audit_pg_writer_cron.sh`：tail `halt_audit.log` JSONL → INSERT `learning.governance_audit_log`；20 unit tests PASS + Linux PG integration test PASS（3 rows + idempotent + clear_path↔event_type mapping verified）。保留 2026-05-18 索引）
+
+## 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2
+
+| 腳本 | 用途 |
+|------|------|
+| `canary/halt_audit_pg_writer.py` | MUST-FIX-3：tail Rust engine 寫的 `halt_audit.log` JSONL → INSERT `learning.governance_audit_log`（V098 24-value allowlist 已含 3 個 halt_session_* event_types）；按 spec §3.8 / §3.9 audit contract；ON CONFLICT pattern 冪等（複合 dedup = process_pid + ts_ms + event）；cursor state file 保證重啟不丟資料 + 不重複；jsonschema validate fail-soft；20 unit tests PASS + Linux PG integration 3 rows + idempotent 已驗。 |
+| `cron/halt_audit_pg_writer_cron.sh` | MUST-FIX-3：1min cron wrapper；對齊 sibling pattern（outcome_backfiller_live_cron）；env 從 `$OPENCLAW_SECRETS_ROOT/environment_files/basic_system_services.env` 讀；mkdir-based lock 防 overrun；source-only（operator 確認 V098 已 land 後手動 crontab -e 加）。 |
+| `canary/test_halt_audit_pg_writer.py` | MUST-FIX-3 unit + PG mock 整合測試：5 大類 17 + 3 = 20 cases；JSONL robust parser、cursor state、validate、resolve paths、PG-absent / 3-rows / idempotent / V098-absent fallback 全覆蓋。 |
 
 ## 2026-05-09 W-AUDIT-1 補登
 

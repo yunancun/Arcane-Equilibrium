@@ -436,6 +436,35 @@ impl TickPipeline {
                     warn!(reason = %reason, "SESSION HALTED / 會話暫停");
                     self.session_halted = true;
                     self.paper_paused = true;
+                    // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): 分類 + 凍結
+                    // halt_set_ts_ms（TTL 起點）+ forensic log。close-all 之前先
+                    // 寫，確保 forensic 永不丟（即便下游 close-all 異常）。
+                    // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt_kind/
+                    // ts 凍結 + forensic log 先於 close-all。
+                    let halt_kind = crate::halt_audit::HaltKind::classify(&reason);
+                    self.halt_kind = Some(halt_kind);
+                    self.halt_set_ts_ms = event.ts_ms;
+                    let halt_engine_mode = self.effective_engine_mode().to_string();
+                    let halt_pipeline_kind = self.pipeline_kind;
+                    // TODO(E2 review): IntentProcessor 暫無 risk_config_version_seen()
+                    //   accessor；forensic 暫填 0。後續若需真值再加 accessor。
+                    // TODO（E2 審查）：risk_config_version_seen accessor 未來補。
+                    let halt_risk_config_version: u64 = 0;
+                    {
+                        // 借用 borrow scope 隔離 — 拿 risk_config + paper_state immutable
+                        // 借用寫 forensic log，於 close-all loop 前釋放。
+                        let risk_config_for_audit = self.intent_processor.risk_config();
+                        crate::halt_audit::record_halt_set(
+                            halt_kind,
+                            &reason,
+                            halt_pipeline_kind,
+                            &halt_engine_mode,
+                            risk_config_for_audit,
+                            halt_risk_config_version,
+                            &self.paper_state,
+                            event.ts_ms,
+                        );
+                    }
                     // G1-06 (Root Principle #5/#6): on Live drawdown halts, also
                     // delete authorization.json so the Live session cannot be
                     // silently un-paused without operator re-approval. The

@@ -1631,9 +1631,16 @@ impl TickPipeline {
             }
         }
 
+        // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): snapshot 對外暴露 halt
+        // 狀態三件套；watchdog Layer B 直讀，避免 reason 字串解析。
+        // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt 狀態三件套對外暴露。
+        let snapshot_now_ms = openclaw_core::now_ms();
+        let halt_kind_str = self.halt_kind.map(|k| k.as_str().to_string());
+        let halt_ttl_remaining_ms = self.compute_halt_ttl_remaining_ms(snapshot_now_ms);
+
         PipelineSnapshot {
             schema_version: "2.0.0".into(),
-            written_at_ms: openclaw_core::now_ms(),
+            written_at_ms: snapshot_now_ms,
             paper_state: self.paper_state.export_state(),
             latest_prices: self.latest_prices.clone(),
             stats: self.stats.clone(),
@@ -1657,6 +1664,10 @@ impl TickPipeline {
                 .intent_processor
                 .daily_loss_pct_pub(self.paper_state.balance()),
             session_drawdown_pct: self.paper_state.drawdown_pct(),
+            // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): halt 對外欄位。
+            halt_kind: halt_kind_str,
+            halt_set_ts_ms: self.halt_set_ts_ms,
+            halt_ttl_remaining_ms,
             mode_snapshots: {
                 // 3E-4: Each pipeline emits its own snapshot. Multi-mode iteration removed.
                 // 3E-4：每管線發出自己的快照。多模式迭代已移除。
@@ -1670,6 +1681,10 @@ impl TickPipeline {
                         consecutive_losses: self.consecutive_losses.clone(),
                         session_halted: self.session_halted,
                         paper_paused: self.paper_paused,
+                        // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): ModeStateSnapshot
+                        // 帶 halt_kind / halt_set_ts_ms 跨 restart 還原 TTL clock。
+                        halt_kind: self.halt_kind,
+                        halt_set_ts_ms: self.halt_set_ts_ms,
                     },
                 );
                 ms
@@ -1711,7 +1726,29 @@ impl TickPipeline {
                 self.paper_paused = true;
             }
             SystemMode::ShadowOnly => {
+                // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：ShadowOnly 是
+                // 既有的 paper_paused clearer 之一；同步清 halt_kind /
+                // halt_set_ts_ms 並寫 forensic audit（clear_path=
+                // "ipc_system_mode_shadow"）。否則 ledger 漏 manual clear。
+                // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：清 halt + audit。
+                let prev_halt_kind = self.halt_kind;
+                let prev_halt_set_ts_ms = self.halt_set_ts_ms;
+                let pipeline_kind = self.pipeline_kind;
+                let engine_mode = self.effective_engine_mode().to_string();
                 self.paper_paused = false;
+                self.halt_kind = None;
+                self.halt_set_ts_ms = 0;
+                if let Some(kind) = prev_halt_kind {
+                    let now_ms = openclaw_core::now_ms();
+                    crate::halt_audit::record_halt_cleared(
+                        kind,
+                        prev_halt_set_ts_ms,
+                        now_ms,
+                        pipeline_kind,
+                        &engine_mode,
+                        "ipc_system_mode_shadow",
+                    );
+                }
             }
             _ => {}
         }
@@ -1739,5 +1776,108 @@ impl TickPipeline {
         let record = self.on_tick(event);
         self.canary_mode = was_canary;
         record
+    }
+
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — check whether the active
+    /// HaltSession-driven `paper_paused` has exceeded its per-kind TTL and, if
+    /// so, atomically clear `paper_paused` / `session_halted` / `halt_kind` and
+    /// emit forensic + governance audit rows.
+    ///
+    /// 設計（Option C 寄生於 on_tick 開頭，O(1) 早退）：
+    ///   1. `halt_kind == None` → 立即 return false（無 active halt）
+    ///   2. `Some(SessionDrawdown)` 或 `Some(Other)` → 永遠 sticky，return false
+    ///   3. `Some(DailyLoss)` + `ttl_ms == 0`（Live D1 sticky）→ return false
+    ///   4. `Some(DailyLoss)` + elapsed < ttl → return false（等過期）
+    ///   5. `Some(DailyLoss)` + elapsed >= ttl → clear + audit
+    ///
+    /// 時鐘倒流防護：`now_ms < halt_set_ts_ms` 用 `saturating_sub` 取 0，
+    /// 仍會 return false（elapsed=0 < ttl），不會誤清。
+    ///
+    /// `now_ms` 採 `event.ts_ms`（非 wall-clock）以保 replay 確定性 + 一致性。
+    ///
+    /// 失敗模式：record_halt_cleared 寫檔失敗 fail-soft（不阻塞清除流程）；
+    /// halt_kind 已清，下次 on_tick 不重複觸發。
+    ///
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：TTL 過期自動清除；
+    /// SessionDrawdown / Other / ttl=0 永遠 sticky；`saturating_sub` 防時鐘倒流。
+    pub fn check_and_clear_halt_expired(&mut self, now_ms: u64) -> bool {
+        // O(1) early-out：絕大多數 tick 走此 path（halt_kind == None）。
+        let kind = match self.halt_kind {
+            Some(k) => k,
+            None => return false,
+        };
+        // 取得 RiskConfig 內 TTL 配置；只有 DailyLoss 走 TTL，其他類別永遠 sticky。
+        let limits = &self.intent_processor.risk_config().limits;
+        let ttl_ms: u64 = match kind {
+            crate::halt_audit::HaltKind::DailyLoss => limits.daily_loss_halt_ttl_ms,
+            crate::halt_audit::HaltKind::SessionDrawdown => return false, // sticky
+            crate::halt_audit::HaltKind::Other => return false,           // fail-safe sticky
+        };
+        // ttl_ms == 0 = 已停用（Live D1 sticky）。
+        if ttl_ms == 0 {
+            return false;
+        }
+        // halt_set_ts_ms == 0 = 無 active halt 起點（防禦性）。
+        if self.halt_set_ts_ms == 0 {
+            return false;
+        }
+        let elapsed = now_ms.saturating_sub(self.halt_set_ts_ms);
+        if elapsed < ttl_ms {
+            return false;
+        }
+        // 過期 → 清除 + audit
+        let prev_set_ts = self.halt_set_ts_ms;
+        self.paper_paused = false;
+        self.session_halted = false;
+        self.halt_kind = None;
+        self.halt_set_ts_ms = 0;
+        tracing::info!(
+            kind = kind.as_str(),
+            elapsed_ms = elapsed,
+            ttl_ms,
+            now_ms,
+            "halt auto-cleared after TTL / halt TTL 過期自動清除"
+        );
+        // Forensic log 寫入；fail-soft（內部 tracing::error! 失敗）。
+        let pipeline_kind = self.pipeline_kind;
+        let engine_mode = self.effective_engine_mode().to_string();
+        crate::halt_audit::record_halt_cleared(
+            kind,
+            prev_set_ts,
+            now_ms,
+            pipeline_kind,
+            &engine_mode,
+            "auto_ttl",
+        );
+        true
+    }
+
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — 計算 PipelineSnapshot
+    /// 對外暴露的 `halt_ttl_remaining_ms`（MIT SHOULD-2 Option<u64> sentinel-free）。
+    ///
+    /// 規則：
+    ///   - `halt_kind == None` → `None`（無 active halt）
+    ///   - `Some(SessionDrawdown | Other)` → `None`（sticky；watchdog 直觀知道）
+    ///   - `Some(DailyLoss) + ttl_ms == 0` → `None`（Live D1 sticky）
+    ///   - `Some(DailyLoss) + ttl_ms > 0` → `Some(ttl_ms.saturating_sub(elapsed))`
+    ///
+    /// `now_ms` 採 wall-clock（openclaw_core::now_ms()），snapshot 寫入時取。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：TTL 剩餘計算。
+    pub fn compute_halt_ttl_remaining_ms(&self, now_ms: u64) -> Option<u64> {
+        let kind = self.halt_kind?;
+        let ttl_ms = match kind {
+            crate::halt_audit::HaltKind::DailyLoss => {
+                self.intent_processor.risk_config().limits.daily_loss_halt_ttl_ms
+            }
+            // sticky kinds：無剩餘概念。
+            crate::halt_audit::HaltKind::SessionDrawdown
+            | crate::halt_audit::HaltKind::Other => return None,
+        };
+        if ttl_ms == 0 {
+            // Live D1：daily_loss sticky。
+            return None;
+        }
+        let elapsed = now_ms.saturating_sub(self.halt_set_ts_ms);
+        Some(ttl_ms.saturating_sub(elapsed))
     }
 }
