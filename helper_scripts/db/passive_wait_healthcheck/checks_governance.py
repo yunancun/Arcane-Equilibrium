@@ -172,10 +172,10 @@ def _attribution_ratio_sql(window: str) -> str:
     `learning.mlde_edge_training_rows` is the canonical semantic view, but it
     also builds feature vectors and decision-context lateral joins that [42b]
     and [42c] do not read. On trade-core that made the passive healthcheck time
-    out before emitting the actual attribution signal. Anchor the query on
-    settled `decision_features` rows, build the valid intent -> signal context
-    set once, then hash-join labels against it. This keeps the denominator
-    identical for settled labels while avoiding per-row lateral lookups. The
+    out before emitting the actual attribution signal. Anchor the denominator on
+    `trading.intents` like the canonical view, build the valid intent -> signal
+    context set once, then hash-join it back. This excludes reject-only negative
+    labels that never had an intent and avoids per-row lateral lookups. The
     supporting runtime indexes are landed by V097. This query mirrors only the
     columns needed for the ratio:
       - normalized LG-5 strategy name
@@ -184,24 +184,35 @@ def _attribution_ratio_sql(window: str) -> str:
         signal row and a settled reward)
     """
     return (
-        "WITH labeled AS MATERIALIZED ( "
+        "WITH intent_base AS MATERIALIZED ( "
         "  SELECT "
+        "    i.context_id, "
         "    df.label_net_edge_bps, "
-        "    df.context_id, "
-        "    CASE lower(COALESCE(NULLIF(df.strategy_name, ''), 'unknown')) "
+        "    CASE lower(COALESCE( "
+        "      NULLIF(i.strategy_name, ''), "
+        "      NULLIF(df.strategy_name, ''), "
+        "      NULLIF(i.details->'scanner'->>'best_strategy', ''), "
+        "      'unknown' "
+        "    )) "
         "      WHEN 'bollinger_reversion' THEN 'bb_reversion' "
         "      WHEN 'bb_reversion' THEN 'bb_reversion' "
         "      WHEN 'bb_breakout' THEN 'bb_breakout' "
         "      WHEN 'ma_crossover' THEN 'ma_crossover' "
         "      WHEN 'grid_trading' THEN 'grid_trading' "
         "      WHEN 'funding_arb' THEN 'funding_arb' "
-        "      ELSE lower(COALESCE(NULLIF(df.strategy_name, ''), 'unknown')) "
+        "      ELSE lower(COALESCE( "
+        "        NULLIF(i.strategy_name, ''), "
+        "        NULLIF(df.strategy_name, ''), "
+        "        NULLIF(i.details->'scanner'->>'best_strategy', ''), "
+        "        'unknown' "
+        "      )) "
         "    END AS strategy_name "
-        "  FROM learning.decision_features df "
-        f"  WHERE df.ts > now() - {window} "
-        "    AND df.engine_mode IN ('demo', 'live_demo') "
-        f"    AND df.strategy_name IN {LG5_STRATEGY_SQL_IN} "
-        "    AND df.label_net_edge_bps IS NOT NULL "
+        "  FROM trading.intents i "
+        "  LEFT JOIN learning.decision_features df "
+        "    ON df.context_id = i.context_id "
+        f"  WHERE i.ts > now() - {window} "
+        "    AND i.engine_mode IN ('demo', 'live_demo') "
+        "    AND COALESCE(i.details->>'source', '') <> 'command' "
         "), valid_contexts AS MATERIALIZED ( "
         "  SELECT DISTINCT i.context_id "
         "  FROM trading.intents i "
@@ -215,11 +226,12 @@ def _attribution_ratio_sql(window: str) -> str:
         "    AND COALESCE(i.details->>'source', '') <> 'command' "
         "), scored AS ( "
         "  SELECT "
-        "    l.strategy_name, "
-        "    l.label_net_edge_bps, "
+        "    b.strategy_name, "
+        "    b.label_net_edge_bps, "
         "    (v.context_id IS NOT NULL) AS attribution_chain_ok "
-        "  FROM labeled l "
-        "  LEFT JOIN valid_contexts v ON v.context_id = l.context_id "
+        "  FROM intent_base b "
+        "  LEFT JOIN valid_contexts v ON v.context_id = b.context_id "
+        f"  WHERE b.strategy_name IN {LG5_STRATEGY_SQL_IN} "
         ") "
         "SELECT strategy_name, "
         "       count(*) FILTER (WHERE label_net_edge_bps IS NOT NULL)::int AS total, "

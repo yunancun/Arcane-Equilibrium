@@ -87,23 +87,18 @@ def _cursor_for_42b(
 
 
 class TestAttributionRatioSqlShape(unittest.TestCase):
-    def test_query_anchors_on_labeled_decision_features(self) -> None:
-        """[42b]/[42c] query must avoid intent-wide scans that timeout."""
+    def test_query_anchors_on_canonical_intent_denominator(self) -> None:
+        """[42b]/[42c] query must stay canonical without lateral timeouts."""
         sql = _attribution_ratio_sql("interval '7 days'")
-        flattened = " ".join(sql.split())
-
-        self.assertIn("WITH labeled AS MATERIALIZED", sql)
-        self.assertIn("FROM learning.decision_features df", sql)
-        self.assertIn("AND df.label_net_edge_bps IS NOT NULL", sql)
+        self.assertIn("WITH intent_base AS MATERIALIZED", sql)
+        self.assertIn("FROM trading.intents i", sql)
+        self.assertIn("LEFT JOIN learning.decision_features df", sql)
+        self.assertIn("ON df.context_id = i.context_id", sql)
         self.assertIn("valid_contexts AS MATERIALIZED", sql)
         self.assertIn("JOIN trading.signals s", sql)
         self.assertIn("s.signal_id = i.signal_id", sql)
-        self.assertIn("LEFT JOIN valid_contexts v ON v.context_id = l.context_id", sql)
+        self.assertIn("LEFT JOIN valid_contexts v ON v.context_id = b.context_id", sql)
         self.assertNotIn("LEFT JOIN LATERAL", sql)
-        self.assertNotIn(
-            "FROM trading.intents i LEFT JOIN learning.decision_features",
-            flattened,
-        )
 
 
 # ---------------------------------------------------------------------------
