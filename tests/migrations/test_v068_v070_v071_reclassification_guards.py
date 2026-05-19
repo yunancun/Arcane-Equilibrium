@@ -72,3 +72,19 @@ def test_v071_records_live_or_env_gated_learning_contracts() -> None:
         assert table in V071
     assert "Rust budget tracker" in V071
     assert "Claude Teacher" in V071
+
+
+# P3 hygiene 2026-05-19 (P2-DEAD-SCHEMA-DROP-1 follow-up):
+# V068 SQL 文本仍引 `learning.rl_transitions` + `learning.symbol_clusters` 作為
+# 「past reclassified placeholder」紀錄；V096 (2026-05-18) 已 DROP 該兩表。
+# 本檔僅驗 SQL 文本不驗 DB state；下面 marker 確保 V096 drop migration 落地，
+# 即「V068 reclassify → V096 drop」治理鏈完整。Operator 在 Linux apply V096 後可
+# 額外人工跑 `SELECT to_regclass('learning.rl_transitions')` 確認為 NULL。
+def test_v096_drop_migration_lands_for_v068_remnants() -> None:
+    v096 = _read("V096__drop_dead_learning_tables.sql")
+    lowered = v096.lower()
+    assert "drop table if exists learning.rl_transitions" in lowered
+    assert "drop table if exists learning.symbol_clusters" in lowered
+    # RESTRICT, NOT CASCADE — 0 dependency grep 驗證後選擇 fail-loud
+    assert " restrict" in lowered or "restrict;" in lowered
+    assert "p2-dead-schema-drop-1" in lowered
