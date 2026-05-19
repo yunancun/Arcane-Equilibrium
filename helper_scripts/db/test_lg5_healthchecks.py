@@ -94,9 +94,11 @@ class TestAttributionRatioSqlShape(unittest.TestCase):
 
         self.assertIn("FROM learning.decision_features df", sql)
         self.assertIn("AND df.label_net_edge_bps IS NOT NULL", sql)
-        self.assertIn("LEFT JOIN LATERAL", sql)
-        self.assertIn("i.context_id = l.context_id", sql)
+        self.assertIn("valid_contexts AS MATERIALIZED", sql)
+        self.assertIn("JOIN trading.signals s", sql)
         self.assertIn("s.signal_id = i.signal_id", sql)
+        self.assertIn("LEFT JOIN valid_contexts v ON v.context_id = l.context_id", sql)
+        self.assertNotIn("LEFT JOIN LATERAL", sql)
         self.assertNotIn(
             "FROM trading.intents i LEFT JOIN learning.decision_features",
             flattened,
