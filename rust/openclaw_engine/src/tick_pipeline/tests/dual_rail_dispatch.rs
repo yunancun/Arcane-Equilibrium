@@ -485,8 +485,8 @@ fn test_close_maker_dispatch_postonly_spine_none() {
     // CALIBRATION-2026-05-18: grid family maker_timeout_ms 30_000 → 90_000
     assert_eq!(req.maker_timeout_ms, Some(90_000));
     assert!(
-        (req.limit_price.expect("limit price") - 50_000.2).abs() < 1e-9,
-        "long close should price as passive sell at ask + one tick"
+        (req.limit_price.expect("limit price") - 50_000.1).abs() < 1e-9,
+        "entry-close long close should price as passive sell at best ask"
     );
     assert_eq!(req.qty, 0.1, "PostOnly limit close must carry explicit qty");
     assert!(!req.is_long, "long position close dispatches Sell side");
@@ -495,7 +495,7 @@ fn test_close_maker_dispatch_postonly_spine_none() {
     assert!(req.spine_verdict_id.is_none());
     assert!(req.spine_stub_report_id.is_none());
     let audit = req.close_maker_audit.expect("close-maker audit");
-    assert_eq!(audit.initial_limit_price, Some(50_000.2));
+    assert_eq!(audit.initial_limit_price, Some(50_000.1));
     assert_eq!(audit.eligible_reason, "grid_close_long");
     assert_eq!(audit.fallback_reason, None);
 }

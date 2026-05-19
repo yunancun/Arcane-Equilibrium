@@ -68,6 +68,8 @@ WATCHDOG_LOCK_FILE = "watchdog.lock"
 WATCHDOG_STATE_FILE = "watchdog_state.json"
 CANARY_EVENTS_FILE = "canary_events.jsonl"
 ENGINE_LOG_FILENAME = "engine.log"
+ENGINE_LOG_ROTATED_DIRNAME = "engine_logs"
+ENGINE_LOG_ROTATED_GLOB = "engine-*.log"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WATCHDOG-DNS-CLASSIFY-1 (2026-04-20): classify infrastructure-level failures
@@ -80,6 +82,8 @@ ENGINE_LOG_FILENAME = "engine.log"
 
 ENGINE_LOG_TAIL_LINES = 20
 NETWORK_OUTAGE_MIN_CONSECUTIVE = 5
+NETWORK_OUTAGE_RECENT_SECONDS = 15 * 60
+NETWORK_OUTAGE_ROTATED_MAX_FILES = 5
 # Case-insensitive substrings; ≥NETWORK_OUTAGE_MIN_CONSECUTIVE consecutive matching
 # tail lines → classify as network_outage (do not count as strike).
 # 不分大小寫子字串；tail 連續 ≥N 條匹配判為 network_outage（不計 strike）。
@@ -171,55 +175,103 @@ def _read_log_tail(log_path: Path, n_lines: int) -> list[str]:
     return lines[-n_lines:] if len(lines) > n_lines else lines
 
 
+def _candidate_failure_log_paths(log_path: Path, now: float | None = None) -> list[Path]:
+    """Return active engine.log plus recent rotated logs, newest first.
+
+    `restart_all.sh` moves the pre-restart death log to
+    `$OPENCLAW_DATA_DIR/engine_logs/engine-<ts>.log`. A watchdog restart can
+    therefore create a fresh `engine.log` whose tail no longer contains the
+    outage lines that caused the stale snapshot. Keep the active log first, then
+    scan a small recent rotation window for the actual failure context.
+    """
+    paths: list[Path] = [log_path]
+    logs_dir = log_path.parent / ENGINE_LOG_ROTATED_DIRNAME
+    now_ts = time.time() if now is None else now
+
+    try:
+        candidates = []
+        for rotated in logs_dir.glob(ENGINE_LOG_ROTATED_GLOB):
+            try:
+                stat = rotated.stat()
+            except OSError:
+                continue
+            if not rotated.is_file():
+                continue
+            age = max(0.0, now_ts - stat.st_mtime)
+            if age <= NETWORK_OUTAGE_RECENT_SECONDS:
+                candidates.append((stat.st_mtime, rotated))
+    except OSError:
+        candidates = []
+
+    for _mtime, rotated in sorted(candidates, key=lambda item: item[0], reverse=True)[
+        :NETWORK_OUTAGE_ROTATED_MAX_FILES
+    ]:
+        if rotated not in paths:
+            paths.append(rotated)
+    return paths
+
+
 def classify_engine_failure(
     log_path: Path,
     tail_lines: int = ENGINE_LOG_TAIL_LINES,
     min_consecutive: int = NETWORK_OUTAGE_MIN_CONSECUTIVE,
 ) -> str:
     """
-    Classify engine failure by inspecting the tail of engine.log.
-    通過檢查 engine.log 尾部分類引擎故障。
+    Classify engine failure by inspecting active and recent rotated engine logs.
+    通過檢查 active engine.log 與最近輪替日誌分類引擎故障。
 
     Returns:
-      "network_outage"  iff the tail contains NO CRASH_INDICATOR_PATTERNS AND
-                         has a run of ≥min_consecutive lines all matching any
-                         NETWORK_OUTAGE_PATTERNS (case-insensitive).
+      "network_outage"  iff scanned tails contain NO CRASH_INDICATOR_PATTERNS AND
+                         at least one tail has a run of ≥min_consecutive lines
+                         all matching any NETWORK_OUTAGE_PATTERNS
+                         (case-insensitive).
       "engine_crash"    otherwise (conservative default on I/O error or empty log).
     """
-    try:
-        tail = _read_log_tail(log_path, tail_lines)
-    except OSError as e:
+    saw_readable_tail = False
+    saw_network_outage = False
+    read_errors: list[OSError] = []
+
+    for candidate in _candidate_failure_log_paths(log_path):
+        try:
+            tail = _read_log_tail(candidate, tail_lines)
+        except OSError as e:
+            read_errors.append(e)
+            continue
+
+        if not tail:
+            continue
+        saw_readable_tail = True
+        lower = [line.lower() for line in tail]
+
+        # (a) crash-indicator override — panic/assertion is always a real bug
+        # (a) panic/assertion 強制覆蓋為 engine_crash
+        for line in lower:
+            if any(pat in line for pat in CRASH_INDICATOR_PATTERNS):
+                return "engine_crash"
+
+        # (b) longest run of consecutive network-outage lines within this tail
+        # (b) 此 tail 內連續 network-outage 行的最長連續段
+        longest_run = 0
+        current_run = 0
+        for line in lower:
+            if any(pat in line for pat in NETWORK_OUTAGE_PATTERNS):
+                current_run += 1
+                if current_run > longest_run:
+                    longest_run = current_run
+            else:
+                current_run = 0
+
+        if longest_run >= min_consecutive:
+            saw_network_outage = True
+
+    if saw_network_outage:
+        return "network_outage"
+    if not saw_readable_tail and read_errors:
+        e = read_errors[0]
         logger.warning(
             "classify_engine_failure: log read failed (%s) — defaulting to engine_crash "
             "/ 日誌讀取失敗（%s）— 預設 engine_crash", e, e,
         )
-        return "engine_crash"
-
-    if not tail:
-        return "engine_crash"
-
-    lower = [line.lower() for line in tail]
-
-    # (a) crash-indicator override — panic/assertion is always a real bug
-    # (a) panic/assertion 強制覆蓋為 engine_crash
-    for line in lower:
-        if any(pat in line for pat in CRASH_INDICATOR_PATTERNS):
-            return "engine_crash"
-
-    # (b) longest run of consecutive network-outage lines within the tail
-    # (b) tail 內連續 network-outage 行的最長連續段
-    longest_run = 0
-    current_run = 0
-    for line in lower:
-        if any(pat in line for pat in NETWORK_OUTAGE_PATTERNS):
-            current_run += 1
-            if current_run > longest_run:
-                longest_run = current_run
-        else:
-            current_run = 0
-
-    if longest_run >= min_consecutive:
-        return "network_outage"
     return "engine_crash"
 
 

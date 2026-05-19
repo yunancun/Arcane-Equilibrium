@@ -92,6 +92,9 @@ LG5_STRATEGIES: tuple[str, ...] = (
     "bb_reversion",
     "funding_arb",
 )
+LG5_STRATEGY_SQL_IN: str = (
+    "('grid_trading','ma_crossover','bb_breakout','bb_reversion','funding_arb')"
+)
 
 # RFC v2 §6 IMPL-3 line 451 mandates three bands for `[42b]` per-strategy 7d
 # rolling attribution_chain_ratio drift: PASS/WARN/FAIL = 0.50/0.30/0.10.
@@ -370,6 +373,7 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
         f"WHERE ts > now() - {ATTRIBUTION_DRIFT_WINDOW} "
         "  AND engine_mode IN ('demo', 'live_demo') "
         "  AND strategy_name IS NOT NULL "
+        f"  AND strategy_name IN {LG5_STRATEGY_SQL_IN} "
         "GROUP BY strategy_name"
     )
     try:
@@ -873,6 +877,7 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
         f"WHERE ts > now() - {ATTRIBUTION_DRIFT_WINDOW_3D} "
         "  AND engine_mode IN ('demo', 'live_demo') "
         "  AND strategy_name IS NOT NULL "
+        f"  AND strategy_name IN {LG5_STRATEGY_SQL_IN} "
         "GROUP BY strategy_name"
     )
     try:

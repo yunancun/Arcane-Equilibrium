@@ -126,6 +126,25 @@ fn test_strategy_factory_creates_five_strategies() {
 }
 
 #[test]
+fn test_strategy_factory_has_no_liquidation_cascade_consumer_before_stage0r_launch() {
+    // W-AUDIT-8a C1 / W-AUDIT-8c boundary guard:
+    // allLiquidation writer + LiquidationPulse panel availability is transport
+    // and replay-tooling evidence only. Until a future Stage 0R → Stage 1 Demo
+    // launch packet lands, the production strategy factory must not expose a
+    // live LiquidationCascade consumer.
+    let strategies = StrategyFactory::create_all();
+    for strategy in strategies {
+        assert!(
+            !strategy
+                .declared_alpha_sources()
+                .contains(&AlphaSourceTag::LiquidationCascade),
+            "{} must not consume LiquidationCascade before an explicit Stage 0R launch packet",
+            strategy.name()
+        );
+    }
+}
+
+#[test]
 fn test_strategy_factory_active_defaults() {
     let strategies = StrategyFactory::create_all();
     for s in &strategies {
