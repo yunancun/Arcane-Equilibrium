@@ -173,10 +173,11 @@ def _attribution_ratio_sql(window: str) -> str:
     also builds feature vectors and decision-context lateral joins that [42b]
     and [42c] do not read. On trade-core that made the passive healthcheck time
     out before emitting the actual attribution signal. Anchor the query on
-    settled `decision_features` rows, then prove the intent -> signal chain by
-    context id. This keeps the denominator identical for settled labels while
-    avoiding a 7d intent-wide scan. The supporting runtime indexes are landed by
-    V097. This query mirrors only the columns needed for the ratio:
+    settled `decision_features` rows, build the valid intent -> signal context
+    set once, then hash-join labels against it. This keeps the denominator
+    identical for settled labels while avoiding per-row lateral lookups. The
+    supporting runtime indexes are landed by V097. This query mirrors only the
+    columns needed for the ratio:
       - normalized LG-5 strategy name
       - settled reward (`decision_features.label_net_edge_bps`)
       - attribution-chain proof (`intents.signal_id/context_id` has a matching
@@ -201,37 +202,24 @@ def _attribution_ratio_sql(window: str) -> str:
         "    AND df.engine_mode IN ('demo', 'live_demo') "
         f"    AND df.strategy_name IN {LG5_STRATEGY_SQL_IN} "
         "    AND df.label_net_edge_bps IS NOT NULL "
-        "), intent_match AS ( "
+        "), valid_contexts AS MATERIALIZED ( "
+        "  SELECT DISTINCT i.context_id "
+        "  FROM trading.intents i "
+        "  JOIN trading.signals s "
+        "    ON s.signal_id = i.signal_id "
+        "   AND s.context_id = i.context_id "
+        f"  WHERE i.ts > now() - {window} "
+        "    AND i.engine_mode IN ('demo', 'live_demo') "
+        "    AND i.signal_id IS NOT NULL AND i.signal_id <> '' "
+        "    AND i.context_id IS NOT NULL AND i.context_id <> '' "
+        "    AND COALESCE(i.details->>'source', '') <> 'command' "
+        "), scored AS ( "
         "  SELECT "
         "    l.strategy_name, "
         "    l.label_net_edge_bps, "
-        "    i.signal_id, "
-        "    i.context_id "
+        "    (v.context_id IS NOT NULL) AS attribution_chain_ok "
         "  FROM labeled l "
-        "  LEFT JOIN LATERAL ( "
-        "    SELECT i.signal_id, i.context_id "
-        "    FROM trading.intents i "
-        "    WHERE i.context_id = l.context_id "
-        "      AND i.engine_mode IN ('demo', 'live_demo') "
-        "      AND COALESCE(i.details->>'source', '') <> 'command' "
-        "    ORDER BY i.ts DESC "
-        "    LIMIT 1 "
-        "  ) i ON TRUE "
-        "), scored AS ( "
-        "  SELECT "
-        "    i.strategy_name, "
-        "    i.label_net_edge_bps, "
-        "    (i.signal_id IS NOT NULL AND i.signal_id <> '' "
-        "      AND i.context_id IS NOT NULL AND i.context_id <> '' "
-        "      AND EXISTS ( "
-        "        SELECT 1 "
-        "        FROM trading.signals s "
-        "        WHERE s.signal_id = i.signal_id "
-        "          AND s.context_id = i.context_id "
-        "        LIMIT 1 "
-        "      ) "
-        "    ) AS attribution_chain_ok "
-        "  FROM intent_match i "
+        "  LEFT JOIN valid_contexts v ON v.context_id = l.context_id "
         ") "
         "SELECT strategy_name, "
         "       count(*) FILTER (WHERE label_net_edge_bps IS NOT NULL)::int AS total, "
