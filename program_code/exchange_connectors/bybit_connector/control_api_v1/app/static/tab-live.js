@@ -1,0 +1,1645 @@
+// MODULE_NOTE
+// 模塊用途：Live 實盤 Tab 的全部前端邏輯（從 tab-live.html 內嵌 <script> 拆出）。
+// 主要區塊：
+//   - Earned-Trust Tier UI（贏得信任階梯展示與 reset hook）
+//   - Trading mode badge / live header / 帳戶與倉位資料刷新
+//   - 下單表單（限價 / 市價 / 條件單）handler 與 typed-confirm modal
+//   - 平倉、全平倉、緊急 Live 停止（hardstop / emergency / close-all）按鈕
+//   - Risk view modal / drawdown reset modal
+//   - Fills 表格 render、Live status 輪詢迴圈、startLiveRefreshLoop / stopLiveRefreshLoop
+// 依賴：common.js（ocEsc / ocSanitizeClass / ocExplain / openTypedConfirmModal 等 SDK）、
+//       common-formatters.js、common-mode-badge.js、common-modals.js。
+// 拆檔背景：tab-live.html 原 2171 LOC 超過 §九 2000 LOC 硬上限；本檔由內嵌
+//           <script> 542-2168 行完整 cut-paste，未做任何邏輯重構。
+// 硬邊界：
+//   - 不引入 framework；維持 vanilla JS + 既有 SDK helper。
+//   - 動態插入 HTML 必透過 ocEsc / ocSanitizeClass，禁裸 innerHTML 拼接外部字串。
+//   - Live 寫操作 (下單 / 平倉 / hardstop) 必走 typed-confirm modal，不得繞過。
+
+// WP-01 Wave 1 follow-up：舊 open*Dialog / closeDialog helper 已不需要（dialog overlay 已移除）。
+// do*() handler 直接走 openTypedConfirmModal（共用 SDK）。
+
+// ═══════════════════════════════════════════════════════════════
+// Earned-Trust Tier UI / 贏得信任階梯介面
+// ═══════════════════════════════════════════════════════════════
+
+const TRUST_TIER_LABELS = {
+  0: 'T0 Entry',
+  1: 'T1 Provisional',
+  2: 'T2 Established',
+  3: 'T3 Trusted',
+};
+const TRUST_TIER_COLORS = {
+  0: { bg: 'rgba(100,116,139,.2)', fg: '#94a3b8' },
+  1: { bg: 'rgba(34,197,94,.15)', fg: 'var(--green)' },
+  2: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
+  3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
+};
+let _livePnlRange = '24h';
+let _liveMetricsLoadedOnce = false;
+let _liveFillsLoadedOnce = false;
+const LIVE_REFRESH_MS = 15000;
+const LIVE_DASHBOARD_REFRESH_MS = 30000;
+const LIVE_PNL_REFRESH_MS = 60000;
+const LIVE_EDGE_REFRESH_MS = 120000;
+let _liveRefreshTimer = null;
+let _liveRefreshInFlight = false;
+let _liveTabVisible = true;
+let _lastDashboardRefreshMs = 0;
+let _lastMetricsRefreshMs = 0;
+let _lastPnlRefreshMs = 0;
+let _lastEdgeRefreshMs = 0;
+
+function _isLiveTabRefreshVisible() {
+  return _liveTabVisible && document.visibilityState !== 'hidden';
+}
+
+function _signedAuthDisplayState(signed, liveHalt) {
+  const known = !!(signed && signed.status);
+  if (!known) {
+    return { known: false, bad: false, text: 'Signed auth: --', color: 'var(--text-dim)', title: '' };
+  }
+  if (signed.valid_for_engine === true) {
+    return { known: true, bad: false, text: 'Signed auth: valid', color: 'var(--green)', title: '' };
+  }
+
+  const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
+  const halted = !!(liveHalt && liveHalt.session_halted);
+  if (String(signed.status || '') === 'missing' && halted) {
+    const dd = Number(liveHalt.session_drawdown_pct);
+    const limit = Number(liveHalt.drawdown_threshold_pct);
+    let detail = '';
+    if (Number.isFinite(dd) && Number.isFinite(limit)) {
+      detail = ' (snapshot DD ' + dd.toFixed(2) + '% / limit ' + limit.toFixed(2) + '%)';
+    } else if (Number.isFinite(dd)) {
+      detail = ' (snapshot DD ' + dd.toFixed(2) + '%)';
+    }
+    return {
+      known: true,
+      bad: true,
+      text: 'Signed auth: MISSING - auto-revoked after Live halt' + detail,
+      color: 'var(--red)',
+      title: 'Renew can be accepted, then Rust deletes authorization.json while the Live session remains halted. Clear/reset the risk halt before renewing again.'
+    };
+  }
+
+  return {
+    known: true,
+    bad: true,
+    text: 'Signed auth: ' + status + ' - Renew required',
+    color: 'var(--red)',
+    title: ''
+  };
+}
+
+/**
+ * Load and render Earned-Trust tier status bars (read-only, no renew controls).
+ * 加載並渲染信任階梯狀態欄（只讀，Renew 操作已移至 Governance Hub）。
+ *
+ * Updates two bars:
+ *   - #trust-status-bar       : inside integrity-fail view (always visible when locked)
+ *   - #trust-status-bar-dashboard : inside dashboard view (visible when Live engine running)
+ * 更新兩個 bar：
+ *   - #trust-status-bar       : 在完整性失效視圖內（tab 鎖定時也可見）
+ *   - #trust-status-bar-dashboard : 在儀表板視圖內（Live 引擎運行時可見）
+ *
+ * NOTE: Renew controls have been moved to Governance Hub → Live Auth section.
+ * 注意：Renew 控件已移至 Governance Hub → Live Auth 區塊，此函數不再處理續期。
+ */
+async function loadTrustStatus() {
+  let d;
+  try {
+    const r = await ocApi('/api/v1/live/auth/trust-status');
+    d = r && r.data;
+  } catch (_) { return; }
+  if (!d) return;
+
+  const tier = d.current_tier ?? 0;
+  const colors = TRUST_TIER_COLORS[tier] || TRUST_TIER_COLORS[0];
+  const label = TRUST_TIER_LABELS[tier] || ('T' + tier);
+
+  // Compute expiry text and color / 計算到期文字與顏色
+  const expiresMs = d.last_auth_expires_ts_ms;
+  let expiresText = 'Trust TTL: --';
+  let expiresColor = 'var(--text-dim)';
+  if (expiresMs) {
+    const diffMs = expiresMs - Date.now();
+    if (diffMs <= 0) {
+      expiresText = 'Trust TTL: EXPIRED';
+      expiresColor = 'var(--red)';
+    } else {
+      const h = Math.floor(diffMs / 3600000);
+      const m = Math.floor((diffMs % 3600000) / 60000);
+      expiresText = 'Trust TTL: ' + h + 'h ' + m + 'm';
+      expiresColor = diffMs < 7200000 ? 'var(--yellow)' : 'var(--text-dim)';
+    }
+  }
+
+  // Signed authorization is the Rust engine gate. It can be missing even while
+  // the earned-trust TTL above is still in the future after a manual restart.
+  const signed = d.signed_authorization || {};
+  const liveHalt = d.live_halt || signed.live_halt || {};
+  const signedState = _signedAuthDisplayState(signed, liveHalt);
+  const signedBad = signedState.bad;
+  const signedText = signedState.text;
+  const signedColor = signedState.color;
+
+  // Compute bar state class / 計算狀態欄 class
+  const barClass = signedBad ? 'crit'
+    : d.pending_downgrade_tier != null ? 'crit'
+    : d.requires_full_review ? 'review'
+    : (d.near_expiry || d.expired) ? 'warn'
+    : 'ok';
+
+  const cleanDaysText = 'Clean days: ' + ((d.clean_days_in_tier ?? 0).toFixed(1));
+
+  /**
+   * Apply computed values to a trust bar element pair.
+   * 將計算好的值套用至指定 trust bar 的 DOM 元素組。
+   *
+   * @param {string} barId        - Element id of the bar container / bar 容器 ID
+   * @param {string} badgeId      - Element id of the tier badge / 階梯徽章 ID
+   * @param {string} cleanDaysId  - Element id of clean-days span / 連續乾淨天數 span ID
+   * @param {string} expiresId    - Element id of expires span / 到期標籤 span ID
+   * @param {string} signedId     - Element id of signed-auth span / signed auth span ID
+   */
+  function _applyToBar(barId, badgeId, cleanDaysId, expiresId, signedId) {
+    const bar = document.getElementById(barId);
+    if (!bar) return;
+    bar.style.display = 'flex';
+    bar.classList.remove('ok', 'warn', 'crit', 'review');
+    bar.classList.add(barClass);
+
+    const badge = document.getElementById(badgeId);
+    if (badge) {
+      badge.textContent = label;
+      badge.style.background = colors.bg;
+      badge.style.color = colors.fg;
+    }
+    const cleanEl = document.getElementById(cleanDaysId);
+    if (cleanEl) cleanEl.textContent = cleanDaysText;
+    const expiresEl = document.getElementById(expiresId);
+    if (expiresEl) {
+      expiresEl.textContent = expiresText;
+      expiresEl.style.color = expiresColor;
+    }
+    const signedEl = document.getElementById(signedId);
+    if (signedEl) {
+      signedEl.textContent = signedText;
+      signedEl.style.color = signedColor;
+      signedEl.title = signedState.title || '';
+    }
+
+    // Pending downgrade inline notice / 待降級內聯提示
+    let pdBanner = bar.querySelector('[data-pd-banner]');
+    if (d.pending_downgrade_tier != null) {
+      if (!pdBanner) {
+        pdBanner = document.createElement('span');
+        pdBanner.setAttribute('data-pd-banner', '1');
+        pdBanner.style.cssText = 'color:#f87171;font-weight:600;font-size:11px';
+        bar.insertBefore(pdBanner, bar.lastElementChild);
+      }
+      // XSS-safe: ocEsc wraps the reason string / ocEsc 包裝 reason 防 XSS
+      pdBanner.textContent = '⚠ Pending downgrade → T' + d.pending_downgrade_tier + ': ' + (d.pending_downgrade_reason || '');
+    } else if (pdBanner) {
+      pdBanner.remove();
+    }
+  }
+
+  // Update integrity-fail view bar (always polled regardless of engine state)
+  // 更新完整性失效視圖的 bar（無論引擎狀態都持續輪詢）
+  _applyToBar('trust-status-bar', 'trust-tier-badge', 'trust-clean-days', 'trust-expires-label', 'trust-signed-auth-status');
+
+  // Update dashboard view bar (visible only when Live engine running)
+  // 更新儀表板視圖的 bar（Live 引擎運行時可見）
+  _applyToBar('trust-status-bar-dashboard', 'trust-tier-badge-dash', 'trust-clean-days-dash', 'trust-expires-label-dash', 'trust-signed-auth-status-dash');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// F5/A1 — Page-load integrity gate
+// F5/A1 — 頁面載入完整性閘
+// ───────────────────────────────────────────────────────────────
+// Runtime contract:
+//   - actual_engine_kind != "live"  → swap to integrity-fail view (no data)
+//   - actual_endpoint == "mainnet"  → REAL FUNDS purple+red double-line theme
+//   - actual_endpoint == "live_demo" → LiveDemo orange/silver theme
+//   - actual_endpoint == "unconfigured" → silver dashboard with caution banner
+//                                          (Live slot empty — using demo client)
+// 運行契約：上述四種狀態前端必區分；不能讓 LiveDemo / unconfigured 被當「真實資金」呈現。
+//
+// _liveModeState is the single source of truth read by other handlers
+// (e.g. button guards, watermark application, banner text).
+// _liveModeState 為單一事實來源，其他 handler（按鈕守衛、水印、banner）讀此判斷。
+// ═══════════════════════════════════════════════════════════════
+const _liveModeState = {
+  actual_engine_kind: 'unknown',  // 'live' | 'demo' | 'paper' | 'unknown'
+  actual_endpoint: 'unconfigured', // 'mainnet' | 'live_demo' | 'unconfigured'
+  execution_authority: 'not_granted',
+  session_state: 'offline',
+  status_error: '',
+};
+let _liveStatusLoadedOnce = false;
+
+function openLiveRisk() {
+  try {
+    window.parent.postMessage({
+      type: 'openclaw-console-switch-tab',
+      tab: 'risk',
+      riskEngine: 'live',
+      riskTab: 'config',
+      scrollTo: 'engine-risk-selector-card'
+    }, window.location.origin);
+  } catch (_) {}
+}
+
+function openLiveAuth() {
+  try {
+    window.parent.postMessage({
+      type: 'openclaw-console-switch-tab',
+      tab: 'governance',
+      governanceSection: 'live-auth-card',
+      scrollTo: 'live-auth-card'
+    }, window.location.origin);
+  } catch (_) {}
+}
+
+function applyDevelopmentSupportVisibility(enabled) {
+  document.querySelectorAll('[data-dev-mode-only="global-mode-control"]').forEach(node => {
+    node.style.display = enabled ? '' : 'none';
+  });
+}
+
+applyDevelopmentSupportVisibility(
+  typeof ocReadCachedDevelopmentSupportMode === 'function'
+    ? ocReadCachedDevelopmentSupportMode()
+    : false
+);
+if (typeof ocListenDevelopmentSupportMode === 'function') {
+  ocListenDevelopmentSupportMode(applyDevelopmentSupportVisibility);
+}
+if (typeof ocFetchDevelopmentSupportMode === 'function') {
+  ocFetchDevelopmentSupportMode().then(applyDevelopmentSupportVisibility);
+}
+
+/**
+ * Apply the resolved engine_kind / endpoint to the document body class so the
+ * CSS mode rules (.live-mode-mainnet / .live-mode-livedemo) take effect.
+ * Also flips visibility between dashboard view and integrity-fail view.
+ *
+ * 將解析出的 engine_kind / endpoint 套到 body class，啟用對應的 CSS 模式規則
+ * （.live-mode-mainnet / .live-mode-livedemo）；同時切換 dashboard view 與
+ * integrity-fail view 的可見性。
+ */
+function _applyLiveModeUI() {
+  const body = document.body;
+  body.classList.remove('live-mode-mainnet', 'live-mode-livedemo', 'live-mode-unconfigured');
+
+  const dash = document.getElementById('live-dashboard-view');
+  const fail = document.getElementById('live-integrity-fail-view');
+  const ifvDebug = document.getElementById('ifv-debug');
+  const ifvTitle = document.getElementById('live-integrity-title');
+
+  // Integrity-fail: engine_kind != 'live' → hide dashboard, show fail view
+  // 完整性失效：engine_kind != 'live' → 隱藏儀表板，顯示警示視圖
+  if (_liveModeState.actual_engine_kind !== 'live') {
+    if (dash) dash.style.display = 'none';
+    if (fail) fail.style.display = 'block';
+    if (ifvTitle) {
+      ifvTitle.textContent = _liveModeState.status_error === 'status_unavailable'
+        ? '⚠️ Live 狀態暫時不可用 — 保留控制入口，請重新檢查'
+        : '⚠️ Live engine 未啟動 — 資料暫停顯示，控制仍可用';
+    }
+    if (ifvDebug) {
+      ifvDebug.textContent =
+        'actual_engine_kind: ' + _liveModeState.actual_engine_kind +
+        ' · actual_endpoint: ' + _liveModeState.actual_endpoint +
+        ' · session: ' + _liveModeState.session_state +
+        (_liveModeState.status_error ? ' · status_error: ' + _liveModeState.status_error : '');
+    }
+    return;
+  }
+
+  // Live engine running — show dashboard with appropriate mode theme
+  // Live 引擎運行中 — 以對應主題顯示儀表板
+  if (dash) dash.style.display = 'block';
+  if (fail) fail.style.display = 'none';
+
+  if (_liveModeState.actual_endpoint === 'mainnet') {
+    body.classList.add('live-mode-mainnet');
+  } else if (_liveModeState.actual_endpoint === 'live_demo') {
+    body.classList.add('live-mode-livedemo');
+  } else {
+    body.classList.add('live-mode-unconfigured');
+  }
+
+  // Update mode banner text based on endpoint / 依 endpoint 更新 banner 文字
+  const banner = document.getElementById('live-mode-banner-body');
+  if (banner) {
+    if (_liveModeState.actual_endpoint === 'mainnet') {
+      banner.innerHTML =
+        '<strong>Live Mainnet — 真實資金 / REAL FUNDS at risk</strong>' +
+        '<span class="real-funds-badge">&#x26A0;&#xFE0F; REAL FUNDS · Mainnet</span><br>' +
+        '<span style="font-size:12px;color:var(--text-dim)">' +
+        '此頁面操作直接影響 Bybit Mainnet 帳戶。請確保風控參數正確配置，謹慎操作。</span>';
+    } else if (_liveModeState.actual_endpoint === 'live_demo') {
+      banner.innerHTML =
+        '<strong>LiveDemo · api-demo endpoint</strong>' +
+        '<span class="live-demo-badge">&#x1F7E0; LiveDemo · api-demo.bybit.com</span><br>' +
+        '<span style="font-size:12px;color:var(--text-dim)">' +
+        'Live 管線跑 demo 服務器（authorization / TTL / 風控按 Live 嚴格標準，不因 endpoint 降級）。' +
+        '本面板非 Mainnet「真實資金」，但 Operator 操作仍會影響 demo 帳戶歷史。</span>';
+    } else {
+      banner.innerHTML =
+        '<strong style="color:#94a3b8">Live 槽未配置 — 顯示資料來自 demo 槽</strong><br>' +
+        '<span style="font-size:12px;color:var(--text-dim)">' +
+        'Live slot is empty; data shown comes from the shared demo client. ' +
+        '請至 Settings 配置 Live API key 後再評估真實 live 行為。</span>';
+    }
+  }
+
+  // Endpoint badge in control bar / 控制欄 endpoint 徽章
+  const epBadge = document.getElementById('live-endpoint-badge');
+  if (epBadge) {
+    if (_liveModeState.actual_endpoint === 'mainnet') {
+      epBadge.style.display = '';
+      epBadge.className = 'real-funds-badge';
+      epBadge.textContent = 'Mainnet';
+    } else if (_liveModeState.actual_endpoint === 'live_demo') {
+      epBadge.style.display = '';
+      epBadge.className = 'live-demo-badge';
+      epBadge.textContent = 'LiveDemo';
+    } else {
+      epBadge.style.display = 'none';
+    }
+  }
+}
+
+/**
+ * F5/A4 — Apply client-side guards to all Live write-action buttons.
+ * Disable when: engine_kind != 'live' OR execution_authority != 'granted'.
+ *
+ * F5/A4 — 對所有 Live 寫操作按鈕套 client-side 守衛：
+ * engine_kind != 'live' 或 execution_authority != 'granted' 時 disable +
+ * 顯示 tooltip。後端仍是真正權威（Operator 角色 + Rust 5 重門控），
+ * 但 UI 層先擋避免誤點。
+ */
+function _applyLiveActionGuards() {
+  const okEngine = _liveModeState.actual_engine_kind === 'live';
+  const okAuth = _liveModeState.execution_authority === 'granted';
+  // btn-live-start gating handled inside checkLiveEngineStatus() (also depends
+  //   on session state); here we only handle stop / emergency / close-all path.
+  // btn-live-start 由 checkLiveEngineStatus() 處理（依賴 session state）；
+  // 此處只處理 stop / emergency / close-all。
+  const writeActionBtns = [
+    document.getElementById('btn-live-stop'),
+    document.getElementById('btn-emergency-stop'),
+  ];
+  // Close-all positions button is the small chip in the Positions header
+  // (not held by id). Query by onclick reference instead.
+  // 「全部平倉」按鈕在 Positions section header（無 id），用 onclick 字串查找。
+  // WP-01 Wave 1 follow-up：button onclick 從 openCloseAllDialog() → doLiveCloseAll()
+  // （拆雙層 modal 後 button 直呼 SDK），selector 同步更新避免 action-guard 失效。
+  document.querySelectorAll('button[onclick="doLiveCloseAll()"]').forEach(b => writeActionBtns.push(b));
+
+  // F5-RETURN/Issue-2 (MEDIUM) — Individual-position close buttons in the
+  // Positions table are dynamically generated via innerHTML with onclick=
+  // "closeLivePosition('${sym}', ...)" (table row template, not held by id).
+  // Without this selector they bypass the action-guard entirely; an operator
+  // who saw the integrity-fail banner could still click a per-row close
+  // button while the engine is not Live → IPC fail → REST fallback uses the
+  // demo client → demo position gets closed. Use prefix-match (^=) because
+  // the onclick string is literally `closeLivePosition('SOLUSDT', '', '')`
+  // with the symbol embedded; substring `closeLivePosition` is unique to
+  // this writer and cannot collide with read paths.
+  // F5-RETURN/Issue-2（MEDIUM）— 個別倉位平倉按鈕由倉位表 row 模板用
+  // innerHTML 動態生成（onclick="closeLivePosition('${sym}', ...)"），無 id；
+  // 無此 selector 則繞過 action-guard：operator 看見 integrity-fail banner
+  // 仍能點 row 平倉按鈕 → IPC 失敗 → REST 降級用 demo client → 誤平 demo 倉位。
+  // 用 prefix-match (^=) 因 onclick 字串為 `closeLivePosition('SOLUSDT',...)`
+  // 含具體 symbol；substring `closeLivePosition` 為此 writer 獨有，無衝突。
+  document.querySelectorAll('button[onclick^="closeLivePosition"]').forEach(b => writeActionBtns.push(b));
+
+  writeActionBtns.forEach(btn => {
+    if (!btn) return;
+    if (!okEngine) {
+      btn.disabled = true;
+      btn.title = 'Live engine 未啟動 — 操作已禁用 / Live engine not running';
+    } else if (!okAuth) {
+      btn.disabled = true;
+      btn.title = 'execution_authority 未授予 — 請先 Renew / Authority not granted';
+    } else {
+      // Don't blanket-enable here; checkLiveEngineStatus() handles per-state logic
+      // 不一律 enable；checkLiveEngineStatus() 處理 per-state 邏輯
+      btn.title = '';
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Refresh page — reload dashboard + engine status
+// 刷新頁面 — 重新加載儀表板 + 引擎狀態
+// ═══════════════════════════════════════════════════════════════
+async function refreshPage(options) {
+  const opts = options || {};
+  const fromTimer = opts.fromTimer === true;
+  const force = opts.force === true || !fromTimer;
+  if (!force && !_isLiveTabRefreshVisible()) return;
+  if (_liveRefreshInFlight) return;
+
+  _liveRefreshInFlight = true;
+  try {
+  // F5/A1: read engine_kind / endpoint FIRST so dashboard never renders
+  //        demo data under a Live label (phantom view).
+  // F5/A1：先讀 engine_kind / endpoint，避免 demo data 套 Live 皮渲染（幽靈視圖）。
+  //
+  // 並行加速：engine status 與 trust status 是 GUI 首屏兩個獨立 endpoint
+  //   /api/v1/live/session/status  vs  /api/v1/live/auth/trust-status
+  // 後者不依賴前者結果（trust TTL bar 任何引擎狀態都要顯示），原本串行兩個
+  // round-trip ≈ 150-400ms，現用 Promise.allSettled 收斂到 max(...) ≈ 100-200ms。
+  // 必須沿用 allSettled：trust-status 失敗時仍要進入後續 engine_kind 判斷，不能 throw 中斷。
+    await Promise.allSettled([
+      checkLiveEngineStatus(),
+      loadTrustStatus(),
+    ]);
+
+  // If engine is not live, _applyLiveModeUI() already swapped to fail view —
+  // skip the data-loaders below to avoid redundant fetches.
+  // 若引擎非 live，_applyLiveModeUI() 已切到失敗視圖 — 跳過資料載入避免冗餘 fetch。
+    if (_liveModeState.actual_engine_kind !== 'live') return;
+
+    const now = Date.now();
+    const tasks = [];
+    if (force || now - _lastDashboardRefreshMs >= LIVE_DASHBOARD_REFRESH_MS) {
+      _lastDashboardRefreshMs = now;
+      tasks.push(loadDashboardData());
+    }
+    if (force || now - _lastMetricsRefreshMs >= LIVE_DASHBOARD_REFRESH_MS) {
+      _lastMetricsRefreshMs = now;
+      tasks.push(loadLiveMetrics());
+    }
+    if (force || now - _lastEdgeRefreshMs >= LIVE_EDGE_REFRESH_MS) {
+      _lastEdgeRefreshMs = now;
+      tasks.push(loadPreLiveEdgeGates());
+    }
+    if (force || now - _lastPnlRefreshMs >= LIVE_PNL_REFRESH_MS) {
+      _lastPnlRefreshMs = now;
+      tasks.push(loadLivePnlSeries());
+    }
+    if (tasks.length) await Promise.allSettled(tasks);
+  } finally {
+    _liveRefreshInFlight = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Dashboard data / 儀表板數據
+// ═══════════════════════════════════════════════════════════════
+// ─── Synthetic owner_strategy rendering helper ────────────────
+// Rust paper_state may tag positions with synthetic owner labels that are
+// NOT real strategy names. Raw strings confuse operators — e.g. "orphan_frozen"
+// reads like "an abandoned orphan" but actually means "dust: qty×price below
+// Bybit's $5 min_notional, engine auto-waits for price recovery, operator must
+// clear manually on Bybit GUI". This helper renders a localized badge + tooltip.
+//
+// Rust paper_state 可能為倉位打上合成 owner 標籤（非真實策略名）。裸字串會誤導
+// operator — 例如 "orphan_frozen" 字面像「被凍結的孤兒」，實指「塵埃倉位：名義值
+// 低於交易所 $5 最小值，引擎自動等待價格回升，operator 需在 Bybit GUI 手動清除」。
+// 此 helper 依標籤輸出雙語 badge + tooltip；後端欄位缺失時優雅降級為純標籤。
+function _ocRenderOwnerStrategy(strat, posData) {
+  if (strat == null || strat === '' || strat === '--') return '--';
+  const s = String(strat);
+  if (s === 'bybit_sync') {
+    return '<span title="引擎從交易所快照接管的倉位，尚未歸屬到任何策略；待 triage / Engine captured from exchange snapshot; awaiting triage assignment">🟡 同步中 / SYNC</span>';
+  }
+  if (s === 'orphan_adopted') {
+    return '<span title="引擎重啟時接管的孤兒倉位，尚未歸屬到任何策略 / Orphan position adopted on engine start; not yet attributed to a strategy">🟠 接管 / ADOPTED</span>';
+  }
+  if (s === 'orphan_frozen' || s === 'DUST_FROZEN') {
+    // If backend injects dust-specific context, compose the richer tooltip.
+    // 後端注入塵埃上下文時組裝詳盡 tooltip，否則降級為通用版本。
+    let detail = '塵埃倉位：名義值低於 Bybit 最小交易額 · 引擎自動等待價格回升；需在 Bybit GUI 手動清 / Dust position: notional below Bybit min; engine waits for price recovery, operator must clear manually on Bybit GUI';
+    if (posData && posData.frozen_reason === 'dust_below_min_notional') {
+      const est = parseFloat(posData.est_notional);
+      const min = parseFloat(posData.min_notional);
+      if (Number.isFinite(est) && Number.isFinite(min)) {
+        detail = '估值 $' + est.toFixed(2) + ' < 交易所最小 $' + min.toFixed(2) +
+                 ' · 引擎自動等待價格回升；需在 Bybit GUI 手動清 / est $' + est.toFixed(2) +
+                 ' < min $' + min.toFixed(2) + '; engine is waiting for price recovery, operator must clear manually on Bybit GUI';
+      }
+    }
+    return '<span title="' + ocEsc(detail) + '">🔴 塵埃凍結 / DUST</span>';
+  }
+  // Real strategy names use the shared color identity chip so Live matches Strategy and Demo.
+  // 真實策略名使用共用策略顏色 chip，和策略頁、Demo 保持一致。
+  return (typeof ocStrategyChip === 'function') ? ocStrategyChip(s) : ocEsc(s);
+}
+
+// Render the dust-positions summary panel from a positions array. Filters rows
+// whose owner_strategy is `orphan_frozen` / `DUST_FROZEN` or whose
+// `frozen_reason === 'dust_below_min_notional'`. Reuses `_ocRenderOwnerStrategy`
+// for the Owner Tag column so the badge styling stays consistent with the main
+// positions table. Empty / no-match arrays show "no dust" footer + empty body
+// without throwing. Counter in the <details> summary updates so operators can
+// see dust count without expanding.
+//
+// 從 positions 陣列渲染塵埃倉位匯總面板。filter owner_strategy 為 orphan_frozen /
+// DUST_FROZEN 或 frozen_reason === 'dust_below_min_notional' 的列。Owner Tag
+// 欄重用 _ocRenderOwnerStrategy 確保 badge 樣式與主持倉表一致。空陣列 /
+// 無匹配時 footer 顯示「無塵埃倉位」、table body 留空，不拋錯。<details>
+// summary 的計數即時更新，operator 不展開即可知 dust 數量。
+function _renderLiveDustPanel(positions) {
+  const tbody = document.querySelector('#liveDustTable tbody');
+  const countEl = document.getElementById('liveDustCount');
+  const footer = document.getElementById('liveDustFooter');
+  if (!tbody || !countEl || !footer) return;
+  const arr = Array.isArray(positions) ? positions : [];
+  const dust = arr.filter(p => {
+    const owner = p && (p.owner_strategy || '');
+    return owner === 'orphan_frozen' || owner === 'DUST_FROZEN' ||
+           (p && p.frozen_reason === 'dust_below_min_notional');
+  });
+  countEl.textContent = String(dust.length);
+  if (dust.length === 0) {
+    tbody.innerHTML = '';
+    footer.style.display = '';
+    footer.textContent = '— 無塵埃倉位 / No dust positions —';
+    return;
+  }
+  footer.style.display = 'none';
+  tbody.innerHTML = dust.map(p => {
+    const sym = ocEsc(p.symbol || '--');
+    const side = ocEsc(p.side || '--');
+    const qty = ocEsc(String(p.size || p.qty || '--'));
+    const mark = ocEsc(String(p.markPrice || p.mark_price || '--'));
+    const est = parseFloat(p.est_notional);
+    const min = parseFloat(p.min_notional);
+    const estCell = Number.isFinite(est) ? '$' + est.toFixed(2) : '--';
+    const minCell = Number.isFinite(min) ? '$' + min.toFixed(2) : '--';
+    // Gap % = how far the position notional is below the exchange minimum.
+    // Higher = harder to recover via price drift alone.
+    // Gap % = 倉位名義值距交易所最小值的差距百分比。越高代表越難靠價格漂移自然恢復。
+    let gap = '--';
+    if (Number.isFinite(est) && Number.isFinite(min) && min > 0) {
+      gap = ((min - est) / min * 100).toFixed(1) + '%';
+    }
+    const owner = p.owner_strategy || '';
+    return '<tr>' +
+      '<td><strong>' + sym + '</strong></td>' +
+      '<td>' + side + '</td>' +
+      '<td>' + qty + '</td>' +
+      '<td>' + mark + '</td>' +
+      '<td>' + estCell + '</td>' +
+      '<td>' + minCell + '</td>' +
+      '<td>' + gap + '</td>' +
+      '<td style="font-size:11px">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+// Live strategy map: symbol → strategy_name, derived from latest fill per symbol.
+// Live 策略映射：symbol → strategy_name，取每個 symbol 最新一筆 fill 推導。
+let _liveStratMap = {};
+function _buildLiveStratMap(fills) {
+  const m = {};
+  if (!Array.isArray(fills)) return m;
+  for (const f of fills) {
+    const sym = f && f.symbol;
+    if (!sym || m[sym]) continue;
+    const s = f.strategy || f.strategy_name;
+    if (s) m[sym] = s;
+  }
+  return m;
+}
+
+/**
+ * F5/A1 helper: detect phantom-view error envelope from any account endpoint.
+ * Returns true iff backend returned the structured "live_slot_not_configured"
+ * payload — caller should short-circuit and render an error row instead of
+ * extracting numeric fields (which would render as "--" anyway but the data
+ * dict still has zeros/empty arrays from the guard payload).
+ *
+ * F5/A1 helper：偵測任何 account endpoint 是否回了幽靈視圖錯誤 envelope。
+ * 後端結構化回了 live_slot_not_configured 時 caller 應短路渲染錯誤訊息，
+ * 不要走數字欄位 extract 路徑（即使 fields 都是 0/空陣列也不要顯示「--」假裝有資料）。
+ */
+function _isPhantomViewError(payload) {
+  return !!(payload && payload.error === 'live_slot_not_configured');
+}
+
+function _livePerformanceMetrics(payload) {
+  return ocPerformanceMetricsFromPayload(payload);
+}
+
+function _liveMetricValue(payload, key) {
+  const metric = ocPerformanceMetricByKey(_livePerformanceMetrics(payload), key);
+  const value = metric ? Number(metric.value) : NaN;
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function _formatSignedMoneyValue(value) {
+  return Number.isFinite(value) && value !== 0
+    ? (value >= 0 ? '+' : '') + value.toFixed(4)
+    : '--';
+}
+
+function _applyLiveTodayPnl(metricsData) {
+  const realizedEl = document.getElementById('live-realized-pnl');
+  const realizedSub = document.getElementById('live-realized-sub');
+  const netEl = document.getElementById('live-net-pnl');
+  if (!realizedEl || !netEl) return;
+
+  if (_isPhantomViewError(metricsData)) {
+    const msg = metricsData.error_zh || metricsData.error || '';
+    realizedEl.textContent = 'N/A';
+    realizedEl.title = msg;
+    realizedEl.className = 'live-metric-val neutral';
+    if (realizedSub) realizedSub.textContent = '';
+    netEl.textContent = 'N/A';
+    netEl.title = msg;
+    netEl.className = 'live-metric-val neutral';
+    return;
+  }
+
+  const db = (metricsData && metricsData.db_true_metrics) || {};
+  const today = db.account_metrics_today || (metricsData && metricsData.account_metrics_today) || {};
+  const gross = Number(today.gross_pnl);
+  const fees = Number(today.total_fees);
+  const funding = Number(today.funding_pnl);
+  const fills = Number(today.total_fills);
+  const net = Number(today.net_pnl);
+
+  realizedEl.textContent = _formatSignedMoneyValue(gross);
+  realizedEl.className = 'live-metric-val' + (gross > 0 ? ' pos' : gross < 0 ? ' neg' : ' neutral');
+  if (realizedSub) {
+    const parts = [];
+    if (Number.isFinite(fees)) parts.push('Fees ' + fees.toFixed(4));
+    if (Number.isFinite(funding) && funding !== 0) parts.push('Funding ' + funding.toFixed(4));
+    if (Number.isFinite(fills)) parts.push('fills ' + String(Math.round(fills)));
+    realizedSub.textContent = parts.join(' · ');
+  }
+
+  netEl.textContent = _formatSignedMoneyValue(net);
+  netEl.className = 'live-metric-val' + (net > 0 ? ' pos' : net < 0 ? ' neg' : ' neutral');
+}
+
+async function loadDashboardData() {
+  // F5/A1: if integrity-fail view is showing, skip data loaders entirely.
+  //        refreshPage() already handles this but loadDashboardData() may be
+  //        called from other paths (manual refresh button etc.) — defensive guard.
+  // F5/A1：integrity-fail view 顯示中時完全跳過資料載入。refreshPage() 已處理過，
+  // 此處再加一層防衛（loadDashboardData 可能被其他路徑呼叫）。
+  if (_liveModeState.actual_engine_kind !== 'live') return;
+
+  // 首屏只讀 Rust snapshot fast path；成交歷史是折疊區，不參與 dashboard 首幀。
+  // Orders 仍查交易所，但不再讓 fills 查詢阻塞 balance/positions。
+  const [balRes, posRes, ordRes] = await Promise.allSettled([
+    ocApi('/api/v1/live/balance?fast=1'),
+    ocApi('/api/v1/live/positions?fast=1'),
+    ocApi('/api/v1/live/orders'),
+  ]);
+  _liveStratMap = {};
+
+  // Balance — from /api/v1/live/balance (httpx BybitClient → real exchange data)
+  // 餘額 — 來自實盤端點（httpx BybitClient → 真實交易所帳戶資料）
+  try {
+    const balData = balRes.status === 'fulfilled' && balRes.value && balRes.value.data;
+    if (_isPhantomViewError(balData)) {
+      // F5/A1: stamp metric cards with the structural error instead of '--'
+      // F5/A1：把結構性錯誤覆蓋到 metric card，不顯示 '--' 偽裝數據
+      ['live-equity', 'live-available', 'live-wallet-balance', 'live-margin-used'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = 'N/A'; el.title = balData.error_zh || balData.error || ''; }
+      });
+    } else if (balData && balData.available !== false) {
+      // httpx BybitClient returns snake_case; Bybit REST raw returns camelCase — handle both
+      // httpx BybitClient 返回 snake_case；Bybit REST 原樣返回 camelCase — 兩者均相容
+      const equity = parseFloat(
+        balData.total_equity || balData.totalEquity || balData.equity || balData.balance || 0
+      );
+      const avail = parseFloat(
+        balData.total_available_balance || balData.totalAvailableBalance ||
+        balData.available_balance || balData.bybit_sync_balance || 0
+      );
+      const upnl = parseFloat(
+        balData.total_unrealised_pnl || balData.totalPerpUPL || balData.unrealized_pnl || 0
+      );
+      const wallet = parseFloat(
+        balData.wallet_balance || balData.walletBalance || balData.total_wallet_balance || equity || 0
+      );
+      const marginUsed = equity > 0 && avail > 0 ? equity - avail : 0;
+      document.getElementById('live-equity').textContent = equity > 0 ? '₮' + equity.toFixed(2) : '--';
+      document.getElementById('live-available').textContent = avail > 0 ? '₮' + avail.toFixed(2) : '--';
+      document.getElementById('live-wallet-balance').textContent = wallet > 0 ? '₮' + wallet.toFixed(2) : '--';
+      document.getElementById('live-margin-used').textContent = marginUsed > 0 ? '₮' + marginUsed.toFixed(2) : '--';
+
+      if (avail > 0 && equity > 0) {
+        const pct = ((avail / equity) * 100).toFixed(1);
+        document.getElementById('live-available-sub').textContent = pct + '% of equity free';
+      }
+
+      const pnlEl = document.getElementById('live-unrealized-pnl');
+      if (pnlEl) {
+        pnlEl.textContent = upnl !== 0 ? (upnl >= 0 ? '+' : '') + upnl.toFixed(4) : '--';
+        pnlEl.className = 'live-metric-val large' + (upnl > 0 ? ' pos' : upnl < 0 ? ' neg' : ' neutral');
+      }
+    }
+  } catch (_) {}
+
+  // Positions — from /api/v1/live/positions (engine-tracked real-money positions in live mode)
+  // 倉位 — 來自實盤端點（live 模式下為引擎追蹤的真實資金倉位）
+  const posBody = document.getElementById('live-positions-body');
+  try {
+    const posData = posRes.status === 'fulfilled' && posRes.value && posRes.value.data;
+    if (_isPhantomViewError(posData)) {
+      // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
+      const msg = ocEsc(posData.error_zh || posData.error || 'Live slot not configured');
+      posBody.innerHTML = '<tr><td colspan="11" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      document.getElementById('live-position-count').textContent = 'N/A';
+      _renderLiveDustPanel([]);
+    } else {
+    const arr = (posData && Array.isArray(posData.positions)) ? posData.positions : [];
+    document.getElementById('live-position-count').textContent = arr.length;
+    if (arr.length === 0) {
+      posBody.innerHTML = '<tr><td colspan="11" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
+    } else {
+      // F5-RETURN/Issue-2 — `closeLivePosition` row buttons are written via
+      //   innerHTML below; they don't exist when checkLiveEngineStatus() ran
+      //   _applyLiveActionGuards() earlier. Re-apply guards immediately after
+      //   the row template has been produced so prefix-match selector picks
+      //   them up. Without this, dynamic buttons stay enabled even under
+      //   integrity-fail / authority-not-granted state.
+      // F5-RETURN/Issue-2 — `closeLivePosition` row 按鈕由下方 innerHTML 寫入；
+      //   先前 checkLiveEngineStatus 跑 _applyLiveActionGuards 時尚未存在。row
+      //   模板生成後立即重跑 guard，selector 才能命中。否則 dynamic button
+      //   即使在 integrity-fail / authority-not-granted 下仍 enabled。
+      posBody.innerHTML = arr.map(p => {
+        // Bybit flat format (camelCase) + snake_case fallback
+        // Bybit 扁平格式（camelCase）+ snake_case 兼容
+        const pnl = parseFloat(p.unrealisedPnl || p.unrealized_pnl || p.unrealised_pnl || 0);
+        const pnlCls = pnl >= 0 ? 'color:var(--green)' : 'color:#f87171';
+        const size = p.size || p.qty || '--';
+        const entry = p.avgPrice || p.avg_price || p.entry_price || '--';
+        const mark = p.markPrice || p.mark_price || '--';
+        const liq = p.liqPrice || p.liq_price || '--';
+        const leverage = p.leverage || p.lev || '--';
+        const symRaw = p.symbol || '';
+        const sym = ocEsc(symRaw);
+        // Prefer authoritative owner_strategy injected by backend from Rust paper_state
+        // (bybit_sync / orphan_adopted / orphan_frozen / DUST_FROZEN / strategy names).
+        // Fallback to fills-derived map (may miss low-turnover strategies).
+        // 優先讀後端從 Rust paper_state 注入的 owner_strategy（權威歸屬）。
+        // 降級到 fills 反推映射（低週轉策略可能漏）。
+        const strat = p.owner_strategy || _liveStratMap[symRaw] || '--';
+        // Synthetic-owner aware close button: dust-frozen → "清塵 / Clear Dust"
+        // + data-* attrs carrying owner_strategy + frozen_reason so the handler
+        // can warn operator that Bybit will reject the close.
+        // 合成 owner 感知的平倉按鈕：塵埃凍結 → 「清塵 / Clear Dust」，透過
+        // data-* 屬性傳遞 owner_strategy + frozen_reason，提醒交易所會拒單。
+        const isDust = (strat === 'orphan_frozen' || strat === 'DUST_FROZEN' ||
+                        p.frozen_reason === 'dust_below_min_notional');
+        const btnLabel = isDust ? '清塵 / Clear Dust' : '平倉';
+        const ownerAttr = ocEsc(String(strat || ''));
+        const reasonAttr = ocEsc(String(p.frozen_reason || ''));
+        return `<tr>
+          <td><strong>${sym}</strong></td>
+          <td style="font-size:11px">${_ocRenderOwnerStrategy(strat, p)}</td>
+          <td>${ocEsc(p.side || '--')}</td>
+          <td>${ocEsc(String(size))}</td>
+          <td>${ocEsc(String(leverage))}x</td>
+          <td>${ocEsc(String(entry))}</td>
+          <td>${ocEsc(ocAmount(ocPositionEntryValue(p)))}</td>
+          <td>${ocEsc(String(mark))}</td>
+          <td style="${pnlCls}">${pnl.toFixed(4)}</td>
+          <td>${ocEsc(String(liq))}</td>
+          <td><button class="oc-btn oc-btn-danger oc-row-close-action" data-owner-strategy="${ownerAttr}" data-frozen-reason="${reasonAttr}" onclick="closeLivePosition('${sym}', this.dataset.ownerStrategy, this.dataset.frozenReason)">${btnLabel}</button></td>
+        </tr>`;
+      }).join('');
+      // F5-RETURN/Issue-2 — re-apply action guards now that row close-buttons
+      //   exist in the DOM. The selector `button[onclick^="closeLivePosition"]`
+      //   added in _applyLiveActionGuards() needs the buttons present, and
+      //   they are produced only after this innerHTML write.
+      // F5-RETURN/Issue-2 — row close-button 進 DOM 後重套 guard。
+      //   _applyLiveActionGuards() 中新增的 selector 只在 button 存在時生效。
+      _applyLiveActionGuards();
+    }
+    }  // end of !_isPhantomViewError(posData) branch / 非幽靈視圖分支結束
+  } catch (_) {
+    posBody.innerHTML = '<tr><td colspan="11" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+  }
+
+  // Render dust-positions summary panel from the same positions payload above.
+  // Filters rows whose owner_strategy is `orphan_frozen` / `DUST_FROZEN` or whose
+  // `frozen_reason === 'dust_below_min_notional'`. Empty array → footer shows
+  // "no dust" and table body stays empty.
+  // 從上方同一份 positions payload 渲染塵埃倉位匯總面板。filter owner_strategy
+  // 為 orphan_frozen / DUST_FROZEN 或 frozen_reason === 'dust_below_min_notional'
+  // 的列。空陣列 → footer 顯示「無塵埃倉位」，table body 留空。
+  try {
+    const posData2 = posRes.status === 'fulfilled' && posRes.value && posRes.value.data;
+    const arr2 = (posData2 && Array.isArray(posData2.positions)) ? posData2.positions : [];
+    _renderLiveDustPanel(arr2);
+  } catch (_) {
+    _renderLiveDustPanel([]);
+  }
+
+  // Orders — from /api/v1/live/orders (pending-close + stop orders from engine state)
+  // 掛單 — 來自實盤端點（引擎狀態中 pending_close + stop 訂單）
+  const ordBody = document.getElementById('live-orders-body');
+  try {
+    const ordData = ordRes.status === 'fulfilled' && ordRes.value && ordRes.value.data;
+    if (_isPhantomViewError(ordData)) {
+      // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
+      const msg = ocEsc(ordData.error_zh || ordData.error || 'Live slot not configured');
+      ordBody.innerHTML = '<tr><td colspan="7" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      document.getElementById('live-order-count').textContent = 'N/A';
+      return;
+    }
+    const ordArr = (ordData && Array.isArray(ordData.list)) ? ordData.list : [];
+    document.getElementById('live-order-count').textContent = ordArr.length;
+    if (ordArr.length === 0) {
+      ordBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">無掛單 / No open orders</td></tr>';
+    } else {
+      ordBody.innerHTML = ordArr.map(o => {
+        // Bybit order format: orderId, symbol, side, qty, price, orderStatus, orderType
+        // Bybit 訂單格式：orderId、symbol、side、qty、price、orderStatus、orderType
+        const qty = o.qty || o.size || o.orderQty || o.order_qty || '--';
+        // Conditional orders have price=0 (market when triggered); show trigger_price instead.
+        // 條件單 price=0（觸發時市價執行），顯示觸發價。
+        const rawPrice = parseFloat(o.price) || parseFloat(o.trigger_price) || parseFloat(o.triggerPrice) || 0;
+        const price = rawPrice > 0 ? rawPrice : '--';
+        const orderType = o.order_type || o.orderType || o.stopOrderType || (o.pending_close ? '平倉' : 'stop');
+        const status = o.order_status || o.orderStatus || (o.pending_close ? 'PendingClose' : '--');
+        const symRaw = o.symbol || '';
+        const strat = _liveStratMap[symRaw] || '--';
+        return `<tr>
+          <td>${ocEsc(symRaw || '--')}</td>
+          <td style="font-size:11px">${ocEsc(strat)}</td>
+          <td>${ocEsc(o.side || '--')}</td>
+          <td>${ocEsc(String(qty))}</td>
+          <td>${ocEsc(String(price))}</td>
+          <td>${ocEsc(String(orderType))}</td>
+          <td>${ocEsc(String(status))}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch (_) {
+    ordBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">無法加載掛單數據</td></tr>';
+    document.getElementById('live-order-count').textContent = '--';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Live engine session status / 引擎 session 狀態
+// ═══════════════════════════════════════════════════════════════
+async function checkLiveEngineStatus() {
+  const badge = document.getElementById('live-engine-status');
+  const detail = document.getElementById('live-engine-detail');
+  const btnStart = document.getElementById('btn-live-start');
+  const btnStartLocked = document.getElementById('btn-live-start-locked');
+  const btnStop = document.getElementById('btn-live-stop');
+  const btnEmg = document.getElementById('btn-emergency-stop');
+
+  const d = await ocApi('/api/v1/live/session/status');
+  if (!d || !d.data) {
+    _liveModeState.status_error = 'status_unavailable';
+    // A transient status timeout should not demote an already-rendered Live view
+    // to "engine not started"; keep the last good state and let the next poll recover.
+    if (_liveStatusLoadedOnce && _liveModeState.actual_engine_kind === 'live') {
+      if (detail) detail.textContent = 'status refresh timeout; keeping last known Live state';
+      return;
+    }
+    _applyLiveModeUI();
+    _applyLiveActionGuards();
+    if (btnStartLocked) btnStartLocked.disabled = false;
+    return;
+  }
+  _liveStatusLoadedOnce = true;
+  _liveModeState.status_error = '';
+  const data = (d && d.data) ? d.data : {};
+  const sessionState = (data.session && data.session.session_state) || 'offline';
+  const authority = data.execution_authority || 'not_granted';
+  const systemMode = data.system_mode || 'unknown';
+  const contraction = data.contraction || {};
+  const contractionState = contraction.state || 'normal';
+  const drawdownPct = contraction.drawdown_pct;
+
+  // F5/A1: capture actual engine kind + endpoint label.
+  //        Backend (live_session_routes._live_response) injects these via
+  //        setdefault; older deployments may not have them yet — treat
+  //        absence as "unknown" so we fall back to the integrity-fail view
+  //        rather than blindly rendering with a wrong banner.
+  // F5/A1：抓取 actual_engine_kind + actual_endpoint。後端透過 setdefault 注入；
+  // 舊版部署可能沒有 — 缺欄位時當 'unknown'，退到 integrity-fail view 安全側。
+  _liveModeState.actual_engine_kind = data.actual_engine_kind || data.engine_kind || 'unknown';
+  _liveModeState.actual_endpoint = data.actual_endpoint || 'unconfigured';
+  _liveModeState.execution_authority = authority;
+  _liveModeState.session_state = sessionState;
+
+  // Apply mode UI early so the badge below shows up under the right theme
+  // 先套模式 UI，下方 badge 才能在正確主題下顯示
+  _applyLiveModeUI();
+
+  // If engine is not live, the dashboard view is hidden — skip badge work.
+  // 引擎非 live 時 dashboard 被隱藏，badge 不必再更新
+  if (_liveModeState.actual_engine_kind !== 'live') {
+    _applyLiveActionGuards();
+    if (btnStartLocked) {
+      btnStartLocked.disabled = false;
+      btnStartLocked.title = 'Live engine 未啟動；點擊後仍需通過後端 Operator + live_reserved + Rust 授權門控';
+    }
+    return;
+  }
+
+  if (!badge) return;
+
+  // F5/A1: badge text reflects endpoint identity (Mainnet vs LiveDemo)
+  //        instead of always saying "Live 實盤 運行中 🟣" which misled
+  //        operators when the slot was actually demo-bound.
+  // F5/A1：徽章文字反映 endpoint 身份（Mainnet vs LiveDemo），不再永遠寫
+  // 「Live 實盤 運行中 🟣」誤導 — 槽是 demo 時就明確寫 LiveDemo。
+  const isActive = sessionState === 'active';
+  const isPausedOrStopped = sessionState === 'paused' || sessionState === 'stopped';
+  const epLabel = _liveModeState.actual_endpoint === 'mainnet' ? 'Mainnet'
+                : _liveModeState.actual_endpoint === 'live_demo' ? 'LiveDemo'
+                : '未配置';
+  const stateZh = isActive ? '運行中' : isPausedOrStopped
+                  ? (sessionState === 'paused' ? '已暫停' : '已停止')
+                  : '引擎離線';
+  if (isActive) {
+    badge.textContent = epLabel + ' ' + stateZh + (
+      _liveModeState.actual_endpoint === 'mainnet' ? ' 🟣' :
+      _liveModeState.actual_endpoint === 'live_demo' ? ' 🟠' : ''
+    );
+    badge.className = 'oc-chip oc-chip-live';
+  } else if (isPausedOrStopped) {
+    badge.textContent = epLabel + ' ' + stateZh;
+    badge.className = 'oc-chip oc-chip-warn';
+  } else {
+    badge.textContent = stateZh;
+    badge.className = 'oc-chip oc-chip-neutral';
+  }
+
+  // Contraction badge — only show when not normal
+  // 縮倉狀態標籤 — 僅在非 normal 時顯示
+  const cBadge = document.getElementById('live-contraction-badge');
+  if (cBadge) {
+    if (contractionState === 'halted') {
+      cBadge.style.display = '';
+      cBadge.className = 'oc-chip oc-chip-bad';
+      cBadge.textContent = `🚨 自動停止 (回撤${drawdownPct != null ? drawdownPct.toFixed(1) + '%' : ''})`;
+    } else if (contractionState === 'warned') {
+      cBadge.style.display = '';
+      cBadge.className = 'oc-chip oc-chip-warn';
+      cBadge.textContent = `⚠ 回撤警告 ${drawdownPct != null ? drawdownPct.toFixed(1) + '%' : ''}`;
+    } else {
+      cBadge.style.display = 'none';
+    }
+  }
+
+  // Show system_mode + authority when active; mode only when idle
+  // Active 時顯示 system_mode + authority；空閒時只顯示 mode
+  if (detail) {
+    detail.textContent = isActive
+      ? `mode: ${systemMode.replace(/_/g, ' ')} | authority: ${authority}`
+      : `mode: ${systemMode.replace(/_/g, ' ')}`;
+  }
+  if (btnStart) btnStart.disabled = isActive || contractionState === 'halted';
+  if (btnStartLocked) btnStartLocked.disabled = isActive || contractionState === 'halted';
+  if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
+  if (btnEmg) btnEmg.disabled = !data.engine_available;
+
+  // F5/A4 — apply uniform guards to all write-action buttons after individual
+  //         logic above, so phantom-view + auth-not-granted always wins.
+  // F5/A4 — 個別邏輯之後再統一套守衛，確保 phantom-view + auth 未授予永遠勝出。
+  _applyLiveActionGuards();
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// Live actions
+// ═══════════════════════════════════════════════════════════════
+async function liveStart() {
+  // A3-MAJOR-1 fix：啟動真金白銀交易必須 typed-phrase 確認
+  const ok = await openTypedConfirmModal({
+    title: '⚠ 啟動 Live 實盤交易',
+    body: '即將以真實資金啟動 Live 實盤交易。\n請確認您了解所有風險，且風控參數已正確設定。',
+    phrase: 'START LIVE',
+    confirmLabel: '確認啟動 / Start Live',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '真實資金交易，引擎將開始接收並執行交易信號',
+    rollback: '可隨時透過「停止 Live」或「緊急停止」中斷'
+  }).catch(function() { return false; });
+  if (!ok) return;
+  const d = await ocPost('/api/v1/live/session/start', {});
+  if (d) {
+    const msg = (d.data && d.data.message) || d.message || '已啟動';
+    ocToast('⚠ ' + msg, 'warn');
+    await refreshPage();
+  }
+}
+
+async function doLiveStop() {
+  // A3 HIGH-1 fix：停止 Live 同樣會市價平倉，必須 typed-phrase 確認
+  // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-stop') 已移除（dialog 不再存在）
+  const ok = await openTypedConfirmModal({
+    title: '⛔ 停止 Live 實盤交易',
+    body: '此操作將：\n1. 取消所有掛單\n2. 市價平倉所有持倉\n3. 停止交易授權租約\n\n⚠ 市價成交存在滑點風險。真實資金。',
+    phrase: 'STOP LIVE',
+    confirmLabel: '確認停止 / Stop Live',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '所有倉位市價平倉，授權租約終止',
+    rollback: '需重新啟動 Live 交易才能恢復'
+  }).catch(function() { return false; });
+  if (!ok) return;
+  const d = await ocPost('/api/v1/live/session/stop', {});
+  if (d) {
+    const errors = (d.data && d.data.errors) || d.errors;
+    if (errors && errors.length) {
+      ocToast('已停止（部分錯誤: ' + errors.join('; ') + '）', 'warn');
+    } else {
+      ocToast('Live 實盤 授權租約 已停止，倉位已平', 'success');
+    }
+    await refreshPage();
+  }
+}
+
+async function doEmergencyStop() {
+  // A3-BLOCKER-1 fix：緊急停止必須 typed-phrase 確認，防止誤觸
+  // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-emergency') 已移除（dialog 不再存在）
+  const ok = await openTypedConfirmModal({
+    title: '🚨 緊急停止 / Emergency Stop',
+    body: '緊急停止將立即：\n1. 強制取消所有掛單\n2. 強制市價平倉所有持倉\n3. 封鎖引擎 — 不接受新指令直到手動解除\n\n⚠ 高滑點風險。此操作無法撤銷。',
+    phrase: 'EMERGENCY STOP',
+    confirmLabel: '🚨 確認緊急停止',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '所有倉位立即市價平倉，引擎封鎖',
+    rollback: '需手動解除引擎封鎖後才能重新啟動'
+  }).catch(function() { return false; });
+  if (!ok) return;
+  const d = await ocPost('/api/v1/live/session/stop', {});
+  if (d) {
+    ocToast('🚨 緊急停止已執行', 'error');
+    await refreshPage();
+  } else {
+    ocToast('緊急停止命令失敗，請手動操作', 'error');
+  }
+}
+
+async function doLiveCloseAll() {
+  // A3-BLOCKER-2 fix：關閉所有倉位必須 typed-phrase 確認
+  // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-close-all') 已移除（dialog 不再存在）
+  const ok = await openTypedConfirmModal({
+    title: '❌ 關閉所有 Live 實盤倉位',
+    body: '此操作將通過 Bybit API 市價平掉所有 Live 實盤持倉並取消掛單。\nSession 不會停止 — 引擎繼續運行，策略可繼續開新倉。\n\n⚠ 市價成交，存在滑點風險。真實資金。',
+    phrase: 'CLOSE ALL',
+    confirmLabel: '確認關閉所有倉位',
+    confirmClass: 'oc-btn-danger',
+    actor: 'Operator',
+    impact: '所有 Live 持倉市價平倉，掛單全部取消',
+    rollback: '策略可在 session 內重新開倉'
+  }).catch(function() { return false; });
+  if (!ok) return;
+  const d = await ocPost('/api/v1/live/close-all-positions', {});
+  if (d) {
+    const msg = (d.data && d.data.message) || d.message || '已平倉';
+    const errors = d.data && d.data.close_result && d.data.close_result.errors;
+    if (errors && errors.length) {
+      ocToast('平倉完成（部分錯誤: ' + errors.join('; ') + '）', 'warn');
+    } else {
+      ocToast('✓ ' + msg, 'success');
+    }
+    await refreshPage();
+  } else {
+    ocToast('平倉指令失敗，請檢查引擎狀態', 'error');
+  }
+}
+
+async function closeLivePosition(symbol, ownerStrategy, frozenReason) {
+  // Close a single live position by symbol / 平掉單一實盤倉位
+  //
+  // When the caller marks this as a dust-frozen synthetic owner, we switch the
+  // confirm + toast to a warning that Bybit will reject the close (below
+  // min_notional) and the only real clear path is the Bybit GUI.
+  // 當 caller 標示為塵埃凍結合成 owner 時，confirm + toast 改為警告級：
+  // 交易所會拒單，唯一清除路徑是 Bybit 網頁 GUI。
+  const isDust = (frozenReason === 'dust_below_min_notional') ||
+                 (ownerStrategy === 'orphan_frozen') ||
+                 (ownerStrategy === 'DUST_FROZEN');
+  if (isDust) {
+    const warnMsg = '⚠ 此倉位低於交易所最小值，引擎已自動派發平倉但交易所會拒單。' +
+                    '唯一清除路徑：在 Bybit 網頁 GUI 手動平倉。是否仍要嘗試？\n\n' +
+                    'This position is below the exchange minimum. The engine ' +
+                    'has auto-dispatched a close but Bybit will reject it. ' +
+                    'The only real clear path is to close it manually on the ' +
+                    'Bybit GUI. Try anyway?';
+    if (!await openConfirmModal({
+      title: '塵埃倉位清理 / Dust Position Clear',
+      body: warnMsg,
+      confirmLabel: '仍要嘗試 / Try Anyway',
+      confirmClass: 'oc-btn-destructive oc-btn-critical'
+    })) return;
+    const d = await ocPost('/api/v1/live/positions/' + encodeURIComponent(symbol) + '/close', {});
+    if (d) {
+      ocToast('⚠ ' + symbol + ' 清塵指令已發送，交易所可能拒單 / dust-clear dispatched, exchange may reject', 'warn');
+      await refreshPage();
+    } else {
+      ocToast(symbol + ' 清塵失敗，請在 Bybit GUI 手動清', 'error');
+    }
+    return;
+  }
+  if (!await openConfirmModal({
+    title: 'Live 平倉 / Close Live Position',
+    body: '確認平倉 ' + symbol + '？\nConfirm close live position: ' + symbol + '?',
+    confirmLabel: '確認平倉 / Confirm Close',
+    confirmClass: 'oc-btn-danger oc-btn-critical'
+  })) return;
+  const d = await ocPost('/api/v1/live/positions/' + encodeURIComponent(symbol) + '/close', {});
+  if (d) {
+    ocToast('⚠ ' + symbol + ' 平倉指令已發送', 'warn');
+    await refreshPage();
+  } else {
+    ocToast(symbol + ' 平倉失敗', 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Performance Metrics / 性能指標
+// ═══════════════════════════════════════════════════════════════
+
+async function loadLiveMetrics() {
+  const d = await ocApi('/api/v1/live/metrics');
+  if (!d || !d.data) {
+    if (!_liveMetricsLoadedOnce) {
+      ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無指標數據</div>');
+    }
+    return;
+  }
+  // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
+  if (_isPhantomViewError(d.data)) {
+    const msg = ocEsc(d.data.error_zh || d.data.error || 'Live slot not configured');
+    ocSetHtml('live-perf-metrics',
+      '<div style="color:#f87171;font-size:12px;padding:12px">⚠ ' + msg + '</div>');
+    _liveMetricsLoadedOnce = true;
+    return;
+  }
+  const m = d.data;
+  _applyLiveTodayPnl(m);
+  const metrics = ocPerformanceMetricsFromPayload(m);
+  if (Array.isArray(metrics) && metrics.length) {
+    ocSetHtml('live-perf-metrics', ocRenderPerformanceMetrics(metrics));
+    _liveMetricsLoadedOnce = true;
+    return;
+  }
+  if (!_liveMetricsLoadedOnce) {
+    ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無後端性能指標</div>');
+  }
+}
+
+function setLivePnlRange(rangeKey) {
+  _livePnlRange = rangeKey || '24h';
+  loadLivePnlSeries();
+}
+
+async function loadLivePnlSeries() {
+  ocSetPnlRangeButtons('live-pnl-range-controls', _livePnlRange);
+  ocSetText('live-pnl-range-label', '(' + String(_livePnlRange).toUpperCase() + ')');
+  let payload = null;
+  let points = [];
+  try {
+    const d = await ocApi('/api/v1/live/pnl-series?range=' + encodeURIComponent(_livePnlRange));
+    payload = d && d.data;
+    if (_isPhantomViewError(payload)) {
+      const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
+      ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
+      ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:#f87171;text-align:center;padding:12px">⚠ ' + msg + '</td></tr>');
+      return;
+    }
+    points = (payload && Array.isArray(payload.points)) ? payload.points : [];
+  } catch (_) {}
+  if (!payload || payload.available === false || !points.length) {
+    try {
+      const fd = await ocApi('/api/v1/live/fills?limit=200&offset=0');
+      const fallbackFills = (fd && fd.data && Array.isArray(fd.data.list)) ? fd.data.list : [];
+      payload = ocPnlSeriesFromFills(fallbackFills, _livePnlRange);
+      points = payload.points || [];
+    } catch (_) {}
+  }
+  if (points.length) {
+    ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', points, 'live-pnl-zero', payload || { range: _livePnlRange });
+    ocSetHtml('live-pnl-series-rows', ocPnlSeriesTableRows(points));
+  } else {
+    ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
+    ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:var(--text-dim);text-align:center;padding:12px">暫無 PnL bucket；後端序列待載入或當前區間無成交</td></tr>');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Pre-Live edge gates / Pre-Live 邊際 gate
+// ═══════════════════════════════════════════════════════════════
+
+function _edgeGateTone(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'pass' || s === 'ready') return 'good';
+  if (s === 'warn' || s === 'not_ready') return 'warn';
+  if (s === 'fail') return 'bad';
+  return 'neutral';
+}
+
+function _edgeGateChip(status) {
+  const s = String(status || 'unknown').toLowerCase();
+  const text = s === 'pass' ? 'PASS'
+             : s === 'warn' ? 'WARN'
+             : s === 'fail' ? 'FAIL'
+             : s === 'ready' ? 'READY'
+             : s === 'not_ready' ? 'NOT READY'
+             : 'UNKNOWN';
+  return ocChip(text, _edgeGateTone(s));
+}
+
+function _edgeMetricValue(value, suffix, decimals) {
+  if (value == null || value === '') return '--';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return ocEsc(value);
+  const d = decimals == null ? 1 : decimals;
+  return ocNum(n, d) + (suffix || '');
+}
+
+function _edgeGateTrendValues(gate) {
+  const rows = Array.isArray(gate && gate.series) ? gate.series : [];
+  if (!gate) return [];
+  if (gate.gate_id === '33') return rows.map(r => r.fee_drop_pct);
+  if (gate.gate_id === '38') return rows.map(r => r.lifetime_ratio);
+  if (gate.gate_id === '40') return rows.map(r => r.avg_net_bps);
+  return [];
+}
+
+function _edgeGateValueCells(gate) {
+  const c = (gate && gate.current) || {};
+  if (!gate) return '';
+  if (gate.gate_id === '33') {
+    return [
+      ['Fee drop', _edgeMetricValue(c.fee_drop_pct, '%', 1)],
+      ['Maker-like', _edgeMetricValue(c.maker_like_pct, '%', 1)],
+      ['Entry fills', _edgeMetricValue(c.entry_fills, '', 0)],
+    ];
+  }
+  if (gate.gate_id === '38') {
+    return [
+      ['Lifetime', _edgeMetricValue(c.lifetime_ratio, 'x', 2)],
+      ['Live p50', _edgeMetricValue(c.live_demo_p50_min, 'm', 1)],
+      ['Re-entry', _edgeMetricValue(c.live_demo_reentry_rate, '', 2)],
+    ];
+  }
+  if (gate.gate_id === '40') {
+    return [
+      ['Avg net', _edgeMetricValue(c.avg_net_bps, ' bps', 2)],
+      ['Rows', _edgeMetricValue(c.rows, '', 0)],
+      ['Win rate', _edgeMetricValue(c.win_rate_pct, '%', 1)],
+    ];
+  }
+  return [];
+}
+
+function _renderEdgeGateCard(gate) {
+  const tone = _edgeGateTone(gate.status);
+  const cells = _edgeGateValueCells(gate).map(pair =>
+    '<div class="oc-edge-gate-value">' +
+      '<div class="label">' + ocEsc(pair[0]) + '</div>' +
+      '<div class="value">' + pair[1] + '</div>' +
+    '</div>'
+  ).join('');
+  const trend = ocMiniTrendSvg(_edgeGateTrendValues(gate), {
+    tone: tone,
+    includeZero: gate.gate_id === '40',
+  });
+  return '<div class="oc-edge-gate-card" data-gate-id="' + ocEsc(gate.gate_id) + '">' +
+    '<div class="oc-edge-gate-head">' +
+      '<div><div class="oc-edge-gate-title">[' + ocEsc(gate.gate_id) + '] ' + ocEsc(gate.label || gate.key) + '</div>' +
+      '<div class="oc-edge-gate-sub">' + ocEsc(gate.key || '') + '</div></div>' +
+      _edgeGateChip(gate.status) +
+    '</div>' +
+    '<div class="oc-edge-gate-values">' + cells + '</div>' +
+    trend +
+    '<div class="oc-edge-gate-summary">' + ocEsc(gate.summary || '') + '</div>' +
+  '</div>';
+}
+
+function _readinessValue(item) {
+  const key = item && item.key ? String(item.key) : '';
+  if (key.indexOf('fee_drop') >= 0 || key.indexOf('maker_like') >= 0) {
+    return _edgeMetricValue(item.value, '%', 1);
+  }
+  if (key.indexOf('avg_net') >= 0) {
+    return _edgeMetricValue(item.value, ' bps', 2);
+  }
+  if (key.indexOf('ratio') >= 0 || key.indexOf('rate') >= 0) {
+    return _edgeMetricValue(item.value, '', 2);
+  }
+  return _edgeMetricValue(item.value, '', 0);
+}
+
+function _renderReadiness(payload) {
+  const readiness = payload && payload.readiness;
+  const box = document.getElementById('live-readiness-checklist');
+  if (!box) return;
+  const items = readiness && Array.isArray(readiness.items) ? readiness.items : [];
+  if (!items.length) {
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+  const headChip = _edgeGateChip(readiness.status || (readiness.ready ? 'ready' : 'not_ready'));
+  const rows = [
+    '<div class="oc-readiness-row">' +
+      '<div><div class="oc-readiness-label">Live readiness checklist</div>' +
+      '<div class="oc-readiness-detail">' + ocEsc(String(readiness.passed || 0)) + '/' +
+        ocEsc(String(readiness.total || items.length)) + ' passed · unknown ' +
+        ocEsc(String(readiness.unknown || 0)) + '</div></div>' +
+      '<div>' + headChip + '</div>' +
+      '<div class="oc-readiness-target">[33] [38] [40]</div>' +
+    '</div>'
+  ];
+  items.forEach(item => {
+    rows.push(
+      '<div class="oc-readiness-row">' +
+        '<div><div class="oc-readiness-label">[' + ocEsc(item.gate || '') + '] ' + ocEsc(item.label || item.key || '') + '</div>' +
+        '<div class="oc-readiness-detail">' + ocEsc(item.detail || '') + '</div></div>' +
+        '<div>' + _edgeGateChip(item.status || (item.passed ? 'pass' : 'fail')) + '</div>' +
+        '<div class="oc-readiness-target">' + _readinessValue(item) + ' / ' + ocEsc(item.target || '') + '</div>' +
+      '</div>'
+    );
+  });
+  box.innerHTML = rows.join('');
+  box.style.display = '';
+}
+
+async function loadPreLiveEdgeGates() {
+  const d = await ocApi('/api/v1/strategy/prelive/edge-gates?window_days=7');
+  const payload = d && d.data;
+  const gateBox = document.getElementById('live-edge-gates');
+  if (!gateBox) return;
+  if (!payload || !payload.gates) {
+    gateBox.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無 gate 趨勢資料 / No edge gate trend data</div>';
+    const readinessBox = document.getElementById('live-readiness-checklist');
+    if (readinessBox) {
+      readinessBox.style.display = 'none';
+      readinessBox.innerHTML = '';
+    }
+    return;
+  }
+  const gates = ['33', '38', '40'].map(id => payload.gates[id]).filter(Boolean);
+  if (!gates.length) {
+    gateBox.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無 gate 趨勢資料 / No edge gate trend data</div>';
+    return;
+  }
+  gateBox.innerHTML = gates.map(_renderEdgeGateCard).join('');
+  _renderReadiness(payload);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Fill history — lazy load on expand
+// 成交記錄 — 展開時懶加載
+// ═══════════════════════════════════════════════════════════════
+let _fillsLoaded = false;
+const LIVE_FILL_PAGE_SIZE = 50;
+const LIVE_FILL_TABS = {
+  aggregate: { label: '聚合 / Aggregate', side: '' },
+  buy: { label: '买入 / Buy', side: 'Buy' },
+  sell: { label: '卖出 / Sell', side: 'Sell' },
+  profit: { label: '收益 / PnL', side: '' },
+};
+let _liveFillState = { tab: 'aggregate', offset: 0, limit: LIVE_FILL_PAGE_SIZE, hasMore: false, loading: false };
+
+function toggleFills() {
+  const section = document.getElementById('fills-section');
+  const btn = document.getElementById('fills-toggle-btn');
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : '';
+  btn.classList.toggle('open', !isOpen);
+  if (!isOpen && !_fillsLoaded) {
+    loadFills();
+  }
+}
+
+function _liveFillTs(f) { return f.execTime || f.exec_time || f.time || f.updatedTime || f.createdTime || ''; }
+function _liveFillQty(f) { return parseFloat(f.execQty || f.exec_qty || f.qty || 0) || 0; }
+function _liveFillPrice(f) { return parseFloat(f.execPrice || f.exec_price || f.price || 0) || 0; }
+function _liveFillFee(f) { return Math.abs(parseFloat(f.execFee || f.exec_fee || f.fee || 0) || 0); }
+function _liveFillPnl(f) {
+  const raw = f.closedPnl != null ? f.closedPnl : f.realized_pnl;
+  const pnl = parseFloat(raw);
+  return isFinite(pnl) ? pnl : 0;
+}
+
+function _liveFillHead(tab) {
+  if (tab === 'profit') {
+    return '<tr><th>平倉時間</th><th>Symbol</th><th>策略 / Strategy</th><th>開倉</th><th>平倉</th><th>Qty</th><th>持倉</th><th>收益 / PnL</th></tr>';
+  }
+  return '<tr><th>時間 / Time</th><th>Symbol</th><th>策略 / Strategy</th><th>Side</th><th>Qty</th><th>Price</th><th>Exec Value</th><th>Fee</th><th>盈亏 / PnL</th><th>Order ID</th></tr>';
+}
+
+function _liveFillRow(f) {
+  const ts = _liveFillTs(f);
+  const qty = f.execQty || f.exec_qty || f.qty || '--';
+  const price = f.execPrice || f.exec_price || f.price || '--';
+  const execValue = ocFillExecValue(f);
+  const fee = f.execFee || f.exec_fee || '--';
+  const feeStr = fee !== '--' ? parseFloat(fee).toFixed(6) : '--';
+  const oid = f.orderId || f.order_id || '--';
+  const side = f.side || '--';
+  const sideCls = side === 'Buy' ? 'color:var(--green)' : side === 'Sell' ? 'color:#f87171' : '';
+  const strategy = f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[f.symbol || ''] || '';
+  return `<tr>
+    <td style="white-space:nowrap">${ocEsc(ocFillTime(ts))}</td>
+    <td><strong>${ocEsc(f.symbol || '--')}</strong></td>
+    <td style="font-size:11px">${strategy ? _ocRenderOwnerStrategy(strategy, f) : '--'}</td>
+    <td style="${sideCls}">${ocEsc(side)}</td>
+    <td>${ocEsc(String(qty))}</td>
+    <td>${ocEsc(String(price))}</td>
+    <td>${ocEsc(ocAmount(execValue))}</td>
+    <td style="color:var(--text-dim)">${ocEsc(feeStr)}</td>
+    ${ocPnlCell(_liveFillPnl(f))}
+    <td style="font-size:10px;color:var(--text-dim)">${ocEsc(String(oid)).slice(0, 12)}…</td>
+  </tr>`;
+}
+
+function _liveBuildProfitRows(fills) {
+  const sorted = fills.slice().sort((a, b) => (Number(_liveFillTs(a)) || 0) - (Number(_liveFillTs(b)) || 0));
+  const lotsBySymbol = {};
+  const rows = [];
+  sorted.forEach(f => {
+    const sym = f.symbol || '';
+    const side = f.side || '';
+    const qty = _liveFillQty(f);
+    const price = _liveFillPrice(f);
+    const fee = _liveFillFee(f);
+    const time = Number(_liveFillTs(f)) || 0;
+    const strategy = f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[sym] || '';
+    if (!sym || !side || qty <= 0 || price <= 0) return;
+    const lots = lotsBySymbol[sym] || (lotsBySymbol[sym] = []);
+    let remaining = qty;
+    while (remaining > 0.00000001 && lots.length && lots[0].side !== side) {
+      const open = lots[0];
+      const matchQty = Math.min(remaining, open.remaining);
+      const rawPnl = _liveFillPnl(f);
+      const computed = open.side === 'Buy'
+        ? (price - open.price) * matchQty
+        : (open.price - price) * matchQty;
+      const pnl = Math.abs(rawPnl) > 0.0001 ? rawPnl * (matchQty / qty) : computed - fee * (matchQty / qty) - open.fee * (matchQty / open.qty);
+      rows.push({ sym, strategy: strategy || open.strategy, open, close: { side, price, time }, qty: matchQty, pnl, holdMs: time - open.time, paired: true });
+      open.remaining -= matchQty;
+      remaining -= matchQty;
+      if (open.remaining <= 0.00000001) lots.shift();
+    }
+    if (remaining > 0.00000001) {
+      lots.push({ side, price, time, qty: remaining, remaining, fee: fee * (remaining / qty), strategy });
+    }
+  });
+  if (!rows.length) {
+    fills.forEach(f => {
+      const pnl = _liveFillPnl(f);
+      if (Math.abs(pnl) > 0.0001) {
+        rows.push({ sym: f.symbol || '', strategy: f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[f.symbol || ''] || '', open: null, close: { side: f.side || '', price: _liveFillPrice(f), time: Number(_liveFillTs(f)) || 0 }, qty: _liveFillQty(f), pnl, holdMs: null, paired: false });
+      }
+    });
+  }
+  return rows.sort((a, b) => (b.close.time || 0) - (a.close.time || 0));
+}
+
+function _liveProfitRow(r) {
+  const openText = r.open ? (r.open.side + ' @ ' + ocNum(r.open.price, 2)) : '--';
+  const closeText = (r.close.side || '--') + (r.close.price ? ' @ ' + ocNum(r.close.price, 2) : '');
+  const hold = r.holdMs != null && r.holdMs >= 0 ? (r.holdMs / 60000).toFixed(1) + 'm' : (r.paired ? '--' : 'page edge');
+  const pnlCls = r.pnl >= 0 ? 'green' : 'red';
+  const sign = r.pnl >= 0 ? '+' : '';
+  return '<tr>' +
+    '<td>' + ocFillTime(r.close.time) + '</td>' +
+    '<td><strong>' + ocEsc(r.sym) + '</strong></td>' +
+    '<td style="font-size:11px">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
+    '<td>' + ocEsc(openText) + '</td>' +
+    '<td>' + ocEsc(closeText) + '</td>' +
+    '<td>' + ocNum(r.qty, 4) + '</td>' +
+    '<td style="color:var(--text-dim)">' + ocEsc(hold) + '</td>' +
+    '<td class="' + pnlCls + '">' + sign + r.pnl.toFixed(4) + '</td>' +
+    '</tr>';
+}
+
+function _liveUpdateFillControls(payload, fills) {
+  document.querySelectorAll('#live-fill-tabs .oc-fill-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-fill-tab') === _liveFillState.tab);
+  });
+  _liveFillState.hasMore = !!(payload && payload.has_more);
+  const page = Math.floor(_liveFillState.offset / _liveFillState.limit) + 1;
+  const tabLabel = (LIVE_FILL_TABS[_liveFillState.tab] || {}).label || _liveFillState.tab;
+  ocSetText('live-fills-page-info', tabLabel + ' · Page ' + page + ' · ' + _liveFillState.limit + '/页');
+  const prev = document.getElementById('live-fills-prev');
+  const next = document.getElementById('live-fills-next');
+  if (prev) prev.disabled = _liveFillState.offset <= 0 || _liveFillState.loading;
+  if (next) next.disabled = !_liveFillState.hasMore || _liveFillState.loading;
+  ocSetText('live-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + ' · offset=' + _liveFillState.offset);
+}
+
+function setLiveFillView(tab) {
+  if (!LIVE_FILL_TABS[tab] || _liveFillState.loading) return;
+  _liveFillState.tab = tab;
+  _liveFillState.offset = 0;
+  loadFills();
+}
+
+function liveFillPrev() {
+  if (_liveFillState.loading || _liveFillState.offset <= 0) return;
+  _liveFillState.offset = Math.max(0, _liveFillState.offset - _liveFillState.limit);
+  loadFills();
+}
+
+function liveFillNext() {
+  if (_liveFillState.loading || !_liveFillState.hasMore) return;
+  _liveFillState.offset += _liveFillState.limit;
+  loadFills();
+}
+
+async function loadFills() {
+  const body = document.getElementById('live-fills-body');
+  const badge = document.getElementById('fills-count-badge');
+  const side = (LIVE_FILL_TABS[_liveFillState.tab] || {}).side || '';
+  const qs = '?limit=' + _liveFillState.limit + '&offset=' + _liveFillState.offset + (side ? '&side=' + encodeURIComponent(side) : '');
+  _liveFillState.loading = true;
+  _liveUpdateFillControls(null, []);
+  document.getElementById('live-fills-head').innerHTML = _liveFillHead(_liveFillState.tab);
+  if (!_liveFillsLoadedOnce) {
+    body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  }
+  try {
+    const d = await ocApi('/api/v1/live/fills' + qs);
+    const payload = d && d.data;
+    if (_isPhantomViewError(payload)) {
+      const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      if (badge) badge.textContent = '';
+      _fillsLoaded = false;
+      _liveFillState.loading = false;
+      _liveUpdateFillControls(payload, []);
+      return;
+    }
+    const arr = (payload && Array.isArray(payload.list)) ? payload.list : [];
+    _liveFillsLoadedOnce = true;
+    _fillsLoaded = true;
+    _liveFillState.loading = false;
+    _liveUpdateFillControls(payload, arr);
+    if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
+    if (arr.length === 0) {
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
+      return;
+    }
+    body.innerHTML = _liveFillState.tab === 'profit'
+      ? (_liveBuildProfitRows(arr).map(_liveProfitRow).join('') || '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">本页没有可關联收益</td></tr>')
+      : arr.map(_liveFillRow).join('');
+  } catch(e) {
+    _liveFillState.loading = false;
+    _liveUpdateFillControls(null, []);
+    if (!_liveFillsLoadedOnce) {
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Init / 初始化
+// ═══════════════════════════════════════════════════════════════
+function startLiveRefreshLoop() {
+  if (_liveRefreshTimer || !_isLiveTabRefreshVisible()) return;
+  _liveRefreshTimer = setInterval(() => refreshPage({ fromTimer: true }), LIVE_REFRESH_MS);
+}
+
+function stopLiveRefreshLoop() {
+  if (!_liveRefreshTimer) return;
+  clearInterval(_liveRefreshTimer);
+  _liveRefreshTimer = null;
+}
+
+window.addEventListener('message', function(ev) {
+  if (ev.origin !== window.location.origin) return;
+  if (!ev.data || ev.data.type !== 'openclaw-tab-visibility' || ev.data.tab !== 'live') return;
+  _liveTabVisible = ev.data.visible !== false;
+  if (_isLiveTabRefreshVisible()) {
+    startLiveRefreshLoop();
+    refreshPage({ force: true });
+  } else {
+    stopLiveRefreshLoop();
+  }
+});
+
+document.addEventListener('visibilitychange', function() {
+  if (_isLiveTabRefreshVisible()) {
+    startLiveRefreshLoop();
+    refreshPage({ force: true });
+  } else {
+    stopLiveRefreshLoop();
+  }
+});
+
+refreshPage({ force: true });
+startLiveRefreshLoop();
