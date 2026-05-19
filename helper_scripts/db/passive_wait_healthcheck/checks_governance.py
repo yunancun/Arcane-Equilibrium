@@ -184,7 +184,7 @@ def _attribution_ratio_sql(window: str) -> str:
         signal row and a settled reward)
     """
     return (
-        "WITH labeled AS ( "
+        "WITH labeled AS MATERIALIZED ( "
         "  SELECT "
         "    df.label_net_edge_bps, "
         "    df.context_id, "

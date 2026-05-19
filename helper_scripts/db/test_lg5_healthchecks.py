@@ -92,6 +92,7 @@ class TestAttributionRatioSqlShape(unittest.TestCase):
         sql = _attribution_ratio_sql("interval '7 days'")
         flattened = " ".join(sql.split())
 
+        self.assertIn("WITH labeled AS MATERIALIZED", sql)
         self.assertIn("FROM learning.decision_features df", sql)
         self.assertIn("AND df.label_net_edge_bps IS NOT NULL", sql)
         self.assertIn("valid_contexts AS MATERIALIZED", sql)
