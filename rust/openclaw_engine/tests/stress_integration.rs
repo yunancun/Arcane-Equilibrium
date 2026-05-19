@@ -4,12 +4,13 @@
 //! Covers: fast_track emergency, multi-symbol mixed trading, cascade governance,
 //!   flash crash, drawdown breach, position limits, stop triggers, rapid ticks.
 
+use openclaw_core::alpha_surface::{AlphaSurface, OIDeltaPanel};
 use openclaw_core::governance_core::{GovernanceCore, GovernanceProfile};
 use openclaw_core::indicators::*;
 use openclaw_core::sm::risk_gov::RiskLevel;
 use openclaw_engine::fast_track::{evaluate_fast_track, FastTrackAction};
 use openclaw_engine::intent_processor::{IntentProcessor, OrderIntent};
-use openclaw_engine::paper_state::PaperState;
+use openclaw_engine::paper_state::{PaperPosition, PaperState};
 use openclaw_engine::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
     ma_crossover::MaCrossover, Strategy, StrategyAction,
@@ -112,6 +113,58 @@ fn bb_snapshot(
         ewma_vol: None,
         donchian: None,
     }
+}
+
+/// 為 bb_reversion exit 測試構造一個由 self 持有的 paper position。
+/// 為什麼必要：commit 6cfd0fcd（2026-05-11 P0 Option A-Lite 重構）後策略在
+/// exit path 用 `ctx.position_state.owner_strategy == "bb_reversion"` 做 owns_self
+/// 過濾；若 `position_state = None`，策略視為「未持倉」回到 entry path，無法
+/// 驗證 mean-reversion exit 行為。
+/// E2 stress fails RCA 2026-05-19 — test-invariant drift fix，不改 production 邏輯。
+fn make_self_owned_position(
+    symbol: &'static str,
+    owner: &str,
+    is_long: bool,
+    entry: f64,
+) -> PaperPosition {
+    PaperPosition {
+        symbol: symbol.to_string(),
+        is_long,
+        qty: 1.0,
+        entry_price: entry,
+        best_price: entry,
+        entry_fee: 0.0,
+        entry_ts_ms: 0,
+        unrealized_pnl: 0.0,
+        entry_context_id: String::new(),
+        owner_strategy: owner.to_string(),
+        entry_notional: entry,
+        max_favorable_pnl_pct: 0.0,
+        peak_reached_ts_ms: 0,
+    }
+}
+
+/// 為 bb_breakout entry 測試構造帶 OI panel 的 AlphaSurface。
+/// 為什麼必要：commit 7a07348b（2026-05-14 Phase 8a OI fail-closed gate）後策略
+/// 要求 `oi_panel_delta_5m_pct` 必能解析，否則走 `oi_panel_unavailable` 提前
+/// `return vec![]`。`EMPTY_ALPHA_SURFACE.oi_delta_panel = None` 無法通過。
+/// 與 bb_breakout::tests::test_oi_surface 同形態，但該 helper 為 `pub(super)`
+/// integration test 無法引用，故在此重複實作。
+/// E2 stress fails RCA 2026-05-19 — test-invariant drift fix，不改 production 邏輯。
+fn fresh_oi_surface(symbol: &str) -> &'static AlphaSurface<'static> {
+    let panel = Box::leak(Box::new(OIDeltaPanel {
+        symbols: vec![symbol.to_string()],
+        oi_delta_5m_pct: vec![0.02],
+        oi_delta_15m_pct: vec![0.02],
+        oi_delta_1h_pct: vec![0.02],
+        oi_abs: vec![100.0],
+        snapshot_ts_ms: i64::MAX / 4,
+        source_tier: "test".to_string(),
+    }));
+    Box::leak(Box::new(AlphaSurface {
+        oi_delta_panel: Some(panel),
+        ..AlphaSurface::empty()
+    }))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -478,7 +531,13 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
     // W-AUDIT-6d #6：exit path 由 ma_value 邏輯獨立於 ma_pair_allows_entry，
     // 這裡仍補 sma_50 對齊（保持 fixture 內聚一致）。
     snap2.sma_50 = Some(2050.0);
-    let ctx2 = make_ctx("ETHUSDT", 2050.0, 700_000, Some(snap2));
+    // P0 Option A-Lite（commit 6cfd0fcd, 2026-05-11）後 exit path 需 owns_self
+    // 過濾通過：position_state.owner_strategy == "bb_reversion"。entry_price=2000
+    // 對應第一階段 ctx1 的 fill price；exit 邏輯只看 percent_b range 不看
+    // entry_price，故對 assert 結果無影響。
+    let pp = make_self_owned_position("ETHUSDT", "bb_reversion", true, 2000.0);
+    let mut ctx2 = make_ctx("ETHUSDT", 2050.0, 700_000, Some(snap2));
+    ctx2.position_state = Some(&pp);
     let intents = strat.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
     assert_eq!(intents.len(), 1, "should exit at mean reversion");
 }
@@ -516,6 +575,12 @@ fn stress_bb_breakout_valid_squeeze_with_volume() {
     let mut strat = BbBreakout::new();
     strat.min_persistence_ms = 0; // disable persistence for test
 
+    // Phase 8a OI fail-closed gate（commit 7a07348b, 2026-05-14）要求每個 on_tick
+    // call 都能解析 oi_panel_delta_5m_pct；squeeze 記錄階段也走同一 gate，故
+    // ctx1/ctx2 皆需帶 OI panel surface（EMPTY_ALPHA_SURFACE 會 fail-closed
+    // 在 squeeze 登記前 return，導致 ctx2 無 squeeze 可確認 → 0 intents）。
+    let surface = fresh_oi_surface("BTCUSDT");
+
     // Squeeze phase
     let ctx1 = make_ctx(
         "BTCUSDT",
@@ -523,7 +588,7 @@ fn stress_bb_breakout_valid_squeeze_with_volume() {
         0,
         Some(bb_snapshot(0.5, 0.015, 50.0, 67000.0, 67000.0, 25.0, 0.8)),
     );
-    strat.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    strat.on_tick(&ctx1, surface);
 
     // Expansion + volume + upper breakout
     let ctx2 = make_ctx(
@@ -532,7 +597,7 @@ fn stress_bb_breakout_valid_squeeze_with_volume() {
         700_000,
         Some(bb_snapshot(1.2, 0.06, 65.0, 67000.0, 67100.0, 30.0, 2.0)),
     );
-    let intents = strat.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    let intents = strat.on_tick(&ctx2, surface);
     assert_eq!(intents.len(), 1, "should enter on valid squeeze breakout");
     match &intents[0] {
         StrategyAction::Open(i) => assert!(i.is_long, "should be long on upper breakout"),

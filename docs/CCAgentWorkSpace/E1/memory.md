@@ -10615,3 +10615,52 @@ orders 之 `trading.orders.intent_id` 100% NULL；恢復 intent → order linkag
 - 主報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--p2_orders_intent_id_writer_gap.md`
 - Backfill 設計備忘（DO NOT EXECUTE）：
   `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--p2_orders_intent_id_backfill_design_memo.md`
+
+---
+
+## 2026-05-19 — stress_integration.rs test-invariant drift fix
+
+### 任務
+E2 RCA 後修 2 個 pre-existing stress test fails：
+- `stress_bb_reversion_extreme_oversold_bounce`（commit 6cfd0fcd, 2026-05-11
+  P0 Option A-Lite 後 exit path 需 `owns_self` 過濾 → 測試沒傳 position_state
+  自動 fail）
+- `stress_bb_breakout_valid_squeeze_with_volume`（commit 7a07348b, 2026-05-14
+  Phase 8a OI fail-closed gate 後 entry/squeeze-record 都要 `oi_panel_delta_5m_pct`
+  能解析 → 測試傳 `EMPTY_ALPHA_SURFACE` 自動 fail-closed）
+
+**不是 production regression，是 test 沒跟上 fixture drift。**
+
+### 修改
+1 file: `rust/openclaw_engine/tests/stress_integration.rs`，+69 / -4 LOC。
+- 新增 use `openclaw_core::alpha_surface::{AlphaSurface, OIDeltaPanel}`、
+  `openclaw_engine::paper_state::PaperPosition`
+- 新增 helper `make_self_owned_position(symbol, owner, is_long, entry) ->
+  PaperPosition`（owner_strategy 由 caller 指定 → 通用）
+- 新增 helper `fresh_oi_surface(symbol) -> &'static AlphaSurface<'static>`
+  （與 bb_breakout::tests::fresh_oi_surface 同形態；後者 `pub(super)` 不能
+  從 integration test 引用，故重複實作）
+- bb_reversion 測試 ctx2 注入 self-owned position
+- bb_breakout 測試 ctx1 + ctx2 都改用 `surface` 變數（fresh_oi_surface），
+  因為 squeeze 登記階段也走 OI gate
+
+### 教訓
+1. **發現實際 bug 範圍比 E2 描述更廣**：E2 RCA 只說 ctx2 fail-closed，實際
+   ctx1 在 squeeze 登記前就 fail-closed 了。production 邏輯沒問題，但
+   test 修法要連 ctx1 一起改否則 squeeze 永遠登記不上。
+2. **companion 測試 `stress_bb_breakout_false_squeeze_no_volume` 不會 fail**
+   是因為它 assert `intents.is_empty()`，fail-closed 剛好符合 → false-positive
+   pass。如果未來測試引入新 negative 場景，這種 coincidental pass 可能掩蓋
+   real regression。
+3. **`pub(super)` 測試 helper 不能跨 crate 引用**：bb_breakout 模組內已有
+   `fresh_oi_surface()`，但 integration test 在 `tests/` 目錄是 external
+   crate，只能看 `pub` 接口；不要嘗試提升能見度，重複實作 5-6 行更乾淨。
+
+### 驗證
+- target 2 tests = 2/2 PASS
+- stress_integration full = 35/35 PASS（原 33/35）
+- openclaw_engine `cargo test --tests` = 全 binaries 0 failures（含 lib 2999
+  + 各 integration 套件）
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--stress_test_invariant_drift_fix.md`
