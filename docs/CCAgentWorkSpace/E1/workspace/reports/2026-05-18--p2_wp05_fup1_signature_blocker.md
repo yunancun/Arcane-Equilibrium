@@ -180,3 +180,75 @@ E1 default 推薦 Option A。等 PA 簽核。
 2. reason_code 命名表（9 個）需要 PA 確認，避免 GUI string-match break。
    建議規範：`ipc_<op>_failed` / `ipc_<op>_not_ok`，全 snake_case，無動詞前綴
    （與 22 sites 已用的 `_failed` 後綴對齊）。
+
+## 8. Closure Addendum — Option A 執行 (2026-05-19)
+
+PM-as-Conductor APPROVE Option A 後，E1 Round 2 派發完成，本節記錄交付。
+
+### 8.1 安全前置驗證
+- `_ipc_failure` 為 `_`-prefix private helper，grep 證 0 external caller
+  （Python source、tests 命名 `test_*_ipc_failure_*` 只是測試函數巧合命名，
+  非 helper invocation）。
+- `tests/test_reset_drawdown_route.py:266` substring 斷言「`rust_engine_unavailable` in exc.value.detail」
+  在新 helper 保留 `rust_engine_unavailable:` 前綴後仍可通過。
+- Blast radius：single-file（risk_routes.py），無跨檔影響。
+
+### 8.2 Helper Signature Delta
+
+`risk_routes.py:84-101`（升級前 84-86，3 行；升級後 84-101，18 行；net `+15` LOC）：
+
+- 簽名從 `(detail: str)` → `(reason_code: str, *, log_detail: str | None = None)`
+- `log_detail` 進 `logger.warning("ipc failure: %s | %s", ...)`，不外洩 client
+- 保留 `rust_engine_unavailable:` 前綴 → test:266 substring 斷言相容
+- Docstring 中文化，標 P2-WP05-FUP-1 出處 + test:266 依賴
+
+### 8.3 9 Caller Delta Table
+
+| 新行號 | 原行號 | 新 reason_code | log_detail 來源 |
+|---|---|---|---|
+| 258 | 243 | `ipc_patch_risk_config_failed` | `str(e)` |
+| 298 | 280 | `ipc_patch_risk_config_category_failed` | `str(e)` |
+| 384 | 363 | `ipc_patch_risk_config_agent_failed` | `str(e)` |
+| 410 | 386 | `ipc_clear_consecutive_losses_failed` | `str(e)` |
+| 541 | 514 | `ipc_reset_drawdown_baseline_failed` | `f"engine={body.engine}: {e}"` |
+| 633 | 603 | `ipc_get_risk_config_failed` | `f"engine={engine}: {e}"` |
+| 711 | 678 | `ipc_patch_risk_config_per_engine_failed` | `f"engine={engine}: {e}"` |
+| 717 | 681 | `ipc_patch_risk_config_not_ok`（無 `from e`） | `f"engine={engine}: {result!r}"` |
+| 746 | 707 | `ipc_resume_paper_failed` | `str(e)` |
+
+每處由 1 行擴為 4 行 → caller LOC delta 共 `+27`。
+
+### 8.4 Grep + pytest 驗證
+
+- `rg "_ipc_failure" --type py --type rust` → 1 def + 9 caller，全在 risk_routes.py；
+  tests 內 `test_*_ipc_failure_*` 為命名巧合（測試函數名），未 invoke helper。
+- `python3 -m py_compile risk_routes.py` → OK
+- `pytest test_reset_drawdown_route.py` → 8/8 PASS（含 `test_ipc_error_surfaces_as_500`）
+- `pytest test_batch_d_risk_fail_closed.py + test_reset_drawdown_route.py + test_risk_view_client.py` →
+  38/38 PASS
+
+### 8.5 LOC Delta
+
+- 檔案 1091 → 1133（`wc -l`），總 +42 LOC（helper +15 / 9 caller +27）。
+- 在 800 行 review attention 之上，已是既存檔案，本 PR 不擴大 scope；
+  E2 / PA 後續若要拆檔可獨立 ticket。
+
+### 8.6 P2-WP05-FUP-1 收尾
+
+- 22 + 1 + 9 = 32/32 site 全清，P2-WP05-FUP-1 close。
+- Round 2 不再需要 P2-WP05-FUP-2 follow-up（原計畫的 deferred 9 sites）。
+- 等 E2 round 2 sign-off + E4 regression 驗證。
+
+### 8.7 不確定 / Operator 下一步
+
+1. **GUI string-match audit**：本 PR 未跑前端 grep 確認沒有 GUI 直接做
+   `exc.value.detail == "rust_engine_unavailable: patch_risk_config: ..."`
+   嚴格相等比對（grep 已證 GUI 只用 `"Rust engine unavailable"` user copy 翻譯，
+   見 `error_sanitize.py:28`，但 audit 沒覆蓋 100%）。E2 / A3 round 2 建議
+   再跑一次 `rg "rust_engine_unavailable:.*patch_risk_config|reset_drawdown_baseline|resume_paper" --type js`
+   確認。
+2. **result dict log leak**：line 717 的 `log_detail=f"engine={engine}: {result!r}"`
+   把 IPC result dict 全文進 log；目前 IPC result 應該乾淨（無 secret），
+   但若未來新增欄位帶 sensitive 內容，需 review log retention。
+3. **Linux runtime 部署**：本檔屬 Python 控制平面（非 engine binary），
+   `helper_scripts/restart_all.sh` reload 即生效；無需 `--rebuild`。
