@@ -10507,3 +10507,31 @@ PA dispatch（同日）派發兩個彼此獨立的工作：
 
 ### 完整報告
 - `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--p1_cron_install_wave_1_and_p2_wp05_csp_sri.md`
+
+## 2026-05-19 P2-WP05-FUP-1 risk_routes.py Round 2 closure（Option A 執行）
+
+### 任務
+- PM-as-Conductor APPROVE Option A，E1 Round 2 升 `_ipc_failure` 簽名
+  + 改 9 caller，將 client-facing exc leak 改成 stable reason_code。
+
+### 關鍵教訓
+1. Private helper（`_` prefix）升簽名是「加 optional kwarg」純擴展時不
+   需破壞性改動；先 grep `--type py --type rust` 證 0 external caller，
+   再向 PA push back 拿 explicit approval；不 silently。
+2. Test substring 斷言（`"rust_engine_unavailable" in detail`）是強相容
+   錨點：只要新 helper 保留前綴 token，refactor reason_code 名稱 1 個
+   test 都不會 break。
+3. Result dict not-ok 路徑（line 681）非 exception 流，沒有 `from e`
+   clause；log_detail 改取 `f"{result!r}"`（注意未來若 result 含 sensitive
+   欄位需 review log retention）。
+4. Reason code naming convention `ipc_<op>_failed` / `ipc_<op>_not_ok`
+   snake_case 與 P2-WP05-FUP-1 其它 22 site 既有後綴對齊；GUI 應只用
+   `error_sanitize.py` 翻譯 base token（`rust_engine_unavailable`），不應
+   做嚴格相等比對。
+5. Caller line 號修改後會 shift：本 PR 9 caller 從 (243/280/363/386/514/603/678/681/707)
+   shift 到 (258/298/384/410/541/633/711/717/746)，因 helper docstring +15 LOC
+   下推所有後續 line；report addendum 雙標新舊行號方便 reviewer 追。
+
+### 完整報告
+- `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--p2_wp05_fup1_signature_blocker.md`
+  Section 8 closure addendum

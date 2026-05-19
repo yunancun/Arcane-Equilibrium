@@ -81,9 +81,24 @@ def _risk_response(data: Any) -> dict[str, Any]:
     }
 
 
-def _ipc_failure(detail: str) -> HTTPException:
-    """Strict failure: IPC unreachable → HTTP 500. No more best-effort silent skip."""
-    return HTTPException(status_code=500, detail=f"rust_engine_unavailable: {detail}")
+def _ipc_failure(
+    reason_code: str,
+    *,
+    log_detail: str | None = None,
+) -> HTTPException:
+    """嚴格失敗：IPC 不可達 → HTTP 500，禁假成功。
+
+    P2-WP05-FUP-1：reason_code 是 client-facing 穩定字串；log_detail（含原
+    exception repr 或 result dict）只進 log，不外洩到 HTTPException.detail。
+    保留 `rust_engine_unavailable:` 前綴維持既有 substring 測試斷言相容
+    （見 tests/test_reset_drawdown_route.py:266）。
+    """
+    if log_detail:
+        logger.warning("ipc failure: %s | %s", reason_code, log_detail)
+    return HTTPException(
+        status_code=500,
+        detail=f"rust_engine_unavailable: {reason_code}",
+    )
 
 
 def _require_risk_write(actor: base.AuthenticatedActor) -> None:
@@ -240,7 +255,10 @@ async def update_global_config(
     try:
         await client.update_global_config(updates)
     except Exception as e:
-        raise _ipc_failure(f"patch_risk_config: {e}") from e
+        raise _ipc_failure(
+            "ipc_patch_risk_config_failed",
+            log_detail=str(e),
+        ) from e
     return _risk_response({"message": "updated", "config": client.config, "version": client.config_version})
 
 
@@ -277,7 +295,10 @@ async def update_category_config(
     try:
         await client.update_category_config(category, updates)
     except Exception as e:
-        raise _ipc_failure(f"patch_risk_config category: {e}") from e
+        raise _ipc_failure(
+            "ipc_patch_risk_config_category_failed",
+            log_detail=str(e),
+        ) from e
     return _risk_response({
         "message": "updated",
         "category": category,
@@ -360,7 +381,10 @@ async def agent_adjust(
     try:
         await client.agent_adjust(updates)
     except Exception as e:
-        raise _ipc_failure(f"patch_risk_config agent: {e}") from e
+        raise _ipc_failure(
+            "ipc_patch_risk_config_agent_failed",
+            log_detail=str(e),
+        ) from e
     return _risk_response({
         "message": "adjusted",
         "agent_params": client.get_agent_params(),
@@ -383,7 +407,10 @@ async def reset_cooldown(
     try:
         result = await client.clear_consecutive_losses()
     except Exception as e:
-        raise _ipc_failure(f"clear_consecutive_losses: {e}") from e
+        raise _ipc_failure(
+            "ipc_clear_consecutive_losses_failed",
+            log_detail=str(e),
+        ) from e
     return _risk_response({"message": "cooldown_reset", "result": result, "status": client.get_status()})
 
 
@@ -511,7 +538,10 @@ async def reset_drawdown_baseline(
     try:
         result = await client.reset_drawdown_baseline(body.engine)
     except Exception as e:
-        raise _ipc_failure(f"reset_drawdown_baseline engine={body.engine}: {e}") from e
+        raise _ipc_failure(
+            "ipc_reset_drawdown_baseline_failed",
+            log_detail=f"engine={body.engine}: {e}",
+        ) from e
 
     # Root Principle #8: trade explainability — audit ALL baseline resets.
     # 根原則 #8：交易可解釋 — 所有 baseline 重置皆寫審計。
@@ -600,7 +630,10 @@ async def get_per_engine_risk_config(
     try:
         resp = await ipc.call("get_risk_config", params={"engine": engine})
     except Exception as e:
-        raise _ipc_failure(f"get_risk_config engine={engine}: {e}") from e
+        raise _ipc_failure(
+            "ipc_get_risk_config_failed",
+            log_detail=f"engine={engine}: {e}",
+        ) from e
 
     raw = resp if isinstance(resp, dict) else {}
     config = raw.get("config", raw)
@@ -675,10 +708,16 @@ async def update_per_engine_global_config(
             params={"engine": engine, "patch": patch, "source": "operator"},
         )
     except Exception as e:
-        raise _ipc_failure(f"patch_risk_config engine={engine}: {e}") from e
+        raise _ipc_failure(
+            "ipc_patch_risk_config_per_engine_failed",
+            log_detail=f"engine={engine}: {e}",
+        ) from e
     result = resp if isinstance(resp, dict) else {}
     if not result.get("ok"):
-        raise _ipc_failure(f"patch_risk_config engine={engine} returned not-ok: {result}")
+        raise _ipc_failure(
+            "ipc_patch_risk_config_not_ok",
+            log_detail=f"engine={engine}: {result!r}",
+        )
     return _risk_response({
         "engine": engine,
         "message": "updated",
@@ -704,7 +743,10 @@ async def unhalt_session(
     try:
         await client.unhalt_session()
     except Exception as e:
-        raise _ipc_failure(f"resume_paper: {e}") from e
+        raise _ipc_failure(
+            "ipc_resume_paper_failed",
+            log_detail=str(e),
+        ) from e
 
     return _risk_response({"message": "session_unhalted"})
 
