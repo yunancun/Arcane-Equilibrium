@@ -48,6 +48,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_governance import (  # no
     LABEL_BACKFILL_PASS_MAX_SECONDS,
     LABEL_BACKFILL_WARN_MAX_SECONDS,
     LG5_STRATEGIES,
+    _attribution_ratio_sql,
     check_42_live_candidate_eval_contract,
     check_42b_live_candidate_attribution_drift,
     check_42c_live_candidate_attribution_drift_3d,
@@ -83,6 +84,23 @@ def _cursor_for_42b(
     cur.fetchone.side_effect = [(exists,)]
     cur.fetchall.return_value = rows if rows is not None else []
     return cur
+
+
+class TestAttributionRatioSqlShape(unittest.TestCase):
+    def test_query_anchors_on_labeled_decision_features(self) -> None:
+        """[42b]/[42c] query must avoid intent-wide scans that timeout."""
+        sql = _attribution_ratio_sql("interval '7 days'")
+        flattened = " ".join(sql.split())
+
+        self.assertIn("FROM learning.decision_features df", sql)
+        self.assertIn("AND df.label_net_edge_bps IS NOT NULL", sql)
+        self.assertIn("LEFT JOIN LATERAL", sql)
+        self.assertIn("i.context_id = l.context_id", sql)
+        self.assertIn("s.signal_id = i.signal_id", sql)
+        self.assertNotIn(
+            "FROM trading.intents i LEFT JOIN learning.decision_features",
+            flattened,
+        )
 
 
 # ---------------------------------------------------------------------------
