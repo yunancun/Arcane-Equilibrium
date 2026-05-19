@@ -342,6 +342,11 @@ pub(super) fn handle_pending_registration(
                     strategy_name: po.strategy.clone(),
                     is_close: po.is_close,
                     engine_mode: em.clone(),
+                    // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：寫入
+                    // trading.orders.intent_id，恢復 intents → orders JOIN。
+                    // entry path 為 Some（step_4_5_dispatch 注入）；close /
+                    // ipc / orphan 路徑為 None（誠實表述無 strategy intent）。
+                    intent_id: po.intent_id.clone(),
                 },
                 "order_registered",
             );
@@ -443,6 +448,10 @@ pub(super) fn handle_pending_registration(
                 spine_decision_id: None,
                 spine_verdict_id: None,
                 spine_stub_report_id: None,
+                // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：
+                // dispatch_failed close-maker 重建 PendingOrder 為 fallback
+                // 路徑，非 strategy intent 對應，保 None。
+                intent_id: None,
             };
             dispatch_close_maker_fallback_from_pending(
                 state,
@@ -963,6 +972,9 @@ mod tests {
             spine_decision_id: None,
             spine_verdict_id: None,
             spine_stub_report_id: None,
+            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：close fixture
+            // 對應 close path，不帶 strategy intent。
+            intent_id: None,
         }
     }
 

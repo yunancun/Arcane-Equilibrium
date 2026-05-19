@@ -1016,6 +1016,10 @@ impl TickPipeline {
                 spine_decision_id: None,
                 spine_verdict_id: None,
                 spine_stub_report_id: None,
+                // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：close path
+                // 不對應 strategy intent（exit logic 觸發），保 None 為誠實
+                // 表述；不在 writer 端合成 fake id 以免遮蓋上游 bug。
+                intent_id: None,
             };
             match tx.send(request) {
                 Ok(()) => {
@@ -1166,6 +1170,9 @@ impl TickPipeline {
             spine_decision_id: None,
             spine_verdict_id: None,
             spine_stub_report_id: None,
+            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：close-maker
+            // market fallback 走 close 路徑無 strategy intent 對應，保 None。
+            intent_id: None,
         };
 
         match tx.send(request) {
@@ -1316,6 +1323,9 @@ impl TickPipeline {
                         spine_decision_id: None,
                         spine_verdict_id: None,
                         spine_stub_report_id: None,
+                        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：
+                        // ipc_close_all 為運維平倉，無 strategy intent。
+                        intent_id: None,
                     };
                     match tx.send(request) {
                         Ok(()) => {
@@ -1512,6 +1522,9 @@ impl TickPipeline {
                     spine_decision_id: None,
                     spine_verdict_id: None,
                     spine_stub_report_id: None,
+                    // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：
+                    // ipc_close_symbol 為運維平倉，無 strategy intent。
+                    intent_id: None,
                 };
                 match tx.send(request) {
                     Ok(()) => {

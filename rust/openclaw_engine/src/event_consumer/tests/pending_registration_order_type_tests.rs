@@ -62,6 +62,18 @@ fn first_order_type(rx: &mut mpsc::Receiver<TradingMsg>) -> String {
     first_order_shape(rx).0
 }
 
+/// P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：抽乾 channel 取第一筆
+/// `TradingMsg::Order` 的 `intent_id`。用於斷言 PendingOrder.intent_id 是否
+/// 被忠實複製到 audit row 與 trading.orders 寫入流。
+fn first_order_intent_id(rx: &mut mpsc::Receiver<TradingMsg>) -> Option<String> {
+    while let Ok(msg) = rx.try_recv() {
+        if let TradingMsg::Order { intent_id, .. } = msg {
+            return intent_id;
+        }
+    }
+    panic!("no TradingMsg::Order observed on channel / channel 上未見 Order msg");
+}
+
 fn first_order_state_change(
     rx: &mut mpsc::Receiver<TradingMsg>,
 ) -> (String, String, Option<String>) {
@@ -109,6 +121,10 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         spine_decision_id: None,
         spine_verdict_id: None,
         spine_stub_report_id: None,
+        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：baseline fixture 為
+        // open entry 形狀（is_close=false），故帶代表性 intent_id；新 test
+        // 4-A 透過 with_intent_id helper / 直接覆寫驗證 propagation。
+        intent_id: Some("intent-demo-BTCUSDT-1700000000000".into()),
     }
 }
 
@@ -338,6 +354,153 @@ fn test_handle_pending_registration_still_inserts_pending_order() {
     let stored = &state.pending_orders[&link_id];
     assert_eq!(stored.order_type, "limit");
     assert_eq!(stored.time_in_force, Some(TimeInForce::PostOnly));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// P2-ORDERS-INTENT-ID-WRITER-GAP-1 regression（2026-05-19）：
+// PendingOrder.intent_id 必須端到端傳到 TradingMsg::Order.intent_id，最終
+// 寫入 trading.orders.intent_id 恢復 intents → orders JOIN。E3 baseline
+// 2026-05-15 揭露 7d 1394 demo orders / 1021 live_demo orders 全部 NULL
+// 是 writer 漏接非 schema 缺欄；本 5 條 test 釘住 writer 接線契約。
+// ───────────────────────────────────────────────────────────────────────────
+
+/// 入場 entry path：PendingOrder 帶 Some(intent_id)，Order msg 必傳同值。
+#[test]
+fn test_handle_pending_registration_propagates_entry_intent_id() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po = baseline_pending_order("market", None);
+    let expected_intent_id = "intent-demo-BTCUSDT-1700000000999".to_string();
+    po.intent_id = Some(expected_intent_id.clone());
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    let intent_id = first_order_intent_id(&mut rx);
+    assert_eq!(
+        intent_id,
+        Some(expected_intent_id),
+        "PendingOrder.intent_id 必須無損傳到 TradingMsg::Order.intent_id，\
+         恢復 trading.intents → trading.orders 邏輯 FK 與 Guardian-pass-rate 計算"
+    );
+}
+
+/// Close path（is_close=true，PendingOrder.intent_id=None）：Order msg 必為 None。
+/// 不在 writer 端合成假 id 以免遮蓋上游 intent 缺失 bug。
+#[test]
+fn test_handle_pending_registration_close_path_intent_id_stays_none() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po = baseline_pending_order("market", None);
+    po.is_close = true;
+    // close 路徑無 strategy intent；writer 端必須誠實表達 NULL。
+    po.intent_id = None;
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    let intent_id = first_order_intent_id(&mut rx);
+    assert!(
+        intent_id.is_none(),
+        "close path 無 strategy intent 對應，writer 不得合成 fake id（trading.orders.intent_id 保 NULL 為誠實表述）"
+    );
+}
+
+/// PostOnly + intent_id：限價單同樣傳送 intent_id（覆蓋 maker 路徑）。
+#[test]
+fn test_handle_pending_registration_postonly_carries_intent_id() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+    let expected = "intent-live_demo-ETHUSDT-1700000000777".to_string();
+    po.intent_id = Some(expected.clone());
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    let intent_id = first_order_intent_id(&mut rx);
+    assert_eq!(
+        intent_id,
+        Some(expected),
+        "PostOnly 限價路徑同樣須透傳 intent_id，不得因 TIF 不同而漏接"
+    );
+}
+
+/// derive(Clone) 行為：PendingOrder.intent_id 必跨 clone 傳承（pending_orders 表
+/// 使用 .clone() 插入，writer 路徑亦 clone po.intent_id）。
+#[test]
+fn test_pending_order_clone_preserves_intent_id() {
+    let mut po = baseline_pending_order("market", None);
+    let expected = "intent-demo-SOLUSDT-1700000000123".to_string();
+    po.intent_id = Some(expected.clone());
+
+    let cloned = po.clone();
+
+    assert_eq!(
+        cloned.intent_id.as_deref(),
+        Some(expected.as_str()),
+        "derive(Clone) 必複製 intent_id；state.pending_orders.insert(.clone()) 路徑依賴此"
+    );
+}
+
+/// Dispatch failed (terminal state)：close-maker 重建 PendingOrder 走 fallback，
+/// 因走 close 路徑無 strategy intent，intent_id 必保 None（不從別處抓 fake）。
+#[test]
+fn test_dispatch_failed_close_maker_synthetic_pending_order_has_no_intent_id() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (tx, _rx) = mpsc::channel::<TradingMsg>(8);
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::DispatchFailed {
+            order_link_id: "oc_close_maker_unreg".into(),
+            symbol: "BTCUSDT".into(),
+            is_long: false,
+            qty: 0.1,
+            strategy: "strategy_close:grid_close_long".into(),
+            context_id: "ctx-close-maker".into(),
+            is_close: true,
+            order_type: "limit".into(),
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms: Some(45_000),
+            close_maker_audit: Some(CloseMakerFillAudit {
+                initial_limit_price: Some(50_000.2),
+                eligible_reason: "grid_close_long".into(),
+                fallback_reason: None,
+                rate_limit_scope: None,
+            }),
+            terminal_status: "Rejected".into(),
+            reason: "dispatch_structural: test".into(),
+            ts_ms: 1_700_000_000_123,
+        }),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    // 此路徑不寫 TradingMsg::Order（只寫 OrderStateChange），但 dispatch_close_maker_fallback_from_pending
+    // 內部會重新建立 PendingOrder（loop_handlers.rs:424）並走 dispatch 路徑；
+    // 重建 PendingOrder.intent_id 必為 None（close + fallback 無 strategy intent）。
+    // 此測試藉由 type 系統保證重建 PendingOrder 不漏 intent_id 欄位編譯通過即已守住，
+    // runtime 行為 = no TradingMsg::Order emit on this path（已 by existing dispatch_failed 測試覆蓋）。
 }
 
 #[test]

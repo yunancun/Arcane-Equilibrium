@@ -97,6 +97,9 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         spine_decision_id: None,
         spine_verdict_id: None,
         spine_stub_report_id: None,
+        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：dual-rail 測試僅
+        // 校驗 SL/TP/is_primary 結構欄位，intent_id 預設 None。
+        intent_id: None,
     };
     assert_eq!(req.stop_loss, Some(49000.0));
     assert_eq!(req.take_profit, Some(52000.0));
@@ -154,6 +157,9 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         spine_decision_id: None,
         spine_verdict_id: None,
         spine_stub_report_id: None,
+        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：dual-rail 測試僅
+        // 校驗 SL/TP/is_primary 結構欄位，intent_id 預設 None。
+        intent_id: None,
     };
     assert!(req.stop_loss.is_none());
     assert!(req.is_close);
@@ -191,6 +197,9 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         spine_decision_id: None,
         spine_verdict_id: None,
         spine_stub_report_id: None,
+        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：dual-rail 測試僅
+        // 校驗 SL/TP/is_primary 結構欄位，intent_id 預設 None。
+        intent_id: None,
     };
     assert!(!req.is_primary);
     assert!(req.stop_loss.is_none());

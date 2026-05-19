@@ -78,6 +78,9 @@ fn test_handle_reset_clears_state_and_pending() {
             spine_decision_id: None,
             spine_verdict_id: None,
             spine_stub_report_id: None,
+            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：Reset 測試只關
+            // pending 清空，不讀 intent_id；預設 None 保 fixture 最小化。
+            intent_id: None,
         },
     );
     pipeline.paper_paused = true;

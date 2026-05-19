@@ -119,11 +119,19 @@ fn test_pending_order_clone_preserves_state() {
         spine_decision_id: None,
         spine_verdict_id: None,
         spine_stub_report_id: None,
+        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：sentinel clone 測試
+        // 帶代表值驗證 derive(Clone) 行為一致。
+        intent_id: Some("intent-paper-BTCUSDT-1000".into()),
     };
     let cloned = po.clone();
     assert_eq!(cloned.order_link_id, "oc_1");
     assert_eq!(cloned.qty, 0.01);
     assert!(!cloned.is_close);
+    // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：derive(Clone) 必傳承 id。
+    assert_eq!(
+        cloned.intent_id.as_deref(),
+        Some("intent-paper-BTCUSDT-1000")
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
