@@ -1,293 +1,227 @@
-# 玄衡 TODO — Active Dispatch Queue
+# 玄衡 TODO — 活躍派工佇列
 
-Version: v56
-Date: 2026-05-19
-Status: v56 — 2026-05-19 ~20:00 UTC P0 trading-inert incident discovered + restart recovered + E2 adversarial RCA + new `P0-ENGINE-HALTSESSION-STUCK-FIX` dispatched. **Incident**: engine PID 1942669 (UTC 12:27:11 watchdog respawn) processed 2x FILUSDT halt_session close at 12:27:14+37 then **7h43m trading-inert** (0 intents/orders/fills despite WS alive + 1k ticks/sec + IPC alive); panel_aggregator channel_len=65+ backpressure; resumed via operator `restart_all.sh --keep-auth` UTC 20:09:36 (new PID 2099215; first fill 1min post-restart, 5 fills/3 symbols in 24min). **E2 RCA verdict** (`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--engine_watchdog_respawn_loop_and_trading_inert_rca.md`): DIFFERENT-ROOT-CAUSE from prior P1-WATCHDOG-STATUS2-RCA — today's bug = `paper_paused=true` sticky from Step 6 RiskAction::HaltSession with no TTL auto-clear path; previous RCA covered systemd cosmetic naming only, did not cover this class. Halt math doesn't add up (drawdown 10.2% vs TOML 25% threshold) — trigger root cause UNRESOLVED (log rotation lost UTC 12:27 line; possible IPC patch / loading-order race / 3rd path). Watchdog has zero "alive but inert" detection. **Operator decision UTC 20:30**: Layer A TTL clear daily_loss only / drawdown sticky; Layer B watchdog business-heartbeat probe alarm-only. **PA spec dispatched** ETA 2-3h. **Severity P0** — loop WILL recur on next breach; demo/live_demo/live share code; Phase 1b verification + all PnL at risk. v55 carry-forward: 4-track parallel closure — operator-authorized 4 surfaces all done (#5 watchdog RCA / #6 entry-path RCA / #7 tab-live extract / #9 stress fails RCA + #12 E1 R2 fix). Commit chain: `9bf4fd62` (tab-live.html 2171→543 LOC + new tab-live.js 1645 LOC pure cut-paste, ?v=20260519.tab-live-extract) / `c1f47722` (stress_integration.rs +65 LOC 2 helper fix; 070ff0a3 INNOCENT, real culprits 6cdfe0dc bb_reversion + 7a07348b bb_breakout; 35/35 PASS) / `d927bf7f` (QA watchdog RCA report). **QC critical reframe on P2-ENTRY-PATH**: yesterday's QA "entry-close vs risk-exit" split by ID prefix was structural artifact — both走同 `execute_position_close()` 路径；`oc_close_mf_fb_*` = maker timeout fallback / `oc_risk_*` = maker success；**真实是 6 maker attempts / 3 fills = 50% Wilson CI [18.8%, 81.2%] 覆盖 sim 70.8%**，21pp 偏差不是 70pp gap。H5 sample noise HIGH + H3 BBO-cross-proxy 乐观 MEDIUM-HIGH，H4 path 不对称 REJECTED。**Sample velocity ~0.44 grid_close/hr → T+72h n≈24 不够 30，首个 defensible verdict 推到 T+96h~T+120h（2026-05-22~23 UTC）**。**6 new backlog tickets**: P1-WATCHDOG-EXIT-CODE-CLARIFY (sys.exit(2)→20) / FA-WATCHDOG-3STRIKE-ESCALATION-POLICY / P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX (按 attempt×fallback 切非 ID prefix) / P2-SIM-QUEUE-AWARE-ADJUSTMENT (replay 10-15pp bias 修正) / P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS (3rd 测试因错误原因 PASS)。**Governance flags**: cargo test --lib 不覆盖 tests/ integration crate；建议 sign-off SOP 加 `cargo test -p openclaw_engine --release` (no --lib)。stress_integration suite 35/35 PASS / cargo lib 2999/0/1 unchanged / node --check + HTML parse 全 GREEN。v54 carry-forward: runtime/admin closure — operator-authorized V096 Linux PG apply/register DONE and P1 cron install wave DONE on trade-core; [75] first-fire PASS, [76]-[79] expected WARN until natural first schedules; P1-WATCHDOG-STATUS2-RCA CLOSED as DNS/HTTP transport outage misclassified as ENGINE_CRASH (no OOM/panic, current engine/watchdog alive); P2-ENTRY-PATH-0PCT-MAKER-FILL-RCA CLOSED with entry_close 6/6 attempts 0/6 maker vs risk_exit 3/3 maker, path-specific not global PostOnly failure; calibration output classified generated and ignored, reports tracked. No V095, engine restart, allLiquidation revival, risk_config, or runtime env mutation. v53 carry-forward: sprint closure — operator-authorized 4 parallel tracks all CLOSED. Commit chain: `4e045c2f` (P2-ORDERS-INTENT-ID-WRITER-GAP-1 Rust intent_id end-to-end plumb +5 regression tests) / `ae71575e` (P2-COMMON-JS-LOC common.js 2198→4 files split + 19-file cache-bust uniform `?v=20260519.split-p2` after E2 HIGH catch) / `3584fb17` (P3 hygiene 4-item + QA Phase 1b 24h AC-A INSUFFICIENT_SAMPLE verdict). **QA Phase 1b**: n=8 attempt_pct Wilson CI [40.9%, 92.9%] passes 25% AC-A floor + 3 real maker fills @ fee 0.0002 vs taker 0.00055; 0 rollback trigger; **Phase 2a 14d clock STAYS @ 2026-05-18 13:50 UTC** (5 evidence: binary mtime / TOML / no --rebuild / spec silent on process restart / fill velocity consistent); engine 01:57:19 UTC autonomous watchdog respawn (9th occurrence in 7d → new P1-WATCHDOG-STATUS2-RCA ticket). **Re-verify AC-A T+72h = 2026-05-21 13:50 UTC** (~32 fills first n≥30 verdict window). **2 new follow-up tickets**: P1-WATCHDOG-STATUS2-RCA + P2-ENTRY-PATH-0PCT-MAKER-FILL-RCA (sim 70.8% vs real entry 0% = 70pp gap). **P2-TAB-LIVE-LOC DEFERRED** (no Jinja2; ticket P2-TAB-LIVE-JS-EXTRACT tracks future inline-script extract). E2 verdict: PASS-after-fix (1 HIGH cache-bust drift caught + fixed inline by PM; 1 MEDIUM weak test + 2 LOW paper-shadow alloc + common.js 815 attention-threshold all advisory non-blocking). E4: cargo engine 2998/0/1 (+5 new regression) / pytest targeted 76/0 / wider 421/3 = v51 baseline identical 0 regression. v52 carry-forward: P2-WP05-FUP-1 final 9/9 closure — PM-as-Conductor APPROVE Option A (E1 memo §4 推薦) → E1 round 2 risk_routes.py `_ipc_failure(reason_code, *, log_detail=None)` 簽名升級 + 9 caller rewrite (`ipc_<op>_failed` / `ipc_patch_risk_config_not_ok`) + 中文 docstring + `logger.warning("ipc failure: %s | %s", ...)` → E2 APPROVE 0 finding (6 視角 + §3.10 caller proof 0 external + GUI strict-match 0 hit + `result!r` PII risk verified IPC payload `{ok, config, version, source}` 0 sensitive field) → E4 421/3 wider batch identical to v51 baseline (3 pre-existing test-ordering pollution, 0 regression). **P2-WP05-FUP-1 final state: 32/32 sites all closed**. v51 carry-forward: cleanup sprint closure — operator-authorized 2 P1 + 11 P2 maintenance batch CLOSED via PM+Conductor 4-batch dispatch + E2 PASS + E4 PASS + 5 commits (`c3524da2` / `449f628b` / `428f1505` / `7bb994c3` / `eda460e8`). **Done (12/13)**: P1-EDGE-P2-3-PH1B-ML-INVARIANT (pr-adversarial-review §3.11) / P2-PORTFOLIO-RESTING-{TEST-COVERAGE / ROUTER-CACHE / DOCSTRING-CLEANUP / E5-BENCH / REPLAY-PARALLEL} / P2-PERCEPTION-DEPRECATE-1 (DeprecationWarning + 3 test files filterwarnings) / P2-STOCHASTIC-LEAK (`stochastic_prior` variant + 5-indicator audit) / P2-DEAD-RUST-CLEANUP-1 (−3616 LOC across 7 openclaw_core modules per ADR-0015) / P2-DEAD-SCHEMA-DROP-1 (V096 RESTRICT + Guard A/B source/test, Linux apply gated) / P2-WP05-CSP-UNSAFE-INLINE (SRI sha384 on unpkg lightweight-charts@4.1.0) / P1-CRON-INSTALL-WAVE-1 (5 wrapper touch-at-start + 5 healthchecks [75..79] source/test, crontab install gated). **Partial (1/13)**: P2-WP05-FUP-1 23/32 sites cleaned across 8 files; 9 risk_routes.py sites HIT signature blocker → memo `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--p2_wp05_fup1_signature_blocker.md` Option A/B/C for PA Round 2. **Net LOC**: −3554. **Regression**: cargo engine 2993/0/1 / core 357/0 / pytest 22+42+107 PASS (V096 + cron heartbeat + 3 perception) + 8-file batch 421/3 (3 pre-existing identical); 2 cargo engine integration stress fails (bb_breakout/bb_reversion) confirmed pre-existing on clean main `8d2b2866` NOT PR-introduced. **Operator gates remain**: V096 Linux PG apply + crontab install on trade-core (separate deploy step). v50 carry-forward: W-AUDIT-8c Stage 0R replay tooling 3 worktree (S0R-1 SQL / S0R-2 metrics / S0R-3 CLI) MERGED to main HEAD `a182e155` after 12 sub-agent multi-round adversarial chain. Chain: PA Stage 0R packet design v1.0 → BB STRUCTURAL verdict (long-liq skew = mainnet microstructure, not demo bias, 0 day delay) → PA HIGH-2 boundary leak arbitration (verdict D open-only not mid) → E1 × 3 round 1 (S0R-1 `bd1b2443` + S0R-2 `c041097c` + S0R-3 `b3e68870`) → E2 × 3 round 1 RETURN (S0R-1 2 CRIT + S0R-2 3 CRIT + S0R-3 6 CRIT runtime + silent-RED killer) + MIT round 1 APPROVE-CONDITIONAL → E1 × 3 round 2 (S0R-1 `381d89a0` + S0R-2 `6cc2b7fb` + S0R-3 `1888ecee`) → E2 × 3 round 2 (S0R-1 + S0R-2 APPROVE, S0R-3 RETURN 4 NEW + smoke misreport governance event) + MIT round 2 APPROVE Linux PG dry-run x2 byte-equivalent + n_eff cluster-aware retrofit verified → E1 round 3 (S0R-3 `a2dc1be8` + `6638d678` honesty disclosure section + 11/11 actual smoke PASS) → E2 round 3 APPROVE (independent smoke 11/11 verified, honesty disclosure genuine) → E4 regression 5 phases 0 W-AUDIT-8c regression (helper_scripts 654 PASS + S0R-2 34/34 + S0R-3 post-merge 11/11 + program_code baseline + cargo 2992) → QA + PM merge integration `w-audit-8c-stage0r-int` → main `f8cb076f` → governance trail commits (`00358320` 12 sub-agent reports + `0e2d1fa0` feedback_pnl_priority_over_governance memory + `a182e155` QA Phase 1b T+24h Phase 1 prep) → 三端同步 (Mac local / origin/main / Linux trade-core all on `a182e155`). v50 carry-forward: v49 dispatch-state sync — v48 P0-PHASE-1B-PARAM-CALIBRATION-1 全 6 step chain CLOSED including deploy. Chain: PA spec v0.1 (`75e29265`) → E1 harness IMPL 12 files / 2781 LOC (`93069c29`) → E2 APPROVE-CONDITIONAL 0 MUST / 3 SHOULD → E4 PASS 7/7 → Merge (`8d8a0123`) → PA SHOULD-FIX memo (`5df39d13`, 3 accept-with-caveat 0 IMPL fix) → Spec v0.2 patch (`34af2d2e`) → SQL fix (`d2286c05`) → Sweep 81 cells (1.4 sec wall) → PA cell selection report (`2b65d3f1`, 78 unique cells / 35 INDETERMINATE / 43 TRUE FAIL / top `G-AB-01-C90` fill 70.8% / +3.37 bps) → E1 Rust 14 LOC `timeout 30s → 90s` (`820f0532`) → E2 light APPROVE-CONDITIONAL → E4 PASS 7/7 (`4cc32ff6`) → Merge (`67f1a047`) → operator-authorized rebuild + restart (engine PID 1253085 → **1506208**, binary mtime 2026-05-18 13:50 UTC). **Phase 2a 14d observation clock reset @ 13:50 UTC**; 24h AC-A SQL verification target ~2026-05-19 13:50 UTC. v48 carry-forward: v47 recovery + Wave 1 merge state preserved. **NEW 2026-05-18 ~10:30 UTC**: third-party assessment + own PG verify revealed Phase 1b 12H post-restart sample = **4 close fills, 100% `close_maker_attempt=TRUE` BUT 100% `close_maker_fallback_reason=timeout_taker`** → real fee saving = 0% so far (maker offset_bps=0.5 + buffer_ticks=1 + timeout 30s/15s too tight for sparse alt-coin spreads). Operator scheduled **P0 Phase 1b parameter calibration sweep + replay counterfactual** for AFTER 12H test window closes (~2026-05-18 11:54 UTC). Pre-calibration code path is verified correct (TOML activator + maker_attempt instrumentation working); root cause is parameter tuning, NOT IMPL bug. v47 carry-forward: W-AUDIT-8a Wave 1 (B-REM-1 `49975eeb` / B-REM-5 `5997dd43` + ADR-0023 `1b614daf` / C1-LIQ-WRITER `7ab6c22d` + healthcheck `[67]` `d8938a78`) merged via `ef0dfc6e` / `5aeae75c` / `25413e96`. EDGE-P2-3 Phase 1b runtime activator deploy chain remains CLOSED 2026-05-17 23:54 (engine PID 1143103, `runtime.use_maker_close=true`). W-AUDIT-8b Round 2 RED_FINAL tombstoned via spec v0.4 (`ef7ea6c2`) + AMD v0.7 (`71f2283b`). Wave 2 (`C2-ORDERFLOW` 5pd HIGH + `C3-SPREAD` + `D-CONTRACT-LOCK` 2pd PA-only) deferred to Sprint N+4. Previous v46 production `allLiquidation*` writer revival (`0e8a8ae8` / `bedc40c3`) remains CLOSED.
-Maintenance contract: keep this file as the active dispatch queue per
-`docs/agents/todo-maintenance.md`; stable project context belongs in
-`README.md`, and agent operating rules belong in `CLAUDE.md` /
-`.codex/MEMORY.md`.
-- **v46 production liquidation revival**: ✅ SOURCE/TEST + RUNTIME DEPLOY DONE 2026-05-17；`0e8a8ae8` revives only C1-approved `allLiquidation.{symbol}` in startup and scanner dynamic production builders while legacy `liquidation.` / `price-limit.` / `adl-notice.` remain excluded；`bedc40c3` fixes runtime log observability (`topics_per_symbol=8`, `all_liquidation_enabled=true`)；local + Linux release lib both green `2969/0/1`；trade-core engine-only rebuild/restart completed with PID `1066422`；post-healthcheck: `OPENCLAW_AUTO_MIGRATE=0`, `OPENCLAW_ENABLE_PAPER=0`, V094/V095 still registered, `market.liquidations` PK `(symbol, ts, side, qty, price)`, public WS subscribed `200` topics / `20` batches, no handler/rate-limit/topic-poison errors, and 3 real liquidation rows landed. Paper remains disabled via `pipeline_snapshot_paper.json disabled=true` (`OPENCLAW_ENABLE_PAPER != 1`). PM consolidated report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--deploy_readiness_consolidated_audit.md`。
-- **v45 deploy-readiness runtime closure**: ✅ V094/V095 + Phase 1b engine restart DONE 2026-05-17；`b867e452` restored Linux cargo baseline to `2969/0/1`；V094 registered with checksum `d7db4e674cc0505da787861b6777717059d69902137057350a3b4b0a5e527a41a1e7b7e3cb559ba2fb8a4dd3fead2512`；V095 registered with checksum `e25f110594587cddafd1e08f7699da593fe63c64af6d26415356c00b4534d8f60f0e67d7640ab8a6b18ba6ba742ca15b`；`market.liquidations` PK is now `(symbol, ts, side, qty, price)`；Phase 1b engine-only rebuild/restart completed at commit `74f88269` before V095 docs sync；`OPENCLAW_AUTO_MIGRATE=0` and `OPENCLAW_ENABLE_PAPER=0` remained unchanged. PM consolidated report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--deploy_readiness_consolidated_audit.md`。
-- **v44 W-AUDIT-8c correction closure**: ✅ SOURCE/TEST + V095 LINUX APPLY + PRODUCTION WRITER REVIVAL DONE 2026-05-17；V095 source migration preserves liquidation item identity with `(symbol, ts, side, qty, price)`；parser/writer fail closed for invalid `allLiquidation` rows；corrected Bybit side mapping (`Buy` long liquidation / `Sell` short liquidation) is tested；V095 Linux PG transaction dry-run x2 PASS + MIT idempotency re-sign APPROVE-CONDITIONAL；V095 manual apply/register DONE in v45；production `allLiquidation.{symbol}` subscription/writer revival DONE in v46 after explicit authorization. PM report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--w_audit_8c_correction_source_test_closure.md`；dry-run evidence: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--v095_linux_pg_dry_run_result.md`；MIT re-sign: `docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-17--w_audit_8c_v095_mit_resign.md`。
-- **v43 Option A source/test closure**: ✅ DONE 2026-05-16；`a6e17d5d` adds W-AUDIT-8b v0.3 4-cell sweep tooling with A3/E2/E4 approval；`ea4ceca6` lands Phase 1b close-maker-first source/test bundle with Worktree B dispatch, V094 audit writer, fallback terminalization, and healthchecks. No deploy / production SQL migration / runtime restart / auth mutation / paper/live/mainnet enablement. PM report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--option_a_phase1b_w_audit8b_impl_closure.md`。
-- **v42 role profile/memory hygiene**: ✅ DONE 2026-05-16；新增 `docs/agents/role-profile-memory-standard.md`，所有 `docs/CCAgentWorkSpace/*/profile.md` 接入共同角色契約，所有 `memory.md` 頂部加 historical-memory 解讀契約；A3/E3/E4/E5/QA/PM 等 profile 去除「當前狀態即真相」歧義，改為 historical baseline + `TODO.md`/latest report/runtime evidence 為準。歷史 memory 正文未刪除。
-- **v41 agent-settings refresh**: ✅ DONE 2026-05-16；all Claude/Codex agent role files now preload operating memory + `README.md` + `docs/agents/context-loading.md`, route active state to `TODO.md`, and no longer depend on stale numbered-memory sections, 11-tab, bilingual-comment, or 1200-line assumptions. Codex role index and agent-facing skills/profiles were aligned.
-- **Wave 1-4 全 closed**: WP-01/02/05/09 (Wave 1) + WP-03/04/07/10/BB-MF-3 (Wave 2) + WP-06/08/13/WP-13-leftover (Wave 3) + WP-11 Phase 1 (Wave 4); WP-12 DEFERRED by design.
-- **v35 rebuild + restart**: trade-core engine PID 69581 / API PID 69674 (2026-05-16); Wave 2-4 Rust source IMPL all deployed; runtime env at 2026-05-16 01:00 UTC had `OPENCLAW_AGENT_SPINE_RUNTIME_MODE=shadow`, `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1`, `OPENCLAW_ENABLE_PAPER=0`, `OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv`.
-- **Round 4 三角 cross-validation (PA + FA + CC)**: 一致 verdict A/C/A for 3 P0 → operator 確認同意。
-- **P0-1 WP-04 $2 RATIFY**: ✅ DONE 2026-05-16 commit `e24c1d8f`；operator ack at `docs/CCAgentWorkSpace/Operator/2026-05-16--wp04_budget_ratification.md`；governance debt cleared。
-- **P0-2 WP-03 OU sigma deploy-gate**: ✅ Option C selected；PA spec `docs/execution_plan/2026-05-16--wp03_ou_sigma_deploy_gate_spec.md` (~600 LOC) + `[69]` healthcheck design land；revert flag 三層 trigger logic (12h/24h/7d)；Operator notification ADR-0020 manual-only。**P1-WP03-DEPLOY-GATE-IMPL ✅ DONE 2026-05-16 commit `d6ff77f7`**：`checks_wp03_deploy_gate.py` 587 LOC + test 528→592 LOC（18/18 PASS）+ runner.py wire `[69]` + `__init__.py` re-export；完整工作鏈 E1→E2 RETURN→E1 round 2→E2 APPROVE（MEDIUM-1 ZERO_FILLS false-positive secondary guard 修 + LOW-1 REQUIRED escalation msg 加 `revert_recommended=false` hint + new test `test_zero_fills_env_override_age_mismatch`）；E4 386/0 sibling regression PASS；2 P2 follow-up: P2-WP03-MSG-STRUCT + P2-WP03-ALERT-FLAG-INDEPENDENCE；Linux-flagged 6 items（deploy 後 cron 第一次 fire empirical verify）。
-- **P0-3 Race protocol SOP Phase 2 rollout**: ✅ APPROVE + enforce 立即生效 2026-05-16 18:00+；`.claude/agents/E2.md` §5 race check 5 條 + `docs/CCAgentWorkSpace/PM/race_dispatch_template.md` PM §6 模板 + `docs/lessons.md` Phase 2 entry；2026-05-30 PM 2-week review。
-- **P1 #5 F-09 model_tier TOML extraction**: ✅ DONE commit `3b055c98`；ArcSwap snapshot path；3 TOML 加 `model_tier="l1_9b"`；E2 APPROVE / E4 PASS 2917/0/1。
-- **P1 #7 [68] portfolio_resting_exposure healthcheck**: ✅ DONE commit `3b055c98`；ID conflict [58]→[68] resolved；562+408 LOC new；E2 APPROVE-CONDITIONAL / E4 PASS 368/0。
-- **P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG**: ✅ DONE 2026-05-16 on `trade-core`；V092 physical continuous aggregates applied online; V091/V092/V093 `_sqlx_migrations` metadata repaired to max_applied=93 / rows=90; checksum verify drift_count=0. PM closure report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--wave_3_5_linux_migration_backlog_closure.md`。
-- **P2 maintenance hygiene batch**: ✅ DONE 2026-05-16 local source/test closure for `P2-H0-DISPLAY-LABEL-1`, `P2-START-LOCAL-HELPER`, `P2-PA-CALLPATH-GREP-RULE`, and `P2-CROSSTAB-I18N`。H0 GUI endpoint now returns `display_only=true`; local Control API launchers use `resolve_openclaw_api_bind_host()`; PA/E2 audit skill requires P0/P1 leak/bias production caller grep; listed cross-tab static GUI files have `实盘/平仓/请检查` grep=0. PM closure report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--p2_maintenance_hygiene_closure.md`。
-- **P1 #4 C1 v2 24h proof**: ✅ TECHNICAL PASS / APPROVE-CONDITIONAL + PRODUCTION WRITER REVIVAL DONE 2026-05-17；`trade-core:/tmp/openclaw/audit/liquidation_topic_probe/liquidation_topic_probe_v2_latest.md` verdict `PASS_C1_PROOF_CANDIDATE`, `c1_proof_eligible=true`, uptime ratio `0.999991`, failures `0`；BB APPROVE after corrected side mapping (`Buy` long liquidation / `Sell` short liquidation)；W-AUDIT-8c/V095 source-test idempotency correction is DONE, V095 Linux PG dry-run x2 PASS, MIT re-sign cleared the schema/idempotency blocker, V095 is applied on Linux, and v46 source/runtime revival now subscribes C1-approved `allLiquidation.{symbol}` with 3 real rows landed. PM result: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--c1_final_signoff_result.md`。
-- **P1 #6 BB-MF-3 production wiring**: ✅ SOURCE/TEST + RUNTIME DEPLOY DONE 2026-05-17；Phase 1b checkpoint `ea4ceca6` is deployed after V094 apply + engine-only rebuild/restart；close-maker audit fields can populate on subsequent fills。
-- **P1 #7 7d budget cap monitoring**: ⏳ passive deploy 後 1 週 (2026-05-23+)。
-- Stage 1 promotion evidence is Demo-only per AMD-2026-05-15-01. A4-C remains diagnostic-only/no-revive unless a future materially new predictive variable is preregistered and passes a fresh Stage 0R gate.
-- Operator 7 條 action 進度: 5/7 DONE + 2/7 passive wait. Wave 1-4 真實完成度 = TRULY DONE for source/test/deploy + governance A 99.0%.
+版本：v56-zh（基於 v56 翻譯與精簡）
+日期：2026-05-19
+狀態：本檔僅保留 ACTIVE / PENDING / ACTIVE-WATCH 項目；所有歷史 ✅ DONE 詳情已歸檔。
 
-This file is the active work queue only. Historical closures, stale observation
-tables, and superseded OpenClaw/Gateway assumptions are archived in
-`docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md` and
-`docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`.
-v21 cleanup archive:
-`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
-v24 stale-row audit archive:
-`docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
-v26 alpha-path dispatch report:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--alpha_path_phase_c_dispatch.md`.
-v27 intent-freeze post-grace closure report:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--p1_intent_freeze_27_post_grace_closure.md`.
-v28 Phase C0 liquidation inventory report:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8a_phase_c0_liquidation_inventory.md`.
-v29 P0-MICRO-PROFIT alpha prework:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--micro_profit_alpha_prework.md`.
-v29 A4-C PM/PA/FA unblock/archive engineering card:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_unblock_engineering_card.md`.
-v29 A4-C RCA start:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_stage0r_rca_start.md`.
-v30 TODO/source three-side sync:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--todo_v30_three_side_sync.md`.
-v31 A4-C RCA final + C1 proof start:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--a4c_rca_final_and_c1_proof_start.md`.
-v32 W-AUDIT-8b review + Stage 0R design:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--w_audit_8b_review_stage0r_design.md`.
-v35 current-progress sync + rebuild decision:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--v35_three_side_sync_rebuild.md`.
-v36 completion cleanup archive:
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
-v37 Stage 1 / A4-C active-marker cleanup:
-`docs/archive/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`.
-W-AUDIT-8b adversarial hardening commit `1499778b`:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--w_audit_8b_adversarial_hardening.md`.
-v39 Wave 3.5 Linux PG migration backlog closure:
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--wave_3_5_linux_migration_backlog_closure.md`.
+## §-1 v56 緊急狀態 — P0 trading-inert incident（2026-05-19 ~20:00 UTC）
+
+- **事件**：engine PID 1942669（UTC 12:27:11 watchdog respawn）處理 2 次 FILUSDT halt_session emergency close 後（12:27:14 + 12:27:37），進入 **7h43m TRADING-INERT**（0 intents / 0 orders / 0 fills；WS alive、~1k ticks/sec、IPC alive；panel_aggregator channel_len=65+ backpressure）。
+- **復原**：operator `restart_all.sh --keep-auth` UTC 20:09:36 → 新 PID 2099215；首筆 fill 在 restart 後 1 分鐘；24 分鐘內 5 fills / 3 symbols，正常交易恢復；Phase 1b verification sample n=13 繼續累積。
+- **E2 RCA**（`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--engine_watchdog_respawn_loop_and_trading_inert_rca.md`）：
+  - 本 bug = `paper_paused=true` sticky from Step 6 `RiskAction::HaltSession`（`step_6_risk_checks.rs:434-461`）**無 TTL auto-clear**；只 4 種 clearer：IPC Resume / Reset / SystemMode::ShadowOnly / restart default init
+  - 與先前 `P1-WATCHDOG-STATUS2-RCA` **不同根因**（先前只覆蓋 systemd cosmetic naming `sys.exit(2)`）
+  - Watchdog 無「alive but inert」偵測（只看 snapshot freshness；engine 每 30s 寫 status_report 不論是否交易）
+  - **Halt 觸發數學不通**：drawdown 10.2% vs TOML 25% threshold — trigger 根因仍 UNRESOLVED（log rotation 失了 UTC 12:27 那一行；可能 IPC patch / loading-order race / 第三條路徑）
+- **Operator 決議 2026-05-19 ~20:30 UTC**：
+  - Layer A：TTL clear **只清 daily_loss**（rolling）；drawdown 維持 sticky（session safety-critical，operator-only resume）
+  - Layer B：Watchdog 業務 heartbeat probe **僅告警**（不自動 restart）
+- **PA spec 已派**：`docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md`（~600-1000 LOC，ETA 2-3h）
+- **嚴重度 P0**：下次 breach 必復發；demo / live_demo / live 共用同段代碼；Phase 1b verification + 所有 PnL 在 breach 與 operator 發現之間都暴露
+
+任務追蹤條目見 §10 `P0-ENGINE-HALTSESSION-STUCK-FIX`。
+
+---
+
+## §0 v55 / 之前的完工狀態（一段話留底）
+
+v55（2026-05-19 上半段）operator 授權的 4 條並行軌道全收口：
+
+- **#5 watchdog RCA**（DNS/HTTP transport outage 誤判為 `ENGINE_CRASH`）
+- **#6 entry-path RCA**（entry-close 0% maker fill 為 path-specific，非全局 PostOnly 壞）
+- **#7 tab-live extract**（tab-live.html 2171→543 LOC，內聯 JS 抽到 tab-live.js 1645 LOC）
+- **#9 stress fails RCA + #12 E1 R2 fix**（stress_integration.rs 修 2 helper；35/35 PASS）
+
+關鍵 commit：`9bf4fd62` / `c1f47722` / `d927bf7f`。
+
+**QC P2-ENTRY-PATH critical reframe**：原 QA「entry-close vs risk-exit by ID prefix」拆法是結構性人為造成的；兩者都走同一 `execute_position_close()` 路径。真實是 6 maker attempts / 3 fills = 50% Wilson CI [18.8%, 81.2%] 覆蓋 sim 70.8% → 21pp 偏差非 70pp gap。Sample velocity ~0.44 grid_close/hr → 首個可信 verdict 推到 **T+96h~T+120h（2026-05-22~23 UTC）**。
+
+**v55 衍生 backlog**：見 §11.3 / §12（P1-WATCHDOG-EXIT-CODE-CLARIFY / FA-WATCHDOG-3STRIKE-ESCALATION-POLICY / P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX / P2-SIM-QUEUE-AWARE-ADJUSTMENT / P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS）。
+
+**Governance flag**：`cargo test --lib` 不覆蓋 tests/ integration crate；建議 sign-off SOP 加 `cargo test -p openclaw_engine --release`（no --lib）。
+
+## 翻譯與歸檔說明
+
+- 本次 v56→v56-zh 改寫：全文中文化 + 嚴格清理 ✅ DONE 詳情。
+- 已完成項目（含 commit hash、E2/E4 鏈、AMD 修文記錄）轉存到：
+  `docs/archive/2026-05-19--todo_v55_translation_archive.md`
+- 上次大規模歸檔已在以下文件累積，本次不再重複收納：
+  - `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`
+  - `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`
+  - `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`
+  - `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`
+  - `docs/archive/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`
+  - `docs/archive/2026-05-07--todo_v12_agent_openclaw_replan_archive.md`
+  - `docs/archive/2026-05-09--w_audit_verified_closed_archive_v3.md`
+
+維護契約：依 `docs/agents/todo-maintenance.md` 將本檔保持為活躍派工佇列；穩定專案脈絡寫進 `README.md`，agent 操作規則寫進 `CLAUDE.md` / `.codex/MEMORY.md`。
+
+---
 
 ## §0.0 PM Freeze — Demo-Only Stage 1 + A4-C Tombstone Guard
 
-**Status**: ACTIVE PM freeze; AMD-2026-05-15-01 now carries the rebase authority.
+**狀態**：ACTIVE PM freeze；AMD-2026-05-15-01 持有 rebase 權威。
 
-- Stage 1 promotion evidence is **Demo-only**: Stage 0 shadow → Stage 0R replay preflight (`eligible_for_demo_canary=true/false`) → Stage 1 Demo micro-canary (1 strategy × 1 symbol × 7d). Stage 0R is not Stage 1 PASS.
-- Paper is not an active promotion lane. Any plan, command, env file, script, or runtime launch that sets `OPENCLAW_ENABLE_PAPER=1` for promotion evidence remains **BLOCKED** unless a future operator decision explicitly reopens paper for non-promotion diagnostics.
-- A4-C tombstone: `W-AUDIT-8d` BTC→Alt Lead-Lag is archived from active promotion and closed no-revive for the BTC 1m return + xcorr feature shape. Keep `panel.btc_lead_lag_panel` / `[57]` diagnostic-only; do not use A4-C as a Stage 0R promotion candidate or Stage 1 Demo cohort source.
-- Future A4-C reopen requires a materially new predictive variable, preregistered validation, and a fresh strategy×symbol Stage 0R packet with `eligible_for_demo_canary=true`. Threshold loosening, post-hoc symbol picking, or reusing paper evidence are non-triggers.
-- Current active alpha gates: W-AUDIT-8b Stage 0R tooling has v0.3 sweep source/test checkpoint `a6e17d5d` and waits for panel ≥7d plus QC/MIT/BB Round 2 verdict; W-AUDIT-8a C1 transport proof is `PASS_C1_PROOF_CANDIDATE` with BB corrected side mapping approved; W-AUDIT-8c source/test correction, V095 migration source, V095 Linux PG dry-run x2, MIT re-sign, V095 Linux apply, and production `allLiquidation.{symbol}` writer revival are DONE. No liquidation strategy launch/promotion gate is implied by writer revival.
+- Stage 1 promotion evidence **僅限 Demo**：Stage 0 shadow → Stage 0R replay preflight（`eligible_for_demo_canary=true/false`）→ Stage 1 Demo micro-canary（1 策略 × 1 symbol × 7d）。Stage 0R 不是 Stage 1 PASS。
+- Paper 不是 active promotion lane。任何計畫 / 命令 / env / 腳本 / runtime 若設 `OPENCLAW_ENABLE_PAPER=1` 為 promotion 用，**BLOCKED**，除非未來 operator 明示重啟 paper 作非 promotion 診斷用途。
+- **A4-C tombstone**：`W-AUDIT-8d` BTC→Alt Lead-Lag 退出 active promotion，封存 no-revive（BTC 1m return + xcorr feature shape）。`panel.btc_lead_lag_panel` / `[57]` 僅保 diagnostic；不得作 Stage 0R 候選或 Stage 1 Demo cohort 來源。
+- 未來 A4-C 重啟需：materially new predictive variable + preregistered validation + 全新 strategy×symbol Stage 0R packet 且 `eligible_for_demo_canary=true`。
+- 當前 active alpha gates：W-AUDIT-8b Stage 0R 已 tombstoned；W-AUDIT-8a C1 transport proof `PASS_C1_PROOF_CANDIDATE`；W-AUDIT-8c source/test + V095 apply + production `allLiquidation.{symbol}` writer revival 已 DONE。writer revival 不蘊含 liquidation 策略可上線。
 
 ---
 
-## §0 Sprint Milestone Banner（FA 業務鏈視角，63% → 85-89%）
+## §1 Sprint Milestone Banner（業務鏈 63% → 85-89%）
 
-| Sprint | Week | 主題 | E1 capacity | Business chain milestone |
+| Sprint | Week | 主題 | E1 capacity | 業務鏈 milestone |
 |---|---|---|---|---|
-| **N+0** | W1-W2 | FOUNDATION HEAVY: W-AUDIT-9 + 8a Phase A + B 群 + C-A6 + 6 mid-ground | **5 active + 1 stand-by** (operator (a)) | 63→65% |
-| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING: 8a Phase B+C + 8b Stage 0R packet + **Stage 1 Demo micro-canary** prep after a future green Stage 0R | 4/6 | 65→70% must be recalculated after demo canary evidence |
-| **N+2** | W5-W6 | 8a Phase D + Stage 2 demo cohort 14d（only after Stage 1 demo evidence） | **5 active + 1 stand-by** | 70→76% rebase pending |
-| **N+3** | W7-W8 | 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | 4/6 | 76→80% |
-| **N+4** | W9-W10 | 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | 4/6 | 80-83% |
-| **N+5** | W11-W12 | 8f IMPL + 8g (R-4) spec + **first per-alpha-source supervised live** | **5 active + 1 stand-by** | **85-89%** |
+| **N+0** | W1-W2 | FOUNDATION HEAVY：W-AUDIT-9 + 8a Phase A + B 群 + C-A6 + 6 mid-ground | 5 active + 1 stand-by | 63→65% |
+| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING：8a Phase B+C + 8b Stage 0R + 待未來綠燈 Stage 0R 後 Stage 1 Demo micro-canary 預備 | 4/6 | 65→70%（待 demo canary 證據後重估） |
+| **N+2** | W5-W6 | 8a Phase D + Stage 2 demo cohort 14d（限 Stage 1 demo 證據通過後）| 5 active + 1 stand-by | 70→76%（rebase 待定） |
+| **N+3** | W7-W8 | 8c（Liquidation）IMPL + 8e（R-2）spec + Stage 3 demo full | 4/6 | 76→80% |
+| **N+4** | W9-W10 | 8f（R-3）spec + 8b（Funding Skew）IMPL + 8e IMPL + Track W 收尾 | 4/6 | 80-83% |
+| **N+5** | W11-W12 | 8f IMPL + 8g（R-4）spec + **首個 per-alpha-source supervised live** | 5 active + 1 stand-by | **85-89%** |
 
-**Stand-by E1 啟用條件**（operator 拍板 2026-05-09 (a)）：W-AUDIT-9 T3 stage-aware exception path 翻車 / W-AUDIT-8a Phase A byte-diff fail / W-AUDIT-6d mid-ground 與 8a Phase A 序列化 deadline 撞牆 / 任一 active E1 health incident → stand-by 即時補位。
+**Stand-by E1 啟用條件**（operator 拍板 2026-05-09 (a)）：W-AUDIT-9 T3 stage-aware exception path 翻車 / W-AUDIT-8a Phase A byte-diff fail / W-AUDIT-6d mid-ground 與 8a Phase A 撞牆 / 任一 active E1 health incident → stand-by 即時補位。
 
-**規劃帶 supervised live 概率**（FA）：6/15 樂觀 ~30% / 6/30 中位 ~40% / 7/15 悲觀 ~25% / 8/15 極悲觀 ~5%。
-
----
-
-## §2 Architecture Boundary
-
-- Formal product: `玄衡 · Arcane Equilibrium`.
-- Bybit is the only exchange target.
-- Rust `openclaw_engine` remains the trading, risk, strategy-config, and execution authority.
-- Python/FastAPI is the control plane, bridge, GUI backend, replay/orchestration surface, and local 5-Agent runtime host. It is not the direct trading truth layer.
-- The canonical GUI is the existing FastAPI console at `trade-core:8000/console`, now the OpenClaw Control Console.
-- External OpenClaw Gateway is communication/mobile/supervisor/proposal relay only. It is not a trading conductor, not the local 5-Agent runtime, and not a second GUI.
-- Local Scout / Strategist / Guardian / Analyst / Executor stay inside TradeBot. Cloud L2 calls must go through one supervisor escalation packet, explicit budget/model config, and durable `agent.ai_invocations` ledger reservation.
-- Scanner is always-on infrastructure for market context, active-universe attribution, route fitness, opportunity evidence, and legacy would-block audit. It is not a trading authority and cannot hard-gate opens, closes, live auth, or order dispatch.
-- `MessageBus` is legacy/advisory trace. Authoritative agent promotion requires typed lineage: StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport.
-- Replay is advisory and diagnostic. Replay can fast-track preflight; it cannot substitute for runtime lineage or authorize live promotion.
-- **Graduated Canary rebase**（AMD-2026-05-15-01 supersedes AMD-2026-05-09-03 Stage 1 paper semantics）：alpha-bearing pathway now uses Stage 0 shadow → **Stage 0R Replay Preflight** (`eligible_for_demo_canary=true/false`, not Stage 1 PASS) → **Stage 1 Demo micro-canary** (1 strategy × 1 symbol × `Environment::Demo` × 7d) → Stage 2 demo extended ×14d → Stage 3 demo full ×21d → Stage 4 LIVE_PENDING。DOC-08 §12 9 條安全不變量 / SM-04 ladder / Live boundary 5-gate / §二 16 原則硬不變式 4 範圍**仍強制 binary fail-closed**，不被 graduated canary 觸碰。
+**Supervised live 機率帶**（FA）：6/15 樂觀 ~30% / 6/30 中位 ~40% / 7/15 悲觀 ~25% / 8/15 極悲觀 ~5%。
 
 ---
 
-## §3 Latest State
+## §2 架構邊界
 
-### Current State (2026-05-16 PM cleanup)
-
-- W-C MAG-082 Stage 2 **WINDOW_PASS 2026-05-11** and W-D MAG-083/MAG-084 **DONE 2026-05-11** are closed; proposal/mobile/Stage 3+/true-live gates remain separate and still blocked by edge/LG/ops prerequisites.
-- A4-C BTC→Alt Lead-Lag active-promotion marker is removed: Step 5b and RCA are archived as **GATE-RED / no-revive** for the BTC 1m return + xcorr feature shape; `panel.btc_lead_lag_panel` remains diagnostic-only. The OI-confirmed 5m packet is only a replay spec and does not change eligibility.
-- `[55]` is source-cleared by `P1-HEALTHCHECK-55-INVARIANT`; `[67]` is restored to PASS after feature baseline apply; `[4]` phys lock and `[Xb]` triangulation are PASS after `7108035d`.
-- V079 / `learning.strategy_trial_ledger` is runtime-applied on `trade-core` (migrations through V090 applied; 16,212 ledger rows observed). Old "V079 not applied / engine still 5/8 binary" text is archived in `docs/archive/2026-05-15--todo_v24_stale_rows_archive.md`.
-- Remaining business root cause: 5 textbook strategies still lack durable positive net edge. `P0-EDGE-1`, `P0-LG-1/2/3`, `P0-OPS-1..4`, Alpha Surface Phase C/D, and alternative alpha candidates are the current path.
-- **EDGE-P2-3 Phase 1b close-maker-first refactor — Round 1 Design/Governance CLOSED + Worktree B DEPLOY DONE 2026-05-17**: round 1 歷史 + spec v1.3 / AMD v0.4 / V094 spec archived at `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`；Option A Worktree B source/test landed at `ea4ceca6` with A3/E2/E4 approval；`b867e452` fixed the test-only phys-lock literal guard regression；V094 Linux apply + engine-only rebuild/restart are DONE. phys_lock live enablement remains deferred to Phase 2b. Honest 認知：本 refactor 是 execution-quality optimization（fee saving ~$50-$200/year per E3 empirical），不解 trading losses root cause（5 textbook 策略 structural alpha deficit）；真實治癒走 W-AUDIT-8a/8b/8c alpha source 軸。
-- **Trading losses Round 2 — Alpha Source Push Option A SOURCE/TEST DONE 2026-05-16 + W-AUDIT-8c correction/V095 APPLY DONE 2026-05-17**: operator trigger 後同步派發 2 路：(P0) Phase 1b Worktree B source/test done `ea4ceca6` and runtime deploy done after V094；(P1) W-AUDIT-8b Round 2 Phase A sweep tooling done `a6e17d5d`。C1 transport proof passed 2026-05-17; W-AUDIT-8c correction source/test includes V095 idempotency source; V095 Linux PG dry-run x2 PASS + MIT re-sign APPROVE-CONDITIONAL + Linux apply/register DONE。Production writer revival still waits for separate AMD/source/config dispatch；no production `allLiquidation*` enablement / auth mutation / paper/live/mainnet enablement yet.
-- **2026-05-18 EDGE-P2-3 Phase 1b RUNTIME ACTIVATOR BLOCKER — ✅ RESOLVED via deploy chain CLOSED (see entry below)**: original RCA preserved for governance audit — post-deploy 4h `trading.fills` sample showed 0% maker_attempt rate (18 grid_close_short + 2 ma_reverse_cross all `close_maker_attempt=FALSE` + `fallback_reason=NULL`). E2 adversarial RCA `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--phase_1b_0_attempt_rca.md` identified cold-default `use_maker_close=false` + ZERO production callers for `set_use_maker_close_runtime`. Resolution: PA design `2026-05-18--phase_1b_use_maker_close_runtime_activator_design.md` Option A TOML activator → E1 second-dispatch IMPL `18081551` (~40 LOC `pipeline_ctor.rs` + `pipeline_config.rs` + `risk_config_demo.toml`) → E2 re-review APPROVE 0 new MUST-FIX (`a94825cb`) → E4 PASS 12/12 (`af3b3010`) → QA APPROVE 0 BLOCKER (`a1b3ca908`) → merge `c737a1e4` → restart 2026-05-17 23:54 UTC engine PID 1143103. AMD-2026-05-15-02 v0.5 (`23e6b6b2`) added Runtime Activation Layer wording. AC-A 24h window verification still pending statistical significance per QA template.
-- **2026-05-18 W-AUDIT round 2 milestones**: (a) **W-AUDIT-8b Round 2 Phase B preliminary sweep** on panel 6.92d (operator-auth override pending 7.0d natural confirm ≈2026-05-18 01:30 CEST) returned **8/8 cells RED HIGH conf** with DSR=0 / PBO 0.64-0.75 / z=1.2 INJUSDT dilution -9.64 bps / crowded_long_fade dead trigger all z (`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-17--w_audit_8b_round2_phase_b_preliminary_sweep.md`); 7.0d confirm rerun + 4-agent QC/MIT/BB/FA review packet template (`docs/CCAgentWorkSpace/PM/workspace/templates/2026-05-18--w_audit_8b_round2_red_4agent_review_packet_template.md`) ready. (b) **W-AUDIT-8a Phase B/C/D 11-worktree decomposition** done (`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8a_phase_b_c_d_worktree_decomposition.md`): 36.1 pd / 8.5 wallclock weeks @ 4 active E1. **Wave 1 ✅ MERGED 2026-05-18** via single-sequential E1+E2 chain post race-incident recovery: B-REM-1 dispatch snapshot contract tests `49975eeb` (merge `5aeae75c`), B-REM-5 SourceAvailability schema `5997dd43` + ADR-0023 `1b614daf` (merge `ef0dfc6e`, E2 APPROVE per `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8a_b_rem_5_e2_review.md`), C1-LIQ-WRITER LiquidationPulse provider `7ab6c22d` + healthcheck `[67]` `d8938a78` + W-AUDIT-8c spec v0.3 (`06897175`) (merge `25413e96`, E2 APPROVE-CONDITIONAL + QA APPROVE WITH RESERVATIONS per `docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-18--w_audit_8a_c1_liq_writer_qa_deploy_readiness.md`). Wave 2 (`C2-ORDERFLOW` 5pd HIGH + `C3-SPREAD` + `D-CONTRACT-LOCK` 2pd PA-only) **deferred to Sprint N+4** (W9-W10, 2026-06-07..13).
-- **2026-05-18 AMD-2026-05-15-02 v0.5 land + multi-agent dispatch race incident + recovery**: AMD v0.4 → v0.5 wording patch (`23e6b6b2`) adds explicit Runtime Activation Layer + three-env TOML table + Phase 2b live_demo Demo-only guard conflict defer to AMD §3 line 84 (closes E2-identified spec/IMPL gap). **4-E1 + 1-PA parallel dispatch on 2026-05-18 SUSPENDED** due to (a) `isolation=worktree` 機制不可靠（hook 未設 + agents 用絕對路徑 write main tree），(b) agents cross-wrote main tree（Phase 1b activator agent + B-REM-1 agent 都動 `rust/openclaw_engine/src/tick_pipeline/`，導致 `step_4_5_dispatch.rs +246 LOC` (B-REM-1 dispatch snapshot contract tests) leaked into `feature/phase-1b-runtime-activator` branch alongside Phase 1b activator IMPL），(c) AMD v0.5 patch 在 main tree 被某 agent 過程 silent revert（已 re-apply）。**Recovery state ✅ CLOSED 2026-05-18 via single-sequential dispatch**: Phase 1b activator IMPL second-dispatch `18081551` (post-strip 245 LOC B-REM-1 leak + honest cargo test 2972/0/1) → merge `c737a1e4`. B-REM-5 SourceAvailability `5997dd43` E2 APPROVE → merge `ef0dfc6e` + ADR-0023 `1b614daf`. B-REM-1 dispatch snapshot contract tests re-dispatched as `49975eeb` → merge `5aeae75c`. C1-LIQ-WRITER LiquidationPulse provider re-dispatched as `7ab6c22d` + healthcheck `[67]` `d8938a78` → merge `25413e96`. **Lesson learned**: 不再多 E1 同時並行；single-agent sequential + E2 chain 完才下個 — 本批 recovery 是這條規則的首次實證；後續所有 W-AUDIT-8a Wave 2+ 工作必繼承。
-- **2026-05-18 Phase 1b runtime activator deploy chain CLOSED + W-AUDIT-8b Round 2 RED_FINAL tombstoned**:
-  - **Phase 1b deploy chain APPROVED**: E1 second-dispatch (`18081551`, post-strip 245 LOC B-REM-1 leak + honest cargo test 2972/0/1) → E2 re-review APPROVE 0 new MUST-FIX (`a94825cb`) → E4 PASS 12/12 runs Mac+Linux release cross-arch (`af3b3010`) → QA APPROVE 0 BLOCKER (`a1b3ca908`) → merge to main (`c737a1e4`) → operator-代跑 restart_all.sh --rebuild on trade-core UTC 2026-05-17 23:54 → engine PID 1066422 → **1143103** with new binary containing `runtime.use_maker_close` activator. `risk_config_demo.toml [runtime] use_maker_close=true` confirmed via grep + engine boot log shows `risk_demo_version=2` loaded. **Post-restart 90min sample: 1 whitelist close, 0 maker_attempts (n=1 too small)**; AC-A/B/C verification requires ~24h window for statistical significance per QA template. Phase 2a 14d observation clock t=0 = first AC-A SQL PASS UTC timestamp (NOT restart timestamp). **Cross-wave consistency check pending** (QA recommendation #3 — restart triggered W6/W7/W1 main-landed-but-not-deployed sources too; PM 24h audit packet §3.9).
-  - **W-AUDIT-8b Round 2 RED_FINAL tombstoned**: PA 7.0d sweep rerun (panel 7.0049d natural gate, +7min margin, 4/4 empirical assertion gates PASS) returned 8/8 cells RED HIGH conf 100% aligned with preliminary 6.92d (`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8b_round2_phase_b_final_sweep.md`). 4-agent independent review **4/4 APPROVE concur RED_FINAL** (BB 0/2/3, QC 0/4/2, FA 3/2/3, MIT 0/4/3 MUST/SHOULD/NTH); MIT report `docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-18--w_audit_8b_round2_red_final_mit_review.md` (`d3fe4063`); BB/QC/FA inline per profile rule; consolidated verdict `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-18--w_audit_8b_round2_red_final_4agent_consolidated.md` (`ffdbc2d0`). **Cross-agent consensus root causes**: (a) z 39x asymmetry (MIT empirical: z≥+1.5 0.27% vs z≤-1.5 10.5%) + Bybit USDT-perp 25-sym 結構性 funding tail bimodal (BB structural) → crowded_long_fade dead **data-structural, NOT demo silent degradation NOT strategy design bug**; (b) INJUSDT 87% concentration in 2026-05-13 single-day event (MIT) → effective independent obs ≈ 2-3 days; (c) `_n_eff` formula deterministic horizon-overlap (not cluster-aware) — RED robust but W-AUDIT-8c+ must retrofit. **AMD-2026-05-15-02 v0.6 → v0.7 wording patch** (`71f2283b`) §8 condition 3 funding-related general + tombstone clause. **W-AUDIT-8b spec v0.3 → v0.4 tombstone amendment** (`ef7ea6c2`) + NEW `Branch-Level Dormancy Retire Path` governance hardening (FA-MUST-FIX-2 forward-applicable to W-AUDIT-8c/8a/8e/8f specs). **REJECTED**: Round 3 zoom-in (MIT ROI≈0) / 28d panel expansion / dual-AMD. **Redirect path**: W-AUDIT-8c Liquidation Cluster + W-AUDIT-8a Phase B/C/D per fix-plan v1.1 §9.4 critical path (11-worktree decomposition, Wave 1 = B-REM-1/5 + C1-LIQ-WRITER ready).
-- **2026-05-18 ~10:30 UTC EDGE-P2-3 Phase 1b 12H sample BLOCKER — 100% timeout fallback → P0 calibration scheduled after 12H window closes**: Operator surfaced third-party assessment + main session PG verify converged on same finding. **PG data (post-restart UTC 2026-05-17 23:54 + ~10.5h)**:
-  ```
-  engine_mode | close_maker_attempt | close_maker_fallback_reason | count
-  demo        | f                   |                             | 23
-  live_demo   | f                   |                             | 13
-  demo        | t                   | timeout_taker               | 4
-  ```
-  4 attempted close fills (all on whitelist exit_reasons: 3 `grid_close_short` + 1 `phys_lock_gate4_giveback`) were maker_attempt=TRUE BUT **100% fell back to taker via timeout** → real fee saving = 0% currently. **Pre-calibration code path is verified correct** (TOML activator firing + maker_attempt instrumentation populating audit fields); root cause is **parameter tuning** (offset_bps=0.5 + buffer_ticks=1 + timeout 30s grid / 15s phys_lock too tight for sparse alt-coin spreads), NOT an IMPL bug. **Schedule**: 12H test window ends ~2026-05-18 11:54 UTC; after window closes → P0 dispatch sequence below. Pre-window remaining ~1.5h is observation-only (no parameter changes during 12H window per AC-A integrity). Operator instruction: "12H 後做 calibration，然後三端同步".
+- 正式產品：`玄衡 · Arcane Equilibrium`。
+- 交易所目標僅 Bybit。
+- Rust `openclaw_engine` 是交易 / 風控 / 策略 config / 執行的權威。
+- Python/FastAPI 是 control plane / bridge / GUI 後端 / replay+orchestration surface / 本地 5-Agent runtime host。不是交易事實層。
+- 標準 GUI = FastAPI console `trade-core:8000/console`（OpenClaw Control Console）。
+- 外部 OpenClaw Gateway 僅做通訊 / mobile / supervisor / proposal relay。不是交易 conductor，不是本地 5-Agent runtime，不是第二 GUI。
+- 本地 Scout / Strategist / Guardian / Analyst / Executor 留在 TradeBot 內。Cloud L2 呼叫須走一次 supervisor escalation packet + 顯式 budget/model config + durable `agent.ai_invocations` ledger reservation。
+- Scanner 是 always-on 基礎設施（市場脈絡 / active-universe attribution / route fitness / opportunity evidence / legacy would-block audit）。不是交易權威，無法 hard-gate opens / closes / live auth / order dispatch。
+- `MessageBus` = legacy/advisory trace。權威 agent promotion 須 typed lineage：StrategySignal → StrategistDecision → GuardianVerdict → ExecutionPlan → Decision Lease / idempotency → ExecutionReport。
+- Replay 是 advisory / diagnostic。可加速 preflight；不能取代 runtime lineage 或授權 live promotion。
+- **Graduated Canary rebase**（AMD-2026-05-15-01 取代 AMD-2026-05-09-03 Stage 1 paper 語意）：alpha-bearing 走 Stage 0 shadow → Stage 0R Replay Preflight（`eligible_for_demo_canary=true/false`，非 Stage 1 PASS）→ Stage 1 Demo micro-canary（1 策略 × 1 symbol × `Environment::Demo` × 7d）→ Stage 2 demo extended ×14d → Stage 3 demo full ×21d → Stage 4 LIVE_PENDING。DOC-08 §12 9 條安全不變量 / SM-04 ladder / Live boundary 5-gate / §二 16 原則硬不變式 4 範圍**仍強制 binary fail-closed**，不被 graduated canary 觸碰。
 
 ---
 
-## §4 Active Dispatch Queue
+## §3 當前活躍狀態
 
-**Dispatch Order** — ✅ MAG-082 runtime lineage PASS 2026-05-11；✅ MAG-083 三角 audit + MAG-084 sign-off CLOSED 2026-05-11；W-D wave closed。但 proposal relay / Telegram/WebChat / 第二 GUI / Stage 3/4 / true live autonomy 仍受 W-AUDIT-3..7 + LG-2/3/4 + edge net-positive + ops gates 限制，不因 W-D closure 自動解除。
+- W-C MAG-082 Stage 2 **WINDOW_PASS 2026-05-11** 與 W-D MAG-083/MAG-084 **DONE 2026-05-11**：已關閉；proposal / mobile / Stage 3+ / true-live gates 仍另立，被 edge/LG/ops 前置卡。
+- A4-C BTC→Alt Lead-Lag active-promotion marker 移除：Step 5b 與 RCA 封存 **GATE-RED / no-revive**；`panel.btc_lead_lag_panel` 留 diagnostic-only。OI-confirmed 5m packet 僅是 replay spec，不改變 eligibility。
+- `[55]` 已被 `P1-HEALTHCHECK-55-INVARIANT` source-cleared；`[67]` 經 feature baseline apply 後恢復 PASS；`[4]` phys lock 與 `[Xb]` triangulation 在 `7108035d` 之後 PASS。
+- V079 / `learning.strategy_trial_ledger` runtime 已在 `trade-core` 應用（migrations 已到 V090）；觀察到 16,212 ledger rows。舊「V079 未 apply / engine 仍 5/8 binary」敘述已歸檔。
+- **業務根因**：5 textbook 策略仍欠持續正 net edge。`P0-EDGE-1`、`P0-LG-1/2/3`、`P0-OPS-1..4`、Alpha Surface Phase C/D、替代 alpha 候選為當前路徑。
+- **EDGE-P2-3 Phase 1b**：Round 1 Design/Governance + Worktree B 部署已 CLOSED（細節見 archive 2026-05-16 + 2026-05-19 v55 translation archive）。本 refactor 是 execution-quality optimization（fee saving ~$50-$200/年，per E3 empirical），不解 trading losses root cause；真實治癒走 W-AUDIT-8a/8b/8c alpha source 軸。
+- **Trading losses Round 2 — Alpha Source Push**：Option A source/test + W-AUDIT-8c correction + V095 apply 已 DONE。C1 transport proof passed 2026-05-17，writer revival 已上線（`0e8a8ae8` / `bedc40c3`）。
+- **2026-05-18 EDGE-P2-3 Phase 1b RUNTIME ACTIVATOR**：RESOLVED via deploy chain CLOSED；engine PID 1143103；`runtime.use_maker_close=true`。AC-A 24h 統計顯著性窗口已通過 INSUFFICIENT_SAMPLE 階段。
+- **2026-05-18 W-AUDIT round 2 結局**：
+  - W-AUDIT-8b Round 2 RED_FINAL **TOMBSTONED**（4-agent 4/4 APPROVE concur；spec v0.4 + AMD v0.7）
+  - W-AUDIT-8a Phase B/C/D Wave 1 **MERGED**（B-REM-1 / B-REM-5 + ADR-0023 / C1-LIQ-WRITER + `[67]`）
+- **2026-05-18 multi-agent dispatch race incident**：lesson learned = 不再多 E1 同時並行；single-agent sequential + E2 鏈完才下個（已 enforce）。
+- **2026-05-18 Phase 1b parameter calibration**：12H sample 100% timeout_taker fallback → P0 calibration DONE 2026-05-18 13:50 UTC（top cell `G-AB-01-C90` fill 70.8% / +3.37 bps simulated；Grid family `timeout_ms 30s → 90s` deployed）。Phase 2a 14d observation clock reset @ 13:50 UTC。
+- **2026-05-19 v55 sprint**：4 軌道 closure（見 §0）。
+- **2026-05-19 ~20:00 UTC v56 incident**：engine 7h43m trading-inert（見 §-1）；新 P0 `P0-ENGINE-HALTSESSION-STUCK-FIX`；PA spec 已派；engine PID 2099215 自 20:09:36 起恢復；Phase 1b verification 繼續累積。
 
-**Status Legend**: ✅ DONE / ⏳ PENDING / 🟡 PARTIAL / 🔵 ACTIVE / ⛔ DEFER
+---
 
-### §4.1 Wave Roster (DUAL-TRACK + 8a-8h)
+## §4 活躍派工佇列
 
-| Rank | Wave | Tag | Owner Chain | Status / Target | Exit Criteria |
+**狀態圖示**：✅ DONE / ⏳ PENDING / 🟡 PARTIAL / 🔵 ACTIVE / ⛔ DEFER
+
+### §4.1 Wave Roster（DUAL-TRACK + 8a-8h）
+
+| 序 | Wave | 標籤 | Owner | 狀態 | 出口條件 |
 |---:|---|---|---|---|---|
-| 1 | `W-F` Edge/data quality + Live Gate foundation | alpha-bearing | PM → QC/MIT/PA → E1/E4 → PM | ⏳ **PENDING** before true-live | H0 production caller, pricing binding, supervised-live state machine. |
-| 2 | `W-G` Proposal/approval/mobile relay | alpha-neutral | PM → CC/FA/PA → E1/E2/E4 → PM | 🟡 **BACKEND FOUNDATION DONE**（待 mobile relay）| Gateway/console proposal/approval relay; no direct order/config/live-auth. |
-| 3 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 + MIT + E2 + E4 | 🟡 **PARTIAL** | Corrected retained scope still active in §11.2: `cost_edge_advisor_log`, `drift_events`, two companion views, and dropped/no-DDL `scorer_predictions`; long-wave fix remains mounted into `W-AUDIT-8f`. |
-| 4 | `W-AUDIT-8a` Alpha Surface Foundation | alpha-bearing | PA → E1 → E2 → E4 + MIT/QC/CC/BB → PM | ✅ **C1 TRANSPORT PASS + WRITER REVIVAL DONE 2026-05-17 + WAVE 1 MERGED 2026-05-18** | Phase A/B/C0 complete; v1 C1 proof FAIL_CONNECTION 5h/24h → v2 resilient harness IMPL `25396b0b` + consolidated 6-fix `8d2eef58` 全鏈 GREEN；C1 24h artifact on `trade-core` is `PASS_C1_PROOF_CANDIDATE`; BB approved corrected side mapping (`Buy` long liquidation / `Sell` short liquidation); MIT schema/writer idempotency condition is cleared by V095 apply; production `allLiquidation.{symbol}` writer revival landed in `0e8a8ae8`/`bedc40c3` with Linux rows observed. **Phase B/C/D 11-worktree Wave 1 (B-REM-1 `49975eeb` + B-REM-5 `5997dd43` + ADR-0023 `1b614daf` + C1-LIQ-WRITER `7ab6c22d` + healthcheck `[67]` `d8938a78`) MERGED 2026-05-18 via `ef0dfc6e` / `5aeae75c` / `25413e96`** with E2 APPROVE + E4 PASS + QA APPROVE WITH RESERVATIONS. Wave 2 (`C2-ORDERFLOW` 5pd HIGH + `C3-SPREAD` + `D-CONTRACT-LOCK` 2pd PA-only) deferred to Sprint N+4 (W9-W10, 2026-06-07..13) per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8a_phase_b_c_d_worktree_decomposition.md`. PM result: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-17--c1_final_signoff_result.md`。 |
-| 5 | `W-AUDIT-8b` A4-A Funding Skew Directional | alpha-bearing | PA spec → Stage 0R query/report + QC + MIT + BB review | ⛔ **TOMBSTONED 2026-05-18 Round 2 RED_FINAL** | Spec v0.3 → **v0.4 tombstone** (`ef7ea6c2`) per Round 2 7.0d sweep 8/8 cells RED HIGH conf + 4-agent (BB/QC/FA/MIT) **4/4 APPROVE concur** (`ffdbc2d0` consolidated verdict). AMD v0.6 → v0.7 (`71f2283b`) §8 condition 3 funding-related general + tombstone clause. No-revive on same feature shape per A4-C precedent. NEW `Branch-Level Dormancy Retire Path` governance hardening forward-applicable to W-AUDIT-8c/8a/8e/8f. **Redirect**: W-AUDIT-8c + W-AUDIT-8a Phase B/C/D per fix-plan v1.1 §9.4 critical path. REJECTED: Round 3 zoom-in / 28d panel expansion / dual-AMD. |
-| 6 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction | alpha-bearing | PA spec → E1 + E2/E4 + MIT + BB → PM | ✅ **SOURCE/TEST + V095 LINUX APPLY + WRITER REVIVAL DONE 2026-05-17** | V095 source/test preserves one `data[]` item per row via `(symbol, ts, side, qty, price)`; parser/writer fail closed; corrected side mapping tested; V095 Linux PG dry-run x2 PASS + MIT re-sign + Linux apply/register DONE; production `allLiquidation.{symbol}` writer revival DONE; strategy launch remains separate. |
-| 7 | `W-AUDIT-8e` (R-2) Strategist Alpha Source Orchestrator | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+4 spec → N+5 IMPL | AlphaSourceRegistry + dynamic Sharpe-by-regime + Hypothesis sourcing. |
-| 8 | `W-AUDIT-8f` (R-3) Hypothesis Pipeline + W-AUDIT-4 ML | alpha-bearing | PA spec → E1 IMPL + MIT spec | ⛔ **DEFER** Sprint N+5 IMPL | learning.hypotheses state machine + W-AUDIT-4 dead schema root-cause closure. |
-| 9 | `W-AUDIT-8g` (R-4) Per-alpha-source Live Promotion Gate | alpha-bearing | PA spec → E1 IMPL | ⛔ **DEFER** Sprint N+7+ | LiveBudget(alpha_source_id, slice) replacement for system-wide live_reserved model. |
-| 10 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 review | ⛔ **DEFER** Sprint N+4-N+6 | A3 tab expansion follow-up. |
-| 11 | `W-AUDIT-10` (R-5) Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec → E1 IMPL | ⛔ **DEFER** 中期 | CI gate spec drift > 7d auto-fail + module/table lifecycle header. |
-| 12 | `EDGE-P2-3 Phase 1b` Close-Maker-First Refactor | alpha-impact-adjacent execution-quality | PA → E1 → E2 → E4 → QA → PM | ✅ **DEPLOY DONE 2026-05-18, AC-A VERIFICATION PENDING 24h** | Full chain APPROVED: E1 second-dispatch `18081551` (post-strip 245 LOC B-REM-1 leak + honest cargo test 2972/0/1) → E2 re-review APPROVE 0 new MUST-FIX → E4 PASS 12/12 cross-arch → QA APPROVE 0 BLOCKER → merge to main `c737a1e4` → operator-authorized restart UTC 2026-05-17 23:54 (PID 1066422 → 1143103). AMD v0.6 → v0.7 (`71f2283b`) wording patch §8 condition 3 land. `runtime.use_maker_close=true` confirmed in demo TOML. Phase 2a 14d clock t=0 trigger = first AC-A SQL PASS (attempt_pct ≥ 25% on demo whitelist closes within 2h post-restart), NOT restart timestamp. Post-90min sample: 1 whitelist close, 0 attempts (n=1 too small). PM 24h post-deploy verification audit pending dispatch (template `2026-05-18--pm_24h_post_deploy_verification_audit_packet.md`). Cross-wave consistency check pending (QA recommendation #3). |
+| 1 | `W-F` Edge/data quality + Live Gate 基座 | alpha-bearing | PM→QC/MIT/PA→E1/E4→PM | ⏳ **PENDING**（true-live 前置）| H0 production caller / pricing binding / supervised-live state machine |
+| 2 | `W-G` Proposal/approval/mobile relay | alpha-neutral | PM→CC/FA/PA→E1/E2/E4→PM | 🟡 **BACKEND 基座 DONE**（待 mobile relay）| Gateway/console proposal/approval relay；不可直發 order/config/live-auth |
+| 3 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 + MIT + E2 + E4 | 🟡 **PARTIAL** | 修正後保留範圍見 §11.2；長尾治理 mount 進 `W-AUDIT-8f` |
+| 4 | `W-AUDIT-8a` Alpha Surface 基座 | alpha-bearing | PA→E1→E2→E4 + MIT/QC/CC/BB→PM | ✅ **C1 transport PASS + writer revival + Wave 1 MERGED**（細節歸檔）| Wave 2（C2-ORDERFLOW / C3-SPREAD / D-CONTRACT-LOCK）DEFER Sprint N+4 |
+| 5 | `W-AUDIT-8b` A4-A Funding Skew Directional | alpha-bearing | PA→Stage 0R→QC/MIT/BB | ⛔ **TOMBSTONED 2026-05-18**（Round 2 RED_FINAL；no-revive on same feature shape）| Redirect→W-AUDIT-8c + W-AUDIT-8a Phase B/C/D |
+| 6 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction | alpha-bearing | PA→E1→E2/E4→MIT→BB→PM | ✅ **SOURCE/TEST + V095 LINUX APPLY + WRITER REVIVAL DONE**（細節歸檔）| 策略 launch 仍另立 Stage 0R/design gate |
+| 7 | `W-AUDIT-8e`（R-2）Strategist Alpha Source Orchestrator | alpha-bearing | PA spec→E1 IMPL | ⛔ **DEFER** N+4 spec → N+5 IMPL | AlphaSourceRegistry + dynamic Sharpe-by-regime + Hypothesis sourcing |
+| 8 | `W-AUDIT-8f`（R-3）Hypothesis Pipeline + W-AUDIT-4 ML | alpha-bearing | PA spec→E1 IMPL + MIT spec | ⛔ **DEFER** N+5 IMPL | learning.hypotheses state machine + dead schema 收尾 |
+| 9 | `W-AUDIT-8g`（R-4）Per-alpha-source Live Promotion Gate | alpha-bearing | PA spec→E1 IMPL | ⛔ **DEFER** N+7+ | LiveBudget(alpha_source_id, slice) 取代系統級 live_reserved |
+| 10 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 | ⛔ **DEFER** N+4-N+6 | A3 tab expansion follow-up |
+| 11 | `W-AUDIT-10`（R-5）Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec→E1 IMPL | ⛔ **DEFER** 中期 | CI gate spec drift > 7d auto-fail + 模組/表 lifecycle 標頭 |
+| 12 | `EDGE-P2-3 Phase 1b` Close-Maker-First Refactor | alpha-impact-adjacent execution-quality | PA→E1→E2→E4→QA→PM | ✅ **DEPLOY DONE 2026-05-18**（細節歸檔）| Phase 2a 14d observation clock reset @ 13:50 UTC；24h AC-A SQL verify ~2026-05-19 13:50 UTC |
 
-### §4.1.1 Completed Sprint Ledgers Archived
+### §4.2 跨 Wave 衝突仲裁（4 條，PA §3.3 必繼承）
 
-Sprint N+0, Sprint N+1 D+0, Phase 3, Phase 4 W1+W2, and v35 12-agent
-completion details are closed and archived in
-`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md` and
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`. Active
-follow-ups remain in §10 / §11 / §12.
-
-### §4.2 Cross-Wave Conflict Resolution（4 條，PA §3.3 必繼承）
-
-| # | 衝突 | Files / Surface | 解 |
+| # | 衝突 | 範圍 | 解 |
 |---|---|---|---|
-| 1 | W-AUDIT-8a Phase A migration ↔ W-AUDIT-6d mid-ground 5 策略改動 | `bb_breakout/mod.rs` / `ma_crossover/strategy_impl.rs` / `bb_reversion/mod.rs` | **序列化**：先 6d mid-ground，再 8a Phase A |
-| 2 | W-AUDIT-9 T3 shadow_mode_provider stage-aware ↔ ExecutorAgent shadow_mode 接線 | `executor_config_cache.py` / `executor_agent.py` | **W-AUDIT-3b 必先 land**；T3 結束前 ExecutorAgent shadow=true 不動 |
+| 1 | W-AUDIT-8a Phase A migration ↔ W-AUDIT-6d mid-ground 5 策略改動 | `bb_breakout/mod.rs` / `ma_crossover/strategy_impl.rs` / `bb_reversion/mod.rs` | 序列化：先 6d mid-ground，再 8a Phase A |
+| 2 | W-AUDIT-9 T3 shadow_mode_provider stage-aware ↔ ExecutorAgent shadow_mode 接線 | `executor_config_cache.py` / `executor_agent.py` | W-AUDIT-3b 必先 land；T3 結束前 ExecutorAgent shadow=true 不動 |
 | 3 | W-AUDIT-8a Phase B+C ↔ W-AUDIT-5b 性能 wave | `tick_pipeline/mod.rs` | Phase B+C 並行於 N+1，5b 性能 catch-up reserved slot |
-| 4 | A 群策略候選 ↔ W-AUDIT-9 Stage 1 Demo cohort 選擇 | governance/canary | **RESOLVED 2026-05-16**: Stage 1 is Demo-only after a future green Stage 0R. A4-C is tombstoned diagnostic-only and must not be selected as the Stage 1 cohort source. |
-| 5 | TODO `W-AUDIT-8b/8c` ↔ legacy execution_plan `8b/8c` 檔名 | docs/execution_plan | **TODO IDs 為 SoT 2026-05-15**: `8b`=A4-A Funding Skew，`8c`=A4-B Liquidation Cluster；舊 `w_audit_8b_strategist...` / `w_audit_8c_hypothesis...` 是 R-2/R-3 alias（現 tracked as `8e/8f`），不得拿來當策略 spec。 |
+| 4 | A 群策略候選 ↔ W-AUDIT-9 Stage 1 Demo cohort 選擇 | governance/canary | **RESOLVED 2026-05-16**：Stage 1 為 Demo-only；A4-C tombstoned，不可作 cohort 來源 |
+| 5 | TODO `W-AUDIT-8b/8c` ↔ legacy execution_plan `8b/8c` 檔名 | `docs/execution_plan` | **TODO IDs 為 SoT 2026-05-15**：`8b` = A4-A Funding Skew，`8c` = A4-B Liquidation Cluster；舊 `w_audit_8b_strategist...` / `w_audit_8c_hypothesis...` 是 R-2/R-3 alias（現為 `8e/8f`），不可拿來當策略 spec |
 
 ---
 
-## §5 Active Sign-off Delta
+## §5 Sign-off Delta
 
-Full Sprint N+0 22-invariant ledger is closed and archived in
-`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
+完整 Sprint N+0 22-invariant ledger 已歸檔（v21 cleanup archive）。當前 delta：
 
-Current sign-off deltas only:
-- ⛔ **A4-C active-promotion marker removed 2026-05-16**: Step 5b / RCA details
-  are archived as no-revive; retain only the tombstone guard and diagnostic
-  panel reference in active docs.
-- 🟡 **OI-confirmed 5m Stage 0R packet remains non-promotional**: the packet
-  defines `bb_breakout_oi_confirmed_5m` replay acceptance rules, and a
-  follow-up read-only feasibility probe found runtime-style OI-confirmed rows
-  far below the Stage 0R sample floor (`n=9` pooled; every symbol `<100`) with
-  negative rough gross 15m. It cannot be used as promotion evidence.
-- ⏳ **A-group alpha-source invariant**: `declared_alpha_sources()` vs real
-  logic re-check remains deferred until new alpha candidates land.
-- 🟡 **W-AUDIT-4b corrected scope** remains active via §11.2 remaining
-  retained tables/views/drop scope; `P1-WA4B-INSERT-1` is completed.
-- Completed `[55]`, W-AUDIT-3b, F-08 cron, and `P0-MIT-LABEL-CLOSE-TAG-1`
-  details are archived in `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`;
-  residual edge risk is tracked by `P0-EDGE-1`.
+- ⛔ **A4-C active-promotion marker 已移除 2026-05-16**：Step 5b / RCA 封存 no-revive；只留 tombstone guard 與 diagnostic panel 引用。
+- 🟡 **OI-confirmed 5m Stage 0R packet 非 promotional**：定義 `bb_breakout_oi_confirmed_5m` replay 接受規則；read-only feasibility probe 樣本量 < Stage 0R 下限（`n=9` pooled；每 symbol < 100）且 gross 15m 為負，不能作 promotion 證據。
+- ⏳ **A 群 alpha-source 不變量**：`declared_alpha_sources()` vs real logic re-check 待新 alpha 候選 land 後再啟。
+- 🟡 **W-AUDIT-4b 修正後範圍**：透過 §11.2 retained tables/views/drop scope 維持 active；`P1-WA4B-INSERT-1` 已完成。
+- `[55]`、W-AUDIT-3b、F-08 cron、`P0-MIT-LABEL-CLOSE-TAG-1` 細節已歸檔（v36 cleanup archive）；剩餘 edge 風險仍由 `P0-EDGE-1` 追蹤。
 
 ---
 
-## §6 Current W-AUDIT Priority Delta
+## §6 當前 W-AUDIT 優先順序
 
-Completed Sprint N+0 / N+1 D+0 execution ledgers and Post-MAG-084 Wave 1
-planning are archived in
-`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
+PM/PA/FA 三方交叉檢查後：
 
-Priority verdict after PM/PA/FA cross-check:
-1. **True-live remains blocked** by `P0-EDGE-1`, `P0-LG-1/2/3`, and
-   `P0-OPS-1..4`; none of the 2026-05-15 runtime/doc fixes grant live authority.
-2. **Stage 1 Demo micro-canary is blocked**, not active execution. There is no
-   active paper cohort and no A4-C cohort candidate; launch requires a future
-   strategy×symbol Stage 0R packet with `eligible_for_demo_canary=true` plus the
-   runtime/lineage/operator gates in AMD-2026-05-15-01.
-3. **Alpha path priority**: active effort is `W-AUDIT-8b` Funding Skew
-   read-only Stage 0R query/report packet while `W-AUDIT-8a C1` is technical
-   PASS / approve-conditional. BB corrected side mapping is signed; MIT
-   W-AUDIT-8c source/test correction is done; V095 Linux PG dry-run x2 passed;
-   MIT re-signed the idempotency gate, V095 is applied on Linux, and v46
-   production writer revival is deployed. The business-chain root cause is still lack
-   of non-textbook alpha.
-4. **Runtime blocker update**: `[27]`, `[55]`, and `[67]` are closed and
-   archived; this does not unblock Stage 1 Demo because no green alpha
-   Stage 0R cohort exists.
-5. **Maintenance**: P2 hygiene remains below alpha/LG/ops gates; W-AUDIT-5
-   damaged dump cleanup and W-AUDIT-7 F-07/CEA env are ops-closed as of
-   2026-05-15.
+1. **True-live 仍 blocked**：被 `P0-EDGE-1`、`P0-LG-1/2/3`、`P0-OPS-1..4`、新 `P0-ENGINE-HALTSESSION-STUCK-FIX` 卡住。2026-05-15 之後的 runtime/doc 修正不授權 live。
+2. **Stage 1 Demo micro-canary 仍 blocked**（非 active execution）：無 active paper cohort，無 A4-C cohort 候選；launch 需未來 strategy×symbol Stage 0R packet 且 `eligible_for_demo_canary=true` + AMD-2026-05-15-01 內 runtime/lineage/operator gates 全通。
+3. **Alpha path 優先**：`W-AUDIT-8b` 已 tombstoned；`W-AUDIT-8a C1` technical PASS；W-AUDIT-8c source/test 修正 + V095 apply + writer revival 全 DONE。業務鏈根因仍為缺乏非教科書 alpha。
+4. **Runtime blocker 更新**：`[27]`、`[55]`、`[67]` 已 closed；不解鎖 Stage 1 Demo（無綠燈 alpha Stage 0R cohort）。新增 v56 P0 incident 須先 spec→IMPL→deploy 才能釋出 7d Linux soak。
+5. **Maintenance**：P2 hygiene 排在 alpha / LG / ops gates 之後；W-AUDIT-5 damaged dump cleanup 與 W-AUDIT-7 F-07/CEA env 已 ops-closed 2026-05-15。
 
 ### §6.1 A4-C BTC→Alt Lead-Lag Tombstone（2026-05-16）
 
-`W-AUDIT-8d` A4-C is not an active promotion task. Keep only this guard in
-active docs:
+`W-AUDIT-8d` A4-C 非 active promotion task。active docs 僅保以下 guard：
 
-- status: archived from promotion; diagnostic-only/no-revive for the BTC 1m
-  return + xcorr feature shape
-- keep: `panel.btc_lead_lag_panel`, `[57] btc_lead_lag_panel_health`, and
-  historical rows for future Hypothesis Pipeline exploration
-- do not keep: Stage 0R promotion candidate status, Stage 1 Demo cohort source
-  status, paper-based promotion language, or threshold-only revive tasks
-- future reopen: materially new predictive variable + preregistered validation
-  + fresh strategy×symbol Stage 0R packet with `eligible_for_demo_canary=true`
+- 狀態：archived from promotion；diagnostic-only / no-revive（BTC 1m return + xcorr feature shape）
+- 保留：`panel.btc_lead_lag_panel`、`[57] btc_lead_lag_panel_health`、歷史 rows（供未來 Hypothesis Pipeline 探索）
+- 不保留：Stage 0R 候選 / Stage 1 Demo cohort 來源 / paper-based promotion 措辭 / threshold-only revive tasks
+- 未來重啟：materially new predictive variable + preregistered validation + 全新 strategy×symbol Stage 0R packet 且 `eligible_for_demo_canary=true`
 
-Detailed Step 5b / RCA / PM+QC+MIT verdicts are archived in
-`docs/execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md`,
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`, and
-`docs/archive/2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`.
+詳細 Step 5b / RCA / PM+QC+MIT verdicts 歸檔於 `docs/execution_plan/2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md` 與相應 archive。
 
 ---
 
-## §7 W-AUDIT-6d Mid-Ground Summary
+## §7 W-AUDIT-6d Mid-Ground
 
-Detailed 保 6 / 砍 6 ledger and DSR K -12 derivation are archived in
-`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`.
+詳細 保 6 / 砍 6 ledger 與 DSR K -12 推導已歸檔（v21 cleanup archive）。
 
-Active rule that remains: the 6 polishing items are still rejected unless a
-future QC/PM decision reopens them; do not add per-symbol/per-threshold sweeps
-that inflate DSR trial count.
+**保留 active rule**：6 polishing 項仍 REJECT，未經未來 QC/PM 決議不可重啟；不可新增 per-symbol / per-threshold sweep（會膨脹 DSR trial count）。
 
 ---
 
-## §8 D-02 Layer 2 Manual 7d 試運行 SOP（Operator 自執行）
+## §8 D-02 Layer 2 手動 7d 試運行 SOP（Operator 自執行）
 
-完整 6 step SOP 見 FA report `2026-05-09--full_dispatch_business_chain_validation.md` §2。摘要：
+完整 6 步 SOP 見 FA report `2026-05-09--full_dispatch_business_chain_validation.md` §2。摘要：
 
 1. **API key 取得**：Anthropic Console → Create Key（命名 `openclaw-layer2-manual-7d-trial`，monthly budget $5）
 2. **寫入**：`echo "sk-ant-xxx..." > $OPENCLAW_SECRETS_ROOT/secret_files/anthropic/api_key && chmod 600`
-3. **Manual trigger 7d daily**（每天 1 次任意時間）：`curl -X POST http://localhost:8000/api/v1/layer2/run_session -d '{"trigger_kind":"manual_daily_probe","scope":"L1_triage","max_cost_usd":0.50}'`
-4. **4 metric 7d 觀察**：cost_today / decisions_assisted / avoided_loss / false_positive_rate
-5. **Pass**: alpha > 2× cost + false_positive < 40% + 0 critical incident；**Fail**: alpha < cost OR false_positive > 60% OR ≥1 layer2 建議致 > 5 USDT 虧損
-6. **Fail rollback**: `rm api_key && restart_all.sh --keep-auth`
+3. **每日手動觸發 7d**：`curl -X POST http://localhost:8000/api/v1/layer2/run_session -d '{"trigger_kind":"manual_daily_probe","scope":"L1_triage","max_cost_usd":0.50}'`
+4. **7d 4 指標觀察**：cost_today / decisions_assisted / avoided_loss / false_positive_rate
+5. **Pass**：alpha > 2× cost + false_positive < 40% + 0 critical incident；**Fail**：alpha < cost OR false_positive > 60% OR ≥1 layer2 建議致 > 5 USDT 虧損
+6. **Fail rollback**：`rm api_key && restart_all.sh --keep-auth`
 
-**FA constraint**（invariant 15）：D-02 SOP 不可自動化為 cron / event-trigger（會違 ADR-0020 manual+supervisor-only）。預期 +2-5 USDT/week alpha contribution；如 7d < 1 USDT/week 不值人工 fixed cost，建議 abort。
+**FA constraint**（invariant 15）：D-02 SOP 不可自動化為 cron / event-trigger（會違 ADR-0020 manual+supervisor-only）。預期 +2-5 USDT/week alpha；7d < 1 USDT/week 不值人工成本 → 建議 abort。
 
 ---
 
-## §9 Dormant D-XX Section（FA §5.2 必 explicit + reason）
+## §9 Dormant D-XX 區（FA §5.2 必 explicit + reason）
 
-| D-XX | Description | Status | Reason | Earliest reactivate |
+| D-XX | 描述 | 狀態 | 原因 | 最早重啟 |
 |---|---|---|---|---|
 | D-13 | Cognitive Modulator | DORMANT | 3-Tier `consecutive_loss/weekly_pnl` 數據源未接齊 + alpha 無依賴 | Sprint N+8+ |
-| D-14 | DreamEngine 完整自主進化 | DORMANT | Foundation Model + L4 跨 strategy meta-learning（ADR-0020 限制 manual）；Foundation Model 未 ready | long-tail |
+| D-14 | DreamEngine 完整自主進化 | DORMANT | Foundation Model + L4 跨策略 meta-learning（ADR-0020 限 manual）；Foundation Model 未 ready | long-tail |
 | D-15 | OpportunityTracker 全 Agent 注入 | DORMANT | 不影響 supervised live；Sprint N+5 可選 | Sprint N+5 可選 |
-| D-16 | openclaw_core 9 模組 sunset cleanup | DORMANT | ADR-0015 已標 permanent sunset candidates | Sprint N+6+ |
+| D-16 | openclaw_core 9 模組 sunset cleanup | DORMANT | ADR-0015 已標 permanent sunset candidates；其中 7 模組已被 `P2-DEAD-RUST-CLEANUP-1`（2026-05-18 commit `449f628b`）清除，餘 2 待 PA 下 sprint 確認 | Sprint N+6+ |
 | D-17 | Layer 2 自主推理循環自動觸發 | **PERMANENT DORMANT** | ADR-0020 manual+supervisor-only by design | **不解** |
 
 **FA constraint**：靜默漏寫 = 6 個月後 lobby 重新 review；explicit 標 dormant + reason + earliest reactivate = 防 strategy drift。
@@ -296,111 +230,60 @@ that inflate DSR trial count.
 
 ## §10 P0 — True-Live Blockers
 
-| ID | Status | Task | Acceptance |
+| ID | 狀態 | 任務 | 接收條件 |
 |---|---|---|---|
-| `P0-ENGINE-HALTSESSION-STUCK-FIX` | 🔵 **NEW 2026-05-19 ~20:00 UTC — PA spec dispatched, operator semantic LOCKED** | **Incident**: engine PID 1942669 (UTC 12:27:11 start) processed FILUSDT halt_session emergency close at 12:27:14 + 12:27:37 then went TRADING-INERT for **7h43m** until operator restart UTC 20:09:36 → new PID 2099215. **E2 RCA verdict** (`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--engine_watchdog_respawn_loop_and_trading_inert_rca.md`): `paper_paused=true` set by Step 6 `RiskAction::HaltSession` (`step_6_risk_checks.rs:434-461`) has **NO TTL auto-clear**; only 4 clearers (IPC Resume/Reset/SystemMode::ShadowOnly/restart default init). **Different-root-cause from prior P1-WATCHDOG-STATUS2-RCA** (which covered systemd cosmetic naming `sys.exit(2)`); previous RCA was correct for its scope, did NOT cover this class. Watchdog provides zero detection for "alive but inert" (only checks snapshot freshness; engine writes status_report every 30s regardless of trading state). **Operator decision 2026-05-19 ~20:30 UTC**: Layer A = **TTL clear daily_loss only / drawdown stays sticky**; Layer B = watchdog business-heartbeat probe (alarm-only, no auto-restart). **Fix layers**: Layer A daily_loss-only TTL (mirror `news/guardian_impl.rs:60-145` pattern) + halt_kind classification + forensic halt_audit.log + state persistence across restart + audit lifecycle row | Layer B watchdog probe `TRADING_INERT_PROLONGED` (parse pipeline_snapshot.json intents/fills/paper_paused; 60min threshold; cooldown; reset). **Acceptance**: simulated daily_loss halt + 1h TTL → auto-clear PASS; simulated drawdown halt + 1h+TTL → still paper_paused=true; watchdog probe fires alarm in test scenario within 60s after threshold; 0 false positives in 7d Linux run; engine_mode demo/live_demo/live all covered. **PA dispatched**: spec at `docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md` (~600-1000 LOC, ETA 2-3h). **Halt trigger UNRESOLVED**: log rotation lost UTC 12:27 line; math (drawdown 10.2% vs TOML 25% threshold) does NOT explain trigger — possible IPC patch / loading-order race / unidentified 3rd path; PA spec MUST mandate halt_audit.log so next time we have evidence. **Severity P0** (loop will recur on next breach; demo/live_demo/live shared code; Phase 1b verification + all PnL at risk). |
-| `P0-PHASE-1B-PARAM-CALIBRATION-1` | ✅ **DONE 2026-05-18 13:50 UTC (deploy chain CLOSED)** | Option C path (simulation = evidence, no live pilot): PA spec v0.1/v0.2 → E1 harness IMPL (`93069c29`) + Rust constant change (`820f0532`) → E2 + E4 review chain → Merge (`8d8a0123` + `67f1a047`) → Sweep 81 cells (1.4 sec wall, top `G-AB-01-C90` fill 70.8% / +3.37 bps simulated) → operator rebuild + restart (engine PID 1506208 binary mtime 13:50 UTC). Grid family `timeout_ms 30s → 90s` deployed; phys_lock family timeout unchanged. **Acceptance result**: simulation `maker_fill_rate=70.8% ≥ 25%` AND `expected_fee_saving_bps=+3.37 ≥ 0.5` (top cell). **Outstanding**: 24h post-deploy AC-A SQL verify real fill rate vs 70.8% simulation prediction (E2 caveat: BBO-cross-proxy systematically optimistic) ~2026-05-19 13:50 UTC. Rollback trigger: real fill < 15% Wilson lower at n≥30 OR adverse_real > 5.55 bps baseline. PnL unlock projection $32-162/year × ~65% PASS prior. Phase 2a 14d observation clock reset from 13:50 UTC. |
-| `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5 注：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
-| `P3-SPINE-COUNTER-CACHE-ALIGN` | ⏳ scheduled quiet period | 3 AtomicU64 counter `#[repr(align(64))]` cache line | E5 cosmetic; 10 min fix; ~50-200ns extra latency 降到 0 |
-| `LG-1` H0 production caller | 🔵 Wave 2.2 dispatched 2026-05-11 | T1+T2+T3+T4 E1×4 parallel IMPL | per PA plan §1.4 |
-| `LG-2` Provider pricing binding | 🔵 Wave 2.2 dispatched 2026-05-11 | T4 RiskConfig 先 → T1+T3 parallel → T2 startup assertion 序列 | per PA plan §2.4 |
-| `LG-3` Supervised live SM | 🔵 Wave 2.1 PA spec phase dispatched 2026-05-11 | PA spec doc 1-1.5d → QC+BB+MIT parallel review → PA spec v2 → Wave 2.4 E1×7 IMPL | per PA plan §3.6 + §6.1 + §6.4 |
-| `P0-EDGE-1` | ACTIVE | Edge net-positive decision | Strategy edge must be positive or scoped to limited supervised path before true-live. **Root cause linked to `P0-MIT-LABEL-CLOSE-TAG-1` 1-day fix（最高 ROI）**。 |
-| `P0-LG-1` | ACTIVE | H0 blocking production caller | H0 wired into production decision path with metrics + fail-closed. |
-| `P0-LG-2` | ACTIVE | Provider pricing binding | Fee/pricing source bound, freshness checked, asserted at startup. |
-| `P0-LG-3` | ACTIVE | Supervised-live state machine | Live authorization, lease, drawdown, revoke, operator approval explicit + tested. |
-| `P0-OPS-1..4` | ACTIVE | HTTPS / credential rotation / legal+ToS / first-day runbook | Required before true-live. |
+| `P0-ENGINE-HALTSESSION-STUCK-FIX` | 🔵 **NEW 2026-05-19 ~20:00 UTC — PA spec 已派，operator 語意已鎖** | **Incident**：engine PID 1942669（UTC 12:27:11 start）處理 FILUSDT halt_session emergency close 後（12:27:14 + 12:27:37）進入 **TRADING-INERT 7h43m**，直到 operator UTC 20:09:36 restart → 新 PID 2099215。**E2 RCA verdict**（`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--engine_watchdog_respawn_loop_and_trading_inert_rca.md`）：`paper_paused=true` set by Step 6 `RiskAction::HaltSession`（`step_6_risk_checks.rs:434-461`）**無 TTL auto-clear**；只 4 種 clearer（IPC Resume / Reset / SystemMode::ShadowOnly / restart default init）。與先前 `P1-WATCHDOG-STATUS2-RCA` 不同根因（後者只覆 systemd cosmetic `sys.exit(2)`）。Watchdog 無 "alive but inert" 偵測（只看 snapshot freshness；engine 每 30s 寫 status_report 不論交易狀態）。**Operator 決議 2026-05-19 ~20:30 UTC**：Layer A = **TTL clear daily_loss only / drawdown stays sticky**；Layer B = watchdog business-heartbeat probe（alarm-only，no auto-restart）。**修復層**：Layer A daily_loss-only TTL（鏡像 `news/guardian_impl.rs:60-145` 模式）+ halt_kind 分類 + forensic halt_audit.log + 跨 restart 狀態持久化 + audit lifecycle row；Layer B watchdog probe `TRADING_INERT_PROLONGED`（parse pipeline_snapshot.json intents/fills/paper_paused；60min threshold；cooldown；reset）。**Acceptance**：simulated daily_loss halt + 1h TTL → auto-clear PASS；simulated drawdown halt + 1h+TTL → 仍 paper_paused=true；watchdog probe 在 test scenario 內 60s 觸發告警；7d Linux run 0 false positive；engine_mode demo/live_demo/live 全覆。**PA 已派 spec**：`docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md`（~600-1000 LOC，ETA 2-3h）。**Halt 觸發 UNRESOLVED**：log rotation 失了 UTC 12:27 line；數學（drawdown 10.2% vs TOML 25% threshold）不通 — 可能 IPC patch / loading-order race / 第三條路徑；PA spec 必含 halt_audit.log 強制留證。**Severity P0**（下次 breach 必復發；demo/live_demo/live 共用代碼；Phase 1b verification + 所有 PnL 暴露）。 |
+| `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
+| `P3-SPINE-COUNTER-CACHE-ALIGN` | ⏳ scheduled quiet period | 3 AtomicU64 counter `#[repr(align(64))]` cache line | E5 cosmetic；10 min fix；~50-200ns 額外延遲降到 0 |
+| `LG-1` H0 production caller | 🔵 Wave 2.2 dispatched 2026-05-11 | T1+T2+T3+T4 E1×4 並行 IMPL | per PA plan §1.4 |
+| `LG-2` Provider pricing binding | 🔵 Wave 2.2 dispatched 2026-05-11 | T4 RiskConfig 先 → T1+T3 並行 → T2 startup assertion 序列 | per PA plan §2.4 |
+| `LG-3` Supervised live SM | 🔵 Wave 2.1 PA spec phase dispatched 2026-05-11 | PA spec 1-1.5d → QC+BB+MIT 並行 review → PA spec v2 → Wave 2.4 E1×7 IMPL | per PA plan §3.6 + §6.1 + §6.4 |
+| `P0-EDGE-1` | ACTIVE | Edge net-positive 決議 | 策略 edge 須 net-positive 或限定 supervised path；根因連到 `P0-MIT-LABEL-CLOSE-TAG-1` 1-day fix（最高 ROI） |
+| `P0-LG-1` | ACTIVE | H0 blocking production caller | H0 wired into production decision path + metrics + fail-closed |
+| `P0-LG-2` | ACTIVE | Provider pricing binding | Fee/pricing source 綁定、freshness 檢查、startup assert |
+| `P0-LG-3` | ACTIVE | Supervised-live state machine | Live authorization / lease / drawdown / revoke / operator approval 全顯式且測過 |
+| `P0-OPS-1..4` | ACTIVE | HTTPS / credential rotation / legal+ToS / first-day runbook | True-live 前置 |
 
-Completed §10 rows are archived in
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
+已完成 P0 條目（如 `P0-PHASE-1B-PARAM-CALIBRATION-1`）已歸檔於 `docs/archive/2026-05-19--todo_v55_translation_archive.md` 與 v36 cleanup archive。
 
 ---
 
-## §11 P1 — Next Engineering Queue
+## §11 P1 — 下個工程佇列
 
 ### §11.1 Sprint N+0 Active
 
-Archived as completed in
-`docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md`. Current
-active work starts at §10 / §11.2 / §11.3.
+已標完成歸檔於 v21 cleanup archive。當前活躍工作從 §10 / §11.2 / §11.3 開始。
 
-### §11.2 W-AUDIT-4b corrected retained tables/views/drop scope（invariant 19）
+### §11.2 W-AUDIT-4b 修正後保留範圍（invariant 19）
 
-| ID | Object | Corrected class | Owner | Notes |
+| ID | 物件 | 修正後分類 | Owner | 備註 |
 |---|---|---|---|---|
-| `P1-WA4B-INSERT-2` | `learning.cost_edge_advisor_log` | retained INSERT table / row-growth confirmed | E1 | Writer live at `cost_edge_advisor/mod.rs`; 2026-05-14 runtime row-growth confirmed: 6091 rows. Current demo `[cost_edge].enabled=false`, so rows are `Disabled` / `ratio=NULL`; ratio-present rows require a separate config decision. |
-| `P1-WA4B-INSERT-3` | `observability.drift_events` | retained INSERT table / readiness gated | E1 | Writer exists in `drift_detector.rs` and is spawned in `tasks.rs`; it depends on active `feature_baselines` and the configured ADWIN burn-in (default 30d). Do not remove burn-in without operator approval. |
-| `P1-WA4B-VIEW-1` | `learning.mlde_edge_training_rows` | companion VIEW | E1/MIT | Read-only projection, not an INSERT path. Keep contract under ML training-data healthchecks. |
-| `P1-WA4B-VIEW-2` | `learning.scorer_training_features` | companion VIEW | E1/MIT | Read-only projection, not an INSERT path. Full unbounded counts are expensive; use bounded/metadata probes. |
-| `P1-WA4B-DROP-1` | `learning.scorer_predictions` | dropped / no-DDL target | E1/MIT | Dropped by V069; no producer wiring target unless a future spec recreates it. |
+| `P1-WA4B-INSERT-2` | `learning.cost_edge_advisor_log` | retained INSERT table / row-growth 已驗 | E1 | Writer live at `cost_edge_advisor/mod.rs`；2026-05-14 runtime 6091 rows。當前 demo `[cost_edge].enabled=false` → rows 為 `Disabled` / `ratio=NULL`；ratio-present rows 需另立 config 決議 |
+| `P1-WA4B-INSERT-3` | `observability.drift_events` | retained INSERT table / readiness gated | E1 | Writer 在 `drift_detector.rs` 並在 `tasks.rs` spawn；依賴 active `feature_baselines` 與配置的 ADWIN burn-in（預設 30d）。不可未經 operator 同意移除 burn-in |
+| `P1-WA4B-VIEW-1` | `learning.mlde_edge_training_rows` | companion VIEW | E1/MIT | 唯讀投影，非 INSERT 路徑。合約掛 ML training-data healthcheck |
+| `P1-WA4B-VIEW-2` | `learning.scorer_training_features` | companion VIEW | E1/MIT | 唯讀投影；full unbounded count 成本高，請用 bounded/metadata probe |
+| `P1-WA4B-DROP-1` | `learning.scorer_predictions` | dropped / no-DDL target | E1/MIT | V069 已 drop；無 producer 接線目標，除非未來 spec 重建 |
 
-`P1-WA4B-INSERT-1` completion detail is archived in
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
+`P1-WA4B-INSERT-1` 完成細節歸檔於 v36 cleanup archive。
 
-### §11.3 P1 — Other Active
+### §11.3 P1 — 其他活躍
 
-| ID | Priority | Task | Notes |
+| ID | 優先級 | 任務 | 備註 |
 |---|---:|---|---|
-| `P1-DATA-1..3-WATCH` | 3 | Runtime-reloaded WARN cluster row-rolloff watch | Source fixes are done; keep as observation-only watch, not an implementation blocker. |
+| `P1-DATA-1..3-WATCH` | 3 | Runtime-reloaded WARN cluster row-rolloff watch | source 已修；保留 observation-only watch |
 | `P1-EDGE-1..2` | 3 | ma_crossover/grid blocked_symbols 已 frozen + funding_arb 14d audit 2026-05-16 | 維持 freeze + 2026-05-16 audit |
-| `P1-LG-5` | 4 | LG-5 reviewer maturity watch | source active; audit-row health |
-| `P1-EDGE-P2-3-PH1B-ML-INVARIANT` | 4 | ✅ **DONE 2026-05-18 commit `c3524da2`**：`.claude/skills/pr-adversarial-review/SKILL.md` §3.11 ML training pipeline 非輸入不變量 — `close_maker_*` audit 欄位禁餵 LinUCB/scorer/quantile/MLDE/DL3；含 3 條 grep pattern + 白名單（audit/replay/healthcheck/governance/tests）；違反輸出格式沿用 §3.10 caller proof。E3 PR pre-merge gate 立即生效。 |
-| `P1-BBMF3-WIRE-1` | 2 | ✅ SOURCE/TEST + RUNTIME DEPLOY DONE 2026-05-17 | Phase 1b source/test bundle wires close-maker reject/backoff/cooldown plumbing and integration regression. Runtime evidence: V094 Linux apply + engine-only rebuild/restart completed; close-maker audit fields can populate on subsequent fills. |
-| `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | spec §5.4 完整 dynamic backoff state machine IMPL（per-symbol 1s exp → 60s + ≥10 symbol cascade → 5min global pause + audit row `rate_limit_scope = "global"`）| Phase 1b initial IMPL（commit `27f02a07`）取 per-symbol 5min 固定（避 scope creep）；Phase 2a Demo PASS 後另開 PR；PA 估 ~50 LOC state machine + ~80 LOC integration test；對應 spec §5.4 v1.4 footnote + AMD v0.4 §11.2 |
-| `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` | 1 | ✅ **DONE 2026-05-16**：`trade-core` online PG closure complete. V092 physical continuous aggregates created (6 views + 6 refresh policies); V091/V092/V093 `_sqlx_migrations` metadata inserted with source SHA-384 checksums; max_applied=93 / rows=90 / checksum drift_count=0. V081 remains legal dead slot. V094 deploy is no longer blocked by this backlog. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-16--wave_3_5_linux_migration_backlog_closure.md`. |
-| `P1-PORTFOLIO-RESTING-EXPOSURE-1` | 4 | ✅ **DONE 2026-05-16 commit `9980448a`**（Round 2 alpha push P1）：337 LOC source (intent_processor/mod.rs +118 / tests.rs +208 / paper_state/resting_orders.rs +11) + 7 unit test；Mac+Linux cargo test --release 2915/0/1 (= baseline 2908 + new 7)；hot_path bench p99=42μs << 300μs SLA；aarch64-apple-darwin PASS。A3 對抗審 APPROVE 9/10 (2 WARN advisory 不阻 commit)；E2 PASS to E4 (0 CRITICAL / 1 MEDIUM / 4 LOW)；E4 regression PASS。16-root + 9 invariant + 硬邊界全 GREEN；live/auth/lease 全未動；注釋全中文。Follow-ups → P2-PORTFOLIO-RESTING-{58-HEALTHCHECK / TEST-COVERAGE / ROUTER-CACHE / DOCSTRING-CLEANUP / E5-BENCH / REPLAY-PARALLEL}。 |
-| `P2-PORTFOLIO-RESTING-58-HEALTHCHECK` | 4 | ✅ **DONE 2026-05-16 as `[68] portfolio_resting_exposure_lineage`**：原 spec/TODO 標 `[58]`，但 `[58]` 已被 W-AUDIT-9 T4 `check_58_graduated_canary_stage_invariant` 占用；實作取下一個 free slot `[68]`，保留 lineage name。`check_68_portfolio_resting_exposure` 已在 `runner.py` wire + `__init__.py` re-export；targeted pytest `helper_scripts/db/test_portfolio_resting_exposure_healthcheck.py -q` = 10 passed。Residual LOW：engine-specific fallback cap / live+live_demo snapshot double-count future hardening，不阻 Stage 1 demo 啟動前監控目的。 |
-| `P2-PORTFOLIO-RESTING-TEST-COVERAGE` | 4 | ✅ **DONE 2026-05-18 commit `c3524da2`**：新測 `test_p2_portfolio_resting_multi_close_summed_capped_at_filled` 釘住「同 symbol 多筆 close-side resting 累積 > filled qty 時 cap 在 filled qty」A3 WARN-2 invariant；intent_processor/tests.rs +45 LOC（含中文 rationale 與三層 assert）。cargo test 2993/0/1 PASS。 |
-| `P2-PORTFOLIO-RESTING-ROUTER-CACHE` | 4 | ✅ **DONE 2026-05-18 commit `c3524da2`**：新增 `compute_{exposure_pct,correlated_exposure_pct,leverage}_from_netting(eff_long, eff_short, balance)` 三 helper 變體 + `compute_effective_long_short_notional` 升 `#[doc(hidden)] pub fn`（precedent `TickPipeline::new`）；router.rs 438-450 caller cache (eff_long, eff_short, balance) 一次共用，3 HashMap allocs → 1。語意保留。E5-bench 實測 p50 ~7.88µs single netting vs ~6.29µs cached three pcts（25-sym × 3-resting 場景節省 ~20%）。 |
-| `P2-PORTFOLIO-RESTING-DOCSTRING-CLEANUP` | 4 | ✅ **DONE 2026-05-18 commit `c3524da2`**：intent_processor/mod.rs:887-923 三段 docstring（RRC-1-B3 / RG-2 / FIX-05）移除英文僅保留中文；P1-PORTFOLIO-RESTING-EXPOSURE-1 引入註解保留。E2 LOW-2 closed。 |
-| `P2-PORTFOLIO-RESTING-E5-BENCH` | 4 | ✅ **DONE 2026-05-18 commit `c3524da2`**：新 `benches/intent_processor_exposure.rs`（178 LOC，Criterion harness）覆蓋 25-sym × 3-resting 場景；Cargo.toml `[[bench]]` 註冊；Mac aarch64 + Linux x86_64 release `--no-run` 編譯 PASS；實跑 single netting p50/p99 = 7.88/11.71µs vs cached three-pct p50/p99 = 6.29/9.46µs。 |
-| `P2-PORTFOLIO-RESTING-REPLAY-PARALLEL` | 4 | ✅ **DONE 2026-05-18 commit `c3524da2` (design-only)**：design memo `docs/execution_plan/2026-05-18--p2_portfolio_resting_replay_parallel_design.md` 闡明本 IMPL 故意不感染 replay（R5-T2 並行 surface SAFETY 不變量）；後續啟動條件 3 條觸發 / 短期 hygiene 1 條 backlog 子卡。0 代碼動。 |
-| `P1-CRON-INSTALL-WAVE-1` | 2 | ✅ **SOURCE/TEST + LINUX CRONTAB INSTALL DONE 2026-05-19**：source/test commit `7bb994c3`；operator-authorized trade-core crontab install completed with backup `/tmp/openclaw/crontab_backups/before_p1_cron_install_wave_1_20260519T103745Z.cron`。5 wrapper installed；direct heartbeat recheck: `[75]` PASS fresh after first 5-min fire；`[76]-[79]` expected WARN until first natural hourly/daily/weekly fire。Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-19--v096_cron_watchdog_entry_rca_closure.md`。 |
-| `P1-WATCHDOG-STATUS2-RCA` | 2 | ✅ **RCA DONE 2026-05-19**：2026-05-19 01:52-01:57 UTC cluster = DNS/HTTP transport outage + stale snapshot misclassified as `ENGINE_CRASH`；no OOM/segfault/panic evidence；engine/watchdog currently alive。Follow-up implementation ticket: `P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX`（classify recent rotated logs/canary events and suppress strikes during confirmed network outage）。Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-19--v096_cron_watchdog_entry_rca_closure.md`。 |
-| `P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX` | 2 | NEW：source-only follow-up from STATUS2 RCA。`engine_watchdog.py` currently requires ≥5 consecutive network-error lines in active `/tmp/openclaw/engine.log`; rotated/interleaved DNS outage evidence can default to `engine_crash` and trigger restart storms。Implement recent-log classifier hardening + regression tests before relying on 3-strike stability counts. |
-| `P1-C1-PROBE-RECONNECT-SPEC` | 2 | ✅ **DONE 2026-05-16 commits `25396b0b` + `8d2eef58`**：v2 resilient harness IMPL `liquidation_topic_probe_v2.py` (942→1045 LOC) + 49/49 unit test + wrapper script `run_c1_v2_proof.sh`；5 reviewer 全綠（A3 7.5/10 APPROVE-COND + E2 PASS to merge + E4 Linux 49/49 + 60s smoke PASS + BB COND 0 Critical/High/Med + MIT FULL V09X 不需）+ E1 consolidated 6-fix + E2 re-review PASS + E4 quick recheck PASS。Operator 24h proof launch：`ssh trade-core 'bash ~/BybitOpenClaw/srv/helper_scripts/bybit/run_c1_v2_proof.sh'` (paste-safe <120 char)。Spec amendment via design plan `docs/execution_plan/2026-05-16--w_audit_8a_c1_v2_resilient_proof.md` 425 LOC。9 P2/P3 follow-up（checkpoint summary 拆檔 / blocker text edge case / tmp cleanup / etc.）見 E1 fix self-report §4。 |
+| `P1-LG-5` | 4 | LG-5 reviewer maturity watch | source 活躍；audit-row 健康 |
+| `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | spec §5.4 完整 dynamic backoff state machine IMPL（per-symbol 1s exp → 60s + ≥10 symbol cascade → 5min global pause + audit row `rate_limit_scope="global"`）| Phase 1b 初版（commit `27f02a07`）取 per-symbol 5min 固定避 scope creep；Phase 2a Demo PASS 後另開 PR；PA 估 ~50 LOC state machine + ~80 LOC integration test |
+| `P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX` | 2 | **NEW**：STATUS2 RCA 衍生 source-only follow-up。`engine_watchdog.py` 當前需 ≥5 連續 network-error lines in active `/tmp/openclaw/engine.log`；rotated/interleaved DNS outage 證據可能 default 到 `engine_crash` 觸發 restart storm。需 recent-log classifier 加固 + regression test，再依 3-strike stability 動作 |
+| `P1-WATCHDOG-EXIT-CODE-CLARIFY` | 3 | **NEW（v55）**：watchdog exit code 語意明確化（sys.exit(2) → 20 之類）以利 systemd / 上層觀察 |
 
-Archived completed P1 rows: `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
+> v55 衍生：`FA-WATCHDOG-3STRIKE-ESCALATION-POLICY` 待 FA 設計後分配優先級。
 
-### §11.5 EDGE-P2-3 Phase 1b — Final Dispatch Plan (2026-05-15 4-agent review 後拍板)
-
-**Status**：Pre-IMPL prep details through Wave 3b are closed and archived. Full
-close-maker-first Round 1（Design + Governance）closure narrative + 30+ commit timeline
-+ 4-agent verdict + IMPL Prereq status + next-round scope → `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`.
-Sibling TODO cleanup（broader v36 scope）→ `docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
-Phase 1b main source/test implementation is complete at `ea4ceca6`; V094 Linux apply and engine-only deploy/restart completed 2026-05-17. Phase 2a observation can collect subsequent fills; alpha/true-live gates below remain active.
-
-**Still Active**
-1. ❌ `P0-EDGE-1` — `[40]` negative realized edge remains active.
-2. ⛔ `W-AUDIT-8b Stage 0R` — **TOMBSTONED 2026-05-18 Round 2 RED_FINAL**：7.0d sweep 8/8 cells RED HIGH conf + 4-agent (BB/QC/FA/MIT) 4/4 APPROVE concur (`ffdbc2d0`). Spec v0.3 → v0.4 tombstone (`ef7ea6c2`) + AMD v0.6 → v0.7 (`71f2283b`) §8 condition 3 funding-related general + tombstone clause. No-revive on same feature shape. Redirect: W-AUDIT-8c Liquidation Cluster (Wave 1 已 merged) + W-AUDIT-8a Phase B/C/D per fix-plan v1.1 §9.4。
-3. ✅ `W-AUDIT-8a C1` — **v2 24h proof TECHNICAL PASS / APPROVE-CONDITIONAL + writer revival DONE 2026-05-17**：session `c1_v2_20260516T145616Z` finished `2026-05-17T14:56:15Z`; artifact `trade-core:/tmp/openclaw/audit/liquidation_topic_probe/liquidation_topic_probe_v2_latest.md` verdict `PASS_C1_PROOF_CANDIDATE`; BB approved corrected Bybit side semantics; W-AUDIT-8c/V095 source-test idempotency correction is done; V095 Linux PG dry-run x2 PASS + MIT re-sign APPROVE-CONDITIONAL + Linux apply/register DONE; production `allLiquidation.{symbol}` subscription/writer revival DONE in `0e8a8ae8`/`bedc40c3` with Linux runtime rows observed.
-4. ✅ `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` — **P0c DONE 2026-05-16**：V091/V092/V093 Linux PG backlog apply + sqlx record closed; V094 deploy no longer blocked by this ticket.
-5. ✅ `P1-BBMF3-WIRE-1` — source/test included in `ea4ceca6`; V094 Linux apply + engine-only rebuild/restart completed 2026-05-17.
-6. ✅ `W-AUDIT-8c` — source/test correction + V095 Linux PG dry-run x2 + MIT re-sign + Linux apply/register + production `allLiquidation.{symbol}` subscription/writer revival DONE 2026-05-17. Strategy launch/promotion remains a separate future gate.
-
-**Phase 1b runtime deploy 已完成**（2026-05-17）：V094 apply + engine-only rebuild/restart complete；Phase 2a observation begins from subsequent fills. W-AUDIT-8b Stage 0R and `P0-EDGE-1` remain active alpha/true-live gates, not Phase 1b schema/deploy blockers.
-
-**✅ 2026-05-18 RUNTIME ACTIVATOR BLOCKER — RESOLVED via deploy chain CLOSED**:
-- Original symptom (preserved for governance audit): Post-deploy 4h `trading.fills` sample = **0% maker_attempt rate** (18 grid_close_short + 2 ma_reverse_cross whitelist closes all `close_maker_attempt=FALSE` + `fallback_reason=NULL`)
-- E2 adversarial RCA `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--phase_1b_0_attempt_rca.md` identified: cold-default `use_maker_close=false` at `pipeline_ctor.rs:62` + ZERO production callers for `set_use_maker_close_runtime` + `commands.rs:117` early-returns `market()` skip path
-- Resolution chain: PA design `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_use_maker_close_runtime_activator_design.md` Option A TOML activator (`runtime.use_maker_close` field + H0Gate shadow_mode RMW pattern) → E1 second-dispatch IMPL `18081551` (~40 LOC `pipeline_ctor.rs` + `pipeline_config.rs` + `risk_config_demo.toml`, post-strip 245 LOC B-REM-1 leak, honest cargo test 2972/0/1) → E2 re-review APPROVE 0 new MUST-FIX (`a94825cb`) → E4 PASS 12/12 Mac+Linux release cross-arch (`af3b3010`) → QA APPROVE 0 BLOCKER (`a1b3ca908`) → merge `c737a1e4` → operator-代跑 restart_all.sh --rebuild UTC 2026-05-17 23:54 → engine PID 1066422 → 1143103 with new binary containing activator
-- AMD-2026-05-15-02 v0.4 → v0.5 wording patch (`23e6b6b2`) lands Runtime Activation Layer + three-env TOML table
-- `risk_config_demo.toml [runtime] use_maker_close=true` confirmed via grep + engine boot log shows `risk_demo_version=2` loaded
-
-**Runtime kickoff status**：
-- V094 Linux migration/deploy authorization → deploy-chain regression → post-deploy healthchecks → PM sign-off: ✅ DONE 2026-05-17.
-- Phase 1b runtime activation: ✅ **DEPLOY DONE 2026-05-17 23:54 UTC** (engine PID 1143103).
-- AC-A verification T+10.6h (2026-05-18 10:29 UTC): **PARTIAL PASS / EXTEND_MONITORING** — demo-only post-restart 3/3 = 100% attempt_pct (Wilson CI lower 43.85% > 25% PRELIMINARY PASS, n=3 insufficient); 24h combined 9.38% (pre-restart cold-default 拖低 + live_demo TOML disabled 稀釋). E2 RCA verdict `9a6787ce`: 4/4 fallback `timeout_taker` = STRUCTURAL DESIGN (NOT bug), n=4 small-n statistical noise at lower-bound of spec §1.2 predicted 15-25% range + entry-side baseline 14.7% PostOnly fill rate 證實 demo low-liquidity floor.
-- **Calibration sweep + Rust timeout deploy** ✅ **DONE 2026-05-18 13:50 UTC** (engine PID 1253085 → 1506208): grid family `timeout_ms 30_000 → 90_000` post-sweep top cell `G-AB-01-C90` (fill 70.8% / +3.37 bps simulated, sweep wall 1.4 sec). Spec v0.2 land (`34af2d2e`) per PA decision memo `5df39d13` denom drift fix. **Phase 2a 14d observation clock reset @ 13:50 UTC NEW t=0**; 24h post-deploy AC-A SQL verification target ~2026-05-19 13:50 UTC (real fill vs simulation 70.8% prediction, E2 caveat BBO-cross-proxy systematically optimistic).
-- Cross-wave consistency check pending (QA recommendation #3 — restart triggered W6/W7/W1 main-landed-but-not-deployed sources too; calibration restart 同樣 trigger).
-- Outstanding anomaly investigations (low-priority, parallel SD agent dispatched 2026-05-18 14:00 UTC): SD-1 A axis (offset_bps) dead-variable hypothesis / SD-2 PS family (phys_lock_gate4_stale_roc_neg) 100% n_skip / 0 fill — investigation report `2026-05-18--phase_1b_calibration_sweep_anomalies_sd_report.md` pending.
-- Next: 24h AC-A real verdict → if PASS Phase 2a 14d observation continue / if FAIL revert timeout 90s→30s OR PA tune-further; Phase 2b LiveDemo / operator + AMD live carve-out / Phase 3 Mainnet remain future gates.
-
----
+歸檔的 P1 條目：v36 cleanup archive + 2026-05-19 v55 translation archive。
 
 ### §11.4 P0-MICRO-PROFIT — 微利根因治本路徑（2026-05-11 QC audit 拍板）
 
-**Background**：QC 2026-05-11 audit verdict — 「為何盈利都是超微利潤」+「能否放大」。判定：當前 5 textbook 策略 7d EV<0 (-17.82 bps demo)，**任何 sizing 槓桿 L>1 必放大虧損**（數學常數）。先修 alpha，再談 size。
+**背景**：QC 2026-05-11 audit verdict — 「為何盈利都是超微利潤」+「能否放大」。判定：當前 5 textbook 策略 7d EV<0（-17.82 bps demo）；**任何 sizing 槓桿 L>1 必放大虧損**（數學常數）。先修 alpha，再談 size。
 
 **5 root cause + 占比**：
 1. **Alpha 結構性缺失（~60%）** — 5 textbook 策略 post-publication decay
@@ -411,82 +294,99 @@ Phase 1b main source/test implementation is complete at `ea4ceca6`; V094 Linux a
 
 **治本路徑 = PA R-1/R-2/R-3 redesign（已映射 W-AUDIT-8a..8f wave 矩陣）**：
 
-| ID | Task | Spec source | ETA |
+| ID | 任務 | Spec 來源 | ETA |
 |---|---|---|---|
-| `W-AUDIT-8a` Phase B/C/D | Tier 2 panel collector + Tier 3 microstructure + Tier 4 information flow | Sprint N+1 W2 起逐步 IMPL | 4-6 sprint |
-| `W-AUDIT-8b` (A4-A) | Funding Skew Directional 新策略（R-1 IMPL）| W-AUDIT-8a Phase B 後 | Spec v0.3 sweep tooling source/test done `a6e17d5d`；Round 2 replay waits panel ≥7d |
-| `W-AUDIT-8c` (A4-B) | Liquidation Cluster Reaction 新策略 | C1 transport PASS + correction source/test + V095 dry-run/MIT re-sign + Linux apply + writer revival done | Strategy launch waits separate Stage 0R/design gate |
-| `W-AUDIT-8d` (A4-C tombstone) | BTC→Alt Lead-Lag diagnostic panel | Archived guard only | ⛔ Not an active alpha path; diagnostic-only/no-revive for BTC 1m return + xcorr |
-| `W-AUDIT-8e` (R-2) | Strategist Alpha Source Orchestrator | W-AUDIT-8b/8c/8d land 後 | N+3-N+4 |
-| `W-AUDIT-8f` (R-3) | Hypothesis Pipeline first-class（含 W-AUDIT-4 ML 6 dead schema 併入）| 序列化於 R-2 後 | N+4 |
+| `W-AUDIT-8a` Phase B/C/D | Tier 2 panel collector + Tier 3 microstructure + Tier 4 information flow | Sprint N+1 W2 起 | 4-6 sprint |
+| `W-AUDIT-8b`（A4-A）| Funding Skew Directional（R-1 IMPL）| ⛔ **TOMBSTONED 2026-05-18** | — |
+| `W-AUDIT-8c`（A4-B）| Liquidation Cluster Reaction | ✅ source/test + V095 apply + writer revival DONE | 策略 launch 仍另立 Stage 0R/design gate |
+| `W-AUDIT-8d`（A4-C tombstone）| BTC→Alt Lead-Lag diagnostic panel | Archived guard only | ⛔ 不再 active；diagnostic-only |
+| `W-AUDIT-8e`（R-2）| Strategist Alpha Source Orchestrator | W-AUDIT-8b/8c/8d 後 | N+3-N+4 |
+| `W-AUDIT-8f`（R-3）| Hypothesis Pipeline first-class（含 W-AUDIT-4 ML 6 dead schema 併入）| 序列化於 R-2 後 | N+4 |
 
-**Total ETA = 12-17 sprint（3-4 個月）** — 真實 gross 轉正最早窗口。
+**Total ETA = 12-17 sprint（3-4 月）** — 真實 gross 轉正最早窗口。
 
-**2026-05-15 PM prework / RCA final update**:
-- `W-AUDIT-8a C1` proof packet exists: `docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md` + `helper_scripts/bybit/liquidation_topic_probe.py`。The prior PID `4100789` run started at `2026-05-15T19:53:09Z` and ended `FAIL_CONNECTION`; the v2 proof session `c1_v2_20260516T145616Z` completed 2026-05-17 with `PASS_C1_PROOF_CANDIDATE`; BB approved corrected side semantics; W-AUDIT-8c/V095 source-test correction, Linux PG dry-run x2, MIT re-sign, V095 Linux apply, and production `allLiquidation.{symbol}` writer revival are done.
-- `W-AUDIT-8b` Funding Skew spec exists: `docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`。It is a cross-sectional crowding signal, not retired `funding_arb`; v0.3 4-cell sweep tooling is source/test done at commit `a6e17d5d`; next gate is panel ≥7d Round 2 packet + QC/MIT/BB verdict.
-- `W-AUDIT-8d` A4-C has only a tombstone in active docs: archive/no-revive for the BTC 1m return + xcorr shape, keep `panel.btc_lead_lag_panel` diagnostic-only, and do not select it for Stage 1 Demo.
-
-**Operator 5 zero/small cost actionable（2026-05-11 拍板）**：
-1. ✅ **DONE**：修 `feedback_position_sizing` memory drift（3% → 註明 SSOT 0.1%/0.05%）
-2. ⏳ **PASSIVE wait**：等 7d 重測 §三 [40]（24h MLDE +8.75bps 是 transitory 還是穩態）— 2026-05-17 自動收口
-3. ⏳ **INFO gathering**：查 Bybit fee tier 距 VIP1 還差多少 30d trading volume（被動 ROI ~0.5-1 bps RT）
-4. ⏳ **PASSIVE wait**：TONUSDT 30d evidence → P1-CONDITIONAL-WATCH freeze decision（2026-06-09 收口）
-5. ✅ **DEFER 記錄**：D/E sizing 槓桿（volatility scaling / edge-weighted）等 ML calibration N≥200 — 寫入 backlog 防過早 commit
+**Operator 5 zero/small cost action（2026-05-11 拍板）**：
+1. ✅ DONE：修 `feedback_position_sizing` memory drift（3% → 註明 SSOT 0.1%/0.05%）
+2. ⏳ PASSIVE wait：等 7d 重測 §3 [40]
+3. ⏳ INFO gathering：Bybit fee tier 距 VIP1 還差多少 30d trading volume（被動 ROI ~0.5-1 bps RT）
+4. ⏳ PASSIVE wait：TONUSDT 30d evidence → P1-CONDITIONAL-WATCH freeze 決議（2026-06-09 收口）
+5. ✅ DEFER 記錄：D/E sizing 槓桿等 ML calibration N≥200 — 寫入 backlog 防過早 commit
 
 **11 sizing 槓桿全 REJECT in current EV<0 state**（A/B/E/F = REJECT；C/I = CONDITIONAL；D = NEUTRAL；G/H/K = DEFER；J = APPROVE 被動）。
 
 **Operator 守則**：
-- 不要看見 memory「3%」就直接套到 TOML（必先讀 risk_config_*.toml SSOT）
+- 看見 memory「3%」**不要**直接套到 TOML（先讀 risk_config_*.toml SSOT）
 - 任何「升 TOML sizing」提案在 EV<0 條件下 = 災難（先修 alpha）
 - 信 config，不信 memory（per `math-model-audit` S1）
 
-**Source**：`srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-11--p1_micro_profit_amplification_math_analysis.md`（待 QC commit）
+**Source**：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-11--p1_micro_profit_amplification_math_analysis.md`
+
+### §11.5 EDGE-P2-3 Phase 1b — Final Dispatch Plan 摘要
+
+**Status**：Round 1（Design + Governance）closure + 30+ commit timeline + 4-agent verdict + IMPL Prereq status + next-round scope → 歸檔 `docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`。Phase 1b main source/test 完成於 `ea4ceca6`；V094 Linux apply + engine-only deploy/restart 完成 2026-05-17。
+
+**仍 active**：
+1. ❌ `P0-EDGE-1` — `[40]` negative realized edge 仍 active
+2. ⛔ `W-AUDIT-8b Stage 0R` — **TOMBSTONED**（細節歸檔）
+3. ✅ `W-AUDIT-8a C1` — v2 24h proof technical PASS + writer revival DONE 2026-05-17
+4. ✅ `P1-WAVE-3-5-LINUX-MIGRATION-BACKLOG` — DONE 2026-05-16
+5. ✅ `P1-BBMF3-WIRE-1` — source/test + V094 apply + engine-only rebuild/restart DONE 2026-05-17
+6. ✅ `W-AUDIT-8c` — source/test 修正 + V095 dry-run/MIT re-sign + Linux apply + writer revival DONE 2026-05-17。策略 launch/promotion 仍 future gate
+
+**Runtime kickoff status**（精簡）：
+- V094 Linux migration/deploy 授權 → deploy-chain regression → post-deploy healthcheck → PM sign-off：✅ DONE 2026-05-17
+- Phase 1b runtime activation：✅ **DEPLOY DONE 2026-05-17 23:54 UTC**（engine PID 1143103）
+- Calibration sweep + Rust timeout deploy：✅ **DONE 2026-05-18 13:50 UTC**（engine PID 1506208；grid family timeout 30s→90s）
+- **Phase 2a 14d observation clock 已 reset @ 2026-05-18 13:50 UTC**；24h post-deploy AC-A SQL verification target ~2026-05-19 13:50 UTC
+- Cross-wave consistency check pending（QA recommendation #3）
+- Outstanding anomaly investigations（low-priority parallel SD agent 2026-05-18 dispatch）：SD-1 A axis（offset_bps）dead-variable / SD-2 PS family（phys_lock_gate4_stale_roc_neg）100% n_skip / 0 fill — 報告 `2026-05-18--phase_1b_calibration_sweep_anomalies_sd_report.md`
+- 後續：24h AC-A real verdict → if PASS 繼續 Phase 2a 14d / if FAIL revert timeout 90s→30s 或 PA tune-further；Phase 2b LiveDemo / operator + AMD live carve-out / Phase 3 Mainnet 仍 future gate
+- **v56 incident 衝擊**：2026-05-19 ~12:27-20:09 UTC 7h43m trading-inert 中斷 Phase 1b verification；engine 自 20:09:36 起新 PID 2099215 恢復，sample 繼續累積（n=13 起）。verdict 視窗（T+96h~T+120h，2026-05-22~23 UTC）不受影響但 sample velocity 有缺口。
+
+### §11.6 12-Agent Full System Audit WPs（2026-05-16）— follow-ups
+
+- **Source**：`srv/2026-05-16--full-system-audit-fix-plan.md`（PA consolidated + PM sign-off）
+- **Wave 1-4 source/test**：完成並歸檔於 v36 cleanup archive
+
+**剩餘 active follow-up**：
+- WP-11 Phase 2 residual → §12 P2 backlog
+- WP-12 ONNX 仍 deferred；rule-based fallback 為當前行為
+- PA audit drift hardening → `P2-PA-CALLPATH-GREP-RULE`（已 DONE）
+- LOC follow-up → `P2-COMMON-JS-LOC`（DONE）、`P2-TAB-LIVE-LOC`（DONE via JS extract）
 
 ---
 
-## §11.6 12-Agent Full System Audit WPs (2026-05-16)
+## §12 P2 — 維護 backlog
 
-**Source**: `srv/2026-05-16--full-system-audit-fix-plan.md` (PA consolidated + PM sign-off)
-**PM Sign-off**: APPROVED-CONDITIONAL 2026-05-16
-**Status**: Wave 1-4 source/test work is closed and archived in
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
-
-**Retained follow-ups**:
-- WP-11 Phase 2 residuals are tracked in §12 P2 backlog.
-- WP-12 ONNX remains deferred; rule-based fallback is current behavior.
-- PA audit drift hardening is tracked by `P2-PA-CALLPATH-GREP-RULE`.
-- LOC follow-ups from Wave 1 are tracked by `P2-COMMON-JS-LOC` and
-  `P2-TAB-LIVE-LOC`.
-
----
-
-## §12 P2 — Maintenance Backlog
-
-| ID | Task | Trigger |
+| ID | 任務 | 觸發 |
 |---|---|---|
-| `P2-LEASE-1` | Clean terminal `DecisionLeaseSm.objects` Vec entries | If long soak shows memory growth or before high-volume live |
-| `P2-STRUCT-2` | Zombie/deprecated code inventory | Next architecture hygiene sweep |
-| `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset (D-16 dormant，§9) | ADR-0015 + AMD-2026-05-09-02 accept; Sprint N+6+ |
-| `P2-DEAD-SCHEMA-DROP-1` | ✅ **SOURCE/TEST + LINUX V096 APPLY/REGISTER DONE 2026-05-19**：source commit `428f1505`；operator-authorized trade-core apply/register only V096（no V095 / no engine restart）。Checksum `dd4613c384f053b6ff7cff8cea48529790e7e77458e97e3e2d89ca31142c58cfe5a691c367df5a0209812fd36e91b982`；backup `/tmp/openclaw/migration_backups/v096_20260519T103714Z`；precheck rows/dependents 0；postcheck both target tables `to_regclass=NULL`；`_sqlx_migrations` version 96 success=true。Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-19--v096_cron_watchdog_entry_rca_closure.md`。 |
-| `P2-DEAD-RUST-CLEANUP-1` | ✅ **DONE 2026-05-18 commit `449f628b`**：刪 7 openclaw_core modules（attention 424 / attribution 267 / cognitive 524 / dream 936 / message_bus 296 / order_match 308 / opportunity 861 = 3616 LOC，dispatch 估 3186 LOC 偏差 +430 LOC 已記入 ADR-0015 follow-up）；rg 0 production caller 驗證；lib.rs 移 7 `pub mod` + retirement marker。cargo openclaw_core 357/0 PASS（baseline 446 − 90 dead module tests + 1 new stochastic_prior test = 357，每個移除可歸因，**非 silent deletion**）。ADR-0015 提「九」模組但 PA TODO 列 7，餘 2 待 PA 下 sprint 確認。 |
-| `P2-PERCEPTION-DEPRECATE-1` | ✅ **DONE 2026-05-18 commit `428f1505`**：`perception_data_plane.py:513 validate_for_decision` 加 `warnings.warn(DeprecationWarning, stacklevel=2)`；中文 docstring 標明 0 production caller + 建議走 Agent Spine typed lineage。3 test 檔（test_perception_data_plane / test_integration_phase2 / test_batch9_perception_analyst_integration）加 pytestmark filterwarnings + unittest setUpModule（runner-agnostic）。107 perception 測試全 PASS（DeprecationWarning suppressed）。 |
-| `P2-H0-DISPLAY-LABEL-1` | ✅ **DONE 2026-05-16**：Python H0Gate GUI endpoint 回傳 `display_only=true`，明確標示此 FastAPI/GUI surface 僅展示 H0 狀態，不是 Rust H0 execution authority；targeted pytest `TestGetH0GateStatusFreshnessFields` = 3 passed。 |
-| `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → **mounted into `W-AUDIT-8f` (R-3) Hypothesis Pipeline per Decision-3 (P0-DECISION-AUDIT-7)** | Sprint N+5 |
-| `P2-ORDERS-INTENT-ID-WRITER-GAP-1` | ✅ **DONE 2026-05-19 commit `4e045c2f`**：ORDER_COLS 12→13 + PendingOrder/OrderDispatchRequest/TradingMsg::Order 加 `intent_id: Option<String>`；entry path Some(make_intent_id(em, symbol, event.ts_ms)) byte-equal trading.intents writer；close path 4 commands + 1 synthetic + pending_sweep 全 explicit None（fail-loud no fake synthesis）；5 新 regression test (pending_registration_order_type_tests.rs)；PG bind 5041×13=65533 < 65535 cap PASS；backfill design memo (DO NOT EXECUTE) at `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--p2_orders_intent_id_backfill_design_memo.md`。Guardian-pass-rate join 自此恢復可算。 |
-| `P2-WP05-FUP-1` | ✅ **DONE 32/32 2026-05-19** — round 1 (commit `428f1505`): 23 sites 跨 8 py file `str(exc)` → 穩定 reason_code + logger.warning；round 2 (commit pending today): 9 risk_routes.py sites — PM-as-Conductor APPROVE Option A → `_ipc_failure(reason_code, *, log_detail=None)` 簽名升級保留 `rust_engine_unavailable:` 前綴維持 test:266 substring 斷言相容 + 9 caller 改 `ipc_<op>_failed` / `ipc_patch_risk_config_not_ok`；`logger.warning("ipc failure: %s | %s", reason_code, log_detail)` 不外洩。1 site live_session_routes:591 marker compare 保留（dispatch 明確分類為非 leak）。E2 APPROVE 0 finding（6 視角 / §3.10 caller proof / GUI strict-match / `result!r` PII verify 全 GREEN）。E4 421/3 = v51 baseline identical 0 regression。memo `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--p2_wp05_fup1_signature_blocker.md` §8 closure addendum 記錄 final state。 |
-| `P2-COMMON-JS-LOC` | ✅ **DONE 2026-05-19 commit `ae71575e`**：common.js 2198→4 files（common.js 815 + common-formatters.js 548 + common-mode-badge.js 357 + common-modals.js 482 = 2202 +4 module headers），每檔 ≤ 2000 cap；19 HTML 文件 3 new `<script>` tag 順序在 common.js 之前；E2 HIGH catch cache-bust drift → 全 19 文件 `?v=20260519.split-p2` uniform 修正；node --check 4/4 PASS / HTML parse 19/19 PASS；window.* global pattern 保留無 framework 注入。 |
-| `P2-ENTRY-PATH-0PCT-MAKER-FILL-RCA` | ✅ **RCA DONE 2026-05-19**：Phase 1b deploy clock後 demo whitelist close，entry-close `oc_close_mf_fb_*` = 6 total / 6 attempts / 0 maker / 6 timeout_taker；risk-exit `oc_risk_*` 同窗 = 5 total / 3 attempts / 3 maker。結論：非全局 PostOnly 壞，為 entry-close path-specific 真實 fill gap；sweep BBO-cross proxy 70.8% 對此 path 過度樂觀。Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-19--v096_cron_watchdog_entry_rca_closure.md`。 |
-| `P2-ENTRY-CLOSE-MAKER-REAL-FILL-FIX` | 2 | NEW：source/test follow-up from entry-path RCA。Compare entry-close vs risk-exit limit placement, order lifetime, cancel/fallback sequencing, and queue/trade-tape evidence；不得只用 sweep proxy 調 runtime 參數。 |
-| `P2-TAB-LIVE-LOC` | ✅ **DONE 2026-05-19 commit `9bf4fd62`** via P2-TAB-LIVE-JS-EXTRACT：tab-live.html 內聯 `<script>` block 抽到 sibling `tab-live.js` 1645 LOC（pattern 同 app-paper.js / risk-tab.js / governance-tab.js / canary-tab.js）；HTML 2171→**543** LOC 大幅低於 §九 2000 cap；純 cut-paste 零邏輯改；self-reference scan clean / DOM timing 保留 verbatim。node --check + HTML parse 全 PASS。 |
-| `P2-CROSSTAB-I18N` | ✅ **DONE 2026-05-16**：tab-system / tab-paper / console / tab-settings / governance-tab.js / tab-risk / app.js / risk-tab.js 進行 static UI 繁體化 cleanup；指定殘留 `实盘/平仓/请检查` grep=0；JS syntax `node --check app.js risk-tab.js governance-tab.js` passed。 |
-| `P2-STOCHASTIC-LEAK` | ✅ **DONE 2026-05-18 commit `449f628b`**：indicators/momentum.rs:80-86 確認 `high[start..=i]` 含 current bar 同類 look-ahead leak；新增 `stochastic_prior(high, low, close, k_period, d_period)` strip current bar（mirror `donchian_prior`），原 `stochastic()` 保留（live caller 仍在 IndicatorEngine + golden_dataset.rs），加中文 warning doc。新測 `test_stochastic_prior_excludes_current_bar` 釘 divergence。5 textbook + 5 strategy indicator 完整 leak audit table：**僅 stochastic LEAKY**，RSI/ADX/ATR/EWMA/SMA/EMA/MACD/KAMA/Bollinger/Hurst/volume_ratio 全 LEAK-FREE 或 BENIGN（summary-style 非 forecast）。後續 production 切換到 `stochastic_prior` 由下一 P1 處理。 |
-| `P2-START-LOCAL-HELPER` | ✅ **DONE 2026-05-16**：`start_local.sh` + `beta_quickstart.sh` source `helper_scripts/lib/api_bind_host.sh` 並使用 `resolve_openclaw_api_bind_host()`；safe default 保持 auto→Tailscale IPv4/loopback，`OPENCLAW_BIND_HOST` 可 override，`0.0.0.0` / `::` 仍 fail-closed；static pytest + `bash -n` passed。 |
-| `P2-PA-CALLPATH-GREP-RULE` | ✅ **DONE 2026-05-16**：repo 內無 literal `code-quality-audit` skill，落地到實際審核入口 `.claude/skills/pr-adversarial-review/SKILL.md` §3.10，並同步 `.claude/agents/PA.md`；P0/P1 leak / look-ahead / selection-bias / stale finding 必附 IndicatorEngine / production caller call-path grep，未附 grep 不得作 P0/P1 blocker。 |
-| `P2-WP05-CSP-UNSAFE-INLINE` | 🟡 **SRI DONE 2026-05-18 commit `7bb994c3`** / ⏳ **full CSP nonce-based refactor 待 live-gate 前 P1**：`trading.html` 唯一外部 CDN tag (unpkg lightweight-charts@4.1.0) 加 `integrity="sha384-rcCMiCptH4kTlEbg0euOTUKWe72TESbrjElatnG+9BfbmUIV268UK/Pro5biJdGm" crossorigin="anonymous"`；helper `helper_scripts/security/compute_sri_hashes.sh` 提供版本升级時重算 + version-pin 檢查。`unsafe-inline` 移除 + 25 處 innerHTML 改寫 + nonce-based CSP 為 live-gate 前獨立 P1 refactor。 |
+| `P2-LEASE-1` | 清掃 terminal `DecisionLeaseSm.objects` Vec entries | 長期 soak 出現 memory growth 或 high-volume live 前 |
+| `P2-STRUCT-2` | Zombie / deprecated code 盤點 | 下一次架構 hygiene sweep |
+| `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset（D-16 dormant）| ADR-0015 + AMD-2026-05-09-02 accept；Sprint N+6+ |
+| `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → mount 進 `W-AUDIT-8f`（R-3）Hypothesis Pipeline | Sprint N+5 |
+| `P2-ENTRY-CLOSE-MAKER-REAL-FILL-FIX` | **NEW（v55 衍生）**：entry-close vs risk-exit limit placement / order lifetime / cancel-fallback sequencing / queue+trade-tape evidence 比對；不得只用 sweep proxy 調 runtime 參數 | source/test follow-up |
+| `P2-WP05-CSP-UNSAFE-INLINE` | 🟡 SRI 部分 DONE 2026-05-18；完整 CSP nonce-based refactor 待 live-gate 前 P1 | live-gate 前 |
+| `P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX` | **NEW（v55）**：QA 模板「entry-close vs risk-exit」拆法改用 attempt × fallback 而非 ID prefix | 下一次 QA template 更新 |
+| `P2-SIM-QUEUE-AWARE-ADJUSTMENT` | **NEW（v55）**：replay queue-aware bias 修正（10-15pp）| 下一次 sim harness round |
+| `P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS` | **NEW（v55）**：3rd 測試因「錯誤原因」PASS — 改善 assert 條件 | 下一輪 stress harness 維護 |
 
-Completed Sprint N+2 P2 rows (`P2-N2-1..4`) are archived in
-`docs/archive/2026-05-16--todo_v36_completion_cleanup_archive.md`.
+**已完成 P2 條目（細節歸檔於 2026-05-19 v55 translation archive）**：
+- `P2-DEAD-SCHEMA-DROP-1` ✅
+- `P2-DEAD-RUST-CLEANUP-1` ✅
+- `P2-PERCEPTION-DEPRECATE-1` ✅
+- `P2-H0-DISPLAY-LABEL-1` ✅
+- `P2-ORDERS-INTENT-ID-WRITER-GAP-1` ✅
+- `P2-WP05-FUP-1` ✅ 32/32 全收
+- `P2-COMMON-JS-LOC` ✅
+- `P2-ENTRY-PATH-0PCT-MAKER-FILL-RCA` ✅
+- `P2-TAB-LIVE-LOC` ✅ via `P2-TAB-LIVE-JS-EXTRACT`
+- `P2-CROSSTAB-I18N` ✅
+- `P2-STOCHASTIC-LEAK` ✅
+- `P2-START-LOCAL-HELPER` ✅
+- `P2-PA-CALLPATH-GREP-RULE` ✅
+- 5 個 `P2-PORTFOLIO-RESTING-*` follow-up ✅
+
+完成的 Sprint N+2 P2 條目（`P2-N2-1..4`）歸檔於 v36 cleanup archive。
 
 ---
 
@@ -494,50 +394,51 @@ Completed Sprint N+2 P2 rows (`P2-N2-1..4`) are archived in
 
 ### PA Push Back（已 RESOLVED 2026-05-09 operator (a)）
 - **原 risk**：Sprint N+0 5/5 HOT capacity = 任一 E1 故障 = 阻塞 critical path
-- **Operator 拍板 (a)**：提供 1 stand-by E1，Sprint N+0 capacity 升級為 6 並行（5 active + 1 stand-by）
+- **Operator 拍板 (a)**：提供 1 stand-by E1，Sprint N+0 capacity 升 6 並行（5 active + 1 stand-by）
 - **記錄**：v19 §0 Sprint Banner / §5.4 invariant 22 / §6 Day 0-3 dispatch
 
 ### FA Push Back（採納，記入治理）
-1. Track W vs Track A 預算 — Track W 92h 是 supervised live 前置門檻（合規/安全/可觀測 baseline），**不能被 Track A lobby 取代**
-2. D-02 SOP 預期上限 +2-5 USDT/week；若 7d < 1 USDT/week 不值人工 fixed cost，建議 abort
+1. Track W vs Track A 預算 — Track W 92h 是 supervised live 前置門檻（合規 / 安全 / 可觀測 baseline），**不能被 Track A lobby 取代**
+2. D-02 SOP 預期上限 +2-5 USDT/week；7d < 1 USDT/week 不值人工 fixed cost → 建議 abort
 3. A/B/C 候選預期 +3-7% 業務鏈是中位估，新 alpha source **0% PASS 率歷史不支持「三都 PASS」樂觀情境**
 4. W-AUDIT-6d 砍 6 polishing 是 DSR 數學意義 right move（K -12），不是省工時妥協
 
-### 4-agent loss audit cross-fact-check（已撤銷的 stale belief）
-- **QC v2-NEW-4 Donchian「runtime contaminated」過期 contaminated belief**：MIT 校核 + PM 直接驗證確認 runtime 自 `75741eff` (2026-04-28) 起 leak-free 11 天；`ad14db07` 僅補 regression test。後續 audit / push back 不可再引此 finding 為 active runtime issue。
+### 4-agent loss audit cross-fact-check（撤銷的 stale belief）
+- **QC v2-NEW-4 Donchian「runtime contaminated」過期 belief**：MIT 校核 + PM 直接驗證確認 runtime 自 `75741eff`（2026-04-28）起 leak-free 11 天；`ad14db07` 僅補 regression test。後續 audit / push back 不可再引此 finding 為 active runtime issue。
 
 ---
 
-## §14 Schedule
+## §14 排程
 
-| Date | Work | Gate |
+| 日期 | 工作 | Gate |
 |---|---|---|
-| 2026-05-10..16 | Sprint N+0 W1-W2 FOUNDATION HEAVY | Closed; detailed ledger archived in `docs/archive/2026-05-15--todo_v21_completion_cleanup_archive.md` |
-| 2026-05-16 | funding_arb 14d audit | verification/history; retirement decision in AMD-2026-05-09-02 / ADR-0018 |
-| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | 8a C1 transport proof passed; W-AUDIT-8c/V095 source-test correction + Linux PG dry-run/MIT re-sign + Linux apply done but production revival waits separate AMD/source/config dispatch; 8b read-only Stage 0R query/report packet; Stage 1 Demo only after a future green Stage 0R (`[55]` source-cleared) |
-| 2026-05-24..30 | Sprint N+2 8a Phase D + Stage 2 demo cohort 14d | Stage 2 only from Stage 1 Demo empirical evidence |
-| 2026-05-31..06-06 | Sprint N+3 8c (Liquidation) IMPL + 8e (R-2) spec + Stage 3 demo full | |
-| 2026-06-07..13 | Sprint N+4 8f (R-3) spec + 8b (Funding Skew) IMPL + 8e IMPL + Track W 收尾 | Track W 全 closed |
-| 2026-06-14..20 | Sprint N+5 8f IMPL + 8g (R-4) spec + first per-alpha-source supervised live | 業務鏈 85-89% |
-| 2026-06-15 | Supervised live 樂觀帶（業務鏈 75%+） | conditional on W-AUDIT-1..7 + 5 P0-LG/OPS + W-A/B/C/D PASS |
-| 2026-06-30 | Supervised live 中位帶（業務鏈 80%+） | ~40% probability per FA |
-| 2026-07-15 | Supervised live 悲觀帶（業務鏈 85%+） | ~25% probability per FA |
+| 2026-05-10..16 | Sprint N+0 W1-W2 FOUNDATION HEAVY | Closed；細節歸檔於 v21 cleanup archive |
+| 2026-05-16 | funding_arb 14d audit | verification/history；retirement 決議於 AMD-2026-05-09-02 / ADR-0018 |
+| 2026-05-17..23 | Sprint N+1 ALPHA SURFACE PANEL WIRING | 8a C1 transport proof passed；8c source/test 修正 + V095 dry-run/MIT re-sign + Linux apply 完成；writer revival 完成（v46）；8b read-only Stage 0R query/report packet；Stage 1 Demo 限未來綠燈 Stage 0R 後 |
+| 2026-05-24..30 | Sprint N+2 8a Phase D + Stage 2 demo cohort 14d | Stage 2 限 Stage 1 Demo 實證後 |
+| 2026-05-31..06-06 | Sprint N+3 8c（Liquidation）IMPL + 8e（R-2）spec + Stage 3 demo full | |
+| 2026-06-07..13 | Sprint N+4 8f（R-3）spec + 8b（Funding Skew）IMPL + 8e IMPL + Track W 收尾 | Track W 全 closed |
+| 2026-06-14..20 | Sprint N+5 8f IMPL + 8g（R-4）spec + 首個 per-alpha-source supervised live | 業務鏈 85-89% |
+| 2026-06-15 | Supervised live 樂觀帶（業務鏈 75%+）| conditional on W-AUDIT-1..7 + 5 P0-LG/OPS + W-A/B/C/D PASS |
+| 2026-06-30 | Supervised live 中位帶（業務鏈 80%+）| ~40% probability per FA |
+| 2026-07-15 | Supervised live 悲觀帶（業務鏈 85%+）| ~25% probability per FA |
 
 ---
 
-## §15 Dispatch Rules + Handoff Checks
+## §15 派工規則 + Handoff 檢查
 
-### Dispatch Rules
+### 派工規則
 - PM-first triage for every wave
-- Implementation work: `PM → PA → E1/E1a → E2 → E4 → QA → PM`，roles 跳過需 explicit justify
-- Security/deploy/runtime work: `PM → E3 → BB if exchange-facing → PM`
-- Quant/data decisions: `PM → QC → MIT → AI-E if model economics matter → PM`
-- Commit each green checkpoint with subject and body, push to origin, then sync Linux by fast-forward
-- **Commit message 加 `[skip ci]`** 對非 CI-relevant 變更（doc / governance / TODO update / report land），保 CI usage 額度
-- Do not rebuild, restart, mutate live auth, change scanner evidence contract, unlock executor shadow, enable lease-router, or add OpenClaw write/proposal routes unless operator explicitly authorizes
+- 實作工作：`PM → PA → E1/E1a → E2 → E4 → QA → PM`，跳過角色需 explicit justify
+- 安全 / 部署 / runtime：`PM → E3 → BB（若涉交易所）→ PM`
+- 量化 / 資料決議：`PM → QC → MIT → AI-E（若涉模型成本）→ PM`
+- 每個 green checkpoint 提交 subject + body，push origin，再以 fast-forward 同步 Linux
+- 非 CI-relevant commit（doc / governance / TODO update / report land）加 `[skip ci]` 保 CI 額度
+- 不可 rebuild / restart / 動 live auth / 改 scanner evidence contract / 解鎖 executor shadow / 啟 lease-router / 新增 OpenClaw write/proposal 路徑，除非 operator 顯式授權
 - W-AUDIT-6d 砍 6 子項：E2 必 grep blacklist；命中即 reject merge
+- **新增（v55 governance flag）**：sign-off SOP 加 `cargo test -p openclaw_engine --release`（no --lib）以覆蓋 tests/ integration crate
 
-### Handoff Checks
+### Handoff 檢查
 
 ```bash
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
@@ -550,50 +451,58 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 
 ## §16 References
 
-### 4-Agent Loss Audit (2026-05-09)
-- **PA dispatch plan**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_dispatch_engineering_plan.md` (commit `d3bf7be2`, 689 lines)
-- **PA architectural redesign**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md`
-- **PA merge analysis**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--todo_qctodo_merge_analysis.md`
-- **FA business chain validation**: `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-09--full_dispatch_business_chain_validation.md` (commit `5a2dee98`)
-- **FA dormant alpha inventory**: `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-09--full_loss_dormant_alpha_features_inventory.md`
-- **FA merge advice**: `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-09--todo_qctodo_merge_business_chain_advice.md`
-- **4-agent loss audit worklog**: `srv/docs/worklogs/2026-05-09--4_agent_loss_audit_and_5_actions.md`
-- **QCTODO archived**: `srv/docs/archive/2026-05-09--qctodo_sprint_n0_n5_archive.md`
+### 4-Agent Loss Audit（2026-05-09）
+- **PA dispatch plan**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_dispatch_engineering_plan.md`（commit `d3bf7be2`，689 行）
+- **PA architectural redesign**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md`
+- **PA merge analysis**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--todo_qctodo_merge_analysis.md`
+- **FA business chain validation**：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-09--full_dispatch_business_chain_validation.md`（commit `5a2dee98`）
+- **FA dormant alpha inventory**：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-09--full_loss_dormant_alpha_features_inventory.md`
+- **FA merge advice**：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-09--todo_qctodo_merge_business_chain_advice.md`
+- **4-agent loss audit worklog**：`docs/worklogs/2026-05-09--4_agent_loss_audit_and_5_actions.md`
+- **QCTODO archived**：`docs/archive/2026-05-09--qctodo_sprint_n0_n5_archive.md`
 
 ### Spec / Amendment
-- **W-AUDIT-8a spec**: `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md` (commit `c13c811e`)
-- **AMD-2026-05-09-02** (5 P0-DECISION-AUDIT closure): `srv/docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md`
-- **AMD-2026-05-09-03** (Graduated Canary Default): `srv/docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md` (commit `b1891023`)
-- **AMD-2026-05-15-01** (Canary Rebase Replay Preflight + Demo Micro-Canary): `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`
-- **AMD-2026-05-15-02 v0.4** (EDGE-P2-3 Phase 1b Close-Maker-First): `srv/docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
-- **EDGE-P2-3 Phase 1b spec v1.3**: `srv/docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
-- **V094 hybrid schema migration spec**: `srv/docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md`
-- **Round 1 Closure Archive**: `srv/docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`（完整 round 1 closure + 30+ commit timeline + IMPL prereq status + next-round scope）
-- **W-AUDIT-8b Funding Skew Directional spec v0.2**: `srv/docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`
-- **ADR-0015** openclaw_core sunset / **ADR-0017** scanner authority retirement / **ADR-0018** funding_arb retire / **ADR-0020** Layer 2 manual+supervisor-only / **ADR-0022** strategist cap
+- **W-AUDIT-8a spec**：`docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`（commit `c13c811e`）
+- **AMD-2026-05-09-02**（5 P0-DECISION-AUDIT closure）：`docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md`
+- **AMD-2026-05-09-03**（Graduated Canary Default）：`docs/governance_dev/amendments/2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md`（commit `b1891023`）
+- **AMD-2026-05-15-01**（Canary Rebase Replay Preflight + Demo Micro-Canary）：`docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`
+- **AMD-2026-05-15-02 v0.7**（EDGE-P2-3 Phase 1b Close-Maker-First + Runtime Activation Layer + W-AUDIT-8b tombstone clause）：`docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
+- **EDGE-P2-3 Phase 1b spec v1.3**：`docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- **V094 hybrid schema migration spec**：`docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md`
+- **Round 1 Closure Archive**：`docs/archive/2026-05-16--close_maker_first_phase_1b_round1_archive.md`
+- **W-AUDIT-8b Funding Skew Directional spec v0.4 tombstone**：`docs/execution_plan/2026-05-15--w_audit_8b_funding_skew_directional_spec.md`
+- **v56 P0 Engine HaltSession TTL spec**：`docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md`（~600-1000 LOC，PA drafting，ETA 2-3h from 2026-05-19 20:30 UTC）
+- **ADR-0015** openclaw_core sunset / **ADR-0017** scanner authority retirement / **ADR-0018** funding_arb retire / **ADR-0020** Layer 2 manual+supervisor-only / **ADR-0022** strategist cap / **ADR-0023** SourceAvailability schema
 
-### Close-Maker-First 3-agent Verdicts (2026-05-15 round 1 — Spec)
-- **PM verdict**: `srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--close_maker_first_pm_verdict.md` (APPROVED-CONDITIONAL，scope-in Sprint N+2 P1)
-- **PA verdict + spec outline**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md` (READY-FOR-SPEC，0 BLOCKED-BY-1B-4.2，~985 LOC)
-- **FA verdict + AC**: `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-15--close_maker_first_fa_verdict.md` (APPROVED-CONDITIONAL，5 conditions + 5 missing keep-market reasons)
+### Close-Maker-First 3-agent Verdicts（2026-05-15 round 1 — Spec）
+- **PM verdict**：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--close_maker_first_pm_verdict.md`
+- **PA verdict + spec outline**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-15--close_maker_first_pa_verdict.md`
+- **FA verdict + AC**：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-15--close_maker_first_fa_verdict.md`
 
-### Close-Maker-First 4-agent AMD Adversarial Review (2026-05-15 round 2 — AMD)
-- **QC verdict**: `srv/docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_qc.md` (APPROVED-CONDITIONAL，4 must + 5 should + 3 NTH；framing / multiple testing / phys_lock timeout / AC-5 sample-size)
-- **FA round 2 verdict**: `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_fa.md` (APPROVED-CONDITIONAL，4 must + 5 should + 4 recommended；framing / IMPL prereq 5 / W-C Caveat 2 / V### backward-compat)
-- **BB verdict**: `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_bb.md` (APPROVED-CONDITIONAL，5 must + 3 should + 4 補錄；PostOnly+reduceOnly dict / dynamic backoff / reject_cooldown split P0 / classifier reuse / reject sample HC)
-- **MIT verdict**: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_mit.md` (APPROVED-CONDITIONAL，6 must + 4 should + 1 may；hybrid schema / Wilson-CI gating / NULL ladder / non-training invariant；V094 recommended)
-- **Consolidated 4-agent summary**: `srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_consolidated.md` (4 consensus + 13 unique must-fix + 14 should-fix；AMD v0.2 + spec v1.1 patch plan)
+### Close-Maker-First 4-agent AMD Adversarial Review（2026-05-15 round 2 — AMD）
+- **QC**：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_qc.md`
+- **FA round 2**：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_fa.md`
+- **BB**：`docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_bb.md`
+- **MIT**：`docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_mit.md`
+- **Consolidated 4-agent summary**：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-15--amd_2026_05_15_02_4agent_review_consolidated.md`
+
+### v56 P0 incident
+- **E2 RCA verdict**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--engine_watchdog_respawn_loop_and_trading_inert_rca.md`
+- **PA spec（drafting）**：`docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md`
 
 ### Adversarial Verification
-- **v3 PM Sign-off summary**: `srv/2026-05-09--audit_fix_verification_v3_summary.md`
-- **v2 PM Sign-off summary**: `srv/2026-05-09--audit_fix_verification_v2_summary.md`
-- **v1 PM Sign-off summary**: `srv/2026-05-09--audit_fix_verification_summary.md`
-- **PA Fix Plan v2 (DUAL-TRACK)**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_audit_pa_fix_plan_v2.md`
-- **2026-05-08 12-Agent Full Audit + PA Fix Plan**: `srv/2026-05-08--full_audit_fix_plan.md`
-- **Verified-closed archives**: `srv/docs/archive/2026-05-09--w_audit_verified_closed_archive_{,v2,v3}.md`
+- **v3 PM Sign-off summary**：`2026-05-09--audit_fix_verification_v3_summary.md`
+- **v2 PM Sign-off summary**：`2026-05-09--audit_fix_verification_v2_summary.md`
+- **v1 PM Sign-off summary**：`2026-05-09--audit_fix_verification_summary.md`
+- **PA Fix Plan v2（DUAL-TRACK）**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_audit_pa_fix_plan_v2.md`
+- **2026-05-08 12-Agent Full Audit + PA Fix Plan**：`2026-05-08--full_audit_fix_plan.md`
+- **Verified-closed archives**：`docs/archive/2026-05-09--w_audit_verified_closed_archive_{,v2,v3}.md`
 
 ### Bybit / API
-- **Bybit API 字典/審計**: `docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
+- **Bybit API 字典/審計**：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
 
 ### Process
-- **Operator G3-08 enable evidence**: commit `dddc5dc1` restart_all.sh wire + 2026-05-09 17:27 UTC engine.log `cost_edge_advisor spawned env=1 phase=B_shadow`
+- **Operator G3-08 enable evidence**：commit `dddc5dc1` restart_all.sh wire + 2026-05-09 17:27 UTC engine.log `cost_edge_advisor spawned env=1 phase=B_shadow`
+
+### v55 翻譯歸檔
+- **歷史 ✅ DONE 詳情**：`docs/archive/2026-05-19--todo_v55_translation_archive.md`（本次同步建立，收納 v37-v55 之 carry-forward 全文 + §11 / §12 已完成 commit chain）
