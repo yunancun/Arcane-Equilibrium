@@ -25,6 +25,13 @@ position_mode = "one_way"
 guardian_modification_size_factor = 0.5
 guardian_modification_leverage_cap = 2.0
 per_trade_risk_pct = 0.1
+# P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — legacy fallback config
+# 與 demo 一致：daily_loss=24h / drawdown=0 sticky。
+# TODO(E2 review)：確認此 file 是否還在 production load path，已 deprecated 則
+# 標清理 ticket。
+# P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：legacy fallback。
+daily_loss_halt_ttl_ms = 86400000
+drawdown_halt_ttl_ms = 0
 
 [overrides]
 

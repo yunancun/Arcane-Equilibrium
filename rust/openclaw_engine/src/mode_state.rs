@@ -213,6 +213,18 @@ pub struct ModeStateSnapshot {
     pub session_halted: bool,
     /// Paper paused by operator / 紙盤暫停
     pub paper_paused: bool,
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：halt 分類，set 時凍結。
+    /// `None` = 無 active halt（含 operator IPC Pause）；`Some(kind)` = paper_paused
+    /// 由 HaltSession 設置且 kind 對應 priority 7/9。restore 後決定是否走 TTL
+    /// auto-clear；operator pause 保留 sticky 語意。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt 分類；restore 後決定 TTL 路徑。
+    #[serde(default)]
+    pub halt_kind: Option<crate::halt_audit::HaltKind>,
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：halt 設置 wall-clock 毫秒。
+    /// 0 = 無 active halt 起點；非 0 = TTL 起點，restart 不重置（保留剩餘 TTL）。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt set 時間；restart 保留。
+    #[serde(default)]
+    pub halt_set_ts_ms: u64,
 }
 
 #[cfg(test)]

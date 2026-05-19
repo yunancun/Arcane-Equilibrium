@@ -322,6 +322,11 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     // QoL-1：首個 tick 前從 trading.fills 還原累計指標；細節見 helper。
     paper_state_restore::restore_paper_counters(&mut pipeline, audit_pool.as_ref()).await;
 
+    // MUST-FIX-2 Round 2（2026-05-19/20）：從上輪 pipeline_snapshot 還原 halt_kind /
+    // halt_set_ts_ms，讓 TTL 起點跨 restart 不重置（AC A-4）。本 helper 完全
+    // fail-soft：缺檔/缺欄位/解析失敗 → 冷啟動，不阻塞 boot。
+    paper_state_restore::restore_halt_state_from_snapshot(&mut pipeline).await;
+
     // B-1 Phase 2: Seed paper_state with exchange positions captured at startup.
     // Without this, inactive symbols never get WS PositionUpdate → snapshot=0.
     // B-1 Phase 2：以啟動時抓到的交易所持倉 seed paper_state（Paper 管線 no-op）。

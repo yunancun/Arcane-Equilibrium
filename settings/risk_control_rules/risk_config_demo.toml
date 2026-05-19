@@ -25,6 +25,16 @@ position_mode = "one_way"
 guardian_modification_size_factor = 0.5
 guardian_modification_leverage_cap = 2.0
 per_trade_risk_pct = 0.1
+# P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)
+# daily_loss_halt_ttl_ms：priority-9 DAILY LOSS halt 的 TTL（毫秒）。
+#   demo / live_demo / paper 採 86400000 (24h) — 跨日後語意重置，學習平面
+#   無需 operator 逐日人工 Resume；非零必在 [86400000, 604800000] 範圍。
+# drawdown_halt_ttl_ms：priority-7 SESSION DRAWDOWN halt 的 TTL。
+#   三環境硬性 sticky，必須 0。drawdown 是結構性風險信號（根原則 #5/#6）。
+#   validate() 對 > 0 直接 reject。
+# P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt TTL（ms）。
+daily_loss_halt_ttl_ms = 86400000
+drawdown_halt_ttl_ms = 0
 
 [overrides]
 

@@ -8,6 +8,54 @@
 
 ## 工作記憶
 
+### 2026-05-19/20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2 — PASS
+
+**對象**：E1 Round 2 IMPL（4 MUST-FIX + 1 E3 MEDIUM + 1 SHOULD spec §6.3 incident replay）9 個新 test 加進來 → 3255 (R1) → 3264 (R2)。
+
+**結果**：
+| Suite | passed | failed | ignored | non-flaky |
+|---|---|---|---|---|
+| Mac cargo --release Run #1 | 3264 | 0 | 3 | ✅ |
+| Mac cargo --release Run #2 | 3264 | 0 | 3 | ✅ identical |
+| Linux pre-Layer A baseline | 3219 | 0 | 3 | (Round 1+2 未 push) |
+| Python pytest test_halt_audit_pg_writer | 20 | 0 | - | ✅ |
+| per_symbol_price_pnl (P1-16) | 3 | 0 | - | ✅ preserved |
+| halt_audit substring | 13 | 0 | - | ✅ |
+| halt_ttl substring | 29 | 0 | - | ✅ |
+| config::risk_config substring | 159 | 0 | - | ✅ |
+
+**Linux PG integration E4 獨立執行**（fake process_pid=2099999 marker 避撞 prod）：
+- Run 1 cold start → inserted=3 skipped=0 new_offset=1227
+- Run 2 idempotency → "no new rows since last cursor; exit 0"
+- SELECT 驗 event_type↔clear_path 完整對齊：set↔NULL / auto_cleared↔auto_ttl / manual_cleared↔ipc_resume
+- Cleanup DELETE 3 rows
+
+**SLA bench**：
+- hot_path_baseline avg=18.88μs p99=27.79μs max=64.79μs（target tick path <100μs，0 regression）
+- intent_processor p99=8.9μs（target IPC <5ms，零問題）
+- tick_latency 45.1μs avg over 1000 ticks
+- TTL check 在 on_tick 入口 O(1) early-out（`halt_kind == None` 直 return）99.9%+ tick 0 額外 cost
+
+**§九 LOC**：
+- risk_config_tests.rs 1917 < 2000（MUST-FIX-4 從 2076 拆 159 LOC → sibling halt_ttl_tests.rs 182 LOC）✓
+- 0 hard-cap breach；82 LOC headroom
+
+**教訓**：
+
+1. **Cross-arch byte-equiv verification 需 commit + push + Linux pull**。dirty Mac tree 無法做 aarch64 ↔ x86-64 對比；只能跑 Mac single-arch + Linux pre-Layer A baseline（diff = total +45 = Round 1 +34 + Round 2 +9 + 1-2 test case 數差合理）。如改 float math / serde / state machine 必須 commit + push 才能驗 1e-4 容差。Round 2 spec §6 已聲明 cross-arch 0 regression risk（無新 float hot path），所以 Linux baseline 對比足夠 E4 階段 sign-off。
+
+2. **POSTGRES_PASSWORD with parens bash auto-export 坑**：`POSTGRES_PASSWORD=<REDACTED>` 在 `set -a; source basic_system_services.env; set +a` 下被 bash syntax-eat（`()` 被視為 subshell）。Python `os.environ.get` 拿到空字串。`grep | cut` 直讀 env file 字面值才正確（cron wrapper L39-43 已正確）。**生產 cron 不受影響**；只有 manual test 需 `export OPENCLAW_DATABASE_URL='postgresql://...(...)..'`。E4 報告此坑供 operator 知悉，不阻塞 PASS。
+
+3. **9 個 named test 雙 path 驗證**：`grep -rnE "test_<name>" rust/openclaw_engine/src/` (file existence) + `cargo test -p openclaw_engine --release -- <9 names>` (run pass) 雙驗。E1 self-report 9 added；E4 兩條 path 各自 9/9。比起 single-path 「全 suite passed >= baseline」更能 catch ghost commits（test function 寫在某 module 但 mod registration 漏接，Mac cargo run 不會跑到）。
+
+4. **Hot path SLA 0 regression 驗證的正確姿態**：不是「跑 cargo test 沒 fail」，是跑 bench 拿具體 p50 / p99 / max。on_tick 入口加 `check_and_clear_halt_expired` 雖看似額外動作，但 O(1) early-out `halt_kind == None → return false` 路徑 99.9%+ tick 走，bench 證實 hot_path_baseline 不退化。E4 應對所有 hot path 改動跑 bench，不能只跑 cargo test。
+
+**Verdict**：**PASS** — Mac 3264/0/3 non-flaky + Linux PG integration 3 INSERT verified + SLA 0 regression + §九 0 breach + 16 原則 0 違反 + 9 named test exist+run。允許 PM 派 QA Audit 並行 E2 round 2 re-review。**不阻塞** E2。
+
+**Report path**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-19--layer_a_halt_ttl_impl_e4_regression.md`
+
+---
+
 ### 2026-05-16 Two-IMPL parallel Mac regression (F-09 + [68]) — PASS
 
 **對象**：兩個並行 P1 IMPL Mac-side baseline regression（PM 派發前）：

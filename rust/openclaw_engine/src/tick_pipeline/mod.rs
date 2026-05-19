@@ -879,6 +879,17 @@ pub struct TickPipeline {
     /// RRC-1-C4: Session halted flag — set by HaltSession, cleared by Resume/Reset.
     /// RRC-1-C4：會話暫停標誌 — 由 HaltSession 設置，由 Resume/Reset 清除。
     pub session_halted: bool,
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): halt 分類，paper_paused 由
+    /// HaltSession 設置時凍結；`None` = 無 active halt（含 operator IPC Pause →
+    /// 保留 sticky 語意，永不 TTL auto-clear）。set/clear 與 paper_paused 同步。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt 分類；operator pause
+    /// 永遠 None 保 sticky。
+    pub halt_kind: Option<crate::halt_audit::HaltKind>,
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): paper_paused 由 HaltSession
+    /// 觸發時的 wall-clock ms 戳；0 = 無 active halt。`check_and_clear_halt_expired`
+    /// 用此計算 elapsed_ms。restart 後從 snapshot restore，不重置 TTL 起點。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt set ts；TTL 起點。
+    pub halt_set_ts_ms: u64,
     /// Session 11: 1-minute trade aggregator (idle writer #2 fix).
     /// Session 11：1 分鐘成交聚合器（idle writer #2 修復）。
     trade_aggregator: crate::database::aggregators::TradeAggregator,

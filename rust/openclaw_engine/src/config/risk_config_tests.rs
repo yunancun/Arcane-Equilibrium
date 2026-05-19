@@ -1910,3 +1910,8 @@ fn test_lg2_t4_real_toml_files_parse_and_validate() {
     }
     assert!(failures.is_empty(), "LG-2 T4 TOML smoke failures: {failures:?}");
 }
+
+// ---------------------------------------------------------------------------
+// MUST-FIX-4 Round 2 (2026-05-19/20)：halt TTL 9 個 test 已拆至 sibling
+// `risk_config_halt_ttl_tests.rs`，避免本檔超 CLAUDE.md §九 2000 LOC 硬上限。
+// ---------------------------------------------------------------------------

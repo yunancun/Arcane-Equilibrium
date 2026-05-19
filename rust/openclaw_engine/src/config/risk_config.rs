@@ -467,6 +467,34 @@ pub struct GlobalLimits {
     /// 倉位但遠高於 dust 殘留（sub-cent 級），可經 `patch_risk_config` 熱重載。
     #[serde(default = "default_ft_dust_qty_floor_usd")]
     pub ft_dust_qty_floor_usd: f64,
+
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): priority-9 `DAILY LOSS`
+    /// halt 的 TTL（毫秒）。`0` = 完全 sticky（Live D1 policy）；非零必須
+    /// 在 [86400000, 604800000] 範圍（24h 下限 + 7d 上限）。
+    ///
+    /// 設計：
+    /// - demo / paper / live_demo 採 86400000（24h wall-clock）— 跨日後語意重置
+    /// - **Live 採 0**（sticky）— 真實 PnL 達 15% = 根原則 #5 紅線，operator 人工 RCA
+    /// - validate() 拒絕 0 < ttl < 24h（防 immediate re-halt 同 UTC day）
+    /// - validate() 拒絕 ttl > 7d（防 misconfig）
+    ///
+    /// 對應 step_6 priority 9 「DAILY LOSS」reason 字串 + halt_audit::HaltKind::DailyLoss。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：priority 9 DAILY LOSS
+    /// halt 的 TTL（ms）。0 = sticky（Live D1）；非零須 [24h, 7d]。
+    #[serde(default = "default_daily_loss_halt_ttl_ms")]
+    pub daily_loss_halt_ttl_ms: u64,
+
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): priority-7 `SESSION DRAWDOWN`
+    /// halt 的 TTL（毫秒）。**必須 0 = NEVER auto-clear**（三環境硬性 sticky）。
+    /// validate() 對 > 0 直接 reject。
+    ///
+    /// 為什麼留欄位而非完全 hard-code Rust：明示性 — operator / E2 / FA 看 TOML
+    /// 一眼就知道「drawdown 是 0」，不必反推 Rust 源；fail-loud validate 守住硬邊界。
+    /// drawdown 是結構性風險信號（根原則 #5「生存 > 利潤」+ #6「失敗默認收縮」）。
+    /// P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：priority 7 SESSION DRAWDOWN
+    /// halt 的 TTL（ms）。三環境必須 0；validate() reject > 0。
+    #[serde(default = "default_drawdown_halt_ttl_ms")]
+    pub drawdown_halt_ttl_ms: u64,
 }
 
 fn default_stop_loss_max_pct() -> f64 {
@@ -542,6 +570,19 @@ fn default_ft_dust_qty_floor_usd() -> f64 {
     1.0
 }
 
+fn default_daily_loss_halt_ttl_ms() -> u64 {
+    // P0-ENGINE-HALTSESSION-STUCK-FIX：demo / paper / live_demo 預設 24h
+    // wall-clock；Live TOML 必須明示 `0` 覆蓋（D1 policy sticky）。
+    24 * 60 * 60 * 1000
+}
+
+fn default_drawdown_halt_ttl_ms() -> u64 {
+    // P0-ENGINE-HALTSESSION-STUCK-FIX：drawdown 三環境硬性 sticky；任何 > 0
+    // 配置 validate() 直接 reject。明示 0 default 與 hard-code 都可，留欄位
+    // 是讓 operator / E2 / FA 看 TOML 一眼即知（明示性）。
+    0
+}
+
 impl Default for GlobalLimits {
     fn default() -> Self {
         Self {
@@ -570,6 +611,10 @@ impl Default for GlobalLimits {
             per_trade_risk_pct: default_per_trade_risk_pct(),
             ft_min_notional_ratio_of_entry: default_ft_min_notional_ratio_of_entry(),
             ft_dust_qty_floor_usd: default_ft_dust_qty_floor_usd(),
+            // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：halt TTL 預設值。
+            // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt TTL 預設。
+            daily_loss_halt_ttl_ms: default_daily_loss_halt_ttl_ms(),
+            drawdown_halt_ttl_ms: default_drawdown_halt_ttl_ms(),
         }
     }
 }
@@ -640,6 +685,31 @@ impl GlobalLimits {
             || !(0.0..=100_000.0).contains(&self.ft_dust_qty_floor_usd)
         {
             return Err("risk.limits.ft_dust_qty_floor_usd must be finite in [0, 100000]".into());
+        }
+        // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): halt TTL 守門。
+        // drawdown_halt_ttl_ms：三環境硬性 sticky；任何 > 0 即 reject（D1 policy）。
+        // 留 0 default + 顯式 reject 確保 fail-loud — TOML 誤填 24h 直接擋下。
+        if self.drawdown_halt_ttl_ms != 0 {
+            return Err(format!(
+                "risk.limits.drawdown_halt_ttl_ms must be 0 (drawdown halts are sticky by operator policy; root principle #5/#6); got {}",
+                self.drawdown_halt_ttl_ms
+            ));
+        }
+        // daily_loss_halt_ttl_ms：允許 0（Live D1 sticky）或 [24h, 7d] 範圍。
+        // 24h 下限 = QC SHOULD-1 防 immediate re-halt 同 UTC day
+        // 7d 上限 = 防 misconfig（wall-clock 語意不應跨週）
+        // Live env 必明示 0（sticky）；TOML loader 不擋 — validate() 接受 0 即可。
+        const DAILY_LOSS_TTL_FLOOR_MS: u64 = 24 * 60 * 60 * 1000;
+        const DAILY_LOSS_TTL_CEILING_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+        if self.daily_loss_halt_ttl_ms != 0
+            && (self.daily_loss_halt_ttl_ms < DAILY_LOSS_TTL_FLOOR_MS
+                || self.daily_loss_halt_ttl_ms > DAILY_LOSS_TTL_CEILING_MS)
+        {
+            return Err(format!(
+                "risk.limits.daily_loss_halt_ttl_ms must be 0 (sticky; Live D1 policy) OR \
+                 in [86400000, 604800000] (24h–7d window); got {}",
+                self.daily_loss_halt_ttl_ms
+            ));
         }
         Ok(())
     }
@@ -1226,3 +1296,9 @@ impl CostGate {
 #[cfg(test)]
 #[path = "risk_config_tests.rs"]
 mod tests;
+
+// MUST-FIX-4 Round 2（2026-05-19/20）：halt TTL 9 個 test 從上方 tests 拆到
+// sibling file 維持 2000 LOC 硬上限。
+#[cfg(test)]
+#[path = "risk_config_halt_ttl_tests.rs"]
+mod halt_ttl_tests;

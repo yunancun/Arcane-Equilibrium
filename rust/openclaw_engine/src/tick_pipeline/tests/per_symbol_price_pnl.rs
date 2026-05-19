@@ -148,6 +148,29 @@ fn test_close_position_at_symbol_market_fallback_to_entry_when_no_latest_price()
 /// ETHUSDT $2357.94 污染 DOT/HIGH/IP 並產生 -17M bps 髒列的根因。
 #[test]
 fn test_halt_session_uses_per_symbol_price_not_triggering_tick() {
+    // MUST-FIX-1 / 2 Round 2（2026-05-19/20）：本 test 透過 HaltSession 觸發
+    // `crate::halt_audit::record_halt_set` 寫進 OPENCLAW_HALT_AUDIT_LOG / 預設
+    // 路徑，會跟 halt_audit / halt_ttl module 內 env-touching test 互踩。
+    // 拿 env_test_lock 並暫時清除 env override 避免污染對方 tmp 檔。
+    let _env_guard = crate::event_consumer::paper_state_restore::env_test_lock();
+    let saved_log_env = std::env::var("OPENCLAW_HALT_AUDIT_LOG").ok();
+    unsafe {
+        std::env::remove_var("OPENCLAW_HALT_AUDIT_LOG");
+    }
+    // RAII guard 還原 env：避免 panic 路徑遺失原值
+    struct EnvRestoreGuard(Option<String>);
+    impl Drop for EnvRestoreGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(v) = self.0.take() {
+                    std::env::set_var("OPENCLAW_HALT_AUDIT_LOG", v);
+                } else {
+                    std::env::remove_var("OPENCLAW_HALT_AUDIT_LOG");
+                }
+            }
+        }
+    }
+    let _restore_guard = EnvRestoreGuard(saved_log_env);
     use crate::database::TradingMsg;
     let mut pipeline = TickPipeline::with_kind(
         &["BTCUSDT", "ETHUSDT", "DOGEUSDT"],

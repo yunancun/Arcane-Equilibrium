@@ -107,6 +107,20 @@ impl TickPipeline {
         // Start timing the tick processing / 開始計時 tick 處理
         let tick_start = Instant::now();
 
+        // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): Option C TTL check at
+        // on_tick opening BEFORE step_3 paper_paused early-return. O(1) when
+        // halt_kind=None（絕大多數 tick 走此 path）。採 event.ts_ms 而非
+        // wall-clock 保證 replay 確定性。
+        //
+        // 與 step_0 fast_track 互動：fast_track 也可能設 paper_paused，但
+        // 不會設 halt_kind → check_and_clear_halt_expired 看到 halt_kind=None
+        // 直接 return false（不會 fast_track 路徑被誤清）。
+        //
+        // WS-feed dependency：tick 持續 = TTL auto-clear path correct；WS 全斷
+        // 期間 halt remains until WS recovery（spec §3.6 acknowledged）。
+        // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：on_tick 開頭 TTL check。
+        self.check_and_clear_halt_expired(event.ts_ms);
+
         // ── Step 0: fast track (flash-crash / margin-crisis / held-drop). ──
         // ── Step 0：快速通道（閃崩 / 保證金危機 / 持倉跌幅）。──
         let ft_pause_new_entries = match self.on_tick_step_0_fast_track(event, tick_start) {

@@ -15,7 +15,10 @@ mod governor_cooldown;
 pub mod handlers;
 mod loop_exchange;
 mod loop_handlers;
-mod paper_state_restore;
+// MUST-FIX-2 Round 2 (2026-05-19/20)：halt-state restore helper 在 sibling
+// crate test（tick_pipeline::tests::halt_ttl）內被呼叫 → pub(crate) 暴露足夠，
+// 不需要 pub。
+pub(crate) mod paper_state_restore;
 mod pending_sweep;
 mod setup;
 mod status_report;

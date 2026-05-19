@@ -2913,4 +2913,112 @@ E1 self-report v3 L103-141 三段檢查全到位：
 
 **Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_3_e2_review_round3.md`
 
+---
 
+## 2026-05-19 — Adversarial RCA: engine 7.5h trading-inert state · P0
+
+**對象**：incident 2026-05-19_engine_stall · engine PID 1942669 12:27→20:09 UTC inert
+**Verdict**：**Trading-inert root cause CONFIRMED + 兩 incident 性質不同**
+**Evidence**：frozen log + 3 rotated gz + PG fills + watchdog.log + Rust source + paper_state_checkpoint
+
+### Core findings
+
+1. **Prior P1-WATCHDOG-STATUS2-RCA verdict 仍 valid 但 scope 不同**：prior RCA 處理「systemd respawn watchdog python process」（3-STRIKE rollback sys.exit(2)）。本次 incident 是「engine binary 仍 alive 但 trading-inert 7.5h」，**不同 incident 層**，操作員 mental model 把兩者混為「10x respawn pattern」是錯誤類比。
+
+2. **Trading-inert SMOKING GUN**：
+   - status_report 整 7.5h: `intents=0 stops=1 fills=2 balance=912.58` 不變 / ticks 28M+ 持續 / panel/scanner/news 正常 → 顯著「alive but not trading」
+   - `paper_paused=true` 由 Step 6 `RiskAction::HaltSession` 設置（`step_6_risk_checks.rs:437-438`）
+   - Step 3 `paper_paused` 早退 (`step_3_signals.rs:45-87`) → 跳過所有 signal_eval + intent_emit + strategy dispatch
+   - `paper_paused` **無 TTL auto-clear**，只能 IPC Resume/Reset 或 engine restart 解除
+   - operator 20:09 UTC restart 後 INJUSDT/OPUSDT/FILUSDT 立即恢復交易 → 印證
+
+3. **News halt vs RiskCheck halt 結構性不對稱**：
+   - 2026-04-24 G6-FUP-NEWS-HALT-DEDUP-1 加了 NEWS halt TTL auto-clear（`tasks.rs:382-394` + `news/guardian_impl.rs:123-145`）
+   - **但 RiskCheck driven HaltSession（Step 6 session_drawdown / daily_loss）沒同步加 TTL auto-clear**
+   - 舊 bug class（"session_halted=true persisted forever and tick pipeline appeared dead to watchdog"）在 sibling code path 復現 → **incomplete fix pattern**
+
+4. **Watchdog 觀察性盲點**：
+   - watchdog 只看 `pipeline_snapshot.json` 新鮮度（每 30s status_report 更新）
+   - 該 engine 7.5h 持續寫 snapshot（健康指標 OK），但 `intents=0 fills=2`（業務指標 DEAD）
+   - watchdog 無「業務心跳」（intent rate / fill rate / strategy emit count）監控
+   - **「engine alive 但 not trading」failure mode 對 watchdog completely invisible**
+
+5. **Halt trigger 數學 unclear**：
+   - peak_balance=1016.64 (checkpoint loaded), balance=912.58 → drawdown=10.24%
+   - demo TOML session_drawdown_max_pct=25%, daily_loss_max_pct=15% → **NEITHER 應該觸發**
+   - frozen log 不覆蓋 12:27 UTC（log rotation .3.gz 最早 17:00 UTC），所以無法直接 quote halt log line
+   - 仍待查：是否有 runtime IPC patch 把 threshold 改低 / 是否有第三個 halt path / 是否 FILUSDT orphan 在 reconciler 時觸發 forced_drawdown
+
+### Durable lessons
+
+1. **不對稱 fix pattern**：fix bug X in code path A，sibling code path B 同類 bug 沒同步處理 → 必跑 sibling pattern grep。E2 review code should add: 「同 class 的另一 path 是否需同步修？」
+
+2. **觀察性層次必匹配 fail mode 層次**：watchdog 監測「process alive」「snapshot fresh」不等於「業務 alive」。新加任何 halt path 必有 healthcheck 配對問「trading-inert 多久應觸發 escalation」
+
+3. **incident-snapshot 必涵蓋觸發前後 window**：本案 frozen log 只 9min 範圍（rotation 剛跑），無法 grep 觸發瞬間。後續 incident 應 freeze `engine.log + engine.log.{1,2,3}.gz + watchdog.log + pipeline_snapshot.json + paper_state_checkpoint`
+
+4. **「watchdog 看起來 OK = engine OK」是 false sense of safety**：本案 watchdog 18h log-silent 是 EXPECTED（snapshot fresh 不 log），但同時 engine 7.5h 不交易。操作員/監控應雙 channel 看 watchdog (process layer) + 業務指標 (intent rate / fill rate)。
+
+5. **Multi-instance restart 路徑 audit**：除了 watchdog auto-restart + operator restart_all.sh，還有什麼路徑會啟動 engine？本案 12:27 restart 來源不明（watchdog log 無 entry）→ 需 audit 所有 spawn path
+
+
+
+## 2026-05-19 — E2 review of P0-ENGINE-HALTSESSION-STUCK-FIX Layer A IMPL
+
+**Verdict**: RETURN to E1 (4 MUST-FIX-RETURN + 3 SHOULD-FIX-FOLLOWUP)
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--layer_a_halt_ttl_impl_e2_review.md`
+
+### Key catches
+1. **CRITICAL**: `halt_audit.rs::record_halt_cleared` hardcodes `event = "halt_session_auto_cleared"` regardless of `clear_path` parameter → IPC Resume/Reset/SystemMode clears mislabel as auto-clear; V098 added `halt_session_manual_cleared` to allowlist but nothing in production code ever writes that event_type
+2. **HIGH**: Spec §3.7 mandated halt_kind/halt_set_ts_ms restore in `paper_state_restore.rs` — completely missing. AC A-4 (restart 不重設 TTL 起點) FAILS in production; E1 unit test only verifies serialization not restore
+3. **HIGH**: No Python audit writer reads halt_audit.log → INSERT to learning.governance_audit_log. AC A-6 / A-1-EV / A-2-EV / A-4-EV all fail in production
+4. **MEDIUM**: `risk_config_tests.rs` 2076 LOC > 2000 hard cap; only file in entire codebase exceeding this. No precedent for exception. Must split.
+
+### Verifications passed
+- P1-16 regression 3/0 PASS (per_symbol_price_pnl tests including `test_halt_session_uses_per_symbol_price_not_triggering_tick`)
+- cargo test aggregate 3255/0/3 matches E1 claim
+- V098 md5 matches E1 claim
+- Cross-platform paths clean (no `/home/ncyu`, `/Users/*`)
+- Pydantic strict-mode check on PipelineSnapshot consumers → 0 strict consumers, X-8 PASS
+- Multi-session race 5-check PASS
+- 16 根原則 + 9 安全不變量 0 violations
+- Step 6 borrow scope correctness (inner block isolates immutable risk_config_for_audit borrow before mutable execute_position_close)
+
+### Process lessons
+- **V053-style migration SOP gap**: `feedback_v_migration_pg_dry_run` mandates `BEGIN; \i V###; ROLLBACK;` outer wrap, but V053-pattern migrations contain inner `BEGIN; ... COMMIT;` → outer ROLLBACK is no-op. E1 silently applied V098 to production trade-core DB. Forward-only acceptable here (pure CHECK enum extension) but SOP must be updated for future. Open `P2-GOV-V-MIGRATION-DRY-RUN-SOP-FIX`.
+- **E1 self-flag was honest but underweight**: E1 §6.1 noted dry-run side-effect but did not escalate; should have requested PA round 3 or operator approval before applying. E1 §5.5 claimed AC A-4 "✅ unit" but unit test only covers emission not restore — E2 caught the gap.
+- **Spec §6.3 mandatory forensic incident replay test deferred to E4** — E1 made unilateral scope reduction; spec wording was "強制此測試". E2 should always cross-check claimed AC against spec wording.
+- **Adversarial value**: H1-H6 hypotheses returned 0/6 direct hits but H4 inquiry into ModeStateSnapshot backward-compat led to discovery of missing restore path — adversarial probing catches non-targeted regressions.
+
+## 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2 — E2 re-review APPROVE
+
+Round 2 IMPL closed all 4 Round 1 MUST-FIX + 1 E3 MEDIUM + 1 spec §6.3 compliance:
+
+### Round 2 verdict
+- **APPROVE → PASS to E4**: 0 MUST-FIX, 0 SHOULD-FIX, 3 informational OBS
+- All 6 fixes independently verified — cargo 3264/0/3, P1-16 3/0, Python 20/0, Linux PG real INSERT integration **re-run by E2 SSH trade-core** (3 rows + idempotent + clear_path↔event_type mapping all PASS)
+- Hard boundaries: 9 + 16 + cross-platform path + Migration Guard A/B/C + Singleton + healthcheck + Bybit API — 0 violation
+- Multi-session race 5-check PASS
+
+### Round 2 adversarial findings (all DISPROVED)
+- R2-H1 (NaN guard off-by-one): no comparison; binary `from_f64` returns None on non-finite. Test covers all 3 cases.
+- R2-H2 (SQL injection): psycopg2 parameterized `%s` placeholders + allowlist gate.
+- R2-H3 (fail-loud on corrupt snapshot): all 4 failure modes use info!/warn! + return; no panic / no Err. Test green.
+- R2-H4 (unknown clear_path fallback wrong direction): falls to `manual_cleared` (conservative; won't mislabel manual as auto).
+- R2-H5 (silent #[ignore]): grep over 4 new test files → 0 matches.
+- R2-H6 (incident_replay passes by mistake): timing arithmetic verified by inspection; `elapsed >= ttl_ms` semantics correct; state transitions match observed pattern.
+
+### Round 2 verification methodology lessons
+- **Re-run integration script on Linux via SSH**: don't trust E1's "Linux PG integration PASS" claim — execute the script independently and parse output. Caught E1 staging files at `/tmp/halt_audit_pg_writer_round2/` (deploy pending) but functionally verified via temp env override.
+- **Path match verification** (writer↔reader for ModeStateSnapshot): grep both ends explicitly. Both bootstrap.rs line 906 writer and paper_state_restore.rs line 188 reader use `pipeline_snapshot_{kind_tag}.json` in `$OPENCLAW_DATA_DIR` with `/tmp/openclaw` fallback. Match confirmed.
+- **Ordering verification** (restore before init snapshot overwrite): bootstrap.rs:323-328 restore runs BEFORE line 947 initial snapshot write. Caught the read-then-overwrite ordering risk by tracing call sequence.
+- **Caller chain enumeration for `clear_path` literal**: rg for `record_halt_cleared\(` → 6 hits (2 test + 4 production) → each production caller's literal string verified against helper allowlist. Round 1 found 4 callers; Round 2 confirmed all 4 still pass correct literals.
+- **f64 NaN guard coverage check**: rg for `json!\(|peak_balance|current_balance|drawdown_pct|*_max_pct` in halt_audit.rs → every f64 field wrapped in `json_number_or_null`. `tracing::info!` macro uses Display impl which is non-panicking on NaN — no additional guard needed.
+
+### Round 2 OOS additions assessment
+- **OOS-1 per_symbol_price_pnl env_lock + RAII guard**: pure test isolation; P1-16 invariant signature unchanged (50500/3000/0.20 prices + position_count + session_halted assertions all intact). NOT scope creep.
+- **OOS-2 parse_jsonl_robust**: Rust helper test-only (2 callers in halt_ttl.rs); Python helper production but downstream `_validate_row` + `_insert_row` allowlist gates prevent INSERT of malformed rows. NOT masking real bugs.
+
+### Round 2 process win
+- **E1 honest self-report on incomplete items**: E1 explicitly listed 6 quant fields still NULL + risk_config_version_seen=0 placeholder + cron 1min interval vs spec 30s — transparent trade-offs documented as observations, not hidden as silent gaps.
+- **Round 1 → Round 2 round-trip 1-day turnaround**: E1 closed 4 MUST-FIX + 1 E3 MEDIUM + 1 spec §6.3 in ~14 hours wall-clock. No new regressions introduced. +9 tests, all green.

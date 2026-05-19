@@ -403,4 +403,27 @@ mod tests {
         assert_eq!(encode_vol_regime("high"), 3.0);
         assert_eq!(encode_vol_regime(""), 0.0);
     }
+
+    // ---------------------------------------------------------------------
+    // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — MIT N-4 forward guard：
+    // 防止 ML feature engineering 把系統狀態（halt / paused / session_halt）
+    // 當市場 feature 餵 model。系統狀態屬 governance 平面，ML 屬市場 / 學習
+    // 平面（根原則 #7「學習 ≠ 改寫 Live」），跨界 = feature contamination。
+    // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：守護 FEATURE_NAMES 不含
+    // halt 系統狀態詞 — 防 ML 把系統態當市場態。
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn feature_names_no_halt_contamination() {
+        for name in FEATURE_NAMES.iter() {
+            let lower = name.to_ascii_lowercase();
+            assert!(
+                !lower.contains("halt")
+                    && !lower.contains("paused")
+                    && !lower.contains("session_halt"),
+                "ML feature contamination: {} 不可在 FEATURE_NAMES 內（系統狀態 != 市場狀態）",
+                name
+            );
+        }
+    }
 }
