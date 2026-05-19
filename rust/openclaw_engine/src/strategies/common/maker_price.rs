@@ -87,7 +87,7 @@ pub fn close_maker_price_policy(exit_reason: &str) -> Option<CloseMakerPricePoli
     match reason {
         "grid_close_short" | "grid_close_long" | "bb_mean_revert" | "ma_reverse_cross"
         | "bw_squeeze" | "pctb_revert" => Some(CloseMakerPricePolicy {
-            buffer_ticks: 1,
+            buffer_ticks: 0,
             offset_bps: 0.5,
             // CALIBRATION-2026-05-18: 30_000 → 90_000 per phase_1b_calibration_cell_selection
             // _report.md G-AB-01-C90 (fill 70.8% / saving +3.37 bps simulated, vs 30s baseline
@@ -171,7 +171,6 @@ pub fn compute_close_limit_price(
     let bid = inputs.best_bid.filter(|v| v.is_finite() && *v > 0.0);
     let ask = inputs.best_ask.filter(|v| v.is_finite() && *v > 0.0);
 
-    let mut buffer_ticks = policy.buffer_ticks.max(1);
     if let (Some(bid), Some(ask)) = (bid, ask) {
         if ask <= bid {
             warn!(
@@ -199,32 +198,13 @@ pub fn compute_close_limit_price(
             );
             return None;
         }
-
-        if let Some(tick) = inputs.tick_size.filter(|v| v.is_finite() && *v > 0.0) {
-            let half_spread = (ask - bid) * 0.5;
-            let required_ticks = (half_spread / tick).ceil();
-            if required_ticks.is_finite() && required_ticks > f64::from(buffer_ticks) {
-                if required_ticks > f64::from(u32::MAX) {
-                    warn!(
-                        strategy = strategy_name,
-                        symbol = symbol,
-                        tick_size = tick,
-                        half_spread = half_spread,
-                        "close_maker strict skip: small-tick widening overflow \
-                         / close_maker 嚴格跳過：small-tick buffer 擴張溢出"
-                    );
-                    return None;
-                }
-                buffer_ticks = required_ticks as u32;
-            }
-        }
     }
 
     compute_post_only_price(
         !position_is_long,
         inputs,
         policy.offset_bps,
-        buffer_ticks,
+        policy.buffer_ticks,
         strategy_name,
         symbol,
     )
@@ -562,6 +542,20 @@ mod tests {
                 "{reason} must not be classified market-only"
             );
         }
+        assert_eq!(
+            close_maker_price_policy("grid_close_long")
+                .expect("entry-close policy")
+                .buffer_ticks,
+            0,
+            "entry-close maker must sit on the inside quote to avoid timeout-to-taker drift"
+        );
+        assert_eq!(
+            close_maker_price_policy("pctb_revert")
+                .expect("entry-close policy")
+                .buffer_ticks,
+            0,
+            "entry-close maker must not retreat half-spread on small-tick books"
+        );
     }
 
     #[test]
@@ -616,12 +610,12 @@ mod tests {
         let long_close_sell =
             compute_close_limit_price(true, inputs, policy, "grid_trading", "BTCUSDT")
                 .expect("long close should price as passive sell");
-        assert!((long_close_sell - 30_002.0).abs() < 1e-9);
+        assert!((long_close_sell - 30_001.0).abs() < 1e-9);
 
         let short_close_buy =
             compute_close_limit_price(false, inputs, policy, "grid_trading", "BTCUSDT")
                 .expect("short close should price as passive buy");
-        assert!((short_close_buy - 29_998.0).abs() < 1e-9);
+        assert!((short_close_buy - 29_999.0).abs() < 1e-9);
 
         assert_eq!(
             close_maker_price_policy("phys_lock_gate4_giveback")
@@ -651,20 +645,20 @@ mod tests {
     }
 
     #[test]
-    fn close_limit_price_small_tick_widens_without_crossing() {
+    fn close_limit_price_small_tick_stays_on_inside_quote_without_crossing() {
         let inputs = inputs_with_bbo(0.010010, 0.010000, 0.010020, 0.000001);
         let policy = close_maker_price_policy("pctb_revert").expect("policy");
 
         let sell = compute_close_limit_price(true, inputs, policy, "bb_breakout", "1000BONKUSDT")
-            .expect("small-tick close should widen instead of crossing");
+            .expect("small-tick close should price on inside quote");
 
         assert!(
-            (sell - 0.010030).abs() < 1e-12,
-            "half-spread 10 ticks should widen sell close to ask + 10 ticks, got {sell}"
+            (sell - 0.010020).abs() < 1e-12,
+            "entry-close maker should sit on best ask instead of retreating half-spread, got {sell}"
         );
         assert!(
-            sell > inputs.best_ask.unwrap(),
-            "widened sell must remain strictly passive"
+            sell >= inputs.best_ask.unwrap(),
+            "inside-quote sell must remain passive"
         );
     }
 }

@@ -487,6 +487,18 @@ class TestEngineFailureClassifier(unittest.TestCase):
                 f.write("\n".join(lines) + "\n")
         return self._pathlib.Path(path)
 
+    def _write_rotated_log(self, lines, name="engine-1700000000.log", age_seconds=0):
+        logs_dir = os.path.join(self._tmpdir.name, "engine_logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        path = os.path.join(logs_dir, name)
+        with open(path, "w", encoding="utf-8") as f:
+            if lines:
+                f.write("\n".join(lines) + "\n")
+        if age_seconds:
+            old = time.time() - age_seconds
+            os.utime(path, (old, old))
+        return self._pathlib.Path(path)
+
     def test_missing_log_defaults_to_engine_crash(self):
         """No engine.log → conservative default / 缺日誌 → 保守 engine_crash"""
         path = self._pathlib.Path(self._tmpdir.name) / "absent.log"
@@ -585,6 +597,36 @@ class TestEngineFailureClassifier(unittest.TestCase):
             classify_engine_failure(path, tail_lines=20),
             "engine_crash",
         )
+
+    def test_recent_rotated_log_classifies_after_restart(self):
+        """Recent rotated death log still classifies restart-triggering outage."""
+        path = self._write_log(["INFO restarted cleanly"])
+        self._write_rotated_log([
+            "INFO pre-restart",
+            *[
+                f"ERROR Temporary failure in name resolution attempt {i}"
+                for i in range(5)
+            ],
+        ])
+        self.assertEqual(classify_engine_failure(path), "network_outage")
+
+    def test_active_panic_overrides_rotated_network_outage(self):
+        """Active panic remains engine_crash even if recent rotated log has DNS flood."""
+        path = self._write_log(["thread 'main' panicked at src/foo.rs:42"])
+        self._write_rotated_log([
+            f"ERROR Temporary failure in name resolution attempt {i}"
+            for i in range(5)
+        ])
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_old_rotated_log_ignored(self):
+        """Historical rotated DNS logs must not classify a new unrelated crash."""
+        path = self._write_log(["INFO fresh active log without outage"])
+        self._write_rotated_log(
+            [f"ERROR DNS error old outage {i}" for i in range(5)],
+            age_seconds=20 * 60,
+        )
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
 
 
 class TestOnEngineCrashClassification(unittest.TestCase):
