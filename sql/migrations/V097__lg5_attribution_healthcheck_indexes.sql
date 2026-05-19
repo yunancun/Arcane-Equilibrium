@@ -82,9 +82,9 @@ CREATE INDEX IF NOT EXISTS idx_signals_signal_context_ts
     ON trading.signals (signal_id, context_id, ts DESC)
     WHERE context_id IS NOT NULL;
 
-COMMENT ON INDEX idx_intents_context_mode_ts IS
+COMMENT ON INDEX trading.idx_intents_context_mode_ts IS
     'V097: accelerates LG-5 [42b]/[42c] attribution healthcheck context_id -> intent lookup.';
-COMMENT ON INDEX idx_signals_signal_context_ts IS
+COMMENT ON INDEX trading.idx_signals_signal_context_ts IS
     'V097: accelerates LG-5 [42b]/[42c] attribution healthcheck signal_id + context_id proof.';
 
 COMMIT;
