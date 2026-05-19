@@ -115,12 +115,15 @@ WIPE_TABLES: list[tuple[str, str]] = [
     ("agent.ai_invocations",              "AI call log + cost tracking"),
     ("agent.state_changes",               "agent state transitions"),
     # ── learning schema (experience data only; model artifacts preserved) ──
-    ("learning.rl_transitions",           "RL episode transitions"),
+    # V096 (2026-05-18) 已 DROP `learning.rl_transitions` + `learning.symbol_clusters`；
+    # 列表保留條目但執行端走 SKIPPED missing table 分支（不報錯）；V096 Linux apply
+    # 後本兩行可移除。P3 hygiene follow-up tracked in 2026-05-18 cleanup sprint.
+    ("learning.rl_transitions",           "RL episode transitions (V096 dropped; SKIPPED at runtime)"),
     ("learning.ml_parameter_suggestions", "parameter suggestion log"),
     ("learning.bayesian_posteriors",      "Thompson Sampling posteriors"),
     ("learning.cpcv_results",             "cross-validation results"),
     ("learning.james_stein_estimates",    "JS shrinkage estimates"),
-    ("learning.symbol_clusters",          "k-means cluster assignments"),
+    ("learning.symbol_clusters",          "k-means cluster assignments (V096 dropped; SKIPPED at runtime)"),
     ("learning.teacher_directives",       "Claude teacher directives"),
     ("learning.directive_executions",     "directive execution tracking"),
     ("learning.experiment_ledger",        "hypothesis experiment log"),

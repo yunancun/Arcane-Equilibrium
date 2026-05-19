@@ -10535,3 +10535,83 @@ PA dispatch（同日）派發兩個彼此獨立的工作：
 ### 完整報告
 - `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-18--p2_wp05_fup1_signature_blocker.md`
   Section 8 closure addendum
+
+## 2026-05-19 P2-ORDERS-INTENT-ID-WRITER-GAP-1（Wave 1.5 ticket，1 person-day）
+
+### 任務
+E3 baseline 2026-05-15 commit `b98706d5` 揭露 7d 1394 demo + 1021 live_demo
+orders 之 `trading.orders.intent_id` 100% NULL；恢復 intent → order linkage
+給 Guardian-pass-rate 計算。Operator 2026-05-19 授權 source/test only on Mac
+（不 deploy Linux / 不 mutate runtime）。
+
+### 關鍵教訓
+
+1. **schema vs writer 解離 audit**：V003（trading_agent_tables.sql:222）
+   起 `trading.orders.intent_id TEXT` 已 nullable 在；但 Rust pipeline
+   `OrderDispatchRequest / PendingOrder / TradingMsg::Order` 全鏈條從未攜
+   intent_id 欄，writer INSERT 列表 12 欄無 intent_id → 自始 NULL 無
+   warning。Lesson = audit schema vs codebase mismatch 要 `information_schema.
+   columns` 對齊 `rg "INSERT INTO <table>"` 列表逐欄比對；type system 不
+   catch nullable column 漏寫。
+
+2. **deterministic id 重建零成本**：`make_intent_id(em, symbol, ts_ms)` 是
+   pure function；entry path 修法即「同 tick 用同三元組重算」，與
+   trading.intents.intent_id 寫入 byte-equal。無需新 schema、無需新存儲、
+   無需 V### migration。Lesson = id factory 設計為 pure function 讓 plumbing
+   gap 可零成本補回；audit/補救都受益。
+
+3. **fail-loud over fake-id**：dispatch §「no synthesize on writer side —
+   would mask bugs」是紅線。close path / IPC close / orphan close 都無對應
+   strategy intent，必須誠實寫 NULL；writer-side 合成 fake id 會永遠遮蓋
+   未來 close path 上游 bug。Lesson = audit/補救要保留信號，不能 pad-to-non-null
+   掩蓋本質；test case `test_*_close_path_intent_id_stays_none` 釘住這個原則。
+
+4. **PendingOrder 構造分散多點，compile error 是守門**：本 PR 6 處
+   PendingOrder 構造（pending_sweep.rs 2 處 / loop_handlers.rs 2 處 /
+   tests/mod / dispatch.rs / 4 處 tests fixtures）必同步加 `intent_id` 欄；
+   `cargo check` 立刻 catch 任一漏點。Lesson = 新增 struct 欄優先依賴
+   compile error 強制掃 caller，比 grep `<Struct> {` 更穩；reviewer 也用
+   compile diff 確認 caller 全覆蓋。
+
+5. **既存邊界 test 自動覆蓋**：`test_batch_limits_under_pg_param_max`
+   定義 PG 65535 bind limit 紅線；改 `ORDER_COLS` 12→13 即 test 自動
+   reverify（5041 * 13 = 65533 ≤ 65535）。無需手算或新 test。Lesson =
+   邊界守門 test 設計得當，加一欄完全零成本。
+
+6. **paper shadow 路徑取捨**：step_4_5_dispatch.rs:~1386 paper-only shadow
+   帶 `intent_id: Some(...)`；但 paper_only path `is_primary=false` 不
+   register PendingOrder，不會寫入 trading.orders。本 PR 帶值純為一致性 +
+   防禦未來 shadow 路徑升級。Lesson = plumbing 一致性 vs minimal 取捨需在
+   report §「不確定之處」自我揭露，等 reviewer 拍板。
+
+### 修改規模
+- 9 個 Rust source 檔（mod / types / dispatch / loop_handlers / writer /
+  step_4_5_dispatch / commands / pending_sweep / 1 個既有 fixture）
+- 5 個 test 檔（tests/mod / handlers/tests / handlers_paper_cmd_tests /
+  dual_rail_dispatch / dispatch_tests）
+- 1 個新測試（pending_registration_order_type_tests.rs 5 條 P2-WRITER-GAP
+  regression）
+- 0 V### migration（schema 自 V003 已 OK）
+
+### LOC delta
+- 9 source diff ~ +90 LOC
+- 5 fixture diff ~ +24 LOC
+- 5 new regression tests ~ +124 LOC
+- 1 backfill design memo ~ +250 LOC
+- 1 implementation report ~ +245 LOC
+- **net ~ +733 LOC（含 doc）**
+
+### 驗證
+- `cargo check -p openclaw_engine --release` = green
+- `cargo test --lib` = **2998 / 0 fail / 1 ignored**
+- `pending_registration_order_type_tests` = **23/23 PASS**（18 既有 + 5
+  新 P2-WRITER-GAP regression）
+- `trading_writer` = 12/12，`pending_sweep` = 16/16，`event_consumer` =
+  177/177，`dispatch` = 101/101，`dual_rail` = 24/24
+- Python `pytest -k "orders or oms or persist_order"` = 19 passed / 1 fail
+  pre-existing（stash baseline 驗證同 fail，與本 PR 無關）
+
+### 完整報告
+- 主報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--p2_orders_intent_id_writer_gap.md`
+- Backfill 設計備忘（DO NOT EXECUTE）：
+  `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--p2_orders_intent_id_backfill_design_memo.md`

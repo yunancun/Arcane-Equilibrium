@@ -92,6 +92,13 @@ def _ipc_failure(
     exception repr 或 result dict）只進 log，不外洩到 HTTPException.detail。
     保留 `rust_engine_unavailable:` 前綴維持既有 substring 測試斷言相容
     （見 tests/test_reset_drawdown_route.py:266）。
+
+    Future-proof note (E2 LOW advisory 2026-05-18)：未來若 RiskConfig schema
+    新增 secret / api_key / authorization / password 等敏感欄位，
+    `log_detail=f"...: {result!r}"` callsite（如 line 717 patch_risk_config_not_ok
+    分支）需審 result 序列化白名單，避免敏感欄位流入 server-side log。
+    目前 IPC `patch_risk_config` 回 `{ok, config, version, source}` 0 敏感欄位
+    （rust/openclaw_engine/src/ipc_server/handlers_config.rs:187-195 已驗）。
     """
     if log_detail:
         logger.warning("ipc failure: %s | %s", reason_code, log_detail)
