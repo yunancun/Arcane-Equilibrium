@@ -166,6 +166,82 @@ def _format_low_sample_watch(totals: dict[str, int], low_samples: list[str]) -> 
     )
 
 
+def _attribution_ratio_sql(window: str) -> str:
+    """Build the light attribution-ratio query for [42b]/[42c].
+
+    `learning.mlde_edge_training_rows` is the canonical semantic view, but it
+    also builds feature vectors and decision-context lateral joins that [42b]
+    and [42c] do not read. On trade-core that made the passive healthcheck time
+    out before emitting the actual attribution signal. This query mirrors only
+    the columns needed for the ratio:
+      - normalized LG-5 strategy name
+      - settled reward (`decision_features.label_net_edge_bps`)
+      - attribution-chain proof (`intents.signal_id/context_id` has a matching
+        signal row and a settled reward)
+    """
+    return (
+        "WITH base AS ( "
+        "  SELECT "
+        "    i.signal_id, "
+        "    i.context_id, "
+        "    df.label_net_edge_bps, "
+        "    CASE lower(COALESCE( "
+        "      NULLIF(i.strategy_name, ''), "
+        "      NULLIF(df.strategy_name, ''), "
+        "      NULLIF(i.details->'scanner'->>'best_strategy', ''), "
+        "      'unknown' "
+        "    )) "
+        "      WHEN 'bollinger_reversion' THEN 'bb_reversion' "
+        "      WHEN 'bb_reversion' THEN 'bb_reversion' "
+        "      WHEN 'bb_breakout' THEN 'bb_breakout' "
+        "      WHEN 'ma_crossover' THEN 'ma_crossover' "
+        "      WHEN 'grid_trading' THEN 'grid_trading' "
+        "      WHEN 'funding_arb' THEN 'funding_arb' "
+        "      ELSE lower(COALESCE( "
+        "        NULLIF(i.strategy_name, ''), "
+        "        NULLIF(df.strategy_name, ''), "
+        "        NULLIF(i.details->'scanner'->>'best_strategy', ''), "
+        "        'unknown' "
+        "      )) "
+        "    END AS strategy_name "
+        "  FROM trading.intents i "
+        "  LEFT JOIN learning.decision_features df "
+        "    ON df.context_id = i.context_id "
+        f"  WHERE i.ts > now() - {window} "
+        "    AND i.engine_mode IN ('demo', 'live_demo') "
+        "    AND COALESCE(i.details->>'source', '') <> 'command' "
+        "), scored AS ( "
+        "  SELECT "
+        "    b.strategy_name, "
+        "    b.label_net_edge_bps, "
+        "    (b.signal_id IS NOT NULL AND b.signal_id <> '' "
+        "      AND b.context_id IS NOT NULL AND b.context_id <> '' "
+        "      AND b.label_net_edge_bps IS NOT NULL "
+        "      AND EXISTS ( "
+        "        SELECT 1 "
+        "        FROM trading.signals s "
+        "        WHERE s.signal_id = b.signal_id "
+        "          AND s.context_id = b.context_id "
+        "        LIMIT 1 "
+        "      ) "
+        "    ) AS attribution_chain_ok "
+        "  FROM base b "
+        f"  WHERE b.strategy_name IN {LG5_STRATEGY_SQL_IN} "
+        ") "
+        "SELECT strategy_name, "
+        "       count(*) FILTER (WHERE label_net_edge_bps IS NOT NULL)::int AS total, "
+        "       count(*) FILTER ( "
+        "         WHERE label_net_edge_bps IS NOT NULL AND attribution_chain_ok "
+        "       )::int AS chain_ok, "
+        "       (count(*) FILTER ( "
+        "          WHERE label_net_edge_bps IS NOT NULL AND attribution_chain_ok "
+        "        ))::float "
+        "         / nullif(count(*) FILTER (WHERE label_net_edge_bps IS NOT NULL), 0)::float AS ratio "
+        "FROM scored "
+        "GROUP BY strategy_name"
+    )
+
+
 def check_42_live_candidate_eval_contract(cur) -> tuple[str, str]:
     """[42] live_candidate_eval_contract — every >1h-old live candidate must
     have a ``review_live_candidate`` audit row. SLA = 1h per RFC v2 §6.
@@ -359,23 +435,7 @@ def check_42b_live_candidate_attribution_drift(cur) -> tuple[str, str]:
     # `_compute_attribution_chain_ratio_by_strategy` 的 `IN ('demo','live_demo')`
     # —— sentinel 必須測 producer 餵給 consumer 的同一資料源。分母只計 settled
     # post-fee samples；未成交/未關閉 raw intent 是 low-sample，不是 chain failure。
-    sql = (
-        "SELECT strategy_name, "
-        "       count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL)::int AS total, "
-        "       count(*) FILTER ( "
-        "         WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
-        "       )::int AS chain_ok, "
-        "       (count(*) FILTER ( "
-        "          WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
-        "        ))::float "
-        "         / nullif(count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL), 0)::float AS ratio "
-        "FROM learning.mlde_edge_training_rows "
-        f"WHERE ts > now() - {ATTRIBUTION_DRIFT_WINDOW} "
-        "  AND engine_mode IN ('demo', 'live_demo') "
-        "  AND strategy_name IS NOT NULL "
-        f"  AND strategy_name IN {LG5_STRATEGY_SQL_IN} "
-        "GROUP BY strategy_name"
-    )
+    sql = _attribution_ratio_sql(ATTRIBUTION_DRIFT_WINDOW)
     try:
         cur.execute(sql)
         rows = cur.fetchall()
@@ -863,23 +923,7 @@ def check_42c_live_candidate_attribution_drift_3d(cur) -> tuple[str, str]:
     # (`ATTRIBUTION_DRIFT_WINDOW_3D`)。engine_mode filter 對齊 Fix 2 後的
     # producer (`IN ('demo','live_demo')` + `_R_META_WINDOW_DAYS = 3`)。
     # 分母只計 settled post-fee samples；未成交/未關閉 raw intent 是 low-sample。
-    sql = (
-        "SELECT strategy_name, "
-        "       count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL)::int AS total, "
-        "       count(*) FILTER ( "
-        "         WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
-        "       )::int AS chain_ok, "
-        "       (count(*) FILTER ( "
-        "          WHERE net_bps_after_fee IS NOT NULL AND attribution_chain_ok "
-        "        ))::float "
-        "         / nullif(count(*) FILTER (WHERE net_bps_after_fee IS NOT NULL), 0)::float AS ratio "
-        "FROM learning.mlde_edge_training_rows "
-        f"WHERE ts > now() - {ATTRIBUTION_DRIFT_WINDOW_3D} "
-        "  AND engine_mode IN ('demo', 'live_demo') "
-        "  AND strategy_name IS NOT NULL "
-        f"  AND strategy_name IN {LG5_STRATEGY_SQL_IN} "
-        "GROUP BY strategy_name"
-    )
+    sql = _attribution_ratio_sql(ATTRIBUTION_DRIFT_WINDOW_3D)
     try:
         cur.execute(sql)
         rows = cur.fetchall()
