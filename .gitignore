@@ -19,6 +19,10 @@ log_files/
 connector_logs/
 decision_packets/
 
+# Generated calibration sweep outputs are preserved on the runtime host and
+# summarized in committed reports; do not track per-run cells/CSV artifacts.
+helper_scripts/calibration/output/
+
 # -----------------------------
 # Local-only dev artifacts / 本地专属开发产物
 # -----------------------------
