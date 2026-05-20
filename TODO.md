@@ -431,6 +431,7 @@ PM/PA/FA 三方交叉檢查後：
 | `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | spec §5.4 完整 dynamic backoff state machine IMPL（per-symbol 1s exp → 60s + ≥10 symbol cascade → 5min global pause + audit row `rate_limit_scope="global"`）| Phase 1b 初版（commit `27f02a07`）取 per-symbol 5min 固定避 scope creep；Phase 2a Demo PASS 後另開 PR；PA 估 ~50 LOC state machine + ~80 LOC integration test |
 | `P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX` | 2 | **NEW**：STATUS2 RCA 衍生 source-only follow-up。`engine_watchdog.py` 當前需 ≥5 連續 network-error lines in active `/tmp/openclaw/engine.log`；rotated/interleaved DNS outage 證據可能 default 到 `engine_crash` 觸發 restart storm。需 recent-log classifier 加固 + regression test，再依 3-strike stability 動作 |
 | `P1-WATCHDOG-EXIT-CODE-CLARIFY` | ✅ **DONE 2026-05-20** | `engine_watchdog.py` exit codes 重排：`--status` 0/1 保持（shell idiom）；lock contention 3→**10**（startup/lock 區段 10-19）；rollback triggered 2→**20**（runtime/rollback 區段 20-29）。shell wrappers（`restart_all.sh` / `fresh_start.sh` / `clean_restart.sh`）僅用 `--status` 模式不受影響；無 systemd service file 引用舊 codes |
+| `P1-LEASE-1` | 3 | **升級自 P2-LEASE-1（2026-05-20 PM-conducted P2 sweep operator 拍板升 P1）**：清掃 terminal `rust/openclaw_core/src/sm/lease.rs:303` `DecisionLeaseSm.objects: Vec<LeaseObject>` entries 避免長 soak memory growth + E2 memory SM-02 leak（HashMap `lease_id_to_idx` 不清）。**依賴 P0-LG-3 Wave 2.4 IMPL DISPATCH 完成後**才排專案（否則觸碰 Decision Lease 核心會干擾 LG-1/LG-2 7d obs + LG-3 IMPL 前置）。spec 需含：(1) terminal state 定義（哪些 `LeaseState` 不可再 transition 可 prune）/ (2) `lease_id_to_idx` HashMap 同步策略 / (3) audit-preserving prune（被刪 lease 必先 ship 到 PG `governance_audit_log` 或 audit log file，不可純失）/ (4) prune 觸發時機（gc tick / 時間閾值 / size 閾值）/ (5) Python `_lease_sm` 對等同步。工時估 4-6h IMPL + E1→E2 對抗（A3）→E4 regression chain。Ticket source: §12.1 deferred + FA 5-OQ-style 5 條 spec 需求 |
 
 > v55 衍生：`FA-WATCHDOG-3STRIKE-ESCALATION-POLICY` 待 FA 設計後分配優先級。
 
@@ -517,7 +518,7 @@ PM/PA/FA 三方交叉檢查後：
 
 | ID | 任務 | 觸發 | Deferred 理由（2026-05-20 sweep） |
 |---|---|---|---|
-| `P2-LEASE-1` | 清掃 terminal `DecisionLeaseSm.objects` Vec entries | 長期 soak 出現 memory growth 或 high-volume live 前 | 觸碰 `rust/openclaw_core/src/sm/lease.rs:303` Decision Lease 核心；LG-1/LG-2 7d observation 中、LG-3 Wave 2.4 IMPL DISPATCH PENDING；建議**升 P1 + 待 LG-3 IMPL DISPATCH 後**排專案，含 terminal state 定義 + lease_id_to_idx HashMap 同步 + audit-preserving prune 設計 |
+| `P2-LEASE-1` | ⬆️ **升 P1** 2026-05-20（見 §11.3 `P1-LEASE-1`）| 長期 soak 出現 memory growth 或 high-volume live 前 | operator 拍板升 P1；依賴 P0-LG-3 Wave 2.4 IMPL DISPATCH 完成；歷史 P2 級觸發條件保留作 reference |
 | `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset（D-16 dormant）| ADR-0015 + AMD-2026-05-09-02 accept；Sprint N+6+ | **ADR-0015 治理硬不變式**：D-16 dormant 觀察期未跑完，提前 sunset 破壞觀察協議；保留待 Sprint N+6+；E5 2026-05-20 zombie inventory 確認 commit `449f628b` 已清乾淨 7 modules，剩餘 sunset 在觀察期 |
 | `P2-WP05-CSP-UNSAFE-INLINE` | 🟡 SRI 部分 DONE 2026-05-18；完整 CSP nonce-based refactor 待 live-gate 前 P1 | live-gate 前 | §10 P0-OPS-1..4（HTTPS / cred rotation / legal）尚未做完；HTTP 環境下 nonce-based CSP 防護無實效；保留待 live-gate prereq 完成後升 P1 |
 
