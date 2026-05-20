@@ -4,10 +4,14 @@ MODULE_NOTE
 依 PA spec §3 Tick-Stream Data Source，從 PG 取：
   - market.market_tickers (BBO + spread_bps 隨時間)，作為 PA spec
     `market.orderbook_50` / `bbo_snapshot` 對應實際 source
+  - market.ob_snapshots (1m bid_depth_5/ask_depth_5 aggregate)
+    — 為 queue-aware adjustment 提供 same-side depth proxy
+    （P2-SIM-QUEUE-AWARE-ADJUSTMENT v55）
   - market.symbol_universe_snapshots (tick_size per symbol)
   - trading.fills (post-restart 4 row + recent 50 baseline seed)
-主要類/函數：FillReplaySeed / TickWindow / load_tick_window /
-            load_replay_seed / load_tick_size_map / get_taker_baseline_fee_bps。
+主要類/函數：FillReplaySeed / TickWindow / OrderbookDepthWindow /
+            load_tick_window / load_orderbook_window / load_replay_seed /
+            load_tick_size_map / get_taker_baseline_fee_bps。
 依賴：psycopg2（per `helper_scripts/db/counterfactual_exit_replay.py` 同模式）。
 硬邊界：read-only；無 write；fail-closed when freshness/coverage 不足；
         data_source tag 必為 'bybit_demo_ws'（spec §3.4）。
@@ -24,6 +28,8 @@ from typing import Any, Optional
 # 為什麼這個 sys.path 插入：與 counterfactual_exit_replay.py 同模式，確保 sibling
 # 模組可 import；CLI 任意 cwd 皆可跑。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from phase_1b_queue_adjustment import QueueDepthSample  # noqa: E402
 
 
 # Phase 1b runtime activator restart anchor（spec §3.3 freshness gate）.
@@ -244,6 +250,39 @@ def load_tick_size_map(
     return result
 
 
+@dataclass(frozen=True)
+class OrderbookDepthWindow:
+    """單一 fill 對應的 ob_snapshots 1m depth bucket window。
+
+    為什麼分開 TickWindow：ob_snapshots 是 1m aggregate（vs tickers ms-level），
+    join 粒度不同；分 module 避免 confusion，且 caller 可選擇是否啟用 queue adjust。
+
+    為什麼 bucket list：1m aggregate 一個 fill timeout window（30-90s）可能跨 1-2
+    個 bucket；caller 用 ts_at_or_before 取 closest preceding bucket。
+    """
+    fill_order_id: str
+    symbol: str
+    fill_ts: object  # datetime
+    buckets: tuple  # tuple[QueueDepthSample, ...]
+
+    def depth_at_or_before(self, ts: object) -> Optional[QueueDepthSample]:
+        """取最接近且 bucket_start ≤ ts 的 sample。
+
+        為什麼 ≤ ts：fill 發生時 my order placed → 取 fill_ts 時最後 known 1m bucket
+        depth 作 queue proxy；若全部 bucket 都晚於 ts → 回 None（觸發 fail-closed
+        退回 proxy 不調整）。
+        """
+        if not self.buckets:
+            return None
+        best: Optional[QueueDepthSample] = None
+        for sample in self.buckets:
+            if sample.ts_bucket_start <= ts and (
+                best is None or sample.ts_bucket_start > best.ts_bucket_start
+            ):
+                best = sample
+        return best
+
+
 def load_tick_window(
     conn: Any,
     seed: FillReplaySeed,
@@ -307,6 +346,57 @@ def load_tick_window(
         pre_fill_samples=tuple(pre),
         replay_samples=tuple(replay),
         post_drift_samples=tuple(drift),
+    )
+
+
+def load_orderbook_window(
+    conn: Any,
+    seed: FillReplaySeed,
+) -> OrderbookDepthWindow:
+    """取單一 fill 的 ob_snapshots 1m depth bucket window。
+
+    時間範圍：fill_ts - 5min .. fill_ts + 5min（覆蓋 max timeout 90s + 緩衝）。
+    為什麼這範圍：1m bucket 粒度下，fill_ts 前後各取 5 個 bucket 確保至少 1 個
+    有效 bucket（少數 symbol bucket 稀疏）；caller 用 depth_at_or_before(fill_ts)
+    取 closest preceding。
+
+    為什麼 P2-SIM-QUEUE-AWARE-ADJUSTMENT 用 ob_snapshots 而非 market_tickers
+    .bid_size / ask_size：empirical 14d query market_tickers.bid_size 僅 1.15%
+    rows > 0（ingest pipeline 沒填），ob_snapshots.bid_depth_5 100% valid。
+    粒度差兩個量級（1m vs ms）但作 queue-proxy 仍可用。
+
+    fail-closed：bucket 缺 → buckets=()，caller 退回 proxy 不調整。
+    """
+    fill_ts = seed.ts
+    window_start = fill_ts - timedelta(minutes=5)
+    window_end = fill_ts + timedelta(minutes=5)
+
+    buckets: list[QueueDepthSample] = []
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT ts, bid_depth_5, ask_depth_5
+              FROM market.ob_snapshots
+             WHERE symbol = %s
+               AND ts BETWEEN %s AND %s
+             ORDER BY ts ASC
+            """,
+            (seed.symbol, window_start, window_end),
+        )
+        for row in cur.fetchall():
+            ts, bid_depth, ask_depth = row
+            buckets.append(QueueDepthSample(
+                ts_bucket_start=ts,
+                symbol=seed.symbol,
+                bid_depth_5=float(bid_depth) if bid_depth is not None else None,
+                ask_depth_5=float(ask_depth) if ask_depth is not None else None,
+            ))
+
+    return OrderbookDepthWindow(
+        fill_order_id=seed.order_id,
+        symbol=seed.symbol,
+        fill_ts=fill_ts,
+        buckets=tuple(buckets),
     )
 
 

@@ -15,9 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from phase_1b_sweep_cells import CalibrationCell  # noqa: E402
 from phase_1b_tick_loader import (  # noqa: E402
     FillReplaySeed,
+    OrderbookDepthWindow,
     TickSample,
     TickWindow,
     DATA_SOURCE_TAG,
+)
+from phase_1b_queue_adjustment import (  # noqa: E402
+    QueueDepthSample,
+    DEFAULT_QUEUE_WEIGHT,
 )
 from phase_1b_sweep_replay import (  # noqa: E402
     simulate_cell,
@@ -255,6 +260,150 @@ def test_simulate_cell_skips_missing_tick_size():
     assert outcome.n_attempts == 1
     assert outcome.n_simulated_fills == 0
     assert outcome.n_skipped_tick_missing == 1
+
+
+def _make_orderbook_window(
+    fill_ts,
+    symbol="BTCUSDT",
+    bid_depth_5=1000.0,
+    ask_depth_5=1000.0,
+) -> OrderbookDepthWindow:
+    """構造 1 個 1m bucket 對應 fill_ts 前 60s 的 depth sample。"""
+    from datetime import timedelta as _td
+    sample = QueueDepthSample(
+        ts_bucket_start=fill_ts - _td(seconds=30),
+        symbol=symbol,
+        bid_depth_5=bid_depth_5,
+        ask_depth_5=ask_depth_5,
+    )
+    return OrderbookDepthWindow(
+        fill_order_id="test_order",
+        symbol=symbol,
+        fill_ts=fill_ts,
+        buckets=(sample,),
+    )
+
+
+def test_queue_adjusted_probability_when_fill_and_depth_available():
+    """BBO-cross-proxy fill=True，有 depth → queue_adjusted_fill_probability < 1。"""
+    fill_ts = datetime(2026, 5, 18, 0, 0, 0, tzinfo=timezone.utc)
+    cell = _make_cell(buffer_ticks=0, timeout_ms=30_000)
+    seed = _make_seed(side="Buy", exit_reason="grid_close_short", price=100.0, ts=fill_ts)
+    seed = FillReplaySeed(
+        order_id=seed.order_id, link_id=seed.link_id, symbol=seed.symbol,
+        side=seed.side, exit_reason=seed.exit_reason,
+        qty=100.0,  # 對比 bid_depth_5=100 → factor=0.5
+        price=seed.price, ts=seed.ts,
+        close_maker_attempt=seed.close_maker_attempt,
+        close_maker_fallback_reason=seed.close_maker_fallback_reason,
+        seed_source=seed.seed_source,
+    )
+    tick_win = _make_tick_window(
+        fill_ts=fill_ts,
+        pre_quotes=[(-1, 100.00, 100.01)],
+        replay_quotes=[(5, 99.97, 99.99)],
+    )
+    ob_win = _make_orderbook_window(
+        fill_ts=fill_ts, bid_depth_5=100.0, ask_depth_5=100.0,
+    )
+    result = simulate_cell_against_fill(
+        cell, seed, tick_win, tick_size=0.01,
+        orderbook_window=ob_win, queue_weight=0.40,
+    )
+    assert result.simulated_fill is True
+    # close BUY (position_is_long=False) → same-side = bid_depth_5 = 100
+    # factor = 100 / (100+100) = 0.5；adj = 1 * (1 - 0.40*0.5) = 0.80
+    assert result.same_side_depth_5 == 100.0
+    assert result.queue_factor == 0.5
+    assert abs(result.queue_adjusted_fill_probability - 0.80) < 1e-9
+
+
+def test_queue_adjusted_probability_passthrough_when_no_orderbook():
+    """無 orderbook_window → queue_adjusted = simulated_fill 對應 0/1（不調整）。"""
+    fill_ts = datetime(2026, 5, 18, 0, 0, 0, tzinfo=timezone.utc)
+    cell = _make_cell(buffer_ticks=0, timeout_ms=30_000)
+    seed = _make_seed(side="Buy", price=100.0, ts=fill_ts)
+    tick_win = _make_tick_window(
+        fill_ts=fill_ts,
+        pre_quotes=[(-1, 100.00, 100.01)],
+        replay_quotes=[(5, 99.97, 99.99)],
+    )
+    result = simulate_cell_against_fill(
+        cell, seed, tick_win, tick_size=0.01,
+        orderbook_window=None,  # passthrough
+    )
+    assert result.simulated_fill is True
+    assert result.queue_factor is None
+    # passthrough → queue_adjusted == fill_p_proxy = 1.0
+    assert result.queue_adjusted_fill_probability == 1.0
+
+
+def test_queue_adjusted_probability_zero_when_no_fill():
+    """BBO-cross-proxy fill=False → queue_adjusted = 0（即使 depth 有效）。"""
+    fill_ts = datetime(2026, 5, 18, 0, 0, 0, tzinfo=timezone.utc)
+    cell = _make_cell(buffer_ticks=0, timeout_ms=30_000)
+    seed = _make_seed(side="Buy", price=100.0, ts=fill_ts)
+    tick_win = _make_tick_window(
+        fill_ts=fill_ts,
+        pre_quotes=[(-1, 100.00, 100.01)],
+        replay_quotes=[(5, 100.00, 100.01), (15, 100.00, 100.01)],  # no cross
+    )
+    ob_win = _make_orderbook_window(fill_ts=fill_ts)
+    result = simulate_cell_against_fill(
+        cell, seed, tick_win, tick_size=0.01, orderbook_window=ob_win,
+    )
+    assert result.simulated_fill is False
+    # queue_factor 可能算出 ≠ None（depth 有效），但 proxy=0 → adjusted = 0
+    assert result.queue_adjusted_fill_probability == 0.0
+
+
+def test_simulate_cell_aggregates_queue_adjusted_rate():
+    """simulate_cell aggregates queue_adjusted_fill_rate per eligible mean。"""
+    fill_ts = datetime(2026, 5, 18, 0, 0, 0, tzinfo=timezone.utc)
+    cell = _make_cell(buffer_ticks=0, timeout_ms=30_000)
+    seeds = [
+        _make_seed(order_id="o1", side="Buy", price=100.0, ts=fill_ts),
+        _make_seed(order_id="o2", side="Buy", price=100.0,
+                   ts=fill_ts + timedelta(minutes=1)),
+    ]
+    # 把 qty 改大確保 queue factor 顯著
+    seeds = [
+        FillReplaySeed(order_id=s.order_id, link_id=s.link_id, symbol=s.symbol,
+                       side=s.side, exit_reason=s.exit_reason,
+                       qty=100.0,
+                       price=s.price, ts=s.ts,
+                       close_maker_attempt=s.close_maker_attempt,
+                       close_maker_fallback_reason=s.close_maker_fallback_reason,
+                       seed_source=s.seed_source)
+        for s in seeds
+    ]
+    win1 = _make_tick_window(
+        fill_ts=seeds[0].ts,
+        pre_quotes=[(-1, 100.00, 100.01)],
+        replay_quotes=[(5, 99.97, 99.99)],  # fill
+    )
+    win2 = _make_tick_window(
+        fill_ts=seeds[1].ts,
+        pre_quotes=[(-1, 100.00, 100.01)],
+        replay_quotes=[(5, 100.00, 100.02)],  # no fill
+    )
+    ob1 = _make_orderbook_window(fill_ts=seeds[0].ts,
+                                  bid_depth_5=100.0, ask_depth_5=100.0)
+    ob2 = _make_orderbook_window(fill_ts=seeds[1].ts,
+                                  bid_depth_5=100.0, ask_depth_5=100.0)
+    outcome = simulate_cell(
+        cell=cell, seeds=seeds,
+        tick_windows={"o1": win1, "o2": win2},
+        tick_size_map={"BTCUSDT": 0.01},
+        orderbook_windows={"o1": ob1, "o2": ob2},
+        queue_weight=0.40,
+    )
+    assert outcome.n_attempts == 2
+    assert outcome.n_simulated_fills == 1
+    assert outcome.maker_fill_rate == 0.5
+    # eligible = 2，queue_adjusted = (0.80 + 0.0) / 2 = 0.40
+    assert abs(outcome.queue_adjusted_fill_rate - 0.40) < 1e-9
+    assert outcome.queue_adjusted_eligible_with_depth == 2
 
 
 def test_simulate_sell_close_fills_when_bid_rises_to_limit():
