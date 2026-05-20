@@ -3971,3 +3971,37 @@ N/A this sprint — no Python ↔ Rust shared computation introduced. `compute_e
 - **Task brief 數字以實測為準（再次驗證）**: brief 寫 "openclaw_core previously 399/0/1 after Batch B +1" — 實測 357（446 - 90 retired + 1）。Brief 漏算 7 dead modules retirement (-90 tests)。E4 必跑命令拿真實 baseline + stash 法驗 pre-PR base = 唯一可靠判 delta attribution。**規則**: 寫 "previously X/Y/Z" 的數字常常忽略同次 PR 的 retirement scope，stash probe 是必檢手段
 - **Wider-batch fail vs isolation-pass = test pollution, not regression**: 2 個 `TestDynamicRiskRoutes` test 單獨跑通、wider batch 跑掛。stash 後 wider batch 同樣掛 → pre-existing pollution，非 PR-introduced。**規則**: 任何「PR-introduced fail？」claim 必跑 pre-PR baseline 同 batch 作對照（stash --keep-index 法即可），單測通過 ≠ 證明 batch 通過
 - **`memory.md` append-only 持續鞏固**: 本次再次 `tail -30` + `cat >> EOF` append 模式工作，無 Read 全檔嘗試
+
+## 2026-05-20 · P2-STRESS-BB-FALSE-SQUEEZE + P2-SIM-QUEUE-AWARE 並行 batch E4 Mac PASS
+
+**Branch**: `main` HEAD `232c3aff`（origin/main 領先 3 commits）— 兩個 P2 IMPL Mac dirty tree。
+**Verdict**: REGRESSION-PASS × 2 IMPL · PM merge READY
+
+### 數字
+| Surface | Result | Baseline | Delta | Verdict |
+|---|---|---|---|---|
+| Rust lib (Mac release run 1) | 3042/0/1 in 0.70s | 2993 (5/18 cleanup sprint) + sibling drift | +49 = sibling Layer A `6cf476c4` + spine align `879e3852` 等；P2-STRESS-BB attribution = 0（純 tests/ 改） | ✅ |
+| Rust lib (run 2) | 3042/0/1 in 0.70s | same | non-flaky | ✅ |
+| Rust --tests (26 binaries × 2 runs) | 3264/0/1 × 2 | n/a | identical | ✅ non-flaky |
+| Rust stress_integration focused × 3 | 35/0/0 in 0.10-0.12s | pre-PR stash baseline 35/0/0 | 0（純強化既有 1 test assertion，不增 count）| ✅ |
+| Python calibration full (run 1+2) | 89/89 in 0.04s | 63 (5/18 phase_1b harness baseline) | +26 = 22 queue_adjustment unit + 4 sweep_replay integration | ✅ non-flaky |
+| Python sweep_replay focused × 2 | 13/13 in 0.01-0.02s | 9 既有 | +4 new queue integration | ✅ non-flaky |
+| Cross-platform path grep × 7 files | 0 hit | n/a | 0 | ✅ |
+| Mock anti-pattern grep × 7 files | 0 hit (sibling line 1317 `apply_patch` 是 RiskConfig API 非 mock) | n/a | 0 | ✅ |
+
+### Lessons learned
+
+- **「既有 N test 是否 false GREEN 受隱式影響」對抗驗證法**: P2-SIM-QUEUE-AWARE 加 `orderbook_window` optional arg + 4 new dataclass field 都帶 default value (None/0.0)。E4 對抗驗法 = (1) grep 既有 9 sweep_replay test 是否傳 `orderbook_window` (全不傳 → walk default) (2) 從 source 驗 default `orderbook_window=None` → `queue_factor=None` → `apply_queue_adjustment` 數學 collapse 到 `fill_p_proxy * 1.0` 1:1 (3) grep 既有 9 test 是否 assert 新欄位 (全 0 assertion) → 三條 verified → 既有 9 test 0 false GREEN 受影響。**規則**：新增 optional kwarg + dataclass new field 必有 default value，E4 對 backward-compat 必三條都驗（call site 不傳 + source default fallback path + 既有 assertion 不觸碰新 field）
+
+- **task brief 「既有 63」拆解陷阱**: task brief 寫 "既有 63 test 是否有 false GREEN 受隱式影響"。但 63 不在單一 file 內 — 是 dir 級分布 (maker_price 20 + sweep_cells 17 + sweep_replay 9 + sweep_report 17 = 63)。E4 必拆 per-file 跑 isolation 才能定位 backward-compat。**規則**：task brief 寫「既有 N test」必拆 per-file 確認哪幾個 file 受改動影響，而非整批跑（整批雖 PASS 但會掩蓋 file 級 false GREEN）
+
+- **Pre-PR stash 法驗 baseline**: 對 Rust tests/ 改動（非 lib 改動），用 `git stash push -- <file>` 後跑 focused test 拿真實 pre-PR baseline = 唯一可靠判 delta attribution。本次 stress_integration 5/18 cleanup sprint report 寫「33 passed / 2 failed」但當前 stash baseline 35/0/0 — 因為 5/19 invariant drift fix 已修那 2 個 pre-existing fail。**規則**：memory 寫死數字（5/18 = 33/2）不能作 5/20 baseline，必跑 stash + focused 拿當下真實 pre-PR baseline
+
+- **`cargo test --lib` 不覆蓋 tests/ integration crate**: TODO §11.3 line 163 governance flag 提醒。本次 E4 run 1 + run 2 跑 `--lib`，run 3 跑 `--tests`（含 26 integration binaries）= cover 兩個 surface。**規則**：PASS sign-off 前必雙跑 `--lib` 1+ 次 + `--tests` 1+ 次；只跑一個 surface 是 BLOCKER 級漏覆蓋
+
+- **0 mock 真 PG SELECT 驗證模式**: phase_1b_queue_bias_regression.py 唯一 `cur.execute` = 純 `SELECT ... FROM trading.fills WHERE ...`（line 143-168）；ground truth `liquidity_role` 對齊 actual_maker=5 + actual_taker=13；無 INSERT/UPDATE/DELETE side effect。E4 verify 5 SQL pattern：(1) `grep cur.execute` 全為 SELECT (2) E2 §1.4 已 verified 5 個 SQL 全 SELECT (3) source line 100-130 註釋說明 "為什麼直接讀 V094" + "為什麼支援 sample_end_utc" 設計意圖。**規則**：task brief 「regression 用真實 PG 而非 mock」對抗驗法 = grep execute pattern + 註釋意圖 + ground truth 對齊（liquidity_role 一致性）三條
+
+- **整批 phase_1b -k 跑會撞 sibling collection error**: `pytest -k 'phase_1b' --tb=short` 從 srv root 跑會撞 `tests/misc_tools/test_pure_utils.py` + `tests/ml_training/test_pure_utils.py` collection error（非 P2 IMPL 引入）。**繞法** = scope 到 `helper_scripts/` 即 `pytest helper_scripts/ -k 'phase_1b'` → 89 passed / 719 deselected in 0.14s。**規則**：跨 dir 廣域 `-k` 跑容易撞 sibling collection error，scope 縮到改動所在 top-level dir（helper_scripts/）即可繞
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-20--p2_stress_bb_sim_queue_aware_e4_regression.md`
