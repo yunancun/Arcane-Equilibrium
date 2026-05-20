@@ -10871,3 +10871,103 @@ E2 returned VERDICT=RETURN 4 MUST-FIX；E3 returned APPROVE-CONDITIONAL 1 MEDIUM
 ### 報告
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--layer_a_halt_ttl_impl_round2_report.md`
 
+
+## 2026-05-20 — P0-ENGINE-HALTSESSION-STUCK-FIX Layer B (Python watchdog inert probe)
+
+### 任務範圍
+operator 在 Layer A round 2 deploy + 自然事件驗 GREEN 後，override D2「24h passive watch」直接派 Layer B。
+spec v0.2 §4 — engine_watchdog.py 加業務心跳探測，獨立於 ENGINE_CRASH 路徑，severity=WARNING。
+
+### 修改清單
+**新建**:
+- `srv/helper_scripts/canary/watchdog_inert_probe.toml` 38 LOC — 4 env (paper/demo/live_demo/live) + default fallback；spec §4.3 per-env threshold 配置
+- `srv/helper_scripts/canary/test_engine_watchdog.py` 393 LOC — 32 unit tests，spec B-1/B-1a/B-2/B-3/B-4/B-5/B-7 全覆蓋
+
+**修改**:
+- `srv/helper_scripts/canary/engine_watchdog.py` 761→1285 LOC (+524 LOC)：
+  - import tomllib fallback chain
+  - INERT_PROBE_DEFAULTS dict + INERT_PROBE_TOML + INERT_STATE_FILE 常數
+  - dataclass `InertState`（per-engine state）
+  - `load_inert_probe_config` TOML loader（缺檔 fallback；parse error RAISE per spec §4.3 fail-loud）
+  - `resolve_engine_label_for_snapshot` file-basename + trading_mode fallback
+  - `read_snapshot_json` fail-soft reader
+  - `detect_paper_paused_stuck` / `detect_intents_zero_delta` 兩 detector
+  - `evaluate_inert_probe` 主 evaluator + cooldown + cleared transition
+  - `_emit_inert_alarm` / `_emit_inert_cleared` writers（watchdog.log + canary_events.jsonl）
+  - `_read_paper_paused` / `_read_halt_set_ts_ms` / `_read_halt_kind` 三個 mode_snapshots 優先讀 helper
+  - `load_inert_state` / `save_inert_state` persistence
+  - `run_inert_probe_once` per-poll evaluator
+  - `run_watchdog` 加 inert_probe_enabled / inert_probe_config_path 兩參數 + startup load + per-iteration probe + save
+  - CLI 加 `--disable-inert-probe` + `--inert-probe-config`
+- `srv/helper_scripts/SCRIPT_INDEX.md` +9 LOC：新區塊 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer B
+
+### 教訓
+1. **PA spec 範例代碼有 field name 不準確**：spec line 639 寫 `i.get("ts_ms", 0)` 但 Rust pipeline_types.rs TimestampedIntent::timestamp_ms 真正欄位是 `timestamp_ms`。我以 source-of-truth schema 為準（pipeline_types.rs line 62），spec 內 snippet 不可盲信。
+2. **`live_demo` env 在 watchdog 端不可分離**：snapshot.pipeline_kind enum 只有 3 variant（paper/demo/live），LiveDemo = Live + Demo endpoint 組合，snapshot 寫入 `pipeline_snapshot_live.json` 且 trading_mode 序列化為 "live"。spec §4.3 `[live_demo]` 在 watchdog 層為 dead config（未實作 endpoint_env reading）。保守選擇：[live_demo] 仍寫進 TOML 預留 future endpoint 識別，目前 LiveDemo 走 [live] 較嚴 threshold = fail-strict（不會 fail-loose alarm spam）。E2 review 點之一。
+3. **mode_snapshots vs 頂層讀取**：spec §4.8 multi-engine — 每 engine 一份 `mode_snapshots.<kind>` 巢狀；同欄位（paper_paused/halt_kind/halt_set_ts_ms）頂層也有但 compat。implementation 用 mode_snapshots 優先讀 helper（`_read_paper_paused` / `_read_halt_set_ts_ms` / `_read_halt_kind`）保證 per-engine 正確；頂層 fallback compat。
+4. **halt_set_ts_ms 作 anchor for B-5**：spec B-5 watchdog restart 不重置 incident state — 持久化 inert_state.json 是一條路徑，但 paper_paused_since 用 engine 端 halt_set_ts_ms 作 anchor（若 >0）是另一條更可靠路徑（跨 watchdog restart 一致）。兩條都實作。
+5. **stale snapshot 不參 inert probe**：spec §4.8 simplification — fresh 才探 inert；stale 走 on_engine_crash 路徑優先。`run_inert_probe_once` 用 `check_snapshot_freshness` skip stale path。
+6. **TOML parse error fail-loud RAISE**：spec §4.3 末段明確；操作者編輯 TOML 出錯靜默 fallback 會讓 operator 以為配置生效，造成隱性風險。但 invalid value（如 "not_a_number"）只 warn + fallback，避免一個 typo 讓整 watchdog down。
+7. **file size warning >800**：engine_watchdog.py 761→1285 LOC 超 800 warning < 2000 hard cap。所有現有 58 tests + 32 新 tests + 20 halt_audit_pg_writer = 110/110 PASS。pre-existing 接近 warning 區間 + Layer B 524 LOC contribution 無法避免；如要拆 sibling 需大改 import surface（test_canary.py 已 import 5 個 symbol）。E2 review 決定是否要拆 `engine_watchdog_inert_probe.py` sibling。
+
+### 驗證
+- Mac unittest：58 (test_canary) + 32 (test_engine_watchdog Layer B) + 20 (test_halt_audit_pg_writer) = **110 / 110 PASS**，無 regression
+- Mac pytest：test_engine_watchdog.py **32 / 32 PASS** in 0.03s
+- 模組 import smoke test PASS（所有 Layer B export symbol 可正常 import）
+- `python3 engine_watchdog.py --help` 新 flag 顯示
+- `python3 -m py_compile` syntax OK
+- TOML canonical file load test PASS（test_repo_canonical_toml_loads）
+
+### 不確定 / E2 review points
+1. **live_demo dead config**：snapshot.trading_mode 無法識別 endpoint，[live_demo] TOML 段目前不會被 watchdog 自動載入。E2 / PA 決定是 (a) 直接刪 [live_demo] 段 (b) 補一個 endpoint 讀取點（如環境變數 OPENCLAW_PIPELINE_ENV_LIVE_DEMO=1 啟用 live_demo override）(c) 保留為 future spec L-3 placeholder（目前選 c）
+2. **file size 1285 LOC**：超 800 warning。是否要拆 `engine_watchdog_inert_probe.py` sibling
+3. **inert_state.json best-effort persistence**：當前實作每 poll cycle 寫一次（POLL_INTERVAL_SECONDS=2s），可能對 SSD wear 略過 — operator 是否需要降頻
+4. **PA spec snippet field name drift**：`ts_ms` vs `timestamp_ms` — PA 是否需要 patch spec snippet
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-20--layer_b_watchdog_inert_probe_impl_report.md`
+
+---
+
+## 2026-05-20 — Layer B Round 2 patch（E2 RETURN 修補）
+
+### 背景
+E2 RETURN review verdict APPROVE-CONDITIONAL：1 HIGH + 1 MEDIUM + 2 LOW finding。Round 2 必須 mechanical close 全 4 issue + 1 PA spec typo（分 commit）。
+
+### 關鍵教訓
+1. **per-engine partial recovery > global wipe**：watchdog 是 critical canary process，state 持久化目的是跨 restart 連續性。HIGH-1 `load_inert_state` 修補應 catch `(ValueError, TypeError)` + skip 該 engine 條目 + warning log + 繼續處理其他 engine。完全空表（option 1）會令所有 engine 失 incident state；partial recovery（option 2）僅損該 engine = cold-start equivalent，可接受。E2 推薦 option 2 是 correct call。
+2. **transition-only write 用 caller-side cache + 純 helper**：抽 `_serialize_inert_states(states)` 純函數 → caller 在 main loop 維持 `inert_last_written: Optional[dict]` → save 內部比 `new_serialized == last_written` 決定 skip vs 真實寫盤。write 失敗時 return `last_written`（不返 None）避免下次 poll 不必要的 retry。empirical 驗 11 calls → 1 write（first cold-start）+ transition 觸 +1 write。
+3. **拒收 <=0 threshold**：spec §6 uncertainty defaults conservative。負/零 threshold 是 operator typo，必須 warning + fallback default，但不應 raise 阻斷 watchdog 啟動（fail-loose 比 fail-loud 適合 operator typo 場景）。
+4. **fallback 字串 semantic 比模糊**：LOW-2 `previous_trigger=None` 用 `"no_trigger_recorded"` 而非 `"unknown"` — 明確告訴 7d observation operator 是 state 載入時即缺，非新 incident。`"unknown"` 模糊 lose audit signal。
+5. **正向 control test 必加**：負向 test alone 可能因其他 bug accidentally pass；每個 Round 2 fix 都加正向 control（如 `test_load_inert_probe_config_positive_threshold_accepted` / `test_cleared_event_keeps_real_trigger_when_present`）確保 fallback 邏輯只在正確時機 trigger，不誤殺。
+6. **mtime_ns 是最強 I/O 觀察**：transition-only write 測試直接看 `Path.stat().st_mtime_ns` — 不變即可確認沒走 os.replace（不需要 mock filesystem）。比 mock 更貼近真實行為。
+7. **doc/code 分 commit**：PA spec 修改是 `[skip ci]` doc commit，code patch 是 normal commit。caller 端 PM 統一執行兩個 commit 不在 E1 範圍。
+8. **新 helper 用 _ prefix 標 private**：`_serialize_inert_states` 與 `_emit_inert_alarm` / `_emit_inert_cleared` 一致 — 表示模塊內部 helper 非 public API。
+
+### 修改
+- `engine_watchdog.py` 1285 → 1365 LOC（+80）
+  - `load_inert_state` 重構為 outer (FileNotFoundError, JSONDecodeError, OSError) + inner per-engine (TypeError, ValueError) skip
+  - 新 `_serialize_inert_states(states)` 純 helper
+  - `save_inert_state(data_dir, states, last_written=None) -> Optional[dict]` 簽名變動（新 last_written 參數 + return type）
+  - `load_inert_probe_config` 加 `if parsed <= 0` 拒收
+  - `_emit_inert_cleared` 加 `previous_trigger = state.last_alarm_trigger or "no_trigger_recorded"`
+  - `run_watchdog` 加 `inert_last_written: Optional[dict]` 局部變量 + 從 loaded state 初始化
+- `test_engine_watchdog.py` 581 → 802 LOC（+221）
+  - 4 個新 test class + 8 個新 test
+- `docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md`
+  - line 639 `ts_ms` → `timestamp_ms`
+  - §12.1 加 v0.3 changelog
+
+### 驗證
+- Mac pytest test_engine_watchdog.py：**40 / 0 PASS** in 0.05s（32 Round 1 + 8 Round 2）
+- Mac wider canary：**118 / 0 PASS** in 31.21s（test_canary 58 + test_engine_watchdog 40 + test_halt_audit_pg_writer 20）
+- empirical HIGH-1：壞 state load NO CRASH + partial recovery 確認
+- empirical MEDIUM-1：10 unchanged polls → 1 write；transition → +1 write
+- py_compile OK；CLI smoke test OK；cross-platform path grep 0 hits；secret grep 0 hits
+
+### 不確定 / E2 review points
+1. **transition-only write SIGKILL 丟失窗口**：watchdog SIGKILL 在 transition 後 2s 內 → disk state 落後 1 個 transition；下次冷起重偵測 = 1 個重複 alarm event。spec §B-5 best-effort 接受。
+2. **`_serialize_inert_states` 抽出後 save_inert_state 簽名變動**：grep 驗證僅 1 個 internal caller（`run_watchdog`）+ 4 個 test caller；無外部 caller 風險。
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-20--layer_b_watchdog_inert_probe_round2_report.md`

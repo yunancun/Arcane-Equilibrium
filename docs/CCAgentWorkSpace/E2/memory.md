@@ -3022,3 +3022,38 @@ Round 2 IMPL closed all 4 Round 1 MUST-FIX + 1 E3 MEDIUM + 1 spec §6.3 complian
 ### Round 2 process win
 - **E1 honest self-report on incomplete items**: E1 explicitly listed 6 quant fields still NULL + risk_config_version_seen=0 placeholder + cron 1min interval vs spec 30s — transparent trade-offs documented as observations, not hidden as silent gaps.
 - **Round 1 → Round 2 round-trip 1-day turnaround**: E1 closed 4 MUST-FIX + 1 E3 MEDIUM + 1 spec §6.3 in ~14 hours wall-clock. No new regressions introduced. +9 tests, all green.
+
+## 2026-05-20 — Layer B watchdog inert probe review (P0-ENGINE-HALTSESSION-STUCK-FIX)
+
+Branch: feature (Mac dirty, not pushed). E1 self-reported 110/110 PASS (58 existing + 32 new + 20 halt_audit). E2 verdict: APPROVE-CONDITIONAL — RETURN to E1 with 1 HIGH finding.
+
+### HIGH finding caught
+- **load_inert_state type-mismatch crash (engine_watchdog.py:986)**: except clause only catches `(FileNotFoundError, json.JSONDecodeError, OSError)` — does NOT catch `ValueError`/`TypeError` raised by `int(payload.get("last_intent_ts_ms", 0))` when JSON has non-numeric value. Watchdog will crash on startup if state file has corrupted types.
+- E2 reproduced with `{"demo": {"last_intent_ts_ms": "not_int"}}` → `ValueError: invalid literal for int() with base 10`
+- E1 has test `test_corrupted_state_file_returns_empty` but only covers JSON syntax error, NOT type-mismatch (valid JSON, bad value type).
+- This is the second time E2 catches "test covers happy path + one error class but misses type-mismatch" pattern (see also 2026-05-18 W-AUDIT-8c S0R round-2 type-coercion gaps).
+
+### Adversarial wins
+- H1 cooldown race: PASS — `incident_active` flag transitions verified across 5 polls + clear + re-fire
+- H2 state corruption: HIGH finding above
+- H3 operator-pause filter: PASS as designed (spec §4.6 defers `inert_kind=operator_pause` to P2)
+- H4 snapshot partial read: PASS — fail-soft `read_snapshot_json` covers empty/half-written/list-top/number-top
+- H5 threshold edge cases: PASS with LOW finding (negative threshold not validated)
+- H6 CLEARED reset paths: PASS with LOW observation (`previous_trigger=None` lossy audit when state file corrupted)
+- H7 per-engine independence: PASS — `dict.setdefault(engine, InertState())` ensures isolation
+
+### E1 5 surfaced concerns — E2 verdicts (all APPROVE)
+1. `[live_demo]` dead config: APPROVE choice (c) future placeholder. Rust SoT verified — `PipelineKind` enum 3 variant, snapshot filename uses `db_mode()`, LiveDemo collapses to `live` file. Fail-strict aligns with `feedback_live_no_degradation_by_endpoint`.
+2. File size 1285 LOC: APPROVE accepting pre-existing exception. `test_canary.py` import surface lock prevents safe sibling split. Future Layer C/D must split.
+3. inert_state.json 1800 writes/h: APPROVE — 3.7 GB/year negligible. Transition-only optimization is MEDIUM follow-up.
+4. PA spec `ts_ms` vs `timestamp_ms` drift: APPROVE E1's correction. PA v0.3 backlog patch.
+5. B-1a `[live_demo]` test gap: ACCEPTABLE — LiveDemo behaves identical to live per (1), `test_per_env_threshold_live_stricter` implicitly covers it.
+
+### Process win
+- E1 self-report transparent: 5 trade-off concerns listed upfront with options (a)/(b)/(c) + chosen reason. E2 only needed to verify reasoning vs Rust SoT.
+- E2 ran tests independently before adversarial — confirmed E1 numbers (110/110 PASS) instead of trusting blind.
+- Multi-session race check §5a-5e all green (origin/main not ahead; unrelated WIP in tree but Layer B scope isolated).
+
+### Anti-pattern reminder
+- "except clause catches only known error types" — every `int(x)` / `float(x)` / `bool(x)` on untrusted JSON input needs `ValueError, TypeError` in except. Add to S3 watchlist.
+- Test coverage gap: corruption tests often cover syntax error but miss type-mismatch. When reviewing test list, ask "does it cover bad-type-but-valid-JSON?".

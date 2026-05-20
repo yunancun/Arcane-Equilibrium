@@ -1,7 +1,15 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-20（P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2 — MUST-FIX-3 加 `canary/halt_audit_pg_writer.py` + `cron/halt_audit_pg_writer_cron.sh`：tail `halt_audit.log` JSONL → INSERT `learning.governance_audit_log`；20 unit tests PASS + Linux PG integration test PASS（3 rows + idempotent + clear_path↔event_type mapping verified）。保留 2026-05-18 索引）
+最後更新：2026-05-20（P0-ENGINE-HALTSESSION-STUCK-FIX Layer B — `canary/engine_watchdog.py` 加 TRADING_INERT_PROLONGED 業務心跳探測 + 新增 `canary/watchdog_inert_probe.toml` per-env threshold + `canary/test_engine_watchdog.py` 32 unit tests PASS。保留 Layer A Round 2 + 2026-05-18 索引）
+
+## 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer B
+
+| 腳本 | 用途 |
+|------|------|
+| `canary/engine_watchdog.py` | Layer B（spec v0.2 §4）擴增：新增 TRADING_INERT_PROLONGED 業務心跳探測；獨立於 ENGINE_CRASH 路徑（severity=WARNING，不重啟 engine）；trigger conditions = paper_paused 持續超 threshold OR recent_intents 滾動窗口無增長；per-engine 獨立 state；cooldown 防 alarm spam；TRADING_INERT_CLEARED transition log；in-memory + on-disk state（spec B-5：watchdog restart 不重置 incident）；CLI 加 `--disable-inert-probe` / `--inert-probe-config` 兩 flag。 |
+| `canary/watchdog_inert_probe.toml` | Layer B per-env threshold 配置：demo=60min/20min（學習資料源 / grid-dominant aware）、live_demo=30min/15min（中間嚴格）、live=15min/10min（最敏感）、paper=demo defaults（dormant default）。fail-loud RAISE on TOML parse error；缺檔 fallback 預設值。 |
+| `canary/test_engine_watchdog.py` | Layer B 32 unit tests：resolve_engine_label / load_inert_probe_config / detect_paper_paused_stuck / detect_intents_zero_delta / evaluate_inert_probe / state persistence / run_inert_probe_once；spec B-1/B-1a/B-2/B-3/B-4/B-5/B-7 全覆蓋。Mac unittest + pytest 32/32 PASS。 |
 
 ## 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2
 

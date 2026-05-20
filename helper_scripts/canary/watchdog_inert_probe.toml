@@ -1,0 +1,38 @@
+# P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19) — Layer B inert probe thresholds.
+# 每 pipeline_kind 獨立配置；watchdog 以 snapshot 檔案 basename 為主鍵查找
+# （`pipeline_snapshot_<engine>.json` → engine label），fallback 讀 snapshot
+# 內 `trading_mode` field。
+#
+# 設計來源：spec v0.2 §4.3（QC + FA + MIT consolidated MUST-5）。
+# - Demo = 學習資料源 / grid-dominant aware；relax threshold
+# - LiveDemo = Live SLA emulation；中間嚴格度
+# - Live = real PnL exposure；最敏感
+# - Paper = dormant default per project_paper_pipeline_disabled_by_default；
+#   若 future re-enable 沿用 demo threshold
+#
+# 注意：watchdog 從 snapshot 檔案路徑識別 engine，僅可區分 paper/demo/live。
+# LiveDemo（Live + Demo endpoint）目前 snapshot 寫入 `pipeline_snapshot_live.json`
+# 且 `trading_mode` 序列化為 "live"，無法自動分流到 `[live_demo]`。
+# 此 key 預留供未來 spec L-3 follow-up 區分 endpoint 後使用；目前 watchdog
+# 仍適用 `[live]` 較嚴 threshold（fail-strict）。
+
+[default]
+# fallback：未知 pipeline_kind 落 demo 保守值，避免 alarm spam
+paper_paused_threshold_seconds = 3600
+intents_zero_delta_window_seconds = 1200
+
+[paper]
+paper_paused_threshold_seconds = 3600
+intents_zero_delta_window_seconds = 1200
+
+[demo]
+paper_paused_threshold_seconds = 3600    # 60min
+intents_zero_delta_window_seconds = 1200 # 20min
+
+[live_demo]
+paper_paused_threshold_seconds = 1800    # 30min
+intents_zero_delta_window_seconds = 900  # 15min
+
+[live]
+paper_paused_threshold_seconds = 900     # 15min
+intents_zero_delta_window_seconds = 600  # 10min

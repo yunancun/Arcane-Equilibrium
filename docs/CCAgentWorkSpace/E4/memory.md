@@ -8,6 +8,57 @@
 
 ## 工作記憶
 
+### 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer B (Python watchdog inert probe) — PASS
+
+**對象**：E1 Layer B IMPL（Python-only：`engine_watchdog.py +525 LOC` + 新建 `test_engine_watchdog.py 581 LOC` 32 unit tests + `watchdog_inert_probe.toml 38 LOC` per-env config + `SCRIPT_INDEX.md` 索引更新）。spec v0.2 §4 + §10.2 B-1..B-7。Mac dirty tree，未 push。
+
+**結果**：
+| Suite | passed | failed | non-flaky |
+|---|---|---|---|
+| Mac pytest test_engine_watchdog.py Run #1 | 32 | 0 | ✅ |
+| Mac pytest test_engine_watchdog.py Run #2 | 32 | 0 | ✅ identical |
+| Mac wider canary `helper_scripts/canary/` Run #1 | 170 | 0 | ✅ |
+| Mac wider canary Run #2 | 170 | 0 | ✅ identical |
+| py_compile engine_watchdog.py | OK | - | - |
+| CLI --help shows --disable-inert-probe + --inert-probe-config | OK | - | - |
+
+**AC B-1..B-7 對應驗證**：
+- B-1 paper_paused 60min+ alarm → `test_fires_alarm_paper_paused_stuck` ✅
+- B-1a live 15min vs demo 60min 差異 → `test_per_env_threshold_live_stricter` + `test_per_env_threshold_demo_not_fire_at_live_threshold` ✅
+- B-2 intents zero-delta > window alarm → `test_fires_alarm_intents_zero_delta` ✅
+- B-3 cooldown 同 incident 不重發 → `test_cooldown_no_duplicate_alarms` ✅
+- B-4 clear 寫 CLEARED → `test_paper_paused_clears_state` ✅
+- B-5 watchdog restart 不重置 incident → `test_state_persistence_across_restart` + `test_save_load_roundtrip` ✅
+- B-6 7d false-positive reconcile → ⏳ post-deploy passive watch
+- B-7 multi-engine 獨立 → `test_multi_engine_independent_state` ✅
+
+**Scope creep check**：Layer A 文件 0 diff（`halt_session.rs` / `risk_config.rs` / `halt_audit_pg_writer.py` / V096-V098 / `paper_state_restore_*` 全未動）。E1 守住 Layer B only。
+
+**Mock 審查**：0 anti-pattern。`grep -nE "patch|MagicMock|Mock\(\)" test_engine_watchdog.py` = 0 matches。Test 用 tempfile 隔離 + 真函式 + 不 mock 時間 / 不 mock JSON parse。`os.environ` / `requests` / `psycopg` 引用 = 0。
+
+**Layer A cron 完整性 post Layer B**：
+- `/tmp/openclaw/halt_audit.log` 2 rows 保留（Round 2 set+manual_cleared 事件鏈）
+- `governance_audit_log` 24h 內 2 rows 保留
+- Layer B 不依賴 Layer A cron（獨立 `watchdog_inert_events.jsonl` channel）→ 結構上不該影響，實測確認
+
+**教訓**：
+
+1. **E1 「90/90」口徑陷阱**：E1 self-report 「90 = 58 existing canary + 32 new」只計 `test_canary.py + test_engine_watchdog.py` 兩檔；忽略 `healthchecks/tests/*` 60 個 + `test_halt_audit_pg_writer.py` 20 個。從廣域 `helper_scripts/canary/` 跑是 170/0。E4 不能盲信 E1 數字，必須直接 directory-level run 拿真實 baseline。
+
+2. **Prompt 寫的 grep 模式可能錯**：prompt 期望 `test_b[0-9]` / `test_inert` / `test_TRADING_INERT` 命名，實際 E1 採描述式（`test_fires_alarm_*`）。E4 必須讀真實 source 而非靠 prompt 的 grep 模式驗 test count。`grep -cE "^\s*def test_"` 才是抗命名風格的計數方式。AC ↔ test 對應靠 E1 IMPL report 的表格不靠檔名 substring。
+
+3. **Mac dirty tree → Linux pytest 不適用**：Layer B 未 commit、未 push，`ssh trade-core "ls test_engine_watchdog.py"` = NOT_PRESENT。Python 平台無關，Mac unit test 全綠對 Linux runtime 充分。但建議 push 後 PM 補跑 `ssh trade-core "git pull --ff-only && pytest"` 一次保險。Layer A Round 2 已驗 Python 跨平台 0 regression 模式。
+
+4. **`[live_demo]` documented dead config 合理**：`pipeline_snapshot_live.json` 寫 `trading_mode="live"` 無 endpoint hint 區分 LiveDemo vs Live。Resolver 落 `[live]` 嚴 threshold。符合 「LiveDemo 不因 endpoint 降級」feedback。Spec L-3 預留升級空間，目前 IMPL acceptable。
+
+5. **Cargo regression 不適用標記要明確**：Layer B Python-only（no Rust / no V### / no engine binary rebuild）。E4 報告必須明確說明「cargo regression 不適用」而非靜默跳過，否則容易被誤判 E4 偷懶。
+
+**Verdict**：**PASS** — Mac 32/0/170 x2 non-flaky + AC B-1..B-7 全 cover + Mock 0 anti-pattern + Layer A 0 diff + Layer A cron infra preserved。允許 PM sign-off → push → 部署 Linux watchdog。**不阻塞** A3 / E2 並行 review（不同 surface）。
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-20--layer_b_watchdog_inert_probe_e4_regression.md`
+
+---
+
 ### 2026-05-19/20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2 — PASS
 
 **對象**：E1 Round 2 IMPL（4 MUST-FIX + 1 E3 MEDIUM + 1 SHOULD spec §6.3 incident replay）9 個新 test 加進來 → 3255 (R1) → 3264 (R2)。
