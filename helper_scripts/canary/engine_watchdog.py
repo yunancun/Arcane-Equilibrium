@@ -1332,7 +1332,9 @@ def main():
             "Another watchdog already holds %s — exiting / 另一看門狗持有 %s — 退出",
             lock_path, lock_path,
         )
-        sys.exit(3)
+        # Exit code 10：single-instance lock contention（10-19 為 startup/lock 區段）。
+        # 原為 3；P1-WATCHDOG-EXIT-CODE-CLARIFY 重排語意供 systemd / 上層觀察區分。
+        sys.exit(10)
     lock_fd.write(f"{os.getpid()}\n")
     lock_fd.flush()
 
@@ -1358,7 +1360,9 @@ def main():
 
     if state.rollback_triggered:
         logger.critical("Watchdog exiting — runtime rollback triggered / 看門狗退出 — 運行時回滾已觸發")
-        sys.exit(2)
+        # Exit code 20：runtime rollback triggered（20-29 為 runtime/rollback 區段）。
+        # 原為 2；P1-WATCHDOG-EXIT-CODE-CLARIFY 重排語意供 systemd / 上層觀察區分。
+        sys.exit(20)
 
 
 if __name__ == "__main__":
