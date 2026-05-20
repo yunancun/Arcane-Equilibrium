@@ -513,19 +513,40 @@ PM/PA/FA 三方交叉檢查後：
 
 ## §12 P2 — 維護 backlog
 
-| ID | 任務 | 觸發 |
-|---|---|---|
-| `P2-LEASE-1` | 清掃 terminal `DecisionLeaseSm.objects` Vec entries | 長期 soak 出現 memory growth 或 high-volume live 前 |
-| `P2-STRUCT-2` | Zombie / deprecated code 盤點 | 下一次架構 hygiene sweep |
-| `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset（D-16 dormant）| ADR-0015 + AMD-2026-05-09-02 accept；Sprint N+6+ |
-| `P2-AUDIT-VERIFY-3` | W-AUDIT-4 dead schema 真實 fix → mount 進 `W-AUDIT-8f`（R-3）Hypothesis Pipeline | Sprint N+5 |
-| `P2-ENTRY-CLOSE-MAKER-REAL-FILL-FIX` | **NEW（v55 衍生）**：entry-close vs risk-exit limit placement / order lifetime / cancel-fallback sequencing / queue+trade-tape evidence 比對；不得只用 sweep proxy 調 runtime 參數 | source/test follow-up |
-| `P2-WP05-CSP-UNSAFE-INLINE` | 🟡 SRI 部分 DONE 2026-05-18；完整 CSP nonce-based refactor 待 live-gate 前 P1 | live-gate 前 |
-| `P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX` | **NEW（v55）**：QA 模板「entry-close vs risk-exit」拆法改用 attempt × fallback 而非 ID prefix | 下一次 QA template 更新 |
-| `P2-SIM-QUEUE-AWARE-ADJUSTMENT` | **NEW（v55）**：replay queue-aware bias 修正（10-15pp）| 下一次 sim harness round |
-| `P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS` | **NEW（v55）**：3rd 測試因「錯誤原因」PASS — 改善 assert 條件 | 下一輪 stress harness 維護 |
+### §12.1 Active backlog（3 項 deferred — operator push back rationale）
 
-**已完成 P2 條目（細節歸檔於 2026-05-19 v55 translation archive）**：
+| ID | 任務 | 觸發 | Deferred 理由（2026-05-20 sweep） |
+|---|---|---|---|
+| `P2-LEASE-1` | 清掃 terminal `DecisionLeaseSm.objects` Vec entries | 長期 soak 出現 memory growth 或 high-volume live 前 | 觸碰 `rust/openclaw_core/src/sm/lease.rs:303` Decision Lease 核心；LG-1/LG-2 7d observation 中、LG-3 Wave 2.4 IMPL DISPATCH PENDING；建議**升 P1 + 待 LG-3 IMPL DISPATCH 後**排專案，含 terminal state 定義 + lease_id_to_idx HashMap 同步 + audit-preserving prune 設計 |
+| `P2-AUDIT-DEAD-CODE` | openclaw_core 9 模組 sunset（D-16 dormant）| ADR-0015 + AMD-2026-05-09-02 accept；Sprint N+6+ | **ADR-0015 治理硬不變式**：D-16 dormant 觀察期未跑完，提前 sunset 破壞觀察協議；保留待 Sprint N+6+；E5 2026-05-20 zombie inventory 確認 commit `449f628b` 已清乾淨 7 modules，剩餘 sunset 在觀察期 |
+| `P2-WP05-CSP-UNSAFE-INLINE` | 🟡 SRI 部分 DONE 2026-05-18；完整 CSP nonce-based refactor 待 live-gate 前 P1 | live-gate 前 | §10 P0-OPS-1..4（HTTPS / cred rotation / legal）尚未做完；HTTP 環境下 nonce-based CSP 防護無實效；保留待 live-gate prereq 完成後升 P1 |
+
+### §12.2 2026-05-20 P2 sweep 結算 — 6 項 DONE（同次 PM-conducted 多 sub-agent 並行清理）
+
+| ID | 任務 | 結果 | 報告 |
+|---|---|---|---|
+| `P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX` | ✅ DONE 2026-05-20 | TW 改 PM template §3.1（35→120 行）；用 V094 schema column 取代 ID prefix（attempt × fallback matrix）；給 grid + bb_breakout 雙範例 + 範圍鎖 spine lineage SOP | `docs/CCAgentWorkSpace/PM/workspace/templates/2026-05-18--pm_24h_post_deploy_verification_audit_packet.md` §3.1 + QA/TW memory |
+| `P2-STRUCT-2` | ✅ DONE 2026-05-20 | E5 inventory 25 項（H 0 / M 8 / L 17）；類 4 ADR-0015 sunset 殘留 = 0；S-Tier 2 項直接可清（governance_hub.py 4 RC-11 dead methods + risk_checks.rs DUAL-TRACK-EXIT-1 14 行 DEPRECATED comment）；3 處 push back（path 誤、V069 drop 數量、ADR-0015 scope） | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-20--zombie_code_inventory.md` |
+| `P2-AUDIT-VERIFY-3` | ✅ DONE 2026-05-20 | E1 verify：V069 真實 drop **1 表**（`observability.scorer_predictions`），非 TODO 描述的 6 個；Python/Rust source grep **0 runtime writer + 0 runtime reader hits**；風險 LOW；5 條 ready-to-run SQL probe 已寫 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-20--w_audit_4_v069_drop_verify.md` |
+| `P2-ENTRY-CLOSE-MAKER-REAL-FILL-FIX` | ✅ ANALYSIS DONE 2026-05-20（不動 runtime，Phase 1b 14d obs 中） | FA evidence-based 分析：7 條改善建議（OBS-1/2/3 + SPEC-1/2 + EVID-1/2）+ 8 條 EVIDENCE-GAP + 5 條 OQ；16/16 root principles + 9/9 safety invariants PASS；operator 已對 5 OQ 決議全 A | `docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-20--entry_close_maker_real_fill_fix_analysis.md` |
+| `P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS` | ✅ DONE 2026-05-20（E1→E2 APPROVE→E4 PASS）| `rust/openclaw_engine/tests/stress_integration.rs` +92/-6；root cause = `EMPTY_ALPHA_SURFACE.oi_delta_panel=None` 命中 Phase 8a OI fail-closed gate（mod.rs:479）；修法 = `fresh_oi_surface` fixture + 7 切片 + control case（vol→1.5 必 fire entry 證 volume gate 是唯一防線）；35/0 stress + 3042 lib + 3264 integration / 0 regression / 0 flaky | E1/E2/E4 reports `docs/CCAgentWorkSpace/*/workspace/reports/2026-05-20--p2_stress_bb_*` |
+| `P2-SIM-QUEUE-AWARE-ADJUSTMENT` | ✅ DONE 2026-05-20（E1 R1→E2 APPROVE-COND→E4 PASS→E1 R2 fix→E2 R2 APPROVE）| 新 3 檔 + 改 3 檔；bias 從 +61.11pp 降至 -1.17pp（reduction 59.95pp，target ≤ 5pp PASS）；89/89 test PASS；R2 fix 加 `--sample-end-utc` pin + family-specific anchor disclaimer；honest finding：60pp gap 主由 `base_rejection`（PostOnly reject/cancel race/trade-tape sparse）非純 queue position，base_rejection=0.70 family-specific anchor 不 hardcode | E1×2/E2×2 reports `docs/CCAgentWorkSpace/*/workspace/reports/2026-05-20--p2_sim_queue_aware_*` + E4 cross-task regression |
+
+### §12.3 2026-05-20 P2 sweep 衍生 follow-up（從 FA P2-ENTRY-CLOSE-MAKER 分析衍生 — 進 §11.3）
+
+| ID | 來源 | 任務 | 優先 | Phase 1b 期內可動 |
+|---|---|---|---|---|
+| `P1-OBS-PLACEMENT-BBO-V094` | FA OBS-1 | 補 placement-time BBO 進 V094 audit `details` JSONB（append-only schema-compat） | P1 | ❌ 14d freeze 後 |
+| `P1-OBS-PRE-STOPOUT-RATE` | FA OBS-2 | 新 healthcheck `71_close_maker_pre_stopout_rate.py`（FA round 1 #5 緩解未掛 AC） | P1 | ✅ 純 SQL 可動 |
+| `P1-OBS-FILL-RATE-STRATIFY` | FA OBS-3 | `62_close_maker_fill_rate.py` 加 `--stratify {hour,dow,both,none}` flag | P1 | ✅ 純 SQL 可動 |
+| `P1-SPEC-DEAD-ENUM-ADR` | FA SPEC-1 | V094 fallback_reason 3 dead enum（FastEscalate/NotAttempted/EngineShutdown）寫 ADR-XX reservation note；不 sunset enum | P1 | ✅ ADR 可寫 |
+| `P2-EVID-TRADE-TAPE-ADR` | FA EVID-1 | ADR：`market.public_trades` + `market.orderbook_l2_snapshot` 寫盤策略（PA+MIT 起草） | P2 | ✅ ADR 可寫；migration 14d freeze 後 |
+| `P2-EVID-A-AXIS-IMPL-CHECK` | FA EVID-2 | `phase_1b_sweep_replay.py` `_did_fill_within_window` offset_bps 變量是否進入 cross 判定（25% probability IMPL bug） | P2 | ✅ sim harness verify 可動 |
+| `P2-SPEC-PHYS-LOCK-AUDIT` | FA SPEC-2 | Phase 1b spec §4.3 補 `phys_lock_gate4_stale_roc_neg` 觸發點 production emit + 14d trigger count audit | P2 | ✅ 純 audit 可動 |
+| `P2-SPEC-HOUR-DISTRIBUTION-AC` | FA OQ-5 | spec v1.4 加 secondary AC「14d 觀察 sample UTC hour distribution ≥ 18h cover、各時段 ≥ 3 attempts」 | P2 | ✅ spec amendment 可動 |
+
+### §12.4 已完成 P2 條目（細節歸檔於 2026-05-19 v55 translation archive）
+
 - `P2-DEAD-SCHEMA-DROP-1` ✅
 - `P2-DEAD-RUST-CLEANUP-1` ✅
 - `P2-PERCEPTION-DEPRECATE-1` ✅
