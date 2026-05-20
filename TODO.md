@@ -1,8 +1,130 @@
 # 玄衡 TODO — 活躍派工佇列
 
-版本：v56-zh（基於 v56 翻譯與精簡）
-日期：2026-05-19
-狀態：本檔僅保留 ACTIVE / PENDING / ACTIVE-WATCH 項目；所有歷史 ✅ DONE 詳情已歸檔。
+版本：v57.3-zh（v57.2 dual-track v4.2 RATIFY 結構保留 + v56 P0-ENGINE-HALTSESSION-STUCK-FIX 完整 cycle CLOSED 2026-05-20 ~02:15 UTC）
+日期：2026-05-20
+狀態：本檔僅保留 ACTIVE / PENDING / ACTIVE-WATCH 項目；所有歷史 ✅ DONE 詳情已歸檔。**v56 P0 unblocks §-0.C Sequencing 後續 PHASE-0-MIGRATION-DRIFT-RECONCILE**。
+
+## §-0 v57.2 雙軌制 v4.2 RATIFY（2026-05-20 — 3 amendments）
+
+**Operator 2026-05-20 三次 ratify**：
+- 上午：v4 dual-track ratify（AMD-01）
+- 下午：1st reviewer parallel audit 提 5 critique；接受 5 全 + push-back 2；v4.1 ratify（AMD-02）
+- 傍晚：**2nd reviewer parallel audit 提 10 critique；接受 9.5/10（reviewer ssh + grep + row count 工作扎實）；v4.2 ratify（AMD-03）**
+
+### §-0.A 三輪修正核心點
+
+| 維度 | v4 (上午) | v4.1 (下午) | v4.2 (傍晚) |
+|---|---|---|---|
+| V101 scope | 假表名 | 9 真表 | **12 真表**（+ signals/decision_outcomes/risk_verdicts）|
+| V102 column | 假欄位 | 假欄位（spec 內已警告） | **真欄位**（ts/fee/realized_pnl；net_edge_bps view computed）|
+| Migration drift | 未明確 | 概述 reconcile | **明確** Linux V096 → repo V098 catch-up + V096 不可逆 |
+| ADR-0026 prereg | manual review | 7 fields | **15 fields**（+code_hash/config_hash/trigger_rule/variance_estimator/immutable_trigger 等）|
+| LCS thesis | 30-180s fade | 同 v4 | **isolated cluster + book recovery + PostOnly maker**（避速度戰）|
+| Replay match | 三件套 gate | 三件套 gate | **DEFER 到 Phase 1.5**（function 未實作）|
+| W8 milestone | first live deploy | demo evidence + live-ready proof | **14d demo verdict only** |
+| Capacity | 60/30/10 | 50/10/40 | **60/0/40**（Track B schema-only N+1-N+3）|
+| GUI | 4 tabs skeleton N+1 | 1 tab summary N+1 | **SQL views + REST endpoint N+1**；summary tab N+2 |
+| ADR-0024 | 完整版延後 | 完整版延後 | **ADR-0024-lite 立即 land**（Cowork sub = operator-assistant 非 autonomous L2）|
+| W12 PIVOT spec | 提及 §3 | 提及 §3 | **DEFER to W8 fork trigger**（Claude push-back，不 speculative）|
+
+### §-0.B governance artifacts 全清單（active）
+
+| Type | 文件 | Status |
+|---|---|---|
+| AMD-01 | `docs/governance_dev/amendments/2026-05-20--AMD-2026-05-20-01-dual-track-architecture.md` | Accepted（被 AMD-02/03 部分 supersede）|
+| AMD-02 | `docs/governance_dev/amendments/2026-05-20--AMD-2026-05-20-02-v4.1-reviewer-corrections.md` | Accepted（被 AMD-03 部分 supersede）|
+| **AMD-03** | `docs/governance_dev/amendments/2026-05-20--AMD-2026-05-20-03-v4.2-second-reviewer-corrections.md` | **Accepted active planning authority** |
+| ADR-0024-lite | `docs/adr/0024-cowork-subscription-operator-assistant.md` | **NEW Accepted-pending-commit** |
+| ADR-0025 v3 | `docs/adr/0025-track-based-strategy-attribution.md` | Accepted-pending-commit（rewrite） |
+| ADR-0026 v3 | `docs/adr/0026-direct-exploit-bypass-cpcv.md` | Accepted-pending-commit（rewrite） |
+| V101/V102 spec v3 | `docs/execution_plan/2026-05-20--v101_v102_track_attribution_migration_spec.md` | SPEC READY v3 |
+| **規劃權威 v4.2** | `srv/2026-05-20--dual-track-architecture-v4.2.md` | **active** |
+| 歷史 v1/v2/v3/v4/v4.1 | `srv/2026-05-20--*.md` | audit trail，非 active |
+
+### §-0.C Sequencing v4.2
+
+```
+✅ v56 P0-ENGINE-HALTSESSION-STUCK-FIX 完整 cycle CLOSED 2026-05-20 ~02:15 UTC（Layer A + B 都 LIVE，real-event verified）
+   ↓
+PHASE-0-MIGRATION-DRIFT-RECONCILE（V097 + V098 catch-up serial, low-write window UTC 04-06）
+   ↓
+PA refresh dispatch plan（V### final + 4 placeholder time column grep final 鎖定）
+   ↓
+V101 apply（12 既存表 + 2 新表，real column names）
+   ↓
+7d soak（writer 上線後填 track）
+   ↓
+V102 apply（NOT NULL + indexes CONCURRENTLY + views computed net_edge_bps）
+   ↓
+REST endpoint /api/v1/tracks/summary go-live + console banner
+   ↓
+Track A LCS isolated cluster IMPL（per ADR-0026 v3 thesis）
++ NLE listing watcher shadow
++ Tier 0 microstructure + Tier 1 RegimeClassifier classical
++ Track B schema-only（0 額外 engineering）
+```
+
+**Hard precondition unchanged**：v56 P0 cycle 中**不啟動 dispatch**。
+
+## §-0 (LEGACY) v57.1 雙軌制 v4.1 RATIFY（2026-05-20）
+
+**Operator 2026-05-20 兩次 ratify**：
+- 上午：v4 dual-track ratify（AMD-2026-05-20-01）
+- 下午：reviewer parallel audit 提 5 條 critique；Claude 接受 5 條全 + push back 2 條；operator 批准 v4.1 修正包（AMD-2026-05-20-02）
+
+### §-0.1 6 條原始批准（unchanged from v4）
+1. ✅ Dual-Track 架構（Track A `direct_exploit` / Track B `asds_factory` / Track C `baseline`）
+2. ✅ ADR-0025 Track-based attribution
+3. ✅ ADR-0026 Direct Exploit bypass CPCV
+4. ✅ V101/V102 Track schema migration
+5. ✅ W8 fork criteria + W24 hard kill
+6. ✅ Risk budget 切分：demo $10k = 40/50/10、live $1k = 70/10/0/20-reserve
+
+### §-0.2 v4.1 reviewer corrections（5 接受 + 2 push-back）
+
+**接受 reviewer 5 critique**：
+1. Schema 對齊真實 DB（`trading.fills/intents/orders/position_snapshots + learning.lease_transitions/strategy_trial_ledger/cost_edge_advisor_log + agent.ai_invocations/decision_objects` — 取代虛構表名）
+2. Phase 0 Migration Drift Reconcile（V096-V098 catch-up before V101 dispatch）
+3. W8 milestone reframe：「demo evidence + live-ready proof」，live deploy 等 P0-LG/OPS clear
+4. ADR-0026 tighten：event-study (Brown & Warner 1985) + pre-registration (OSF) + replay match ≥ 80% 三件套
+5. Track A 順序 LCS-first（DB 已有 data 即可 replay）/ NLE shadow-collect 第二
+
+**Claude push-back（接受）**：
+A. Track B 不歸零（Tier 0/1 共享基建移到 Shared）→ capacity 改 50/10/40
+B. GUI 漸進式（N+1 1 tab summary / N+2 +exploit tab / 後續 defer）
+
+### §-0.3 governance artifacts（全部本日 land）
+
+| Type | 文件 | Status |
+|---|---|---|
+| AMD-01 | `docs/governance_dev/amendments/2026-05-20--AMD-2026-05-20-01-dual-track-architecture.md` | Accepted（§9 sprint banner + §3 schema + §5 kill ladder 被 AMD-02 supersede） |
+| **AMD-02** | `docs/governance_dev/amendments/2026-05-20--AMD-2026-05-20-02-v4.1-reviewer-corrections.md` | **Accepted（active planning authority）** |
+| ADR-0025 v2 | `docs/adr/0025-track-based-strategy-attribution.md` | Accepted-pending-commit |
+| ADR-0026 v2 | `docs/adr/0026-direct-exploit-bypass-cpcv.md` | Accepted-pending-commit |
+| V101/V102 spec v2 | `docs/execution_plan/2026-05-20--v101_v102_track_attribution_migration_spec.md` | SPEC READY（待 Phase 0 + v56 P0 完成）|
+| 規劃權威 v4.1 | `srv/2026-05-20--dual-track-architecture-v4.1.md` | active |
+| 歷史 v1/v2/v3/v4 | `srv/2026-05-20--*.md` | audit trail，非 active |
+
+### §-0.4 Sequencing
+
+```
+v56 P0-ENGINE-HALTSESSION-STUCK-FIX 完整 cycle 收口
+   ↓
+PHASE-0-MIGRATION-DRIFT-RECONCILE（Linux DB head 對齊 repo V098）
+   ↓
+PA refresh dispatch plan（V### final + schema 欄位名 final 校對）
+   ↓
+V101 apply → 7d soak → V102 apply
+   ↓
+Track A LCS event-study + replay（per ADR-0026 v2）
++ Track A NLE listing watcher (shadow)
++ Track B Hypothesis Ledger CRUD
++ Shared: Tier 0/1 + GUI summary tab + Execution hardening
+```
+
+**Hard precondition**：上述全鏈在 v56 P0 cycle 中**不啟動 dispatch**。
+
+---
 
 ## §-1 v56 緊急狀態 — P0 trading-inert incident（2026-05-19 ~20:00 UTC）
 
@@ -70,20 +192,40 @@ v55（2026-05-19 上半段）operator 授權的 4 條並行軌道全收口：
 
 ---
 
-## §1 Sprint Milestone Banner（業務鏈 63% → 85-89%）
+## §1 Sprint Milestone Banner — v57.1 Dual-Track v4.1（業務鏈 65% → 88%）
 
-| Sprint | Week | 主題 | E1 capacity | 業務鏈 milestone |
-|---|---|---|---|---|
-| **N+0** | W1-W2 | FOUNDATION HEAVY：W-AUDIT-9 + 8a Phase A + B 群 + C-A6 + 6 mid-ground | 5 active + 1 stand-by | 63→65% |
-| **N+1** | W3-W4 | ALPHA SURFACE PANEL WIRING：8a Phase B+C + 8b Stage 0R + 待未來綠燈 Stage 0R 後 Stage 1 Demo micro-canary 預備 | 4/6 | 65→70%（待 demo canary 證據後重估） |
-| **N+2** | W5-W6 | 8a Phase D + Stage 2 demo cohort 14d（限 Stage 1 demo 證據通過後）| 5 active + 1 stand-by | 70→76%（rebase 待定） |
-| **N+3** | W7-W8 | 8c（Liquidation）IMPL + 8e（R-2）spec + Stage 3 demo full | 4/6 | 76→80% |
-| **N+4** | W9-W10 | 8f（R-3）spec + 8b（Funding Skew）IMPL + 8e IMPL + Track W 收尾 | 4/6 | 80-83% |
-| **N+5** | W11-W12 | 8f IMPL + 8g（R-4）spec + **首個 per-alpha-source supervised live** | 5 active + 1 stand-by | **85-89%** |
+**取代於 AMD-2026-05-20-02**：v4.1 修正後 sprint plan。Track A 順序改 LCS-first；NLE 改 shadow-collect；capacity 改 50/10/40；W8 milestone 改 demo evidence (not live)。
 
-**Stand-by E1 啟用條件**（operator 拍板 2026-05-09 (a)）：W-AUDIT-9 T3 stage-aware exception path 翻車 / W-AUDIT-8a Phase A byte-diff fail / W-AUDIT-6d mid-ground 與 8a Phase A 撞牆 / 任一 active E1 health incident → stand-by 即時補位。
+| Sprint | Week | Track A 任務 | Track B 任務 | Shared 任務 | Milestone |
+|---|---|---|---|---|---|
+| **N+0** | W1-W2 | FOUNDATION HEAVY（已完成；歸檔 v21/v36 cleanup） | — | — | 65% |
+| **N+1** | W3-W4 | LCS event-study + replay + pre-registration / NLE listing watcher (shadow only) | learning.hypotheses + preregistration schema | **Phase 0 migration drift reconcile** + V101 + Tier 0 microstructure + Tier 1 RegimeClassifier (classical) + GUI summary tab + Execution hardening | 67% |
+| **N+2** | W5-W6 | LCS demo deploy + 14d soak / NLE 收 5+ events shadow | Hypothesis Ledger CRUD API minimal | V102 + Tier 0/1 Ollama narrative + GUI exploit tab | 70% |
+| **N+3** | W7-W8 | LCS 14d evidence packet + NLE first event-study report / **W8 fork review** | manual hypothesis 寫入 ledger 試跑 | Stage 0R replay tooling enhance + cross-track conflict resolver | 75% / **W8 verdict** |
+| **N+4** | W9-W10 | branch: LCS Stage 1 prep / NLE expand / PIVOT signal service / KILL | branch: Tier 2 spec start（若 SCALE） | GUI asds tab if SCALE | 80% |
+| **N+5** | W11-W12 | branch-dependent | branch-dependent | per branch | 85% |
+| **N+6** | W13-W14 | 6-month review + W24 prep | review | review | 88% |
 
-**Supervised live 機率帶**（FA）：6/15 樂觀 ~30% / 6/30 中位 ~40% / 7/15 悲觀 ~25% / 8/15 極悲觀 ~5%。
+**Capacity split v4.1**: 50% Track A / 10% Track B（Hypothesis Ledger only）/ 40% Shared（Tier 0/1 共享基建 + V101 + GUI + execution hardening + Phase 0 reconcile）
+
+**Stand-by E1 啟用條件**（operator 拍板 2026-05-09 (a)，仍 valid）：Phase 0 reconcile 翻車 / Track A LCS event-study 卡 / 任一 active E1 health incident → stand-by 即時補位。
+
+**Track A W8 kill ladder v4.1**（per AMD-2026-05-20-02 §4.1，**reframe from "first live" to "demo evidence"**）：
+- W2: LCS event-study t-stat < 1.5 OR pre-reg miss > 2σ → KILL LCS，all-in NLE shadow
+- W2: t-stat ≥ 1.5 + replay match ≥ 80% → LCS demo deploy approved
+- W6: demo 14d cum net edge < -5 bps → WARN, size reduce 50%
+- W8: **demo Sharpe > 1.0 + DSR > 0.85 → Stage 1 micro-canary 預備**（live deploy 等 P0-LG/OPS clear）
+- W8: demo Sharpe < 0.5 + NLE event-study 失敗 → KILL Track A → PIVOT signal service
+- W12 (PIVOT path): signal subs < 5 → KILL Track A entirely
+- W24: Track A revenue (live or signal) < $500 → HARD KILL → IP sale
+
+**Track B kill ladder v4.1**（per AMD-2026-05-20-02 §4.2，**極簡無強壓**）：
+- W4: learning.hypotheses schema 未 land → block Track B 進度
+- W8: 0 hypothesis written → DEFER all Track B Tier 2+ to Year 2
+- W24: < 10 hypothesis registered → downgrade Track B to dormant
+- W24: ≥ 10 hypothesis + ≥1 demo Sharpe > 1.0 → GRADUATE → consider Tier 2 LLM generator build
+
+**Live deploy 條件式**（取代 v4「W8 first live」承諾）：P0-EDGE-1 + P0-LG-1/2/3 + P0-OPS-1..4 全清 + Track A 完成 Stage 1+2 demo canary → operator 決議是否啟動 $200 live envelope。預期最早 N+5～N+6（W10-W14），悲觀帶 N+7+。
 
 ---
 
@@ -120,6 +262,7 @@ v55（2026-05-19 上半段）operator 授權的 4 條並行軌道全收口：
 - **2026-05-18 Phase 1b parameter calibration**：12H sample 100% timeout_taker fallback → P0 calibration DONE 2026-05-18 13:50 UTC（top cell `G-AB-01-C90` fill 70.8% / +3.37 bps simulated；Grid family `timeout_ms 30s → 90s` deployed）。Phase 2a 14d observation clock reset @ 13:50 UTC。
 - **2026-05-19 v55 sprint**：4 軌道 closure（見 §0）。
 - **2026-05-19 ~20:00 UTC v56 incident**：engine 7h43m trading-inert（見 §-1）；新 P0 `P0-ENGINE-HALTSESSION-STUCK-FIX`；PA spec 已派；engine PID 2099215 自 20:09:36 起恢復；Phase 1b verification 繼續累積。
+- **2026-05-20 v57 ratify**（見 §-0）：operator 補資金 demo $10k + live $1k；批准 v4 dual-track 取代 v2 ASDS 純路徑 + v3 lean 純路徑；4 governance artifacts（AMD-2026-05-20-01 + ADR-0025/26 + V101/V102 spec）land；業務根因更新為「**5 textbook 策略仍欠正 edge → Track A direct exploit (NLE/LCS) 8 週現金流 + Track B ASDS factory 12 個月規模化長線並行**」。舊「Alpha Surface Phase C/D + 替代 alpha 候選」敘事被 dual-track 重組吸收。
 
 ---
 
@@ -127,22 +270,34 @@ v55（2026-05-19 上半段）operator 授權的 4 條並行軌道全收口：
 
 **狀態圖示**：✅ DONE / ⏳ PENDING / 🟡 PARTIAL / 🔵 ACTIVE / ⛔ DEFER
 
-### §4.1 Wave Roster（DUAL-TRACK + 8a-8h）
+### §4.1 Wave Roster（v57 雙軌制重組 + 8a-8h legacy entries）
 
-| 序 | Wave | 標籤 | Owner | 狀態 | 出口條件 |
+**Track 標記**：A = Direct Exploit / B = ASDS Factory / C = Baseline / shared = 共用 infra
+
+| 序 | Wave | Track | Owner | 狀態 | 出口條件 |
 |---:|---|---|---|---|---|
-| 1 | `W-F` Edge/data quality + Live Gate 基座 | alpha-bearing | PM→QC/MIT/PA→E1/E4→PM | ⏳ **PENDING**（true-live 前置）| H0 production caller / pricing binding / supervised-live state machine |
-| 2 | `W-G` Proposal/approval/mobile relay | alpha-neutral | PM→CC/FA/PA→E1/E2/E4→PM | 🟡 **BACKEND 基座 DONE**（待 mobile relay）| Gateway/console proposal/approval relay；不可直發 order/config/live-auth |
-| 3 | `W-AUDIT-4` ML 基座 + dead schema | alpha-bearing | E1×6 + MIT + E2 + E4 | 🟡 **PARTIAL** | 修正後保留範圍見 §11.2；長尾治理 mount 進 `W-AUDIT-8f` |
-| 4 | `W-AUDIT-8a` Alpha Surface 基座 | alpha-bearing | PA→E1→E2→E4 + MIT/QC/CC/BB→PM | ✅ **C1 transport PASS + writer revival + Wave 1 MERGED**（細節歸檔）| Wave 2（C2-ORDERFLOW / C3-SPREAD / D-CONTRACT-LOCK）DEFER Sprint N+4 |
-| 5 | `W-AUDIT-8b` A4-A Funding Skew Directional | alpha-bearing | PA→Stage 0R→QC/MIT/BB | ⛔ **TOMBSTONED 2026-05-18**（Round 2 RED_FINAL；no-revive on same feature shape）| Redirect→W-AUDIT-8c + W-AUDIT-8a Phase B/C/D |
-| 6 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction | alpha-bearing | PA→E1→E2/E4→MIT→BB→PM | ✅ **SOURCE/TEST + V095 LINUX APPLY + WRITER REVIVAL DONE**（細節歸檔）| 策略 launch 仍另立 Stage 0R/design gate |
-| 7 | `W-AUDIT-8e`（R-2）Strategist Alpha Source Orchestrator | alpha-bearing | PA spec→E1 IMPL | ⛔ **DEFER** N+4 spec → N+5 IMPL | AlphaSourceRegistry + dynamic Sharpe-by-regime + Hypothesis sourcing |
-| 8 | `W-AUDIT-8f`（R-3）Hypothesis Pipeline + W-AUDIT-4 ML | alpha-bearing | PA spec→E1 IMPL + MIT spec | ⛔ **DEFER** N+5 IMPL | learning.hypotheses state machine + dead schema 收尾 |
-| 9 | `W-AUDIT-8g`（R-4）Per-alpha-source Live Promotion Gate | alpha-bearing | PA spec→E1 IMPL | ⛔ **DEFER** N+7+ | LiveBudget(alpha_source_id, slice) 取代系統級 live_reserved |
-| 10 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | alpha-neutral | E1a + A3 | ⛔ **DEFER** N+4-N+6 | A3 tab expansion follow-up |
-| 11 | `W-AUDIT-10`（R-5）Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec→E1 IMPL | ⛔ **DEFER** 中期 | CI gate spec drift > 7d auto-fail + 模組/表 lifecycle 標頭 |
-| 12 | `EDGE-P2-3 Phase 1b` Close-Maker-First Refactor | alpha-impact-adjacent execution-quality | PA→E1→E2→E4→QA→PM | ✅ **DEPLOY DONE 2026-05-18**（細節歸檔）| Phase 2a 14d observation clock reset @ 13:50 UTC；24h AC-A SQL verify ~2026-05-19 13:50 UTC |
+| **T1** | `TRACK-SCHEMA` V101/V102 + Rust enum + Decision Lease attribution | shared | PA→E1→E2→MIT | ⏳ **PENDING**（v56 P0 完整 cycle 後 dispatch）| V101 apply + 7d soak + V102 apply + 5 acceptance pass per spec §5 |
+| **T2** | `TRACK-A-NLE` New Listing Exploit（3 子策略 + listing watcher + risk carve-out）| A | PA→E1→E2→QA | ⏳ **PENDING**（依賴 T1 + v56 P0）| W2 demo deploy + W6 14d demo Sharpe > 1.0 + W8 first live |
+| **T3** | `TRACK-A-LCS` Liquidation Cascade Scalper（cluster detector + LCS strategy）| A | PA→E1→E2→QA | ⏳ **PENDING**（依賴 T1 + T2 in-progress）| W4 demo deploy + Sharpe > 1.0 14d |
+| **T4** | `TRACK-B-TIER0` CrossAssetPanel + Microstructure features + Universe tier classifier | B | PA→E1→E2 | ⏳ **PENDING**（依賴 T1）| Per-tick MarketStateSnapshot 落 metrics + universe split 落 PG |
+| **T5** | `TRACK-B-TIER1` RegimeClassifier L0 (classical) + L1 (Ollama narrative) | B | PA→E1→E2 | ⏳ **PENDING**（N+2）| 5-class RegimeTag 落 tick_pipeline_metrics |
+| **T6** | `TRACK-B-TIER2-3` Hypothesis Generator (L1 + Cowork sub) + Auto-Validator (CPCV + DSR) | B | PA→AI-E→E1→QC→E2 | ⏳ **PENDING**（N+3）| 第一個 L1 mutation + L2 novel hypothesis 通過 validator |
+| **T7** | `TRACK-GUI` 4 tab skeleton（summary / exploit / asds / baseline）| shared | E1a→A3 | ⏳ **PENDING**（N+1 shared 10%）| 4 tabs 顯示 per-track P&L 獨立、無 cross-track 滲透 |
+| **T8** | `TRACK-RISK-GUARDIAN6` Guardian check 6（per-track envelope enforcement）| shared | PA→E1→E2→BB | ⏳ **PENDING**（依賴 T1）| risk_config_*.toml 加 [track_budgets]；Guardian veto 超 envelope trade |
+| **T9** | `TRACK-CONFLICT-RESOLVER` Cross-track conflict detection at Decision Lease | shared | PA→E1→E2 | ⏳ **PENDING**（N+2-N+3）| A 優先；B intent 標 BLOCKED_CROSSTRACK 落 audit log |
+| — | — | — | — | — | — |
+| 1 | `W-F` Edge/data quality + Live Gate 基座 | shared | PM→QC/MIT/PA→E1/E4→PM | ⏳ **PENDING**（true-live 前置；與雙軌制並行不衝突）| H0 production caller / pricing binding / supervised-live state machine |
+| 2 | `W-G` Proposal/approval/mobile relay | shared | PM→CC/FA/PA→E1/E2/E4→PM | 🟡 **BACKEND 基座 DONE**（待 mobile relay）| Gateway/console proposal/approval relay；不可直發 order/config/live-auth |
+| 3 | `W-AUDIT-4` ML 基座 + dead schema | B | E1×6 + MIT + E2 + E4 | 🟡 **PARTIAL**（W-AUDIT-4b retained 範圍歸 Track B 治理）| 修正後保留範圍見 §11.2；長尾治理 mount 進 `W-AUDIT-8f` → T6 |
+| 4 | `W-AUDIT-8a` Alpha Surface 基座 | B | PA→E1→E2→E4 + MIT/QC/CC/BB→PM | ✅ Wave 1 MERGED；🟡 Wave 2 部分被 v57 frozen | per AMD-2026-05-20-01 §2.4：Tier 2 (FundingSkew/Basis) + Tier 4 (Sentiment) **FROZEN**；Tier 3 LiquidationCascade → T3；Tier 3 OrderflowImbalance → T4 |
+| 5 | `W-AUDIT-8b` A4-A Funding Skew Directional | — | — | ⛔ **TOMBSTONED 2026-05-18 + FROZEN 2026-05-20**（v57 確認 no-revive）| — |
+| 6 | `W-AUDIT-8c` A4-B Liquidation Cluster Reaction | A | PA→E1→E2/E4→MIT→BB→PM | ✅ writer DONE；🔄 **策略 launch redirect → T3 Track A LCS** | per AMD-2026-05-20-01 §2.5：launch 走 Track A direct exploit（bypass CPCV per ADR-0026），不走 ASDS Tier 3 |
+| 7 | `W-AUDIT-8e`（R-2）Strategist Alpha Source Orchestrator | B | PA spec→E1 IMPL | ⛔ **重新 mapping → T6 Track B Tier 2/3** | 不再單獨追蹤；融入雙軌 Track B Tier 2 Hypothesis Generator |
+| 8 | `W-AUDIT-8f`（R-3）Hypothesis Pipeline + W-AUDIT-4 ML | B | PA spec→E1 IMPL + MIT spec | 🔄 **拉前 → T6 + N+5 Tier 4/5/6/7** | per AMD-2026-05-20-01 §2.7：N+3 起 Tier 2-3 first cycle，N+5 full pipeline |
+| 9 | `W-AUDIT-8g`（R-4）Per-alpha-source Live Promotion Gate | B | PA spec→E1 IMPL | ⛔ **DEFER N+5+**；簡化版 mount 進 T8（per-hypothesis live budget cap）| LiveBudget(hypothesis_id, slice) — per AMD-2026-05-20-01 §4.2 line "Track B $100 cap" |
+| 10 | `W-AUDIT-8h` Alpha Sources GUI tab + Hypothesis Lab GUI tab | shared | E1a + A3 | 🔄 **被 T7 Track GUI 吸收** | 不再單獨追蹤 |
+| 11 | `W-AUDIT-10`（R-5）Spec-as-Code + Module Lifecycle SM | alpha-neutral | PA spec→E1 IMPL | ⛔ **DEFER** 中期（v57 不衝突）| CI gate spec drift > 7d auto-fail + 模組/表 lifecycle 標頭 |
+| 12 | `EDGE-P2-3 Phase 1b` Close-Maker-First Refactor | shared | PA→E1→E2→E4→QA→PM | ✅ **DEPLOY DONE**；Phase 2a observation 中（受益兩軌）| Phase 2a 14d clock reset @ 2026-05-18 13:50 UTC |
 
 ### §4.2 跨 Wave 衝突仲裁（4 條，PA §3.3 必繼承）
 
@@ -232,7 +387,7 @@ PM/PA/FA 三方交叉檢查後：
 
 | ID | 狀態 | 任務 | 接收條件 |
 |---|---|---|---|
-| `P0-ENGINE-HALTSESSION-STUCK-FIX` | 🔵 **NEW 2026-05-19 ~20:00 UTC — PA spec 已派，operator 語意已鎖** | **Incident**：engine PID 1942669（UTC 12:27:11 start）處理 FILUSDT halt_session emergency close 後（12:27:14 + 12:27:37）進入 **TRADING-INERT 7h43m**，直到 operator UTC 20:09:36 restart → 新 PID 2099215。**E2 RCA verdict**（`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--engine_watchdog_respawn_loop_and_trading_inert_rca.md`）：`paper_paused=true` set by Step 6 `RiskAction::HaltSession`（`step_6_risk_checks.rs:434-461`）**無 TTL auto-clear**；只 4 種 clearer（IPC Resume / Reset / SystemMode::ShadowOnly / restart default init）。與先前 `P1-WATCHDOG-STATUS2-RCA` 不同根因（後者只覆 systemd cosmetic `sys.exit(2)`）。Watchdog 無 "alive but inert" 偵測（只看 snapshot freshness；engine 每 30s 寫 status_report 不論交易狀態）。**Operator 決議 2026-05-19 ~20:30 UTC**：Layer A = **TTL clear daily_loss only / drawdown stays sticky**；Layer B = watchdog business-heartbeat probe（alarm-only，no auto-restart）。**修復層**：Layer A daily_loss-only TTL（鏡像 `news/guardian_impl.rs:60-145` 模式）+ halt_kind 分類 + forensic halt_audit.log + 跨 restart 狀態持久化 + audit lifecycle row；Layer B watchdog probe `TRADING_INERT_PROLONGED`（parse pipeline_snapshot.json intents/fills/paper_paused；60min threshold；cooldown；reset）。**Acceptance**：simulated daily_loss halt + 1h TTL → auto-clear PASS；simulated drawdown halt + 1h+TTL → 仍 paper_paused=true；watchdog probe 在 test scenario 內 60s 觸發告警；7d Linux run 0 false positive；engine_mode demo/live_demo/live 全覆。**PA 已派 spec**：`docs/execution_plan/2026-05-19--engine_haltsession_ttl_and_watchdog_inert_probe_spec.md`（~600-1000 LOC，ETA 2-3h）。**Halt 觸發 UNRESOLVED**：log rotation 失了 UTC 12:27 line；數學（drawdown 10.2% vs TOML 25% threshold）不通 — 可能 IPC patch / loading-order race / 第三條路徑；PA spec 必含 halt_audit.log 強制留證。**Severity P0**（下次 breach 必復發；demo/live_demo/live 共用代碼；Phase 1b verification + 所有 PnL 暴露）。 |
+| `P0-ENGINE-HALTSESSION-STUCK-FIX` | ✅ **DONE 2026-05-20 ~02:15 UTC — Layer A + B 都 LIVE，real-event verified** | **Incident timeline**：engine PID 1942669（2026-05-19 UTC 12:27:11 start）處理 FILUSDT halt_session emergency close 後（12:27:14 + 12:27:37）進入 **TRADING-INERT 7h43m** → operator UTC 20:09:36 restart 救活。 **修復鏈** (~6h15m end-to-end)：PA spec v0.1 (1365 LOC) → QC+MIT+FA 3 並行 review APPROVE-CONDITIONAL ×3 (7 dedup MUST-FIX) → PA spec v0.2 → **Layer A** E1 Round 1 IMPL → E2 RETURN + E3 APPROVE-CONDITIONAL → E1 Round 2 (6 fixes) → E2 R2 APPROVE + E4 PASS → QA APPROVE-CONDITIONAL → operator commit/push/deploy commit `6cf476c4` UTC 22:59:36 (new engine PID 2099215 → 2182250) → **🎉 real-event verify** drawdown halt 27.51% 啟動 9s 後觸發 → forensic log + cron → governance_audit_log INSERT 2 rows (set + manual_cleared via ipc_resume) → operator GUI 平倉 + reset peak + Resume → **Layer B** E1 Round 1 IMPL 90/90 PASS → E2 RETURN (1 HIGH+1 MEDIUM+2 LOW+1 spec typo) + E4 PASS → E1 Round 2 (4 fixes) → E2 R2 APPROVE 40/0+118/0 → operator commit `fec63743`+`8ad70090` UTC 02:14 → watchdog process restart UTC 02:15:16 → 新 watchdog PID 2222237 with Inert probe enabled，inert_state.json tracking demo+live independent。**Halt 觸發根因仍 UNRESOLVED**（drawdown 10.2% vs 25% threshold log 失證）— forensic halt_audit.log 已 armed 用於下次自然事件 RCA（P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1 ticket spec §12.2）。**未來 7h+ blackout 保護**：demo 60min/20min / live_demo 30min/15min / live 15min/10min alarm + operator-pause filter + transition-only write (95% I/O ↓) + cron auto-INSERT。Files：Layer A `rust/openclaw_engine/src/halt_audit.rs` + V098 migration + `risk_config_*.toml ×3` + Python tail-writer `helper_scripts/canary/halt_audit_pg_writer.py` + cron wrapper；Layer B `helper_scripts/canary/engine_watchdog.py` (+604 LOC) + `watchdog_inert_probe.toml` 38 LOC + 40 tests。Reports：E1 R1/R2 + E2 R1/R2 + E3 + E4 + QA in `docs/CCAgentWorkSpace/*/workspace/reports/2026-05-19-20--*.md`。**Unblocks** §-0.C Sequencing 後續 PHASE-0-MIGRATION-DRIFT-RECONCILE → V101/V102 → Track A LCS IMPL。 |
 | `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
 | `P3-SPINE-COUNTER-CACHE-ALIGN` | ⏳ scheduled quiet period | 3 AtomicU64 counter `#[repr(align(64))]` cache line | E5 cosmetic；10 min fix；~50-200ns 額外延遲降到 0 |
 | `LG-1` H0 production caller | ✅ **IMPL LANDED 2026-05-11** (`a11a4df6` + closure `0fb661d3`) — 待 7d observation | T1+T2+T3+T4 E1×4 並行 IMPL DONE；E2+E4+E5+A3 全 APPROVE；runbook `docs/runbooks/2026-05-11--lg1_h0_flip_rollback.md` ship；**2026-05-19 PM audit TODO 同步斷裂修正** | per PA plan §1.4 |
