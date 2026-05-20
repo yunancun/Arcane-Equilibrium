@@ -10971,3 +10971,34 @@ E2 RETURN review verdict APPROVE-CONDITIONAL：1 HIGH + 1 MEDIUM + 2 LOW finding
 
 ### 報告
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-20--layer_b_watchdog_inert_probe_round2_report.md`
+
+---
+
+## 2026-05-19 — P0-ENGINE-HALTSESSION-STUCK-FIX Worktree A IMPL (Round 1 chain a868abb1, historical / superseded by 6cf476c4)
+
+**注**：本 section 為主 chain（session `a868abb1`）的 isolated worktree round 1 IMPL（commit `6599ccfd` on branch `feature/p0-engine-haltsession-fix-worktree-a`），operator 在 round 2 dispatch 前手動 kill；同期隔壁 session 並行完成完整 Layer A round 1+2 + Layer B round 1+2（commits `6cf476c4` / `fec63743` 等已 land main，TODO `90d4df39 v56 P0 CLOSED`）。本 chain work 已 superseded by 隔壁 round 2。Salvage 此 section 保留 12 條 unique lessons 作對照與 historical reference。
+
+### Scope
+Spec v0.2 (commit a9074611) §9.1 Worktree A 全 13 子項。
+
+### 教訓
+1. **TickPipeline 內加新 state field 必 4 處同步**：`mod.rs` struct field 宣告 + `pipeline_ctor.rs` init + ipc_server tests/mod.rs constructor + 所有 manual write site 清除路徑（resume/reset/system_mode）。漏一處 compile fail 或 runtime 不一致。
+2. **`serde(default)` 只影響 deserialize，不影響 Rust struct constructor**：新加 field 後既有 `PipelineSnapshot { ... }` constructor sites（tests/ipc_server）必加新 fields 明示初始值，否則 compile error。
+3. **PaperStateSnapshot 無 Default impl**：mode_state tests 不能用 `::default()`，得逐欄位明示。如果想要 Default，需另開 commit 加 `#[derive(Default)]`（影響面廣，避免本 IMPL 動）。
+4. **cargo test env::set_var 多 thread race**：halt_audit IO tests 用 OPENCLAW_HALT_AUDIT_LOG env var 隔離 path，但 cargo test 預設 multi-thread → 並行 test 互相覆蓋 env → NotFound 錯。解法：process-global `Mutex<()>` 序列化所有 env-mutating tests（OnceLock 初始化）。不引入 serial_test crate。
+5. **Step 6 HaltSession arm 改動的 borrow shape**：halt_audit context 構造在 `self.paper_state.positions()` immut borrow **之前**，避免 mutable self（halt_kind/halt_set_ts_ms set）與 immutable subborrow 衝突。實作上把 audit block 放在 set state 之後 / close-all loop 之前，scope 自然分開。
+6. **risk_config_version_seen 是 private field**：on_tick step_6 是 `impl TickPipeline` 同 module，可直訪 field；不需要新增 pub getter（minimal-impact 原則）。
+7. **`TimescaleDB 2.26.1 add_compression_policy` 需先 enable hypertable compression**：spec §3.11.5 寫的「1-line addition」假設不成立。Empirical PG dry-run 揭露需 `ALTER TABLE ... SET (timescaledb.compress = true)`。本 IMPL 拆 compression 出 V098 留 P2 follow-up；retention 仍 land。**教訓：V### migration 即使有 if_not_exists，新加 TimescaleDB policy 仍須 empirical PG verify 不只看語法**。
+8. **跨 worktree V### file 衝突**：另一 in-flight worktree 已寫過 V098（spec drafting / sub-agent dry-run residue）；Linux file system V098 已存在但 _sqlx_migrations table 沒記錄。透過 scp tmp path + tmp filename dry-run 隔離自己版本驗證，不污染 main tree。**教訓：V### 派發前必 `ssh trade-core ls sql/migrations/V0NN*`，sub-agent 並行時看 git 不夠**。
+9. **Rust unsafe env::set_var (1.80+)**：test helper TempEnvGuard 須包 `unsafe { env::set_var(...) }`；單 thread 假設過時，需配 Mutex 序列化。`#[allow(unused_unsafe)]` 保證向後相容。
+10. **PA spec §3.7 「restart 不重設 TTL 起點」結構性 gap**：spec 寫「進 ModeStateSnapshot」但當前源碼**無** snapshot file → TickPipeline read-back path。我做了 surface（snapshot 寫出 + ModeStateSnapshot 攜帶 fields）+ 留 P1 follow-up（cross-restart restore 真正接通需 read-back wire）。**教訓：spec 期望 vs 源碼現實有 gap 時，IMPL surface 做完即 stop，不擴大 PA scope，明示在 report §9 留 follow-up ticket**。
+11. **VS spec MUST-6 `test_live_daily_loss_sticky_enforcement`**：unit-style inject + check_and_clear_halt_expired 直測比完整 Step 6 HaltSession arm trigger 更穩。整個 priority 9 daily_loss path 需 paper_state.balance() 注入特定值 + IntentProcessor.daily_loss_pct() 計算路徑 → complex；inject halt 狀態後直驗 TTL check 即等價 coverage。
+12. **halt_audit.rs 850 LOC**：超 800 LOC 警告線；50% 是 tests。E2 review 可建議拆 tests 出 sibling（但本 IMPL 為 commit minimal 不主動拆）。
+
+### 工具
+- `ssh trade-core` 跑 PG empirical dry-run（per `feedback_v_migration_pg_dry_run`）；`scp -> /tmp/<unique_name>.sql` 避免污染 production migration dir
+- `cargo bench -p openclaw_engine --bench hot_path_baseline` 驗 on_tick latency 不退化
+- `cargo test -p openclaw_engine --release` + `--tests` 覆蓋 lib + integration crate
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-19--p0_engine_haltsession_round1_chain_a868abb1_self_report.md`
