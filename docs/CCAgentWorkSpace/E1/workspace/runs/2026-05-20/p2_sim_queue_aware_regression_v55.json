@@ -1,0 +1,369 @@
+{
+  "cell": {
+    "cell_id": "G-AB-01-C90",
+    "family": "grid",
+    "block": 1,
+    "offset_bps": 0.5,
+    "buffer_ticks": 1,
+    "timeout_ms": 90000,
+    "spread_guard_bps": 50.0,
+    "is_baseline": true,
+    "direction_note": "Phase 2a deploy anchor cell"
+  },
+  "lookback_days": 14,
+  "actual_maker": 5,
+  "actual_taker": 13,
+  "actual_fill_rate": 0.2777777777777778,
+  "regression": {
+    "n_attempts": 18,
+    "n_eligible": 18,
+    "n_proxy_fills": 16,
+    "sweep_proxy_fill_rate": 0.8888888888888888,
+    "sweep_adjusted_fill_rate": 0.2661203455664504,
+    "queue_weight": 0.1,
+    "base_rejection_rate": 0.7,
+    "eligible_with_depth": 18,
+    "skip_breakdown": {
+      "spread_guard": 0,
+      "no_bbo": 0,
+      "tick_missing": 0,
+      "family_mismatch": 0,
+      "crossed_book": 0
+    },
+    "sample_results": [
+      {
+        "order_id": "oc_close_mf_fb_dm_1779075935490_18",
+        "symbol": "ARBUSDT",
+        "side": "grid_close_short",
+        "qty": 784.7,
+        "simulated_fill": true,
+        "queue_adjusted_p": 0.2998,
+        "queue_factor": 0.0063,
+        "depth_5": 123249.4,
+        "skip": null
+      },
+      {
+        "order_id": "oc_close_mf_fb_dm_1779076035184_20",
+        "symbol": "OPUSDT",
+        "side": "grid_close_short",
+        "qty": 712.6,
+        "simulated_fill": true,
+        "queue_adjusted_p": 0.2996,
+        "queue_factor": 0.0146,
+        "depth_5": 48016.1,
+        "skip": null
+      },
+      {
+        "order_id": "oc_close_mf_fb_dm_1779078093310_24",
+        "symbol": "ARBUSDT",
+        "side": "grid_close_short",
+        "qty": 548.6,
+        "simulated_fill": true,
+        "queue_adjusted_p": 0.2996,
+        "queue_factor": 0.0117,
+        "depth_5": 46330.0,
+        "skip": null
+      },
+      {
+        "order_id": "oc_close_mf_fb_dm_1779112800303_20",
+        "symbol": "DOTUSDT",
+        "side": "grid_close_short",
+        "qty": 73.5,
+        "simulated_fill": true,
+        "queue_adjusted_p": 0.2995,
+        "queue_factor": 0.0178,
+        "depth_5": 4052.3,
+        "skip": null
+      },
+      {
+        "order_id": "oc_risk_dm_1779117300827_30",
+        "symbol": "LTCUSDT",
+        "side": "grid_close_short",
+        "qty": 1.1,
+        "simulated_fill": true,
+        "queue_adjusted_p": 0.2999,
+        "queue_factor": 0.0019,
+        "depth_5": 574.5,
+        "skip": null
+      }
+    ]
+  },
+  "sweep_result": {
+    "best_queue_weight": 0.1,
+    "best_base_rejection": 0.7,
+    "best_abs_bias_pp": 1.1657432211327368,
+    "sweep": [
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.0,
+        "adjusted_fill_rate": 0.8870678185548346,
+        "bias_pp": 60.929004077705684
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.1,
+        "adjusted_fill_rate": 0.7983610366993512,
+        "bias_pp": 52.05832589215734
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.2,
+        "adjusted_fill_rate": 0.7096542548438678,
+        "bias_pp": 43.187647706609
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.3,
+        "adjusted_fill_rate": 0.6209474729883842,
+        "bias_pp": 34.316969521060635
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.4,
+        "adjusted_fill_rate": 0.5322406911329007,
+        "bias_pp": 25.446291335512296
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.5,
+        "adjusted_fill_rate": 0.4435339092774173,
+        "bias_pp": 16.575613149963953
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.6,
+        "adjusted_fill_rate": 0.3548271274219339,
+        "bias_pp": 7.70493496441561
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.7,
+        "adjusted_fill_rate": 0.2661203455664504,
+        "bias_pp": -1.1657432211327368
+      },
+      {
+        "queue_weight": 0.1,
+        "base_rejection": 0.8,
+        "adjusted_fill_rate": 0.1774135637109669,
+        "bias_pp": -10.03642140668109
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.0,
+        "adjusted_fill_rate": 0.8852467482207804,
+        "bias_pp": 60.74689704430026
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.1,
+        "adjusted_fill_rate": 0.7967220733987024,
+        "bias_pp": 51.89442956209246
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.2,
+        "adjusted_fill_rate": 0.7081973985766243,
+        "bias_pp": 43.041962079884655
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.3,
+        "adjusted_fill_rate": 0.6196727237545462,
+        "bias_pp": 34.18949459767684
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.4,
+        "adjusted_fill_rate": 0.5311480489324683,
+        "bias_pp": 25.337027115469045
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.5,
+        "adjusted_fill_rate": 0.4426233741103902,
+        "bias_pp": 16.48455963326124
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.6,
+        "adjusted_fill_rate": 0.35409869928831217,
+        "bias_pp": 7.632092151053438
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.7,
+        "adjusted_fill_rate": 0.2655740244662341,
+        "bias_pp": -1.2203753311543664
+      },
+      {
+        "queue_weight": 0.2,
+        "base_rejection": 0.8,
+        "adjusted_fill_rate": 0.17704934964415603,
+        "bias_pp": -10.072842813362175
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.0,
+        "adjusted_fill_rate": 0.8816046075526719,
+        "bias_pp": 60.38268297748941
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.1,
+        "adjusted_fill_rate": 0.7934441467974047,
+        "bias_pp": 51.566636901962696
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.2,
+        "adjusted_fill_rate": 0.7052836860421375,
+        "bias_pp": 42.750590826435975
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.3,
+        "adjusted_fill_rate": 0.6171232252868702,
+        "bias_pp": 33.93454475090925
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.4,
+        "adjusted_fill_rate": 0.5289627645316031,
+        "bias_pp": 25.11849867538253
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.5,
+        "adjusted_fill_rate": 0.44080230377633595,
+        "bias_pp": 16.302452599855815
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.6,
+        "adjusted_fill_rate": 0.35264184302106877,
+        "bias_pp": 7.486406524329098
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.7,
+        "adjusted_fill_rate": 0.2644813822658016,
+        "bias_pp": -1.32963955119762
+      },
+      {
+        "queue_weight": 0.4,
+        "base_rejection": 0.8,
+        "adjusted_fill_rate": 0.17632092151053433,
+        "bias_pp": -10.145685626724346
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.0,
+        "adjusted_fill_rate": 0.8779624668845634,
+        "bias_pp": 60.01846891067856
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.1,
+        "adjusted_fill_rate": 0.790166220196107,
+        "bias_pp": 51.23884424183293
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.2,
+        "adjusted_fill_rate": 0.7023699735076507,
+        "bias_pp": 42.459219572987294
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.3,
+        "adjusted_fill_rate": 0.6145737268191943,
+        "bias_pp": 33.67959490414165
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.4,
+        "adjusted_fill_rate": 0.526777480130738,
+        "bias_pp": 24.89997023529602
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.5,
+        "adjusted_fill_rate": 0.4389812334422817,
+        "bias_pp": 16.12034556645039
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.6,
+        "adjusted_fill_rate": 0.35118498675382537,
+        "bias_pp": 7.340720897604758
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.7,
+        "adjusted_fill_rate": 0.26338874006536905,
+        "bias_pp": -1.4389037712408737
+      },
+      {
+        "queue_weight": 0.6,
+        "base_rejection": 0.8,
+        "adjusted_fill_rate": 0.17559249337691263,
+        "bias_pp": -10.218528440086516
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.0,
+        "adjusted_fill_rate": 0.8743203262164548,
+        "bias_pp": 59.654254843867704
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.1,
+        "adjusted_fill_rate": 0.7868882935948094,
+        "bias_pp": 50.91105158170316
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.2,
+        "adjusted_fill_rate": 0.6994562609731639,
+        "bias_pp": 42.167848319538614
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.3,
+        "adjusted_fill_rate": 0.6120242283515184,
+        "bias_pp": 33.42464505737406
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.4,
+        "adjusted_fill_rate": 0.5245921957298729,
+        "bias_pp": 24.681441795209512
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.5,
+        "adjusted_fill_rate": 0.4371601631082274,
+        "bias_pp": 15.938238533044963
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.6,
+        "adjusted_fill_rate": 0.34972813048658197,
+        "bias_pp": 7.1950352708804175
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.7,
+        "adjusted_fill_rate": 0.26229609786493646,
+        "bias_pp": -1.5481679912841328
+      },
+      {
+        "queue_weight": 0.8,
+        "base_rejection": 0.8,
+        "adjusted_fill_rate": 0.17486406524329093,
+        "bias_pp": -10.291371253448686
+      }
+    ]
+  },
+  "generated_at_utc": "2026-05-20T01:28:53.679921+00:00"
+}
