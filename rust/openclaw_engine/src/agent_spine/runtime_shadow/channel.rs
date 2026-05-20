@@ -29,14 +29,42 @@
 //! - 並發場景下 fetch_add(1, Relaxed) 保證單調遞增，不需 Mutex / RwLock。
 
 use super::super::store::AgentSpineMsg;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::warn;
 
-static SPINE_CHANNEL_DROP_TOTAL: AtomicU64 = AtomicU64::new(0);
-static SPINE_CHANNEL_RETRY_SUCCESS_TOTAL: AtomicU64 = AtomicU64::new(0);
-static SPINE_CHANNEL_RETRY_FAIL_TOTAL: AtomicU64 = AtomicU64::new(0);
+/// Cache-line aligned AtomicU64 wrapper（P3-SPINE-COUNTER-CACHE-ALIGN）。
+///
+/// 三個 counter 為 process-wide global，hot path (`try_send`) 每個 tick 都會
+/// `.fetch_add` 到 `SPINE_CHANNEL_DROP_TOTAL`。若三個 counter 排在同一 64-byte
+/// cache line，會在多核 fetch_add 時觸發 cache-line ping-pong（false sharing），
+/// 為 hot path 增加 ~50-200ns 額外延遲。透過 `#[repr(align(64))]` 強制每個
+/// counter 獨佔 cache line（Apple Silicon M-series 與 x86-64 主流 CPU L1d
+/// 都是 64-byte line），消除 false sharing。
+///
+/// 用 `Deref<Target = AtomicU64>` 讓 callsite 仍可直接 `.fetch_add(...)` /
+/// `.load(...)`，不需要改 wrapper 語法。
+#[repr(align(64))]
+struct CacheAlignedAtomic(AtomicU64);
+
+impl CacheAlignedAtomic {
+    const fn new(v: u64) -> Self {
+        Self(AtomicU64::new(v))
+    }
+}
+
+impl Deref for CacheAlignedAtomic {
+    type Target = AtomicU64;
+    fn deref(&self) -> &AtomicU64 {
+        &self.0
+    }
+}
+
+static SPINE_CHANNEL_DROP_TOTAL: CacheAlignedAtomic = CacheAlignedAtomic::new(0);
+static SPINE_CHANNEL_RETRY_SUCCESS_TOTAL: CacheAlignedAtomic = CacheAlignedAtomic::new(0);
+static SPINE_CHANNEL_RETRY_FAIL_TOTAL: CacheAlignedAtomic = CacheAlignedAtomic::new(0);
 
 /// 對外暴露 metric：累計 try_send **初始失敗** 筆數（INITIAL fail occurrences）。
 ///
