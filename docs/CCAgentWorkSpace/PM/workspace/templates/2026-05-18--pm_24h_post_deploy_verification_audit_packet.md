@@ -35,39 +35,121 @@
 
 Verify `use_maker_close` is actually ON in Demo runtime post-deploy.
 
+**設計理由 — 為什麼用 attempt × fallback matrix 拆而不是 ID prefix**：
+
+過去（≤ 2026-05-19 v55）的 QA 模板用 `order_id LIKE 'oc_%' AND NOT LIKE 'oc_risk_%'` 區分 entry-close vs risk-exit 兩條 path。QC v55 critical reframe 指出**這個拆法是結構性人為誤分類**：
+
+- entry-close 與 risk-exit 兩者都走同一條 `execute_position_close()`；差別只在「誰觸發 close」（strategy whitelist exit vs risk module stop）
+- 一次 attempt 內若 maker limit 超時 fallback 成 market exit（或 PostOnly reject 後重試 / cancel 失敗轉 risk-exit），同筆訂單會先有 `oc_close_mf_fb_*` 又會在 fallback 後出 `oc_risk_*`，**ID prefix 拆法會把同一個 attempt 的 maker 階段 + fallback 階段算成「entry path 0% maker fill / risk path 100% maker fill」這種誤導性結論**
+- 真實的分析軸是「**這次 attempt 走了什麼 fallback**」，不是「order_id 開頭是什麼」
+
+因此本 template 改採 **attempt（主路徑）× fallback（後備路徑）matrix**：
+
+- **attempt 軸（主路徑）**：策略試圖用什麼方式平倉 — `maker_close_attempt`（PostOnly limit @ BBO ± offset）vs `sweep_taker`（直接 IOC market，不嘗試 maker；負面 whitelist 如 `halt_session` 走這條）
+- **fallback 軸（後備路徑）**：attempt 命運落點 — `maker_filled`（成功，liquidity_role='maker'） / `timeout_taker`（限時 fallback 成 taker） / `postonly_reject_retry`（PostOnly 被拒，retry 一次後成或最終 taker） / `cancel_grace_expired`（cancel 失敗後強制 taker） / `risk_exit_takeover`（attempt 內 risk module 強制轉 stop）
+
+**Schema 提醒**：`close_maker_attempt` boolean + `close_maker_fallback_reason` enum（V094）已支援 attempt × fallback 兩軸切。`close_maker_fallback_reason IS NULL` 即「maker filled 成功」（沒走 fallback）；非 NULL 必為合法 enum 值。不再用 `order_id LIKE` 為拆法軸。
+
 ```sql
--- AC-1: maker_attempt rate ≥25% on demo whitelist closes (per spec §4.3 conservative)
-SELECT engine_mode, fill_role,
-       COUNT(*) FILTER (WHERE close_maker_attempt=TRUE) AS attempts,
-       COUNT(*) FILTER (WHERE liquidity_role IN ('maker','taker')) AS close_total,
-       ROUND(100.0 * COUNT(*) FILTER (WHERE close_maker_attempt=TRUE)
-             / NULLIF(COUNT(*) FILTER (WHERE exit_reason IS NOT NULL), 0), 2) AS attempt_pct
+-- AC-1（attempt 軸）：策略 close 主路徑分布 — maker_close_attempt vs sweep_taker
+-- 預期：whitelist closes 上 attempt_pct ≥25%（≥ spec §4.3 保守 floor）；negative whitelist 0%
+SELECT engine_mode,
+       CASE WHEN exit_reason IN ('grid_close_short','grid_close_long','bb_mean_revert',
+                                  'ma_reverse_cross','bw_squeeze','pctb_revert')
+            THEN 'whitelist_close'
+            WHEN exit_reason LIKE 'risk_close:%' OR exit_reason = 'halt_session'
+            THEN 'negative_close'
+            ELSE 'other' END AS attempt_class,
+       COUNT(*) FILTER (WHERE close_maker_attempt = TRUE) AS maker_close_attempt,
+       COUNT(*) FILTER (WHERE close_maker_attempt = FALSE) AS sweep_taker,
+       COUNT(*) AS total,
+       ROUND(100.0 * COUNT(*) FILTER (WHERE close_maker_attempt = TRUE)
+             / NULLIF(COUNT(*), 0), 2) AS attempt_pct
   FROM trading.fills
  WHERE ts > NOW() - INTERVAL '24 hours'
    AND engine_mode IN ('demo','live_demo')
-   AND exit_reason IN ('grid_close_short','grid_close_long','bb_mean_revert',
-                       'ma_reverse_cross','bw_squeeze','pctb_revert')
- GROUP BY engine_mode, fill_role;
+ GROUP BY engine_mode, attempt_class
+ ORDER BY engine_mode, attempt_class;
 
--- AC-2: fallback_reason distribution non-NULL on attempt=TRUE
-SELECT close_maker_fallback_reason, COUNT(*)
+-- AC-2（fallback 軸）：attempt=TRUE 的命運分布 — maker_filled vs 4 種 fallback
+-- 預期：fallback_reason 在 attempt=TRUE 上非 NULL ≥ 90%（NULL 即 maker_filled，剩餘為合法 enum）
+SELECT engine_mode,
+       COALESCE(close_maker_fallback_reason, 'maker_filled') AS fallback_class,
+       COUNT(*) AS n,
+       ROUND(100.0 * COUNT(*) OVER (PARTITION BY engine_mode)
+             / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY engine_mode), 0), 2) AS pct
   FROM trading.fills
  WHERE ts > NOW() - INTERVAL '24 hours'
+   AND engine_mode IN ('demo','live_demo')
    AND close_maker_attempt = TRUE
- GROUP BY 1 ORDER BY 2 DESC;
+ GROUP BY engine_mode, fallback_class
+ ORDER BY engine_mode, n DESC;
 
--- AC-3: 0% maker_attempt on negative whitelist (risk_close:halt_session)
-SELECT engine_mode, exit_reason, close_maker_attempt, COUNT(*)
+-- AC-3（attempt × fallback 二維 matrix）：策略級拆分 — 全 attempt 命運 × 後備
+-- 預期：whitelist_close × maker_filled 列存在實際 row 數；
+--      negative_close × maker_close_attempt = 0（負面 whitelist 不該走 maker path）
+SELECT engine_mode,
+       CASE WHEN exit_reason IN ('grid_close_short','grid_close_long','bb_mean_revert',
+                                  'ma_reverse_cross','bw_squeeze','pctb_revert')
+            THEN 'whitelist_close'
+            WHEN exit_reason LIKE 'risk_close:%' OR exit_reason = 'halt_session'
+            THEN 'negative_close'
+            ELSE 'other' END AS attempt_class,
+       CASE WHEN close_maker_attempt = FALSE THEN 'sweep_taker'
+            WHEN close_maker_fallback_reason IS NULL THEN 'maker_filled'
+            ELSE close_maker_fallback_reason END AS fallback_class,
+       COUNT(*) AS n
   FROM trading.fills
  WHERE ts > NOW() - INTERVAL '24 hours'
-   AND exit_reason LIKE 'risk_close:%' OR exit_reason = 'halt_session'
- GROUP BY 1,2,3 ORDER BY 4 DESC;
+   AND engine_mode IN ('demo','live_demo')
+ GROUP BY engine_mode, attempt_class, fallback_class
+ ORDER BY engine_mode, attempt_class, n DESC;
 ```
 
 **Acceptance**:
-- AC-1 attempt_pct ≥25% on demo+live_demo whitelist closes
-- AC-2 fallback_reason non-NULL ≥90% on attempt=TRUE rows
-- AC-3 negative whitelist 0% attempt rate
+- AC-1 attempt_pct ≥ 25% on demo+live_demo `whitelist_close` rows；`negative_close` rows attempt_pct = 0% (per AC-3 cross-check)
+- AC-2 fallback_reason non-NULL coverage ≥ 90% on attempt=TRUE rows；maker_filled 列必出現（非全 fallback）
+- AC-3 二維 matrix 必有 `whitelist_close × maker_filled` 非零；`negative_close × maker_close_attempt`/`maker_filled`/任何 fallback 行 = 0
+
+#### §3.1.1 Example — grid family（grid_close_short / grid_close_long）
+
+策略族 `grid_trading` 平倉走 whitelist；典型 attempt × fallback matrix（24h demo，n 為實際 fill 數）：
+
+| attempt | fallback | n | 說明 |
+|---|---|---:|---|
+| `maker_close_attempt` | `maker_filled` | k1 | PostOnly limit @ BBO ± offset 在 timeout 內成交，liquidity_role='maker'，fee_rate=0.0002（理想路徑）|
+| `maker_close_attempt` | `timeout_taker` | k2 | timeout（90s 校準後）內 maker 未成，fallback IOC market；同筆 attempt 內 BBO 漂走 = 微結構主因 |
+| `maker_close_attempt` | `postonly_reject_retry` | k3 | maker price 跨價成 taker → PostOnly Bybit 拒；engine retry 後最終為 taker 或 maker 二嘗試成 |
+| `maker_close_attempt` | `cancel_grace_expired` | k4 | timeout 後 cancel 失敗超 grace；本筆強制走 taker 結束 |
+| `maker_close_attempt` | `risk_exit_takeover` | k5 | maker attempt 進行中 risk module 介入（例：halt_session）；同筆 attempt 由 risk path 接手結束 |
+| `sweep_taker` | (N/A) | k6 | `use_maker_close=false`（live/paper 預設）或 attempt cooldown；直接 IOC，fee_rate=0.00055 |
+
+**注意**：上表每一行都是「**同一筆 attempt** 在不同 fallback 命運下的計數」，不是「ID prefix 出現兩種 order_id 就算兩筆」。同一筆 attempt 若先 maker→fallback→taker fill，**只算一行**（attempt=`maker_close_attempt`, fallback=`timeout_taker`/`cancel_grace_expired`/`postonly_reject_retry`/`risk_exit_takeover` 取最終命運）。
+
+#### §3.1.2 Example — bb_breakout family（bw_squeeze / pctb_revert）
+
+策略族 `bb_breakout` close 走 `bw_squeeze` / `pctb_revert` whitelist；典型 matrix（24h demo）：
+
+| attempt | fallback | n | 說明 |
+|---|---|---:|---|
+| `maker_close_attempt` | `maker_filled` | k1 | breakout reversion 觸發時 spread 通常較寬 → maker fill 機率高於 grid（empirical 觀察待 sample 累積驗）|
+| `maker_close_attempt` | `timeout_taker` | k2 | breakout 後 BBO 動能快，maker 漂走概率高；典型 timeout fallback 比例 |
+| `maker_close_attempt` | `postonly_reject_retry` | k3 | breakout 高 vol bar 內 BBO 跨價，PostOnly 拒概率上升 |
+| `maker_close_attempt` | `cancel_grace_expired` | k4 | 罕見，rate_limit 緊張時才出現 |
+| `maker_close_attempt` | `risk_exit_takeover` | k5 | bb_breakout 收益 / 風險不對稱，risk_close:halt_session 觸發比 grid 高 |
+| `sweep_taker` | (N/A) | k6 | 同 §3.1.1 — `use_maker_close=false` 或 cooldown 路徑 |
+
+**對比觀察點**（grid vs bb_breakout）：兩族 `maker_filled / total_attempt` 比例可能差 ≥ 10pp，**屬不同微結構特性而非 IMPL bug**；報告需分別列、不可只報合併數。`negative_close`（如 `halt_session`）兩族都應落到 `sweep_taker` 列，attempt=TRUE 數 = 0。
+
+#### §3.1.3 SOP — 為什麼禁止再用 ID prefix 拆法
+
+從本 template 起，post-deploy verification SQL **禁止**用 `order_id LIKE 'oc_%' AND NOT LIKE 'oc_risk_%'` 作為 entry vs risk-exit 拆法軸：
+
+1. **語意誤導**：ID prefix 反映「最終訂單由哪個 producer 開單」，不反映「策略想做什麼 attempt」。`oc_close_mf_fb_*` 是 maker close attempt 的 fallback 訂單，`oc_risk_*` 是 risk module 開的 stop 訂單；同一 attempt 在 fallback 後出現 `oc_risk_*` 並**不**等於「策略改用 risk-exit 平倉」
+2. **歷史教訓**：QA memory.md 2026-05-11 W-C lesson §1.2「entry vs risk_exit 分流必要」原意是 spine lineage 對接（emit_fill_completion_lineage 不覆 StopManager path），**不**是 close attempt 分類軸；v55 之前的 QA report 把它套到 close maker 分析上是誤用
+3. **正確 spine lineage SQL**：若驗證的是 `agent.decision_state_changes` lineage propagation（W-C Caveat 2 場景），那是「fill 必有對應 ExecutionReport」的 join 驗證；可繼續用 `order_id LIKE` 區分 spine-covered fill（`oc_*` AND NOT `oc_risk_*`）vs StopManager path（`oc_risk_*`），但**僅限該語境**。post-deploy maker close 分析改用本 §3.1 attempt × fallback matrix
+
+如未來新增 close path（例：iceberg / TWAP），擴 attempt enum 與本 §3.1 SQL 三段；不要再加新 ID prefix 拆法。
 
 ### §3.2 Healthcheck [62][63][64][65] Pass
 

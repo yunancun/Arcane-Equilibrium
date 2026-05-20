@@ -39,7 +39,23 @@
 | 2026-05-16 | WP-09 doc drift fix：R4-CRITICAL-1（ADR 14→22）/ R4-CRITICAL-2（tab 13→16 + dictionary 補 3 缺漏）/ README 索引補 16 缺失條目 / CHANGELOG 補 2026-05-16 條目 / adr/ range 更正 | inline final message |
 | 2026-05-16 | WP-09 round 2：README 索引再補 +32 缺失條目（ADR 0001-0014 / execution_plan 9 / amendments 3 / archive 1 / Operator 8 / PM 1）+ REF-20 v0.1/V1/V2/V2.1 四檔加 SUPERSEDED header + KNOWN_ISSUES.md 確認存在但 stale（2026-04-12 停更）| inline final message |
 | 2026-05-16 | WP-09 R4 PARTIAL fix（4 個 gap）：(1) README 補 ~85 個 2026-05-10/11 owner reports（E1 56 / E2 14 / E4 15 / QC 8 / MIT 10 / BB 2 / CC 1 / R4 1 / E5 1 / A3 1 / PM 6 / Operator 11）(2) KNOWN_ISSUES.md 真實 reconcile：新增 12 RESOLVED（WC-MAG-082 / WD-MAG-083/084 / WA-3b / HC-55/27/67 / WA-5a/5b / 7c / 8a-C0 / A4C-ARCHIVE / V079/083/084）+ 11 OPEN（P0-EDGE-1 / P0-LG-1/2/3 / P0-OPS-1..4 / WA-8a-C1 / WA-8b）+ 最後更新 2026-04-12 → 2026-05-16 (3) REF-21 v1/v1.1/v1.2/gui v1 4 個檔加 SUPERSEDED callout block（對齊 REF-20 V1/V0.1 格式）(4) WP-01 sign-off（E1a 80+ LOC，r1 IMPL DONE + A3 PARTIAL 6.5/10 + 5 push back）+ WP-02 sign-off（E1 80+ LOC，hygiene-only PASS + audit drift 第 3 次教訓）| `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-16--wp09_doc_real_fix.md` |
+| 2026-05-20 | P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX（v55 衍生）：PM template §3.1 改寫 — entry-close vs risk-exit ID prefix 拆法 → attempt × fallback matrix；新 attempt 軸（maker_close_attempt vs sweep_taker）+ fallback 軸（maker_filled / timeout_taker / postonly_reject_retry / cancel_grace_expired / risk_exit_takeover）；附 §3.1.1 grid family + §3.1.2 bb_breakout family 兩範例 + §3.1.3 SOP 禁用 ID prefix；QA memory.md 2026-05-11 W-C lesson 條目加 v55 reframe 註（不刪舊；spine lineage 場景仍用舊拆法，僅 close maker 分析改用新 matrix）+ 治理 SOP 追加一條 | inline final message（不寫 report file，per prompt 指示） |
 | 2026-05-09 | P0-V3-ADR-0021-ARCH-04 部分 — CONTEXT.md 「Alpha source taxonomy」5 詞條 + AMD-2026-05-09-03 Strategist Wide-Adjustment Skill + AMD-2026-05-09-04 Demo→LivePending Promotion Evidence Push（R4 派 ADR-0021 + ARCH-04，TW 負責 CONTEXT + 2 amendment）| `srv/CONTEXT.md` + `srv/docs/governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md` + `srv/docs/governance_dev/amendments/2026-05-09--demo_promotion_evidence_push.md` |
+
+## 2026-05-20 P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX 重點
+
+- **任務**：operator 派 TW 把 PM 24h post-deploy verification audit packet template 的 entry-close vs risk-exit 拆法從 ID prefix（`oc_*` / `oc_risk_*`）改成 attempt × fallback matrix（per v55 QC critical reframe）。範圍鎖定 §3.1 only。
+- **背景**：v55 QC reframe 揭露原 QA template ID prefix 拆法**結構性人為誤分類** — entry-close 與 risk-exit 走同一條 `execute_position_close()`；一次 attempt 內 maker timeout 後 fallback 成 market exit / cancel grace expired / PostOnly reject 重試，同筆 attempt 會出現 `oc_close_mf_fb_*` 與 `oc_risk_*` 兩種 order_id，ID prefix 拆法把同一 attempt 的兩段算成「entry 0% maker / risk 100% maker」誤導結論。
+- **改寫策略**：
+  1. **PM template `2026-05-18--pm_24h_post_deploy_verification_audit_packet.md` §3.1** — 完整重寫：(a) 加「設計理由」段說明為什麼用 attempt × fallback 而非 ID prefix；(b) 3 段 SQL（AC-1 attempt 軸 / AC-2 fallback 軸 / AC-3 二維 matrix）；(c) §3.1.1 grid family 6 行範例 table；(d) §3.1.2 bb_breakout family 6 行範例 table + 微結構差異說明；(e) §3.1.3 SOP「禁止再用 ID prefix」段含 3 條 rationale + spine lineage 場景例外
+  2. **QA memory.md** — 不刪舊 W-C lesson §1.2「entry vs risk_exit 分流必要」（per Memory Usage Contract「不要靜默刪除舊條目」）；改加 v55 reframe inline 註標「重要修正」+ 適用範圍限縮（spine lineage only）+ 指向 PM template；另在「治理 SOP 加固」追加一條「close maker 分析必用 attempt × fallback matrix」
+- **設計理由完整捕獲**：
+  - 為什麼保留舊條目而不刪：spine lineage propagation 場景（W-C Caveat 2 emit_fill_completion_lineage 對接驗證）原拆法仍**正確**，只是不能套到 close maker 分析；刪掉會誤殺 spine 場景的指引
+  - 為什麼用 schema column 而非 ID prefix：V094 已 land `close_maker_attempt boolean NOT NULL` + `close_maker_fallback_reason text` enum 10 值；schema-level 語意是 producer 真實聲明，ID prefix 是 consumer side observation
+  - 為什麼附 2 個範例族：grid（穩定 BBO，maker 概率較高）+ bb_breakout（高 vol，BBO 漂走概率高）足以說明「同方法在不同微結構下的 matrix 應差別呈現」，避免後續 reviewer 把兩族合併數誤判
+- **未做**：(1) 不動 §3.2-§3.8（範圍鎖定 §3.1 only）(2) 不動 v55 archive（歷史快照）(3) 不動 spec / ADR / AMD（template 級修改）(4) 不寫 report file（per prompt 指示）(5) 不 commit / push（per prompt「PM 統一 commit」）
+- **驗收**：(1) PM template §3.1 全改寫且保留既有 §3 frame；(2) attempt 軸 + fallback 軸定義明確且與 V094 schema enum 對齊；(3) 2 個範例 table 各 6 行覆蓋全 fallback enum；(4) §3.1.3 SOP 明示禁用 ID prefix 拆法 + spine lineage 場景例外（保護舊用法）；(5) QA memory 舊條目保留 + v55 reframe inline 註 + 治理 SOP 追加一條；(6) TW memory 報告索引追加 + 本決策 log
+- **規範遵守**：中文為主 + 英文技術名詞（V094 / oc_* / Wilson CI / liquidity_role 等保留）；不動代碼 / 業務邏輯；不刪舊條目（per Memory Usage Contract）；命名遵守 `YYYY-MM-DD--描述.md`（本任務未新建 report 檔，無命名衝突）。
 
 ## 2026-05-09 P0-V3-ADR-0021-ARCH-04 部分（TW + R4 共識落地）
 

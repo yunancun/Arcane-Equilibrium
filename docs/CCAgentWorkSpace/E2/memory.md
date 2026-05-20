@@ -6,6 +6,128 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-20 — P2-SIM-QUEUE-AWARE-ADJUSTMENT v55 · APPROVE-CONDITIONAL
+
+**對象**：E1 IMPL `helper_scripts/calibration/` 6 file（3 new + 3 modified）
++210/+452/+202 NEW + +124/+94/+149 MOD
+**Verdict**：**APPROVE-CONDITIONAL → E4 regression ready**（0 CRITICAL / 0 HIGH /
+2 MEDIUM SHOULD-FIX 不阻 E4 / 4 LOW NTH）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p2_sim_queue_aware_e2_review.md`
+
+**Bias model 數學驗 PASS**：
+- 公式：`fill_p_adjusted = fill_p_proxy × (1 - base_rejection_rate) × (1 - queue_weight × queue_factor)`
+- 乘性合成正確：proxy=0 → adjusted=0（"no cross → no fill" 不變）；加性會破壞此 invariant
+- queue_factor 線性飽和 `my_qty/(my_qty+depth_5)` ∈ [0,1] 單調 — 符合 Roll/Glosten-Milgrom single-parameter linear approximation
+- 22 unit test 覆蓋邊界 case：NaN / None / negative / >1 clamp / proxy=0 / weight=0 全 GREEN
+- `base_rejection=0.70` 0 hardcode 進 source — `DEFAULT_BASE_REJECTION_RATE=0.0` + regression CLI `--base-rejection` 顯式 inject；0.70 只在 2D sweep grid tuple line 319
+
+**核心 catch — Wilson CI 統計學分析**：
+- actual_fill_rate = 5/18 = 0.2778
+- Wilson 95% CI = **[0.1250, 0.5087]**（寬度 38.4pp）
+- adjusted_rate = 0.2661 **完全落在 actual CI 內** → bias_after -1.17pp 在 statistical
+  sense 「indistinguishable from zero」
+- 但同樣「indistinguishable from +25pp / -15pp」：n=18 CI 太寬無法精細判別任何
+  base_rejection 是否「真實」
+- → E1 §6.1 honest finding 已 disclose 此局限；不算盲區
+
+**v55 治理 invariant 驗 PASS**：
+- §3.11 ML pipeline grep `linucb|scorer|quantile|mlde|dl3` 0 命中
+- close_maker_attempt 用作 WHERE filter / close_maker_fallback_reason carrier /
+  liquidity_role ground truth — **不**進任何 training feature
+- Rust runtime grep `queue_adjusted|queue_factor|same_side_depth|base_rejection`
+  0 命中
+- sweep_report.py / sweep_cli.py 不讀新欄位，舊 81-cell sweep backward-compat path
+
+**2 MEDIUM SHOULD-FIX**（不阻 E4，阻 v55 sweep production interpretation）：
+1. **family-specific anchor cell disclosure**：regression CLI SQL 拉 6 family
+   exit_reason 但 anchor cell.family='grid' 只跑 grid family；結論不可外推至
+   phys_lock_giveback / phys_lock_stale_roc_neg / bb_breakout
+2. **sliding 14d window 重現性**：`ts > NOW() - 14 days` 隨 demo runtime 漂移；
+   建議加 `--sample-end-utc` pin window
+
+**4 LOW NTH**：
+- queue depth timing alignment（placement vs taker fill_ts）— 14d sample factor < 0.02
+  vanishing 不致命
+- f-string DSN connection（與既有 phase_1b_tick_loader 同模式 acceptable）
+- 2D sweep grid hardcode tuple — 可加 `--sweep-grid` argparse
+- `_qty_for_diagnostic` O(n) scan — minor perf
+
+**Lessons captured**：
+1. **bias model 設計的乘性 vs 加性 trade-off**：乘性合成在物理上獨立 fail mode（queue
+   position vs non-queue PostOnly reject / cancel race）下是 correct 設計；加性會在
+   proxy=0 時需要額外 clamp 防負概率。對 single-variable hazard composition 乘性是
+   default best；reviewer 對 adjustment model 不可僅 「乘性比加性簡單」就過，必驗
+   physical mode 是否獨立可乘。
+2. **n=N Wilson CI 寬度的對抗驗證 SOP**：任何 verdict「bias ≤ Xpp PASS」claim 必算
+   Wilson CI 寬度與 verdict threshold 對比；若 CI 寬度 >> threshold（本案 38.4pp >>
+   5pp）→ verdict 是「small-sample lucky calibration」非「true bias < threshold」。
+   E1 自承此 limitation 在 §6.1 是 A-grade honest disclosure，但 reviewer 必須獨立
+   驗 CI 寬度避免被 PASS 數字迷惑。
+3. **V094 schema 內 placement_my_qty 不存在 → seed.qty fallback**：當 spec 內 column
+   不存在於 hot column 而 details JSONB 包含時，IMPL 用 trading.fills.qty（actual
+   fill qty）作 proxy 是 V094 schema constraint 內最精確選擇 — 對 close-maker first
+   → cancel → taker fallback 路徑，placement_maker_qty = fallback_taker_fill_qty
+   等價，不算 placeholder。reviewer 對 my_qty source 必驗 V094 schema 是否真有更精確
+   field，confirm fallback 是 schema-constrained choice 而非 lazy 設計。
+4. **research helper backward-compat default arg pattern**：新 dataclass field 全
+   `= default` / 新 function arg 全 `= default` → 既有 CLI / sweep_report / 63 既有
+   test 0 改而仍 GREEN。reviewer 對 「新增 field + 既有 caller 不變」必驗 default arg
+   是否真覆蓋所有 caller 路徑（grep simulate_all_cells 等下游 entry point）。
+5. **ML training pipeline non-input invariant 跨 module grep**：close_maker_*
+   audit field 只能 audit/replay-only，禁進 ML training feature / label。E2 §3.11
+   grep `linucb/scorer/quantile/mlde/dl3.*close_maker|close_maker.*linucb/...` 跨
+   rust/program_code 全方位 0 命中是 confirmed isolation。reviewer 對任何
+   close_maker_* / queue_adjusted / base_rejection 新欄位都應跑此 grep 防 future
+   accidental leak。
+6. **sliding window vs pinned window 在 audit reproducibility**：`ts > NOW() -
+   14 days` 是 sliding window，每次跑結果略漂移；audit-friendly 設計應加
+   `--sample-end-utc` pin window + JSON artifact record `sample_window_end_utc`。
+   reviewer 對 historical regression CLI 必驗結果可重現的時間範圍如何被 pin。
+
+**對抗反問 8 條全跑 PASS**（含乘性 vs 加性數學 / source 0.70 hardcode / V094 schema
+limit / Rust runtime isolation / ML pipeline non-input / Wilson CI 寬度 / family-
+specific anchor 結論不外推 / sliding window 重現性）
+
+**Race check 5/5 PASS**：origin/main 與 HEAD 對齊（無 sibling push）；3 modified + 3
+untracked 全屬本任務 scope；其他 dirty file（PM template / memory.md / stress_integration.rs）
+屬獨立 parallel task 0 動。
+
+---
+
+## 2026-05-20 — P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS · APPROVE
+
+**對象**：E1 working tree `rust/openclaw_engine/tests/stress_integration.rs` +92/-6 LOC（純 test 改動）
+**Verdict**：**APPROVE → E4 regression ready**（0 BLOCKER / 0 must-fix / 2 CAVEAT 非阻）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p2_stress_bb_breakout_e2_review.md`
+
+**Coincidental PASS root cause 驗證**：
+- `bb_breakout/mod.rs:479` OI fail-closed gate 真早於 line 542-543 squeeze 登記
+- `EMPTY_ALPHA_SURFACE.oi_delta_panel = None` → `oi_panel_delta_5m_pct` 返 `Err("missing_panel")` → line 490 提前 `return vec![]`
+- 舊 test ctx1/ctx2 在 squeeze 登記 / entry path 之前被 fail-closed → `assert intents.is_empty()` 是「OI gate 一律 return 空」非「volume gate 攔下」
+
+**E1 fix narrative 完全成立**：
+1. 補 `fresh_oi_surface("BTCUSDT")` 解 OI gate
+2. 7 切片真實踩到 volume gate 拒絕分支 + entry lifecycle 邊界
+3. Control case（同 fixture vol→1.5）證明 volume gate 是唯一防線
+4. RED → GREEN 演練合理（RED probe 真 panic 證 fixture 修好後 entry path 真可達）
+
+**重跑驗 reproducibility PASS**：`cargo test stress_bb_breakout` 2/2 + 全 stress suite 35/35 ✓
+
+**2 CAVEAT 非阻**：
+- CAVEAT-1：1315→1401 LOC 過 800 警告線；P2 scope OK，follow-up 拆檔（按 strategy 分檔 + 共用 helper module）
+- CAVEAT-2：control case 同函數內第二實例 vs 獨立 #[test] — test cohesion > granularity 合理
+
+**Lessons captured**：
+1. **OI fail-closed gate 在 squeeze 登記之前的 architectural side-effect**：commit 7a07348b (2026-05-14 Phase 8a) 把 OI fail-closed gate 放在 on_tick 最上層 → 任何下游 indicator/state 邏輯（包含 squeeze 登記、OI buffer 維護、cooldown 等）都在 OI 不可用時 dormant。test 用 `EMPTY_ALPHA_SURFACE` 會 coincidental PASS 所有「期望 0 intents」的 assertion；type-level invariant test 必須補 OI surface。
+2. **「assert PASS 但邏輯沒驗到」的 coincidental-pass pattern**：本案是 E1 round 1 自留 follow-up，showcase 該 pattern。對抗審核必跑「列舉所有 return vec![] 路徑 + 逐項驗 fixture 是否命中」確認 assert 真正觸達被測 gate。
+3. **Control case 設計的對抗驗證 SOP**：control 必驗 (a) 完整 gate chain 是否真會通過（不只 happy-path 假設）(b) 變數隔離（哪些 state share、哪些 fresh）(c) RED probe 真會 panic 而非 fixture 缺依賴。
+4. **`#[test]` granularity vs cohesion trade-off**：同函數內 false-case + control 對照 → cohesion 強但 cargo test --filter 無法只跑 control；future 拆檔時建議拆獨立 #[test]，但不該阻 merge。
+5. **Race check 5 條於 review 期間活躍 dirty tree**：sibling commits 全屬不同 scope（P0-ENGINE-HALTSESSION-STUCK-FIX / GUI tab-live extract / healthcheck lg5），與 stress_integration.rs 0 overlap → APPROVE safe；review 期間 working tree 多檔 dirty 但僅 stress_integration.rs 屬本 review scope，其他 dirty 屬獨立 parallel task。
+
+**對抗反問 9 條全跑 PASS**（含 use_maker_entry default / confluence_as_gate default / Donchian None match / min_notional 充足 / in_squeeze 不過期 / squeeze_detected_ms 只在 entry path 末尾清空 等隱性 gate 全驗）
+
+---
+
 ## 2026-05-18 — W-AUDIT-8c-S0R-1 Round 2 closure · APPROVE
 
 **對象**：E1 round 2 rework `feature/w-audit-8c-s0r-1-sql-query-template` HEAD `381d89a0`
@@ -3057,3 +3179,50 @@ Branch: feature (Mac dirty, not pushed). E1 self-reported 110/110 PASS (58 exist
 ### Anti-pattern reminder
 - "except clause catches only known error types" — every `int(x)` / `float(x)` / `bool(x)` on untrusted JSON input needs `ValueError, TypeError` in except. Add to S3 watchlist.
 - Test coverage gap: corruption tests often cover syntax error but miss type-mismatch. When reviewing test list, ask "does it cover bad-type-but-valid-JSON?".
+
+## 2026-05-20 — P2-SIM-QUEUE-AWARE-ADJUSTMENT v55 Round 2 E2 quick scan APPROVE
+
+Round 1 APPROVE-CONDITIONAL (2 MEDIUM SHOULD-FIX) → Round 2 E1 修復 → E2 R2 quick scan
+verdict **APPROVE** (0 new finding).
+
+### MEDIUM-1 family-specific anchor disclosure（4 sub-fix 全真實落地）
+- `phase_1b_queue_adjustment.py:61-70` — 11 行 ⚠️ FAMILY-SPECIFIC 警告 comment 在 `DEFAULT_BASE_REJECTION_RATE = 0.0` 前；含 G-AB-01-C90 / PG-AB-01-C15 / PS-AB-01-C10 alternative cell example
+- `phase_1b_queue_bias_regression.py:363-374` — `[DISCLAIMER]` 段在 print_results 結尾，配 `===` 顯著分隔線
+- JSON artifact line 539-547 — `anchor_family` + 6 行英文 `anchor_disclaimer` 完整
+- argparse `--base-rejection` help line 466-472 — `⚠️ family-specific anchor` 警告
+
+### MEDIUM-2 sample window pinning（5 sub-fix 全真實落地）
+- `_parse_sample_end_utc` helper line 428-445 — 處 None/empty/'now'（case-insensitive）/ISO+tz/Z suffix/naive UTC；invalid → ValueError
+- `load_v094_attempts` signature 加 `sample_end_utc: Optional[datetime]`，return 5-tuple；SQL `ts > NOW() - interval` → Python-side resolve `(window_start, window_end)` + `WHERE ts >= %s AND ts <= %s`
+- JSON artifact 4 欄：`sample_end_utc` / `sample_window_start_utc` / `sample_window_end_utc` / `sample_window_pinned: sample_end_utc is not None`
+- argparse `--sample-end-utc` line 456-461 default=None；舊 invocation 不破
+
+### Adversarial probe — Python NOW() vs PG NOW() hidden time drift
+- Python `datetime.now(timezone.utc)` 在 SQL roundtrip **前** resolve；PG `NOW()` 在 SQL **時** resolve；差 ms 級
+- 對 historical 14d / n=18 sample 影響 0（無 fill 落 ms 窗口）
+- 對 future heavy sample 場景，可能有 1-2 fill drift — 但這是 audit 可重現性的 trade-off，非 hidden bug
+
+### Adversarial probe — JSON artifact 新欄位 backward compat
+- grep 0 外部 consumer / 0 外部 import `phase_1b_queue_bias_regression`
+- 新欄位 add-only，舊 dict reader（如有 future tool）走 `.get(key, default)` pattern 不破
+
+### Adversarial probe — disclaimer 文字長度與可見性
+- print_results 結尾 disclaimer 用 `[DISCLAIMER]` marker + `===` 分隔線顯著
+- 內含 actionable next step（PG-AB-01-C15 / PS-AB-01-C10 alternative anchor）
+- 出現位置在 verdict 之後，讀者剛看完 PASS/FAIL 立即看到適用範圍 → 充足
+
+### Scope 鎖定驗證
+- SIM model 核心 `compute_queue_factor` / `apply_queue_adjustment` 邏輯 line-by-line 驗 0 改 ✓
+- 4 LOW NTH（timing alignment / f-string DSN / sweep tuple hardcode / O(n) qty diagnostic）全保留 ✓
+- LOC 221 + 572 均 < 800 警告 ✓
+- E2 重跑 pytest 89/89 PASS 0.04s ✓
+
+### Process win
+- R2 quick scan 15min 內完成 — Round 1 已建立 review baseline，R2 只需 delta-verify
+- E1 Round 2 self-report A-grade honest：明列 Python-side time resolve trade-off + signature breaking change + 中英文選擇 rationale，E2 只需驗 reasoning consistency
+- Multi-session race check 5/5 PASS（sibling commit f2c1123c docs-only 不衝突 scope）
+
+### Anti-pattern reminder
+- 「sliding window」reproducibility risk：任何 `WHERE ts > NOW() - interval` 都應 require `--sample-end-utc` 等價 flag — 沒 audit pin 的 historical regression 結果無法 bit-exact 重現
+- backward compat 改動 signature 時 `grep -rn <function_name>` 驗 callers — 5-tuple breaking change 需確認唯一 caller 同檔內，0 外部 import
+- family-specific empirical anchor 不可外推：未來任何「single value 對全 family 套用」的 default 都需配 source comment + JSON artifact 警告，否則 production cell selection 階段必然踩雷

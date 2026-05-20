@@ -363,6 +363,10 @@ Round 5 曾預警 round 6 可能再被「/finalize 拒接 subprocess_pid IS NULL
 1. **時區陷阱**：對抗 SQL 用 `+02::timestamptz` 等同 CEST = UTC-2，會把 deploy 前 1.5h fills 算進 post-deploy → missed_n 假性 18。**UTC strict `+00:00`** cutoff 後 entry=6 missed=0 100% PASS。Operator 給 deploy_ts 寫 UTC，QA SQL 必對齊 UTC。**未來 SOP**：任何 deploy-cutoff SQL 必用 `+00:00` 或 `'<ts>'::timestamptz at time zone 'utc'`，禁混 CEST/UTC。
 
 2. **trading.fills 含 entry + risk_exit**：原 PA §4.3 對抗 SQL 沒區分 `oc_*` (entry) vs `oc_risk_*` (risk_exit)。risk_exit 走 StopManager 不走 spine emit_fill_completion_lineage（by-design），分子分母混算會誤判 fix 失敗。SQL 必加 `order_id LIKE 'oc_%' AND order_id NOT LIKE 'oc_risk_%'`。
+   > **2026-05-20 v55 reframe（重要修正）**：本條教訓**僅適用 spine lineage propagation 驗證**（即 `agent.decision_state_changes` ↔ `trading.fills` 對接）。
+   > 適用於 **close maker** 分析（Phase 1b activator AC-A 等場景）時，QC v55 critical reframe 揭露此 ID prefix 拆法是**結構性誤分類**：entry-close 與 risk-exit 走同一條 `execute_position_close()`；一次 attempt 內若 maker timeout → fallback 成 market exit 或 cancel grace expired → 強制走 risk-exit takeover，同筆 attempt 會出現 `oc_close_mf_fb_*` 與 `oc_risk_*` 兩種 order_id，**ID prefix 拆法會把同一 attempt 的兩段生命週期算成「entry path 0% maker / risk path 100% maker」誤導結論**。
+   > 自 2026-05-20 起，**post-deploy close maker verification 改用 attempt × fallback matrix**（PM template `2026-05-18--pm_24h_post_deploy_verification_audit_packet.md` §3.1）：attempt 軸 = `maker_close_attempt` vs `sweep_taker`；fallback 軸 = `maker_filled` / `timeout_taker` / `postonly_reject_retry` / `cancel_grace_expired` / `risk_exit_takeover`。
+   > backlog ticket：`P2-QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX`（已 IMPL 2026-05-20）。
 
 3. **[55] WARN ≠ FAIL**：分母 chains_with_real_fill_report=6/210=2.86% 是 transition 期，分母含 204 pre-deploy stub-only chains。24h steady-state rolling 後分母換新 chains 自動 ≥ 50% gate。WARN 接受為 transition characteristic，不是 fix failure。
 
@@ -382,7 +386,8 @@ Round 5 曾預警 round 6 可能再被「/finalize 拒接 subprocess_pid IS NULL
 ### 治理 SOP 加固
 
 - **deploy-cutoff SQL UTC mandatory**：任何 post-deploy verification SQL 用 `+00:00` 或 `at time zone 'utc'`，禁混 local timezone（CEST/EST/etc）。納入 PA spec template + QA audit template default。
-- **entry vs risk_exit 分流必要**：trading.fills cross-join 必區分 `oc_*` 與 `oc_risk_*`；spine lineage 是 entry-path-only，stopmanager 走獨立 path（fix scope 之外）。
+- **entry vs risk_exit 分流必要**：trading.fills cross-join 必區分 `oc_*` 與 `oc_risk_*`；spine lineage 是 entry-path-only，stopmanager 走獨立 path（fix scope 之外）。**僅 spine lineage 場景**適用。
+- **close maker 分析必用 attempt × fallback matrix（2026-05-20 v55 起）**：post-deploy `close_maker_attempt` AC verification 禁用 ID prefix 拆法；改用 `close_maker_attempt` boolean × `close_maker_fallback_reason` enum 兩軸切。範本 = PM template `2026-05-18--pm_24h_post_deploy_verification_audit_packet.md` §3.1，含 grid + bb_breakout 兩個範例。同一 attempt 的 fallback 後階段不可被當成「另一條 path」雙計。
 - **[55] WARN vs FAIL 細分**：bad_report_value_quality=0 + state_changes ≥ N 是 fix correctness gate；chains_with_real_fill_report ratio 是 calibration / transition gate。前者強 fail-closed，後者接受 WARN transition。
 
 ---
