@@ -544,30 +544,116 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
 
 #[test]
 fn stress_bb_breakout_false_squeeze_no_volume() {
+    // P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS（v55 audit）：
+    // 舊版只用 `EMPTY_ALPHA_SURFACE.oi_delta_panel=None` 做 fixture，整個 on_tick
+    // 在 OI fail-closed gate（commit 7a07348b, mod.rs:479）就 `return vec![]`，
+    // ctx1 squeeze 從未登記、entry path 從未進入；assert `intents.is_empty()`
+    // 滿足是因「OI 永遠 fail-closed」而非 volume gate 真正攔截 false breakout。
+    // 修法：補 OI surface 讓 ctx1 真的登記 squeeze、ctx2 真的進 entry path 並
+    // 真實踩到 `vol_ratio < volume_threshold` 的拒絕分支；驗多個切片：
+    //   (1) BB squeeze 路徑 — ctx1 後 `has_squeeze=true`
+    //   (2) Expansion + direction 判定 — bandwidth>expansion_bw, %B>1 → long candidate
+    //   (3) Volume gate 唯一防線 — vol_ratio<volume_threshold → 0 intents
+    //   (4) Entry/Exit 行為 — 無 Open / 無 Close（false_squeeze 不應觸發任何下單）
+    //   (5) PnL 邊界 — 無 entry → entry_price=None / trailing_stop=None；
+    //   (6) Squeeze state 保留 — false breakout 不消耗 squeeze 窗口，下個有量
+    //       擴張 tick 仍可 fire（matches FIX-26 語義）
+    //   (7) Control case — 同一 fixture 把 vol_ratio 拉到 threshold 以上立即
+    //       觸發 long entry，證 volume gate 是唯一造成 (3) 的條件，而非任何
+    //       其他無關 fail-closed。
     let mut strat = BbBreakout::new();
     strat.min_persistence_ms = 0; // disable persistence for test
+    let surface = fresh_oi_surface("BTCUSDT");
 
-    // Enter squeeze
+    // Squeeze phase：bandwidth=0.015 < squeeze_bw(=0.03) → 登記 squeeze 時間戳。
     let ctx1 = make_ctx(
         "BTCUSDT",
         67000.0,
         0,
         Some(bb_snapshot(0.5, 0.015, 50.0, 67000.0, 67000.0, 25.0, 0.8)),
     );
-    strat.on_tick(&ctx1, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
+    strat.on_tick(&ctx1, surface);
+    assert!(
+        strat.has_squeeze("BTCUSDT"),
+        "ctx1 應在 bandwidth(0.015) < squeeze_bw(0.03) 時登記 squeeze；\
+         若失敗代表 OI gate 或 squeeze 登記路徑被打斷"
+    );
 
-    // Expansion but LOW volume — should NOT enter
+    // Expansion 但 vol_ratio(=1.0) < volume_threshold(=1.2)：false breakout，
+    // 應被 volume gate 攔下。fixture 蓄意設計使其他兩個 gate（in_squeeze /
+    // bandwidth>expansion_bw）皆通過，且 %B=1.1>1.0 → direction 判定為 long
+    // candidate；唯一拒絕原因應為 volume。
     let ctx2 = make_ctx(
         "BTCUSDT",
         67500.0,
         700_000,
         Some(bb_snapshot(1.1, 0.05, 60.0, 67000.0, 67100.0, 25.0, 1.0)),
     );
-    let intents = strat.on_tick(&ctx2, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE);
-    assert!(
-        intents.is_empty(),
-        "should not enter without volume confirmation"
+    let intents = strat.on_tick(&ctx2, surface);
+    assert_eq!(
+        intents.len(),
+        0,
+        "vol_ratio(1.0) < volume_threshold(1.2) 時 false breakout 必須 0 intents"
     );
+    // 顯式禁 Open / Close — 防 future regression 用其他理由產生意外 action。
+    // StrategyAction 當前僅 Open/Close 兩個 variant；若未來新增 variant，
+    // 此 match 會因 non-exhaustive 編譯失敗 → 強制重新評估 false_squeeze 預期行為。
+    for action in &intents {
+        match action {
+            StrategyAction::Open(i) => panic!(
+                "false_squeeze 不應產生 Open intent，但拿到 {:?}",
+                i
+            ),
+            StrategyAction::Close { reason, .. } => panic!(
+                "false_squeeze 無持倉，不應產生 Close (reason={})",
+                reason
+            ),
+        }
+    }
+
+    // PnL 邊界：false breakout 沒入場 → 不應寫 entry_price 也不應寫 trailing_stop。
+    assert_eq!(
+        strat.entry_price_of("BTCUSDT"),
+        None,
+        "false breakout 未入場，entry_price 必為 None"
+    );
+    assert_eq!(
+        strat.trailing_stop_of("BTCUSDT"),
+        None,
+        "false breakout 未入場，trailing_stop 必為 None"
+    );
+    // Squeeze 窗口應保留（FIX-26：未入場時 squeeze_detected_ms 不清空），
+    // 下個有量 tick 仍可在 expiry 窗口內觸發真正 entry。
+    assert!(
+        strat.has_squeeze("BTCUSDT"),
+        "false breakout 不消耗 squeeze 窗口（FIX-26 語義），squeeze_detected_ms 應保留"
+    );
+
+    // Control case：完全相同 fixture 僅 vol_ratio 提升到 >= volume_threshold(1.2)
+    // 即立即觸發 long entry。對照組證明 (3) 的 0 intents 來自 volume gate 而非
+    // 其他無關 fail-closed（OI / squeeze / direction / cooldown / persistence 等）。
+    let mut strat_ctrl = BbBreakout::new();
+    strat_ctrl.min_persistence_ms = 0;
+    strat_ctrl.on_tick(&ctx1, surface);
+    let ctx2_ctrl = make_ctx(
+        "BTCUSDT",
+        67500.0,
+        700_000,
+        Some(bb_snapshot(1.1, 0.05, 60.0, 67000.0, 67100.0, 25.0, 1.5)),
+    );
+    let intents_ctrl = strat_ctrl.on_tick(&ctx2_ctrl, surface);
+    assert_eq!(
+        intents_ctrl.len(),
+        1,
+        "control：vol_ratio 升到 >= threshold 後同 fixture 必須產生 entry"
+    );
+    match &intents_ctrl[0] {
+        StrategyAction::Open(i) => assert!(
+            i.is_long,
+            "control：%B(1.1)>1.0 → 必為 long entry，但拿到 short"
+        ),
+        other => panic!("control：期待 Open(long)，實際 {:?}", other),
+    }
 }
 
 #[test]
