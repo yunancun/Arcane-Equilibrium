@@ -6,6 +6,7 @@
 //! risk control, cognitive parameters, and engine configuration.
 
 pub mod agent;
+pub mod asset_venue;
 pub mod cognitive;
 pub mod intent;
 pub mod price;
@@ -13,6 +14,7 @@ pub mod risk;
 pub mod state;
 
 pub use agent::{AgentMessage, AgentRole, MessageType};
+pub use asset_venue::{AssetClass, Venue, VenueParseError};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, PriceEventKind, OHLCV};

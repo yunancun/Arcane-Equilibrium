@@ -520,4 +520,96 @@ Y1 autonomy : 66% 不變（spike pass 後路線不變）
 
 | Commit | Subject | 內容 |
 |---|---|---|
-| (pending) | `docs(sprint-1a-delta): PM SIGN-OFF — 10 file land (5 module + 5 V### reserve；含 5 dup naming pending dedup) [skip ci]` | 10 file commit + TODO Sprint banner 1A-δ DONE + archive §J append |
+| `90c808ce` | `docs(sprint-1a-delta): PM SIGN-OFF — 10 file land (5 module + 5 V### reserve；含 5 dup naming pending dedup) [skip ci]` | 10 file commit + TODO Sprint banner 1A-δ DONE + archive §J append（已 land；parallel session）|
+
+---
+
+## §K Sprint 1A-δ-IMPL closure — Rust trait stub 第一次 IMPL 層 land (PM 簽收 2026-05-21)
+
+### K.1 觸發 + 與 §J 的關係
+
+§J Sprint 1A-δ DESIGN closure 由並發 session 完成（commit `90c808ce`）— DESIGN/spec/V### reserve frontmatter 全 land 但 0 Rust IMPL 對應。本 session 在 operator 選 1A-δ scope 後派發 PA × 3 → E1 × 3 → E2/E4 → M5 refactor 鏈，產出 Sprint 1A 首批 ✅ 欄 4 (route/code) + ✅ 欄 5 (test) IMPL artifact，補 FA 2026-05-21 acceptance audit §7.1「新增 Sprint 1A-IMPL phase」建議的第一刀。
+
+**狀態語言升級**：Sprint 1A-δ 從 `DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED` 升 `DESIGN-DONE / IMPL-DONE (Rust trait stubs) / RUNTIME-NOT-APPLIED`。RUNTIME-NOT-APPLIED 不變（trait stub default `unimplemented!()` Y3+ activation 前不執行；無 PG / 無 route / 無 cron — 屬 stub 預留紀律）。
+
+### K.2 Deliverable check（IMPL phase 3 軌道 → 3 ✅）
+
+| # | Module | Rust 主檔 | 行數 | Test 檔 | Test 行數 | Test count | 狀態 |
+|---|---|---|---|---|---|---|---|
+| 1 | M5 ModelClient | `rust/openclaw_engine/src/model_client.rs` | 277 | `tests/m5_model_client_stub_panic.rs` | 111 | 7 (6 panic + 1 dyn safety) | ✅ refactor 對齊 ADR-0035 Decision 1 6-method |
+| 2 | M12 OrderRouter | `rust/openclaw_engine/src/order_router.rs` | 393 | `tests/m12_order_router_stub.rs` | 243 | 11 (4 panic + BinancePerp/Option Y3+ defer Err + maker tier + dyn safety) | ✅ 對齊 ADR-0039 6-method authoritative |
+| 3 | M13 AssetClass+Venue | `rust/openclaw_types/src/asset_venue.rs` | 151 | `tests/m13_asset_venue_acceptance.rs` | 152 | 7 (serde round-trip + Display + FromStr + DEX/Hyperliquid reject) | ✅ 對齊 ADR-0040；DEX/Hyperliquid 0 enum variant；hardcode reject |
+| 4 | lib.rs edit | `rust/openclaw_engine/src/lib.rs` | +2 行 (model_client + order_router) | – | – | – | ✅ 既有 pub mod 列表 alphabetical 插入；無 reorder |
+| 5 | lib.rs edit | `rust/openclaw_types/src/lib.rs` | +2 行 (asset_venue pub mod + pub use) | – | – | – | ✅ |
+
+**合計**：3 src 821 行 + 3 test 506 行 + 2 lib.rs edit = 6 新檔 + 2 modified；**+25 cargo test PASS**（M5 7 + M12 11 + M13 7）
+
+### K.3 Sprint 1A-δ-IMPL artifact 統計
+
+- **3 Rust 主檔**：M5 277 + M12 393 + M13 151 = **821 行 src**
+- **3 Rust test 檔**：M5 111 + M12 243 + M13 152 = **506 行 test**
+- **2 lib.rs edit**：openclaw_engine +2 + openclaw_types +2 = 4 行
+- **總計**：6 新檔 + 2 modified，~1331 行 Rust（src + test）
+- **cargo test**：openclaw_engine 3290 P / 0 F / 3 IGNORED + openclaw_types 35 + 7 = 42 P / 0 F；**workspace 全 3742 P / 0 F / 4 IGNORED**；delta = **+25**（精準對齊預期）
+
+### K.4 Sub-agent dispatch chain — PA × 3 + E1 × 3 + M5 refactor + E2/E4
+
+| Wave | 派發 | Sub-agent | Result |
+|---|---|---|---|
+| Phase 1 (PA × 3 並行；無 worktree；每 agent 限自己 2 file scope) | M5 spec / M12 spec / M13 spec + V114/V115/V116 frontmatter | PA × 3 | 3/3 ✅；M5 508 行 + M12 905 行 + M13 624 行；V114 190 + V115 321 + V116 288；M12 PA 內部 reconcile v0 5-method → ADR-0039 6-method authoritative |
+| Phase 2a (E1 × 2 並行 Wave 1) | M5 + M13 同時派（M5 openclaw_engine + M13 openclaw_types 不同 crate 無 lib.rs Edit race） | E1 × 2 | 2/2 ✅；M5 226 行 (舊 method 名單) + M13 151 行 |
+| Phase 2b (E1 × 1 sequential Wave 2) | M12（等 M5 lib.rs land 後）| E1 × 1 | ✅；M12 393 行 + 11 case test |
+| Phase 3a (E2 + E4 並行) | E2 對抗審 + E4 regression | E2 + E4 | 全 APPROVED；E2 標 M5 PA spec vs ADR-0035 命名衝突 OBSERVE |
+| Phase 3b (M5 refactor; sequential after 並發 session R4 dedup decision visible) | M5 ADR-0035 對齊 refactor（drift_callback/rollback/throttle 取代 version/model_metadata/streaming_supported）| E1 × 1 | ✅；M5 226 → 277 行（+M5Error/FeatureVector/DistributionMetrics + Result wrapping）；舊 4 method/struct grep 0 hit；cargo test 3290 不變 |
+
+**總 sub-agent dispatch**：3 PA + 3 E1 + E2 + E4 + 1 E1 refactor = **9 sub-agent run；100% success；無 disconnect**（per archive §H.4 lesson 「sequential 1-at-a-time 100% success」+ Phase 2a 2 並行 + Phase 2b sequential 避 lib.rs Edit race；Phase 3a E2/E4 不同 domain 並行安全）
+
+### K.5 Multi-session race — R4 dedup decision impact on M5 IMPL
+
+並發 session 在本 session PA Phase 1 期間（22:06-22:18）寫 parallel 版本 M5/V114/V115 spec；R4 audit dedup decision（per `docs/archive/2026-05-21--sprint_1a_delta_dup_artifacts/README.md`）採 ADR-0035-aligned 版本（保留 `m5_online_learning_design_spec.md` 6 method = get_predict/get_predict_streaming/**drift_callback/rollback/throttle**/health），archive 我這邊 `m5_model_client_design_spec.md`（6 method = ...**version/model_metadata/streaming_supported**）。E1 Phase 2a M5 IMPL 沿用 archived spec → 與 ADR 不對齊 → Phase 3b refactor 補正。
+
+**Multi-session race rule reinforcement (per memory `project_multi_session_memory_race` 2026-04-23)**：
+- commit-first：並發 session 已 commit dedup 決策 → 我接受不 revert
+- 不認識改動禁 revert：parallel 寫的 `m5_online_learning_design_spec.md` 我保留並依其重 IMPL
+- IMPL 對齊 canonical spec 不是 archived spec：跨 session 接手必先 `git log -3 --oneline` + `ls docs/execution_plan/2026-05-21--*` 對比 archive folder 才能下手 IMPL
+
+### K.6 PM Sign-off Verdict
+
+**狀態**：✅ **APPROVED — Sprint 1A-δ-IMPL (M5/M12/M13 Rust trait stubs) 3/3 ✅；E2 對抗審 7 維度 6 PASS + 1 OBSERVE (Open Q→1A-ε)；E4 regression 6/6 AC GREEN**
+
+**對齊驗證**：
+- ✅ ADR-0035 Decision 1 6-method (M5)：M5 refactor 後 `grep "fn version\|fn model_metadata\|fn streaming_supported\|struct ModelMetadata"` = 0 hit
+- ✅ ADR-0039 §Decision 1 6-method authoritative (M12)：`grep "fn route_order\|fn venue_health\|fn cross_venue_position\|fn forecast_slippage\|fn reverse_snipe\|fn maker_fill_rate_30d"` = 6 hit + 1 UnimplementedOrderRouter override
+- ✅ ADR-0040 Decision 4 hardcode reject (M13)：Venue enum 0 Dex / Hyperliquid / Uniswap / GMX / DyDx variant；FromStr 對 "dex"/"DEX"/"Dex"/"hyperliquid" → `Err(DeniedByADR0040)`
+- ✅ D1a 拒絕政策：M12 `route_order(Venue::BinancePerp)` / `route_order(Venue::BinanceOption)` → `Err(VenueDeferred("Y3+ per ADR-0033"))` 非 panic（hardcode Y3+ defer compile-time + runtime 雙保險）
+- ✅ 5-gate inheritance：M5 method body 全 `unimplemented!()`（Y3+ activation 必經 LAL Tier 3 protected per ADR-0034）
+- ✅ trait stub default body 紀律：3 IMPL 檔 `grep "Ok\(\)|Default::default\(\)"` = 0 sneaky impl hit
+- ✅ 中文注釋紀律 per feedback_chinese_only_comments 2026-05-05
+- ✅ 行 cap：3 主檔全 < 400 行（M5 277 / M12 393 / M13 151）；test 全 < 250 行
+- ✅ Mac aarch64-apple-darwin cross-compile PASS（host native）
+- ✅ 0 new cargo build warning（既有 baseline 3 warning 不擴）
+- ✅ 0 mock 隱蔽邏輯；0 flaky；13 panic test 真實 method body 觸發
+
+**Carry-over to Sprint 1A-ε（已 land per `11e94d39` 部分；剩餘 follow-up）**：
+1. M5 PA spec vs ADR-0035 命名衝突 — R4 dedup decision 已採 ADR-aligned 版本（已 closure）；M5 IMPL refactor 完成（K.5 + Phase 3b）
+2. M12 `MakerTier::Penalty` vs ADR-0039 `RebateTier::BelowDefault` 命名差異 — Open Q→1A-ε ADR-0039 amendment 或 IMPL rename
+3. M12 `MakerFillRateStats` 簡化為 3-field vs ADR-0039 9-field — Sprint 6+ V094/V115 IMPL 期 amend
+4. M12 `RoutingError::VenueNotApproved(Venue)` Y1 active 路徑無 enum 可帶 — Sprint 6+ 未來新 venue 接入預留
+5. M13 `VenueParseError::DeniedByADR0040` 雙 variant（強化 PA spec UnknownVenue）— PA spec §3.4 amend record 待 1A-ε
+6. M13 `thiserror` derive 替換 std::error::Error 手 impl — PA spec amend record 待 1A-ε
+7. M13 schema_golden_tests `rust/schemas/shared_types.json` 未擴展 — 等 Python binding land 期再擴
+
+**Risk caveats**:
+- M5 trait stub 在 Y3+ activation 前所有 caller 呼叫即觸 `unimplemented!()` panic — 屬 fail-loud 紀律設計，符合 §二 原則 6「不確定走保守」+ §二 原則 9「dual protection」
+- M12 BinancePerp/Option `route_order` hardcode Y3+ defer Err 是 compile-time + runtime 雙保險，**無 risk_config TOML override path**；任何企圖繞過必走 Rust source amend + commit + cargo build + ssh trade-core sync
+- M13 Venue enum 不含 Dex/Hyperliquid 是 compile-time guard；FromStr `DeniedByADR0040` 是 runtime guard；雙重保護不可繞
+
+**PM 簽收**：PM 主會話 2026-05-21（Sprint 1A-δ-IMPL closure；K.7 commit pending）
+
+### K.7 Commit chain — Sprint 1A-δ-IMPL land
+
+| Commit | Subject | 內容 |
+|---|---|---|
+| (pending) | `feat(sprint-1a-delta-impl): Rust trait stubs M5+M12+M13 land — 6 file + 2 lib.rs + +25 cargo test` | 3 module src + 3 test + 2 lib.rs edit + TODO Sprint banner 1A-δ-IMPL DONE + archive §K append + 3 dup file deletion (per R4 audit 11e94d39 finalize) + E1 memory log |
+
+**Linux runtime sync**：Mac push origin → ssh trade-core pull --ff-only（per CLAUDE.md §六 + memory `project_ssh_bridge_workflow`）
