@@ -15,6 +15,8 @@
 - **operator follow-up（不阻塞）**：(1) OpenClaw key 發行日（Bybit Web API mgmt 查 last edited；5 min；Sprint 1B 派發前必驗）(2) Console tab 歸屬 H2（A3+PA+operator；不阻塞 Sprint 1A）
 - **派發前 must-fix（PA+sub-agent 補 2026-05-22 內）**：V103 schema 補 4-5 audit field（lease_id/approval_id/actor_id/bybit_request_payload/rationale；5-8 hr）+ V### re-number search/replace + PG connection 範例補 CLAUDE.md + Earn governance 五角色 cross-ref
 - **報告 inventory（2026-05-21）**：`PM/workspace/reports/2026-05-21--v57_pm_signoff.md`（路線敲定主入口）+ `PM/workspace/reports/2026-05-21--v57_12_prefix_pm_signoff.md`（12 條 prefix 驗收）+ `FA/workspace/reports/2026-05-21--v57_12_prefix_business_verify.md` + `PA/workspace/reports/2026-05-21--v57_12_prefix_tech_verify.md` + 12 條 prefix sub-agent reports（C2 TW / C3 MIT / C4-C6 BB / C8 CC / C9 PA）
+- **v5.8 13-module autonomy expansion 狀態（2026-05-21）**：operator 自寫 v5.8 主檔 land；PM 派 14 multi-agent audit 全 0 NO-GO（11 GO-WITH-CONDITIONS / 3 conditional HOLD：E2/R4/TW）；PA 整合 562 行；PM 最終 verdict DISPATCH-NEEDS-FIX；**operator D1-D5 已批 2026-05-21**（D1 16 CRITICAL must-fix / D2 M1 改名 LAL / D3 Y1 工時 3,500-5,200 hr 44-55w / D4 M13 → Y3+ / D5 立 AMD-2026-05-21-01）；3 missing module 處置（M14 defer v5.9 / M15 擴 M6 / M16 擴 M1 acceptance）；16 CRITICAL must-fix 列入 §0.6 staging；Sprint 1A-β 派發 D+5~D+10 內；**Y1 末 autonomy 66% / Y2 Q2 90% / Y3 Q2 95%**
+- **v5.8 報告 inventory**：`PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md`（主入口）+ `PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` + 14 agent `{ROLE}/workspace/reports/2026-05-21--v58_executability_audit.md` + `execution_plan/2026-05-20--execution-plan-v5.8.md`（v5.8 主檔）
 
 ---
 
@@ -63,6 +65,103 @@
 | `v57-C12` | 中文注釋 mandate + SCRIPT_INDEX.md enforce + MODULE_NOTE grep step | PA + TW | ✅ DONE | dispatch_packet §4 |
 
 **5 並行 track 派工 readiness**：1A-gov ✅ / 1A-schema ⚠️ NEEDS-PM-ARBITRATION (V### re-number done) / 1A-sensor ✅ / 1A-earn ✅ / 1A-gui ⚠️ NEEDS-OPERATOR-DECISION (H2 tab 歸屬)
+
+---
+
+## §0.6 v5.8 13-Module Pre-Sprint-1A-β Fix List — STAGING（operator D1-D5 批 2026-05-21）
+
+**狀態**：STAGING — 16 CRITICAL must-fix 修補；D+0 ~ D+5 並行完成後 D+5 ~ D+10 派 Sprint 1A-β 真實開發
+
+**operator 簽核已批 2026-05-21**：
+- **D1 同意**：批 16 CRITICAL must-fix 為 Sprint 1A-β 派發前置條件
+- **D2 允許**：M1 Lease Tier → **LAL (Layered Approval Lease)** 改名（避 AMD-01 Stage 0R-4 命名衝突）
+- **D3 接受**：Sprint 1A 工時 543-797 → **670-1,015 hr** / Y1 total → **3,500-5,200 hr** / Y1 calendar → **44-55w**
+- **D4 同意**：M13 Y2 Binance trade enable → **Y3+ at earliest**（per BB push back + ADR-0033/CLAUDE.md §一 衝突）
+- **D5 允許**：立 **AMD-2026-05-21-01-autonomy-vs-human-final-review**（protected vs opt-in scope 邊界定義）
+
+**3 missing module 處置（PM 仲裁，operator D1 採納）**：
+- **M14** strategy hot-swap：defer v5.9（Sprint 4 後 90d 才需）
+- **M15** capacity-aware sizing：擴 M6 acceptance 第 4 條「orderbook depth bounds」，不新建 module
+- **M16** cross-strategy correlation re-sizing：擴 M1/LAL acceptance「correlation-adjusted weight」，不新建 module
+
+**autonomy 真實時點**：Sprint 4 末 38% / Sprint 7 末 56% / Y1 末 66% / Y2 Q2 90% / Y3 Q2 95%；真正「不需介入」= Y2 Q2-Q3（~21-24 個月達 90%）/ Y3 Q2（~32 個月達 95%）
+
+### 16 CRITICAL must-fix（按優先級 + ETA + owner）
+
+| ID | Item | Owner | 工時 | ETA | 依賴 |
+|---|---|---|---|---|---|
+| `v58-CR-1` | v5.7 4 follow-up（V103 audit field +4-5 / V### re-number / PG conn 範例 / Earn 五角色 cross-ref） | PA + MIT + TW + FA + E3 + QA | 8-12 hr | D+1 | 無，可即派 |
+| `v58-CR-2` | M1 → LAL 改名 + ADR-0034 5 細節（per-decision lease emit / lease_id unique / 80% yes-rate window 6mo / Console toggle 不重簽 authorization / 24h undo scope = toggle 開啟期間全部 rollback） | PA + CC + QA | 12-18 hr | D+2 | D2 ✓ |
+| `v58-CR-3` | AMD-2026-05-21-01 autonomy-vs-human-final-review AMD draft | PM + CC | 4-8 hr | D+2 | D5 ✓ |
+| `v58-CR-4` | ADR-0040 multi-venue gate spec（M13 → Y3+ 措辭 + 5-gate venue schema + per-venue secret slot + per-venue authorization.json env_allowed） | TW + BB + E3 | 6-10 hr | D+3 | D4 ✓ |
+| `v58-CR-5` | M10 Tier D HMM 黑名單 hardening + M8 GARCH 替換（ADR 明寫 "no HMM / Markov-switching / GARCH" + 替代 = ATR-vol regime + funding state） | TW + MIT + QC | 4-6 hr | D+2 | 無 |
+| `v58-CR-6` | M4 minimum bar + leakage protocol（DRAFT 必附 6 attribute：N≥30 / Bonferroni p<0.05/K / effect ≥ 0.2 / 6mo sub-period stability / graveyard flag / cluster K silhouette）+ rolling stat shift(1) leak-free | MIT + PA | 5-8 hr | D+3 | 無 |
+| `v58-CR-7` | M11 threshold statistical derivation + M7 dedup（M11 為 M7 input；M7 single decay authority；M7 STAGE_DEMOTED → DECAY_ENFORCED 改名） | MIT + QC | 4-6 hr | D+3 | 無 |
+| `v58-CR-8` | 9 個 V### schema spec doc（V105-V113）仿 v103_v104 範式 940 行 + Guard A/B/C + engine_mode CHECK + hypertable 判斷 + PG dry-run + idempotency | MIT + PA + E5 | 90-140 hr | D+5 | 並行 5 sub-agent |
+| `v58-CR-9` | PG dry-run mandatory + cross-V### dependency graph（V107→V103/V109/V113 / V108→V103 / V109→V112 / V112→V113 / V105→V107）寫入 v5.8 §3 / §10；Sprint 1A-β/γ 順序 dispatch + cross-ADR collision gate | PA + E5 | 3-5 hr | D+3 | 部分依 CR-8 |
+| `v58-CR-10` | §10 P0 precondition table（P0-EDGE-1 + P0-LG-3 + P0-OPS-1..4 + 5-gate live）+ §12 operator decision 第 5 條 | PM | 2-4 hr | D+3 | ★ operator 提供 P0 closure ETA |
+| `v58-CR-11` | GUI 工時 +261-374 hr + Console tab 4 sub-section 歸屬 + A3 sign-off invariants 48-53 hr Y1 8 surface | PM + A3 | 3-5 hr | D+4 | ★ operator 確認 tab 歸屬 |
+| `v58-CR-12` | TW 工時 +450-640 hr 寫入 §3/§4/§8/§9/§12（第 5 條 operator decision「Approve TW 並行 dispatch with PA-MIT-CC parallel tracks」） | PM + TW | 2-3 hr | D+4 | – |
+| `v58-CR-13` | §3/§4/§14 工時統一上修 543-797→670-1,015 hr / 2,780-3,930→3,500-5,200 hr / 37-44w→44-55w；§3 五階段 + §4 Sprint 表三處時間數字統一 | PM | 1 hr | D+4 | D3 ✓ |
+| `v58-CR-14` | M12 OrderRouter maker_fill_rate_30d metric + ADR-0039 routing audit log schema + 字典補 PostOnly fill rate SOP；M11 ADR-0038 明示 nightly replay 用 PG `market.liquidations` (自家累積) 為 historical source（Bybit historical liquidations API 不存在） | BB + TW | 3-5 hr | D+3 | – |
+| `v58-CR-15` | 5-gate auto path inheritance 明文（v5.8 §11 invariant：M1 LAL Tier 1+2 / M2 auto-disable / M3 auto-degrade / M6 auto-weight / M7 auto-demote / M8 alert→action / M10 capital trigger 寫 live state 必經完整 5-gate fail-closed）+ M4 DRAFT writeback Decision Lease + HMAC signature + ml-training-pattern-miner role + rate limit | TW + E3 + CC | 4-6 hr | D+4 | – |
+| `v58-CR-16` | ADR-0041 ContextDistiller v4（分層 snapshot + token 硬 cap ≤ 800/推理 + 超出降級 statistical-only path）+ DOC-08 月 $60 cap 重估（Y2 預估 $112-213/月）+ M4 Cowork review 純規則 vs LLM 明示 + M11 narrative daily L1 Ollama 9B 路徑 | AI-E + TW + PM | 6-10 hr | D+5 | ★ operator 簽 ADR-0041 |
+
+**CRITICAL 合計**：~157-246 hr core + 90-140 hr MIT spec + 450-640 hr TW + 261-374 hr GUI + 48-53 hr A3 ≈ **1,007-1,453 hr 全部修補**；並行 5-10 sub-agent 後 wall-clock D+0 ~ D+5（5 天）
+
+### Operator 親手 Action Checklist（提前提醒，避免卡進度）
+
+| 日期 | Action | 預期時間 | 提醒 trigger | 卡進度後果 |
+|---|---|---|---|---|
+| **D+0 (2026-05-21)** | ✅ **簽 D1-D5 已完成** | 30 min | done | – |
+| **D+1 (2026-05-22)** | 提供 OpenClaw API key 發行日（Bybit Web API mgmt 查 last edited，5 min query）— v5.7 leftover | 5 min | PM ping AM | 阻 Sprint 1B Earn first stake |
+| **D+1-D+2** | **Phase 2a 14d verdict 三選一決議**（calibration r2 / accept 35% baseline / Phase 2b LiveDemo）— clock @ 2026-05-22~23 UTC verdict 視窗 | 30-60 min | clock 觸發 | 阻 P0-EDGE-1 closure → 阻 Sprint 4 first Live |
+| **D+2-D+3** | review AMD-2026-05-21-01 草案（CC + PM draft 後）— protected scope vs opt-in scope 邊界確認 | 15-30 min | CC + PM ping | 阻 CR-3 + 7 auto-apply module（M1/M2/M6/M7/M8/M9/M10） |
+| **D+3** | **提供 P0-EDGE-1 / P0-LG-3 / P0-OPS-1..4 closure ETA**（填 §10 table；operator 知道 LG-3 SPEC READY 10d / EDGE-1 ACTIVE / OPS-1..4 待 HTTPS + cred + legal + runbook） | 30 min | PM ping | 阻 Sprint 4 first Live + CR-10 |
+| **D+4** | batch review 4 ADR draft（ADR-0034 LAL / ADR-0036 M8 anomaly / ADR-0037 M9 A/B / ADR-0038 M11 replay） | 30-60 min | TW + PM ping | 阻 CR-2/5/7 + V### spec |
+| **D+5** | **batch sign-off 12 ADR + 1 AMD**：ADR-0030/0031/0032/0033（v5.7 既有）+ ADR-0034 LAL + ADR-0035-0040（v5.8 7 新）+ ADR-0041 + AMD-2026-05-21-01 | 60-90 min | PM ping | 阻 Sprint 1A-β 派發 |
+| **D+5** | Console tab 歸屬決策（A3 dispatch packet：4 tab × 2-4 sub-section；不擴張 16 tab） | 15-30 min | A3 + PM ping | 阻 CR-11 + Sprint 4 M1 IMPL |
+| **D+5** | Bybit Tokenomist trial expiry 確認（M4 dependency）+ 是否續訂 / 換 fallback vendor | 5-10 min | BB ping | 阻 Sprint 6-7 M4 active |
+| **D+5-D+6** | Sprint 1A-β 派發 readiness 12 check + final sign-off | 30 min | PM ping | – |
+
+**Operator 親手時間 D+0 ~ D+6 = ~3.5-5 小時**（分散 6 天，平均每天 ~30-50 min）
+
+### Sprint 1A-β 派發 readiness Check List（12 條，D+5~D+6 必達）
+
+1. □ v5.7 4 leftover land（CR-1）
+2. □ ADR-0030/0031/0032/0033（v5.7）+ ADR-0034 LAL（CR-2）sign-off
+3. □ AMD-2026-05-21-01 sign-off（CR-3）
+4. □ ADR-0040 multi-venue gate（CR-4）sign-off
+5. □ ADR-0036 + ADR-0037 + ADR-0038 sign-off
+6. □ M10 Tier D 黑名單 hardening + M8 GARCH 替換（CR-5）
+7. □ V105-V113 9 個 schema spec doc land（CR-8）
+8. □ §10 P0 precondition table + operator ETA（CR-10）
+9. □ GUI 工時 + Console tab 歸屬（CR-11）
+10. □ TW 工時上修 + 並行 dispatch（CR-12）
+11. □ §3/§4/§14 工時統一上修（CR-13）
+12. □ docs/README.md index 補（~11 條 + v5.8 主檔 + 14 audit）+ TODO §0.5/0.6 refactor
+
+### Sprint 1A-β 真實派發後時間軸
+
+| 階段 | Weeks | 工作 | 工時 |
+|---|---|---|---|
+| **修補階段** | D+0 ~ D+5 | 16 CRITICAL 並行修補 + 12 ADR/AMD sign-off | 1,007-1,453 hr 並行 |
+| Sprint 1A-β | W1.5-3.5 | M1 LAL/M3/M6/M7/M11 DESIGN + ADR-0034/0036/0037/0038 + V105/V106/V107/V112/V113 spec | 310-460 hr |
+| Sprint 1A-γ | W3.5-5.5 | M2/M4/M8/M9/M10 DESIGN + V108/V109/V111 spec + 4 runbook | 220-340 hr |
+| Sprint 1A-δ | W5.5-6.5 | M5/M12/M13 stubs + ADR-0035/0039/0040 + V114/V115/V116 partial | 75-120 hr |
+| Sprint 1A-ε | W6.5-9 | integration verify + cross-ADR consistency + Monthly Review Wizard + docs/README index 補 | 60-100 hr |
+| Sprint 1B+ | W9-12 | v5.7 baseline 1B + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 hr |
+| Sprint 2 | W12-15 | Alpha Tournament + M4 + M10 + M8 read-only | 280-400 hr |
+| Sprint 3 | W15-18 | Top-1 Unlock SHORT build + Stage 0 shadow + M11 + M3 | 280-380 hr |
+| **Sprint 4** | **W18-21** | **★ Top-1 LIVE $500 first time ★** + Top-2 + Options Stack 1 + M1 LAL Tier 1 + M9 read-only | 360-490 hr |
+| Sprint 5-10 | W21-44 | Top-2 ~ Top-5 LIVE / Advisory Allocator / Decay / Discovery / Y1 review | 1,700-2,500 hr |
+| **Y1 末** | **W44-55** | **autonomy 66%** | – |
+| Y2 Q1-Q2 | ~21-24 月 | 6mo Advisory + >80% approval gate → Auto-Allocator activation → autonomy 90% | – |
+| Y3 Q2 | ~32 月 | M10 Tier C-E / M12 cross-venue / M13 Y3+ → autonomy 95% | – |
+
+### 新增 P2 ticket（H 級 24 條 per PA §1.HIGH 簡列）
+
+`P2-v58-H-{1..24}`：M2 stage gate 對齊 / M6 Bayesian spec / M8 autoencoder Y2 / M9 variant Stage / M10 AUM trigger 數據源 / M5/M12/M13 trait slot / M3-M8-M11 mutex / M14-M15-M16 處置 / M1-M3-M11 量化 threshold / forgetfulness mitigation 反向 attack / 灰度事件嚴重度 / cross-language fixture / sibling file structure / Apple Silicon CI / external secret slot / docs/README index 補 / TODO refactor / Tokenomist trial expiry — 派發後 Sprint 1A-β-ε 期間並行補
 
 ---
 
