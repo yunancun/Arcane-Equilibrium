@@ -1,16 +1,34 @@
 # 玄衡 TODO — 活躍派工佇列
 
-版本：v57.4-zh（v57.3 dispatch-prep cleanup — A+B+C 三批 closure 2026-05-21）
+版本：v57.5-zh（v57.4 + D 批 active obs closure + watchdog R2 source land 2026-05-21）
 日期：2026-05-21
-狀態：本檔僅保留 ACTIVE / PENDING / ACTIVE-WATCH 項目；所有歷史 ✅ DONE 詳情已歸檔。**v57.4 closure 後 working tree clean，無 stale active 項；下一步 §-0.C Sequencing PHASE-0-MIGRATION-DRIFT-RECONCILE 待 operator 拍板路線（v4.2 / v4.3 / v4.4 / v5.0）**。
+狀態：本檔僅保留 ACTIVE / PENDING / ACTIVE-WATCH 項目；所有歷史 ✅ DONE 詳情已歸檔。**v57.5 closure 後 working tree clean（5 個 V5.2-V5.6 路線檔 untracked 屬 operator 範圍）；舊 in-flight 全 closure，可乾淨進路線變更**。
 
-**v57.3 → v57.4 closure（2026-05-21）**：
+**v57.3 → v57.5 closure（2026-05-21）— A+B+C+D 四批**：
+
 - **A 批**：TODO 縮 70 行（HALTSESSION/SPINE/WATCHDOG-EXIT/§12.2 sweep 6 項 + §-0 LEGACY v4.1 + §-1 incident 全歸檔）
 - **B 批**：13 個未追蹤文件入 git — AMD-01..05 + ADR-0024..0027 + execution_plan + LG-3 refresh + 9 個 srv/2026-05-20--*.md planning audit trail
 - **C 批**：P2 sweep 衍生 8 follow-up 全 closure — healthcheck [66] new + [62] --stratify（E1 R1+R2 / E2 R1 RETURN + R2 APPROVE-COND / E4 PASS）+ ADR-0028 dead-enum reservation + ADR-0029 trade-tape policy（Proposed 等 MIT calibration）+ FA C4 A-axis verdict (IMPL WIRED FOR LOG ONLY) + FA C6 phys-lock gate4 audit (spec PRESENT but incomplete) + spec v1.3→v1.4 AC-20 hour distribution coverage
-- **E2 R1 catch 重要 bug**：原 SQL 草案 `IN ('stop_loss', 'liquidation')` 全錯（exit_reason 是 free-text 大寫 LIKE pattern + liquidation 走 strategy_name LIKE 'unattributed:%'）；E1 R2 修正後 83/83 pass
-- **§12.3a 衍生 4 條新 follow-up**：P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE / P1-SWEEP-A-AXIS-PRUNE / P2-PHYS-LOCK-72-HEALTHCHECK / P2-FALLBACK-DEAD-ENUM-90D-AUDIT
-- Commit chain：`5cd7b264`（A）+ `4f3ae2bb`（B governance）+ `cfb9d243`（B planning）+ `e96d8ebb`（C closure）
+- **D 批**：active observation closure + 新 P1 ticket land
+  - **D1 QA**：LG-1 + LG-2 7d obs closure verdict — **LG-1 PASS WITH 1 KNOWN GAP**（H0 wired 18M+ ticks；fail-closed never fired）+ **LG-2 PASS WITH 1 CAVEAT**（startup assertion fire；tick path 0 caller BY-DESIGN per spec §2.4）+ Phase 2a T+72h HEALTHY VELOCITY but AC projection FAIL；engine 09:58:50 UTC SIGTERM stopped → PM 13:31 UTC restart_all.sh --keep-auth 恢復（3 process 全 alive；watchdog Inert probe enabled）
+  - **D2 watchdog classifier**：完整 E1 R1（103/103）→ E2 R1 RETURN（HIGH-1 production PG pool string false positive）→ E1 R2（207/207 +1 production string adversarial test）→ E2 R2 APPROVE → E4 PASS；4-gate + AMBIGUOUS_SOURCE_PATTERNS guard；R2 source 入 commit（deploy 等 operator 決定 watchdog daemon 重啟）
+  - **D3 PA**：P1 watch reverify — P1-DATA-1..3-WATCH CLOSED / P1-EDGE-1 CLOSED / P1-LG-5 STILL_ACTIVE / P1-EDGE-2 建議升 P0-FUNDING-ARB-DECISION-FORCE 待 operator 拍板
+- **§11.3 新增 5 條 P1**（D 批衍生）：P1-LG1-DEMO-SLA-VIOLATION / P1-FUNDING-ARB-SL-GATE-BUG / P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1 / P1-WATCHDOG-NETOUTAGE-SPARSE-LOG-OQ / P2-CANARY-FILE-SIZE-REFACTOR
+- **C 批 §12.3a 衍生 4 條 follow-up**：P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE / P1-SWEEP-A-AXIS-PRUNE / P2-PHYS-LOCK-72-HEALTHCHECK / P2-FALLBACK-DEAD-ENUM-90D-AUDIT
+
+**Commit chain（A→D 全期 push）**：
+- `5cd7b264`（A）+ `4f3ae2bb`（B governance）+ `cfb9d243`（B planning）+ `e96d8ebb`（C closure）
+- `33ef66f5`（TODO v57.3→v57.4 header bump）
+- `d5d5ee3c`（D-todo: LG-1/2 P0 closure + P1 status updates）
+- `fbe8b8d5`（D-reports: QA D1 + PA D3 + E1/E2 D2 R1 + memory）
+- `7f959673`（D2 R2: watchdog classifier R2 source + E1/E2/E4 R2 reports）
+
+**待 operator 拍板（不主動推）**：
+1. **P0-FUNDING-ARB-DECISION-FORCE 升等** — PA D3 建議不再等 n≥30 trigger
+2. **Watchdog daemon R2 deploy** — 當前 PID 2936560 仍跑 R1
+3. **5 個 V5.2-V5.6 路線檔** — untracked，operator 拍板路線後處理
+4. **OQ-NETOUTAGE-2** — sparse-log timestamp window gate defer 推薦
+5. **§12.3a 衍生 + §11.3 5 條 P1 ticket** — 入 backlog，待派工
 
 ## §-0 v57.2 雙軌制 v4.2 RATIFY（2026-05-20 — 3 amendments）
 
