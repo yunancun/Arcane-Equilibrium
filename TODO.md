@@ -9,7 +9,8 @@
 
 ## §0 摘要
 
-- **Current Sprint Phase**：Sprint 1A-α ✅ + Wave 2 v5.8 16 CR ✅ + Wave 2.5 paperwork ✅ + **Sprint 1A-β ✅ PM-signed 2026-05-21（9/10 deliverable + 1 DEFER + 25+ open Q）**；Sprint 1A-γ READY 派
+- **Current Sprint Phase**：Sprint 1A-α **DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED** (PM-signed 2026-05-21) + Wave 2 v5.8 16 CR **DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED** + Wave 2.5 paperwork **DESIGN-DONE** + **Sprint 1A-β DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED** (PM-signed 2026-05-21；9/10 deliverable + 1 DEFER + 25+ open Q)；Sprint 1A-γ READY 派
+  - 註：DESIGN-DONE = spec/ADR/runbook 文件 land；IMPL-PENDING = 無對應 IMPL 代碼；RUNTIME-NOT-APPLIED = sql/migrations/ 本地 max=V098 / Linux PG `_sqlx_migrations` max=96 / 10 target table (health_observations / degradation_state / replay_divergence_log / reward_weight_history / decision_lease_lal_tiers / lal_eligibility_log / decay_signals / strategy_lifecycle / earn_movement_log / hypotheses) pg_class 0 hits（per 2026-05-21 acceptance audit）
 - **Current Wave**：Sprint 1A-γ PENDING — M2/M4/M8/M9/M10 ADD-per-operator DESIGN + V105/V108/V109/V111 4 V### full DDL + V103 EXTEND M4 + 5 spec doc + 2 runbook + Cowork hybrid path + 3 ADR (M3/M6/M7 R4 建議補)
 - **Active P0**：`P0-EDGE-1`（5 strategy alpha-deficient）+ `P0-LG-3`（Wave 2.4 IMPL DISPATCH PENDING SPEC-READY 10d）+ `P0-OPS-1..4`（HTTPS / cred / legal / runbook）— Sprint 4 first Live W18-21 前必 closure
 - **Next 24h operator action**：D+1 (2026-05-22) AM ① BB OpenClaw key 發行日 5 min query ② Phase 2a 14d verdict 視窗（clock @ 2026-05-22~23 UTC）30-60 min 三選一決議
@@ -23,22 +24,27 @@
 ### §1.1 Current Sprint Banner
 
 ```
-Sprint 1A-α  ✅ DONE (W0-1.5, 2026-05-21)            v5.7 12 prefix + PM signoff
-Sprint 1A-修補 ✅ DONE (D+0~D+5, 2026-05-21)          v5.8 16 CR + Wave 2.5 paperwork
-Sprint 1A-β  ✅ DONE (2026-05-21 PM-signed)          M1 LAL/M3/M6/M7/M11 DESIGN + 5 V### full DDL + 6 runbook (16 artifact / ~12,900+ 行)
-Sprint 1A-γ  🟡 READY (W3.5-5.5)                    M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 + Cowork hybrid + 3 ADR (M3/M6/M7)
-Sprint 1A-δ  ⏳ PENDING (W5.5-6.5)                    M5/M12/M13 interface stubs (ADR-0035/0039/0040 已 Wave 2 land)
-Sprint 1A-ε  ⏳ PENDING (W6.5-9)                      integration verify + Monthly Review Wizard + 25+ open Q cross-ADR audit
+Sprint 1A-α   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (W0-1.5, 2026-05-21 PM-signed)  v5.7 12 prefix + PM signoff
+Sprint 1A-修補 DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (D+0~D+5, 2026-05-21)           v5.8 16 CR + Wave 2.5 paperwork
+Sprint 1A-β   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)          M1 LAL/M3/M6/M7/M11 DESIGN spec + 5 V### schema spec + 6 runbook (16 artifact / ~12,900+ 行；無 IMPL；V099+ migration 本地不存在；Linux PG max=96)
+Sprint 1A-γ   READY-TO-DISPATCH (W3.5-5.5)                                                     M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 + Cowork hybrid + 3 ADR (M3/M6/M7)
+Sprint 1A-δ   PENDING (W5.5-6.5)                                                                M5/M12/M13 interface stubs (ADR-0035/0039/0040 已 Wave 2 land)
+Sprint 1A-ε   PENDING (W6.5-9)                                                                  integration verify + Monthly Review Wizard + 25+ open Q cross-ADR audit + IMPL spike start
 ```
+
+> **狀態語言**（per 2026-05-21 acceptance audit）：
+> - **DESIGN-DONE**：spec / ADR / runbook / schema spec 文件 land 在 docs/ 並通過 PM signoff
+> - **IMPL-PENDING**：對應 Rust / Python / SQL 實作未開始（grep `nightly_replay|cf_quality|replay_divergence|earn_reconcile|lal_audit|decay_signal` in helper_scripts/api/python → 0 hits）
+> - **RUNTIME-NOT-APPLIED**：sql/migrations/ 本地 max=V098；Linux runtime DB `_sqlx_migrations` MAX(version)=96 / COUNT=93；10 個 target table pg_class 0 hits
 
 ### §1.2 Sprint Progression Table（Sprint 1A → Y3）
 
 | Sprint | Calendar | 主要工作 | 工時 (hr) | Status |
 |---|---|---|---|---|
-| 1A-α | 2026-05-21 done | v5.7 baseline + 4 follow-up | 75-105 | ✅ DONE |
-| 1A-修補 | 2026-05-21 done | 16 CRITICAL + Wave 2.5 paperwork | 1,007-1,453 並行 | ✅ DONE |
-| 1A-β | 2026-05-21 done | M1 LAL/M3/M6/M7/M11 DESIGN + V106/V107/V110/V112/V113 full DDL + 6 runbook | 310-460 並行 (10 sub-agent + 3 recovery) | ✅ DONE |
-| 1A-γ | W3.5-5.5 (~2026-05-27 開派) | M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 + V103 EXTEND M4 + 5 spec + 2 runbook + Cowork hybrid + 3 ADR (M3/M6/M7) | 240-360 | 🟡 READY |
+| 1A-α | 2026-05-21 done | v5.7 baseline + 4 follow-up | 75-105 | DESIGN-DONE / IMPL-PENDING |
+| 1A-修補 | 2026-05-21 done | 16 CRITICAL + Wave 2.5 paperwork | 1,007-1,453 並行 | DESIGN-DONE / IMPL-PENDING |
+| 1A-β | 2026-05-21 done | M1 LAL/M3/M6/M7/M11 DESIGN + V106/V107/V110/V112/V113 schema spec (本地無 .sql 檔；Linux PG 未 apply) + 6 runbook | 310-460 並行 (10 sub-agent + 3 recovery) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
+| 1A-γ | W3.5-5.5 (~2026-05-27 開派) | M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 + V103 EXTEND M4 + 5 spec + 2 runbook + Cowork hybrid + 3 ADR (M3/M6/M7) | 240-360 | READY-TO-DISPATCH |
 | 1A-δ | W5.5-6.5 | M5/M12/M13 stubs + ADR-0035/0039/0040 + V114-116 partial | 75-120 | ⏳ |
 | 1A-ε | W6.5-9 | integration verify + cross-ADR + Monthly Review Wizard + docs/README index | 60-100 | ⏳ |
 | 1B | W9-12 | v5.7 baseline + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 | ⏳ |
@@ -87,13 +93,19 @@ Sprint 1A-ε  ⏳ PENDING (W6.5-9)                      integration verify + Mon
 
 ### §1.5 Sprint 1A-α + Wave 2 + Wave 2.5 closure pointer
 
-**狀態**：✅ Sprint 1A-α PM-signed（`26ee2f06`）+ Wave 2 v5.8 16 CR ✅（`77d5c54e`）+ Wave 2.5 paperwork ✅（`957491ee`）；Sprint 1A-β D+5~D+6 dispatch readiness 12-check **10/12 ✅**。剩 2 條 operator-bound action carry-over 到 §1.4：#8 P0-EDGE-1/LG-3/OPS-1..4 closure ETA D+3 / #9 Console tab 4 sub-section decision D+5。
+**狀態**（per 2026-05-21 acceptance audit）：
+- Sprint 1A-α **DESIGN-DONE / IMPL-PENDING**（PM-signed `26ee2f06`；v5.7 12 prefix 為文件級 patch）
+- Wave 2 v5.8 16 CR **DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED**（`77d5c54e`；spec/ADR land，無 IMPL，9 V### 為 placeholder spec 非 SQL 檔）
+- Wave 2.5 paperwork **DESIGN-DONE**（`957491ee`；ADR-0035/0037 補位 + 反向 ref + README 索引漂移修）
+- Sprint 1A-β D+5~D+6 dispatch readiness 12-check **10/12 ✅**（剩 #8 #9 operator-bound）
 
-**完整 12-check 表 + closure narrative + 反向 attack mitigation + commit chain + reference**：`docs/archive/2026-05-21--sprint_1a_alpha_repair_closure.md` §A-§F
+**重要 caveat**（acceptance audit 揭露）：sql/migrations/ 本地 max=V098；Linux PG `_sqlx_migrations` MAX(version)=96 / COUNT=93；V099+ migration file 尚未產出；V97/V98 file 存在但未 apply。10 個 target table (health_observations / degradation_state / replay_divergence_log / reward_weight_history / decision_lease_lal_tiers / lal_eligibility_log / decay_signals / strategy_lifecycle / earn_movement_log / hypotheses) pg_class 0 hits。所有「DONE」措辭 = 文件 land 級別，不代表 runtime ready。
+
+**完整 12-check 表 + closure narrative + 反向 attack mitigation + commit chain + reference**：`docs/archive/2026-05-21--sprint_1a_alpha_repair_closure.md` §A-§F；Sprint 1A-β PM signoff narrative 在同檔 §G（無獨立 1A-β PM signoff file）
 
 ### §1.6 v5.8 Wave 2 16 CRITICAL must-fix closure pointer
 
-**狀態**：✅ 16/16 DONE 2026-05-21（commit `77d5c54e`）+ Wave 2.5 paperwork（commit `957491ee`）；CRITICAL 合計 ~1,007-1,453 hr / D+0~D+5 並行 5-10 sub-agent。
+**狀態**：16/16 **DESIGN-DONE** 2026-05-21（commit `77d5c54e`，spec/ADR/runbook 文件級 land；無 IMPL 代碼）+ Wave 2.5 paperwork（commit `957491ee`）；CRITICAL 合計 ~1,007-1,453 hr（est. 含未來 IMPL）/ D+0~D+5 並行 5-10 sub-agent（per 2026-05-21 acceptance audit）。
 
 **完整 16 CR 表（Owner / 工時 / ETA）+ 統計**：`docs/archive/2026-05-21--sprint_1a_alpha_repair_closure.md` §B
 
@@ -338,7 +350,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 
 ## §-1 歷史 closure 摘要（≤ 14d）
 
-- **2026-05-21 closure summary**：v5.7 12 prefix DONE PM SIGN-OFF（archive §A）/ v5.8 13-module audit 14 agent + PA + PM verdict / TODO v60 → v61 重構（本檔）+ H+I 批 P2/P3 closure（archive §C）/ 過去 14d 9 批 closure narrative（archive §D）
+- **2026-05-21 closure summary**：v5.7 12 prefix **DESIGN-DONE / IMPL-PENDING** PM SIGN-OFF（archive §A）/ v5.8 13-module audit 14 agent + PA + PM verdict（DESIGN-only）/ Sprint 1A-β 16 artifact **DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED**（archive §G）/ TODO v60 → v61 重構（本檔）+ H+I 批 P2/P3 closure（archive §C）/ 過去 14d 9 批 closure narrative（archive §D）— per 2026-05-21 acceptance audit (Linux PG max_version=96, 10 target tables pg_class 0 hits, V099+ migration .sql 本地不存在)
 - **Incident marker 2026-05-21**：09:58 UTC engine + watchdog SIGTERM graceful stop；13:31 UTC PM restart_all.sh --keep-auth 恢復；Phase 2a sample velocity gap ~3.5h；verdict 視窗影響 low
 
 **詳細歷史**：`docs/archive/2026-05-21--todo_v60_archive.md`（§A-§F 完整 narrative）

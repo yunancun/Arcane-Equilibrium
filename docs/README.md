@@ -171,6 +171,14 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `execution_plan/2026-05-21--earn_governance_spec.md` | Bybit Earn Asset Movement Guardian 完整治理 spec（5-Gate Adapter + Decision Lease retrofit + audit log；ADR-0032 spec phase） |
 | `execution_plan/2026-05-21--m4_minimum_bar_and_leakage_protocol.md` | M4 Pattern Miner minimum bar threshold + leakage protocol（hypothesis discovery 防 data leak + null-result acceptance + shift(1) 三語言） |
 | `execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` | M11 threshold rename + M7 dedup decay enforced（continuous replay 與 model decay 接線去重；per CR-7 contract） |
+| `execution_plan/2026-05-21--m1_lal_layered_approval_lease_design_spec.md` | M1 LAL Layered Approval Lease module DESIGN spec（697 行；Tier 0-4 升降 / 24h undo / Decision Lease retrofit / ADR-0034 對應 module 行為層 spec）— SPEC-DRAFT-V0 (IMPL pending Sprint 1A-γ+；per 2026-05-21 acceptance audit) |
+| `execution_plan/2026-05-21--m2_overlay_state_machine_design_spec.md` | M2 Overlay Enable / Disable state machine module DESIGN spec（macro / on-chain / regime 三類 overlay 治理；5-state FSM × 5 trigger_type；V105 schema 已 land）— DESIGN-DRAFT (Sprint 1A-γ 派發；IMPL pending E1 Sprint 5+) |
+| `execution_plan/2026-05-21--m3_health_monitoring_design_spec.md` | M3 self-monitoring / auto-diagnostics / health-aware degradation module DESIGN spec（648 行；4-state ladder + 6 health domain + amplification cap；對應 V106 schema spec）— DESIGN-DRAFT (IMPL pending Sprint 1A-γ+；ADR 待 Sprint 1A-γ R4 cross-ADR audit 補) |
+| `execution_plan/2026-05-21--m4_hypothesis_discovery_design_spec.md` | M4 Hypothesis Discovery — self-supervised pattern mining module DESIGN spec（Cowork DRAFT-only 邊界 + V103 EXTEND + shift(1) leak-free）— SPEC-DRAFT-V0 (Sprint 1A-γ 派發；DRAFT writeback 在 protected scope 邊界) |
+| `execution_plan/2026-05-21--m6_bayesian_reward_weight_design_spec.md` | M6 Bayesian Reward Weight Tuning module DESIGN spec（849 行；GP kernel + acquisition function + iter budget + 30% rollback cap；對應 V110 schema spec）— SPEC-DRAFT-V1 (IMPL pending Sprint 1A-γ+；ADR 待補) |
+| `execution_plan/2026-05-21--m7_decay_enforced_design_spec.md` | M7 Decay Detection + Single Decay Authority + DECAY_ENFORCED lifecycle module DESIGN spec（463 行；4 source × 6 FSM；14d × 50% per-strategy 動態；對應 V113 schema spec；QC consultant draft + PM transcribe）— SPEC-DRAFT-V0 (IMPL pending Sprint 1A-γ+；ADR 待補) |
+| `execution_plan/2026-05-21--m9_ab_framework_design_spec.md` | M9 A/B Testing Framework module DESIGN spec（4 variant cluster × i.i.d. 修正 × variant Stage 路徑 + fair execution clause；對應 V108 schema spec + ADR-0037）— SPEC-DRAFT-V1 (Sprint 1A-γ 派發；Sprint 4 read-only logging / Sprint 7-8 manual A/B / Y2 auto-gate 分階段 IMPL) |
+| `execution_plan/2026-05-21--m11_continuous_counterfactual_replay_design_spec.md` | M11 Continuous Counterfactual Replay module DESIGN spec（619 行；nightly replay divergence 5-7 type × 4-level severity + self-hosted PG `market.liquidations` source；對應 V107 schema spec + ADR-0038）— SPEC-DRAFT-V0 (IMPL pending Sprint 1A-γ+) |
 | `execution_plan/2026-05-21--v105_m2_overlay_state_transitions_schema_spec.md` | V105 M2 overlay state transitions schema spec（5 值 state enum + from/to + trigger_type + counterfactual_log FK + engine_mode CHECK） |
 | `execution_plan/2026-05-21--v106_m3_health_observations_schema_spec.md` | V106 M3 health observations schema spec（health domain 6 column + hypertable + 7d chunk + 30d compression） |
 | `execution_plan/2026-05-21--v107_m11_replay_divergence_log_schema_spec.md` | V107 M11 replay divergence log schema spec（divergence_type / divergence_pnl_usdt / fill_chain_id FK + ~9k row/yr 規模） |
@@ -545,15 +553,15 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-10--n0_signoff_n1_dispatch_fire_sop.md` | N+0 sign-off + N+1 dispatch fire SOP — pre-fire 檢查 + deploy 步驟 (一次 restart_all --rebuild --keep-auth W7-3+W7-1+W2 trait) + dispatch fire (W7-2/W7-4/W7-5 + W6 + W1 + W2 + W4 + W5 並行) + memory persist + 24h watch |
 | `archive/2026-05-09--w_audit_verified_closed_archive_v2.md` | v2 verified-closed archive (R4 v2 errata 補登) |
 | `archive/2026-05-09--w_audit_verified_closed_archive_v3.md` | v3 verified-closed archive — DUAL-TRACK structure + 5 commits real cover + cross-agent PA Redesign verdict |
-| `../2026-05-09--audit_fix_verification_v3_summary.md` | PM v3 sign-off summary (top-level operator-facing) |
+| `archive/2026-05-21--srv_root_cleanup/2026-05-09--audit_fix_verification_v3_summary.md` | PM v3 sign-off summary (top-level operator-facing；2026-05-21 archived from srv root) |
 | `CCAgentWorkSpace/{FA,AI-E,E5,E4,E3,CC,QC,MIT,BB,TW,R4,A3}/workspace/reports/2026-05-09--*_v3.md` | 12 v3 verification reports (per-agent re-audit after v2 land) |
-| `../2026-05-09--audit_fix_verification_v2_summary.md` | PM v2 sign-off summary (intermediate, superseded by v3) |
+| `archive/2026-05-21--srv_root_cleanup/2026-05-09--audit_fix_verification_v2_summary.md` | PM v2 sign-off summary (intermediate, superseded by v3；2026-05-21 archived from srv root) |
 
 ### 2026-05 W-AUDIT-1 index addendum（AgentTodo / audit / governance）
 
 | 文件 | 内容 |
 |------|------|
-| `../2026-05-08--full_audit_fix_plan.md` | 12-agent full audit PA 整合修復計劃：88 unique findings / W-AUDIT-1..7 / 5 pending operator decisions |
+| `archive/2026-05-21--srv_root_cleanup/2026-05-08--full_audit_fix_plan.md` | 12-agent full audit PA 整合修復計劃：88 unique findings / W-AUDIT-1..7 / 5 pending operator decisions（2026-05-21 archived from srv root） |
 | `governance_dev/2026-05-08--w_c_lease_router_authorized.md` | W-C Decision Lease router evidence-mode operator authorization record |
 | `governance_dev/amendments/2026-05-02--SM-02_R04_retrofit_path_a.md` | AMD-2026-05-02-01 + §5.4.1 W-C early evidence flag addendum |
 | `governance_dev/amendments/2026-05-03--ref20_wave7_p5_impl_accept_deploy_blocked.md` | AMD-2026-05-03-01 Wave 7 P5 IMPL accepted / deploy blocked split |
