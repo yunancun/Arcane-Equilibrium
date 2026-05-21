@@ -9,8 +9,8 @@
 
 ## §0 摘要
 
-- **Current Sprint Phase**：Sprint 1A-α DONE（v5.7 12 prefix sign-off 2026-05-21）+ Wave 2 v5.8 修補 D+0~D+5 STAGING
-- **Current Wave**：Wave 2 = v5.8 16 CRITICAL must-fix 修補（D+0 完 1/16；剩 15 條 D+1~D+5 並行）
+- **Current Sprint Phase**：Sprint 1A-α DONE（v5.7 12 prefix sign-off 2026-05-21）+ Wave 2 v5.8 修補 16/16 ✅ DONE + Wave 2.5 paperwork closure ✅ DONE（2026-05-21）+ Sprint 1A-β D+5~D+6 dispatch readiness 12-check 10/12 ✅
+- **Current Wave**：Wave 2.5 ✅ DONE = ADR-0035/0037 TW draft + 0034/0036/0040 反向 ref + README index 53+7+3 條補 + 12-check sweep + 2 untracked stage；下一步 = D+3~D+5 operator-bound 2 條 + D+5 Sprint 1A-β PA dispatch packet
 - **Active P0**：`P0-EDGE-1`（5 strategy alpha-deficient）+ `P0-LG-3`（Wave 2.4 IMPL DISPATCH PENDING SPEC-READY 10d）+ `P0-OPS-1..4`（HTTPS / cred / legal / runbook）— Sprint 4 first Live W18-21 前必 closure
 - **Next 24h operator action**：D+1 (2026-05-22) AM ① BB OpenClaw key 發行日 5 min query ② Phase 2a 14d verdict 視窗（clock @ 2026-05-22~23 UTC）30-60 min 三選一決議
 - **Runtime**：engine PID 2934602 + API PID 2934665 + watchdog PID 2936560；最後 graceful restart 2026-05-21 13:31 UTC
@@ -85,20 +85,20 @@ Sprint 1A-ε  ⏳ PENDING (W6.5-9)                      integration verify + Mon
 
 **Operator 親手時間 D+0~D+6 ≈ 3.5-5 hr**（分散 6 天，平均 30-50 min/day）；PM 每次 operator 進 session 主動 check 當天 action
 
-### §1.5 Sprint 1A-β Dispatch Readiness Checklist（12 條，D+5~D+6 必達）
+### §1.5 Sprint 1A-β Dispatch Readiness Checklist（12 條，D+5~D+6 必達；2026-05-21 paperwork closure 後 10/12 ✅，剩 #8 operator closure ETA + #9 Console tab decision 兩條 operator-bound action）
 
-1. ☐ v5.7 4 leftover land（CR-1：V103 audit field / V### re-number / PG conn / Earn 五角色 cross-ref）
-2. ☐ ADR-0030~0033（v5.7）+ ADR-0034 LAL（CR-2）sign-off
-3. ☐ AMD-2026-05-21-01 autonomy-vs-human-final-review sign-off（CR-3）
-4. ☐ ADR-0040 multi-venue gate（CR-4）sign-off
-5. ☐ ADR-0036 + ADR-0037 + ADR-0038 sign-off
-6. ☐ M10 Tier D 黑名單 hardening + M8 GARCH 替換（CR-5）
-7. ☐ V105-V113 9 個 schema spec doc land（CR-8，90-140 MIT-hr）
-8. ☐ §10 P0 precondition table + operator closure ETA（CR-10）
-9. ☐ GUI 工時 +261-374 hr + Console tab 4 sub-section + A3 sign-off invariants（CR-11）
-10. ☐ TW 工時 +450-640 hr 寫入 §3/§4/§8/§9/§12（CR-12）
-11. ☐ §3/§4/§14 工時統一上修（CR-13：543-797→670-1,015 hr / 2,780-3,930→3,500-5,200 hr / 37-44w→44-55w）
-12. ☐ docs/README.md index 補（v5.7+v5.8 主檔 + 14 audit + dispatch packet + V103/V104 spec 等 ~11 條）+ TODO v61 finalize
+1. ✅ v5.7 4 leftover land（CR-1：V103 audit field / V### re-number / PG conn / Earn 五角色 cross-ref）
+2. ✅ ADR-0030~0033（v5.7 Earn/Macro/Onchain/Bybit-Binance amendment 4 ADR）+ ADR-0034 LAL（CR-2）sign-off
+3. ✅ AMD-2026-05-21-01 autonomy-vs-human-final-review sign-off（CR-3）
+4. ✅ ADR-0040 multi-venue gate（CR-4）sign-off
+5. ✅ ADR-0035 + ADR-0036 + ADR-0037 + ADR-0038 sign-off — 0036/0038 此前 ✅；ADR-0035 (M5 online learning interface, 239 行) + ADR-0037 (M9 A/B framework, 391 行) TW 2026-05-21 補 draft（status Proposed；PM 簽 D+5）；反向 ref patch 0034/0036/0040 同 commit land
+6. ✅ M10 Tier D 黑名單 hardening + M8 GARCH 替換（CR-5）
+7. ✅ V105-V113 9 個 schema spec doc land（CR-8，90-140 MIT-hr placeholder ✅；full DDL Sprint 1A-β/γ）
+8. ⏳ §10 P0 precondition table ✅（CR-10 已 land v5.8 §10.5）+ **operator closure ETA D+3 親手填**
+9. ⏳ GUI 工時 +261-374 hr ✅ + A3 sign-off invariants 48-53 hr Y1 ✅（CR-11 已 land v5.8 §3.5.2/§12）+ **Console tab 4 sub-section decision D+5 operator 親手**
+10. ✅ TW 工時 +450-640 hr 寫入 §3/§4/§8/§9/§12（CR-12）
+11. ✅ §3/§4/§14 工時統一上修（CR-13：543-797→670-1,015 hr / 2,780-3,930→3,500-5,200 hr / 37-44w→44-55w）
+12. ✅ docs/README.md index 補（R4 audit + PM apply：新 2026-05-21 time-section 53 條 entry + ADR table 7 條 append + archive table 3 條 append + 0035/0037 反向 ref patch）+ TODO v61 finalize ✅（commit 7cd75c89）
 
 ### §1.6 v5.8 16 CRITICAL must-fix（D+0~D+5 並行修補）
 
@@ -351,9 +351,14 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - ADR-0028 close-maker-fallback dead enum reservation（90d audit 2026-08-21）
 - ADR-0029 market.public_trades + orderbook_l2_snapshot storage policy（Proposed）
 - ADR-0030 Bybit Earn governance / ADR-0031 Macro counterfactual / ADR-0032 On-chain counterfactual
-- **ADR-0034 M1 LAL（Layered Approval Lease，v5.8 NEW）— TW draft pending D+5**
-- **ADR-0035-0040 v5.8 7 ADR — TW draft pending D+4-D+5**
-- **ADR-0041 ContextDistiller v4 — AI-E draft pending D+5**
+- ADR-0034 M1 LAL（Layered Approval Lease，v5.8 NEW）✅ DONE 2026-05-21
+- ADR-0035 M5 online learning interface reserved (Y3+) ✅ DONE 2026-05-21
+- ADR-0036 M8 anomaly detection + M10 Tier D blacklist ✅ DONE 2026-05-21
+- ADR-0037 M9 A/B framework + statistical methodology ✅ DONE 2026-05-21
+- ADR-0038 M11 continuous counterfactual replay ✅ DONE 2026-05-21
+- ADR-0039 M12 order router trait + maker fill rate ✅ DONE 2026-05-21
+- ADR-0040 multi-venue gate spec ✅ DONE 2026-05-21
+- ADR-0041 ContextDistiller v4 + AI cost cap amendment ✅ DONE 2026-05-21
 - AMD-2026-05-15-01（Canary Rebase Replay Preflight + Demo Micro-Canary）
 - AMD-2026-05-15-02 v0.7（EDGE-P2-3 Phase 1b + Runtime Activation Layer）
 - **AMD-2026-05-21-01-autonomy-vs-human-final-review — CC+PM draft pending D+2**

@@ -4,7 +4,7 @@ Date: 2026-05-21
 Status: **Proposed-pending-commit**（per operator D4 2026-05-21；本 ADR 為 ADR-0033 §Decision 2 時點 amendment standalone）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via BB 5.21 v5.8 audit push back + PM final verdict §四 D4「M13 Y2 Binance trade enable → Y3+ at earliest」批准）
 Supersedes: ADR-0033 §Decision 2 「Y1 末（Sprint 10 W36-39）evaluation」時點 → 改 Y3+ first quarter (~Y2 末 W104+) evaluation；ADR-0033 §Decision 1（Binance market-data Y1 approved）+ §Decision 3（DEX/Hyperliquid not approved）+ §Decision 4（D12 + ToS posture）**不變**
-Related: ADR-0006 (Bybit-only baseline 2026-04-03 — thesis 不變) / ADR-0033 (ADR-0006 amendment Binance market-data + Y2 evaluation — 本 ADR 為其 §Decision 2 時點 amendment) / ADR-0034 (LAL 4 capital structure / venue change always operator) / CLAUDE.md §一 Bybit-only + §四 mainnet boundary / AMD-2026-05-21-01 autonomy-vs-human-final-review / v5.8 §2 M13 (Multi-asset class / multi-venue capacity) / v5.8 §5 capital-tier ladder
+Related: ADR-0006 (Bybit-only baseline 2026-04-03 — thesis 不變) / ADR-0033 (ADR-0006 amendment Binance market-data + Y2 evaluation — 本 ADR 為其 §Decision 2 時點 amendment) / ADR-0034 (LAL 4 capital structure / venue change always operator) / ADR-0035 (M5 online learning interface reservation；同 Sprint 1A-δ deliverable + 同 interface-reservation pattern) / CLAUDE.md §一 Bybit-only + §四 mainnet boundary / AMD-2026-05-21-01 autonomy-vs-human-final-review / v5.8 §2 M13 (Multi-asset class / multi-venue capacity) / v5.8 §5 capital-tier ladder
 
 ## Context
 
