@@ -18,34 +18,51 @@
 
 ---
 
-## §0.5 v5.7 Sprint 1A Pre-Start CRITICAL Fix List（D1-D5 已批 / D6 暫不改 §1）
+## §0.5 v5.7 Sprint 1A Pre-Start CRITICAL Fix List — DONE 2026-05-21 PM SIGN-OFF
 
-**狀態**：STAGING — 12 條 CRITICAL must-fix 為 Sprint 1A 派 PA 前置條件；本區為「修補階段」工作台，不取代 §1 路線重填（§1 保留 Hard precondition）。
+**狀態**：**DONE — 12/12 land + FA APPROVE-WITH-CAVEAT + PA NEEDS-PM-ARBITRATION + PM 仲裁 5 條決議完畢 + Sprint 1A 派發 GO-WITH-CONDITIONS**
 
-**緣由**：v5.7 thesis 14/14 agent verified；執行細節 12 CRITICAL + 20 HIGH 缺口；並行 sub-agent 後 wall-clock 2-3 天可清。
+**完整 sign-off**：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v57_12_prefix_pm_signoff.md`（PM 驗收主入口）
+**FA 業務 verify**：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-21--v57_12_prefix_business_verify.md`
+**PA 技術 verify**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_12_prefix_tech_verify.md`
 
-**完整理由 + 並行依賴圖見**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_dispatch_consolidation.md`
+**PM 仲裁 5 條決議**（全採 FA+PA 推薦）：
+1. **G5 V### re-number**：option A（V097/V098 catch-up → V099/V100=Track v3 → V101/V102=Earn schema）；30-60 min churn
+2. **G3 工時 reconcile**：75-105 hr 中間值（BB C6 推翻僅 §6 部分，不全回滾）
+3. **G2 V101 字段集**：路徑 A（v5.7 brief 字段集；廢棄 V101 §3.3.1+§3.3.2）
+4. **G7 C8 §4**：條件 A finalize（BB C4 verdict (a) API EXISTS）
+5. **G11 Apple CI clippy**：雙軌（hard gate cargo check / 軟強制 clippy + P2-CLIPPY-CLEANUP-1 ticket）
 
-| ID | 項目 | 來源 agent | 估時 | Owner | 狀態 |
-|---|---|---|---|---|---|
-| `v57-C1` | v5.7 主檔搬 `docs/execution_plan/2026-05-20--execution-plan-v5.7.md` + 進 git tree（**§1 不重填 / Hard precondition 不解除** per D6） | E2 R4 | 30 min | PM | □ |
-| `v57-C2` | ADR 編號順移 `0028/0029/0030` → `0030/0031/0032` + 新建 **ADR-0033**（ADR-0006 Binance amendment） | R4 TW CC | 12-18 hr | TW + CC | □ |
-| `v57-C3` | V103/V104 schema spec 起草 `docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md`（4 表完整 DDL + Guard A/B/C + index） | MIT E2 CC FA TW | 8-12 hr | PA + MIT | □ |
-| `v57-C4` | Bybit Earn API endpoint 存在性 BB review verdict（三選一：a API exists / b Web UI only / c partial API） | BB E2 E3 QC | 2-4 hr | BB | □ |
-| `v57-C5` | Bybit Earn stake/redeem API key scope 驗證（非 withdraw；違反 D1d Hard Boundary 則 fallback manual Web UI） | BB CC E3 | 1-2 hr | BB + E3 | □ |
-| `v57-C6` | liquidation writer §6「已 30k+ rows」claim factual 核對 — 等 `W-AUDIT-8a-C1` 24h proof verdict（2026-05-15 19:53 啟動，目前已過 5 天） | BB E2 | 2-3 hr | BB + MIT | □ |
-| `v57-C7` | Sprint 1B C10 改 Stage 0R + Stage 1 Demo（spot leg paper-only，**不寫 mainnet live $2,000**）；live 真實時間落 Sprint 3-4 | QA E2 FA QC | 1 hr | PA + FA | □ |
-| `v57-C8` | Earn governance spec land `docs/execution_plan/2026-05-21--earn_governance_spec.md`（IntentProcessor 復用 / lease_type=earn_stake / 5-gate 適用 / retCode != 0 fail-closed / Daily reconciliation 失敗 → disable） | CC QA E3 FA MIT | 6-10 hr | CC + FA | □ |
-| `v57-C9` | V103/V104 派發前 Linux PG empirical dry-run（`ssh trade-core` 查 _sqlx_migrations head + information_schema.columns + pg_total_relation_size） | E4 MIT QA E2 CC | 1-2 hr | PA | □ |
-| `v57-C10` | Sprint 1A 60-80 → **90-130 hr** + 1B 50-70 → **65-85 hr** + Y1 total 1,190-1,590 → **1,295-1,740 hr**；§9 並行 sub-agent 強制 50-60% workload | E2 E3 E4 E5 MIT TW QC | 30 min | PM | □ |
-| `v57-C11` | Sprint 1A acceptance criteria 加 Apple Silicon CI tuple 條款（`cargo check --target aarch64-apple-darwin` 必過）；PA sub-agent prompt 注入 | E5 | 30 min | PA | □ |
-| `v57-C12` | Sprint 1A dispatch brief 明示「注釋默認只寫中文」（per 2026-05-05 mandate） + SCRIPT_INDEX.md enforce（E2 review 加 `rg -L 'MODULE_NOTE\|模塊用途' <new-files>` = 0 hit PASS） | TW | 30 min | PA | □ |
+**operator follow-up（不阻塞今日 commit）**：
+- G4 OpenClaw key 發行日（5 min query；Sprint 1B 派發前必驗）
+- H2 Console tab 歸屬決策（A3+PA+operator 工作會；H 級不阻塞）
 
-**CRITICAL 合計**：~36-58 hr（C2 12-18 + C3 8-12 + C8 6-10 為大頭；其他多 0.5-4 hr 確認類）；3+ 並行 sub-agent 後 wall-clock 2-3 天
+**Sprint 1A 派發前 must-fix（PA + sub-agent 補；2026-05-22 內 land）**：
+- G6 V103 schema 補 4-5 audit field（PA + MIT；5-8 hr）
+- V### re-number search/replace（PA；30-60 min）
+- PG connection 範例補 CLAUDE.md / docs/agents/context-loading.md（TW；30 min）
+- Earn governance 五角色 cross-ref（FA + E3 + QA + MIT 並行；各 1-2 hr）
 
-**5 並行 track（per PA §2）**：1A-gov（governance + spec） / 1A-schema（V103/V104） / 1A-sensor（4 NEW sensor） / 1A-earn（Earn API read-only） / 1A-gui（A3 + E1a）
+**新增 P2 ticket**：`P2-CLIPPY-CLEANUP-1`（既有 17 clippy errors 修；owner E1；4-6 hr；Sprint 1A 進行中並行清；不阻塞 dispatch）
 
-**D+5 正式 dispatch 前 check list**：12 條全 ✓ + AMD 命名規範化 + docs/README.md index 補
+**Sprint 1A 派發 verdict**：GO-WITH-CONDITIONS — D+1（2026-05-22）5 並行 track 可派
+
+| ID | 項目 | Owner | 狀態 | 落地 |
+|---|---|---|---|---|
+| `v57-C1` | v5.7 主檔搬 `docs/execution_plan/2026-05-20--execution-plan-v5.7.md` + 進 git tree（**§1 不重填 / Hard precondition 不解除** per D6） | PM | ✅ DONE | git rename detected |
+| `v57-C2` | ADR 0030/0031/0032 + ADR-0033（ADR-0006 amendment）926 行 | TW | ✅ DONE | `docs/adr/0030-..0033-*.md` |
+| `v57-C3` | V103/V104 schema spec（4 表 DDL + Guard A/B/C）940 行 ⚠️ V### search/replace（PM 仲裁 1）+ 補 4-5 audit field（2026-05-22 PA+MIT 5-8 hr）| PA + MIT | ✅ DONE-WITH-FOLLOWUP | `docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md` |
+| `v57-C4` | Bybit Earn API endpoint = **(a) API EXISTS 12 endpoint** | BB | ✅ DONE | `docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-21--v57_c4_c5_c6_bybit_verdict.md` |
+| `v57-C5` | Earn API key scope = **(a) non-withdraw sufficient** ⚠️ operator 5-min 查 key 發行日（Sprint 1B 派發前必驗）| BB + E3 | ✅ DONE-WITH-OPERATOR-FOLLOWUP | 同上 BB report |
+| `v57-C6` | liquidation writer = **(a) PROOF PASS 31,473 rows** 推翻 v57 audit Risk 1 BLOCKED claim | BB + MIT | ✅ DONE-STRONG | 同上 BB report |
+| `v57-C7` | Sprint 1B C10 → Stage 0R + Stage 1 Demo（不寫 mainnet live $2,000）；Stage 4 落 Sprint 3-4 | PA + FA | ✅ DONE | `docs/execution_plan/2026-05-21--sprint_1a_dispatch_packet.md` §1 |
+| `v57-C8` | Earn governance spec（5-gate / IntentProcessor 復用 / fail-closed / daily reconciliation）460 行 ⚠️ §4 條件 A finalize（PM 仲裁 4）；五角色 cross-ref 預 2026-05-22 land | CC + FA | ✅ DONE-WITH-CROSS-REF-FOLLOWUP | `docs/execution_plan/2026-05-21--earn_governance_spec.md` |
+| `v57-C9` | V103/V104 PG empirical dry-run — **head=V096，V101/V102 未 land**；PM 仲裁 1 採 option A：V099/V100=Track v3 / V101/V102=Earn schema | PA | ✅ DONE-STRONG | `docs/execution_plan/2026-05-21--v103_v104_linux_pg_dry_run.md` + PA report |
+| `v57-C10` | Sprint 1A 60-80 → **75-105 hr**（PM 仲裁 2 中間值）+ Y1 total → **1,275-1,710 hr**；§9 並行 sub-agent 強制 50-60% workload | PM | ✅ DONE | dispatch_packet §2 |
+| `v57-C11` | Apple Silicon CI — PM 仲裁 5 雙軌：`cargo check --target aarch64-apple-darwin` hard gate ✅；clippy 軟強制 + P2-CLIPPY-CLEANUP-1 | PA | ✅ DONE | dispatch_packet §3 |
+| `v57-C12` | 中文注釋 mandate + SCRIPT_INDEX.md enforce + MODULE_NOTE grep step | PA + TW | ✅ DONE | dispatch_packet §4 |
+
+**5 並行 track 派工 readiness**：1A-gov ✅ / 1A-schema ⚠️ NEEDS-PM-ARBITRATION (V### re-number done) / 1A-sensor ✅ / 1A-earn ✅ / 1A-gui ⚠️ NEEDS-OPERATOR-DECISION (H2 tab 歸屬)
 
 ---
 

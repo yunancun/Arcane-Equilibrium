@@ -675,3 +675,85 @@ PM 派 W-AUDIT-8a C1 v2 942 LOC E1 IMPL pre-deploy BB pre-review；v1 17055s/864
 ### Report path
 
 `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_bb_pre_review.md`
+
+---
+
+## 2026-05-21 v5.7 C4 + C5 + C6 三件 advisory verdict (HEAD pending)
+
+### Trigger
+
+PM 派 v57 dispatch-safe patch Sprint 1A 派發前 3 件 BB advisory（v57 executability audit §4 列「PA / FA 必收 top 3」延伸）：C4 Earn endpoint 存在性 / C5 Stake/Redeem API key scope / C6 W-AUDIT-8a C1 24h proof verdict。
+
+### Verdict
+
+| # | 三選一 |
+|---|---|
+| C4 | **(a) API exists**（`/v5/earn/flexible/*` + `/v5/earn/fixed/*` + `/v5/finance/earn/easy-onchain/*`），12 endpoint 完整，2025-02-20 launch；字典 0 entries → drift 5+ 個月 |
+| C5 | **(a) non-withdraw scope sufficient**（dedicated `Earn` scope，2026-04-09 後 key 自動帶；2026-04-09 前 key 缺）；不違 D1d / Hard Boundaries |
+| C6 | **(a) PROOF PASS** — PG `market.liquidations` 31,473 rows / 3.7 day / 99 rows 5min 持續流入；writer production-grade |
+
+### 重大發現：推翻 2026-05-21 v57 executability audit Risk 1 BLOCKED claim
+
+v57 audit Risk 1 claim「§6 30k+ rows 是 2026-04-05 之前舊資料 + writer 未恢復 + Sprint 1A scope 反向 +30~50 hr」**完全錯誤**。實際：
+- PG empirical query: 31,473 rows, time range 2026-05-17 23:12 → 2026-05-21 16:01（3.7 day）
+- writer 是 production engine PID 2934602 `/home/ncyu/BybitOpenClaw/srv` from 13:31，canary mode + paper=0
+- `multi_interval_topics.rs:131` / `ws_client/dispatch.rs:115` / `parsers.rs:295` / `market_writer.rs:475` 全 wired
+- 99 rows in last 5 min (16 cohort + 23 non-cohort symbols)
+
+Root cause：v57 audit 過信字典 line 1092 + W-AUDIT-8a C1 plan「BLOCKED」status，**沒做 PG empirical query** 直接驗證；字典 + plan stale ~5 day。
+
+### Sprint 1A 工時 net 修正
+
+| 項目 | v5.7 estimate | v57 audit | BB-real（本次） |
+|---|---|---|---|
+| §4 Earn API integration | 15 hr | 30~40 hr 或 BD waiting | **18~25 hr**（read-only first） |
+| §6 Liquidation writer | -15~20 hr 節省 | +30~50 hr 反向 | **0~+1 hr**（writer 已 prod） |
+| **Sprint 1A total** | **60~80 hr** | **90~130 hr** | **65~85 hr** |
+
+v57 audit total over-estimated by ~30 hr，主因 §6 Risk 1 過度反估 +50 hr。
+
+### 字典補錄清單（BB1 Wave 3b 從 7 升 13）
+
+新增 6 處：
+1. §3 NEW Earn API 章節（12 endpoint，HIGH）
+2. §1.10 line 1092/1099/1325 移除 allLiquidation BLOCKED 字樣（HIGH）
+3. §2.1 WS topic table `allLiquidation.{symbol}` 標 active production（HIGH）
+4. §3 NEW `/v5/earn/byusdt/*` 章節（LOW）
+5. §3 NEW `/v5/earn/fixed-saving/*` 章節（LOW）
+6. §4.1 Rate Limit table 新加 Earn group（LOW）
+
+估 ~4-6 hr 與既有 BB1 工作合併。
+
+### Sprint 1A 派發前 must-fix（從 v57 7 項修正為 4 項）
+
+1. 字典 ref handbook §3 NEW Earn API 章節 + §1.10 W-AUDIT-8a C1 BLOCKED 字樣修正（HIGH，4-6 hr，BB1）
+2. operator 查 OpenClaw API key 發行日 + Bybit account UI `Earn` scope toggle 確認（HIGH，5-10 min）
+3. W-AUDIT-8a C1 plan §Verdict 標 PASS-by-empirical-evidence + MIT 補 schema mapping sign-off（HIGH，5-8 hr）
+4. Bybit demo / LiveDemo Earn endpoint smoke test（HIGH，0.5 hr，operator + BB）
+
+原 v57 must-fix #5（options chain recorder schema review）+ #7（§4 driver endpoint 環境決策）保持。
+
+### Bybit-side overall（2026-05-21 本次）
+
+- 技術合規度：96%（writer production-confirmed 但字典 + plan 仍標 BLOCKED 屬 governance drift）
+- 政策合規度：72%（Earn scope 0 違反 + key 發行日待 operator 驗）
+- 0 ship-stop blocker
+- 0 hard boundary 違反
+- 30d Bybit V5 changelog 0 breaking change（Earn `/v5/earn/byusdt/*` + `/v5/earn/fixed-saving/*` 新加但與 OpenClaw 當前無交集）
+
+### 下次啟動需查驗項
+
+1. BB1 sub-agent Wave 3b 13 項字典更新是否啟動（從 7 升 13）
+2. operator API key 發行日 + Earn scope toggle 確認結果
+3. W-AUDIT-8a C1 plan PASS-by-empirical-evidence 是否 land（execution plan + 字典同步）
+4. MIT schema mapping sign-off 是否補（5 col PG schema → Rust `MarketDataMsg::Liquidation` mapping）
+5. Sprint 1A §4 scope 是否限定 read-only Earn API（不接 stake/redeem programmatic）
+6. Bybit demo / LiveDemo `/v5/earn/flexible/product` smoke 結果
+7. 25-cohort filter 策略決策（QC/PA 拍板）
+8. v57 executability audit 是否 deprecate Risk 1 段落 + 補本 verdict cross-ref
+
+### Report path
+
+`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-21--v57_c4_c5_c6_bybit_verdict.md`
+（同檔複製到 `docs/CCAgentWorkSpace/Operator/`，因 Risk 1 推翻 + 工時 ±50 hr 修正屬 HIGH severity operator advisory）
+
