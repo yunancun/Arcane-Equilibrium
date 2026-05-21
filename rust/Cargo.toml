@@ -36,6 +36,10 @@ hex = "0.4"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "uuid", "macros", "migrate"] }
 ndarray = "0.16"
 parking_lot = "0.12"
+# P2-LG1-DEMO-SLO-CARVEOUT — H0 hot-path latency observability。
+# HdrHistogram 7.x pure Rust + sig_figs=3 ~256KB/instance × 5 engine_mode ≈ 1.3MB。
+# Apple Silicon arm64 build clean，無 sys dep（per spec §11.3）。
+hdrhistogram = "7"
 
 [profile.release]
 strip = "symbols"

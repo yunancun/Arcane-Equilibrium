@@ -192,6 +192,20 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     if let Some(env) = endpoint_env {
         pipeline.set_endpoint_env(env);
     }
+    // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：注入 per-pipeline 獨立的
+    // H0LatencyRecorder。必須在 set_endpoint_env 之後，因為 set_endpoint_env
+    // 把 effective_engine_mode 同步給 H0Gate.engine_mode；recorder 注入後
+    // record() 路徑用此 tag 分流 histogram。
+    //
+    // 為什麼 per-pipeline 獨立 Arc：3 pipeline 各跑自己 tokio rt；共用 Arc 會
+    // 每 tick 撞 Mutex（3 producer × ~1000 tick/s）；獨立 instance 確保 record
+    // 路徑 single-thread uncontested ~30-40ns，符合 spec AC-3 ≤ 50ns。
+    //
+    // recorder 內仍持 5 mode histogram，但本 pipeline 只填自己 engine_mode
+    // 那格；output JSON shape 與 spec §3.6 一致（其他 4 mode count=0 由
+    // status JSON consumer 過濾）。
+    let h0_latency_recorder = Arc::new(openclaw_core::hot_path_metrics::H0LatencyRecorder::new());
+    pipeline.set_h0_latency_recorder(h0_latency_recorder);
     if let Some(tx) = lease_transition_tx {
         pipeline.governance.set_lease_transition_tx(tx);
     }

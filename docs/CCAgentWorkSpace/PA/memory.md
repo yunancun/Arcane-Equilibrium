@@ -4912,3 +4912,133 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 **Report path**：`docs/execution_plan/2026-05-21--v103_v104_linux_pg_dry_run.md`（spec ~300 行）+ `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_c9_pg_dry_run.md`（≤ 200 字 closure report）
 
 **Confidence**：HIGH for empirical query 結果；HIGH for §6 V### re-number 選項 A 推薦；MEDIUM-HIGH for §7 Q3 v56 P0 closure 解釋（須 PM / QA 確認）。
+
+
+---
+
+## 2026-05-21 — P2-LG1-DEMO-SLO-CARVEOUT PA spec + Rust skeleton 一手到底
+
+**Trigger**：E5 F1 audit verdict 2026-05-21（demo H0 `max=2454μs > 1ms SLA` 非 algorithmic bug，platform jitter floor）推薦選項 B（accept variance + SLO carve-out + HdrHistogram metric + Grafana panel）。主會話 PM dispatch；observability layer scope 允許 PA 在同 agent 內寫 IMPL（非 hot path 業務代碼）。
+
+**Outcome**：spec + Rust skeleton + 8 unit test + Grafana JSON 全 land；workspace + core Cargo.toml hdrhistogram dep 加；`cargo check --target aarch64-apple-darwin -p openclaw_core` PASS；`cargo check -p openclaw_engine` 不被 core 改動 break；8 PASS / 0 fail / 0.02s release test。
+
+**派工 prompt 三處 PA 更正（最重要教訓）**：
+
+1. **module path 寫錯 crate**：prompt 指定 `rust/openclaw_engine/src/hot_path_metrics/` —— grep 證 `h0_gate.rs` 住 `openclaw_core` crate 不在 engine。workspace dep 單向 core → engine；engine 無法被 core 看到。若 PA 盲信 prompt 在 engine 寫 module，會出 3 種 broken pattern：(a) cross-crate 反向 dep 編譯拒絕 / (b) trait callback 過度抽象 + vtable dispatch > 50ns AC-3 / (c) standalone engine module 失去 sub-tick granularity。**正解** = metric module 必須住 H0Gate 同 crate。
+
+2. **Cargo.toml 加 dep 未指定 crate**：prompt 只寫 `加 hdrhistogram = "7"`。PA 拍板加 workspace + openclaw_core/Cargo.toml 雙處（workspace 為 SoT，core 引 `workspace = true`）。
+
+3. **`EngineMode` enum 與既有 5-string 系統雙頭 SoT**：prompt §4 寫 `EngineMode enum`。grep 證 `effective_engine_mode(kind, env) -> &'static str` 回 5 種值（paper/demo/live/live_demo/live_testnet）。新引 enum = 雙 SoT 引入長期 maintenance debt。**正解** = API 收 `&'static str`，未知 mode silently skip 不 panic（防 caller 拼錯字串導致 hot path 崩）。
+
+**架構教訓 4 個**：
+
+1. **派工 prompt module path 必驗 crate ownership**：grep `find rust -name "<filename>.rs"` 是 5 秒成本，能 catch cross-crate dep 反向錯誤 wave。隔壁 sub-agent prompt 寫的 path 不能盲信。
+
+2. **HdrHistogram 設計約束 hot path 友善**：HdrHistogram `record()` 內部 ~30-40ns（atomic increment + bucket index 計算）；用 parking_lot Mutex（已是 openclaw_core dep）unconstested 加 ~10-15ns；total 預估 ≤ 50ns AC-3 邊界。`new_with_bounds(1, 10_000_000, 3)` 配置：low=1us / high=10s / sig_figs=3 → ~256KB/instance × 5 mode ≈ 1.3MB（vs engine RSS 148MB 0.9%）。
+
+3. **Reset cadence 不 per-tick**：HdrHistogram 設計就是長窗 percentile；per-tick reset 失去語意。Reset 由 status_report 1h cadence 觸發（control plane，非 tick path）。`last_reset_ms` field 在 inner 持有；status_report 比較 `now_ms() - last_reset_ms > 3600_000`。
+
+4. **recorded_at_ms 由 caller 傳入**：避免 inner 模組引 chrono dep + SystemTime sys call 開銷；status_report 已有 `now_ms()` helper 直接用。spec §3.3 設計選擇。
+
+**Push back 留給 E1 hot path 接線**（spec §10 brief）：
+- H0Gate 加 `metrics_recorder: Option<Arc<H0LatencyRecorder>>` + `engine_mode: &'static str` field
+- 新增 `H0Gate::with_metrics(...)` constructor（保留 H0Gate::new backward compat）
+- finalize_blocked / finalize_allowed 各加 1 行 `record(latency_us as u64, self.engine_mode)`
+- pipeline_ctor.rs:94 改用 with_metrics + effective_engine_mode(kind, env)
+- status_report.rs 加 5 H0LatencySummary export + 1h reset 邏輯
+- 不改 H0LatencyRecorder API（PA 已 land）；不改 SLA 文檔（留下個 doc-update wave）；不改 TODO.md
+
+**OQ-1..OQ-5 五條給 PM**（spec §11.2）：
+- OQ-1：summary 寫 healthcheck_run 還是新 table？推薦 healthcheck_run（避免 V### migration）
+- OQ-2：Grafana datasource UID binding 由誰？推薦 E1 接線 sub-agent 或 deploy E3 phase
+- OQ-3：1h reset 觸發放 status_report 還是獨立 scheduler？推薦 status_report（避免新 scheduler）
+- OQ-4：live vs live_demo 分開 histogram？推薦分開（per 5-string 系統一致）
+- OQ-5：50ns 上限是否太鬆？50ns = E5 baseline 10× headroom 足夠
+
+**Apple Silicon CI tuple 已驗**：`cargo check --target aarch64-apple-darwin -p openclaw_core` PASS（5.89s）。HdrHistogram 7.5.4 pure Rust + 無 sys dep。
+
+**Reports**：
+- spec: `docs/execution_plan/2026-05-21--p2_lg1_demo_slo_carveout_spec.md`（429 行）
+- PA report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--p2_lg1_demo_slo_carveout_pa_impl.md`
+- Operator mirror: `docs/CCAgentWorkSpace/Operator/2026-05-21--p2_lg1_demo_slo_carveout_pa_impl.md`
+- Rust skeleton: `rust/openclaw_core/src/hot_path_metrics/{mod.rs,h0_latency.rs}`
+- Grafana: `docs/grafana/dashboards/h0_latency_distribution.json`
+- Cargo deps: `rust/Cargo.toml` + `rust/openclaw_core/Cargo.toml`
+
+**Confidence**：HIGH for spec / API / 8 test / Apple Silicon；MEDIUM-HIGH for Grafana JSON（datasource UID OQ-2 留 deploy phase）；MEDIUM for §6 alert threshold 邊界（spec §2.2 carve-out 安全 headroom；calibrate 後 future amendment 可調）。
+
+**未 commit**；交給主會話 PM 派 E1 hot path 接線 + E2 review + E4 regression 後合併。
+
+---
+
+## 2026-05-21 — v5.7+v5.8 真實開發路線整合報告
+
+**Topic**：14 multi-agent v5.8 executability audit → PA 整合視角寫真實 dispatch 路線
+
+**Report**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` (467 行 ≤ 1000 限制 OK)
+
+**14 audit verdict 聚合**：
+- 11 GO-WITH-CONDITIONS (A3/AI-E/BB/CC/E3/E4/E5/FA/MIT/QA/QC)
+- 3 conditional HOLD (E2/R4/TW)
+- 0 NO-GO
+
+**3 HOLD 阻塞分析**：
+- E2 = 對抗式找盲點（7 矛盾：§3/§4/§14 工時三處不一致 + V103 EXTEND + V### 編號 + §10 漏 P0 + §11 反向 attack 6 條 + 13 module 依賴圖未畫 + Sprint 7-8 IMPL race + 24h undo 已 fill 不可逆）
+- R4 = 文檔 ~46 新文件 + ~40 條 index 漂移
+- TW = 工時 450-640 hr / §3-§9-§12 全表 0 TW 行
+- 全部 conditional + 派發前可清
+
+**共識 must-fix 去重**：
+- 16 CRITICAL（CR-1..16）→ 13 prerequisite check list / 60-105 hr / 4-5 wall-clock days / 5-7 並行 sub-agent
+- 24 HIGH（Sprint 1A-β-ε 期內 land）
+
+**工時上修**：
+- Sprint 1A: 543-797 hr → 670-1,015 hr / 7w → 8.5w
+- Y1 total: 2,780-3,930 hr / 37-44w → 3,500-5,200 hr / 44-55w
+- GUI: +261-374 hr Y1（A3 識別缺漏；v5.7 + v5.8 累計）
+- TW: +450-640 hr Y1（14-17% 系統性漏）
+- MIT spec: +120-140 hr（9 V### spec doc）
+- Governance amend buffer: +60-90 hr
+- AI LLM cost Y1 $505-865 / Y2 $1,344-2,556（超 DOC-08 月 $60 cap 1.9-3.5x）
+- A3 sign-off: +48-53 hr Y1（8 surface Lv 3-4）
+
+**Sprint 1A 5 階段（α/β/γ/δ/ε）**：
+- 1A-α (W0-1.5) DONE 2026-05-21 + 4 follow-up (V103 audit field / V### re-number / PG conn / Earn 五角色)
+- 1A-β (W1.5-3.5) CRITICAL module M1/M3/M6/M7/M11 DESIGN / 310-460 hr / 5-7 並行
+- 1A-γ (W3.5-5.5) M2/M4/M8/M9/M10 DESIGN / 240-360 hr / 5-7 並行
+- 1A-δ (W5.5-6.5) M5/M12/M13 interface stub / 75-110 hr / 3-4 並行
+- 1A-ε (W6.5-8.5) integration + cross-ADR + Monthly Review Wizard + docs/README/SCRIPT_INDEX/CONTEXT batch / 86-126 hr / single-thread
+
+**PM 仲裁 10 條建議**（核心）：
+- #1 M1 Lease Tier → LAL 改名（避 AMD-01 Stage 0R-4 衝突）
+- #2 R4 6 建議 ADR 混合方案（M2/M3/M7 補；M4/M6/M10 合入 0034/0036）
+- #3 立 AMD-2026-05-21-01 autonomy-vs-human-final-review
+- #4 M13 Y2 → Y3+ at earliest（保 Product Boundary）
+- #5 M10 Tier D 採 ATR-vol + funding state（Y1-Y2 簡單可行）+ Y3+ PELT evaluation
+- #6 GUI 工時 +261-374 hr 補 §4
+- #7 TW 並行 dispatch + §12 第 5 條 operator decision
+- #8 AI cost 砍頻率（L1 only / weekly digest）+ Y2 Q1 重評 cap
+- #9 Sprint 1A wall-clock 8.5w（接受 1.5w cross-ADR collision slip）
+- #10 3 PM verdict missing module 處置 = defer v5.9 + ETA
+
+**派發前 prerequisite**：13 prerequisite check list / 60-105 hr / 4-5 wall-clock days / D+5~D+10 內 → Sprint 1A-β 派 PA dispatch
+
+**首次 Live 時點**：Sprint 4（W17.5-20.5），受 P0-EDGE-1 + P0-LG-3 + P0-OPS-1..4 四 active P0 阻塞（CR-10 補 §10 P0 precondition table + §12 第 5 條 operator decision）
+
+**核心教訓**：
+1. **派多 audit + 整合視角**比派多 audit 後逐一審查更高效（14 audit + 1 整合 = ~3 wall-clock days vs 多輪 audit + 多輪 reconcile = ~7 days）
+2. **共識 pattern 統計（≥3 agent 重合）**是 must-fix 收斂的最佳信號（CRITICAL 16 條全部源自 ≥3 agent 共識，無單 agent 噪音）
+3. **3 HOLD 仔細分類**：conditional vs hard；本次全 conditional（文檔/工時/治理層）非邏輯/設計層 → 不阻 thesis
+4. **v5.8 §3/§4 系統性工時偏低 20-43%**：原因是 reviewer-corrected lower end + 13 module zero-baseline + 沒列 GUI/TW/MIT spec/A3/AI cost → PA 整合者應補
+5. **Cross-V### dependency graph 必畫**：β → γ 不可重疊（V107 → V103/V109/V113 / V108 → V103 / V109 → V112 / V112 → V113 / V105 → V107）
+6. **AI cost / LLM token / ContextDistiller 是 v5.8 最被低估的維度**：AI-E 識別 ContextDistiller 從 700 → 1,200-1,500 token 直接撞 L1 SLA + 月 cost 超 DOC-08 cap 1.9-3.5x
+
+**Confidence**：HIGH for 16 CRITICAL + 24 HIGH 收斂（14 audit 共識）；MEDIUM-HIGH for Sprint 1A wall-clock 8.5w（取決 cross-ADR collision 嚴重度）；MEDIUM for Y1 total 3,500-5,200 hr（依 IMPL phase calibration multiplier 1.5-2.5x 真實值）
+
+**已 push back operator-style 觀點**：
+- v5.8 §3 / §4 / §14 三處工時數字不一致是 reviewer-corrected 但仍偏 lower
+- M1 Tier 2 24h undo 對 fill 部位不可逆（E2 反向 attack catch）
+- M13 Y2 Binance trade enable 與 Product Boundary 衝突；BB push back Y3+ at earliest
+- ContextDistiller v4 / ADR-0041 / AI cost cap 重評 = AI-E 唯一系統性缺失
+- 3 PM verdict missing module（M3 hot-swap / M6 capacity / M7 correlation）defer v5.9 非立 M14-M16
+

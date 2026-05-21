@@ -11332,3 +11332,43 @@ upgrade 為「有 healthcheck + 90d review date 2026-08-21」合規。
 
 ### 報告
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_halt_trigger_healthcheck_impl.md`
+
+## 2026-05-21 — P2-LG1-DEMO-SLO-CARVEOUT hot-path 接線
+
+### 任務
+PA spec land 後 5 件 plumbing：H0Gate.with_metrics + finalize_blocked/allowed record + pipeline_ctor 接線 + status_report 1h reset + snapshot summary export。
+
+### 設計 push-back
+- spec §4.3 寫「3 pipeline 共用 single Arc<H0LatencyRecorder>」— 我採 per-pipeline 獨立 Arc 反向設計，理由：
+  - 3 個 pipeline 各跑獨立 tokio runtime；共用 Arc 每 tick 撞 Mutex（3 producer × ~1000 tick/s = ~3k contention/s），毀 spec AC-3 50ns 預算
+  - 獨立 Arc 確保 record 路徑 single-thread uncontested ~30-40ns
+  - recorder 內仍 5 mode histogram，per-pipeline 只填自己那格；output JSON shape 與 spec §3.6 一致
+  - 無需動 EventConsumerDeps / main_pipelines.rs（30+ field 不擴）
+- spec §11.4「engine_mode `&'static str` 不可改 String」只指 record 入參；summary engine_mode 我保 `&'static str` + 僅 Serialize 不 Deserialize 因為 `'de: 'static` bound 衝突。Producer-only use 合理。
+
+### 接線位置
+- h0_gate.rs 加 metrics_recorder + engine_mode field + with_metrics + 2 setter
+- finalize_blocked / finalize_allowed 各 1 行條件 record（Some 分支內呼）
+- TickPipeline struct 加 h0_latency_recorder + h0_latency_last_reset_ms
+- pipeline_ctor.set_endpoint_env 末加 `h0_gate.set_engine_mode(tag_str)`
+- pipeline_ctor 新 setter `set_h0_latency_recorder`（同步 wire 進 H0Gate + 持 Arc clone）
+- bootstrap.rs 在 set_endpoint_env 後建 Arc::new(H0LatencyRecorder::new()) + 呼 setter
+- status_report.rs 加 1h cadence reset + log p50/p99/p999/max（tracing::info!）
+- pipeline_types.rs PipelineSnapshot 加 h0_latency_summaries（serde skip_deserializing）
+- commands.rs snapshot() 填入 5 mode summary
+
+### 教訓
+- `&'static str` 在 serde Deserialize bound 是常見坑：`'de: 'static` 要求 super-trait 與普通 borrow 衝突
+- skip_deserializing + skip_serializing_if "Option::is_none" 是 producer-only field 的乾淨解
+- pipeline 接線一定要走 set_endpoint_env 後再 inject recorder，因為 effective_engine_mode 須在 endpoint_env 設定後才正確
+- 編譯保 backward compat 的 setter（H0Gate::set_metrics_recorder + set_engine_mode）比改 ctor 簽名動 30+ caller 划算
+
+### 驗證
+- `cargo test --release -p openclaw_core` 全 PASS（含 hot_path_metrics 8/8 + h0_gate 33/33）
+- `cargo test --release -p openclaw_engine` 3272 PASS / 0 FAIL（baseline 3267 + 5 新 integration test）
+- `cargo check --target aarch64-apple-darwin -p openclaw_core` PASS
+- `cargo check --target aarch64-apple-darwin -p openclaw_engine` PASS
+- 硬編碼路徑 grep = 0 hit
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p2_lg1_demo_slo_carveout_e1_wire.md`

@@ -28,6 +28,11 @@ pub mod governance_core;
 pub mod governance_emit;
 pub mod guardian;
 pub mod h0_gate;
+// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21, spec):
+// H0 hot-path latency observability — HdrHistogram-based p50/p99/p999/max
+// percentile recorder per engine_mode（paper/demo/live/live_demo/live_testnet）。
+// 落實 E5 F1 audit verdict 選項 B（accept variance + SLO carve-out）。
+pub mod hot_path_metrics;
 pub mod indicators;
 pub mod klines;
 // W-AUDIT-9 T6 (AMD-2026-05-09-03 §4.5): 強型別 LeaseScope enum + 為 graduated

@@ -16,7 +16,8 @@
 //!   / risk store accessor 的注入 setter + 取用器。
 
 use openclaw_core::{
-    governance_core::GovernanceCore, h0_gate::H0Gate, klines::KlineManager,
+    governance_core::GovernanceCore, h0_gate::H0Gate,
+    hot_path_metrics::H0LatencyRecorder, klines::KlineManager,
     risk::PriceHistoryTracker, signals::SignalEngine,
 };
 use std::collections::{HashMap, VecDeque};
@@ -171,6 +172,14 @@ impl TickPipeline {
             // provider only，consumer 留 W-AUDIT-8c；slot=None 時 surface
             // liquidation_pulse=None 不影響既有 (Phase A dormant) 行為。
             liquidation_pulse_panel_slot: None,
+            // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：default None / 0；
+            // bootstrap.rs 在 set_endpoint_env 後呼 set_h0_latency_recorder
+            // 注入 per-pipeline 獨立 Arc<H0LatencyRecorder>。test / cold 路徑
+            // 不注入 → H0Gate 走 None 分支，hot path 仍 4.86ns 純算術 + 1 個
+            // 條件 branch（None 分支 ~1ns）；snapshot.h0_latency_summaries = None
+            // 對應 status JSON 端不附 summary 欄位（既有行為兼容）。
+            h0_latency_recorder: None,
+            h0_latency_last_reset_ms: 0,
         }
     }
 
@@ -223,8 +232,29 @@ impl TickPipeline {
         // `effective_engine_mode()` resolver 正確標記 audit row；無此
         // wire-in 則 governance_core resolver 永遠 fallback "unknown"，
         // AC-1 distinct count >= 5 query 失效。
-        let tag = self.effective_engine_mode().to_string();
-        self.governance.set_engine_mode_tag(tag);
+        let tag_str = self.effective_engine_mode();
+        self.governance.set_engine_mode_tag(tag_str.to_string());
+        // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：把 effective_engine_mode 同步給
+        // H0Gate metric 標籤；recorder.record() 用此 tag 分流 histogram。
+        // effective_engine_mode 回 `&'static str`（5 種已枚舉），與 H0Gate.engine_mode
+        // 型別一致，零 alloc。set_endpoint_env 預期 boot 時呼 1 次（demo/live），
+        // Paper pipeline 不呼 set_endpoint_env，H0Gate engine_mode 維持預設 "paper"。
+        self.h0_gate.set_engine_mode(tag_str);
+    }
+
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：注入 per-pipeline 獨立的
+    /// `Arc<H0LatencyRecorder>`，並同步 wire 進 H0Gate 與保留 Arc clone
+    /// 給 status_report 用於 1h reset cadence + summary export。
+    ///
+    /// 接線時機：bootstrap.rs 在 `set_endpoint_env` 後呼叫一次；test / cold ctor
+    /// 不呼叫，pipeline 仍可運作（H0Gate / status_report 走 None 分支）。
+    ///
+    /// 為什麼一次呼叫雙向 wire：H0Gate 自己持 Arc 供 hot path record；TickPipeline
+    /// 自己持 Arc 供 status_report 取 summary / reset_all。兩者 Arc 同 inner，
+    /// reset_all 對 H0Gate 看到的 histogram 立即生效（同記憶體位）。
+    pub fn set_h0_latency_recorder(&mut self, recorder: Arc<H0LatencyRecorder>) {
+        self.h0_gate.set_metrics_recorder(Arc::clone(&recorder));
+        self.h0_latency_recorder = Some(recorder);
     }
 
     /// Wire the shared scanner SymbolRegistry as market context and

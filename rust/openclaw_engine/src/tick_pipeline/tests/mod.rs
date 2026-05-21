@@ -49,6 +49,9 @@ mod fast_track_reduce;
 // 對應 PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §1.4。
 mod h0_blocking;
 mod h0_ctor_default;
+// P2-LG1-DEMO-SLO-CARVEOUT（2026-05-21）：H0 latency metrics 接線 E2E integration test。
+// 對應 spec `docs/execution_plan/2026-05-21--p2_lg1_demo_slo_carveout_spec.md` §10。
+mod h0_latency_metrics;
 // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：halt TTL 狀態機測試。
 // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt TTL 測試。
 mod halt_ttl;

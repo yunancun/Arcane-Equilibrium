@@ -15,6 +15,7 @@ use openclaw_core::{
     alpha_surface::AlphaSurface,
     governance_core::{GovernanceCore, GovernanceProfile},
     h0_gate::H0Gate,
+    hot_path_metrics::H0LatencyRecorder,
     indicators::{IndicatorEngine, IndicatorSnapshot},
     klines::KlineManager,
     risk::PriceHistoryTracker,
@@ -1132,6 +1133,38 @@ pub struct TickPipeline {
     /// 本 wave provider only — setter 由下游 wave（main.rs 接線）late-inject。
     pub(crate) liquidation_pulse_panel_slot:
         Option<crate::ipc_server::LiquidationPulsePanelSlot>,
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：HdrHistogram-based H0 hot-path latency
+    /// recorder。
+    ///
+    /// 為什麼 per-pipeline 獨立 Arc（非 cross-pipeline 共用）：
+    ///   - 3 個 pipeline 各跑自己的 tokio runtime；共用 Arc 會在每 tick 引入 Mutex
+    ///     爭用（3 producers × ~1000 tick/s = ~3k contention/s），毀掉 spec AC-3
+    ///     ≤ 50ns/call 預算。
+    ///   - per-pipeline 獨立 instance：single-thread producer + 偶爾 status_report
+    ///     consumer 讀，Mutex 在實際運行為 uncontested。
+    ///   - 每個 recorder 內仍持 5 mode histogram，但 record() 路徑只填本管線的
+    ///     engine_mode 那一格；output JSON shape 與 spec §3.6 一致（其他 4 mode
+    ///     count=0 由 status JSON consumer 過濾）。
+    ///
+    /// 為什麼 Option：cold path / test / startup/mod.rs legacy 路徑不接 recorder，
+    /// pipeline 仍可運作；bootstrap.rs 構造後 setter 注入。
+    ///
+    /// Setter：`set_h0_latency_recorder` in pipeline_ctor.rs。
+    pub(crate) h0_latency_recorder: Option<Arc<H0LatencyRecorder>>,
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：1h reset cadence 最後執行 wall-clock ms。
+    ///
+    /// 為什麼存在：spec §3.5 + §4.5 要求 HdrHistogram 每 1h reset 避免 bucket
+    /// 永久單調累積（spec §3.5 「per-tick reset 等於丟 percentile semantics」）。
+    /// status_report 30s cadence 內 piggy-back 此檢查：若 `now - last >= 3600_000`
+    /// 呼 `recorder.reset_all(now)` 並更新本 field。
+    ///
+    /// 為什麼放 TickPipeline 而非 recorder 內部 `last_reset_ms`：
+    /// recorder 內 `last_reset_ms` 由 `reset_all(now_ms)` 寫入但 0 = 未 reset 過；
+    /// 這裡額外維護 status_report 本端的 cadence 戳記，初始 0 → 首次 status_interval
+    /// 觸發 reset 即把 cadence 對齊到啟動時間，後續每整 hour reset。
+    /// （兩者語意一致即可，操作上 status_report 比較 recorder.last_reset_ms 也 OK，
+    /// 此 field 設計餘地保留給未來 cadence policy 變更）。
+    pub(crate) h0_latency_last_reset_ms: u64,
 }
 
 // ---------------------------------------------------------------------------

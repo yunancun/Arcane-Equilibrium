@@ -46,9 +46,12 @@
 //!   §5.6 (Principle 6): fail to safe / conserve on uncertainty
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::Instant;
 
 use openclaw_types::{H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot};
+
+use crate::hot_path_metrics::H0LatencyRecorder;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gate statistics / 門控統計
@@ -148,11 +151,30 @@ pub struct H0Gate {
     stats: GateStats,
     /// Shadow mode log (circular buffer) / 影子模式日誌（環形緩衝區）
     shadow_log: VecDeque<ShadowEntry>,
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：HdrHistogram-based latency recorder。
+    ///
+    /// 為什麼 Option<Arc<...>>：
+    ///   - None = backward compat（H0Gate::new 與既有測試/cold path 不接 recorder）。
+    ///   - Some = pipeline_ctor 在 set_endpoint_env 之後注入 per-pipeline 獨立
+    ///     recorder（不共用 Arc，避免 3 tokio rt 同時 record 的鎖爭用）。
+    ///
+    /// 為什麼 engine_mode 與 recorder 同時 inject：record() 需 `&'static str` tag
+    /// 對應 5 種 effective_engine_mode 值之一；任何拼錯 silently skip（recorder 防禦）。
+    metrics_recorder: Option<Arc<H0LatencyRecorder>>,
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：metric 標籤對應的 effective_engine_mode。
+    ///
+    /// 預設 "paper" 對齊 H0Gate::new + with_balance 預設 PipelineKind::Paper；
+    /// pipeline_ctor.set_endpoint_env 後同步更新（demo / live / live_demo / live_testnet）。
+    /// `&'static str` 不可改 `String`：hot path 不可 alloc。
+    engine_mode: &'static str,
 }
 
 impl H0Gate {
     /// Create a new H0Gate with optional config (uses defaults if None).
     /// 建立新的 H0Gate，若無配置則使用預設值。
+    ///
+    /// `metrics_recorder` 預設 None；`engine_mode` 預設 "paper"。
+    /// pipeline_ctor 在 set_endpoint_env / set_h0_latency_recorder 後注入。
     pub fn new(config: Option<H0GateConfig>) -> Self {
         Self {
             config: config.unwrap_or_default(),
@@ -163,7 +185,46 @@ impl H0Gate {
             system_mode: "read_only".to_string(),
             stats: GateStats::default(),
             shadow_log: VecDeque::with_capacity(SHADOW_LOG_MAX),
+            metrics_recorder: None,
+            engine_mode: "paper",
         }
+    }
+
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：builder pattern 注入 latency recorder。
+    ///
+    /// 為什麼存在：spec §4.2 要求新增 `with_metrics` constructor 而保留 H0Gate::new
+    /// backward compat（其他 caller / test 預期 None recorder fallback）。
+    ///
+    /// `engine_mode` 必須是 effective_engine_mode 5 種回傳值之一
+    /// （"paper" / "demo" / "live" / "live_demo" / "live_testnet"）；
+    /// 任何不在 ENGINE_MODES 的字串會被 recorder.record 在 hot path silently skip。
+    pub fn with_metrics(
+        config: Option<H0GateConfig>,
+        recorder: Arc<H0LatencyRecorder>,
+        engine_mode: &'static str,
+    ) -> Self {
+        let mut gate = Self::new(config);
+        gate.metrics_recorder = Some(recorder);
+        gate.engine_mode = engine_mode;
+        gate
+    }
+
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：post-construction 注入 recorder。
+    ///
+    /// 為什麼存在：TickPipeline::with_balance/new/with_kind 已 land 而 EventConsumerDeps
+    /// bootstrap 是 ctor 完成後才知曉 endpoint_env / effective_engine_mode。改 with_metrics
+    /// 進入 ctor 需動 with_balance/with_kind 簽名，連帶 30+ 構造站；用 setter 路徑
+    /// 注入是最小 footprint 接線。
+    pub fn set_metrics_recorder(&mut self, recorder: Arc<H0LatencyRecorder>) {
+        self.metrics_recorder = Some(recorder);
+    }
+
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：更新 engine_mode 標籤。
+    ///
+    /// pipeline_ctor.set_endpoint_env 解析 effective_engine_mode 後呼叫；
+    /// 必為 ENGINE_MODES 5 個合法值之一（caller 自證）。
+    pub fn set_engine_mode(&mut self, engine_mode: &'static str) {
+        self.engine_mode = engine_mode;
     }
 
     // ── State update methods (non-hot-path) / 狀態更新方法（非熱路徑）────────
@@ -514,6 +575,13 @@ impl H0Gate {
         if (latency_us as u64) > self.stats.max_latency_us {
             self.stats.max_latency_us = latency_us as u64;
         }
+        // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：blocked path latency record。
+        // 為什麼條件呼叫：None 路徑保 backward compat（既有 test / cold ctor），
+        // 且 None 分支由 monomorphisation 與 branch predictor 處理，overhead ~1ns。
+        // Some 路徑呼 record() 內部 spec AC-3 ≤ 50ns（Mutex unconstested + bucket index）。
+        if let Some(ref rec) = self.metrics_recorder {
+            rec.record(latency_us as u64, self.engine_mode);
+        }
         H0CheckResult {
             allowed: false,
             reason,
@@ -536,6 +604,13 @@ impl H0Gate {
         self.stats.total_latency_us += latency_us as u64;
         if (latency_us as u64) > self.stats.max_latency_us {
             self.stats.max_latency_us = latency_us as u64;
+        }
+        // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：allowed path latency record。
+        // 設計同 finalize_blocked；shadow mode 也走此路徑（finalize_allowed），
+        // 因此 shadow_would_block 樣本也計入 percentile（shadow mode 是 H0 hot path
+        // 完整 5 子檢查的子集，latency 觀測語意一致）。
+        if let Some(ref rec) = self.metrics_recorder {
+            rec.record(latency_us as u64, self.engine_mode);
         }
         H0CheckResult {
             allowed: true,
@@ -1042,6 +1117,101 @@ mod tests {
         assert_eq!(gate.stats.total_checks, 1);
         // total_latency_us is populated (may be 0 on very fast machines).
         assert_eq!(gate.stats.total_allowed, 1);
+    }
+
+    // ── 30a. P2-LG1: with_metrics 注入 recorder + record 計數 ──────────────
+
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：with_metrics ctor 注入 recorder，
+    /// 每次 check() 後 recorder.summary 的 count 應對應呼叫次數。
+    /// allowed + blocked 兩條路徑都應觸發 record（finalize_allowed/blocked 均接線）。
+    #[test]
+    fn test_p2_lg1_with_metrics_records_both_paths() {
+        let now = 1_700_000_000_000u64;
+        let rec = Arc::new(H0LatencyRecorder::new());
+        // 用 with_metrics 注入 recorder + engine_mode="demo"
+        let mut gate = H0Gate::with_metrics(None, Arc::clone(&rec), "demo");
+        gate.update_price_ts("BTCUSDT", now - 100);
+        gate.update_health(H0GateHealthSnapshot {
+            cpu_pct: 30.0,
+            memory_available_mb: 4096,
+            db_latency_ms: 5.0,
+            network_loss_pct: 0.1,
+            snapshot_ts_ms: now - 1000,
+        });
+        gate.update_risk(H0GateRiskSnapshot {
+            open_position_count: 2,
+            total_exposure_pct: 30.0,
+            cooldown_until_ts_ms: 0,
+            kill_switch_active: false,
+            snapshot_ts_ms: now - 500,
+        });
+
+        // 1 個 allowed
+        let r1 = gate.check("BTCUSDT", "linear", now);
+        assert!(r1.allowed);
+        // 2 個 blocked（無資料 / 類別不允許）
+        let r2 = gate.check("ETHUSDT", "linear", now);
+        assert!(!r2.allowed);
+        let r3 = gate.check("BTCUSDT", "option", now);
+        assert!(!r3.allowed);
+
+        // recorder demo summary count 應 = 3（2 blocked + 1 allowed）
+        let s = rec.summary("demo", 0).expect("demo histogram exists");
+        assert_eq!(
+            s.count, 3,
+            "P2-LG1：finalize_allowed + finalize_blocked 各走 record；3 check → 3 sample"
+        );
+        // 其他 mode 不應被污染
+        assert_eq!(rec.summary("paper", 0).unwrap().count, 0);
+        assert_eq!(rec.summary("live", 0).unwrap().count, 0);
+        assert_eq!(rec.summary("live_demo", 0).unwrap().count, 0);
+        assert_eq!(rec.summary("live_testnet", 0).unwrap().count, 0);
+    }
+
+    // ── 30b. P2-LG1: 無 recorder 路徑（None） backward compat ─────────────
+
+    /// 為什麼：spec §11.4 不變式「H0Gate::new 不可破 backward compat」；
+    /// 既有 test / cold ctor 必須在 metrics_recorder=None 下保持 latency
+    /// stats 行為（total_latency_us / max_latency_us 仍累計）。
+    #[test]
+    fn test_p2_lg1_no_recorder_backward_compat() {
+        let now = 1_700_000_000_000u64;
+        let mut gate = gate_with_fresh_btc(now); // H0Gate::new 路徑 → recorder=None
+        gate.check("BTCUSDT", "linear", now);
+        gate.check("ETHUSDT", "linear", now); // blocked freshness
+
+        // GateStats 累計仍正確（latency 路徑未被破壞）
+        assert_eq!(gate.stats.total_checks, 2);
+        assert_eq!(gate.stats.total_allowed, 1);
+        assert_eq!(gate.stats.blocked_freshness, 1);
+        // 不 panic 即驗 None 分支無 alloc / 無錯誤
+    }
+
+    // ── 30c. P2-LG1: set_metrics_recorder + set_engine_mode 後接注入 ─────
+
+    /// 為什麼：bootstrap.rs 接線路徑用 setter（pipeline_ctor 已 H0Gate::new 完成
+    /// 後才知道 effective_engine_mode）；驗 setter 路徑語意等同 with_metrics。
+    #[test]
+    fn test_p2_lg1_post_construction_injection() {
+        let now = 1_700_000_000_000u64;
+        let rec = Arc::new(H0LatencyRecorder::new());
+        let mut gate = gate_with_fresh_btc(now); // H0Gate::new → recorder=None, mode="paper"
+
+        // 注入前 1 check：應寫到 "paper"（預設 mode）但 None recorder 跳過
+        gate.check("BTCUSDT", "linear", now);
+        assert_eq!(rec.summary("paper", 0).unwrap().count, 0);
+
+        // 後接注入 recorder + engine_mode="live_demo"
+        gate.set_metrics_recorder(Arc::clone(&rec));
+        gate.set_engine_mode("live_demo");
+
+        // 注入後 2 check：應計入 "live_demo"
+        gate.check("BTCUSDT", "linear", now);
+        gate.check("BTCUSDT", "linear", now);
+
+        let s = rec.summary("live_demo", 0).unwrap();
+        assert_eq!(s.count, 2, "set_metrics_recorder 後 record 應計入新 engine_mode");
+        assert_eq!(rec.summary("paper", 0).unwrap().count, 0);
     }
 
     // ── 30. Shadow mode multiple blocks / 影子模式：多重阻擋 ────────────────

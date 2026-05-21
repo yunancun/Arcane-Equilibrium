@@ -1,0 +1,182 @@
+{
+  "$schema_note": "P2-LG1-DEMO-SLO-CARVEOUT Grafana panel skeleton — per spec docs/execution_plan/2026-05-21--p2_lg1_demo_slo_carveout_spec.md §5. Datasource UID placeholder ${DS_PG} 留 runtime deploy 時 operator/E1 binding。",
+  "title": "H0 Gate Latency Distribution (P2-LG1-DEMO-SLO-CARVEOUT)",
+  "uid": "h0-latency-distribution",
+  "tags": ["h0_gate", "hot_path", "p2_lg1", "slo_carveout"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "engine_mode",
+        "type": "custom",
+        "label": "Engine Mode",
+        "query": "paper,demo,live,live_demo,live_testnet",
+        "current": {
+          "value": "demo",
+          "text": "demo"
+        },
+        "options": [
+          {"value": "paper", "text": "paper"},
+          {"value": "demo", "text": "demo"},
+          {"value": "live", "text": "live"},
+          {"value": "live_demo", "text": "live_demo"},
+          {"value": "live_testnet", "text": "live_testnet"}
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "gauge",
+      "title": "H0 p50 latency (μs) — $engine_mode",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 100},
+              {"color": "red", "value": 1000}
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at_ms AS time, p50_us AS value FROM learning.healthcheck_run WHERE check_name='h0_latency_distribution' AND engine_mode='$engine_mode' ORDER BY recorded_at_ms DESC LIMIT 1"
+        }
+      ],
+      "options": {
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      }
+    },
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "H0 p99 latency (μs) — $engine_mode",
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "description": "WARN threshold: p99 > 1000μs over 1h rolling (spec §6.1 H0_P99_WARN)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1000},
+              {"color": "red", "value": 2000}
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at_ms AS time, p99_us AS value FROM learning.healthcheck_run WHERE check_name='h0_latency_distribution' AND engine_mode='$engine_mode' ORDER BY recorded_at_ms DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "H0 p999 latency (μs) — $engine_mode",
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "description": "Design budget: p999 ≤ 2000μs (spec §2.2 carve-out)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 2000},
+              {"color": "red", "value": 5000}
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at_ms AS time, p999_us AS value FROM learning.healthcheck_run WHERE check_name='h0_latency_distribution' AND engine_mode='$engine_mode' ORDER BY recorded_at_ms DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "H0 max latency (μs) — $engine_mode",
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "description": "WARN: max > 5000μs / FAIL: max > 10000μs over 1h rolling (spec §6.1 H0_MAX_WARN / H0_MAX_FAIL)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 5000},
+              {"color": "red", "value": 10000}
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at_ms AS time, max_us AS value FROM learning.healthcheck_run WHERE check_name='h0_latency_distribution' AND engine_mode='$engine_mode' ORDER BY recorded_at_ms DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "heatmap",
+      "title": "H0 latency distribution 30d — $engine_mode (log-scale μs)",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "description": "p50/p99/p999/max time-series 30d heatmap, log-scale Y; per spec §5.3 panel 5",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "custom": {
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT recorded_at_ms AS time, p50_us AS p50, p99_us AS p99, p999_us AS p999, max_us AS max FROM learning.healthcheck_run WHERE check_name='h0_latency_distribution' AND engine_mode='$engine_mode' AND recorded_at_ms > extract(epoch from now() - interval '30 days') * 1000 ORDER BY recorded_at_ms"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "axisLabel": "latency (μs)",
+          "min": 1,
+          "max": 10000
+        }
+      }
+    }
+  ],
+  "_alert_rules_inline_comment": "Alert rules NOT embedded in panel JSON — managed separately via Grafana alert rules API or helper_scripts/db/audit/h0_latency_alert_eval.py (spec §6.3). 邊界: H0_P99_WARN p99>1000μs 1h / H0_MAX_WARN max>5000μs 1h / H0_MAX_FAIL max>10000μs 1h."
+}

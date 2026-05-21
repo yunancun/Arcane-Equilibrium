@@ -153,6 +153,8 @@ pub(super) fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
         paper_paused: false,
         pipeline_kind: crate::tick_pipeline::PipelineKind::Paper,
         h0_gate_stats: None,
+        // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：test 預設 None（cold ctor / 無 recorder）
+        h0_latency_summaries: None,
         stop_config: None,
         guardian_config: None,
         risk_manager_config: None,
