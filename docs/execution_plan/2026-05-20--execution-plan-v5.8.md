@@ -538,26 +538,106 @@ v5.7 Sprint 2+ shifts right by ~5.5 weeks. Y1 timeline becomes 44.5 weeks instea
 
 ---
 
+## §3.5 PM 整合上修（per 14-Agent v5.8 Audit + PA Consolidation + Operator D1-D5）
+
+**14 audit verdict 共識**：v5.8 §3 上方表 543-797 hr Sprint 1A + 2,780-3,930 hr Y1 系統性偏低 20-43%。原因 = 漏 GUI + TW + MIT spec 完整 work + A3 sign-off + governance amend buffer + AI cost。**operator 2026-05-21 D3 已批接受 +20-43% 工時 + 7-11w calendar 延後**。
+
+### 3.5.1 Sprint 1A 真實工時上修（CR-13）
+
+| 維度 | v5.8 §3 文本 | PM 整合真實 | 差距 |
+|---|---|---|---|
+| Sprint 1A engineering | 543-797 hr / 7w | **670-1,015 hr / 8.5w**（含 GUI/TW/MIT buffer）| +127-218 hr |
+| Sprint 1A-β CRITICAL DESIGN | 220-320 hr | **310-460 hr**（含 MIT spec 90-140 hr buffer + TW 35-45 hr + GUI 9-11 hr + governance buffer）| +90-140 hr |
+| Sprint 1A-γ ADD-per-operator DESIGN | 190-290 hr | **240-360 hr**（含 TW 35-45 hr + GUI 7-9 hr）| +50-70 hr |
+| Sprint 1A-δ interface stubs | 58-82 hr | **75-110 hr**（含 TW 15-25 hr + GUI 2 hr）| +17-28 hr |
+| Sprint 1A-ε integration verify | 40-60 hr | **86-126 hr**（含 TW 20-30 hr + GUI 6 hr + Monthly Review Wizard A3 16-24 hr + Lv3-4 modal helper 8-12 hr）| +46-66 hr |
+
+### 3.5.2 維度缺漏補位（CR-11 GUI + CR-12 TW + MIT spec + A3 + AI cost）
+
+| 缺漏項 | v5.8 §3 上方 | 補後 | 來源 |
+|---|---|---|---|
+| **GUI 工時 Y1**（CR-11）| 0 hr（漏） | **+261-374 hr**（Sprint 1A 24-28 hr + 1B-10 漸增；Console tab 歸屬 4 tab × 2-4 sub-section 不擴張 16 tab）| A3 5.21 audit |
+| **TW 工時 Y1**（CR-12）| 0 hr（漏） | **+450-640 hr**（Sprint 1A 五階段 135-175 hr critical-path + 1B-10 ADR/spec/runbook 漸增；並行 dispatch with PA-MIT-CC tracks）| TW 5.21 audit |
+| **MIT 9 V### spec doc**（CR-8）| 0 hr placeholder | **+90-140 hr**（V105-V113 仿 V103/V104 範式 full DDL；Sprint 1A-β/γ 內逐個推進）| MIT 5.21 audit |
+| **Governance amend buffer**（4 ADR/AMD draft + 0034/0036/0037/0038/0040/0041 細節 + AMD-2026-05-21-01）| 0 hr | **+60-90 hr** | TW + CC + PM |
+| **A3 sign-off Y1**（CR-11）| 0 hr | **+48-53 hr**（8 surface Lv 3-4 防誤觸 modal + cooldown 設計 + Monthly Review Wizard）| A3 5.21 audit |
+| **AI LLM cost Y1**（CR-16）| 0 | **$505-865 / yr**（Y1 cap DOC-08 §4 $60/月 + ContextDistiller v4 800 token hard cap per ADR-0041） | AI-E 5.21 audit |
+| **AI LLM cost Y2**（CR-16）| 0 | **$1,344-2,556 / yr**（超 DOC-08 §4 cap 1.9-3.5x；conditional opt-in raise to $150-200/月 per ADR-0041 LAL 4 approval） | AI-E 5.21 audit |
+
+### 3.5.3 Sprint 1A 五階段真實 wall-clock
+
+```
+Sprint 1A-α  : W0-1.5  (DONE 2026-05-21 PM sign-off + 4 v5.7 follow-up D+1 land — V103 audit fields / V### re-number / PG conn / Earn 五角色 cross-ref)
+Sprint 1A-β  : W1.5-3.5 (2 wall-clock weeks; 5-7 sub-agent 並行; M1 LAL / M3 / M6 / M7 / M11 CRITICAL DESIGN; V107/V112/V113/V106/V110 spec full DDL + 5 module spec doc + 6 runbook draft; ADR-0034 + ADR-0038 + ADR-0041 + AMD-2026-05-21-01 land)
+Sprint 1A-γ  : W3.5-5.5 (2 wall-clock weeks; 5-7 sub-agent 並行; M2 / M4 / M8 / M9 / M10 ADD-per-operator DESIGN; V105/V108/V109/V111 spec full DDL + 5 module spec doc + 2 runbook; ADR-0036 / ADR-0037 / V103 EXTEND M4 + Cowork hybrid path land)
+Sprint 1A-δ  : W5.5-6.5 (1 wall-clock week; 3-4 sub-agent 並行; M5 / M12 / M13 interface stubs; V114/V115/V116 reserve; ADR-0035 + ADR-0039 + ADR-0040 land; Mac CI 13-module cross-compile verify)
+Sprint 1A-ε  : W6.5-8.5 (1.5-2 wall-clock weeks; single-thread cross-ADR + 並行 docs/index; cross-ADR consistency audit + schema migration ordering land + 12 V### dry-run SOP + docs/README.md index 補 + Monthly Review Wizard + Lv3-4 modal helper + CHANGELOG v5.7→v5.8 + CONTEXT.md 12 詞條)
+Sprint 1A    : ~8.5w 真實 (v5.8 §3 上方表 7w + 1.5w cross-ADR collision risk slip)
+```
+
+### 3.5.4 並行 sub-agent ceiling
+
+7 並行 + PM hands-on coordination 是 hard ceiling（per memory `project_multi_session_memory_race` 2026-04-23 事件 + v5.7 12 prefix DONE 證實）。1A-β/γ **5-7 並行**；1A-δ **3-4 並行**；1A-ε **single-thread cross-ADR + 並行 docs**。
+
+### 3.5.5 PG Dry-Run Mandate + Cross-V### Dependency Graph（CR-9）
+
+**PG dry-run mandate (per CLAUDE.md §Data, Migrations, And Validation + feedback_v_migration_pg_dry_run.md 2026-05-05 V055 教訓)**：
+
+- 任何 V### migration 含 PG reflection / transaction control / schema assumption 必先 **Linux PG empirical dry-run** before IMPL sign-off
+- `CREATE TABLE IF NOT EXISTS` 需 Guard A；type-sensitive `ADD COLUMN` 需 Guard B；hot-path indexes 需 Guard C
+- Idempotency 必雙跑驗
+- Engine restart 實測必含（per 2026-05-02 a19797d sqlx hash drift 教訓）
+
+**Cross-V### dependency graph (V099-V116)**：
+
+```
+V099/V100 (v5.7 Track v3) — Sprint 1A-α DONE
+V101/V102 (v5.7 Earn schema) — Sprint 1A-α DONE
+V103/V104 (v5.7 hypotheses + preregistration) — Sprint 1A-α DONE + EXTEND for M4 (Sprint 1A-γ +30 hr)
+   ↓
+V105 (M2 overlay) — Sprint 1A-γ ← V107 (M11 reference for state advance condition)
+V106 (M3 health) — Sprint 1A-β (hypertable 7d chunk + 7d compression + 90d retention 必)
+V107 (M11 replay div) — Sprint 1A-β ← V103/V109/V113 (M7 source per CR-7 dedup) (hypertable 必)
+V108 (M9 A/B) — Sprint 1A-γ ← V103 (share M4 hypothesis schema)
+V109 (M8 anomaly) — Sprint 1A-γ → V112 (M1 LAL anomaly→halt cross-ref) (hypertable 必)
+V110 (M6 reward weight) — Sprint 1A-β (regular table)
+V111 (M10 discovery tier) — Sprint 1A-γ (regular table; Tier D 用 ATR-vol+funding NOT HMM/GARCH per ADR-0036)
+V112 (M1 LAL) — Sprint 1A-β ← V113 (M7 reference for "no incident 90d" check)
+V113 (M7 decay; DECAY_ENFORCED rename per CR-7) — Sprint 1A-β (hypertable 必; M7 是 single decay authority)
+V114 (M5 online learning) — Sprint 1A-δ reserve frontmatter only
+V115 (M12 order routing) — Sprint 1A-δ reserve frontmatter only
+V116 (M13 asset/venue) — Sprint 1A-δ reserve frontmatter only
+```
+
+**順序限制**：Sprint 1A-β **必先 land** V106/V107/V110/V112/V113 → Sprint 1A-γ 才能 land V105/V108/V109/V111；β → γ 不可重疊（per E5 + MIT 共識）。Cross-ADR collision gate single-thread Sprint 1A-ε。
+
+**Spec placeholder 已 land**（per CR-8 2026-05-21）：V105-V113 9 個 frontmatter + 7-section 大綱已 reserve（位於 `docs/execution_plan/2026-05-21--v###_*_schema_spec.md`）。Sprint 1A-β/γ 各週 sub-agent 接手補完整 DDL。
+
+---
+
 ## §4 Y1 Total Engineering (v5.8)
 
-| Sprint | Weeks (v5.7) | Weeks (v5.8) | Focus | Hours (v5.8) |
-|---|---|---|---|---|
-| 1A (α through ε) | 0-1.5 | 0-7 | v5.7 baseline + 13-module DESIGN | 600-900 |
-| 1B | 1.5-3 | 7-10 | v5.7 baseline 1B + early M3/M11 IMPL | 130-180 |
-| 2 | 4-7 | 10-13 | Alpha Tournament + M4 pattern miner stage 1 + M10 Tier A productionize | 220-310 |
-| 3 | 8-11 | 13-16 | Top-1 build + Stage 0 shadow + M11 nightly replay + M3 statistical detectors | 220-300 |
-| 4 | 12-15 | 16-19 | Top-1 live + Top-2 + Options Stack 1 + M1 Tier 1 IMPL + M9 read-only | 280-380 |
-| 5 | 16-19 | 19-22 | Top-2 live + Top-3 + Options Stack 2 + M3 auto-degradation triggers + M11 hookups | 240-340 |
-| 6 | 20-23 | 22-25 | Top-4 + C13-VRP + Funding short + M12 maker-vs-taker adaptive | 240-340 |
-| 7 | 24-27 | 25-28 | Top-5 + Advisory Allocator + M1 Tier 2 + M6 Advisory reward weights | 220-320 |
-| 8 | 28-31 | 28-31 | Decay (M7) IMPL + M4 pattern miner stage 2 + M9 manual A/B + M3 recovery logic + M8 alerting | 280-380 |
-| 9 | 32-35 | 31-34 | Continue Advisory + Copy Infra build + M12 slicing IMPL | 200-280 |
-| 10 | 36-39 | 34-37 | Y1 Review + Copy Trading Evidence Gate + Overlay verdict + M2/M8/M9 Y2 prep + M13 spec | 150-200 |
-| **Y1 Total** | **39 wk** | **37-44 wk** | | **2,780-3,930 hr** |
+| Sprint | Weeks (v5.7) | Weeks v5.8 §3 上方 | **Weeks PM 整合真實**（CR-13）| Focus | **Hours PM 整合真實**（CR-11+12+13） |
+|---|---|---|---|---|---|
+| 1A (α through ε) | 0-1.5 | 0-7 | **0-8.5** | v5.7 baseline + 13-module DESIGN + GUI + TW + MIT spec + AI cost | **720-1,090 hr**（v5.8 §3 上方 543-797 + GUI 24-28 + TW 135-175 + MIT spec 90-140 + governance buffer 60-90 + A3 sign-off 48-53）|
+| 1B | 1.5-3 | 7-10 | **8.5-11.5** | v5.7 baseline 1B + early M3/M11 IMPL + ContextDistiller v4 IMPL | 165-220 |
+| 2 | 4-7 | 10-13 | **11.5-14.5** | Alpha Tournament + M4 pattern miner stage 1 + M10 Tier A productionize + M8 read-only | 280-400 |
+| 3 | 8-11 | 13-16 | **14.5-17.5** | Top-1 build + Stage 0 shadow + M11 nightly replay + M3 statistical detectors + M8 alerting prep | 280-380 |
+| 4 | 12-15 | 16-19 | **17.5-20.5** | Top-1 LIVE $500 + Top-2 + Options Stack 1 + M1 LAL 1 IMPL + M9 read-only + ★ Sprint 4 首次 Live（P0-EDGE-1/LG-3/OPS-1..4 全 closure precondition） | 360-490 |
+| 5 | 16-19 | 19-22 | **20.5-23.5** | Top-2 LIVE + Top-3 + Options Stack 2 + M3 auto-degradation + M11 hookups + LAL 1 auto-approve elig logging | 305-440 |
+| 6 | 20-23 | 22-25 | **23.5-26.5** | Top-4 + C13-VRP + Funding short + M12 maker-vs-taker + M12 maker_fill_rate_30d metric per ADR-0039 | 305-440 |
+| 7 | 24-27 | 25-28 | **26.5-29.5** | Top-5 + Advisory Allocator + M1 LAL 2 + M6 Advisory reward weights + M9 manual A/B | 280-410 |
+| 8 | 28-31 | 28-31 | **29.5-32.5** | Decay (M7 DECAY_ENFORCED) IMPL + M4 pattern miner stage 2 + M3 recovery + M8 alerting + LAL 1 auto-demote | 360-490 |
+| 9 | 32-35 | 31-34 | **32.5-35.5** | Continue Advisory + Copy Infra build + M12 slicing IMPL | 255-360 |
+| 10 | 36-39 | 34-37 | **35.5-38.5** | Y1 Review + Copy Trading Evidence Gate + Overlay verdict + M2/M8/M9 Y2 prep + M13 Y3+ spec | 190-260 |
+| **Y1 buffer** | — | — | **38.5-44 (5.5w)** | cross-Sprint collision + cross-ADR re-amendment + 13 prerequisite emergent | 80-120 |
+| **Y1 Total** | **39 wk** | **37-44 wk** | **44-55 wk** | | **3,500-5,200 hr** |
 
-**vs v5.7 1,275-1,710 hr**: v5.8 ~2.0-2.3x engineering. This is the cost of designing 13 modules.
+**vs v5.7 1,275-1,710 hr**: v5.8 ~2.7-3.0x engineering（含補位完整工時）。
 
-**vs reviewer's full-13-module estimate 2,000-7,800 hr**: v5.8 lands at ~3,200 hr median, lower bound of reviewer range. Achievable because most modules are DESIGN-only Y1; full IMPL phased Y2-Y3.
+**vs v5.8 §3 上方文本 2,780-3,930 hr**: PM 整合上修 +26-32% / +7-11w。原因 = GUI 261-374 hr + TW 450-640 hr + MIT spec 90-140 hr + A3 sign-off 48-53 hr + governance amend 60-90 hr + AI cost reserve $1,344-2,556 Y2 + cross-Sprint collision buffer 80-120 hr。
+
+**operator D3 已批接受**（2026-05-21）：Y1 calendar 44-55w + 工時 3,500-5,200 hr。
 
 ---
 
@@ -683,30 +763,40 @@ Plus existing v5.7 lineage:
 
 ---
 
-## §9 Schema Migration Roster (v5.8 adds V105-V107 + extensions)
+## §9 Schema Migration Roster (v5.8 adds V105-V116; V### re-number consistent per CR-1)
+
+**V### re-number search/replace 狀態 (per CR-1 v5.7 4 follow-up 第 2 條 2026-05-21 補)**：
+
+- ✅ `srv/sql/migrations/` git tree empirical head = **V098** (V091-V098 全 land)；V099-V116 為 spec 未 SQL IMPL
+- ✅ V099-V104 spec docs consistent；V103/V104 spec doc v3 (`docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md`) 已 SPEC-FINAL with V103 §14 EXTEND
+- ✅ V105-V113 spec placeholder land 2026-05-21 (per CR-8)；V114-V116 reserve frontmatter only
+- ✅ 無 dangling V### references (grep 確認 `V097`/`V098`/`V099`/`V100`/`V101`/`V102` 全部命中為 prereq references 或 catch-up status；無歷史 inconsistent 引用)
+- ✅ Memory `project_2026_05_02_p0_sqlx_hash_drift` 教訓：V### SQL file 不直接 rename（觸 sqlx checksum drift）；V### re-number 只在 spec doc + dispatch packet 層；SQL IMPL 階段 E1 land V### sql file 時必 cross-ref spec doc V### number
 
 ```
 v5.7 lineage:
-  V097, V098: Linux DB catch-up (in flight)
-  V099, V100: Track v3 (per PM arbitration)
-  V101, V102: Earn schema (per PM arbitration)
-  V103, V104: hypotheses + preregistration (v5.7) — EXTEND in v5.8 for M4
+  V091-V098 (已 land 到 srv/sql/migrations/, sqlx_migrations head = V098)
+  V097/V098: Linux DB catch-up (DONE Phase 0 per v5.7 §3)
+  V099, V100: Track v3 (per PM 仲裁 1 option A, spec ready, IMPL Sprint 1A-α/β)
+  V101, V102: Earn schema (per PM 仲裁 1 option A, spec ready, IMPL Sprint 1A-α/β)
+  V103, V104: hypotheses + preregistration + earn_movement_log (v5.7 v3 SPEC-FINAL + §14 audit field EXTEND per CR-1)
+             V104 退號為 no-op (per V103/V104 spec §1.3 情境 1)
 
-v5.8 new:
-  V105: overlay_state_transitions + counterfactual_to_state hooks (M2)
-  V106: health_observations + degradation_state (M3)
-  V107: replay_divergence_log (M11)
-  V108: ab_tests + ab_assignments + ab_results (M9) [could merge with V107 if dispatch consolidates]
-  V109: anomaly_events + severity (M8)
-  V110: reward_weight_history + bayesian_opt_runs (M6)
-  V111: discovery_tier_config + capital_triggers (M10)
-  V112: decision_lease_tiers + tier_eligibility_log (M1)
-  V113: decay_signals + strategy_lifecycle (M7)
+v5.8 new (CR-8 placeholder spec land 2026-05-21；full DDL Sprint 1A-β/γ 逐個推進):
+  V105: overlay_state_transitions + counterfactual_to_state hooks (M2; Sprint 1A-γ; ← V107)
+  V106: health_observations + degradation_state (M3; Sprint 1A-β; hypertable 必)
+  V107: replay_divergence_log (M11; Sprint 1A-β; ← V103/V109/V113; hypertable 必; ADR-0038)
+  V108: ab_tests + ab_assignments + ab_results (M9; Sprint 1A-γ; ← V103; ADR-0037)
+  V109: anomaly_events + severity (M8; Sprint 1A-γ; → V112; hypertable 必; ADR-0036; NO HMM/GARCH)
+  V110: reward_weight_history + bayesian_opt_runs (M6; Sprint 1A-β)
+  V111: discovery_tier_config + capital_triggers (M10; Sprint 1A-γ; Tier D ATR-vol+funding NOT HMM per ADR-0036)
+  V112: decision_lease_lal_tiers + lal_eligibility_log + lal_toggle_audit (M1; Sprint 1A-β; ← V113; ADR-0034 LAL rename)
+  V113: decay_signals + strategy_lifecycle (M7; Sprint 1A-β; hypertable 必; M7 single decay authority per CR-7)
 
-Interface-stub schemas (no DDL Sprint 1A, but reserved numbers):
+Interface-stub schemas (no DDL Sprint 1A-δ, reserved numbers only):
   V114: online_learning_models (M5; reserved, not used Y1)
-  V115: order_routing_profiles (M12; reserved, IMPL Sprint 6)
-  V116: asset_class_venue_registry (M13; reserved, IMPL Y2)
+  V115: order_routing_profiles + order_routing_decisions (M12; reserved, IMPL Sprint 6; per ADR-0039 含 maker_fill_rate_30d)
+  V116: asset_class_venue_registry (M13; reserved, IMPL Y3+; per ADR-0040 multi-venue Y3+ at earliest)
 
 PA dispatch finalizes consolidation (may merge V109+V108 etc. if logically related).
 ```
@@ -723,11 +813,34 @@ PA dispatch finalizes consolidation (may merge V109+V108 etc. if logically relat
 - D2 ($3k max loss ceiling; M3 HEALTH_CATASTROPHIC triggers existing kill)
 
 **New risks v5.8 introduces**:
-1. **Schema sprawl** (V103-V116): PA dispatch must verify ordering + idempotency; mitigated by per-V dry-run requirement (CLAUDE.md §Data, Migrations, And Validation)
+1. **Schema sprawl** (V103-V116): PA dispatch must verify ordering + idempotency; mitigated by per-V dry-run requirement (CLAUDE.md §Data, Migrations, And Validation) + §3.5.5 cross-V### dependency graph
 2. **DESIGN-only debt** (M5/M12/M13 interface stubs): if Y2-Y3 IMPL skipped, interfaces become dead code; mitigated by ADR-0035/0039/0040 explicit retirement criteria
-3. **Sprint 1A timeline 1.5w → 7w**: Sprint 2+ shifts right; Sprint 4 first Live (W12-15 → W16-19); operator must accept; **mitigated by**: v5.7 Sprint 1A baseline (75-105 hr) still completes in 1.5w as scheduled, so first usable governance + sensors lands W1.5 unchanged. v5.8 module DESIGN runs **parallel** to Sprint 1B-3 execution where possible.
-4. **Engineering 2.3x** (1,710 → 3,930 hr): operator cost-of-time exposure; mitigated by **parallel sub-agent execution** (PA + MIT + TW + CC parallelize most DESIGN work) and **DESIGN-deferred-IMPL** structure
+3. **Sprint 1A timeline 1.5w → 8.5w PM 整合** (per §3.5): Sprint 2+ shifts right; Sprint 4 first Live (W12-15 → W17.5-20.5); operator must accept; **mitigated by**: v5.7 Sprint 1A baseline (75-105 hr) still completes in 1.5w as scheduled, so first usable governance + sensors lands W1.5 unchanged. v5.8 module DESIGN runs **parallel** to Sprint 1B-3 execution where possible.
+4. **Engineering 2.7-3.0x** (1,710 → 3,500-5,200 hr PM 整合): operator cost-of-time exposure; mitigated by **parallel sub-agent execution** (PA + MIT + TW + CC parallelize most DESIGN work) and **DESIGN-deferred-IMPL** structure
 5. **Auto-Allocator gate unchanged**: even with v5.8, Y2 90% requires 6+ months Advisory + >80% approval. **v5.8 does NOT shortcut this**.
+6. **AI cost Y2 超 DOC-08 §4 cap 1.9-3.5x**（per ADR-0041 / CR-16）：$1,344-2,556/yr Y2 vs DOC-08 §4 $60/月 baseline；mitigated by ContextDistiller v4 800 token hard cap + Y2 conditional opt-in $150-200/月 LAL 4 approval
+7. **PG buffer V106 health 高頻表**：6mo +1.25-2.5 GB（占 buffer 16-63%）；mitigated by hypertable 7d chunk + 7d compression + 90d retention (per V106 spec placeholder + E5 audit)
+8. **4 state machine（M1/M2/M3/M7）50+ transition 易漏邊**：first-detection deadlock 反模式風險（per memory `feedback_first_detection_deadlock_pattern`）；mitigated by §STATE-MACHINE-TEST proptest 窮舉 + dead-state scan + is_none() reset auto-clear 反模式 scan (per E4 H-14)
+
+---
+
+## §10.5 P0 Precondition Table — Sprint 4 First Live 阻塞（per CR-10 / E2 + FA Audit）
+
+Sprint 4 首次 Live（W17.5-20.5 PM 整合 calendar）受以下 4+1 條 active P0 precondition 阻塞，必先 closure 或 operator accept LiveDemo 自動降級：
+
+| P0 ID | 描述 | Status (2026-05-21) | Sprint 4 Live 阻塞影響 |
+|---|---|---|---|
+| **P0-EDGE-1** | net-positive edge — 5 textbook 策略結構性 alpha-deficient（QC 2026-05-11 audit verdict 持續有效）| OPEN — Phase B/C/D + A 群 待 closure | **HARD BLOCKER**：Sprint 4 Top-1 LIVE 必先有 net-positive edge evidence |
+| **P0-LG-3** | Wave 2.4 IMPL DISPATCH 完整鏈 | OPEN — 部分 IMPL | Sprint 4 部分 module 依賴 LG-3 落地 |
+| **P0-OPS-1..4** | HTTPS / cred rotation / legal / runbook OPS 4 條 | OPEN — OPS-1 HTTPS 部署 / OPS-2 cred rotation cadence / OPS-3 legal sign-off / OPS-4 runbook完整 | OPS-1/2 是 Live 5-gate 級必要；OPS-3/4 可 LiveDemo 階段並行補 |
+| **5-gate live boundary** | Python live_reserved + Operator role + OPENCLAW_ALLOW_MAINNET=1 + valid secret slot + signed authorization.json | 4/5 gate ready；secret slot Sprint 1A-α DONE；authorization 在 Sprint 4 W17.5 簽發 | **HARD GATE**：5/5 必齊；缺一不可 Live |
+
+**operator decision 5（per §12 第 5 條 CR-10）**：
+- 選項 A：**Sprint 4 W17.5 前 P0-EDGE-1 + P0-LG-3 + P0-OPS-1/2 全 closure** → 真實 Live $500 開放
+- 選項 B：**accept LiveDemo 自動降級** → Sprint 4 走 LiveDemo（live-grade control flow against demo endpoint per ADR-0004 + CLAUDE.md §四 LiveDemo 不降級）；P0 closure deferred to Sprint 6+；Live deadline 至 Sprint 6 末重評
+- 選項 C：**Sprint 4 LIVE skip，跳到 Sprint 5+ direct Live** → 須伴隨 P0 emergency closure plan + 操作 risk acceptance
+
+**Sprint 1A-β/γ/δ/ε 不阻**：P0 precondition 在 Sprint 4 W17.5 前須 closure（or operator accept B/C）；不影響 Sprint 1A 多階段 DESIGN dispatch。
 
 ---
 
@@ -748,6 +861,42 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
 
 ---
 
+## §11.5 5-Gate Auto Path Inheritance — Hard Invariant（per CR-15 / E3 + CC Audit）
+
+**Invariant**：v5.8 引入 7 條 auto path 寫 live state，**任一條必經完整 5-gate fail-closed**。任何一 gate fail → 該 auto path 自動 fall-back to Advisory 模式，**不**繞 gate 直寫。
+
+| Auto path | Module | LAL 級 | 5-gate inheritance contract |
+|---|---|---|---|
+| 1. M1 LAL 1 intra-strategy reparam | M1 | LAL 1 | Console toggle ON + 30d stable + 90d no-incident + 5/5 gate green; gate fail → fall-back Advisory |
+| 2. M1 LAL 2 cross-strategy reweight Y2 | M1 | LAL 2 | Console toggle ON + Y2 enable gate + 6mo Advisory + 80% yes-rate + 5/5 gate green; gate fail → fall-back Advisory |
+| 3. M2 overlay auto-disable | M2 | LAL 2 (auto-disable always-on per AMD-2026-05-21-01) | 5/5 gate green; trigger 條件 = Sharpe collapse OR regime anomaly + counterfactual diverge; gate fail → keep current state (degraded conservative) |
+| 4. M3 auto-degradation HEALTH_DEGRADED/CRITICAL | M3 | LAL 2 (always-on) | 5/5 gate green required for state transition write; HEALTH_WARN 不 action 只 alert; gate fail → emit alert no state change |
+| 5. M6 reward weight ≤30% auto-apply | M6 | LAL 2 (Y2 enable) | Console toggle ON + Y2 enable + bounds within operator-set + 5/5 gate green; gate fail → keep current weight |
+| 6. M7 auto-demote DECAY_ENFORCED (50% size) | M7 | LAL 1 (always-on per CR-7 single decay authority) | 5/5 gate green + M11/Sharpe/DD/N-loss 4 signal source ≥ 2 confirm; gate fail → emit alert keep current size |
+| 7. M10 capital tier activation eval | M10 | LAL 4 (always operator approve per AMD-2026-05-21-01) | AUM 30d sustained + Console toggle per tier + 5/5 gate green + operator click; gate fail → defer activation |
+
+**M4 DRAFT writeback Decision Lease 紀律**（CR-15 + ADR-0024-lite）：
+- M4 pattern miner DRAFT 寫入 V103 EXTEND 必經 Decision Lease + HMAC signature + `ml-training-pattern-miner` role + rate limit
+- DRAFT 寫入 rate limit：≤ 10 DRAFT / hour / instance + ≤ 100 DRAFT / day (per AI-E cost guard ADR-0041)
+- DRAFT 不可 auto promote 到 preregistered（per CR-6 6 attribute minimum bar + operator+Cowork review required）
+- DRAFT 不可 auto trigger trial activation（per ADR-0024-lite Cowork operator-assistant scope）
+- DRAFT 寫入 audit log：`agent.ai_invocations` ledger 必含 `fallback_reason` if token budget exhausted
+
+**operator forgetfulness 6 條反向 attack 對應 mitigation**（per E2 H-11 + AMD-2026-05-21-01 §4）：
+
+| 反向 attack | Mitigation |
+|---|---|
+| M1 24h undo 已 fill 不可逆 | LAL undo scope 明寫 "config + risk envelope only, not fills"（per ADR-0034 Decision 5） |
+| M2 false anomaly trigger（healthy market burst → 誤 disable overlay）| M2 auto-disable 條件嚴格 = Sharpe < 0 AND counterfactual diverge AND 30d sustained；單一 burst 不觸發 |
+| M3 healthy market burst false-positive | HEALTH_WARN 不 action 只 alert；HEALTH_DEGRADED/CRITICAL 才 state change |
+| M7 14d × 50% 持續虧 | 14d review window 末必 operator click decision；不 auto-recover；無 ack 升 25% size 自動 |
+| M8 alpha source vs halt 混淆 | M8 severity 4 級（INFO/WARN/CRITICAL/HALT 對齊 M11 per CR-7 §5）；halt 只在 CRITICAL+；HIGH=throttle 非 halt |
+| M11 passive Slack 5d 不被 ack | 自動升 M3 HEALTH_WARN；7d 升 HEALTH_DEGRADED 並暫停 LAL 1+2 auto-approval（fail-safe to Advisory） |
+
+**Operator inactivity > 60d** → auto-rollback opt-in scope 全部回 Advisory（per AMD-2026-05-21-01 §3）。
+
+---
+
 ## §12 Dispatch Plan
 
 **v5.7 Sprint 1A-α (Week 0-1.5)**: DISPATCH-OF-RECORD. Already PM signed off 2026-05-21 (TODO §0.5). 5 parallel sub-agent tracks. UNCHANGED.
@@ -758,11 +907,49 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
 - Sprint 1A-β runs Week 1.5-3.5 (after v5.7 1A-α tracks land)
 - Subsequent γ/δ/ε per §3 schedule
 
-**Operator decision points**:
-1. **Approve v5.8 13-module scope** (this document) — Y/N
-2. **Approve Y1 timeline 39w → 44w** — operator accepts 5w slip for autonomy DESIGN
-3. **Approve engineering 2.3x** (1,710 → 3,930 hr) — operator accepts cost
-4. **Confirm interface-stub policy for M5/M12/M13** — Sprint 1A-δ stubs + Y2-Y3 IMPL trigger by AUM
+**Operator decision points (D1-D5 PM 仲裁 batch；2026-05-21 全批)**:
+
+1. **Approve v5.8 13-module scope** (this document) — ✅ D1 已批 (2026-05-21)
+2. **Approve Y1 timeline 39w → 44-55w PM 整合**（per §3.5）— ✅ D3 已批 (2026-05-21)
+3. **Approve engineering 2.7-3.0x** (1,710 → 3,500-5,200 hr PM 整合) — ✅ D3 已批 (2026-05-21)
+4. **Confirm interface-stub policy for M5/M12/M13** — Sprint 1A-δ stubs + Y2-Y3 IMPL trigger by AUM — ✅ D1 含 (2026-05-21)
+5. **★ NEW (per CR-10 E2+FA audit)**：**確認 Sprint 4 Live precondition ETA OR accept LiveDemo 自動降級** — Sprint 4 W17.5-20.5 首次 Live 阻塞於 P0-EDGE-1 / P0-LG-3 / P0-OPS-1..4 4 條 active P0；operator 選 (A) Sprint 4 前全 closure / (B) LiveDemo 降級 deferred to Sprint 6+ / (C) skip Sprint 4 LIVE to Sprint 5+ direct（per §10.5 P0 precondition table）— **PENDING operator click decision before Sprint 4 W17.5 dispatch**
+
+**PM 仲裁 D2/D4/D5（per PA consolidation §8 + PM final verdict §四）**：
+
+- **D2 M1 Lease Tier 改名為 LAL (Layered Approval Lease)** — ✅ 已批 (2026-05-21)；ADR-0034 land；V112 schema column rename `decision_lease_tiers` → `decision_lease_lal_tiers`；避 AMD-01 Stage 0R-4 字面碰撞
+- **D4 M13 Y2 Binance trade enable → Y3+ at earliest** — ✅ 已批 (2026-05-21)；ADR-0040 land；per BB push back + ADR-0033 + CLAUDE.md §一 衝突；Y2 期間 Binance 維持 market-data only
+- **D5 立 AMD-2026-05-21-01 autonomy-vs-human-final-review** — ✅ 已批 (2026-05-21)；AMD draft land；priority order 第 5 條 protected scope vs opt-in scope 邊界明示
+
+**PM additional decisions（CR-11 + CR-12 + CR-15 + CR-16）**：
+
+- **CR-11 GUI 工時 +261-374 hr 寫入 §3 + §4** — ✅ §3.5.2 + §4 已 reflect；Console tab 歸屬 4 tab × 2-4 sub-section（不擴張 16 tab）；A3 sign-off 48-53 hr Y1 8 surface Lv 3-4
+- **CR-12 TW 工時 +450-640 hr 寫入 §3 + §4 + §8 + §9** — ✅ §3.5.2 + §4 已 reflect；TW 並行 dispatch with PA-MIT-CC parallel tracks
+- **CR-15 5-gate auto path inheritance hard invariant** — ✅ §11.5 已 land 7 條 auto path + M4 DRAFT writeback Decision Lease + 6 反向 attack mitigation
+- **CR-16 ADR-0041 ContextDistiller v4 + DOC-08 §4 amendment** — ✅ ADR-0041 land；Y1 cap $60/月 + Y2 conditional $150-200/月 LAL 4 approval；800 token hard cap；M4 純規則 vs LLM hybrid 明示；M11 daily L1 vs CRITICAL L2 narrative cadence 分
+
+**Sub-agent dispatch readiness（per CR-1..16 完成度）**：
+
+| Prerequisite | 狀態 | Owner |
+|---|---|---|
+| CR-1 v5.7 4 follow-up | ✅ DONE 主會話 2026-05-21 + sub-agent | PA + MIT + TW + FA + E3 + QA |
+| CR-2 ADR-0034 M1 LAL | ✅ DONE 2026-05-21 | TW |
+| CR-3 AMD-2026-05-21-01 | ✅ DONE 2026-05-21 | TW + CC |
+| CR-4 ADR-0040 multi-venue | ✅ DONE 2026-05-21 | TW + BB + E3 |
+| CR-5 ADR-0036 M8 + M10 blacklist | ✅ DONE 2026-05-21 | TW + MIT + QC |
+| CR-6 M4 leakage protocol | ✅ DONE 2026-05-21 | MIT + PA |
+| CR-7 M11 threshold + M7 dedup | ✅ DONE 2026-05-21 | MIT + QC |
+| CR-8 V105-V113 spec placeholders | ✅ DONE 2026-05-21 | MIT + PA + E5 |
+| CR-9 PG dry-run + cross-V### graph | ✅ DONE 主會話 §3.5.5 | PA + E5 |
+| CR-10 §10.5 P0 precondition + §12 decision 5 | ✅ DONE 主會話 | PM |
+| CR-11 GUI hours + §12 A3 sign-off | ✅ DONE 主會話 | PM + A3 |
+| CR-12 TW hours + §12 dispatch | ✅ DONE 主會話 | PM + TW |
+| CR-13 Sprint 1A + Y1 hours uplift | ✅ DONE 主會話 §3.5 + §4 | PM |
+| CR-14 ADR-0039 M12 + ADR-0038 M11 | ✅ DONE 2026-05-21 | TW + BB |
+| CR-15 5-gate auto path inheritance | ✅ DONE 主會話 §11.5 | TW + E3 + CC |
+| CR-16 ADR-0041 ContextDistiller v4 | ✅ DONE 2026-05-21 | AI-E + TW + PM |
+
+**Sprint 1A-β 派發 readiness**：16/16 CRITICAL 完成 → **GO** D+5~D+10 內 PA dispatch 5-7 並行 sub-agent 開始真實 DESIGN。
 
 **Optional shortcuts (operator can elect)**:
 - **Drop M5** entirely (online learning not even interface stub): saves 8-12 hr Sprint 1A but loses interface compatibility
@@ -782,6 +969,15 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
 - CLAUDE.md root principles (16) + hard boundaries (D1c/D1d)
 - 16 root principles priority order: survival > risk governance > system health > audit traceability > human final review > real net PnL > autonomy evolution
 
+**v5.8 16 CRITICAL prefix DONE 2026-05-21 references**:
+- PM final verdict (主入口): `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md`
+- PA dispatch consolidation 562 行: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md`
+- 14 agent v5.8 executability audit: `docs/CCAgentWorkSpace/{A3,AI-E,BB,CC,E2,E3,E4,E5,FA,MIT,QA,QC,R4,TW}/workspace/reports/2026-05-21--v58_executability_audit.md`
+- **新 ADR**：ADR-0034 (M1 LAL) / ADR-0036 (M8 anomaly + M10 Tier D blacklist) / ADR-0038 (M11 replay + liquidations source) / ADR-0039 (M12 OrderRouter + maker_fill_rate) / ADR-0040 (multi-venue Y3+) / ADR-0041 (ContextDistiller v4 + DOC-08 amend)
+- **新 AMD**：AMD-2026-05-21-01 autonomy-vs-human-final-review
+- **新 spec doc**：m4_minimum_bar_and_leakage_protocol / m11_threshold_m7_dedup_decay_enforced_rename
+- **新 V### placeholder spec**：V105-V113 (9 docs at `docs/execution_plan/2026-05-21--v{105..113}_*_schema_spec.md`)
+
 ---
 
 ## §14 v5.8 Summary
@@ -790,12 +986,18 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
 
 **Scope change vs v5.7**:
 - +13 modules with full DESIGN at Sprint 1A (M5/M12/M13 interface stubs only)
-- +7 new ADRs (0034-0040)
-- +12 new schema migrations / extensions
-- +1,505-2,220 hr engineering Y1
-- +5 weeks Y1 timeline (Sprint 1A 1.5w → 7w)
+- +**8 new ADRs (0034-0041)** + **1 new AMD (2026-05-21-01)** + 2 spec docs (M4 leakage / M11+M7 dedup)
+- +**12 new schema migrations / extensions** (V105-V116; V105-V113 active; V114-V116 reserve)
+- +**1,790-3,490 hr engineering Y1 PM 整合**（v5.7 1,275-1,710 hr → v5.8 真實 3,500-5,200 hr）
+- +**5-16 weeks Y1 timeline PM 整合**（Sprint 1A 1.5w → 8.5w；Y1 39w → 44-55w）
 - +Capital tier scaling design (M10 Tier A-E roadmap)
-- +Operator forgetfulness mitigation (M1 default-OFF auto, M2 auto-disable, M3 auto-degrade, M7 safer demote, M8 alert→action, M11 daily report)
+- +Operator forgetfulness mitigation (M1 default-OFF auto, M2 auto-disable, M3 auto-degrade, M7 DECAY_ENFORCED safer demote, M8 alert→action, M11 daily report) + AMD-2026-05-21-01 protected vs opt-in scope 明示
+- +**M1 Tier 0-4 → LAL 0-4** rename（per D2 + ADR-0034；避 AMD-01 Stage 0R-4 字面碰撞）
+- +**M7 STAGE_DEMOTED → DECAY_ENFORCED** rename（per CR-7；避 Stage 字面碰撞）
+- +**M13 Y2 → Y3+ at earliest**（per D4 + ADR-0040；BB push back + Bybit-only baseline）
+- +**M8/M10 Tier D HMM/Markov-switching/GARCH 黑名單**（per ADR-0036；math-model-audit skill 永久 ADR 級強化）
+- +**M11 self-hosted PG market.liquidations historical source**（per ADR-0038；不依賴 Bybit historical API）
+- +**ContextDistiller v4 800 token hard cap + DOC-08 §4 Y2 conditional opt-in $150-200/月**（per ADR-0041）
 
 **Autonomy delta**:
 - Y1 末: 60% → 66%
@@ -803,14 +1005,15 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
 - Y3 Q2: (v5.7 not reaching) → 95% (with capital growth)
 
 **Long-term value**:
-- M4 self-supervised discovery delivers Y2-Y3 alpha (operator's "long-term auto-iteration")
-- M10 Tier C-E enables capital scaling without re-architecture (operator's "don't assume $10k")
-- M5/M12/M13 interface reservations keep Y3+ doors open
+- M4 self-supervised discovery delivers Y2-Y3 alpha (operator's "long-term auto-iteration")；per CR-6 6 attribute minimum bar + shift(1) leak-free 紀律
+- M10 Tier C-E enables capital scaling without re-architecture (operator's "don't assume $10k")；Tier D 用 ATR-vol+funding 不 HMM
+- M5/M12/M13 interface reservations keep Y3+ doors open；M12 含 maker_fill_rate_30d 維持 Bybit rebate eligibility
+- M11 continuous counterfactual replay 100% self-hosted；governance posture 不押 vendor optionality
 
-**Dispatch readiness**: v5.7 Sprint 1A-α unchanged (already PM-signed). v5.8 awaits operator approval of this document, then PA dispatch Sprint 1A-β.
+**Dispatch readiness**: v5.7 Sprint 1A-α unchanged (already PM-signed 2026-05-21). v5.8 **16 CRITICAL prefix DONE 2026-05-21**，operator D1-D5 + PM 仲裁 10 條已批；Sprint 1A-β D+5~D+10 內可派 5-7 並行 sub-agent DESIGN dispatch。
 
 ---
 
-**END v5.8 — 13-Module Autonomy Expansion**
+**END v5.8 — 13-Module Autonomy Expansion + 16 CRITICAL Prefix DONE 2026-05-21**
 
-**Operator action required**: 4 decision points in §12.
+**Sprint 1A-β 派發 readiness**：**GO** — 16/16 CRITICAL prefix 完成；5 operator decision (D1-D5) 已批；3 PM 仲裁 (D2/D4/D5) 已批；7 additional PM decisions (CR-11/12/15/16) 已批；D+5~D+10 PA dispatch packet → 5-7 並行 sub-agent → 真實 DESIGN 開始。

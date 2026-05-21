@@ -937,4 +937,126 @@ per V101 spec v3 §7：rollback 路徑不跨 V096（V096 drop dead tables 不可
 
 ---
 
+## §14 V103 EXTEND — 4 Audit Field（v5.7 4 follow-up 第 1 條 CR-1 — 2026-05-22 補）
+
+**背景**：v5.7 12 prefix DONE PM signoff 2026-05-21 列「Sprint 1A 派發前 must-fix：V103 schema 補 4-5 audit field（lease_id/approval_id/actor_id/bybit_request_payload/rationale；5-8 hr）」（per TODO §0.5 line 16）。本節為 V103 EXTEND 設計（5 audit field land；hypotheses + hypothesis_preregistration + earn_movement_log 三表均含 audit trail）。
+
+**設計動機**：
+- hypotheses + preregistration 是 governance write event；缺 audit trail 違反根原則 #8「交易可解釋」
+- earn_movement_log §2.3.1 已含 governance_approval_id + bybit_response_payload 部分 audit；hypotheses + preregistration 需對等 audit field
+- DOC-08 §12 安全不變量 #8「交易可解釋」要求所有 governance write 有 lineage（lease → approval → actor → payload → rationale）
+
+### 14.1 hypotheses 表 EXTEND（5 audit field ADD COLUMN）
+
+```sql
+ALTER TABLE learning.hypotheses
+    ADD COLUMN IF NOT EXISTS lease_id              BIGINT REFERENCES governance.decision_lease(lease_id),
+    ADD COLUMN IF NOT EXISTS approval_id           BIGINT REFERENCES governance.audit_log(id),
+    ADD COLUMN IF NOT EXISTS actor_id              TEXT NOT NULL DEFAULT 'system',
+    ADD COLUMN IF NOT EXISTS bybit_request_payload JSONB,
+    ADD COLUMN IF NOT EXISTS rationale             TEXT;
+```
+
+| Column | 用途 | NULL 允許 | 備註 |
+|---|---|---|---|
+| `lease_id` | Decision Lease ID for hypothesis state transition (draft→preregistered, preregistered→shadow 等) | YES (draft 無 lease) | FK to `governance.decision_lease.lease_id`；待 governance.decision_lease 表 column name 由 PA C9 confirm |
+| `approval_id` | Operator approval audit log entry ID | YES (draft 無 approval) | FK to `governance.audit_log.id`；對齊既有 §2.3.1 earn_movement_log 範式 |
+| `actor_id` | 寫入這 row 的 actor（'operator' / 'system' / 'ml-training-pattern-miner' / 'cowork-agent' / 等）| NOT NULL DEFAULT 'system' | per ADR-0024-lite Cowork operator-assistant + M4 DRAFT writeback per CR-15 |
+| `bybit_request_payload` | Bybit API request payload (preregistered → shadow 期 may issue test orders) | YES (preregistration 階段無 request) | JSONB 對齊 earn_movement_log §2.3.1 bybit_response_payload 範式 |
+| `rationale` | hypothesis 寫入 / state transition 的人類可讀理由 (operator review note / M4 pattern miner 生成 / Cowork digest 等) | YES | TEXT；長度不限制；對齊根原則 #10 separate fact/inference/assumption |
+
+### 14.2 hypothesis_preregistration 表 EXTEND（5 audit field ADD COLUMN）
+
+```sql
+ALTER TABLE learning.hypothesis_preregistration
+    ADD COLUMN IF NOT EXISTS lease_id              BIGINT REFERENCES governance.decision_lease(lease_id),
+    ADD COLUMN IF NOT EXISTS approval_id           BIGINT REFERENCES governance.audit_log(id),
+    ADD COLUMN IF NOT EXISTS actor_id              TEXT NOT NULL DEFAULT 'operator',
+    ADD COLUMN IF NOT EXISTS bybit_request_payload JSONB,
+    ADD COLUMN IF NOT EXISTS rationale             TEXT;
+```
+
+| Column | 差異 | 備註 |
+|---|---|---|
+| `actor_id` | DEFAULT 'operator' | preregistration 必 operator 簽署 (per §2.2.1 operator_signature)；rarely system actor |
+| 其他 4 column | 同 §14.1 範式 | — |
+
+### 14.3 earn_movement_log 表 EXTEND（補 3 audit field；既有 2 留存）
+
+既有 `governance_approval_id` + `bybit_response_payload`（per §2.3.1）；補：
+
+```sql
+ALTER TABLE learning.earn_movement_log
+    ADD COLUMN IF NOT EXISTS lease_id              BIGINT REFERENCES governance.decision_lease(lease_id),
+    ADD COLUMN IF NOT EXISTS actor_id              TEXT NOT NULL DEFAULT 'operator',
+    ADD COLUMN IF NOT EXISTS rationale             TEXT;
+
+-- Note: bybit_request_payload 對應 stake/redeem request；既有 column bybit_response_payload 是 response
+-- earn_movement_log §2.3.1 已含 bybit_response_payload；本 EXTEND 補 bybit_request_payload 對稱
+ALTER TABLE learning.earn_movement_log
+    ADD COLUMN IF NOT EXISTS bybit_request_payload JSONB;
+```
+
+| Column | 用途 | NULL 允許 |
+|---|---|---|
+| `lease_id` | Earn stake/redeem 取 Decision Lease (per Earn governance spec §2.2 + §2.3) | YES（reconciliation 補錄事件無 lease）|
+| `actor_id` | DEFAULT 'operator'；Y1 manual rebalance only | NOT NULL |
+| `rationale` | stake/redeem reason (margin headroom drop / scheduled rebalance / kill criteria 等) | YES |
+| `bybit_request_payload` | Bybit API stake/redeem request | YES（reconciliation 補錄事件無 request payload）|
+
+### 14.4 Index 補充（hot-path queries）
+
+```sql
+-- audit trail temporal scan
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_hypotheses_lease_approval
+    ON learning.hypotheses (lease_id, approval_id)
+    WHERE lease_id IS NOT NULL;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_preregistration_lease
+    ON learning.hypothesis_preregistration (lease_id)
+    WHERE lease_id IS NOT NULL;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_earn_movement_lease
+    ON learning.earn_movement_log (lease_id, event_ts DESC)
+    WHERE lease_id IS NOT NULL;
+```
+
+### 14.5 Guard B（per CLAUDE.md §Data, Migrations, And Validation）
+
+3 表的 `ALTER TABLE ADD COLUMN IF NOT EXISTS` 屬 type-sensitive ADD COLUMN，需 **Guard B**：
+
+- 添加 column 前先 `SELECT column_name FROM information_schema.columns WHERE table_schema='learning' AND table_name=? AND column_name=?` empirical check
+- 若 column 已存在但 type mismatch → RAISE
+- 若 column 已存在 type 一致 → skip (per IF NOT EXISTS)
+
+### 14.6 PA C9 Linux PG dry-run 追加 query（必跑）
+
+```sql
+-- §14.1 hypotheses EXTEND idempotency 驗
+ALTER TABLE learning.hypotheses ADD COLUMN IF NOT EXISTS lease_id BIGINT;
+ALTER TABLE learning.hypotheses ADD COLUMN IF NOT EXISTS lease_id BIGINT;  -- 二次不報錯
+
+-- governance.decision_lease.lease_id 存在性驗證
+SELECT column_name FROM information_schema.columns 
+  WHERE table_schema='governance' AND table_name='decision_lease' AND column_name='lease_id';
+```
+
+### 14.7 Sign-off
+
+- MIT Drafted (§14 schema EXTEND draft 2026-05-21 主會話 CR-1 補完)
+- PA PENDING (Linux PG dry-run + lease_id FK target column name confirm)
+- E3 PENDING (audit field secret/sensitive data 評估 — rationale field 是否可能 leak operator 寫入內容)
+
+### 14.8 Cross-references
+
+- Earn governance spec §2.5（payload schema + audit field 列表 alignment）
+- DOC-08 §12 安全不變量 #8（交易可解釋）
+- CR-1 v5.7 4 follow-up（TODO §0.5 line 16）
+- ADR-0008 Decision Lease state machine
+- ADR-0024-lite Cowork operator-assistant
+- CR-15 M4 DRAFT writeback Decision Lease（v5.8 §11.5）
+- v5.8 §3.5.5 cross-V### dependency graph
+
+---
+
 **END V103 / V104 spec draft v0**
