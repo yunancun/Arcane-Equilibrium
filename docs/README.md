@@ -188,6 +188,12 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `adr/0039-m12-order-router-trait-and-maker-fill-rate-metric.md` | ADR-0039: M12 OrderRouter Trait — Maker-Fill-Rate Metric + Adaptive Routing Audit Schema（V115 reserve） |
 | `adr/0040-multi-venue-gate-spec.md` | ADR-0040: Multi-Venue Gate Spec — M13 Binance Trade Enable Defer Y3+ At Earliest（ADR-0033 §Decision 2 時點 amendment standalone） |
 | `adr/0041-context-distiller-v4-and-ai-cost-cap-amendment.md` | ADR-0041: ContextDistiller v4 — Layered Snapshot + Token Hard Cap + DOC-08 AI Cost Amendment（ADR-0027 v4 級延伸；AI-E must-fix #1） |
+| `runbooks/2026-05-21--m1_lal_operator_runbook.md` | M1 LAL — Tier 升降 / Auto-Approve / Manual Override SOP（5-tier 矩陣 + 6 hard gate + 24h undo fills 不可逆 + 6 反向 attack mitigation；ADR-0034 對應 runbook draft） |
+| `runbooks/2026-05-21--m3_health_oncall_runbook.md` | M3 健康監控 On-Call Response SOP（4-state ladder + 6 domain triage + amplification cap + HEALTH_DEGRADED → LAL 降階驗收；v5.8 §2 M3 對應 runbook draft） |
+| `runbooks/2026-05-21--m7_decay_alert_runbook.md` | M7 Decay Signal 告警 SOP（4 source × 6 FSM enum 響應矩陣 + 14d × 50% 強制 SUSPENDED 不被 LAL override + M11 dedup verify；CR-7 / v5.8 §2 M7 對應 runbook draft） |
+| `runbooks/2026-05-21--m11_replay_divergence_triage_runbook.md` | M11 Nightly Replay Divergence Triage SOP（5-7 divergence type × 4-level severity + 4h budget + 5d unack auto-escalate H-11 + self-hosted PG fallback；ADR-0038 對應 runbook draft） |
+| `runbooks/2026-05-21--earn_governance_runbook.md` | Bybit Earn Governance — Operator 介入 SOP（5-Gate Adapter + manual rebalance first 3 months + APY 異常 3 trigger + reconciliation drift；ADR-0030/0031/0032 對應 runbook draft） |
+| `runbooks/2026-05-21--counterfactual_quality_report_runbook.md` | Counterfactual Quality 月報生成 SOP（cron + coverage threshold + quality metric 4 維度 + Y1 末 ADR-0030 4-gate evidence packet input prep；M11 月度 aggregation runbook draft） |
 | `governance_dev/amendments/2026-05-21--AMD-2026-05-21-01-autonomy-vs-human-final-review.md` | AMD-2026-05-21-01 — v5.8 13-module thesis 核心治理 amendment（CLAUDE.md §二 第 5 條 human final review 拆 protected vs opt-in；5 mitigation + 6 反向 attack counter-mitigation；§四 hard boundaries 不放鬆）|
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md` | PM v5.8 final verdict consolidation（5 audit + PA dispatch consolidation 整合；GO-WITH-CONDITIONS verdict） |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v57_autonomy_verdict.md` | PM v5.7 autonomy verdict（autonomy boundary 收斂 + opt-in path 標準化） |
