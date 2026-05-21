@@ -83,14 +83,14 @@ Use these patterns on Linux `trade-core` runtime only:
 ### Standard psql connect (via systemd-managed PG)
 
 ```bash
-ssh trade-core 'sudo -u postgres psql -d openclaw -c "SELECT current_database(), version();"'
+ssh trade-core 'psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c "SELECT current_database(), version();"'
 ```
 
 ### Schema reflection example (V### dry-run)
 
 ```bash
 # Verify column existence before ADD COLUMN IF NOT EXISTS
-ssh trade-core 'sudo -u postgres psql -d openclaw -c "
+ssh trade-core 'psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c "
   SELECT column_name, data_type
   FROM information_schema.columns
   WHERE table_schema=$$learning$$ AND table_name=$$hypotheses$$
@@ -98,7 +98,7 @@ ssh trade-core 'sudo -u postgres psql -d openclaw -c "
 "'
 
 # Verify migration head (sqlx checksums)
-ssh trade-core 'sudo -u postgres psql -d openclaw -c "
+ssh trade-core 'psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c "
   SELECT version, success, checksum, execution_time
   FROM _sqlx_migrations
   ORDER BY version DESC
@@ -119,13 +119,13 @@ ssh trade-core 'cd ~/openclaw && cargo sqlx migrate run --database-url $DATABASE
 ```bash
 # After V### apply, restart engine and confirm migration head matches
 ssh trade-core 'bash ~/openclaw/helper_scripts/restart_all.sh --rebuild'
-ssh trade-core 'sudo -u postgres psql -d openclaw -c "SELECT version FROM _sqlx_migrations ORDER BY version DESC LIMIT 1;"'
+ssh trade-core 'psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c "SELECT version FROM _sqlx_migrations ORDER BY version DESC LIMIT 1;"'
 ```
 
 ### Hypertable + retention reflection (TimescaleDB)
 
 ```bash
-ssh trade-core 'sudo -u postgres psql -d openclaw -c "
+ssh trade-core 'psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c "
   SELECT hypertable_name, num_chunks, compression_enabled
   FROM timescaledb_information.hypertables
   WHERE hypertable_schema = $$learning$$;

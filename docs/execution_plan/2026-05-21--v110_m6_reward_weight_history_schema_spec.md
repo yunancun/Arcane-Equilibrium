@@ -9,6 +9,7 @@ parent specs:
   - srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md §Sprint 1A-β + §HIGH H-2 (GP kernel + acquisition + iter budget + 30% rollback cap)
   - srv/docs/execution_plan/2026-05-21--m6_bayesian_reward_weight_design_spec.md (sibling design spec)
   - srv/docs/adr/0021-alpha-source-architecture-upgrade.md (Alpha Surface Bundle reference)
+  - srv/docs/adr/0043-m6-bayesian-reward-weight.md (V110 schema 對應治理 authority；ADR-0043 Decision 2/3/4 為 column 設計邊界；R4 NEW-H-2 reverse-ref patch 2026-05-21)
 mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md (Guard A/B/C + Linux PG dry-run protocol format)
   - srv/sql/migrations/V094__fills_close_maker_audit.sql (Guard A/B/C 範式)

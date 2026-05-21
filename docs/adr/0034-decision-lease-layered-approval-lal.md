@@ -183,6 +183,19 @@ AMD-2026-05-21-01 是 operator D5 提出的 autonomy directive，將以 amendmen
 | **24h undo 涵蓋 fills**（rollback 已成交） | 與 ADR-0008 「成交不可逆」原則衝突；exchange 端已執行 fill 無法 client-side rollback；undo 邊界必須明示 |
 | **LAL 1/2 auto-approve 也需 2FA per decision** | Auto-approve 的目的是 remove operator click；要求 2FA per decision = degrade 到 manual approve；2FA 只用在 toggle 切換，不在 per-decision 路徑 |
 
+### Decision 6 — LAL Tier 0 Active Blocker on M7 RETIRED Strategy (per R4 NEW-M-3 patch 2026-05-21)
+
+| 元素 | 設計 |
+|---|---|
+| Contract | strategy lifecycle 進入 `RETIRED` state (per M7 DECAY_ENFORCED → RETIRED transition in V113 `decay_signals.lifecycle_state`) → 該 strategy 全部後續 LAL Tier 0 fill query path **MUST fail-closed** |
+| 為什麼 | M7 RETIRED = strategy alpha-deficient 永久退役 (per ADR-0044 Decision 1 M7 single decay authority)；若 LAL Tier 0 仍允許 fill = 等同 retire 形同虛設；違反 §二 原則 5「生存 > 利潤」 + §二 原則 6「Uncertainty defaults to conservative」 |
+| Query path | LAL Tier 0 fill judgment 必 query：`SELECT lifecycle_state FROM learning.mv_latest_decay_state_per_strategy WHERE strategy_id=$1` → IF `RETIRED` → reject fill + audit log + alert operator |
+| 已開倉位 | RETIRED 觸發 = 新 fill block；已開倉位走既有 SL/TP path（不強制 immediate close）|
+| Operator override | LAL 4 manual override 也禁用（per AMD-2026-05-21-01 protected scope）；僅 operator manual re-promotion through Stage 0R 路徑可從 RETIRED 拉回 NORMAL_LIVE（30d cooling + per ADR-0044 §3.2 transition table）|
+| 反模式（明示禁止） | (a)「RETIRED 但 LAL Tier 0 仍 fill」= retire 形同虛設 (b)「LAL Tier 4 operator override RETIRED → NORMAL_LIVE 即時」= 違反 14d × 50% mitigation 硬基石 (c)「Tier 0 query 不 check decay_signals」= cross-module contract 斷裂 |
+| 落地 | V112 schema LAL Tier 0 fill query path 必 join `learning.mv_latest_decay_state_per_strategy`（per V113 §8 materialized view land）；Sprint 1A-ζ spike Track A4 是首次 empirical verify 此 contract |
+| Cross-ref | ADR-0044 Decision 1+6 (M7 single decay authority + RETIRED → LAL Tier 0 blocker) / V113 `decay_signals.lifecycle_state` ENUM 'RETIRED' / AMD-2026-05-21-01 protected scope §4 反向 attack #4 14d × 50% mitigation / Sprint 1A-ζ spike spec §2.1 A4 |
+
 ## Consequences
 
 ### Positive

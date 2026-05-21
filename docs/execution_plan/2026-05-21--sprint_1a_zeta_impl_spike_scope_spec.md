@@ -339,30 +339,47 @@ per Track A / B / C §2.1-2.3 工作清單；3 並行 sub-agent 各自獨立 IMP
 
 ## §6 Dispatch Plan + Workload（30-50 hr 真實 / 57-86 hr 含 buffer / 1-2 wall-clock week）
 
-### 6.1 Per-phase workload table
+### 6.1 Per-phase workload table（per Q4a override 2026-05-21 operator sign-off）
 
 | Sub-phase | Owner | 工時 | Sequential or parallel | Wall-clock |
 |---|---|---|---|---|
+| Phase 0 sandbox + Vault prep（per Q1d + Q2 operator sign-off）| E3 + AI-E (single sequence) | 4-6 hr | single-thread | 0.5 day |
 | Phase 1 PA spike refine + 3 dispatch packet | PA (single) | 4-6 hr | single-thread | 0.5 day |
-| Phase 2 E1 IMPL × 3 track（Track A / B / C 並行） | E1 × 3（並行 sub-agent） | 30-45 hr 並行（per track 10-15 hr） | 3 並行 sub-agent | 2-3 days |
+| Phase 2 E1 IMPL × 3 track（Track A / B / C；**強制 sequential V107 → V113 → V112 ordering**）| E1 × 3（sequential per ordering）| **35-55 hr**（Track A 12-18 / Track B 13-19 / Track C **16-27** per Q4a 含 M11 Python skeleton + fill_chain detector empirical）| sequential by V### dep | 3-4 days |
 | Phase 3a E2 review × 3 track（並行） | E2 × 3（並行 sub-agent） | 12-18 hr 並行（per track 4-6 hr） | 3 並行 sub-agent | 1 day |
 | Phase 3b E4 regression（含 cross-language fixture） | E4 (single) | 4-6 hr | single-thread | 0.5 day |
 | Phase 3c QA empirical verify（AC-1..7 driver） | QA (single) | 4-6 hr | single-thread | 0.5 day |
 | Phase 3d TW spike acceptance report | TW (single) | 2-3 hr | single-thread | 0.5 day |
 | Phase 3e PM sign-off + verdict | PM (single) | 1-2 hr | single-thread | 0.5 day |
-| **Total** | – | **57-86 hr（含 buffer）** | – | **1-2 wall-clock week** |
+| **Total** | – | **66-102 hr（含 buffer + Phase 0 sandbox + Q4a override）** | – | **1.5-2 wall-clock week** |
 
-### 6.2 真實 wall-clock 預測
+### 6.1.1 V### Dependency Ordering（Phase 2 強制 sequential per V### FK reference）
+
+per V099-V116 dependency graph (V107 ← V103/V109/V113 / V108 ← V103 / V109 → V112 / V112 → V113 / V105 → V107) + spike Track 對應 V### apply：
 
 ```
-D0 (派發日)        : Phase 1 PA spike refine + 3 dispatch packet (4-6 hr)
-D1-D3 (3 days)     : Phase 2 E1 IMPL × 3 並行 sub-agent (30-45 hr 並行 / wall-clock 2-3 days)
-D4 (1 day)         : Phase 3a E2 review × 3 並行 sub-agent (12-18 hr 並行 / wall-clock 1 day)
-D5 (0.5 day)       : Phase 3b E4 regression (4-6 hr)
-D5 (0.5 day, 並行) : Phase 3c QA empirical (4-6 hr)
-D6 (0.5 day)       : Phase 3d TW report + Phase 3e PM sign-off (3-5 hr)
+Phase 2 sequential ordering（避 3 並行撞 FK race）：
+  Step 1: Track C  V107 (M11 replay divergence log) PG apply 先（standalone；無 upstream FK dep）
+  Step 2: Track A  V113 (M7 decay signals) PG apply 第二（M7 ref V107 m11_replay_divergence_ref UUID placeholder）
+  Step 3: Track A  V112 (M1 LAL tiers) PG apply 第三（M1 LAL ref V113 no_incident_check_v113_ref BIGINT FK）
+  Step 4: Track B  V106 (M3 health observations) PG apply 第四（standalone；無 upstream FK；可與 Step 2-3 並行 IMPL 但 PG apply 必 sequential）
+
+> Note: V### apply 為 sequential；Rust skeleton IMPL 仍可 3 並行（不撞 PG）
+> per Q4a override Track C 含 M11 Python skeleton + fill_chain detector empirical (+5-10 hr) 整合在 Track C 16-27 hr 範圍
+```
+
+### 6.2 真實 wall-clock 預測（per Q4a override + V### ordering）
+
+```
+D0 (派發日 -0.5)   : Phase 0 sandbox + Vault prep (4-6 hr E3 + AI-E sequential)
+D0.5 (派發日)      : Phase 1 PA spike refine + 3 dispatch packet (4-6 hr)
+D1-D4 (4 days)     : Phase 2 E1 IMPL — V### apply sequential (V107 → V113 → V112 → V106) + Rust skeleton 3 並行 (35-55 hr / wall-clock 3-4 days)
+D5 (1 day)         : Phase 3a E2 review × 3 並行 sub-agent (12-18 hr 並行 / wall-clock 1 day)
+D6 (0.5 day)       : Phase 3b E4 regression (4-6 hr)
+D6 (0.5 day, 並行) : Phase 3c QA empirical (4-6 hr)
+D7 (0.5 day)       : Phase 3d TW report + Phase 3e PM sign-off (3-5 hr)
 ─────────
-合計 wall-clock    : 1-2 wall-clock week（D0-D6 約 1 week 紧型；含 buffer 達 2 week）
+合計 wall-clock    : 1.5-2 wall-clock week（D0-D7 約 1.5 week 紧型；含 buffer 達 2 week）
 ```
 
 ### 6.3 並行 sub-agent ceiling check
