@@ -11372,3 +11372,95 @@ PA spec land 後 5 件 plumbing：H0Gate.with_metrics + finalize_blocked/allowed
 
 ### 報告
 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p2_lg1_demo_slo_carveout_e1_wire.md`
+
+---
+
+## 2026-05-21 Sprint 1A-δ Wave 1 / Track M13 — AssetClass + Venue enum interface reservation
+
+### 任務
+- PA spec：`docs/execution_plan/2026-05-21--m13_asset_class_venue_design_spec.md`（624 行）
+- ADR：`docs/adr/0040-multi-venue-gate-spec.md`（257 行）
+- Scope = 介面預留 enum stub only（4-6 hr）；無 method body / 無 venue dispatch / 無 trading routing
+
+### 修改清單
+- 新 `srv/rust/openclaw_types/src/asset_venue.rs`（151 行；< 250 cap）
+- 新 `srv/rust/openclaw_types/tests/m13_asset_venue_acceptance.rs`（152 行 / 7 #[test]）
+- Edit `srv/rust/openclaw_types/src/lib.rs`（+2 行：`pub mod asset_venue;` + `pub use asset_venue::{AssetClass, Venue, VenueParseError};`）
+
+### 治理對照
+- ADR-0040 Decision 4：DEX / Hyperliquid 硬編碼拒絕 → 0 個 enum variant；只在 doc 與 `DeniedByADR0040` reject path 出現
+- ADR-0040 Decision 1：BinancePerp Y2 market-data only / Y3+ trade defer → doc comment 標明
+- v5.8 §2 M13：Structured Y3+ Tier C+ AUM $75k+ → doc comment 標明
+- 中文注釋（per `feedback_chinese_only_comments` 2026-05-05）
+
+### 教訓
+- spec §6.1 預設用 `thiserror`，但 Cargo.toml 沒此 dep；改用 `std::error::Error + Display` impl，保 dep 乾淨（與 LG-2 T4 dev-deps 紀律一致）
+- VenueParseError 設計 enrich = 採 spec §7.4 (b) `DeniedByADR0040` + `UnknownVenue`；理由：fail-closed log 要可區分「未開 ADR」與「硬拒」，運維成本 < $1 hr
+- Display 選 snake_case 與 agent.rs / state.rs / Bybit-Binance category API 慣例對齊；FromStr 額外接受 PascalCase 增容錯
+- golden schema 不擴 `shared_types.json`（per spec §6.5 Open Q 3 + §7.3 建議 (b)）；無 Python binding 不需 cross-language contract；既有 4 個 schema_golden_tests 全 PASS
+
+### 報告
+（per E1 完成序列：本任務報告以「最終訊息直接回 PA」形式，不寫 .md 報告檔，遵循 system prompt 指示）
+
+
+---
+
+## 2026-05-21 — Sprint 1A-δ M5 ModelClient trait stub IMPL
+
+### 教訓
+- Spec 衝突仲裁：ADR-0035 Decision 1 列 6 method (get_predict / get_predict_streaming / drift_callback / rollback / throttle / health) 與 PA spec §2 列的 6 method (get_predict / get_predict_streaming / version / model_metadata / health / streaming_supported) 不一致；prompt 明寫「per PA spec §2 + ADR-0035」且明列要實作哪 6 個，以 prompt + PA spec 為準（PA spec §2.7 對齊矩陣是「最新權威」對 Sprint 1A-δ IMPL）；E1 需 surface 衝突，不靜默選邊。
+- `serde::Deserialize` 不可隨意 derive — `Prediction` 自 edge_predictor re-export 未 derive `Deserialize`，若 placeholder struct 加 `Deserialize` derive 會觸發跨型別 trait bound 編譯失敗；prompt 明寫「`#[derive(Debug, Clone)]`」就照 prompt，不要 over-derive。
+- trait dyn safety test 寫法：`Box<dyn ModelClient>` 構造本身合法，呼叫 method 才 panic；要避免編譯器 dead code elimination 把構造優化掉 → 走 `Box::into_raw` + 手動 `Box::from_raw` drop。
+
+### 工具偏好
+- `cargo build -p <pkg> --release` 後直接 `cargo test -p <pkg> --release --test <test_file>` 跑單一 test file → 比跑整套快；regression 才跑完整 `cargo test -p <pkg> --release`。
+- `cargo test ... 2>&1 | grep -E "^test result:" | awk` 是 PASS/FAIL aggregate 標準法。
+
+### 報告
+（per E1 完成序列：本任務報告以「最終訊息直接回 PA」形式，不寫 .md 報告檔，遵循 system prompt 指示）
+
+
+---
+
+## 2026-05-21 — Sprint 1A-δ Wave 2 M12 OrderRouter trait stub IMPL
+
+### 教訓
+- **task vs ADR 命名差異仲裁**：task dispatch 列 `MakerTier::Penalty`、ADR-0039 §Decision 2 列 `RebateTier::BelowDefault`（兩者語意一致：< 50% threshold）。E1 採 task 命名為當前授權 + doc comment 標明差異 + 報告列入 PA spec §8 Open Q reconciliation。E1 不靜默選邊；當 PA spec 與 ADR 衝突時，以 prompt 為近因權威，但必 surface 給 PA / PM。
+- **MakerFillRateStats 欄位簡化**：task dispatch 3-field (window_30d_maker_notional / window_30d_total_notional / current_tier) vs ADR-0039 §Decision 1 行 98-108 列 9-field 完整版。E1 採 task 簡化版（純 Sprint 1A-δ data carrier），完整版 8-field 待 Sprint 6+ IMPL amend；doc comment 明示簡化來源 + 完整版時點。
+- **PA spec v0 5-method vs ADR-0039 6-method**：PA spec 起手草稿是 5-method（含 record_fill / adaptive_routing_enabled / routing_metrics），後修訂為 ADR-0039 6-method authoritative（route_order / venue_health / cross_venue_position / forecast_slippage / reverse_snipe / maker_fill_rate_30d）。E1 IMPL 必以 ADR-0039 § Decision 1 為 binding，PA spec §2.4 明示草稿 v0 3 method 移為周邊 helper trait Sprint 6+ 期決議。
+- **5-gate inheritance 紅線 hardcode 寫在 override default body**：trait default body 6 個全 `unimplemented!()`；但 `UnimplementedOrderRouter` impl 必須 override `route_order` 並對 BinancePerp / BinanceOption 走 `Err(VenueDeferred("Y3+ per ADR-0033"))` early return — 否則 trait default panic 連 Y3+ defer 路徑也 panic，違反「治理硬拒 != 未實作」的 E2 review focus #2。
+
+### 工具偏好
+- `Venue` / `AssetClass` 直接 `use openclaw_types::{Venue, AssetClass}`（M13 Wave 1 已 land，crate dep 已通）— 不需修改 Cargo.toml。
+- `Venue` enum **不含** Dex / Hyperliquid variant（per ADR-0040 §Decision 4 硬編碼拒絕，那兩 venue 在 enum 設計階段就不存在 slot）；OrderRouter spec 提的 `VenueNotApproved(Venue)` variant 主要供未來新 venue 接入 ADR 流程預留，非 Y1 active 拒絕路徑。
+- `RoutingError` 不用 `thiserror` derive（保 Cargo.toml lean dep 紀律，與 M13 VenueParseError 同樣手寫 `Display + std::error::Error`）。
+- test `#[should_panic(expected = "M12")]` 是最 robust 的 panic verify pattern — 比指明完整 message substring 安全，未來 message 細修改不破 test。
+
+### 報告
+
+---
+
+## 2026-05-21 — Sprint 1A-δ Phase 3 補正 / Track M5 refactor（multi-session race 後對齊 canonical spec）
+
+### 教訓
+- **multi-session R4 audit dedup 衝突**：並發 session 同時跑 M5 IMPL；R4 audit dedup decision 後 archive 我先前實作的 `m5_model_client_design_spec.md`、KEEP 另一版本 `m5_online_learning_design_spec.md`（6 method 完全對齊 ADR-0035 §Decision 1）。先前 M5 IMPL 跟著 archived spec 寫，6 method 與 ADR 不對齊（含 `version / model_metadata / streaming_supported`，無 `drift_callback / rollback / throttle`）。corrective action = refactor 對齊 canonical spec + ADR-0035 §Decision 1 line 67-74 表格。
+- **6 method 對齊矩陣**（canonical spec §2.1 line 79-137 rust block 為 binding）：
+  - `get_predict(&FeatureVector) -> Result<Prediction, M5Error>`（保留，加 Result 包裝 + 改 param type）
+  - `get_predict_streaming(&FeatureVector) -> Result<StreamingPrediction, M5Error>`（保留，加 Result + 改 param）
+  - `drift_callback(&DistributionMetrics) -> Result<(), M5Error>`（新 method，取代 version）
+  - `rollback(ModelVersion) -> Result<(), M5Error>`（新 method，取代 model_metadata）
+  - `throttle(f64) -> Result<(), M5Error>`（新 method，取代 streaming_supported）
+  - `health() -> Result<ModelHealth, M5Error>`（保留，加 Result 包裝）
+- **placeholder type 政策**：canonical spec §2.1 line 140-145 列 `FeatureVector / DistributionMetrics` 為 `/* Y3+ activation define */` placeholder。E1 採 `#[derive(Debug, Clone, Default)]` + 單一 `pub _placeholder: ()` field，避免 trait param 為 unsized type 導致 dyn safety 破。
+- **M5Error 不引 thiserror**：沿用 M13 IMPL 已採 `std::error::Error + Display` 手動 impl 模式，保 Cargo.toml lean dep 紀律。`NotActivated(String)` 是當前唯一 variant，內含 method name 供 audit 定位（Y3+ activation 後擴展 DriftDetected / RollbackFailed / ThrottleExceeded 等）。
+- **ModelMetadata struct 刪除**：原 Sprint 1A-δ v0 IMPL 含 `ModelMetadata` struct + `model_metadata()` method；refactor 後 audit metadata 走 V114 `learning.online_learning_models` schema（per ADR-0035 §Decision 2），不再走 trait method。E1 直接刪 struct，不留 dead code（per canonical spec §6 retirement 紀律：trait + V114 + streaming_enabled 三件一致對齊）。
+- **default panic message tag 規範**：所有 6 method message 含 `"M5 ModelClient::<method> stub — Y3+ activation 後 IMPL（per ADR-0035 §Decision 1）"` 一致格式；test `#[should_panic(expected = "M5")]` substring 比 fully literal 安全，未來 message 細改不破 test。
+- **保 trait dyn safety**：所有 method `&self` 接收者 + 無 generic param + 無 associated type；Box<dyn ModelClient> dyn smoke test 守護。
+
+### 工具偏好
+- multi-session 衝突時讀 archive index：`docs/execution_plan/archive/` 路徑下找被 dedup 出去的 spec，對比 KEEP 版本 method delta；之後對齊 KEEP 版本不對齊 archived。
+- canonical spec line 番號是 binding 索引：refactor 前列 6 method 對齊矩陣（舊 vs 新 vs canonical spec line 番號）比直接看 prompt summary 安全。
+- baseline test count snapshot：跑 refactor 前後 `cargo test 2>&1 | grep "^test result:" | awk '{p+=$4; f+=$6} END {print p, f}'` 對比 W2 baseline 3290/0；refactor 不應引入新 test 數變化（M5 panic test 仍 7 case：6 method + 1 dyn safety）。
+
+### 報告
+（per E1 完成序列：本任務報告以「最終訊息直接回 PA」形式，不寫 .md 報告檔，遵循 system prompt 指示）

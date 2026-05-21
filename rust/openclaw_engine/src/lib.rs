@@ -47,10 +47,14 @@ pub mod live_spawn_assert;
 pub mod market_data_client;
 pub mod ml;
 pub mod mode_state;
+// Sprint 1A-δ M5：ModelClient trait stub（6 method default panic）per ADR-0035。
+pub mod model_client;
 pub mod multi_interval_topics;
 pub mod news;
 pub mod orchestrator;
 pub mod order_manager;
+// Sprint 1A-δ M12：OrderRouter trait stub（6 method default panic）per ADR-0039。
+pub mod order_router;
 pub mod paper_state;
 // Sprint N+1 W1 + W2：cross-asset / cross-strategy panel aggregator namespace
 // （funding_curve / oi_delta / btc_lead_lag panel collector + producer）。
