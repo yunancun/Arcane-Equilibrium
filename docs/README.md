@@ -525,6 +525,10 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `adr/0018-funding-arb-v2-deprecation-watch.md` | ADR-0018: funding_arb V2 retired from active strategy set; W-AUDIT-6 cleanup pending |
 | `adr/0019-github-issues-active-tracker.md` | ADR-0019: GitHub Issues active external tracker; git remains SoT |
 | `adr/0020-layer2-manual-supervisor-only.md` | ADR-0020: Layer2 is manual supervisor escalation, not autonomous loop |
+| `adr/0030-copy-trading-evidence-gated.md` | ADR-0030: Copy Trading Y1 末 4-Gate Evidence Evaluation, Y2 Enablement Conditional (Proposed; v5.7 §11 提案順移自 ADR-0028) |
+| `adr/0031-framework-expansion-earn-macro-onchain.md` | ADR-0031: Framework Expansion — Earn Governance + Macro Counterfactual + On-Chain Counterfactual (Proposed; v5.7 §11 提案順移自 ADR-0029) |
+| `adr/0032-bybit-earn-asset-movement-guardian.md` | ADR-0032: Bybit Earn Asset Movement Guardian — 5-Gate Adapter + Decision Lease Retrofit + Audit Log (Proposed; v5.7 §12 提案順移自 ADR-0030) |
+| `adr/0033-adr-0006-bybit-binance-amendment.md` | ADR-0033: ADR-0006 Amendment — Binance Market Data Approved Y1 + Trading Defer Y2 + DEX/Hyperliquid NOT Approved + D12 + ToS (Proposed; v5.7 §12 amendment standalone) |
 | `architecture/2026-05-06--openclaw_control_plane_repositioning.md` | ARCH-02: OpenClaw control-plane repositioning |
 | `architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md` | ARCH-03 parent: Agent Decision Spine engineering plan |
 | `architecture/multi_agent_rework_2026-05-05/AgentTodo.md` | Historical AgentTodo milestone board for MAG-010..084 |
