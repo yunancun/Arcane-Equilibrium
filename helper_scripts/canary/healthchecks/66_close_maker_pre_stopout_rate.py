@@ -66,22 +66,41 @@ MODULE_NOTE:
       ``trailing_stop%``  ``fast_track%``  ``halt_session%``  ``phys_lock_%``
     或 ``strategy_name LIKE 'unattributed:%'``（交易所 auto-close）。
 
-Verdict ladder（prompt 草案；可 CLI 覆寫 threshold）：
-  - n < min_sample → INSUFFICIENT_SAMPLE
-  - stopout_rate ≤ pass_upper → PASS（close maker 來得及；strategy graceful
-    exit 為主）
-  - stopout_rate > fail_upper → FAIL（close maker 太晚；多數 attempts 已過了
-    stopout 邊界）
-  - 其他 → WARN
+Verdict ladder（R2 MEDIUM-D1 follow-up，2026-05-21；可 CLI 覆寫 threshold）：
 
-預設 0.10 / 0.30；前者代表「強制 stop-out 不超過 10%」，後者代表「過 30%
-即視為策略 over-shooting」。
+  預設啟用 Wilson 95% CI sub-clause（mirror [62] AC-18 風格；可 ``--no-wilson``
+  opt-out 退回原 raw-rate ladder）：
+
+  Wilson 模式（預設）：
+    - n < min_sample → INSUFFICIENT_SAMPLE
+    - raw rate ≤ pass_upper **且** Wilson upper ≤ wilson_upper_pass → PASS
+    - raw rate > fail_upper **或** Wilson lower > wilson_lower_fail → FAIL
+    - 其他 → WARN
+
+  Raw-rate 模式（``--no-wilson``）：
+    - n < min_sample → INSUFFICIENT_SAMPLE
+    - stopout_rate ≤ pass_upper → PASS（close maker 來得及；strategy graceful
+      exit 為主）
+    - stopout_rate > fail_upper → FAIL（close maker 太晚；多數 attempts 已過
+      stopout 邊界）
+    - 其他 → WARN
+
+預設門檻 0.10 / 0.30 / Wilson upper 0.15 / Wilson lower 0.15；前兩者代表
+「強制 stop-out 不超過 10% PASS / 過 30% FAIL」，Wilson 子句為 conservative
+sub-clause：raw 雖在 PASS 邊但 upper CI 超 0.15 拒 PASS（降至 WARN）；
+raw 雖在 WARN 邊但 lower CI 超 0.15 升至 FAIL（E2 R2 push back 後從 0.20 調降，
+避免 demo velocity n~70/week 下成 dead gate）。
+
+為什麼用 Wilson 而非純 raw：[62] AC-18 同步要求 Wilson；本 [66] 為對稱
+failure-direction metric（rate 越低越好），mirror 風格意味 upper bound 作為
+PASS conservativeness、lower bound 作為 FAIL conservativeness。
 
 CLI:
   python3 66_close_maker_pre_stopout_rate.py [--window-secs 604800] \\
         [--engine-mode demo,live_demo] [--pass-upper 0.10] \\
         [--fail-upper 0.30] [--min-sample 30] [--write-file PATH] [--text] \\
-        [--stopout-patterns PATTERN1,PATTERN2,...]
+        [--stopout-patterns PATTERN1,PATTERN2,...] [--no-wilson] \\
+        [--wilson-upper-pass 0.15] [--wilson-lower-fail 0.15]
 
 Exit codes:
   0 = PASS / INSUFFICIENT_SAMPLE（後者不阻 deploy）
@@ -116,6 +135,7 @@ from _common import (  # noqa: E402
     emit_result,
     severity_max,
     split_engine_modes,
+    wilson_ci_95,
 )
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -210,6 +230,35 @@ def _parse_args() -> argparse.Namespace:
             "(default 用 DEFAULT_STOPOUT_EXIT_REASON_PATTERNS source-derived list)"
         ),
     )
+    # R2 MEDIUM-D1（2026-05-21）：Wilson 95%% CI sub-clause（mirror [62] AC-18）
+    # 注：argparse %%-format help，所有 ``%`` 字面要寫成 ``%%`` 避 _expand_help 崩
+    parser.add_argument(
+        "--no-wilson",
+        action="store_true",
+        help=(
+            "停用 Wilson 95%% CI sub-clause，退回 R1 raw-rate-only ladder "
+            "(default: Wilson sub-clause enabled per R2 MEDIUM-D1)"
+        ),
+    )
+    parser.add_argument(
+        "--wilson-upper-pass",
+        type=float,
+        default=0.15,
+        help=(
+            "Wilson upper bound ≤ 此值才允 PASS（搭配 raw ≤ pass_upper）；"
+            "預設 0.15 (R2 MEDIUM-D1)"
+        ),
+    )
+    parser.add_argument(
+        "--wilson-lower-fail",
+        type=float,
+        default=0.15,
+        help=(
+            "Wilson lower bound > 此值即 FAIL（即使 raw ≤ fail_upper）；"
+            "預設 0.15（E2 R2 push back 後從 0.20 調降，避免 demo "
+            "velocity n~70/week 下 0.20 成 dead gate；對稱配 raw upper 0.15）"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -226,23 +275,53 @@ def _stopout_rate_verdict(
     min_sample: int,
     pass_upper: float,
     fail_upper: float,
-) -> tuple[str, float]:
-    """[66] stopout_rate ladder（與 [62] Wilson-CI ladder 不同：本檔用 raw rate
-    + 雙閾值，因 prompt 草案明確指定 0.10/0.30 為 upper-bound 而非 Wilson 下
-    界；Wilson 對小樣本貢獻有限，且本 metric 期望單調遞減 rate 走勢，raw rate
-    比 CI 直觀）。
+    *,
+    use_wilson: bool = True,
+    wilson_upper_pass: float = 0.15,
+    wilson_lower_fail: float = 0.15,
+) -> tuple[str, float, float, float]:
+    """[66] stopout_rate ladder。
 
-    回傳 (verdict, stopout_rate)。
+    R1 為 raw-rate-only 雙閾值；R2 MEDIUM-D1（2026-05-21）補 Wilson 95% CI
+    sub-clause（mirror [62] AC-18 風格）增強小樣本 conservativeness。
+
+    本 metric 為 failure-direction（rate 越低越好），所以 mirror [62] 的方式
+    對稱反轉：
+      - [62] success-direction：PASS 要 Wilson **lower** ≥ pass_lower（即使
+        raw 高，也要下界穩）；FAIL 要 Wilson **upper** < warn_lower
+      - [66] failure-direction：PASS 要 Wilson **upper** ≤ wilson_upper_pass
+        （即使 raw 低，也要上界穩）；FAIL 要 Wilson **lower** > wilson_lower_fail
+        （即使 raw 還沒過 fail_upper，下界已超即可判 over-shoot）
+
+    為什麼仍保留 raw-rate gate：prompt 0.10 / 0.30 為「rate-level」直觀門檻，
+    operator 報告易理解；Wilson 為 secondary conservativeness layer，雙條件
+    AND/OR 組合提升信號可靠度。
+
+    回傳 (verdict, stopout_rate, wilson_lower, wilson_upper)。
+    use_wilson=False 時 wilson_lower / wilson_upper 仍計算回傳（給 cell payload
+    觀察用），但不參與 verdict 判定 — 即退回 R1 ladder。
     """
     if total < min_sample:
         rate = stopouts / total if total else 0.0
-        return (VERDICT_INSUFFICIENT_SAMPLE, rate)
+        return (VERDICT_INSUFFICIENT_SAMPLE, rate, 0.0, 0.0)
     rate = stopouts / total
-    if rate <= pass_upper:
-        return (VERDICT_PASS, rate)
-    if rate > fail_upper:
-        return (VERDICT_FAIL, rate)
-    return (VERDICT_WARN, rate)
+    lower, upper = wilson_ci_95(stopouts, total)
+    if not use_wilson:
+        # R1 raw-rate-only ladder（``--no-wilson`` opt-out 走這條）
+        if rate <= pass_upper:
+            return (VERDICT_PASS, rate, lower, upper)
+        if rate > fail_upper:
+            return (VERDICT_FAIL, rate, lower, upper)
+        return (VERDICT_WARN, rate, lower, upper)
+    # R2 Wilson sub-clause（default）
+    #   FAIL 先判（任一觸發）：raw > fail_upper OR Wilson lower > wilson_lower_fail
+    #   PASS 再判（要 AND）：raw ≤ pass_upper AND Wilson upper ≤ wilson_upper_pass
+    #   其他 → WARN
+    if rate > fail_upper or lower > wilson_lower_fail:
+        return (VERDICT_FAIL, rate, lower, upper)
+    if rate <= pass_upper and upper <= wilson_upper_pass:
+        return (VERDICT_PASS, rate, lower, upper)
+    return (VERDICT_WARN, rate, lower, upper)
 
 
 def run(
@@ -253,12 +332,22 @@ def run(
     fail_upper: float,
     min_sample: int,
     stopout_patterns: list[str],
+    *,
+    use_wilson: bool = True,
+    wilson_upper_pass: float = 0.15,
+    wilson_lower_fail: float = 0.15,
 ) -> dict:
     """執行 SQL + verdict 計算，回傳 result dict。
 
     SQL 語意：在 close_maker_attempt=TRUE 的母體上，計 stopout / clean exits
     per engine_mode。stopout 定義為 (exit_reason 命中 stopout_patterns 任一
     LIKE pattern) OR (strategy_name LIKE 'unattributed:%')。
+
+    Wilson sub-clause（R2 MEDIUM-D1，2026-05-21）：
+      use_wilson=True（default）：每 cell 額外計 Wilson 95% CI；PASS 要
+        raw ≤ pass_upper AND upper ≤ wilson_upper_pass；FAIL 要
+        raw > fail_upper OR lower > wilson_lower_fail。
+      use_wilson=False（``--no-wilson``）：退回 R1 raw-rate-only ladder。
     """
     # 為什麼用 array_concat + ANY-pattern：psycopg2 LIKE %s ANY(array) pattern
     # 不直接支援；改用 ``exit_reason LIKE ANY(%s::text[])`` PG 9.5+ 標準語法。
@@ -317,12 +406,15 @@ def run(
             attempts = int(row[1] or 0)
             stopouts = int(row[2] or 0)
             clean_exits = int(row[3] or 0)
-            verdict, rate = _stopout_rate_verdict(
+            verdict, rate, wilson_lower, wilson_upper = _stopout_rate_verdict(
                 stopouts,
                 attempts,
                 min_sample=min_sample,
                 pass_upper=pass_upper,
                 fail_upper=fail_upper,
+                use_wilson=use_wilson,
+                wilson_upper_pass=wilson_upper_pass,
+                wilson_lower_fail=wilson_lower_fail,
             )
             cells.append({
                 "engine_mode": engine_mode,
@@ -330,6 +422,8 @@ def run(
                 "n_stopouts": stopouts,
                 "n_clean_exits": clean_exits,
                 "stopout_rate": round(rate, 4),
+                "wilson_lower": round(wilson_lower, 4),
+                "wilson_upper": round(wilson_upper, 4),
                 "verdict": verdict,
             })
             overall_verdict = severity_max(overall_verdict, verdict)
@@ -349,7 +443,10 @@ def run(
             "min_sample": min_sample,
             "pass_upper": pass_upper,
             "fail_upper": fail_upper,
+            "wilson_upper_pass": wilson_upper_pass,
+            "wilson_lower_fail": wilson_lower_fail,
         },
+        "use_wilson_subclause": use_wilson,
         "stopout_patterns": stopout_patterns,
         "liquidation_strategy_pattern": LIQUIDATION_STRATEGY_NAME_PATTERN,
         "total_attempts": total_attempts,
@@ -377,6 +474,9 @@ def main() -> int:
                 fail_upper=args.fail_upper,
                 min_sample=args.min_sample,
                 stopout_patterns=stopout_patterns,
+                use_wilson=not args.no_wilson,
+                wilson_upper_pass=args.wilson_upper_pass,
+                wilson_lower_fail=args.wilson_lower_fail,
             )
     finally:
         conn.close()

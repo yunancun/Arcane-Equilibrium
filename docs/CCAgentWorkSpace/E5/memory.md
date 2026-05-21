@@ -57,6 +57,7 @@
 | 2026-05-10 | W-C Caveat 1+2+3 fix Rust+Python perf+LOC+refactor review | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-10--w_c_fix_e5_perf_review.md` |
 | 2026-05-11 | Wave 1.6 P1-FILL-LINEAGE-DROP perf re-audit | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--p1_fill_lineage_drop_e5_perf.md` |
 | 2026-05-11 | Wave 2.2 LG-1 + LG-2 (8 task) perf+LOC+refactor review | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--wave2_2_e5_perf.md` |
+| 2026-05-21 | P1-LG1-DEMO-SLA-VIOLATION H0 hot-path RCA（demo max=2454μs > 1ms SLA）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-21--p1_lg1_demo_sla_violation_hotpath_audit.md` |
 
 ## 2026-05-10 W-C Caveat 1+2+3 fix perf review 教訓
 
@@ -324,6 +325,52 @@ E1 P1-FILL-LINEAGE-MONITOR follow-up（接 counter 到 IPC + healthcheck [55]/[N
 2. **rx 消費阻塞時段 必入 throughput equation**：PG INSERT batch flush 200-500ms 是 producer 累積窗口
 3. **empirical evidence > theoretical capacity**：當有真實 runtime 證據（QA RCA empirical 25.8% drop）必反推 capacity ceiling
 4. **false sharing pattern**：連續 static AtomicU64 宣告會撞同 cache line；多 thread 並發 fetch_add 互相 invalidate → 50-200ns extra latency / contention（cosmetic 非 SLA）
+
+---
+
+### 2026-05-21 P1-LG1-DEMO-SLA-VIOLATION H0 hot-path RCA
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-21--p1_lg1_demo_sla_violation_hotpath_audit.md`
+
+**Context**：QA D1 (2026-05-21) 7d closure 揭 `pipeline_snapshot_demo.json` `max_latency_us=2454` 超 H0 hot path `<1ms` SLA；新增 P1 ticket。E5 hot-path profile + RCA。
+
+**Verdict**：**NOT A BUG, accept-with-SLO-carve-out（選項 B）**
+
+**Empirical evidence**：
+- demo current snapshot (3h7min uptime): h0_checks=3,599,176 / max=346μs / avg=4.86ns/check（飽和為 0，多數 sub-1μs）
+- QA D1 38h pre-restart: h0_checks=18,086,022 / max=2454μs
+- live current+QA: max=19μs（live tick rate ≈ demo/100，sample size 小）
+- 0 個 H0 BLOCKED 或 shadow_would_block 事件 across 全部 sample
+- hot_path_baseline bench (10k iter, 5 symbols, on_tick whole): avg=23.6μs / p99=38.9μs / max=164μs — H0 單一 sub-step < 1% of whole tick
+
+**5 root cause hypothesis（按 weight）**：
+1. OS scheduler preemption (Linux CFS 1ms quantum) **40%** — 2454μs ≈ 2.5 quanta; load avg 5.43; no RT priority
+2. CPU cache miss / NUMA jitter **25%** — RYZEN AI MAX+ 395 32 cores
+3. Instant::now() vDSO degradation **15%** — CLOCK_MONOTONIC fallback in long uptime
+4. HashMap.get cold cache walk **10%** — bounded < 1μs
+5. GC-like alloc burst **5%** — H0 happy path 0 alloc
+- H1+H2+H3 = 80% 解釋；全平台 jitter floor，**非 algorithmic**
+
+**3 改善選項**：
+- A (fix source: ahash + cpu pin + SCHED_FIFO)：LOW ROI；高 effort；Mac M-series cross-platform 風險 HIGH
+- **B (accept + SLO carve-out)** ← **推薦**：~130 LOC HdrHistogram + p99/p999 metric；改 SLA「`<1ms`」→「`p99 < 1ms / max ≤ 5ms over 1M ticks`」；HIGH ROI
+- C (partial fix: enum Category + interned symbol)：MEDIUM ROI；SLA 不保證達標
+
+**主要教訓**：
+1. **「max latency over large N」必算 N × per-tick-jitter-probability，而非 single-tick design budget** — 18M tick sample 撞 platform jitter floor 2-3ms 是必然
+2. **demo vs live 對比中 max 巨差** 不代表 demo bug；通常是 **tick rate** 差異 → sample size 差異 → tail outlier 出現概率差異
+3. **`as_micros()` rounding down + saturating** 是隱形飽和特性；avg=5ns 不代表「真實平均 5ns」而是「大多數 case sub-1μs 被 round 為 0」；report 必明寫
+4. **OS scheduler quantum 對齊**：2454μs ≈ 2.5 × Linux CFS 1ms quantum 是強訊號；若 max 出現 1ms/2ms/3ms cluster → 第一懷疑 scheduler preemption
+5. **panel_aggregator lagging 11836 events + channel_len 最大 516** 是 system contention 指示器，**非 H0 latency 因果**；但是同類 jitter event 的 共因 evidence
+6. **SLA 文檔應區分 median / p99 / max**；用 hard `< 1ms` 單值掩蓋 tail distribution 是 anti-pattern；future SLO design pattern reference
+
+**對 LG-1 P0 closure 影響**：build B 路徑後 P1-LG1-DEMO-SLA-VIOLATION 可降為 P2 observability 任務；不阻 LG-1 closure。
+
+**對抗性 verify SOP 補充**（生效 2026-05-21）：
+- 看到「production max latency violation」必區分：(a) algorithmic hot path issue (b) statistical tail outlier (c) platform jitter floor
+- (b) 必算 sample size scaling: ticks ×N → max 改變率（線性 → algorithmic）vs（亞線性 / log → platform tail）
+- 跨 env 對比中（demo / live）巨差 max 必對比 tick rate；先排除 sample size 差異
+- micros-level metric 必標註 `as_micros() round-down saturating to 0` 隱形飽和；report avg 必 disclaim
 
 ---
 

@@ -11211,3 +11211,20 @@ E2 PR review (`2026-05-20--p2_sim_queue_aware_e2_review.md`) APPROVE-CONDITIONAL
 
 - **重要對齊**：本 task R2 完成後 R1 + R2 整體 net-outage classifier 設計達成 production-grade fail-closed 等級（PG / disk / OOM / 死鎖證據在場時保守降級 engine_crash），interleaved + cross-rotation 場景仍能正確識別 net-outage 避免 restart storm。但 sparse-log 邊緣場景盲區留 OQ-NETOUTAGE-2 待 PM 升 P1 決定
 
+
+## 2026-05-21 — P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE polish
+
+- E2 R2 review MEDIUM-D1 deferred follow-up：[66] close_maker_pre_stopout_rate
+  raw rate + 雙閾值 ladder 補 Wilson 95% CI sub-clause（mirror [62] AC-18）
+- Failure-direction metric mirror 對稱性：[62] success-direction PASS 用
+  Wilson lower 嚴 / FAIL 用 Wilson upper 嚴；[66] PASS = raw≤pass_upper AND
+  Wilson upper ≤ 0.15 / FAIL = raw>fail_upper OR Wilson lower > 0.20
+- 默認啟用 Wilson sub-clause，加 `--no-wilson` opt-out；既有 4 個 R1 test 在
+  default Wilson 下 verdict 都不變（後向兼容）
+- 教訓 1：argparse help 字串內 `%` 字面必 escape 為 `%%`，否則 `_expand_help`
+  ValueError；本次「Wilson 95% CI」字串中招，加 escape 解決
+- 教訓 2：Wilson sub-clause FAIL via lower 需要 n ≈ 1000 才會比 raw FAIL gate
+  早觸發（小樣本 Wilson lower 對 raw 0.25 仍 ~0.17 < 0.20）— 正確行為但
+  E2 review 可能會問實 production demo 數據量是否「夠大才能 trigger」
+- 文件：`66_close_maker_pre_stopout_rate.py` + `tests/test_66_pre_stopout_rate.py`；
+  baseline 83 → 88 全綠

@@ -12,6 +12,13 @@ R2 修正歷史（E2 review 2026-05-20）：
     上述 A1/A2 失誤（patterns 全錯時必紅）
   - MEDIUM-F1：[71] → [66] 避與 passive_wait_healthcheck [71] slot 碰撞
 
+R2 MEDIUM-D1 follow-up（2026-05-21）：
+  - E2 R2 review C 批 MEDIUM-D1 deferred → P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE
+  - 補 Wilson 95% CI sub-clause（mirror [62] AC-18 風格）
+  - PASS = raw ≤ pass_upper AND Wilson upper ≤ wilson_upper_pass
+  - FAIL = raw > fail_upper OR Wilson lower > wilson_lower_fail
+  - 默認啟用；`--no-wilson` opt-out 退回 R1 raw-rate-only ladder
+
 驗證重點：
   - empty window → INSUFFICIENT_SAMPLE
   - 雙閾值 (pass_upper / fail_upper) ladder PASS / WARN / FAIL 三段
@@ -20,6 +27,7 @@ R2 修正歷史（E2 review 2026-05-20）：
   - SQL 同時 bind exit_reason patterns + strategy_name liquidation pattern
   - --stopout-patterns CLI 覆寫不影響預設 pattern list 結構
   - default patterns 命中 production 真實 exit_reason 字串（R2 新增 E1 修）
+  - Wilson sub-clause PASS / WARN-via-upper / FAIL-via-Wilson-lower / no-wilson opt-out
 """
 
 from __future__ import annotations
@@ -299,3 +307,178 @@ def test_split_patterns_empty_falls_back_to_default(hc66):
     assert hc66._split_patterns("") == list(
         hc66.DEFAULT_STOPOUT_EXIT_REASON_PATTERNS
     )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# R2 MEDIUM-D1 Wilson 95% CI sub-clause 測試（2026-05-21）
+# ───────────────────────────────────────────────────────────────────────────
+#
+# 這 5 個 case 對應任務 spec P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE：
+#   PASS / WARN-via-Wilson-upper / FAIL-via-raw / FAIL-via-Wilson-lower
+#   / INSUFFICIENT-SAMPLE 不變
+#
+# 為什麼選這幾組 (stopouts, total)：
+#   - (10, 200) raw=0.05；實算 Wilson upper ≈ 0.0896 ≤ 0.15 → PASS
+#   - (4, 50)   raw=0.08 ≤ pass_upper=0.10 滿足 raw 條件；但 Wilson upper
+#                ≈ 0.1884 > 0.15 不滿足 secondary PASS → WARN
+#   - (40, 100) raw=0.40 > fail_upper=0.30 直接 raw FAIL（與 R1 行為一致）
+#   - (250, 1000) raw=0.25 ≤ fail_upper=0.30 raw 不觸發；但 Wilson lower
+#                  ≈ 0.2242 > wilson_lower_fail=0.20 觸發 Wilson FAIL
+#                  → 這是 R2 sub-clause 新增的「raw 還沒過但下界已超」訊號
+#   - INSUFFICIENT_SAMPLE：n=29 < min_sample=30 不變
+#
+# 為什麼 (250, 1000) 需要這麼大 n：
+#   Wilson lower 對小樣本天然保守，n=100 時 raw=0.25 的 Wilson lower 約 0.173
+#   不超 0.20；要讓 lower 超 0.20 需 n 接近 1000 — 這也是「Wilson sub-clause
+#   只在大樣本時補強訊號」的正確行為（小樣本仍應停在 WARN 等更多 evidence）。
+
+
+def test_pass_when_wilson_upper_within_bound(hc66, fake_cursor_factory):
+    """R2 MEDIUM-D1：raw ≤ pass_upper AND Wilson upper ≤ wilson_upper_pass → PASS。
+
+    (10, 200) raw=0.05，Wilson upper ≈ 0.0896 ≤ 0.15 → PASS。
+    """
+    rows = [[("demo", 200, 10, 190)]]
+    cur = fake_cursor_factory(rows)
+    result = hc66.run(
+        cur,
+        window_secs=604800,
+        engine_modes=["demo"],
+        pass_upper=0.10,
+        fail_upper=0.30,
+        min_sample=30,
+        stopout_patterns=list(hc66.DEFAULT_STOPOUT_EXIT_REASON_PATTERNS),
+        # use_wilson default True
+    )
+    cell = result["cells"][0]
+    assert result["verdict"] == "PASS"
+    assert cell["verdict"] == "PASS"
+    assert cell["stopout_rate"] == 0.05
+    # Wilson upper 必 ≤ 0.15
+    assert cell["wilson_upper"] <= 0.15, f"wilson_upper={cell['wilson_upper']}"
+    # 確認 result 暴露 Wilson 門檻 + use_wilson 旗標供 caller 觀察
+    assert result["use_wilson_subclause"] is True
+    assert result["thresholds"]["wilson_upper_pass"] == 0.15
+    assert result["thresholds"]["wilson_lower_fail"] == 0.15
+
+
+def test_warn_when_raw_passes_but_wilson_upper_exceeds(hc66, fake_cursor_factory):
+    """R2 MEDIUM-D1：raw ≤ pass_upper 但 Wilson upper > wilson_upper_pass → WARN
+    （Wilson sub-clause 降級保護：小樣本 raw 看起來達標但 CI 上界仍寬，不能簽 PASS）。
+
+    (4, 50) raw=0.08 ≤ 0.10 滿足 raw 條件；但 Wilson upper ≈ 0.1884 > 0.15。
+    """
+    rows = [[("demo", 50, 4, 46)]]
+    cur = fake_cursor_factory(rows)
+    result = hc66.run(
+        cur,
+        window_secs=604800,
+        engine_modes=["demo"],
+        pass_upper=0.10,
+        fail_upper=0.30,
+        min_sample=30,
+        stopout_patterns=list(hc66.DEFAULT_STOPOUT_EXIT_REASON_PATTERNS),
+    )
+    cell = result["cells"][0]
+    assert result["verdict"] == "WARN", (
+        f"raw rate 0.08 ≤ 0.10 但 Wilson upper {cell['wilson_upper']} > 0.15 應 WARN"
+    )
+    assert cell["stopout_rate"] == 0.08
+    assert cell["wilson_upper"] > 0.15, (
+        f"fixture sanity: expected upper > 0.15, got {cell['wilson_upper']}"
+    )
+
+
+def test_fail_via_raw_rate_regardless_of_wilson(hc66, fake_cursor_factory):
+    """R2 MEDIUM-D1：raw > fail_upper 任一條件即 FAIL（保留 R1 行為，sub-clause
+    並未放鬆 raw FAIL gate）。
+
+    (40, 100) raw=0.40 > 0.30 → FAIL。
+    """
+    rows = [[("demo", 100, 40, 60)]]
+    cur = fake_cursor_factory(rows)
+    result = hc66.run(
+        cur,
+        window_secs=604800,
+        engine_modes=["demo"],
+        pass_upper=0.10,
+        fail_upper=0.30,
+        min_sample=30,
+        stopout_patterns=list(hc66.DEFAULT_STOPOUT_EXIT_REASON_PATTERNS),
+    )
+    cell = result["cells"][0]
+    assert result["verdict"] == "FAIL"
+    assert cell["stopout_rate"] == 0.40
+
+
+def test_fail_via_wilson_lower_when_raw_under_fail_upper(hc66, fake_cursor_factory):
+    """R2 MEDIUM-D1 核心新增：raw ≤ fail_upper 但 Wilson lower > wilson_lower_fail
+    → FAIL（即使 raw 還在 WARN 區間，下界已超 0.20 代表 over-shoot 高機率）。
+
+    (250, 1000) raw=0.25 ≤ 0.30，但 Wilson lower ≈ 0.2242 > 0.20 → FAIL。
+    這個 case 是 sub-clause 的 raison d'être — 大樣本 conservativeness。
+    """
+    rows = [[("demo", 1000, 250, 750)]]
+    cur = fake_cursor_factory(rows)
+    result = hc66.run(
+        cur,
+        window_secs=604800,
+        engine_modes=["demo"],
+        pass_upper=0.10,
+        fail_upper=0.30,
+        min_sample=30,
+        stopout_patterns=list(hc66.DEFAULT_STOPOUT_EXIT_REASON_PATTERNS),
+    )
+    cell = result["cells"][0]
+    assert result["verdict"] == "FAIL", (
+        f"raw 0.25 ≤ 0.30 但 Wilson lower {cell['wilson_lower']} > 0.20 應 FAIL"
+    )
+    assert cell["stopout_rate"] == 0.25
+    assert cell["wilson_lower"] > 0.20, (
+        f"fixture sanity: expected lower > 0.20, got {cell['wilson_lower']}"
+    )
+    # 反向核對：如果 ``--no-wilson``，同樣 (250,1000) 應該只走 raw → WARN 而非 FAIL
+    cur2 = fake_cursor_factory(rows)
+    result_no_wilson = hc66.run(
+        cur2,
+        window_secs=604800,
+        engine_modes=["demo"],
+        pass_upper=0.10,
+        fail_upper=0.30,
+        min_sample=30,
+        stopout_patterns=list(hc66.DEFAULT_STOPOUT_EXIT_REASON_PATTERNS),
+        use_wilson=False,
+    )
+    assert result_no_wilson["verdict"] == "WARN", (
+        "no-wilson opt-out 應該退回 R1 raw ladder（0.10 < 0.25 ≤ 0.30 = WARN）；"
+        f"got {result_no_wilson['verdict']}"
+    )
+    assert result_no_wilson["use_wilson_subclause"] is False
+
+
+def test_insufficient_sample_unchanged_under_wilson(hc66, fake_cursor_factory):
+    """R2 MEDIUM-D1：n < min_sample 一律 INSUFFICIENT_SAMPLE，Wilson sub-clause
+    不擾動此分支（即使 raw 已超 fail_upper 也以 INSUFFICIENT_SAMPLE 為準，避免
+    小樣本噪訊 trigger 部署阻斷）。
+
+    (15, 29) raw=0.517 看似很糟，但 n=29 < min_sample=30，仍判 INSUFFICIENT_SAMPLE。
+    """
+    rows = [[("demo", 29, 15, 14)]]
+    cur = fake_cursor_factory(rows)
+    result = hc66.run(
+        cur,
+        window_secs=604800,
+        engine_modes=["demo"],
+        pass_upper=0.10,
+        fail_upper=0.30,
+        min_sample=30,
+        stopout_patterns=list(hc66.DEFAULT_STOPOUT_EXIT_REASON_PATTERNS),
+    )
+    cell = result["cells"][0]
+    assert result["verdict"] == "INSUFFICIENT_SAMPLE"
+    assert cell["verdict"] == "INSUFFICIENT_SAMPLE"
+    # n < min_sample 時 Wilson CI 不算（lower=upper=0.0 為 sentinel）— 避免
+    # downstream observer 把 sentinel 誤讀成真實 CI；mirror [62] fill_rate_verdict
+    # 同 sentinel 行為（_common.py:193）
+    assert cell["wilson_lower"] == 0.0
+    assert cell["wilson_upper"] == 0.0
