@@ -93,8 +93,6 @@ ENGINE_LOG_TAIL_LINES = 20
 NETWORK_OUTAGE_MIN_CONSECUTIVE = 5
 NETWORK_OUTAGE_RECENT_SECONDS = 15 * 60
 NETWORK_OUTAGE_ROTATED_MAX_FILES = 5
-# Case-insensitive substrings; ≥NETWORK_OUTAGE_MIN_CONSECUTIVE consecutive matching
-# tail lines → classify as network_outage (do not count as strike).
 # 不分大小寫子字串；tail 連續 ≥N 條匹配判為 network_outage（不計 strike）。
 NETWORK_OUTAGE_PATTERNS: tuple[str, ...] = (
     "temporary failure in name resolution",
@@ -103,14 +101,98 @@ NETWORK_OUTAGE_PATTERNS: tuple[str, ...] = (
     "connection refused",
     "dns error",
 )
-# If ANY tail line contains one of these, override back to engine_crash.
-# Panic / assertion is always a real bug, even amid a network outage.
 # 若 tail 任一行含以下子字串，強制回到 engine_crash（panic/assertion 一定是 bug）。
 CRASH_INDICATOR_PATTERNS: tuple[str, ...] = (
     "panic",
     "assertion failed",
     "stack backtrace",
 )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WATCHDOG-NETOUTAGE-CLASSIFIER-FIX (2026-05-21): interleaved + cross-rotation
+# evidence support — rotated 或 interleaved log 場景下也能正確判 net-outage。
+#
+# 背景：DNS-CLASSIFY-1 只支援「單檔內連續 ≥5 條 network-error」。實務中
+#   (1) interleaved：DNS error 中間夾雜 heartbeat/metric/lifecycle 行 → 連續 run 斷
+#   (2) cross-rotation：DNS error 散落跨 active engine.log + 多份 rotated 死檔
+# 兩種情境都會被誤判 engine_crash → 三振計數 → restart storm（與 v55 #5 同類更廣）。
+#
+# 強化策略（保守，仍以 engine_crash 為 fail-closed default）：
+#   - 保留 (b) 單檔連續 ≥5 fast-path（與舊行為向後相容）
+#   - 新增 (c) 單檔 interleaved：tail 內總 match 數 ≥ MIN_INTERLEAVED **且**
+#     match/total 比例 ≥ MIN_RATIO **且** 無 ambiguous-source line
+#   - 新增 (d) cross-rotation aggregate：把 active + recent rotated 各 file 的
+#     tail 合併後重評 (c)；解決證據跨檔散落
+#
+# False positive guard：若任何 candidate tail 含 ambiguous-source line
+#   (PG / disk / OOM / engine-side bug 跡象) → 降級回 engine_crash，
+#   防止把純 PG 故障或 disk-full 誤標為 network_outage。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Interleaved gate：tail 內 network-error 行的最低總數（不要求連續）。
+# 5/20 = 25% 比例已遠超隨機噪音水平；同時要求 (c-2) ratio gate 進一步壓抑誤報。
+NETWORK_OUTAGE_MIN_INTERLEAVED = 5
+# Interleaved gate：tail 中 network-match 行佔比下限（25%）。
+# 為什麼 0.25：DNS-CLASSIFY-1 原連續 ≥5/20 (25%) 設定為設計基準；保持等價門檻避免
+# 放寬靈敏度。若 tail 不滿 20 行（log 剛 rotated 或剛啟動），按實際讀到行數算分母。
+#
+# 已知盲區（MEDIUM-1 R2 注釋；OQ-NETOUTAGE-2 留 PM 後續決定）：
+#   ratio gate 假設 tail 20 行涵蓋幾分鐘範圍（每秒幾行的引擎輸出速率下成立）。
+#   在 engine idle / paused / heavily throttled 階段 log 寫入速率可低於每分鐘 1 行，
+#   tail 可能跨越數小時。此時 5/20=25% ratio 命中可能反映「過去數小時內偶發 DNS
+#   error」而非真實當下持續 outage。
+#   - 風險場景：稀疏 log（如 5 條 DNS error 散落在 4 小時內 + 15 條 heartbeat）
+#     會被誤判 network_outage，跳過 strike 計數 + auto-restart。
+#   - 緩解假設：production engine 正常情況下 tail 20 行通常 ≤5min；engine paused
+#     時 watchdog 通常已被 Layer B inert-probe 或 freshness check 攔截。
+#   - 上游既有時間窗保護：`NETWORK_OUTAGE_RECENT_SECONDS = 15min` mtime filter 已
+#     在 `_candidate_failure_log_paths` 過濾掉 >15min 未更新的 rotated log（檔案
+#     級別時間窗）；但 active engine.log 本身只要 mtime 在 15min 內就會被掃，
+#     不保證 tail 內所有行都在 15min 內。
+#   - OQ-NETOUTAGE-2（待 PM 決定）：未來是否補 5min rolling timestamp window
+#     gate（解析 Rust tracing RFC3339 timestamp，限制只看 5min 內的行）。
+#     trade-off：增加 timestamp parsing brittle 風險 vs 消除 sparse-log 盲區。
+NETWORK_OUTAGE_MIN_RATIO = 0.25
+# Cross-rotation aggregate gate：active + rotated 各 tail 合併後總行數上限與 match 下限。
+# MIN_INTERLEAVED 相同數值（5 行）但分母可達 N_FILES × TAIL_LINES（最壞 6 × 20 = 120）。
+NETWORK_OUTAGE_AGGREGATE_MIN_MATCHES = 5
+NETWORK_OUTAGE_AGGREGATE_MIN_RATIO = 0.10
+
+# Ambiguous-source patterns：tail 出現以下 token 時 evidence 模糊（可能 PG/disk/OOM
+# 而非單純 DNS/HTTP），保守降級回 engine_crash。為什麼這些 token：
+#   - "postgres" / "sqlx" / "pgconnection"：sqlx 層失敗也會吐 "connection
+#     refused" / "connection error" 字樣與 NETWORK_OUTAGE_PATTERNS 衝突
+#   - "pg pool" / "pool timed out" / "db_pool"：openclaw_engine::database::pool
+#     層的真實 production 失敗格式（HIGH-1 R2 補；E2 R1 用 production engine.log
+#     第 4 行 reproduce false-positive）；prefix 涵蓋：
+#       * "PG pool connect failed — DB writes disabled / 連接失敗"
+#       * "PG pool unavailable / 連接池不可用"
+#       * "db_pool unavailable, BudgetTracker not started"
+#       * "error=pool timed out while waiting for an open connection"（sqlx 內部錯誤訊息）
+#   - "disk full" / "no space left"：disk 故障 ≠ network outage
+#   - "out of memory" / "killed (oom)"：OOM ≠ network outage
+#   - "watchdog timeout" / "deadlock"：engine 內部死鎖 ≠ network outage
+# 命中任一 token，本次 classification 直接回 engine_crash（保守原則）。
+#
+# 維護規範（HIGH-1 R2 教訓）：token list 必須對照 production engine.log empirical
+# 取樣（`grep -i 'pool\|memory\|disk\|panic\|db_' <OPENCLAW_DATA_DIR>/engine.log`），
+# 不可純推測。新增前先 grep 驗證真實字樣，避免遺漏實際格式。Mac dev 路徑通常為
+# `~/.openclaw_runtime/`；Linux runtime 路徑依 `OPENCLAW_DATA_DIR` env / restart_all.sh。
+AMBIGUOUS_SOURCE_PATTERNS: tuple[str, ...] = (
+    "postgres",
+    "pgconnection",
+    "sqlx",
+    "pg pool",
+    "pool timed out",
+    "db_pool",
+    "disk full",
+    "no space left",
+    "out of memory",
+    "killed (oom)",
+    "watchdog timeout",
+    "deadlock detected",
+)
+
 # Cap tail scan cost — engine.log can grow large before rotation.
 # 上限 256 KB，避免 log 未輪替時讀取過慢。
 ENGINE_LOG_MAX_READ_BYTES = 256 * 1024
@@ -220,24 +302,78 @@ def _candidate_failure_log_paths(log_path: Path, now: float | None = None) -> li
     return paths
 
 
+def _count_network_matches(lower_lines: list[str]) -> int:
+    """計算 tail 中匹配 NETWORK_OUTAGE_PATTERNS 的行數（不要求連續）。
+
+    為什麼抽出來：(c) interleaved 單檔評估與 (d) cross-rotation aggregate 共用同一
+    計數邏輯；helper 抽出避免雙重維護。
+    """
+    return sum(
+        1
+        for line in lower_lines
+        if any(pat in line for pat in NETWORK_OUTAGE_PATTERNS)
+    )
+
+
+def _longest_consecutive_network_run(lower_lines: list[str]) -> int:
+    """計算 tail 中連續 network-outage 行的最長 run（fast-path 用）。"""
+    longest_run = 0
+    current_run = 0
+    for line in lower_lines:
+        if any(pat in line for pat in NETWORK_OUTAGE_PATTERNS):
+            current_run += 1
+            if current_run > longest_run:
+                longest_run = current_run
+        else:
+            current_run = 0
+    return longest_run
+
+
+def _has_ambiguous_source(lower_lines: list[str]) -> bool:
+    """檢查 tail 是否含 PG/disk/OOM 等模糊來源 token。
+
+    命中即視為 ambiguous evidence → 上游分類器降級回 engine_crash。
+    保守原則：寧可漏報 net-outage（多計 strike），不可錯把 PG/disk 故障標為
+    network_outage 而跳過 strike 計數導致真正 bug 被吞掉。
+    """
+    return any(
+        any(pat in line for pat in AMBIGUOUS_SOURCE_PATTERNS)
+        for line in lower_lines
+    )
+
+
 def classify_engine_failure(
     log_path: Path,
     tail_lines: int = ENGINE_LOG_TAIL_LINES,
     min_consecutive: int = NETWORK_OUTAGE_MIN_CONSECUTIVE,
+    min_interleaved: int = NETWORK_OUTAGE_MIN_INTERLEAVED,
+    min_ratio: float = NETWORK_OUTAGE_MIN_RATIO,
 ) -> str:
-    """
-    Classify engine failure by inspecting active and recent rotated engine logs.
-    通過檢查 active engine.log 與最近輪替日誌分類引擎故障。
+    """檢查 active engine.log 與最近輪替日誌，分類引擎故障。
+
+    為什麼分四層 gate（按優先序）：
+      (a) crash-indicator override：tail 含 panic/assertion/stack-backtrace →
+          一定是 engine bug，即使同時有 DNS 風暴也判 engine_crash。panic 必須
+          算 strike。
+      (b) per-file consecutive run ≥ min_consecutive：DNS-CLASSIFY-1 原 fast-path，
+          保持向後兼容。
+      (c) per-file interleaved：tail 內 match 數 ≥ min_interleaved 且 match/total
+          比例 ≥ min_ratio。處理 DNS error 中間夾雜 heartbeat/metric 的散落情境。
+      (d) cross-rotation aggregate：active + rotated 各 file 的 tail 合併後重評
+          (c)。處理證據跨檔散落的 rotation 情境（v55 #5 watchdog RCA 同類更廣）。
+
+    False positive guard：任何 candidate tail 含 AMBIGUOUS_SOURCE_PATTERNS（PG /
+    disk / OOM / 死鎖）→ **整體** 降級回 engine_crash（保守原則）。寧可漏報 net-
+    outage 多計 strike，也不可錯把 PG/disk 失敗標為 network_outage 跳過 strike。
 
     Returns:
-      "network_outage"  iff scanned tails contain NO CRASH_INDICATOR_PATTERNS AND
-                         at least one tail has a run of ≥min_consecutive lines
-                         all matching any NETWORK_OUTAGE_PATTERNS
-                         (case-insensitive).
-      "engine_crash"    otherwise (conservative default on I/O error or empty log).
+      "network_outage"  通過 gate (b)/(c)/(d) 任一且無 (a)/ambiguous 命中。
+      "engine_crash"    其餘所有情況（含 I/O error、空 log、ambiguous evidence）。
     """
     saw_readable_tail = False
-    saw_network_outage = False
+    saw_per_file_outage = False
+    saw_ambiguous = False
+    aggregate_lower: list[str] = []
     read_errors: list[OSError] = []
 
     for candidate in _candidate_failure_log_paths(log_path):
@@ -251,30 +387,52 @@ def classify_engine_failure(
             continue
         saw_readable_tail = True
         lower = [line.lower() for line in tail]
+        aggregate_lower.extend(lower)
 
-        # (a) crash-indicator override — panic/assertion is always a real bug
-        # (a) panic/assertion 強制覆蓋為 engine_crash
+        # (a) crash-indicator override — panic/assertion 即時 short-circuit
         for line in lower:
             if any(pat in line for pat in CRASH_INDICATOR_PATTERNS):
                 return "engine_crash"
 
-        # (b) longest run of consecutive network-outage lines within this tail
-        # (b) 此 tail 內連續 network-outage 行的最長連續段
-        longest_run = 0
-        current_run = 0
-        for line in lower:
-            if any(pat in line for pat in NETWORK_OUTAGE_PATTERNS):
-                current_run += 1
-                if current_run > longest_run:
-                    longest_run = current_run
-            else:
-                current_run = 0
+        # False positive guard：ambiguous source 命中暫存，等掃完所有 candidate
+        # 後再決定（不在這裡 short-circuit；後面 aggregate gate 也要受此抑制）。
+        if _has_ambiguous_source(lower):
+            saw_ambiguous = True
 
-        if longest_run >= min_consecutive:
-            saw_network_outage = True
+        # (b) 單檔連續 run（fast-path，向後兼容 DNS-CLASSIFY-1）
+        if _longest_consecutive_network_run(lower) >= min_consecutive:
+            saw_per_file_outage = True
+            continue
 
-    if saw_network_outage:
+        # (c) 單檔 interleaved：總 match 數 ≥ MIN_INTERLEAVED **且** 比例達標
+        match_count = _count_network_matches(lower)
+        if (
+            match_count >= min_interleaved
+            and len(lower) > 0
+            and (match_count / len(lower)) >= min_ratio
+        ):
+            saw_per_file_outage = True
+
+    # Ambiguous evidence 整體降級 — 保守原則優先於 net-outage 強化
+    if saw_ambiguous:
+        return "engine_crash"
+
+    if saw_per_file_outage:
         return "network_outage"
+
+    # (d) cross-rotation aggregate：active + rotated 合併後重評 interleaved
+    # 為什麼用較寬鬆 ratio（0.10 vs 0.25）：cross-file 場景的分母被 unrelated
+    # rotation lines 拉大屬正常；MIN_MATCHES 絕對下限維持 5 提供噪音底線。
+    # MEDIUM-2 R2：抽 agg_matches 變數，避免重複呼叫 `_count_network_matches`。
+    if len(aggregate_lower) > 0:
+        agg_matches = _count_network_matches(aggregate_lower)
+        if (
+            agg_matches >= NETWORK_OUTAGE_AGGREGATE_MIN_MATCHES
+            and (agg_matches / len(aggregate_lower))
+            >= NETWORK_OUTAGE_AGGREGATE_MIN_RATIO
+        ):
+            return "network_outage"
+
     if not saw_readable_tail and read_errors:
         e = read_errors[0]
         logger.warning(
@@ -464,12 +622,17 @@ def on_engine_crash(
 
     Returns: action taken ("fallback" | "rollback" | "network_outage" | "none")
 
-    WATCHDOG-DNS-CLASSIFY-1 (2026-04-20): when log_path is given, inspect the
-    engine.log tail; a pure DNS/transport outage (no panic/assertion + ≥5
-    consecutive network-error lines) classifies as `network_outage` — no strike
-    is counted, no auto-restart is attempted (restart can't fix DNS and would
-    burn the circuit-breaker). engine_alive still flips to False so that the
-    recovery path fires normally once the network comes back.
+    WATCHDOG-DNS-CLASSIFY-1 (2026-04-20) + NETOUTAGE-CLASSIFIER-FIX
+    (2026-05-21): when log_path is given, inspect the engine.log tail; a pure
+    DNS/transport outage classifies as `network_outage` via four gates:
+      (b) ≥5 consecutive network-error lines（向後兼容）
+      (c) tail 內 ≥5 interleaved network-error 行且比例 ≥25%
+      (d) cross-rotation aggregate（active + rotated tail 合併重評）
+    panic/assertion override (a) 強制 engine_crash；PG/disk/OOM token 觸發
+    ambiguous-evidence guard 也保守降級 engine_crash。
+    no strike is counted, no auto-restart is attempted (restart can't fix DNS
+    and would burn the circuit-breaker). engine_alive still flips to False so
+    that the recovery path fires normally once the network comes back.
     """
     if not state.engine_alive:
         return "none"  # Already in crash state / 已在崩潰狀態

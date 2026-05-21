@@ -4036,3 +4036,18 @@ PASS · ready for PM commit。
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-21--c1_c2_close_maker_healthcheck_e4_regression.md`
+
+## 2026-05-21 · P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX R2 — E4 PASS
+- Branch local main HEAD `fbe8b8d5`（sibling push 0）；改動 3 files（engine_watchdog 1369→1532 +163 / test_canary 728→890 +162 / test_engine_watchdog 803→810 +7）。
+- pytest `helper_scripts/canary/` 兩遍 207/207 PASS（31.19s / 31.18s）；cross-module healthchecks/tests/ 83/83 + helper_scripts/db/ 459 + 14 subtests 全綠不破。
+- 25/25 TestEngineFailureClassifier + TestOnEngineCrashClassification 全 PASS（含 6 R2 new tests + 19 R1 baseline 含 1 改名 `test_non_consecutive_dns_above_interleaved_threshold` 意圖反轉設計）。
+- **adversarial probe（production-empirical 真實性驗）**：暫時 comment AMBIGUOUS_SOURCE_PATTERNS 3 個 R2 新 token (`pg pool` / `pool timed out` / `db_pool`) → `test_pg_pool_exhaustion_with_concurrent_dns_errors_not_classified_as_net_outage` RED (`network_outage != engine_crash` 重現 R1 FP) → 復原（diff = 0 byte-identical）→ test GREEN；control test `test_pg_connection_error_not_classified_as_net_outage` 在 strip state 仍 PASS（用 sqlx + pgconnection 不在 strip 範圍）→ ambiguous token 互相獨立、設計健全。
+- **規範**：3 file < 2000 hard cap / 0 emoji / 0 hardcoded path / 0 新 import / 中文注釋默認 / `--status` exit 0 對齊 P1-WATCHDOG-EXIT-CODE-CLARIFY DONE 2026-05-20 semantic 分區。
+- **Linux runtime impact**：source-only，0 新 dependency，watchdog daemon PID 2936560 仍跑 R1，需重啟 deploy（out of E4 scope per `feedback_restart_rebuild_flag_scope`）。
+- **教訓（adversarial probe 真實性驗）**：HIGH-1 R2 production-empirical test 用真實 ANSI-wrapped engine.log 第 4 行 reproduce false-positive，這類 test 必須跑 adversarial cycle（strip → RED → restore → GREEN）才能證實非 mock self-consistency。E2 R2 §自驗 regression catcher 應為標配；E4 在 cross-confirmation 階段再跑一次 cycle 多一層保險。本次設計健全度：strip 3 token 必紅、其他 token 不依賴新 3 token、復原 byte-identical 重現綠 → 100% 設計合格。
+- **教訓（test 改名意圖翻轉）**：R1 baseline 有 1 test 改名 + assertion 翻轉（`test_non_consecutive_dns_below_threshold` → `_above_`，`engine_crash` → `network_outage`）。這類「改舊 test 而非加新 test」屬 BLOCKER 反模式邊緣，但本次因 gate (c) 新增使原行為設計反轉（不是「測試妥協」），E2 R2 已 APPROVE 此設計變動；E4 在報告中明確 callout 此意圖反轉避免後人誤判。
+- **教訓（cross-module non-flaky verification）**：207/207 兩遍同綠 31.19s / 31.18s（差 0.01s）= 系統穩定；single-run 459 PASS db/ + 83 PASS healthchecks/tests/ 對齊 C 批 baseline → cross-module 0 regression 真實確認。pytest stability 是 watchdog daemon code change 的最少 sanity check 標準。
+- **教訓（restoration verify byte-identical）**：adversarial probe 之後 `diff <restored> <backup>` = 0 是強制檢驗（不能只看 test 再綠就 assume 復原）；本次 diff 0 + final canary/ 207/207 重跑都驗 → 100% restore。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix_e4_regression.md`

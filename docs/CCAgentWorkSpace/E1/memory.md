@@ -11195,3 +11195,19 @@ E2 PR review (`2026-05-20--p2_sim_queue_aware_e2_review.md`) APPROVE-CONDITIONAL
 - **教訓 5：「helper 抽出與否看共用次數」**：`_count_network_matches` 被 gate (c) per-file + gate (d) aggregate 共用 → 必抽（避免雙重維護）；`_longest_consecutive_network_run` 只 fast-path 一處用 → 也抽是為了 readability + 對齊新 helper 風格。`_has_ambiguous_source` 共用 4 處（每 candidate file 都查）→ 必抽。**單次用且 ≤ 5 行可 inline；2+ 次用或 ≥ 10 行邏輯抽 helper**
 - **教訓 6：「baseline test 必須先跑」**：本次先跑 baseline 確認 59 tests，再寫新 test。pytest 跑完發現 1 個既有 test 因新邏輯 FAIL → 是設計目標的核心成果不是 regression → rename + 改意圖。**禁止把 baseline FAIL 當 regression 強硬 revert classifier 邏輯 → 失去設計目標**
 
+### 2026-05-21 P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX R2 教訓（E2 RETURN 1 HIGH + 2 MEDIUM + 1 LOW）
+
+- **任務**：R2 修 HIGH-1（AMBIGUOUS_SOURCE_PATTERNS 補 PG pool 真實 production patterns）+ MEDIUM-1（ratio gate sparse-log 盲區注釋 + OQ-NETOUTAGE-2）+ MEDIUM-2（agg_matches 變數抽出）+ LOW-1（test_engine_watchdog.py MODULE_NOTE cross-ref）。R1 206 → R2 207 PASS（+1 dedicated production-empirical test）
+
+- **教訓 1：「ambiguous pattern list 不可純推測，必須對齊 production engine.log empirical 取樣」**：R1 token list 9 個全憑推測（postgres / sqlx / pgconnection / disk / oom / etc.），未跑 `grep -i 'pool\|memory\|disk\|panic\|db_' <OPENCLAW_DATA_DIR>/engine.log` 對齊 → E2 R1 用 production line 4 即抓到 false-positive（`pg pool` / `pool timed out` / `db_pool` 全 miss）。R2 補 3 token 後 R1 設計目標達成度 0% → 100%。**後續新增 pattern-matching list 強制先 empirical grep production log 取樣**；source comment 同步 embed 維護規範，避免下個 maintainer silently inherit 推測風格
+
+- **教訓 2：「對抗 probe test 必須包含 production-empirical 真實字串，不可全 mock 自我引用」**：R1 寫 5 新 test 全 self-consistent — 用 R1 patterns 自驗（patterns 全錯 test 也 pass）。**與 P1/P2 close_maker R1 / R2 教訓 #2 完全同類**（test 全 mock + DEFAULT patterns 自驗，pattern 錯 test 仍 pass）。R2 補 `test_pg_pool_exhaustion_with_concurrent_dns_errors_not_classified_as_net_outage` 用 production line 4 真實 ANSI-wrapped 字串釘住此契約。**高風險 classifier / pattern matcher / LIKE filter 等 test design rule**：至少 1 個 test 用 production-derived 真實字串（含 ANSI escape / 中英混排 / Unicode emdash 等真實格式），不能全靠 mock + 自寫 patterns 互驗
+
+- **教訓 3：「ratio gate vs timestamp window trade-off 應在 source comment 明文紀錄盲區假設 + OQ」**：R1 push back 採 ratio gate 替代 timestamp window 是合理 trade-off，但 sparse-log 邊緣場景（engine idle / paused / heavily throttled）盲區未在 source 注釋 explicit 標記。R2 注釋追加完整 risk scenario + mitigation assumption + OQ-NETOUTAGE-2 留 PM 後續決定。**遇 brittle 替代方案 push back 後必須在 source 留盲區紀錄 + OQ ticket，不能讓下個 maintainer 不知道存在限制**
+
+- **教訓 4：「source comment 是 governance trail 一部分，不純文檔」**：將「token list 必須對照 production engine.log empirical 取樣 ... 新增前先 grep 驗證真實字樣」維護規範直接 embed 在 AMBIGUOUS_SOURCE_PATTERNS 上方注釋 — 比寫在 memory.md / report archive 更接近 maintainer 視線，未來 grep `AMBIGUOUS_SOURCE_PATTERNS` 即看到。**governance / 維護規範 embedded in source comments > docs-only**
+
+- **教訓 5：「helper 抽變數 vs helper 抽 function 不同顆粒度」**：MEDIUM-2 `agg_matches` 是「同函數內單次使用兩次」場景，抽變數即可（不需新 helper function）；R1 教訓 5「helper 抽出與否看共用次數」的 2+ 次規則指 cross-function 共用。**Function-local 同邏輯重算抽變數；cross-function 共用抽 helper**
+
+- **重要對齊**：本 task R2 完成後 R1 + R2 整體 net-outage classifier 設計達成 production-grade fail-closed 等級（PG / disk / OOM / 死鎖證據在場時保守降級 engine_crash），interleaved + cross-rotation 場景仍能正確識別 net-outage 避免 restart storm。但 sparse-log 邊緣場景盲區留 OQ-NETOUTAGE-2 待 PM 升 P1 決定
+

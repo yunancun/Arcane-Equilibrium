@@ -16,6 +16,14 @@ state persistence、multi-engine 獨立性。
 - B-4：clear 後寫 TRADING_INERT_CLEARED
 - B-5：watchdog restart 不重置 incident state
 - B-7：multi-engine 獨立 state
+
+Cross-reference（LOW-1 R2 補；測試局部性說明）：
+classify_engine_failure / on_engine_crash 等核心 watchdog routing 的 unittest
+位於 `test_canary.py::TestEngineFailureClassifier` + `TestOnEngineCrashClassification`
+（既有 13 個 classifier test 早於 Layer B 落地，新增 4 個 NETOUTAGE-CLASSIFIER-FIX
+test 也保持局部性原則放在同 class 內）。
+本檔僅含 Layer B inert-probe scope，不含 classifier test；`pytest test_engine_watchdog.py`
+不會覆蓋 classifier coverage，需配合 `pytest test_canary.py`。
 """
 
 import json
