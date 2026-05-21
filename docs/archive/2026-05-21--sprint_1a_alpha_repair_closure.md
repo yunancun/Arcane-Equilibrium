@@ -364,6 +364,96 @@ R4 留 **R-VERIFY-1**（TW 0035/0037 land 後 README index 補）已 close 入�
 |---|---|---|
 | `f75117ec` | docs(sprint-1a-gamma): D+0 carry-over land — 3 ADR (M3/M6/M7) + 3 module DESIGN (M2/M4/M9) + 2 runbook + V105/V108 full DDL | Wave 1+2 first batch (12 artifact) |
 | `a06e5094` | docs(archive): srv root cleanup — 20 stale .md → docs/archive/2026-05-21--srv_root_cleanup/ + README cross-ref sync | Root cleanup (orthogonal) |
-| (pending) | `docs(sprint-1a-gamma): PM SIGN-OFF — final 4 artifact land (M10 design + V111 + M8 design + V109 full DDL)` | Wave 3 sequential final + TODO sprint banner + archive §H |
+| `c168a39a` | `docs(sprint-1a-gamma): PM SIGN-OFF — final 4 artifact (M10 design + M8 design + V109 + V111)` | Wave 3 sequential final + TODO sprint banner + archive §H |
 
 **Linux runtime sync**：Mac push origin → ssh trade-core pull --ff-only
+
+---
+
+## §I Sprint 1A-ζ — IMPL Prototype Spike Phase PLANNING（PM push back 2026-05-21）
+
+### I.1 Origin — PM push back PA 原 Sprint 1A 純 DESIGN 路線
+
+operator query 2026-05-21 23:XX UTC：「Sprint 1A 是設計就應該 IMPL 還是只做文檔沒 wire 沒 IMPL?」
+
+PM 對 PA dispatch consolidation + v5.8 §4 Sprint progression evidence chain 答：
+- **YES Sprint 1A 全 5 phase（α/修補/β/γ/δ/ε）= 純 DESIGN, 0 IMPL, 0 wire, 0 V### apply 是設計正確**
+- 但 flag 4 risk：(R1) 100% design / 0 runtime evidence (R2) Sprint 1B IMPL 才開始 = 8.5w 後 (R3) V### 全 schema spec 未經 PG empirical apply (R4) state machine ↔ schema ↔ ADR 三層對齊未 runtime test
+
+PM 建議 + operator 採納：**插入新 Sprint 1A-ζ「IMPL Prototype Spike Phase」**（W8.5-10；1-2 wall-clock week / 30-50 hr）驗 critical-path spec→IMPL 真實可行。
+
+### I.2 Sprint 1A-ζ scope（per PA spike scope spec 657 行 land）
+
+**Artifact**：`docs/execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md`
+
+**3 critical-path track**：
+| Track | Module | V### | 工時 (E1 IMPL) | Spike 目標 |
+|---|---|---|---|---|
+| **A (最高優先)** | M1 LAL | V112 | 12-18 hr | LAL Tier 0/1 state machine + V112 PG empirical apply + ADR-0034 LAL 0-4 數字方向 PG CHECK + Rust code 對齊 |
+| **B (中優先)** | M3 health | V106 | 13-19 hr | 4-state ladder Rust skeleton + 1 health domain (engine_runtime) + amplification cap 24h-suppression empirical fire |
+| **C (低優先)** | M11 replay | V107 | 11-17 hr | V107 PG apply + Guard A forbidden action RAISE 驗 + M11 → M7 dedup contract empirical |
+
+**8 Acceptance Criteria**（AC-1~AC-8）：sqlx_migrations success / idempotency / engine restart 0 panic / LAL transition + ADR 對齊 / amp cap fire / dedup contract / cross-language 1e-4 fixture / TW report + PM sign-off
+
+**Phase split + workload**：
+- Phase 1 PA refine 4-6 hr single-thread (D0)
+- Phase 2 E1 IMPL × 3 track parallel 30-45 hr (D1-D3)
+- Phase 3a E2 review × 3 parallel 12-18 hr (D4)
+- Phase 3b E4 regression 4-6 hr single (D5)
+- Phase 3c QA empirical 4-6 hr single (D5)
+- Phase 3d TW report 2-3 hr single (D6)
+- Phase 3e PM sign-off 1-2 hr single (D6)
+- **Total 57-86 hr 含 buffer / 1-2 wall-clock week**
+
+**PASS / FAIL verdict（3 選一 governance gate）**：
+- **PASS** → Sprint 1B M3/M11 early IMPL 開派 + Sprint 4 first Live M1 LAL Tier 1 IMPL 開派 — 路線不變
+- **FAIL (a)** → 退回 Sprint 1A-γ revise spec + re-spike
+- **FAIL (b)** → 接受 spec 有限度 + patch ADR + Sprint 1B IMPL 時補
+- **FAIL (c)** → defer first Live Sprint 4 → Sprint 5（W21-24）給 IMPL re-design buffer
+
+### I.3 5 Open Q 待 operator review + Phase 1 PA refine sign-off
+
+| # | Severity | 題目 | PA 推薦 |
+|---|---|---|---|
+| Q1 | HIGH | spike 期間 GUI Console 是否加 spike-mode banner | (d) sandbox DB 隔絕 — 0 GUI work |
+| Q2 | HIGH | engine restart 走 `--rebuild` 還是 `--keep-auth` | (d) sandbox CI + 0 production restart |
+| Q3 | HIGH | spike fail partial pass 治理 | (b) 限「non-critical gap」+ PA+PM 共同 sign-off |
+| Q4 | MEDIUM | Track C M11 是否 Y2 才 spike | (c) 折衷 — V107 PG apply + Guard A 驗 critical path；M11 Python skeleton 延 Sprint 3 |
+| Q5 | LOW | spike 期間其他 1A-ε wave 是否暫停 | (a) 1A-ε 後跑 — 嚴守 7 sub-agent ceiling |
+
+### I.4 Pending Operator Decision
+
+**operator 親手 review Sprint 1A-ζ spec 後**：
+1. 簽 Q1-Q5 5 Open Q 路徑
+2. confirm Track C 是否折衷（Q4）
+3. authorize PM 派 PA Phase 1 refine
+
+**之後 PM dispatch chain**：
+- PA Phase 1 refine (4-6 hr) → operator sign-off scope final
+- E1 × 3 IMPL sub-agent parallel (Sequential 1-at-a-time 若 network 不穩 per Sprint 1A-γ saga)
+- E2 × 3 review parallel
+- E4 + QA + TW + PM closure single-thread
+
+### I.5 Spike PASS 後 Sprint 1A 真實完整 wall-clock revised
+
+```
+Sprint 1A-α  : W0-1.5  done
+Sprint 1A-β  : W1.5-3.5 done
+Sprint 1A-γ  : W3.5-5.5 done
+Sprint 1A-δ  : W5.5-6.5 (M5/M12/M13 stubs)
+Sprint 1A-ε  : W6.5-8.5 (cross-ADR audit + docs index 補)
+Sprint 1A-ζ  : W8.5-10 (NEW — IMPL spike 1-2 wall-clock week)
+Sprint 1A    : ~10w 真實（原 8.5w + 1.5w spike）
+Sprint 1B    : W10-13 起 (原 W9-12，順移 1-2w)
+Sprint 4 first Live : W19-22 (原 W18-21，順移 1-2w)
+Y1 末       : W45-56 (原 W44-55，順移 1-2w)
+Y1 autonomy : 66% 不變（spike pass 後路線不變）
+```
+
+**Sprint 4 first Live ETA：~2026-09 中（原 W18-21 → 順移到 W19-22）**
+
+### I.6 Commit chain — Sprint 1A-ζ planning land
+
+| Commit | Subject | 內容 |
+|---|---|---|
+| (pending) | `docs(sprint-1a-zeta): PM push back IMPL spike phase planning — PA scope spec 657 行 + TODO sprint banner [skip ci]` | PA spike scope spec + TODO §0/§1.1/§1.2 update + archive §I append |

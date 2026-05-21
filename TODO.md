@@ -11,7 +11,7 @@
 
 - **Current Sprint Phase**：Sprint 1A-α + Wave 2 + Wave 2.5 + Sprint 1A-β + **Sprint 1A-γ DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED** (PM-signed 2026-05-21；15/15 deliverable 全 land；M8 + V109 sequential final)；Sprint 1A-δ READY-TO-DISPATCH
   - 註：DESIGN-DONE = spec/ADR/runbook 文件 land；IMPL-PENDING = 無對應 IMPL 代碼；RUNTIME-NOT-APPLIED = sql/migrations/ 本地 max=V098 / Linux PG `_sqlx_migrations` max=96 / 10 target table (health_observations / degradation_state / replay_divergence_log / reward_weight_history / decision_lease_lal_tiers / lal_eligibility_log / decay_signals / strategy_lifecycle / earn_movement_log / hypotheses) pg_class 0 hits（per 2026-05-21 acceptance audit）
-- **Current Wave**：Sprint 1A-δ PENDING — M5/M12/M13 interface stubs (ADR-0035/0039/0040 已 Wave 2 land) + V114/V115/V116 reserve frontmatter + Mac CI 13-module cross-compile verify
+- **Current Wave**：Sprint 1A-δ READY 派 (M5/M12/M13 stubs)；**新增 Sprint 1A-ζ IMPL Prototype Spike phase**（PM push back 2026-05-21；W8.5-10；驗證 M1 LAL/M3/M11 critical path spec→IMPL 真實可行，避免 Sprint 4 first Live 才發現 spec gap 大幅 rework）— PA spike scope spec 進行中
 - **Active P0**：`P0-EDGE-1`（5 strategy alpha-deficient）+ `P0-LG-3`（Wave 2.4 IMPL DISPATCH PENDING SPEC-READY 10d）+ `P0-OPS-1..4`（HTTPS / cred / legal / runbook）— Sprint 4 first Live W18-21 前必 closure
 - **Next 24h operator action**：D+1 (2026-05-22) AM ① BB OpenClaw key 發行日 5 min query ② Phase 2a 14d verdict 視窗（clock @ 2026-05-22~23 UTC）30-60 min 三選一決議
 - **Runtime**：engine PID 2934602 + API PID 2934665 + watchdog PID 2936560；最後 graceful restart 2026-05-21 13:31 UTC
@@ -29,7 +29,8 @@ Sprint 1A-修補 DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (D+0~D+5, 2026
 Sprint 1A-β   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)          M1 LAL/M3/M6/M7/M11 DESIGN spec + 5 V### schema spec + 6 runbook (16 artifact / ~12,900+ 行；無 IMPL；V099+ migration 本地不存在；Linux PG max=96)
 Sprint 1A-γ   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)          M2/M4/M8/M9/M10 DESIGN spec + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) (15 artifact / ~12,400+ 行；無 IMPL；V###未 apply)
 Sprint 1A-δ   READY-TO-DISPATCH (W5.5-6.5)                                                       M5/M12/M13 interface stubs (ADR-0035/0039/0040 已 Wave 2 land)
-Sprint 1A-ε   PENDING (W6.5-9)                                                                  integration verify + Monthly Review Wizard + 25+ open Q cross-ADR audit + IMPL spike start
+Sprint 1A-ε   PENDING (W6.5-8.5)                                                                  integration verify + cross-ADR consistency audit + 45+ open Q audit + docs index 補
+Sprint 1A-ζ   PENDING (W8.5-10) — **NEW PHASE 2026-05-21 PM push back**                            IMPL Prototype Spike (M1 LAL + M3 health + M11 replay critical-path 驗證 spec→IMPL 可行；30-50 hr / 1-2 wall-clock week)
 ```
 
 > **狀態語言**（per 2026-05-21 acceptance audit）：
@@ -46,7 +47,8 @@ Sprint 1A-ε   PENDING (W6.5-9)                                                 
 | 1A-β | 2026-05-21 done | M1 LAL/M3/M6/M7/M11 DESIGN + V106/V107/V110/V112/V113 schema spec (本地無 .sql 檔；Linux PG 未 apply) + 6 runbook | 310-460 並行 (10 sub-agent + 3 recovery) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
 | 1A-γ | 2026-05-21 done | M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) | 240-360 並行 (6 + 7 recovery + 2 sequential) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
 | 1A-δ | W5.5-6.5 (~2026-05-28 開派) | M5/M12/M13 stubs + ADR-0035/0039/0040 + V114-116 partial | 75-120 | READY-TO-DISPATCH |
-| 1A-ε | W6.5-9 | integration verify + cross-ADR + Monthly Review Wizard + docs/README index | 60-100 | ⏳ |
+| 1A-ε | W6.5-8.5 | integration verify + cross-ADR consistency audit + docs/README index 補 + 45+ open Q audit | 60-100 | ⏳ |
+| **1A-ζ** | **W8.5-10 (NEW; PM push back 2026-05-21)** | **IMPL Prototype Spike — Track A M1 LAL + V112 PG apply / Track B M3 health + V106 / Track C M11 replay + V107；驗 Sprint 1B IMPL 開始前 spec 真實可行** | **57-86 (含 buffer)** | **⏳ PENDING — PA spike scope spec 進行中** |
 | 1B | W9-12 | v5.7 baseline + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 | ⏳ |
 | 2 | W12-15 | Alpha Tournament + M4 stage 1 + M10 Tier A + M8 read-only | 280-400 | ⏳ |
 | 3 | W15-18 | Top-1 Unlock SHORT build + Stage 0 shadow + M11 nightly + M3 detectors | 280-380 | ⏳ |
