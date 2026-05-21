@@ -5055,3 +5055,18 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 - Top 3 必含：§1 Session/Wave/Sprint 路線圖表 + §2 當前 Wave 詳情單一展開區 + §10 References 28 條完整
 - 4 OQ 給 PM：Wave 結束整體歸檔 / W-AUDIT-4b 移 §11 / §9 SOP 裁剪 / §0 摘要限 8 bullet
 - 報告：docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--todo_v61_restructure_proposal.md
+
+## 2026-05-21 — Sprint 1A-ζ Phase 1 PA Refine（spike phase 啟動 / 5 critical patch P-5..P-9 close / 3 E1 packet ready）
+- 任務：Phase 1 single-thread 4-6 hr；close P-5/P-6 sandbox infra + P-7 AC-5.1 mock time hook + P-8 AC-1.1 LAL 0-4 PG CHECK + Rust assert + P-9 fetch SOP
+- 5 deliverable 全 land：
+  1. sandbox_prep_checklist.md（414 行 / 9 section / Phase 0 sandbox DB + Vault TOTP + sample fills + 6 GO confirm + §7 fallback）— path `docs/execution_plan/2026-05-21--sprint_1a_zeta_phase0_sandbox_prep_checklist.md`
+  2. spike spec §AC-1.1 (line 280-347) — SQL 反向 INSERT lal_level=-1/5 必 RAISE + Rust LalTier::from_i32(-1/5) Err + numeric_value 越大越嚴
+  3. spike spec §AC-5.1 (line 349-465) — tokio::time::pause + advance mock；對齊 M3 spec §3.3 dwell time + flap suppression；feature flag 隔絕 production
+  4. spike spec §6.3.1 (line 557-620) — pre-dispatch fetch SOP + stagger 5min + disconnect 三連檢查 + 7 sub-agent ceiling check
+  5. 3_e1_dispatch_packet.md（438 行 / 7 section / Track A/B/C 各完整 dispatch packet 含 AC + 必讀 + 反模式 + Disconnect Recovery）— path `docs/execution_plan/2026-05-21--sprint_1a_zeta_3_e1_dispatch_packet.md`
+- 派發順序確認：V107 first (T+0) → V113 placeholder transcribe + V112 (T+5min) → V106 standalone (T+10min)；Rust skeleton 3 並行不撞 PG
+- 工時：Track A 12-18 hr / Track B 13-19 hr / Track C 16-27 hr (Q4a override 含 M11 Python skeleton + fill_chain detector empirical)
+- AC coverage：Track A → AC-1+2+3+4(含 AC-1.1) / Track B → AC-1+2+3+5(含 AC-5.1) / Track C → AC-1+2+3+6
+- Phase 0 → Phase 1 → Phase 2 sign-off chain：Phase 0 6 confirm (E3 sandbox + AI-E TOTP + MIT seed) + Phase 1 PA refine + 3 dispatch packet land → Phase 2 stagger dispatch
+- C7 v103 EXTEND M4 PM Q1 verdict 確認：carry-over Sprint 1A-ε 已 close（per Sprint 1A-β closure 2026-05-21）；不影響 spike
+- Verdict：READY for Phase 2 E1 IMPL Dispatch（待 Phase 0 §6 6 confirm 全 PASS）

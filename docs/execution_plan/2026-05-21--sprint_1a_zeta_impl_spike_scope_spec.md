@@ -277,6 +277,170 @@ per Track A / B / C §2.1-2.3 工作清單；3 並行 sub-agent 各自獨立 IMP
 | **AC-7** | **cross-language 1e-4 fixture pass**（M3 health metric Rust ↔ Python replay） — 1 個 metric `engine_cpu_pct` 算 5 sample window mean / sigma 在 Rust 跟 Python replay 端誤差 < 1e-4 | `pytest tests/spike_cross_lang_fixture.py -k cpu_pct_window` | E4 |
 | **AC-8** | **spike Acceptance Report TW write + PM sign-off** | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--sprint_1a_zeta_spike_overall_acceptance.md` exists + PM sign-off section | TW + PM |
 
+### AC-1.1 ADR-0034 LAL 0-4 數字方向 PG CHECK + Rust assert（Phase 1 PA Refine append per P-8 patch）
+
+**對齊源頭**：ADR-0034 line 41「數字越大越嚴」+ line 137-143 對齊矩陣 + V112 spec doc §2.2 5 tier_name enum `LAL_0_AUTO / LAL_1_LIGHT_REVIEW / LAL_2_FULL_REVIEW / LAL_3_OPERATOR_APPROVAL / LAL_4_OPERATOR_ATTESTATION`。
+
+**SQL 反向 INSERT 測試**：
+
+```sql
+-- SQL test 1: lal_level = -1 反向 INSERT 必 RAISE (CHECK tier_level BETWEEN 0 AND 4)
+INSERT INTO governance.lease_lal_tiers (
+  tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec
+) VALUES (-1, 'NEGATIVE_TEST', false, 0, 60);
+-- expect: ERROR "new row for relation \"lease_lal_tiers\" violates check constraint \"lease_lal_tiers_tier_level_check\""
+
+-- SQL test 2: lal_level = 5 反向 INSERT 必 RAISE
+INSERT INTO governance.lease_lal_tiers (
+  tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec
+) VALUES (5, 'TIER_5_OVERFLOW', false, 0, 60);
+-- expect: 同 ERROR
+```
+
+**Rust assert 測試**（per Track A A6 + V112 spec §2.2 line 126）：
+
+```rust
+// Rust assert 1: LalTier::from_i32(-1) 必 Err / panic
+#[test]
+fn test_lal_tier_from_negative() {
+    let result = LalTier::from_i32(-1);
+    assert!(result.is_err(), "expected Err for lal_level=-1, got {:?}", result);
+}
+
+// Rust assert 2: LalTier::from_i32(5) 必 Err / panic
+#[test]
+fn test_lal_tier_from_overflow() {
+    let result = LalTier::from_i32(5);
+    assert!(result.is_err(), "expected Err for lal_level=5, got {:?}", result);
+}
+
+// Rust assert 3: 數字越大越嚴對齊 ADR-0034 line 41
+#[test]
+fn test_lal_tier_numeric_strictness_order() {
+    assert!(LalTier::Auto.numeric_value() < LalTier::LightReview.numeric_value());
+    assert!(LalTier::LightReview.numeric_value() < LalTier::FullReview.numeric_value());
+    assert!(LalTier::FullReview.numeric_value() < LalTier::OperatorApproval.numeric_value());
+    assert!(LalTier::OperatorApproval.numeric_value() < LalTier::OperatorAttestation.numeric_value());
+    // 全鏈：0 < 1 < 2 < 3 < 4 = 數字越大越嚴
+}
+```
+
+**Verify command（AC-4 sub-step）**：
+
+```bash
+# PG CHECK 反向 INSERT 驗
+ssh trade-core "psql -h 127.0.0.1 -U sandbox_admin -d trading_ai_sandbox \
+  -c \"INSERT INTO governance.lease_lal_tiers (tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec) VALUES (-1, 'NEGATIVE_TEST', false, 0, 60);\" 2>&1 | grep -c 'violates check'"
+# expect: 1 (CHECK fire 一次)
+
+ssh trade-core "psql -h 127.0.0.1 -U sandbox_admin -d trading_ai_sandbox \
+  -c \"INSERT INTO governance.lease_lal_tiers (tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec) VALUES (5, 'TIER_5_OVERFLOW', false, 0, 60);\" 2>&1 | grep -c 'violates check'"
+# expect: 1
+
+# Rust assert 驗
+cd ~/BybitOpenClaw/srv && cargo test --release --features spike test_lal_tier_from_negative test_lal_tier_from_overflow test_lal_tier_numeric_strictness_order
+# expect: 3 tests pass
+```
+
+**Sign-off**：E2 review + QA empirical（AC-4 內 sub-gate；AC-4 fail = AC-1.1 fail；無單獨 verdict）
+
+---
+
+### AC-5.1 Mock Time Hook Design — amp cap 24h fire test harness（Phase 1 PA Refine append per P-7 patch）
+
+**對齊源頭**：ADR-0042 Decision 4 amplification cap (1-anomaly = 1-state-change/24h) + M3 spec §3.3 dwell time + flap suppression 設計 + AC-5 24h fire empirical 需求。
+
+**核心挑戰**：empirical test 不能等真實 24h；必須 mock time injection。
+
+**設計選項對比**：
+
+| 選項 | 描述 | 取捨 | PA 推薦 |
+|---|---|---|---|
+| (a) `mock-instant` crate | Rust ecosystem 第三方 crate；feature flag override `std::time::Instant` | 引入新 dep；ecosystem maturity 中（last update 2024）；feature flag 滲透 production code path 風險 | 不推薦 |
+| (b) `tokio::time::pause()` + `tokio::time::advance()` | tokio runtime 內建；不引入新 dep；async runtime mock；feature flag 完全隔絕 production | 限 tokio runtime；M3 state machine 必走 tokio runtime；對齊 engine 主路徑 | **推薦** |
+| (c) 自寫 `TestClock` trait + `Arc<Mutex<DateTime>>` | 完全自控；無第三方 dep；但全 state machine code 必加 `clock: Arc<dyn Clock>` 構造參數 | 滲透 production constructor；測試專用代碼污染 production；高風險 | 不推薦 |
+
+**選 (b) tokio::time mock 設計（per Track B B5 + B6）**：
+
+```rust
+// engine/openclaw_engine/src/health/state_machine.rs (spike skeleton)
+#[cfg(feature = "spike")]
+use tokio::time::{pause, advance, Duration};
+
+#[cfg(feature = "spike")]
+#[tokio::test(start_paused = true)]
+async fn test_amp_cap_24h_fire() {
+    // Setup: M3 state machine engine_runtime domain
+    let mut sm = HealthStateMachine::new(Domain::EngineRuntime);
+    assert_eq!(sm.current_state(), HealthState::Ok);
+
+    // Step 1: 第一個 fake CPU spike 80% × 5min → HEALTH_WARN
+    for _ in 0..10 {
+        sm.observe(EngineRuntimeMetric { cpu_pct: 85.0, rss_mb: 1500.0, ... });
+        advance(Duration::from_secs(30)).await;  // 30s sampling × 10 = 5min
+    }
+    assert_eq!(sm.current_state(), HealthState::Warn);
+    assert_eq!(sm.amplification_loop_24h_count(), 1);
+
+    // Step 2: 跳 24h+1s（mock time hop）
+    advance(Duration::from_secs(24 * 3600 + 1)).await;
+
+    // Step 3: 第二個 fake CPU spike → cap 必 suppress（不升 HEALTH_DEGRADED）
+    for _ in 0..10 {
+        sm.observe(EngineRuntimeMetric { cpu_pct: 85.0, rss_mb: 1500.0, ... });
+        advance(Duration::from_secs(30)).await;
+    }
+
+    // Assert: 24h 後 cap 重置；第二個 spike 又算「第一次」；不升 DEGRADED
+    assert_eq!(sm.current_state(), HealthState::Warn);  // 仍 WARN（dwell time 第二輪 60s pass）
+    assert_eq!(sm.amplification_loop_24h_count(), 1);   // cap suppressed second spike
+    
+    // Step 4: 反向 assert — 24h 內 inject 第二個 spike 必被 suppress
+    advance(Duration::from_secs(3600)).await;  // +1h（仍在 24h cap 窗口內）
+    for _ in 0..10 {
+        sm.observe(EngineRuntimeMetric { cpu_pct: 85.0, rss_mb: 1500.0, ... });
+        advance(Duration::from_secs(30)).await;
+    }
+    assert_eq!(sm.current_state(), HealthState::Warn);  // 仍 WARN 不升 DEGRADED
+    assert_eq!(sm.amplification_loop_24h_count(), 1);   // cap suppressed; count stays at 1
+}
+```
+
+**對齊 M3 spec §3.3 dwell time + flap suppression**：
+
+per M3 design spec §3.3：
+- OK → WARN dwell = 60s 持續 WARN-band (30s × 2 sample)
+- WARN → DEGRADED dwell = 5min 持續 DEGRADED-band **+ amplification gate PASS**
+- 24h 內同 domain DEGRADED ↔ WARN > 2 次 → 自動 lock 至 DEGRADED 直到 4h 全 OK + operator manual override unlock
+
+本 AC-5.1 test：
+- step 1 OK→WARN dwell time 60s 對齊 (30s × 10 = 5min > 60s threshold)
+- step 2 24h hop 對齊 24h cap reset window
+- step 3 cap 仍 suppress 因 `amplification_loop_24h_count = 1` 第二個 spike anomaly_id 相同 (per ADR-0042 Decision 4 `同一 anomaly_id 在 24h rolling window 內最多觸發 1 次 state transition`)
+- step 4 反向驗 24h cap 窗口內 cap 真實 fire（不升 DEGRADED）
+
+**Feature flag 隔絕**：
+
+```toml
+# engine/openclaw_engine/Cargo.toml
+[features]
+default = []
+spike = []  # spike-only mock time + test harness；不滲透 production binary
+```
+
+production build (`cargo build --release`) 不帶 `--features spike` → mock time + test harness 完全不編譯進 binary；0 production code path 污染。
+
+**Verify command（AC-5 sub-step）**：
+
+```bash
+ssh trade-core "cd ~/BybitOpenClaw/srv && cargo test --release --features spike test_amp_cap_24h_fire"
+# expect: test test_amp_cap_24h_fire ... ok / 0 failure
+```
+
+**Sign-off**：E4 regression + QA empirical fire test verify（AC-5 內 sub-gate；AC-5 fail = AC-5.1 fail；無單獨 verdict）
+
+---
+
 **AC pass 規則**：
 - AC-1 / AC-2 / AC-3 = 三 V### PG empirical hard gate；缺一即 FAIL
 - AC-4 / AC-5 / AC-6 = 三 track 業務邏輯 empirical hard gate；缺一即 partial FAIL（仍可走 §5 FAIL verdict 選項 (b)）
@@ -389,6 +553,71 @@ per `project_multi_session_memory_race` + `2026-04-23` multi-session memory race
 - 7 sub-agent + PM hands-on 是 hard ceiling
 - 本 spike 3 並行 E1 + 3 並行 E2 = 6 sub-agent / 但**不同步**（E1 在 Phase 2、E2 在 Phase 3a）→ 不撞 ceiling
 - Phase 3b/c/d/e 全 single-thread → 0 race
+
+### 6.3.1 Multi-Session Race Mitigation SOP（Phase 1 PA Refine append per P-9 patch）
+
+派 3 並行 E1 sub-agent 前 SOP（per `feedback_fetch_before_dispatch` 2026-04-24 memory + `project_multi_session_memory_race` 2026-04-23 教訓）：
+
+**Pre-dispatch fetch check**（每次派 sub-agent 前 PM 必跑；Phase 2 Track A/B/C 各一次）：
+
+```bash
+# 在 Mac CC dev session（PM 主會話）跑
+git fetch origin
+git branch -r | grep -E "(spike|zeta|sprint_1a)"
+# 確認無 cross-session 撞點 branch（如 origin/feature/sprint_1a_zeta_track_a 已存在 = 隔壁 session 已開）
+
+# 在 Linux trade-core runtime 跑同步驗
+ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only && git status --short --branch"
+# 確認 Mac SSOT 與 Linux runtime branch / commit 同步；無 untracked dirty
+```
+
+**Stagger 5 min dispatch 順序**（避同時 3 並行派發撞 git index race）：
+
+```
+[T+0 min]   PM 派 Track A E1 sub-agent（V107 → V113 → V112 IMPL）
+[T+5 min]   PM 派 Track B E1 sub-agent（V106 standalone IMPL）
+[T+10 min]  PM 派 Track C E1 sub-agent（V107 已先 land 過；接 Python skeleton + fill_chain detector）
+```
+
+每個 sub-agent dispatch packet 帶獨立 `working_branch` hint（避撞）：
+- Track A: `feature/sprint_1a_zeta_track_a_m1_lal`
+- Track B: `feature/sprint_1a_zeta_track_b_m3_health`
+- Track C: `feature/sprint_1a_zeta_track_c_m11_replay`
+
+**Disconnect 接手三連檢查**（任一 sub-agent disconnect mid-IMPL → 接手 sub-agent 必跑；per `project_multi_session_memory_race`）：
+
+```bash
+# 1. memory log 檢查（前任 E1 是否寫過 memory 條目？）
+ls -la ~/.claude/projects/-Users-ncyu-Projects-TradeBot/memory/ | head -5
+grep -l "sprint_1a_zeta" ~/.claude/projects/-Users-ncyu-Projects-TradeBot/memory/*.md
+
+# 2. git log 檢查（前任 E1 是否 commit 過？）
+git log --oneline --since="2 days ago" --all | head -10
+git log --oneline feature/sprint_1a_zeta_track_<a|b|c>* 2>&1 | head -5
+
+# 3. TODO entry 檢查（前任 E1 是否在 TODO 寫過 active blocker？）
+grep -c "sprint_1a_zeta" /Users/ncyu/Projects/TradeBot/srv/TODO.md
+```
+
+**任一檢查發現前任工作 → 接手必走 commit-first / 不認識改動禁 revert**（per `project_multi_session_memory_race` 2026-04-23 教訓）。
+
+**7 sub-agent ceiling check**（每次 dispatch 前 PM 確認）：
+
+| 階段 | 並行 sub-agent | 主會話 | ceiling 余量 |
+|---|---|---|---|
+| Phase 0 | 3 (E3 + AI-E + MIT 串行 = 0 並行) | PM | 7/7 |
+| Phase 1 | 1 (PA single-thread) | PM | 6/7 |
+| **Phase 2** | **3 (Track A/B/C E1 並行)** | **PM** | **3/7** |
+| Phase 3a | 3 (Track A/B/C E2 並行) | PM | 3/7 |
+| Phase 3b-e | 1 (E4 / QA / TW / PM single 各串行) | PM | 6/7 |
+
+Phase 2 + Phase 3a **不同步**（Phase 2 結束才 Phase 3a 起跑）→ 6 sub-agent / 2 階段 max 3 並行 → **不撞 7 ceiling**。
+
+**反模式**（明示禁止）：
+- (a) 3 並行 E1 dispatch 不 stagger → git index race；2026-04-23 memory race 教訓重蹈
+- (b) 派 sub-agent 前不 fetch → 隔壁 session 已開同名 branch 撞點（G6-01 教訓）
+- (c) Phase 2 結束前同步派 Phase 3a → 撞 7 ceiling + sub-agent 看不到 Phase 2 完整 commit
+- (d) 接手 sub-agent 不跑三連檢查 → 前任工作被 revert（2026-04-23 教訓）
 
 ### 6.4 Dispatch packet 結構
 

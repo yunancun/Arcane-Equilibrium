@@ -30,7 +30,7 @@ Sprint 1A-β   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-s
 Sprint 1A-γ   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)          M2/M4/M8/M9/M10 DESIGN spec + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) (15 artifact / ~12,400+ 行；無 IMPL；V###未 apply)
 Sprint 1A-δ   DESIGN-DONE / **IMPL-DONE (Rust trait stubs)** / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed + IMPL closure)  M5/M12/M13 spec + V114/V115/V116 reserve (10 file design) + **6 Rust file land** (model_client 277 / order_router 393 / asset_venue 151 + 3 test 100+243+152) + 2 lib.rs edit + **+25 cargo test PASS** (M5 7 / M12 11 / M13 7) + 3 dup file mv→archive 完成 + 0 new warning / 0 mock / 0 flaky / Mac aarch64-apple-darwin cross-compile PASS
 Sprint 1A-ε   DESIGN-DONE / IMPL-PENDING (2026-05-21 PM-signed)                                  R4 cross-ADR audit (5 CRITICAL + 4 HIGH patches applied) + TW CHANGELOG/CONTEXT + MIT V099-V116 ordering (1223) + E5 Mac CI (598) + A3 Wizard+Lv3-4 (520+) + 5 dup dedup applied (3 archived) + README index 22 entries
-Sprint 1A-ζ   READY-TO-DISPATCH (W8.5-10) — IMPL Prototype Spike (M1 LAL + M3 health + M11 replay critical-path；62-96 hr / 1-2 wall-clock week；operator Q1-Q5 signed)
+Sprint 1A-ζ   **ACTIVE — Phase 1 PA refine 進行中** (2026-05-21 operator authorize 進入 ζ；三化審計 Round 1+2 close 後 dispatch) — IMPL Prototype Spike (M1 LAL + M3 health + M11 replay critical-path；62-96 hr / 1-2 wall-clock week；operator Q1-Q5 signed)
 ```
 
 > **狀態語言**（per 2026-05-21 acceptance audit）：
@@ -48,7 +48,7 @@ Sprint 1A-ζ   READY-TO-DISPATCH (W8.5-10) — IMPL Prototype Spike (M1 LAL + M3
 | 1A-γ | 2026-05-21 done | M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) | 240-360 並行 (6 + 7 recovery + 2 sequential) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
 | 1A-δ | 2026-05-21 done | M5/M12/M13 spec (10 file) + **Rust trait stub IMPL** (model_client 277 / order_router 393 / asset_venue 151 + 3 test 495 行) + 2 lib.rs edit + +25 cargo test | 75-110 + IMPL 18-28 並行 (3 PA sub-agent + 3 E1 sub-agent + 1 E1 refactor + E2/E4) | DESIGN-DONE / **IMPL-DONE (trait stubs)** / RUNTIME-NOT-APPLIED |
 | 1A-ε | 2026-05-21 done | R4 cross-ADR audit (5C+4H patches) + TW CHANGELOG/CONTEXT + MIT V099-V116 + E5 Mac CI + A3 Wizard+Lv3-4 + dup dedup + README index | 86-126 並行 (5 sub-agent + PM patch) | DESIGN-DONE / IMPL-PENDING |
-| **1A-ζ** | **W8.5-10 (READY)** | **IMPL Prototype Spike — Track A M1 LAL + V112 PG apply / Track B M3 health + V106 / Track C M11 replay + V107 (Q4a 含 M11 Python skeleton)；驗 Sprint 1B IMPL 開始前 spec 真實可行** | **62-96 (含 buffer)** | **READY-TO-DISPATCH (operator Q1-Q5 signed)** |
+| **1A-ζ** | **2026-05-21 進入 ACTIVE** | **IMPL Prototype Spike — Phase 1 PA refine 進行中 + 5 P-5/6/7/8/9 patches finalize；Phase 2 E1 IMPL × 3 並行 Track A/B/C 待 Phase 1 sign-off** | **66-102 (含 buffer; Round 1 Phase 0 sandbox prep 上修)** | **ACTIVE Phase 1 PA refine** |
 | 1B | W9-12 | v5.7 baseline + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 | ⏳ |
 | 2 | W12-15 | Alpha Tournament + M4 stage 1 + M10 Tier A + M8 read-only | 280-400 | ⏳ |
 | 3 | W15-18 | Top-1 Unlock SHORT build + Stage 0 shadow + M11 nightly + M3 detectors | 280-380 | ⏳ |
