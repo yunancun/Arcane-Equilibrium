@@ -1655,6 +1655,14 @@ impl TickPipeline {
             recent_fills: self.recent_fills.iter().cloned().collect(),
             klines,
             h0_gate_stats: Some(self.h0_gate.get_stats().clone()),
+            // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：把 per-pipeline recorder 的
+            // 5 mode summary 進 snapshot。recorder=None（cold ctor / test）時為
+            // None，consumer 端 skip `h0_latency_summaries` 不報錯。
+            // `snapshot_now_ms` 已上面取（line ~1637）— 復用為 recorded_at_ms。
+            h0_latency_summaries: self
+                .h0_latency_recorder
+                .as_ref()
+                .map(|rec| rec.all_summaries(snapshot_now_ms)),
             stop_config: Some(self.paper_state.stop_config().clone()),
             guardian_config: Some(self.intent_processor.guardian_config().clone()),
             risk_manager_config: Some(self.intent_processor.risk_config().clone()),

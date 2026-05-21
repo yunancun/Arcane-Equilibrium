@@ -137,6 +137,26 @@ pub struct PipelineSnapshot {
     /// RRC-1：H0 門控統計（總檢查次數、阻斷、影子模式本應阻斷）。
     #[serde(default)]
     pub h0_gate_stats: Option<openclaw_core::h0_gate::GateStats>,
+    /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：H0 hot-path latency distribution
+    /// summaries（per engine_mode HdrHistogram p50/p99/p999/max）。
+    ///
+    /// 為什麼是 `Vec`：spec §3.3 + §3.6 設計 5 mode（paper/demo/live/live_demo/
+    /// live_testnet）各 1 個 histogram；per-pipeline 獨立 recorder 只填本 pipeline
+    /// 的 engine_mode 那格，其他 4 entry 維持 count=0（caller 可 filter count > 0）。
+    ///
+    /// `None` = recorder 尚未注入（bootstrap.rs 接線前 / test path），等同
+    /// spec §11.2 OQ-1：status_report 端不附 `h0_latency_summary`，IPC
+    /// consumer 依 None 處理（不報錯）。
+    ///
+    /// 不引新 schema migration（spec §11.2 OQ-1 推薦）— 寫入 `learning.healthcheck_run`
+    /// 一個 cell JSON payload 即可，由 Python status JSON 端持久化。
+    ///
+    /// `skip_deserializing` 因為 `H0LatencySummary.engine_mode: &'static str`
+    /// 無法滿足 serde Deserialize `'de: 'static` bound；本 field 為 producer-only
+    /// （Rust → JSON），Rust 端不需 Deserialize 回。`default = "Option::default"`
+    /// 確保 Deserialize 路徑（state restore / Python writebacks）取得 None。
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub h0_latency_summaries: Option<Vec<openclaw_core::hot_path_metrics::H0LatencySummary>>,
     // ─── RRC-1-D1: Risk single source of truth / 風控單一真相源 ───
     /// Stop-loss configuration / 止損配置
     #[serde(default)]

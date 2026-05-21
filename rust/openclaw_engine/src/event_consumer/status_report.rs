@@ -97,6 +97,40 @@ pub(super) fn handle_status_interval(
                 "PNL-2 invariant violated: ticks>0 but H0Gate checks==0 — stale binary? / H0 門控未執行"
             );
         }
+        // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：1h reset cadence 觸發。
+        //
+        // 為什麼放這裡：spec §3.5 + §4.5 要求 HdrHistogram 每 1h reset；
+        // status_report 30s cadence 已存在 + 不在 hot path（control plane），
+        // 順手 piggy-back 比新 tokio interval timer 更少資源。
+        //
+        // 不變量：reset 操作 ~10us（5 mode histogram reset），mutex hold 期間
+        // 不阻塞同 pipeline 的 tick path（tick path 由同 tokio rt 串行運行
+        // 與本函數互斥；spec §3.4 設計這就是 control plane 短暫鎖場景）。
+        //
+        // 啟動首次：h0_latency_last_reset_ms=0；首次 status_interval 觸發
+        // reset_all 把 cadence 對齊到啟動時間，後續每整 1h 觸發。
+        const H0_LATENCY_RESET_INTERVAL_MS: u64 = 3_600_000;
+        let mut h0_latency_log_summary: Option<openclaw_core::hot_path_metrics::H0LatencySummary> =
+            None;
+        if let Some(rec) = pipeline.h0_latency_recorder.as_ref() {
+            // 1h cadence reset
+            if pipeline
+                .h0_latency_last_reset_ms
+                .saturating_add(H0_LATENCY_RESET_INTERVAL_MS)
+                <= now_ms
+            {
+                rec.reset_all(now_ms);
+                pipeline.h0_latency_last_reset_ms = now_ms;
+                tracing::debug!(
+                    engine_mode = pipeline.effective_engine_mode(),
+                    now_ms,
+                    "P2-LG1：H0 latency recorder 1h reset / HdrHistogram 1h 重置"
+                );
+            }
+            // 取本 pipeline engine_mode 的 summary 加入 status log
+            // （所有 5 mode summary 仍由 snapshot.h0_latency_summaries 完整匯出）。
+            h0_latency_log_summary = rec.summary(pipeline.effective_engine_mode(), now_ms);
+        }
         tracing::info!(
             ticks = status.stats.total_ticks,
             fills = status.stats.total_fills,
@@ -109,6 +143,13 @@ pub(super) fn handle_status_interval(
             h0_checks = h0_stats.total_checks,
             h0_blocked = h0_stats.total_blocked(),
             h0_shadow_would_block = h0_stats.shadow_would_block,
+            // P2-LG1：percentile summary（per pipeline 的 effective_engine_mode）。
+            //   count=0 / None 時 h0_p99_us / h0_max_us 為 0；caller 端依 h0_lat_count 判活躍。
+            h0_lat_count = h0_latency_log_summary.as_ref().map(|s| s.count).unwrap_or(0),
+            h0_p50_us = h0_latency_log_summary.as_ref().map(|s| s.p50_us).unwrap_or(0),
+            h0_p99_us = h0_latency_log_summary.as_ref().map(|s| s.p99_us).unwrap_or(0),
+            h0_p999_us = h0_latency_log_summary.as_ref().map(|s| s.p999_us).unwrap_or(0),
+            h0_max_us = h0_latency_log_summary.as_ref().map(|s| s.max_us).unwrap_or(0),
             "status report / 狀態報告"
         );
         let snap = pipeline.paper_state.export_state();
