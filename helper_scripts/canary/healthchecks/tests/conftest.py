@@ -57,6 +57,17 @@ def hc65():
     return _load_script("65_reject_sample_healthcheck.py", "hc65_reject_sample")
 
 
+@pytest.fixture(scope="session")
+def hc66():
+    # P1-OBS-PRE-STOPOUT-RATE（2026-05-21）新增 [66] standalone healthcheck
+    # 對應 FA round 1 #5 close maker 來得及量度（R2 從 [71] 改 [66]
+    # 避與 passive_wait_healthcheck [71] close_maker_zero_spine_lineage
+    # 字面碰撞 — 兩 namespace 物理分離但 PM/operator mixed report 易混淆）
+    return _load_script(
+        "66_close_maker_pre_stopout_rate.py", "hc66_pre_stopout_rate"
+    )
+
+
 class FakeCursor:
     """Minimal psycopg2-cursor stub for SQL/result unit tests."""
 

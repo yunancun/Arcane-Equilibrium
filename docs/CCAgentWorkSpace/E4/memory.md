@@ -4005,3 +4005,34 @@ N/A this sprint — no Python ↔ Rust shared computation introduced. `compute_e
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-20--p2_stress_bb_sim_queue_aware_e4_regression.md`
+
+## 2026-05-21 — C1+C2 close_maker healthcheck E4 light regression
+
+### Task
+E2 R2 APPROVE-CONDITIONAL (cfb9d243) 後 light E4：純 Python read-only SQL healthcheck（C1 新 `[66] 66_close_maker_pre_stopout_rate.py` 392 行 + C2 改 `[62] 62_close_maker_fill_rate.py` 加 `--stratify` flag）。未動 _common.py / Rust / IPC / GUI。
+
+### Verdict
+PASS · ready for PM commit。
+
+### Numbers
+- `helper_scripts/canary/healthchecks/tests/` 83/0 (1st + 2nd run, 0.04s/0.03s, non-flaky)
+- `helper_scripts/canary/` 201/0 (1st + 2nd, 31.77s/31.21s)
+- `helper_scripts/db/test_close_maker_audit_healthcheck.py` 8/0 + 14 subtests（passive_wait `[71] zero_spine_lineage` 仍綠 → cross-namespace 不擾）
+- file size 全 ≤ 800（392/336/39/301/104）
+- emoji = 0 / hardcoded path = 0
+- argparse / module import / `--stratify hour --help` 全 OK
+
+### 教訓 / 工程觀察
+
+- **task list `grep [71] 應 0 hit` 字面 vs E2 design intent**: task brief 寫 `grep -r "\[71\]" helper_scripts/canary/healthchecks/` 應 0 hit，實測 8 hits。但 E2 R2 §MEDIUM-F1 已 ratify 這 8 hits 全是 doc/comment 形式（passive_wait namespace 邊界說明 + R2 rename 歷史）— 不是 leftover regression。**規則**：E4 不重啟 E2 review 已 APPROVE 的 design intent；只認定 active slot 編號是否還是 [71]（**驗法 = `check_id` literal + 模組命名 + fixture name**，不靠純文字 grep count）。task list 字面與 E2 verdict 衝突時走 E2 verdict（CLAUDE.md §八 工作鏈 + role hierarchy）。
+
+- **passive_wait test 不在 `passive_wait_healthcheck/` 子目錄**: task list step 2 `python -m pytest helper_scripts/db/passive_wait_healthcheck/` = `no tests ran`（該子目錄無 test，源檔 only）。實際 test 集中在 `helper_scripts/db/test_close_maker_audit_healthcheck.py` 等 sibling file。**規則**：未來 cross-namespace verify「passive_wait 不被擾」測試的正確 path = `helper_scripts/db/test_close_maker_audit_healthcheck.py`（含 `test_zero_spine_lineage_guard` 等 [70-74] slot test）。
+
+- **adversarial test design — `EXPECTED_STOPOUT_EXIT_REASONS` fixture**: test_66 line 43-58 收錄 12 個 production 真實 exit_reason 字串（source line 標註 risk_checks.rs:334/355/379/390 + bb_breakout/mod.rs:910/919 + step_0_fast_track.rs:486/603 + helpers_close_tags.rs:122-127 + maker_price.rs:528/529）+ 8 個 graceful exit 字串，用 fnmatch 模擬 PG LIKE 驗 default patterns 真實 match。E2 R2 §MEDIUM-E1 自跑 adversarial probe 證實此 test 故意把 patterns 改回 R1 lowercase → 3/12 紅報。**規則**：catcher test 設計優於 mock test — fixture 全 source-grep 標註 + reverse assert 8 個 graceful exit 保證 0 match（防 pattern 過寬 false positive），這種模式是 healthcheck regression 黃金標準。
+
+- **stratify=none 向後兼容 adversarial assert**: test_62:132-153 `test_stratify_none_keeps_legacy_sql_verbatim` 不只 assert SQL 不含 `EXTRACT(HOUR/DOW`，還 assert `GROUP BY engine_mode` → `ORDER BY engine_mode` 之間 0 comma（即無 extra group cols）— 這個 SQL 字面切片 + comma-substring 檢驗能 catch 任何「stratify=none 路徑被 stratify mode 程式碼污染」regression。**規則**：向後兼容測試不能只 assert NOT contains，要 assert 結構級 invariant（如 BETWEEN 兩個 anchor 之間沒 unexpected token）。
+
+- **dead init 清理 LOW-F3 三路徑審計**: 62 改動刪 line 225 `overall_verdict = "PASS"` init，E2 R2 §LOW-F3 驗證 3 條路徑（not rows / else stratify=none / else stratify!=none）全本地賦值 → dead init 100% 安全。**規則**：刪 default value init 前必窮舉所有 control-flow 分支驗證本地賦值 ≥ 1 次；別只看「init 後沒讀」（可能某分支真讀 default）。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-21--c1_c2_close_maker_healthcheck_e4_regression.md`

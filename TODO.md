@@ -459,18 +459,27 @@ PM/PA/FA 三方交叉檢查後：
 
 詳情歸檔於 `docs/archive/2026-05-20--todo_v57_3_closure_cleanup_archive.md` §C。本次 sweep 包括：QA-TEMPLATE-CLOSE-MAKER-SPLIT-FIX / STRUCT-2 zombie inventory / AUDIT-VERIFY-3 V069 drop verify / ENTRY-CLOSE-MAKER analysis / STRESS-BB-BREAKOUT-FALSE-SQUEEZE / SIM-QUEUE-AWARE-ADJUSTMENT。Commit chain `12dcdcbc` + `e2d213b5` + `a39dd11b` + `c3f25496`。
 
-### §12.3 2026-05-20 P2 sweep 衍生 follow-up（從 FA P2-ENTRY-CLOSE-MAKER 分析衍生 — 進 §11.3）
+### §12.3 2026-05-20~21 P2 sweep 衍生 follow-up（從 FA P2-ENTRY-CLOSE-MAKER 分析衍生）
 
-| ID | 來源 | 任務 | 優先 | Phase 1b 期內可動 |
+| ID | 來源 | 任務 | 優先 | 狀態 |
 |---|---|---|---|---|
-| `P1-OBS-PLACEMENT-BBO-V094` | FA OBS-1 | 補 placement-time BBO 進 V094 audit `details` JSONB（append-only schema-compat） | P1 | ❌ 14d freeze 後 |
-| `P1-OBS-PRE-STOPOUT-RATE` | FA OBS-2 | 新 healthcheck `71_close_maker_pre_stopout_rate.py`（FA round 1 #5 緩解未掛 AC） | P1 | ✅ 純 SQL 可動 |
-| `P1-OBS-FILL-RATE-STRATIFY` | FA OBS-3 | `62_close_maker_fill_rate.py` 加 `--stratify {hour,dow,both,none}` flag | P1 | ✅ 純 SQL 可動 |
-| `P1-SPEC-DEAD-ENUM-ADR` | FA SPEC-1 | V094 fallback_reason 3 dead enum（FastEscalate/NotAttempted/EngineShutdown）寫 ADR-XX reservation note；不 sunset enum | P1 | ✅ ADR 可寫 |
-| `P2-EVID-TRADE-TAPE-ADR` | FA EVID-1 | ADR：`market.public_trades` + `market.orderbook_l2_snapshot` 寫盤策略（PA+MIT 起草） | P2 | ✅ ADR 可寫；migration 14d freeze 後 |
-| `P2-EVID-A-AXIS-IMPL-CHECK` | FA EVID-2 | `phase_1b_sweep_replay.py` `_did_fill_within_window` offset_bps 變量是否進入 cross 判定（25% probability IMPL bug） | P2 | ✅ sim harness verify 可動 |
-| `P2-SPEC-PHYS-LOCK-AUDIT` | FA SPEC-2 | Phase 1b spec §4.3 補 `phys_lock_gate4_stale_roc_neg` 觸發點 production emit + 14d trigger count audit | P2 | ✅ 純 audit 可動 |
-| `P2-SPEC-HOUR-DISTRIBUTION-AC` | FA OQ-5 | spec v1.4 加 secondary AC「14d 觀察 sample UTC hour distribution ≥ 18h cover、各時段 ≥ 3 attempts」 | P2 | ✅ spec amendment 可動 |
+| `P1-OBS-PLACEMENT-BBO-V094` | FA OBS-1 | 補 placement-time BBO 進 V094 audit `details` JSONB（append-only schema-compat） | P1 | ⏳ Phase 1b 14d freeze 後 |
+| `P1-OBS-PRE-STOPOUT-RATE` | FA OBS-2 | 新 healthcheck `66_close_maker_pre_stopout_rate.py`（FA round 1 #5 緩解未掛 AC） | P1 | ✅ DONE 2026-05-21（E1 R1+R2 / E2 R1 RETURN + R2 APPROVE-COND / E4 regression；slot [71]→[66] 防 passive_wait 碰撞）|
+| `P1-OBS-FILL-RATE-STRATIFY` | FA OBS-3 | `62_close_maker_fill_rate.py` 加 `--stratify {hour,dow,both,none}` flag | P1 | ✅ DONE 2026-05-21（同上）|
+| `P1-SPEC-DEAD-ENUM-ADR` | FA SPEC-1 | V094 fallback_reason 3 dead enum 寫 ADR reservation note；不 sunset | P1 | ✅ DONE 2026-05-21（ADR-0028 Accepted-pending-commit）|
+| `P2-EVID-TRADE-TAPE-ADR` | FA EVID-1 | ADR：`market.public_trades` + `market.orderbook_l2_snapshot` 寫盤策略（PA+MIT 起草） | P2 | ✅ DONE 2026-05-21（ADR-0029 Proposed；故意不 finalize schema 等 MIT calibration；6 步 dispatch 路徑 per PA report）|
+| `P2-EVID-A-AXIS-IMPL-CHECK` | FA EVID-2 | offset_bps 變量是否進入 cross 判定（25% probability IMPL bug） | P2 | ✅ AUDIT DONE 2026-05-21（FA verdict：**IMPL WIRED FOR LOG ONLY** — 100% silent dead；升級為 OQ-C4-1..5 5 條 follow-up；建議 sweep prune A axis + spec v1.4 mark deprecated）|
+| `P2-SPEC-PHYS-LOCK-AUDIT` | FA SPEC-2 | Phase 1b spec §4.3 補 `phys_lock_gate4_stale_roc_neg` audit | P2 | ✅ AUDIT DONE 2026-05-21（FA verdict：**spec PRESENT but incomplete** — emit point v2.rs:359 production wiring 完整；spec §4.3 缺 observability SLA；建議 v1.4 加 §4.3.1 + [72] healthcheck + per-reason kill-switch）|
+| `P2-SPEC-HOUR-DISTRIBUTION-AC` | FA OQ-5 | spec v1.4 加 secondary AC | P2 | ✅ DONE 2026-05-21（TW v1.3→v1.4 加 AC-20 hour distribution ≥ 18h cover + ≥ 3 attempts；secondary AC，違反僅 WARN）|
+
+### §12.3a P2 sweep 衍生新增 follow-up（C 批 2026-05-21 完成後派生）
+
+| ID | 來源 | 任務 | 優先 |
+|---|---|---|---|
+| `P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE` | E2 R2 MEDIUM-D1 deferred | `66_close_maker_pre_stopout_rate.py` 補 Wilson upper bound sub-clause（mirror [62] AC-18 風格）；E2 已接受 raw rate 設計，但 min_sample=30 對 0.10 boundary 不 conservative | P2 |
+| `P1-SWEEP-A-AXIS-PRUNE` | FA C4 verdict + SD-1 | 下一輪 phase_1b sweep 把 A axis (`offset_bps` 0/+1/+2) collapse 到 1-value；可省 ~58 cells × ~17ms；spec v1.4 mark `offset_bps` as deprecated config field | P1 |
+| `P2-PHYS-LOCK-72-HEALTHCHECK` | FA C6 OQ-C6-2 | 新 standalone healthcheck（slot 待 PA 分配，建議 [68]/[69]/[76]）監測 `phys_lock_gate4_stale_roc_neg` trigger rate vs `gate4_giveback`；daily cron | P2 |
+| `P2-FALLBACK-DEAD-ENUM-90D-AUDIT` | ADR-0028 §6 cadence | 90d 後（2026-08-21）re-audit V094 `close_maker_fallback_reason` 3 dead variants；確認仍 dead-by-design 非 missing-data；若 EngineShutdownSafety 仍 0 → confirm；FastEscalate/NotAttempted 須 ops scenario sim 驗 emit path | P2 |
 
 ### §12.4 已完成 P2 條目（細節歸檔於 2026-05-19 v55 translation archive / 2026-05-20 v57.3 archive）
 
