@@ -6,6 +6,64 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-21 — H 批（H1 + H3 + H4）· 3/3 APPROVE → E4
+
+**對象**：H1 P3-AUDIT-SCRIPT-STALE-CONST audit script fix + H3 P2-PHYS-LOCK-72-HEALTHCHECK new healthcheck + H4 P1-HALT-TRIGGER-ROOT-CAUSE new healthcheck，3 件並行 sub-agent IMPL
+**Verdict**：**3/3 APPROVE → E4 regression ready**（0 BLOCKER / 0 HIGH / 0 MEDIUM / 3 LOW NTH 不阻 E4）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--h_batch_e2_review.md`
+
+**Pytest 全 PASS（自跑驗證）**：
+- `helper_scripts/canary/healthchecks/tests/`: **111 PASS** in 0.05s（88 baseline + 10 hc68 + 13 hc69）
+- `helper_scripts/db/audit/test_funding_arb_14d_audit.py`: **5 PASS** in 0.02s
+- 預期值與實際 100% 達成
+
+**H1 核心 catch**：
+- `_load_sl_hard_cap_pct()` module-load 一次 — TOML 變動須重啟 script，但 audit context short-lived acceptable（comment line 165 已 doc）
+- exit_code 1 條件改 `max_loss_pct > SL_HARD_CAP_PCT + slip_buf`（25%+5%=30%）— 對 6.29% loss/notional case 不再誤觸 「假警報」（FA F2 RCA 痊愈）
+- 真 TOML smoke `test_current_demo_toml_returns_25_pct` 防 W-AUDIT-6 invariant 偷偷回退 — grep `risk_config_demo.toml:74` 確 `stop_loss_max_pct_override = 2.5` 在 `[per_strategy.ma_crossover]` 區塊，funding_arb 真不在 per_strategy
+- tomllib + tomli + stale 三層 fallback 正確結構；Python 3.10.1 + tomli pip 環境 5 PASS 驗證
+
+**H3 核心 catch — PA refine 數學驗證**：
+- 原 spec §2.2 WARN 條件 `stale_roc=0 AND giveback>=10` 會把所有 demo natural sparse 環境（giveback 30 + stale_roc 自然 0）誤升 WARN — 與 spec §1 「natural sparse 不阻 deploy」訴求矛盾
+- PA refine 後新 WARN 條件 `giveback>=10 AND close_attempts=0` 對 natural sparse 環境正確判 PASS（test_pass_when_giveback_alive_and_stale_roc_naturally_sparse 直接驗）
+- 但 FAIL 仍保留 stale_roc 條件 — `has_stale_roc AND stale_roc_close_attempts_sum == 0` 是「policy alive 但 close path 不通」確證 — 14d window 內可成立（即使 stale_roc 只 1 fire）
+- production exit_reason fixture `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg` 與 grep `rust/openclaw_engine/src/exit_features/v2.rs:344/351/359/...` 對齊 PASS
+- slot [68] cross-namespace：canary vs passive_wait 不同 domain；`result["namespace"] = "canary"` 強制標 + `__init__.py` MODULE_NOTE 明標兩 namespace 邊界
+- FA prompt SQL `details->>'fee_bps'` schema-incorrect 已從 IMPL 移除（grep `fee_bps` 0 hit）
+- 10/10 PA AC + 3/3 E2 push back 全覆蓋
+
+**H4 核心 catch — schema 真實驗證**：
+- E1 claim「V035 真實是 `payload JSONB`」grep V035.sql:90-136 確認 PASS（不是 `details`）
+- V098 24-value enum allowlist 含 3 個 halt_session_* — grep V098.sql:122-125 + 196-198 PASS
+- `halt_audit_pg_writer.py:250` 將整 row JSON 寫 payload JSONB — `payload->>'session_drawdown_pct'/'loaded_drawdown_threshold'/'process_pid'/'ts_ms'` 全對齊 PASS
+- `daily_loss_pct` payload **永遠** null in halt_session_set event (halt_audit.rs:287 `serde_json::Value::Null`)；H4 `_classify_event` line 232-265 fallback 邏輯：drawdown_pct 驗算優先 + daily_loss kind 兩 metric 都 null 則 INSUFFICIENT_SAMPLE
+- `THRESHOLD_TOLERANCE = 1e-6` 防 f64 rounding boundary 誤判（drawdown == threshold case PASS 而非 WARN）
+- 90d window 對齊 FA G2 review date 2026-08-21（v56 closure 2026-05-20 + 90d）— `test_default_window_aligns_with_review_date_90d` 直接 assert
+- 13/13 verdict 分支 + boundary 全覆蓋
+
+**Cross-file race 5/5 PASS**：
+- HEAD = origin/main (0e10f594) — 2h window 0 sibling push
+- `__init__.py` H3 + H4 兩 entry [68] + [69] 都正確 land（git diff 驗）
+- `conftest.py` 兩 fixture hc68 + hc69 都正確 land — _load_script pattern 一致
+- pytest 111 PASS 隱式驗 import / syntax / fixture wire 全綠
+
+**3 LOW NTH（不阻 E4）**：
+1. H1 test：tomllib=None stale-fallback path 未明確 unit test（Python <3.10 + 無 tomli 環境才觸發；當前 runtime 0% 機會）
+2. H3 IMPL：overall_verdict 對「CLI 要 engine 但 0 row」與 per_engine_verdicts 不一致（design intent 已 doc comment 358-363）
+3. H4 test：`test_pass_when_daily_loss_kind_with_null_daily_loss_pct` test name 含 "pass" 但實 assert WARN（nit；不阻 functionality）
+
+**Lessons captured**：
+1. **schema-incorrect column grep 對抗驗證 SOP**：PA spec 自承 FA prompt 含 `details->>'fee_bps'` schema-incorrect column 已移除 — E2 必須 grep IMPL 0 hit 確證，不可信 PA 一句「已移除」。本次驗證 `grep -nE "fee_bps"` 0 hit PASS。
+2. **module-load 一次 const vs runtime reload trade-off**：audit / short-lived script 用 module-level const 從 TOML 一次性 load 是可接受 trade-off（重啟即生效），但必須 comment 明標 trade-off。長 runtime daemon 不可用此 pattern。
+3. **enum-allowlist 跨 migration 驗證**：V### 後續加 enum value 必須 grep 原 V### + 後續 V### 兩個 migration file 都對齊；本案 V035 14-value base → V053+V054 21-value → V098 24-value 三層 enum 演化必須驗 INSERT path 用的 event_type 都在 final allowlist。
+4. **production exit_reason fixture 對 rust src 對齊**：healthcheck SQL LIKE pattern catch production fill 必須附 fixture 對齊 rust emit point grep — fixture 設計目的 = catch emit point 未來改動帶 prefix（如「Physical:phys_lock_*」）後 SQL 漏 catch。本案 fixture 對齊 `exit_features/v2.rs:351/359/etc.`
+5. **Natural sparse 環境誤升 WARN 對抗驗證**：spec §2.2 原 WARN 條件數學上會 catch 所有 demo natural sparse → reviewer 必驗 verdict ladder 對 「healthy production case」是否誤升；本案 PA 自找 false-positive 並 refine 條件 — A 級 spec design discipline，reviewer 必驗 refine 後新條件對 sparse case 不誤判。
+6. **payload JSONB 整包 vs column-promoted 兩種 schema 設計**：V035 用 payload JSONB（forward-compat）而非 promoted columns — healthcheck 用 `payload->>'field'` 取值必須對齊 INSERT path 用的 key naming；E2 必 grep INSERT statement source（halt_audit_pg_writer.py:250）確證 key match。
+
+**對抗反問 8 條全跑 PASS**
+
+---
+
 ## 2026-05-20 — P2-SIM-QUEUE-AWARE-ADJUSTMENT v55 · APPROVE-CONDITIONAL
 
 **對象**：E1 IMPL `helper_scripts/calibration/` 6 file（3 new + 3 modified）

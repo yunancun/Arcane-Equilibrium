@@ -434,3 +434,235 @@ fn test_demo_toml_retired_funding_arb_removed_from_risk_config() {
     cfg.validate()
         .expect("demo TOML must pass RiskConfig::validate() (Defense A)");
 }
+
+// ===========================================================================
+// P2-DYN-STOP-FLOOR-SENTINEL — FA F2 RCA OQ-4 衍生
+//
+// 鎖死 demo / live TOML 的 dyn_stop floor/cap/ATR 因子，防止配置 silent drift
+// 改變 SL gate semantic 卻無人察覺。
+//
+// 觸發背景：funding_arb F2 RCA 顯示 6.29% SL 是 dyn_stop floor（25.0 × 0.25
+// = 6.25%）內，屬「設計範圍內」非「越界」；若未來 base_ratio 從 0.25 drift
+// 至 0.20，則 floor 變 5.0%，6.29% 就會被誤判為「真正越界」，外部 analyst
+// 從外部看數據將形成系統性誤判。
+//
+// 動本檔三 test 之 sentinel 值前，必須先跑 SL gate semantic impact audit：
+//   (1) 影響哪些策略的 dyn_stop floor / cap 範圍
+//   (2) 過去 14d 哪些 hard-stop SL fire 落在新舊範圍交集外（變誤判 / 漏判）
+//   (3) 同步更新 FA F2 OQ-4 + risk_config_demo.toml 註釋
+//
+// 公式參考（per FA F2 §2 + risk_checks effective_sl 邏輯）：
+//   dyn_stop floor = limits.stop_loss_max_pct × dynamic_stop.base_ratio
+//   dyn_stop cap   = limits.stop_loss_max_pct × dynamic_stop.cap_ratio
+//   dyn_stop value = clamp(ATR × atr_stop_mult / entry × 100, floor, cap)
+// ===========================================================================
+
+#[test]
+fn test_demo_toml_dyn_stop_base_ratio_locked() {
+    // 鎖死 demo TOML：base_ratio 0.25 + stop_loss_max_pct 25.0
+    //   → dyn_stop floor = 25.0 × 0.25 = 6.25%
+    //
+    // 變更 sentinel 前必走 SL gate semantic impact audit（見 module-level
+    // 註釋）。funding_arb 6.29% SL 案例 == floor + 0.04pp 即「設計範圍內」；
+    // 若 base_ratio 收緊至 0.20 → floor 5.0% → 6.29% 變越界，analyst 將
+    // 改變對歷史 SL 樣本的歸因，跨策略 retrofit 影響極大。
+    use std::fs;
+    use std::path::PathBuf;
+
+    let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    srv_root.pop(); // openclaw_engine -> rust
+    srv_root.pop(); // rust -> srv
+    let toml_path = srv_root
+        .join("settings")
+        .join("risk_control_rules")
+        .join("risk_config_demo.toml");
+    let toml_str = fs::read_to_string(&toml_path)
+        .unwrap_or_else(|e| panic!("failed to read {:?}: {}", toml_path, e));
+    let cfg: RiskConfig = toml::from_str(&toml_str)
+        .unwrap_or_else(|e| panic!("TOML parse failed for risk_config_demo.toml: {}", e));
+
+    // ── dynamic_stop.base_ratio = 0.25（per 2026-05-02 operator decision 3C(a)）──
+    assert!(
+        (cfg.dynamic_stop.base_ratio - 0.25).abs() < 1e-9,
+        "dynamic_stop.base_ratio expected 0.25, got {} — \
+         任何動 base_ratio 之前須先跑 SL gate semantic impact audit（FA F2 OQ-4）",
+        cfg.dynamic_stop.base_ratio
+    );
+
+    // ── limits.stop_loss_max_pct = 25.0（demo 寬容上限）──
+    assert!(
+        (cfg.limits.stop_loss_max_pct - 25.0).abs() < 1e-9,
+        "limits.stop_loss_max_pct expected 25.0, got {} — \
+         動之前須同步審視 dyn_stop floor / cap / per-strategy override 範圍",
+        cfg.limits.stop_loss_max_pct
+    );
+
+    // ── effective dyn_stop floor = 25.0 × 0.25 = 6.25% ──
+    let dyn_stop_floor = cfg.limits.stop_loss_max_pct * cfg.dynamic_stop.base_ratio;
+    assert!(
+        (dyn_stop_floor - 6.25).abs() < 1e-9,
+        "demo dyn_stop floor expected 6.25%, got {}% — \
+         funding_arb F2 RCA OQ-4 鎖定值",
+        dyn_stop_floor
+    );
+}
+
+#[test]
+fn test_demo_toml_dyn_stop_atr_mult_and_cap_locked() {
+    // 鎖死 demo TOML：atr_stop_mult 2.0 + cap_ratio 0.85
+    //   → dyn_stop cap = 25.0 × 0.85 = 21.25%
+    //   → ATR 換算：dyn_stop = clamp(ATR × 2.0 / entry × 100, 6.25, 21.25)
+    //
+    // 動 atr_stop_mult 改變 ATR → SL 的轉換係數；動 cap_ratio 改變上界；
+    // 兩者都會改變所有 demo 策略在高/低波動下的 SL 行為。
+    use std::fs;
+    use std::path::PathBuf;
+
+    let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    srv_root.pop();
+    srv_root.pop();
+    let toml_path = srv_root
+        .join("settings")
+        .join("risk_control_rules")
+        .join("risk_config_demo.toml");
+    let toml_str = fs::read_to_string(&toml_path)
+        .unwrap_or_else(|e| panic!("failed to read {:?}: {}", toml_path, e));
+    let cfg: RiskConfig = toml::from_str(&toml_str)
+        .unwrap_or_else(|e| panic!("TOML parse failed for risk_config_demo.toml: {}", e));
+
+    // ── dynamic_stop.atr_stop_mult = 2.0 ──
+    assert!(
+        (cfg.dynamic_stop.atr_stop_mult - 2.0).abs() < 1e-9,
+        "dynamic_stop.atr_stop_mult expected 2.0, got {} — \
+         動之前須跑 ATR→SL 轉換係數 impact audit（影響所有 demo 策略）",
+        cfg.dynamic_stop.atr_stop_mult
+    );
+
+    // ── dynamic_stop.cap_ratio = 0.85 ──
+    assert!(
+        (cfg.dynamic_stop.cap_ratio - 0.85).abs() < 1e-9,
+        "dynamic_stop.cap_ratio expected 0.85, got {} — \
+         動之前須同步審 dyn_stop cap 範圍（per FA F2 OQ-4）",
+        cfg.dynamic_stop.cap_ratio
+    );
+
+    // ── effective dyn_stop cap = 25.0 × 0.85 = 21.25% ──
+    let dyn_stop_cap = cfg.limits.stop_loss_max_pct * cfg.dynamic_stop.cap_ratio;
+    assert!(
+        (dyn_stop_cap - 21.25).abs() < 1e-9,
+        "demo dyn_stop cap expected 21.25%, got {}% — \
+         FA F2 OQ-4 鎖定值",
+        dyn_stop_cap
+    );
+}
+
+#[test]
+fn test_live_toml_dyn_stop_explicit_divergence_from_demo() {
+    // Live TOML 故意與 demo 不對齊（per feedback_env_config_independence）：
+    //   - demo: stop_loss_max_pct=25.0, base_ratio=0.25, atr_stop_mult=2.0,
+    //           cap_ratio=0.85 → floor=6.25% / cap=21.25%
+    //   - live: stop_loss_max_pct=15.0, base_ratio=0.5,  atr_stop_mult=1.5,
+    //           cap_ratio=0.75 → floor=7.50% / cap=11.25%
+    //
+    // 設計意圖：demo 為學習資料源，floor 收緊（25×0.25=6.25）加速 EDGE-DIAG-2
+    // 樣本收斂；live 收緊上限 stop_loss_max_pct=15.0 + 提高 base_ratio=0.5
+    // 取得更窄 SL band（保守風控）。兩 TOML 故意分開不可「純衛生合併」。
+    //
+    // 本 test 不要求 demo == live，而是 explicit 鎖死 live 各參數實值並
+    // 驗證 live floor > demo floor（live 更窄）+ live cap < demo cap
+    // （live 更窄）— 一旦未來有人改 live 配置使 live 比 demo 更寬，此
+    // sentinel 紅燈警告（policy 反向 drift）。
+    use std::fs;
+    use std::path::PathBuf;
+
+    let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    srv_root.pop();
+    srv_root.pop();
+    let demo_path = srv_root
+        .join("settings")
+        .join("risk_control_rules")
+        .join("risk_config_demo.toml");
+    let live_path = srv_root
+        .join("settings")
+        .join("risk_control_rules")
+        .join("risk_config_live.toml");
+
+    let demo_str = fs::read_to_string(&demo_path)
+        .unwrap_or_else(|e| panic!("failed to read {:?}: {}", demo_path, e));
+    let live_str = fs::read_to_string(&live_path)
+        .unwrap_or_else(|e| panic!("failed to read {:?}: {}", live_path, e));
+    let demo: RiskConfig = toml::from_str(&demo_str)
+        .unwrap_or_else(|e| panic!("TOML parse failed for risk_config_demo.toml: {}", e));
+    let live: RiskConfig = toml::from_str(&live_str)
+        .unwrap_or_else(|e| panic!("TOML parse failed for risk_config_live.toml: {}", e));
+
+    // ── Live 各參數實值鎖死（policy intent baseline）──
+    assert!(
+        (live.limits.stop_loss_max_pct - 15.0).abs() < 1e-9,
+        "live limits.stop_loss_max_pct expected 15.0, got {} — \
+         動之前須跑 live policy review",
+        live.limits.stop_loss_max_pct
+    );
+    assert!(
+        (live.dynamic_stop.base_ratio - 0.5).abs() < 1e-9,
+        "live dynamic_stop.base_ratio expected 0.5, got {} — \
+         動之前須跑 live policy review",
+        live.dynamic_stop.base_ratio
+    );
+    assert!(
+        (live.dynamic_stop.atr_stop_mult - 1.5).abs() < 1e-9,
+        "live dynamic_stop.atr_stop_mult expected 1.5, got {} — \
+         動之前須跑 ATR→SL impact audit",
+        live.dynamic_stop.atr_stop_mult
+    );
+    assert!(
+        (live.dynamic_stop.cap_ratio - 0.75).abs() < 1e-9,
+        "live dynamic_stop.cap_ratio expected 0.75, got {} — \
+         動之前須跑 live policy review",
+        live.dynamic_stop.cap_ratio
+    );
+
+    // ── Effective live floor / cap ──
+    let live_floor = live.limits.stop_loss_max_pct * live.dynamic_stop.base_ratio;
+    let live_cap = live.limits.stop_loss_max_pct * live.dynamic_stop.cap_ratio;
+    let demo_floor = demo.limits.stop_loss_max_pct * demo.dynamic_stop.base_ratio;
+    let demo_cap = demo.limits.stop_loss_max_pct * demo.dynamic_stop.cap_ratio;
+
+    assert!(
+        (live_floor - 7.5).abs() < 1e-9,
+        "live dyn_stop floor expected 7.50%, got {}%",
+        live_floor
+    );
+    assert!(
+        (live_cap - 11.25).abs() < 1e-9,
+        "live dyn_stop cap expected 11.25%, got {}%",
+        live_cap
+    );
+
+    // ── Policy invariant：live cap < demo cap（live 更保守 / 更窄）──
+    //   Live policy 不應放寬至比 demo 更寬；若反向 drift（live cap >= demo cap）
+    //   表示 live 配置失守，須 push back FA / PA / operator。
+    assert!(
+        live_cap < demo_cap,
+        "live dyn_stop cap ({}%) MUST be tighter than demo ({}%) — \
+         policy invariant：live 永遠 fail-closed / 不可比 demo 寬",
+        live_cap,
+        demo_cap
+    );
+
+    // ── Floor 對比：當前 live floor (7.5%) > demo floor (6.25%) ──
+    //   含義：demo 為加速學習 floor 收緊（樣本收斂），live 為風控保守
+    //   floor 較高（更早觸發 SL 保命）。兩者方向都是「比未調整前更窄」，
+    //   只是調的維度不同。
+    //   一旦 demo floor 改回 ≥ live floor，policy intent 就鬆動 →
+    //   此 assert 預警 EDGE-DIAG-2 學習速度退化（樣本變稀）。
+    assert!(
+        live_floor > demo_floor,
+        "live dyn_stop floor ({}%) expected > demo floor ({}%) — \
+         demo EDGE-DIAG-2 為學習加速 floor 收緊 (per risk_config_demo.toml \
+         L143-152)；若 demo floor 改回 ≥ live floor，須同步審 EDGE-DIAG-2 \
+         樣本收斂預期",
+        live_floor,
+        demo_floor
+    );
+}
