@@ -6,6 +6,7 @@ phase: v5.8 Sprint 1A-β CRITICAL DESIGN
 status: SPEC-DRAFT-V0
 parent specs:
   - docs/execution_plan/2026-05-20--execution-plan-v5.8.md §2 M7
+  - docs/adr/0044-m7-decay-enforced-single-authority.md（M7 single decay authority；R4 audit H-3 reverse-ref patch 2026-05-21）
   - docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md
   - docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md
   - docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md §CR-7 + §H-11

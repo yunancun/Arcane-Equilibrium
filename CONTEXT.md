@@ -70,6 +70,58 @@ _Avoid_: "experiment" (loses governance weight), "test" (generic).
 The proposed (ADR-0021 R-4) replacement for "system-wide live_reserved" promotion model. LiveBudget(alpha_source_id, slice) allocates capital_cap_usd / max_concurrent_positions / max_drawdown_pct per alpha source. Each alpha source has independent promotion clock concurrent to others.
 _Avoid_: "per-strategy live promotion" (alpha-source != strategy), "live budget" alone.
 
+### Autonomy expansion taxonomy (v5.8)
+
+These 12 terms are added by v5.8 13-module autonomy expansion thesis (執行計畫 v5.8 + ADR-0034..0044 + AMD-2026-05-21-01). Every new prose discussing autonomy / health / decay / replay / A/B / scope governance must use these names exactly — do not collapse them into "tier," "gate," "stage," "level," or generic "approval."
+
+**LAL (Layered Approval Lease)**:
+The five-level approval depth ladder layered onto Decision Lease — LAL 0 (per-fill, always autonomous via existing Guardian) / LAL 1 (intra-strategy reparam, auto after Stage 4 + 30d stable) / LAL 2 (cross-strategy reweight, Advisory Y1 / Auto Y2 with gate) / LAL 3 (new strategy promotion, always operator approval) / LAL 4 (capital structure / venue change, always operator approval). LAL 0-4 是 M1 Decision Lease 的 approval depth 維度，與 AMD-2026-05-15-01 Stage 0R-4 是兩個正交維度，per ADR-0034 + D2 改名（v5.7 之前稱「Lease Tier 0-4」已棄用）。
+_Avoid_: "Lease Tier" (字面碰撞舊命名), "Stage" (Stage 是 strategy lifecycle，LAL 是 approval depth), "approval level" (失去 lease 語意).
+
+**DECAY_ENFORCED**:
+The M7 strategy lifecycle state replacing legacy `STAGE_DEMOTED` per CR-7。觸發後 strategy live size 自動 scaled to 50% pending 14d observation window；14d 末 operator 必 click decision（RECOVER 重新升 25%、或 RETIRE 降至 0）；不可被 LAL Tier 4 manual override 跳過 14d × 50% 強制 SUSPENDED 階段。M7 是 single decay authority per ADR-0044；M11 replay divergence emit-only，不可直接觸發 demote。schema 對應 V113 `decay_action_level` 欄（ENUM 值 `'DECAY_ENFORCED'` 替換舊 `'STAGE_DEMOTED'`）。
+_Avoid_: "STAGE_DEMOTED" (legacy 命名 per CR-7 字面碰撞), "stage demote" (混淆 Stage lifecycle), "decay tier" (M7 用 action level 而非 tier).
+
+**Counterfactual Replay**:
+The M11 nightly continuous validation system running all live strategies through replay engine with last 24h market data — divergence taxonomy 5-7 type (PnL divergence > $X / decision count divergence > Y / slippage divergence > Z bps / 額外 type per spec)。Data source 為 self-hosted PG `market.liquidations` 而非 Bybit historical API（per ADR-0038 Decision 1；避 Bybit historical API 退出風險）。Budget < 4h wall-clock per nightly run。輸出 `learning.replay_divergence_log` (V107 hypertable) + daily Slack quality report + 高 divergence → M3 HEALTH_WARN escalation。
+_Avoid_: "replay" (alone), "backtest" (REF-20 Replay Lab 是另一構造), "what-if" (Dream Engine 才是 what-if 探索).
+
+**9-cell ATR-vol × Funding state**:
+The M8 / M10 Tier D regime taxonomy 替代 HMM / Markov-switching / GARCH 三類被 ADR-0036 永久禁用的 model family。3 × 3 grid = ATR vol percentile (low / mid / high) × funding sign (negative / neutral / positive) = 9 cells；每 cell 獨立 baseline + RV percentile + block bootstrap 推導 confidence interval。math-model-audit skill 已 ADR 級永久強化禁 HMM。
+_Avoid_: "regime classifier" (太 generic), "vol regime" (失去 funding 維度), "HMM" / "Markov-switching" / "GARCH" (永久禁用 per ADR-0036).
+
+**A/B Variant Cluster (4)**:
+The M9 A/B testing framework 4-variant cluster taxonomy per ADR-0037：parameter variant（如 MA=20 vs MA=30）/ signal source variant（如 indicator-based vs orderflow-based entry）/ risk profile variant（如 1.5% vs 2.0% risk per trade）/ exit logic variant（如 entry-on-touch vs entry-on-close）。Assignment 用 trial_id hash deterministic reproducible + stratified by symbol/regime/time-of-day。Statistics 用 mSPRT (mSequential Probability Ratio Test) + early stopping + Bonferroni / FDR multiple comparison correction。Test 不可 promote variant to live 不經 operator approval + Stage gate（per AMD-2026-05-21-01 opt-in scope）。
+_Avoid_: "A/B test" (alone), "variant" (alone), "split test" (失去 sequential testing 語意), "experiment" (Hypothesis 才是 governance object).
+
+**Bayesian Reward Weight**:
+The M6 reward function 5 λ tuning system per ADR-0043 — 5 λ = `λ_alpha`（alpha attribution）/ `λ_sharpe`（risk-adjusted return）/ `λ_max_dd`（max drawdown penalty）/ `λ_hit_rate`（win rate）/ `λ_capacity_used`（orderbook depth penalty）。Optimization 用 Gaussian Process (Matern 5/2 kernel) + Expected Improvement acquisition；monthly Bayesian opt run；Y2 auto-apply ≤ 30% weight change（per H-2 rollback cap）；> 30% change 必 operator confirm。weight bounds operator-set in Console。
+_Avoid_: "reward tuning" (alone), "λ optimization" (失去 Bayesian methodology 語意), "weight calibration" (太 generic), "M6 Auto" (混淆 M6 Advisory vs Auto 階段).
+
+**Cross-V### Dependency Graph**:
+The V### sequencing graph 規範 Sprint 1A-β 必先 land 哪些 V### 再 Sprint 1A-γ 才能 land 後續 V### per CR-9 + E5 + MIT 共識。主要依賴鏈：V107 (M11) ← V103/V109/V113 / V108 (M9) ← V103 (共用 hypothesis schema) / V109 (M8) → V112 (M1 LAL anomaly→halt cross-ref) / V112 (M1 LAL) ← V113 (M7 reference for "no incident 90d" check) / V105 (M2 overlay) ← V107 (M11 state advance condition)。β → γ 不可重疊（per E5）；cross-ADR collision gate 走 Sprint 1A-ε single-thread。
+_Avoid_: "V### roster" (失去 dependency 語意), "migration ordering" (太 generic), "schema sequence" (失去 cross-ref 語意).
+
+**Protected vs Opt-in Scope**:
+The AMD-2026-05-21-01 governance partition — **protected scope 6 條 (a-f)** 永遠不開放 auto path：(a) true-live kill 操作 / (b) signed authorization.json 簽發 / (c) `OPENCLAW_ALLOW_MAINNET=1` mainnet env 切換 / (d) Bybit retCode!=0 fail-closed 路徑 / (e) fake AI 寫入禁 / (f) paper promotion lane 重啟。**opt-in scope 8 條 (g-n)** 走 5 mitigation 機制：(g) M1 LAL 1+2 / (h) M2 enable / (i) M3 Tier 1+2 / (j) M4 DRAFT writeback / (k) M6 ≤30% weight change / (l) M7 demote / (m) M8 Y2 trigger / (n) M10 tier eval。LAL Tier 4 manual override 不可繞 protected scope。
+_Avoid_: "auto scope" (失去 protected/opt-in 對立), "operator-only list" (太 generic), "permission tier" (混淆 LAL).
+
+**Forbidden Algorithm Reverse Pattern**:
+The V109 schema 雙重 (Guard A + Guard C) detection_method CHECK constraint 不可含 `hmm` / `markov_switching` / `garch` 任一字串，違反必 RAISE EXCEPTION per ADR-0036。這是 compile-time 強制 forbidden algorithm 不可寫入 anomaly detection schema；對應 M10 Tier D 也禁同類 model。math-model-audit skill 此 ADR 級永久強化。Schema-level enforcement 是 fail-closed first defense；application-level pattern miner 也必 grep 確認 0 hit `HMM / Markov / GARCH` 字串。
+_Avoid_: "blacklist" (太 generic 失去 algorithm 語意), "禁用模型" (失去 ADR 強制力 + Guard CHECK 雙層強化), "HMM ban" (alone — 失去 Markov-switching + GARCH 完整 family).
+
+**5-Gate Auto Path Inheritance**:
+The v5.8 §11.5 hard invariant per CR-15 + E3 + CC audit — v5.8 引入 7 條 auto path 寫 live state（M1 LAL 1 intra-strategy reparam / M1 LAL 2 cross-strategy reweight Y2 / M2 overlay auto-disable / M3 auto-degradation / M6 weight ≤30% auto-apply / M7 auto-demote DECAY_ENFORCED / M10 capital tier activation eval），**任一條必經完整 5-gate fail-closed**（CLAUDE.md §四 hard boundaries：Python live_reserved + Operator role + `OPENCLAW_ALLOW_MAINNET=1` + valid secret slot + signed authorization.json）。任一 gate fail → 該 auto path **自動 fall-back to Advisory 模式**，不繞 gate 直寫。M4 DRAFT writeback Decision Lease 紀律相同（必經 lease + HMAC + ml-training-pattern-miner role + rate limit）。
+_Avoid_: "auto path" (alone — 失去 5-gate 強制), "gate bypass" (反向反模式名稱), "fail-open" (永遠禁；任一 gate fail = fail-closed).
+
+**Spike PASS/FAIL Verdict**:
+The Sprint 1A-ζ governance gate output — 5 module spike（M1 LAL Tier 1 / M3 statistical detector / M6 Bayesian weight / M7 decay signal / M11 nightly replay）走 1.5 wall-clock week + 2-3 sub-agent 並行 + 60-90 hr engineering 後，PM verdict 三選一：(1) **PASS** = 5 module 全達 acceptance criteria → 進 Sprint 2 / (2) **FAIL (a) revise** = 部分 fail 但可修 → 加 1 週 revise + 再 verdict / (3) **FAIL (b) accept limited** = 部分 fail operator 接受降級 scope → 進 Sprint 2 with reduced module set / (4) **FAIL (c) defer first Live** = critical fail → 順移 Sprint 4 first Live 至 Sprint 5+。Spike phase 是 PM push back 2026-05-21 新增的 governance gate。
+_Avoid_: "spike" (alone — 失去 PASS/FAIL verdict 語意), "prototype review" (太 generic 失去 module count + verdict 選項), "Sprint 1A-ζ gate" (失去 verdict 三選一 結構).
+
+**Multi-Session Dual Write**:
+The Sprint 1A-δ + 多 CC session memory race 教訓 per memory `project_multi_session_memory_race`（2026-04-23 事件）— 同一 module 在不同 CC session 寫成不同 naming convention（如 `decision_lease_lal_tiers` vs `lease_tier_ledger`）；協議 = **commit-first / 不認識的改動禁 revert / 接手三連加 memory log 檢查 / Mac 被 revert 從 Linux + origin 重建不可重做**。多 session 並行 dispatch 必先 fetch + 查遠端 branch（per feedback `fetch_before_dispatch`）；保留兩版直到 PM 仲裁明確 winner。
+_Avoid_: "session race" (太 generic 失去 memory + commit-first 紀律), "naming collision" (失去 dual-write 保留兩版的紀律), "merge conflict" (典型 git 概念 — 失去多 session memory race 特定教訓).
+
 ### Decision Lease state machine (SM-02)
 
 **Decision Lease**:

@@ -9,6 +9,7 @@ parent specs:
   - srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md §HIGH H-2 (GP kernel + acquisition function + iter budget + 30% rollback 累積 cap mandate)
   - srv/docs/execution_plan/2026-05-21--v110_m6_reward_weight_history_schema_spec.md (V110 schema full DDL — sibling，本 spec 引用 column 不重定義)
   - srv/docs/adr/0021-alpha-source-architecture-upgrade.md (Alpha Surface Bundle reference)
+  - srv/docs/adr/0043-m6-bayesian-reward-weight.md（M6 governance authority；R4 audit H-2 reverse-ref patch 2026-05-21）
 companion specs:
   - srv/docs/execution_plan/2026-05-21--m1_lal_layered_approval_lease_design_spec.md (M1 LAL 697 行；本 spec §9 weight tuning → LAL Tier 2-3 audit 對接)
   - srv/docs/execution_plan/2026-05-21--m11_continuous_counterfactual_replay_design_spec.md (M11 619 行；本 spec §7 weight variant fair execution audit 對接)

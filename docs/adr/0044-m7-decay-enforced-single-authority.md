@@ -220,7 +220,7 @@ per PA H-11 反向 attack：M7 decay signal 對 alpha-bearing strategy 觸發 DE
 - **v5.8 §2 M7**：`docs/execution_plan/2026-05-20--execution-plan-v5.8.md:253-277`
 - **ADR-0034 M1 LAL**：`docs/adr/0034-decision-lease-layered-approval-lal.md`（Tier 0 active blocker + Tier 3 operator approve）
 - **ADR-0036 M8 black-list**：`docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md`（Signal 估計禁用 HMM / GARCH）
-- **ADR-0038 stage lifecycle naming**：`docs/adr/0038-stage-lifecycle-naming.md`（字面命名空間分離參考）
+- **ADR-0038**：`docs/adr/0038-m11-continuous-counterfactual-replay-and-liquidations-source.md`（M11 replay；M7 dedup 對齊參考 — M11 不寫 strategy_lifecycle 走 ingest signal route）
 - **AMD-2026-05-21-01**：`docs/governance_dev/amendments/2026-05-21--AMD-2026-05-21-01-autonomy-vs-human-final-review.md`（protected scope + 14d × 50% mitigation）
 - **AMD-2026-05-15-01**：`docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`（Stage envelope + revive 路徑）
 - **PA dispatch consolidation report**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` §CR-7 + §H-11

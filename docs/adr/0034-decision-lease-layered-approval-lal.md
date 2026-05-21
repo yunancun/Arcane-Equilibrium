@@ -249,7 +249,7 @@ AMD-2026-05-21-01 是 operator D5 提出的 autonomy directive，將以 amendmen
 
 - **ADR-0008**：`docs/adr/0008-decision-lease-state-machine.md`（本 ADR baseline；emit / sign / settle / replay 不變）
 - **ADR-0016**：`docs/adr/0016-decision-lease-router-evidence-mode.md`（Router evidence mode 對所有 LAL level 生效）
-- **ADR-0024-lite**：`docs/adr/0024-cowork-operator-assistant-lite.md`（assistant 在 auto-approve 後 emit notification + 提供 undo 入口）
+- **ADR-0024-lite**：`docs/adr/0024-cowork-subscription-operator-assistant.md`（assistant 在 auto-approve 後 emit notification + 提供 undo 入口）
 - **AMD-2026-05-15-01**：`docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`（Stage 0R-4 命名來源；對齊矩陣的 Stage 維度）
 - **AMD-2026-05-21-01**：autonomy-vs-human-final-review（CR-3 待 land；本 ADR 為其 ADR 級落地）
 - **AMD-2026-05-09-03**：`docs/governance_dev/amendments/2026-05-09--strategist_wide_adjustment_skill.md`（RuntimeMaxEnvelope 是 §Decision 5 gate #3 risk envelope check 的具體實現）
