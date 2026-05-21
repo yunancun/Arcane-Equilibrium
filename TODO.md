@@ -1,8 +1,8 @@
 # 玄衡 TODO — 活躍派工佇列
 
-版本：v59-zh（v58 layout refactor — PA G1 + FA G2 consolidate；549 → ~310 行）
+版本：v60-zh（v59 + 2026-05-21 v5.7 12 條 CRITICAL prefix DONE + PM signoff + FA/PA verify）
 日期：2026-05-21
-狀態：路線中立；§1 路線變更區待 operator 拍板後重填。
+狀態：路線中立；§1 路線變更區待 operator 拍板後重填；§0.5 v5.7 12 條 prefix DONE PM SIGN-OFF。
 
 ## §0 摘要
 
@@ -10,8 +10,11 @@
 - **當前 Phase 2a 14d observation**：clock @ 2026-05-18 13:50 UTC；verdict 視窗 2026-05-22~23 UTC（明後天）；QA D1 T+72h projection AC-1/2/4 FAIL → PM 須三選一決議
 - **Runtime**：engine PID 2934602 + API PID 2934665 + watchdog PID 2936560（Inert probe enabled）；最後 graceful restart 2026-05-21 13:31 UTC
 - **待 operator 拍板**：(1) 路線敲定 v4/v5 重填 §1；(2) `P0-FUNDING-ARB-DECISION-FORCE` 升等；(3) Watchdog daemon R2 deploy 時機
-- **v5.7 dispatch-safe patch 狀態（2026-05-21）**：14 SubAgent 執行性審核 + PA/FA 匯總 + PM 簽收完成；operator 已批 D1-D5（CRITICAL must-fix 為派發前置 / ADR 順移 0030-0033 / Sprint 1A 工時上修 90-130 hr / Sprint 1B C10 改 Stage 0R+1 Demo / GUI 工時補位 104-151 hr）；D6 = 暫不重填 §1 / 不解 V101/V102 Hard precondition，僅於 §0.5 列 12 條 pre-start CRITICAL fix
-- **報告 inventory（2026-05-21）**：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v57_pm_signoff.md`（主入口） + `PA/workspace/reports/2026-05-21--v57_dispatch_consolidation.md` + `FA/workspace/reports/2026-05-21--v57_business_consolidation.md` + 14 份 `{ROLE}/workspace/reports/2026-05-21--v57_executability_audit.md`
+- **v5.7 dispatch-safe patch 狀態（2026-05-21）**：14 SubAgent 執行性審核 + PA/FA 匯總 + PM 簽收完成；operator 已批 D1-D5；D6 = 暫不重填 §1 / 不解 V101/V102 Hard precondition，僅於 §0.5 列 12 條 pre-start CRITICAL fix
+- **v5.7 12 條 prefix DONE 2026-05-21**：12/12 land（C1-C12）；7 並行 sub-agent + PM hands-on；FA verdict APPROVE-WITH-CAVEAT；PA verdict NEEDS-PM-ARBITRATION（非 NO-GO）；**PM 仲裁 5 條決議全採 FA+PA 推薦**（V### re-number 採 option A / 工時 75-105 hr / V101 字段集路徑 A / Earn §4 條件 A / clippy 軟強制）；BB C6 **PROOF PASS 31,473 rows 推翻 v57 audit Risk 1 BLOCKED claim**；4 ADR draft 0030-0033 land（TW 926 行）；V103/V104 schema spec land（MIT 940 行）；Earn governance spec land（CC 460 行）；V### empirical head=V096 仲裁採 option A：V099/V100=Track v3 / V101/V102=Earn schema
+- **operator follow-up（不阻塞）**：(1) OpenClaw key 發行日（Bybit Web API mgmt 查 last edited；5 min；Sprint 1B 派發前必驗）(2) Console tab 歸屬 H2（A3+PA+operator；不阻塞 Sprint 1A）
+- **派發前 must-fix（PA+sub-agent 補 2026-05-22 內）**：V103 schema 補 4-5 audit field（lease_id/approval_id/actor_id/bybit_request_payload/rationale；5-8 hr）+ V### re-number search/replace + PG connection 範例補 CLAUDE.md + Earn governance 五角色 cross-ref
+- **報告 inventory（2026-05-21）**：`PM/workspace/reports/2026-05-21--v57_pm_signoff.md`（路線敲定主入口）+ `PM/workspace/reports/2026-05-21--v57_12_prefix_pm_signoff.md`（12 條 prefix 驗收）+ `FA/workspace/reports/2026-05-21--v57_12_prefix_business_verify.md` + `PA/workspace/reports/2026-05-21--v57_12_prefix_tech_verify.md` + 12 條 prefix sub-agent reports（C2 TW / C3 MIT / C4-C6 BB / C8 CC / C9 PA）
 
 ---
 
@@ -112,7 +115,7 @@ operator 拍板後在本區重填 Sprint Milestone Banner + Wave Roster + Sequen
 |---|---:|---|---|
 | `P1-EDGE-2` (funding_arb) | 3 | ⚠️ PA D3 建議升 P0-FUNDING-ARB-DECISION-FORCE 待 operator 拍板 | FA F2 RCA 確認 SL gate 健康（NOT_A_BUG）；funding_arb 整體治理仍開放；operator 拍板選項 (A) 砍策略 / (B) 增樣本 / (C) 接受 INSUFFICIENT；缺 deadline |
 | `P1-LG-5` | 4 | LG-5 reviewer maturity watch — STILL_ACTIVE | source 活躍；14d daily fire 4-43 reviews/day；7d 共 66 review_live_candidate 全 verdict=defer 是設計正確訊號；建議 review cadence 90d + exit conditions（3 個 not-defer 或 180d 都 defer 觸發 PA review） |
-| `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` | 3 | v56 P0 closure 未解 root cause | forensic `halt_audit.log` armed；passive wait next 自然事件；**FA G2 補建議**：加 90d review date (2026-08-21) + healthcheck `halt_session_root_cause_recurrence` 符合 CLAUDE.md passive-wait 規則 |
+| `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` | 3 | v56 P0 closure 未解 root cause；H4 healthcheck [69] LIVE → passive-wait 規則合規 | forensic `halt_audit.log` armed；passive wait next 自然事件；✅ **H4 補 healthcheck `[69] halt_session_root_cause_recurrence` LIVE 2026-05-21**（E1 IMPL + E2 APPROVE + E4 PASS；13 test PASS；commit `296e94b2`）+ 90d review date 2026-08-21 |
 | `P1-LEASE-1` | 3 | 升 P1 from P2（2026-05-20）：清掃 terminal `lease.rs:303` `objects` + HashMap leak | 依賴 P0-LG-3 IMPL DISPATCH 完成後排專案；spec 需 5 元素（terminal state / hashmap 同步 / audit-preserve prune / 觸發時機 / Python `_lease_sm` 對等同步）；工時 ~4-6h |
 | `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | Phase 1b spec §5.4 完整 dynamic backoff state machine IMPL | Phase 1b 初版（commit `27f02a07`）取 per-symbol 5min 固定；Phase 2a Demo PASS 後另開 PR；PA 估 ~130 LOC |
 
@@ -124,10 +127,13 @@ operator 拍板後在本區重填 Sprint Milestone Banner + Wave Roster + Sequen
 
 | ID | 優先 | Owner | 工時 | 任務 |
 |---|---:|---|---|---|
-| `P3-AUDIT-SCRIPT-STALE-CONST` | P3 | E1 | 30min | `audit/2026-05-16_funding_arb_14d_audit.py:71` `SL_HARD_CAP_PCT=0.03` 改動態讀 `risk_config_demo.toml` 或標 `STALE_REFERENCE`（per FA F2 OQ-3）|
-| `P2-DYN-STOP-FLOOR-SENTINEL` | P2 | E4 | 30min | 5 策略 dyn_stop floor 加 sentinel test `base = limits.stop_loss_max_pct × dynamic_stop.base_ratio = 25 × 0.25 = 6.25%`；防 base_ratio drift（per FA F2 OQ-4）|
 | `P2-LG1-DEMO-SLO-CARVEOUT` | P2 | PA spec → E1 + E5 | 130 LOC + Grafana ~3-4h | SLA 文檔 carve-out（p99 < 1ms / max ≤ 5ms over 1M ticks）+ HdrHistogram p99/p999 metric + Grafana panel（per E5 F1 推薦選項 B）|
-| `P2-PHYS-LOCK-72-HEALTHCHECK` | P2 | PA spec → E1 + E4 | ~spec+IMPL 4-6h | 新 standalone healthcheck slot [68]/[69]/[76]；監測 `phys_lock_gate4_stale_roc_neg` trigger rate vs `gate4_giveback`；daily cron（per FA C6 OQ-C6-2）|
+
+**H 批 2026-05-21 closure**：
+- ✅ `P3-AUDIT-SCRIPT-STALE-CONST` DONE（E1+E2+E4；tomllib fallback；5/5 PASS；commit `296e94b2`）
+- ✅ `P2-DYN-STOP-FLOOR-SENTINEL` DONE（E4 self；3 sentinel；3045 PASS；commit `296e94b2`）
+- ✅ `P2-PHYS-LOCK-72-HEALTHCHECK` DONE（PA spec + IMPL slot [68]；E2 APPROVE + E4 PASS；10 test；commit `296e94b2`）
+- ✅ `P2-EDGE-EST-SNAPSHOTS-STALE-FOLLOWUP` AUDIT DONE（FA verdict LOW now / MEDIUM future-risk；root cause = cron never installed；Path A operator approve `crontab -e` 5 min ops；維持 P2 綁 W-AUDIT-8a Phase B/C/D 為硬 deadline）
 
 ### §6.2 Deferred / Passive Wait
 
@@ -255,14 +261,15 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **2026-05-08~16** v55 4 軌道 closure（watchdog RCA / entry-path RCA / tab-live extract / stress fails）→ archive §A
 - **2026-05-19** v56 P0-ENGINE-HALTSESSION-STUCK-FIX incident → 2026-05-20 02:15 UTC Layer A+B LIVE + real-event verified → §C 歸檔
 - **2026-05-20** P2 sweep 6 項 closure（QA-TEMPLATE / STRUCT-2 / AUDIT-VERIFY-3 / ENTRY-CLOSE-MAKER / STRESS-BB / SIM-QUEUE-AWARE）→ §I 歸檔
-- **2026-05-21 A+B+C+D+E+F+G 七批 closure**：
+- **2026-05-21 A+B+C+D+E+F+G+H 八批 closure**：
   - A: TODO 縮 70 行（v57.3 cleanup）
   - B: 13 governance + 9 planning 入 git
   - C: 8 P2 sweep follow-up（含 healthcheck [66] / ADR-0028/0029 / spec v1.4 AC-20 / FA A-axis verdict / FA phys-lock audit）
   - D: QA D1 LG-1/2 P0 closure + PA D3 P1 reverify + watchdog R2 source land
   - E: TODO 路線變更 purge → `docs/archive/2026-05-21--todo_v57_5_route_change_purge.md`
   - F: 4 actionable attack — F1 E5 P1-LG1-DEMO-SLA → P2-LG1-DEMO-SLO-CARVEOUT / F2 FA P1-FUNDING-ARB-SL NOT_A_BUG / F3 E1→E2→E4 P2-OBS-WILSON 88/88 PASS / F4 PA P2-CANARY-FILE-SIZE DEFER
-  - G: TODO layout refactor v58 → v59（本 commit）
+  - G: TODO layout refactor v58 → v59
+  - **H**: 5 backlog actionable closure（commit `296e94b2`）— H1 audit script polish / H2 dyn-stop sentinel 3 test / H3 phys-lock healthcheck [68] / H4 halt-trigger healthcheck [69] / H5 edge-est-snapshots audit；E1+E4+PA+FA → E2 → E4 全 chain PASS；Python 116 + Rust 3045 + adversarial 4/4 真實 catcher
 
 歸檔詳情走 `docs/archive/2026-05-21--todo_v58_layout_refactor_archive.md`。
 
