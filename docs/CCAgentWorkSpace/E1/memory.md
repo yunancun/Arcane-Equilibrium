@@ -11464,3 +11464,64 @@ PA spec land 後 5 件 plumbing：H0Gate.with_metrics + finalize_blocked/allowed
 
 ### 報告
 （per E1 完成序列：本任務報告以「最終訊息直接回 PA」形式，不寫 .md 報告檔，遵循 system prompt 指示）
+
+## 2026-05-22 — Sprint 1A-ζ Phase 2 Track A: M1 LAL + V112 PG apply
+
+### 任務
+- V112 sandbox PG apply (`trading_ai_sandbox`)
+- Rust skeleton `rust/openclaw_engine/src/governance/lal/mod.rs` (LalTier enum + from_i32 + numeric_value + Tier 0→1 transition stub + Tier 0 RETIRED blocker stub per ADR-0034 Decision 6)
+- AC-1/2/3/4 + AC-1.1 反向 INSERT + Rust assert
+
+### 教訓
+- **Spec doc schema name typo catch**：V112 spec §4.1 line 450 寫 Guard A check `governance.audit_log`，但 V035/V053/V098 chain 實際 audit_log 在 `learning.governance_audit_log` (empirical verified on sandbox)。Mac 上不會 catch — Linux empirical (`ssh trade-core`) 才看得到 spec doc 錯誤。教訓：spec 看似權威也要 empirical 校驗 schema 名 / table location，遵 `feedback_v_migration_pg_dry_run`。
+- **PG `_sqlx_migrations.version` 是 BIGINT 不是 TEXT**：派發包寫 `WHERE version IN ('V107', ...)` 會 RAISE `invalid input syntax for type bigint: "V107"`；改為 `IN (107, 112, 113)` 走整數。
+- **psql -f vs engine sqlx migrate**：psql -f apply 不寫 _sqlx_migrations row；只有 engine startup sqlx migrate 才寫 row + checksum。Spike scope 是手動 PG apply（per dispatch packet line 47-50），不過 engine restart；AC-1「V112 success=t」在 spike 範圍解讀為 schema land 完整（已 verified via Verify SQL 1-7：15 col / 5 row / 20 col / MV / FK / CHECK / index 全 ok）。Sprint 4 LAL writer IMPL 上線時 engine restart + sqlx migrate runtime 寫 row + checksum，那時才走真正 AC-3 engine restart 驗。
+- **cargo test --lib filter 必加 --lib**：`cargo test -p openclaw_engine governance::lal` 會跑整 integration test suite 並把 0 個 match 都 filter 掉；`cargo test -p openclaw_engine --lib governance::lal` 直接命中 src/governance/lal/mod.rs tests 模塊。
+- **dispatch packet vs spec doc 衝突優先序**：dispatch packet line 67 寫 `Hypertable on lease_lal_assignments.assigned_at`；V112 spec §2.2.5 明示 `regular table 可承載；無 hypertable 需求`。採 spec doc 為準（packet 是 dispatch summary，spec 是 PA-MIT-sign-off SSoT）。
+- **trait + mock provider 模式對 fail-closed stub 友善**：Tier 0 RETIRED blocker 用 `DecayStateProvider` trait + `FailClosedDecayProvider` 預設實作 + 測試用自寫 mock；Sprint 4+ 接 sqlx pool 只需新 `PgPoolDecayProvider` 換掉預設，spike 範圍乾淨；測試用 RetiredProvider / NormalLiveProvider / NoRowProvider 三 mock 覆蓋 3 條 branch path。
+- **multi-Track 並行 untracked file 互不重疊**：Track A 寫 V112 + governance/lal/；Track B 寫 V106 + health/；Track C 寫 V107。我從未動其他 Track files；git status 各 Track untracked 出現獨立 sibling 路徑（per dispatch packet §1.8 反模式 e+f）。
+
+## 2026-05-22 — Sprint 1A-ζ Phase 2 Track C: V107 + M11 Python skeleton + AC-6 dedup empirical
+
+### 任務
+- V107 sandbox PG apply (`trading_ai_sandbox`)
+- M11 Python skeleton: spike_trigger.py + divergence_d1_fill_chain.py + dedup_contract_test.py
+- 1 種 divergence type D1 fill_chain detector empirical + synthetic injection
+- AC-6 M11 → M7 dedup contract empirical verify (4 condition)
+
+### 教訓
+- **Phase 0 sandbox prep gap catch**：Phase 0 sandbox prep checklist §2.3 catch-up 只到 V096，但 V107 Guard A 強制要求 `governance.audit_log` (V098) + `learning.hypotheses` (V103) 存在。sandbox empirical apply 必 RAISE Guard A FAIL。採 minimal stub 補丁（建 5 col governance.audit_log + 4 col learning.hypotheses）讓 V107 schema 可驗證；spike 結束 cleanup drop。Push back PA：spec 內部矛盾（V107 自稱 standalone first，但 Guard A 又要求 V098/V103 prereq）。Track A 將碰同 gap，已在 report 提醒。
+- **`to_regclass()` 比 `::regclass` cast 安全**：V107 spec §5.3 範式用 `conrelid='learning.replay_divergence_log'::regclass`，首次 apply 時 table 不存在 → cast RAISE error。對齊 V106 sister table 範式：先 `v_target_oid := to_regclass('schema.tab')`，IS NULL 直接 RETURN，避免 idempotency Round 1 RAISE。
+- **TimescaleDB hypertable 不支援 CONCURRENTLY**：V107 spec §4.2 line 351-374 寫 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，但 hypertable + transaction block 不支援。對齊 V106 sister table 採 `CREATE INDEX IF NOT EXISTS`（非 CONCURRENT）；TS 自動逐 chunk 建 index；spike 0 row 時 0 cost。spec doc 應 push back MIT 加註。
+- **trading.fills column 命名是 strategy_name 不是 strategy_id**：V107 spec 寫 `strategy_id` column；spike Python skeleton query trading.fills 要用 `strategy_name`（empirical verified via `\d trading.fills`）。V107 schema 自己用 `strategy_id`（M11 自身 column），但 query 跨 trading.fills 時走 `strategy_name`。
+- **sandbox-only safety guard**：Python script 啟動時驗 `pg_database` substring 含 'sandbox'；不含直接 `sys.exit(2)`。防誤觸 production trading_ai。對齊 Q1d operator sign-off + spec §7.2 sandbox 隔絕。
+- **D1 detector 雙 threshold pattern**：absolute count threshold (per spec §4.3 D1 ±2/±5 fills) + σ-based threshold (per ADR-0038 Decision 3 0.5σ/2.5σ/3σ) 取 max severity；對應 §二 原則 6「失敗默認收縮」。cold_start 期 CRITICAL → WARN downgrade per m11_threshold §2.5。
+- **SAVEPOINT pattern 跑反向 INSERT 5 連發**：psql `-c` 帶 BEGIN/SAVEPOINT/ROLLBACK 一 transaction 內測 5 個 CHECK enforce + FK reject；比 5 個獨立 transaction 快 + 共享 sandbox state。
+- **PG `_sqlx_migrations` 在 spike 階段不寫**：psql -f apply 不過 sqlx migrate runtime；spike 的「AC-1 V107 success=t」應解讀為 schema 完整 land（hypertable + 27 col + 5 index + mv + FK + 4 CHECK）。production engine restart + sqlx migrate runtime 才寫 _sqlx_migrations row + checksum。
+- **forbidden column reverse pattern 雙 grep**：V107.sql 字面 grep 會 hit 8 個（Guard A 反向檢測本身 + 註解）；DB column grep 應為 0 hit（DDL CREATE TABLE 真實 0 column）。雙驗：DDL grep 0 hit（regex 行尾 type）+ DB column grep 0 hit 才 PASS。
+- **mv CONCURRENTLY refresh + unique index**：mv 走 4h cron refresh 必含 unique index `idx_mv_latest_div_strategy_symbol_type` (per PG 12+ 要求)；empirical refresh 0 error 證明 unique index 設計正確。
+- **Compression policy 30d vs V106 7d**：V107 用 30d compression（寬於 V106）對齊 M7 14d window detector hot read 需求；spec §3.4 已說明。Track A V113 (M7) 才走 7d compression 對應 30d window detector lag tolerance。
+
+### 工具偏好
+- **`to_regclass()` 比 `::regclass` cast 安全**：所有 V### 新 table guard 預檢都用 `to_regclass` + IS NULL skip pattern；對齊 V106 範式而非 V107 spec 原寫法
+- **hypertable index 非 CONCURRENT**：CREATE INDEX 在 hypertable 上自動逐 chunk 建；不要寫 CONCURRENTLY
+- **Python sandbox safety guard**：所有 spike 用 Python script 啟動驗 pg_database substring 含 'sandbox'
+- **SAVEPOINT pattern 跑反向 INSERT 5 連發**：1 transaction 5 SAVEPOINT 比 5 transaction 高效
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_c_v107_m11_spike.md`
+
+### 2026-05-22 Sprint 1A-ζ Phase 2 Track B M3 health + V106 PG apply 教訓
+
+- **Sandbox Phase 0 prep gap (V096 baseline only, V097+V098 缺) 不能盲等 E3**：V106 spec line 12 `depend on: V096 + V098` 但 sandbox 跑 `SELECT max FROM _sqlx_migrations` 只到 V96; V106 Guard A 撞 governance.audit_log missing FAIL。我 catch-up V097+V098 (psql -f 既有 file 跑) 後 Guard A PASS。**未來 Phase 0 GO criteria C3「V001-V096 baseline」字面需升級含 V097+V098 catch-up step**。Push back PA：Phase 0 prep checklist 加 step。
+- **V106 spec §5.1 概念命名 vs V098 真實表名 drift**：spec 寫 `governance.audit_log`（概念名）；V098 真實表名 `learning.governance_audit_log`（V035 baseline）。V106.sql Guard A 用真實表名對齊 V098 schema + 註釋說明對齊邏輯，spec doc 不修。Push back PA + MIT 對齊 spec doc 標明真實表名（後續 sprint 文檔工作）。
+- **timescale hypertable + CONCURRENTLY index 在 psql -f transaction 內不可用**：`psql -v ON_ERROR_STOP=1 -f V106.sql` 隱式 transaction；CONCURRENTLY 要求非 transaction。改用普通 `CREATE INDEX IF NOT EXISTS` + timescale hypertable chunk-level 自動建索引；greenfield 0 row 無 lock 代價；上線後若需 reindex 走 timescale `reindex_chunk` API（Sprint 1B writer 上線 prep）。
+- **Guard C 預檢必 `IF EXISTS` 包覆才 idempotent**：`'learning.health_observations'::regclass` 對 missing table 拋 ERROR 非 NULL；首次 apply（table 不存在）走 regclass cast 會 fail。Guard C 預檢入口先 `IF EXISTS (SELECT 1 FROM information_schema.tables ...)` 包覆，table 存在才進 pg_constraint query；首次 apply skip → 重跑 verify drift。**這是 V094 沒踩到的 pattern 因為 V094 是 ALTER 既有 table**；V106 是 NEW table，hypertable + CHECK + index 全要 IF EXISTS guard。
+- **tokio::time::pause/advance 不 hop std::time::Instant**：spike test 設計用 `tokio::test(start_paused = true)` + `tokio::time::advance(Duration)` 推進虛擬 clock。但 state machine 內部用 `std::time::Instant::now()`（monotonic real clock）對 tokio 虛擬 clock 無感知 → state transition 不 fire。**正確做法**：state machine API 分 `observe()` (production, 內 `Instant::now()`) + `observe_at(now: Instant)` (spike test 注入入口)。spike test 用 `base + Duration::from_secs(24*3600+1)` 模擬 24h hop。**0 spike feature 滲透 production observe() 路徑**。
+- **`tokio = "full"` workspace feature 不含 `test-util`**：tokio 1.51 `full = ["fs","io-util","io-std","macros","net","parking_lot","process","rt","rt-multi-thread","signal","sync","time"]` — 沒 test-util。dev-dependencies 補 `tokio = { workspace = true, features = ["test-util"] }`；release binary 不受影響。
+- **HashMap retain 過期清理在 observe 入口而非 background task**：spike scope 無 background task；amp cap entries 過期判斷 lazy 在每次 observe 走 retain。Cost O(N) per observe but N < 10 (per-domain anomaly source typically少)。Sprint 5 Tier 1 IMPL 加 background reaper 時可分擔（但 lazy retain 仍是 fallback，避免 reaper 死亡致 cap 不釋放）。
+- **AC-3 release profile 必驗，不只 dev profile**：dispatch packet AC-3 `cargo test --release --features spike`；我先跑 dev profile 確認邏輯 → 再跑 release 確認 0 panic。Release binary build (cargo build --release without --features spike) 也 verify clean (`cargo check` 0 production 污染)。3 test all PASS in both dev + release。
+- **report 內 push back chain 必明列**：「Phase 0 prep checklist 升級」「V106 spec doc Guard A schema 名對齊」「sandbox role 獨立 vs 共用 production password」三條 不在 Track B IMPL scope 但 IMPL 路上發現 → report §8 unclarity + §9 operator next step 雙列。PA / PM follow-up flag 明標。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_m3_health_v106_impl.md`

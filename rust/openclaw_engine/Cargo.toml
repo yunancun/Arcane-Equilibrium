@@ -56,6 +56,10 @@ ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, fea
 
 [dev-dependencies]
 tempfile = "3"
+# Sprint 1A-ζ Track B — tokio test-util feature 提供 time::pause / time::advance
+# mock clock; 加在 dev-dependencies 不影響 release binary (test-util 不會被
+# `cargo build --release` 拉入)。對齊 spike spec §AC-5.1 mock time hook 設計。
+tokio = { workspace = true, features = ["test-util"] }
 
 # ============================================================
 # EDGE-P3-1 Realized Edge Predictor — backend feature flag.
@@ -97,6 +101,13 @@ edge_predictor_ort = ["dep:ort"]
 # 絕不拉 intent_processor / ipc_server / build_exchange_pipeline / GovernanceHub /
 # decision_lease。
 replay_isolated = []
+
+# Sprint 1A-ζ Track B — M3 health monitoring spike feature flag。
+# 只在 spike scope 啟用 mock time hook (tokio::time::pause/advance) + spike
+# 對抗測試 harness; production build 不帶 --features spike → mock 路徑與測試
+# 完全不編譯進 binary; 0 production code path 污染。
+# per docs/execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md §AC-5.1。
+spike = []
 
 [[bin]]
 name = "openclaw-engine"
