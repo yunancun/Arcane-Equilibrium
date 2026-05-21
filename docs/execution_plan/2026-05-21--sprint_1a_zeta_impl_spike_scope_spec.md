@@ -652,6 +652,33 @@ per `2026-05-21--v58_dispatch_consolidation.md` 14 audit verdict：
 
 ---
 
+## §12 Operator Sign-off — 5 Open Q Decisions（2026-05-21）
+
+operator 在 archive §I PM commit 後 2026-05-21 親手回覆 5 Open Q：
+
+| # | Severity | Decision | 理由 |
+|---|---|---|---|
+| **Q1** | HIGH | **(d) sandbox DB 隔絕**（採 PA 推薦）| 0 GUI work + Console 仍顯示 production；最小 risk |
+| **Q2** | HIGH | **(d) sandbox CI + 0 production restart**（採 PA 推薦）| 物理隔絕 production；最 fail-safe |
+| **Q3** | HIGH | **(b) spike fail 限「non-critical gap」+ PA+PM 共同 sign-off**（採 PA 推薦）| 折衷 governance；不全有不全無 |
+| **Q4** | MEDIUM | **(a) Track C 全跑（不折衷）含 M11 Python skeleton**（operator override PA 推薦 c）| 不在 Sprint 3 才發現 M11 架構問題；Spike 多 5-10 hr 換 14w 早 detect 值得 |
+| **Q5** | LOW | **(a) 1A-ε 完才跑 1A-ζ**（採 PA 推薦）| 嚴守 7 sub-agent ceiling + 0 race；wall-clock W8.5-W10 |
+
+**Q4 (a) Override 工時影響**：
+- Track C 原 11-17 hr (V107 PG apply + Guard A 驗 + dedup contract 6-7 hr) → Q4 (a) 含 M11 Python skeleton + 1 divergence type fill_chain detector empirical = +5-10 hr
+- Track C 新工時：**16-27 hr**（原 11-17 + 5-10）
+- Spike 總工時：57-86 → **62-96 hr** 含 buffer
+- Wall-clock：1-2 week 不變（Track C E1 仍在 D1-D3 並行窗口內）
+
+**dispatch 順序確認**（per Q5 a）：
+- Sprint 1A-δ (M5/M12/M13 stubs) 先派
+- Sprint 1A-ε (cross-ADR audit + docs index 補) 後派
+- Sprint 1A-ζ (IMPL Spike) W8.5-10 最後派
+- 不並行；嚴守 sequential phase
+
+---
+
 **END Sprint 1A-ζ — IMPL Prototype Spike Phase Scope Specification**
 
 **PA DESIGN DONE**: spec path: /Users/ncyu/Projects/TradeBot/srv/docs/execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md
+**Operator Sign-off**: 2026-05-21 — 5 Open Q decided per §12（Q4 a override）
