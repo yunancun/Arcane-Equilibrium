@@ -11,7 +11,7 @@
 
 - **Current Sprint Phase**：Sprint 1A-α + Wave 2 + Wave 2.5 + Sprint 1A-β + **Sprint 1A-γ DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED** (PM-signed 2026-05-21；15/15 deliverable 全 land；M8 + V109 sequential final)；Sprint 1A-δ READY-TO-DISPATCH
   - 註：DESIGN-DONE = spec/ADR/runbook 文件 land；IMPL-PENDING = 無對應 IMPL 代碼；RUNTIME-NOT-APPLIED = sql/migrations/ 本地 max=V098 / Linux PG `_sqlx_migrations` max=96 / 10 target table (health_observations / degradation_state / replay_divergence_log / reward_weight_history / decision_lease_lal_tiers / lal_eligibility_log / decay_signals / strategy_lifecycle / earn_movement_log / hypotheses) pg_class 0 hits（per 2026-05-21 acceptance audit）
-- **Current Wave**：Sprint 1A-δ ✅ DONE (M5/M12/M13 stubs；含 5 dup naming pending dedup Sprint 1A-ε)；Sprint 1A-ε READY-TO-DISPATCH (cross-ADR consistency audit + docs index 補 + 45+ open Q audit + 5 dup naming dedup)；Sprint 1A-ζ IMPL Spike PENDING (W8.5-10 after 1A-ε)
+- **Current Wave**：Sprint 1A-ε ✅ DONE (R4 5 CRITICAL + 4 HIGH patches applied / dup dedup 3 archived / README index 22 entries / A3 spec transcribed)；Sprint 1A-ζ READY-TO-DISPATCH (W8.5-10 IMPL Prototype Spike；operator Q1-Q5 signed；Q4a override Track C M11 Python skeleton 含)；剩 operator-bound: M13/V116 dup 仲裁 + M4 ADR-0045 reserved confirm
 - **Active P0**：`P0-EDGE-1`（5 strategy alpha-deficient）+ `P0-LG-3`（Wave 2.4 IMPL DISPATCH PENDING SPEC-READY 10d）+ `P0-OPS-1..4`（HTTPS / cred / legal / runbook）— Sprint 4 first Live W18-21 前必 closure
 - **Next 24h operator action**：D+1 (2026-05-22) AM ① BB OpenClaw key 發行日 5 min query ② Phase 2a 14d verdict 視窗（clock @ 2026-05-22~23 UTC）30-60 min 三選一決議
 - **Runtime**：engine PID 2934602 + API PID 2934665 + watchdog PID 2936560；最後 graceful restart 2026-05-21 13:31 UTC
@@ -29,8 +29,8 @@ Sprint 1A-修補 DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (D+0~D+5, 2026
 Sprint 1A-β   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)          M1 LAL/M3/M6/M7/M11 DESIGN spec + 5 V### schema spec + 6 runbook (16 artifact / ~12,900+ 行；無 IMPL；V099+ migration 本地不存在；Linux PG max=96)
 Sprint 1A-γ   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)          M2/M4/M8/M9/M10 DESIGN spec + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) (15 artifact / ~12,400+ 行；無 IMPL；V###未 apply)
 Sprint 1A-δ   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)            M5/M12/M13 interface stubs + V114/V115/V116 reserve (10 file land；5 主題 + 5 dup naming pending dedup Sprint 1A-ε)
-Sprint 1A-ε   PENDING (W6.5-8.5)                                                                  integration verify + cross-ADR consistency audit + 45+ open Q audit + docs index 補
-Sprint 1A-ζ   PENDING (W8.5-10) — **NEW PHASE 2026-05-21 PM push back**                            IMPL Prototype Spike (M1 LAL + M3 health + M11 replay critical-path 驗證 spec→IMPL 可行；30-50 hr / 1-2 wall-clock week)
+Sprint 1A-ε   DESIGN-DONE / IMPL-PENDING (2026-05-21 PM-signed)                                  R4 cross-ADR audit (5 CRITICAL + 4 HIGH patches applied) + TW CHANGELOG/CONTEXT + MIT V099-V116 ordering (1223) + E5 Mac CI (598) + A3 Wizard+Lv3-4 (520+) + 5 dup dedup applied (3 archived) + README index 22 entries
+Sprint 1A-ζ   READY-TO-DISPATCH (W8.5-10) — IMPL Prototype Spike (M1 LAL + M3 health + M11 replay critical-path；62-96 hr / 1-2 wall-clock week；operator Q1-Q5 signed)
 ```
 
 > **狀態語言**（per 2026-05-21 acceptance audit）：
@@ -47,8 +47,8 @@ Sprint 1A-ζ   PENDING (W8.5-10) — **NEW PHASE 2026-05-21 PM push back**      
 | 1A-β | 2026-05-21 done | M1 LAL/M3/M6/M7/M11 DESIGN + V106/V107/V110/V112/V113 schema spec (本地無 .sql 檔；Linux PG 未 apply) + 6 runbook | 310-460 並行 (10 sub-agent + 3 recovery) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
 | 1A-γ | 2026-05-21 done | M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) | 240-360 並行 (6 + 7 recovery + 2 sequential) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
 | 1A-δ | 2026-05-21 done | M5/M12/M13 interface stub + V114/V115/V116 reserve (10 file 含 5 dup naming pending dedup) | 75-110 並行 (3 sub-agent + parallel session dual write) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
-| 1A-ε | W6.5-8.5 | integration verify + cross-ADR consistency audit + docs/README index 補 + 45+ open Q audit | 60-100 | ⏳ |
-| **1A-ζ** | **W8.5-10 (NEW; PM push back 2026-05-21)** | **IMPL Prototype Spike — Track A M1 LAL + V112 PG apply / Track B M3 health + V106 / Track C M11 replay + V107；驗 Sprint 1B IMPL 開始前 spec 真實可行** | **57-86 (含 buffer)** | **⏳ PENDING — PA spike scope spec 進行中** |
+| 1A-ε | 2026-05-21 done | R4 cross-ADR audit (5C+4H patches) + TW CHANGELOG/CONTEXT + MIT V099-V116 + E5 Mac CI + A3 Wizard+Lv3-4 + dup dedup + README index | 86-126 並行 (5 sub-agent + PM patch) | DESIGN-DONE / IMPL-PENDING |
+| **1A-ζ** | **W8.5-10 (READY)** | **IMPL Prototype Spike — Track A M1 LAL + V112 PG apply / Track B M3 health + V106 / Track C M11 replay + V107 (Q4a 含 M11 Python skeleton)；驗 Sprint 1B IMPL 開始前 spec 真實可行** | **62-96 (含 buffer)** | **READY-TO-DISPATCH (operator Q1-Q5 signed)** |
 | 1B | W9-12 | v5.7 baseline + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 | ⏳ |
 | 2 | W12-15 | Alpha Tournament + M4 stage 1 + M10 Tier A + M8 read-only | 280-400 | ⏳ |
 | 3 | W15-18 | Top-1 Unlock SHORT build + Stage 0 shadow + M11 nightly + M3 detectors | 280-380 | ⏳ |

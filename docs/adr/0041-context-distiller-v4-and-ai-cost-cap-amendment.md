@@ -280,7 +280,7 @@ ADR-0027 治「月度時間預算」；ADR-0041 治「per-inference token 預算
 ### Negative / Risk
 
 - **800 token cap 對未來新 module state 注入造成壓力** — v5.9+ 若新增 M14-M16（per 仲裁 #10 defer v5.9 + ETA）會撞 cap；mitigation = 新 module state 加入 ContextDistiller v4 必走 ADR-0041 amendment（per ADR-0009 ArcSwap hot-reload 對齊，但 schema 變動需 ADR），不可默默膨脹
-- **L1 P95 邊際撞 3s SLA**（800 token P95 ~4.5s）— 接受妥協 per Decision 2 三項理由；mitigation = M3 self-monitoring + M8 anomaly 雙層觀察；若 P95 連續 30d 破 5s → 觸發 ContextDistiller v5（ADR-0042 future）
+- **L1 P95 邊際撞 3s SLA**（800 token P95 ~4.5s）— 接受妥協 per Decision 2 三項理由；mitigation = M3 self-monitoring + M8 anomaly 雙層觀察；若 P95 連續 30d 破 5s → 觸發 ContextDistiller v5（ADR-XX future to be assigned；ADR-0042 已用於 M3 health monitoring）
 - **Y2 opt-in path 走 LAL 4 等級可能影響 operator 度假時 cap raise 速度** — opt-in 等待 operator session = bot autonomy 邊際受限；mitigation = ADR-0041 接受該妥協（per 仲裁 #8 (b)），Y2 evidence accumulation 期間 cost 維持 Y1 $60 cap 是設計意圖
 - **M11 daily L1 narrative quality 不如 L2** — L1 9B 表達能力 limited；mitigation = template fill 模式 + L2 fallback CRITICAL/HALT level 保留；先試運行 60d 評估 quality；若 quality 持續不達標 → 起新 ADR 重議 L1/L2 routing
 - **Statistical-only fallback 在 M4 / M11 active 場景的 informativeness 損失** — 純規則 narrative 比 LLM 弱；mitigation = fallback 是 conservative degrade 不是 normal path；M3 health monitoring 確保 fallback 不長期 active（超 30% inference 走 fallback → HEALTH_CRITICAL）

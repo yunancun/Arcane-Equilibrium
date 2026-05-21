@@ -749,12 +749,12 @@ WHERE status IN ('draft', 'exploratory', 'preregistered');
 
 | Sprint | 內容 | 估時 | 對應 v5.8 §2 M4 line |
 |---|---|---|---|
-| **Sprint 1A-γ DESIGN（本 spec）** | M4 schema EXTEND V103 + ADR-0042（per R4 建議）+ 6 attribute spec land | 12-16 hr | line 177（hypothesis_drafts table extension）|
+| **Sprint 1A-γ DESIGN（本 spec）** | M4 schema EXTEND V103 + ADR-0045（per R4 建議）+ 6 attribute spec land | 12-16 hr | line 177（hypothesis_drafts table extension）|
 | **Sprint 2-3 Pattern miner stage 1** | Cross-correlation + event-window 純規則；每個 hypothesis 自動計算 6 attribute；不含 clustering | 60 hr | line 178（cross-correlation + event-window 80-120 hr）|
 | **Sprint 8 Pattern miner stage 2** | Clustering + regime（含 §2.6 silhouette）；K-means / HDBSCAN / GMM 三選一 + 5-fold purged CV | 60-90 hr | line 179（clustering + regime 60-90 hr）|
 | **Y2 active loop** | DRAFT → operator + Cowork review → preregister → Alpha Tournament | ongoing | line 181（Y2 Q2-Q3 full discovery loop active）|
 
-### §6.2 ADR-0042 建議內容（per R4 上 spec 紀錄）
+### §6.2 ADR-0045 建議內容（per R4 上 spec 紀錄）
 
 - **ADR title**：M4 Self-Supervised Hypothesis Discovery — Minimum Bar + Leakage Protocol
 - **Decision**：採 6 attribute minimum bar（§2）+ rolling shift(1) leak-free 強制（§3）+ anti-mock leakage scan（§4）+ V103 EXTEND 6 字段（§5）
@@ -807,7 +807,7 @@ WHERE status IN ('draft', 'exploratory', 'preregistered');
 
 - ADR-0024-lite：Cowork operator-assistant scope（M4 DRAFT review 由 operator + Cowork 主導，bot 不 autonomous L2）
 - ADR-0026 v3：Hypothesis preregistration（V101 spec § 3.3.2 + v5.7 PA brief 字段集合並，本 spec 不涉及 reconciliation 由 V103 spec 收口）
-- ADR-0042（提議中）：本 spec 對應 governance authority；status SPEC-DRAFT-V0
+- ADR-0045（提議中）：本 spec 對應 governance authority；status SPEC-DRAFT-V0
 
 ---
 
@@ -817,7 +817,7 @@ WHERE status IN ('draft', 'exploratory', 'preregistered');
 |---|---|---|---|
 | **MIT** | **Drafted** | Spec design（§2 + §3 + §4 + §6）| spec 統計設計面主撰；6 attribute 數學定義與 reasoning |
 | **TW** | **Drafted** | Doc structure（§0 + §1 + §5 + §7 + §8）| frontmatter / §0 TL;DR / cross-reference / sign-off table / 整體文檔結構與中文化 |
-| **PA** | **PENDING** | V103 EXTEND schema land + ADR-0042 起草 + Sprint 1A-γ dispatch | 待主會話 CR-1 v5.7 follow-up 收口；本 spec 為 PA 後續 IMPL 提供 design surface |
+| **PA** | **PENDING** | V103 EXTEND schema land + ADR-0045 起草 + Sprint 1A-γ dispatch | 待主會話 CR-1 v5.7 follow-up 收口；本 spec 為 PA 後續 IMPL 提供 design surface |
 | **E4** | **PENDING** | Leakage scan test harness（§4.3 `test_m4_leakage_scan.py`）+ §3.5 verification SQL 整合 | E4 regression 階段補 |
 | **QC** | **PENDING** | Bonferroni vs FDR 仲裁（§2.2.3）+ effect size 0.2 阈值校驗 + silhouette 0.5 校驗 | PA dispatch 前 QC 確認 |
 | **AI-E** | **PENDING** | M4 Pattern miner IMPL stage 1 / stage 2 引用本 spec 6 attribute 計算 | Sprint 2-3 + Sprint 8 |
@@ -829,7 +829,7 @@ WHERE status IN ('draft', 'exploratory', 'preregistered');
 - V103 EXTEND ALTER SQL 實檔（CR-1 v5.7 follow-up 主會話收口）
 - v5.8 主檔修改（spec only / 主檔 land 由主會話統一）
 - Rust / Python writer code（M4 Pattern miner IMPL 階段；本 spec 是 design）
-- ADR-0042 實檔（PA Sprint 1A-γ dispatch 統一）
+- ADR-0045 實檔（PA Sprint 1A-γ dispatch 統一）
 - Mac PG empirical dry-run（必 Linux PG，per CLAUDE.md §七 + V055 mandate）
 - `learning.hypothesis_graveyard` 初始載入 50 條 Harvey-Liu-Zhu 資料（Sprint 1A-γ PA 統一 seed）
 - M4 Pattern miner stage 1 / stage 2 演算法選型（Sprint 2-3 / Sprint 8 IMPL 階段）

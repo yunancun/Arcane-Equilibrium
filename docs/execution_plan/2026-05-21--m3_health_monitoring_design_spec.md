@@ -9,6 +9,7 @@ parent specs:
   - srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md §Sprint 1A-β + §跨 module dependency
   - srv/docs/execution_plan/2026-05-21--v106_m3_health_observations_schema_spec.md（V106 schema spec sub-agent 同時段 — placeholder reference）
   - srv/docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md（M3 ↔ M8 amplification loop cap 1-anomaly = 1-state-change/24h）
+  - srv/docs/adr/0042-m3-health-monitoring.md（M3 governance authority；R4 audit H-1 reverse-ref patch 2026-05-21）
 mirror precedent:
   - srv/helper_scripts/canary/engine_watchdog.py（existing process-level watchdog；M3 復用 + 升級）
   - srv/helper_scripts/db/passive_wait_healthcheck.sh（existing DB passive healthcheck；M3 復用 + 集中）

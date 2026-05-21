@@ -233,6 +233,50 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/E5/workspace/reports/2026-05-21--p1_lg1_demo_sla_violation_hotpath_audit.md` | E5 P1-LG-1 demo SLA violation hotpath audit |
 | `CCAgentWorkSpace/BB/workspace/reports/2026-05-21--v57_c4_c5_c6_bybit_verdict.md` | BB v5.7 §12 C4/C5/C6 Bybit verdict（trade tape / Earn Guardian / 14 problems business framing review） |
 
+### 2026-05-21 Sprint 1A-γ ADD-per-operator DESIGN + V### full DDL + 2 runbook + 3 R4 ADR
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-21--m2_overlay_state_machine_design_spec.md` | M2 Overlay State Machine DESIGN spec (904 行；5-state FSM + dwell time + flap suppression；Sprint 1A-γ PA) |
+| `execution_plan/2026-05-21--m4_hypothesis_discovery_design_spec.md` | M4 Hypothesis Discovery + V103 EXTEND outline + Cowork hybrid path DESIGN spec (877 行；6 attribute minimum bar + DRAFT writeback；governance authority ADR-0045 reserved per R4 C-1) |
+| `execution_plan/2026-05-21--m8_anomaly_detection_design_spec.md` | M8 Anomaly Detection DESIGN spec (688 行；9 event_taxonomy + 9-cell ATR-vol × Funding state) |
+| `execution_plan/2026-05-21--m9_ab_framework_design_spec.md` | M9 A/B Framework DESIGN spec (775 行；4 variant cluster + variant Stage 路徑 + mSPRT + AVI) |
+| `execution_plan/2026-05-21--m10_discovery_tier_design_spec.md` | M10 Discovery Tier DESIGN spec (~990 行；Tier A-E + capital threshold 7 級 + Tier D 黑名單) |
+| `execution_plan/2026-05-21--v105_m2_overlay_state_transitions_schema_spec.md` | V105 M2 overlay state transitions full DDL (1395 行) |
+| `execution_plan/2026-05-21--v108_m9_ab_testing_framework_schema_spec.md` | V108 M9 A/B testing framework full DDL (1508 行；3 table) |
+| `execution_plan/2026-05-21--v109_m8_anomaly_events_schema_spec.md` | V109 M8 anomaly events full DDL (1412 行；Guard A+C 雙重黑名單 RAISE 反模式) |
+| `execution_plan/2026-05-21--v111_m10_discovery_tier_config_schema_spec.md` | V111 M10 discovery tier config full DDL (1471 行) |
+| `runbooks/2026-05-21--m2_overlay_state_runbook.md` | M2 Overlay State operator runbook (421 行) |
+| `runbooks/2026-05-21--m9_ab_testing_runbook.md` | M9 A/B Testing operator runbook (587 行) |
+| `adr/0042-m3-health-monitoring.md` | ADR-0042: M3 Health Monitoring — Single Health Authority (222 行；R4 建議補) |
+| `adr/0043-m6-bayesian-reward-weight.md` | ADR-0043: M6 Bayesian Reward Weight — Portfolio Weight Authority (246 行；R4 建議補) |
+| `adr/0044-m7-decay-enforced-single-authority.md` | ADR-0044: M7 Decay + Single Authority + DECAY_ENFORCED + 14d×50% mitigation (246 行；R4 建議補) |
+
+### 2026-05-21 Sprint 1A-δ — interface stubs (M5/M12/M13 + V114/V115/V116；dedup applied per R4)
+
+> **註**：Sprint 1A-δ 多 session dual write 產生 5 pair dup naming；R4 audit 採 ADR-aligned 版本；3 棄置版本見 `docs/archive/2026-05-21--sprint_1a_delta_dup_artifacts/`；M13/V116 pending operator 仲裁 SPLIT vs MERGE。
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-21--m5_online_learning_design_spec.md` | M5 ModelClient Interface DESIGN spec (461 行；6 method per ADR-0035 Decision 1；Y3+ defer；KEEP per R4 dedup) |
+| `execution_plan/2026-05-21--m12_order_router_design_spec.md` | M12 OrderRouter DESIGN spec (905 行；6-method trait per ADR-0039 §Decision 1 + maker_fill_rate_30d) |
+| `execution_plan/2026-05-21--m13_multi_venue_asset_class_design_spec.md` | M13 Multi-Venue / AssetClass DESIGN spec (427 行；AssetClass + Venue enum + DEX/Hyperliquid hardcode rejection + 6 trade gate；KEEP pending merge with parallel) |
+| `execution_plan/2026-05-21--m13_asset_class_venue_design_spec.md` | M13 design parallel session (624 行；5 AssetClass + AUM threshold；pending MERGE per R4) |
+| `execution_plan/2026-05-21--v114_m5_model_versions_streaming_schema_spec.md` | V114 M5 EXTEND `learning.model_versions` PLACEHOLDER (190 行；ADR-0035 Decision 2 對齊；KEEP per R4 dedup) |
+| `execution_plan/2026-05-21--v115_m12_order_router_audit_schema_spec.md` | V115 M12 OrderRouter Adaptive Routing Audit PLACEHOLDER (288 行；ADR-0039 §Decision 3；KEEP per R4 dedup) |
+| `execution_plan/2026-05-21--v116_m13_multi_venue_reserved_schema_spec.md` | V116 multi-venue reserved (101 行；routing.venue_lifecycle hint；pending operator 仲裁) |
+| `execution_plan/2026-05-21--v116_m13_asset_venue_dim_schema_spec.md` | V116 asset/venue dim (288 行；parallel；reference.asset_class_dim + venue_dim + Y1 seed；pending operator 仲裁) |
+
+### 2026-05-21 Sprint 1A-ζ planning + Sprint 1A-ε cross-ADR audit deliverables
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md` | Sprint 1A-ζ IMPL Prototype Spike Phase Scope Spec (657 行 + §12 operator sign-off；3 track A/B/C；W8.5-10；62-96 hr 含 buffer) |
+| `execution_plan/2026-05-21--v099_v116_migration_ordering_audit_and_dry_run_sop.md` | V099-V116 migration ordering audit + 12 V### Linux PG dry-run SOP (1223 行；18 V### overview + dependency graph + sqlx checksum repair + 1e-4 fixture harness；Sprint 1A-ε MIT) |
+| `execution_plan/2026-05-21--mac_ci_13_module_cross_compile_verify_scope_spec.md` | Mac CI 13-module cross-compile verify scope spec (598 行；PR + 週一 cron + 2000 min/月 budget；Sprint 1A-ε E5) |
+| `execution_plan/2026-05-21--monthly_review_wizard_and_lv3_4_modal_helper_scope_spec.md` | Monthly Operator Review Wizard + Lv 3-4 Modal Helper scope spec (520+ 行；A3 inline draft a12c302e → PM transcribed；8 surface + 7 AC + 8 INV；Sprint 1A-ε A3) |
+| `archive/2026-05-21--sprint_1a_delta_dup_artifacts/README.md` | Sprint 1A-δ multi-session dual write 棄置 file 歸檔說明 (3 file archived per R4 dedup audit 2026-05-21；M13/V116 pending) |
+
 ### 2026-05-16 12-agent consolidated audit + Wave 1-4 (WP-01..13)
 
 | 文件 | 内容 |

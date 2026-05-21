@@ -219,7 +219,7 @@ per PA H-2（2026-05-21）必須在 ADR 鎖入：GP kernel + acquisition functio
 - **v5.8 §2 M6**：`docs/execution_plan/2026-05-20--execution-plan-v5.8.md:219-251`
 - **ADR-0021**：`docs/adr/0021-alpha-source-architecture-upgrade.md`（Alpha Surface 與 λ_alpha 對接）
 - **ADR-0034**：`docs/adr/0034-decision-lease-layered-approval-lal.md`（LAL Tier 2-3 對接）
-- **ADR-0037**：`docs/adr/0037-m9-ab-framework.md`（cluster 3 risk profile + fair execution clause）
+- **ADR-0037**：`docs/adr/0037-m9-ab-framework-and-statistical-methodology.md`（cluster 3 risk profile + fair execution clause）
 - **ADR-0036**：`docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md`（GP variance 不可用 GARCH）
 - **PA dispatch consolidation report**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` §H-2
 - **walk-forward-validation-protocol skill**：`srv/.claude/skills/walk-forward-validation-protocol/SKILL.md`
