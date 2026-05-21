@@ -1,5 +1,51 @@
 # PA Memory — 工作記憶
 
+## v5.7 12 條 CRITICAL prefix 技術派工核實（2026-05-21）
+
+**觸發**：12 條 prefix（v57-C1..C12）由 5 並行 sub-agent + PM hands-on 完成；PM 派 PA 對抗審計派發 readiness。
+
+**核心 verdict**：**NEEDS-PM-ARBITRATION**（4 仲裁項 + 1 operator 拍板項；非 NO-GO）
+
+**12 條技術完整度**：✅ 8 / ⚠️ 4（C3 V### re-number 仲裁 / C8 §4 待 finalize / C10 工時衝突 / C11 clippy 不可行）/ ❌ 0
+
+**5 並行 track readiness**：
+- ✅ 1A-gov / 1A-sensor / 1A-earn → READY-TO-DISPATCH
+- ⚠️ 1A-schema → NEEDS-PM-ARBITRATION（V### re-number 路徑 A vs B）
+- ⚠️ 1A-gui → NEEDS-OPERATOR-DECISION（tab 歸屬 H2）
+
+**4 PM 仲裁項**：
+1. V### re-number 路徑 A（V097/V098 catch-up → V099/V100 Track v3 → V101/V102 Earn schema → V103/V104 reserve）vs B；PA 強烈建議 A，30 min churn 可接受
+2. C10 工時 90-130 hr 修為 75-105 hr 中間值（per BB C6 推翻 Risk 1 後）；不全回滾為 65-85 hr（含 GUI/buffer）
+3. C8 Earn governance spec §4 finalize 為條件 A（per BB C4 (a) verdict）+ typo patch ADR-0030 → ADR-0032
+4. Apple Silicon CI clippy `-D warnings` 不可行（17 既有 errors）；雙軌（軟強制 -A + P2 ticket 並行清）
+
+**4 PA 親自驗的關鍵 finding**（read-only Bash 證據）：
+1. **Apple Silicon CI smoke**：`cargo check --target aarch64-apple-darwin` ✅ PASS 12 sec enforceable；但 `cargo clippy -- -D warnings` ❌ FAIL 17 errors（既有 baseline `too_many_arguments` 等）→ dispatch_packet §3.1 需 patch
+2. **Rust LeaseScope enum 真可擴**（4 variant: TradeEntry/TradeExit/PositionAdjust/CanaryStagePromotion）→ CC spec 假設「擴 enum 不新建 facade」正確
+3. **Rust IntentType enum 不存在** — `OrderIntent` struct 只有 `is_long: bool` + `order_type: String`；CC spec §3.1 IntentType enum 是「概念性 placeholder」；Sprint 1B 程式化 stake/redeem IMPL 前需先派 PA 設計 IntentType 結構（或 EarnIntent + OrderIntent 並列），但**不阻塞 Sprint 1A**
+4. **V101/V102 migration SQL 未 land**（`sql/migrations/V10*` 無檔，head V096 per C9 PG dry-run）；V101 spec **文件** land 但 SQL 未 apply
+
+**Interface 一致性 4 個漂移**：
+- V103 schema 缺 EarnIntentPayload 4-5 column（intent_id / actor_id / rationale / approval UUID 統一 / expected_apr_bps）→ Sprint 1B Earn IMPL 前 PA 補 small V### migration ALTER ADD COLUMN
+- ADR-0032 漏引 V103 + earn_governance spec cross-ref → 5 min patch
+- Earn governance spec related ADRs typo `ADR-0030` 應為 `ADR-0032` → 5 min patch
+- CC spec §4 待 finalize 為條件 A（BB C4 已 verdict）→ 30 min patch
+
+**核心教訓（4 個）**：
+1. **概念性 placeholder enum vs 實際既有 enum 區別**：CC Earn governance spec §3.1 寫 `IntentType` enum「v57-C8 不改實檔，僅 spec」是合理設計，但下游 IMPL 派發前 PA 必先 grep 確認既有結構 — 否則 E1 收到 Earn governance spec 後可能誤以為 IntentType enum 已存在直接擴展。新 PA mandate：governance / IPC spec 中提及的 enum/struct 必標 `[既有]` 或 `[新建]` 雙標籤
+2. **Apple Silicon CI clippy strict `-D warnings` 對既有 codebase 不可行**：dispatch_packet 寫 `cargo clippy -- -D warnings` 是理想態，但實測 17 既有 errors（多為 `too_many_arguments` / `too_many_lines`）— 需先派 P2-clippy-cleanup 漸進清 + 軟強制 `-A` allowlist。**新 PA mandate**：CI clause 設計時必 Mac local 實測命中率，不能基於 spec 假設「clippy 應該 0 warning」
+3. **多 sub-agent verdict 之間矛盾必要 PA 對抗審計**：v57 executability audit Risk 1 「liquidation writer BLOCKED」與 BB C6 「31,473 rows / 3.7 day 持續流入」**直接矛盾**；BB 跑 PG empirical query 後推翻 v57 audit；PA 需以 BB empirical evidence 為準（runtime PG > Rust code > Bybit official > tiagosiebler SDK > 字典 ref handbook），不能機械加總多 agent verdict
+4. **V### re-number 4 ADR/spec search-replace 30 min churn 可接受**：V### conflict 屬於可預期的 metadata 漂移；PA 路徑 A 推薦不是因為「最少 churn」而是因為「最大 schema land semantic completeness」（V101/V102 用於 Track v3 已成熟 ADR-0026 v3 spec；V103/V104 reserve 留給後續 Earn schema 演進）
+
+**E2 重點審查 3 點**（給下游 IMPL phase 派發後 review）：
+1. V103 schema 真實 apply 後 `governance.audit_log.id` 是 BIGINT 還是 UUID — FK target column name 須 PA C9 補資料 empirical confirm（per V103 spec §4.1 Query 4）
+2. Earn API recorder 24h 真有 row 前，Sprint 1A → 1B gate 條件不可放行（per dispatch_packet §7.3）
+3. Sprint 1B 程式化 stake/redeem IMPL 前，需 PA 補設計：(a) IntentType enum / EarnIntent struct (b) LeaseScope enum 擴 EarnStake/EarnRedeem variant + requires_operator_authority=true + default_ttl_ms=60_000 (c) V103 schema follow-up ALTER ADD COLUMN（4-5 字段對齊 EarnIntentPayload）
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_12_prefix_tech_verify.md`（已複製到 `srv/docs/CCAgentWorkSpace/Operator/`）
+
+---
+
 ## Phase 1b Calibration Cell Selection Report（2026-05-18）
 
 **觸發**：sweep run `sweep_20260518_125510` 完成（81 cells / 1.4 sec / `bybit_demo_ws`）；PA decision memo `5df39d13` §5 C1-C5 cleanup steps 應用 + top-2 pilot 推薦。
@@ -4746,3 +4792,123 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 
 **Report path**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--p1_data_lg5_edge_status_reverify.md`
 
+
+---
+
+## 2026-05-21 — v5.7 Dispatch-Safe Patch 14-agent verdict 匯總 + PA 技術開發方案
+
+**任務**：對 14 個 sub-agent（A3/AI-E/BB/CC/E2/E3/E4/E5/FA/MIT/QA/QC/R4/TW）的 v5.7 執行性審核 verdict 做最終匯總，從 PA 視角產出 dispatch packet 草案結構 + Sprint 1A must-fix 合併清單 + dispatch readiness 結論。
+
+**Verdict 分布**：12 GO-WITH-CONDITIONS + 2 HOLD（E2/R4）+ 0 NO-GO。
+
+**14 agent 共識 pattern**（重合度 ≥ 3）：
+- Sprint 1A 工時系統性低估 1.5-3x（9 agent）
+- V103/V104 schema spec 缺 DDL（7 agent）
+- §4 Earn governance 規格不足（6 agent）
+- PG empirical dry-run mandatory 未寫入（5 agent）
+- Bybit Earn API endpoint 存在性未驗（5 agent）
+- Counterfactual logger schema + A/B threshold 缺（5 agent）
+- Sprint 1B C10 跳 Stage gate 直 mainnet live（3 agent）
+- ADR 編號 0028/0029 衝突 + ADR-0006 amendment 缺檔（3 agent）
+- TODO Hard precondition 與 v5.7 dispatch-ready 衝突（2 agent，皆 HOLD）
+
+**PA 最終 verdict**：**DISPATCH-NEEDS-FIX**（不是 NO-GO，不是 ready-to-go）。
+
+12 個 CRITICAL must-fix 需在 Sprint 1A 派發前 land：
+- C1: TODO §-0 補填 + v5.7 主檔 git tree
+- C2: ADR 編號順移 0028/0029/0030 → 0030/0031/0032 + ADR-0033 新建（ADR-0006 Binance amendment 缺檔）
+- C3: V103/V104 schema spec land（4 表完整 DDL，仿 V101/V102 spec 範式）
+- C4: Bybit Earn API endpoint 存在性 BB verdict
+- C5: Bybit Earn stake/redeem API key scope 驗證（非 withdraw）
+- C6: W-AUDIT-8a-C1 24h proof verdict + liquidation writer 30k+ rows claim 核對
+- C7: Sprint 1B C10 改 Stage 0R + Stage 1 Demo（不寫 mainnet live）
+- C8: Earn governance spec land（5-gate + IntentProcessor 復用 + fail-closed）
+- C9: Linux PG empirical dry-run query 結果附 V103/V104 spec
+- C10: Sprint 1A 工時上修 60-80 → 90-130 hr + Y1 total 1,295-1,740 hr
+- C11: Apple Silicon CI tuple 條款寫入 dispatch brief
+- C12: 中文注釋 mandate + SCRIPT_INDEX.md sync enforce
+
+**Sprint 1A 5 並行 dispatch track**：
+1. 1A-gov（25-30 hr）：ADR 4 個 + Earn spec + TODO 補填，TW + CC + FA + R4
+2. 1A-schema（15-25 hr）：V103/V104 spec + Linux PG dry-run + E1 IMPL，MIT + PA + E1 + E2
+3. 1A-sensor（50-70 hr）：4 NEW sensor + healthcheck，BB + E1×4 + E2×2 + E5
+4. 1A-earn（12-18 hr）：Earn API recorder read-only，BB + E1 + E3 + E1a
+5. 1A-gui（8-12 hr）：APR readonly viewer + tab 歸屬，A3 + E1a + PA
+
+**修補後預期可派發時間**：D+3 ~ D+5（72-120 hr 內）。
+
+**重要 PA 教訓**：
+- ADR-0028/0029 編號在同日（2026-05-21）被佔用是 R4 governance grep 才挖出來的 — 派發前必跑 ADR / V### 編號 grep
+- BB 視角揭露 v5.7 §6「liquidation writer 30k+ rows」claim 與 W-AUDIT-8a-C1 BLOCKED state 直接矛盾（30k rows 是 2026-04-05 之前舊資料） — 任何「已存在 writer healthy」claim 必驗 git log + grep + 8a-C1 verdict
+- E2 + R4 兩個 HOLD 都指向 TODO Hard precondition 未解除 — 多 agent 治理 audit 必跑 TODO active state cross-check
+- 14 agent 工時 estimate 共識：Sprint 1A 30-50% 低估，Y1 total ~10% 低估，GUI/TW/AI-E 三領域 0 工時行 — 派發前必加三領域工時行
+- 9/14 agent 共識：Apple Silicon CI tuple 必納入 dispatch brief（Mac 部署 ready 永遠 active）
+
+**Report path**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_dispatch_consolidation.md`（562 行，≤ 800 上限）
+
+
+
+---
+
+## 2026-05-21 P2-PHYS-LOCK-72-HEALTHCHECK — PA spec + IMPL 一手到底
+
+**Trigger**：FA C6 audit 2026-05-20 verdict / OQ-C6-2 衍生；主會話 PM dispatch；audit-layer healthcheck scope 允許 PA 在同 agent 內寫 IMPL（非業務代碼）。
+
+**Outcome**：spec + IMPL + 10 test cases + `__init__.py` + `conftest.py` 全 land；pytest 88 baseline + 10 new + 13 hc69/conftest = **111 PASS**。
+
+**Slot 拍板**：`[68]` (canary namespace) — TODO §6.1 row 給 `[68]/[69]/[76]` 選項，[69] 已被隔壁 cross-session sub-agent 占（halt_session_root_cause），[76] 物理斷層，[68] 自然接續。cross-namespace 號碼撞（passive_wait 也用 [68] portfolio_resting）治理：result payload 強標 `namespace="canary"` field + `__init__.py` MODULE_NOTE 明邊界（R2 [66] 範本治理）。
+
+**架構教訓**（4 個 critical lesson）：
+
+1. **FA prompt SQL schema 必驗**：FA C6 prompt 給的 SQL 含 `AVG(COALESCE((details->>'fee_bps')::numeric, 0))` —— PA grep `trading_writer.rs:431 INSERT INTO trading.fills` 確認 `fee_bps` 不在 schema（有 `fee` / `fee_rate` 直 column；details JSONB 不寫 fee_bps）。任何 audit-layer SQL 必對 production INSERT statement 反射確認 schema 而非接受 prompt 文字。**移除** fee 觀察符合 OQ-C6-2 核心訴求（focus on policy alive + close path 接通）。
+
+2. **Verdict ladder 啟發式 false-positive 風險**：原 FA C6 §2.2 WARN 條件 `stale_roc=0 AND giveback>=10 → WARN (router 缺口疑似)` 在 IMPL test 覆蓋階段暴露 false-positive — phys_lock_gate4_stale_roc_neg 本身嚴苛 emit 條件導致 14d window 自然 0 fire 是預期狀態，原 WARN 條件會把所有 demo natural sparse 環境誤升 WARN，**與 spec §1「prevent natural vs router-bug 混淆」訴求矛盾**。PA refine 後 WARN 條件改為 `giveback>=10 AND close_attempts=0`（router 缺口真正訊號 = giveback path close 也不通）。**Lesson**：任何「sparse signal 缺席 = 紅燈」啟發式必先驗 sparse signal 的 emit 條件是否 natural 在 window 內 sparse。
+
+3. **`_common.severity_max` order 對 aggregation 影響**：`PASS(0) < INSUFFICIENT_SAMPLE(1) < WARN(2) < FAIL(3)` —— INSUFFICIENT_SAMPLE **比 PASS 嚴重**。任何新 healthcheck 對 multi-cell / multi-engine fold 計算，starting `overall_verdict` lower bound **必設 PASS**（不能設 INSUFFICIENT_SAMPLE 否則永遠不會降至 PASS）；且不參與 fold 的 fallback engine 不能在 overall_verdict 計算內。[62-67] 範本都符合此模式。
+
+4. **Cross-session race 防禦**：隔壁 sub-agent（[69] halt_session_root_cause）在 `__init__.py` 與 `conftest.py` 註中誤標「[68] 預留 v59 TODO §6.1 H3 PA 用途」—— TODO §6.1 整檔 0 match "H3"，隔壁是錯誤預判。本 PA work 修正了三處錯誤註（`__init__.py` MODULE_NOTE / `conftest.py` hc69 fixture comment / `__init__.py` __all__ 對應 entry）。**Lesson**：cross-session sub-agent 註記 reservation 必先 grep 證實對應 TODO row / spec ID 確實存在，否則造成 future agent 誤判 + slot 浪費。
+
+**Push back 3 點交 E2**：
+1. `exit_reason LIKE 'phys_lock_%'` strip chain assumption（test fixture 已覆 12+8 production-grade 字串）
+2. Verdict ladder 4-cell aggregation 邊界（FAIL 先判優於 WARN；starting lower bound = PASS）
+3. SQL OR-condition 雙條件（exit_reason + details）必要性（test 是 string-level；E2 可選 push back row-level fixture）
+
+**Report path**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--p2_phys_lock_72_healthcheck_pa_impl.md`
+**Operator mirror**：`srv/docs/CCAgentWorkSpace/Operator/2026-05-21--p2_phys_lock_72_healthcheck_pa_impl.md`
+
+**Confidence**：HIGH for §1-§8 spec + IMPL + test；MEDIUM-HIGH for §2.2 ladder refine（spec 已內嵌 rationale，E2 review 可二次確認）。
+
+---
+
+## 2026-05-21 — v57-C9 V103/V104 Linux PG empirical dry-run
+
+**Trigger**：v5.7 dispatch-safe patch C9 — PA 必須在 V103/V104 IMPL 派發前驗 Linux PG 當前 state（per V055 5-round retrofit 教訓）。
+
+**派工 prompt 假設盲區（三條）**：
+1. PG 連線 = `psql -d openclaw -U openclaw` — **錯**。實際 = `psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai`（從 `~/.pgpass` 取）；socket `/var/run/postgresql:5432` no response，TCP-only
+2. `_sqlx_migrations head ≥ V102` — **錯**。實際 head = **V096**（2026-05-19）；V097/V098 file 在 git tree 但未 apply（Phase 0 catch-up pending）
+3. v5.7 §7.5「V101 spec v3 §1 已 ALTER 12 表加 track column，V104 退號」 — **完全反向**。V101 spec **未** land；`trading.fills.track` column / `strategy_track` ENUM / `governance.track_kill_events` 全不存在；V101/V102 spec v3 自身保留「順延 V103/V104」option → v5.7 §7.5 派 V103/V104 = Earn schema **直接撞號**
+
+**真實 state（empirical query 證據）**：
+- DB head V096；V099-V102 編號全 free
+- V101/V102 spec EXISTS in `docs/execution_plan/`（23,452 bytes，2026-05-21 11:56 modified）但 SPEC READY 未 apply
+- `trading.fills` 27 columns（無 track）；`learning.*hypothes*` 0 rows；總 DB 121 GB
+- Top storage：`learning.decision_features_evaluations` 86 GB（V082 split + V092 continuous aggregates 沒明顯壓縮 — retention follow-up）
+
+**PA verdict（選項 A 強烈推薦）**：
+- V097/V098 catch-up（V098 = governance.audit_log ALTER constraint 須低寫入窗口）
+- V099/V100 = Track attribution v3 final（原 V101/V102）
+- V101/V102 = Earn schema final（原 v5.7 §7.5 V103/V104）
+- 4 ADR/spec search/replace 編號 30 min churn 可接受
+- v5.7 §7.5 Table 3 `trading.fills.track` ADD COLUMN 與 V099/V100 spec §1 重複 → Earn schema 退掉 fill.track，只剩 3 表（hypotheses + hypothesis_preregistration + earn_movement_log）
+
+**Open question 給 operator**：Q1 A vs B 拍板 / Q2 V098 maintenance window / Q3 v56 P0 closure 算 root cause resolved？ / Q5 v5.7 §7.5 Table 3 退號確認。Q1 後 PA 立即派 v57-C3。
+
+**教訓沉澱**：
+1. **派工 prompt 連線假設不可盲信** — 派工者寫 `psql -d openclaw -U openclaw` 但實際是 `trading_admin / trading_ai`；CLAUDE.md / docs/agents/context-loading.md 應加 PG connection 範例段
+2. **「V### 已 land」claim 必 empirical 驗** — v5.7 §7.5 整個 V104 退號判斷基於 V101 已 ALTER 假設；empirical query 證明完全反向
+3. **migration spec 浮動編號是 dispatch race source** — V101/V102 spec v3 自身寫「可能順延 V103/V104」就是 race signal；派工者沒讀完 spec line 24-25
+
+**Report path**：`docs/execution_plan/2026-05-21--v103_v104_linux_pg_dry_run.md`（spec ~300 行）+ `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_c9_pg_dry_run.md`（≤ 200 字 closure report）
+
+**Confidence**：HIGH for empirical query 結果；HIGH for §6 V### re-number 選項 A 推薦；MEDIUM-HIGH for §7 Q3 v56 P0 closure 解釋（須 PM / QA 確認）。

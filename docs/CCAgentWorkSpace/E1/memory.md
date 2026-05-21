@@ -11228,3 +11228,107 @@ E2 PR review (`2026-05-20--p2_sim_queue_aware_e2_review.md`) APPROVE-CONDITIONAL
   E2 review 可能會問實 production demo 數據量是否「夠大才能 trigger」
 - 文件：`66_close_maker_pre_stopout_rate.py` + `tests/test_66_pre_stopout_rate.py`；
   baseline 83 → 88 全綠
+
+## 2026-05-21 — P3-AUDIT-SCRIPT-STALE-CONST funding_arb audit polish
+
+- FA F2 RCA (2026-05-21) 揭：`helper_scripts/db/audit/2026-05-16_funding_arb_14d_audit.py:71`
+  寫死 `SL_HARD_CAP_PCT = 0.03`（2026-05-02 期望值），W-AUDIT-6 (2026-05-09)
+  funding_arb override 移除後 effective SL gate 退至 global 25% / dyn_stop
+  floor 25 × 0.25 = 6.25%；6.29% fill 觸發「SL gate failure」假警報的 root cause
+- 修法選擇 A：module-load 時呼叫 `_load_sl_hard_cap_pct()` 動態讀
+  `settings/risk_control_rules/risk_config_demo.toml`，優先級
+  `per_strategy.funding_arb.stop_loss_max_pct_override` > `limits.stop_loss_max_pct`
+- tomllib (3.11+) → tomli fallback → 最後 stale 0.03 + stderr 警告，三層降級
+- **教訓 1：「stale const」修法不能只動 const 定義，要連 SQL / render / decision
+  / exit_code 邏輯一起 sweep**：`SL_HARD_CAP_PCT` 同時被 SQL `%(sl_cap)s` filter
+  / decision rationale 文字 / render table header「3% hard cap」/ exit_code 1
+  `n_over_5pct > 0` 條件四處引用；單獨改 const → 0.25，SQL 變「>25% fill」
+  失去歷史可比性。**語意切分**：保留觀測 bucket 為新 const
+  `SL_OBSERVE_BUCKET_PCT = 0.03` / `SL_SLIPPAGE_BUFFER_PCT = 0.05`（hardcoded，
+  純 SQL FILTER 統計，與 effective SL gate 解耦）；`SL_HARD_CAP_PCT` 動態讀
+  → 反映 effective gate；exit_code 1 條件改為 `max_loss_pct > SL_HARD_CAP_PCT
+  + SL_SLIPPAGE_BUFFER_PCT`（語意正確：effective gate + slippage buffer 才是
+  真正的 gate failure 邊界）。FA F2 那 6.29% fill 現 < 0.30 effective threshold
+  → 不再觸發假警報
+- **教訓 2：「prompt 字面要求 vs 語意上要 fix 的問題」push back**：prompt 寫
+  `SL_HARD_CAP_PCT = _load_sl_hard_cap_pct()` 直譯會把 0.03 直接換成 0.25，
+  SQL `n_over_3pct` 變 `n_over_25pct` 失去原 audit 觀察 slippage zone 的目的；
+  E1 拆兩個 const 而非單純替換 — 在 report 明文記錄此 push back，避免下個
+  maintainer 看到 prompt 認為「應該完全照字面改」
+- **教訓 3：「動態 TOML reader 必有 stale fallback + stderr 警告」**：tomllib
+  / tomli 都不存在時 `_load_sl_hard_cap_pct()` 不能 raise（會破 module load）
+  也不能假裝成功 — fallback to documented `STALE_REFERENCE_2026_05_02 = 0.03`
+  + stderr 警告 + 註釋明標當前 effective SL gate 未經驗證，請升級 Python。
+  既有 `engine_watchdog.py` / `checks_cost_edge.py` 都用同 pattern
+- **教訓 4：「audit script test 用 importlib.util.spec_from_file_location」**：
+  audit script 檔名 `2026-05-16_funding_arb_14d_audit.py` 以日期前綴開頭，
+  Python 標準 import 不行；test 檔用 `importlib.util.spec_from_file_location`
+  動態載入，這也是 audit dir 第一個 test file 建立模板
+- **教訓 5：「歷史 cross-ref caveat 必須明標」**：W-AUDIT-6 之前的 fill 落在
+  3% override 期間，當期 effective SL 才是 3%；本動態讀只反映**當前** TOML，
+  不重建歷史。Module docstring + `_load_sl_hard_cap_pct` docstring 明文 caveat
+  +「需 git log -p settings/...risk_config_demo.toml 做 commit timeline cross-ref」
+- 文件：`helper_scripts/db/audit/2026-05-16_funding_arb_14d_audit.py` (462→581
+  lines) + new `helper_scripts/db/audit/test_funding_arb_14d_audit.py` (131 lines)；
+  5/5 tests PASS (4 mock TOML path + 1 real TOML smoke)；6.29% fill 不再觸發
+  exit_code 1 假警報驗證通過
+
+
+## 2026-05-21 — P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1 passive-wait healthcheck [69]
+
+### 任務範圍
+v56 P0 closure 留 P1-HALT-TRIGGER 標 passive wait next 自然事件，違反 CLAUDE.md
+passive-wait 規則（要 healthcheck / review date / named external action）。本任務
+建 [69] healthcheck `69_halt_session_root_cause_recurrence.py` 把 passive wait
+upgrade 為「有 healthcheck + 90d review date 2026-08-21」合規。
+
+### 設計選擇
+1. **Slot 選 [69]**：[68] 並行被另一 sub-agent 開 P2-PHYS-LOCK-72-HEALTHCHECK
+   占用（conftest.py linter 已寫入 hc68 fixture）；[69] 自由。
+2. **SQL 邏輯**：掃 `learning.governance_audit_log` 最近 N 天 `halt_session_*`
+   events；payload JSONB 取 `session_drawdown_pct` / `daily_loss_pct` /
+   `loaded_drawdown_threshold` / `loaded_daily_loss_threshold` / `process_pid`
+   / `ts_ms`；每筆 halt_set event 驗 metric ≥ threshold 數學關係 + 跟 forensic
+   `halt_audit.log` cross-link by (process_pid, ts_ms) 雙鍵。
+3. **Verdict ladder**：
+   - **PASS**：n ≥ 1 + 每筆 halt_set 滿足 (drawdown ≥ thr_dd OR daily_loss ≥
+     thr_dl) → 自然 recurrence；root cause 跟 v56 不同
+   - **WARN**：n ≥ 1 + 至少 1 筆 metric < threshold → v56 pattern recurrence；
+     五候選假設 (a)-(e) 仍 UNRESOLVED
+   - **FAIL**：n ≥ 1 但 forensic halt_audit.log 缺對應 row → spec §5 forensic
+     寫入機制失效
+   - **INSUFFICIENT_SAMPLE**：n = 0 events in window（多數情況；passive-wait
+     dead zone 不阻 deploy）
+4. **default window 90d**：對齊 P1-HALT-TRIGGER review date 2026-08-21（v56
+   closure +90d）；過短永遠 INSUFFICIENT_SAMPLE 變 dead gate / 過長混入舊
+   incident 干擾
+5. **THRESHOLD_TOLERANCE = 1e-6**：halt_audit.rs 寫 f64 兩個 metric 來源不同
+   （PaperState 即時算 vs RiskConfig dump），rounding 可能差 1e-12；boundary
+   equality 必走 PASS 路徑
+6. **cron schedule 建議**：daily（rare event；不需 4h cycle）或 weekly（更穩）
+
+### 教訓
+1. **`details` vs `payload` 字段名**：task prompt 寫 SELECT `details->>` 但 V035
+   真實 schema 是 `payload JSONB`（V035:133）；先讀 schema 才能 SELECT。spec
+   description 字段名也須 cross-check production schema。
+2. **`ts_utc` vs `ts`**：governance_audit_log column 名是 `ts TIMESTAMPTZ`，
+   非 `ts_utc`。
+3. **halt_audit.rs:287 daily_loss_pct null 已知行為**：set event payload 寫
+   null（「daily_loss_pct 不在 PaperState API」）；classify_event 必須 daily_loss
+   kind fallback drawdown 驗，否則 PASS branch 永遠走不到。
+4. **forensic cross-link 雙鍵 (process_pid, ts_ms)**：halt_audit.rs:282/293 寫，
+   halt_audit_pg_writer.py:262-264 INSERT dedup 也用此雙鍵；行掃 forensic JSONL
+   找 row 是最簡單可行 cross-link。
+5. **conftest.py [68] race 自然解決**：linter（隔壁 sub-agent + 自動 fixture
+   sync 機制）幫加 hc68 fixture；我的 [69] 邊界完整獨立，pytest 不互擾。
+
+### 驗證
+- pytest = 101 passed（baseline 88 + 新 13；含 5 verdict ladder + 2 daily_loss
+  fallback + 1 mixed events + 1 multi-set severity_max + 1 SQL bind + 1 boundary
+  tolerance + 1 clear events + 1 default constant alignment）
+- LOC：574 (script) + 580 (test) 全 ≤ 800
+- 硬編碼路徑 grep = 0 hit（`/home/ncyu` / `/Users/[^/]+` / `TradeBot` 三條）
+- `--help` CLI 正常輸出 4 個 flag
+
+### 報告
+`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_halt_trigger_healthcheck_impl.md`

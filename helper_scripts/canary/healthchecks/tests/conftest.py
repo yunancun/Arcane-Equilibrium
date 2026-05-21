@@ -68,6 +68,31 @@ def hc66():
     )
 
 
+@pytest.fixture(scope="session")
+def hc68():
+    # P2-PHYS-LOCK-72-HEALTHCHECK（2026-05-21）新增 [68] standalone healthcheck
+    # 對應 FA C6 OQ-C6-2 follow-up — phys_lock gate4 trigger 分布觀察，區分
+    # 0-fire-natural vs 0-fire-router-bug；TODO §6.1 row 給 slot 選項 [68]/[69]/
+    # [76]，[69] 已被 P1-HALT-TRIGGER 占用故 PA 拍板取 [68]；passive_wait
+    # namespace 也有 [68] portfolio_resting 但完全不同 domain（前者 leverage
+    # chain semantic / 後者 phys_lock micro-profit lock trigger），物理分離
+    # + __init__.py MODULE_NOTE 明標 namespace 邊界已是 R2 [66] 範本治理
+    return _load_script(
+        "68_phys_lock_gate4_distribution.py", "hc68_phys_lock_gate4_distribution"
+    )
+
+
+@pytest.fixture(scope="session")
+def hc69():
+    # P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1（2026-05-21）passive-wait
+    # healthcheck；監測 v56 P0 §1.4 五候選假設 (a)-(e) 在下次自然 halt
+    # 事件是否仍出現 metric < threshold pattern；slot [69] 由本次 P1-HALT-
+    # TRIGGER 占用，[68] 取 P2-PHYS-LOCK-72-HEALTHCHECK 用途
+    return _load_script(
+        "69_halt_session_root_cause_recurrence.py", "hc69_halt_root_cause"
+    )
+
+
 class FakeCursor:
     """Minimal psycopg2-cursor stub for SQL/result unit tests."""
 
