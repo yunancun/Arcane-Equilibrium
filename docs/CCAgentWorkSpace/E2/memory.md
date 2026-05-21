@@ -3226,3 +3226,154 @@ verdict **APPROVE** (0 new finding).
 - 「sliding window」reproducibility risk：任何 `WHERE ts > NOW() - interval` 都應 require `--sample-end-utc` 等價 flag — 沒 audit pin 的 historical regression 結果無法 bit-exact 重現
 - backward compat 改動 signature 時 `grep -rn <function_name>` 驗 callers — 5-tuple breaking change 需確認唯一 caller 同檔內，0 外部 import
 - family-specific empirical anchor 不可外推：未來任何「single value 對全 family 套用」的 default 都需配 source comment + JSON artifact 警告，否則 production cell selection 階段必然踩雷
+
+## 2026-05-21 P1/P2 close_maker healthcheck [62] stratify + [71] pre_stopout — RETURN to E1 (2 HIGH + 2 MEDIUM + 2 LOW)
+
+### Scope
+- 新 `helper_scripts/canary/healthchecks/71_close_maker_pre_stopout_rate.py` (342 行) + 9 tests
+- 改 `62_close_maker_fill_rate.py` (209→334) `--stratify {none,hour,dow,both}` + 12 stratify tests
+- conftest.py +hc71 fixture
+- Spec v1.3 → v1.4 patch（AC-20 14d UTC hour distribution secondary AC）
+
+### Findings 總計
+**0 BLOCKER · 2 HIGH MUST-FIX · 2 MEDIUM · 2 LOW**
+
+### A 區 schema 真相驗證（E1 patterns 大量 MISS）
+
+**HIGH-A1**：`71_close_maker_pre_stopout_rate.py:113-121` `DEFAULT_STOPOUT_EXIT_REASON_PATTERNS` lowercase `"hard_stop:%"` / `"time_stop:%"` **與 production exit_reason 真實值不匹配**。
+- E1 grep claim: pattern lowercase + colon
+- 實證（多重交叉驗證）:
+  - `rust/openclaw_engine/src/risk_checks.rs:334` `format!("HARD STOP: pnl {:.2}% <= -{:.2}%", ...)` ← 大寫 + 空格 + colon
+  - `risk_checks.rs:355` `format!("DYNAMIC STOP: ...")` ← 大寫
+  - `risk_checks.rs:390` `format!("TIME STOP: held {:.1}h ...")` ← 大寫
+  - `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-29--strategy_name_attribution_cleanup_design.md:31-35` 明列 V033 後 exit_reason = `"HARD STOP: pnl -6.00% <= -5.00%"` 大寫
+  - `helpers_close_tags.rs:213-253` test 固化 `"TRAILING STOP: peak X% - current Y% = ..."` 大寫
+- chain: risk_checks emit `RiskAction::ClosePosition("HARD STOP: ...")` → step_6 `build_risk_close_tag` wrap → emit_close_fill → `build_close_tags_from_legacy` strip `risk_close:` → `db_exit_reason = "HARD STOP: pnl ..."` 大寫 verbatim 進 trading.fills
+- LIKE pattern `"hard_stop:%"` (小寫底線 colon) **不匹配** `"HARD STOP: pnl ..."` (大寫空格 colon)。production [71] 將嚴重低估 stopout 計數 → 假 PASS verdict 風險
+- **缺少 DYNAMIC STOP 整類 pattern**
+
+**HIGH-A2**：pattern 補完建議
+- 應改為：`"HARD STOP%"` / `"DYNAMIC STOP%"` / `"TIME STOP%"` / `"TRAILING STOP%"` （全大寫 + 空格）
+- 加 lowercase 變體只在 fast_track / phys_lock_ / halt_session / trailing_stop (bb_breakout 直 emit `lowercase trailing_stop`，risk_checks 是 `"TRAILING STOP: ..."`)
+
+**halt_session 路徑驗證**：step_6_risk_checks.rs:529/542/553 HaltSession close_tag hardcoded `"risk_close:halt_session"` (不傳 reason)，所以 exit_reason = `"halt_session"`（剝 prefix 後 verbatim）。`SESSION DRAWDOWN: ...` / `DAILY LOSS: ...` 只用作 HaltSession reason 的 forensic log，**不寫 fills.exit_reason** — 不需另加 SQL pattern。Pattern `"halt_session%"` 命中 ✓
+
+### B 區 SQL injection — PASS
+- `_stratify_sql_addons` 純 4-enum mapping (none/hour/dow/both)，0 user input
+- argparse `choices=_STRATIFY_CHOICES` strict
+- f-string SQL concat 雖非 sql.SQL composable best practice，但 4 hardcoded fragment 風險 0
+
+### C 區 stratify=none 向後兼容 — PASS
+- bytewise SQL string 對比舊版（除外層 indent）每行 content + whitespace 完全相同 → psycopg2 視為相同 query
+- severity_max 純函數，迴圈內逐 verdict 累計 vs 迴圈外從 PASS 重新累計 → 結果等價
+- `test_stratify_none_keeps_legacy_sql_verbatim` + `test_result_includes_stratify_key_in_none_mode` 固化
+
+### D 區 Wilson vs raw rate 不對稱
+
+**MEDIUM-D1**：[71] 用 raw rate + 雙閾值 (0.10/0.30)，[62] 用 Wilson CI。E1 解釋「prompt 草案指定 0.10/0.30 為 upper-bound 而非 Wilson 下界；raw rate 比 CI 直觀」可接受，但 `min_sample=30` 對「stopout_rate ≤ 10%」門檻 = 3 stopouts，boundary case 不 conservative。建議補 Wilson upper bound sub-clause（mirror AC-18 QC-SF-6 mechanism）：CI upper > 0.20 → WARN；CI upper > 0.40 → FAIL。**不擋 merge**。
+
+### E 區 test 真實性
+
+**MEDIUM-E1**：`test_71_pre_stopout_rate.py` 9 cases 全用 mock cursor + `DEFAULT_STOPOUT_EXIT_REASON_PATTERNS` 餵入 run()，**沒驗 default patterns 與 production data 對齊**。`test_sql_binds_patterns_and_liquidation:138-148` 只檢 SQL 字串含 `"exit_reason LIKE ANY"`，pattern 內容換成 `"WRONG_PATTERN"` test 也通過。Catch-A1 失誤的 test 不存在。建議補：
+```python
+def test_default_patterns_match_real_exit_reason_strings():
+    """固化 production exit_reason 真實格式 — 任何 risk_checks.rs format!() 改動須同步 default list。"""
+    real_exit_reasons = [
+        "HARD STOP: pnl -25.00% <= -20.00%",
+        "DYNAMIC STOP: pnl -8.5% <= -7.2% (regime=trending, atr=Some(0.012))",
+        "TIME STOP: held 24.0h >= limit 24.0h (regime=trending)",
+        "TRAILING STOP: peak 8.46% - current 6.46% = 2.00%",
+        "fast_track_reduce_half",
+        "halt_session_drawdown_3pct",
+        "phys_lock_gate4_giveback",
+    ]
+    for er in real_exit_reasons:
+        assert any(fnmatch_like(er, p) for p in DEFAULT_STOPOUT_EXIT_REASON_PATTERNS), \
+            f"production exit_reason {er!r} not matched by default patterns"
+```
+
+### F 區 OpenClaw 特殊條目
+
+**MEDIUM-F1**：[71] check_id slot 與 `passive_wait_healthcheck/checks_close_maker_audit.py:443 "[71]" (close_maker_zero_spine_lineage)` 字面衝突。雖然兩 namespace 物理分離，但 PM/operator 看 mixed report 會混淆。FA round 1 #5 設計 line 316-323 指定編號為 [71] 沒 grep 過 cross-namespace。建議改 `[71c]` (canary suffix) 或加 namespace prefix `"canary:[71]"`，至少 docstring + result JSON 內 disambiguate。
+
+**LOW-F2**：`helper_scripts/canary/healthchecks/__init__.py` docstring line 19-24 仍只列 [62][63][64][65]，[71] 加入後沒同步更新 module docstring。
+
+**LOW-F3**：`62_close_maker_fill_rate.py:225` `overall_verdict = "PASS"` 是 dead init（line 230 in not rows path 覆蓋為 INSUFFICIENT；line 277 stratify=none 又重置為 "PASS"）。功能 OK 但 lint 警示。
+
+### 跨平台 / hardcoded path / except:pass / log f-string / file size — all PASS
+- file size: 71=342, 62=334 ≤ 800 ✓
+- 跨平台 `/home/ncyu` / `/Users/[^/]+` 0 hit ✓
+- 0 except:pass ✓
+- 0 log f-string ✓
+
+### Multi-session race check (§5) — all PASS
+- 5a fetch+sibling window: 2h 內 0 sibling push 衝突
+- 5b status clean: 6 改動全屬本 review scope
+- 5c-5e n/a (no revert / no sign-off commit / no sibling push)
+
+### 對抗反問結果
+- 「E1 grep 真嗎？」→ 不純。schema 真相靠 PA design report + risk_checks.rs format!() 直接讀；E1 grep `exit_reason LIKE` 只在 healthcheck file 找到，沒 grep Rust emission point → A1/A2 catch
+- 「test mock 太多？」→ 是。9 cases 全 fake_cursor，0 case 驗 production exit_reason 字面 → E1 catch
+- 「slot 編號重複？」→ 是。FA 設計 + E1 IMPL 兩階段都沒 cross-namespace grep `"\[71\]"` → F1 catch
+
+### 結論
+- A1/A2 是 root cause（pattern miss）→ runtime stopout 計數低估 → false PASS
+- E1/F1 是 governance gap（test coverage + slot collision）
+- D1/F2/F3 是 quality polish
+
+### 教訓 / Pattern
+- **schema 真相必跨 Rust emission point + Python LIKE pattern 雙向驗證**：E1 一站式 grep 同 file 不夠，要從 `format!()` literal 找 emission 源頭
+- **healthcheck pattern 必有 production-real-string fixture test**：純 mock + 純 self-consistent assert 看不出 grep miss
+- **slot 編號 cross-namespace grep 必跑**：`canary` + `passive_wait` 兩 namespace 都用 `check_id "[NN]"` string，physical 分離 ≠ semantic 分離，FA 設計指定編號前必 grep
+- **大寫 / 小寫 / underscore / space pattern drift**：Rust `format!("HARD STOP: ...")` 與 Python `"hard_stop:%"` 命名習慣 mismatch 是經典隱性 bug，每次跨語言 LIKE 必 spot check
+
+### 報告路徑
+- 本 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p1_p2_close_maker_healthcheck_e2_review.md`
+
+---
+
+## 2026-05-21 P1/P2 close_maker healthcheck E2 R2 review (APPROVE-CONDITIONAL)
+
+### Context
+- E1 R2 修 R1 RETURN 4 finding（HIGH-A1/A2 patterns 大寫 + DYNAMIC STOP + MEDIUM-E1 production-string test + MEDIUM-F1 [71]→[66] slot rename）+ 1 polish（LOW-F3 dead init）+ 1 defer（MEDIUM-D1 Wilson upper）
+- HEAD = cfb9d243（從 R1 起 0 sibling push）
+
+### Round 2 verdict: APPROVE-CONDITIONAL · PASS to E4
+- R1 4/4 finding 真實修復 + 2/2 LOW polish 完成 + 1/1 defer per R1 spec
+- 0 new regression（C2 stratify safety / 向後兼容 / file size 全保 PASS）
+- 3 個 new LOW nit（G1 regime_shift docstring / G2 "PASS" literal vs VERDICT_PASS / G3 TODO line 467 sync）不擋 merge
+
+### E2 R2 自驗手法（與 R1 不同：R1 找 bug；R2 驗 fix 真實）
+- **Production emission grep 1:1 對齊**：自跑 `grep -En '(HARD|DYNAMIC|TIME|TRAILING) STOP' rust/openclaw_engine/src/risk_checks.rs` 命中 334/355/379/390 + 7 個 test assertion，與 E1 patterns 8 條 1:1 對應
+- **Adversarial probe new test 設計**：故意把 patterns 改回 R1 lowercase + 漏 DYNAMIC STOP，跑同邏輯確認 3/12 production stopout 字串 MISS → 新 test `test_default_patterns_match_real_production_exit_reasons` 設計上能 catch regression
+- **Cross-namespace [71]/[66] grep**：canary tree `[71]` 0 active（只剩歷史 doc/comment）；passive_wait `[71]` close_maker_zero_spine_lineage 保留不影響；`hc71` 0 hit
+- **Edge case false positive probe**：8 個假設字串測 patterns 過寬，`phys_lock_gate1_low_edge` HIT 但 risk_checks.rs comment 明說「no longer emitted」→ 0 對 production data false positive
+- **Pytest 自跑驗**：83/83 在 0.03s pass
+
+### R2 新發現（不擋 merge）
+- **G1 nit**：`66_close_maker_pre_stopout_rate.py:54-56` 非 stopout list 沒明寫 `regime_shift`（bb_breakout/mod.rs:939 emit）是 strategy-driven graceful exit；E1 patterns 不命中是 spec design choice 合理但 docstring 應補
+- **G2 nit**：`62_close_maker_fill_rate.py:280` `"PASS"` literal vs `_common.py:52 VERDICT_PASS = "PASS"` constant 並用 style inconsistent；功能 100% 等價
+- **G3 docs sync**：`TODO.md:467` 仍 reference `71_close_maker_pre_stopout_rate.py`，沒同步 rename
+
+### §5 Multi-session race check — 5/5 PASS
+- 5a `git fetch --prune origin` 0 sibling
+- 5b `git status` 5 R2 files 全屬本 review scope
+- 5c-5e n/a
+
+### 對抗反問結果
+- 「8 patterns 全對齊 production emission？」→ ✓ 8/8 grep 自驗 risk_checks.rs / helpers_close_tags.rs / step_0_fast_track.rs / maker_price.rs / bb_breakout/mod.rs 全 confirmed
+- 「new test 真會 catch R1 regression？」→ ✓ adversarial probe 證 3/12 MISS → 紅報
+- 「slot rename 完全乾淨？」→ ✓ hc71 0 hit / [71] 在 canary tree 0 active
+- 「破壞 R1 APPROVE 部分？」→ ✗ SQL byte-identical / file size / 跨平台 0 regression
+- 「還有漏的 stopout 字串？」→ regime_shift 是 strategy-driven graceful（spec choice OK，docstring nit）
+
+### 教訓 / Pattern
+- **R2 review = R1 fix 真實性 verify + adversarial regression catcher test**：不接受「E1 報 N/N pass」一句話，必跑獨立 adversarial probe（故意 revert patterns 跑新 test，看會不會紅）
+- **新 fixture 字串必有 source line ref 標註**：E1 R2 fixture 每個 EXPECTED_STOPOUT 字串都有 `# risk_checks.rs:334` source comment，這讓 reviewer 1:1 對應 emission point 而非靠記憶
+- **Cross-namespace grep 必雙向**：canary [71] 0 active + passive_wait [71] 仍 own 對方 slot 不衝突，namespace 邊界 doc 明寫
+- **VERDICT_PASS literal style consistency** = LOW nit pattern：跨檔 import 常數 vs hardcoded string literal 是常見 style drift，不擋 merge but flag for polish
+
+### 報告路徑
+- 本 R2 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_p2_close_maker_healthcheck_e2_review_r2.md`
+- 對應 R1 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p1_p2_close_maker_healthcheck_e2_review.md`
+- 對應 E1 R2 fix 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_p2_close_maker_healthcheck_round2_fix.md`

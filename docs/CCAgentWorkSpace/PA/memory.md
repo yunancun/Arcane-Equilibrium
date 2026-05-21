@@ -4656,3 +4656,40 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 
 **Report path**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md`
 **Mirror path**: `srv/docs/CCAgentWorkSpace/Operator/2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md`
+
+---
+
+## 2026-05-21 — ADR-0028 + ADR-0029 起草（FA 2026-05-20 P2-ENTRY-CLOSE-MAKER SPEC-1/EVID-1 結案）
+
+**Trigger**：主會話 PM dispatch；2 個 ADR 起草分別處理 FA SPEC-1（V094 dead enum）與 EVID-1（trade tape + L2 storage fidelity 升級）。
+
+**ADR-0028 outcome**：V094 `close_maker_fallback_reason` 3 dead variants（`fast_escalate_safety_upgrade` / `not_attempted_safety_path` / `engine_shutdown_safety`）**保留 schema，不 sunset**；正式紀錄為 safety-path reservation。配套 90d cadence review（calendar trigger 2026-08-21）+ dashboard / healthcheck 必區分「dead by design」vs「missing data quality issue」+ analytics 必標 `[reserved — expected sparse]`。Status: **Accepted-pending-commit**。
+
+**ADR-0029 outcome**：`market.public_trades` + `market.orderbook_l2_snapshot` 雙表 storage policy 草案——**Schema 不在本 ADR finalize**，需 MIT calibration（OQ-1 sample rate / OQ-3 dual-write / OQ-4 timing）+ BB review（OQ-2 WS quota）+ QC review（fidelity uplift）後才能 promote。Status: **Proposed**。Track A（trade tape）/ Track B（L2 snapshot）可獨立 calibrate。
+
+**設計約束 lock**：
+- Migration land 不可 disturb V094 14d freeze window
+- Storage budget hard cap：daily insert ≤ PG 4-8GB shared_buffers 50%（per `project_hardware_constraints`）
+- WS subscription enablement 對齊 ADR-0003 default-disabled pattern
+- 三引擎適用（paper/demo/live）+ writer fail-closed 不阻塞 trading thread（per ADR-0001）
+
+**Push back / OQ 明確留給下游 role**：
+- MIT calibrate sample rate 與 storage budget（不單方面決策）
+- BB review Bybit WS quota（25 symbol × 2 topic）
+- QC review fidelity uplift 假設（~10-15pp）與 dual-write 過渡
+
+**教訓**：
+1. FA SPEC-1 只點名 3 dead variants，但 14d 期 9 個 non-`TimeoutTaker` 都 0 rows——ADR-0028 明確區分「safety reservation 3 個」vs「runtime under-observation 6 個」；後者需獨立評估（不在本 ADR 範圍）
+2. 不要把「14d 0 rows」當作 sunset 訊號——safety reservation 性質的 enum value 罕見觸發是預期；應該以「event frequency 推估」而非「observation duration」做 sunset 判斷
+3. ADR-0029 是 design-intent ADR，不 finalize schema 是有意設計——避免 PA 越界 MIT calibration 工作（OQ-1 是 MIT 範圍）
+
+**Reports**：
+- `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--adr_0028_0029_close_maker_dead_enum_trade_tape_storage.md`
+- `srv/docs/CCAgentWorkSpace/Operator/2026-05-21--adr_0028_0029_close_maker_dead_enum_trade_tape_storage.md`
+
+**ADR 文件**：
+- `srv/docs/adr/0028-close-maker-fallback-reason-dead-enum-reservation.md`
+- `srv/docs/adr/0029-market-trade-tape-and-orderbook-l2-storage-policy.md`
+
+**Commit timing**：交給主會話 PM review 後 commit；ADR 0028 commit hint = ADR-only governance commit + `[skip ci]` 可考慮；ADR 0029 commit hint = Proposed status，不需 `[skip ci]`，可能後續 IMPL 階段需 dispatched MIT calibration task。
+

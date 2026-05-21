@@ -11176,3 +11176,12 @@ E2 PR review (`2026-05-20--p2_sim_queue_aware_e2_review.md`) APPROVE-CONDITIONAL
 - Round 2 修改後 89/89 PASS（不破）
 - _parse_sample_end_utc 自驗 6 個 case 全 OK（None / '' / 'now' / ISO+tz / Z suffix / naive UTC → UTC / non-UTC → UTC convert / invalid → ValueError）
 
+## 2026-05-21 P1/P2 close_maker healthcheck E2 RETURN R2 fix
+- 任務：E2 R1 review RETURN 2 HIGH + 2 MEDIUM + 2 LOW；R2 修 4 issue（A1/A2/E1/F1）+ F3 polish
+- 教訓 1：「grep emission source 必須讀 format!() literal 不能猜 case」— R1 用 lowercase patterns 全 miss 大寫 + 空格 production exit_reason（`HARD STOP: ...` / `DYNAMIC STOP: ...` / `TIME STOP: ...`），E2 對抗審查 catch；後續所有 LIKE pattern 設計強制先 grep Rust format!() 文字逐字對齊
+- 教訓 2：「test 必須驗 production 真實字串，不能 self-consistent」— R1 9 tests 全 mock + DEFAULT patterns 自我引用，pattern 全錯 test 也 pass；R2 補 `test_default_patterns_match_real_production_exit_reasons` 用 fnmatch 模擬 PG LIKE 對 12 個 source-derived 真實字串固化 + 8 個非 stopout 0 命中反向驗證
+- 教訓 3：「新加 healthcheck 必 cross-namespace grep slot 編號」— R1 [71] 與 passive_wait_healthcheck [71] 字面碰撞；後續新 [NN] slot 必 grep helper_scripts/canary + helper_scripts/db/passive_wait_healthcheck 兩 namespace；canary [62-66] / passive_wait [70-74] 物理分離但 mixed report 易混淆
+- 教訓 4：Adversarial test 設計要驗 catch-regression 能力 — 本次將 R1 patterns 餵新 test 確認 `HARD STOP` / `DYNAMIC STOP` / `TIME STOP` 0 match，證明 test 設計上能 catch HIGH-A1+A2 失誤
+- 修改：rename 71_*→66_* + patterns 全替（4 大寫 + 4 小寫，含 R2 新補 DYNAMIC STOP%）+ check_id [71]→[66] + MODULE_NOTE 對齊 + new production-string test + __init__.py 補 [66] + [62] dead init 清
+- 結果：82/82 → 83/83 PASS；MEDIUM-D1 Wilson upper bound deferred（E2 標非 blocker）；E2 R2 review pending
+
