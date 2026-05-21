@@ -267,15 +267,41 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `execution_plan/2026-05-21--v116_m13_multi_venue_reserved_schema_spec.md` | V116 multi-venue reserved (101 行；routing.venue_lifecycle hint；pending operator 仲裁) |
 | `execution_plan/2026-05-21--v116_m13_asset_venue_dim_schema_spec.md` | V116 asset/venue dim (288 行；parallel；reference.asset_class_dim + venue_dim + Y1 seed；pending operator 仲裁) |
 
-### 2026-05-21 Sprint 1A-ζ planning + Sprint 1A-ε cross-ADR audit deliverables
+### 2026-05-21 Sprint 1A-ε deliverables (4 spec; R4+CC+PA+MIT 三化審計)
 
 | 文件 | 内容 |
 |------|------|
-| `execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md` | Sprint 1A-ζ IMPL Prototype Spike Phase Scope Spec (657 行 + §12 operator sign-off；3 track A/B/C；W8.5-10；62-96 hr 含 buffer) |
-| `execution_plan/2026-05-21--v099_v116_migration_ordering_audit_and_dry_run_sop.md` | V099-V116 migration ordering audit + 12 V### Linux PG dry-run SOP (1223 行；18 V### overview + dependency graph + sqlx checksum repair + 1e-4 fixture harness；Sprint 1A-ε MIT) |
-| `execution_plan/2026-05-21--mac_ci_13_module_cross_compile_verify_scope_spec.md` | Mac CI 13-module cross-compile verify scope spec (598 行；PR + 週一 cron + 2000 min/月 budget；Sprint 1A-ε E5) |
-| `execution_plan/2026-05-21--monthly_review_wizard_and_lv3_4_modal_helper_scope_spec.md` | Monthly Operator Review Wizard + Lv 3-4 Modal Helper scope spec (520+ 行；A3 inline draft a12c302e → PM transcribed；8 surface + 7 AC + 8 INV；Sprint 1A-ε A3) |
-| `archive/2026-05-21--sprint_1a_delta_dup_artifacts/README.md` | Sprint 1A-δ multi-session dual write 棄置 file 歸檔說明 (3 file archived per R4 dedup audit 2026-05-21；M13/V116 pending) |
+| `execution_plan/2026-05-21--v099_v116_migration_ordering_audit_and_dry_run_sop.md` | V099-V116 migration ordering audit + 12 V### Linux PG dry-run SOP (1223 行；18 V### overview + dependency graph + sqlx checksum repair + 1e-4 fixture harness；MIT) |
+| `execution_plan/2026-05-21--mac_ci_13_module_cross_compile_verify_scope_spec.md` | Mac CI 13-module cross-compile verify scope spec (598 行；PR + 週一 cron + 2000 min/月 budget；E5) |
+| `execution_plan/2026-05-21--monthly_review_wizard_and_lv3_4_modal_helper_scope_spec.md` | Monthly Operator Review Wizard + Lv 3-4 Modal Helper scope spec (520+ 行；A3 inline draft a12c302e → PM transcribed；8 surface + 7 AC + 8 INV；A3) |
+| `execution_plan/2026-05-21--v103_extend_m4_hypothesis_columns_schema_spec.md` | V103 EXTEND M4 hypothesis discovery 6 column full DDL (MIT inline a4d52063 → PM transcribed；Gap I-A patch；Guard B 6 段 + Linux PG dry-run × 2 round + 3 hot-path index；待 PM Q1 V### naming verdict + DEFAULT 'OPERATOR' vs 'M4_AUTO' 拍板) |
+| `adr/0045-m4-hypothesis-discovery-governance.md` | ADR-0045 M4 Hypothesis Discovery Governance Reserved Placeholder (per R4 C-1 ADR-0042 編號衝突修；M4 Sprint 6+ IMPL 啟動前必 dispatch TW 補完整 ADR) |
+
+### 2026-05-21 Sprint 1A-ζ planning (1 spec)
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md` | Sprint 1A-ζ IMPL Prototype Spike Phase Scope Spec (657 行 + §12 operator sign-off + §6 Phase 0 sandbox prep + V107→V113→V112→V106 sequential ordering + Q4a Track C 16-27 hr update；3 track A/B/C；W8.5-10；66-102 hr 含 buffer) |
+
+### 2026-05-21 Sprint 1A closure narrative + acceptance evidence + 三化審計
+
+| 文件 | 内容 |
+|------|------|
+| `audits/2026-05-21--sprint_1a_acceptance_evidence.md` | FA Sprint 1A 6 欄 acceptance audit (grade A；揭露 RUNTIME-NOT-APPLIED 真相；48 條目 0✅ 真 IMPL / 47⚠️ DESIGN-DONE / 1❌) |
+| `archive/2026-05-21--sprint_1a_alpha_repair_closure.md` | Sprint 1A α+修補+β+γ+δ canonical closure narrative §A-§K |
+| `archive/2026-05-21--sprint_1a_delta_dup_artifacts/README.md` | Sprint 1A-δ multi-session dual write 棄置 file 歸檔說明 (5 file archived per R4 + PA dedup audit 2026-05-21；M5/V114/V115/M13/V116 棄置版本 + dedup decision narrative) |
+| `archive/2026-05-21--todo_v60_archive.md` | TODO v60 archive：v57 12 prefix DONE + W-AUDIT-4b retained + H+I 批 closure + 9 批 narrative (v61 起以 v5.8 為主軸) |
+
+### 2026-05-21 v5.7/v5.8 reference ADR list (baseline cross-ref per R4 NEW-M-5)
+
+| 文件 | 内容 |
+|------|------|
+| `adr/0021-alpha-source-architecture-upgrade.md` | ADR-0021 Alpha Source Architecture Upgrade (v5.8 M6 / V110 cite 來源) |
+| `adr/0024-cowork-subscription-operator-assistant.md` | ADR-0024 Cowork operator-assistant (v5.8 M4 Cowork hybrid path + AMD-2026-05-21-01 protected scope (j) 來源) |
+| `adr/0030-copy-trading-evidence-gated.md` | ADR-0030 Copy Trading evidence-gated (v5.8 M11 counterfactual_quality_report runbook 對接；Y1 末 Sprint 10 Evidence Gate 數據準備) |
+| `adr/0031-framework-expansion-earn-macro-onchain.md` | ADR-0031 Earn / Macro / On-chain framework expansion (Earn governance spec 對應 governance ADR) |
+| `adr/0032-bybit-earn-asset-movement-guardian.md` | ADR-0032 Bybit Earn 5-Gate Adapter (Earn governance runbook 對應 governance ADR) |
+| `adr/0033-adr-0006-bybit-binance-amendment.md` | ADR-0033 Bybit-Binance amendment (v5.8 M13 ADR-0040 amendment 基線；Binance market-data only Y3+ at earliest) |
 
 ### 2026-05-16 12-agent consolidated audit + Wave 1-4 (WP-01..13)
 
