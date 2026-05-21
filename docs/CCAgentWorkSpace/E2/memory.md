@@ -3442,3 +3442,61 @@ E2 用 `python3 -c "..."` 跑 28 個 adversarial probe，27 個邏輯正確，**
 ### 報告路徑
 - 本 R1 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix_e2_review.md`
 - E1 R1 IMPL 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix.md`
+
+---
+
+## 2026-05-21 E2 — P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE (verdict APPROVE-CONDITIONAL)
+
+### 場景
+[66] close_maker_pre_stopout_rate.py 補 Wilson 95% CI sub-clause，
+mirror [62] AC-18 風格。E1 push back 提 wilson_lower_fail=0.20 在
+小樣本 demo n~100 下 raw=0.25 仍不 fire，問是否調 0.15-0.17。
+
+### Key learning — production sample velocity 必須 empirical 查
+**E1 push back 在「demo n~100」是假設、E2 必須 ssh trade-core empirical
+查 production sample 數驗證**。實測 `trading.fills WHERE close_maker_attempt=TRUE`
+過去 7d demo = **32 attempts**（close_maker 2026-05-18 才 enable，3 days history，
+demo velocity ~10/day = ~70/week）。
+
+對應 Wilson lower 計算：
+- n=70 (1 week real), raw=0.25 → lower=0.1575 → 0.20 不 fire（dead gate）
+- n=70, raw=0.25, threshold 0.17 → 仍不 fire
+- n=70, raw=0.25, threshold 0.15 → **fire**
+
+結論：threshold 0.20 在 production demo velocity + 7d default window 下
+**永遠不會 fire**。強建議 PM 改 0.15。
+
+### Pattern — Wilson 對稱反轉審查
+[62] success-direction：PASS=lower≥bound / FAIL=upper<bound
+[66] failure-direction（rate 越低越好）鏡像：PASS=upper≤bound / FAIL=lower>bound
+
+E1 對稱反轉邏輯正確。
+
+### Pattern — R1→R2 default behavior change schema audit
+雖然 E1 在 report 宣稱「既有 4 個 R1 test (n=100) fixture 跑 default 仍綠」，
+**但真實 production data 在 boundary case（raw=0.10/n>=200 OR raw=0.30/n>=100）
+R2 default 比 R1 更嚴格**。E1 沒主動 disclose 廣度，E2 必補：
+- raw=0.30 n=100 lower=0.2189 在 R1 是 WARN，R2 default 變 FAIL
+- raw=0.10 n=100 upper=0.1744 在 R1 是 PASS，R2 default 變 WARN
+
+review 立場：[66] 是 manual standalone，無 cron consumer，不破。但 PM 應知道。
+
+### Pattern — 反向對照 test 在 use_wilson opt-out 是良好實踐
+E1 的 `test_fail_via_wilson_lower_when_raw_under_fail_upper` 內含
+`use_wilson=False` 反向核對 — 同樣 fixture (250,1000) Wilson 模式 → FAIL，
+raw-only 模式 → WARN。這是 schema-change-with-feature-flag 的標準審查 case，
+驗 opt-out 真退舊行為。
+
+### Findings
+- MEDIUM-1：wilson_lower_fail=0.20 default 在 production demo velocity 下
+  dead gate；建議調 0.15
+- LOW-1：E1 self-report +5-10 行但實際 +98 行（docstring 大改可接受，但
+  estimate 不對齊；下次 IMPL 應抓得更準）
+
+### Verdict
+**APPROVE-CONDITIONAL** — 不擋 E4；threshold trade-off 留 PM decision point
+進 E4 前明確選 0.15 / 0.17 / sticking 0.20 + dead gate document。
+
+### 報告路徑
+- 本 review report：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p2_obs_pre_stopout_wilson_subclause_e2_review.md`
+- E1 IMPL report：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p2_obs_pre_stopout_wilson_subclause.md`

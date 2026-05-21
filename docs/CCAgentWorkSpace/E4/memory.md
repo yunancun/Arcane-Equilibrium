@@ -4051,3 +4051,36 @@ PASS · ready for PM commit。
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix_e4_regression.md`
+
+## 2026-05-21 — F3 P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE E4 light regression PASS
+
+### Task
+DEFER-D1 follow-up land。E2 R2 APPROVE-CONDITIONAL（Wilson 公式 + 對稱反轉 + 5 test 真實覆蓋全 PASS）+ PM 主會話 inline 修 default 0.20 → 0.15（6 處對齊）後 light E4。改 2 files：`66_close_maker_pre_stopout_rate.py` (392→492 LOC) + `tests/test_66_pre_stopout_rate.py` (301→484 LOC)。
+
+### Verdict
+**PASS** · ready for PM commit。
+
+### Numbers
+- `helper_scripts/canary/healthchecks/tests/` 88/88 × 3 runs (0.04s identical, non-flaky)
+- `helper_scripts/canary/` 212/212 × 2 runs (31.21s/31.17s, non-flaky)
+- `helper_scripts/db/test_close_maker_audit_healthcheck.py` 8/8 + 14 subtests（passive_wait [71] cross-namespace 不擾）
+- file size 全 ≤ 800（492/484）/ emoji = 0 / hardcoded path = 0
+- argparse `--wilson-lower-fail` default 0.15（從 0.20 調降）/ `--no-wilson` 預設 disabled (Wilson enabled by default)
+- adversarial probe A：strip `run()` line 338 `0.15` → `0.20` → `test_pass_when_wilson_upper_within_bound` line 362 RED (`assert 0.2 == 0.15`) → byte-identical restore → 88/88 GREEN（diff = 0 byte）
+
+### 教訓 / 工程觀察
+
+- **「PM inline 修 4 處」實是 6 處 — function default 不能漏算**：PM brief 寫 default 修 4 處（docstring × 2 + argparse + test assertion）；實 source 額外有 2 處 function default（`_stopout_rate_verdict()` line 281 + `run()` line 338）也需同步改才邏輯一致。視覺角度 user-visible 是 4 處，但內部技術一致性要看 6 處。E4 必跑 `grep -nP "wilson_lower_fail.*=\s*0\." <source>` 把所有 `wilson_lower_fail = 0.XX` 點全列出對齊。**規則**：PM inline 多處同 const value 修改，E4 必 grep 整檔 default value 占位驗 N 處對齊（不只信 brief 寫的 N）。
+
+- **adversarial probe 真實性：strip default → test 必紅 + restore byte-identical → 必綠**：本 PR 核心 test `test_pass_when_wilson_upper_within_bound` line 362 `assert result["thresholds"]["wilson_lower_fail"] == 0.15` 是針對 `run()` line 338 function default 的直接 catcher。strip `0.15` → `0.20` → 立紅 (`assert 0.2 == 0.15`)；diff < /tmp/backup > = 0 byte → GREEN。**規則**：高敏感 default value (gate threshold) 必須有 1+ test 對 result["thresholds"][key] 做 assertion；E4 必跑 adversarial cycle 確認該 assertion 真實。設計健全度 = strip 1 default 必 1 red + 其他不依賴此 default + restore byte-identical 必 GREEN。
+
+- **`_stopout_rate_verdict()` dead default value 不影響 adversarial probe**：line 281 default `wilson_lower_fail: float = 0.15` 是 dead default（`run()` line 417 永遠 explicit pass `wilson_lower_fail=wilson_lower_fail`）。strip 它不會紅。但邏輯一致性仍要求保留 0.15（防未來重構誤觸發 default）。E4 verify dead default 對 adversarial cycle 不必抓綠紅，但要 mention probe scope 限定在 explicit pass site（line 338）。**規則**：identifying dead default value（call site 永遠 explicit pass）是 adversarial probe target 排序的 prerequisite — 別費時 probe dead default。
+
+- **test 不 touch argparse 是設計上 mock-scope 缺口**：test_66 全 import + call `run()` 不走 `_parse_args` / `sys.argv`。所以 argparse line 255 default 改變 test 完全看不見。當前對齊靠 docstring + function default × 2 + test assertion 4 路綁定，PM 視覺檢查保證 argparse 跟其他 3 路一致。**規則**：對 user-visible CLI default 想完全 hard-binding 需加 `test_argparse_defaults_snapshot`（mock-free，純 import argparse + parse_args([]) 比對 dict）NTH-P2 add。
+
+- **baseline 漂移 attribution**：5/21 早晨 C1+C2 baseline canary/ = 201；P1-WATCHDOG-NETOUTAGE R2 +6 = 207；當前 212 = +5 sibling drift。本 PR 對 canary/ 主目錄貢獻 = 0（5 new test 全在 canary/healthchecks/tests/ 已計入 88/88）。**規則**：baseline 不能只看「PR 加幾個 test」要 attribute 到正確子目錄；canary/ 級 +5 跟 PR 無關時 E4 必明寫 attribution 否則後人誤判 PR 改變 canary/ baseline。
+
+- **`memory.md` 322KB＋ 持續用 append-only `cat >> EOF` 模式**：跟 5/18 / 5/20 / 5/21 早報告同 pattern，避免 Read 全檔超 256KB 上限。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-21--f3_obs_pre_stopout_wilson_e4_regression.md`
