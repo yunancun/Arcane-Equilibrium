@@ -456,4 +456,68 @@ Y1 autonomy : 66% 不變（spike pass 後路線不變）
 
 | Commit | Subject | 內容 |
 |---|---|---|
-| (pending) | `docs(sprint-1a-zeta): PM push back IMPL spike phase planning — PA scope spec 657 行 + TODO sprint banner [skip ci]` | PA spike scope spec + TODO §0/§1.1/§1.2 update + archive §I append |
+| `142b170c` | `docs(sprint-1a-zeta): PM push back IMPL spike phase planning — PA scope spec 657 行 + TODO/archive` | PA spike scope spec + TODO §0/§1.1/§1.2 update + archive §I append |
+| `f6fdba5a` | `docs(sprint-1a-zeta): operator sign-off 5 Open Q + §12 added` | Operator decided Q1d/Q2d/Q3b/Q4a(override)/Q5a；spike 工時 62-96 hr 含 buffer |
+
+---
+
+## §J Sprint 1A-δ closure — PM 簽收 2026-05-21
+
+### J.1 Sprint 1A-δ scope（per PA dispatch consolidation §Sprint 1A-δ deliverable）
+
+3 interface stub module：**M5 ModelClient / M12 OrderRouter / M13 Multi-Venue + AssetClass**
++ 3 V### reserve frontmatter：**V114 (M5) / V115 (M12) / V116 (M13)**
++ ADR-0035 / 0039 / 0040 (已 Wave 2 land；本 phase 不重新寫)
++ Mac CI 13-module cross-compile verify (DEFER to Sprint 1A-ε / 1A-ζ spike)
+
+### J.2 Deliverable check（6 條 → 6 ✅，但 multi-session dual write 衍生 5 dup naming）
+
+| # | Deliverable | Status | Artifact (含 dup) |
+|---|---|---|---|
+| 1 | M5 ModelClient trait stub + V114 reserve | ✅ + dup | mine: `m5_online_learning_design_spec.md` 461 行 / `v114_m5_online_learning_reserved_schema_spec.md` 179 行；parallel session: `m5_model_client_design_spec.md` 36KB / `v114_m5_model_versions_streaming_schema_spec.md` 190 行 |
+| 2 | M12 OrderRouter trait stub + maker_fill_rate_30d metric + V115 reserve | ✅ | `m12_order_router_design_spec.md` 905 行（PA 自 575 行 v0 iterate 至 905 行 6-method ADR-0039 對齊）+ `v115_m12_order_router_reserved_schema_spec.md` 208 行 |
+| 3 | M13 AssetClass + Venue enum + V116 reserve | ✅ + dup | mine: `m13_multi_venue_asset_class_design_spec.md` 427 行 / `v116_m13_multi_venue_reserved_schema_spec.md` 101 行；parallel: `m13_asset_class_venue_design_spec.md` 624 行 / `v116_m13_asset_venue_dim_schema_spec.md` 288 行 |
+
+**結算**：6/6 ✅ scope；但 10 file land（5 主題 × 2 naming convention 不一致）
+
+### J.3 Sprint 1A-δ artifact 統計
+
+- **5 module design spec**：m5_online 461 / m5_model_client 36KB / m12_order_router 905 / m13_multi_venue 427 / m13_asset_class_venue 624 = ~3500+ 行
+- **5 V### reserve frontmatter**：V114 mine 179 / V114 parallel 190 / V115 208 / V116 mine 101 / V116 parallel 288 = 966 行
+- **總計**：10 file，~4500+ 行
+
+### J.4 Multi-session dual write 現象 (per memory `project_multi_session_memory_race` 2026-04-23)
+
+時間軸（per ls -la timestamp）：
+- 22:06 mine `m5_online_learning_design_spec.md` (461)
+- 22:07 mine `v114_m5_online_learning_reserved_schema_spec.md` (179) + `v115_m12_order_router_reserved_schema_spec.md` (208)
+- 22:09 parallel `m13_asset_class_venue_design_spec.md` (624) **— 比我 mine 早 5 min**
+- 22:11 parallel `v116_m13_asset_venue_dim_schema_spec.md` (288)
+- 22:12 parallel `m5_model_client_design_spec.md` (36KB)
+- 22:14 parallel `v114_m5_model_versions_streaming_schema_spec.md` (190) + mine `m13_multi_venue_asset_class_design_spec.md` (427)
+- 22:15 mine `v116_m13_multi_venue_reserved_schema_spec.md` (101)
+- 22:16 PA sub-agent iterate `m12_order_router_design_spec.md` 575 → 905 行 (6-method ADR-0039 對齊)
+
+**Rule (per memory)**：不認識改動禁 revert；保留兩版；operator 決定 canonical or merge。
+
+### J.5 PM Sign-off Verdict
+
+**狀態**：✅ **APPROVED — Sprint 1A-δ interface stub 全 land；5 dup naming pending dedup Sprint 1A-ε**
+
+**對齊驗證**：
+- ✅ PA dispatch consolidation §Sprint 1A-δ deliverable: 3/3 module + 3/3 V### scope ✅
+- ✅ ADR alignment: M5 對齊 ADR-0035 (retirement criteria 4 條) / M12 對齊 ADR-0039 (6-method trait + maker_fill_rate_30d) / M13 對齊 ADR-0040 (4 AssetClass + 4 Venue + DEX/Hyperliquid hardcode rejection + 6 trade gate criteria)
+- ⚠️ **Naming convention 不一致** — operator OR Sprint 1A-ε cross-ADR audit 決定 canonical（mine 較對齊 prompt + scope；parallel 較對齊 ADR Trait name）
+
+**Carry-over to Sprint 1A-ε**：
+1. 5 dup naming dedup（M5 / V114 / M13 / V116 各 2 file → 1 canonical）— operator decide 或 R4 cross-ref audit
+2. M5 PA push back: ModelClient trait 6 method names 採 ADR-0035 鎖定 vs PM prompt 泛 ML — operator amend ADR-0035 § Decision 1 OR adopt PA 推薦
+3. 4 open Q (M5 Q1 trait names / Q2 R1 trigger 機率 / Q3 activation 6 條 hard gate sensitivity / Q4 M5 vs M9 boundary)
+4. M12 5 OQ (schema routing.* vs learning.* / UnimplementedOrderRouter fallback / async trait / RoutingContext variant_id / cross-venue aggregation)
+5. M13 3 OQ + 5 caveat (Y3+ first venue 是否 Binance / 6 gate 數值未鎖 / Option enum Sprint 6 vs Y2 / Future variant dead code / DEX 名詞語義變化 / cross-venue PositionAggregator / per-venue secret slot / authorization.json venue field)
+
+### J.6 Commit chain — Sprint 1A-δ land
+
+| Commit | Subject | 內容 |
+|---|---|---|
+| (pending) | `docs(sprint-1a-delta): PM SIGN-OFF — 10 file land (5 module + 5 V### reserve；含 5 dup naming pending dedup) [skip ci]` | 10 file commit + TODO Sprint banner 1A-δ DONE + archive §J append |
