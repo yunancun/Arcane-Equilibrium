@@ -140,17 +140,22 @@ operator 拍板後在本區重填 Sprint Milestone Banner + Wave Roster + Sequen
 
 ## §6 P2/P3 — 維護 backlog
 
-### §6.1 立刻可派 actionable（不依賴 operator 拍板）
+### §6.1 立刻可派 actionable（不依賴 operator 拍板）— 0 active
 
-| ID | 優先 | Owner | 工時 | 任務 |
-|---|---:|---|---|---|
-| `P2-LG1-DEMO-SLO-CARVEOUT` | P2 | PA spec → E1 + E5 | 130 LOC + Grafana ~3-4h | SLA 文檔 carve-out（p99 < 1ms / max ≤ 5ms over 1M ticks）+ HdrHistogram p99/p999 metric + Grafana panel（per E5 F1 推薦選項 B）|
+**H+I 批 2026-05-21 closure 後本區清空**；新衍生 follow-up 全入 §6.2 deferred 或路線範圍。
 
 **H 批 2026-05-21 closure**：
 - ✅ `P3-AUDIT-SCRIPT-STALE-CONST` DONE（E1+E2+E4；tomllib fallback；5/5 PASS；commit `296e94b2`）
 - ✅ `P2-DYN-STOP-FLOOR-SENTINEL` DONE（E4 self；3 sentinel；3045 PASS；commit `296e94b2`）
 - ✅ `P2-PHYS-LOCK-72-HEALTHCHECK` DONE（PA spec + IMPL slot [68]；E2 APPROVE + E4 PASS；10 test；commit `296e94b2`）
 - ✅ `P2-EDGE-EST-SNAPSHOTS-STALE-FOLLOWUP` AUDIT DONE（FA verdict LOW now / MEDIUM future-risk；root cause = cron never installed；Path A operator approve `crontab -e` 5 min ops；維持 P2 綁 W-AUDIT-8a Phase B/C/D 為硬 deadline）
+
+**I 批 2026-05-21 closure**：
+- ✅ `P2-LG1-DEMO-SLO-CARVEOUT` DONE（PA spec 429 行 + E1 hot path 接線 + E2 APPROVE + E4 PASS；3272 + 410 + 5/5 integration；Apple Silicon CI 雙 PASS；adversarial real catcher；ML pipeline contamination 守住；commit `aa0780a3`）
+
+**衍生 P3 follow-up**（per E2 R1 LOW NTH，入 backlog）：
+- `P3-H0GATE-FILE-SPLIT`（h0_gate.rs 1243 行 > 800 警告；獨立 wave 處理，per E5 file-size pattern）
+- `P3-H0-LATENCY-1H-RESET-INTEGRATION-TEST`（E2 R1 LOW NTH；既有 unit test 覆蓋 reset 邏輯，但缺 1h cadence integration test）
 
 ### §6.2 Deferred / Passive Wait
 
@@ -278,7 +283,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
 - **2026-05-08~16** v55 4 軌道 closure（watchdog RCA / entry-path RCA / tab-live extract / stress fails）→ archive §A
 - **2026-05-19** v56 P0-ENGINE-HALTSESSION-STUCK-FIX incident → 2026-05-20 02:15 UTC Layer A+B LIVE + real-event verified → §C 歸檔
 - **2026-05-20** P2 sweep 6 項 closure（QA-TEMPLATE / STRUCT-2 / AUDIT-VERIFY-3 / ENTRY-CLOSE-MAKER / STRESS-BB / SIM-QUEUE-AWARE）→ §I 歸檔
-- **2026-05-21 A+B+C+D+E+F+G+H 八批 closure**：
+- **2026-05-21 A+B+C+D+E+F+G+H+I 九批 closure**：
   - A: TODO 縮 70 行（v57.3 cleanup）
   - B: 13 governance + 9 planning 入 git
   - C: 8 P2 sweep follow-up（含 healthcheck [66] / ADR-0028/0029 / spec v1.4 AC-20 / FA A-axis verdict / FA phys-lock audit）
@@ -287,6 +292,7 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/db/passive_wait_he
   - F: 4 actionable attack — F1 E5 P1-LG1-DEMO-SLA → P2-LG1-DEMO-SLO-CARVEOUT / F2 FA P1-FUNDING-ARB-SL NOT_A_BUG / F3 E1→E2→E4 P2-OBS-WILSON 88/88 PASS / F4 PA P2-CANARY-FILE-SIZE DEFER
   - G: TODO layout refactor v58 → v59
   - **H**: 5 backlog actionable closure（commit `296e94b2`）— H1 audit script polish / H2 dyn-stop sentinel 3 test / H3 phys-lock healthcheck [68] / H4 halt-trigger healthcheck [69] / H5 edge-est-snapshots audit；E1+E4+PA+FA → E2 → E4 全 chain PASS；Python 116 + Rust 3045 + adversarial 4/4 真實 catcher
+  - **I**: P2-LG1-DEMO-SLO-CARVEOUT 完整 closure（commit `aa0780a3`）— I1 PA spec 429 行 + Rust skeleton 8 unit test + Cargo hdrhistogram=7.5.4 + Grafana JSON 5 panels；I2 E1 hot path 接線 5 plumbing steps + 5 integration test；I3 E2 review APPROVE（3 push back + 2 注意全 ACCEPT；0 BLOCKER）；I4 E4 regression PASS（3272 engine + 410 core + Apple Silicon CI 雙 PASS + adversarial real catcher byte-restore + ML contamination 守住）；衍生 P3-H0GATE-FILE-SPLIT + P3-H0-LATENCY-1H-RESET-INTEGRATION-TEST 入 §6.1 follow-up
 
 歸檔詳情走 `docs/archive/2026-05-21--todo_v58_layout_refactor_archive.md`。
 
