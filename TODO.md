@@ -204,6 +204,7 @@ v55（2026-05-19 上半段）operator 授權的 4 條並行軌道全收口：
 - **2026-05-19 v55 sprint**：4 軌道 closure（見 §0）。
 - **2026-05-19 ~20:00 UTC v56 incident**：engine 7h43m trading-inert（見 §-1）；新 P0 `P0-ENGINE-HALTSESSION-STUCK-FIX`；PA spec 已派；engine PID 2099215 自 20:09:36 起恢復；Phase 1b verification 繼續累積。
 - **2026-05-20 v57 ratify**（見 §-0）：operator 補資金 demo $10k + live $1k；批准 v4 dual-track 取代 v2 ASDS 純路徑 + v3 lean 純路徑；4 governance artifacts（AMD-2026-05-20-01 + ADR-0025/26 + V101/V102 spec）land；業務根因更新為「**5 textbook 策略仍欠正 edge → Track A direct exploit (NLE/LCS) 8 週現金流 + Track B ASDS factory 12 個月規模化長線並行**」。舊「Alpha Surface Phase C/D + 替代 alpha 候選」敘事被 dual-track 重組吸收。
+- **2026-05-21 v57.4 closure 批 D**：QA D1 + PA D3 obs verify 完成；**LG-1 + LG-2 P0 DONE WITH GAP/CAVEAT**；P1-DATA-1..3-WATCH CLOSED；P1-EDGE-1 CLOSED；PA D3 建議 P1-EDGE-2 升 P0-FUNDING-ARB-DECISION-FORCE 待 operator 拍板；衍生 P1-LG1-DEMO-SLA-VIOLATION + P1-FUNDING-ARB-SL-GATE-BUG。Engine + watchdog 09:58:50 UTC graceful SIGTERM stopped（操作 race 可能 Ctrl+C interrupt），PM 13:31 UTC restart_all.sh --keep-auth 恢復（engine PID 2934602 / API PID 2934665 / watchdog PID 2936560 with Inert probe）；Phase 2a gap ~3.5h estimated 失 ~1.4 rows，verdict 視窗 T+96-120h（2026-05-22~23 UTC）影響 low。D2 watchdog classifier source-only fix E1 R1→E2 R1 RETURN→E1 R2 in-progress。
 
 ---
 
@@ -331,12 +332,12 @@ PM/PA/FA 三方交叉檢查後：
 | `P0-ENGINE-HALTSESSION-STUCK-FIX` | ✅ **DONE 2026-05-20 ~02:15 UTC**（Layer A + B 都 LIVE，real-event verified）| Layer A `6cf476c4` + Layer B `fec63743/8ad70090`；watchdog PID 2222237；Halt trigger 根因仍 UNRESOLVED → P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1。**詳情歸檔** `docs/archive/2026-05-20--todo_v57_3_closure_cleanup_archive.md` §A |
 | `P3-AGENT-SPINE-BENCH` | ⏳ scheduled N+3 | emit_entry_lineage / emit_fill_completion bench harness | E5：當前只有 tick_pipeline hot_path_baseline；補 1000×100 sample SLA monitoring |
 | `P3-SPINE-COUNTER-CACHE-ALIGN` | ✅ **DONE 2026-05-20**（待 Linux rebuild）| `channel.rs` 三 AtomicU64 改 `#[repr(align(64))]`；21/21 agent_spine unit tests pass；commit `879e3852`；歸檔 §B.1 |
-| `LG-1` H0 production caller | ✅ **IMPL LANDED 2026-05-11** (`a11a4df6` + closure `0fb661d3`) — 待 7d observation | T1+T2+T3+T4 E1×4 並行 IMPL DONE；E2+E4+E5+A3 全 APPROVE；runbook `docs/runbooks/2026-05-11--lg1_h0_flip_rollback.md` ship；**2026-05-19 PM audit TODO 同步斷裂修正** | per PA plan §1.4 |
-| `LG-2` Provider pricing binding | ✅ **IMPL LANDED 2026-05-11** (`a11a4df6` + closure `0fb661d3`) — 待 7d observation | T1+T2+T3+T4 全 land；FeeSource enum + query_fee_source IPC + PricingConfig + Live spawn assertion；runbook `docs/runbooks/2026-05-11--lg2_pricing_assertion_failure.md` ship；**2026-05-19 PM audit TODO 同步斷裂修正** | per PA plan §2.4 |
+| `LG-1` H0 production caller | ✅ **DONE 2026-05-21 — PASS WITH 1 KNOWN GAP**（10d obs closure verified by QA）| H0 wired (18M+ ticks confirmed `h0_gate_stats.total_checks=18,086,022 / 0 blocked`)；fail-closed semantic 從未實際 fire（0 hard-block + 0 shadow_would_block 過 5h current log window；10d archive binary blob 不可 verify cumulative）；P1-LG1T3-RMW-WIRE hot-reload gap 仍 OPEN；新衍生 **P1-LG1-DEMO-SLA-VIOLATION**（demo `max_latency_us=2454μs > 1ms SLA`，見 §11.3）。QA report `docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-21--lg1_lg2_7d_closure_phase2a_t72h_verify.md` §1 |
+| `LG-2` Provider pricing binding | ✅ **DONE 2026-05-21 — PASS WITH 1 CAVEAT**（10d obs closure verified by QA）| startup assertion 2026-05-21 09:57:12 UTC engine restart 真實 fire `LG-2 T2 pricing binding assertion PASS event="lg2_t2_pricing_assert_pass" env=LiveDemo fee_rate_count=25`；**caveat**：production tick path 0 caller for `fee_source()`（grep tick_pipeline / strategies = 0 hit）是 **BY-DESIGN per spec §2.4**（startup assertion + IPC read contract，**不是 tick-time consumer**），非 wiring bug。QA report §2 |
 | `LG-3` Supervised live SM | ⚠️ **SPEC v2 READY 8 days, Wave 2.4 IMPL DISPATCH PENDING** — 2026-05-19 PM audit catch silent stall | PA spec v2 final `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v2_final.md`（1767 行，26 caveats incorporated：10 QC + 9 MIT + 7 BB）+ QC/MIT/BB 3-review 全 APPROVE 2026-05-11；**V094 號被 W-AUDIT-8c 佔用→必改 V099/V100**；Wave 2.4 IMPL E1×7 需 PA refresh dispatch plan（V### 號 + multi-E1 race-aware 排程 + 與 v56 P0 序列化）；**序列化於 v56 P0-ENGINE-HALTSESSION 完整 cycle 之後**派 | per PA plan §3.6 + §6.1 + §6.4；refresh plan dispatched 2026-05-19 |
 | `P0-EDGE-1` | ACTIVE | Edge net-positive 決議 | 策略 edge 須 net-positive 或限定 supervised path；根因連到 `P0-MIT-LABEL-CLOSE-TAG-1` 1-day fix（最高 ROI） |
-| `P0-LG-1` | 🟢 **IMPL LANDED, 待 7d observation closure** | H0 wired into production decision path + metrics + fail-closed (LANDED 2026-05-11) | E2+E4+E5+A3 APPROVE；evidence: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--wave2_2_lg1_lg2_e2_review.md` |
-| `P0-LG-2` | 🟢 **IMPL LANDED, 待 7d observation closure** | Fee/pricing source 綁定、freshness 檢查、startup assert (LANDED 2026-05-11) | FeeSource enum + IPC + PricingConfig + Live spawn assertion 全 ship |
+| `P0-LG-1` | ✅ **DONE 2026-05-21 — PASS WITH GAP**（QA 10d obs closure）| H0 wired (18M+ ticks verified); fail-closed never fired in 5h current log window；衍生 P1-LG1-DEMO-SLA-VIOLATION | 見 §10 LG-1 行；evidence QA report 2026-05-21 §1 |
+| `P0-LG-2` | ✅ **DONE 2026-05-21 — PASS WITH CAVEAT**（QA 10d obs closure）| startup assertion fire 09:57:12 UTC；production tick path 0 caller BY-DESIGN per spec §2.4 | 見 §10 LG-2 行；evidence QA report 2026-05-21 §2 |
 | `P0-LG-3` | ⚠️ **SPEC READY, Wave 2.4 IMPL DISPATCH PENDING** | Live authorization / lease / drawdown / revoke / operator approval 全顯式且測過 | spec finalize 2026-05-11；2026-05-19 PM audit catch 8d silent stall；Wave 2.4 IMPL 序列化於 v56 P0 完整 cycle 之後派 |
 | `P0-OPS-1..4` | ACTIVE | HTTPS / credential rotation / legal+ToS / first-day runbook | True-live 前置 |
 
@@ -366,11 +367,14 @@ PM/PA/FA 三方交叉檢查後：
 
 | ID | 優先級 | 任務 | 備註 |
 |---|---:|---|---|
-| `P1-DATA-1..3-WATCH` | 3 | Runtime-reloaded WARN cluster row-rolloff watch | source 已修；保留 observation-only watch |
-| `P1-EDGE-1..2` | 3 | ma_crossover/grid blocked_symbols 已 frozen + funding_arb 14d audit 2026-05-16 | 維持 freeze + 2026-05-16 audit |
-| `P1-LG-5` | 4 | LG-5 reviewer maturity watch | source 活躍；audit-row 健康 |
+| ~~`P1-DATA-1..3-WATCH`~~ | — | ✅ **CLOSED 2026-05-21**（PA D3 reverify DOWNGRADE_TO_OPTIONAL）| LG-5 W3 FUP-2 attribution writer fix `34211ab4` settled；runtime 7 healthcheck slot 6 WARN 0 FAIL；row-rolloff 14d 穩定；watch 被 P0-EDGE-1 + R-1/R-2/R-3 路徑 + `[51]` scanner LOW_SAMPLE maturity 自然覆蓋。**從 active 刪**；PA report `2026-05-21--p1_data_lg5_edge_status_reverify.md` §A |
+| `P1-EDGE-2` (funding_arb) | 3 | ⚠️ **PA D3 建議升 P0-FUNDING-ARB-DECISION-FORCE**（PM/QC 強制 governance decision）| PA 親跑 5/16 audit script = `INSUFFICIENT`（n=18<30，net_bps -49.74）+ funding_arb 14d fills=0 dormant + 1 fill 6.29% loss/notional 超 3% hard cap（**SL gate failure** — 衍生 `P1-FUNDING-ARB-SL-GATE-BUG` FA owner）。建議不再等 n≥30 trigger governance decision；待 operator 拍板升 P0 |
+| `P1-LG-5` | 4 | LG-5 reviewer maturity watch — PA D3 reverify **STILL_ACTIVE**（不可降）| source 活躍（`governance_hub_live_candidate_review.py` 1552 LOC + `lg5_review_consumer_scheduler.py` 722 LOC）；過去 14d daily fire 4-43 reviews/day；7d 共 66 review_live_candidate 全 verdict=defer **是設計正確訊號**（5 textbook 策略 EV negative per QC 2026-05-11 audit）；promote 真實發生需 alpha 路徑 + LG-3 Wave 2.4；維持 watch 至首個 verdict ≠ defer 出現 |
 | `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | spec §5.4 完整 dynamic backoff state machine IMPL（per-symbol 1s exp → 60s + ≥10 symbol cascade → 5min global pause + audit row `rate_limit_scope="global"`）| Phase 1b 初版（commit `27f02a07`）取 per-symbol 5min 固定避 scope creep；Phase 2a Demo PASS 後另開 PR；PA 估 ~50 LOC state machine + ~80 LOC integration test |
-| `P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX` | 2 | **NEW**：STATUS2 RCA 衍生 source-only follow-up。`engine_watchdog.py` 當前需 ≥5 連續 network-error lines in active `/tmp/openclaw/engine.log`；rotated/interleaved DNS outage 證據可能 default 到 `engine_crash` 觸發 restart storm。需 recent-log classifier 加固 + regression test，再依 3-strike stability 動作 |
+| `P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX` | 2 | E1 R1 DONE 2026-05-21（103/103 PASS）→ E2 R1 RETURN（HIGH-1 production PG pool string 漏 AMBIGUOUS guard）→ E1 R2 in-progress | 4-gate classifier（panic + consecutive + interleaved + cross-rotation + ambiguous guard）；待 E1 R2 補 `pool timed out` / `pg pool` / `db_pool` patterns + true production string test；之後 E2 R2 + E4 |
+| `P1-LG1-DEMO-SLA-VIOLATION` | 2 | **NEW 2026-05-21（QA D1 衍生）**：demo H0 gate `max_latency_us=2454μs > 1ms SLA` | 違反 H0 hot path <1ms 設計上限；non-blocking but ≥ 2.4x 上限；QA report §1 evidence；需 E5 hot-path profiling + PA 設計改善 |
+| `P1-FUNDING-ARB-SL-GATE-BUG` | 2 | **NEW 2026-05-21（PA D3 衍生）**：funding_arb 1 fill 6.29% loss/notional 超 3% hard cap | SL gate failure；FA owner；audit script `2026-05-16` 確認；governance decision force 後 RCA |
+| `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` | 3 | v56 P0 closure 未解 root cause：drawdown 10.2% vs 25% threshold 觸發 halt 數學不通 | forensic `halt_audit.log` armed；passive wait 下次自然事件；不主動 push |
 | `P1-WATCHDOG-EXIT-CODE-CLARIFY` | ✅ **DONE 2026-05-20** | `engine_watchdog.py` exit codes 語意分區（`--status` 0/1；lock 10-19；rollback 20-29）；shell wrappers/systemd 不受影響；commit `dc33eb2d` + `232c3aff`；歸檔 §B.2 |
 | `P1-LEASE-1` | 3 | **升級自 P2-LEASE-1（2026-05-20 PM-conducted P2 sweep operator 拍板升 P1）**：清掃 terminal `rust/openclaw_core/src/sm/lease.rs:303` `DecisionLeaseSm.objects: Vec<LeaseObject>` entries 避免長 soak memory growth + E2 memory SM-02 leak（HashMap `lease_id_to_idx` 不清）。**依賴 P0-LG-3 Wave 2.4 IMPL DISPATCH 完成後**才排專案（否則觸碰 Decision Lease 核心會干擾 LG-1/LG-2 7d obs + LG-3 IMPL 前置）。spec 需含：(1) terminal state 定義（哪些 `LeaseState` 不可再 transition 可 prune）/ (2) `lease_id_to_idx` HashMap 同步策略 / (3) audit-preserving prune（被刪 lease 必先 ship 到 PG `governance_audit_log` 或 audit log file，不可純失）/ (4) prune 觸發時機（gc tick / 時間閾值 / size 閾值）/ (5) Python `_lease_sm` 對等同步。工時估 4-6h IMPL + E1→E2 對抗（A3）→E4 regression chain。Ticket source: §12.1 deferred + FA 5-OQ-style 5 條 spec 需求 |
 
@@ -511,6 +515,8 @@ PM/PA/FA 三方交叉檢查後：
 - `P2-ENTRY-CLOSE-MAKER-REAL-FILL-FIX` ✅ ANALYSIS 2026-05-20
 - `P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS` ✅ 2026-05-20
 - `P2-SIM-QUEUE-AWARE-ADJUSTMENT` ✅ 2026-05-20
+- `P1-EDGE-1` (ma_crossover/grid blocked_symbols freeze) ✅ CLOSED 2026-05-21（PA D3 reverify；freeze registry permanent + static guard + RFC counterfactual SOP 三位一體 commit `c081029d`；7d new fills=0）
+- `P1-DATA-1..3-WATCH` ✅ CLOSED 2026-05-21（PA D3 DOWNGRADE_TO_OPTIONAL；row-rolloff 14d 穩定）
 
 完成的 Sprint N+2 P2 條目（`P2-N2-1..4`）歸檔於 v36 cleanup archive。
 
